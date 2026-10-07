@@ -1,6 +1,6 @@
 # 上传持久事务内核
 
-pn_transfer/pn_upload提供单owner的同源上传状态机，用于后续书籍、TTF、封面和壁纸接收。当前完成的是事务内核与故障模拟port；文件系统安装port、真实格式检查适配、空间配额/最多8会话、HTTP/配对/AP/STA、网页与设备传输入口尚未接入。不能称为已有可用传书或字体上传功能，完整路径仍按[传输方案](TRANSFER.md)开发。
+pn_transfer/pn_upload提供单owner的同源上传状态机，用于后续书籍、TTF、封面和壁纸接收。事务内核、故障模拟port与[真实文件安装port](UPLOAD_FILES.md)已建立，包含格式检查、空间预检和8会话配额；HTTP/配对/AP/STA、网页、设备回调与传输入口尚未接入。不能称为已有可用传书或字体上传功能，完整路径仍按[传输方案](TRANSFER.md)开发。
 
 ## 数据与确认
 
@@ -16,13 +16,13 @@ begin/resume取得TF的独占WRITE租约，已有阅读/TF字体READ或USB访问
 
 RECEIVING：完整长度/SHA核验，再调用实际格式检查。通过后同步VERIFIED，然后调用可恢复幂等install_sync；该port必须核对新主文件完整摘要后才成功。最后同步COMMITTED。已提交完成请求幂等，不重复安装。
 
-VERIFIED重开允许暂存已被移到目标路径；由install_sync判定新主/旧备份并恢复。安装失败或已安装但COMMITTED日志失败都保留已验证事务，不能用取消删除可能已安装的资源。覆盖备份和各rename恢复阶段属于文件port的必要实现，尚未实现；内核不声称FAT rename原子。
+VERIFIED重开允许暂存已被移到目标路径；由install_sync判定新主/旧备份并恢复。安装失败或已安装但COMMITTED日志失败都保留已验证事务，不能用取消删除可能已安装的资源。覆盖备份和各rename恢复阶段由文件port实现；内核不声称FAT rename原子。
 
 RECEIVING取消先同步CANCELLED标记再清本ID暂存。清理失败可重试，不能删已安装资源。begin遇已有日志或无日志的暂存拒绝覆盖；孤立暂存需要后续明确清理入口，不能偷删。
 
 ## port维护契约
 
-bind只绑定ID所属日志，不擦已有数据；ctx和日志上下文在会话期间稳定不可移动。size的EMPTY仅表示暂存不存在。truncate_sync/write_sync/remove_sync必须真实同步；不支持同步不能假报成功。read每次返回1..capacity字节，所有文件操作需检测介质错误并排除其他进程改动。install_sync需可重复调用和掉电恢复。validate是强制回调，不能仅根据扩展名放行。不允许回调重入状态机。
+bind只绑定ID所属日志，不擦已有数据；admit可预检配额及保存覆盖意图，unbind只解除绑定，recover_initial只允许恢复已有持久意图的空暂存；ctx和日志上下文在会话期间稳定不可移动。size的EMPTY仅表示暂存不存在。truncate_sync/write_sync/remove_sync必须真实同步；不支持同步不能假报成功。read每次返回1..capacity字节，所有文件操作需检测介质错误并排除其他进程改动。install_sync需可重复调用和掉电恢复。validate是强制回调，不能仅根据扩展名放行。不允许回调重入状态机。
 
 所有应用内存走pn_pool；数据块借用调用方只读缓冲，调用期间不得修改，内核不保存整本。SHA流每次4KiB读取。hash/格式检查当前同步，异步取消/响应时间预算尚未实现。
 

@@ -179,3 +179,10 @@ pn_status_t pn_font_info(pn_font_t *font,pn_font_info_t *out){
     if(error!=FT_Err_Table_Missing){status=result(e,error);if(status!=PN_OK)return status;info.variable=length!=0;}
     status=result(e,0);if(status==PN_OK)*out=info;return status;
 }
+
+pn_status_t pn_font_validate(pn_font_t *font){
+    if(!font || !font->impl)return PN_INVALID;
+    engine_t *e=font->impl;if(e->face->num_glyphs<1 || e->face->num_glyphs>65535)return PN_CORRUPT;
+    for(FT_UInt i=0;i<(FT_UInt)e->face->num_glyphs;i++){pn_status_t status=ready(e);if(status!=PN_OK)return status;status=result(e,FT_Load_Glyph(e->face,i,FT_LOAD_NO_SCALE | FT_LOAD_NO_HINTING | FT_LOAD_NO_BITMAP));if(status!=PN_OK)return status;}
+    return PN_OK;
+}

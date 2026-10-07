@@ -32,6 +32,9 @@ typedef struct {
  pn_status_t (*validate)(void *,pn_upload_kind_t,const char *); ///< 实际格式校验，不只看扩展名 / Actual format validation beyond extensions
  pn_status_t (*install_sync)(void *,pn_upload_kind_t,const char *,const pn_book_id_t *); ///< 可恢复幂等安装，核对新主文件摘要再成功 / Recoverable idempotent install, verify new target digest before success
  pn_status_t (*remove_sync)(void *); ///< 只移除本ID暂存并同步，不能删已安装资源 / Remove this ID staging only and sync, never installed resources
+ pn_status_t (*admit)(void *,const pn_upload_request_t *); ///< 可选：空间/配额和覆盖意图，创建暂存前执行 / Optional space/quota and replace-intent check before staging creation
+ void (*unbind)(void *); ///< 可选：释放绑定状态，不删除持久文件 / Optional unbind without deleting durable files
+ pn_status_t (*recover_initial)(void *,pn_upload_request_t *); ///< 可选：从已持久意图恢复尚无上传日志的空暂存 / Optional recovery of empty staging with durable intent but no upload journal
 } pn_upload_port_t;
 typedef struct {void *impl;} pn_upload_t; ///< 活动对象不可复制 / Never copy live objects
 /// 校验名称、类别扩展名、上限和ID；不代表资源解析兼容。/ Validate name, kind extension, limits and ID; not parser compatibility.

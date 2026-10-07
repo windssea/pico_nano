@@ -47,3 +47,7 @@ typedef struct {
 } pn_font_info_t;
 /// 有界只读元数据，错误保持输出，不宣称全字库覆盖。/ Bounded read-only metadata, preserving outputs on error; no full-coverage claim.
 pn_status_t pn_font_info(pn_font_t *,pn_font_info_t *);
+
+/// 逐字形加载所有轮廓，校验字体引擎/源错误；不证明全字库覆盖或全部字号光栅结果。
+/// Load every glyph outline and validate engine/source errors; not full character coverage or all-size raster verification.
+pn_status_t pn_font_validate(pn_font_t *);

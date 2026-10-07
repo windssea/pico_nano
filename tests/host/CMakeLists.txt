@@ -148,3 +148,12 @@ add_test(NAME font_set COMMAND test_font_set ${PN_ROOT}/tests/fixtures/font-fall
 add_executable(test_upload test_upload.c)
 target_link_libraries(test_upload PRIVATE pn_core)
 add_test(NAME upload COMMAND test_upload)
+
+add_executable(upload_files_driver upload_files_driver.c)
+target_link_libraries(upload_files_driver PRIVATE pn_core)
+add_test(NAME upload_files COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_upload_files.py $<TARGET_FILE:upload_files_driver>)
+
+add_executable(upload_resource_driver upload_resource_driver.c)
+target_link_libraries(upload_resource_driver PRIVATE pn_core)
+
+add_test(NAME upload_resources COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_upload_resources.py $<TARGET_FILE:upload_resource_driver>)
