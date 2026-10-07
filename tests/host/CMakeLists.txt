@@ -161,3 +161,9 @@ add_test(NAME upload_resources COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOU
 add_executable(pn_transfer_host ${PN_ROOT}/simulator/transfer_host.c)
 target_link_libraries(pn_transfer_host PRIVATE pn_core)
 add_test(NAME transfer_http COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_transfer_http.py $<TARGET_FILE:pn_transfer_host>)
+
+add_executable(test_device_upload_storage test_device_upload_storage.c ${PN_ROOT}/main/device_upload_storage.c)
+target_include_directories(test_device_upload_storage PRIVATE stubs ${PN_ROOT}/main ${PN_ROOT}/components/read_pico/include)
+target_link_libraries(test_device_upload_storage PRIVATE pn_core)
+target_link_options(test_device_upload_storage PRIVATE "-Wl,--wrap=fsync")
+add_test(NAME device_upload_storage COMMAND test_device_upload_storage)
