@@ -130,7 +130,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
    if self.command=='GET' and path in ('/','/qa','/qa.mjs','/app.js','/style.css','/sha256.mjs','/hash-worker.mjs'):
     filename='index.html' if path in ('/','/qa') else path[1:];data=(ROOT/'assets/transfer'/filename).read_bytes();data=data.replace(b'</body>',b'<script type="module" src="/qa.mjs"></script></body>') if path=='/qa' else data;mime='text/html' if filename.endswith('.html') else 'text/css' if filename.endswith('.css') else 'text/javascript'
     self.send_response(200);self.send_header('Content-Type',mime+'; charset=utf-8');self.send_header('Content-Length',str(len(data)));self.send_header('Cache-Control','no-store');self.send_header('X-Content-Type-Options','nosniff');self.send_header('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; worker-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'");self.end_headers();self.wfile.write(data);return
-   if self.command=='GET' and path=='/api/v1/status':self.send_json(200,{'name':'小纸 Pico','version':'0.0.43','chunk_size':65536,'preview':True});return
+   if self.command=='GET' and path=='/api/v1/status':self.send_json(200,{'name':'小纸 Pico','version':'0.0.44','chunk_size':65536,'preview':True});return
    if self.command=='POST' and path=='/api/v1/pair':value=self.object(('code',),('code',));status,result=self.server.app.pair(value['code']);self.send_json(status,result);return
    if not self.server.app.authorized(self.header('Authorization')):self.error(401,'请先输入配对码');return
    if self.command=='POST' and path=='/api/v1/uploads':
@@ -185,7 +185,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
  do_OPTIONS=dispatch
 
 def make_server(app,bind='127.0.0.1',port=8787,authority=None):
- server=http.server.ThreadingHTTPServer((bind,port),Handler);server.daemon_threads=True;server.app=app;server.authority=authority or f'{bind}:{server.server_port}';return server
+ server=http.server.ThreadingHTTPServer((bind,port),Handler);server.daemon_threads=False;server.block_on_close=True;server.app=app;server.authority=authority or f'{bind}:{server.server_port}';return server
 
 def main():
  parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--worker',required=True);parser.add_argument('--root',required=True);parser.add_argument('--bind',default='127.0.0.1');parser.add_argument('--port',type=int,default=8787);parser.add_argument('--authority');args=parser.parse_args()

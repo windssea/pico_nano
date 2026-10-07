@@ -54,5 +54,17 @@ with tempfile.TemporaryDirectory() as directory:
    block=content[at:at+65536];assert call(resource_url+'/chunks','PUT',block,token,extra={'X-Offset':str(at),'X-Chunk-SHA256':hashlib.sha256(block).hexdigest()})[0]==200
   assert call(resource_url+'/complete','POST',{'sha256':sha},token)[0]==200
   assert (root/{'font':'fonts','cover':'covers','wallpaper':'wallpapers'}[kind]/name).read_bytes()==content
- server.shutdown();server.server_close();thread.join();app.close()
+ # 关闭等待已接收HTTP线程，不提前销毁原生管道。/ Close waits for admitted HTTP threads before destroying native pipes.
+ entered=threading.Event();release=threading.Event();closed=threading.Event();native_call=app.worker.call
+ def gated(command,body=b''):
+  if command.startswith('BEGIN '):entered.set();assert release.wait(5)
+  return native_call(command,body)
+ app.worker.call=gated
+ request['name']='关闭期间.txt';pending_result=[]
+ producer=threading.Thread(target=lambda:pending_result.append(call('/api/v1/uploads','POST',request,token)),daemon=True);producer.start();assert entered.wait(5)
+ server.shutdown();close_started=threading.Event()
+ def finish_server():close_started.set();server.server_close();closed.set()
+ closer=threading.Thread(target=finish_server,daemon=True);closer.start();assert close_started.wait(5)
+ closed_early=closed.wait(.1);release.set();producer.join(5);closer.join(5);thread.join();app.close()
+ assert not producer.is_alive() and not closer.is_alive() and not closed_early and pending_result[0][0]==201
 print('HTTP transfer: native durable chunks, auth/Host/Origin, pair lockout, restart/new token, resume, explicit replacement and cancellation passed')

@@ -5,13 +5,13 @@
  * 冻结：不接受客户端根路径，文件事务不由HTTP语言替代。
  * Frozen: no client-supplied root paths; HTTP languages never replace file transactions.
  */
-#include "pn_transfer_service.h"
+#include "pn_transfer_worker.h"
 #include <stdio.h>
 #include <string.h>
 typedef struct {
  pn_pool_t pool;
  pn_media_t media;
- pn_transfer_service_t service;
+ pn_transfer_worker_t worker;
  uint8_t *buffer;
 } host_t;
 static bool decode(const char *hex,uint8_t *out,size_t n){if(strlen(hex)!=2*n)return false;for(size_t i=0;i<n;i++){unsigned byte=0;for(unsigned j=0;j<2;j++){char c=hex[i*2+j];unsigned v=c>='0' && c<='9'?(unsigned)(c-'0'):c>='a' && c<='f'?(unsigned)(c-'a'+10):c>='A' && c<='F'?(unsigned)(c-'A'+10):16;if(v>15)return false;byte=byte*16+v;}out[i]=(uint8_t)byte;}return true;}
@@ -40,7 +40,7 @@ int main(int argc,char **argv){
  h.buffer=pn_alloc(&h.pool,PN_UPLOAD_CHUNK);
  if(!h.buffer)return 2;
  pn_upload_files_options_t options={.root=argv[1]};
- if(pn_transfer_service_open(&h.service,&h.pool,&h.media,&options)!=PN_OK){pn_free(h.buffer);return 2;}
+ if(pn_transfer_worker_open(&h.worker,&h.media,&options,6u*1024u*1024u,NULL,NULL,NULL)!=PN_OK){pn_free(h.buffer);return 2;}
  puts("{\"code\":0,\"ready\":true}");fflush(stdout);
  char line[1100];
  while(fgets(line,sizeof line,stdin)){
@@ -79,10 +79,12 @@ int main(int argc,char **argv){
   }else if(!strcmp(command,"EXIT") && sscanf(line,"EXIT %n",&consumed)==0 && !line[consumed]){
    request.operation=PN_TRANSFER_STOP;parsed=true;
   }
-  pn_status_t status=parsed?pn_transfer_service_execute(&h.service,&request,&reply):PN_INVALID;
+  pn_status_t status=PN_INVALID;
+  if(parsed && request.operation==PN_TRANSFER_STOP)status=pn_transfer_worker_close(&h.worker);
+  else if(parsed)status=pn_transfer_worker_execute(&h.worker,&request,&reply);
   emit(status,&reply);
   if(parsed && request.operation==PN_TRANSFER_STOP)break;
  }
- pn_status_t closed=pn_transfer_service_close(&h.service);pn_free(h.buffer);
+ pn_status_t closed=pn_transfer_worker_close(&h.worker);pn_free(h.buffer);
  return closed==PN_OK && !h.pool.used && !h.pool.live && !pn_media_active(&h.media)?0:1;
 }

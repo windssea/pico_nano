@@ -18,7 +18,7 @@ docker run --rm --mount type=bind,source=D:\windssea\dev\pico_nano,target=/work 
 
 ## 所有权与API
 
-Python只验证HTTP、认证及请求边界；`simulator/transfer_host.c` 只转换有界IPC命令与回复，所有会话切换、文件身份查询、写入、校验、覆盖、恢复和取消都由 [同源传输服务](TRANSFER_SERVICE.md) 通过 `pn_upload`/`pn_upload_files` 完成。worker使用固定测试介质身份和6MiB受限池。HTTP线程串行调用worker；不存在Python直接把请求写进正式书库的捷径。
+Python只验证HTTP、认证及请求边界；`simulator/transfer_host.c` 只转换有界IPC命令与回复，再交给 [有界工作任务](TRANSFER_WORKER.md)。所有会话切换、文件身份查询、写入、校验、覆盖、恢复和取消都由 [同源传输服务](TRANSFER_SERVICE.md) 通过 `pn_upload`/`pn_upload_files` 完成。任务使用固定测试介质身份和独立6MiB事务池。HTTP线程串行调用worker；不存在Python直接把请求写进正式书库的捷径。
 
 | 接口 | 行为 |
 | --- | --- |
