@@ -144,3 +144,7 @@ add_test(NAME font_preview COMMAND font_asset_capture ${PN_ROOT}/assets/fonts/re
 add_executable(test_font_set test_font_set.c)
 target_link_libraries(test_font_set PRIVATE pn_core)
 add_test(NAME font_set COMMAND test_font_set ${PN_ROOT}/tests/fixtures/font-fallback.ttf)
+
+add_executable(test_upload test_upload.c)
+target_link_libraries(test_upload PRIVATE pn_core)
+add_test(NAME upload COMMAND test_upload)

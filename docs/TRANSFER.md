@@ -98,3 +98,5 @@ mDNS 名称为 `readpico-XXXX.local`，IP/二维码总是可用；不承诺路�
 计划 `tools/importer/`：Windows-first CLI＋本地拖放网页界面，复用设备 v1 API。`calibre ebook-convert` 作为用户可选安装的外部转换工具，明确检查版本/许可和是否安装；不自动捆绑大工具或破解 DRM。MOBI/AZW3→EPUB；PDF 原生优先，可选 OCR/转 CBZ 由外部工具完成，设备不承担 OCR。
 
 所有转换输出新文件，保留原文，预览书名、封面、章节与源格式，再发送。纯手机网页可以传原生格式，但完整 MOBI/AZW3 转换初版需要电脑；这项限制写进帮助，避免虚假的“手机全格式秒传”。
+
+同源分块/持久ACK/恢复状态机已建立，当前实现范围与port边界见[上传事务内核](UPLOAD_TRANSACTION.md)。真实文件安装和网络入口仍待接入。

@@ -13,6 +13,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+static pn_status_t short_read(void *ctx,uint64_t at,uint8_t *out,size_t cap,size_t *n){const char *text=ctx;if(at>=strlen(text) || !cap)return PN_IO;*out=(uint8_t)text[at];*n=1;return PN_OK;}
+static pn_status_t invalid_read(void *ctx,uint64_t at,uint8_t *out,size_t cap,size_t *n){(void)ctx;(void)at;(void)out;*n=cap+1;return PN_OK;}
 static void write_bytes(const char *path, const char *bytes, size_t n) {
     FILE *f=fopen(path,"wb"); assert(f); assert(fwrite(bytes,1,n,f)==n); assert(fclose(f)==0);
 }
@@ -30,6 +32,9 @@ int main(int argc, char **argv) {
     write_bytes(a,"abc",3); write_bytes(b,"abc",3);
     const uint8_t abc[]={0xba,0x78,0x16,0xbf,0x8f,0x01,0xcf,0xea,0x41,0x41,0x40,0xde,0x5d,0xae,0x22,0x23,0xb0,0x03,0x61,0xa3,0x96,0x17,0x7a,0x9c,0xb4,0x10,0xff,0x61,0xf2,0x00,0x15,0xad};
     assert(pn_identity_file(&media,&lease,a,3,&id)==PN_OK && memcmp(id.sha256,abc,32)==0);
+    assert(pn_identity_bytes((const uint8_t *)"abc",3,&id)==PN_OK && !memcmp(id.sha256,abc,32));
+    assert(pn_identity_stream((void *)"abc",3,short_read,&id)==PN_OK && !memcmp(id.sha256,abc,32));
+    pn_book_id_t unchanged=id;assert(pn_identity_stream(NULL,3,invalid_read,&id)==PN_IO && !memcmp(&id,&unchanged,sizeof id));
     pn_book_id_t copy; assert(pn_identity_file(&media,&lease,b,3,&copy)==PN_OK && memcmp(&id,&copy,sizeof id)==0);
     write_bytes(a,"abd",3); assert(pn_identity_file(&media,&lease,a,3,&copy)==PN_OK && memcmp(&id,&copy,sizeof id)!=0);
     copy=id; assert(pn_identity_file(&media,&lease,a,2,&copy)==PN_LIMIT && memcmp(&id,&copy,sizeof id)==0);

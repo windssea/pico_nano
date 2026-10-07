@@ -79,3 +79,18 @@ pn_status_t pn_identity_file(pn_media_t *media, const pn_media_lease_t *lease,
     if (status!=PN_OK) return status;
     pn_book_id_t result; finish(&hash,&result); *id=result; return PN_OK;
 }
+
+pn_status_t pn_identity_bytes(const uint8_t *bytes,size_t n,pn_book_id_t *out){
+    if((!bytes && n) || !out)return PN_INVALID;
+#if SIZE_MAX > UINT64_MAX / 8
+    if((uint64_t)n>UINT64_MAX/8)return PN_LIMIT;
+#endif
+    sha_t hash={.h={0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19}};update(&hash,bytes,n);pn_book_id_t result;finish(&hash,&result);*out=result;return PN_OK;
+}
+pn_status_t pn_identity_stream(void *ctx,uint64_t size,pn_identity_read_fn read,pn_book_id_t *out){
+    if(!read || !out)return PN_INVALID;
+    if(size>UINT64_MAX/8)return PN_LIMIT;
+    sha_t hash={.h={0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19}};uint8_t buffer[4096];
+    while(hash.bytes<size){size_t cap=size-hash.bytes<sizeof buffer?(size_t)(size-hash.bytes):sizeof buffer,n=0;pn_status_t status=read(ctx,hash.bytes,buffer,cap,&n);if(status!=PN_OK)return status;if(!n || n>cap)return PN_IO;update(&hash,buffer,n);}
+    pn_book_id_t result;finish(&hash,&result);*out=result;return PN_OK;
+}
