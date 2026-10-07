@@ -1,0 +1,2 @@
+// 仅开发演练：合成File，不读取本机私人文件。/ Development-only synthetic File, never reading private local files.
+const button=document.createElement('button');button.textContent='添加演练小册';button.className='secondary';document.getElementById('drop').after(button);button.onclick=()=>{const transfer=new DataTransfer();transfer.items.add(new File(['小纸 Pico 的传输演练正文。\n'.repeat(150000)],'演练小册.txt',{type:'text/plain'}));const input=document.getElementById('files');input.files=transfer.files;input.dispatchEvent(new Event('change',{bubbles:true}));};

@@ -56,3 +56,6 @@ pn_status_t pn_upload_cancel(pn_upload_t *);
 pn_status_t pn_upload_state(pn_upload_t *,pn_upload_state_t *);
 /// 释放内存/租约，不取消持久会话，便于断网后重开。/ Release memory/lease without cancelling durable sessions, permitting resume after disconnect.
 pn_status_t pn_upload_close(pn_upload_t *);
+
+/// 查询当前持久请求身份，未确认/失效记录不输出。/ Query durable request identity without output through uncertain/stale records.
+pn_status_t pn_upload_info(pn_upload_t *,pn_upload_request_t *);

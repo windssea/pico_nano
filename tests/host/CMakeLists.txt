@@ -157,3 +157,7 @@ add_executable(upload_resource_driver upload_resource_driver.c)
 target_link_libraries(upload_resource_driver PRIVATE pn_core)
 
 add_test(NAME upload_resources COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_upload_resources.py $<TARGET_FILE:upload_resource_driver>)
+
+add_executable(pn_transfer_host ${PN_ROOT}/simulator/transfer_host.c)
+target_link_libraries(pn_transfer_host PRIVATE pn_core)
+add_test(NAME transfer_http COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_transfer_http.py $<TARGET_FILE:pn_transfer_host>)
