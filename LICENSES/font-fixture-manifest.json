@@ -1,0 +1,11 @@
+{
+  "source_sha256": "a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da",
+  "license": "OFL-1.1",
+  "weight": 400,
+  "fonttools_version": "4.51.0",
+  "unicode_present": [
+    65,
+    31687
+  ],
+  "output_sha256": "ac3039e04e7f8dab760feafc29c1d8a5d8be6752dde23e41468fce4f952abb82"
+}

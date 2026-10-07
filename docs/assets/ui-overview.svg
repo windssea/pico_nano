@@ -1,0 +1,128 @@
+<?xml version='1.0' encoding='utf-8'?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="800" viewBox="0 0 1180 800">
+  <title>小纸 Pico 阅读固件：书架、阅读与排版界面设计</title>
+  <desc>三张684乘1216原生像素页面的缩小线框。几何封面为原创占位，示意不是固件截图。</desc>
+  <defs>
+    <symbol id="cover-a" viewBox="0 0 184 240">
+      <rect x="1" y="1" width="182" height="238" fill="white" stroke="#222" stroke-width="2" />
+      <path d="M20 192 L68 104 L108 166 L145 125 L164 192" fill="none" stroke="#222" stroke-width="4" />
+      <circle cx="137" cy="66" r="17" fill="none" stroke="#222" stroke-width="3" />
+      <text x="18" y="46" font-size="24" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616">山间来信</text><text x="18" y="218" font-size="14" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616">READ PICO / 01</text>
+    </symbol>
+    <symbol id="cover-b" viewBox="0 0 184 240">
+      <rect x="1" y="1" width="182" height="238" fill="#eee" stroke="#222" stroke-width="2" />
+      <path d="M22 112 H162 M22 132 H162 M22 152 H162 M22 172 H162" fill="none" stroke="#777" stroke-width="2" />
+      <text x="18" y="51" font-size="24" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616">时间的形状</text><circle cx="90" cy="136" r="35" fill="white" stroke="#222" stroke-width="3" />
+      <path d="M90 107 V136 L109 148" stroke="#222" stroke-width="3" fill="none" />
+      <text x="18" y="218" font-size="14" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616">READ PICO / 02</text>
+    </symbol>
+    <symbol id="cover-c" viewBox="0 0 184 240">
+      <rect x="1" y="1" width="182" height="238" fill="white" stroke="#222" stroke-width="2" />
+      <rect x="18" y="82" width="146" height="100" fill="none" stroke="#222" stroke-width="3" />
+      <path d="M32 168 L56 146 L82 153 L109 113 L150 96" fill="none" stroke="#222" stroke-width="4" />
+      <text x="18" y="50" font-size="24" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616">阅读笔记</text><text x="18" y="218" font-size="14" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616">READ PICO / 03</text>
+    </symbol>
+  </defs>
+  <rect width="1180" height="800" fill="#f2f1ed" />
+  <text x="40" y="49" font-size="28" font-weight="600" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616">小纸 Pico · 阅读界面</text>
+  <text x="40" y="79" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616" font-size="17">原生 684 × 1216 布局 · 黑白层级 · 封面优先 · 墨水屏低干扰交互</text>
+  <g transform="translate(40 119) scale(.45)">
+    <rect width="684" height="1216" rx="12" fill="white" stroke="#202020" stroke-width="3" />
+    <text x="32" y="43" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616" font-size="28">小纸 Pico</text><text x="560" y="43" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616" font-size="28">82%</text>
+    <text x="32" y="121" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616" font-size="48" font-weight="600">书架</text><text x="532" y="116" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616" font-size="34">搜索</text>
+    <line x1="32" y1="144" x2="652" y2="144" stroke="#161616" stroke-width="2" />
+    <g transform="translate(32 172) scale(0.5)"><rect x="1" y="1" width="182" height="238" fill="white" stroke="#222" stroke-width="2" />
+      <path d="M20 192 L68 104 L108 166 L145 125 L164 192" fill="none" stroke="#222" stroke-width="4" />
+      <circle cx="137" cy="66" r="17" fill="none" stroke="#222" stroke-width="3" />
+      <text x="18" y="46" font-size="24" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616">山间来信</text><text x="18" y="218" font-size="14" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616">READ PICO / 01</text>
+    </g><text x="148" y="201" font-weight="600" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616" font-size="34">山间来信</text>
+    <text x="148" y="247" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616" font-size="28">第 3 节 · 已读 27%</text>
+    <text x="466" y="295" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616" font-size="34">继续阅读 →</text>
+    <line x1="32" y1="320" x2="652" y2="320" stroke="#161616" stroke-width="2" />
+    <text x="32" y="372" font-weight="600" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616" font-size="34">全部</text><text x="160" y="372" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616" font-size="34">最近</text><text x="443" y="372" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616" font-size="28">名称排序 ▾</text>
+    <g transform="translate(32 400) scale(1)"><rect x="1" y="1" width="182" height="238" fill="white" stroke="#222" stroke-width="2" />
+      <path d="M20 192 L68 104 L108 166 L145 125 L164 192" fill="none" stroke="#222" stroke-width="4" />
+      <circle cx="137" cy="66" r="17" fill="none" stroke="#222" stroke-width="3" />
+      <text x="18" y="46" font-size="24" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616">山间来信</text><text x="18" y="218" font-size="14" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616">READ PICO / 01</text>
+    </g><g transform="translate(244 400) scale(1)"><rect x="1" y="1" width="182" height="238" fill="#eee" stroke="#222" stroke-width="2" />
+      <path d="M22 112 H162 M22 132 H162 M22 152 H162 M22 172 H162" fill="none" stroke="#777" stroke-width="2" />
+      <text x="18" y="51" font-size="24" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616">时间的形状</text><circle cx="90" cy="136" r="35" fill="white" stroke="#222" stroke-width="3" />
+      <path d="M90 107 V136 L109 148" stroke="#222" stroke-width="3" fill="none" />
+      <text x="18" y="218" font-size="14" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616">READ PICO / 02</text>
+    </g><g transform="translate(456 400) scale(1)"><rect x="1" y="1" width="182" height="238" fill="white" stroke="#222" stroke-width="2" />
+      <rect x="18" y="82" width="146" height="100" fill="none" stroke="#222" stroke-width="3" />
+      <path d="M32 168 L56 146 L82 153 L109 113 L150 96" fill="none" stroke="#222" stroke-width="4" />
+      <text x="18" y="50" font-size="24" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616">阅读笔记</text><text x="18" y="218" font-size="14" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616">READ PICO / 03</text>
+    </g><text x="32" y="677" font-size="30" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616">山间来信</text><text x="244" y="677" font-size="30" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616">时间的形状</text><text x="456" y="677" font-size="30" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616">阅读笔记</text>
+    <text x="32" y="711" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616" font-size="28">27% · EPUB</text><text x="244" y="711" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616" font-size="28">未读 · TXT</text><text x="456" y="711" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616" font-size="28">未读 · PDF</text>
+    <g transform="translate(32 736) scale(1)"><rect x="1" y="1" width="182" height="238" fill="white" stroke="#222" stroke-width="2" />
+      <rect x="18" y="82" width="146" height="100" fill="none" stroke="#222" stroke-width="3" />
+      <path d="M32 168 L56 146 L82 153 L109 113 L150 96" fill="none" stroke="#222" stroke-width="4" />
+      <text x="18" y="50" font-size="24" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616">阅读笔记</text><text x="18" y="218" font-size="14" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616">READ PICO / 03</text>
+    </g><g transform="translate(244 736) scale(1)"><rect x="1" y="1" width="182" height="238" fill="white" stroke="#222" stroke-width="2" />
+      <path d="M20 192 L68 104 L108 166 L145 125 L164 192" fill="none" stroke="#222" stroke-width="4" />
+      <circle cx="137" cy="66" r="17" fill="none" stroke="#222" stroke-width="3" />
+      <text x="18" y="46" font-size="24" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616">山间来信</text><text x="18" y="218" font-size="14" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616">READ PICO / 01</text>
+    </g><g transform="translate(456 736) scale(1)"><rect x="1" y="1" width="182" height="238" fill="#eee" stroke="#222" stroke-width="2" />
+      <path d="M22 112 H162 M22 132 H162 M22 152 H162 M22 172 H162" fill="none" stroke="#777" stroke-width="2" />
+      <text x="18" y="51" font-size="24" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616">时间的形状</text><circle cx="90" cy="136" r="35" fill="white" stroke="#222" stroke-width="3" />
+      <path d="M90 107 V136 L109 148" stroke="#222" stroke-width="3" fill="none" />
+      <text x="18" y="218" font-size="14" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616">READ PICO / 02</text>
+    </g><text x="32" y="1011" font-size="30" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616">海边的日子</text><text x="244" y="1011" font-size="30" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616">远行手记</text><text x="456" y="1011" font-size="30" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616">昨日书页</text>
+    <text x="32" y="1045" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616" font-size="28">未读 · EPUB</text><text x="244" y="1045" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616" font-size="28">56% · EPUB</text><text x="456" y="1045" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616" font-size="28">未读 · CBZ</text>
+    <text x="281" y="1093" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616" font-size="28">1 / 8 页</text>
+    <line x1="0" y1="1104" x2="684" y2="1104" stroke="#161616" stroke-width="2" />
+    <text x="80" y="1171" font-weight="600" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616" font-size="34">书架</text><text x="308" y="1171" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616" font-size="34">传书</text><text x="536" y="1171" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616" font-size="34">设置</text>
+  </g>
+  <g transform="translate(436 119) scale(.45)">
+    <rect width="684" height="1216" rx="12" fill="white" stroke="#202020" stroke-width="3" />
+    <text x="32" y="92" font-size="50" font-weight="600" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616">第三节　慢慢读</text>
+    <g font-size="44">
+      <text x="120" y="189" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616">窗外的风渐渐停了。桌上</text>
+      <text x="32" y="253" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616">放着一本翻到一半的书，纸页</text>
+      <text x="32" y="317" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616">之间，留着昨天读到的地方。</text>
+      <text x="120" y="408" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616">阅读不必匆忙。字与字之</text>
+      <text x="32" y="472" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616">间，留出恰好的距离；段落与</text>
+      <text x="32" y="536" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616">段落之间，也有片刻的呼吸。</text>
+      <text x="120" y="627" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616">轻轻按下右侧的按键，下</text>
+      <text x="32" y="691" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616">一页便来到眼前。故事继续，</text>
+      <text x="32" y="755" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616">屏幕之外仍然安静。</text>
+      <text x="120" y="846" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616">把喜欢的一页留作书签，</text>
+      <text x="32" y="910" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616">下次醒来，就从这里接着读。</text>
+    </g>
+    <line x1="32" y1="1144" x2="652" y2="1144" stroke="#161616" stroke-width="2" />
+    <text x="32" y="1190" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616" font-size="28">第 3 节 · 8 / …</text><text x="580" y="1190" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616" font-size="28">27%</text>
+  </g>
+  <g transform="translate(832 119) scale(.45)">
+    <rect width="684" height="1216" rx="12" fill="white" stroke="#202020" stroke-width="3" />
+    <text x="32" y="76" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616" font-size="34">‹ 返回</text><text x="281" y="82" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616" font-size="48" font-weight="600">排版</text><text x="568" y="76" font-weight="600" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616" font-size="34">应用</text>
+    <line x1="32" y1="112" x2="652" y2="112" stroke="#161616" stroke-width="2" />
+    <rect x="32" y="144" width="620" height="260" fill="#fafafa" stroke="#222" stroke-width="2" rx="12" />
+    <text x="56" y="188" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616" font-size="28">当前段落预览</text>
+    <text x="104" y="255" font-size="44" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616">字与字之间，留出恰好</text>
+    <text x="56" y="319" font-size="44" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616">的距离。让阅读回到舒适。</text>
+    <text x="32" y="468" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616" font-size="34">字体</text><text x="270" y="468" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616" font-size="34">完整中文字体　›</text>
+    <line x1="32" y1="500" x2="652" y2="500" stroke="#161616" stroke-width="2" />
+    <text x="32" y="566" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616" font-size="34">字号</text><rect x="312" y="516" width="340" height="80" rx="12" fill="white" stroke="#161616" stroke-width="2" />
+    <text x="340" y="566" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616" font-size="34">−</text><text x="449" y="566" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616" font-size="34">44</text><text x="595" y="566" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616" font-size="34">＋</text>
+    <text x="32" y="674" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616" font-size="34">行距</text><rect x="312" y="624" width="340" height="80" rx="12" fill="white" stroke="#161616" stroke-width="2" />
+    <text x="340" y="674" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616" font-size="34">−</text><text x="429" y="674" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616" font-size="34">1.45</text><text x="595" y="674" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616" font-size="34">＋</text>
+    <text x="32" y="782" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616" font-size="34">段距</text><rect x="312" y="732" width="340" height="80" rx="12" fill="white" stroke="#161616" stroke-width="2" />
+    <text x="340" y="782" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616" font-size="34">−</text><text x="429" y="782" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616" font-size="34">0.40</text><text x="595" y="782" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616" font-size="34">＋</text>
+    <text x="32" y="890" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616" font-size="34">首行缩进</text><rect x="312" y="840" width="340" height="80" rx="12" fill="white" stroke="#161616" stroke-width="2" />
+    <text x="340" y="890" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616" font-size="34">−</text><text x="429" y="890" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616" font-size="34">2 字</text><text x="595" y="890" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616" font-size="34">＋</text>
+    <text x="32" y="990" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616" font-size="34">边距与更多选项</text><text x="616" y="990" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616" font-size="34">›</text>
+    <rect x="32" y="1040" width="196" height="88" rx="12" fill="white" stroke="#161616" stroke-width="4" />
+    <text x="65" y="1096" font-size="34" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616">● 舒适</text>
+    <rect x="244" y="1040" width="196" height="88" rx="12" fill="white" stroke="#161616" stroke-width="2" /><text x="308" y="1096" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616" font-size="34">紧凑</text>
+    <rect x="456" y="1040" width="196" height="88" rx="12" fill="white" stroke="#161616" stroke-width="2" /><text x="520" y="1096" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616" font-size="34">大字</text>
+    <text x="222" y="1183" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616" font-size="28">取消返回　·　恢复默认</text>
+  </g>
+  <text x="40" y="715" font-size="21" font-weight="600" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616">01　封面书架</text>
+  <text x="40" y="746" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616" font-size="15">最近续读 · 六本一页 · 三个主入口</text>
+  <text x="436" y="715" font-size="21" font-weight="600" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616">02　沉浸阅读</text>
+  <text x="436" y="746" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616" font-size="15">原生像素文字 · 轻量页脚 · 三键翻页</text>
+  <text x="832" y="715" font-size="21" font-weight="600" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616">03　即时排版</text>
+  <text x="832" y="746" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#161616" font-size="15">离散档位 · 段落预览 · 明确应用与取消</text>
+  <text x="40" y="783" font-size="13" fill="#555" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif">设计示意，非运行截图。字体与灰阶清晰度、触摸命中及真实刷新须在面板验收。</text>
+</svg>

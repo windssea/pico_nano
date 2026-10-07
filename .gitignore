@@ -1,0 +1,41 @@
+# 本机构建、固件与模拟运行输出。/ Local builds, firmware and simulator output.
+/build*/
+/out/
+/dist/
+/firmware-artifacts/
+/captures/
+/logs/
+/sim-data/
+/managed_components/
+/CMakeFiles/
+/CMakeCache.txt
+/cmake_install.cmake
+/compile_commands.json
+/build.ninja
+/.ninja_log
+/.ninja_deps
+/*.bin
+/*.elf
+/*.map
+/*.log
+
+# 产品默认配置需要提交，idf生成的本机配置不提交。/ Keep product defaults; exclude local generated IDF configuration.
+/sdkconfig
+/sdkconfig.old
+
+# 私人测试书籍/完整字体及本机过程记录。/ Private test books/full fonts and local process records.
+/mockDoc/
+/docs/local/
+/docs/HANDOFF.local.md
+
+# Python缓存、编辑器与本机环境。/ Python caches, editors and local environment.
+__pycache__/
+*.py[cod]
+/.vscode/
+/.idea/
+/.env
+/.env.*
+!/.env.example
+.DS_Store
+Thumbs.db
+*~

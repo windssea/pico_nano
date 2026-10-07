@@ -1,0 +1,19 @@
+# 自有文本规范化；固定来源与校验字节不做换行转换。/ Normalize owned text; preserve pinned sources and checksum bytes.
+* text=auto
+components/**/vendor/** -text
+components/read_pico/** -text
+components/read_pico_pmu/** -text
+components/epdiy/** -text
+components/e0470_epaper_waveform/** -text
+components/cst836u/** -text
+components/sc7a20h/** -text
+components/fca9555/** -text
+components/sy7636a/** -text
+components/pwm_audio/** -text
+assets/fonts/** -text
+tests/fixtures/** -text
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.pdf binary
+*.ttf binary

@@ -1,0 +1,46 @@
+name: Build and shared-source tests
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  host:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 tools/check_docs.py
+      - run: python3 -m unittest discover -s tests/tools -v
+      - run: cmake -S tests/host -B build-host -G Ninja -DPN_SANITIZERS=ON
+      - run: cmake --build build-host
+      - run: ctest --test-dir build-host --output-on-failure
+      - run: cmake -S simulator -B build-sim -G Ninja -DPN_SANITIZERS=ON
+      - run: cmake --build build-sim
+      - run: ctest --test-dir build-sim --output-on-failure
+      - run: ./build-sim/pn_sim --headless --capture build-sim/pattern.pgm
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shared-renderer-pattern
+          path: build-sim/pattern.pgm
+  firmware:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        profile: [ci, defaults]
+    container: espressif/idf:v6.1@sha256:81893c71bb5e570088901f21def8684c25cd2a9020281bd01b843a7655edb18c
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile ESP32-S3 with an isolated sdkconfig
+        shell: bash
+        run: |
+          . /opt/esp/idf/export.sh
+          idf.py -B build-${{ matrix.profile }} -DIDF_TARGET=esp32s3 -DSDKCONFIG="$PWD/build-${{ matrix.profile }}/sdkconfig" -DSDKCONFIG_DEFAULTS=sdkconfig.${{ matrix.profile }} build
+          idf.py -B build-${{ matrix.profile }} -DIDF_TARGET=esp32s3 -DSDKCONFIG="$PWD/build-${{ matrix.profile }}/sdkconfig" -DSDKCONFIG_DEFAULTS=sdkconfig.${{ matrix.profile }} size
+      - uses: actions/upload-artifact@v4
+        with:
+          name: engineering-firmware-${{ matrix.profile }}
+          path: |
+            build-${{ matrix.profile }}/pico_nano.bin
+            build-${{ matrix.profile }}/pico_nano.elf
+            build-${{ matrix.profile }}/bootloader/bootloader.bin
+            build-${{ matrix.profile }}/partition_table/partition-table.bin
+            build-${{ matrix.profile }}/ota_data_initial.bin
+            build-${{ matrix.profile }}/flash_args

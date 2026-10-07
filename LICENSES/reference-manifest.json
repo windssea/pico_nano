@@ -1,0 +1,478 @@
+{
+  "repository": "https://github.com/MindReset/read_pico_firmware",
+  "commit": "28cde682a4468a581c278761922724f57d976418",
+  "files": [
+    {
+      "path": "components/read_pico/buzzer_1bit.c",
+      "sha256": "70200310408763d19dbdfe017e48dad0933a1c08767169705b3065796db17448"
+    },
+    {
+      "path": "components/read_pico/buzzer_duty_map.c",
+      "sha256": "4fb4bca01227e4dd34fdd8def32b1f36c5321bf635571b9e10d9e7d7d0631c9e"
+    },
+    {
+      "path": "components/read_pico/buzzer_score.c",
+      "sha256": "f17a6d306cdfe0bed5692315a87592c2297d7ef95ba63fac52b92fcc5a1de810"
+    },
+    {
+      "path": "components/read_pico/CMakeLists.txt",
+      "sha256": "c6f0221ef47960e677e89f1c116e2b63e5262fc63cd4f5f48b6aa6018aa4c14d"
+    },
+    {
+      "path": "components/read_pico/idf_component.yml",
+      "sha256": "87ad5896c4a234925950e12c3c309bb683b007a5f6bb7cde7c043ceb9fbfe1de"
+    },
+    {
+      "path": "components/read_pico/include/buzzer_1bit.h",
+      "sha256": "691e0b518bde10382a7168a3c1bab0d3b95dd4b4724fdfe6f54fad653ed7433b"
+    },
+    {
+      "path": "components/read_pico/include/buzzer_duty_map.h",
+      "sha256": "9f645f5b56a0c551e29ae9c4cf3c0e9596ca5b867cd2bbb6df3ada0270c6001e"
+    },
+    {
+      "path": "components/read_pico/include/buzzer_score.h",
+      "sha256": "eceb80c559facc2634615e3428bee635519209bf6ab94bf1254515751edf93ad"
+    },
+    {
+      "path": "components/read_pico/include/read_pico.h",
+      "sha256": "08eab85c09697d75cb2809d8114a2ca01b1cc70b3a41f5679d5624dfe3178345"
+    },
+    {
+      "path": "components/read_pico/include/read_pico_board.h",
+      "sha256": "5749eac7f7b713c3d11b3248612549eace1bf8fbcbc4cff7f30bec1308b1a815"
+    },
+    {
+      "path": "components/read_pico/include/read_pico_buzzer.h",
+      "sha256": "16de096858f85ada6fd2780d91bdf6651b0db91b8b360c588c3efe1818823f4a"
+    },
+    {
+      "path": "components/read_pico/include/read_pico_epd_timing.h",
+      "sha256": "7403c92537f76922a9f7953e61947b3b2a2b736b1ba1a83adbd37db696896901"
+    },
+    {
+      "path": "components/read_pico/include/read_pico_init.h",
+      "sha256": "bebc85c274dde3c1bed9977c36f9a9d683c11b7dde89d6ad8b04a60b42727419"
+    },
+    {
+      "path": "components/read_pico/include/read_pico_sd.h",
+      "sha256": "4cf2c04cbf4a5c4126493eea021a9dee2bf02a5fe5e98228c823587ca9bd1cec"
+    },
+    {
+      "path": "components/read_pico/Kconfig",
+      "sha256": "44fea6a16194c9cad8fc0afb93db4ba098ae6b3f733b281b7b334dbd1cf20111"
+    },
+    {
+      "path": "components/read_pico/LICENSE",
+      "sha256": "2f5c05478ec97ee03a42051dec629237a86787bcfe912f8cc55c6f01a490f072"
+    },
+    {
+      "path": "components/read_pico/read_pico_blockchain.ots",
+      "sha256": "1949539f749832fe25a70175fd49f24f7fe9a8afd7b965a91b2270a718a3e03d"
+    },
+    {
+      "path": "components/read_pico/read_pico_board.c",
+      "sha256": "c216449d72cefe14d22ab7cdee1c915d0d7913015d51e6191733624805fe936c"
+    },
+    {
+      "path": "components/read_pico/read_pico_buzzer.c",
+      "sha256": "1d04567797c3131829878568e3a187013d74ed492917834d712bec7a3367e986"
+    },
+    {
+      "path": "components/read_pico/read_pico_epd_timing.c",
+      "sha256": "9de264d83f06f5a27475967d1e649f8ce5562f3ae8a80b527f732b0f0c64e688"
+    },
+    {
+      "path": "components/read_pico/read_pico_flash_hpm.c",
+      "sha256": "343775441fe8121478c5c87be5c3551f36d11f31320539f401aed18c54c3833b"
+    },
+    {
+      "path": "components/read_pico/read_pico_init.c",
+      "sha256": "90aa05bfe85eb2a5d60a430b5dc7c11a49af719f00beb938057fb733e7a395b2"
+    },
+    {
+      "path": "components/read_pico/read_pico_sd.c",
+      "sha256": "c2795405eb91195ecbb7621b3faf76b94916bae6e1df4b4143beda0fc5137843"
+    },
+    {
+      "path": "components/read_pico/README.md",
+      "sha256": "b21059903d94604c318e50c515468f7c240a943718846beb3bebd61fa62f078d"
+    },
+    {
+      "path": "components/read_pico_pmu/CMakeLists.txt",
+      "sha256": "2585b8b52f754401750185d93c60c4164e745e97b5e23cfd92b973670c92e6f7"
+    },
+    {
+      "path": "components/read_pico_pmu/docs/llms-full_en.md",
+      "sha256": "937dfa30b4cc8a86b4b790604d3e7b575d1221eb4ed8800d2d1f8b24444ce9b6"
+    },
+    {
+      "path": "components/read_pico_pmu/docs/llms-full_zh_cn.md",
+      "sha256": "ab630ce02f77aeb122b746a2d309af274135085c7bdababc6dd3e5cf5514f11e"
+    },
+    {
+      "path": "components/read_pico_pmu/docs/pmu_protocol_en.h",
+      "sha256": "31be4a4cf19a53ca4bdca08204367bfeea93451329e30dcbac55b41ba8c2fc94"
+    },
+    {
+      "path": "components/read_pico_pmu/docs/pmu_protocol_zh_cn.h",
+      "sha256": "f2b1edaec721cd0d298e4a6de9f6c9e71538a6f6d06d2cb70044d236f77651c7"
+    },
+    {
+      "path": "components/read_pico_pmu/docs/pmu_registers_en.json",
+      "sha256": "6585f419a1b91e9ca8086f9a0eeffd486a5ae0d354880214df4cdce95827cdd2"
+    },
+    {
+      "path": "components/read_pico_pmu/docs/pmu_registers_zh_cn.json",
+      "sha256": "45e78c086c1c60955bb50f444a5745f037d0a9d0b310bb60510de1c8c2781d62"
+    },
+    {
+      "path": "components/read_pico_pmu/docs/read_pico_pmu_datasheet_v1.0.8_en.pdf",
+      "sha256": "1ac03ec9924f38280cfc294ad57282d80b1db2118ea9158a6ae0e06adf497529"
+    },
+    {
+      "path": "components/read_pico_pmu/docs/read_pico_pmu_datasheet_v1.0.8_zh_cn.pdf",
+      "sha256": "0586fc829cb5be5931ca9a06dc0929a2167ec215ab5a9f95142ad841fec1f224"
+    },
+    {
+      "path": "components/read_pico_pmu/idf_component.yml",
+      "sha256": "0fa7aaf449a2b9b2e226bb5cdaea7f8ceb11b6db764f6a83eb179e74b9787d39"
+    },
+    {
+      "path": "components/read_pico_pmu/include/read_pico_pmu.h",
+      "sha256": "bb7ec433bca6b92d21071f57e1cb0e178a5fee6dcd39899026763e7dc32b048f"
+    },
+    {
+      "path": "components/read_pico_pmu/include/read_pico_pmu_protocol.h",
+      "sha256": "b75e0768260e3cf9314747f1d859a051a13c307e7bfc45d3e36764216b4e754b"
+    },
+    {
+      "path": "components/read_pico_pmu/LICENSE",
+      "sha256": "2f5c05478ec97ee03a42051dec629237a86787bcfe912f8cc55c6f01a490f072"
+    },
+    {
+      "path": "components/read_pico_pmu/read_pico_pmu.c",
+      "sha256": "0a4494cbe328fab804ac8f0b859a2949425143b09f9dc2d4211c00e53c087927"
+    },
+    {
+      "path": "components/read_pico_pmu/README.md",
+      "sha256": "86e9c35541a00ae6e6b0f04f5ef215c80944387b5073b96437e2a09bef41cd06"
+    },
+    {
+      "path": "components/epdiy/CMakeLists.txt",
+      "sha256": "643b3d5468026e94cdd164c4e8c279443cc944ab5b37c8dc0709c0f78d5768bb"
+    },
+    {
+      "path": "components/epdiy/idf_component.yml",
+      "sha256": "621ca8479815b971fd6bedfe54357cb02c89f38b0ad6b6e0963e8fed4af0f73c"
+    },
+    {
+      "path": "components/epdiy/include/epd_lcd.h",
+      "sha256": "83a9a4c6a413d0f340fd66f63208c248d525526a4a942778fe04e3ae4fbee5d4"
+    },
+    {
+      "path": "components/epdiy/include/epd_waveform.h",
+      "sha256": "d93fd5510b93424bfd5b5eb4bcf331db2ed9cad269ee8b75c22608e75373fe19"
+    },
+    {
+      "path": "components/epdiy/LICENSE",
+      "sha256": "1f914a6333ae854ff06a2bbbdb9a7352a56c0b017b10bb239c158990b0f09a1b"
+    },
+    {
+      "path": "components/epdiy/README.md",
+      "sha256": "991c3084744519b3db2bf537f3f7745bfa637db65b4096cc3aab2c8b749dc913"
+    },
+    {
+      "path": "components/epdiy/src/board/epd_board.c",
+      "sha256": "777d256100d4689592c1704ce175fdcd1f29d0319b1999b019d8d81c5956efcf"
+    },
+    {
+      "path": "components/epdiy/src/diff.S",
+      "sha256": "a68471e366d4bff90468121cd5c44e2f43c68c86041147badbecca94c26c8d72"
+    },
+    {
+      "path": "components/epdiy/src/displays.c",
+      "sha256": "8e9cc7f5c04001d407c343bb3bf5a766b1c39e95420c42d4adb86f1a61dcd2c7"
+    },
+    {
+      "path": "components/epdiy/src/epd_board.h",
+      "sha256": "6421b493d06510303515aa0ee1e5b65d30bd477d0d1576af208635a99ef79d01"
+    },
+    {
+      "path": "components/epdiy/src/epd_display.h",
+      "sha256": "c69340fe0c95b11b97fb9dde78671cf01a1f5ad83585de9e8eb9188369be8c63"
+    },
+    {
+      "path": "components/epdiy/src/epd_highlevel.h",
+      "sha256": "bf475e27423744e6b312965b1186c75b581fbae5d27ea34887861ed99db33551"
+    },
+    {
+      "path": "components/epdiy/src/epd_internals.h",
+      "sha256": "f3d0185e4d7b8110d38f282bc784f7c565600b5fe523fc854070a0f488e4223d"
+    },
+    {
+      "path": "components/epdiy/src/epdiy.c",
+      "sha256": "146eb47407dd0013320fdfdd82c0710adf6f9328554b06fea3f0bb71c9416875"
+    },
+    {
+      "path": "components/epdiy/src/epdiy.h",
+      "sha256": "b0adeef84ff4309e654338673b0747650a8d1e626d9ed6cdd8457ef7349f2be4"
+    },
+    {
+      "path": "components/epdiy/src/font.c",
+      "sha256": "456dfb6d207ca371096ff77f6cb3ad3410d825e8aeac0536768c89dc0a3132cd"
+    },
+    {
+      "path": "components/epdiy/src/hacks.cmake",
+      "sha256": "508953f735bd78f21a49d36e2255293044354be9219dd8df2d21ecb1239d5d06"
+    },
+    {
+      "path": "components/epdiy/src/highlevel.c",
+      "sha256": "926f06692b32cbd61c3a491d5c216b4914c1b352968b693bacf59d81a72c4dd8"
+    },
+    {
+      "path": "components/epdiy/src/output_common/line_queue.c",
+      "sha256": "bf211d3432d6e34e21efbdda5b5024461ece8827cb1f9573c80285d9efce61dc"
+    },
+    {
+      "path": "components/epdiy/src/output_common/line_queue.h",
+      "sha256": "4e0d4be4a7a3a4626cabe4dc5ee31bec042cefee6076bc3880cd238ea12afead"
+    },
+    {
+      "path": "components/epdiy/src/output_common/lut.c",
+      "sha256": "0f77b77a9a6deb8cb10921c6a2ce6f4a683060fed55757fa35bc5c1e8dc4af1c"
+    },
+    {
+      "path": "components/epdiy/src/output_common/lut.h",
+      "sha256": "1f90a878cd1cf644507eb8c8cf7f34c6c10f69e1ef87fa002426a7296cfea29a"
+    },
+    {
+      "path": "components/epdiy/src/output_common/lut.S",
+      "sha256": "4a1fa758c622e60fd46fac0f9cff9e62932f12c9af8e372af35bf4d83ee02ded"
+    },
+    {
+      "path": "components/epdiy/src/output_common/render_context.c",
+      "sha256": "16c0dc863988bbb73ee990d9d3be6f2b64560ccc808454f4589ab5a3c82afd99"
+    },
+    {
+      "path": "components/epdiy/src/output_common/render_context.h",
+      "sha256": "939e166924d39c434af78b9b7a478b1ae1a0cb539cd64b7f1483ed0bfcafcfc2"
+    },
+    {
+      "path": "components/epdiy/src/output_common/render_method.h",
+      "sha256": "2f3b4b0b68ff1cd28ca0469163e6fb34ac2ba940e00fad6451e141562432a98c"
+    },
+    {
+      "path": "components/epdiy/src/output_common/rmt_compat.c",
+      "sha256": "bfaaf34d50f97b32ba3a5e567444484946d5904cb29703548c419015b67d0f51"
+    },
+    {
+      "path": "components/epdiy/src/output_common/rmt_compat.h",
+      "sha256": "e1c145be65b39f4ba2fcb737a74332ce8e7345be7cb07b5e65fb6548887683d0"
+    },
+    {
+      "path": "components/epdiy/src/output_lcd/idf-4-backports.h",
+      "sha256": "ae9a385cff2dd9b87105cef1e3399e22a3aff69dc950d8e0958c22a5cf103749"
+    },
+    {
+      "path": "components/epdiy/src/output_lcd/lcd_driver.c",
+      "sha256": "a2dcdd2726abe6a4aa4706fed68a5175ab267ca3837a080a9528ad11cf7e8b93"
+    },
+    {
+      "path": "components/epdiy/src/output_lcd/lcd_driver.h",
+      "sha256": "d1e11ea82b46cc6fd063914edba9172e6d1f2938a2fdf21b46506ac0663fb428"
+    },
+    {
+      "path": "components/epdiy/src/output_lcd/render_lcd.c",
+      "sha256": "71595ca576dd1d56cd165f47133451517dd8f6298ec2493c616fc1676f269b3d"
+    },
+    {
+      "path": "components/epdiy/src/output_lcd/render_lcd.h",
+      "sha256": "db4efbc7722b7578a82c120f95041640d4f2fa55c50849bf393cdce4c595da27"
+    },
+    {
+      "path": "components/epdiy/src/render.c",
+      "sha256": "66da373a8614da41acd7b5c6c3128d46e7f714a56ecba2c3c34ff3aad4c11c46"
+    },
+    {
+      "path": "components/epdiy/src/render.h",
+      "sha256": "939700f0fdbb09a007c343753ec38b2612e3f5f0c438babe4fffee902a7a618c"
+    },
+    {
+      "path": "components/e0470_epaper_waveform/CMakeLists.txt",
+      "sha256": "d535f73254711c89e66beba0f3ccbfc99095442702ed93223351c592bafc201c"
+    },
+    {
+      "path": "components/e0470_epaper_waveform/e0470_epaper_waveform.c",
+      "sha256": "addeca8292c5dde5a3727a3012177f401df2b3605c3f1e8d99a4f0a523ce61d4"
+    },
+    {
+      "path": "components/e0470_epaper_waveform/e0470_waveform_trim.c",
+      "sha256": "83e1a65aa6f1be20ffe127b258ec3dcc72c01ae42bf29ee5aed9a1de2276016c"
+    },
+    {
+      "path": "components/e0470_epaper_waveform/idf_component.yml",
+      "sha256": "63e03fe44550450347ef2dcb3e3fd43342dd735428ba39d227f454d6f2c1dbb9"
+    },
+    {
+      "path": "components/e0470_epaper_waveform/include/e0470_epaper_waveform.h",
+      "sha256": "d0ca3370f9251b2138a0ca8d7802c34e6f6b64b8120daee4b78dca298d4c7f6e"
+    },
+    {
+      "path": "components/e0470_epaper_waveform/include/e0470_waveform_trim.h",
+      "sha256": "756a3426a1d03a537de6387fb15c52194ffa3119df2c80e16b12189b17fbc307"
+    },
+    {
+      "path": "components/e0470_epaper_waveform/LICENSE",
+      "sha256": "2f5c05478ec97ee03a42051dec629237a86787bcfe912f8cc55c6f01a490f072"
+    },
+    {
+      "path": "components/e0470_epaper_waveform/README.md",
+      "sha256": "2b24accd960e80e08706666db70ff865a097780f32a337add8dd8e003c4405e5"
+    },
+    {
+      "path": "components/e0470_epaper_waveform/waveforms/du.h",
+      "sha256": "39ead676a8fa80e7cc042c8c41c4c7f9ec6b7314d1b51b58bf11f04029ecc021"
+    },
+    {
+      "path": "components/e0470_epaper_waveform/waveforms/gc16.h",
+      "sha256": "661909dadf59f2e9948ad23a120cf417a81b252d4524d8a6f01a757f7333ab2d"
+    },
+    {
+      "path": "components/e0470_epaper_waveform/waveforms/gl16.h",
+      "sha256": "40a3291be43c7af6e3f13335c546bf9743c36f5d501c3fb63695887a317706dd"
+    },
+    {
+      "path": "components/e0470_epaper_waveform/waveforms/gray8_gc16.h",
+      "sha256": "4f201e6dade95cb955f2f1da52eda14f36d4b49c86365adcd55163d527c2a4bb"
+    },
+    {
+      "path": "components/e0470_epaper_waveform/waveforms/gray8_gl16.h",
+      "sha256": "83b942d61db9b5548344a785db3d128808df43774898c649028497e5cbfeba6f"
+    },
+    {
+      "path": "components/cst836u/CMakeLists.txt",
+      "sha256": "06ffa7c9b4f011f9c3a06aa6239cc92b2e144644f3e431ba16cbb91085e077f7"
+    },
+    {
+      "path": "components/cst836u/cst836u.c",
+      "sha256": "8d2ef88b6f8376cfe197412eeba5cda24a4abe8b085282f054150c9ddfea1a1d"
+    },
+    {
+      "path": "components/cst836u/idf_component.yml",
+      "sha256": "15807614799f045408ce105807a946b29369de4e753775605e992183983bd369"
+    },
+    {
+      "path": "components/cst836u/include/cst836u.h",
+      "sha256": "9b52224d4f1c6a3aafd51db2f2ecf4a337ad93b0bef781a506816843c117a9e0"
+    },
+    {
+      "path": "components/cst836u/LICENSE",
+      "sha256": "2f5c05478ec97ee03a42051dec629237a86787bcfe912f8cc55c6f01a490f072"
+    },
+    {
+      "path": "components/cst836u/README.md",
+      "sha256": "c1bbaa0e3edf8a04d65ab9dcb29bfec53a8e552f2e44d6c7a7556986503b7bd2"
+    },
+    {
+      "path": "components/sc7a20h/CMakeLists.txt",
+      "sha256": "f4d22cecb86f8231a07bdb265609204fe5b8cbb0d739a5db72463fde27150e17"
+    },
+    {
+      "path": "components/sc7a20h/idf_component.yml",
+      "sha256": "d621c35a30024991872e8b4c54612afeb2204d369db4264e352cef018996ad4f"
+    },
+    {
+      "path": "components/sc7a20h/include/sc7a20h.h",
+      "sha256": "54edbaf0aae80134bd8a20d0829953ae77cccd6cc9700ad59fa78df0b2ddfd69"
+    },
+    {
+      "path": "components/sc7a20h/include/sc7a20h_lab.h",
+      "sha256": "f5b0e6728f491f35fed5fed528f6b396fc3b033dbf938ab350ae1a191d56e766"
+    },
+    {
+      "path": "components/sc7a20h/LICENSE",
+      "sha256": "2f5c05478ec97ee03a42051dec629237a86787bcfe912f8cc55c6f01a490f072"
+    },
+    {
+      "path": "components/sc7a20h/README.md",
+      "sha256": "97001da52b65e7506ae6edfd3d5c9e73bd5114684ddc6a8d356431607bc74b9e"
+    },
+    {
+      "path": "components/sc7a20h/sc7a20h.c",
+      "sha256": "5b3e1a100fa75d6f28ce9134cdc252559b7c57302b32da001e13165c28baece9"
+    },
+    {
+      "path": "components/fca9555/CMakeLists.txt",
+      "sha256": "0b9ede7f2fa827e1c52625b229a370d1cbb0795b1022ff570072d8f3096f4e4d"
+    },
+    {
+      "path": "components/fca9555/fca9555.c",
+      "sha256": "02c2aaf8994cb94b8238fddfa42147e0f860d1f5fc3449f616beb398529da9ba"
+    },
+    {
+      "path": "components/fca9555/idf_component.yml",
+      "sha256": "185d713b7a0c478d9aeb4d04917c9573c0759d6cdd5d9691e89dbaa806dd8da6"
+    },
+    {
+      "path": "components/fca9555/include/fca9555.h",
+      "sha256": "86d090cea736293a7a09683cc38a4acaf7b20a0cfb95bb899c49600c3a12c132"
+    },
+    {
+      "path": "components/fca9555/Kconfig",
+      "sha256": "98840e74dd6acd9e65bfa57be1b9649122872909a106ed401b31df627a5ceb70"
+    },
+    {
+      "path": "components/fca9555/LICENSE",
+      "sha256": "2f5c05478ec97ee03a42051dec629237a86787bcfe912f8cc55c6f01a490f072"
+    },
+    {
+      "path": "components/fca9555/README.md",
+      "sha256": "572c4f9b5c708405894d9b9b32f8bfac0cf9dabc56e4278a1909ebe621fd064e"
+    },
+    {
+      "path": "components/sy7636a/CMakeLists.txt",
+      "sha256": "6cfaef63a50a95dd17e54dea62e508cb4177f6c749b8a90541bbabfe1214372e"
+    },
+    {
+      "path": "components/sy7636a/idf_component.yml",
+      "sha256": "61d1fe753c7ed76055a04c15980888a1deebeebe946161369bdf9d0bddb3104f"
+    },
+    {
+      "path": "components/sy7636a/include/sy7636a.h",
+      "sha256": "d90be5a2ac78b6a5a40d45490d9cd35dd54f45afb1d22520650d1871e21b00e1"
+    },
+    {
+      "path": "components/sy7636a/LICENSE",
+      "sha256": "2f5c05478ec97ee03a42051dec629237a86787bcfe912f8cc55c6f01a490f072"
+    },
+    {
+      "path": "components/sy7636a/README.md",
+      "sha256": "37a2bc16b016ac1cfc8d5b80931da200ba773079cd99669aea40de7cd8d6ea09"
+    },
+    {
+      "path": "components/sy7636a/sy7636a.c",
+      "sha256": "86955799a75b5b3ede647620ab7ac884b52ae33a0d2fbbfc5e73b9d05c9c0ff6"
+    },
+    {
+      "path": "components/pwm_audio/CMakeLists.txt",
+      "sha256": "0cebaf389c3a645943b5a22871a35b491ac072726f81119c6150665852303ce4"
+    },
+    {
+      "path": "components/pwm_audio/include/pwm_audio.h",
+      "sha256": "a694828fdf24eba67d7a14b8b274d5c6c7a9c00e57ee1c267d00525c86044a13"
+    },
+    {
+      "path": "components/pwm_audio/LICENSE",
+      "sha256": "90756d90857b2293c6878a75e8b460e8f610244701ca53c61a1f1f91d634fcfa"
+    },
+    {
+      "path": "components/pwm_audio/pwm_audio.c",
+      "sha256": "373462a36c0616cc8053037d0e670c7fb3a907bae944d899dabebdf8416152f0"
+    },
+    {
+      "path": "components/pwm_audio/README.md",
+      "sha256": "7504ec08afa2bd145839a92f875c3f6d8eb8d507264e698979e220957b5a54af"
+    }
+  ]
+}
