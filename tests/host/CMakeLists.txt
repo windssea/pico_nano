@@ -167,3 +167,7 @@ target_include_directories(test_device_upload_storage PRIVATE stubs ${PN_ROOT}/m
 target_link_libraries(test_device_upload_storage PRIVATE pn_core)
 target_link_options(test_device_upload_storage PRIVATE "-Wl,--wrap=fsync")
 add_test(NAME device_upload_storage COMMAND test_device_upload_storage)
+
+add_executable(test_transfer_service test_transfer_service.c)
+target_link_libraries(test_transfer_service PRIVATE pn_core)
+add_test(NAME transfer_service COMMAND test_transfer_service)
