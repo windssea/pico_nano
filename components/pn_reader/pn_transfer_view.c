@@ -21,7 +21,7 @@ static pn_status_t text(pn_font_t *font,pn_frame_t *frame,const char *s,int x,in
 }
 static pn_status_t button(pn_font_t *font,pn_frame_t *frame,const char *label,int y){pn_frame_rect(frame,32,y,620,1,5);pn_frame_rect(frame,32,y+100,620,1,5);pn_frame_rect(frame,32,y,1,100,5);pn_frame_rect(frame,651,y,1,100,5);return text(font,frame,label,64,y+64);}
 static bool valid(pn_font_t *font,pn_frame_t *frame){return font && font->impl && frame && frame->pixels && frame->width==684 && frame->height==1216 && frame->stride>=342;}
-/* 六槽菜单：继续/书架/热点/局域网（可选）/壁纸/字体。/ Six-slot menu: resume/shelf/hotspot/LAN (optional)/wallpaper/fonts. */
+/* 五槽菜单：继续/书架/热点/局域网（可选）/设置。/ Five-slot menu: resume/shelf/hotspot/LAN (optional)/settings. */
 pn_status_t pn_reading_menu_render_lan(bool resume,const char *lan,pn_font_t *font,pn_frame_t *frame){
  if(!valid(font,frame))return PN_INVALID;
  pn_frame_clear(frame,15);pn_status_t s=text(font,frame,"小纸 Pico",32,64);
@@ -30,15 +30,14 @@ pn_status_t pn_reading_menu_render_lan(bool resume,const char *lan,pn_font_t *fo
  if(s==PN_OK)s=button(font,frame,"全部书架",370);
  if(s==PN_OK)s=button(font,frame,"热点传书",510);
  if(s==PN_OK && lan){char label[96];snprintf(label,sizeof label,"局域网传书：%s",lan);s=button(font,frame,label,650);}
- if(s==PN_OK)s=button(font,frame,"锁屏壁纸",790);
- if(s==PN_OK)s=button(font,frame,"字体管理",930);
+ if(s==PN_OK)s=button(font,frame,"设置（壁纸、字体、翻页）",790);
  if(s==PN_OK)s=text(font,frame,"进入前保存位置，退出后回到原书",32,1110);
  return s;
 }
 int pn_reading_menu_hit_lan(int x,int y,bool lan){
  if(x<32 || x>=652 || y<230 || (y-230)%140>=100)return -1;
- const int slots[]={PN_READING_MENU_RESUME,PN_READING_MENU_SHELF,PN_READING_MENU_TRANSFER,PN_READING_MENU_LAN,PN_READING_MENU_WALLPAPER,PN_READING_MENU_FONTS};
- int row=(y-230)/140;if(row>=6)return -1;
+ const int slots[]={PN_READING_MENU_RESUME,PN_READING_MENU_SHELF,PN_READING_MENU_TRANSFER,PN_READING_MENU_LAN,PN_READING_MENU_SETTINGS};
+ int row=(y-230)/140;if(row>=5)return -1;
  return slots[row]==PN_READING_MENU_LAN && !lan?-1:slots[row];
 }
 pn_status_t pn_reading_menu_render(bool resume,pn_font_t *font,pn_frame_t *frame){return pn_reading_menu_render_lan(resume,NULL,font,frame);}

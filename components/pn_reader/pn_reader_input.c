@@ -24,8 +24,11 @@ bool pn_reader_input_feed(pn_reader_input_t *i,unsigned count,int x,int y,bool v
         if(submit){
             if(i->region>=0 && i->region<4){const pn_reader_action_t actions[]={PN_APP_PREVIOUS,PN_APP_NEXT,PN_APP_SMALLER,PN_APP_LARGER};action=actions[i->region];}
             else if(i->region==4){int dx=i->last_x-i->start_x,dy=i->last_y-i->start_y;
-                if(abs(dx)>=120 && abs(dy)<=80)action=dx<0?PN_APP_NEXT:PN_APP_PREVIOUS;
-                else if(abs(dx)<=24 && abs(dy)<=24){if(i->start_x<136)action=PN_APP_PREVIOUS;else if(i->start_x>=548)action=PN_APP_NEXT;else submit=false;}
+                // 横滑：|dx|≥64且≥1.5|dy|；点按：移动≤24，左0–171、右513–683。/ Swipe: |dx|≥64 and ≥1.5|dy|; tap: movement ≤24, left 0–171, right 513–683.
+                if(abs(dx)>=64 && 2*abs(dx)>=3*abs(dy)){if(i->config.no_swipe)submit=false;else action=dx<0?PN_APP_NEXT:PN_APP_PREVIOUS;}
+                else if(abs(dx)<=24 && abs(dy)<=24 && !i->config.no_edge_tap){
+                    bool left=i->start_x<172,right=i->start_x>=513;
+                    if(left || right)action=(left!=i->config.left_hand)?PN_APP_PREVIOUS:PN_APP_NEXT;else submit=false;}
                 else submit=false;
             }else submit=false;
         }

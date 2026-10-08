@@ -55,6 +55,8 @@ set_tests_properties(epub_window PROPERTIES LABELS "reader;ui;storage")
 endif()
 
 if(PN_SIM_SDL)
+add_test(NAME settings_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_settings_window.py $<TARGET_FILE:pn_sim>)
+set_tests_properties(settings_window PROPERTIES LABELS "ui;storage")
 add_test(NAME font_manage_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_font_manage_window.py $<TARGET_FILE:pn_sim>)
 set_tests_properties(font_manage_window PROPERTIES LABELS "ui;storage")
 add_test(NAME wallpaper_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_wallpaper_window.py $<TARGET_FILE:pn_sim>)

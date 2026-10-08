@@ -36,6 +36,7 @@ add_library(pn_core STATIC ${ui_font_c}
     ${PN_ROOT}/components/pn_personalization/pn_wallpaper.c
     ${PN_ROOT}/components/pn_personalization/pn_wallpaper_ui.c
     ${PN_ROOT}/components/pn_personalization/pn_font_manage.c
+    ${PN_ROOT}/components/pn_personalization/pn_settings_ui.c
     ${PN_ROOT}/components/pn_library/pn_shelf_view.c
     ${PN_ROOT}/components/pn_library/pn_font_preview.c
     ${PN_ROOT}/components/pn_font/pn_font.c
@@ -52,11 +53,13 @@ add_library(pn_core STATIC ${ui_font_c}
     ${PN_ROOT}/components/pn_core/pn_alloc.c
     ${PN_ROOT}/components/pn_ui/pn_frame.c
     ${PN_ROOT}/components/pn_ui/pn_tap.c
+    ${PN_ROOT}/components/pn_ui/pn_key.c
     ${PN_ROOT}/components/pn_storage/pn_media.c
     ${PN_ROOT}/components/pn_storage/pn_journal.c
     ${PN_ROOT}/components/pn_storage/pn_blob.c
     ${PN_ROOT}/components/pn_storage/pn_recent.c
     ${PN_ROOT}/components/pn_storage/pn_network_store.c
+    ${PN_ROOT}/components/pn_storage/pn_input_prefs.c
     ${PN_ROOT}/components/pn_storage/pn_identity.c
     ${PN_ROOT}/components/pn_storage/pn_progress.c
     ${PN_ROOT}/components/pn_storage/pn_epub_progress.c

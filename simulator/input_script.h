@@ -39,6 +39,7 @@ static void script_queue(sim_script_t *script){
         else if(!strcmp(part,"recent"))event.key.keysym.sym=SDLK_r;
         else if(!strcmp(part,"continue"))event.key.keysym.sym=SDLK_c;
         else if(!strcmp(part,"wallpaper"))event.key.keysym.sym=SDLK_w;
+        else if(!strcmp(part,"settings"))event.key.keysym.sym=SDLK_p;
         else if(!strcmp(part,"toc"))event.key.keysym.sym=SDLK_t;
         else if(!strcmp(part,"toc-down"))event.key.keysym.sym=SDLK_DOWN;
         else if(!strcmp(part,"toc-up"))event.key.keysym.sym=SDLK_UP;
