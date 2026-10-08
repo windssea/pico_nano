@@ -1,6 +1,6 @@
 # 构建与运行入口
 
-当前开发版本0.0.49。能力与待办统一见 [项目状态](PROJECT_STATUS.md)，环境、测试分层和证据边界见 [开发与测试](DEVELOPMENT_AND_TESTING.md)。本页只列已经存在的运行入口，不把拟建命令当成实现。
+当前开发版本0.0.50。能力与待办统一见 [项目状态](PROJECT_STATUS.md)，环境、测试分层和证据边界见 [开发与测试](DEVELOPMENT_AND_TESTING.md)。本页只列已经存在的运行入口，不把拟建命令当成实现。
 
 ## Windows与Docker
 

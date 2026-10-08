@@ -33,6 +33,7 @@ add_library(pn_core STATIC ${ui_font_c}
     ${PN_ROOT}/components/pn_format/pn_xhtml.c
     ${PN_ROOT}/components/pn_library/pn_catalog.c
     ${PN_ROOT}/components/pn_library/pn_cover.c
+    ${PN_ROOT}/components/pn_personalization/pn_wallpaper.c
     ${PN_ROOT}/components/pn_library/pn_shelf_view.c
     ${PN_ROOT}/components/pn_library/pn_font_preview.c
     ${PN_ROOT}/components/pn_font/pn_font.c
@@ -75,7 +76,8 @@ target_include_directories(pn_core PUBLIC
     ${PN_ROOT}/components/pn_text/include
     ${PN_ROOT}/components/pn_font/include
     ${PN_ROOT}/components/pn_reader/include
-    ${PN_ROOT}/components/pn_library/include)
+    ${PN_ROOT}/components/pn_library/include
+    ${PN_ROOT}/components/pn_personalization/include)
 target_include_directories(pn_core PUBLIC ${PN_ROOT}/components/pn_format/include)
 target_include_directories(pn_core PUBLIC ${PN_ROOT}/components/pn_image/include)
 target_link_libraries(pn_core PUBLIC pn_freetype pn_expat pn_spng pn_zlib m)
