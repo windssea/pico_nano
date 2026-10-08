@@ -1,6 +1,6 @@
 # 有界传输工作任务
 
-`pn_transfer_worker` 为共享传输服务增加专用工作任务、独立事务池和单请求槽。PC HTTP worker已使用真实pthread任务；ESP-IDF编译使用FreeRTOS分支。设备无线、页面及主界面介质交接尚未接入，不能把编译当成设备传输运行证据。
+`pn_transfer_worker` 为共享传输服务增加专用工作任务、独立事务池和单请求槽。PC HTTP worker已使用真实pthread任务；ESP-IDF编译使用FreeRTOS分支。设备热点、页面与介质交接后续已接入，不能把编译当成设备传输运行证据。
 
 ## 进入与所有权
 

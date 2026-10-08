@@ -14,7 +14,7 @@ owner提供已挂载可信绝对根（最长95字节，不接受根目录本身�
 
 数据创建/截断/写入用精确长度和fsync，创建/日志写入/rename/unlink还同步对应父目录。同步错误不靠读回认成功；保存安装意图失败后阻止继续操作，必须关闭重开。PC默认fsync目录和statvfs；ESP的sync_directory/space_free回调为强制项，缺失返回UNSUPPORTED，不能假报同步成功。
 
-参考BSP的read_pico_sd_sync会卸载卡，不能用于逐块上传。ESP-IDF的文件f_sync/命名空间实现须在SDK与真实卡上分别检查，[官方FatFs同步说明](https://docs.espressif.com/projects/esp-idf/en/v6.1/esp32s3/api-reference/storage/fatfs.html)也不能代替卡的掉电验证。本port尚未接入设备这些回调。
+参考BSP的read_pico_sd_sync会卸载卡，不能用于逐块上传。ESP-IDF的文件f_sync/命名空间实现须在SDK与真实卡上分别检查，[官方FatFs同步说明](https://docs.espressif.com/projects/esp-idf/en/v6.1/esp32s3/api-reference/storage/fatfs.html)也不能代替卡的掉电验证。设备已通过 [FAT适配](DEVICE_TRANSFER_STORAGE.md) 接入这些回调，仍需真实卡掉电验证。
 
 若初始安装意图已保存，但进程在空part创建后、上传日志写入前中断，恢复可用同ID/媒体的PREPARED意图重建初始上传记录。part只能为空或尚未创建；已有非空但无有效上传日志的数据拒绝猜测或覆盖。
 

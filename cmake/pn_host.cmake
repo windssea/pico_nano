@@ -10,6 +10,8 @@ find_package(Python3 REQUIRED COMPONENTS Interpreter)
 set(ui_font_c ${CMAKE_CURRENT_BINARY_DIR}/pn_ui_font.c)
 add_custom_command(OUTPUT ${ui_font_c} COMMAND ${Python3_EXECUTABLE} ${PN_ROOT}/tools/embed_binary.py ${PN_ROOT}/assets/fonts/read-pico-ui.ttf ${ui_font_c} DEPENDS ${PN_ROOT}/tools/embed_binary.py ${PN_ROOT}/assets/fonts/read-pico-ui.ttf VERBATIM)
 add_library(pn_core STATIC ${ui_font_c}
+    ${PN_ROOT}/components/pn_qr/pn_qr.c
+    ${PN_ROOT}/components/pn_qr/vendor/qrcodegen.c
     ${PN_ROOT}/components/pn_reader/pn_transfer_view.c
     ${PN_ROOT}/components/pn_transfer/pn_transfer_worker.c
     ${PN_ROOT}/components/pn_transfer/pn_transfer_service.c
@@ -108,3 +110,5 @@ target_compile_definitions(pn_jpeg PRIVATE _POSIX_C_SOURCE=200809L)
 target_include_directories(pn_core PUBLIC ${PN_ROOT}/components/pn_transfer/include)
 find_package(Threads REQUIRED)
 target_link_libraries(pn_core PUBLIC Threads::Threads)
+
+target_include_directories(pn_core PUBLIC ${PN_ROOT}/components/pn_qr/include PRIVATE ${PN_ROOT}/components/pn_qr/vendor)

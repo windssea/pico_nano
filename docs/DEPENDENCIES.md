@@ -51,3 +51,7 @@ UI字体由OFL-1.1的Noto Sans SC固定源生成Read Pico UI Regular子集，保
 ## cJSON v1.7.19
 
 固定 [上游标签](https://github.com/DaveGamble/cJSON/tree/v1.7.19) 的cJSON.c、cJSON.h和MIT LICENSE，不修改vendor；LICENSES/cjson-manifest.json逐文件SHA核对。编译递归限16层，协议解析前限制结构token数64及正文8192字节。同源主机/设备仅用于HTTP JSON，运行边界见 [设备HTTP](DEVICE_TRANSFER_HTTP.md)。
+
+## QR-Code-generator v1.8.0
+
+固定Nayuki C版qrcodegen.c/h及Readme.markdown，源文件自带完整MIT声明，不修改vendor；LICENSES/qr-manifest.json逐文件核对。caller提供缓冲，无堆分配，wrapper只允许版本<=10及240字节UTF8输入，矩阵与转义边界见 [扫码传书](TRANSFER_QR.md)。

@@ -1,6 +1,6 @@
 # EPUB页节点与真实捕获
 
-0.0.18新增pn_epub_page，把已实现的XHTML事件流转换为可绘制页节点，保留字号无关的源位置。host epub_capture可使用实际TTF生成4bpp页，并已接 [PNG绘制](PNG_RENDERING.md)；主界面与阅读会话尚未接入，完整CSS版式、目录操作、EPUB续读/书签仍待完成。它不是完整EPUB阅读验收。
+0.0.18新增pn_epub_page，把已实现的XHTML事件流转换为可绘制页节点，保留字号无关的源位置。host epub_capture可使用实际TTF生成4bpp页，并已接 [PNG绘制](PNG_RENDERING.md)；后续已接主界面、阅读会话、目录与续读/书签，完整CSS兼容与性能仍待完成。它不是完整EPUB阅读验收。
 
 ## 输入、页与语义衔接
 

@@ -1,6 +1,6 @@
 # 设备上传存储适配
 
-`main/device_upload_storage.c` 为已有上传文件port提供ESP-IDF v6.1 FAT卷同步与实时空间回调，已纳入固件构建。当前仍未连接设备无线服务和传输页面，不能据此宣称设备已可传书。
+`main/device_upload_storage.c` 为已有上传文件port提供ESP-IDF v6.1 FAT卷同步与实时空间回调，已纳入固件构建。后续已连接设备热点服务与页面，见 [设备入口](DEVICE_TRANSFER_ENTRY.md)；代码装配不能代替无线实测。
 
 ## 接入契约
 

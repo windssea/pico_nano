@@ -1,5 +1,7 @@
 # 小纸 Pico 阅读固件开发计划
 
+更新基线0.0.48。当前T01–T14完成情况、用户需求覆盖和待办统一见 [PROJECT_STATUS](PROJECT_STATUS.md)。本文保留原始详细验收要求；阶段代码或主机绿色结果不能自动勾完含硬件/产品闭环的任务。
+
 > 执行者：按任务逐项实现与验收，使用 executing-plans 工作流；未经用户另行授权不启动子 agent。本文是用户要求的长期开发路线，过程日志、临时检查点与实验记录放忽略的 docs/local，不进入产品提交。
 
 **Goal：**在 Read Pico 现有板上交付可靠、清晰、易用的离线阅读固件，原生 TXT/EPUB/PDF，完整版本扩展 FB2/CBZ，具有封面、排版设置、快速传书和可恢复升级。
@@ -39,13 +41,15 @@
 
 ## 3. 验证命令约定
 
-长期任务中的拟建入口不代表全部已经存在。0.0.1已建立基础工程与部分测试，可执行命令以 [当前构建与运行](BUILDING.md) 为准；其余测试和产品功能按对应任务继续实现，不把命令清单当成验收结果。
+长期任务中的拟建入口不代表全部已经存在。当前已建立同源工程、阅读/上传等软件测试，可执行命令以 [当前构建与运行](BUILDING.md) 为准；其余测试和产品功能按对应任务继续实现，不把命令清单当成验收结果。
 
-环境与完整命令统一维护在 [开发与PC模拟测试](DEVELOPMENT_AND_TESTING.md)。固件CI与真机分别使用build-ci/build-board及独立SDKCONFIG，避免已生成sdkconfig覆盖默认配置。主机用真实组件源与port替身；桌面模拟器使用同一UI/字体/排版源，不另写模拟产品。CTest的`-L`筛选标签、`-R`筛选名称。编译、主机、芯片仿真与真机结果分别报告。
+环境与完整命令统一维护在 [开发与PC模拟测试](DEVELOPMENT_AND_TESTING.md)。固件CI与真机分别使用build-ci-s3/build-board及独立SDKCONFIG，避免已生成sdkconfig覆盖默认配置。主机用真实组件源与port替身；桌面模拟器使用同一UI/字体/排版源，不另写模拟产品。CTest的`-L`筛选标签、`-R`筛选名称。编译、主机、芯片仿真与真机结果分别报告。
 
 ## 4. 具体任务
 
 ### T01 驱动迁移、合法来源与测量基线
+
+当前状态：部分：来源/工程已建立，真机基线待测。细分证据见PROJECT_STATUS。
 
 **拟建文件：**`CMakeLists.txt`、`main/app_main.c`、`sdkconfig.ci`、`sdkconfig.defaults`、`partitions.csv`、`components/pn_port/`、`tests/host/CMakeLists.txt`、`tools/check_docs.py`、`LICENSES/`、`docs/DEPENDENCIES.md`。逐组件移植参考BSP/芯片驱动/epdiy/波形，不复制demo应用。生成或vendored表只保留来源不手改。
 
@@ -63,6 +67,8 @@
 
 ### T02 原生PDF可行性与许可门（最高优先级）
 
+当前状态：未完成：原生PDF技术与许可门尚未通过。细分证据见PROJECT_STATUS。
+
 **拟建文件：**`components/pn_pdf/include/pn_pdf.h`、`pn_pdf_adapter.c`、`pn_pdf_budget.c`、`tests/host/test_pdf_budget.c`、`tests/fixtures/pdf/manifest.json`、`tools/benchmark_pdf.py`、`docs/PDF_SUPPORT.md`；实验日志 `docs/local/pdf/`。
 
 **接口：**`pn_pdf_open(stream,budget,token)`、`pn_pdf_page_info(page)`、`pn_pdf_render(page,viewport,strip_sink,token)`、`pn_pdf_close()`。返回status、heap peak、实际过滤器错误；budget不得绕回系统无上限malloc。
@@ -76,6 +82,8 @@
 **验收：**正式门通过才能把PDF产品实现列可交付；失败可继续文本内测，但Beta/1.0 PDF不算完成。此任务产物是可复跑PDF技术样机，不要求先实现整套书架。
 
 ### T03 WiFi、USB与卡写入通道基线
+
+当前状态：部分：热点/扫码代码已装配，无线/USB实测待做。细分证据见PROJECT_STATUS。
 
 **拟建文件：**`components/pn_transfer/pn_network.c`、`pn_usb_probe.c`、`tools/benchmark_transfer.py`、`tests/host/test_transport_state.c`、`docs/USB_SUPPORT.md`。
 
@@ -91,7 +99,9 @@
 
 ### T04 存储租约、内容身份与持久位置
 
-当前0.0.4已实现租约、原文件SHA、A/B记录、TXT位置载荷、5次翻页/30秒同步保存策略和单个TXT书签持久操作，主机/交叉编译验证见BUILDING和PERSISTENCE；本任务的真实拔卡/掉电、内部挂载、RTOS保存屏障/产品接入尚未验收。
+当前状态：主体代码已实现，真实TF掉电/拔卡验收未完成。细分证据见PROJECT_STATUS。
+
+历史0.0.4起实现租约、原文件SHA、A/B记录、TXT位置载荷、5次翻页/30秒同步保存策略和单个TXT书签持久操作，主机/交叉编译验证见BUILDING和PERSISTENCE；本任务的真实拔卡/掉电、内部挂载、RTOS保存屏障/产品接入尚未验收。
 
 **拟建文件：**`components/pn_core/include/pn_types.h`、`components/pn_storage/include/pn_storage.h`、`pn_media.c`、`pn_lease.c`、`pn_journal.c`、`pn_identity.c`、`tests/host/test_media.c`、`test_identity.c`、`test_journal.c`。
 
@@ -106,6 +116,8 @@
 **验收：**`ctest -R "media|identity|journal"`全通过；真实拔卡/掉电恢复保留至少最后有效位置；挂载失败不自动格式化。
 
 ### T05 导航、输入与唯一显示调度器
+
+当前状态：部分：输入与显示确认已接，全量设备交互/调度门待做。细分证据见PROJECT_STATUS。
 
 **拟建文件：**`components/pn_shell/pn_router.c`、`pn_navigation.c`、`components/pn_ui/pn_gesture.c`、`components/pn_display/pn_scheduler.c`、`pn_damage.c`、`pn_recovery.c`、`tests/host/test_router.c`、`test_gesture.c`、`test_display.c`。
 
@@ -123,7 +135,9 @@
 
 ### T06 字体服务与清晰度
 
-当前0.0.6建立固定FreeType TTF port、受限分配/真实度量/灰阶与二值绘制、常驻UI子集及PC实际TXT捕获，见FONT_PORT。T06的变化轴选择/LRU/完整fallback/上传安全/fuzz/真机仍未验收。
+当前状态：部分：选择/预览/偏好/上传已接，完整管理与清晰度验收待做。细分证据见PROJECT_STATUS。
+
+历史0.0.6起建立固定FreeType TTF port、受限分配/真实度量/灰阶与二值绘制、常驻UI子集及PC实际TXT捕获，见FONT_PORT。T06的变化轴选择/LRU/完整fallback/上传安全/fuzz/真机仍未验收。
 
 **拟建文件：**`components/pn_font/pn_font.c`、`pn_metrics.c`、`pn_cache.c`、`pn_variation.c`、`pn_fallback.c`、`tests/host/test_font.c`、`tools/font_compare.py`、`assets/fonts/README.md`。
 
@@ -140,7 +154,9 @@
 
 ### T07 TXT/EPUB与增量分页内核
 
-当前0.0.9已建立TXT流式编码/源映射、文件source、有界页节点、真实TTF绘制、PC与设备阅读会话及逐书续读，见TEXT_CORE、READER_SESSION。仍需BlockStream、完整排版、索引/目录、EPUB和完整产品UI；不能作为T07验收通过。
+当前状态：主体TXT/EPUB代码已接，兼容/异步分页/热翻页门未完成。细分证据见PROJECT_STATUS。
+
+历史0.0.9起建立TXT流式编码/源映射、文件source、有界页节点、真实TTF绘制、PC与设备阅读会话及逐书续读，见TEXT_CORE、READER_SESSION。TXT/EPUB、目录与排版后续已接，现阶段仍需异步/预绘制、兼容与完整产品验收，不能作为T07整体通过。
 
 **拟建文件：**`components/pn_format/include/pn_document.h`、`pn_txt.c`、`pn_epub.c`、`pn_zip.c`、`pn_block.c`、`pn_css.c`、`components/pn_reader/pn_session.c`、`pn_layout.c`、`pn_locator.c`、`pn_prepaint.c`、`tests/host/test_txt.c`、`test_epub.c`、`test_layout.c`、`test_locator.c`。
 
@@ -156,7 +172,9 @@
 
 ### T08 书库、封面与产品UI
 
-当前0.0.9已有六条可见文件分页、PC/设备选择TXT、返回和逐书续读，见CATALOG。封面卡仍为格式占位；自然/最近排序、元数据、书签列表、字体与壁纸管理和全量旅程尚未完成。以下64记录指计划中的索引服务批次，当前扫描只保留六条可见候选。
+当前状态：部分：基础书库/最近/书签/设置已接，封面/管理/壁纸待完成。细分证据见PROJECT_STATUS。
+
+历史0.0.9已有六条可见文件分页、PC/设备选择TXT、返回和逐书续读，见CATALOG。封面卡仍为格式占位；最近/书签列表和字体选择后续已接；完整元数据、封面、资源管理、壁纸和全量旅程尚未完成。以下64记录指计划中的索引服务批次，当前扫描只保留六条可见候选。
 
 **拟建文件：**`components/pn_library/pn_catalog.c`、`pn_cover.c`、`pn_search.c`、`pn_collection.c`、`components/pn_ui/pn_tokens.h`、`pn_widgets.c`、`components/pn_shell/pages/shelf.c`、`reader.c`、`typesetting.c`、`toc.c`、`bookmarks.c`、`settings.c`、`tests/host/test_catalog.c`、`test_cover.c`、`test_settings.c`。
 
@@ -182,6 +200,8 @@
 
 ### T09 AP/STA网页传书与基本导入
 
+当前状态：部分：网页/热点/扫码已接，STA配网与真机传输待做。细分证据见PROJECT_STATUS。
+
 **拟建文件：**`components/pn_transfer/pn_pairing.c`、`pn_http.c`、`pn_credentials.c`、`web/index.html`、`web/transfer.js`、`components/pn_shell/pages/transfer.c`、`tests/web/transfer.test.js`、`tests/host/test_pairing.c`、`test_upload_commit.c`。
 
 **接口：**TRANSFER API v1；T09先实现单文件流＋part/backup与授权，端点沿同协议保留会话结构；T11升级持久分块，不能把临时会话称为断点续传。
@@ -198,6 +218,8 @@
 
 ### T10 PDF原生产品化与视图
 
+当前状态：未完成，依赖T02。细分证据见PROJECT_STATUS。
+
 **拟建文件：**`components/pn_pdf/pn_viewport.c`、`pn_pdf_toc.c`、`pn_pdf_search.c`、`components/pn_shell/pages/pdf_tools.c`、`tests/host/test_viewport.c`、`test_pdf_location.c`。
 
 **依赖：**T02门通过，T04身份和T05显示；document fixed_page能力进入T07 reader会话，不走文本layout。
@@ -211,6 +233,8 @@
 **验收：**READ-03 PDF原生达标；原版不出现无效字号/段落控件，pdf heap＋系统总峰值达标。
 
 ### T11 持久分块续传与导入辅助
+
+当前状态：部分：事务续传已接，丢失创建回复找回与转换助手待做。细分证据见PROJECT_STATUS。
 
 **拟建文件：**`components/pn_transfer/pn_upload_session.c`、`pn_chunk.c`、`pn_commit_recovery.c`、`web/hash-worker.js`、`tools/importer/cli.py`、`tests/host/test_chunk.c`、`test_commit_recovery.c`、`tests/web/resume.test.js`。
 
@@ -227,6 +251,8 @@
 
 ### T12 FB2/CBZ与完整书库功能
 
+当前状态：未完成：FB2/CBZ与完整书库尚未交付。细分证据见PROJECT_STATUS。
+
 **拟建文件：**`components/pn_format/pn_fb2.c`、`pn_cbz.c`、`pn_xml.c`、`components/pn_reader/pn_search.c`、`tests/host/test_fb2.c`、`test_cbz.c`、`test_search.c`。
 
 **接口：**FB2输出BlockStream，CBZ输出fixed_page；复用budget、identity与location，不能另造永久页码方案。
@@ -240,6 +266,8 @@
 **验收：**LIB-03、READ-03 FB2/CBZ、READ-04通过；所有新增解析路径进入sanitizer/fuzz语料。
 
 ### T13 电源、USB产品通道与安全升级
+
+当前状态：未完成：睡眠/USB/OTA产品闭环与真机门待做。细分证据见PROJECT_STATUS。
 
 **拟建文件：**`components/pn_power/pn_sleep.c`、`pn_save_barrier.c`、`components/pn_transfer/pn_usb_msc.c`、`components/pn_update/pn_update.c`、`pn_boot_confirm.c`、`tests/host/test_power.c`、`test_usb_lease.c`、`test_update.c`。
 
@@ -255,6 +283,8 @@
 **验收：**POWER-01、UPDATE-01通过；USB存在则XFER-03通过；耗电/升级恢复无不可逆误操作。
 
 ### T14 全体验与正式发布
+
+当前状态：未完成：完整第一版尚未验收。细分证据见PROJECT_STATUS。
 
 **拟建文件：**`tools/benchmark_reader.py`、`tools/run_fault_matrix.py`、`tests/fixtures/manifest.json`、`docs/USER_GUIDE.md`、`docs/FORMAT_SUPPORT.md`、`docs/CHANGELOG.md`、`.github/workflows/build.yml`、部署包说明。
 

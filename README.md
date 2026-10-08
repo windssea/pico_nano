@@ -1,87 +1,39 @@
 # 小纸 Pico 阅读固件 / Read Pico Reader
 
-面向 Read Pico RDP-G01-W 的独立电子书固件设计项目。`pico_nano` 是开发目录及内部项目名；面向用户的中文名称为“小纸 Pico”，英文和日文为“Read Pico”。
+面向RDP-G01-W的独立ESP32-S3电子书固件，开发目录pico_nano。当前0.0.48开发版：TXT/EPUB、位置/书签、排版/字体、中文网页上传、设备热点/扫码和异步停止已接入代码与软件测试；**完整第一版尚未完成，未进行本项目烧写与真机验收。**
 
-**当前状态：已开始开发，0.0.47开发基础、介质租约、显示所有权、内容SHA/A-B位置、保存/每书100条书签管理、交互界面与跳转返回及TXT流式解码/有界分页、受限字体引擎、实际TXT页捕获及PC交互阅读/续读及设备TXT/内部非破坏挂载入口及共享文件书架及最近20条/继续阅读及逐书排版设置、EPUB容器/出版物结构及目录模型、XHTML正文事件及有界页节点/实际捕获和PNG逐行图片绘制及有界作者CSS图片版式和JPEG基线/渐进式解码层及出版物PNG/JPEG图片路径和原生EPUB导航会话/显示回执及语义位置A/B保存/恢复和实际EPUB应用/独立PC窗口及混合书架/设备路由已建立；ESP-IDF v6.1的CI与真机默认配置已编译。尚未烧写或真机验证，完整产品功能尚未完成。** 性能目标仍不是实测结果。参考固件与本项目相互独立，参考代码未修改。
-
-## 阅读入口
-
-| 文档 | 内容 |
+| 入口 | 内容 |
 | --- | --- |
-| [当前构建与运行](docs/BUILDING.md) | 已实现入口、可复跑命令、模拟器与固件边界 |
-| [存储与显示维护契约](docs/STORAGE_AND_DISPLAY.md) | 已实现租约、拔卡代次、缓冲所有权与场景测试 |
-| [依赖来源](docs/DEPENDENCIES.md) | 复用摘要、组件许可、工具链 |
-| [总体方案](docs/DESIGN.md) | 产品目标、架构取舍、关键决策、支持范围 |
-| [产品需求](docs/PRODUCT_REQUIREMENTS.md) | 书库、阅读、封面、设置、睡眠、错误恢复 |
-| [界面与交互](docs/UI_UX.md) | 像素布局、视觉规范、手势、三键、完整用户流程 |
-| [技术架构](docs/ARCHITECTURE.md) | 模块、任务、消息、存储、内存、升级、硬件适配 |
-| [格式与封面](docs/FORMATS.md) | TXT/EPUB/PDF/FB2/CBZ 的支持边界与解析策略 |
-| [排版与刷新](docs/RENDERING.md) | 字体分辨率、段落、分页、预绘制、波形、缓存 |
-| [快速传书](docs/TRANSFER.md) | 手机网页、热点、局域网、分块续传、USB、转换工具 |
-| [字体上传与锁屏壁纸](docs/FONTS_AND_WALLPAPERS.md) | 字体安装管理、壁纸上传裁切、锁屏模式与断电缓存 |
-| [开发计划](docs/DEVELOPMENT_PLAN.md) | 阶段依赖、具体任务、拟建文件、验收与估算 |
-| [开发与PC模拟测试](docs/DEVELOPMENT_AND_TESTING.md) | 环境配置、共享代码模拟器、QEMU/Wokwi、命令与测试流程 |
-| [验证与发布](docs/VALIDATION.md) | 样本、性能定义、可靠性、硬件与发布门槛 |
-| [依据与待验证决策](docs/SOURCES_AND_DECISIONS.md) | 参考代码基线、官方资料、风险与验证方式 |
+| [项目状态与待办](docs/PROJECT_STATUS.md) | 用户需求覆盖、T01–T14状态、下一批工作和未通过门 |
+| [构建与运行](docs/BUILDING.md) | 已存在的命令、产物、SDKCONFIG隔离 |
+| [开发环境与测试](docs/DEVELOPMENT_AND_TESTING.md) | Docker/Windows/WSL/SDL、SDK-stub、独立oracle与硬件边界 |
+| [完整开发计划](docs/DEVELOPMENT_PLAN.md) | 原始任务依赖与验收要求，不以局部实现代替任务完成 |
+| [总体设计](docs/DESIGN.md) | 产品目标和格式/资源路线 |
+| [界面与交互](docs/UI_UX.md) | 设计目标、阅读/设置流程 |
+| [设备传输入口](docs/DEVICE_TRANSFER_ENTRY.md) | 热点入口、后台停止、返回原书和所有权 |
+| [扫码传书](docs/TRANSFER_QR.md) | 连接热点/打开网页两码、独立解码检查 |
+| [PC网页服务](docs/TRANSFER_WEB.md) | 真实HTTP开发入口与资源安装 |
+| [格式](docs/FORMATS.md) / [排版](docs/RENDERING.md) | TXT/EPUB/PDF/FB2/CBZ目标与实现边界 |
+| [字体与壁纸](docs/FONTS_AND_WALLPAPERS.md) | 字体管理与锁屏图片目标/未完成项 |
+| [验证与发布](docs/VALIDATION.md) | 性能统计、可靠性与硬件发布门 |
+| [依赖](docs/DEPENDENCIES.md) / [功能变化](docs/CHANGELOG.md) | 固定来源/许可和轻量版本变化 |
 
-推荐顺序：总体方案 → 界面与交互 → 排版与刷新 → 快速传书 → 开发计划。
+## 快速检查
 
-界面布局示意见 [三屏设计图](docs/assets/ui-overview.svg)。它是设计线框，不是运行中的固件截图；封面图案使用自绘几何占位。
+在本目录运行，需要Python 3和可用Docker Linux引擎：
 
-![书架、阅读与排版设计预览](docs/assets/ui-overview.png)
+```powershell
+python tools/dev.py docs
+python tools/dev.py host
+python tools/dev.py sdl
+python tools/dev.py firmware-ci
+python tools/dev.py firmware-board
+```
 
-## 本次设计基线
+这些命令不烧写。当前本机default context可连接Linux引擎；若默认context失效，按BUILDING核对后仅在当前Shell设置DOCKER_CONTEXT，不盲目重启。
 
-- 参考仓库：`D:/windssea/dev/read_pico_firmware`。
-- 参考提交：`28cde682a4468a581c278761922724f57d976418`。
-- 设计日期：2026-10-05（Asia/Shanghai）。
-- 板型：ESP32-S3 / 16 MiB flash / 8 MiB PSRAM / 4.7 英寸 E0470A01。
-- 设备原生目标：TXT、EPUB、PDF；FB2 与 CBZ 在完整版本加入。
-- PDF 原生阅读是正式需求，必须先通过内存、性能和许可证技术门；MOBI/AZW3 可在电脑转换后传入。
-- 无 DRM、无账号依赖，离线阅读；默认关闭无线网络。
+## 硬件与安全边界
 
-当前工程可构建并打开TXT及原生EPUB，书架、续读、中文目录、七项排版预览和字体基础已接入。后续继续完成硬件基线与PDF技术验证；完整开发步骤见 [当前构建与运行](docs/BUILDING.md)。
+ESP32-S3、16MiB flash、8MiB PSRAM、4.7英寸E0470A01，逻辑684×1216。真实板默认120MHz时序依赖Zbit；CI配置仅编译验证。启动只读PMU VCOM，未取得有效值不推屏；不复制VCOM到NVS、不写SY7636A标定/电源时序、不自动擦NVS或格式化TF。阅读/字体/传输/USB按同一介质owner仲裁。
 
-内容身份与持久位置的已实现接口、线格式和限制见 [维护契约](docs/PERSISTENCE.md)。
-
-书签、上次位置、继续阅读的需求覆盖与实现边界见 [阅读状态契约](docs/READING_STATE.md)。
-
-TXT编码、源位置与当前分页边界见 [文本内核契约](docs/TEXT_CORE.md)。
-
-真实文字捕获与字体边界见 [字体引擎说明](docs/FONT_PORT.md)。
-
-Portions of this software are copyright © 2026 The FreeType Project (https://freetype.org). All rights reserved.
-
-PC翻页、字号、关闭保存与续读的当前契约见 [阅读会话](docs/READER_SESSION.md)。
-
-设备书架与TXT入口、初始化镜像及尚未验收的硬件边界见 [设备接入](docs/DEVICE_PORT.md)。
-
-文件书架的操作、格式标识和当前限制见 [书架契约](docs/CATALOG.md)。
-
-EPUB接入已开始：有界ZIP资源流和本地路径解析已建立，正文/目录/封面尚未接入。见 [资源层](docs/EPUB_CONTAINER.md)。
-
-原生EPUB书签存储和跳转返回接口见[EPUB书签](docs/EPUB_BOOKMARKS.md)，中文管理入口已接入，真实设备体验尚待验证。
-
-正文缺字回退与当前备用源入口见[字体回退](docs/FONT_FALLBACK.md)，完整字体管理界面仍在开发。
-
-字体的全局与逐书持久恢复见[字体选择记录](docs/FONT_PREFERENCES.md)，管理界面与阅读中应用继续开发。
-
-字体目录与只读中文样例预览见[字体检查](docs/FONT_INSPECTION.md)，选择/应用交互尚待接入。
-
-活动阅读中的原文字体预览、取消与逐书应用API见[字体切换](docs/FONT_SWITCHING.md)，中文选择菜单仍待接入。
-
-设备/PC的逐书正文与备用字体选择菜单见[中文字体选择](docs/FONT_PICKER_UI.md)，全局设置和上传管理继续开发。
-
-中文传输网页与原生上传事务已在PC接通，支持书籍、字体、封面和锁屏图片的配对上传与续传；使用及设备接入边界见 [传输网页](docs/TRANSFER_WEB.md)。
-
-设备上传的FAT同步/实时空间回调已纳入构建，借用已有介质owner；无线接入与真机验证尚待完成，见 [设备上传存储](docs/DEVICE_TRANSFER_STORAGE.md)。
-
-PC HTTP已改用网络无关的共享传输owner，设备队列接入契约见 [同源传输服务](docs/TRANSFER_SERVICE.md)。
-
-传输服务已增加独立工作任务和停止接收屏障，PC HTTP使用实际线程路径；设备集成边界见 [传输工作任务](docs/TRANSFER_WORKER.md)。
-
-ESP-IDF HTTP上传适配已实现并纳入构建，WiFi与设备页尚待装配；接口与验证边界见 [设备HTTP](docs/DEVICE_TRANSFER_HTTP.md)。
-
-设备AP/STA生命周期已实现，RAM凭据与停止边界见 [设备WiFi](docs/DEVICE_WIFI.md)；HTTP/设备页面仍待装配。
-
-设备书架与阅读菜单已装配热点传输和异步停止返回，尚未真机验证；操作与边界见 [设备传输入口](docs/DEVICE_TRANSFER_ENTRY.md)。
+参考仓库D:/windssea/dev/read_pico_firmware保持只读，来源和逐文件摘要见LICENSES/reference-manifest.json。源码、必要UI字体/fixture和许可证提交Git；mockDoc样本、生成捕获、日志、build与本机过程记录忽略。进度和支持范围以PROJECT_STATUS为准，不依据模拟图或旧版本文档宣称真机通过。

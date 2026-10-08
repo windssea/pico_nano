@@ -130,7 +130,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
    if self.command=='GET' and path in ('/','/qa','/qa.mjs','/app.js','/style.css','/sha256.mjs','/hash-worker.mjs'):
     filename='index.html' if path in ('/','/qa') else path[1:];data=(ROOT/'assets/transfer'/filename).read_bytes();data=data.replace(b'</body>',b'<script type="module" src="/qa.mjs"></script></body>') if path=='/qa' else data;mime='text/html' if filename.endswith('.html') else 'text/css' if filename.endswith('.css') else 'text/javascript'
     self.send_response(200);self.send_header('Content-Type',mime+'; charset=utf-8');self.send_header('Content-Length',str(len(data)));self.send_header('Cache-Control','no-store');self.send_header('X-Content-Type-Options','nosniff');self.send_header('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; worker-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'");self.end_headers();self.wfile.write(data);return
-   if self.command=='GET' and path=='/api/v1/status':self.send_json(200,{'name':'小纸 Pico','version':'0.0.47','chunk_size':65536,'preview':True});return
+   if self.command=='GET' and path=='/api/v1/status':self.send_json(200,{'name':'小纸 Pico','version':'0.0.48','chunk_size':65536,'preview':True});return
    if self.command=='POST' and path=='/api/v1/pair':value=self.object(('code',),('code',));status,result=self.server.app.pair(value['code']);self.send_json(status,result);return
    if not self.server.app.authorized(self.header('Authorization')):self.error(401,'请先输入配对码');return
    if self.command=='POST' and path=='/api/v1/uploads':

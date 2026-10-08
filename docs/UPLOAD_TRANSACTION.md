@@ -1,6 +1,6 @@
 # 上传持久事务内核
 
-pn_transfer/pn_upload提供单owner的同源上传状态机，用于后续书籍、TTF、封面和壁纸接收。事务内核、故障模拟port与[真实文件安装port](UPLOAD_FILES.md)已建立，包含格式检查、空间预检和8会话配额；HTTP/配对/AP/STA、网页、设备回调与传输入口尚未接入。不能称为已有可用传书或字体上传功能，完整路径仍按[传输方案](TRANSFER.md)开发。
+pn_transfer/pn_upload提供单owner的同源上传状态机，用于后续书籍、TTF、封面和壁纸接收。事务内核、故障模拟port与[真实文件安装port](UPLOAD_FILES.md)已建立，包含格式检查、空间预检和8会话配额；PC真实HTTP、网页、配对、设备热点/回调/扫码后续已接入；STA配网与真实无线验证仍待完成，见 [设备入口](DEVICE_TRANSFER_ENTRY.md)。
 
 ## 数据与确认
 

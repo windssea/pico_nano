@@ -6,6 +6,7 @@
  * Frozen: paint only, never change reading positions, settings, networks or power.
  */
 #include "pn_transfer_view.h"
+#include "pn_qr.h"
 #include <string.h>
 static pn_status_t read(void *ctx,uint64_t at,uint8_t *out,size_t cap,size_t *n){const char *s=ctx;size_t length=strlen(s);if(at>length)return PN_INVALID;size_t take=length-(size_t)at;if(take>cap)take=cap;memcpy(out,s+at,take);*n=take;return PN_OK;}
 static pn_status_t text(pn_font_t *font,pn_frame_t *frame,const char *s,int x,int y){
@@ -26,9 +27,16 @@ pn_status_t pn_transfer_view_render(const pn_transfer_view_t *v,pn_font_t *font,
  pn_frame_clear(frame,15);pn_status_t s=text(font,frame,"小纸 Pico",32,64);
  if(s==PN_OK)s=text(font,frame,"热点传书",32,160);
  if(v->phase==PN_TVIEW_READY){
-  const char *labels[]={"手机先连接热点",v->ssid,"热点口令",v->password,"在浏览器打开",v->address,"配对码",v->pin};
-  for(unsigned i=0;i<8 && s==PN_OK;i++)s=text(font,frame,labels[i],32,250+(int)i*80);
-  if(s==PN_OK)s=text(font,frame,v->busy?"正在接收或校验文件":"已连接，等待网页发送",32,970);
+  char payload[256];
+  if(s==PN_OK)s=text(font,frame,"扫码连接热点",32,212);
+  if(s==PN_OK)s=text(font,frame,"扫码打开网页",364,212);
+  if(s==PN_OK)s=pn_qr_wifi_payload(v->ssid,v->password,payload,sizeof payload);
+  if(s==PN_OK)s=pn_qr_draw(payload,frame,32,232,280);
+  if(s==PN_OK)s=pn_qr_draw(v->address,frame,364,232,280);
+  if(s==PN_OK)s=text(font,frame,"先连热点，再打开网页输入配对码",32,566);
+  const char *labels[]={"热点名称",v->ssid,"热点口令",v->password,"网页地址",v->address,"配对码",v->pin};
+  for(unsigned i=0;i<8 && s==PN_OK;i++)s=text(font,frame,labels[i],i%2?220:32,636+(int)(i/2)*80);
+  if(s==PN_OK)s=text(font,frame,v->busy?"正在接收或校验文件":"已连接，等待网页发送",32,1010);
  }else if(v->phase==PN_TVIEW_STARTING){if(s==PN_OK)s=text(font,frame,"正在开启传输",32,330);if(s==PN_OK)s=text(font,frame,"请稍候，阅读位置已保存",32,420);}
  else if(v->phase==PN_TVIEW_STOPPING){if(s==PN_OK)s=text(font,frame,"正在关闭传输",32,330);if(s==PN_OK)s=text(font,frame,"等待文件处理结束，请勿拔卡",32,420);}
  else{if(s==PN_OK)s=text(font,frame,"传输未能继续",32,330);if(s==PN_OK)s=text(font,frame,v->released?"资源已关闭，可返回阅读":"尚未归还存储，请重试关闭",32,420);}

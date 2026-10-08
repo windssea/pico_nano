@@ -62,6 +62,8 @@ if(PN_SIM_SDL)
 add_test(NAME toc_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_toc_window.py $<TARGET_FILE:pn_sim>)
 endif()
 
+if(PN_SIM_SDL)
 add_test(NAME font_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_font_window.py $<TARGET_FILE:pn_sim>)
 
 add_test(NAME font_picker_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_font_picker_window.py $<TARGET_FILE:pn_sim>)
+endif()

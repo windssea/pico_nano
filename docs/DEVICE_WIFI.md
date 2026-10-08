@@ -1,6 +1,6 @@
 # 设备WiFi会话生命周期
 
-`main/device_wifi.c` 实现传输会话的AP/STA驱动、事件与有限连接重试。主机运行同源C模块与显式SDK stub，固件构建使用真实SDK。当前主设备入口尚未装配WiFi、HTTP和传输页面，尚无真实手机连接或无线吞吐证据。
+`main/device_wifi.c` 实现传输会话的AP/STA驱动、事件与有限连接重试。主机运行同源C模块与显式SDK stub，固件构建使用真实SDK。主设备热点入口后续已装配WiFi、HTTP和页面，见 [设备入口](DEVICE_TRANSFER_ENTRY.md)；尚无真实手机连接或无线吞吐证据。
 
 ## 模式与凭据
 

@@ -1,0 +1,7 @@
+if(ESP_PLATFORM)
+ idf_component_register(SRCS "pn_qr.c" "vendor/qrcodegen.c" INCLUDE_DIRS "include" PRIV_INCLUDE_DIRS "vendor" REQUIRES pn_core pn_ui pn_text)
+else()
+ add_library(pn_qr INTERFACE)
+ target_link_libraries(pn_qr INTERFACE pn_core)
+ target_include_directories(pn_qr INTERFACE include)
+endif()

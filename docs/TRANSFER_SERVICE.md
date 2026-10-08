@@ -1,6 +1,6 @@
 # 同源串行传输服务
 
-`pn_transfer_service` 把原生上传事务与文件port装配成网络无关的串行owner。PC HTTP的 `pn_transfer_host` 已使用这层服务，不再自行管理会话或查询书库文件。服务同源编入ESP-IDF；设备HTTP队列、WiFi及传输页尚待接通。
+`pn_transfer_service` 把原生上传事务与文件port装配成网络无关的串行owner。PC HTTP的 `pn_transfer_host` 已使用这层服务，不再自行管理会话或查询书库文件。服务同源编入ESP-IDF；设备热点HTTP、WiFi与页面后续已装配，真机验证尚待完成，见 [设备入口](DEVICE_TRANSFER_ENTRY.md)。
 
 ## 资源与调用
 

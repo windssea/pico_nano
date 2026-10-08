@@ -14,7 +14,7 @@
 
 两种应用提供fallback_font(app,path)，只允许首次实际显示前绑定一个备用TTF。先用真实引擎校验，失败释放候选源并恢复原回退配置；已显示或已有备用返回BUSY。这是启动装配接口，尚不是完整字体管理界面，独立启动接口本身不持久保存路径；0.0.34新增的[字体选择记录](FONT_PREFERENCES.md)可在下次打开时恢复正文与备用选择。后续管理需要原锚点重排/实际显示、逐书与全局继承、使用中替换/删除的源关闭屏障。
 
-PC独立阅读及书架窗口可使用--font PRIMARY.ttf --fallback-font FALLBACK.ttf；headless旧TXT捕获入口拒绝该参数，避免静默忽略。EPUB实际应用捕获设PN_EPUB_FALLBACK_FONT为本地路径。设备已使用常驻子集末级回退；用户备用文件的选择界面与启动配置仍待接入，不猜测卡上文件名。
+PC独立阅读及书架窗口可使用--font PRIMARY.ttf --fallback-font FALLBACK.ttf；headless旧TXT捕获入口拒绝该参数，避免静默忽略。EPUB实际应用捕获设PN_EPUB_FALLBACK_FONT为本地路径。设备已使用常驻子集末级回退；用户主/备用字体选择及逐书/全局偏好后续已接，见 [字体偏好](FONT_PREFERENCES.md)；不猜测卡上文件名，资源管理与真机验收仍待完成。
 
 接受格式沿用既有单glyf TTF、32MiB、8..128像素约束，字重/可变轴选择和上传管理尚待完成。路径是受信任的启动配置，不允许直接使用上传方任意路径。
 

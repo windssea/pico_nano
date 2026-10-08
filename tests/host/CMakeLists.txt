@@ -199,3 +199,8 @@ target_include_directories(test_device_transfer PRIVATE stubs ${PN_ROOT}/main ${
 target_link_libraries(test_device_transfer PRIVATE pn_core pn_cjson)
 add_test(NAME device_transfer COMMAND test_device_transfer)
 set_tests_properties(device_transfer PROPERTIES TIMEOUT 30)
+
+add_subdirectory(${PN_ROOT}/components/pn_qr ${CMAKE_CURRENT_BINARY_DIR}/pn-qr)
+add_executable(test_qr test_qr.c)
+target_link_libraries(test_qr PRIVATE pn_qr)
+add_test(NAME qr COMMAND test_qr)

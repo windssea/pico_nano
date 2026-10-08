@@ -1,6 +1,6 @@
 # ESP-IDF设备HTTP上传适配
 
-0.0.45提供 `pn_device_transfer_http`，使用真实esp_http_server接口、固定版本cJSON、构建嵌入网页及 [工作任务](TRANSFER_WORKER.md)。主机测试使用显式SDK接口stub及真实JSON、worker和文件事务；两套ESP-IDF配置编译真实SDK分支。当前主设备入口尚未调用此适配，WiFi生命周期、设备传输页和二维码仍待接通，尚未进行真实无线测试。
+0.0.45提供 `pn_device_transfer_http`，使用真实esp_http_server接口、固定版本cJSON、构建嵌入网页及 [工作任务](TRANSFER_WORKER.md)。主机测试使用显式SDK接口stub及真实JSON、worker和文件事务；两套ESP-IDF配置编译真实SDK分支。设备热点入口、WiFi与二维码后续已装配，见 [设备入口](DEVICE_TRANSFER_ENTRY.md) 和 [扫码传书](TRANSFER_QR.md)；尚未进行真实无线测试。
 
 ## 启动与停止
 

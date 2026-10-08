@@ -20,7 +20,7 @@ pn_text_file_t首次使用前清零，不可移动；open后重复open返回BUSY
 
 ## 页节点
 
-pn_text_paginate接收reader、正文区域、行距/基线/段首缩进/段距及字体advance回调。advance用26.6固定点，度量与栅格分离；字体渲染尚未接入，基本布局测试使用明确模拟度量，0.0.6捕获使用实际TTF度量；两者不能替代真机性能。
+pn_text_paginate接收reader、正文区域、行距/基线/段首缩进/段距及字体advance回调。advance用26.6固定点，度量与栅格分离；低层分页器只调用度量回调，真实字体绘制已由后续reader_app接入；基本布局测试使用明确模拟度量，实际捕获使用TTF度量，均不能替代真机性能。
 
 页glyph缓冲由调用方提供，最多4096项；函数不分配。每项保留Unicode/source range/x/baseline/advance，换行也留节点，绘制者跳过LF。width/height上限4096、单个字形超过区域或缓冲不足返回LIMIT，不偷偷截断；失败清valid/count且不消费原reader，缓冲内部可有不再有效的中间结果。
 

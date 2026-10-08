@@ -1,5 +1,7 @@
 # 技术架构与维护契约
 
+本文保留目标架构，当前实现与缺项以 [PROJECT_STATUS](PROJECT_STATUS.md) 为准。deadline/USB/升级等描述是验收目标；现有同步保存/解析等尚不具备全部deadline能力。
+
 ## 1. 分层与依赖
 
 ```mermaid
