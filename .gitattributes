@@ -17,3 +17,5 @@ tests/fixtures/** -text
 *.jpeg binary
 *.pdf binary
 *.ttf binary
+
+components/pn_cjson/vendor/** -text whitespace=-blank-at-eol,-blank-at-eof

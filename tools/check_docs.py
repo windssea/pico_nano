@@ -59,6 +59,11 @@ def main():
         check_partitions((ROOT / "partitions.csv").read_text(encoding="utf-8"))
     except ValueError as exc:
         errors.append(str(exc))
+    cjson = json.loads((ROOT / "LICENSES/cjson-manifest.json").read_text(encoding="utf8"))
+    for name, digest in cjson["files"].items():
+        source = ROOT / "components/pn_cjson/vendor" / name
+        if not source.is_file() or hashlib.sha256(source.read_bytes()).hexdigest() != digest:
+            errors.append(f"cJSON source changed or missing: {name}")
     manifest = json.loads((ROOT / "LICENSES/reference-manifest.json").read_text(encoding="utf-8"))
     for entry in manifest["files"]:
         path = ROOT / entry["path"]
@@ -115,7 +120,7 @@ def main():
     if errors:
         print("\n".join(errors), file=sys.stderr)
         return 1
-    print(f"Documentation links/fences, partitions and {len(manifest['files'])} reference hashes/licenses, 744 FreeType, 116 LittleFS, {len(z_manifest['files'])} zlib, {len(xml_manifest['files'])} Expat, {len(png_manifest['files'])} libspng, {len(jpeg_manifest['files'])} libjpeg-turbo sources and font hashes passed")
+    print(f"Documentation links/fences, partitions and {len(manifest['files'])} reference hashes/licenses, 744 FreeType, 116 LittleFS, {len(z_manifest['files'])} zlib, {len(xml_manifest['files'])} Expat, {len(png_manifest['files'])} libspng, {len(jpeg_manifest['files'])} libjpeg-turbo, 3 cJSON sources and font hashes passed")
     return 0
 
 

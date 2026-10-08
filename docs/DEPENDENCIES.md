@@ -47,3 +47,7 @@ UI字体由OFL-1.1的Noto Sans SC固定源生成Read Pico UI Regular子集，保
 ## libjpeg-turbo3.1.4.1
 
 官方源码包固定SHA256 ecae8008e2cc9ade2f2c1bb9d5e6d4fb73e7c433866a056bd82980741571a022，来源 [官方发行](https://github.com/libjpeg-turbo/libjpeg-turbo/releases/tag/3.1.4.1)。完整vendor633文件与原IJG/BSD/zlib附带条款保留；manifest及check_docs核对每个哈希。通用decode-only编译选原wrapper，不改源码，系统内存端口另在pn_jpeg_memory.c，以pn_pool替代jmemnobs，无backing文件。功能与未完集成见 [JPEG层](JPEG_RENDERING.md)。
+
+## cJSON v1.7.19
+
+固定 [上游标签](https://github.com/DaveGamble/cJSON/tree/v1.7.19) 的cJSON.c、cJSON.h和MIT LICENSE，不修改vendor；LICENSES/cjson-manifest.json逐文件SHA核对。编译递归限16层，协议解析前限制结构token数64及正文8192字节。同源主机/设备仅用于HTTP JSON，运行边界见 [设备HTTP](DEVICE_TRANSFER_HTTP.md)。
