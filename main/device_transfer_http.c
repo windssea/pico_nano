@@ -137,7 +137,7 @@ static esp_err_t dispatch(httpd_req_t *r){
  if((r->method==HTTP_GET || r->method==HTTP_DELETE) && r->content_len)return error(r,400,"该操作不接受请求正文");
  if(r->method==HTTP_GET){
   const pn_transfer_asset_t *asset=pn_transfer_asset(uri);if(asset)return send_data(r,200,asset->mime,(const char *)asset->bytes,asset->size);
-  if(!strcmp(uri,"/api/v1/status")){cJSON *json=cJSON_CreateObject();bool v=string(json,"name","小纸 Pico");v&=string(json,"version","0.0.51");v&=number(json,"chunk_size",PN_UPLOAD_CHUNK);v&=boolean(json,"preview",false);return json_send(r,200,json,v);}
+  if(!strcmp(uri,"/api/v1/status")){cJSON *json=cJSON_CreateObject();bool v=string(json,"name","小纸 Pico");v&=string(json,"version","0.0.52");v&=number(json,"chunk_size",PN_UPLOAD_CHUNK);v&=boolean(json,"preview",false);return json_send(r,200,json,v);}
  }
  bool pairing=r->method==HTTP_POST && !strcmp(uri,"/api/v1/pair");
  if(!pairing && !authorized)return error(r,401,"请先输入配对码");

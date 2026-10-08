@@ -103,6 +103,10 @@ add_executable(test_wallpaper_ui test_wallpaper_ui.c)
 target_link_libraries(test_wallpaper_ui PRIVATE pn_core)
 add_test(NAME wallpaper_ui COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_wallpaper_ui.py $<TARGET_FILE:test_wallpaper_ui> ${PN_ROOT}/tests/fixtures)
 
+add_executable(test_font_manage test_font_manage.c)
+target_link_libraries(test_font_manage PRIVATE pn_core)
+add_test(NAME font_manage COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_font_manage.py $<TARGET_FILE:test_font_manage> ${PN_ROOT})
+
 add_executable(test_cover test_cover.c)
 target_link_libraries(test_cover PRIVATE pn_core)
 add_test(NAME cover COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_cover.py $<TARGET_FILE:test_cover> ${PN_ROOT}/tests/fixtures)

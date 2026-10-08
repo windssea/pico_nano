@@ -24,7 +24,7 @@ int pn_sim_epub_window(pn_epub_app_t *,pn_pool_t *);
 #ifdef PN_SIM_SDL
 int pn_sim_window(const pn_frame_t *frame);
 int pn_sim_reader_window(pn_reader_app_t *app,pn_pool_t *pool);
-int pn_sim_library_window(pn_pool_t *pool,const char *directory,const char *font,const char *fallback,const char *state,const char *cover_cache,const char *wallpaper_dir,const char *wallpaper_store);
+int pn_sim_library_window(pn_pool_t *pool,const char *directory,const char *font,const char *fallback,const char *state,const char *cover_cache,const char *wallpaper_dir,const char *wallpaper_store,const char *font_dir);
 #endif
 
 static int save_pgm(const char *path, const pn_frame_t *frame) {
@@ -70,7 +70,7 @@ static pn_status_t ownership_scenario(pn_display_t *display, pn_display_job_t *v
 
 int main(int argc, char **argv) {
     bool headless=false, ownership=false, budget_explicit=false;
-    const char *capture=NULL,*book=NULL,*font_path=NULL,*fallback_path=NULL,*state_dir=NULL,*library=NULL,*cover_cache=NULL,*wallpaper_dir=NULL,*wallpaper_store=NULL;
+    const char *capture=NULL,*book=NULL,*font_path=NULL,*fallback_path=NULL,*state_dir=NULL,*library=NULL,*cover_cache=NULL,*wallpaper_dir=NULL,*wallpaper_store=NULL,*font_dir=NULL;
     unsigned book_page=1;int font_pixels=44;
     size_t budget=1024*1024;
     for (int i=1;i<argc;i++) {
@@ -82,6 +82,7 @@ int main(int argc, char **argv) {
         else if (strcmp(argv[i],"--cover-cache")==0 && i+1<argc) cover_cache=argv[++i];
         else if (strcmp(argv[i],"--wallpaper-dir")==0 && i+1<argc) wallpaper_dir=argv[++i];
         else if (strcmp(argv[i],"--wallpaper-store")==0 && i+1<argc) wallpaper_store=argv[++i];
+        else if (strcmp(argv[i],"--font-dir")==0 && i+1<argc) font_dir=argv[++i];
         else if (strcmp(argv[i],"--fallback-font")==0 && i+1<argc) fallback_path=argv[++i];
         else if (strcmp(argv[i],"--font")==0 && i+1<argc) font_path=argv[++i];
         else if ((strcmp(argv[i],"--page")==0 || strcmp(argv[i],"--size")==0) && i+1<argc) {
@@ -111,6 +112,7 @@ int main(int argc, char **argv) {
     if(library && (headless || capture || book_page!=1))return 2;
     if(cover_cache && (!library || !*cover_cache))return 2;
     if((wallpaper_dir || wallpaper_store) && (!library || !wallpaper_dir || !*wallpaper_dir || (wallpaper_store && !*wallpaper_store)))return 2;
+    if(font_dir && (!library || !*font_dir))return 2;
     if(library && !budget_explicit)budget=6*1024*1024;
     if (ownership && !budget_explicit) budget=2*1024*1024;
     bool epub_book=false;
@@ -120,7 +122,7 @@ int main(int argc, char **argv) {
     if (pn_pool_init(&pool,budget,NULL,NULL,NULL)!=0) return 1;
     if(library){
 #ifdef PN_SIM_SDL
-        int result=pn_sim_library_window(&pool,library,font_path,fallback_path,state_dir?state_dir:"sim-data",cover_cache,wallpaper_dir,wallpaper_store);printf("library_window pool_peak=%zu used=%zu live=%zu\n",pool.peak,pool.used,pool.live);return result;
+        int result=pn_sim_library_window(&pool,library,font_path,fallback_path,state_dir?state_dir:"sim-data",cover_cache,wallpaper_dir,wallpaper_store,font_dir);printf("library_window pool_peak=%zu used=%zu live=%zu\n",pool.peak,pool.used,pool.live);return result;
 #else
         fprintf(stderr,"Library window requires PN_SIM_SDL=ON\n");return 2;
 #endif

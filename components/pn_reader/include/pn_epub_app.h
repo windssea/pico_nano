@@ -47,6 +47,8 @@ pn_status_t pn_epub_app_toc_jump(pn_epub_app_t *,size_t,uint64_t,pn_reader_prese
 
 /// 原字节内容身份；错误输出不变。/ Original-byte content identity, preserving output on errors.
 pn_status_t pn_epub_app_identity(const pn_epub_app_t *,pn_book_id_t *);
+/// 打开时所选字体缺失/被替换而暂用启动默认字体；记录未改。/ The saved font was missing or replaced at open, so the startup default is in use; the record is unchanged.
+bool pn_epub_app_font_unavailable(const pn_epub_app_t *);
 
 /// 纯绘制覆盖页，通过显示owner推屏，不提交原文位置，之后正文强刷。
 /// Paint-only overlay presented through display owner without text-position commits; force full next body refresh.

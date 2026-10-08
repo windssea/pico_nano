@@ -82,6 +82,8 @@ bool pn_reader_app_bookmark_can_return(const pn_reader_app_t *app);
 /// 未显示时也可核对内容身份；错误不改输出。
 /// Check content identity before presentation too; errors preserve output.
 pn_status_t pn_reader_app_identity(const pn_reader_app_t *app,pn_book_id_t *book);
+/// 打开时所选字体缺失/被替换而暂用启动默认字体；记录未改。/ The saved font was missing or replaced at open, so the startup default is in use; the record is unchanged.
+bool pn_reader_app_font_unavailable(const pn_reader_app_t *app);
 /// 最近历史记录错误，不替代进度保存状态。
 /// Recent-history recording error, distinct from progress-save status.
 pn_status_t pn_reader_app_recent_status(const pn_reader_app_t *app);

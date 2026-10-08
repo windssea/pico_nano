@@ -31,7 +31,7 @@ typedef struct {
     char boot_primary[PN_FONT_REFERENCE_PATH_MAX],boot_fallback[PN_FONT_REFERENCE_PATH_MAX];pn_font_preferences_t live_fonts;bool fonts_known;
     pn_font_preferences_t draft_fonts,pending_fonts,pending_record,before_fonts,global_fonts;uint64_t font_origin;
     pn_text_source_t font_source;
-    bool external_font,metadata_tried;
+    bool external_font,metadata_tried,font_unavailable;
     pn_frame_t frame;
     uint8_t *pixels;
     pn_page_glyph_t *glyphs;
@@ -156,9 +156,17 @@ pn_status_t pn_reader_app_open_on_media(pn_reader_app_t *app,pn_pool_t *pool,pn_
         status=pn_font_preferences_files(&global_files,&a->state_media,&a->state_lease,a->state_directory,NULL,&global_io);
         if(status==PN_OK)status=pn_font_preferences_files(&book_files,&a->state_media,&a->state_lease,a->state_directory,&a->book,&book_io);
         if(status==PN_OK)status=pn_font_preferences_resolve(&global_io,&book_io,pool,&a->book,&selected_fonts,&fonts_from_book);
-        if(status==PN_EMPTY)status=PN_OK;else if(status==PN_OK){has_selected_fonts=true;status=pn_font_reference_verify(&selected_fonts.primary,a->book_media,&a->book_lease);if(status==PN_OK)status=pn_font_reference_verify(&selected_fonts.fallback,a->book_media,&a->book_lease);font_path=selected_fonts.primary.kind==PN_FONT_FILE?selected_fonts.primary.path:NULL;}
+        if(status==PN_EMPTY)status=PN_OK;else if(status==PN_OK){
+            // 所选字体缺失/被替换：本次用启动默认字体运行，保留记录不改。/ Missing or replaced selection: run with the startup default this time and keep the record unchanged.
+            pn_status_t primary=pn_font_reference_verify(&selected_fonts.primary,a->book_media,&a->book_lease);
+            if(primary==PN_STALE_MEDIA)status=primary;
+            else if(primary!=PN_OK)a->font_unavailable=true;
+            else{has_selected_fonts=true;font_path=selected_fonts.primary.kind==PN_FONT_FILE?selected_fonts.primary.path:NULL;
+                pn_status_t backup=pn_font_reference_verify(&selected_fonts.fallback,a->book_media,&a->book_lease);
+                if(backup==PN_STALE_MEDIA)status=backup;
+                else if(backup!=PN_OK){a->font_unavailable=true;selected_fonts.fallback=(pn_font_reference_t){.kind=PN_FONT_RESIDENT};}}}
     }
-    if(status==PN_OK && has_selected_fonts){a->live_fonts=selected_fonts;a->fonts_known=true;}
+    if(status==PN_OK && has_selected_fonts && !a->font_unavailable){a->live_fonts=selected_fonts;a->fonts_known=true;}
     if(status==PN_OK && font_path){if(strlen(font_path)>=sizeof a->boot_primary)status=PN_LIMIT;else strcpy(a->boot_primary,font_path);}
     if(status==PN_OK && font_path){status=pn_media_acquire(a->book_media,PN_MEDIA_READ,&a->font_lease);if(status==PN_OK)status=pn_text_file_open(&a->font_file,a->book_media,&a->font_lease,font_path,&font_source);}
     if(status==PN_OK && font_path){a->font_source=font_source;a->external_font=true;}
@@ -312,6 +320,7 @@ pn_status_t pn_reader_app_overlay(pn_reader_app_t *app,pn_reader_overlay_fn pain
 }
 bool pn_reader_app_last_confirmed(const pn_reader_app_t *app){return app && app->impl && ((app_t *)app->impl)->last_confirmed;}
 bool pn_reader_app_bookmark_can_return(const pn_reader_app_t *app){return app && app->impl && ((app_t *)app->impl)->has_bookmark_origin;}
+bool pn_reader_app_font_unavailable(const pn_reader_app_t *app){return app && app->impl && ((app_t *)app->impl)->font_unavailable;}
 pn_status_t pn_reader_app_identity(const pn_reader_app_t *app,pn_book_id_t *book){if(!app || !app->impl || !book)return PN_INVALID;*book=((app_t *)app->impl)->book;return PN_OK;}
 pn_status_t pn_reader_app_recent_status(const pn_reader_app_t *app){return app && app->impl?((app_t *)app->impl)->recent_status:PN_INVALID;}
 pn_status_t pn_reader_app_style_get(const pn_reader_app_t *app,pn_style_t *style){if(!app || !app->impl || !style)return PN_INVALID;*style=((app_t *)app->impl)->style;return PN_OK;}
