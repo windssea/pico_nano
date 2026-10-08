@@ -1,6 +1,6 @@
 # 小纸 Pico 阅读固件 / Read Pico Reader
 
-面向RDP-G01-W的独立ESP32-S3电子书固件，开发目录pico_nano。当前0.0.52开发版：TXT/EPUB、书架封面、锁屏壁纸设置、字体管理、位置/书签、排版/字体、中文网页上传、设备热点/扫码和异步停止已接入代码与软件测试；**完整第一版尚未完成，未进行本项目烧写与真机验收。**
+面向RDP-G01-W的独立ESP32-S3电子书固件，开发目录pico_nano。当前0.0.53开发版：TXT/EPUB、书架封面、锁屏壁纸设置、字体管理、局域网传书、位置/书签、排版/字体、中文网页上传、设备热点/扫码和异步停止已接入代码与软件测试；**完整第一版尚未完成，未进行本项目烧写与真机验收。**
 
 | 入口 | 内容 |
 | --- | --- |
@@ -15,6 +15,7 @@
 | [书架封面](docs/COVERS.md) | EPUB/TXT封面提取、空闲队列、TF缓存与内存边界 |
 | [锁屏与壁纸缓存](docs/LOCK_SCREEN.md) | 壁纸设置页、预处理、内部A/B记录、锁屏绘制 |
 | [字体管理](docs/FONT_MANAGEMENT.md) | TF字体列表/详情/全局默认/删除与缺失回退 |
+| [局域网传书](docs/LAN_TRANSFER.md) | 网页保存家庭WiFi、STA传书与凭据边界 |
 | [PC网页服务](docs/TRANSFER_WEB.md) | 真实HTTP开发入口与资源安装 |
 | [格式](docs/FORMATS.md) / [排版](docs/RENDERING.md) | TXT/EPUB/PDF/FB2/CBZ目标与实现边界 |
 | [字体与壁纸](docs/FONTS_AND_WALLPAPERS.md) | 字体管理与锁屏图片目标/未完成项 |

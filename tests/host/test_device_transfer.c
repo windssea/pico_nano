@@ -53,6 +53,8 @@ int main(void){
  assert(before.source_offset>0);
  pn_device_transfer_t session={0};pn_device_wifi_config_t config={.mode=PN_WIFI_AP};assert(pn_device_transfer_open(&session,&media,root,&config)==PN_BUSY);assert(pn_reader_app_close(&reader,1002)==PN_OK);
  assert(pn_device_transfer_open(&session,&media,root,&config)==PN_OK);pn_device_transfer_state_t state=wait_for(&session,true);assert(!state.released && state.pin[0] && state.network.ap_password[0]);assert(pn_device_transfer_close(&session)==PN_BUSY);
+ /* 配网信箱：无请求EMPTY，回报校验名称长度。/ Provisioning mailbox: EMPTY without requests; results validate the name length. */
+ {pn_network_credentials_t c;bool forget;assert(pn_device_transfer_take_network(&session,&c,&forget)==PN_EMPTY);assert(pn_device_transfer_network_result(&session,PN_OK,"123456789012345678901234567890123")==PN_INVALID && pn_device_transfer_network_result(&session,PN_OK,"家")==PN_OK);}
  char pair[64];snprintf(pair,sizeof pair,"{\"code\":\"%s\"}",state.pin);cJSON *json=request(HTTP_POST,"/api/v1/pair",pair,strlen(pair),NULL,NULL);assert(code==200);cJSON_Delete(json);
  assert(pn_device_transfer_request_stop(&session)==PN_OK);state=wait_for(&session,false);assert(state.phase==PN_DTRANSFER_STOPPED);assert(pn_device_transfer_close(&session)==PN_OK && !native_allocations && !radio && !pn_media_active(&media));
  assert(pn_reader_app_open_on_media(&reader,&pool,&media,book,NULL,progress,44,2000)==PN_OK);assert(pn_reader_app_step(&reader,PN_APP_OPEN,2000,presented,NULL)==PN_OK);assert(pn_reader_app_progress(&reader,&after)==PN_OK);assert(before.source_offset==after.source_offset);assert(pn_reader_app_close(&reader,2001)==PN_OK);

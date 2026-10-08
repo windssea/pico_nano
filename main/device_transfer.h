@@ -8,6 +8,7 @@
 #pragma once
 #include "device_wifi.h"
 #include "pn_transfer_worker.h"
+#include "pn_network_store.h"
 typedef enum {PN_DTRANSFER_STARTING,PN_DTRANSFER_READY,PN_DTRANSFER_STOPPING,PN_DTRANSFER_STOPPED,PN_DTRANSFER_FAILED} pn_device_transfer_phase_t; ///< 生命周期 / Lifecycle
 typedef struct {
  pn_device_transfer_phase_t phase; ///< 当前阶段 / Current phase
@@ -28,3 +29,7 @@ pn_status_t pn_device_transfer_state(pn_device_transfer_t *,pn_device_transfer_s
 /// released前BUSY；released后join并释放，保留已保存的阅读位置与上传记录。
 /// BUSY before released; join and release afterwards, preserving saved reading positions and upload records.
 pn_status_t pn_device_transfer_close(pn_device_transfer_t *);
+/// 取出网页提交的配网请求（主任务调用后写内部存储）；无请求EMPTY。/ Take a provisioning request from the web page (main task then writes internal storage); EMPTY when none.
+pn_status_t pn_device_transfer_take_network(pn_device_transfer_t *,pn_network_credentials_t *,bool *forget);
+/// 主任务回报已保存名称与结果，供网页查询；初始化时以PN_EMPTY播种。/ The main task reports the saved name and result for the web page; seed with PN_EMPTY at start.
+pn_status_t pn_device_transfer_network_result(pn_device_transfer_t *,pn_status_t,const char *saved_ssid);

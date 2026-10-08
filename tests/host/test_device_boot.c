@@ -17,6 +17,8 @@ pn_status_t pn_device_transfer_open(pn_device_transfer_t *s,pn_media_t *m,const 
 pn_status_t pn_device_transfer_request_stop(pn_device_transfer_t *s){(void)s;assert(false);return PN_UNSUPPORTED;}
 pn_status_t pn_device_transfer_state(pn_device_transfer_t *s,pn_device_transfer_state_t *out){(void)s;(void)out;assert(false);return PN_UNSUPPORTED;}
 pn_status_t pn_device_transfer_close(pn_device_transfer_t *s){(void)s;assert(false);return PN_UNSUPPORTED;}
+pn_status_t pn_device_transfer_take_network(pn_device_transfer_t *s,pn_network_credentials_t *c,bool *f){(void)s;(void)c;(void)f;assert(false);return PN_UNSUPPORTED;}
+pn_status_t pn_device_transfer_network_result(pn_device_transfer_t *s,pn_status_t r,const char *n){(void)s;(void)r;(void)n;assert(false);return PN_UNSUPPORTED;}
 void app_main(void);
 static jmp_buf end;
 static void (*worker)(void *);

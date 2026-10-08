@@ -14,6 +14,7 @@
 #include "pn_wallpaper.h"
 #include "pn_wallpaper_ui.h"
 #include "pn_font_manage.h"
+#include "pn_network_store.h"
 #include "pn_tap.h"
 #include "pn_bookmark_ui.h"
 #include "pn_style_ui.h"
@@ -44,6 +45,7 @@ static pn_media_t wallpaper_media;
 static bool wallpaper_ready;
 static pn_wallpaper_ui_t wallpaper_ui;
 static pn_font_manage_t font_manage;
+static char saved_network[PN_NETWORK_SSID_MAX+1]; ///< 已保存网络名，不缓存口令 / Saved network name; the password is not cached
 static pn_reader_app_t reader;
 static pn_epub_app_t epub;
 static pn_toc_ui_t toc;
@@ -209,11 +211,33 @@ static void start_reader(void){
     if(status!=PN_OK){ESP_LOGE(TAG,"Reader open/present failed: %d",(int)status);if(stop_reader())message("打开书籍失败","检查书籍或字体后重试");return;}
     locked=false;status_page=false;shelf_mode=false;
 }
+/// 读取已保存网络（含口令），调用方用后清零。/ Read the saved network including its password; callers wipe it after use.
+static pn_status_t load_network(pn_network_credentials_t *out){
+    if(!data_ready)data_ready=mount_data();
+    if(!data_ready)return PN_IO;
+    pn_media_lease_t lease;pn_status_t status=pn_media_acquire(&data_media,PN_MEDIA_READ,&lease);if(status!=PN_OK)return status;
+    pn_journal_files_t files;pn_journal_io_t io;status=pn_network_files(&files,&data_media,&lease,"/data/progress",&io);
+    if(status==PN_OK)status=pn_network_load(&io,out);
+    (void)pn_media_release(&data_media,&lease);return status;
+}
+static void refresh_network_name(void){pn_network_credentials_t c={0};pn_status_t status=load_network(&c);if(status==PN_OK)strcpy(saved_network,c.ssid);else if(status==PN_EMPTY)saved_network[0]=0;pn_network_wipe(&c);}
+/// 主任务保存网页提交的网络，再回报给网页。/ The main task saves the network submitted by the web page, then reports back.
+static void handle_network_request(void){
+    pn_network_credentials_t c={0};bool forget=false;
+    if(pn_device_transfer_take_network(&transfer,&c,&forget)!=PN_OK)return;
+    if(forget)pn_network_wipe(&c);
+    pn_status_t status=data_ready?PN_OK:PN_IO;pn_media_lease_t lease;
+    if(status==PN_OK)status=pn_media_acquire(&data_media,PN_MEDIA_WRITE,&lease);
+    if(status==PN_OK){pn_journal_files_t files;pn_journal_io_t io;status=pn_network_files(&files,&data_media,&lease,"/data/progress",&io);if(status==PN_OK)status=pn_network_save(&io,&c);(void)pn_media_release(&data_media,&lease);}
+    pn_network_wipe(&c);refresh_network_name();
+    if(status!=PN_OK)ESP_LOGW(TAG,"Network save failed: %d",(int)status);
+    (void)pn_device_transfer_network_result(&transfer,status,saved_network);
+}
 static void paint_transfer(bool menu){
     uint8_t *pixels=pn_alloc(&pool,684u*1216u/2u);pn_frame_t frame;pn_font_t font={0};pn_text_source_t builtin=pn_font_builtin_source();
     pn_status_t status=pn_frame_bind(&frame,pixels,684u*1216u/2u,684,1216)?PN_OK:PN_NO_MEMORY;
     if(status==PN_OK)status=pn_font_open(&font,&pool,&builtin,32);
-    if(status==PN_OK)status=menu?pn_reading_menu_render(reader_active(),&font,&frame):pn_transfer_view_render(&transfer_view,&font,&frame);
+    if(status==PN_OK)status=menu?pn_reading_menu_render_lan(reader_active(),*saved_network?saved_network:NULL,&font,&frame):pn_transfer_view_render(&transfer_view,&font,&frame);
     if(status==PN_OK)status=present(NULL,&frame,panel_known?PN_REFRESH_GL16:PN_REFRESH_GC16);
     pn_font_close(&font);pn_free(pixels);
     if(status==PN_OK){status_page=true;shelf_mode=false;if(!menu)last_transfer_view=transfer_view;}
@@ -241,7 +265,7 @@ static void begin_fonts(void){
 }
 static void end_fonts(void){pn_font_manage_close(&font_manage);if(*selected_path)start_reader();else show_shelf("",false);}
 static void end_wallpaper(void){pn_wallpaper_ui_close(&wallpaper_ui);if(*selected_path)start_reader();else show_shelf("",false);}
-static void begin_transfer(void){
+static void begin_transfer(bool station){
     if(transfer.impl)return;
     if(reader_active()){
         pn_status_t status=epub.impl?pn_epub_app_identity(&epub,&selected_expected):pn_reader_app_identity(&reader,&selected_expected);
@@ -250,14 +274,21 @@ static void begin_transfer(void){
     }
     if(!stop_reader())return;
     pn_device_wifi_config_t config={.mode=PN_WIFI_AP};
+    if(station){pn_network_credentials_t c={0};pn_status_t loaded=load_network(&c);
+        if(loaded!=PN_OK || !c.ssid[0]){pn_network_wipe(&c);message("没有已保存的网络","可在热点传书网页中保存");return;}
+        config.mode=PN_WIFI_STA;strcpy(config.ssid,c.ssid);strcpy(config.password,c.password);pn_network_wipe(&c);}
     pn_status_t status=pn_device_transfer_open(&transfer,&sd_media,"/sdcard",&config);
+    {volatile uint8_t *secret=(volatile uint8_t *)config.password;for(size_t i=0;i<sizeof config.password;i++)secret[i]=0;}
     if(status!=PN_OK){message("传输未开启","保留阅读位置，请重试");return;}
+    if(!data_ready)data_ready=mount_data();
+    (void)pn_device_transfer_network_result(&transfer,PN_EMPTY,saved_network);
     reading_menu=false;transfer_return=false;transfer_lock=false;memset(&transfer_view,0,sizeof transfer_view);transfer_view.phase=PN_TVIEW_STARTING;
     paint_transfer(false);last_transfer_draw=now_ms();
 }
 static void tick_transfer(uint64_t now){
     pn_device_transfer_state_t state;if(pn_device_transfer_state(&transfer,&state)!=PN_OK)return;
-    memset(&transfer_view,0,sizeof transfer_view);transfer_view.released=state.released;transfer_view.busy=state.work.busy;
+    handle_network_request();
+    memset(&transfer_view,0,sizeof transfer_view);transfer_view.released=state.released;transfer_view.busy=state.work.busy;transfer_view.station=state.network.mode==PN_WIFI_STA;
     transfer_view.phase=state.phase==PN_DTRANSFER_READY?PN_TVIEW_READY:state.phase==PN_DTRANSFER_STOPPING?PN_TVIEW_STOPPING:state.phase==PN_DTRANSFER_STARTING?PN_TVIEW_STARTING:PN_TVIEW_FAILED;
     memcpy(transfer_view.ssid,state.network.ssid,sizeof transfer_view.ssid);memcpy(transfer_view.password,state.network.ap_password,sizeof transfer_view.password);memcpy(transfer_view.pin,state.pin,sizeof transfer_view.pin);
     if(state.network.address[0])snprintf(transfer_view.address,sizeof transfer_view.address,"http://%s",state.network.address);
@@ -296,7 +327,7 @@ static void device_task(void *arg){
             if(transfer.impl)hit=pn_transfer_view_hit(&transfer_view,touch.x,touch.y);
             else if(wallpaper_ui.impl)hit=pn_wallpaper_ui_hit(&wallpaper_ui,touch.x,touch.y);
             else if(font_manage.impl)hit=pn_font_manage_hit(&font_manage,touch.x,touch.y);
-            else if(reading_menu)hit=pn_reading_menu_hit(touch.x,touch.y);
+            else if(reading_menu)hit=pn_reading_menu_hit_lan(touch.x,touch.y,*saved_network!=0);
             else if(fonts.active)hit=pn_font_ui_hit(&fonts,touch.x,touch.y);
             else if(toc.active)hit=pn_toc_ui_hit(&toc,touch.x,touch.y);
             else if(styles.active)hit=pn_style_ui_hit(&styles,touch.x,touch.y);
@@ -314,9 +345,9 @@ static void device_task(void *arg){
                 if(transfer.impl){if(selection==PN_TRANSFER_VIEW_STOP){transfer_return=true;(void)pn_device_transfer_request_stop(&transfer);}}
                 else if(wallpaper_ui.impl){pn_status_t status=pn_wallpaper_ui_event(&wallpaper_ui,selection,present,NULL);if(status!=PN_OK && status!=PN_EMPTY)ESP_LOGW(TAG,"Wallpaper UI: %d",(int)status);if(!wallpaper_ui.active)end_wallpaper();}
                 else if(font_manage.impl){pn_status_t status=pn_font_manage_event(&font_manage,selection,present,NULL);if(status!=PN_OK && status!=PN_EMPTY)ESP_LOGW(TAG,"Font management: %d",(int)status);if(!font_manage.active)end_fonts();}
-                else if(reading_menu){if(selection==PN_READING_MENU_FONTS)begin_fonts();else if(selection==PN_READING_MENU_WALLPAPER)begin_wallpaper();else if(selection==PN_READING_MENU_TRANSFER)begin_transfer();else if(selection==PN_READING_MENU_SHELF){reading_menu=false;if(stop_reader()){selected_path[0]=0;show_shelf("",false);}}else if(selection==PN_READING_MENU_RESUME){reading_menu=false;if(reader_active()){if(active_step(PN_APP_OPEN,now_ms())==PN_OK){status_page=false;shelf_mode=false;}}else start_reader();}}
-                else if(shelf_mode && selection==PN_SHELF_TRANSFER)begin_transfer();
-                else if(shelf_mode && selection==PN_SHELF_MENU){reading_menu=true;paint_transfer(true);}
+                else if(reading_menu){if(selection==PN_READING_MENU_LAN)begin_transfer(true);else if(selection==PN_READING_MENU_FONTS)begin_fonts();else if(selection==PN_READING_MENU_WALLPAPER)begin_wallpaper();else if(selection==PN_READING_MENU_TRANSFER)begin_transfer(false);else if(selection==PN_READING_MENU_SHELF){reading_menu=false;if(stop_reader()){selected_path[0]=0;show_shelf("",false);}}else if(selection==PN_READING_MENU_RESUME){reading_menu=false;if(reader_active()){if(active_step(PN_APP_OPEN,now_ms())==PN_OK){status_page=false;shelf_mode=false;}}else start_reader();}}
+                else if(shelf_mode && selection==PN_SHELF_TRANSFER)begin_transfer(false);
+                else if(shelf_mode && selection==PN_SHELF_MENU){reading_menu=true;refresh_network_name();paint_transfer(true);}
                 else if(fonts.active){(void)pn_font_ui_event(&fonts,selection,now_ms(),present,NULL);if(!fonts.active){pn_font_ui_close(&fonts);if(styles.active)(void)pn_style_ui_present(&styles,present,NULL);}}
                 else if(toc.active){(void)pn_toc_ui_event(&toc,selection,now_ms(),present,NULL);}
                 else if(selection==13 && epub.impl && bookmarks.mode==PN_BUI_CLOSED && !styles.active){(void)pn_toc_ui_open(&toc,&epub,present,NULL);}
@@ -332,7 +363,7 @@ static void device_task(void *arg){
                     else message("格式尚未接入","书籍仍保留，选择TXT或EPUB");
                 }else if(shelf_mode && shelf_page && shelf_page->count && (selection==PN_SHELF_NEXT || selection==PN_SHELF_PREVIOUS)){
                     char cursor[PN_CATALOG_NAME_MAX];strcpy(cursor,shelf_page->items[selection==PN_SHELF_NEXT?shelf_page->count-1:0].name);show_shelf(cursor,selection==PN_SHELF_PREVIOUS);
-                }else if(selection==8){reading_menu=true;paint_transfer(true);}
+                }else if(selection==8){reading_menu=true;refresh_network_name();paint_transfer(true);}
                 else if(selection==9){selected_path[0]=0;start_reader();}
                 pn_reader_input_cancel(&input);
             }

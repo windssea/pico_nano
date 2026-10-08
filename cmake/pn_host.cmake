@@ -56,6 +56,7 @@ add_library(pn_core STATIC ${ui_font_c}
     ${PN_ROOT}/components/pn_storage/pn_journal.c
     ${PN_ROOT}/components/pn_storage/pn_blob.c
     ${PN_ROOT}/components/pn_storage/pn_recent.c
+    ${PN_ROOT}/components/pn_storage/pn_network_store.c
     ${PN_ROOT}/components/pn_storage/pn_identity.c
     ${PN_ROOT}/components/pn_storage/pn_progress.c
     ${PN_ROOT}/components/pn_storage/pn_epub_progress.c

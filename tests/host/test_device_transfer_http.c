@@ -59,6 +59,10 @@ static cJSON *request(int method,const char *uri,const void *bytes,size_t n,cons
  struct httpd_req_aux aux={.scratch=scratch,.scratch_size_limit=sizeof scratch-1,.scratch_cur_size=sizeof scratch-1,.req_hdrs_count=headers};
  httpd_req_t r={.handle=&route,.method=method,.uri=uri,.content_len=n,.user_ctx=route.user_ctx,.aux=&aux};route.handler(&r);return cJSON_Parse(response);
 }
+static pn_network_credentials_t sink_last;static bool sink_forget,sink_busy;static unsigned sink_calls;
+static pn_status_t sink_submit(void *ctx,const pn_network_credentials_t *c,bool forget){(void)ctx;if(sink_busy)return PN_BUSY;sink_calls++;sink_forget=forget;if(!forget)sink_last=*c;return PN_OK;}
+static pn_status_t sink_status(void *ctx,char ssid[PN_NETWORK_SSID_MAX+1],bool *pending,pn_status_t *last){(void)ctx;strcpy(ssid,sink_last.ssid);*pending=false;*last=PN_OK;return PN_OK;}
+static const pn_device_network_sink_t net_sink={NULL,sink_submit,sink_status};
 int main(void){
  char root[]="/tmp/pn-device-http-XXXXXX";assert(mkdtemp(root));pn_media_t media;pn_media_init(&media);assert(pn_media_attach(&media,123)==PN_OK);
  pn_upload_files_options_t options={.root=root};pn_transfer_worker_t worker={0};assert(pn_transfer_worker_open(&worker,&media,&options,6u*1024u*1024u,NULL,NULL,NULL)==PN_OK);
@@ -93,6 +97,19 @@ int main(void){
  json=request(HTTP_POST,"/api/v1/uploads",begin,strlen(begin),token,NULL);assert(code==201);strcpy(id,cJSON_GetObjectItemCaseSensitive(json,"upload_id")->valuestring);cJSON_Delete(json);snprintf(uri,sizeof uri,"/api/v1/uploads/%s/chunks",id);
  json=request(HTTP_PUT,uri,text,sizeof text-1,token,extra);assert(code==200);cJSON_Delete(json);snprintf(uri,sizeof uri,"/api/v1/uploads/%s/complete",id);
  json=request(HTTP_POST,uri,complete,strlen(complete),token,NULL);assert(code==422);cJSON_Delete(json);
+ /* 配网接口：未启用404；保存只交给sink且不回显口令。/ Provisioning endpoints: 404 when disabled; saves go only to the sink and never echo passwords. */
+ json=request(HTTP_GET,"/api/v1/network",NULL,0,token,NULL);assert(code==404);cJSON_Delete(json);
+ assert(pn_device_transfer_http_network(&server,&net_sink)==PN_OK);
+ const char *home="{\"ssid\":\"家里的WiFi\",\"password\":\"secret-pass\"}";
+ json=request(HTTP_POST,"/api/v1/network",home,strlen(home),NULL,NULL);assert(code==401 && !sink_calls);cJSON_Delete(json);
+ json=request(HTTP_POST,"/api/v1/network",home,strlen(home),token,NULL);assert(code==202 && sink_calls==1 && !sink_forget && !strcmp(sink_last.ssid,"家里的WiFi") && !strcmp(sink_last.password,"secret-pass") && !strstr(response,"secret"));cJSON_Delete(json);
+ sink_busy=true;json=request(HTTP_POST,"/api/v1/network",home,strlen(home),token,NULL);assert(code==409);cJSON_Delete(json);sink_busy=false;
+ const char *invalid[]={"{\"ssid\":\"x\",\"password\":\"1234567\"}","{\"ssid\":\"x\"}","{\"ssid\":\"\",\"password\":\"\"}","{\"ssid\":\"x\",\"password\":\"12345678\",\"extra\":1}","{\"ssid\":\"123456789012345678901234567890123\",\"password\":\"\"}","{\"ssid\":\"x\",\"password\":\"badépassword\"}"};
+ for(unsigned i=0;i<sizeof invalid/sizeof invalid[0];i++){json=request(HTTP_POST,"/api/v1/network",invalid[i],strlen(invalid[i]),token,NULL);assert(code==400 && sink_calls==1);cJSON_Delete(json);}
+ const char *open="{\"ssid\":\"开放网络\",\"password\":\"\"}";json=request(HTTP_POST,"/api/v1/network",open,strlen(open),token,NULL);assert(code==202 && sink_calls==2 && !sink_last.password[0]);cJSON_Delete(json);
+ json=request(HTTP_GET,"/api/v1/network",NULL,0,token,NULL);assert(code==200 && !strcmp(cJSON_GetObjectItemCaseSensitive(json,"ssid")->valuestring,"开放网络") && cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(json,"saved")) && !cJSON_GetObjectItemCaseSensitive(json,"password"));cJSON_Delete(json);
+ json=request(HTTP_DELETE,"/api/v1/network",NULL,0,token,NULL);assert(code==202 && sink_calls==3 && sink_forget);cJSON_Delete(json);
+ assert(pn_device_transfer_http_network(&server,NULL)==PN_OK);json=request(HTTP_GET,"/api/v1/network",NULL,0,token,NULL);assert(code==404);cJSON_Delete(json);
  snprintf(begin,sizeof begin,"{\"kind\":\"book\",\"name\":\"leading-zero.txt\",\"size\":01,\"sha256\":\"%s\"}",sha);json=request(HTTP_POST,"/api/v1/uploads",begin,strlen(begin),token,NULL);assert(code==400);cJSON_Delete(json);
  receive_delay=6000;json=request(HTTP_POST,"/api/v1/pair",pair,strlen(pair),NULL,NULL);assert(code==400);cJSON_Delete(json);receive_delay=0;
  incomplete=true;json=request(HTTP_POST,"/api/v1/pair",pair,strlen(pair),NULL,NULL);assert(code==400);cJSON_Delete(json);incomplete=false;

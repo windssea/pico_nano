@@ -30,6 +30,7 @@ typedef struct {
  uint64_t created,locked_until;
  unsigned failures;
  bool closing;
+ const pn_device_network_sink_t *network;
  uint8_t bytes[PN_UPLOAD_CHUNK+1];
 } http_t;
 static const char *const messages[]={"成功","输入参数无效","资源正在使用或同名文件已存在","没有找到该文件或上传会话","空间、配额或大小超过限制","内存不足，请稍后重试","存储介质已失效","文件身份已经变化","上传已取消","暂不支持此格式","摘要或文件格式校验失败","读写失败，请重新查询后续传"};
@@ -137,7 +138,7 @@ static esp_err_t dispatch(httpd_req_t *r){
  if((r->method==HTTP_GET || r->method==HTTP_DELETE) && r->content_len)return error(r,400,"该操作不接受请求正文");
  if(r->method==HTTP_GET){
   const pn_transfer_asset_t *asset=pn_transfer_asset(uri);if(asset)return send_data(r,200,asset->mime,(const char *)asset->bytes,asset->size);
-  if(!strcmp(uri,"/api/v1/status")){cJSON *json=cJSON_CreateObject();bool v=string(json,"name","小纸 Pico");v&=string(json,"version","0.0.52");v&=number(json,"chunk_size",PN_UPLOAD_CHUNK);v&=boolean(json,"preview",false);return json_send(r,200,json,v);}
+  if(!strcmp(uri,"/api/v1/status")){cJSON *json=cJSON_CreateObject();bool v=string(json,"name","小纸 Pico");v&=string(json,"version","0.0.53");v&=number(json,"chunk_size",PN_UPLOAD_CHUNK);v&=boolean(json,"preview",false);return json_send(r,200,json,v);}
  }
  bool pairing=r->method==HTTP_POST && !strcmp(uri,"/api/v1/pair");
  if(!pairing && !authorized)return error(r,401,"请先输入配对码");
@@ -169,6 +170,23 @@ static esp_err_t dispatch(httpd_req_t *r){
   cJSON *result=cJSON_CreateObject();return json_send(r,200,result,string(result,"token",token));
  }
  if(r->method==HTTP_GET && !strcmp(uri,"/api/v1/session")){cJSON *result=cJSON_CreateObject();return json_send(r,200,result,boolean(result,"paired",true));}
+ if(!strcmp(uri,"/api/v1/network")){
+  // 配网：只排队交给主任务保存，口令不回显。/ Provisioning: queue for the main task to save; passwords are never echoed.
+  lock(s);const pn_device_network_sink_t *sink=s->network;unlock(s);
+  if(!sink){cJSON_Delete(json);return error(r,404,"当前模式不支持保存家庭网络");}
+  if(r->method==HTTP_GET){char ssid[PN_NETWORK_SSID_MAX+1]={0};bool pending=false;pn_status_t last=PN_EMPTY;pn_status_t got=sink->status(sink->ctx,ssid,&pending,&last);cJSON_Delete(json);
+   if(got!=PN_OK)return error(r,500,"无法读取网络状态");
+   cJSON *result=cJSON_CreateObject();bool v=string(result,"ssid",ssid);v&=boolean(result,"saved",ssid[0]!=0);v&=boolean(result,"pending",pending);v&=string(result,"result",last==PN_EMPTY?"none":last==PN_OK?"ok":"failed");return json_send(r,200,result,v);}
+  pn_network_credentials_t credentials={0};bool forget=r->method==HTTP_DELETE;pn_status_t queued=PN_INVALID;
+  if(r->method==HTTP_POST){const char *keys[]={"ssid","password"};const char *ssid=get_string(json,"ssid"),*password=get_string(json,"password");
+   if(fields(json,keys,2,3) && ssid && password && strlen(ssid)<=PN_NETWORK_SSID_MAX && strlen(password)<=PN_NETWORK_PASSWORD_MAX){strcpy(credentials.ssid,ssid);strcpy(credentials.password,password);
+    queued=pn_network_validate(&credentials,false)==PN_OK?sink->submit(sink->ctx,&credentials,false):PN_INVALID;}}
+  else if(forget && !json)queued=sink->submit(sink->ctx,&credentials,true);
+  pn_network_wipe(&credentials);cJSON_Delete(json);
+  if(queued==PN_BUSY)return error(r,409,"上一个网络设置还在保存");
+  if(queued!=PN_OK)return error(r,400,"网络名称或口令格式无效（口令8–63位或留空）");
+  cJSON *result=cJSON_CreateObject();return json_send(r,202,result,boolean(result,"pending",true));
+ }
  pn_transfer_command_t command={0};bool valid=false;unsigned success=200;
  if(r->method==HTTP_POST && !strcmp(uri,"/api/v1/uploads")){
   const char *keys[]={"kind","name","size","sha256","replace"};const char *name=get_string(json,"name");command.operation=PN_TRANSFER_BEGIN;command.request.kind=kind(get_string(json,"kind"));command.request.has_digest=true;
@@ -192,6 +210,10 @@ static esp_err_t dispatch(httpd_req_t *r){
   }
  }
  cJSON_Delete(json);if(!valid)return error(r,400,"请求操作或参数无效");return execute(s,r,&command,success);
+}
+pn_status_t pn_device_transfer_http_network(pn_device_transfer_http_t *http,const pn_device_network_sink_t *sink){
+ if(!http || !http->impl || (sink && (!sink->submit || !sink->status)))return PN_INVALID;
+ http_t *s=http->impl;lock(s);s->network=sink;unlock(s);return PN_OK;
 }
 pn_status_t pn_device_transfer_http_open(pn_device_transfer_http_t *out,pn_transfer_worker_t *worker,const char *authority,uint16_t port){
  if(!out || !worker || !authority || !*authority || strlen(authority)>=64 || !port)return PN_INVALID;

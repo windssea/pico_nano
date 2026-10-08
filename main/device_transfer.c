@@ -32,6 +32,11 @@ typedef struct {
  pn_device_transfer_http_t http;
  pn_device_transfer_state_t state;
  bool stop,retry;
+ pn_network_credentials_t inbox; ///< 待保存的配网请求 / Pending provisioning request
+ bool inbox_full,inbox_forget,saving; ///< 已排队/忘记/主任务处理中 / Queued/forget/being handled by the main task
+ char saved_ssid[PN_NETWORK_SSID_MAX+1]; ///< 已保存名称 / Saved name
+ pn_status_t network_last; ///< 最近保存结果 / Latest save result
+ pn_device_network_sink_t sink; ///< 交给HTTP的出口 / Outlet handed to HTTP
 #ifdef ESP_PLATFORM
  SemaphoreHandle_t mutex;
  TaskHandle_t task;
@@ -55,6 +60,15 @@ static void *allocate(size_t n){return malloc(n);}
 static void release(void *p){free(p);}
 static void destroy(transfer_t *s){pthread_mutex_destroy(&s->mutex);}
 #endif
+static pn_status_t sink_submit(void *ctx,const pn_network_credentials_t *c,bool forget){
+ transfer_t *s=ctx;lock(s);pn_status_t status=PN_OK;
+ if(s->inbox_full || s->saving)status=PN_BUSY;
+ else{if(forget)pn_network_wipe(&s->inbox);else s->inbox=*c;s->inbox_forget=forget;s->inbox_full=true;}
+ unlock(s);return status;
+}
+static pn_status_t sink_status(void *ctx,char ssid[PN_NETWORK_SSID_MAX+1],bool *pending,pn_status_t *last){
+ transfer_t *s=ctx;lock(s);memcpy(ssid,s->saved_ssid,PN_NETWORK_SSID_MAX+1);*pending=s->inbox_full || s->saving;*last=s->network_last;unlock(s);return PN_OK;
+}
 static bool stopping(transfer_t *s){lock(s);bool value=s->stop;unlock(s);return value;}
 static pn_status_t cleanup(transfer_t *s){
  pn_status_t status=PN_OK;
@@ -78,6 +92,8 @@ static void run(transfer_t *s){
   if(s->http.impl && (network.phase!=PN_WIFI_READY || network.generation!=network_generation)){cause=PN_STALE_JOB;break;}
   if(!s->http.impl && network.phase==PN_WIFI_READY && !stopping(s)){
    cause=pn_device_transfer_http_open(&s->http,&s->worker,network.address,80);
+   if(cause!=PN_OK)break;
+   cause=pn_device_transfer_http_network(&s->http,&s->sink);
    if(cause!=PN_OK)break;
    network_generation=network.generation;
   }
@@ -108,7 +124,7 @@ pn_status_t pn_device_transfer_open(pn_device_transfer_t *out,pn_media_t *media,
  if(!out || !media || !root || !config || strlen(root)>=PN_UPLOAD_FILES_ROOT_MAX)return PN_INVALID;
  if(out->impl || pn_media_active(media))return PN_BUSY;
  if(!media->available)return PN_STALE_MEDIA;
- transfer_t *s=allocate(sizeof *s);if(!s)return PN_NO_MEMORY;memset(s,0,sizeof *s);s->media=media;s->config=*config;strcpy(s->root,root);s->state.phase=PN_DTRANSFER_STARTING;
+ transfer_t *s=allocate(sizeof *s);if(!s)return PN_NO_MEMORY;memset(s,0,sizeof *s);s->media=media;s->config=*config;strcpy(s->root,root);s->state.phase=PN_DTRANSFER_STARTING;s->network_last=PN_EMPTY;s->sink=(pn_device_network_sink_t){s,sink_submit,sink_status};
 #ifdef ESP_PLATFORM
  s->mutex=xSemaphoreCreateMutex();if(!s->mutex){release(s);return PN_NO_MEMORY;}
  bool created=xTaskCreatePinnedToCore(entry,"pn_transfer_ctl",16384,s,4,&s->task,0)==pdPASS;
@@ -129,4 +145,14 @@ pn_status_t pn_device_transfer_close(pn_device_transfer_t *out){
  pthread_join(s->task,NULL);
 #endif
  destroy(s);volatile uint8_t *bytes=(volatile uint8_t *)s;for(size_t i=0;i<sizeof *s;i++)bytes[i]=0;release(s);out->impl=NULL;return PN_OK;
+}
+pn_status_t pn_device_transfer_take_network(pn_device_transfer_t *t,pn_network_credentials_t *out,bool *forget){
+ if(!t || !t->impl || !out || !forget)return PN_INVALID;
+ transfer_t *s=t->impl;lock(s);pn_status_t status=PN_EMPTY;
+ if(s->inbox_full){*out=s->inbox;*forget=s->inbox_forget;pn_network_wipe(&s->inbox);s->inbox_full=false;s->saving=true;status=PN_OK;}
+ unlock(s);return status;
+}
+pn_status_t pn_device_transfer_network_result(pn_device_transfer_t *t,pn_status_t result,const char *saved_ssid){
+ if(!t || !t->impl || !saved_ssid || strlen(saved_ssid)>PN_NETWORK_SSID_MAX)return PN_INVALID;
+ transfer_t *s=t->impl;lock(s);strcpy(s->saved_ssid,saved_ssid);s->network_last=result;s->saving=false;unlock(s);return PN_OK;
 }
