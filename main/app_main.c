@@ -17,6 +17,7 @@
 #include "pn_network_store.h"
 #include "pn_settings_ui.h"
 #include "pn_key.h"
+#include "device_sleep.h"
 #include "pn_tap.h"
 #include "pn_bookmark_ui.h"
 #include "pn_style_ui.h"
@@ -51,6 +52,9 @@ static pn_settings_ui_t settings_ui;
 static uint8_t input_flags; ///< 已保存翻页标志 / Saved page-turn flags
 static bool input_flags_loaded;
 static pn_key_t keys={.key=-1};
+static uint64_t last_input; ///< 最近一次触摸/按键，用于自动锁屏 / Latest touch or key, for auto-lock
+#define AUTO_LOCK_MS (5u*60u*1000u)
+static void lock_and_sleep(const char *hint);
 static char saved_network[PN_NETWORK_SSID_MAX+1]; ///< 已保存网络名，不缓存口令 / Saved network name; the password is not cached
 static pn_reader_app_t reader;
 static pn_epub_app_t epub;
@@ -310,9 +314,14 @@ static void tick_transfer(uint64_t now){
     memcpy(transfer_view.ssid,state.network.ssid,sizeof transfer_view.ssid);memcpy(transfer_view.password,state.network.ap_password,sizeof transfer_view.password);memcpy(transfer_view.pin,state.pin,sizeof transfer_view.pin);
     if(state.network.address[0])snprintf(transfer_view.address,sizeof transfer_view.address,"http://%s",state.network.address);
     if(state.released && transfer_return && pn_device_transfer_close(&transfer)==PN_OK){
-        reading_menu=false;if(transfer_lock){locked=true;show_lock("传输已停止，按电源键继续阅读");}else start_reader();return;
+        reading_menu=false;if(transfer_lock)lock_and_sleep("传输已停止，按电源键继续阅读");else start_reader();return;
     }
     if(now-last_transfer_draw>=1000 && memcmp(&transfer_view,&last_transfer_view,sizeof transfer_view)){paint_transfer(false);last_transfer_draw=now;}
+}
+/// 锁屏后浅睡，电源键唤醒即解锁回原书；唤醒源不可用时保持锁屏等待轮询。/ Light-sleep after locking and unlock back to the book on a power-key wake; if the wake source is unavailable stay locked and keep polling.
+static void lock_and_sleep(const char *hint){
+    locked=true;show_lock(hint);
+    if(pn_device_sleep_until_key()){locked=false;last_input=now_ms();start_reader();}
 }
 static void open_menu(void){reading_menu=true;refresh_network_name();paint_transfer(true);}
 /// 屏下三键：阅读KEY1/3翻页、KEY2菜单、长按KEY2回书架；书架KEY1/3翻书目页；菜单KEY2返回。/ Touch keys: reading KEY1/3 turn pages, KEY2 opens the menu and a long KEY2 returns to the shelf; shelf KEY1/3 page the catalog; menu KEY2 goes back.
@@ -359,14 +368,16 @@ static void device_task(void *arg){
             if(sd_media.available && !card.mounted){if(reader_active()){if(epub.impl)(void)pn_epub_app_media_lost(&epub);else (void)pn_reader_app_media_lost(&reader);(void)stop_reader();}else (void)pn_media_detach(&sd_media);selected_path[0]=0;pn_reader_input_cancel(&input);message("卡已移除","保留上次阅读位置\n插卡后点下方重试");}}
         if(now-last_key>=100){last_key=now;if(read_pico_pmu_take_key_short() && now-boot>=1000){pn_reader_input_cancel(&input);
                 if(transfer.impl){transfer_return=true;transfer_lock=true;(void)pn_device_transfer_request_stop(&transfer);}
-                else if(locked){locked=false;start_reader();}else if(stop_reader()){locked=true;show_lock("再按电源键继续阅读");}}}
+                else if(locked){locked=false;last_input=now;start_reader();}else if(stop_reader())lock_and_sleep("再按电源键继续阅读");}}
+        // 无操作满5分钟自动锁屏；传输中由其停止流程负责。/ Auto-lock after five idle minutes; transfers handle their own stop flow.
+        if(!locked && !transfer.impl && now-last_input>=AUTO_LOCK_MS && now-boot>=AUTO_LOCK_MS){pn_reader_input_cancel(&input);if(stop_reader())lock_and_sleep("再按电源键继续阅读");else last_input=now;}
         if(reader_active() && !locked){pn_status_t saved=epub.impl?pn_epub_app_tick(&epub,now_ms()):pn_reader_app_tick(&reader,now_ms());if(saved!=PN_OK && saved!=PN_BUSY)ESP_LOGW(TAG,"Pending progress save: %d",(int)saved);}
         if(bookmarks.mode!=PN_BUI_CLOSED && !bookmarks.presented && !locked && now-last_ui_retry>=1000){last_ui_retry=now;(void)pn_bookmark_ui_present(&bookmarks,present,NULL);}
         if(toc.active && !toc.presented && !locked && now-last_ui_retry>=1000){last_ui_retry=now;(void)pn_toc_ui_present(&toc,present,NULL);}
         if(styles.active && !styles.presented && !locked && now-last_ui_retry>=1000){last_ui_retry=now;(void)pn_style_ui_present(&styles,present,NULL);}
         if(styles.request_fonts && !locked){styles.request_fonts=false;(void)pn_font_ui_open(&fonts,&pool,epub.impl?NULL:&reader,epub.impl?&epub:NULL,NULL,present,NULL);}
         if(fonts.active && !fonts.presented && !locked && now-last_ui_retry>=1000){last_ui_retry=now;(void)pn_font_ui_present(&fonts,present,NULL);}
-        if(hardware.touch_ready){cst836u_touch_t touch={0};esp_err_t read=cst836u_read(hardware.touch,&touch);pn_reader_action_t action;touch_held=read==ESP_OK && touch.count>0;
+        if(hardware.touch_ready){cst836u_touch_t touch={0};esp_err_t read=cst836u_read(hardware.touch,&touch);pn_reader_action_t action;touch_held=read==ESP_OK && touch.count>0;if(touch_held)last_input=now_ms();
             int hit=-1,selection=-1;
             if(transfer.impl)hit=pn_transfer_view_hit(&transfer_view,touch.x,touch.y);
             else if(wallpaper_ui.impl)hit=pn_wallpaper_ui_hit(&wallpaper_ui,touch.x,touch.y);
