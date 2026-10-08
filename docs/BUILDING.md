@@ -1,6 +1,6 @@
 # 构建与运行入口
 
-当前开发版本0.0.50。能力与待办统一见 [项目状态](PROJECT_STATUS.md)，环境、测试分层和证据边界见 [开发与测试](DEVELOPMENT_AND_TESTING.md)。本页只列已经存在的运行入口，不把拟建命令当成实现。
+当前开发版本0.0.51。能力与待办统一见 [项目状态](PROJECT_STATUS.md)，环境、测试分层和证据边界见 [开发与测试](DEVELOPMENT_AND_TESTING.md)。本页只列已经存在的运行入口，不把拟建命令当成实现。
 
 ## Windows与Docker
 
@@ -35,7 +35,7 @@ python tools/dev.py host
 | sdl | build-sim-sdl-idf | SDL交互测试/窗口程序 |
 | firmware-ci | build-ci-s3 | sdkconfig.ci，默认时序编译验证 |
 | firmware-board | build-board | sdkconfig.defaults，真机Zbit 120MHz配置 |
-| factory-data | build-dev/factory-data.bin | 单独生成内部数据文件系统镜像，不自动烧写 |
+| factory-data | build-dev/factory-data.bin、factory-wallpaper.bin | 单独生成内部数据与壁纸分区空镜像，不自动烧写 |
 | docs | build-dev/logs/docs-0.log | 文档/分区/依赖与字体摘要核对 |
 
 两SDKCONFIG独立生成，不能把CI时序当产品默认。产物、日志、样本与截图都忽略；必要UI字体、测试fixture、许可证与依赖清单保留。Windows不能直接执行Linux ELF，容器绝对路径也不能直接当Windows烧写路径。
@@ -53,7 +53,7 @@ cmake --build build-sim-native
 ./build-sim-native/pn_sim --library mockDoc --font mockDoc/LXGWWenKai-Regular.ttf --state-dir build-dev/sim-state
 ```
 
-书库窗口可加 `--cover-cache DIR` 把封面缩略图缓存到指定目录；不给时只解码不写盘，见 [书架封面](COVERS.md)。mockDoc为用户本机样本，Git不提供；先自行放入合法测试文件。单书用 `--book PATH`，EPUB入口按扩展名分派。`--headless --capture FILE.pgm`、`--budget BYTES`、`--scenario ownership`等以simulator/main.c为准；没有通用JSON脚本CLI。窗口脚本测试使用测试专用环境变量，不能当真实用户交互验收。
+书库窗口可加 `--cover-cache DIR` 把封面缩略图缓存到指定目录；不给时只解码不写盘，见 [书架封面](COVERS.md)；`--wallpaper-dir DIR [--wallpaper-store DIR]` 启用壁纸设置页（书架按W），见 [锁屏与壁纸缓存](LOCK_SCREEN.md)。mockDoc为用户本机样本，Git不提供；先自行放入合法测试文件。单书用 `--book PATH`，EPUB入口按扩展名分派。`--headless --capture FILE.pgm`、`--budget BYTES`、`--scenario ownership`等以simulator/main.c为准；没有通用JSON脚本CLI。窗口脚本测试使用测试专用环境变量，不能当真实用户交互验收。
 
 ## 功能入口与样本
 

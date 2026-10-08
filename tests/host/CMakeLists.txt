@@ -99,6 +99,10 @@ add_executable(test_wallpaper test_wallpaper.c)
 target_link_libraries(test_wallpaper PRIVATE pn_core)
 add_test(NAME wallpaper COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_wallpaper.py $<TARGET_FILE:test_wallpaper>)
 
+add_executable(test_wallpaper_ui test_wallpaper_ui.c)
+target_link_libraries(test_wallpaper_ui PRIVATE pn_core)
+add_test(NAME wallpaper_ui COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_wallpaper_ui.py $<TARGET_FILE:test_wallpaper_ui> ${PN_ROOT}/tests/fixtures)
+
 add_executable(test_cover test_cover.c)
 target_link_libraries(test_cover PRIVATE pn_core)
 add_test(NAME cover COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_cover.py $<TARGET_FILE:test_cover> ${PN_ROOT}/tests/fixtures)

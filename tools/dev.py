@@ -73,7 +73,8 @@ def main():
     elif args.action == "factory-data":
         commands = [["cmake", "-S", "tests/host", "-B", "build-host", "-G", "Ninja", "-DPN_SANITIZERS=ON"],
                     ["cmake", "--build", "build-host", "--target", "pn_fs_image"],
-                    ["./build-host/pn_fs_image", "build-dev/factory-data.bin"]]
+                    ["./build-host/pn_fs_image", "build-dev/factory-data.bin"],
+                    ["./build-host/pn_fs_image", "build-dev/factory-wallpaper.bin", "wallpaper"]]
     elif args.action == "sim":
         (ROOT / "build-sim" / "artifacts").mkdir(parents=True, exist_ok=True)
         commands = [["cmake", "-S", "simulator", "-B", "build-sim-idf", "-G", "Ninja", "-DPN_SANITIZERS=ON"],

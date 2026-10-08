@@ -19,6 +19,7 @@ pn_status_t pn_shelf_render_selected(const pn_catalog_page_t *page,pn_font_t *fo
 pn_status_t pn_shelf_render_mode(const pn_catalog_page_t *page,pn_font_t *font,pn_frame_t *frame,int selected,bool recent);
 
 #define PN_SHELF_TRANSFER 14
+#define PN_SHELF_MENU 15 ///< 点品牌标题打开菜单 / Tap the brand title to open the menu
 /// 传输已装配的平台显式启用按钮，旧入口保持隐藏。/ Explicitly enable the button on wired platforms; legacy entries keep it hidden.
 pn_status_t pn_shelf_render_mode_with_transfer(const pn_catalog_page_t *,pn_font_t *,pn_frame_t *,int,bool,bool);
 int pn_shelf_hit_with_transfer(const pn_catalog_page_t *,int,int,bool);

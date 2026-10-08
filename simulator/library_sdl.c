@@ -10,6 +10,7 @@
 #include "pn_epub_app.h"
 #include "pn_reader_input.h"
 #include "pn_shelf_view.h"
+#include "pn_wallpaper_ui.h"
 #include "pn_tap.h"
 #include <SDL.h>
 #include <stdio.h>
@@ -48,6 +49,11 @@ typedef struct {
     char cover_dir[512]; ///< 显式--cover-cache目录，空则只解码不缓存 / Explicit --cover-cache directory; empty decodes without caching
     uint8_t salt[16]; ///< EPUB XML哈希盐 / EPUB XML hash salt
     bool covers_dirty; ///< 本页有新封面待重绘 / New covers await a redraw for this page
+    pn_wallpaper_ui_t wallpaper; ///< 壁纸设置页 / Wallpaper settings page
+    const char *wallpaper_dir; ///< 原图目录，NULL禁用 / Source directory, NULL disables the page
+    pn_media_t wallpaper_media; ///< 模拟内部壁纸分区 / Simulated internal wallpaper partition
+    pn_wallpaper_store_t wallpaper_store; ///< 显式记录目录的两槽 / Two slots in the explicit record directory
+    bool wallpaper_store_ok; ///< 已给出记录目录 / Record directory supplied
 } library_t;
 static bool reading(library_t *s){return s->reader.impl || s->epub.impl;}
 static pn_status_t active_step(library_t *s,pn_reader_action_t action,uint64_t now,pn_reader_present_fn present,void *ctx){return s->epub.impl?pn_epub_app_step(&s->epub,action,now,present,ctx):pn_reader_app_step(&s->reader,action,now,present,ctx);}
@@ -133,13 +139,17 @@ static pn_status_t return_to_shelf(library_t *s,uint64_t now){
     pn_status_t status=active_close(s,now);
     if(status==PN_OK){pn_toc_ui_close(&s->toc);pn_bookmark_ui_cancel(&s->bookmarks);pn_style_ui_close(&s->styles);pn_font_ui_close(&s->fonts);SDL_StopTextInput();status=draw(s);printf("library_return status=%d\n",(int)status);}return status;
 }
-int pn_sim_library_window(pn_pool_t *pool,const char *directory,const char *font_path,const char *fallback_path,const char *state_dir,const char *cover_cache){
+int pn_sim_library_window(pn_pool_t *pool,const char *directory,const char *font_path,const char *fallback_path,const char *state_dir,const char *cover_cache,const char *wallpaper_dir,const char *wallpaper_store){
     if(SDL_Init(SDL_INIT_VIDEO)!=0)return 1;
     library_t *s=pn_alloc(pool,sizeof *s);if(!s){SDL_Quit();return 1;}
     memset(s,0,sizeof *s);s->pool=pool;s->directory=directory;s->font_path=font_path;s->fallback_path=fallback_path;s->state_dir=state_dir;
     s->page=pn_alloc(pool,sizeof *s->page);s->frame.pixels=pn_alloc(pool,342u*1216u);
     s->recent=pn_alloc(pool,sizeof *s->recent);s->covers=pn_alloc(pool,sizeof *s->covers);if(s->covers)pn_shelf_covers_reset(s->covers,NULL);
     if(cover_cache && (size_t)snprintf(s->cover_dir,sizeof s->cover_dir,"%s",cover_cache)>=sizeof s->cover_dir)s->cover_dir[0]=0;
+    s->wallpaper_dir=wallpaper_dir;
+    if(wallpaper_store){char a[PN_WALLPAPER_PATH_MAX],b[PN_WALLPAPER_PATH_MAX];pn_media_init(&s->wallpaper_media);
+        s->wallpaper_store_ok=(size_t)snprintf(a,sizeof a,"%s/lock.a",wallpaper_store)<sizeof a && (size_t)snprintf(b,sizeof b,"%s/lock.b",wallpaper_store)<sizeof b &&
+            pn_media_attach(&s->wallpaper_media,3)==PN_OK && pn_wallpaper_store_init(&s->wallpaper_store,&s->wallpaper_media,a,b)==PN_OK;}
     {FILE *random=fopen("/dev/urandom","rb");bool seeded=random && fread(s->salt,1,sizeof s->salt,random)==sizeof s->salt;if(random)fclose(random);if(!seeded){pn_free(s->covers);s->covers=NULL;}}
     s->window=SDL_CreateWindow("小纸 Pico",SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,342,608,SDL_WINDOW_RESIZABLE);
     s->renderer=s->window?SDL_CreateRenderer(s->window,-1,SDL_RENDERER_SOFTWARE):NULL;
@@ -158,7 +168,7 @@ int pn_sim_library_window(pn_pool_t *pool,const char *directory,const char *font
         script_queue(&script);SDL_Event event;bool got=SDL_WaitEventTimeout(&event,100)!=0;uint64_t now=SDL_GetTicks64();
         if(reading(s)){status=s->epub.impl?pn_epub_app_tick(&s->epub,now):pn_reader_app_tick(&s->reader,now);if(status!=PN_OK && status!=PN_BUSY)SDL_SetWindowTitle(s->window,"小纸 Pico - 保存失败，关闭前请重试");}
         if(s->bookmarks.mode!=PN_BUI_CLOSED && !s->bookmarks.presented && now-s->ui_retry>=1000){s->ui_retry=now;status=pn_bookmark_ui_present(&s->bookmarks,present,s);}
-        if(!got){if(!reading(s) && !s->pointer_down)covers_tick(s);continue;}
+        if(!got){if(!reading(s) && !s->pointer_down && !s->wallpaper.impl)covers_tick(s);continue;}
         script_received(&script,&event);
         if(s->styles.request_fonts){s->styles.request_fonts=false;status=pn_font_ui_open(&s->fonts,s->pool,s->epub.impl?NULL:&s->reader,s->epub.impl?&s->epub:NULL,NULL,present,s);printf("font_ui open status=%d active=%d\n",status,s->fonts.active);}
         if(font_modal(&s->fonts,&event,now,present,s,&tap,&s->font_pointer)){if(!s->fonts.active){pn_font_ui_close(&s->fonts);if(s->styles.active)(void)pn_style_ui_present(&s->styles,present,s);}continue;}
@@ -185,6 +195,16 @@ int pn_sim_library_window(pn_pool_t *pool,const char *directory,const char *font
             int command=event.type==SDL_KEYDOWN && !event.key.repeat?bookmark_key(&s->bookmarks,event.key.keysym.sym):event.type==SDL_TEXTINPUT && s->bookmarks.mode==PN_BUI_RENAME?PN_BUI_TEXT:-1;
             if(command>=0){status=pn_bookmark_ui_event(&s->bookmarks,command,event.type==SDL_TEXTINPUT?event.text.text:NULL,now,present,s);bookmark_report(&s->bookmarks,command,status);cancel_pointer(&input,&tap,(SDL_GetMouseState(NULL,NULL)&SDL_BUTTON_LMASK)==0);continue;}
         }
+        if(s->wallpaper.impl){
+            // 壁纸页：Esc返回/取消，Enter应用，鼠标松开命中。/ Wallpaper page: Esc back/cancel, Enter apply, mouse release hits.
+            int command=-1;
+            if(event.type==SDL_QUIT){pn_wallpaper_ui_close(&s->wallpaper);running=false;continue;}
+            if(event.type==SDL_KEYDOWN && !event.key.repeat){SDL_Keycode key=event.key.keysym.sym;if(key==SDLK_ESCAPE)command=s->wallpaper.screen==PN_WUI_LIST?PN_WUI_BACK:PN_WUI_CANCEL;else if(key==SDLK_RETURN)command=PN_WUI_APPLY;}
+            else if(event.type==SDL_MOUSEBUTTONUP && event.button.button==SDL_BUTTON_LEFT)command=pn_wallpaper_ui_hit(&s->wallpaper,event.button.x,event.button.y);
+            if(command>=0){status=pn_wallpaper_ui_event(&s->wallpaper,command,present,s);printf("wallpaper_ui command=%d status=%d screen=%d active=%d\n",command,(int)status,(int)s->wallpaper.screen,(int)s->wallpaper.active);
+                if(!s->wallpaper.active){pn_wallpaper_ui_close(&s->wallpaper);(void)draw(s);}}
+            continue;
+        }
         if(event.type==SDL_QUIT || (event.type==SDL_KEYDOWN && !event.key.repeat && event.key.keysym.sym==SDLK_ESCAPE)){
             if(reading(s)){status=return_to_shelf(s,now);if(status!=PN_OK){SDL_SetWindowTitle(s->window,"小纸 Pico - 保存失败，按退出键重试");if(!reading(s)){result=1;running=false;}}}
             else running=false;
@@ -206,6 +226,7 @@ int pn_sim_library_window(pn_pool_t *pool,const char *directory,const char *font
                 else if(key==SDLK_PLUS || key==SDLK_EQUALS){action=PN_APP_LARGER;turn=true;}
                 else if(key==SDLK_MINUS){action=PN_APP_SMALLER;turn=true;}
             }else{
+                if(key==SDLK_w && s->wallpaper_dir){status=pn_wallpaper_ui_open(&s->wallpaper,s->pool,&s->media,s->wallpaper_dir,s->wallpaper_store_ok?&s->wallpaper_store:NULL,present,s);printf("wallpaper_ui open status=%d\n",(int)status);continue;}
                 if(key==SDLK_r){s->recent_mode=!s->recent_mode;status=page(s,false,true);continue;}
                 if(key==SDLK_c){status=continue_book(s,now);continue;}
                 if(key==SDLK_RETURN){hit=s->selected;commit=true;}
@@ -253,6 +274,7 @@ int pn_sim_library_window(pn_pool_t *pool,const char *directory,const char *font
     }
 cleanup:
     if(reading(s))(void)active_close(s,SDL_GetTicks64());
+    pn_wallpaper_ui_close(&s->wallpaper);
     pn_font_ui_close(&s->fonts);
     pn_font_close(&s->font);pn_free(s->frame.pixels);pn_free(s->page);pn_free(s->recent);pn_free(s->covers);
     free(s->argb);SDL_DestroyTexture(s->texture);SDL_DestroyRenderer(s->renderer);SDL_DestroyWindow(s->window);

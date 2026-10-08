@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.22)
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 idf_build_set_property(MINIMAL_BUILD ON)
-project(pico_nano VERSION 0.0.50)
+project(pico_nano VERSION 0.0.51)
 if(NOT IDF_VERSION_MAJOR EQUAL 6 OR NOT IDF_VERSION_MINOR EQUAL 1)
     message(FATAL_ERROR "pico_nano requires ESP-IDF v6.1")
 endif()

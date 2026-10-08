@@ -13,7 +13,7 @@
 #define PN_CATALOG_NAME_MAX 768
 #define PN_CATALOG_PATH_MAX 1024
 
-typedef enum {PN_BOOK_TXT=1,PN_BOOK_EPUB,PN_BOOK_PDF,PN_BOOK_FB2,PN_BOOK_CBZ,PN_FILE_TTF} pn_book_format_t;
+typedef enum {PN_BOOK_TXT=1,PN_BOOK_EPUB,PN_BOOK_PDF,PN_BOOK_FB2,PN_BOOK_CBZ,PN_FILE_TTF,PN_FILE_IMAGE} pn_book_format_t;
 typedef struct {
     char name[PN_CATALOG_NAME_MAX]; ///< 原始UTF8文件名 / Original UTF8 filename
     char path[PN_CATALOG_PATH_MAX]; ///< 原实例路径，不是身份 / Instance path, not identity
@@ -46,3 +46,7 @@ pn_status_t pn_catalog_recent_page(const pn_recent_snapshot_t *snapshot,size_t s
 pn_status_t pn_catalog_font_page(pn_media_t *,const pn_media_lease_t *,const char *,const char *,pn_catalog_page_t *);
 /// 字体目录向前六项，源/输出规则同普通目录。/ Previous six font items using the same source/output rules as regular catalogs.
 pn_status_t pn_catalog_font_page_before(pn_media_t *,const pn_media_lease_t *,const char *,const char *,pn_catalog_page_t *);
+/// 壁纸目录专用，仅JPG/JPEG/PNG扩展名；内容仍须解码器确认。/ Wallpaper-only pages with JPG/JPEG/PNG extensions; content still requires decoder confirmation.
+pn_status_t pn_catalog_image_page(pn_media_t *,const pn_media_lease_t *,const char *,const char *,pn_catalog_page_t *);
+/// 壁纸目录向前六项。/ Previous six wallpaper items.
+pn_status_t pn_catalog_image_page_before(pn_media_t *,const pn_media_lease_t *,const char *,const char *,pn_catalog_page_t *);

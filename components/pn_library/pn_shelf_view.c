@@ -46,7 +46,7 @@ pn_status_t pn_shelf_render_covers(const pn_catalog_page_t *page,pn_font_t *font
     const char *labels[]={"上一页","下一页"};for(int i=0;i<2;i++){int x=32+i*320;pn_frame_rect(frame,x,1130,300,1,5);pn_frame_rect(frame,x,1210,300,1,5);pn_frame_rect(frame,x,1130,1,80,5);pn_frame_rect(frame,x+299,1130,1,80,5);s=at(font,frame,labels[i],x+100,1150,180,45,1);if(s!=PN_OK)return s;}
     return PN_OK;
 }
-int pn_shelf_hit(const pn_catalog_page_t *page,int x,int y){if(!page || x<32 || x>=652 || y<0 || y>=1216)return -1;if(y>=16 && y<96){if(x>=460)return PN_SHELF_TOGGLE;if(x>=272 && x<440)return PN_SHELF_CONTINUE;}if(y>=160 && y<1024){int row=(y-160)/144;if((y-160)%144<136 && row<(int)page->count)return row;}if(y>=1130 && y<=1210){if(x<332)return PN_SHELF_PREVIOUS;if(x>=352)return PN_SHELF_NEXT;}return -1;}
+int pn_shelf_hit(const pn_catalog_page_t *page,int x,int y){if(!page || x<32 || x>=652 || y<0 || y>=1216)return -1;if(y>=16 && y<96){if(x>=460)return PN_SHELF_TOGGLE;if(x>=272 && x<440)return PN_SHELF_CONTINUE;if(x<260)return PN_SHELF_MENU;}if(y>=160 && y<1024){int row=(y-160)/144;if((y-160)%144<136 && row<(int)page->count)return row;}if(y>=1130 && y<=1210){if(x<332)return PN_SHELF_PREVIOUS;if(x>=352)return PN_SHELF_NEXT;}return -1;}
 
 pn_status_t pn_shelf_render(const pn_catalog_page_t *p,pn_font_t *f,pn_frame_t *b){return pn_shelf_render_selected(p,f,b,-1);}
 pn_status_t pn_shelf_render_selected(const pn_catalog_page_t *p,pn_font_t *f,pn_frame_t *b,int selected){return pn_shelf_render_mode(p,f,b,selected,false);}

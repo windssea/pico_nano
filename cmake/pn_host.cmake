@@ -34,6 +34,7 @@ add_library(pn_core STATIC ${ui_font_c}
     ${PN_ROOT}/components/pn_library/pn_catalog.c
     ${PN_ROOT}/components/pn_library/pn_cover.c
     ${PN_ROOT}/components/pn_personalization/pn_wallpaper.c
+    ${PN_ROOT}/components/pn_personalization/pn_wallpaper_ui.c
     ${PN_ROOT}/components/pn_library/pn_shelf_view.c
     ${PN_ROOT}/components/pn_library/pn_font_preview.c
     ${PN_ROOT}/components/pn_font/pn_font.c

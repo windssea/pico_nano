@@ -22,7 +22,7 @@ static bool safe_name(const char *name){
 }
 static pn_book_format_t format(const char *name){const char *ext=strrchr(name,'.');if(!ext)return 0;if(!strcasecmp(ext,".txt"))return PN_BOOK_TXT;if(!strcasecmp(ext,".epub"))return PN_BOOK_EPUB;if(!strcasecmp(ext,".pdf"))return PN_BOOK_PDF;if(!strcasecmp(ext,".fb2"))return PN_BOOK_FB2;if(!strcasecmp(ext,".cbz"))return PN_BOOK_CBZ;return 0;}
 static pn_status_t scan(pn_media_t *media,const pn_media_lease_t *lease,const char *directory,
-    const char *after,pn_catalog_page_t *page,bool reverse,bool fonts){
+    const char *after,pn_catalog_page_t *page,bool reverse,int filter){
     if(!media || !lease || !directory || !*directory || !after || !page)return PN_INVALID;
     if(strlen(directory)>=PN_CATALOG_PATH_MAX || strlen(after)>=PN_CATALOG_NAME_MAX)return PN_LIMIT;
     pn_status_t status=pn_media_validate(media,lease);if(status!=PN_OK)return status;
@@ -30,7 +30,7 @@ static pn_status_t scan(pn_media_t *media,const pn_media_lease_t *lease,const ch
     memset(page,0,sizeof *page);DIR *dir=opendir(directory);if(!dir)return PN_IO;
     char greatest[PN_CATALOG_NAME_MAX]={0};
     for(;;){status=pn_media_validate(media,lease);if(status!=PN_OK)break;errno=0;struct dirent *entry=readdir(dir);if(!entry){if(errno)status=PN_IO;break;}
-        const char *name=entry->d_name;if(name[0]=='.')continue;const char *ext=strrchr(name,'.');pn_book_format_t kind=fonts?(ext && !strcasecmp(ext,".ttf")?PN_FILE_TTF:0):format(name);if(!kind)continue;
+        const char *name=entry->d_name;if(name[0]=='.')continue;const char *ext=strrchr(name,'.');pn_book_format_t kind=filter==1?(ext && !strcasecmp(ext,".ttf")?PN_FILE_TTF:0):filter==2?(ext && (!strcasecmp(ext,".jpg") || !strcasecmp(ext,".jpeg") || !strcasecmp(ext,".png"))?PN_FILE_IMAGE:0):format(name);if(!kind)continue;
         if(strlen(name)>=PN_CATALOG_NAME_MAX || !safe_name(name)){page->skipped++;continue;}
         pn_catalog_item_t item={.format=kind};int length=snprintf(item.path,sizeof item.path,"%s/%s",directory,name);
         if(length<0 || (size_t)length>=sizeof item.path){page->skipped++;continue;}
@@ -57,8 +57,8 @@ static pn_status_t scan(pn_media_t *media,const pn_media_lease_t *lease,const ch
     page->more=page->count && strcmp(greatest,page->items[page->count-1].name)>0;return PN_OK;
 }
 
-pn_status_t pn_catalog_page(pn_media_t *m,const pn_media_lease_t *l,const char *d,const char *a,pn_catalog_page_t *p){return scan(m,l,d,a,p,false,false);}
-pn_status_t pn_catalog_page_before(pn_media_t *m,const pn_media_lease_t *l,const char *d,const char *a,pn_catalog_page_t *p){return scan(m,l,d,a,p,true,false);}
+pn_status_t pn_catalog_page(pn_media_t *m,const pn_media_lease_t *l,const char *d,const char *a,pn_catalog_page_t *p){return scan(m,l,d,a,p,false,0);}
+pn_status_t pn_catalog_page_before(pn_media_t *m,const pn_media_lease_t *l,const char *d,const char *a,pn_catalog_page_t *p){return scan(m,l,d,a,p,true,0);}
 pn_status_t pn_catalog_recent_page(const pn_recent_snapshot_t *snapshot,size_t start,pn_catalog_page_t *page){
     if(!snapshot || !page || snapshot->count>PN_RECENT_MAX || start>snapshot->count)return PN_INVALID;
     memset(page,0,sizeof *page);size_t count=snapshot->count-start;if(count>PN_CATALOG_PAGE_MAX)count=PN_CATALOG_PAGE_MAX;
@@ -73,5 +73,7 @@ pn_status_t pn_catalog_recent_page(const pn_recent_snapshot_t *snapshot,size_t s
     page->count=count;page->more=start+count<snapshot->count;return PN_OK;
 }
 
-pn_status_t pn_catalog_font_page(pn_media_t *m,const pn_media_lease_t *l,const char *d,const char *a,pn_catalog_page_t *p){return scan(m,l,d,a,p,false,true);}
-pn_status_t pn_catalog_font_page_before(pn_media_t *m,const pn_media_lease_t *l,const char *d,const char *a,pn_catalog_page_t *p){return scan(m,l,d,a,p,true,true);}
+pn_status_t pn_catalog_font_page(pn_media_t *m,const pn_media_lease_t *l,const char *d,const char *a,pn_catalog_page_t *p){return scan(m,l,d,a,p,false,1);}
+pn_status_t pn_catalog_font_page_before(pn_media_t *m,const pn_media_lease_t *l,const char *d,const char *a,pn_catalog_page_t *p){return scan(m,l,d,a,p,true,1);}
+pn_status_t pn_catalog_image_page(pn_media_t *m,const pn_media_lease_t *l,const char *d,const char *a,pn_catalog_page_t *p){return scan(m,l,d,a,p,false,2);}
+pn_status_t pn_catalog_image_page_before(pn_media_t *m,const pn_media_lease_t *l,const char *d,const char *a,pn_catalog_page_t *p){return scan(m,l,d,a,p,true,2);}
