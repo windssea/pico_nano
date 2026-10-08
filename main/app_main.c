@@ -22,6 +22,7 @@
 #include "read_pico_pmu.h"
 #include "esp_littlefs.h"
 #include "esp_heap_caps.h"
+#include "esp_random.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "nvs_flash.h"
@@ -56,6 +57,10 @@ static pn_device_transfer_t transfer;
 static bool reading_menu,transfer_return,transfer_lock;
 static pn_transfer_view_t transfer_view,last_transfer_view;
 static uint64_t last_transfer_draw;
+static pn_shelf_covers_t *shelf_covers;
+static bool covers_dirty,touch_held;
+static uint8_t cover_salt[16];
+static const char *const cover_cache="/sdcard/.readpico/covers";
 static void *psram_alloc(void *ctx,size_t size){(void)ctx;return heap_caps_malloc(size,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);}
 static void psram_free(void *ctx,void *ptr){(void)ctx;heap_caps_free(ptr);}
 static uint64_t now_ms(void){return (uint64_t)(esp_timer_get_time()/1000);}
@@ -106,6 +111,23 @@ static bool stop_reader(void){
     pn_toc_ui_close(&toc);
     pn_bookmark_ui_cancel(&bookmarks);pn_style_ui_close(&styles);pn_font_ui_close(&fonts);return true;
 }
+/// 只按当前页与封面槽绘制书架，不扫描目录。/ Draw the shelf from the current page and cover slots only, without scanning.
+static pn_status_t draw_shelf(pn_refresh_t profile){
+    uint8_t *pixels=pn_alloc(&pool,684u*1216u/2u);pn_frame_t frame;pn_font_t font={0};pn_text_source_t builtin=pn_font_builtin_source();
+    pn_status_t status=pn_frame_bind(&frame,pixels,684u*1216u/2u,684,1216)?PN_OK:PN_NO_MEMORY;
+    if(status==PN_OK)status=pn_font_open(&font,&pool,&builtin,24);
+    if(status==PN_OK)status=pn_shelf_render_covers(shelf_page,&font,&frame,-1,recent_mode,true,shelf_covers);
+    if(status==PN_OK)status=present(NULL,&frame,profile);
+    pn_font_close(&font);pn_free(pixels);return status;
+}
+/// 空闲时解码一本封面；整页完成后一次GL16重绘，避免逐本闪屏。/ Decode one cover per idle tick; redraw once with GL16 after the page completes to avoid per-book flashing.
+static void tick_covers(void){
+    size_t free_bytes=pool.limit>pool.used?pool.limit-pool.used:0,reserve=512u*1024u;bool changed=false;
+    pn_status_t status=pn_shelf_covers_step(shelf_covers,shelf_page,&pool,&sd_media,cover_cache,cover_salt,free_bytes>reserve?free_bytes-reserve:1,&changed);
+    if(changed)covers_dirty=true;
+    if(status==PN_EMPTY && covers_dirty){covers_dirty=false;if(draw_shelf(PN_REFRESH_GL16)!=PN_OK)ESP_LOGW(TAG,"Cover redraw failed");}
+    else if(status!=PN_OK && status!=PN_EMPTY && status!=PN_BUSY){ESP_LOGW(TAG,"Cover queue stopped: %d",(int)status);pn_shelf_covers_reset(shelf_covers,NULL);covers_dirty=false;}
+}
 static void show_shelf(const char *cursor,bool previous){
     if(!shelf_page){shelf_page=pn_alloc(&pool,sizeof *shelf_page);if(!shelf_page){message("内存不足","稍后重试");return;}}
     pn_catalog_page_t *next=pn_alloc(&pool,sizeof *next);if(!next){message("内存不足","稍后重试");return;}
@@ -129,12 +151,11 @@ static void show_shelf(const char *cursor,bool previous){
     }
     if(status==PN_OK && (next->count || !*cursor))*shelf_page=*next;
     pn_free(next);
-    uint8_t *pixels=pn_alloc(&pool,684u*1216u/2u);pn_frame_t frame;pn_font_t font={0};pn_text_source_t builtin=pn_font_builtin_source();
-    if(status==PN_OK && !pn_frame_bind(&frame,pixels,684u*1216u/2u,684,1216))status=PN_NO_MEMORY;
-    if(status==PN_OK)status=pn_font_open(&font,&pool,&builtin,24);
-    if(status==PN_OK)status=pn_shelf_render_mode_with_transfer(shelf_page,&font,&frame,-1,recent_mode,true);
-    if(status==PN_OK)status=present(NULL,&frame,PN_REFRESH_GC16);
-    pn_font_close(&font);pn_free(pixels);
+    // 换页先用缓存封面，首帧即完整；未命中的留给空闲逐条解码。/ Use cached covers on page change so the first paint is complete; misses decode later per idle tick.
+    if(status==PN_OK && !shelf_covers)shelf_covers=pn_alloc(&pool,sizeof *shelf_covers);
+    if(status==PN_OK && shelf_covers){bool changed;pn_shelf_covers_reset(shelf_covers,shelf_page);covers_dirty=false;
+        if(pn_shelf_covers_cached(shelf_covers,shelf_page,&pool,&sd_media,cover_cache,&changed)!=PN_OK)pn_shelf_covers_reset(shelf_covers,NULL);}
+    if(status==PN_OK)status=draw_shelf(PN_REFRESH_GC16);
     if(status!=PN_OK){message("读取书架失败","当前位置仍保留，重试");return;}
     status_page=false;shelf_mode=true;locked=false;
 }
@@ -198,11 +219,12 @@ static void device_task(void *arg){
     size_t available=heap_caps_get_free_size(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
     size_t budget=available>256u*1024u?available-256u*1024u:0;if(budget>6u*1024u*1024u)budget=6u*1024u*1024u;
     if(pn_pool_init(&pool,budget,psram_alloc,psram_free,NULL)!=0){read_pico_deinit(&hardware);vTaskDelete(NULL);return;}
-    pn_media_init(&sd_media);pn_media_init(&data_media);read_pico_pmu_drain_events();
+    pn_media_init(&sd_media);pn_media_init(&data_media);read_pico_pmu_drain_events();esp_fill_random(cover_salt,sizeof cover_salt);
     if(read_pico_pmu_report_ready()!=ESP_OK){ESP_LOGE(TAG,"PMU running handshake failed; display withheld");read_pico_deinit(&hardware);vTaskDelete(NULL);return;}
     start_reader();pn_reader_input_t input={0};pn_tap_t tap={0};uint64_t last_card=0,last_key=0,last_ui_retry=0,boot=now_ms();
     for(;;){uint64_t now=now_ms();
         if(transfer.impl)tick_transfer(now);
+        if(shelf_mode && shelf_covers && shelf_page && !transfer.impl && !locked && !status_page && !reading_menu && !touch_held)tick_covers();
         if(!transfer.impl && now-last_card>=250){last_card=now;read_pico_sd_info_t card={0};(void)read_pico_sd_get_info(&card);
             if(sd_media.available && !card.mounted){if(reader_active()){if(epub.impl)(void)pn_epub_app_media_lost(&epub);else (void)pn_reader_app_media_lost(&reader);(void)stop_reader();}else (void)pn_media_detach(&sd_media);selected_path[0]=0;pn_reader_input_cancel(&input);message("卡已移除","保留上次阅读位置\n插卡后点下方重试");}}
         if(now-last_key>=100){last_key=now;if(read_pico_pmu_take_key_short() && now-boot>=1000){pn_reader_input_cancel(&input);
@@ -214,7 +236,7 @@ static void device_task(void *arg){
         if(styles.active && !styles.presented && !locked && now-last_ui_retry>=1000){last_ui_retry=now;(void)pn_style_ui_present(&styles,present,NULL);}
         if(styles.request_fonts && !locked){styles.request_fonts=false;(void)pn_font_ui_open(&fonts,&pool,epub.impl?NULL:&reader,epub.impl?&epub:NULL,NULL,present,NULL);}
         if(fonts.active && !fonts.presented && !locked && now-last_ui_retry>=1000){last_ui_retry=now;(void)pn_font_ui_present(&fonts,present,NULL);}
-        if(hardware.touch_ready){cst836u_touch_t touch={0};esp_err_t read=cst836u_read(hardware.touch,&touch);pn_reader_action_t action;
+        if(hardware.touch_ready){cst836u_touch_t touch={0};esp_err_t read=cst836u_read(hardware.touch,&touch);pn_reader_action_t action;touch_held=read==ESP_OK && touch.count>0;
             int hit=-1,selection=-1;
             if(transfer.impl)hit=pn_transfer_view_hit(&transfer_view,touch.x,touch.y);
             else if(reading_menu)hit=pn_reading_menu_hit(touch.x,touch.y);

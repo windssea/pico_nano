@@ -55,6 +55,11 @@ set_tests_properties(epub_window PROPERTIES LABELS "reader;ui;storage")
 endif()
 
 if(PN_SIM_SDL)
+add_test(NAME cover_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_cover_window.py $<TARGET_FILE:pn_sim>)
+set_tests_properties(cover_window PROPERTIES LABELS "library;ui;storage")
+endif()
+
+if(PN_SIM_SDL)
 add_test(NAME epub_library COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_epub_library.py $<TARGET_FILE:pn_sim>)
 endif()
 

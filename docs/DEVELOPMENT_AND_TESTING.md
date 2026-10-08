@@ -1,6 +1,6 @@
 # 开发环境与测试说明
 
-当前基线0.0.48。可运行命令统一见 [BUILDING](BUILDING.md)，功能/待办见 [PROJECT_STATUS](PROJECT_STATUS.md)，发布门保留在 [VALIDATION](VALIDATION.md)。以下区分“代码运行在哪里”和“能证明什么”。
+当前基线0.0.49。可运行命令统一见 [BUILDING](BUILDING.md)，功能/待办见 [PROJECT_STATUS](PROJECT_STATUS.md)，发布门保留在 [VALIDATION](VALIDATION.md)。以下区分“代码运行在哪里”和“能证明什么”。
 
 ## ESP32-S3与PC模拟的区别
 

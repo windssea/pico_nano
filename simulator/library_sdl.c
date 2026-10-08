@@ -44,6 +44,10 @@ typedef struct {
     SDL_Texture *texture;
     uint32_t *argb;
     int selected;
+    pn_shelf_covers_t *covers; ///< 当前页封面槽 / Current-page cover slots
+    char cover_dir[512]; ///< 显式--cover-cache目录，空则只解码不缓存 / Explicit --cover-cache directory; empty decodes without caching
+    uint8_t salt[16]; ///< EPUB XML哈希盐 / EPUB XML hash salt
+    bool covers_dirty; ///< 本页有新封面待重绘 / New covers await a redraw for this page
 } library_t;
 static bool reading(library_t *s){return s->reader.impl || s->epub.impl;}
 static pn_status_t active_step(library_t *s,pn_reader_action_t action,uint64_t now,pn_reader_present_fn present,void *ctx){return s->epub.impl?pn_epub_app_step(&s->epub,action,now,present,ctx):pn_reader_app_step(&s->reader,action,now,present,ctx);}
@@ -59,8 +63,23 @@ static pn_status_t present(void *ctx,const pn_frame_t *frame,pn_refresh_t profil
 static pn_status_t draw(library_t *s){
     if(!s->frame.pixels){uint8_t *pixels=pn_alloc(s->pool,342u*1216u);if(!pixels || !pn_frame_bind(&s->frame,pixels,342u*1216u,684,1216)){pn_free(pixels);return PN_NO_MEMORY;}}
     if(!s->font.impl){pn_text_source_t builtin=pn_font_builtin_source();pn_status_t opened=pn_font_open(&s->font,s->pool,&builtin,24);if(opened!=PN_OK)return opened;}
-    pn_status_t status=pn_shelf_render_mode(s->page,&s->font,&s->frame,s->selected,s->recent_mode);
+    pn_status_t status=pn_shelf_render_covers(s->page,&s->font,&s->frame,s->selected,s->recent_mode,false,s->covers);
     return status==PN_OK?present(s,&s->frame,PN_REFRESH_GC16):status;
+}
+/* 换页：先复用缓存封面再绘制，其余空闲逐条解码。/ Page change: reuse cached covers before drawing; the rest decode one per idle tick. */
+static void covers_reset(library_t *s){
+    if(!s->covers)return;
+    bool changed;pn_shelf_covers_reset(s->covers,s->page);s->covers_dirty=false;
+    if(*s->cover_dir && pn_shelf_covers_cached(s->covers,s->page,s->pool,&s->media,s->cover_dir,&changed)!=PN_OK)pn_shelf_covers_reset(s->covers,NULL);
+}
+static void covers_tick(library_t *s){
+    if(!s->covers)return;
+    bool changed=false;
+    pn_status_t status=pn_shelf_covers_step(s->covers,s->page,s->pool,&s->media,*s->cover_dir?s->cover_dir:NULL,s->salt,s->pool->limit>s->pool->used?s->pool->limit-s->pool->used:1,&changed);
+    if(changed)s->covers_dirty=true;
+    if(status==PN_EMPTY && s->covers_dirty){s->covers_dirty=false;size_t ready=0;for(size_t i=0;i<s->page->count;i++)ready+=s->covers->state[i]==PN_COVER_READY;
+        printf("covers ready=%zu status=%d\n",ready,(int)draw(s));}
+    else if(status!=PN_OK && status!=PN_EMPTY && status!=PN_BUSY)pn_shelf_covers_reset(s->covers,NULL);
 }
 static pn_status_t recent_load(library_t *s){
     pn_media_lease_t lease;pn_status_t status=pn_media_acquire(&s->state_media,PN_MEDIA_READ,&lease);if(status!=PN_OK)return status;
@@ -72,7 +91,7 @@ static pn_status_t page(library_t *s,bool previous,bool first){
     if(s->recent_mode){pn_status_t status=recent_load(s);if(status!=PN_OK)return status;
         size_t start=first?0:previous?(s->recent_start>=6?s->recent_start-6:0):s->recent_start+6;
         if(start>=s->recent->count && start)return PN_EMPTY;
-        status=pn_catalog_recent_page(s->recent,start,s->page);if(status==PN_OK){s->recent_start=start;s->selected=s->page->count?0:-1;status=draw(s);printf("recent_page start=%zu count=%zu\n",start,s->page->count);}return status;
+        status=pn_catalog_recent_page(s->recent,start,s->page);if(status==PN_OK){s->recent_start=start;s->selected=s->page->count?0:-1;covers_reset(s);status=draw(s);printf("recent_page start=%zu count=%zu\n",start,s->page->count);}return status;
     }
     if(!first && (!s->page->count || (!previous && !s->page->more)))return PN_EMPTY;
     pn_catalog_page_t *next=pn_alloc(s->pool,sizeof *next);if(!next)return PN_NO_MEMORY;
@@ -82,7 +101,7 @@ static pn_status_t page(library_t *s,bool previous,bool first){
         status=previous?pn_catalog_page_before(&s->media,&lease,s->directory,cursor,next):pn_catalog_page(&s->media,&lease,s->directory,cursor,next);
         (void)pn_media_release(&s->media,&lease);
     }
-    if(status==PN_OK && (first || next->count)){*s->page=*next;s->selected=next->count?0:-1;status=draw(s);
+    if(status==PN_OK && (first || next->count)){*s->page=*next;s->selected=next->count?0:-1;covers_reset(s);status=draw(s);
         if(status==PN_OK)printf("library_page first=%s count=%zu\n",next->count?next->items[0].name:"",next->count);
     }else if(status==PN_OK)status=PN_EMPTY;
     pn_free(next);return status;
@@ -114,18 +133,20 @@ static pn_status_t return_to_shelf(library_t *s,uint64_t now){
     pn_status_t status=active_close(s,now);
     if(status==PN_OK){pn_toc_ui_close(&s->toc);pn_bookmark_ui_cancel(&s->bookmarks);pn_style_ui_close(&s->styles);pn_font_ui_close(&s->fonts);SDL_StopTextInput();status=draw(s);printf("library_return status=%d\n",(int)status);}return status;
 }
-int pn_sim_library_window(pn_pool_t *pool,const char *directory,const char *font_path,const char *fallback_path,const char *state_dir){
+int pn_sim_library_window(pn_pool_t *pool,const char *directory,const char *font_path,const char *fallback_path,const char *state_dir,const char *cover_cache){
     if(SDL_Init(SDL_INIT_VIDEO)!=0)return 1;
     library_t *s=pn_alloc(pool,sizeof *s);if(!s){SDL_Quit();return 1;}
     memset(s,0,sizeof *s);s->pool=pool;s->directory=directory;s->font_path=font_path;s->fallback_path=fallback_path;s->state_dir=state_dir;
     s->page=pn_alloc(pool,sizeof *s->page);s->frame.pixels=pn_alloc(pool,342u*1216u);
-    s->recent=pn_alloc(pool,sizeof *s->recent);
+    s->recent=pn_alloc(pool,sizeof *s->recent);s->covers=pn_alloc(pool,sizeof *s->covers);if(s->covers)pn_shelf_covers_reset(s->covers,NULL);
+    if(cover_cache && (size_t)snprintf(s->cover_dir,sizeof s->cover_dir,"%s",cover_cache)>=sizeof s->cover_dir)s->cover_dir[0]=0;
+    {FILE *random=fopen("/dev/urandom","rb");bool seeded=random && fread(s->salt,1,sizeof s->salt,random)==sizeof s->salt;if(random)fclose(random);if(!seeded){pn_free(s->covers);s->covers=NULL;}}
     s->window=SDL_CreateWindow("小纸 Pico",SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,342,608,SDL_WINDOW_RESIZABLE);
     s->renderer=s->window?SDL_CreateRenderer(s->window,-1,SDL_RENDERER_SOFTWARE):NULL;
     s->texture=s->renderer?SDL_CreateTexture(s->renderer,SDL_PIXELFORMAT_ARGB8888,SDL_TEXTUREACCESS_STATIC,684,1216):NULL;
     s->argb=s->texture?malloc(684u*1216u*sizeof(uint32_t)):NULL;
     int result=1;pn_status_t status=PN_NO_MEMORY;
-    if(!s->page || !s->recent || !s->frame.pixels || !s->argb)goto cleanup;
+    if(!s->page || !s->recent || !s->covers || !s->frame.pixels || !s->argb)goto cleanup;
     memset(s->page,0,sizeof *s->page);
     if(!pn_frame_bind(&s->frame,s->frame.pixels,342u*1216u,684,1216) || SDL_RenderSetLogicalSize(s->renderer,684,1216)!=0)goto cleanup;
     pn_text_source_t source=pn_font_builtin_source();status=pn_font_open(&s->font,pool,&source,24);if(status!=PN_OK)goto cleanup;
@@ -137,7 +158,7 @@ int pn_sim_library_window(pn_pool_t *pool,const char *directory,const char *font
         script_queue(&script);SDL_Event event;bool got=SDL_WaitEventTimeout(&event,100)!=0;uint64_t now=SDL_GetTicks64();
         if(reading(s)){status=s->epub.impl?pn_epub_app_tick(&s->epub,now):pn_reader_app_tick(&s->reader,now);if(status!=PN_OK && status!=PN_BUSY)SDL_SetWindowTitle(s->window,"小纸 Pico - 保存失败，关闭前请重试");}
         if(s->bookmarks.mode!=PN_BUI_CLOSED && !s->bookmarks.presented && now-s->ui_retry>=1000){s->ui_retry=now;status=pn_bookmark_ui_present(&s->bookmarks,present,s);}
-        if(!got)continue;
+        if(!got){if(!reading(s) && !s->pointer_down)covers_tick(s);continue;}
         script_received(&script,&event);
         if(s->styles.request_fonts){s->styles.request_fonts=false;status=pn_font_ui_open(&s->fonts,s->pool,s->epub.impl?NULL:&s->reader,s->epub.impl?&s->epub:NULL,NULL,present,s);printf("font_ui open status=%d active=%d\n",status,s->fonts.active);}
         if(font_modal(&s->fonts,&event,now,present,s,&tap,&s->font_pointer)){if(!s->fonts.active){pn_font_ui_close(&s->fonts);if(s->styles.active)(void)pn_style_ui_present(&s->styles,present,s);}continue;}
@@ -233,7 +254,7 @@ int pn_sim_library_window(pn_pool_t *pool,const char *directory,const char *font
 cleanup:
     if(reading(s))(void)active_close(s,SDL_GetTicks64());
     pn_font_ui_close(&s->fonts);
-    pn_font_close(&s->font);pn_free(s->frame.pixels);pn_free(s->page);pn_free(s->recent);
+    pn_font_close(&s->font);pn_free(s->frame.pixels);pn_free(s->page);pn_free(s->recent);pn_free(s->covers);
     free(s->argb);SDL_DestroyTexture(s->texture);SDL_DestroyRenderer(s->renderer);SDL_DestroyWindow(s->window);
     pn_free(s);SDL_Quit();return result;
 }

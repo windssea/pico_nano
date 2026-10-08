@@ -2,8 +2,8 @@
 /*
  * SPDX-FileCopyrightText: 2026 pico_nano contributors
  * SPDX-License-Identifier: Apache-2.0
- * 中文：无封面列表绘制，完整路径仅在控制器保留。
- * English: cover-fallback list drawing, with complete paths retained by the controller.
+ * 中文：书目列表绘制，已就绪封面缩略图优先，否则格式占位卡；完整路径仅在控制器保留。
+ * English: catalog-list drawing preferring ready cover thumbnails over format placeholder cards, with complete paths retained by the controller.
  */
 #include "pn_shelf_view.h"
 #include <stdio.h>
@@ -22,7 +22,7 @@ static pn_status_t label(pn_font_t *font,pn_frame_t *part,const char *s,unsigned
 }
 static pn_status_t at(pn_font_t *font,pn_frame_t *frame,const char *s,int x,int y,int w,int h,unsigned lines){pn_frame_t part={frame->pixels+(size_t)y*frame->stride+(size_t)x/2,w,h,frame->stride};return label(font,&part,s,lines);}
 static const char *kind(pn_book_format_t f){switch(f){case PN_BOOK_TXT:return "TXT";case PN_BOOK_EPUB:return "EPUB";case PN_BOOK_PDF:return "PDF";case PN_BOOK_FB2:return "FB2";case PN_BOOK_CBZ:return "CBZ";default:return "?";}}
-pn_status_t pn_shelf_render_mode_with_transfer(const pn_catalog_page_t *page,pn_font_t *font,pn_frame_t *frame,int selected,bool recent,bool transfer){
+pn_status_t pn_shelf_render_covers(const pn_catalog_page_t *page,pn_font_t *font,pn_frame_t *frame,int selected,bool recent,bool transfer,const pn_shelf_covers_t *covers){
     if(!page || page->count>6 || !font || !font->impl || !frame || !frame->pixels || frame->width!=684 || frame->height!=1216 || frame->stride<342)return PN_INVALID;
     pn_frame_clear(frame,15);pn_status_t s=at(font,frame,"小纸 Pico",32,20,620,52,1);if(s!=PN_OK)return s;
     s=at(font,frame,recent?"最近阅读":"书架",32,90,620,50,1);if(s!=PN_OK)return s;pn_frame_rect(frame,32,144,620,1,7);
@@ -30,8 +30,11 @@ pn_status_t pn_shelf_render_mode_with_transfer(const pn_catalog_page_t *page,pn_
     s=at(font,frame,recent?"全部":"最近",464,30,170,50,1);if(s!=PN_OK)return s;
     pn_frame_rect(frame,272,16,168,1,5);pn_frame_rect(frame,272,95,168,1,5);pn_frame_rect(frame,460,16,192,1,5);pn_frame_rect(frame,460,95,192,1,5);
     for(size_t i=0;i<page->count;i++){const pn_catalog_item_t *item=&page->items[i];if(strnlen(item->name,sizeof item->name)>=sizeof item->name)return PN_INVALID;int y=160+(int)i*144;
-        pn_frame_rect(frame,32,y,72,100,13);pn_frame_rect(frame,32,y,72,1,4);pn_frame_rect(frame,32,y+99,72,1,4);pn_frame_rect(frame,32,y,1,100,4);pn_frame_rect(frame,103,y,1,100,4);
-        s=at(font,frame,kind(item->format),34,y+34,68,42,1);if(s!=PN_OK)return s;
+        pn_frame_t cover;bool drawn=pn_shelf_cover_frame(covers,i,&cover);
+        if(drawn){for(int cy=0;cy<PN_COVER_HEIGHT;cy++)for(int cx=0;cx<PN_COVER_WIDTH;cx++)pn_frame_pixel(frame,32+cx,y+cy,pn_frame_get(&cover,cx,cy));}
+        else pn_frame_rect(frame,32,y,72,100,13);
+        pn_frame_rect(frame,32,y,72,1,4);pn_frame_rect(frame,32,y+99,72,1,4);pn_frame_rect(frame,32,y,1,100,4);pn_frame_rect(frame,103,y,1,100,4);
+        if(!drawn){s=at(font,frame,kind(item->format),34,y+34,68,42,1);if(s!=PN_OK)return s;}
         s=at(font,frame,item->name,128,y+4,524,80,2);if(s!=PN_OK)return s;
         if((int)i==selected){pn_frame_rect(frame,120,y,2,132,0);pn_frame_rect(frame,648,y,2,132,0);}
         char details[96];if(item->identified && item->progress<=10000)snprintf(details,sizeof details,"%s  |  %llu KB  |  %u%%",kind(item->format),(unsigned long long)(item->size/1024+(item->size%1024!=0)),(unsigned)(item->progress/100));
@@ -49,4 +52,5 @@ pn_status_t pn_shelf_render(const pn_catalog_page_t *p,pn_font_t *f,pn_frame_t *
 pn_status_t pn_shelf_render_selected(const pn_catalog_page_t *p,pn_font_t *f,pn_frame_t *b,int selected){return pn_shelf_render_mode(p,f,b,selected,false);}
 
 pn_status_t pn_shelf_render_mode(const pn_catalog_page_t *p,pn_font_t *f,pn_frame_t *b,int selected,bool recent){return pn_shelf_render_mode_with_transfer(p,f,b,selected,recent,false);}
+pn_status_t pn_shelf_render_mode_with_transfer(const pn_catalog_page_t *p,pn_font_t *f,pn_frame_t *b,int selected,bool recent,bool transfer){return pn_shelf_render_covers(p,f,b,selected,recent,transfer,NULL);}
 int pn_shelf_hit_with_transfer(const pn_catalog_page_t *p,int x,int y,bool enabled){if(enabled && p && x>=32 && x<652 && y>=1040 && y<1120)return PN_SHELF_TRANSFER;return pn_shelf_hit(p,x,y);}

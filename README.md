@@ -1,6 +1,6 @@
 # 小纸 Pico 阅读固件 / Read Pico Reader
 
-面向RDP-G01-W的独立ESP32-S3电子书固件，开发目录pico_nano。当前0.0.48开发版：TXT/EPUB、位置/书签、排版/字体、中文网页上传、设备热点/扫码和异步停止已接入代码与软件测试；**完整第一版尚未完成，未进行本项目烧写与真机验收。**
+面向RDP-G01-W的独立ESP32-S3电子书固件，开发目录pico_nano。当前0.0.49开发版：TXT/EPUB、书架封面、位置/书签、排版/字体、中文网页上传、设备热点/扫码和异步停止已接入代码与软件测试；**完整第一版尚未完成，未进行本项目烧写与真机验收。**
 
 | 入口 | 内容 |
 | --- | --- |
@@ -12,6 +12,7 @@
 | [界面与交互](docs/UI_UX.md) | 设计目标、阅读/设置流程 |
 | [设备传输入口](docs/DEVICE_TRANSFER_ENTRY.md) | 热点入口、后台停止、返回原书和所有权 |
 | [扫码传书](docs/TRANSFER_QR.md) | 连接热点/打开网页两码、独立解码检查 |
+| [书架封面](docs/COVERS.md) | EPUB/TXT封面提取、空闲队列、TF缓存与内存边界 |
 | [PC网页服务](docs/TRANSFER_WEB.md) | 真实HTTP开发入口与资源安装 |
 | [格式](docs/FORMATS.md) / [排版](docs/RENDERING.md) | TXT/EPUB/PDF/FB2/CBZ目标与实现边界 |
 | [字体与壁纸](docs/FONTS_AND_WALLPAPERS.md) | 字体管理与锁屏图片目标/未完成项 |

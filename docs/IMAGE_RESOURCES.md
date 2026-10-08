@@ -1,6 +1,6 @@
 # 出版物PNG/JPEG图片资源
 
-0.0.24加入pn_image内容路由和pn_epub_image资源桥接，host epub_capture已接入；可从原EPUB绘制PNG插图、基线/渐进式JPEG及JPEG封面。书架封面缓存、壁纸安装、设备/SDL EPUB交互会话仍需接入，不能把捕获当第一版完整验收。
+0.0.24加入pn_image内容路由和pn_epub_image资源桥接，host epub_capture已接入；可从原EPUB绘制PNG插图、基线/渐进式JPEG及JPEG封面。书架封面已在0.0.49接入（见 [书架封面](COVERS.md)），壁纸安装、设备/SDL EPUB交互会话仍需接入，不能把捕获当第一版完整验收。
 
 ## 内容识别与校验
 

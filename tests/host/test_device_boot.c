@@ -42,6 +42,7 @@ esp_err_t read_pico_sd_get_info(read_pico_sd_info_t *i){memset(i,0,sizeof *i);re
 esp_err_t read_pico_sd_remount(void){assert(false);return ESP_FAIL;}
 esp_err_t cst836u_read(void *h,cst836u_touch_t *t){(void)h;(void)t;assert(false);return ESP_FAIL;}
 void read_pico_pmu_drain_events(void){}
+void esp_fill_random(void *p,size_t n){memset(p,0xa5,n);}
 esp_err_t read_pico_pmu_report_ready(void){return ready_bad?ESP_FAIL:ESP_OK;}
 bool read_pico_pmu_take_key_short(void){return false;}
 void *heap_caps_malloc(size_t n,int caps){assert(caps==3);return malloc(n);}

@@ -95,6 +95,10 @@ add_executable(jpeg_dump jpeg_dump.c)
 target_link_libraries(jpeg_dump PRIVATE pn_core)
 add_test(NAME jpeg_oracle COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_jpeg.py $<TARGET_FILE:jpeg_dump> ${PN_ROOT}/tests/fixtures)
 
+add_executable(test_cover test_cover.c)
+target_link_libraries(test_cover PRIVATE pn_core)
+add_test(NAME cover COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_cover.py $<TARGET_FILE:test_cover> ${PN_ROOT}/tests/fixtures)
+
 add_executable(test_image test_image.c)
 target_link_libraries(test_image PRIVATE pn_core)
 add_test(NAME image_route COMMAND test_image ${PN_ROOT}/tests/fixtures)

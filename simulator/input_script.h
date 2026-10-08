@@ -4,16 +4,19 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-typedef struct {char copy[512];char *next;bool pending;unsigned pointer;int x,y;} sim_script_t;
+typedef struct {char copy[512];char *next;bool pending;unsigned pointer;int x,y;uint64_t resume;} sim_script_t;
 static void script_init(sim_script_t *script,const char *name){
     memset(script,0,sizeof *script);const char *value=getenv(name);if(!value || strlen(value)>500)return;
     strcpy(script->copy,value);script->next=script->copy;
 }
 static void script_queue(sim_script_t *script){
     if(script->pending)return;
+    if(script->resume){if(SDL_GetTicks64()<script->resume)return;script->resume=0;}
     if(script->pointer==1){SDL_Event event={0};event.type=SDL_MOUSEBUTTONUP;event.button.windowID=UINT32_MAX;event.button.button=SDL_BUTTON_LEFT;event.button.x=script->x;event.button.y=script->y;script->pointer=2;script->pending=SDL_PushEvent(&event)==1;return;}
     while(script->next){char *part=script->next,*comma=strchr(part,',');if(comma){*comma=0;script->next=comma+1;}else script->next=NULL;
-        SDL_Event event={0};event.type=SDL_KEYDOWN;event.key.windowID=UINT32_MAX;
+        SDL_Event event={0};event.type=SDL_KEYDOWN;event.key.windowID=UINT32_MAX;unsigned wait;
+        // wait:MS暂停投递，让空闲任务（如封面队列）运行。/ wait:MS pauses delivery so idle work such as the cover queue runs.
+        if(sscanf(part,"wait:%u",&wait)==1 && wait<=60000){script->resume=SDL_GetTicks64()+wait;return;}
         if(sscanf(part,"tap:%d:%d",&script->x,&script->y)==2 && script->x>=0 && script->x<684 && script->y>=0 && script->y<1216){event.type=SDL_MOUSEBUTTONDOWN;event.button.windowID=UINT32_MAX;event.button.button=SDL_BUTTON_LEFT;event.button.x=script->x;event.button.y=script->y;script->pointer=1;}
         else if(sscanf(part,"release:%d:%d",&script->x,&script->y)==2){event.type=SDL_MOUSEBUTTONUP;event.button.windowID=UINT32_MAX;event.button.button=SDL_BUTTON_LEFT;event.button.x=script->x;event.button.y=script->y;}
         else if(!strcmp(part,"window-close")){event.type=SDL_QUIT;}
