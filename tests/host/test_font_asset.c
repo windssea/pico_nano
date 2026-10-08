@@ -8,7 +8,7 @@ int main(int argc,char **argv){assert(argc==2);pn_pool_t pool;assert(!pn_pool_in
  assert(pn_font_asset_open(&asset,&pool,&media,&guard,argv[1],1,44)==PN_STALE_JOB && !asset.impl && !pool.used && pn_media_active(&media)==1);
  assert(pn_font_asset_open(&asset,&pool,&media,&guard,argv[1],0,44)==PN_OK && pn_media_active(&media)==2);
  assert(pn_font_asset_open(&asset,&pool,&media,&guard,argv[1],0,44)==PN_BUSY);
- pn_font_reference_t reference;pn_font_info_t info;assert(pn_font_asset_details(&asset,&reference,&info)==PN_OK && info.glyphs==3 && reference.kind==PN_FONT_FILE && pn_font_reference_verify(&reference,&media,&guard)==PN_OK);
+ pn_font_reference_t reference;pn_font_info_t info;assert(pn_font_asset_details(&asset,&reference,&info)==PN_OK && info.glyphs==4 && reference.kind==PN_FONT_FILE && pn_font_reference_verify(&reference,&media,&guard)==PN_OK);
  printf("{\"family\":");json_string(info.family);printf(",\"style\":");json_string(info.style);printf(",\"weight\":%u,\"glyphs\":%u,\"variable\":%s}\n",info.weight,info.glyphs,info.variable?"true":"false");
  const uint32_t points[]={65,31687,0x4e2d};unsigned missing;assert(pn_font_asset_sample(&asset,points,3,&missing)==PN_OK && missing==1);
  pn_font_t *font=pn_font_asset_font(&asset);int32_t width;assert(font && pn_font_size(font,56)==PN_OK && pn_font_advance(font,31687,&width)==PN_OK);

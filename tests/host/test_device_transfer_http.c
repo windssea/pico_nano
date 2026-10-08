@@ -10,6 +10,7 @@
 #include <string.h>
 #include <strings.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <sys/socket.h>
 #include <unistd.h>
 static httpd_uri_t route;
@@ -21,6 +22,7 @@ static uint64_t receive_delay;
 static bool incomplete;
 static uint64_t now=1000;
 static size_t native_allocations;
+static _Atomic bool http_stop_fails;
 static void *global_context;
 static httpd_recv_func_t receive;
 static esp_err_t (*open_socket)(httpd_handle_t,int);
@@ -36,7 +38,7 @@ void vSemaphoreDelete(void *p){pthread_mutex_destroy(p);free(p);}
 esp_err_t httpd_start(httpd_handle_t *h,const httpd_config_t *cfg){assert(cfg->max_uri_handlers>=4);*h=&route;global_context=cfg->global_user_ctx;open_socket=cfg->open_fn;return ESP_OK;}
 void *httpd_get_global_user_ctx(httpd_handle_t h){assert(h==&route);return global_context;}
 esp_err_t httpd_sess_set_recv_override(httpd_handle_t h,int fd,httpd_recv_func_t callback){(void)fd;assert(h==&route);receive=callback;return ESP_OK;}
-esp_err_t httpd_stop(httpd_handle_t h){assert(h==&route);return ESP_OK;}
+esp_err_t httpd_stop(httpd_handle_t h){assert(h==&route);return http_stop_fails?ESP_FAIL:ESP_OK;}
 esp_err_t httpd_register_uri_handler(httpd_handle_t h,const httpd_uri_t *r){assert(h==&route);route=*r;return ESP_OK;}
 static const char *header(const char *name){const char *at=scratch;for(unsigned i=0;i<headers;i++){const char *colon=strchr(at,':');if(colon && (size_t)(colon-at)==strlen(name) && !strncasecmp(at,name,strlen(name))){while(*++colon==' ');return colon;}if(i+1<headers){at+=strlen(at)+1;while(!*at)at++;}}return NULL;}
 size_t httpd_req_get_hdr_value_len(httpd_req_t *r,const char *name){(void)r;const char *value=header(name);return value?strlen(value):0;}

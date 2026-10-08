@@ -17,8 +17,8 @@ int main(int argc,char **argv){assert(argc==2);file_t f={fopen(argv[1],"rb"),tru
  pn_font_chain_clear(&chain);pn_font_close(&primary);
  pn_text_source_t builtin=pn_font_builtin_source();assert(pn_font_open(&primary,&pool,&builtin,44)==PN_OK);
  assert(pn_font_chain_init(&chain,&pool,&primary,&source)==PN_OK);
- assert(pn_font_chain_choose(&chain,31687,&choice)==PN_OK && choice.font==&chain.fonts[0]);
- f.live=false;choice.ascent=999;assert(pn_font_chain_choose(&chain,31687,&choice)==PN_STALE_MEDIA && choice.ascent==999);f.live=true;
+ assert(pn_font_chain_choose(&chain,0x9F98,&choice)==PN_OK && choice.font==&chain.fonts[0]);
+ f.live=false;choice.ascent=999;assert(pn_font_chain_choose(&chain,0x9F98,&choice)==PN_STALE_MEDIA && choice.ascent==999);f.live=true;
  assert(pn_font_chain_choose(&chain,0x10ffff,&choice)==PN_EMPTY && choice.ascent==999);
  pn_font_chain_clear(&chain);pn_font_close(&primary);assert(!pool.used && !pool.live);
  size_t requests=0;

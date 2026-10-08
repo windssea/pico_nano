@@ -8,7 +8,7 @@ FreeType固定2.14.3，采用官方镜像VER-2-14-3归档，SHA-256为dc49de6b01
 
 Portions of this software are copyright © 2026 The FreeType Project (https://freetype.org). All rights reserved.
 
-常驻字体源为Google Fonts Noto Sans SC，可再发行许可见assets/fonts/OFL.txt。原字体摘要a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da。tools/subset_ui_font.py固定wght=400，取公开设计文档/当前UI源码/自有TXT样例字符，修改子集家族名为Read Pico UI，保留原版权与OFL；输出摘要、工具版本和字符集在LICENSES/ui-font-manifest.json。当前1174个字符映射、307304 bytes，不是完整中文正文fallback。
+常驻字体源为Google Fonts Noto Sans SC，可再发行许可见assets/fonts/OFL.txt。原字体摘要a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da。tools/subset_ui_font.py固定wght=400，取公开设计文档/当前UI源码/自有TXT样例字符，修改子集家族名为Read Pico UI，保留原版权与OFL；输出摘要、工具版本和字符集在LICENSES/ui-font-manifest.json。当前字符映射与字节数见上述manifest和生成输出；这不是完整中文正文fallback。
 
 本字体子集及其衍生字体仍为SIL OFL 1.1，不随项目代码改为Apache。生成时需要fontTools，运行/编译只用已固定的TTF及Python嵌入脚本。--replay使用manifest记录的字符集和fontTools版本，关闭生成时间重写；当前重复生成摘要一致。字体源不常驻PSRAM，构建时嵌入只读字节；大小计入产品flash预算，不能因为当前未用符号被链接器删除而当作零成本。
 

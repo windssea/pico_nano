@@ -1,4 +1,4 @@
-"""生成两字形字体回退测试样本，保留OFL并修改家族名。 / Generate a two-glyph fallback fixture, retaining OFL and renaming the family."""
+"""生成三字形字体回退测试样本，保留OFL并修改家族名。 / Generate a three-glyph fallback fixture, retaining OFL and renaming the family."""
 import argparse
 import hashlib
 import json
@@ -19,7 +19,7 @@ def main():
     options = subset.Options()
     options.name_IDs = [0, 1, 2, 3, 4, 5, 6, 13, 14]
     worker = subset.Subsetter(options=options)
-    worker.populate(unicodes=[0x41, 0x7BC7])
+    worker.populate(unicodes=[0x41, 0x7BC7, 0x9F98])
     worker.subset(font)
     names = {1: "Read Pico Fallback Fixture", 2: "Regular", 3: "ReadPicoFallbackFixture-1", 4: "Read Pico Fallback Fixture Regular", 6: "ReadPicoFallbackFixture-Regular"}
     for record in font["name"].names:

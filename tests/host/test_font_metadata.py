@@ -25,5 +25,5 @@ with tempfile.TemporaryDirectory() as folder:
  for i,(records,family,style) in enumerate(variants):
   path=pathlib.Path(folder)/f'{i}.ttf';path.write_bytes(font(records));r=subprocess.run([sys.argv[1],str(path)],capture_output=True,text=True,timeout=20)
   assert r.returncode==0,(r.stdout,r.stderr)
-  metadata=json.loads(r.stdout);assert metadata['family']==family and metadata['style']==style and metadata['weight']==700 and metadata['glyphs']==3 and not metadata['variable'],metadata
+  metadata=json.loads(r.stdout);assert metadata['family']==family and metadata['style']==style and metadata['weight']==700 and metadata['glyphs']==4 and not metadata['variable'],metadata
 print('Font metadata: independent multilingual UTF-16/surrogate/long-name/legacy encoding and weight checks passed')

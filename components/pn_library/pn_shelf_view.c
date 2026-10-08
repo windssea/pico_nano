@@ -22,7 +22,7 @@ static pn_status_t label(pn_font_t *font,pn_frame_t *part,const char *s,unsigned
 }
 static pn_status_t at(pn_font_t *font,pn_frame_t *frame,const char *s,int x,int y,int w,int h,unsigned lines){pn_frame_t part={frame->pixels+(size_t)y*frame->stride+(size_t)x/2,w,h,frame->stride};return label(font,&part,s,lines);}
 static const char *kind(pn_book_format_t f){switch(f){case PN_BOOK_TXT:return "TXT";case PN_BOOK_EPUB:return "EPUB";case PN_BOOK_PDF:return "PDF";case PN_BOOK_FB2:return "FB2";case PN_BOOK_CBZ:return "CBZ";default:return "?";}}
-pn_status_t pn_shelf_render_mode(const pn_catalog_page_t *page,pn_font_t *font,pn_frame_t *frame,int selected,bool recent){
+pn_status_t pn_shelf_render_mode_with_transfer(const pn_catalog_page_t *page,pn_font_t *font,pn_frame_t *frame,int selected,bool recent,bool transfer){
     if(!page || page->count>6 || !font || !font->impl || !frame || !frame->pixels || frame->width!=684 || frame->height!=1216 || frame->stride<342)return PN_INVALID;
     pn_frame_clear(frame,15);pn_status_t s=at(font,frame,"小纸 Pico",32,20,620,52,1);if(s!=PN_OK)return s;
     s=at(font,frame,recent?"最近阅读":"书架",32,90,620,50,1);if(s!=PN_OK)return s;pn_frame_rect(frame,32,144,620,1,7);
@@ -39,6 +39,7 @@ pn_status_t pn_shelf_render_mode(const pn_catalog_page_t *page,pn_font_t *font,p
         s=at(font,frame,details,128,y+88,524,40,1);if(s!=PN_OK)return s;pn_frame_rect(frame,128,y+136,524,1,10);
     }
     if(!page->count){s=at(font,frame,"暂无书籍",32,240,620,60,1);if(s!=PN_OK)return s;}
+    if(transfer){pn_frame_rect(frame,32,1040,620,1,5);pn_frame_rect(frame,32,1120,620,1,5);s=at(font,frame,"传书",284,1050,160,60,1);if(s!=PN_OK)return s;}
     const char *labels[]={"上一页","下一页"};for(int i=0;i<2;i++){int x=32+i*320;pn_frame_rect(frame,x,1130,300,1,5);pn_frame_rect(frame,x,1210,300,1,5);pn_frame_rect(frame,x,1130,1,80,5);pn_frame_rect(frame,x+299,1130,1,80,5);s=at(font,frame,labels[i],x+100,1150,180,45,1);if(s!=PN_OK)return s;}
     return PN_OK;
 }
@@ -46,3 +47,6 @@ int pn_shelf_hit(const pn_catalog_page_t *page,int x,int y){if(!page || x<32 || 
 
 pn_status_t pn_shelf_render(const pn_catalog_page_t *p,pn_font_t *f,pn_frame_t *b){return pn_shelf_render_selected(p,f,b,-1);}
 pn_status_t pn_shelf_render_selected(const pn_catalog_page_t *p,pn_font_t *f,pn_frame_t *b,int selected){return pn_shelf_render_mode(p,f,b,selected,false);}
+
+pn_status_t pn_shelf_render_mode(const pn_catalog_page_t *p,pn_font_t *f,pn_frame_t *b,int selected,bool recent){return pn_shelf_render_mode_with_transfer(p,f,b,selected,recent,false);}
+int pn_shelf_hit_with_transfer(const pn_catalog_page_t *p,int x,int y,bool enabled){if(enabled && p && x>=32 && x<652 && y>=1040 && y<1120)return PN_SHELF_TRANSFER;return pn_shelf_hit(p,x,y);}

@@ -11,6 +11,12 @@
 #include "read_pico.h"
 #include "esp_littlefs.h"
 #include "pn_alloc.h"
+#include "device_transfer.h"
+// 启动保护场景不能开启网络；调用这些桩即为回归。/ Boot-gate scenarios must never start networking; reaching these stubs is a regression.
+pn_status_t pn_device_transfer_open(pn_device_transfer_t *s,pn_media_t *m,const char *r,const pn_device_wifi_config_t *c){(void)s;(void)m;(void)r;(void)c;assert(false);return PN_UNSUPPORTED;}
+pn_status_t pn_device_transfer_request_stop(pn_device_transfer_t *s){(void)s;assert(false);return PN_UNSUPPORTED;}
+pn_status_t pn_device_transfer_state(pn_device_transfer_t *s,pn_device_transfer_state_t *out){(void)s;(void)out;assert(false);return PN_UNSUPPORTED;}
+pn_status_t pn_device_transfer_close(pn_device_transfer_t *s){(void)s;assert(false);return PN_UNSUPPORTED;}
 void app_main(void);
 static jmp_buf end;
 static void (*worker)(void *);
