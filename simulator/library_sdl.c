@@ -60,6 +60,8 @@ typedef struct {
     const char *font_dir; ///< --font-dir，NULL禁用 / --font-dir, NULL disables the page
     pn_settings_ui_t settings; ///< 设置页 / Settings page
     uint8_t input_flags; ///< 已保存翻页标志 / Saved page-turn flags
+    bool index; ///< 字母跳转页 / Letter-index page
+    char jump; ///< 下次首页查询的字母 / Letter for the next first-page query
 } library_t;
 static bool reading(library_t *s){return s->reader.impl || s->epub.impl;}
 static pn_status_t active_step(library_t *s,pn_reader_action_t action,uint64_t now,pn_reader_present_fn present,void *ctx){return s->epub.impl?pn_epub_app_step(&s->epub,action,now,present,ctx):pn_reader_app_step(&s->reader,action,now,present,ctx);}
@@ -110,7 +112,7 @@ static pn_status_t page(library_t *s,bool previous,bool first){
     pn_media_lease_t lease={0};pn_status_t status=pn_media_acquire(&s->media,PN_MEDIA_READ,&lease);
     const char *cursor=first?"":s->page->items[previous?0:s->page->count-1].name;
     if(status==PN_OK){
-        status=previous?pn_catalog_page_before(&s->media,&lease,s->directory,cursor,next):pn_catalog_page(&s->media,&lease,s->directory,cursor,next);
+        status=s->jump?pn_catalog_page_from(&s->media,&lease,s->directory,s->jump,next):previous?pn_catalog_page_before(&s->media,&lease,s->directory,cursor,next):pn_catalog_page(&s->media,&lease,s->directory,cursor,next);s->jump=0;
         (void)pn_media_release(&s->media,&lease);
     }
     if(status==PN_OK && (first || next->count)){*s->page=*next;s->selected=next->count?0:-1;covers_reset(s);status=draw(s);
@@ -203,6 +205,15 @@ int pn_sim_library_window(pn_pool_t *pool,const char *directory,const char *font
             if(command>=0){status=pn_bookmark_ui_event(&s->bookmarks,command,event.type==SDL_TEXTINPUT?event.text.text:NULL,now,present,s);bookmark_report(&s->bookmarks,command,status);cancel_pointer(&input,&tap,(SDL_GetMouseState(NULL,NULL)&SDL_BUTTON_LMASK)==0);continue;}
         }
         input.config=(pn_reader_input_config_t){.left_hand=(s->input_flags&PN_INPUT_LEFT_HAND)!=0,.no_swipe=(s->input_flags&PN_INPUT_NO_SWIPE)!=0,.no_edge_tap=(s->input_flags&PN_INPUT_NO_EDGE_TAP)!=0,.no_keys=(s->input_flags&PN_INPUT_NO_KEYS)!=0};
+        if(s->index){
+            // 字母页：鼠标松开选字母，Esc返回。/ Index page: mouse release picks a letter, Esc returns.
+            char letter=0;
+            if(event.type==SDL_QUIT){running=false;continue;}
+            if(event.type==SDL_KEYDOWN && !event.key.repeat && event.key.keysym.sym==SDLK_ESCAPE)letter='<';
+            else if(event.type==SDL_MOUSEBUTTONUP && event.button.button==SDL_BUTTON_LEFT)letter=pn_shelf_index_hit(event.button.x,event.button.y);
+            if(letter){s->index=false;if(letter!='<'){s->jump=letter;s->recent_mode=false;}status=page(s,false,true);printf("index letter=%c status=%d first=%s\n",letter,(int)status,s->page->count?s->page->items[0].name:"");}
+            continue;
+        }
         if(s->settings.impl){
             // 设置页：Esc返回，鼠标松开命中；子页按已启用选项打开。/ Settings: Esc returns, mouse release hits; sub-pages open when their options are enabled.
             int command=-1;
@@ -259,6 +270,7 @@ int pn_sim_library_window(pn_pool_t *pool,const char *directory,const char *font
                 else if(key==SDLK_PLUS || key==SDLK_EQUALS){action=PN_APP_LARGER;turn=true;}
                 else if(key==SDLK_MINUS){action=PN_APP_SMALLER;turn=true;}
             }else{
+                if(key==SDLK_j && !s->recent_mode){status=pn_shelf_index_render(&s->font,&s->frame);if(status==PN_OK)status=present(s,&s->frame,PN_REFRESH_GL16);s->index=status==PN_OK;printf("index open status=%d\n",(int)status);continue;}
                 if(key==SDLK_p){status=pn_settings_ui_open(&s->settings,s->pool,&s->state_media,s->state_dir,present,s);printf("settings open status=%d flags=%u\n",(int)status,(unsigned)s->settings.flags);continue;}
                 if(key==SDLK_f && s->font_dir){status=pn_font_manage_open(&s->font_manage,s->pool,&s->media,s->font_dir,&s->state_media,s->state_dir,present,s);printf("font_manage open status=%d\n",(int)status);continue;}
                 if(key==SDLK_w && s->wallpaper_dir){status=pn_wallpaper_ui_open(&s->wallpaper,s->pool,&s->media,s->wallpaper_dir,s->wallpaper_store_ok?&s->wallpaper_store:NULL,present,s);printf("wallpaper_ui open status=%d\n",(int)status);continue;}

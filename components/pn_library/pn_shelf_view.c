@@ -25,7 +25,7 @@ static const char *kind(pn_book_format_t f){switch(f){case PN_BOOK_TXT:return "T
 pn_status_t pn_shelf_render_covers(const pn_catalog_page_t *page,pn_font_t *font,pn_frame_t *frame,int selected,bool recent,bool transfer,const pn_shelf_covers_t *covers){
     if(!page || page->count>6 || !font || !font->impl || !frame || !frame->pixels || frame->width!=684 || frame->height!=1216 || frame->stride<342)return PN_INVALID;
     pn_frame_clear(frame,15);pn_status_t s=at(font,frame,"小纸 Pico",32,20,620,52,1);if(s!=PN_OK)return s;
-    s=at(font,frame,recent?"最近阅读":"书架",32,90,620,50,1);if(s!=PN_OK)return s;pn_frame_rect(frame,32,144,620,1,7);
+    s=at(font,frame,recent?"最近阅读":"书架 · 按字母",32,90,620,50,1);if(s!=PN_OK)return s;pn_frame_rect(frame,32,144,620,1,7);
     s=at(font,frame,"继续",284,30,140,50,1);if(s!=PN_OK)return s;
     s=at(font,frame,recent?"全部":"最近",464,30,170,50,1);if(s!=PN_OK)return s;
     pn_frame_rect(frame,272,16,168,1,5);pn_frame_rect(frame,272,95,168,1,5);pn_frame_rect(frame,460,16,192,1,5);pn_frame_rect(frame,460,95,192,1,5);
@@ -46,8 +46,26 @@ pn_status_t pn_shelf_render_covers(const pn_catalog_page_t *page,pn_font_t *font
     const char *labels[]={"上一页","下一页"};for(int i=0;i<2;i++){int x=32+i*320;pn_frame_rect(frame,x,1130,300,1,5);pn_frame_rect(frame,x,1210,300,1,5);pn_frame_rect(frame,x,1130,1,80,5);pn_frame_rect(frame,x+299,1130,1,80,5);s=at(font,frame,labels[i],x+100,1150,180,45,1);if(s!=PN_OK)return s;}
     return PN_OK;
 }
-int pn_shelf_hit(const pn_catalog_page_t *page,int x,int y){if(!page || x<32 || x>=652 || y<0 || y>=1216)return -1;if(y>=16 && y<96){if(x>=460)return PN_SHELF_TOGGLE;if(x>=272 && x<440)return PN_SHELF_CONTINUE;if(x<260)return PN_SHELF_MENU;}if(y>=160 && y<1024){int row=(y-160)/144;if((y-160)%144<136 && row<(int)page->count)return row;}if(y>=1130 && y<=1210){if(x<332)return PN_SHELF_PREVIOUS;if(x>=352)return PN_SHELF_NEXT;}return -1;}
+int pn_shelf_hit(const pn_catalog_page_t *page,int x,int y){if(!page || x<32 || x>=652 || y<0 || y>=1216)return -1;if(y>=16 && y<96){if(x>=460)return PN_SHELF_TOGGLE;if(x>=272 && x<440)return PN_SHELF_CONTINUE;if(x<260)return PN_SHELF_MENU;}if(y>=96 && y<144 && x<300)return PN_SHELF_INDEX;if(y>=160 && y<1024){int row=(y-160)/144;if((y-160)%144<136 && row<(int)page->count)return row;}if(y>=1130 && y<=1210){if(x<332)return PN_SHELF_PREVIOUS;if(x>=352)return PN_SHELF_NEXT;}return -1;}
 
+/* 4列7行：A–Z、#、返回。/ Four columns by seven rows: A–Z, #, Back. */
+static const char cells[]="abcdefghijklmnopqrstuvwxyz#<";
+pn_status_t pn_shelf_index_render(pn_font_t *font,pn_frame_t *frame){
+    if(!font || !font->impl || !frame || !frame->pixels || frame->width!=684 || frame->height!=1216 || frame->stride<342)return PN_INVALID;
+    pn_frame_clear(frame,15);pn_status_t s=at(font,frame,"小纸 Pico",32,20,620,52,1);
+    if(s==PN_OK)s=at(font,frame,"按书名首字母跳转（中文按拼音）",32,90,620,50,1);
+    for(int i=0;i<28 && s==PN_OK;i++){int x=32+(i%4)*157,y=180+(i/4)*125;
+        pn_frame_rect(frame,x,y,150,1,5);pn_frame_rect(frame,x,y+114,150,1,5);pn_frame_rect(frame,x,y,1,115,5);pn_frame_rect(frame,x+149,y,1,115,5);
+        char label[8];if(cells[i]=='<')strcpy(label,"返回");else if(cells[i]=='#')strcpy(label,"#");else{label[0]=(char)(cells[i]-'a'+'A');label[1]=0;}
+        s=at(font,frame,label,x+(cells[i]=='<'?40:62),y+36,100,50,1);}
+    return s;
+}
+char pn_shelf_index_hit(int x,int y){
+    if(x<32 || y<180)return 0;
+    int column=(x-32)/157,row=(y-180)/125;
+    if(column>3 || row>6 || (x-32)%157>=150 || (y-180)%125>=115)return 0;
+    return cells[row*4+column];
+}
 pn_status_t pn_shelf_render(const pn_catalog_page_t *p,pn_font_t *f,pn_frame_t *b){return pn_shelf_render_selected(p,f,b,-1);}
 pn_status_t pn_shelf_render_selected(const pn_catalog_page_t *p,pn_font_t *f,pn_frame_t *b,int selected){return pn_shelf_render_mode(p,f,b,selected,false);}
 

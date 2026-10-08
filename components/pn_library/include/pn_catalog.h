@@ -42,6 +42,13 @@ pn_status_t pn_catalog_page_before(pn_media_t *media,const pn_media_lease_t *lea
 /// Map a recent snapshot into six rows, preserving paths and eliding long display names at character boundaries.
 pn_status_t pn_catalog_recent_page(const pn_recent_snapshot_t *snapshot,size_t start,pn_catalog_page_t *page);
 
+/// 书名排序：拼音首字母（GB2312一级汉字）与拉丁字母交错，其余字符排在字母后，完全同键再按字节；全序，可作分页游标。
+/// Title order: pinyin initials (GB2312 level-1 hanzi) interleave with Latin letters, other characters follow letters, byte order breaks ties; a total order usable as page cursors.
+int pn_catalog_compare(const char *a,const char *b);
+/// 索引字母：a–z；数字/符号开头为'#'；其他（如二级汉字、假名）为'~'。/ Index letter: a–z; '#' for digits/symbols; '~' for others such as level-2 hanzi or kana.
+char pn_catalog_initial(const char *name);
+/// 从字母letter（a–z）起的第一页（含之后所有字母及'~'）；'#'即首页。/ First page from letter (a–z) onward, including later letters and '~'; '#' is the first page.
+pn_status_t pn_catalog_page_from(pn_media_t *media,const pn_media_lease_t *lease,const char *directory,char letter,pn_catalog_page_t *page);
 /// 字体目录专用，仅TTF扩展名；仍须实际引擎校验。/ Font-only directory pages, TTF extensions only; actual engine validation remains required.
 pn_status_t pn_catalog_font_page(pn_media_t *,const pn_media_lease_t *,const char *,const char *,pn_catalog_page_t *);
 /// 字体目录向前六项，源/输出规则同普通目录。/ Previous six font items using the same source/output rules as regular catalogs.

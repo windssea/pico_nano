@@ -52,6 +52,8 @@ static pn_settings_ui_t settings_ui;
 static uint8_t input_flags; ///< 已保存翻页标志 / Saved page-turn flags
 static bool input_flags_loaded;
 static pn_key_t keys={.key=-1};
+static bool index_mode; ///< 字母跳转页 / Letter-index page
+static char jump_letter; ///< 下次书架查询从此字母起 / The next shelf query starts at this letter
 static uint64_t last_input; ///< 最近一次触摸/按键，用于自动锁屏 / Latest touch or key, for auto-lock
 #define AUTO_LOCK_MS (5u*60u*1000u)
 static void lock_and_sleep(const char *hint);
@@ -104,7 +106,7 @@ static void message(const char *title,const char *detail){
     pn_toc_ui_close(&toc);
     pn_bookmark_ui_cancel(&bookmarks);
     pn_style_ui_close(&styles);pn_font_ui_close(&fonts);pn_wallpaper_ui_close(&wallpaper_ui);pn_font_manage_close(&font_manage);pn_settings_ui_close(&settings_ui);
-    status_page=true;shelf_mode=false;
+    status_page=true;shelf_mode=false;index_mode=false;
     uint8_t *pixels=pn_alloc(&pool,684u*1216u/2u);pn_frame_t frame;pn_font_t font={0};pn_text_source_t builtin=pn_font_builtin_source();
     pn_status_t status=pn_frame_bind(&frame,pixels,684u*1216u/2u,684,1216)?PN_OK:PN_NO_MEMORY;
     if(status==PN_OK)status=pn_font_open(&font,&pool,&builtin,32);
@@ -135,7 +137,7 @@ static bool mount_wallpaper(void){
 /// 锁屏页：读内部有效壁纸记录，任何失败用系统默认图，再失败退回文字页。/ Lock page: load the valid internal wallpaper record, use the system default on any failure, and fall back to the text page last.
 static void show_lock(const char *hint){
     reading_menu=false;pn_toc_ui_close(&toc);pn_bookmark_ui_cancel(&bookmarks);pn_style_ui_close(&styles);pn_font_ui_close(&fonts);pn_wallpaper_ui_close(&wallpaper_ui);pn_font_manage_close(&font_manage);pn_settings_ui_close(&settings_ui);
-    status_page=true;shelf_mode=false;
+    status_page=true;shelf_mode=false;index_mode=false;
     uint8_t *pixels=pn_alloc(&pool,PN_WALLPAPER_BYTES);pn_frame_t frame;pn_font_t font={0};pn_text_source_t builtin=pn_font_builtin_source();
     pn_lock_selection_t selection={.mode=PN_LOCK_DEFAULT,.hint=true};
     pn_status_t status=pn_frame_bind(&frame,pixels,PN_WALLPAPER_BYTES,PN_WALLPAPER_WIDTH,PN_WALLPAPER_HEIGHT)?PN_OK:PN_NO_MEMORY;
@@ -191,7 +193,8 @@ static void show_shelf(const char *cursor,bool previous){
         if(status!=PN_OK){recent_mode=false;pn_free(next);message("历史读取失败","记录保留，点下方回书架");return;}
     }else{
         status=pn_media_acquire(&sd_media,PN_MEDIA_READ,&lease);
-        if(status==PN_OK)status=previous?pn_catalog_page_before(&sd_media,&lease,book_directory,cursor,next):pn_catalog_page(&sd_media,&lease,book_directory,cursor,next);
+        if(status==PN_OK)status=jump_letter?pn_catalog_page_from(&sd_media,&lease,book_directory,jump_letter,next):previous?pn_catalog_page_before(&sd_media,&lease,book_directory,cursor,next):pn_catalog_page(&sd_media,&lease,book_directory,cursor,next);
+        jump_letter=0;
         if(lease.ticket)(void)pn_media_release(&sd_media,&lease);
     }
     if(status==PN_OK && (next->count || !*cursor))*shelf_page=*next;
@@ -261,7 +264,7 @@ static void begin_wallpaper(void){
     bool store_ok=mount_wallpaper() && pn_wallpaper_store_init(&store,&wallpaper_media,"/wallpaper/lock.a","/wallpaper/lock.b")==PN_OK;
     pn_status_t status=pn_wallpaper_ui_open(&wallpaper_ui,&pool,&sd_media,"/sdcard/wallpapers",store_ok?&store:NULL,present,NULL);
     if(status!=PN_OK){message("壁纸设置未打开","保留原锁屏，稍后重试");return;}
-    status_page=true;shelf_mode=false;
+    status_page=true;shelf_mode=false;index_mode=false;
 }
 /// 进入字体管理：先关闭正文和其字体源，删除/设默认在无消费者时进行。/ Enter font management after closing the book and its font sources, so deletion and defaults happen without consumers.
 static void begin_fonts(void){
@@ -271,7 +274,7 @@ static void begin_fonts(void){
     if(!data_ready)data_ready=mount_data();
     pn_status_t status=pn_font_manage_open(&font_manage,&pool,&sd_media,"/sdcard/fonts",data_ready?&data_media:NULL,data_ready?"/data/progress":NULL,present,NULL);
     if(status!=PN_OK){message("字体管理未打开","字体与选择均保留，稍后重试");return;}
-    status_page=true;shelf_mode=false;
+    status_page=true;shelf_mode=false;index_mode=false;
 }
 /// 设置页：壁纸/字体入口与翻页开关；进入前同样保存并关闭正文。/ Settings: wallpaper/font entries and page-turn switches; the book is saved and closed first as well.
 static void begin_settings(void){
@@ -281,7 +284,7 @@ static void begin_settings(void){
     if(!data_ready)data_ready=mount_data();
     pn_status_t status=pn_settings_ui_open(&settings_ui,&pool,data_ready?&data_media:NULL,data_ready?"/data/progress":NULL,present,NULL);
     if(status!=PN_OK){message("设置未打开","原设置保留，稍后重试");return;}
-    status_page=true;shelf_mode=false;
+    status_page=true;shelf_mode=false;index_mode=false;
 }
 static void end_settings(void){input_flags=settings_ui.flags;pn_settings_ui_close(&settings_ui);if(*selected_path)start_reader();else show_shelf("",false);}
 static void end_fonts(void){pn_font_manage_close(&font_manage);if(*selected_path)start_reader();else show_shelf("",false);}
@@ -322,6 +325,16 @@ static void tick_transfer(uint64_t now){
 static void lock_and_sleep(const char *hint){
     locked=true;show_lock(hint);
     if(pn_device_sleep_until_key()){locked=false;last_input=now_ms();start_reader();}
+}
+/// 字母跳转页。/ Letter-index page.
+static void show_index(void){
+    uint8_t *pixels=pn_alloc(&pool,684u*1216u/2u);pn_frame_t frame;pn_font_t font={0};pn_text_source_t builtin=pn_font_builtin_source();
+    pn_status_t status=pn_frame_bind(&frame,pixels,684u*1216u/2u,684,1216)?PN_OK:PN_NO_MEMORY;
+    if(status==PN_OK)status=pn_font_open(&font,&pool,&builtin,40);
+    if(status==PN_OK)status=pn_shelf_index_render(&font,&frame);
+    if(status==PN_OK)status=present(NULL,&frame,PN_REFRESH_GL16);
+    pn_font_close(&font);pn_free(pixels);
+    if(status==PN_OK){index_mode=true;shelf_mode=false;status_page=true;}
 }
 static void open_menu(void){reading_menu=true;refresh_network_name();paint_transfer(true);}
 /// 屏下三键：阅读KEY1/3翻页、KEY2菜单、长按KEY2回书架；书架KEY1/3翻书目页；菜单KEY2返回。/ Touch keys: reading KEY1/3 turn pages, KEY2 opens the menu and a long KEY2 returns to the shelf; shelf KEY1/3 page the catalog; menu KEY2 goes back.
@@ -383,6 +396,7 @@ static void device_task(void *arg){
             else if(wallpaper_ui.impl)hit=pn_wallpaper_ui_hit(&wallpaper_ui,touch.x,touch.y);
             else if(font_manage.impl)hit=pn_font_manage_hit(&font_manage,touch.x,touch.y);
             else if(settings_ui.impl)hit=pn_settings_ui_hit(&settings_ui,touch.x,touch.y);
+            else if(index_mode){char letter=pn_shelf_index_hit(touch.x,touch.y);hit=letter?(int)(unsigned char)letter:-1;}
             else if(reading_menu)hit=pn_reading_menu_hit_lan(touch.x,touch.y,*saved_network!=0);
             else if(fonts.active)hit=pn_font_ui_hit(&fonts,touch.x,touch.y);
             else if(toc.active)hit=pn_toc_ui_hit(&toc,touch.x,touch.y);
@@ -401,11 +415,13 @@ static void device_task(void *arg){
                 if(transfer.impl){if(selection==PN_TRANSFER_VIEW_STOP){transfer_return=true;(void)pn_device_transfer_request_stop(&transfer);}}
                 else if(wallpaper_ui.impl){pn_status_t status=pn_wallpaper_ui_event(&wallpaper_ui,selection,present,NULL);if(status!=PN_OK && status!=PN_EMPTY)ESP_LOGW(TAG,"Wallpaper UI: %d",(int)status);if(!wallpaper_ui.active)end_wallpaper();}
                 else if(font_manage.impl){pn_status_t status=pn_font_manage_event(&font_manage,selection,present,NULL);if(status!=PN_OK && status!=PN_EMPTY)ESP_LOGW(TAG,"Font management: %d",(int)status);if(!font_manage.active)end_fonts();}
+                else if(index_mode){index_mode=false;if(selection!='<'){jump_letter=(char)selection;recent_mode=false;}show_shelf("",false);}
                 else if(settings_ui.impl){pn_status_t status=pn_settings_ui_event(&settings_ui,selection,present,NULL);if(status!=PN_OK && status!=PN_EMPTY && status!=PN_LIMIT)ESP_LOGW(TAG,"Settings: %d",(int)status);
                     if(settings_ui.request){int request=settings_ui.request;input_flags=settings_ui.flags;pn_settings_ui_close(&settings_ui);if(request==PN_SETUI_WALLPAPER)begin_wallpaper();else begin_fonts();}
                     else if(!settings_ui.active)end_settings();}
                 else if(reading_menu){if(selection==PN_READING_MENU_LAN)begin_transfer(true);else if(selection==PN_READING_MENU_SETTINGS)begin_settings();else if(selection==PN_READING_MENU_TRANSFER)begin_transfer(false);else if(selection==PN_READING_MENU_SHELF){reading_menu=false;if(stop_reader()){selected_path[0]=0;show_shelf("",false);}}else if(selection==PN_READING_MENU_RESUME){reading_menu=false;if(reader_active()){if(active_step(PN_APP_OPEN,now_ms())==PN_OK){status_page=false;shelf_mode=false;}}else start_reader();}}
                 else if(shelf_mode && selection==PN_SHELF_TRANSFER)begin_transfer(false);
+                else if(shelf_mode && selection==PN_SHELF_INDEX && !recent_mode)show_index();
                 else if(shelf_mode && selection==PN_SHELF_MENU){reading_menu=true;refresh_network_name();paint_transfer(true);}
                 else if(fonts.active){(void)pn_font_ui_event(&fonts,selection,now_ms(),present,NULL);if(!fonts.active){pn_font_ui_close(&fonts);if(styles.active)(void)pn_style_ui_present(&styles,present,NULL);}}
                 else if(toc.active){(void)pn_toc_ui_event(&toc,selection,now_ms(),present,NULL);}

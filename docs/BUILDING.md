@@ -1,6 +1,6 @@
 # 构建与运行入口
 
-当前开发版本0.0.55。能力与待办统一见 [项目状态](PROJECT_STATUS.md)，环境、测试分层和证据边界见 [开发与测试](DEVELOPMENT_AND_TESTING.md)。本页只列已经存在的运行入口，不把拟建命令当成实现。
+当前开发版本0.0.56。能力与待办统一见 [项目状态](PROJECT_STATUS.md)，环境、测试分层和证据边界见 [开发与测试](DEVELOPMENT_AND_TESTING.md)。本页只列已经存在的运行入口，不把拟建命令当成实现。
 
 ## Windows与Docker
 
@@ -53,7 +53,7 @@ cmake --build build-sim-native
 ./build-sim-native/pn_sim --library mockDoc --font mockDoc/LXGWWenKai-Regular.ttf --state-dir build-dev/sim-state
 ```
 
-书库窗口可加 `--cover-cache DIR` 把封面缩略图缓存到指定目录；不给时只解码不写盘，见 [书架封面](COVERS.md)；`--wallpaper-dir DIR [--wallpaper-store DIR]` 启用壁纸设置页（书架按W），见 [锁屏与壁纸缓存](LOCK_SCREEN.md)；`--font-dir DIR` 启用字体管理页（书架按F），见 [字体管理](FONT_MANAGEMENT.md)；书架按P进入设置页，见 [翻页与三键](PAGE_TURN.md)。mockDoc为用户本机样本，Git不提供；先自行放入合法测试文件。单书用 `--book PATH`，EPUB入口按扩展名分派。`--headless --capture FILE.pgm`、`--budget BYTES`、`--scenario ownership`等以simulator/main.c为准；没有通用JSON脚本CLI。窗口脚本测试使用测试专用环境变量，不能当真实用户交互验收。
+书库窗口可加 `--cover-cache DIR` 把封面缩略图缓存到指定目录；不给时只解码不写盘，见 [书架封面](COVERS.md)；`--wallpaper-dir DIR [--wallpaper-store DIR]` 启用壁纸设置页（书架按W），见 [锁屏与壁纸缓存](LOCK_SCREEN.md)；`--font-dir DIR` 启用字体管理页（书架按F），见 [字体管理](FONT_MANAGEMENT.md)；书架按P进入设置页，见 [翻页与三键](PAGE_TURN.md)；按J打开字母跳转。mockDoc为用户本机样本，Git不提供；先自行放入合法测试文件。单书用 `--book PATH`，EPUB入口按扩展名分派。`--headless --capture FILE.pgm`、`--budget BYTES`、`--scenario ownership`等以simulator/main.c为准；没有通用JSON脚本CLI。窗口脚本测试使用测试专用环境变量，不能当真实用户交互验收。
 
 ## 功能入口与样本
 
