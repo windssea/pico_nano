@@ -185,3 +185,8 @@ target_include_directories(test_device_transfer_http PRIVATE stubs ${PN_ROOT}/ma
 target_link_libraries(test_device_transfer_http PRIVATE pn_core pn_cjson)
 add_test(NAME device_transfer_http COMMAND test_device_transfer_http)
 set_tests_properties(device_transfer_http PROPERTIES TIMEOUT 30)
+
+add_executable(test_device_wifi test_device_wifi.c ${PN_ROOT}/main/device_wifi.c)
+target_include_directories(test_device_wifi PRIVATE stubs ${PN_ROOT}/main)
+target_link_libraries(test_device_wifi PRIVATE pn_core)
+add_test(NAME device_wifi COMMAND test_device_wifi)
