@@ -20,16 +20,16 @@ int main(int argc,char **argv){
     /* 打开：无记录显示系统默认，三张候选（含伪图片）。/ Open: no record shows the default; three candidates including a fake image. */
     assert(pn_wallpaper_ui_open(&ui,&pool,&sd,images,&store,present,NULL)==PN_OK && ui.active && ui.presented && ui.screen==PN_WUI_LIST);
     pn_lock_selection_t cur;assert(pn_wallpaper_ui_current(&ui,&cur) && cur.mode==PN_LOCK_DEFAULT);
-    assert(pn_wallpaper_ui_hit(&ui,100,500)==PN_WUI_ROW && pn_wallpaper_ui_hit(&ui,100,600)==PN_WUI_ROW+1 && pn_wallpaper_ui_hit(&ui,100,700)==PN_WUI_ROW+2 && pn_wallpaper_ui_hit(&ui,100,800)==-1);
-    assert(pn_wallpaper_ui_hit(&ui,100,300)==PN_WUI_DEFAULT && pn_wallpaper_ui_hit(&ui,500,300)==PN_WUI_SIMPLE && pn_wallpaper_ui_hit(&ui,300,1150)==PN_WUI_BACK);
+    assert(pn_wallpaper_ui_hit(&ui,100,400)==PN_WUI_ROW && pn_wallpaper_ui_hit(&ui,100,500)==PN_WUI_ROW+1 && pn_wallpaper_ui_hit(&ui,100,590)==PN_WUI_ROW+2 && pn_wallpaper_ui_hit(&ui,100,700)==-1);
+    assert(pn_wallpaper_ui_hit(&ui,100,240)==PN_WUI_DEFAULT && pn_wallpaper_ui_hit(&ui,330,240)==PN_WUI_SIMPLE && pn_wallpaper_ui_hit(&ui,600,240)==PN_WUI_BOOK && pn_wallpaper_ui_hit(&ui,235,240)==-1 && pn_wallpaper_ui_hit(&ui,100,60)==PN_WUI_BACK && pn_wallpaper_ui_hit(&ui,100,1120)==PN_WUI_PREVIOUS && pn_wallpaper_ui_hit(&ui,600,1120)==PN_WUI_NEXT);
     /* 伪图片停留列表并提示，不改记录。/ A fake image stays on the list with a message and no record change. */
     assert(pn_wallpaper_ui_event(&ui,PN_WUI_ROW+0,present,NULL)!=PN_OK && ui.screen==PN_WUI_LIST);
     FILE *none=fopen(a,"rb");assert(!none);
     /* 真图片：预览→铺满→右移→旋转→关提示→应用。/ Real image: preview → cover → shift right → rotate → hint off → apply. */
     assert(pn_wallpaper_ui_event(&ui,PN_WUI_ROW+1,present,NULL)==PN_OK && ui.screen==PN_WUI_PREVIEW);
-    assert(pn_wallpaper_ui_hit(&ui,100,700)==PN_WUI_FIT && pn_wallpaper_ui_hit(&ui,100,830)==-1);
+    assert(pn_wallpaper_ui_hit(&ui,100,800)==PN_WUI_FIT && pn_wallpaper_ui_hit(&ui,100,855)==-1 && pn_wallpaper_ui_hit(&ui,100,60)==PN_WUI_CANCEL && pn_wallpaper_ui_hit(&ui,600,60)==PN_WUI_APPLY);
     assert(pn_wallpaper_ui_event(&ui,PN_WUI_LEFT,present,NULL)==PN_EMPTY);
-    assert(pn_wallpaper_ui_event(&ui,PN_WUI_FIT,present,NULL)==PN_OK && pn_wallpaper_ui_hit(&ui,500,830)==PN_WUI_RIGHT);
+    assert(pn_wallpaper_ui_event(&ui,PN_WUI_FIT,present,NULL)==PN_OK && pn_wallpaper_ui_hit(&ui,500,900)==PN_WUI_RIGHT);
     assert(pn_wallpaper_ui_event(&ui,PN_WUI_RIGHT,present,NULL)==PN_OK && pn_wallpaper_ui_event(&ui,PN_WUI_ROTATE,present,NULL)==PN_OK && pn_wallpaper_ui_event(&ui,PN_WUI_HINT,present,NULL)==PN_OK);
     for(int i=0;i<4;i++)(void)pn_wallpaper_ui_event(&ui,PN_WUI_RIGHT,present,NULL);
     assert(pn_wallpaper_ui_event(&ui,PN_WUI_RIGHT,present,NULL)==PN_EMPTY);
@@ -57,6 +57,11 @@ int main(int argc,char **argv){
     /* 目录不存在：空列表仍可选内置模式。/ Missing directory: empty list, built-in modes still available. */
     snprintf(path,sizeof path,"%s/absent",images);assert(pn_wallpaper_ui_open(&ui,&pool,&sd,path,&store,present,NULL)==PN_OK && pn_wallpaper_ui_hit(&ui,100,500)==-1);
     assert(pn_wallpaper_ui_event(&ui,PN_WUI_SIMPLE,present,NULL)==PN_OK && pn_wallpaper_ui_event(&ui,PN_WUI_APPLY,present,NULL)==PN_OK && pn_wallpaper_ui_current(&ui,&cur) && cur.mode==PN_LOCK_SIMPLE);pn_wallpaper_ui_close(&ui);
+    /* 当前书封面：预览为占位，应用后记录为BOOK模式且不带原图路径。/ Current-book cover: the preview is a placeholder and applying stores a BOOK-mode record without a source path. */
+    assert(pn_wallpaper_ui_open(&ui,&pool,&sd,images,&store,present,NULL)==PN_OK);
+    assert(pn_wallpaper_ui_event(&ui,PN_WUI_BOOK,present,NULL)==PN_OK && ui.screen==PN_WUI_PREVIEW && pn_wallpaper_ui_hit(&ui,100,700)==-1);
+    assert(pn_wallpaper_ui_event(&ui,PN_WUI_APPLY,present,NULL)==PN_OK && pn_wallpaper_ui_current(&ui,&cur) && cur.mode==PN_LOCK_BOOK && cur.hint && !cur.source[0]);
+    pn_wallpaper_ui_close(&ui);
     /* 呈现失败不标记presented。/ A failed presentation leaves presented false. */
     assert(pn_wallpaper_ui_open(&ui,&pool,&sd,images,&store,fail_present,NULL)==PN_OK && !ui.presented);assert(pn_wallpaper_ui_present(&ui,present,NULL)==PN_OK && ui.presented);pn_wallpaper_ui_close(&ui);
     /* 打开时每个分配点失败都完全回收。/ Every allocation failure while opening fully recovers. */

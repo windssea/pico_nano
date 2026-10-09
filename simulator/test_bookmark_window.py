@@ -9,7 +9,7 @@ with tempfile.TemporaryDirectory() as directory:
     books = root / "books"
     books.mkdir()
     (books / "book.txt").write_text("Read Pico book with editable bookmarks.\n" * 300, encoding="utf8")
-    script = "enter,next,bookmarks,mark-add,mark-select,mark-rename,mark-clear,text:My mark,mark-confirm,tap:150:50,tap:620:500,tap:300:40,tap:200:200,mark-jump,mark-return,bookmarks,mark-select,mark-delete,mark-back,mark-delete,mark-confirm,mark-back,back,quit"
+    script = "enter,next,bookmarks,mark-add,mark-select,mark-rename,mark-clear,text:My mark,mark-confirm,tap:150:50,tap:620:500,tap:342:600,tap:342:984,tap:200:280,mark-jump,mark-return,bookmarks,mark-select,mark-delete,mark-back,mark-delete,mark-confirm,mark-back,back,quit"
     env = dict(os.environ, SDL_VIDEODRIVER="dummy", PN_SIM_LIBRARY_SCRIPT=script)
     args = [sys.argv[1], "--library", str(books), "--state-dir", str(root / "state")]
     result = subprocess.run(args, capture_output=True, text=True, env=env, timeout=30)
@@ -46,7 +46,7 @@ with tempfile.TemporaryDirectory() as directory:
             result=subprocess.run([sys.argv[1],mode,str(book if mode=='--book' else books),'--state-dir',str(state)],env=env,capture_output=True,text=True,timeout=40)
             assert result.returncode==0 and 'used=0 live=0' in result.stdout,(result.stdout,result.stderr)
             return result
-        r=run('tap:350:40,release:580:1160,mark-add,mark-select,mark-rename,mark-clear,text:第一章,mark-confirm,mark-back,next,bookmarks,mark-select,mark-jump,tap:430:40,')
+        r=run('bookmarks,release:580:1160,mark-add,mark-select,mark-rename,mark-clear,text:第一章,mark-confirm,mark-back,next,bookmarks,mark-select,mark-jump,mark-return,')
         assert r.stdout.count('bookmark_ui command=4 status=0')==1 and 'bookmark_return status=0' in r.stdout,r.stdout
         assert 'bookmark_ui command=4 status=0 mode=1 count=1' in r.stdout and 'bookmark_label value=第一章' in r.stdout and 'bookmark_ui command=6 status=0 mode=0 count=1' in r.stdout,r.stdout
         r=run('bookmarks,mark-select,mark-delete,mark-back,mark-delete,mark-confirm,mark-back,')

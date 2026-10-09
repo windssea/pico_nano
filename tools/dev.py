@@ -26,7 +26,7 @@ def run(command, docker, log, container_image=IDF_IMAGE):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["host", "sim", "firmware-ci", "firmware-board", "factory-data", "sdl", "docs", "epub-sample"])
+    parser.add_argument("action", choices=["host", "sim", "firmware-ci", "firmware-board", "factory-data", "sdl", "docs", "epub-sample", "sdl-run"])
     parser.add_argument("--native", action="store_true", help="Use installed tools instead of the pinned IDF container")
     parser.add_argument("--archive", type=pathlib.Path, help="Local EPUB inside the workspace for epub-sample")
     parser.add_argument("--all-resources", action="store_true", help="Compare every ZIP resource for epub-sample")
@@ -58,14 +58,19 @@ def main():
     elif args.action == "docs":
         commands = [[sys.executable, "tools/check_docs.py"]]
         docker = False
-    elif args.action == "sdl":
+    elif args.action in ("sdl", "sdl-run"):
         if docker:
             container_image = "pico-nano-sdl:dev"
             status = run(["docker", "build", "--tag", container_image, str(ROOT / "tools/docker")], False, logs / "sdl-image.log")
             if status:
                 return status
-        commands = [["cmake", "-S", "simulator", "-B", "build-sim-sdl-idf", "-G", "Ninja", "-DPN_SIM_SDL=ON", "-DPN_SANITIZERS=ON"],
-                    ["cmake", "--build", "build-sim-sdl-idf"], ["ctest", "--test-dir", "build-sim-sdl-idf", "--output-on-failure"]]
+        if args.action == "sdl-run":
+            # 给人用的可见窗口：Release、无sanitizer，响应速度接近真实；不跑测试。/ For people using the visible window: Release without sanitizers for realistic speed; no tests.
+            commands = [["cmake", "-S", "simulator", "-B", "build-sim-sdl-run", "-G", "Ninja", "-DPN_SIM_SDL=ON", "-DCMAKE_BUILD_TYPE=Release"],
+                        ["cmake", "--build", "build-sim-sdl-run"]]
+        else:
+            commands = [["cmake", "-S", "simulator", "-B", "build-sim-sdl-idf", "-G", "Ninja", "-DPN_SIM_SDL=ON", "-DPN_SANITIZERS=ON"],
+                        ["cmake", "--build", "build-sim-sdl-idf"], ["ctest", "--test-dir", "build-sim-sdl-idf", "--output-on-failure"]]
     elif args.action == "host":
         commands = [["cmake", "-S", "tests/host", "-B", "build-host", "-G", "Ninja", "-DPN_SANITIZERS=ON"],
                     ["cmake", "--build", "build-host"], ["ctest", "--test-dir", "build-host", "--output-on-failure"],

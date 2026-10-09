@@ -12,6 +12,7 @@
 #include "pn_font_preferences.h"
 #include "pn_font_set.h"
 #include "pn_font_preview.h"
+#include "pn_reader_chrome.h"
 #include <errno.h>
 #include <limits.h>
 #include <stdio.h>
@@ -68,44 +69,27 @@ static pn_status_t body_source(app_t *a,pn_text_source_t *out){pn_font_set_t *se
 static void suspend_fonts(app_t *a){pn_font_chain_suspend(&a->chain);pn_font_close(&a->body);pn_font_set_suspend(&a->font_live);pn_font_set_suspend(&a->font_draft);}
 static pn_status_t font_write(app_t *,const pn_font_preferences_t *);
 static pn_status_t global_write(app_t *,const pn_font_preferences_t *);
-static pn_status_t memory_read(void *ctx,uint64_t offset,uint8_t *out,size_t cap,size_t *n){const char *text=ctx;size_t length=strlen(text);if(offset>length)return PN_INVALID;size_t take=length-(size_t)offset;if(take>cap)take=cap;memcpy(out,text+offset,take);*n=take;return PN_OK;}
-static pn_status_t text(pn_font_t *font,pn_frame_t *frame,const char *value,int x,int baseline){
-    pn_text_source_t source={(void *)value,strlen(value),memory_read,NULL};pn_text_reader_t decoder;pn_status_t status=pn_text_open(&decoder,&source,PN_TEXT_UTF8);if(status!=PN_OK)return status;
-    pn_text_char_t c;int64_t cursor=(int64_t)x*64;
-    while((status=pn_text_next(&decoder,&c))==PN_OK){int32_t width;if(cursor>INT32_MAX || cursor<INT32_MIN)return PN_LIMIT;
-        pn_status_t s=pn_font_advance(font,c.codepoint,&width);if(s!=PN_OK)return s;s=pn_font_draw(font,frame,c.codepoint,(int32_t)cursor,baseline,PN_FONT_GRAY);if(s!=PN_OK)return s;cursor+=width;}
-    return status==PN_EMPTY?PN_OK:status;
-}
 static pn_status_t advance(void *ctx,uint32_t cp,int32_t *width){app_t *a=ctx;pn_status_t s=pn_font_chain_advance(chain(a),cp,width);if(s==PN_EMPTY){*width=body(a)->pixels*64;return PN_OK;}return s;}
-static pn_status_t layout(app_t *a,pn_layout_t *out){int ascent,descent;pn_status_t s=pn_font_chain_vertical(chain(a),&ascent,&descent);if(s!=PN_OK)return s;int line=(body(a)->pixels*a->style.line_percent+99)/100;if(line<ascent+descent)line=ascent+descent;*out=(pn_layout_t){684-2*a->style.margin,960,line,ascent,body(a)->pixels*a->style.indent_em,body(a)->pixels*a->style.gap_percent/100,body(a)->pixels*64*a->style.tracking_percent/100};return PN_OK;}
+static pn_status_t layout(app_t *a,pn_layout_t *out){int ascent,descent;pn_status_t s=pn_font_chain_vertical(chain(a),&ascent,&descent);if(s!=PN_OK)return s;int line=(body(a)->pixels*a->style.line_percent+99)/100;if(line<ascent+descent)line=ascent+descent;*out=(pn_layout_t){684-2*a->style.margin,PN_READER_HEIGHT,line,ascent,body(a)->pixels*a->style.indent_em,body(a)->pixels*a->style.gap_percent/100,body(a)->pixels*64*a->style.tracking_percent/100};return PN_OK;}
 static pn_status_t render(app_t *a,pn_frame_t *frame,const pn_reader_receipt_t *receipt,bool show_return){
     pn_frame_clear(frame,15);unsigned missing=0;
     // 偶数边距保持4bpp半字节对齐，仅裁切正文区域。/ Even margin preserves 4bpp nibble alignment and clips the content area.
-    pn_frame_t viewport={frame->pixels+100*frame->stride+a->style.margin/2,684-2*a->style.margin,960,frame->stride};
+    pn_frame_t viewport={frame->pixels+PN_READER_TOP*frame->stride+a->style.margin/2,684-2*a->style.margin,PN_READER_HEIGHT,frame->stride};
     for(size_t i=0;i<a->reader.page.count;i++){pn_page_glyph_t *g=&a->glyphs[i];if(g->source.codepoint==10 || g->source.codepoint==9)continue;
         pn_status_t s=pn_font_chain_draw(chain(a),&viewport,g->source.codepoint,g->x_64,g->baseline,PN_FONT_GRAY);
         if(s==PN_EMPTY){int x=g->x_64/64,y=g->baseline-body(a)->pixels,size=body(a)->pixels-4;pn_frame_rect(&viewport,x,y,size,1,0);pn_frame_rect(&viewport,x,y+size,size,1,0);pn_frame_rect(&viewport,x,y,1,size,0);pn_frame_rect(&viewport,x+size,y,1,size,0);missing++;}
         else if(s!=PN_OK)return s;
     }
-    pn_status_t s;
-    if(a->draft_render){s=text(&a->ui,frame,a->font_render?"字体预览":"排版预览",32,46);if(s!=PN_OK)return s;}
-    else{
-        s=text(&a->ui,frame,"小纸 Pico",32,46);if(s!=PN_OK)return s;
-        s=text(&a->ui,frame,"书签",264,46);if(s!=PN_OK)return s;
-        if(show_return){s=text(&a->ui,frame,"返回",390,46);if(s!=PN_OK)return s;}
-        s=text(&a->ui,frame,"排版",520,46);if(s!=PN_OK)return s;
-    }
-    char label[80];
-    pn_frame_rect(frame,32,70,620,1,7);pn_frame_rect(frame,32,1070,620,1,7);
-    if(a->draft_render){s=text(&a->ui,frame,"设置尚未保存",32,1102);if(s!=PN_OK)return s;
-        pn_frame_rect(frame,32,1120,620,1,5);pn_frame_rect(frame,32,1200,620,1,5);
-        return text(&a->ui,frame,"点击返回设置",232,1170);
-    }
-    snprintf(label,sizeof label,"%llu%%",(unsigned long long)(a->reader.decoder.source.size?receipt->anchor.begin*100/a->reader.decoder.source.size:0));s=text(&a->ui,frame,label,32,1102);if(s!=PN_OK)return s;
-    if(missing){snprintf(label,sizeof label,"%u 缺字",missing);s=text(&a->ui,frame,label,480,1102);if(s!=PN_OK)return s;}
-    const char *labels[]={"上页","下页","缩小","放大"};
-    for(int i=0;i<4;i++){int x=32+i*157;pn_frame_rect(frame,x,1120,148,1,5);pn_frame_rect(frame,x,1200,148,1,5);pn_frame_rect(frame,x,1120,1,81,5);pn_frame_rect(frame,x+147,1120,1,81,5);s=text(&a->ui,frame,labels[i],x+44,1170);if(s!=PN_OK)return s;}
-    return PN_OK;
+    // 页脚：书名与百分比；预览态改为提示。无顶栏与底部按钮，工具由点正文中央打开的工具栏提供。
+    // Footer: book title and percentage; previews show a hint instead. There is no top bar or bottom buttons; tools come from the toolbar opened by tapping the middle of the text.
+    char left[PN_RECENT_PATH_MAX],right[48]="";
+    if(a->draft_render)snprintf(left,sizeof left,"%s",a->font_render?"字体预览，设置尚未保存":"排版预览，设置尚未保存");
+    else if(show_return)snprintf(left,sizeof left,"< 返回跳转前位置");
+    else{const char *slash=strrchr(a->book_path,'/');snprintf(left,sizeof left,"%s",slash?slash+1:a->book_path);char *dot=strrchr(left,'.');if(dot && dot!=left)*dot=0;}
+    if(a->draft_render)snprintf(right,sizeof right,"点击返回设置");
+    else{unsigned long long percent=a->reader.decoder.source.size?receipt->anchor.begin*100/a->reader.decoder.source.size:0;
+        if(missing)snprintf(right,sizeof right,"%u 缺字 · %llu%%",missing,percent);else snprintf(right,sizeof right,"%llu%%",percent);}
+    return pn_reader_footer_render(&a->ui,body(a),frame,left,right);
 }
 static pn_status_t release_app(app_t *a){
     pn_font_close(&a->metadata);pn_font_set_close(&a->font_draft);pn_font_set_close(&a->font_live);pn_font_chain_clear(&a->chain);pn_font_close(&a->body);pn_font_close(&a->ui);pn_status_t status=pn_text_file_close(&a->book_file);
@@ -294,6 +278,16 @@ pn_status_t pn_reader_app_bookmark_jump(pn_reader_app_t *app,uint64_t id,uint64_
     status=pn_reader_app_progress(app,&before);if(status!=PN_OK)return status;
     bool committed=false;status=step_location(app,PN_APP_OPEN,true,position.source_offset,now,present,ctx,&committed,1);
     // 保存可能失败而画面已确认，以本次显示确认决定返回点。/ Saving may fail after confirmation; this presentation confirmation controls the return anchor.
+    if(committed){app_t *a=app->impl;a->bookmark_origin=before;a->has_bookmark_origin=true;}
+    return status;
+}
+pn_status_t pn_reader_app_jump_percent(pn_reader_app_t *app,unsigned basis_points,uint64_t now,pn_reader_present_fn present,void *ctx){
+    if(app && app->impl)((app_t *)app->impl)->last_confirmed=false;
+    if(!app || !app->impl || basis_points>10000)return PN_INVALID;
+    pn_txt_progress_t before;pn_status_t status=pn_reader_app_progress(app,&before);if(status!=PN_OK)return status;
+    uint64_t offset=before.source_size/10000u*basis_points+before.source_size%10000u*basis_points/10000u; // 分步算以免溢出 / Split to avoid overflow
+    {app_t *a=app->impl;uint64_t aligned=0;status=pn_reader_align(&a->reader,offset,&aligned);if(status!=PN_OK)return status;offset=aligned;}
+    bool committed=false;status=step_location(app,PN_APP_OPEN,true,offset,now,present,ctx,&committed,1);
     if(committed){app_t *a=app->impl;a->bookmark_origin=before;a->has_bookmark_origin=true;}
     return status;
 }
@@ -486,3 +480,4 @@ pn_status_t pn_reader_app_fonts_probe(pn_reader_app_t *app,const pn_catalog_item
     (void)pn_font_asset_close(&asset);
     if(status==PN_OK){*ref=reference;*info=metadata;*checked=(unsigned)count;*missing=absent;}return status;
 }
+pn_font_t *pn_reader_app_body_font(const pn_reader_app_t *app){return app && app->impl?body((app_t *)app->impl):NULL;}

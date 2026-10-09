@@ -20,7 +20,8 @@
 typedef enum {
     PN_LOCK_DEFAULT=0, ///< 固件内置黑白锁屏 / Built-in black-and-white lock screen
     PN_LOCK_CUSTOM=1, ///< 用户图片预处理位图 / Preprocessed user image bitmap
-    PN_LOCK_SIMPLE=2 ///< 白底产品名与静态提示 / White background with product name and static hint
+    PN_LOCK_SIMPLE=2, ///< 白底产品名与静态提示 / White background with product name and static hint
+    PN_LOCK_BOOK=3 ///< 锁屏时显示正在读的书的封面；记录不带位图 / Show the cover of the book being read at lock time; the record carries no bitmap
 } pn_lock_mode_t;
 /// 适配方式。/ Fit mode.
 typedef enum {
@@ -65,6 +66,8 @@ pn_status_t pn_wallpaper_load(const pn_wallpaper_store_t *store,const pn_media_l
 /// 失败可能已经提交，调用方应重新load确认。/ Failures may still have committed; callers should reload to confirm.
 pn_status_t pn_wallpaper_save(const pn_wallpaper_store_t *store,const pn_media_lease_t *lease,pn_lock_selection_t *selection,const pn_frame_t *bitmap);
 
-/// 按选择绘制锁屏；custom时frame须已含位图，只叠加提示带。font为常驻UI字体，hint为一行提示文本。
-/// Draw the lock screen for a selection; in custom mode frame already holds the bitmap and only the hint band is overlaid. font is the resident UI font; hint is one line of text.
+/// 按选择绘制锁屏；custom/book时frame须已含位图，只叠加提示带。font为常驻UI字体，hint为一行提示文本。
+/// book模式由调用方先把封面画入frame；取不到封面时调用方应改用默认选择，本函数不检查frame内容。
+/// Draw the lock screen for a selection; in custom/book mode frame already holds the bitmap and only the hint band is overlaid. font is the resident UI font; hint is one line of text.
+/// In book mode the caller first draws the cover into frame; when no cover is available the caller must switch to the default selection, as this function does not inspect frame contents.
 pn_status_t pn_lock_render(const pn_lock_selection_t *selection,pn_font_t *font,const char *hint,pn_frame_t *frame);

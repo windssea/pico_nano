@@ -30,6 +30,7 @@ static void script_queue(sim_script_t *script){
         else if(!strcmp(part,"quit") || !strcmp(part,"back") || !strcmp(part,"mark-back"))event.key.keysym.sym=SDLK_ESCAPE;
         else if(!strcmp(part,"library-next"))event.key.keysym.sym=SDLK_PAGEDOWN;
         else if(!strcmp(part,"library-previous"))event.key.keysym.sym=SDLK_PAGEUP;
+        else if(!strcmp(part,"jump"))event.key.keysym.sym=SDLK_g;
         else if(!strcmp(part,"bookmarks"))event.key.keysym.sym=SDLK_m;
         else if(!strcmp(part,"mark-add"))event.key.keysym.sym=SDLK_a;
         else if(!strcmp(part,"mark-rename"))event.key.keysym.sym=SDLK_r;

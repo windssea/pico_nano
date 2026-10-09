@@ -18,12 +18,12 @@ with tempfile.TemporaryDirectory() as folder:
  state=root/'single'
  r=run('--book',state,'toc,release:100:170,toc-next,toc-select,quit')
  assert 'toc_ui command=2 status=0 active=1' in r.stdout and 'toc_ui command=16 status=0 active=0' in r.stdout,r.stdout
- reopened=run('--book',state,'tap:580:40,back,quit')
+ reopened=run('--book',state,'toc,back,quit')
  assert 'toc_ui command=0 status=0 active=1' in reopened.stdout and 'toc_ui command=1 status=0 active=0' in reopened.stdout,reopened.stdout
  first=re.search(r'epub_event action=open status=0 path=(\S+) element=(\d+) run=(\d+) offset=(\d+)',r.stdout).groups()
  second=re.search(r'epub_event action=open status=0 path=(\S+) element=(\d+) run=(\d+) offset=(\d+)',reopened.stdout).groups();assert first!=second
  state=root/'library'
- r=run('--library',state,'enter,tap:580:40,release:100:170,toc-next,toc-select,back,continue,back,quit')
+ r=run('--library',state,'enter,tap:342:600,tap:130:984,release:100:170,toc-next,toc-select,back,continue,back,quit')
  assert 'toc_ui command=2 status=0 active=1' in r.stdout and 'toc_ui command=16 status=0 active=0' in r.stdout,r.stdout
  locations=re.findall(r'epub_library_position path=(\S+) element=(\d+) run=(\d+) offset=(\d+)',r.stdout);assert len(locations)==2 and locations[0]!=locations[1],r.stdout
  print('TOC SDL: standalone/library keyboard and pointer menus, directory pages, actual jump/save/reopen passed')

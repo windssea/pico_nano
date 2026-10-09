@@ -25,6 +25,15 @@ static pn_status_t seek(pn_text_reader_t *d,uint64_t offset,bool *paragraph){
     while(d->cursor<offset){pn_text_char_t c;pn_status_t s=pn_text_next(d,&c);if(s!=PN_OK)return s;if(d->cursor>offset)return PN_INVALID;*paragraph=c.codepoint==10;}
     return PN_OK;
 }
+pn_status_t pn_reader_align(const pn_reader_t *r,uint64_t offset,uint64_t *aligned){
+    if(!r || !aligned || !r->decoder.source.read_at)return PN_INVALID;
+    pn_text_reader_t work=r->decoder;work.cursor=work.content_begin;
+    uint64_t previous=work.cursor;
+    while(work.cursor<offset && work.cursor<work.source.size){pn_text_char_t c;previous=work.cursor;pn_status_t s=pn_text_next(&work,&c);if(s!=PN_OK)return s;}
+    // 越过末尾时退回最后一个字符，避免落在空页。/ Past the end, fall back to the last character so the jump never lands on an empty page.
+    *aligned=work.cursor>=work.source.size && work.source.size>work.content_begin && offset>=work.source.size?previous:work.cursor;
+    return PN_OK;
+}
 pn_status_t pn_reader_prepare(pn_reader_t *r,pn_read_intent_t intent,uint64_t offset,pn_reader_receipt_t *receipt){
     if(!r || !receipt || !r->decoder.source.read_at || intent<PN_READ_FIRST || intent>PN_READ_JUMP)return PN_INVALID;
     if(r->preparing)return PN_BUSY;

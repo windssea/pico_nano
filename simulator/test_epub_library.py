@@ -18,7 +18,7 @@ with tempfile.TemporaryDirectory() as folder:
  assert len(positions)==2 and positions[0]!=positions[1],r.stdout
  assert r.stdout.count('library_open name=a.epub')==2 and 'recent_identity status=0' in r.stdout,r.stdout
  r=run('continue,back,quit');assert re.findall(r'epub_library_position path=(\S+) element=(\d+) run=(\d+) offset=(\d+)',r.stdout)==[positions[1]],r.stdout
- r=run('enter,back,tap:200:350,next,back,tap:200:200,back,quit')
+ r=run('enter,back,tap:300:500,next,back,tap:100:500,back,quit')
  assert r.stdout.count('library_open name=a.epub')==2 and 'library_open name=b.txt' in r.stdout,r.stdout
  before={p.name:p.read_bytes() for p in state.iterdir()}
  with zipfile.ZipFile(book) as z:entries={n:z.read(n) for n in z.namelist()}

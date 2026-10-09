@@ -63,6 +63,9 @@ static int store(const char *dir){
     flip(b,10);assert(pn_wallpaper_load(&s,&write,&got,&frame)==PN_CORRUPT);
     /* 双坏后仍可保存新记录并恢复。/ After both slots are bad a new record can still be saved and recovered. */
     assert(pn_wallpaper_save(&s,&write,&def,NULL)==PN_OK && def.sequence==4);assert(pn_wallpaper_load(&s,&write,&got,NULL)==PN_OK && got.sequence==4 && got.mode==PN_LOCK_DEFAULT);
+    /* 当前书封面记录不带位图，往返保留模式与提示。/ A current-book-cover record carries no bitmap and round-trips mode and hint. */
+    pn_lock_selection_t book={.mode=PN_LOCK_BOOK,.hint=true};assert(pn_wallpaper_save(&s,&write,&book,NULL)==PN_OK && book.sequence==5);
+    assert(pn_wallpaper_load(&s,&write,&got,NULL)==PN_OK && got.sequence==5 && got.mode==PN_LOCK_BOOK && got.hint && !got.source[0]);
     assert(pn_media_detach(&media)==PN_OK);assert(pn_wallpaper_load(&s,&write,&got,NULL)==PN_STALE_MEDIA && pn_wallpaper_save(&s,&write,&def,NULL)==PN_STALE_MEDIA);
     free(fp);free(bp);puts("store ok");return 0;
 }
@@ -70,11 +73,11 @@ static int store(const char *dir){
 static int lock(const char *prefix){
     pn_pool_t pool;assert(!pn_pool_init(&pool,2u*1024u*1024u,NULL,NULL,NULL));pn_font_t font={0};pn_text_source_t builtin=pn_font_builtin_source();assert(pn_font_open(&font,&pool,&builtin,24)==PN_OK);
     pn_frame_t frame;uint8_t *p=full(&frame);char path[512];const char *hint="按电源键继续阅读";
-    for(int mode=0;mode<3;mode++){
-        if(mode==PN_LOCK_CUSTOM)pn_frame_clear(&frame,3);
+    for(int mode=0;mode<4;mode++){
+        if(mode==PN_LOCK_CUSTOM || mode==PN_LOCK_BOOK)pn_frame_clear(&frame,3);
         pn_lock_selection_t s={.mode=(pn_lock_mode_t)mode,.hint=true};assert(pn_lock_render(&s,&font,hint,&frame)==PN_OK && font.pixels==24);
         snprintf(path,sizeof path,"%s-%d.pgm",prefix,mode);write_pgm(&frame,path);
-        if(mode==PN_LOCK_CUSTOM){assert(pn_frame_get(&frame,10,500)==3 && pn_frame_get(&frame,10,1200)==15);s.hint=false;pn_frame_clear(&frame,3);assert(pn_lock_render(&s,&font,hint,&frame)==PN_OK && pn_frame_get(&frame,10,1200)==3);}
+        if(mode==PN_LOCK_CUSTOM || mode==PN_LOCK_BOOK){assert(pn_frame_get(&frame,10,500)==3 && pn_frame_get(&frame,10,1200)==15);s.hint=false;pn_frame_clear(&frame,3);assert(pn_lock_render(&s,&font,hint,&frame)==PN_OK && pn_frame_get(&frame,10,1200)==3);}
     }
     pn_lock_selection_t bad={.mode=(pn_lock_mode_t)7};assert(pn_lock_render(&bad,&font,hint,&frame)==PN_INVALID);
     pn_font_close(&font);free(p);assert(!pool.used && !pool.live);puts("lock ok");return 0;

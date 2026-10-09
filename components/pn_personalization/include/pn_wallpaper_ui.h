@@ -22,6 +22,7 @@
 #define PN_WUI_HINT 10
 #define PN_WUI_APPLY 11
 #define PN_WUI_CANCEL 12
+#define PN_WUI_BOOK 13
 #define PN_WUI_ROW 16
 typedef pn_status_t (*pn_wallpaper_present_fn)(void *,const pn_frame_t *,pn_refresh_t); ///< 与阅读呈现回调同签名 / Same signature as reader presentation callbacks
 /// 页面：列表或预览。/ Screen: list or preview.

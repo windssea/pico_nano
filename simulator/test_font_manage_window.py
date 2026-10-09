@@ -10,7 +10,7 @@ with tempfile.TemporaryDirectory() as folder:
         assert r.returncode==0,(r.stdout,r.stderr)
         assert 'used=0 live=0' in r.stdout,r.stdout
         return r.stdout
-    out=run('fonts,tap:100:370,tap:100:1000,tap:500:1000,back,tap:500:1000,tap:500:1150,back,quit','--font-dir',str(fonts))
+    out=run('fonts,tap:100:240,tap:100:1000,tap:500:1000,back,tap:500:1000,tap:500:1150,back,quit','--font-dir',str(fonts))
     for line in ('font_manage open status=0','font_manage command=16 status=0 screen=1 active=1','font_manage command=4 status=0 screen=1 active=1',
                  'font_manage command=5 status=0 screen=2 active=1','font_manage command=7 status=0 screen=1 active=1','font_manage command=6 status=0 screen=0 active=1',
                  'font_manage command=1 status=0 screen=0 active=0'):

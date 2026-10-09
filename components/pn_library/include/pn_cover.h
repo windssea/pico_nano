@@ -9,10 +9,11 @@
 #pragma once
 #include "pn_catalog.h"
 #include "pn_frame.h"
-#define PN_COVER_WIDTH 72
-#define PN_COVER_HEIGHT 100
+#define PN_COVER_WIDTH 184 ///< 网格封面宽，见UI_UX书架布局 / Grid cover width, see the shelf layout in UI_UX
+#define PN_COVER_HEIGHT 256 ///< 网格封面高 / Grid cover height
 #define PN_COVER_BYTES (PN_COVER_WIDTH*PN_COVER_HEIGHT/2)
-#define PN_COVER_CACHE_VERSION 1
+#define PN_COVER_CACHE_VERSION 2 ///< 尺寸变化后缓存重建 / Caches rebuild after the size change
+#define PN_COVER_SLOT_LAST PN_CATALOG_PAGE_MAX ///< 最近阅读卡使用的额外槽 / Extra slot used by the continue-reading card
 
 /// 单书封面状态。/ Per-book cover state.
 typedef enum {
@@ -22,11 +23,14 @@ typedef enum {
     PN_COVER_FAILED ///< 封面存在但损坏/超限，书仍可打开 / Cover present but corrupt/over budget; the book still opens
 } pn_cover_state_t;
 
-/// 当前书目页六条封面槽，调用方拥有，可放pool或静态区。/ Six cover slots for the current catalog page, caller-owned in pool or static storage.
+/// 当前书目页六条封面槽外加一个“继续阅读”槽，调用方拥有，可放pool或静态区。
+/// Six cover slots for the current catalog page plus one continue-reading slot, caller-owned in pool or static storage.
 typedef struct {
-    uint8_t pixels[PN_CATALOG_PAGE_MAX][PN_COVER_BYTES]; ///< 4bpp行内低半字节在左 / 4bpp rows, left pixel in low nibble
-    pn_cover_state_t state[PN_CATALOG_PAGE_MAX]; ///< 每槽状态 / Per-slot state
-    pn_status_t reason[PN_CATALOG_PAGE_MAX]; ///< 最后一次提取结果 / Last extraction status
+    uint8_t pixels[PN_CATALOG_PAGE_MAX+1][PN_COVER_BYTES]; ///< 4bpp行内低半字节在左 / 4bpp rows, left pixel in low nibble
+    pn_cover_state_t state[PN_CATALOG_PAGE_MAX+1]; ///< 每槽状态 / Per-slot state
+    pn_status_t reason[PN_CATALOG_PAGE_MAX+1]; ///< 最后一次提取结果 / Last extraction status
+    bool has_last; ///< last有效 / last is valid
+    pn_catalog_item_t last; ///< 继续阅读的书（路径、名称、进度） / The continue-reading book (path, name, progress)
 } pn_shelf_covers_t;
 
 /// 提取单本封面并contain缩放到thumb整帧（白底居中）；EPUB用OPF声明或cover文件名候选，TXT用同名侧车。
@@ -40,6 +44,9 @@ pn_status_t pn_cover_render(pn_pool_t *pool,pn_media_t *media,const pn_media_lea
 
 /// 按页面重置：TXT/EPUB为PENDING，其他格式NONE。/ Reset for a page: TXT/EPUB become PENDING, other formats NONE.
 void pn_shelf_covers_reset(pn_shelf_covers_t *covers,const pn_catalog_page_t *page);
+/// 设置或清除继续阅读的书（item为NULL清除）；下次reset/step/cached起为其提取封面。
+/// Set or clear the continue-reading book (NULL clears it); its cover is extracted by later reset/step/cached calls.
+void pn_shelf_covers_set_last(pn_shelf_covers_t *covers,const pn_catalog_item_t *item);
 /// 只从缓存填充PENDING槽，供首次绘制前调用以免墨水屏二次刷新；未命中仍PENDING，介质失效STALE_MEDIA。
 /// Fill PENDING slots from the cache only, called before the first paint to avoid a second e-ink refresh; misses stay PENDING, STALE_MEDIA on invalidation.
 pn_status_t pn_shelf_covers_cached(pn_shelf_covers_t *covers,const pn_catalog_page_t *page,pn_pool_t *pool,pn_media_t *media,const char *cache_dir,bool *changed);

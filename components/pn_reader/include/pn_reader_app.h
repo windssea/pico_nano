@@ -24,7 +24,8 @@ typedef enum {
     PN_APP_PREVIOUS, ///< 上一页 / Previous page
     PN_APP_SMALLER, ///< 字号减2 / Reduce size by two
     PN_APP_LARGER, ///< 字号加2 / Increase size by two
-    PN_APP_BEGINNING ///< 书首 / Beginning
+    PN_APP_BEGINNING, ///< 书首 / Beginning
+    PN_APP_TOOLS ///< 点正文中央打开工具栏；只由输入识别器产生，应用不处理 / Center tap opens the toolbar; produced only by the input recognizer and never handled by the apps
 } pn_reader_action_t;
 typedef pn_status_t (*pn_reader_present_fn)(void *,const pn_frame_t *,pn_refresh_t);
 /// state_dir可空禁用持久化；非空只创建此目录、按内容SHA独立A/B文件。
@@ -122,3 +123,12 @@ pn_status_t pn_reader_app_font_default(pn_reader_app_t *,const pn_font_preferenc
 /// 在原文锚点应用已有全局默认，显示成功后保存继承标记；未设全局返回EMPTY。
 /// Apply existing global defaults at the original anchor and save inheritance after presentation; absent global returns EMPTY.
 pn_status_t pn_reader_app_font_inherit(pn_reader_app_t *,uint64_t,pn_reader_present_fn,void *);
+
+/// 当前正文字体（借用，不可关闭；字体已挂起时engine为空）。排版预览用它按草稿字号试排。
+/// The current body font (borrowed, never close it; its engine is empty while fonts are suspended). The typesetting preview uses it to sample the draft size.
+pn_font_t *pn_reader_app_body_font(const pn_reader_app_t *app);
+
+/// 跳到全书basis_points/10000处（按原文件字节比例，落点由阅读层对齐到字符边界）；成功确认后可用“返回跳转前位置”。
+/// Jump to basis_points/10000 of the book (by original-file byte share; the reading layer aligns to a character boundary); "return to the position before the jump" works after a confirmed jump.
+pn_status_t pn_reader_app_jump_percent(pn_reader_app_t *app,unsigned basis_points,uint64_t now_ms,pn_reader_present_fn present,void *ctx);
+

@@ -49,14 +49,29 @@ char pn_catalog_initial(const char *name){
     const unsigned char *p=(const unsigned char *)name;uint32_t key=sort_key(next_point(&p));
     return key>='a' && key<='z'?(char)key:key<'a'?'#':'~';
 }
+/* 搜索匹配：query为小写a–z/0–9，命中书名里的同样字符（不区分大小写）或汉字拼音首字母序列的任意连续片段。
+ * Search matching: query is lowercase a–z/0–9 and hits the same characters in the name (case-insensitive) or any run of the hanzi pinyin-initial sequence. */
+bool pn_catalog_match(const char *name,const char *query){
+    if(!name || !query)return false;
+    if(!*query)return true;
+    char initials[PN_CATALOG_NAME_MAX],plain[PN_CATALOG_NAME_MAX];size_t n=0,m=0;
+    const unsigned char *p=(const unsigned char *)name;
+    while(*p && n<sizeof initials-1){
+        uint32_t c=next_point(&p),key=sort_key(c);
+        if(c<0x80)plain[m++]=(char)(c>='A' && c<='Z'?c-'A'+'a':c);
+        if((key>='a' && key<='z') || (key>='0' && key<='9'))initials[n++]=(char)key;
+    }
+    initials[n]=0;plain[m]=0;
+    return strstr(plain,query) || strstr(initials,query);
+}
 static pn_status_t scan(pn_media_t *media,const pn_media_lease_t *lease,const char *directory,
-    const char *after,pn_catalog_page_t *page,bool reverse,int filter,char from){
+    const char *after,pn_catalog_page_t *page,bool reverse,int filter,char from,const char *query){
     if(!media || !lease || !directory || !*directory || !after || !page)return PN_INVALID;
     if(strlen(directory)>=PN_CATALOG_PATH_MAX || strlen(after)>=PN_CATALOG_NAME_MAX)return PN_LIMIT;
     pn_status_t status=pn_media_validate(media,lease);if(status!=PN_OK)return status;
     if(lease->access==PN_MEDIA_USB)return PN_INVALID;
     memset(page,0,sizeof *page);DIR *dir=opendir(directory);if(!dir)return PN_IO;
-    char greatest[PN_CATALOG_NAME_MAX]={0};
+    char greatest[PN_CATALOG_NAME_MAX]={0};size_t total=0,at_or_before=0,before=0,skipped_by_letter=0;
     for(;;){status=pn_media_validate(media,lease);if(status!=PN_OK)break;errno=0;struct dirent *entry=readdir(dir);if(!entry){if(errno)status=PN_IO;break;}
         const char *name=entry->d_name;if(name[0]=='.')continue;const char *ext=strrchr(name,'.');pn_book_format_t kind=filter==1?(ext && !strcasecmp(ext,".ttf")?PN_FILE_TTF:0):filter==2?(ext && (!strcasecmp(ext,".jpg") || !strcasecmp(ext,".jpeg") || !strcasecmp(ext,".png"))?PN_FILE_IMAGE:0):format(name);if(!kind)continue;
         if(strlen(name)>=PN_CATALOG_NAME_MAX || !safe_name(name)){page->skipped++;continue;}
@@ -69,9 +84,12 @@ static pn_status_t scan(pn_media_t *media,const pn_media_lease_t *lease,const ch
         int result=lstat(item.path,&info);
 #endif
         if(result!=0){page->skipped++;continue;}if(!S_ISREG(info.st_mode) || info.st_size<0)continue;
+        if(query && !pn_catalog_match(name,query))continue;
         if(!*greatest || pn_catalog_compare(name,greatest)>0)strcpy(greatest,name);
+        // 同一次扫描顺带数出总数与位置，不另读目录。/ Count totals and position during the same scan instead of reading the directory again.
+        total++;{int order=pn_catalog_compare(name,after);if(order<=0)at_or_before++;if(order<0)before++;}
         if(reverse?pn_catalog_compare(name,after)>=0:pn_catalog_compare(name,after)<=0)continue;
-        if(from){char initial=pn_catalog_initial(name);if(initial=='#' || (initial!='~' && initial<from))continue;}
+        if(from){char initial=pn_catalog_initial(name);if(initial=='#' || (initial!='~' && initial<from)){skipped_by_letter++;continue;}}
         strcpy(item.name,name);item.size=(uint64_t)info.st_size;
         if(reverse && page->count==PN_CATALOG_PAGE_MAX){if(pn_catalog_compare(name,page->items[0].name)<=0)continue;memmove(page->items,page->items+1,(PN_CATALOG_PAGE_MAX-1)*sizeof page->items[0]);page->count--;}
         size_t index=0;while(index<page->count && pn_catalog_compare(page->items[index].name,name)<0)index++;
@@ -83,11 +101,14 @@ static pn_status_t scan(pn_media_t *media,const pn_media_lease_t *lease,const ch
     if(closedir(dir)!=0 && status==PN_OK)status=PN_IO;
     pn_status_t current=pn_media_validate(media,lease);if(current!=PN_OK)status=current;
     if(status!=PN_OK){page->count=0;page->more=false;return status;}
-    page->more=page->count && pn_catalog_compare(greatest,page->items[page->count-1].name)>0;return PN_OK;
+    page->more=page->count && pn_catalog_compare(greatest,page->items[page->count-1].name)>0;
+    page->total=total;
+    page->index=reverse?(before>=page->count?before-page->count:0):at_or_before+skipped_by_letter;
+    return PN_OK;
 }
 
-pn_status_t pn_catalog_page(pn_media_t *m,const pn_media_lease_t *l,const char *d,const char *a,pn_catalog_page_t *p){return scan(m,l,d,a,p,false,0,0);}
-pn_status_t pn_catalog_page_before(pn_media_t *m,const pn_media_lease_t *l,const char *d,const char *a,pn_catalog_page_t *p){return scan(m,l,d,a,p,true,0,0);}
+pn_status_t pn_catalog_page(pn_media_t *m,const pn_media_lease_t *l,const char *d,const char *a,pn_catalog_page_t *p){return scan(m,l,d,a,p,false,0,0,NULL);}
+pn_status_t pn_catalog_page_before(pn_media_t *m,const pn_media_lease_t *l,const char *d,const char *a,pn_catalog_page_t *p){return scan(m,l,d,a,p,true,0,0,NULL);}
 pn_status_t pn_catalog_recent_page(const pn_recent_snapshot_t *snapshot,size_t start,pn_catalog_page_t *page){
     if(!snapshot || !page || snapshot->count>PN_RECENT_MAX || start>snapshot->count)return PN_INVALID;
     memset(page,0,sizeof *page);size_t count=snapshot->count-start;if(count>PN_CATALOG_PAGE_MAX)count=PN_CATALOG_PAGE_MAX;
@@ -99,18 +120,34 @@ pn_status_t pn_catalog_recent_page(const pn_recent_snapshot_t *snapshot,size_t s
         else{n=sizeof item->name-4;while(n && ((unsigned char)name[n]&0xc0)==0x80)n--;memcpy(item->name,name,n);strcpy(item->name+n,"...");}
         item->size=r->source_size;item->format=(pn_book_format_t)r->format;item->expected=r->book;item->progress=r->progress;item->identified=true;
     }
-    page->count=count;page->more=start+count<snapshot->count;return PN_OK;
+    page->count=count;page->more=start+count<snapshot->count;page->index=start;page->total=snapshot->count;return PN_OK;
 }
 
-pn_status_t pn_catalog_font_page(pn_media_t *m,const pn_media_lease_t *l,const char *d,const char *a,pn_catalog_page_t *p){return scan(m,l,d,a,p,false,1,0);}
-pn_status_t pn_catalog_font_page_before(pn_media_t *m,const pn_media_lease_t *l,const char *d,const char *a,pn_catalog_page_t *p){return scan(m,l,d,a,p,true,1,0);}
-pn_status_t pn_catalog_image_page(pn_media_t *m,const pn_media_lease_t *l,const char *d,const char *a,pn_catalog_page_t *p){return scan(m,l,d,a,p,false,2,0);}
-pn_status_t pn_catalog_image_page_before(pn_media_t *m,const pn_media_lease_t *l,const char *d,const char *a,pn_catalog_page_t *p){return scan(m,l,d,a,p,true,2,0);}
+pn_status_t pn_catalog_font_page(pn_media_t *m,const pn_media_lease_t *l,const char *d,const char *a,pn_catalog_page_t *p){return scan(m,l,d,a,p,false,1,0,NULL);}
+pn_status_t pn_catalog_font_page_before(pn_media_t *m,const pn_media_lease_t *l,const char *d,const char *a,pn_catalog_page_t *p){return scan(m,l,d,a,p,true,1,0,NULL);}
+pn_status_t pn_catalog_image_page(pn_media_t *m,const pn_media_lease_t *l,const char *d,const char *a,pn_catalog_page_t *p){return scan(m,l,d,a,p,false,2,0,NULL);}
+pn_status_t pn_catalog_image_page_before(pn_media_t *m,const pn_media_lease_t *l,const char *d,const char *a,pn_catalog_page_t *p){return scan(m,l,d,a,p,true,2,0,NULL);}
 pn_status_t pn_catalog_page_from(pn_media_t *m,const pn_media_lease_t *l,const char *d,char letter,pn_catalog_page_t *p){
-    if(letter=='#')return scan(m,l,d,"",p,false,0,0);
+    if(letter=='#')return scan(m,l,d,"",p,false,0,0,NULL);
     if(letter<'a' || letter>'z')return PN_INVALID;
-    pn_status_t status=scan(m,l,d,"",p,false,0,letter);
+    pn_status_t status=scan(m,l,d,"",p,false,0,letter,NULL);
     // 该字母之后没有书：退到最后一页，避免空页无路可翻。/ No books from this letter on: fall back to the last page so the shelf never strands on an empty page.
-    if(status==PN_OK && !p->count)status=scan(m,l,d,"\xf4\x8f\xbf\xbf",p,true,0,0);
+    if(status==PN_OK && !p->count)status=scan(m,l,d,"\xf4\x8f\xbf\xbf",p,true,0,0,NULL);
     return status;
+}
+void pn_catalog_apply_recent(pn_catalog_page_t *page,const pn_recent_snapshot_t *snapshot){
+    if(!page || !snapshot || snapshot->count>PN_RECENT_MAX)return;
+    for(size_t i=0;i<page->count;i++){
+        for(size_t j=0;j<snapshot->count;j++){
+            if(!strcmp(page->items[i].path,snapshot->items[j].path)){page->items[i].progress=snapshot->items[j].progress;page->items[i].has_progress=true;break;}
+        }
+    }
+}
+pn_status_t pn_catalog_search_page(pn_media_t *m,const pn_media_lease_t *l,const char *d,const char *query,const char *after,pn_catalog_page_t *p){
+    if(!query || strlen(query)>PN_CATALOG_QUERY_MAX)return PN_INVALID;
+    return scan(m,l,d,after,p,false,0,0,query);
+}
+pn_status_t pn_catalog_search_page_before(pn_media_t *m,const pn_media_lease_t *l,const char *d,const char *query,const char *after,pn_catalog_page_t *p){
+    if(!query || strlen(query)>PN_CATALOG_QUERY_MAX)return PN_INVALID;
+    return scan(m,l,d,after,p,true,0,0,query);
 }

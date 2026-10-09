@@ -15,6 +15,10 @@
 #define PN_SUI_FORM 4
 #define PN_SUI_RETRY 5
 #define PN_SUI_FONTS 6
+#define PN_SUI_MORE 7 ///< 打开“边距与更多选项” / Open the margins and more options page
+#define PN_SUI_BACK_MAIN 8 ///< 从更多页回到排版主页 / Back from the more page to the main typesetting page
+#define PN_SUI_RESET 9 ///< 恢复默认草稿 / Restore the default draft
+#define PN_SUI_PRESET 10 ///< 10..12为舒适/紧凑/大字 / 10..12 are comfortable/compact/large
 #define PN_SUI_FIELD 16
 #define PN_SUI_FIELDS 7
 typedef struct {
@@ -23,6 +27,7 @@ typedef struct {
     pn_style_t draft; ///< 未保存配置 / Uncommitted configuration
     bool request_fonts,did_preview,application_failed; ///< 字体请求及预览/失败应用状态 / Font request, preview and failed-apply states
     bool active,preview,presented; ///< 活动、正文预览与呈现确认 / Active, body preview and presentation confirmation
+    bool more; ///< 正显示“更多排版”页 / The more-options page is showing
     unsigned selected; ///< 键盘选中字段0..6 / Keyboard-selected field zero through six
     const char *notice; ///< 静态反馈 / Static feedback
 } pn_style_ui_t;

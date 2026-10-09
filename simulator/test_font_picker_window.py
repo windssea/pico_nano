@@ -17,7 +17,7 @@ with tempfile.TemporaryDirectory() as directory:
    r=subprocess.run([sys.argv[1],mode,str(path),'--font',str(primary),'--state-dir',str(state)],capture_output=True,text=True,env=env,timeout=45)
    assert r.returncode==0 and 'used=0 live=0' in r.stdout,(r.stdout,r.stderr)
    return r
-  r=run('styles,tap:520:70,release:200:180,font-select,font-preview,font-form,font-back,font-cancel,style-cancel,')
+  r=run('styles,tap:100:440,release:200:180,font-select,font-preview,font-form,font-back,font-cancel,style-cancel,')
   assert 'font_ui command=34 status=0' in r.stdout and 'font_ui command=7 status=0' in r.stdout and 'font_ui command=9 status=0 active=0' in r.stdout,r.stdout
   assert not list(state.glob('*.fonts.*'))
   r=run('styles,fonts,font-fallback,font-down,font-select,font-preview,font-form,font-apply,style-cancel,')

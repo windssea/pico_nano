@@ -38,6 +38,8 @@ add_library(pn_core STATIC ${ui_font_c}
     ${PN_ROOT}/components/pn_personalization/pn_font_manage.c
     ${PN_ROOT}/components/pn_personalization/pn_settings_ui.c
     ${PN_ROOT}/components/pn_library/pn_shelf_view.c
+    ${PN_ROOT}/components/pn_library/pn_search_ui.c
+    ${PN_ROOT}/components/pn_widgets/pn_widgets.c
     ${PN_ROOT}/components/pn_library/pn_font_preview.c
     ${PN_ROOT}/components/pn_font/pn_font.c
     ${PN_ROOT}/components/pn_font/pn_font_chain.c
@@ -47,8 +49,10 @@ add_library(pn_core STATIC ${ui_font_c}
     ${PN_ROOT}/components/pn_reader/pn_epub_page.c
     ${PN_ROOT}/components/pn_reader/pn_reader_app.c
     ${PN_ROOT}/components/pn_reader/pn_reader_input.c
+    ${PN_ROOT}/components/pn_reader/pn_reader_chrome.c
     ${PN_ROOT}/components/pn_reader/pn_bookmark_ui.c
     ${PN_ROOT}/components/pn_reader/pn_style_ui.c
+    ${PN_ROOT}/components/pn_reader/pn_jump_ui.c
     ${PN_ROOT}/components/pn_reader/pn_font_ui.c
     ${PN_ROOT}/components/pn_core/pn_alloc.c
     ${PN_ROOT}/components/pn_ui/pn_frame.c
@@ -83,6 +87,7 @@ target_include_directories(pn_core PUBLIC
     ${PN_ROOT}/components/pn_font/include
     ${PN_ROOT}/components/pn_reader/include
     ${PN_ROOT}/components/pn_library/include
+    ${PN_ROOT}/components/pn_widgets/include
     ${PN_ROOT}/components/pn_personalization/include)
 target_include_directories(pn_core PUBLIC ${PN_ROOT}/components/pn_format/include)
 target_include_directories(pn_core PUBLIC ${PN_ROOT}/components/pn_image/include)

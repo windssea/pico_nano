@@ -9,6 +9,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "pn_font_manage.h"
 #include "pn_font_preview.h"
+#include "pn_widgets.h"
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
@@ -22,23 +23,6 @@ typedef struct {
     char selected[PN_CATALOG_PATH_MAX],name[PN_CATALOG_NAME_MAX],message[128];
 } fm_t;
 static pn_status_t string_read(void *ctx,uint64_t off,uint8_t *out,size_t cap,size_t *n){const char *s=ctx;size_t size=strlen(s);if(off>size)return PN_INVALID;size_t take=size-(size_t)off;if(take>cap)take=cap;memcpy(out,s+off,take);*n=take;return PN_OK;}
-static pn_status_t text(fm_t *f,const char *s,int x,int y,int width){
-    pn_font_t *font=&f->ui;pn_text_source_t source={(void *)s,strlen(s),string_read,NULL};pn_text_reader_t reader;pn_status_t status=pn_text_open(&reader,&source,PN_TEXT_UTF8);
-    if(status!=PN_OK)return status;
-    pn_text_char_t c;int32_t cursor=x*64,limit=(x+width)*64;
-    while((status=pn_text_next(&reader,&c))==PN_OK){int32_t advance;pn_status_t measured=pn_font_advance(font,c.codepoint,&advance);
-        if(measured==PN_EMPTY)advance=font->pixels*64;
-        else if(measured!=PN_OK)return measured;
-        if(advance<0)return PN_LIMIT;
-        if(advance>limit-cursor)break;
-        if(measured==PN_EMPTY){int left=cursor/64;pn_frame_rect(&f->canvas,left+2,y-font->pixels+4,font->pixels-6,1,0);pn_frame_rect(&f->canvas,left+2,y-2,font->pixels-6,1,0);pn_frame_rect(&f->canvas,left+2,y-font->pixels+4,1,font->pixels-6,0);pn_frame_rect(&f->canvas,left+font->pixels-5,y-font->pixels+4,1,font->pixels-6,0);}
-        else{status=pn_font_draw(font,&f->canvas,c.codepoint,cursor,y,PN_FONT_GRAY);if(status!=PN_OK)return status;}
-        cursor+=advance;
-    }
-    return status==PN_EMPTY?PN_OK:status;
-}
-static void box(pn_frame_t *fr,int x,int y,int w,int h,uint8_t shade){pn_frame_rect(fr,x,y,w,1,shade);pn_frame_rect(fr,x,y+h-1,w,1,shade);pn_frame_rect(fr,x,y,1,h,shade);pn_frame_rect(fr,x+w-1,y,1,h,shade);}
-static pn_status_t button(fm_t *f,const char *label,int x,int y,int w){box(&f->canvas,x,y,w,90,5);return text(f,label,x+24,y+58,w-40);}
 static const char *base(const char *path){const char *slash=strrchr(path,'/');return slash?slash+1:path;}
 static bool is_global(const fm_t *f,const char *path){return f->global_known && f->global_set && f->global.primary.kind==PN_FONT_FILE && !strcmp(f->global.primary.path,path);}
 static void release_asset(fm_t *f){
@@ -80,39 +64,54 @@ static pn_status_t inspect(fm_t *f,const pn_catalog_item_t *item){
     if(status!=PN_OK){release_asset(f);return status;}
     f->checked=(unsigned)count;f->missing=missing;strcpy(f->selected,item->path);strcpy(f->name,item->name);return PN_OK;
 }
+/* 版式：列表页每行88px，底部上一页/下一页；详情页下半部为名称与两个按钮；确认页为说明与取消/确认。
+ * Layout: list rows are 88 px with paging buttons at the bottom; the detail page puts the name and two buttons in its lower half; the confirmation page has a note and cancel/confirm. */
+#define LIST_ROW_Y 204
+#define LIST_ROWS 6
+#define PAGER_Y 1084
+#define DETAIL_NAME_Y 884
+#define DETAIL_BUTTON_Y 924
+#define DETAIL_BACK_Y 1044
+#define CONFIRM_BUTTON_Y 1084
 static pn_status_t draw(pn_font_manage_t *ui){
     fm_t *f=ui->impl;pn_frame_clear(&f->canvas,15);pn_status_t s=PN_OK;char line[PN_CATALOG_PATH_MAX+128];
     if(ui->screen==PN_FMU_LIST){
-        s=text(f,"小纸 Pico",32,64,620);
-        if(s==PN_OK)s=text(f,"字体管理",32,150,620);
-        if(s==PN_OK){if(!f->global_known)snprintf(line,sizeof line,"全局默认：记录不可读");else if(!f->global_set)snprintf(line,sizeof line,"全局默认：未设置");else if(f->global.primary.kind==PN_FONT_RESIDENT)snprintf(line,sizeof line,"全局默认：内置界面字体");else snprintf(line,sizeof line,"全局默认：%s",base(f->global.primary.path));s=text(f,line,32,220,620);}
-        if(s==PN_OK)s=text(f,f->page.count?"TF卡字体（点选查看）":"fonts目录暂无TTF字体，可用热点传书上传",32,290,620);
-        for(size_t i=0;i<f->page.count && s==PN_OK;i++){const pn_catalog_item_t *item=&f->page.items[i];int y=320+(int)i*120;box(&f->canvas,32,y,620,110,8);
-            s=text(f,item->name,56,y+48,580);
-            if(s==PN_OK){snprintf(line,sizeof line,"%llu KB%s",(unsigned long long)((item->size+1023)/1024),is_global(f,item->path)?"  ·  全局默认":"");s=text(f,line,56,y+94,580);}}
-        if(s==PN_OK && *f->message)s=text(f,f->message,32,1086,620);
-        if(s==PN_OK)s=button(f,"上一页",32,1110,190);
-        if(s==PN_OK)s=button(f,"返回",247,1110,190);
-        if(s==PN_OK)s=button(f,"下一页",462,1110,190);
+        s=pn_w_header(&f->ui,&f->canvas,"< 返回","字体管理",NULL);
+        if(s==PN_OK){if(!f->global_known)snprintf(line,sizeof line,"全局默认：记录不可读");else if(!f->global_set)snprintf(line,sizeof line,"全局默认：未设置");else if(f->global.primary.kind==PN_FONT_RESIDENT)snprintf(line,sizeof line,"全局默认：内置界面字体");else snprintf(line,sizeof line,"全局默认：%s",f->global.primary.path);
+            int original=f->ui.pixels;s=pn_font_size(&f->ui,28);if(s==PN_OK)s=pn_w_text(&f->ui,&f->canvas,line,PN_UI_MARGIN,168,620,PN_ALIGN_LEFT);pn_status_t restored=pn_font_size(&f->ui,original);if(s==PN_OK)s=restored;}
+        for(size_t i=0;i<f->page.count && i<LIST_ROWS && s==PN_OK;i++){const pn_catalog_item_t *item=&f->page.items[i];
+            snprintf(line,sizeof line,"%llu KB%s",(unsigned long long)((item->size+1023)/1024),is_global(f,item->path)?" · 全局默认":"");
+            s=pn_w_row(&f->ui,&f->canvas,item->name,line,true,LIST_ROW_Y+(int)i*PN_W_ROW_H);}
+        if(s==PN_OK && !f->page.count){int original=f->ui.pixels;s=pn_font_size(&f->ui,30);if(s==PN_OK)s=pn_w_text_lines(&f->ui,&f->canvas,"fonts 目录里还没有 TTF 字体。点底栏“传书”，用手机把字体传进来。",PN_UI_MARGIN,LIST_ROW_Y+48,620,3,44,NULL);pn_status_t restored=pn_font_size(&f->ui,original);if(s==PN_OK)s=restored;}
+        if(s==PN_OK && *f->message){int original=f->ui.pixels;s=pn_font_size(&f->ui,28);if(s==PN_OK)s=pn_w_text(&f->ui,&f->canvas,f->message,PN_UI_MARGIN,PAGER_Y-24,620,PN_ALIGN_LEFT);pn_status_t restored=pn_font_size(&f->ui,original);if(s==PN_OK)s=restored;}
+        if(s==PN_OK){int original=f->ui.pixels;s=pn_font_size(&f->ui,30);
+            if(s==PN_OK)s=pn_w_button(&f->ui,&f->canvas,"上一页",32,PAGER_Y,196,80,0u);
+            if(s==PN_OK)s=pn_w_button(&f->ui,&f->canvas,"下一页",456,PAGER_Y,196,80,0u);
+            pn_status_t restored=pn_font_size(&f->ui,original);if(s==PN_OK)s=restored;}
     }else if(ui->screen==PN_FMU_DETAIL){
         pn_font_t *body=pn_font_asset_font(&f->asset);int original=f->ui.pixels;
         s=pn_font_size(&f->ui,36);
         if(s==PN_OK)s=pn_font_preview_draw(&f->ui,body,&f->info,f->reference.size,f->checked,f->missing,&f->canvas);
         pn_status_t restored=pn_font_size(&f->ui,original);if(s==PN_OK)s=restored;
-        if(s==PN_OK){pn_frame_rect(&f->canvas,0,840,W,H-840,15);pn_frame_rect(&f->canvas,32,840,620,1,8);}
-        if(s==PN_OK)s=text(f,f->name,32,930,620);
-        if(s==PN_OK)s=button(f,is_global(f,f->selected)?"已是全局默认":"设为全局默认",32,960,300);
-        if(s==PN_OK)s=button(f,"删除",352,960,300);
-        if(s==PN_OK && *f->message)s=text(f,f->message,32,1090,620);
-        if(s==PN_OK)s=button(f,"返回",32,1110,620);
+        if(s==PN_OK){pn_frame_rect(&f->canvas,0,DETAIL_NAME_Y-48,W,H-(DETAIL_NAME_Y-48),15);pn_frame_rect(&f->canvas,32,DETAIL_NAME_Y-44,620,2,PN_UI_RULE);}
+        if(s==PN_OK){s=pn_font_size(&f->ui,34);if(s==PN_OK)s=pn_w_text(&f->ui,&f->canvas,f->name,PN_UI_MARGIN,DETAIL_NAME_Y,620,PN_ALIGN_LEFT);pn_status_t again=pn_font_size(&f->ui,original);if(s==PN_OK)s=again;}
+        if(s==PN_OK){s=pn_font_size(&f->ui,30);
+            if(s==PN_OK)s=pn_w_button(&f->ui,&f->canvas,is_global(f,f->selected)?"已是全局默认":"设为全局默认",32,DETAIL_BUTTON_Y,300,96,0u);
+            if(s==PN_OK)s=pn_w_button(&f->ui,&f->canvas,"删除",352,DETAIL_BUTTON_Y,300,96,0u);
+            if(s==PN_OK && *f->message){s=pn_font_size(&f->ui,28);if(s==PN_OK)s=pn_w_text(&f->ui,&f->canvas,f->message,PN_UI_MARGIN,DETAIL_BACK_Y-20,620,PN_ALIGN_LEFT);}
+            if(s==PN_OK){s=pn_font_size(&f->ui,30);if(s==PN_OK)s=pn_w_button(&f->ui,&f->canvas,"返回",32,DETAIL_BACK_Y,620,96,0u);}
+            pn_status_t again=pn_font_size(&f->ui,original);if(s==PN_OK)s=again;}
     }else{
-        s=text(f,"删除字体？",32,150,620);
-        if(s==PN_OK)s=text(f,f->name,32,240,620);
-        if(s==PN_OK)s=text(f,"使用它的书将暂用默认字体",32,340,620);
-        if(s==PN_OK)s=text(f,"阅读位置与字体选择记录都会保留",32,400,620);
-        if(s==PN_OK && is_global(f,f->selected))s=text(f,"这是当前全局默认字体",32,460,620);
-        if(s==PN_OK)s=button(f,"取消",32,1110,300);
-        if(s==PN_OK)s=button(f,"确认删除",352,1110,300);
+        s=pn_w_header(&f->ui,&f->canvas,"","删除字体？",NULL);
+        int original=f->ui.pixels;
+        if(s==PN_OK)s=pn_font_size(&f->ui,36);
+        if(s==PN_OK)s=pn_w_text_lines(&f->ui,&f->canvas,f->name,PN_UI_MARGIN,220,620,2,48,NULL);
+        if(s==PN_OK)s=pn_font_size(&f->ui,30);
+        if(s==PN_OK)s=pn_w_text_lines(&f->ui,&f->canvas,"使用它的书将暂用默认字体；阅读位置与字体选择记录都会保留。删除后文件无法恢复。",PN_UI_MARGIN,360,620,4,46,NULL);
+        if(s==PN_OK && is_global(f,f->selected))s=pn_w_text(&f->ui,&f->canvas,"这是当前的全局默认字体。",PN_UI_MARGIN,580,620,PN_ALIGN_LEFT);
+        if(s==PN_OK)s=pn_w_button(&f->ui,&f->canvas,"取消",32,CONFIRM_BUTTON_Y,300,96,0u);
+        if(s==PN_OK)s=pn_w_button(&f->ui,&f->canvas,"确认删除",352,CONFIRM_BUTTON_Y,300,96,PN_W_SELECTED);
+        pn_status_t restored=pn_font_size(&f->ui,original);if(s==PN_OK)s=restored;
     }
     return s;
 }
@@ -162,7 +161,13 @@ static pn_status_t remove_font(pn_font_manage_t *ui){
         (void)pn_media_release(f->fonts,&lease);}
     ui->screen=PN_FMU_LIST;
     if(load_page(f,"",false)!=PN_OK)memset(&f->page,0,sizeof f->page);
-    if(status==PN_OK)snprintf(f->message,sizeof f->message,"已删除：%s",base(path));
+    if(status==PN_OK){
+        // 文件名放进提示前按UTF-8字符边界截短，不会截断半个汉字。/ Clip the file name at a UTF-8 character boundary so no character is cut in half.
+        char shown[96];const char *name=base(path);size_t n=strlen(name);
+        if(n>=sizeof shown){n=sizeof shown-1;while(n>0 && ((unsigned char)name[n]&0xc0)==0x80)n--;}
+        memcpy(shown,name,n);shown[n]=0;
+        snprintf(f->message,sizeof f->message,"已删除：%.95s",shown);
+    }
     else snprintf(f->message,sizeof f->message,"删除失败（%d），文件保留",(int)status);
     return status;
 }
@@ -193,19 +198,22 @@ pn_status_t pn_font_manage_event(pn_font_manage_t *ui,int command,pn_font_manage
 }
 pn_status_t pn_font_manage_present(pn_font_manage_t *ui,pn_font_manage_present_fn present,void *ctx){if(!ui || !ui->impl || !present)return PN_INVALID;return show(ui,present,ctx);}
 int pn_font_manage_hit(const pn_font_manage_t *ui,int x,int y){
-    if(!ui || !ui->impl || x<32 || x>=652)return -1;
+    if(!ui || !ui->impl || x<0 || x>=W)return -1;
     const fm_t *f=ui->impl;
     if(ui->screen==PN_FMU_LIST){
-        if(y>=320 && y<1040){int row=(y-320)/120;if((y-320)%120<110 && row<(int)f->page.count)return PN_FMU_ROW+row;return -1;}
-        if(y>=1110 && y<1200)return x<222?PN_FMU_PREVIOUS:x>=247 && x<437?PN_FMU_BACK:x>=462?PN_FMU_NEXT:-1;
+        if(pn_w_header_hit(x,y,false)==1)return PN_FMU_BACK;
+        if(x<32 || x>=652)return -1;
+        if(y>=LIST_ROW_Y && y<LIST_ROW_Y+LIST_ROWS*PN_W_ROW_H){int row=(y-LIST_ROW_Y)/PN_W_ROW_H;return row<(int)f->page.count?PN_FMU_ROW+row:-1;}
+        if(y>=PAGER_Y && y<PAGER_Y+80)return x<228?PN_FMU_PREVIOUS:x>=456?PN_FMU_NEXT:-1;
         return -1;
     }
+    if(x<32 || x>=652)return -1;
     if(ui->screen==PN_FMU_DETAIL){
-        if(y>=960 && y<1050)return x<332?PN_FMU_DEFAULT:x>=352?PN_FMU_DELETE:-1;
-        if(y>=1110 && y<1200)return PN_FMU_BACK;
+        if(y>=DETAIL_BUTTON_Y && y<DETAIL_BUTTON_Y+96)return x<332?PN_FMU_DEFAULT:x>=352?PN_FMU_DELETE:-1;
+        if(y>=DETAIL_BACK_Y && y<DETAIL_BACK_Y+96)return PN_FMU_BACK;
         return -1;
     }
-    if(y>=1110 && y<1200)return x<332?PN_FMU_CANCEL:x>=352?PN_FMU_CONFIRM:-1;
+    if(y>=CONFIRM_BUTTON_Y && y<CONFIRM_BUTTON_Y+96)return x<332?PN_FMU_CANCEL:x>=352?PN_FMU_CONFIRM:-1;
     return -1;
 }
 void pn_font_manage_close(pn_font_manage_t *ui){

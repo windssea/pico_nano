@@ -7,6 +7,7 @@
  * Frozen: painting never operates bookmark storage; glyphs may borrow lease-protected read-only font sources.
  */
 #include "pn_bookmark_ui.h"
+#include "pn_widgets.h"
 #include <stdio.h>
 #include <string.h>
 static bool live(const pn_bookmark_ui_t *u){return u && ((u->reader && u->reader->impl) || (u->epub && u->epub->impl));}
@@ -18,48 +19,9 @@ static pn_status_t page_list(pn_bookmark_ui_t *u,uint64_t cursor,pn_txt_bookmark
     return status;
 }
 static const char keys[5][9]={"abcdefgh","ijklmnop","qrstuvwx","yz012345","6789 .-_"};
-static void missing(pn_font_t *font,pn_frame_t *part,int cursor,int baseline){
-    int px=cursor/64,size=font->pixels-4;
-    pn_frame_rect(part,px,baseline-font->pixels,size,1,0);pn_frame_rect(part,px,baseline-4,size,1,0);
-    pn_frame_rect(part,px,baseline-font->pixels,1,size,0);pn_frame_rect(part,px+size-1,baseline-font->pixels,1,size,0);
-}
 static pn_status_t read_string(void *ctx,uint64_t offset,uint8_t *out,size_t capacity,size_t *n){
     const char *s=ctx;size_t length=strlen(s);if(offset>length)return PN_INVALID;
     size_t take=length-(size_t)offset;if(take>capacity)take=capacity;memcpy(out,s+offset,take);*n=take;return PN_OK;
-}
-static pn_status_t draw_name(pn_font_t *font,pn_font_t *fallback,pn_frame_t *frame,const char *value,int x,int y,int width,int height){
-    pn_frame_t part={frame->pixels+(size_t)y*frame->stride+(size_t)x/2,width,height,frame->stride};
-    pn_text_source_t source={(void *)value,strlen(value),read_string,NULL};pn_text_reader_t decoder;
-    pn_status_t status=pn_text_open(&decoder,&source,PN_TEXT_UTF8);if(status!=PN_OK)return status;
-    int cursor=0,baseline=font->pixels+4;pn_text_char_t c;
-    while((status=pn_text_next(&decoder,&c))==PN_OK){
-        if(c.codepoint==10){cursor=0;baseline+=font->pixels+4;continue;}
-        pn_font_t *used=font;int32_t advance;pn_status_t measured=pn_font_advance(used,c.codepoint,&advance);
-        if(measured==PN_EMPTY && fallback){used=fallback;measured=pn_font_advance(used,c.codepoint,&advance);
-            if(measured!=PN_OK || advance<0 || advance>width*64){used=font;measured=PN_EMPTY;}
-        }
-        if(measured==PN_EMPTY)advance=font->pixels*64;else if(measured!=PN_OK)return measured;
-        if(advance<0 || advance>width*64)return PN_LIMIT;
-        if(cursor>width*64-advance){cursor=0;baseline+=font->pixels+4;}
-        if(baseline>height)return PN_OK;
-        if(measured==PN_EMPTY)missing(font,&part,cursor,baseline);
-        else{status=pn_font_draw(used,&part,c.codepoint,cursor,baseline,PN_FONT_GRAY);
-            if(status!=PN_OK){if(used==font)return status;missing(font,&part,cursor,baseline);advance=font->pixels*64;}
-        }
-        cursor+=advance;
-    }
-    return status==PN_EMPTY?PN_OK:status;
-}
-static pn_status_t draw_text(pn_font_t *font,pn_frame_t *frame,const char *value,int x,int y,int width,int height){return draw_name(font,NULL,frame,value,x,y,width,height);}
-static pn_status_t button(pn_font_t *font,pn_frame_t *frame,const char *label,int x,int y,int w,int h){
-    pn_frame_rect(frame,x,y,w,1,5);pn_frame_rect(frame,x,y+h-1,w,1,5);
-    pn_frame_rect(frame,x,y,1,h,5);pn_frame_rect(frame,x+w-1,y,1,h,5);
-    pn_text_source_t source={(void *)label,strlen(label),read_string,NULL};pn_text_reader_t decoder;pn_status_t status=pn_text_open(&decoder,&source,PN_TEXT_UTF8);if(status!=PN_OK)return status;
-    int32_t total=0;pn_text_char_t c;while((status=pn_text_next(&decoder,&c))==PN_OK){int32_t advance;status=pn_font_advance(font,c.codepoint,&advance);if(status!=PN_OK)return status;if(advance<0 || advance>(w-24)*64-total)return PN_LIMIT;total+=advance;}
-    if(status!=PN_EMPTY)return status;
-    int ascent,descent;status=pn_font_vertical(font,&ascent,&descent);if(status!=PN_OK)return status;
-    int dx=(w-(total+63)/64)/2;dx&=~1;int dy=(h+ascent-descent)/2-font->pixels-4;if(dy<4)dy=4;
-    return draw_text(font,frame,label,x+dx,y+dy,w-dx,h-dy);
 }
 static unsigned percent(const pn_txt_progress_t *p){
     if(!p->source_size)return 0;
@@ -69,48 +31,75 @@ static unsigned percent(const pn_txt_progress_t *p){
     return result;
 }
 static pn_txt_bookmark_t *selected(pn_bookmark_ui_t *u){return u->selected>=0 && (size_t)u->selected<u->count?&u->items[u->selected]:NULL;}
+/* 版式：顶栏；列表=“添加当前位置”按钮、六行书签、翻页；单条操作、删除确认、改名键盘各自按钮。
+ * Layout: header; list = "add current position" button, six bookmark rows and paging; item actions, delete confirmation and the rename keyboard have their own buttons. */
+#define ADD_Y 148
+#define ROW_Y0 252
+#define ROW_PITCH 104
+#define PAGER_Y 1084
+#define ACTION_Y0 420
+#define ACTION_PITCH 128
+#define DELETE_BUTTON_Y 620
+#define KEY_X0 22
+#define KEY_Y0 512
+#define SHIFT_Y 1016
+#define RENAME_BUTTON_Y 1130
+static pn_status_t sized_text(pn_font_t *font,pn_frame_t *frame,const char *value,int size,int x,int baseline,int width,pn_align_t align){
+    int original=font->pixels;pn_status_t s=pn_font_size(font,size);
+    if(s==PN_OK)s=pn_w_text(font,frame,value,x,baseline,width,align);
+    pn_status_t restored=pn_font_size(font,original);return s==PN_OK?restored:s;
+}
+static pn_status_t sized_button(pn_font_t *font,pn_frame_t *frame,const char *label,int size,int x,int y,int w,int h,unsigned style){
+    int original=font->pixels;pn_status_t s=pn_font_size(font,size);
+    if(s==PN_OK)s=pn_w_button(font,frame,label,x,y,w,h,style);
+    pn_status_t restored=pn_font_size(font,original);return s==PN_OK?restored:s;
+}
 static pn_status_t paint(void *ctx,pn_font_t *font,pn_font_t *metadata,pn_frame_t *frame){
     pn_bookmark_ui_t *u=ctx;if(u->count>PN_BOOKMARK_UI_ROWS || frame->width!=684 || frame->height!=1216 || frame->stride<342)return PN_INVALID;
-    pn_frame_clear(frame,15);pn_status_t status=pn_font_size(font,48);if(status!=PN_OK)return status;
-    status=button(font,frame,u->mode==PN_BUI_LIST?"返回阅读":"返回",32,16,220,80);if(status!=PN_OK)return status;
-    status=draw_text(font,frame,u->mode==PN_BUI_RENAME?"修改名称":u->mode==PN_BUI_DELETE?"删除书签":"书签",280,36,236,60);if(status!=PN_OK)return status;
-    status=button(font,frame,"重试",532,16,120,80);if(status!=PN_OK)return status;pn_frame_rect(frame,32,120,620,1,8);
-    status=pn_font_size(font,36);if(status!=PN_OK)return status;
-    if(u->mode==PN_BUI_LIST){
-        for(size_t i=0;i<u->count;i++){int y=160+(int)i*144;char label[80];const pn_txt_bookmark_t *mark=&u->items[i];
+    pn_frame_clear(frame,15);
+    pn_status_t status=pn_w_header(font,frame,u->mode==PN_BUI_LIST?"< 返回阅读":"< 返回",u->mode==PN_BUI_RENAME?"修改名称":u->mode==PN_BUI_DELETE?"删除书签":"书签",u->notice?"重试":NULL);
+    pn_w_set_fallback(metadata);
+    if(status==PN_OK && u->mode==PN_BUI_LIST){
+        status=sized_button(font,frame,"+ 添加当前位置",34,32,ADD_Y,620,88,0u);
+        for(size_t i=0;i<u->count && status==PN_OK;i++){int y=ROW_Y0+(int)i*ROW_PITCH;char label[96];const pn_txt_bookmark_t *mark=&u->items[i];
             if(*mark->label)snprintf(label,sizeof label,"%s",mark->label);else snprintf(label,sizeof label,"书签 #%llu",(unsigned long long)mark->id);
-            status=draw_name(font,metadata,frame,label,48,y+4,584,96);if(status!=PN_OK)return status;
-            if(u->epub)snprintf(label,sizeof label,"原文位置  |  #%llu",(unsigned long long)mark->id);else snprintf(label,sizeof label,"%u%%  |  #%llu",percent(&mark->position),(unsigned long long)mark->id);
-            status=pn_font_size(font,28);if(status!=PN_OK)return status;
-            status=draw_text(font,frame,label,48,y+96,584,40);if(status!=PN_OK)return status;
-            status=pn_font_size(font,36);if(status!=PN_OK)return status;
-            if((int)i==u->selected){pn_frame_rect(frame,32,y,2,132,0);pn_frame_rect(frame,650,y,2,132,0);}pn_frame_rect(frame,48,y+136,584,1,10);
+            status=sized_text(font,frame,label,34,PN_UI_MARGIN+8,y+44,604,PN_ALIGN_LEFT);
+            if(status==PN_OK){if(u->epub)snprintf(label,sizeof label,"原文位置 · #%llu",(unsigned long long)mark->id);else snprintf(label,sizeof label,"%u%% · #%llu",percent(&mark->position),(unsigned long long)mark->id);
+                status=sized_text(font,frame,label,26,PN_UI_MARGIN+8,y+82,604,PN_ALIGN_LEFT);}
+            if(status==PN_OK && (int)i==u->selected)pn_frame_rect(frame,PN_UI_MARGIN,y+6,4,ROW_PITCH-18,PN_UI_INK);
+            if(status==PN_OK)pn_frame_rect(frame,PN_UI_MARGIN,y+ROW_PITCH-8,620,1,10);
         }
-        if(!u->count){status=draw_text(font,frame,u->notice?"暂时无法读取":"还没有书签",48,220,584,60);if(status!=PN_OK)return status;}
-        const char *labels[]={"上一页","下一页","添加书签"};for(int i=0;i<3;i++){status=button(font,frame,labels[i],32+i*212,1130,196,80);if(status!=PN_OK)return status;}
-    }else{
-        pn_txt_bookmark_t *mark=selected(u);if(!mark)return PN_INVALID;
-        status=draw_name(font,metadata,frame,*mark->label?mark->label:"未命名书签",48,180,584,96);if(status!=PN_OK)return status;
-        if(u->mode==PN_BUI_ACTIONS){
-            const char *labels[]={"跳转阅读","修改名称","删除书签"};for(int i=0;i<3;i++){status=button(font,frame,labels[i],32,420+i*128,620,96);if(status!=PN_OK)return status;}
-        }else if(u->mode==PN_BUI_DELETE){
-            status=draw_text(font,frame,"删除后无法撤销\n",48,350,584,60);if(status!=PN_OK)return status;
-            status=button(font,frame,"取消",32,620,300,96);if(status!=PN_OK)return status;
-            status=button(font,frame,"确认删除",352,620,300,96);if(status!=PN_OK)return status;
-        }else if(u->mode==PN_BUI_RENAME){
-            pn_frame_rect(frame,32,286,620,1,8);pn_frame_rect(frame,32,388,620,1,8);
-            status=draw_name(font,metadata,frame,*u->draft?u->draft:"请输入名称",48,300,584,96);if(status!=PN_OK)return status;
-            for(int row=0;row<5;row++)for(int col=0;col<8;col++){char value=keys[row][col],label[8]={0};
+        if(status==PN_OK && !u->count)status=sized_text(font,frame,u->notice?"暂时无法读取":"还没有书签",34,PN_UI_MARGIN,ROW_Y0+60,620,PN_ALIGN_LEFT);
+        if(status==PN_OK)status=sized_button(font,frame,"上一页",30,32,PAGER_Y,196,80,0u);
+        if(status==PN_OK)status=sized_button(font,frame,"下一页",30,456,PAGER_Y,196,80,0u);
+    }else if(status==PN_OK){
+        pn_txt_bookmark_t *mark=selected(u);if(!mark){pn_w_set_fallback(NULL);return PN_INVALID;}
+        int original=font->pixels;status=pn_font_size(font,36);
+        if(status==PN_OK)status=pn_w_text_lines(font,frame,*mark->label?mark->label:"未命名书签",PN_UI_MARGIN,ROW_Y0-40,620,2,48,NULL);
+        pn_status_t restored=pn_font_size(font,original);if(status==PN_OK)status=restored;
+        if(status==PN_OK && u->mode==PN_BUI_ACTIONS){
+            const char *labels[]={"跳转阅读","修改名称","删除书签"};
+            for(int i=0;i<3 && status==PN_OK;i++)status=sized_button(font,frame,labels[i],34,32,ACTION_Y0+i*ACTION_PITCH,620,96,0u);
+        }else if(status==PN_OK && u->mode==PN_BUI_DELETE){
+            status=sized_text(font,frame,"删除后无法撤销。",32,PN_UI_MARGIN,ROW_Y0+120,620,PN_ALIGN_LEFT);
+            if(status==PN_OK)status=sized_button(font,frame,"取消",34,32,DELETE_BUTTON_Y,300,96,0u);
+            if(status==PN_OK)status=sized_button(font,frame,"确认删除",34,352,DELETE_BUTTON_Y,300,96,PN_W_SELECTED);
+        }else if(status==PN_OK && u->mode==PN_BUI_RENAME){
+            pn_w_round_outline(frame,32,296,620,100,PN_UI_RADIUS,2,PN_UI_INK);
+            status=sized_text(font,frame,*u->draft?u->draft:"请输入名称",34,PN_UI_MARGIN+16,360,588,PN_ALIGN_LEFT);
+            for(int row=0;row<5 && status==PN_OK;row++)for(int col=0;col<8 && status==PN_OK;col++){char value=keys[row][col],label[8]={0};
                 if(u->shift && value>='a' && value<='z')value=(char)(value-'a'+'A');
                 if(value==' ')strcpy(label,"空");else label[0]=value;
-                status=button(font,frame,label,22+col*80,512+row*96,80,88);if(status!=PN_OK)return status;
+                status=sized_button(font,frame,label,34,KEY_X0+col*80,KEY_Y0+row*96,76,88,0u);
             }
-            const char *labels[]={u->shift?"小写":"大写","退格","清空"};for(int i=0;i<3;i++){status=button(font,frame,labels[i],22+i*212,1016,208,88);if(status!=PN_OK)return status;}
-            status=button(font,frame,"取消",32,1130,300,80);if(status!=PN_OK)return status;
-            status=button(font,frame,"保存名称",352,1130,300,80);if(status!=PN_OK)return status;
+            const char *labels[]={u->shift?"小写":"大写","退格","清空"};
+            for(int i=0;i<3 && status==PN_OK;i++)status=sized_button(font,frame,labels[i],30,KEY_X0+i*212,SHIFT_Y,200,88,0u);
+            if(status==PN_OK)status=sized_button(font,frame,"取消",30,32,RENAME_BUTTON_Y,300,80,0u);
+            if(status==PN_OK)status=sized_button(font,frame,"保存名称",30,352,RENAME_BUTTON_Y,300,80,PN_W_SELECTED);
         }
     }
-    if(u->notice)status=draw_text(font,frame,u->notice,48,u->mode==PN_BUI_RENAME?416:1074,584,48);
+    pn_w_set_fallback(NULL);
+    if(status==PN_OK && u->notice)status=sized_text(font,frame,u->notice,28,PN_UI_MARGIN,u->mode==PN_BUI_RENAME?460:PAGER_Y-24,620,PN_ALIGN_LEFT);
     return status;
 }
 static pn_status_t load_page(pn_bookmark_ui_t *u,unsigned page,uint64_t cursor){
@@ -200,16 +189,19 @@ pn_status_t pn_bookmark_ui_event(pn_bookmark_ui_t *u,int command,const char *val
 }
 int pn_bookmark_ui_hit(const pn_bookmark_ui_t *u,int x,int y){
     if(!u || u->count>PN_BOOKMARK_UI_ROWS || u->mode==PN_BUI_CLOSED || x<0 || x>=684 || y<0 || y>=1216)return -1;
-    if(y>=16 && y<96){if(x>=32 && x<252)return PN_BUI_BACK;if(x>=532 && x<652)return PN_BUI_RETRY;}
+    int header=pn_w_header_hit(x,y,u->notice!=NULL);
+    if(header==1)return PN_BUI_BACK;
+    if(header==2)return PN_BUI_RETRY;
     if(u->mode==PN_BUI_LIST){
-        if(x>=32 && x<652 && y>=160 && y<1024 && (y-160)%144<136){int row=(y-160)/144;if((size_t)row<u->count)return PN_BUI_ROW+row;}
-        if(y>=1130 && y<1210){for(int i=0;i<3;i++)if(x>=32+i*212 && x<228+i*212)return i==0?PN_BUI_PREVIOUS:i==1?PN_BUI_NEXT:PN_BUI_ADD;}
-    }else if(u->mode==PN_BUI_ACTIONS){if(x>=32 && x<652 && y>=420 && y<772 && (y-420)%128<96){int row=(y-420)/128;return row==0?PN_BUI_JUMP:row==1?PN_BUI_EDIT:PN_BUI_REMOVE;}}
-    else if(u->mode==PN_BUI_DELETE){if(y>=620 && y<716){if(x>=32 && x<332)return PN_BUI_CANCEL;if(x>=352 && x<652)return PN_BUI_CONFIRM;}}
+        if(x>=32 && x<652 && y>=ADD_Y && y<ADD_Y+88)return PN_BUI_ADD;
+        if(x>=32 && x<652 && y>=ROW_Y0 && y<ROW_Y0+PN_BOOKMARK_UI_ROWS*ROW_PITCH && (y-ROW_Y0)%ROW_PITCH<ROW_PITCH-8){int row=(y-ROW_Y0)/ROW_PITCH;if((size_t)row<u->count)return PN_BUI_ROW+row;}
+        if(y>=PAGER_Y && y<PAGER_Y+80){if(x>=32 && x<228)return PN_BUI_PREVIOUS;if(x>=456 && x<652)return PN_BUI_NEXT;}
+    }else if(u->mode==PN_BUI_ACTIONS){if(x>=32 && x<652 && y>=ACTION_Y0 && y<ACTION_Y0+3*ACTION_PITCH && (y-ACTION_Y0)%ACTION_PITCH<96){int row=(y-ACTION_Y0)/ACTION_PITCH;return row==0?PN_BUI_JUMP:row==1?PN_BUI_EDIT:PN_BUI_REMOVE;}}
+    else if(u->mode==PN_BUI_DELETE){if(y>=DELETE_BUTTON_Y && y<DELETE_BUTTON_Y+96){if(x>=32 && x<332)return PN_BUI_CANCEL;if(x>=352 && x<652)return PN_BUI_CONFIRM;}}
     else if(u->mode==PN_BUI_RENAME){
-        if(x>=22 && x<662 && y>=512 && y<992 && (y-512)%96<88)return PN_BUI_CHARACTER+(unsigned char)keys[(y-512)/96][(x-22)/80];
-        if(y>=1016 && y<1104){for(int i=0;i<3;i++)if(x>=22+i*212 && x<230+i*212)return i==0?PN_BUI_SHIFT:i==1?PN_BUI_BACKSPACE:PN_BUI_CLEAR;}
-        if(y>=1130 && y<1210){if(x>=32 && x<332)return PN_BUI_CANCEL;if(x>=352 && x<652)return PN_BUI_SAVE;}
+        if(x>=KEY_X0 && x<KEY_X0+640 && y>=KEY_Y0 && y<KEY_Y0+5*96 && (y-KEY_Y0)%96<88 && (x-KEY_X0)%80<76)return PN_BUI_CHARACTER+(unsigned char)keys[(y-KEY_Y0)/96][(x-KEY_X0)/80];
+        if(y>=SHIFT_Y && y<SHIFT_Y+88){for(int i=0;i<3;i++)if(x>=KEY_X0+i*212 && x<KEY_X0+i*212+200)return i==0?PN_BUI_SHIFT:i==1?PN_BUI_BACKSPACE:PN_BUI_CLEAR;}
+        if(y>=RENAME_BUTTON_Y && y<RENAME_BUTTON_Y+80){if(x>=32 && x<332)return PN_BUI_CANCEL;if(x>=352 && x<652)return PN_BUI_SAVE;}
     }
     return -1;
 }

@@ -5,39 +5,33 @@
  * 冻结：未呈现不接导航，失败保留菜单与原位置。/ Frozen: no unpresented navigation; failures retain menu/location.
  */
 #include "pn_toc_ui.h"
+#include "pn_widgets.h"
 #include <string.h>
 #include <stdio.h>
-static pn_status_t read_string(void *ctx,uint64_t off,uint8_t *out,size_t cap,size_t *n){const char *s=ctx;size_t size=strlen(s);if(off>size)return PN_INVALID;size_t count=size-(size_t)off;if(count>cap)count=cap;memcpy(out,s+off,count);*n=count;return PN_OK;}
-static pn_status_t label(pn_font_t *ui,pn_font_t *metadata,pn_frame_t *frame,const char *value,int x,int y,int width,unsigned lines){
-    pn_text_source_t source={(void *)value,strlen(value),read_string,NULL};pn_text_reader_t r;pn_status_t status=pn_text_open(&r,&source,PN_TEXT_UTF8);if(status!=PN_OK)return status;
-    pn_frame_t part={frame->pixels+(size_t)y*frame->stride+(size_t)x/2,width,(int)(lines*56),frame->stride};pn_text_char_t c;int32_t at=0;unsigned row=0;
-    while((status=pn_text_next(&r,&c))==PN_OK){pn_font_t *font=metadata?metadata:ui;int32_t advance;pn_status_t measured=pn_font_advance(font,c.codepoint,&advance);
-        if(measured==PN_EMPTY && font!=ui){font=ui;measured=pn_font_advance(font,c.codepoint,&advance);}
-        if(measured==PN_EMPTY)advance=36*64;else if(measured!=PN_OK)return measured;
-        if(advance<0 || advance>width*64)return PN_LIMIT;
-        if(at>width*64-advance){at=0;if(++row==lines)return PN_OK;}
-        int baseline=40+(int)row*56;
-        if(measured==PN_EMPTY){int px=at/64;pn_frame_rect(&part,px,baseline-32,28,1,0);pn_frame_rect(&part,px,baseline-4,28,1,0);pn_frame_rect(&part,px,baseline-32,1,28,0);pn_frame_rect(&part,px+27,baseline-32,1,28,0);}
-        else{status=pn_font_draw(font,&part,c.codepoint,at,baseline,PN_FONT_GRAY);if(status!=PN_OK)return status;}
-        at+=advance;
-    }
-    return status==PN_EMPTY?PN_OK:status;
-}
+/* 版式：顶栏、六行目录（每行至多两行文字）、底部翻页。/ Layout: header, six TOC rows (up to two text lines each) and paging at the bottom. */
+#define ROW_Y0 148
+#define ROW_PITCH 120
+#define PAGER_Y 1084
 static pn_status_t paint(void *ctx,pn_font_t *font,pn_font_t *metadata,pn_frame_t *frame){
-    pn_toc_ui_t *u=ctx;pn_frame_clear(frame,15);pn_status_t status=label(font,NULL,frame,"返回",32,24,140,1);if(status!=PN_OK)return status;
-    status=label(font,NULL,frame,"目录",282,24,180,1);if(status!=PN_OK)return status;
-    status=label(font,NULL,frame,"重试",532,24,120,1);if(status!=PN_OK)return status;pn_frame_rect(frame,32,110,620,1,8);
-    if(!u->total){status=label(font,NULL,frame,"暂无目录",48,180,584,1);if(status!=PN_OK)return status;}
-    for(size_t i=0;i<u->count;i++){unsigned level=u->rows[i].level>3?3:u->rows[i].level;int indent=(int)level*24,y=160+(int)i*144;
-        status=label(font,metadata,frame,u->rows[i].label,48+indent,y,584-indent,2);if(status!=PN_OK)return status;
-        if(i==u->selected)pn_frame_rect(frame,32,y,2,128,0);
-        pn_frame_rect(frame,48,y+136,584,1,10);
+    pn_toc_ui_t *u=ctx;pn_frame_clear(frame,15);int original=font->pixels;
+    pn_status_t status=pn_w_header(font,frame,"< 返回","目录",u->notice?"重试":NULL);
+    if(status==PN_OK)status=pn_font_size(font,34);
+    if(status==PN_OK && !u->total)status=pn_w_text(font,frame,"这本书没有目录",PN_UI_MARGIN,ROW_Y0+60,620,PN_ALIGN_LEFT);
+    pn_w_set_fallback(metadata);
+    for(size_t i=0;i<u->count && status==PN_OK;i++){
+        unsigned level=u->rows[i].level>3?3:u->rows[i].level;int indent=(int)level*24,y=ROW_Y0+(int)i*ROW_PITCH;
+        status=pn_w_text_lines(font,frame,u->rows[i].label,PN_UI_MARGIN+indent+8,y+46,620-indent-16,2,44,NULL);
+        if(status==PN_OK && i==u->selected)pn_frame_rect(frame,PN_UI_MARGIN,y+8,4,ROW_PITCH-24,PN_UI_INK);
+        if(status==PN_OK)pn_frame_rect(frame,PN_UI_MARGIN,y+ROW_PITCH-12,620,1,10);
     }
-    if(u->notice){status=label(font,NULL,frame,u->notice,48,1040,584,1);if(status!=PN_OK)return status;}
+    pn_w_set_fallback(NULL);
+    if(status==PN_OK && u->notice){status=pn_font_size(font,28);if(status==PN_OK)status=pn_w_text(font,frame,u->notice,PN_UI_MARGIN,PAGER_Y-24,620,PN_ALIGN_LEFT);}
     char page[64];snprintf(page,sizeof page,"%zu / %zu",u->total?u->start/6+1:0,(u->total+5)/6);
-    status=label(font,NULL,frame,"上页",32,1130,180,1);if(status!=PN_OK)return status;
-    status=label(font,NULL,frame,page,250,1130,260,1);if(status!=PN_OK)return status;
-    return label(font,NULL,frame,"下页",532,1130,120,1);
+    if(status==PN_OK)status=pn_font_size(font,30);
+    if(status==PN_OK)status=pn_w_button(font,frame,"上一页",32,PAGER_Y,196,80,0u);
+    if(status==PN_OK)status=pn_w_text(font,frame,page,228,PAGER_Y+54,228,PN_ALIGN_CENTER);
+    if(status==PN_OK)status=pn_w_button(font,frame,"下一页",456,PAGER_Y,196,80,0u);
+    pn_status_t restored=pn_font_size(font,original);return status==PN_OK?restored:status;
 }
 static pn_status_t load(pn_toc_ui_t *u){
     u->count=0;for(size_t i=0;i<PN_TOC_UI_ROWS && u->start+i<u->total;i++){pn_toc_entry_t entry;pn_status_t status=pn_epub_app_toc_get(u->reader,u->start+i,&entry);if(status!=PN_OK)return status;
@@ -68,8 +62,11 @@ pn_status_t pn_toc_ui_event(pn_toc_ui_t *u,int command,uint64_t now,pn_reader_pr
 }
 int pn_toc_ui_hit(const pn_toc_ui_t *u,int x,int y){
     if(!u || !u->active || x<0 || x>=684 || y<0 || y>=1216)return -1;
-    if(y>=16 && y<96){if(x>=32 && x<220)return PN_TOC_UI_BACK;if(x>=532 && x<652)return PN_TOC_UI_RETRY;}
-    if(x>=32 && x<652 && y>=160 && y<1024 && (y-160)%144<136){int row=(y-160)/144;if((size_t)row<u->count)return PN_TOC_UI_ROW+row;}
-    if(y>=1120 && y<1210){if(x>=32 && x<228)return PN_TOC_UI_PREVIOUS;if(x>=532 && x<652)return PN_TOC_UI_NEXT;}return -1;
+    int header=pn_w_header_hit(x,y,u->notice!=NULL);
+    if(header==1)return PN_TOC_UI_BACK;
+    if(header==2)return PN_TOC_UI_RETRY;
+    if(x>=32 && x<652 && y>=ROW_Y0 && y<ROW_Y0+6*ROW_PITCH && (y-ROW_Y0)%ROW_PITCH<ROW_PITCH-8){int row=(y-ROW_Y0)/ROW_PITCH;if((size_t)row<u->count)return PN_TOC_UI_ROW+row;}
+    if(y>=PAGER_Y && y<PAGER_Y+80){if(x>=32 && x<228)return PN_TOC_UI_PREVIOUS;if(x>=456 && x<652)return PN_TOC_UI_NEXT;}
+    return -1;
 }
 void pn_toc_ui_close(pn_toc_ui_t *u){if(u)memset(u,0,sizeof *u);}

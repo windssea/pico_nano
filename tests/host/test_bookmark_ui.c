@@ -49,7 +49,7 @@ int main(void){
     screen.ui=&ui;screen.capture=true;
     assert(pn_bookmark_ui_open(&ui,&app,present,&screen)==PN_OK && ui.mode==PN_BUI_LIST && ui.count==0 && ui.presented);
     assert(pn_bookmark_ui_event(&ui,PN_BUI_ADD,NULL,2,present,&screen)==PN_OK && ui.count==1);
-    assert(pn_bookmark_ui_hit(&ui,200,200)==PN_BUI_ROW);
+    assert(pn_bookmark_ui_hit(&ui,200,280)==PN_BUI_ROW && pn_bookmark_ui_hit(&ui,200,180)==PN_BUI_ADD && pn_bookmark_ui_hit(&ui,100,60)==PN_BUI_BACK);
     assert(pn_bookmark_ui_event(&ui,PN_BUI_ROW,NULL,2,present,&screen)==PN_OK && ui.mode==PN_BUI_ACTIONS);
     assert(pn_bookmark_ui_event(&ui,PN_BUI_EDIT,NULL,2,present,&screen)==PN_OK && ui.mode==PN_BUI_RENAME);
     assert(pn_bookmark_ui_event(&ui,PN_BUI_CLEAR,NULL,2,present,&screen)==PN_OK && screen.mode==PN_REFRESH_GL16);

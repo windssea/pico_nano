@@ -12,6 +12,7 @@
 #define PN_SETUI_BACK 1
 #define PN_SETUI_WALLPAPER 2
 #define PN_SETUI_FONTS 3
+#define PN_SETUI_LAN 4 ///< 局域网传书（仅已保存家庭网络时出现）/ LAN transfer (shown only when a home network is saved)
 #define PN_SETUI_TOGGLE 8 ///< 加0–3对应左手/滑动/边缘点按/三键 / Plus 0–3 for hand/swipe/edge taps/keys
 typedef pn_status_t (*pn_settings_present_fn)(void *,const pn_frame_t *,pn_refresh_t); ///< 与阅读呈现同签名 / Same signature as reader presentation
 typedef struct {
@@ -33,3 +34,7 @@ int pn_settings_ui_hit(const pn_settings_ui_t *ui,int x,int y);
 void pn_settings_ui_close(pn_settings_ui_t *ui);
 /// 从内部记录读取翻页标志，无记录得0。/ Read page-turn flags from the internal record, 0 without one.
 pn_status_t pn_settings_load_flags(pn_media_t *state_media,const char *state_dir,uint8_t *flags);
+
+/// 设置“局域网传书”行显示的已保存网络名；NULL或空串隐藏该行。设置后立即重画。/ Set the saved network name shown on the "LAN transfer" row; NULL or an empty string hides the row. Repaints at once.
+pn_status_t pn_settings_ui_set_lan(pn_settings_ui_t *ui,const char *ssid,pn_settings_present_fn present,void *ctx);
+

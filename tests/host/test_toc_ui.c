@@ -12,7 +12,7 @@ int main(int argc,char **argv){
     screen.fail=true;assert(pn_toc_ui_open(&ui,&app,present,&screen)==PN_IO && ui.active && !ui.presented);unsigned calls=screen.calls;
     assert(pn_toc_ui_event(&ui,PN_TOC_UI_ROW+1,now++,present,&screen)==PN_BUSY && screen.calls==calls && pn_epub_app_progress(&app,&after)==PN_OK && same(&origin,&after));
     screen.fail=false;assert(pn_toc_ui_event(&ui,PN_TOC_UI_RETRY,now++,present,&screen)==PN_OK && ui.presented && ui.count==6 && ui.total==8);
-    assert(pn_toc_ui_hit(&ui,100,170)==PN_TOC_UI_ROW && pn_toc_ui_hit(&ui,100,300)==-1);
+    assert(pn_toc_ui_hit(&ui,100,170)==PN_TOC_UI_ROW && pn_toc_ui_hit(&ui,100,262)==-1);
     assert(pn_toc_ui_event(&ui,PN_TOC_UI_ROW,now++,present,&screen)==PN_EMPTY && ui.active && pn_epub_app_progress(&app,&after)==PN_OK && same(&after,&origin));
     assert(pn_toc_ui_event(&ui,PN_TOC_UI_NEXT,now++,present,&screen)==PN_OK && ui.start==6 && ui.count==2);
     assert(pn_toc_ui_event(&ui,PN_TOC_UI_NEXT,now++,present,&screen)==PN_EMPTY && ui.start==6);

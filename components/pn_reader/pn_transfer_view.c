@@ -6,26 +6,17 @@
  * Frozen: paint only, never change reading positions, settings, networks or power.
  */
 #include "pn_transfer_view.h"
+#include "pn_widgets.h"
 #include <stdio.h>
 #include "pn_qr.h"
 #include <string.h>
-static pn_status_t read(void *ctx,uint64_t at,uint8_t *out,size_t cap,size_t *n){const char *s=ctx;size_t length=strlen(s);if(at>length)return PN_INVALID;size_t take=length-(size_t)at;if(take>cap)take=cap;memcpy(out,s+at,take);*n=take;return PN_OK;}
-static pn_status_t text(pn_font_t *font,pn_frame_t *frame,const char *s,int x,int y){
- pn_text_source_t source={(void *)s,strlen(s),read,NULL};pn_text_reader_t decoder;pn_status_t status=pn_text_open(&decoder,&source,PN_TEXT_UTF8);if(status!=PN_OK)return status;pn_text_char_t c;int cursor=x*64;
- while((status=pn_text_next(&decoder,&c))==PN_OK){int32_t advance;pn_status_t measured=pn_font_advance(font,c.codepoint,&advance);if(measured==PN_EMPTY)advance=font->pixels*64;else if(measured!=PN_OK)return measured;if(advance<0)return PN_LIMIT;if(advance>652*64-cursor)break;
-  if(measured==PN_EMPTY){int left=cursor/64;pn_frame_rect(frame,left,y-font->pixels+4,font->pixels-4,1,0);pn_frame_rect(frame,left,y-4,font->pixels-4,1,0);pn_frame_rect(frame,left,y-font->pixels+4,1,font->pixels-8,0);pn_frame_rect(frame,left+font->pixels-5,y-font->pixels+4,1,font->pixels-8,0);}
-  else{pn_status_t drawn=pn_font_draw(font,frame,c.codepoint,cursor,y,PN_FONT_GRAY);if(drawn!=PN_OK)return drawn;}
-  cursor+=advance;
- }
- return status==PN_OK || status==PN_EMPTY?PN_OK:status;
-}
-static pn_status_t button(pn_font_t *font,pn_frame_t *frame,const char *label,int y){pn_frame_rect(frame,32,y,620,1,5);pn_frame_rect(frame,32,y+100,620,1,5);pn_frame_rect(frame,32,y,1,100,5);pn_frame_rect(frame,651,y,1,100,5);return text(font,frame,label,64,y+64);}
+static pn_status_t text(pn_font_t *font,pn_frame_t *frame,const char *s,int x,int y){return pn_w_text(font,frame,s,x,y,652-x,PN_ALIGN_LEFT);}
+static pn_status_t button(pn_font_t *font,pn_frame_t *frame,const char *label,int y){return pn_w_button(font,frame,label,32,y,620,100,0u);}
 static bool valid(pn_font_t *font,pn_frame_t *frame){return font && font->impl && frame && frame->pixels && frame->width==684 && frame->height==1216 && frame->stride>=342;}
 /* 五槽菜单：继续/书架/热点/局域网（可选）/设置。/ Five-slot menu: resume/shelf/hotspot/LAN (optional)/settings. */
 pn_status_t pn_reading_menu_render_lan(bool resume,const char *lan,pn_font_t *font,pn_frame_t *frame){
  if(!valid(font,frame))return PN_INVALID;
- pn_frame_clear(frame,15);pn_status_t s=text(font,frame,"小纸 Pico",32,64);
- if(s==PN_OK)s=text(font,frame,"阅读与传输",32,160);
+ pn_frame_clear(frame,15);pn_status_t s=pn_w_header(font,frame,"","阅读与传输",NULL);
  if(s==PN_OK)s=button(font,frame,resume?"继续阅读":"返回书架",230);
  if(s==PN_OK)s=button(font,frame,"全部书架",370);
  if(s==PN_OK)s=button(font,frame,"热点传书",510);
@@ -44,8 +35,7 @@ pn_status_t pn_reading_menu_render(bool resume,pn_font_t *font,pn_frame_t *frame
 int pn_reading_menu_hit(int x,int y){return pn_reading_menu_hit_lan(x,y,false);}
 pn_status_t pn_transfer_view_render(const pn_transfer_view_t *v,pn_font_t *font,pn_frame_t *frame){
  if(!v || !valid(font,frame) || !memchr(v->ssid,0,sizeof v->ssid) || !memchr(v->password,0,sizeof v->password) || !memchr(v->address,0,sizeof v->address) || !memchr(v->pin,0,sizeof v->pin))return PN_INVALID;
- pn_frame_clear(frame,15);pn_status_t s=text(font,frame,"小纸 Pico",32,64);
- if(s==PN_OK)s=text(font,frame,v->station?"局域网传书":"热点传书",32,160);
+ pn_frame_clear(frame,15);pn_status_t s=pn_w_header(font,frame,"",v->station?"局域网传书":"热点传书",NULL);
  if(v->phase==PN_TVIEW_READY && v->station){
   // 局域网：手机已在同一网络，只给网页码。/ LAN: the phone is already on the same network, so only the web-page code is shown.
   if(s==PN_OK)s=text(font,frame,"扫码打开网页",200,212);

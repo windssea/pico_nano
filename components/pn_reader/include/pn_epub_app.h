@@ -100,3 +100,14 @@ pn_status_t pn_epub_app_font_default(pn_epub_app_t *,const pn_font_preferences_t
 /// 在原文锚点应用已有全局默认，显示成功后保存继承标记；未设全局返回EMPTY。
 /// Apply existing global defaults at the original anchor and save inheritance after presentation; absent global returns EMPTY.
 pn_status_t pn_epub_app_font_inherit(pn_epub_app_t *,uint64_t,pn_reader_present_fn,void *);
+
+/// 当前正文字体（借用，不可关闭；字体已挂起时engine为空）。排版预览用它按草稿字号试排。
+/// The current body font (borrowed, never close it; its engine is empty while fonts are suspended). The typesetting preview uses it to sample the draft size.
+pn_font_t *pn_epub_app_body_font(const pn_epub_app_t *app);
+
+/// 章节（spine）数量与当前显示所在章节序号（从0起）；尚无显示位置返回PN_EMPTY。
+/// Section (spine) count and the zero-based section of the displayed page; PN_EMPTY before anything is displayed.
+pn_status_t pn_epub_app_section_info(pn_epub_app_t *,size_t *count,size_t *current);
+/// 跳到第index章开头（从0起）；成功确认后可用“返回跳转前位置”。/ Jump to the start of section index (zero-based); "return to the position before the jump" works after a confirmed jump.
+pn_status_t pn_epub_app_section_jump(pn_epub_app_t *,size_t index,uint64_t,pn_reader_present_fn,void *);
+

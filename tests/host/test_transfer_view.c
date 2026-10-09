@@ -19,6 +19,6 @@ int main(int argc,char **argv){
  assert(pn_reading_menu_render_lan(true,"家里的WiFi",&font,&frame)==PN_OK && pn_reading_menu_hit_lan(100,700,true)==PN_READING_MENU_LAN && pn_reading_menu_hit_lan(100,700,false)==-1 && pn_reading_menu_hit_lan(100,1000,false)==-1 && pn_reading_menu_hit_lan(100,850,true)==PN_READING_MENU_SETTINGS && pn_reading_menu_hit_lan(100,345,true)==-1);
  view.phase=PN_TVIEW_STOPPING;assert(pn_transfer_view_hit(&view,200,1100)==-1 && pn_transfer_view_render(&view,&font,&frame)==PN_OK);
  view.phase=PN_TVIEW_FAILED;view.released=false;assert(pn_transfer_view_render(&view,&font,&frame)==PN_OK && pn_transfer_view_hit(&view,200,1100)==PN_TRANSFER_VIEW_STOP);
- pn_catalog_page_t *page=pn_alloc(&pool,sizeof *page);memset(page,0,sizeof *page);assert(pn_shelf_render_mode_with_transfer(page,&font,&frame,-1,false,true)==PN_OK);assert(pn_shelf_hit_with_transfer(page,200,1080,true)==PN_SHELF_TRANSFER && pn_shelf_hit_with_transfer(page,200,1080,false)==-1);
+ pn_catalog_page_t *page=pn_alloc(&pool,sizeof *page);memset(page,0,sizeof *page);assert(pn_shelf_render_mode_with_transfer(page,&font,&frame,-1,false,true)==PN_OK);assert(pn_shelf_hit_with_transfer(page,340,1150,true)==PN_SHELF_TRANSFER && pn_shelf_hit_with_transfer(page,340,1150,false)==-1);
  pn_free(page);pn_font_close(&font);pn_free(pixels);assert(!pool.used && !pool.live);return 0;
 }

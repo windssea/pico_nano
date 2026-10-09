@@ -23,7 +23,9 @@ pn_status_t pn_device_transfer_network_result(pn_device_transfer_t *s,pn_status_
 void app_main(void);
 static jmp_buf end;
 static void (*worker)(void *);
-static unsigned vcom_reads,presents,board_calls,mounts;
+static unsigned vcom_reads,presents,board_calls,mounts,poweroffs,pclk_calls;
+static int last_pclk;
+static bool underrun;
 static bool nvs_bad,vcom_bad,mount_bad,ready_bad;
 const char *esp_err_to_name(esp_err_t e){(void)e;return "mock";}
 esp_err_t nvs_flash_init(void){return nvs_bad?ESP_FAIL:ESP_OK;}
@@ -34,9 +36,10 @@ void epd_set_vcom(uint16_t v){assert(v==1230 && vcom_reads==1);}
 void epd_draw_pixel(int x,int y,uint8_t c,uint8_t *f){(void)x;(void)y;(void)c;(void)f;assert(vcom_reads==1 && !vcom_bad);}
 void read_pico_epd_use_scan(int s){assert(s==READ_PICO_EPD_SCAN_FULL);}
 void epd_poweron(void){assert(!vcom_bad && vcom_reads==1);}
-void epd_poweroff(void){}
+void epd_poweroff(void){poweroffs++;}
+void read_pico_epd_set_pclk(int mhz){pclk_calls++;last_pclk=mhz;}
 void epd_clear(void){}
-enum EpdDrawError epd_hl_update_screen_from_white(EpdiyHighlevelState *h,enum EpdDrawMode m,int t){(void)h;(void)m;(void)t;presents++;return EPD_DRAW_SUCCESS;}
+enum EpdDrawError epd_hl_update_screen_from_white(EpdiyHighlevelState *h,enum EpdDrawMode m,int t){(void)h;(void)m;(void)t;presents++;if(underrun && presents==1)return EPD_DRAW_EMPTY_LINE_QUEUE;return EPD_DRAW_SUCCESS;}
 enum EpdDrawError epd_hl_update_screen_full(EpdiyHighlevelState *h,enum EpdDrawMode m,int t){return epd_hl_update_screen_from_white(h,m,t);}
 esp_err_t esp_vfs_littlefs_register(const esp_vfs_littlefs_conf_t *c){mounts++;assert(!c->format_if_mount_failed && !c->grow_on_mount && !c->dont_mount && !c->read_only);assert(strcmp(c->base_path,"/data")==0 && strcmp(c->partition_label,"data")==0);return mount_bad?ESP_FAIL:ESP_OK;}
 esp_err_t esp_vfs_littlefs_unregister(const char *s){(void)s;return ESP_OK;}
@@ -54,11 +57,20 @@ int64_t esp_timer_get_time(void){return 1000000;}
 void vTaskDelete(void *t){(void)t;longjmp(end,1);}
 void vTaskDelay(unsigned n){assert(n==10);longjmp(end,1);}
 int xTaskCreatePinnedToCore(void (*fn)(void *),const char *name,unsigned stack,void *arg,unsigned priority,void *handle,int core){(void)name;(void)arg;(void)priority;(void)handle;assert(stack==32768 && core==1);worker=fn;return 1;}
-int main(int argc,char **argv){assert(argc==2);nvs_bad=strcmp(argv[1],"nvs")==0;vcom_bad=strcmp(argv[1],"vcom")==0;mount_bad=strcmp(argv[1],"mount")==0;ready_bad=strcmp(argv[1],"ready")==0;app_main();assert(worker);if(!setjmp(end))worker(NULL);
+int main(int argc,char **argv){assert(argc==2);nvs_bad=strcmp(argv[1],"nvs")==0;vcom_bad=strcmp(argv[1],"vcom")==0;mount_bad=strcmp(argv[1],"mount")==0;ready_bad=strcmp(argv[1],"ready")==0;underrun=strcmp(argv[1],"underrun")==0;app_main();assert(worker);if(!setjmp(end))worker(NULL);
     if(nvs_bad)assert(board_calls==0 && vcom_reads==0 && presents==0 && mounts==0);
     else if(vcom_bad)assert(board_calls==1 && vcom_reads==1 && presents==0 && mounts==0);
     else if(ready_bad)assert(board_calls==1 && vcom_reads==1 && presents==0 && mounts==0);
-    else assert(board_calls==1 && vcom_reads==1 && presents==1 && mounts==1);
+    else if(underrun){
+        // 欠载：退回12MHz并白场重建，随后成功；轨保活不断电。/ Underrun: back to 12 MHz and rebuild from white, then succeed; rails stay up.
+        assert(board_calls==1 && vcom_reads==1 && presents==2 && mounts==1);
+        assert(pclk_calls==1 && last_pclk==READ_PICO_EPD_PCLK_MIN_MHZ && poweroffs==0);
+    }
+    else {
+        assert(board_calls==1 && vcom_reads==1 && presents==1 && mounts==1);
+        // 正常刷新后高压轨保活，空闲期满前不断电。/ After a normal present the rails stay up until the idle period elapses.
+        assert(pclk_calls==0 && poweroffs==0);
+    }
     return 0;
 }
 

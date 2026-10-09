@@ -15,11 +15,11 @@ int main(int argc,char **argv){
     capture=argc>1?argv[1]:NULL;
     /* 识别器阈值与偏好。/ Recognizer thresholds and preferences. */
     pn_reader_input_t in={0};pn_reader_action_t a;
-    assert(tap(&in,171,500,&a) && a==PN_APP_PREVIOUS && tap(&in,513,500,&a) && a==PN_APP_NEXT && !tap(&in,172,500,&a) && !tap(&in,512,500,&a));
+    assert(tap(&in,171,500,&a) && a==PN_APP_PREVIOUS && tap(&in,513,500,&a) && a==PN_APP_NEXT && tap(&in,172,500,&a) && a==PN_APP_TOOLS && tap(&in,512,500,&a) && a==PN_APP_TOOLS);
     assert(swipe(&in,400,500,336,500,&a) && a==PN_APP_NEXT && !swipe(&in,400,500,337,500,&a) && swipe(&in,300,500,400,560,&a) && a==PN_APP_PREVIOUS && !swipe(&in,300,500,400,580,&a));
     in.config.left_hand=true;assert(tap(&in,100,500,&a) && a==PN_APP_NEXT && tap(&in,600,500,&a) && a==PN_APP_PREVIOUS && swipe(&in,400,500,300,500,&a) && a==PN_APP_NEXT);
     in.config=(pn_reader_input_config_t){.no_swipe=true};assert(!swipe(&in,400,500,300,500,&a) && tap(&in,600,500,&a) && a==PN_APP_NEXT);
-    in.config=(pn_reader_input_config_t){.no_edge_tap=true};assert(!tap(&in,600,500,&a) && swipe(&in,400,500,300,500,&a));
+    in.config=(pn_reader_input_config_t){.no_edge_tap=true};assert(!tap(&in,600,500,&a) && swipe(&in,400,500,300,500,&a) && tap(&in,342,500,&a) && a==PN_APP_TOOLS);
     /* 记录：无记录EMPTY、往返、未知标志拒绝。/ Record: EMPTY without one, round trip, unknown flags rejected. */
     char root[]="/tmp/pn-settings-XXXXXX";assert(mkdtemp(root));
     pn_media_t media;pn_media_init(&media);assert(pn_media_attach(&media,1)==PN_OK);
@@ -31,13 +31,18 @@ int main(int argc,char **argv){
     /* 设置页。/ Settings page. */
     pn_pool_t pool;assert(!pn_pool_init(&pool,2u*1024u*1024u,NULL,NULL,NULL));pn_settings_ui_t ui={0};
     assert(pn_settings_ui_open(&ui,&pool,&media,root,present,NULL)==PN_OK && ui.active && ui.presented && ui.flags==0);
-    assert(pn_settings_ui_hit(&ui,100,240)==PN_SETUI_WALLPAPER && pn_settings_ui_hit(&ui,100,350)==PN_SETUI_FONTS && pn_settings_ui_hit(&ui,100,530)==PN_SETUI_TOGGLE && pn_settings_ui_hit(&ui,100,860)==PN_SETUI_TOGGLE+3 && pn_settings_ui_hit(&ui,100,590)==-1 && pn_settings_ui_hit(&ui,300,1150)==PN_SETUI_BACK);
+    assert(pn_settings_ui_hit(&ui,100,220)==PN_SETUI_FONTS && pn_settings_ui_hit(&ui,100,380)==PN_SETUI_WALLPAPER && pn_settings_ui_hit(&ui,100,540)==PN_SETUI_TOGGLE && pn_settings_ui_hit(&ui,100,800)==PN_SETUI_TOGGLE+3 && pn_settings_ui_hit(&ui,100,900)==-1 && pn_settings_ui_hit(&ui,100,60)==PN_SETUI_BACK && pn_settings_ui_hit(&ui,600,60)==-1);
     assert(pn_settings_ui_event(&ui,PN_SETUI_TOGGLE,present,NULL)==PN_OK && ui.flags==PN_INPUT_LEFT_HAND && pn_settings_load_flags(&media,root,&flags)==PN_OK && flags==PN_INPUT_LEFT_HAND);
     assert(pn_settings_ui_event(&ui,PN_SETUI_TOGGLE+1,present,NULL)==PN_OK && pn_settings_ui_event(&ui,PN_SETUI_TOGGLE+2,present,NULL)==PN_OK);
     assert(pn_settings_ui_event(&ui,PN_SETUI_TOGGLE+3,present,NULL)==PN_LIMIT && !(ui.flags&PN_INPUT_NO_KEYS));
     pn_media_lease_t writer;assert(pn_media_acquire(&media,PN_MEDIA_WRITE,&writer)==PN_OK);uint8_t before=ui.flags;
     assert(pn_settings_ui_event(&ui,PN_SETUI_TOGGLE+2,present,NULL)==PN_BUSY && ui.flags==before);assert(pn_media_release(&media,&writer)==PN_OK);
     assert(pn_settings_ui_event(&ui,PN_SETUI_FONTS,present,NULL)==PN_OK && ui.request==PN_SETUI_FONTS && ui.active);ui.request=0;
+    /* 局域网传书行：设置网络名后才出现，选中交给调用方。/ The LAN transfer row appears only after a network name is set and selecting it is handed to the caller. */
+    assert(pn_settings_ui_hit(&ui,100,960)==-1 && pn_settings_ui_event(&ui,PN_SETUI_LAN,present,NULL)==PN_EMPTY && !ui.request);
+    assert(pn_settings_ui_set_lan(&ui,"家里的WiFi",present,NULL)==PN_OK && pn_settings_ui_hit(&ui,100,960)==PN_SETUI_LAN);
+    assert(pn_settings_ui_event(&ui,PN_SETUI_LAN,present,NULL)==PN_OK && ui.request==PN_SETUI_LAN);ui.request=0;
+    assert(pn_settings_ui_set_lan(&ui,"",present,NULL)==PN_OK && pn_settings_ui_hit(&ui,100,960)==-1);
     assert(pn_settings_ui_event(&ui,PN_SETUI_BACK,present,NULL)==PN_OK && !ui.active);pn_settings_ui_close(&ui);pn_settings_ui_close(&ui);assert(!pool.used && !pool.live);
     assert(pn_settings_load_flags(&media,root,&flags)==PN_OK && flags==(PN_INPUT_LEFT_HAND|PN_INPUT_NO_SWIPE|PN_INPUT_NO_EDGE_TAP));
     /* 无存储：显示默认、不能保存。/ No storage: defaults shown, nothing saved. */

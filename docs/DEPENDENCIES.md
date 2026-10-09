@@ -1,6 +1,6 @@
 # 依赖与源码来源
 
-新建共享核心、UI基础与模拟器源文件使用Apache-2.0。复用的板级组件来自 `MindReset/read_pico_firmware` 提交 `28cde682a4468a581c278761922724f57d976418`，逐文件SHA-256记录于 `LICENSES/reference-manifest.json`。本阶段只复制所需组件，排除examples/build等目录，没有修改复用源代码；源文件原有版权、许可证与冻结决策保留。
+新建共享核心、UI基础与模拟器源文件使用Apache-2.0。复用的板级组件来自 `MindReset/read_pico_firmware` 提交 `ed1e9331077451a0391769cd6c191568f7901807`（自 `28cde682` 起仅 `read_pico_board.c` 随官方VCOM扫描门控提交整体更新，其余复用文件未变），逐文件SHA-256记录于 `LICENSES/reference-manifest.json`。本阶段只复制所需组件，排除examples/build等目录，除上述整体同步外没有修改复用源代码；源文件原有版权、许可证与冻结决策保留。
 
 | 组件 | 许可与边界 |
 | --- | --- |
