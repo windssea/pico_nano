@@ -27,7 +27,7 @@ class NativeWorker:
   with self.lock:
    if self.process.poll() is not None:raise RuntimeError('原生传输进程已退出')
    self.process.stdin.write(command.encode('ascii')+b'\n'+body);self.process.stdin.flush()
-   result=self.process.stdout.readline(4096)
+   result=self.process.stdout.readline(16384)
    if not result:raise RuntimeError('原生传输进程没有返回结果')
    return json.loads(result)
  def close(self):
@@ -173,6 +173,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
     if set(query)!=set(('name',)) or len(query['name'])!=1:raise BadRequest('文件名参数无效')
     result=self.native(f'FILE {KINDS[match[1]]} {basename(query["name"][0])}')
     if result is not None:self.send_json(200,{'size':result['size'],'sha256':result['sha256']})
+    return
+   if path=='/api/v1/fonts' and self.command=='GET':
+    query=urllib.parse.parse_qs(parsed.query,strict_parsing=True,keep_blank_values=True) if parsed.query else {}
+    if set(query)-set(('after',)) or len(query.get('after',[]))>1:raise BadRequest('查询参数无效')
+    after=query.get('after',[''])[0]
+    cursor=basename(after) if after else '-'
+    result=self.native(f'LIST {KINDS["font"]} {cursor}')
+    if result is not None:
+     self.send_json(200,{'more':result['more'],'items':[{'name':bytes.fromhex(item['name_hex']).decode('utf-8'),'size':item['size']} for item in result['items']]})
+    return
+   if path=='/api/v1/fonts' and self.command=='DELETE':
+    query=urllib.parse.parse_qs(parsed.query,strict_parsing=True)
+    if set(query)!=set(('name','size','sha256')) or any(len(item)!=1 for item in query.values()) or not re.fullmatch('[1-9][0-9]{0,18}',query['size'][0]):raise BadRequest('删除参数无效')
+    result=self.native(f'DELETE {KINDS["font"]} {basename(query["name"][0])} {int(query["size"][0])} {digest(query["sha256"][0])}')
+    if result is not None:self.send_json(200,{'deleted':True,'message':'字体已删除'})
     return
    self.error(404,'没有这个操作入口')
   except BadRequest as error:self.error(400,str(error))

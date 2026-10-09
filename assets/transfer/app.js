@@ -3,7 +3,7 @@ import {SHA256} from './sha256.mjs';
 const $=id=>document.getElementById(id),kinds={book:{label:'书籍',accept:'.txt,.epub',hint:'TXT、EPUB 电子书，支持多本添加',limit:512*1024*1024},font:{label:'字体',accept:'.ttf',hint:'TTF 字体，最大 32 MiB',limit:32*1024*1024},cover:{label:'封面',accept:'.png,.jpg,.jpeg',hint:'PNG、JPEG 图片，最大 8 MiB',limit:8*1024*1024},wallpaper:{label:'锁屏图片',accept:'.png,.jpg,.jpeg',hint:'上传后在阅读器菜单“锁屏壁纸”中预览并应用',limit:8*1024*1024}};
 let kind='book',token=null,running=false,entries=[];
 function notice(text,error=false){$('notice').textContent=text;$('notice').classList.toggle('error',error);}
-function connected(value){$('connection').textContent=value?'已连接':'等待配对';$('connection').classList.toggle('connected',value);$('pair-panel').hidden=value;if(!value)$('network-panel').hidden=true;else loadNetwork();render();}
+function connected(value){$('connection').textContent=value?'已连接':'等待配对';$('connection').classList.toggle('connected',value);$('pair-panel').hidden=value;if(!value)$('network-panel').hidden=true;else loadNetwork();syncFonts();render();}
 // 家庭网络：只在设备支持时显示；口令只提交，不回显。/ Home network: shown only when the device supports it; passwords are submitted, never echoed.
 function showNetwork(state){$('network-panel').hidden=false;$('network-forget').hidden=!state.saved;$('network-status').textContent=state.pending?'正在保存到阅读器…':state.result==='failed'?'保存失败，请重试；原设置保留。':state.saved?'已保存：'+state.ssid+'。退出传书后可在菜单选择“局域网传书”。':'保存后，阅读器菜单会出现“局域网传书”，手机与阅读器连同一个 WiFi 即可传书。';}
 async function loadNetwork(){try{showNetwork(await api('/network'));}catch(error){if(error.status===404)$('network-panel').hidden=true;}}
@@ -12,7 +12,29 @@ $('network-form').onsubmit=async event=>{event.preventDefault();const button=eve
 $('network-forget').onclick=async()=>{try{await api('/network','DELETE');await waitNetwork();notice('已忘记家庭网络。');}catch(error){notice(error.message,true);}};
 async function api(path,method='GET',body,headers={}){if(token)headers.Authorization='Bearer '+token;let data=body;if(body&&!(body instanceof Uint8Array)){headers['Content-Type']='application/json';data=JSON.stringify(body);}const response=await fetch('/api/v1'+path,{method,body:data,headers}),value=await response.json();if(!response.ok){if(response.status===401){token=null;connected(false);}const error=Error(value.message||'操作失败');error.status=response.status;throw error;}return value;}
 $('pair-form').onsubmit=async event=>{event.preventDefault();const button=event.submitter;button.disabled=true;try{token=(await api('/pair','POST',{code:$('pair-code').value})).token;$('pair-code').value='';connected(true);notice('连接成功，可以开始发送。');}catch(error){notice(error.message,true);}finally{button.disabled=false;}};
-for(const button of document.querySelectorAll('[data-kind]'))button.onclick=()=>{kind=button.dataset.kind;for(const tab of document.querySelectorAll('[data-kind]'))tab.setAttribute('aria-pressed',String(tab===button));$('files').accept=kinds[kind].accept;$('accept-hint').textContent=kinds[kind].hint;};
+for(const button of document.querySelectorAll('[data-kind]'))button.onclick=()=>{kind=button.dataset.kind;for(const tab of document.querySelectorAll('[data-kind]'))tab.setAttribute('aria-pressed',String(tab===button));$('files').accept=kinds[kind].accept;$('accept-hint').textContent=kinds[kind].hint;syncFonts();};
+// 已安装字体：选择“字体”类别时列出；删除前现取文件身份，设备核对一致才删除。/ Installed fonts: listed when the font category is selected; the file identity is fetched right before deleting and the device deletes only on a match.
+function syncFonts(){const panel=$('fonts-panel');panel.hidden=!token||kind!=='font';if(!panel.hidden)loadFonts('');}
+async function loadFonts(after){
+ const list=$('fonts-list');
+ try{
+  const data=await api('/fonts'+(after?'?after='+encodeURIComponent(after):''));
+  if(!after)list.replaceChildren();
+  for(const item of data.items){const row=document.createElement('li'),name=document.createElement('span'),info=document.createElement('span'),button=document.createElement('button');
+   name.textContent=item.name;info.textContent=size(item.size);button.className='secondary';button.textContent='删除';button.onclick=()=>removeFont(item);row.append(name,info,button);list.append(row);}
+  $('fonts-empty').hidden=list.children.length>0;$('fonts-more').hidden=!data.more;
+  $('fonts-more').onclick=()=>loadFonts(data.items[data.items.length-1].name);
+ }catch(error){if(error.status===404)$('fonts-panel').hidden=true;else notice(error.message,true);}
+}
+function confirmDelete(name){return new Promise(resolve=>{const dialog=$('delete-dialog');$('delete-name').textContent=name;$('delete-no').onclick=()=>{dialog.close();resolve(false);};$('delete-yes').onclick=()=>{dialog.close();resolve(true);};dialog.oncancel=()=>resolve(false);dialog.showModal();});}
+async function removeFont(item){
+ if(!await confirmDelete(item.name))return;
+ try{
+  const old=await api('/files/font?name='+encodeURIComponent(item.name));
+  await api('/fonts?name='+encodeURIComponent(item.name)+'&size='+old.size+'&sha256='+old.sha256,'DELETE');
+  notice('已删除字体：'+item.name+'。正在使用它的书会改用默认字体。');await loadFonts('');
+ }catch(error){notice(error.message,true);await loadFonts('');}
+}
 function add(files){for(const file of files){const type=kinds[kind],suffix='.'+file.name.split('.').pop().toLowerCase();if(!type.accept.split(',').includes(suffix)||!file.size||file.size>type.limit){notice('文件格式或大小不符合当前类别，请检查。',true);continue;}if(entries.length>=32){notice('一次最多添加 32 项。',true);break;}entries.push({file,name:file.name,kind,state:'等待发送',offset:0,progress:0,paused:false,cancelled:false});}render();}
 $('files').onchange=()=>{add($('files').files);$('files').value='';};$('choose').onclick=event=>{event.stopPropagation();$('files').click();};$('drop').onclick=()=> $('files').click();$('drop').onkeydown=event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();$('files').click();}};
 for(const event of ['dragenter','dragover'])$('drop').addEventListener(event,e=>{e.preventDefault();$('drop').classList.add('drag');});for(const event of ['dragleave','drop'])$('drop').addEventListener(event,e=>{e.preventDefault();$('drop').classList.remove('drag');if(event==='drop')add(e.dataTransfer.files);});

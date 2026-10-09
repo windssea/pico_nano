@@ -97,6 +97,31 @@ int main(void){
  json=request(HTTP_POST,"/api/v1/uploads",begin,strlen(begin),token,NULL);assert(code==201);strcpy(id,cJSON_GetObjectItemCaseSensitive(json,"upload_id")->valuestring);cJSON_Delete(json);snprintf(uri,sizeof uri,"/api/v1/uploads/%s/chunks",id);
  json=request(HTTP_PUT,uri,text,sizeof text-1,token,extra);assert(code==200);cJSON_Delete(json);snprintf(uri,sizeof uri,"/api/v1/uploads/%s/complete",id);
  json=request(HTTP_POST,uri,complete,strlen(complete),token,NULL);assert(code==422);cJSON_Delete(json);
+ /* 已安装字体：授权列表、游标、严格查询、身份不符拒绝删除、成功删除。/ Installed fonts: authorized listing, cursor, strict queries, refusal on identity mismatch, and successful deletion. */
+ {
+  char folder[256],path[300];snprintf(folder,sizeof folder,"%s/fonts",root);snprintf(path,sizeof path,"%s/x.ttf",folder);FILE *font=fopen(path,"wb");assert(font && fwrite(text,1,sizeof text-1,font)==sizeof text-1 && fclose(font)==0);
+  snprintf(path,sizeof path,"%s/字体.ttf",folder);font=fopen(path,"wb");assert(font && fwrite(text,1,sizeof text-1,font)==sizeof text-1 && fclose(font)==0);
+  json=request(HTTP_GET,"/api/v1/fonts",NULL,0,NULL,NULL);assert(code==401);cJSON_Delete(json);
+  json=request(HTTP_GET,"/api/v1/fonts",NULL,0,token,NULL);assert(code==200 && cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(json,"more")));
+  cJSON *items=cJSON_GetObjectItemCaseSensitive(json,"items");assert(cJSON_GetArraySize(items)==2);
+  assert(!strcmp(cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(items,0),"name")->valuestring,"x.ttf") && cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(items,0),"size")->valueint==(int)sizeof text-1);
+  assert(!strcmp(cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(items,1),"name")->valuestring,"字体.ttf"));cJSON_Delete(json);
+  json=request(HTTP_GET,"/api/v1/fonts?after=x.ttf",NULL,0,token,NULL);assert(code==200 && cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(json,"items"))==1);cJSON_Delete(json);
+  json=request(HTTP_GET,"/api/v1/fonts?after=%E5%AD%97%E4%BD%93.ttf",NULL,0,token,NULL);assert(code==200 && cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(json,"items"))==0);cJSON_Delete(json);
+  const char *bad_queries[]={"/api/v1/fonts?bogus=1","/api/v1/fonts?after=a&after=b","/api/v1/fonts?after=%zz","/api/v1/fonts?after","/api/v1/fonts?after=..%2Fx.ttf","/api/v1/fontsx"};
+  for(unsigned i=0;i<sizeof bad_queries/sizeof bad_queries[0];i++){json=request(HTTP_GET,bad_queries[i],NULL,0,token,NULL);assert(code==400 || code==404);cJSON_Delete(json);}
+  char remove[400];snprintf(remove,sizeof remove,"/api/v1/fonts?name=x.ttf&size=%zu&sha256=%s",sizeof text-1,sha);
+  json=request(HTTP_DELETE,remove,NULL,0,NULL,NULL);assert(code==401);cJSON_Delete(json);
+  json=request(HTTP_DELETE,remove,NULL,0,token,"Origin: http://evil.test");assert(code==400);cJSON_Delete(json);
+  char query[400];
+  snprintf(query,sizeof query,"/api/v1/fonts?name=x.ttf&size=%zu",sizeof text-1);json=request(HTTP_DELETE,query,NULL,0,token,NULL);assert(code==400);cJSON_Delete(json);
+  snprintf(query,sizeof query,"/api/v1/fonts?name=x.ttf&size=0&sha256=%s",sha);json=request(HTTP_DELETE,query,NULL,0,token,NULL);assert(code==400);cJSON_Delete(json);
+  snprintf(query,sizeof query,"/api/v1/fonts?name=x.ttf&size=%zu&sha256=%s",sizeof text-1+1,sha);json=request(HTTP_DELETE,query,NULL,0,token,NULL);assert(code==409);cJSON_Delete(json);
+  snprintf(path,sizeof path,"%s/x.ttf",folder);assert(access(path,F_OK)==0);
+  json=request(HTTP_DELETE,remove,NULL,0,token,NULL);assert(code==200 && cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(json,"deleted")));cJSON_Delete(json);assert(access(path,F_OK)!=0);
+  json=request(HTTP_DELETE,remove,NULL,0,token,NULL);assert(code==404);cJSON_Delete(json);
+  json=request(HTTP_GET,"/api/v1/fonts",NULL,0,token,NULL);assert(code==200 && cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(json,"items"))==1);cJSON_Delete(json);
+ }
  /* 配网接口：未启用404；保存只交给sink且不回显口令。/ Provisioning endpoints: 404 when disabled; saves go only to the sink and never echo passwords. */
  json=request(HTTP_GET,"/api/v1/network",NULL,0,token,NULL);assert(code==404);cJSON_Delete(json);
  assert(pn_device_transfer_http_network(&server,&net_sink)==PN_OK);

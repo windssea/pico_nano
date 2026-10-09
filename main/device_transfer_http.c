@@ -74,7 +74,8 @@ static esp_err_t send_data(httpd_req_t *r,unsigned status,const char *mime,const
 }
 static esp_err_t error(httpd_req_t *r,unsigned status,const char *message){char bytes[384];int n=snprintf(bytes,sizeof bytes,"{\"message\":\"%s\"}",message);return send_data(r,status,"application/json; charset=utf-8",bytes,(size_t)n);}
 static esp_err_t json_send(httpd_req_t *r,unsigned status,cJSON *json,bool valid){
- char bytes[2048];bool okay=valid && json && cJSON_PrintPreallocated(json,bytes,sizeof bytes,false);cJSON_Delete(json);
+ // 4608足够八条最长字体名的列表。/ 4608 bytes fit a listing of eight maximum-length font names.
+ char bytes[4608];bool okay=valid && json && cJSON_PrintPreallocated(json,bytes,sizeof bytes,false);cJSON_Delete(json);
  return okay?send_data(r,status,"application/json; charset=utf-8",bytes,strlen(bytes)):error(r,503,"内存不足，请稍后重试");
 }
 static bool string(cJSON *o,const char *key,const char *value){return o && cJSON_AddStringToObject(o,key,value)!=NULL;}
@@ -122,7 +123,41 @@ static esp_err_t execute(http_t *s,httpd_req_t *r,pn_transfer_command_t *command
  cJSON *json=cJSON_CreateObject();bool valid=json!=NULL;
  if(reply.has_file){char sha[65];encode(reply.file_digest.sha256,32,sha);valid&=number(json,"size",reply.file_size);valid&=string(json,"sha256",sha);}
  if(reply.has_upload){char sha[65],id[33];encode(reply.request.digest.sha256,32,sha);encode(reply.request.id,16,id);valid&=string(json,"upload_id",id);valid&=string(json,"name",reply.request.name);valid&=string(json,"kind",kind_name(reply.request.kind));valid&=string(json,"sha256",sha);valid&=number(json,"size",reply.state.size);valid&=number(json,"next_offset",reply.state.offset);valid&=number(json,"phase",reply.state.phase);valid&=number(json,"chunk_size",PN_UPLOAD_CHUNK);valid&=boolean(json,"cleanup_pending",reply.cleanup_pending);}
+ if(reply.has_list){
+  cJSON *items=json?cJSON_AddArrayToObject(json,"items"):NULL;valid&=items!=NULL;valid&=boolean(json,"more",reply.more);
+  for(size_t i=0;valid && i<reply.count;i++){cJSON *item=cJSON_CreateObject();bool good=item && string(item,"name",reply.list[i].name) && number(item,"size",reply.list[i].size);
+   if(good)cJSON_AddItemToArray(items,item);else{cJSON_Delete(item);valid=false;}}
+ }
+ if(reply.deleted){valid&=boolean(json,"deleted",true);valid&=string(json,"message","字体已删除");}
  return json_send(r,success,json,valid);
+}
+/// 严格解析 ?k=v&k=v：键须在允许集合内且各至多一次，值做百分号解码，拒绝#、NUL与超长。
+/// Strictly parse ?k=v&k=v: keys must be allowed and unique, values are percent-decoded, and '#', NUL and overlong values are rejected.
+static bool query_parse(const char *query,const char *const *keys,size_t n,char values[][PN_UPLOAD_NAME_MAX],unsigned *seen){
+ *seen=0;
+ if(!query)return true;
+ if(*query!='?')return false;
+ const char *at=query+1;
+ while(*at){
+  const char *eq=strchr(at,'=');const char *amp=strchr(at,'&');
+  if(!eq || (amp && amp<eq))return false;
+  size_t key_length=(size_t)(eq-at),i=0;
+  while(i<n && (strlen(keys[i])!=key_length || strncmp(keys[i],at,key_length)))i++;
+  if(i==n || (*seen&(1u<<i)))return false;
+  *seen|=1u<<i;
+  const char *in=eq+1;size_t out=0;
+  while(*in && *in!='&'){
+   unsigned char c=(unsigned char)*in++;
+   if(c=='%'){int a=in[0]?digit(in[0]):-1,b=a>=0 && in[1]?digit(in[1]):-1;if(a<0 || b<0)return false;c=(unsigned char)(a*16+b);in+=2;}
+   else if(c=='+')c=' ';
+   else if(c=='#')return false;
+   if(!c || out>=PN_UPLOAD_NAME_MAX-1)return false;
+   values[i][out++]=(char)c;
+  }
+  values[i][out]=0;
+  at=*in=='&'?in+1:in;
+ }
+ return true;
 }
 static esp_err_t dispatch(httpd_req_t *r){
  http_t *s=r->user_ctx;char host[64],origin[80],authorization[64];
@@ -202,6 +237,18 @@ static esp_err_t dispatch(httpd_req_t *r){
    else if(r->method==HTTP_POST && !strcmp(tail,"/complete")){const char *keys[]={"sha256"};command.operation=PN_TRANSFER_COMPLETE;valid=valid && fields(json,keys,1,1) && decode(get_string(json,"sha256"),command.digest.sha256,32);}
    else if(r->method==HTTP_PUT && !strcmp(tail,"/chunks")){char offset[32],sha[65];command.operation=PN_TRANSFER_CHUNK;command.bytes=s->bytes;command.length=r->content_len;valid=valid && header(r,"X-Offset",offset,sizeof offset) && decimal(offset,512u*1024u*1024u,&command.offset) && header(r,"X-Chunk-SHA256",sha,sizeof sha) && decode(sha,command.digest.sha256,32);}
    else valid=false;
+  }
+ }else if((r->method==HTTP_GET || r->method==HTTP_DELETE) && (!strcmp(uri,"/api/v1/fonts") || !strncmp(uri,"/api/v1/fonts?",14))){
+  // 已安装字体：GET分页列表（after游标可选）；DELETE须带名称、长度与SHA-256，由服务核对身份。
+  // Installed fonts: GET is a paged list (optional after cursor); DELETE needs name, size and SHA-256 and the service checks identity.
+  const char *query=uri[13]?uri+13:NULL;unsigned seen=0;static const char *const list_keys[]={"after"},*const delete_keys[]={"name","size","sha256"};
+  char values[3][PN_UPLOAD_NAME_MAX];command.request.kind=PN_UPLOAD_FONT;
+  if(r->method==HTTP_GET){
+   valid=query_parse(query,list_keys,1,values,&seen);command.operation=PN_TRANSFER_LIST;
+   if(valid && (seen&1u))snprintf(command.request.name,sizeof command.request.name,"%s",values[0]);
+  }else{
+   valid=query_parse(query,delete_keys,3,values,&seen) && seen==7u;command.operation=PN_TRANSFER_DELETE;
+   if(valid){snprintf(command.request.name,sizeof command.request.name,"%s",values[0]);valid=decimal(values[1],512u*1024u*1024u,&command.old_size) && command.old_size>0 && decode(values[2],command.old_digest.sha256,32);}
   }
  }else if(r->method==HTTP_GET && !strncmp(uri,"/api/v1/files/",14)){
   const char *query=strchr(uri+14,'?');if(query && !strncmp(query,"?name=",6)){char name[16];size_t n=(size_t)(query-(uri+14));if(n<sizeof name){memcpy(name,uri+14,n);name[n]=0;command.request.kind=kind(name);command.operation=PN_TRANSFER_FILE;const char *in=query+6;size_t at=0;valid=command.request.kind!=0;

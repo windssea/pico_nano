@@ -1,6 +1,6 @@
 {
   "repository": "https://github.com/MindReset/read_pico_firmware",
-  "commit": "28cde682a4468a581c278761922724f57d976418",
+  "commit": "ed1e9331077451a0391769cd6c191568f7901807",
   "files": [
     {
       "path": "components/read_pico/buzzer_1bit.c",
@@ -72,7 +72,7 @@
     },
     {
       "path": "components/read_pico/read_pico_board.c",
-      "sha256": "c216449d72cefe14d22ab7cdee1c915d0d7913015d51e6191733624805fe936c"
+      "sha256": "102ee74f16bc722cab179fd5892cc1843406e5daa06be86f818b2607408470c2"
     },
     {
       "path": "components/read_pico/read_pico_buzzer.c",

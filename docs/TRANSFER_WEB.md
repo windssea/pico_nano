@@ -31,6 +31,10 @@ Python只验证HTTP、认证及请求边界；`simulator/transfer_host.c` 只转
 | POST `/api/v1/uploads/{id}/complete` | 完整摘要和格式校验后安装 |
 | DELETE `/api/v1/uploads/{id}` | 原生取消；已验证/已安装状态不能撤销 |
 | GET `/api/v1/files/{kind}?name=…` | 查询旧文件长度与摘要，供明确覆盖确认 |
+| GET `/api/v1/fonts[?after=名称]` | 已安装字体分页列表：每页最多8项，按名称字节序升序，`after`为上一页末项；返回 `items[{name,size}]` 与 `more` |
+| DELETE `/api/v1/fonts?name=…&size=…&sha256=…` | 删除一个字体：三个参数缺一不可，设备取WRITE租约后核对长度与完整SHA-256，一致才删除并同步目录；不一致409，不存在404 |
+
+字体列表和删除只面向字体：忽略隐藏项、符号链接、子目录和不能被上传规则接受的名称。网页在“字体”类别下显示已安装字体，删除前弹出确认，并在确认后现取该文件的长度与摘要交给设备核对。删除成功后，选择了该字体的书下次打开时用启动默认字体，记录不改（见 [字体管理](FONT_MANAGEMENT.md)）。目录同步失败返回500类错误，此时文件可能已经删除，需重新列表确认；介质被占用时返回409且不删除。
 
 除公共信息与配对外均需 `Authorization: Bearer …`。修改请求必须带与服务authority完全相符的Origin，Host也须匹配；不提供跨域授权。服务拒绝重复关键头、分块编码、未知JSON字段、超长请求及路径名称。页面使用自托管资源与CSP，文件名通过textContent显示。
 

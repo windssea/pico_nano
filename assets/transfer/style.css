@@ -3,3 +3,12 @@
 .queue-buttons{display:flex;gap:8px}.queue-buttons .secondary{font-size:12px;padding:8px 12px}
 
 #save-name{display:block;width:100%;border:1px solid #bacbbf;border-radius:9px;padding:10px;margin-top:8px} .footnote,.preview-note,.empty{color:#63796a}
+
+.fonts-panel{padding:0 0 24px;border-bottom:1px solid #d8e0d9;margin-bottom:27px}
+.fonts-panel h2{font-size:16px}
+.fonts-panel p{font-size:12px;color:#718578;margin:7px 0 12px}
+.fonts-panel ul{list-style:none;margin:0 0 12px;padding:0}
+.fonts-panel li{display:flex;align-items:center;gap:12px;min-height:52px;padding:6px 0;border-bottom:1px solid #e6ece6}
+.fonts-panel li span:first-child{flex:1 1 auto;min-width:0;overflow-wrap:anywhere}
+.fonts-panel li span:nth-child(2){flex:none;font-size:12px;color:#718578}
+.fonts-panel li button{flex:none;min-height:44px}

@@ -54,6 +54,24 @@ with tempfile.TemporaryDirectory() as directory:
    block=content[at:at+65536];assert call(resource_url+'/chunks','PUT',block,token,extra={'X-Offset':str(at),'X-Chunk-SHA256':hashlib.sha256(block).hexdigest()})[0]==200
   assert call(resource_url+'/complete','POST',{'sha256':sha},token)[0]==200
   assert (root/{'font':'fonts','cover':'covers','wallpaper':'wallpapers'}[kind]/name).read_bytes()==content
+ # 已安装字体：列表、需要授权与来源的删除、身份不符拒绝、成功删除。/ Installed fonts: listing, authorized same-origin deletion, identity mismatch refusal, successful deletion.
+ font_bytes=(root/'fonts/测试字体.ttf').read_bytes();font_sha=hashlib.sha256(font_bytes).hexdigest();quoted=urllib.parse.quote('测试字体.ttf')
+ assert call('/api/v1/fonts')[0]==401
+ code,listing=call('/api/v1/fonts',token=token);assert code==200 and listing=={'more':False,'items':[{'name':'测试字体.ttf','size':len(font_bytes)}]},(code,listing)
+ assert call('/api/v1/fonts?after='+quoted,token=token)[1]=={'more':False,'items':[]}
+ assert call('/api/v1/fonts?bogus=1',token=token)[0]==400
+ delete_url=f'/api/v1/fonts?name={quoted}&size={len(font_bytes)}&sha256={font_sha}'
+ assert call(delete_url,'DELETE')[0]==401
+ assert call(delete_url,'DELETE',token=token,origin='http://evil.test')[0]==403
+ assert call(f'/api/v1/fonts?name={quoted}&size={len(font_bytes)}',  'DELETE',token=token)[0]==400
+ assert call(f'/api/v1/fonts?name={quoted}&size=0&sha256={font_sha}','DELETE',token=token)[0]==400
+ assert call(f'/api/v1/fonts?name=..%2Fx.ttf&size=5&sha256={font_sha}','DELETE',token=token)[0]==400
+ assert call(f'/api/v1/fonts?name={quoted}&size={len(font_bytes)}&sha256='+'1'+'0'*63,'DELETE',token=token)[0]==409 and (root/'fonts/测试字体.ttf').exists()
+ assert call(f'/api/v1/fonts?name=absent.ttf&size=5&sha256={font_sha}','DELETE',token=token)[0]==404
+ code,result=call(delete_url,'DELETE',token=token);assert code==200 and result['deleted'] and not (root/'fonts/测试字体.ttf').exists(),(code,result)
+ assert call(f'/api/v1/fonts?name={quoted}&size={len(font_bytes)}&sha256='+'0'*64,'DELETE',token=token)[0]==400
+ assert call(delete_url,'DELETE',token=token)[0]==404
+ assert call('/api/v1/fonts',token=token)[1]=={'more':False,'items':[]}
  # 关闭等待已接收HTTP线程，不提前销毁原生管道。/ Close waits for admitted HTTP threads before destroying native pipes.
  entered=threading.Event();release=threading.Event();closed=threading.Event();native_call=app.worker.call
  def gated(command,body=b''):

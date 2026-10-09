@@ -28,7 +28,14 @@ static void emit(pn_status_t code,const pn_transfer_reply_t *reply){
  }else if(code==PN_OK && reply->has_file){
   printf(",\"size\":%llu,\"sha256\":\"",(unsigned long long)reply->file_size);
   hex_print(reply->file_digest.sha256,32);printf("\"");
- }
+ }else if(code==PN_OK && reply->has_list){
+  printf(",\"more\":%s,\"items\":[",reply->more?"true":"false");
+  for(size_t i=0;i<reply->count;i++){
+   printf("%s{\"name_hex\":\"",i?",":"");hex_print((const uint8_t *)reply->list[i].name,strlen(reply->list[i].name));
+   printf("\",\"size\":%llu}",(unsigned long long)reply->list[i].size);
+  }
+  printf("]");
+ }else if(code==PN_OK && reply->deleted)printf(",\"deleted\":true");
  puts("}");fflush(stdout);
 }
 int main(int argc,char **argv){
@@ -75,6 +82,18 @@ int main(int argc,char **argv){
    size_t length=strlen(name_hex)/2;
    if(length && length<sizeof request.request.name && strlen(name_hex)%2==0 && decode(name_hex,(uint8_t *)request.request.name,length) && !memchr(request.request.name,0,length)){
     request.operation=PN_TRANSFER_FILE;request.request.kind=(pn_upload_kind_t)kind;parsed=true;
+   }
+  }else if(!strcmp(command,"LIST") && sscanf(line,"LIST %u %510s %n",&kind,name_hex,&consumed)==2 && !line[consumed]){
+   // 游标为名称十六进制，"-"表示从头开始。/ The cursor is the hex name; "-" starts from the beginning.
+   size_t length=strcmp(name_hex,"-")?strlen(name_hex)/2:0;
+   if(length<sizeof request.request.name && (!length || (strlen(name_hex)%2==0 && decode(name_hex,(uint8_t *)request.request.name,length) && !memchr(request.request.name,0,length)))){
+    request.operation=PN_TRANSFER_LIST;request.request.kind=(pn_upload_kind_t)kind;parsed=true;
+   }
+  }else if(!strcmp(command,"DELETE") && sscanf(line,"DELETE %u %510s %llu %64s %n",&kind,name_hex,&old_size,digest_hex,&consumed)==4 && !line[consumed]){
+   size_t length=strlen(name_hex)/2;
+   if(length && length<sizeof request.request.name && strlen(name_hex)%2==0 && decode(name_hex,(uint8_t *)request.request.name,length) &&
+      !memchr(request.request.name,0,length) && decode(digest_hex,request.old_digest.sha256,32)){
+    request.operation=PN_TRANSFER_DELETE;request.request.kind=(pn_upload_kind_t)kind;request.old_size=old_size;parsed=true;
    }
   }else if(!strcmp(command,"EXIT") && sscanf(line,"EXIT %n",&consumed)==0 && !line[consumed]){
    request.operation=PN_TRANSFER_STOP;parsed=true;

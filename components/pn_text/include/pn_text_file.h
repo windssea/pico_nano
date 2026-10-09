@@ -16,6 +16,9 @@ typedef struct {
     pn_media_t *media; ///< 存储owner / Storage owner
     pn_media_lease_t lease; ///< 调用方保持至close之后 / Caller keeps alive until after close
     uint64_t size; ///< 不变源大小 / Immutable source size
+    uint8_t *block; ///< 4KiB读缓存，首次小读时分配，close释放；分配失败则直接读 / 4 KiB read cache, allocated on the first small read and freed by close; reads go straight through if allocation fails
+    uint64_t block_start; ///< 缓存块在文件中的起点 / File offset of the cached block
+    size_t block_length; ///< 缓存块有效字节数 / Valid bytes in the cached block
 } pn_text_file_t;
 /// 打开普通文件，不改变source失败输出；最大INT32_MAX bytes以兼容目标fseek。
 /// Open a regular file, preserving source output on failure; cap at INT32_MAX bytes for target fseek compatibility.

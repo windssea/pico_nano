@@ -16,6 +16,17 @@
 #include <string.h>
 extern const uint8_t pn_ui_font_bytes[];
 extern const size_t pn_ui_font_size;
+/* 字形缓存：同一字符在分页量宽和绘制各加载一次轮廓，而每次加载要经cmap二分和loca/glyf多次小读取，在SD/网络盘上很慢。
+ * 缓存按（码点、像素高）记住字宽/缺字结果，再按（码点、像素高、亚像素偏移）记住渲染好的灰度位图。命中时仍先校验字体源，介质失效照常报错。
+ * Glyph cache: layout measuring and drawing each loaded the same outline, and every load costs a cmap binary search plus several small loca/glyf reads, which is slow on SD or network drives.
+ * It remembers advances/missing results by (code point, pixel height) and rendered gray bitmaps by (code point, pixel height, subpixel offset). Hits still validate the font source first, so lost media is reported as before. */
+#define ADV_SLOTS 1024u
+#define BMP_SLOTS 512u
+#define BMP_BUDGET (384u*1024u)
+#define BMP_ENTRY_MAX (64u*1024u)
+#define CACHE_HEADROOM (1536u*1024u) ///< 池剩余不足此值（加本次所需）就不再扩缓存，避免挤占阅读和字体切换的内存 / Stop growing the cache when the pool's remaining space is below this plus the request, so reading and font switching keep their memory
+typedef struct {uint32_t cp;uint16_t pixels;uint8_t state;int32_t advance;} adv_t; ///< state 0空槽 1有字 2缺字 / 0 empty slot, 1 present, 2 missing
+typedef struct {uint32_t cp;uint16_t pixels;int16_t delta;int left,top;uint16_t width,rows;uint8_t data[];} bmp_t;
 typedef struct {
     pn_pool_t *pool;
     struct FT_MemoryRec_ memory;
@@ -25,7 +36,12 @@ typedef struct {
     pn_text_source_t source;
     pn_status_t source_error;
     bool allocation_failed;
+    adv_t *adv; ///< 按需分配的字宽表 / Advance table, allocated on demand
+    bmp_t **bmp; ///< 按需分配的位图指针表 / Bitmap pointer table, allocated on demand
+    size_t bmp_bytes;
 } engine_t;
+static bool cache_allowed(const engine_t *e,size_t need){const pn_pool_t *p=e->pool;return p->limit>p->used && p->limit-p->used>=need+CACHE_HEADROOM;}
+static unsigned hash_key(uint32_t cp,int pixels,int delta){uint32_t h=cp*2654435761u;h^=(uint32_t)pixels*40503u;h^=(uint32_t)(delta+64)*2246822519u;h^=h>>15;return h;}
 static void *allocate(FT_Memory memory,long bytes) {
     engine_t *e=memory->user;if(bytes<=0)return NULL;
     void *result=pn_alloc(e->pool,(size_t)bytes);if(!result)e->allocation_failed=true;return result;
@@ -60,7 +76,11 @@ static pn_status_t result(engine_t *e,FT_Error error) {
 }
 void pn_font_close(pn_font_t *font) {
     if(!font || !font->impl)return;
-    engine_t *e=font->impl;if(e->face)FT_Done_Face(e->face);if(e->library)FT_Done_Library(e->library);
+    engine_t *e=font->impl;
+    if(e->bmp){for(unsigned i=0;i<BMP_SLOTS;i++)pn_free(e->bmp[i]);pn_free(e->bmp);e->bmp=NULL;}
+    pn_free(e->adv);e->adv=NULL;
+    if(e->face)FT_Done_Face(e->face);
+    if(e->library)FT_Done_Library(e->library);
     pn_free(e);font->impl=NULL;font->pixels=0;
 }
 pn_status_t pn_font_open(pn_font_t *font,pn_pool_t *pool,const pn_text_source_t *source,int pixels) {
@@ -100,11 +120,23 @@ static pn_status_t load(pn_font_t *font,uint32_t cp,bool render) {
 }
 pn_status_t pn_font_advance(void *ctx,uint32_t cp,int32_t *advance) {
     pn_font_t *font=ctx;if(!advance)return PN_INVALID;
+    if(!font || !font->impl || cp>0x10ffff || (cp>=0xd800 && cp<=0xdfff))return PN_INVALID;
+    engine_t *e=font->impl;
+    if(!e->adv && cache_allowed(e,sizeof(adv_t)*ADV_SLOTS)){e->adv=pn_alloc(e->pool,sizeof(adv_t)*ADV_SLOTS);if(e->adv)memset(e->adv,0,sizeof(adv_t)*ADV_SLOTS);}
+    adv_t *slot=e->adv?&e->adv[hash_key(cp,font->pixels,0)%ADV_SLOTS]:NULL;
+    if(slot && slot->state && slot->cp==cp && slot->pixels==(uint16_t)font->pixels){
+        pn_status_t checked=ready(e);if(checked!=PN_OK)return checked;
+        if(slot->state==2)return PN_EMPTY;
+        *advance=slot->advance;return PN_OK;
+    }
     bool tab=cp==9;
-    pn_status_t s=load(font,tab?32:cp,false);if(s!=PN_OK)return s;
-    engine_t *e=font->impl;FT_Pos value=e->face->glyph->advance.x;
+    pn_status_t s=load(font,tab?32:cp,false);
+    if(s==PN_EMPTY){if(slot)*slot=(adv_t){cp,(uint16_t)font->pixels,2,0};return s;}
+    if(s!=PN_OK)return s;
+    FT_Pos value=e->face->glyph->advance.x;
     if(value<0 || value>(tab?INT32_MAX/4:INT32_MAX))return PN_LIMIT;
     if(tab)value*=4;
+    if(slot)*slot=(adv_t){cp,(uint16_t)font->pixels,1,(int32_t)value};
     *advance=(int32_t)value;return PN_OK;
 }
 pn_status_t pn_font_vertical(pn_font_t *font,int *ascent,int *descent) {
@@ -114,22 +146,60 @@ pn_status_t pn_font_vertical(pn_font_t *font,int *ascent,int *descent) {
     if(a<0 || a>128*8*64 || d>0 || d< -128*8*64)return PN_LIMIT;
     *ascent=(int)((a+63)/64);*descent=(int)((-d+63)/64);return PN_OK;
 }
+/* 把灰度位图（顶行在前，行距pitch）按覆盖率叠到帧上。/ Composite a gray bitmap (top row first, row stride pitch) onto the frame by coverage. */
+static void composite(pn_frame_t *frame,int64_t left,int64_t top,unsigned width,unsigned rows,const uint8_t *data,size_t pitch,pn_font_render_t mode) {
+    for(unsigned y=0;y<rows;y++){
+        int64_t py=top+y;if(py<0 || py>=frame->height)continue;
+        for(unsigned x=0;x<width;x++){
+            int64_t px=left+x;if(px<0 || px>=frame->width)continue;
+            unsigned coverage=data[(size_t)y*pitch+x];
+            if(mode==PN_FONT_BINARY)coverage=coverage>=128?255:0;
+            if(!coverage)continue;
+            unsigned previous=pn_frame_get(frame,(int)px,(int)py);
+            pn_frame_pixel(frame,(int)px,(int)py,(uint8_t)((previous*(255-coverage)+127)/255));
+        }
+    }
+}
 pn_status_t pn_font_draw(pn_font_t *font,pn_frame_t *frame,uint32_t cp,int32_t x_64,int baseline,pn_font_render_t mode) {
     if(!font || !font->impl || !frame || !frame->pixels || (mode!=PN_FONT_GRAY && mode!=PN_FONT_BINARY))return PN_INVALID;
-    engine_t *e=font->impl;FT_Vector delta={x_64%64,0};FT_Set_Transform(e->face,NULL,&delta);
+    engine_t *e=font->impl;int offset=(int)(x_64%64);
+    if(!e->bmp && cache_allowed(e,sizeof(bmp_t *)*BMP_SLOTS)){e->bmp=pn_alloc(e->pool,sizeof(bmp_t *)*BMP_SLOTS);if(e->bmp)memset(e->bmp,0,sizeof(bmp_t *)*BMP_SLOTS);}
+    bmp_t **slot=e->bmp?&e->bmp[hash_key(cp,font->pixels,offset)%BMP_SLOTS]:NULL;
+    if(slot && *slot && (*slot)->cp==cp && (*slot)->pixels==(uint16_t)font->pixels && (*slot)->delta==(int16_t)offset){
+        pn_status_t checked=ready(e);if(checked!=PN_OK)return checked;
+        const bmp_t *hit=*slot;
+        composite(frame,(int64_t)x_64/64+hit->left,(int64_t)baseline-hit->top,hit->width,hit->rows,hit->data,hit->width,mode);
+        return PN_OK;
+    }
+    FT_Vector delta={offset,0};FT_Set_Transform(e->face,NULL,&delta);
     pn_status_t s=load(font,cp,true);FT_Set_Transform(e->face,NULL,NULL);if(s!=PN_OK)return s;
-    FT_GlyphSlot slot=e->face->glyph;FT_Bitmap *b=&slot->bitmap;
-    if(!b->width || !b->rows)return PN_OK;
+    FT_GlyphSlot glyph=e->face->glyph;FT_Bitmap *b=&glyph->bitmap;
+    if(!b->width || !b->rows){
+        // 空白字形也记住，免得再加载一遍。/ Remember blank glyphs too so they are not loaded again.
+        bmp_t *blank=slot && cache_allowed(e,sizeof *blank)?pn_alloc(e->pool,sizeof *blank):NULL;
+        if(blank){*blank=(bmp_t){cp,(uint16_t)font->pixels,(int16_t)offset,0,0,0,0};pn_free(*slot);*slot=blank;}
+        return PN_OK;
+    }
     if(b->pixel_mode!=FT_PIXEL_MODE_GRAY || b->num_grays!=256 || b->width>512 || b->rows>512 || !b->buffer)return PN_LIMIT;
     int64_t pitch=b->pitch;if(pitch<0)pitch=-pitch;
     if(pitch<b->width)return PN_CORRUPT;
-    int64_t left=(int64_t)x_64/64+slot->bitmap_left,top=(int64_t)baseline-slot->bitmap_top;
-    for(unsigned y=0;y<b->rows;y++)for(unsigned x=0;x<b->width;x++) {
-        int64_t px=left+x,py=top+y;if(px<0 || py<0 || px>=frame->width || py>=frame->height)continue;
-        size_t row=b->pitch>=0?y:b->rows-1-y;unsigned coverage=b->buffer[row*(size_t)pitch+x];
-        if(mode==PN_FONT_BINARY)coverage=coverage>=128?255:0;
-        unsigned previous=pn_frame_get(frame,(int)px,(int)py);
-        pn_frame_pixel(frame,(int)px,(int)py,(uint8_t)((previous*(255-coverage)+127)/255));
+    int64_t left=(int64_t)x_64/64+glyph->bitmap_left,top=(int64_t)baseline-glyph->bitmap_top;
+    // 先画再缓存；缓存失败（预算或内存）只是下次重新渲染，不影响本次结果。/ Draw first, then cache; a failed insert only means re-rendering next time and never changes this result.
+    size_t bytes=(size_t)b->width*b->rows;
+    bmp_t *entry=NULL;
+    if(slot && bytes<=BMP_ENTRY_MAX){
+        size_t freed=*slot?(size_t)(*slot)->width*(*slot)->rows:0;
+        if(e->bmp_bytes-freed+bytes<=BMP_BUDGET && cache_allowed(e,sizeof *entry+bytes))entry=pn_alloc(e->pool,sizeof *entry+bytes);
+    }
+    if(entry){
+        *entry=(bmp_t){cp,(uint16_t)font->pixels,(int16_t)offset,glyph->bitmap_left,glyph->bitmap_top,(uint16_t)b->width,(uint16_t)b->rows};
+        for(unsigned y=0;y<b->rows;y++){size_t row=b->pitch>=0?y:b->rows-1-y;memcpy(entry->data+(size_t)y*b->width,b->buffer+row*(size_t)pitch,b->width);}
+        if(*slot){e->bmp_bytes-=(size_t)(*slot)->width*(*slot)->rows;pn_free(*slot);}
+        *slot=entry;e->bmp_bytes+=bytes;
+        composite(frame,left,top,entry->width,entry->rows,entry->data,entry->width,mode);
+    }else{
+        // 不入缓存：按FreeType位图直接叠加（行序按pitch符号处理）。/ Not cached: composite straight from the FreeType bitmap, honoring the sign of the pitch.
+        for(unsigned y=0;y<b->rows;y++){size_t row=b->pitch>=0?y:b->rows-1-y;composite(frame,left,top+y,b->width,1,b->buffer+row*(size_t)pitch,(size_t)pitch,mode);}
     }
     return PN_OK;
 }
