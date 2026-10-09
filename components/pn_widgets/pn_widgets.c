@@ -119,44 +119,43 @@ void pn_w_outline(pn_frame_t *frame,int x,int y,int width,int height,int thickne
     pn_frame_rect(frame,x,y,width,thickness,shade);pn_frame_rect(frame,x,y+height-thickness,width,thickness,shade);
     pn_frame_rect(frame,x,y+thickness,thickness,height-2*thickness,shade);pn_frame_rect(frame,x+width-thickness,y+thickness,thickness,height-2*thickness,shade);
 }
-/* 圆角矩形内部判定：四角按圆弧，其余为真。/ Rounded-rectangle containment: arcs at the corners, solid elsewhere. */
-static bool inside(int px,int py,int width,int height,int radius){
-    int dx=px<width-1-px?px:width-1-px,dy=py<height-1-py?py:height-1-py;
-    if(dx<0 || dy<0)return false;
-    if(dx>=radius || dy>=radius)return true;
-    int ax=radius-dx,ay=radius-dy;return ax*ax+ay*ay<=radius*radius;
-}
 void pn_w_round_outline(pn_frame_t *frame,int x,int y,int width,int height,int radius,int thickness,uint8_t shade){
     if(!frame || width<=0 || height<=0 || thickness<=0)return;
-    int cap=(width<height?width:height)/2;if(radius>cap)radius=cap;if(radius<0)radius=0;
-    int inner_radius=radius>thickness?radius-thickness:0;
-    for(int py=0;py<height;py++){
-        for(int px=0;px<width;px++){
-            if(!inside(px,py,width,height,radius))continue;
-            bool core=px>=thickness && py>=thickness && px<width-thickness && py<height-thickness && inside(px-thickness,py-thickness,width-2*thickness,height-2*thickness,inner_radius);
-            if(!core)pn_frame_pixel(frame,x+px,y+py,shade);
-        }
-    }
+    pn_w_round_stroke(frame,x,y,width,height,radius,(float)thickness,shade);
 }
 pn_status_t pn_w_button(pn_font_t *font,pn_frame_t *frame,const char *label,int x,int y,int width,int height,unsigned style){
     if(!font || !font->impl || !frame || !label || width<=0 || height<=0)return PN_INVALID;
-    if(!(style&PN_W_PLAIN))pn_w_round_outline(frame,x,y,width,height,PN_UI_RADIUS,(style&PN_W_SELECTED)?4:2,PN_UI_INK);
+    bool primary=(style&PN_W_SELECTED) && !(style&(PN_W_PLAIN|PN_W_DISABLED));
+    // 次要按钮是细描边，主按钮是黑底白字（先画黑字再反相）。/ A secondary button is a thin outline; the primary one is white text on black (draw black text, then invert).
+    if(!(style&PN_W_PLAIN) && !primary)pn_w_round_outline(frame,x,y,width,height,PN_UI_RADIUS,(style&PN_W_SELECTED)?3:2,PN_UI_INK);
     int baseline=y+height/2+font->pixels*3/8;
     pn_status_t status=pn_w_text(font,frame,label,x+12,baseline,width-24,PN_ALIGN_CENTER);
+    if(status==PN_OK && primary)pn_w_invert_round(frame,x,y,width,height,PN_UI_RADIUS);
     if(status==PN_OK && (style&PN_W_DISABLED)){int w;if(pn_w_text_width(font,label,&w)==PN_OK){if(w>width-24)w=width-24;pn_frame_rect(frame,x+(width-w)/2,y+height/2,w,2,PN_UI_INK);}}
     return status;
 }
-pn_status_t pn_w_tabbar(pn_font_t *font,pn_frame_t *frame,const char *const *labels,unsigned count,unsigned active,unsigned disabled,int y,int height){
+pn_status_t pn_w_tabbar_icons(pn_font_t *font,pn_frame_t *frame,const char *const *labels,const pn_icon_t *icons,unsigned count,unsigned active,unsigned disabled,int y,int height){
     if(!font || !font->impl || !frame || !labels || !count || count>4 || height<=0)return PN_INVALID;
-    pn_frame_rect(frame,0,y,PN_UI_WIDTH,2,PN_UI_INK);
+    pn_frame_rect(frame,0,y,PN_UI_WIDTH,2,PN_UI_RULE);
     pn_status_t status=PN_OK;
     for(unsigned i=0;i<count && status==PN_OK;i++){
-        int x0=(int)(PN_UI_WIDTH*i/count),x1=(int)(PN_UI_WIDTH*(i+1)/count);
-        if(i==active)pn_frame_rect(frame,x0+24,y+2,x1-x0-48,6,PN_UI_INK);
-        status=pn_w_text(font,frame,labels[i],x0,y+height/2+font->pixels*3/8+4,x1-x0,PN_ALIGN_CENTER);
-        if(status==PN_OK && (disabled&(1u<<i))){int w;if(pn_w_text_width(font,labels[i],&w)==PN_OK)pn_frame_rect(frame,x0+(x1-x0-w)/2,y+height/2+4,w,2,PN_UI_INK);}
+        int x0=(int)(PN_UI_WIDTH*i/count),x1=(int)(PN_UI_WIDTH*(i+1)/count),cx=(x0+x1)/2;
+        if(icons){
+            // 当前页：图标后面一枚浅灰胶囊，图标与文字仍是黑色。/ The current tab: a light-gray pill behind the icon, icon and label stay black.
+            if(i==active)pn_w_round_fill(frame,cx-44,y+10,88,48,24,12);
+            pn_w_icon(frame,icons[i],cx-17,y+16,34,PN_UI_INK);
+            if(disabled&(1u<<i))pn_w_line(frame,(float)(cx-22),(float)(y+54),(float)(cx+22),(float)(y+14),3.0f,PN_UI_INK);
+            status=pn_w_text(font,frame,labels[i],x0,y+96,x1-x0,PN_ALIGN_CENTER);
+        }else{
+            if(i==active)pn_frame_rect(frame,x0+24,y+2,x1-x0-48,6,PN_UI_INK);
+            status=pn_w_text(font,frame,labels[i],x0,y+height/2+font->pixels*3/8+4,x1-x0,PN_ALIGN_CENTER);
+            if(status==PN_OK && (disabled&(1u<<i))){int w;if(pn_w_text_width(font,labels[i],&w)==PN_OK)pn_frame_rect(frame,x0+(x1-x0-w)/2,y+height/2+4,w,2,PN_UI_INK);}
+        }
     }
     return status;
+}
+pn_status_t pn_w_tabbar(pn_font_t *font,pn_frame_t *frame,const char *const *labels,unsigned count,unsigned active,unsigned disabled,int y,int height){
+    return pn_w_tabbar_icons(font,frame,labels,NULL,count,active,disabled,y,height);
 }
 int pn_w_tabbar_hit(unsigned count,int y,int height,int x,int hit_y){
     if(!count || count>4 || x<0 || x>=PN_UI_WIDTH || hit_y<y || hit_y>=y+height)return -1;
@@ -166,7 +165,9 @@ pn_status_t pn_w_header(pn_font_t *font,pn_frame_t *frame,const char *back,const
     if(!font || !font->impl || !frame || !back || !title)return PN_INVALID;
     int original=font->pixels;
     pn_status_t status=pn_font_size(font,34);
-    if(status==PN_OK)status=pn_w_text(font,frame,back,PN_UI_MARGIN,78,200,PN_ALIGN_LEFT);
+    // “< 返回”里的“<”换成线条箭头图标。/ The "<" in "< Back" becomes a line chevron icon.
+    if(status==PN_OK && back[0]=='<' && back[1]==' '){pn_w_icon(frame,PN_ICON_BACK,PN_UI_MARGIN-6,52,36,PN_UI_INK);status=pn_w_text(font,frame,back+2,PN_UI_MARGIN+32,78,170,PN_ALIGN_LEFT);}
+    else if(status==PN_OK)status=pn_w_text(font,frame,back,PN_UI_MARGIN,78,200,PN_ALIGN_LEFT);
     if(status==PN_OK)status=pn_font_size(font,40);
     if(status==PN_OK)status=pn_w_text(font,frame,title,0,80,PN_UI_WIDTH,PN_ALIGN_CENTER);
     if(status==PN_OK)status=pn_font_size(font,34);
@@ -186,34 +187,29 @@ pn_status_t pn_w_section(pn_font_t *font,pn_frame_t *frame,const char *title,int
     pn_frame_rect(frame,PN_UI_MARGIN,baseline+10,PN_UI_WIDTH-2*PN_UI_MARGIN,2,PN_UI_INK);
     pn_status_t restored=pn_font_size(font,original);return status==PN_OK?restored:status;
 }
-pn_status_t pn_w_row(pn_font_t *font,pn_frame_t *frame,const char *label,const char *value,bool chevron,int y){
+/* 开关：胶囊加圆钮；开为黑底白钮靠右，关为描边黑钮靠左。/ Toggle: a pill with a knob; on is a black pill with a white knob on the right, off an outlined pill with a black knob on the left. */
+void pn_w_toggle(pn_frame_t *frame,int x,int y,bool on){
+    if(!frame)return;
+    if(on){pn_w_round_fill(frame,x,y,64,36,18,PN_UI_INK);pn_w_dot(frame,(float)(x+46),(float)(y+18),12.0f,PN_UI_PAPER);}
+    else{pn_w_round_stroke(frame,x,y,64,36,18,3.0f,PN_UI_INK);pn_w_dot(frame,(float)(x+18),(float)(y+18),10.0f,PN_UI_INK);}
+}
+pn_status_t pn_w_row_icon(pn_font_t *font,pn_frame_t *frame,const char *label,const char *value,int icon,unsigned flags,int y){
     if(!font || !font->impl || !frame || !label)return PN_INVALID;
     int original=font->pixels;pn_status_t status=pn_font_size(font,34);
-    int tail=chevron?36:0,value_width=0;
+    int lead=icon>=0?52:0,tail=(flags&PN_ROW_CHEVRON)?36:(flags&(PN_ROW_ON|PN_ROW_OFF))?80:0,value_width=0;
     if(status==PN_OK && value && *value){status=pn_font_size(font,30);if(status==PN_OK)status=pn_w_text_width(font,value,&value_width);if(status==PN_OK)status=pn_font_size(font,34);}
-    int label_room=PN_UI_WIDTH-2*PN_UI_MARGIN-tail-(value_width?value_width+24:0);
-    if(status==PN_OK)status=pn_w_text(font,frame,label,PN_UI_MARGIN,y+56,label_room,PN_ALIGN_LEFT);
+    int label_room=PN_UI_WIDTH-2*PN_UI_MARGIN-lead-tail-(value_width?value_width+24:0);
+    if(icon>=0)pn_w_icon(frame,(pn_icon_t)icon,PN_UI_MARGIN,y+22,36,PN_UI_INK);
+    if(status==PN_OK)status=pn_w_text(font,frame,label,PN_UI_MARGIN+lead,y+56,label_room,PN_ALIGN_LEFT);
     if(status==PN_OK && value && *value){status=pn_font_size(font,30);if(status==PN_OK)status=pn_w_text(font,frame,value,PN_UI_WIDTH-PN_UI_MARGIN-tail-value_width,y+56,value_width,PN_ALIGN_RIGHT);}
-    if(status==PN_OK && chevron){status=pn_font_size(font,34);if(status==PN_OK)status=pn_w_text(font,frame,">",PN_UI_WIDTH-PN_UI_MARGIN-24,y+56,24,PN_ALIGN_RIGHT);}
+    if(status==PN_OK && (flags&PN_ROW_CHEVRON))pn_w_icon(frame,PN_ICON_CHEVRON,PN_UI_WIDTH-PN_UI_MARGIN-30,y+30,30,PN_UI_INK);
+    if(status==PN_OK && (flags&(PN_ROW_ON|PN_ROW_OFF)))pn_w_toggle(frame,PN_UI_WIDTH-PN_UI_MARGIN-64,y+26,(flags&PN_ROW_ON)!=0);
     pn_frame_rect(frame,PN_UI_MARGIN,y+PN_W_ROW_H-2,PN_UI_WIDTH-2*PN_UI_MARGIN,1,10);
     pn_status_t restored=pn_font_size(font,original);return status==PN_OK?restored:status;
 }
-void pn_w_icon_search(pn_frame_t *frame,int x,int y,int size){
-    if(!frame || size<12)return;
-    int lens=size*2/3;
-    pn_w_round_outline(frame,x,y,lens,lens,lens/2,3,PN_UI_INK);
-    // 手柄：从镜片右下沿45°伸出。/ Handle: leaves the lens at 45 degrees from its lower right.
-    int from=lens-lens/6;
-    for(int i=0;from+i<size;i++){pn_frame_rect(frame,x+from+i,y+from+i,3,3,PN_UI_INK);}
+pn_status_t pn_w_row(pn_font_t *font,pn_frame_t *frame,const char *label,const char *value,bool chevron,int y){
+    return pn_w_row_icon(font,frame,label,value,-1,chevron?PN_ROW_CHEVRON:0u,y);
 }
-void pn_w_icon_grid(pn_frame_t *frame,int x,int y,int size){
-    if(!frame || size<12)return;
-    int cell=(size-6)/2;
-    for(int r=0;r<2;r++)for(int c=0;c<2;c++)pn_w_outline(frame,x+c*(cell+6),y+r*(cell+6),cell,cell,3,PN_UI_INK);
-}
-void pn_w_icon_list(pn_frame_t *frame,int x,int y,int size){
-    if(!frame || size<12)return;
-    int gap=(size-9)/2;
-    for(int i=0;i<3;i++)pn_frame_rect(frame,x,y+i*(gap+3),size,3,PN_UI_INK);
-}
-
+void pn_w_icon_search(pn_frame_t *frame,int x,int y,int size){pn_w_icon(frame,PN_ICON_SEARCH,x,y,size,PN_UI_INK);}
+void pn_w_icon_grid(pn_frame_t *frame,int x,int y,int size){pn_w_icon(frame,PN_ICON_GRID,x,y,size,PN_UI_INK);}
+void pn_w_icon_list(pn_frame_t *frame,int x,int y,int size){pn_w_icon(frame,PN_ICON_LIST,x,y,size,PN_UI_INK);}

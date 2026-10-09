@@ -52,7 +52,7 @@ static void meta_of(const pn_catalog_item_t *item,char *out,size_t cap){
 }
 /* 无封面时的排版卡：细框、书名、底部格式标签。/ Typographic card when there is no cover: thin frame, title and a format tag at the bottom. */
 static pn_status_t card(pn_font_t *font,pn_frame_t *frame,int x,int y,int w,int h,const char *title,const char *tag,bool large){
-    pn_w_outline(frame,x,y,w,h,2,PN_UI_INK);
+    pn_w_round_outline(frame,x,y,w,h,10,2,PN_UI_INK);
     pn_status_t s=pn_font_size(font,large?30:26);
     if(s==PN_OK)s=pn_w_text_lines(font,frame,title,x+14,y+(large?50:38),w-28,large?4:3,large?38:32,NULL);
     if(s==PN_OK){pn_frame_rect(frame,x+14,y+h-(large?52:40),w-28,1,PN_UI_RULE);s=pn_font_size(font,large?26:22);}
@@ -78,45 +78,56 @@ static void blit_scaled(pn_frame_t *frame,const pn_frame_t *cover,int x,int y,in
         }
     }
 }
+/* 进度条：圆头灰槽加黑色进度。/ Progress bar: a rounded gray track with a black fill. */
 static void progress_bar(pn_frame_t *frame,int x,int y,int w,unsigned basis){
-    int fill=(int)((unsigned long)w*basis/10000u);pn_frame_rect(frame,x,y,w,8,12);pn_frame_rect(frame,x,y,fill,8,PN_UI_INK);
+    int fill=(int)((unsigned long)w*basis/10000u);pn_w_round_fill(frame,x,y,w,8,4,11);
+    if(fill>=8)pn_w_round_fill(frame,x,y,fill,8,4,PN_UI_INK);else if(fill>0)pn_w_round_fill(frame,x,y,8,8,4,PN_UI_INK);
 }
+/* 封面加圆角与细边。/ Give a cover rounded corners and a hairline edge. */
+static void frame_cover(pn_frame_t *frame,int x,int y,int w,int h,int radius){
+    pn_w_mask_corners(frame,x,y,w,h,radius,PN_UI_PAPER);pn_w_round_stroke(frame,x,y,w,h,radius,2.0f,6);
+}
+/* 继续阅读卡：浅灰圆角面板，左封面、中书名与进度、右“继续阅读”。/ Continue-reading card: a light-gray rounded panel with the cover on the left, title and progress in the middle and "continue" on the right. */
 static pn_status_t continue_card(const pn_shelf_covers_t *covers,pn_font_t *font,pn_frame_t *frame){
     pn_status_t s=PN_OK;
+    pn_w_round_fill(frame,32,152,620,160,16,14);pn_w_round_stroke(frame,32,152,620,160,16,2.0f,10);
     if(covers && covers->has_last){
         const pn_catalog_item_t *last=&covers->last;char title[PN_CATALOG_NAME_MAX];title_of(last,title,sizeof title);
         pn_frame_t cover;
-        if(pn_shelf_cover_frame(covers,PN_COVER_SLOT_LAST,&cover)){blit_scaled(frame,&cover,32,160,92,128);pn_w_outline(frame,32,160,92,128,2,PN_UI_INK);}
-        else s=card(font,frame,32,160,92,128,"",kind(last->format),false);
-        if(s==PN_OK)s=pn_font_size(font,36);
-        if(s==PN_OK)s=pn_w_text_lines(font,frame,title,148,200,504,2,46,NULL);
-        char meta[64];
-        if((last->identified || last->has_progress) && last->progress<=10000)snprintf(meta,sizeof meta,"已读 %u%% · %s",(unsigned)(last->progress/100),kind(last->format));
+        if(pn_shelf_cover_frame(covers,PN_COVER_SLOT_LAST,&cover)){blit_scaled(frame,&cover,48,168,92,128);frame_cover(frame,48,168,92,128,8);}
+        else s=card(font,frame,48,168,92,128,"",kind(last->format),false);
+        if(s==PN_OK)s=pn_font_size(font,34);
+        if(s==PN_OK)s=pn_w_text_lines(font,frame,title,160,208,476,2,44,NULL);
+        char meta[64];bool known=(last->identified || last->has_progress) && last->progress<=10000;
+        if(known)snprintf(meta,sizeof meta,"已读 %u%% · %s",(unsigned)(last->progress/100),kind(last->format));
         else snprintf(meta,sizeof meta,"%s",kind(last->format));
         if(s==PN_OK)s=pn_font_size(font,26);
-        if(s==PN_OK)s=pn_w_text(font,frame,meta,148,284,504,PN_ALIGN_LEFT);
+        if(s==PN_OK)s=pn_w_text(font,frame,meta,160,270,476,PN_ALIGN_LEFT);
+        if(known)progress_bar(frame,160,286,250,last->progress);
         if(s==PN_OK)s=pn_font_size(font,28);
-        if(s==PN_OK)s=pn_w_text(font,frame,"继续阅读 →",32,304,620,PN_ALIGN_RIGHT);
+        if(s==PN_OK)s=pn_w_text(font,frame,"继续阅读",400,302,200,PN_ALIGN_RIGHT);
+        pn_w_icon(frame,PN_ICON_ARROW,606,278,28,PN_UI_INK);
     }else{
-        s=pn_font_size(font,36);
-        if(s==PN_OK)s=pn_w_text(font,frame,"还没有阅读记录",32,214,620,PN_ALIGN_LEFT);
-        if(s==PN_OK)s=pn_font_size(font,28);
-        if(s==PN_OK)s=pn_w_text_lines(font,frame,"点下面的封面开始阅读，读到哪里会记在这里。",32,266,620,2,38,NULL);
+        pn_w_icon(frame,PN_ICON_SHELF,60,204,64,PN_UI_INK);
+        s=pn_font_size(font,34);
+        if(s==PN_OK)s=pn_w_text(font,frame,"还没有阅读记录",148,214,490,PN_ALIGN_LEFT);
+        if(s==PN_OK)s=pn_font_size(font,26);
+        if(s==PN_OK)s=pn_w_text_lines(font,frame,"点下面的封面开始阅读，读到哪里会记在这里。",148,258,490,2,36,NULL);
     }
-    pn_frame_rect(frame,32,318,620,2,PN_UI_RULE);return s;
+    return s;
 }
 /* 网格：封面184×256，下方一行书名与一行“进度 · 格式”。/ Grid: 184×256 cover, a title line and a "progress · format" line below. */
 static pn_status_t grid_item(const pn_catalog_item_t *item,const pn_shelf_covers_t *covers,size_t i,pn_font_t *font,pn_frame_t *frame,bool selected){
     int x=CELL_X0+(int)(i%3)*CELL_PITCH,y=GRID_Y+(int)(i/3)*ROW_PITCH;char title[PN_CATALOG_NAME_MAX],meta[64];title_of(item,title,sizeof title);meta_of(item,meta,sizeof meta);
     pn_frame_t cover;pn_status_t s=PN_OK;
-    if(pn_shelf_cover_frame(covers,i,&cover)){blit(frame,&cover,x,y);pn_w_outline(frame,x,y,PN_COVER_WIDTH,PN_COVER_HEIGHT,2,PN_UI_RULE);}
+    if(pn_shelf_cover_frame(covers,i,&cover)){blit(frame,&cover,x,y);frame_cover(frame,x,y,PN_COVER_WIDTH,PN_COVER_HEIGHT,10);}
     else s=card(font,frame,x,y,PN_COVER_WIDTH,PN_COVER_HEIGHT,title,kind(item->format),true);
-    if(s==PN_OK && (item->identified || item->has_progress) && item->progress>0 && item->progress<=10000)progress_bar(frame,x+2,y+PN_COVER_HEIGHT-10,PN_COVER_WIDTH-4,item->progress);
+    if(s==PN_OK && (item->identified || item->has_progress) && item->progress>0 && item->progress<=10000)progress_bar(frame,x+12,y+PN_COVER_HEIGHT-20,PN_COVER_WIDTH-24,item->progress);
     if(s==PN_OK)s=pn_font_size(font,28);
     if(s==PN_OK)s=pn_w_text(font,frame,title,x,y+PN_COVER_HEIGHT+32,CELL_W-12,PN_ALIGN_LEFT);
     if(s==PN_OK)s=pn_font_size(font,26);
     if(s==PN_OK)s=pn_w_text(font,frame,meta,x,y+PN_COVER_HEIGHT+64,CELL_W-12,PN_ALIGN_LEFT);
-    if(selected)pn_w_outline(frame,x-6,y-6,PN_COVER_WIDTH+12,PN_COVER_HEIGHT+12,3,PN_UI_INK);
+    if(selected)pn_w_round_outline(frame,x-6,y-6,PN_COVER_WIDTH+12,PN_COVER_HEIGHT+12,16,3,PN_UI_INK);
     return s;
 }
 /* 列表：80×112封面、全名最多两行、“进度 · 格式 · 大小”。/ List: 80×112 cover, full name up to two lines, "progress · format · size". */
@@ -124,7 +135,7 @@ static pn_status_t list_item(const pn_catalog_item_t *item,const pn_shelf_covers
     int y=GRID_Y+(int)i*LIST_ROW_PITCH;char title[PN_CATALOG_NAME_MAX],meta[96],base[64];title_of(item,title,sizeof title);meta_of(item,base,sizeof base);
     snprintf(meta,sizeof meta,"%s · %llu KB",base,(unsigned long long)(item->size/1024+(item->size%1024!=0)));
     pn_frame_t cover;pn_status_t s=PN_OK;
-    if(pn_shelf_cover_frame(covers,i,&cover)){blit_scaled(frame,&cover,32,y+9,80,112);pn_w_outline(frame,32,y+9,80,112,2,PN_UI_RULE);}
+    if(pn_shelf_cover_frame(covers,i,&cover)){blit_scaled(frame,&cover,32,y+9,80,112);frame_cover(frame,32,y+9,80,112,8);}
     else s=card(font,frame,32,y+9,80,112,"",kind(item->format),false);
     if(s==PN_OK)s=pn_font_size(font,30);
     if(s==PN_OK)s=pn_w_text_lines(font,frame,title,132,y+44,520,2,40,NULL);
@@ -142,18 +153,18 @@ pn_status_t pn_shelf_render_ex(const pn_catalog_page_t *page,pn_font_t *font,pn_
     // 状态带：产品名与电量。/ Status band: product name and battery.
     pn_status_t s=pn_font_size(font,28);
     if(s==PN_OK)s=pn_w_text(font,frame,"小纸 Pico",32,44,300,PN_ALIGN_LEFT);
-    if(s==PN_OK && options->battery_percent>=0){char battery[16];snprintf(battery,sizeof battery,"%d%%",options->battery_percent>100?100:options->battery_percent);s=pn_w_text(font,frame,battery,352,44,300,PN_ALIGN_RIGHT);}
+    if(s==PN_OK && options->battery_percent>=0){char battery[16];int percent=options->battery_percent>100?100:options->battery_percent;snprintf(battery,sizeof battery,"%d%%",percent);s=pn_w_text(font,frame,battery,300,44,290,PN_ALIGN_RIGHT);pn_w_battery(frame,608,24,44,22,percent,PN_UI_INK);}
     // 标题行：标题与搜索入口。/ Title row: the title and the search entry.
     if(s==PN_OK)s=pn_font_size(font,48);
     if(s==PN_OK)s=pn_w_text(font,frame,options->query?"搜索结果":recent?"最近阅读":"书架",32,122,420,PN_ALIGN_LEFT);
-    if(s==PN_OK && options->search){pn_w_icon_search(frame,SEARCH_X+52,80,36);s=pn_font_size(font,30);if(s==PN_OK)s=pn_w_text(font,frame,options->query?"清除":"搜索",SEARCH_X+96,114,76,PN_ALIGN_LEFT);}
+    if(s==PN_OK && options->search){pn_w_icon(frame,options->query?PN_ICON_CLOSE:PN_ICON_SEARCH,SEARCH_X+52,80,36,PN_UI_INK);s=pn_font_size(font,30);if(s==PN_OK)s=pn_w_text(font,frame,options->query?"清除":"搜索",SEARCH_X+96,114,76,PN_ALIGN_LEFT);}
     pn_frame_rect(frame,32,143,620,2,PN_UI_RULE);
     if(s==PN_OK)s=continue_card(covers,font,frame);
     // 全部/最近、排序说明与网格/列表切换。/ All/Recent, the sort note and the grid/list toggle.
     if(s==PN_OK)s=pn_font_size(font,36);
     if(s==PN_OK)s=pn_w_text(font,frame,"全部",32,372,128,PN_ALIGN_LEFT);
     if(s==PN_OK)s=pn_w_text(font,frame,"最近",160,372,128,PN_ALIGN_LEFT);
-    pn_frame_rect(frame,recent?160:32,384,72,4,PN_UI_INK);
+    pn_w_round_fill(frame,recent?160:32,383,72,5,2,PN_UI_INK);
     if(s==PN_OK)s=pn_font_size(font,26);
     if(s==PN_OK)s=pn_w_text(font,frame,recent?"阅读时间":options->query?"匹配度":"名称排序",300,370,252,PN_ALIGN_RIGHT);
     if(options->layout_toggle){if(list)pn_w_icon_grid(frame,LAYOUT_X+44,342,44);else pn_w_icon_list(frame,LAYOUT_X+44,346,44);}
@@ -163,6 +174,7 @@ pn_status_t pn_shelf_render_ex(const pn_catalog_page_t *page,pn_font_t *font,pn_
         s=list?list_item(item,covers,i,font,frame,(int)i==selected):grid_item(item,covers,i,font,frame,(int)i==selected);
     }
     if(s==PN_OK && !page->count){
+        pn_w_icon(frame,options->query?PN_ICON_SEARCH:PN_ICON_SHELF,(684-96)/2,470,96,PN_UI_INK);
         s=pn_font_size(font,36);if(s==PN_OK)s=pn_w_text(font,frame,options->query?"没有匹配的书":"暂无书籍",32,600,620,PN_ALIGN_CENTER);
         if(s==PN_OK)s=pn_font_size(font,28);
         if(s==PN_OK)s=pn_w_text_lines(font,frame,options->query?"换个关键词，或点“清除”回到书架。":transfer?"把书放进存储卡的 books 目录，或点下方“传书”用手机发送。":"把书放进存储卡的 books 目录。",64,660,556,3,40,NULL);
@@ -177,7 +189,7 @@ pn_status_t pn_shelf_render_ex(const pn_catalog_page_t *page,pn_font_t *font,pn_
         if(s==PN_OK && page->more)s=pn_w_text(font,frame,">",592,INFO_Y+36,60,PN_ALIGN_RIGHT);
     }
     // 底栏。/ Bottom bar.
-    if(s==PN_OK){static const char *const tabs[]={"书架","传书","设置"};s=pn_font_size(font,34);if(s==PN_OK)s=pn_w_tabbar(font,frame,tabs,3,0,transfer?0u:2u,TAB_Y,TAB_H);}
+    if(s==PN_OK){static const char *const tabs[]={"书架","传书","设置"};static const pn_icon_t icons[]={PN_ICON_SHELF,PN_ICON_TRANSFER,PN_ICON_SETTINGS};s=pn_font_size(font,28);if(s==PN_OK)s=pn_w_tabbar_icons(font,frame,tabs,icons,3,0,transfer?0u:2u,TAB_Y,TAB_H);}
     pn_status_t restored=pn_font_size(font,original);return s==PN_OK?restored:s;
 }
 pn_status_t pn_shelf_render_covers(const pn_catalog_page_t *page,pn_font_t *font,pn_frame_t *frame,int selected,bool recent,bool transfer,const pn_shelf_covers_t *covers){

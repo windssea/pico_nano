@@ -73,9 +73,9 @@ static pn_status_t stepper(pn_font_t *font,pn_frame_t *frame,const pn_style_t *d
     pn_status_t s=pn_font_size(font,34);
     if(s==PN_OK)s=pn_w_text(font,frame,names[field],PN_UI_MARGIN,y+54,230,PN_ALIGN_LEFT);
     pn_w_round_outline(frame,BOX_X,y,BOX_W,80,PN_UI_RADIUS,selected?4:2,PN_UI_INK);
-    if(s==PN_OK)s=pn_font_size(font,40);
-    if(s==PN_OK)s=pn_w_text(font,frame,"-",BOX_X,y+56,88,PN_ALIGN_CENTER);
-    if(s==PN_OK)s=pn_w_text(font,frame,"+",BOX_X+BOX_W-88,y+56,88,PN_ALIGN_CENTER);
+    // 减/加用线条图标，中间值两侧各一条细分隔。/ Minus and plus are line icons with a hairline divider on each side of the value.
+    pn_w_icon(frame,PN_ICON_MINUS,BOX_X+30,y+24,28,PN_UI_INK);pn_w_icon(frame,PN_ICON_PLUS,BOX_X+BOX_W-58,y+24,28,PN_UI_INK);
+    pn_frame_rect(frame,BOX_X+88,y+16,1,48,10);pn_frame_rect(frame,BOX_X+BOX_W-88,y+16,1,48,10);
     if(s==PN_OK)s=pn_font_size(font,34);
     if(s==PN_OK)s=pn_w_text(font,frame,value,BOX_X+88,y+54,BOX_W-176,PN_ALIGN_CENTER);
     return s;
@@ -104,14 +104,14 @@ static pn_status_t paint_main(pn_style_ui_t *u,pn_font_t *font,pn_frame_t *frame
     if(s==PN_OK)s=pn_w_text(font,frame,"字体",PN_UI_MARGIN,FONT_ROW_Y+54,200,PN_ALIGN_LEFT);
     pn_font_t *body=body_font(u);
     pn_w_set_fallback(body);
-    if(s==PN_OK)s=pn_w_text(font,frame,name,200,FONT_ROW_Y+54,410,PN_ALIGN_RIGHT);
+    if(s==PN_OK)s=pn_w_text(font,frame,name,200,FONT_ROW_Y+54,380,PN_ALIGN_RIGHT);
     pn_w_set_fallback(NULL);
-    if(s==PN_OK)s=pn_w_text(font,frame,">",PN_UI_MARGIN,FONT_ROW_Y+54,PN_UI_WIDTH-2*PN_UI_MARGIN,PN_ALIGN_RIGHT);
+    pn_w_icon(frame,PN_ICON_CHEVRON,PN_UI_WIDTH-PN_UI_MARGIN-30,FONT_ROW_Y+26,30,PN_UI_INK);
     pn_frame_rect(frame,PN_UI_MARGIN,FONT_ROW_Y+82,620,1,PN_UI_RULE);
     for(unsigned i=0;i<4 && s==PN_OK;i++)s=stepper(font,frame,&u->draft,i,STEP_Y0+(int)i*STEP_PITCH,u->selected==i);
     // 更多入口。/ The "more" entry.
     if(s==PN_OK)s=pn_w_text(font,frame,"边距与更多选项",PN_UI_MARGIN,MORE_Y+54,400,PN_ALIGN_LEFT);
-    if(s==PN_OK)s=pn_w_text(font,frame,">",PN_UI_MARGIN,MORE_Y+54,PN_UI_WIDTH-2*PN_UI_MARGIN,PN_ALIGN_RIGHT);
+    pn_w_icon(frame,PN_ICON_CHEVRON,PN_UI_WIDTH-PN_UI_MARGIN-30,MORE_Y+26,30,PN_UI_INK);
     pn_frame_rect(frame,PN_UI_MARGIN,MORE_Y+82,620,1,PN_UI_RULE);
     // 三个预设。/ Three presets.
     int chosen=selected_preset(&u->draft);
@@ -139,7 +139,7 @@ static pn_status_t paint(void *ctx,pn_font_t *font,pn_font_t *metadata,pn_frame_
     // 底部：两个小链接“取消返回 · 恢复默认”，整页预览改为轻点段落预览框。/ Bottom: two small links "cancel · restore defaults"; the full-page preview moved to tapping the paragraph box.
     if(s==PN_OK)s=pn_font_size(font,30);
     if(s==PN_OK)s=pn_w_text(font,frame,"取消返回",32,LINKS_Y+52,300,PN_ALIGN_RIGHT);
-    if(s==PN_OK)s=pn_w_text(font,frame,"·",332,LINKS_Y+52,20,PN_ALIGN_CENTER);
+    if(s==PN_OK)s=pn_w_text(font,frame,"·",322,LINKS_Y+52,40,PN_ALIGN_CENTER);
     if(s==PN_OK)s=pn_w_text(font,frame,"恢复默认",352,LINKS_Y+52,300,PN_ALIGN_LEFT);
     if(s==PN_OK)s=pn_font_size(font,26);
     if(s==PN_OK)s=pn_w_text(font,frame,u->notice?u->notice:"点“应用”才会保存；取消返回不改变当前排版",PN_UI_MARGIN,1200,620,PN_ALIGN_CENTER);

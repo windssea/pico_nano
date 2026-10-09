@@ -10,6 +10,7 @@
 | [完整开发计划](docs/DEVELOPMENT_PLAN.md) | 原始任务依赖与验收要求，不以局部实现代替任务完成 |
 | [总体设计](docs/DESIGN.md) | 产品目标和格式/资源路线 |
 | [界面与交互](docs/UI_UX.md) | 设计目标、阅读/设置流程 |
+| [界面组件与图标](docs/UI_KIT.md) | 共用控件、抗锯齿图元与线条图标集 |
 | [设备传输入口](docs/DEVICE_TRANSFER_ENTRY.md) | 热点入口、后台停止、返回原书和所有权 |
 | [扫码传书](docs/TRANSFER_QR.md) | 连接热点/打开网页两码、独立解码检查 |
 | [书架封面](docs/COVERS.md) | EPUB/TXT封面提取、空闲队列、TF缓存与内存边界 |

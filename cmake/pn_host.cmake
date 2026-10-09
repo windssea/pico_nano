@@ -40,6 +40,8 @@ add_library(pn_core STATIC ${ui_font_c}
     ${PN_ROOT}/components/pn_library/pn_shelf_view.c
     ${PN_ROOT}/components/pn_library/pn_search_ui.c
     ${PN_ROOT}/components/pn_widgets/pn_widgets.c
+    ${PN_ROOT}/components/pn_widgets/pn_gfx.c
+    ${PN_ROOT}/components/pn_widgets/pn_icons.c
     ${PN_ROOT}/components/pn_library/pn_font_preview.c
     ${PN_ROOT}/components/pn_font/pn_font.c
     ${PN_ROOT}/components/pn_font/pn_font_chain.c

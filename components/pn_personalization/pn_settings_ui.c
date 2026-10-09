@@ -24,13 +24,13 @@ static pn_status_t show(pn_settings_ui_t *ui,pn_settings_present_fn present,void
     su_t *u=ui->impl;ui->presented=false;pn_frame_clear(&u->canvas,15);pn_font_t *font=&u->font;
     pn_status_t s=pn_w_header(font,&u->canvas,"< 返回","设置",NULL);
     if(s==PN_OK)s=pn_w_section(font,&u->canvas,"显示与字体",172);
-    if(s==PN_OK)s=pn_w_row(font,&u->canvas,"字体管理",NULL,true,FONT_ROW_Y);
+    if(s==PN_OK)s=pn_w_row_icon(font,&u->canvas,"字体管理",NULL,PN_ICON_FONT,PN_ROW_CHEVRON,FONT_ROW_Y);
     if(s==PN_OK)s=pn_w_section(font,&u->canvas,"锁屏与壁纸",328);
-    if(s==PN_OK)s=pn_w_row(font,&u->canvas,"锁屏壁纸",NULL,true,WALLPAPER_ROW_Y);
+    if(s==PN_OK)s=pn_w_row_icon(font,&u->canvas,"锁屏壁纸",NULL,PN_ICON_IMAGE,PN_ROW_CHEVRON,WALLPAPER_ROW_Y);
     if(s==PN_OK)s=pn_w_section(font,&u->canvas,"翻页",488);
-    for(unsigned i=0;i<4 && s==PN_OK;i++)s=pn_w_row(font,&u->canvas,names[i],on(ui->flags,i)?"开":"关",false,TOGGLE_ROW_Y+(int)i*PN_W_ROW_H);
+    for(unsigned i=0;i<4 && s==PN_OK;i++)s=pn_w_row_icon(font,&u->canvas,names[i],NULL,-1,on(ui->flags,i)?PN_ROW_ON:PN_ROW_OFF,TOGGLE_ROW_Y+(int)i*PN_W_ROW_H);
     if(s==PN_OK && *u->lan)s=pn_w_section(font,&u->canvas,"传书",LAN_SECTION_Y);
-    if(s==PN_OK && *u->lan)s=pn_w_row(font,&u->canvas,"局域网传书",u->lan,true,LAN_ROW_Y);
+    if(s==PN_OK && *u->lan)s=pn_w_row_icon(font,&u->canvas,"局域网传书",u->lan,PN_ICON_WIFI,PN_ROW_CHEVRON,LAN_ROW_Y);
     if(s==PN_OK){int original=font->pixels;s=pn_font_size(font,28);
         if(s==PN_OK)s=pn_w_text(font,&u->canvas,*u->message?u->message:(u->state?"开关立即保存":"内部存储不可用，开关不能保存"),PN_UI_MARGIN,*u->lan?LAN_ROW_Y+PN_W_ROW_H+48:TOGGLE_ROW_Y+4*PN_W_ROW_H+48,620,PN_ALIGN_LEFT);
         pn_status_t restored=pn_font_size(font,original);if(s==PN_OK)s=restored;}

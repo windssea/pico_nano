@@ -10,6 +10,7 @@
 #include "pn_wallpaper.h"
 #include "pn_image.h"
 #include "pn_text_file.h"
+#include "pn_widgets.h"
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
@@ -183,11 +184,13 @@ pn_status_t pn_lock_render(const pn_lock_selection_t *selection,pn_font_t *font,
     if(!selection || selection->mode>PN_LOCK_BOOK || !font || !font->impl || !hint || !full_frame(frame))return PN_INVALID;
     int original=font->pixels;pn_status_t status=PN_OK;
     if(selection->mode==PN_LOCK_DEFAULT){
-        /* 内置图：纸页叠影、书脊与品牌，纯黑白线条便于GC16。/ Built-in art: stacked paper pages, a spine and the brand in pure black-and-white lines for GC16. */
+        /* 内置图：圆角书本（书脊、标题条与文字行）、品牌与提示，抗锯齿线条，纯黑白便于GC16。/ Built-in art: a rounded book with spine, title bar and text lines, the brand and a hint, in anti-aliased lines that stay pure black-and-white for GC16. */
         pn_frame_clear(frame,15);
-        for(int i=0;i<4;i++){int x=172+i*14,y=300-i*14;pn_frame_rect(frame,x,y,340,2,0);pn_frame_rect(frame,x,y+440,340,2,0);pn_frame_rect(frame,x,y,2,442,0);pn_frame_rect(frame,x+338,y,2,442,0);if(i<3)pn_frame_rect(frame,x+2,y+2,336,438,15);}
-        pn_frame_rect(frame,214,258,20,440,0);
-        for(int y=330;y<640;y+=36)pn_frame_rect(frame,262,y,200,2,6);
+        pn_w_round_stroke(frame,172,250,340,450,26,5.0f,0);
+        pn_w_round_fill(frame,172,250,64,450,26,0);pn_frame_rect(frame,206,250,30,450,0);
+        pn_w_line(frame,286,340,462,340,10.0f,0);pn_w_line(frame,286,392,420,392,10.0f,0);
+        for(int i=0;i<5;i++)pn_w_line(frame,286,470+i*40,i==4?400:462,470+i*40,5.0f,8);
+        pn_w_icon(frame,PN_ICON_LOCK,(W-56)/2,722,56,0);
         status=centered(font,frame,"小纸 Pico",64,860);
         if(status==PN_OK)status=centered(font,frame,"Read Pico",32,916);
         if(status==PN_OK){pn_frame_rect(frame,32,1104,620,2,0);status=centered(font,frame,hint,32,1170);}
