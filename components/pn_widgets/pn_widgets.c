@@ -11,6 +11,9 @@
 /* 文字来源：主字体、方框占位、备用字体。/ Glyph source: primary font, box placeholder, fallback font. */
 enum {SRC_PRIMARY=0,SRC_BOX=1,SRC_FALLBACK=2};
 static pn_font_t *fallback_font;
+/* 文字样式：墨色灰阶与是否加粗（加粗=错开0.6px再画一遍）。只在_ex调用期间生效。/ Text style: ink gray and bold (bold draws again 0.6 px to the right); active only during an _ex call. */
+static uint8_t text_ink;static bool text_bold;
+#define BOLD_SHIFT 40
 void pn_w_set_fallback(pn_font_t *font){fallback_font=font;}
 static pn_status_t string_read(void *ctx,uint64_t off,uint8_t *out,size_t cap,size_t *n){
     const char *s=ctx;size_t size=strlen(s);if(off>size)return PN_INVALID;
@@ -30,14 +33,21 @@ static pn_status_t decode(pn_font_t *font,const char *s,uint32_t *cp,int32_t *ad
             else{advance=font->pixels*64;missing[n]=SRC_BOX;}
         }
         else if(measured!=PN_OK)return measured;
+        if(text_bold)advance+=BOLD_SHIFT;
         if(advance<0 || advance>PN_UI_WIDTH*64)return PN_LIMIT;
         cp[n]=c.codepoint;adv[n]=advance;n++;
     }
     *count=n;return status==PN_EMPTY || n==MAX_CHARS?PN_OK:status;
 }
+static pn_status_t draw_styled(pn_font_t *font,pn_frame_t *frame,uint32_t cp,int32_t x_64,int baseline){
+    uint8_t saved=font->ink;font->ink=text_ink;
+    pn_status_t status=pn_font_draw(font,frame,cp,x_64,baseline,PN_FONT_GRAY);
+    if(status==PN_OK && text_bold)status=pn_font_draw(font,frame,cp,x_64+BOLD_SHIFT,baseline,PN_FONT_GRAY);
+    font->ink=saved;return status;
+}
 static pn_status_t glyph(pn_font_t *font,pn_frame_t *frame,uint32_t cp,uint8_t source,int32_t x_64,int baseline){
-    if(source==SRC_PRIMARY)return pn_font_draw(font,frame,cp,x_64,baseline,PN_FONT_GRAY);
-    if(source==SRC_FALLBACK)return pn_font_draw(fallback_font,frame,cp,x_64,baseline,PN_FONT_GRAY);
+    if(source==SRC_PRIMARY)return draw_styled(font,frame,cp,x_64,baseline);
+    if(source==SRC_FALLBACK)return draw_styled(fallback_font,frame,cp,x_64,baseline);
     int x=x_64/64,size=font->pixels;
     pn_frame_rect(frame,x+2,baseline-size+4,size-6,1,0);pn_frame_rect(frame,x+2,baseline-2,size-6,1,0);
     pn_frame_rect(frame,x+2,baseline-size+4,1,size-6,0);pn_frame_rect(frame,x+size-5,baseline-size+4,1,size-6,0);return PN_OK;
@@ -113,6 +123,19 @@ static pn_status_t fallback_restore(int saved,pn_status_t status){
     if(saved>0 && fallback_font && fallback_font->pixels!=saved){pn_status_t restored=pn_font_size(fallback_font,saved);if(status==PN_OK)return restored;}
     return status;
 }
+pn_status_t pn_w_text_ex(pn_font_t *font,pn_frame_t *frame,const char *utf8,int x,int baseline,int max_width,pn_align_t align,uint8_t ink,bool bold){
+    uint8_t ink_saved=text_ink;bool bold_saved=text_bold;text_ink=ink>15?15:ink;text_bold=bold;
+    pn_status_t status=pn_w_text(font,frame,utf8,x,baseline,max_width,align);
+    text_ink=ink_saved;text_bold=bold_saved;return status;
+}
+pn_status_t pn_w_text_lines_ex(pn_font_t *font,pn_frame_t *frame,const char *utf8,int x,int baseline,int width,unsigned max_lines,int pitch,uint8_t ink,bool bold){
+    uint8_t ink_saved=text_ink;bool bold_saved=text_bold;text_ink=ink>15?15:ink;text_bold=bold;
+    pn_status_t status=pn_w_text_lines(font,frame,utf8,x,baseline,width,max_lines,pitch,NULL);
+    text_ink=ink_saved;text_bold=bold_saved;return status;
+}
+pn_status_t pn_w_text_width_ex(pn_font_t *font,const char *utf8,bool bold,int *width){
+    bool bold_saved=text_bold;text_bold=bold;pn_status_t status=pn_w_text_width(font,utf8,width);text_bold=bold_saved;return status;
+}
 pn_status_t pn_w_text_width(pn_font_t *font,const char *utf8,int *width){int saved=fallback_saved();return fallback_restore(saved,text_width_impl(font,utf8,width));}
 pn_status_t pn_w_text(pn_font_t *font,pn_frame_t *frame,const char *utf8,int x,int baseline,int max_width,pn_align_t align){int saved=fallback_saved();return fallback_restore(saved,text_impl(font,frame,utf8,x,baseline,max_width,align));}
 pn_status_t pn_w_text_lines(pn_font_t *font,pn_frame_t *frame,const char *utf8,int x,int baseline,int width,unsigned max_lines,int pitch,unsigned *used){int saved=fallback_saved();return fallback_restore(saved,text_lines_impl(font,frame,utf8,x,baseline,width,max_lines,pitch,0,0,used));}
@@ -129,29 +152,30 @@ void pn_w_round_outline(pn_frame_t *frame,int x,int y,int width,int height,int r
     if(!frame || width<=0 || height<=0 || thickness<=0)return;
     pn_w_round_stroke(frame,x,y,width,height,radius,(float)thickness,shade);
 }
+/* Mono Glass 按钮：主按钮深色填充白字；次按钮浅灰雾面加细描边；PLAIN只有文字。/ Mono Glass buttons: primary is a dark fill with white text, secondary a light fog surface with a hairline, PLAIN is text only. */
 pn_status_t pn_w_button(pn_font_t *font,pn_frame_t *frame,const char *label,int x,int y,int width,int height,unsigned style){
     if(!font || !font->impl || !frame || !label || width<=0 || height<=0)return PN_INVALID;
     bool primary=(style&PN_W_SELECTED) && !(style&(PN_W_PLAIN|PN_W_DISABLED));
-    // 次要按钮是细描边，主按钮是黑底白字（先画黑字再反相）。/ A secondary button is a thin outline; the primary one is white text on black (draw black text, then invert).
-    if(!(style&PN_W_PLAIN) && !primary)pn_w_round_outline(frame,x,y,width,height,PN_UI_RADIUS,(style&PN_W_SELECTED)?3:2,PN_UI_INK);
+    if(!(style&PN_W_PLAIN) && !primary){pn_w_round_fill(frame,x,y,width,height,PN_UI_RADIUS,PN_UI_SURFACE);pn_w_round_stroke(frame,x,y,width,height,PN_UI_RADIUS,2.0f,PN_UI_STROKE);}
     int baseline=y+height/2+font->pixels*3/8;
-    pn_status_t status=pn_w_text(font,frame,label,x+12,baseline,width-24,PN_ALIGN_CENTER);
+    pn_status_t status=pn_w_text_ex(font,frame,label,x+12,baseline,width-24,PN_ALIGN_CENTER,(style&PN_W_DISABLED)?PN_UI_MUTED:PN_UI_INK,primary);
     if(status==PN_OK && primary)pn_w_invert_round(frame,x,y,width,height,PN_UI_RADIUS);
     if(status==PN_OK && (style&PN_W_DISABLED)){int w;if(pn_w_text_width(font,label,&w)==PN_OK){if(w>width-24)w=width-24;pn_frame_rect(frame,x+(width-w)/2,y+height/2,w,2,PN_UI_INK);}}
     return status;
 }
 pn_status_t pn_w_tabbar_icons(pn_font_t *font,pn_frame_t *frame,const char *const *labels,const pn_icon_t *icons,unsigned count,unsigned active,unsigned disabled,int y,int height){
     if(!font || !font->impl || !frame || !labels || !count || count>4 || height<=0)return PN_INVALID;
-    pn_frame_rect(frame,0,y,PN_UI_WIDTH,2,PN_UI_RULE);
+    pn_frame_rect(frame,0,y,PN_UI_WIDTH,2,PN_UI_STROKE);
     pn_status_t status=PN_OK;
     for(unsigned i=0;i<count && status==PN_OK;i++){
         int x0=(int)(PN_UI_WIDTH*i/count),x1=(int)(PN_UI_WIDTH*(i+1)/count),cx=(x0+x1)/2;
         if(icons){
-            // 当前页：图标后面一枚浅灰胶囊，图标与文字仍是黑色。/ The current tab: a light-gray pill behind the icon, icon and label stay black.
-            if(i==active)pn_w_round_fill(frame,cx-44,y+10,88,48,24,12);
-            pn_w_icon(frame,icons[i],cx-17,y+16,34,PN_UI_INK);
-            if(disabled&(1u<<i))pn_w_line(frame,(float)(cx-22),(float)(y+54),(float)(cx+22),(float)(y+14),3.0f,PN_UI_INK);
-            status=pn_w_text(font,frame,labels[i],x0,y+96,x1-x0,PN_ALIGN_CENTER);
+            // 所在Tab：浅灰圆角底座＋深色图标＋加粗标签（规范2.2）。/ The current tab: a light rounded base, dark icon and bold label (spec 2.2).
+            bool on=i==active;
+            if(on)pn_w_round_fill(frame,x0+20,y+10,x1-x0-40,height-18,22,PN_UI_SELECT);
+            pn_w_icon(frame,icons[i],cx-18,y+18,36,PN_UI_INK);
+            if(disabled&(1u<<i))pn_w_line(frame,(float)(cx-22),(float)(y+56),(float)(cx+22),(float)(y+16),3.0f,PN_UI_INK);
+            status=pn_w_text_ex(font,frame,labels[i],x0,y+92,x1-x0,PN_ALIGN_CENTER,on?PN_UI_INK:PN_UI_MUTED,on);
         }else{
             if(i==active)pn_frame_rect(frame,x0+24,y+2,x1-x0-48,6,PN_UI_INK);
             status=pn_w_text(font,frame,labels[i],x0,y+height/2+font->pixels*3/8+4,x1-x0,PN_ALIGN_CENTER);
@@ -167,53 +191,60 @@ int pn_w_tabbar_hit(unsigned count,int y,int height,int x,int hit_y){
     if(!count || count>4 || x<0 || x>=PN_UI_WIDTH || hit_y<y || hit_y>=y+height)return -1;
     return (int)((unsigned)x*count/PN_UI_WIDTH);
 }
-/* 状态带共享的电量：由设备/模拟器定期写入，绘制只读取。/ Battery shared by every status band: written periodically by the device or simulator, only read while drawing. */
-static int status_battery=-1;
+/* 状态带共享的电量、时间与无线状态：由设备/模拟器写入，绘制只读取。/ Battery, clock and wireless state shared by every status band: written by the device or simulator, only read while drawing. */
+static int status_battery=-1;static char status_clock[8];static bool status_wifi;
 void pn_w_set_battery(int percent){status_battery=percent<0?-1:percent>100?100:percent;}
 int pn_w_battery_level(void){return status_battery;}
+void pn_w_set_clock(const char *hhmm){size_t n=0;if(hhmm)while(hhmm[n] && n<sizeof status_clock-1){status_clock[n]=hhmm[n];n++;}status_clock[n]=0;}
+void pn_w_set_wifi(bool connected){status_wifi=connected;}
 pn_status_t pn_w_status(pn_font_t *font,pn_frame_t *frame){
     if(!font || !font->impl || !frame)return PN_INVALID;
     int original=font->pixels;pn_status_t status=pn_font_size(font,24);
-    if(status==PN_OK)status=pn_w_text(font,frame,"PicoNano",PN_UI_MARGIN,30,300,PN_ALIGN_LEFT);
+    // 左：产品名；右：时间（已知时）、无线（已连接时）、电量。都只显示真实读到的值。/ Left: product name; right: clock (when known), wireless (when connected) and battery, all only when actually read.
+    if(status==PN_OK)status=pn_w_text_ex(font,frame,"PicoNano",PN_UI_MARGIN,30,300,PN_ALIGN_LEFT,PN_UI_INK,true);
+    int right=PN_UI_WIDTH-PN_UI_MARGIN;
     if(status==PN_OK && status_battery>=0){
-        char text[8];text[0]=0;int n=status_battery;char *p=text;if(n>=100){*p++='1';*p++='0';*p++='0';}else{if(n>=10)*p++=(char)('0'+n/10);*p++=(char)('0'+n%10);}*p++='%';*p=0;
-        status=pn_w_text(font,frame,text,PN_UI_WIDTH-PN_UI_MARGIN-52-120,30,112,PN_ALIGN_RIGHT);
-        pn_w_battery(frame,PN_UI_WIDTH-PN_UI_MARGIN-44,12,44,22,status_battery,PN_UI_INK);
+        char text[8];int n=status_battery;char *p=text;if(n>=100){*p++='1';*p++='0';*p++='0';}else{if(n>=10)*p++=(char)('0'+n/10);*p++=(char)('0'+n%10);}*p++='%';*p=0;
+        pn_w_battery(frame,right-44,12,44,22,status_battery,PN_UI_INK);right-=54;
+        int w=0;if(pn_w_text_width(font,text,&w)!=PN_OK)w=60;
+        status=pn_w_text(font,frame,text,right-w,30,w+2,PN_ALIGN_RIGHT);right-=w+16;
     }
+    if(status_wifi){pn_w_icon(frame,PN_ICON_WIFI,right-30,6,30,PN_UI_INK);right-=42;}
+    if(status==PN_OK && status_clock[0])status=pn_w_text(font,frame,status_clock,right-100,30,100,PN_ALIGN_RIGHT);
     pn_status_t restored=pn_font_size(font,original);return status==PN_OK?restored:status;
 }
 pn_status_t pn_w_header(pn_font_t *font,pn_frame_t *frame,const char *back,const char *title,const char *action){
     if(!font || !font->impl || !frame || !back || !title)return PN_INVALID;
     int original=font->pixels;
-    // 顶部：状态带（产品名与电量），其下导航行：返回、居中标题、右侧黑底主按钮。/ Top: a status band (product name and battery), then the navigation row with Back, a centered title and a black primary button.
+    // 顶部：状态带，其下导航行：返回、居中加粗标题、右侧深色主按钮；下沿一条细线。/ Top: the status band, then the navigation row with Back, a centered bold title and a dark primary button; a hairline below.
     pn_status_t status=pn_w_status(font,frame);
-    if(status==PN_OK)status=pn_font_size(font,32);
-    if(status==PN_OK && back[0]=='<' && back[1]==' '){pn_w_icon(frame,PN_ICON_BACK,PN_UI_MARGIN-6,70,34,PN_UI_INK);status=pn_w_text(font,frame,back+2,PN_UI_MARGIN+30,100,170,PN_ALIGN_LEFT);}
-    else if(status==PN_OK)status=pn_w_text(font,frame,back,PN_UI_MARGIN,100,200,PN_ALIGN_LEFT);
-    if(status==PN_OK)status=pn_font_size(font,38);
-    if(status==PN_OK)status=pn_w_text(font,frame,title,180,102,PN_UI_WIDTH-360,PN_ALIGN_CENTER);
     if(status==PN_OK)status=pn_font_size(font,30);
-    if(status==PN_OK && action)status=pn_w_button(font,frame,action,520,58,132,58,PN_W_SELECTED);
-    pn_frame_rect(frame,PN_UI_MARGIN,PN_W_HEADER_H-4,PN_UI_WIDTH-2*PN_UI_MARGIN,2,PN_UI_RULE);
+    if(status==PN_OK && back[0]=='<' && back[1]==' '){pn_w_icon(frame,PN_ICON_BACK,PN_UI_MARGIN-6,72,32,PN_UI_INK);status=pn_w_text(font,frame,back+2,PN_UI_MARGIN+28,100,170,PN_ALIGN_LEFT);}
+    else if(status==PN_OK)status=pn_w_text(font,frame,back,PN_UI_MARGIN,100,200,PN_ALIGN_LEFT);
+    if(status==PN_OK)status=pn_font_size(font,36);
+    if(status==PN_OK)status=pn_w_text_ex(font,frame,title,180,102,PN_UI_WIDTH-360,PN_ALIGN_CENTER,PN_UI_INK,true);
+    if(status==PN_OK)status=pn_font_size(font,28);
+    if(status==PN_OK && action)status=pn_w_button(font,frame,action,524,62,128,54,PN_W_SELECTED);
+    pn_frame_rect(frame,0,PN_W_HEADER_H-2,PN_UI_WIDTH,2,PN_UI_SELECT);
     pn_status_t restored=pn_font_size(font,original);return status==PN_OK?restored:status;
 }
 int pn_w_header_hit(int x,int y,bool has_action){
     if(y<0 || y>=PN_W_HEADER_H || x<0 || x>=PN_UI_WIDTH)return 0;
     if(x<240)return 1;
-    return has_action && x>=500 && x<652 && y>=44?2:0;
+    return has_action && x>=500 && x<672 && y>=44?2:0;
 }
-/* 分段控件：等宽格子，选中项黑底白字，可选第二行小字说明。/ Segmented control: equal cells, the selected one white on black, with an optional small second line. */
+/* 分段控件：浅灰雾面槽内等宽格子，选中项深色胶囊白字，可选第二行小字说明。/ Segmented control: equal cells in a light fog track, the selected one a dark capsule with white text, with an optional small second line. */
 pn_status_t pn_w_segments(pn_font_t *font,pn_frame_t *frame,const char *const *labels,const char *const *notes,unsigned count,int selected,int y,int height){
     if(!font || !font->impl || !frame || !labels || !count || count>5 || height<=0)return PN_INVALID;
     int original=font->pixels,gap=12,width=(PN_UI_WIDTH-2*PN_UI_MARGIN-gap*(int)(count-1))/(int)count;pn_status_t status=PN_OK;
+    pn_w_round_fill(frame,PN_UI_MARGIN-6,y-6,PN_UI_WIDTH-2*PN_UI_MARGIN+12,height+12,PN_UI_CHIP_RADIUS,PN_UI_SURFACE);
     for(unsigned i=0;i<count && status==PN_OK;i++){
         int x=PN_UI_MARGIN+(int)i*(width+gap);bool on=(int)i==selected;
-        if(!on)pn_w_round_stroke(frame,x,y,width,height,PN_UI_RADIUS,2.0f,PN_UI_INK);
         bool two=notes && notes[i] && *notes[i];
         status=pn_font_size(font,30);
-        if(status==PN_OK)status=pn_w_text(font,frame,labels[i],x+6,two?y+height/2-2:y+height/2+11,width-12,PN_ALIGN_CENTER);
-        if(status==PN_OK && two){status=pn_font_size(font,22);if(status==PN_OK)status=pn_w_text(font,frame,notes[i],x+6,y+height/2+28,width-12,PN_ALIGN_CENTER);}
-        if(on)pn_w_invert_round(frame,x,y,width,height,PN_UI_RADIUS);
+        if(status==PN_OK)status=pn_w_text_ex(font,frame,labels[i],x+6,two?y+height/2-2:y+height/2+11,width-12,PN_ALIGN_CENTER,PN_UI_INK,on);
+        if(status==PN_OK && two){status=pn_font_size(font,22);if(status==PN_OK)status=pn_w_text_ex(font,frame,notes[i],x+6,y+height/2+28,width-12,PN_ALIGN_CENTER,on?PN_UI_INK:PN_UI_MUTED,false);}
+        if(on)pn_w_invert_round(frame,x,y,width,height,PN_UI_CHIP_RADIUS-6);
     }
     pn_status_t restored=pn_font_size(font,original);return status==PN_OK?restored:status;
 }
@@ -229,11 +260,11 @@ pn_status_t pn_w_section(pn_font_t *font,pn_frame_t *frame,const char *title,int
     pn_frame_rect(frame,PN_UI_MARGIN,baseline+10,PN_UI_WIDTH-2*PN_UI_MARGIN,2,PN_UI_INK);
     pn_status_t restored=pn_font_size(font,original);return status==PN_OK?restored:status;
 }
-/* 开关：胶囊加圆钮；开为黑底白钮靠右，关为描边黑钮靠左。/ Toggle: a pill with a knob; on is a black pill with a white knob on the right, off an outlined pill with a black knob on the left. */
+/* 开关：开为深色轨道白钮靠右；关为浅灰轨道带描边、白钮靠左（规范C09）。/ Toggle: on is a dark track with a white knob on the right; off a light outlined track with a white outlined knob on the left (spec C09). */
 void pn_w_toggle(pn_frame_t *frame,int x,int y,bool on){
     if(!frame)return;
     if(on){pn_w_round_fill(frame,x,y,64,36,18,PN_UI_INK);pn_w_dot(frame,(float)(x+46),(float)(y+18),12.0f,PN_UI_PAPER);}
-    else{pn_w_round_stroke(frame,x,y,64,36,18,3.0f,PN_UI_INK);pn_w_dot(frame,(float)(x+18),(float)(y+18),10.0f,PN_UI_INK);}
+    else{pn_w_round_fill(frame,x,y,64,36,18,PN_UI_SELECT);pn_w_round_stroke(frame,x,y,64,36,18,2.0f,PN_UI_STROKE);pn_w_dot(frame,(float)(x+18),(float)(y+18),13.0f,PN_UI_INK);pn_w_dot(frame,(float)(x+18),(float)(y+18),10.0f,PN_UI_PAPER);}
 }
 pn_status_t pn_w_row_icon(pn_font_t *font,pn_frame_t *frame,const char *label,const char *value,int icon,unsigned flags,int y){
     if(!font || !font->impl || !frame || !label)return PN_INVALID;
@@ -246,7 +277,7 @@ pn_status_t pn_w_row_icon(pn_font_t *font,pn_frame_t *frame,const char *label,co
     if(status==PN_OK && value && *value){status=pn_font_size(font,30);if(status==PN_OK)status=pn_w_text(font,frame,value,PN_UI_WIDTH-PN_UI_MARGIN-tail-value_width,y+56,value_width,PN_ALIGN_RIGHT);}
     if(status==PN_OK && (flags&PN_ROW_CHEVRON))pn_w_icon(frame,PN_ICON_CHEVRON,PN_UI_WIDTH-PN_UI_MARGIN-30,y+30,30,PN_UI_INK);
     if(status==PN_OK && (flags&(PN_ROW_ON|PN_ROW_OFF)))pn_w_toggle(frame,PN_UI_WIDTH-PN_UI_MARGIN-64,y+26,(flags&PN_ROW_ON)!=0);
-    pn_frame_rect(frame,PN_UI_MARGIN,y+PN_W_ROW_H-2,PN_UI_WIDTH-2*PN_UI_MARGIN,1,10);
+    pn_frame_rect(frame,PN_UI_MARGIN,y+PN_W_ROW_H-2,PN_UI_WIDTH-2*PN_UI_MARGIN,1,PN_UI_SELECT);
     pn_status_t restored=pn_font_size(font,original);return status==PN_OK?restored:status;
 }
 pn_status_t pn_w_row(pn_font_t *font,pn_frame_t *frame,const char *label,const char *value,bool chevron,int y){
@@ -255,33 +286,39 @@ pn_status_t pn_w_row(pn_font_t *font,pn_frame_t *frame,const char *label,const c
 void pn_w_icon_search(pn_frame_t *frame,int x,int y,int size){pn_w_icon(frame,PN_ICON_SEARCH,x,y,size,PN_UI_INK);}
 void pn_w_icon_grid(pn_frame_t *frame,int x,int y,int size){pn_w_icon(frame,PN_ICON_GRID,x,y,size,PN_UI_INK);}
 void pn_w_icon_list(pn_frame_t *frame,int x,int y,int size){pn_w_icon(frame,PN_ICON_LIST,x,y,size,PN_UI_INK);}
-/* 分组标题：小字号灰黑，置于卡片上方。/ Group title: small text above a card. */
+/* 分组标题：小字号、次要墨色、加粗，置于卡片上方。/ Group title: small, secondary ink and bold, above a card. */
 pn_status_t pn_w_group(pn_font_t *font,pn_frame_t *frame,const char *title,int baseline){
     if(!font || !font->impl || !frame || !title)return PN_INVALID;
     int original=font->pixels;pn_status_t status=pn_font_size(font,26);
-    if(status==PN_OK)status=pn_w_text(font,frame,title,PN_UI_MARGIN+8,baseline,PN_UI_WIDTH-2*PN_UI_MARGIN-16,PN_ALIGN_LEFT);
+    if(status==PN_OK)status=pn_w_text_ex(font,frame,title,PN_UI_MARGIN+8,baseline,PN_UI_WIDTH-2*PN_UI_MARGIN-16,PN_ALIGN_LEFT,PN_UI_MUTED,true);
     pn_status_t restored=pn_font_size(font,original);return status==PN_OK?restored:status;
+}
+void pn_w_glass(pn_frame_t *frame,int x,int y,int width,int height,int radius){
+    if(!frame || width<=0 || height<=0)return;
+    // 拟玻璃：下沿一道静态浅灰“影”（一级灰差）＋雾面＋细描边，不做模糊。/ Faux glass: a static one-step gray shade under the bottom edge, a fog surface and a hairline, no blur.
+    pn_w_round_fill(frame,x+2,y+4,width-4,height,radius,PN_UI_SELECT);
+    pn_w_round_fill(frame,x,y,width,height,radius,PN_UI_SURFACE);
+    pn_w_round_stroke(frame,x,y,width,height,radius,2.0f,PN_UI_STROKE);
 }
 void pn_w_card(pn_frame_t *frame,int y,int rows){
     if(!frame || rows<=0)return;
-    pn_w_round_fill(frame,PN_UI_MARGIN,y,PN_UI_WIDTH-2*PN_UI_MARGIN,rows*PN_W_CARD_ROW_H,16,14);
-    pn_w_round_stroke(frame,PN_UI_MARGIN,y,PN_UI_WIDTH-2*PN_UI_MARGIN,rows*PN_W_CARD_ROW_H,16,2.0f,10);
+    pn_w_glass(frame,PN_UI_MARGIN,y,PN_UI_WIDTH-2*PN_UI_MARGIN,rows*PN_W_CARD_ROW_H,PN_UI_CARD_RADIUS);
 }
 pn_status_t pn_w_card_row(pn_font_t *font,pn_frame_t *frame,const char *label,const char *subtitle,const char *value,int icon,unsigned flags,int y,bool last){
     if(!font || !font->impl || !frame || !label)return PN_INVALID;
     int original=font->pixels,text_x=icon>=0?112:56;
     // 图标放进圆角方块，视觉上与纯文字行区分。/ The icon sits in a rounded tile so it reads apart from plain text.
-    if(icon>=0){pn_w_round_fill(frame,52,y+28,44,44,12,PN_UI_PAPER);pn_w_round_stroke(frame,52,y+28,44,44,12,2.0f,8);pn_w_icon(frame,(pn_icon_t)icon,60,y+36,28,PN_UI_INK);}
+    if(icon>=0){pn_w_round_fill(frame,52,y+26,48,48,14,PN_UI_PAPER);pn_w_round_stroke(frame,52,y+26,48,48,14,2.0f,PN_UI_STROKE);pn_w_icon(frame,(pn_icon_t)icon,62,y+36,28,PN_UI_INK);}
     int tail=(flags&PN_ROW_CHEVRON)?44:(flags&(PN_ROW_ON|PN_ROW_OFF))?92:16,value_width=0;
     pn_status_t status=PN_OK;
     if(value && *value){status=pn_font_size(font,28);if(status==PN_OK)status=pn_w_text_width(font,value,&value_width);}
     int room=PN_UI_WIDTH-PN_UI_MARGIN-tail-text_x-(value_width?value_width+16:0);
     if(status==PN_OK)status=pn_font_size(font,34);
     if(status==PN_OK)status=pn_w_text(font,frame,label,text_x,y+(subtitle&&*subtitle?46:62),room,PN_ALIGN_LEFT);
-    if(status==PN_OK && subtitle && *subtitle){status=pn_font_size(font,26);if(status==PN_OK)status=pn_w_text(font,frame,subtitle,text_x,y+80,room,PN_ALIGN_LEFT);}
+    if(status==PN_OK && subtitle && *subtitle){status=pn_font_size(font,24);if(status==PN_OK)status=pn_w_text_ex(font,frame,subtitle,text_x,y+80,room,PN_ALIGN_LEFT,PN_UI_MUTED,false);}
     if(status==PN_OK && value && *value){status=pn_font_size(font,28);if(status==PN_OK)status=pn_w_text(font,frame,value,PN_UI_WIDTH-PN_UI_MARGIN-tail-value_width,y+60,value_width,PN_ALIGN_RIGHT);}
     if(flags&PN_ROW_CHEVRON)pn_w_icon(frame,PN_ICON_CHEVRON,PN_UI_WIDTH-PN_UI_MARGIN-16-28,y+36,28,PN_UI_INK);
     if(flags&(PN_ROW_ON|PN_ROW_OFF))pn_w_toggle(frame,PN_UI_WIDTH-PN_UI_MARGIN-16-64,y+32,(flags&PN_ROW_ON)!=0);
-    if(!last)pn_frame_rect(frame,text_x,y+PN_W_CARD_ROW_H-1,PN_UI_WIDTH-PN_UI_MARGIN-16-text_x,1,10);
+    if(!last)pn_frame_rect(frame,text_x,y+PN_W_CARD_ROW_H-1,PN_UI_WIDTH-PN_UI_MARGIN-16-text_x,1,PN_UI_SELECT);
     pn_status_t restored=pn_font_size(font,original);return status==PN_OK?restored:status;
 }

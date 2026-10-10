@@ -19,6 +19,7 @@
 #define PN_SUI_BACK_MAIN 8 ///< 从更多页回到排版主页 / Back from the more page to the main typesetting page
 #define PN_SUI_RESET 9 ///< 恢复默认草稿 / Restore the default draft
 #define PN_SUI_PRESET 10 ///< 10..12为舒适/紧凑/大字 / 10..12 are comfortable/compact/large
+#define PN_SUI_INDENT 14 ///< 切换首行缩进（0或2字）/ Toggle the first-line indent (0 or 2 characters)
 #define PN_SUI_FIELD 16
 #define PN_SUI_FIELDS 7
 typedef struct {

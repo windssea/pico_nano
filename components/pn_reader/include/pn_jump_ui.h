@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  * 中文：阅读进度跳转面板（docs/UI_UX.md第4节“点击进度条打开跳转面板”）：数值步进＋预览＋确认，避免一次随手触摸直接跨越大量内容。
  * English: reading progress jump panel (docs/UI_UX.md section 4, "tap the progress to open the jump panel"): numeric stepping, preview and confirmation so one stray touch never leaps across a lot of content.
- * 冻结：步进只改草稿；只有“跳转”才移动阅读位置；取消重画当前页。TXT按百分比，EPUB按章节。
- * Frozen: stepping only edits the draft; only "Jump" moves the reading position; cancel redraws the current page. TXT jumps by percentage, EPUB by section.
+ * 冻结：步进只改草稿；只有“跳转”才移动阅读位置；取消重画当前页。TXT与EPUB都按百分比，EPUB落到该百分比所在章节的开头。
+ * Frozen: stepping only edits the draft; only "Jump" moves the reading position; cancel redraws the current page. TXT and EPUB both jump by percentage; EPUB lands at the start of the containing section.
  */
 #pragma once
 #include "pn_reader_app.h"
@@ -17,10 +17,11 @@ typedef struct {
     pn_reader_app_t *reader; ///< TXT会话（与epub互斥）/ TXT session (exclusive with epub)
     pn_epub_app_t *epub; ///< EPUB会话 / EPUB session
     bool active,presented; ///< 面板活动与呈现确认 / Panel active and presentation confirmed
-    unsigned current; ///< 打开时的位置：TXT为百分比0..100，EPUB为章节序号 / Position at opening: TXT percent 0..100, EPUB section index
+    unsigned current; ///< 打开时的位置：百分比0..100 / Position at opening: percent 0..100
     unsigned draft; ///< 草稿目标，范围同current / Draft target, same range as current
-    unsigned maximum; ///< 草稿最大值：TXT为100，EPUB为章节数-1 / Largest draft: 100 for TXT, section count minus one for EPUB
+    unsigned maximum; ///< 草稿最大值100 / Largest draft, 100
     unsigned large; ///< 大步长 / Large step
+    unsigned sections; ///< EPUB章节数，用于预览说明 / EPUB section count for the preview line
     const char *notice; ///< 静态反馈 / Static feedback
 } pn_jump_ui_t;
 /// 打开面板并呈现；失败时不改变阅读位置。/ Open and present the panel; a failure leaves the reading position unchanged.

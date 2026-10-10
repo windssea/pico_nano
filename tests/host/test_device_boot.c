@@ -53,6 +53,7 @@ void esp_fill_random(void *p,size_t n){memset(p,0xa5,n);}
 esp_err_t read_pico_pmu_report_ready(void){return ready_bad?ESP_FAIL:ESP_OK;}
 bool read_pico_pmu_take_key_short(void){return false;}
 bool read_pico_pmu_ready(void){return true;}
+esp_err_t read_pico_pmu_cmd(uint16_t code,const uint8_t *payload,uint8_t plen){(void)code;(void)payload;(void)plen;return ESP_OK;}
 esp_err_t read_pico_pmu_poll(void){return ESP_OK;}
 const pmu_snapshot_t *read_pico_pmu_get(void){static const pmu_snapshot_t snapshot={.qb_soc=873,.qb_flags=2};return &snapshot;}
 void *heap_caps_malloc(size_t n,int caps){assert(caps==3);return malloc(n);}

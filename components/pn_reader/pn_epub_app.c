@@ -80,6 +80,21 @@ static bool section_progress(app_t *a,const char *path,size_t *index,unsigned *b
     if(!total){*basis=(unsigned)(*index*10000u/a->info.spine_count);return true;}
     *basis=(unsigned)(before*10000u/total);if(*basis>10000u)*basis=10000u;return true;
 }
+/* 百分比对应的章节：各章起点按XHTML原长累计，取起点不超过目标的最后一章。/ The section for a percentage: chapter starts accumulate XHTML sizes; pick the last chapter starting at or before the target. */
+static bool basis_section(app_t *a,unsigned basis,size_t *index){
+    if(!a->info.spine_count)return false;
+    uint64_t total=0;
+    for(size_t i=0;i<a->info.spine_count;i++){pn_epub_item_t item;pn_zip_info_t info;if(pn_epub_spine(&a->epub,i,&item)==PN_OK && item.media==PN_EPUB_XHTML && pn_zip_info(&a->zip,item.zip_index,&info)==PN_OK)total+=info.unpacked;}
+    if(!total){*index=(size_t)basis*a->info.spine_count/10001u;return true;}
+    uint64_t target=total*basis/10000u,start=0;*index=0;
+    for(size_t i=0;i<a->info.spine_count;i++){
+        pn_epub_item_t item;pn_zip_info_t info;
+        if(pn_epub_spine(&a->epub,i,&item)!=PN_OK || item.media!=PN_EPUB_XHTML || pn_zip_info(&a->zip,item.zip_index,&info)!=PN_OK)continue;
+        if(start>target)break;
+        *index=i;start+=info.unpacked;
+    }
+    return true;
+}
 static pn_status_t recent(app_t *a,const char *path){
     pn_recent_item_t item={.book=a->book,.source_size=a->book_file.size,.format=2,.progress=PN_RECENT_UNKNOWN_PROGRESS};strcpy(item.path,a->book_path);
     size_t index=0;unsigned basis=0;if(section_progress(a,path,&index,&basis)){item.progress=(uint16_t)basis;a->recent_section=index;}
@@ -370,6 +385,21 @@ pn_status_t pn_epub_app_section_info(pn_epub_app_t *app,size_t *count,size_t *cu
     app_t *a=app->impl;if(!a->has_visible)return PN_EMPTY;
     size_t index=0;pn_status_t status=pn_epub_spine_find(&a->epub,a->visible.location.path,&index);if(status!=PN_OK)return status;
     *count=a->info.spine_count;*current=index;return PN_OK;
+}
+pn_status_t pn_epub_app_percent(pn_epub_app_t *app,unsigned *basis,size_t *section,size_t *count){
+    if(!app || !app->impl || !basis || !section || !count)return PN_INVALID;
+    app_t *a=app->impl;if(!a->has_visible)return PN_EMPTY;
+    if(!section_progress(a,a->visible.location.path,section,basis))return PN_EMPTY;
+    *count=a->info.spine_count;return PN_OK;
+}
+pn_status_t pn_epub_app_percent_section(pn_epub_app_t *app,unsigned basis,size_t *section){
+    if(!app || !app->impl || !section || basis>10000)return PN_INVALID;
+    return basis_section(app->impl,basis,section)?PN_OK:PN_EMPTY;
+}
+pn_status_t pn_epub_app_jump_percent(pn_epub_app_t *app,unsigned basis,uint64_t now,pn_reader_present_fn present,void *ctx){
+    if(app && app->impl)((app_t *)app->impl)->last_confirmed=false;
+    size_t index=0;pn_status_t status=pn_epub_app_percent_section(app,basis,&index);if(status!=PN_OK)return status;
+    return pn_epub_app_section_jump(app,index,now,present,ctx);
 }
 pn_status_t pn_epub_app_section_jump(pn_epub_app_t *app,size_t index,uint64_t now,pn_reader_present_fn present,void *ctx){
     if(app && app->impl)((app_t *)app->impl)->last_confirmed=false;

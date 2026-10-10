@@ -25,6 +25,7 @@ pn_status_t pn_shelf_render_mode(const pn_catalog_page_t *page,pn_font_t *font,p
 #define PN_SHELF_TAB_ALL 18 ///< 点“全部” / Tap All
 #define PN_SHELF_TAB_RECENT 19 ///< 点“最近” / Tap Recent
 #define PN_SHELF_SEARCH 20 ///< 点“搜索” / Tap Search
+#define PN_SHELF_TAB_FAVORITES 23 ///< 点“收藏” / Tap Favorites
 #define PN_SHELF_IMPORT 22 ///< 点“导入图书”（进入传书）/ Tap "import books" (opens transfer)
 #define PN_SHELF_LAYOUT 21 ///< 点网格/列表切换 / Tap the grid/list toggle
 /// 书架的可选外观与入口；全零（battery_percent=-1）等价于旧行为。
@@ -32,6 +33,8 @@ pn_status_t pn_shelf_render_mode(const pn_catalog_page_t *page,pn_font_t *font,p
 typedef struct {
     int battery_percent; ///< 0–100，<0不显示 / 0–100, hidden when negative
     bool list_mode; ///< 列表模式（每页5行）/ List mode, five rows per page
+    bool favorites_tab; ///< 分类里显示“收藏” / Show Favorites among the categories
+    bool favorites; ///< 当前为收藏视图 / Showing the favorites view
     bool import_tile; ///< 最后一页空格放“导入图书”卡、空书架给“导入图书”按钮 / An import tile in a free last-page slot and an import button on an empty shelf
     bool layout_toggle; ///< 显示网格/列表切换 / Show the grid/list toggle
     bool search; ///< 显示“搜索”入口 / Show the Search entry

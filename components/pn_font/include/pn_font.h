@@ -14,6 +14,7 @@ typedef enum {PN_FONT_GRAY=0,PN_FONT_BINARY=1} pn_font_render_t;
 typedef struct {
     void *impl; ///< 初始化为NULL，内部引擎 / Initialize to NULL, private engine
     int pixels; ///< 当前像素高度 / Current pixel height
+    uint8_t ink; ///< 字形混合到的灰阶，0为黑（默认）/ Gray the glyphs blend towards, 0 is black (default)
 } pn_font_t;
 /// 仅接受有glyf的单TTF源，最大32MiB；全部引擎分配走pool。
 /// Accept single glyf TTF sources only, at most 32 MiB; all engine allocations use pool.

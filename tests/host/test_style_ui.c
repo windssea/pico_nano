@@ -19,20 +19,23 @@ int main(void){char root[]="/tmp/pn-style-ui-XXXXXX";assert(mkdtemp(root));char 
     screen.fail=true;assert(pn_style_ui_open(&ui,&app,present,&screen)==PN_IO && !ui.presented);
     assert(pn_style_ui_event(&ui,PN_SUI_APPLY,2,present,&screen)==PN_BUSY && ui.active);
     screen.fail=false;screen.capture=true;assert(pn_style_ui_event(&ui,PN_SUI_RETRY,2,present,&screen)==PN_OK && ui.presented);
-    /* 主页四个步进行；“边距与更多选项”进入第二页再调后三项。/ Four steppers on the main page; "margins and more options" opens the second page for the remaining three. */
-    for(unsigned i=0;i<4;i++){int hit=pn_style_ui_hit(&ui,600,630+(int)i*80);assert(hit==PN_SUI_FIELD+(int)i*2+1);assert(pn_style_ui_event(&ui,hit,2,present,&screen)==PN_OK && !ui.more);}
-    assert(pn_style_ui_hit(&ui,100,970)==PN_SUI_MORE && pn_style_ui_hit(&ui,100,570)==PN_SUI_FONTS && pn_style_ui_hit(&ui,100,60)==PN_SUI_CANCEL && pn_style_ui_hit(&ui,600,60)==PN_SUI_APPLY);
+    /* 主页：字号/行距/段距/页边距四个步进行与首行缩进开关；“字距与清残影”进入第二页。/ Main page: size/line/gap/margin steppers and the indent toggle; "tracking and ghost clearing" opens the second page. */
+    {static const unsigned rows[4]={0,1,2,5};
+     for(unsigned i=0;i<4;i++){int hit=pn_style_ui_hit(&ui,600,600+(int)i*84);assert(hit==PN_SUI_FIELD+(int)rows[i]*2+1);assert(pn_style_ui_event(&ui,hit,2,present,&screen)==PN_OK && !ui.more);}}
+    assert(pn_style_ui_hit(&ui,100,950)==PN_SUI_INDENT && pn_style_ui_event(&ui,PN_SUI_INDENT,2,present,&screen)==PN_OK && ui.draft.indent_em==2);
+    assert(pn_style_ui_hit(&ui,100,1030)==PN_SUI_MORE && pn_style_ui_hit(&ui,100,520)==PN_SUI_FONTS && pn_style_ui_hit(&ui,100,60)==PN_SUI_CANCEL && pn_style_ui_hit(&ui,600,90)==PN_SUI_RESET && pn_style_ui_hit(&ui,300,1150)==PN_SUI_APPLY);
     assert(pn_style_ui_event(&ui,PN_SUI_MORE,2,present,&screen)==PN_OK && ui.more && pn_style_ui_hit(&ui,100,60)==PN_SUI_BACK_MAIN);
-    for(unsigned i=4;i<7;i++){int hit=pn_style_ui_hit(&ui,600,166+(int)(i-4)*80);assert(hit==PN_SUI_FIELD+(int)i*2+1);assert(pn_style_ui_event(&ui,hit,2,present,&screen)==PN_OK && ui.more);}
-    assert(pn_style_ui_hit(&ui,100,900)==-1 && pn_style_ui_hit(&ui,100,430)==-1); /* 更多页没有字体行和预设 / the more page has no font row or presets */
+    {static const unsigned more[2]={4,6};
+     for(unsigned i=0;i<2;i++){int hit=pn_style_ui_hit(&ui,600,180+(int)i*84);assert(hit==PN_SUI_FIELD+(int)more[i]*2+1);assert(pn_style_ui_event(&ui,hit,2,present,&screen)==PN_OK && ui.more);}}
+    assert(pn_style_ui_hit(&ui,100,900)==-1 && pn_style_ui_hit(&ui,100,520)==-1); /* 更多页没有字体行和预设 / the more page has no font row or presets */
     assert(pn_style_ui_event(&ui,PN_SUI_BACK_MAIN,2,present,&screen)==PN_OK && !ui.more);
-    assert(ui.draft.pixels==46 && ui.draft.line_percent==150 && ui.draft.gap_percent==30 && ui.draft.indent_em==1 && ui.draft.margin==34 && ui.draft.gl_before_clear==13 && ui.draft.tracking_percent==5);
+    assert(ui.draft.pixels==46 && ui.draft.line_percent==150 && ui.draft.gap_percent==30 && ui.draft.indent_em==2 && ui.draft.margin==48 && ui.draft.gl_before_clear==13 && ui.draft.tracking_percent==5);
     /* 预设与恢复默认只改草稿。/ Presets and restore-defaults change only the draft. */
-    assert(pn_style_ui_hit(&ui,100,470)==PN_SUI_PRESET && pn_style_ui_hit(&ui,340,470)==PN_SUI_PRESET+1 && pn_style_ui_hit(&ui,560,470)==PN_SUI_PRESET+2);
+    assert(pn_style_ui_hit(&ui,100,448)==PN_SUI_PRESET && pn_style_ui_hit(&ui,340,448)==PN_SUI_PRESET+1 && pn_style_ui_hit(&ui,560,448)==PN_SUI_PRESET+2);
     assert(pn_style_ui_event(&ui,PN_SUI_PRESET+1,2,present,&screen)==PN_OK && ui.draft.pixels==36 && ui.draft.line_percent==125 && ui.draft.margin==24 && ui.draft.tracking_percent==0);
     assert(pn_style_ui_event(&ui,PN_SUI_PRESET+2,2,present,&screen)==PN_OK && ui.draft.pixels==56);
     assert(pn_style_ui_event(&ui,PN_SUI_RESET,2,present,&screen)==PN_OK && ui.draft.pixels==44 && ui.draft.line_percent==145 && ui.draft.indent_em==0);
-    assert(pn_style_ui_hit(&ui,300,300)==PN_SUI_PREVIEW && pn_style_ui_hit(&ui,100,1100)==PN_SUI_CANCEL && pn_style_ui_hit(&ui,340,1100)==-1 && pn_style_ui_hit(&ui,560,1100)==PN_SUI_RESET);
+    assert(pn_style_ui_hit(&ui,300,300)==PN_SUI_PREVIEW && pn_style_ui_hit(&ui,300,1100)==-1);
     screen.capture=false;const char *preview_path=getenv("PN_STYLE_PREVIEW_CAPTURE");if(preview_path){assert(setenv("PN_STYLE_CAPTURE",preview_path,1)==0);screen.capture=true;}
     assert(pn_style_ui_event(&ui,PN_SUI_PREVIEW,3,present,&screen)==PN_OK && ui.preview);assert(pn_style_ui_hit(&ui,300,400)==PN_SUI_FORM);screen.capture=false;
     assert(pn_style_ui_event(&ui,PN_SUI_FORM,3,present,&screen)==PN_OK && !ui.preview);assert(pn_style_ui_event(&ui,PN_SUI_CANCEL,4,present,&screen)==PN_OK && !ui.active);

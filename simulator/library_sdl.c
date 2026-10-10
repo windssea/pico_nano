@@ -18,6 +18,7 @@
 #include "pn_tap.h"
 #include <SDL.h>
 #include <stdio.h>
+#include <time.h>
 #include <stdlib.h>
 #include <string.h>
 #include "pn_search_ui.h"
@@ -206,7 +207,7 @@ static pn_status_t continue_book(library_t *s,uint64_t now){
     *book=s->covers->last;pn_status_t status=open_item(s,book,now);pn_free(book);return status;
 }
 /* 工具栏中当前书不能用的入口：TXT没有目录，搜索尚未实现。/ Entries unavailable for the current book: TXT has no TOC and search is not implemented. */
-static unsigned toolbar_unavailable(library_t *s){return (s->epub.impl?0u:1u)|4u;}
+static unsigned toolbar_unavailable(library_t *s){return s->epub.impl?0u:1u;}
 /* 在上一帧页面上叠加工具栏并呈现。/ Overlay the toolbar on the last page frame and present it. */
 static pn_status_t toolbar_show(library_t *s){
     if(!reading(s) || !s->page_px)return PN_EMPTY;
@@ -261,6 +262,7 @@ int pn_sim_library_window(pn_pool_t *pool,const char *directory,const char *font
     if(pn_settings_load_flags(&s->state_media,s->state_dir,&s->input_flags)!=PN_OK)s->input_flags=0;
     sim_script_t script;script_init(&script,"PN_SIM_LIBRARY_SCRIPT");result=0;bool running=true;pn_tap_t tap={0};pn_reader_input_t input={0};
     while(running){
+        {static time_t last;time_t t=time(NULL);if(t!=last){last=t;struct tm local;char text[8];if(localtime_r(&t,&local) && strftime(text,sizeof text,"%H:%M",&local))pn_w_set_clock(text);}} // 模拟器用本机时间 / The simulator uses the host clock
         script_queue(&script);SDL_Event event;bool got=SDL_WaitEventTimeout(&event,100)!=0;uint64_t now=SDL_GetTicks64();
         if(reading(s)){status=s->epub.impl?pn_epub_app_tick(&s->epub,now):pn_reader_app_tick(&s->reader,now);if(status!=PN_OK && status!=PN_BUSY)SDL_SetWindowTitle(s->window,"小纸 Pico - 保存失败，关闭前请重试");}
         if(s->bookmarks.mode!=PN_BUI_CLOSED && !s->bookmarks.presented && now-s->ui_retry>=1000){s->ui_retry=now;status=pn_bookmark_ui_present(&s->bookmarks,present,s);}
@@ -372,6 +374,7 @@ int pn_sim_library_window(pn_pool_t *pool,const char *directory,const char *font
             else if(tool==PN_TOOL_REFRESH)status=toolbar_close(s,true);
             else if(tool==PN_TOOL_TOC){s->toolbar=false;status=pn_toc_ui_open(&s->toc,&s->epub,present,s);toc_report(&s->toc,0,status);}
             else if(tool==PN_TOOL_BOOKMARKS){s->toolbar=false;status=s->epub.impl?pn_bookmark_ui_open_epub(&s->bookmarks,&s->epub,present,s):pn_bookmark_ui_open(&s->bookmarks,&s->reader,present,s);printf("bookmark_ui open status=%d mode=%d count=%zu\n",(int)status,(int)s->bookmarks.mode,s->bookmarks.count);SDL_StopTextInput();}
+            else if(tool==PN_TOOL_JUMP){s->toolbar=false;status=s->epub.impl?pn_jump_ui_open_epub(&s->jumpui,&s->epub,present,s):pn_jump_ui_open(&s->jumpui,&s->reader,present,s);}
             else if(tool==PN_TOOL_TYPESET){s->toolbar=false;status=s->epub.impl?pn_style_ui_open_epub(&s->styles,&s->epub,present,s):pn_style_ui_open(&s->styles,&s->reader,present,s);printf("style_ui open status=%d pixels=%u\n",(int)status,s->styles.draft.pixels);}
             else if(tool==PN_TOOL_SHELF){s->toolbar=false;status=return_to_shelf(s,now);}
             cancel_pointer(&input,&tap,(SDL_GetMouseState(NULL,NULL)&SDL_BUTTON_LMASK)==0);

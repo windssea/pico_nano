@@ -91,6 +91,7 @@ void pn_w_icon(pn_frame_t *frame,pn_icon_t icon,int x,int y,int size,uint8_t sha
     case PN_ICON_IMPORT:
         line(&c,0.50f,0.10f,0.50f,0.62f);line(&c,0.30f,0.44f,0.50f,0.64f);line(&c,0.50f,0.64f,0.70f,0.44f);
         line(&c,0.14f,0.66f,0.14f,0.88f);line(&c,0.14f,0.88f,0.86f,0.88f);line(&c,0.86f,0.88f,0.86f,0.66f);break;
+    case PN_ICON_PROGRESS: line(&c,0.08f,0.62f,0.92f,0.62f);dot(&c,0.56f,0.62f,0.12f);line(&c,0.56f,0.12f,0.56f,0.36f);line(&c,0.44f,0.26f,0.56f,0.38f);line(&c,0.56f,0.38f,0.68f,0.26f);break;
     default: break;
     }
 }

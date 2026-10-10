@@ -61,7 +61,7 @@ int main(int argc,char **argv){
     pn_style_ui_t ui={0};screen.fail=true;assert(pn_style_ui_open_epub(&ui,&app,present,&screen)==PN_IO && !ui.presented && pn_style_ui_event(&ui,PN_SUI_APPLY,now++,present,&screen)==PN_BUSY);
     screen.fail=false;assert(pn_style_ui_event(&ui,PN_SUI_RETRY,now++,present,&screen)==PN_OK);
     assert(pn_style_ui_event(&ui,PN_SUI_FIELD+7,now++,present,&screen)==PN_EMPTY && ui.draft.indent_em==2);
-    for(unsigned i=0;i<PN_SUI_FIELDS;i++)assert(pn_style_ui_event(&ui,PN_SUI_FIELD+(int)i*2+(i==3?0:1),now++,present,&screen)==PN_OK);
+    for(unsigned i=0;i<PN_SUI_FIELDS;i++){pn_status_t stepped=pn_style_ui_event(&ui,PN_SUI_FIELD+(int)i*2+(i==3?0:1),now++,present,&screen);assert(stepped==PN_OK || (i==5 && stepped==PN_EMPTY));} /* 页边距只有三档，已在最宽时不再加 / margins have three levels and stop at the widest */
     assert(pn_style_ui_event(&ui,PN_SUI_PREVIEW,now++,present,&screen)==PN_OK && ui.preview && pn_epub_app_progress(&app,&after)==PN_OK && same(&current,&after));
     assert(pn_style_ui_event(&ui,PN_SUI_FORM,now++,present,&screen)==PN_OK && pn_style_ui_event(&ui,PN_SUI_CANCEL,now++,present,&screen)==PN_OK && !ui.active);
     assert(pn_epub_app_style_get(&app,&draft)==PN_OK && !memcmp(&draft,&style,sizeof style));

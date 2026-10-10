@@ -25,12 +25,12 @@ static pn_status_t overlay(pn_jump_ui_t *u,pn_reader_overlay_fn paint,pn_reader_
 }
 /* 值的显示：TXT“42%”，EPUB“第 12 节”。/ Value text: "42%" for TXT, "section 12" for EPUB. */
 static void value_text(const pn_jump_ui_t *u,unsigned value,char *out,size_t cap){
-    if(u->epub)snprintf(out,cap,"第 %u 节",value+1);else snprintf(out,cap,"%u%%",value);
+    (void)u;snprintf(out,cap,"%u%%",value);
 }
 static pn_status_t paint(void *ctx,pn_font_t *font,pn_font_t *metadata,pn_frame_t *frame){
     (void)metadata;pn_jump_ui_t *u=ctx;pn_frame_clear(frame,PN_UI_PAPER);
     int original=font->pixels;char text[96],now[48];
-    pn_status_t s=pn_w_header(font,frame,"< 取消",u->epub?"跳到章节":"跳到位置",NULL);
+    pn_status_t s=pn_w_header(font,frame,"< 取消","跳到位置",NULL);
     // 当前位置与目标。/ Current position and target.
     value_text(u,u->current,now,sizeof now);
     if(s==PN_OK)s=pn_font_size(font,30);
@@ -46,7 +46,7 @@ static pn_status_t paint(void *ctx,pn_font_t *font,pn_font_t *metadata,pn_frame_
     // 预览行：说明跳转后的相对位置。/ Preview line describing the relative position after the jump.
     if(s==PN_OK)s=pn_font_size(font,28);
     if(u->draft==u->current)snprintf(text,sizeof text,"与现在相同，不会移动");
-    else if(u->epub)snprintf(text,sizeof text,"%s %u 节，共 %u 节",u->draft>u->current?"向后":"向前",u->draft>u->current?u->draft-u->current:u->current-u->draft,u->maximum+1);
+    else if(u->epub){size_t section=0;if(pn_epub_app_percent_section(u->epub,u->draft*100u,&section)!=PN_OK)section=0;snprintf(text,sizeof text,"约在第 %zu/%u 节开头（按章节定位）",section+1,u->sections);}
     else snprintf(text,sizeof text,"%s %u%%，之后可“返回跳转前位置”",u->draft>u->current?"向后":"向前",u->draft>u->current?u->draft-u->current:u->current-u->draft);
     if(s==PN_OK)s=pn_w_text(font,frame,text,PN_UI_MARGIN,BAR_Y+80,620,PN_ALIGN_LEFT);
     // 四个步进键。/ Four step keys.
@@ -80,8 +80,9 @@ pn_status_t pn_jump_ui_open_epub(pn_jump_ui_t *u,pn_epub_app_t *epub,pn_reader_p
     if(!u || !epub || !epub->impl)return PN_INVALID;
     size_t count=0,current=0;pn_status_t status=pn_epub_app_section_info(epub,&count,&current);if(status!=PN_OK)return status;
     if(count<2)return PN_EMPTY;
-    memset(u,0,sizeof *u);u->epub=epub;
-    u->current=u->draft=(unsigned)current;u->maximum=(unsigned)(count-1);u->large=count>=40?5u:count>=12?3u:2u;u->active=true;
+    unsigned basis=0;size_t at=0,total=0;if(pn_epub_app_percent(epub,&basis,&at,&total)!=PN_OK)return PN_EMPTY;
+    memset(u,0,sizeof *u);u->epub=epub;u->sections=(unsigned)total;
+    (void)current;(void)at;u->current=u->draft=basis/100u;u->maximum=100;u->large=10;u->active=true; // EPUB也按百分比，定位到所在章节开头 / EPUB uses percentages too, landing at the start of the containing section
     status=pn_jump_ui_present(u,present,ctx);if(status!=PN_OK)u->active=false;return status;
 }
 pn_status_t pn_jump_ui_event(pn_jump_ui_t *u,int command,uint64_t now,pn_reader_present_fn present,void *ctx){
@@ -97,7 +98,7 @@ pn_status_t pn_jump_ui_event(pn_jump_ui_t *u,int command,uint64_t now,pn_reader_
     }
     if(command==PN_JUI_CONFIRM){
         if(u->draft==u->current){u->notice="与现在相同，不会移动";return pn_jump_ui_present(u,present,ctx);}
-        pn_status_t status=u->epub?pn_epub_app_section_jump(u->epub,u->draft,now,present,ctx):pn_reader_app_jump_percent(u->reader,u->draft*100u,now,present,ctx);
+        pn_status_t status=u->epub?pn_epub_app_jump_percent(u->epub,u->draft*100u,now,present,ctx):pn_reader_app_jump_percent(u->reader,u->draft*100u,now,present,ctx);
         bool confirmed=u->epub?pn_epub_app_last_confirmed(u->epub):pn_reader_app_last_confirmed(u->reader);
         // 已确认显示即关闭；保存失败由阅读层另行提示。/ A confirmed display closes the panel; save failures surface through the reading layer.
         if(confirmed){u->active=false;return status;}

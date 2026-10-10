@@ -112,3 +112,9 @@ pn_status_t pn_epub_app_section_info(pn_epub_app_t *,size_t *count,size_t *curre
 pn_status_t pn_epub_app_section_jump(pn_epub_app_t *,size_t index,uint64_t,pn_reader_present_fn,void *);
 /// 资源路径所在章节（从0起）与章节总数；不是章节资源返回PN_EMPTY。/ Zero-based section of a resource path and the section count; PN_EMPTY when the path is not a section.
 pn_status_t pn_epub_app_section_of(pn_epub_app_t *,const char *path,size_t *index,size_t *count);
+/// 当前位置的章节进度（0–10000，按章节起点估算）、所在章节与章节数。/ Section-based progress of the current position (0–10000, estimated at chapter starts), its section and the section count.
+pn_status_t pn_epub_app_percent(pn_epub_app_t *,unsigned *basis,size_t *section,size_t *count);
+/// 百分比落在哪一章（从0起）。/ The section (zero-based) a percentage falls into.
+pn_status_t pn_epub_app_percent_section(pn_epub_app_t *,unsigned basis,size_t *section);
+/// 按百分比跳转：跳到该百分比所在章节的开头；成功确认后可返回跳转前位置。/ Jump by percentage to the start of the section it falls into; the pre-jump position stays reachable after a confirmed jump.
+pn_status_t pn_epub_app_jump_percent(pn_epub_app_t *,unsigned basis,uint64_t,pn_reader_present_fn,void *);

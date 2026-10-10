@@ -16,7 +16,7 @@
 typedef enum {
     PN_TOOL_TOC=40, ///< 目录 / Table of contents
     PN_TOOL_BOOKMARKS, ///< 书签 / Bookmarks
-    PN_TOOL_SEARCH, ///< 搜索（尚未实现，固定显示为不可用）/ Search (not implemented, always shown as unavailable)
+    PN_TOOL_JUMP, ///< 按百分比跳转（打开跳转面板）/ Jump by percentage (opens the jump panel)
     PN_TOOL_TYPESET, ///< 排版 / Typesetting
     PN_TOOL_REFRESH, ///< 强刷：整屏GC16重绘当前页 / Full-screen GC16 redraw of the current page
     PN_TOOL_SHELF, ///< 回书架 / Back to the shelf

@@ -13,10 +13,16 @@
 #define PN_UI_WIDTH 684 ///< 逻辑宽度 / Logical width
 #define PN_UI_HEIGHT 1216 ///< 逻辑高度 / Logical height
 #define PN_UI_MARGIN 32 ///< 基本边距 / Basic margin
-#define PN_UI_HIT_MIN 80 ///< 最小命中尺寸 / Minimum touch target
-#define PN_UI_RADIUS 12 ///< 按钮圆角 / Button radius
+#define PN_UI_HIT_MIN 88 ///< 最小命中尺寸（297ppi下约7.5mm，规范要求不小于7mm）/ Minimum touch target (about 7.5 mm at 297 ppi; the spec requires at least 7 mm)
+#define PN_UI_RADIUS 16 ///< 控件圆角（9u）/ Control radius (9u)
+#define PN_UI_CARD_RADIUS 22 ///< 卡片圆角（12u）/ Card radius (12u)
+#define PN_UI_CHIP_RADIUS 28 ///< 分段与抽屉圆角（16u）/ Segment and sheet radius (16u)
 #define PN_UI_INK 0 ///< 前景黑 / Foreground black
-#define PN_UI_RULE 4 ///< 分隔线灰阶 / Rule shade
+#define PN_UI_RULE 11 ///< 分隔线灰阶（G11）/ Rule shade (G11)
+#define PN_UI_STROKE 11 ///< 描边（G11 #BBBBBB）/ Stroke (G11)
+#define PN_UI_SELECT 13 ///< 选中灰底与细分隔（G13 #DDDDDD）/ Selection base and fine dividers (G13)
+#define PN_UI_SURFACE 14 ///< 雾面卡片（G14 #EEEEEE）/ Fog card surface (G14)
+#define PN_UI_MUTED 5 ///< 次要文字（G05 #555555）/ Secondary text (G05)
 #define PN_UI_PAPER 15 ///< 背景白 / Background white
 
 /// 文字水平对齐。/ Horizontal text alignment.
@@ -30,7 +36,7 @@ typedef enum {PN_ALIGN_LEFT=0,PN_ALIGN_CENTER,PN_ALIGN_RIGHT} pn_align_t;
 typedef enum {
     PN_ICON_SEARCH=0,PN_ICON_GRID,PN_ICON_LIST,PN_ICON_BACK,PN_ICON_CHEVRON,PN_ICON_SHELF,PN_ICON_TRANSFER,PN_ICON_SETTINGS,
     PN_ICON_TOC,PN_ICON_BOOKMARK,PN_ICON_TYPESET,PN_ICON_REFRESH,PN_ICON_CLOSE,PN_ICON_PLUS,PN_ICON_MINUS,PN_ICON_ARROW,
-    PN_ICON_FONT,PN_ICON_IMAGE,PN_ICON_LOCK,PN_ICON_TRASH,PN_ICON_CHECK,PN_ICON_WIFI,PN_ICON_MORE,PN_ICON_IMPORT,PN_ICON_COUNT
+    PN_ICON_FONT,PN_ICON_IMAGE,PN_ICON_LOCK,PN_ICON_TRASH,PN_ICON_CHECK,PN_ICON_WIFI,PN_ICON_MORE,PN_ICON_IMPORT,PN_ICON_PROGRESS,PN_ICON_COUNT
 } pn_icon_t;
 
 /// 设置备用字体（例如用户的阅读字体）：主UI字体缺字时用同字号画它的字形；NULL取消。字体对象须在取消前保持有效。
@@ -42,6 +48,12 @@ pn_status_t pn_w_text_width(pn_font_t *font,const char *utf8,int *width);
 /// 画一行文字。baseline为基线y；max_width>0且放不下时以“...”截断；对齐相对[x,x+max_width]（max_width为0时相对x）。
 /// Draw one line. baseline is the y of the baseline; with max_width>0 overflowing text is cut with "..."; alignment is within [x,x+max_width] (relative to x when max_width is 0).
 pn_status_t pn_w_text(pn_font_t *font,pn_frame_t *frame,const char *utf8,int x,int baseline,int max_width,pn_align_t align);
+/// 带样式的单行文字：ink为墨色灰阶（0黑，5为次要说明），bold为加粗。/ Styled single line: ink is the gray level (0 black, 5 for secondary notes) and bold thickens strokes.
+pn_status_t pn_w_text_ex(pn_font_t *font,pn_frame_t *frame,const char *utf8,int x,int baseline,int max_width,pn_align_t align,uint8_t ink,bool bold);
+/// 带样式的折行文字。/ Styled wrapped text.
+pn_status_t pn_w_text_lines_ex(pn_font_t *font,pn_frame_t *frame,const char *utf8,int x,int baseline,int width,unsigned max_lines,int pitch,uint8_t ink,bool bold);
+/// 按是否加粗量宽度。/ Measure width for regular or bold text.
+pn_status_t pn_w_text_width_ex(pn_font_t *font,const char *utf8,bool bold,int *width);
 /// 按字符折行最多max_lines行，行距pitch；放不下时末行以“...”截断。used可为NULL，返回实际行数。
 /// Wrap by character into at most max_lines lines spaced by pitch; the last line is cut with "..." on overflow. used may be NULL and returns the line count.
 pn_status_t pn_w_text_lines(pn_font_t *font,pn_frame_t *frame,const char *utf8,int x,int baseline,int width,unsigned max_lines,int pitch,unsigned *used);
@@ -69,6 +81,11 @@ int pn_w_tabbar_hit(unsigned count,int y,int height,int x,int hit_y);
 /// 页面顶栏：左侧“< 返回”文字，居中标题，右侧可选的圆角主按钮；底部细线。字号由本函数设定并在返回前还原。
 /// Page header: "< back" text on the left, a centered title and an optional rounded primary button on the right; a thin rule below. The font size is set here and restored on return.
 pn_status_t pn_w_header(pn_font_t *font,pn_frame_t *frame,const char *back,const char *title,const char *action);
+/// 状态带时间（"HH:MM"，NULL或空则不显示）与无线连接状态。/ Status-band clock ("HH:MM"; hidden when NULL or empty) and wireless connection state.
+void pn_w_set_clock(const char *hhmm);
+void pn_w_set_wifi(bool connected);
+/// 拟玻璃面板：静态下沿灰影＋雾面＋细描边。/ Faux-glass panel: a static under-edge shade, fog surface and hairline.
+void pn_w_glass(pn_frame_t *frame,int x,int y,int width,int height,int radius);
 /// 状态带（y=0..40）：左侧产品名，右侧电量（未设置电量则不画）。/ Status band (y=0..40): product name on the left and the battery on the right (omitted until a level is set).
 pn_status_t pn_w_status(pn_font_t *font,pn_frame_t *frame);
 /// 设置/读取状态带电量（0–100，<0表示未知不显示）。/ Set or read the status-band battery (0–100, negative means unknown and hidden).

@@ -14,8 +14,8 @@
 #define COLUMN_PITCH 212
 #define ROW_Y0 936
 #define ROW_PITCH 120
-static const char *const labels[TOOL_COUNT]={"目录","书签","搜索","排版","刷新","书架"};
-static const pn_icon_t icons[TOOL_COUNT]={PN_ICON_TOC,PN_ICON_BOOKMARK,PN_ICON_SEARCH,PN_ICON_TYPESET,PN_ICON_REFRESH,PN_ICON_SHELF};
+static const char *const labels[TOOL_COUNT]={"目录","书签","跳转","排版","刷新","书架"};
+static const pn_icon_t icons[TOOL_COUNT]={PN_ICON_TOC,PN_ICON_BOOKMARK,PN_ICON_PROGRESS,PN_ICON_TYPESET,PN_ICON_REFRESH,PN_ICON_SHELF};
 pn_status_t pn_reader_footer_progress(pn_font_t *ui,pn_font_t *fallback,pn_frame_t *frame,const char *left,const char *right,int basis){
     if(!ui || !ui->impl || !frame || !frame->pixels || !left || !right)return PN_INVALID;
     int original=ui->pixels;
@@ -44,13 +44,15 @@ pn_status_t pn_reader_toolbar_render(pn_font_t *ui,pn_frame_t *frame,unsigned un
     int original=ui->pixels;
     // 底部面板：圆角顶边、细描边与一条抓手；每个入口是图标在上、文字在下的圆角卡片。
     // Bottom sheet: rounded top edge, a hairline and a grab handle; every entry is a rounded card with the icon above its label.
-    pn_w_round_fill(frame,0,PN_TOOLBAR_Y,PN_UI_WIDTH,PN_UI_HEIGHT-PN_TOOLBAR_Y+40,28,PN_UI_PAPER);
-    pn_w_round_stroke(frame,-2,PN_TOOLBAR_Y,PN_UI_WIDTH+4,PN_UI_HEIGHT-PN_TOOLBAR_Y+40,28,2.0f,PN_UI_INK);
-    pn_w_round_fill(frame,(PN_UI_WIDTH-64)/2,PN_TOOLBAR_Y+12,64,6,3,8);
+    // 不加灰色遮罩：底部面板为不透明雾面，上沿圆角、细描边、抓手（产品决定，减少残影）。/ No gray mask: the bottom sheet is an opaque fog surface with rounded top corners, a hairline and a grab handle (product decision, to limit ghosting).
+    pn_w_round_fill(frame,-2,PN_TOOLBAR_Y-4,PN_UI_WIDTH+4,PN_UI_HEIGHT-PN_TOOLBAR_Y+44,PN_UI_CHIP_RADIUS,PN_UI_SELECT);
+    pn_w_round_fill(frame,0,PN_TOOLBAR_Y,PN_UI_WIDTH,PN_UI_HEIGHT-PN_TOOLBAR_Y+40,PN_UI_CHIP_RADIUS,PN_UI_PAPER);
+    pn_w_round_stroke(frame,-2,PN_TOOLBAR_Y,PN_UI_WIDTH+4,PN_UI_HEIGHT-PN_TOOLBAR_Y+40,PN_UI_CHIP_RADIUS,2.0f,PN_UI_STROKE);
+    pn_w_round_fill(frame,(PN_UI_WIDTH-64)/2,PN_TOOLBAR_Y+12,64,6,3,PN_UI_STROKE);
     pn_status_t status=pn_font_size(ui,26);
     for(unsigned i=0;i<TOOL_COUNT && status==PN_OK;i++){
         int x=SHEET_PADDING+(int)(i%3)*COLUMN_PITCH,y=ROW_Y0+(int)(i/3)*ROW_PITCH;bool off=(unavailable&(1u<<i))!=0;
-        pn_w_round_fill(frame,x,y,BUTTON_W,BUTTON_H,PN_UI_RADIUS,14);pn_w_round_stroke(frame,x,y,BUTTON_W,BUTTON_H,PN_UI_RADIUS,2.0f,9);
+        pn_w_glass(frame,x,y,BUTTON_W,BUTTON_H,PN_UI_RADIUS);
         pn_w_icon(frame,icons[i],x+(BUTTON_W-36)/2,y+10,36,PN_UI_INK);
         status=pn_w_text(ui,frame,labels[i],x+8,y+BUTTON_H-12,BUTTON_W-16,PN_ALIGN_CENTER);
         if(off && status==PN_OK)pn_w_line(frame,(float)(x+BUTTON_W/2-30),(float)(y+BUTTON_H-8-24),(float)(x+BUTTON_W/2+30),(float)(y+14),3.0f,PN_UI_INK);

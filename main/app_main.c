@@ -227,6 +227,23 @@ static bool stop_reader(void){
     pn_toc_ui_close(&toc);
     pn_bookmark_ui_cancel(&bookmarks);pn_style_ui_close(&styles);pn_jump_ui_close(&jump_ui);pn_font_ui_close(&fonts);return true;
 }
+/* 状态带时间：开机时从PMU读一次RTC（仅当PMU报告已对时），之后按开机计时推算；锁屏不显示时间。时区固定为UTC+8。
+ * Status-band clock: read the PMU RTC once at boot (only when the PMU reports it as synced), then advance by uptime; the lock screen shows no time. The time zone is fixed at UTC+8. */
+#define CLOCK_UTC_OFFSET (8*3600)
+static bool clock_known;static uint32_t clock_base_sec;static uint64_t clock_base_ms;
+static void clock_read_boot(uint64_t now){
+    if(read_pico_pmu_cmd(PMU_CMD_TIME_GET,NULL,0)!=ESP_OK)return;
+    const pmu_snapshot_t *snapshot=read_pico_pmu_get();
+    if(!snapshot || !snapshot->time_ok || !snapshot->time_synced || snapshot->unix_sec<1700000000u)return;
+    clock_base_sec=snapshot->unix_sec;clock_base_ms=now;clock_known=true;
+}
+static void clock_tick(uint64_t now){
+    if(!clock_known){pn_w_set_clock(NULL);return;}
+    uint64_t t=(uint64_t)clock_base_sec+(now-clock_base_ms)/1000u+CLOCK_UTC_OFFSET;
+    char text[8];unsigned hh=(unsigned)((t/3600u)%24u),mm=(unsigned)((t/60u)%60u);
+    text[0]=(char)('0'+hh/10);text[1]=(char)('0'+hh%10);text[2]=':';text[3]=(char)('0'+mm/10);text[4]=(char)('0'+mm%10);text[5]=0;
+    pn_w_set_clock(text);
+}
 /// 从PMU快照读电量百分比；PMU未就绪、读失败或SOC无效时返回-1（书架不显示电量，不猜）。
 /// Battery percentage from the PMU quick snapshot; -1 when the PMU is not ready, the read fails or the SOC is invalid (the shelf then shows no battery rather than a guess).
 static int battery_percent(void){
@@ -445,7 +462,7 @@ static void show_index(void){
 }
 /// 屏下三键：阅读KEY1/3翻页、KEY2菜单、长按KEY2回书架；书架KEY1/3翻书目页；菜单KEY2返回。/ Touch keys: reading KEY1/3 turn pages, KEY2 opens the menu and a long KEY2 returns to the shelf; shelf KEY1/3 page the catalog; menu KEY2 goes back.
 /// 当前书不可用的工具栏入口：TXT没有目录，搜索尚未实现。/ Toolbar entries unavailable for the current book: TXT has no TOC and search is not implemented.
-static unsigned tool_unavailable(void){return (epub.impl?0u:1u)|4u;}
+static unsigned tool_unavailable(void){return epub.impl?0u:1u;}
 /// 在最近一页上叠加工具栏并呈现；失败时保持原页面。/ Overlay the toolbar on the latest page and present it; the page stays on failure.
 static void toolbar_show(void){
     if(toolbar_open || !reader_active() || status_page || !page_copy)return;
@@ -600,6 +617,7 @@ static void apply_selection(int selection){
         else if(selection==PN_TOOL_REFRESH)toolbar_close(PN_REFRESH_GC16);
         else if(selection==PN_TOOL_TOC){toolbar_open=false;if(epub.impl)(void)pn_toc_ui_open(&toc,&epub,present,NULL);}
         else if(selection==PN_TOOL_BOOKMARKS){toolbar_open=false;if(epub.impl)(void)pn_bookmark_ui_open_epub(&bookmarks,&epub,present,NULL);else (void)pn_bookmark_ui_open(&bookmarks,&reader,present,NULL);}
+        else if(selection==PN_TOOL_JUMP){toolbar_open=false;pn_status_t status=epub.impl?pn_jump_ui_open_epub(&jump_ui,&epub,present,NULL):pn_jump_ui_open(&jump_ui,&reader,present,NULL);if(status!=PN_OK)ESP_LOGW(TAG,"Jump UI open: %d",(int)status);}
         else if(selection==PN_TOOL_TYPESET){toolbar_open=false;if(epub.impl)(void)pn_style_ui_open_epub(&styles,&epub,present,NULL);else (void)pn_style_ui_open(&styles,&reader,present,NULL);}
         else if(selection==PN_TOOL_SHELF){toolbar_open=false;if(stop_reader()){selected_path[0]=0;show_shelf("",false);}}
     }
@@ -642,11 +660,12 @@ static void device_task(void *arg){
     if(pn_pool_init(&pool,budget,psram_alloc,psram_free,NULL)!=0){read_pico_deinit(&hardware);vTaskDelete(NULL);return;}
     pn_media_init(&sd_media);pn_media_init(&data_media);pn_media_init(&wallpaper_media);read_pico_pmu_drain_events();esp_fill_random(cover_salt,sizeof cover_salt);
     if(read_pico_pmu_report_ready()!=ESP_OK){ESP_LOGE(TAG,"PMU running handshake failed; display withheld");read_pico_deinit(&hardware);vTaskDelete(NULL);return;}
+    clock_read_boot(now_ms());
     start_reader();pn_reader_input_t input={0};pn_tap_t tap={0};int hold_hit=-1;uint64_t hold_start=0,hold_last=0;bool hold_fired=false;uint64_t last_card=0,last_key=0,last_ui_retry=0,boot=now_ms();
     for(;;){uint64_t now=now_ms();
         rails_idle_check(now);
         if(transfer.impl)tick_transfer(now);
-        {static uint64_t last_battery;if(now-last_battery>=60000 || !last_battery){last_battery=now;pn_w_set_battery(battery_percent());}} // 状态带电量每分钟刷新一次 / Refresh the status-band battery once a minute
+        {static uint64_t last_battery,last_clock;if(now-last_battery>=60000 || !last_battery){last_battery=now;pn_w_set_battery(battery_percent());}if(now-last_clock>=10000 || !last_clock){last_clock=now;clock_tick(now);}} // 状态带电量每分钟刷新一次 / Refresh the status-band battery once a minute
         if(!input_flags_loaded && data_ready && pn_settings_load_flags(&data_media,"/data/progress",&input_flags)==PN_OK)input_flags_loaded=true;
         input.config=(pn_reader_input_config_t){.left_hand=(input_flags&PN_INPUT_LEFT_HAND)!=0,.no_swipe=(input_flags&PN_INPUT_NO_SWIPE)!=0,.no_edge_tap=(input_flags&PN_INPUT_NO_EDGE_TAP)!=0,.no_keys=(input_flags&PN_INPUT_NO_KEYS)!=0};
         if(shelf_mode && shelf_covers && shelf_page && !transfer.impl && !wallpaper_ui.impl && !font_manage.impl && !settings_ui.impl && !locked && !status_page && !reading_menu && !touch_held)tick_covers();

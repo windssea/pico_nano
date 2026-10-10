@@ -92,7 +92,7 @@ pn_status_t pn_font_open(pn_font_t *font,pn_pool_t *pool,const pn_text_source_t 
     engine_t *e=pn_alloc(pool,sizeof *e);if(!e)return PN_NO_MEMORY;memset(e,0,sizeof *e);e->pool=pool;e->source=*source;
     e->memory=(struct FT_MemoryRec_){e,allocate,release,resize};
     e->stream.size=(unsigned long)source->size;e->stream.descriptor.pointer=e;e->stream.read=stream_read;
-    pn_font_t temporary={e,0};uint8_t prefix[4];
+    pn_font_t temporary={e,0,0};uint8_t prefix[4];
     if(stream_read(&e->stream,0,prefix,4)!=4){pn_status_t s=e->source_error;pn_font_close(&temporary);return s;}
     if(memcmp(prefix,"\0\1\0\0",4)!=0 && memcmp(prefix,"true",4)!=0){pn_font_close(&temporary);return PN_UNSUPPORTED;}
     FT_Error error=FT_New_Library(&e->memory,&e->library);
@@ -147,7 +147,7 @@ pn_status_t pn_font_vertical(pn_font_t *font,int *ascent,int *descent) {
     *ascent=(int)((a+63)/64);*descent=(int)((-d+63)/64);return PN_OK;
 }
 /* 把灰度位图（顶行在前，行距pitch）按覆盖率叠到帧上。/ Composite a gray bitmap (top row first, row stride pitch) onto the frame by coverage. */
-static void composite(pn_frame_t *frame,int64_t left,int64_t top,unsigned width,unsigned rows,const uint8_t *data,size_t pitch,pn_font_render_t mode) {
+static void composite(pn_frame_t *frame,int64_t left,int64_t top,unsigned width,unsigned rows,const uint8_t *data,size_t pitch,pn_font_render_t mode,unsigned ink) {
     for(unsigned y=0;y<rows;y++){
         int64_t py=top+y;if(py<0 || py>=frame->height)continue;
         for(unsigned x=0;x<width;x++){
@@ -156,7 +156,8 @@ static void composite(pn_frame_t *frame,int64_t left,int64_t top,unsigned width,
             if(mode==PN_FONT_BINARY)coverage=coverage>=128?255:0;
             if(!coverage)continue;
             unsigned previous=pn_frame_get(frame,(int)px,(int)py);
-            pn_frame_pixel(frame,(int)px,(int)py,(uint8_t)((previous*(255-coverage)+127)/255));
+            // 向ink混合（ink为0时与原先的变黑完全相同）。/ Blend towards ink (identical to the former darkening when ink is 0).
+            pn_frame_pixel(frame,(int)px,(int)py,(uint8_t)((previous*(255-coverage)+ink*coverage+127)/255));
         }
     }
 }
@@ -168,7 +169,7 @@ pn_status_t pn_font_draw(pn_font_t *font,pn_frame_t *frame,uint32_t cp,int32_t x
     if(slot && *slot && (*slot)->cp==cp && (*slot)->pixels==(uint16_t)font->pixels && (*slot)->delta==(int16_t)offset){
         pn_status_t checked=ready(e);if(checked!=PN_OK)return checked;
         const bmp_t *hit=*slot;
-        composite(frame,(int64_t)x_64/64+hit->left,(int64_t)baseline-hit->top,hit->width,hit->rows,hit->data,hit->width,mode);
+        composite(frame,(int64_t)x_64/64+hit->left,(int64_t)baseline-hit->top,hit->width,hit->rows,hit->data,hit->width,mode,font->ink>15?15u:font->ink);
         return PN_OK;
     }
     FT_Vector delta={offset,0};FT_Set_Transform(e->face,NULL,&delta);
@@ -196,10 +197,10 @@ pn_status_t pn_font_draw(pn_font_t *font,pn_frame_t *frame,uint32_t cp,int32_t x
         for(unsigned y=0;y<b->rows;y++){size_t row=b->pitch>=0?y:b->rows-1-y;memcpy(entry->data+(size_t)y*b->width,b->buffer+row*(size_t)pitch,b->width);}
         if(*slot){e->bmp_bytes-=(size_t)(*slot)->width*(*slot)->rows;pn_free(*slot);}
         *slot=entry;e->bmp_bytes+=bytes;
-        composite(frame,left,top,entry->width,entry->rows,entry->data,entry->width,mode);
+        composite(frame,left,top,entry->width,entry->rows,entry->data,entry->width,mode,font->ink>15?15u:font->ink);
     }else{
         // 不入缓存：按FreeType位图直接叠加（行序按pitch符号处理）。/ Not cached: composite straight from the FreeType bitmap, honoring the sign of the pitch.
-        for(unsigned y=0;y<b->rows;y++){size_t row=b->pitch>=0?y:b->rows-1-y;composite(frame,left,top+y,b->width,1,b->buffer+row*(size_t)pitch,(size_t)pitch,mode);}
+        for(unsigned y=0;y<b->rows;y++){size_t row=b->pitch>=0?y:b->rows-1-y;composite(frame,left,top+y,b->width,1,b->buffer+row*(size_t)pitch,(size_t)pitch,mode,font->ink>15?15u:font->ink);}
     }
     return PN_OK;
 }
