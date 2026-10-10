@@ -30,6 +30,7 @@ typedef struct {
     size_t skipped; ///< 非法/过长等跳过数量 / Invalid/overlong entries skipped
     bool more; ///< 此游标后还有条目 / More entries after this cursor
     size_t index; ///< 本页首项在整个排序列表中的序号（从0起）/ Zero-based position of the first entry in the whole sorted list
+    size_t per_page; ///< 输出：本页容量（1至6），列表模式为5 / Output: this page's capacity (1 to 6), 5 in list mode
     size_t total; ///< 排序列表条目总数（同一次扫描得到）/ Total entries in the sorted list, from the same scan
 } pn_catalog_page_t;
 /// after为空从头，其他用前页末尾完整name；不分配整库，扫描后按UTF8字节顺序取六条。
@@ -74,3 +75,11 @@ bool pn_catalog_match(const char *name,const char *query);
 pn_status_t pn_catalog_search_page(pn_media_t *media,const pn_media_lease_t *lease,const char *directory,const char *query,const char *after,pn_catalog_page_t *page);
 pn_status_t pn_catalog_search_page_before(pn_media_t *media,const pn_media_lease_t *lease,const char *directory,const char *query,const char *after,pn_catalog_page_t *page);
 
+/// 指定每页条数limit（1至6，0表示6）的取页函数，其余语义同无后缀版本；列表模式每页5本。
+/// Paging functions with an explicit entries-per-page limit (1 to 6, 0 means 6), otherwise like the unsuffixed versions; list mode uses 5.
+pn_status_t pn_catalog_page_n(pn_media_t *media,const pn_media_lease_t *lease,const char *directory,const char *after,size_t limit,pn_catalog_page_t *page);
+pn_status_t pn_catalog_page_before_n(pn_media_t *media,const pn_media_lease_t *lease,const char *directory,const char *before,size_t limit,pn_catalog_page_t *page);
+pn_status_t pn_catalog_page_from_n(pn_media_t *media,const pn_media_lease_t *lease,const char *directory,char letter,size_t limit,pn_catalog_page_t *page);
+pn_status_t pn_catalog_search_page_n(pn_media_t *media,const pn_media_lease_t *lease,const char *directory,const char *query,const char *after,size_t limit,pn_catalog_page_t *page);
+pn_status_t pn_catalog_search_page_before_n(pn_media_t *media,const pn_media_lease_t *lease,const char *directory,const char *query,const char *before,size_t limit,pn_catalog_page_t *page);
+pn_status_t pn_catalog_recent_page_n(const pn_recent_snapshot_t *snapshot,size_t start,size_t limit,pn_catalog_page_t *page);

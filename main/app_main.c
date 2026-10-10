@@ -80,6 +80,9 @@ static pn_catalog_page_t *shelf_page;
 static pn_recent_snapshot_t *recent_snapshot;
 static bool recent_mode,selected_identified;
 static size_t recent_start;
+static bool list_mode; ///< 书架列表模式（每页5本）/ Shelf list mode (five per page)
+/// 当前书架每页条数。/ Entries per shelf page right now.
+static size_t shelf_per_page(void){return list_mode?5u:6u;}
 static pn_book_id_t selected_expected;
 static char selected_path[PN_CATALOG_PATH_MAX];
 static const char *book_directory="/sdcard";
@@ -228,7 +231,7 @@ static pn_status_t draw_shelf(pn_refresh_t profile){
     uint8_t *pixels=pn_alloc(&pool,684u*1216u/2u);pn_frame_t frame;pn_font_t font={0};pn_text_source_t builtin=pn_font_builtin_source();
     pn_status_t status=pn_frame_bind(&frame,pixels,684u*1216u/2u,684,1216)?PN_OK:PN_NO_MEMORY;
     if(status==PN_OK)status=pn_font_open(&font,&pool,&builtin,24);
-    if(status==PN_OK){pn_shelf_options_t options={.battery_percent=-1,.search=true,.query=!recent_mode && *search_query};status=pn_shelf_render_with_font_file_ex(shelf_page,&font,&frame,shelf_focus,recent_mode,true,shelf_covers,&pool,&sd_media,access("/sdcard/fonts/reader.ttf",R_OK)==0?"/sdcard/fonts/reader.ttf":NULL,&options);}
+    if(status==PN_OK){pn_shelf_options_t options={.battery_percent=-1,.search=true,.layout_toggle=true,.list_mode=list_mode,.query=!recent_mode && *search_query};status=pn_shelf_render_with_font_file_ex(shelf_page,&font,&frame,shelf_focus,recent_mode,true,shelf_covers,&pool,&sd_media,access("/sdcard/fonts/reader.ttf",R_OK)==0?"/sdcard/fonts/reader.ttf":NULL,&options);}
     if(status==PN_OK)status=present(NULL,&frame,profile);
     pn_font_close(&font);pn_free(pixels);return status;
 }
@@ -270,13 +273,13 @@ static void show_shelf(const char *cursor,bool previous){
         if(status==PN_OK)status=pn_recent_load(&io,&pool,recent_snapshot);
         if(lease.ticket)(void)pn_media_release(&data_media,&lease);
         if(status==PN_EMPTY){memset(recent_snapshot,0,sizeof *recent_snapshot);status=PN_OK;}
-        size_t start=!*cursor?0:previous?(recent_start>=6?recent_start-6:0):recent_start+6;
+        size_t start=!*cursor?0:previous?(recent_start>=shelf_per_page()?recent_start-shelf_per_page():0):recent_start+shelf_per_page();
         if(status==PN_OK && start>=recent_snapshot->count && start){pn_free(next);return;}
-        if(status==PN_OK){status=pn_catalog_recent_page(recent_snapshot,start,next);if(status==PN_OK)recent_start=start;}
+        if(status==PN_OK){status=pn_catalog_recent_page_n(recent_snapshot,start,shelf_per_page(),next);if(status==PN_OK)recent_start=start;}
         if(status!=PN_OK){recent_mode=false;pn_free(next);message("历史读取失败","记录保留，点下方回书架");return;}
     }else{
         status=pn_media_acquire(&sd_media,PN_MEDIA_READ,&lease);
-        if(status==PN_OK)status=*search_query?(previous?pn_catalog_search_page_before(&sd_media,&lease,book_directory,search_query,cursor,next):pn_catalog_search_page(&sd_media,&lease,book_directory,search_query,cursor,next)):jump_letter?pn_catalog_page_from(&sd_media,&lease,book_directory,jump_letter,next):previous?pn_catalog_page_before(&sd_media,&lease,book_directory,cursor,next):pn_catalog_page(&sd_media,&lease,book_directory,cursor,next);
+        if(status==PN_OK)status=*search_query?(previous?pn_catalog_search_page_before_n(&sd_media,&lease,book_directory,search_query,cursor,shelf_per_page(),next):pn_catalog_search_page_n(&sd_media,&lease,book_directory,search_query,cursor,shelf_per_page(),next)):jump_letter?pn_catalog_page_from_n(&sd_media,&lease,book_directory,jump_letter,shelf_per_page(),next):previous?pn_catalog_page_before_n(&sd_media,&lease,book_directory,cursor,shelf_per_page(),next):pn_catalog_page_n(&sd_media,&lease,book_directory,cursor,shelf_per_page(),next);
         jump_letter=0;
         if(lease.ticket)(void)pn_media_release(&sd_media,&lease);
     }
@@ -474,6 +477,25 @@ static void focus_show(void){
     if(scratch && pn_frame_bind(&frame,scratch,342u*1216u,684,1216)){memcpy(scratch,page_copy,342u*1216u);if(present(NULL,&frame,PN_REFRESH_GL16)!=PN_OK)ESP_LOGW(TAG,"Focus ring present failed");}
     ring_pending=false;pn_free(scratch);
 }
+/// 当前是否是阻断确认弹窗（删除字体/删除书签），是则给出确认与取消的命中码。/ Whether a blocking confirmation dialog (delete font / delete bookmark) is showing, giving its confirm and cancel hit codes.
+static bool dialog_codes(int *confirm,int *cancel){
+    if(font_manage.impl && font_manage.screen==PN_FMU_CONFIRMING){*confirm=PN_FMU_CONFIRM;*cancel=PN_FMU_CANCEL;return true;}
+    if(bookmarks.mode==PN_BUI_DELETE){*confirm=PN_BUI_CONFIRM;*cancel=PN_BUI_CANCEL;return true;}
+    return false;
+}
+/// 弹窗三键（docs/UI_UX.md第7节）：KEY1取消，KEY3在取消与确认间切换焦点，KEY2确认当前焦点；默认焦点是取消，不会自动确认。
+/// Dialog keys (docs/UI_UX.md section 7): KEY1 cancels, KEY3 switches focus between Cancel and Confirm and KEY2 confirms the focused button; the default focus is Cancel and nothing is ever confirmed automatically.
+static void dialog_key(int key,pn_key_event_t event,int confirm,int cancel){
+    if(event!=PN_KEY_SHORT)return;
+    focus_rescan();
+    const pn_focus_item_t *item=pn_focus_current(&focus_nav);
+    bool on_confirm=item && item->code==confirm;
+    if(key==PN_KEY_1){focus_nav.index=-1;apply_selection(cancel);return;}
+    if(key==PN_KEY_2){focus_nav.index=-1;apply_selection(on_confirm?confirm:cancel);return;}
+    int target=on_confirm?cancel:confirm;
+    for(size_t i=0;i<focus_nav.count;i++)if(focus_nav.items[i].code==target)focus_nav.index=(int)i;
+    focus_show();
+}
 /// KEY1/KEY3移动焦点，KEY2确认焦点项（没有焦点时工具栏的KEY2仍是关闭）。/ KEY1/KEY3 move the focus and KEY2 confirms it (with no focus KEY2 still closes the toolbar).
 static void focus_key(int key,pn_key_event_t event){
     if(event!=PN_KEY_SHORT)return;
@@ -494,6 +516,7 @@ static void open_shelf_item(int index){
     else message("格式尚未接入","书籍仍保留，选择TXT或EPUB");
 }
 static void handle_key(int key,pn_key_event_t event){
+    {int confirm=0,cancel=0;if(dialog_codes(&confirm,&cancel)){dialog_key(key,event,confirm,cancel);return;}}
     if(focus_page()){focus_key(key,event);return;}
     if(transfer.impl || wallpaper_ui.impl || font_manage.impl || settings_ui.impl)return;
     if(bookmarks.mode!=PN_BUI_CLOSED || styles.active || fonts.active || toc.active || jump_ui.active)return;
@@ -539,7 +562,7 @@ static int active_hit(int x,int y){
     else if(jump_ui.active)hit=pn_jump_ui_hit(&jump_ui,x,y);
     else if(styles.active)hit=pn_style_ui_hit(&styles,x,y);
     else if(bookmarks.mode!=PN_BUI_CLOSED)hit=pn_bookmark_ui_hit(&bookmarks,x,y);
-    else if(shelf_mode && shelf_page){pn_shelf_options_t options={.battery_percent=-1,.search=true,.query=!recent_mode && *search_query};hit=pn_shelf_hit_ex(shelf_page,x,y,&options);if(hit<0 && pn_w_tabbar_hit(3,1104,112,x,y)==1)hit=PN_SHELF_TRANSFER;}
+    else if(shelf_mode && shelf_page){pn_shelf_options_t options={.battery_percent=-1,.search=true,.layout_toggle=true,.list_mode=list_mode,.query=!recent_mode && *search_query};hit=pn_shelf_hit_ex(shelf_page,x,y,&options);if(hit<0 && pn_w_tabbar_hit(3,1104,112,x,y)==1)hit=PN_SHELF_TRANSFER;}
     else if(toolbar_open)hit=pn_reader_toolbar_hit(x,y,tool_unavailable());
     else if(reader_active() && !status_page && y>=1144 && x<420 && (epub.impl?pn_epub_app_bookmark_can_return(&epub):pn_reader_app_bookmark_can_return(&reader)))hit=11;
     else if(reader_active() && !status_page && y>=1144 && x>=420)hit=14;
@@ -572,7 +595,8 @@ static void apply_selection(int selection){
         else if(selection==PN_TOOL_SHELF){toolbar_open=false;if(stop_reader()){selected_path[0]=0;show_shelf("",false);}}
     }
     else if(reading_menu){if(selection==PN_READING_MENU_LAN)begin_transfer(true);else if(selection==PN_READING_MENU_SETTINGS)begin_settings();else if(selection==PN_READING_MENU_TRANSFER)begin_transfer(false);else if(selection==PN_READING_MENU_SHELF){reading_menu=false;if(stop_reader()){selected_path[0]=0;show_shelf("",false);}}else if(selection==PN_READING_MENU_RESUME){reading_menu=false;if(reader_active()){if(active_step(PN_APP_OPEN,now_ms())==PN_OK){status_page=false;shelf_mode=false;}}else start_reader();}}
-    else if(shelf_mode && selection==PN_SHELF_TRANSFER)begin_transfer(false);
+    else if(shelf_mode && selection==PN_SHELF_LAYOUT){list_mode=!list_mode;shelf_focus=-1;show_shelf("",false);}
+                else if(shelf_mode && selection==PN_SHELF_TRANSFER)begin_transfer(false);
     else if(shelf_mode && selection==PN_SHELF_SEARCH){if(*search_query && !recent_mode){search_query[0]=0;show_shelf("",false);}else{pn_search_ui_open(&search_ui,NULL);show_search();}}
     else if(shelf_mode && selection==PN_SHELF_INDEX && !recent_mode && !*search_query)show_index();
     else if(shelf_mode && selection==PN_SHELF_MENU)begin_settings();

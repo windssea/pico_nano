@@ -37,6 +37,7 @@ typedef struct {
     pn_recent_snapshot_t *recent;
     bool recent_mode;
     size_t recent_start;
+    bool list_mode; ///< 列表模式（每页5本）/ List mode (five per page)
     pn_catalog_page_t *page;
     pn_font_t font;
     pn_frame_t frame;
@@ -77,7 +78,7 @@ typedef struct {
     char query[PN_CATALOG_QUERY_MAX+1]; ///< 当前生效的搜索词，空表示不过滤 / Active search query, empty means unfiltered
 } library_t;
 /* 书架选项：模拟器没有电量计，故不显示电量。/ Shelf options: the simulator has no fuel gauge so no battery is shown. */
-static pn_shelf_options_t shelf_options(const library_t *s){return (pn_shelf_options_t){.battery_percent=-1,.search=true,.query=!s->recent_mode && *s->query};}
+static pn_shelf_options_t shelf_options(const library_t *s){return (pn_shelf_options_t){.battery_percent=-1,.search=true,.layout_toggle=true,.list_mode=s->list_mode,.query=!s->recent_mode && *s->query};}
 static bool reading(library_t *s){return s->reader.impl || s->epub.impl;}
 static pn_status_t active_step(library_t *s,pn_reader_action_t action,uint64_t now,pn_reader_present_fn present,void *ctx){return s->epub.impl?pn_epub_app_step(&s->epub,action,now,present,ctx):pn_reader_app_step(&s->reader,action,now,present,ctx);}
 static pn_status_t active_close(library_t *s,uint64_t now){return s->epub.impl?pn_epub_app_close(&s->epub,now):pn_reader_app_close(&s->reader,now);}
@@ -155,16 +156,16 @@ static pn_status_t recent_load(library_t *s){
 }
 static pn_status_t page(library_t *s,bool previous,bool first){
     if(s->recent_mode){pn_status_t status=recent_load(s);if(status!=PN_OK)return status;
-        size_t start=first?0:previous?(s->recent_start>=6?s->recent_start-6:0):s->recent_start+6;
+        size_t per=s->list_mode?5u:6u;size_t start=first?0:previous?(s->recent_start>=per?s->recent_start-per:0):s->recent_start+per;
         if(start>=s->recent->count && start)return PN_EMPTY;
-        status=pn_catalog_recent_page(s->recent,start,s->page);if(status==PN_OK){s->recent_start=start;s->selected=s->page->count?0:-1;covers_reset(s);status=draw(s);printf("recent_page start=%zu count=%zu\n",start,s->page->count);}return status;
+        status=pn_catalog_recent_page_n(s->recent,start,per,s->page);if(status==PN_OK){s->recent_start=start;s->selected=s->page->count?0:-1;covers_reset(s);status=draw(s);printf("recent_page start=%zu count=%zu\n",start,s->page->count);}return status;
     }
     if(!first && (!s->page->count || (!previous && !s->page->more)))return PN_EMPTY;
     pn_catalog_page_t *next=pn_alloc(s->pool,sizeof *next);if(!next)return PN_NO_MEMORY;
     pn_media_lease_t lease={0};pn_status_t status=pn_media_acquire(&s->media,PN_MEDIA_READ,&lease);
     const char *cursor=first?"":s->page->items[previous?0:s->page->count-1].name;
     if(status==PN_OK){
-        status=*s->query?(previous?pn_catalog_search_page_before(&s->media,&lease,s->directory,s->query,cursor,next):pn_catalog_search_page(&s->media,&lease,s->directory,s->query,cursor,next)):s->jump?pn_catalog_page_from(&s->media,&lease,s->directory,s->jump,next):previous?pn_catalog_page_before(&s->media,&lease,s->directory,cursor,next):pn_catalog_page(&s->media,&lease,s->directory,cursor,next);s->jump=0;
+        status=*s->query?(previous?pn_catalog_search_page_before_n(&s->media,&lease,s->directory,s->query,cursor,s->list_mode?5u:6u,next):pn_catalog_search_page_n(&s->media,&lease,s->directory,s->query,cursor,s->list_mode?5u:6u,next)):s->jump?pn_catalog_page_from_n(&s->media,&lease,s->directory,s->jump,s->list_mode?5u:6u,next):previous?pn_catalog_page_before_n(&s->media,&lease,s->directory,cursor,s->list_mode?5u:6u,next):pn_catalog_page_n(&s->media,&lease,s->directory,cursor,s->list_mode?5u:6u,next);s->jump=0;
         (void)pn_media_release(&s->media,&lease);
     }
     if(status==PN_OK && (first || next->count)){*s->page=*next;s->selected=next->count?0:-1;covers_reset(s);status=draw(s);
@@ -436,7 +437,8 @@ int pn_sim_library_window(pn_pool_t *pool,const char *directory,const char *font
             else if(reading(s) && hit==13 && s->epub.impl){status=pn_toc_ui_open(&s->toc,&s->epub,present,s);toc_report(&s->toc,0,status);turn=false;}
             else if(reading(s) && hit==8){status=return_to_shelf(s,now);turn=false;}
             else if(!reading(s)){
-                if(hit==PN_SHELF_TOGGLE){s->recent_mode=!s->recent_mode;*s->query=0;status=page(s,false,true);}
+                if(hit==PN_SHELF_LAYOUT){s->list_mode=!s->list_mode;status=page(s,false,true);}
+                else if(hit==PN_SHELF_TOGGLE){s->recent_mode=!s->recent_mode;*s->query=0;status=page(s,false,true);}
                 else if(hit==PN_SHELF_SEARCH && *s->query && !s->recent_mode){*s->query=0;status=page(s,false,true);}
                 else if(hit==PN_SHELF_SEARCH){pn_search_ui_open(&s->search,NULL);s->search_open=true;status=pn_search_ui_render(&s->search,&s->font,&s->frame);if(status==PN_OK)status=present(s,&s->frame,PN_REFRESH_GL16);}
                 else if(hit==PN_SHELF_TAB_ALL || hit==PN_SHELF_TAB_RECENT || hit==PN_SHELF_HOME){bool want=hit==PN_SHELF_TAB_RECENT;if(hit==PN_SHELF_HOME || want!=s->recent_mode){s->recent_mode=want;*s->query=0;status=page(s,false,true);}}

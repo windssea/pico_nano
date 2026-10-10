@@ -65,12 +65,13 @@ bool pn_catalog_match(const char *name,const char *query){
     return strstr(plain,query) || strstr(initials,query);
 }
 static pn_status_t scan(pn_media_t *media,const pn_media_lease_t *lease,const char *directory,
-    const char *after,pn_catalog_page_t *page,bool reverse,int filter,char from,const char *query){
+    const char *after,pn_catalog_page_t *page,bool reverse,int filter,char from,const char *query,size_t limit){
     if(!media || !lease || !directory || !*directory || !after || !page)return PN_INVALID;
     if(strlen(directory)>=PN_CATALOG_PATH_MAX || strlen(after)>=PN_CATALOG_NAME_MAX)return PN_LIMIT;
     pn_status_t status=pn_media_validate(media,lease);if(status!=PN_OK)return status;
     if(lease->access==PN_MEDIA_USB)return PN_INVALID;
-    memset(page,0,sizeof *page);DIR *dir=opendir(directory);if(!dir)return PN_IO;
+    if(!limit || limit>PN_CATALOG_PAGE_MAX)limit=PN_CATALOG_PAGE_MAX; // 0表示满容量 / Zero means full capacity
+    memset(page,0,sizeof *page);page->per_page=limit;DIR *dir=opendir(directory);if(!dir)return PN_IO;
     char greatest[PN_CATALOG_NAME_MAX]={0};size_t total=0,at_or_before=0,before=0,skipped_by_letter=0;
     for(;;){status=pn_media_validate(media,lease);if(status!=PN_OK)break;errno=0;struct dirent *entry=readdir(dir);if(!entry){if(errno)status=PN_IO;break;}
         const char *name=entry->d_name;if(name[0]=='.')continue;const char *ext=strrchr(name,'.');pn_book_format_t kind=filter==1?(ext && !strcasecmp(ext,".ttf")?PN_FILE_TTF:0):filter==2?(ext && (!strcasecmp(ext,".jpg") || !strcasecmp(ext,".jpeg") || !strcasecmp(ext,".png"))?PN_FILE_IMAGE:0):format(name);if(!kind)continue;
@@ -91,10 +92,10 @@ static pn_status_t scan(pn_media_t *media,const pn_media_lease_t *lease,const ch
         if(reverse?pn_catalog_compare(name,after)>=0:pn_catalog_compare(name,after)<=0)continue;
         if(from){char initial=pn_catalog_initial(name);if(initial=='#' || (initial!='~' && initial<from)){skipped_by_letter++;continue;}}
         strcpy(item.name,name);item.size=(uint64_t)info.st_size;
-        if(reverse && page->count==PN_CATALOG_PAGE_MAX){if(pn_catalog_compare(name,page->items[0].name)<=0)continue;memmove(page->items,page->items+1,(PN_CATALOG_PAGE_MAX-1)*sizeof page->items[0]);page->count--;}
+        if(reverse && page->count==limit){if(pn_catalog_compare(name,page->items[0].name)<=0)continue;memmove(page->items,page->items+1,(limit-1)*sizeof page->items[0]);page->count--;}
         size_t index=0;while(index<page->count && pn_catalog_compare(page->items[index].name,name)<0)index++;
-        if(index>=PN_CATALOG_PAGE_MAX)continue;
-        size_t count=page->count<PN_CATALOG_PAGE_MAX?page->count+1:PN_CATALOG_PAGE_MAX;
+        if(index>=limit)continue;
+        size_t count=page->count<limit?page->count+1:limit;
         for(size_t i=count-1;i>index;i--)page->items[i]=page->items[i-1];
         page->items[index]=item;page->count=count;
     }
@@ -107,11 +108,12 @@ static pn_status_t scan(pn_media_t *media,const pn_media_lease_t *lease,const ch
     return PN_OK;
 }
 
-pn_status_t pn_catalog_page(pn_media_t *m,const pn_media_lease_t *l,const char *d,const char *a,pn_catalog_page_t *p){return scan(m,l,d,a,p,false,0,0,NULL);}
-pn_status_t pn_catalog_page_before(pn_media_t *m,const pn_media_lease_t *l,const char *d,const char *a,pn_catalog_page_t *p){return scan(m,l,d,a,p,true,0,0,NULL);}
-pn_status_t pn_catalog_recent_page(const pn_recent_snapshot_t *snapshot,size_t start,pn_catalog_page_t *page){
+pn_status_t pn_catalog_page(pn_media_t *m,const pn_media_lease_t *l,const char *d,const char *a,pn_catalog_page_t *p){return scan(m,l,d,a,p,false,0,0,NULL,0);}
+pn_status_t pn_catalog_page_before(pn_media_t *m,const pn_media_lease_t *l,const char *d,const char *a,pn_catalog_page_t *p){return scan(m,l,d,a,p,true,0,0,NULL,0);}
+pn_status_t pn_catalog_recent_page_n(const pn_recent_snapshot_t *snapshot,size_t start,size_t limit,pn_catalog_page_t *page){
     if(!snapshot || !page || snapshot->count>PN_RECENT_MAX || start>snapshot->count)return PN_INVALID;
-    memset(page,0,sizeof *page);size_t count=snapshot->count-start;if(count>PN_CATALOG_PAGE_MAX)count=PN_CATALOG_PAGE_MAX;
+    if(!limit || limit>PN_CATALOG_PAGE_MAX)limit=PN_CATALOG_PAGE_MAX;
+    memset(page,0,sizeof *page);page->per_page=limit;size_t count=snapshot->count-start;if(count>limit)count=limit;
     for(size_t i=0;i<count;i++){
         const pn_recent_item_t *r=&snapshot->items[start+i];pn_catalog_item_t *item=&page->items[i];
         size_t length=strnlen(r->path,sizeof r->path);if(!length || length>=sizeof r->path)return PN_CORRUPT;
@@ -123,16 +125,16 @@ pn_status_t pn_catalog_recent_page(const pn_recent_snapshot_t *snapshot,size_t s
     page->count=count;page->more=start+count<snapshot->count;page->index=start;page->total=snapshot->count;return PN_OK;
 }
 
-pn_status_t pn_catalog_font_page(pn_media_t *m,const pn_media_lease_t *l,const char *d,const char *a,pn_catalog_page_t *p){return scan(m,l,d,a,p,false,1,0,NULL);}
-pn_status_t pn_catalog_font_page_before(pn_media_t *m,const pn_media_lease_t *l,const char *d,const char *a,pn_catalog_page_t *p){return scan(m,l,d,a,p,true,1,0,NULL);}
-pn_status_t pn_catalog_image_page(pn_media_t *m,const pn_media_lease_t *l,const char *d,const char *a,pn_catalog_page_t *p){return scan(m,l,d,a,p,false,2,0,NULL);}
-pn_status_t pn_catalog_image_page_before(pn_media_t *m,const pn_media_lease_t *l,const char *d,const char *a,pn_catalog_page_t *p){return scan(m,l,d,a,p,true,2,0,NULL);}
+pn_status_t pn_catalog_font_page(pn_media_t *m,const pn_media_lease_t *l,const char *d,const char *a,pn_catalog_page_t *p){return scan(m,l,d,a,p,false,1,0,NULL,0);}
+pn_status_t pn_catalog_font_page_before(pn_media_t *m,const pn_media_lease_t *l,const char *d,const char *a,pn_catalog_page_t *p){return scan(m,l,d,a,p,true,1,0,NULL,0);}
+pn_status_t pn_catalog_image_page(pn_media_t *m,const pn_media_lease_t *l,const char *d,const char *a,pn_catalog_page_t *p){return scan(m,l,d,a,p,false,2,0,NULL,0);}
+pn_status_t pn_catalog_image_page_before(pn_media_t *m,const pn_media_lease_t *l,const char *d,const char *a,pn_catalog_page_t *p){return scan(m,l,d,a,p,true,2,0,NULL,0);}
 pn_status_t pn_catalog_page_from(pn_media_t *m,const pn_media_lease_t *l,const char *d,char letter,pn_catalog_page_t *p){
-    if(letter=='#')return scan(m,l,d,"",p,false,0,0,NULL);
+    if(letter=='#')return scan(m,l,d,"",p,false,0,0,NULL,0);
     if(letter<'a' || letter>'z')return PN_INVALID;
-    pn_status_t status=scan(m,l,d,"",p,false,0,letter,NULL);
+    pn_status_t status=scan(m,l,d,"",p,false,0,letter,NULL,0);
     // 该字母之后没有书：退到最后一页，避免空页无路可翻。/ No books from this letter on: fall back to the last page so the shelf never strands on an empty page.
-    if(status==PN_OK && !p->count)status=scan(m,l,d,"\xf4\x8f\xbf\xbf",p,true,0,0,NULL);
+    if(status==PN_OK && !p->count)status=scan(m,l,d,"\xf4\x8f\xbf\xbf",p,true,0,0,NULL,0);
     return status;
 }
 void pn_catalog_apply_recent(pn_catalog_page_t *page,const pn_recent_snapshot_t *snapshot){
@@ -145,9 +147,27 @@ void pn_catalog_apply_recent(pn_catalog_page_t *page,const pn_recent_snapshot_t 
 }
 pn_status_t pn_catalog_search_page(pn_media_t *m,const pn_media_lease_t *l,const char *d,const char *query,const char *after,pn_catalog_page_t *p){
     if(!query || strlen(query)>PN_CATALOG_QUERY_MAX)return PN_INVALID;
-    return scan(m,l,d,after,p,false,0,0,query);
+    return scan(m,l,d,after,p,false,0,0,query,0);
 }
 pn_status_t pn_catalog_search_page_before(pn_media_t *m,const pn_media_lease_t *l,const char *d,const char *query,const char *after,pn_catalog_page_t *p){
     if(!query || strlen(query)>PN_CATALOG_QUERY_MAX)return PN_INVALID;
-    return scan(m,l,d,after,p,true,0,0,query);
+    return scan(m,l,d,after,p,true,0,0,query,0);
+}
+pn_status_t pn_catalog_recent_page(const pn_recent_snapshot_t *snapshot,size_t start,pn_catalog_page_t *page){return pn_catalog_recent_page_n(snapshot,start,0,page);}
+pn_status_t pn_catalog_page_n(pn_media_t *m,const pn_media_lease_t *l,const char *d,const char *a,size_t limit,pn_catalog_page_t *p){return scan(m,l,d,a,p,false,0,0,NULL,limit);}
+pn_status_t pn_catalog_page_before_n(pn_media_t *m,const pn_media_lease_t *l,const char *d,const char *a,size_t limit,pn_catalog_page_t *p){return scan(m,l,d,a,p,true,0,0,NULL,limit);}
+pn_status_t pn_catalog_page_from_n(pn_media_t *m,const pn_media_lease_t *l,const char *d,char letter,size_t limit,pn_catalog_page_t *p){
+    if(letter=='#')return scan(m,l,d,"",p,false,0,0,NULL,limit);
+    if(letter<'a' || letter>'z')return PN_INVALID;
+    pn_status_t status=scan(m,l,d,"",p,false,0,letter,NULL,limit);
+    if(status==PN_OK && !p->count)status=scan(m,l,d,"\xf4\x8f\xbf\xbf",p,true,0,0,NULL,limit);
+    return status;
+}
+pn_status_t pn_catalog_search_page_n(pn_media_t *m,const pn_media_lease_t *l,const char *d,const char *query,const char *after,size_t limit,pn_catalog_page_t *p){
+    if(!query || strlen(query)>PN_CATALOG_QUERY_MAX)return PN_INVALID;
+    return scan(m,l,d,after,p,false,0,0,query,limit);
+}
+pn_status_t pn_catalog_search_page_before_n(pn_media_t *m,const pn_media_lease_t *l,const char *d,const char *query,const char *after,size_t limit,pn_catalog_page_t *p){
+    if(!query || strlen(query)>PN_CATALOG_QUERY_MAX)return PN_INVALID;
+    return scan(m,l,d,after,p,true,0,0,query,limit);
 }
