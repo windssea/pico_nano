@@ -8,12 +8,13 @@ with tempfile.TemporaryDirectory() as folder:
         assert r.returncode==0,(r.stdout,r.stderr)
         assert 'used=0 live=0' in r.stdout,r.stdout
         return r.stdout
-    out=run('settings,tap:100:530,tap:100:640,back,quit')
+    # 翻页开关在“按键与手势”子页。/ The page-turn switches live on the keys-and-gestures page.
+    out=run('settings,tap:100:500,tap:100:680,tap:100:780,back,back,quit')
     assert 'settings open status=0 flags=0' in out and 'settings command=8 status=0 flags=1 active=1' in out and 'settings command=9 status=0 flags=3 active=1' in out,out
     assert 'settings closed request=0' in out and (state/'input.a').exists() or (state/'input.b').exists()
     out=run('settings,back,quit');assert 'settings open status=0 flags=3' in out,out
     # 不能关掉全部翻页方式。/ All page-turn methods cannot be switched off.
-    out=run('settings,tap:100:750,tap:100:820,back,quit');assert 'settings command=11 status=4 flags=7 active=1' in out,out
+    out=run('settings,tap:100:500,tap:100:880,tap:100:980,back,back,quit');assert 'settings command=11 status=4 flags=7 active=1' in out,out
     # 子页：字体管理在给出--font-dir时打开。/ Sub-page: font management opens when --font-dir is given.
     # 字体管理返回设置页（不是书架），再返回才到书架。/ Back from font management returns to Settings, not the shelf; one more Back reaches the shelf.
     out=run('settings,tap:100:220,back,back,quit','--font-dir',str(fonts));assert 'settings closed request=3' in out and 'font_manage command=1 status=0 screen=0 active=0' in out and 'settings closed request=0' in out.split('font_manage command=1')[1],out

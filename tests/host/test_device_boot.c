@@ -10,6 +10,8 @@
 #include <string.h>
 #include "read_pico.h"
 #include "read_pico_pmu.h"
+#include "esp_vfs_fat.h"
+#include "esp_app_desc.h"
 #include "esp_littlefs.h"
 #include "pn_alloc.h"
 #include "device_transfer.h"
@@ -53,6 +55,8 @@ void esp_fill_random(void *p,size_t n){memset(p,0xa5,n);}
 esp_err_t read_pico_pmu_report_ready(void){return ready_bad?ESP_FAIL:ESP_OK;}
 bool read_pico_pmu_take_key_short(void){return false;}
 bool read_pico_pmu_ready(void){return true;}
+esp_err_t esp_vfs_fat_info(const char *root,uint64_t *total,uint64_t *free_bytes){(void)root;*total=32ull<<30;*free_bytes=12ull<<30;return ESP_OK;}
+const esp_app_desc_t *esp_app_get_description(void){static const esp_app_desc_t app={"0.0.57"};return &app;}
 esp_err_t read_pico_pmu_cmd(uint16_t code,const uint8_t *payload,uint8_t plen){(void)code;(void)payload;(void)plen;return ESP_OK;}
 esp_err_t read_pico_pmu_poll(void){return ESP_OK;}
 const pmu_snapshot_t *read_pico_pmu_get(void){static const pmu_snapshot_t snapshot={.qb_soc=873,.qb_flags=2};return &snapshot;}

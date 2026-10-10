@@ -11,7 +11,8 @@
 #define PN_INPUT_NO_SWIPE 0x02u ///< 关闭滑动 / Swipe off
 #define PN_INPUT_NO_EDGE_TAP 0x04u ///< 关闭边缘点按 / Edge taps off
 #define PN_INPUT_NO_KEYS 0x08u ///< 关闭三键翻页 / Key turns off
-#define PN_INPUT_FLAGS_ALL 0x0Fu
+#define PN_INPUT_REFRESH_MASK 0x30u ///< 刷新策略（位4–5：0均衡、1清晰、2省电）/ Refresh policy (bits 4–5: 0 balanced, 1 crisp, 2 saver)
+#define PN_INPUT_FLAGS_ALL 0x3Fu
 /// 绑定root下input.a/b，不建目录。/ Bind input.a/b under root without creating directories.
 pn_status_t pn_input_prefs_files(pn_journal_files_t *files,pn_media_t *media,const pn_media_lease_t *lease,const char *root,pn_journal_io_t *io);
 /// 读取标志；无记录EMPTY；错误不改输出。/ Load flags; EMPTY without a record; errors keep the output.

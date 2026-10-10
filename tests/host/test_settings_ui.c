@@ -25,24 +25,39 @@ int main(int argc,char **argv){
     pn_media_t media;pn_media_init(&media);assert(pn_media_attach(&media,1)==PN_OK);
     uint8_t flags=0xee;assert(pn_settings_load_flags(&media,root,&flags)==PN_OK && flags==0);
     pn_media_lease_t lease;assert(pn_media_acquire(&media,PN_MEDIA_WRITE,&lease)==PN_OK);pn_journal_files_t files;pn_journal_io_t io;assert(pn_input_prefs_files(&files,&media,&lease,root,&io)==PN_OK);
-    assert(pn_input_prefs_save(&io,0x10)==PN_INVALID && pn_input_prefs_save(&io,PN_INPUT_LEFT_HAND)==PN_OK && pn_input_prefs_load(&io,&flags)==PN_OK && flags==PN_INPUT_LEFT_HAND);
+    assert(pn_input_prefs_save(&io,0x40)==PN_INVALID && pn_input_prefs_save(&io,0x20)==PN_OK && pn_input_prefs_save(&io,PN_INPUT_LEFT_HAND)==PN_OK && pn_input_prefs_load(&io,&flags)==PN_OK && flags==PN_INPUT_LEFT_HAND);
     uint8_t future[6]={'P','N','I','P',2,0};assert(pn_journal_save(&io,future,6)==PN_OK && pn_input_prefs_load(&io,&flags)==PN_UNSUPPORTED);
     assert(pn_input_prefs_save(&io,0)==PN_OK);assert(pn_media_release(&media,&lease)==PN_OK);
     /* 设置页。/ Settings page. */
     pn_pool_t pool;assert(!pn_pool_init(&pool,2u*1024u*1024u,NULL,NULL,NULL));pn_settings_ui_t ui={0};
     assert(pn_settings_ui_open(&ui,&pool,&media,root,present,NULL)==PN_OK && ui.active && ui.presented && ui.flags==0);
-    assert(pn_settings_ui_hit(&ui,100,220)==PN_SETUI_FONTS && pn_settings_ui_hit(&ui,100,380)==PN_SETUI_WALLPAPER && pn_settings_ui_hit(&ui,100,540)==PN_SETUI_TOGGLE && pn_settings_ui_hit(&ui,100,800)==PN_SETUI_TOGGLE+3 && pn_settings_ui_hit(&ui,100,900)==-1 && pn_settings_ui_hit(&ui,100,60)==PN_SETUI_BACK && pn_settings_ui_hit(&ui,600,60)==-1);
+    /* 一级页：字体、壁纸、按键与手势、刷新与屏幕、存储与关于；底栏书架/传书交给调用方，标题区无返回。/ Root page: fonts, wallpaper, keys, refresh, about; the bottom-bar shelf/transfer go to the caller and the title has no back. */
+    assert(pn_settings_ui_hit(&ui,100,220)==PN_SETUI_FONTS && pn_settings_ui_hit(&ui,100,380)==PN_SETUI_WALLPAPER && pn_settings_ui_hit(&ui,100,500)==PN_SETUI_KEYS && pn_settings_ui_hit(&ui,100,600)==PN_SETUI_REFRESH && pn_settings_ui_hit(&ui,100,750)==PN_SETUI_ABOUT && pn_settings_ui_hit(&ui,100,900)==-1 && pn_settings_ui_hit(&ui,100,60)==-1);
+    assert(pn_settings_ui_hit(&ui,100,1150)==PN_SETUI_SHELF && pn_settings_ui_hit(&ui,340,1150)==PN_SETUI_TRANSFER && pn_settings_ui_hit(&ui,600,1150)==-1);
+    assert(pn_settings_ui_event(&ui,PN_SETUI_TRANSFER,present,NULL)==PN_OK && ui.request==PN_SETUI_TRANSFER && ui.active);ui.request=0;
+    /* 刷新与屏幕：三档策略立即保存，整屏刷新只重画本页。/ Refresh page: the three policies save at once and a full refresh only repaints this page. */
+    assert(pn_settings_ui_event(&ui,PN_SETUI_REFRESH,present,NULL)==PN_OK && pn_settings_ui_screen(&ui)==2 && pn_settings_ui_hit(&ui,100,60)==PN_SETUI_BACK);
+    assert(pn_settings_ui_hit(&ui,100,240)==PN_SETUI_LEVEL+1 && pn_settings_ui_hit(&ui,340,240)==PN_SETUI_LEVEL && pn_settings_ui_hit(&ui,560,240)==PN_SETUI_LEVEL+2 && pn_settings_ui_hit(&ui,300,560)==PN_SETUI_FULL_REFRESH);
+    assert(pn_settings_ui_event(&ui,PN_SETUI_LEVEL+1,present,NULL)==PN_OK && (ui.flags&PN_INPUT_REFRESH_MASK)==0x10 && pn_settings_refresh_pages(ui.flags)==6);
+    assert(pn_settings_ui_event(&ui,PN_SETUI_FULL_REFRESH,present,NULL)==PN_OK && pn_settings_ui_event(&ui,PN_SETUI_LEVEL,present,NULL)==PN_OK && pn_settings_refresh_pages(ui.flags)==14);
+    assert(pn_settings_ui_event(&ui,PN_SETUI_BACK,present,NULL)==PN_OK && ui.active && pn_settings_ui_screen(&ui)==0);
+    /* 存储与关于：只显示调用方填写的实际信息。/ Storage and about shows only what the caller actually read. */
+    {pn_settings_about_t about={0};strcpy(about.version,"0.0.57");strcpy(about.storage,"共 29.7 GB · 可用 12.1 GB");pn_settings_ui_set_about(&ui,&about);
+     assert(pn_settings_ui_event(&ui,PN_SETUI_ABOUT,present,NULL)==PN_OK && pn_settings_ui_screen(&ui)==3 && pn_settings_ui_event(&ui,PN_SETUI_BACK,present,NULL)==PN_OK);}
+    /* 按键与手势：四个翻页开关。/ Keys and gestures: the four page-turn switches. */
+    assert(pn_settings_ui_event(&ui,PN_SETUI_KEYS,present,NULL)==PN_OK && pn_settings_ui_screen(&ui)==1 && pn_settings_ui_hit(&ui,100,680)==PN_SETUI_TOGGLE && pn_settings_ui_hit(&ui,100,1000)==PN_SETUI_TOGGLE+3 && pn_settings_ui_hit(&ui,100,1100)==-1);
     assert(pn_settings_ui_event(&ui,PN_SETUI_TOGGLE,present,NULL)==PN_OK && ui.flags==PN_INPUT_LEFT_HAND && pn_settings_load_flags(&media,root,&flags)==PN_OK && flags==PN_INPUT_LEFT_HAND);
     assert(pn_settings_ui_event(&ui,PN_SETUI_TOGGLE+1,present,NULL)==PN_OK && pn_settings_ui_event(&ui,PN_SETUI_TOGGLE+2,present,NULL)==PN_OK);
     assert(pn_settings_ui_event(&ui,PN_SETUI_TOGGLE+3,present,NULL)==PN_LIMIT && !(ui.flags&PN_INPUT_NO_KEYS));
     pn_media_lease_t writer;assert(pn_media_acquire(&media,PN_MEDIA_WRITE,&writer)==PN_OK);uint8_t before=ui.flags;
     assert(pn_settings_ui_event(&ui,PN_SETUI_TOGGLE+2,present,NULL)==PN_BUSY && ui.flags==before);assert(pn_media_release(&media,&writer)==PN_OK);
+    assert(pn_settings_ui_event(&ui,PN_SETUI_BACK,present,NULL)==PN_OK && ui.active && pn_settings_ui_screen(&ui)==0);
     assert(pn_settings_ui_event(&ui,PN_SETUI_FONTS,present,NULL)==PN_OK && ui.request==PN_SETUI_FONTS && ui.active);ui.request=0;
     /* 局域网传书行：设置网络名后才出现，选中交给调用方。/ The LAN transfer row appears only after a network name is set and selecting it is handed to the caller. */
-    assert(pn_settings_ui_hit(&ui,100,960)==-1 && pn_settings_ui_event(&ui,PN_SETUI_LAN,present,NULL)==PN_EMPTY && !ui.request);
-    assert(pn_settings_ui_set_lan(&ui,"家里的WiFi",present,NULL)==PN_OK && pn_settings_ui_hit(&ui,100,960)==PN_SETUI_LAN);
+    assert(pn_settings_ui_hit(&ui,100,750)==PN_SETUI_ABOUT && pn_settings_ui_event(&ui,PN_SETUI_LAN,present,NULL)==PN_EMPTY && !ui.request);
+    assert(pn_settings_ui_set_lan(&ui,"家里的WiFi",present,NULL)==PN_OK && pn_settings_ui_hit(&ui,100,750)==PN_SETUI_LAN && pn_settings_ui_hit(&ui,100,850)==PN_SETUI_ABOUT);
     assert(pn_settings_ui_event(&ui,PN_SETUI_LAN,present,NULL)==PN_OK && ui.request==PN_SETUI_LAN);ui.request=0;
-    assert(pn_settings_ui_set_lan(&ui,"",present,NULL)==PN_OK && pn_settings_ui_hit(&ui,100,960)==-1);
+    assert(pn_settings_ui_set_lan(&ui,"",present,NULL)==PN_OK && pn_settings_ui_hit(&ui,100,850)==-1);
     assert(pn_settings_ui_event(&ui,PN_SETUI_BACK,present,NULL)==PN_OK && !ui.active);pn_settings_ui_close(&ui);pn_settings_ui_close(&ui);assert(!pool.used && !pool.live);
     assert(pn_settings_load_flags(&media,root,&flags)==PN_OK && flags==(PN_INPUT_LEFT_HAND|PN_INPUT_NO_SWIPE|PN_INPUT_NO_EDGE_TAP));
     /* 无存储：显示默认、不能保存。/ No storage: defaults shown, nothing saved. */

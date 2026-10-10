@@ -23,6 +23,8 @@
 #include <string.h>
 #include "pn_search_ui.h"
 #include "pn_jump_ui.h"
+#include "pn_transfer_hub.h"
+#include <sys/statvfs.h>
 #include "bookmark_sdl.h"
 #include "input_script.h"
 #include "style_sdl.h"
@@ -73,6 +75,8 @@ typedef struct {
     uint8_t *page_px; ///< 最近一次呈现帧的副本，关闭工具栏时恢复 / Copy of the latest presented frame, restored when the toolbar closes
     uint8_t *tool_px; ///< 画工具栏用的临时帧 / Scratch frame for drawing the toolbar
     char jump; ///< 下次首页查询的字母 / Letter for the next first-page query
+    bool hub; ///< 传书一级页正显示 / The Transfer root tab is showing
+    char storage[64]; ///< 书库所在磁盘容量说明 / Capacity note of the library disk
     bool back_to_settings; ///< 子页从设置页进入，返回时回设置页 / The sub-page was opened from Settings, so Back returns there
     pn_jump_ui_t jumpui; ///< 进度跳转面板 / Progress jump panel
     pn_search_ui_t search; ///< 搜索页输入状态 / Search page input state
@@ -158,6 +162,26 @@ static pn_status_t recent_load(library_t *s){
     pn_journal_files_t files;pn_journal_io_t io;status=pn_recent_files(&files,&s->state_media,&lease,s->state_dir,&io);
     if(status==PN_OK)status=pn_recent_load(&io,s->pool,s->recent);
     (void)pn_media_release(&s->state_media,&lease);if(status==PN_EMPTY){memset(s->recent,0,sizeof *s->recent);status=PN_OK;}return status;
+}
+/* 书库所在磁盘的容量（模拟器的“存储卡”）。/ Capacity of the disk holding the library (the simulator's "card"). */
+static void storage_note(library_t *s){
+    struct statvfs st;s->storage[0]=0;
+    if(statvfs(s->directory,&st)==0 && st.f_blocks){unsigned long long total=(unsigned long long)st.f_blocks*st.f_frsize,avail=(unsigned long long)st.f_bavail*st.f_frsize;
+        snprintf(s->storage,sizeof s->storage,"共 %llu.%llu GB · 可用 %llu.%llu GB",total>>30,((total%(1ull<<30))*10)>>30,avail>>30,((avail%(1ull<<30))*10)>>30);}
+}
+static int shelf_hit(library_t *s,int x,int y){pn_shelf_options_t o=shelf_options(s);int hit=pn_shelf_hit_ex(s->page,x,y,&o);return hit<0 && pn_w_tabbar_hit(3,1104,112,x,y)==1?PN_SHELF_TRANSFER:hit;}
+static pn_status_t open_settings(library_t *s){
+    pn_status_t status=pn_settings_ui_open(&s->settings,s->pool,&s->state_media,s->state_dir,present,s);
+    if(status==PN_OK){pn_settings_about_t about={0};storage_note(s);snprintf(about.version,sizeof about.version,"PC 模拟器");snprintf(about.storage,sizeof about.storage,"%s",s->storage);
+        snprintf(about.internal,sizeof about.internal,"%s",s->state_dir?"可用（--state-dir）":"未指定 --state-dir");snprintf(about.screen,sizeof about.screen,"684×1216 · 16 级灰阶（模拟）");pn_settings_ui_set_about(&s->settings,&about);}
+    return status;
+}
+/* 传书一级页：模拟器没有无线传书，只显示原因。/ Transfer root tab: the simulator has no wireless transfer and only shows the reason. */
+static pn_transfer_hub_info_t hub_info(library_t *s){return (pn_transfer_hub_info_t){.storage=s->storage,.unavailable="PC 模拟器不提供无线传书"};}
+static pn_status_t open_hub(library_t *s){
+    storage_note(s);pn_transfer_hub_info_t info=hub_info(s);
+    pn_status_t status=pn_transfer_hub_render(&s->font,&s->frame,&info);if(status==PN_OK)status=present(s,&s->frame,PN_REFRESH_GL16);
+    s->hub=status==PN_OK;printf("hub open status=%d\n",(int)status);return status;
 }
 static pn_status_t page(library_t *s,bool previous,bool first){
     if(s->recent_mode){pn_status_t status=recent_load(s);if(status!=PN_OK)return status;
@@ -303,6 +327,17 @@ int pn_sim_library_window(pn_pool_t *pool,const char *directory,const char *font
             if(command>=0){status=pn_bookmark_ui_event(&s->bookmarks,command,event.type==SDL_TEXTINPUT?event.text.text:NULL,now,present,s);bookmark_report(&s->bookmarks,command,status);cancel_pointer(&input,&tap,(SDL_GetMouseState(NULL,NULL)&SDL_BUTTON_LMASK)==0);continue;}
         }
         input.config=(pn_reader_input_config_t){.left_hand=(s->input_flags&PN_INPUT_LEFT_HAND)!=0,.no_swipe=(s->input_flags&PN_INPUT_NO_SWIPE)!=0,.no_edge_tap=(s->input_flags&PN_INPUT_NO_EDGE_TAP)!=0,.no_keys=(s->input_flags&PN_INPUT_NO_KEYS)!=0};
+        if(s->hub){
+            // 传书一级页：底栏切换书架/设置，Esc回书架。/ Transfer root tab: the bottom bar switches to the shelf or Settings; Esc returns to the shelf.
+            int hit=-1;
+            if(event.type==SDL_QUIT){running=false;continue;}
+            if(event.type==SDL_KEYDOWN && !event.key.repeat && event.key.keysym.sym==SDLK_ESCAPE)hit=PN_HUB_SHELF;
+            else if(event.type==SDL_MOUSEBUTTONUP && event.button.button==SDL_BUTTON_LEFT){pn_transfer_hub_info_t info=hub_info(s);hit=pn_transfer_hub_hit(&info,event.button.x,event.button.y);}
+            if(hit==PN_HUB_SHELF){s->hub=false;status=draw(s);}
+            else if(hit==PN_HUB_SETTINGS){s->hub=false;status=open_settings(s);}
+            if(hit>=0)printf("hub command=%d status=%d\n",hit,(int)status);
+            continue;
+        }
         if(s->index){
             // 字母页：鼠标松开选字母，Esc返回。/ Index page: mouse release picks a letter, Esc returns.
             char letter=0;
@@ -338,7 +373,8 @@ int pn_sim_library_window(pn_pool_t *pool,const char *directory,const char *font
                 int request=s->settings.request;
                 if(request || !s->settings.active){pn_settings_ui_close(&s->settings);
                     s->back_to_settings=(request==PN_SETUI_FONTS && s->font_dir) || (request==PN_SETUI_WALLPAPER && s->wallpaper_dir);
-                    if(request==PN_SETUI_FONTS && s->font_dir)status=pn_font_manage_open(&s->font_manage,s->pool,&s->media,s->font_dir,&s->state_media,s->state_dir,present,s);
+                    if(request==PN_SETUI_TRANSFER)status=open_hub(s);
+                    else if(request==PN_SETUI_FONTS && s->font_dir)status=pn_font_manage_open(&s->font_manage,s->pool,&s->media,s->font_dir,&s->state_media,s->state_dir,present,s);
                     else if(request==PN_SETUI_WALLPAPER && s->wallpaper_dir)status=pn_wallpaper_ui_open(&s->wallpaper,s->pool,&s->media,s->wallpaper_dir,s->wallpaper_store_ok?&s->wallpaper_store:NULL,present,s);
                     else (void)draw(s);
                     printf("settings closed request=%d\n",request);}}
@@ -351,7 +387,7 @@ int pn_sim_library_window(pn_pool_t *pool,const char *directory,const char *font
             if(event.type==SDL_KEYDOWN && !event.key.repeat && event.key.keysym.sym==SDLK_ESCAPE)command=s->font_manage.screen==PN_FMU_CONFIRMING?PN_FMU_CANCEL:PN_FMU_BACK;
             else if(event.type==SDL_MOUSEBUTTONUP && event.button.button==SDL_BUTTON_LEFT)command=pn_font_manage_hit(&s->font_manage,event.button.x,event.button.y);
             if(command>=0){status=pn_font_manage_event(&s->font_manage,command,present,s);printf("font_manage command=%d status=%d screen=%d active=%d\n",command,(int)status,(int)s->font_manage.screen,(int)s->font_manage.active);
-                if(!s->font_manage.active){pn_font_manage_close(&s->font_manage);if(s->back_to_settings){s->back_to_settings=false;status=pn_settings_ui_open(&s->settings,s->pool,&s->state_media,s->state_dir,present,s);}else (void)draw(s);}}
+                if(!s->font_manage.active){pn_font_manage_close(&s->font_manage);if(s->back_to_settings){s->back_to_settings=false;status=open_settings(s);}else (void)draw(s);}}
             continue;
         }
         if(s->wallpaper.impl){
@@ -361,7 +397,7 @@ int pn_sim_library_window(pn_pool_t *pool,const char *directory,const char *font
             if(event.type==SDL_KEYDOWN && !event.key.repeat){SDL_Keycode key=event.key.keysym.sym;if(key==SDLK_ESCAPE)command=s->wallpaper.screen==PN_WUI_LIST?PN_WUI_BACK:PN_WUI_CANCEL;else if(key==SDLK_RETURN)command=PN_WUI_APPLY;}
             else if(event.type==SDL_MOUSEBUTTONUP && event.button.button==SDL_BUTTON_LEFT)command=pn_wallpaper_ui_hit(&s->wallpaper,event.button.x,event.button.y);
             if(command>=0){status=pn_wallpaper_ui_event(&s->wallpaper,command,present,s);printf("wallpaper_ui command=%d status=%d screen=%d active=%d\n",command,(int)status,(int)s->wallpaper.screen,(int)s->wallpaper.active);
-                if(!s->wallpaper.active){pn_wallpaper_ui_close(&s->wallpaper);if(s->back_to_settings){s->back_to_settings=false;status=pn_settings_ui_open(&s->settings,s->pool,&s->state_media,s->state_dir,present,s);}else (void)draw(s);}}
+                if(!s->wallpaper.active){pn_wallpaper_ui_close(&s->wallpaper);if(s->back_to_settings){s->back_to_settings=false;status=open_settings(s);}else (void)draw(s);}}
             continue;
         }
         if(s->toolbar){
@@ -404,7 +440,7 @@ int pn_sim_library_window(pn_pool_t *pool,const char *directory,const char *font
                 else if(key==SDLK_MINUS){action=PN_APP_SMALLER;turn=true;}
             }else{
                 if(key==SDLK_j && !s->recent_mode){status=pn_shelf_index_render(&s->font,&s->frame);if(status==PN_OK)status=present(s,&s->frame,PN_REFRESH_GL16);s->index=status==PN_OK;printf("index open status=%d\n",(int)status);continue;}
-                if(key==SDLK_p){status=pn_settings_ui_open(&s->settings,s->pool,&s->state_media,s->state_dir,present,s);printf("settings open status=%d flags=%u\n",(int)status,(unsigned)s->settings.flags);continue;}
+                if(key==SDLK_p){status=open_settings(s);printf("settings open status=%d flags=%u\n",(int)status,(unsigned)s->settings.flags);continue;}
                 if(key==SDLK_f && s->font_dir){status=pn_font_manage_open(&s->font_manage,s->pool,&s->media,s->font_dir,&s->state_media,s->state_dir,present,s);printf("font_manage open status=%d\n",(int)status);continue;}
                 if(key==SDLK_w && s->wallpaper_dir){status=pn_wallpaper_ui_open(&s->wallpaper,s->pool,&s->media,s->wallpaper_dir,s->wallpaper_store_ok?&s->wallpaper_store:NULL,present,s);printf("wallpaper_ui open status=%d\n",(int)status);continue;}
                 if(key==SDLK_SLASH){pn_search_ui_open(&s->search,NULL);s->search_open=true;status=pn_search_ui_render(&s->search,&s->font,&s->frame);if(status==PN_OK)status=present(s,&s->frame,PN_REFRESH_GL16);continue;}
@@ -421,8 +457,8 @@ int pn_sim_library_window(pn_pool_t *pool,const char *directory,const char *font
             if(event.type==SDL_MOUSEBUTTONDOWN)s->pointer_down=true;
             if(!s->pointer_down)continue;
             int x=motion?event.motion.x:event.button.x,y=motion?event.motion.y:event.button.y;
-            pn_shelf_options_t shelf_opts=shelf_options(s);
-            int target=s->styles.active?pn_style_ui_hit(&s->styles,x,y):s->bookmarks.mode!=PN_BUI_CLOSED?pn_bookmark_ui_hit(&s->bookmarks,x,y):reading(s)?(y>=1144 && x<420 && (s->epub.impl?pn_epub_app_bookmark_can_return(&s->epub):pn_reader_app_bookmark_can_return(&s->reader))?11:y>=1144 && x>=420?14:-1):pn_shelf_hit_ex(s->page,x,y,&shelf_opts);
+
+            int target=s->styles.active?pn_style_ui_hit(&s->styles,x,y):s->bookmarks.mode!=PN_BUI_CLOSED?pn_bookmark_ui_hit(&s->bookmarks,x,y):reading(s)?(y>=1144 && x<420 && (s->epub.impl?pn_epub_app_bookmark_can_return(&s->epub):pn_reader_app_bookmark_can_return(&s->reader))?11:y>=1144 && x>=420?14:-1):shelf_hit(s,x,y);
             (void)pn_tap_feed(&tap,1,target,true,&hit);
             if(reading(s) && s->bookmarks.mode==PN_BUI_CLOSED && !s->styles.active)(void)pn_reader_input_feed(&input,1,x,y,true,&action);
             if(event.type==SDL_MOUSEBUTTONUP){
@@ -451,7 +487,8 @@ int pn_sim_library_window(pn_pool_t *pool,const char *directory,const char *font
                 else if(hit==PN_SHELF_SEARCH){pn_search_ui_open(&s->search,NULL);s->search_open=true;status=pn_search_ui_render(&s->search,&s->font,&s->frame);if(status==PN_OK)status=present(s,&s->frame,PN_REFRESH_GL16);}
                 else if(hit==PN_SHELF_TAB_ALL || hit==PN_SHELF_TAB_RECENT || hit==PN_SHELF_HOME){bool want=hit==PN_SHELF_TAB_RECENT;if(hit==PN_SHELF_HOME || want!=s->recent_mode){s->recent_mode=want;*s->query=0;status=page(s,false,true);}}
                 else if(hit==PN_SHELF_INDEX && !s->recent_mode && !*s->query){status=pn_shelf_index_render(&s->font,&s->frame);if(status==PN_OK)status=present(s,&s->frame,PN_REFRESH_GL16);s->index=status==PN_OK;printf("index open status=%d\n",(int)status);}
-                else if(hit==PN_SHELF_MENU){status=pn_settings_ui_open(&s->settings,s->pool,&s->state_media,s->state_dir,present,s);printf("settings open status=%d flags=%u\n",(int)status,(unsigned)s->settings.flags);}
+                else if(hit==PN_SHELF_TRANSFER || hit==PN_SHELF_IMPORT)status=open_hub(s);
+                else if(hit==PN_SHELF_MENU){status=open_settings(s);printf("settings open status=%d flags=%u\n",(int)status,(unsigned)s->settings.flags);}
                 else if(hit==PN_SHELF_CONTINUE)status=continue_book(s,now);
                 else if(hit==PN_SHELF_NEXT || hit==PN_SHELF_PREVIOUS)status=page(s,hit==PN_SHELF_PREVIOUS,false);
                 else status=open_book(s,hit,now);
