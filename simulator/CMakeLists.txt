@@ -63,6 +63,8 @@ add_test(NAME jump_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_D
 set_tests_properties(jump_window PROPERTIES LABELS "reader;ui")
 add_test(NAME list_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_list_window.py $<TARGET_FILE:pn_sim>)
 set_tests_properties(list_window PROPERTIES LABELS "library;ui")
+add_test(NAME actions_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_actions_window.py $<TARGET_FILE:pn_sim>)
+set_tests_properties(actions_window PROPERTIES LABELS "library;ui;storage")
 add_test(NAME settings_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_settings_window.py $<TARGET_FILE:pn_sim>)
 set_tests_properties(settings_window PROPERTIES LABELS "ui;storage")
 add_test(NAME font_manage_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_font_manage_window.py $<TARGET_FILE:pn_sim>)

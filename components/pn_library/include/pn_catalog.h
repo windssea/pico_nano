@@ -7,6 +7,7 @@
  * Frozen: no file writes or symlink following; paths are not content identity.
  */
 #pragma once
+#include "pn_favorites.h"
 #include "pn_storage.h"
 #include "pn_recent.h"
 #define PN_CATALOG_PAGE_MAX 6
@@ -83,3 +84,5 @@ pn_status_t pn_catalog_page_from_n(pn_media_t *media,const pn_media_lease_t *lea
 pn_status_t pn_catalog_search_page_n(pn_media_t *media,const pn_media_lease_t *lease,const char *directory,const char *query,const char *after,size_t limit,pn_catalog_page_t *page);
 pn_status_t pn_catalog_search_page_before_n(pn_media_t *media,const pn_media_lease_t *lease,const char *directory,const char *query,const char *before,size_t limit,pn_catalog_page_t *page);
 pn_status_t pn_catalog_recent_page_n(const pn_recent_snapshot_t *snapshot,size_t start,size_t limit,pn_catalog_page_t *page);
+/// 收藏夹映射为一页（不扫描目录）；文件不存在的条目大小为0。/ Map favorites into a page without scanning; missing files get size 0.
+pn_status_t pn_catalog_favorites_page(const pn_favorites_t *favorites,size_t start,size_t limit,pn_catalog_page_t *page);

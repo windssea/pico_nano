@@ -40,6 +40,7 @@ add_library(pn_core STATIC ${ui_font_c}
     ${PN_ROOT}/components/pn_personalization/pn_settings_ui.c
     ${PN_ROOT}/components/pn_library/pn_shelf_view.c
     ${PN_ROOT}/components/pn_library/pn_search_ui.c
+    ${PN_ROOT}/components/pn_library/pn_book_actions.c
     ${PN_ROOT}/components/pn_widgets/pn_widgets.c
     ${PN_ROOT}/components/pn_widgets/pn_gfx.c
     ${PN_ROOT}/components/pn_widgets/pn_icons.c
@@ -66,6 +67,7 @@ add_library(pn_core STATIC ${ui_font_c}
     ${PN_ROOT}/components/pn_storage/pn_journal.c
     ${PN_ROOT}/components/pn_storage/pn_blob.c
     ${PN_ROOT}/components/pn_storage/pn_recent.c
+    ${PN_ROOT}/components/pn_storage/pn_favorites.c
     ${PN_ROOT}/components/pn_storage/pn_network_store.c
     ${PN_ROOT}/components/pn_storage/pn_input_prefs.c
     ${PN_ROOT}/components/pn_storage/pn_identity.c

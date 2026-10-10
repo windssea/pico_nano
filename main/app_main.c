@@ -15,6 +15,7 @@
 #include "pn_search_ui.h"
 #include "pn_jump_ui.h"
 #include "pn_transfer_hub.h"
+#include "pn_book_actions.h"
 #include "esp_vfs_fat.h"
 #include "esp_app_desc.h"
 #include "pn_focus.h"
@@ -63,6 +64,10 @@ static pn_key_t keys={.key=-1};
 static bool index_mode; ///< 字母跳转页 / Letter-index page
 static int shelf_focus=-1; ///< 三键书架焦点（-1无）/ Three-key shelf focus (-1 none)
 static bool back_to_settings; ///< 子页从设置页进入，返回时回设置页而不是书架 / The sub-page was opened from Settings, so Back returns there instead of the shelf
+static bool fav_mode; ///< 书架“收藏”分类 / Shelf Favorites category
+static size_t fav_start;static pn_favorites_t *favorites;
+static bool actions_mode; ///< 书籍操作面板 / Book actions sheet
+static pn_book_actions_t actions;
 static bool hub_mode; ///< 传书一级页 / Transfer root tab
 static pn_transfer_hub_info_t hub_info;static char hub_storage[64];
 static bool search_mode; ///< 搜索输入页 / Search input page
@@ -88,7 +93,7 @@ static bool recent_mode,selected_identified;
 static size_t recent_start;
 static bool list_mode; ///< 书架列表模式（每页5本）/ Shelf list mode (five per page)
 /// 当前书架每页条数。/ Entries per shelf page right now.
-static size_t shelf_per_page(void){return list_mode || *search_query?5u:6u;}
+static size_t shelf_per_page(void){return list_mode || (!recent_mode && !fav_mode && *search_query)?5u:6u;}
 static pn_book_id_t selected_expected;
 static char selected_path[PN_CATALOG_PATH_MAX];
 static const char *book_directory="/sdcard";
@@ -160,7 +165,7 @@ static void message(const char *title,const char *detail){
     pn_toc_ui_close(&toc);
     pn_bookmark_ui_cancel(&bookmarks);
     pn_style_ui_close(&styles);pn_font_ui_close(&fonts);pn_wallpaper_ui_close(&wallpaper_ui);pn_font_manage_close(&font_manage);pn_settings_ui_close(&settings_ui);
-    status_page=true;shelf_mode=false;index_mode=false;search_mode=false;hub_mode=false;
+    status_page=true;shelf_mode=false;index_mode=false;search_mode=false;hub_mode=false;actions_mode=false;
     uint8_t *pixels=pn_alloc(&pool,684u*1216u/2u);pn_frame_t frame;pn_font_t font={0};pn_text_source_t builtin=pn_font_builtin_source();
     pn_status_t status=pn_frame_bind(&frame,pixels,684u*1216u/2u,684,1216)?PN_OK:PN_NO_MEMORY;
     if(status==PN_OK)status=pn_font_open(&font,&pool,&builtin,28);
@@ -198,7 +203,7 @@ static bool mount_wallpaper(void){
 /// 锁屏页：读内部有效壁纸记录，任何失败用系统默认图，再失败退回文字页。/ Lock page: load the valid internal wallpaper record, use the system default on any failure, and fall back to the text page last.
 static void show_lock(const char *hint){
     reading_menu=false;pn_toc_ui_close(&toc);pn_bookmark_ui_cancel(&bookmarks);pn_style_ui_close(&styles);pn_font_ui_close(&fonts);pn_wallpaper_ui_close(&wallpaper_ui);pn_font_manage_close(&font_manage);pn_settings_ui_close(&settings_ui);
-    status_page=true;shelf_mode=false;index_mode=false;search_mode=false;hub_mode=false;
+    status_page=true;shelf_mode=false;index_mode=false;search_mode=false;hub_mode=false;actions_mode=false;
     uint8_t *pixels=pn_alloc(&pool,PN_WALLPAPER_BYTES);pn_frame_t frame;pn_font_t font={0};pn_text_source_t builtin=pn_font_builtin_source();
     pn_lock_selection_t selection={.mode=PN_LOCK_DEFAULT,.hint=true};
     pn_status_t status=pn_frame_bind(&frame,pixels,PN_WALLPAPER_BYTES,PN_WALLPAPER_WIDTH,PN_WALLPAPER_HEIGHT)?PN_OK:PN_NO_MEMORY;
@@ -258,11 +263,30 @@ static int battery_percent(void){
     return (snapshot->qb_soc+5u)/10u;
 }
 /// 只按当前页与封面槽绘制书架，不扫描目录。/ Draw the shelf from the current page and cover slots only, without scanning.
+/// 书架选项（绘制与命中共用）。/ Shelf options shared by drawing and hit testing.
+static pn_shelf_options_t shelf_options(void){
+    bool query=!recent_mode && !fav_mode && *search_query;
+    return (pn_shelf_options_t){.battery_percent=-1,.actions=actions_mode?&actions:NULL,.search=true,.import_tile=true,.layout_toggle=true,.favorites_tab=true,.favorites=fav_mode,.list_mode=list_mode || query,.query=query};
+}
+/// 读收藏夹到favorites（没有记录为空表）。/ Load favorites (an empty list without a record).
+static pn_status_t favorites_load(void){
+    if(!data_ready)return PN_UNSUPPORTED;
+    if(!favorites)favorites=pn_alloc(&pool,sizeof *favorites);
+    if(!favorites)return PN_NO_MEMORY;
+    pn_media_lease_t lease={0};pn_status_t status=pn_media_acquire(&data_media,PN_MEDIA_READ,&lease);
+    pn_journal_files_t files;pn_journal_io_t io;
+    if(status==PN_OK)status=pn_favorites_files(&files,&data_media,&lease,"/data/progress",&io);
+    if(status==PN_OK)status=pn_favorites_load(&io,&pool,favorites);
+    if(lease.ticket)(void)pn_media_release(&data_media,&lease);
+    if(status==PN_EMPTY){memset(favorites,0,sizeof *favorites);status=PN_OK;}
+    return status;
+}
 static pn_status_t draw_shelf(pn_refresh_t profile){
     uint8_t *pixels=pn_alloc(&pool,684u*1216u/2u);pn_frame_t frame;pn_font_t font={0};pn_text_source_t builtin=pn_font_builtin_source();
     pn_status_t status=pn_frame_bind(&frame,pixels,684u*1216u/2u,684,1216)?PN_OK:PN_NO_MEMORY;
     if(status==PN_OK)status=pn_font_open(&font,&pool,&builtin,24);
-    if(status==PN_OK){pn_w_set_battery(battery_percent());pn_shelf_options_t options={.battery_percent=-1,.search=true,.import_tile=true,.layout_toggle=true,.list_mode=list_mode || (!recent_mode && *search_query),.query=!recent_mode && *search_query};status=pn_shelf_render_with_font_file_ex(shelf_page,&font,&frame,shelf_focus,recent_mode,true,shelf_covers,&pool,&sd_media,access("/sdcard/fonts/reader.ttf",R_OK)==0?"/sdcard/fonts/reader.ttf":NULL,&options);}
+    if(status==PN_OK){pn_w_set_battery(battery_percent());pn_shelf_options_t options=shelf_options();status=pn_shelf_render_with_font_file_ex(shelf_page,&font,&frame,shelf_focus,recent_mode,true,shelf_covers,&pool,&sd_media,access("/sdcard/fonts/reader.ttf",R_OK)==0?"/sdcard/fonts/reader.ttf":NULL,&options);}
+    // 书籍操作面板叠在书架上（删除确认为整页）。/ The book actions sheet overlays the shelf (the delete confirmation is a full page).
     if(status==PN_OK)status=present(NULL,&frame,profile);
     pn_font_close(&font);pn_free(pixels);return status;
 }
@@ -296,7 +320,14 @@ static void show_shelf(const char *cursor,bool previous){
     if(!shelf_page){shelf_page=pn_alloc(&pool,sizeof *shelf_page);if(!shelf_page){message("内存不足","稍后重试");return;}}
     pn_catalog_page_t *next=pn_alloc(&pool,sizeof *next);if(!next){message("内存不足","稍后重试");return;}
     pn_media_lease_t lease={0};pn_status_t status;
-    if(recent_mode){
+    if(fav_mode){
+        status=favorites_load();
+        size_t start=!*cursor?0:previous?(fav_start>=shelf_per_page()?fav_start-shelf_per_page():0):fav_start+shelf_per_page();
+        if(status==PN_OK && start>=favorites->count && start){pn_free(next);return;}
+        if(status==PN_OK){status=pn_catalog_favorites_page(favorites,start,shelf_per_page(),next);if(status==PN_OK)fav_start=start;}
+        if(status==PN_OK && recent_snapshot)pn_catalog_apply_recent(next,recent_snapshot);
+        if(status!=PN_OK){fav_mode=false;pn_free(next);message("收藏读取失败","记录保留，点下方回书架");return;}
+    }else if(recent_mode){
         if(!recent_snapshot)recent_snapshot=pn_alloc(&pool,sizeof *recent_snapshot);
         status=recent_snapshot?pn_media_acquire(&data_media,PN_MEDIA_READ,&lease):PN_NO_MEMORY;
         pn_journal_files_t files;pn_journal_io_t io;
@@ -381,7 +412,7 @@ static void begin_wallpaper(void){
     bool store_ok=mount_wallpaper() && pn_wallpaper_store_init(&store,&wallpaper_media,"/wallpaper/lock.a","/wallpaper/lock.b")==PN_OK;
     pn_status_t status=pn_wallpaper_ui_open(&wallpaper_ui,&pool,&sd_media,"/sdcard/wallpapers",store_ok?&store:NULL,present,NULL);
     if(status!=PN_OK){message("壁纸设置未打开","保留原锁屏，稍后重试");return;}
-    status_page=true;shelf_mode=false;index_mode=false;search_mode=false;hub_mode=false;
+    status_page=true;shelf_mode=false;index_mode=false;search_mode=false;hub_mode=false;actions_mode=false;
 }
 /// 进入字体管理：先关闭正文和其字体源，删除/设默认在无消费者时进行。/ Enter font management after closing the book and its font sources, so deletion and defaults happen without consumers.
 static void begin_fonts(void){
@@ -391,7 +422,7 @@ static void begin_fonts(void){
     if(!data_ready)data_ready=mount_data();
     pn_status_t status=pn_font_manage_open(&font_manage,&pool,&sd_media,"/sdcard/fonts",data_ready?&data_media:NULL,data_ready?"/data/progress":NULL,present,NULL);
     if(status!=PN_OK){message("字体管理未打开","字体与选择均保留，稍后重试");return;}
-    status_page=true;shelf_mode=false;index_mode=false;search_mode=false;hub_mode=false;
+    status_page=true;shelf_mode=false;index_mode=false;search_mode=false;hub_mode=false;actions_mode=false;
 }
 /// 设置页：壁纸/字体入口与翻页开关；进入前同样保存并关闭正文。/ Settings: wallpaper/font entries and page-turn switches; the book is saved and closed first as well.
 static void storage_note(char *out,size_t cap);
@@ -407,7 +438,7 @@ static void begin_settings(void){
      storage_note(about.storage,sizeof about.storage);snprintf(about.internal,sizeof about.internal,"%s",data_ready?"可用（阅读记录、书签与设置）":"不可用");
      snprintf(about.screen,sizeof about.screen,"4.7 英寸 · 684×1216 · 16 级灰阶");pn_settings_ui_set_about(&settings_ui,&about);}
     refresh_network_name();if(*saved_network)(void)pn_settings_ui_set_lan(&settings_ui,saved_network,present,NULL);
-    status_page=true;shelf_mode=false;index_mode=false;search_mode=false;hub_mode=false;
+    status_page=true;shelf_mode=false;index_mode=false;search_mode=false;hub_mode=false;actions_mode=false;
 }
 static void end_settings(void){input_flags=settings_ui.flags;pn_settings_ui_close(&settings_ui);if(*selected_path)start_reader();else show_shelf("",false);}
 static void end_fonts(void){pn_font_manage_close(&font_manage);if(back_to_settings){back_to_settings=false;begin_settings();return;}if(*selected_path)start_reader();else show_shelf("",false);}
@@ -513,7 +544,7 @@ static int active_hit(int x,int y);
 static void apply_selection(int selection);
 /// 三键焦点导航适用的页面：触摸页与工具栏等（书架和阅读正文各有自己的按键规则）。/ Pages three-key focus navigation applies to: touch pages and the toolbar (the shelf and the reading text have their own key rules).
 static bool focus_page(void){
-    return hub_mode || transfer.impl || wallpaper_ui.impl || font_manage.impl || settings_ui.impl || search_mode || index_mode || reading_menu || fonts.active || toc.active || jump_ui.active || styles.active || bookmarks.mode!=PN_BUI_CLOSED || toolbar_open || status_page;
+    return actions_mode || hub_mode || transfer.impl || wallpaper_ui.impl || font_manage.impl || settings_ui.impl || search_mode || index_mode || reading_menu || fonts.active || toc.active || jump_ui.active || styles.active || bookmarks.mode!=PN_BUI_CLOSED || toolbar_open || status_page;
 }
 static int focus_hit(void *ctx,int x,int y){(void)ctx;return active_hit(x,y);}
 /// 重新扫描当前页的焦点表，尽量保持原焦点。/ Rescan the page's focus table, keeping the focus where possible.
@@ -537,6 +568,7 @@ static void focus_show(void){
 static bool dialog_codes(int *confirm,int *cancel){
     if(font_manage.impl && font_manage.screen==PN_FMU_CONFIRMING){*confirm=PN_FMU_CONFIRM;*cancel=PN_FMU_CANCEL;return true;}
     if(bookmarks.mode==PN_BUI_DELETE){*confirm=PN_BUI_CONFIRM;*cancel=PN_BUI_CANCEL;return true;}
+    if(actions_mode && actions.confirming){*confirm=PN_BA_CONFIRM;*cancel=PN_BA_CANCEL;return true;}
     return false;
 }
 /// 弹窗三键（docs/UI_UX.md第7节）：KEY1取消，KEY3在取消与确认间切换焦点，KEY2确认当前焦点；默认焦点是取消，不会自动确认。
@@ -563,6 +595,13 @@ static void focus_key(int key,pn_key_event_t event){
         return;
     }
     if(pn_focus_move(&focus_nav,key==PN_KEY_3?1:-1)>=0)focus_show();
+}
+/// 打开第index本书的操作面板。/ Open the actions sheet for entry index.
+static void open_actions(int index){
+    if(!shelf_page || index<0 || (size_t)index>=shelf_page->count)return;
+    actions=(pn_book_actions_t){.item=shelf_page->items[index]};
+    actions.favorites_known=favorites_load()==PN_OK;actions.favorite=actions.favorites_known && pn_favorites_contains(favorites,actions.item.path);
+    actions_mode=true;if(draw_shelf(PN_REFRESH_GL16)!=PN_OK){actions_mode=false;ESP_LOGW(TAG,"Book actions present failed");}
 }
 /// 打开书架第index项（触摸与KEY2共用）。/ Open shelf entry index (shared by touch and KEY2).
 static void open_shelf_item(int index){
@@ -619,7 +658,8 @@ static int active_hit(int x,int y){
     else if(jump_ui.active)hit=pn_jump_ui_hit(&jump_ui,x,y);
     else if(styles.active)hit=pn_style_ui_hit(&styles,x,y);
     else if(bookmarks.mode!=PN_BUI_CLOSED)hit=pn_bookmark_ui_hit(&bookmarks,x,y);
-    else if(shelf_mode && shelf_page){pn_shelf_options_t options={.battery_percent=-1,.search=true,.import_tile=true,.layout_toggle=true,.list_mode=list_mode || (!recent_mode && *search_query),.query=!recent_mode && *search_query};hit=pn_shelf_hit_ex(shelf_page,x,y,&options);if(hit<0 && pn_w_tabbar_hit(3,1104,112,x,y)==1)hit=PN_SHELF_TRANSFER;}
+    else if(actions_mode)hit=pn_book_actions_hit(&actions,x,y);
+    else if(shelf_mode && shelf_page){pn_shelf_options_t options=shelf_options();hit=pn_shelf_hit_ex(shelf_page,x,y,&options);if(hit<0 && pn_w_tabbar_hit(3,1104,112,x,y)==1)hit=PN_SHELF_TRANSFER;}
     else if(toolbar_open)hit=pn_reader_toolbar_hit(x,y,tool_unavailable());
     else if(reader_active() && !status_page && y>=1144 && x<420 && (epub.impl?pn_epub_app_bookmark_can_return(&epub):pn_reader_app_bookmark_can_return(&reader)))hit=11;
     else if(reader_active() && !status_page && y>=1144 && x>=420)hit=14;
@@ -631,6 +671,29 @@ static void apply_selection(int selection){
     if(transfer.impl){if(selection==PN_TRANSFER_VIEW_STOP){transfer_return=true;(void)pn_device_transfer_request_stop(&transfer);}}
     else if(wallpaper_ui.impl){pn_status_t status=pn_wallpaper_ui_event(&wallpaper_ui,selection,present,NULL);if(status!=PN_OK && status!=PN_EMPTY)ESP_LOGW(TAG,"Wallpaper UI: %d",(int)status);if(!wallpaper_ui.active)end_wallpaper();}
     else if(font_manage.impl){pn_status_t status=pn_font_manage_event(&font_manage,selection,present,NULL);if(status!=PN_OK && status!=PN_EMPTY)ESP_LOGW(TAG,"Font management: %d",(int)status);if(!font_manage.active)end_fonts();}
+    else if(actions_mode){
+        if(selection==PN_BA_CANCEL){if(actions.confirming){actions.confirming=false;actions.notice=NULL;(void)draw_shelf(PN_REFRESH_GL16);}else{actions_mode=false;(void)draw_shelf(PN_REFRESH_GL16);}}
+        else if(selection==PN_BA_OPEN){actions_mode=false;
+            if(actions.item.format==PN_BOOK_TXT || actions.item.format==PN_BOOK_EPUB){selected_format=actions.item.format;strcpy(selected_path,actions.item.path);selected_identified=false;start_reader();}
+            else message("格式尚未接入","书籍仍保留，选择TXT或EPUB");}
+        else if(selection==PN_BA_FAVORITE){
+            pn_media_lease_t lease={0};pn_status_t status=data_ready?pn_media_acquire(&data_media,PN_MEDIA_WRITE,&lease):PN_UNSUPPORTED;pn_journal_files_t files;pn_journal_io_t io;bool now=actions.favorite;
+            if(status==PN_OK)status=pn_favorites_files(&files,&data_media,&lease,"/data/progress",&io);
+            if(status==PN_OK)status=pn_favorites_toggle(&io,&pool,actions.item.path,&now);
+            if(lease.ticket)(void)pn_media_release(&data_media,&lease);
+            actions.notice=status==PN_OK?(now?"已加入收藏":"已取消收藏"):status==PN_LIMIT?"收藏最多 50 本":"保存失败，请重试";
+            if(status==PN_OK)actions.favorite=now;
+            (void)draw_shelf(PN_REFRESH_GL16);}
+        else if(selection==PN_BA_DELETE){actions.confirming=true;actions.notice=NULL;(void)draw_shelf(PN_REFRESH_GL16);}
+        else if(selection==PN_BA_CONFIRM){
+            // 删除前确认没有书正打开；只删用户选中的这一个文件。/ Make sure no book is open first, and delete only the one file the user chose.
+            pn_status_t status=stop_reader()?PN_OK:PN_BUSY;pn_media_lease_t lease={0};
+            if(status==PN_OK)status=pn_media_acquire(&sd_media,PN_MEDIA_WRITE,&lease);
+            if(status==PN_OK && remove(actions.item.path)!=0)status=PN_IO;
+            if(lease.ticket)(void)pn_media_release(&sd_media,&lease);
+            if(status==PN_OK){actions_mode=false;if(!strcmp(selected_path,actions.item.path))selected_path[0]=0;show_shelf("",false);}
+            else{actions.notice="删除失败，文件仍保留";(void)draw_shelf(PN_REFRESH_GL16);}}
+    }
     else if(hub_mode){
         if(selection==PN_HUB_HOTSPOT){hub_mode=false;begin_transfer(false);}
         else if(selection==PN_HUB_LAN){hub_mode=false;begin_transfer(true);}
@@ -675,7 +738,7 @@ static void apply_selection(int selection){
     else if(bookmarks.mode!=PN_BUI_CLOSED){pn_status_t status=pn_bookmark_ui_event(&bookmarks,selection,NULL,now_ms(),present,NULL);if(status!=PN_OK && status!=PN_EMPTY && status!=PN_BUSY)ESP_LOGW(TAG,"Bookmark UI: %d",(int)status);}
     else if(selection==10){if(epub.impl)(void)pn_bookmark_ui_open_epub(&bookmarks,&epub,present,NULL);else (void)pn_bookmark_ui_open(&bookmarks,&reader,present,NULL);}
     else if(selection==11){if(epub.impl)(void)pn_epub_app_bookmark_return(&epub,now_ms(),present,NULL);else (void)pn_reader_app_bookmark_return(&reader,now_ms(),present,NULL);}
-    else if(shelf_mode && (selection==PN_SHELF_TAB_ALL || selection==PN_SHELF_TAB_RECENT || selection==PN_SHELF_HOME)){bool want_recent=selection==PN_SHELF_TAB_RECENT;if(selection==PN_SHELF_HOME || want_recent!=recent_mode){recent_mode=want_recent;search_query[0]=0;show_shelf("",false);}}
+    else if(shelf_mode && (selection==PN_SHELF_TAB_ALL || selection==PN_SHELF_TAB_RECENT || selection==PN_SHELF_HOME || selection==PN_SHELF_TAB_FAVORITES)){bool want_recent=selection==PN_SHELF_TAB_RECENT,want_fav=selection==PN_SHELF_TAB_FAVORITES;if(selection==PN_SHELF_HOME || want_recent!=recent_mode || want_fav!=fav_mode){recent_mode=want_recent;fav_mode=want_fav;fav_start=0;search_query[0]=0;show_shelf("",false);}}
     else if(shelf_mode && selection==PN_SHELF_CONTINUE){
         // 继续阅读卡直接打开最近一本，不改变当前书架模式。/ The continue card opens the latest book directly without changing the shelf mode.
         if(shelf_covers && shelf_covers->has_last){const pn_catalog_item_t *last=&shelf_covers->last;
@@ -725,9 +788,13 @@ static void device_task(void *arg){
             // 步进键长按：按住满600 ms后每180 ms再走一档；松手时不再多走一档（docs/UI_UX.md第5节）。
             // Stepper hold: after 600 ms held, step again every 180 ms; releasing does not add one more step (docs/UI_UX.md section 5).
             {bool repeatable=(styles.active && hit>=PN_SUI_FIELD && hit<PN_SUI_FIELD+PN_SUI_FIELDS*2) || (jump_ui.active && hit>=PN_JUI_STEP && hit<PN_JUI_STEP+4);
+             // 书架封面长按600 ms：打开书籍操作面板（只触发一次，松手不再打开书）。/ A 600 ms long press on a shelf cover opens the book actions sheet (once; releasing does not open the book).
+             bool long_press=shelf_mode && shelf_page && !actions_mode && hit>=0 && hit<(int)shelf_page->count && hit<6;
              uint64_t tick=now_ms();
-             if(touch_held && repeatable && hit==hold_hit){if(tick-hold_start>=600 && tick-hold_last>=180 && !locked){hold_last=tick;hold_fired=true;apply_selection(hit);}}
-             else{hold_hit=touch_held && repeatable?hit:-1;hold_start=tick;hold_last=0;if(touch_held)hold_fired=false;}}
+             if(touch_held && (repeatable || long_press) && hit==hold_hit){
+                 if(long_press){if(!hold_fired && tick-hold_start>=600 && !locked){hold_fired=true;open_actions(hit);}}
+                 else if(tick-hold_start>=600 && tick-hold_last>=180 && !locked){hold_last=tick;hold_fired=true;apply_selection(hit);}}
+             else{hold_hit=touch_held && (repeatable || long_press)?hit:-1;hold_start=tick;hold_last=0;if(touch_held)hold_fired=false;}}
             if(pn_tap_feed(&tap,touch.count,hit,read==ESP_OK,&selection) && !locked){
                 if(hold_fired)hold_fired=false;else apply_selection(selection);
                 pn_reader_input_cancel(&input);

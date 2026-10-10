@@ -171,3 +171,18 @@ pn_status_t pn_catalog_search_page_before_n(pn_media_t *m,const pn_media_lease_t
     if(!query || strlen(query)>PN_CATALOG_QUERY_MAX)return PN_INVALID;
     return scan(m,l,d,after,p,true,0,0,query,limit);
 }
+pn_status_t pn_catalog_favorites_page(const pn_favorites_t *favorites,size_t start,size_t limit,pn_catalog_page_t *page){
+    if(!favorites || !page || favorites->count>PN_FAVORITES_MAX || start>favorites->count)return PN_INVALID;
+    if(!limit || limit>PN_CATALOG_PAGE_MAX)limit=PN_CATALOG_PAGE_MAX;
+    memset(page,0,sizeof *page);page->per_page=limit;size_t count=favorites->count-start;if(count>limit)count=limit;
+    for(size_t i=0;i<count;i++){
+        const char *path=favorites->paths[start+i];pn_catalog_item_t *item=&page->items[i];
+        size_t length=strnlen(path,PN_FAVORITES_PATH_MAX);if(!length || length>=sizeof item->path)return PN_CORRUPT;
+        memcpy(item->path,path,length+1);const char *name=path;for(const char *p=path;*p;p++)if(*p=='/' || *p=='\\')name=p+1;
+        size_t n=strlen(name);if(n>=sizeof item->name)n=sizeof item->name-1;memcpy(item->name,name,n);item->name[n]=0;
+        item->format=format(item->name);
+        // 文件不在时大小为0，仍列出，由打开时提示。/ A missing file lists with size 0 and is reported when opened.
+        struct stat info;if(stat(path,&info)==0 && S_ISREG(info.st_mode) && info.st_size>=0)item->size=(uint64_t)info.st_size;
+    }
+    page->count=count;page->more=start+count<favorites->count;page->index=start;page->total=favorites->count;return PN_OK;
+}

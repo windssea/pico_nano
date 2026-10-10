@@ -18,6 +18,8 @@ static void script_queue(sim_script_t *script){
         // wait:MS暂停投递，让空闲任务（如封面队列）运行。/ wait:MS pauses delivery so idle work such as the cover queue runs.
         if(sscanf(part,"wait:%u",&wait)==1 && wait<=60000){script->resume=SDL_GetTicks64()+wait;return;}
         if(sscanf(part,"tap:%d:%d",&script->x,&script->y)==2 && script->x>=0 && script->x<684 && script->y>=0 && script->y<1216){event.type=SDL_MOUSEBUTTONDOWN;event.button.windowID=UINT32_MAX;event.button.button=SDL_BUTTON_LEFT;event.button.x=script->x;event.button.y=script->y;script->pointer=1;}
+        // rtap:X:Y是右键单击，模拟器里代表长按。/ rtap:X:Y is a right click, which stands for a long press in the simulator.
+        else if(sscanf(part,"rtap:%d:%d",&script->x,&script->y)==2){event.type=SDL_MOUSEBUTTONUP;event.button.windowID=UINT32_MAX;event.button.button=SDL_BUTTON_RIGHT;event.button.x=script->x;event.button.y=script->y;}
         else if(sscanf(part,"release:%d:%d",&script->x,&script->y)==2){event.type=SDL_MOUSEBUTTONUP;event.button.windowID=UINT32_MAX;event.button.button=SDL_BUTTON_LEFT;event.button.x=script->x;event.button.y=script->y;}
         else if(!strcmp(part,"window-close")){event.type=SDL_QUIT;}
         else if(!strncmp(part,"text:",5)){event.type=SDL_TEXTINPUT;event.text.windowID=UINT32_MAX;snprintf(event.text.text,sizeof event.text.text,"%s",part+5);}

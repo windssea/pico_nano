@@ -331,6 +331,7 @@ pn_status_t pn_shelf_render_with_font_file_ex(const pn_catalog_page_t *page,pn_f
         if(font_open)pn_w_set_fallback(&extra);
     }
     pn_status_t status=pn_shelf_render_ex(page,font,frame,selected,recent,transfer,covers,options);
+    if(status==PN_OK && options && options->actions)status=pn_book_actions_render(options->actions,font,frame);
     pn_w_set_fallback(NULL);
     if(font_open)pn_font_close(&extra);
     if(file_open)(void)pn_text_file_close(&file);
