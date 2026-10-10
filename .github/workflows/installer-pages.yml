@@ -1,7 +1,7 @@
 name: Web installer (GitHub Pages)
 on:
   push:
-    branches: [codex/reader-foundation]
+    branches: [main]
     paths: [installer/**, releases/**, tools/installer_site.py, tests/installer/**, .github/workflows/installer-pages.yml]
   workflow_dispatch:
 permissions:

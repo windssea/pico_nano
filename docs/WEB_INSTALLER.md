@@ -38,4 +38,4 @@ py tools/dev.py installer
 py tools/installer_site.py --serve 8765
 ```
 
-前者跑计划测试并生成 `build-dev/installer-site`；后者在 `http://localhost:8765/` 提供页面（Web Serial 要求 https 或 localhost）。发布新版本：把新的 `releases/pico_nano-<版本>-esp32s3/` 提交到 `codex/reader-foundation`，Pages 工作流自动重建；仓库需在 Settings → Pages 选择 GitHub Actions 作为来源。
+前者跑计划测试并生成 `build-dev/installer-site`；后者在 `http://localhost:8765/` 提供页面（Web Serial 要求 https 或 localhost）。发布新版本：把新的 `releases/pico_nano-<版本>-esp32s3/` 提交到 `main`，Pages 工作流自动重建；仓库需在 Settings → Pages 选择 GitHub Actions 作为来源。
