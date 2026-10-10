@@ -15,5 +15,6 @@ with tempfile.TemporaryDirectory() as folder:
     # 不能关掉全部翻页方式。/ All page-turn methods cannot be switched off.
     out=run('settings,tap:100:750,tap:100:820,back,quit');assert 'settings command=11 status=4 flags=7 active=1' in out,out
     # 子页：字体管理在给出--font-dir时打开。/ Sub-page: font management opens when --font-dir is given.
-    out=run('settings,tap:100:220,back,quit','--font-dir',str(fonts));assert 'settings closed request=3' in out and 'font_manage command=1 status=0 screen=0 active=0' in out,out
+    # 字体管理返回设置页（不是书架），再返回才到书架。/ Back from font management returns to Settings, not the shelf; one more Back reaches the shelf.
+    out=run('settings,tap:100:220,back,back,quit','--font-dir',str(fonts));assert 'settings closed request=3' in out and 'font_manage command=1 status=0 screen=0 active=0' in out and 'settings closed request=0' in out.split('font_manage command=1')[1],out
 print('settings window: switches persist across restarts, not-all-off refusal and sub-page jump passed')

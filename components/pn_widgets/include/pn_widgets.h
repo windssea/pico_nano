@@ -104,3 +104,13 @@ void pn_w_battery(pn_frame_t *frame,int x,int y,int width,int height,int percent
 void pn_w_icon_search(pn_frame_t *frame,int x,int y,int size); ///< 放大镜 / Magnifier
 void pn_w_icon_grid(pn_frame_t *frame,int x,int y,int size); ///< 宫格 / Grid squares
 void pn_w_icon_list(pn_frame_t *frame,int x,int y,int size); ///< 列表 / List lines
+
+#define PN_W_CARD_ROW_H 100 ///< 卡片行高度 / Card row height
+/// 分组标题（卡片上方的小字）。/ Group title, small text above a card.
+pn_status_t pn_w_group(pn_font_t *font,pn_frame_t *frame,const char *title,int baseline);
+/// 画rows行高的圆角卡片底（浅灰面加细边），y为卡片上沿；再逐行调用pn_w_card_row。
+/// Draw a rounded card background for rows rows (light-gray fill with a hairline); y is its top; follow with pn_w_card_row per row.
+void pn_w_card(pn_frame_t *frame,int y,int rows);
+/// 卡片内的一行：可选图标方块、标题、副标题、右值，行尾箭头或开关；last为真时不画分隔线。
+/// One row inside a card: optional icon tile, title, subtitle, value and a trailing chevron or toggle; no divider when last.
+pn_status_t pn_w_card_row(pn_font_t *font,pn_frame_t *frame,const char *label,const char *subtitle,const char *value,int icon,unsigned flags,int y,bool last);

@@ -72,13 +72,17 @@ typedef struct {
     uint8_t *page_px; ///< 最近一次呈现帧的副本，关闭工具栏时恢复 / Copy of the latest presented frame, restored when the toolbar closes
     uint8_t *tool_px; ///< 画工具栏用的临时帧 / Scratch frame for drawing the toolbar
     char jump; ///< 下次首页查询的字母 / Letter for the next first-page query
+    bool back_to_settings; ///< 子页从设置页进入，返回时回设置页 / The sub-page was opened from Settings, so Back returns there
     pn_jump_ui_t jumpui; ///< 进度跳转面板 / Progress jump panel
     pn_search_ui_t search; ///< 搜索页输入状态 / Search page input state
     bool search_open; ///< 搜索页正显示 / The search page is showing
     char query[PN_CATALOG_QUERY_MAX+1]; ///< 当前生效的搜索词，空表示不过滤 / Active search query, empty means unfiltered
 } library_t;
 /* 书架选项：模拟器没有电量计，故不显示电量。/ Shelf options: the simulator has no fuel gauge so no battery is shown. */
-static pn_shelf_options_t shelf_options(const library_t *s){return (pn_shelf_options_t){.battery_percent=-1,.search=true,.layout_toggle=true,.list_mode=s->list_mode,.query=!s->recent_mode && *s->query};}
+/* 模拟器没有电量计：电量取环境变量PN_SIM_BATTERY（0–100，默认85，仅为演示值，不是实测）。
+ * The simulator has no fuel gauge: the battery comes from PN_SIM_BATTERY (0–100, default 85), a demo value, not a measurement. */
+static int sim_battery(void){const char *v=getenv("PN_SIM_BATTERY");if(!v || !*v)return 85;int n=atoi(v);return n<0?-1:n>100?100:n;}
+static pn_shelf_options_t shelf_options(const library_t *s){return (pn_shelf_options_t){.battery_percent=sim_battery(),.search=true,.layout_toggle=true,.list_mode=s->list_mode,.query=!s->recent_mode && *s->query};}
 static bool reading(library_t *s){return s->reader.impl || s->epub.impl;}
 static pn_status_t active_step(library_t *s,pn_reader_action_t action,uint64_t now,pn_reader_present_fn present,void *ctx){return s->epub.impl?pn_epub_app_step(&s->epub,action,now,present,ctx):pn_reader_app_step(&s->reader,action,now,present,ctx);}
 static pn_status_t active_close(library_t *s,uint64_t now){return s->epub.impl?pn_epub_app_close(&s->epub,now):pn_reader_app_close(&s->reader,now);}
@@ -331,6 +335,7 @@ int pn_sim_library_window(pn_pool_t *pool,const char *directory,const char *font
             if(command>=0){status=pn_settings_ui_event(&s->settings,command,present,s);s->input_flags=s->settings.flags;printf("settings command=%d status=%d flags=%u active=%d\n",command,(int)status,(unsigned)s->settings.flags,(int)s->settings.active);
                 int request=s->settings.request;
                 if(request || !s->settings.active){pn_settings_ui_close(&s->settings);
+                    s->back_to_settings=(request==PN_SETUI_FONTS && s->font_dir) || (request==PN_SETUI_WALLPAPER && s->wallpaper_dir);
                     if(request==PN_SETUI_FONTS && s->font_dir)status=pn_font_manage_open(&s->font_manage,s->pool,&s->media,s->font_dir,&s->state_media,s->state_dir,present,s);
                     else if(request==PN_SETUI_WALLPAPER && s->wallpaper_dir)status=pn_wallpaper_ui_open(&s->wallpaper,s->pool,&s->media,s->wallpaper_dir,s->wallpaper_store_ok?&s->wallpaper_store:NULL,present,s);
                     else (void)draw(s);
@@ -344,7 +349,7 @@ int pn_sim_library_window(pn_pool_t *pool,const char *directory,const char *font
             if(event.type==SDL_KEYDOWN && !event.key.repeat && event.key.keysym.sym==SDLK_ESCAPE)command=s->font_manage.screen==PN_FMU_CONFIRMING?PN_FMU_CANCEL:PN_FMU_BACK;
             else if(event.type==SDL_MOUSEBUTTONUP && event.button.button==SDL_BUTTON_LEFT)command=pn_font_manage_hit(&s->font_manage,event.button.x,event.button.y);
             if(command>=0){status=pn_font_manage_event(&s->font_manage,command,present,s);printf("font_manage command=%d status=%d screen=%d active=%d\n",command,(int)status,(int)s->font_manage.screen,(int)s->font_manage.active);
-                if(!s->font_manage.active){pn_font_manage_close(&s->font_manage);(void)draw(s);}}
+                if(!s->font_manage.active){pn_font_manage_close(&s->font_manage);if(s->back_to_settings){s->back_to_settings=false;status=pn_settings_ui_open(&s->settings,s->pool,&s->state_media,s->state_dir,present,s);}else (void)draw(s);}}
             continue;
         }
         if(s->wallpaper.impl){
@@ -354,7 +359,7 @@ int pn_sim_library_window(pn_pool_t *pool,const char *directory,const char *font
             if(event.type==SDL_KEYDOWN && !event.key.repeat){SDL_Keycode key=event.key.keysym.sym;if(key==SDLK_ESCAPE)command=s->wallpaper.screen==PN_WUI_LIST?PN_WUI_BACK:PN_WUI_CANCEL;else if(key==SDLK_RETURN)command=PN_WUI_APPLY;}
             else if(event.type==SDL_MOUSEBUTTONUP && event.button.button==SDL_BUTTON_LEFT)command=pn_wallpaper_ui_hit(&s->wallpaper,event.button.x,event.button.y);
             if(command>=0){status=pn_wallpaper_ui_event(&s->wallpaper,command,present,s);printf("wallpaper_ui command=%d status=%d screen=%d active=%d\n",command,(int)status,(int)s->wallpaper.screen,(int)s->wallpaper.active);
-                if(!s->wallpaper.active){pn_wallpaper_ui_close(&s->wallpaper);(void)draw(s);}}
+                if(!s->wallpaper.active){pn_wallpaper_ui_close(&s->wallpaper);if(s->back_to_settings){s->back_to_settings=false;status=pn_settings_ui_open(&s->settings,s->pool,&s->state_media,s->state_dir,present,s);}else (void)draw(s);}}
             continue;
         }
         if(s->toolbar){

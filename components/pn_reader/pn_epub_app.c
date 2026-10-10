@@ -30,7 +30,8 @@ typedef struct {
     char boot_primary[PN_FONT_REFERENCE_PATH_MAX],boot_fallback[PN_FONT_REFERENCE_PATH_MAX];pn_font_preferences_t live_fonts;bool fonts_known;
     pn_font_preferences_t draft_fonts,pending_fonts,pending_record,before_fonts,global_fonts;pn_epub_location_t font_origin;pn_epub_reader_t reader;pn_epub_page_t page;pn_layout_t layout;pn_job_token_t token;pn_display_t display;pn_frame_t frame;uint8_t *pixels;
     pn_journal_files_t progress_files,style_files;pn_journal_io_t progress_io,style_io;pn_epub_save_t save;pn_epub_progress_t restored,visible;
-    char book_path[PN_RECENT_PATH_MAX],state_directory[PN_JOURNAL_PATH_MAX];bool recent_recorded;
+    char book_path[PN_RECENT_PATH_MAX],state_directory[PN_JOURNAL_PATH_MAX];bool recent_recorded;size_t recent_section; ///< 最近记录对应的章节序号，换章才更新记录 / Section index of the latest recent record; the record is refreshed only when the section changes
+    
     pn_epub_progress_t bookmark_origin;bool has_bookmark_origin,bookmark_navigation,bookmark_returning;
     char footer_path[PN_ZIP_PATH_MAX]; ///< 当前页所属章节资源，供页脚显示 / Chapter resource of the displayed page, for the footer
     pn_style_t style,saved_style,pending_style;
@@ -64,8 +65,24 @@ static pn_status_t image_size(void *ctx,const char *path,int maxw,int maxh,int *
     *outw=w?(int)w:1;*outh=h?(int)h:1;return PN_OK;
 }
 static pn_layout_t layout(const pn_style_t *s){return (pn_layout_t){.width=684-2*s->margin,.height=PN_READER_HEIGHT,.line_height=(s->pixels*s->line_percent+99)/100,.indent=s->pixels*s->indent_em,.paragraph_gap=s->pixels*s->gap_percent/100,.letter_spacing_64=s->pixels*64*s->tracking_percent/100};}
-static pn_status_t recent(app_t *a){
+/* 章节进度：按各章XHTML原长占全书XHTML总长的比例，章内位置不估计（只算到章首），所以是“读到第几章的约几成”，不是页码或精确位置。
+ * Section progress: the share of XHTML bytes before the chapter over all XHTML bytes; the position inside a chapter is not estimated, so this is "roughly how far the reached chapter starts", never a page number or exact position. */
+static bool section_progress(app_t *a,const char *path,size_t *index,unsigned *basis){
+    if(!path || !*path || !a->info.spine_count || pn_epub_spine_find(&a->epub,path,index)!=PN_OK)return false;
+    uint64_t before=0,total=0;
+    for(size_t i=0;i<a->info.spine_count;i++){
+        pn_epub_item_t item;pn_zip_info_t info;
+        if(pn_epub_spine(&a->epub,i,&item)!=PN_OK || item.media!=PN_EPUB_XHTML || pn_zip_info(&a->zip,item.zip_index,&info)!=PN_OK)continue;
+        if(i<*index)before+=info.unpacked;
+        total+=info.unpacked;
+    }
+    // 没有可量的章节长度时按章节数均分。/ With no measurable chapter sizes, split evenly by chapter count.
+    if(!total){*basis=(unsigned)(*index*10000u/a->info.spine_count);return true;}
+    *basis=(unsigned)(before*10000u/total);if(*basis>10000u)*basis=10000u;return true;
+}
+static pn_status_t recent(app_t *a,const char *path){
     pn_recent_item_t item={.book=a->book,.source_size=a->book_file.size,.format=2,.progress=PN_RECENT_UNKNOWN_PROGRESS};strcpy(item.path,a->book_path);
+    size_t index=0;unsigned basis=0;if(section_progress(a,path,&index,&basis)){item.progress=(uint16_t)basis;a->recent_section=index;}
     pn_journal_files_t files;pn_journal_io_t io;pn_status_t status=pn_recent_files(&files,&a->state,&a->state_lease,a->state_directory,&io);
     if(status==PN_OK)status=pn_recent_touch(&io,a->pool,&item);
     if(status==PN_OK)a->recent_recorded=true;
@@ -74,7 +91,11 @@ static pn_status_t recent(app_t *a){
 static pn_status_t confirmed(void *ctx,const pn_epub_progress_t *p,bool turn,uint64_t now){
     app_t *a=ctx;a->visible=*p;a->has_visible=true;a->last_confirmed=true;
     pn_status_t status=a->persistent?pn_epub_save_confirm(&a->save,p,turn,now):PN_OK;
-    if(a->persistent && !a->recent_recorded)(void)recent(a);
+    // 首次与换章时刷新“最近阅读”记录里的进度。/ Refresh the progress in the recent record on the first page and whenever the chapter changes.
+    if(a->persistent){
+        size_t index=0;unsigned basis=0;
+        if(!a->recent_recorded || (section_progress(a,p->location.path,&index,&basis) && index!=a->recent_section))(void)recent(a,p->location.path);
+    }
     return status;
 }
 static pn_status_t scratch(app_t *a){
@@ -106,14 +127,17 @@ static pn_status_t paint(app_t *a,pn_frame_t *frame){
     // 页脚：书名与“第N/M节”；预览态改为提示。无顶栏与底部按钮，工具由点正文中央打开的工具栏提供。
     // Footer: title and "section N of M"; previews show a hint instead. There is no top bar or bottom buttons; tools come from the toolbar opened by tapping the middle of the text.
     char left[PN_EPUB_META_MAX+16],right[128]="";
+    // 页脚：左“第 N 节 · 共 M 节”，右章节进度百分比；章内页数在布局确定前不显示（不伪造页码）。
+    // Footer: "section N of M" on the left and the section-based percentage on the right; the in-chapter page count is withheld until layout is final (no invented page numbers).
+    size_t index=0;unsigned basis=0;bool known=a->footer_path[0] && section_progress(a,a->footer_path,&index,&basis);
     if(a->draft_render)snprintf(left,sizeof left,"%s",a->font_render?"字体预览，设置尚未保存":"排版预览，设置尚未保存");
     else if((a->has_bookmark_origin || a->bookmark_navigation) && !a->bookmark_returning)snprintf(left,sizeof left,"< 返回跳转前位置");
+    else if(known)snprintf(left,sizeof left,"第 %zu 节 · 共 %zu 节",index+1,a->info.spine_count);
     else snprintf(left,sizeof left,"%s",a->info.title[0]?a->info.title:"小纸 Pico");
     if(a->draft_render)snprintf(right,sizeof right,"点击返回设置");
     else{
-        char section[64]="";size_t index=0;
-        if(a->footer_path[0] && a->info.spine_count && pn_epub_spine_find(&a->epub,a->footer_path,&index)==PN_OK)snprintf(section,sizeof section,"第 %zu/%zu 节",index+1,a->info.spine_count);
-        if(missing)snprintf(right,sizeof right,"%u 缺字%s%s",missing,section[0]?" · ":"",section);else snprintf(right,sizeof right,"%s",section);
+        char percent[16]="";if(known)snprintf(percent,sizeof percent,"%u%%",basis/100);
+        if(missing)snprintf(right,sizeof right,"%u 缺字%s%s",missing,percent[0]?" · ":"",percent);else snprintf(right,sizeof right,"%s",percent);
     }
     return pn_reader_footer_render(&a->ui,body(a),frame,left,right);
 }
@@ -237,7 +261,7 @@ pn_status_t pn_epub_app_close(pn_epub_app_t *app,uint64_t now){
     if(a->persistent){pn_status_t status=pn_epub_save_flush(&a->save,now);if(status!=PN_OK)return status;if(a->style_pending){status=pn_style_save(&a->style_io,&a->book,&a->pending_style);if(status!=PN_OK)return status;}}
     if(a->global_pending){pn_status_t saved=global_write(a,&a->global_fonts);if(saved!=PN_OK)return saved;a->global_pending=false;}
     if(a->font_pending){pn_status_t saved=font_write(a,&a->pending_record);if(saved!=PN_OK)return saved;a->font_pending=false;}
-    if(a->persistent && a->has_visible){pn_status_t status=recent(a);if(status!=PN_OK)return status;}
+    if(a->persistent && a->has_visible){pn_status_t status=recent(a,a->visible.location.path);if(status!=PN_OK)return status;}
     pn_status_t status=release(a);app->impl=NULL;return status;
 }
 pn_status_t pn_epub_app_media_lost(pn_epub_app_t *app){

@@ -54,10 +54,13 @@ static pn_status_t sized_button(pn_font_t *font,pn_frame_t *frame,const char *la
     if(s==PN_OK)s=pn_w_button(font,frame,label,x,y,w,h,style);
     pn_status_t restored=pn_font_size(font,original);return s==PN_OK?restored:s;
 }
+/* 成功提示不是错误：只有失败提示才给“重试”入口。/ A success notice is not an error: only failure notices offer Retry. */
+static const char saved_notice[]="已保存书签";
+static bool failed(const pn_bookmark_ui_t *u){return u->notice && u->notice!=saved_notice;}
 static pn_status_t paint(void *ctx,pn_font_t *font,pn_font_t *metadata,pn_frame_t *frame){
     pn_bookmark_ui_t *u=ctx;if(u->count>PN_BOOKMARK_UI_ROWS || frame->width!=684 || frame->height!=1216 || frame->stride<342)return PN_INVALID;
     pn_frame_clear(frame,15);
-    pn_status_t status=pn_w_header(font,frame,u->mode==PN_BUI_LIST?"< 返回阅读":"< 返回",u->mode==PN_BUI_RENAME?"修改名称":u->mode==PN_BUI_DELETE?"删除书签":"书签",u->notice?"重试":NULL);
+    pn_status_t status=pn_w_header(font,frame,u->mode==PN_BUI_LIST?"< 返回阅读":"< 返回",u->mode==PN_BUI_RENAME?"修改名称":u->mode==PN_BUI_DELETE?"删除书签":"书签",failed(u)?"重试":NULL);
     pn_w_set_fallback(metadata);
     if(status==PN_OK && u->mode==PN_BUI_LIST){
         status=sized_button(font,frame,"+ 添加当前位置",34,32,ADD_Y,620,88,0u);
@@ -69,7 +72,7 @@ static pn_status_t paint(void *ctx,pn_font_t *font,pn_font_t *metadata,pn_frame_
             if(status==PN_OK && (int)i==u->selected)pn_frame_rect(frame,PN_UI_MARGIN,y+6,4,ROW_PITCH-18,PN_UI_INK);
             if(status==PN_OK)pn_frame_rect(frame,PN_UI_MARGIN,y+ROW_PITCH-8,620,1,10);
         }
-        if(status==PN_OK && !u->count)status=sized_text(font,frame,u->notice?"暂时无法读取":"还没有书签",34,PN_UI_MARGIN,ROW_Y0+60,620,PN_ALIGN_LEFT);
+        if(status==PN_OK && !u->count)status=sized_text(font,frame,failed(u)?"暂时无法读取":"还没有书签",34,PN_UI_MARGIN,ROW_Y0+60,620,PN_ALIGN_LEFT);
         if(status==PN_OK)status=sized_button(font,frame,"上一页",30,32,PAGER_Y,196,80,0u);
         if(status==PN_OK)status=sized_button(font,frame,"下一页",30,456,PAGER_Y,196,80,0u);
     }else if(status==PN_OK){
@@ -160,7 +163,7 @@ pn_status_t pn_bookmark_ui_event(pn_bookmark_ui_t *u,int command,const char *val
                 if(status==PN_OK){snprintf(label,sizeof label,"书签 %u%%",percent(&position));status=pn_reader_app_bookmark_add(u->reader,label,&id);}}
             if(status==PN_OK){status=load_page(u,0,0);
                 while(status==PN_OK && u->more && u->count && u->items[u->count-1].id<id)status=load_page(u,u->page+1,u->items[u->count-1].id);
-                if(status==PN_OK){for(size_t i=0;i<u->count;i++)if(u->items[i].id==id)u->selected=(int)i;u->notice="已保存书签";}
+                if(status==PN_OK){for(size_t i=0;i<u->count;i++)if(u->items[i].id==id)u->selected=(int)i;u->notice=saved_notice;}
             }
         }else if(command==PN_BUI_NEXT)status=u->more && u->count?load_page(u,u->page+1,u->items[u->count-1].id):PN_EMPTY;
         else if(command==PN_BUI_PREVIOUS)status=u->page?load_page(u,u->page-1,u->cursors[u->page-1]):PN_EMPTY;
@@ -189,7 +192,7 @@ pn_status_t pn_bookmark_ui_event(pn_bookmark_ui_t *u,int command,const char *val
 }
 int pn_bookmark_ui_hit(const pn_bookmark_ui_t *u,int x,int y){
     if(!u || u->count>PN_BOOKMARK_UI_ROWS || u->mode==PN_BUI_CLOSED || x<0 || x>=684 || y<0 || y>=1216)return -1;
-    int header=pn_w_header_hit(x,y,u->notice!=NULL);
+    int header=pn_w_header_hit(x,y,failed(u));
     if(header==1)return PN_BUI_BACK;
     if(header==2)return PN_BUI_RETRY;
     if(u->mode==PN_BUI_LIST){

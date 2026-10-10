@@ -213,3 +213,33 @@ pn_status_t pn_w_row(pn_font_t *font,pn_frame_t *frame,const char *label,const c
 void pn_w_icon_search(pn_frame_t *frame,int x,int y,int size){pn_w_icon(frame,PN_ICON_SEARCH,x,y,size,PN_UI_INK);}
 void pn_w_icon_grid(pn_frame_t *frame,int x,int y,int size){pn_w_icon(frame,PN_ICON_GRID,x,y,size,PN_UI_INK);}
 void pn_w_icon_list(pn_frame_t *frame,int x,int y,int size){pn_w_icon(frame,PN_ICON_LIST,x,y,size,PN_UI_INK);}
+/* 分组标题：小字号灰黑，置于卡片上方。/ Group title: small text above a card. */
+pn_status_t pn_w_group(pn_font_t *font,pn_frame_t *frame,const char *title,int baseline){
+    if(!font || !font->impl || !frame || !title)return PN_INVALID;
+    int original=font->pixels;pn_status_t status=pn_font_size(font,26);
+    if(status==PN_OK)status=pn_w_text(font,frame,title,PN_UI_MARGIN+8,baseline,PN_UI_WIDTH-2*PN_UI_MARGIN-16,PN_ALIGN_LEFT);
+    pn_status_t restored=pn_font_size(font,original);return status==PN_OK?restored:status;
+}
+void pn_w_card(pn_frame_t *frame,int y,int rows){
+    if(!frame || rows<=0)return;
+    pn_w_round_fill(frame,PN_UI_MARGIN,y,PN_UI_WIDTH-2*PN_UI_MARGIN,rows*PN_W_CARD_ROW_H,16,14);
+    pn_w_round_stroke(frame,PN_UI_MARGIN,y,PN_UI_WIDTH-2*PN_UI_MARGIN,rows*PN_W_CARD_ROW_H,16,2.0f,10);
+}
+pn_status_t pn_w_card_row(pn_font_t *font,pn_frame_t *frame,const char *label,const char *subtitle,const char *value,int icon,unsigned flags,int y,bool last){
+    if(!font || !font->impl || !frame || !label)return PN_INVALID;
+    int original=font->pixels,text_x=icon>=0?112:56;
+    // 图标放进圆角方块，视觉上与纯文字行区分。/ The icon sits in a rounded tile so it reads apart from plain text.
+    if(icon>=0){pn_w_round_fill(frame,52,y+28,44,44,12,PN_UI_PAPER);pn_w_round_stroke(frame,52,y+28,44,44,12,2.0f,8);pn_w_icon(frame,(pn_icon_t)icon,60,y+36,28,PN_UI_INK);}
+    int tail=(flags&PN_ROW_CHEVRON)?44:(flags&(PN_ROW_ON|PN_ROW_OFF))?92:16,value_width=0;
+    pn_status_t status=PN_OK;
+    if(value && *value){status=pn_font_size(font,28);if(status==PN_OK)status=pn_w_text_width(font,value,&value_width);}
+    int room=PN_UI_WIDTH-PN_UI_MARGIN-tail-text_x-(value_width?value_width+16:0);
+    if(status==PN_OK)status=pn_font_size(font,34);
+    if(status==PN_OK)status=pn_w_text(font,frame,label,text_x,y+(subtitle&&*subtitle?46:62),room,PN_ALIGN_LEFT);
+    if(status==PN_OK && subtitle && *subtitle){status=pn_font_size(font,26);if(status==PN_OK)status=pn_w_text(font,frame,subtitle,text_x,y+80,room,PN_ALIGN_LEFT);}
+    if(status==PN_OK && value && *value){status=pn_font_size(font,28);if(status==PN_OK)status=pn_w_text(font,frame,value,PN_UI_WIDTH-PN_UI_MARGIN-tail-value_width,y+60,value_width,PN_ALIGN_RIGHT);}
+    if(flags&PN_ROW_CHEVRON)pn_w_icon(frame,PN_ICON_CHEVRON,PN_UI_WIDTH-PN_UI_MARGIN-16-28,y+36,28,PN_UI_INK);
+    if(flags&(PN_ROW_ON|PN_ROW_OFF))pn_w_toggle(frame,PN_UI_WIDTH-PN_UI_MARGIN-16-64,y+32,(flags&PN_ROW_ON)!=0);
+    if(!last)pn_frame_rect(frame,text_x,y+PN_W_CARD_ROW_H-1,PN_UI_WIDTH-PN_UI_MARGIN-16-text_x,1,10);
+    pn_status_t restored=pn_font_size(font,original);return status==PN_OK?restored:status;
+}

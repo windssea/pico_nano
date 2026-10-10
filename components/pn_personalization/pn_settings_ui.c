@@ -11,28 +11,32 @@
 #define W 684
 #define H 1216
 typedef struct {pn_pool_t *pool;pn_media_t *state;char dir[PN_JOURNAL_PATH_MAX];pn_font_t font;uint8_t *pixels;pn_frame_t canvas;char message[96];char lan[40];} su_t;
-static const char *const names[]={"左手模式（左边缘下一页）","滑动翻页","边缘点按翻页","屏下三键翻页"};
+static const char *const names[]={"左手模式","滑动翻页","边缘点按翻页","屏下三键翻页"};
+static const char *const hints[]={"点左边缘翻到下一页","左右滑动翻页","点屏幕两侧边缘翻页","KEY1 上一页，KEY3 下一页"};
 static const uint8_t bits[]={PN_INPUT_LEFT_HAND,PN_INPUT_NO_SWIPE,PN_INPUT_NO_EDGE_TAP,PN_INPUT_NO_KEYS};
 static bool on(uint8_t flags,unsigned i){bool set=(flags&bits[i])!=0;return i==0?set:!set;}
-/* 版式：顶栏、三个小节（显示与字体、锁屏与壁纸、翻页），行高88。/ Layout: header and three sections (display and fonts, lock and wallpaper, page turning) with 88 px rows. */
+/* 版式：顶栏下按分组排列圆角卡片，每行100px（标题加一行说明）。/ Layout: grouped rounded cards under the header, 100 px rows (a title plus one line of explanation). */
 #define FONT_ROW_Y 188
-#define WALLPAPER_ROW_Y 344
-#define TOGGLE_ROW_Y 504
-#define LAN_SECTION_Y 912
-#define LAN_ROW_Y 928
+#define WALLPAPER_ROW_Y 338
+#define TOGGLE_ROW_Y 488
+#define LAN_ROW_Y 938
+#define ROW_H PN_W_CARD_ROW_H
 static pn_status_t show(pn_settings_ui_t *ui,pn_settings_present_fn present,void *ctx){
-    su_t *u=ui->impl;ui->presented=false;pn_frame_clear(&u->canvas,15);pn_font_t *font=&u->font;
-    pn_status_t s=pn_w_header(font,&u->canvas,"< 返回","设置",NULL);
-    if(s==PN_OK)s=pn_w_section(font,&u->canvas,"显示与字体",172);
-    if(s==PN_OK)s=pn_w_row_icon(font,&u->canvas,"字体管理",NULL,PN_ICON_FONT,PN_ROW_CHEVRON,FONT_ROW_Y);
-    if(s==PN_OK)s=pn_w_section(font,&u->canvas,"锁屏与壁纸",328);
-    if(s==PN_OK)s=pn_w_row_icon(font,&u->canvas,"锁屏壁纸",NULL,PN_ICON_IMAGE,PN_ROW_CHEVRON,WALLPAPER_ROW_Y);
-    if(s==PN_OK)s=pn_w_section(font,&u->canvas,"翻页",488);
-    for(unsigned i=0;i<4 && s==PN_OK;i++)s=pn_w_row_icon(font,&u->canvas,names[i],NULL,-1,on(ui->flags,i)?PN_ROW_ON:PN_ROW_OFF,TOGGLE_ROW_Y+(int)i*PN_W_ROW_H);
-    if(s==PN_OK && *u->lan)s=pn_w_section(font,&u->canvas,"传书",LAN_SECTION_Y);
-    if(s==PN_OK && *u->lan)s=pn_w_row_icon(font,&u->canvas,"局域网传书",u->lan,PN_ICON_WIFI,PN_ROW_CHEVRON,LAN_ROW_Y);
-    if(s==PN_OK){int original=font->pixels;s=pn_font_size(font,28);
-        if(s==PN_OK)s=pn_w_text(font,&u->canvas,*u->message?u->message:(u->state?"开关立即保存":"内部存储不可用，开关不能保存"),PN_UI_MARGIN,*u->lan?LAN_ROW_Y+PN_W_ROW_H+48:TOGGLE_ROW_Y+4*PN_W_ROW_H+48,620,PN_ALIGN_LEFT);
+    su_t *u=ui->impl;ui->presented=false;pn_frame_clear(&u->canvas,15);pn_font_t *font=&u->font;pn_frame_t *f=&u->canvas;
+    pn_status_t s=pn_w_header(font,f,"< 返回","设置",NULL);
+    if(s==PN_OK)s=pn_w_group(font,f,"显示与字体",FONT_ROW_Y-14);
+    pn_w_card(f,FONT_ROW_Y,1);
+    if(s==PN_OK)s=pn_w_card_row(font,f,"字体管理","正文字体、全局默认与删除",NULL,PN_ICON_FONT,PN_ROW_CHEVRON,FONT_ROW_Y,true);
+    if(s==PN_OK)s=pn_w_group(font,f,"锁屏与壁纸",WALLPAPER_ROW_Y-14);
+    pn_w_card(f,WALLPAPER_ROW_Y,1);
+    if(s==PN_OK)s=pn_w_card_row(font,f,"锁屏壁纸","系统默认、简洁、当前书封面或自定义",NULL,PN_ICON_IMAGE,PN_ROW_CHEVRON,WALLPAPER_ROW_Y,true);
+    if(s==PN_OK)s=pn_w_group(font,f,"翻页",TOGGLE_ROW_Y-14);
+    pn_w_card(f,TOGGLE_ROW_Y,4);
+    for(unsigned i=0;i<4 && s==PN_OK;i++)s=pn_w_card_row(font,f,names[i],hints[i],NULL,-1,on(ui->flags,i)?PN_ROW_ON:PN_ROW_OFF,TOGGLE_ROW_Y+(int)i*ROW_H,i==3);
+    if(s==PN_OK && *u->lan){s=pn_w_group(font,f,"传书",LAN_ROW_Y-14);pn_w_card(f,LAN_ROW_Y,1);}
+    if(s==PN_OK && *u->lan)s=pn_w_card_row(font,f,"局域网传书",u->lan,NULL,PN_ICON_WIFI,PN_ROW_CHEVRON,LAN_ROW_Y,true);
+    if(s==PN_OK){int original=font->pixels;s=pn_font_size(font,26);
+        if(s==PN_OK)s=pn_w_text(font,f,*u->message?u->message:(u->state?"开关立即保存":"内部存储不可用，开关不能保存"),PN_UI_MARGIN+8,*u->lan?LAN_ROW_Y+ROW_H+52:TOGGLE_ROW_Y+4*ROW_H+52,604,PN_ALIGN_LEFT);
         pn_status_t restored=pn_font_size(font,original);if(s==PN_OK)s=restored;}
     if(s==PN_OK)s=present(ctx,&u->canvas,PN_REFRESH_GL16);
     if(s==PN_OK)ui->presented=true;
@@ -95,10 +99,10 @@ int pn_settings_ui_hit(const pn_settings_ui_t *ui,int x,int y){
     if(!ui || !ui->impl || x<0 || x>=W)return -1;
     if(pn_w_header_hit(x,y,false)==1)return PN_SETUI_BACK;
     if(x<32 || x>=652)return -1;
-    if(y>=FONT_ROW_Y && y<FONT_ROW_Y+PN_W_ROW_H)return PN_SETUI_FONTS;
-    if(y>=WALLPAPER_ROW_Y && y<WALLPAPER_ROW_Y+PN_W_ROW_H)return PN_SETUI_WALLPAPER;
-    if(y>=TOGGLE_ROW_Y && y<TOGGLE_ROW_Y+4*PN_W_ROW_H)return PN_SETUI_TOGGLE+(y-TOGGLE_ROW_Y)/PN_W_ROW_H;
-    if(*((const su_t *)ui->impl)->lan && y>=LAN_ROW_Y && y<LAN_ROW_Y+PN_W_ROW_H)return PN_SETUI_LAN;
+    if(y>=FONT_ROW_Y && y<FONT_ROW_Y+ROW_H)return PN_SETUI_FONTS;
+    if(y>=WALLPAPER_ROW_Y && y<WALLPAPER_ROW_Y+ROW_H)return PN_SETUI_WALLPAPER;
+    if(y>=TOGGLE_ROW_Y && y<TOGGLE_ROW_Y+4*ROW_H)return PN_SETUI_TOGGLE+(y-TOGGLE_ROW_Y)/ROW_H;
+    if(*((const su_t *)ui->impl)->lan && y>=LAN_ROW_Y && y<LAN_ROW_Y+ROW_H)return PN_SETUI_LAN;
     return -1;
 }
 void pn_settings_ui_close(pn_settings_ui_t *ui){

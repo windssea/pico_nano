@@ -47,8 +47,11 @@ static void title_of(const pn_catalog_item_t *item,char *out,size_t cap){
 }
 /* 条目的第二行：“27% · EPUB”或“未读 · TXT”。/ Second line of an entry: "27% · EPUB" or "unread · TXT". */
 static void meta_of(const pn_catalog_item_t *item,char *out,size_t cap){
-    if((item->identified || item->has_progress) && item->progress>0 && item->progress<=10000)snprintf(out,cap,"%u%% · %s",(unsigned)(item->progress/100),kind(item->format));
-    else snprintf(out,cap,"未读 · %s",kind(item->format));
+    // 有阅读记录：能算出进度显示百分比（含0%），算不出显示“已开始”；没有记录才是“未读”。/ With a reading record: a percentage when known (including 0%) and "started" when not; "unread" only without a record.
+    if(item->identified || item->has_progress){
+        if(item->progress<=10000)snprintf(out,cap,"%u%% · %s",(unsigned)(item->progress/100),kind(item->format));
+        else snprintf(out,cap,"已开始 · %s",kind(item->format));
+    }else snprintf(out,cap,"未读 · %s",kind(item->format));
 }
 /* 无封面时的排版卡：细框、书名、底部格式标签。/ Typographic card when there is no cover: thin frame, title and a format tag at the bottom. */
 static pn_status_t card(pn_font_t *font,pn_frame_t *frame,int x,int y,int w,int h,const char *title,const char *tag,bool large){
@@ -100,6 +103,7 @@ static pn_status_t continue_card(const pn_shelf_covers_t *covers,pn_font_t *font
         if(s==PN_OK)s=pn_w_text_lines(font,frame,title,160,208,476,2,44,NULL);
         char meta[64];bool known=(last->identified || last->has_progress) && last->progress<=10000;
         if(known)snprintf(meta,sizeof meta,"已读 %u%% · %s",(unsigned)(last->progress/100),kind(last->format));
+        else if(last->identified || last->has_progress)snprintf(meta,sizeof meta,"已开始 · %s",kind(last->format));
         else snprintf(meta,sizeof meta,"%s",kind(last->format));
         if(s==PN_OK)s=pn_font_size(font,26);
         if(s==PN_OK)s=pn_w_text(font,frame,meta,160,270,476,PN_ALIGN_LEFT);
@@ -119,10 +123,11 @@ static pn_status_t continue_card(const pn_shelf_covers_t *covers,pn_font_t *font
 /* 网格：封面184×256，下方一行书名与一行“进度 · 格式”。/ Grid: 184×256 cover, a title line and a "progress · format" line below. */
 static pn_status_t grid_item(const pn_catalog_item_t *item,const pn_shelf_covers_t *covers,size_t i,pn_font_t *font,pn_frame_t *frame,bool selected){
     int x=CELL_X0+(int)(i%3)*CELL_PITCH,y=GRID_Y+(int)(i/3)*ROW_PITCH;char title[PN_CATALOG_NAME_MAX],meta[64];title_of(item,title,sizeof title);meta_of(item,meta,sizeof meta);
-    pn_frame_t cover;pn_status_t s=PN_OK;
-    if(pn_shelf_cover_frame(covers,i,&cover)){blit(frame,&cover,x,y);frame_cover(frame,x,y,PN_COVER_WIDTH,PN_COVER_HEIGHT,10);}
+    pn_frame_t cover;pn_status_t s=PN_OK;bool has_cover=pn_shelf_cover_frame(covers,i,&cover);
+    if(has_cover){blit(frame,&cover,x,y);frame_cover(frame,x,y,PN_COVER_WIDTH,PN_COVER_HEIGHT,10);}
     else s=card(font,frame,x,y,PN_COVER_WIDTH,PN_COVER_HEIGHT,title,kind(item->format),true);
-    if(s==PN_OK && (item->identified || item->has_progress) && item->progress>0 && item->progress<=10000)progress_bar(frame,x+12,y+PN_COVER_HEIGHT-20,PN_COVER_WIDTH-24,item->progress);
+    // 排版卡底部有格式标签，进度条放到分隔线上方，避免压字。/ Typographic cards carry a format tag at the bottom, so the bar sits above their rule to avoid covering text.
+    if(s==PN_OK && (item->identified || item->has_progress) && item->progress>0 && item->progress<=10000)progress_bar(frame,x+12,y+PN_COVER_HEIGHT-(has_cover?20:68),PN_COVER_WIDTH-24,item->progress);
     if(s==PN_OK)s=pn_font_size(font,28);
     if(s==PN_OK)s=pn_w_text(font,frame,title,x,y+PN_COVER_HEIGHT+32,CELL_W-12,PN_ALIGN_LEFT);
     if(s==PN_OK)s=pn_font_size(font,26);
@@ -152,7 +157,7 @@ pn_status_t pn_shelf_render_ex(const pn_catalog_page_t *page,pn_font_t *font,pn_
     int original=font->pixels;pn_frame_clear(frame,PN_UI_PAPER);
     // 状态带：产品名与电量。/ Status band: product name and battery.
     pn_status_t s=pn_font_size(font,28);
-    if(s==PN_OK)s=pn_w_text(font,frame,"小纸 Pico",32,44,300,PN_ALIGN_LEFT);
+    if(s==PN_OK)s=pn_w_text(font,frame,"PicoNano",32,44,300,PN_ALIGN_LEFT);
     if(s==PN_OK && options->battery_percent>=0){char battery[16];int percent=options->battery_percent>100?100:options->battery_percent;snprintf(battery,sizeof battery,"%d%%",percent);s=pn_w_text(font,frame,battery,300,44,290,PN_ALIGN_RIGHT);pn_w_battery(frame,608,24,44,22,percent,PN_UI_INK);}
     // 标题行：标题与搜索入口。/ Title row: the title and the search entry.
     if(s==PN_OK)s=pn_font_size(font,48);
