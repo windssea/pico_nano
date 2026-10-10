@@ -6,7 +6,7 @@
 
 app_main仅创建独立32KiB栈worker（core1、priority5）。worker初始化NVS失败直接退出，不erase；BSP失败清理；PMU未ready或VCOM未标定/读失败时不推屏。PMU RUNNING握手失败也停止启动并禁止推屏。有效VCOM只读一次，传给显示封装，不写NVS或SY标定寄存器。worker大栈并不证明余量25%达标，仍需测high-water。
 
-逻辑684×1216映射通过BSP epd_draw_pixel到物理framebuffer。present必须等待epd_hl扫描返回后才确认；初屏/扫描失败后先clear并从白推GC16，已知参考下使用全像素GC16/GL16（GL16不用差分白底路径）。波形温度暂用原工程25°C，真实温度和欠载恢复仍待实现。每次完成关闭EPD电源轨，保持像素图。
+逻辑684×1216映射通过BSP epd_draw_pixel到物理framebuffer。present必须等待epd_hl扫描返回后才确认；初屏/扫描失败后先clear并从白推GC16，已知参考下使用全像素GC16/GL16（GL16不用差分白底路径）；present另存上一次显示的帧，GL16时若变化的外接矩形不超过屏幕45%，只以epd_hl_update_area_full推该区域（逻辑坐标由epdiy按旋转换算），无变化则不刷新，失败后丢弃上一帧、下次整屏。软刷新累计到“刷新与屏幕”策略的页数（6/14/24）后升级为GC16。状态带时间在启动时经PMU TIME_GET读取，仅PMU报告已对时才显示，之后按开机计时推算（UTC+8）；电量每分钟读PMU快速电量快照。局部刷新与时钟都未上板验证。波形温度暂用原工程25°C，真实温度和欠载恢复仍待实现。每次完成关闭EPD电源轨，保持像素图。
 
 ## 内部data挂载
 
