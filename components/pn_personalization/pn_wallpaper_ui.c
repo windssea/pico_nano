@@ -89,7 +89,7 @@ static pn_status_t draw(ui_t *u,pn_wallpaper_screen_t screen){
         const pn_lock_mode_t modes[3]={PN_LOCK_DEFAULT,PN_LOCK_SIMPLE,PN_LOCK_BOOK};const char *labels[3]={"系统默认","简洁锁屏","当前书封面"};
         for(int i=0;i<3 && s==PN_OK;i++){bool current=u->saved_known?u->saved.mode==modes[i]:modes[i]==PN_LOCK_DEFAULT;s=sized_button(u,labels[i],32+i*215,MODE_BUTTON_Y,190,96,current?PN_W_SELECTED:0u);}
         if(s==PN_OK)s=pn_w_section(&u->font,&u->canvas,u->page.count?"自定义图片":"自定义图片（wallpapers 目录暂无 JPEG/PNG）",IMAGE_SECTION_Y);
-        for(size_t i=0;i<u->page.count && i<IMAGE_ROWS && s==PN_OK;i++)s=pn_w_row(&u->font,&u->canvas,u->page.items[i].name,NULL,true,IMAGE_ROW_Y+(int)i*PN_W_ROW_H);
+        for(size_t i=0;i<u->page.count && i<IMAGE_ROWS && s==PN_OK;i++)s=pn_w_row_icon(&u->font,&u->canvas,u->page.items[i].name,NULL,PN_ICON_IMAGE,PN_ROW_CHEVRON,IMAGE_ROW_Y+(int)i*PN_W_ROW_H);
         if(s==PN_OK && *u->message)s=line_text(u,u->message,28,PAGER_Y-24,PN_ALIGN_LEFT);
         if(s==PN_OK)s=sized_button(u,"上一页",32,PAGER_Y,196,80,0u);
         if(s==PN_OK)s=sized_button(u,"下一页",456,PAGER_Y,196,80,0u);

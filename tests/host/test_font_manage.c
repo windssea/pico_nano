@@ -26,7 +26,7 @@ int main(int argc,char **argv){
     char a[600],c[600];snprintf(a,sizeof a,"%s/a-ui.ttf",fonts);snprintf(c,sizeof c,"%s/c-bad.ttf",fonts);
     pn_font_manage_t ui={0};pn_font_preferences_t g;
     assert(pn_font_manage_open(&ui,&pool,&sd,fonts,&internal,state,present,NULL)==PN_OK && ui.active && ui.presented && ui.screen==PN_FMU_LIST);
-    assert(pn_font_manage_hit(&ui,100,240)==PN_FMU_ROW && pn_font_manage_hit(&ui,100,420)==PN_FMU_ROW+2 && pn_font_manage_hit(&ui,100,740)==-1 && pn_font_manage_hit(&ui,100,60)==PN_FMU_BACK && pn_font_manage_hit(&ui,100,1120)==PN_FMU_PREVIOUS && pn_font_manage_hit(&ui,600,1120)==PN_FMU_NEXT);
+    assert(pn_font_manage_hit(&ui,100,380)==PN_FMU_ROW && pn_font_manage_hit(&ui,100,580)==PN_FMU_ROW+2 && pn_font_manage_hit(&ui,100,740)==-1 && pn_font_manage_hit(&ui,100,60)==PN_FMU_BACK && pn_font_manage_hit(&ui,100,1120)==PN_FMU_PREVIOUS && pn_font_manage_hit(&ui,600,1120)==PN_FMU_NEXT);
     /* 坏字体留在列表。/ A bad font stays on the list. */
     assert(pn_font_manage_event(&ui,PN_FMU_ROW+2,present,NULL)!=PN_OK && ui.screen==PN_FMU_LIST);
     /* 详情→设为全局默认→重复无操作。/ Detail → set global default → repeat is a no-op. */
@@ -43,7 +43,7 @@ int main(int argc,char **argv){
     assert(pn_font_manage_event(&ui,PN_FMU_DELETE,present,NULL)==PN_OK && pn_font_manage_event(&ui,PN_FMU_CONFIRM,present,NULL)==PN_BUSY && ui.screen==PN_FMU_LIST && access(a,F_OK)==0);
     assert(pn_media_release(&sd,&reader_lease)==PN_OK);
     assert(pn_font_manage_event(&ui,PN_FMU_ROW,present,NULL)==PN_OK && pn_font_manage_event(&ui,PN_FMU_DELETE,present,NULL)==PN_OK && pn_font_manage_event(&ui,PN_FMU_CONFIRM,present,NULL)==PN_OK && ui.last==PN_OK);
-    assert(access(a,F_OK)!=0 && access(c,F_OK)==0 && pn_font_manage_hit(&ui,100,420)==-1 && pn_font_manage_hit(&ui,100,340)==PN_FMU_ROW+1);
+    assert(access(a,F_OK)!=0 && access(c,F_OK)==0 && pn_font_manage_hit(&ui,100,580)==-1 && pn_font_manage_hit(&ui,100,480)==PN_FMU_ROW+1);
     /* 删除不清选择记录。/ Deletion keeps the selection record. */
     assert(global(&internal,state,&pool,&g) && !strcmp(g.primary.path,a));
     assert(pn_font_manage_event(&ui,PN_FMU_BACK,present,NULL)==PN_OK && !ui.active);pn_font_manage_close(&ui);pn_font_manage_close(&ui);assert(!pool.used && !pool.live);

@@ -87,9 +87,10 @@ static pn_status_t render(app_t *a,pn_frame_t *frame,const pn_reader_receipt_t *
     else if(show_return)snprintf(left,sizeof left,"< 返回跳转前位置");
     else{const char *slash=strrchr(a->book_path,'/');snprintf(left,sizeof left,"%s",slash?slash+1:a->book_path);char *dot=strrchr(left,'.');if(dot && dot!=left)*dot=0;}
     if(a->draft_render)snprintf(right,sizeof right,"点击返回设置");
-    else{unsigned long long percent=a->reader.decoder.source.size?receipt->anchor.begin*100/a->reader.decoder.source.size:0;
+    unsigned long long basis=a->reader.decoder.source.size?receipt->anchor.begin*10000/a->reader.decoder.source.size:0;if(basis>10000)basis=10000;
+    if(!a->draft_render){unsigned long long percent=basis/100;
         if(missing)snprintf(right,sizeof right,"%u 缺字 · %llu%%",missing,percent);else snprintf(right,sizeof right,"%llu%%",percent);}
-    return pn_reader_footer_render(&a->ui,body(a),frame,left,right);
+    return pn_reader_footer_progress(&a->ui,body(a),frame,left,right,a->draft_render?-1:(int)basis);
 }
 static pn_status_t release_app(app_t *a){
     pn_font_close(&a->metadata);pn_font_set_close(&a->font_draft);pn_font_set_close(&a->font_live);pn_font_chain_clear(&a->chain);pn_font_close(&a->body);pn_font_close(&a->ui);pn_status_t status=pn_text_file_close(&a->book_file);

@@ -132,14 +132,14 @@ static pn_status_t paint(app_t *a,pn_frame_t *frame){
     size_t index=0;unsigned basis=0;bool known=a->footer_path[0] && section_progress(a,a->footer_path,&index,&basis);
     if(a->draft_render)snprintf(left,sizeof left,"%s",a->font_render?"字体预览，设置尚未保存":"排版预览，设置尚未保存");
     else if((a->has_bookmark_origin || a->bookmark_navigation) && !a->bookmark_returning)snprintf(left,sizeof left,"< 返回跳转前位置");
-    else if(known)snprintf(left,sizeof left,"第 %zu 节 · 共 %zu 节",index+1,a->info.spine_count);
+    else if(known)snprintf(left,sizeof left,"第 %zu/%zu 节",index+1,a->info.spine_count);
     else snprintf(left,sizeof left,"%s",a->info.title[0]?a->info.title:"小纸 Pico");
     if(a->draft_render)snprintf(right,sizeof right,"点击返回设置");
     else{
         char percent[16]="";if(known)snprintf(percent,sizeof percent,"%u%%",basis/100);
         if(missing)snprintf(right,sizeof right,"%u 缺字%s%s",missing,percent[0]?" · ":"",percent);else snprintf(right,sizeof right,"%s",percent);
     }
-    return pn_reader_footer_render(&a->ui,body(a),frame,left,right);
+    return pn_reader_footer_progress(&a->ui,body(a),frame,left,right,known && !a->draft_render?(int)basis:-1);
 }
 static pn_status_t state_open(app_t *a,const char *directory,uint64_t now){
     if(strlen(directory)>=sizeof a->state_directory)return PN_LIMIT;
@@ -359,6 +359,11 @@ pn_status_t pn_epub_app_bookmark_jump(pn_epub_app_t *app,uint64_t id,uint64_t no
     status=pn_epub_bookmarks_position(&marks,id,&target);if(status!=PN_OK)return status;
     a->bookmark_navigation=true;status=pn_epub_app_jump(app,&target.location,now,present,ctx);a->bookmark_navigation=false;
     if(a->last_confirmed){a->bookmark_origin=before;a->has_bookmark_origin=true;}return status;
+}
+pn_status_t pn_epub_app_section_of(pn_epub_app_t *app,const char *path,size_t *index,size_t *count){
+    if(!app || !app->impl || !path || !index || !count)return PN_INVALID;
+    app_t *a=app->impl;pn_status_t status=pn_epub_spine_find(&a->epub,path,index);if(status!=PN_OK)return status;
+    *count=a->info.spine_count;return PN_OK;
 }
 pn_status_t pn_epub_app_section_info(pn_epub_app_t *app,size_t *count,size_t *current){
     if(!app || !app->impl || !count || !current)return PN_INVALID;

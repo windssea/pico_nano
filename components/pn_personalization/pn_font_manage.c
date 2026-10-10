@@ -66,7 +66,8 @@ static pn_status_t inspect(fm_t *f,const pn_catalog_item_t *item){
 }
 /* 版式：列表页每行88px，底部上一页/下一页；详情页下半部为名称与两个按钮；确认页为说明与取消/确认。
  * Layout: list rows are 88 px with paging buttons at the bottom; the detail page puts the name and two buttons in its lower half; the confirmation page has a note and cancel/confirm. */
-#define LIST_ROW_Y 204
+#define DEFAULT_CARD_Y 184
+#define LIST_ROW_Y 334
 #define LIST_ROWS 6
 #define PAGER_Y 1084
 #define DETAIL_NAME_Y 884
@@ -77,12 +78,23 @@ static pn_status_t draw(pn_font_manage_t *ui){
     fm_t *f=ui->impl;pn_frame_clear(&f->canvas,15);pn_status_t s=PN_OK;char line[PN_CATALOG_PATH_MAX+128];
     if(ui->screen==PN_FMU_LIST){
         s=pn_w_header(&f->ui,&f->canvas,"< 返回","字体管理",NULL);
-        if(s==PN_OK){if(!f->global_known)snprintf(line,sizeof line,"全局默认：记录不可读");else if(!f->global_set)snprintf(line,sizeof line,"全局默认：未设置");else if(f->global.primary.kind==PN_FONT_RESIDENT)snprintf(line,sizeof line,"全局默认：内置界面字体");else snprintf(line,sizeof line,"全局默认：%s",f->global.primary.path);
-            int original=f->ui.pixels;s=pn_font_size(&f->ui,28);if(s==PN_OK)s=pn_w_text(&f->ui,&f->canvas,line,PN_UI_MARGIN,168,620,PN_ALIGN_LEFT);pn_status_t restored=pn_font_size(&f->ui,original);if(s==PN_OK)s=restored;}
-        for(size_t i=0;i<f->page.count && i<LIST_ROWS && s==PN_OK;i++){const pn_catalog_item_t *item=&f->page.items[i];
-            snprintf(line,sizeof line,"%llu KB%s",(unsigned long long)((item->size+1023)/1024),is_global(f,item->path)?" · 全局默认":"");
-            s=pn_w_row(&f->ui,&f->canvas,item->name,line,true,LIST_ROW_Y+(int)i*PN_W_ROW_H);}
-        if(s==PN_OK && !f->page.count){int original=f->ui.pixels;s=pn_font_size(&f->ui,30);if(s==PN_OK)s=pn_w_text_lines(&f->ui,&f->canvas,"fonts 目录里还没有 TTF 字体。点底栏“传书”，用手机把字体传进来。",PN_UI_MARGIN,LIST_ROW_Y+48,620,3,44,NULL);pn_status_t restored=pn_font_size(&f->ui,original);if(s==PN_OK)s=restored;}
+        // 当前默认字体卡，再列出已安装字体；默认项用对勾标出。/ A card for the current default font, then the installed fonts with the default marked by a check.
+        const char *name="内置界面字体",*note="未设置全局默认，正文使用内置字体";
+        if(!f->global_known){name="记录不可读";note="全局默认记录暂时无法读取";}
+        else if(f->global_set && f->global.primary.kind!=PN_FONT_RESIDENT){const char *slash=strrchr(f->global.primary.path,'/');name=slash?slash+1:f->global.primary.path;note="新打开的书默认使用它";}
+        else if(f->global_set)note="全局默认为内置界面字体";
+        if(s==PN_OK)s=pn_w_group(&f->ui,&f->canvas,"当前默认字体",DEFAULT_CARD_Y-14);
+        pn_w_card(&f->canvas,DEFAULT_CARD_Y,1);
+        if(s==PN_OK)s=pn_w_card_row(&f->ui,&f->canvas,name,note,"默认",PN_ICON_FONT,0u,DEFAULT_CARD_Y,true);
+        if(s==PN_OK)s=pn_w_group(&f->ui,&f->canvas,"已安装字体",LIST_ROW_Y-14);
+        size_t shown=f->page.count<LIST_ROWS?f->page.count:LIST_ROWS;
+        if(shown)pn_w_card(&f->canvas,LIST_ROW_Y,(int)shown);
+        for(size_t i=0;i<shown && s==PN_OK;i++){const pn_catalog_item_t *item=&f->page.items[i];bool global=is_global(f,item->path);
+            snprintf(line,sizeof line,"%llu KB%s",(unsigned long long)((item->size+1023)/1024),global?" · 全局默认":"");
+            int y=LIST_ROW_Y+(int)i*PN_W_CARD_ROW_H;
+            s=pn_w_card_row(&f->ui,&f->canvas,item->name,line,NULL,-1,PN_ROW_CHEVRON,y,i+1==shown);
+            if(s==PN_OK && global)pn_w_icon(&f->canvas,PN_ICON_CHECK,PN_UI_WIDTH-PN_UI_MARGIN-100,y+34,32,PN_UI_INK);}
+        if(s==PN_OK && !f->page.count){int original=f->ui.pixels;s=pn_font_size(&f->ui,30);if(s==PN_OK)s=pn_w_text_lines(&f->ui,&f->canvas,"还没有安装字体。用“传书”把 TTF 字体放进 fonts 目录。",PN_UI_MARGIN,LIST_ROW_Y+48,620,3,44,NULL);pn_status_t restored=pn_font_size(&f->ui,original);if(s==PN_OK)s=restored;}
         if(s==PN_OK && *f->message){int original=f->ui.pixels;s=pn_font_size(&f->ui,28);if(s==PN_OK)s=pn_w_text(&f->ui,&f->canvas,f->message,PN_UI_MARGIN,PAGER_Y-24,620,PN_ALIGN_LEFT);pn_status_t restored=pn_font_size(&f->ui,original);if(s==PN_OK)s=restored;}
         if(s==PN_OK){int original=f->ui.pixels;s=pn_font_size(&f->ui,30);
             if(s==PN_OK)s=pn_w_button(&f->ui,&f->canvas,"上一页",32,PAGER_Y,196,80,0u);
@@ -110,7 +122,7 @@ static pn_status_t draw(pn_font_manage_t *ui){
         if(s==PN_OK)s=pn_w_text_lines(&f->ui,&f->canvas,"使用它的书将暂用默认字体；阅读位置与字体选择记录都会保留。删除后文件无法恢复。",PN_UI_MARGIN,360,620,4,46,NULL);
         if(s==PN_OK && is_global(f,f->selected))s=pn_w_text(&f->ui,&f->canvas,"这是当前的全局默认字体。",PN_UI_MARGIN,580,620,PN_ALIGN_LEFT);
         if(s==PN_OK)s=pn_w_button(&f->ui,&f->canvas,"取消",32,CONFIRM_BUTTON_Y,300,96,0u);
-        if(s==PN_OK)s=pn_w_button(&f->ui,&f->canvas,"确认删除",352,CONFIRM_BUTTON_Y,300,96,PN_W_SELECTED);
+        if(s==PN_OK)s=pn_w_button(&f->ui,&f->canvas,"删除",352,CONFIRM_BUTTON_Y,300,96,0u); // 危险操作不用黑底 / No black emphasis for destructive actions
         pn_status_t restored=pn_font_size(&f->ui,original);if(s==PN_OK)s=restored;
     }
     return s;
@@ -203,7 +215,7 @@ int pn_font_manage_hit(const pn_font_manage_t *ui,int x,int y){
     if(ui->screen==PN_FMU_LIST){
         if(pn_w_header_hit(x,y,false)==1)return PN_FMU_BACK;
         if(x<32 || x>=652)return -1;
-        if(y>=LIST_ROW_Y && y<LIST_ROW_Y+LIST_ROWS*PN_W_ROW_H){int row=(y-LIST_ROW_Y)/PN_W_ROW_H;return row<(int)f->page.count?PN_FMU_ROW+row:-1;}
+        if(y>=LIST_ROW_Y && y<LIST_ROW_Y+LIST_ROWS*PN_W_CARD_ROW_H){int row=(y-LIST_ROW_Y)/PN_W_CARD_ROW_H;return row<(int)f->page.count?PN_FMU_ROW+row:-1;}
         if(y>=PAGER_Y && y<PAGER_Y+80)return x<228?PN_FMU_PREVIOUS:x>=456?PN_FMU_NEXT:-1;
         return -1;
     }

@@ -30,7 +30,7 @@ typedef enum {PN_ALIGN_LEFT=0,PN_ALIGN_CENTER,PN_ALIGN_RIGHT} pn_align_t;
 typedef enum {
     PN_ICON_SEARCH=0,PN_ICON_GRID,PN_ICON_LIST,PN_ICON_BACK,PN_ICON_CHEVRON,PN_ICON_SHELF,PN_ICON_TRANSFER,PN_ICON_SETTINGS,
     PN_ICON_TOC,PN_ICON_BOOKMARK,PN_ICON_TYPESET,PN_ICON_REFRESH,PN_ICON_CLOSE,PN_ICON_PLUS,PN_ICON_MINUS,PN_ICON_ARROW,
-    PN_ICON_FONT,PN_ICON_IMAGE,PN_ICON_LOCK,PN_ICON_TRASH,PN_ICON_CHECK,PN_ICON_WIFI,PN_ICON_COUNT
+    PN_ICON_FONT,PN_ICON_IMAGE,PN_ICON_LOCK,PN_ICON_TRASH,PN_ICON_CHECK,PN_ICON_WIFI,PN_ICON_MORE,PN_ICON_IMPORT,PN_ICON_COUNT
 } pn_icon_t;
 
 /// 设置备用字体（例如用户的阅读字体）：主UI字体缺字时用同字号画它的字形；NULL取消。字体对象须在取消前保持有效。
@@ -69,6 +69,15 @@ int pn_w_tabbar_hit(unsigned count,int y,int height,int x,int hit_y);
 /// 页面顶栏：左侧“< 返回”文字，居中标题，右侧可选的圆角主按钮；底部细线。字号由本函数设定并在返回前还原。
 /// Page header: "< back" text on the left, a centered title and an optional rounded primary button on the right; a thin rule below. The font size is set here and restored on return.
 pn_status_t pn_w_header(pn_font_t *font,pn_frame_t *frame,const char *back,const char *title,const char *action);
+/// 状态带（y=0..40）：左侧产品名，右侧电量（未设置电量则不画）。/ Status band (y=0..40): product name on the left and the battery on the right (omitted until a level is set).
+pn_status_t pn_w_status(pn_font_t *font,pn_frame_t *frame);
+/// 设置/读取状态带电量（0–100，<0表示未知不显示）。/ Set or read the status-band battery (0–100, negative means unknown and hidden).
+void pn_w_set_battery(int percent);
+int pn_w_battery_level(void);
+/// 分段控件：count个等宽格，selected为黑底白字，notes可为NULL（每格第二行说明）。/ Segmented control with count equal cells, selected drawn white on black; notes may be NULL (a second line per cell).
+pn_status_t pn_w_segments(pn_font_t *font,pn_frame_t *frame,const char *const *labels,const char *const *notes,unsigned count,int selected,int y,int height);
+/// 分段命中：格序号，空白-1。/ Segment hit: cell index, or -1.
+int pn_w_segments_hit(unsigned count,int y,int height,int x,int hit_y);
 /// 顶栏命中：1返回，2右侧按钮，0空白。has_action为假时右侧不命中。/ Header hit test: 1 back, 2 the right button, 0 blank; no right-side hit when has_action is false.
 int pn_w_header_hit(int x,int y,bool has_action);
 /// 小节标题（28px，下方细线）。baseline是文字基线。/ Section title (28 px with a rule below); baseline is the text baseline.

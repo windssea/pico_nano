@@ -31,6 +31,8 @@ typedef struct {
     pn_reader_app_t *reader; ///< 借用owner会话对象 / Borrowed owner session object
     pn_bookmark_ui_mode_t mode; ///< 当前屏幕模型 / Current screen model
     pn_txt_bookmark_t items[PN_BOOKMARK_UI_ROWS]; ///< 本页ID/名称；position仅TXT使用 / Page IDs/labels; position is TXT-only
+    int sections[PN_BOOKMARK_UI_ROWS]; ///< EPUB书签所在章节（从1起），未知为0 / Section of each EPUB bookmark (from 1), 0 when unknown
+    int section_count; ///< EPUB章节总数 / EPUB section count
     size_t count; ///< 有效行数 / Valid rows
     uint64_t cursors[PN_BOOKMARK_UI_PAGES]; ///< 本会话前页游标 / Previous-page cursors for this session
     unsigned page; ///< 游标层级 / Cursor depth

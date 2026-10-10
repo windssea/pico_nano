@@ -44,8 +44,10 @@ pn_status_t pn_search_ui_render(const pn_search_ui_t *ui,pn_font_t *font,pn_fram
     int original=font->pixels;pn_frame_clear(frame,PN_UI_PAPER);
     pn_status_t s=pn_w_header(font,frame,"< 返回","搜索",NULL);
     // 输入框：显示搜索词，空时给出提示。/ Query box showing the query, or a hint when empty.
-    if(s==PN_OK){pn_w_round_outline(frame,32,BOX_Y,620,BOX_H,PN_UI_RADIUS,2,PN_UI_INK);pn_w_icon_search(frame,52,BOX_Y+28,40);s=pn_font_size(font,40);}
-    if(s==PN_OK)s=pn_w_text(font,frame,*ui->query?ui->query:"书名拼音首字母或英文",112,BOX_Y+64,520,PN_ALIGN_LEFT);
+    // 搜索框：浅灰圆角底、放大镜、搜索词，有词时右端出现清除图标。/ Search field: light-gray rounded base, magnifier and query, with a clear icon at the end once there is a query.
+    if(s==PN_OK){pn_w_round_fill(frame,32,BOX_Y,620,BOX_H,PN_UI_RADIUS,14);pn_w_round_stroke(frame,32,BOX_Y,620,BOX_H,PN_UI_RADIUS,2.0f,8);pn_w_icon(frame,PN_ICON_SEARCH,52,BOX_Y+28,40,PN_UI_INK);s=pn_font_size(font,40);}
+    if(s==PN_OK)s=pn_w_text(font,frame,*ui->query?ui->query:"书名拼音首字母或英文",112,BOX_Y+64,*ui->query?450:520,PN_ALIGN_LEFT);
+    if(*ui->query){pn_w_dot(frame,610.0f,(float)(BOX_Y+BOX_H/2),20.0f,PN_UI_INK);pn_w_line(frame,602.0f,(float)(BOX_Y+BOX_H/2-8),618.0f,(float)(BOX_Y+BOX_H/2+8),3.0f,PN_UI_PAPER);pn_w_line(frame,618.0f,(float)(BOX_Y+BOX_H/2-8),602.0f,(float)(BOX_Y+BOX_H/2+8),3.0f,PN_UI_PAPER);}
     if(s==PN_OK)s=pn_font_size(font,26);
     if(s==PN_OK)s=pn_w_text(font,frame,"中文书名输入各字拼音首字母，如“bnzd”",32,HINT_BASE,620,PN_ALIGN_LEFT);
     // 键盘。/ Keyboard.
@@ -64,6 +66,7 @@ pn_status_t pn_search_ui_render(const pn_search_ui_t *ui,pn_font_t *font,pn_fram
 int pn_search_ui_hit(int x,int y){
     if(x<0 || x>=684 || y<0 || y>=1216)return PN_SEARCH_NONE;
     if(y<PN_W_HEADER_H)return pn_w_header_hit(x,y,false)==1?PN_SEARCH_BACK:PN_SEARCH_NONE;
+    if(y>=BOX_Y && y<BOX_Y+BOX_H && x>=560 && x<652)return PN_SEARCH_CLEAR; // 搜索框右端的清除图标 / The clear icon at the end of the field
     if(y>=KEY_Y && y<KEY_Y+KEY_ROWS*KEY_H && x>=KEY_X){
         int column=(x-KEY_X)/KEY_W,row=(y-KEY_Y)/KEY_H;
         if(column>=KEY_COLS || (x-KEY_X)%KEY_W>=KEY_W-8 || (y-KEY_Y)%KEY_H>=KEY_H-8)return PN_SEARCH_NONE;

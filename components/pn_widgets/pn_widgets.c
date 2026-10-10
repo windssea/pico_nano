@@ -42,6 +42,12 @@ static pn_status_t glyph(pn_font_t *font,pn_frame_t *frame,uint32_t cp,uint8_t s
     pn_frame_rect(frame,x+2,baseline-size+4,size-6,1,0);pn_frame_rect(frame,x+2,baseline-2,size-6,1,0);
     pn_frame_rect(frame,x+2,baseline-size+4,1,size-6,0);pn_frame_rect(frame,x+size-5,baseline-size+4,1,size-6,0);return PN_OK;
 }
+/* 省略号的一点：字体缺“.”时画一个小圆点，不让截断导致整页失败。/ One dot of an ellipsis: a small filled circle when the font lacks '.', so truncation never fails a page. */
+static pn_status_t ellipsis_dot(pn_font_t *font,pn_frame_t *frame,int32_t x_64,int baseline,int32_t advance_64){
+    pn_status_t status=pn_font_draw(font,frame,'.',x_64,baseline,PN_FONT_GRAY);
+    if(status==PN_EMPTY){float r=(float)font->pixels/14.0f;if(r<1.5f)r=1.5f;pn_w_dot(frame,(float)x_64/64.0f+(float)advance_64/128.0f,(float)baseline-r,r,PN_UI_INK);status=PN_OK;}
+    return status;
+}
 static bool is_word(uint32_t c){return (c>='a' && c<='z') || (c>='A' && c<='Z') || (c>='0' && c<='9');}
 static int32_t total(const int32_t *adv,size_t n){int32_t sum=0;for(size_t i=0;i<n;i++)sum+=adv[i];return sum;}
 static pn_status_t text_width_impl(pn_font_t *font,const char *utf8,int *width){
@@ -66,7 +72,7 @@ static pn_status_t text_impl(pn_font_t *font,pn_frame_t *frame,const char *utf8,
     if(max_width>0 && !dots){int32_t room=limit-width;if(align==PN_ALIGN_CENTER)start+=room/2;else if(align==PN_ALIGN_RIGHT)start+=room;}
     else if(max_width==0){if(align==PN_ALIGN_CENTER)start-=width/2;else if(align==PN_ALIGN_RIGHT)start-=width;}
     for(size_t i=0;i<shown;i++){status=glyph(font,frame,cp[i],miss[i],start,baseline);if(status!=PN_OK)return status;start+=adv[i];}
-    for(int i=0;dots && i<3;i++){status=pn_font_draw(font,frame,'.',start,baseline,PN_FONT_GRAY);if(status!=PN_OK)return status;start+=dot;}
+    for(int i=0;dots && i<3;i++){status=ellipsis_dot(font,frame,start,baseline,dot);if(status!=PN_OK)return status;start+=dot;}
     return PN_OK;
 }
 static pn_status_t text_lines_impl(pn_font_t *font,pn_frame_t *frame,const char *utf8,int x,int baseline,int width,unsigned max_lines,int pitch,int first_indent,int tracking_64,unsigned *used){
@@ -94,7 +100,7 @@ static pn_status_t text_lines_impl(pn_font_t *font,pn_frame_t *frame,const char 
         if(cut){sum=0;end=at;while(end<n && sum+adv[end]+3*period<=room){sum+=adv[end];end++;}}
         int32_t pen=(int32_t)x*64+(line==0?first_indent*64:0);
         for(size_t i=at;i<end;i++){status=glyph(font,frame,cp[i],miss[i],pen,baseline+(int)line*pitch);if(status!=PN_OK)return status;pen+=adv[i];}
-        for(int i=0;cut && i<3;i++){status=pn_font_draw(font,frame,'.',pen,baseline+(int)line*pitch,PN_FONT_GRAY);if(status!=PN_OK)return status;pen+=period;}
+        for(int i=0;cut && i<3;i++){status=ellipsis_dot(font,frame,pen,baseline+(int)line*pitch,period);if(status!=PN_OK)return status;pen+=period;}
         at=end;line++;
     }
     if(used)*used=line;
@@ -161,24 +167,60 @@ int pn_w_tabbar_hit(unsigned count,int y,int height,int x,int hit_y){
     if(!count || count>4 || x<0 || x>=PN_UI_WIDTH || hit_y<y || hit_y>=y+height)return -1;
     return (int)((unsigned)x*count/PN_UI_WIDTH);
 }
+/* 状态带共享的电量：由设备/模拟器定期写入，绘制只读取。/ Battery shared by every status band: written periodically by the device or simulator, only read while drawing. */
+static int status_battery=-1;
+void pn_w_set_battery(int percent){status_battery=percent<0?-1:percent>100?100:percent;}
+int pn_w_battery_level(void){return status_battery;}
+pn_status_t pn_w_status(pn_font_t *font,pn_frame_t *frame){
+    if(!font || !font->impl || !frame)return PN_INVALID;
+    int original=font->pixels;pn_status_t status=pn_font_size(font,24);
+    if(status==PN_OK)status=pn_w_text(font,frame,"PicoNano",PN_UI_MARGIN,30,300,PN_ALIGN_LEFT);
+    if(status==PN_OK && status_battery>=0){
+        char text[8];text[0]=0;int n=status_battery;char *p=text;if(n>=100){*p++='1';*p++='0';*p++='0';}else{if(n>=10)*p++=(char)('0'+n/10);*p++=(char)('0'+n%10);}*p++='%';*p=0;
+        status=pn_w_text(font,frame,text,PN_UI_WIDTH-PN_UI_MARGIN-52-120,30,112,PN_ALIGN_RIGHT);
+        pn_w_battery(frame,PN_UI_WIDTH-PN_UI_MARGIN-44,12,44,22,status_battery,PN_UI_INK);
+    }
+    pn_status_t restored=pn_font_size(font,original);return status==PN_OK?restored:status;
+}
 pn_status_t pn_w_header(pn_font_t *font,pn_frame_t *frame,const char *back,const char *title,const char *action){
     if(!font || !font->impl || !frame || !back || !title)return PN_INVALID;
     int original=font->pixels;
-    pn_status_t status=pn_font_size(font,34);
-    // “< 返回”里的“<”换成线条箭头图标。/ The "<" in "< Back" becomes a line chevron icon.
-    if(status==PN_OK && back[0]=='<' && back[1]==' '){pn_w_icon(frame,PN_ICON_BACK,PN_UI_MARGIN-6,52,36,PN_UI_INK);status=pn_w_text(font,frame,back+2,PN_UI_MARGIN+32,78,170,PN_ALIGN_LEFT);}
-    else if(status==PN_OK)status=pn_w_text(font,frame,back,PN_UI_MARGIN,78,200,PN_ALIGN_LEFT);
-    if(status==PN_OK)status=pn_font_size(font,40);
-    if(status==PN_OK)status=pn_w_text(font,frame,title,0,80,PN_UI_WIDTH,PN_ALIGN_CENTER);
-    if(status==PN_OK)status=pn_font_size(font,34);
-    if(status==PN_OK && action)status=pn_w_button(font,frame,action,500,24,152,80,PN_W_SELECTED);
+    // 顶部：状态带（产品名与电量），其下导航行：返回、居中标题、右侧黑底主按钮。/ Top: a status band (product name and battery), then the navigation row with Back, a centered title and a black primary button.
+    pn_status_t status=pn_w_status(font,frame);
+    if(status==PN_OK)status=pn_font_size(font,32);
+    if(status==PN_OK && back[0]=='<' && back[1]==' '){pn_w_icon(frame,PN_ICON_BACK,PN_UI_MARGIN-6,70,34,PN_UI_INK);status=pn_w_text(font,frame,back+2,PN_UI_MARGIN+30,100,170,PN_ALIGN_LEFT);}
+    else if(status==PN_OK)status=pn_w_text(font,frame,back,PN_UI_MARGIN,100,200,PN_ALIGN_LEFT);
+    if(status==PN_OK)status=pn_font_size(font,38);
+    if(status==PN_OK)status=pn_w_text(font,frame,title,180,102,PN_UI_WIDTH-360,PN_ALIGN_CENTER);
+    if(status==PN_OK)status=pn_font_size(font,30);
+    if(status==PN_OK && action)status=pn_w_button(font,frame,action,520,58,132,58,PN_W_SELECTED);
     pn_frame_rect(frame,PN_UI_MARGIN,PN_W_HEADER_H-4,PN_UI_WIDTH-2*PN_UI_MARGIN,2,PN_UI_RULE);
     pn_status_t restored=pn_font_size(font,original);return status==PN_OK?restored:status;
 }
 int pn_w_header_hit(int x,int y,bool has_action){
-    if(y<0 || y>=112 || x<0 || x>=PN_UI_WIDTH)return 0;
+    if(y<0 || y>=PN_W_HEADER_H || x<0 || x>=PN_UI_WIDTH)return 0;
     if(x<240)return 1;
-    return has_action && x>=500 && x<652 && y>=24?2:0;
+    return has_action && x>=500 && x<652 && y>=44?2:0;
+}
+/* 分段控件：等宽格子，选中项黑底白字，可选第二行小字说明。/ Segmented control: equal cells, the selected one white on black, with an optional small second line. */
+pn_status_t pn_w_segments(pn_font_t *font,pn_frame_t *frame,const char *const *labels,const char *const *notes,unsigned count,int selected,int y,int height){
+    if(!font || !font->impl || !frame || !labels || !count || count>5 || height<=0)return PN_INVALID;
+    int original=font->pixels,gap=12,width=(PN_UI_WIDTH-2*PN_UI_MARGIN-gap*(int)(count-1))/(int)count;pn_status_t status=PN_OK;
+    for(unsigned i=0;i<count && status==PN_OK;i++){
+        int x=PN_UI_MARGIN+(int)i*(width+gap);bool on=(int)i==selected;
+        if(!on)pn_w_round_stroke(frame,x,y,width,height,PN_UI_RADIUS,2.0f,PN_UI_INK);
+        bool two=notes && notes[i] && *notes[i];
+        status=pn_font_size(font,30);
+        if(status==PN_OK)status=pn_w_text(font,frame,labels[i],x+6,two?y+height/2-2:y+height/2+11,width-12,PN_ALIGN_CENTER);
+        if(status==PN_OK && two){status=pn_font_size(font,22);if(status==PN_OK)status=pn_w_text(font,frame,notes[i],x+6,y+height/2+28,width-12,PN_ALIGN_CENTER);}
+        if(on)pn_w_invert_round(frame,x,y,width,height,PN_UI_RADIUS);
+    }
+    pn_status_t restored=pn_font_size(font,original);return status==PN_OK?restored:status;
+}
+int pn_w_segments_hit(unsigned count,int y,int height,int x,int hit_y){
+    if(!count || count>5 || hit_y<y || hit_y>=y+height || x<PN_UI_MARGIN || x>=PN_UI_WIDTH-PN_UI_MARGIN)return -1;
+    int gap=12,width=(PN_UI_WIDTH-2*PN_UI_MARGIN-gap*(int)(count-1))/(int)count,slot=(x-PN_UI_MARGIN)/(width+gap);
+    return (x-PN_UI_MARGIN)%(width+gap)<width && slot<(int)count?slot:-1;
 }
 pn_status_t pn_w_section(pn_font_t *font,pn_frame_t *frame,const char *title,int baseline){
     if(!font || !font->impl || !frame || !title)return PN_INVALID;

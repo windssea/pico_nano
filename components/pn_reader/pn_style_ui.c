@@ -21,12 +21,14 @@ static pn_status_t cancel(pn_style_ui_t *u,uint64_t now,pn_reader_present_fn pre
  * Layout (docs/UI_UX.md section 5): header, paragraph preview, font row, four steppers, a "more" entry, three presets and bottom links. */
 #define HEADER_H 128
 #define PREVIEW_Y 140
-#define PREVIEW_H 260
-#define FONT_ROW_Y 416
-#define STEP_Y0 512
-#define STEP_PITCH 88
-#define MORE_Y 872
-#define PRESET_Y 968
+#define PREVIEW_H 240
+#define MODE_BASE 418
+#define PRESET_Y 432
+#define PRESET_H 92
+#define FONT_ROW_Y 540
+#define STEP_Y0 620
+#define STEP_PITCH 80
+#define MORE_Y 940
 #define LINKS_Y 1084
 #define BOX_X 288
 #define BOX_W 364
@@ -35,6 +37,7 @@ static const char *const names[PN_SUI_FIELDS]={"字号","行距","段距","首�
 typedef struct {unsigned pixels,line,gap,indent,margin;} preset_t;
 static const preset_t presets[3]={{44,145,40,2,32},{36,125,20,2,24},{56,160,40,2,32}};
 static const char *const preset_names[3]={"舒适","紧凑","大字"};
+static const char *const preset_notes[3]={"平衡阅读体验","显示更多内容","更大字体尺寸"};
 static unsigned field_value(const pn_style_t *s,unsigned i){switch(i){case 0:return s->pixels;case 1:return s->line_percent;case 2:return s->gap_percent;case 3:return s->indent_em;case 4:return s->tracking_percent;case 5:return s->margin;default:return s->gl_before_clear;}}
 static void field_set(pn_style_t *s,unsigned i,unsigned v){switch(i){case 0:s->pixels=(uint16_t)v;break;case 1:s->line_percent=(uint16_t)v;break;case 2:s->gap_percent=(uint16_t)v;break;case 3:s->indent_em=(uint16_t)v;break;case 4:s->tracking_percent=(uint16_t)v;break;case 5:s->margin=(uint16_t)v;break;default:s->gl_before_clear=(uint16_t)v;}}
 static void field_text(const pn_style_t *s,unsigned i,char *out,size_t cap){
@@ -71,19 +74,19 @@ static void font_name(pn_style_ui_t *u,char *out,size_t cap){
 static pn_status_t stepper(pn_font_t *font,pn_frame_t *frame,const pn_style_t *draft,unsigned field,int y,bool selected){
     char value[40];field_text(draft,field,value,sizeof value);
     pn_status_t s=pn_font_size(font,34);
-    if(s==PN_OK)s=pn_w_text(font,frame,names[field],PN_UI_MARGIN,y+54,230,PN_ALIGN_LEFT);
-    pn_w_round_outline(frame,BOX_X,y,BOX_W,80,PN_UI_RADIUS,selected?4:2,PN_UI_INK);
+    if(s==PN_OK)s=pn_w_text(font,frame,names[field],PN_UI_MARGIN,y+52,230,PN_ALIGN_LEFT);
+    pn_w_round_outline(frame,BOX_X,y+8,BOX_W,64,PN_UI_RADIUS,selected?3:2,PN_UI_INK);
     // 减/加用线条图标，中间值两侧各一条细分隔。/ Minus and plus are line icons with a hairline divider on each side of the value.
-    pn_w_icon(frame,PN_ICON_MINUS,BOX_X+30,y+24,28,PN_UI_INK);pn_w_icon(frame,PN_ICON_PLUS,BOX_X+BOX_W-58,y+24,28,PN_UI_INK);
-    pn_frame_rect(frame,BOX_X+88,y+16,1,48,10);pn_frame_rect(frame,BOX_X+BOX_W-88,y+16,1,48,10);
-    if(s==PN_OK)s=pn_font_size(font,34);
-    if(s==PN_OK)s=pn_w_text(font,frame,value,BOX_X+88,y+54,BOX_W-176,PN_ALIGN_CENTER);
+    pn_w_icon(frame,PN_ICON_MINUS,BOX_X+30,y+26,28,PN_UI_INK);pn_w_icon(frame,PN_ICON_PLUS,BOX_X+BOX_W-58,y+26,28,PN_UI_INK);
+    pn_frame_rect(frame,BOX_X+88,y+20,1,40,10);pn_frame_rect(frame,BOX_X+BOX_W-88,y+20,1,40,10);
+    if(s==PN_OK)s=pn_font_size(font,32);
+    if(s==PN_OK)s=pn_w_text(font,frame,value,BOX_X+88,y+52,BOX_W-176,PN_ALIGN_CENTER);
     return s;
 }
 /* 用草稿的字号/行距/缩进/字距试排一段，让数值变化立刻可见；正文字体不可用时用UI字体。
  * Typeset a sample paragraph with the draft's size, spacing, indent and tracking so changes are visible at once; the UI font is used when the body font is unavailable. */
 static pn_status_t sample(pn_style_ui_t *u,pn_font_t *ui,pn_frame_t *frame){
-    pn_w_round_outline(frame,32,PREVIEW_Y,620,PREVIEW_H,PN_UI_RADIUS,2,PN_UI_INK);
+    pn_w_round_stroke(frame,32,PREVIEW_Y,620,PREVIEW_H,PN_UI_RADIUS,2.0f,8);
     pn_status_t s=pn_font_size(ui,26);
     if(s==PN_OK)s=pn_w_text(ui,frame,"当前段落预览",52,PREVIEW_Y+40,560,PN_ALIGN_LEFT);
     if(s==PN_OK)s=pn_w_text(ui,frame,"轻点查看整页",52,PREVIEW_Y+40,560,PN_ALIGN_RIGHT);
@@ -98,24 +101,26 @@ static pn_status_t sample(pn_style_ui_t *u,pn_font_t *ui,pn_frame_t *frame){
 }
 static pn_status_t paint_main(pn_style_ui_t *u,pn_font_t *font,pn_frame_t *frame){
     pn_status_t s=sample(u,font,frame);
+    // 排版模式：三段分段控件，选中为黑底。/ Typesetting modes: a three-way segmented control, the selected one in black.
+    if(s==PN_OK)s=pn_font_size(font,26);
+    if(s==PN_OK)s=pn_w_text(font,frame,"排版模式",PN_UI_MARGIN,MODE_BASE,300,PN_ALIGN_LEFT);
+    if(s==PN_OK)s=pn_w_segments(font,frame,preset_names,preset_notes,3,selected_preset(&u->draft),PRESET_Y,PRESET_H);
     // 字体行。/ Font row.
     char name[PN_FONT_NAME_MAX+8];font_name(u,name,sizeof name);
     if(s==PN_OK)s=pn_font_size(font,34);
-    if(s==PN_OK)s=pn_w_text(font,frame,"字体",PN_UI_MARGIN,FONT_ROW_Y+54,200,PN_ALIGN_LEFT);
+    if(s==PN_OK)s=pn_w_text(font,frame,"字体",PN_UI_MARGIN,FONT_ROW_Y+52,200,PN_ALIGN_LEFT);
     pn_font_t *body=body_font(u);
     pn_w_set_fallback(body);
-    if(s==PN_OK)s=pn_w_text(font,frame,name,200,FONT_ROW_Y+54,380,PN_ALIGN_RIGHT);
+    if(s==PN_OK)s=pn_font_size(font,30);
+    if(s==PN_OK)s=pn_w_text(font,frame,name,200,FONT_ROW_Y+52,380,PN_ALIGN_RIGHT);
     pn_w_set_fallback(NULL);
     pn_w_icon(frame,PN_ICON_CHEVRON,PN_UI_WIDTH-PN_UI_MARGIN-30,FONT_ROW_Y+26,30,PN_UI_INK);
-    pn_frame_rect(frame,PN_UI_MARGIN,FONT_ROW_Y+82,620,1,PN_UI_RULE);
-    for(unsigned i=0;i<4 && s==PN_OK;i++)s=stepper(font,frame,&u->draft,i,STEP_Y0+(int)i*STEP_PITCH,u->selected==i);
+    pn_frame_rect(frame,PN_UI_MARGIN,FONT_ROW_Y+79,620,1,10);
+    for(unsigned i=0;i<4 && s==PN_OK;i++){s=stepper(font,frame,&u->draft,i,STEP_Y0+(int)i*STEP_PITCH,u->selected==i);pn_frame_rect(frame,PN_UI_MARGIN,STEP_Y0+(int)i*STEP_PITCH+79,620,1,10);}
     // 更多入口。/ The "more" entry.
-    if(s==PN_OK)s=pn_w_text(font,frame,"边距与更多选项",PN_UI_MARGIN,MORE_Y+54,400,PN_ALIGN_LEFT);
+    if(s==PN_OK)s=pn_font_size(font,34);
+    if(s==PN_OK)s=pn_w_text(font,frame,"边距与更多选项",PN_UI_MARGIN,MORE_Y+52,400,PN_ALIGN_LEFT);
     pn_w_icon(frame,PN_ICON_CHEVRON,PN_UI_WIDTH-PN_UI_MARGIN-30,MORE_Y+26,30,PN_UI_INK);
-    pn_frame_rect(frame,PN_UI_MARGIN,MORE_Y+82,620,1,PN_UI_RULE);
-    // 三个预设。/ Three presets.
-    int chosen=selected_preset(&u->draft);
-    for(int i=0;i<3 && s==PN_OK;i++)s=pn_w_button(font,frame,preset_names[i],32+i*212,PRESET_Y,196,96,i==chosen?PN_W_SELECTED:0u);
     return s;
 }
 static pn_status_t paint_more(pn_style_ui_t *u,pn_font_t *font,pn_frame_t *frame){
@@ -128,13 +133,7 @@ static pn_status_t paint_more(pn_style_ui_t *u,pn_font_t *font,pn_frame_t *frame
 static pn_status_t paint(void *ctx,pn_font_t *font,pn_font_t *metadata,pn_frame_t *frame){
     (void)metadata;pn_style_ui_t *u=ctx;pn_frame_clear(frame,PN_UI_PAPER);
     int original=font->pixels;
-    pn_status_t s=pn_font_size(font,34);
-    if(s==PN_OK)s=pn_w_text(font,frame,"< 返回",PN_UI_MARGIN,78,200,PN_ALIGN_LEFT);
-    if(s==PN_OK)s=pn_font_size(font,40);
-    if(s==PN_OK)s=pn_w_text(font,frame,u->more?"更多排版":"排版",0,80,PN_UI_WIDTH,PN_ALIGN_CENTER);
-    if(s==PN_OK)s=pn_font_size(font,34);
-    if(s==PN_OK)s=pn_w_text(font,frame,"应用",500,78,152,PN_ALIGN_RIGHT);
-    pn_frame_rect(frame,PN_UI_MARGIN,HEADER_H-4,620,2,PN_UI_RULE);
+    pn_status_t s=pn_w_header(font,frame,"< 返回",u->more?"更多排版":"排版设置","应用");
     if(s==PN_OK)s=u->more?paint_more(u,font,frame):paint_main(u,font,frame);
     // 底部：两个小链接“取消返回 · 恢复默认”，整页预览改为轻点段落预览框。/ Bottom: two small links "cancel · restore defaults"; the full-page preview moved to tapping the paragraph box.
     if(s==PN_OK)s=pn_font_size(font,30);
@@ -142,7 +141,7 @@ static pn_status_t paint(void *ctx,pn_font_t *font,pn_font_t *metadata,pn_frame_
     if(s==PN_OK)s=pn_w_text(font,frame,"·",322,LINKS_Y+52,40,PN_ALIGN_CENTER);
     if(s==PN_OK)s=pn_w_text(font,frame,"恢复默认",352,LINKS_Y+52,300,PN_ALIGN_LEFT);
     if(s==PN_OK)s=pn_font_size(font,26);
-    if(s==PN_OK)s=pn_w_text(font,frame,u->notice?u->notice:"点“应用”才会保存；取消返回不改变当前排版",PN_UI_MARGIN,1200,620,PN_ALIGN_CENTER);
+    if(s==PN_OK)s=pn_w_text(font,frame,u->notice?u->notice:"点“应用”才保存；取消返回不改变当前排版",PN_UI_MARGIN,1200,620,PN_ALIGN_CENTER);
     pn_status_t restored=pn_font_size(font,original);return s==PN_OK?restored:s;
 }
 pn_status_t pn_style_ui_present(pn_style_ui_t *u,pn_reader_present_fn present,void *ctx){
@@ -181,7 +180,7 @@ pn_status_t pn_style_ui_event(pn_style_ui_t *u,int command,uint64_t now,pn_reade
 int pn_style_ui_hit(const pn_style_ui_t *u,int x,int y){
     if(!u || !u->active || x<0 || x>=684 || y<0 || y>=1216)return -1;
     if(u->preview)return PN_SUI_FORM;
-    if(y<112){if(x<240)return u->more?PN_SUI_BACK_MAIN:PN_SUI_CANCEL;if(x>=500 && x<652 && y>=24)return PN_SUI_APPLY;return -1;}
+    if(y<PN_W_HEADER_H){int header=pn_w_header_hit(x,y,true);return header==1?(u->more?PN_SUI_BACK_MAIN:PN_SUI_CANCEL):header==2?PN_SUI_APPLY:-1;}
     if(y>=LINKS_Y && y<LINKS_Y+80){if(x>=32 && x<332)return PN_SUI_CANCEL;if(x>=352 && x<652)return PN_SUI_RESET;return -1;}
     if(!u->more && y>=PREVIEW_Y && y<PREVIEW_Y+PREVIEW_H && x>=32 && x<652)return PN_SUI_PREVIEW;
     unsigned first=u->more?4:0,count=u->more?3:4;int top=u->more?MORE_STEP_Y0:STEP_Y0;
@@ -192,7 +191,7 @@ int pn_style_ui_hit(const pn_style_ui_t *u,int x,int y){
     if(!u->more){
         if(y>=FONT_ROW_Y && y<FONT_ROW_Y+80)return PN_SUI_FONTS;
         if(y>=MORE_Y && y<MORE_Y+80)return PN_SUI_MORE;
-        if(y>=PRESET_Y && y<PRESET_Y+96){for(int i=0;i<3;i++)if(x>=32+i*212 && x<228+i*212)return PN_SUI_PRESET+i;}
+        {int preset=pn_w_segments_hit(3,PRESET_Y,PRESET_H,x,y);if(preset>=0)return PN_SUI_PRESET+preset;}
     }
     return -1;
 }

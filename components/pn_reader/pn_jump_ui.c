@@ -30,11 +30,7 @@ static void value_text(const pn_jump_ui_t *u,unsigned value,char *out,size_t cap
 static pn_status_t paint(void *ctx,pn_font_t *font,pn_font_t *metadata,pn_frame_t *frame){
     (void)metadata;pn_jump_ui_t *u=ctx;pn_frame_clear(frame,PN_UI_PAPER);
     int original=font->pixels;char text[96],now[48];
-    pn_status_t s=pn_font_size(font,34);
-    if(s==PN_OK)s=pn_w_text(font,frame,"< 取消",PN_UI_MARGIN,78,200,PN_ALIGN_LEFT);
-    if(s==PN_OK)s=pn_font_size(font,40);
-    if(s==PN_OK)s=pn_w_text(font,frame,u->epub?"跳到章节":"跳到位置",0,80,PN_UI_WIDTH,PN_ALIGN_CENTER);
-    pn_frame_rect(frame,PN_UI_MARGIN,124,620,2,PN_UI_RULE);
+    pn_status_t s=pn_w_header(font,frame,"< 取消",u->epub?"跳到章节":"跳到位置",NULL);
     // 当前位置与目标。/ Current position and target.
     value_text(u,u->current,now,sizeof now);
     if(s==PN_OK)s=pn_font_size(font,30);
@@ -117,7 +113,7 @@ pn_status_t pn_jump_ui_event(pn_jump_ui_t *u,int command,uint64_t now,pn_reader_
 }
 int pn_jump_ui_hit(const pn_jump_ui_t *u,int x,int y){
     if(!u || !u->active || x<0 || x>=684 || y<0 || y>=1216)return -1;
-    if(y<112)return x<240?PN_JUI_CANCEL:-1;
+    if(y<PN_W_HEADER_H)return pn_w_header_hit(x,y,false)==1?PN_JUI_CANCEL:-1;
     if(y>=STEP_Y && y<STEP_Y+BUTTON_H){
         int slot=(x-PN_UI_MARGIN)/(STEP_W+STEP_GAP);
         if(x>=PN_UI_MARGIN && slot<4 && (x-PN_UI_MARGIN)%(STEP_W+STEP_GAP)<STEP_W)return PN_JUI_STEP+slot;

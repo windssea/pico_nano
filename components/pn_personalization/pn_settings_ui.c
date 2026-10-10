@@ -36,7 +36,9 @@ static pn_status_t show(pn_settings_ui_t *ui,pn_settings_present_fn present,void
     if(s==PN_OK && *u->lan){s=pn_w_group(font,f,"传书",LAN_ROW_Y-14);pn_w_card(f,LAN_ROW_Y,1);}
     if(s==PN_OK && *u->lan)s=pn_w_card_row(font,f,"局域网传书",u->lan,NULL,PN_ICON_WIFI,PN_ROW_CHEVRON,LAN_ROW_Y,true);
     if(s==PN_OK){int original=font->pixels;s=pn_font_size(font,26);
-        if(s==PN_OK)s=pn_w_text(font,f,*u->message?u->message:(u->state?"开关立即保存":"内部存储不可用，开关不能保存"),PN_UI_MARGIN+8,*u->lan?LAN_ROW_Y+ROW_H+52:TOGGLE_ROW_Y+4*ROW_H+52,604,PN_ALIGN_LEFT);
+        // 正常时不显示内部说明，只在有问题时提示。/ No internal note when all is well; only problems are shown.
+        const char *note=*u->message?u->message:u->state?"":"内部存储不可用，开关不能保存";
+        if(s==PN_OK && *note)s=pn_w_text(font,f,note,PN_UI_MARGIN+8,*u->lan?LAN_ROW_Y+ROW_H+52:TOGGLE_ROW_Y+4*ROW_H+52,604,PN_ALIGN_LEFT);
         pn_status_t restored=pn_font_size(font,original);if(s==PN_OK)s=restored;}
     if(s==PN_OK)s=present(ctx,&u->canvas,PN_REFRESH_GL16);
     if(s==PN_OK)ui->presented=true;

@@ -87,6 +87,10 @@ void pn_w_icon(pn_frame_t *frame,pn_icon_t icon,int x,int y,int size,uint8_t sha
     case PN_ICON_WIFI:
         arc(&c,0.50f,0.82f,0.70f,-0.707f,-0.707f,6,true);arc(&c,0.50f,0.82f,0.46f,-0.707f,-0.707f,6,true);arc(&c,0.50f,0.82f,0.22f,-0.707f,-0.707f,6,true);
         dot(&c,0.50f,0.84f,0.07f);break;
+    case PN_ICON_MORE: dot(&c,0.50f,0.20f,0.07f);dot(&c,0.50f,0.50f,0.07f);dot(&c,0.50f,0.80f,0.07f);break;
+    case PN_ICON_IMPORT:
+        line(&c,0.50f,0.10f,0.50f,0.62f);line(&c,0.30f,0.44f,0.50f,0.64f);line(&c,0.50f,0.64f,0.70f,0.44f);
+        line(&c,0.14f,0.66f,0.14f,0.88f);line(&c,0.14f,0.88f,0.86f,0.88f);line(&c,0.86f,0.88f,0.86f,0.66f);break;
     default: break;
     }
 }

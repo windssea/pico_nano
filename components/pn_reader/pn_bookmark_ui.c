@@ -12,10 +12,11 @@
 #include <string.h>
 static bool live(const pn_bookmark_ui_t *u){return u && ((u->reader && u->reader->impl) || (u->epub && u->epub->impl));}
 static bool confirmed(const pn_bookmark_ui_t *u){return u->epub?pn_epub_app_last_confirmed(u->epub):pn_reader_app_last_confirmed(u->reader);}
-static pn_status_t page_list(pn_bookmark_ui_t *u,uint64_t cursor,pn_txt_bookmark_t *items,size_t *count,bool *more){
+static pn_status_t page_list(pn_bookmark_ui_t *u,uint64_t cursor,pn_txt_bookmark_t *items,int *sections,size_t *count,bool *more){
     if(!u->epub)return pn_reader_app_bookmark_list(u->reader,cursor,items,PN_BOOKMARK_UI_ROWS,count,more);
     pn_epub_bookmark_t marks[PN_BOOKMARK_UI_ROWS];pn_status_t status=pn_epub_app_bookmark_list(u->epub,cursor,marks,PN_BOOKMARK_UI_ROWS,count,more);
-    if(status==PN_OK)for(size_t i=0;i<*count;i++){items[i]=(pn_txt_bookmark_t){.id=marks[i].id};memcpy(items[i].label,marks[i].label,sizeof items[i].label);}
+    if(status==PN_OK)for(size_t i=0;i<*count;i++){items[i]=(pn_txt_bookmark_t){.id=marks[i].id};memcpy(items[i].label,marks[i].label,sizeof items[i].label);
+        size_t index=0,total=0;sections[i]=pn_epub_app_section_of(u->epub,marks[i].position.location.path,&index,&total)==PN_OK?(int)index+1:0;if(total)u->section_count=(int)total;}
     return status;
 }
 static const char keys[5][9]={"abcdefgh","ijklmnop","qrstuvwx","yz012345","6789 .-_"};
@@ -63,16 +64,24 @@ static pn_status_t paint(void *ctx,pn_font_t *font,pn_font_t *metadata,pn_frame_
     pn_status_t status=pn_w_header(font,frame,u->mode==PN_BUI_LIST?"< 返回阅读":"< 返回",u->mode==PN_BUI_RENAME?"修改名称":u->mode==PN_BUI_DELETE?"删除书签":"书签",failed(u)?"重试":NULL);
     pn_w_set_fallback(metadata);
     if(status==PN_OK && u->mode==PN_BUI_LIST){
-        status=sized_button(font,frame,"+ 添加当前位置",34,32,ADD_Y,620,88,0u);
-        for(size_t i=0;i<u->count && status==PN_OK;i++){int y=ROW_Y0+(int)i*ROW_PITCH;char label[96];const pn_txt_bookmark_t *mark=&u->items[i];
+        // 主按钮“添加当前页为书签”，书签是带图标的圆角卡片行。/ A primary "bookmark this page" button; bookmarks are rounded card rows with an icon.
+        status=sized_button(font,frame,"+ 添加当前页为书签",32,32,ADD_Y,620,80,PN_W_SELECTED);
+        for(size_t i=0;i<u->count && status==PN_OK;i++){int y=ROW_Y0+(int)i*ROW_PITCH;char label[96];const pn_txt_bookmark_t *mark=&u->items[i];bool on=(int)i==u->selected;
+            pn_w_round_fill(frame,32,y,620,ROW_PITCH-12,PN_UI_RADIUS,14);pn_w_round_stroke(frame,32,y,620,ROW_PITCH-12,PN_UI_RADIUS,on?3.0f:2.0f,on?PN_UI_INK:10);
+            pn_w_icon(frame,PN_ICON_BOOKMARK,48,y+24,32,PN_UI_INK);pn_w_icon(frame,PN_ICON_MORE,604,y+30,28,PN_UI_INK);
             if(*mark->label)snprintf(label,sizeof label,"%s",mark->label);else snprintf(label,sizeof label,"书签 #%llu",(unsigned long long)mark->id);
-            status=sized_text(font,frame,label,34,PN_UI_MARGIN+8,y+44,604,PN_ALIGN_LEFT);
-            if(status==PN_OK){if(u->epub)snprintf(label,sizeof label,"原文位置 · #%llu",(unsigned long long)mark->id);else snprintf(label,sizeof label,"%u%% · #%llu",percent(&mark->position),(unsigned long long)mark->id);
-                status=sized_text(font,frame,label,26,PN_UI_MARGIN+8,y+82,604,PN_ALIGN_LEFT);}
-            if(status==PN_OK && (int)i==u->selected)pn_frame_rect(frame,PN_UI_MARGIN,y+6,4,ROW_PITCH-18,PN_UI_INK);
-            if(status==PN_OK)pn_frame_rect(frame,PN_UI_MARGIN,y+ROW_PITCH-8,620,1,10);
+            status=sized_text(font,frame,label,32,96,y+42,496,PN_ALIGN_LEFT);
+            if(status==PN_OK){
+                if(u->epub && u->sections[i] && u->section_count)snprintf(label,sizeof label,"第 %d/%d 节",u->sections[i],u->section_count);
+                else if(u->epub)snprintf(label,sizeof label,"书签 #%llu",(unsigned long long)mark->id);
+                else snprintf(label,sizeof label,"已读 %u%%",percent(&mark->position));
+                status=sized_text(font,frame,label,24,96,y+76,496,PN_ALIGN_LEFT);}
         }
-        if(status==PN_OK && !u->count)status=sized_text(font,frame,failed(u)?"暂时无法读取":"还没有书签",34,PN_UI_MARGIN,ROW_Y0+60,620,PN_ALIGN_LEFT);
+        if(status==PN_OK && !u->count){
+            pn_w_icon(frame,PN_ICON_BOOKMARK,(684-72)/2,ROW_Y0+80,72,PN_UI_INK);
+            status=sized_text(font,frame,failed(u)?"暂时无法读取书签":"还没有书签",34,PN_UI_MARGIN,ROW_Y0+210,620,PN_ALIGN_CENTER);
+            if(status==PN_OK)status=sized_text(font,frame,failed(u)?"点右上“重试”再读一次。":"读到喜欢的地方，随时留个记号。",28,PN_UI_MARGIN,ROW_Y0+260,620,PN_ALIGN_CENTER);
+        }
         if(status==PN_OK)status=sized_button(font,frame,"上一页",30,32,PAGER_Y,196,80,0u);
         if(status==PN_OK)status=sized_button(font,frame,"下一页",30,456,PAGER_Y,196,80,0u);
     }else if(status==PN_OK){
@@ -84,9 +93,9 @@ static pn_status_t paint(void *ctx,pn_font_t *font,pn_font_t *metadata,pn_frame_
             const char *labels[]={"跳转阅读","修改名称","删除书签"};
             for(int i=0;i<3 && status==PN_OK;i++)status=sized_button(font,frame,labels[i],34,32,ACTION_Y0+i*ACTION_PITCH,620,96,0u);
         }else if(status==PN_OK && u->mode==PN_BUI_DELETE){
-            status=sized_text(font,frame,"删除后无法撤销。",32,PN_UI_MARGIN,ROW_Y0+120,620,PN_ALIGN_LEFT);
+            status=sized_text(font,frame,"删除这条书签？此操作无法撤销。",32,PN_UI_MARGIN,ROW_Y0+120,620,PN_ALIGN_LEFT);
             if(status==PN_OK)status=sized_button(font,frame,"取消",34,32,DELETE_BUTTON_Y,300,96,0u);
-            if(status==PN_OK)status=sized_button(font,frame,"确认删除",34,352,DELETE_BUTTON_Y,300,96,PN_W_SELECTED);
+            if(status==PN_OK)status=sized_button(font,frame,"删除",34,352,DELETE_BUTTON_Y,300,96,0u); // 危险操作不用黑底强调 / Destructive actions are not emphasised in black
         }else if(status==PN_OK && u->mode==PN_BUI_RENAME){
             pn_w_round_outline(frame,32,296,620,100,PN_UI_RADIUS,2,PN_UI_INK);
             status=sized_text(font,frame,*u->draft?u->draft:"请输入名称",34,PN_UI_MARGIN+16,360,588,PN_ALIGN_LEFT);
@@ -106,14 +115,14 @@ static pn_status_t paint(void *ctx,pn_font_t *font,pn_font_t *metadata,pn_frame_
     return status;
 }
 static pn_status_t load_page(pn_bookmark_ui_t *u,unsigned page,uint64_t cursor){
-    pn_txt_bookmark_t items[PN_BOOKMARK_UI_ROWS];size_t count;bool more;pn_status_t status;
+    pn_txt_bookmark_t items[PN_BOOKMARK_UI_ROWS];int sections[PN_BOOKMARK_UI_ROWS]={0};size_t count;bool more;pn_status_t status;
     if(page>=PN_BOOKMARK_UI_PAGES)return PN_LIMIT;
-    for(;;){status=page_list(u,cursor,items,&count,&more);
+    for(;;){status=page_list(u,cursor,items,sections,&count,&more);
         if(status!=PN_OK || count || !page)break;
         cursor=u->cursors[--page];
     }
     if(status!=PN_OK)return status;
-    memcpy(u->items,items,count*sizeof *items);u->count=count;u->more=more;u->page=page;u->cursors[page]=cursor;u->selected=count?0:-1;return PN_OK;
+    memcpy(u->items,items,count*sizeof *items);memcpy(u->sections,sections,sizeof u->sections);u->count=count;u->more=more;u->page=page;u->cursors[page]=cursor;u->selected=count?0:-1;return PN_OK;
 }
 static const char *failure(pn_status_t status,int command){
     if(status==PN_UNSUPPORTED)return "尚未启用书签存储";

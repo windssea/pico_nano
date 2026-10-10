@@ -110,4 +110,5 @@ pn_font_t *pn_epub_app_body_font(const pn_epub_app_t *app);
 pn_status_t pn_epub_app_section_info(pn_epub_app_t *,size_t *count,size_t *current);
 /// 跳到第index章开头（从0起）；成功确认后可用“返回跳转前位置”。/ Jump to the start of section index (zero-based); "return to the position before the jump" works after a confirmed jump.
 pn_status_t pn_epub_app_section_jump(pn_epub_app_t *,size_t index,uint64_t,pn_reader_present_fn,void *);
-
+/// 资源路径所在章节（从0起）与章节总数；不是章节资源返回PN_EMPTY。/ Zero-based section of a resource path and the section count; PN_EMPTY when the path is not a section.
+pn_status_t pn_epub_app_section_of(pn_epub_app_t *,const char *path,size_t *index,size_t *count);

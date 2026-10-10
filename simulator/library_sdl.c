@@ -82,7 +82,7 @@ typedef struct {
 /* 模拟器没有电量计：电量取环境变量PN_SIM_BATTERY（0–100，默认85，仅为演示值，不是实测）。
  * The simulator has no fuel gauge: the battery comes from PN_SIM_BATTERY (0–100, default 85), a demo value, not a measurement. */
 static int sim_battery(void){const char *v=getenv("PN_SIM_BATTERY");if(!v || !*v)return 85;int n=atoi(v);return n<0?-1:n>100?100:n;}
-static pn_shelf_options_t shelf_options(const library_t *s){return (pn_shelf_options_t){.battery_percent=sim_battery(),.search=true,.layout_toggle=true,.list_mode=s->list_mode,.query=!s->recent_mode && *s->query};}
+static pn_shelf_options_t shelf_options(const library_t *s){pn_w_set_battery(sim_battery());return (pn_shelf_options_t){.battery_percent=-1,.search=true,.layout_toggle=true,.list_mode=s->list_mode || (!s->recent_mode && *s->query),.query=!s->recent_mode && *s->query};}
 static bool reading(library_t *s){return s->reader.impl || s->epub.impl;}
 static pn_status_t active_step(library_t *s,pn_reader_action_t action,uint64_t now,pn_reader_present_fn present,void *ctx){return s->epub.impl?pn_epub_app_step(&s->epub,action,now,present,ctx):pn_reader_app_step(&s->reader,action,now,present,ctx);}
 static pn_status_t active_close(library_t *s,uint64_t now){return s->epub.impl?pn_epub_app_close(&s->epub,now):pn_reader_app_close(&s->reader,now);}
@@ -169,7 +169,7 @@ static pn_status_t page(library_t *s,bool previous,bool first){
     pn_media_lease_t lease={0};pn_status_t status=pn_media_acquire(&s->media,PN_MEDIA_READ,&lease);
     const char *cursor=first?"":s->page->items[previous?0:s->page->count-1].name;
     if(status==PN_OK){
-        status=*s->query?(previous?pn_catalog_search_page_before_n(&s->media,&lease,s->directory,s->query,cursor,s->list_mode?5u:6u,next):pn_catalog_search_page_n(&s->media,&lease,s->directory,s->query,cursor,s->list_mode?5u:6u,next)):s->jump?pn_catalog_page_from_n(&s->media,&lease,s->directory,s->jump,s->list_mode?5u:6u,next):previous?pn_catalog_page_before_n(&s->media,&lease,s->directory,cursor,s->list_mode?5u:6u,next):pn_catalog_page_n(&s->media,&lease,s->directory,cursor,s->list_mode?5u:6u,next);s->jump=0;
+        status=*s->query?(previous?pn_catalog_search_page_before_n(&s->media,&lease,s->directory,s->query,cursor,(s->list_mode || *s->query)?5u:6u,next):pn_catalog_search_page_n(&s->media,&lease,s->directory,s->query,cursor,(s->list_mode || *s->query)?5u:6u,next)):s->jump?pn_catalog_page_from_n(&s->media,&lease,s->directory,s->jump,(s->list_mode || *s->query)?5u:6u,next):previous?pn_catalog_page_before_n(&s->media,&lease,s->directory,cursor,(s->list_mode || *s->query)?5u:6u,next):pn_catalog_page_n(&s->media,&lease,s->directory,cursor,(s->list_mode || *s->query)?5u:6u,next);s->jump=0;
         (void)pn_media_release(&s->media,&lease);
     }
     if(status==PN_OK && (first || next->count)){*s->page=*next;s->selected=next->count?0:-1;covers_reset(s);status=draw(s);

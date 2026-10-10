@@ -20,15 +20,15 @@ int main(void){char root[]="/tmp/pn-style-ui-XXXXXX";assert(mkdtemp(root));char 
     assert(pn_style_ui_event(&ui,PN_SUI_APPLY,2,present,&screen)==PN_BUSY && ui.active);
     screen.fail=false;screen.capture=true;assert(pn_style_ui_event(&ui,PN_SUI_RETRY,2,present,&screen)==PN_OK && ui.presented);
     /* 主页四个步进行；“边距与更多选项”进入第二页再调后三项。/ Four steppers on the main page; "margins and more options" opens the second page for the remaining three. */
-    for(unsigned i=0;i<4;i++){int hit=pn_style_ui_hit(&ui,600,522+(int)i*88);assert(hit==PN_SUI_FIELD+(int)i*2+1);assert(pn_style_ui_event(&ui,hit,2,present,&screen)==PN_OK && !ui.more);}
-    assert(pn_style_ui_hit(&ui,100,880)==PN_SUI_MORE && pn_style_ui_hit(&ui,100,430)==PN_SUI_FONTS && pn_style_ui_hit(&ui,100,60)==PN_SUI_CANCEL && pn_style_ui_hit(&ui,600,60)==PN_SUI_APPLY);
+    for(unsigned i=0;i<4;i++){int hit=pn_style_ui_hit(&ui,600,630+(int)i*80);assert(hit==PN_SUI_FIELD+(int)i*2+1);assert(pn_style_ui_event(&ui,hit,2,present,&screen)==PN_OK && !ui.more);}
+    assert(pn_style_ui_hit(&ui,100,970)==PN_SUI_MORE && pn_style_ui_hit(&ui,100,570)==PN_SUI_FONTS && pn_style_ui_hit(&ui,100,60)==PN_SUI_CANCEL && pn_style_ui_hit(&ui,600,60)==PN_SUI_APPLY);
     assert(pn_style_ui_event(&ui,PN_SUI_MORE,2,present,&screen)==PN_OK && ui.more && pn_style_ui_hit(&ui,100,60)==PN_SUI_BACK_MAIN);
-    for(unsigned i=4;i<7;i++){int hit=pn_style_ui_hit(&ui,600,166+(int)(i-4)*88);assert(hit==PN_SUI_FIELD+(int)i*2+1);assert(pn_style_ui_event(&ui,hit,2,present,&screen)==PN_OK && ui.more);}
+    for(unsigned i=4;i<7;i++){int hit=pn_style_ui_hit(&ui,600,166+(int)(i-4)*80);assert(hit==PN_SUI_FIELD+(int)i*2+1);assert(pn_style_ui_event(&ui,hit,2,present,&screen)==PN_OK && ui.more);}
     assert(pn_style_ui_hit(&ui,100,900)==-1 && pn_style_ui_hit(&ui,100,430)==-1); /* 更多页没有字体行和预设 / the more page has no font row or presets */
     assert(pn_style_ui_event(&ui,PN_SUI_BACK_MAIN,2,present,&screen)==PN_OK && !ui.more);
     assert(ui.draft.pixels==46 && ui.draft.line_percent==150 && ui.draft.gap_percent==30 && ui.draft.indent_em==1 && ui.draft.margin==34 && ui.draft.gl_before_clear==13 && ui.draft.tracking_percent==5);
     /* 预设与恢复默认只改草稿。/ Presets and restore-defaults change only the draft. */
-    assert(pn_style_ui_hit(&ui,100,1000)==PN_SUI_PRESET && pn_style_ui_hit(&ui,340,1000)==PN_SUI_PRESET+1 && pn_style_ui_hit(&ui,560,1000)==PN_SUI_PRESET+2);
+    assert(pn_style_ui_hit(&ui,100,470)==PN_SUI_PRESET && pn_style_ui_hit(&ui,340,470)==PN_SUI_PRESET+1 && pn_style_ui_hit(&ui,560,470)==PN_SUI_PRESET+2);
     assert(pn_style_ui_event(&ui,PN_SUI_PRESET+1,2,present,&screen)==PN_OK && ui.draft.pixels==36 && ui.draft.line_percent==125 && ui.draft.margin==24 && ui.draft.tracking_percent==0);
     assert(pn_style_ui_event(&ui,PN_SUI_PRESET+2,2,present,&screen)==PN_OK && ui.draft.pixels==56);
     assert(pn_style_ui_event(&ui,PN_SUI_RESET,2,present,&screen)==PN_OK && ui.draft.pixels==44 && ui.draft.line_percent==145 && ui.draft.indent_em==0);

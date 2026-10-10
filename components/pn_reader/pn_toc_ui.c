@@ -17,9 +17,12 @@ static pn_status_t paint(void *ctx,pn_font_t *font,pn_font_t *metadata,pn_frame_
     pn_status_t status=pn_w_header(font,frame,"< 返回","目录",u->notice?"重试":NULL);
     if(status==PN_OK)status=pn_font_size(font,34);
     if(status==PN_OK && !u->total)status=pn_w_text(font,frame,"这本书没有目录",PN_UI_MARGIN,ROW_Y0+60,620,PN_ALIGN_LEFT);
+    // 当前所在章节：浅灰圆角底加左侧黑条（docs与设计规范S05）。/ The chapter being read: a light-gray rounded base with a black side bar (spec S05).
+    size_t sections=0,current=SIZE_MAX;if(pn_epub_app_section_info(u->reader,&sections,&current)!=PN_OK)current=SIZE_MAX;
     pn_w_set_fallback(metadata);
     for(size_t i=0;i<u->count && status==PN_OK;i++){
         unsigned level=u->rows[i].level>3?3:u->rows[i].level;int indent=(int)level*24,y=ROW_Y0+(int)i*ROW_PITCH;
+        if(current!=SIZE_MAX && u->rows[i].spine==current){pn_w_round_fill(frame,PN_UI_MARGIN,y+4,620,ROW_PITCH-20,PN_UI_RADIUS,13);pn_w_round_fill(frame,PN_UI_MARGIN,y+16,6,ROW_PITCH-44,3,PN_UI_INK);}
         status=pn_w_text_lines(font,frame,u->rows[i].label,PN_UI_MARGIN+indent+8,y+46,620-indent-16,2,44,NULL);
         if(status==PN_OK && i==u->selected)pn_frame_rect(frame,PN_UI_MARGIN,y+8,4,ROW_PITCH-24,PN_UI_INK);
         if(status==PN_OK)pn_frame_rect(frame,PN_UI_MARGIN,y+ROW_PITCH-12,620,1,10);
@@ -35,7 +38,7 @@ static pn_status_t paint(void *ctx,pn_font_t *font,pn_font_t *metadata,pn_frame_
 }
 static pn_status_t load(pn_toc_ui_t *u){
     u->count=0;for(size_t i=0;i<PN_TOC_UI_ROWS && u->start+i<u->total;i++){pn_toc_entry_t entry;pn_status_t status=pn_epub_app_toc_get(u->reader,u->start+i,&entry);if(status!=PN_OK)return status;
-        strcpy(u->rows[i].label,entry.label);u->rows[i].level=entry.level;u->rows[i].target=entry.target;u->count++;}
+        strcpy(u->rows[i].label,entry.label);u->rows[i].level=entry.level;u->rows[i].target=entry.target;u->rows[i].spine=entry.spine_index;u->count++;}
     if(u->selected>=u->count)u->selected=0;
     return PN_OK;
 }

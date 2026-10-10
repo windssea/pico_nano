@@ -16,6 +16,7 @@
 typedef struct {
     char label[PN_EPUB_META_MAX]; ///< 用户目录原文 / User's original TOC label
     unsigned level; ///< 目录层级 / TOC level
+    size_t spine; ///< 指向的章节序号，分组为SIZE_MAX / Target section index, SIZE_MAX for groups
     bool target; ///< 可跳转条目 / Target entry
 } pn_toc_ui_row_t;
 typedef struct {

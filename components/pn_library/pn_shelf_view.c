@@ -100,17 +100,17 @@ static pn_status_t continue_card(const pn_shelf_covers_t *covers,pn_font_t *font
         if(pn_shelf_cover_frame(covers,PN_COVER_SLOT_LAST,&cover)){blit_scaled(frame,&cover,48,168,92,128);frame_cover(frame,48,168,92,128,8);}
         else s=card(font,frame,48,168,92,128,"",kind(last->format),false);
         if(s==PN_OK)s=pn_font_size(font,34);
-        if(s==PN_OK)s=pn_w_text_lines(font,frame,title,160,208,476,2,44,NULL);
+        if(s==PN_OK)s=pn_w_text(font,frame,title,160,212,476,PN_ALIGN_LEFT);
         char meta[64];bool known=(last->identified || last->has_progress) && last->progress<=10000;
         if(known)snprintf(meta,sizeof meta,"已读 %u%% · %s",(unsigned)(last->progress/100),kind(last->format));
         else if(last->identified || last->has_progress)snprintf(meta,sizeof meta,"已开始 · %s",kind(last->format));
         else snprintf(meta,sizeof meta,"%s",kind(last->format));
         if(s==PN_OK)s=pn_font_size(font,26);
-        if(s==PN_OK)s=pn_w_text(font,frame,meta,160,270,476,PN_ALIGN_LEFT);
-        if(known)progress_bar(frame,160,286,250,last->progress);
+        if(s==PN_OK)s=pn_w_text(font,frame,meta,160,256,290,PN_ALIGN_LEFT);
+        if(known)progress_bar(frame,160,276,270,last->progress);
+        // 黑底主按钮“继续阅读”，整卡仍可点。/ A black primary "continue" button; the whole card stays tappable.
         if(s==PN_OK)s=pn_font_size(font,28);
-        if(s==PN_OK)s=pn_w_text(font,frame,"继续阅读",400,302,200,PN_ALIGN_RIGHT);
-        pn_w_icon(frame,PN_ICON_ARROW,606,278,28,PN_UI_INK);
+        if(s==PN_OK)s=pn_w_button(font,frame,"继续阅读",462,240,174,56,PN_W_SELECTED);
     }else{
         pn_w_icon(frame,PN_ICON_SHELF,60,204,64,PN_UI_INK);
         s=pn_font_size(font,34);
@@ -150,15 +150,18 @@ static pn_status_t list_item(const pn_catalog_item_t *item,const pn_shelf_covers
     if(s==PN_OK)pn_frame_rect(frame,32,y+LIST_ROW_PITCH-4,620,1,10);
     return s;
 }
+/* “导入图书”卡所在格；没有则-1。/ The grid slot of the import tile, or -1. */
+static int import_slot(const pn_catalog_page_t *page,const pn_shelf_options_t *options,bool transfer){
+    if(!transfer || !options->import_tile || options->list_mode || options->query || !page->count || page->more || page->count>=PN_CATALOG_PAGE_MAX)return -1;
+    return (int)page->count;
+}
 pn_status_t pn_shelf_render_ex(const pn_catalog_page_t *page,pn_font_t *font,pn_frame_t *frame,int selected,bool recent,bool transfer,const pn_shelf_covers_t *covers,const pn_shelf_options_t *options){
     if(!page || page->count>6 || !font || !font->impl || !frame || !frame->pixels || frame->width!=684 || frame->height!=1216 || frame->stride<342)return PN_INVALID;
     if(!options)options=&default_options;
     bool list=options->list_mode;size_t visible=list?LIST_ROWS:PN_CATALOG_PAGE_MAX;
     int original=font->pixels;pn_frame_clear(frame,PN_UI_PAPER);
     // 状态带：产品名与电量。/ Status band: product name and battery.
-    pn_status_t s=pn_font_size(font,28);
-    if(s==PN_OK)s=pn_w_text(font,frame,"PicoNano",32,44,300,PN_ALIGN_LEFT);
-    if(s==PN_OK && options->battery_percent>=0){char battery[16];int percent=options->battery_percent>100?100:options->battery_percent;snprintf(battery,sizeof battery,"%d%%",percent);s=pn_w_text(font,frame,battery,300,44,290,PN_ALIGN_RIGHT);pn_w_battery(frame,608,24,44,22,percent,PN_UI_INK);}
+    pn_status_t s=pn_w_status(font,frame);
     // 标题行：标题与搜索入口。/ Title row: the title and the search entry.
     if(s==PN_OK)s=pn_font_size(font,48);
     if(s==PN_OK)s=pn_w_text(font,frame,options->query?"搜索结果":recent?"最近阅读":"书架",32,122,420,PN_ALIGN_LEFT);
@@ -178,11 +181,21 @@ pn_status_t pn_shelf_render_ex(const pn_catalog_page_t *page,pn_font_t *font,pn_
         const pn_catalog_item_t *item=&page->items[i];if(strnlen(item->name,sizeof item->name)>=sizeof item->name)return PN_INVALID;
         s=list?list_item(item,covers,i,font,frame,(int)i==selected):grid_item(item,covers,i,font,frame,(int)i==selected);
     }
+    // 最后一页网格还有空位时放“导入图书”卡（需要传书能力）。/ An "import books" tile fills a free grid slot on the last page (needs transfer).
+    if(s==PN_OK && import_slot(page,options,transfer)>=0){
+        size_t i=(size_t)import_slot(page,options,transfer);int x=CELL_X0+(int)(i%3)*CELL_PITCH,y=GRID_Y+(int)(i/3)*ROW_PITCH;
+        pn_w_round_fill(frame,x,y,PN_COVER_WIDTH,PN_COVER_HEIGHT,10,14);pn_w_round_stroke(frame,x,y,PN_COVER_WIDTH,PN_COVER_HEIGHT,10,2.0f,10);
+        pn_w_icon(frame,PN_ICON_PLUS,x+(PN_COVER_WIDTH-56)/2,y+84,56,PN_UI_INK);
+        s=pn_font_size(font,28);if(s==PN_OK)s=pn_w_text(font,frame,"导入图书",x,y+190,PN_COVER_WIDTH,PN_ALIGN_CENTER);
+    }
+    // 空状态：图标、标题、一句说明与一个主操作（docs/UI_UX.md的文案规范）。/ Empty state: icon, title, one sentence and one primary action.
     if(s==PN_OK && !page->count){
         pn_w_icon(frame,options->query?PN_ICON_SEARCH:PN_ICON_SHELF,(684-96)/2,470,96,PN_UI_INK);
-        s=pn_font_size(font,36);if(s==PN_OK)s=pn_w_text(font,frame,options->query?"没有匹配的书":"暂无书籍",32,600,620,PN_ALIGN_CENTER);
+        s=pn_font_size(font,36);if(s==PN_OK)s=pn_w_text(font,frame,options->query?"没有找到相关书籍":recent?"还没有阅读记录":"书架还是空的",32,620,620,PN_ALIGN_CENTER);
         if(s==PN_OK)s=pn_font_size(font,28);
-        if(s==PN_OK)s=pn_w_text_lines(font,frame,options->query?"换个关键词，或点“清除”回到书架。":transfer?"把书放进存储卡的 books 目录，或点下方“传书”用手机发送。":"把书放进存储卡的 books 目录。",64,660,556,3,40,NULL);
+        if(s==PN_OK)s=pn_w_text(font,frame,options->query?"试试更短的关键词。":recent?"打开一本书，读到哪里会记在这里。":"导入一本书，开始阅读。",32,672,620,PN_ALIGN_CENTER);
+        if(s==PN_OK && options->query){s=pn_font_size(font,30);if(s==PN_OK)s=pn_w_button(font,frame,"清除搜索",222,720,240,72,0u);}
+        else if(s==PN_OK && !recent && transfer && options->import_tile){s=pn_font_size(font,30);if(s==PN_OK)s=pn_w_button(font,frame,"导入图书",222,720,240,72,PN_W_SELECTED);}
     }
     // 页码信息行：当前页/总页数，两侧小箭头用于翻页。/ Page info row: current/total pages with small arrows for turning.
     if(s==PN_OK && page->count && page->total){
@@ -208,7 +221,9 @@ int pn_shelf_hit_ex(const pn_catalog_page_t *page,int x,int y,const pn_shelf_opt
     if(y<144){if(options->search && x>=SEARCH_X && x<652)return PN_SHELF_SEARCH;return x>=32 && x<300?PN_SHELF_INDEX:-1;}
     if(y<320)return x>=32 && x<652?PN_SHELF_CONTINUE:-1;
     if(y<400){if(options->layout_toggle && x>=LAYOUT_X && x<652)return PN_SHELF_LAYOUT;return x>=32 && x<160?PN_SHELF_TAB_ALL:x>=160 && x<288?PN_SHELF_TAB_RECENT:-1;}
+    if(!page->count && y>=720 && y<792 && x>=222 && x<462){if(options->query)return PN_SHELF_SEARCH;if(options->import_tile && !options->list_mode)return PN_SHELF_IMPORT;}
     if(y<INFO_Y){
+        {int slot=import_slot(page,options,true);if(slot>=0){int ix=CELL_X0+(slot%3)*CELL_PITCH,iy=GRID_Y+(slot/3)*ROW_PITCH;if(x>=ix && x<ix+PN_COVER_WIDTH && y>=iy && y<iy+PN_COVER_HEIGHT)return PN_SHELF_IMPORT;}}
         if(options->list_mode){
             if(x<32 || x>=652)return -1;
             int row=(y-GRID_Y)/LIST_ROW_PITCH;return row<LIST_ROWS && row<(int)page->count && (y-GRID_Y)%LIST_ROW_PITCH<LIST_ROW_PITCH-4?row:-1;
