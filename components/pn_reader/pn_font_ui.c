@@ -44,6 +44,8 @@ static pn_status_t paint(void *ctx,pn_font_t *font,pn_font_t *metadata,pn_frame_
   if(status==PN_OK)status=sized_button(font,frame,"备用字体",352,TARGET_Y,300,80,s->target?PN_W_SELECTED:0u);
   for(size_t i=0;i<s->page.count && i<LIST_ROWS && status==PN_OK;i++){
    status=pn_w_row(font,frame,s->page.items[i].name,NULL,true,LIST_Y0+(int)i*PN_W_ROW_H);
+   // 当前使用的字体打对勾。/ Check the font in use.
+   if(status==PN_OK && !s->target && s->draft.primary.kind==PN_FONT_FILE && !strcmp(s->draft.primary.path,s->page.items[i].path))pn_w_icon(frame,PN_ICON_CHECK,560,LIST_Y0+(int)i*PN_W_ROW_H+28,32,PN_UI_INK);
    if(status==PN_OK && i==u->selected)pn_frame_rect(frame,PN_UI_MARGIN-12,LIST_Y0+(int)i*PN_W_ROW_H+8,4,PN_W_ROW_H-20,PN_UI_INK);
   }
   if(status==PN_OK && !s->page.count)status=sized_text(font,frame,"fonts 目录暂无可用字体",30,LIST_Y0+60,PN_ALIGN_LEFT);
@@ -87,7 +89,9 @@ pn_status_t pn_font_ui_event(pn_font_ui_t *u,int command,uint64_t now,pn_reader_
  else if(command==PN_FUI_NEXT || command==PN_FUI_PREVIOUS){char cursor[PN_CATALOG_NAME_MAX];if(!s->page.count || (command==PN_FUI_NEXT && !s->page.more))status=PN_EMPTY;else{strcpy(cursor,s->page.items[command==PN_FUI_NEXT?s->page.count-1:0].name);status=page(u,cursor,command==PN_FUI_PREVIOUS);}}
  else if(command==PN_FUI_UP || command==PN_FUI_DOWN){int next=(int)u->selected+(command==PN_FUI_UP?-1:1);if(next>=0 && (size_t)next<s->page.count)u->selected=(unsigned)next;else status=PN_EMPTY;}
  else if(command==PN_FUI_RESIDENT){if(s->target)s->draft.fallback=(pn_font_reference_t){0};else s->draft.primary=(pn_font_reference_t){0};s->info=(pn_font_info_t){0};s->checked=s->missing=0;u->mode=1;}
- else if(command==PN_FUI_SELECT || (command>=PN_FUI_ROW && command<PN_FUI_ROW+6)){unsigned row=command==PN_FUI_SELECT?u->selected:(unsigned)(command-PN_FUI_ROW);if(row>=s->page.count)status=PN_EMPTY;else{pn_font_reference_t ref;pn_font_info_t info;unsigned checked,missing;status=s->epub?pn_epub_app_fonts_probe(s->epub,&s->page.items[row],&ref,&info,&checked,&missing):pn_reader_app_fonts_probe(s->reader,&s->page.items[row],&ref,&info,&checked,&missing);if(status==PN_OK){u->selected=row;if(s->target)s->draft.fallback=ref;else s->draft.primary=ref;s->info=info;s->checked=checked;s->missing=missing;u->mode=1;}}}
+ else if(command==PN_FUI_SELECT || (command>=PN_FUI_ROW && command<PN_FUI_ROW+6) || (command>=PN_FUI_INFO && command<PN_FUI_INFO+6)){bool direct=command>=PN_FUI_ROW && command<PN_FUI_ROW+6;unsigned row=command==PN_FUI_SELECT?u->selected:direct?(unsigned)(command-PN_FUI_ROW):(unsigned)(command-PN_FUI_INFO);if(row>=s->page.count)status=PN_EMPTY;else{pn_font_reference_t ref;pn_font_info_t info;unsigned checked,missing;status=s->epub?pn_epub_app_fonts_probe(s->epub,&s->page.items[row],&ref,&info,&checked,&missing):pn_reader_app_fonts_probe(s->reader,&s->page.items[row],&ref,&info,&checked,&missing);if(status==PN_OK){u->selected=row;if(s->target)s->draft.fallback=ref;else s->draft.primary=ref;s->info=info;s->checked=checked;s->missing=missing;u->mode=1;
+   // 点行即应用到本书并返回排版页看效果；右侧箭头才进详情。/ Tapping a row applies it to this book and returns to typesetting to show the result; only the chevron opens details.
+   if(direct){status=s->epub?pn_epub_app_font_apply(s->epub,&s->draft,now,present,ctx):pn_reader_app_font_apply(s->reader,&s->draft,now,present,ctx);if(status==PN_OK){u->active=false;return status;}u->mode=0;}}}}
  else if(command==PN_FUI_PREVIEW && u->mode==1){status=s->epub?pn_epub_app_font_preview(s->epub,&s->draft,now,present,ctx):pn_reader_app_font_preview(s->reader,&s->draft,now,present,ctx);if(confirmed(s)){u->preview=true;u->presented=true;return status;}}
  else if(command==PN_FUI_APPLY && u->mode==1){status=s->epub?pn_epub_app_font_apply(s->epub,&s->draft,now,present,ctx):pn_reader_app_font_apply(s->reader,&s->draft,now,present,ctx);if(status==PN_OK){u->active=false;return status;}}
  else status=PN_INVALID;
@@ -105,7 +109,7 @@ int pn_font_ui_hit(const pn_font_ui_t *u,int x,int y){
  if(u->mode==0){
   if(y>=INHERIT_Y && y<INHERIT_Y+PN_W_ROW_H)return PN_FUI_INHERIT;
   if(y>=TARGET_Y && y<TARGET_Y+80)return x<332?PN_FUI_PRIMARY:x>=352?PN_FUI_FALLBACK:-1;
-  if(y>=LIST_Y0 && y<LIST_Y0+LIST_ROWS*PN_W_ROW_H){unsigned row=(unsigned)(y-LIST_Y0)/PN_W_ROW_H;return row<s->page.count?PN_FUI_ROW+(int)row:-1;}
+  if(y>=LIST_Y0 && y<LIST_Y0+LIST_ROWS*PN_W_ROW_H){unsigned row=(unsigned)(y-LIST_Y0)/PN_W_ROW_H;return row<s->page.count?(x>=560?PN_FUI_INFO:PN_FUI_ROW)+(int)row:-1;}
   if(y>=RESIDENT_Y && y<RESIDENT_Y+PN_W_ROW_H)return PN_FUI_RESIDENT;
   if(y>=PAGER_Y && y<PAGER_Y+80)return x<228?PN_FUI_PREVIOUS:x>=456?PN_FUI_NEXT:-1;
   return -1;

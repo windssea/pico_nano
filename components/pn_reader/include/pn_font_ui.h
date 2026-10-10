@@ -21,6 +21,7 @@
 #define PN_FUI_DEFAULT 12
 #define PN_FUI_INHERIT 13
 #define PN_FUI_ROW 16
+#define PN_FUI_INFO 48 ///< 48+行：查看该字体详情（行右侧箭头）/ 48+row: open that font's details (the chevron on the right)
 #define PN_FUI_UP 32
 #define PN_FUI_DOWN 33
 #define PN_FUI_SELECT 34

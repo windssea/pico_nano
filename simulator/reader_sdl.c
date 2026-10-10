@@ -29,7 +29,7 @@ int pn_sim_reader_window(pn_reader_app_t *app,pn_pool_t *pool){
     if(SDL_Init(SDL_INIT_VIDEO)!=0){fprintf(stderr,"SDL: %s\n",SDL_GetError());return 1;}
     surface_t s={0};s.window=SDL_CreateWindow("小纸 Pico",SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,342,608,SDL_WINDOW_RESIZABLE);
     s.renderer=s.window?SDL_CreateRenderer(s.window,-1,SDL_RENDERER_SOFTWARE):NULL;
-    s.texture=s.renderer?SDL_CreateTexture(s.renderer,SDL_PIXELFORMAT_ARGB8888,SDL_TEXTUREACCESS_STATIC,684,1216):NULL;
+    s.texture=s.renderer?SDL_CreateTexture(s.renderer,SDL_PIXELFORMAT_ARGB8888,SDL_TEXTUREACCESS_STATIC,684,1216):NULL;if(s.texture)(void)SDL_SetTextureScaleMode(s.texture,SDL_ScaleModeLinear); /* 半尺寸窗口用线性缩放 / Linear scaling for the half-size window */
     s.argb=s.texture?malloc(684u*1216u*sizeof(uint32_t)):NULL;
     int result=0;bool running=s.argb!=NULL;pn_reader_input_t input={0};pn_tap_t tap={0};pn_bookmark_ui_t bookmarks={0};pn_style_ui_t styles={0};pn_font_ui_t fonts={0};bool font_pointer=false;sim_script_t script={0};uint64_t ui_retry=0;
     if(!running || SDL_RenderSetLogicalSize(s.renderer,684,1216)!=0){result=1;running=false;}

@@ -9,7 +9,7 @@ int main(void){pn_pool_t pool;assert(pn_pool_init(&pool,1024*1024,NULL,NULL,NULL
     /* 翻页箭头只在有上一页/下一页时命中。/ The page arrows only hit when a previous/next page exists. */
     assert(pn_shelf_hit(p,100,1080)==-1 && pn_shelf_hit(p,600,1080)==-1);
     p->index=6;p->total=14;p->more=true;
-    assert(pn_shelf_hit(p,100,1080)==PN_SHELF_PREVIOUS && pn_shelf_hit(p,600,1080)==PN_SHELF_NEXT && pn_shelf_hit(p,340,1080)==-1);
+    assert(pn_shelf_hit(p,100,1080)==PN_SHELF_PREVIOUS && pn_shelf_hit(p,600,1080)==PN_SHELF_NEXT && pn_shelf_hit(p,341,1080)==PN_SHELF_PREVIOUS);
     assert(pn_shelf_render(p,&font,&frame)==PN_OK);
     p->index=0;p->total=2;p->more=false;
     /* 选项：搜索入口、网格/列表切换与列表模式命中。/ Options: the search entry, grid/list toggle and list-mode hits. */

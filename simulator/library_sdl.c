@@ -301,6 +301,8 @@ int pn_sim_library_window(pn_pool_t *pool,const char *directory,const char *font
     s->window=SDL_CreateWindow("小纸 Pico",SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,342,608,SDL_WINDOW_RESIZABLE);
     s->renderer=s->window?SDL_CreateRenderer(s->window,-1,SDL_RENDERER_SOFTWARE):NULL;
     s->texture=s->renderer?SDL_CreateTexture(s->renderer,SDL_PIXELFORMAT_ARGB8888,SDL_TEXTUREACCESS_STATIC,684,1216):NULL;
+    // 窗口默认为半尺寸，缩放用线性滤波，否则最近邻会隔像素丢弃、文字锯齿明显（设备1:1显示不受影响）。/ The window defaults to half size; scale with linear filtering, since nearest-neighbour drops every other pixel and makes text jagged (the device shows 1:1 and is unaffected).
+    if(s->texture)(void)SDL_SetTextureScaleMode(s->texture,SDL_ScaleModeLinear);
     s->argb=s->texture?malloc(684u*1216u*sizeof(uint32_t)):NULL;
     int result=1;pn_status_t status=PN_NO_MEMORY;
     if(!s->page || !s->recent || !s->covers || !s->frame.pixels || !s->argb)goto cleanup;

@@ -152,7 +152,7 @@ static pn_status_t continue_card(const pn_shelf_covers_t *covers,pn_font_t *font
         s=pn_font_size(font,32);
         if(s==PN_OK)s=pn_w_text_ex(font,frame,"开始阅读",148,CONT_Y+66,490,PN_ALIGN_LEFT,PN_UI_INK,true);
         if(s==PN_OK)s=pn_font_size(font,24);
-        if(s==PN_OK)s=pn_w_text_lines_ex(font,frame,"点下面的封面开始阅读，读到哪里会记在这里。",148,CONT_Y+106,480,2,32,PN_UI_MUTED,false);
+        if(s==PN_OK)s=pn_w_text_lines_ex(font,frame,"点封面开始阅读，读到哪里会记在这里。",148,CONT_Y+106,480,2,32,PN_UI_MUTED,false);
     }
     return s;
 }
@@ -244,19 +244,19 @@ pn_status_t pn_shelf_render_ex(const pn_catalog_page_t *page,pn_font_t *font,pn_
         if(s==PN_OK && options->query){s=pn_font_size(font,30);if(s==PN_OK)s=pn_w_button(font,frame,"修改搜索词",212,776,260,88,0u);}
         else if(s==PN_OK && !recent && !options->favorites && transfer && options->import_tile){s=pn_font_size(font,30);if(s==PN_OK)s=pn_w_button(font,frame,"导入图书",212,776,260,88,PN_W_SELECTED);}
     }
-    // 分页栏：上一页 | n / m | 下一页；首末页箭头置灰并画删除线式禁用。/ Paging bar: previous | n / m | next; arrows at the ends are disabled.
+    // 分页栏：居中一枚拟玻璃胶囊“‹  n / m  ›”，没有上一页/下一页的一侧箭头变浅；整行左右两半分别是上一页/下一页的命中区。
+    // Paging bar: one centered faux-glass pill "‹  n / m  ›" whose arrow fades on a side without a page; the left and right halves of the whole row are the previous/next hit areas.
     if(s==PN_OK && page->count && page->total){
         char info[48];unsigned per=(unsigned)visible,current=(unsigned)(page->index/per)+1,pages=(unsigned)((page->total+per-1)/per);
         snprintf(info,sizeof info,"%u / %u",current,pages<current?current:pages);
-        s=pn_font_size(font,26);if(s==PN_OK)s=pn_w_text_ex(font,frame,info,200,INFO_Y+38,284,PN_ALIGN_CENTER,PN_UI_INK,true);
         bool can_back=page->index>0,can_next=page->more;
-        pn_w_round_fill(frame,32,INFO_Y+4,72,48,24,can_back?PN_UI_SURFACE:PN_UI_PAPER);pn_w_round_stroke(frame,32,INFO_Y+4,72,48,24,2.0f,PN_UI_STROKE);
-        pn_w_icon(frame,PN_ICON_BACK,54,INFO_Y+14,28,can_back?PN_UI_INK:PN_UI_STROKE);
-        pn_w_round_fill(frame,580,INFO_Y+4,72,48,24,can_next?PN_UI_SURFACE:PN_UI_PAPER);pn_w_round_stroke(frame,580,INFO_Y+4,72,48,24,2.0f,PN_UI_STROKE);
-        pn_w_icon(frame,PN_ICON_CHEVRON,602,INFO_Y+14,28,can_next?PN_UI_INK:PN_UI_STROKE);
+        pn_w_glass(frame,212,INFO_Y+2,260,50,25);
+        pn_w_icon(frame,PN_ICON_BACK,232,INFO_Y+13,28,can_back?PN_UI_INK:PN_UI_STROKE);
+        pn_w_icon(frame,PN_ICON_CHEVRON,424,INFO_Y+13,28,can_next?PN_UI_INK:PN_UI_STROKE);
+        s=pn_font_size(font,26);if(s==PN_OK)s=pn_w_text_ex(font,frame,info,262,INFO_Y+36,160,PN_ALIGN_CENTER,PN_UI_INK,true);
     }
     // 固定底栏：书架 / 传书 / 设置。/ Fixed bottom bar: shelf / transfer / settings.
-    if(s==PN_OK){static const char *const tabs[]={"书架","传书","设置"};static const pn_icon_t icons[]={PN_ICON_SHELF,PN_ICON_TRANSFER,PN_ICON_SETTINGS};s=pn_font_size(font,24);if(s==PN_OK)s=pn_w_tabbar_icons(font,frame,tabs,icons,3,0,transfer?0u:2u,TAB_Y,TAB_H);}
+    if(s==PN_OK){static const char *const tabs[]={"书架","传书","设置"};static const pn_icon_t icons[]={PN_ICON_SHELF,PN_ICON_TRANSFER,PN_ICON_SETTINGS};s=pn_font_size(font,24);if(s==PN_OK)s=pn_w_tabbar_icons(font,frame,tabs,icons,3,0,0u,TAB_Y,TAB_H);}
     pn_status_t restored=pn_font_size(font,original);return s==PN_OK?restored:s;
 }
 pn_status_t pn_shelf_render_covers(const pn_catalog_page_t *page,pn_font_t *font,pn_frame_t *frame,int selected,bool recent,bool transfer,const pn_shelf_covers_t *covers){
@@ -288,7 +288,7 @@ int pn_shelf_hit_ex(const pn_catalog_page_t *page,int x,int y,const pn_shelf_opt
         if(x<CELL_X0 || column>2 || (x-CELL_X0)%CELL_PITCH>=CELL_W || row>1)return -1;
         int index=row*3+column;return index<(int)page->count?index:-1;
     }
-    if(y<TAB_Y){if(x<160 && page->index>0)return PN_SHELF_PREVIOUS;if(x>=524 && page->more)return PN_SHELF_NEXT;}
+    if(y<TAB_Y){if(x<342 && page->index>0)return PN_SHELF_PREVIOUS;if(x>=342 && page->more)return PN_SHELF_NEXT;}
     return -1;
 }
 int pn_shelf_hit(const pn_catalog_page_t *page,int x,int y){return pn_shelf_hit_ex(page,x,y,NULL);}

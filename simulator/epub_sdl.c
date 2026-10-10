@@ -30,7 +30,7 @@ static void report(pn_epub_app_t *app,const char *name,pn_status_t status){pn_ep
 int pn_sim_epub_window(pn_epub_app_t *app,pn_pool_t *pool){
     if(SDL_Init(SDL_INIT_VIDEO))return 1;
     surface_t s={0};s.window=SDL_CreateWindow("小纸 Pico",SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,342,608,SDL_WINDOW_RESIZABLE);
-    s.renderer=s.window?SDL_CreateRenderer(s.window,-1,SDL_RENDERER_SOFTWARE):NULL;s.texture=s.renderer?SDL_CreateTexture(s.renderer,SDL_PIXELFORMAT_ARGB8888,SDL_TEXTUREACCESS_STATIC,684,1216):NULL;s.argb=s.texture?malloc(684u*1216u*4u):NULL;
+    s.renderer=s.window?SDL_CreateRenderer(s.window,-1,SDL_RENDERER_SOFTWARE):NULL;s.texture=s.renderer?SDL_CreateTexture(s.renderer,SDL_PIXELFORMAT_ARGB8888,SDL_TEXTUREACCESS_STATIC,684,1216):NULL;if(s.texture)(void)SDL_SetTextureScaleMode(s.texture,SDL_ScaleModeLinear); /* 半尺寸窗口用线性缩放 / Linear scaling for the half-size window */s.argb=s.texture?malloc(684u*1216u*4u):NULL;
     bool running=s.argb!=NULL;int result=0;sim_script_t script={0};pn_toc_ui_t toc={0};pn_style_ui_t styles={0};pn_font_ui_t fonts={0};bool font_pointer=false;pn_bookmark_ui_t bookmarks={0};pn_tap_t tap={0};uint64_t retry=0;bool menu_pointer=false,header_pointer=false,pointer=false;int pressed=-1;
     if(!running || SDL_RenderSetLogicalSize(s.renderer,684,1216)){running=false;result=1;}
     if(running){pn_status_t status=pn_epub_app_step(app,PN_APP_OPEN,SDL_GetTicks64(),present,&s);report(app,"open",status);if(status!=PN_OK){running=false;result=1;}else script_init(&script,"PN_SIM_INPUT_SCRIPT");}
