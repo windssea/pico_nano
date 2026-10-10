@@ -18,3 +18,5 @@ void epd_set_vcom(uint16_t);void epd_draw_pixel(int,int,uint8_t,uint8_t *);void 
 void epd_poweron(void);void epd_poweroff(void);void epd_clear(void);
 enum EpdDrawError epd_hl_update_screen_from_white(EpdiyHighlevelState *,enum EpdDrawMode,int);
 enum EpdDrawError epd_hl_update_screen_full(EpdiyHighlevelState *,enum EpdDrawMode,int);
+typedef struct {int x,y,width,height;} EpdRect;
+enum EpdDrawError epd_hl_update_area_full(EpdiyHighlevelState *,enum EpdDrawMode,int,EpdRect);

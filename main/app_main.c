@@ -129,6 +129,31 @@ static uint8_t *page_copy;
 static bool ring_pending; ///< 下一次呈现在焦点位置画焦点环（仅一次）/ The next presentation draws the focus ring (once)
 static pn_focus_item_t ring_item; ///< 焦点环位置 / Where the focus ring goes
 static pn_focus_t focus_nav; ///< 当前页的三键焦点表 / Three-key focus table of the current page
+/* 局部刷新：保存上一帧，GL16时只推变化的外接矩形（逻辑坐标，epdiy按旋转换算）；变化超过45%或没有上一帧则整屏。
+ * Partial refresh: keep the previous frame and, for GL16, push only the bounding box of what changed (logical coordinates, rotated by epdiy); more than 45% changed or no previous frame means a full update. */
+#define PARTIAL_MAX_PERCENT 45
+static uint8_t *shown_px;
+static bool dirty_box(const pn_frame_t *frame,EpdRect *box){
+    if(!shown_px)return false;
+    int top=-1,bottom=-1,left=342,right=-1;
+    for(int y=0;y<1216;y++){
+        const uint8_t *now=frame->pixels+(size_t)y*frame->stride,*was=shown_px+(size_t)y*342;
+        if(!memcmp(now,was,342))continue;
+        if(top<0)top=y;
+        bottom=y;
+        int l=0;while(l<342 && now[l]==was[l])l++;
+        int r=341;while(r>l && now[r]==was[r])r--;
+        if(l<left)left=l;
+        if(r>right)right=r;
+    }
+    if(top<0){*box=(EpdRect){0,0,0,0};return true;}
+    int x=left*2-8,y=top-8,w=(right+1)*2+8-x,h=bottom+9-y;
+    if(x<0)x=0;
+    if(y<0)y=0;
+    if(x+w>684)w=684-x;
+    if(y+h>1216)h=1216-y;
+    *box=(EpdRect){.x=x,.y=y,.width=w,.height=h};return true;
+}
 static pn_status_t present(void *ctx,const pn_frame_t *frame,pn_refresh_t profile){
     (void)ctx;
     if(!toolbar_open && frame->width==684 && frame->height==1216 && frame->stride>=342){
@@ -144,7 +169,13 @@ static pn_status_t present(void *ctx,const pn_frame_t *frame,pn_refresh_t profil
     if(mode==MODE_GC16)soft_refreshes=0;else if(++soft_refreshes>=SOFT_REFRESH_PER_GC16){mode=MODE_GC16;soft_refreshes=0;}
     enum EpdDrawError result;
     if(!panel_known){epd_clear();result=epd_hl_update_screen_from_white(&hardware.hl,MODE_GC16,25);soft_refreshes=0;}
-    else result=epd_hl_update_screen_full(&hardware.hl,mode,25);
+    else{
+        EpdRect box;bool partial=mode==MODE_GL16 && dirty_box(frame,&box) && (long)box.width*box.height*100<=684L*1216L*PARTIAL_MAX_PERCENT;
+        // 没有变化的GL16不刷屏；软刷新计数已累加。/ A GL16 with no change does not refresh; the soft count was already advanced.
+        if(partial && !box.width)result=EPD_DRAW_SUCCESS;
+        else if(partial)result=epd_hl_update_area_full(&hardware.hl,mode,25,box);
+        else result=epd_hl_update_screen_full(&hardware.hl,mode,25);
+    }
     if(result&EPD_DRAW_EMPTY_LINE_QUEUE){
         // 供数不足：退回安全时钟，白场重建参考帧，目标帧保留在framebuffer。/ Underrun: fall back to the safe clock and rebuild the reference frame from white; the target stays in the framebuffer.
         ESP_LOGW(TAG,"Line queue underrun, pclk back to %d MHz",PCLK_SAFE_MHZ);
@@ -152,6 +183,9 @@ static pn_status_t present(void *ctx,const pn_frame_t *frame,pn_refresh_t profil
         epd_clear();result=epd_hl_update_screen_from_white(&hardware.hl,MODE_GC16,25);soft_refreshes=0;
     }
     panel_known=result==EPD_DRAW_SUCCESS;
+    // 记下已显示的帧，供下次算局部刷新区域；失败时丢弃，下次整屏。/ Remember the shown frame for the next dirty box; drop it on failure so the next update is full.
+    if(panel_known){if(!shown_px)shown_px=pn_alloc(&pool,342u*1216u);if(shown_px)for(int y=0;y<1216;y++)memcpy(shown_px+(size_t)y*342,frame->pixels+(size_t)y*frame->stride,342);}
+    else{pn_free(shown_px);shown_px=NULL;}
     // 成功则保活到空闲期满；失败立即断电。/ Keep the rails up until idle expiry on success; drop them at once on failure.
     rails_deadline_ms=now_ms()+RAILS_IDLE_MS;if(!panel_known)rails_release();
     if(!panel_known)ESP_LOGE(TAG,"Panel present failed: %u",(unsigned)result);

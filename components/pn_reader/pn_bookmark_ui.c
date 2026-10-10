@@ -31,6 +31,31 @@ static unsigned percent(const pn_txt_progress_t *p){
     for(unsigned i=0;i<100;i++){if(remainder>=p->source_size-p->source_offset){remainder-=p->source_size-p->source_offset;result++;}else remainder+=p->source_offset;}
     return result;
 }
+/* 当前位置是否已有书签（按位置比较，逐页遍历全部书签）；found输出其id。/ Whether the current position already has a bookmark (compared by position over every page); found receives its id. */
+static bool same_location(const pn_epub_location_t *a,const pn_epub_location_t *b){
+    return !strcmp(a->path,b->path) && a->chapter_start==b->chapter_start && a->position.element==b->position.element && a->position.run==b->position.run && a->position.offset==b->position.offset && a->position.kind==b->position.kind;
+}
+static bool existing_mark(pn_bookmark_ui_t *u,uint64_t *found){
+    uint64_t cursor=0;bool more=true;
+    if(u->epub){
+        pn_epub_progress_t here;if(pn_epub_app_progress(u->epub,&here)!=PN_OK)return false;
+        for(int pages=0;more && pages<64;pages++){
+            pn_epub_bookmark_t marks[PN_BOOKMARK_UI_ROWS];size_t count=0;
+            if(pn_epub_app_bookmark_list(u->epub,cursor,marks,PN_BOOKMARK_UI_ROWS,&count,&more)!=PN_OK || !count)return false;
+            for(size_t i=0;i<count;i++)if(same_location(&marks[i].position.location,&here.location)){*found=marks[i].id;return true;}
+            cursor=marks[count-1].id;
+        }
+        return false;
+    }
+    pn_txt_progress_t here;if(pn_reader_app_progress(u->reader,&here)!=PN_OK)return false;
+    for(int pages=0;more && pages<64;pages++){
+        pn_txt_bookmark_t marks[PN_BOOKMARK_UI_ROWS];size_t count=0;
+        if(pn_reader_app_bookmark_list(u->reader,cursor,marks,PN_BOOKMARK_UI_ROWS,&count,&more)!=PN_OK || !count)return false;
+        for(size_t i=0;i<count;i++)if(marks[i].position.source_offset==here.source_offset){*found=marks[i].id;return true;}
+        cursor=marks[count-1].id;
+    }
+    return false;
+}
 static pn_txt_bookmark_t *selected(pn_bookmark_ui_t *u){return u->selected>=0 && (size_t)u->selected<u->count?&u->items[u->selected]:NULL;}
 /* 版式：顶栏；列表=“添加当前位置”按钮、六行书签、翻页；单条操作、删除确认、改名键盘各自按钮。
  * Layout: header; list = "add current position" button, six bookmark rows and paging; item actions, delete confirmation and the rename keyboard have their own buttons. */
@@ -57,7 +82,8 @@ static pn_status_t sized_button(pn_font_t *font,pn_frame_t *frame,const char *la
 }
 /* 成功提示不是错误：只有失败提示才给“重试”入口。/ A success notice is not an error: only failure notices offer Retry. */
 static const char saved_notice[]="已保存书签";
-static bool failed(const pn_bookmark_ui_t *u){return u->notice && u->notice!=saved_notice;}
+static const char duplicate_notice[]="当前位置已添加";
+static bool failed(const pn_bookmark_ui_t *u){return u->notice && u->notice!=saved_notice && u->notice!=duplicate_notice;}
 static pn_status_t paint(void *ctx,pn_font_t *font,pn_font_t *metadata,pn_frame_t *frame){
     pn_bookmark_ui_t *u=ctx;if(u->count>PN_BOOKMARK_UI_ROWS || frame->width!=684 || frame->height!=1216 || frame->stride<342)return PN_INVALID;
     pn_frame_clear(frame,15);
@@ -166,11 +192,15 @@ pn_status_t pn_bookmark_ui_event(pn_bookmark_ui_t *u,int command,const char *val
         else u->mode=PN_BUI_ACTIONS;
     }else if(u->mode==PN_BUI_LIST){
         if(command==PN_BUI_ADD){
-            uint64_t id=0;char label[48];
-            if(u->epub){status=pn_epub_app_bookmark_add(u->epub,"书签",&id);}
+            uint64_t id=0;char label[48];bool exists=existing_mark(u,&id);
+            // 同一位置不重复添加，选中已有的那条并提示（规范R04）。/ Never add the same position twice; select the existing one and say so (spec R04).
+            if(exists){status=load_page(u,0,0);
+                while(status==PN_OK && u->more && u->count && u->items[u->count-1].id<id)status=load_page(u,u->page+1,u->items[u->count-1].id);
+                if(status==PN_OK){for(size_t i=0;i<u->count;i++)if(u->items[i].id==id)u->selected=(int)i;u->notice=duplicate_notice;}}
+            else if(u->epub){status=pn_epub_app_bookmark_add(u->epub,"书签",&id);}
             else{pn_txt_progress_t position;status=pn_reader_app_progress(u->reader,&position);
                 if(status==PN_OK){snprintf(label,sizeof label,"书签 %u%%",percent(&position));status=pn_reader_app_bookmark_add(u->reader,label,&id);}}
-            if(status==PN_OK){status=load_page(u,0,0);
+            if(!exists && status==PN_OK){status=load_page(u,0,0);
                 while(status==PN_OK && u->more && u->count && u->items[u->count-1].id<id)status=load_page(u,u->page+1,u->items[u->count-1].id);
                 if(status==PN_OK){for(size_t i=0;i<u->count;i++)if(u->items[i].id==id)u->selected=(int)i;u->notice=saved_notice;}
             }

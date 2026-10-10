@@ -10,6 +10,7 @@
 #include "pn_font_manage.h"
 #include "pn_font_preview.h"
 #include "pn_widgets.h"
+#include "pn_text_file.h"
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
@@ -28,6 +29,21 @@ static bool is_global(const fm_t *f,const char *path){return f->global_known && 
 static void release_asset(fm_t *f){
     (void)pn_font_asset_close(&f->asset);
     if(f->guard.ticket){(void)pn_media_release(f->fonts,&f->guard);f->guard=(pn_media_lease_t){0};}
+}
+/* 字体样本：在图标方块里用该字体本身画“Aa”；打不开就保留默认图标（不影响列表）。
+ * Font sample: draw "Aa" in the font itself inside the icon tile; keep the default icon when it cannot be opened (the list is unaffected). */
+static void sample_tile(fm_t *f,const char *path,int y){
+    pn_media_lease_t lease;if(pn_media_acquire(f->fonts,PN_MEDIA_READ,&lease)!=PN_OK)return;
+    pn_text_file_t file={0};pn_text_source_t source={0};pn_font_t font={0};
+    if(pn_text_file_open(&file,f->fonts,&lease,path,&source)==PN_OK){
+        if(pn_font_open(&font,f->pool,&source,30)==PN_OK){
+            pn_w_round_fill(&f->canvas,53,y+27,46,46,13,PN_UI_PAPER);
+            (void)pn_w_text(&font,&f->canvas,"Aa",52,y+62,48,PN_ALIGN_CENTER);
+            pn_font_close(&font);
+        }
+        (void)pn_text_file_close(&file);
+    }
+    (void)pn_media_release(f->fonts,&lease);
 }
 /* 读全局记录；读不到保留已知值。/ Read the global record; keep known values when unreadable. */
 static void load_global(fm_t *f){
@@ -92,7 +108,8 @@ static pn_status_t draw(pn_font_manage_t *ui){
         for(size_t i=0;i<shown && s==PN_OK;i++){const pn_catalog_item_t *item=&f->page.items[i];bool global=is_global(f,item->path);
             snprintf(line,sizeof line,"%llu KB%s",(unsigned long long)((item->size+1023)/1024),global?" · 全局默认":"");
             int y=LIST_ROW_Y+(int)i*PN_W_CARD_ROW_H;
-            s=pn_w_card_row(&f->ui,&f->canvas,item->name,line,NULL,-1,PN_ROW_CHEVRON,y,i+1==shown);
+            s=pn_w_card_row(&f->ui,&f->canvas,item->name,line,NULL,PN_ICON_FONT,PN_ROW_CHEVRON,y,i+1==shown);
+            if(s==PN_OK)sample_tile(f,item->path,y);
             if(s==PN_OK && global)pn_w_icon(&f->canvas,PN_ICON_CHECK,PN_UI_WIDTH-PN_UI_MARGIN-100,y+34,32,PN_UI_INK);}
         if(s==PN_OK && !f->page.count){int original=f->ui.pixels;s=pn_font_size(&f->ui,30);if(s==PN_OK)s=pn_w_text_lines(&f->ui,&f->canvas,"还没有安装字体。用“传书”把 TTF 字体放进 fonts 目录。",PN_UI_MARGIN,LIST_ROW_Y+48,620,3,44,NULL);pn_status_t restored=pn_font_size(&f->ui,original);if(s==PN_OK)s=restored;}
         if(s==PN_OK && *f->message){int original=f->ui.pixels;s=pn_font_size(&f->ui,28);if(s==PN_OK)s=pn_w_text(&f->ui,&f->canvas,f->message,PN_UI_MARGIN,PAGER_Y-24,620,PN_ALIGN_LEFT);pn_status_t restored=pn_font_size(&f->ui,original);if(s==PN_OK)s=restored;}
