@@ -21,3 +21,6 @@ tests/fixtures/** -text
 components/pn_cjson/vendor/** -text whitespace=-blank-at-eol,-blank-at-eof
 
 components/pn_qr/vendor/** -text whitespace=-blank-at-eol,-blank-at-eof
+
+# 发布固件按字节保存，保证 SHA256SUMS 校验。/ Keep release firmware byte-exact so SHA256SUMS verifies.
+releases/** -text
