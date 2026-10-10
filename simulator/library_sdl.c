@@ -541,6 +541,7 @@ int pn_sim_library_window(pn_pool_t *pool,const char *directory,const char *font
                 else if(hit==PN_SHELF_SEARCH){pn_search_ui_open(&s->search,NULL);s->search_open=true;status=pn_search_ui_render(&s->search,&s->font,&s->frame);if(status==PN_OK)status=present(s,&s->frame,PN_REFRESH_GL16);}
                 else if(hit==PN_SHELF_TAB_ALL || hit==PN_SHELF_TAB_RECENT || hit==PN_SHELF_HOME || hit==PN_SHELF_TAB_FAVORITES){bool want=hit==PN_SHELF_TAB_RECENT,fav=hit==PN_SHELF_TAB_FAVORITES;if(hit==PN_SHELF_HOME || want!=s->recent_mode || fav!=s->fav_mode){s->recent_mode=want;s->fav_mode=fav;s->fav_start=0;*s->query=0;status=page(s,false,true);}}
                 else if(hit==PN_SHELF_INDEX && !s->recent_mode && !*s->query){status=pn_shelf_index_render(&s->font,&s->frame);if(status==PN_OK)status=present(s,&s->frame,PN_REFRESH_GL16);s->index=status==PN_OK;printf("index open status=%d\n",(int)status);}
+                else if(hit>=PN_SHELF_MORE && hit<PN_SHELF_MORE+6)open_actions(s,hit-PN_SHELF_MORE);
                 else if(hit==PN_SHELF_TRANSFER || hit==PN_SHELF_IMPORT)status=open_hub(s);
                 else if(hit==PN_SHELF_MENU){status=open_settings(s);printf("settings open status=%d flags=%u\n",(int)status,(unsigned)s->settings.flags);}
                 else if(hit==PN_SHELF_CONTINUE)status=continue_book(s,now);

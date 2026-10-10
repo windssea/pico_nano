@@ -17,7 +17,8 @@ int main(void){pn_pool_t pool;assert(pn_pool_init(&pool,1024*1024,NULL,NULL,NULL
      assert(pn_shelf_hit_ex(p,560,110,&o)==PN_SHELF_SEARCH && pn_shelf_hit_ex(p,560,110,NULL)==-1);
      assert(pn_shelf_hit_ex(p,600,360,&o)==PN_SHELF_LAYOUT && pn_shelf_hit_ex(p,600,360,NULL)==-1);
      assert(pn_shelf_render_ex(p,&font,&frame,-1,false,true,NULL,&o)==PN_OK && font.pixels==24);
-     o.list_mode=true;assert(pn_shelf_hit_ex(p,100,450,&o)==0 && pn_shelf_hit_ex(p,100,580,&o)==1 && pn_shelf_hit_ex(p,100,720,&o)==-1);
+     assert(pn_shelf_hit_ex(p,190,690,&o)==PN_SHELF_MORE && pn_shelf_hit_ex(p,100,690,&o)==0 && pn_shelf_hit_ex(p,410,690,&o)==PN_SHELF_MORE+1);
+     o.list_mode=true;assert(pn_shelf_hit_ex(p,600,450,&o)==PN_SHELF_MORE && pn_shelf_hit_ex(p,100,450,&o)==0 && pn_shelf_hit_ex(p,100,580,&o)==1 && pn_shelf_hit_ex(p,100,720,&o)==-1);
      assert(pn_shelf_render_ex(p,&font,&frame,0,false,true,NULL,&o)==PN_OK && font.pixels==24);
      o.list_mode=false;o.favorites_tab=true;assert(pn_shelf_hit_ex(p,300,350,&o)==PN_SHELF_TAB_FAVORITES);o.favorites=true;assert(pn_shelf_render_ex(p,&font,&frame,-1,false,true,NULL,&o)==PN_OK);o.favorites=false;
      o.query=true;assert(pn_shelf_render_ex(p,&font,&frame,-1,false,true,NULL,&o)==PN_OK);}

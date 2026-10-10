@@ -16,4 +16,6 @@ with tempfile.TemporaryDirectory() as folder:
     # 删除：先进确认页，取消不删；确认才删。/ Delete: the confirmation page first, cancel keeps the file, confirm deletes it.
     out=run(','.join((COVER,DELETE,CANCEL,CLOSE,'quit')));assert (books/'a.txt').exists() and 'actions command=3 status=0 active=1' in out,out
     out=run(','.join((COVER,DELETE,CONFIRM,'quit')));assert not (books/'a.txt').exists() and (books/'b.txt').exists() and 'actions command=5 status=0 active=0' in out,out
+    # 书名旁“⋯”同样打开面板。/ The "⋯" beside the title opens the sheet too.
+    out=run('tap:190:690,tap:300:300,quit');assert 'actions open index=0 status=0' in out,out
 print('actions window: long press sheet, favorites toggle and page, confirmed delete passed')

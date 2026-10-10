@@ -27,6 +27,7 @@ pn_status_t pn_shelf_render_mode(const pn_catalog_page_t *page,pn_font_t *font,p
 #define PN_SHELF_TAB_RECENT 19 ///< 点“最近” / Tap Recent
 #define PN_SHELF_SEARCH 20 ///< 点“搜索” / Tap Search
 #define PN_SHELF_TAB_FAVORITES 23 ///< 点“收藏” / Tap Favorites
+#define PN_SHELF_MORE 24 ///< 24+序号：该书的“⋯”（书籍操作）/ 24+index: that book's "⋯" (book actions)
 #define PN_SHELF_IMPORT 22 ///< 点“导入图书”（进入传书）/ Tap "import books" (opens transfer)
 #define PN_SHELF_LAYOUT 21 ///< 点网格/列表切换 / Tap the grid/list toggle
 /// 书架的可选外观与入口；全零（battery_percent=-1）等价于旧行为。

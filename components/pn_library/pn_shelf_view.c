@@ -162,7 +162,9 @@ static pn_status_t grid_item(const pn_catalog_item_t *item,const pn_shelf_covers
     pn_status_t s=cover_or_placeholder(font,frame,covers,i,item,x,y,COVER_W,COVER_H,true,PN_UI_RADIUS);
     if(s==PN_OK && (item->identified || item->has_progress) && item->progress>0 && item->progress<=10000)progress_bar(frame,x+12,y+COVER_H-20,COVER_W-24,item->progress);
     if(s==PN_OK)s=pn_font_size(font,26);
-    if(s==PN_OK)s=pn_w_text_ex(font,frame,title,x,y+COVER_H+34,CELL_W,PN_ALIGN_LEFT,PN_UI_INK,true);
+    if(s==PN_OK)s=pn_w_text_ex(font,frame,title,x,y+COVER_H+34,CELL_W-34,PN_ALIGN_LEFT,PN_UI_INK,true);
+    // 书名右侧“⋯”：打开书籍操作（收藏、信息、删除），长按封面同样可以。/ The "⋯" right of the title opens the book actions (favorite, info, delete); a long press on the cover does the same.
+    pn_w_icon(frame,PN_ICON_MORE,x+CELL_W-28,y+COVER_H+12,28,PN_UI_INK);
     if(s==PN_OK)s=pn_font_size(font,22);
     if(s==PN_OK)s=pn_w_text_ex(font,frame,meta,x,y+COVER_H+62,CELL_W,PN_ALIGN_LEFT,PN_UI_MUTED,false);
     if(selected)pn_w_round_outline(frame,x-6,y-6,COVER_W+12,COVER_H+12,PN_UI_RADIUS+4,3,PN_UI_INK);
@@ -177,7 +179,7 @@ static pn_status_t list_item(const pn_catalog_item_t *item,const pn_shelf_covers
     if(s==PN_OK)s=pn_w_text_lines_ex(font,frame,title,132,y+42,480,2,36,PN_UI_INK,true);
     if(s==PN_OK)s=pn_font_size(font,22);
     if(s==PN_OK)s=pn_w_text_ex(font,frame,meta,132,y+106,480,PN_ALIGN_LEFT,PN_UI_MUTED,false);
-    pn_w_icon(frame,PN_ICON_CHEVRON,622,y+46,26,PN_UI_INK);
+    pn_w_icon(frame,PN_ICON_MORE,614,y+44,30,PN_UI_INK);
     if(selected)pn_w_round_fill(frame,20,y+12,6,98,3,PN_UI_INK);
     if(s==PN_OK)pn_frame_rect(frame,132,y+LIST_ROW_PITCH-2,520,1,PN_UI_SELECT);
     return s;
@@ -282,11 +284,16 @@ int pn_shelf_hit_ex(const pn_catalog_page_t *page,int x,int y,const pn_shelf_opt
         {int slot=import_slot(page,options,true);if(slot>=0){int ix=CELL_X0+(slot%3)*CELL_PITCH,iy=GRID_Y+(slot/3)*ROW_PITCH;if(x>=ix && x<ix+COVER_W && y>=iy && y<iy+COVER_H)return PN_SHELF_IMPORT;}}
         if(options->list_mode){
             if(x<32 || x>=652)return -1;
-            int row=(y-GRID_Y)/LIST_ROW_PITCH;return row<LIST_ROWS && row<(int)page->count?row:-1;
+            int row=(y-GRID_Y)/LIST_ROW_PITCH;if(row>=LIST_ROWS || row>=(int)page->count)return -1;
+            return x>=572?PN_SHELF_MORE+row:row;
         }
         int column=(x-CELL_X0)/CELL_PITCH,row=(y-GRID_Y)/ROW_PITCH;
         if(x<CELL_X0 || column>2 || (x-CELL_X0)%CELL_PITCH>=CELL_W || row>1)return -1;
-        int index=row*3+column;return index<(int)page->count?index:-1;
+        int index=row*3+column;if(index>=(int)page->count)return -1;
+        // 书名行右端约88×72的透明命中区给“⋯”。/ An invisible 88×72 area at the right end of the title rows belongs to "⋯".
+        int cx=CELL_X0+column*CELL_PITCH,cy=GRID_Y+row*ROW_PITCH;
+        if(y>=cy+COVER_H && x>=cx+CELL_W-60)return PN_SHELF_MORE+index;
+        return index;
     }
     if(y<TAB_Y){if(x<342 && page->index>0)return PN_SHELF_PREVIOUS;if(x>=342 && page->more)return PN_SHELF_NEXT;}
     return -1;

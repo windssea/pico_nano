@@ -758,6 +758,7 @@ static void apply_selection(int selection){
     else if(reading_menu){if(selection==PN_READING_MENU_LAN)begin_transfer(true);else if(selection==PN_READING_MENU_SETTINGS)begin_settings();else if(selection==PN_READING_MENU_TRANSFER)begin_transfer(false);else if(selection==PN_READING_MENU_SHELF){reading_menu=false;if(stop_reader()){selected_path[0]=0;show_shelf("",false);}}else if(selection==PN_READING_MENU_RESUME){reading_menu=false;if(reader_active()){if(active_step(PN_APP_OPEN,now_ms())==PN_OK){status_page=false;shelf_mode=false;}}else start_reader();}}
     else if(shelf_mode && selection==PN_SHELF_LAYOUT){list_mode=!list_mode;shelf_focus=-1;show_shelf("",false);}
                 else if(shelf_mode && selection==PN_SHELF_IMPORT && !recent_mode)show_hub();
+    else if(shelf_mode && selection>=PN_SHELF_MORE && selection<PN_SHELF_MORE+6)open_actions(selection-PN_SHELF_MORE);
     else if(shelf_mode && selection==PN_SHELF_TRANSFER)show_hub();
     else if(shelf_mode && selection==PN_SHELF_SEARCH){if(*search_query && !recent_mode){search_query[0]=0;show_shelf("",false);}else{pn_search_ui_open(&search_ui,NULL);show_search();}}
     else if(shelf_mode && selection==PN_SHELF_INDEX && !recent_mode && !*search_query)show_index();
