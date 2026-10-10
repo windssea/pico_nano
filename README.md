@@ -6,6 +6,7 @@
 | --- | --- |
 | [项目状态与待办](docs/PROJECT_STATUS.md) | 用户需求覆盖、T01–T14状态、下一批工作和未通过门 |
 | [构建与运行](docs/BUILDING.md) | 已存在的命令、产物、SDKCONFIG隔离 |
+| [网页安装器](docs/WEB_INSTALLER.md) | 浏览器安装/升级固件的写入规则与发布方式 |
 | [开发环境与测试](docs/DEVELOPMENT_AND_TESTING.md) | Docker/Windows/WSL/SDL、SDK-stub、独立oracle与硬件边界 |
 | [完整开发计划](docs/DEVELOPMENT_PLAN.md) | 原始任务依赖与验收要求，不以局部实现代替任务完成 |
 | [总体设计](docs/DESIGN.md) | 产品目标和格式/资源路线 |

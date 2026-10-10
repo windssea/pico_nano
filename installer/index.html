@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PicoNano 网页安装</title>
+  <meta name="description" content="在浏览器里为小纸 Pico（Read Pico）安装 PicoNano 固件。">
+  <link rel="stylesheet" href="style.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <main>
+    <header>
+      <p class="eyebrow">小纸 Pico · Read Pico · RDP-G01-W</p>
+      <h1>PicoNano 网页安装</h1>
+      <p class="lead">用电脑上的 Chrome 或 Edge 通过 USB 连接阅读器，一次完成安装或升级。只写需要的区域，不整片擦除。</p>
+    </header>
+
+    <p id="unsupported" class="notice error" hidden>当前浏览器不支持 Web Serial。请在电脑上用 Chrome 或 Edge 打开本页（手机和 Safari、Firefox 不支持）。</p>
+
+    <section class="card">
+      <div class="row">
+        <div>
+          <h2>固件 <span id="version">—</span></h2>
+          <p id="release-meta" class="muted"></p>
+        </div>
+        <label class="select">版本
+          <select id="release"></select>
+        </label>
+      </div>
+      <p id="hw-warning" class="notice warn" hidden><strong>开发预览，未经真机验证。</strong>该版本只经过主机测试、模拟器和编译验证，还没在样机上做过启动、显示、触摸和功耗测试。请保留备份，风险自担。</p>
+    </section>
+
+    <section class="card">
+      <h2>1 · 连接设备</h2>
+      <ol class="steps">
+        <li>用能传数据的 USB 线把阅读器接到电脑。</li>
+        <li>点“连接设备”，在弹窗里选择出现的串口（通常名为 USB JTAG/serial debug unit）。</li>
+        <li>如果一直连不上，让设备进入下载模式后再试（ESP32-S3 通常是按住 BOOT 再接 USB；本机具体按键以原厂说明为准）。</li>
+      </ol>
+      <div class="actions">
+        <button id="connect" class="primary">连接设备</button>
+        <span id="device" class="muted"></span>
+      </div>
+    </section>
+
+    <section id="plan" class="card" hidden>
+      <h2>2 · 核对并安装</h2>
+      <p id="plan-mode" class="pill"></p>
+      <p id="plan-note" class="muted"></p>
+      <ol id="plan-steps" class="plan"></ol>
+      <label class="check"><input type="checkbox" id="backup"> 先备份整片闪存（16 MiB，约 3–5 分钟，保存到下载文件夹）</label>
+      <label class="check"><input type="checkbox" id="clear-nvs"> 清除设置区（NVS）：只在安装后无法开机、串口提示“NVS unavailable”时勾选</label>
+      <label class="check"><input type="checkbox" id="confirm-model"> 我确认这台设备是小纸 Pico（RDP-G01-W），并了解写入有风险</label>
+      <div class="actions">
+        <button id="install" class="primary" disabled>开始安装</button>
+        <span id="backup-link"></span>
+      </div>
+    </section>
+
+    <section class="card">
+      <p id="status" class="status">准备就绪。</p>
+      <div id="progress" hidden>
+        <div class="bar"><div id="progress-bar"></div></div>
+        <p id="progress-label" class="muted"></p>
+      </div>
+      <details>
+        <summary>详细日志</summary>
+        <div id="log" class="log"></div>
+      </details>
+    </section>
+
+    <section class="card help">
+      <h2>帮助</h2>
+      <details>
+        <summary>安装器会写哪些内容</summary>
+        <p>安装器先读取设备上的分区表，再决定要写什么：</p>
+        <ul>
+          <li><strong>升级</strong>（设备已是本固件布局）：只写应用固件和 OTA 选择；引导程序与设备相同时跳过；设置、阅读进度、书签和壁纸都保留。</li>
+          <li><strong>首次安装</strong>（原厂或其他系统）：写引导程序、应用、OTA 选择，最后写分区表。旧分区表里本就是设置区（NVS）的扇区保留，新设置区里原先不是 NVS 的扇区清空；内部数据和壁纸分区若还不是有效文件系统，写入空镜像。</li>
+          <li>任何情况都不整片擦除，不碰存储卡，不写屏幕电源芯片（VCOM 只从 PMU 读取）。每段写完都做 MD5 校验。</li>
+        </ul>
+      </details>
+      <details>
+        <summary>开机后没有画面</summary>
+        <p>固件读不到有效的屏幕电压（VCOM）时会故意不刷屏，屏幕保持原样，这是保护行为。设置区无法初始化时固件也会停下。可用串口查看日志（115200）：看到 “NVS unavailable” 时，重新连接并勾选“清除设置区”再装一次。</p>
+      </details>
+      <details>
+        <summary>如何恢复原来的系统</summary>
+        <p>用安装前保存的整片备份写回 0x0：<code>esptool --chip esp32s3 -p COM? write-flash 0x0 read-pico-backup-….bin</code>。中途断开时设备会停在下载模式，可直接重新安装或写回备份。</p>
+      </details>
+      <details>
+        <summary>命令行安装</summary>
+        <p>也可以下载各版本文件夹里的分段文件用 esptool 写入，说明见仓库 <code>releases/</code> 中的 README。</p>
+      </details>
+    </section>
+
+    <footer class="muted">页面在浏览器中直接与设备通信，固件文件从本站下载并经 SHA-256 校验。串口通信使用 esptool-js 0.5.7（Apache-2.0）。</footer>
+  </main>
+</body>
+</html>

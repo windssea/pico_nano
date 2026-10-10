@@ -37,6 +37,7 @@ python tools/dev.py host
 | firmware-board | build-board | sdkconfig.defaults，真机Zbit 120MHz配置 |
 | factory-data | build-dev/factory-data.bin、factory-wallpaper.bin | 单独生成内部数据与壁纸分区空镜像，不自动烧写 |
 | docs | build-dev/logs/docs-0.log | 文档/分区/依赖与字体摘要核对 |
+| installer | build-dev/installer-site | 网页安装器计划测试（Node）与静态站点，不连接设备；见 [网页安装器](WEB_INSTALLER.md) |
 
 两SDKCONFIG独立生成，不能把CI时序当产品默认。产物、日志、样本与截图都忽略；必要UI字体、测试fixture、许可证与依赖清单保留。Windows不能直接执行Linux ELF，容器绝对路径也不能直接当Windows烧写路径。
 

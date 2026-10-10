@@ -26,7 +26,7 @@ def run(command, docker, log, container_image=IDF_IMAGE):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["host", "sim", "firmware-ci", "firmware-board", "factory-data", "sdl", "docs", "epub-sample", "sdl-run"])
+    parser.add_argument("action", choices=["host", "sim", "firmware-ci", "firmware-board", "factory-data", "sdl", "docs", "epub-sample", "sdl-run", "installer"])
     parser.add_argument("--native", action="store_true", help="Use installed tools instead of the pinned IDF container")
     parser.add_argument("--archive", type=pathlib.Path, help="Local EPUB inside the workspace for epub-sample")
     parser.add_argument("--all-resources", action="store_true", help="Compare every ZIP resource for epub-sample")
@@ -57,6 +57,10 @@ def main():
                     ["cmake", "--build", "build-host", "--target", "zip_dump"], sample]
     elif args.action == "docs":
         commands = [[sys.executable, "tools/check_docs.py"]]
+        docker = False
+    elif args.action == "installer":
+        # 网页安装器：测试写入计划并生成 build-dev/installer-site；不连接设备。/ Web installer: test the plan and build the site; no device access.
+        commands = [["node", "--test", "--test-reporter=tap", "tests/installer/plan.test.mjs"], [sys.executable, "tools/installer_site.py"]]
         docker = False
     elif args.action in ("sdl", "sdl-run"):
         if docker:

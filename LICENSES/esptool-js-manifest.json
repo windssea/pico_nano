@@ -1,0 +1,11 @@
+{
+  "name": "esptool-js",
+  "version": "0.5.7",
+  "license": "Apache-2.0 (bundle also contains pako 2.1.0, MIT AND Zlib)",
+  "source": "https://registry.npmjs.org/esptool-js/-/esptool-js-0.5.7.tgz",
+  "tarball_sha256": "fe400625bc1c4eb5e1d7c8d630ee52548af2e22fa2db349b5783e87375bdb629",
+  "files": {
+    "bundle.js": "a2bc5bcbb3811e48781de165f2267f9c9c51e63fac7e8866765745e8a197cec0",
+    "LICENSE": "1c25f29242785d63e9adb0be7fdc137551dfbbc0756b622fcd26d9cd7de3a4f3"
+  }
+}

@@ -69,6 +69,11 @@ def main():
         source = ROOT / "components/pn_cjson/vendor" / name
         if not source.is_file() or hashlib.sha256(source.read_bytes()).hexdigest() != digest:
             errors.append(f"cJSON source changed or missing: {name}")
+    esptool_js = json.loads((ROOT / "LICENSES/esptool-js-manifest.json").read_text(encoding="utf8"))
+    for name, digest in esptool_js["files"].items():
+        source = ROOT / "installer/vendor/esptool-js-0.5.7" / name
+        if not source.is_file() or hashlib.sha256(source.read_bytes()).hexdigest() != digest:
+            errors.append(f"esptool-js bundle changed or missing: {name}")
     manifest = json.loads((ROOT / "LICENSES/reference-manifest.json").read_text(encoding="utf-8"))
     for entry in manifest["files"]:
         path = ROOT / entry["path"]
