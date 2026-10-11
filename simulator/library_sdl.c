@@ -131,11 +131,13 @@ static pn_status_t present_raw(library_t *s,const pn_frame_t *frame){
     if(timing_on())fprintf(stderr,"timing present convert+upload=%llums swap=%llums\n",(unsigned long long)(t1-t0),(unsigned long long)(SDL_GetTicks64()-t1));
     return PN_OK;
 }
+static pn_status_t favorites_load(library_t *s);
 static pn_status_t draw(library_t *s){
     if(!s->frame.pixels){uint8_t *pixels=pn_alloc(s->pool,342u*1216u);if(!pixels || !pn_frame_bind(&s->frame,pixels,342u*1216u,684,1216)){pn_free(pixels);return PN_NO_MEMORY;}}
     if(!s->font.impl){pn_text_source_t builtin=pn_font_builtin_source();pn_status_t opened=pn_font_open(&s->font,s->pool,&builtin,24);if(opened!=PN_OK)return opened;}
     uint64_t t0=SDL_GetTicks64();
     pn_shelf_options_t options=shelf_options(s);
+    if(favorites_load(s)==PN_OK)options.favorite_items=s->favorites;
     pn_status_t status=pn_shelf_render_with_font_file_ex(s->page,&s->font,&s->frame,s->selected,s->recent_mode,false,s->covers,s->pool,&s->media,*s->font_real?s->font_real:NULL,&options);
     if(status==PN_OK && s->open_failed){pn_frame_rect(&s->frame,32,970,620,64,15);status=pn_font_size(&s->font,28);if(status==PN_OK)status=pn_w_text(&s->font,&s->frame,"打开失败，请重试",48,1012,580,PN_ALIGN_LEFT);}
     if(timing_on())fprintf(stderr,"timing shelf render=%llums\n",(unsigned long long)(SDL_GetTicks64()-t0));
@@ -179,7 +181,6 @@ static void storage_note(library_t *s){
     if(statvfs(s->directory,&st)==0 && st.f_blocks){unsigned long long total=(unsigned long long)st.f_blocks*st.f_frsize,avail=(unsigned long long)st.f_bavail*st.f_frsize;
         snprintf(s->storage,sizeof s->storage,"共 %llu.%llu GB · 可用 %llu.%llu GB",total>>30,((total%(1ull<<30))*10)>>30,avail>>30,((avail%(1ull<<30))*10)>>30);}
 }
-static pn_status_t favorites_load(library_t *s);
 static void open_actions(library_t *s,int index){
     if(index<0 || (size_t)index>=s->page->count)return;
     s->actions=(pn_book_actions_t){.item=s->page->items[index]};

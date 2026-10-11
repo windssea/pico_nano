@@ -126,14 +126,21 @@ static pn_status_t cover_or_placeholder(pn_font_t *font,pn_frame_t *frame,const 
     if(s==PN_OK)frame_cover(frame,x,y,w,h,radius);
     return s;
 }
+// 白底黑书签在深浅封面上均清晰；不增加点击入口。/ A black bookmark on white stays visible on any cover; no extra tap target.
+static void favorite_badge(pn_frame_t *frame,int x,int y,int size){
+    pn_w_round_fill(frame,x,y,size,size,8,PN_UI_PAPER);
+    pn_w_round_stroke(frame,x,y,size,size,8,1.5f,PN_UI_INK);
+    pn_w_icon(frame,PN_ICON_BOOKMARK,x+5,y+5,size-10,PN_UI_INK);
+}
 /* 继续阅读卡（拟玻璃）：“正在阅读”、书名、已读进度与深色“继续阅读 →”。没有阅读记录时改为一句引导。
  * Continue-reading card (faux glass): "reading now", title, progress and a dark "continue →"; a one-line hint when there is no history. */
-static pn_status_t continue_card(const pn_shelf_covers_t *covers,pn_font_t *font,pn_frame_t *frame){
+static pn_status_t continue_card(const pn_shelf_covers_t *covers,const pn_favorites_t *favorites,pn_font_t *font,pn_frame_t *frame){
     pn_status_t s=PN_OK;
     pn_w_glass(frame,32,CONT_Y,620,CONT_H,PN_UI_CARD_RADIUS);
     if(covers && covers->has_last){
         const pn_catalog_item_t *last=&covers->last;char title[PN_CATALOG_NAME_MAX];title_of(last,title,sizeof title);
         s=cover_or_placeholder(font,frame,covers,PN_COVER_SLOT_LAST,last,48,CONT_Y+14,92,128,false,10);
+        if(s==PN_OK && pn_favorites_contains(favorites,last->path))favorite_badge(frame,104,CONT_Y+20,30);
         if(s==PN_OK)s=pn_font_size(font,22);
         if(s==PN_OK)s=pn_w_text_ex(font,frame,"正在阅读",160,CONT_Y+40,300,PN_ALIGN_LEFT,PN_UI_MUTED,false);
         if(s==PN_OK)s=pn_font_size(font,34);
@@ -157,9 +164,10 @@ static pn_status_t continue_card(const pn_shelf_covers_t *covers,pn_font_t *font
     return s;
 }
 /* 网格：176×244封面，下方加粗书名与次要色“进度 · 格式”。/ Grid: 176×244 cover, a bold title and a secondary "progress · format" line below. */
-static pn_status_t grid_item(const pn_catalog_item_t *item,const pn_shelf_covers_t *covers,size_t i,pn_font_t *font,pn_frame_t *frame,bool selected){
+static pn_status_t grid_item(const pn_catalog_item_t *item,const pn_shelf_covers_t *covers,size_t i,pn_font_t *font,pn_frame_t *frame,bool selected,bool favorite){
     int x=CELL_X0+(int)(i%3)*CELL_PITCH,y=GRID_Y+(int)(i/3)*ROW_PITCH;char title[PN_CATALOG_NAME_MAX],meta[64];title_of(item,title,sizeof title);meta_of(item,meta,sizeof meta);
     pn_status_t s=cover_or_placeholder(font,frame,covers,i,item,x,y,COVER_W,COVER_H,true,PN_UI_RADIUS);
+    if(s==PN_OK && favorite)favorite_badge(frame,x+COVER_W-50,y+10,40);
     if(s==PN_OK && (item->identified || item->has_progress) && item->progress>0 && item->progress<=10000)progress_bar(frame,x+12,y+COVER_H-20,COVER_W-24,item->progress);
     if(s==PN_OK)s=pn_font_size(font,26);
     if(s==PN_OK)s=pn_w_text_ex(font,frame,title,x,y+COVER_H+34,CELL_W-34,PN_ALIGN_LEFT,PN_UI_INK,true);
@@ -171,10 +179,11 @@ static pn_status_t grid_item(const pn_catalog_item_t *item,const pn_shelf_covers
     return s;
 }
 /* 列表：80×112封面、全名最多两行、“进度 · 格式 · 大小”，整行可点。/ List: 80×112 cover, full name up to two lines, "progress · format · size"; the whole row is tappable. */
-static pn_status_t list_item(const pn_catalog_item_t *item,const pn_shelf_covers_t *covers,size_t i,pn_font_t *font,pn_frame_t *frame,bool selected){
-    int y=GRID_Y+(int)i*LIST_ROW_PITCH;char title[PN_CATALOG_NAME_MAX],meta[96],base[64];title_of(item,title,sizeof title);meta_of(item,base,sizeof base);
-    snprintf(meta,sizeof meta,"%s · %llu KB",base,(unsigned long long)(item->size/1024+(item->size%1024!=0)));
+static pn_status_t list_item(const pn_catalog_item_t *item,const pn_shelf_covers_t *covers,size_t i,pn_font_t *font,pn_frame_t *frame,bool selected,bool favorite){
+    int y=GRID_Y+(int)i*LIST_ROW_PITCH;char title[PN_CATALOG_NAME_MAX],meta[128],base[64];title_of(item,title,sizeof title);meta_of(item,base,sizeof base);
+    snprintf(meta,sizeof meta,"%s%s · %llu KB",favorite?"已收藏 · ":"",base,(unsigned long long)(item->size/1024+(item->size%1024!=0)));
     pn_status_t s=cover_or_placeholder(font,frame,covers,i,item,32,y+5,80,112,false,10);
+    if(s==PN_OK && favorite)favorite_badge(frame,76,y+11,30);
     if(s==PN_OK)s=pn_font_size(font,28);
     if(s==PN_OK)s=pn_w_text_lines_ex(font,frame,title,132,y+42,480,2,36,PN_UI_INK,true);
     if(s==PN_OK)s=pn_font_size(font,22);
@@ -209,7 +218,7 @@ pn_status_t pn_shelf_render_ex(const pn_catalog_page_t *page,pn_font_t *font,pn_
         pn_w_icon(frame,options->query?PN_ICON_CLOSE:PN_ICON_SEARCH,SEARCH_X+22,87,32,PN_UI_INK);
         s=pn_font_size(font,28);if(s==PN_OK)s=pn_w_text(font,frame,options->query?"清除":"搜索",SEARCH_X+64,114,76,PN_ALIGN_LEFT);
     }
-    if(s==PN_OK)s=continue_card(covers,font,frame);
+    if(s==PN_OK)s=continue_card(covers,options->favorite_items,font,frame);
     // 分类：全部/最近/收藏，深色胶囊为当前；右侧网格/列表切换。/ Categories: All/Recent/Favorites with a dark capsule for the current one; the grid/list toggle on the right.
     {static const char *const chips[]={"全部","最近","收藏"};int active=options->favorites?2:recent?1:0;unsigned count=options->favorites_tab?3u:2u;
         pn_w_round_fill(frame,32,CHIP_Y,(int)count*CHIP_W+12,CHIP_H,CHIP_H/2,PN_UI_SURFACE);
@@ -225,7 +234,7 @@ pn_status_t pn_shelf_render_ex(const pn_catalog_page_t *page,pn_font_t *font,pn_
     // 书目：网格或列表。/ Books: grid or list.
     for(size_t i=0;i<page->count && i<visible && s==PN_OK;i++){
         const pn_catalog_item_t *item=&page->items[i];if(strnlen(item->name,sizeof item->name)>=sizeof item->name)return PN_INVALID;
-        s=list?list_item(item,covers,i,font,frame,(int)i==selected):grid_item(item,covers,i,font,frame,(int)i==selected);
+        s=list?list_item(item,covers,i,font,frame,(int)i==selected,pn_favorites_contains(options->favorite_items,item->path)):grid_item(item,covers,i,font,frame,(int)i==selected,pn_favorites_contains(options->favorite_items,item->path));
     }
     // 最后一页网格还有空位时放虚线“导入图书”卡（需要传书能力）。/ A dashed "import books" tile fills a free grid slot on the last page (needs transfer).
     if(s==PN_OK && import_slot(page,options,transfer)>=0){

@@ -22,6 +22,23 @@ int main(void){pn_pool_t pool;assert(pn_pool_init(&pool,1024*1024,NULL,NULL,NULL
      assert(pn_shelf_render_ex(p,&font,&frame,0,false,true,NULL,&o)==PN_OK && font.pixels==24);
      o.list_mode=false;o.favorites_tab=true;assert(pn_shelf_hit_ex(p,300,350,&o)==PN_SHELF_TAB_FAVORITES);o.favorites=true;assert(pn_shelf_render_ex(p,&font,&frame,-1,false,true,NULL,&o)==PN_OK);o.favorites=false;
      o.query=true;assert(pn_shelf_render_ex(p,&font,&frame,-1,false,true,NULL,&o)==PN_OK);}
+    // 收藏标识只跟随完整路径，网格与列表取消后恢复原像素。/ Favorite markers follow full paths; removing restores grid and list pixels.
+    {pn_favorites_t *favorites=calloc(1,sizeof *favorites);uint8_t *before=malloc(684*1216/2);assert(favorites && before);
+     strcpy(p->items[0].path,"/books/one.txt");strcpy(p->items[1].path,"/books/two.epub");
+     favorites->count=1;strcpy(favorites->paths[0],p->items[0].path);
+     for(int list=0;list<2;list++){pn_shelf_options_t o={.battery_percent=-1,.list_mode=list!=0};
+      assert(pn_shelf_render_ex(p,&font,&frame,-1,false,false,NULL,&o)==PN_OK);memcpy(before,bytes,684*1216/2);
+      o.favorite_items=favorites;assert(pn_shelf_render_ex(p,&font,&frame,-1,false,false,NULL,&o)==PN_OK);
+      assert(memcmp(before,bytes,684*1216/2)!=0);
+      int second_y=list?550:428,second_x=list?32:254;
+      for(int y=second_y;y<second_y+112;y++)for(int x=second_x;x<second_x+80;x++)assert(pn_frame_get(&frame,x,y)==((before[y*342+x/2]>>(x%2?4:0))&15));
+      favorites->count=0;assert(pn_shelf_render_ex(p,&font,&frame,-1,false,false,NULL,&o)==PN_OK);assert(!memcmp(before,bytes,684*1216/2));favorites->count=1;
+     }
+     pn_shelf_covers_t *covers=calloc(1,sizeof *covers);assert(covers);pn_shelf_covers_set_last(covers,&p->items[0]);
+     pn_shelf_options_t o={.battery_percent=-1};assert(pn_shelf_render_ex(p,&font,&frame,-1,false,false,covers,&o)==PN_OK);memcpy(before,bytes,684*1216/2);
+     o.favorite_items=favorites;assert(pn_shelf_render_ex(p,&font,&frame,-1,false,false,covers,&o)==PN_OK);
+     bool changed=false;for(int y=170;y<200;y++)for(int x=104;x<134;x++)if(pn_frame_get(&frame,x,y)!=((before[y*342+x/2]>>(x%2?4:0))&15))changed=true;assert(changed);
+     free(covers);free(before);free(favorites);}
     assert(pn_shelf_hit(p,100,1150)==PN_SHELF_HOME && pn_shelf_hit(p,340,1150)==-1 && pn_shelf_hit(p,600,1150)==PN_SHELF_MENU);
     assert(pn_shelf_hit_with_transfer(p,340,1150,true)==PN_SHELF_TRANSFER && pn_shelf_hit_with_transfer(p,340,1150,false)==-1);
     assert(pn_shelf_hit(p,100,120)==PN_SHELF_INDEX && pn_shelf_hit(p,600,100)==-1 && pn_shelf_hit(p,100,50)==-1 && pn_shelf_hit(p,500,50)==-1);
