@@ -15,4 +15,8 @@ with tempfile.TemporaryDirectory() as folder:
     # 取消：不移动，面板关闭。/ Cancel: no move and the panel closes.
     out=run('enter,jump,tap:540:690,back,mark-return,back,quit')
     assert 'jump_ui command=1 status=0 active=0' in out and 'bookmark_return status=0' not in out,out
+    # 翻页之后返回点失效，不能再跳回原位置。/ Turning a page expires the return point, preventing a return to the old location.
+    out=run('enter,jump,tap:540:690,tap:300:860,next,mark-return,back,quit')
+    assert 'jump_ui command=2 status=0 active=0' in out and 'library_turn pointer=0 status=0' in out,out
+    assert 'bookmark_return status=0' not in out,out
 print('jump window: footer entry, draft stepping, confirm with return, and cancel passed')

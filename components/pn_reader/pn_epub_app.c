@@ -248,16 +248,18 @@ static pn_status_t navigate(pn_epub_app_t *app,pn_reader_action_t action,const p
     pn_font_close(&a->ui);pn_status_t status=scratch(a);if(status!=PN_OK)return status;
     pn_read_intent_t intent=jump?PN_READ_JUMP:action==PN_APP_NEXT?PN_READ_NEXT:action==PN_APP_PREVIOUS?PN_READ_PREVIOUS:action==PN_APP_BEGINNING?PN_READ_FIRST:a->has_visible?PN_READ_CURRENT:a->has_restore?PN_READ_JUMP:PN_READ_FIRST;
     pn_epub_reader_receipt_t receipt;status=pn_epub_reader_prepare(&a->reader,intent,intent==PN_READ_JUMP?(jump?jump:&a->restored.location):NULL,&receipt);if(status!=PN_OK)return status;
+    // 新页隐藏返回提示，只有呈现确认后才清除返回状态。/ Hide the return hint on the new page; clear its state only after presentation is confirmed.
+    bool dismiss_return=!jump && (action==PN_APP_NEXT || action==PN_APP_PREVIOUS || action==PN_APP_BEGINNING);
     status=compact(a);pn_draw_lease_t lease={0};pn_frame_t *frame=NULL;
     if(status==PN_OK)status=pn_display_begin_draw(&a->display,a->token,&lease,&frame);
-    if(status==PN_OK){snprintf(a->footer_path,sizeof a->footer_path,"%s",receipt.anchor.begin.path);status=paint(a,frame);}
+    if(status==PN_OK){snprintf(a->footer_path,sizeof a->footer_path,"%s",receipt.anchor.begin.path);bool returning=a->bookmark_returning;a->bookmark_returning=returning || dismiss_return;status=paint(a,frame);a->bookmark_returning=returning;}
     pn_refresh_t profile=!a->has_visible || a->force_full || a->since_clear>=a->style.gl_before_clear?PN_REFRESH_GC16:PN_REFRESH_GL16;
     if(status==PN_OK)status=pn_display_publish(&a->display,&lease,receipt.ticket,profile);
     if(status!=PN_OK){if(lease.ticket)(void)pn_display_discard(&a->display,&lease);(void)pn_epub_reader_complete(&a->reader,&receipt,false,now);a->force_full=true;return status;}
     pn_display_job_t job;status=pn_display_start(&a->display,&job);if(status!=PN_OK){(void)pn_epub_reader_complete(&a->reader,&receipt,false,now);a->force_full=true;return status;}
     pn_status_t shown=present(ctx,job.frame,job.profile),displayed=pn_display_complete(&a->display,&job,shown==PN_OK);
     bool success=shown==PN_OK && displayed==PN_OK;pn_status_t committed=pn_epub_reader_complete(&a->reader,&receipt,success,now);
-    if(!success || !a->last_confirmed)a->force_full=true;else{a->force_full=false;a->has_restore=false;if(profile==PN_REFRESH_GC16)a->since_clear=0;else a->since_clear++;}
+    if(!success || !a->last_confirmed)a->force_full=true;else{a->force_full=false;a->has_restore=false;if(dismiss_return)a->has_bookmark_origin=false;if(profile==PN_REFRESH_GC16)a->since_clear=0;else a->since_clear++;}
     return shown!=PN_OK?shown:displayed!=PN_OK?displayed:committed;
 }
 pn_status_t pn_epub_app_step(pn_epub_app_t *app,pn_reader_action_t action,uint64_t now,pn_reader_present_fn present,void *ctx){return navigate(app,action,NULL,now,present,ctx);}

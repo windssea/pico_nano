@@ -191,9 +191,11 @@ static pn_status_t step_location(pn_reader_app_t *app,pn_reader_action_t action,
     else if(action==PN_APP_NEXT)intent=PN_READ_NEXT;
     else if(action==PN_APP_PREVIOUS)intent=PN_READ_PREVIOUS;
     else if(action==PN_APP_BEGINNING)intent=PN_READ_FIRST;
+    // 确认继续阅读后丢弃跳转返回点；候选页先不画返回入口。/ Discard the jump origin after confirmed continued reading; omit the entry from the candidate page.
+    bool dismiss_return=!jump && (action==PN_APP_NEXT || action==PN_APP_PREVIOUS || action==PN_APP_BEGINNING);
     pn_reader_receipt_t receipt;pn_status_t s=pn_reader_prepare(&a->reader,intent,offset,&receipt);if(s!=PN_OK)return s;
     pn_draw_lease_t lease={0};pn_frame_t *frame=NULL;s=pn_display_begin_draw(&a->display,a->reader.token,&lease,&frame);
-    if(s==PN_OK)s=render(a,frame,&receipt,return_hint<0?a->has_bookmark_origin:return_hint!=0);
+    if(s==PN_OK)s=render(a,frame,&receipt,dismiss_return?false:return_hint<0?a->has_bookmark_origin:return_hint!=0);
     pn_refresh_t profile=(!a->reader.has_visible || a->force_full || a->since_clear>=a->style.gl_before_clear)?PN_REFRESH_GC16:PN_REFRESH_GL16;
     if(s==PN_OK)s=pn_display_publish(&a->display,&lease,receipt.ticket,profile);
     if(s!=PN_OK){if(lease.ticket)(void)pn_display_discard(&a->display,&lease);(void)pn_reader_complete(&a->reader,&receipt,false,now);return s;}
@@ -206,6 +208,7 @@ static pn_status_t step_location(pn_reader_app_t *app,pn_reader_action_t action,
     if(completed!=PN_OK)return completed;
     if(confirmed!=PN_OK)return confirmed;
     a->last_confirmed=true;
+    if(dismiss_return)a->has_bookmark_origin=false;
     if(committed)*committed=true;
     if(a->persistent && !a->recent_recorded)(void)record_recent(a);
     return a->persistent?pn_save_policy_tick(&a->save,now):PN_OK;
