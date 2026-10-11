@@ -1,1 +1,1 @@
-idf_component_register(SRCS "pn_upload.c" "pn_upload_files.c" "pn_upload_validate.c" "pn_transfer_service.c" "pn_transfer_worker.c" INCLUDE_DIRS "include" REQUIRES pn_core pn_storage pn_text pn_font pn_format pn_image freertos heap)
+idf_component_register(SRCS "pn_upload.c" "pn_upload_files.c" "pn_upload_validate.c" "pn_transfer_service.c" "pn_transfer_receive.c" "pn_transfer_worker.c" INCLUDE_DIRS "include" REQUIRES pn_core pn_storage pn_text pn_font pn_format pn_image freertos heap)

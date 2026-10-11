@@ -16,6 +16,7 @@ add_library(pn_core STATIC ${ui_font_c}
     ${PN_ROOT}/components/pn_reader/pn_transfer_hub.c
     ${PN_ROOT}/components/pn_transfer/pn_transfer_worker.c
     ${PN_ROOT}/components/pn_transfer/pn_transfer_service.c
+    ${PN_ROOT}/components/pn_transfer/pn_transfer_receive.c
     ${PN_ROOT}/components/pn_transfer/pn_upload.c
     ${PN_ROOT}/components/pn_transfer/pn_upload_files.c
     ${PN_ROOT}/components/pn_transfer/pn_upload_validate.c

@@ -51,6 +51,8 @@ pn_status_t pn_upload_chunk(pn_upload_t *,uint64_t,const uint8_t *,size_t,const 
 /// 完整摘要/实际格式通过后记录VERIFIED，再幂等安装和记录COMMITTED。
 /// Verify complete digest/actual format, persist VERIFIED, then idempotent install and persist COMMITTED.
 pn_status_t pn_upload_complete(pn_upload_t *,const pn_book_id_t *);
+/// 由owner计算精确长度暂存摘要并安装；提供过的摘要仍须核对。/ Owner hashes exact staging content and installs; any supplied digest must still match.
+pn_status_t pn_upload_complete_stream(pn_upload_t *);
 /// RECEIVING先保存取消标记再清暂存；VERIFIED不能撤销可能已安装的资源。
 /// Persist cancellation before clearing RECEIVING staging; VERIFIED cannot undo possibly installed resources.
 pn_status_t pn_upload_cancel(pn_upload_t *);

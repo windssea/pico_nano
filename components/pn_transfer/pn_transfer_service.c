@@ -25,6 +25,8 @@ typedef struct {
  pn_upload_files_t files;
  pn_upload_port_t port;
  bool stopped;
+ bool streaming; ///< 整文件网络请求期间的独占门 / Exclusivity gate during a whole-file network request
+ uint8_t stream_id[PN_UPLOAD_ID_BYTES]; ///< 允许继续/取消的会话 / Session allowed to continue or cancel
 } service_t;
 static bool zero(const uint8_t *bytes,size_t n){for(size_t i=0;i<n;i++)if(bytes[i])return false;return true;}
 static pn_status_t guard(service_t *s){
@@ -229,14 +231,25 @@ pn_status_t pn_transfer_service_execute(pn_transfer_service_t *out,const pn_tran
   return status;
  }
  pn_status_t status=guard(s);if(status!=PN_OK)return status;
- if(command->operation==PN_TRANSFER_BEGIN){
+ if(s->streaming){
+  bool own=(command->operation==PN_TRANSFER_CHUNK || command->operation==PN_TRANSFER_CANCEL || command->operation==PN_TRANSFER_STREAM_COMPLETE) && !memcmp(command->id,s->stream_id,PN_UPLOAD_ID_BYTES);
+  if(!own)return PN_BUSY;
+ }
+ if(command->operation==PN_TRANSFER_BEGIN || command->operation==PN_TRANSFER_STREAM_BEGIN){
   status=pn_upload_request_validate(&command->request);
   if(status!=PN_OK)return status;
-  if(!command->request.has_digest || (!command->replace && (command->old_size || !zero(command->old_digest.sha256,32))))return PN_INVALID;
+  bool stream=command->operation==PN_TRANSFER_STREAM_BEGIN;
+  if((!stream && !command->request.has_digest) || (stream && command->replace) || (!command->replace && (command->old_size || !zero(command->old_digest.sha256,32))))return PN_INVALID;
   status=close_current(s);
   if(status==PN_OK)status=create_port(s,command);
   if(status==PN_OK)status=pn_upload_begin(&s->upload,s->pool,s->media,&s->port,&command->request);
   if(status!=PN_OK){(void)close_current(s);return status;}
+  if(stream){
+   status=snapshot(s,reply);
+   if(status==PN_OK){s->streaming=true;memcpy(s->stream_id,command->request.id,PN_UPLOAD_ID_BYTES);}
+   else (void)close_current(s);
+   return status;
+  }
  }else if(command->operation==PN_TRANSFER_FILE){
   pn_upload_request_t request=command->request;request.id[0]=1;request.size=1;request.has_digest=false;request.digest=(pn_book_id_t){0};
   status=pn_upload_request_validate(&request);
@@ -246,14 +259,17 @@ pn_status_t pn_transfer_service_execute(pn_transfer_service_t *out,const pn_tran
  }else if(command->operation==PN_TRANSFER_DELETE){
   return delete_font(s,command,reply);
  }else{
-  if(command->operation<PN_TRANSFER_OPEN || command->operation>PN_TRANSFER_CANCEL || zero(command->id,PN_UPLOAD_ID_BYTES))return PN_INVALID;
+  bool finish=command->operation==PN_TRANSFER_STREAM_COMPLETE;
+  if((!finish && (command->operation<PN_TRANSFER_OPEN || command->operation>PN_TRANSFER_CANCEL)) || zero(command->id,PN_UPLOAD_ID_BYTES))return PN_INVALID;
   if(command->operation==PN_TRANSFER_CHUNK && (!command->bytes || !command->length || command->length>PN_UPLOAD_CHUNK))return PN_INVALID;
   status=ensure(s,command->id,command->operation==PN_TRANSFER_OPEN);
   if(status!=PN_OK)return status;
   if(command->operation==PN_TRANSFER_CHUNK){uint64_t ack;status=pn_upload_chunk(&s->upload,command->offset,command->bytes,command->length,&command->digest,&ack);}
   else if(command->operation==PN_TRANSFER_COMPLETE)status=pn_upload_complete(&s->upload,&command->digest);
   else if(command->operation==PN_TRANSFER_CANCEL)status=pn_upload_cancel(&s->upload);
+  else if(finish)status=pn_upload_complete_stream(&s->upload);
   if(status!=PN_OK)return status;
+  if(finish || command->operation==PN_TRANSFER_CANCEL)s->streaming=false;
  }
  return snapshot(s,reply);
 }

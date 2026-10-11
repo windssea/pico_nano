@@ -90,5 +90,15 @@ pn_status_t pn_upload_complete(pn_upload_t *out,const pn_book_id_t *digest){
  status=u->port.install_sync(u->port.ctx,next.request.kind,next.request.name,digest);if(status==PN_OK)status=guard(u);if(status!=PN_OK)return status;next.phase=PN_UPLOAD_COMMITTED;return save(u,&next);
 }
 pn_status_t pn_upload_cancel(pn_upload_t *out){if(!out || !out->impl)return PN_INVALID;upload_t *u=out->impl;pn_status_t status=guard(u);if(status!=PN_OK)return status;snapshot_t next=u->saved;if(next.phase==PN_UPLOAD_COMMITTED || next.phase==PN_UPLOAD_VERIFIED)return PN_BUSY;if(next.phase!=PN_UPLOAD_CANCELLED){next.phase=PN_UPLOAD_CANCELLED;status=save(u,&next);if(status!=PN_OK)return status;}status=u->port.remove_sync(u->port.ctx);if(status==PN_OK)status=guard(u);return status;}
+pn_status_t pn_upload_complete_stream(pn_upload_t *out){
+ if(!out || !out->impl)return PN_INVALID;
+ upload_t *u=out->impl;pn_status_t status=guard(u);if(status!=PN_OK)return status;
+ if(u->saved.phase==PN_UPLOAD_CANCELLED)return PN_CANCELLED;
+ if(u->saved.offset!=u->saved.request.size)return PN_BUSY;
+ pn_book_id_t digest;
+ if(u->saved.phase==PN_UPLOAD_RECEIVING)status=pn_identity_stream(u,u->saved.request.size,read_checked,&digest);
+ else digest=u->saved.request.digest;
+ return status==PN_OK?pn_upload_complete(out,&digest):status;
+}
 
 pn_status_t pn_upload_info(pn_upload_t *out,pn_upload_request_t *request){if(!out || !out->impl || !request)return PN_INVALID;upload_t *u=out->impl;pn_status_t status=guard(u);if(status==PN_OK)*request=u->saved.request;return status;}

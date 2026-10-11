@@ -10,6 +10,7 @@
 | [首次上板清单](docs/HARDWARE_BRINGUP.md) | 备份、启动、显示、存储、睡眠与无线验证顺序 |
 | [LocalSend接收模式](docs/LOCALSEND.md) | 官方客户端互通设计、整文件接收与验收边界（尚未实现） |
 | [存储卡目录](docs/SD_CARD_LAYOUT.md) | 各上传模式共用的资源分类、固定安装目录与封面关联 |
+| [整文件接收](docs/TRANSFER_RECEIVE.md) | LocalSend前置基础层：缺省SHA、短读、共享安装与取消（尚无协议互通） |
 | [开发环境与测试](docs/DEVELOPMENT_AND_TESTING.md) | Docker/Windows/WSL/SDL、SDK-stub、独立oracle与硬件边界 |
 | [完整开发计划](docs/DEVELOPMENT_PLAN.md) | 原始任务依赖与验收要求，不以局部实现代替任务完成 |
 | [总体设计](docs/DESIGN.md) | 产品目标和格式/资源路线 |
