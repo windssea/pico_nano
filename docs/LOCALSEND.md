@@ -2,6 +2,8 @@
 
 用户已要求增加与官方 LocalSend 客户端互通的传书方式。整文件接收基础层、[元数据/会话核心](LOCALSEND_SESSION.md) 与 [PC HTTP/IPv4发现开发入口](LOCALSEND_PC.md) 已实现；官方客户端完整联调、设备发现/HTTPS与中文图形接收确认尚未完成，不能宣称已支持官方客户端传书。现有网页上传、热点与家庭网络传书继续保留。
 
+[中文确认与状态组件](LOCALSEND_UI.md) 和可点击SDL演练已提供，尚未连接真实HTTP会话或设备页面；它不替代上面的图形接收闭环验收。
+
 ## 协议与产品范围
 
 协议来源为 [LocalSend 官方协议 v2.2](https://github.com/localsend/protocol/blob/62bd3406ec80d62f2ed46269cdc06c4dcc391083/README.md)，核对日期 2026-10-11。首期实现接收端，设备在传输页由用户开启，退出或锁屏时按现有停止屏障关闭。设备名“小纸 Pico”，接收已支持的 TXT/EPUB、TTF、JPEG/PNG；PDF/FB2/CBZ在阅读内核支持前拒绝，不按扩展名假装支持。

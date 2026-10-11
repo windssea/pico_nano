@@ -249,3 +249,6 @@ add_test(NAME localsend_http COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURC
 set_tests_properties(localsend_http PROPERTIES TIMEOUT 40)
 add_test(NAME localsend_discovery COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_localsend_discovery.py)
 set_tests_properties(localsend_discovery PROPERTIES TIMEOUT 10)
+add_executable(test_localsend_view test_localsend_view.c)
+target_link_libraries(test_localsend_view PRIVATE pn_core)
+add_test(NAME localsend_view COMMAND test_localsend_view)

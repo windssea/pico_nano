@@ -201,7 +201,7 @@ pn_status_t pn_w_status(pn_font_t *font,pn_frame_t *frame){
     if(!font || !font->impl || !frame)return PN_INVALID;
     int original=font->pixels;pn_status_t status=pn_font_size(font,24);
     // 左：产品名；右：时间（已知时）、无线（已连接时）、电量。都只显示真实读到的值。/ Left: product name; right: clock (when known), wireless (when connected) and battery, all only when actually read.
-    if(status==PN_OK)status=pn_w_text_ex(font,frame,"PicoNano",PN_UI_MARGIN,30,300,PN_ALIGN_LEFT,PN_UI_INK,true);
+    if(status==PN_OK)status=pn_w_text_ex(font,frame,"小纸 Pico",PN_UI_MARGIN,30,300,PN_ALIGN_LEFT,PN_UI_INK,true);
     int right=PN_UI_WIDTH-PN_UI_MARGIN;
     if(status==PN_OK && status_battery>=0){
         char text[8];int n=status_battery;char *p=text;if(n>=100){*p++='1';*p++='0';*p++='0';}else{if(n>=10)*p++=(char)('0'+n/10);*p++=(char)('0'+n%10);}*p++='%';*p=0;

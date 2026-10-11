@@ -86,6 +86,7 @@ cmake --build build-sim-native
 - 阅读/续读/目录/书签/排版/字体：见 [阅读会话](READER_SESSION.md)、[EPUB应用](EPUB_APP.md)、[阅读状态](READING_STATE.md)。
 - PC传书网页：见 [网页服务](TRANSFER_WEB.md)，使用独立测试书库，不能与阅读模拟器同时访问同一根。
 - LocalSend PC HTTP：见 [开发入口](LOCALSEND_PC.md)，本机控制台确认，独立测试根；尚未验证官方客户端或设备互通。
+- 附近传书界面预览：见 [中文确认与状态](LOCALSEND_UI.md)，`tools/run_localsend_preview.ps1` 打开独立可点击SDL窗口；无网络或文件安装。
 - 设备热点/退出返回：见 [设备入口](DEVICE_TRANSFER_ENTRY.md)；扫码及独立解码见 [扫码传书](TRANSFER_QR.md)。
 - EPUB容器全资源检查：`python tools/dev.py epub-sample --archive "mockDoc/绍宋.epub" --all-resources`，只读原文件，报告留build-dev。
 - 字体子集/fixture：tools/subset_ui_font.py、tools/subset_fallback_fixture.py，源哈希必须匹配；不能手改字体或表。
