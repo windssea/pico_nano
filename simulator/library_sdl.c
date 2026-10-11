@@ -103,7 +103,9 @@ static bool timing_on(void){static int on=-1;if(on<0){const char *v=getenv("PN_S
 static pn_status_t present_raw(library_t *s,const pn_frame_t *frame);
 static pn_status_t present(void *ctx,const pn_frame_t *frame,pn_refresh_t profile){
     library_t *s=ctx;(void)profile;
-    if(!s->toolbar && frame->width==684 && frame->height==1216 && frame->stride>=342){
+    if(!reading(s)){pn_free(s->page_px);s->page_px=NULL;pn_free(s->tool_px);s->tool_px=NULL;}
+    // 备份只供阅读工具栏关闭时恢复；书架/设置不需要，避免挤占封面解码预算。/ Only reading needs the backup for toolbar restoration; shelf/settings copies waste the cover decode budget.
+    if(reading(s) && !s->toolbar && frame->width==684 && frame->height==1216 && frame->stride>=342){
         if(!s->page_px)s->page_px=pn_alloc(s->pool,342u*1216u);
         if(s->page_px)for(int y=0;y<1216;y++)memcpy(s->page_px+(size_t)y*342,frame->pixels+(size_t)y*frame->stride,342);
     }

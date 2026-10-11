@@ -22,6 +22,18 @@ with tempfile.TemporaryDirectory() as folder:
         for i in range(chapters):
             body = '<img src="cover.jpg"/>' if not i else '<p>阅读测试。继续翻页，返回书架。</p>' * 50
             z.writestr(f"OPS/c{i}.xhtml", f'<html xmlns="http://www.w3.org/1999/xhtml"><head><title>测试</title></head><body>{body}</body></html>')
+    # 大图缩略图也须在书架空闲期间出现，不能只测正文可打开。/ Large-image thumbnails must appear while the shelf is idle, not merely open in reading.
+    cache = root / "covers"
+    cover_args = [sys.argv[1], "--library", str(books), "--state-dir", str(root / "cover-state"), "--cover-cache", str(cache)]
+    covered = subprocess.run(cover_args,
+        env=dict(os.environ, SDL_VIDEODRIVER="dummy", PN_SIM_LIBRARY_SCRIPT="wait:1500,quit"),
+        capture_output=True, text=True, timeout=60)
+    assert covered.returncode == 0 and "covers ready=1 status=0" in covered.stdout, (covered.stdout, covered.stderr)
+    assert "used=0 live=0" in covered.stdout, covered.stdout
+    assert len(list(cache.glob("*.pnc"))) == 1
+    warm = subprocess.run(cover_args, env=dict(os.environ, SDL_VIDEODRIVER="dummy", PN_SIM_LIBRARY_SCRIPT="wait:300,quit"),
+        capture_output=True, text=True, timeout=60)
+    assert warm.returncode == 0 and "covers ready=" not in warm.stdout and "used=0 live=0" in warm.stdout, (warm.stdout, warm.stderr)
     result = subprocess.run([sys.argv[1], "--library", str(books), "--state-dir", str(root / "state")],
         env=dict(os.environ, SDL_VIDEODRIVER="dummy", PN_SIM_LIBRARY_SCRIPT="tap:100:500,next,back,quit"),
         capture_output=True, text=True, timeout=60)
