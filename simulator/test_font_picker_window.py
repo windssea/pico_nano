@@ -20,10 +20,10 @@ with tempfile.TemporaryDirectory() as directory:
   r=run('styles,tap:100:570,release:200:180,font-select,font-preview,font-form,font-back,font-cancel,style-cancel,')
   assert 'font_ui command=34 status=0' in r.stdout and 'font_ui command=7 status=0' in r.stdout and 'font_ui command=9 status=0 active=0' in r.stdout,r.stdout
   assert not list(state.glob('*.fonts.*'))
-  r=run('styles,fonts,font-fallback,font-down,font-select,font-preview,font-form,font-apply,style-cancel,')
+  r=run('styles,fonts,font-primary,font-down,font-select,font-preview,font-form,font-apply,style-cancel,')
   assert 'font_ui command=8 status=0 active=0' in r.stdout,r.stdout
   snapshots=list(state.glob('*.fonts.*'));assert snapshots
-  payload=snapshots[0].read_bytes();at=payload.index(b'PNFP');assert struct.unpack_from('<H',payload,at+40)[0]==1 and struct.unpack_from('<H',payload,at+88)[0]==1
+  payload=snapshots[0].read_bytes();at=payload.index(b'PNFP');assert struct.unpack_from('<H',payload,at+40)[0]==1 and struct.unpack_from('<H',payload,at+88)[0]==0
   r=run('styles,fonts,font-cancel,style-cancel,');assert 'font_ui open status=0 active=1' in r.stdout,r.stdout
   before={p.name:p.read_bytes() for p in snapshots}
   r=run('styles,fonts,font-primary,font-select,font-default,font-back,font-cancel,style-cancel,')
@@ -33,6 +33,8 @@ with tempfile.TemporaryDirectory() as directory:
   r=run('styles,fonts,font-inherit,style-cancel,')
   assert 'font_ui command=13 status=0 active=0' in r.stdout,r.stdout
   snapshots=list(state.glob('*.fonts.*'));newest=max(snapshots,key=lambda p:struct.unpack_from('<Q',p.read_bytes(),12)[0]);payload=newest.read_bytes();at=payload.index(b'PNFP')
-  assert struct.unpack_from('<H',payload,at+6)[0]&2 and struct.unpack_from('<H',payload,at+40)[0]==0 and struct.unpack_from('<H',payload,at+88)[0]==0
+  assert not (struct.unpack_from('<H',payload,at+6)[0]&2) and struct.unpack_from('<H',payload,at+40)[0]==0 and struct.unpack_from('<H',payload,at+88)[0]==0
+  r=run('styles,fonts,tap:100:190,style-cancel,')
+  assert 'font_ui command=13 status=0 active=0' in r.stdout,r.stdout
 
-print('Font picker SDL: TXT/EPUB/library pointer entry, ignored release, original preview/cancel, fallback apply and durable reopen passed')
+print('Reading font picker: TXT/EPUB/library preview/cancel, external primary with automatic fallback, built-in default reset and durable reopen passed')

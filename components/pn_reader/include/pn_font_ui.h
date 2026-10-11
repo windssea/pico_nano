@@ -1,7 +1,7 @@
 /*
  * SPDX-License-Identifier: Apache-2.0
- * 中文：同源中文字体选择、正文/备用草稿与原文预览。
- * English: shared Chinese font selection, primary/fallback drafts and anchored previews.
+ * 中文：默认和外置阅读字体选择、正文草稿与原文预览；界面字体固定。
+ * English: default/external reading-font choices, primary drafts and anchored previews; UI font stays fixed.
  * 冻结：未呈现不能应用；样例不是全字库覆盖。
  * Frozen: unpresented UI cannot apply; samples are not full coverage.
  */
@@ -19,7 +19,8 @@
 #define PN_FUI_FORM 10
 #define PN_FUI_RETRY 11
 #define PN_FUI_DEFAULT 12
-#define PN_FUI_INHERIT 13
+#define PN_FUI_RESTORE_DEFAULT 13 ///< 本书恢复系统默认阅读字体 / Restore this book's system reading font
+#define PN_FUI_INHERIT PN_FUI_RESTORE_DEFAULT ///< 保留旧事件编号，不再表示继承 / Preserve the old event number, no longer inheritance
 #define PN_FUI_ROW 16
 #define PN_FUI_INFO 48 ///< 48+行：查看该字体详情（行右侧箭头）/ 48+row: open that font's details (the chevron on the right)
 #define PN_FUI_UP 32
