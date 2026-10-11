@@ -5,7 +5,8 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
-import { isLittleFs, md5, parseTable, planInstall, TABLE_OFFSET } from "../../installer/plan.js";
+import vm from "node:vm";
+import { isLittleFs, layoutOf, md5, parseTable, planInstall, TABLE_OFFSET, TABLE_SIZE } from "../../installer/plan.js";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const release = join(root, "releases", readdirSync(join(root, "releases")).filter((n) => n.startsWith("pico_nano-")).sort().at(-1));
@@ -14,7 +15,7 @@ const files = {
   bootloader: read("bootloader.bin"), partitionTable: read("partition-table.bin"), otaData: read("ota_data_initial.bin"),
   app: read("pico_nano.bin"), factoryData: read("first-install/factory-data.bin"), factoryWallpaper: read("first-install/factory-wallpaper.bin"),
 };
-const blankHead = new Uint8Array(0x2000).fill(0xff);
+const blankHead = new Uint8Array(0x100000).fill(0xff);
 const fsHead = files.factoryData.slice(0, 0x2000);
 
 /// 构造二进制分区表。/ Build a binary partition table.
@@ -92,4 +93,56 @@ test("unknown layout clears the whole NVS range; clearNvs does the same on upgra
 test("rejects an app larger than ota_0", () => {
   const big = { ...files, app: new Uint8Array(0x600001) };
   assert.throws(() => planInstall({ files: big, deviceTable: files.partitionTable, dataHead: fsHead, wallpaperHead: fsHead }));
+});
+
+test("unrecognized nonblank storage is preserved until explicit initialization", () => {
+  const damaged = new Uint8Array(blankHead); damaged[123] = 0x42;
+  const plan = planInstall({ files, deviceTable: files.partitionTable, dataHead: damaged, wallpaperHead: damaged });
+  assert.deepEqual(names(plan), ["write@0x20000", "write@0xf000", "write@0x0"]);
+  assert.deepEqual(plan.unrecognizedStorage, ["data", "wallpaper"]);
+  const reset = planInstall({ files, deviceTable: files.partitionTable, dataHead: damaged, wallpaperHead: damaged, initializeStorage: true });
+  assert.ok(reset.steps.some((s) => s.address === 0xc20000));
+  assert.ok(reset.steps.some((s) => s.address === 0xf00000));
+});
+
+test("short or missing storage reads never authorize automatic initialization", () => {
+  for (const head of [undefined, new Uint8Array(0), blankHead.slice(0, 4096), blankHead.slice(0, 8192)]) {
+    const plan = planInstall({ files, deviceTable: files.partitionTable, dataHead: head, wallpaperHead: fsHead });
+    assert.ok(!plan.steps.some((s) => s.address === 0xc20000));
+    assert.deepEqual(plan.unrecognizedStorage, ["data"]);
+  }
+});
+
+test("blank headers with data later in the partition are preserved", () => {
+  const bytes = new Uint8Array(blankHead); bytes[0x9000] = 1;
+  const plan = planInstall({ files, deviceTable: files.partitionTable, dataHead: bytes, wallpaperHead: fsHead });
+  assert.ok(!plan.steps.some((s) => s.address === 0xc20000));
+  assert.deepEqual(plan.unrecognizedStorage, ["data"]);
+});
+
+test("page preparation reads unknown partitions fully and wires explicit recovery", async () => {
+  // 运行真实页面控制器，仅替换DOM与串口；覆盖读取与计划的接线。/ Run the real page controller with DOM/serial substitutes to cover read and plan wiring.
+  const elements = new Map();
+  const element = () => ({ checked: false, dataset: {}, style: {}, events: {}, append() {}, replaceChildren() {}, addEventListener(name, fn) { this.events[name] = fn; } });
+  const document = { createElement: element, getElementById(id) { if (!elements.has(id)) elements.set(id, element()); return elements.get(id); } };
+  const reads = [];
+  const unknown = new Uint8Array(blankHead); unknown[0x9000] = 1;
+  const loader = { async readFlash(address, size) {
+    reads.push([address, size]);
+    if (address === TABLE_OFFSET) return files.partitionTable;
+    if (address === 0xc20000) return unknown.slice(0, size);
+    if (address === 0xf00000) return fsHead;
+    throw new Error("Unexpected read");
+  } };
+  const context = vm.createContext({ document, navigator: {}, console, files, loader, isLittleFs, layoutOf, md5, planInstall, TABLE_OFFSET, TABLE_SIZE });
+  const source = readFileSync(join(root, "installer/app.js"), "utf8").replace(/^import .*;\r?$/gm, "").replace("init().then(syncButtons);", "");
+  vm.runInContext(source, context);
+  await vm.runInContext("state.files=files; state.loader=loader; state.device={}; prepare();", context);
+  assert.deepEqual(reads, [[0x8000, 0xc00], [0xc20000, 8192], [0xc20000, 0x100000], [0xf00000, 8192]]);
+  assert.match(document.getElementById("plan-note").textContent, /保留原数据/);
+  assert.ok(document.getElementById("backup").checked);
+  assert.ok(!vm.runInContext("state.plan.steps.some(s=>s.address===0xc20000)", context));
+  const checkbox = document.getElementById("initialize-storage"); checkbox.checked = true; checkbox.events.change();
+  assert.ok(vm.runInContext("state.plan.steps.some(s=>s.address===0xc20000)", context));
+  assert.match(document.getElementById("plan-note").textContent, /已选择清除并初始化/);
 });

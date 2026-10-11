@@ -1,6 +1,6 @@
 # 开发环境与测试说明
 
-当前基线0.0.56。可运行命令统一见 [BUILDING](BUILDING.md)，功能/待办见 [PROJECT_STATUS](PROJECT_STATUS.md)，发布门保留在 [VALIDATION](VALIDATION.md)。以下区分“代码运行在哪里”和“能证明什么”。
+当前基线0.0.57。可运行命令与开发时可见窗口统一见 [BUILDING](BUILDING.md)，功能/待办见 [PROJECT_STATUS](PROJECT_STATUS.md)，发布门保留在 [VALIDATION](VALIDATION.md)。以下区分“代码运行在哪里”和“能证明什么”。
 
 ## ESP32-S3与PC模拟的区别
 
@@ -13,11 +13,11 @@ PC运行同源C阅读、字体、布局、状态机及UI，替换文件/显示/�
 | 环境 | 当前使用/要求 | 说明 |
 | --- | --- | --- |
 | Windows主机 | Python 3.12.8、PowerShell | 文档检查、字体生成、独立图像/QR核对 |
-| Docker Linux | Docker Engine 29.2.1；本机default context | 固定IDF镜像，实际连接状态必须现场核对 |
+| Docker Linux | Docker Engine 29.2.1；2026-10-11本机desktop-linux可用 | 固定IDF镜像，实际连接状态必须现场核对；default管道本次不可用 |
 | ESP工具链 | ESP-IDF v6.1固定镜像摘要 | 同一版本的CI和Zbit板级配置，不混用SDKCONFIG |
 | 主机测试 | 容器C11/CMake/Ninja/Python、ASan/UBSan、pthread | 原生Linux；代码依赖POSIX，Windows原生构建未验证 |
 | SDL | tools/docker构建pico-nano-sdl:dev | 固定IDF基础镜像+SDL2；dummy测试不产生可见窗口 |
-| 可见PC窗口 | Linux/WSL+SDL2+图形会话 | 同源阅读器，当前Windows Docker不代替WSLg窗口环境 |
+| 可见PC窗口 | Windows Docker+WSLg+SDL2，tools/run_sim.ps1 | 同源窗口已启动并捕获《绍宋》书架首帧；无真实面板与芯片模拟 |
 | 字体工具 | fontTools 4.51.0、固定Noto源SHA | 子集/OFL/家族改名，manifest记录可复现版本 |
 | JS摘要oracle | Node v24.19.0（本机） | tests/tools/test_transfer_sha.mjs与crypto比较；固件无Node依赖 |
 | QR独立oracle | 实际cv2模块4.13.0、headless发行4.13.0.92（本机） | tools/test_qr_decode.py准确比较演练UTF8载荷；不是手机相机实测 |

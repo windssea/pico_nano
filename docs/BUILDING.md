@@ -1,6 +1,19 @@
 # 构建与运行入口
 
-当前开发版本0.0.56。能力与待办统一见 [项目状态](PROJECT_STATUS.md)，环境、测试分层和证据边界见 [开发与测试](DEVELOPMENT_AND_TESTING.md)。本页只列已经存在的运行入口，不把拟建命令当成实现。
+当前开发版本0.0.57。能力与待办统一见 [项目状态](PROJECT_STATUS.md)，环境、测试分层和证据边界见 [开发与测试](DEVELOPMENT_AND_TESTING.md)。本页只列已经存在的运行入口，不把拟建命令当成实现。
+
+## 开发时保留可见模拟器
+
+界面开发与本地调试时先启动窗口，观察同源代码的显示效果：
+
+```powershell
+python tools/dev.py sdl-run
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/run_sim.ps1
+```
+
+默认使用忽略目录 mockDoc 中的《绍宋》与 LXGWWenKai-Regular.ttf。可用 -Books/-Font/-FontDir/-WallpaperDir 指定工作区内的其他输入。脚本保留已运行的 pico-sim 窗口，不自动关闭；源码重建后执行 docker stop pico-sim 再运行脚本，窗口才会加载新二进制。关闭窗口也会结束容器。
+
+依赖 Docker Linux 引擎与 WSLg；以 docker version 实际可连的 context 为准。2026-10-11本机 desktop-linux 可用，default 管道不可用，可在当前Shell设置 $env:DOCKER_CONTEXT='desktop-linux'，不改变全局配置。日志用 docker logs pico-sim 查看；每次呈现的PGM在忽略目录 build-dev/sim-frames，阅读状态与封面缓存在 pico-sim-data Docker卷中。dummy自动测试与可见窗口分开，窗口观感不等于真实面板观感。
 
 ## Windows与Docker
 
@@ -17,10 +30,10 @@ python tools/dev.py firmware-board
 
 命令均不烧写。host执行同源C、ASan/UBSan、真实文件/HTTP、SDK-stub和工具测试；sim为基础headless捕获与调度场景；sdl构建可选窗口模拟器并通过dummy驱动测试交互。Windows Docker里的dummy测试不打开可见窗口。
 
-若Docker连接失败，先读 `docker context ls`、`docker desktop status` 和 `docker --context default version`。本机当前default可以连接Linux引擎；旧desktop-linux管道可能不可用。仅在确认context指向可用Linux引擎后，给当前Shell设置：
+若Docker连接失败，先读 `docker context ls`、`docker desktop status`，再用 `docker --context desktop-linux version` 或 `docker --context default version` 核对各管道。仅在确认context指向可用Linux引擎后，给当前Shell设置（本次desktop-linux可用）：
 
 ```powershell
-$env:DOCKER_CONTEXT='default'
+$env:DOCKER_CONTEXT='desktop-linux'
 python tools/dev.py host
 ```
 
