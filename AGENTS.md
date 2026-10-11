@@ -7,6 +7,7 @@
 - 产品名中文“小纸 Pico”，英文/日文“Read Pico”；pico_nano仅内部目录/工程代号。
 - VCOM从PMU读取，产品路径不写入或复制到NVS；不写SY7636A标定/电源时序寄存器。不读取有效VCOM则不推屏。
 - 默认挂载/恢复不能格式化或静默擦除NVS。未来USB和应用不能并行访问TF。
+- 上传资源必须遵守docs/SD_CARD_LAYOUT.md；所有通道复用pn_upload_directory和共享安装事务，客户端不能选择目录，图片明确分为封面/锁屏。目录常量在pn_sd_layout.h。
 - 复用组件目前保持原样；摘要和来源在LICENSES/reference-manifest.json。禁止手改波形、stb与生成fallback表，保留原许可证。基础改动不可借整理注释修改vendor组件。
 - 新代码注释中英双语，公开API与成员使用///。render只绘制，硬件副作用留适配/控制层。
 - 核心、排版、字体与UI使用主机/固件同源，PC只替换port。主机性能及截图不能当面板或功耗实测。

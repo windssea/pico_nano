@@ -12,6 +12,8 @@
 #define PN_UPLOAD_NAME_MAX 256
 #define PN_UPLOAD_ID_BYTES 16
 typedef enum {PN_UPLOAD_BOOK=1,PN_UPLOAD_FONT,PN_UPLOAD_COVER,PN_UPLOAD_WALLPAPER} pn_upload_kind_t; ///< 资源目录类别 / Resource directory kind
+/// 唯一类别目录映射；未知类别返回NULL，客户端不能指定目录。/ Single category-directory mapping; unknown kinds return NULL, clients cannot set directories.
+const char *pn_upload_directory(pn_upload_kind_t kind);
 typedef enum {PN_UPLOAD_RECEIVING=0,PN_UPLOAD_VERIFIED,PN_UPLOAD_COMMITTED,PN_UPLOAD_CANCELLED} pn_upload_phase_t; ///< 持久阶段 / Durable phase
 typedef struct {
  uint8_t id[PN_UPLOAD_ID_BYTES]; ///< owner生成的随机非零ID，不是授权 / Owner-generated random nonzero ID, not authorization

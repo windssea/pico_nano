@@ -19,6 +19,7 @@
 #include "esp_vfs_fat.h"
 #include "esp_app_desc.h"
 #include "pn_focus.h"
+#include "pn_sd_layout.h"
 #include "pn_shelf_view.h"
 #include "pn_wallpaper.h"
 #include "pn_wallpaper_ui.h"
@@ -96,7 +97,7 @@ static bool list_mode; ///< 书架列表模式（每页5本）/ Shelf list mode 
 static size_t shelf_per_page(void){return list_mode || (!recent_mode && !fav_mode && *search_query)?5u:6u;}
 static pn_book_id_t selected_expected;
 static char selected_path[PN_CATALOG_PATH_MAX];
-static const char *book_directory="/sdcard";
+static const char *book_directory=PN_SD_MOUNT;
 static uint64_t card_instance=1;
 static pn_device_transfer_t transfer;
 static bool reading_menu,transfer_return,transfer_lock;
@@ -105,7 +106,7 @@ static uint64_t last_transfer_draw;
 static pn_shelf_covers_t *shelf_covers;
 static bool covers_dirty,touch_held;
 static uint8_t cover_salt[16];
-static const char *const cover_cache="/sdcard/.readpico/covers";
+static const char *const cover_cache=PN_SD_MOUNT "/" PN_SD_COVER_CACHE;
 static void *psram_alloc(void *ctx,size_t size){(void)ctx;return heap_caps_malloc(size,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);}
 static void psram_free(void *ctx,void *ptr){(void)ctx;heap_caps_free(ptr);}
 static uint64_t now_ms(void){return (uint64_t)(esp_timer_get_time()/1000);}
@@ -319,7 +320,7 @@ static pn_status_t draw_shelf(pn_refresh_t profile){
     uint8_t *pixels=pn_alloc(&pool,684u*1216u/2u);pn_frame_t frame;pn_font_t font={0};pn_text_source_t builtin=pn_font_builtin_source();
     pn_status_t status=pn_frame_bind(&frame,pixels,684u*1216u/2u,684,1216)?PN_OK:PN_NO_MEMORY;
     if(status==PN_OK)status=pn_font_open(&font,&pool,&builtin,24);
-    if(status==PN_OK){pn_w_set_battery(battery_percent());pn_shelf_options_t options=shelf_options();status=pn_shelf_render_with_font_file_ex(shelf_page,&font,&frame,shelf_focus,recent_mode,true,shelf_covers,&pool,&sd_media,access("/sdcard/fonts/reader.ttf",R_OK)==0?"/sdcard/fonts/reader.ttf":NULL,&options);}
+    if(status==PN_OK){pn_w_set_battery(battery_percent());pn_shelf_options_t options=shelf_options();status=pn_shelf_render_with_font_file_ex(shelf_page,&font,&frame,shelf_focus,recent_mode,true,shelf_covers,&pool,&sd_media,access(PN_SD_MOUNT "/" PN_SD_FONTS "/reader.ttf",R_OK)==0?PN_SD_MOUNT "/" PN_SD_FONTS "/reader.ttf":NULL,&options);}
     // 书籍操作面板叠在书架上（删除确认为整页）。/ The book actions sheet overlays the shelf (the delete confirmation is a full page).
     if(status==PN_OK)status=present(NULL,&frame,profile);
     pn_font_close(&font);pn_free(pixels);return status;
@@ -397,8 +398,8 @@ static void start_reader(void){
     if(card.present && !card.mounted){esp_err_t mounted=read_pico_sd_remount();if(mounted!=ESP_OK){message("TF卡不可用","未格式化\n检查卡后重试");return;}(void)read_pico_sd_get_info(&card);}
     if(!card.mounted){message("请插入TF卡","书籍放 books 目录\n字体可放 fonts/reader.ttf");return;}
     if(!sd_media.available){pn_status_t s=pn_media_attach(&sd_media,card_instance++);if(s!=PN_OK){message("卡仍被占用","等待旧文件关闭后重试");return;}}
-    if(!*selected_path){struct stat info;book_directory=stat("/sdcard/books",&info)==0 && S_ISDIR(info.st_mode)?"/sdcard/books":"/sdcard";show_shelf("",false);return;}
-    const char *font=access("/sdcard/fonts/reader.ttf",R_OK)==0?"/sdcard/fonts/reader.ttf":NULL;
+    if(!*selected_path){struct stat info;book_directory=stat(PN_SD_MOUNT "/" PN_SD_BOOKS,&info)==0 && S_ISDIR(info.st_mode)?PN_SD_MOUNT "/" PN_SD_BOOKS:PN_SD_MOUNT;show_shelf("",false);return;}
+    const char *font=access(PN_SD_MOUNT "/" PN_SD_FONTS "/reader.ttf",R_OK)==0?PN_SD_MOUNT "/" PN_SD_FONTS "/reader.ttf":NULL;
     pn_status_t status=selected_format==PN_BOOK_EPUB?pn_epub_app_open_on_media(&epub,&pool,&sd_media,selected_path,font,"/data/progress",44,now_ms()):pn_reader_app_open_on_media(&reader,&pool,&sd_media,selected_path,font,"/data/progress",44,now_ms());
     if(status==PN_OK && selected_identified){pn_book_id_t actual;status=epub.impl?pn_epub_app_identity(&epub,&actual):pn_reader_app_identity(&reader,&actual);if(status==PN_OK && memcmp(actual.sha256,selected_expected.sha256,32))status=PN_STALE_JOB;}
     if(status==PN_OK)status=active_step(PN_APP_OPEN,now_ms());
@@ -444,7 +445,7 @@ static void begin_wallpaper(void){
     if(!stop_reader())return;
     reading_menu=false;pn_wallpaper_store_t store;
     bool store_ok=mount_wallpaper() && pn_wallpaper_store_init(&store,&wallpaper_media,"/wallpaper/lock.a","/wallpaper/lock.b")==PN_OK;
-    pn_status_t status=pn_wallpaper_ui_open(&wallpaper_ui,&pool,&sd_media,"/sdcard/wallpapers",store_ok?&store:NULL,present,NULL);
+    pn_status_t status=pn_wallpaper_ui_open(&wallpaper_ui,&pool,&sd_media,PN_SD_MOUNT "/" PN_SD_WALLPAPERS,store_ok?&store:NULL,present,NULL);
     if(status!=PN_OK){message("壁纸设置未打开","保留原锁屏，稍后重试");return;}
     status_page=true;shelf_mode=false;index_mode=false;search_mode=false;hub_mode=false;actions_mode=false;
 }
@@ -454,7 +455,7 @@ static void begin_fonts(void){
     if(!stop_reader())return;
     reading_menu=false;
     if(!data_ready)data_ready=mount_data();
-    pn_status_t status=pn_font_manage_open(&font_manage,&pool,&sd_media,"/sdcard/fonts",data_ready?&data_media:NULL,data_ready?"/data/progress":NULL,present,NULL);
+    pn_status_t status=pn_font_manage_open(&font_manage,&pool,&sd_media,PN_SD_MOUNT "/" PN_SD_FONTS,data_ready?&data_media:NULL,data_ready?"/data/progress":NULL,present,NULL);
     if(status!=PN_OK){message("字体管理未打开","字体与选择均保留，稍后重试");return;}
     status_page=true;shelf_mode=false;index_mode=false;search_mode=false;hub_mode=false;actions_mode=false;
 }
@@ -489,7 +490,7 @@ static void begin_transfer(bool station){
     if(station){pn_network_credentials_t c={0};pn_status_t loaded=load_network(&c);
         if(loaded!=PN_OK || !c.ssid[0]){pn_network_wipe(&c);message("没有已保存的网络","可在热点传书网页中保存");return;}
         config.mode=PN_WIFI_STA;strcpy(config.ssid,c.ssid);strcpy(config.password,c.password);pn_network_wipe(&c);}
-    pn_status_t status=pn_device_transfer_open(&transfer,&sd_media,"/sdcard",&config);
+    pn_status_t status=pn_device_transfer_open(&transfer,&sd_media,PN_SD_MOUNT,&config);
     {volatile uint8_t *secret=(volatile uint8_t *)config.password;for(size_t i=0;i<sizeof config.password;i++)secret[i]=0;}
     if(status!=PN_OK){message("传输未开启","保留阅读位置，请重试");return;}
     if(!data_ready)data_ready=mount_data();
@@ -529,7 +530,7 @@ static void show_search(void){
 /// 存储卡容量说明（实际读取，读不到为空串）。/ Card capacity note from an actual read; empty when unreadable.
 static void storage_note(char *out,size_t cap){
     out[0]=0;uint64_t total=0,free_bytes=0;
-    if(sd_media.available && esp_vfs_fat_info("/sdcard",&total,&free_bytes)==ESP_OK && total)
+    if(sd_media.available && esp_vfs_fat_info(PN_SD_MOUNT,&total,&free_bytes)==ESP_OK && total)
         snprintf(out,cap,"共 %llu.%llu GB · 可用 %llu.%llu GB",(unsigned long long)(total>>30),(unsigned long long)((total%(1ull<<30))*10>>30),(unsigned long long)(free_bytes>>30),(unsigned long long)((free_bytes%(1ull<<30))*10>>30));
 }
 /// 传书一级页：按实际能力列出通道。/ Transfer root tab listing channels by real capability.

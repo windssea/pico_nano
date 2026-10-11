@@ -99,4 +99,15 @@ with tempfile.TemporaryDirectory() as folder:
     (books/'f-sidecar.cover.png').unlink()
     states=queue(cache);assert states['f-sidecar.txt']==(0,EMPTY),states
     assert not any(f.name.endswith('.tmp') for f in cache.iterdir())
-print('cover: EPUB declared/EPUB2/candidate/none/corrupt, TXT sidecar/none/garbage, fault-injected allocation, shelf queue and TF cache hit/invalidate/rebuild passed')
+    # 上传封面在卡根covers，TXT/EPUB共用，与缓存目录分开。/ Uploaded covers live in card-root covers for TXT/EPUB, separate from caches.
+    card=root/'card';(card/'books').mkdir(parents=True);(card/'covers').mkdir()
+    text=card/'books'/'sample.txt';text.write_text('正文',encoding='utf8')
+    publication=card/'books'/'sample.epub';epub(publication,halves)
+    (card/'covers'/'sample.png').write_bytes(png(40,40,lambda x,y:0))
+    for book in (text,publication):
+        _,_,pixels=render(book,OK,root/'central.pgm')
+        assert pixels[(H//2)*W+W//2]==0,'central uploaded cover takes precedence'
+    (card/'covers'/'sample.png').unlink()
+    render(text,EMPTY,root/'missing.pgm')
+    render(publication,OK,root/'embedded.pgm')
+print('cover: EPUB sources, TXT sidecars, centralized uploaded covers, faults and cache recovery passed')

@@ -85,7 +85,7 @@ static pn_status_t metadata(service_t *s,const pn_upload_request_t *request,pn_t
  pn_media_lease_t lease={0};
  status=pn_media_acquire(s->media,PN_MEDIA_READ,&lease);
  if(status!=PN_OK)return status;
- const char *folder=request->kind==PN_UPLOAD_BOOK?"books":request->kind==PN_UPLOAD_FONT?"fonts":request->kind==PN_UPLOAD_COVER?"covers":"wallpapers";
+ const char *folder=pn_upload_directory(request->kind);
  char dir[PN_JOURNAL_PATH_MAX],path[PN_JOURNAL_PATH_MAX];
  int n=snprintf(dir,sizeof dir,"%s/%s",s->root,folder);
  status=n<0 || (size_t)n>=sizeof dir?PN_LIMIT:directory(dir);
@@ -106,7 +106,7 @@ static pn_status_t metadata(service_t *s,const pn_upload_request_t *request,pn_t
 }
 /// 字体目录绝对路径。/ Absolute path of the font directory.
 static pn_status_t font_directory(service_t *s,char *dir){
- int n=snprintf(dir,PN_JOURNAL_PATH_MAX,"%s/fonts",s->root);
+ int n=snprintf(dir,PN_JOURNAL_PATH_MAX,"%s/%s",s->root,pn_upload_directory(PN_UPLOAD_FONT));
  return n<0 || (size_t)n>=PN_JOURNAL_PATH_MAX?PN_LIMIT:PN_OK;
 }
 /// 与上传相同的名称规则：只有能被上传的名称才会被列出或删除。/ Same name rules as uploads: only names that could be uploaded are listed or deleted.

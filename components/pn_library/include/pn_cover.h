@@ -12,7 +12,7 @@
 #define PN_COVER_WIDTH 184 ///< 网格封面宽，见UI_UX书架布局 / Grid cover width, see the shelf layout in UI_UX
 #define PN_COVER_HEIGHT 256 ///< 网格封面高 / Grid cover height
 #define PN_COVER_BYTES (PN_COVER_WIDTH*PN_COVER_HEIGHT/2)
-#define PN_COVER_CACHE_VERSION 2 ///< 尺寸变化后缓存重建 / Caches rebuild after the size change
+#define PN_COVER_CACHE_VERSION 3 ///< 集中封面来源变化后缓存重建 / Rebuild caches after centralized cover-source changes
 #define PN_COVER_SLOT_LAST PN_CATALOG_PAGE_MAX ///< 最近阅读卡使用的额外槽 / Extra slot used by the continue-reading card
 
 /// 单书封面状态。/ Per-book cover state.
