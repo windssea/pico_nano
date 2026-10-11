@@ -1,6 +1,6 @@
 # LocalSend 元数据与会话核心
 
-本模块已实现同源C会话与协议JSON编解码，不是可运行的LocalSend HTTP服务器。设备入口、中文确认界面、UDP发现和HTTPS尚未装配，官方客户端仍不能传书。
+本模块已实现同源C会话与协议JSON编解码，并由 [PC HTTP开发入口](LOCALSEND_PC.md) 调用。设备入口、中文图形确认界面、UDP发现和HTTPS尚未装配，官方客户端互通尚未验证。
 
 ## 元数据与目录
 

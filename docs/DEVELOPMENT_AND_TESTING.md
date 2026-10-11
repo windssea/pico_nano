@@ -60,6 +60,7 @@ Linux/WSL原生host可用ctest -R筛选名称，或ctest -L筛选已有标签；
 ## 专项重跑
 
 - PC HTTP：先host构建pn_transfer_host，再按TRANSFER_WEB启动；默认回环，配对码仅当前会话，退出等待已接收请求。测试根不能复用mockDoc或正在阅读的书库。
+- LocalSend PC HTTP：host构建pn_localsend_host，按 [开发入口](LOCALSEND_PC.md) 启动；可信本机确认，真实TCP与共享安装层联测。私有EPUB/TTF可作为测试脚本附加参数；官方客户端、UDP、设备HTTPS与图形UI单独验收。
 - 摘要：`node tests/tools/test_transfer_sha.mjs`，验证块边界/填充/任意分块；浏览器页面无需安全上下文WebCrypto。
 - 二维码：按TRANSFER_QR生成PGM，再用本机OpenCV独立解码；捕获是演练口令，截图不是设备照片。
 - EPUB：epub-sample核对全部ZIP资源；epub_dump/body_probe/epub_capture等边界见对应格式维护文档，不把单一容器检查当阅读验收。
