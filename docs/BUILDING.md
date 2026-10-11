@@ -11,7 +11,17 @@ python tools/dev.py sdl-run
 powershell -NoProfile -ExecutionPolicy Bypass -File tools/run_sim.ps1
 ```
 
-默认使用忽略目录 mockDoc 中的《绍宋》与 LXGWWenKai-Regular.ttf。可用 -Books/-Font/-FontDir/-WallpaperDir 指定工作区内的其他输入。脚本保留已运行的 pico-sim 窗口，不自动关闭；源码重建后执行 docker stop pico-sim 再运行脚本，窗口才会加载新二进制。关闭窗口也会结束容器。
+默认自动生成忽略目录 build-dev/sim-library/books：4本TXT（UTF8/BOM/UTF16/GBK）与4本原创EPUB（EPUB2/3、目录、插图、长书名），并在本地原小说存在时复制《绍宋》，共9本。原创文字和条纹图使用CC0-1.0，私人小说不随仓库交付；在窗口删除书籍只影响副本，原始mockDoc不改。字体默认使用 mockDoc/LXGWWenKai-Regular.ttf。
+
+可单独运行 python tools/make_sim_library.py 重建样本（会重新生成上述固定文件名）。可用 -Books/-Font/-FontDir/-WallpaperDir 指定工作区内的其他输入。脚本保留已运行的 pico-sim 窗口，不自动关闭；源码重建后执行 docker stop pico-sim 再运行脚本，窗口才会加载新二进制。关闭窗口也会结束容器。
+
+逐本打开/翻页/返回的本地复跑（Docker Linux）：
+
+```powershell
+docker run --rm --mount type=bind,source=D:\windssea\dev\pico_nano,target=/work -w /work pico-nano-sdl:dev python3 tools/test_sim_library.py build-sim-sdl-run/pn_sim build-dev/sim-library/books mockDoc/LXGWWenKai-Regular.ttf
+```
+
+默认6MiB阅读预算不扩大。进入正文前释放不再使用的书架帧备份，避免大渐进式JPEG首帧被无用备份挤占；打开失败会在书架提示，具体状态与阶段可用 docker logs pico-sim 查看。大型图片仍有预算限制，PC结果不证明设备可解码所有大图。
 
 依赖 Docker Linux 引擎与 WSLg；以 docker version 实际可连的 context 为准。2026-10-11本机 desktop-linux 可用，default 管道不可用，可在当前Shell设置 $env:DOCKER_CONTEXT='desktop-linux'，不改变全局配置。日志用 docker logs pico-sim 查看；每次呈现的PGM在忽略目录 build-dev/sim-frames，阅读状态与封面缓存在 pico-sim-data Docker卷中。dummy自动测试与可见窗口分开，窗口观感不等于真实面板观感。
 

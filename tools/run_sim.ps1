@@ -2,7 +2,7 @@
 # 先运行 python tools/dev.py sdl-run 生成Release二进制。 / Run `python tools/dev.py sdl-run` first to build the Release binary.
 # 用法 / Usage:  powershell -File tools\run_sim.ps1 [-Books DIR] [-Font TTF] [-FontDir DIR] [-WallpaperDir DIR]
 param(
-    [string]$Books = "mockDoc",
+    [string]$Books = "build-dev/sim-library/books",
     [string]$Font = "mockDoc/LXGWWenKai-Regular.ttf",
     [string]$FontDir = "mockDoc",
     [string]$WallpaperDir = "mockDoc"
@@ -14,6 +14,11 @@ if (-not (Test-Path "build-sim-sdl-run/pn_sim")) { Write-Error "缺少 build-sim
 $running = docker ps --filter "name=^/pico-sim$" --format '{{.ID}}'
 if ($LASTEXITCODE -ne 0) { Write-Error "Docker不可用，请检查 docker context ls 与 docker version"; exit 1 }
 if ($running) { Write-Host "模拟器已运行，保留当前窗口；重建后用 docker stop pico-sim 再启动。"; exit 0 }
+# 默认书库可复建，原小说只复制，不把阅读器删除操作指向私人源文件。/ Rebuild the default library and copy the novel so reader deletes never target private originals.
+if ($Books -eq "build-dev/sim-library/books") {
+    python tools/make_sim_library.py
+    if ($LASTEXITCODE -ne 0) { Write-Error "测试书库生成失败"; exit 1 }
+}
 foreach ($path in @($Books, $Font, $FontDir, $WallpaperDir)) {
     if (-not (Test-Path -LiteralPath $path)) { Write-Error "模拟器输入不存在：$path"; exit 1 }
 }

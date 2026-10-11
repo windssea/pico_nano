@@ -77,6 +77,8 @@ endif()
 
 if(PN_SIM_SDL)
 add_test(NAME epub_library COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_epub_library.py $<TARGET_FILE:pn_sim>)
+add_test(NAME large_epub_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_large_epub_window.py $<TARGET_FILE:pn_sim>)
+set_tests_properties(large_epub_window PROPERTIES LABELS "library;reader")
 endif()
 
 if(PN_SIM_SDL)
