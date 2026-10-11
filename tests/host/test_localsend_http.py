@@ -12,6 +12,7 @@ import urllib.parse
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / 'tools'))
 from localsend_server import LocalSendApp, LocalSendServer
+from localsend_control import LocalControl
 
 
 def main(binary,resources=()):
@@ -22,8 +23,16 @@ def main(binary,resources=()):
             binary = ['docker','--context','desktop-linux','run','--rm','-i','--mount',f'type=bind,source={workspace},target=/work',
                       '--mount',f'type=bind,source={directory},target=/sd','--entrypoint','/work/build-host/pn_localsend_host','pico-nano-sdl:dev','/sd']
         app = LocalSendApp(binary, directory)
+        control = LocalControl(app)
         server = LocalSendServer(('127.0.0.1', 0), app)
         thread = threading.Thread(target=server.serve_forever); thread.start()
+        def operator(path,body=None,authorized=True,origin=True):
+            conn=http.client.HTTPConnection(*control.server.server_address,timeout=5)
+            headers={'Authorization':'Bearer '+control.token} if authorized else {}
+            if origin:headers['Origin']=control.authority
+            conn.request('POST' if body is not None else 'GET',path,json.dumps(body).encode() if body is not None else None,headers)
+            response=conn.getresponse();data=response.read();conn.close()
+            return response.status,json.loads(data) if data else None
         def request(path, data=b'', headers=None, method='POST'):
             conn = http.client.HTTPConnection(*server.server_address, timeout=15)
             conn.request(method, path, data, headers or {})
@@ -38,8 +47,13 @@ def main(binary,resources=()):
                 while not app.pending() and time.monotonic() < deadline: time.sleep(.01)
                 pending = app.pending(); assert pending
                 assert not (pathlib.Path(directory) / 'books' / name).exists()
-                assert app.decide(pending['generation'] - 1, accept)['code'] != 0
-                assert app.decide(pending['generation'], accept)['code'] in (0, 8)
+                assert operator('/state',authorized=False)[0]==403
+                display=operator('/state')[1]
+                assert 'grants' not in display and 'sessionId' not in display and display['generation']==pending['generation']
+                assert operator('/decide',{'generation':pending['generation'],'choices':accept},origin=False)[0]==403
+                assert operator('/decide',{'generation':pending['generation']-1,'choices':accept})[0]==409
+                assert operator('/decide',{'generation':pending['generation'],'choices':accept})[0]==200
+                assert operator('/state')[1]['choices']==accept
                 return future.result()
         try:
             assert request('/api/localsend/v2/info', method='GET')[1]['download'] is False
@@ -77,7 +91,8 @@ def main(binary,resources=()):
             while not app.active and time.monotonic()<deadline: time.sleep(.01)
             assert app.active
             assert request('/api/localsend/v2/cancel?sessionId='+'0'*32)[0] == 403
-            assert request('/api/localsend/v2/cancel?sessionId='+grants['sessionId'])[0] == 200
+            assert operator('/cancel',{'generation':app.last['generation']-1})[0]==409
+            assert operator('/cancel',{'generation':app.last['generation']})[0]==200
             response = conn.getresponse(); assert response.status == 403; response.read(); conn.close()
             assert not (pathlib.Path(directory)/'books/取消.txt').exists()
             assert prepare('后续.txt','正文'.encode())[0] == 200
@@ -98,7 +113,7 @@ def main(binary,resources=()):
                 app.owner.release()
                 assert request('/api/localsend/v2/prepare-upload',b'{}')[0] == 503
         finally:
-            server.shutdown(); app.stop(); server.server_close(); thread.join(); app.close()
+            server.shutdown(); app.stop(); control.close(); server.server_close(); thread.join(); app.close()
 
 
 if __name__ == '__main__': main(sys.argv[1],sys.argv[2:])

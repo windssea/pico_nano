@@ -31,6 +31,10 @@ class LocalSendApp:
         self.grants = None
         self.active = False
         self.closed = False
+        self.last = {'phase':0,'generation':0,'installed':0,'failed':0}
+        self.display_request = None
+        self.display_choices = ''
+        self.received = 0; self.total = 0; self.file_name = ''
         self.abort = threading.Event()
         self.info = {'alias':'小纸 Pico（PC 测试）', 'version':'2.2', 'deviceModel':'PC simulator',
                      'deviceType':'headless', 'fingerprint':secrets.token_hex(32), 'download':False,
@@ -46,7 +50,10 @@ class LocalSendApp:
         try:
             self.process.stdin.write(command.encode('ascii') + b'\n' + data)
             self.process.stdin.flush()
-            return self._read()
+            result=self._read()
+            with self.condition:
+                self.last.update({k:result[k] for k in ('phase','generation','installed','failed','unresolved') if k in result})
+            return result
         except (OSError,RuntimeError,ValueError) as exc:
             self.stop()
             raise RuntimeError('原生接收通道失效；请停止后重新启动') from exc
@@ -55,6 +62,19 @@ class LocalSendApp:
         with self.condition:
             # 返回独立展示快照，不将令牌交给待确认界面。/ Return an independent display snapshot without grant tokens.
             return json.loads(json.dumps(self.waiting)) if self.waiting else None
+
+    def control_state(self):
+        with self.condition:
+            return json.loads(json.dumps({**self.last,'request':self.display_request,'choices':self.display_choices,'pending':self.waiting is not None and self.decision is None,
+                    'active':self.active,'received':self.received,'total':self.total,'file_name':self.file_name,'closed':self.closed,'cancelling':self.abort.is_set()}))
+
+    def control_cancel(self,generation):
+        with self.condition:
+            if type(generation) is not int or generation!=self.last['generation']:return {'code':7}
+            pending=self.waiting if self.decision is None else None
+            peer=self.peer;grants=self.grants
+        if pending:return self.decide(generation,'0'*len(pending['files']))
+        return self.cancel(peer,grants['sessionId']) if grants else {'code':2}
 
     def prepare(self, peer, body):
         if not self.owner.acquire(blocking=False): return {'code':2}
@@ -65,6 +85,9 @@ class LocalSendApp:
                 result = self._call(f'PREP {peer} {len(body)}', body)
                 if result['code']: return result
                 self.waiting = result; self.decision = None; self.peer = peer; self.grants = None
+                self.display_request={'alias':result['alias'],'files':result['files']}
+                self.display_choices=''
+                self.received=self.total=0;self.file_name='';self.abort.clear()
                 self.condition.notify_all()
         finally: self.owner.release()
         deadline = time.monotonic() + 60
@@ -88,7 +111,7 @@ class LocalSendApp:
                 if self.closed or not self.waiting or self.decision is not None: return {'code':2}
                 result = self._call(f'DECIDE {generation} {choices}')
                 if result['code'] not in (0,8): return result
-                self.decision = result; self.grants = result.get('grants'); self.condition.notify_all()
+                self.decision = result; self.grants = result.get('grants'); self.display_choices=choices; self.condition.notify_all()
                 return result
         finally: self.owner.release()
 
@@ -110,6 +133,8 @@ class LocalSendApp:
                 result = self._call(f'AUTH {peer} {sid} {file_id.encode("utf8").hex()} {token}')
                 if not result.get('body'): return result
                 started = True; self.active = True; self.abort.clear()
+                self.received=0;self.total=result['size']
+                self.file_name=next((f['name'] for f in self.display_request['files'] if f['id']==file_id),'')
             if result['size'] != size:
                 final = True; self._call('ABORT'); return {'code':1}
             connection.settimeout(1)
@@ -126,6 +151,7 @@ class LocalSendApp:
                 if not result.get('frame'):
                     final = True; return result
                 remaining -= len(data); idle = time.monotonic()
+                with self.condition:self.received=size-remaining
             final = True
             result = self._call('ABORT' if self.abort.is_set() else 'EOF')
             with self.condition:
@@ -283,6 +309,7 @@ def main():
     parser.add_argument('--port',type=int,default=53317)
     parser.add_argument('--discovery-interface',help='启用UDP发现并明确本机局域网IPv4地址')
     parser.add_argument('--discovery-port',type=int,default=53317,help='UDP发现端口，须与客户端一致')
+    parser.add_argument('--control',action='store_true',help='打开仅本机可访问的图形确认入口')
     args = parser.parse_args()
     if not 1<=args.port<=65535 or not 1<=args.discovery_port<=65535: parser.error('端口须在1–65535之间')
     if args.discovery_interface and args.bind in ('127.0.0.1','localhost','::1'):
@@ -302,11 +329,21 @@ def main():
             discovery = Discovery(app.info,args.discovery_interface,listen_port=args.discovery_port,target=('224.0.0.167',args.discovery_port)); discovery.start()
     except (OSError,ValueError,RuntimeError):
         close_services(app,server,discovery); raise
-    threading.Thread(target=console,args=(app,),daemon=True).start()
-    print(f'PC 明文HTTP开发服务：http://{args.bind}:{server.server_address[1]}；仅本机控制台可确认。UDP发现{"已开启" if discovery else "未开启"}；设备HTTPS尚未接入。',flush=True)
+    control=None
+    if args.control:
+        from localsend_control import LocalControl
+        try:control=LocalControl(app)
+        except BaseException:close_services(app,server,discovery);raise
+        print('本机图形确认：'+control.url,flush=True)
+    else:threading.Thread(target=console,args=(app,),daemon=True).start()
+    print(f'PC 明文HTTP开发服务：http://{args.bind}:{server.server_address[1]}；本机确认入口已开启。UDP发现{"已开启" if discovery else "未开启"}；设备HTTPS尚未接入。',flush=True)
     try: server.serve_forever()
     except KeyboardInterrupt: pass
-    finally: close_services(app,server,discovery)
+    finally:
+        app.stop()
+        try:
+            if control:control.close()
+        finally:close_services(app,server,discovery)
 
 
 if __name__=='__main__': main()
