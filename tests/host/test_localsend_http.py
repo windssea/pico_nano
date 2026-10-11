@@ -16,6 +16,11 @@ from localsend_server import LocalSendApp, LocalSendServer
 
 def main(binary,resources=()):
     with tempfile.TemporaryDirectory() as directory:
+        docker_worker = binary=='--docker-worker'
+        if docker_worker:
+            workspace = pathlib.Path(__file__).resolve().parents[2]
+            binary = ['docker','--context','desktop-linux','run','--rm','-i','--mount',f'type=bind,source={workspace},target=/work',
+                      '--mount',f'type=bind,source={directory},target=/sd','--entrypoint','/work/build-host/pn_localsend_host','pico-nano-sdl:dev','/sd']
         app = LocalSendApp(binary, directory)
         server = LocalSendServer(('127.0.0.1', 0), app)
         thread = threading.Thread(target=server.serve_forever); thread.start()
@@ -86,11 +91,12 @@ def main(binary,resources=()):
                 installed = (pathlib.Path(directory)/folder/path.name).read_bytes()
                 assert hashlib.sha256(installed).digest()==hashlib.sha256(data).digest()
                 print(f'HTTP/native SHA256 {path.name}: {hashlib.sha256(installed).hexdigest()}',flush=True)
-            app.process.terminate(); app.process.wait(timeout=5)
-            assert request('/api/localsend/v2/prepare-upload',b'{}')[0] == 500
-            assert app.closed and app.owner.acquire(blocking=False)
-            app.owner.release()
-            assert request('/api/localsend/v2/prepare-upload',b'{}')[0] == 503
+            if not docker_worker:
+                app.process.terminate(); app.process.wait(timeout=5)
+                assert request('/api/localsend/v2/prepare-upload',b'{}')[0] == 500
+                assert app.closed and app.owner.acquire(blocking=False)
+                app.owner.release()
+                assert request('/api/localsend/v2/prepare-upload',b'{}')[0] == 503
         finally:
             server.shutdown(); app.stop(); server.server_close(); thread.join(); app.close()
 

@@ -12,6 +12,7 @@ import subprocess
 import threading
 import time
 import urllib.parse
+from localsend_discovery import Discovery
 
 PREFIX = '/api/localsend/v2/'
 HTTP_CODES = {1:400, 2:409, 3:404, 4:413, 5:503, 6:503, 7:403, 8:403, 9:400, 10:422, 11:500}
@@ -20,7 +21,8 @@ HTTP_CODES = {1:400, 2:409, 3:404, 4:413, 5:503, 6:503, 7:403, 8:403, 9:400, 10:
 class LocalSendApp:
     def __init__(self, executable, root):
         pathlib.Path(root).mkdir(parents=True, exist_ok=True)
-        self.process = subprocess.Popen([str(executable), str(root)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,start_new_session=True)
+        command = executable if isinstance(executable,list) else [str(executable),str(root)]
+        self.process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,start_new_session=True)
         self.owner = threading.Lock()
         self.condition = threading.Condition()
         self.waiting = None
@@ -261,20 +263,50 @@ def console(app):
             print('已确认' if result['code']==0 else '未接收；请重新发起',flush=True); break
 
 
+def close_services(app,server,discovery):
+    app.stop()
+    try:
+        if discovery: discovery.close()
+    finally:
+        try:
+            if server: server.server_close()
+        finally: app.close()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--worker',type=pathlib.Path,required=True)
+    workers = parser.add_mutually_exclusive_group(required=True)
+    workers.add_argument('--worker',type=pathlib.Path)
+    workers.add_argument('--docker-worker',action='store_true',help='Windows网络服务调用容器原生owner')
     parser.add_argument('--root',type=pathlib.Path,required=True)
     parser.add_argument('--bind',default='127.0.0.1')
     parser.add_argument('--port',type=int,default=53317)
+    parser.add_argument('--discovery-interface',help='启用UDP发现并明确本机局域网IPv4地址')
+    parser.add_argument('--discovery-port',type=int,default=53317,help='UDP发现端口，须与客户端一致')
     args = parser.parse_args()
-    app = LocalSendApp(args.worker,args.root)
-    server = LocalSendServer((args.bind,args.port),app)
+    if not 1<=args.port<=65535 or not 1<=args.discovery_port<=65535: parser.error('端口须在1–65535之间')
+    if args.discovery_interface and args.bind in ('127.0.0.1','localhost','::1'):
+        parser.error('发现服务需要局域网HTTP绑定，例如 --bind 0.0.0.0')
+    worker = args.worker
+    if args.docker_worker:
+        workspace = pathlib.Path(__file__).resolve().parents[1]
+        try: relative = args.root.resolve().relative_to(workspace)
+        except ValueError: parser.error('容器owner的测试根必须在工作目录中')
+        worker = ['docker','--context','desktop-linux','run','--rm','-i','--mount',f'type=bind,source={workspace},target=/work',
+                  '--entrypoint','/work/build-host/pn_localsend_host','pico-nano-sdl:dev','/work/'+relative.as_posix()]
+    app = LocalSendApp(worker,args.root)
+    server = None; discovery = None
+    try:
+        server = LocalSendServer((args.bind,args.port),app)
+        if args.discovery_interface:
+            discovery = Discovery(app.info,args.discovery_interface,listen_port=args.discovery_port,target=('224.0.0.167',args.discovery_port)); discovery.start()
+    except (OSError,ValueError,RuntimeError):
+        close_services(app,server,discovery); raise
     threading.Thread(target=console,args=(app,),daemon=True).start()
-    print(f'PC 明文HTTP开发服务：http://{args.bind}:{server.server_address[1]}；仅本机控制台可确认。尚未接入UDP发现/设备HTTPS。',flush=True)
+    print(f'PC 明文HTTP开发服务：http://{args.bind}:{server.server_address[1]}；仅本机控制台可确认。UDP发现{"已开启" if discovery else "未开启"}；设备HTTPS尚未接入。',flush=True)
     try: server.serve_forever()
     except KeyboardInterrupt: pass
-    finally: app.stop(); server.server_close(); app.close()
+    finally: close_services(app,server,discovery)
 
 
 if __name__=='__main__': main()

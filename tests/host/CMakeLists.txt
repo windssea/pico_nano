@@ -247,3 +247,5 @@ add_test(NAME localsend_host COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURC
 set_tests_properties(localsend_host PROPERTIES TIMEOUT 40)
 add_test(NAME localsend_http COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_localsend_http.py $<TARGET_FILE:pn_localsend_host>)
 set_tests_properties(localsend_http PROPERTIES TIMEOUT 40)
+add_test(NAME localsend_discovery COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_localsend_discovery.py)
+set_tests_properties(localsend_discovery PROPERTIES TIMEOUT 10)
