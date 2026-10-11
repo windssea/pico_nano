@@ -63,9 +63,9 @@ static pn_font_t *body(app_t *a){return font_set(a)?a->managed_body:&a->body;}
 static pn_font_chain_t *chain(app_t *a){return font_set(a)?a->managed_chain:&a->chain;}
 static pn_status_t ensure_body(app_t *a,int pixels){
     pn_font_set_t *set=font_set(a);if(set)return pn_font_set_ensure(set,pixels,&a->managed_body,&a->managed_chain);
-    if(!a->body.impl){pn_text_source_t source=a->external_font?a->font_source:pn_font_builtin_source();return pn_font_open(&a->body,a->pool,&source,pixels);}return pn_font_size(&a->body,pixels);
+    if(!a->body.impl){pn_text_source_t source=a->external_font?a->font_source:pn_font_reading_source();return pn_font_open(&a->body,a->pool,&source,pixels);}return pn_font_size(&a->body,pixels);
 }
-static pn_status_t body_source(app_t *a,pn_text_source_t *out){pn_font_set_t *set=font_set(a);if(set)return pn_font_set_source(set,out);*out=a->external_font?a->font_source:pn_font_builtin_source();return PN_OK;}
+static pn_status_t body_source(app_t *a,pn_text_source_t *out){pn_font_set_t *set=font_set(a);if(set)return pn_font_set_source(set,out);*out=a->external_font?a->font_source:pn_font_reading_source();return PN_OK;}
 static void suspend_fonts(app_t *a){pn_font_chain_suspend(&a->chain);pn_font_close(&a->body);pn_font_set_suspend(&a->font_live);pn_font_set_suspend(&a->font_draft);}
 static pn_status_t font_write(app_t *,const pn_font_preferences_t *);
 static pn_status_t global_write(app_t *,const pn_font_preferences_t *);
@@ -130,7 +130,7 @@ pn_status_t pn_reader_app_open_on_media(pn_reader_app_t *app,pn_pool_t *pool,pn_
     a->style=a->saved_style=pn_style_default(pixels);
     a->book_media=media?media:&a->local_media;pn_status_t status=PN_OK;
     if(!media){pn_media_init(a->book_media);status=pn_media_attach(a->book_media,1);}
-    pn_text_source_t source={0},font_source=pn_font_builtin_source();pn_text_encoding_t encoding;
+    pn_text_source_t source={0},font_source=pn_font_reading_source();pn_text_encoding_t encoding;
     if(status==PN_OK)status=pn_media_acquire(a->book_media,PN_MEDIA_READ,&a->book_lease);
     if(status==PN_OK)status=pn_text_file_open(&a->book_file,a->book_media,&a->book_lease,book_path,&source);
     if(status==PN_OK)status=pn_identity_file(a->book_media,&a->book_lease,book_path,PN_TEXT_FILE_MAX_BYTES,&a->book);

@@ -10,7 +10,9 @@ find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_subdirectory(${PN_ROOT}/components/pn_cjson ${CMAKE_CURRENT_BINARY_DIR}/pn-cjson)
 set(ui_font_c ${CMAKE_CURRENT_BINARY_DIR}/pn_ui_font.c)
 add_custom_command(OUTPUT ${ui_font_c} COMMAND ${Python3_EXECUTABLE} ${PN_ROOT}/tools/embed_binary.py ${PN_ROOT}/assets/fonts/read-pico-ui.ttf ${ui_font_c} DEPENDS ${PN_ROOT}/tools/embed_binary.py ${PN_ROOT}/assets/fonts/read-pico-ui.ttf VERBATIM)
-add_library(pn_core STATIC ${ui_font_c}
+set(reading_font_c ${CMAKE_CURRENT_BINARY_DIR}/pn_reading_font.c)
+add_custom_command(OUTPUT ${reading_font_c} COMMAND ${Python3_EXECUTABLE} ${PN_ROOT}/tools/embed_binary.py ${PN_ROOT}/assets/fonts/read-pico-reading.ttf ${reading_font_c} pn_reading_font DEPENDS ${PN_ROOT}/tools/embed_binary.py ${PN_ROOT}/assets/fonts/read-pico-reading.ttf VERBATIM)
+add_library(pn_core STATIC ${ui_font_c} ${reading_font_c}
     ${PN_ROOT}/components/pn_qr/pn_qr.c
     ${PN_ROOT}/components/pn_qr/vendor/qrcodegen.c
     ${PN_ROOT}/components/pn_reader/pn_transfer_view.c

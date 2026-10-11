@@ -12,7 +12,7 @@ pn_status_t pn_font_chain_init(pn_font_chain_t *c,pn_pool_t *pool,pn_font_t *pri
     if(c->primary || c->fonts[0].impl || c->fonts[1].impl)return PN_BUSY;
     *c=(pn_font_chain_t){.primary=primary,.pool=pool,.count=fallback?2u:1u};
     if(fallback)c->sources[0]=*fallback;
-    c->sources[c->count-1]=pn_font_builtin_source();return PN_OK;
+    c->sources[c->count-1]=pn_font_reading_source();return PN_OK;
 }
 void pn_font_chain_suspend(pn_font_chain_t *c){if(c)for(unsigned i=0;i<2;i++)pn_font_close(&c->fonts[i]);}
 void pn_font_chain_clear(pn_font_chain_t *c){if(c){pn_font_chain_suspend(c);memset(c,0,sizeof *c);}}

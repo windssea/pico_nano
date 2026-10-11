@@ -30,7 +30,7 @@ pn_status_t pn_sim_reader_prepare(pn_display_t *display,pn_job_token_t token,pn_
     const char *book,const char *font_path,unsigned requested,int pixels){
     pn_media_t media;pn_media_init(&media);pn_status_t status=pn_media_attach(&media,1);
     pn_media_lease_t book_lease={0},font_lease={0};pn_text_file_t book_file={0},font_file={0};
-    pn_text_source_t source={0},font_source=pn_font_builtin_source();pn_font_t font={0},ui={0};
+    pn_text_source_t source={0},font_source=pn_font_reading_source();pn_font_t font={0},ui={0};
     pn_page_glyph_t *glyphs=NULL;pn_draw_lease_t draw={0};pn_frame_t *frame=NULL;
     if(status==PN_OK)status=pn_media_acquire(&media,PN_MEDIA_READ,&book_lease);
     if(status==PN_OK)status=pn_text_file_open(&book_file,&media,&book_lease,book,&source);

@@ -19,7 +19,7 @@ pn_status_t pn_font_set_open(pn_font_set_t *set,pn_pool_t *pool,pn_media_t *medi
     status=pn_media_validate(media,guard);if(status!=PN_OK)return status;if(guard->access==PN_MEDIA_USB)return PN_INVALID;
     set_t *s=pn_alloc(pool,sizeof *s);if(!s)return PN_NO_MEMORY;*s=(set_t){.pool=pool,.media=media,.guard=*guard};pn_text_source_t source,fallback;
     if(prefs->primary.kind==PN_FONT_FILE){status=open_ref(&s->primary,pool,media,guard,&prefs->primary,pixels);if(status==PN_OK)s->body=pn_font_asset_font(&s->primary);}
-    else{source=pn_font_builtin_source();status=pn_font_open(&s->resident,pool,&source,pixels);s->body=&s->resident;}
+    else{source=pn_font_reading_source();status=pn_font_open(&s->resident,pool,&source,pixels);s->body=&s->resident;}
     if(status==PN_OK && prefs->fallback.kind==PN_FONT_FILE){status=open_ref(&s->fallback,pool,media,guard,&prefs->fallback,pixels);if(status==PN_OK)status=pn_font_asset_source(&s->fallback,&fallback);pn_font_asset_suspend(&s->fallback);}
     if(status==PN_OK)status=pn_font_chain_init(&s->chain,pool,s->body,prefs->fallback.kind==PN_FONT_FILE?&fallback:NULL);
     if(status!=PN_OK){release(s);return status;}set->impl=s;return PN_OK;
@@ -29,8 +29,8 @@ void pn_font_set_suspend(pn_font_set_t *set){if(set && set->impl){set_t *s=set->
 pn_status_t pn_font_set_ensure(pn_font_set_t *set,int pixels,pn_font_t **font,pn_font_chain_t **chain){
     if(!set || !set->impl || !font || !chain)return PN_INVALID;
     set_t *s=set->impl;pn_status_t status=pn_media_validate(s->media,&s->guard);if(status!=PN_OK)return status;
-    if(s->primary.impl)status=pn_font_asset_ensure(&s->primary,pixels,&s->body);else{pn_text_source_t source=pn_font_builtin_source();status=s->resident.impl?pn_font_size(&s->resident,pixels):pn_font_open(&s->resident,s->pool,&source,pixels);s->body=&s->resident;}
+    if(s->primary.impl)status=pn_font_asset_ensure(&s->primary,pixels,&s->body);else{pn_text_source_t source=pn_font_reading_source();status=s->resident.impl?pn_font_size(&s->resident,pixels):pn_font_open(&s->resident,s->pool,&source,pixels);s->body=&s->resident;}
     if(status==PN_OK){*font=s->body;*chain=&s->chain;}return status;
 }
-pn_status_t pn_font_set_source(const pn_font_set_t *set,pn_text_source_t *out){if(!set || !set->impl || !out)return PN_INVALID;const set_t *s=set->impl;pn_status_t status=pn_media_validate(s->media,&s->guard);if(status!=PN_OK)return status;if(s->primary.impl)return pn_font_asset_source(&s->primary,out);*out=pn_font_builtin_source();return PN_OK;}
+pn_status_t pn_font_set_source(const pn_font_set_t *set,pn_text_source_t *out){if(!set || !set->impl || !out)return PN_INVALID;const set_t *s=set->impl;pn_status_t status=pn_media_validate(s->media,&s->guard);if(status!=PN_OK)return status;if(s->primary.impl)return pn_font_asset_source(&s->primary,out);*out=pn_font_reading_source();return PN_OK;}
 pn_status_t pn_font_set_move(pn_font_set_t *to,pn_font_set_t *from){if(!to || !from || to==from)return PN_INVALID;if(to->impl)return PN_BUSY;to->impl=from->impl;from->impl=NULL;return PN_OK;}

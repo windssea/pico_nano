@@ -206,7 +206,7 @@ pn_status_t pn_epub_app_open_on_media(pn_epub_app_t *app,pn_pool_t *pool,pn_medi
     if(status==PN_OK)status=pn_epub_open(&a->epub,pool,&a->zip,a->salt);
     if(status==PN_OK)status=pn_epub_info(&a->epub,&a->info);
     if(status==PN_OK && state)status=state_open(a,state,now);
-    a->saved_style=a->style;a->font_source=pn_font_builtin_source();
+    a->saved_style=a->style;a->font_source=pn_font_reading_source();
     pn_font_preferences_t selected_fonts={0};bool has_selected_fonts=false,fonts_from_book=false;
     if(status==PN_OK && a->persistent){pn_journal_files_t global_files,book_files;pn_journal_io_t global_io,book_io;
         status=pn_font_preferences_files(&global_files,&a->state,&a->state_lease,a->state_directory,NULL,&global_io);

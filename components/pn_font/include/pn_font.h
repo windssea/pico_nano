@@ -37,6 +37,8 @@ pn_status_t pn_font_draw(pn_font_t *font,pn_frame_t *frame,uint32_t codepoint,in
 /// 常驻子集源，不分配、不访问卡；没有完整中文fallback承诺。
 /// Resident subset source without allocation or card access; not a full Chinese fallback.
 pn_text_source_t pn_font_builtin_source(void);
+/// 内置默认阅读黑体，覆盖GB2312与界面字集；不访问存储卡。/ Resident reading sans covering GB2312 and the UI repertoire without card access.
+pn_text_source_t pn_font_reading_source(void);
 
 #define PN_FONT_NAME_MAX 128
 typedef struct {

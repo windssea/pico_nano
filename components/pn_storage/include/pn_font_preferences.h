@@ -11,7 +11,7 @@
 #define PN_FONT_REFERENCE_PATH_MAX 1024
 #define PN_FONT_REFERENCE_MAX_BYTES (32u*1024u*1024u)
 typedef enum {
-    PN_FONT_RESIDENT=0, ///< 常驻子集 / Resident subset
+    PN_FONT_RESIDENT=0, ///< 内置阅读黑体 / Resident reading sans
     PN_FONT_FILE=1 ///< 完整文件引用 / Complete-file reference
 } pn_font_reference_kind_t;
 typedef struct {
