@@ -47,7 +47,7 @@ static pn_status_t paint(void *ctx,pn_font_t *font,pn_font_t *metadata,pn_frame_
     if(s==PN_OK)s=pn_font_size(font,28);
     if(u->draft==u->current)snprintf(text,sizeof text,"与现在相同，不会移动");
     else if(u->epub){size_t section=0;if(pn_epub_app_percent_section(u->epub,u->draft*100u,&section)!=PN_OK)section=0;snprintf(text,sizeof text,"约在第 %zu/%u 节开头（按章节定位）",section+1,u->sections);}
-    else snprintf(text,sizeof text,"%s %u%%，之后可“返回跳转前位置”",u->draft>u->current?"向后":"向前",u->draft>u->current?u->draft-u->current:u->current-u->draft);
+    else snprintf(text,sizeof text,"%s %u%%，翻页前可返回原位置",u->draft>u->current?"向后":"向前",u->draft>u->current?u->draft-u->current:u->current-u->draft);
     if(s==PN_OK)s=pn_w_text(font,frame,text,PN_UI_MARGIN,BAR_Y+80,620,PN_ALIGN_LEFT);
     // 四个步进键。/ Four step keys.
     char big[4][8];snprintf(big[0],sizeof big[0],"-%u",u->large);strcpy(big[1],"-1");strcpy(big[2],"+1");snprintf(big[3],sizeof big[3],"+%u",u->large);

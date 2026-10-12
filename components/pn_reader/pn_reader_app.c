@@ -63,9 +63,9 @@ static pn_font_t *body(app_t *a){return font_set(a)?a->managed_body:&a->body;}
 static pn_font_chain_t *chain(app_t *a){return font_set(a)?a->managed_chain:&a->chain;}
 static pn_status_t ensure_body(app_t *a,int pixels){
     pn_font_set_t *set=font_set(a);if(set)return pn_font_set_ensure(set,pixels,&a->managed_body,&a->managed_chain);
-    if(!a->body.impl){pn_text_source_t source=a->external_font?a->font_source:pn_font_builtin_source();return pn_font_open(&a->body,a->pool,&source,pixels);}return pn_font_size(&a->body,pixels);
+    if(!a->body.impl){pn_text_source_t source=a->external_font?a->font_source:pn_font_reading_source();return pn_font_open(&a->body,a->pool,&source,pixels);}return pn_font_size(&a->body,pixels);
 }
-static pn_status_t body_source(app_t *a,pn_text_source_t *out){pn_font_set_t *set=font_set(a);if(set)return pn_font_set_source(set,out);*out=a->external_font?a->font_source:pn_font_builtin_source();return PN_OK;}
+static pn_status_t body_source(app_t *a,pn_text_source_t *out){pn_font_set_t *set=font_set(a);if(set)return pn_font_set_source(set,out);*out=a->external_font?a->font_source:pn_font_reading_source();return PN_OK;}
 static void suspend_fonts(app_t *a){pn_font_chain_suspend(&a->chain);pn_font_close(&a->body);pn_font_set_suspend(&a->font_live);pn_font_set_suspend(&a->font_draft);}
 static pn_status_t font_write(app_t *,const pn_font_preferences_t *);
 static pn_status_t global_write(app_t *,const pn_font_preferences_t *);
@@ -130,7 +130,7 @@ pn_status_t pn_reader_app_open_on_media(pn_reader_app_t *app,pn_pool_t *pool,pn_
     a->style=a->saved_style=pn_style_default(pixels);
     a->book_media=media?media:&a->local_media;pn_status_t status=PN_OK;
     if(!media){pn_media_init(a->book_media);status=pn_media_attach(a->book_media,1);}
-    pn_text_source_t source={0},font_source=pn_font_builtin_source();pn_text_encoding_t encoding;
+    pn_text_source_t source={0},font_source=pn_font_reading_source();pn_text_encoding_t encoding;
     if(status==PN_OK)status=pn_media_acquire(a->book_media,PN_MEDIA_READ,&a->book_lease);
     if(status==PN_OK)status=pn_text_file_open(&a->book_file,a->book_media,&a->book_lease,book_path,&source);
     if(status==PN_OK)status=pn_identity_file(a->book_media,&a->book_lease,book_path,PN_TEXT_FILE_MAX_BYTES,&a->book);
@@ -191,9 +191,11 @@ static pn_status_t step_location(pn_reader_app_t *app,pn_reader_action_t action,
     else if(action==PN_APP_NEXT)intent=PN_READ_NEXT;
     else if(action==PN_APP_PREVIOUS)intent=PN_READ_PREVIOUS;
     else if(action==PN_APP_BEGINNING)intent=PN_READ_FIRST;
+    // 确认继续阅读后丢弃跳转返回点；候选页先不画返回入口。/ Discard the jump origin after confirmed continued reading; omit the entry from the candidate page.
+    bool dismiss_return=!jump && (action==PN_APP_NEXT || action==PN_APP_PREVIOUS || action==PN_APP_BEGINNING);
     pn_reader_receipt_t receipt;pn_status_t s=pn_reader_prepare(&a->reader,intent,offset,&receipt);if(s!=PN_OK)return s;
     pn_draw_lease_t lease={0};pn_frame_t *frame=NULL;s=pn_display_begin_draw(&a->display,a->reader.token,&lease,&frame);
-    if(s==PN_OK)s=render(a,frame,&receipt,return_hint<0?a->has_bookmark_origin:return_hint!=0);
+    if(s==PN_OK)s=render(a,frame,&receipt,dismiss_return?false:return_hint<0?a->has_bookmark_origin:return_hint!=0);
     pn_refresh_t profile=(!a->reader.has_visible || a->force_full || a->since_clear>=a->style.gl_before_clear)?PN_REFRESH_GC16:PN_REFRESH_GL16;
     if(s==PN_OK)s=pn_display_publish(&a->display,&lease,receipt.ticket,profile);
     if(s!=PN_OK){if(lease.ticket)(void)pn_display_discard(&a->display,&lease);(void)pn_reader_complete(&a->reader,&receipt,false,now);return s;}
@@ -206,6 +208,7 @@ static pn_status_t step_location(pn_reader_app_t *app,pn_reader_action_t action,
     if(completed!=PN_OK)return completed;
     if(confirmed!=PN_OK)return confirmed;
     a->last_confirmed=true;
+    if(dismiss_return)a->has_bookmark_origin=false;
     if(committed)*committed=true;
     if(a->persistent && !a->recent_recorded)(void)record_recent(a);
     return a->persistent?pn_save_policy_tick(&a->save,now):PN_OK;

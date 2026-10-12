@@ -16,6 +16,8 @@
 #include <string.h>
 extern const uint8_t pn_ui_font_bytes[];
 extern const size_t pn_ui_font_size;
+extern const uint8_t pn_reading_font_bytes[];
+extern const size_t pn_reading_font_size;
 /* 字形缓存：同一字符在分页量宽和绘制各加载一次轮廓，而每次加载要经cmap二分和loca/glyf多次小读取，在SD/网络盘上很慢。
  * 缓存按（码点、像素高）记住字宽/缺字结果，再按（码点、像素高、亚像素偏移）记住渲染好的灰度位图。命中时仍先校验字体源，介质失效照常报错。
  * Glyph cache: layout measuring and drawing each loaded the same outline, and every load costs a cmap binary search plus several small loca/glyf reads, which is slow on SD or network drives.
@@ -210,6 +212,13 @@ static pn_status_t builtin_read(void *ctx,uint64_t offset,uint8_t *out,size_t ca
     memcpy(out,pn_ui_font_bytes+offset,count);*n=count;return PN_OK;
 }
 pn_text_source_t pn_font_builtin_source(void){return (pn_text_source_t){NULL,pn_ui_font_size,builtin_read,NULL};}
+
+static pn_status_t reading_read(void *ctx,uint64_t offset,uint8_t *out,size_t cap,size_t *n){
+    (void)ctx;if(!out || !n || offset>pn_reading_font_size)return PN_INVALID;
+    size_t count=pn_reading_font_size-(size_t)offset;if(count>cap)count=cap;
+    memcpy(out,pn_reading_font_bytes+offset,count);*n=count;return PN_OK;
+}
+pn_text_source_t pn_font_reading_source(void){return (pn_text_source_t){NULL,pn_reading_font_size,reading_read,NULL};}
 
 /* ---- 有界字体信息 / Bounded font information ---- */
 static bool name_append(char *out,size_t *used,uint32_t cp){

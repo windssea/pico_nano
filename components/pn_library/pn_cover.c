@@ -8,6 +8,7 @@
  */
 #define _POSIX_C_SOURCE 200809L
 #include "pn_cover.h"
+#include "pn_sd_layout.h"
 #include "pn_epub.h"
 #include "pn_image.h"
 #include "pn_text_file.h"
@@ -95,10 +96,20 @@ static bool sidecar(const char *path,size_t index,char out[PN_CATALOG_PATH_MAX])
     const char *slash=strrchr(path,'/'),*dot=strrchr(path,'.');size_t stem=dot && (!slash || dot>slash)?(size_t)(dot-path):strlen(path);
     int length=snprintf(out,PN_CATALOG_PATH_MAX,"%.*s%s",(int)stem,path,suffixes[index]);return length>=0 && (size_t)length<PN_CATALOG_PATH_MAX;
 }
-/* 同名侧车按 .cover.jpg/.cover.png/.jpg/.png 顺序，首个存在者决定结果。/ Same-basename sidecars in order; the first existing one decides. */
-static pn_status_t txt_cover(pn_pool_t *pool,pn_media_t *media,const pn_media_lease_t *lease,const char *path,pn_frame_t *out){
-    for(size_t i=0;i<SUFFIXES;i++){
-        char candidate[PN_CATALOG_PATH_MAX];if(!sidecar(path,i,candidate) || !regular_file(candidate))continue;
+/* books中的书优先匹配卡根covers；后四项保留旧同目录侧车兼容。/ Books in books prefer card-root covers; the last four candidates preserve legacy sidecars. */
+static bool cover_candidate(const char *path,size_t index,char out[PN_CATALOG_PATH_MAX]){
+    if(index>=SUFFIXES)return sidecar(path,index-SUFFIXES,out);
+    const char *slash=strrchr(path,'/');if(!slash)return false;
+    const char *folder=slash;while(folder>path && folder[-1]!='/')folder--;
+    if((size_t)(slash-folder)!=strlen(PN_SD_BOOKS) || memcmp(folder,PN_SD_BOOKS,strlen(PN_SD_BOOKS)))return false;
+    const char *name=slash+1,*dot=strrchr(name,'.');size_t stem=dot?(size_t)(dot-name):strlen(name);
+    int n=snprintf(out,PN_CATALOG_PATH_MAX,"%.*s%s/%.*s%s",(int)(folder-path),path,PN_SD_COVERS,(int)stem,name,suffixes[index]);
+    return n>=0 && n<PN_CATALOG_PATH_MAX;
+}
+/* 集中封面优先，旧同目录侧车其次；首个存在者决定结果。/ Centralized covers precede legacy sidecars; the first existing one decides. */
+static pn_status_t external_cover(pn_pool_t *pool,pn_media_t *media,const pn_media_lease_t *lease,const char *path,pn_frame_t *out){
+    for(size_t i=0;i<2*SUFFIXES;i++){
+        char candidate[PN_CATALOG_PATH_MAX];if(!cover_candidate(path,i,candidate) || !regular_file(candidate))continue;
         pn_status_t status=pn_media_validate(media,lease);if(status!=PN_OK)return status;
         pn_text_file_t file={0};pn_text_source_t source;status=pn_text_file_open(&file,media,lease,candidate,&source);
         if(status==PN_OK){cover_source_t c={.file=&source};status=decode(pool,&c,out);pn_status_t closed=pn_text_file_close(&file);if(status==PN_OK)status=closed;}
@@ -116,7 +127,8 @@ pn_status_t pn_cover_render(pn_pool_t *pool,pn_media_t *media,const pn_media_lea
     pn_pool_t sub;if(pn_pool_init(&sub,budget,sub_alloc,sub_free,pool)!=0)return PN_INVALID;
     size_t bytes=((size_t)thumb->width+1)/2*(size_t)thumb->height;uint8_t *pixels=pn_alloc(&sub,bytes);if(!pixels)return PN_NO_MEMORY;
     pn_frame_t out;(void)pn_frame_bind(&out,pixels,bytes,thumb->width,thumb->height);
-    status=item->format==PN_BOOK_EPUB?epub_cover(&sub,media,lease,item->path,salt,&out):txt_cover(&sub,media,lease,item->path,&out);
+    status=external_cover(&sub,media,lease,item->path,&out);
+    if(status==PN_EMPTY && item->format==PN_BOOK_EPUB)status=epub_cover(&sub,media,lease,item->path,salt,&out);
     if(status==PN_OK)for(int y=0;y<out.height;y++)for(int x=0;x<out.width;x++)pn_frame_pixel(thumb,x,y,pn_frame_get(&out,x,y));
     pn_free(pixels);return status;
 }
@@ -139,7 +151,7 @@ void pn_shelf_covers_set_last(pn_shelf_covers_t *covers,const pn_catalog_item_t 
     if(item){covers->last=*item;}
     covers->state[PN_COVER_SLOT_LAST]=coverable(item)?PN_COVER_PENDING:PN_COVER_NONE;covers->reason[PN_COVER_SLOT_LAST]=PN_EMPTY;
 }
-/* 缓存键：书大小/mtime，TXT另含首个存在侧车的序号/大小/mtime。/ Cache key: book size/mtime, plus first existing sidecar index/size/mtime for TXT. */
+/* 缓存键：书大小/mtime，另含首个外置封面的序号/大小/mtime。/ Cache key: book size/mtime plus the first external cover's index/size/mtime. */
 typedef struct {uint64_t size,side_size;int64_t mtime,side_mtime;uint8_t side;} cover_key_t;
 #define KEY_BYTES 33
 #define HEADER_BYTES (4+2+2+2+1+1+KEY_BYTES+2)
@@ -149,7 +161,7 @@ static uint32_t crc32(const uint8_t *p,size_t n){uint32_t v=UINT32_MAX;for(size_
 static pn_status_t cover_key(const pn_catalog_item_t *item,cover_key_t *key){
     struct stat info;if(!file_info(item->path,&info))return PN_IO;
     *key=(cover_key_t){.size=(uint64_t)info.st_size,.mtime=(int64_t)info.st_mtime,.side=0xff};
-    if(item->format==PN_BOOK_TXT)for(size_t i=0;i<SUFFIXES;i++){char candidate[PN_CATALOG_PATH_MAX];if(sidecar(item->path,i,candidate) && file_info(candidate,&info)){key->side=(uint8_t)i;key->side_size=(uint64_t)info.st_size;key->side_mtime=(int64_t)info.st_mtime;break;}}
+    for(size_t i=0;i<2*SUFFIXES;i++){char candidate[PN_CATALOG_PATH_MAX];if(cover_candidate(item->path,i,candidate) && file_info(candidate,&info)){key->side=(uint8_t)i;key->side_size=(uint64_t)info.st_size;key->side_mtime=(int64_t)info.st_mtime;break;}}
     return PN_OK;
 }
 static void encode_key(uint8_t *p,const cover_key_t *k){put(p,k->size,8);put(p+8,(uint64_t)k->mtime,8);p[16]=k->side;put(p+17,k->side_size,8);put(p+25,(uint64_t)k->side_mtime,8);}

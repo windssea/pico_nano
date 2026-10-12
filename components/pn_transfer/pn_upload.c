@@ -6,6 +6,7 @@
  * Frozen: errors never advance acknowledged offsets; recoverable ports own installation.
  */
 #include "pn_upload.h"
+#include "pn_sd_layout.h"
 #include <string.h>
 #include <ctype.h>
 #define HEADER 144u
@@ -31,6 +32,9 @@ pn_status_t pn_upload_request_validate(const pn_upload_request_t *r){
  switch(r->kind){case PN_UPLOAD_BOOK:limit=512u*1024u*1024u;supported=extension(r->name,".txt") || extension(r->name,".epub") || extension(r->name,".pdf") || extension(r->name,".fb2") || extension(r->name,".cbz");break;case PN_UPLOAD_FONT:limit=32u*1024u*1024u;supported=extension(r->name,".ttf");break;case PN_UPLOAD_COVER:case PN_UPLOAD_WALLPAPER:limit=8u*1024u*1024u;supported=extension(r->name,".png") || extension(r->name,".jpg") || extension(r->name,".jpeg");break;default:return PN_INVALID;}
  if(!supported)return PN_UNSUPPORTED;
  return r->size>limit?PN_LIMIT:PN_OK;
+}
+const char *pn_upload_directory(pn_upload_kind_t kind){
+ switch(kind){case PN_UPLOAD_BOOK:return PN_SD_BOOKS;case PN_UPLOAD_FONT:return PN_SD_FONTS;case PN_UPLOAD_COVER:return PN_SD_COVERS;case PN_UPLOAD_WALLPAPER:return PN_SD_WALLPAPERS;default:return NULL;}
 }
 static size_t encode(const snapshot_t *s,uint8_t *b){
  memset(b,0,MAX_RECORD);memcpy(b,"PNUP",4);put(b+4,1,2);b[6]=(uint8_t)s->request.kind;b[7]=(uint8_t)s->phase;put(b+8,s->media_id,8);put(b+16,s->request.size,8);put(b+24,s->offset,8);put(b+32,s->last_offset,8);put(b+40,s->last_length,4);put(b+44,s->request.has_digest?1:0,4);memcpy(b+48,s->request.id,16);memcpy(b+64,s->request.digest.sha256,32);memcpy(b+96,s->last_digest.sha256,32);size_t n=strlen(s->request.name);put(b+128,n,2);memcpy(b+HEADER,s->request.name,n);return HEADER+n;
@@ -86,5 +90,15 @@ pn_status_t pn_upload_complete(pn_upload_t *out,const pn_book_id_t *digest){
  status=u->port.install_sync(u->port.ctx,next.request.kind,next.request.name,digest);if(status==PN_OK)status=guard(u);if(status!=PN_OK)return status;next.phase=PN_UPLOAD_COMMITTED;return save(u,&next);
 }
 pn_status_t pn_upload_cancel(pn_upload_t *out){if(!out || !out->impl)return PN_INVALID;upload_t *u=out->impl;pn_status_t status=guard(u);if(status!=PN_OK)return status;snapshot_t next=u->saved;if(next.phase==PN_UPLOAD_COMMITTED || next.phase==PN_UPLOAD_VERIFIED)return PN_BUSY;if(next.phase!=PN_UPLOAD_CANCELLED){next.phase=PN_UPLOAD_CANCELLED;status=save(u,&next);if(status!=PN_OK)return status;}status=u->port.remove_sync(u->port.ctx);if(status==PN_OK)status=guard(u);return status;}
+pn_status_t pn_upload_complete_stream(pn_upload_t *out){
+ if(!out || !out->impl)return PN_INVALID;
+ upload_t *u=out->impl;pn_status_t status=guard(u);if(status!=PN_OK)return status;
+ if(u->saved.phase==PN_UPLOAD_CANCELLED)return PN_CANCELLED;
+ if(u->saved.offset!=u->saved.request.size)return PN_BUSY;
+ pn_book_id_t digest;
+ if(u->saved.phase==PN_UPLOAD_RECEIVING)status=pn_identity_stream(u,u->saved.request.size,read_checked,&digest);
+ else digest=u->saved.request.digest;
+ return status==PN_OK?pn_upload_complete(out,&digest):status;
+}
 
 pn_status_t pn_upload_info(pn_upload_t *out,pn_upload_request_t *request){if(!out || !out->impl || !request)return PN_INVALID;upload_t *u=out->impl;pn_status_t status=guard(u);if(status==PN_OK)*request=u->saved.request;return status;}

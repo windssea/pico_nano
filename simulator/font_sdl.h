@@ -17,7 +17,6 @@ static int font_key(const pn_font_ui_t *u,SDL_Keycode key){
  if(key==SDLK_PAGEDOWN)return PN_FUI_NEXT;
  if(key==SDLK_PAGEUP)return PN_FUI_PREVIOUS;
  if(key==SDLK_1)return PN_FUI_PRIMARY;
- if(key==SDLK_2)return PN_FUI_FALLBACK;
  if(key==SDLK_i)return PN_FUI_RESIDENT;
  return -1;
 }

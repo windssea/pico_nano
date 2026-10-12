@@ -3,6 +3,7 @@
 #include "pn_cover.h"
 #include "pn_book_actions.h"
 #include "pn_font.h"
+#include "pn_favorites.h"
 #define PN_SHELF_PREVIOUS 6
 #define PN_SHELF_NEXT 7
 #define PN_SHELF_TOGGLE 8
@@ -36,6 +37,7 @@ typedef struct {
     int battery_percent; ///< 0–100，<0不显示 / 0–100, hidden when negative
     bool list_mode; ///< 列表模式（每页5行）/ List mode, five rows per page
     const pn_book_actions_t *actions; ///< 非NULL时在书架上叠画书籍操作面板（借用同一补字字体）/ When non-NULL, the book actions sheet is drawn over the shelf (sharing the fallback font)
+    const pn_favorites_t *favorite_items; ///< 已验证的收藏快照，NULL不画标识 / Validated favorites snapshot; NULL hides markers
     bool favorites_tab; ///< 分类里显示“收藏” / Show Favorites among the categories
     bool favorites; ///< 当前为收藏视图 / Showing the favorites view
     bool import_tile; ///< 最后一页空格放“导入图书”卡、空书架给“导入图书”按钮 / An import tile in a free last-page slot and an import button on an empty shelf

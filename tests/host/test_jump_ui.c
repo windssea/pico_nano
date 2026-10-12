@@ -42,6 +42,12 @@ int main(void){
     assert(ui.draft==40 && pn_jump_ui_event(&ui,PN_JUI_CONFIRM,5,present,&screen)==PN_OK && !ui.active && pn_reader_app_last_confirmed(&app));
     assert(pn_reader_app_progress(&app,&after)==PN_OK && after.source_offset>=before.source_size*38/100 && after.source_offset<=before.source_size*42/100 && pn_reader_app_bookmark_can_return(&app));
     assert(pn_reader_app_bookmark_return(&app,6,present,&screen)==PN_OK && pn_reader_app_progress(&app,&after)==PN_OK && after.source_offset==before.source_offset);
+    /* 成功翻页接受新位置，失败呈现或原页重绘不能吞掉返回点。/ A confirmed turn accepts the new location; failed presentation or redraw retains the origin. */
+    assert(pn_reader_app_jump_percent(&app,40,6,present,&screen)==PN_OK && pn_reader_app_bookmark_can_return(&app));
+    screen.fail=true;assert(pn_reader_app_step(&app,PN_APP_NEXT,6,present,&screen)==PN_IO && pn_reader_app_bookmark_can_return(&app));screen.fail=false;
+    assert(pn_reader_app_step(&app,PN_APP_OPEN,6,present,&screen)==PN_OK && pn_reader_app_bookmark_can_return(&app));
+    assert(pn_reader_app_step(&app,PN_APP_NEXT,6,present,&screen)==PN_OK && !pn_reader_app_bookmark_can_return(&app));
+    assert(pn_reader_app_bookmark_return(&app,6,present,&screen)==PN_EMPTY);
     /* 任意百分比都落在字符边界上（多字节文本里7%、33%也能跳）。/ Any percentage lands on a character boundary (7% and 33% work in multi-byte text too). */
     for(unsigned percent=1;percent<=100;percent+=6){
         assert(pn_jump_ui_open(&ui,&app,present,&screen)==PN_OK);

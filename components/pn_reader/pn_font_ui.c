@@ -2,8 +2,8 @@
  * SPDX-License-Identifier: Apache-2.0
  * 中文：六项字体菜单、真实字体检查与原文选择操作。
  * English: six-item font menus, actual font checks and anchored selection operations.
- * 冻结：绘制不读目录/记录，不悄悄替换另一项字体。
- * Frozen: painting never reads directories/records or silently replaces the other font.
+ * 冻结：用户选择仅针对阅读正文；按简化字体需求使用系统缺字回退，不暴露备用配置。
+ * Frozen: user choices affect reading text only; the simplified product uses automatic fallback without exposing secondary-font configuration.
  */
 #include "pn_font_ui.h"
 #include "pn_widgets.h"
@@ -11,11 +11,11 @@
 #include <stdio.h>
 #include <string.h>
 #include <inttypes.h>
-typedef struct {bool ready;pn_pool_t *pool;pn_reader_app_t *reader;pn_epub_app_t *epub;pn_catalog_page_t page;pn_font_preferences_t draft;pn_font_info_t info;char directory[PN_FONT_REFERENCE_PATH_MAX],cursor[PN_CATALOG_NAME_MAX];unsigned target,checked,missing;const char *notice;} ui_t;
+typedef struct {bool ready;pn_pool_t *pool;pn_reader_app_t *reader;pn_epub_app_t *epub;pn_catalog_page_t page;pn_font_preferences_t draft;pn_font_info_t info;char directory[PN_FONT_REFERENCE_PATH_MAX],cursor[PN_CATALOG_NAME_MAX];unsigned checked,missing;const char *notice;} ui_t;
 static pn_status_t overlay(pn_font_ui_t *u,pn_reader_overlay_fn paint,pn_reader_present_fn present,void *ctx){ui_t *s=u->impl;return s->epub?pn_epub_app_overlay(s->epub,paint,u,present,ctx,PN_REFRESH_GC16):pn_reader_app_overlay(s->reader,paint,u,present,ctx,PN_REFRESH_GC16);}
 static pn_status_t page(pn_font_ui_t *u,const char *cursor,bool reverse){ui_t *s=u->impl;pn_status_t status=s->epub?pn_epub_app_fonts_page(s->epub,s->directory,cursor,reverse,&s->page):pn_reader_app_fonts_page(s->reader,s->directory,cursor,reverse,&s->page);if(status==PN_OK){memmove(s->cursor,cursor,strlen(cursor)+1);u->selected=0;}else{s->page.count=0;s->page.more=false;}return status;}
-/* 版式：列表页=顶栏、继承默认行、正文/备用切换、六行字体、内置字体行、翻页；详情页=字体信息与四个操作按钮。
- * Layout: list page = header, inherit-default row, primary/fallback switch, six font rows, a built-in row and paging; detail page = font information and four action buttons. */
+/* 列表：默认阅读字体和用户外置字体；详情只配置阅读正文。
+ * List: default reading font and user external fonts; details configure reading text only. */
 #define INHERIT_Y 148
 #define TARGET_Y 244
 #define LIST_Y0 348
@@ -36,34 +36,35 @@ static pn_status_t sized_button(pn_font_t *font,pn_frame_t *frame,const char *la
 }
 static pn_status_t paint(void *ctx,pn_font_t *font,pn_font_t *metadata,pn_frame_t *frame){
  pn_font_ui_t *u=ctx;ui_t *s=u->impl;if(!s || frame->width!=684 || frame->height!=1216)return PN_INVALID;pn_frame_clear(frame,15);
- pn_status_t status=pn_w_header(font,frame,u->mode==0?"< 取消":"< 返回列表",u->mode==0?"选择字体":"字体详情",s->notice?"重试":NULL);
- pn_w_set_fallback(metadata);
+ pn_status_t status=pn_w_header(font,frame,u->mode==0?"< 取消":"< 返回列表",u->mode==0?"阅读字体":"阅读字体详情",s->notice?"重试":NULL);
+ (void)metadata;
  if(status==PN_OK && u->mode==0){
-  status=pn_w_row(font,frame,"继承全局默认字体",NULL,true,INHERIT_Y);
-  if(status==PN_OK)status=sized_button(font,frame,"正文字体",32,TARGET_Y,300,80,s->target?0u:PN_W_SELECTED);
-  if(status==PN_OK)status=sized_button(font,frame,"备用字体",352,TARGET_Y,300,80,s->target?PN_W_SELECTED:0u);
+  status=pn_w_row(font,frame,"默认字体",NULL,true,INHERIT_Y);
+  if(status==PN_OK && s->draft.primary.kind==PN_FONT_RESIDENT)pn_w_icon(frame,PN_ICON_CHECK,560,INHERIT_Y+28,32,PN_UI_INK);
+  if(status==PN_OK)status=pn_w_group(font,frame,"外置字体",TARGET_Y+24);
+  if(status==PN_OK)status=sized_text(font,frame,"用户上传的字体，仅用于阅读正文",24,TARGET_Y+66,PN_ALIGN_LEFT);
   for(size_t i=0;i<s->page.count && i<LIST_ROWS && status==PN_OK;i++){
    status=pn_w_row(font,frame,s->page.items[i].name,NULL,true,LIST_Y0+(int)i*PN_W_ROW_H);
    // 当前使用的字体打对勾。/ Check the font in use.
-   if(status==PN_OK && !s->target && s->draft.primary.kind==PN_FONT_FILE && !strcmp(s->draft.primary.path,s->page.items[i].path))pn_w_icon(frame,PN_ICON_CHECK,560,LIST_Y0+(int)i*PN_W_ROW_H+28,32,PN_UI_INK);
+   if(status==PN_OK && s->draft.primary.kind==PN_FONT_FILE && !strcmp(s->draft.primary.path,s->page.items[i].path))pn_w_icon(frame,PN_ICON_CHECK,560,LIST_Y0+(int)i*PN_W_ROW_H+28,32,PN_UI_INK);
    if(status==PN_OK && i==u->selected)pn_frame_rect(frame,PN_UI_MARGIN-12,LIST_Y0+(int)i*PN_W_ROW_H+8,4,PN_W_ROW_H-20,PN_UI_INK);
   }
-  if(status==PN_OK && !s->page.count)status=sized_text(font,frame,"fonts 目录暂无可用字体",30,LIST_Y0+60,PN_ALIGN_LEFT);
-  if(status==PN_OK)status=pn_w_row(font,frame,s->target?"不使用额外备用字体":"内置界面字体",NULL,true,RESIDENT_Y);
+  if(status==PN_OK && !s->page.count)status=sized_text(font,frame,"暂无外置字体，请在传书中上传 TTF",30,LIST_Y0+60,PN_ALIGN_LEFT);
+  if(status==PN_OK)status=sized_text(font,frame,"界面字体固定，不随阅读字体改变",24,RESIDENT_Y+56,PN_ALIGN_LEFT);
   if(status==PN_OK)status=sized_button(font,frame,"上一页",32,PAGER_Y,196,80,0u);
   if(status==PN_OK)status=sized_button(font,frame,"下一页",456,PAGER_Y,196,80,0u);
  }else if(status==PN_OK){
   int original=font->pixels;status=pn_font_size(font,36);
-  if(status==PN_OK)status=pn_w_text_lines(font,frame,*s->info.family?s->info.family:s->target?"不使用额外备用字库":"内置界面字库",PN_UI_MARGIN,196,620,2,48,NULL);
+  if(status==PN_OK)status=pn_w_text_lines(font,frame,*s->info.family?s->info.family:"默认字体",PN_UI_MARGIN,196,620,2,48,NULL);
   pn_status_t restored=pn_font_size(font,original);if(status==PN_OK)status=restored;
   char value[128];
-  if(status==PN_OK){if(s->info.glyphs)snprintf(value,sizeof value,"字重 %u · 字形 %" PRIu32,s->info.weight,s->info.glyphs);else snprintf(value,sizeof value,"%s",s->target?"仍保留内置回退":"仅包含常用界面文字");status=sized_text(font,frame,value,28,332,PN_ALIGN_LEFT);}
+  if(status==PN_OK){if(s->info.glyphs)snprintf(value,sizeof value,"字重 %u · 字形 %" PRIu32,s->info.weight,s->info.glyphs);else snprintf(value,sizeof value,"%s","默认阅读字库，缺字由系统回退");status=sized_text(font,frame,value,28,332,PN_ALIGN_LEFT);}
   if(status==PN_OK){if(s->checked)snprintf(value,sizeof value,"样例检查：缺字 %u / %u",s->missing,s->checked);else snprintf(value,sizeof value,"请预览原文检查缺字");status=sized_text(font,frame,value,28,384,PN_ALIGN_LEFT);}
-  if(status==PN_OK)status=sized_text(font,frame,s->target?"将用作备用字体":"将用作正文字体",28,436,PN_ALIGN_LEFT);
-  const char *labels[]={"预览原文","应用本书","设为全局默认","取消"};
+  if(status==PN_OK)status=sized_text(font,frame,"仅用于电子书阅读，不改变界面字体",28,436,PN_ALIGN_LEFT);
+  const char *labels[]={"预览原文","应用本书","设为默认阅读字体","取消"};
   for(int i=0;i<4 && status==PN_OK;i++)status=sized_button(font,frame,labels[i],32,DETAIL_Y0+i*DETAIL_PITCH,620,96,i==1?PN_W_SELECTED:0u);
  }
- pn_w_set_fallback(NULL);
+
  if(status==PN_OK && s->notice)status=sized_text(font,frame,s->notice,28,u->mode==0?PAGER_Y-24:DETAIL_Y0+4*DETAIL_PITCH+24,PN_ALIGN_LEFT);
  return status;
 }
@@ -82,14 +83,15 @@ pn_status_t pn_font_ui_event(pn_font_ui_t *u,int command,uint64_t now,pn_reader_
  if(!s->ready && command!=PN_FUI_BACK && command!=PN_FUI_CANCEL && command!=PN_FUI_RETRY)return PN_BUSY;
  if(command==PN_FUI_RETRY){if(!s->ready){status=s->epub?pn_epub_app_fonts_get(s->epub,&s->draft,s->directory,sizeof s->directory):pn_reader_app_fonts_get(s->reader,&s->draft,s->directory,sizeof s->directory);s->ready=status==PN_OK;}if(s->ready && u->mode==0)status=page(u,s->cursor,false);if(status!=PN_OK)s->notice="字体目录读取失败，可重试";return pn_font_ui_present(u,present,ctx);}if(command==PN_FUI_FORM)return pn_font_ui_present(u,present,ctx);
  if(command==PN_FUI_CANCEL || (command==PN_FUI_BACK && u->mode==0)){status=s->epub?pn_epub_app_font_cancel(s->epub,now,present,ctx):pn_reader_app_font_cancel(s->reader,now,present,ctx);if(confirmed(s)){u->active=false;return status;}}
- else if(command==PN_FUI_INHERIT){status=s->epub?pn_epub_app_font_inherit(s->epub,now,present,ctx):pn_reader_app_font_inherit(s->reader,now,present,ctx);if(status==PN_OK){u->active=false;return status;}if(status==PN_EMPTY)s->notice="请先设置全局默认字体";}
- else if(command==PN_FUI_DEFAULT && u->mode==1){status=s->epub?pn_epub_app_font_default(s->epub,&s->draft):pn_reader_app_font_default(s->reader,&s->draft);if(status==PN_OK)s->notice="默认已保存，下次打开生效";}
+ else if(command==PN_FUI_RESTORE_DEFAULT){pn_font_preferences_t defaults={0};status=s->epub?pn_epub_app_font_apply(s->epub,&defaults,now,present,ctx):pn_reader_app_font_apply(s->reader,&defaults,now,present,ctx);if(status==PN_OK){u->active=false;return status;}}
+ else if(command==PN_FUI_DEFAULT && u->mode==1){status=s->epub?pn_epub_app_font_default(s->epub,&s->draft):pn_reader_app_font_default(s->reader,&s->draft);if(status==PN_OK)s->notice="阅读默认已保存，新打开的书生效";}
  else if(command==PN_FUI_BACK){u->mode=0;}
- else if(command==PN_FUI_PRIMARY || command==PN_FUI_FALLBACK){s->target=command==PN_FUI_FALLBACK;u->mode=0;}
+ else if(command==PN_FUI_PRIMARY){u->mode=0;}
+ else if(command==PN_FUI_FALLBACK){status=PN_UNSUPPORTED;}
  else if(command==PN_FUI_NEXT || command==PN_FUI_PREVIOUS){char cursor[PN_CATALOG_NAME_MAX];if(!s->page.count || (command==PN_FUI_NEXT && !s->page.more))status=PN_EMPTY;else{strcpy(cursor,s->page.items[command==PN_FUI_NEXT?s->page.count-1:0].name);status=page(u,cursor,command==PN_FUI_PREVIOUS);}}
  else if(command==PN_FUI_UP || command==PN_FUI_DOWN){int next=(int)u->selected+(command==PN_FUI_UP?-1:1);if(next>=0 && (size_t)next<s->page.count)u->selected=(unsigned)next;else status=PN_EMPTY;}
- else if(command==PN_FUI_RESIDENT){if(s->target)s->draft.fallback=(pn_font_reference_t){0};else s->draft.primary=(pn_font_reference_t){0};s->info=(pn_font_info_t){0};s->checked=s->missing=0;u->mode=1;}
- else if(command==PN_FUI_SELECT || (command>=PN_FUI_ROW && command<PN_FUI_ROW+6) || (command>=PN_FUI_INFO && command<PN_FUI_INFO+6)){bool direct=command>=PN_FUI_ROW && command<PN_FUI_ROW+6;unsigned row=command==PN_FUI_SELECT?u->selected:direct?(unsigned)(command-PN_FUI_ROW):(unsigned)(command-PN_FUI_INFO);if(row>=s->page.count)status=PN_EMPTY;else{pn_font_reference_t ref;pn_font_info_t info;unsigned checked,missing;status=s->epub?pn_epub_app_fonts_probe(s->epub,&s->page.items[row],&ref,&info,&checked,&missing):pn_reader_app_fonts_probe(s->reader,&s->page.items[row],&ref,&info,&checked,&missing);if(status==PN_OK){u->selected=row;if(s->target)s->draft.fallback=ref;else s->draft.primary=ref;s->info=info;s->checked=checked;s->missing=missing;u->mode=1;
+ else if(command==PN_FUI_RESIDENT){s->draft=(pn_font_preferences_t){0};s->info=(pn_font_info_t){0};s->checked=s->missing=0;u->mode=1;}
+ else if(command==PN_FUI_SELECT || (command>=PN_FUI_ROW && command<PN_FUI_ROW+6) || (command>=PN_FUI_INFO && command<PN_FUI_INFO+6)){bool direct=command>=PN_FUI_ROW && command<PN_FUI_ROW+6;unsigned row=command==PN_FUI_SELECT?u->selected:direct?(unsigned)(command-PN_FUI_ROW):(unsigned)(command-PN_FUI_INFO);if(row>=s->page.count)status=PN_EMPTY;else{pn_font_reference_t ref;pn_font_info_t info;unsigned checked,missing;status=s->epub?pn_epub_app_fonts_probe(s->epub,&s->page.items[row],&ref,&info,&checked,&missing):pn_reader_app_fonts_probe(s->reader,&s->page.items[row],&ref,&info,&checked,&missing);if(status==PN_OK){u->selected=row;s->draft=(pn_font_preferences_t){.primary=ref};s->info=info;s->checked=checked;s->missing=missing;u->mode=1;
    // 点行即应用到本书并返回排版页看效果；右侧箭头才进详情。/ Tapping a row applies it to this book and returns to typesetting to show the result; only the chevron opens details.
    if(direct){status=s->epub?pn_epub_app_font_apply(s->epub,&s->draft,now,present,ctx):pn_reader_app_font_apply(s->reader,&s->draft,now,present,ctx);if(status==PN_OK){u->active=false;return status;}u->mode=0;}}}}
  else if(command==PN_FUI_PREVIEW && u->mode==1){status=s->epub?pn_epub_app_font_preview(s->epub,&s->draft,now,present,ctx):pn_reader_app_font_preview(s->reader,&s->draft,now,present,ctx);if(confirmed(s)){u->preview=true;u->presented=true;return status;}}
@@ -107,10 +109,8 @@ int pn_font_ui_hit(const pn_font_ui_t *u,int x,int y){
  if(header==2)return PN_FUI_RETRY;
  if(x<32 || x>=652)return -1;
  if(u->mode==0){
-  if(y>=INHERIT_Y && y<INHERIT_Y+PN_W_ROW_H)return PN_FUI_INHERIT;
-  if(y>=TARGET_Y && y<TARGET_Y+80)return x<332?PN_FUI_PRIMARY:x>=352?PN_FUI_FALLBACK:-1;
+  if(y>=INHERIT_Y && y<INHERIT_Y+PN_W_ROW_H)return x>=560?PN_FUI_RESIDENT:PN_FUI_RESTORE_DEFAULT;
   if(y>=LIST_Y0 && y<LIST_Y0+LIST_ROWS*PN_W_ROW_H){unsigned row=(unsigned)(y-LIST_Y0)/PN_W_ROW_H;return row<s->page.count?(x>=560?PN_FUI_INFO:PN_FUI_ROW)+(int)row:-1;}
-  if(y>=RESIDENT_Y && y<RESIDENT_Y+PN_W_ROW_H)return PN_FUI_RESIDENT;
   if(y>=PAGER_Y && y<PAGER_Y+80)return x<228?PN_FUI_PREVIOUS:x>=456?PN_FUI_NEXT:-1;
   return -1;
  }

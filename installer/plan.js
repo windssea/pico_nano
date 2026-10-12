@@ -35,6 +35,7 @@ export function parseTable(bytes) {
 /// 判断区域开头是否为 LittleFS 超级块（块 0 或块 1 的第 8 字节起为 "littlefs"）。
 /// Whether a region starts with a LittleFS superblock ("littlefs" at byte 8 of block 0 or 1).
 export function isLittleFs(head) {
+  if (!(head instanceof Uint8Array)) return false;
   const tag = [0x6c, 0x69, 0x74, 0x74, 0x6c, 0x65, 0x66, 0x73];
   for (const block of [0, SECTOR]) {
     if (head.length < block + 16) continue;
@@ -68,14 +69,14 @@ function sameBytes(a, b) {
   return true;
 }
 
-/// 生成写入计划。输入为本固件文件、设备上读到的分区表与 data/wallpaper 区域开头，以及用户选项。
+/// 生成写入计划。输入为本固件文件、设备分区表与 data/wallpaper 头部或完整分区，以及用户选项。
 /// 计划只写需要的区域：不整片擦除；旧分区表里本就是 NVS 的扇区保留，其余落在新 NVS 范围内的扇区清空，
 /// 避免把旧系统的非 NVS 数据当成 NVS 页；勾选 clearNvs 时整段 NVS 清空。分区表最后写，降低断电后的不一致。
-/// Build the write plan from the firmware files, the device's current table and data/wallpaper heads, and user options.
+/// Build the write plan from firmware files, the device table, data/wallpaper heads or full partitions, and user options.
 /// Only needed regions are written; no whole-chip erase. Sectors that were NVS in the old table are kept and the rest of the
 /// new NVS range is cleared so foreign non-NVS bytes are never parsed as NVS pages; clearNvs clears the whole range.
 /// The partition table is written last to narrow the inconsistent window on power loss.
-export function planInstall({ files, deviceTable, dataHead, wallpaperHead, clearNvs = false }) {
+export function planInstall({ files, deviceTable, dataHead, wallpaperHead, clearNvs = false, initializeStorage = false }) {
   const layout = layoutOf(files.partitionTable);
   const upgrade = sameBytes(deviceTable, files.partitionTable);
   const oldEntries = upgrade ? null : parseTable(deviceTable);
@@ -93,8 +94,15 @@ export function planInstall({ files, deviceTable, dataHead, wallpaperHead, clear
     if (clearNvs || !wasNvs) blank(`NVS 扇区 0x${at.toString(16)}`, at, SECTOR, clearNvs ? "按选择清除设置 / cleared by choice" : "原先不是 NVS / was not NVS before");
     else keptNvs.push(at);
   }
-  if (!isLittleFs(dataHead)) write("内部数据 / data", layout.data.offset, files.factoryData, "尚无有效数据分区 / no valid data partition yet");
-  if (!isLittleFs(wallpaperHead)) write("锁屏壁纸 / wallpaper", layout.wallpaper.offset, files.factoryWallpaper, "尚无有效壁纸分区 / no valid wallpaper partition yet");
+  // 只把完整分区全为FF视为空白；头部损坏或短读不能授权覆盖。/ Only a complete all-FF partition is blank; damaged headers or short reads never authorize replacement.
+  const unrecognizedStorage = [];
+  for (const [name, partition, bytes, image] of [["data", layout.data, dataHead, files.factoryData], ["wallpaper", layout.wallpaper, wallpaperHead, files.factoryWallpaper]]) {
+    if (isLittleFs(bytes)) continue;
+    const empty = bytes instanceof Uint8Array && bytes.length === partition.size && bytes.every((b) => b === 0xff);
+    if (!empty) unrecognizedStorage.push(name);
+    if (empty || initializeStorage) write(name === "data" ? "内部数据 / data" : "锁屏壁纸 / wallpaper", partition.offset, image,
+      empty ? "完整分区为空白 / full partition is blank" : "明确选择初始化，清除原数据 / explicitly initialize and remove existing data");
+  }
 
   // 升级时引导程序相同则跳过（由调用方比对设备 MD5）。/ On upgrade an identical bootloader is skipped (caller compares device MD5).
   write("引导程序 / bootloader", 0x0, files.bootloader, "二级引导 / second-stage bootloader", upgrade);
@@ -102,7 +110,7 @@ export function planInstall({ files, deviceTable, dataHead, wallpaperHead, clear
   for (const step of steps) {
     if (step.address % SECTOR) throw new Error(`地址未按扇区对齐 / unaligned address 0x${step.address.toString(16)}`);
   }
-  return { mode: upgrade ? "upgrade" : "install", knownTable: upgrade || !!oldEntries, keptNvs, steps };
+  return { mode: upgrade ? "upgrade" : "install", knownTable: upgrade || !!oldEntries, keptNvs, unrecognizedStorage, steps };
 }
 
 /// 计算 MD5 十六进制摘要（esptool 校验写入用）。/ MD5 hex digest used to verify esptool writes.

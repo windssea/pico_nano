@@ -1,6 +1,6 @@
 # 开发环境与测试说明
 
-当前基线0.0.56。可运行命令统一见 [BUILDING](BUILDING.md)，功能/待办见 [PROJECT_STATUS](PROJECT_STATUS.md)，发布门保留在 [VALIDATION](VALIDATION.md)。以下区分“代码运行在哪里”和“能证明什么”。
+当前基线0.0.57。可运行命令与开发时可见窗口统一见 [BUILDING](BUILDING.md)，功能/待办见 [PROJECT_STATUS](PROJECT_STATUS.md)，发布门保留在 [VALIDATION](VALIDATION.md)。以下区分“代码运行在哪里”和“能证明什么”。
 
 ## ESP32-S3与PC模拟的区别
 
@@ -13,11 +13,11 @@ PC运行同源C阅读、字体、布局、状态机及UI，替换文件/显示/�
 | 环境 | 当前使用/要求 | 说明 |
 | --- | --- | --- |
 | Windows主机 | Python 3.12.8、PowerShell | 文档检查、字体生成、独立图像/QR核对 |
-| Docker Linux | Docker Engine 29.2.1；本机default context | 固定IDF镜像，实际连接状态必须现场核对 |
+| Docker Linux | Docker Engine 29.2.1；2026-10-11本机desktop-linux可用 | 固定IDF镜像，实际连接状态必须现场核对；default管道本次不可用 |
 | ESP工具链 | ESP-IDF v6.1固定镜像摘要 | 同一版本的CI和Zbit板级配置，不混用SDKCONFIG |
 | 主机测试 | 容器C11/CMake/Ninja/Python、ASan/UBSan、pthread | 原生Linux；代码依赖POSIX，Windows原生构建未验证 |
 | SDL | tools/docker构建pico-nano-sdl:dev | 固定IDF基础镜像+SDL2；dummy测试不产生可见窗口 |
-| 可见PC窗口 | Linux/WSL+SDL2+图形会话 | 同源阅读器，当前Windows Docker不代替WSLg窗口环境 |
+| 可见PC窗口 | Windows Docker+WSLg+SDL2，tools/run_sim.ps1 | 同源窗口已启动并捕获《绍宋》书架首帧；无真实面板与芯片模拟 |
 | 字体工具 | fontTools 4.51.0、固定Noto源SHA | 子集/OFL/家族改名，manifest记录可复现版本 |
 | JS摘要oracle | Node v24.19.0（本机） | tests/tools/test_transfer_sha.mjs与crypto比较；固件无Node依赖 |
 | QR独立oracle | 实际cv2模块4.13.0、headless发行4.13.0.92（本机） | tools/test_qr_decode.py准确比较演练UTF8载荷；不是手机相机实测 |
@@ -60,6 +60,8 @@ Linux/WSL原生host可用ctest -R筛选名称，或ctest -L筛选已有标签；
 ## 专项重跑
 
 - PC HTTP：先host构建pn_transfer_host，再按TRANSFER_WEB启动；默认回环，配对码仅当前会话，退出等待已接收请求。测试根不能复用mockDoc或正在阅读的书库。
+- LocalSend PC HTTP/发现：host构建pn_localsend_host，按 [开发入口](LOCALSEND_PC.md) 启动；Windows网络可调用Docker owner，可信本机确认。私有EPUB/TTF可作为测试脚本附加参数，真实网卡组播须明确指定环境；默认测试不发LAN公告。官方客户端完整互通、设备发现/HTTPS与图形UI单独验收。
+- 附近传书中文界面：按 [共用界面与SDL演练](LOCALSEND_UI.md) 启动独立预览窗口；host验证选择/代次/状态，SDL验证点击和真实核心确认/拒绝/取消。进度及安装结果是带预览标记的fixture，不是实际HTTP传输；截图只留build-dev。
 - 摘要：`node tests/tools/test_transfer_sha.mjs`，验证块边界/填充/任意分块；浏览器页面无需安全上下文WebCrypto。
 - 二维码：按TRANSFER_QR生成PGM，再用本机OpenCV独立解码；捕获是演练口令，截图不是设备照片。
 - EPUB：epub-sample核对全部ZIP资源；epub_dump/body_probe/epub_capture等边界见对应格式维护文档，不把单一容器检查当阅读验收。

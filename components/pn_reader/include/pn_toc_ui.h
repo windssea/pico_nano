@@ -7,11 +7,12 @@
  */
 #pragma once
 #include "pn_epub_app.h"
-#define PN_TOC_UI_ROWS 6
+#define PN_TOC_UI_ROWS 10 ///< 紧凑目录每页十项 / Ten entries per compact page
 #define PN_TOC_UI_BACK 1
 #define PN_TOC_UI_NEXT 2
 #define PN_TOC_UI_PREVIOUS 3
 #define PN_TOC_UI_RETRY 4
+#define PN_TOC_UI_CURRENT 5 ///< 定位当前章节所在目录页 / Locate the current chapter's TOC page
 #define PN_TOC_UI_ROW 16
 typedef struct {
     char label[PN_EPUB_META_MAX]; ///< 用户目录原文 / User's original TOC label
@@ -23,6 +24,7 @@ typedef struct {
     pn_epub_app_t *reader; ///< 借用原生会话 / Borrowed native reader
     pn_toc_ui_row_t rows[PN_TOC_UI_ROWS]; ///< 当前页原文 / Current page labels
     size_t start,total,count; ///< 先序列表范围 / Preorder list range
+    size_t current; ///< 唯一对应当前章节的目录项，未知为SIZE_MAX / Unique current-section entry, SIZE_MAX when unknown
     unsigned selected; ///< 当前键盘焦点 / Keyboard focus
     bool active,presented; ///< 活动与推屏确认 / Active and presented
     const char *notice; ///< 静态中文反馈 / Static Chinese feedback

@@ -8,4 +8,8 @@ int main(int argc,char **argv){assert(argc==2);pn_pool_t pool;assert(!pn_pool_in
  pn_font_set_suspend(&set);assert(pn_font_set_ensure(&set,56,&font,&chain)==PN_OK && font->pixels==56 && pn_font_chain_choose(chain,'A',&choice)==PN_OK);
  assert(pn_font_set_move(&moved,&set)==PN_OK && !set.impl);pn_font_set_close(&moved);assert(!pool.used && !pool.live && pn_media_active(&media)==1);
  for(size_t fail=1;fail<=requests;fail++){pn_pool_t fault;assert(!pn_pool_init(&fault,1024*1024,NULL,NULL,NULL));fault.fail_at=fail;pn_status_t status=pn_font_set_open(&set,&fault,&media,&guard,&prefs,44);assert(status==PN_OK || status==PN_NO_MEMORY);pn_font_set_close(&set);assert(!fault.used && !fault.live && pn_media_active(&media)==1);}
+ // 默认正文必须覆盖预览里的“恰”和常用字，不依赖卡上字体。/ Default text covers the preview's qia and common characters without a card font.
+ pn_font_preferences_t defaults={0};assert(pn_font_set_open(&set,&pool,&media,&guard,&defaults,36)==PN_OK);assert(pn_font_set_ensure(&set,36,&font,&chain)==PN_OK);
+ const uint32_t common[]={0x6070,0x8212,0x8ddd,0x79bb,0x9605,0x8bfb,0x9f99,0x3002};for(size_t i=0;i<sizeof common/sizeof *common;i++)assert(pn_font_chain_choose(chain,common[i],&choice)==PN_OK);
+ pn_font_set_close(&set);assert(!pool.used && !pool.live);
  assert(pn_font_set_open(&set,&pool,&media,&guard,&prefs,44)==PN_OK && pn_media_detach(&media)==PN_OK);assert(pn_font_set_ensure(&set,44,&font,&chain)==PN_STALE_MEDIA);pn_font_set_close(&set);assert(!pool.used && !pool.live && pn_media_release(&media,&guard)==PN_OK);return 0;}

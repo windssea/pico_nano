@@ -30,6 +30,11 @@ int main(int argc,char **argv){
     screen.fail=false;assert(pn_epub_app_bookmark_jump(&app,mark_id,now++,present,&screen)==PN_OK && pn_epub_app_bookmark_can_return(&app) && pn_epub_app_progress(&app,&after)==PN_OK && same(&first,&after));
     screen.fail=true;assert(pn_epub_app_bookmark_return(&app,now++,present,&screen)==PN_IO && pn_epub_app_bookmark_can_return(&app));
     screen.fail=false;assert(pn_epub_app_bookmark_return(&app,now++,present,&screen)==PN_OK && !pn_epub_app_bookmark_can_return(&app) && pn_epub_app_progress(&app,&after)==PN_OK && same(&current,&after));
+    assert(pn_epub_app_bookmark_jump(&app,mark_id,now++,present,&screen)==PN_OK && pn_epub_app_bookmark_can_return(&app));
+    screen.fail=true;assert(pn_epub_app_step(&app,PN_APP_NEXT,now++,present,&screen)==PN_IO && pn_epub_app_bookmark_can_return(&app));screen.fail=false;
+    assert(pn_epub_app_step(&app,PN_APP_OPEN,now++,present,&screen)==PN_OK && pn_epub_app_bookmark_can_return(&app));
+    assert(pn_epub_app_step(&app,PN_APP_NEXT,now++,present,&screen)==PN_OK && !pn_epub_app_bookmark_can_return(&app));
+    assert(pn_epub_app_bookmark_return(&app,now++,present,&screen)==PN_EMPTY);
     assert(pn_epub_app_bookmark_rename(&app,mark_id,"首章")==PN_OK);
     pn_epub_bookmark_t marks[6];size_t mark_count;bool mark_more;assert(pn_epub_app_bookmark_list(&app,0,marks,6,&mark_count,&mark_more)==PN_OK && mark_count==1 && !mark_more && !strcmp(marks[0].label,"首章"));
     pn_bookmark_ui_t bm={0};assert(pn_bookmark_ui_open_epub(&bm,&app,present,&screen)==PN_OK && bm.count==1);

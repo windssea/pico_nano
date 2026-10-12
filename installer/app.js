@@ -1,7 +1,7 @@
 /// 网页安装器界面与串口流程：读取设备现状、按 plan.js 写入并逐段 MD5 校验。
 /// Web-installer UI and serial flow: read the device state, write per plan.js and verify every region by MD5.
 import { ESPLoader, Transport } from "./vendor/esptool-js-0.5.7/bundle.js";
-import { layoutOf, md5, planInstall, TABLE_OFFSET, TABLE_SIZE } from "./plan.js";
+import { isLittleFs, layoutOf, md5, planInstall, TABLE_OFFSET, TABLE_SIZE } from "./plan.js";
 
 const FLASH_BYTES = 16 * 1024 * 1024;
 const BAUD = 921600;
@@ -144,8 +144,13 @@ async function prepare() {
   const layout = layoutOf(state.files.partitionTable);
   status("正在读取设备分区表…");
   const deviceTable = await state.loader.readFlash(TABLE_OFFSET, TABLE_SIZE);
-  const dataHead = await state.loader.readFlash(layout.data.offset, HEAD);
-  const wallpaperHead = await state.loader.readFlash(layout.wallpaper.offset, HEAD);
+  // 未识别头部时读取完整分区，不能凭空白头部认定全部数据为空。/ Read the full partition for unrecognized headers; a blank header does not prove all data is blank.
+  const readStorage = async (partition) => {
+    const head = await state.loader.readFlash(partition.offset, HEAD);
+    return isLittleFs(head) ? head : await state.loader.readFlash(partition.offset, partition.size);
+  };
+  const dataHead = await readStorage(layout.data);
+  const wallpaperHead = await readStorage(layout.wallpaper);
   state.device.reads = { deviceTable, dataHead, wallpaperHead };
   buildPlan();
   state.busy = false;
@@ -155,14 +160,15 @@ async function prepare() {
 
 function buildPlan() {
   const { deviceTable, dataHead, wallpaperHead } = state.device.reads;
-  state.plan = planInstall({ files: state.files, deviceTable, dataHead, wallpaperHead, clearNvs: $("clear-nvs").checked });
+  state.plan = planInstall({ files: state.files, deviceTable, dataHead, wallpaperHead, clearNvs: $("clear-nvs").checked, initializeStorage: $("initialize-storage").checked });
   const plan = state.plan;
   const mode = plan.mode === "upgrade" ? "升级：设备上已是本固件的分区布局"
     : plan.knownTable ? "首次安装：将把设备切换到本固件的分区布局" : "首次安装：未能识别设备上的分区表";
   $("plan-mode").textContent = mode;
   $("plan-mode").dataset.tone = plan.mode === "upgrade" ? "ok" : "warn";
   const kept = plan.keptNvs.length ? `保留设置区（NVS）扇区 ${plan.keptNvs.map(hex).join("、")}。` : "设置区（NVS）将全部清空。";
-  $("plan-note").textContent = `${kept}不整片擦除，不触碰存储卡和屏幕电源芯片。`;
+  const storage = plan.unrecognizedStorage.length ? `无法识别 ${plan.unrecognizedStorage.join("、")} 分区。${$("initialize-storage").checked ? "已选择清除并初始化，请先备份。" : "保留原数据；安装后可能无法保存，请备份后再决定恢复方式。"}` : "";
+  $("plan-note").textContent = `${kept}${storage}不整片擦除，不触碰存储卡和屏幕电源芯片。`;
   const list = $("plan-steps");
   list.replaceChildren();
   for (const step of plan.steps) {
@@ -176,7 +182,7 @@ function buildPlan() {
     item.append(name, where, why);
     list.append(item);
   }
-  $("backup").checked = $("backup").dataset.touched ? $("backup").checked : plan.mode !== "upgrade";
+  $("backup").checked = $("backup").dataset.touched ? $("backup").checked : plan.mode !== "upgrade" || plan.unrecognizedStorage.length > 0;
   $("plan").hidden = false;
 }
 
@@ -237,7 +243,7 @@ async function install() {
     state.plan = null;
     status("安装完成，设备已重启。若屏幕没有变化，请查看帮助中的“开机后没有画面”。", "ok");
   } catch (error) {
-    fail(new Error(`安装中断：${error.message || error}。设备会停在下载模式，可重新连接后再次安装，或写回备份。`));
+    fail(new Error(`安装中断：${error.message || error}。设备可能无法正常启动，请手动进入下载模式后重新安装，或用外部工具写回备份。`));
     return;
   }
   state.busy = false;
@@ -249,4 +255,5 @@ $("install").addEventListener("click", () => install());
 $("confirm-model").addEventListener("change", syncButtons);
 $("backup").addEventListener("change", () => { $("backup").dataset.touched = "1"; });
 $("clear-nvs").addEventListener("change", () => { if (state.device?.reads) buildPlan(); });
+$("initialize-storage").addEventListener("change", () => { if (state.device?.reads) buildPlan(); });
 init().then(syncButtons);

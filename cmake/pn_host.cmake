@@ -7,15 +7,22 @@ add_subdirectory(${PN_ROOT}/components/pn_zlib ${CMAKE_CURRENT_BINARY_DIR}/pn-zl
 add_subdirectory(${PN_ROOT}/components/pn_expat ${CMAKE_CURRENT_BINARY_DIR}/pn-expat)
 add_subdirectory(${PN_ROOT}/components/pn_spng ${CMAKE_CURRENT_BINARY_DIR}/pn-spng)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
+add_subdirectory(${PN_ROOT}/components/pn_cjson ${CMAKE_CURRENT_BINARY_DIR}/pn-cjson)
 set(ui_font_c ${CMAKE_CURRENT_BINARY_DIR}/pn_ui_font.c)
 add_custom_command(OUTPUT ${ui_font_c} COMMAND ${Python3_EXECUTABLE} ${PN_ROOT}/tools/embed_binary.py ${PN_ROOT}/assets/fonts/read-pico-ui.ttf ${ui_font_c} DEPENDS ${PN_ROOT}/tools/embed_binary.py ${PN_ROOT}/assets/fonts/read-pico-ui.ttf VERBATIM)
-add_library(pn_core STATIC ${ui_font_c}
+set(reading_font_c ${CMAKE_CURRENT_BINARY_DIR}/pn_reading_font.c)
+add_custom_command(OUTPUT ${reading_font_c} COMMAND ${Python3_EXECUTABLE} ${PN_ROOT}/tools/embed_binary.py ${PN_ROOT}/assets/fonts/read-pico-reading.ttf ${reading_font_c} pn_reading_font DEPENDS ${PN_ROOT}/tools/embed_binary.py ${PN_ROOT}/assets/fonts/read-pico-reading.ttf VERBATIM)
+add_library(pn_core STATIC ${ui_font_c} ${reading_font_c}
     ${PN_ROOT}/components/pn_qr/pn_qr.c
     ${PN_ROOT}/components/pn_qr/vendor/qrcodegen.c
     ${PN_ROOT}/components/pn_reader/pn_transfer_view.c
+    ${PN_ROOT}/components/pn_reader/pn_localsend_view.c
     ${PN_ROOT}/components/pn_reader/pn_transfer_hub.c
     ${PN_ROOT}/components/pn_transfer/pn_transfer_worker.c
     ${PN_ROOT}/components/pn_transfer/pn_transfer_service.c
+    ${PN_ROOT}/components/pn_transfer/pn_transfer_receive.c
+    ${PN_ROOT}/components/pn_transfer/pn_localsend_session.c
+    ${PN_ROOT}/components/pn_transfer/pn_localsend_json.c
     ${PN_ROOT}/components/pn_transfer/pn_upload.c
     ${PN_ROOT}/components/pn_transfer/pn_upload_files.c
     ${PN_ROOT}/components/pn_transfer/pn_upload_validate.c
@@ -132,3 +139,5 @@ find_package(Threads REQUIRED)
 target_link_libraries(pn_core PUBLIC Threads::Threads)
 
 target_include_directories(pn_core PUBLIC ${PN_ROOT}/components/pn_qr/include PRIVATE ${PN_ROOT}/components/pn_qr/vendor)
+
+target_link_libraries(pn_core PUBLIC pn_cjson)

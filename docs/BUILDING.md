@@ -1,6 +1,29 @@
 # 构建与运行入口
 
-当前开发版本0.0.56。能力与待办统一见 [项目状态](PROJECT_STATUS.md)，环境、测试分层和证据边界见 [开发与测试](DEVELOPMENT_AND_TESTING.md)。本页只列已经存在的运行入口，不把拟建命令当成实现。
+当前开发版本0.0.57。能力与待办统一见 [项目状态](PROJECT_STATUS.md)，环境、测试分层和证据边界见 [开发与测试](DEVELOPMENT_AND_TESTING.md)。本页只列已经存在的运行入口，不把拟建命令当成实现。
+
+## 开发时保留可见模拟器
+
+界面开发与本地调试时先启动窗口，观察同源代码的显示效果：
+
+```powershell
+python tools/dev.py sdl-run
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/run_sim.ps1
+```
+
+默认自动生成忽略目录 build-dev/sim-library/books：4本TXT（UTF8/BOM/UTF16/GBK）与4本原创EPUB（EPUB2/3、目录、插图、长书名），并在本地原小说存在时复制《绍宋》，共9本。原创文字和条纹图使用CC0-1.0，私人小说不随仓库交付；在窗口删除书籍只影响副本，原始mockDoc不改。字体默认使用 mockDoc/LXGWWenKai-Regular.ttf。
+
+可单独运行 python tools/make_sim_library.py 重建样本（会重新生成上述固定文件名）。可用 -Books/-Font/-FontDir/-WallpaperDir 指定工作区内的其他输入。脚本保留已运行的 pico-sim 窗口，不自动关闭；源码重建后执行 docker stop pico-sim 再运行脚本，窗口才会加载新二进制。关闭窗口也会结束容器。
+
+逐本打开/翻页/返回的本地复跑（Docker Linux）：
+
+```powershell
+docker run --rm --mount type=bind,source=D:\windssea\dev\pico_nano,target=/work -w /work pico-nano-sdl:dev python3 tools/test_sim_library.py build-sim-sdl-run/pn_sim build-dev/sim-library/books mockDoc/LXGWWenKai-Regular.ttf
+```
+
+默认6MiB阅读预算不扩大。帧备份只供正文关闭工具栏时恢复，书架/设置不分配，返回书架时释放；避免大渐进式JPEG首帧和缩略图被无用备份挤占。打开失败会在书架提示，具体状态与阶段可用 docker logs pico-sim 查看。大型图片仍有预算限制，PC结果不证明设备可解码所有大图。
+
+依赖 Docker Linux 引擎与 WSLg；以 docker version 实际可连的 context 为准。2026-10-11本机 desktop-linux 可用，default 管道不可用，可在当前Shell设置 $env:DOCKER_CONTEXT='desktop-linux'，不改变全局配置。日志用 docker logs pico-sim 查看；每次呈现的PGM在忽略目录 build-dev/sim-frames，阅读状态与封面缓存在 pico-sim-data Docker卷中。dummy自动测试与可见窗口分开，窗口观感不等于真实面板观感。
 
 ## Windows与Docker
 
@@ -17,10 +40,10 @@ python tools/dev.py firmware-board
 
 命令均不烧写。host执行同源C、ASan/UBSan、真实文件/HTTP、SDK-stub和工具测试；sim为基础headless捕获与调度场景；sdl构建可选窗口模拟器并通过dummy驱动测试交互。Windows Docker里的dummy测试不打开可见窗口。
 
-若Docker连接失败，先读 `docker context ls`、`docker desktop status` 和 `docker --context default version`。本机当前default可以连接Linux引擎；旧desktop-linux管道可能不可用。仅在确认context指向可用Linux引擎后，给当前Shell设置：
+若Docker连接失败，先读 `docker context ls`、`docker desktop status`，再用 `docker --context desktop-linux version` 或 `docker --context default version` 核对各管道。仅在确认context指向可用Linux引擎后，给当前Shell设置（本次desktop-linux可用）：
 
 ```powershell
-$env:DOCKER_CONTEXT='default'
+$env:DOCKER_CONTEXT='desktop-linux'
 python tools/dev.py host
 ```
 
@@ -62,6 +85,8 @@ cmake --build build-sim-native
 
 - 阅读/续读/目录/书签/排版/字体：见 [阅读会话](READER_SESSION.md)、[EPUB应用](EPUB_APP.md)、[阅读状态](READING_STATE.md)。
 - PC传书网页：见 [网页服务](TRANSFER_WEB.md)，使用独立测试书库，不能与阅读模拟器同时访问同一根。
+- LocalSend PC HTTP：见 [开发入口](LOCALSEND_PC.md)，本机控制台确认，独立测试根；尚未验证官方客户端或设备互通。
+- 附近传书界面预览：见 [中文确认与状态](LOCALSEND_UI.md)，`tools/run_localsend_preview.ps1` 打开独立可点击SDL窗口；无网络或文件安装。
 - 设备热点/退出返回：见 [设备入口](DEVICE_TRANSFER_ENTRY.md)；扫码及独立解码见 [扫码传书](TRANSFER_QR.md)。
 - EPUB容器全资源检查：`python tools/dev.py epub-sample --archive "mockDoc/绍宋.epub" --all-resources`，只读原文件，报告留build-dev。
 - 字体子集/fixture：tools/subset_ui_font.py、tools/subset_fallback_fixture.py，源哈希必须匹配；不能手改字体或表。
