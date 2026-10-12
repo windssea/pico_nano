@@ -46,7 +46,7 @@ def main(binary,resources=()):
                 deadline = time.monotonic() + 3
                 while not app.pending() and time.monotonic() < deadline: time.sleep(.01)
                 pending = app.pending(); assert pending
-                assert not (pathlib.Path(directory) / 'books' / name).exists()
+                assert not (pathlib.Path(directory) / 'piconano/books' / name).exists()
                 assert operator('/state',authorized=False)[0]==403
                 display=operator('/state')[1]
                 assert 'grants' not in display and 'sessionId' not in display and display['generation']==pending['generation']
@@ -64,18 +64,18 @@ def main(binary,resources=()):
             query = urllib.parse.urlencode({'sessionId': grants['sessionId'], 'fileId': '中文 ID', 'token': grants['files']['中文 ID']})
             assert request('/api/localsend/v2/upload?' + query.replace(grants['files']['中文 ID'], '0'*32), data)[0] == 403
             assert request('/api/localsend/v2/upload?' + query, data)[0] == 200
-            assert (pathlib.Path(directory) / 'books/正文.txt').read_bytes() == data
+            assert (pathlib.Path(directory) / 'piconano/books/正文.txt').read_bytes() == data
             assert request('/api/localsend/v2/upload?' + query, data)[0] == 409
             assert prepare('拒绝.txt', b'hello', '0')[0] == 403
             code, grants = prepare('摘要错误.txt', b'hello', digest='0'*64); assert code == 200
             query = urllib.parse.urlencode({'sessionId': grants['sessionId'], 'fileId': '中文 ID', 'token': grants['files']['中文 ID']})
             assert request('/api/localsend/v2/upload?' + query, b'hello')[0] == 422
-            assert not (pathlib.Path(directory) / 'books/摘要错误.txt').exists()
+            assert not (pathlib.Path(directory) / 'piconano/books/摘要错误.txt').exists()
             code, grants = prepare('长度错误.txt', b'hello'); assert code == 200
             query = urllib.parse.urlencode({'sessionId': grants['sessionId'], 'fileId': '中文 ID', 'token': grants['files']['中文 ID']})
             assert request('/api/localsend/v2/upload?' + query, b'short!')[0] == 400
             assert request('/api/localsend/v2/cancel?sessionId=' + grants['sessionId'])[0] == 200
-            for name, choice, folder in [('封面.png','3','covers'), ('锁屏.png','4','wallpapers')]:
+            for name, choice, folder in [('封面.png','3','piconano/covers'), ('锁屏.png','4','piconano/wallpapers')]:
                 data = (pathlib.Path(__file__).parents[1] / 'fixtures/image-black.png').read_bytes()
                 code, grants = prepare(name, data, choice); assert code == 200
                 query = urllib.parse.urlencode({'sessionId': grants['sessionId'], 'fileId': '中文 ID', 'token': grants['files']['中文 ID']})
@@ -94,7 +94,7 @@ def main(binary,resources=()):
             assert operator('/cancel',{'generation':app.last['generation']-1})[0]==409
             assert operator('/cancel',{'generation':app.last['generation']})[0]==200
             response = conn.getresponse(); assert response.status == 403; response.read(); conn.close()
-            assert not (pathlib.Path(directory)/'books/取消.txt').exists()
+            assert not (pathlib.Path(directory)/'piconano/books/取消.txt').exists()
             assert prepare('后续.txt','正文'.encode())[0] == 200
             assert request('/api/localsend/v2/cancel?sessionId='+app.grants['sessionId'])[0] == 200
             for path in [pathlib.Path(__file__).resolve().parents[2]/'assets/fonts/read-pico-ui.ttf', *map(pathlib.Path,resources)]:
@@ -102,7 +102,7 @@ def main(binary,resources=()):
                 code, grants = prepare(path.name,data); assert code == 200
                 query = urllib.parse.urlencode({'sessionId':grants['sessionId'],'fileId':'中文 ID','token':grants['files']['中文 ID']})
                 assert request('/api/localsend/v2/upload?'+query,data)[0] == 200
-                folder = 'fonts' if path.suffix.lower()=='.ttf' else 'books'
+                folder = 'piconano/fonts' if path.suffix.lower()=='.ttf' else 'piconano/books'
                 installed = (pathlib.Path(directory)/folder/path.name).read_bytes()
                 assert hashlib.sha256(installed).digest()==hashlib.sha256(data).digest()
                 print(f'HTTP/native SHA256 {path.name}: {hashlib.sha256(installed).hexdigest()}',flush=True)

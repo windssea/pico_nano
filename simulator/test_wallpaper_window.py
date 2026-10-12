@@ -2,9 +2,9 @@
 import os,pathlib,struct,subprocess,sys,tempfile,zlib
 
 def png(width,height,value):
-    raw=b''.join(b'\0'+bytes((value if x<width//2 else 255) for x in range(width)) for y in range(height))
+    raw=b''.join(b'\0'+b''.join(bytes([value,255 if x<width//2 else 0]) for x in range(width)) for y in range(height))
     chunk=lambda kind,data:struct.pack('>I',len(data))+kind+data+struct.pack('>I',zlib.crc32(kind+data))
-    return b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('>IIBBBBB',width,height,8,0,0,0,0))+chunk(b'IDAT',zlib.compress(raw))+chunk(b'IEND',b'')
+    return b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('>IIBBBBB',width,height,8,4,0,0,0))+chunk(b'IDAT',zlib.compress(raw))+chunk(b'IEND',b'')
 
 with tempfile.TemporaryDirectory() as folder:
     root=pathlib.Path(folder);books=root/'books';books.mkdir();(books/'a.txt').write_text('阅读测试。\n'*20,encoding='utf-8')
@@ -26,7 +26,7 @@ with tempfile.TemporaryDirectory() as folder:
     record=store/'lock.a';assert record.exists() and record.stat().st_size>415872,list(store.iterdir())
     # 预览后Esc取消不写新记录。/ Esc after previewing cancels without a new record.
     before=record.read_bytes();out=run('wallpaper,tap:330:240,back,back,quit',*opts)
-    assert 'wallpaper_ui command=5 status=0 screen=1 active=1' in out and 'wallpaper_ui command=12 status=0 screen=0 active=1' in out,out
+    assert 'wallpaper_ui command=4 status=0 screen=1 active=1' in out and 'wallpaper_ui command=12 status=0 screen=0 active=1' in out,out
     assert record.read_bytes()==before and not (store/'lock.b').exists()
     # 无记录目录：应用返回不支持。/ Without a record directory, apply reports unsupported.
     out=run('wallpaper,tap:100:240,enter,back,back,quit','--wallpaper-dir',str(images))
@@ -34,15 +34,13 @@ with tempfile.TemporaryDirectory() as folder:
     # 未给目录时w键无效；选项须配合书库。/ Without the option the w key does nothing; options require the library mode.
     out=run('wallpaper,quit');assert 'wallpaper_ui' not in out,out
     assert subprocess.run([sys.argv[1],'--wallpaper-dir',str(images)],env=dict(os.environ,SDL_VIDEODRIVER='dummy'),capture_output=True).returncode==2
-    # 在读书退出后仍可预览真实侧车书封，重启/原图缺失后使用同身份缓存。/ A real sidecar cover remains previewable after closing the reader; restart/missing sources reuse the matching cache.
-    import shutil
-    book=next(books.glob('*.txt'));sidecar=book.with_suffix('.png');shutil.copy2(next(images.glob('*.png')),sidecar)
-    out=run('tap:100:500,back,wallpaper,tap:600:240,enter,back,lock,next,enter,back,quit',*opts)
-    assert 'wallpaper_ui command=13 status=0 screen=1 active=1' in out and 'wallpaper_ui command=11 status=0 screen=0 active=1' in out,out
-    assert 'lock_preview status=0 mode=3 cached=1' in out and 'lock_preview wake status=0' in out,out
+    # PNG透明遮罩在阅读及锁屏保留文字；缺失原图降级为正文和默认锁屏。/ PNG masks retain text during reading and locking; missing sources fall back to plain text and default locking.
+    out=run('wallpaper,tap:100:400,tap:100:1080,enter,back,tap:100:500,lock,next,enter,back,quit',*opts)
+    assert 'wallpaper_ui command=14 status=0 screen=1 active=1' in out and 'wallpaper_ui command=11 status=0 screen=0 active=1' in out,out
+    assert 'reading_mask status=0' in out and 'lock_preview status=0 mode=4 cached=0' in out and 'lock_preview wake status=0' in out,out
     latest=max((p.read_bytes() for p in store.glob('lock.*')),key=lambda b:int.from_bytes(b[12:20],'little'))
-    assert latest[:6]==b'PNWP\x02\x00' and latest[6]==3 and latest[11]==1 and len(latest)>415872
-    book.unlink();sidecar.unlink()
-    out=run('wallpaper,tap:600:240,enter,back,quit',*opts)
-    assert 'wallpaper_ui command=13 status=0 screen=1 active=1' in out and 'wallpaper_ui command=11 status=0 screen=0 active=1' in out,out
-print('wallpaper window: open, preview, cover, apply record, cancel, no-store and option validation passed')
+    assert latest[:6]==b'PNWP\x02\x00' and latest[6]==4 and latest[11]==0 and len(latest)<2048
+    next(images.glob('*.png')).unlink()
+    out=run('tap:100:500,lock,enter,back,quit',*opts)
+    assert 'reading_mask status=11' in out and 'lock_preview status=0 mode=0 cached=0' in out,out
+print('wallpaper window: default/custom choices, preview, mask reading/locking, missing-source fallback, cancel and option validation passed')

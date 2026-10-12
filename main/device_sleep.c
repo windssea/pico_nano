@@ -17,18 +17,22 @@
 static const char *TAG="pn_sleep";
 static int64_t now_ms(void){return esp_timer_get_time()/1000;}
 /* 电源键松开且中断线保持高电平150ms才算空闲，最多等800ms。/ Idle means the key is released and the interrupt line stays high for 150 ms, waiting at most 800 ms. */
-static void wait_key_idle(int timeout_ms){
+static bool wait_key_idle(int timeout_ms){
     int64_t start=now_ms(),high_from=0;
     while(now_ms()-start<timeout_ms){
         read_pico_pmu_drain_events();read_pico_clear_ioe_int();
-        bool held=read_pico_pmu_poll()==ESP_OK && (read_pico_pmu_get()->key_state&0x01)!=0;
+        bool held=read_pico_pmu_poll()!=ESP_OK || (read_pico_pmu_get()->key_state&0x01)!=0;
         bool high=gpio_get_level((gpio_num_t)READ_PICO_IOE_INT_GPIO)!=0;
-        if(!held && high){if(!high_from)high_from=now_ms();if(now_ms()-high_from>=150)return;}
+        if(!held && high){if(!high_from)high_from=now_ms();if(now_ms()-high_from>=150)return true;}
         else high_from=0;
         vTaskDelay(pdMS_TO_TICKS(20));
     }
+    return false;
 }
+static bool media_unchanged;
+bool pn_device_sleep_media_unchanged(void){return media_unchanged;}
 bool pn_device_sleep_until_key(void){
+    media_unchanged=true;
     wait_key_idle(800);
     gpio_config_t io={.pin_bit_mask=1ULL<<READ_PICO_IOE_INT_GPIO,.mode=GPIO_MODE_INPUT,.pull_up_en=GPIO_PULLUP_ENABLE,.pull_down_en=GPIO_PULLDOWN_DISABLE,.intr_type=GPIO_INTR_DISABLE};
     if(gpio_config(&io)!=ESP_OK){ESP_LOGW(TAG,"IOE_INT config failed; staying awake");return false;}
@@ -41,12 +45,16 @@ bool pn_device_sleep_until_key(void){
         // 入睡前中断线仍为低：先处理积压事件，不带着挂起唤醒入睡。/ Line still low before sleeping: drain pending events instead of sleeping with a pending wake.
         if(gpio_get_level((gpio_num_t)READ_PICO_IOE_INT_GPIO)==0){
             if(slept && read_pico_pmu_take_key_wakeup())break;
-            read_pico_pmu_drain_events();read_pico_clear_ioe_int();vTaskDelay(pdMS_TO_TICKS(20));continue;
+            media_unchanged=false;read_pico_pmu_drain_events();read_pico_clear_ioe_int();vTaskDelay(pdMS_TO_TICKS(20));continue;
         }
-        (void)esp_light_sleep_start();slept=true;
+        if(esp_light_sleep_start()!=ESP_OK){media_unchanged=false;(void)gpio_wakeup_disable((gpio_num_t)READ_PICO_IOE_INT_GPIO);return false;}slept=true;
         read_pico_clear_ioe_int();
         if(read_pico_pmu_take_key_wakeup())break;
+        media_unchanged=false; // 非电源中断可能来自TF拔插，保守禁用热恢复。/ A non-power IRQ may be a card change; conservatively disable warm restore.
     }
     (void)gpio_wakeup_disable((gpio_num_t)READ_PICO_IOE_INT_GPIO);
+    // KEY_DOWN可先唤醒，松开后才产生KEY_SHORT；完整消费这一按键周期，避免同一次按键再次锁屏。
+    // KEY_DOWN can wake before KEY_SHORT arrives on release; consume the whole press so it cannot lock again.
+    if(!wait_key_idle(800)){ESP_LOGW(TAG,"Wake key not idle; staying locked until release");return false;}
     ESP_LOGI(TAG,"Woken by power key");return true;
 }

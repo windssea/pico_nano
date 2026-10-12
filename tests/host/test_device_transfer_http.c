@@ -12,6 +12,7 @@
 #include <pthread.h>
 #include <stdatomic.h>
 #include <sys/socket.h>
+#include <netinet/in.h>
 #include <unistd.h>
 #include <sys/stat.h>
 #include <errno.h>
@@ -22,6 +23,9 @@ static const uint8_t *body;
 static size_t body_at;
 static uint64_t receive_delay;
 static bool incomplete;
+static bool wrong_peer;
+int httpd_req_to_sockfd(httpd_req_t *r){(void)r;return 50;}
+int getpeername(int fd,struct sockaddr *address,socklen_t *length){assert(fd==50 && *length>=sizeof(struct sockaddr_in));struct sockaddr_in peer={.sin_family=AF_INET};uint8_t *ip=(uint8_t *)&peer.sin_addr;ip[0]=192;ip[1]=168;ip[2]=4;ip[3]=wrong_peer?3:2;memcpy(address,&peer,sizeof peer);*length=sizeof peer;return 0;}
 static uint64_t now=1000;
 static size_t native_allocations;
 static _Atomic bool http_stop_fails;
@@ -52,7 +56,7 @@ esp_err_t httpd_resp_set_hdr(httpd_req_t *r,const char *key,const char *value){(
 esp_err_t httpd_resp_send(httpd_req_t *r,const char *data,int n){(void)r;if(n<0)n=(int)strlen(data);if(n<(int)sizeof response){memcpy(response,data,(size_t)n);response[n]=0;}return ESP_OK;}
 static void add(const char *line){size_t at=0;for(unsigned i=0;i<headers;i++)at+=strlen(scratch+at)+1;strcpy(scratch+at,line);headers++;}
 static cJSON *request(int method,const char *uri,const void *bytes,size_t n,const char *token,const char *extra){
- memset(scratch,0,sizeof scratch);headers=0;add("Host: 192.168.4.1");add("Origin: http://192.168.4.1");
+ memset(scratch,0,sizeof scratch);headers=0;add("Host: 192.168.4.1");if(strncmp(uri,"/api/localsend/",15))add("Origin: http://192.168.4.1");
  char line[256];if(token){snprintf(line,sizeof line,"Authorization: Bearer %s",token);add(line);}
  if(method==HTTP_POST || method==HTTP_PUT){snprintf(line,sizeof line,"Content-Length: %zu",n);add(line);if(method==HTTP_POST)add("Content-Type: application/json");}
  if(method==HTTP_PUT)add("X-Offset: 0");
@@ -76,6 +80,24 @@ int main(void){
  json=request(HTTP_POST,"/api/v1/pair",pair,strlen(pair),NULL,"Host: evil.test");assert(code==400);cJSON_Delete(json);
  json=request(HTTP_POST,"/api/v1/pair",pair,strlen(pair),NULL,NULL);assert(code==200);char token[33];strcpy(token,cJSON_GetObjectItemCaseSensitive(json,"token")->valuestring);cJSON_Delete(json);
  const uint8_t text[]="device HTTP\n";pn_book_id_t digest;assert(pn_identity_bytes(text,sizeof text-1,&digest)==PN_OK);char sha[65];for(unsigned i=0;i<32;i++)sprintf(sha+i*2,"%02x",digest.sha256[i]);
+ /* LocalSend自动书籍接收使用真实共享安装器，连接来源和一次性令牌必须匹配。/ LocalSend book auto-reception uses the real shared installer with matching connection origin and single-use grants. */
+ json=request(HTTP_GET,"/api/localsend/v2/info",NULL,0,NULL,NULL);assert(code==200 && cJSON_IsString(cJSON_GetObjectItemCaseSensitive(json,"fingerprint")) && cJSON_GetObjectItemCaseSensitive(json,"port")->valueint==80);cJSON_Delete(json);
+ json=request(HTTP_GET,"/api/localsend/v2/info",NULL,0,NULL,"Origin: http://192.168.4.1");assert(code==403);cJSON_Delete(json);
+ char metadata[1200];snprintf(metadata,sizeof metadata,"{\"info\":{\"alias\":\"Sender\",\"version\":\"2.2\",\"fingerprint\":\"sender\"},\"files\":{\"native\":{\"id\":\"native\",\"fileName\":\"native.txt\",\"size\":%zu,\"fileType\":\"text/plain\",\"sha256\":\"%s\"}}}",sizeof text-1,sha);
+ json=request(HTTP_POST,"/api/localsend/v2/prepare-upload",metadata,strlen(metadata),NULL,NULL);assert(code==200 && json);char ls_id[33],ls_token[33];strcpy(ls_id,cJSON_GetObjectItemCaseSensitive(json,"sessionId")->valuestring);strcpy(ls_token,cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(json,"files"),"native")->valuestring);cJSON_Delete(json);
+ json=request(HTTP_POST,"/api/localsend/v2/prepare-upload",metadata,strlen(metadata),NULL,NULL);assert(code==409);cJSON_Delete(json);
+ char ls_uri[300];snprintf(ls_uri,sizeof ls_uri,"/api/localsend/v2/upload?sessionId=%s&fileId=native&token=%s",ls_id,ls_token);
+ wrong_peer=true;json=request(HTTP_POST,ls_uri,text,sizeof text-1,NULL,NULL);assert(code==403);cJSON_Delete(json);wrong_peer=false;
+ json=request(HTTP_POST,ls_uri,text,sizeof text-1,NULL,NULL);assert(code==200 && !json);
+ char native_path[512];snprintf(native_path,sizeof native_path,"%s/piconano/books/native.txt",root);FILE *native=fopen(native_path,"rb");assert(native);uint8_t native_bytes[64];assert(fread(native_bytes,1,sizeof native_bytes,native)==sizeof text-1 && !memcmp(native_bytes,text,sizeof text-1));assert(!fclose(native));
+ json=request(HTTP_POST,ls_uri,text,sizeof text-1,NULL,NULL);assert(code==409);cJSON_Delete(json);
+ const char *image_meta="{\"info\":{\"alias\":\"Sender\",\"version\":\"2.2\",\"fingerprint\":\"sender\"},\"files\":{\"image\":{\"id\":\"image\",\"fileName\":\"image.png\",\"size\":100,\"fileType\":\"image/png\"}}}";
+ json=request(HTTP_POST,"/api/localsend/v2/prepare-upload",image_meta,strlen(image_meta),NULL,NULL);assert(code==403);cJSON_Delete(json);
+ char bad_sha[65];memset(bad_sha,'0',64);bad_sha[64]=0;
+ snprintf(metadata,sizeof metadata,"{\"info\":{\"alias\":\"Sender\",\"version\":\"2.2\",\"fingerprint\":\"sender\"},\"files\":{\"native\":{\"id\":\"native\",\"fileName\":\"bad-native.txt\",\"size\":%zu,\"sha256\":\"%s\"}}}",sizeof text-1,bad_sha);
+ json=request(HTTP_POST,"/api/localsend/v2/prepare-upload",metadata,strlen(metadata),NULL,NULL);assert(code==200 && json);strcpy(ls_id,cJSON_GetObjectItemCaseSensitive(json,"sessionId")->valuestring);strcpy(ls_token,cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(json,"files"),"native")->valuestring);cJSON_Delete(json);
+ snprintf(ls_uri,sizeof ls_uri,"/api/localsend/v2/upload?sessionId=%s&fileId=native&token=%s",ls_id,ls_token);json=request(HTTP_POST,ls_uri,text,sizeof text-1,NULL,NULL);assert(code==422);cJSON_Delete(json);
+ snprintf(native_path,sizeof native_path,"%s/piconano/books/bad-native.txt",root);assert(access(native_path,F_OK)!=0);
  char begin[512];snprintf(begin,sizeof begin,"{\"kind\":\"book\",\"name\":\"测试.txt\",\"size\":%zu,\"sha256\":\"%s\"}",sizeof text-1,sha);
  json=request(HTTP_POST,"/api/v1/uploads",begin,strlen(begin),token,NULL);assert(code==201);char id[33],uri[100];strcpy(id,cJSON_GetObjectItemCaseSensitive(json,"upload_id")->valuestring);cJSON_Delete(json);
  snprintf(uri,sizeof uri,"/api/v1/uploads/%s/chunks",id);
@@ -101,7 +123,7 @@ int main(void){
  json=request(HTTP_POST,uri,complete,strlen(complete),token,NULL);assert(code==422);cJSON_Delete(json);
  /* 图片资源路由：各自目录、严格查询、身份核对与删除。/ Image resource routes: separate directories, strict queries, identity checking and deletion. */
  for(unsigned i=0;i<2;i++){
-  const char *dir=i?"wallpapers":"covers",*route=i?"/api/v1/wallpapers":"/api/v1/covers";
+  const char *dir=i?"piconano/wallpapers":"piconano/covers",*route=i?"/api/v1/wallpapers":"/api/v1/covers";
   char folder[256],path[300],uri[400];snprintf(folder,sizeof folder,"%s/%s",root,dir);assert(mkdir(folder,0700)==0 || errno==EEXIST);
   snprintf(path,sizeof path,"%s/x.png",folder);FILE *image=fopen(path,"wb");assert(image && fwrite(text,1,sizeof text-1,image)==sizeof text-1 && fclose(image)==0);
   json=request(HTTP_GET,route,NULL,0,token,NULL);assert(code==200 && cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(json,"items"))==1);cJSON_Delete(json);
@@ -111,7 +133,7 @@ int main(void){
  }
  /* 已安装字体：授权列表、游标、严格查询、身份不符拒绝删除、成功删除。/ Installed fonts: authorized listing, cursor, strict queries, refusal on identity mismatch, and successful deletion. */
  {
-  char folder[256],path[300];snprintf(folder,sizeof folder,"%s/fonts",root);snprintf(path,sizeof path,"%s/x.ttf",folder);FILE *font=fopen(path,"wb");assert(font && fwrite(text,1,sizeof text-1,font)==sizeof text-1 && fclose(font)==0);
+  char folder[256],path[300];snprintf(folder,sizeof folder,"%s/piconano/fonts",root);snprintf(path,sizeof path,"%s/x.ttf",folder);FILE *font=fopen(path,"wb");assert(font && fwrite(text,1,sizeof text-1,font)==sizeof text-1 && fclose(font)==0);
   snprintf(path,sizeof path,"%s/字体.ttf",folder);font=fopen(path,"wb");assert(font && fwrite(text,1,sizeof text-1,font)==sizeof text-1 && fclose(font)==0);
   json=request(HTTP_GET,"/api/v1/fonts",NULL,0,NULL,NULL);assert(code==401);cJSON_Delete(json);
   json=request(HTTP_GET,"/api/v1/fonts",NULL,0,token,NULL);assert(code==200 && cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(json,"more")));

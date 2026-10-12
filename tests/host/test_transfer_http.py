@@ -41,13 +41,13 @@ with tempfile.TemporaryDirectory() as directory:
  token=call('/api/v1/pair','POST',{'code':app.pair_code})[1]['token'];code,result=call(url,token=token);assert code==200 and result['next_offset']==65536
  for at in range(65536,len(data),65536):
   block=data[at:at+65536];code,result=call(url+'/chunks','PUT',block,token,extra={'X-Offset':str(at),'X-Chunk-SHA256':hashlib.sha256(block).hexdigest()});assert code==200,(code,result)
- code,result=call(url+'/complete','POST',{'sha256':digest},token);assert code==200 and (root/'books/小说.txt').read_bytes()==data,(code,result)
+ code,result=call(url+'/complete','POST',{'sha256':digest},token);assert code==200 and (root/'piconano/books/小说.txt').read_bytes()==data,(code,result)
  assert call('/api/v1/uploads','POST',request,token)[0]==409
  code,old=call('/api/v1/files/book?name='+urllib.parse.quote('小说.txt'),token=token);assert code==200 and old['sha256']==digest
  changed=b'new text\n';new_request={'kind':'book','name':'小说.txt','size':len(changed),'sha256':hashlib.sha256(changed).hexdigest(),'replace':{'size':len(data),'sha256':digest}}
  code,result=call('/api/v1/uploads','POST',new_request,token);assert code==201;new_url='/api/v1/uploads/'+result['upload_id'];assert call(new_url+'/chunks','PUT',changed,token,extra={'X-Offset':'0','X-Chunk-SHA256':new_request['sha256']})[0]==200
- assert call(new_url+'/complete','POST',{'sha256':new_request['sha256']},token)[0]==200 and (root/'books/小说.txt').read_bytes()==changed
- request['name']='取消.txt';code,result=call('/api/v1/uploads','POST',request,token);assert code==201;assert call('/api/v1/uploads/'+result['upload_id'],'DELETE',token=token)[0]==200 and not (root/'books/取消.txt').exists()
+ assert call(new_url+'/complete','POST',{'sha256':new_request['sha256']},token)[0]==200 and (root/'piconano/books/小说.txt').read_bytes()==changed
+ request['name']='取消.txt';code,result=call('/api/v1/uploads','POST',request,token);assert code==201;assert call('/api/v1/uploads/'+result['upload_id'],'DELETE',token=token)[0]==200 and not (root/'piconano/books/取消.txt').exists()
  sys.path.insert(0,str(repo/'tools'));from make_sim_library import wallpaper_png
  native_png=root/'native-fixture.png';native_png.write_bytes(wallpaper_png())
  for kind,name,source in [('font','测试字体.ttf',repo/'assets/fonts/read-pico-ui.ttf'),('cover','封面.png',repo/'tests/fixtures/image-black.png'),('wallpaper','原生透明.png',native_png),('wallpaper','锁屏.jpg',repo/'tests/fixtures/jpeg-progressive.jpg')]:
@@ -55,9 +55,9 @@ with tempfile.TemporaryDirectory() as directory:
   for at in range(0,len(content),65536):
    block=content[at:at+65536];assert call(resource_url+'/chunks','PUT',block,token,extra={'X-Offset':str(at),'X-Chunk-SHA256':hashlib.sha256(block).hexdigest()})[0]==200
   assert call(resource_url+'/complete','POST',{'sha256':sha},token)[0]==200
-  assert (root/{'font':'fonts','cover':'covers','wallpaper':'wallpapers'}[kind]/name).read_bytes()==content
+  assert (root/{'font':'piconano/fonts','cover':'piconano/covers','wallpaper':'piconano/wallpapers'}[kind]/name).read_bytes()==content
  # 已安装字体：列表、需要授权与来源的删除、身份不符拒绝、成功删除。/ Installed fonts: listing, authorized same-origin deletion, identity mismatch refusal, successful deletion.
- font_bytes=(root/'fonts/测试字体.ttf').read_bytes();font_sha=hashlib.sha256(font_bytes).hexdigest();quoted=urllib.parse.quote('测试字体.ttf')
+ font_bytes=(root/'piconano/fonts/测试字体.ttf').read_bytes();font_sha=hashlib.sha256(font_bytes).hexdigest();quoted=urllib.parse.quote('测试字体.ttf')
  assert call('/api/v1/fonts')[0]==401
  code,listing=call('/api/v1/fonts',token=token);assert code==200 and listing=={'more':False,'items':[{'name':'测试字体.ttf','size':len(font_bytes)}]},(code,listing)
  assert call('/api/v1/fonts?after='+quoted,token=token)[1]=={'more':False,'items':[]}
@@ -68,18 +68,18 @@ with tempfile.TemporaryDirectory() as directory:
  assert call(f'/api/v1/fonts?name={quoted}&size={len(font_bytes)}',  'DELETE',token=token)[0]==400
  assert call(f'/api/v1/fonts?name={quoted}&size=0&sha256={font_sha}','DELETE',token=token)[0]==400
  assert call(f'/api/v1/fonts?name=..%2Fx.ttf&size=5&sha256={font_sha}','DELETE',token=token)[0]==400
- assert call(f'/api/v1/fonts?name={quoted}&size={len(font_bytes)}&sha256='+'1'+'0'*63,'DELETE',token=token)[0]==409 and (root/'fonts/测试字体.ttf').exists()
+ assert call(f'/api/v1/fonts?name={quoted}&size={len(font_bytes)}&sha256='+'1'+'0'*63,'DELETE',token=token)[0]==409 and (root/'piconano/fonts/测试字体.ttf').exists()
  assert call(f'/api/v1/fonts?name=absent.ttf&size=5&sha256={font_sha}','DELETE',token=token)[0]==404
- code,result=call(delete_url,'DELETE',token=token);assert code==200 and result['deleted'] and not (root/'fonts/测试字体.ttf').exists(),(code,result)
+ code,result=call(delete_url,'DELETE',token=token);assert code==200 and result['deleted'] and not (root/'piconano/fonts/测试字体.ttf').exists(),(code,result)
  assert call(f'/api/v1/fonts?name={quoted}&size={len(font_bytes)}&sha256='+'0'*64,'DELETE',token=token)[0]==400
  assert call(delete_url,'DELETE',token=token)[0]==404
  assert call('/api/v1/fonts',token=token)[1]=={'more':False,'items':[]}
  # 封面/壁纸使用相同owner，目录和身份隔离；删除原图不触碰内部缓存。/ Covers/wallpapers share the owner with isolated directories/identities; deleting sources leaves internal caches intact.
  internal=root/'internal-lock.a';internal.write_bytes(b'preserved internal bitmap')
  for route,name in [('covers','封面.png'),('wallpapers','原生透明.png'),('wallpapers','锁屏.jpg')]:
-  source=root/route/name;content=source.read_bytes();quoted=urllib.parse.quote(name);sha=hashlib.sha256(content).hexdigest()
+  source=root/'piconano'/route/name;content=source.read_bytes();quoted=urllib.parse.quote(name);sha=hashlib.sha256(content).hexdigest()
   assert call('/api/v1/'+route)[0]==401
-  wanted=[{'name':p.name,'size':p.stat().st_size} for p in sorted((root/route).iterdir(),key=lambda p:p.name)]
+  wanted=[{'name':p.name,'size':p.stat().st_size} for p in sorted((root/'piconano'/route).iterdir(),key=lambda p:p.name)]
   assert call('/api/v1/'+route,token=token)[1]=={'more':False,'items':wanted}
   assert call('/api/v1/'+route+'?after='+quoted,token=token)[1]=={'more':False,'items':[item for item in wanted if item['name']>name]}
   url=f'/api/v1/{route}?name={quoted}&size={len(content)}&sha256={sha}'

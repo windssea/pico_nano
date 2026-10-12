@@ -27,6 +27,7 @@ typedef struct {
 static uint16_t u16(const uint8_t *p){return (uint16_t)(p[0]|((uint16_t)p[1]<<8));}
 static uint32_t u32(const uint8_t *p){return (uint32_t)u16(p)|((uint32_t)u16(p+2)<<16);}
 static pn_status_t current(archive_t *a){return a->source.validate?a->source.validate(a->source.ctx):PN_OK;}
+pn_status_t pn_zip_validate(pn_zip_t *zip){return !zip || !zip->impl?PN_INVALID:current(zip->impl);}
 static pn_status_t read_at(archive_t *a,uint64_t off,uint8_t *out,size_t size){
     pn_status_t status=current(a);if(status!=PN_OK)return status;
     if(off>a->source.size || size>a->source.size-off)return PN_CORRUPT;

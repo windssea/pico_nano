@@ -7,7 +7,7 @@ with tempfile.TemporaryDirectory() as tmp:
   destination=root/('case-'+str(len(list(root.glob('case-*')))));destination.mkdir()
   r=subprocess.run([exe,str(destination),str(source),str(kind),name],capture_output=True,text=True,timeout=60)
   assert (r.returncode==0)==success,(name,r.stdout,r.stderr)
-  folder={1:'books',2:'fonts',3:'covers',4:'wallpapers'}[kind];target=destination/folder/name
+  folder={1:'piconano/books',2:'piconano/fonts',3:'piconano/covers',4:'piconano/wallpapers'}[kind];target=destination/folder/name
   assert target.exists()==success,(name,r.stdout)
   if success:assert hashlib.sha256(target.read_bytes()).digest()==hashlib.sha256(source.read_bytes()).digest()
   assert 'used=0 live=0' in r.stdout,(r.stdout,r.stderr)

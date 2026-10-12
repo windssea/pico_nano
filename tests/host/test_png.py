@@ -44,6 +44,11 @@ with tempfile.TemporaryDirectory() as folder:
             composite=(gray*alpha+255*(255-alpha)+127)//255
             expected.append(min(15,(composite+8)//17)*17)
     assert raw==bytes(expected)
+    # 保留原色与透明度，透明洞不得被白底吞掉。/ Preserve color and alpha instead of flattening holes onto white.
+    for plane in ['gray','alpha']:
+        result=run(7,5,env={'PN_PNG_PLANE':plane})
+        values=[min(15,((p[0]*77+p[1]*150+p[2]*29+128)//256+8)//17)*17 if plane=='gray' else min(15,(p[3]+8)//17)*17 for p in pixels]
+        assert result.stdout.split(b'\n',3)[3]==bytes(values)
     assert run(env={'PN_PNG_CHUNK':'1'}).stdout.split(b'\n',3)[3]==bytes(expected)
     stopped=run(success=False,env={'PN_PNG_CHUNK':'1','PN_PNG_STOP_AFTER':'50'});assert b'status=6' in stopped.stderr
     path.write_bytes(adam7(7,5,pixels));assert run().stdout.split(b'\n',3)[3]==bytes(expected)

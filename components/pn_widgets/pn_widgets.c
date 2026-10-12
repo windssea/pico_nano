@@ -20,7 +20,7 @@ void pn_w_set_fallback(pn_font_t *font){fallback_font=font;}
 pn_status_t pn_w_font_scope_begin(pn_w_font_scope_t *scope,pn_pool_t *pool,pn_font_t *external){
     if(!scope || !pool || scope->active || scope->resident.impl || (external && !external->impl))return PN_INVALID;
     pn_status_t s=PN_OK;
-    if(!system_font){pn_text_source_t source=pn_font_reading_source();s=pn_font_open(&scope->resident,pool,&source,24);}
+    if(!system_font){pn_text_source_t source=pn_font_fallback_source();s=pn_font_open(&scope->resident,pool,&source,24);}
     if(s!=PN_OK)return s;
     scope->previous_system=system_font;scope->previous_external=fallback_font;scope->active=true;
     if(scope->resident.impl)system_font=&scope->resident;

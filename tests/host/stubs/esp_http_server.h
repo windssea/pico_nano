@@ -21,6 +21,7 @@ esp_err_t httpd_register_uri_handler(httpd_handle_t,const httpd_uri_t *);
 size_t httpd_req_get_hdr_value_len(httpd_req_t *,const char *);
 esp_err_t httpd_req_get_hdr_value_str(httpd_req_t *,const char *,char *,size_t);
 int httpd_req_recv(httpd_req_t *,char *,size_t);
+int httpd_req_to_sockfd(httpd_req_t *);
 esp_err_t httpd_resp_set_status(httpd_req_t *,const char *);
 esp_err_t httpd_resp_set_type(httpd_req_t *,const char *);
 esp_err_t httpd_resp_set_hdr(httpd_req_t *,const char *,const char *);

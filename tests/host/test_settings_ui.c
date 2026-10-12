@@ -25,8 +25,8 @@ int main(int argc,char **argv){
     pn_media_t media;pn_media_init(&media);assert(pn_media_attach(&media,1)==PN_OK);
     uint8_t flags=0xee;assert(pn_settings_load_flags(&media,root,&flags)==PN_OK && flags==0);
     pn_media_lease_t lease;assert(pn_media_acquire(&media,PN_MEDIA_WRITE,&lease)==PN_OK);pn_journal_files_t files;pn_journal_io_t io;assert(pn_input_prefs_files(&files,&media,&lease,root,&io)==PN_OK);
-    assert(pn_input_prefs_save(&io,0x40)==PN_INVALID && pn_input_prefs_save(&io,0x20)==PN_OK && pn_input_prefs_save(&io,PN_INPUT_LEFT_HAND)==PN_OK && pn_input_prefs_load(&io,&flags)==PN_OK && flags==PN_INPUT_LEFT_HAND);
-    uint8_t future[6]={'P','N','I','P',2,0};assert(pn_journal_save(&io,future,6)==PN_OK && pn_input_prefs_load(&io,&flags)==PN_UNSUPPORTED);
+    assert(pn_input_prefs_save(&io,0xc0)==PN_INVALID && pn_input_prefs_save(&io,0x20)==PN_OK && pn_input_prefs_save(&io,PN_INPUT_LEFT_HAND)==PN_OK && pn_input_prefs_load(&io,&flags)==PN_OK && flags==PN_INPUT_LEFT_HAND);
+    uint8_t future[6]={'P','N','I','P',3,0};assert(pn_journal_save(&io,future,6)==PN_OK && pn_input_prefs_load(&io,&flags)==PN_UNSUPPORTED);
     /* 外观记录：默认、非法密度、CRC回退、未来版本和错误不改输出。/ Appearance records: defaults, invalid density, CRC fallback, future versions and output preservation on errors. */
     {pn_journal_files_t sf;pn_journal_io_t sio;pn_shelf_prefs_t prefs=pn_shelf_prefs_default(),out={4,PN_SHELF_PAPER};
      assert(pn_shelf_prefs_files(&sf,&media,&lease,root,&sio)==PN_OK && pn_shelf_prefs_load(&sio,&out)==PN_EMPTY && out.columns==4);
@@ -39,6 +39,13 @@ int main(int argc,char **argv){
      prefs=pn_shelf_prefs_default();assert(pn_shelf_prefs_save(&sio,&prefs)==PN_OK);
     }
     assert(pn_input_prefs_save(&io,0)==PN_OK);assert(pn_media_release(&media,&lease)==PN_OK);
+    /* 样式与旧版本：新记录持久化，旧版无样式。/ Styles and legacy versions: persist new records, legacy has no effect. */
+    assert(pn_media_acquire(&media,PN_MEDIA_WRITE,&lease)==PN_OK);
+    assert(pn_input_prefs_files(&files,&media,&lease,root,&io)==PN_OK);
+    assert(pn_input_prefs_save(&io,0x80)==PN_OK && pn_input_prefs_load(&io,&flags)==PN_OK && flags==0x80);
+    uint8_t legacy[6]={'P','N','I','P',1,PN_INPUT_LEFT_HAND};assert(pn_journal_save(&io,legacy,6)==PN_OK && pn_input_prefs_load(&io,&flags)==PN_OK && flags==PN_INPUT_LEFT_HAND);
+    assert(pn_input_prefs_save(&io,0xc0)==PN_INVALID);
+    assert(pn_input_prefs_save(&io,0)==PN_OK && pn_media_release(&media,&lease)==PN_OK);
     /* 设置页。/ Settings page. */
     pn_pool_t pool;assert(!pn_pool_init(&pool,2u*1024u*1024u,NULL,NULL,NULL));pn_settings_ui_t ui={0};
     assert(pn_settings_ui_open(&ui,&pool,&media,root,present,NULL)==PN_OK && ui.active && ui.presented && ui.flags==0);
@@ -51,6 +58,10 @@ int main(int argc,char **argv){
     assert(pn_settings_ui_hit(&ui,100,240)==PN_SETUI_LEVEL+1 && pn_settings_ui_hit(&ui,340,240)==PN_SETUI_LEVEL && pn_settings_ui_hit(&ui,560,240)==PN_SETUI_LEVEL+2 && pn_settings_ui_hit(&ui,300,560)==PN_SETUI_FULL_REFRESH);
     assert(pn_settings_ui_event(&ui,PN_SETUI_LEVEL+1,present,NULL)==PN_OK && (ui.flags&PN_INPUT_REFRESH_MASK)==0x10 && pn_settings_refresh_pages(ui.flags)==6);
     assert(pn_settings_ui_event(&ui,PN_SETUI_FULL_REFRESH,present,NULL)==PN_OK && pn_settings_ui_event(&ui,PN_SETUI_LEVEL,present,NULL)==PN_OK && pn_settings_refresh_pages(ui.flags)==14);
+    assert(pn_settings_ui_hit(&ui,100,940)==PN_SETUI_TURN && pn_settings_ui_hit(&ui,340,940)==PN_SETUI_TURN+1 && pn_settings_ui_hit(&ui,560,940)==PN_SETUI_TURN+2);
+    assert(pn_settings_ui_event(&ui,PN_SETUI_TURN+2,present,NULL)==PN_OK && (ui.flags&PN_INPUT_TURN_MASK)==0x80);
+    assert(pn_settings_load_flags(&media,root,&flags)==PN_OK && flags==ui.flags);
+    assert(pn_settings_ui_event(&ui,PN_SETUI_TURN,present,NULL)==PN_OK && !(ui.flags&PN_INPUT_TURN_MASK));
     assert(pn_settings_ui_event(&ui,PN_SETUI_BACK,present,NULL)==PN_OK && ui.active && pn_settings_ui_screen(&ui)==0);
     /* 存储与关于：只显示调用方填写的实际信息。/ Storage and about shows only what the caller actually read. */
     {pn_settings_about_t about={0};strcpy(about.version,"0.0.57");strcpy(about.storage,"共 29.7 GB · 可用 12.1 GB");pn_settings_ui_set_about(&ui,&about);

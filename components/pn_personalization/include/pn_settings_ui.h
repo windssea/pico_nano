@@ -26,6 +26,7 @@
 #define PN_SETUI_COLUMNS 19 ///< 加0或1选择3或4列 / Plus zero or one for three or four columns
 #define PN_SETUI_HOME 25 ///< 底栏首页请求 / Bottom-bar home request
 #define PN_SETUI_STYLE 21 ///< 加0至3选择书架样式 / Plus zero through three for a shelf style
+#define PN_SETUI_TURN 26 ///< 加0至2选择默认/扫除/仿真翻页 / Plus zero through two for direct/sweep/fold turns
 /// “存储与关于”页显示的信息，由调用方按实际读取填写；空串不显示猜测值。/ Information on the "storage and about" page, filled by the caller from actual reads; empty strings never show guesses.
 typedef struct {char version[32];char storage[64];char internal[48];char screen[64];} pn_settings_about_t;
 typedef pn_status_t (*pn_settings_present_fn)(void *,const pn_frame_t *,pn_refresh_t); ///< 与阅读呈现同签名 / Same signature as reader presentation

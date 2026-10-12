@@ -17,6 +17,7 @@
 #include "pn_wallpaper_ui.h"
 #include "pn_font_manage.h"
 #include "pn_settings_ui.h"
+#include "pn_turn_transition.h"
 #include "pn_tap.h"
 #include <SDL.h>
 #include <stdio.h>
@@ -68,6 +69,7 @@ typedef struct {
     uint8_t salt[16]; ///< EPUB XML哈希盐 / EPUB XML hash salt
     bool covers_dirty; ///< 本页有新封面待重绘 / New covers await a redraw for this page
     pn_wallpaper_ui_t wallpaper; ///< 壁纸设置页 / Wallpaper settings page
+    pn_wallpaper_mask_t reading_mask; ///< 常驻遮罩与成功阅读底图 / Resident mask and confirmed reading underlay
     const char *wallpaper_dir; ///< 原图目录，NULL禁用 / Source directory, NULL disables the page
     pn_media_t wallpaper_media; ///< 模拟内部壁纸分区 / Simulated internal wallpaper partition
     pn_wallpaper_store_t wallpaper_store; ///< 显式记录目录的两槽 / Two slots in the explicit record directory
@@ -104,7 +106,13 @@ static int sim_battery(void){const char *v=getenv("PN_SIM_BATTERY");if(!v || !*v
 static pn_shelf_options_t shelf_options(const library_t *s){pn_w_set_battery(sim_battery());bool query=!s->recent_mode && !s->fav_mode && *s->query;return (pn_shelf_options_t){.home=s->home,.battery_percent=-1,.columns=s->shelf_prefs.columns,.style=s->shelf_prefs.style,.actions=s->actions_mode?&s->actions:NULL,.search=true,.layout_toggle=true,.favorites_tab=true,.favorites=s->fav_mode,.list_mode=s->list_mode || query,.query=query};}
 static size_t shelf_per_page(const library_t *s){pn_shelf_options_t o=shelf_options(s);return s->home?3u:pn_shelf_capacity(&o);}
 static bool reading(library_t *s){return s->reader.impl || s->epub.impl;}
-static pn_status_t active_step(library_t *s,pn_reader_action_t action,uint64_t now,pn_reader_present_fn present,void *ctx){return s->epub.impl?pn_epub_app_step(&s->epub,action,now,present,ctx):pn_reader_app_step(&s->reader,action,now,present,ctx);}
+static pn_status_t present_effect(void *,const pn_frame_t *,pn_refresh_t);
+static pn_status_t active_step(library_t *s,pn_reader_action_t action,uint64_t now,pn_reader_present_fn present,void *ctx){
+    pn_frame_t before;pn_turn_t effect={.pool=s->pool,.style=(pn_turn_style_t)((s->input_flags&PN_INPUT_TURN_MASK)>>6),.reverse=action==PN_APP_PREVIOUS,.present=present,.ctx=ctx};
+    if((action==PN_APP_NEXT || action==PN_APP_PREVIOUS) && s->page_px && pn_frame_bind(&before,s->page_px,342u*1216u,684,1216))effect.before=&before;else effect.style=PN_TURN_NONE;
+    if(effect.style!=PN_TURN_NONE)effect.present=present_effect;
+    return s->epub.impl?pn_epub_app_step(&s->epub,action,now,pn_turn_present,&effect):pn_reader_app_step(&s->reader,action,now,pn_turn_present,&effect);
+}
 static pn_status_t active_close(library_t *s,uint64_t now){return s->epub.impl?pn_epub_app_close(&s->epub,now):pn_reader_app_close(&s->reader,now);}
 static bool timing_on(void){static int on=-1;if(on<0){const char *v=getenv("PN_SIM_TIMING");on=v && *v=='1';}return on;}
 /* 呈现并记住最近一帧（工具栏打开时不记，以便关闭后恢复原页面）。/ Present and remember the latest frame (not while the toolbar is open, so closing restores the original page). */
@@ -118,6 +126,9 @@ static pn_status_t present(void *ctx,const pn_frame_t *frame,pn_refresh_t profil
         if(s->page_px)for(int y=0;y<1216;y++)memcpy(s->page_px+(size_t)y*342,frame->pixels+(size_t)y*frame->stride,342);
     }
     return present_raw(s,frame);
+}
+static pn_status_t present_effect(void *ctx,const pn_frame_t *frame,pn_refresh_t profile){
+    pn_status_t status=present(ctx,frame,profile);if(status==PN_OK)SDL_Delay(100);return status;
 }
 static pn_status_t present_raw(library_t *s,const pn_frame_t *frame){
     uint64_t t0=SDL_GetTicks64();
@@ -141,6 +152,7 @@ static pn_status_t present_raw(library_t *s,const pn_frame_t *frame){
 }
 static pn_status_t favorites_load(library_t *s);
 static pn_status_t draw(library_t *s){
+    pn_wallpaper_mask_close(&s->reading_mask);
     if(!s->frame.pixels){uint8_t *pixels=pn_alloc(s->pool,342u*1216u);if(!pixels || !pn_frame_bind(&s->frame,pixels,342u*1216u,684,1216)){pn_free(pixels);return PN_NO_MEMORY;}}
     if(!s->font.impl){pn_text_source_t builtin=pn_font_builtin_source();pn_status_t opened=pn_font_open(&s->font,s->pool,&builtin,24);if(opened!=PN_OK)return opened;}
     uint64_t t0=SDL_GetTicks64();
@@ -173,6 +185,8 @@ static void covers_reset(library_t *s){
 static void covers_tick(library_t *s){
     if(!s->covers)return;
     bool changed=false;
+    // 空闲大图任务优先于可重建字形缓存，阅读预算不扩大。/ Idle large-image work takes priority over rebuildable glyph caches, without enlarging the reading budget.
+    pn_font_trim(&s->font);
     pn_status_t status=pn_shelf_covers_step(s->covers,s->page,s->pool,&s->media,*s->cover_dir?s->cover_dir:NULL,s->salt,s->pool->limit>s->pool->used?s->pool->limit-s->pool->used:1,&changed);
     if(changed)s->covers_dirty=true;
     if(status==PN_EMPTY && s->covers_dirty){s->covers_dirty=false;size_t ready=0;for(size_t i=0;i<s->page->count;i++)ready+=s->covers->state[i]==PN_COVER_READY;
@@ -251,11 +265,24 @@ static pn_status_t open_item(library_t *s,const pn_catalog_item_t *book,uint64_t
     pn_status_t status;
     // 进入阅读后不再使用书架备份，先释放，给首章图片留出解码预算。/ The shelf backup is unused after entering reading; release it before decoding first-section images.
     s->open_failed=false;pn_free(s->page_px);s->page_px=NULL;pn_free(s->tool_px);s->tool_px=NULL;
+    pn_wallpaper_mask_close(&s->reading_mask);
     if(book->format==PN_BOOK_EPUB){pn_font_close(&s->font);pn_free(s->frame.pixels);s->frame.pixels=NULL;status=pn_epub_app_open_on_media(&s->epub,s->pool,&s->media,book->path,s->font_path,s->state_dir,32,now);}
     else status=pn_reader_app_open_on_media(&s->reader,s->pool,&s->media,book->path,s->font_path,s->state_dir,32,now);
     fprintf(stderr,"library_open prepare name=%s status=%d pool=%zu/%zu\n",book->name,(int)status,s->pool->used,s->pool->limit);
     if(status==PN_OK && s->fallback_path)status=s->epub.impl?pn_epub_app_fallback_font(&s->epub,s->fallback_path):pn_reader_app_fallback_font(&s->reader,s->fallback_path);
     if(status==PN_OK && book->identified){pn_book_id_t actual;status=s->epub.impl?pn_epub_app_identity(&s->epub,&actual):pn_reader_app_identity(&s->reader,&actual);if(status==PN_OK && memcmp(actual.sha256,book->expected.sha256,32))status=PN_STALE_JOB;printf("recent_identity status=%d\n",(int)status);}
+    if(status==PN_OK){
+        if(s->wallpaper_store_ok){pn_media_lease_t lease;pn_lock_selection_t selection;
+            if(pn_media_acquire(&s->wallpaper_media,PN_MEDIA_READ,&lease)==PN_OK){
+                pn_status_t loaded=pn_wallpaper_load(&s->wallpaper_store,&lease,&selection,NULL);(void)pn_media_release(&s->wallpaper_media,&lease);
+                if(loaded==PN_OK && selection.mode==PN_LOCK_MASK){pn_status_t mask=pn_wallpaper_mask_open(&s->reading_mask,s->pool,&s->media,&selection);
+                    if(mask==PN_OK){pn_reader_body_layer_t layer={&s->reading_mask,pn_wallpaper_mask_paint,pn_wallpaper_mask_complete};
+                        if(s->epub.impl)(void)pn_epub_app_body_layer(&s->epub,&layer);else (void)pn_reader_app_body_layer(&s->reader,&layer);}
+                    printf("reading_mask status=%d\n",(int)mask);
+                }
+            }
+        }
+    }
     if(status==PN_OK)status=active_step(s,PN_APP_OPEN,now,present,s);
     fprintf(stderr,"library_open first-page name=%s status=%d\n",book->name,(int)status);
     if(status==PN_OK){pn_txt_progress_t progress;s->last_read=*book;
@@ -307,14 +334,15 @@ static pn_status_t return_to_shelf(library_t *s,uint64_t now){
 }
 /// 设置页借用在读书快照，正文关闭后仍能预览封面。/ Settings use an in-progress book snapshot, allowing cover preview after the reader closes.
 static pn_status_t wallpaper_open(library_t *s){
+    pn_wallpaper_mask_close(&s->reading_mask);
     pn_status_t status=pn_wallpaper_ui_open(&s->wallpaper,s->pool,&s->media,s->wallpaper_dir,s->wallpaper_store_ok?&s->wallpaper_store:NULL,present,s);
-    if(status==PN_OK){covers_last(s);const pn_catalog_item_t *book=s->last_read_known?&s->last_read:s->covers && s->covers->has_last?&s->covers->last:NULL;
-        if(book)status=pn_wallpaper_ui_book_source(&s->wallpaper,book,s->salt);}
     return status;
 }
 /// PC电源边界：保存关闭正文后，用共用锁屏记录/绘制预览；不模拟硬件睡眠或功耗。/ PC power boundary: save/close the reader and preview shared lock records/rendering; no hardware sleep or power simulation.
 static pn_status_t lock_preview(library_t *s,uint64_t now){
-    pn_status_t status=reading(s)?active_close(s,now):PN_OK;if(status!=PN_OK)return status;
+    pn_status_t status=PN_OK;
+    if(reading(s)){status=s->epub.impl?pn_epub_app_suspend(&s->epub,now):pn_reader_app_suspend(&s->reader,now);if(status==PN_BUSY)status=active_close(s,now);}
+    if(status!=PN_OK)return status;
     s->toolbar=false;
     if(!s->frame.pixels){uint8_t *pixels=pn_alloc(s->pool,PN_WALLPAPER_BYTES);if(!pixels)return PN_NO_MEMORY;pn_frame_bind(&s->frame,pixels,PN_WALLPAPER_BYTES,684,1216);}
     if(!s->font.impl){pn_text_source_t font=pn_font_builtin_source();status=pn_font_open(&s->font,s->pool,&font,32);}
@@ -322,7 +350,9 @@ static pn_status_t lock_preview(library_t *s,uint64_t now){
     if(status==PN_OK && s->wallpaper_store_ok){pn_media_lease_t lease;pn_status_t loaded=pn_media_acquire(&s->wallpaper_media,PN_MEDIA_READ,&lease);
         if(loaded==PN_OK){loaded=pn_wallpaper_load(&s->wallpaper_store,&lease,&selection,&s->frame);(void)pn_media_release(&s->wallpaper_media,&lease);}
         if(loaded!=PN_OK)selection=(pn_lock_selection_t){.mode=PN_LOCK_DEFAULT,.hint=true};}
-    if(selection.mode==PN_LOCK_BOOK && (!selection.cached_book || (s->last_read_known && memcmp(selection.book.sha256,s->last_read.expected.sha256,32))))selection=(pn_lock_selection_t){.mode=PN_LOCK_DEFAULT,.hint=true};
+    if(selection.mode==PN_LOCK_SIMPLE || selection.mode==PN_LOCK_BOOK)selection=(pn_lock_selection_t){.mode=PN_LOCK_DEFAULT,.hint=true};
+    if(selection.mode==PN_LOCK_MASK && !pn_wallpaper_mask_snapshot(&s->reading_mask,&s->frame))selection=(pn_lock_selection_t){.mode=PN_LOCK_DEFAULT,.hint=true};
+    if(!reading(s))pn_wallpaper_mask_close(&s->reading_mask);
     if(status==PN_OK)status=pn_lock_render(&selection,&s->font,"按电源键继续阅读",&s->frame);
     if(status==PN_OK)status=present(s,&s->frame,PN_REFRESH_GC16);
     s->locked=status==PN_OK;printf("lock_preview status=%d mode=%d cached=%d\n",(int)status,(int)selection.mode,selection.cached_book);return status;
@@ -373,7 +403,10 @@ int pn_sim_library_window(pn_pool_t *pool,const char *directory,const char *font
         if(s->locked){
             if(event.type==SDL_QUIT){running=false;continue;}
             if(event.type==SDL_KEYDOWN && !event.key.repeat && (event.key.keysym.sym==SDLK_l || event.key.keysym.sym==SDLK_RETURN || event.key.keysym.sym==SDLK_ESCAPE)){
-                s->locked=false;status=s->last_read_known?open_item(s,&s->last_read,now):draw(s);printf("lock_preview wake status=%d\n",(int)status);}
+                s->locked=false;
+                if(reading(s))status=s->epub.impl?pn_epub_app_resume(&s->epub,now,present,s):pn_reader_app_resume(&s->reader,now,present,s);
+                else status=s->last_read_known?open_item(s,&s->last_read,now):draw(s);
+                printf("lock_preview wake status=%d\n",(int)status);}
             continue;
         }
         if(font_modal(&s->fonts,&event,now,present,s,&tap,&s->font_pointer)){if(!s->fonts.active){bool returned=s->fonts.return_presented;pn_font_ui_close(&s->fonts);if(s->styles.active){if(returned){s->styles.presented=true;s->styles.preview=false;}else (void)pn_style_ui_present(&s->styles,present,s);}}continue;}
@@ -613,6 +646,7 @@ int pn_sim_library_window(pn_pool_t *pool,const char *directory,const char *font
     }
 cleanup:
     if(reading(s))(void)active_close(s,SDL_GetTicks64());
+    pn_wallpaper_mask_close(&s->reading_mask);
     pn_wallpaper_ui_close(&s->wallpaper);pn_font_manage_close(&s->font_manage);pn_settings_ui_close(&s->settings);
     pn_font_ui_close(&s->fonts);
     pn_font_close(&s->font);pn_free(s->frame.pixels);pn_free(s->page_px);pn_free(s->tool_px);pn_free(s->favorites);pn_free(s->page);pn_free(s->recent);pn_free(s->covers);

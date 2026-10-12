@@ -58,6 +58,7 @@ pn_status_t pn_transfer_view_render(const pn_transfer_view_t *v,pn_font_t *font,
  }else if(v->phase==PN_TVIEW_STARTING){if(s==PN_OK)s=text(font,frame,v->station?"正在连接已保存网络":"正在开启传输",32,330);if(s==PN_OK)s=text(font,frame,"请稍候，阅读位置已保存",32,420);}
  else if(v->phase==PN_TVIEW_STOPPING){if(s==PN_OK)s=text(font,frame,"正在关闭传输",32,330);if(s==PN_OK)s=text(font,frame,"等待文件处理结束，请勿拔卡",32,420);}
  else{if(s==PN_OK)s=text(font,frame,v->station?"无法连接已保存网络，可改用热点传书":"传输未能继续",32,330);if(s==PN_OK)s=text(font,frame,v->released?"资源已关闭，可返回阅读":"尚未归还存储，请重试关闭",32,420);}
+ if(s==PN_OK && v->phase==PN_TVIEW_READY && v->localsend){int pixels=font->pixels;s=pn_font_size(font,24);if(s==PN_OK)s=text(font,frame,"LocalSend：自动接收书籍和字体",32,1048);(void)pn_font_size(font,pixels);}
  if(s==PN_OK && v->phase!=PN_TVIEW_STOPPING)s=button(font,frame,v->phase==PN_TVIEW_FAILED?(v->released?"返回阅读":"重试关闭"):"停止传输并返回",1070);
  return s;
 }

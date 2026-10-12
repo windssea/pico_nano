@@ -15,6 +15,8 @@
 #include "pn_toc.h"
 #include "pn_reader_app.h"
 typedef struct {void *impl;} pn_epub_app_t; ///< 初始NULL，不复制活动对象 / Initially NULL; never copy a live object
+/// 绑定/清除同源正文叠层，不影响工具页。/ Bind/clear the shared body decoration without affecting tool pages.
+pn_status_t pn_epub_app_body_layer(pn_epub_app_t *app,const pn_reader_body_layer_t *layer);
 /// state可NULL；本地media或借用已挂载media，不挂载/格式化。/ Optional state; local or borrowed mounted media, never mounted/formatted here.
 pn_status_t pn_epub_app_open_on_media(pn_epub_app_t *,pn_pool_t *,pn_media_t *,const char *book,const char *font,const char *state,int pixels,uint64_t);
 /// 本地/PC便捷打开，仍同源核心。/ Local/PC convenience open using the shared core.
@@ -25,6 +27,10 @@ pn_status_t pn_epub_app_step(pn_epub_app_t *,pn_reader_action_t,uint64_t,pn_read
 pn_status_t pn_epub_app_tick(pn_epub_app_t *,uint64_t);
 /// 保存屏障成功后释放，失败不关闭会话。/ Release only after successful save barriers, retaining the session on failure.
 pn_status_t pn_epub_app_close(pn_epub_app_t *,uint64_t);
+/// 保存后热挂起会话；预览/失败候选返回BUSY。/ Save then retain session; previews/failed candidates return BUSY.
+pn_status_t pn_epub_app_suspend(pn_epub_app_t *,uint64_t);
+/// 验证介质后呈现已确认正文，不解析、不推进位置。/ Validate media and redisplay confirmed body without parsing or advancing position.
+pn_status_t pn_epub_app_resume(pn_epub_app_t *,uint64_t,pn_reader_present_fn,void *);
 /// 返回最后真实显示的位置，拔卡后仍保留。/ Return the last displayed location, retained after media loss.
 pn_status_t pn_epub_app_progress(const pn_epub_app_t *,pn_epub_progress_t *);
 /// 失效源/pending而不画屏、重挂载或丢已显示位置。/ Expire source/pending without drawing, remounting or discarding displayed position.

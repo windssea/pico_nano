@@ -226,7 +226,8 @@ static pn_status_t grid_item(const pn_catalog_item_t *item,const pn_shelf_covers
     else s=monogram_cover(font,frame,x,y,w,h,title,style);
     frame_cover(frame,x,y,w,h,radius);style_cover(frame,style,x,y,w,h);
     if(s==PN_OK && favorite)favorite_badge(frame,x+10,y+10,28);
-    pn_w_round_fill(frame,x+w-38,y+10,28,28,7,PN_UI_PAPER);pn_w_icon(frame,PN_ICON_MORE,x+w-35,y+13,22,PN_UI_MUTED);
+    // 放大可见按钮及触摸热区，四列封面仍不跨列。/ Enlarge the visible button and touch target without crossing four-column covers.
+    pn_w_round_fill(frame,x+w-76,y+8,68,68,12,PN_UI_PAPER);pn_w_icon(frame,PN_ICON_MORE,x+w-64,y+20,44,PN_UI_INK);
     /* 格式与未读文字留给详情，封面仅保留必要标识。/ Format and unread text live in details; covers retain only necessary markers. */
     bool started=item->identified || item->has_progress;
     if(started && item->progress<=10000){pn_frame_rect(frame,x+8,y+h-9,w-16,4,PN_UI_PAPER);pn_frame_rect(frame,x+8,y+h-9,(int)((unsigned)(w-16)*item->progress/10000u),4,PN_UI_INK);}
@@ -369,7 +370,7 @@ int pn_shelf_hit_ex(const pn_catalog_page_t *page,int x,int y,const pn_shelf_opt
         for(size_t i=0;i<page->count && i<pn_shelf_capacity(options);i++){grid_box_t b=grid_box(i,options);
             int inset=options->style==PN_SHELF_WOOD?4:0;
             if(x>=b.x-inset && x<b.x+b.w+inset && y>=b.y && y<b.y+b.h+80){
-                if(y<b.y+88 && x>=b.x+b.w-88 && x<b.x+b.w)return PN_SHELF_MORE+(int)i;
+                if(y<b.y+96 && x>=b.x+b.w-96 && x<b.x+b.w)return PN_SHELF_MORE+(int)i;
                 return (int)i;
             }
         }

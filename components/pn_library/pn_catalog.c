@@ -71,7 +71,9 @@ static pn_status_t scan(pn_media_t *media,const pn_media_lease_t *lease,const ch
     pn_status_t status=pn_media_validate(media,lease);if(status!=PN_OK)return status;
     if(lease->access==PN_MEDIA_USB)return PN_INVALID;
     if(!limit || limit>PN_CATALOG_PAGE_MAX)limit=PN_CATALOG_PAGE_DEFAULT; // 0表示旧默认6项 / Zero retains the legacy six-item default
-    memset(page,0,sizeof *page);page->per_page=limit;DIR *dir=opendir(directory);if(!dir)return PN_IO;
+    memset(page,0,sizeof *page);page->per_page=limit;DIR *dir=opendir(directory);
+    // 资源目录尚未创建或被删除时显示空列表；不吞权限/I/O错误或卡失效。/ Missing resource folders show empty lists; preserve permission/I/O failures and media loss.
+    if(!dir){if(errno!=ENOENT)return PN_IO;return pn_media_validate(media,lease);}
     char greatest[PN_CATALOG_NAME_MAX]={0};size_t total=0,at_or_before=0,before=0,skipped_by_letter=0;
     for(;;){status=pn_media_validate(media,lease);if(status!=PN_OK)break;errno=0;struct dirent *entry=readdir(dir);if(!entry){if(errno)status=PN_IO;break;}
         const char *name=entry->d_name;if(name[0]=='.')continue;const char *ext=strrchr(name,'.');pn_book_format_t kind=filter==1?(ext && !strcasecmp(ext,".ttf")?PN_FILE_TTF:0):filter==2?(ext && (!strcasecmp(ext,".jpg") || !strcasecmp(ext,".jpeg") || !strcasecmp(ext,".png"))?PN_FILE_IMAGE:0):format(name);if(!kind)continue;

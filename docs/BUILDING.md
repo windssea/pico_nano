@@ -15,16 +15,16 @@ py -V:Astral/CPython3.12.13 tools/dev.py sdl-run
 powershell -NoProfile -ExecutionPolicy Bypass -File tools/run_sim.ps1
 ```
 
-默认使用忽略目录build-dev/sim-library/books：4本TXT（UTF8/BOM/UTF16/GBK）与4本原创EPUB（EPUB2/3、目录、插图、长书名），本地原小说存在时只补缺失副本。默认正文使用内置阅读字体，不要求mockDoc。fonts目录提供带OFL许可证的阅读子集样本，wallpapers目录提供原生尺寸透明PNG几何样本；原创文字/图案为CC0-1.0。manifest.json记录来源与SHA，已有本机修改保留且不误标为原创许可。私人小说不随仓库交付；窗口操作只作用副本。
+默认使用忽略目录build-dev/sim-library/piconano/books：4本TXT（UTF8/BOM/UTF16/GBK）与4本原创EPUB（EPUB2/3、目录、插图、长书名），本地原小说存在时只补缺失副本。默认正文使用内置阅读字体，不要求mockDoc。fonts目录提供带OFL许可证的阅读子集样本，wallpapers目录提供原生尺寸透明PNG几何样本；原创文字/图案为CC0-1.0。manifest.json记录来源与SHA，已有本机修改保留且不误标为原创许可。私人小说不随仓库交付；窗口操作只作用副本。
 
-可单独用真实Python运行tools/make_sim_library.py补齐样本，复跑不覆盖已有文件；启动脚本用SDL容器内Python生成，不受Windows别名影响。可用-Books/-Font/-FontDir/-WallpaperDir指定工作区内输入，支持工作区内绝对路径并转换为容器路径。默认字体/图片目录分别为build-dev/sim-library/fonts、wallpapers；-Font为空时使用内置默认字体。脚本保留已运行的pico-sim窗口，不自动关闭；源码重建后执行docker stop pico-sim再启动加载新二进制，关闭窗口也会结束容器。
+可单独用真实Python运行tools/make_sim_library.py补齐样本，复跑不覆盖已有文件；启动脚本用SDL容器内Python生成，不受Windows别名影响。可用-Books/-Font/-FontDir/-WallpaperDir指定工作区内输入，支持工作区内绝对路径并转换为容器路径。默认字体/图片目录分别为build-dev/sim-library/piconano/fonts、wallpapers；-Font为空时使用内置默认字体。脚本保留已运行的pico-sim窗口，不自动关闭；源码重建后执行docker stop pico-sim再启动加载新二进制，关闭窗口也会结束容器。
 
 开发观察可加`-Script 'settings,back,fonts,back,wallpaper'`，以真实SDL窗口回放输入；不写quit时脚本结束后窗口继续可操作。书架/正文按L预览已保存锁屏，L/回车/Esc返回最近在读书；预览使用共用A/B读取与绘制，先保存并关闭正文，不模拟PMU睡眠或功耗。窗口时区为Asia/Shanghai，电量仍为演示值。
 
 逐本打开/翻页/返回的本地复跑（Docker Linux）：
 
 ```powershell
-docker run --rm --mount type=bind,source=D:\dev\windssea\pico_nano,target=/work -w /work pico-nano-sdl:dev python3 tools/test_sim_library.py build-sim-sdl-run/pn_sim build-dev/sim-library/books build-dev/sim-library/fonts/ReadPicoSample.ttf
+docker run --rm --mount type=bind,source=D:\dev\windssea\pico_nano,target=/work -w /work pico-nano-sdl:dev python3 tools/test_sim_library.py build-sim-sdl-run/pn_sim build-dev/sim-library/piconano/books build-dev/sim-library/piconano/fonts/ReadPicoSample.ttf
 ```
 
 本机样本可在忽略文件 `build-dev/sim-library/local-inputs.json` 中配置，格式如下；`path` 可用仓库相对路径，资源按固定类型复制到 books/fonts，原件只读，复跑保留已有副本：

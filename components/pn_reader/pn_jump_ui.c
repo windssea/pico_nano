@@ -70,9 +70,8 @@ pn_status_t pn_jump_ui_open(pn_jump_ui_t *u,pn_reader_app_t *reader,pn_reader_pr
     if(!u || !reader || !reader->impl)return PN_INVALID;
     pn_txt_progress_t progress;pn_status_t status=pn_reader_app_progress(reader,&progress);if(status!=PN_OK)return status;
     memset(u,0,sizeof *u);u->reader=reader;
-    unsigned percent=0;
-    if(progress.source_size)percent=progress.source_size>=100?(unsigned)(progress.source_offset/(progress.source_size/100)):(unsigned)(progress.source_offset*100/progress.source_size);
-    if(percent>100)percent=100;
+    unsigned basis=0;status=pn_reader_app_percent(reader,&basis);if(status!=PN_OK)return status;
+    unsigned percent=basis/100u;
     u->current=u->draft=percent;u->maximum=100;u->large=10;u->active=true;
     status=pn_jump_ui_present(u,present,ctx);if(status!=PN_OK)u->active=false;return status;
 }

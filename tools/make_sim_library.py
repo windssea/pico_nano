@@ -142,7 +142,7 @@ def generate(output, private_book=None, local_inputs=None):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--out", type=pathlib.Path, default=ROOT / "build-dev/sim-library/books")
+    parser.add_argument("--out", type=pathlib.Path, default=ROOT / "build-dev/sim-library/piconano/books")
     parser.add_argument("--private-book", type=pathlib.Path, default=ROOT / "mockDoc/绍宋.epub")
     parser.add_argument("--local-inputs", type=pathlib.Path, help="Local-only book/font source manifest; defaults beside the output books directory")
     args = parser.parse_args()

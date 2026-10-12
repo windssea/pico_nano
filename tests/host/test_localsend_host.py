@@ -31,7 +31,7 @@ def main(binary):
         data = ('中文正文\n' * 15000).encode('utf8')
         pending = prepare('正文.txt', data)
         assert pending['code'] == 0 and pending['phase'] == 1
-        assert not (root / 'books/正文.txt').exists()
+        assert not (root / 'piconano/books/正文.txt').exists()
         assert call('DECIDE 0 1')['code'] != 0
         grants = call(f'DECIDE {pending["generation"]} 1')['grants']
         assert authorize(grants, '127.0.0.2')['code'] != 0
@@ -41,7 +41,7 @@ def main(binary):
             assert call(f'DATA {len(chunk)}', chunk)['code'] == 0
         result = call('EOF')
         assert result['committed'] and result['installed'] == 1
-        assert hashlib.sha256((root / 'books/正文.txt').read_bytes()).hexdigest() == result['sha256']
+        assert hashlib.sha256((root / 'piconano/books/正文.txt').read_bytes()).hexdigest() == result['sha256']
         assert authorize(grants)['code'] != 0
         pending = prepare('正文.txt', data)
         grants = call(f'DECIDE {pending["generation"]} 1')['grants']
@@ -53,11 +53,11 @@ def main(binary):
         assert call('DATA 7', b'partial')['code'] == 0
         result = call('ABORT')
         assert result['code'] == 8 and not result['committed']
-        assert not (root / 'books/截断.txt').exists()
+        assert not (root / 'piconano/books/截断.txt').exists()
         assert prepare('../escape.txt', b'bad')['code'] != 0
         pending = prepare('拒绝.txt', b'bad')
         assert call(f'DECIDE {pending["generation"]} 0')['code'] == 8
-        assert not (root / 'books/拒绝.txt').exists()
+        assert not (root / 'piconano/books/拒绝.txt').exists()
         assert call('EXIT')['code'] == 0
         p.stdin.close(); p.stdout.close()
         assert p.wait(timeout=10) == 0

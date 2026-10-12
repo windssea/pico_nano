@@ -18,6 +18,10 @@ extern const uint8_t pn_ui_font_bytes[];
 extern const size_t pn_ui_font_size;
 extern const uint8_t pn_reading_font_bytes[];
 extern const size_t pn_reading_font_size;
+extern const uint8_t pn_harmony_font_bytes[];
+extern const size_t pn_harmony_font_size;
+static pn_status_t harmony_ui_read(void *,uint64_t,uint8_t *,size_t,size_t *);
+static pn_status_t builtin_read(void *,uint64_t,uint8_t *,size_t,size_t *);
 /* 字形缓存：同一字符在分页量宽和绘制各加载一次轮廓，而每次加载要经cmap二分和loca/glyf多次小读取，在SD/网络盘上很慢。
  * 缓存按（码点、像素高）记住字宽/缺字结果，再按（码点、像素高、亚像素偏移）记住渲染好的灰度位图。命中时仍先校验字体源，介质失效照常报错。
  * Glyph cache: layout measuring and drawing each loaded the same outline, and every load costs a cmap binary search plus several small loca/glyf reads, which is slow on SD or network drives.
@@ -37,6 +41,8 @@ typedef struct {
     struct FT_StreamRec_ stream;
     pn_text_source_t source;
     pn_status_t source_error;
+    pn_font_t ui_fallback; ///< HarmonyOS界面的独立中文回退引擎 / Separate CJK fallback engine for the HarmonyOS UI
+    bool resident_ui; ///< 仅常驻界面源启用中文回退，外置字体仍报告真实缺字 / Only the resident UI source uses CJK fallback; external faces report real missing glyphs
     bool allocation_failed;
     adv_t *adv; ///< 按需分配的字宽表 / Advance table, allocated on demand
     bmp_t **bmp; ///< 按需分配的位图指针表 / Bitmap pointer table, allocated on demand
@@ -76,11 +82,17 @@ static pn_status_t result(engine_t *e,FT_Error error) {
     if(e->allocation_failed || error==FT_Err_Out_Of_Memory)return PN_NO_MEMORY;
     return error?PN_CORRUPT:PN_OK;
 }
-void pn_font_close(pn_font_t *font) {
+void pn_font_trim(pn_font_t *font){
     if(!font || !font->impl)return;
     engine_t *e=font->impl;
+    pn_font_trim(&e->ui_fallback);
     if(e->bmp){for(unsigned i=0;i<BMP_SLOTS;i++)pn_free(e->bmp[i]);pn_free(e->bmp);e->bmp=NULL;}
     pn_free(e->adv);e->adv=NULL;
+    e->bmp_bytes=0;
+}
+void pn_font_close(pn_font_t *font) {
+    if(!font || !font->impl)return;
+    engine_t *e=font->impl;pn_font_trim(font);pn_font_close(&e->ui_fallback);
     if(e->face)FT_Done_Face(e->face);
     if(e->library)FT_Done_Library(e->library);
     pn_free(e);font->impl=NULL;font->pixels=0;
@@ -91,7 +103,7 @@ pn_status_t pn_font_open(pn_font_t *font,pn_pool_t *pool,const pn_text_source_t 
     if(source->size<12)return PN_CORRUPT;
     if(source->size>32u*1024u*1024u)return PN_LIMIT;
     if(source->validate){pn_status_t s=source->validate(source->ctx);if(s!=PN_OK)return s;}
-    engine_t *e=pn_alloc(pool,sizeof *e);if(!e)return PN_NO_MEMORY;memset(e,0,sizeof *e);e->pool=pool;e->source=*source;
+    engine_t *e=pn_alloc(pool,sizeof *e);if(!e)return PN_NO_MEMORY;memset(e,0,sizeof *e);e->pool=pool;e->source=*source;e->resident_ui=source->read_at==harmony_ui_read;
     e->memory=(struct FT_MemoryRec_){e,allocate,release,resize};
     e->stream.size=(unsigned long)source->size;e->stream.descriptor.pointer=e;e->stream.read=stream_read;
     pn_font_t temporary={e,0,0};uint8_t prefix[4];
@@ -112,6 +124,15 @@ pn_status_t pn_font_size(pn_font_t *font,int pixels) {
     engine_t *e=font->impl;pn_status_t status=ready(e);if(status!=PN_OK)return status;
     status=result(e,FT_Set_Pixel_Sizes(e->face,0,(FT_UInt)pixels));if(status==PN_OK)font->pixels=pixels;return status;
 }
+/// 延迟打开界面中文回退，保持字号和失败状态一致。/ Lazily open the UI CJK fallback at the same size and preserve errors.
+static pn_status_t ui_fallback(pn_font_t *font,pn_font_t **out){
+    engine_t *e=font->impl;if(!e->resident_ui)return PN_EMPTY;
+    pn_status_t s;
+    if(e->ui_fallback.impl)s=pn_font_size(&e->ui_fallback,font->pixels);
+    else{pn_text_source_t source={NULL,pn_ui_font_size,builtin_read,NULL};s=pn_font_open(&e->ui_fallback,e->pool,&source,font->pixels);}
+    if(s==PN_OK)*out=&e->ui_fallback;
+    return s;
+}
 static pn_status_t load(pn_font_t *font,uint32_t cp,bool render) {
     if(!font || !font->impl || cp>0x10ffff || (cp>=0xd800 && cp<=0xdfff))return PN_INVALID;
     engine_t *e=font->impl;pn_status_t status=ready(e);if(status!=PN_OK)return status;
@@ -128,12 +149,12 @@ pn_status_t pn_font_advance(void *ctx,uint32_t cp,int32_t *advance) {
     adv_t *slot=e->adv?&e->adv[hash_key(cp,font->pixels,0)%ADV_SLOTS]:NULL;
     if(slot && slot->state && slot->cp==cp && slot->pixels==(uint16_t)font->pixels){
         pn_status_t checked=ready(e);if(checked!=PN_OK)return checked;
-        if(slot->state==2)return PN_EMPTY;
+        if(slot->state==2){pn_font_t *fallback;pn_status_t s=ui_fallback(font,&fallback);return s==PN_OK?pn_font_advance(fallback,cp,advance):s;}
         *advance=slot->advance;return PN_OK;
     }
     bool tab=cp==9;
     pn_status_t s=load(font,tab?32:cp,false);
-    if(s==PN_EMPTY){if(slot)*slot=(adv_t){cp,(uint16_t)font->pixels,2,0};return s;}
+    if(s==PN_EMPTY){if(slot)*slot=(adv_t){cp,(uint16_t)font->pixels,2,0};pn_font_t *fallback;s=ui_fallback(font,&fallback);return s==PN_OK?pn_font_advance(fallback,cp,advance):s;}
     if(s!=PN_OK)return s;
     FT_Pos value=e->face->glyph->advance.x;
     if(value<0 || value>(tab?INT32_MAX/4:INT32_MAX))return PN_LIMIT;
@@ -146,7 +167,9 @@ pn_status_t pn_font_vertical(pn_font_t *font,int *ascent,int *descent) {
     engine_t *e=font->impl;pn_status_t s=ready(e);if(s!=PN_OK)return s;
     FT_Pos a=e->face->size->metrics.ascender,d=e->face->size->metrics.descender;
     if(a<0 || a>128*8*64 || d>0 || d< -128*8*64)return PN_LIMIT;
-    *ascent=(int)((a+63)/64);*descent=(int)((-d+63)/64);return PN_OK;
+    int up=(int)((a+63)/64),down=(int)((-d+63)/64);
+    if(e->resident_ui){pn_font_t *fallback;s=ui_fallback(font,&fallback);if(s!=PN_OK)return s;int fa,fd;s=pn_font_vertical(fallback,&fa,&fd);if(s!=PN_OK)return s;if(fa>up)up=fa;if(fd>down)down=fd;}
+    *ascent=up;*descent=down;return PN_OK;
 }
 /* 把灰度位图（顶行在前，行距pitch）按覆盖率叠到帧上。/ Composite a gray bitmap (top row first, row stride pitch) onto the frame by coverage. */
 static void composite(pn_frame_t *frame,int64_t left,int64_t top,unsigned width,unsigned rows,const uint8_t *data,size_t pitch,pn_font_render_t mode,unsigned ink) {
@@ -175,7 +198,9 @@ pn_status_t pn_font_draw(pn_font_t *font,pn_frame_t *frame,uint32_t cp,int32_t x
         return PN_OK;
     }
     FT_Vector delta={offset,0};FT_Set_Transform(e->face,NULL,&delta);
-    pn_status_t s=load(font,cp,true);FT_Set_Transform(e->face,NULL,NULL);if(s!=PN_OK)return s;
+    pn_status_t s=load(font,cp,true);FT_Set_Transform(e->face,NULL,NULL);
+    if(s==PN_EMPTY){pn_font_t *fallback;s=ui_fallback(font,&fallback);if(s!=PN_OK)return s;fallback->ink=font->ink;return pn_font_draw(fallback,frame,cp,x_64,baseline,mode);}
+    if(s!=PN_OK)return s;
     FT_GlyphSlot glyph=e->face->glyph;FT_Bitmap *b=&glyph->bitmap;
     if(!b->width || !b->rows){
         // 空白字形也记住，免得再加载一遍。/ Remember blank glyphs too so they are not loaded again.
@@ -211,14 +236,21 @@ static pn_status_t builtin_read(void *ctx,uint64_t offset,uint8_t *out,size_t ca
     size_t count=pn_ui_font_size-(size_t)offset;if(count>cap)count=cap;
     memcpy(out,pn_ui_font_bytes+offset,count);*n=count;return PN_OK;
 }
-pn_text_source_t pn_font_builtin_source(void){return (pn_text_source_t){NULL,pn_ui_font_size,builtin_read,NULL};}
+static pn_status_t harmony_read(void *ctx,uint64_t offset,uint8_t *out,size_t cap,size_t *n){
+    (void)ctx;if(!out || !n || offset>pn_harmony_font_size)return PN_INVALID;
+    size_t count=pn_harmony_font_size-(size_t)offset;if(count>cap)count=cap;
+    memcpy(out,pn_harmony_font_bytes+offset,count);*n=count;return PN_OK;
+}
+static pn_status_t harmony_ui_read(void *ctx,uint64_t off,uint8_t *out,size_t cap,size_t *n){return harmony_read(ctx,off,out,cap,n);}
+pn_text_source_t pn_font_builtin_source(void){return (pn_text_source_t){NULL,pn_harmony_font_size,harmony_ui_read,NULL};}
 
 static pn_status_t reading_read(void *ctx,uint64_t offset,uint8_t *out,size_t cap,size_t *n){
     (void)ctx;if(!out || !n || offset>pn_reading_font_size)return PN_INVALID;
     size_t count=pn_reading_font_size-(size_t)offset;if(count>cap)count=cap;
     memcpy(out,pn_reading_font_bytes+offset,count);*n=count;return PN_OK;
 }
-pn_text_source_t pn_font_reading_source(void){return (pn_text_source_t){NULL,pn_reading_font_size,reading_read,NULL};}
+pn_text_source_t pn_font_reading_source(void){return (pn_text_source_t){NULL,pn_harmony_font_size,harmony_read,NULL};}
+pn_text_source_t pn_font_fallback_source(void){return (pn_text_source_t){NULL,pn_reading_font_size,reading_read,NULL};}
 
 /* ---- 有界字体信息 / Bounded font information ---- */
 static bool name_append(char *out,size_t *used,uint32_t cp){

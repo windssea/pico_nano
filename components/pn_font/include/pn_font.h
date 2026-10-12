@@ -22,6 +22,8 @@ pn_status_t pn_font_open(pn_font_t *font,pn_pool_t *pool,const pn_text_source_t 
 /// 释放引擎，不关闭调用方源，幂等。
 /// Release engine without closing caller source, idempotently.
 void pn_font_close(pn_font_t *font);
+/// 释放可重建的字形/度量缓存，保留字体源、字号和引擎；不访问文件或硬件。/ Free rebuildable glyph/metric caches while retaining the source, size and engine; no file or hardware I/O.
+void pn_font_trim(pn_font_t *font);
 /// 设置8至128像素，不保存全局或逐书设置。
 /// Set 8 through 128 pixels without saving global or per-book settings.
 pn_status_t pn_font_size(pn_font_t *font,int pixels);
@@ -35,10 +37,12 @@ pn_status_t pn_font_vertical(pn_font_t *font,int *ascent,int *descent);
 /// x uses 26.6 and baseline uses pixels; clipped coverage drawing or binary DU threshold.
 pn_status_t pn_font_draw(pn_font_t *font,pn_frame_t *frame,uint32_t codepoint,int32_t x_64,int baseline,pn_font_render_t mode);
 /// 常驻子集源，不分配、不访问卡；没有完整中文fallback承诺。
-/// Resident subset source without allocation or card access; not a full Chinese fallback.
+/// Resident HarmonyOS UI primary with a separate resident CJK subset fallback; no card access.
 pn_text_source_t pn_font_builtin_source(void);
-/// 内置默认阅读黑体，覆盖GB2312与界面字集；不访问存储卡。/ Resident reading sans covering GB2312 and the UI repertoire without card access.
+/// 内置HarmonyOS默认主字体；汉字由独立回退链绘制，不访问存储卡。/ Resident HarmonyOS primary; CJK uses a separate fallback chain, without card access.
 pn_text_source_t pn_font_reading_source(void);
+/// 与HarmonyOS主字体分离的常驻中文回退，不访问TF。/ Resident CJK fallback separate from HarmonyOS, without TF access.
+pn_text_source_t pn_font_fallback_source(void);
 
 #define PN_FONT_NAME_MAX 128
 typedef struct {

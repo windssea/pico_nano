@@ -113,7 +113,7 @@ int main(int argc, char **argv) {
     if(cover_cache && (!library || !*cover_cache))return 2;
     if((wallpaper_dir || wallpaper_store) && (!library || !wallpaper_dir || !*wallpaper_dir || (wallpaper_store && !*wallpaper_store)))return 2;
     if(font_dir && (!library || !*font_dir))return 2;
-    if(library && !budget_explicit)budget=6*1024*1024;
+    if((library || book) && !budget_explicit)budget=6*1024*1024;
     if (ownership && !budget_explicit) budget=2*1024*1024;
     bool epub_book=false;
     if(book){FILE *file=fopen(book,"rb");if(file){uint8_t prefix[4];size_t n=fread(prefix,1,4,file);fclose(file);epub_book=n==4 && prefix[0]=='P' && prefix[1]=='K' && prefix[2]==3 && prefix[3]==4;}}

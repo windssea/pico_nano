@@ -42,9 +42,16 @@ pn_status_t pn_reader_app_tick(pn_reader_app_t *app,uint64_t now_ms);
 /// 先保存屏障，保存失败不释放；成功后清理源，关闭I/O错误可在释放后报告。
 /// Save barrier first, retain on save failure; clean sources on success, reporting close I/O errors after release.
 pn_status_t pn_reader_app_close(pn_reader_app_t *app,uint64_t now_ms);
+/// 保存后热挂起会话；预览/失败候选返回BUSY。/ Save then retain session; previews/failed candidates return BUSY.
+pn_status_t pn_reader_app_suspend(pn_reader_app_t *,uint64_t);
+/// 验证介质后呈现已确认正文，不解析、不推进位置。/ Validate media and redisplay confirmed body without parsing or advancing position.
+pn_status_t pn_reader_app_resume(pn_reader_app_t *,uint64_t,pn_reader_present_fn,void *);
 /// 已显示位置或EMPTY；不返回待显示页。
 /// Displayed location or EMPTY, never the prepared page.
 pn_status_t pn_reader_app_progress(const pn_reader_app_t *app,pn_txt_progress_t *progress);
+/// 返回已确认页的展示进度（0..10000），末页为10000；不改变用于续读的页首位置。
+/// Get display progress for the confirmed page (0..10000), with 10000 on the last page; preserve the page-start resume location.
+pn_status_t pn_reader_app_percent(const pn_reader_app_t *app,unsigned *basis_points);
 
 /// 设备路径借用已确认挂载的共享media，不初始化/重挂载它；源与传输共同仲裁。
 /// Device path borrows a confirmed-mounted shared media without initializing/remounting it; arbitrate with transfers.
@@ -71,6 +78,15 @@ pn_status_t pn_reader_app_bookmark_jump(pn_reader_app_t *app,uint64_t id,uint64_
 pn_status_t pn_reader_app_bookmark_return(pn_reader_app_t *app,uint64_t now_ms,pn_reader_present_fn present,void *ctx);
 
 typedef pn_status_t (*pn_reader_overlay_fn)(void *,pn_font_t *,pn_font_t *,pn_frame_t *);
+/// 常驻正文叠层；paint只绘制，complete仅在正文推屏完成后通知，资源由控制层拥有。
+/// Persistent body decoration; paint only draws, complete reports body presentation, and the controller owns resources.
+typedef struct {
+    void *ctx; ///< 叠层状态 / Decoration state
+    pn_status_t (*paint)(void *,pn_frame_t *); ///< 正文绘制后调用 / Called after body drawing
+    void (*complete)(void *,const pn_frame_t *,bool); ///< 成功呈现才保存锁屏底图 / Save the lock underlay only after successful presentation
+} pn_reader_body_layer_t;
+/// 绑定/清除正文叠层；不影响工具页，不取得资源所有权。/ Bind/clear a body decoration without affecting tool pages or taking ownership.
+pn_status_t pn_reader_app_body_layer(pn_reader_app_t *app,const pn_reader_body_layer_t *layer);
 /// paint借用常驻UI字体、可空36px正文回退字体和帧；纯绘制，不提交阅读位置。
 /// paint borrows resident UI font, nullable 36px body fallback and frame; paint only, without location commits.
 /// 仅GC16/GL16；之后正文强刷。/ GC16/GL16 only; force full reader refresh afterwards.

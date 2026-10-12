@@ -12,9 +12,11 @@ set(ui_font_c ${CMAKE_CURRENT_BINARY_DIR}/pn_ui_font.c)
 add_custom_command(OUTPUT ${ui_font_c} COMMAND ${Python3_EXECUTABLE} ${PN_ROOT}/tools/embed_binary.py ${PN_ROOT}/assets/fonts/read-pico-ui.ttf ${ui_font_c} DEPENDS ${PN_ROOT}/tools/embed_binary.py ${PN_ROOT}/assets/fonts/read-pico-ui.ttf VERBATIM)
 set(reading_font_c ${CMAKE_CURRENT_BINARY_DIR}/pn_reading_font.c)
 add_custom_command(OUTPUT ${reading_font_c} COMMAND ${Python3_EXECUTABLE} ${PN_ROOT}/tools/embed_binary.py ${PN_ROOT}/assets/fonts/read-pico-reading.ttf ${reading_font_c} pn_reading_font DEPENDS ${PN_ROOT}/tools/embed_binary.py ${PN_ROOT}/assets/fonts/read-pico-reading.ttf VERBATIM)
+set(harmony_font_c ${CMAKE_CURRENT_BINARY_DIR}/pn_harmony_font.c)
+add_custom_command(OUTPUT ${harmony_font_c} COMMAND ${Python3_EXECUTABLE} ${PN_ROOT}/tools/embed_binary.py ${PN_ROOT}/assets/fonts/HarmonyOS_Sans_Regular.ttf ${harmony_font_c} pn_harmony_font DEPENDS ${PN_ROOT}/tools/embed_binary.py ${PN_ROOT}/assets/fonts/HarmonyOS_Sans_Regular.ttf VERBATIM)
 set(brand_image_c ${CMAKE_CURRENT_BINARY_DIR}/pn_brand_logo.c)
 add_custom_command(OUTPUT ${brand_image_c} COMMAND ${Python3_EXECUTABLE} ${PN_ROOT}/tools/build_brand_image.py ${PN_ROOT}/assets/image/logo.png ${brand_image_c} --report ${CMAKE_CURRENT_BINARY_DIR}/pn_brand_logo.json DEPENDS ${PN_ROOT}/tools/build_brand_image.py ${PN_ROOT}/assets/image/logo.png VERBATIM)
-add_library(pn_core STATIC ${ui_font_c} ${reading_font_c} ${brand_image_c}
+add_library(pn_core STATIC ${ui_font_c} ${reading_font_c} ${harmony_font_c} ${brand_image_c}
     ${PN_ROOT}/components/pn_personalization/pn_brand_image.c
     ${PN_ROOT}/components/pn_qr/pn_qr.c
     ${PN_ROOT}/components/pn_qr/vendor/qrcodegen.c
@@ -35,6 +37,7 @@ add_library(pn_core STATIC ${ui_font_c} ${reading_font_c} ${brand_image_c}
     ${PN_ROOT}/components/pn_reader/pn_epub_image.c
     ${PN_ROOT}/components/pn_reader/pn_epub_reader.c
     ${PN_ROOT}/components/pn_reader/pn_epub_app.c
+    ${PN_ROOT}/components/pn_reader/pn_turn_transition.c
     ${PN_ROOT}/components/pn_reader/pn_toc_ui.c
     ${PN_ROOT}/components/pn_format/pn_zip.c
     ${PN_ROOT}/components/pn_format/pn_resource.c

@@ -1,0 +1,12 @@
+{
+  "source": "User-provided original HarmonyOS_Sans_Regular.ttf",
+  "publisher": "Huawei Device Co., Ltd.",
+  "source_reference": "https://developer.huawei.com/consumer/cn/design/resource",
+  "source_sha256": "4f00c7e80329238d0b6fc58e5c829c4086432ba9fa1a8c5ca3da9a0442ce0452",
+  "license": "HarmonyOS Sans Fonts License Agreement",
+  "license_source": "https://raw.githubusercontent.com/openharmony/global_system_resources/master/LICENSE_Fonts",
+  "license_sha256": "327e0147d4a3ca2d89e81abce45b210576b0f9fe2b29d900f64b58039f12a102",
+  "file": "assets/fonts/HarmonyOS_Sans_Regular.ttf",
+  "modified": false,
+  "coverage": "874 mappings; no CJK; resident Noto fallback is separate"
+}

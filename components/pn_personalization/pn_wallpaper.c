@@ -38,10 +38,11 @@ static bool full_frame(const pn_frame_t *f){return f && f->pixels && f->width==W
 static void unrotate(unsigned r,int x,int y,int uw,int uh,int *ux,int *uy){
     switch(r){case 1:*ux=y;*uy=uh-1-x;break;case 2:*ux=uw-1-x;*uy=uh-1-y;break;case 3:*ux=uw-1-y;*uy=x;break;default:*ux=x;*uy=y;break;}
 }
-static pn_status_t prepare(pn_pool_t *pool,const pn_text_source_t *source,pn_wallpaper_transform_t t,pn_frame_t *out){
+static pn_status_t prepare(pn_pool_t *pool,const pn_text_source_t *source,pn_wallpaper_transform_t t,pn_frame_t *out,pn_frame_t *alpha){
     file_input_t at={source,0};pn_image_input_t input={&at,file_read};pn_image_info_t info;
     pn_status_t status=pn_image_probe(pool,&input,&info);if(status!=PN_OK)return status;
     if(!info.width || !info.height)return PN_CORRUPT;
+    if(alpha && info.kind!=PN_IMAGE_PNG)return PN_UNSUPPORTED;
     unsigned r=t.rotation&3u;uint64_t rw=r&1u?info.height:info.width,rh=r&1u?info.width:info.height;
     bool wider=rw*H>rh*W;uint64_t dw,dh;
     if(wider==(t.fit==PN_WALLPAPER_CONTAIN)){dw=W;dh=rh*W/rw;}else{dh=H;dw=rw*H/rh;}
@@ -54,29 +55,79 @@ static pn_status_t prepare(pn_pool_t *pool,const pn_text_source_t *source,pn_wal
     /* 旋转后矩形映射回未旋转窗口。/ Map the rotated rectangle back to the unrotated window. */
     int uw=r&1u?H:W,uh=r&1u?W:H;int64_t ux,uy,iw=r&1u?(int64_t)dh:(int64_t)dw,ih=r&1u?(int64_t)dw:(int64_t)dh;
     switch(r){case 1:ux=oy;uy=uh-ox-(int64_t)dw;break;case 2:ux=W-ox-(int64_t)dw;uy=H-oy-(int64_t)dh;break;case 3:ux=uw-oy-(int64_t)dh;uy=ox;break;default:ux=ox;uy=oy;break;}
-    unsigned k=2;
+    unsigned k=alpha?1:2;
     while(k>1 && ((uint64_t)iw*k>(r&1u?rh:rw) || (uint64_t)ih*k>(r&1u?rw:rh) || iw*k>4096 || ih*k>4096 || (size_t)uw*k/2*(size_t)uh*k>SCRATCH_MAX))k--;
     int sw=uw*(int)k,sh=uh*(int)k;size_t bytes=((size_t)sw+1)/2*(size_t)sh;
     uint8_t *pixels=pn_alloc(pool,bytes);if(!pixels)return PN_NO_MEMORY;
     pn_frame_t scratch;(void)pn_frame_bind(&scratch,pixels,bytes,sw,sh);pn_frame_clear(&scratch,15);
-    at.offset=0;status=pn_image_draw(pool,&input,&scratch,(pn_image_rect_t){(int)(ux*k),(int)(uy*k),(int)(iw*k),(int)(ih*k)},&info);
+    uint8_t *opacity=alpha?pn_alloc(pool,bytes):NULL;pn_frame_t scratch_alpha;
+    if(alpha && !opacity){pn_free(pixels);return PN_NO_MEMORY;}
+    if(alpha){(void)pn_frame_bind(&scratch_alpha,opacity,bytes,sw,sh);pn_frame_clear(&scratch_alpha,0);}
+    at.offset=0;pn_image_rect_t rect={(int)(ux*k),(int)(uy*k),(int)(iw*k),(int)(ih*k)};
+    if(alpha){pn_png_info_t png;status=pn_png_draw_planes(pool,&input,&scratch,&scratch_alpha,rect,&png);}
+    else status=pn_image_draw(pool,&input,&scratch,rect,&info);
     if(status==PN_OK){unsigned area=k*k;
         for(int y=0;y<H;y++)for(int x=0;x<W;x++){int sx,sy;unrotate(r,x,y,uw,uh,&sx,&sy);unsigned sum=0;
             for(unsigned dy=0;dy<k;dy++)for(unsigned dx=0;dx<k;dx++)sum+=pn_frame_get(&scratch,sx*(int)k+(int)dx,sy*(int)k+(int)dy);
-            pn_frame_pixel(out,x,y,(uint8_t)((sum+area/2)/area));}
+            pn_frame_pixel(out,x,y,(uint8_t)((sum+area/2)/area));
+            if(alpha)pn_frame_pixel(alpha,x,y,pn_frame_get(&scratch_alpha,sx,sy));}
     }
-    pn_free(pixels);return status;
+    pn_free(opacity);pn_free(pixels);return status;
 }
-pn_status_t pn_wallpaper_prepare(pn_pool_t *pool,pn_media_t *media,const pn_media_lease_t *lease,const char *path,
-    pn_wallpaper_transform_t transform,size_t budget,pn_frame_t *out){
+static pn_status_t prepare_file(pn_pool_t *pool,pn_media_t *media,const pn_media_lease_t *lease,const char *path,
+    pn_wallpaper_transform_t transform,size_t budget,pn_frame_t *out,pn_frame_t *alpha){
     if(!pool || !media || !lease || !path || !*path || !budget || !full_frame(out) || transform.rotation>3 || (transform.fit!=PN_WALLPAPER_CONTAIN && transform.fit!=PN_WALLPAPER_COVER) ||
        transform.shift<-PN_WALLPAPER_SHIFT_MAX || transform.shift>PN_WALLPAPER_SHIFT_MAX)return PN_INVALID;
     pn_status_t status=pn_media_validate(media,lease);if(status!=PN_OK)return status;
     if(lease->access==PN_MEDIA_USB)return PN_INVALID;
     pn_pool_t sub;if(pn_pool_init(&sub,budget,sub_alloc,sub_free,pool)!=0)return PN_INVALID;
     pn_text_file_t file={0};pn_text_source_t source;status=pn_text_file_open(&file,media,lease,path,&source);if(status!=PN_OK)return status;
-    status=prepare(&sub,&source,transform,out);pn_status_t closed=pn_text_file_close(&file);
+    status=prepare(&sub,&source,transform,out,alpha);pn_status_t closed=pn_text_file_close(&file);
     return status==PN_OK?closed:status;
+}
+pn_status_t pn_wallpaper_prepare(pn_pool_t *pool,pn_media_t *media,const pn_media_lease_t *lease,const char *path,pn_wallpaper_transform_t transform,size_t budget,pn_frame_t *out){return prepare_file(pool,media,lease,path,transform,budget,out,NULL);}
+pn_status_t pn_wallpaper_mask_prepare(pn_pool_t *pool,pn_media_t *media,const pn_media_lease_t *lease,const char *path,pn_wallpaper_transform_t transform,size_t budget,pn_frame_t *gray,pn_frame_t *alpha){
+    if(!full_frame(alpha) || !gray || alpha->pixels==gray->pixels)return PN_INVALID;
+    return prepare_file(pool,media,lease,path,transform,budget,gray,alpha);
+}
+pn_status_t pn_wallpaper_mask_render(const pn_frame_t *gray,const pn_frame_t *alpha,pn_frame_t *underlay){
+    if(!full_frame(gray) || !full_frame(alpha) || !full_frame(underlay) || gray->pixels==underlay->pixels || alpha->pixels==underlay->pixels)return PN_INVALID;
+    for(int y=0;y<H;y++)for(int x=0;x<W;x++){unsigned a=pn_frame_get(alpha,x,y);if(a)pn_frame_pixel(underlay,x,y,(uint8_t)((pn_frame_get(gray,x,y)*a+pn_frame_get(underlay,x,y)*(15-a)+7)/15));}
+    return PN_OK;
+}
+typedef struct {pn_frame_t gray,alpha,shown;uint8_t *pixels;bool confirmed;} mask_t;
+pn_status_t pn_wallpaper_mask_open(pn_wallpaper_mask_t *mask,pn_pool_t *pool,pn_media_t *media,const pn_lock_selection_t *selection){
+    if(!mask || !pool || !media || !selection || selection->mode!=PN_LOCK_MASK)return PN_INVALID;
+    if(mask->impl)return PN_BUSY;
+    mask_t *m=pn_alloc(pool,sizeof *m);if(!m)return PN_NO_MEMORY;memset(m,0,sizeof *m);
+    m->pixels=pn_alloc(pool,3u*PN_WALLPAPER_BYTES);
+    if(!m->pixels){pn_free(m);return PN_NO_MEMORY;}
+    (void)pn_frame_bind(&m->gray,m->pixels,PN_WALLPAPER_BYTES,W,H);
+    (void)pn_frame_bind(&m->alpha,m->pixels+PN_WALLPAPER_BYTES,PN_WALLPAPER_BYTES,W,H);
+    (void)pn_frame_bind(&m->shown,m->pixels+2u*PN_WALLPAPER_BYTES,PN_WALLPAPER_BYTES,W,H);
+    pn_media_lease_t lease;pn_status_t s=pn_media_acquire(media,PN_MEDIA_READ,&lease);
+    if(s==PN_OK){size_t free_bytes=pool->limit>pool->used?pool->limit-pool->used:0;
+        s=pn_wallpaper_mask_prepare(pool,media,&lease,selection->source,selection->transform,free_bytes>262144?free_bytes-262144:1,&m->gray,&m->alpha);
+        pn_status_t released=pn_media_release(media,&lease);if(s==PN_OK)s=released;}
+    if(s!=PN_OK){pn_free(m->pixels);pn_free(m);return s;}mask->impl=m;return PN_OK;
+}
+pn_status_t pn_wallpaper_mask_paint(void *ctx,pn_frame_t *frame){
+    pn_wallpaper_mask_t *mask=ctx;if(!mask || !mask->impl)return PN_INVALID;
+    mask_t *m=mask->impl;return pn_wallpaper_mask_render(&m->gray,&m->alpha,frame);
+}
+void pn_wallpaper_mask_complete(void *ctx,const pn_frame_t *frame,bool shown){
+    pn_wallpaper_mask_t *mask=ctx;if(!mask || !mask->impl || !shown || !full_frame(frame))return;
+    mask_t *m=mask->impl;memcpy(m->shown.pixels,frame->pixels,PN_WALLPAPER_BYTES);m->confirmed=true;
+}
+bool pn_wallpaper_mask_snapshot(const pn_wallpaper_mask_t *mask,pn_frame_t *frame){
+    if(!mask || !mask->impl || !full_frame(frame))return false;
+    mask_t *m=mask->impl;
+    if(!m->confirmed)return false;
+    memcpy(frame->pixels,m->shown.pixels,PN_WALLPAPER_BYTES);return true;
+}
+void pn_wallpaper_mask_close(pn_wallpaper_mask_t *mask){
+    if(!mask || !mask->impl)return;
+    mask_t *m=mask->impl;pn_free(m->pixels);pn_free(m);mask->impl=NULL;
 }
 
 static void put(uint8_t *p,uint64_t v,unsigned n){for(unsigned i=0;i<n;i++)p[i]=(uint8_t)(v>>(8*i));}
@@ -90,7 +141,7 @@ pn_status_t pn_wallpaper_store_init(pn_wallpaper_store_t *store,pn_media_t *medi
 /* 解析头部；路径另读。/ Parse the fixed header; the path is read separately. */
 static bool decode_header(const uint8_t *h,pn_lock_selection_t *s,size_t *path_length){
     unsigned version=(unsigned)get(h+4,2);
-    if(memcmp(h,"PNWP",4) || (version!=1 && version!=VERSION) || h[6]>PN_LOCK_BOOK || h[7]>PN_WALLPAPER_COVER || h[8]>3 || (int8_t)h[9]<-PN_WALLPAPER_SHIFT_MAX || (int8_t)h[9]>PN_WALLPAPER_SHIFT_MAX || h[10]>1 || h[11]>1 || (version==1 && h[11]) || (h[11] && h[6]!=PN_LOCK_BOOK))return false;
+    if(memcmp(h,"PNWP",4) || (version!=1 && version!=VERSION) || h[6]>PN_LOCK_MASK || h[7]>PN_WALLPAPER_COVER || h[8]>3 || (int8_t)h[9]<-PN_WALLPAPER_SHIFT_MAX || (int8_t)h[9]>PN_WALLPAPER_SHIFT_MAX || h[10]>1 || h[11]>1 || (version==1 && h[11]) || (h[11] && h[6]!=PN_LOCK_BOOK))return false;
     *s=(pn_lock_selection_t){.mode=(pn_lock_mode_t)h[6],.transform={(pn_wallpaper_fit_t)h[7],h[8],(int8_t)h[9]},.hint=h[10]!=0,.sequence=get(h+12,8),.source_size=get(h+20,8),.source_mtime=(int64_t)get(h+28,8)};
     s->cached_book=h[11]!=0;*path_length=(size_t)get(h+36,2);return s->sequence && *path_length<PN_WALLPAPER_PATH_MAX;
 }
@@ -141,7 +192,7 @@ pn_status_t pn_wallpaper_load(const pn_wallpaper_store_t *store,const pn_media_l
     pn_lock_selection_t s;int which;status=best(store,lease,&s,frame,&which);if(status==PN_OK)*selection=s;return status;
 }
 pn_status_t pn_wallpaper_save(const pn_wallpaper_store_t *store,const pn_media_lease_t *lease,pn_lock_selection_t *selection,const pn_frame_t *bitmap){
-    if(!store || !store->media || !lease || lease->access!=PN_MEDIA_WRITE || !selection || selection->mode>PN_LOCK_BOOK || (bitmap_record(selection) && !full_frame(bitmap)) || (selection->cached_book && !book_identity_valid(selection)) ||
+    if(!store || !store->media || !lease || lease->access!=PN_MEDIA_WRITE || !selection || selection->mode>PN_LOCK_MASK || (bitmap_record(selection) && !full_frame(bitmap)) || (selection->cached_book && !book_identity_valid(selection)) ||
        selection->transform.rotation>3 || selection->transform.fit>PN_WALLPAPER_COVER || selection->transform.shift<-PN_WALLPAPER_SHIFT_MAX || selection->transform.shift>PN_WALLPAPER_SHIFT_MAX)return PN_INVALID;
     size_t path_length=strnlen(selection->source,PN_WALLPAPER_PATH_MAX);if(path_length>=PN_WALLPAPER_PATH_MAX)return PN_LIMIT;
     pn_status_t status=pn_media_validate(store->media,lease);if(status!=PN_OK)return status;
@@ -191,7 +242,7 @@ static pn_status_t centered(pn_font_t *font,pn_frame_t *frame,const char *s,int 
     int32_t x=(W*64-width)/2;if(x<0)x=0;return line(font,frame,s,x,baseline,NULL);
 }
 pn_status_t pn_lock_render(const pn_lock_selection_t *selection,pn_font_t *font,const char *hint,pn_frame_t *frame){
-    if(!selection || selection->mode>PN_LOCK_BOOK || !font || !font->impl || !hint || !full_frame(frame))return PN_INVALID;
+    if(!selection || selection->mode>PN_LOCK_MASK || !font || !font->impl || !hint || !full_frame(frame))return PN_INVALID;
     int original=font->pixels;pn_status_t status=PN_OK;
     if(selection->mode==PN_LOCK_DEFAULT){
         status=pn_brand_image_render(frame);

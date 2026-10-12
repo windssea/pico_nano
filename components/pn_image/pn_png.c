@@ -73,7 +73,7 @@ static pn_status_t error(reader_t *reader,int value){
     if(value==SPNG_EMEM)return PN_NO_MEMORY;
     return PN_CORRUPT;
 }
-static void write_row(pn_frame_t *frame,pn_image_rect_t rect,const struct spng_ihdr *header,const struct spng_row_info *row,const uint8_t *rgba){
+static void write_row(pn_frame_t *frame,pn_frame_t *alpha,pn_image_rect_t rect,const struct spng_ihdr *header,const struct spng_row_info *row,const uint8_t *rgba){
     static const uint8_t first[7]={0,4,0,2,0,1,0},step[7]={8,8,4,4,2,2,1};
     unsigned x0=header->interlace_method?first[row->pass]:0,dx=header->interlace_method?step[row->pass]:1;
     uint64_t y0=((uint64_t)row->row_num*rect.height+header->height-1)/header->height;
@@ -84,11 +84,12 @@ static void write_row(pn_frame_t *frame,pn_image_rect_t rect,const struct spng_i
         int64_t tx=(int64_t)rect.x+x,ty=(int64_t)rect.y+(int64_t)y;if(tx<0 || ty<0 || tx>=frame->width || ty>=frame->height)continue;
         const uint8_t *p=rgba+4*((source_x-x0)/dx);unsigned gray=(p[0]*77u+p[1]*150u+p[2]*29u+128u)/256u;
         unsigned background=pn_frame_get(frame,(int)tx,(int)ty)*17u;
-        unsigned composite=(gray*p[3]+background*(255u-p[3])+127u)/255u;unsigned shade=(composite+8u)/17u;if(shade>15)shade=15;
+        unsigned composite=alpha?gray:(gray*p[3]+background*(255u-p[3])+127u)/255u;unsigned shade=(composite+8u)/17u;if(shade>15)shade=15;
         pn_frame_pixel(frame,(int)tx,(int)ty,(uint8_t)shade);
+        if(alpha)pn_frame_pixel(alpha,(int)tx,(int)ty,(uint8_t)((p[3]+8u)/17u));
     }
 }
-pn_status_t pn_png_draw(pn_pool_t *pool,const pn_image_input_t *input,pn_frame_t *frame,pn_image_rect_t rect,pn_png_info_t *info){
+static pn_status_t draw(pn_pool_t *pool,const pn_image_input_t *input,pn_frame_t *frame,pn_frame_t *alpha,pn_image_rect_t rect,pn_png_info_t *info){
     if(!pool || !input || !input->read || !frame || !frame->pixels || frame->width<1 || frame->height<1 || frame->width>4096 || frame->height>4096 || frame->stride<(size_t)(frame->width+1)/2 || frame->stride>SIZE_MAX/(size_t)frame->height || rect.width<1 || rect.height<1 || rect.width>4096 || rect.height>4096 || !info)return PN_INVALID;
     pn_pool_t *previous=current_pool;current_pool=pool;struct spng_alloc alloc={allocate,resize,zero_allocate,release};spng_ctx *ctx=spng_ctx_new2(&alloc,0);if(!ctx){current_pool=previous;return PN_NO_MEMORY;}
     reader_t reader={.input=input,.scan_chunks=true,.signature_left=8};pn_status_t status=PN_OK;uint8_t *rgba=NULL;struct spng_ihdr header={0};
@@ -105,10 +106,15 @@ pn_status_t pn_png_draw(pn_pool_t *pool,const pn_image_input_t *input,pn_frame_t
         if(row.row_num>=header.height || row.pass<0 || row.pass>6){status=PN_CORRUPT;break;}
         rc=spng_decode_scanline(ctx,rgba,(size_t)header.width*4);
         if(rc && rc!=SPNG_EOI){status=error(&reader,rc);break;}
-        write_row(frame,rect,&header,&row,rgba);if(rc==SPNG_EOI)break;
+        write_row(frame,alpha,rect,&header,&row,rgba);if(rc==SPNG_EOI)break;
     }
     if(status==PN_OK){rc=spng_decode_chunks(ctx);status=error(&reader,rc);}
     if(status==PN_OK){uint8_t tail;size_t n=0;pn_status_t eof=input->read(input->ctx,&tail,1,&n);if(eof!=PN_EMPTY || n)status=eof==PN_OK || eof==PN_EMPTY?PN_CORRUPT:eof;}
     if(status==PN_OK)*info=(pn_png_info_t){.width=header.width,.height=header.height,.depth=header.bit_depth,.color_type=header.color_type,.interlace=header.interlace_method};
     pn_free(rgba);spng_ctx_free(ctx);current_pool=previous;return status;
+}
+pn_status_t pn_png_draw(pn_pool_t *pool,const pn_image_input_t *input,pn_frame_t *frame,pn_image_rect_t rect,pn_png_info_t *info){return draw(pool,input,frame,NULL,rect,info);}
+pn_status_t pn_png_draw_planes(pn_pool_t *pool,const pn_image_input_t *input,pn_frame_t *gray,pn_frame_t *alpha,pn_image_rect_t rect,pn_png_info_t *info){
+    if(!gray || !alpha || !alpha->pixels || alpha->pixels==gray->pixels || alpha->width!=gray->width || alpha->height!=gray->height || alpha->stride<(size_t)(alpha->width+1)/2)return PN_INVALID;
+    return draw(pool,input,gray,alpha,rect,info);
 }

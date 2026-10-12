@@ -33,6 +33,8 @@ int main(void){
             int x=32+(int)(i%cols)*pitch,y=y0+(int)(i/cols)*354;
             assert(pn_shelf_hit_ex(p,x+24,y+100,&o)==(int)i);
             assert(pn_shelf_hit_ex(p,x+w-24,y+24,&o)==PN_SHELF_MORE+(int)i);
+            assert(pn_shelf_hit_ex(p,x+w-94,y+94,&o)==PN_SHELF_MORE+(int)i);
+            assert(pn_shelf_hit_ex(p,x+w-94,y+98,&o)==(int)i);
         }
         /* 焦点不改变封面像素，避免默认黑框。/ Focus leaves cover pixels untouched, avoiding a default black frame. */
         for(int y=y0;y<y0+h-12;y++)for(int x=40;x<32+w-10;x++)assert(pn_frame_get(&frame,x,y)==((before[y*342+x/2]>>(x%2?4:0))&15));

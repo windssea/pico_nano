@@ -35,6 +35,7 @@ unsigned pn_settings_refresh_pages(uint8_t flags){static const unsigned pages[3]
 #define LEVEL_H 92
 #define FULL_Y 520
 #define ABOUT_Y 190
+#define TURN_Y 900
 static int device_rows(const su_t *u){return *u->lan?2:1;}
 static pn_status_t note(su_t *u,const char *text,int baseline){
     int original=u->font.pixels;pn_status_t s=pn_font_size(&u->font,24);
@@ -106,7 +107,12 @@ static pn_status_t draw_refresh(pn_settings_ui_t *ui,su_t *u){
     if(s==PN_OK)s=pn_w_group(font,f,"屏幕",FULL_Y+150);
     pn_w_card(f,FULL_Y+162,1);
     if(s==PN_OK)s=pn_w_card_row(font,f,*u->about.screen?u->about.screen:"4.7 英寸墨水屏","16 级灰阶，阅读页保持纯白底",NULL,-1,0u,FULL_Y+162,true);
-    if(s==PN_OK && *u->message)s=note(u,u->message,FULL_Y+162+ROW_H+48);
+    if(s==PN_OK)s=pn_w_group(font,f,"翻页样式",TURN_Y-18);
+    static const char *const turns[3]={"默认","扫除","仿真翻页"},*const turn_notes[3]={"无样式","从右到左","页折效果"};
+    unsigned turn=(ui->flags&PN_INPUT_TURN_MASK)>>6;
+    if(s==PN_OK)s=pn_w_segments(font,f,turns,turn_notes,3,turn>2?0:(int)turn,TURN_Y,92);
+    if(s==PN_OK)s=note(u,"翻页效果会增加刷新次数；默认无样式响应最快。",TURN_Y+138);
+    if(s==PN_OK && *u->message)s=note(u,u->message,TURN_Y+228);
     return s;
 }
 static pn_status_t draw_about(su_t *u){
@@ -116,7 +122,7 @@ static pn_status_t draw_about(su_t *u){
         {"存储卡",*u->about.storage?u->about.storage:"未读取到存储卡"},{"内部存储",*u->about.internal?u->about.internal:(u->state?"可用":"不可用")}};
     pn_w_card(f,ABOUT_Y,4);
     for(int i=0;i<4 && s==PN_OK;i++)s=pn_w_card_row(font,f,rows[i][0],rows[i][1],NULL,-1,0u,ABOUT_Y+i*ROW_H,i==3);
-    if(s==PN_OK)s=note(u,"阅读记录、书签与设置只保存在本机。设备信息按实际读取显示，读不到的项目不会显示猜测值。",ABOUT_Y+4*ROW_H+52);
+    if(s==PN_OK)s=note(u,"本固件使用 HarmonyOS Sans 字体。阅读记录、书签与设置只保存在本机。设备信息按实际读取显示。",ABOUT_Y+4*ROW_H+52);
     return s;
 }
 /* 设置中直接预览静态样式；无贴图、无动画或额外封面解码。/ Preview static styles in settings without textures, animation or extra cover decoding. */
@@ -224,6 +230,11 @@ pn_status_t pn_settings_ui_event(pn_settings_ui_t *ui,int command,pn_settings_pr
         if(next.columns!=ui->shelf.columns || next.style!=ui->shelf.style)status=commit_shelf(ui,u,next);
         pn_status_t shown=show(ui,present,ctx);return status==PN_OK?shown:status;
     }
+    if(command>=PN_SETUI_TURN && command<PN_SETUI_TURN+3){
+        uint8_t next=(uint8_t)((ui->flags&~PN_INPUT_TURN_MASK)|((unsigned)(command-PN_SETUI_TURN)<<6));
+        if(next!=ui->flags)status=commit(ui,u,next);
+        pn_status_t shown=show(ui,present,ctx);return status==PN_OK?shown:status;
+    }
     if(command==PN_SETUI_FULL_REFRESH)return show_profile(ui,present,ctx,PN_REFRESH_GC16);
     if(command>=PN_SETUI_LEVEL && command<PN_SETUI_LEVEL+3){
         uint8_t next=(uint8_t)((ui->flags&~PN_INPUT_REFRESH_MASK)|((unsigned)(command-PN_SETUI_LEVEL)<<4));
@@ -261,6 +272,7 @@ int pn_settings_ui_hit(const pn_settings_ui_t *ui,int x,int y){
     }
     if(u->screen==SCREEN_KEYS){if(y>=TOGGLE_Y && y<TOGGLE_Y+4*ROW_H)return PN_SETUI_TOGGLE+(y-TOGGLE_Y)/ROW_H;return -1;}
     if(u->screen==SCREEN_REFRESH){
+        int turn=pn_w_segments_hit(3,TURN_Y,92,x,y);if(turn>=0)return PN_SETUI_TURN+turn;
         static const int order[3]={1,0,2};
         int cell=pn_w_segments_hit(3,LEVEL_Y-6,LEVEL_H+12,x,y);if(cell>=0)return PN_SETUI_LEVEL+order[cell];
         if(y>=FULL_Y && y<FULL_Y+88)return PN_SETUI_FULL_REFRESH;

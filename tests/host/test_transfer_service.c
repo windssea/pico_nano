@@ -55,7 +55,7 @@ int main(void){
  assert(pn_transfer_service_execute(&service,&end,&reply)==PN_OK && reply.state.phase==PN_UPLOAD_COMMITTED);
  pn_transfer_command_t file={.operation=PN_TRANSFER_FILE,.request={.kind=PN_UPLOAD_BOOK}};strcpy(file.request.name,"one.txt");
  assert(pn_transfer_service_execute(&service,&file,&reply)==PN_OK && reply.has_file && reply.file_size==70000 && !memcmp(reply.file_digest.sha256,a.request.digest.sha256,32));assert(!pn_media_active(&media));
- char link[256];snprintf(link,sizeof link,"%s/books/link.txt",root);assert(symlink("/etc/passwd",link)==0);strcpy(file.request.name,"link.txt");unchanged(&service,&file,PN_INVALID);
+ char link[256];snprintf(link,sizeof link,"%s/piconano/books/link.txt",root);assert(symlink("/etc/passwd",link)==0);strcpy(file.request.name,"link.txt");unchanged(&service,&file,PN_INVALID);
  b.request.id[0]=3;strcpy(b.request.name,"lost.txt");
  assert(pn_transfer_service_execute(&service,&b,&reply)==PN_OK && pn_media_active(&media)==1);
  assert(pn_media_detach(&media)==PN_OK);unchanged(&service,&open,PN_STALE_MEDIA);

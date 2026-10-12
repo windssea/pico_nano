@@ -22,7 +22,8 @@ typedef enum {
     PN_LOCK_DEFAULT=0, ///< 固件内置黑白锁屏 / Built-in black-and-white lock screen
     PN_LOCK_CUSTOM=1, ///< 用户图片预处理位图 / Preprocessed user image bitmap
     PN_LOCK_SIMPLE=2, ///< 白底产品名与静态提示 / White background with product name and static hint
-    PN_LOCK_BOOK=3 ///< 当前/最近在读书封，可带内部位图 / Current/last-read book cover, optionally carrying an internal bitmap
+    PN_LOCK_BOOK=3, ///< 旧版书封记录 / Legacy book-cover record
+    PN_LOCK_MASK=4 ///< 阅读及锁屏透明PNG遮罩，源缺失回退 / Transparent PNG mask for reading and locking, falling back when absent
 } pn_lock_mode_t;
 /// 适配方式。/ Fit mode.
 typedef enum {
@@ -58,6 +59,27 @@ typedef struct {
 /// 超宽/超高图在铺满时缩放后单边超过4096返回LIMIT。/ Cover scaling past 4096 on one side returns LIMIT.
 pn_status_t pn_wallpaper_prepare(pn_pool_t *pool,pn_media_t *media,const pn_media_lease_t *lease,const char *path,
     pn_wallpaper_transform_t transform,size_t budget,pn_frame_t *out);
+/// 保留PNG灰度与透明度，错误不修改两个输出；不支持JPEG遮罩。
+/// Preserve PNG gray and alpha, leaving both outputs unchanged on errors; JPEG masks are unsupported.
+pn_status_t pn_wallpaper_mask_prepare(pn_pool_t *pool,pn_media_t *media,const pn_media_lease_t *lease,const char *path,
+    pn_wallpaper_transform_t transform,size_t budget,pn_frame_t *gray,pn_frame_t *alpha);
+/// 将已校验遮罩叠加到文字底图；只绘制，无文件或硬件操作。
+/// Composite a validated mask over a text underlay; drawing only, without file or hardware operations.
+pn_status_t pn_wallpaper_mask_render(const pn_frame_t *gray,const pn_frame_t *alpha,pn_frame_t *underlay);
+/// 解码一次的遮罩与最后成功呈现的文字底图缓存。/ A once-decoded mask and the last successfully presented text underlay.
+typedef struct {void *impl;} pn_wallpaper_mask_t; ///< 初始NULL，控制层拥有 / Initially NULL, owned by the controller
+/// 取得READ租约预处理，完成即释放；失效图片不留下活动缓存。
+/// Prepare under a READ lease, releasing it immediately; unusable images leave no live cache.
+pn_status_t pn_wallpaper_mask_open(pn_wallpaper_mask_t *mask,pn_pool_t *pool,pn_media_t *media,const pn_lock_selection_t *selection);
+/// 正文纯绘制回调，不解码或读取文件。/ Body drawing callback without decoding or reading files.
+pn_status_t pn_wallpaper_mask_paint(void *mask,pn_frame_t *frame);
+/// 正文推屏完成通知；失败保留上一次成功底图。/ Body presentation notification; failures retain the previous successful underlay.
+void pn_wallpaper_mask_complete(void *mask,const pn_frame_t *frame,bool shown);
+/// 拷贝最后成功的阅读画面供锁屏使用，不重复合成半透明像素。
+/// Copy the last successful reading image for locking without compositing semitransparent pixels twice.
+bool pn_wallpaper_mask_snapshot(const pn_wallpaper_mask_t *mask,pn_frame_t *frame);
+/// 幂等释放遮罩与底图。/ Idempotently release the mask and underlay.
+void pn_wallpaper_mask_close(pn_wallpaper_mask_t *mask);
 
 /// 绑定两槽，路径必须不同。/ Bind two distinct slot paths.
 pn_status_t pn_wallpaper_store_init(pn_wallpaper_store_t *store,pn_media_t *media,const char *a,const char *b);

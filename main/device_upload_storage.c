@@ -7,6 +7,7 @@
  */
 #define _POSIX_C_SOURCE 200809L
 #include "device_upload_storage.h"
+#include "pn_sd_layout.h"
 #include "read_pico_sd.h"
 #include "esp_vfs_fat.h"
 #include <fcntl.h>
@@ -59,9 +60,13 @@ static pn_status_t sync_directory(void *ctx,const char *path){
     if(!inside(s,path))return PN_INVALID;
     struct stat info;
     if(inspect(path,&info) || !S_ISDIR(info.st_mode))return PN_INVALID;
-    char folder[PN_UPLOAD_FILES_ROOT_MAX+16],marker[PN_UPLOAD_FILES_ROOT_MAX+32];
-    snprintf(folder,sizeof folder,"%s/.readpico",s->root);
-    if(inspect(folder,&info) || !S_ISDIR(info.st_mode))return PN_INVALID;
+    char folder[PN_UPLOAD_FILES_ROOT_MAX+64],marker[PN_UPLOAD_FILES_ROOT_MAX+96];
+    // 首次同步也可用于创建应用根；标记必须位于同一卷的固定私有目录，拒绝符号链接。
+    // The first sync can create the application root; the marker stays in its fixed private directory on the same volume, rejecting symlinks.
+    snprintf(folder,sizeof folder,"%s/" PN_SD_APP,s->root);
+    if(inspect(folder,&info)){if(errno!=ENOENT || mkdir(folder,0700))return PN_IO;}else if(!S_ISDIR(info.st_mode))return PN_INVALID;
+    snprintf(folder,sizeof folder,"%s/" PN_SD_PRIVATE,s->root);
+    if(inspect(folder,&info)){if(errno!=ENOENT || mkdir(folder,0700))return PN_IO;}else if(!S_ISDIR(info.st_mode))return PN_INVALID;
     snprintf(marker,sizeof marker,"%s/volume.sync",folder);
     if(inspect(marker,&info)==0){
         if(!S_ISREG(info.st_mode) || info.st_size<0 || info.st_size>1)return PN_CORRUPT;

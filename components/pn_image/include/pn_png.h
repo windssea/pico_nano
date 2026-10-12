@@ -27,3 +27,6 @@ pn_status_t pn_png_probe(const pn_image_input_t *input,pn_png_info_t *info);
 /// 校验到IEND及源EOF，拒绝尾随数据；错误可能改部分fb，调用方必须丢弃暂定帧。
 /// Verify through IEND and source EOF, rejecting trailing data; errors may change partial framebuffer data, requiring discard of the provisional frame.
 pn_status_t pn_png_draw(pn_pool_t *pool,const pn_image_input_t *input,pn_frame_t *frame,pn_image_rect_t rect,pn_png_info_t *info);
+/// 分别写4bpp原灰度与透明度（0透明、15不透明），不与背景合成；两帧尺寸必须相同。
+/// Write separate 4bpp raw gray and alpha (0 transparent, 15 opaque) planes without compositing; frame dimensions must match.
+pn_status_t pn_png_draw_planes(pn_pool_t *pool,const pn_image_input_t *input,pn_frame_t *gray,pn_frame_t *alpha,pn_image_rect_t rect,pn_png_info_t *info);

@@ -30,3 +30,5 @@ int pn_key_hit(int x,int y);
 pn_key_event_t pn_key_feed(pn_key_t *keys,unsigned count,int x,int y,bool valid,uint64_t now_ms,int *key);
 /// 取消当前按压直到完全释放。/ Cancel the current press until fully released.
 void pn_key_cancel(pn_key_t *keys);
+/// 管理页短按：左返回、中首页、右确认；长按/未知键不提交。/ Management short press: left Back, middle Home, right Confirm; no action on long/unknown keys.
+int pn_key_management_command(int key,pn_key_event_t event,int back,int confirm,int home);

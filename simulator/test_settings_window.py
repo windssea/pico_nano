@@ -18,4 +18,9 @@ with tempfile.TemporaryDirectory() as folder:
     # 子页：字体管理在给出--font-dir时打开。/ Sub-page: font management opens when --font-dir is given.
     # 字体管理返回设置页（不是书架），再返回才到书架。/ Back from font management returns to Settings, not the shelf; one more Back reaches the shelf.
     out=run('settings,tap:100:220,back,back,quit','--font-dir',str(fonts));assert 'settings closed request=3' in out and 'font_manage command=1 status=0 screen=0 active=0' in out and 'settings closed request=0' in out.split('font_manage command=1')[1],out
-print('settings window: switches persist across restarts, not-all-off refusal and sub-page jump passed')
+    # 新样式持久化并用于真实正文；锁屏热恢复不重新打开。/ Persist new styles and use real text; warm lock restore does not reopen.
+    out=run('settings,tap:100:700,tap:340:940,back,back,enter,next,previous,lock,lock,quit,quit')
+    assert 'settings command=27 status=0 flags=71' in out and 'lock_preview wake status=0' in out,out
+    out=run('settings,tap:100:700,tap:560:940,back,back,enter,next,previous,quit,quit')
+    assert 'settings command=28 status=0 flags=135' in out,out
+print('settings window: switches and turn styles persist, warm restore, not-all-off refusal and sub-page jump passed')

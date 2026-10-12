@@ -2,10 +2,10 @@
 # 先运行 py tools/dev.py sdl-run 生成Release二进制。 / Run `py tools/dev.py sdl-run` first to build the Release binary.
 # 用法 / Usage:  powershell -File tools\run_sim.ps1 [-Books DIR] [-Font TTF] [-FontDir DIR] [-WallpaperDir DIR]
 param(
-    [string]$Books = "build-dev/sim-library/books",
+    [string]$Books = "build-dev/sim-library/piconano/books",
     [string]$Font = "",
-    [string]$FontDir = "build-dev/sim-library/fonts",
-    [string]$WallpaperDir = "build-dev/sim-library/wallpapers",
+    [string]$FontDir = "build-dev/sim-library/piconano/fonts",
+    [string]$WallpaperDir = "build-dev/sim-library/piconano/wallpapers",
     [string]$Script = ""
 )
 $root = Split-Path -Parent $PSScriptRoot

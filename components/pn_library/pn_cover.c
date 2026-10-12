@@ -101,8 +101,9 @@ static bool sidecar(const char *path,size_t index,char out[PN_CATALOG_PATH_MAX])
 static bool cover_candidate(const char *path,size_t index,char out[PN_CATALOG_PATH_MAX]){
     if(index>=SUFFIXES)return sidecar(path,index-SUFFIXES,out);
     const char *slash=strrchr(path,'/');if(!slash)return false;
-    const char *folder=slash;while(folder>path && folder[-1]!='/')folder--;
-    if((size_t)(slash-folder)!=strlen(PN_SD_BOOKS) || memcmp(folder,PN_SD_BOOKS,strlen(PN_SD_BOOKS)))return false;
+    size_t folder_size=strlen(PN_SD_BOOKS);if((size_t)(slash-path)<folder_size)return false;
+    const char *folder=slash-folder_size;
+    if((folder>path && folder[-1]!='/') || memcmp(folder,PN_SD_BOOKS,folder_size))return false;
     const char *name=slash+1,*dot=strrchr(name,'.');size_t stem=dot?(size_t)(dot-name):strlen(name);
     int n=snprintf(out,PN_CATALOG_PATH_MAX,"%.*s%s/%.*s%s",(int)(folder-path),path,PN_SD_COVERS,(int)stem,name,suffixes[index]);
     return n>=0 && n<PN_CATALOG_PATH_MAX;

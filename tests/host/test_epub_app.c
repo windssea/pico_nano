@@ -28,6 +28,11 @@ int main(int argc,char **argv){
     assert(pn_epub_app_fallback_font(&app,argv[3])==PN_OK);
     uint64_t mark_id;assert(pn_epub_app_bookmark_add(&app,"未显示",&mark_id)==PN_EMPTY);
     screen.fail=false;assert(pn_epub_app_step(&app,PN_APP_OPEN,now++,present,&screen)==PN_OK && pn_epub_app_progress(&app,&first)==PN_OK);uint64_t first_hash=screen.hash;assert(pn_epub_app_bookmark_add(&app,"第一页",&mark_id)==PN_OK && mark_id==1);
+    assert(pn_epub_app_suspend(&app,now++)==PN_OK && app.impl);
+    assert(pn_epub_app_resume(&app,now++,present,&screen)==PN_OK && screen.hash==first_hash && pn_epub_app_progress(&app,&current)==PN_OK && same(&first,&current));
+    assert(pn_epub_app_suspend(&app,now++)==PN_OK);
+    screen.fail=true;assert(pn_epub_app_resume(&app,now++,present,&screen)==PN_IO && pn_epub_app_progress(&app,&current)==PN_OK && same(&first,&current));
+    screen.fail=false;assert(pn_epub_app_suspend(&app,now++)==PN_OK && pn_epub_app_resume(&app,now++,present,&screen)==PN_OK);
     screen.fail=true;assert(pn_epub_app_step(&app,PN_APP_NEXT,now++,present,&screen)==PN_IO && pn_epub_app_progress(&app,&current)==PN_OK && same(&first,&current));
     screen.fail=false;assert(pn_epub_app_step(&app,PN_APP_NEXT,now++,present,&screen)==PN_OK && pn_epub_app_progress(&app,&current)==PN_OK && !same(&first,&current) && screen.hash!=first_hash);
     screen.fail=true;assert(pn_epub_app_bookmark_jump(&app,mark_id,now++,present,&screen)==PN_IO && !pn_epub_app_bookmark_can_return(&app) && pn_epub_app_progress(&app,&after)==PN_OK && same(&current,&after));

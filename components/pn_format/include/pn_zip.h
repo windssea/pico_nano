@@ -26,6 +26,8 @@ pn_status_t pn_zip_open(pn_zip_t *zip,pn_pool_t *pool,const pn_text_source_t *so
 pn_status_t pn_zip_close(pn_zip_t *zip);
 /// 验证目录数量或0。/ Validated entry count or zero.
 size_t pn_zip_count(const pn_zip_t *zip);
+/// 只验证源的介质代次，不为句柄校验读取条目名称。/ Validate source media generation without reading entry names for a handle check.
+pn_status_t pn_zip_validate(pn_zip_t *zip);
 /// 精确查找，EMPTY为不存在；错误不改index。/ Exact lookup, EMPTY if absent; preserve index on errors.
 pn_status_t pn_zip_find(pn_zip_t *zip,const char *path,uint32_t *index);
 /// 返回当前代条目，错误不改输出。/ Get current-generation entry, preserving output on errors.

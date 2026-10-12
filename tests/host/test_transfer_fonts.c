@@ -17,10 +17,10 @@ static pn_status_t directory_sync(void *ctx,const char *path){
  return failed?PN_IO:PN_OK;
 }
 static void write_file(const char *root,const char *name,size_t size,char fill){
- char path[512];snprintf(path,sizeof path,"%s/fonts/%s",root,name);
+ char path[512];snprintf(path,sizeof path,"%s/piconano/fonts/%s",root,name);
  FILE *file=fopen(path,"wb");assert(file);for(size_t i=0;i<size;i++)assert(fputc(fill,file)==fill);assert(fclose(file)==0);
 }
-static bool exists(const char *root,const char *name){char path[512];struct stat info;snprintf(path,sizeof path,"%s/fonts/%s",root,name);return lstat(path,&info)==0;}
+static bool exists(const char *root,const char *name){char path[512];struct stat info;snprintf(path,sizeof path,"%s/piconano/fonts/%s",root,name);return lstat(path,&info)==0;}
 static pn_status_t list(pn_transfer_service_t *service,const char *cursor,pn_transfer_reply_t *reply){
  pn_transfer_command_t command={.operation=PN_TRANSFER_LIST,.request={.kind=PN_UPLOAD_FONT}};snprintf(command.request.name,sizeof command.request.name,"%s",cursor);
  return pn_transfer_service_execute(service,&command,reply);
@@ -31,7 +31,7 @@ static pn_transfer_command_t deletion(const char *name,size_t size,char fill){
  uint8_t *bytes=malloc(size);assert(bytes);memset(bytes,fill,size);assert(pn_identity_bytes(bytes,size,&command.old_digest)==PN_OK);free(bytes);return command;
 }
 int main(void){
- char root[]="/tmp/pn-transfer-fonts-XXXXXX";assert(mkdtemp(root));
+ char root[]="/tmp/pn-transfer-fonts-XXXXXX";assert(mkdtemp(root));char app_root[512];snprintf(app_root,sizeof app_root,"%s/piconano",root);assert(mkdir(app_root,0700)==0);
  pn_pool_t pool;assert(pn_pool_init(&pool,6u*1024u*1024u,NULL,NULL,NULL)==PN_OK);
  pn_media_t media;pn_media_init(&media);assert(pn_media_attach(&media,123)==PN_OK);
  pn_upload_files_options_t options={.root=root,.sync_directory=directory_sync};pn_transfer_service_t service={0};
@@ -39,7 +39,7 @@ int main(void){
  pn_transfer_reply_t reply;memset(&reply,0,sizeof reply);
  /* 目录尚不存在：空列表而不是错误。/ A missing directory is an empty list, not an error. */
  assert(list(&service,"",&reply)==PN_OK && reply.has_list && !reply.count && !reply.more && !pn_media_active(&media));
- char fonts[512];snprintf(fonts,sizeof fonts,"%s/fonts",root);assert(mkdir(fonts,0700)==0);
+ char fonts[512];snprintf(fonts,sizeof fonts,"%s/piconano/fonts",root);assert(mkdir(fonts,0700)==0);
  /* 十个字体及应被忽略的条目。/ Ten fonts plus entries that must be ignored. */
  for(int i=0;i<10;i++){char name[32];snprintf(name,sizeof name,"font-%02d.ttf",i);write_file(root,name,100u+(size_t)i,'a');}
  write_file(root,".hidden.ttf",5,'x');write_file(root,"notes.txt",5,'x');write_file(root,"中文字体.ttf",321,'z');
@@ -63,7 +63,7 @@ int main(void){
  pn_transfer_command_t no_digest=del;memset(&no_digest.old_digest,0,sizeof no_digest.old_digest);assert(pn_transfer_service_execute(&service,&no_digest,&reply)==PN_INVALID);
  pn_transfer_command_t book=del;book.request.kind=PN_UPLOAD_BOOK;assert(pn_transfer_service_execute(&service,&book,&reply)==PN_INVALID);
  pn_transfer_command_t missing=deletion("absent.ttf",10,'a');assert(pn_transfer_service_execute(&service,&missing,&reply)==PN_EMPTY);
- pn_transfer_command_t traversal=del;strcpy(traversal.request.name,"../fonts/font-03.ttf");assert(pn_transfer_service_execute(&service,&traversal,&reply)==PN_INVALID);
+ pn_transfer_command_t traversal=del;strcpy(traversal.request.name,"../piconano/fonts/font-03.ttf");assert(pn_transfer_service_execute(&service,&traversal,&reply)==PN_INVALID);
  pn_transfer_command_t not_regular=deletion("dir.ttf",103,'a');assert(pn_transfer_service_execute(&service,&not_regular,&reply)==PN_INVALID && exists(root,"dir.ttf"));
  pn_transfer_command_t link=deletion("link.ttf",103,'a');assert(pn_transfer_service_execute(&service,&link,&reply)==PN_INVALID && exists(root,"link.ttf"));
  /* 身份变化（长度或内容）拒绝删除并保留文件。/ A changed identity (length or content) refuses deletion and keeps the file. */

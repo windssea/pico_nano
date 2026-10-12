@@ -127,6 +127,9 @@ def main():
     reading = json.loads((ROOT / "LICENSES/reading-font-manifest.json").read_text(encoding="utf8"))
     if reading["source_sha256"] != font_manifest["source_sha256"] or reading["license"] != "OFL-1.1" or reading["ofl_sha256"] != font_manifest["ofl_sha256"] or hashlib.sha256((ROOT / "assets/fonts/read-pico-reading.ttf").read_bytes()).hexdigest() != reading["output_sha256"]:
         errors.append("Reading font source/license/hash differs")
+    harmony = json.loads((ROOT / "LICENSES/harmony-font-manifest.json").read_text(encoding="utf8"))
+    if hashlib.sha256((ROOT / harmony["file"]).read_bytes()).hexdigest() != harmony["source_sha256"] or hashlib.sha256((ROOT / "assets/fonts/HarmonyOS_Sans_LICENSE.txt").read_bytes()).hexdigest() != harmony["license_sha256"] or harmony["modified"]:
+        errors.append("HarmonyOS original font/license/hash differs")
     fixture = json.loads((ROOT / "LICENSES/font-fixture-manifest.json").read_text(encoding="utf8"))
     if fixture["source_sha256"] != font_manifest["source_sha256"] or fixture["license"] != "OFL-1.1" or hashlib.sha256((ROOT / "tests/fixtures/font-fallback.ttf").read_bytes()).hexdigest() != fixture["output_sha256"]:
         errors.append("Fallback fixture source/license/hash differs")

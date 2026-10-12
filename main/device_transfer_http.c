@@ -8,6 +8,8 @@
 #define _POSIX_C_SOURCE 200809L
 #include "pn_brand.h"
 #include "device_transfer_http.h"
+#include "pn_localsend_json.h"
+#include "device_ls_discovery.h"
 #include "transfer_assets.h"
 #include "esp_http_server.h"
 #include "esp_httpd_priv.h"
@@ -23,6 +25,7 @@
 #include <math.h>
 #include <errno.h>
 #include <sys/socket.h>
+#include <netinet/in.h>
 typedef struct {
  pn_transfer_worker_t *worker;
  httpd_handle_t server;
@@ -32,6 +35,9 @@ typedef struct {
  unsigned failures;
  bool closing;
  const pn_device_network_sink_t *network;
+ pn_pool_t ls_pool;pn_ls_session_t ls;char fingerprint[33];uint16_t port; ///< 单HTTP owner的LocalSend会话 / LocalSend session owned by the single HTTP task
+ pn_device_ls_discovery_t discovery; ///< 生命周期先于HTTP上下文结束 / Ends before the HTTP context is released
+ pn_ls_request_t ls_request;pn_ls_snapshot_t ls_snapshot;pn_ls_grants_t ls_grants; ///< 串行复用PSRAM模型，避免撑满HTTP任务栈 / Serially reused PSRAM models avoid exhausting the HTTP task stack
  uint8_t bytes[PN_UPLOAD_CHUNK+1];
 } http_t;
 static const char *const messages[]={"成功","输入参数无效","资源正在使用或同名文件已存在","没有找到该文件或上传会话","空间、配额或大小超过限制","内存不足，请稍后重试","存储介质已失效","文件身份已经变化","上传已取消","暂不支持此格式","摘要或文件格式校验失败","读写失败，请重新查询后续传"};
@@ -167,11 +173,89 @@ static bool query_parse(const char *query,const char *const *keys,size_t n,char 
  }
  return true;
 }
+static pn_status_t ls_entropy(void *ctx,uint8_t *out,size_t n){(void)ctx;esp_fill_random(out,n);return PN_OK;}
+static void *ls_allocate(void *ctx,size_t n){(void)ctx;return heap_caps_malloc(n,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);}
+static void ls_release(void *ctx,void *p){(void)ctx;heap_caps_free(p);}
+static bool ls_peer(httpd_req_t *r,pn_ls_peer_t *peer){
+ struct sockaddr_storage address;socklen_t length=sizeof address;memset(peer,0,sizeof *peer);
+ if(getpeername(httpd_req_to_sockfd(r),(struct sockaddr *)&address,&length))return false;
+ if(address.ss_family==AF_INET){peer->family=4;memcpy(peer->address,&((struct sockaddr_in *)&address)->sin_addr,4);return true;}
+ if(address.ss_family==AF_INET6){peer->family=6;memcpy(peer->address,&((struct sockaddr_in6 *)&address)->sin6_addr,16);return true;}return false;
+}
+static esp_err_t ls_info(http_t *s,httpd_req_t *r){
+ cJSON *json=cJSON_CreateObject();bool valid=string(json,"alias",PN_BRAND_NAME);valid&=string(json,"version","2.2");valid&=string(json,"deviceModel",PN_BRAND_NAME);valid&=string(json,"deviceType","headless");
+ valid&=string(json,"fingerprint",s->fingerprint);valid&=string(json,"protocol","http");valid&=number(json,"port",s->port);valid&=boolean(json,"download",false);return json_send(r,200,json,valid);
+}
+typedef struct {http_t *server;httpd_req_t *request;uint64_t received,started;} ls_stream_t;
+static pn_status_t ls_execute(void *ctx,const pn_transfer_command_t *command,pn_transfer_reply_t *reply){return pn_transfer_worker_execute(((http_t *)ctx)->worker,command,reply);}
+static pn_status_t ls_read(void *ctx,uint8_t *out,size_t cap,size_t *n){
+ ls_stream_t *stream=ctx;http_t *s=stream->server;*n=0;
+ if(is_closing(s))return PN_CANCELLED;
+ if(stream->received==stream->request->content_len){pn_status_t done=pn_ls_body_done(&s->ls,now_ms());return done==PN_OK?PN_EMPTY:done;}
+ uint64_t now=now_ms();if(now<stream->started || now-stream->started>=PN_LS_TRANSFER_MS)return PN_CANCELLED;
+ size_t remaining=stream->request->content_len-(size_t)stream->received;if(cap>remaining)cap=remaining;
+ int got=httpd_req_recv(stream->request,(char *)out,cap);if(got<=0 || (size_t)got>cap)return PN_IO;
+ stream->received+=(size_t)got;*n=(size_t)got;return pn_ls_progress(&s->ls,stream->received,now_ms());
+}
+static esp_err_t ls_dispatch(http_t *s,httpd_req_t *r,unsigned presence){
+ // Native LocalSend uses peer/session grants; browser requests retain their separate pairing contract.
+ // 原生LocalSend使用连接来源与会话授权；浏览器仍走独立配对契约。
+ if(is_closing(s))return error(r,503,"传输服务已停止");
+ if(presence&2u)return error(r,403,"LocalSend仅接受原生客户端");
+ const char *uri=r->uri;pn_ls_peer_t peer;if(!ls_peer(r,&peer))return error(r,403,"无法确认连接来源");
+ (void)pn_ls_poll(&s->ls,now_ms());
+ bool info=r->method==HTTP_GET && !strcmp(uri,"/api/localsend/v2/info");
+ bool registration=r->method==HTTP_POST && !strcmp(uri,"/api/localsend/v2/register");
+ bool prepare=r->method==HTTP_POST && !strcmp(uri,"/api/localsend/v2/prepare-upload");
+ if(info){if(r->content_len)return error(r,400,"无效正文");return ls_info(s,r);}
+ if(registration || prepare){
+  char length[32],type[64];uint64_t parsed;
+  if(!header(r,"Content-Length",length,sizeof length) || !decimal(length,PN_LS_JSON_MAX,&parsed) || parsed!=r->content_len || !parsed || !header(r,"Content-Type",type,sizeof type) || (strcasecmp(type,"application/json") && strcasecmp(type,"application/json; charset=utf-8")))return error(r,400,"无效元数据");
+  uint64_t started=now_ms();size_t at=0;
+  while(at<r->content_len){if(is_closing(s) || now_ms()-started>=PN_LS_IDLE_MS)return error(r,408,"元数据接收超时");int got=httpd_req_recv(r,(char *)s->bytes+at,r->content_len-at);if(got<=0 || (size_t)got>r->content_len-at)return error(r,400,"元数据不完整");at+=(size_t)got;}
+  if(registration){s->bytes[at]=0;if(!json_guard(s->bytes,at))return error(r,400,"无效元数据");cJSON *j=cJSON_ParseWithLengthOpts((char *)s->bytes,at+1,NULL,true);bool valid=cJSON_IsObject(j) && get_string(j,"fingerprint") && get_string(j,"version");cJSON_Delete(j);return valid?ls_info(s,r):error(r,400,"无效设备信息");}
+  pn_ls_request_t *request=&s->ls_request;pn_status_t status=pn_ls_parse_prepare(&s->ls_pool,s->bytes,at,request);
+  if(status==PN_OK)status=pn_ls_prepare(&s->ls,&peer,request,now_ms());
+  if(status!=PN_OK)return error(r,status==PN_BUSY?409:400,"接收请求未能建立");
+  pn_ls_snapshot_t *snapshot=&s->ls_snapshot;status=pn_ls_snapshot(&s->ls,snapshot);pn_ls_choice_t choices[PN_LS_FILES_MAX]={0};size_t accepted=0;
+  if(status==PN_OK)for(size_t i=0;i<request->count;i++){
+   // 用户开启接收模式即授权书籍/字体自动接收；图片须通过网页明确指定封面或壁纸。
+   // Entering receive mode authorizes book/font auto-acceptance; images require an explicit cover/wallpaper category on the web page.
+   choices[i].accept=snapshot->request.files[i].kind==PN_UPLOAD_BOOK || snapshot->request.files[i].kind==PN_UPLOAD_FONT;accepted+=choices[i].accept;
+  }
+  if(status==PN_OK)status=pn_ls_decide(&s->ls,snapshot->generation,choices,now_ms());
+  if(status!=PN_OK || !accepted)return error(r,403,"图片请在网页选择封面或壁纸");
+  char reply[PN_LS_REPLY_MAX];size_t written=0;
+  status=pn_ls_grants(&s->ls,&s->ls_grants,now_ms());if(status==PN_OK)status=pn_ls_encode_grants(&s->ls_pool,&s->ls_grants,reply,sizeof reply,&written);
+  return status==PN_OK?send_data(r,200,"application/json",reply,written):error(r,503,"接收授权不可用");
+ }
+ if(r->method!=HTTP_POST)return error(r,404,"未知LocalSend操作");
+ const char *query=strchr(uri,'?');size_t route_len=query?(size_t)(query-uri):strlen(uri);char values[3][PN_UPLOAD_NAME_MAX];unsigned seen=0;
+ const char *keys[]={"sessionId","fileId","token"};
+ if(!query_parse(query,keys,3,values,&seen))return error(r,400,"无效会话参数");
+ if(route_len==strlen("/api/localsend/v2/cancel") && !strncmp(uri,"/api/localsend/v2/cancel",route_len)){
+  if(seen!=1u || r->content_len)return error(r,400,"无效取消请求");
+  pn_status_t status=pn_ls_cancel_peer(&s->ls,&peer,values[0],now_ms());return status==PN_OK?send_data(r,200,"text/plain","",0):error(r,403,"无效会话来源");
+ }
+ if(route_len!=strlen("/api/localsend/v2/upload") || strncmp(uri,"/api/localsend/v2/upload",route_len))return error(r,404,"未知LocalSend操作");
+ if(seen!=7u)return error(r,400,"缺少会话参数");
+ pn_upload_request_t request;pn_status_t status=pn_ls_authorize(&s->ls,&peer,values[0],values[1],values[2],now_ms(),&request);
+ if(status!=PN_OK)return error(r,status==PN_BUSY?409:403,"无效文件授权");
+ char length[32];uint64_t parsed;
+ if(!header(r,"Content-Length",length,sizeof length) || !decimal(length,512u*1024u*1024u,&parsed) || parsed!=request.size || parsed!=r->content_len){(void)pn_ls_cancel(&s->ls,now_ms());return error(r,400,"文件长度不匹配");}
+ ls_stream_t stream={s,r,0,now_ms()};pn_transfer_receive_result_t receipt;
+ status=pn_transfer_receive(&s->ls_pool,ls_execute,s,&request,ls_read,&stream,&receipt);pn_status_t finished=pn_ls_finish(&s->ls,&receipt,now_ms());
+ if(status==PN_OK && finished==PN_OK && receipt.committed)return send_data(r,200,"text/plain","",0);
+ return error(r,status==PN_CORRUPT?422:status==PN_BUSY?409:503,"文件未确认安装，请重试或关闭传输");
+}
 static esp_err_t dispatch(httpd_req_t *r){
  http_t *s=r->user_ctx;char host[64],origin[80],authorization[64];
+ if(strlen(r->uri)>1024)return error(r,400,"请求地址过长");
  unsigned presence=0;
  if(!unique_headers(r,&presence))return error(r,400,"请求头重复或无效");
- if(!header(r,"Host",host,sizeof host) || strcmp(host,s->authority))return error(r,403,"传输地址不匹配");
+ bool localsend=!strncmp(r->uri,"/api/localsend/v2/",18);char host_port[72];snprintf(host_port,sizeof host_port,"%s:%u",s->authority,s->port);
+ if(!header(r,"Host",host,sizeof host) || (strcmp(host,s->authority) && (!localsend || strcmp(host,host_port))))return error(r,403,"传输地址不匹配");
+ if(localsend)return ls_dispatch(s,r,presence);
  bool has_origin=(presence&2u)!=0;bool valid_origin=header(r,"Origin",origin,sizeof origin);
  if((has_origin && (!valid_origin || strcmp(origin,s->origin))) || (r->method!=HTTP_GET && !has_origin))return error(r,403,"请求来源不匹配");
  lock(s);bool closing=s->closing;bool authorized=false;
@@ -276,14 +360,18 @@ pn_status_t pn_device_transfer_http_open(pn_device_transfer_http_t *out,pn_trans
  pn_transfer_worker_state_t state;if(pn_transfer_worker_state(worker,&state)!=PN_OK || state.phase!=PN_TWORK_ACTIVE)return PN_BUSY;
  http_t *s=heap_caps_malloc(sizeof *s,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);if(!s)return PN_NO_MEMORY;memset(s,0,sizeof *s);s->worker=worker;strcpy(s->authority,authority);snprintf(s->origin,sizeof s->origin,"http://%s",authority);
  s->auth=xSemaphoreCreateMutex();if(!s->auth){heap_caps_free(s);return PN_NO_MEMORY;}
+ s->port=port;uint8_t fingerprint[16];esp_fill_random(fingerprint,sizeof fingerprint);encode(fingerprint,16,s->fingerprint);
+ if(pn_pool_init(&s->ls_pool,128u*1024u,ls_allocate,ls_release,NULL)!=0 || pn_ls_session_open(&s->ls,&s->ls_pool,ls_entropy,NULL)!=PN_OK){vSemaphoreDelete(s->auth);heap_caps_free(s);return PN_NO_MEMORY;}
  uint32_t value;do{esp_fill_random(&value,sizeof value);}while(value>=UINT32_MAX-UINT32_MAX%1000000u);snprintf(s->pin,sizeof s->pin,"%06u",(unsigned)(value%1000000u));uint8_t token[16];esp_fill_random(token,16);encode(token,16,s->token);s->created=now_ms();
  httpd_config_t cfg=HTTPD_DEFAULT_CONFIG();cfg.server_port=port;cfg.ctrl_port=32768;cfg.stack_size=16384;cfg.max_req_hdr_len=2048;cfg.max_uri_len=1024;cfg.max_open_sockets=4;cfg.max_uri_handlers=4;cfg.max_resp_headers=6;cfg.recv_wait_timeout=10;cfg.send_wait_timeout=10;cfg.uri_match_fn=httpd_uri_match_wildcard;
  cfg.global_user_ctx=s;cfg.global_user_ctx_free_fn=keep_context;cfg.open_fn=opened;
  esp_err_t result=httpd_start(&s->server,&cfg);out->impl=s;
  if(result==ESP_OK){const int methods[]={HTTP_GET,HTTP_POST,HTTP_PUT,HTTP_DELETE};for(unsigned i=0;i<4;i++){httpd_uri_t uri={.uri="/*",.method=methods[i],.handler=dispatch,.user_ctx=s};result=httpd_register_uri_handler(s->server,&uri);if(result!=ESP_OK)break;}}
- if(result!=ESP_OK){(void)pn_device_transfer_http_request_stop(out);if(s->server && httpd_stop(s->server)!=ESP_OK)return PN_IO;vSemaphoreDelete(s->auth);heap_caps_free(s);out->impl=NULL;return PN_IO;}
+ if(result!=ESP_OK){(void)pn_device_transfer_http_request_stop(out);if(s->server && httpd_stop(s->server)!=ESP_OK)return PN_IO;(void)pn_ls_stop_after_join(&s->ls);(void)pn_ls_session_close(&s->ls);vSemaphoreDelete(s->auth);heap_caps_free(s);out->impl=NULL;return PN_IO;}
+ char address[64];snprintf(address,sizeof address,"%s",authority);char *colon=strchr(address,':');if(colon)*colon=0;
+ pn_status_t discovery=pn_device_ls_discovery_open(&s->discovery,address,port,s->fingerprint);if(discovery!=PN_OK){(void)pn_device_transfer_http_close(out);return discovery;}
  return PN_OK;
 }
 pn_status_t pn_device_transfer_http_code(pn_device_transfer_http_t *out,char code[7]){if(!out || !out->impl || !code)return PN_INVALID;http_t *s=out->impl;lock(s);pn_status_t status=s->closing?PN_CANCELLED:PN_OK;if(status==PN_OK)memcpy(code,s->pin,7);unlock(s);return status;}
 pn_status_t pn_device_transfer_http_request_stop(pn_device_transfer_http_t *out){if(!out || !out->impl)return PN_INVALID;http_t *s=out->impl;lock(s);s->closing=true;memset(s->token,0,sizeof s->token);unlock(s);return pn_transfer_worker_request_stop(s->worker);}
-pn_status_t pn_device_transfer_http_close(pn_device_transfer_http_t *out){if(!out)return PN_INVALID;if(!out->impl)return PN_OK;http_t *s=out->impl;(void)pn_device_transfer_http_request_stop(out);if(s->server && httpd_stop(s->server)!=ESP_OK)return PN_IO;vSemaphoreDelete(s->auth);heap_caps_free(s);out->impl=NULL;return PN_OK;}
+pn_status_t pn_device_transfer_http_close(pn_device_transfer_http_t *out){if(!out)return PN_INVALID;if(!out->impl)return PN_OK;http_t *s=out->impl;(void)pn_device_transfer_http_request_stop(out);pn_status_t discovery=pn_device_ls_discovery_close(&s->discovery);if(discovery!=PN_OK)return discovery;if(s->server && httpd_stop(s->server)!=ESP_OK)return PN_IO;(void)pn_ls_stop_after_join(&s->ls);(void)pn_ls_session_close(&s->ls);vSemaphoreDelete(s->auth);heap_caps_free(s);out->impl=NULL;return PN_OK;}

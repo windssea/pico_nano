@@ -29,7 +29,7 @@ int main(void){
     assert(length>0 && (size_t)length<sizeof json);
     pn_ls_request_t metadata;assert(pn_ls_parse_prepare(&pool,(const uint8_t *)json,(size_t)length,&metadata)==PN_OK);
     assert(pn_ls_prepare(&session,&peer,&metadata,0)==PN_OK);
-    char path[256];snprintf(path,sizeof path,"%s/books/received.txt",root);assert(access(path,F_OK)!=0);
+    char path[256];snprintf(path,sizeof path,"%s/piconano/books/received.txt",root);assert(access(path,F_OK)!=0);
     pn_ls_choice_t choices[PN_LS_FILES_MAX]={{.accept=true}};assert(pn_ls_decide(&session,1,choices,1)==PN_OK);
     pn_ls_grants_t grants;assert(pn_ls_grants(&session,&grants,2)==PN_OK);
     pn_upload_request_t request;assert(pn_ls_authorize(&session,&peer,grants.session_id,grants.files[0].id,grants.files[0].token,3,&request)==PN_OK);

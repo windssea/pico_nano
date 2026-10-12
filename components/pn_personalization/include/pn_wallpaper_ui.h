@@ -23,6 +23,7 @@
 #define PN_WUI_APPLY 11
 #define PN_WUI_CANCEL 12
 #define PN_WUI_BOOK 13
+#define PN_WUI_MASK 14
 #define PN_WUI_ROW 16
 typedef pn_status_t (*pn_wallpaper_present_fn)(void *,const pn_frame_t *,pn_refresh_t); ///< 与阅读呈现回调同签名 / Same signature as reader presentation callbacks
 /// 页面：列表或预览。/ Screen: list or preview.
@@ -41,9 +42,6 @@ typedef struct {
 /// Borrows pool, holding about two full frames plus a quarter-size preview; preprocessing is capped by the remaining pool.
 pn_status_t pn_wallpaper_ui_open(pn_wallpaper_ui_t *ui,pn_pool_t *pool,pn_media_t *images_media,const char *directory,
     const pn_wallpaper_store_t *store,pn_wallpaper_present_fn present,void *ctx);
-/// 提供当前/最近在读书快照与XML盐，复制模型；仅列表状态可更新，NULL清除候选。
-/// Supply a current/last-read book snapshot and XML salt, copying the model; update only on the list screen, NULL clears the candidate.
-pn_status_t pn_wallpaper_ui_book_source(pn_wallpaper_ui_t *ui,const pn_catalog_item_t *book,const uint8_t salt[16]);
 /// 处理一个命令（PN_WUI_*或ROW+i）并重绘。/ Handle one command (PN_WUI_* or ROW+i) and repaint.
 pn_status_t pn_wallpaper_ui_event(pn_wallpaper_ui_t *ui,int command,pn_wallpaper_present_fn present,void *ctx);
 /// 重画当前模型。/ Repaint the current model.

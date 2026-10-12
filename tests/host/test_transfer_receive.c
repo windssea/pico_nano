@@ -39,7 +39,7 @@ static pn_status_t read_input(void *ctx,uint8_t *out,size_t cap,size_t *n){
     memcpy(out,in->bytes+in->offset,take);in->offset+=take;*n=take;return PN_OK;
 }
 static pn_upload_request_t request(unsigned id,const char *name,size_t size){pn_upload_request_t r={.kind=PN_UPLOAD_BOOK,.size=size};r.id[0]=(uint8_t)id;strcpy(r.name,name);return r;}
-static void absent(const char *root,const char *name){char path[384];snprintf(path,sizeof path,"%s/books/%s",root,name);assert(access(path,F_OK)!=0);}
+static void absent(const char *root,const char *name){char path[384];snprintf(path,sizeof path,"%s/piconano/books/%s",root,name);assert(access(path,F_OK)!=0);}
 int main(int argc,char **argv){
     assert(argc==4);
     char root[]="/tmp/pn-receive-XXXXXX";assert(mkdtemp(root));
@@ -51,7 +51,7 @@ int main(int argc,char **argv){
     pn_upload_request_t r=request(1,"no-hash.txt",size);input_t input={.service=&service,.bytes=bytes,.size=size,.compete=true};pn_transfer_receive_result_t result;
     assert(pn_transfer_receive(&pool,execute,&service,&r,read_input,&input,&result)==PN_OK);
     assert(result.committed && !memcmp(result.digest.sha256,expected.sha256,32));
-    char path[384];snprintf(path,sizeof path,"%s/books/no-hash.txt",root);FILE *file=fopen(path,"rb");assert(file);uint8_t *copy=malloc(size);assert(copy && fread(copy,1,size,file)==size && !memcmp(copy,bytes,size));assert(!fclose(file));free(copy);
+    char path[384];snprintf(path,sizeof path,"%s/piconano/books/no-hash.txt",root);FILE *file=fopen(path,"rb");assert(file);uint8_t *copy=malloc(size);assert(copy && fread(copy,1,size,file)==size && !memcmp(copy,bytes,size));assert(!fclose(file));free(copy);
     r=request(2,"known.txt",size);r.has_digest=true;r.digest=expected;input=(input_t){.service=&service,.bytes=bytes,.size=size};
     assert(pn_transfer_receive(&pool,execute,&service,&r,read_input,&input,&result)==PN_OK && result.committed);
     r=request(3,"wrong.txt",size);r.has_digest=true;r.digest=expected;r.digest.sha256[0]^=1;input=(input_t){.service=&service,.bytes=bytes,.size=size};

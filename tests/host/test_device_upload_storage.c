@@ -44,7 +44,7 @@ int main(void){
  fail_space=true;free_bytes=17;assert(options.space_free(options.ctx,root,&free_bytes)==PN_IO && free_bytes==17);fail_space=false;
  uint64_t ack=0;assert(pn_upload_chunk(&upload,0,text,sizeof(text)-1,&request.digest,&ack)==PN_OK && ack==sizeof(text)-1);
  assert(pn_upload_complete(&upload,&request.digest)==PN_OK && space_calls>0);
- char marker[256];snprintf(marker,sizeof marker,"%s/.readpico/volume.sync",root);struct stat info;assert(stat(marker,&info)==0 && info.st_size==1);
+ char marker[256];snprintf(marker,sizeof marker,"%s/piconano/.readpico/volume.sync",root);struct stat info;assert(stat(marker,&info)==0 && info.st_size==1);
  FILE *stream=fopen(marker,"wb");assert(stream);assert(fwrite("foreign",1,7,stream)==7);assert(fclose(stream)==0);
  assert(options.sync_directory(options.ctx,root)==PN_CORRUPT);
  lose_during_space=true;free_bytes=17;assert(options.space_free(options.ctx,root,&free_bytes)==PN_STALE_MEDIA && free_bytes==17);lose_during_space=false;mounted=true;

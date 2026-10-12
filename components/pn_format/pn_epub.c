@@ -280,7 +280,7 @@ pn_status_t pn_epub_open(pn_epub_t *epub,pn_pool_t *pool,pn_zip_t *zip,const uin
 }
 static pn_status_t validate(pn_epub_t *epub,epub_t **book){
     if(!epub || !epub->impl)return PN_INVALID;
-    epub_t *b=epub->impl;pn_zip_info_t info;pn_status_t status=pn_zip_info(b->zip,0,&info);
+    epub_t *b=epub->impl;pn_status_t status=pn_zip_validate(b->zip);
     if(status==PN_OK)*book=b;
     return status;
 }

@@ -8,6 +8,8 @@
  */
 #pragma once
 #include <stdbool.h>
-/// 等电源键松开后浅睡，直到PMU确认按键唤醒；唤醒源配置失败返回false，调用方继续轮询解锁。
-/// Light-sleep after the power key is released until the PMU confirms a key wake; returns false if the wake source cannot be armed, so callers keep polling to unlock.
+/// 等电源键松开后浅睡，直到PMU确认按键唤醒；唤醒源配置失败或唤醒按键未空闲返回false，调用方继续轮询解锁。
+/// Light-sleep after the power key is released until the PMU confirms a key wake; returns false if the wake source cannot be armed or the wake key does not become idle, so callers keep polling to unlock.
 bool pn_device_sleep_until_key(void);
+/// 浅睡期间没有非电源唤醒/失败；调用方仍须校验挂载与租约。/ No non-power wake/failure during light sleep; caller must still validate mount and leases.
+bool pn_device_sleep_media_unchanged(void);

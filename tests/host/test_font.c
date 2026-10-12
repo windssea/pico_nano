@@ -10,12 +10,14 @@
 #include <assert.h>
 #include <limits.h>
 #include <stdio.h>
+#include <string.h>
+#include "pn_font_chain.h"
 static pn_status_t check_source(void *ctx){return *(bool *)ctx?PN_OK:PN_STALE_MEDIA;}
 int main(void){
     pn_pool_t pool;assert(pn_pool_init(&pool,1024*1024,NULL,NULL,NULL)==0);
     pn_font_t font={0};pn_text_source_t source=pn_font_builtin_source();
     assert(pn_font_open(&font,&pool,&source,44)==PN_OK);
-    pn_font_info_t info={0};assert(pn_font_info(&font,&info)==PN_OK && info.glyphs>1000 && info.family[0] && info.weight<=1000 && !info.variable);
+    pn_font_info_t info={0};assert(pn_font_info(&font,&info)==PN_OK && !strcmp(info.family,"HarmonyOS Sans") && info.glyphs>800 && info.weight<=1000 && !info.variable);
     int32_t latin,chinese;assert(pn_font_advance(&font,'W',&latin)==PN_OK && latin>0);
     assert(pn_font_advance(&font,0x4e2d,&chinese)==PN_OK && chinese>0);
     int ascent,descent;assert(pn_font_vertical(&font,&ascent,&descent)==PN_OK && ascent>0 && descent>=0);
@@ -45,5 +47,18 @@ int main(void){
     pn_font_close(&g);assert(!guarded_pool.used && !guarded_pool.live);
     pn_pool_t tiny;assert(pn_pool_init(&tiny,64,NULL,NULL,NULL)==0);font=(pn_font_t){0};
     assert(pn_font_open(&font,&tiny,&source,44)==PN_NO_MEMORY && !tiny.live);
+    // 默认正文须度量并绘制ASCII X与设备指南中的“曈”，不是仅有cmap记录。/ The resident body font must measure and rasterize ASCII X and guide character U+66C8, beyond cmap presence.
+    pn_pool_t resident_pool;assert(!pn_pool_init(&resident_pool,1024*1024,NULL,NULL,NULL));pn_font_t resident={0};
+    pn_text_source_t reading=pn_font_reading_source();assert(pn_font_open(&resident,&resident_pool,&reading,44)==PN_OK);
+    assert(pn_font_info(&resident,&info)==PN_OK && !strcmp(info.family,"HarmonyOS Sans"));
+    pn_font_chain_t chain={0};assert(pn_font_chain_init(&chain,&resident_pool,&resident,NULL)==PN_OK);
+    const uint32_t coverage[]={'X','x',0x66c8};
+    for(unsigned i=0;i<sizeof coverage/sizeof coverage[0];i++){
+        assert(pn_font_chain_advance(&chain,coverage[i],&latin)==PN_OK && latin>0);
+        pn_frame_clear(&frame,15);assert(pn_font_chain_draw(&chain,&frame,coverage[i],10*64,60,PN_FONT_GRAY)==PN_OK);
+        ink=0;for(int y=0;y<100;y++)for(int x=0;x<100;x++)ink+=pn_frame_get(&frame,x,y)<15;
+        assert(ink>0);
+    }
+    pn_font_chain_clear(&chain);pn_font_close(&resident);assert(!resident_pool.live && !resident_pool.used);
     printf("font: native metrics, gray/binary rendering, clipping and %zu allocation faults passed\n",requests);return 0;
 }

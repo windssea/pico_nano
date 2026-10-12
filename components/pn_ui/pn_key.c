@@ -6,6 +6,10 @@
  * 冻结：只依赖坐标与时间，不做硬件访问。/ Frozen: coordinates and time only, no hardware access.
  */
 #include "pn_key.h"
+int pn_key_management_command(int key,pn_key_event_t event,int back,int confirm,int home){
+    if(event!=PN_KEY_SHORT)return -1;
+    return key==PN_KEY_1?back:key==PN_KEY_2?home:key==PN_KEY_3?confirm:-1;
+}
 #include <stddef.h>
 int pn_key_hit(int x,int y){
     if(y<PN_KEY_AREA_TOP || x<0)return -1;

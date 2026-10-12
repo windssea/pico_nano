@@ -4,6 +4,8 @@
 
 ## 准备与显示确认
 
+TXT展示进度与续读锚点分开：页脚、跳转面板和最近阅读以页首字节估算进度，但已确认页覆盖文件末尾时显示100%。pn_reader_app_percent只读取已确认页，不把候选页或失败呈现当成完成；pn_reader_app_progress仍返回页首字节用于保存和恢复，避免下次打开跳到EOF空页。回到前一页后按它的锚点重新计算。此规则不代表提前建立完整页表或精确页数。
+
 pn_reader使用调用方提供的source、字体度量和glyph缓冲，不分配，不负责文件开关或光栅。init传非零session/generation；跨会话必须使用不同的单调session，所有source/metrics/buffer/save在调用期间保持有效；owner串行调用。
 
 prepare只生成当前page和receipt，不更改visible或save。receipt含owner/token/ticket/意图/完整源锚点；有pending时再次prepare返回BUSY。complete只接收准确receipt；错误对象/票号/锚点/重复确认拒绝；旧token返回STALE_JOB，当前显示失败返回IO。成功且source仍有效才更新visible；保存策略只接受这时的位置。源失效不提交旧卡结果。

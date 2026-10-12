@@ -13,6 +13,7 @@ enum EpdDrawError {EPD_DRAW_SUCCESS=0,EPD_DRAW_FAILURE=1,EPD_DRAW_EMPTY_LINE_QUE
 void read_pico_epd_set_pclk(int);
 esp_err_t read_pico_init(read_pico_handle_t *);void read_pico_deinit(read_pico_handle_t *);
 esp_err_t read_pico_sd_get_info(read_pico_sd_info_t *);esp_err_t read_pico_sd_remount(void);
+void read_pico_clear_ioe_int(void);
 esp_err_t cst836u_read(void *,cst836u_touch_t *);
 void epd_set_vcom(uint16_t);void epd_draw_pixel(int,int,uint8_t,uint8_t *);void read_pico_epd_use_scan(int);
 void epd_poweron(void);void epd_poweroff(void);void epd_clear(void);
