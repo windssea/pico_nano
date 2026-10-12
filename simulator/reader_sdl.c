@@ -6,6 +6,7 @@
  * 冻结：ARGB为主机开销；关闭保存失败时留在窗口，不模拟面板性能。
  * Frozen: ARGB is host overhead; retain window on save failure; no simulated panel-performance claims.
  */
+#include "pn_brand.h"
 #include "pn_reader_app.h"
 #include "pn_reader_input.h"
 #include <SDL.h>
@@ -27,7 +28,7 @@ static pn_status_t present(void *ctx,const pn_frame_t *frame,pn_refresh_t profil
 static void report(pn_reader_app_t *app,const char *action,pn_status_t status){pn_txt_progress_t p;if(pn_reader_app_progress(app,&p)==PN_OK)printf("reader_event action=%s status=%d offset=%llu\n",action,(int)status,(unsigned long long)p.source_offset);}
 int pn_sim_reader_window(pn_reader_app_t *app,pn_pool_t *pool){
     if(SDL_Init(SDL_INIT_VIDEO)!=0){fprintf(stderr,"SDL: %s\n",SDL_GetError());return 1;}
-    surface_t s={0};s.window=SDL_CreateWindow("小纸 Pico",SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,342,608,SDL_WINDOW_RESIZABLE);
+    surface_t s={0};s.window=SDL_CreateWindow(PN_BRAND_NAME,SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,342,608,SDL_WINDOW_RESIZABLE);
     s.renderer=s.window?SDL_CreateRenderer(s.window,-1,SDL_RENDERER_SOFTWARE):NULL;
     s.texture=s.renderer?SDL_CreateTexture(s.renderer,SDL_PIXELFORMAT_ARGB8888,SDL_TEXTUREACCESS_STATIC,684,1216):NULL;if(s.texture)(void)SDL_SetTextureScaleMode(s.texture,SDL_ScaleModeLinear); /* 半尺寸窗口用线性缩放 / Linear scaling for the half-size window */
     s.argb=s.texture?malloc(684u*1216u*sizeof(uint32_t)):NULL;
@@ -36,12 +37,13 @@ int pn_sim_reader_window(pn_reader_app_t *app,pn_pool_t *pool){
     if(running){pn_status_t status=pn_reader_app_step(app,PN_APP_OPEN,SDL_GetTicks64(),present,&s);report(app,"open",status);if(status!=PN_OK){result=1;running=false;}else script_init(&script,"PN_SIM_INPUT_SCRIPT");}
     while(running){
         script_queue(&script);SDL_Event event;bool got=SDL_WaitEventTimeout(&event,100)!=0;uint64_t now=SDL_GetTicks64();
-        pn_status_t tick=pn_reader_app_tick(app,now);if(tick!=PN_OK && tick!=PN_BUSY)SDL_SetWindowTitle(s.window,"小纸 Pico - 保存失败，关闭前请重试");
+        pn_status_t tick=pn_reader_app_tick(app,now);if(tick!=PN_OK && tick!=PN_BUSY)SDL_SetWindowTitle(s.window,PN_BRAND_NAME " - 保存失败，关闭前请重试");
         if(bookmarks.mode!=PN_BUI_CLOSED && !bookmarks.presented && now-ui_retry>=1000){ui_retry=now;(void)pn_bookmark_ui_present(&bookmarks,present,&s);}
+        // 页面请求不等待下一次输入，空闲轮询也完成导航。/ Navigation requests complete during idle polling without waiting for another input.
+        if(styles.request_fonts){styles.request_fonts=false;pn_status_t opened=pn_font_ui_open(&fonts,pool,app,NULL,NULL,present,&s);pn_font_ui_return_to(&fonts,pn_style_ui_render,&styles);printf("font_ui open status=%d active=%d\n",opened,fonts.active);}
         if(!got)continue;
         script_received(&script,&event);
-        if(styles.request_fonts){styles.request_fonts=false;pn_status_t opened=pn_font_ui_open(&fonts,pool,app,NULL,NULL,present,&s);printf("font_ui open status=%d active=%d\n",opened,fonts.active);}
-        if(font_modal(&fonts,&event,now,present,&s,&tap,&font_pointer)){if(!fonts.active){pn_font_ui_close(&fonts);if(styles.active)(void)pn_style_ui_present(&styles,present,&s);}continue;}
+        if(font_modal(&fonts,&event,now,present,&s,&tap,&font_pointer)){if(!fonts.active){bool returned=fonts.return_presented;pn_font_ui_close(&fonts);if(styles.active){if(returned){styles.presented=true;styles.preview=false;}else (void)pn_style_ui_present(&styles,present,&s);}}continue;}
 
         if(styles.active){
             if(!styles.presented && now-ui_retry>=1000){ui_retry=now;(void)pn_style_ui_present(&styles,present,&s);}
@@ -55,7 +57,7 @@ int pn_sim_reader_window(pn_reader_app_t *app,pn_pool_t *pool){
         if(event.type==SDL_QUIT || (event.type==SDL_KEYDOWN && event.key.keysym.sym==SDLK_ESCAPE)){
             pn_status_t closed=pn_reader_app_close(app,now);printf("reader_close status=%d\n",(int)closed);
             if(closed==PN_OK || !app->impl){if(closed!=PN_OK)result=1;running=false;}
-            else SDL_SetWindowTitle(s.window,"小纸 Pico - 保存失败，按退出键重试");
+            else SDL_SetWindowTitle(s.window,PN_BRAND_NAME " - 保存失败，按退出键重试");
             continue;
         }
         pn_reader_action_t action=PN_APP_OPEN;const char *name=NULL;
@@ -95,7 +97,7 @@ int pn_sim_reader_window(pn_reader_app_t *app,pn_pool_t *pool){
             int ignored;pn_reader_input_cancel(&input);(void)pn_tap_feed(&tap,1,-1,false,&ignored);
         }
         if(name){if(event.type==SDL_KEYDOWN && input.down)pn_reader_input_cancel(&input);pn_status_t status=pn_reader_app_step(app,action,now,present,&s);report(app,name,status);
-            SDL_SetWindowTitle(s.window,status==PN_OK?"小纸 Pico":status==PN_EMPTY?"小纸 Pico - 已到首尾或字号范围边界":"小纸 Pico - 操作失败");
+            SDL_SetWindowTitle(s.window,status==PN_OK?PN_BRAND_NAME:status==PN_EMPTY?PN_BRAND_NAME " - 已到首尾或字号范围边界":PN_BRAND_NAME " - 操作失败");
         }else if(event.type==SDL_WINDOWEVENT && event.window.event==SDL_WINDOWEVENT_SIZE_CHANGED){
             if(SDL_RenderClear(s.renderer)!=0 || SDL_RenderCopy(s.renderer,s.texture,NULL,NULL)!=0){result=1;running=false;}else SDL_RenderPresent(s.renderer);
         }

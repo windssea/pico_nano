@@ -26,16 +26,16 @@ with tempfile.TemporaryDirectory() as folder:
     cache = root / "covers"
     cover_args = [sys.argv[1], "--library", str(books), "--state-dir", str(root / "cover-state"), "--cover-cache", str(cache)]
     covered = subprocess.run(cover_args,
-        env=dict(os.environ, SDL_VIDEODRIVER="dummy", PN_SIM_LIBRARY_SCRIPT="wait:1500,quit"),
+        env=dict(os.environ, SDL_VIDEODRIVER="dummy", PN_SIM_LIBRARY_SCRIPT="library,wait:1500,quit"),
         capture_output=True, text=True, timeout=60)
     assert covered.returncode == 0 and "covers ready=1 status=0" in covered.stdout, (covered.stdout, covered.stderr)
     assert "used=0 live=0" in covered.stdout, covered.stdout
     assert len(list(cache.glob("*.pnc"))) == 1
-    warm = subprocess.run(cover_args, env=dict(os.environ, SDL_VIDEODRIVER="dummy", PN_SIM_LIBRARY_SCRIPT="wait:300,quit"),
+    warm = subprocess.run(cover_args, env=dict(os.environ, SDL_VIDEODRIVER="dummy", PN_SIM_LIBRARY_SCRIPT="library,wait:300,quit"),
         capture_output=True, text=True, timeout=60)
     assert warm.returncode == 0 and "covers ready=" not in warm.stdout and "used=0 live=0" in warm.stdout, (warm.stdout, warm.stderr)
     result = subprocess.run([sys.argv[1], "--library", str(books), "--state-dir", str(root / "state")],
-        env=dict(os.environ, SDL_VIDEODRIVER="dummy", PN_SIM_LIBRARY_SCRIPT="tap:100:500,next,back,quit"),
+        env=dict(os.environ, SDL_VIDEODRIVER="dummy", PN_SIM_LIBRARY_SCRIPT="library,tap:100:500,next,back,quit"),
         capture_output=True, text=True, timeout=60)
     assert result.returncode == 0, (result.stdout, result.stderr)
     assert "library_open name=large.epub" in result.stdout, (result.stdout, result.stderr)
@@ -47,7 +47,7 @@ with tempfile.TemporaryDirectory() as folder:
     bad.mkdir()
     (bad / "broken.epub").write_bytes(b"not a ZIP")
     result = subprocess.run([sys.argv[1], "--library", str(bad), "--state-dir", str(root / "bad-state")],
-        env=dict(os.environ, SDL_VIDEODRIVER="dummy", PN_SIM_LIBRARY_SCRIPT="tap:100:500,quit"),
+        env=dict(os.environ, SDL_VIDEODRIVER="dummy", PN_SIM_LIBRARY_SCRIPT="library,tap:100:500,quit"),
         capture_output=True, text=True, timeout=60)
     assert result.returncode == 0 and "shelf_open_failed status=" in result.stdout and "notice=1" in result.stdout, (result.stdout, result.stderr)
     assert "used=0 live=0" in result.stdout, result.stdout

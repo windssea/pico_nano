@@ -6,7 +6,7 @@ with tempfile.TemporaryDirectory() as folder:
     source=pathlib.Path(__file__).resolve().parents[1]/'assets'/'fonts'/'read-pico-ui.ttf'
     shutil.copy(source,fonts/'a-ui.ttf');shutil.copy(source,fonts/'b-copy.ttf')
     def run(script,*extra):
-        r=subprocess.run([sys.argv[1],'--library',str(books),'--state-dir',str(state),*extra],env=dict(os.environ,SDL_VIDEODRIVER='dummy',PN_SIM_LIBRARY_SCRIPT=script),capture_output=True,text=True,timeout=120)
+        r=subprocess.run([sys.argv[1],'--library',str(books),'--state-dir',str(state),*extra],env=dict(os.environ,SDL_VIDEODRIVER='dummy',PN_SIM_LIBRARY_SCRIPT="library,"+script),capture_output=True,text=True,timeout=120)
         assert r.returncode==0,(r.stdout,r.stderr)
         assert 'used=0 live=0' in r.stdout,r.stdout
         return r.stdout

@@ -17,6 +17,8 @@
 #define PN_BA_CONFIRM 5 ///< 确认删除文件 / Confirm deleting the file
 typedef struct {
     pn_catalog_item_t item; ///< 操作对象 / The book acted on
+    char title[512]; ///< 验证作品名，空串回退文件名 / Verified title; empty falls back to filename
+    char author[512]; ///< 验证作者，可为空 / Verified author, possibly empty
     bool favorite; ///< 当前是否已收藏 / Currently a favorite
     bool favorites_known; ///< 收藏状态可读 / Favorite state is readable
     bool confirming; ///< 正在确认删除 / Confirming deletion

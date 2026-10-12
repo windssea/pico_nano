@@ -8,6 +8,13 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 IDF_IMAGE = "espressif/idf:v6.1@sha256:81893c71bb5e570088901f21def8684c25cd2a9020281bd01b843a7655edb18c"
 
 
+def prepare_console():
+    """管道/终端统一UTF-8，避免Node符号使GBK控制台报错。 / Use UTF-8 for pipes/terminals so Node symbols cannot break a GBK console."""
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
+
 def run(command, docker, log, container_image=IDF_IMAGE):
     if docker:
         command = ["docker", "run", "--rm", "--mount", f"type=bind,source={ROOT},target=/work",
@@ -25,8 +32,9 @@ def run(command, docker, log, container_image=IDF_IMAGE):
 
 
 def main():
+    prepare_console()
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["host", "sim", "firmware-ci", "firmware-board", "factory-data", "sdl", "docs", "epub-sample", "sdl-run", "installer"])
+    parser.add_argument("action", choices=["host", "sim", "firmware-ci", "firmware-board", "factory-data", "sdl", "docs", "epub-sample", "sdl-run", "installer", "local-samples"])
     parser.add_argument("--native", action="store_true", help="Use installed tools instead of the pinned IDF container")
     parser.add_argument("--archive", type=pathlib.Path, help="Local EPUB inside the workspace for epub-sample")
     parser.add_argument("--all-resources", action="store_true", help="Compare every ZIP resource for epub-sample")
@@ -55,6 +63,15 @@ def main():
             sample.append("--all")
         commands = [["cmake", "-S", "tests/host", "-B", "build-host", "-G", "Ninja", "-DPN_SANITIZERS=ON"],
                     ["cmake", "--build", "build-host", "--target", "zip_dump"], sample]
+    elif args.action == "local-samples":
+        # 私人样本单独复跑，不作为公共CI依赖，不烧写。/ Private samples run separately from public CI, without flashing.
+        container_image = "pico-nano-sdl:dev"
+        commands = [["cmake", "-S", "tests/host", "-B", "build-host", "-G", "Ninja", "-DPN_SANITIZERS=ON"],
+                    ["cmake", "--build", "build-host", "--target", "font_probe", "zip_dump"],
+                    ["cmake", "-S", "simulator", "-B", "build-sim-sdl-idf", "-G", "Ninja", "-DPN_SIM_SDL=ON", "-DPN_SANITIZERS=ON"],
+                    ["cmake", "--build", "build-sim-sdl-idf"],
+                    ["python3" if docker else sys.executable, "tools/make_sim_library.py"],
+                    ["python3" if docker else sys.executable, "tools/test_local_samples.py", "--sim", "build-sim-sdl-idf/pn_sim", "--probe", "build-host/font_probe", "--zip-binary", "build-host/zip_dump"]]
     elif args.action == "docs":
         commands = [[sys.executable, "tools/check_docs.py"]]
         docker = False
@@ -100,6 +117,9 @@ def main():
         status = run(command, docker, logs / f"{args.action}-{index}.log", container_image)
         if status:
             return status
+    if args.action == "host":
+        # 浏览器异步行为用实际网页源与Node验证，独立于容器的Python/C运行时。/ Verify browser async behavior against actual page source in Node, independently of container Python/C runtimes.
+        return run(["node", "--test", "tests/tools/test_transfer_resources.mjs"], False, logs / "host-web.log")
     return 0
 
 

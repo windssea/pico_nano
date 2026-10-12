@@ -12,7 +12,10 @@ set(ui_font_c ${CMAKE_CURRENT_BINARY_DIR}/pn_ui_font.c)
 add_custom_command(OUTPUT ${ui_font_c} COMMAND ${Python3_EXECUTABLE} ${PN_ROOT}/tools/embed_binary.py ${PN_ROOT}/assets/fonts/read-pico-ui.ttf ${ui_font_c} DEPENDS ${PN_ROOT}/tools/embed_binary.py ${PN_ROOT}/assets/fonts/read-pico-ui.ttf VERBATIM)
 set(reading_font_c ${CMAKE_CURRENT_BINARY_DIR}/pn_reading_font.c)
 add_custom_command(OUTPUT ${reading_font_c} COMMAND ${Python3_EXECUTABLE} ${PN_ROOT}/tools/embed_binary.py ${PN_ROOT}/assets/fonts/read-pico-reading.ttf ${reading_font_c} pn_reading_font DEPENDS ${PN_ROOT}/tools/embed_binary.py ${PN_ROOT}/assets/fonts/read-pico-reading.ttf VERBATIM)
-add_library(pn_core STATIC ${ui_font_c} ${reading_font_c}
+set(brand_image_c ${CMAKE_CURRENT_BINARY_DIR}/pn_brand_logo.c)
+add_custom_command(OUTPUT ${brand_image_c} COMMAND ${Python3_EXECUTABLE} ${PN_ROOT}/tools/build_brand_image.py ${PN_ROOT}/assets/image/logo.png ${brand_image_c} --report ${CMAKE_CURRENT_BINARY_DIR}/pn_brand_logo.json DEPENDS ${PN_ROOT}/tools/build_brand_image.py ${PN_ROOT}/assets/image/logo.png VERBATIM)
+add_library(pn_core STATIC ${ui_font_c} ${reading_font_c} ${brand_image_c}
+    ${PN_ROOT}/components/pn_personalization/pn_brand_image.c
     ${PN_ROOT}/components/pn_qr/pn_qr.c
     ${PN_ROOT}/components/pn_qr/vendor/qrcodegen.c
     ${PN_ROOT}/components/pn_reader/pn_transfer_view.c
@@ -77,6 +80,7 @@ add_library(pn_core STATIC ${ui_font_c} ${reading_font_c}
     ${PN_ROOT}/components/pn_storage/pn_favorites.c
     ${PN_ROOT}/components/pn_storage/pn_network_store.c
     ${PN_ROOT}/components/pn_storage/pn_input_prefs.c
+    ${PN_ROOT}/components/pn_storage/pn_shelf_prefs.c
     ${PN_ROOT}/components/pn_storage/pn_identity.c
     ${PN_ROOT}/components/pn_storage/pn_progress.c
     ${PN_ROOT}/components/pn_storage/pn_epub_progress.c

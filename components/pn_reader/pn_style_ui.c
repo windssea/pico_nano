@@ -7,6 +7,7 @@
  * Frozen: changes enter drafts first; write failures never dismiss the UI.
  */
 #define _POSIX_C_SOURCE 200809L
+#include "pn_brand.h"
 #include "pn_style_ui.h"
 #include <stdio.h>
 #include <string.h>
@@ -118,7 +119,7 @@ static pn_status_t paint_main(pn_style_ui_t *u,pn_font_t *font,pn_frame_t *frame
     pn_font_t *body=body_font(u);
     pn_w_set_fallback(body);
     if(s==PN_OK)s=pn_font_size(font,28);
-    if(s==PN_OK)s=pn_w_text_ex(font,frame,name,200,FONT_ROW_Y+52,390,PN_ALIGN_RIGHT,PN_UI_MUTED,false);
+    if(s==PN_OK)s=pn_w_text_ex(font,frame,pn_brand_label(name),200,FONT_ROW_Y+52,390,PN_ALIGN_RIGHT,PN_UI_MUTED,false);
     pn_w_set_fallback(NULL);
     pn_w_icon(frame,PN_ICON_CHEVRON,PN_UI_WIDTH-PN_UI_MARGIN-28,FONT_ROW_Y+28,28,PN_UI_INK);
     pn_frame_rect(frame,PN_UI_MARGIN,FONT_ROW_Y+81,620,1,PN_UI_SELECT);
@@ -142,8 +143,8 @@ static pn_status_t paint_more(pn_style_ui_t *u,pn_font_t *font,pn_frame_t *frame
     if(s==PN_OK)s=pn_w_text_lines_ex(font,frame,"字距按字号的百分比计算。清残影是每隔几页做一次整屏刷新，数字越小越干净、闪屏越多。",PN_UI_MARGIN,MORE_STEP_Y0+2*STEP_PITCH+40,620,4,38,PN_UI_MUTED,false);
     return s;
 }
-static pn_status_t paint(void *ctx,pn_font_t *font,pn_font_t *metadata,pn_frame_t *frame){
-    (void)metadata;pn_style_ui_t *u=ctx;pn_frame_clear(frame,PN_UI_PAPER);
+pn_status_t pn_style_ui_render(void *ctx,pn_font_t *font,pn_font_t *metadata,pn_frame_t *frame){
+    (void)metadata;pn_style_ui_t *u=ctx;if(!live(u) || !u->active || !font || !font->impl || !frame || !frame->pixels)return PN_INVALID;pn_frame_clear(frame,PN_UI_PAPER);
     int original=font->pixels;
     pn_status_t s=pn_w_header(font,frame,"< 返回",u->more?"字距与清残影":"排版设置",NULL);
     if(s==PN_OK && !u->more){s=pn_font_size(font,26);if(s==PN_OK)s=pn_w_text_ex(font,frame,"恢复默认",480,100,172,PN_ALIGN_RIGHT,PN_UI_MUTED,false);}
@@ -156,7 +157,7 @@ static pn_status_t paint(void *ctx,pn_font_t *font,pn_font_t *metadata,pn_frame_
 }
 pn_status_t pn_style_ui_present(pn_style_ui_t *u,pn_reader_present_fn present,void *ctx){
     if(!u || !u->active || !live(u))return PN_INVALID;
-    u->preview=false;u->presented=false;pn_status_t status=overlay(u,paint,present,ctx);u->presented=status==PN_OK;return status;
+    u->preview=false;u->presented=false;pn_status_t status=overlay(u,pn_style_ui_render,present,ctx);u->presented=status==PN_OK;return status;
 }
 pn_status_t pn_style_ui_open(pn_style_ui_t *u,pn_reader_app_t *reader,pn_reader_present_fn present,void *ctx){
     if(!u || !reader || !reader->impl)return PN_INVALID;

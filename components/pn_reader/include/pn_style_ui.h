@@ -39,6 +39,8 @@ pn_status_t pn_style_ui_open(pn_style_ui_t *ui,pn_reader_app_t *reader,pn_reader
 pn_status_t pn_style_ui_event(pn_style_ui_t *ui,int command,uint64_t now,pn_reader_present_fn present,void *ctx);
 /// 仅重画当前草稿，不自动应用。/ Repaint the draft only without automatic application.
 pn_status_t pn_style_ui_present(pn_style_ui_t *ui,pn_reader_present_fn present,void *ctx);
+/// 只绘制当前草稿，供字体事务合成最终目标页；不推屏、不写配置。/ Paint the current draft for a font transaction destination, without presenting or writing settings.
+pn_status_t pn_style_ui_render(void *,pn_font_t *,pn_font_t *,pn_frame_t *);
 /// 同源坐标命中，空白-1。/ Shared coordinate hits, or -1 for blanks.
 int pn_style_ui_hit(const pn_style_ui_t *ui,int x,int y);
 /// 离书/锁屏清暂存界面，配置提交仍由reader负责。

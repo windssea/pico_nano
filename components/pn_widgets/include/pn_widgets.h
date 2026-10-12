@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  * 中文：各页面共用的绘制控件与设计令牌（对应docs/UI_UX.md第1节）；只绘制，不读写存储或硬件。
  * English: drawing widgets and design tokens shared by all pages (docs/UI_UX.md section 1); drawing only, never touching storage or hardware.
- * 冻结：坐标为684×1216逻辑像素；文字只用常驻UI字体；缺字画方框而不是跳过。
- * Frozen: coordinates are 684×1216 logical pixels; text uses the resident UI font only; missing glyphs draw a box instead of being skipped.
+ * 冻结：坐标为684×1216逻辑像素；界面字体固定，动态名称可使用控制层准备的系统补字；仍缺则画方框。
+ * Frozen: coordinates are 684×1216 logical pixels; UI font stays fixed, dynamic labels can use system fallback prepared by controllers; remaining missing glyphs draw a box.
  */
 #pragma once
 #include "pn_font.h"
@@ -36,12 +36,28 @@ typedef enum {PN_ALIGN_LEFT=0,PN_ALIGN_CENTER,PN_ALIGN_RIGHT} pn_align_t;
 typedef enum {
     PN_ICON_SEARCH=0,PN_ICON_GRID,PN_ICON_LIST,PN_ICON_BACK,PN_ICON_CHEVRON,PN_ICON_SHELF,PN_ICON_TRANSFER,PN_ICON_SETTINGS,
     PN_ICON_TOC,PN_ICON_BOOKMARK,PN_ICON_TYPESET,PN_ICON_REFRESH,PN_ICON_CLOSE,PN_ICON_PLUS,PN_ICON_MINUS,PN_ICON_ARROW,
-    PN_ICON_FONT,PN_ICON_IMAGE,PN_ICON_LOCK,PN_ICON_TRASH,PN_ICON_CHECK,PN_ICON_WIFI,PN_ICON_MORE,PN_ICON_IMPORT,PN_ICON_PROGRESS,PN_ICON_COUNT
+    PN_ICON_FONT,PN_ICON_IMAGE,PN_ICON_LOCK,PN_ICON_TRASH,PN_ICON_CHECK,PN_ICON_WIFI,PN_ICON_MORE,PN_ICON_IMPORT,PN_ICON_PROGRESS,PN_ICON_HOME,PN_ICON_COUNT
 } pn_icon_t;
+
+/// 四个一级页使用同源导航。/ Four root pages share navigation.
+typedef enum {PN_NAV_HOME=0,PN_NAV_LIBRARY,PN_NAV_TRANSFER,PN_NAV_SETTINGS} pn_navigation_t;
+/// 只绘制；字号恢复；命中返回0..3或-1。/ Drawing only; restores font size; hits return 0..3 or -1.
+pn_status_t pn_w_navigation(pn_font_t *font,pn_frame_t *frame,pn_navigation_t active);
+int pn_w_navigation_hit(int x,int y);
 
 /// 设置备用字体（例如用户的阅读字体）：主UI字体缺字时用同字号画它的字形；NULL取消。字体对象须在取消前保持有效。
 /// Set a fallback font (e.g. the user's reading font) used at the same size when the UI font lacks a glyph; NULL clears it. The font must outlive its use.
 void pn_w_set_fallback(pn_font_t *font);
+/// 控制层持有的界面补字作用域；初始全零，禁止复制活动对象。/ Controller-owned UI glyph scope; initially zero, never copy a live object.
+typedef struct {
+    pn_font_t resident; ///< 内置中文引擎，必要时初始化 / Resident Chinese engine, initialized when needed
+    pn_font_t *previous_system,*previous_external; ///< 嵌套前的借用字体 / Borrowed fonts before nesting
+    bool active; ///< 已建立作用域 / Scope established
+} pn_w_font_scope_t;
+/// 绘制前由控制层准备：固定内置中文先于外置补字，不读取外置文件。/ Prepare in the controller before drawing: resident Chinese precedes external fallback; no external files are opened.
+pn_status_t pn_w_font_scope_begin(pn_w_font_scope_t *scope,pn_pool_t *pool,pn_font_t *external);
+/// 恢复外层借用并释放本次引擎，幂等。/ Restore outer borrowing and release this engine idempotently.
+void pn_w_font_scope_end(pn_w_font_scope_t *scope);
 /// 以当前字号量一行文字的像素宽度；缺字按一个字号宽计。
 /// Measure one line in pixels at the current size; missing glyphs count as one em.
 pn_status_t pn_w_text_width(pn_font_t *font,const char *utf8,int *width);

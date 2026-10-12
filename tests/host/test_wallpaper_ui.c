@@ -1,5 +1,6 @@
 /* 壁纸设置页：列表/预览/调整/应用/重开/失败路径。/ Wallpaper settings: list/preview/adjust/apply/reopen/failure paths. */
 #include "pn_wallpaper_ui.h"
+#include <unistd.h>
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -62,6 +63,24 @@ int main(int argc,char **argv){
     assert(pn_wallpaper_ui_event(&ui,PN_WUI_BOOK,present,NULL)==PN_OK && ui.screen==PN_WUI_PREVIEW && pn_wallpaper_ui_hit(&ui,100,700)==-1);
     assert(pn_wallpaper_ui_event(&ui,PN_WUI_APPLY,present,NULL)==PN_OK && pn_wallpaper_ui_current(&ui,&cur) && cur.mode==PN_LOCK_BOOK && cur.hint && !cur.source[0]);
     pn_wallpaper_ui_close(&ui);
+    /* 真实TXT侧车封面预览/取消/应用，缺卡后从内部缓存复现。/ Preview/cancel/apply a real TXT sidecar cover, then reproduce the internal cache without the card. */
+    pn_catalog_item_t book={.format=PN_BOOK_TXT};snprintf(book.path,sizeof book.path,"%s/book.txt",images);strcpy(book.name,"book.txt");
+    FILE *source=fopen(book.path,"wb");assert(source && fputs("Reading cover cache test\n",source)>=0 && fclose(source)==0);
+    char cover_path[1200],copy_path[1200];snprintf(cover_path,sizeof cover_path,"%s/book.png",images);snprintf(copy_path,sizeof copy_path,"%s/b-photo.png",images);
+    FILE *input=fopen(copy_path,"rb"),*output=fopen(cover_path,"wb");assert(input && output);int byte;while((byte=fgetc(input))!=EOF)assert(fputc(byte,output)==byte);assert(fclose(input)==0 && fclose(output)==0);
+    assert(pn_media_acquire(&sd,PN_MEDIA_READ,&lease)==PN_OK);assert(pn_identity_file(&sd,&lease,book.path,1024,&book.expected)==PN_OK);assert(pn_media_release(&sd,&lease)==PN_OK);book.identified=true;uint8_t salt[16]={0};
+    assert(pn_wallpaper_ui_open(&ui,&pool,&sd,images,&store,present,NULL)==PN_OK && pn_wallpaper_ui_book_source(&ui,&book,salt)==PN_OK);
+    uint64_t before_sequence=cur.sequence;
+    assert(pn_wallpaper_ui_event(&ui,PN_WUI_BOOK,present,NULL)==PN_OK && ui.screen==PN_WUI_PREVIEW);
+    assert(pn_wallpaper_ui_book_source(&ui,NULL,NULL)==PN_BUSY);
+    assert(pn_wallpaper_ui_event(&ui,PN_WUI_CANCEL,present,NULL)==PN_OK && pn_wallpaper_ui_current(&ui,&cur) && cur.sequence==before_sequence);
+    assert(pn_wallpaper_ui_event(&ui,PN_WUI_BOOK,present,NULL)==PN_OK && pn_wallpaper_ui_event(&ui,PN_WUI_APPLY,present,NULL)==PN_OK);
+    assert(pn_wallpaper_ui_current(&ui,&cur) && cur.cached_book && !memcmp(cur.book.sha256,book.expected.sha256,32));pn_wallpaper_ui_close(&ui);
+    assert(unlink(book.path)==0 && unlink(cover_path)==0 && pn_media_detach(&sd)==PN_OK);
+    assert(pn_wallpaper_ui_open(&ui,&pool,&sd,images,&store,present,NULL)==PN_OK && pn_wallpaper_ui_book_source(&ui,&book,salt)==PN_OK);
+    assert(pn_wallpaper_ui_event(&ui,PN_WUI_BOOK,present,NULL)==PN_OK && ui.screen==PN_WUI_PREVIEW);
+    assert(pn_wallpaper_ui_event(&ui,PN_WUI_APPLY,present,NULL)==PN_OK && pn_wallpaper_ui_current(&ui,&cur) && cur.cached_book);pn_wallpaper_ui_close(&ui);
+    assert(pn_media_attach(&sd,2)==PN_OK);
     /* 呈现失败不标记presented。/ A failed presentation leaves presented false. */
     assert(pn_wallpaper_ui_open(&ui,&pool,&sd,images,&store,fail_present,NULL)==PN_OK && !ui.presented);assert(pn_wallpaper_ui_present(&ui,present,NULL)==PN_OK && ui.presented);pn_wallpaper_ui_close(&ui);
     /* 打开时每个分配点失败都完全回收。/ Every allocation failure while opening fully recovers. */

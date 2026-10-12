@@ -11,7 +11,7 @@ with tempfile.TemporaryDirectory() as folder:
     images=root/'wallpapers';images.mkdir();(images/'sea.png').write_bytes(png(240,400,30))
     store=root/'internal';store.mkdir()
     def run(script,*extra):
-        r=subprocess.run([sys.argv[1],'--library',str(books),'--state-dir',str(root/'state'),*extra],env=dict(os.environ,SDL_VIDEODRIVER='dummy',PN_SIM_LIBRARY_SCRIPT=script),capture_output=True,text=True,timeout=120)
+        r=subprocess.run([sys.argv[1],'--library',str(books),'--state-dir',str(root/'state'),*extra],env=dict(os.environ,SDL_VIDEODRIVER='dummy',PN_SIM_LIBRARY_SCRIPT="library,"+script),capture_output=True,text=True,timeout=120)
         assert r.returncode==0,(r.stdout,r.stderr)
         assert 'used=0 live=0' in r.stdout,r.stdout
         return r.stdout
@@ -34,4 +34,15 @@ with tempfile.TemporaryDirectory() as folder:
     # 未给目录时w键无效；选项须配合书库。/ Without the option the w key does nothing; options require the library mode.
     out=run('wallpaper,quit');assert 'wallpaper_ui' not in out,out
     assert subprocess.run([sys.argv[1],'--wallpaper-dir',str(images)],env=dict(os.environ,SDL_VIDEODRIVER='dummy'),capture_output=True).returncode==2
+    # 在读书退出后仍可预览真实侧车书封，重启/原图缺失后使用同身份缓存。/ A real sidecar cover remains previewable after closing the reader; restart/missing sources reuse the matching cache.
+    import shutil
+    book=next(books.glob('*.txt'));sidecar=book.with_suffix('.png');shutil.copy2(next(images.glob('*.png')),sidecar)
+    out=run('tap:100:500,back,wallpaper,tap:600:240,enter,back,lock,next,enter,back,quit',*opts)
+    assert 'wallpaper_ui command=13 status=0 screen=1 active=1' in out and 'wallpaper_ui command=11 status=0 screen=0 active=1' in out,out
+    assert 'lock_preview status=0 mode=3 cached=1' in out and 'lock_preview wake status=0' in out,out
+    latest=max((p.read_bytes() for p in store.glob('lock.*')),key=lambda b:int.from_bytes(b[12:20],'little'))
+    assert latest[:6]==b'PNWP\x02\x00' and latest[6]==3 and latest[11]==1 and len(latest)>415872
+    book.unlink();sidecar.unlink()
+    out=run('wallpaper,tap:600:240,enter,back,quit',*opts)
+    assert 'wallpaper_ui command=13 status=0 screen=1 active=1' in out and 'wallpaper_ui command=11 status=0 screen=0 active=1' in out,out
 print('wallpaper window: open, preview, cover, apply record, cancel, no-store and option validation passed')

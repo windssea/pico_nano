@@ -14,8 +14,8 @@
 #define COLUMN_PITCH 212
 #define ROW_Y0 936
 #define ROW_PITCH 120
-static const char *const labels[TOOL_COUNT]={"目录","书签","跳转","排版","刷新","书架"};
-static const pn_icon_t icons[TOOL_COUNT]={PN_ICON_TOC,PN_ICON_BOOKMARK,PN_ICON_PROGRESS,PN_ICON_TYPESET,PN_ICON_REFRESH,PN_ICON_SHELF};
+static const char *const labels[TOOL_COUNT]={"目录","书签","跳转","排版","刷新","返回"};
+static const pn_icon_t icons[TOOL_COUNT]={PN_ICON_TOC,PN_ICON_BOOKMARK,PN_ICON_PROGRESS,PN_ICON_TYPESET,PN_ICON_REFRESH,PN_ICON_BACK};
 pn_status_t pn_reader_footer_progress(pn_font_t *ui,pn_font_t *fallback,pn_frame_t *frame,const char *left,const char *right,int basis){
     if(!ui || !ui->impl || !frame || !frame->pixels || !left || !right)return PN_INVALID;
     int original=ui->pixels;

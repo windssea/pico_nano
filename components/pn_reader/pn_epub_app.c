@@ -6,7 +6,9 @@
  * Frozen: one serialized owner; no power/calibration writes, automatic mounts or formatting.
  */
 #define _POSIX_C_SOURCE 200809L
+#include "pn_brand.h"
 #include "pn_epub_app.h"
+#include "pn_widgets.h"
 #include "pn_font_chain.h"
 #include "pn_font_preferences.h"
 #include "pn_font_set.h"
@@ -37,6 +39,7 @@ typedef struct {
     pn_style_t style,saved_style,pending_style;
     bool style_preview,draft_render;pn_epub_location_t style_origin;uint8_t salt[16];uint64_t last_now;unsigned since_clear;
     bool persistent,has_restore,has_visible,lost,force_full,last_confirmed,style_pending,font_unavailable;
+    pn_reader_overlay_fn font_view;void *font_view_ctx; ///< 仅本次字体事务借用的目标页 / Destination page borrowed only during this font transaction
 } app_t;
 static pn_font_set_t *font_set(app_t *a){return a->font_use_draft?&a->font_draft:a->font_live.impl?&a->font_live:NULL;}
 static pn_font_t *body(app_t *a){return font_set(a)?a->managed_body:&a->body;}
@@ -148,7 +151,7 @@ static pn_status_t paint(app_t *a,pn_frame_t *frame){
     if(a->draft_render)snprintf(left,sizeof left,"%s",a->font_render?"字体预览，设置尚未保存":"排版预览，设置尚未保存");
     else if((a->has_bookmark_origin || a->bookmark_navigation) && !a->bookmark_returning)snprintf(left,sizeof left,"< 返回跳转前位置");
     else if(known)snprintf(left,sizeof left,"第 %zu/%zu 节",index+1,a->info.spine_count);
-    else snprintf(left,sizeof left,"%s",a->info.title[0]?a->info.title:"小纸 Pico");
+    else snprintf(left,sizeof left,"%s",a->info.title[0]?a->info.title:PN_BRAND_NAME);
     if(a->draft_render)snprintf(right,sizeof right,"点击返回设置");
     else{
         char percent[16]="";if(known)snprintf(percent,sizeof percent,"%u%%",basis/100);
@@ -237,6 +240,17 @@ pn_status_t pn_epub_app_open_on_media(pn_epub_app_t *app,pn_pool_t *pool,pn_medi
     if(status!=PN_OK){(void)release(a);return status;}app->impl=a;return PN_OK;
 }
 pn_status_t pn_epub_app_open(pn_epub_app_t *app,pn_pool_t *pool,const char *book,const char *font,const char *state,int pixels,uint64_t now){return pn_epub_app_open_on_media(app,pool,NULL,book,font,state,pixels,now);}
+/* 字体事务直接画最终目标页，使用候选正文字体；不递归推屏。/ Font transactions paint their final destination with the candidate body font, without recursive presentation. */
+static pn_status_t paint_font_view(app_t *a,pn_frame_t *frame){
+    pn_status_t status=ensure_body(a,a->style.pixels);
+    if(status==PN_OK && !a->ui.impl){pn_text_source_t source=pn_font_builtin_source();status=pn_font_open(&a->ui,a->pool,&source,36);}
+    int original=a->ui.pixels;if(status==PN_OK)status=pn_font_size(&a->ui,36);
+    pn_w_font_scope_t scope={0};if(status==PN_OK)status=pn_w_font_scope_begin(&scope,a->pool,body(a));
+    if(status==PN_OK)status=a->font_view(a->font_view_ctx,&a->ui,body(a),frame);
+    pn_w_font_scope_end(&scope);
+    if(a->ui.impl){pn_status_t restored=pn_font_size(&a->ui,original);if(status==PN_OK)status=restored;}
+    return status;
+}
 static pn_status_t navigate(pn_epub_app_t *app,pn_reader_action_t action,const pn_epub_location_t *jump,uint64_t now,pn_reader_present_fn present,void *ctx){
     if(app && app->impl)((app_t *)app->impl)->last_confirmed=false;
     if(!app || !app->impl || !present || action<PN_APP_OPEN || action>PN_APP_BEGINNING)return PN_INVALID;
@@ -252,7 +266,7 @@ static pn_status_t navigate(pn_epub_app_t *app,pn_reader_action_t action,const p
     bool dismiss_return=!jump && (action==PN_APP_NEXT || action==PN_APP_PREVIOUS || action==PN_APP_BEGINNING);
     status=compact(a);pn_draw_lease_t lease={0};pn_frame_t *frame=NULL;
     if(status==PN_OK)status=pn_display_begin_draw(&a->display,a->token,&lease,&frame);
-    if(status==PN_OK){snprintf(a->footer_path,sizeof a->footer_path,"%s",receipt.anchor.begin.path);bool returning=a->bookmark_returning;a->bookmark_returning=returning || dismiss_return;status=paint(a,frame);a->bookmark_returning=returning;}
+    if(status==PN_OK){snprintf(a->footer_path,sizeof a->footer_path,"%s",receipt.anchor.begin.path);bool returning=a->bookmark_returning;a->bookmark_returning=returning || dismiss_return;status=a->font_view?paint_font_view(a,frame):paint(a,frame);a->bookmark_returning=returning;}
     pn_refresh_t profile=!a->has_visible || a->force_full || a->since_clear>=a->style.gl_before_clear?PN_REFRESH_GC16:PN_REFRESH_GL16;
     if(status==PN_OK)status=pn_display_publish(&a->display,&lease,receipt.ticket,profile);
     if(status!=PN_OK){if(lease.ticket)(void)pn_display_discard(&a->display,&lease);(void)pn_epub_reader_complete(&a->reader,&receipt,false,now);a->force_full=true;return status;}
@@ -340,7 +354,9 @@ pn_status_t pn_epub_app_overlay(pn_epub_app_t *app,pn_reader_overlay_fn paint,vo
     if(!a->ui.impl){pn_text_source_t source=pn_font_builtin_source();status=pn_font_open(&a->ui,a->pool,&source,36);}else status=pn_font_size(&a->ui,36);
     pn_font_t *metadata=NULL;if(status==PN_OK && font_size(a,36)==PN_OK)metadata=body(a);
     pn_draw_lease_t lease={0};pn_frame_t *frame=NULL;if(status==PN_OK)status=pn_display_begin_draw(&a->display,a->token,&lease,&frame);
+    pn_w_font_scope_t scope={0};if(status==PN_OK)status=pn_w_font_scope_begin(&scope,a->pool,metadata);
     if(status==PN_OK)status=paint(paint_ctx,&a->ui,metadata,frame);
+    pn_w_font_scope_end(&scope);
     if(status==PN_OK)status=pn_display_publish(&a->display,&lease,0,profile);
     (void)pn_font_size(&a->ui,24);
     if(status!=PN_OK){if(lease.ticket)(void)pn_display_discard(&a->display,&lease);return status;}
@@ -472,12 +488,12 @@ static pn_status_t font_stage(pn_epub_app_t *app,const pn_font_preferences_t *pr
     if(app && app->impl)((app_t *)app->impl)->last_confirmed=false;
     if(!app || !app->impl || !present || pn_font_preferences_validate(prefs,true)!=PN_OK)return PN_INVALID;
     app_t *a=app->impl;if(a->lost)return PN_STALE_MEDIA;if(!a->has_visible)return PN_EMPTY;if(now<a->last_now)return PN_INVALID;if(a->style_preview || a->style_pending)return PN_BUSY;
-    pn_epub_location_t origin=a->font_preview?a->font_origin:a->visible.location;pn_font_set_t candidate={0},previous={0};bool old_use=a->font_use_draft;
+    pn_epub_location_t origin=a->font_preview?a->font_origin:a->visible.location;pn_font_set_t candidate={0},previous={0};bool old_use=a->font_use_draft;pn_font_preferences_t old_draft=a->draft_fonts;
     pn_status_t status=pn_font_set_open(&candidate,a->pool,a->media,&a->book_lease,prefs,a->style.pixels);if(status!=PN_OK)return status;
-    (void)pn_font_set_move(&previous,&a->font_draft);(void)pn_font_set_move(&a->font_draft,&candidate);a->font_use_draft=true;font_metadata_reset(a);status=font_relayout(a);
+    (void)pn_font_set_move(&previous,&a->font_draft);(void)pn_font_set_move(&a->font_draft,&candidate);a->font_use_draft=true;a->draft_fonts=*prefs;font_metadata_reset(a);status=font_relayout(a);
     a->font_render=hint;a->draft_render=hint;if(status==PN_OK)status=pn_epub_app_jump(app,&origin,now,present,ctx);a->draft_render=false;a->font_render=false;
     if(a->last_confirmed){pn_font_set_close(&previous);a->font_origin=origin;a->font_preview=true;a->draft_fonts=*prefs;return status;}
-    pn_font_set_close(&a->font_draft);(void)pn_font_set_move(&a->font_draft,&previous);a->font_use_draft=old_use;font_metadata_reset(a);pn_status_t restored=font_relayout(a);return restored!=PN_OK?restored:status;
+    pn_font_set_close(&a->font_draft);(void)pn_font_set_move(&a->font_draft,&previous);a->font_use_draft=old_use;a->draft_fonts=old_draft;font_metadata_reset(a);pn_status_t restored=font_relayout(a);return restored!=PN_OK?restored:status;
 }
 static void font_accept(app_t *a){
     font_metadata_reset(a);pn_font_set_close(&a->font_live);(void)pn_font_set_move(&a->font_live,&a->font_draft);a->font_use_draft=false;a->font_preview=false;a->font_pending=false;a->live_fonts=a->pending_fonts;a->fonts_known=true;
@@ -496,6 +512,19 @@ static pn_status_t font_apply_record(pn_epub_app_t *app,const pn_font_preference
     a->pending_fonts=*prefs;a->pending_record=*record;a->font_pending=a->persistent;pn_status_t saved=font_write(a,record);if(saved!=PN_OK)return saved;font_accept(a);return status;
 }
 pn_status_t pn_epub_app_font_apply(pn_epub_app_t *app,const pn_font_preferences_t *prefs,uint64_t now,pn_reader_present_fn present,void *ctx){return font_apply_record(app,prefs,prefs,now,present,ctx);}
+/* 目标页回调仅在同步事务中有效，返回时无论成功失败都解除借用。/ The destination callback lives only during the synchronous transaction and is cleared on every return. */
+pn_status_t pn_epub_app_font_apply_view(pn_epub_app_t *app,const pn_font_preferences_t *prefs,pn_reader_overlay_fn paint,void *view_ctx,uint64_t now,pn_reader_present_fn present,void *ctx){
+    if(app && app->impl)((app_t *)app->impl)->last_confirmed=false;
+    if(!app || !app->impl || !paint)return PN_INVALID;
+    app_t *a=app->impl;if(a->font_view)return PN_BUSY;a->font_view=paint;a->font_view_ctx=view_ctx;
+    pn_status_t status=pn_epub_app_font_apply(app,prefs,now,present,ctx);a->font_view=NULL;a->font_view_ctx=NULL;return status;
+}
+pn_status_t pn_epub_app_font_cancel_view(pn_epub_app_t *app,pn_reader_overlay_fn paint,void *view_ctx,uint64_t now,pn_reader_present_fn present,void *ctx){
+    if(app && app->impl)((app_t *)app->impl)->last_confirmed=false;
+    if(!app || !app->impl || !paint)return PN_INVALID;
+    app_t *a=app->impl;if(a->font_view)return PN_BUSY;a->font_view=paint;a->font_view_ctx=view_ctx;
+    pn_status_t status=pn_epub_app_font_cancel(app,now,present,ctx);a->font_view=NULL;a->font_view_ctx=NULL;return status;
+}
 pn_status_t pn_epub_app_font_inherit(pn_epub_app_t *app,uint64_t now,pn_reader_present_fn present,void *ctx){
     if(app && app->impl)((app_t *)app->impl)->last_confirmed=false;
     if(!app || !app->impl || !present)return PN_INVALID;
@@ -529,7 +558,7 @@ pn_status_t pn_epub_app_fonts_get(pn_epub_app_t *app,pn_font_preferences_t *out,
     if(!app || !app->impl || !out || !directory || !capacity)return PN_INVALID;
     app_t *a=app->impl;if(a->lost)return PN_STALE_MEDIA;
     if(!a->fonts_known){pn_font_preferences_t p={0};pn_status_t status=PN_OK;if(*a->boot_primary)status=pn_font_reference_capture(a->pool,a->media,&a->book_lease,a->boot_primary,&p.primary);if(status==PN_OK && *a->boot_fallback)status=pn_font_reference_capture(a->pool,a->media,&a->book_lease,a->boot_fallback,&p.fallback);if(status!=PN_OK)return status;a->live_fonts=p;a->fonts_known=true;}
-    const pn_font_preferences_t *p=a->font_preview?&a->draft_fonts:&a->live_fonts;const char *path=p->primary.kind==PN_FONT_FILE?p->primary.path:p->fallback.kind==PN_FONT_FILE?p->fallback.path:NULL;
+    const pn_font_preferences_t *p=a->font_use_draft?&a->draft_fonts:&a->live_fonts;const char *path=p->primary.kind==PN_FONT_FILE?p->primary.path:p->fallback.kind==PN_FONT_FILE?p->fallback.path:NULL;
     char folder[PN_FONT_REFERENCE_PATH_MAX];if(path){strcpy(folder,path);char *slash=strrchr(folder,'/');if(!slash)return PN_INVALID;if(slash==folder)slash[1]=0;else *slash=0;}else{
 #ifdef ESP_PLATFORM
         strcpy(folder,"/sdcard/fonts");

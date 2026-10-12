@@ -5,6 +5,7 @@
  * 冻结：ARGB只计主机开销，保存失败留窗，不冒充面板实测。
  * Frozen: ARGB is host-only overhead; keep window on save failure; never claim panel validation.
  */
+#include "pn_brand.h"
 #include "pn_epub_app.h"
 #include "input_script.h"
 #include "toc_sdl.h"
@@ -29,18 +30,19 @@ static void cancel_menu_tap(pn_tap_t *tap){
 static void report(pn_epub_app_t *app,const char *name,pn_status_t status){pn_epub_progress_t p;if(pn_epub_app_progress(app,&p)==PN_OK)printf("epub_event action=%s status=%d path=%s element=%llu run=%u offset=%llu\n",name,(int)status,p.location.path,(unsigned long long)p.location.position.element,p.location.position.run,(unsigned long long)p.location.position.offset);}
 int pn_sim_epub_window(pn_epub_app_t *app,pn_pool_t *pool){
     if(SDL_Init(SDL_INIT_VIDEO))return 1;
-    surface_t s={0};s.window=SDL_CreateWindow("小纸 Pico",SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,342,608,SDL_WINDOW_RESIZABLE);
+    surface_t s={0};s.window=SDL_CreateWindow(PN_BRAND_NAME,SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,342,608,SDL_WINDOW_RESIZABLE);
     s.renderer=s.window?SDL_CreateRenderer(s.window,-1,SDL_RENDERER_SOFTWARE):NULL;s.texture=s.renderer?SDL_CreateTexture(s.renderer,SDL_PIXELFORMAT_ARGB8888,SDL_TEXTUREACCESS_STATIC,684,1216):NULL;if(s.texture)(void)SDL_SetTextureScaleMode(s.texture,SDL_ScaleModeLinear); /* 半尺寸窗口用线性缩放 / Linear scaling for the half-size window */s.argb=s.texture?malloc(684u*1216u*4u):NULL;
     bool running=s.argb!=NULL;int result=0;sim_script_t script={0};pn_toc_ui_t toc={0};pn_style_ui_t styles={0};pn_font_ui_t fonts={0};bool font_pointer=false;pn_bookmark_ui_t bookmarks={0};pn_tap_t tap={0};uint64_t retry=0;bool menu_pointer=false,header_pointer=false,pointer=false;int pressed=-1;
     if(!running || SDL_RenderSetLogicalSize(s.renderer,684,1216)){running=false;result=1;}
     if(running){pn_status_t status=pn_epub_app_step(app,PN_APP_OPEN,SDL_GetTicks64(),present,&s);report(app,"open",status);if(status!=PN_OK){running=false;result=1;}else script_init(&script,"PN_SIM_INPUT_SCRIPT");}
     while(running){
         script_queue(&script);SDL_Event event;bool got=SDL_WaitEventTimeout(&event,100)!=0;uint64_t now=SDL_GetTicks64();pn_status_t tick=pn_epub_app_tick(app,now);
-        if(tick!=PN_OK && tick!=PN_BUSY)SDL_SetWindowTitle(s.window,"小纸 Pico - 保存失败，关闭前请重试");
+        if(tick!=PN_OK && tick!=PN_BUSY)SDL_SetWindowTitle(s.window,PN_BRAND_NAME " - 保存失败，关闭前请重试");
+        // 页面请求不等待下一次输入，空闲轮询也完成导航。/ Navigation requests complete during idle polling without waiting for another input.
+        if(styles.request_fonts){styles.request_fonts=false;pn_status_t opened=pn_font_ui_open(&fonts,pool,NULL,app,NULL,present,&s);pn_font_ui_return_to(&fonts,pn_style_ui_render,&styles);printf("font_ui open status=%d active=%d\n",opened,fonts.active);}
         if(!got)continue;
         script_received(&script,&event);
-        if(styles.request_fonts){styles.request_fonts=false;pn_status_t opened=pn_font_ui_open(&fonts,pool,NULL,app,NULL,present,&s);printf("font_ui open status=%d active=%d\n",opened,fonts.active);}
-        if(font_modal(&fonts,&event,now,present,&s,&tap,&font_pointer)){if(!fonts.active){pn_font_ui_close(&fonts);if(styles.active)(void)pn_style_ui_present(&styles,present,&s);}continue;}
+        if(font_modal(&fonts,&event,now,present,&s,&tap,&font_pointer)){if(!fonts.active){bool returned=fonts.return_presented;pn_font_ui_close(&fonts);if(styles.active){if(returned){styles.presented=true;styles.preview=false;}else (void)pn_style_ui_present(&styles,present,&s);}}continue;}
 
         if(bookmarks.mode!=PN_BUI_CLOSED && event.type!=SDL_QUIT){
             if(!bookmarks.presented && now-retry>=1000){retry=now;(void)pn_bookmark_ui_present(&bookmarks,present,&s);}
@@ -83,7 +85,7 @@ int pn_sim_epub_window(pn_epub_app_t *app,pn_pool_t *pool){
         }
         if(event.type==SDL_QUIT || (event.type==SDL_KEYDOWN && event.key.keysym.sym==SDLK_ESCAPE)){
             pn_status_t status=pn_epub_app_close(app,now);printf("epub_close status=%d\n",(int)status);
-            if(status==PN_OK || !app->impl){result=status!=PN_OK;running=false;}else SDL_SetWindowTitle(s.window,"小纸 Pico - 保存失败，按退出键重试");
+            if(status==PN_OK || !app->impl){result=status!=PN_OK;running=false;}else SDL_SetWindowTitle(s.window,PN_BRAND_NAME " - 保存失败，按退出键重试");
             continue;
         }
         bool open_marks=event.type==SDL_KEYDOWN && !event.key.repeat && event.key.keysym.sym==SDLK_m;
@@ -116,7 +118,7 @@ int pn_sim_epub_window(pn_epub_app_t *app,pn_pool_t *pool){
         else if(event.type==SDL_MOUSEMOTION && pointer){int x=event.motion.x,y=event.motion.y;int hit=y>=1120 && y<=1200 && x>=32 && x<660 && (x-32)%157<148?(x-32)/157:-1;if(hit!=pressed)pressed=-1;}
         else if(event.type==SDL_WINDOWEVENT && event.window.event==SDL_WINDOWEVENT_FOCUS_LOST){pointer=false;pressed=-1;}
         if(command>=0){if(event.type==SDL_KEYDOWN){pointer=false;pressed=-1;}pn_status_t status=pn_epub_app_step(app,(pn_reader_action_t)command,now,present,&s);report(app,name,status);
-            SDL_SetWindowTitle(s.window,status==PN_OK?"小纸 Pico":status==PN_EMPTY?"小纸 Pico - 已到首尾或字号边界":"小纸 Pico - 操作失败，请重试");}
+            SDL_SetWindowTitle(s.window,status==PN_OK?PN_BRAND_NAME:status==PN_EMPTY?PN_BRAND_NAME " - 已到首尾或字号边界":PN_BRAND_NAME " - 操作失败，请重试");}
     }
     if(app->impl){pn_status_t closed=pn_epub_app_close(app,SDL_GetTicks64());if(closed!=PN_OK)result=1;}
     pn_font_ui_close(&fonts);

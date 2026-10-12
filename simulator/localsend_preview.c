@@ -6,6 +6,7 @@
  * Frozen: sample data rehearses drawing only; no networking, installs or device acceptance.
  */
 #define _POSIX_C_SOURCE 200809L
+#include "pn_brand.h"
 #include "pn_localsend_view.h"
 #include "pn_widgets.h"
 #include <SDL.h>
@@ -29,7 +30,7 @@ int main(void){
     pn_ls_snapshot_t snapshot;pn_ls_snapshot(&session,&snapshot);pn_ls_view_t view={0};pn_ls_view_bind(&view,&snapshot,0,0);
     if(SDL_Init(SDL_INIT_VIDEO)!=0)return 2;
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY,"1");
-    SDL_Window *window=SDL_CreateWindow("小纸 Pico - 附近传书界面预览（不传输文件）",SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,342,608,SDL_WINDOW_RESIZABLE);
+    SDL_Window *window=SDL_CreateWindow(PN_BRAND_NAME " - 附近传书界面预览（不传输文件）",SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,342,608,SDL_WINDOW_RESIZABLE);
     SDL_Renderer *renderer=window?SDL_CreateRenderer(window,-1,SDL_RENDERER_SOFTWARE):NULL;
     SDL_Texture *texture=renderer?SDL_CreateTexture(renderer,SDL_PIXELFORMAT_ARGB8888,SDL_TEXTUREACCESS_STREAMING,684,1216):NULL;
     uint32_t *argb=texture?malloc(684u*1216u*sizeof *argb):NULL;int result=argb?0:2;

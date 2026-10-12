@@ -15,8 +15,8 @@ typedef enum {
  PN_TRANSFER_CANCEL, ///< 持久取消 / Durable cancellation
  PN_TRANSFER_FILE, ///< 旧资源身份 / Existing resource identity
  PN_TRANSFER_STOP, ///< 关闭消费者并永久停止本实例 / Close consumers and permanently stop this instance
- PN_TRANSFER_LIST, ///< 按名称字节序分页列出已安装字体 / List installed fonts in name byte order, paged
- PN_TRANSFER_DELETE, ///< 核对身份后删除一个已安装字体 / Delete one installed font after an identity check
+ PN_TRANSFER_LIST, ///< 按名称字节序分页列出字体/封面/壁纸原图 / List fonts/cover/wallpaper sources in name byte order, paged
+ PN_TRANSFER_DELETE, ///< 核对身份后删除一个资源原文件，不修改内部锁屏缓存 / Delete one resource source after identity checking, without changing the internal lock cache
  PN_TRANSFER_STREAM_BEGIN, ///< 已授权整文件接收，可缺省摘要，不覆盖 / Authorized whole-file receive; optional digest, no replacement
  PN_TRANSFER_STREAM_COMPLETE ///< 对精确暂存内容计算摘要后校验安装 / Hash exact staging content, validate and install
 } pn_transfer_operation_t;

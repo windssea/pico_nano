@@ -8,6 +8,7 @@
  * 冻结：不模拟真实面板光学效果，不宣称阅读功能已实现。
  * Frozen: no simulation of panel optics and no claim of implemented reading features.
  */
+#include "pn_brand.h"
 #include "pn_frame.h"
 #include <SDL.h>
 #include <stdio.h>
@@ -15,7 +16,7 @@
 
 int pn_sim_window(const pn_frame_t *frame) {
     if (SDL_Init(SDL_INIT_VIDEO)!=0) { fprintf(stderr,"SDL: %s\n",SDL_GetError()); return 1; }
-    SDL_Window *window=SDL_CreateWindow("小纸 Pico - 显示测试",
+    SDL_Window *window=SDL_CreateWindow(PN_BRAND_NAME " - 显示测试",
         SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,342,608,SDL_WINDOW_RESIZABLE);
     SDL_Renderer *renderer=window ? SDL_CreateRenderer(window,-1,SDL_RENDERER_SOFTWARE) : NULL;
     SDL_Texture *texture=renderer ? SDL_CreateTexture(renderer,SDL_PIXELFORMAT_ARGB8888,

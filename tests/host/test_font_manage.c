@@ -7,7 +7,9 @@
 #include <string.h>
 #include <unistd.h>
 static int presents;
+static uint64_t list_pixels; ///< 最近列表像素摘要 / Last list pixel checksum
 static pn_status_t present(void *ctx,const pn_frame_t *frame,pn_refresh_t profile){(void)ctx;(void)frame;(void)profile;presents++;return PN_OK;}
+static pn_status_t checksum(void *ctx,const pn_frame_t *frame,pn_refresh_t profile){(void)ctx;(void)profile;list_pixels=0;for(int y=0;y<1216;y++)for(int x=0;x<684;x++)list_pixels=list_pixels*33+pn_frame_get(frame,x,y);return PN_OK;}
 static const char *capture;
 static pn_status_t save_frame(void *ctx,const pn_frame_t *frame,pn_refresh_t profile){
     (void)ctx;(void)profile;FILE *f=fopen(capture,"wb");assert(f);fprintf(f,"P5\n684 1216\n15\n");
@@ -26,6 +28,12 @@ int main(int argc,char **argv){
     char a[600],c[600];snprintf(a,sizeof a,"%s/a-ui.ttf",fonts);snprintf(c,sizeof c,"%s/c-bad.ttf",fonts);
     pn_font_manage_t ui={0};pn_font_preferences_t g;
     assert(pn_font_manage_open(&ui,&pool,&sd,fonts,&internal,state,present,NULL)==PN_OK && ui.active && ui.presented && ui.screen==PN_FMU_LIST);
+    /* 暂时移走两个样本字体，重绘仍保持小样像素，证明不重复依赖外置源。/ Temporarily move both sample fonts; unchanged tile pixels prove repainting does not reread external sources. */
+    assert(pn_font_manage_present(&ui,checksum,NULL)==PN_OK);uint64_t first_pixels=list_pixels;
+    char tile_paths[2][1200],tile_hidden[2][1200];const char *tile_names[]={"a-ui.ttf","b-fallback.ttf"};
+    for(unsigned i=0;i<2;i++){snprintf(tile_paths[i],sizeof tile_paths[i],"%s/%s",fonts,tile_names[i]);snprintf(tile_hidden[i],sizeof tile_hidden[i],"%s/.sample-%u",fonts,i);assert(rename(tile_paths[i],tile_hidden[i])==0);}
+    assert(pn_font_manage_present(&ui,checksum,NULL)==PN_OK && list_pixels==first_pixels);
+    for(unsigned i=0;i<2;i++)assert(rename(tile_hidden[i],tile_paths[i])==0);
     assert(pn_font_manage_hit(&ui,100,380)==PN_FMU_ROW && pn_font_manage_hit(&ui,100,580)==PN_FMU_ROW+2 && pn_font_manage_hit(&ui,100,740)==-1 && pn_font_manage_hit(&ui,100,60)==PN_FMU_BACK && pn_font_manage_hit(&ui,100,1120)==PN_FMU_PREVIOUS && pn_font_manage_hit(&ui,600,1120)==PN_FMU_NEXT);
     /* 坏字体留在列表。/ A bad font stays on the list. */
     assert(pn_font_manage_event(&ui,PN_FMU_ROW+2,present,NULL)!=PN_OK && ui.screen==PN_FMU_LIST);

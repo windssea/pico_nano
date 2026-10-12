@@ -10,6 +10,7 @@ jobs:
       - run: python3 tools/check_docs.py
       - run: python3 -m unittest discover -s tests/tools -v
       - run: node --test tests/installer/plan.test.mjs
+      - run: node --test tests/tools/test_transfer_resources.mjs
       - run: python3 tools/installer_site.py --out build-installer
       - run: cmake -S tests/host -B build-host -G Ninja -DPN_SANITIZERS=ON
       - run: cmake --build build-host

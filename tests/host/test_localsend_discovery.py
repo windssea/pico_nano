@@ -10,7 +10,7 @@ import unittest
 sys.path.insert(0,str(pathlib.Path(__file__).resolve().parents[2]/'tools'))
 from localsend_discovery import Discovery, parse_announcement
 
-INFO = {'alias':'小纸 Pico（测试）','version':'2.2','fingerprint':'own','deviceType':'headless','port':53318,'protocol':'http','download':False}
+INFO = {'alias':'PicoNano（测试）','version':'2.2','fingerprint':'own','deviceType':'headless','port':53318,'protocol':'http','download':False}
 
 
 class DiscoveryTests(unittest.TestCase):

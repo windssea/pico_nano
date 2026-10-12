@@ -1,52 +1,69 @@
-/* 真实字体书架绘制和行命中。/ Real-font shelf rendering and row hit tests. */
+/* 原生页面回归：导航、密度、长名、元数据与轻量焦点。/ Native-page regression: navigation, density, long titles, metadata and subtle focus. */
 #include "pn_shelf_view.h"
+#include "pn_widgets.h"
 #include <assert.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
-int main(void){pn_pool_t pool;assert(pn_pool_init(&pool,1024*1024,NULL,NULL,NULL)==0);pn_font_t font={0};pn_text_source_t source=pn_font_builtin_source();assert(pn_font_open(&font,&pool,&source,24)==PN_OK);uint8_t *bytes=pn_alloc(&pool,684*1216/2);pn_frame_t frame;assert(pn_frame_bind(&frame,bytes,684*1216/2,684,1216));pn_catalog_page_t *p=calloc(1,sizeof *p);assert(p);p->count=2;strcpy(p->items[0].name,"Read Pico.txt");p->items[0].format=PN_BOOK_TXT;strcpy(p->items[1].name,"reading.epub");p->items[1].format=PN_BOOK_EPUB;assert(pn_shelf_render(p,&font,&frame)==PN_OK);/* 三列封面网格：本页两本；空格、封面行间隙无命中。/ Three-column cover grid with two books; empty cells and the row gap are not hits. */
-    assert(pn_shelf_hit(p,100,500)==0 && pn_shelf_hit(p,300,500)==1 && pn_shelf_hit(p,500,500)==-1 && pn_shelf_hit(p,100,900)==-1 && pn_shelf_hit(p,232,500)==-1);
-    /* 翻页行、底栏三入口、标题行、继续阅读卡与全部/最近。/ Paging row, three bottom-bar entries, title row, continue card and All/Recent tabs. */
-    /* 翻页箭头只在有上一页/下一页时命中。/ The page arrows only hit when a previous/next page exists. */
-    assert(pn_shelf_hit(p,100,1080)==-1 && pn_shelf_hit(p,600,1080)==-1);
-    p->index=6;p->total=14;p->more=true;
-    assert(pn_shelf_hit(p,100,1080)==PN_SHELF_PREVIOUS && pn_shelf_hit(p,600,1080)==PN_SHELF_NEXT && pn_shelf_hit(p,341,1080)==PN_SHELF_PREVIOUS);
-    assert(pn_shelf_render(p,&font,&frame)==PN_OK);
-    p->index=0;p->total=2;p->more=false;
-    /* 选项：搜索入口、网格/列表切换与列表模式命中。/ Options: the search entry, grid/list toggle and list-mode hits. */
-    {pn_shelf_options_t o={.battery_percent=87,.search=true,.layout_toggle=true};
-     assert(pn_shelf_hit_ex(p,560,110,&o)==PN_SHELF_SEARCH && pn_shelf_hit_ex(p,560,110,NULL)==-1);
-     assert(pn_shelf_hit_ex(p,600,360,&o)==PN_SHELF_LAYOUT && pn_shelf_hit_ex(p,600,360,NULL)==-1);
-     assert(pn_shelf_render_ex(p,&font,&frame,-1,false,true,NULL,&o)==PN_OK && font.pixels==24);
-     assert(pn_shelf_hit_ex(p,190,690,&o)==PN_SHELF_MORE && pn_shelf_hit_ex(p,100,690,&o)==0 && pn_shelf_hit_ex(p,410,690,&o)==PN_SHELF_MORE+1);
-     o.list_mode=true;assert(pn_shelf_hit_ex(p,600,450,&o)==PN_SHELF_MORE && pn_shelf_hit_ex(p,100,450,&o)==0 && pn_shelf_hit_ex(p,100,580,&o)==1 && pn_shelf_hit_ex(p,100,720,&o)==-1);
-     assert(pn_shelf_render_ex(p,&font,&frame,0,false,true,NULL,&o)==PN_OK && font.pixels==24);
-     o.list_mode=false;o.favorites_tab=true;assert(pn_shelf_hit_ex(p,300,350,&o)==PN_SHELF_TAB_FAVORITES);o.favorites=true;assert(pn_shelf_render_ex(p,&font,&frame,-1,false,true,NULL,&o)==PN_OK);o.favorites=false;
-     o.query=true;assert(pn_shelf_render_ex(p,&font,&frame,-1,false,true,NULL,&o)==PN_OK);}
-    // 收藏标识只跟随完整路径，网格与列表取消后恢复原像素。/ Favorite markers follow full paths; removing restores grid and list pixels.
-    {pn_favorites_t *favorites=calloc(1,sizeof *favorites);uint8_t *before=malloc(684*1216/2);assert(favorites && before);
-     strcpy(p->items[0].path,"/books/one.txt");strcpy(p->items[1].path,"/books/two.epub");
-     favorites->count=1;strcpy(favorites->paths[0],p->items[0].path);
-     for(int list=0;list<2;list++){pn_shelf_options_t o={.battery_percent=-1,.list_mode=list!=0};
-      assert(pn_shelf_render_ex(p,&font,&frame,-1,false,false,NULL,&o)==PN_OK);memcpy(before,bytes,684*1216/2);
-      o.favorite_items=favorites;assert(pn_shelf_render_ex(p,&font,&frame,-1,false,false,NULL,&o)==PN_OK);
-      assert(memcmp(before,bytes,684*1216/2)!=0);
-      int second_y=list?550:428,second_x=list?32:254;
-      for(int y=second_y;y<second_y+112;y++)for(int x=second_x;x<second_x+80;x++)assert(pn_frame_get(&frame,x,y)==((before[y*342+x/2]>>(x%2?4:0))&15));
-      favorites->count=0;assert(pn_shelf_render_ex(p,&font,&frame,-1,false,false,NULL,&o)==PN_OK);assert(!memcmp(before,bytes,684*1216/2));favorites->count=1;
-     }
-     pn_shelf_covers_t *covers=calloc(1,sizeof *covers);assert(covers);pn_shelf_covers_set_last(covers,&p->items[0]);
-     pn_shelf_options_t o={.battery_percent=-1};assert(pn_shelf_render_ex(p,&font,&frame,-1,false,false,covers,&o)==PN_OK);memcpy(before,bytes,684*1216/2);
-     o.favorite_items=favorites;assert(pn_shelf_render_ex(p,&font,&frame,-1,false,false,covers,&o)==PN_OK);
-     bool changed=false;for(int y=170;y<200;y++)for(int x=104;x<134;x++)if(pn_frame_get(&frame,x,y)!=((before[y*342+x/2]>>(x%2?4:0))&15))changed=true;assert(changed);
-     free(covers);free(before);free(favorites);}
-    assert(pn_shelf_hit(p,100,1150)==PN_SHELF_HOME && pn_shelf_hit(p,340,1150)==-1 && pn_shelf_hit(p,600,1150)==PN_SHELF_MENU);
-    assert(pn_shelf_hit_with_transfer(p,340,1150,true)==PN_SHELF_TRANSFER && pn_shelf_hit_with_transfer(p,340,1150,false)==-1);
-    assert(pn_shelf_hit(p,100,120)==PN_SHELF_INDEX && pn_shelf_hit(p,600,100)==-1 && pn_shelf_hit(p,100,50)==-1 && pn_shelf_hit(p,500,50)==-1);
-    assert(pn_shelf_hit(p,200,230)==PN_SHELF_CONTINUE && pn_shelf_hit(p,50,350)==PN_SHELF_TAB_ALL && pn_shelf_hit(p,200,350)==PN_SHELF_TAB_RECENT && pn_shelf_hit(p,500,350)==-1);
-    /* 无封面时的排版卡、有继续阅读卡的各种状态都能绘制，绘制后字号不变。/ Fallback cards and every continue-card state draw, leaving the font size unchanged. */
-    {pn_shelf_covers_t *covers=calloc(1,sizeof *covers);assert(covers);
-     assert(pn_shelf_render_covers(p,&font,&frame,0,false,true,covers)==PN_OK && font.pixels==24);
-     pn_catalog_item_t last={0};strcpy(last.name,"最近读的一本很长很长很长很长很长很长的书名.epub");last.format=PN_BOOK_EPUB;last.identified=true;last.progress=2700;pn_shelf_covers_set_last(covers,&last);
-     assert(pn_shelf_render_covers(p,&font,&frame,1,true,false,covers)==PN_OK && font.pixels==24);
-     pn_shelf_covers_set_last(covers,NULL);p->count=0;assert(pn_shelf_render_covers(p,&font,&frame,-1,false,true,covers)==PN_OK);p->count=2;free(covers);}
-    assert(pn_shelf_index_render(&font,&frame)==PN_OK && pn_shelf_index_hit(100,230)=='a' && pn_shelf_index_hit(259,980)=='z' && pn_shelf_index_hit(573,980)=='<' && pn_shelf_index_hit(416,980)=='#' && pn_shelf_index_hit(100,300)==0 && pn_shelf_index_hit(20,230)==0);pn_font_close(&font);pn_free(bytes);free(p);assert(!pool.live && !pool.used);return 0;}
+int main(void){
+    pn_pool_t pool;assert(!pn_pool_init(&pool,2u*1024u*1024u,NULL,NULL,NULL));
+    pn_font_t font={0};pn_text_source_t source=pn_font_builtin_source();assert(pn_font_open(&font,&pool,&source,24)==PN_OK);
+    uint8_t *bytes=pn_alloc(&pool,684*1216/2),*before=malloc(684*1216/2);pn_frame_t frame;
+    assert(before && pn_frame_bind(&frame,bytes,684*1216/2,684,1216));
+    /* 不在UI子集中的汉字必须用内置中文补字，度量与绘制同源；嵌套退出不得悬挂字体。/ Hanzi outside the UI subset uses resident Chinese with shared metrics/rendering; nested exit cannot leave dangling fonts. */
+    {const uint32_t cp=0x9f9b;int32_t advance;assert(pn_font_advance(&font,cp,&advance)==PN_EMPTY);
+     pn_w_font_scope_t outer={0},inner={0};assert(pn_w_font_scope_begin(&outer,&pool,NULL)==PN_OK);size_t used=pool.used;
+     assert(pn_w_font_scope_begin(&inner,&pool,NULL)==PN_OK && pool.used==used);pn_w_font_scope_end(&inner);
+     pn_frame_clear(&frame,15);assert(pn_w_text(&font,&frame,"\xe9\xbe\x9b",32,80,100,PN_ALIGN_LEFT)==PN_OK);memcpy(before,bytes,684*1216/2);
+     pn_frame_clear(&frame,15);assert(pn_font_size(&outer.resident,24)==PN_OK && pn_font_draw(&outer.resident,&frame,cp,32*64,80,PN_FONT_GRAY)==PN_OK);
+     assert(!memcmp(before,bytes,684*1216/2));pn_w_font_scope_end(&outer);pn_w_font_scope_end(&outer);}
+    pn_catalog_page_t *p=calloc(1,sizeof *p);pn_shelf_covers_t *covers=calloc(1,sizeof *covers);assert(p && covers);
+    p->count=8;p->total=18;p->more=true;
+    for(size_t i=0;i<8;i++){snprintf(p->items[i].name,sizeof p->items[i].name,"Book %zu.epub",i);snprintf(p->items[i].path,sizeof p->items[i].path,"/books/%zu.epub",i);p->items[i].format=PN_BOOK_EPUB;}
+    strcpy(p->items[0].name,"一本很长很长很长很长的中文文件名.epub");
+    /* 密度与装饰不改变选择身份，也不碰游标文件名。/ Density and decoration preserve selection identity and cursor filenames. */
+    for(unsigned cols=3;cols<=4;cols++)for(unsigned style=0;style<PN_SHELF_STYLE_COUNT;style++){
+        pn_shelf_options_t o={.columns=cols,.style=style,.search=true,.layout_toggle=true,.favorites_tab=true};
+        assert(pn_shelf_capacity(&o)==cols*2);
+        assert(pn_shelf_render_ex(p,&font,&frame,-1,false,true,covers,&o)==PN_OK && font.pixels==24);
+        memcpy(before,bytes,684*1216/2);
+        assert(pn_shelf_render_ex(p,&font,&frame,0,false,true,covers,&o)==PN_OK);
+        int pitch=cols==4?162:222,w=cols==4?134:176,h=cols==4?186:244,y0=cols==4?308:284;
+        for(unsigned i=0;i<cols*2;i++){
+            int x=32+(int)(i%cols)*pitch,y=y0+(int)(i/cols)*354;
+            assert(pn_shelf_hit_ex(p,x+24,y+100,&o)==(int)i);
+            assert(pn_shelf_hit_ex(p,x+w-24,y+24,&o)==PN_SHELF_MORE+(int)i);
+        }
+        /* 焦点不改变封面像素，避免默认黑框。/ Focus leaves cover pixels untouched, avoiding a default black frame. */
+        for(int y=y0;y<y0+h-12;y++)for(int x=40;x<32+w-10;x++)assert(pn_frame_get(&frame,x,y)==((before[y*342+x/2]>>(x%2?4:0))&15));
+        assert(pn_shelf_hit_ex(p,600,190,&o)==PN_SHELF_LAYOUT && pn_shelf_hit_ex(p,560,110,&o)==PN_SHELF_SEARCH);
+        assert(pn_shelf_hit_ex(p,50,190,&o)==PN_SHELF_TAB_ALL && pn_shelf_hit_ex(p,200,190,&o)==PN_SHELF_TAB_RECENT && pn_shelf_hit_ex(p,300,190,&o)==PN_SHELF_TAB_FAVORITES);
+        assert(pn_shelf_hit_ex(p,600,1080,&o)==PN_SHELF_NEXT && pn_shelf_hit_ex(p,100,1080,&o)==-1);
+    }
+    /* 四栏不与书籍序号或翻页命令冲突。/ Four tabs cannot collide with book or paging commands. */
+    assert(pn_shelf_hit(p,85,1150)==PN_SHELF_READING_HOME && pn_shelf_hit(p,256,1150)==PN_SHELF_HOME && pn_shelf_hit(p,427,1150)==PN_SHELF_TRANSFER && pn_shelf_hit(p,598,1150)==PN_SHELF_MENU);
+    for(int tab=0;tab<4;tab++){assert(pn_w_navigation_hit(85+171*tab,1150)==tab);assert(pn_w_navigation(&font,&frame,(pn_navigation_t)tab)==PN_OK && font.pixels==24);}
+    assert(pn_w_navigation_hit(-1,1150)==-1 && pn_w_navigation_hit(100,1103)==-1);
+    pn_shelf_options_t list={.list_mode=true,.search=true};assert(pn_shelf_capacity(&list)==5);
+    for(int i=0;i<5;i++){assert(pn_shelf_hit_ex(p,150,300+i*150,&list)==i);assert(pn_shelf_hit_ex(p,600,300+i*150,&list)==PN_SHELF_MORE+i);}
+    assert(pn_shelf_hit_ex(p,100,1030,&list)==-1);
+    /* 元数据改变展示，而原文件名保留。/ Metadata changes presentation while raw filenames remain untouched. */
+    strcpy(covers->display[0].title,"真正的作品名");strcpy(covers->display[0].author,"测试作者");
+    assert(pn_shelf_render_ex(p,&font,&frame,-1,false,true,covers,&list)==PN_OK);
+    assert(!strcmp(p->items[0].name,"一本很长很长很长很长的中文文件名.epub"));
+    memcpy(before,bytes,684*1216/2);covers->display[0].author[0]=0;
+    assert(pn_shelf_render_ex(p,&font,&frame,-1,false,true,covers,&list)==PN_OK && memcmp(before,bytes,684*1216/2));
+    /* 继续卡仅首页命中；空记录不伪造书籍。/ Only Home exposes Continue; empty history invents no books. */
+    p->count=3;p->total=3;p->more=false;pn_shelf_covers_set_last(covers,&p->items[0]);
+    pn_shelf_options_t home={.home=true};
+    assert(pn_shelf_render_ex(p,&font,&frame,-1,true,false,covers,&home)==PN_OK && font.pixels==24);
+    assert(pn_shelf_hit_ex(p,300,540,&home)==PN_SHELF_CONTINUE && pn_shelf_hit_ex(p,580,620,&home)==PN_SHELF_HOME);
+    assert(pn_shelf_hit_ex(p,300,710,&home)==1 && pn_shelf_hit_ex(p,300,880,&home)==2 && pn_shelf_hit_ex(p,300,1050,&home)==-1);
+    p->count=0;pn_shelf_covers_set_last(covers,NULL);
+    assert(pn_shelf_render_ex(p,&font,&frame,-1,true,false,covers,&home)==PN_OK);
+    assert(pn_shelf_hit_ex(p,300,540,&home)==PN_SHELF_HOME && pn_shelf_hit_ex(p,300,820,&home)==PN_SHELF_TRANSFER);
+    assert(pn_shelf_render_ex(p,&font,&frame,-1,false,true,covers,&list)==PN_OK);
+    assert(pn_shelf_index_render(&font,&frame)==PN_OK && pn_shelf_index_hit(100,230)=='a' && pn_shelf_index_hit(573,980)=='<');
+    pn_font_close(&font);pn_free(bytes);free(before);free(covers);free(p);assert(!pool.live && !pool.used);
+    puts("home/library: four-tab navigation, 3/4/list, metadata, cursor stability, subtle focus and empty history passed");return 0;
+}

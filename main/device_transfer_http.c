@@ -6,6 +6,7 @@
  * Frozen: ESP-IDF6.1 header layout only, never permit duplicate critical headers or log tokens.
  */
 #define _POSIX_C_SOURCE 200809L
+#include "pn_brand.h"
 #include "device_transfer_http.h"
 #include "transfer_assets.h"
 #include "esp_http_server.h"
@@ -116,6 +117,13 @@ static bool json_guard(const uint8_t *bytes,size_t n){
  return !quoted && !depth;
 }
 static pn_upload_kind_t kind(const char *s){if(!s)return 0;return !strcmp(s,"book")?PN_UPLOAD_BOOK:!strcmp(s,"font")?PN_UPLOAD_FONT:!strcmp(s,"cover")?PN_UPLOAD_COVER:!strcmp(s,"wallpaper")?PN_UPLOAD_WALLPAPER:0;}
+/// 精确资源路由，拒绝同前缀的其他路径。/ Match exact resource routes, rejecting other paths with the same prefix.
+static pn_upload_kind_t resource_route(const char *uri,const char **query){
+ const char *paths[]={"/api/v1/fonts","/api/v1/covers","/api/v1/wallpapers"};
+ const pn_upload_kind_t kinds[]={PN_UPLOAD_FONT,PN_UPLOAD_COVER,PN_UPLOAD_WALLPAPER};
+ for(unsigned i=0;i<3;i++){size_t n=strlen(paths[i]);if(!strncmp(uri,paths[i],n) && (!uri[n] || uri[n]=='?')){*query=uri[n]?uri+n:NULL;return kinds[i];}}
+ return 0;
+}
 static const char *kind_name(pn_upload_kind_t value){return value==PN_UPLOAD_BOOK?"book":value==PN_UPLOAD_FONT?"font":value==PN_UPLOAD_COVER?"cover":"wallpaper";}
 static esp_err_t execute(http_t *s,httpd_req_t *r,pn_transfer_command_t *command,unsigned success){
  pn_transfer_reply_t reply;pn_status_t status=pn_transfer_worker_execute(s->worker,command,&reply);
@@ -173,7 +181,7 @@ static esp_err_t dispatch(httpd_req_t *r){
  if((r->method==HTTP_GET || r->method==HTTP_DELETE) && r->content_len)return error(r,400,"该操作不接受请求正文");
  if(r->method==HTTP_GET){
   const pn_transfer_asset_t *asset=pn_transfer_asset(uri);if(asset)return send_data(r,200,asset->mime,(const char *)asset->bytes,asset->size);
-  if(!strcmp(uri,"/api/v1/status")){cJSON *json=cJSON_CreateObject();bool v=string(json,"name","小纸 Pico");v&=string(json,"version","0.0.56");v&=number(json,"chunk_size",PN_UPLOAD_CHUNK);v&=boolean(json,"preview",false);return json_send(r,200,json,v);}
+  if(!strcmp(uri,"/api/v1/status")){cJSON *json=cJSON_CreateObject();bool v=string(json,"name",PN_BRAND_NAME);v&=string(json,"version","0.0.56");v&=number(json,"chunk_size",PN_UPLOAD_CHUNK);v&=boolean(json,"preview",false);return json_send(r,200,json,v);}
  }
  bool pairing=r->method==HTTP_POST && !strcmp(uri,"/api/v1/pair");
  if(!pairing && !authorized)return error(r,401,"请先输入配对码");
@@ -222,7 +230,7 @@ static esp_err_t dispatch(httpd_req_t *r){
   if(queued!=PN_OK)return error(r,400,"网络名称或口令格式无效（口令8–63位或留空）");
   cJSON *result=cJSON_CreateObject();return json_send(r,202,result,boolean(result,"pending",true));
  }
- pn_transfer_command_t command={0};bool valid=false;unsigned success=200;
+ pn_transfer_command_t command={0};bool valid=false;unsigned success=200;const char *resource_query=NULL;pn_upload_kind_t resource=resource_route(uri,&resource_query);
  if(r->method==HTTP_POST && !strcmp(uri,"/api/v1/uploads")){
   const char *keys[]={"kind","name","size","sha256","replace"};const char *name=get_string(json,"name");command.operation=PN_TRANSFER_BEGIN;command.request.kind=kind(get_string(json,"kind"));command.request.has_digest=true;
   valid=fields(json,keys,5,15) && name && strlen(name)<PN_UPLOAD_NAME_MAX && integer(json,"size",&command.request.size) && decode(get_string(json,"sha256"),command.request.digest.sha256,32);
@@ -238,11 +246,10 @@ static esp_err_t dispatch(httpd_req_t *r){
    else if(r->method==HTTP_PUT && !strcmp(tail,"/chunks")){char offset[32],sha[65];command.operation=PN_TRANSFER_CHUNK;command.bytes=s->bytes;command.length=r->content_len;valid=valid && header(r,"X-Offset",offset,sizeof offset) && decimal(offset,512u*1024u*1024u,&command.offset) && header(r,"X-Chunk-SHA256",sha,sizeof sha) && decode(sha,command.digest.sha256,32);}
    else valid=false;
   }
- }else if((r->method==HTTP_GET || r->method==HTTP_DELETE) && (!strcmp(uri,"/api/v1/fonts") || !strncmp(uri,"/api/v1/fonts?",14))){
-  // 已安装字体：GET分页列表（after游标可选）；DELETE须带名称、长度与SHA-256，由服务核对身份。
-  // Installed fonts: GET is a paged list (optional after cursor); DELETE needs name, size and SHA-256 and the service checks identity.
-  const char *query=uri[13]?uri+13:NULL;unsigned seen=0;static const char *const list_keys[]={"after"},*const delete_keys[]={"name","size","sha256"};
-  char values[3][PN_UPLOAD_NAME_MAX];command.request.kind=PN_UPLOAD_FONT;
+ }else if((r->method==HTTP_GET || r->method==HTTP_DELETE) && resource){
+  // 字体/图片原图：分页与删除复用owner，删除不会修改内部已应用壁纸。/ Font/image sources: paging and deletion share the owner; deleting never modifies the internally applied wallpaper.
+  const char *query=resource_query;unsigned seen=0;static const char *const list_keys[]={"after"},*const delete_keys[]={"name","size","sha256"};
+  char values[3][PN_UPLOAD_NAME_MAX];command.request.kind=resource;
   if(r->method==HTTP_GET){
    valid=query_parse(query,list_keys,1,values,&seen);command.operation=PN_TRANSFER_LIST;
    if(valid && (seen&1u))snprintf(command.request.name,sizeof command.request.name,"%s",values[0]);

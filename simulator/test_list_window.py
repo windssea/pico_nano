@@ -4,11 +4,11 @@ with tempfile.TemporaryDirectory() as folder:
     root=pathlib.Path(folder);books=root/'books';books.mkdir()
     for name in 'abcdefgh':(books/f'{name}book.txt').write_text('测试。\n',encoding='utf-8')
     def run(script):
-        r=subprocess.run([sys.argv[1],'--library',str(books),'--state-dir',str(root/'state')],env=dict(os.environ,SDL_VIDEODRIVER='dummy',PN_SIM_LIBRARY_SCRIPT=script),capture_output=True,text=True,timeout=60)
+        r=subprocess.run([sys.argv[1],'--library',str(books),'--state-dir',str(root/'state')],env=dict(os.environ,SDL_VIDEODRIVER='dummy',PN_SIM_LIBRARY_SCRIPT="library,"+script),capture_output=True,text=True,timeout=60)
         assert r.returncode==0,(r.stdout,r.stderr)
         assert 'used=0 live=0' in r.stdout,r.stdout
         return r.stdout
-    LAYOUT='tap:600:360'
+    LAYOUT='tap:600:190'
     out=run('quit');assert 'library_page first=abook.txt count=6' in out,out
     # 切到列表：第一页5本，下一页3本，再翻回上一页仍是5本。/ Toggle to list: five on the first page, three on the next, and back again five.
     out=run(','.join((LAYOUT,'library-next','library-previous','quit')))

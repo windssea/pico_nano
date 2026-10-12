@@ -109,6 +109,11 @@ pn_status_t pn_reader_app_font_preview(pn_reader_app_t *,const pn_font_preferenc
 pn_status_t pn_reader_app_font_apply(pn_reader_app_t *,const pn_font_preferences_t *,uint64_t,pn_reader_present_fn,void *);
 /// 恢复旧字体及原锚点；失败不丢候选或待提交请求。/ Restore accepted fonts/original anchor, retaining candidate/pending request on failure.
 pn_status_t pn_reader_app_font_cancel(pn_reader_app_t *,uint64_t,pn_reader_present_fn,void *);
+/// 候选字体直接呈现在目标设置页，确认后保存；不呈现中间正文帧。/ Present candidate fonts directly in the destination settings page and save after confirmation, without an intermediate body frame.
+pn_status_t pn_reader_app_font_apply_view(pn_reader_app_t *,const pn_font_preferences_t *,pn_reader_overlay_fn,void *,uint64_t,pn_reader_present_fn,void *);
+/// 恢复字体后直接呈现目标设置页，确认/失败屏障保持。/ Restore fonts directly into the destination settings page, retaining confirmation/failure barriers.
+pn_status_t pn_reader_app_font_cancel_view(pn_reader_app_t *,pn_reader_overlay_fn,void *,uint64_t,pn_reader_present_fn,void *);
+
 
 /// 当前字体组及默认目录，错误不改输出。/ Current font set and default directory, preserving outputs on error.
 pn_status_t pn_reader_app_fonts_get(pn_reader_app_t *,pn_font_preferences_t *,char *directory,size_t capacity);

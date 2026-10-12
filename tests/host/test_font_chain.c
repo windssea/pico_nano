@@ -13,6 +13,9 @@ int main(int argc,char **argv){assert(argc==2);file_t f={fopen(argv[1],"rb"),tru
  assert(pn_font_chain_choose(&chain,0x4e2d,&choice)==PN_OK && choice.font!=&primary && choice.font->pixels==44);
  int32_t width;assert(pn_font_advance(choice.font,0x4e2d,&width)==PN_OK && width==choice.advance_64);
  assert(pn_font_size(&primary,56)==PN_OK && pn_font_chain_choose(&chain,0x4e2d,&choice)==PN_OK && choice.font->pixels==56);
+ // 拉丁附加字与常用字集外的汉字，必须可由系统回退度量和绘制。/ Supplemental Latin and Hanzi outside the common repertoire must measure and render through system fallback.
+ const uint32_t extra[]={0x00f1,0x9574,0x9e3b};uint8_t bytes[96*96/2];pn_frame_t frame;assert(pn_frame_bind(&frame,bytes,sizeof bytes,96,96));
+ for(size_t i=0;i<sizeof extra/sizeof extra[0];i++){assert(pn_font_chain_choose(&chain,extra[i],&choice)==PN_OK && choice.font!=&primary);pn_frame_clear(&frame,15);assert(pn_font_chain_draw(&chain,&frame,extra[i],8*64,70,PN_FONT_GRAY)==PN_OK);bool ink=false;for(size_t j=0;j<sizeof bytes;j++)ink|=bytes[j]!=0xff;assert(ink);}
  f.live=false;assert(pn_font_chain_choose(&chain,0x4e2d,&choice)==PN_STALE_MEDIA);f.live=true;
  pn_font_chain_clear(&chain);pn_font_close(&primary);
  pn_text_source_t builtin=pn_font_builtin_source();assert(pn_font_open(&primary,&pool,&builtin,44)==PN_OK);

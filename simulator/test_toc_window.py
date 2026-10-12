@@ -11,7 +11,7 @@ with tempfile.TemporaryDirectory() as folder:
   body=''.join(f'<h2 id="p{i}">第{i}节</h2>'+('<p>阅读文字，页面控制与目录选择测试。</p>'*30) for i in range(12))
   z.writestr('OPS/a.xhtml','<html xmlns="http://www.w3.org/1999/xhtml"><body>'+body+'</body></html>')
  def run(mode,state,script):
-  env=dict(os.environ,SDL_VIDEODRIVER='dummy',**{('PN_SIM_INPUT_SCRIPT' if mode=='--book' else 'PN_SIM_LIBRARY_SCRIPT'):script})
+  env=dict(os.environ,SDL_VIDEODRIVER='dummy',**{('PN_SIM_INPUT_SCRIPT' if mode=='--book' else 'PN_SIM_LIBRARY_SCRIPT'):(('library,' if mode=='--library' else '')+script)})
   r=subprocess.run([sys.argv[1],mode,str(book if mode=='--book' else books),'--state-dir',str(state)],env=env,capture_output=True,text=True,timeout=40)
   assert r.returncode==0 and 'used=0 live=0' in r.stdout,(r.stdout,r.stderr)
   return r

@@ -11,11 +11,11 @@ with tempfile.TemporaryDirectory() as directory:
     (books / "book.txt").write_text("Read Pico typesetting changes preserve the anchor.\n" * 300, encoding="utf8")
     args = [sys.argv[1], "--library", str(books), "--state-dir", str(root / "state")]
     script = "enter,next,styles,style-plus,style-preview,style-form,style-cancel,styles,style-plus,style-down,style-down,style-down,style-down,style-plus,style-apply,back,quit"
-    env = dict(os.environ, SDL_VIDEODRIVER="dummy", PN_SIM_LIBRARY_SCRIPT=script)
+    env = dict(os.environ, SDL_VIDEODRIVER="dummy", PN_SIM_LIBRARY_SCRIPT="library,"+script)
     result = subprocess.run(args, capture_output=True, text=True, env=env, timeout=30)
     assert result.returncode == 0, (result.stdout, result.stderr)
     assert "style_ui command=1 status=0" in result.stdout and "style_ui command=3 status=0 active=0" in result.stdout and "style_ui command=2 status=0 active=0" in result.stdout, result.stdout
-    env["PN_SIM_LIBRARY_SCRIPT"] = "continue,styles,style-cancel,back,quit"
+    env["PN_SIM_LIBRARY_SCRIPT"] = "library,continue,styles,style-cancel,back,quit"
     reopened = subprocess.run(args, capture_output=True, text=True, env=env, timeout=30)
     assert reopened.returncode == 0 and "style_ui open status=0 pixels=34" in reopened.stdout and "used=0 live=0" in reopened.stdout, (reopened.stdout, reopened.stderr)
     assert "tracking=5" in result.stdout, result.stdout
@@ -44,7 +44,7 @@ with tempfile.TemporaryDirectory() as directory:
         prefix='' if mode=='--book' else 'enter,'
         suffix='quit' if mode=='--book' else 'back,quit'
         def run(script):
-            env=dict(os.environ,SDL_VIDEODRIVER='dummy',**{script_var:prefix+script+suffix})
+            env=dict(os.environ,SDL_VIDEODRIVER='dummy',**{script_var:(('library,' if mode=='--library' else '')+prefix+script+suffix)})
             result=subprocess.run([sys.argv[1],mode,str(book if mode=='--book' else books),'--state-dir',str(state)],capture_output=True,text=True,env=env,timeout=40)
             assert result.returncode==0 and 'used=0 live=0' in result.stdout,(result.stdout,result.stderr)
             return result

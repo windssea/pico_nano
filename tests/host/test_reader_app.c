@@ -16,8 +16,12 @@
 #include <string.h>
 #include <unistd.h>
 #include <dirent.h>
-typedef struct {bool fail;unsigned calls;unsigned ink;pn_refresh_t profile;} screen_t;
-static pn_status_t present(void *ctx,const pn_frame_t *f,pn_refresh_t profile){screen_t *s=ctx;s->profile=profile;s->calls++;s->ink=0;for(int y=0;y<f->height;y++)for(int x=0;x<f->width;x++)s->ink+=pn_frame_get(f,x,y)<15;return s->fail?PN_IO:PN_OK;}
+typedef struct {bool fail;unsigned calls;unsigned ink;unsigned tag;pn_refresh_t profile;} screen_t;
+static pn_status_t present(void *ctx,const pn_frame_t *f,pn_refresh_t profile){screen_t *s=ctx;s->profile=profile;s->calls++;s->ink=0;s->tag=pn_frame_get(f,17,17);for(int y=0;y<f->height;y++)for(int x=0;x<f->width;x++)s->ink+=pn_frame_get(f,x,y)<15;return s->fail?PN_IO:PN_OK;}
+/* 最终目标页使用真实候选字体，并留可观察像素；测试不伪造呈现成功。/ The destination draws the actual candidate font and observable pixels; tests never fake presentation success. */
+static pn_status_t destination(void *ctx,pn_font_t *ui,pn_font_t *body,pn_frame_t *frame){
+ (void)ui;if(ctx && *(bool *)ctx)return PN_IO;pn_frame_clear(frame,15);pn_frame_rect(frame,16,16,4,4,9);return pn_font_draw(body,frame,'A',32*64,120,PN_FONT_GRAY);
+}
 int main(void){
     char dir[]="/tmp/pn-app-XXXXXX";assert(mkdtemp(dir));char book[384],state[384];snprintf(book,sizeof book,"%s/book.txt",dir);snprintf(state,sizeof state,"%s/state",dir);
     FILE *f=fopen(book,"wb");assert(f);for(unsigned i=0;i<300;i++)assert(fputs("Read Pico keeps your place. Read a book every day.\n",f)>=0);assert(fclose(f)==0);
@@ -49,6 +53,15 @@ int main(void){
     assert(pn_reader_app_font_preview(&app,&candidate,8,present,&screen)==PN_OK && pn_reader_app_progress(&app,&progress)==PN_OK && progress.source_offset==second);
     assert(pn_reader_app_font_cancel(&app,8,present,&screen)==PN_OK && pn_reader_app_progress(&app,&progress)==PN_OK && progress.source_offset==second);
     assert(pn_reader_app_font_apply(&app,&preferences,8,present,&screen)==PN_OK && pn_reader_app_progress(&app,&progress)==PN_OK && progress.source_offset==second);
+    // 新字体只呈现最终设置页；绘制/显示失败不接受，成功只一次回调且锚点不变。/ A new font presents only the destination; paint/display failures cannot accept it, and success calls once without moving the anchor.
+    unsigned calls=screen.calls;bool failed_paint=true;pn_font_preferences_t resident={0},observed;char view_directory[PN_FONT_REFERENCE_PATH_MAX];
+    assert(pn_reader_app_font_apply_view(&app,&resident,destination,&failed_paint,8,present,&screen)==PN_IO && screen.calls==calls && !pn_reader_app_last_confirmed(&app));
+    screen.fail=true;assert(pn_reader_app_font_apply_view(&app,&resident,destination,NULL,8,present,&screen)==PN_IO && screen.calls==calls+1);screen.fail=false;
+    assert(pn_reader_app_fonts_get(&app,&observed,view_directory,sizeof view_directory)==PN_OK && observed.primary.kind==PN_FONT_FILE);
+    calls=screen.calls;assert(pn_reader_app_font_apply_view(&app,&resident,destination,NULL,8,present,&screen)==PN_OK && screen.calls==calls+1 && screen.tag==9);
+    assert(pn_reader_app_progress(&app,&progress)==PN_OK && progress.source_offset==second);
+    calls=screen.calls;assert(pn_reader_app_font_cancel_view(&app,destination,NULL,8,present,&screen)==PN_OK && screen.calls==calls+1 && screen.tag==9);
+    assert(pn_reader_app_font_apply(&app,&preferences,8,present,&screen)==PN_OK);
     // 全局保存不改逐书覆盖；继承失败不落盘，成功保留阅读锚点。/ Global saves preserve overrides; failed inheritance does not persist, successful inheritance preserves anchors.
     pn_font_preferences_t global_fonts={0},loaded_fonts;assert(pn_reader_app_font_default(&app,&global_fonts)==PN_OK);
     pn_journal_files_t inspect_files;pn_journal_io_t inspect_io;assert(pn_font_preferences_files(&inspect_files,&preferences_media,&preferences_lease,state,&progress.book,&inspect_io)==PN_OK);

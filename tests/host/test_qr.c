@@ -11,7 +11,7 @@ int main(int argc,char **argv){
  assert(pn_qr_wifi_payload("Pico","short",payload,sizeof payload)==PN_INVALID);
  uint8_t *pixels=calloc(1,342u*1216u);assert(pixels);pn_frame_t frame;assert(pn_frame_bind(&frame,pixels,342u*1216u,684,1216));pn_frame_clear(&frame,15);
  assert(pn_qr_draw("http://192.168.4.1",&frame,32,232,280)==PN_OK);
- assert(pn_qr_wifi_payload("小纸 Pico-1234","ABCDEFGH2345",payload,sizeof payload)==PN_OK);assert(pn_qr_draw(payload,&frame,364,232,280)==PN_OK);
+ assert(pn_qr_wifi_payload("PicoNano-1234","ABCDEFGH2345",payload,sizeof payload)==PN_OK);assert(pn_qr_draw(payload,&frame,364,232,280)==PN_OK);
  assert(pn_qr_draw(payload,&frame,-1,0,280)==PN_INVALID && pn_qr_draw(payload,&frame,0,0,12)==PN_LIMIT);
  if(argc==2){FILE *f=fopen(argv[1],"wb");assert(f);fprintf(f,"P5\n684 1216\n255\n");for(int y=0;y<1216;y++)for(int x=0;x<684;x++)fputc(pn_frame_get(&frame,x,y)*17,f);assert(!fclose(f));}
  free(pixels);return 0;

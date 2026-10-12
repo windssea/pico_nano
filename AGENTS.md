@@ -4,7 +4,7 @@
 
 - 用户已授权在本目录开发。按阶段持续实现；未经用户明确授权不启动子agent。
 - 使用ESP-IDF v6.1、ESP32-S3；CI与板级SDKCONFIG隔离。可复跑入口为python tools/dev.py，详见BUILDING。
-- 产品名中文“小纸 Pico”，英文/日文“Read Pico”；pico_nano仅内部目录/工程代号。
+- 产品对外品牌统一为“PicoNano”（所有语言）；pico_nano仅内部目录/工程代号。复用硬件、许可证和资源身份保持原名。
 - VCOM从PMU读取，产品路径不写入或复制到NVS；不写SY7636A标定/电源时序寄存器。不读取有效VCOM则不推屏。
 - 默认挂载/恢复不能格式化或静默擦除NVS。未来USB和应用不能并行访问TF。
 - 上传资源必须遵守docs/SD_CARD_LAYOUT.md；所有通道复用pn_upload_directory和共享安装事务，客户端不能选择目录，图片明确分为封面/锁屏。目录常量在pn_sd_layout.h。

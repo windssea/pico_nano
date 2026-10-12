@@ -17,8 +17,8 @@ static bool valid(pn_font_t *font,pn_frame_t *frame){return font && font->impl &
 pn_status_t pn_reading_menu_render_lan(bool resume,const char *lan,pn_font_t *font,pn_frame_t *frame){
  if(!valid(font,frame))return PN_INVALID;
  pn_frame_clear(frame,15);pn_status_t s=pn_w_header(font,frame,"","阅读与传输",NULL);
- if(s==PN_OK)s=button(font,frame,resume?"继续阅读":"返回书架",230);
- if(s==PN_OK)s=button(font,frame,"全部书架",370);
+ if(s==PN_OK)s=button(font,frame,resume?"继续阅读":"返回",230);
+ if(s==PN_OK)s=button(font,frame,"全部书库",370);
  if(s==PN_OK)s=button(font,frame,"热点传书",510);
  if(s==PN_OK && lan){char label[96];snprintf(label,sizeof label,"局域网传书：%s",lan);s=button(font,frame,label,650);}
  if(s==PN_OK)s=button(font,frame,"设置（壁纸、字体、翻页）",790);

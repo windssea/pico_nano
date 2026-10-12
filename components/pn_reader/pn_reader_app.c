@@ -8,6 +8,7 @@
  */
 #define _POSIX_C_SOURCE 200809L
 #include "pn_reader_app.h"
+#include "pn_widgets.h"
 #include "pn_font_chain.h"
 #include "pn_font_preferences.h"
 #include "pn_font_set.h"
@@ -54,6 +55,7 @@ typedef struct {
     bool recent_recorded;
     pn_txt_progress_t bookmark_origin;
     bool has_bookmark_origin,last_confirmed;
+    pn_reader_overlay_fn font_view;void *font_view_ctx; ///< 仅本次字体事务借用的目标页 / Destination page borrowed only during this font transaction
     uint64_t last_now;
     bool persistent,has_restore,media_lost,force_full;
     unsigned since_clear;
@@ -178,6 +180,17 @@ static pn_status_t record_recent(app_t *a){
     if(status==PN_OK)status=pn_recent_touch(&io,a->pool,&item);
     a->recent_status=status;if(status==PN_OK)a->recent_recorded=true;return status;
 }
+/* 字体事务直接画最终目标页，使用候选正文字体；不递归推屏。/ Font transactions paint their final destination with the candidate body font, without recursive presentation. */
+static pn_status_t paint_font_view(app_t *a,pn_frame_t *frame){
+    pn_status_t status=ensure_body(a,a->style.pixels);
+    if(status==PN_OK && !a->ui.impl){pn_text_source_t source=pn_font_builtin_source();status=pn_font_open(&a->ui,a->pool,&source,36);}
+    int original=a->ui.pixels;if(status==PN_OK)status=pn_font_size(&a->ui,36);
+    pn_w_font_scope_t scope={0};if(status==PN_OK)status=pn_w_font_scope_begin(&scope,a->pool,body(a));
+    if(status==PN_OK)status=a->font_view(a->font_view_ctx,&a->ui,body(a),frame);
+    pn_w_font_scope_end(&scope);
+    if(a->ui.impl){pn_status_t restored=pn_font_size(&a->ui,original);if(status==PN_OK)status=restored;}
+    return status;
+}
 static pn_status_t step_location(pn_reader_app_t *app,pn_reader_action_t action,bool jump,uint64_t jump_offset,uint64_t now,
     pn_reader_present_fn present,void *ctx,bool *committed,int return_hint){
     if(committed)*committed=false;
@@ -195,7 +208,7 @@ static pn_status_t step_location(pn_reader_app_t *app,pn_reader_action_t action,
     bool dismiss_return=!jump && (action==PN_APP_NEXT || action==PN_APP_PREVIOUS || action==PN_APP_BEGINNING);
     pn_reader_receipt_t receipt;pn_status_t s=pn_reader_prepare(&a->reader,intent,offset,&receipt);if(s!=PN_OK)return s;
     pn_draw_lease_t lease={0};pn_frame_t *frame=NULL;s=pn_display_begin_draw(&a->display,a->reader.token,&lease,&frame);
-    if(s==PN_OK)s=render(a,frame,&receipt,dismiss_return?false:return_hint<0?a->has_bookmark_origin:return_hint!=0);
+    if(s==PN_OK)s=a->font_view?paint_font_view(a,frame):render(a,frame,&receipt,dismiss_return?false:return_hint<0?a->has_bookmark_origin:return_hint!=0);
     pn_refresh_t profile=(!a->reader.has_visible || a->force_full || a->since_clear>=a->style.gl_before_clear)?PN_REFRESH_GC16:PN_REFRESH_GL16;
     if(s==PN_OK)s=pn_display_publish(&a->display,&lease,receipt.ticket,profile);
     if(s!=PN_OK){if(lease.ticket)(void)pn_display_discard(&a->display,&lease);(void)pn_reader_complete(&a->reader,&receipt,false,now);return s;}
@@ -312,7 +325,9 @@ pn_status_t pn_reader_app_overlay(pn_reader_app_t *app,pn_reader_overlay_fn pain
         a->metadata_tried=true;pn_text_source_t source;if(body_source(a,&source)==PN_OK)(void)pn_font_open(&a->metadata,a->pool,&source,36);
     }
     int previous=a->ui.pixels;a->force_full=true;pn_status_t status=pn_font_size(&a->ui,36);
+    pn_w_font_scope_t scope={0};if(status==PN_OK)status=pn_w_font_scope_begin(&scope,a->pool,a->metadata.impl?&a->metadata:NULL);
     if(status==PN_OK)status=paint(paint_ctx,&a->ui,a->metadata.impl?&a->metadata:NULL,&a->frame);
+    pn_w_font_scope_end(&scope);
     pn_status_t restored=pn_font_size(&a->ui,previous);if(status==PN_OK)status=restored;
     return status==PN_OK?present(ctx,&a->frame,profile):status;
 }
@@ -401,12 +416,12 @@ static pn_status_t font_stage(pn_reader_app_t *app,const pn_font_preferences_t *
     if(app && app->impl)((app_t *)app->impl)->last_confirmed=false;
     if(!app || !app->impl || !present || pn_font_preferences_validate(prefs,true)!=PN_OK)return PN_INVALID;
     app_t *a=app->impl;if(a->media_lost)return PN_STALE_MEDIA;if(!a->reader.has_visible)return PN_EMPTY;if(now<a->last_now)return PN_INVALID;if(a->style_preview || a->style_pending)return PN_BUSY;
-    uint64_t origin=a->font_preview?a->font_origin:a->reader.visible.begin;pn_font_set_t candidate={0},previous={0};bool old_use=a->font_use_draft;
+    uint64_t origin=a->font_preview?a->font_origin:a->reader.visible.begin;pn_font_set_t candidate={0},previous={0};bool old_use=a->font_use_draft;pn_font_preferences_t old_draft=a->draft_fonts;
     pn_status_t status=pn_font_set_open(&candidate,a->pool,a->book_media,&a->book_lease,prefs,a->style.pixels);if(status!=PN_OK)return status;
-    (void)pn_font_set_move(&previous,&a->font_draft);(void)pn_font_set_move(&a->font_draft,&candidate);a->font_use_draft=true;font_metadata_reset(a);status=font_relayout(a);
+    (void)pn_font_set_move(&previous,&a->font_draft);(void)pn_font_set_move(&a->font_draft,&candidate);a->font_use_draft=true;a->draft_fonts=*prefs;font_metadata_reset(a);status=font_relayout(a);
     a->font_render=hint;a->draft_render=hint;if(status==PN_OK)status=step_location(app,PN_APP_OPEN,true,origin,now,present,ctx,NULL,-1);a->draft_render=false;a->font_render=false;
     if(a->last_confirmed){pn_font_set_close(&previous);a->font_origin=origin;a->font_preview=true;a->draft_fonts=*prefs;return status;}
-    pn_font_set_close(&a->font_draft);(void)pn_font_set_move(&a->font_draft,&previous);a->font_use_draft=old_use;font_metadata_reset(a);pn_status_t restored=font_relayout(a);return restored!=PN_OK?restored:status;
+    pn_font_set_close(&a->font_draft);(void)pn_font_set_move(&a->font_draft,&previous);a->font_use_draft=old_use;a->draft_fonts=old_draft;font_metadata_reset(a);pn_status_t restored=font_relayout(a);return restored!=PN_OK?restored:status;
 }
 static void font_accept(app_t *a){
     font_metadata_reset(a);pn_font_set_close(&a->font_live);(void)pn_font_set_move(&a->font_live,&a->font_draft);a->font_use_draft=false;a->font_preview=false;a->font_pending=false;a->live_fonts=a->pending_fonts;a->fonts_known=true;
@@ -426,6 +441,19 @@ static pn_status_t font_apply_record(pn_reader_app_t *app,const pn_font_preferen
     a->pending_fonts=*prefs;a->pending_record=*record;a->font_pending=a->persistent;pn_status_t saved=font_write(a,record);if(saved!=PN_OK)return saved;font_accept(a);return status;
 }
 pn_status_t pn_reader_app_font_apply(pn_reader_app_t *app,const pn_font_preferences_t *prefs,uint64_t now,pn_reader_present_fn present,void *ctx){return font_apply_record(app,prefs,prefs,now,present,ctx);}
+/* 目标页回调仅在同步事务中有效，返回时无论成功失败都解除借用。/ The destination callback lives only during the synchronous transaction and is cleared on every return. */
+pn_status_t pn_reader_app_font_apply_view(pn_reader_app_t *app,const pn_font_preferences_t *prefs,pn_reader_overlay_fn paint,void *view_ctx,uint64_t now,pn_reader_present_fn present,void *ctx){
+    if(app && app->impl)((app_t *)app->impl)->last_confirmed=false;
+    if(!app || !app->impl || !paint)return PN_INVALID;
+    app_t *a=app->impl;if(a->font_view)return PN_BUSY;a->font_view=paint;a->font_view_ctx=view_ctx;
+    pn_status_t status=pn_reader_app_font_apply(app,prefs,now,present,ctx);a->font_view=NULL;a->font_view_ctx=NULL;return status;
+}
+pn_status_t pn_reader_app_font_cancel_view(pn_reader_app_t *app,pn_reader_overlay_fn paint,void *view_ctx,uint64_t now,pn_reader_present_fn present,void *ctx){
+    if(app && app->impl)((app_t *)app->impl)->last_confirmed=false;
+    if(!app || !app->impl || !paint)return PN_INVALID;
+    app_t *a=app->impl;if(a->font_view)return PN_BUSY;a->font_view=paint;a->font_view_ctx=view_ctx;
+    pn_status_t status=pn_reader_app_font_cancel(app,now,present,ctx);a->font_view=NULL;a->font_view_ctx=NULL;return status;
+}
 pn_status_t pn_reader_app_font_inherit(pn_reader_app_t *app,uint64_t now,pn_reader_present_fn present,void *ctx){
     if(app && app->impl)((app_t *)app->impl)->last_confirmed=false;
     if(!app || !app->impl || !present)return PN_INVALID;
@@ -459,7 +487,7 @@ pn_status_t pn_reader_app_fonts_get(pn_reader_app_t *app,pn_font_preferences_t *
     if(!app || !app->impl || !out || !directory || !capacity)return PN_INVALID;
     app_t *a=app->impl;if(a->media_lost)return PN_STALE_MEDIA;
     if(!a->fonts_known){pn_font_preferences_t p={0};pn_status_t status=PN_OK;if(*a->boot_primary)status=pn_font_reference_capture(a->pool,a->book_media,&a->book_lease,a->boot_primary,&p.primary);if(status==PN_OK && *a->boot_fallback)status=pn_font_reference_capture(a->pool,a->book_media,&a->book_lease,a->boot_fallback,&p.fallback);if(status!=PN_OK)return status;a->live_fonts=p;a->fonts_known=true;}
-    const pn_font_preferences_t *p=a->font_preview?&a->draft_fonts:&a->live_fonts;const char *path=p->primary.kind==PN_FONT_FILE?p->primary.path:p->fallback.kind==PN_FONT_FILE?p->fallback.path:NULL;
+    const pn_font_preferences_t *p=a->font_use_draft?&a->draft_fonts:&a->live_fonts;const char *path=p->primary.kind==PN_FONT_FILE?p->primary.path:p->fallback.kind==PN_FONT_FILE?p->fallback.path:NULL;
     char folder[PN_FONT_REFERENCE_PATH_MAX];if(path){strcpy(folder,path);char *slash=strrchr(folder,'/');if(!slash)return PN_INVALID;if(slash==folder)slash[1]=0;else *slash=0;}else{
 #ifdef ESP_PLATFORM
         strcpy(folder,"/sdcard/fonts");

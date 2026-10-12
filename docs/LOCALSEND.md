@@ -6,7 +6,7 @@
 
 ## 协议与产品范围
 
-协议来源为 [LocalSend 官方协议 v2.2](https://github.com/localsend/protocol/blob/62bd3406ec80d62f2ed46269cdc06c4dcc391083/README.md)，核对日期 2026-10-11。首期实现接收端，设备在传输页由用户开启，退出或锁屏时按现有停止屏障关闭。设备名“小纸 Pico”，接收已支持的 TXT/EPUB、TTF、JPEG/PNG；PDF/FB2/CBZ在阅读内核支持前拒绝，不按扩展名假装支持。
+协议来源为 [LocalSend 官方协议 v2.2](https://github.com/localsend/protocol/blob/62bd3406ec80d62f2ed46269cdc06c4dcc391083/README.md)，核对日期 2026-10-11。首期实现接收端，设备在传输页由用户开启，退出或锁屏时按现有停止屏障关闭。设备名“PicoNano”，接收已支持的 TXT/EPUB、TTF、JPEG/PNG；PDF/FB2/CBZ在阅读内核支持前拒绝，不按扩展名假装支持。
 
 目标为同一家庭网络下，官方 Windows/Android/iOS 客户端发现设备、选择文件、设备确认后接收。热点模式另外验证手机路由与组播行为，不以家庭网络结果代替。初期不实现反向下载、剪贴板或任意文件导入。
 

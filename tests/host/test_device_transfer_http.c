@@ -13,6 +13,8 @@
 #include <stdatomic.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <sys/stat.h>
+#include <errno.h>
 static httpd_uri_t route;
 static char scratch[2048],response[4096];
 static unsigned code,headers;
@@ -68,7 +70,7 @@ int main(void){
  pn_upload_files_options_t options={.root=root};pn_transfer_worker_t worker={0};assert(pn_transfer_worker_open(&worker,&media,&options,6u*1024u*1024u,NULL,NULL,NULL)==PN_OK);
  pn_device_transfer_http_t server={0};assert(pn_device_transfer_http_open(&server,&worker,"192.168.4.1",80)==PN_OK);char pin[7];assert(pn_device_transfer_http_code(&server,pin)==PN_OK);
  int sockets[2];assert(socketpair(AF_UNIX,SOCK_STREAM,0,sockets)==0);assert(open_socket(&route,sockets[0])==ESP_OK);assert(write(sockets[1],"a",1)==1);char received;assert(receive(&route,sockets[0],&received,1,0)==1 && received=='a');
- cJSON *json=request(HTTP_GET,"/api/v1/status",NULL,0,NULL,NULL);assert(code==200 && json);cJSON_Delete(json);
+ cJSON *json=request(HTTP_GET,"/api/v1/status",NULL,0,NULL,NULL);assert(code==200 && json && !strcmp(cJSON_GetObjectItemCaseSensitive(json,"name")->valuestring,"PicoNano"));cJSON_Delete(json);
  json=request(HTTP_POST,"/api/v1/uploads","{}",2,NULL,NULL);assert(code==401);cJSON_Delete(json);
  char pair[64];snprintf(pair,sizeof pair,"{\"code\":\"%s\"}",pin);
  json=request(HTTP_POST,"/api/v1/pair",pair,strlen(pair),NULL,"Host: evil.test");assert(code==400);cJSON_Delete(json);
@@ -97,6 +99,16 @@ int main(void){
  json=request(HTTP_POST,"/api/v1/uploads",begin,strlen(begin),token,NULL);assert(code==201);strcpy(id,cJSON_GetObjectItemCaseSensitive(json,"upload_id")->valuestring);cJSON_Delete(json);snprintf(uri,sizeof uri,"/api/v1/uploads/%s/chunks",id);
  json=request(HTTP_PUT,uri,text,sizeof text-1,token,extra);assert(code==200);cJSON_Delete(json);snprintf(uri,sizeof uri,"/api/v1/uploads/%s/complete",id);
  json=request(HTTP_POST,uri,complete,strlen(complete),token,NULL);assert(code==422);cJSON_Delete(json);
+ /* 图片资源路由：各自目录、严格查询、身份核对与删除。/ Image resource routes: separate directories, strict queries, identity checking and deletion. */
+ for(unsigned i=0;i<2;i++){
+  const char *dir=i?"wallpapers":"covers",*route=i?"/api/v1/wallpapers":"/api/v1/covers";
+  char folder[256],path[300],uri[400];snprintf(folder,sizeof folder,"%s/%s",root,dir);assert(mkdir(folder,0700)==0 || errno==EEXIST);
+  snprintf(path,sizeof path,"%s/x.png",folder);FILE *image=fopen(path,"wb");assert(image && fwrite(text,1,sizeof text-1,image)==sizeof text-1 && fclose(image)==0);
+  json=request(HTTP_GET,route,NULL,0,token,NULL);assert(code==200 && cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(json,"items"))==1);cJSON_Delete(json);
+  snprintf(uri,sizeof uri,"%s?after=x.png&after=x.png",route);json=request(HTTP_GET,uri,NULL,0,token,NULL);assert(code==400);cJSON_Delete(json);
+  snprintf(uri,sizeof uri,"%s?name=x.png&size=%zu&sha256=%s",route,sizeof text,sha);json=request(HTTP_DELETE,uri,NULL,0,token,NULL);assert(code==409 && access(path,F_OK)==0);cJSON_Delete(json);
+  snprintf(uri,sizeof uri,"%s?name=x.png&size=%zu&sha256=%s",route,sizeof text-1,sha);json=request(HTTP_DELETE,uri,NULL,0,token,NULL);assert(code==200 && access(path,F_OK)!=0);cJSON_Delete(json);
+ }
  /* 已安装字体：授权列表、游标、严格查询、身份不符拒绝删除、成功删除。/ Installed fonts: authorized listing, cursor, strict queries, refusal on identity mismatch, and successful deletion. */
  {
   char folder[256],path[300];snprintf(folder,sizeof folder,"%s/fonts",root);snprintf(path,sizeof path,"%s/x.ttf",folder);FILE *font=fopen(path,"wb");assert(font && fwrite(text,1,sizeof text-1,font)==sizeof text-1 && fclose(font)==0);

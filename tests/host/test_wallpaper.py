@@ -44,6 +44,11 @@ with tempfile.TemporaryDirectory() as folder:
     # 透明铺白。/ Transparency composites onto white.
     clear=root/'clear.png';clear.write_bytes(png(60,90,lambda x,y:(0,0) if x<30 else (0,255),alpha=True))
     p=run(clear,1,0,0,root/'t.pgm');assert at(p,100,600)==15 and at(p,600,600)==0
+    # 原生/二倍透明PNG在有界预处理内保留白底、半透明灰和实心笔画。/ Native/double-size transparent PNGs preserve white, translucent gray and opaque strokes under bounded preprocessing.
+    for scale in (1,2):
+        native=root/f'native-{scale}.png';native.write_bytes(png(W*scale,H*scale,lambda x,y:(0,0 if x<W*scale//3 else 128 if x<2*W*scale//3 else 255),alpha=True))
+        p=run(native,0,0,0,root/f'native-{scale}.pgm')
+        assert at(p,100,600)==15 and 7<=at(p,340,600)<=8 and at(p,600,600)==0
     # 大图走2倍超采样：黑白分界附近出现均值灰，两侧仍纯黑/纯白。/ Large source uses 2× supersampling: averaged gray near the seam, pure black/white on each side.
     big=root/'big.png';big.write_bytes(png(1400,2400,lambda x,y:0 if (x//7)%2==0 else 255))
     p=run(big,0,0,0,root/'big.pgm');values=set(p[600*W+50:600*W+600]);assert values-{0,15},'supersampling averages stripes'
@@ -55,4 +60,10 @@ with tempfile.TemporaryDirectory() as folder:
     for args in (['store',str(root/'wp')],['lock',str(root/'lock')]):
         r=subprocess.run([binary,*args],capture_output=True,timeout=120);assert r.returncode==0,(args,r.stdout,r.stderr)
     default=pgm(root/'lock-0.pgm');assert 0 in default and len(set(default))>2
+    # 独立构造旧v1自定义记录，确认升级不丢失已应用图片。/ Independently construct a legacy v1 custom record to verify applied wallpapers survive upgrades.
+    legacy=root/'legacy';legacy.mkdir();source=b'/missing/legacy.png'
+    header=b'PNWP'+struct.pack('<H6BQQqH',1,1,0,0,0,1,0,77,123,0,len(source))
+    payload=header+source+bytes([0x33])*(W*H//2)
+    (legacy/'lock.a').write_bytes(payload+struct.pack('<I',zlib.crc32(payload)))
+    r=subprocess.run([binary,'legacy',str(legacy)],capture_output=True,timeout=120);assert r.returncode==0,(r.stdout,r.stderr)
 print('wallpaper: contain/cover/shift, four rotations, transparency, supersampling, corrupt input, fault injection, A/B records and lock screens passed')

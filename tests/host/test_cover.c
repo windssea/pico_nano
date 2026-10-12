@@ -52,11 +52,11 @@ static int queue(const char *directory,const char *output,const char *cache){
     bool changed;pn_status_t status;size_t steps=0;
     while((status=pn_shelf_covers_step(covers,page,&pool,&media,dir,salt,BUDGET,&changed))==PN_OK){steps++;assert(!pool.used && !pool.live);}
     assert(status==PN_EMPTY && steps<=page->count);
-    for(size_t i=0;i<page->count;i++)printf("%s state=%d reason=%d\n",page->items[i].name,(int)covers->state[i],(int)covers->reason[i]);
+    for(size_t i=0;i<page->count;i++)printf("%s state=%d reason=%d title=%s author=%s\n",page->items[i].name,(int)covers->state[i],(int)covers->reason[i],covers->display[i].title,covers->display[i].author);
     /* 缓存预取应完全复现逐条结果，不留PENDING。/ Cache prefetch must reproduce every step result without leaving PENDING. */
     if(dir){pn_shelf_covers_t *again=calloc(1,sizeof *again);assert(again);pn_shelf_covers_reset(again,page);
         assert(pn_shelf_covers_cached(again,page,&pool,&media,dir,&changed)==PN_OK && !pool.used && !pool.live);
-        for(size_t i=0;i<page->count;i++){assert(again->state[i]==covers->state[i] && again->reason[i]==covers->reason[i]);if(again->state[i]==PN_COVER_READY)assert(!memcmp(again->pixels[i],covers->pixels[i],PN_COVER_BYTES));}
+        for(size_t i=0;i<page->count;i++){assert(again->state[i]==covers->state[i] && again->reason[i]==covers->reason[i] && !memcmp(&again->display[i],&covers->display[i],sizeof again->display[i]));if(again->state[i]==PN_COVER_READY)assert(!memcmp(again->pixels[i],covers->pixels[i],PN_COVER_BYTES));}
         free(again);}
     pn_font_t font={0};pn_text_source_t builtin=pn_font_builtin_source();assert(pn_font_open(&font,&pool,&builtin,24)==PN_OK);
     uint8_t *bytes=pn_alloc(&pool,684*1216/2);pn_frame_t frame;assert(pn_frame_bind(&frame,bytes,684*1216/2,684,1216));

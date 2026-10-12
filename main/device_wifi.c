@@ -6,6 +6,7 @@
  * Frozen: one owner calls control APIs; events only update state, never switch modes or access TF.
  */
 #define _POSIX_C_SOURCE 200809L
+#include "pn_brand.h"
 #include "device_wifi.h"
 #include "esp_wifi.h"
 #include "esp_wifi_default.h"
@@ -91,7 +92,7 @@ pn_status_t pn_device_wifi_open(pn_device_wifi_t *out,const pn_device_wifi_confi
   for(unsigned i=0;i<12;i++)s->state.ap_password[i]=alphabet[random[i]&31];
   clear_secret(random,sizeof random);
   result=esp_read_mac(mac,ESP_MAC_WIFI_SOFTAP);
-  if(result==ESP_OK){snprintf(s->state.ssid,sizeof s->state.ssid,"小纸 Pico-%02X%02X",mac[4],mac[5]);memcpy(settings.ap.ssid,s->state.ssid,strlen(s->state.ssid));memcpy(settings.ap.password,s->state.ap_password,12);settings.ap.ssid_len=(uint8_t)strlen(s->state.ssid);settings.ap.channel=1;settings.ap.max_connection=2;settings.ap.authmode=WIFI_AUTH_WPA2_PSK;settings.ap.pairwise_cipher=WIFI_CIPHER_TYPE_CCMP;}
+  if(result==ESP_OK){snprintf(s->state.ssid,sizeof s->state.ssid,PN_BRAND_NAME "-%02X%02X",mac[4],mac[5]);memcpy(settings.ap.ssid,s->state.ssid,strlen(s->state.ssid));memcpy(settings.ap.password,s->state.ap_password,12);settings.ap.ssid_len=(uint8_t)strlen(s->state.ssid);settings.ap.channel=1;settings.ap.max_connection=2;settings.ap.authmode=WIFI_AUTH_WPA2_PSK;settings.ap.pairwise_cipher=WIFI_CIPHER_TYPE_CCMP;}
  }else{
   strcpy(s->state.ssid,config->ssid);memcpy(settings.sta.ssid,config->ssid,strlen(config->ssid));memcpy(settings.sta.password,config->password,strlen(config->password));settings.sta.threshold.authmode=config->password[0]?WIFI_AUTH_WPA2_PSK:WIFI_AUTH_OPEN;settings.sta.pmf_cfg.capable=true;settings.sta.sae_pwe_h2e=WPA3_SAE_PWE_BOTH;
  }

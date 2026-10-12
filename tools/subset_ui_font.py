@@ -12,12 +12,17 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input", type=pathlib.Path)
     parser.add_argument("--replay", action="store_true", help="Use stored character set and fontTools version")
+    parser.add_argument("--extra-text", type=pathlib.Path, help="UTF-8 interface labels to include without embedding their source files")
     args = parser.parse_args()
     if hashlib.sha256(args.input.read_bytes()).hexdigest() != SHA:
         raise SystemExit("Unexpected source font hash")
     paths = list((ROOT / "docs").glob("*.md")) + list((ROOT / "main").rglob("*.c")) + list((ROOT / "tests/fixtures").glob("*.txt"))
     paths += list((ROOT / "components/pn_ui").rglob("*.c")) + list((ROOT / "components/pn_shell").rglob("*.c")) + list((ROOT / "components/pn_library").rglob("*.c")) + list((ROOT / "components/pn_reader").rglob("*.c"))
     text = "".join(p.read_text(encoding="utf8") for p in sorted(paths))
+    if args.extra_text:
+        if args.replay:
+            parser.error("--extra-text cannot be combined with --replay")
+        text += args.extra_text.read_text(encoding="utf-8")
     codes = sorted(set(range(32, 127)) | {ord(c) for c in text if ord(c) > 127})
     if args.replay:
         stored = json.loads((ROOT / "LICENSES/ui-font-manifest.json").read_text(encoding="utf8"))

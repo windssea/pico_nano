@@ -26,9 +26,12 @@
 #define PN_FUI_UP 32
 #define PN_FUI_DOWN 33
 #define PN_FUI_SELECT 34
-typedef struct {void *impl;bool active,presented,preview;unsigned mode,selected;} pn_font_ui_t; ///< 活动对象不可复制 / Never copy live objects
+typedef struct {void *impl;bool active,presented,preview;unsigned mode,selected;bool return_presented; ///< 最终返回页已确认呈现 / Final return page confirmed presented
+} pn_font_ui_t; ///< 活动对象不可复制 / Never copy live objects
 /// directory可NULL使用当前字体目录，错误仍可返回/重试。/ Optional directory uses current font folder; errors still allow return/retry.
 pn_status_t pn_font_ui_open(pn_font_ui_t *,pn_pool_t *,pn_reader_app_t *,pn_epub_app_t *,const char *,pn_reader_present_fn,void *);
+/// 借用返回页绘制器；应用/取消直接呈现此页，生命周期须覆盖字体菜单。/ Borrow a return-page painter so apply/cancel present it directly; it must outlive the font menu.
+void pn_font_ui_return_to(pn_font_ui_t *,pn_reader_overlay_fn,void *);
 /// 同源菜单事件及实际原文预览/取消/应用。/ Shared menu events and actual anchored preview/cancel/apply.
 pn_status_t pn_font_ui_event(pn_font_ui_t *,int,uint64_t,pn_reader_present_fn,void *);
 /// 重画现有模型，禁止隐式应用。/ Repaint current model without implicit application.

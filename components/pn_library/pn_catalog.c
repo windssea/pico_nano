@@ -70,7 +70,7 @@ static pn_status_t scan(pn_media_t *media,const pn_media_lease_t *lease,const ch
     if(strlen(directory)>=PN_CATALOG_PATH_MAX || strlen(after)>=PN_CATALOG_NAME_MAX)return PN_LIMIT;
     pn_status_t status=pn_media_validate(media,lease);if(status!=PN_OK)return status;
     if(lease->access==PN_MEDIA_USB)return PN_INVALID;
-    if(!limit || limit>PN_CATALOG_PAGE_MAX)limit=PN_CATALOG_PAGE_MAX; // 0表示满容量 / Zero means full capacity
+    if(!limit || limit>PN_CATALOG_PAGE_MAX)limit=PN_CATALOG_PAGE_DEFAULT; // 0表示旧默认6项 / Zero retains the legacy six-item default
     memset(page,0,sizeof *page);page->per_page=limit;DIR *dir=opendir(directory);if(!dir)return PN_IO;
     char greatest[PN_CATALOG_NAME_MAX]={0};size_t total=0,at_or_before=0,before=0,skipped_by_letter=0;
     for(;;){status=pn_media_validate(media,lease);if(status!=PN_OK)break;errno=0;struct dirent *entry=readdir(dir);if(!entry){if(errno)status=PN_IO;break;}
@@ -112,7 +112,7 @@ pn_status_t pn_catalog_page(pn_media_t *m,const pn_media_lease_t *l,const char *
 pn_status_t pn_catalog_page_before(pn_media_t *m,const pn_media_lease_t *l,const char *d,const char *a,pn_catalog_page_t *p){return scan(m,l,d,a,p,true,0,0,NULL,0);}
 pn_status_t pn_catalog_recent_page_n(const pn_recent_snapshot_t *snapshot,size_t start,size_t limit,pn_catalog_page_t *page){
     if(!snapshot || !page || snapshot->count>PN_RECENT_MAX || start>snapshot->count)return PN_INVALID;
-    if(!limit || limit>PN_CATALOG_PAGE_MAX)limit=PN_CATALOG_PAGE_MAX;
+    if(!limit || limit>PN_CATALOG_PAGE_MAX)limit=PN_CATALOG_PAGE_DEFAULT;
     memset(page,0,sizeof *page);page->per_page=limit;size_t count=snapshot->count-start;if(count>limit)count=limit;
     for(size_t i=0;i<count;i++){
         const pn_recent_item_t *r=&snapshot->items[start+i];pn_catalog_item_t *item=&page->items[i];
@@ -173,7 +173,7 @@ pn_status_t pn_catalog_search_page_before_n(pn_media_t *m,const pn_media_lease_t
 }
 pn_status_t pn_catalog_favorites_page(const pn_favorites_t *favorites,size_t start,size_t limit,pn_catalog_page_t *page){
     if(!favorites || !page || favorites->count>PN_FAVORITES_MAX || start>favorites->count)return PN_INVALID;
-    if(!limit || limit>PN_CATALOG_PAGE_MAX)limit=PN_CATALOG_PAGE_MAX;
+    if(!limit || limit>PN_CATALOG_PAGE_MAX)limit=PN_CATALOG_PAGE_DEFAULT;
     memset(page,0,sizeof *page);page->per_page=limit;size_t count=favorites->count-start;if(count>limit)count=limit;
     for(size_t i=0;i<count;i++){
         const char *path=favorites->paths[start+i];pn_catalog_item_t *item=&page->items[i];

@@ -21,7 +21,7 @@ def epub(path,cover=None,name='cover.png',declare='epub3',stored=False):
     with zipfile.ZipFile(path,'w',compression=zipfile.ZIP_DEFLATED) as z:
         z.writestr('mimetype','application/epub+zip',compress_type=zipfile.ZIP_STORED)
         z.writestr('META-INF/container.xml','<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OPS/book.opf" media-type="application/oebps-package+xml"/></rootfiles></container>')
-        z.writestr('OPS/book.opf',f'<package xmlns="http://www.idpf.org/2007/opf" xmlns:d="http://purl.org/dc/elements/1.1/" version="{version}" unique-identifier="uid"><metadata><d:title>封面测试</d:title><d:identifier id="uid">cover</d:identifier>{meta}</metadata><manifest>{opf_items}</manifest><spine><itemref idref="a"/></spine></package>')
+        z.writestr('OPS/book.opf',f'<package xmlns="http://www.idpf.org/2007/opf" xmlns:d="http://purl.org/dc/elements/1.1/" version="{version}" unique-identifier="uid"><metadata><d:title>封面测试</d:title><d:creator>测试作者</d:creator><d:identifier id="uid">cover</d:identifier>{meta}</metadata><manifest>{opf_items}</manifest><spine><itemref idref="a"/></spine></package>')
         z.writestr('OPS/a.xhtml','<html xmlns="http://www.w3.org/1999/xhtml"><body><p>正文</p></body></html>')
         if cover is not None:z.writestr('OPS/'+name,cover,compress_type=zipfile.ZIP_STORED if stored else zipfile.ZIP_DEFLATED)
 
@@ -67,12 +67,13 @@ with tempfile.TemporaryDirectory() as folder:
     def queue(cache='-'):
         r=subprocess.run([binary,'queue',str(books),str(root/'shelf.pgm'),str(cache)],capture_output=True,timeout=300)
         assert r.returncode==0,(r.stdout,r.stderr)
-        return {line.split()[0]:(int(line.split('state=')[1].split()[0]),int(line.split('reason=')[1])) for line in r.stdout.decode().splitlines()}
+        text=r.stdout.decode();assert "title=封面测试 author=测试作者" in text,text
+        return {line.split()[0]:(int(line.split('state=')[1].split()[0]),int(line.split('reason=')[1].split()[0])) for line in r.stdout.decode().splitlines()}
     expected={'a-declared.epub':(2,OK),'b-epub2-jpeg.epub':(2,OK),'c-candidate.epub':(2,OK),'d-none.epub':(0,EMPTY),'e-corrupt.epub':(3,CORRUPT),'f-sidecar.txt':(2,OK)}
     states=queue();assert states==expected,states
     w,h,p=pgm(root/'shelf.pgm');assert (w,h)==(684,1216)
     # 第一行封面槽左半为黑，证明缩略图被绘入书架。/ Left half of the first slot is black, proving the thumbnail reached the shelf.
-    assert p[(400+H//2)*684+32+10]==0 and p[(400+H//2)*684+32+W-14]==15
+    assert p[(284+H//2)*684+32+10]==0 and p[(284+H//2)*684+32+W-14]==15
     plain=p
 
     # 缓存：首次写入全部六条内容结论，父目录按需创建，无临时残留。/ Cache: first run stores all six content outcomes, creating parents, leaving no temporaries.

@@ -7,6 +7,8 @@
  * Frozen: sources are read-only; temporary allocations use a bounded sub-pool; record CRCs cover every byte; no formatting or erasing.
  */
 #define _POSIX_C_SOURCE 200809L
+#include "pn_brand.h"
+#include "pn_brand_image.h"
 #include "pn_wallpaper.h"
 #include "pn_image.h"
 #include "pn_text_file.h"
@@ -19,7 +21,10 @@
 #define H PN_WALLPAPER_HEIGHT
 #define SCRATCH_MAX (2u*1024u*1024u)
 #define HEADER 38
-#define VERSION 1
+#define VERSION 2
+/// 只有自定义和已缓存书封包含位图；旧BOOK记录继续兼容。/ Only custom/cached-book records contain a bitmap; legacy BOOK records remain compatible.
+static bool bitmap_record(const pn_lock_selection_t *s){return s->mode==PN_LOCK_CUSTOM || (s->mode==PN_LOCK_BOOK && s->cached_book);}
+static bool book_identity_valid(const pn_lock_selection_t *s){uint8_t zero[32]={0};return s->mode==PN_LOCK_BOOK && memcmp(s->book.sha256,zero,sizeof zero)!=0;}
 typedef struct {const pn_text_source_t *source;uint64_t offset;} file_input_t;
 static void *sub_alloc(void *ctx,size_t bytes){return pn_alloc(ctx,bytes);}
 static void sub_free(void *ctx,void *ptr){(void)ctx;pn_free(ptr);}
@@ -84,9 +89,10 @@ pn_status_t pn_wallpaper_store_init(pn_wallpaper_store_t *store,pn_media_t *medi
 }
 /* 解析头部；路径另读。/ Parse the fixed header; the path is read separately. */
 static bool decode_header(const uint8_t *h,pn_lock_selection_t *s,size_t *path_length){
-    if(memcmp(h,"PNWP",4) || get(h+4,2)!=VERSION || h[6]>PN_LOCK_BOOK || h[7]>PN_WALLPAPER_COVER || h[8]>3 || (int8_t)h[9]<-PN_WALLPAPER_SHIFT_MAX || (int8_t)h[9]>PN_WALLPAPER_SHIFT_MAX || h[10]>1 || h[11])return false;
+    unsigned version=(unsigned)get(h+4,2);
+    if(memcmp(h,"PNWP",4) || (version!=1 && version!=VERSION) || h[6]>PN_LOCK_BOOK || h[7]>PN_WALLPAPER_COVER || h[8]>3 || (int8_t)h[9]<-PN_WALLPAPER_SHIFT_MAX || (int8_t)h[9]>PN_WALLPAPER_SHIFT_MAX || h[10]>1 || h[11]>1 || (version==1 && h[11]) || (h[11] && h[6]!=PN_LOCK_BOOK))return false;
     *s=(pn_lock_selection_t){.mode=(pn_lock_mode_t)h[6],.transform={(pn_wallpaper_fit_t)h[7],h[8],(int8_t)h[9]},.hint=h[10]!=0,.sequence=get(h+12,8),.source_size=get(h+20,8),.source_mtime=(int64_t)get(h+28,8)};
-    *path_length=(size_t)get(h+36,2);return s->sequence && *path_length<PN_WALLPAPER_PATH_MAX;
+    s->cached_book=h[11]!=0;*path_length=(size_t)get(h+36,2);return s->sequence && *path_length<PN_WALLPAPER_PATH_MAX;
 }
 /* 完整校验一个槽；frame非空且为自定义时写入位图。EMPTY不存在，CORRUPT内容无效。/ Fully verify one slot, writing the bitmap into frame for custom records; EMPTY if absent, CORRUPT if invalid. */
 static pn_status_t read_slot(const pn_wallpaper_store_t *store,const pn_media_lease_t *lease,unsigned slot,pn_lock_selection_t *out,pn_frame_t *frame){
@@ -95,8 +101,11 @@ static pn_status_t read_slot(const pn_wallpaper_store_t *store,const pn_media_le
     uint8_t header[HEADER],buffer[512];pn_lock_selection_t s;size_t path_length=0;uint32_t crc=UINT32_MAX;
     if(fread(header,1,HEADER,file)!=HEADER)status=ferror(file)?PN_IO:PN_CORRUPT;
     else if(!decode_header(header,&s,&path_length))status=PN_CORRUPT;
-    if(status==PN_OK){crc=crc_update(crc,header,HEADER);if(fread(s.source,1,path_length,file)!=path_length)status=ferror(file)?PN_IO:PN_CORRUPT;else{s.source[path_length]=0;crc=crc_update(crc,(uint8_t *)s.source,path_length);if(strlen(s.source)!=path_length)status=PN_CORRUPT;}}
-    if(status==PN_OK && s.mode==PN_LOCK_CUSTOM)for(int y=0;y<H && status==PN_OK;y++){uint8_t *row=frame?frame->pixels+(size_t)y*frame->stride:buffer;
+    if(status==PN_OK){crc=crc_update(crc,header,HEADER);
+        if(get(header+4,2)==VERSION){if(fread(s.book.sha256,1,32,file)!=32)status=ferror(file)?PN_IO:PN_CORRUPT;else crc=crc_update(crc,s.book.sha256,32);}
+        if(status==PN_OK && s.cached_book && !book_identity_valid(&s))status=PN_CORRUPT;}
+    if(status==PN_OK){if(fread(s.source,1,path_length,file)!=path_length)status=ferror(file)?PN_IO:PN_CORRUPT;else{s.source[path_length]=0;crc=crc_update(crc,(uint8_t *)s.source,path_length);if(strlen(s.source)!=path_length)status=PN_CORRUPT;}}
+    if(status==PN_OK && bitmap_record(&s))for(int y=0;y<H && status==PN_OK;y++){uint8_t *row=frame?frame->pixels+(size_t)y*frame->stride:buffer;
         if(fread(row,1,W/2,file)!=W/2)status=ferror(file)?PN_IO:PN_CORRUPT;else crc=crc_update(crc,row,W/2);}
     uint8_t tail[5];size_t n=status==PN_OK?fread(tail,1,sizeof tail,file):0;
     if(status==PN_OK && ferror(file))status=PN_IO;
@@ -132,7 +141,7 @@ pn_status_t pn_wallpaper_load(const pn_wallpaper_store_t *store,const pn_media_l
     pn_lock_selection_t s;int which;status=best(store,lease,&s,frame,&which);if(status==PN_OK)*selection=s;return status;
 }
 pn_status_t pn_wallpaper_save(const pn_wallpaper_store_t *store,const pn_media_lease_t *lease,pn_lock_selection_t *selection,const pn_frame_t *bitmap){
-    if(!store || !store->media || !lease || lease->access!=PN_MEDIA_WRITE || !selection || selection->mode>PN_LOCK_BOOK || (selection->mode==PN_LOCK_CUSTOM && !full_frame(bitmap)) ||
+    if(!store || !store->media || !lease || lease->access!=PN_MEDIA_WRITE || !selection || selection->mode>PN_LOCK_BOOK || (bitmap_record(selection) && !full_frame(bitmap)) || (selection->cached_book && !book_identity_valid(selection)) ||
        selection->transform.rotation>3 || selection->transform.fit>PN_WALLPAPER_COVER || selection->transform.shift<-PN_WALLPAPER_SHIFT_MAX || selection->transform.shift>PN_WALLPAPER_SHIFT_MAX)return PN_INVALID;
     size_t path_length=strnlen(selection->source,PN_WALLPAPER_PATH_MAX);if(path_length>=PN_WALLPAPER_PATH_MAX)return PN_LIMIT;
     pn_status_t status=pn_media_validate(store->media,lease);if(status!=PN_OK)return status;
@@ -142,11 +151,12 @@ pn_status_t pn_wallpaper_save(const pn_wallpaper_store_t *store,const pn_media_l
     if(status==PN_CORRUPT){uint64_t seq;for(unsigned i=0;i<2;i++)if(peek(store,i,&seq)==PN_OK && seq>=sequence)sequence=seq+1;}
     unsigned target=which==0?1u:0u;
     uint8_t header[HEADER];memcpy(header,"PNWP",4);put(header+4,VERSION,2);header[6]=(uint8_t)selection->mode;header[7]=(uint8_t)selection->transform.fit;header[8]=selection->transform.rotation;
-    header[9]=(uint8_t)selection->transform.shift;header[10]=selection->hint?1:0;header[11]=0;put(header+12,sequence,8);put(header+20,selection->source_size,8);put(header+28,(uint64_t)selection->source_mtime,8);put(header+36,path_length,2);
+    header[9]=(uint8_t)selection->transform.shift;header[10]=selection->hint?1:0;header[11]=selection->cached_book?1:0;put(header+12,sequence,8);put(header+20,selection->source_size,8);put(header+28,(uint64_t)selection->source_mtime,8);put(header+36,path_length,2);
     FILE *file=fopen(store->slots[target],"wb");if(!file)return PN_IO;
     uint32_t crc=crc_update(UINT32_MAX,header,HEADER);bool error=fwrite(header,1,HEADER,file)!=HEADER;
+    crc=crc_update(crc,selection->book.sha256,32);if(!error && fwrite(selection->book.sha256,1,32,file)!=32)error=true;
     crc=crc_update(crc,(const uint8_t *)selection->source,path_length);if(!error && fwrite(selection->source,1,path_length,file)!=path_length)error=true;
-    if(selection->mode==PN_LOCK_CUSTOM)for(int y=0;y<H && !error;y++){const uint8_t *row=bitmap->pixels+(size_t)y*bitmap->stride;crc=crc_update(crc,row,W/2);if(fwrite(row,1,W/2,file)!=W/2)error=true;}
+    if(bitmap_record(selection))for(int y=0;y<H && !error;y++){const uint8_t *row=bitmap->pixels+(size_t)y*bitmap->stride;crc=crc_update(crc,row,W/2);if(fwrite(row,1,W/2,file)!=W/2)error=true;}
     uint8_t tail[4];put(tail,~crc&UINT32_MAX,4);if(!error && fwrite(tail,1,4,file)!=4)error=true;
     if(!error && (fflush(file) || fsync(fileno(file))))error=true;
     if(fclose(file))error=true;
@@ -184,18 +194,10 @@ pn_status_t pn_lock_render(const pn_lock_selection_t *selection,pn_font_t *font,
     if(!selection || selection->mode>PN_LOCK_BOOK || !font || !font->impl || !hint || !full_frame(frame))return PN_INVALID;
     int original=font->pixels;pn_status_t status=PN_OK;
     if(selection->mode==PN_LOCK_DEFAULT){
-        /* 内置图：圆角书本（书脊、标题条与文字行）、品牌与提示，抗锯齿线条，纯黑白便于GC16。/ Built-in art: a rounded book with spine, title bar and text lines, the brand and a hint, in anti-aliased lines that stay pure black-and-white for GC16. */
-        pn_frame_clear(frame,15);
-        pn_w_round_stroke(frame,172,250,340,450,26,5.0f,0);
-        pn_w_round_fill(frame,172,250,64,450,26,0);pn_frame_rect(frame,206,250,30,450,0);
-        pn_w_line(frame,286,340,462,340,10.0f,0);pn_w_line(frame,286,392,420,392,10.0f,0);
-        for(int i=0;i<5;i++)pn_w_line(frame,286,470+i*40,i==4?400:462,470+i*40,5.0f,8);
-        pn_w_icon(frame,PN_ICON_LOCK,(W-56)/2,722,56,0);
-        status=centered(font,frame,"小纸 Pico",64,860);
-        if(status==PN_OK)status=centered(font,frame,"Read Pico",32,916);
-        if(status==PN_OK){pn_frame_rect(frame,32,1104,620,2,0);status=centered(font,frame,hint,32,1170);}
+        status=pn_brand_image_render(frame);
+        if(status==PN_OK && selection->hint){pn_frame_rect(frame,32,1104,620,2,0);status=centered(font,frame,hint,32,1170);}
     }else if(selection->mode==PN_LOCK_SIMPLE){
-        pn_frame_clear(frame,15);status=centered(font,frame,"小纸 Pico",56,600);
+        pn_frame_clear(frame,15);status=centered(font,frame,PN_BRAND_NAME,56,600);
         if(status==PN_OK){pn_frame_rect(frame,242,640,200,2,0);status=centered(font,frame,hint,32,700);}
     }else if(selection->hint){
         pn_frame_rect(frame,0,1104,W,H-1104,15);pn_frame_rect(frame,0,1104,W,2,0);status=centered(font,frame,hint,32,1170);

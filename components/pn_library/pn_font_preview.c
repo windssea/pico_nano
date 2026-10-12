@@ -5,6 +5,7 @@
  * 冻结：缺字画方框，不用备用字体伪造候选覆盖。
  * Frozen: missing glyphs use boxes, never a fallback that disguises candidate coverage.
  */
+#include "pn_brand.h"
 #include "pn_font_preview.h"
 #include <stdio.h>
 #include <inttypes.h>
@@ -39,7 +40,7 @@ pn_status_t pn_font_preview_draw(pn_font_t *ui,pn_font_t *body,const pn_font_inf
     if(!memchr(info->family,0,sizeof info->family) || !memchr(info->style,0,sizeof info->style))return PN_INVALID;
     pn_frame_clear(frame,15);pn_status_t status=draw_string(ui,NULL,frame,"字体预览",32,24,620,72);if(status!=PN_OK)return status;pn_frame_rect(frame,32,110,620,1,8);
     int original=body->pixels;status=pn_font_size(body,ui->pixels);
-    if(status==PN_OK)status=draw_string(ui,body,frame,*info->family?info->family:"未提供名称",32,136,620,96);
+    if(status==PN_OK)status=draw_string(ui,body,frame,*info->family?pn_brand_label(info->family):"未提供名称",32,136,620,96);
     pn_status_t restored=pn_font_size(body,original);if(status==PN_OK)status=restored;if(status!=PN_OK)return status;
     char label[256];snprintf(label,sizeof label,"样式：%s",style_name(info->style));status=draw_string(ui,NULL,frame,label,32,236,620,60);if(status!=PN_OK)return status;
     if(info->weight)snprintf(label,sizeof label,"%s  字重 %u  字形 %" PRIu32,info->variable?"可变字体":"静态字体",info->weight,info->glyphs);else snprintf(label,sizeof label,"%s  字重未知  字形 %" PRIu32,info->variable?"可变字体":"静态字体",info->glyphs);

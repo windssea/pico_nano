@@ -18,7 +18,7 @@ def check(binary, books, font):
             library.mkdir()
             shutil.copy2(sample, library / sample.name)
             result = subprocess.run([str(binary.resolve()), "--library", str(library), "--font", str(font.resolve()), "--state-dir", str(root / f"state-{index}")],
-                env=dict(os.environ, SDL_VIDEODRIVER="dummy", PN_SIM_LIBRARY_SCRIPT="tap:100:500,next,back,quit"),
+                env=dict(os.environ, SDL_VIDEODRIVER="dummy", PN_SIM_LIBRARY_SCRIPT="library,tap:100:500,next,back,quit"),
                 capture_output=True, text=True, timeout=120)
             assert result.returncode == 0, (sample.name, result.stdout, result.stderr)
             for expected in (f"library_open name={sample.name}", "library_turn pointer=0 status=0", "library_return status=0", "used=0 live=0"):

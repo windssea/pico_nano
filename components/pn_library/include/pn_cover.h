@@ -12,7 +12,7 @@
 #define PN_COVER_WIDTH 184 ///< 网格封面宽，见UI_UX书架布局 / Grid cover width, see the shelf layout in UI_UX
 #define PN_COVER_HEIGHT 256 ///< 网格封面高 / Grid cover height
 #define PN_COVER_BYTES (PN_COVER_WIDTH*PN_COVER_HEIGHT/2)
-#define PN_COVER_CACHE_VERSION 3 ///< 集中封面来源变化后缓存重建 / Rebuild caches after centralized cover-source changes
+#define PN_COVER_CACHE_VERSION 4 ///< 集中封面来源变化后缓存重建 / Rebuild caches after centralized cover-source changes
 #define PN_COVER_SLOT_LAST PN_CATALOG_PAGE_MAX ///< 最近阅读卡使用的额外槽 / Extra slot used by the continue-reading card
 
 /// 单书封面状态。/ Per-book cover state.
@@ -23,12 +23,19 @@ typedef enum {
     PN_COVER_FAILED ///< 封面存在但损坏/超限，书仍可打开 / Cover present but corrupt/over budget; the book still opens
 } pn_cover_state_t;
 
-/// 当前书目页六条封面槽外加一个“继续阅读”槽，调用方拥有，可放pool或静态区。
-/// Six cover slots for the current catalog page plus one continue-reading slot, caller-owned in pool or static storage.
+/// 已验证作品元数据；空串使用文件名回退。/ Verified publication metadata; empty strings use filename fallback.
+typedef struct {
+    char title[512]; ///< OPF作品名 / OPF publication title
+    char author[512]; ///< OPF作者，不从文件名猜测 / OPF author, never guessed from filenames
+} pn_book_display_t;
+
+/// 当前书目页最多八条封面槽外加一个“继续阅读”槽，调用方拥有，可放pool或静态区。
+/// Up to eight cover slots for the current catalog page plus one continue-reading slot, caller-owned in pool or static storage.
 typedef struct {
     uint8_t pixels[PN_CATALOG_PAGE_MAX+1][PN_COVER_BYTES]; ///< 4bpp行内低半字节在左 / 4bpp rows, left pixel in low nibble
     pn_cover_state_t state[PN_CATALOG_PAGE_MAX+1]; ///< 每槽状态 / Per-slot state
     pn_status_t reason[PN_CATALOG_PAGE_MAX+1]; ///< 最后一次提取结果 / Last extraction status
+    pn_book_display_t display[PN_CATALOG_PAGE_MAX+1]; ///< 当前槽展示快照 / Current slot display snapshots
     bool has_last; ///< last有效 / last is valid
     pn_catalog_item_t last; ///< 继续阅读的书（路径、名称、进度） / The continue-reading book (path, name, progress)
 } pn_shelf_covers_t;

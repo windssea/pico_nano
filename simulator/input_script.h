@@ -24,6 +24,8 @@ static void script_queue(sim_script_t *script){
         else if(!strcmp(part,"window-close")){event.type=SDL_QUIT;}
         else if(!strncmp(part,"text:",5)){event.type=SDL_TEXTINPUT;event.text.windowID=UINT32_MAX;snprintf(event.text.text,sizeof event.text.text,"%s",part+5);}
         else if(!strcmp(part,"enter") || !strcmp(part,"mark-select") || !strcmp(part,"mark-confirm"))event.key.keysym.sym=SDLK_RETURN;
+        else if(!strcmp(part,"home"))event.key.keysym.sym=SDLK_h;
+        else if(!strcmp(part,"library"))event.key.keysym.sym=SDLK_b;
         else if(!strcmp(part,"next"))event.key.keysym.sym=SDLK_RIGHT;
         else if(!strcmp(part,"previous"))event.key.keysym.sym=SDLK_LEFT;
         else if(!strcmp(part,"larger"))event.key.keysym.sym=SDLK_PLUS;
@@ -42,6 +44,7 @@ static void script_queue(sim_script_t *script){
         else if(!strcmp(part,"recent"))event.key.keysym.sym=SDLK_r;
         else if(!strcmp(part,"continue"))event.key.keysym.sym=SDLK_c;
         else if(!strcmp(part,"wallpaper"))event.key.keysym.sym=SDLK_w;
+        else if(!strcmp(part,"lock"))event.key.keysym.sym=SDLK_l;
         else if(!strcmp(part,"settings"))event.key.keysym.sym=SDLK_p;
         else if(!strcmp(part,"index"))event.key.keysym.sym=SDLK_j;
         else if(!strcmp(part,"toc"))event.key.keysym.sym=SDLK_t;

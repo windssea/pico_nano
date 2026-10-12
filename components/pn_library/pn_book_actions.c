@@ -5,6 +5,7 @@
  * English: book actions sheet, see pn_book_actions.h.
  */
 #define _POSIX_C_SOURCE 200809L
+#include "pn_brand.h"
 #include "pn_book_actions.h"
 #include <stdio.h>
 #include <string.h>
@@ -31,7 +32,7 @@ static void info_of(const pn_catalog_item_t *item,char *out,size_t cap){
 }
 pn_status_t pn_book_actions_render(const pn_book_actions_t *a,pn_font_t *font,pn_frame_t *frame){
     if(!a || !font || !font->impl || !frame || !frame->pixels || frame->width!=PN_UI_WIDTH || frame->height!=PN_UI_HEIGHT)return PN_INVALID;
-    int original=font->pixels;char title[PN_CATALOG_NAME_MAX],info[96];title_of(&a->item,title,sizeof title);info_of(&a->item,info,sizeof info);
+    int original=font->pixels;char title[PN_CATALOG_NAME_MAX],info[96];title_of(&a->item,title,sizeof title);if(*a->title)snprintf(title,sizeof title,"%s",a->title);info_of(&a->item,info,sizeof info);
     pn_status_t s=PN_OK;
     if(a->confirming){
         // 删除确认整页：说明后果，取消在左、删除在右，删除不用黑底（规范11.2）。/ Full-page delete confirmation: state the consequence, Cancel on the left and Delete on the right, Delete not in black (spec 11.2).
@@ -54,9 +55,10 @@ pn_status_t pn_book_actions_render(const pn_book_actions_t *a,pn_font_t *font,pn
         s=pn_font_size(font,34);
         if(s==PN_OK)s=pn_w_text_ex(font,frame,title,PN_UI_MARGIN,SHEET_Y+74,620,PN_ALIGN_LEFT,PN_UI_INK,true);
         if(s==PN_OK)s=pn_font_size(font,24);
-        if(s==PN_OK)s=pn_w_text_ex(font,frame,info,PN_UI_MARGIN,SHEET_Y+114,620,PN_ALIGN_LEFT,PN_UI_MUTED,false);
+        if(s==PN_OK && *a->author)s=pn_w_text_ex(font,frame,pn_brand_label(a->author),PN_UI_MARGIN,SHEET_Y+108,620,PN_ALIGN_LEFT,PN_UI_MUTED,false);
+        if(s==PN_OK)s=pn_w_text_ex(font,frame,info,PN_UI_MARGIN,SHEET_Y+140,620,PN_ALIGN_LEFT,PN_UI_MUTED,false);
         if(s==PN_OK)s=pn_font_size(font,20);
-        if(s==PN_OK)s=pn_w_text_ex(font,frame,a->item.path,PN_UI_MARGIN,SHEET_Y+148,620,PN_ALIGN_LEFT,PN_UI_MUTED,false);
+        if(s==PN_OK)s=pn_w_text_ex(font,frame,a->item.path,PN_UI_MARGIN,SHEET_Y+172,620,PN_ALIGN_LEFT,PN_UI_MUTED,false);
         if(s==PN_OK)s=pn_font_size(font,32);
         if(s==PN_OK)s=pn_w_button(font,frame,"打开",BUTTON_X,OPEN_Y,BUTTON_W,BUTTON_H,PN_W_SELECTED);
         if(s==PN_OK)s=pn_w_button(font,frame,!a->favorites_known?"收藏不可用":a->favorite?"取消收藏":"加入收藏",BUTTON_X,FAVORITE_Y,BUTTON_W,BUTTON_H,a->favorites_known?0u:PN_W_DISABLED);

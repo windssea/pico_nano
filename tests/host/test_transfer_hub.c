@@ -13,7 +13,7 @@ int main(void){
     pn_transfer_hub_info_t info={.hotspot=true,.lan=false,.storage="共 29.7 GB · 可用 12.1 GB"};
     assert(pn_transfer_hub_render(&font,&frame,&info)==PN_OK && font.pixels==24);
     assert(pn_transfer_hub_hit(&info,300,280)==PN_HUB_HOTSPOT && pn_transfer_hub_hit(&info,300,380)==-1 && pn_transfer_hub_hit(&info,300,480)==-1);
-    assert(pn_transfer_hub_hit(&info,100,1150)==PN_HUB_SHELF && pn_transfer_hub_hit(&info,340,1150)==-1 && pn_transfer_hub_hit(&info,600,1150)==PN_HUB_SETTINGS);
+    assert(pn_transfer_hub_hit(&info,100,1150)==PN_HUB_HOME && pn_transfer_hub_hit(&info,260,1150)==PN_HUB_SHELF && pn_transfer_hub_hit(&info,430,1150)==-1 && pn_transfer_hub_hit(&info,600,1150)==PN_HUB_SETTINGS);
     info.lan=true;info.lan_name="家里的WiFi";assert(pn_transfer_hub_render(&font,&frame,&info)==PN_OK && pn_transfer_hub_hit(&info,300,380)==PN_HUB_LAN);
     /* 无线不可用：只显示原因，热点与局域网都不可点。/ Wireless unavailable: only the reason is shown and neither hotspot nor LAN is tappable. */
     pn_transfer_hub_info_t off={.unavailable="PC 模拟器不提供无线传书"};

@@ -106,16 +106,19 @@ static pn_status_t metadata(service_t *s,const pn_upload_request_t *request,pn_t
  if(status==PN_OK){candidate.has_file=true;*reply=candidate;}
  return status;
 }
-/// 字体目录绝对路径。/ Absolute path of the font directory.
-static pn_status_t font_directory(service_t *s,char *dir){
- int n=snprintf(dir,PN_JOURNAL_PATH_MAX,"%s/%s",s->root,pn_upload_directory(PN_UPLOAD_FONT));
+/// 可管理的资源类别，书籍删除仍留给书库控制层。/ Manageable resource kinds; book deletion remains in the library controller.
+static bool resource_kind(pn_upload_kind_t kind){return kind==PN_UPLOAD_FONT || kind==PN_UPLOAD_COVER || kind==PN_UPLOAD_WALLPAPER;}
+/// 固定资源目录绝对路径。/ Absolute path of the fixed resource directory.
+static pn_status_t resource_directory(service_t *s,pn_upload_kind_t kind,char *dir){
+ if(!resource_kind(kind))return PN_INVALID;
+ int n=snprintf(dir,PN_JOURNAL_PATH_MAX,"%s/%s",s->root,pn_upload_directory(kind));
  return n<0 || (size_t)n>=PN_JOURNAL_PATH_MAX?PN_LIMIT:PN_OK;
 }
 /// 与上传相同的名称规则：只有能被上传的名称才会被列出或删除。/ Same name rules as uploads: only names that could be uploaded are listed or deleted.
-static pn_status_t font_name_check(const char *name){
+static pn_status_t resource_name_check(pn_upload_kind_t kind,const char *name){
  pn_upload_request_t probe={0};
  if(!name || strlen(name)>=sizeof probe.name)return PN_INVALID;
- probe.kind=PN_UPLOAD_FONT;probe.size=1;probe.id[0]=1;strcpy(probe.name,name);
+ probe.kind=kind;probe.size=1;probe.id[0]=1;strcpy(probe.name,name);
  return pn_upload_request_validate(&probe);
 }
 /// 把名称按字节序插入有界升序表；表满时丢弃最大者。/ Insert a name into the bounded ascending table, dropping the largest when full.
@@ -130,9 +133,9 @@ static void list_insert(pn_transfer_reply_t *reply,const char *name,uint64_t siz
  }
  snprintf(reply->list[at].name,sizeof reply->list[at].name,"%s",name);reply->list[at].size=size;
 }
-static pn_status_t list_fonts(service_t *s,const pn_upload_request_t *cursor,pn_transfer_reply_t *reply){
- if(cursor->kind!=PN_UPLOAD_FONT)return PN_INVALID;
- if(cursor->name[0] && font_name_check(cursor->name)!=PN_OK)return PN_INVALID;
+static pn_status_t list_resources(service_t *s,const pn_upload_request_t *cursor,pn_transfer_reply_t *reply){
+ if(!resource_kind(cursor->kind))return PN_INVALID;
+ if(cursor->name[0] && resource_name_check(cursor->kind,cursor->name)!=PN_OK)return PN_INVALID;
  pn_status_t status=close_current(s);
  if(status!=PN_OK)return status;
  pn_media_lease_t lease={0};
@@ -142,23 +145,25 @@ static pn_status_t list_fonts(service_t *s,const pn_upload_request_t *cursor,pn_
  pn_transfer_reply_t *candidate=pn_alloc(s->pool,sizeof *candidate);
  if(!candidate){(void)pn_media_release(s->media,&lease);return PN_NO_MEMORY;}
  memset(candidate,0,sizeof *candidate);candidate->has_list=true;
- status=font_directory(s,dir);
+ status=resource_directory(s,cursor->kind,dir);
  if(status==PN_OK)status=directory(dir);
- if(status==PN_EMPTY)status=PN_OK; // 目录尚不存在即没有字体。/ A missing directory means no fonts.
+ if(status==PN_EMPTY)status=PN_OK; // 目录尚不存在即没有资源。/ A missing directory means no resources.
  else if(status==PN_OK){
   DIR *folder=opendir(dir);
   if(!folder)status=PN_IO;
   else{
    size_t seen=0;struct dirent *entry;
-   while((entry=readdir(folder))!=NULL){
+   for(;;){
+    status=pn_media_validate(s->media,&lease);if(status!=PN_OK)break;
+    errno=0;entry=readdir(folder);if(!entry){if(errno)status=PN_IO;break;}
     const char *name=entry->d_name;
-    if(name[0]=='.' || (cursor->name[0] && strcmp(name,cursor->name)<=0) || font_name_check(name)!=PN_OK)continue;
+    if(name[0]=='.' || (cursor->name[0] && strcmp(name,cursor->name)<=0) || resource_name_check(cursor->kind,name)!=PN_OK)continue;
     char path[PN_JOURNAL_PATH_MAX];struct stat info;
     int n=snprintf(path,sizeof path,"%s/%s",dir,name);
     if(n<0 || (size_t)n>=sizeof path || inspect(path,&info)!=PN_OK || !S_ISREG(info.st_mode) || info.st_size<0)continue;
     seen++;list_insert(candidate,name,(uint64_t)info.st_size);
    }
-   closedir(folder);
+   if(closedir(folder)!=0 && status==PN_OK)status=PN_IO;
    candidate->more=seen>candidate->count;
   }
  }
@@ -170,7 +175,7 @@ static pn_status_t list_fonts(service_t *s,const pn_upload_request_t *cursor,pn_
  return status;
 }
 /// 目录项删除后的命名空间同步；ESP必须提供回调。/ Namespace sync after removing the entry; ESP must supply the callback.
-static pn_status_t sync_font_directory(service_t *s,const char *dir){
+static pn_status_t sync_resource_directory(service_t *s,const char *dir){
  if(s->options.sync_directory)return s->options.sync_directory(s->options.ctx,dir);
 #ifdef ESP_PLATFORM
  (void)dir;return PN_UNSUPPORTED;
@@ -180,9 +185,9 @@ static pn_status_t sync_font_directory(service_t *s,const char *dir){
  return error?PN_IO:PN_OK;
 #endif
 }
-static pn_status_t delete_font(service_t *s,const pn_transfer_command_t *command,pn_transfer_reply_t *reply){
- if(command->request.kind!=PN_UPLOAD_FONT || !command->old_size || zero(command->old_digest.sha256,32))return PN_INVALID;
- pn_status_t status=font_name_check(command->request.name);
+static pn_status_t delete_resource(service_t *s,const pn_transfer_command_t *command,pn_transfer_reply_t *reply){
+ if(!resource_kind(command->request.kind) || !command->old_size || zero(command->old_digest.sha256,32))return PN_INVALID;
+ pn_status_t status=resource_name_check(command->request.kind,command->request.name);
  if(status!=PN_OK)return status;
  status=close_current(s);
  if(status!=PN_OK)return status;
@@ -190,7 +195,7 @@ static pn_status_t delete_font(service_t *s,const pn_transfer_command_t *command
  status=pn_media_acquire(s->media,PN_MEDIA_WRITE,&lease);
  if(status!=PN_OK)return status;
  char dir[PN_JOURNAL_PATH_MAX],path[PN_JOURNAL_PATH_MAX];struct stat info;
- status=font_directory(s,dir);
+ status=resource_directory(s,command->request.kind,dir);
  if(status==PN_OK)status=directory(dir);
  if(status==PN_OK){int n=snprintf(path,sizeof path,"%s/%s",dir,command->request.name);if(n<0 || (size_t)n>=sizeof path)status=PN_LIMIT;}
  if(status==PN_OK)status=inspect(path,&info);
@@ -201,7 +206,7 @@ static pn_status_t delete_font(service_t *s,const pn_transfer_command_t *command
  if(status==PN_OK && memcmp(digest.sha256,command->old_digest.sha256,32))status=PN_STALE_JOB;
  if(status==PN_OK)status=pn_media_validate(s->media,&lease);
  if(status==PN_OK && unlink(path))status=PN_IO;
- if(status==PN_OK)status=sync_font_directory(s,dir);
+ if(status==PN_OK)status=sync_resource_directory(s,dir);
  pn_status_t current=pn_media_validate(s->media,&lease);if(current!=PN_OK)status=current;
  pn_status_t closed=pn_media_release(s->media,&lease);if(status==PN_OK)status=closed;
  current=guard(s);if(current!=PN_OK)status=current;
@@ -255,9 +260,9 @@ pn_status_t pn_transfer_service_execute(pn_transfer_service_t *out,const pn_tran
   status=pn_upload_request_validate(&request);
   return status==PN_OK?metadata(s,&request,reply):status;
  }else if(command->operation==PN_TRANSFER_LIST){
-  return list_fonts(s,&command->request,reply);
+  return list_resources(s,&command->request,reply);
  }else if(command->operation==PN_TRANSFER_DELETE){
-  return delete_font(s,command,reply);
+  return delete_resource(s,command,reply);
  }else{
   bool finish=command->operation==PN_TRANSFER_STREAM_COMPLETE;
   if((!finish && (command->operation<PN_TRANSFER_OPEN || command->operation>PN_TRANSFER_CANCEL)) || zero(command->id,PN_UPLOAD_ID_BYTES))return PN_INVALID;

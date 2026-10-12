@@ -25,6 +25,10 @@
 
 # 私人测试书籍/完整字体及本机过程记录。/ Private test books/full fonts and local process records.
 /mockDoc/
+# 本机用户提供的测试原件，子目录中的公开夹具仍可提交。/ Local user-provided originals; public fixtures in subdirectories remain tracked.
+/tests/*.epub
+/tests/*.ttf
+/tests/*.TTF
 /docs/local/
 /docs/HANDOFF.local.md
 

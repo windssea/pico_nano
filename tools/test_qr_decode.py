@@ -4,7 +4,7 @@ def main():
  parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('captures',nargs='+',type=pathlib.Path);args=parser.parse_args()
  try:import cv2
  except ImportError:raise SystemExit('缺少OpenCV，请在测试环境安装opencv-python后运行')
- expected={'http://192.168.4.1','WIFI:T:WPA;S:小纸 Pico-1234;P:ABCDEFGH2345;H:false;;'}
+ expected={'http://192.168.4.1','WIFI:T:WPA;S:PicoNano-1234;P:ABCDEFGH2345;H:false;;'}
  for path in args.captures:
   pixels=cv2.imread(str(path),cv2.IMREAD_GRAYSCALE)
   if pixels is None:raise SystemExit(f'无法读取测试捕获：{path}')

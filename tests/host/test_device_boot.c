@@ -73,11 +73,11 @@ int main(int argc,char **argv){assert(argc==2);nvs_bad=strcmp(argv[1],"nvs")==0;
     else if(ready_bad)assert(board_calls==1 && vcom_reads==1 && presents==0 && mounts==0);
     else if(underrun){
         // 欠载：退回12MHz并白场重建，随后成功；轨保活不断电。/ Underrun: back to 12 MHz and rebuild from white, then succeed; rails stay up.
-        assert(board_calls==1 && vcom_reads==1 && presents==2 && mounts==1);
+        assert(board_calls==1 && vcom_reads==1 && presents==3 && mounts==1);
         assert(pclk_calls==1 && last_pclk==READ_PICO_EPD_PCLK_MIN_MHZ && poweroffs==0);
     }
     else {
-        assert(board_calls==1 && vcom_reads==1 && presents==1 && mounts==1);
+        assert(board_calls==1 && vcom_reads==1 && presents==2 && mounts==1);
         // 正常刷新后高压轨保活，空闲期满前不断电。/ After a normal present the rails stay up until the idle period elapses.
         assert(pclk_calls==0 && poweroffs==0);
     }

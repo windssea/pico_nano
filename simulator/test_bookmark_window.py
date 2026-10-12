@@ -10,7 +10,7 @@ with tempfile.TemporaryDirectory() as directory:
     books.mkdir()
     (books / "book.txt").write_text("Read Pico book with editable bookmarks.\n" * 300, encoding="utf8")
     script = "enter,next,bookmarks,mark-add,mark-select,mark-rename,mark-clear,text:My mark,mark-confirm,tap:150:50,tap:620:500,tap:342:600,tap:342:984,tap:200:280,mark-jump,mark-return,bookmarks,mark-select,mark-delete,mark-back,mark-delete,mark-confirm,mark-back,back,quit"
-    env = dict(os.environ, SDL_VIDEODRIVER="dummy", PN_SIM_LIBRARY_SCRIPT=script)
+    env = dict(os.environ, SDL_VIDEODRIVER="dummy", PN_SIM_LIBRARY_SCRIPT="library,"+script)
     args = [sys.argv[1], "--library", str(books), "--state-dir", str(root / "state")]
     result = subprocess.run(args, capture_output=True, text=True, env=env, timeout=30)
     assert result.returncode == 0, (result.stdout, result.stderr)
@@ -23,7 +23,7 @@ with tempfile.TemporaryDirectory() as directory:
     assert "bookmark_ui command=1 status=0 mode=2 count=1" in result.stdout, result.stdout
     assert "bookmark_ui command=9 status=0 mode=1 count=0" in result.stdout, result.stdout
     assert "used=0 live=0" in result.stdout, result.stdout
-    env["PN_SIM_LIBRARY_SCRIPT"] = "enter,bookmarks,mark-back,back,quit"
+    env["PN_SIM_LIBRARY_SCRIPT"] = "library,enter,bookmarks,mark-back,back,quit"
     resumed = subprocess.run(args, capture_output=True, text=True, env=env, timeout=30)
     assert resumed.returncode == 0 and "bookmark_ui open status=0 mode=1 count=0" in resumed.stdout, (resumed.stdout, resumed.stderr)
     reader_env = dict(os.environ, SDL_VIDEODRIVER="dummy", PN_SIM_INPUT_SCRIPT=script)
@@ -42,7 +42,7 @@ with tempfile.TemporaryDirectory() as directory:
     for mode in ('--book','--library'):
         state=root/('single' if mode=='--book' else 'library');prefix='' if mode=='--book' else 'enter,';suffix='quit' if mode=='--book' else 'back,quit'
         def run(script):
-            env=dict(os.environ,SDL_VIDEODRIVER='dummy',**{('PN_SIM_INPUT_SCRIPT' if mode=='--book' else 'PN_SIM_LIBRARY_SCRIPT'):prefix+script+suffix})
+            env=dict(os.environ,SDL_VIDEODRIVER='dummy',**{('PN_SIM_INPUT_SCRIPT' if mode=='--book' else 'PN_SIM_LIBRARY_SCRIPT'):(('library,' if mode=='--library' else '')+prefix+script+suffix)})
             result=subprocess.run([sys.argv[1],mode,str(book if mode=='--book' else books),'--state-dir',str(state)],env=env,capture_output=True,text=True,timeout=40)
             assert result.returncode==0 and 'used=0 live=0' in result.stdout,(result.stdout,result.stderr)
             return result

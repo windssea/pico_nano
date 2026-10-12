@@ -36,13 +36,13 @@ pn_status_t pn_transfer_hub_render(pn_font_t *font,pn_frame_t *frame,const pn_tr
     if(s==PN_OK)s=pn_w_card_row(font,frame,"存储卡",info->storage && *info->storage?info->storage:"未读取到存储卡",NULL,-1,0u,STORAGE_Y,true);
     if(s==PN_OK)s=pn_w_group(font,frame,"支持的文件",FORMAT_Y-14);
     if(s==PN_OK)s=pn_font_size(font,24);
-    if(s==PN_OK)s=pn_w_text_lines_ex(font,frame,"图书 EPUB / TXT · 字体 TTF · 壁纸 JPG / PNG。传完回到书架即可看到。",PN_UI_MARGIN+8,FORMAT_Y+22,604,3,34,PN_UI_MUTED,false);
-    if(s==PN_OK){static const char *const tabs[]={"书架","传书","设置"};static const pn_icon_t icons[]={PN_ICON_SHELF,PN_ICON_TRANSFER,PN_ICON_SETTINGS};s=pn_font_size(font,24);if(s==PN_OK)s=pn_w_tabbar_icons(font,frame,tabs,icons,3,1,0u,TAB_Y,TAB_H);}
+    if(s==PN_OK)s=pn_w_text_lines_ex(font,frame,"图书 EPUB / TXT · 字体 TTF · 壁纸 JPG / PNG。传完回到书库即可看到。",PN_UI_MARGIN+8,FORMAT_Y+22,604,3,34,PN_UI_MUTED,false);
+    if(s==PN_OK){s=pn_font_size(font,24);if(s==PN_OK)s=pn_w_navigation(font,frame,PN_NAV_TRANSFER);}
     pn_status_t restored=pn_font_size(font,original);return s==PN_OK?restored:s;
 }
 int pn_transfer_hub_hit(const pn_transfer_hub_info_t *info,int x,int y){
     if(!info || x<0 || x>=PN_UI_WIDTH || y<0 || y>=PN_UI_HEIGHT)return -1;
-    if(y>=TAB_Y){int tab=pn_w_tabbar_hit(3,TAB_Y,TAB_H,x,y);return tab==0?PN_HUB_SHELF:tab==2?PN_HUB_SETTINGS:-1;}
+    if(y>=TAB_Y){int tab=pn_w_navigation_hit(x,y);return tab==PN_NAV_HOME?PN_HUB_HOME:tab==PN_NAV_LIBRARY?PN_HUB_SHELF:tab==PN_NAV_SETTINGS?PN_HUB_SETTINGS:-1;}
     if(x<PN_UI_MARGIN || x>=PN_UI_WIDTH-PN_UI_MARGIN)return -1;
     if(y>=CHANNEL_Y && y<CHANNEL_Y+ROW_H)return info->hotspot?PN_HUB_HOTSPOT:-1;
     if(y>=CHANNEL_Y+ROW_H && y<CHANNEL_Y+2*ROW_H)return info->lan?PN_HUB_LAN:-1;

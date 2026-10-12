@@ -11,6 +11,7 @@
 #define PN_HUB_HOTSPOT 1 ///< 开热点传书 / Start hotspot transfer
 #define PN_HUB_LAN 2 ///< 局域网传书 / LAN transfer
 #define PN_HUB_SHELF 3 ///< 底栏书架 / Bottom-bar Shelf
+#define PN_HUB_HOME 5 ///< 底栏首页 / Bottom-bar Home
 #define PN_HUB_SETTINGS 4 ///< 底栏设置 / Bottom-bar Settings
 /// 页面上显示的能力与信息，由调用方按实际状态填写。/ Capabilities and information shown on the page, filled by the caller from actual state.
 typedef struct {

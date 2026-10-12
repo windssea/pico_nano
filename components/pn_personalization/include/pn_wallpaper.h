@@ -10,6 +10,7 @@
 #include "pn_font.h"
 #include "pn_frame.h"
 #include "pn_storage.h"
+#include "pn_identity.h"
 #define PN_WALLPAPER_WIDTH 684
 #define PN_WALLPAPER_HEIGHT 1216
 #define PN_WALLPAPER_BYTES (PN_WALLPAPER_WIDTH/2*PN_WALLPAPER_HEIGHT)
@@ -21,7 +22,7 @@ typedef enum {
     PN_LOCK_DEFAULT=0, ///< 固件内置黑白锁屏 / Built-in black-and-white lock screen
     PN_LOCK_CUSTOM=1, ///< 用户图片预处理位图 / Preprocessed user image bitmap
     PN_LOCK_SIMPLE=2, ///< 白底产品名与静态提示 / White background with product name and static hint
-    PN_LOCK_BOOK=3 ///< 锁屏时显示正在读的书的封面；记录不带位图 / Show the cover of the book being read at lock time; the record carries no bitmap
+    PN_LOCK_BOOK=3 ///< 当前/最近在读书封，可带内部位图 / Current/last-read book cover, optionally carrying an internal bitmap
 } pn_lock_mode_t;
 /// 适配方式。/ Fit mode.
 typedef enum {
@@ -43,6 +44,8 @@ typedef struct {
     uint64_t source_size; ///< 原图大小，仅供编辑页提示 / Source size, for edit-page hints only
     int64_t source_mtime; ///< 原图mtime / Source mtime
     char source[PN_WALLPAPER_PATH_MAX]; ///< 原图路径，原图可已不存在 / Source path; the source may no longer exist
+    bool cached_book; ///< BOOK记录已含有效书封位图 / BOOK record contains a validated cover bitmap
+    pn_book_id_t book; ///< 已缓存书封的内容身份 / Content identity of the cached book cover
 } pn_lock_selection_t;
 /// 缓存文件A/B两槽，由可信owner给出不同路径。/ Two cache slot paths supplied by a trusted owner.
 typedef struct {
@@ -58,11 +61,11 @@ pn_status_t pn_wallpaper_prepare(pn_pool_t *pool,pn_media_t *media,const pn_medi
 
 /// 绑定两槽，路径必须不同。/ Bind two distinct slot paths.
 pn_status_t pn_wallpaper_store_init(pn_wallpaper_store_t *store,pn_media_t *media,const char *a,const char *b);
-/// 选最高有效序号；自定义模式把位图读入frame（整屏、stride 342）。EMPTY无记录；CORRUPT两槽皆坏；错误时frame可能变化不可呈现，选择不变。
-/// Pick the highest valid sequence; custom mode reads the bitmap into frame (full screen, stride 342). EMPTY without records; CORRUPT when both slots are bad; on error frame may change and must not be shown while selection stays unchanged.
+/// 选最高有效序号；自定义/已缓存书封把位图读入frame（整屏、stride 342）。EMPTY无记录；CORRUPT两槽皆坏；错误时frame可能变化不可呈现，选择不变。
+/// Pick the highest valid sequence; custom/cached-book modes read the bitmap into frame (full screen, stride 342). EMPTY without records; CORRUPT when both slots are bad; on error frame may change and must not be shown while selection stays unchanged.
 pn_status_t pn_wallpaper_load(const pn_wallpaper_store_t *store,const pn_media_lease_t *lease,pn_lock_selection_t *selection,pn_frame_t *frame);
-/// 写入非活动槽、同步并读回CRC；sequence由现有最高有效代加一并回填selection。custom须给bitmap。
-/// Write the inactive slot, sync and read back the CRC; the sequence is the highest valid one plus one and is written back into selection. Custom mode requires bitmap.
+/// 写入非活动槽、同步并读回CRC；sequence由现有最高有效代加一并回填selection。自定义/已缓存书封须给bitmap。
+/// Write the inactive slot, sync and read back the CRC; the sequence is the highest valid one plus one and is written back into selection. Custom/cached-book modes require bitmap.
 /// 失败可能已经提交，调用方应重新load确认。/ Failures may still have committed; callers should reload to confirm.
 pn_status_t pn_wallpaper_save(const pn_wallpaper_store_t *store,const pn_media_lease_t *lease,pn_lock_selection_t *selection,const pn_frame_t *bitmap);
 

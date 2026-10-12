@@ -1,7 +1,7 @@
 // 中文传输队列，原文只读；名称使用textContent。/ Chinese transfer queue, read-only originals and textContent names.
 import {SHA256} from './sha256.mjs';
 const $=id=>document.getElementById(id),kinds={book:{label:'书籍',accept:'.txt,.epub',hint:'TXT、EPUB 电子书，支持多本添加',limit:512*1024*1024},font:{label:'字体',accept:'.ttf',hint:'TTF 字体，最大 32 MiB',limit:32*1024*1024},cover:{label:'封面',accept:'.png,.jpg,.jpeg',hint:'PNG、JPEG 图片，最大 8 MiB',limit:8*1024*1024},wallpaper:{label:'锁屏图片',accept:'.png,.jpg,.jpeg',hint:'上传后在阅读器菜单“锁屏壁纸”中预览并应用',limit:8*1024*1024}};
-let kind='book',token=null,running=false,entries=[];
+let kind='book',token=null,running=false,entries=[],resourceGeneration=0;
 function notice(text,error=false){$('notice').textContent=text;$('notice').classList.toggle('error',error);}
 function connected(value){$('connection').textContent=value?'已连接':'等待配对';$('connection').classList.toggle('connected',value);$('pair-panel').hidden=value;if(!value)$('network-panel').hidden=true;else loadNetwork();syncFonts();render();}
 // 家庭网络：只在设备支持时显示；口令只提交，不回显。/ Home network: shown only when the device supports it; passwords are submitted, never echoed.
@@ -10,29 +10,32 @@ async function loadNetwork(){try{showNetwork(await api('/network'));}catch(error
 async function waitNetwork(){for(let i=0;i<20;i++){const state=await api('/network');if(!state.pending){showNetwork(state);return state;}await new Promise(r=>setTimeout(r,300));}notice('阅读器仍在保存，请稍后刷新查看。',true);}
 $('network-form').onsubmit=async event=>{event.preventDefault();const button=event.submitter;button.disabled=true;try{await api('/network','POST',{ssid:$('network-ssid').value,password:$('network-password').value});$('network-password').value='';const state=await waitNetwork();if(state&&state.result==='ok')notice('网络已保存到阅读器。');}catch(error){notice(error.message,true);}finally{button.disabled=false;}};
 $('network-forget').onclick=async()=>{try{await api('/network','DELETE');await waitNetwork();notice('已忘记家庭网络。');}catch(error){notice(error.message,true);}};
-async function api(path,method='GET',body,headers={}){if(token)headers.Authorization='Bearer '+token;let data=body;if(body&&!(body instanceof Uint8Array)){headers['Content-Type']='application/json';data=JSON.stringify(body);}const response=await fetch('/api/v1'+path,{method,body:data,headers}),value=await response.json();if(!response.ok){if(response.status===401){token=null;connected(false);}const error=Error(value.message||'操作失败');error.status=response.status;throw error;}return value;}
+async function api(path,method='GET',body,headers={}){const auth=token;if(auth)headers.Authorization='Bearer '+auth;let data=body;if(body&&!(body instanceof Uint8Array)){headers['Content-Type']='application/json';data=JSON.stringify(body);}const response=await fetch('/api/v1'+path,{method,body:data,headers}),value=await response.json();if(!response.ok){if(response.status===401&&token===auth){token=null;connected(false);}const error=Error(value.message||'操作失败');error.status=response.status;throw error;}return value;}
 $('pair-form').onsubmit=async event=>{event.preventDefault();const button=event.submitter;button.disabled=true;try{token=(await api('/pair','POST',{code:$('pair-code').value})).token;$('pair-code').value='';connected(true);notice('连接成功，可以开始发送。');}catch(error){notice(error.message,true);}finally{button.disabled=false;}};
 for(const button of document.querySelectorAll('[data-kind]'))button.onclick=()=>{kind=button.dataset.kind;for(const tab of document.querySelectorAll('[data-kind]'))tab.setAttribute('aria-pressed',String(tab===button));$('files').accept=kinds[kind].accept;$('accept-hint').textContent=kinds[kind].hint;syncFonts();};
-// 已安装字体：选择“字体”类别时列出；删除前现取文件身份，设备核对一致才删除。/ Installed fonts: listed when the font category is selected; the file identity is fetched right before deleting and the device deletes only on a match.
-function syncFonts(){const panel=$('fonts-panel');panel.hidden=!token||kind!=='font';if(!panel.hidden)loadFonts('');}
+// 资源原图管理：切换类别丢弃旧列表回复；删除前现取身份，内部锁屏缓存保留。/ Resource management: discard old-category replies and fetch identity before deletion; retain the internal lock cache.
+const resourceTypes={font:{route:'fonts',title:'已安装字体',note:'删除后，使用它的书会暂用默认字体，阅读位置不变。'},cover:{route:'covers',title:'封面原图',note:'删除外置封面后，书架会重新查找内嵌封面或显示占位。书籍不会删除。'},wallpaper:{route:'wallpapers',title:'锁屏图片原图',note:'支持 PNG、JPEG。删除原图会保留已应用的内部锁屏缓存；上传后仍需在设备预览并应用。'}};
+function syncFonts(){resourceGeneration++;const panel=$('fonts-panel'),type=resourceTypes[kind];panel.hidden=!token||!type;if(!panel.hidden){$('resources-title').textContent=type.title;$('resources-note').textContent=type.note;$('fonts-list').replaceChildren();$('fonts-empty').hidden=true;$('fonts-more').hidden=true;loadFonts('');}}
 async function loadFonts(after){
- const list=$('fonts-list');
+ const list=$('fonts-list'),selected=kind,auth=token,generation=resourceGeneration,type=resourceTypes[selected];if(!auth||!type)return;
  try{
-  const data=await api('/fonts'+(after?'?after='+encodeURIComponent(after):''));
+  const data=await api('/'+type.route+(after?'?after='+encodeURIComponent(after):''));
+  if(generation!==resourceGeneration||kind!==selected||token!==auth)return;
   if(!after)list.replaceChildren();
   for(const item of data.items){const row=document.createElement('li'),name=document.createElement('span'),info=document.createElement('span'),button=document.createElement('button');
-   name.textContent=item.name;info.textContent=size(item.size);button.className='secondary';button.textContent='删除';button.onclick=()=>removeFont(item);row.append(name,info,button);list.append(row);}
-  $('fonts-empty').hidden=list.children.length>0;$('fonts-more').hidden=!data.more;
+   name.textContent=item.name;info.textContent=size(item.size);button.className='secondary';button.textContent='删除';button.onclick=()=>removeFont(item,selected);row.append(name,info,button);list.append(row);}
+  $('fonts-empty').textContent='还没有'+type.title+'。';$('fonts-empty').hidden=list.children.length>0;$('fonts-more').hidden=!data.more;
   $('fonts-more').onclick=()=>loadFonts(data.items[data.items.length-1].name);
- }catch(error){if(error.status===404)$('fonts-panel').hidden=true;else notice(error.message,true);}
+ }catch(error){if(generation!==resourceGeneration||kind!==selected||token!==auth)return;if(error.status===404)$('fonts-panel').hidden=true;else notice(error.message,true);}
 }
-function confirmDelete(name){return new Promise(resolve=>{const dialog=$('delete-dialog');$('delete-name').textContent=name;$('delete-no').onclick=()=>{dialog.close();resolve(false);};$('delete-yes').onclick=()=>{dialog.close();resolve(true);};dialog.oncancel=()=>resolve(false);dialog.showModal();});}
-async function removeFont(item){
- if(!await confirmDelete(item.name))return;
+function confirmDelete(name,selected){return new Promise(resolve=>{const dialog=$('delete-dialog'),label=kinds[selected].label;$('delete-title').textContent='删除这个'+label+'原文件？';$('delete-note').textContent=resourceTypes[selected].note+' 原文件删除后无法撤销。';$('delete-no').textContent='保留'+label;$('delete-name').textContent=name;$('delete-no').onclick=()=>{dialog.close();resolve(false);};$('delete-yes').onclick=()=>{dialog.close();resolve(true);};dialog.oncancel=()=>resolve(false);dialog.showModal();});}
+async function removeFont(item,selected){
+ const auth=token;if(!await confirmDelete(item.name,selected)||token!==auth)return;
  try{
-  const old=await api('/files/font?name='+encodeURIComponent(item.name));
-  await api('/fonts?name='+encodeURIComponent(item.name)+'&size='+old.size+'&sha256='+old.sha256,'DELETE');
-  notice('已删除字体：'+item.name+'。正在使用它的书会改用默认字体。');await loadFonts('');
+  const old=await api('/files/'+selected+'?name='+encodeURIComponent(item.name));
+  if(token!==auth)return;
+  await api('/'+resourceTypes[selected].route+'?name='+encodeURIComponent(item.name)+'&size='+old.size+'&sha256='+old.sha256,'DELETE');
+  notice('已删除'+kinds[selected].label+'原文件：'+item.name+'。');if(kind===selected)await loadFonts('');
  }catch(error){notice(error.message,true);await loadFonts('');}
 }
 function add(files){for(const file of files){const type=kinds[kind],suffix='.'+file.name.split('.').pop().toLowerCase();if(!type.accept.split(',').includes(suffix)||!file.size||file.size>type.limit){notice('文件格式或大小不符合当前类别，请检查。',true);continue;}if(entries.length>=32){notice('一次最多添加 32 项。',true);break;}entries.push({file,name:file.name,kind,state:'等待发送',offset:0,progress:0,paused:false,cancelled:false});}render();}
@@ -48,6 +51,6 @@ async function send(entry){if(!entry.sha)entry.sha=await hashFile(entry);entry.p
  if(!entry.id){const request={kind:entry.kind,name:entry.name,size:entry.file.size,sha256:entry.sha};try{entry.id=(await api('/uploads','POST',request)).upload_id;}catch(error){if(error.status!==409)throw error;const old=await api('/files/'+entry.kind+'?name='+encodeURIComponent(entry.name));if(!await confirmReplace(entry.name)){entry.paused=true;entry.state='原文件已保留';render();return;}request.replace={size:old.size,sha256:old.sha256};entry.id=(await api('/uploads','POST',request)).upload_id;}savedId(key,entry.id);}if(entry.cancelled){if(entry.id)await api('/uploads/'+entry.id,'DELETE');entry.state='已取消';render();return;}
  while(entry.offset<entry.file.size&&!entry.paused&&!entry.cancelled){const bytes=new Uint8Array(await entry.file.slice(entry.offset,entry.offset+65536).arrayBuffer());entry.state='发送中 '+Math.round(entry.offset/entry.file.size*100)+'%';entry.progress=entry.offset/entry.file.size;render();const chunk=new SHA256().update(bytes).hex();const result=await api('/uploads/'+entry.id+'/chunks','PUT',bytes,{'X-Offset':String(entry.offset),'X-Chunk-SHA256':chunk});entry.offset=result.next_offset;entry.progress=entry.offset/entry.file.size;render();}
  if(entry.cancelled)return;if(entry.paused){entry.state='已暂停，可继续';render();return;}entry.state='正在校验文件';render();const result=await api('/uploads/'+entry.id+'/complete','POST',{sha256:entry.sha});entry.done=true;entry.progress=1;entry.state=result.cleanup_pending?'已保存，备份待清理':'已保存';render();}
-async function sendQueue(){if(running||!token)return;running=true;render();for(const entry of entries){if(entry.done||entry.cancelled||entry.paused)continue;try{await send(entry);}catch(error){if(!entry.cancelled){entry.state=error.message;entry.paused=true;notice(error.message,true);}render();if(!token)break;}}running=false;render();if(entries.length&&entries.every(e=>e.done||e.cancelled))notice('这一批已处理完，可以添加更多内容。');}
+async function sendQueue(){if(running||!token)return;running=true;render();for(const entry of entries){if(entry.done||entry.cancelled||entry.paused)continue;try{await send(entry);}catch(error){if(!entry.cancelled){entry.state=error.message;entry.paused=true;notice(error.message,true);}render();if(!token)break;}}running=false;render();syncFonts();if(entries.length&&entries.every(e=>e.done||e.cancelled))notice('这一批已处理完，可以添加更多内容。');}
 $('start').onclick=sendQueue;$('clear').onclick=()=>{entries=entries.filter(e=>!e.done&&!e.cancelled);render();};
 const pair=new URLSearchParams(location.hash.slice(1)).get('pair');if(pair){history.replaceState(null,'',location.pathname+location.search);if(/^[0-9a-fA-F]{32}$/.test(pair)){token=pair;api('/session').then(()=>connected(true)).catch(error=>notice(error.message,true));}}render();

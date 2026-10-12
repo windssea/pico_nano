@@ -9,6 +9,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "pn_wallpaper_ui.h"
 #include "pn_widgets.h"
+#include "pn_cover.h"
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -26,6 +27,7 @@ typedef struct {
     pn_catalog_page_t page;pn_lock_selection_t saved,draft;bool saved_known,bitmap_valid;
     pn_wallpaper_transform_t prepared;char prepared_path[PN_WALLPAPER_PATH_MAX];
     char message[96];
+    pn_catalog_item_t book;uint8_t salt[16];bool has_book; ///< 在读书快照，不借用已关闭正文 / In-progress book snapshot, without borrowing closed reader state
 } ui_t;
 static const char *base(const char *path){const char *slash=strrchr(path,'/');return slash?slash+1:path;}
 static const char *mode_name(const pn_lock_selection_t *s){return s->mode==PN_LOCK_CUSTOM?"自定义图片":s->mode==PN_LOCK_SIMPLE?"简洁锁屏":s->mode==PN_LOCK_BOOK?"当前书封面":"系统默认";}
@@ -46,8 +48,31 @@ static void reload_saved(ui_t *u){
     else if(status==PN_CORRUPT)u->saved_known=false;
 }
 /* 按草稿生成预览：自定义时仅在路径/参数变化后重新预处理。/ Build the draft preview; custom sources are re-preprocessed only when path/parameters change. */
+static pn_status_t load_book_cache(ui_t *u){
+    if(!u->has_store || !u->saved_known || u->saved.mode!=PN_LOCK_BOOK || !u->saved.cached_book || (u->has_book && (!u->book.identified || memcmp(u->book.expected.sha256,u->saved.book.sha256,32))))return PN_EMPTY;
+    pn_media_lease_t lease;pn_lock_selection_t saved;pn_status_t s=pn_media_acquire(u->store.media,PN_MEDIA_READ,&lease);
+    if(s==PN_OK){s=pn_wallpaper_load(&u->store,&lease,&saved,&u->bitmap);(void)pn_media_release(u->store.media,&lease);}
+    if(s==PN_OK && saved.mode==PN_LOCK_BOOK && saved.cached_book && (!u->has_book || !memcmp(u->book.expected.sha256,saved.book.sha256,32))){bool hint=u->draft.hint;u->draft=saved;u->draft.hint=hint;u->bitmap_valid=true;return PN_OK;}
+    return s==PN_OK?PN_EMPTY:s;
+}
+static pn_status_t book_preview(ui_t *u){
+    if(u->bitmap_valid && u->draft.cached_book)return PN_OK;
+    if((!u->has_book || !u->images->available) && load_book_cache(u)==PN_OK)return PN_OK;
+    if(!u->has_book)return PN_OK;
+    pn_media_lease_t lease;pn_status_t status=pn_media_acquire(u->images,PN_MEDIA_READ,&lease);pn_book_id_t id;
+    if(status==PN_OK){status=pn_identity_file(u->images,&lease,u->book.path,512u*1024u*1024u,&id);
+        if(status==PN_OK && u->book.identified && memcmp(id.sha256,u->book.expected.sha256,32))status=PN_STALE_JOB;
+        size_t free_bytes=u->pool->limit>u->pool->used?u->pool->limit-u->pool->used:0;
+        if(status==PN_OK)status=pn_cover_render(u->pool,u->images,&lease,&u->book,u->salt,free_bytes>RESERVE?free_bytes-RESERVE:1,&u->bitmap);
+        (void)pn_media_release(u->images,&lease);}
+    if((status==PN_EMPTY || status==PN_STALE_MEDIA || status==PN_IO) && load_book_cache(u)==PN_OK)return PN_OK;
+    if(status==PN_EMPTY){snprintf(u->message,sizeof u->message,"这本书没有封面，锁屏使用系统默认");return PN_OK;}
+    if(status==PN_OK){u->draft.cached_book=true;u->draft.book=id;snprintf(u->draft.source,sizeof u->draft.source,"%s",u->book.path);u->draft.source_size=u->book.size;u->bitmap_valid=true;}
+    return status;
+}
 static pn_status_t build_preview(ui_t *u){
     pn_status_t status=PN_OK;
+    if(u->draft.mode==PN_LOCK_BOOK)status=book_preview(u);
     if(u->draft.mode==PN_LOCK_CUSTOM && (!u->bitmap_valid || strcmp(u->prepared_path,u->draft.source) || memcmp(&u->prepared,&u->draft.transform,sizeof u->prepared))){
         u->bitmap_valid=false;pn_media_lease_t lease;status=pn_media_acquire(u->images,PN_MEDIA_READ,&lease);
         size_t free_bytes=u->pool->limit>u->pool->used?u->pool->limit-u->pool->used:0;
@@ -55,9 +80,9 @@ static pn_status_t build_preview(ui_t *u){
         if(status==PN_OK){u->bitmap_valid=true;u->prepared=u->draft.transform;strcpy(u->prepared_path,u->draft.source);}
     }
     if(status!=PN_OK)return status;
-    if(u->draft.mode==PN_LOCK_CUSTOM)memcpy(u->canvas_px,u->bitmap_px,PN_WALLPAPER_BYTES);
-    // 当前书封面在锁屏时才取，预览用系统默认图占位。/ The book cover is fetched at lock time, so the preview uses the system default art as a placeholder.
-    pn_lock_selection_t shown=u->draft;if(shown.mode==PN_LOCK_BOOK)shown.mode=PN_LOCK_DEFAULT;
+    if(u->draft.mode==PN_LOCK_CUSTOM || u->draft.cached_book)memcpy(u->canvas_px,u->bitmap_px,PN_WALLPAPER_BYTES);
+    // 有效书封与自定义使用相同预览/持久路径；无候选保留系统默认占位。/ Valid book covers share the custom preview/persistence path; no candidate retains default artwork.
+    pn_lock_selection_t shown=u->draft;if(shown.mode==PN_LOCK_BOOK && !shown.cached_book)shown.mode=PN_LOCK_DEFAULT;
     status=pn_lock_render(&shown,&u->font,"再按电源键继续阅读",&u->canvas);
     if(status==PN_OK){for(int y=0;y<PH;y++)for(int x=0;x<PW;x++){unsigned sum=pn_frame_get(&u->canvas,2*x,2*y)+pn_frame_get(&u->canvas,2*x+1,2*y)+pn_frame_get(&u->canvas,2*x,2*y+1)+pn_frame_get(&u->canvas,2*x+1,2*y+1);pn_frame_pixel(&u->small,x,y,(uint8_t)((sum+2)/4));}}
     return status;
@@ -131,20 +156,26 @@ pn_status_t pn_wallpaper_ui_open(pn_wallpaper_ui_t *ui,pn_pool_t *pool,pn_media_
     *ui=(pn_wallpaper_ui_t){.impl=u,.active=true,.screen=PN_WUI_LIST,.last=PN_EMPTY};
     (void)show(ui,present,ctx);return PN_OK;
 }
+pn_status_t pn_wallpaper_ui_book_source(pn_wallpaper_ui_t *ui,const pn_catalog_item_t *book,const uint8_t salt[16]){
+    if(!ui || !ui->impl || (book && (!salt || !memchr(book->path,0,sizeof book->path) || !*book->path || (book->format!=PN_BOOK_TXT && book->format!=PN_BOOK_EPUB))))return PN_INVALID;
+    if(ui->screen!=PN_WUI_LIST)return PN_BUSY;
+    ui_t *u=ui->impl;u->has_book=book!=NULL;u->bitmap_valid=false;
+    if(book){u->book=*book;memcpy(u->salt,salt,16);}return PN_OK;
+}
 static pn_status_t apply(pn_wallpaper_ui_t *ui){
     ui_t *u=ui->impl;
     if(!u->has_store){snprintf(u->message,sizeof u->message,"内部壁纸分区不可用，锁屏未更改");return PN_UNSUPPORTED;}
-    if(u->draft.mode==PN_LOCK_CUSTOM && !u->bitmap_valid){snprintf(u->message,sizeof u->message,"预览尚未生成，锁屏未更改");return PN_INVALID;}
+    if((u->draft.mode==PN_LOCK_CUSTOM || u->draft.cached_book) && !u->bitmap_valid){snprintf(u->message,sizeof u->message,"预览尚未生成，锁屏未更改");return PN_INVALID;}
     pn_media_lease_t lease;pn_status_t status=pn_media_acquire(u->store.media,PN_MEDIA_WRITE,&lease);
     pn_lock_selection_t record=u->draft;
-    if(status==PN_OK){status=pn_wallpaper_save(&u->store,&lease,&record,u->draft.mode==PN_LOCK_CUSTOM?&u->bitmap:NULL);(void)pn_media_release(u->store.media,&lease);
+    if(status==PN_OK){status=pn_wallpaper_save(&u->store,&lease,&record,u->draft.mode==PN_LOCK_CUSTOM || u->draft.cached_book?&u->bitmap:NULL);(void)pn_media_release(u->store.media,&lease);
         // 保存失败也可能已提交，以读回为准。/ A failed save may still have committed; trust the readback.
         reload_saved(u);}
     if(status==PN_OK){ui->screen=PN_WUI_LIST;snprintf(u->message,sizeof u->message,"已应用：%s",mode_name(&record));}
     else snprintf(u->message,sizeof u->message,"应用失败（%d），保留原锁屏",(int)status);
     return status;
 }
-static void begin_preview(ui_t *u,pn_lock_selection_t draft){u->draft=draft;u->message[0]=0;}
+static void begin_preview(ui_t *u,pn_lock_selection_t draft){u->bitmap_valid=false;u->draft=draft;u->message[0]=0;}
 pn_status_t pn_wallpaper_ui_event(pn_wallpaper_ui_t *ui,int command,pn_wallpaper_present_fn present,void *ctx){
     if(!ui || !ui->impl || !ui->active || !present)return PN_INVALID;
     ui_t *u=ui->impl;pn_status_t status=PN_OK;bool rebuild=false;
@@ -174,7 +205,7 @@ pn_status_t pn_wallpaper_ui_event(pn_wallpaper_ui_t *ui,int command,pn_wallpaper
         else return PN_EMPTY;
     }
     if(rebuild){status=build_preview(u);
-        if(status==PN_OK){ui->screen=PN_WUI_PREVIEW;u->message[0]=0;}
+        if(status==PN_OK){ui->screen=PN_WUI_PREVIEW;}
         else{ui->screen=PN_WUI_LIST;snprintf(u->message,sizeof u->message,status==PN_NO_MEMORY?"图片过大，内存不足":status==PN_UNSUPPORTED?"不是可用的JPEG/PNG":"图片无法读取（%d）",(int)status);}}
     pn_status_t shown=show(ui,present,ctx);return status==PN_OK?shown:status;
 }

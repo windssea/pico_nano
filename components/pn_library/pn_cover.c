@@ -68,15 +68,16 @@ static pn_status_t decode(pn_pool_t *pool,cover_source_t *c,pn_frame_t *out){
     }
     pn_free(pixels);return status;
 }
-static pn_status_t epub_cover(pn_pool_t *pool,pn_media_t *media,const pn_media_lease_t *lease,const char *path,const uint8_t salt[16],pn_frame_t *out){
+static pn_status_t epub_cover(pn_pool_t *pool,pn_media_t *media,const pn_media_lease_t *lease,const char *path,const uint8_t salt[16],pn_frame_t *out,pn_book_display_t *display){
     pn_text_file_t file={0};pn_text_source_t source;pn_zip_t zip={0};pn_epub_t epub={0};
     pn_epub_info_t *info=pn_alloc(pool,sizeof *info);if(!info)return PN_NO_MEMORY;
     pn_status_t status=pn_text_file_open(&file,media,lease,path,&source);
     if(status==PN_OK)status=pn_zip_open(&zip,pool,&source);
     if(status==PN_OK)status=pn_epub_open(&epub,pool,&zip,salt);
     if(status==PN_OK)status=pn_epub_info(&epub,info);
-    if(status==PN_OK && !*info->cover_path)status=PN_EMPTY;
-    if(status==PN_OK){cover_source_t c={.epub=&epub,.path=info->cover_path};status=decode(pool,&c,out);}
+    if(status==PN_OK && display){snprintf(display->title,sizeof display->title,"%s",info->title);snprintf(display->author,sizeof display->author,"%s",info->creator);}
+    if(status==PN_OK && out && !*info->cover_path)status=PN_EMPTY;
+    if(status==PN_OK && out){cover_source_t c={.epub=&epub,.path=info->cover_path};status=decode(pool,&c,out);}
     pn_epub_close(&epub);pn_status_t closed=pn_zip_close(&zip);if(status==PN_OK)status=closed;
     closed=pn_text_file_close(&file);if(status==PN_OK)status=closed;
     pn_free(info);return status;
@@ -117,8 +118,8 @@ static pn_status_t external_cover(pn_pool_t *pool,pn_media_t *media,const pn_med
     }
     return PN_EMPTY;
 }
-pn_status_t pn_cover_render(pn_pool_t *pool,pn_media_t *media,const pn_media_lease_t *lease,const pn_catalog_item_t *item,
-    const uint8_t salt[16],size_t budget,pn_frame_t *thumb){
+static pn_status_t cover_render_display(pn_pool_t *pool,pn_media_t *media,const pn_media_lease_t *lease,const pn_catalog_item_t *item,
+    const uint8_t salt[16],size_t budget,pn_frame_t *thumb,pn_book_display_t *display){
     if(!pool || !media || !lease || !item || !salt || !budget || !thumb || !thumb->pixels || thumb->width<=0 || thumb->height<=0 || thumb->width>684 || thumb->height>1216)return PN_INVALID;
     if(strnlen(item->path,sizeof item->path)>=sizeof item->path || !*item->path)return PN_INVALID;
     if(item->format!=PN_BOOK_TXT && item->format!=PN_BOOK_EPUB)return PN_UNSUPPORTED;
@@ -128,9 +129,15 @@ pn_status_t pn_cover_render(pn_pool_t *pool,pn_media_t *media,const pn_media_lea
     size_t bytes=((size_t)thumb->width+1)/2*(size_t)thumb->height;uint8_t *pixels=pn_alloc(&sub,bytes);if(!pixels)return PN_NO_MEMORY;
     pn_frame_t out;(void)pn_frame_bind(&out,pixels,bytes,thumb->width,thumb->height);
     status=external_cover(&sub,media,lease,item->path,&out);
-    if(status==PN_EMPTY && item->format==PN_BOOK_EPUB)status=epub_cover(&sub,media,lease,item->path,salt,&out);
+    if(item->format==PN_BOOK_EPUB){
+        if(status==PN_EMPTY)status=epub_cover(&sub,media,lease,item->path,salt,&out,display);
+        else if(display)(void)epub_cover(&sub,media,lease,item->path,salt,NULL,display);
+    }
     if(status==PN_OK)for(int y=0;y<out.height;y++)for(int x=0;x<out.width;x++)pn_frame_pixel(thumb,x,y,pn_frame_get(&out,x,y));
     pn_free(pixels);return status;
+}
+pn_status_t pn_cover_render(pn_pool_t *pool,pn_media_t *media,const pn_media_lease_t *lease,const pn_catalog_item_t *item,const uint8_t salt[16],size_t budget,pn_frame_t *thumb){
+    return cover_render_display(pool,media,lease,item,salt,budget,thumb,NULL);
 }
 static bool coverable(const pn_catalog_item_t *item){return item && (item->format==PN_BOOK_TXT || item->format==PN_BOOK_EPUB);}
 /* 槽对应的书：0..5为本页条目，PN_COVER_SLOT_LAST为继续阅读的书。/ The book behind a slot: 0..5 are page entries, PN_COVER_SLOT_LAST is the continue-reading book. */
@@ -142,11 +149,13 @@ void pn_shelf_covers_reset(pn_shelf_covers_t *covers,const pn_catalog_page_t *pa
     if(!covers)return;
     for(size_t i=0;i<=PN_COVER_SLOT_LAST;i++){
         // page为NULL表示停止全部提取，包括继续阅读槽。/ A NULL page stops all extraction, including the continue-reading slot.
+        memset(&covers->display[i],0,sizeof covers->display[i]);
         covers->state[i]=page && coverable(slot_item(covers,page,i))?PN_COVER_PENDING:PN_COVER_NONE;covers->reason[i]=PN_EMPTY;
     }
 }
 void pn_shelf_covers_set_last(pn_shelf_covers_t *covers,const pn_catalog_item_t *item){
     if(!covers)return;
+    memset(&covers->display[PN_COVER_SLOT_LAST],0,sizeof covers->display[0]);
     covers->has_last=item!=NULL;
     if(item){covers->last=*item;}
     covers->state[PN_COVER_SLOT_LAST]=coverable(item)?PN_COVER_PENDING:PN_COVER_NONE;covers->reason[PN_COVER_SLOT_LAST]=PN_EMPTY;
@@ -170,10 +179,10 @@ static bool cache_path(const char *dir,const char *book,char out[PN_CATALOG_PATH
     uint64_t h=1469598103934665603u;for(const unsigned char *c=(const unsigned char *)book;*c;c++){h^=*c;h*=1099511628211u;}
     int length=snprintf(out,PN_CATALOG_PATH_MAX,"%s/%016llx.pnc%s",dir,(unsigned long long)h,suffix);return length>=0 && (size_t)length<PN_CATALOG_PATH_MAX;
 }
-static size_t record_bytes(size_t path_length,pn_cover_state_t state){return HEADER_BYTES+path_length+(state==PN_COVER_READY?PN_COVER_BYTES:0)+4;}
+static size_t record_bytes(size_t path_length,pn_cover_state_t state){return HEADER_BYTES+path_length+sizeof(pn_book_display_t)+(state==PN_COVER_READY?PN_COVER_BYTES:0)+4;}
 /* 命中OK；缺失/键或路径不符EMPTY；损坏CORRUPT，调用方重建覆盖。/ Hit OK; missing or key/path mismatch EMPTY; corrupt CORRUPT and the caller rebuilds over it. */
 static pn_status_t cache_load(pn_pool_t *pool,pn_media_t *media,const pn_media_lease_t *lease,const char *dir,const pn_catalog_item_t *item,
-    const cover_key_t *key,pn_cover_state_t *state,pn_status_t *reason,uint8_t *pixels){
+    const cover_key_t *key,pn_cover_state_t *state,pn_status_t *reason,uint8_t *pixels,pn_book_display_t *display){
     char path[PN_CATALOG_PATH_MAX];if(!cache_path(dir,item->path,path,""))return PN_LIMIT;
     size_t length=strlen(item->path),capacity=record_bytes(length,PN_COVER_READY);
     uint8_t *data=pn_alloc(pool,capacity+1);if(!data)return PN_NO_MEMORY;
@@ -187,7 +196,9 @@ static pn_status_t cache_load(pn_pool_t *pool,pn_media_t *media,const pn_media_l
         else{pn_cover_state_t stored=(pn_cover_state_t)data[10];
             if((stored!=PN_COVER_READY && stored!=PN_COVER_NONE && stored!=PN_COVER_FAILED) || n!=record_bytes(get(data+HEADER_BYTES-2,2),stored) || get(data+n-4,4)!=crc32(data,n-4))status=PN_CORRUPT;
             else if(memcmp(data+12,expected,KEY_BYTES) || get(data+HEADER_BYTES-2,2)!=length || memcmp(data+HEADER_BYTES,item->path,length))status=PN_EMPTY;
-            else{*state=stored;*reason=(pn_status_t)data[11];if(stored==PN_COVER_READY)memcpy(pixels,data+HEADER_BYTES+length,PN_COVER_BYTES);}
+            else{pn_book_display_t candidate;memcpy(&candidate,data+HEADER_BYTES+length,sizeof candidate);
+                if(!memchr(candidate.title,0,sizeof candidate.title) || !memchr(candidate.author,0,sizeof candidate.author))status=PN_CORRUPT;
+                else{*state=stored;*reason=(pn_status_t)data[11];*display=candidate;if(stored==PN_COVER_READY)memcpy(pixels,data+HEADER_BYTES+length+sizeof candidate,PN_COVER_BYTES);}}
         }
     }
     pn_free(data);return status;
@@ -195,13 +206,14 @@ static pn_status_t cache_load(pn_pool_t *pool,pn_media_t *media,const pn_media_l
 static pn_status_t make_dir(const char *path){return mkdir(path,0775)==0 || errno==EEXIST?PN_OK:PN_IO;}
 /* 先写临时文件并同步，再替换；中途掉电最多丢缓存，CRC拒绝残片。/ Write and sync a temporary file, then replace; power loss loses at most the cache and CRC rejects fragments. */
 static pn_status_t cache_store(pn_pool_t *pool,pn_media_t *media,const pn_media_lease_t *lease,const char *dir,const pn_catalog_item_t *item,
-    const cover_key_t *key,pn_cover_state_t state,pn_status_t reason,const uint8_t *pixels){
+    const cover_key_t *key,pn_cover_state_t state,pn_status_t reason,const uint8_t *pixels,const pn_book_display_t *display){
     char path[PN_CATALOG_PATH_MAX],temporary[PN_CATALOG_PATH_MAX],parent[PN_CATALOG_PATH_MAX];
     if(!cache_path(dir,item->path,path,"") || !cache_path(dir,item->path,temporary,".tmp") || strlen(dir)>=sizeof parent)return PN_LIMIT;
     size_t length=strlen(item->path),size=record_bytes(length,state);uint8_t *data=pn_alloc(pool,size);if(!data)return PN_NO_MEMORY;
     memcpy(data,"PNCV",4);put(data+4,PN_COVER_CACHE_VERSION,2);put(data+6,PN_COVER_WIDTH,2);put(data+8,PN_COVER_HEIGHT,2);data[10]=(uint8_t)state;data[11]=(uint8_t)reason;
     encode_key(data+12,key);put(data+HEADER_BYTES-2,length,2);memcpy(data+HEADER_BYTES,item->path,length);
-    if(state==PN_COVER_READY)memcpy(data+HEADER_BYTES+length,pixels,PN_COVER_BYTES);
+    memcpy(data+HEADER_BYTES+length,display,sizeof *display);
+    if(state==PN_COVER_READY)memcpy(data+HEADER_BYTES+length+sizeof *display,pixels,PN_COVER_BYTES);
     put(data+size-4,crc32(data,size-4),4);
     strcpy(parent,dir);char *slash=strrchr(parent,'/');
     pn_status_t status=pn_media_validate(media,lease);
@@ -224,8 +236,8 @@ pn_status_t pn_shelf_covers_cached(pn_shelf_covers_t *covers,const pn_catalog_pa
         if(!item || covers->state[i]!=PN_COVER_PENDING)continue;
         cover_key_t key;pn_cover_state_t state;pn_status_t reason;
         if(cover_key(item,&key)!=PN_OK)continue;
-        status=cache_load(pool,media,&lease,cache_dir,item,&key,&state,&reason,covers->pixels[i]);
-        if(status==PN_OK){covers->state[i]=state;covers->reason[i]=reason;if(state==PN_COVER_READY)*changed=true;}
+        status=cache_load(pool,media,&lease,cache_dir,item,&key,&state,&reason,covers->pixels[i],&covers->display[i]);
+        if(status==PN_OK){covers->state[i]=state;covers->reason[i]=reason;if(state==PN_COVER_READY || *covers->display[i].title)*changed=true;}
     }
     (void)pn_media_release(media,&lease);return status==PN_STALE_MEDIA?status:PN_OK;
 }
@@ -239,19 +251,19 @@ pn_status_t pn_shelf_covers_step(pn_shelf_covers_t *covers,const pn_catalog_page
         pn_media_lease_t lease;
         pn_status_t status=pn_media_acquire(media,PN_MEDIA_READ,&lease);if(status!=PN_OK)return status;
         cover_key_t key;bool keyed=cache_dir && cover_key(item,&key)==PN_OK;
-        if(keyed){pn_cover_state_t state;pn_status_t reason;status=cache_load(pool,media,&lease,cache_dir,item,&key,&state,&reason,covers->pixels[i]);
-            if(status==PN_OK){covers->state[i]=state;covers->reason[i]=reason;*changed=state==PN_COVER_READY;(void)pn_media_release(media,&lease);return PN_OK;}
+        if(keyed){pn_cover_state_t state;pn_status_t reason;status=cache_load(pool,media,&lease,cache_dir,item,&key,&state,&reason,covers->pixels[i],&covers->display[i]);
+            if(status==PN_OK){covers->state[i]=state;covers->reason[i]=reason;*changed=state==PN_COVER_READY || *covers->display[i].title;(void)pn_media_release(media,&lease);return PN_OK;}
             if(status==PN_STALE_MEDIA){(void)pn_media_release(media,&lease);return status;}
         }
         pn_frame_t thumb;(void)pn_frame_bind(&thumb,covers->pixels[i],PN_COVER_BYTES,PN_COVER_WIDTH,PN_COVER_HEIGHT);
-        status=pn_cover_render(pool,media,&lease,item,salt,budget,&thumb);(void)pn_media_release(media,&lease);
+        status=cover_render_display(pool,media,&lease,item,salt,budget,&thumb,&covers->display[i]);(void)pn_media_release(media,&lease);
         if(status==PN_STALE_MEDIA || status==PN_INVALID)return status;
         covers->reason[i]=status;
         covers->state[i]=status==PN_OK?PN_COVER_READY:status==PN_EMPTY || status==PN_UNSUPPORTED?PN_COVER_NONE:PN_COVER_FAILED;
-        *changed=status==PN_OK;
+        *changed=status==PN_OK || *covers->display[i].title;
         /* 只缓存与内容有关的结论；内存/IO/超限可能下次成功。/ Cache content-determined outcomes only; memory/IO/limit failures may succeed later. */
-        if(keyed && (status==PN_OK || status==PN_EMPTY || status==PN_UNSUPPORTED || status==PN_CORRUPT) && pn_media_acquire(media,PN_MEDIA_WRITE,&lease)==PN_OK){
-            (void)cache_store(pool,media,&lease,cache_dir,item,&key,covers->state[i],status,covers->pixels[i]);(void)pn_media_release(media,&lease);
+        if(keyed && (item->format!=PN_BOOK_EPUB || *covers->display[i].title) && (status==PN_OK || status==PN_EMPTY || status==PN_UNSUPPORTED || status==PN_CORRUPT) && pn_media_acquire(media,PN_MEDIA_WRITE,&lease)==PN_OK){
+            (void)cache_store(pool,media,&lease,cache_dir,item,&key,covers->state[i],status,covers->pixels[i],&covers->display[i]);(void)pn_media_release(media,&lease);
         }
         return PN_OK;
     }

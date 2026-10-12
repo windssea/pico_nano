@@ -5,7 +5,7 @@ assets=[]
 for index,name in enumerate(('index.html','app.js','style.css','sha256.mjs','hash-worker.mjs')):
  data=(source/name).read_bytes()
  if name=='index.html':
-  data=data.replace('开发预览 · 当前连接的是 PC 服务<br>设备无线传输和壁纸应用尚未接入。'.encode(),'无线传输 · 当前连接的是小纸 Pico<br>字体和图片上传后需单独选择。'.encode())
+  data=data.replace('开发预览 · 当前连接的是 PC 服务<br>设备无线传输和壁纸应用尚未接入。'.encode(),'无线传输 · 当前连接的是PicoNano<br>字体和图片上传后需单独选择。'.encode())
  rows.append(f'static const uint8_t asset_{index}[]={{')
  rows.extend(','.join(str(v) for v in data[at:at+64])+',' for at in range(0,len(data),64));rows.append('};')
  mime='text/html' if name.endswith('.html') else 'text/css' if name.endswith('.css') else 'text/javascript'

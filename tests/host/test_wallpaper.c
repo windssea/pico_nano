@@ -1,5 +1,6 @@
 /* 壁纸预处理、A/B记录与锁屏绘制驱动。/ Wallpaper preprocessing, A/B record and lock-screen drawing driver. */
 #include "pn_wallpaper.h"
+#include "pn_brand_image.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -66,6 +67,13 @@ static int store(const char *dir){
     /* 当前书封面记录不带位图，往返保留模式与提示。/ A current-book-cover record carries no bitmap and round-trips mode and hint. */
     pn_lock_selection_t book={.mode=PN_LOCK_BOOK,.hint=true};assert(pn_wallpaper_save(&s,&write,&book,NULL)==PN_OK && book.sequence==5);
     assert(pn_wallpaper_load(&s,&write,&got,NULL)==PN_OK && got.sequence==5 && got.mode==PN_LOCK_BOOK && got.hint && !got.source[0]);
+    /* 书封位图与内容身份同一事务，原书不必再存在；坏CRC回退旧BOOK记录。/ Cover bitmap and identity share a transaction; the source need not exist, and bad CRC falls back to the old BOOK record. */
+    book.cached_book=true;book.book.sha256[0]=0x52;strcpy(book.source,"/missing/book.epub");
+    assert(pn_wallpaper_save(&s,&write,&book,NULL)==PN_INVALID);
+    assert(pn_wallpaper_save(&s,&write,&book,&bitmap)==PN_OK && book.sequence==6);
+    memset(fp,0,PN_WALLPAPER_BYTES);assert(pn_wallpaper_load(&s,&write,&got,&frame)==PN_OK && got.cached_book && got.book.sha256[0]==0x52 && !strcmp(got.source,book.source) && !memcmp(fp,bp,PN_WALLPAPER_BYTES));
+    flip(a,100000);assert(pn_wallpaper_load(&s,&write,&got,NULL)==PN_OK && got.sequence==5 && !got.cached_book);
+    memset(book.book.sha256,0,32);assert(pn_wallpaper_save(&s,&write,&book,&bitmap)==PN_INVALID);
     assert(pn_media_detach(&media)==PN_OK);assert(pn_wallpaper_load(&s,&write,&got,NULL)==PN_STALE_MEDIA && pn_wallpaper_save(&s,&write,&def,NULL)==PN_STALE_MEDIA);
     free(fp);free(bp);puts("store ok");return 0;
 }
@@ -79,10 +87,21 @@ static int lock(const char *prefix){
         snprintf(path,sizeof path,"%s-%d.pgm",prefix,mode);write_pgm(&frame,path);
         if(mode==PN_LOCK_CUSTOM || mode==PN_LOCK_BOOK){assert(pn_frame_get(&frame,10,500)==3 && pn_frame_get(&frame,10,1200)==15);s.hint=false;pn_frame_clear(&frame,3);assert(pn_lock_render(&s,&font,hint,&frame)==PN_OK && pn_frame_get(&frame,10,1200)==3);}
     }
+    // 关闭提示的默认壁纸与开机图必须逐字节一致，绘制无临时分配。/ Default wallpaper without the hint must exactly match boot art, with no temporary allocations.
+    pn_lock_selection_t plain={.mode=PN_LOCK_DEFAULT,.hint=false};size_t attempts=pool.attempts;
+    assert(pn_lock_render(&plain,&font,hint,&frame)==PN_OK);uint8_t *snapshot=malloc(PN_WALLPAPER_BYTES);assert(snapshot);memcpy(snapshot,p,PN_WALLPAPER_BYTES);
+    assert(pn_brand_image_render(&frame)==PN_OK && !memcmp(snapshot,p,PN_WALLPAPER_BYTES) && attempts==pool.attempts);free(snapshot);
+    assert(pn_frame_get(&frame,0,0)==15 && pn_frame_get(&frame,683,1215)==15);
     pn_lock_selection_t bad={.mode=(pn_lock_mode_t)7};assert(pn_lock_render(&bad,&font,hint,&frame)==PN_INVALID);
     pn_font_close(&font);free(p);assert(!pool.used && !pool.live);puts("lock ok");return 0;
 }
 int main(int argc,char **argv){
+    if(argc==3 && !strcmp(argv[1],"legacy")){
+        pn_media_t media;pn_media_init(&media);assert(pn_media_attach(&media,1)==PN_OK);pn_media_lease_t lease;assert(pn_media_acquire(&media,PN_MEDIA_READ,&lease)==PN_OK);
+        char a[1024],b[1024];snprintf(a,sizeof a,"%s/lock.a",argv[2]);snprintf(b,sizeof b,"%s/lock.b",argv[2]);pn_wallpaper_store_t s;assert(pn_wallpaper_store_init(&s,&media,a,b)==PN_OK);
+        pn_frame_t frame;uint8_t *pixels=full(&frame);pn_lock_selection_t got;assert(pn_wallpaper_load(&s,&lease,&got,&frame)==PN_OK && got.mode==PN_LOCK_CUSTOM && got.sequence==77 && !got.cached_book && pn_frame_get(&frame,0,0)==3);
+        assert(pn_media_release(&media,&lease)==PN_OK);free(pixels);return 0;
+    }
     if(argc==7 && !strcmp(argv[1],"prepare"))return prepare(argv[2],atoi(argv[3]),atoi(argv[4]),atoi(argv[5]),argv[6]);
     if(argc==3 && !strcmp(argv[1],"store"))return store(argv[2]);
     if(argc==3 && !strcmp(argv[1],"lock"))return lock(argv[2]);

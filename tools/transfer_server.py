@@ -130,7 +130,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
    if self.command=='GET' and path in ('/','/qa','/qa.mjs','/app.js','/style.css','/sha256.mjs','/hash-worker.mjs'):
     filename='index.html' if path in ('/','/qa') else path[1:];data=(ROOT/'assets/transfer'/filename).read_bytes();data=data.replace(b'</body>',b'<script type="module" src="/qa.mjs"></script></body>') if path=='/qa' else data;mime='text/html' if filename.endswith('.html') else 'text/css' if filename.endswith('.css') else 'text/javascript'
     self.send_response(200);self.send_header('Content-Type',mime+'; charset=utf-8');self.send_header('Content-Length',str(len(data)));self.send_header('Cache-Control','no-store');self.send_header('X-Content-Type-Options','nosniff');self.send_header('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; worker-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'");self.end_headers();self.wfile.write(data);return
-   if self.command=='GET' and path=='/api/v1/status':self.send_json(200,{'name':'小纸 Pico','version':'0.0.56','chunk_size':65536,'preview':True});return
+   if self.command=='GET' and path=='/api/v1/status':self.send_json(200,{'name':'PicoNano','version':'0.0.56','chunk_size':65536,'preview':True});return
    if self.command=='POST' and path=='/api/v1/pair':value=self.object(('code',),('code',));status,result=self.server.app.pair(value['code']);self.send_json(status,result);return
    if not self.server.app.authorized(self.header('Authorization')):self.error(401,'请先输入配对码');return
    if self.command=='POST' and path=='/api/v1/uploads':
@@ -174,20 +174,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
     result=self.native(f'FILE {KINDS[match[1]]} {basename(query["name"][0])}')
     if result is not None:self.send_json(200,{'size':result['size'],'sha256':result['sha256']})
     return
-   if path=='/api/v1/fonts' and self.command=='GET':
+   resource={'/api/v1/fonts':'font','/api/v1/covers':'cover','/api/v1/wallpapers':'wallpaper'}.get(path)
+   if resource and self.command=='GET':
     query=urllib.parse.parse_qs(parsed.query,strict_parsing=True,keep_blank_values=True) if parsed.query else {}
     if set(query)-set(('after',)) or len(query.get('after',[]))>1:raise BadRequest('查询参数无效')
     after=query.get('after',[''])[0]
     cursor=basename(after) if after else '-'
-    result=self.native(f'LIST {KINDS["font"]} {cursor}')
+    result=self.native(f'LIST {KINDS[resource]} {cursor}')
     if result is not None:
      self.send_json(200,{'more':result['more'],'items':[{'name':bytes.fromhex(item['name_hex']).decode('utf-8'),'size':item['size']} for item in result['items']]})
     return
-   if path=='/api/v1/fonts' and self.command=='DELETE':
+   if resource and self.command=='DELETE':
     query=urllib.parse.parse_qs(parsed.query,strict_parsing=True)
     if set(query)!=set(('name','size','sha256')) or any(len(item)!=1 for item in query.values()) or not re.fullmatch('[1-9][0-9]{0,18}',query['size'][0]):raise BadRequest('删除参数无效')
-    result=self.native(f'DELETE {KINDS["font"]} {basename(query["name"][0])} {int(query["size"][0])} {digest(query["sha256"][0])}')
-    if result is not None:self.send_json(200,{'deleted':True,'message':'字体已删除'})
+    result=self.native(f'DELETE {KINDS[resource]} {basename(query["name"][0])} {int(query["size"][0])} {digest(query["sha256"][0])}')
+    if result is not None:self.send_json(200,{'deleted':True,'message':'资源原文件已删除'})
     return
    self.error(404,'没有这个操作入口')
   except BadRequest as error:self.error(400,str(error))

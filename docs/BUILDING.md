@@ -2,24 +2,40 @@
 
 当前开发版本0.0.57。能力与待办统一见 [项目状态](PROJECT_STATUS.md)，环境、测试分层和证据边界见 [开发与测试](DEVELOPMENT_AND_TESTING.md)。本页只列已经存在的运行入口，不把拟建命令当成实现。
 
+2026-10-12本机W00入口已复跑：当前工作区`D:/dev/windssea/pico_nano`，Docker `desktop-linux`可连接Linux引擎。Windows的`python`/`python3`为应用商店别名；先用`py -0p`查看真实解释器，本机稳定入口为`py -V:Astral/CPython3.12.13 tools/dev.py ACTION`。其他主机按自己的真实解释器执行，不修改全局Python或Docker配置。
+
+新版窗口默认进入阅读首页；键盘B进入书库、H回首页、C继续阅读，脚本对应`library/home/continue`。书库上/下显示轻量焦点，回车打开；PageUp/Down分页。四栏导航可直接点击，阅读返回保持进入来源。
+
 ## 开发时保留可见模拟器
 
 界面开发与本地调试时先启动窗口，观察同源代码的显示效果：
 
 ```powershell
-python tools/dev.py sdl-run
+py -V:Astral/CPython3.12.13 tools/dev.py sdl-run
 powershell -NoProfile -ExecutionPolicy Bypass -File tools/run_sim.ps1
 ```
 
-默认自动生成忽略目录 build-dev/sim-library/books：4本TXT（UTF8/BOM/UTF16/GBK）与4本原创EPUB（EPUB2/3、目录、插图、长书名），并在本地原小说存在时复制《绍宋》，共9本。原创文字和条纹图使用CC0-1.0，私人小说不随仓库交付；在窗口删除书籍只影响副本，原始mockDoc不改。字体默认使用 mockDoc/LXGWWenKai-Regular.ttf。
+默认使用忽略目录build-dev/sim-library/books：4本TXT（UTF8/BOM/UTF16/GBK）与4本原创EPUB（EPUB2/3、目录、插图、长书名），本地原小说存在时只补缺失副本。默认正文使用内置阅读字体，不要求mockDoc。fonts目录提供带OFL许可证的阅读子集样本，wallpapers目录提供原生尺寸透明PNG几何样本；原创文字/图案为CC0-1.0。manifest.json记录来源与SHA，已有本机修改保留且不误标为原创许可。私人小说不随仓库交付；窗口操作只作用副本。
 
-可单独运行 python tools/make_sim_library.py 重建样本（会重新生成上述固定文件名）。可用 -Books/-Font/-FontDir/-WallpaperDir 指定工作区内的其他输入。脚本保留已运行的 pico-sim 窗口，不自动关闭；源码重建后执行 docker stop pico-sim 再运行脚本，窗口才会加载新二进制。关闭窗口也会结束容器。
+可单独用真实Python运行tools/make_sim_library.py补齐样本，复跑不覆盖已有文件；启动脚本用SDL容器内Python生成，不受Windows别名影响。可用-Books/-Font/-FontDir/-WallpaperDir指定工作区内输入，支持工作区内绝对路径并转换为容器路径。默认字体/图片目录分别为build-dev/sim-library/fonts、wallpapers；-Font为空时使用内置默认字体。脚本保留已运行的pico-sim窗口，不自动关闭；源码重建后执行docker stop pico-sim再启动加载新二进制，关闭窗口也会结束容器。
+
+开发观察可加`-Script 'settings,back,fonts,back,wallpaper'`，以真实SDL窗口回放输入；不写quit时脚本结束后窗口继续可操作。书架/正文按L预览已保存锁屏，L/回车/Esc返回最近在读书；预览使用共用A/B读取与绘制，先保存并关闭正文，不模拟PMU睡眠或功耗。窗口时区为Asia/Shanghai，电量仍为演示值。
 
 逐本打开/翻页/返回的本地复跑（Docker Linux）：
 
 ```powershell
-docker run --rm --mount type=bind,source=D:\windssea\dev\pico_nano,target=/work -w /work pico-nano-sdl:dev python3 tools/test_sim_library.py build-sim-sdl-run/pn_sim build-dev/sim-library/books mockDoc/LXGWWenKai-Regular.ttf
+docker run --rm --mount type=bind,source=D:\dev\windssea\pico_nano,target=/work -w /work pico-nano-sdl:dev python3 tools/test_sim_library.py build-sim-sdl-run/pn_sim build-dev/sim-library/books build-dev/sim-library/fonts/ReadPicoSample.ttf
 ```
+
+本机样本可在忽略文件 `build-dev/sim-library/local-inputs.json` 中配置，格式如下；`path` 可用仓库相对路径，资源按固定类型复制到 books/fonts，原件只读，复跑保留已有副本：
+
+```json
+{"files":[{"kind":"book","path":"tests/本机样本.epub"},{"kind":"font","path":"tests/本机字体.TTF"}]}
+```
+
+启动脚本自动读取这份本机配置，也可用 `tools/make_sim_library.py --local-inputs PATH` 明确指定。私人书籍与字体只在本机运行，不嵌入固件，不成为公共CI依赖；manifest记录来源、摘要及本机许可边界。`--font-dir` 同时供字体管理和阅读选择页使用，与已保存的正文字体所在目录无关。
+
+单独复跑本机资源：`py -V:Astral/CPython3.12.13 tools/dev.py local-samples`。入口构建同源字体探针/EPUB容器及SDL程序，比较EPUB全部资源，按正文码点检查不同字号的灰阶/二值字形，并逐字体验证目录、跳转、翻页和续读；报告存于忽略目录 `build-dev/local-samples/report.json`。缺字计数是该样本的主字体覆盖诊断，不能当全字库或面板清晰度验收。可见窗口仍须另行观察。
 
 默认6MiB阅读预算不扩大。帧备份只供正文关闭工具栏时恢复，书架/设置不分配，返回书架时释放；避免大渐进式JPEG首帧和缩略图被无用备份挤占。打开失败会在书架提示，具体状态与阶段可用 docker logs pico-sim 查看。大型图片仍有预算限制，PC结果不证明设备可解码所有大图。
 
@@ -27,7 +43,7 @@ docker run --rm --mount type=bind,source=D:\windssea\dev\pico_nano,target=/work 
 
 ## Windows与Docker
 
-在 `D:/windssea/dev/pico_nano` 执行，需要Python 3与Docker Desktop Linux引擎。固定工具镜像：`espressif/idf:v6.1@sha256:81893c71bb5e570088901f21def8684c25cd2a9020281bd01b843a7655edb18c`。
+在当前工作区根目录执行，需要真实Python 3与Docker Desktop Linux引擎。固定工具镜像：`espressif/idf:v6.1@sha256:81893c71bb5e570088901f21def8684c25cd2a9020281bd01b843a7655edb18c`。本机完整py标签见页首；下面通用python写法适用于PATH中已有真实解释器的环境。
 
 ```powershell
 python tools/dev.py docs

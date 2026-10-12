@@ -10,11 +10,15 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
-typedef struct {bool fail;pn_pool_t *save_fault;unsigned calls;uint64_t hash;} screen_t;
+typedef struct {bool fail;pn_pool_t *save_fault;unsigned calls,tag;uint64_t hash;} screen_t;
 static pn_status_t present(void *ctx,const pn_frame_t *frame,pn_refresh_t profile){
-    (void)profile;screen_t *s=ctx;s->calls++;if(s->fail)return PN_IO;uint64_t hash=1469598103934665603ULL;for(int y=0;y<frame->height;y++)for(int x=0;x<frame->width;x++){hash^=pn_frame_get(frame,x,y);hash*=1099511628211ULL;}s->hash=hash;if(s->save_fault){s->save_fault->fail_at=s->save_fault->attempts+1;s->save_fault=NULL;}return PN_OK;
+    (void)profile;screen_t *s=ctx;s->calls++;s->tag=pn_frame_get(frame,17,17);if(s->fail)return PN_IO;uint64_t hash=1469598103934665603ULL;for(int y=0;y<frame->height;y++)for(int x=0;x<frame->width;x++){hash^=pn_frame_get(frame,x,y);hash*=1099511628211ULL;}s->hash=hash;if(s->save_fault){s->save_fault->fail_at=s->save_fault->attempts+1;s->save_fault=NULL;}return PN_OK;
 }
 static bool same(const pn_epub_progress_t *a,const pn_epub_progress_t *b){return !memcmp(a->book.sha256,b->book.sha256,32) && !strcmp(a->location.path,b->location.path) && a->location.position.element==b->location.position.element && a->location.position.offset==b->location.position.offset && a->location.position.run==b->location.position.run && a->location.position.kind==b->location.position.kind;}
+/* 最终目标页使用真实候选字体，并留可观察像素；测试不伪造呈现成功。/ The destination draws the actual candidate font and observable pixels; tests never fake presentation success. */
+static pn_status_t destination(void *ctx,pn_font_t *ui,pn_font_t *body,pn_frame_t *frame){
+ (void)ui;if(ctx && *(bool *)ctx)return PN_IO;pn_frame_clear(frame,15);pn_frame_rect(frame,16,16,4,4,9);return pn_font_draw(body,frame,'A',32*64,120,PN_FONT_GRAY);
+}
 int main(int argc,char **argv){
     pn_epub_app_t app={0};assert(pn_epub_app_close(&app,0)==PN_OK && !pn_epub_app_last_confirmed(&app));if(argc==1)return 0;assert(argc==4);
     pn_pool_t pool;assert(!pn_pool_init(&pool,2*1024*1024,NULL,NULL,NULL));screen_t screen={.fail=true};pn_epub_progress_t first,current,after;uint64_t now=1;
@@ -59,6 +63,16 @@ int main(int argc,char **argv){
     assert(pn_font_ui_event(&chooser,PN_FUI_PREVIEW,now++,present,&screen)==PN_OK && chooser.preview && pn_epub_app_progress(&app,&after)==PN_OK && same(&after,&current));
     assert(pn_font_ui_event(&chooser,PN_FUI_FORM,now++,present,&screen)==PN_OK);
     assert(pn_font_ui_event(&chooser,PN_FUI_CANCEL,now++,present,&screen)==PN_OK && !chooser.active);pn_font_ui_close(&chooser);
+    // 单帧目标页仍遵守绘制/呈现/保存屏障，失败后可重试原字体请求。/ A single destination frame retains paint/display/save barriers and allows retrying the original font request.
+    pn_font_preferences_t before_view,resident_view={0};char view_directory[PN_FONT_REFERENCE_PATH_MAX];assert(pn_epub_app_fonts_get(&app,&before_view,view_directory,sizeof view_directory)==PN_OK);
+    unsigned calls=screen.calls;bool failed_paint=true;assert(pn_epub_app_font_apply_view(&app,&resident_view,destination,&failed_paint,now++,present,&screen)==PN_IO && screen.calls==calls && !pn_epub_app_last_confirmed(&app));
+    screen.fail=true;assert(pn_epub_app_font_apply_view(&app,&resident_view,destination,NULL,now++,present,&screen)==PN_IO && screen.calls==calls+1);screen.fail=false;
+    assert(pn_epub_app_progress(&app,&after)==PN_OK && same(&current,&after));
+    calls=screen.calls;screen.save_fault=&pool;assert(pn_epub_app_font_apply_view(&app,&resident_view,destination,NULL,now++,present,&screen)==PN_NO_MEMORY && pn_epub_app_last_confirmed(&app) && screen.calls==calls+1 && screen.tag==9);pool.fail_at=0;
+    calls=screen.calls;assert(pn_epub_app_font_apply_view(&app,&resident_view,destination,NULL,now++,present,&screen)==PN_OK && screen.calls==calls+1 && screen.tag==9);
+    calls=screen.calls;assert(pn_epub_app_font_cancel_view(&app,destination,NULL,now++,present,&screen)==PN_OK && screen.calls==calls+1 && screen.tag==9);
+    assert(pn_epub_app_progress(&app,&after)==PN_OK && same(&current,&after));
+    assert(pn_epub_app_font_apply(&app,&before_view,now++,present,&screen)==PN_OK);
     pn_style_t style;assert(pn_epub_app_style_get(&app,&style)==PN_OK);style.pixels=46;style.line_percent=155;style.gap_percent=50;style.indent_em=2;style.tracking_percent=10;style.margin=40;
     assert(pn_epub_app_style_apply(&app,&style,now++,present,&screen)==PN_OK && pn_epub_app_progress(&app,&after)==PN_OK && same(&current,&after));
     pn_style_t draft=style;draft.tracking_percent=20;assert(pn_epub_app_style_preview(&app,&draft,now++,present,&screen)==PN_OK && pn_epub_app_progress(&app,&after)==PN_OK && same(&current,&after));

@@ -5,16 +5,33 @@
  * 中文：共用绘制控件，见pn_widgets.h。
  * English: shared drawing widgets, see pn_widgets.h.
  */
+#include "pn_brand.h"
 #include "pn_widgets.h"
 #include <string.h>
 #define MAX_CHARS 256
-/* 文字来源：主字体、方框占位、备用字体。/ Glyph source: primary font, box placeholder, fallback font. */
-enum {SRC_PRIMARY=0,SRC_BOX=1,SRC_FALLBACK=2};
+/* 文字来源：主字体、方框占位、备用字体、系统补字。/ Glyph source: primary font, box placeholder, external fallback and system fallback. */
+enum {SRC_PRIMARY=0,SRC_BOX=1,SRC_FALLBACK=2,SRC_SYSTEM=3};
 static pn_font_t *fallback_font;
+static pn_font_t *system_font;
 /* 文字样式：墨色灰阶与是否加粗（加粗=错开0.6px再画一遍）。只在_ex调用期间生效。/ Text style: ink gray and bold (bold draws again 0.6 px to the right); active only during an _ex call. */
 static uint8_t text_ink;static bool text_bold;
 #define BOLD_SHIFT 40
 void pn_w_set_fallback(pn_font_t *font){fallback_font=font;}
+pn_status_t pn_w_font_scope_begin(pn_w_font_scope_t *scope,pn_pool_t *pool,pn_font_t *external){
+    if(!scope || !pool || scope->active || scope->resident.impl || (external && !external->impl))return PN_INVALID;
+    pn_status_t s=PN_OK;
+    if(!system_font){pn_text_source_t source=pn_font_reading_source();s=pn_font_open(&scope->resident,pool,&source,24);}
+    if(s!=PN_OK)return s;
+    scope->previous_system=system_font;scope->previous_external=fallback_font;scope->active=true;
+    if(scope->resident.impl)system_font=&scope->resident;
+    if(external)fallback_font=external;
+    return PN_OK;
+}
+void pn_w_font_scope_end(pn_w_font_scope_t *scope){
+    if(!scope || !scope->active)return;
+    system_font=scope->previous_system;fallback_font=scope->previous_external;
+    pn_font_close(&scope->resident);memset(scope,0,sizeof *scope);
+}
 static pn_status_t string_read(void *ctx,uint64_t off,uint8_t *out,size_t cap,size_t *n){
     const char *s=ctx;size_t size=strlen(s);if(off>size)return PN_INVALID;
     size_t take=size-(size_t)off;if(take>cap)take=cap;memcpy(out,s+off,take);*n=take;return PN_OK;
@@ -28,8 +45,9 @@ static pn_status_t decode(pn_font_t *font,const char *s,uint32_t *cp,int32_t *ad
         int32_t advance;pn_status_t measured=pn_font_advance(font,c.codepoint,&advance);
         missing[n]=SRC_PRIMARY;
         if(measured==PN_EMPTY){
-            // 主字体缺字时先问备用字体（例如阅读字体），仍缺才画方框。/ When the primary font lacks a glyph ask the fallback (e.g. the reading font) before drawing a box.
-            if(fallback_font && fallback_font->impl && pn_font_size(fallback_font,font->pixels)==PN_OK && pn_font_advance(fallback_font,c.codepoint,&advance)==PN_OK)missing[n]=SRC_FALLBACK;
+            // 主界面字库缺字先用系统中文补字，再问备用字体；都缺才画方框。/ Missing UI glyphs use system CJK first, then the external fallback; draw a box only if both lack the glyph.
+            if(system_font && system_font->impl && pn_font_size(system_font,font->pixels)==PN_OK && pn_font_advance(system_font,c.codepoint,&advance)==PN_OK)missing[n]=SRC_SYSTEM;
+            else if(fallback_font && fallback_font->impl && pn_font_size(fallback_font,font->pixels)==PN_OK && pn_font_advance(fallback_font,c.codepoint,&advance)==PN_OK)missing[n]=SRC_FALLBACK;
             else{advance=font->pixels*64;missing[n]=SRC_BOX;}
         }
         else if(measured!=PN_OK)return measured;
@@ -48,6 +66,7 @@ static pn_status_t draw_styled(pn_font_t *font,pn_frame_t *frame,uint32_t cp,int
 static pn_status_t glyph(pn_font_t *font,pn_frame_t *frame,uint32_t cp,uint8_t source,int32_t x_64,int baseline){
     if(source==SRC_PRIMARY)return draw_styled(font,frame,cp,x_64,baseline);
     if(source==SRC_FALLBACK)return draw_styled(fallback_font,frame,cp,x_64,baseline);
+    if(source==SRC_SYSTEM)return draw_styled(system_font,frame,cp,x_64,baseline);
     int x=x_64/64,size=font->pixels;
     pn_frame_rect(frame,x+2,baseline-size+4,size-6,1,0);pn_frame_rect(frame,x+2,baseline-2,size-6,1,0);
     pn_frame_rect(frame,x+2,baseline-size+4,1,size-6,0);pn_frame_rect(frame,x+size-5,baseline-size+4,1,size-6,0);return PN_OK;
@@ -118,9 +137,11 @@ static pn_status_t text_lines_impl(pn_font_t *font,pn_frame_t *frame,const char 
 }
 /* 备用字体借用时会被改字号；调用方（例如阅读页的正文字体）依赖原字号，所以每次绘制后还原。
  * Borrowing the fallback font changes its size; callers (e.g. the reading page's body font) depend on the original size, so it is restored after every drawing call. */
-static int fallback_saved(void){return fallback_font && fallback_font->impl?fallback_font->pixels:0;}
-static pn_status_t fallback_restore(int saved,pn_status_t status){
-    if(saved>0 && fallback_font && fallback_font->pixels!=saved){pn_status_t restored=pn_font_size(fallback_font,saved);if(status==PN_OK)return restored;}
+typedef struct {int external,system;} fallback_sizes_t;
+static fallback_sizes_t fallback_saved(void){return (fallback_sizes_t){fallback_font && fallback_font->impl?fallback_font->pixels:0,system_font && system_font->impl?system_font->pixels:0};}
+static pn_status_t fallback_restore(fallback_sizes_t saved,pn_status_t status){
+    if(saved.external>0 && fallback_font && fallback_font->pixels!=saved.external){pn_status_t restored=pn_font_size(fallback_font,saved.external);if(status==PN_OK)status=restored;}
+    if(saved.system>0 && system_font && system_font->pixels!=saved.system){pn_status_t restored=pn_font_size(system_font,saved.system);if(status==PN_OK)status=restored;}
     return status;
 }
 pn_status_t pn_w_text_ex(pn_font_t *font,pn_frame_t *frame,const char *utf8,int x,int baseline,int max_width,pn_align_t align,uint8_t ink,bool bold){
@@ -136,10 +157,10 @@ pn_status_t pn_w_text_lines_ex(pn_font_t *font,pn_frame_t *frame,const char *utf
 pn_status_t pn_w_text_width_ex(pn_font_t *font,const char *utf8,bool bold,int *width){
     bool bold_saved=text_bold;text_bold=bold;pn_status_t status=pn_w_text_width(font,utf8,width);text_bold=bold_saved;return status;
 }
-pn_status_t pn_w_text_width(pn_font_t *font,const char *utf8,int *width){int saved=fallback_saved();return fallback_restore(saved,text_width_impl(font,utf8,width));}
-pn_status_t pn_w_text(pn_font_t *font,pn_frame_t *frame,const char *utf8,int x,int baseline,int max_width,pn_align_t align){int saved=fallback_saved();return fallback_restore(saved,text_impl(font,frame,utf8,x,baseline,max_width,align));}
-pn_status_t pn_w_text_lines(pn_font_t *font,pn_frame_t *frame,const char *utf8,int x,int baseline,int width,unsigned max_lines,int pitch,unsigned *used){int saved=fallback_saved();return fallback_restore(saved,text_lines_impl(font,frame,utf8,x,baseline,width,max_lines,pitch,0,0,used));}
-pn_status_t pn_w_text_flow(pn_font_t *font,pn_frame_t *frame,const char *utf8,int x,int baseline,int width,unsigned max_lines,int pitch,int first_indent,int tracking_64,unsigned *used){int saved=fallback_saved();return fallback_restore(saved,text_lines_impl(font,frame,utf8,x,baseline,width,max_lines,pitch,first_indent,tracking_64,used));}
+pn_status_t pn_w_text_width(pn_font_t *font,const char *utf8,int *width){fallback_sizes_t saved=fallback_saved();return fallback_restore(saved,text_width_impl(font,utf8,width));}
+pn_status_t pn_w_text(pn_font_t *font,pn_frame_t *frame,const char *utf8,int x,int baseline,int max_width,pn_align_t align){fallback_sizes_t saved=fallback_saved();return fallback_restore(saved,text_impl(font,frame,utf8,x,baseline,max_width,align));}
+pn_status_t pn_w_text_lines(pn_font_t *font,pn_frame_t *frame,const char *utf8,int x,int baseline,int width,unsigned max_lines,int pitch,unsigned *used){fallback_sizes_t saved=fallback_saved();return fallback_restore(saved,text_lines_impl(font,frame,utf8,x,baseline,width,max_lines,pitch,0,0,used));}
+pn_status_t pn_w_text_flow(pn_font_t *font,pn_frame_t *frame,const char *utf8,int x,int baseline,int width,unsigned max_lines,int pitch,int first_indent,int tracking_64,unsigned *used){fallback_sizes_t saved=fallback_saved();return fallback_restore(saved,text_lines_impl(font,frame,utf8,x,baseline,width,max_lines,pitch,first_indent,tracking_64,used));}
 void pn_w_outline(pn_frame_t *frame,int x,int y,int width,int height,int thickness,uint8_t shade){
     if(!frame || width<=0 || height<=0 || thickness<=0)return;
     if(thickness*2>width)thickness=width/2;
@@ -201,7 +222,7 @@ pn_status_t pn_w_status(pn_font_t *font,pn_frame_t *frame){
     if(!font || !font->impl || !frame)return PN_INVALID;
     int original=font->pixels;pn_status_t status=pn_font_size(font,24);
     // 左：产品名；右：时间（已知时）、无线（已连接时）、电量。都只显示真实读到的值。/ Left: product name; right: clock (when known), wireless (when connected) and battery, all only when actually read.
-    if(status==PN_OK)status=pn_w_text_ex(font,frame,"小纸 Pico",PN_UI_MARGIN,30,300,PN_ALIGN_LEFT,PN_UI_INK,true);
+    if(status==PN_OK)status=pn_w_text_ex(font,frame,PN_BRAND_NAME,PN_UI_MARGIN,30,300,PN_ALIGN_LEFT,PN_UI_INK,true);
     int right=PN_UI_WIDTH-PN_UI_MARGIN;
     if(status==PN_OK && status_battery>=0){
         char text[8];int n=status_battery;char *p=text;if(n>=100){*p++='1';*p++='0';*p++='0';}else{if(n>=10)*p++=(char)('0'+n/10);*p++=(char)('0'+n%10);}*p++='%';*p=0;
@@ -322,3 +343,19 @@ pn_status_t pn_w_card_row(pn_font_t *font,pn_frame_t *frame,const char *label,co
     if(!last)pn_frame_rect(frame,text_x,y+PN_W_CARD_ROW_H-1,PN_UI_WIDTH-PN_UI_MARGIN-16-text_x,1,PN_UI_SELECT);
     pn_status_t restored=pn_font_size(font,original);return status==PN_OK?restored:status;
 }
+
+/* 四栏绘制与命中共用像素契约。/ Four tabs share a drawing and hit-testing pixel contract. */
+pn_status_t pn_w_navigation(pn_font_t *font,pn_frame_t *frame,pn_navigation_t active){
+    static const pn_icon_t icons[]={PN_ICON_HOME,PN_ICON_SHELF,PN_ICON_TRANSFER,PN_ICON_SETTINGS};
+    if(!font || !font->impl || !frame || !frame->pixels || active<PN_NAV_HOME || active>PN_NAV_SETTINGS)return PN_INVALID;
+    // 一级导航只画居中图标；整栏命中保持不变。/ Root navigation draws centered icons only; full-tab hit areas stay unchanged.
+    pn_frame_rect(frame,0,1104,PN_UI_WIDTH,112,PN_UI_PAPER);
+    pn_frame_rect(frame,0,1104,PN_UI_WIDTH,2,PN_UI_STROKE);
+    for(unsigned i=0;i<4;i++){
+        int cx=(int)(PN_UI_WIDTH*(2*i+1)/8);
+        if(i==(unsigned)active)pn_w_round_fill(frame,cx-66,1122,132,76,22,PN_UI_SELECT);
+        pn_w_icon(frame,icons[i],cx-21,1139,42,PN_UI_INK);
+    }
+    return PN_OK;
+}
+int pn_w_navigation_hit(int x,int y){return pn_w_tabbar_hit(4,1104,112,x,y);}

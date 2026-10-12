@@ -36,7 +36,7 @@ class LocalSendApp:
         self.display_choices = ''
         self.received = 0; self.total = 0; self.file_name = ''
         self.abort = threading.Event()
-        self.info = {'alias':'小纸 Pico（PC 测试）', 'version':'2.2', 'deviceModel':'PC simulator',
+        self.info = {'alias':'PicoNano（PC 测试）', 'version':'2.2', 'deviceModel':'PC simulator',
                      'deviceType':'headless', 'fingerprint':secrets.token_hex(32), 'download':False,
                      'protocol':'http', 'port':53317}
         if not self._read().get('ready'): raise RuntimeError('原生接收进程启动失败')

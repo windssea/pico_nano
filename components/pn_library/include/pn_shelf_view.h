@@ -4,9 +4,11 @@
 #include "pn_book_actions.h"
 #include "pn_font.h"
 #include "pn_favorites.h"
-#define PN_SHELF_PREVIOUS 6
-#define PN_SHELF_NEXT 7
+#include "pn_shelf_prefs.h"
+#define PN_SHELF_PREVIOUS 40
+#define PN_SHELF_NEXT 41
 #define PN_SHELF_TOGGLE 8
+#define PN_SHELF_READING_HOME 42 ///< 独立阅读首页 / Independent reading home
 #define PN_SHELF_CONTINUE 9 ///< 点继续阅读卡 / Tap the continue-reading card
 /// 绘制六行文字/无封面卡，纯绘制，不打开书籍或修改状态。
 /// Draw six text/cover-fallback rows only, without opening books or changing state.
@@ -34,8 +36,11 @@ pn_status_t pn_shelf_render_mode(const pn_catalog_page_t *page,pn_font_t *font,p
 /// 书架的可选外观与入口；全零（battery_percent=-1）等价于旧行为。
 /// Optional shelf appearance and entries; all-zero with battery_percent=-1 matches the legacy behaviour.
 typedef struct {
+    bool home; ///< 首页读取实际最近快照，书库不画继续卡 / Home reads actual recent snapshots; library omits the continue card
     int battery_percent; ///< 0–100，<0不显示 / 0–100, hidden when negative
     bool list_mode; ///< 列表模式（每页5行）/ List mode, five rows per page
+    uint8_t columns; ///< 网格3或4列，0默认3列 / Grid with three or four columns; zero defaults to three
+    uint8_t style; ///< pn_shelf_style_t静态风格 / Static pn_shelf_style_t appearance
     const pn_book_actions_t *actions; ///< 非NULL时在书架上叠画书籍操作面板（借用同一补字字体）/ When non-NULL, the book actions sheet is drawn over the shelf (sharing the fallback font)
     const pn_favorites_t *favorite_items; ///< 已验证的收藏快照，NULL不画标识 / Validated favorites snapshot; NULL hides markers
     bool favorites_tab; ///< 分类里显示“收藏” / Show Favorites among the categories
@@ -45,6 +50,9 @@ typedef struct {
     bool search; ///< 显示“搜索”入口 / Show the Search entry
     bool query; ///< 当前为搜索结果，标题改为“搜索结果”、入口改为“清除” / Showing search results: heading says results and the entry says Clear
 } pn_shelf_options_t;
+/// 同源的可见容量与样式缩略预览，纯绘制。/ Shared visible capacity and miniature style preview; drawing only.
+size_t pn_shelf_capacity(const pn_shelf_options_t *options);
+void pn_shelf_style_preview(pn_frame_t *frame,unsigned style,unsigned columns,int x,int y,int w,int h);
 /// 带选项的绘制与命中（options可为NULL）。list_mode下每页5行，条目序号按行计。
 /// Drawing and hit testing with options (may be NULL). In list mode a page has five rows and item numbers count rows.
 pn_status_t pn_shelf_render_ex(const pn_catalog_page_t *page,pn_font_t *font,pn_frame_t *frame,int selected,bool recent,bool transfer,const pn_shelf_covers_t *covers,const pn_shelf_options_t *options);

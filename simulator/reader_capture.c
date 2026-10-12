@@ -4,6 +4,7 @@
  * 中文：实际TXT页捕获，组合共享解码/分页/字体，不替代交互session。
  * English: real TXT page capture combining shared decoding/layout/font, not an interactive session.
  */
+#include "pn_brand.h"
 #include "reader_capture.h"
 #include "pn_font.h"
 #include "pn_text_file.h"
@@ -56,7 +57,7 @@ pn_status_t pn_sim_reader_prepare(pn_display_t *display,pn_job_token_t token,pn_
             if(status!=PN_OK)break;
         }
     }
-    if(status==PN_OK)status=ui_text(&ui,frame,"小纸 Pico",32,48);
+    if(status==PN_OK)status=ui_text(&ui,frame,PN_BRAND_NAME,32,48);
     if(status==PN_OK){pn_frame_rect(frame,32,70,620,1,7);pn_frame_rect(frame,32,1150,620,1,7);char footer[96];
         snprintf(footer,sizeof footer,"第 %u 页  |  %llu%%  |  缺字 %u",requested,(unsigned long long)(source.size?page.begin*100/source.size:0),missing);
         status=ui_text(&ui,frame,footer,32,1190);

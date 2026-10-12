@@ -2,6 +2,8 @@
 
 当前基线0.0.57。可运行命令与开发时可见窗口统一见 [BUILDING](BUILDING.md)，功能/待办见 [PROJECT_STATUS](PROJECT_STATUS.md)，发布门保留在 [VALIDATION](VALIDATION.md)。以下区分“代码运行在哪里”和“能证明什么”。
 
+W00于2026-10-12复跑：宿主稳定解释器为Astral/CPython 3.12.13（Windows用完整`py -V:`标签，普通`py -3.12`不识别该注册项）；Docker Linux server 29.7.2、desktop-linux可用，容器Python 3.12.3，Node 24.19.0。下表是早期环境记录，实际复跑以当前探测为准。开发入口统一UTF-8输出，避免Node的成功符号导致GBK终端误报失败；不改变用户全局配置。host新增真实网页源的Node异步边界测试，SDL锁屏预览不执行PMU睡眠。
+
 ## ESP32-S3与PC模拟的区别
 
 PC运行同源C阅读、字体、布局、状态机及UI，替换文件/显示/时钟等port；SDL显示相同4bpp画面。PC不会执行真实ESP32-S3固件，也不能模拟真实墨水屏波形、PMU、PSRAM带宽、射频、温度或功耗。

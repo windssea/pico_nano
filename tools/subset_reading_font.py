@@ -12,6 +12,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input", type=pathlib.Path)
     parser.add_argument("--replay", action="store_true")
+    parser.add_argument("--extra-text", type=pathlib.Path, help="UTF-8 coverage characters to include without embedding their source files")
     args = parser.parse_args()
     ui = json.loads((ROOT / "LICENSES/ui-font-manifest.json").read_text(encoding="utf8"))
     if hashlib.sha256(args.input.read_bytes()).hexdigest() != ui["source_sha256"]:
@@ -24,6 +25,10 @@ def main():
             except UnicodeDecodeError:
                 pass
     manifest_path = ROOT / "LICENSES/reading-font-manifest.json"
+    if args.extra_text:
+        if args.replay:
+            parser.error("--extra-text cannot be combined with --replay")
+        codes.update(map(ord, args.extra_text.read_text(encoding="utf-8")))
     if args.replay:
         stored = json.loads(manifest_path.read_text(encoding="utf8"))
         if stored["fonttools_version"] != __import__("fontTools").__version__:
@@ -44,7 +49,8 @@ def main():
     font.recalcTimestamp = False
     font.save(destination)
     manifest = {key: ui[key] for key in ("source", "source_sha256", "ofl_sha256", "license", "weight")}
-    manifest.update(fonttools_version=__import__("fontTools").__version__, coverage="GB2312 + UI repertoire + CJK/fullwidth punctuation", unicode_requested=sorted(codes), unicode_present=sorted(font.getBestCmap()), output_sha256=hashlib.sha256(destination.read_bytes()).hexdigest())
+    coverage = stored["coverage"] if args.replay else "GB2312 + UI repertoire + CJK/fullwidth punctuation" + (" + supplemental repertoire" if args.extra_text else "")
+    manifest.update(fonttools_version=__import__("fontTools").__version__, coverage=coverage, unicode_requested=sorted(codes), unicode_present=sorted(font.getBestCmap()), output_sha256=hashlib.sha256(destination.read_bytes()).hexdigest())
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf8")
     print(f"Reading font: {len(font.getBestCmap())} mappings, {destination.stat().st_size} bytes")
 

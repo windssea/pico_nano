@@ -4,7 +4,7 @@ with tempfile.TemporaryDirectory() as folder:
     root=pathlib.Path(folder);books=root/'books';books.mkdir();state=root/'state'
     (books/'a.txt').write_text(''.join(f'第{i}段：文字沿着清晰的行列展开，调整字距和段落间距，找到舒服的阅读节奏。\n' for i in range(600)),encoding='utf-8')
     def run(script):
-        r=subprocess.run([sys.argv[1],'--library',str(books),'--state-dir',str(state)],env=dict(os.environ,SDL_VIDEODRIVER='dummy',PN_SIM_LIBRARY_SCRIPT=script),capture_output=True,text=True,timeout=120)
+        r=subprocess.run([sys.argv[1],'--library',str(books),'--state-dir',str(state)],env=dict(os.environ,SDL_VIDEODRIVER='dummy',PN_SIM_LIBRARY_SCRIPT="library,"+script),capture_output=True,text=True,timeout=120)
         assert r.returncode==0,(r.stdout,r.stderr)
         assert 'used=0 live=0' in r.stdout,r.stdout
         return r.stdout

@@ -21,6 +21,9 @@ int main(int argc,char **argv){
     if(status==PN_OK)status=pn_media_acquire(&media,PN_MEDIA_READ,&lease);
     if(status==PN_OK)status=pn_text_file_open(&file,&media,&lease,argv[1],&source);
     if(status==PN_OK)status=pn_font_open(&font,&pool,&source,44);
+    // 同源元数据只作诊断，不把字形数当成正文覆盖率。/ Shared metadata is diagnostic; glyph count is not body coverage.
+    if(status==PN_OK){pn_font_info_t info={0};pn_status_t details=pn_font_info(&font,&info);
+        printf("font_probe_info family=%s style=%s weight=%u glyphs=%u variable=%d status=%d\n",info.family,info.style,(unsigned)info.weight,(unsigned)info.glyphs,(int)info.variable,(int)details);}
     uint8_t pixels[192*192/2];pn_frame_t frame;
     if(!pn_frame_bind(&frame,pixels,sizeof pixels,192,192))status=PN_INVALID;
     const int sizes[]={28,32,44,56,72};size_t total=0,missing=0;unsigned gray=0,black=0;

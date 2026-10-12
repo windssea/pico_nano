@@ -6,7 +6,7 @@
 
 ```mermaid
 flowchart TD
-    UI[书架 / 阅读 / 排版 / 传书 / 设置] --> Router[导航与事件协调]
+    UI[首页 / 书库 / 阅读 / 排版 / 传书 / 设置] --> Router[导航与事件协调]
     Router --> Reader[阅读会话服务]
     Router --> Library[书库与身份服务]
     Router --> Transfer[传输与导入服务]
@@ -56,6 +56,8 @@ docs/local/                    忽略的过程日志与实验结果
 复用下层 `read_pico/cst836u/sc7a20h/fca9555/sy7636a/read_pico_pmu/epdiy/e0470_epaper_waveform`，记录来源与许可。参考 `main/book` 和字体代码作为拆分移植基础，不原样复制庞大 `app_book.c`。参考厂测与 VCOM 校准保留为独立维护路径。功能页不导入出厂演示的后台状态。
 
 PC版只替换port与硬件边界，字体/排版/UI使用同一源代码；即时与慢刷新模型均不能代替面板实测。预算、截图、故障回放与真机分工见 [开发与测试流程](DEVELOPMENT_AND_TESTING.md)。
+
+当前首页/书库共享`pn_shelf_view`页面快照与`pn_w_navigation`绘制/命中，SDL与设备适配只管理页面来源、加载最近/目录和处理副作用。`pn_shelf_covers_t`增加9个有界作品元数据槽，OPF title/creator随空闲封面解析取得，缓存v4同时校验路径/快速源键/CRC；显示元数据不能充当内容身份。渲染不解析EPUB；整页队列完成合并重绘，阅读/设置/传书/二级页期间暂停。独立异步router/reader worker仍为W03目标，不把现有单worker空闲队列当成可取消解析。
 
 ## 3. 任务与线程所有权
 

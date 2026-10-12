@@ -15,7 +15,7 @@ with tempfile.TemporaryDirectory() as directory:
   try:
    with urllib.request.urlopen(request,timeout=30) as response:return response.status,json.load(response)
   except urllib.error.HTTPError as error:return error.code,json.load(error)
- assert call('/api/v1/status')[0]==200
+ assert call('/api/v1/status')==(200,{'name':'PicoNano','version':'0.0.56','chunk_size':65536,'preview':True})
  assert call('/api/v1/uploads','POST',{})[0]==401
  assert call('/api/v1/pair','POST',{'code':app.pair_code},origin='http://evil.test')[0]==403
  for i in range(5):assert call('/api/v1/pair','POST',{'code':'999999' if app.pair_code!='999999' else '000000'})[0]==401
@@ -48,7 +48,9 @@ with tempfile.TemporaryDirectory() as directory:
  code,result=call('/api/v1/uploads','POST',new_request,token);assert code==201;new_url='/api/v1/uploads/'+result['upload_id'];assert call(new_url+'/chunks','PUT',changed,token,extra={'X-Offset':'0','X-Chunk-SHA256':new_request['sha256']})[0]==200
  assert call(new_url+'/complete','POST',{'sha256':new_request['sha256']},token)[0]==200 and (root/'books/小说.txt').read_bytes()==changed
  request['name']='取消.txt';code,result=call('/api/v1/uploads','POST',request,token);assert code==201;assert call('/api/v1/uploads/'+result['upload_id'],'DELETE',token=token)[0]==200 and not (root/'books/取消.txt').exists()
- for kind,name,source in [('font','测试字体.ttf',repo/'assets/fonts/read-pico-ui.ttf'),('cover','封面.png',repo/'tests/fixtures/image-black.png'),('wallpaper','锁屏.jpg',repo/'tests/fixtures/jpeg-progressive.jpg')]:
+ sys.path.insert(0,str(repo/'tools'));from make_sim_library import wallpaper_png
+ native_png=root/'native-fixture.png';native_png.write_bytes(wallpaper_png())
+ for kind,name,source in [('font','测试字体.ttf',repo/'assets/fonts/read-pico-ui.ttf'),('cover','封面.png',repo/'tests/fixtures/image-black.png'),('wallpaper','原生透明.png',native_png),('wallpaper','锁屏.jpg',repo/'tests/fixtures/jpeg-progressive.jpg')]:
   content=source.read_bytes();sha=hashlib.sha256(content).hexdigest();code,result=call('/api/v1/uploads','POST',{'kind':kind,'name':name,'size':len(content),'sha256':sha},token);assert code==201,(code,result);resource_url='/api/v1/uploads/'+result['upload_id']
   for at in range(0,len(content),65536):
    block=content[at:at+65536];assert call(resource_url+'/chunks','PUT',block,token,extra={'X-Offset':str(at),'X-Chunk-SHA256':hashlib.sha256(block).hexdigest()})[0]==200
@@ -72,6 +74,20 @@ with tempfile.TemporaryDirectory() as directory:
  assert call(f'/api/v1/fonts?name={quoted}&size={len(font_bytes)}&sha256='+'0'*64,'DELETE',token=token)[0]==400
  assert call(delete_url,'DELETE',token=token)[0]==404
  assert call('/api/v1/fonts',token=token)[1]=={'more':False,'items':[]}
+ # 封面/壁纸使用相同owner，目录和身份隔离；删除原图不触碰内部缓存。/ Covers/wallpapers share the owner with isolated directories/identities; deleting sources leaves internal caches intact.
+ internal=root/'internal-lock.a';internal.write_bytes(b'preserved internal bitmap')
+ for route,name in [('covers','封面.png'),('wallpapers','原生透明.png'),('wallpapers','锁屏.jpg')]:
+  source=root/route/name;content=source.read_bytes();quoted=urllib.parse.quote(name);sha=hashlib.sha256(content).hexdigest()
+  assert call('/api/v1/'+route)[0]==401
+  wanted=[{'name':p.name,'size':p.stat().st_size} for p in sorted((root/route).iterdir(),key=lambda p:p.name)]
+  assert call('/api/v1/'+route,token=token)[1]=={'more':False,'items':wanted}
+  assert call('/api/v1/'+route+'?after='+quoted,token=token)[1]=={'more':False,'items':[item for item in wanted if item['name']>name]}
+  url=f'/api/v1/{route}?name={quoted}&size={len(content)}&sha256={sha}'
+  assert call(url,'DELETE',token=token,origin='http://evil.test')[0]==403 and source.exists()
+  assert call(url.replace(sha,'1'+'0'*63),'DELETE',token=token)[0]==409 and source.exists()
+  assert call(url,'DELETE',token=token)[0]==200 and not source.exists()
+  assert internal.read_bytes()==b'preserved internal bitmap'
+  assert call('/api/v1/'+route,token=token)[1]=={'more':False,'items':[item for item in wanted if item['name']!=name]}
  # 关闭等待已接收HTTP线程，不提前销毁原生管道。/ Close waits for admitted HTTP threads before destroying native pipes.
  entered=threading.Event();release=threading.Event();closed=threading.Event();native_call=app.worker.call
  def gated(command,body=b''):
