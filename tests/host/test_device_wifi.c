@@ -59,6 +59,7 @@ esp_err_t esp_wifi_set_config(wifi_interface_t iface,const wifi_config_t *value)
 esp_err_t esp_wifi_start(void){started=true;wifi_handler(wifi_context,WIFI_EVENT,mode==WIFI_MODE_AP?WIFI_EVENT_AP_START:WIFI_EVENT_STA_START,NULL);return fail_start?ESP_FAIL:ESP_OK;}
 esp_err_t esp_wifi_set_ps(wifi_ps_type_t ps){assert(started && mode==WIFI_MODE_STA && ps==WIFI_PS_NONE);power_save_disabled++;return ESP_OK;}
 esp_err_t esp_wifi_connect(void){connections++;return ESP_OK;}
+esp_err_t esp_wifi_sta_get_ap_info(wifi_ap_record_t *out){out->rssi=-61;return ESP_OK;}
 esp_err_t esp_wifi_stop(void){if(fail_stop)return ESP_FAIL;started=false;return ESP_OK;}
 esp_err_t esp_wifi_deinit(void){assert(!started);initialized=false;if(radio_gates_usb_clock)usb_clock=false;return ESP_OK;}
 int main(void){
@@ -71,7 +72,10 @@ int main(void){
  settings.mode=PN_WIFI_STA;strcpy(settings.ssid,"家里的网络");strcpy(settings.password,"reader-password");assert(pn_device_wifi_open(&wifi,&settings)==PN_OK);
  assert(pn_device_wifi_poll(&wifi)==PN_OK && connections==1 && power_save_disabled==1);assert(pn_device_wifi_state(&wifi,&state)==PN_OK && !state.ap_password[0]);
  ip_event_got_ip_t got={0};uint8_t *ip=(uint8_t *)&got.ip_info.ip.addr;ip[0]=10;ip[3]=2;ip_handler(ip_context,IP_EVENT,IP_EVENT_STA_GOT_IP,&got);assert(pn_device_wifi_state(&wifi,&state)==PN_OK && state.phase==PN_WIFI_READY && !strcmp(state.address,"10.0.0.2"));
- wifi_handler(wifi_context,WIFI_EVENT,WIFI_EVENT_STA_DISCONNECTED,NULL);for(unsigned i=0;i<3;i++){now+=1000;assert(pn_device_wifi_poll(&wifi)==PN_OK);wifi_handler(wifi_context,WIFI_EVENT,WIFI_EVENT_STA_DISCONNECTED,NULL);}
+ assert(pn_device_wifi_poll(&wifi)==PN_OK);assert(pn_device_wifi_state(&wifi,&state)==PN_OK && state.rssi_known && state.rssi==-61 && !state.reconnects);
+ wifi_event_sta_disconnected_t lost={.reason=201};wifi_handler(wifi_context,WIFI_EVENT,WIFI_EVENT_STA_DISCONNECTED,&lost);assert(pn_device_wifi_state(&wifi,&state)==PN_OK && !state.rssi_known && state.disconnects==1 && state.last_disconnect_reason==201);
+ now+=1000;assert(pn_device_wifi_poll(&wifi)==PN_OK);ip_handler(ip_context,IP_EVENT,IP_EVENT_STA_GOT_IP,&got);assert(pn_device_wifi_state(&wifi,&state)==PN_OK && state.reconnects==1);
+ wifi_handler(wifi_context,WIFI_EVENT,WIFI_EVENT_STA_DISCONNECTED,&lost);for(unsigned i=0;i<3;i++){now+=1000;assert(pn_device_wifi_poll(&wifi)==PN_OK);wifi_handler(wifi_context,WIFI_EVENT,WIFI_EVENT_STA_DISCONNECTED,&lost);}
  now+=1000;assert(pn_device_wifi_poll(&wifi)==PN_IO);assert(pn_device_wifi_state(&wifi,&state)==PN_OK && state.phase==PN_WIFI_FAILED && state.mode==PN_WIFI_STA);
  assert(pn_device_wifi_close(&wifi)==PN_OK && !allocations && !wifi_handler && !ip_handler);
  initialized=true;assert(pn_device_wifi_open(&wifi,&settings)==PN_BUSY && !wifi.impl);initialized=false;

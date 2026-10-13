@@ -127,6 +127,7 @@ static void run(transfer_t *s){
    strcpy(network_address,network.address);
   }
   pn_transfer_worker_state_t work={0};if(s->worker.impl)(void)pn_transfer_worker_state(&s->worker,&work);
+  if(s->http.impl)(void)pn_device_transfer_http_diagnostics(&s->http,&network);
   lock(s);s->state.network=network;s->state.work=work;
   if(!s->stop){s->state.phase=s->http.impl && network.phase==PN_WIFI_READY?PN_DTRANSFER_READY:PN_DTRANSFER_STARTING;}
   unlock(s);pause_task();

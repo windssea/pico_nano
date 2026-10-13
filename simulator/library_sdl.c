@@ -267,7 +267,8 @@ static int shelf_hit(library_t *s,int x,int y){pn_shelf_options_t o=shelf_option
 static pn_status_t open_settings(library_t *s){
     pn_status_t status=pn_settings_ui_open(&s->settings,s->pool,&s->state_media,s->state_dir,present,s);
     if(status==PN_OK){pn_settings_about_t about={0};storage_note(s);snprintf(about.version,sizeof about.version,"PC 模拟器");snprintf(about.storage,sizeof about.storage,"%s",s->storage);
-        snprintf(about.internal,sizeof about.internal,"%s",s->state_dir?"可用（--state-dir）":"未指定 --state-dir");snprintf(about.screen,sizeof about.screen,"684×1216 · 16 级灰阶（模拟）");pn_settings_ui_set_about(&s->settings,&about);}
+        snprintf(about.internal,sizeof about.internal,"%s",s->state_dir?"可用（--state-dir）":"未指定 --state-dir");snprintf(about.screen,sizeof about.screen,"684×1216 · 16 级灰阶（模拟）");pn_settings_ui_set_about(&s->settings,&about);
+        pn_settings_time_t clock={0};time_t utc=time(NULL);if(utc>=1704067200 && (uint64_t)utc<=4102444799u)(void)pn_settings_time_format(&clock,(uint32_t)utc);snprintf(clock.message,sizeof clock.message,"模拟器显示本机时间，联网校时需在阅读器验证。");pn_settings_ui_set_time(&s->settings,&clock);}
     return status;
 }
 /* 传书一级页：模拟器没有无线传书，只显示原因。/ Transfer root tab: the simulator has no wireless transfer and only shows the reason. */

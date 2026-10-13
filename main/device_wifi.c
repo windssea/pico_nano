@@ -23,6 +23,10 @@
 #include "freertos/semphr.h"
 #include <string.h>
 #include <stdio.h>
+#include <limits.h>
+#ifdef ESP_PLATFORM
+#include "esp_log.h"
+#endif
 typedef struct {
  SemaphoreHandle_t mutex;
  esp_netif_t *netif;
@@ -31,6 +35,7 @@ typedef struct {
  bool loop_owned,initialized,started,start_attempted,closing,ap_ready,pending_connect;
  bool usb_enabled; ///< 无线前USB数据状态，完整退出后恢复 / USB data state before radio, restored after complete teardown
  uint64_t window,next_retry;
+ uint64_t signal_at;bool ever_ready; ///< 有界信号采样与首次连接区分 / Bounded signal sampling and first-connection distinction
 } wifi_t;
 static wifi_t *active;
 static uint64_t now_ms(void){return (uint64_t)(esp_timer_get_time()/1000);}
@@ -41,7 +46,7 @@ static bool changed(wifi_t *s){if(s->state.generation==UINT64_MAX){s->state.phas
 static void address(char out[16],uint32_t ip){const uint8_t *bytes=(const uint8_t *)&ip;snprintf(out,16,"%u.%u.%u.%u",bytes[0],bytes[1],bytes[2],bytes[3]);}
 static void disconnected(wifi_t *s){
  if(s->state.phase==PN_WIFI_READY){s->window=now_ms();s->state.attempts=0;}
- s->state.phase=PN_WIFI_CONNECTING;s->state.address[0]=0;s->pending_connect=true;s->next_retry=now_ms()+1000;(void)changed(s);
+ s->state.phase=PN_WIFI_CONNECTING;s->state.address[0]=0;s->state.rssi_known=false;s->pending_connect=true;s->next_retry=now_ms()+1000;(void)changed(s);
 }
 static void event(void *ctx,esp_event_base_t base,int32_t id,void *data){
  wifi_t *s=ctx;lock(s);if(s->closing || s->state.phase==PN_WIFI_FAILED){unlock(s);return;}
@@ -53,13 +58,16 @@ static void event(void *ctx,esp_event_base_t base,int32_t id,void *data){
    else if(id==WIFI_EVENT_AP_STADISCONNECTED && s->state.clients)s->state.clients--;
   }else{
    if(id==WIFI_EVENT_STA_START){s->state.phase=PN_WIFI_CONNECTING;s->pending_connect=true;}
-   else if(id==WIFI_EVENT_STA_DISCONNECTED)disconnected(s);
+   else if(id==WIFI_EVENT_STA_DISCONNECTED){const wifi_event_sta_disconnected_t *lost=data;s->state.last_disconnect_reason=lost?lost->reason:0;if(s->state.disconnects<UINT_MAX)s->state.disconnects++;disconnected(s);}
   }
  }else if(base==IP_EVENT && s->state.mode==PN_WIFI_STA){
-  if(id==IP_EVENT_STA_GOT_IP && data){const ip_event_got_ip_t *got=data;if(got->ip_info.ip.addr){address(s->state.address,got->ip_info.ip.addr);s->state.phase=PN_WIFI_READY;s->state.error=ESP_OK;s->pending_connect=false;(void)changed(s);}}
+  if(id==IP_EVENT_STA_GOT_IP && data){const ip_event_got_ip_t *got=data;if(got->ip_info.ip.addr){if(s->ever_ready && s->state.phase!=PN_WIFI_READY && s->state.reconnects<UINT_MAX)s->state.reconnects++;s->ever_ready=true;s->signal_at=0;address(s->state.address,got->ip_info.ip.addr);s->state.phase=PN_WIFI_READY;s->state.error=ESP_OK;s->pending_connect=false;(void)changed(s);}}
   else if(id==IP_EVENT_STA_LOST_IP)disconnected(s);
  }
  unlock(s);
+#ifdef ESP_PLATFORM
+ if(base==WIFI_EVENT && id==WIFI_EVENT_STA_DISCONNECTED){const wifi_event_sta_disconnected_t *lost=data;ESP_LOGW("pn_wifi","STA disconnected reason=%u",lost?(unsigned)lost->reason:0u);}
+#endif
 }
 pn_status_t pn_device_wifi_close(pn_device_wifi_t *out){
  if(!out)return PN_INVALID;
@@ -121,7 +129,7 @@ pn_status_t pn_device_wifi_open(pn_device_wifi_t *out,const pn_device_wifi_confi
  if(result==ESP_OK)result=esp_event_handler_instance_register(WIFI_EVENT,ESP_EVENT_ANY_ID,event,s,&s->wifi_events);
  if(result==ESP_OK && config->mode==PN_WIFI_STA)result=esp_event_handler_instance_register(IP_EVENT,ESP_EVENT_ANY_ID,event,s,&s->ip_events);
  if(result==ESP_OK){s->start_attempted=true;result=esp_wifi_start();if(result==ESP_OK)s->started=true;}
- // 仅传输会话关闭STA modem sleep，停止后驱动销毁，不改变离线阅读功耗。 / Disable STA modem sleep only for transfer sessions; driver teardown leaves offline reading power unchanged.
+ // 仅联网会话关闭STA modem sleep，停止后驱动销毁，不改变离线阅读功耗。 / Disable STA modem sleep only for network sessions; driver teardown leaves offline reading power unchanged.
  if(result==ESP_OK && config->mode==PN_WIFI_STA)result=esp_wifi_set_ps(WIFI_PS_NONE);
  if(result!=ESP_OK){lock(s);s->state.phase=PN_WIFI_FAILED;s->state.error=result;unlock(s);(void)pn_device_wifi_close(out);return PN_IO;}
  return PN_OK;
@@ -131,7 +139,8 @@ pn_status_t pn_device_wifi_poll(pn_device_wifi_t *out){
  wifi_t *s=out->impl;uint64_t now=now_ms();lock(s);
  if(s->closing){unlock(s);return PN_CANCELLED;}
  if(s->state.phase==PN_WIFI_FAILED){unlock(s);return PN_IO;}
- if(s->state.phase==PN_WIFI_READY){unlock(s);return PN_OK;}
+ if(s->state.phase==PN_WIFI_READY){bool sample=s->state.mode==PN_WIFI_STA && (!s->signal_at || now<s->signal_at || now-s->signal_at>=1000);uint64_t generation=s->state.generation;if(sample)s->signal_at=now;unlock(s);
+  if(sample){wifi_ap_record_t ap={0};esp_err_t result=esp_wifi_sta_get_ap_info(&ap);lock(s);if(s->state.phase==PN_WIFI_READY && s->state.generation==generation){s->state.rssi_known=result==ESP_OK;if(result==ESP_OK)s->state.rssi=ap.rssi;}unlock(s);}return PN_OK;}
  if(now<s->window || now-s->window>=20000){s->state.phase=PN_WIFI_FAILED;s->state.error=ESP_FAIL;unlock(s);return PN_IO;}
  bool ap=s->state.mode==PN_WIFI_AP && s->ap_ready;
  bool connect=s->state.mode==PN_WIFI_STA && s->pending_connect && now>=s->next_retry;

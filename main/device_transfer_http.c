@@ -35,6 +35,7 @@ typedef struct {
  SemaphoreHandle_t auth;
  char authority[64],origin[80],token[33];
  bool closing;
+ struct {bool ready,rssi_known;int rssi;unsigned disconnects,reconnects,reason;} diagnostics; ///< 无口令快照 / Credential-free snapshot
  const pn_device_network_sink_t *network;
  pn_pool_t ls_pool;pn_ls_session_t ls;char fingerprint[33];uint16_t port; ///< 单HTTP owner的LocalSend会话 / LocalSend session owned by the single HTTP task
  pn_device_ls_discovery_t discovery; ///< 生命周期先于HTTP上下文结束 / Ends before the HTTP context is released
@@ -271,7 +272,9 @@ static esp_err_t dispatch(httpd_req_t *r){
  if((r->method==HTTP_GET || r->method==HTTP_DELETE) && r->content_len)return error(r,400,"该操作不接受请求正文");
  if(r->method==HTTP_GET){
   const pn_transfer_asset_t *asset=pn_transfer_asset(uri);if(asset)return send_data(r,200,asset->mime,(const char *)asset->bytes,asset->size);
-  if(!strcmp(uri,"/api/v1/status")){cJSON *json=cJSON_CreateObject();bool v=string(json,"name",PN_BRAND_NAME);v&=string(json,"version","0.0.56");v&=number(json,"chunk_size",PN_UPLOAD_CHUNK);v&=boolean(json,"preview",false);return json_send(r,200,json,v);}
+  if(!strcmp(uri,"/api/v1/status")){cJSON *json=cJSON_CreateObject();bool v=string(json,"name",PN_BRAND_NAME);v&=string(json,"version","0.0.57");v&=number(json,"chunk_size",PN_UPLOAD_CHUNK);v&=boolean(json,"preview",false);
+   lock(s);bool ready=s->diagnostics.ready,known=s->diagnostics.rssi_known;int rssi=s->diagnostics.rssi;unsigned drops=s->diagnostics.disconnects,recoveries=s->diagnostics.reconnects,reason=s->diagnostics.reason;unlock(s);
+   v&=boolean(json,"wifi_ready",ready);v&=boolean(json,"rssi_known",known);if(known)v&=json && cJSON_AddNumberToObject(json,"rssi_dbm",(double)rssi)!=NULL;v&=number(json,"disconnects",drops);v&=number(json,"reconnects",recoveries);v&=number(json,"last_disconnect_reason",reason);return json_send(r,200,json,v);}
  }
  // 同源页面自动取得短生命周期令牌，不再输入配对码。 / Same-origin pages obtain a session token automatically without a pairing code.
  if(r->method==HTTP_GET && !strcmp(uri,"/api/v1/session")){
@@ -371,4 +374,5 @@ pn_status_t pn_device_transfer_http_open(pn_device_transfer_http_t *out,pn_trans
  return PN_OK;
 }
 pn_status_t pn_device_transfer_http_request_stop(pn_device_transfer_http_t *out){if(!out || !out->impl)return PN_INVALID;http_t *s=out->impl;lock(s);s->closing=true;memset(s->token,0,sizeof s->token);unlock(s);return pn_transfer_worker_request_stop(s->worker);}
+pn_status_t pn_device_transfer_http_diagnostics(pn_device_transfer_http_t *out,const pn_device_wifi_state_t *state){if(!out || !out->impl || !state)return PN_INVALID;http_t *s=out->impl;lock(s);s->diagnostics.ready=state->phase==PN_WIFI_READY;s->diagnostics.rssi_known=state->rssi_known;s->diagnostics.rssi=state->rssi;s->diagnostics.disconnects=state->disconnects;s->diagnostics.reconnects=state->reconnects;s->diagnostics.reason=state->last_disconnect_reason;unlock(s);return PN_OK;}
 pn_status_t pn_device_transfer_http_close(pn_device_transfer_http_t *out){if(!out)return PN_INVALID;if(!out->impl)return PN_OK;http_t *s=out->impl;(void)pn_device_transfer_http_request_stop(out);pn_status_t discovery=pn_device_ls_discovery_close(&s->discovery);if(discovery!=PN_OK)return discovery;if(s->server && httpd_stop(s->server)!=ESP_OK)return PN_IO;(void)pn_ls_stop_after_join(&s->ls);(void)pn_ls_session_close(&s->ls);vSemaphoreDelete(s->auth);heap_caps_free(s);out->impl=NULL;return PN_OK;}

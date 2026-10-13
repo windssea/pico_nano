@@ -4,16 +4,18 @@
  * 中文：设置（一级页）与“按键与手势”“刷新与屏幕”“存储与关于”三个子页；开关与刷新策略立即保存，保存走内部状态介质WRITE租约。
  * English: Settings (a root tab) with the "keys and gestures", "refresh and screen" and "storage and about" sub-pages; switches and the refresh policy save at once through a WRITE lease on the internal state media.
  */
+#define _POSIX_C_SOURCE 200809L
 #include "pn_brand.h"
 #include "pn_settings_ui.h"
 #include "pn_widgets.h"
 #include "pn_shelf_view.h"
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 #define W 684
 #define H 1216
-enum {SCREEN_MAIN=0,SCREEN_KEYS,SCREEN_REFRESH,SCREEN_ABOUT,SCREEN_APPEARANCE};
-typedef struct {pn_pool_t *pool;pn_media_t *state;char dir[PN_JOURNAL_PATH_MAX];pn_font_t font;uint8_t *pixels;pn_frame_t canvas;char message[96];char lan[40];int screen;pn_settings_about_t about;} su_t;
+enum {SCREEN_MAIN=0,SCREEN_KEYS,SCREEN_REFRESH,SCREEN_ABOUT,SCREEN_APPEARANCE,SCREEN_TIME};
+typedef struct {pn_pool_t *pool;pn_media_t *state;char dir[PN_JOURNAL_PATH_MAX];pn_font_t font;uint8_t *pixels;pn_frame_t canvas;char message[96];char lan[40];int screen;pn_settings_about_t about;pn_settings_time_t time;} su_t;
 static const char *const names[]={"左手模式","滑动翻页","边缘点按翻页","屏下三键翻页"};
 static const char *const hints[]={"点左边缘翻到下一页","左右滑动翻页","点屏幕两侧边缘翻页","KEY1 上一页，KEY3 下一页"};
 static const uint8_t bits[]={PN_INPUT_LEFT_HAND,PN_INPUT_NO_SWIPE,PN_INPUT_NO_EDGE_TAP,PN_INPUT_NO_KEYS};
@@ -120,6 +122,18 @@ static pn_status_t draw_about(su_t *u){
     pn_w_card(f,ABOUT_Y,4);
     for(int i=0;i<4 && s==PN_OK;i++)s=pn_w_card_row(font,f,rows[i][0],rows[i][1],NULL,-1,0u,ABOUT_Y+i*ROW_H,i==3);
     if(s==PN_OK)s=note(u,"本固件使用 HarmonyOS Sans 字体。阅读记录、书签与设置只保存在本机。设备信息按实际读取显示。",ABOUT_Y+4*ROW_H+52);
+    pn_w_card(f,840,1);if(s==PN_OK)s=pn_w_card_row(font,f,"日期与时间",*u->time.datetime?u->time.datetime:"时钟尚未校准",NULL,PN_ICON_SETTINGS,PN_ROW_CHEVRON,840,true);
+    return s;
+}
+static pn_status_t draw_time(su_t *u){
+    pn_status_t s=pn_w_header(&u->font,&u->canvas,"< 关于","日期与时间",NULL);
+    if(s==PN_OK)s=pn_font_size(&u->font,38);
+    if(s==PN_OK)s=pn_w_text(&u->font,&u->canvas,*u->time.datetime?u->time.datetime:"时间尚未校准",32,290,620,PN_ALIGN_CENTER);
+    if(s==PN_OK)s=note(u,"北京时间 · UTC+8",348);
+    if(s==PN_OK)s=note(u,*u->time.message?u->time.message:u->time.available?"使用已保存的家庭WiFi获取网络时间。完成后由设备时钟继续走时。":"请先在传书网页中保存家庭WiFi，再联网校时。",450);
+    if(s==PN_OK)s=pn_font_size(&u->font,32);
+    if(s==PN_OK)s=pn_w_button(&u->font,&u->canvas,u->time.running?"结束对时":"立即联网校时",32,700,620,88,u->time.running || u->time.available?PN_W_SELECTED:PN_W_DISABLED);
+    if(s==PN_OK)s=note(u,"对时期间可以操作其他设置。网络失败时保留原显示时间，稍后可重试。",862);
     return s;
 }
 /* 设置中直接预览静态样式；无贴图、无动画或额外封面解码。/ Preview static styles in settings without textures, animation or extra cover decoding. */
@@ -144,7 +158,7 @@ static pn_status_t draw_appearance(pn_settings_ui_t *ui,su_t *u){
 }
 static pn_status_t show_profile(pn_settings_ui_t *ui,pn_settings_present_fn present,void *ctx,pn_refresh_t profile){
     su_t *u=ui->impl;ui->presented=false;pn_frame_clear(&u->canvas,15);
-    pn_status_t s=u->screen==SCREEN_KEYS?draw_keys(ui,u):u->screen==SCREEN_REFRESH?draw_refresh(ui,u):u->screen==SCREEN_ABOUT?draw_about(u):u->screen==SCREEN_APPEARANCE?draw_appearance(ui,u):draw_main(ui,u);
+    pn_status_t s=u->screen==SCREEN_KEYS?draw_keys(ui,u):u->screen==SCREEN_REFRESH?draw_refresh(ui,u):u->screen==SCREEN_ABOUT?draw_about(u):u->screen==SCREEN_TIME?draw_time(u):u->screen==SCREEN_APPEARANCE?draw_appearance(ui,u):draw_main(ui,u);
     if(s==PN_OK)s=present(ctx,&u->canvas,profile);
     if(s==PN_OK)ui->presented=true;
     return s;
@@ -218,7 +232,9 @@ static pn_status_t commit_shelf(pn_settings_ui_t *ui,su_t *u,pn_shelf_prefs_t ne
 pn_status_t pn_settings_ui_event(pn_settings_ui_t *ui,int command,pn_settings_present_fn present,void *ctx){
     if(!ui || !ui->impl || !ui->active || !present)return PN_INVALID;
     su_t *u=ui->impl;u->message[0]=0;pn_status_t status=PN_OK;
-    if(command==PN_SETUI_BACK){if(u->screen!=SCREEN_MAIN){u->screen=SCREEN_MAIN;return show(ui,present,ctx);}ui->active=false;return PN_OK;}
+    if(command==PN_SETUI_BACK){if(u->screen!=SCREEN_MAIN){u->screen=u->screen==SCREEN_TIME?SCREEN_ABOUT:SCREEN_MAIN;return show(ui,present,ctx);}ui->active=false;return PN_OK;}
+    if(command==PN_SETUI_TIME){u->screen=SCREEN_TIME;return show(ui,present,ctx);}
+    if(command==PN_SETUI_TIME_SYNC || command==PN_SETUI_TIME_CANCEL){if(!ui->presented)return PN_BUSY;if(u->screen!=SCREEN_TIME || (command==PN_SETUI_TIME_SYNC?(!u->time.available || u->time.running):!u->time.running))return PN_EMPTY;ui->request=command;return PN_OK;}
     if(command==PN_SETUI_WALLPAPER || command==PN_SETUI_FONTS || (command==PN_SETUI_LAN && *u->lan) || command==PN_SETUI_SHELF || command==PN_SETUI_TRANSFER || command==PN_SETUI_HOME){ui->request=command;return PN_OK;}
     if(command==PN_SETUI_APPEARANCE){u->screen=SCREEN_APPEARANCE;return show(ui,present,ctx);}
     if(command==PN_SETUI_KEYS || command==PN_SETUI_REFRESH || command==PN_SETUI_ABOUT){u->screen=command==PN_SETUI_KEYS?SCREEN_KEYS:command==PN_SETUI_REFRESH?SCREEN_REFRESH:SCREEN_ABOUT;return show(ui,present,ctx);}
@@ -257,6 +273,8 @@ int pn_settings_ui_hit(const pn_settings_ui_t *ui,int x,int y){
     }
     if(pn_w_header_hit(x,y,false)==1)return PN_SETUI_BACK;
     if(x<32 || x>=652)return -1;
+    if(u->screen==SCREEN_ABOUT && y>=840 && y<840+ROW_H)return PN_SETUI_TIME;
+    if(u->screen==SCREEN_TIME){if(y>=700 && y<788)return u->time.running?PN_SETUI_TIME_CANCEL:u->time.available?PN_SETUI_TIME_SYNC:-1;return -1;}
     if(u->screen==SCREEN_APPEARANCE){int cell=pn_w_segments_hit(2,190,108,x,y);if(cell>=0)return PN_SETUI_COLUMNS+cell;
         if(y>=460 && y<900){int row=(y-460)/230,col=(x-32)/318;
             if(row<2 && col<2 && (y-460)%230<210 && (x-32)%318<302)return PN_SETUI_STYLE+row*2+col;}
@@ -291,3 +309,11 @@ void pn_settings_ui_set_about(pn_settings_ui_t *ui,const pn_settings_about_t *ab
     u->about.version[sizeof u->about.version-1]=0;u->about.storage[sizeof u->about.storage-1]=0;u->about.internal[sizeof u->about.internal-1]=0;u->about.screen[sizeof u->about.screen-1]=0;
 }
 int pn_settings_ui_screen(const pn_settings_ui_t *ui){return ui && ui->impl?((const su_t *)ui->impl)->screen:0;}
+void pn_settings_ui_set_time(pn_settings_ui_t *ui,const pn_settings_time_t *time){if(!ui || !ui->impl || !time)return;su_t *u=ui->impl;u->time=*time;u->time.datetime[sizeof u->time.datetime-1]=0;u->time.message[sizeof u->time.message-1]=0;}
+
+pn_status_t pn_settings_time_format(pn_settings_time_t *view,uint32_t utc){
+    if(!view || utc<1704067200u || utc>4102444799u)return PN_INVALID;
+    time_t local=(time_t)((uint64_t)utc+8u*3600u);struct tm date;char text[32];
+    if(!gmtime_r(&local,&date) || !strftime(text,sizeof text,"%Y-%m-%d %H:%M",&date))return PN_IO;
+    memset(view->datetime,0,sizeof view->datetime);memcpy(view->datetime,text,strlen(text)+1);return PN_OK;
+}

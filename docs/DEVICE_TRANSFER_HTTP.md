@@ -4,9 +4,9 @@
 
 ## 启动与停止
 
-调用方先停止TF消费者、移交共享media并启动worker，再启动WiFi，最后以固定IP[:port] authority打开HTTP服务。生成配对码和令牌时要求ESP随机数源已有真实熵；不能把无无线时的测试随机数当成已验证的设备认证。服务固定使用端口对应的IPv4地址入口，不接受任意Host或跨域来源，mDNS别名尚未实现。
+调用方先停止TF消费者、移交共享media并启动worker，再启动WiFi，最后以固定IP[:port] authority打开HTTP服务。生成令牌时要求ESP随机数源已有真实熵；不能把无无线时的测试随机数当成已验证的设备认证。服务固定使用端口对应的IPv4地址入口，不接受任意Host或跨域来源，mDNS别名尚未实现。
 
-配对码由拒绝采样生成六位数字，五分钟过期；连续五次错误锁定一分钟。令牌为随机128位、仅内存保存。界面只能通过code API查询显示用配对码，日志不输出令牌。HTTP是本地网络通道，没有链路加密，不能直接作为公网服务。
+已移除手工配对码及pair/code接口。页面从GET session自动取得随机128位内存令牌，后续文件操作仍要求令牌；停止清零失效。状态不含令牌或WiFi口令，日志不输出令牌。HTTP是本地网络通道，没有链路加密。
 
 request_stop先锁保护关闭认证、清令牌，再关闭worker接收入口，不等待完整格式校验。close调用httpd_stop等待HTTP处理结束，成功后才释放上下文；随后由调用方关闭worker并归还media。关闭失败保留对象供重试，不能提前释放平台ctx、卸载TF或恢复阅读。启动后注册失败也关闭接收；若HTTP停止失败则保留对象，调用方必须继续清理。
 
@@ -14,7 +14,7 @@ request_stop先锁保护关闭认证、清令牌，再关闭worker接收入口�
 
 ## 请求边界
 
-API与 [PC网页服务](TRANSFER_WEB.md) 对齐：status、pair、session、新建上传、按ID恢复、64KiB块、完整安装、取消及按类别查询旧文件摘要。书籍当前TXT/EPUB、字体TTF、图片PNG/JPEG；上传后不自动切换字体或应用图片。
+API与 [PC网页服务](TRANSFER_WEB.md) 对齐：status、session、新建上传、按ID恢复、64KiB块、完整安装、取消及按类别查询旧文件摘要。书籍当前TXT/EPUB、字体TTF、图片PNG/JPEG；上传后不自动切换字体或应用图片。开发中的无线状态诊断字段与实测边界见 [局域网传书](LAN_TRANSFER.md)。
 
 Host须与固定authority相符；修改请求必须有准确Origin，GET携带Origin时也须匹配。拒绝重复Host、Origin、Authorization、Content-Length、Content-Type及分块摘要/位置头，拒绝任何Transfer-Encoding。JSON最多8192字节，原始块最多65536字节；禁止不完整正文、未知/重复字段、嵌入NUL、超深/过多JSON结构、非整数范围和错误摘要。名称、扩展名及类别仍由共享服务再次验证。
 

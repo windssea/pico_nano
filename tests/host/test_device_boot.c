@@ -16,11 +16,18 @@
 #include "esp_littlefs.h"
 #include "pn_alloc.h"
 #include "device_transfer.h"
+#include "device_time.h"
 // 启动保护场景不能开启网络；调用这些桩即为回归。/ Boot-gate scenarios must never start networking; reaching these stubs is a regression.
 pn_status_t pn_device_transfer_open(pn_device_transfer_t *s,pn_media_t *m,const char *r,const pn_device_wifi_config_t *c){(void)s;(void)m;(void)r;(void)c;assert(false);return PN_UNSUPPORTED;}
 pn_status_t pn_device_transfer_request_stop(pn_device_transfer_t *s){(void)s;assert(false);return PN_UNSUPPORTED;}
 pn_status_t pn_device_transfer_state(pn_device_transfer_t *s,pn_device_transfer_state_t *out){(void)s;(void)out;assert(false);return PN_UNSUPPORTED;}
 pn_status_t pn_device_transfer_close(pn_device_transfer_t *s){(void)s;assert(false);return PN_UNSUPPORTED;}
+pn_status_t pn_device_time_open(pn_device_time_t *t,const pn_device_wifi_config_t *c){(void)t;(void)c;assert(false);return PN_UNSUPPORTED;}
+pn_status_t pn_device_time_poll(pn_device_time_t *t,uint64_t n){(void)t;(void)n;assert(false);return PN_UNSUPPORTED;}
+pn_status_t pn_device_time_request_stop(pn_device_time_t *t){(void)t;assert(false);return PN_UNSUPPORTED;}
+pn_status_t pn_device_time_state(const pn_device_time_t *t,pn_device_time_state_t *s){(void)t;(void)s;assert(false);return PN_UNSUPPORTED;}
+pn_status_t pn_device_time_close(pn_device_time_t *t){(void)t;assert(false);return PN_UNSUPPORTED;}
+pn_status_t pn_device_time_commit(const pn_device_time_state_t *s,uint32_t *u){(void)s;(void)u;assert(false);return PN_UNSUPPORTED;}
 static bool wake_idle;
 static unsigned sleep_calls,loop_delays;
 static int64_t clock_us=1000000;

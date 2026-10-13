@@ -4,11 +4,26 @@
 #define pn_device_transfer_state boot_transfer_state
 #define pn_device_transfer_close boot_transfer_close
 #define pn_device_transfer_take_network boot_transfer_take_network
+#define pn_device_time_poll boot_time_poll
+#define pn_device_time_state boot_time_state
+#define pn_device_time_close boot_time_close
+#define pn_device_time_commit boot_time_commit
 #include "test_device_boot.c"
 #undef main
 #undef pn_device_transfer_state
 #undef pn_device_transfer_close
 #undef pn_device_transfer_take_network
+#undef pn_device_time_poll
+#undef pn_device_time_state
+#undef pn_device_time_close
+#undef pn_device_time_commit
+static pn_device_time_state_t time_result;
+static pn_status_t commit_result=PN_IO;
+static unsigned time_commits;
+pn_status_t pn_device_time_poll(pn_device_time_t *t,uint64_t n){assert(t->impl);(void)n;return PN_OK;}
+pn_status_t pn_device_time_state(const pn_device_time_t *t,pn_device_time_state_t *s){assert(t->impl);*s=time_result;return PN_OK;}
+pn_status_t pn_device_time_close(pn_device_time_t *t){assert(time_result.released);t->impl=NULL;return PN_OK;}
+pn_status_t pn_device_time_commit(const pn_device_time_state_t *s,uint32_t *u){assert(s->released && s->phase==PN_TIME_SUCCEEDED);time_commits++;if(commit_result==PN_OK)*u=s->utc;return commit_result;}
 pn_status_t pn_device_transfer_state(pn_device_transfer_t *s,pn_device_transfer_state_t *out){assert(s->impl);*out=(pn_device_transfer_state_t){.released=true,.phase=PN_DTRANSFER_STOPPED};return PN_OK;}
 pn_status_t pn_device_transfer_close(pn_device_transfer_t *s){assert(s->impl);s->impl=NULL;return PN_OK;}
 pn_status_t pn_device_transfer_take_network(pn_device_transfer_t *s,pn_network_credentials_t *c,bool *f){(void)s;(void)c;(void)f;return PN_EMPTY;}
@@ -83,6 +98,13 @@ int main(void){
     pn_async_init(&async_port.input);event.navigation=true;event.urgent=true;assert(pn_async_send(&async_port.input,&event)==PN_OK);
     transfer.impl=(void *)1;transfer_return=true;management_home_pending=true;gc_before=gc_updates;full_before=area_full_calls;
     tick_transfer(now_ms());assert(!transfer.impl && gc_updates==gc_before && area_full_calls==full_before);
+    // 无线未释放不提交；PMU失败保留旧显示，成功才更新时基；对时禁止第二个无线owner。 / Never commit before radio release; preserve display on PMU failure, update only on success, and reject a second radio owner.
+    pn_async_init(&async_port.input);time_sync.impl=(void *)1;time_result=(pn_device_time_state_t){.phase=PN_TIME_STOPPING};clock_known=false;time_poll_at=0;
+    tick_time_sync(1000);assert(time_sync.impl && !time_commits && !clock_known);begin_transfer(false);assert(time_sync.impl && !transfer.impl);
+    time_result=(pn_device_time_state_t){.phase=PN_TIME_SUCCEEDED,.released=true,.utc=1780000000u,.acquired_ms=1000};tick_time_sync(1100);assert(!time_sync.impl && time_commits==1 && !clock_known);
+    time_sync.impl=(void *)1;commit_result=PN_OK;tick_time_sync(1200);assert(!time_sync.impl && time_commits==2 && clock_known && clock_base_sec==1780000000u);
+    time_sync.impl=(void *)1;time_result=(pn_device_time_state_t){.phase=PN_TIME_CANCELLED,.released=true,.error=PN_CANCELLED};tick_time_sync(1300);assert(!time_sync.impl && time_commits==2 && clock_base_sec==1780000000u);
+    time_sync.impl=(void *)1;time_result=(pn_device_time_state_t){.phase=PN_TIME_SUCCEEDED,.released=true,.utc=1780000000u,.acquired_ms=1000};clock_us=31000000;tick_time_sync(31000);assert(time_commits==3 && clock_base_sec==1780000030u);
     pn_free(shown_px);pn_free(page_copy);pn_free(shelf_page);pn_free(shelf_covers);pn_free(recent_snapshot);pn_free(favorites);
     assert(!pool.used && !pool.live);return 0;
 }

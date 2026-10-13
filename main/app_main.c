@@ -46,6 +46,7 @@
 #include "device_text.h"
 #include "device_frame.h"
 #include "device_transfer.h"
+#include "device_time.h"
 #include "pn_transfer_view.h"
 #include "read_pico.h"
 #include "read_pico_pmu.h"
@@ -61,6 +62,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <stdio.h>
+#include <time.h>
 static const char *TAG="pico_nano";
 static read_pico_handle_t hardware;
 static pn_pool_t pool;
@@ -73,6 +75,10 @@ static pn_wallpaper_ui_t wallpaper_ui;
 static pn_wallpaper_mask_t lock_mask; ///< 锁屏时临时遮罩 / Temporary mask used only while locked
 static pn_font_manage_t font_manage;
 static pn_settings_ui_t settings_ui;
+static pn_device_time_t time_sync;
+static char time_notice[96];
+static bool time_lock_pending;
+static uint64_t time_poll_at;
 static uint8_t input_flags; ///< 已保存翻页标志 / Saved page-turn flags
 static bool input_flags_loaded;
 static pn_shelf_prefs_t shelf_prefs={3,PN_SHELF_DEFAULT}; ///< 已保存书架外观 / Saved shelf appearance
@@ -410,8 +416,8 @@ static bool stop_reader(void){
     reader_suspended=false;pn_toc_ui_close(&toc);
     pn_bookmark_ui_cancel(&bookmarks);pn_style_ui_close(&styles);pn_jump_ui_close(&jump_ui);pn_font_ui_close(&fonts);return true;
 }
-/* 状态带时间：开机时从PMU读一次RTC（仅当PMU报告已对时），之后按开机计时推算；锁屏不显示时间。时区固定为UTC+8。
- * Status-band clock: read the PMU RTC once at boot (only when the PMU reports it as synced), then advance by uptime; the lock screen shows no time. The time zone is fixed at UTC+8. */
+/* 状态带时间：开机或手动联网对时后读取已确认的PMU UTC，之后按开机计时推算；锁屏不显示时间。时区固定为UTC+8。
+ * Status-band clock: read confirmed PMU UTC at boot or after explicit network synchronization, then advance by uptime; the lock screen shows no time. The time zone is fixed at UTC+8. */
 #define CLOCK_UTC_OFFSET (8*3600)
 static bool clock_known;static uint32_t clock_base_sec;static uint64_t clock_base_ms;
 static void clock_read_boot(uint64_t now){
@@ -426,6 +432,14 @@ static void clock_tick(uint64_t now){
     char text[8];unsigned hh=(unsigned)((t/3600u)%24u),mm=(unsigned)((t/60u)%60u);
     text[0]=(char)('0'+hh/10);text[1]=(char)('0'+hh%10);text[2]=':';text[3]=(char)('0'+mm/10);text[4]=(char)('0'+mm%10);text[5]=0;
     pn_w_set_clock(text);
+}
+/// 日期时间显示只用已确认UTC与单调计时，不拿编译时间猜日期。 / Display dates only from confirmed UTC and monotonic elapsed time, never compilation time.
+static void update_time_ui(bool redraw){
+    if(!settings_ui.impl)return;
+    pn_settings_time_t value={.running=time_sync.impl!=NULL,.available=*saved_network!=0};
+    if(clock_known){uint64_t ms=now_ms(),utc=(uint64_t)clock_base_sec+(ms>=clock_base_ms?(ms-clock_base_ms)/1000u:0);if(utc<=4102444799u)(void)pn_settings_time_format(&value,(uint32_t)utc);}
+    snprintf(value.message,sizeof value.message,"%s",time_notice);pn_settings_ui_set_time(&settings_ui,&value);
+    if(redraw && pn_settings_ui_screen(&settings_ui)==5)(void)pn_settings_ui_present(&settings_ui,present,NULL);
 }
 /// 从PMU快照读电量百分比；PMU未就绪、读失败或SOC无效时返回-1（书架不显示电量，不猜）。
 /// Battery percentage from the PMU quick snapshot; -1 when the PMU is not ready, the read fails or the SOC is invalid (the shelf then shows no battery rather than a guess).
@@ -610,6 +624,16 @@ static pn_status_t load_network(pn_network_credentials_t *out){
     if(status==PN_OK)status=pn_network_load(&io,out);
     (void)pn_media_release(&data_media,&lease);return status;
 }
+/// 对时只借用无线；打开时复制凭据，所有长网络等待由poll推进。 / Time sync borrows only radio; opening copies credentials and polls advance all long network waits.
+static void begin_time_sync(void){
+    if(time_sync.impl || transfer.impl)return;
+    pn_network_credentials_t credentials={0};pn_status_t status=load_network(&credentials);
+    if(status==PN_OK && !credentials.ssid[0])status=PN_EMPTY;
+    pn_device_wifi_config_t config={.mode=PN_WIFI_STA};
+    if(status==PN_OK){memcpy(config.ssid,credentials.ssid,sizeof config.ssid);memcpy(config.password,credentials.password,sizeof config.password);status=pn_device_time_open(&time_sync,&config);}
+    pn_network_wipe(&credentials);volatile unsigned char *bytes=(volatile unsigned char *)&config;for(size_t i=0;i<sizeof config;i++)bytes[i]=0;
+    snprintf(time_notice,sizeof time_notice,"%s",status==PN_OK?"正在连接家庭WiFi…":status==PN_EMPTY?"请先保存家庭WiFi":"对时未开始，稍后重试");time_poll_at=0;update_time_ui(true);
+}
 static void refresh_network_name(void){pn_network_credentials_t c={0};pn_status_t status=load_network(&c);if(status==PN_OK)strcpy(saved_network,c.ssid);else if(status==PN_EMPTY)saved_network[0]=0;pn_network_wipe(&c);}
 /// 主任务保存网页提交的网络，再回报给网页。/ The main task saves the network submitted by the web page, then reports back.
 static void handle_network_request(void){
@@ -668,13 +692,14 @@ static void begin_settings(void){
     {pn_settings_about_t about={0};const esp_app_desc_t *app=esp_app_get_description();if(app){char version[24];memcpy(version,app->version,sizeof version-1);version[sizeof version-1]=0;snprintf(about.version,sizeof about.version,"版本 %.20s",version);}
      storage_note(about.storage,sizeof about.storage);snprintf(about.internal,sizeof about.internal,"%s",data_ready?"可用（阅读记录、书签与设置）":"不可用");
      snprintf(about.screen,sizeof about.screen,"4.7 英寸 · 684×1216 · 16 级灰阶");pn_settings_ui_set_about(&settings_ui,&about);}
-    refresh_network_name();if(*saved_network)(void)pn_settings_ui_set_lan(&settings_ui,saved_network,present,NULL);
+    refresh_network_name();update_time_ui(false);if(*saved_network)(void)pn_settings_ui_set_lan(&settings_ui,saved_network,present,NULL);
     status_page=true;shelf_mode=false;index_mode=false;search_mode=false;hub_mode=false;actions_mode=false;
 }
 static void end_settings(void){input_flags=settings_ui.flags;shelf_prefs=settings_ui.shelf;pn_settings_ui_close(&settings_ui);if(*selected_path)start_reader();else show_shelf("",false);}
 static void end_fonts(void){pn_font_manage_close(&font_manage);if(back_to_settings){back_to_settings=false;begin_settings();return;}if(*selected_path)start_reader();else show_shelf("",false);}
 static void end_wallpaper(void){pn_wallpaper_ui_close(&wallpaper_ui);if(back_to_settings){back_to_settings=false;begin_settings();return;}if(*selected_path)start_reader();else show_shelf("",false);}
 static void begin_transfer(bool station){
+    if(time_sync.impl){message("正在对时","请结束对时后再传书");return;}
     if(transfer.impl)return;
     if(reader_active()){
         pn_status_t status=epub.impl?pn_epub_app_identity(&epub,&selected_expected):pn_reader_app_identity(&reader,&selected_expected);
@@ -762,6 +787,20 @@ static void storage_note(char *out,size_t cap){
     out[0]=0;uint64_t total=0,free_bytes=0;
     if(sd_media.available && esp_vfs_fat_info(PN_SD_MOUNT,&total,&free_bytes)==ESP_OK && total)
         snprintf(out,cap,"共 %llu.%llu GB · 可用 %llu.%llu GB",(unsigned long long)(total>>30),(unsigned long long)((total%(1ull<<30))*10>>30),(unsigned long long)(free_bytes>>30),(unsigned long long)((free_bytes%(1ull<<30))*10>>30));
+}
+/// 无等待状态推进；PMU提交在本控制owner且无线已释放后进行。 / Advance without waiting; this controller commits PMU only after radio release.
+static void tick_time_sync(uint64_t now){
+    if(!time_sync.impl || (time_poll_at && now<time_poll_at))return;
+    time_poll_at=now+100;pn_device_time_state_t before={0},state={0};(void)pn_device_time_state(&time_sync,&before);(void)pn_device_time_poll(&time_sync,now);(void)pn_device_time_state(&time_sync,&state);
+    if(!state.released){if(state.phase!=before.phase){snprintf(time_notice,sizeof time_notice,"%s",state.phase==PN_TIME_WAITING?"正在获取网络时间…":state.phase==PN_TIME_STOPPING?"正在结束网络服务…":"正在连接家庭WiFi…");update_time_ui(true);}return;}
+    if(state.phase==PN_TIME_SUCCEEDED){uint32_t confirmed=0;pn_status_t status=PN_IO;uint64_t observed=now_ms();
+        // 清理重试的耗时计入UTC，单调倒退或超出日期范围时不提交。 / Advance UTC across cleanup retries; never commit on monotonic rollback or date overflow.
+        if(observed>=state.acquired_ms){uint64_t utc=(uint64_t)state.utc+(observed-state.acquired_ms)/1000u;if(utc<=4102444799u){state.utc=(uint32_t)utc;status=pn_device_time_commit(&state,&confirmed);}}
+        if(status==PN_OK){clock_base_sec=confirmed;clock_base_ms=now_ms();clock_known=true;clock_tick(clock_base_ms);snprintf(time_notice,sizeof time_notice,"已校准，设备时钟继续走时");}
+        else snprintf(time_notice,sizeof time_notice,"网络时间已获取，设备时钟未确认");}
+    else snprintf(time_notice,sizeof time_notice,"%s",state.phase==PN_TIME_CANCELLED?"已结束对时":state.sdk_error==ESP_ERR_TIMEOUT?"网络对时超时，原显示时间保留":"对时失败，原显示时间保留");
+    ESP_LOGI(TAG,"Time sync phase=%d error=%d sdk=%d",(int)state.phase,(int)state.error,state.sdk_error);(void)pn_device_time_close(&time_sync);update_time_ui(true);
+    if(time_lock_pending){time_lock_pending=false;if(prepare_lock())lock_and_sleep("再按电源键继续阅读");}
 }
 /// 传书一级页：按实际能力列出通道。/ Transfer root tab listing channels by real capability.
 static void show_hub(void){
@@ -1003,8 +1042,9 @@ static void apply_selection(int selection){
         }
     }
     else if(index_mode){index_mode=false;if(selection!='<'){jump_letter=(char)selection;recent_mode=false;}show_shelf("",false);}
-    else if(settings_ui.impl){if(selection==PN_SETUI_FULL_REFRESH)atomic_store(&deep_clean_pending,true);pn_status_t status=pn_settings_ui_event(&settings_ui,selection,present,NULL);if(status!=PN_OK && status!=PN_EMPTY && status!=PN_LIMIT)ESP_LOGW(TAG,"Settings: %d",(int)status);
-        if(settings_ui.request){int request=settings_ui.request;input_flags=settings_ui.flags;shelf_prefs=settings_ui.shelf;pn_settings_ui_close(&settings_ui);back_to_settings=request==PN_SETUI_WALLPAPER || request==PN_SETUI_FONTS;if(request==PN_SETUI_WALLPAPER)begin_wallpaper();else if(request==PN_SETUI_LAN)begin_transfer(true);else if(request==PN_SETUI_SHELF || request==PN_SETUI_HOME){home_mode=request==PN_SETUI_HOME;selected_path[0]=0;show_shelf("",false);}else if(request==PN_SETUI_TRANSFER)show_hub();else begin_fonts();}
+    else if(settings_ui.impl){update_time_ui(false);if(selection==PN_SETUI_FULL_REFRESH)atomic_store(&deep_clean_pending,true);pn_status_t status=pn_settings_ui_event(&settings_ui,selection,present,NULL);if(status!=PN_OK && status!=PN_EMPTY && status!=PN_LIMIT)ESP_LOGW(TAG,"Settings: %d",(int)status);
+        if(settings_ui.request==PN_SETUI_TIME_SYNC || settings_ui.request==PN_SETUI_TIME_CANCEL){int request=settings_ui.request;settings_ui.request=0;if(request==PN_SETUI_TIME_SYNC)begin_time_sync();else{(void)pn_device_time_request_stop(&time_sync);snprintf(time_notice,sizeof time_notice,"正在结束对时…");update_time_ui(true);}}
+        else if(settings_ui.request){int request=settings_ui.request;input_flags=settings_ui.flags;shelf_prefs=settings_ui.shelf;pn_settings_ui_close(&settings_ui);back_to_settings=request==PN_SETUI_WALLPAPER || request==PN_SETUI_FONTS;if(request==PN_SETUI_WALLPAPER)begin_wallpaper();else if(request==PN_SETUI_LAN)begin_transfer(true);else if(request==PN_SETUI_SHELF || request==PN_SETUI_HOME){home_mode=request==PN_SETUI_HOME;selected_path[0]=0;show_shelf("",false);}else if(request==PN_SETUI_TRANSFER)show_hub();else begin_fonts();}
         else if(!settings_ui.active)end_settings();}
     else if(toolbar_open){
         if(selection==PN_TOOL_CLOSE)toolbar_close(PN_REFRESH_GL16);
@@ -1094,8 +1134,9 @@ static void device_task(void *arg){
             if(queued.kind==PN_DASYNC_ACTION && body && !locked){if(queued.action==PN_APP_TOOLS)toolbar_show();else{pn_status_t status=active_step(queued.action,now);report_reader_result(status);}}}
         if(!async_port.display_active)rails_idle_check(now);
         if(transfer.impl)tick_transfer(now);
+        if(time_sync.impl)tick_time_sync(now);
         if(!transfer.impl && !locked && sd_recovery.pending)tick_sd_recovery(now);
-        {static uint64_t last_battery,last_clock;if(now-last_battery>=60000 || !last_battery){last_battery=now;pn_w_set_battery(battery_percent());}if(now-last_clock>=10000 || !last_clock){last_clock=now;clock_tick(now);}} // 状态带电量每分钟刷新一次 / Refresh the status-band battery once a minute
+        {static uint64_t last_battery,last_clock,date_minute;if(now-last_battery>=60000 || !last_battery){last_battery=now;pn_w_set_battery(battery_percent());}if(now-last_clock>=10000 || !last_clock){last_clock=now;clock_tick(now);if(settings_ui.impl && pn_settings_ui_screen(&settings_ui)==5 && now/60000u!=date_minute){date_minute=now/60000u;update_time_ui(true);}}} // 电量与日期页每分钟推进，正文不因对时刷新。 / Advance battery and the date page once a minute; time sync never redraws reading content.
         {static uint64_t prefs_retry;
          if(data_ready && (!shelf_prefs_loaded || !input_flags_loaded) && now>=prefs_retry){
             prefs_retry=now+3000;
@@ -1107,12 +1148,13 @@ static void device_task(void *arg){
             if(sd_media.available && pn_device_card_presence()==PN_STALE_MEDIA){if(reader_active()){if(epub.impl)(void)pn_epub_app_media_lost(&epub);else (void)pn_reader_app_media_lost(&reader);(void)stop_reader();}else (void)pn_media_detach(&sd_media);selected_path[0]=0;pn_reader_input_cancel(&input);message("卡已移除","保留上次阅读位置\n插卡后点下方重试");}}
         if((async_port.input_active && available==PN_OK && queued.kind==PN_DASYNC_POWER) || (!async_port.input_active && now-last_key>=100)){last_key=now;if((async_port.input_active || read_pico_pmu_take_key_short()) && now-boot>=1000){pn_reader_input_cancel(&input);
                 if(transfer.impl){transfer_return=true;transfer_lock=true;(void)pn_device_transfer_request_stop(&transfer);}
+                else if(time_sync.impl){time_lock_pending=true;(void)pn_device_time_request_stop(&time_sync);}
                 else if(locked){locked=false;last_input=now;resume_reader();}else if(prepare_lock())lock_and_sleep("再按电源键继续阅读");}}
         // 按键路径可能睡眠后更新last_input；重取当前时间，避免睡前时间减去唤醒时间下溢后立即锁屏。
         // The key path can sleep and update last_input; refresh time to avoid subtracting wake time from pre-sleep time.
         now=now_ms();
         // 无操作满5分钟自动锁屏；传输中由其停止流程负责。/ Auto-lock after five idle minutes; transfers handle their own stop flow.
-        if(!locked && !transfer.impl && now>=last_input && now-last_input>=AUTO_LOCK_MS && now-boot>=AUTO_LOCK_MS){pn_reader_input_cancel(&input);if(prepare_lock())lock_and_sleep("再按电源键继续阅读");else last_input=now;}
+        if(!locked && !transfer.impl && !time_sync.impl && now>=last_input && now-last_input>=AUTO_LOCK_MS && now-boot>=AUTO_LOCK_MS){pn_reader_input_cancel(&input);if(prepare_lock())lock_and_sleep("再按电源键继续阅读");else last_input=now;}
         if(reader_active() && !locked){pn_status_t saved=epub.impl?pn_epub_app_tick(&epub,now_ms()):pn_reader_app_tick(&reader,now_ms());if(saved==PN_OK)progress_save_failed=false;else if(saved!=PN_BUSY){progress_save_failed=true;ESP_LOGW(TAG,"Pending progress save: %d",(int)saved);}}
         if(bookmarks.mode!=PN_BUI_CLOSED && !bookmarks.presented && !locked && now-last_ui_retry>=1000){last_ui_retry=now;(void)pn_bookmark_ui_present(&bookmarks,present,NULL);}
         if(toc.active && !toc.presented && !locked && now-last_ui_retry>=1000){last_ui_retry=now;(void)pn_toc_ui_present(&toc,present,NULL);}

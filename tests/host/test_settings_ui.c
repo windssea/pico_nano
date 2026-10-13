@@ -66,6 +66,20 @@ int main(int argc,char **argv){
     /* 存储与关于：只显示调用方填写的实际信息。/ Storage and about shows only what the caller actually read. */
     {pn_settings_about_t about={0};strcpy(about.version,"0.0.57");strcpy(about.storage,"共 29.7 GB · 可用 12.1 GB");pn_settings_ui_set_about(&ui,&about);
      assert(pn_settings_ui_event(&ui,PN_SETUI_ABOUT,present,NULL)==PN_OK && pn_settings_ui_screen(&ui)==3 && pn_settings_ui_event(&ui,PN_SETUI_BACK,present,NULL)==PN_OK);}
+    /* 日期显示和联网请求由控制层推进，UI不等待网络。 / Date display and network requests are advanced by the controller without UI network waits. */
+    {pn_settings_time_t clock={0};strcpy(clock.datetime,"unchanged");assert(pn_settings_time_format(&clock,123)==PN_INVALID && !strcmp(clock.datetime,"unchanged"));
+     assert(pn_settings_time_format(&clock,1709222400u)==PN_OK && !strcmp(clock.datetime,"2024-03-01 00:00"));
+     assert(pn_settings_time_format(&clock,4102444799u)==PN_OK && !strcmp(clock.datetime,"2100-01-01 07:59"));
+     assert(pn_settings_ui_event(&ui,PN_SETUI_ABOUT,present,NULL)==PN_OK && pn_settings_ui_hit(&ui,100,870)==PN_SETUI_TIME);
+     pn_settings_ui_set_time(&ui,&clock);assert(pn_settings_ui_event(&ui,PN_SETUI_TIME,present,NULL)==PN_OK && pn_settings_ui_screen(&ui)==5);
+     assert(pn_settings_ui_hit(&ui,100,740)==-1 && pn_settings_ui_event(&ui,PN_SETUI_TIME_SYNC,present,NULL)==PN_EMPTY);
+     clock.available=true;pn_settings_ui_set_time(&ui,&clock);assert(pn_settings_ui_hit(&ui,100,740)==PN_SETUI_TIME_SYNC);
+     ui.presented=false;assert(pn_settings_ui_event(&ui,PN_SETUI_TIME_SYNC,present,NULL)==PN_BUSY);ui.presented=true;
+     assert(pn_settings_ui_event(&ui,PN_SETUI_TIME_SYNC,present,NULL)==PN_OK && ui.request==PN_SETUI_TIME_SYNC);ui.request=0;
+     clock.running=true;pn_settings_ui_set_time(&ui,&clock);assert(pn_settings_ui_hit(&ui,100,740)==PN_SETUI_TIME_CANCEL && pn_settings_ui_event(&ui,PN_SETUI_TIME_SYNC,present,NULL)==PN_EMPTY);
+     assert(pn_settings_ui_event(&ui,PN_SETUI_TIME_CANCEL,present,NULL)==PN_OK && ui.request==PN_SETUI_TIME_CANCEL);ui.request=0;
+     assert(pn_settings_ui_event(&ui,PN_SETUI_BACK,present,NULL)==PN_OK && pn_settings_ui_screen(&ui)==3);
+     assert(pn_settings_ui_event(&ui,PN_SETUI_BACK,present,NULL)==PN_OK && pn_settings_ui_screen(&ui)==0);}
     /* 按键与手势：四个翻页开关。/ Keys and gestures: the four page-turn switches. */
     assert(pn_settings_ui_event(&ui,PN_SETUI_KEYS,present,NULL)==PN_OK && pn_settings_ui_screen(&ui)==1 && pn_settings_ui_hit(&ui,100,680)==PN_SETUI_TOGGLE && pn_settings_ui_hit(&ui,100,1000)==PN_SETUI_TOGGLE+3 && pn_settings_ui_hit(&ui,100,1100)==-1);
     assert(pn_settings_ui_event(&ui,PN_SETUI_TOGGLE,present,NULL)==PN_OK && ui.flags==PN_INPUT_LEFT_HAND && pn_settings_load_flags(&media,root,&flags)==PN_OK && flags==PN_INPUT_LEFT_HAND);

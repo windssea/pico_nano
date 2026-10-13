@@ -9,3 +9,5 @@ typedef struct {uint16_t qb_soc;uint8_t qb_flags;uint32_t unix_sec;uint8_t time_
 esp_err_t read_pico_pmu_cmd(uint16_t code,const uint8_t *payload,uint8_t plen);
 bool read_pico_pmu_ready(void);esp_err_t read_pico_pmu_poll(void);const pmu_snapshot_t *read_pico_pmu_get(void);
 bool read_pico_pmu_take_key_wakeup(void);
+
+#define PMU_CMD_TIME_SYNC 0x0005

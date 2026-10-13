@@ -8,6 +8,7 @@
 #pragma once
 #include "pn_transfer_worker.h"
 #include "pn_network_store.h"
+#include "device_wifi.h"
 /// 配网请求出口：HTTP任务只复制请求，由主任务写内部存储。/ Network-provisioning outlet: the HTTP task only copies requests; the main task writes internal storage.
 typedef struct {
  void *ctx; ///< 控制层上下文 / Controller context
@@ -20,6 +21,8 @@ typedef struct {void *impl;} pn_device_transfer_http_t; ///< 活动对象不可�
 pn_status_t pn_device_transfer_http_open(pn_device_transfer_http_t *,pn_transfer_worker_t *,const char *,uint16_t);
 /// 启用/network接口；sink须活到close之后，NULL关闭接口。/ Enable the /network endpoints; sink must outlive close, NULL disables them.
 pn_status_t pn_device_transfer_http_network(pn_device_transfer_http_t *,const pn_device_network_sink_t *);
+/// 复制无凭据无线诊断供/status查询，不增加网页轮询。 / Copy credential-free radio diagnostics for /status without adding browser polling.
+pn_status_t pn_device_transfer_http_diagnostics(pn_device_transfer_http_t *,const pn_device_wifi_state_t *);
 /// 关闭认证与worker接收入口；不等待已接收请求。/ Close authentication and worker admission without waiting for accepted requests.
 pn_status_t pn_device_transfer_http_request_stop(pn_device_transfer_http_t *);
 /// 等待HTTP处理完再释放上下文；随后调用方关闭worker并归还media。

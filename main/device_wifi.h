@@ -24,6 +24,9 @@ typedef struct {
  uint64_t generation; ///< 网络身份变化代次 / Network identity change generation
  unsigned attempts,clients; ///< STA连接次数/AP客户端数 / STA connection attempts or AP client count
  int error; ///< SDK错误供控制层翻译 / SDK error for controller translation
+ unsigned disconnects,reconnects,last_disconnect_reason; ///< 本会话断连/恢复次数与SDK原因，不含凭据 / Session disconnect/recovery counts and SDK reason, without credentials
+ int rssi; ///< 最近STA信号dBm，须结合rssi_known / Latest STA signal in dBm, valid only with rssi_known
+ bool rssi_known; ///< 已取得当前连接信号 / Current connection signal is available
 } pn_device_wifi_state_t;
 typedef struct {void *impl;} pn_device_wifi_t; ///< 活动会话不复制 / Never copy a live session
 /// 单owner打开，不取得TF租约；短暂SAR熵窗口必须在RF/ADC未使用时完成。

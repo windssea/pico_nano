@@ -75,6 +75,10 @@ int main(void){
  pn_device_transfer_http_t server={0};assert(pn_device_transfer_http_open(&server,&worker,"192.168.4.1",80)==PN_OK);
  int sockets[2];assert(socketpair(AF_UNIX,SOCK_STREAM,0,sockets)==0);assert(open_socket(&route,sockets[0])==ESP_OK);assert(write(sockets[1],"a",1)==1);char received;assert(receive(&route,sockets[0],&received,1,0)==1 && received=='a');
  cJSON *json=request(HTTP_GET,"/api/v1/status",NULL,0,NULL,NULL);assert(code==200 && json && !strcmp(cJSON_GetObjectItemCaseSensitive(json,"name")->valuestring,"PicoNano"));cJSON_Delete(json);
+ pn_device_wifi_state_t radio={.phase=PN_WIFI_READY,.rssi_known=true,.rssi=-61,.disconnects=2,.reconnects=1,.last_disconnect_reason=201};strcpy(radio.ap_password,"private");
+ assert(pn_device_transfer_http_diagnostics(&server,&radio)==PN_OK);json=request(HTTP_GET,"/api/v1/status",NULL,0,NULL,NULL);
+ assert(code==200 && cJSON_GetObjectItemCaseSensitive(json,"rssi_dbm")->valueint==-61 && cJSON_GetObjectItemCaseSensitive(json,"disconnects")->valueint==2 && cJSON_GetObjectItemCaseSensitive(json,"last_disconnect_reason")->valueint==201 && !strstr(response,"private"));cJSON_Delete(json);
+ radio.rssi_known=false;assert(pn_device_transfer_http_diagnostics(&server,&radio)==PN_OK);json=request(HTTP_GET,"/api/v1/status",NULL,0,NULL,NULL);assert(!cJSON_GetObjectItemCaseSensitive(json,"rssi_dbm"));cJSON_Delete(json);
  json=request(HTTP_POST,"/api/v1/uploads","{}",2,NULL,NULL);assert(code==401);cJSON_Delete(json);
  json=request(HTTP_GET,"/api/v1/session",NULL,0,NULL,"Host: evil.test");assert(code==400);cJSON_Delete(json);
  json=request(HTTP_GET,"/api/v1/session",NULL,0,NULL,NULL);assert(code==200 && cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(json,"ready")));char token[33];strcpy(token,cJSON_GetObjectItemCaseSensitive(json,"token")->valuestring);cJSON_Delete(json);

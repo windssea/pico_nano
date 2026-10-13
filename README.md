@@ -10,6 +10,7 @@
 | [1.0产品与验收计划](docs/V1_PRODUCT_PLAN.md) | 1.0范围、传书/字体/PNG与书封锁屏、约300ppi清晰度、沉浸阅读、书架方案与性能门；微信读书留后续 |
 | [1.0开发执行计划](docs/V1_DEVELOPMENT_PLAN.md) | 从当前代码推进的W00–W12工作包、依赖、阶段出口、测试与发布要求 |
 | [阅读响应与清残影计划](docs/READING_RESPONSE_PLAN.md) | 六个参考项目的源码证据、统一刷新与性能阶段结果 |
+| [日期与网络对时](docs/DATE_TIME.md) | 手动非阻塞校时、PMU确认及未发布的验证边界 |
 | [构建与运行](docs/BUILDING.md) | 已存在的命令、产物、SDKCONFIG隔离 |
 | [网页安装器](docs/WEB_INSTALLER.md) | 浏览器安装/升级固件的写入规则与发布方式 |
 | [首次上板清单](docs/HARDWARE_BRINGUP.md) | 备份、启动、显示、存储、睡眠与无线验证顺序 |

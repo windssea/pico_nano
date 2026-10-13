@@ -48,6 +48,7 @@ esp_err_t esp_wifi_connect(void){
  connection_calls++;ip_event_got_ip_t got={0};uint8_t *ip=(uint8_t *)&got.ip_info.ip.addr;ip[0]=192;ip[1]=168;ip[2]=4;ip[3]=1;
  ip_callback(ip_ctx,IP_EVENT,IP_EVENT_STA_GOT_IP,&got);return ESP_OK;
 }
+esp_err_t esp_wifi_sta_get_ap_info(wifi_ap_record_t *out){out->rssi=-61;return ESP_OK;}
 esp_err_t esp_wifi_stop(void){return ESP_OK;}
 esp_err_t esp_wifi_deinit(void){radio=false;return ESP_OK;}
 static pn_status_t presented(void *ctx,const pn_frame_t *frame,pn_refresh_t mode){(void)ctx;(void)mode;return frame && frame->pixels?PN_OK:PN_INVALID;}
