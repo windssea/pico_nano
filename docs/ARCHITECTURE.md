@@ -69,7 +69,7 @@ PC版只替换port与硬件边界，字体/排版/UI使用同一源代码；即�
 | --- | --- | --- | --- |
 | input/router | 导航状态与用户意图 | 6 | core 0，短回调；5–10 ms 轮询/中断唤醒 |
 | display owner | epdiy、前后帧、波形与电源轨 | 5 | core 0 协调，保留底层已有扫描任务；不重绑其核 |
-| reader worker | 当前文档、layout、正文 font context、PDF context | 3 | core 1，16 KiB 栈起步，监控水位 |
+| reader worker | 当前文档、layout、正文 font context、PDF context | 3 | core 1，当前32 KiB产品栈，监控累计水位 |
 | import worker | 哈希、元数据、缩略图 | 2 | 仅空闲运行；PDF 渲染/阅读翻页时让出 |
 | transfer HTTP | 请求读取与上传流 | 3 | IDF httpd，缓冲有界；不绘制屏幕 |
 | storage control | 租约状态、事务提交、介质切换 | 4 | 小消息任务；文件 I/O 由获得租约的 worker 执行 |
@@ -174,3 +174,8 @@ wallpaper独立1MiB，不挤占内部小书库/位置日志；存两张415872-by
 ### 缓存压力入口
 
 同源`pn_pool`统一准入和同步回收TXT/EPUB邻页、字形与非活动封面；无堆分配owner注册、短期借用pin和预排scope保证释放不触碰当前节点、已显示帧或保存屏障。共享1MiB上限、分项额度与前台余量以[内存与响应](MEMORY_AND_RESPONSE.md)为准，不叠加到既有池预算。前台底层分配失败最多重试一次，可选缓存/预排不抢占；设备真实堆与最大块仍由port诊断校准。
+
+
+### 阅读刷新用途与回执
+
+同源pn_refresh_policy仅按成功逻辑翻页判断系统6/14/24周期；历史逐书字段不控制硬件。应用请求GL16/GC16，显示owner独立管理24次成功管理更新、未知参考/手动/欠载深清，成功GC通过原子回执由产品owner重置阅读计数。显示用途是本次操作明确传入的状态，不能取异步输入尚未更新的view猜用途。普通正文全像素GL16，管理小区域仍局部；render只绘制，清屏/电源由port执行。翻页控制器仅呈现一次，工具栏控制器区域快照在显示回执后恢复原像素。详见[阅读响应计划](READING_RESPONSE_PLAN.md)。

@@ -107,12 +107,27 @@ int main(void){
     assert(pn_reader_app_open_on_media(&app,&pool,&shared,book,NULL,state,44,18)==PN_OK);
     pn_media_lease_t exclusive;assert(pn_media_acquire(&shared,PN_MEDIA_WRITE,&exclusive)==PN_BUSY);
     assert(pn_reader_app_step(&app,PN_APP_OPEN,19,present,&screen)==PN_OK);
-    unsigned regular=0,clears=1;
-    for(unsigned i=0;i<100;i++){pn_status_t s=pn_reader_app_step(&app,PN_APP_NEXT,20+i,present,&screen);if(s==PN_EMPTY)break;assert(s==PN_OK);if(screen.profile==PN_REFRESH_GC16){assert(regular<=12);regular=0;clears++;}else {regular++;assert(regular<=12);}}
-    assert(clears>=2);
+    uint64_t refresh_now=20;
+    pn_style_t legacy;assert(pn_reader_app_style_get(&app,&legacy)==PN_OK);legacy.gl_before_clear=0;
+    assert(pn_reader_app_style_apply(&app,&legacy,refresh_now++,present,&screen)==PN_OK);
+    for(unsigned p=0;p<3;p++){
+        const unsigned periods[]={6,14,24};unsigned period=periods[p];pn_reader_app_refresh_period(&app,period);pn_reader_app_refresh_reset(&app);
+        for(unsigned i=1;i<=period;i++){
+            assert(pn_reader_app_step(&app,PN_APP_OPEN,refresh_now++,present,&screen)==PN_OK && screen.profile==PN_REFRESH_GL16);
+            assert(pn_reader_app_step(&app,i%2?PN_APP_NEXT:PN_APP_PREVIOUS,refresh_now++,present,&screen)==PN_OK);
+            assert(screen.profile==(i==period?PN_REFRESH_GC16:PN_REFRESH_GL16));
+        }
+    }
+    // 下调周期保留已计页数；显示owner深清回执可重置，旧排版字段仍无效。/ Lowering the period preserves counted turns; a confirmed physical clean can reset it, with the legacy style field ignored.
+    pn_reader_app_refresh_period(&app,14);
+    for(unsigned i=1;i<=5;i++)assert(pn_reader_app_step(&app,i%2?PN_APP_NEXT:PN_APP_PREVIOUS,refresh_now++,present,&screen)==PN_OK && screen.profile==PN_REFRESH_GL16);
+    pn_reader_app_refresh_period(&app,6);
+    assert(pn_reader_app_step(&app,PN_APP_PREVIOUS,refresh_now++,present,&screen)==PN_OK && screen.profile==PN_REFRESH_GC16);
+    pn_reader_app_refresh_reset(&app);
+    assert(pn_reader_app_step(&app,PN_APP_NEXT,refresh_now++,present,&screen)==PN_OK && screen.profile==PN_REFRESH_GL16);
     assert(pn_reader_app_media_lost(&app)==PN_OK);
-    assert(pn_reader_app_step(&app,PN_APP_NEXT,130,present,&screen)==PN_STALE_MEDIA);
-    assert(pn_reader_app_close(&app,131)==PN_OK && !pool.live && pn_media_active(&shared)==0);
+    assert(pn_reader_app_step(&app,PN_APP_NEXT,refresh_now++,present,&screen)==PN_STALE_MEDIA);
+    assert(pn_reader_app_close(&app,refresh_now++)==PN_OK && !pool.live && pn_media_active(&shared)==0);
     pn_test_remove_indexes(state);DIR *d=opendir(state);assert(d);struct dirent *entry;while((entry=readdir(d))){if(entry->d_name[0]=='.')continue;char path[768];snprintf(path,sizeof path,"%s/%s",state,entry->d_name);assert(unlink(path)==0);}assert(closedir(d)==0);assert(rmdir(state)==0 && unlink(book)==0 && unlink(fallback_path)==0 && rmdir(dir)==0);
     puts("reader app: native page, failed presentation, reflow anchor, durable reopen and cleanup passed");return 0;
 }

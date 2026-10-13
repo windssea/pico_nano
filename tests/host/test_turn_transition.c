@@ -3,9 +3,9 @@
 #include "pn_turn_transition.h"
 #include <assert.h>
 #include <string.h>
-static unsigned calls,fail_at;
+static unsigned calls,fail_at;static pn_status_t fault=PN_IO;
 static uint8_t last[24];
-static pn_status_t show(void *ctx,const pn_frame_t *f,pn_refresh_t p){(void)ctx;(void)p;calls++;memcpy(last,f->pixels,24);return calls==fail_at?PN_IO:PN_OK;}
+static pn_status_t show(void *ctx,const pn_frame_t *f,pn_refresh_t p){(void)ctx;(void)p;calls++;memcpy(last,f->pixels,24);return calls==fail_at?fault:PN_OK;}
 int main(void){
     uint8_t a[24],b[24],c[24];memset(a,255,24);memset(b,0,24);pn_frame_t old,next,out;
     assert(pn_frame_bind(&old,a,24,12,4) && pn_frame_bind(&next,b,24,12,4) && pn_frame_bind(&out,c,24,12,4));
@@ -19,9 +19,15 @@ int main(void){
     pn_frame_t bad=old;bad.pixels=NULL;turn.before=&bad;turn.style=PN_TURN_CURL;
     assert(pn_turn_present(&turn,&next,PN_REFRESH_GL16)==PN_INVALID && !calls);turn.before=&old;turn.style=PN_TURN_NONE;
     assert(pn_turn_present(&turn,&next,PN_REFRESH_GL16)==PN_OK && calls==1 && !memcmp(last,b,24));
-    calls=0;turn.style=PN_TURN_CURL;assert(pn_turn_present(&turn,&next,PN_REFRESH_GL16)==PN_OK && calls==3 && !memcmp(last,b,24));
-    calls=0;fail_at=2;assert(pn_turn_present(&turn,&next,PN_REFRESH_GL16)==PN_IO && calls==3 && !memcmp(last,a,24));
-    calls=0;fail_at=3;assert(pn_turn_present(&turn,&next,PN_REFRESH_GL16)==PN_IO && calls==4 && !memcmp(last,a,24));
+    for(unsigned style=0;style<=2;style++){
+        calls=fail_at=0;turn.style=(pn_turn_style_t)style;size_t attempts=pool.attempts;
+        assert(pn_turn_present(&turn,&next,PN_REFRESH_GL16)==PN_OK && calls==1 && !memcmp(last,b,24) && pool.attempts==attempts);
+        calls=0;fail_at=1;assert(pn_turn_present(&turn,&next,PN_REFRESH_GL16)==PN_IO && calls==2 && !memcmp(last,a,24));
+    }
+    for(unsigned i=0;i<2;i++){
+        calls=0;fail_at=1;fault=i?PN_BUSY:PN_CANCELLED;
+        assert(pn_turn_present(&turn,&next,PN_REFRESH_GL16)==fault && calls==1);
+    }
     assert(!pool.used && !pool.live && a[0]==255 && b[0]==0);
     calls=fail_at=0;pool.fail_at=pool.attempts+1;assert(pn_turn_present(&turn,&next,PN_REFRESH_GL16)==PN_OK && calls==1);
     return 0;

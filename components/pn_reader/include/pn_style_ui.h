@@ -1,8 +1,8 @@
 /*
  * SPDX-FileCopyrightText: 2026 pico_nano contributors
  * SPDX-License-Identifier: Apache-2.0
- * 中文：七项排版草稿，应用/取消/正文预览共用控制器。
- * English: seven-field typesetting drafts with shared apply/cancel/body-preview control.
+ * 中文：六项排版草稿，应用/取消/正文预览共用控制器。
+ * English: six-field typesetting drafts with shared apply/cancel/body-preview control.
  * 冻结：调整值不直接写存储；未呈现确认的界面禁止应用。
  * Frozen: field changes never write storage directly; unpresented UI cannot apply.
  */
@@ -21,7 +21,7 @@
 #define PN_SUI_PRESET 10 ///< 10..12为舒适/紧凑/大字 / 10..12 are comfortable/compact/large
 #define PN_SUI_INDENT 14 ///< 切换首行缩进（0或2字）/ Toggle the first-line indent (0 or 2 characters)
 #define PN_SUI_FIELD 16
-#define PN_SUI_FIELDS 7
+#define PN_SUI_FIELDS 6
 typedef struct {
     pn_epub_app_t *epub; ///< 可选EPUB会话，与reader互斥 / Optional EPUB session, exclusive with reader
     pn_reader_app_t *reader; ///< 借用会话 / Borrowed session

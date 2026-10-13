@@ -14,11 +14,11 @@ typedef struct {
     uint16_t gap_percent; ///< 段距0..100字号百分比 / Paragraph gap 0..100 percent of size
     uint16_t indent_em; ///< 首行0..2个em / First-line zero through two em
     uint16_t margin; ///< 左右16..80偶数像素 / Even horizontal margins 16..80 px
-    uint16_t gl_before_clear; ///< 0..30次GL后GC / GC after zero through 30 GL presentations
+    uint16_t gl_before_clear; ///< 历史字段仅兼容读写，不控制刷新 / Legacy field retained for record compatibility, never controls refresh
     uint16_t tracking_percent; ///< 字间距0..50字号百分比 / Tracking zero through 50 percent of body size
 } pn_style_t;
-/// 默认145%行距、25%段距、无缩进、32px边距和12次GL。
-/// Default 145% line spacing, 25% gap, no indent, 32px margins and 12 GL presentations.
+/// 默认145%行距、25%段距、无缩进、32px边距；刷新使用系统设置。
+/// Default 145% line spacing, 25% gap, no indent, 32px margins refresh follows global settings.
 pn_style_t pn_style_default(int pixels);
 /// 校验所有范围。/ Validate every range.
 pn_status_t pn_style_validate(const pn_style_t *style);

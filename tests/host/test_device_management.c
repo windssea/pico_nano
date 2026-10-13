@@ -35,7 +35,27 @@ int main(void){
     unsigned clean_before=clear_calls;
     for(unsigned i=0;i<12;i++){pn_frame_rect(&probe_frame,20+(int)i*4,200,4,4,0);assert(present(NULL,&probe_frame,PN_REFRESH_GL16)==PN_OK);}
     assert(clear_calls==clean_before);
-    assert(present(NULL,&probe_frame,PN_REFRESH_GC16)==PN_OK && clear_calls==clean_before+1);
+    unsigned gc_before=gc_updates;
+    assert(present(NULL,&probe_frame,PN_REFRESH_GC16)==PN_OK && clear_calls==clean_before && gc_updates==gc_before+1);
+    // 逻辑周期由阅读控制器决定，显示帧不再次计页；显式刷新与未知参考保留深清。/ Logical periods belong to the reader; display frames never count again, with deep cleaning kept for explicit/unknown references.
+    atomic_store(&reading_presentation,true);gc_before=gc_updates;
+    for(unsigned i=0;i<6;i++){pn_frame_rect(&probe_frame,100+(int)i*4,300,4,4,0);assert(present(NULL,&probe_frame,PN_REFRESH_GL16)==PN_OK);}
+    assert(clear_calls==clean_before && gc_updates==gc_before);atomic_store(&reading_presentation,false);
+    // 管理第24次实际更新才GC；不变帧不占预算，周期不插入额外clear。/ GC on management update 24; unchanged frames spend no budget and periodic refresh adds no clear.
+    assert(present(NULL,&probe_frame,PN_REFRESH_GC16)==PN_OK);gc_before=gc_updates;
+    for(unsigned i=0;i<24;i++){
+        for(unsigned repeat=0;repeat<3;repeat++)assert(present(NULL,&probe_frame,PN_REFRESH_GL16)==PN_OK);
+        pn_frame_rect(&probe_frame,160+(int)i*4,400,4,4,0);assert(present(NULL,&probe_frame,PN_REFRESH_GL16)==PN_OK);
+        assert(gc_updates==gc_before+(i==23));
+    }
+    assert(clear_calls==clean_before);
+    atomic_store(&deep_clean_pending,true);assert(present(NULL,&probe_frame,PN_REFRESH_GL16)==PN_OK && clear_calls==clean_before+1);
+    clean_before++;
+    atomic_store(&deep_clean_pending,true);assert(present(NULL,&probe_frame,PN_REFRESH_GC16)==PN_OK && clear_calls==clean_before+1);
+    panel_known=false;assert(present(NULL,&probe_frame,PN_REFRESH_GL16)==PN_OK && clear_calls==clean_before+2);
+    atomic_store(&full_clean_completed,false);atomic_store(&deep_clean_pending,true);panel_fault=true;
+    assert(present(NULL,&probe_frame,PN_REFRESH_GL16)==PN_IO && !panel_known && atomic_load(&deep_clean_pending) && !atomic_load(&full_clean_completed));
+    panel_fault=false;assert(present(NULL,&probe_frame,PN_REFRESH_GL16)==PN_OK && panel_known && !atomic_load(&deep_clean_pending) && atomic_load(&full_clean_completed));
     pn_free(probe_pixels);
     pn_free(shown_px);pn_free(page_copy);pn_free(shelf_page);pn_free(shelf_covers);pn_free(recent_snapshot);pn_free(favorites);
     assert(!pool.used && !pool.live);return 0;

@@ -155,3 +155,8 @@ pn_font_t *pn_reader_app_body_font(const pn_reader_app_t *app);
 /// Jump to basis_points/10000 of the book (by original-file byte share; the reading layer aligns to a character boundary); "return to the position before the jump" works after a confirmed jump.
 pn_status_t pn_reader_app_jump_percent(pn_reader_app_t *app,unsigned basis_points,uint64_t now_ms,pn_reader_present_fn present,void *ctx);
 
+
+/// 接入全局刷新周期，保留已计页数；不写逐书排版。/ Apply global refresh period, retaining counted turns without writing per-book style.
+void pn_reader_app_refresh_period(pn_reader_app_t *app,unsigned pages);
+/// 显示owner确认整屏清理后，由产品owner重置计数。/ Product owner resets the counter after display owner confirms full cleaning.
+void pn_reader_app_refresh_reset(pn_reader_app_t *app);

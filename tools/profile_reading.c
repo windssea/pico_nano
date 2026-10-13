@@ -27,6 +27,12 @@ int main(int argc,char **argv){
         for(unsigned k=0;s==PN_OK && k<2;k++){pn_style_t style=pn_style_default(k?44:46);s=is_epub?pn_epub_app_style_apply(&epub,&style,k+10,present,NULL):pn_reader_app_style_apply(&txt,&style,k+10,present,NULL);}
         if(s==PN_OK){pn_status_t prefetched=is_epub?pn_epub_app_prefetch(&epub):pn_reader_app_prefetch(&txt);if(prefetched!=PN_OK && prefetched!=PN_EMPTY && prefetched!=PN_NO_MEMORY)s=prefetched;}
         pn_status_t closed=is_epub?pn_epub_app_close(&epub,20):pn_reader_app_close(&txt,20);if(s==PN_OK)s=closed;
+        // 同一已保存位置冷重开，包含完整身份、恢复定位与首屏绘制。/ Cold-reopen the saved location, including full identity, restore lookup and first-page rasterization.
+        if(s==PN_OK && is_epub){pn_profile_span_t span;pn_profile_begin(&span,&pool,"epub.resume-open");
+            s=pn_epub_app_open(&epub,&pool,argv[1],NULL,state,44,30);
+            if(s==PN_OK)s=pn_epub_app_step(&epub,PN_APP_OPEN,31,present,NULL);
+            pn_profile_end(&span,s);closed=pn_epub_app_close(&epub,32);if(s==PN_OK)s=closed;
+        }
         printf("round=%ld status=%d used=%zu live=%zu peak=%zu\n",j,(int)s,pool.used,pool.live,pool.peak);if(s!=PN_OK || pool.used || pool.live)failed++;
     }
     return failed?1:0;

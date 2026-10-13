@@ -25,7 +25,7 @@ int pn_pool_init(pn_pool_t *pool, size_t limit, pn_malloc_fn alloc, pn_free_fn r
     *pool = (pn_pool_t){ .limit=limit, .malloc_fn=alloc ? alloc : libc_alloc,
         .free_fn=release ? release : libc_free, .ctx=ctx,
         .cache_limit=1024u*1024u,.cache_reserve=limit/8<256u*1024u?limit/8:256u*1024u,
-        .cache_caps={512u*1024u,768u*1024u,256u*1024u} };
+        .cache_caps={512u*1024u,768u*1024u,256u*1024u,384u*1024u} };
     return 0;
 }
 

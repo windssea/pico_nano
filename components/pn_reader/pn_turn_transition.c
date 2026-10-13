@@ -24,17 +24,9 @@ pn_status_t pn_turn_present(void *ctx,const pn_frame_t *next,pn_refresh_t profil
     pn_turn_t *t=ctx;if(!t || !t->present || !next)return PN_INVALID;
     if(!next->pixels || next->width<1 || next->width>4096 || next->height<1 || next->height>4096 || next->stride<(size_t)(next->width+1)/2)return PN_INVALID;
     if(t->style>PN_TURN_CURL)return PN_INVALID;
-    if(t->style==PN_TURN_NONE || !t->before)return t->present(t->ctx,next,profile);
-    if(!t->pool || !t->before->pixels || t->before->stride<(size_t)(next->width+1)/2 || t->before->width!=next->width || t->before->height!=next->height)return PN_INVALID;
-    size_t row=(size_t)(next->width+1)/2,bytes=row*(size_t)next->height;
-    uint8_t *old=pn_alloc_tagged(t->pool,PN_MEM_FRAME,bytes),*pixels=old?pn_alloc_tagged(t->pool,PN_MEM_FRAME,bytes):NULL;
-    if(!old || !pixels){pn_free(old);pn_free(pixels);return t->present(t->ctx,next,profile);}
-    pn_frame_t before,frame;bool bound=pn_frame_bind(&before,old,bytes,next->width,next->height) && pn_frame_bind(&frame,pixels,bytes,next->width,next->height);
-    if(!bound){pn_free(old);pn_free(pixels);return PN_INVALID;}
-    for(int y=0;y<before.height;y++)memcpy(old+(size_t)y*row,t->before->pixels+(size_t)y*t->before->stride,row);
-    pn_status_t status=PN_OK;
-    for(unsigned step=1;step<3 && status==PN_OK;step++){status=pn_turn_frame(&before,next,&frame,t->style,step,3,t->reverse);if(status==PN_OK)status=t->present(t->ctx,&frame,PN_REFRESH_GL16);}
-    if(status==PN_OK)status=t->present(t->ctx,next,profile);
-    if(status!=PN_OK)(void)t->present(t->ctx,&before,PN_REFRESH_GC16);
-    pn_free(pixels);pn_free(old);return status;
+    // 历史样式都直接显示一次；不分配动画帧。/ All legacy styles present once, without animation frame allocation.
+    if(t->before && (!t->before->pixels || t->before->stride<(size_t)(next->width+1)/2 || t->before->width!=next->width || t->before->height!=next->height))return PN_INVALID;
+    pn_status_t status=t->present(t->ctx,next,profile);
+    if(status!=PN_OK && status!=PN_CANCELLED && status!=PN_BUSY && t->before)(void)t->present(t->ctx,t->before,PN_REFRESH_GC16);
+    return status;
 }

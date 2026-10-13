@@ -6,6 +6,7 @@
  * Frozen: retain latest displayed location on failure; never confuse save and display failures.
  */
 #include "pn_epub_save.h"
+#include "pn_profile.h"
 #include <string.h>
 static bool ready(const pn_epub_save_t *p){return p && p->pool && p->io.read && p->io.write_sync;}
 static bool same(const pn_epub_progress_t *a,const pn_epub_progress_t *b){return !memcmp(a->book.sha256,b->book.sha256,32) && !strcmp(a->location.path,b->location.path) && a->location.version==b->location.version && a->location.chapter_start==b->location.chapter_start && a->location.position.element==b->location.position.element && a->location.position.offset==b->location.position.offset && a->location.position.run==b->location.position.run && a->location.position.kind==b->location.position.kind;}
@@ -27,11 +28,12 @@ pn_status_t pn_epub_save_presented(pn_epub_save_t *p,const pn_epub_progress_t *p
 pn_status_t pn_epub_save_flush(pn_epub_save_t *p,uint64_t now){
     if(!ready(p) || now<p->last_now)return PN_INVALID;
     p->last_now=now;if(!p->dirty)return PN_OK;
+    pn_profile_span_t span;pn_profile_begin(&span,p->pool,"storage.progress");
     pn_status_t status=pn_epub_progress_save(&p->io,p->pool,&p->current);
     if(status!=PN_OK){pn_epub_progress_t loaded;if(pn_epub_progress_load(&p->io,p->pool,&p->expected,&loaded)==PN_OK && same(&loaded,&p->current))status=PN_OK;}
     if(status==PN_OK){p->dirty=false;p->retry_pending=false;p->turns=0;p->dirty_since=0;}
     else{p->retry_pending=true;p->last_failed=now;}
-    return status;
+    pn_profile_end(&span,status);return status;
 }
 pn_status_t pn_epub_save_tick(pn_epub_save_t *p,uint64_t now){
     if(!ready(p) || now<p->last_now)return PN_INVALID;

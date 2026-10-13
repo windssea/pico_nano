@@ -1,7 +1,7 @@
 """SDL设置页：翻页开关保存与重开、子页跳转。 / SDL settings page: page-turn switches saved across restarts and sub-page jumps."""
 import os,pathlib,subprocess,sys,tempfile
 with tempfile.TemporaryDirectory() as folder:
-    root=pathlib.Path(folder);books=root/'books';books.mkdir();(books/'a.txt').write_text('设置窗口测试。\n'*20,encoding='utf-8')
+    root=pathlib.Path(folder);books=root/'books';books.mkdir();(books/'a.txt').write_text('设置窗口测试。\n'*200,encoding='utf-8')
     state=root/'state';state.mkdir();fonts=root/'fonts';fonts.mkdir()
     def run(script,*extra):
         r=subprocess.run([sys.argv[1],'--library',str(books),'--state-dir',str(state),*extra],env=dict(os.environ,SDL_VIDEODRIVER='dummy',PN_SIM_LIBRARY_SCRIPT="library,"+script),capture_output=True,text=True,timeout=120)
@@ -18,9 +18,9 @@ with tempfile.TemporaryDirectory() as folder:
     # 子页：字体管理在给出--font-dir时打开。/ Sub-page: font management opens when --font-dir is given.
     # 字体管理返回设置页（不是书架），再返回才到书架。/ Back from font management returns to Settings, not the shelf; one more Back reaches the shelf.
     out=run('settings,tap:100:220,back,back,quit','--font-dir',str(fonts));assert 'settings closed request=3' in out and 'font_manage command=1 status=0 screen=0 active=0' in out and 'settings closed request=0' in out.split('font_manage command=1')[1],out
-    # 新样式持久化并用于真实正文；锁屏热恢复不重新打开。/ Persist new styles and use real text; warm lock restore does not reopen.
-    out=run('settings,tap:100:700,tap:340:940,back,back,enter,next,previous,lock,lock,quit,quit')
-    assert 'settings command=27 status=0 flags=71' in out and 'lock_preview wake status=0' in out,out
-    out=run('settings,tap:100:700,tap:560:940,back,back,enter,next,previous,quit,quit')
-    assert 'settings command=28 status=0 flags=135' in out,out
-print('settings window: switches and turn styles persist, warm restore, not-all-off refusal and sub-page jump passed')
+    # 全局刷新周期保存；原动画行不再命中，锁屏热恢复不重开书。/ Save global periods; the legacy animation row is inert and warm resume never reopens.
+    out=run('settings,tap:100:700,tap:100:240,tap:340:940,back,back,enter,next,previous,lock,lock,quit,quit')
+    assert 'settings command=13 status=0 flags=23' in out and 'settings command=27' not in out and 'lock_preview wake status=0' in out,out
+    out=run('settings,tap:100:700,tap:560:240,tap:560:940,back,back,enter,next,previous,quit,quit')
+    assert 'settings open status=0 flags=23' in out and 'settings command=14 status=0 flags=39' in out and 'settings command=28' not in out,out
+print('settings window: switches and global refresh periods persist, legacy animation row inert, warm restore, not-all-off refusal and sub-page jump passed')

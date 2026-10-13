@@ -59,7 +59,10 @@ with tempfile.TemporaryDirectory() as directory:
     attempts = int(re.search(rb"attempts=(\d+)", streamed.stderr)[1])
     for fault in range(1, attempts + 1):
         result = subprocess.run([binary, str(path), "chapter", "4096"], env=dict(os.environ, PN_ZIP_FAIL_AT=str(fault)), capture_output=True, timeout=10)
-        assert result.returncode != 0 and b"used=0 live=0" in result.stderr, result.stderr
+        assert b"used=0 live=0" in result.stderr, result.stderr
+        # 可选目录快照失败允许同样输出；必需分配失败仍返回错误。/ Optional directory storage may fail with identical output; required allocation failures still report errors.
+        if result.returncode == 0:
+            assert result.stdout == payload and b"verified=1" in result.stderr, result.stderr
     # 部分头和deflate破坏不可变成成功空输出。/ Header/deflate damage must never become successful empty output.
     original = buf.getvalue()
     for offset in [0, original.index(b"PK\x01\x02"), len(original)-22]:

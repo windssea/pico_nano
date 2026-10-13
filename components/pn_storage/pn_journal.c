@@ -8,6 +8,7 @@
  */
 #define _POSIX_C_SOURCE 200809L
 #include "pn_journal.h"
+#include "pn_profile.h"
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
@@ -85,7 +86,7 @@ static pn_status_t allowed(pn_journal_files_t *files, bool writing) {
     if (files->lease.access==PN_MEDIA_USB || (writing && files->lease.access!=PN_MEDIA_WRITE)) return PN_INVALID;
     return PN_OK;
 }
-static pn_status_t file_read(void *ctx, unsigned slot, uint8_t *out, size_t cap, size_t *size) {
+static pn_status_t file_read_impl(void *ctx, unsigned slot, uint8_t *out, size_t cap, size_t *size) {
     pn_journal_files_t *files=ctx; pn_status_t s=allowed(files,false);
     if (s!=PN_OK) return s;
     FILE *f=fopen(files->paths[slot],"rb");
@@ -97,7 +98,7 @@ static pn_status_t file_read(void *ctx, unsigned slot, uint8_t *out, size_t cap,
     if (extra!=EOF) return PN_CORRUPT;
     *size=n; return PN_OK;
 }
-static pn_status_t file_write(void *ctx, unsigned slot, const uint8_t *data, size_t n) {
+static pn_status_t file_write_impl(void *ctx, unsigned slot, const uint8_t *data, size_t n) {
     pn_journal_files_t *files=ctx; pn_status_t s=allowed(files,true);
     if (s!=PN_OK) return s;
     FILE *f=fopen(files->paths[slot],"wb"); if (!f) return PN_IO;
@@ -107,6 +108,14 @@ static pn_status_t file_write(void *ctx, unsigned slot, const uint8_t *data, siz
     if (fclose(f)!=0) error=true;
     s=allowed(files,true); if (s!=PN_OK) return s;
     return error ? PN_IO:PN_OK;
+}
+static pn_status_t file_read(void *ctx,unsigned slot,uint8_t *out,size_t cap,size_t *size){
+    pn_profile_span_t span;pn_profile_begin(&span,NULL,"storage.read");
+    pn_status_t status=file_read_impl(ctx,slot,out,cap,size);pn_profile_end(&span,status);return status;
+}
+static pn_status_t file_write(void *ctx,unsigned slot,const uint8_t *data,size_t n){
+    pn_profile_span_t span;pn_profile_begin(&span,NULL,"storage.sync");
+    pn_status_t status=file_write_impl(ctx,slot,data,n);pn_profile_end(&span,status);return status;
 }
 pn_status_t pn_journal_files_init(pn_journal_files_t *files, pn_media_t *media,
     const pn_media_lease_t *lease, const char *a, const char *b, pn_journal_io_t *io) {

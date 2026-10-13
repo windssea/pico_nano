@@ -3,6 +3,7 @@
 #include "device_async.h"
 #include "pn_reader_input.h"
 #include "pn_input_prefs.h"
+#include "pn_profile.h"
 #include "read_pico_pmu.h"
 #include <string.h>
 #include <stdlib.h>
@@ -54,9 +55,11 @@ static pn_status_t receipt(pn_device_async_t *p,pn_status_t status){if(status==P
 pn_status_t pn_device_async_present(pn_device_async_t *p,const pn_frame_t *frame,pn_refresh_t profile){
     pn_status_t cancel=pn_cancel_checkpoint();if(cancel!=PN_OK)return cancel;
 #ifdef ESP_PLATFORM
-    if(p->display_active){display_t job={.frame=frame,.profile=profile};if(xQueueSend(p->display_queue,&job,pdMS_TO_TICKS(100))!=pdTRUE)return PN_BUSY; // 队列交接前允许取消，扫描开始后等回执。/ Cancellation is allowed before handoff; once scanning starts, wait for its receipt.
-        if(xSemaphoreTake(p->display_done,portMAX_DELAY)!=pdTRUE)return PN_IO;
-        return receipt(p,p->display_result);}
+    if(p->display_active){display_t job={.frame=frame,.profile=profile};pn_profile_span_t span;
+        pn_profile_begin(&span,NULL,"display.queue");bool queued=xQueueSend(p->display_queue,&job,pdMS_TO_TICKS(100))==pdTRUE;pn_profile_end(&span,queued?PN_OK:PN_BUSY);
+        if(!queued)return PN_BUSY; // 队列交接前允许取消，扫描开始后等回执。/ Cancellation is allowed before handoff; once scanning starts, wait for its receipt.
+        pn_profile_begin(&span,NULL,"display.wait");bool completed=xSemaphoreTake(p->display_done,portMAX_DELAY)==pdTRUE;
+        pn_status_t status=completed?p->display_result:PN_IO;pn_profile_end(&span,status);return receipt(p,status);}
 #endif
     return receipt(p,p->panel(NULL,frame,profile));
 }

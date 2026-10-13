@@ -29,8 +29,11 @@ with tempfile.TemporaryDirectory() as folder:
                     book.writestr(name, content)
     def run(success=True, env=None):
         result = subprocess.run([binary, str(path)], capture_output=True, timeout=30, env=dict(os.environ, **(env or {})))
-        assert (result.returncode == 0) == success, result.stderr
+        if success is not None:
+            assert (result.returncode == 0) == success, result.stderr
         assert b"used=0 live=0" in result.stderr, result.stderr
+        if result.returncode != 0 and env and "PN_EPUB_FAIL_AT" in env:
+            assert not result.stdout, "Failed publication must not publish partial JSON"
         return result
     write()
     result = run()
@@ -42,7 +45,10 @@ with tempfile.TemporaryDirectory() as folder:
     assert data["cover_declared"] and data["cover_path"] == "OPS/Images/cover.jpg"
     attempts = int(re.search(rb"attempts=(\d+)", result.stderr)[1])
     for fault in range(1, attempts + 1):
-        run(False, {"PN_EPUB_FAIL_AT": str(fault)})
+        failed = run(None, {"PN_EPUB_FAIL_AT": str(fault)})
+        # 可选暂存失败不能改变已验证出版物输出。/ Failed optional storage must not change verified publication output.
+        if failed.returncode == 0:
+            assert failed.stdout == result.stdout
     run(False, {"PN_EPUB_DETACH": "1"})
     write(opf=package.encode("utf-16"), con=container.encode("utf-16"));run()
     write(opf="<!DOCTYPE o:package SYSTEM 'http://example.invalid/opf.dtd'>" + package);run()

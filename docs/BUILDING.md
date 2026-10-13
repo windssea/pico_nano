@@ -132,3 +132,10 @@ cmake --build build-sim-native
 
 
 硬件资源与模拟约束以[硬件基线](HARDWARE.md)为准。`pn_hardware.h`共享6MiB池上限和32KiB产品任务栈，模拟器命令行也拒绝超限；固件阅读组件生成`.su`栈报告并拒绝大于16KiB的函数栈帧。普通板级固件输出关键EPUB/摘要耗时、缓存及栈水位，CONFIG_PN_PROFILE额外开启全部阶段/分类堆诊断。
+
+章节语义缓存为kind 3，384KiB单项、复用原1MiB共享总额；超限流式回退。`host`新增semantic_cache和epub_hotpath零XML热翻页回归，`sdl`校验四类共享总额。profile入口新增同一保存位置的冷重开阶段`epub.resume-open`（仍完整SHA），使用各轮独立状态；不是浅睡resume，也不测面板。普通设备子阶段仅输出简洁profile行：epub.zip/publication、model-build/replay、layout、raster.body/footer、display.queue/wait/receipt、storage.read/sync/progress/recent/page-index。子阶段包含于外层，不能重复相加，诊断输出也会影响外层耗时。
+
+设备`Display stages`以毫秒拆分dirty（脏区比较）、convert（格式转换）、power（扫描配置/上电）、scan（清屏/波形/欠载恢复）、remember（记下成功帧及收尾）；`display.wait`包含显示排队与实际扫描，`display.receipt`还包含产品侧备份。仅显示owner输出面板分段，不跨线程扫描产品分配池。
+
+
+最新阅读响应/刷新阶段见[开发计划](READING_RESPONSE_PLAN.md)。普通固件`Present`行包含用途与reason（reading/management/requested/maintenance/manual/unknown-reference/underrun），用来核对全刷触发；display分段和保存分段仍分别记录。主机font_composite使用旧逐像素oracle比较全部灰阶值，reader_toolbar比较成功/失败后的原帧；这些不等于光学残影、实际TF延迟或设备栈水位。

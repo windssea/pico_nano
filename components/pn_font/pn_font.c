@@ -8,6 +8,7 @@
  */
 #include "pn_profile.h"
 #include "pn_font.h"
+#include "pn_font_composite.h"
 #include "pn_cancel.h"
 #include "pn_identity.h"
 #include "pn_text_file.h"
@@ -190,18 +191,7 @@ pn_status_t pn_font_vertical(pn_font_t *font,int *ascent,int *descent) {
 }
 /* 把灰度位图（顶行在前，行距pitch）按覆盖率叠到帧上。/ Composite a gray bitmap (top row first, row stride pitch) onto the frame by coverage. */
 static void composite(pn_frame_t *frame,int64_t left,int64_t top,unsigned width,unsigned rows,const uint8_t *data,size_t pitch,pn_font_render_t mode,unsigned ink) {
-    for(unsigned y=0;y<rows;y++){
-        int64_t py=top+y;if(py<0 || py>=frame->height)continue;
-        for(unsigned x=0;x<width;x++){
-            int64_t px=left+x;if(px<0 || px>=frame->width)continue;
-            unsigned coverage=data[(size_t)y*pitch+x];
-            if(mode==PN_FONT_BINARY)coverage=coverage>=128?255:0;
-            if(!coverage)continue;
-            unsigned previous=pn_frame_get(frame,(int)px,(int)py);
-            // 向ink混合（ink为0时与原先的变黑完全相同）。/ Blend towards ink (identical to the former darkening when ink is 0).
-            pn_frame_pixel(frame,(int)px,(int)py,(uint8_t)((previous*(255-coverage)+ink*coverage+127)/255));
-        }
-    }
+    pn_font_composite(frame,left,top,width,rows,data,pitch,mode==PN_FONT_BINARY,ink);
 }
 static pn_status_t draw_impl(pn_font_t *font,pn_frame_t *frame,uint32_t cp,int32_t x_64,int baseline,pn_font_render_t mode) {
     pn_status_t cancel=pn_cancel_checkpoint();if(cancel!=PN_OK)return cancel;

@@ -131,3 +131,8 @@ pn_status_t pn_epub_app_percent(pn_epub_app_t *,unsigned *basis,size_t *section,
 pn_status_t pn_epub_app_percent_section(pn_epub_app_t *,unsigned basis,size_t *section);
 /// 按百分比跳转：跳到该百分比所在章节的开头；成功确认后可返回跳转前位置。/ Jump by percentage to the start of the section it falls into; the pre-jump position stays reachable after a confirmed jump.
 pn_status_t pn_epub_app_jump_percent(pn_epub_app_t *,unsigned basis,uint64_t,pn_reader_present_fn,void *);
+
+/// 接入全局刷新周期，保留已计页数；不写逐书排版。/ Apply global refresh period, retaining counted turns without writing per-book style.
+void pn_epub_app_refresh_period(pn_epub_app_t *app,unsigned pages);
+/// 显示owner确认整屏清理后，由产品owner重置计数。/ Product owner resets the counter after display owner confirms full cleaning.
+void pn_epub_app_refresh_reset(pn_epub_app_t *app);

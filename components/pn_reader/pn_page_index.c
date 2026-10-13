@@ -104,7 +104,7 @@ static pn_status_t quota(index_t *i,size_t incoming){
         closedir(dir);if(total+incoming<=QUOTA)return PN_OK;if(!*victim || remove(victim))return PN_IO;
     }
 }
-pn_status_t pn_page_index_flush(pn_page_index_t *h,bool force){
+static pn_status_t index_flush(pn_page_index_t *h,bool force){
     if(!h || !h->impl)return PN_EMPTY;
     index_t *i=h->impl;if(!i->dirty || (!force && i->dirty<16))return PN_EMPTY;
     pn_status_t s=checked(i);if(s!=PN_OK)return s;if(mkdir(i->directory,0700) && errno!=EEXIST)return PN_IO;
@@ -118,5 +118,9 @@ pn_status_t pn_page_index_flush(pn_page_index_t *h,bool force){
     if(s==PN_OK)s=checked(i);
     if(s==PN_OK && rename(temporary,i->path))s=PN_IO;
     if(s!=PN_OK)(void)remove(temporary);else i->dirty=0;return s;
+}
+pn_status_t pn_page_index_flush(pn_page_index_t *h,bool force){
+    pn_profile_span_t span;pn_profile_begin(&span,h && h->impl?((index_t *)h->impl)->pool:NULL,"storage.page-index");
+    pn_status_t status=index_flush(h,force);pn_profile_end(&span,status);return status;
 }
 void pn_page_index_close(pn_page_index_t *h){if(h){pn_free(h->impl);h->impl=NULL;}}

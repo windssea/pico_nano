@@ -101,17 +101,14 @@ static pn_status_t draw_refresh(pn_settings_ui_t *ui,su_t *u){
     int chosen=0;for(int i=0;i<3;i++)if(order[i]==(int)level_of(ui->flags))chosen=i;
     if(s==PN_OK)s=pn_w_group(font,f,"自动清残影",LEVEL_Y-18);
     if(s==PN_OK)s=pn_w_segments(font,f,labels,notes,3,chosen,LEVEL_Y,LEVEL_H);
-    if(s==PN_OK)s=note(u,"阅读翻页用快速刷新，累计到设定页数后做一次整屏刷新压掉残影。数字越小越干净，闪屏也越多。每本书还可以在排版里单独设置。",LEVEL_Y+LEVEL_H+50);
+    if(s==PN_OK)s=note(u,"所有书籍共用此设置。成功翻到第 6、14 或 24 页时整屏刷新；工具栏、排版预览和重复点击不计页。周期越短，闪屏越多。",LEVEL_Y+LEVEL_H+50);
     if(s==PN_OK)s=pn_w_group(font,f,"手动刷新",FULL_Y-18);
     if(s==PN_OK){int original=font->pixels;s=pn_font_size(font,30);if(s==PN_OK)s=pn_w_button(font,f,"立即整屏刷新",PN_UI_MARGIN,FULL_Y,620,88,PN_W_SELECTED);pn_status_t restored=pn_font_size(font,original);if(s==PN_OK)s=restored;}
     if(s==PN_OK)s=pn_w_group(font,f,"屏幕",FULL_Y+150);
     pn_w_card(f,FULL_Y+162,1);
     if(s==PN_OK)s=pn_w_card_row(font,f,*u->about.screen?u->about.screen:"4.7 英寸墨水屏","16 级灰阶，阅读页保持纯白底",NULL,-1,0u,FULL_Y+162,true);
-    if(s==PN_OK)s=pn_w_group(font,f,"翻页样式",TURN_Y-18);
-    static const char *const turns[3]={"默认","扫除","仿真翻页"},*const turn_notes[3]={"无样式","从右到左","页折效果"};
-    unsigned turn=(ui->flags&PN_INPUT_TURN_MASK)>>6;
-    if(s==PN_OK)s=pn_w_segments(font,f,turns,turn_notes,3,turn>2?0:(int)turn,TURN_Y,92);
-    if(s==PN_OK)s=note(u,"翻页效果会增加刷新次数；默认无样式响应最快。",TURN_Y+138);
+    if(s==PN_OK)s=pn_w_group(font,f,"翻页显示",TURN_Y-18);
+    if(s==PN_OK)s=note(u,"每次翻页直接显示完整的 16 灰阶正文。",TURN_Y+40);
     if(s==PN_OK && *u->message)s=note(u,u->message,TURN_Y+228);
     return s;
 }
@@ -230,11 +227,6 @@ pn_status_t pn_settings_ui_event(pn_settings_ui_t *ui,int command,pn_settings_pr
         if(next.columns!=ui->shelf.columns || next.style!=ui->shelf.style)status=commit_shelf(ui,u,next);
         pn_status_t shown=show(ui,present,ctx);return status==PN_OK?shown:status;
     }
-    if(command>=PN_SETUI_TURN && command<PN_SETUI_TURN+3){
-        uint8_t next=(uint8_t)((ui->flags&~PN_INPUT_TURN_MASK)|((unsigned)(command-PN_SETUI_TURN)<<6));
-        if(next!=ui->flags)status=commit(ui,u,next);
-        pn_status_t shown=show(ui,present,ctx);return status==PN_OK?shown:status;
-    }
     if(command==PN_SETUI_FULL_REFRESH)return show_profile(ui,present,ctx,PN_REFRESH_GC16);
     if(command>=PN_SETUI_LEVEL && command<PN_SETUI_LEVEL+3){
         uint8_t next=(uint8_t)((ui->flags&~PN_INPUT_REFRESH_MASK)|((unsigned)(command-PN_SETUI_LEVEL)<<4));
@@ -272,7 +264,6 @@ int pn_settings_ui_hit(const pn_settings_ui_t *ui,int x,int y){
     }
     if(u->screen==SCREEN_KEYS){if(y>=TOGGLE_Y && y<TOGGLE_Y+4*ROW_H)return PN_SETUI_TOGGLE+(y-TOGGLE_Y)/ROW_H;return -1;}
     if(u->screen==SCREEN_REFRESH){
-        int turn=pn_w_segments_hit(3,TURN_Y,92,x,y);if(turn>=0)return PN_SETUI_TURN+turn;
         static const int order[3]={1,0,2};
         int cell=pn_w_segments_hit(3,LEVEL_Y-6,LEVEL_H+12,x,y);if(cell>=0)return PN_SETUI_LEVEL+order[cell];
         if(y>=FULL_Y && y<FULL_Y+88)return PN_SETUI_FULL_REFRESH;

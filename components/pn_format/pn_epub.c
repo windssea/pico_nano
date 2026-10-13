@@ -8,6 +8,7 @@
  */
 #include "pn_profile.h"
 #include "pn_epub.h"
+#include "pn_xhtml.h"
 #include "pn_resource.h"
 #include <string.h>
 #define OCF "urn:oasis:names:tc:opendocument:xmlns:container|"
@@ -261,6 +262,7 @@ static pn_status_t mimetype(pn_zip_t *zip){
 }
 void pn_epub_close(pn_epub_t *epub){
     if(!epub || !epub->impl)return;
+    pn_xhtml_cache_close(epub);
     epub_t *b=epub->impl;
     for(size_t i=0;i<b->info.manifest_count;i++)pn_free(b->items[i]);
     for(size_t i=0;i<b->info.spine_count;i++)pn_free(b->spine[i].idref);
@@ -279,7 +281,7 @@ static pn_status_t pn_epub_open_impl(pn_epub_t *epub,pn_pool_t *pool,pn_zip_t *z
     if(status==PN_OK)status=index_spine(b);
     if(status==PN_OK){pn_zip_info_t current;status=pn_zip_info(zip,0,&current);}
     pn_free(p);
-    if(status!=PN_OK){pn_epub_t partial={b};pn_epub_close(&partial);return status;}
+    if(status!=PN_OK){pn_epub_t partial={.impl=b};pn_epub_close(&partial);return status;}
     epub->impl=b;return PN_OK;
 }
 pn_status_t pn_epub_open(pn_epub_t *epub,pn_pool_t *pool,pn_zip_t *zip,const uint8_t salt[16]){

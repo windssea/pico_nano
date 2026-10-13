@@ -46,9 +46,11 @@ typedef pn_status_t (*pn_xhtml_sink_t)(void *,const pn_xhtml_event_t *);
 /// 消费已验证EOF的XML流；支持严格XHTML与元素行内样式（无样式表加载），全部解析分配走pool；失败不改stats，sink须丢弃暂定内容。
 /// Consume XML with verified EOF, supporting strict XHTML and inline attributes (no stylesheet loading) with pooled allocations; errors preserve stats and require discarding provisional sink content.
 pn_status_t pn_xhtml_parse_input(pn_pool_t *pool,const pn_xml_input_t *input,const char *base,const uint8_t salt[16],pn_xhtml_sink_t sink,void *ctx,pn_xhtml_stats_t *stats);
-/// 从出版物自身打开章节，先校验head作者样式；成功必须完整资源CRC及正文结构通过，不整章生成TXT。
-/// Open a chapter in its own publication after verifying head author styles; success requires complete resource CRC/body structure without generating whole-chapter TXT.
+/// 从出版物解析并按预算复用本会话已验证语义；head样式/完整CRC/XML通过才缓存，复放仍检查介质与取消，失败不改stats。
+/// Parse publication resources and reuse budgeted verified session semantics; cache only after head styles/full CRC/XML pass, rechecking media/cancellation on replay and preserving stats on failure.
 pn_status_t pn_xhtml_parse(pn_pool_t *pool,pn_epub_t *epub,const char *path,const uint8_t salt[16],pn_xhtml_sink_t sink,void *ctx,pn_xhtml_stats_t *stats);
+/// 释放本出版物语义缓存，借用期间不释放；close使用同一入口。/ Release publication semantics unless borrowed; close uses the same entry point.
+void pn_xhtml_cache_close(pn_epub_t *);
 /// 完整扫描找到唯一id，缺失EMPTY、重复CORRUPT，失败不改position。
 /// Scan completely for a unique ID, EMPTY if absent, CORRUPT on duplicates, preserving position on failure.
 pn_status_t pn_xhtml_anchor(pn_pool_t *pool,pn_epub_t *epub,const char *path,const char *id,const uint8_t salt[16],pn_xhtml_position_t *position);

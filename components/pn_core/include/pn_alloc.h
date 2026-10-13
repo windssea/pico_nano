@@ -18,6 +18,7 @@ typedef enum {
     PN_CACHE_NEIGHBOR, ///< 未显示邻页 / Undisplayed neighbor pages
     PN_CACHE_GLYPH, ///< 可重建字形 / Rebuildable glyphs
     PN_CACHE_COVER, ///< 非活动封面 / Inactive covers
+    PN_CACHE_CHAPTER, ///< 已验证章节语义，可在压力时重建 / Verified chapter semantics, rebuildable under pressure
     PN_CACHE_COUNT ///< 类别数 / Class count
 } pn_cache_class_t;
 typedef struct pn_cache_owner pn_cache_owner_t;

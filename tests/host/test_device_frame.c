@@ -13,5 +13,10 @@ int main(void){
         int px=y,py=683-x;uint8_t packed=dst[1+(size_t)py*608+px/2];
         assert(((packed>>(px%2?4:0))&15)==pn_frame_get(&f,x,y));
     }
+    uint8_t *padded=malloc(350u*1216u);assert(padded);memset(padded,0xaa,350u*1216u);
+    for(int y=0;y<1216;y++)memcpy(padded+350u*y,src+342u*y,342);
+    pn_frame_t wide={padded,684,1216,350};assert(pn_device_frame_copy(&wide,dst+1,bytes)==PN_OK);
+    for(int y=0;y<1216;y++)for(int x=0;x<684;x++)assert(((dst[1+(size_t)(683-x)*608+y/2]>>(y%2?4:0))&15)==pn_frame_get(&f,x,y));
+    free(padded);
     assert(pn_device_frame_copy(NULL,dst,bytes)==PN_INVALID);free(src);free(dst);return 0;
 }

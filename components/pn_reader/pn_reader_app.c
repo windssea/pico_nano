@@ -9,6 +9,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "pn_profile.h"
 #include "pn_reader_app.h"
+#include "pn_refresh_policy.h"
 #include "pn_sd_layout.h"
 #include "pn_widgets.h"
 #include "pn_font_chain.h"
@@ -64,7 +65,7 @@ typedef struct {
     uint64_t last_now;
     bool suspended; ///< 保留已确认正文的热挂起 / Warm suspension retaining confirmed text
     bool persistent,has_restore,media_lost,force_full;
-    unsigned since_clear;
+    pn_refresh_policy_t refresh;
 } app_t;
 static pn_font_set_t *font_set(app_t *a){return a->font_use_draft?&a->font_draft:a->font_live.impl?&a->font_live:NULL;}
 static pn_font_t *body(app_t *a){return font_set(a)?a->managed_body:&a->body;}
@@ -273,14 +274,15 @@ static pn_status_t step_location(pn_reader_app_t *app,pn_reader_action_t action,
     pn_draw_lease_t lease={0};pn_frame_t *frame=NULL;s=pn_display_begin_draw(&a->display,a->reader.token,&lease,&frame);
     if(s==PN_OK)s=a->font_view?paint_font_view(a,frame):render(a,frame,&receipt,dismiss_return?false:return_hint<0?a->has_bookmark_origin:return_hint!=0);
     if(s==PN_OK && !a->font_view && a->body_layer.paint)s=a->body_layer.paint(a->body_layer.ctx,frame);
-    pn_refresh_t profile=(!a->reader.has_visible || a->force_full || a->since_clear>=a->style.gl_before_clear)?PN_REFRESH_GC16:PN_REFRESH_GL16;
+    bool turn=intent==PN_READ_NEXT || intent==PN_READ_PREVIOUS;
+    pn_refresh_t profile=pn_refresh_policy_next(&a->refresh,!a->reader.has_visible || a->force_full,turn);
     if(s==PN_OK)s=pn_display_publish(&a->display,&lease,receipt.ticket,profile);
     if(s!=PN_OK){if(lease.ticket)(void)pn_display_discard(&a->display,&lease);(void)pn_reader_complete(&a->reader,&receipt,false,now);return s;}
     pn_display_job_t job;s=pn_display_start(&a->display,&job);if(s!=PN_OK){(void)pn_reader_complete(&a->reader,&receipt,false,now);return s;}
     pn_status_t shown=present(ctx,job.frame,job.profile);pn_status_t completed=pn_display_complete(&a->display,&job,shown==PN_OK);
     if(!a->font_view && a->body_layer.complete)a->body_layer.complete(a->body_layer.ctx,job.frame,shown==PN_OK && completed==PN_OK);
     if(shown!=PN_OK || completed!=PN_OK)a->force_full=true;
-    else {a->force_full=false;if(profile==PN_REFRESH_GC16)a->since_clear=0;else a->since_clear++;}
+    else {a->force_full=false;pn_refresh_policy_commit(&a->refresh,profile,turn);}
     pn_status_t confirmed=pn_reader_complete(&a->reader,&receipt,shown==PN_OK && completed==PN_OK,now);
     if(shown!=PN_OK)return shown;
     if(completed!=PN_OK)return completed;
@@ -320,7 +322,7 @@ pn_status_t pn_reader_app_resume(pn_reader_app_t *app,uint64_t now,pn_reader_pre
     if(!a->suspended)return PN_BUSY;
     pn_status_t status=a->media_lost?PN_STALE_MEDIA:pn_media_validate(a->book_media,&a->book_lease);if(status!=PN_OK)return status;
     status=present(ctx,&a->frame,PN_REFRESH_GC16);a->last_now=now;
-    if(status==PN_OK){a->suspended=false;a->force_full=false;a->since_clear=0;}return status;
+    if(status==PN_OK){a->suspended=false;a->force_full=false;a->refresh.turns=0;}return status;
 }
 pn_status_t pn_reader_app_close(pn_reader_app_t *app,uint64_t now){
     if(!app)return PN_INVALID;
@@ -604,3 +606,6 @@ pn_status_t pn_reader_app_fonts_probe(pn_reader_app_t *app,const pn_catalog_item
     if(status==PN_OK){*ref=reference;*info=metadata;*checked=(unsigned)count;*missing=absent;}return status;
 }
 pn_font_t *pn_reader_app_body_font(const pn_reader_app_t *app){return app && app->impl?body((app_t *)app->impl):NULL;}
+
+void pn_reader_app_refresh_period(pn_reader_app_t *app,unsigned pages){if(app && app->impl)((app_t *)app->impl)->refresh.period=pages>=1 && pages<=30?pages:14;}
+void pn_reader_app_refresh_reset(pn_reader_app_t *app){if(app && app->impl)((app_t *)app->impl)->refresh.turns=0;}

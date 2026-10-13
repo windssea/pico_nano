@@ -54,10 +54,10 @@ with tempfile.TemporaryDirectory() as folder:
         for line in result.stderr.splitlines():
             if line.startswith("cache "):
                 fields = dict(re.findall(r"(\w+)=([^\s]+)", line))
-                assert int(fields["bytes"]) <= [512, 768, 256][int(fields["kind"])] * 1024, line
+                assert int(fields["bytes"]) <= [512, 768, 256, 384][int(fields["kind"])] * 1024, line
                 if fields["kind"] == "0":
                     aggregate = 0
                 aggregate += int(fields["bytes"])
-                if fields["kind"] == "2":
+                if fields["kind"] == "3":
                     assert aggregate <= 1024 * 1024, line
 print("2MiB TXT/EPUB: foreground turns, eviction, source preservation, real close/save/resume and zero live allocations passed")

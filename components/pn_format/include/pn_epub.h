@@ -12,7 +12,10 @@
 #define PN_EPUB_ID_MAX 256
 #define PN_EPUB_META_MAX 512
 #define PN_EPUB_ITEMS_MAX PN_ZIP_ENTRIES_MAX
-typedef struct {void *impl;} pn_epub_t; ///< 初始NULL，不可复制活动对象 / Initially NULL; never copy a live object
+typedef struct {
+    void *impl; ///< 出版物模型，初始NULL，不可复制活动对象 / Publication model, initially NULL; never copy a live object
+    void *semantic_cache; ///< 本会话可选语义缓存，初始NULL，由close释放 / Optional session semantic cache, initially NULL, released by close
+} pn_epub_t;
 typedef enum {PN_EPUB_OTHER=0,PN_EPUB_XHTML,PN_EPUB_NCX,PN_EPUB_IMAGE,PN_EPUB_CSS,PN_EPUB_FONT} pn_epub_media_t;
 typedef struct {
     char id[PN_EPUB_ID_MAX]; ///< OPF资源ID / OPF resource ID

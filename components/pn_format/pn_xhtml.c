@@ -1,8 +1,8 @@
 /*
  * SPDX-FileCopyrightText: 2026 pico_nano contributors
  * SPDX-License-Identifier: Apache-2.0
- * 中文：流式正文事件与解码文本区间位置，不保留DOM或整章文本。
- * English: streaming body events and decoded text-run positions without DOM or whole-chapter text retention.
+ * 中文：流式正文事件与有界已验证语义缓存，不建立DOM或持久TXT副本。
+ * English: streaming body events and bounded verified semantics without a DOM or persistent TXT copy.
  * 冻结：不执行脚本，不读取外部实体；CRC完成前不得提交页面或续读位置。
  * Frozen: never execute scripts or load external entities; no page or resume commits before CRC completion.
  */
@@ -373,7 +373,7 @@ static pn_status_t collect_sheets(sheet_t *sheet,const char *path,const uint8_t 
     if(status==PN_OK){pn_xml_input_t input={&stream,pn_epub_chapter_read};pn_xml_hooks_t hooks={collect_start,collect_end,collect_text};status=pn_xml_parse(sheet->pool,&input,&hooks,c,32u*1024u*1024u,salt);}
     pn_free(c->buffer);pn_free(c);pn_epub_chapter_close(&stream);return status;
 }
-static pn_status_t pn_xhtml_parse_impl(pn_pool_t *pool,pn_epub_t *epub,const char *path,const uint8_t salt[16],pn_xhtml_sink_t sink,void *ctx,pn_xhtml_stats_t *stats){
+static pn_status_t parse_source(pn_pool_t *pool,pn_epub_t *epub,const char *path,const uint8_t salt[16],pn_xhtml_sink_t sink,void *ctx,pn_xhtml_stats_t *stats){
     if(!pool || !epub || !path || !*path || strlen(path)>=PN_ZIP_PATH_MAX || !salt || !stats)return PN_INVALID;
     size_t ordinal;pn_status_t status=pn_epub_spine_find(epub,path,&ordinal);if(status!=PN_OK)return status;
     sheet_t sheet={.pool=pool,.epub=epub};status=collect_sheets(&sheet,path,salt);
@@ -384,6 +384,102 @@ static pn_status_t pn_xhtml_parse_impl(pn_pool_t *pool,pn_epub_t *epub,const cha
     if(status==PN_OK)status=pn_epub_spine_find(epub,path,&ordinal);
     if(status==PN_OK)*stats=candidate;
     sheet_close(&sheet);return status;
+}
+// 只保留一个已验证章的语义；连续文本按64标量分组，不复制每个事件的完整样式。/ Retain one verified chapter; group text in 64 scalars instead of repeating full styles per event.
+#define MODEL_TEXT_MAX 64u
+typedef struct model_record {
+    struct model_record *next;
+    uint64_t element,offset;
+    uint32_t run;
+    uint16_t count,value_size;
+    uint8_t kind,block,position_kind,style;
+} model_record_t;
+typedef struct {uint32_t codepoints[MODEL_TEXT_MAX];uint16_t offsets[MODEL_TEXT_MAX];} model_text_t;
+typedef struct {
+    pn_cache_owner_t owner;pn_pool_t *pool;model_record_t *first,*last;size_t charged;
+    char path[PN_ZIP_PATH_MAX];uint8_t salt[16];pn_xhtml_stats_t stats;
+    pn_xhtml_style_t styles[32];unsigned style_count;
+    bool valid,busy,abandoned,skipped;size_t skipped_cap;
+} model_t;
+typedef struct {model_t *model;pn_xhtml_sink_t sink;void *ctx;} model_sink_t;
+static size_t model_bytes(void *ctx){return ((model_t *)ctx)->charged;}
+static void model_drop(void *ctx){
+    model_t *m=ctx;model_record_t *r=m->first;
+    while(r){model_record_t *next=r->next;pn_free(r);r=next;}
+    m->first=m->last=NULL;m->charged=0;m->style_count=0;m->valid=false;m->abandoned=m->busy;
+}
+void pn_xhtml_cache_close(pn_epub_t *epub){
+    if(!epub || !epub->semantic_cache)return;
+    model_t *m=epub->semantic_cache;if(m->busy)return;
+    pn_cache_detach(&m->owner);model_drop(m);pn_free(m);epub->semantic_cache=NULL;
+}
+static bool model_text_matches(const model_t *m,const model_record_t *r,const pn_xhtml_event_t *e){
+    return r && r->kind==PN_XHTML_TEXT && r->count<MODEL_TEXT_MAX &&
+        r->element==e->position.element && r->run==e->position.run &&
+        e->position.offset>=r->offset && e->position.offset-r->offset<=UINT16_MAX &&
+        !memcmp(&m->styles[r->style],&e->style,sizeof e->style);
+}
+static void model_append(model_t *m,const pn_xhtml_event_t *e){
+    if(m->abandoned)return;
+    model_record_t *r=m->last;
+    if(e->kind!=PN_XHTML_TEXT || !model_text_matches(m,r,e)){
+        unsigned style=0;while(style<m->style_count && memcmp(&m->styles[style],&e->style,sizeof e->style))style++;
+        if(style==32){model_drop(m);m->abandoned=true;return;}
+        if(style==m->style_count)m->styles[m->style_count++]=e->style;
+        size_t value=e->value?strlen(e->value)+1:0,alt=e->alt?strlen(e->alt)+1:0;
+        size_t payload=e->kind==PN_XHTML_TEXT?sizeof(model_text_t):value+alt;
+        r=pn_cache_alloc(m->pool,PN_CACHE_CHAPTER,PN_MEM_DOCUMENT,sizeof *r+payload);
+        if(!r){model_drop(m);m->abandoned=true;return;}
+        *r=(model_record_t){.element=e->position.element,.offset=e->position.offset,.run=e->position.run,.value_size=(uint16_t)value,.kind=(uint8_t)e->kind,.block=(uint8_t)e->block,.position_kind=(uint8_t)e->position.kind,.style=(uint8_t)style};m->charged+=pn_alloc_size(r);
+        if(m->last)m->last->next=r;else m->first=r;m->last=r;
+        if(e->kind!=PN_XHTML_TEXT){char *text=(char *)(r+1);if(value){memcpy(text,e->value,value);text+=value;}if(alt){memcpy(text,e->alt,alt);r->count=1;}}
+    }
+    if(e->kind==PN_XHTML_TEXT){model_text_t *text=(model_text_t *)(r+1);text->codepoints[r->count]=e->codepoint;text->offsets[r->count]=(uint16_t)(e->position.offset-r->offset);r->count++;}
+}
+static pn_status_t model_event(void *ctx,const pn_xhtml_event_t *event){
+    model_sink_t *s=ctx;model_append(s->model,event);return s->sink?s->sink(s->ctx,event):PN_OK;
+}
+static pn_status_t model_replay(model_t *m,pn_epub_t *epub,pn_xhtml_sink_t sink,void *ctx){
+    pn_profile_span_t span;pn_profile_begin(&span,m->pool,"epub.model-replay");
+    pn_status_t status=PN_OK;size_t events=0,ordinal;m->busy=true;pn_cache_pin(&m->owner);
+    for(model_record_t *r=m->first;r && status==PN_OK;r=r->next){
+        unsigned count=r->kind==PN_XHTML_TEXT?r->count:1;
+        for(unsigned i=0;i<count && status==PN_OK;i++){
+            status=pn_cancel_checkpoint();if(status!=PN_OK)break;
+            if((events++&63u)==0){status=pn_epub_spine_find(epub,m->path,&ordinal);if(status!=PN_OK)break;}
+            pn_xhtml_event_t e={.kind=(pn_xhtml_event_kind_t)r->kind,.position={.element=r->element,.offset=r->offset,.run=r->run,.kind=(pn_xhtml_position_kind_t)r->position_kind},.style=m->styles[r->style],.block=(pn_xhtml_block_t)r->block};
+            if(e.kind==PN_XHTML_TEXT){model_text_t *t=(model_text_t *)(r+1);e.codepoint=t->codepoints[i];e.position.offset+=t->offsets[i];}
+            else{if(r->value_size)e.value=(const char *)(r+1);if(r->count)e.alt=(const char *)(r+1)+r->value_size;}
+            if(sink)status=sink(ctx,&e);
+        }
+    }
+    if(status==PN_OK)status=pn_cancel_checkpoint();
+    if(status==PN_OK)status=pn_epub_spine_find(epub,m->path,&ordinal);
+    pn_cache_unpin(&m->owner);m->busy=false;pn_profile_end(&span,status);return status;
+}
+static pn_status_t pn_xhtml_parse_impl(pn_pool_t *pool,pn_epub_t *epub,const char *path,const uint8_t salt[16],pn_xhtml_sink_t sink,void *ctx,pn_xhtml_stats_t *stats){
+    if(!pool || !epub || !path || !*path || strlen(path)>=PN_ZIP_PATH_MAX || !salt || !stats)return PN_INVALID;
+    size_t ordinal;pn_status_t status=pn_epub_spine_find(epub,path,&ordinal);if(status!=PN_OK)return status;
+    model_t *m=epub->semantic_cache;
+    if(m && (m->busy || m->pool!=pool))return parse_source(pool,epub,path,salt,sink,ctx,stats);
+    bool same=m && !strcmp(m->path,path) && !memcmp(m->salt,salt,16);
+    bool hit=same && m->valid;pn_cache_observe(pool,PN_CACHE_CHAPTER,hit);
+    if(hit){status=model_replay(m,epub,sink,ctx);if(status==PN_OK)*stats=m->stats;return status;}
+    if(!m){
+        m=pn_cache_alloc(pool,PN_CACHE_CHAPTER,PN_MEM_DOCUMENT,sizeof *m);
+        if(!m)return parse_source(pool,epub,path,salt,sink,ctx,stats);
+        *m=(model_t){.pool=pool};epub->semantic_cache=m;
+        pn_cache_attach(pool,&m->owner,PN_CACHE_CHAPTER,m,model_bytes,model_drop);
+    }
+    if(same && m->skipped && pool->cache_caps[PN_CACHE_CHAPTER]<=m->skipped_cap)return parse_source(pool,epub,path,salt,sink,ctx,stats);
+    model_drop(m);strcpy(m->path,path);memcpy(m->salt,salt,16);m->busy=true;m->abandoned=m->skipped=false;
+    model_sink_t proxy={m,sink,ctx};pn_xhtml_stats_t candidate;
+    pn_profile_span_t span;pn_profile_begin(&span,pool,"epub.model-build");
+    status=parse_source(pool,epub,path,salt,model_event,&proxy,&candidate);
+    m->busy=false;
+    if(status==PN_OK){*stats=candidate;if(!m->abandoned){m->stats=candidate;m->valid=true;}else{m->skipped=true;m->skipped_cap=pool->cache_caps[PN_CACHE_CHAPTER];}}
+    if(status!=PN_OK)model_drop(m);
+    pn_profile_end(&span,status);return status;
 }
 pn_status_t pn_xhtml_parse(pn_pool_t *pool,pn_epub_t *epub,const char *path,const uint8_t salt[16],pn_xhtml_sink_t sink,void *ctx,pn_xhtml_stats_t *stats){
     pn_profile_span_t span;pn_profile_begin(&span,pool,"epub.model");

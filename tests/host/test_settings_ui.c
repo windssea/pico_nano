@@ -58,10 +58,10 @@ int main(int argc,char **argv){
     assert(pn_settings_ui_hit(&ui,100,240)==PN_SETUI_LEVEL+1 && pn_settings_ui_hit(&ui,340,240)==PN_SETUI_LEVEL && pn_settings_ui_hit(&ui,560,240)==PN_SETUI_LEVEL+2 && pn_settings_ui_hit(&ui,300,560)==PN_SETUI_FULL_REFRESH);
     assert(pn_settings_ui_event(&ui,PN_SETUI_LEVEL+1,present,NULL)==PN_OK && (ui.flags&PN_INPUT_REFRESH_MASK)==0x10 && pn_settings_refresh_pages(ui.flags)==6);
     assert(pn_settings_ui_event(&ui,PN_SETUI_FULL_REFRESH,present,NULL)==PN_OK && pn_settings_ui_event(&ui,PN_SETUI_LEVEL,present,NULL)==PN_OK && pn_settings_refresh_pages(ui.flags)==14);
-    assert(pn_settings_ui_hit(&ui,100,940)==PN_SETUI_TURN && pn_settings_ui_hit(&ui,340,940)==PN_SETUI_TURN+1 && pn_settings_ui_hit(&ui,560,940)==PN_SETUI_TURN+2);
-    assert(pn_settings_ui_event(&ui,PN_SETUI_TURN+2,present,NULL)==PN_OK && (ui.flags&PN_INPUT_TURN_MASK)==0x80);
+    assert(pn_settings_ui_hit(&ui,100,940)==-1 && pn_settings_ui_hit(&ui,340,940)==-1 && pn_settings_ui_hit(&ui,560,940)==-1);
+    assert(pn_settings_ui_event(&ui,PN_SETUI_TURN+2,present,NULL)==PN_EMPTY && !(ui.flags&PN_INPUT_TURN_MASK));
     assert(pn_settings_load_flags(&media,root,&flags)==PN_OK && flags==ui.flags);
-    assert(pn_settings_ui_event(&ui,PN_SETUI_TURN,present,NULL)==PN_OK && !(ui.flags&PN_INPUT_TURN_MASK));
+    assert(pn_settings_ui_event(&ui,PN_SETUI_TURN,present,NULL)==PN_EMPTY && !(ui.flags&PN_INPUT_TURN_MASK));
     assert(pn_settings_ui_event(&ui,PN_SETUI_BACK,present,NULL)==PN_OK && ui.active && pn_settings_ui_screen(&ui)==0);
     /* 存储与关于：只显示调用方填写的实际信息。/ Storage and about shows only what the caller actually read. */
     {pn_settings_about_t about={0};strcpy(about.version,"0.0.57");strcpy(about.storage,"共 29.7 GB · 可用 12.1 GB");pn_settings_ui_set_about(&ui,&about);

@@ -38,9 +38,10 @@ with tempfile.TemporaryDirectory() as folder:
             book.writestr("OPS/nav.xhtml" if epub3 else "OPS/toc.ncx", content, compress_type=zipfile.ZIP_STORED)
     def run(success=True, env=None):
         result = subprocess.run([binary, str(path), "--toc"], capture_output=True, timeout=30, env=dict(os.environ, **(env or {})))
-        assert (result.returncode==0)==success, result.stderr
+        if success is not None:
+            assert (result.returncode==0)==success, result.stderr
         assert b"used=0 live=0" in result.stderr, result.stderr
-        if not success:
+        if result.returncode!=0:
             assert not result.stdout, "Failed navigation must not publish partial JSON"
         return result
     write();result=run();entries=json.loads(result.stdout)["toc"]
@@ -48,7 +49,10 @@ with tempfile.TemporaryDirectory() as folder:
     assert [e["level"] for e in entries]==[0,1]
     assert [e["spine_index"] for e in entries]==[0,1] and entries[0]["fragment"]=="章一"
     attempts=int(re.search(rb"attempts=(\d+)",result.stderr)[1])
-    for fault in range(1,attempts+1):run(False,{"PN_EPUB_FAIL_AT":str(fault)})
+    for fault in range(1,attempts+1):
+        failed=run(None,{"PN_EPUB_FAIL_AT":str(fault)})
+        # 可选目录暂存失败可流式成功，目录必须逐字节相同。/ Optional directory storage may fall back successfully, with byte-identical navigation.
+        if failed.returncode==0:assert failed.stdout==result.stdout
     write(repeat=True);assert json.loads(run().stdout)["toc"][0]["spine_index"]==0
     write(ncx.encode('utf-16'));run()
     write();result=subprocess.run([binary,str(path),"--toc"],capture_output=True,env=dict(os.environ,PN_EPUB_DETACH="1"),timeout=30)

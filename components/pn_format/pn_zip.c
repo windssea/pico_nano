@@ -19,7 +19,7 @@ typedef struct {
     uint16_t name_length,method,flags;
     bool directory;
 } entry_t;
-typedef struct {pn_pool_t *pool;pn_text_source_t source;entry_t *entries;uint32_t count,directory;unsigned streams;} archive_t;
+typedef struct {pn_pool_t *pool;pn_text_source_t source;entry_t *entries;uint32_t count,directory;unsigned streams;uint8_t *directory_bytes;size_t directory_size;} archive_t;
 typedef struct {
     archive_t *archive;entry_t entry;z_stream inflate;
     uint32_t packed_read,produced,crc;
@@ -33,6 +33,10 @@ pn_status_t pn_zip_validate(pn_zip_t *zip){return !zip || !zip->impl?PN_INVALID:
 static pn_status_t read_at(archive_t *a,uint64_t off,uint8_t *out,size_t size){
     pn_status_t status=current(a);if(status!=PN_OK)return status;
     if(off>a->source.size || size>a->source.size-off)return PN_CORRUPT;
+    // 打开时中央目录快照避免与远处local头交替读卡；仍验证介质。/ An opening-time directory snapshot avoids alternating card reads with distant local headers; still validate media.
+    if(a->directory_bytes && off>=a->directory && off-a->directory<=a->directory_size && size<=a->directory_size-(size_t)(off-a->directory)){
+        memcpy(out,a->directory_bytes+(size_t)(off-a->directory),size);return current(a);
+    }
     size_t done=0;while(done<size){size_t n=0;status=a->source.read_at(a->source.ctx,off+done,out+done,size-done,&n);if(status!=PN_OK)return status;if(!n || n>size-done)return PN_IO;done+=n;}
     return current(a);
 }
@@ -102,6 +106,9 @@ static pn_status_t pn_zip_open_impl(pn_zip_t *zip,pn_pool_t *pool,const pn_text_
     if(a->directory>eocd || directory_size!=eocd-a->directory){status=PN_CORRUPT;goto failed;}
     pn_free(tail);tail=NULL;
     if(a->count){a->entries=pn_alloc_tagged(pool,PN_MEM_DOCUMENT,a->count*sizeof *a->entries);if(!a->entries){status=PN_NO_MEMORY;goto failed;}}
+    // 最多128KiB暂存；准入失败保留原有逐段校验路径，不保留到阅读会话。/ At most 128 KiB of temporary storage; admission failure keeps original validation, never retaining it for reading.
+    if(directory_size && directory_size<=128u*1024u){uint8_t *snapshot=pn_cache_alloc(pool,PN_CACHE_CHAPTER,PN_MEM_DOCUMENT,directory_size);
+        if(snapshot){status=read_at(a,a->directory,snapshot,directory_size);if(status!=PN_OK){pn_free(snapshot);goto failed;}a->directory_bytes=snapshot;a->directory_size=directory_size;}}
     uint32_t cursor=a->directory;uint64_t total=0;
     for(uint32_t i=0;i<a->count;i++){
         uint8_t h[46];if(cursor>eocd || eocd-cursor<46){status=PN_CORRUPT;goto failed;}status=read_at(a,cursor,h,sizeof h);if(status!=PN_OK)goto failed;
@@ -127,9 +134,9 @@ static pn_status_t pn_zip_open_impl(pn_zip_t *zip,pn_pool_t *pool,const pn_text_
         char x[PN_ZIP_PATH_MAX],y[PN_ZIP_PATH_MAX];status=name_at(a,&a->entries[i],x);if(status==PN_OK)status=name_at(a,&a->entries[j],y);if(status!=PN_OK)goto failed;
         if(!strcmp(x,y)){status=PN_CORRUPT;goto failed;}
     }
-    status=current(a);if(status!=PN_OK)goto failed;zip->impl=a;return PN_OK;
+    status=current(a);if(status!=PN_OK)goto failed;pn_free(a->directory_bytes);a->directory_bytes=NULL;a->directory_size=0;zip->impl=a;return PN_OK;
 failed:
-    pn_free(tail);pn_free(a->entries);pn_free(a);return status;
+    pn_free(tail);pn_free(a->directory_bytes);pn_free(a->entries);pn_free(a);return status;
 }
 pn_status_t pn_zip_open(pn_zip_t *zip,pn_pool_t *pool,const pn_text_source_t *source){
     pn_profile_span_t span;pn_profile_begin(&span,pool,"epub.zip");

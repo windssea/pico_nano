@@ -10,9 +10,9 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
-typedef struct {bool fail;pn_pool_t *save_fault;unsigned calls,tag;uint64_t hash;} screen_t;
+typedef struct {bool fail;pn_pool_t *save_fault;unsigned calls,tag;pn_refresh_t profile;uint64_t hash;} screen_t;
 static pn_status_t present(void *ctx,const pn_frame_t *frame,pn_refresh_t profile){
-    (void)profile;screen_t *s=ctx;s->calls++;s->tag=pn_frame_get(frame,17,17);if(s->fail)return PN_IO;uint64_t hash=1469598103934665603ULL;for(int y=0;y<frame->height;y++)for(int x=0;x<frame->width;x++){hash^=pn_frame_get(frame,x,y);hash*=1099511628211ULL;}s->hash=hash;if(s->save_fault){s->save_fault->fail_at=s->save_fault->attempts+1;s->save_fault=NULL;}return PN_OK;
+    screen_t *s=ctx;s->profile=profile;s->calls++;s->tag=pn_frame_get(frame,17,17);if(s->fail)return PN_IO;uint64_t hash=1469598103934665603ULL;for(int y=0;y<frame->height;y++)for(int x=0;x<frame->width;x++){hash^=pn_frame_get(frame,x,y);hash*=1099511628211ULL;}s->hash=hash;if(s->save_fault){s->save_fault->fail_at=s->save_fault->attempts+1;s->save_fault=NULL;}return PN_OK;
 }
 static bool same(const pn_epub_progress_t *a,const pn_epub_progress_t *b){return !memcmp(a->book.sha256,b->book.sha256,32) && !strcmp(a->location.path,b->location.path) && a->location.position.element==b->location.position.element && a->location.position.offset==b->location.position.offset && a->location.position.run==b->location.position.run && a->location.position.kind==b->location.position.kind;}
 /* 最终目标页使用真实候选字体，并留可观察像素；测试不伪造呈现成功。/ The destination draws the actual candidate font and observable pixels; tests never fake presentation success. */
@@ -138,6 +138,18 @@ int main(int argc,char **argv){
     // 全局选择覆盖启动默认，逐书选择优先，身份不匹配拒绝打开。/ Global selections override boot defaults, per-book selections win and identity mismatches reject opening.
     pn_media_t font_media;pn_media_init(&font_media);assert(pn_media_attach(&font_media,1)==PN_OK);pn_media_lease_t font_lease;assert(pn_media_acquire(&font_media,PN_MEDIA_READ,&font_lease)==PN_OK);
     pn_font_preferences_t fonts={0};fonts.primary.kind=PN_FONT_FILE;strcpy(fonts.primary.path,argv[3]);struct stat font_stat;assert(!stat(argv[3],&font_stat));fonts.primary.size=(uint64_t)font_stat.st_size;assert(pn_identity_file(&font_media,&font_lease,argv[3],PN_FONT_REFERENCE_MAX_BYTES,&fonts.primary.identity)==PN_OK);
+    assert(pn_epub_app_open(&app,&pool,argv[1],argv[3],NULL,44,0)==PN_OK && pn_epub_app_step(&app,PN_APP_OPEN,now++,present,&screen)==PN_OK);
+    pn_style_t legacy;assert(pn_epub_app_style_get(&app,&legacy)==PN_OK);legacy.gl_before_clear=0;
+    assert(pn_epub_app_style_apply(&app,&legacy,now++,present,&screen)==PN_OK);
+    for(unsigned p=0;p<3;p++){
+        const unsigned periods[]={6,14,24};unsigned period=periods[p];pn_epub_app_refresh_period(&app,period);pn_epub_app_refresh_reset(&app);
+        for(unsigned i=1;i<=period;i++){
+            assert(pn_epub_app_step(&app,PN_APP_OPEN,now++,present,&screen)==PN_OK && screen.profile==PN_REFRESH_GL16);
+            assert(pn_epub_app_step(&app,i%2?PN_APP_NEXT:PN_APP_PREVIOUS,now++,present,&screen)==PN_OK);
+            assert(screen.profile==(i==period?PN_REFRESH_GC16:PN_REFRESH_GL16));
+        }
+    }
+    assert(pn_epub_app_close(&app,now++)==PN_OK && !pool.used && !pool.live);
     assert(pn_media_release(&font_media,&font_lease)==PN_OK && pn_media_acquire(&font_media,PN_MEDIA_WRITE,&font_lease)==PN_OK);
     pn_journal_files_t global_files,book_files;pn_journal_io_t global_io,book_io;assert(pn_font_preferences_files(&global_files,&font_media,&font_lease,argv[2],NULL,&global_io)==PN_OK && pn_font_preferences_files(&book_files,&font_media,&font_lease,argv[2],&current.book,&book_io)==PN_OK);
     assert(pn_font_preferences_save(&global_io,&pool,NULL,&fonts)==PN_OK);

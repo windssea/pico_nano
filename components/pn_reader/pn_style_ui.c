@@ -1,8 +1,8 @@
 /*
  * SPDX-FileCopyrightText: 2026 pico_nano contributors
  * SPDX-License-Identifier: Apache-2.0
- * 中文：七项排版草稿、正文预览与应用/取消；绘制不写配置。
- * English: seven-field typesetting drafts, body preview and apply/cancel; painting never writes configuration.
+ * 中文：六项排版草稿、正文预览与应用/取消；绘制不写配置。
+ * English: six-field typesetting drafts, body preview and apply/cancel; painting never writes configuration.
  * 冻结：变化先进入草稿；写入失败不关闭界面。
  * Frozen: changes enter drafts first; write failures never dismiss the UI.
  */
@@ -38,16 +38,15 @@ static pn_status_t cancel(pn_style_ui_t *u,uint64_t now,pn_reader_present_fn pre
 #define BOX_X 300
 #define BOX_W 352
 #define MORE_STEP_Y0 156
-static const char *const names[PN_SUI_FIELDS]={"字号","行距","段距","首行缩进","字间距","边距","清残影"};
+static const char *const names[PN_SUI_FIELDS]={"字号","行距","段距","首行缩进","字间距","边距"};
 typedef struct {unsigned pixels,line,gap,indent,margin;} preset_t;
 static const preset_t presets[3]={{44,145,40,2,32},{36,125,20,2,24},{56,160,40,2,32}};
 static const char *const preset_names[3]={"舒适","紧凑","大字"};
-static unsigned field_value(const pn_style_t *s,unsigned i){switch(i){case 0:return s->pixels;case 1:return s->line_percent;case 2:return s->gap_percent;case 3:return s->indent_em;case 4:return s->tracking_percent;case 5:return s->margin;default:return s->gl_before_clear;}}
-static void field_set(pn_style_t *s,unsigned i,unsigned v){switch(i){case 0:s->pixels=(uint16_t)v;break;case 1:s->line_percent=(uint16_t)v;break;case 2:s->gap_percent=(uint16_t)v;break;case 3:s->indent_em=(uint16_t)v;break;case 4:s->tracking_percent=(uint16_t)v;break;case 5:s->margin=(uint16_t)v;break;default:s->gl_before_clear=(uint16_t)v;}}
+static unsigned field_value(const pn_style_t *s,unsigned i){switch(i){case 0:return s->pixels;case 1:return s->line_percent;case 2:return s->gap_percent;case 3:return s->indent_em;case 4:return s->tracking_percent;default:return s->margin;}}
+static void field_set(pn_style_t *s,unsigned i,unsigned v){switch(i){case 0:s->pixels=(uint16_t)v;break;case 1:s->line_percent=(uint16_t)v;break;case 2:s->gap_percent=(uint16_t)v;break;case 3:s->indent_em=(uint16_t)v;break;case 4:s->tracking_percent=(uint16_t)v;break;default:s->margin=(uint16_t)v;break;}}
 static void field_text(const pn_style_t *s,unsigned i,char *out,size_t cap){
     unsigned v=field_value(s,i);
-    if(i==6)snprintf(out,cap,v?"每 %u 页":"每页",v+1);
-    else if(i==1 || i==2)snprintf(out,cap,"%u.%02u",v/100,v%100);
+    if(i==1 || i==2)snprintf(out,cap,"%u.%02u",v/100,v%100);
     else if(i==3)snprintf(out,cap,"%u 字",v);
     else if(i==4)snprintf(out,cap,"%u%%",v);
     else if(i==5)snprintf(out,cap,v<=20?"窄":v<=32?"中":"宽");
@@ -132,21 +131,21 @@ static pn_status_t paint_main(pn_style_ui_t *u,pn_font_t *font,pn_frame_t *frame
     pn_frame_rect(frame,PN_UI_MARGIN,INDENT_ROW_Y+81,620,1,PN_UI_SELECT);
     // 更多入口与固定“应用”。/ The "more" entry and the fixed Apply button.
     if(s==PN_OK)s=pn_font_size(font,32);
-    if(s==PN_OK)s=pn_w_text(font,frame,"字距与清残影",PN_UI_MARGIN,MORE_Y+52,400,PN_ALIGN_LEFT);
+    if(s==PN_OK)s=pn_w_text(font,frame,"字间距",PN_UI_MARGIN,MORE_Y+52,400,PN_ALIGN_LEFT);
     pn_w_icon(frame,PN_ICON_CHEVRON,PN_UI_WIDTH-PN_UI_MARGIN-28,MORE_Y+28,28,PN_UI_INK);
     return s;
 }
 static pn_status_t paint_more(pn_style_ui_t *u,pn_font_t *font,pn_frame_t *frame){
-    pn_status_t s=PN_OK;static const unsigned rows[2]={4,6};
-    for(unsigned i=0;i<2 && s==PN_OK;i++)s=stepper(font,frame,&u->draft,rows[i],MORE_STEP_Y0+(int)i*STEP_PITCH,u->selected==rows[i]);
+    pn_status_t s=PN_OK;static const unsigned rows[1]={4};
+    for(unsigned i=0;i<1 && s==PN_OK;i++)s=stepper(font,frame,&u->draft,rows[i],MORE_STEP_Y0+(int)i*STEP_PITCH,u->selected==rows[i]);
     if(s==PN_OK)s=pn_font_size(font,26);
-    if(s==PN_OK)s=pn_w_text_lines_ex(font,frame,"字距按字号的百分比计算。清残影是每隔几页做一次整屏刷新，数字越小越干净、闪屏越多。",PN_UI_MARGIN,MORE_STEP_Y0+2*STEP_PITCH+40,620,4,38,PN_UI_MUTED,false);
+    if(s==PN_OK)s=pn_w_text_lines_ex(font,frame,"字距按字号的百分比计算。清残影统一在系统设置的“刷新与屏幕”调整，对所有书籍生效。",PN_UI_MARGIN,MORE_STEP_Y0+2*STEP_PITCH+40,620,4,38,PN_UI_MUTED,false);
     return s;
 }
 pn_status_t pn_style_ui_render(void *ctx,pn_font_t *font,pn_font_t *metadata,pn_frame_t *frame){
     (void)metadata;pn_style_ui_t *u=ctx;if(!live(u) || !u->active || !font || !font->impl || !frame || !frame->pixels)return PN_INVALID;pn_frame_clear(frame,PN_UI_PAPER);
     int original=font->pixels;
-    pn_status_t s=pn_w_header(font,frame,"< 返回",u->more?"字距与清残影":"排版设置",NULL);
+    pn_status_t s=pn_w_header(font,frame,"< 返回",u->more?"字间距":"排版设置",NULL);
     if(s==PN_OK && !u->more){s=pn_font_size(font,26);if(s==PN_OK)s=pn_w_text_ex(font,frame,"恢复默认",480,100,172,PN_ALIGN_RIGHT,PN_UI_MUTED,false);}
     if(s==PN_OK)s=u->more?paint_more(u,font,frame):paint_main(u,font,frame);
     // 底部固定的深色“应用”；取消即左上返回，“恢复默认”在右上。/ A fixed dark Apply at the bottom; cancelling is the Back at the top left and Restore defaults sits at the top right.
@@ -166,13 +165,13 @@ pn_status_t pn_style_ui_open(pn_style_ui_t *u,pn_reader_app_t *reader,pn_reader_
 pn_status_t pn_style_ui_event(pn_style_ui_t *u,int command,uint64_t now,pn_reader_present_fn present,void *ctx){
     if(!u || !u->active || !live(u))return PN_INVALID;
     if(!u->presented && command!=PN_SUI_RETRY)return PN_BUSY;
-    if(command==PN_SUI_FORM)u->more=u->selected==4 || u->selected==6;
+    if(command==PN_SUI_FORM)u->more=u->selected==4;
     if(command==PN_SUI_RETRY || command==PN_SUI_FORM)return pn_style_ui_present(u,present,ctx);
     pn_status_t status=PN_OK;u->notice=NULL;
     if(command==PN_SUI_FONTS){if(u->application_failed){u->notice="请先应用或取消排版";(void)pn_style_ui_present(u,present,ctx);return PN_BUSY;}if(u->did_preview){status=cancel(u,now,present,ctx);if(status!=PN_OK)return status;u->did_preview=false;}u->request_fonts=true;return PN_OK;}
     if(command>=PN_SUI_FIELD && command<PN_SUI_FIELD+PN_SUI_FIELDS*2){
-        static const unsigned steps[]={2,5,5,1,5,2,1},minimum[]={28,100,0,0,0,16,0},maximum[]={72,220,100,2,50,80,30};
-        unsigned field=(unsigned)(command-PN_SUI_FIELD)/2;bool up=(command-PN_SUI_FIELD)&1;unsigned v=field_value(&u->draft,field);u->selected=field;u->more=field==4 || field==6;
+        static const unsigned steps[]={2,5,5,1,5,2},minimum[]={28,100,0,0,0,16},maximum[]={72,220,100,2,50,80};
+        unsigned field=(unsigned)(command-PN_SUI_FIELD)/2;bool up=(command-PN_SUI_FIELD)&1;unsigned v=field_value(&u->draft,field);u->selected=field;u->more=field==4;
         // 页边距只有窄/中/宽三档。/ Margins have just three levels: narrow, medium and wide.
         if(field==5){unsigned level=v<=20?0u:v<=32?1u:2u;static const unsigned margins[3]={20,32,48};if(up && level<2)level++;else if(!up && level>0)level--;else status=PN_EMPTY;field_set(&u->draft,5,margins[level]);}
         else{
@@ -198,8 +197,8 @@ int pn_style_ui_hit(const pn_style_ui_t *u,int x,int y){
     if(y<PN_W_HEADER_H){if(pn_w_header_hit(x,y,false)==1)return u->more?PN_SUI_BACK_MAIN:PN_SUI_CANCEL;return !u->more && x>=480 && y>=44?PN_SUI_RESET:-1;}
     if(y>=APPLY_Y && y<APPLY_Y+APPLY_H)return x>=PN_UI_MARGIN && x<652?PN_SUI_APPLY:-1;
     if(!u->more && y>=PREVIEW_Y && y<PREVIEW_Y+PREVIEW_H && x>=32 && x<652)return PN_SUI_PREVIEW;
-    static const unsigned main_rows[4]={0,1,2,5},more_rows[2]={4,6};
-    const unsigned *rows=u->more?more_rows:main_rows;unsigned count=u->more?2:4;int top=u->more?MORE_STEP_Y0:STEP_Y0;
+    static const unsigned main_rows[4]={0,1,2,5},more_rows[1]={4};
+    const unsigned *rows=u->more?more_rows:main_rows;unsigned count=u->more?1:4;int top=u->more?MORE_STEP_Y0:STEP_Y0;
     for(unsigned i=0;i<count;i++){
         int row=top+(int)i*STEP_PITCH;
         if(y>=row && y<row+STEP_PITCH){if(x>=BOX_X && x<BOX_X+110)return PN_SUI_FIELD+(int)rows[i]*2;if(x>=BOX_X+BOX_W-110 && x<BOX_X+BOX_W)return PN_SUI_FIELD+(int)rows[i]*2+1;return -1;}
