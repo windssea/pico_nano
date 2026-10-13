@@ -40,7 +40,7 @@ def read_upgrade(folder):
     if files["partitionTable"]["size"] != 0xc00 or not 0 < files["app"]["size"] <= 0x600000:
         raise SystemExit("Invalid preserving upgrade sizes")
     version = f"{match.group(1)}+{match.group(2)}"
-    return {"version": version, "commit": metadata["source_commit"], "mode": "app-only", "verifiedOnHardware": False,
+    return {"version": version, "commit": metadata["source_commit"], "builtAt": metadata.get("built_at", ""), "mode": "app-only", "verifiedOnHardware": False,
             "path": f"firmware/{version}/", "files": files, "_folder": folder}
 
 
@@ -90,7 +90,7 @@ def build(out):
             releases.append(read_release(folder))
         elif UPGRADE.fullmatch(folder.name):
             releases.append(read_upgrade(folder))
-    releases.sort(key=lambda r: (version_key(r["version"].split("+")[0]), r.get("mode") == "app-only"), reverse=True)
+    releases.sort(key=lambda r: (version_key(r["version"].split("+")[0]), r.get("mode") == "app-only", r.get("builtAt", "")), reverse=True)
     if not releases:
         raise SystemExit("releases/ has no pico_nano-<version>-esp32s3 folder")
     if out.exists():

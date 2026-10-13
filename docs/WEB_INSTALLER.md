@@ -6,7 +6,7 @@
 
 2026-10-13新增 `0.0.57+c696890` 保留布局升级，固件来源为提交 c696890：只下载应用和已核对旧分区表样本，严格匹配设备布局后只写 `0x20000` 应用；不读取内部文件系统，不写 otadata/bootloader/分区表/NVS/数据。清除和初始化选项禁用。仅适用于当前已从 ota_0 启动的阅读器，不用于首次安装。原有完整安装包与规则仍单独保留。具体操作见 [异机烧录](FLASH_ON_ANOTHER_PC.md)。
 
-GitHub Pages此前部署返回404，部署日志提示确认是否启用Pages；在线地址尚不可用。管理员须在仓库Settings → Pages选择GitHub Actions来源，再重跑工作流。可先使用发布目录里的本地网页ZIP（解压后执行`py serve.py`，打开`http://localhost:8765/`）。本轮网页计划/控制器软件测试通过，但浏览器串口连接、实际写入和复位启动仍待用户实测；当前esptool-js复位请求不能保证原生USB自动退出下载模式。
+GitHub Pages已由用户启用，在线入口为 `https://windssea.github.io/pico_nano/`，后续默认由网页交付。此前c696890在线摘要校验通过，用户已实际网页烧录并反馈自动重启失败；该反馈只证明进入烧录流程，不能等同全部产品验收。新RTC复位与USB无线互斥固件仍待本次刷入复验。发布目录也提供本地网页ZIP（解压后执行`py serve.py`，打开`http://localhost:8765/`）。
 
 | 部分 | 作用 |
 | --- | --- |
@@ -17,6 +17,10 @@ GitHub Pages此前部署返回404，部署日志提示确认是否启用Pages；
 | `tests/installer/plan.test.mjs` | 写入计划与 MD5 的主机测试 |
 
 ## 流程
+
+2026-10-13复位修正：旧esptool-js 0.5.7的 `after("hard_reset")` 仅走RTS策略，没有命令行esptool 5.3.1针对ESP32-S3的清除强制下载标志及watchdog序列。本项目新增自有 `reset.js`，不修改vendor：所有S3复位先仅清RTC FORCE_DOWNLOAD_BOOT位；识别Espressif原生USB VID/PID 303A:1001后使用命令行同样的RTC watchdog寄存器序列，其他串口仍走RTS。watchdog触发后USB可能先断开再返回响应，界面提示观察启动；触发前失败则明确区分“固件已写入校验通过”和“自动复位未完成”，不把复位失败误报成固件写入失败。寄存器仅用于ESP系统复位，不写Flash/eFuse/PMU。
+
+这些分支已有模拟传输回归，网页实际复位、Windows重新枚举和固件启动仍由用户验证。新无线固件传书时暂停USB数据；请先退出传书，等USB恢复，再连接安装器。
 
 1. 读取清单，下载所选版本的文件，按清单 SHA-256 校验。
 2. 连接后确认芯片为 ESP32-S3、闪存 16 MiB；读取 0x8000 分区表，以及 data、wallpaper 分区开头 8 KiB。无法识别头部时再读取完整分区，确认是否全为 0xFF。芯片检测不能证明设备型号，用户必须勾选确认是 RDP-G01-W。

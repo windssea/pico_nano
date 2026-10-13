@@ -8,6 +8,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "pn_brand.h"
 #include "device_wifi.h"
+#include "device_usb_radio.h"
 #include "esp_wifi.h"
 #include "esp_wifi_default.h"
 #include "esp_event.h"
@@ -28,6 +29,7 @@ typedef struct {
  esp_event_handler_instance_t wifi_events,ip_events;
  pn_device_wifi_state_t state;
  bool loop_owned,initialized,started,start_attempted,closing,ap_ready,pending_connect;
+ bool usb_enabled; ///< 无线前USB数据状态，完整退出后恢复 / USB data state before radio, restored after complete teardown
  uint64_t window,next_retry;
 } wifi_t;
 static wifi_t *active;
@@ -69,6 +71,7 @@ pn_status_t pn_device_wifi_close(pn_device_wifi_t *out){
  if(s->initialized){if(esp_wifi_deinit()!=ESP_OK)return PN_IO;s->initialized=false;}
  if(s->netif){if(esp_wifi_clear_default_wifi_driver_and_handlers(s->netif)!=ESP_OK)return PN_IO;esp_netif_destroy(s->netif);s->netif=NULL;}
  if(s->loop_owned){if(esp_event_loop_delete_default()!=ESP_OK)return PN_IO;s->loop_owned=false;}
+ pn_device_usb_radio_restore(s->usb_enabled);
  vSemaphoreDelete(s->mutex);clear_secret(s,sizeof *s);heap_caps_free(s);active=NULL;out->impl=NULL;return PN_OK;
 }
 pn_status_t pn_device_wifi_open(pn_device_wifi_t *out,const pn_device_wifi_config_t *config){
@@ -85,6 +88,8 @@ pn_status_t pn_device_wifi_open(pn_device_wifi_t *out,const pn_device_wifi_confi
  wifi_t *s=heap_caps_malloc(sizeof *s,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);if(!s)return PN_NO_MEMORY;memset(s,0,sizeof *s);
  s->mutex=xSemaphoreCreateMutex();if(!s->mutex){heap_caps_free(s);return PN_NO_MEMORY;}
  s->state.mode=config->mode;s->state.phase=PN_WIFI_STARTING;s->state.generation=1;s->window=now_ms();out->impl=s;active=s;
+ // 无线初始化前暂停USB数据，失败清理也走同一恢复路径。 / Suspend USB before radio initialization; failures use the same restoration path.
+ s->usb_enabled=pn_device_usb_radio_suspend();
  wifi_config_t settings={0};esp_err_t result=ESP_OK;
  if(config->mode==PN_WIFI_AP){
   uint8_t random[12],mac[6];bootloader_random_enable();esp_fill_random(random,sizeof random);bootloader_random_disable();

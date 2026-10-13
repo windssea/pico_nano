@@ -2,6 +2,7 @@
 /// Web-installer UI and serial flow: read the device state, write per plan.js and verify every region by MD5.
 import { ESPLoader, Transport } from "./vendor/esptool-js-0.5.7/bundle.js";
 import { isLittleFs, layoutOf, md5, planInstall, TABLE_OFFSET, TABLE_SIZE } from "./plan.js";
+import { resetAfterFlash } from "./reset.js";
 
 const FLASH_BYTES = 16 * 1024 * 1024;
 const BAUD = 115200;
@@ -131,7 +132,7 @@ async function connect() {
   const flashKiB = await state.loader.getFlashSize();
   if (flashKiB * 1024 !== FLASH_BYTES) throw new Error(`闪存容量为 ${flashKiB} KiB，本固件需要 16 MiB`);
   const mac = await state.loader.chip.readMac(state.loader);
-  state.device = { chip, mac };
+  state.device = { chip, mac, portInfo: port.getInfo() };
   $("device").textContent = `${chip} · 16 MiB · MAC ${mac}`;
   await prepare();
 }
@@ -249,7 +250,18 @@ async function install() {
     });
     progress("写入并校验完成", 1, 1);
     log("全部区域 MD5 校验通过，正在重启设备…");
-    await state.loader.after("hard_reset");
+    try {
+      const reset = await resetAfterFlash(state.loader, state.device.portInfo);
+      if (reset?.responseLost) log("已发送 watchdog 复位；USB响应中断，请观察设备启动。");
+    } catch (error) {
+      log(`固件写入与MD5校验已成功，但自动复位失败：${error.message || error}`);
+      await disconnect();
+      state.plan = null;
+      state.busy = false;
+      syncButtons();
+      status("固件写入校验成功，自动复位未完成。请按板级方式复位或拔线开机，无需因复位错误重新刷写。", "warn");
+      return;
+    }
     await disconnect();
     state.plan = null;
     status("写入校验通过，已发送复位请求。请观察设备是否正常启动；若仍停在下载模式，请按板级方式复位或拔线开机。", "ok");

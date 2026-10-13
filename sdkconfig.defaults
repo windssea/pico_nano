@@ -30,6 +30,9 @@ CONFIG_ESP32S3_DATA_CACHE_64KB=y
 # PNG 解码的有界局部缓冲需要额外栈空间。/ Bounded PNG decoder locals need additional stack space.
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+# 无线会话暂停USB数据以使用SDK的RF干扰规避；退出后板级适配恢复数据，充电不变。
+# Radio sessions suspend USB data for the SDK RF workaround; the board restores data on exit, leaving charging intact.
+CONFIG_ESP_PHY_ENABLE_USB=n
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 CONFIG_COMPILER_OPTIMIZATION_PERF=y
 # 1ms tick：EPD 上电流程里按毫秒轮询 PGOOD，100Hz 的 tick 会把每次等待放大到 10ms

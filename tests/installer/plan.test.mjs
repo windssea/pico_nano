@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import vm from "node:vm";
+import { resetAfterFlash } from "../../installer/reset.js";
 import { isLittleFs, layoutOf, md5, parseTable, planInstall, TABLE_OFFSET, TABLE_SIZE } from "../../installer/plan.js";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
@@ -33,6 +34,50 @@ function table(rows) {
   return out;
 }
 const names = (plan) => plan.steps.map((s) => `${s.kind}@0x${s.address.toString(16)}`);
+
+test("native USB reset clears download latch and uses esptool S3 watchdog sequence", async () => {
+  const writes = [], after = [], waits = [];
+  const loader = { chip: { CHIP_NAME: "ESP32-S3" }, async writeReg(...args) { writes.push(args); }, async after(mode) { after.push(mode); } };
+  await resetAfterFlash(loader, { usbVendorId: 0x303a, usbProductId: 0x1001 }, async (ms) => waits.push(ms));
+  assert.deepEqual(writes, [[0x6000812c, 0, 1], [0x600080b0, 0x50d83aa1], [0x6000809c, 2000], [0x60008098, 0xd0000102], [0x600080b0, 0]]);
+  assert.deepEqual(after, []);
+  assert.deepEqual(waits, [500]);
+  writes.length = 0;
+  await resetAfterFlash(loader, { usbVendorId: 0x10c4, usbProductId: 0xea60 });
+  assert.deepEqual(writes, [[0x6000812c, 0, 1]]);
+  assert.deepEqual(after, ["hard_reset"]);
+});
+
+test("reset transport failure is tolerated only after watchdog trigger; wrong target never writes", async () => {
+  const native = { usbVendorId: 0x303a, usbProductId: 0x1001 };
+  const loader = { chip: { CHIP_NAME: "ESP32-S3" }, async writeReg(address) { if (address === 0x60008098) throw new Error("USB disconnected"); } };
+  assert.equal((await resetAfterFlash(loader, native, async () => {})).responseLost, true);
+  loader.writeReg = async () => { throw new Error("initial write failed"); };
+  await assert.rejects(resetAfterFlash(loader, native, async () => {}), /initial write failed/);
+  loader.chip.CHIP_NAME = "ESP32";
+  await assert.rejects(resetAfterFlash(loader, native), /不是 ESP32-S3/);
+});
+
+test("page distinguishes post-verify reset failure from write failure", async () => {
+  const elements = new Map();
+  const element = () => ({ checked: false, dataset: {}, style: {}, append() {}, replaceChildren() {}, addEventListener() {} });
+  const document = { createElement: element, getElementById(id) { if (!elements.has(id)) elements.set(id, element()); return elements.get(id); } };
+  let resetCalls = 0;
+  const loader = { ui8ToBstr() { return "image"; }, async writeFlash() {} };
+  const context = vm.createContext({ document, navigator: {}, console: { ...console, error() {} }, loader, files,
+    resetAfterFlash: async () => { resetCalls++; throw new Error("reset unavailable"); }, md5 });
+  const source = readFileSync(join(root, "installer/app.js"), "utf8").replace(/^import .*;\r?$/gm, "").replace("init().then(syncButtons);", "");
+  vm.runInContext(source, context);
+  const setup = "state.loader=loader;state.device={portInfo:{}};state.plan={steps:[{name:'app',address:0x20000,data:files.app}]};";
+  await vm.runInContext(setup + "install();", context);
+  assert.equal(resetCalls, 1);
+  assert.match(document.getElementById("status").textContent, /固件写入校验成功，自动复位未完成/);
+  assert.equal(vm.runInContext("state.plan", context), null);
+  loader.writeFlash = async () => { throw new Error("write unavailable"); };
+  await vm.runInContext(setup + "install();", context);
+  assert.equal(resetCalls, 1);
+  assert.match(document.getElementById("status").textContent, /安装中断：write unavailable/);
+});
 
 test("shipped preserving upgrade writes only app and blocks other layouts or destructive options", () => {
   const folder = join(root, "releases/pico_nano-0.0.57-c696890-upgrade");

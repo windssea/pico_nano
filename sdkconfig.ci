@@ -16,6 +16,8 @@ CONFIG_ESP32S3_DATA_CACHE_64KB=y
 # 与产品的 PNG 解码栈预算一致。/ Match the product PNG decoding stack budget.
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+# 与产品的USB/无线互斥行为一致，仅时序保持CI隔离。 / Match product USB/radio exclusion while keeping CI timing isolated.
+CONFIG_ESP_PHY_ENABLE_USB=n
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 CONFIG_COMPILER_OPTIMIZATION_PERF=y
 CONFIG_FREERTOS_HZ=1000
