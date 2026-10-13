@@ -250,9 +250,11 @@ async function install() {
     });
     progress("写入并校验完成", 1, 1);
     log("全部区域 MD5 校验通过，正在重启设备…");
+    let resetUncertain = false;
     try {
       const reset = await resetAfterFlash(state.loader, state.device.portInfo);
-      if (reset?.responseLost) log("已发送 watchdog 复位；USB响应中断，请观察设备启动。");
+      resetUncertain = !!reset?.responseLost;
+      if (resetUncertain) log("watchdog 复位步骤USB响应中断，启动结果需观察。");
     } catch (error) {
       log(`固件写入与MD5校验已成功，但自动复位失败：${error.message || error}`);
       await disconnect();
@@ -264,7 +266,7 @@ async function install() {
     }
     await disconnect();
     state.plan = null;
-    status("写入校验通过，已发送复位请求。请观察设备是否正常启动；若仍停在下载模式，请按板级方式复位或拔线开机。", "ok");
+    status(resetUncertain ? "写入校验通过，复位步骤遇到USB断开。请确认设备是否启动；未启动时按板级方式复位或拔线开机。" : "写入校验通过，已发送复位请求。请观察设备是否正常启动；若仍停在下载模式，请按板级方式复位或拔线开机。", resetUncertain ? "warn" : "ok");
   } catch (error) {
     fail(new Error(`安装中断：${error.message || error}。设备可能无法正常启动，请手动进入下载模式后重新安装，或用外部工具写回备份。`));
     return;
