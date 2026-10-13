@@ -7,6 +7,7 @@
  */
 #define _POSIX_C_SOURCE 200809L
 #include "device_transfer.h"
+#include "device_card_presence.h"
 #include "device_transfer_http.h"
 #include "device_upload_storage.h"
 #include "read_pico_sd.h"
@@ -18,6 +19,7 @@
 #include "freertos/semphr.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #else
 #include <pthread.h>
 #include <stdlib.h>
@@ -49,6 +51,7 @@ typedef struct {
 #ifdef ESP_PLATFORM
 static void lock(transfer_t *s){xSemaphoreTake(s->mutex,portMAX_DELAY);}
 static void unlock(transfer_t *s){xSemaphoreGive(s->mutex);}
+static uint64_t now_ms(void){return (uint64_t)(esp_timer_get_time()/1000);}
 static void pause_task(void){vTaskDelay(pdMS_TO_TICKS(20));}
 static void *allocate(size_t n){return heap_caps_malloc(n,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);}
 static void release(void *p){heap_caps_free(p);}
@@ -56,6 +59,7 @@ static void destroy(transfer_t *s){vSemaphoreDelete(s->mutex);}
 #else
 static void lock(transfer_t *s){pthread_mutex_lock(&s->mutex);}
 static void unlock(transfer_t *s){pthread_mutex_unlock(&s->mutex);}
+static uint64_t now_ms(void){struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return (uint64_t)t.tv_sec*1000u+(uint64_t)t.tv_nsec/1000000u;}
 static void pause_task(void){struct timespec t={.tv_nsec=20000000};nanosleep(&t,NULL);}
 static void *allocate(size_t n){return malloc(n);}
 static void release(void *p){free(p);}
@@ -94,13 +98,25 @@ static void run(transfer_t *s){
  if(cause==PN_OK && !stopping(s))cause=pn_device_wifi_open(&s->wifi,&s->config);
  memory_stage("wifi-open");
  volatile uint8_t *secret=(volatile uint8_t *)s->config.password;for(size_t i=0;i<sizeof s->config.password;i++)secret[i]=0;
- uint64_t network_generation=0;
+ uint64_t network_generation=0,card_error_since=0;
+ char network_address[16]={0};
  while(cause==PN_OK && !stopping(s)){
-  read_pico_sd_info_t card={0};(void)read_pico_sd_get_info(&card);
-  if(!card.present || !card.mounted){cause=PN_STALE_MEDIA;break;}
+  pn_status_t card=pn_device_card_presence();
+  if(card==PN_STALE_MEDIA){cause=card;break;}
+  if(card!=PN_OK){
+   uint64_t now=now_ms();
+   if(!card_error_since)card_error_since=now;
+   if(now>=card_error_since && now-card_error_since>=1000){cause=PN_IO;break;}
+   pause_task();continue;
+  }
+  card_error_since=0;
   cause=pn_device_wifi_poll(&s->wifi);if(cause!=PN_OK)break;
   pn_device_wifi_state_t network;cause=pn_device_wifi_state(&s->wifi,&network);if(cause!=PN_OK)break;
-  if(s->http.impl && (network.phase!=PN_WIFI_READY || network.generation!=network_generation)){cause=PN_STALE_JOB;break;}
+  // 短暂断连保留事务与监听服务；只有重连后地址改变才终止旧地址会话。 / Keep transactions/listeners through brief disconnects; terminate only when the reconnected address changes.
+  if(s->http.impl && network.phase==PN_WIFI_READY && network.generation!=network_generation){
+   if(strcmp(network.address,network_address)){cause=PN_STALE_JOB;break;}
+   network_generation=network.generation;
+  }
   if(!s->http.impl && network.phase==PN_WIFI_READY && !stopping(s)){
    cause=pn_device_transfer_http_open(&s->http,&s->worker,network.address,80);
    memory_stage("http-open");
@@ -108,14 +124,14 @@ static void run(transfer_t *s){
    cause=pn_device_transfer_http_network(&s->http,&s->sink);
    if(cause!=PN_OK)break;
    network_generation=network.generation;
+   strcpy(network_address,network.address);
   }
   pn_transfer_worker_state_t work={0};if(s->worker.impl)(void)pn_transfer_worker_state(&s->worker,&work);
-  char pin[7]={0};if(s->http.impl)(void)pn_device_transfer_http_code(&s->http,pin);
   lock(s);s->state.network=network;s->state.work=work;
-  if(!s->stop){s->state.phase=s->http.impl?PN_DTRANSFER_READY:PN_DTRANSFER_STARTING;memcpy(s->state.pin,pin,sizeof pin);}
+  if(!s->stop){s->state.phase=s->http.impl && network.phase==PN_WIFI_READY?PN_DTRANSFER_READY:PN_DTRANSFER_STARTING;}
   unlock(s);pause_task();
  }
- lock(s);s->stop=true;s->state.phase=PN_DTRANSFER_STOPPING;memset(s->state.pin,0,sizeof s->state.pin);unlock(s);
+ lock(s);s->stop=true;s->state.phase=PN_DTRANSFER_STOPPING;unlock(s);
 #ifdef ESP_PLATFORM
  ESP_LOGI("pn_transfer","stopping cause=%d",(int)cause);
 #endif
@@ -150,7 +166,7 @@ pn_status_t pn_device_transfer_open(pn_device_transfer_t *out,pn_media_t *media,
  if(!created){destroy(s);release(s);return PN_NO_MEMORY;}
  out->impl=s;return PN_OK;
 }
-pn_status_t pn_device_transfer_request_stop(pn_device_transfer_t *out){if(!out || !out->impl)return PN_INVALID;transfer_t *s=out->impl;lock(s);s->stop=true;s->retry=true;if(!s->state.released)s->state.phase=PN_DTRANSFER_STOPPING;memset(s->state.pin,0,sizeof s->state.pin);unlock(s);return PN_OK;}
+pn_status_t pn_device_transfer_request_stop(pn_device_transfer_t *out){if(!out || !out->impl)return PN_INVALID;transfer_t *s=out->impl;lock(s);s->stop=true;s->retry=true;if(!s->state.released)s->state.phase=PN_DTRANSFER_STOPPING;unlock(s);return PN_OK;}
 pn_status_t pn_device_transfer_state(pn_device_transfer_t *out,pn_device_transfer_state_t *state){if(!out || !out->impl || !state)return PN_INVALID;transfer_t *s=out->impl;lock(s);*state=s->state;unlock(s);return PN_OK;}
 pn_status_t pn_device_transfer_close(pn_device_transfer_t *out){
  if(!out)return PN_INVALID;

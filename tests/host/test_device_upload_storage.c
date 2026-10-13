@@ -10,13 +10,14 @@
 #include <sys/stat.h>
 #include <errno.h>
 static bool mounted=true,fail_space,lose_during_space;
+static bool fail_detect;
 static bool fail_sync,lose_during_sync;
 static unsigned sync_calls;
 int __real_fsync(int);
 int __wrap_fsync(int fd){sync_calls++;int result=__real_fsync(fd);if(lose_during_sync)mounted=false;if(fail_sync){errno=EIO;return -1;}return result;}
 static uint64_t remaining=64u*1024u*1024u;
 static unsigned space_calls;
-esp_err_t read_pico_sd_get_info(read_pico_sd_info_t *out){*out=(read_pico_sd_info_t){.present=mounted,.mounted=mounted};return mounted?ESP_OK:ESP_FAIL;}
+esp_err_t read_pico_sd_get_info(read_pico_sd_info_t *out){*out=(read_pico_sd_info_t){.present=mounted,.mounted=mounted};return fail_detect?ESP_ERR_TIMEOUT:mounted?ESP_OK:ESP_ERR_NOT_FOUND;}
 esp_err_t esp_vfs_fat_info(const char *root,uint64_t *total,uint64_t *free_bytes){assert(root && root[0]=='/');space_calls++;*total=128u*1024u*1024u;*free_bytes=remaining;if(lose_during_space)mounted=false;return fail_space?ESP_FAIL:ESP_OK;}
 int main(void){
  char root[]="/tmp/pn-device-volume-XXXXXX";assert(mkdtemp(root));
@@ -40,6 +41,8 @@ int main(void){
  unsigned synced=sync_calls;fail_sync=true;
  assert(options.sync_directory(options.ctx,root)==PN_IO && sync_calls==synced+1);fail_sync=false;
  lose_during_sync=true;assert(options.sync_directory(options.ctx,root)==PN_STALE_MEDIA);lose_during_sync=false;mounted=true;
+ assert(options.space_free(options.ctx,root,&free_bytes)==PN_OK && free_bytes==remaining);
+ fail_detect=true;assert(options.space_free(options.ctx,root,&free_bytes)==PN_IO && media.available);fail_detect=false;
  assert(options.space_free(options.ctx,root,&free_bytes)==PN_OK && free_bytes==remaining);
  fail_space=true;free_bytes=17;assert(options.space_free(options.ctx,root,&free_bytes)==PN_IO && free_bytes==17);fail_space=false;
  uint64_t ack=0;assert(pn_upload_chunk(&upload,0,text,sizeof(text)-1,&request.digest,&ack)==PN_OK && ack==sizeof(text)-1);

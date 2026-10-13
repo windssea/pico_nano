@@ -16,4 +16,4 @@ static int style_key(pn_style_ui_t *u,SDL_Keycode key){
     if(key==SDLK_DOWN && u->selected+1<PN_SUI_FIELDS){u->selected++;return PN_SUI_FORM;}
     return -1;
 }
-static void style_report(const pn_style_ui_t *u,int command,pn_status_t status){printf("style_ui command=%d status=%d active=%d preview=%d pixels=%u tracking=%u\n",command,(int)status,u->active,u->preview,u->draft.pixels,u->draft.tracking_percent);}
+static void style_report(const pn_style_ui_t *u,int command,pn_status_t status){printf("style_ui command=%d status=%d active=%d preview=%d pixels=%u tracking=%u guide=%u guide_offset=%d\n",command,(int)status,u->active,u->preview,u->draft.pixels,u->draft.tracking_percent,u->draft.reading_line,u->draft.reading_line_offset);}

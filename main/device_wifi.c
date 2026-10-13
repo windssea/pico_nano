@@ -121,6 +121,8 @@ pn_status_t pn_device_wifi_open(pn_device_wifi_t *out,const pn_device_wifi_confi
  if(result==ESP_OK)result=esp_event_handler_instance_register(WIFI_EVENT,ESP_EVENT_ANY_ID,event,s,&s->wifi_events);
  if(result==ESP_OK && config->mode==PN_WIFI_STA)result=esp_event_handler_instance_register(IP_EVENT,ESP_EVENT_ANY_ID,event,s,&s->ip_events);
  if(result==ESP_OK){s->start_attempted=true;result=esp_wifi_start();if(result==ESP_OK)s->started=true;}
+ // 仅传输会话关闭STA modem sleep，停止后驱动销毁，不改变离线阅读功耗。 / Disable STA modem sleep only for transfer sessions; driver teardown leaves offline reading power unchanged.
+ if(result==ESP_OK && config->mode==PN_WIFI_STA)result=esp_wifi_set_ps(WIFI_PS_NONE);
  if(result!=ESP_OK){lock(s);s->state.phase=PN_WIFI_FAILED;s->state.error=result;unlock(s);(void)pn_device_wifi_close(out);return PN_IO;}
  return PN_OK;
 }

@@ -15,6 +15,11 @@ int main(void){
     pn_pool_t pool;assert(!pn_pool_init(&pool,2u*1024u*1024u,NULL,NULL,NULL));
     uint8_t *pixels=malloc(PN_HW_FRAME_BYTES),*copy=malloc(PN_HW_FRAME_BYTES);assert(pixels && copy);original=copy;
     pn_frame_t frame;assert(pn_frame_bind(&frame,pixels,PN_HW_FRAME_BYTES,684,1216));
+    // 独立像素检查阅读线的空隙、模式、边界和无副作用关闭。 / Independent pixel checks cover guide gaps, modes, bounds and no-op disabling.
+    pn_frame_clear(&frame,15);memcpy(copy,pixels,PN_HW_FRAME_BYTES);
+    pn_reader_guide_row(&frame,0,100);pn_reader_guide_row(&frame,1,-1);pn_reader_guide_row(&frame,2,1216);assert(!memcmp(copy,pixels,PN_HW_FRAME_BYTES));
+    pn_reader_guide_row(&frame,1,100);assert(pn_frame_get(&frame,18,100)==10 && pn_frame_get(&frame,19,100)==15 && pn_frame_get(&frame,31,100)==10 && pn_frame_get(&frame,0,99)==15);
+    pn_reader_guide_row(&frame,2,101);assert(pn_frame_get(&frame,1,101)==10 && pn_frame_get(&frame,2,101)==15 && pn_frame_get(&frame,13,101)==10);
     for(unsigned i=0;i<PN_HW_FRAME_BYTES;i++)pixels[i]=copy[i]=(uint8_t)(i*19u);
     pn_font_t font={0};pn_text_source_t source=pn_font_builtin_source();assert(pn_font_open(&font,&pool,&source,34)==PN_OK);
     // 正文的末行必须完整位于正文更新区；进度圆点不能跨入该区。/ The last text line stays in the body update; the progress knob must not cross into it.

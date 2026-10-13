@@ -1,5 +1,7 @@
 """开机图/默认锁屏共用logo，提示带独立，原生帧无品牌图裁切。 / Boot/default lock share the logo, keep the hint separate and preserve native artwork bounds."""
 import os
+import json
+import hashlib
 import pathlib
 import subprocess
 import sys
@@ -33,6 +35,9 @@ with tempfile.TemporaryDirectory() as directory:
     assert boot[:684 * 1104] == lock[:684 * 1104]
     ink = [(i % 684, i // 684) for i, value in enumerate(boot) if value < 255]
     assert ink and min(x for x, y in ink) >= 62 and max(x for x, y in ink) < 622
-    assert min(y for x, y in ink) > 400 and max(y for x, y in ink) < 800
+    metadata=json.loads((pathlib.Path(sys.argv[1]).parent/'pn_brand_logo.json').read_text())
+    assert metadata['source_sha256']==hashlib.sha256(pathlib.Path(__file__).resolve().parents[1].joinpath('assets/image/logo.png').read_bytes()).hexdigest()
+    top=metadata['position'][1];height=metadata['image_size'][1]
+    assert min(y for x,y in ink)>=top and max(y for x,y in ink)<top+height
     assert len(set(boot)) > 2 and any(value < 255 for value in lock[684 * 1104:])
 print('PicoNano: shared native boot/default logo, white transparency, safe bounds and independent hint passed')

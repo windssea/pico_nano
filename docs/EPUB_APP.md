@@ -20,7 +20,7 @@ step完成章节、字体和PNG/JPEG图片ZIP CRC，publish到显示调度器再
 
 目录count/get懒加载完整NCX/nav，不改变位置；toc_jump解析id/章节并走真实显示，失败不改位置。分组/缺失idEMPTY，其余错误保留。设备/PC目录列表入口已接 [共享中文目录UI](EPUB_TOC_UI.md)。
 
-style_apply实际原锚点重排/显示后PNTS逐书保存，支持七字段；显示失败回滚配置，写失败留保存屏障，重开用已有逐书设置。七项预览/取消面板现与TXT共用，顶部“排版”或PC按S打开，操作与保存边界见[排版设置](TYPESETTING_SETTINGS.md)。
+style_apply实际原锚点重排/显示后PNTS逐书保存，支持排版及阅读线字段；显示失败回滚配置，写失败留保存屏障，重开用已有逐书设置。排版及阅读线预览/取消面板与TXT共用，顶部“排版”或PC按S打开，操作与保存边界见[排版设置](TYPESETTING_SETTINGS.md)。
 
 ## PC使用与验证
 

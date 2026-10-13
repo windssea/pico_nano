@@ -71,7 +71,7 @@ typedef struct {void *impl;} pn_wallpaper_mask_t; ///< 初始NULL，控制层拥
 /// 取得READ租约预处理，完成即释放；失效图片不留下活动缓存。
 /// Prepare under a READ lease, releasing it immediately; unusable images leave no live cache.
 pn_status_t pn_wallpaper_mask_open(pn_wallpaper_mask_t *mask,pn_pool_t *pool,pn_media_t *media,const pn_lock_selection_t *selection);
-/// 正文纯绘制回调，不解码或读取文件。/ Body drawing callback without decoding or reading files.
+/// 锁屏遮罩纯绘制回调，不解码或读取文件。/ Lock-mask drawing callback without decoding or reading files.
 pn_status_t pn_wallpaper_mask_paint(void *mask,pn_frame_t *frame);
 /// 正文推屏完成通知；失败保留上一次成功底图。/ Body presentation notification; failures retain the previous successful underlay.
 void pn_wallpaper_mask_complete(void *mask,const pn_frame_t *frame,bool shown);

@@ -78,7 +78,7 @@ int main(int argc,char **argv){
     calls=screen.calls;assert(pn_epub_app_font_cancel_view(&app,destination,NULL,now++,present,&screen)==PN_OK && screen.calls==calls+1 && screen.tag==9);
     assert(pn_epub_app_progress(&app,&after)==PN_OK && same(&current,&after));
     assert(pn_epub_app_font_apply(&app,&before_view,now++,present,&screen)==PN_OK);
-    pn_style_t style;assert(pn_epub_app_style_get(&app,&style)==PN_OK);style.pixels=46;style.line_percent=155;style.gap_percent=50;style.indent_em=2;style.tracking_percent=10;style.margin=40;
+    pn_style_t style;assert(pn_epub_app_style_get(&app,&style)==PN_OK);style.pixels=46;style.line_percent=155;style.gap_percent=50;style.indent_em=2;style.tracking_percent=10;style.margin=40;style.reading_line=1;style.reading_line_offset=-2;
     assert(pn_epub_app_style_apply(&app,&style,now++,present,&screen)==PN_OK && pn_epub_app_progress(&app,&after)==PN_OK && same(&current,&after));
     pn_style_t draft=style;draft.tracking_percent=20;assert(pn_epub_app_style_preview(&app,&draft,now++,present,&screen)==PN_OK && pn_epub_app_progress(&app,&after)==PN_OK && same(&current,&after));
     assert(pn_epub_app_style_cancel(&app,now++,present,&screen)==PN_OK && pn_epub_app_style_get(&app,&draft)==PN_OK && draft.tracking_percent==style.tracking_percent);

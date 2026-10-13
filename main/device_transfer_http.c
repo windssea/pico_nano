@@ -33,9 +33,7 @@ typedef struct {
  pn_transfer_worker_t *worker;
  httpd_handle_t server;
  SemaphoreHandle_t auth;
- char authority[64],origin[80],pin[7],token[33];
- uint64_t created,locked_until;
- unsigned failures;
+ char authority[64],origin[80],token[33];
  bool closing;
  const pn_device_network_sink_t *network;
  pn_pool_t ls_pool;pn_ls_session_t ls;char fingerprint[33];uint16_t port; ///< 单HTTP owner的LocalSend会话 / LocalSend session owned by the single HTTP task
@@ -275,8 +273,13 @@ static esp_err_t dispatch(httpd_req_t *r){
   const pn_transfer_asset_t *asset=pn_transfer_asset(uri);if(asset)return send_data(r,200,asset->mime,(const char *)asset->bytes,asset->size);
   if(!strcmp(uri,"/api/v1/status")){cJSON *json=cJSON_CreateObject();bool v=string(json,"name",PN_BRAND_NAME);v&=string(json,"version","0.0.56");v&=number(json,"chunk_size",PN_UPLOAD_CHUNK);v&=boolean(json,"preview",false);return json_send(r,200,json,v);}
  }
- bool pairing=r->method==HTTP_POST && !strcmp(uri,"/api/v1/pair");
- if(!pairing && !authorized)return error(r,401,"请先输入配对码");
+ // 同源页面自动取得短生命周期令牌，不再输入配对码。 / Same-origin pages obtain a session token automatically without a pairing code.
+ if(r->method==HTTP_GET && !strcmp(uri,"/api/v1/session")){
+  char token[33];lock(s);closing=s->closing;if(!closing)memcpy(token,s->token,sizeof token);unlock(s);
+  if(closing)return error(r,503,"传输服务已停止");
+  cJSON *result=cJSON_CreateObject();return json_send(r,200,result,boolean(result,"ready",true) && string(result,"token",token));
+ }
+ if(!authorized)return error(r,401,"会话已失效，请刷新页面重新连接");
  cJSON *json=NULL;
  if(r->method==HTTP_POST || r->method==HTTP_PUT){
   size_t limit=r->method==HTTP_POST?8192:PN_UPLOAD_CHUNK;char length[32];uint64_t parsed=0;
@@ -291,20 +294,6 @@ static esp_err_t dispatch(httpd_req_t *r){
   if(now_ms()-started>=10000)return error(r,400,"请求正文接收超时");
   if(r->method==HTTP_POST){s->bytes[at]=0;if(!json_guard(s->bytes,at))return error(r,400,"请求JSON无效");json=cJSON_ParseWithLengthOpts((char *)s->bytes,at+1,NULL,true);if(!json)return error(r,400,"请求JSON无效");}
  }
- if(pairing){
-  const char *keys[]={"code"};const char *pin=get_string(json,"code");bool valid=fields(json,keys,1,1) && pin && strlen(pin)==6;
-  if(valid)for(unsigned i=0;i<6;i++)if(pin[i]<'0' || pin[i]>'9')valid=false;
-  if(!valid){cJSON_Delete(json);return error(r,400,"配对码格式无效");}
-  unsigned status=200;const char *message=NULL;char token[33];uint64_t now=now_ms();lock(s);
-  if(s->closing){status=503;message="传输服务已停止";}else if(now<s->locked_until){status=429;message="尝试过于频繁，请稍后再试";}else if(now<s->created || now-s->created>=300000){status=401;message="配对码已过期，请重新开启传输";}else{
-   if(s->failures>=5)s->failures=0;
-   unsigned diff=0;for(unsigned i=0;i<6;i++)diff|=(unsigned char)pin[i]^(unsigned char)s->pin[i];
-   if(diff){status=401;message="配对码不正确";if(++s->failures>=5)s->locked_until=now+60000;}else{s->failures=0;memcpy(token,s->token,sizeof token);}
-  }
-  unlock(s);cJSON_Delete(json);if(message)return error(r,status,message);
-  cJSON *result=cJSON_CreateObject();return json_send(r,200,result,string(result,"token",token));
- }
- if(r->method==HTTP_GET && !strcmp(uri,"/api/v1/session")){cJSON *result=cJSON_CreateObject();return json_send(r,200,result,boolean(result,"paired",true));}
  if(!strcmp(uri,"/api/v1/network")){
   // 配网：只排队交给主任务保存，口令不回显。/ Provisioning: queue for the main task to save; passwords are never echoed.
   lock(s);const pn_device_network_sink_t *sink=s->network;unlock(s);
@@ -370,7 +359,7 @@ pn_status_t pn_device_transfer_http_open(pn_device_transfer_http_t *out,pn_trans
  s->auth=xSemaphoreCreateMutex();if(!s->auth){heap_caps_free(s);return PN_NO_MEMORY;}
  s->port=port;uint8_t fingerprint[16];esp_fill_random(fingerprint,sizeof fingerprint);encode(fingerprint,16,s->fingerprint);
  if(pn_pool_init(&s->ls_pool,128u*1024u,ls_allocate,ls_release,NULL)!=0 || pn_ls_session_open(&s->ls,&s->ls_pool,ls_entropy,NULL)!=PN_OK){vSemaphoreDelete(s->auth);heap_caps_free(s);return PN_NO_MEMORY;}
- uint32_t value;do{esp_fill_random(&value,sizeof value);}while(value>=UINT32_MAX-UINT32_MAX%1000000u);snprintf(s->pin,sizeof s->pin,"%06u",(unsigned)(value%1000000u));uint8_t token[16];esp_fill_random(token,16);encode(token,16,s->token);s->created=now_ms();
+ uint8_t token[16];esp_fill_random(token,16);encode(token,16,s->token);
  // 接收owner串行处理文件；限制两条连接并回收闲置连接，避免浏览器连接挤尽内部网络内存。/ The receiving owner serializes files; cap connections at two and purge idle connections to preserve internal network memory.
  httpd_config_t cfg=HTTPD_DEFAULT_CONFIG();cfg.server_port=port;cfg.ctrl_port=32768;cfg.stack_size=16384;cfg.max_req_hdr_len=2048;cfg.max_uri_len=1024;cfg.max_open_sockets=2;cfg.lru_purge_enable=true;cfg.max_uri_handlers=4;cfg.max_resp_headers=6;cfg.recv_wait_timeout=10;cfg.send_wait_timeout=10;cfg.uri_match_fn=httpd_uri_match_wildcard;
  cfg.global_user_ctx=s;cfg.global_user_ctx_free_fn=keep_context;cfg.open_fn=opened;
@@ -381,6 +370,5 @@ pn_status_t pn_device_transfer_http_open(pn_device_transfer_http_t *out,pn_trans
  pn_status_t discovery=pn_device_ls_discovery_open(&s->discovery,address,port,s->fingerprint);if(discovery!=PN_OK){(void)pn_device_transfer_http_close(out);return discovery;}
  return PN_OK;
 }
-pn_status_t pn_device_transfer_http_code(pn_device_transfer_http_t *out,char code[7]){if(!out || !out->impl || !code)return PN_INVALID;http_t *s=out->impl;lock(s);pn_status_t status=s->closing?PN_CANCELLED:PN_OK;if(status==PN_OK)memcpy(code,s->pin,7);unlock(s);return status;}
 pn_status_t pn_device_transfer_http_request_stop(pn_device_transfer_http_t *out){if(!out || !out->impl)return PN_INVALID;http_t *s=out->impl;lock(s);s->closing=true;memset(s->token,0,sizeof s->token);unlock(s);return pn_transfer_worker_request_stop(s->worker);}
 pn_status_t pn_device_transfer_http_close(pn_device_transfer_http_t *out){if(!out)return PN_INVALID;if(!out->impl)return PN_OK;http_t *s=out->impl;(void)pn_device_transfer_http_request_stop(out);pn_status_t discovery=pn_device_ls_discovery_close(&s->discovery);if(discovery!=PN_OK)return discovery;if(s->server && httpd_stop(s->server)!=ESP_OK)return PN_IO;(void)pn_ls_stop_after_join(&s->ls);(void)pn_ls_session_close(&s->ls);vSemaphoreDelete(s->auth);heap_caps_free(s);out->impl=NULL;return PN_OK;}

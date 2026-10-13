@@ -34,15 +34,15 @@ int pn_reading_menu_hit_lan(int x,int y,bool lan){
 pn_status_t pn_reading_menu_render(bool resume,pn_font_t *font,pn_frame_t *frame){return pn_reading_menu_render_lan(resume,NULL,font,frame);}
 int pn_reading_menu_hit(int x,int y){return pn_reading_menu_hit_lan(x,y,false);}
 pn_status_t pn_transfer_view_render(const pn_transfer_view_t *v,pn_font_t *font,pn_frame_t *frame){
- if(!v || !valid(font,frame) || !memchr(v->ssid,0,sizeof v->ssid) || !memchr(v->password,0,sizeof v->password) || !memchr(v->address,0,sizeof v->address) || !memchr(v->pin,0,sizeof v->pin))return PN_INVALID;
+ if(!v || !valid(font,frame) || !memchr(v->ssid,0,sizeof v->ssid) || !memchr(v->password,0,sizeof v->password) || !memchr(v->address,0,sizeof v->address))return PN_INVALID;
  pn_frame_clear(frame,15);pn_status_t s=pn_w_header(font,frame,"",v->station?"局域网传书":"热点传书",NULL);
  if(v->phase==PN_TVIEW_READY && v->station){
   // 局域网：手机已在同一网络，只给网页码。/ LAN: the phone is already on the same network, so only the web-page code is shown.
   if(s==PN_OK)s=text(font,frame,"扫码打开网页",200,212);
   if(s==PN_OK)s=pn_qr_draw(v->address,frame,202,232,280);
-  if(s==PN_OK)s=text(font,frame,"手机连接同一WiFi后扫码，输入配对码",32,566);
-  const char *labels[]={"网络名称",v->ssid,"网页地址",v->address,"配对码",v->pin};
-  for(unsigned i=0;i<6 && s==PN_OK;i++)s=text(font,frame,labels[i],i%2?220:32,636+(int)(i/2)*80);
+  if(s==PN_OK)s=text(font,frame,"手机连接同一WiFi后扫码即可传书",32,566);
+  const char *labels[]={"网络名称",v->ssid,"网页地址",v->address};
+  for(unsigned i=0;i<4 && s==PN_OK;i++)s=text(font,frame,labels[i],i%2?220:32,636+(int)(i/2)*80);
   if(s==PN_OK)s=text(font,frame,v->busy?"正在接收或校验文件":"已连接，等待网页发送",32,1010);
  }else if(v->phase==PN_TVIEW_READY){
   char payload[256];
@@ -51,9 +51,9 @@ pn_status_t pn_transfer_view_render(const pn_transfer_view_t *v,pn_font_t *font,
   if(s==PN_OK)s=pn_qr_wifi_payload(v->ssid,v->password,payload,sizeof payload);
   if(s==PN_OK)s=pn_qr_draw(payload,frame,32,232,280);
   if(s==PN_OK)s=pn_qr_draw(v->address,frame,364,232,280);
-  if(s==PN_OK)s=text(font,frame,"先连热点，再打开网页输入配对码",32,566);
-  const char *labels[]={"热点名称",v->ssid,"热点口令",v->password,"网页地址",v->address,"配对码",v->pin};
-  for(unsigned i=0;i<8 && s==PN_OK;i++)s=text(font,frame,labels[i],i%2?220:32,636+(int)(i/2)*80);
+  if(s==PN_OK)s=text(font,frame,"先连热点，再打开网页即可传书",32,566);
+  const char *labels[]={"热点名称",v->ssid,"热点口令",v->password,"网页地址",v->address};
+  for(unsigned i=0;i<6 && s==PN_OK;i++)s=text(font,frame,labels[i],i%2?220:32,636+(int)(i/2)*80);
   if(s==PN_OK)s=text(font,frame,v->busy?"正在接收或校验文件":"已连接，等待网页发送",32,1010);
  }else if(v->phase==PN_TVIEW_STARTING){if(s==PN_OK)s=text(font,frame,v->station?"正在连接已保存网络":"正在开启传输",32,330);if(s==PN_OK)s=text(font,frame,"请稍候，阅读位置已保存",32,420);}
  else if(v->phase==PN_TVIEW_STOPPING){if(s==PN_OK)s=text(font,frame,"正在关闭传输",32,330);if(s==PN_OK)s=text(font,frame,"等待文件处理结束，请勿拔卡",32,420);}

@@ -18,8 +18,6 @@ typedef struct {void *impl;} pn_device_transfer_http_t; ///< 活动对象不可�
 /// WiFi启动后调用，authority为固定IP[:port]；先准备活动worker，平台随机数须有熵。
 /// Call after WiFi starts with a fixed IP[:port] authority and active worker; platform randomness requires entropy.
 pn_status_t pn_device_transfer_http_open(pn_device_transfer_http_t *,pn_transfer_worker_t *,const char *,uint16_t);
-/// 查询显示用六位码，不输出令牌。/ Query a six-digit display code without exposing tokens.
-pn_status_t pn_device_transfer_http_code(pn_device_transfer_http_t *,char [7]);
 /// 启用/network接口；sink须活到close之后，NULL关闭接口。/ Enable the /network endpoints; sink must outlive close, NULL disables them.
 pn_status_t pn_device_transfer_http_network(pn_device_transfer_http_t *,const pn_device_network_sink_t *);
 /// 关闭认证与worker接收入口；不等待已接收请求。/ Close authentication and worker admission without waiting for accepted requests.

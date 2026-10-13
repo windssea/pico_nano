@@ -26,7 +26,7 @@ static bool incomplete;
 static bool wrong_peer;
 int httpd_req_to_sockfd(httpd_req_t *r){(void)r;return 50;}
 int getpeername(int fd,struct sockaddr *address,socklen_t *length){assert(fd==50 && *length>=sizeof(struct sockaddr_in));struct sockaddr_in peer={.sin_family=AF_INET};uint8_t *ip=(uint8_t *)&peer.sin_addr;ip[0]=192;ip[1]=168;ip[2]=4;ip[3]=wrong_peer?3:2;memcpy(address,&peer,sizeof peer);*length=sizeof peer;return 0;}
-static uint64_t now=1000;
+static _Atomic uint64_t now=1000;
 static size_t native_allocations;
 static _Atomic bool http_stop_fails;
 static void *global_context;
@@ -72,13 +72,13 @@ static const pn_device_network_sink_t net_sink={NULL,sink_submit,sink_status};
 int main(void){
  char root[]="/tmp/pn-device-http-XXXXXX";assert(mkdtemp(root));pn_media_t media;pn_media_init(&media);assert(pn_media_attach(&media,123)==PN_OK);
  pn_upload_files_options_t options={.root=root};pn_transfer_worker_t worker={0};assert(pn_transfer_worker_open(&worker,&media,&options,6u*1024u*1024u,NULL,NULL,NULL)==PN_OK);
- pn_device_transfer_http_t server={0};assert(pn_device_transfer_http_open(&server,&worker,"192.168.4.1",80)==PN_OK);char pin[7];assert(pn_device_transfer_http_code(&server,pin)==PN_OK);
+ pn_device_transfer_http_t server={0};assert(pn_device_transfer_http_open(&server,&worker,"192.168.4.1",80)==PN_OK);
  int sockets[2];assert(socketpair(AF_UNIX,SOCK_STREAM,0,sockets)==0);assert(open_socket(&route,sockets[0])==ESP_OK);assert(write(sockets[1],"a",1)==1);char received;assert(receive(&route,sockets[0],&received,1,0)==1 && received=='a');
  cJSON *json=request(HTTP_GET,"/api/v1/status",NULL,0,NULL,NULL);assert(code==200 && json && !strcmp(cJSON_GetObjectItemCaseSensitive(json,"name")->valuestring,"PicoNano"));cJSON_Delete(json);
  json=request(HTTP_POST,"/api/v1/uploads","{}",2,NULL,NULL);assert(code==401);cJSON_Delete(json);
- char pair[64];snprintf(pair,sizeof pair,"{\"code\":\"%s\"}",pin);
- json=request(HTTP_POST,"/api/v1/pair",pair,strlen(pair),NULL,"Host: evil.test");assert(code==400);cJSON_Delete(json);
- json=request(HTTP_POST,"/api/v1/pair",pair,strlen(pair),NULL,NULL);assert(code==200);char token[33];strcpy(token,cJSON_GetObjectItemCaseSensitive(json,"token")->valuestring);cJSON_Delete(json);
+ json=request(HTTP_GET,"/api/v1/session",NULL,0,NULL,"Host: evil.test");assert(code==400);cJSON_Delete(json);
+ json=request(HTTP_GET,"/api/v1/session",NULL,0,NULL,NULL);assert(code==200 && cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(json,"ready")));char token[33];strcpy(token,cJSON_GetObjectItemCaseSensitive(json,"token")->valuestring);cJSON_Delete(json);
+ const char *request_body="{\"ssid\":\"test\",\"password\":\"\"}";
  const uint8_t text[]="device HTTP\n";pn_book_id_t digest;assert(pn_identity_bytes(text,sizeof text-1,&digest)==PN_OK);char sha[65];for(unsigned i=0;i<32;i++)sprintf(sha+i*2,"%02x",digest.sha256[i]);
  /* LocalSend自动书籍接收使用真实共享安装器，连接来源和一次性令牌必须匹配。/ LocalSend book auto-reception uses the real shared installer with matching connection origin and single-use grants. */
  json=request(HTTP_GET,"/api/localsend/v2/info",NULL,0,NULL,NULL);assert(code==200 && cJSON_IsString(cJSON_GetObjectItemCaseSensitive(json,"fingerprint")) && cJSON_GetObjectItemCaseSensitive(json,"port")->valueint==80);cJSON_Delete(json);
@@ -105,13 +105,11 @@ int main(void){
  memset(scratch,0,sizeof scratch);headers=0;add("Host: 192.168.4.1");add("Origin: http://192.168.4.1");char line[100];snprintf(line,sizeof line,"Authorization: Bearer %s",token);add(line);snprintf(line,sizeof line,"Content-Length: %zu",sizeof text-1);add(line);add("X-Offset: 0");add(extra);
  body=text;body_at=0;struct httpd_req_aux aux={.scratch=scratch,.scratch_size_limit=sizeof scratch-1,.scratch_cur_size=sizeof scratch-1,.req_hdrs_count=headers};httpd_req_t r={.handle=&route,.method=HTTP_PUT,.uri=uri,.content_len=sizeof text-1,.user_ctx=route.user_ctx,.aux=&aux};route.handler(&r);assert(code==200);
  snprintf(uri,sizeof uri,"/api/v1/uploads/%s/complete",id);char complete[100];snprintf(complete,sizeof complete,"{\"sha256\":\"%s\"}",sha);json=request(HTTP_POST,uri,complete,strlen(complete),token,NULL);assert(code==200 && cJSON_GetObjectItemCaseSensitive(json,"phase")->valueint==2);cJSON_Delete(json);
- json=request(HTTP_GET,"/api/v1/session",NULL,0,NULL,NULL);assert(code==401);cJSON_Delete(json);
+ json=request(HTTP_GET,"/api/v1/session",NULL,0,NULL,NULL);assert(code==200);cJSON_Delete(json);
  const char *bad="{\"kind\":\"book\",\"name\":\"../bad.txt\",\"size\":true,\"sha256\":\"bad\"}";json=request(HTTP_POST,"/api/v1/uploads",bad,strlen(bad),token,NULL);assert(code==400);cJSON_Delete(json);
- const char *nul="{\"code\":\"123456\\u0000suffix\"}";json=request(HTTP_POST,"/api/v1/pair",nul,strlen(nul),NULL,NULL);assert(code==400);cJSON_Delete(json);
- json=request(HTTP_POST,"/api/v1/pair",pair,strlen(pair),NULL,"Transfer-Encoding: chunked");assert(code==400);cJSON_Delete(json);
+ const char *nul="{\"code\":\"123456\\u0000suffix\"}";json=request(HTTP_POST,"/api/v1/network",nul,strlen(nul),token,NULL);assert(code==400);cJSON_Delete(json);
+ json=request(HTTP_POST,"/api/v1/network",request_body,strlen(request_body),token,"Transfer-Encoding: chunked");assert(code==400);cJSON_Delete(json);
  json=request(HTTP_GET,"/api/v1/session",NULL,0,token,"Origin: http://evil.test");assert(code==400);cJSON_Delete(json);
- for(unsigned i=0;i<5;i++){const char *wrong=!strcmp(pin,"999999")?"{\"code\":\"000000\"}":"{\"code\":\"999999\"}";json=request(HTTP_POST,"/api/v1/pair",wrong,strlen(wrong),NULL,NULL);assert(code==401);cJSON_Delete(json);}
- json=request(HTTP_POST,"/api/v1/pair",pair,strlen(pair),NULL,NULL);assert(code==429);cJSON_Delete(json);now+=60001;
  json=request(HTTP_GET,"/api/v1/files/book?name=%E6%B5%8B%E8%AF%95.txt",NULL,0,token,NULL);assert(code==200 && cJSON_GetObjectItemCaseSensitive(json,"size")->valueint==(int)sizeof text-1 && !strcmp(cJSON_GetObjectItemCaseSensitive(json,"sha256")->valuestring,sha));cJSON_Delete(json);
  json=request(HTTP_POST,"/api/v1/uploads",begin,strlen(begin),token,NULL);assert(code==409);cJSON_Delete(json);
  char replace[700];snprintf(replace,sizeof replace,"{\"kind\":\"book\",\"name\":\"测试.txt\",\"size\":%zu,\"sha256\":\"%s\",\"replace\":{\"size\":%zu,\"sha256\":\"%s\"}}",sizeof text-1,sha,sizeof text-1,sha);
@@ -170,10 +168,10 @@ int main(void){
  json=request(HTTP_DELETE,"/api/v1/network",NULL,0,token,NULL);assert(code==202 && sink_calls==3 && sink_forget);cJSON_Delete(json);
  assert(pn_device_transfer_http_network(&server,NULL)==PN_OK);json=request(HTTP_GET,"/api/v1/network",NULL,0,token,NULL);assert(code==404);cJSON_Delete(json);
  snprintf(begin,sizeof begin,"{\"kind\":\"book\",\"name\":\"leading-zero.txt\",\"size\":01,\"sha256\":\"%s\"}",sha);json=request(HTTP_POST,"/api/v1/uploads",begin,strlen(begin),token,NULL);assert(code==400);cJSON_Delete(json);
- receive_delay=6000;json=request(HTTP_POST,"/api/v1/pair",pair,strlen(pair),NULL,NULL);assert(code==400);cJSON_Delete(json);receive_delay=0;
- incomplete=true;json=request(HTTP_POST,"/api/v1/pair",pair,strlen(pair),NULL,NULL);assert(code==400);cJSON_Delete(json);incomplete=false;
- const char *duplicate="{\"code\":\"1\",\"code\":\"2\"}";json=request(HTTP_POST,"/api/v1/pair",duplicate,strlen(duplicate),NULL,NULL);assert(code==400);cJSON_Delete(json);
- now+=300001;json=request(HTTP_POST,"/api/v1/pair",pair,strlen(pair),NULL,NULL);assert(code==401);cJSON_Delete(json);
+ receive_delay=6000;json=request(HTTP_POST,"/api/v1/network",request_body,strlen(request_body),token,NULL);assert(code==400);cJSON_Delete(json);receive_delay=0;
+ incomplete=true;json=request(HTTP_POST,"/api/v1/network",request_body,strlen(request_body),token,NULL);assert(code==400);cJSON_Delete(json);incomplete=false;
+ const char *duplicate="{\"kind\":\"book\",\"kind\":\"font\",\"name\":\"dup.txt\",\"size\":1,\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}";json=request(HTTP_POST,"/api/v1/uploads",duplicate,strlen(duplicate),token,NULL);assert(code==400);cJSON_Delete(json);
+ now+=300001;json=request(HTTP_GET,"/api/v1/session",NULL,0,NULL,NULL);assert(code==200);cJSON_Delete(json);
  assert(pn_device_transfer_http_request_stop(&server)==PN_OK);json=request(HTTP_GET,"/api/v1/session",NULL,0,token,NULL);assert(code==503);cJSON_Delete(json);
  assert(receive(&route,sockets[0],&received,1,0)==HTTPD_SOCK_ERR_FAIL);close(sockets[0]);close(sockets[1]);
  assert(pn_device_transfer_http_close(&server)==PN_OK && !native_allocations);assert(pn_transfer_worker_close(&worker)==PN_OK && !pn_media_active(&media));

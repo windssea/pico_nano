@@ -30,7 +30,7 @@ pn_status_t pn_font_asset_open(pn_font_asset_t *asset,pn_pool_t *pool,pn_media_t
     uint64_t size=(uint64_t)st.st_size;if(expected_size && expected_size!=size)return PN_STALE_JOB;if(size>PN_FONT_REFERENCE_MAX_BYTES)return PN_LIMIT;if(size<12)return PN_CORRUPT;
     asset_t *a=pn_alloc_tagged(pool,PN_MEM_FONT,sizeof *a);if(!a)return PN_NO_MEMORY;*a=(asset_t){.pool=pool,.media=media,.reference={.kind=PN_FONT_FILE,.size=size}};strcpy(a->reference.path,path);
     status=pn_media_acquire(media,PN_MEDIA_READ,&a->lease);if(status==PN_OK)status=pn_text_file_open(&a->file,media,&a->lease,path,&a->source);if(status==PN_OK && a->source.size!=size)status=PN_STALE_JOB;
-    if(status==PN_OK)status=pn_identity_file(media,&a->lease,path,PN_FONT_REFERENCE_MAX_BYTES,&a->reference.identity);
+    if(status==PN_OK)status=pn_identity_file_pooled(pool,media,&a->lease,path,PN_FONT_REFERENCE_MAX_BYTES,&a->reference.identity);
     if(status==PN_OK)status=pn_font_open(&a->font,pool,&a->source,pixels);
     if(status==PN_OK)status=pn_font_info(&a->font,&a->info);
     if(status==PN_OK)status=pn_media_validate(media,guard);

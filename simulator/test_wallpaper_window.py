@@ -10,8 +10,8 @@ with tempfile.TemporaryDirectory() as folder:
     root=pathlib.Path(folder);books=root/'books';books.mkdir();(books/'a.txt').write_text('阅读测试。\n'*20,encoding='utf-8')
     images=root/'wallpapers';images.mkdir();(images/'sea.png').write_bytes(png(240,400,30))
     store=root/'internal';store.mkdir()
-    def run(script,*extra):
-        r=subprocess.run([sys.argv[1],'--library',str(books),'--state-dir',str(root/'state'),*extra],env=dict(os.environ,SDL_VIDEODRIVER='dummy',PN_SIM_LIBRARY_SCRIPT="library,"+script),capture_output=True,text=True,timeout=120)
+    def run(script,*extra,frames=None):
+        r=subprocess.run([sys.argv[1],'--library',str(books),'--state-dir',str(root/'state'),*extra],env=dict(os.environ,SDL_VIDEODRIVER='dummy',PN_SIM_LIBRARY_SCRIPT="library,"+script,PN_SIM_FRAME_DIR=str(frames) if frames else ""),capture_output=True,text=True,timeout=120)
         assert r.returncode==0,(r.stdout,r.stderr)
         assert 'used=0 live=0' in r.stdout,r.stdout
         return r.stdout
@@ -34,13 +34,19 @@ with tempfile.TemporaryDirectory() as folder:
     # 未给目录时w键无效；选项须配合书库。/ Without the option the w key does nothing; options require the library mode.
     out=run('wallpaper,quit');assert 'wallpaper_ui' not in out,out
     assert subprocess.run([sys.argv[1],'--wallpaper-dir',str(images)],env=dict(os.environ,SDL_VIDEODRIVER='dummy'),capture_output=True).returncode==2
-    # PNG透明遮罩在阅读及锁屏保留文字；缺失原图降级为正文和默认锁屏。/ PNG masks retain text during reading and locking; missing sources fall back to plain text and default locking.
+    # PNG透明遮罩只在锁屏叠加，正文不受影响；缺失原图降级为正文和默认锁屏。/ PNG masks appear only while locked and never alter reading; missing sources fall back to plain text and default locking.
     out=run('wallpaper,tap:100:400,tap:100:1080,enter,back,tap:100:500,lock,next,enter,back,quit',*opts)
     assert 'wallpaper_ui command=14 status=0 screen=1 active=1' in out and 'wallpaper_ui command=11 status=0 screen=0 active=1' in out,out
-    assert 'reading_mask status=0' in out and 'lock_preview status=0 mode=4 cached=0' in out and 'lock_preview wake status=0' in out,out
+    assert 'lock_mask status=0' in out and 'lock_preview status=0 mode=4 cached=0' in out and 'lock_preview wake status=0' in out,out
+    # 锁前/锁后正文像素必须逐字节相同，只有锁屏帧在左侧叠加不透明遮罩。 / Reading pixels before/after lock must match bytewise; only the lock frame contains the opaque left mask.
+    captures=root/'mask-frames';captures.mkdir()
+    out=run('tap:100:500,lock,enter,back,quit',*opts,frames=captures)
+    pages=[p.read_bytes().split(b'255\n',1)[1] for p in sorted(captures.glob('frame-*.pgm'))]
+    probe=10*684+10
+    assert any(pages[i-1]==pages[i+1] and pages[i-1][probe]==255 and pages[i][probe]<100 for i in range(1,len(pages)-1)),(len(pages),out)
     latest=max((p.read_bytes() for p in store.glob('lock.*')),key=lambda b:int.from_bytes(b[12:20],'little'))
     assert latest[:6]==b'PNWP\x02\x00' and latest[6]==4 and latest[11]==0 and len(latest)<2048
     next(images.glob('*.png')).unlink()
     out=run('tap:100:500,lock,enter,back,quit',*opts)
-    assert 'reading_mask status=11' in out and 'lock_preview status=0 mode=0 cached=0' in out,out
+    assert 'lock_mask status=11' in out and 'lock_preview status=0 mode=0 cached=0' in out,out
 print('wallpaper window: default/custom choices, preview, mask reading/locking, missing-source fallback, cancel and option validation passed')

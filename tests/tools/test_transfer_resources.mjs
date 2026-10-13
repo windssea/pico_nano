@@ -4,7 +4,7 @@ import vm from 'node:vm';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-function harness(fetch){
+function harness(fetch,bootstrap=false){
   const elements=new Map();
   class Element {
     constructor(){this.children=[];this.dataset={};this.classList={toggle(){},add(){},remove(){}};this.style={};this.value='';}
@@ -13,9 +13,9 @@ function harness(fetch){
   }
   const element=id=>{if(!elements.has(id))elements.set(id,new Element());return elements.get(id);};
   const tabs=['book','font','cover','wallpaper'].map(kind=>{const e=new Element();e.dataset.kind=kind;return e;});
-  const context=vm.createContext({document:{getElementById:element,createElement:()=>new Element(),querySelectorAll:()=>tabs},fetch,URLSearchParams,Uint8Array,TextEncoder,location:{hash:'',pathname:'/',search:''},history:{replaceState(){}},sessionStorage:{getItem(){return null;},setItem(){}},setTimeout});
+  const context=vm.createContext({document:{getElementById:element,createElement:()=>new Element(),querySelectorAll:()=>tabs},fetch,URLSearchParams,Uint8Array,TextEncoder,location:{hash:'',pathname:'/',search:''},history:{replaceState(){}},sessionStorage:{getItem(){return null;},setItem(){}},setTimeout,clearTimeout,AbortController});
   const source=readFileSync(new URL('../../assets/transfer/app.js',import.meta.url),'utf8').replace(/^import .*;\r?$/m,'');
-  vm.runInContext(source+'\nglobalThis.qa={token:value=>{token=value;},auth:()=>token,remove:removeFont};',context);
+  vm.runInContext((bootstrap?source:source.slice(0,source.indexOf('// 打开页面'))+'render();')+'\nglobalThis.qa={token:value=>{token=value;},auth:()=>token,api,remove:removeFont};',context);
   return {context,element,choose:kind=>tabs.find(t=>t.dataset.kind===kind).onclick()};
 }
 const reply=(value,status=200)=>({ok:status<400,status,json:async()=>value});
@@ -29,7 +29,7 @@ test('late font list cannot repaint the wallpaper category',async()=>{
   assert.deepEqual(h.element('fonts-list').children.map(row=>row.children[0].textContent),['透明.png']);
 });
 
-test('late old authorization failure cannot clear a new pairing',async()=>{
+test('late old authorization failure cannot clear a new session',async()=>{
   let finish;const h=harness(()=>new Promise(r=>{finish=r;}));
   h.context.qa.token('old');h.choose('font');h.context.qa.token('new');finish(reply({message:'expired'},401));await settle();
   assert.equal(h.context.qa.auth(),'new');
@@ -42,4 +42,18 @@ test('delete consent remains bound to the selected resource, cancellation sends 
   const deletion=h.context.qa.remove({name:'cover.png'},'cover');h.element('delete-yes').onclick();await deletion;
   assert.equal(calls[0].url,'/api/v1/files/cover?name=cover.png');
   assert.match(calls[1].url,/^\/api\/v1\/covers\?name=cover.png&size=32&sha256=/);assert.equal(calls[1].method,'DELETE');
+});
+
+test('page establishes a session without collecting a pairing code',async()=>{
+  const calls=[];const h=harness((url,options)=>{calls.push({url,options});return Promise.resolve(reply(url.endsWith('/session')?{ready:true,token:'automatic'}:{message:'not supported'},url.endsWith('/session')?200:404));},true);
+  await settle();assert.equal(h.context.qa.auth(),'automatic');assert.equal(h.element('connection').textContent,'已连接');
+  assert.equal(calls[0].url,'/api/v1/session');assert.ok(calls.every(c=>!c.url.endsWith('/pair')));
+});
+
+test('idempotent chunk retries retain offset and bytes; creation is never replayed',async()=>{
+ let puts=0,posts=0;const bodies=[];const h=harness((url,options)=>{if(options.method==='PUT'){puts++;bodies.push(options);return Promise.resolve(reply(puts===1?{message:'transient I/O'}:{next_offset:3},puts===1?503:200));}posts++;return Promise.reject(Error('network lost'));});
+ h.context.qa.token('current');const bytes=new Uint8Array([1,2,3]);
+ const result=await h.context.qa.api('/uploads/id/chunks','PUT',bytes,{'X-Offset':'0'});
+ assert.equal(result.next_offset,3);assert.equal(puts,2);assert.equal(bodies[0].body,bodies[1].body);assert.equal(bodies[1].headers['X-Offset'],'0');
+ await assert.rejects(h.context.qa.api('/uploads','POST',{}),/network lost/);assert.equal(posts,1);
 });

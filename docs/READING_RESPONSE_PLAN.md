@@ -85,3 +85,24 @@ R1源码审阅完成，来源均固定提交；R2统一入口与逻辑周期、R
 进一步只读复核上述固定源码：read-pico-reader的静态导航/灰阶条带与内容更新分离，可借鉴到页脚；Metalio book_screen保留按页位图预热及独立开书worker/反馈，下一步应测下一页字形预热（当前只有节点预排）；RickyOS ActivityManager的输入取消空闲渲染与重启准备可改善快速翻页后预热命中。其graySettleAllowed仍为false，不据注释启用黑白先显/灰阶回补。
 
 同书热重开另需有界保留已验证句柄/章节/字体状态，低内存可回收；传输/USB/换卡先清理租约，禁止只按size/mtime复用SHA。首页不需要立即完成的封面/索引继续空闲执行，连续排版参数可以等抬手/短暂静止后一次预览，减少无用重排。所有方向分别设置软件与真实面板出口，尚未实现的方向不计完成。
+
+
+## 2026-10-14 read-pico-reader重点复核与阅读线落地
+
+用户指定重新重点分析最新main。固定只读源码为 `24363623eba4f523d12302f4fec872cb96eb809a`，对外名称已改为 kiikoread，板型同为RDP-G01-W/ESP32-S3、SDK6.1；替代旧2566dcf分析基线。源码位于忽略目录 `build-dev/references/read-pico-reader-2436362`，未运行其构建脚本或固件，未将README性能描述当成真机结果。用户另明确要求本轮同时实现阅读线，其余机制只分析。
+
+| 关注项及源码 | 已读到的行为 | PicoNano接入判断 |
+| --- | --- | --- |
+| [残影刷新](https://github.com/wegooo-cell/read-pico-reader/blob/24363623eba4f523d12302f4fec872cb96eb809a/main/display.c#L359) | 整页计数和局部反馈分开；快页面差分GL16+周期全像素settle，阅读5/10/15/30页或关闭强刷。文字边缘另有自行调序波形。 | 保留PicoNano成功逻辑翻页6/14/24周期；差分正文/周期settle须另做面板对照，拒绝直接移植调序波形。 |
+| [翻页](https://github.com/wegooo-cell/read-pico-reader/blob/24363623eba4f523d12302f4fec872cb96eb809a/main/apps/app_book.c#L2780) | 下一页位图在独立task中预绘制，显示与预绘制重叠，内存不足或插图时放弃；显示结束会等待预绘制完成。 | 当前仅预排节点，建议先字形预热，再做池内可回收位图预绘制；前台不得被后台join拖住，取消、字号及会话代次须覆盖。 |
+| [无线传书](https://github.com/wegooo-cell/read-pico-reader/blob/24363623eba4f523d12302f4fec872cb96eb809a/components/read_pico_transfer/read_pico_transfer.c#L272) | HTTP整文件PUT，16KiB接收与8KiB stdio写缓冲；临时文件+覆盖备份、失败清理；STA关闭modem sleep，HTTP内部栈在WiFi启动前预留，输出断连reason与连续堆。 | 借鉴内部堆准入、reason诊断和缓冲测量；保留PicoNano分块SHA、持久ACK、幂等续传及统一安装事务，不能换成失败删part的整文件入口。 |
+| [USB传书](https://github.com/wegooo-cell/read-pico-reader/blob/24363623eba4f523d12302f4fec872cb96eb809a/main/apps/usb_storage.c#L69) | 本机卸载FAT后TinyUSB MSC独占TF；SDMMC1bit20MHz；禁止auto_mount/format；断开、回调排空、停止后重挂，并归还Serial/JTAG PHY。 | 先落实PN_MEDIA_USB交接栅栏、所有TF消费者退出和字体切内置；重挂换epoch并重验资源，逐步测读/写/弹出/拔线/串口恢复。非本轮实现。 |
+| [WiFi配置](https://github.com/wegooo-cell/read-pico-reader/blob/24363623eba4f523d12302f4fec872cb96eb809a/components/read_pico_transfer/transfer_policy.h#L65) | 设备扫描按SSID去重并保留最强RSSI，分页列表与ASCII键盘配网，NVS单blob保存；STA全信道按信号排序，30秒5次有界重连。 | PicoNano仍用内部data A/B凭据；可扩设备扫描/信号/连接原因。网络owner须能给对时和升级借用，避免未来启动多个WiFi实例。 |
+| [在线升级](https://github.com/wegooo-cell/read-pico-reader/blob/24363623eba4f523d12302f4fec872cb96eb809a/main/ota_online.c#L97) | HTTPS CA校验、板型/项目/布局/版本/大小/SHA，Range重连，写非活动槽，擦写/显示共锁；主线程切槽，启动检查后确认rollback。 | 参考布局为4MiB双槽，PicoNano是6MiB双槽且当前应用约4.9MB，布局完全不能移植；目前仅Web Serial升级。新增设备OTA需自身manifest、实际旧表/bootloader回滚门和取消/断电验证。 |
+| [阅读线](https://github.com/wegooo-cell/read-pico-reader/blob/24363623eba4f523d12302f4fec872cb96eb809a/main/book/book_layout.c#L310) | 关闭/虚线/点线，±8px位置，横排跟行、竖排跟列；逐步绘制，不加第二张页帧。 | 本轮自有同源实现：默认关闭，虚线/点线1px灰色，位置±8px步2，TXT/EPUB真实行定位，跳过插图行，逐书schema3、旧版默认关闭；PicoNano未支持竖排。 |
+| [大型EPUB](https://github.com/wegooo-cell/read-pico-reader/blob/24363623eba4f523d12302f4fec872cb96eb809a/main/book/book_epub.c#L68) | 8192 manifest/spine/nav上限，标题/锚点块池与动态表，ZIP哈希定位，持久OPF/目录索引；整章HTML提取上限4MiB，仍整章解析/分页。缓存按路径、大小、mtime。 | 借鉴目录池化与强键持久索引，保留完整内容SHA/解析版本，不用mtime免检；PicoNano已有章字节/语义/邻页缓存，长章仍需分段模型，不能只放宽资源上限。 |
+| [日期时间](https://github.com/wegooo-cell/read-pico-reader/blob/24363623eba4f523d12302f4fec872cb96eb809a/components/read_pico_transfer/read_pico_transfer.c#L600) | SNTP复用在线STA或临时连网；独立设置操作写PMU TIME_SYNC并TIME_GET核验，开机恢复settimeofday、睡前同步；分钟变化只刷新可见状态区。另有/clock客户端时间接口，当前upload页面未调用。 | PicoNano目前只在开机读已对时PMU并推算HH:MM，未接网络或手机对时。建议UTC秒存PMU、展示UTC+8，连网异步校时、手机时间作无互联网备选，失败保留旧时钟，不碰VCOM/时序寄存器。 |
+
+建议顺序：先验证现有传输恢复并补断连reason/堆余量，随后独立网络owner与异步对时；翻页字形预热、差分/settle对照与强内容键EPUB持久模型并行排期（不代表启动子agent）；USB独占恢复和设备OTA分别过硬件门。阅读线软件落地详情见[逐书排版](TYPESETTING_SETTINGS.md)。保留PicoNano品牌、固定目录与共享安装事务，不直接采用参考的自由文件目录、NVS凭据、4MiB分区或自调波形。
+
+复核细节：参考的OTA确认调用在硬件/显示/触摸准备后、进入首个应用界面之前，不能据此宣称已经验证首个主页或打开书。PicoNano若新增回滚门，应在首个必要界面成功呈现和关键存储自检后确认新槽。参考的配置页SNTP调用是同步等待，临时连网最多等待15秒、SNTP等待12秒；应借鉴PMU写入与读回流程并改为自有异步任务。参考STA可在离开传输页后保持联网，PicoNano当前退出会销毁无线并恢复USB；对时先选择临时连网或受控复用，避免意外改变离线功耗/USB恢复。

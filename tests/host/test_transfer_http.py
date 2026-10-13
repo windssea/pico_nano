@@ -17,15 +17,10 @@ with tempfile.TemporaryDirectory() as directory:
   except urllib.error.HTTPError as error:return error.code,json.load(error)
  assert call('/api/v1/status')==(200,{'name':'PicoNano','version':'0.0.56','chunk_size':65536,'preview':True})
  assert call('/api/v1/uploads','POST',{})[0]==401
- assert call('/api/v1/pair','POST',{'code':app.pair_code},origin='http://evil.test')[0]==403
- for i in range(5):assert call('/api/v1/pair','POST',{'code':'999999' if app.pair_code!='999999' else '000000'})[0]==401
- assert call('/api/v1/pair','POST',{'code':app.pair_code})[0]==429
- app.locked_until=0
- code,result=call('/api/v1/pair','POST',{'code':app.pair_code});assert code==200;token=result['token']
+ assert call('/api/v1/session',origin='http://evil.test')[0]==403
+ code,result=call('/api/v1/session');assert code==200;token=result['token']
  assert call('/api/v1/uploads','POST',{},token,extra={'Host':'evil.test'})[0]==403
- expiry=app.pair_expires;app.pair_expires=0
- assert call('/api/v1/pair','POST',{'code':app.pair_code})[0]==401
- app.pair_expires=expiry
+ assert call('/api/v1/session')[1]['token']==token
  assert call('/api/v1/uploads','POST',{'kind':'book','name':'../escape.txt','size':1,'sha256':'0'*64},token)[0]==400
  assert call('/api/v1/uploads','POST',{'kind':'book','name':'bad.txt','size':True,'sha256':'0'*64},token)[0]==400
  assert call('/api/v1/uploads','POST',{'kind':'book','name':'bad.txt','size':1,'sha256':'oops'},token)[0]==400
@@ -38,7 +33,7 @@ with tempfile.TemporaryDirectory() as directory:
  assert call(url+'/chunks','PUT',first,token,extra=headers)[1]['next_offset']==65536
  old_token=token;server.shutdown();server.server_close();thread.join();app.close()
  app,server,thread=start();assert call(url,token=old_token)[0]==401
- token=call('/api/v1/pair','POST',{'code':app.pair_code})[1]['token'];code,result=call(url,token=token);assert code==200 and result['next_offset']==65536
+ token=call('/api/v1/session')[1]['token'];code,result=call(url,token=token);assert code==200 and result['next_offset']==65536
  for at in range(65536,len(data),65536):
   block=data[at:at+65536];code,result=call(url+'/chunks','PUT',block,token,extra={'X-Offset':str(at),'X-Chunk-SHA256':hashlib.sha256(block).hexdigest()});assert code==200,(code,result)
  code,result=call(url+'/complete','POST',{'sha256':digest},token);assert code==200 and (root/'piconano/books/小说.txt').read_bytes()==data,(code,result)

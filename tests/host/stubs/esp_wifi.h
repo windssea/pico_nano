@@ -29,3 +29,6 @@ esp_err_t esp_wifi_start(void);
 esp_err_t esp_wifi_connect(void);
 esp_err_t esp_wifi_stop(void);
 esp_err_t esp_wifi_deinit(void);
+
+typedef enum {WIFI_PS_NONE=0,WIFI_PS_MIN_MODEM=1} wifi_ps_type_t;
+esp_err_t esp_wifi_set_ps(wifi_ps_type_t);

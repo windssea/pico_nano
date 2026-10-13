@@ -142,6 +142,18 @@ static pn_status_t paint_body(app_t *a,pn_frame_t *frame,unsigned *missing,unsig
     if(a->page.image_count)(void)compact(a);
     pn_frame_clear(frame,15);
     pn_frame_t viewport={frame->pixels+PN_READER_TOP*frame->stride+a->style.margin/2,a->layout.width,PN_READER_HEIGHT,frame->stride};
+    // 合并同一基线的混合字号；有插图的行不画阅读线，文字/图片在其后绘制。 / Combine mixed sizes on each baseline; skip illustrated rows and paint text/images afterward.
+    if(a->style.reading_line){int baseline=INT_MIN,descent=0,gap=INT_MAX;bool text=false,illustrated=false;
+        for(size_t i=0;i<=a->page.count;i++){
+            pn_epub_page_node_t *n=i<a->page.count?&a->page.nodes[i]:NULL;
+            if(!n || n->baseline!=baseline){if(text && !illustrated)pn_reader_guide_row(&viewport,a->style.reading_line,baseline+descent+(gap==INT_MAX?0:gap/2)+a->style.reading_line_offset);baseline=n?n->baseline:INT_MIN;descent=0;gap=INT_MAX;text=illustrated=false;}
+            if(!n)break;
+            if(n->image_index!=UINT_MAX){illustrated=true;continue;}
+            if(n->codepoint==9 || n->codepoint==10 || n->codepoint==' ')continue;
+            text=true;if(n->metrics.descent>descent)descent=n->metrics.descent;
+            int spacing=(n->metrics.line_height?n->metrics.line_height:a->layout.line_height)-n->metrics.ascent-n->metrics.descent;if(spacing<0)spacing=0;if(spacing<gap)gap=spacing;
+        }
+    }
     for(size_t i=0;i<a->page.count;i++){pn_epub_page_node_t *n=&a->page.nodes[i];pn_status_t status;
         if(n->image_index!=UINT_MAX){pn_epub_reader_trim(&a->reader);suspend_fonts(a);pn_font_close(&a->ui);pn_epub_page_image_t *image=&a->page.images[n->image_index];pn_image_info_t info;
             int x=n->x_64/64,y=n->baseline-image->height,w=image->width,h=image->height;
@@ -257,18 +269,18 @@ static pn_status_t pn_epub_app_open_on_media_impl(pn_epub_app_t *app,pn_pool_t *
             // 所选字体缺失/被替换：本次用启动默认字体运行，保留记录不改。/ Missing or replaced selection: run with the startup default this time and keep the record unchanged.
             pn_status_t primary;
 #ifdef ESP_PLATFORM
-            primary=selected_fonts.primary.kind==PN_FONT_FILE && !pn_sd_resource_path(selected_fonts.primary.path,PN_SD_FONTS)?PN_EMPTY:pn_font_reference_verify(&selected_fonts.primary,a->media,&a->book_lease);
+            primary=selected_fonts.primary.kind==PN_FONT_FILE && !pn_sd_resource_path(selected_fonts.primary.path,PN_SD_FONTS)?PN_EMPTY:pn_font_reference_verify_pooled(pool,&selected_fonts.primary,a->media,&a->book_lease);
 #else
-            primary=pn_font_reference_verify(&selected_fonts.primary,a->media,&a->book_lease);
+            primary=pn_font_reference_verify_pooled(pool,&selected_fonts.primary,a->media,&a->book_lease);
 #endif
             if(primary==PN_STALE_MEDIA)status=primary;
             else if(primary!=PN_OK)a->font_unavailable=true;
             else{has_selected_fonts=true;font=selected_fonts.primary.kind==PN_FONT_FILE?selected_fonts.primary.path:NULL;
                 pn_status_t backup;
 #ifdef ESP_PLATFORM
-                backup=selected_fonts.fallback.kind==PN_FONT_FILE && !pn_sd_resource_path(selected_fonts.fallback.path,PN_SD_FONTS)?PN_EMPTY:pn_font_reference_verify(&selected_fonts.fallback,a->media,&a->book_lease);
+                backup=selected_fonts.fallback.kind==PN_FONT_FILE && !pn_sd_resource_path(selected_fonts.fallback.path,PN_SD_FONTS)?PN_EMPTY:pn_font_reference_verify_pooled(pool,&selected_fonts.fallback,a->media,&a->book_lease);
 #else
-                backup=pn_font_reference_verify(&selected_fonts.fallback,a->media,&a->book_lease);
+                backup=pn_font_reference_verify_pooled(pool,&selected_fonts.fallback,a->media,&a->book_lease);
 #endif
                 if(backup==PN_STALE_MEDIA)status=backup;
                 else if(backup!=PN_OK){a->font_unavailable=true;selected_fonts.fallback=(pn_font_reference_t){.kind=PN_FONT_RESIDENT};}}}

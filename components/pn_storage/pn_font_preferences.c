@@ -80,7 +80,7 @@ pn_status_t pn_font_preferences_files(pn_journal_files_t *files,pn_media_t *medi
     n=snprintf(b,sizeof b,"%s/%s.b",root,name);if(n<0 || (size_t)n>=sizeof b)return PN_LIMIT;
     return pn_journal_files_init(files,media,lease,a,b,io);
 }
-pn_status_t pn_font_reference_verify(const pn_font_reference_t *r,pn_media_t *media,const pn_media_lease_t *lease){
+pn_status_t pn_font_reference_verify_pooled(pn_pool_t *pool,const pn_font_reference_t *r,pn_media_t *media,const pn_media_lease_t *lease){
     pn_status_t status=reference_valid(r);if(status!=PN_OK)return status;
     status=pn_media_validate(media,lease);if(status!=PN_OK)return status;if(lease->access==PN_MEDIA_USB)return PN_INVALID;
     if(r->kind==PN_FONT_RESIDENT)return PN_OK;
@@ -92,7 +92,11 @@ pn_status_t pn_font_reference_verify(const pn_font_reference_t *r,pn_media_t *me
 #endif
     if(result || !S_ISREG(info.st_mode) || info.st_size<0)return PN_IO;
     if((uint64_t)info.st_size!=r->size)return PN_STALE_JOB;
-    pn_book_id_t id;status=pn_identity_file(media,lease,r->path,PN_FONT_REFERENCE_MAX_BYTES,&id);
+    pn_book_id_t id;status=pn_identity_file_pooled(pool,media,lease,r->path,PN_FONT_REFERENCE_MAX_BYTES,&id);
     if(status==PN_OK && memcmp(id.sha256,r->identity.sha256,32))status=PN_STALE_JOB;
     return status;
+}
+
+pn_status_t pn_font_reference_verify(const pn_font_reference_t *r,pn_media_t *media,const pn_media_lease_t *lease){
+    return pn_font_reference_verify_pooled(NULL,r,media,lease);
 }

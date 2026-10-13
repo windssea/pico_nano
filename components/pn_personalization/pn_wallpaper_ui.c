@@ -115,7 +115,7 @@ static pn_status_t draw(ui_t *u,pn_wallpaper_screen_t screen){
             row=1;
             if(s==PN_OK && cover){s=sized_button(u,"裁切位置 -",32,CONTROL_Y0+CONTROL_PITCH,300,80,0u);if(s==PN_OK)s=sized_button(u,"裁切位置 +",352,CONTROL_Y0+CONTROL_PITCH,300,80,0u);row=2;}}
         if(s==PN_OK)s=sized_button(u,u->draft.hint?"底部提示：开":"底部提示：关",32,CONTROL_Y0+row*CONTROL_PITCH,620,80,0u);
-        if(s==PN_OK && custom)s=sized_button(u,u->draft.mode==PN_LOCK_MASK?"透明遮罩 · 阅读及锁屏":"全屏壁纸 · 仅锁屏",32,1040,620,80,0u);
+        if(s==PN_OK && custom)s=sized_button(u,u->draft.mode==PN_LOCK_MASK?"透明遮罩 · 仅锁屏":"全屏壁纸 · 仅锁屏",32,1040,620,80,0u);
         if(s==PN_OK){snprintf(line,sizeof line,"预览未保存：%s",custom?base(u->draft.source):mode_name(&u->draft));s=line_text(u,*u->message?u->message:line,26,1190,PN_ALIGN_LEFT);}
     }
     return s;

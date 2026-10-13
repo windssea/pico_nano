@@ -70,6 +70,12 @@ int pn_reader_toolbar_hit(int x,int y,unsigned unavailable){
     }
     return -1;
 }
+bool pn_reader_loading_needed(bool text_format,uint64_t source_bytes){return !text_format || source_bytes>65536u;}
+void pn_reader_guide_row(pn_frame_t *frame,unsigned style,int y){
+    if(!frame || !frame->pixels || style<1 || style>2 || y<0 || y>=frame->height || frame->width<1)return;
+    int dash=style==1?19:2,period=style==1?31:13;
+    for(int x=0;x<frame->width;x+=period){int width=frame->width-x;if(width>dash)width=dash;pn_frame_rect(frame,x,y,width,1,10);}
+}
 pn_status_t pn_reader_loading_render(pn_font_t *ui,pn_frame_t *frame,const char *title){
     if(!ui || !ui->impl || !frame || !frame->pixels || !title)return PN_INVALID;
     int original=ui->pixels;pn_frame_clear(frame,PN_UI_PAPER);

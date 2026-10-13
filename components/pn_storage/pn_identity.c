@@ -6,10 +6,13 @@
  * 冻结：不写文件；调用方排除文件并发变更，不用于安全认证。
  * Frozen: no file writes; caller excludes concurrent mutation; not for security authentication.
  */
+#define _POSIX_C_SOURCE 200809L
 #include "pn_profile.h"
 #include "pn_identity.h"
 #include "pn_cancel.h"
 #include <stdio.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #include <string.h>
 
 typedef struct {
@@ -59,32 +62,37 @@ static void finish(sha_t *s, pn_book_id_t *id) {
     compress(s,s->block);
     for (unsigned i=0;i<32;i++) id->sha256[i]=(uint8_t)(s->h[i/4]>>(24-8*(i%4)));
 }
-static pn_status_t pn_identity_file_impl(pn_media_t *media, const pn_media_lease_t *lease,
-    const char *path, uint64_t limit, pn_book_id_t *id) {
-    if (!media || !lease || !path || !*path || !id) return PN_INVALID;
-    pn_status_t status=pn_media_validate(media,lease); if (status!=PN_OK) return status;
-    if (lease->access==PN_MEDIA_USB) return PN_INVALID;
-    FILE *file=fopen(path,"rb"); if (!file) return PN_IO;
-    sha_t hash={.h={0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19}};
-    uint8_t buffer[4096];
-    for (;;) {
-        status=pn_cancel_checkpoint();if(status==PN_OK)status=pn_media_validate(media,lease); if (status!=PN_OK) break;
-        size_t n=fread(buffer,1,sizeof buffer,file);
-        if (ferror(file)) { status=PN_IO;break; }
-        if ((uint64_t)n>limit-hash.bytes || (uint64_t)n>UINT64_MAX/8-hash.bytes) { status=PN_LIMIT;break; }
-        update(&hash,buffer,n);
-        if (feof(file)) break;
-        if (!n) { status=PN_IO;break; }
-    }
-    if (fclose(file)!=0 && status==PN_OK) status=PN_IO;
-    pn_status_t current=pn_media_validate(media,lease); if (current!=PN_OK) return current;
-    if (status!=PN_OK) return status;
-    pn_book_id_t result; finish(&hash,&result); *id=result; return PN_OK;
+typedef struct {FILE *file;pn_media_t *media;const pn_media_lease_t *lease;uint64_t offset;} file_hash_t;
+static pn_status_t file_hash_read(void *ctx,uint64_t offset,uint8_t *bytes,size_t capacity,size_t *got){
+    file_hash_t *source=ctx;pn_status_t status=pn_cancel_checkpoint();
+    if(status==PN_OK)status=pn_media_validate(source->media,source->lease);
+    if(status!=PN_OK)return status;
+    if(offset!=source->offset)return PN_INVALID;
+    *got=fread(bytes,1,capacity,source->file);source->offset+=*got;
+    return ferror(source->file)?PN_IO:PN_OK;
 }
-pn_status_t pn_identity_file(pn_media_t *media, const pn_media_lease_t *lease,
-    const char *path, uint64_t limit, pn_book_id_t *id){
-    pn_profile_span_t span;pn_profile_begin(&span,NULL,"content.sha");
-    pn_status_t status=pn_identity_file_impl(media,lease,path,limit,id);pn_profile_end(&span,status);return status;
+pn_status_t pn_identity_file_pooled(pn_pool_t *pool,pn_media_t *media,const pn_media_lease_t *lease,const char *path,uint64_t limit,pn_book_id_t *id){
+    if(!media || !lease || !path || !*path || !id)return PN_INVALID;
+    pn_status_t status=pn_media_validate(media,lease);if(status!=PN_OK)return status;
+    if(lease->access==PN_MEDIA_USB)return PN_INVALID;
+    FILE *file=fopen(path,"rb");if(!file)return PN_IO;
+    struct stat info;pn_book_id_t result;
+    if(fstat(fileno(file),&info) || !S_ISREG(info.st_mode) || info.st_size<0)status=PN_IO;
+    else if((uint64_t)info.st_size>limit)status=PN_LIMIT;
+    else{
+        file_hash_t source={file,media,lease,0};pn_profile_span_t span;pn_profile_begin(&span,pool,"content.sha");
+        // 共用硬件/软件流式摘要，连续读取；仍校验全部原文，不能由大小猜身份。 / Use shared hardware/software streaming SHA and sequential reads; verify all bytes, never infer identity from size.
+        status=pool?pn_identity_stream_pooled(pool,&source,(uint64_t)info.st_size,file_hash_read,&result):pn_identity_stream(&source,(uint64_t)info.st_size,file_hash_read,&result);
+        if(status==PN_OK && (fgetc(file)!=EOF || ferror(file)))status=PN_IO;
+        pn_profile_end(&span,status);
+    }
+    if(fclose(file) && status==PN_OK)status=PN_IO;
+    pn_status_t current=pn_media_validate(media,lease);if(current!=PN_OK)return current;
+    if(status==PN_OK)*id=result;
+    return status;
+}
+pn_status_t pn_identity_file(pn_media_t *media,const pn_media_lease_t *lease,const char *path,uint64_t limit,pn_book_id_t *id){
+    return pn_identity_file_pooled(NULL,media,lease,path,limit,id);
 }
 
 pn_status_t pn_identity_bytes(const uint8_t *bytes,size_t n,pn_book_id_t *out){

@@ -7,7 +7,7 @@ typedef struct {
  bool released,busy; ///< 是否归还介质/正在处理 / Media returned or processing
  bool station; ///< 局域网模式：不显示热点口令与连接码 / LAN mode: no hotspot password or join code
  bool localsend; ///< 同时提供原生自动接收 / Native auto-reception is also available
- char ssid[33],password[13],address[80],pin[7]; ///< 复制的显示字段，不是网络上下文 / Copied display fields, not network context
+ char ssid[33],password[13],address[80]; ///< 复制的显示字段，不是网络上下文 / Copied display fields, not network context
 } pn_transfer_view_t;
 #define PN_TRANSFER_VIEW_STOP 40
 #define PN_READING_MENU_RESUME 30

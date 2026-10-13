@@ -36,3 +36,7 @@ pn_status_t pn_reader_toolbar_render(pn_font_t *ui,pn_frame_t *frame,unsigned un
 int pn_reader_toolbar_hit(int x,int y,unsigned unavailable);
 /// 静态开书反馈，不画假百分比；只绘制，由控制层管理输入门和显示回执。/ Paint static opening feedback without a fake percentage; controllers own input gating and display receipts.
 pn_status_t pn_reader_loading_render(pn_font_t *ui,pn_frame_t *frame,const char *title);
+/// 小TXT直接呈现正文，省掉一次面板刷新；大文件保留开书反馈。 / Present small TXT directly to avoid an extra panel update; keep opening feedback for larger files.
+bool pn_reader_loading_needed(bool text_format,uint64_t source_bytes);
+/// 在正文视口的一行绘制灰色虚线/点线；0关闭，越界跳过，不分配或改变排版。 / Draw a gray dashed/dotted row in a text viewport; zero disables, out-of-bounds rows are skipped, without allocation or layout changes.
+void pn_reader_guide_row(pn_frame_t *viewport,unsigned style,int y);

@@ -91,7 +91,12 @@ static pn_status_t render_impl(app_t *a,pn_frame_t *frame,const pn_reader_receip
     pn_frame_clear(frame,15);unsigned missing=0;
     // 偶数边距保持4bpp半字节对齐，仅裁切正文区域。/ Even margin preserves 4bpp nibble alignment and clips the content area.
     pn_frame_t viewport={frame->pixels+PN_READER_TOP*frame->stride+a->style.margin/2,684-2*a->style.margin,PN_READER_HEIGHT,frame->stride};
+    int guide_baseline=INT_MIN,guide_below=0;
+    if(a->style.reading_line){int ascent,descent;pn_status_t s=pn_font_chain_vertical(chain(a),&ascent,&descent);if(s!=PN_OK)return s;
+        int gap=a->reader.layout.line_height-ascent-descent;if(gap<0)gap=0;guide_below=descent+gap/2+a->style.reading_line_offset;}
     for(size_t i=0;i<a->reader.page.count;i++){pn_page_glyph_t *g=&a->glyphs[i];if(g->source.codepoint==10 || g->source.codepoint==9)continue;
+        // 阅读线跟随实际行基线，空段和页脚不画，不改变源位置。 / Guides follow actual baselines, omit empty paragraphs/footer and never change source positions.
+        if(a->style.reading_line && g->baseline!=guide_baseline && g->source.codepoint!=' '){guide_baseline=g->baseline;pn_reader_guide_row(&viewport,a->style.reading_line,g->baseline+guide_below);}
         pn_status_t s=pn_font_chain_draw(chain(a),&viewport,g->source.codepoint,g->x_64,g->baseline,PN_FONT_GRAY);
         if(s==PN_EMPTY){int x=g->x_64/64,y=g->baseline-body(a)->pixels,size=body(a)->pixels-4;pn_frame_rect(&viewport,x,y,size,1,0);pn_frame_rect(&viewport,x,y+size,size,1,0);pn_frame_rect(&viewport,x,y,1,size,0);pn_frame_rect(&viewport,x+size,y,1,size,0);missing++;}
         else if(s!=PN_OK)return s;
@@ -156,7 +161,7 @@ static pn_status_t pn_reader_app_open_on_media_impl(pn_reader_app_t *app,pn_pool
     pn_text_source_t source={0},font_source=pn_font_reading_source();pn_text_encoding_t encoding;
     if(status==PN_OK)status=pn_media_acquire(a->book_media,PN_MEDIA_READ,&a->book_lease);
     if(status==PN_OK)status=pn_text_file_open(&a->book_file,a->book_media,&a->book_lease,book_path,&source);
-    if(status==PN_OK)status=pn_identity_file(a->book_media,&a->book_lease,book_path,PN_TEXT_FILE_MAX_BYTES,&a->book);
+    if(status==PN_OK)status=pn_identity_file_pooled(pool,a->book_media,&a->book_lease,book_path,PN_TEXT_FILE_MAX_BYTES,&a->book);
     if(status==PN_OK)status=pn_text_probe_checkpoints(&source,PN_TEXT_FILE_MAX_BYTES,&encoding,decoder_checkpoint,a);
     if(status==PN_OK && state_dir)status=open_state(a,state_dir,now);
     pn_font_preferences_t selected_fonts={0};bool has_selected_fonts=false,fonts_from_book=false;
@@ -168,18 +173,18 @@ static pn_status_t pn_reader_app_open_on_media_impl(pn_reader_app_t *app,pn_pool
             // 所选字体缺失/被替换：本次用启动默认字体运行，保留记录不改。/ Missing or replaced selection: run with the startup default this time and keep the record unchanged.
             pn_status_t primary;
 #ifdef ESP_PLATFORM
-            primary=selected_fonts.primary.kind==PN_FONT_FILE && !pn_sd_resource_path(selected_fonts.primary.path,PN_SD_FONTS)?PN_EMPTY:pn_font_reference_verify(&selected_fonts.primary,a->book_media,&a->book_lease);
+            primary=selected_fonts.primary.kind==PN_FONT_FILE && !pn_sd_resource_path(selected_fonts.primary.path,PN_SD_FONTS)?PN_EMPTY:pn_font_reference_verify_pooled(pool,&selected_fonts.primary,a->book_media,&a->book_lease);
 #else
-            primary=pn_font_reference_verify(&selected_fonts.primary,a->book_media,&a->book_lease);
+            primary=pn_font_reference_verify_pooled(pool,&selected_fonts.primary,a->book_media,&a->book_lease);
 #endif
             if(primary==PN_STALE_MEDIA)status=primary;
             else if(primary!=PN_OK)a->font_unavailable=true;
             else{has_selected_fonts=true;font_path=selected_fonts.primary.kind==PN_FONT_FILE?selected_fonts.primary.path:NULL;
                 pn_status_t backup;
 #ifdef ESP_PLATFORM
-                backup=selected_fonts.fallback.kind==PN_FONT_FILE && !pn_sd_resource_path(selected_fonts.fallback.path,PN_SD_FONTS)?PN_EMPTY:pn_font_reference_verify(&selected_fonts.fallback,a->book_media,&a->book_lease);
+                backup=selected_fonts.fallback.kind==PN_FONT_FILE && !pn_sd_resource_path(selected_fonts.fallback.path,PN_SD_FONTS)?PN_EMPTY:pn_font_reference_verify_pooled(pool,&selected_fonts.fallback,a->book_media,&a->book_lease);
 #else
-                backup=pn_font_reference_verify(&selected_fonts.fallback,a->book_media,&a->book_lease);
+                backup=pn_font_reference_verify_pooled(pool,&selected_fonts.fallback,a->book_media,&a->book_lease);
 #endif
                 if(backup==PN_STALE_MEDIA)status=backup;
                 else if(backup!=PN_OK){a->font_unavailable=true;selected_fonts.fallback=(pn_font_reference_t){.kind=PN_FONT_RESIDENT};}}}

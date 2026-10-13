@@ -42,22 +42,9 @@ class TransferApp:
  def __init__(self,worker,root):
   self.root=pathlib.Path(root).resolve();self.root.mkdir(parents=True,exist_ok=True)
   self.worker=NativeWorker(worker,self.root)
-  self.pair_code=f'{secrets.randbelow(1000000):06d}'
   self.token=secrets.token_hex(16)
-  self.pair_expires=time.monotonic()+300;self.locked_until=0;self.failures=0;self.closed=False
+  self.closed=False
   self.auth_lock=threading.Lock()
- def pair(self,code):
-  with self.auth_lock:
-   now=time.monotonic()
-   if self.closed:return 503,{'message':'传输服务已停止'}
-   if now<self.locked_until:return 429,{'message':'尝试过于频繁，请稍后再试','retry_after':max(1,int(self.locked_until-now))}
-   if self.failures>=5:self.failures=0
-   if now>=self.pair_expires:return 401,{'message':'配对码已过期，请重新开启传输'}
-   if not isinstance(code,str) or not secrets.compare_digest(code,self.pair_code):
-    self.failures+=1
-    if self.failures>=5:self.locked_until=now+60
-    return 401,{'message':'配对码不正确'}
-   self.failures=0;return 200,{'token':self.token}
  def authorized(self,value):
   with self.auth_lock:return not self.closed and isinstance(value,str) and secrets.compare_digest(value,'Bearer '+self.token)
  def close(self):
@@ -131,8 +118,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
     filename='index.html' if path in ('/','/qa') else path[1:];data=(ROOT/'assets/transfer'/filename).read_bytes();data=data.replace(b'</body>',b'<script type="module" src="/qa.mjs"></script></body>') if path=='/qa' else data;mime='text/html' if filename.endswith('.html') else 'text/css' if filename.endswith('.css') else 'text/javascript'
     self.send_response(200);self.send_header('Content-Type',mime+'; charset=utf-8');self.send_header('Content-Length',str(len(data)));self.send_header('Cache-Control','no-store');self.send_header('X-Content-Type-Options','nosniff');self.send_header('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; worker-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'");self.end_headers();self.wfile.write(data);return
    if self.command=='GET' and path=='/api/v1/status':self.send_json(200,{'name':'PicoNano','version':'0.0.56','chunk_size':65536,'preview':True});return
-   if self.command=='POST' and path=='/api/v1/pair':value=self.object(('code',),('code',));status,result=self.server.app.pair(value['code']);self.send_json(status,result);return
-   if not self.server.app.authorized(self.header('Authorization')):self.error(401,'请先输入配对码');return
+   if self.command=='GET' and path=='/api/v1/session':
+    with self.server.app.auth_lock:
+     if self.server.app.closed:self.error(503,'传输服务已停止');return
+     self.send_json(200,{'ready':True,'token':self.server.app.token});return
+   if not self.server.app.authorized(self.header('Authorization')):self.error(401,'会话已失效，请刷新页面重新连接');return
    if self.command=='POST' and path=='/api/v1/uploads':
     value=self.object(('kind','name','size','sha256','replace'),('kind','name','size','sha256'));kind=KINDS.get(value['kind']) if isinstance(value['kind'],str) else None
     if kind is None:raise BadRequest('文件类别无效')
@@ -143,7 +133,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
     identifier=secrets.token_hex(16);result=self.native(f'BEGIN {identifier} {kind} {size} {sha} {name} {int(old is not None)} {old_size} {old_sha}')
     if result is not None:self.send_json(201,public_state(result)|{'chunk_size':65536})
     return
-   if self.command=='GET' and path=='/api/v1/session':self.send_json(200,{'paired':True});return
    match=re.fullmatch('/api/v1/uploads/([0-9a-fA-F]{32})(/chunks|/complete)?',path)
    if match:
     identifier=match[1].lower();action=match[2]
@@ -206,7 +195,7 @@ def make_server(app,bind='127.0.0.1',port=8787,authority=None):
 def main():
  parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--worker',required=True);parser.add_argument('--root',required=True);parser.add_argument('--bind',default='127.0.0.1');parser.add_argument('--port',type=int,default=8787);parser.add_argument('--authority');args=parser.parse_args()
  app=TransferApp(args.worker,args.root);server=make_server(app,args.bind,args.port,args.authority)
- print('传输地址：http://'+server.authority,flush=True);print('配对码：'+app.pair_code,flush=True)
+ print('传输地址：http://'+server.authority,flush=True)
  try:server.serve_forever()
  except KeyboardInterrupt:pass
  finally:server.server_close();app.close()

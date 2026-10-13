@@ -16,6 +16,8 @@ typedef struct {
 /// Stream content without guessing identity from path or size; errors preserve output. Caller prevents concurrent file mutation.
 pn_status_t pn_identity_file(pn_media_t *media, const pn_media_lease_t *lease,
     const char *path, uint64_t byte_limit, pn_book_id_t *id);
+/// 与file同样完整校验，临时缓冲计入pool，硬件/软件同源；错误保持输出。 / Full file verification with a pool-charged temporary buffer and shared hardware/software hashing; preserve output on error.
+pn_status_t pn_identity_file_pooled(pn_pool_t *pool,pn_media_t *media,const pn_media_lease_t *lease,const char *path,uint64_t byte_limit,pn_book_id_t *id);
 
 /// 借用只读块计算完整摘要，错误不改输出。/ Hash a borrowed read-only block; preserve output on errors.
 pn_status_t pn_identity_bytes(const uint8_t *,size_t,pn_book_id_t *);

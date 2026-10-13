@@ -16,6 +16,7 @@
 #include "pn_toc_ui.h"
 #include "pn_reader_input.h"
 #include "pn_reader_chrome.h"
+#include "device_card_presence.h"
 #include "pn_reader_toolbar.h"
 #include "pn_widgets.h"
 #include "pn_search_ui.h"
@@ -69,7 +70,7 @@ static pn_media_t data_media;
 static pn_media_t wallpaper_media;
 static bool wallpaper_ready;
 static pn_wallpaper_ui_t wallpaper_ui;
-static pn_wallpaper_mask_t reading_mask; ///< 常驻遮罩及成功阅读底图 / Resident mask and confirmed reading underlay
+static pn_wallpaper_mask_t lock_mask; ///< 锁屏时临时遮罩 / Temporary mask used only while locked
 static pn_font_manage_t font_manage;
 static pn_settings_ui_t settings_ui;
 static uint8_t input_flags; ///< 已保存翻页标志 / Saved page-turn flags
@@ -297,7 +298,7 @@ static pn_status_t present_impl(void *ctx,const pn_frame_t *frame,pn_refresh_t p
     // 池只由产品worker分配；显示任务只写预分配的已显示像素。/ Only the product worker allocates; display writes preallocated shown pixels.
     if(!shown_px)shown_px=pn_alloc_tagged(&pool,PN_MEM_FRAME,342u*1216u);
     if(!reader_active()){pn_free(page_copy);page_copy=NULL;}
-    bool backup=reader_active() && !toolbar_open && frame->width==684 && frame->height==1216 && frame->stride>=342;
+    bool backup=reader_active() && !locked && !toolbar_open && frame->width==684 && frame->height==1216 && frame->stride>=342;
     if(backup && !page_copy)page_copy=pn_alloc_tagged(&pool,PN_MEM_FRAME,342u*1216u);
     pn_status_t status=async_port.panel?pn_device_async_present(&async_port,frame,profile):present_panel(NULL,frame,profile);
     if(status==PN_OK && backup && page_copy && frame->pixels!=page_copy)for(int y=0;y<1216;y++)memcpy(page_copy+(size_t)y*342,frame->pixels+(size_t)y*frame->stride,342);
@@ -380,7 +381,16 @@ static void show_lock(const char *hint){
         if(pn_wallpaper_store_init(&store,&wallpaper_media,"/wallpaper/lock.a","/wallpaper/lock.b")==PN_OK && pn_media_acquire(&wallpaper_media,PN_MEDIA_READ,&lease)==PN_OK){
             pn_status_t loaded=pn_wallpaper_load(&store,&lease,&selection,&frame);(void)pn_media_release(&wallpaper_media,&lease);
             if(loaded!=PN_OK){if(loaded!=PN_EMPTY)ESP_LOGW(TAG,"Wallpaper record unusable: %d; default lock screen",(int)loaded);selection=(pn_lock_selection_t){.mode=PN_LOCK_DEFAULT,.hint=true};}}}
-    if(status==PN_OK && selection.mode==PN_LOCK_MASK && !pn_wallpaper_mask_snapshot(&reading_mask,&frame))selection=(pn_lock_selection_t){.mode=PN_LOCK_DEFAULT,.hint=true};
+    if(status==PN_OK && selection.mode==PN_LOCK_MASK){
+        // 只在锁屏解码/合成，底图取成功正文副本，绝不修改阅读器帧。 / Decode/composite only while locking, using a confirmed text copy without modifying reader pixels.
+        pn_status_t mask=PN_EMPTY;
+        if(reader_suspended && page_copy && pn_sd_resource_path(selection.source,PN_SD_WALLPAPERS)){
+            mask=pn_wallpaper_mask_open(&lock_mask,&pool,&sd_media,&selection);
+            if(mask==PN_OK){memcpy(frame.pixels,page_copy,PN_WALLPAPER_BYTES);mask=pn_wallpaper_mask_paint(&lock_mask,&frame);}
+        }
+        pn_wallpaper_mask_close(&lock_mask);
+        if(mask!=PN_OK)selection=(pn_lock_selection_t){.mode=PN_LOCK_DEFAULT,.hint=true};
+    }
     if(selection.mode==PN_LOCK_SIMPLE || selection.mode==PN_LOCK_BOOK)selection=(pn_lock_selection_t){.mode=PN_LOCK_DEFAULT,.hint=true};
     if(status==PN_OK)status=pn_font_open(&font,&pool,&builtin,32);
     if(status==PN_OK)status=pn_lock_render(&selection,&font,hint,&frame);
@@ -495,7 +505,7 @@ static void refresh_last(void){
     pn_free(tmp);
 }
 static void show_shelf(const char *cursor,bool previous){
-    pn_wallpaper_mask_close(&reading_mask);
+    pn_wallpaper_mask_close(&lock_mask);
     if(!shelf_page){shelf_page=pn_alloc_tagged(&pool,PN_MEM_UI,sizeof *shelf_page);if(!shelf_page){message("内存不足","稍后重试");return;}}
     pn_catalog_page_t *next=pn_alloc_tagged(&pool,PN_MEM_UI,sizeof *next);if(!next){message("内存不足","稍后重试");return;}
     pn_media_lease_t lease={0};pn_status_t status;
@@ -543,7 +553,7 @@ static pn_status_t show_loading(const char *path){
 static void start_reader_impl(void){
     if(transfer.impl)return;
     if(!stop_reader())return;
-    pn_wallpaper_mask_close(&reading_mask);
+    pn_wallpaper_mask_close(&lock_mask);
     if(!data_ready){data_ready=mount_data();if(!data_ready){message("内部存储不可用","保留数据，未格式化\n请先初始化数据分区");return;}}
     if(!shelf_prefs_loaded && pn_settings_load_shelf(&data_media,"/data/progress",&shelf_prefs)==PN_OK)shelf_prefs_loaded=true;
     if(!input_flags_loaded && pn_settings_load_flags(&data_media,"/data/progress",&input_flags)==PN_OK)input_flags_loaded=true;
@@ -563,26 +573,13 @@ static void start_reader_impl(void){
     }
     const char *font=NULL;
     covers_inactive=true;
-    pn_status_t loading=show_loading(selected_path);
+    pn_status_t loading=pn_reader_loading_needed(selected_format==PN_BOOK_TXT,(uint64_t)selected_info.st_size)?show_loading(selected_path):PN_OK;
     if(loading==PN_CANCELLED)return;
     if(loading!=PN_OK)ESP_LOGW(TAG,"Opening feedback unavailable: %d",(int)loading);
     uint64_t opened_at=now_ms();(void)opened_at;
     pn_status_t status=selected_format==PN_BOOK_EPUB?pn_epub_app_open_on_media(&epub,&pool,&sd_media,selected_path,font,"/data/progress",44,now_ms()):pn_reader_app_open_on_media(&reader,&pool,&sd_media,selected_path,font,"/data/progress",44,now_ms());
     ESP_LOGI(TAG,"Book prepare format=%u status=%d elapsed=%llu ms",(unsigned)selected_format,(int)status,(unsigned long long)(now_ms()-opened_at));
     if(status==PN_OK && selected_identified){pn_book_id_t actual;status=epub.impl?pn_epub_app_identity(&epub,&actual):pn_reader_app_identity(&reader,&actual);if(status==PN_OK && memcmp(actual.sha256,selected_expected.sha256,32))status=PN_STALE_JOB;}
-    if(status==PN_OK){
-        if(mount_wallpaper()){pn_wallpaper_store_t store;pn_media_lease_t lease;pn_lock_selection_t selection;
-            if(pn_wallpaper_store_init(&store,&wallpaper_media,"/wallpaper/lock.a","/wallpaper/lock.b")==PN_OK && pn_media_acquire(&wallpaper_media,PN_MEDIA_READ,&lease)==PN_OK){
-                pn_status_t loaded=pn_wallpaper_load(&store,&lease,&selection,NULL);(void)pn_media_release(&wallpaper_media,&lease);
-                if(loaded==PN_OK && selection.mode==PN_LOCK_MASK && pn_sd_resource_path(selection.source,PN_SD_WALLPAPERS)){
-                    pn_status_t mask=pn_wallpaper_mask_open(&reading_mask,&pool,&sd_media,&selection);
-                    if(mask==PN_OK){pn_reader_body_layer_t layer={&reading_mask,pn_wallpaper_mask_paint,pn_wallpaper_mask_complete};
-                        if(epub.impl)(void)pn_epub_app_body_layer(&epub,&layer);else (void)pn_reader_app_body_layer(&reader,&layer);}
-                    else ESP_LOGW(TAG,"Reading mask unavailable: %d; keeping plain text",(int)mask);
-                }
-            }
-        }
-    }
     if(status==PN_OK)status=active_step(PN_APP_OPEN,now_ms());
     if(status==PN_CANCELLED){pn_cancel_scope_t shield;pn_cancel_enter(&shield,NULL,NULL);if(stop_reader())show_shelf("",false);pn_cancel_leave(&shield);return;}
     if(status==PN_STALE_JOB){if(stop_reader()){recent_mode=false;selected_identified=false;selected_path[0]=0;message("书籍内容已改变","从全部书架重新选择\n历史记录仍保留");}return;}
@@ -640,7 +637,7 @@ static void paint_transfer(bool menu){
 static void begin_wallpaper(void){
     if(transfer.impl || wallpaper_ui.impl)return;
     if(!stop_reader())return;
-    pn_wallpaper_mask_close(&reading_mask);reading_menu=false;pn_wallpaper_store_t store;
+    pn_wallpaper_mask_close(&lock_mask);reading_menu=false;pn_wallpaper_store_t store;
     bool store_ok=mount_wallpaper() && pn_wallpaper_store_init(&store,&wallpaper_media,"/wallpaper/lock.a","/wallpaper/lock.b")==PN_OK;
     pn_status_t status=pn_wallpaper_ui_open(&wallpaper_ui,&pool,&sd_media,PN_SD_MOUNT "/" PN_SD_WALLPAPERS,store_ok?&store:NULL,present,NULL);
     if(status!=PN_OK){message("壁纸设置未打开","保留原锁屏，稍后重试");return;}
@@ -650,7 +647,7 @@ static void begin_wallpaper(void){
 static void begin_fonts(void){
     if(transfer.impl || font_manage.impl || wallpaper_ui.impl)return;
     if(!stop_reader())return;
-    pn_wallpaper_mask_close(&reading_mask);
+    pn_wallpaper_mask_close(&lock_mask);
     reading_menu=false;
     if(!data_ready)data_ready=mount_data();
     pn_status_t status=pn_font_manage_open(&font_manage,&pool,&sd_media,PN_SD_MOUNT "/" PN_SD_FONTS,data_ready?&data_media:NULL,data_ready?"/data/progress":NULL,present,NULL);
@@ -663,7 +660,7 @@ static void show_hub(void);
 static void begin_settings(void){
     if(transfer.impl || settings_ui.impl || font_manage.impl || wallpaper_ui.impl)return;
     if(!stop_reader())return;
-    pn_wallpaper_mask_close(&reading_mask);
+    pn_wallpaper_mask_close(&lock_mask);
     reading_menu=false;
     if(!data_ready)data_ready=mount_data();
     pn_status_t status=pn_settings_ui_open(&settings_ui,&pool,data_ready?&data_media:NULL,data_ready?"/data/progress":NULL,present,NULL);
@@ -702,7 +699,7 @@ static void tick_transfer(uint64_t now){
     handle_network_request();
     memset(&transfer_view,0,sizeof transfer_view);transfer_view.released=state.released;transfer_view.busy=state.work.busy;transfer_view.station=state.network.mode==PN_WIFI_STA;
     transfer_view.localsend=true;transfer_view.phase=state.phase==PN_DTRANSFER_READY?PN_TVIEW_READY:state.phase==PN_DTRANSFER_STOPPING?PN_TVIEW_STOPPING:state.phase==PN_DTRANSFER_STARTING?PN_TVIEW_STARTING:PN_TVIEW_FAILED;
-    memcpy(transfer_view.ssid,state.network.ssid,sizeof transfer_view.ssid);memcpy(transfer_view.password,state.network.ap_password,sizeof transfer_view.password);memcpy(transfer_view.pin,state.pin,sizeof transfer_view.pin);
+    memcpy(transfer_view.ssid,state.network.ssid,sizeof transfer_view.ssid);memcpy(transfer_view.password,state.network.ap_password,sizeof transfer_view.password);
     if(state.network.address[0])snprintf(transfer_view.address,sizeof transfer_view.address,"http://%s",state.network.address);
     if(state.released && transfer_return && pn_device_transfer_close(&transfer)==PN_OK){
         // 关闭完成后前台返回；抬手等普通事件不能取消这次唯一重绘，紧急导航仍可取消。/ Return in the foreground after shutdown; ordinary release events cannot cancel the only redraw, while urgent navigation can.
@@ -739,7 +736,7 @@ static void resume_reader(void){
 }
 static void lock_and_sleep_impl(const char *hint){
     ESP_LOGI(TAG,"Locking; idle at %llu ms",(unsigned long long)last_input);
-    locked=true;show_lock(hint);if(!reader_suspended)pn_wallpaper_mask_close(&reading_mask);
+    locked=true;show_lock(hint);if(!reader_suspended)pn_wallpaper_mask_close(&lock_mask);
     if(!pn_device_async_off(&async_port)){ESP_LOGW(TAG,"Display off barrier failed; staying awake");return;} // 显示owner断轨后再交出PMU/触摸。/ Display owner drops rails before handing off PMU/touch.
     if(!pn_device_async_pause(&async_port,true)){ESP_LOGW(TAG,"Input pause timed out; staying awake");(void)pn_device_async_pause(&async_port,false);return;}
     if(pn_device_sleep_until_key()){locked=false;last_input=now_ms();ESP_LOGI(TAG,"Unlocked at %llu ms",(unsigned long long)last_input);resume_reader();}
@@ -1106,8 +1103,8 @@ static void device_task(void *arg){
             if(!input_flags_loaded && pn_settings_load_flags(&data_media,"/data/progress",&input_flags)==PN_OK)input_flags_loaded=true;
          }} // 读取失败限频重试，不能每10ms重复访问存储。/ Rate-limit failed loads instead of repeating storage reads every 10 ms.
         input.config=(pn_reader_input_config_t){.left_hand=(input_flags&PN_INPUT_LEFT_HAND)!=0,.no_swipe=(input_flags&PN_INPUT_NO_SWIPE)!=0,.no_edge_tap=(input_flags&PN_INPUT_NO_EDGE_TAP)!=0,.no_keys=(input_flags&PN_INPUT_NO_KEYS)!=0};
-        if(!transfer.impl && now-last_card>=250){last_card=now;read_pico_sd_info_t card={0};(void)read_pico_sd_get_info(&card);
-            if(sd_media.available && !card.mounted){if(reader_active()){if(epub.impl)(void)pn_epub_app_media_lost(&epub);else (void)pn_reader_app_media_lost(&reader);(void)stop_reader();}else (void)pn_media_detach(&sd_media);selected_path[0]=0;pn_reader_input_cancel(&input);message("卡已移除","保留上次阅读位置\n插卡后点下方重试");}}
+        if(!transfer.impl && now-last_card>=250){last_card=now;
+            if(sd_media.available && pn_device_card_presence()==PN_STALE_MEDIA){if(reader_active()){if(epub.impl)(void)pn_epub_app_media_lost(&epub);else (void)pn_reader_app_media_lost(&reader);(void)stop_reader();}else (void)pn_media_detach(&sd_media);selected_path[0]=0;pn_reader_input_cancel(&input);message("卡已移除","保留上次阅读位置\n插卡后点下方重试");}}
         if((async_port.input_active && available==PN_OK && queued.kind==PN_DASYNC_POWER) || (!async_port.input_active && now-last_key>=100)){last_key=now;if((async_port.input_active || read_pico_pmu_take_key_short()) && now-boot>=1000){pn_reader_input_cancel(&input);
                 if(transfer.impl){transfer_return=true;transfer_lock=true;(void)pn_device_transfer_request_stop(&transfer);}
                 else if(locked){locked=false;last_input=now;resume_reader();}else if(prepare_lock())lock_and_sleep("再按电源键继续阅读");}}

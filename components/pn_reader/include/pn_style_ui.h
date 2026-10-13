@@ -1,8 +1,8 @@
 /*
  * SPDX-FileCopyrightText: 2026 pico_nano contributors
  * SPDX-License-Identifier: Apache-2.0
- * 中文：六项排版草稿，应用/取消/正文预览共用控制器。
- * English: six-field typesetting drafts with shared apply/cancel/body-preview control.
+ * 中文：排版与阅读线草稿，应用/取消/正文预览共用控制器。
+ * English: typesetting and reading-guide drafts with shared apply/cancel/body-preview control.
  * 冻结：调整值不直接写存储；未呈现确认的界面禁止应用。
  * Frozen: field changes never write storage directly; unpresented UI cannot apply.
  */
@@ -21,7 +21,7 @@
 #define PN_SUI_PRESET 10 ///< 10..12为舒适/紧凑/大字 / 10..12 are comfortable/compact/large
 #define PN_SUI_INDENT 14 ///< 切换首行缩进（0或2字）/ Toggle the first-line indent (0 or 2 characters)
 #define PN_SUI_FIELD 16
-#define PN_SUI_FIELDS 6
+#define PN_SUI_FIELDS 8
 typedef struct {
     pn_epub_app_t *epub; ///< 可选EPUB会话，与reader互斥 / Optional EPUB session, exclusive with reader
     pn_reader_app_t *reader; ///< 借用会话 / Borrowed session
@@ -29,7 +29,7 @@ typedef struct {
     bool request_fonts,did_preview,application_failed; ///< 字体请求及预览/失败应用状态 / Font request, preview and failed-apply states
     bool active,preview,presented; ///< 活动、正文预览与呈现确认 / Active, body preview and presentation confirmation
     bool more; ///< 正显示“更多排版”页 / The more-options page is showing
-    unsigned selected; ///< 键盘选中字段0..6 / Keyboard-selected field zero through six
+    unsigned selected; ///< 键盘选中字段0..7 / Keyboard-selected field zero through seven
     const char *notice; ///< 静态反馈 / Static feedback
 } pn_style_ui_t;
 /// 打开排版草稿，不修改设置。/ Open a typesetting draft without changing settings.

@@ -16,7 +16,6 @@ typedef struct {
  pn_status_t error; ///< 最初失败或清理错误 / Initial failure or cleanup error
  pn_device_wifi_state_t network; ///< 无STA秘密的网络快照 / Network snapshot without STA secrets
  pn_transfer_worker_state_t work; ///< 任务快照 / Worker snapshot
- char pin[7]; ///< 显示用配对码 / Display pairing code
 } pn_device_transfer_state_t;
 typedef struct {void *impl;} pn_device_transfer_t; ///< 活动对象不可复制 / Never copy a live object
 /// 立即移交media，独立任务装配；root为可信已挂载根，ESP固定/sdcard。

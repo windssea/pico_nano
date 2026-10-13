@@ -3,15 +3,33 @@ import {SHA256} from './sha256.mjs';
 const $=id=>document.getElementById(id),kinds={book:{label:'书籍',accept:'.txt,.epub',hint:'TXT、EPUB 电子书，支持多本添加',limit:512*1024*1024},font:{label:'字体',accept:'.ttf',hint:'TTF 字体，最大 32 MiB',limit:32*1024*1024},cover:{label:'封面',accept:'.png,.jpg,.jpeg',hint:'PNG、JPEG 图片，最大 8 MiB',limit:8*1024*1024},wallpaper:{label:'锁屏图片',accept:'.png,.jpg,.jpeg',hint:'上传后在阅读器菜单“锁屏壁纸”中预览并应用',limit:8*1024*1024}};
 let kind='book',token=null,running=false,entries=[],resourceGeneration=0;
 function notice(text,error=false){$('notice').textContent=text;$('notice').classList.toggle('error',error);}
-function connected(value){$('connection').textContent=value?'已连接':'等待配对';$('connection').classList.toggle('connected',value);$('pair-panel').hidden=value;if(!value)$('network-panel').hidden=true;else loadNetwork();syncFonts();render();}
+function connected(value){$('connection').textContent=value?'已连接':'正在连接';$('connection').classList.toggle('connected',value);if(!value)$('network-panel').hidden=true;else loadNetwork();syncFonts();render();}
 // 家庭网络：只在设备支持时显示；口令只提交，不回显。/ Home network: shown only when the device supports it; passwords are submitted, never echoed.
 function showNetwork(state){$('network-panel').hidden=false;$('network-forget').hidden=!state.saved;$('network-status').textContent=state.pending?'正在保存到阅读器…':state.result==='failed'?'保存失败，请重试；原设置保留。':state.saved?'已保存：'+state.ssid+'。退出传书后可在菜单选择“局域网传书”。':'保存后，阅读器菜单会出现“局域网传书”，手机与阅读器连同一个 WiFi 即可传书。';}
 async function loadNetwork(){try{showNetwork(await api('/network'));}catch(error){if(error.status===404)$('network-panel').hidden=true;}}
 async function waitNetwork(){for(let i=0;i<20;i++){const state=await api('/network');if(!state.pending){showNetwork(state);return state;}await new Promise(r=>setTimeout(r,300));}notice('阅读器仍在保存，请稍后刷新查看。',true);}
 $('network-form').onsubmit=async event=>{event.preventDefault();const button=event.submitter;button.disabled=true;try{await api('/network','POST',{ssid:$('network-ssid').value,password:$('network-password').value});$('network-password').value='';const state=await waitNetwork();if(state&&state.result==='ok')notice('网络已保存到阅读器。');}catch(error){notice(error.message,true);}finally{button.disabled=false;}};
 $('network-forget').onclick=async()=>{try{await api('/network','DELETE');await waitNetwork();notice('已忘记家庭网络。');}catch(error){notice(error.message,true);}};
-async function api(path,method='GET',body,headers={}){const auth=token;if(auth)headers.Authorization='Bearer '+auth;let data=body;if(body&&!(body instanceof Uint8Array)){headers['Content-Type']='application/json';data=JSON.stringify(body);}const response=await fetch('/api/v1'+path,{method,body:data,headers}),value=await response.json();if(!response.ok){if(response.status===401&&token===auth){token=null;connected(false);}const error=Error(value.message||'操作失败');error.status=response.status;throw error;}return value;}
-$('pair-form').onsubmit=async event=>{event.preventDefault();const button=event.submitter;button.disabled=true;try{token=(await api('/pair','POST',{code:$('pair-code').value})).token;$('pair-code').value='';connected(true);notice('连接成功，可以开始发送。');}catch(error){notice(error.message,true);}finally{button.disabled=false;}};
+// 只自动重试读取和幂等分块；新建/删除/完成等操作不盲重放。 / Retry only reads and idempotent chunks; never blindly replay create/delete/complete operations.
+async function api(path,method='GET',body,headers={}){
+ const auth=token;if(auth)headers.Authorization='Bearer '+auth;
+ let data=body;if(body&&!(body instanceof Uint8Array)){headers['Content-Type']='application/json';data=JSON.stringify(body);}
+ const retries=method==='GET'||(method==='PUT'&&path.endsWith('/chunks'))?3:0;
+ for(let attempt=0;;attempt++){
+  const controller=typeof AbortController==='function'?new AbortController():null;
+  // 大字体的完整校验可能较久，完成请求单独等待，不重复提交。 / Full validation of large fonts can take longer; wait separately without resubmitting completion.
+  const timer=controller?setTimeout(()=>controller.abort(),method==='POST'&&path.endsWith('/complete')?120000:15000):null;
+  try{
+   const response=await fetch('/api/v1'+path,{method,body:data,headers,signal:controller?.signal}),value=await response.json();
+   if(!response.ok){if(response.status===401&&token===auth){token=null;connected(false);}const error=Error(value.message||'操作失败');error.status=response.status;throw error;}
+   return value;
+  }catch(error){
+   if(attempt>=retries||(error.status&&error.status<500))throw error;
+  }finally{if(timer)clearTimeout(timer);}
+  await new Promise(resolve=>setTimeout(resolve,500*(2**attempt)));
+ }
+}
+
 for(const button of document.querySelectorAll('[data-kind]'))button.onclick=()=>{kind=button.dataset.kind;for(const tab of document.querySelectorAll('[data-kind]'))tab.setAttribute('aria-pressed',String(tab===button));$('files').accept=kinds[kind].accept;$('accept-hint').textContent=kinds[kind].hint;syncFonts();};
 // 资源原图管理：切换类别丢弃旧列表回复；删除前现取身份，内部锁屏缓存保留。/ Resource management: discard old-category replies and fetch identity before deletion; retain the internal lock cache.
 const resourceTypes={font:{route:'fonts',title:'已安装字体',note:'删除后，使用它的书会暂用默认字体，阅读位置不变。'},cover:{route:'covers',title:'封面原图',note:'删除外置封面后，书架会重新查找内嵌封面或显示占位。书籍不会删除。'},wallpaper:{route:'wallpapers',title:'锁屏图片原图',note:'支持 PNG、JPEG。删除原图会保留已应用的内部锁屏缓存；上传后仍需在设备预览并应用。'}};
@@ -53,4 +71,5 @@ async function send(entry){if(!entry.sha)entry.sha=await hashFile(entry);entry.p
  if(entry.cancelled)return;if(entry.paused){entry.state='已暂停，可继续';render();return;}entry.state='正在校验文件';render();const result=await api('/uploads/'+entry.id+'/complete','POST',{sha256:entry.sha});entry.done=true;entry.progress=1;entry.state=result.cleanup_pending?'已保存，备份待清理':'已保存';render();}
 async function sendQueue(){if(running||!token)return;running=true;render();for(const entry of entries){if(entry.done||entry.cancelled||entry.paused)continue;try{await send(entry);}catch(error){if(!entry.cancelled){entry.state=error.message;entry.paused=true;notice(error.message,true);}render();if(!token)break;}}running=false;render();syncFonts();if(entries.length&&entries.every(e=>e.done||e.cancelled))notice('这一批已处理完，可以添加更多内容。');}
 $('start').onclick=sendQueue;$('clear').onclick=()=>{entries=entries.filter(e=>!e.done&&!e.cancelled);render();};
-const pair=new URLSearchParams(location.hash.slice(1)).get('pair');if(pair){history.replaceState(null,'',location.pathname+location.search);if(/^[0-9a-fA-F]{32}$/.test(pair)){token=pair;api('/session').then(()=>connected(true)).catch(error=>notice(error.message,true));}}render();
+// 打开页面自动建立会话，客户端不再收集配对码。 / Establish a session automatically without collecting a pairing code.
+api('/session').then(session=>{token=session.token;connected(true);notice('已连接，可以开始发送。');}).catch(error=>{connected(false);notice(error.message,true);});render();

@@ -7,6 +7,7 @@
  */
 #define _POSIX_C_SOURCE 200809L
 #include "device_upload_storage.h"
+#include "device_card_presence.h"
 #include "pn_sd_layout.h"
 #include "read_pico_sd.h"
 #include "esp_vfs_fat.h"
@@ -20,9 +21,7 @@
 static pn_status_t ready(pn_device_upload_storage_t *s){
     if(!s || !s->media)return PN_INVALID;
     if(!s->media->available || s->epoch!=s->media->epoch)return PN_STALE_MEDIA;
-    read_pico_sd_info_t info={0};
-    if(read_pico_sd_get_info(&info)!=ESP_OK || !info.present || !info.mounted)return PN_STALE_MEDIA;
-    return PN_OK;
+    return pn_device_card_presence();
 }
 static pn_status_t guard(pn_device_upload_storage_t *s){
     pn_status_t status=ready(s);

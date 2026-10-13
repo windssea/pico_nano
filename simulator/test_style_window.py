@@ -59,3 +59,37 @@ with tempfile.TemporaryDirectory() as directory:
         run('styles,style-plus,style-preview,window-close,')
         assert {p.name:p.read_bytes() for p in state.glob('*.style.*')}==before
 print('EPUB styles: standalone/library pointer entry, draft preview/cancel/apply, durable fields and preview-close passed')
+
+# 阅读线：TXT/EPUB共用设置，正文有线、页脚像素不变，取消/关闭恢复与重开持久化。 / Guides share settings across TXT/EPUB, alter only body pixels, and preserve cancellation/reopen behavior.
+with tempfile.TemporaryDirectory() as directory:
+    root=pathlib.Path(directory)
+    for kind in ('txt','epub'):
+        books=root/kind;books.mkdir();state=root/(kind+'-state')
+        if kind=='txt':
+            (books/'book.txt').write_text('阅读线跟随真实文字行。关闭后恢复纯正文。\n'*50,encoding='utf-8')
+        else:
+            with zipfile.ZipFile(books/'book.epub','w',compression=zipfile.ZIP_DEFLATED) as z:
+                z.writestr('mimetype','application/epub+zip',compress_type=zipfile.ZIP_STORED)
+                z.writestr('META-INF/container.xml','<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="book.opf" media-type="application/oebps-package+xml"/></rootfiles></container>')
+                z.writestr('book.opf','<package xmlns="http://www.idpf.org/2007/opf" xmlns:d="http://purl.org/dc/elements/1.1/" version="2.0" unique-identifier="uid"><metadata><d:title>阅读线测试</d:title><d:identifier id="uid">guide</d:identifier></metadata><manifest><item id="a" href="a.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="a"/></spine></package>')
+                z.writestr('a.xhtml','<html xmlns="http://www.w3.org/1999/xhtml"><body>'+'<p>阅读线跟随真实文字行。关闭后恢复纯正文。</p>'*50+'</body></html>')
+        def capture(label,script):
+            frames=root/(kind+'-'+label);frames.mkdir()
+            result=subprocess.run([sys.argv[1],'--library',str(books),'--state-dir',str(state)],env=dict(os.environ,SDL_VIDEODRIVER='dummy',PN_SIM_LIBRARY_SCRIPT='library,enter,'+script+'window-close',PN_SIM_FRAME_DIR=str(frames)),capture_output=True,text=True,timeout=45)
+            assert result.returncode==0 and 'used=0 live=0' in result.stdout,(result.stdout,result.stderr)
+            # 关闭窗口先归还阅读并画书架；取此前最后一张正文。 / Window close returns to the shelf first; inspect the last preceding reader frame.
+            assert 'library_return status=0' in result.stdout,result.stdout
+            return sorted(frames.glob('frame-*.pgm'))[-2].read_bytes().split(b'255\n',1)[1]
+        plain=capture('plain','')
+        dashed=capture('dash','styles,tap:100:1030,tap:600:270,style-apply,')
+        assert plain!=dashed and plain[1144*684:]==dashed[1144*684:], (kind,plain==dashed,[i for i,(a,b) in enumerate(zip(plain,dashed)) if a!=b][:8],[i for i,(a,b) in enumerate(zip(plain[1144*684:],dashed[1144*684:])) if a!=b][:8])
+        assert any(a==255 and b==170 for a,b in zip(plain[:1144*684],dashed[:1144*684]))
+        assert capture('reopen','')==dashed
+        assert capture('cancel','styles,tap:100:1030,tap:600:270,style-cancel,')==dashed
+        dotted=capture('dot','styles,tap:100:1030,tap:600:270,tap:600:350,style-apply,')
+        assert dotted!=dashed and dotted[1144*684:]==dashed[1144*684:]
+        records=[p.read_bytes() for p in state.glob('*.style.*')];payload=max(records,key=lambda b:int.from_bytes(b[8:16],'little'));at=payload.index(b'PNTS')
+        assert struct.unpack_from('<H',payload,at+4)[0]==3 and any(struct.unpack_from('<Hh',b,b.index(b'PNTS')+54)==(2,2) for b in records)
+        off=capture('off','styles,tap:100:1030,tap:320:270,tap:320:270,style-apply,')
+        assert off==plain
+print('reading guides: TXT/EPUB dashed/dotted/off pixels, unchanged footer, cancel, durable mode and offset passed')

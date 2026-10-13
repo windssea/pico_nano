@@ -38,3 +38,5 @@ pn_status_t pn_font_preferences_resolve(const pn_journal_io_t *global,const pn_j
 pn_status_t pn_font_preferences_files(pn_journal_files_t *,pn_media_t *,const pn_media_lease_t *,const char *,const pn_book_id_t *,pn_journal_io_t *);
 /// 校验预期大小和完整SHA；不代替字体引擎校验。/ Verify expected size and complete SHA; does not replace font-engine validation.
 pn_status_t pn_font_reference_verify(const pn_font_reference_t *,pn_media_t *,const pn_media_lease_t *);
+/// 完整校验字体原文，借用pool临时缓冲而不缓存路径身份。 / Verify full font content using a temporary pool buffer without caching identity by path.
+pn_status_t pn_font_reference_verify_pooled(pn_pool_t *,const pn_font_reference_t *,pn_media_t *,const pn_media_lease_t *);
