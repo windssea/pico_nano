@@ -29,5 +29,10 @@ int main(void){
  assert(pn_reader_prefetch(&r)==PN_OK);s.lost=true;assert(pn_reader_prepare(&r,PN_READ_NEXT,0,&receipt)==PN_STALE_MEDIA && r.visible.begin==0);
  s.lost=false;assert(pn_reader_prepare(&r,PN_READ_NEXT,0,&receipt)==PN_OK);pn_async_begin(&q,&scope,false);e.urgent=true;pn_async_send(&q,&e);assert(pn_cancel_checkpoint()==PN_CANCELLED);
  assert(pn_reader_complete(&r,&receipt,true,6)==PN_OK && r.visible.begin==16 && pn_cancel_checkpoint()==PN_CANCELLED);pn_async_end(&scope);
+ // 回收只丢邻页，当前节点/可见位置不变；预排拒绝后仍可前台翻页。/ Evict neighbors only, preserving current nodes/visible location; foreground turns still work after prefetch admission fails.
+ pn_reader_anchor_t confirmed=r.visible;memcpy(saved,nodes,sizeof saved);size_t cap=pool.limit;
+ assert(pn_cache_reclaim(&pool,SIZE_MAX)>0 && !r.ahead.valid && !r.behind.valid && !memcmp(&confirmed,&r.visible,sizeof confirmed) && !memcmp(saved,nodes,sizeof saved));
+ pool.limit=pool.used+128;assert(pn_reader_prefetch(&r)==PN_NO_MEMORY && !memcmp(&confirmed,&r.visible,sizeof confirmed));
+ assert(pn_reader_prepare(&r,PN_READ_NEXT,0,&receipt)==PN_OK && pn_reader_complete(&r,&receipt,true,7)==PN_OK);pool.limit=cap;
  pn_reader_neighbors(&r,NULL);assert(!pool.used && !pool.live);puts("TXT neighbors: no speculative commit, cached forward/reverse, failure, cancel, memory, reflow and media passed");return 0;
 }

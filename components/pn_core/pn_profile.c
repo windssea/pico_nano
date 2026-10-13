@@ -14,5 +14,6 @@ void pn_profile_allocation(pn_pool_t *pool){for(pn_profile_span_t *s=current;s;s
 void pn_profile_end(pn_profile_span_t *s,pn_status_t status){
     if(!s->active || current!=s)return;
     uint64_t end=clock_port(port_ctx);current=s->previous;s->active=false;
+    pn_cache_snapshot(s->pool);
     pn_profile_event_t event={s->phase,end>=s->started?end-s->started:0,status,s->begin_bytes,s->pool?s->pool->used:0,s->peak_bytes,s->pool?s->pool->attempts-s->attempts:0,s->pool};emit_port(port_ctx,&event);
 }

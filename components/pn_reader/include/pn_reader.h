@@ -38,6 +38,7 @@ struct pn_reader {
     pn_page_index_t *index; ///< 可选同布局页边界窗口，借用 / Optional borrowed page boundaries for this layout
     const pn_reader_anchor_t *checkpoints; ///< 整源验证所得、布局无关的借用解码检查点 / Borrowed layout-independent decoder checkpoints from full validation
     size_t checkpoint_count; ///< 有界检查点数量，最多512 / Bounded checkpoint count, at most 512
+    pn_cache_owner_t cache; ///< 邻页借用保护，绑定后reader地址须稳定 / Neighbor protection; reader address must remain stable after binding
     pn_pool_t *neighbor_pool; ///< 可选邻页预算池，owner串行 / Optional neighbor pool, serialized owner
     pn_text_page_t ahead,behind; ///< 有界下一页/上一页节点 / Bounded next/previous nodes
     pn_reader_anchor_t ahead_anchor,behind_anchor; ///< 缓存锚点 / Cached anchors

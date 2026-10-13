@@ -72,6 +72,8 @@ typedef struct {
     SDL_Texture *texture;
     uint32_t *argb;
     int selected;
+    pn_cache_owner_t cover_cache; ///< 封面预算owner / Cover-budget owner
+    bool covers_inactive; ///< 借用完毕才允许回收 / Reclaim only after all cover borrowing ends
     pn_shelf_covers_t *covers; ///< 当前页封面槽 / Current-page cover slots
     char cover_dir[512]; ///< 显式--cover-cache目录，空则只解码不缓存 / Explicit --cover-cache directory; empty decodes without caching
     uint8_t salt[16]; ///< EPUB XML哈希盐 / EPUB XML hash salt
@@ -129,6 +131,7 @@ static uint64_t profile_clock(void *ctx){(void)ctx;uint64_t c=SDL_GetPerformance
 static void profile_emit(void *ctx,const pn_profile_event_t *e){
     (void)ctx;fprintf(stderr,"profile phase=%s elapsed_us=%llu status=%d begin=%zu end=%zu peak=%zu attempts=%zu backend=host\n",e->phase,(unsigned long long)e->elapsed_us,(int)e->status,e->begin_bytes,e->end_bytes,e->peak_bytes,e->attempts);
     if(e->pool){fprintf(stderr,"memory phase=%s",e->phase);for(unsigned j=0;j<PN_MEM_COUNT;j++){const pn_memory_stats_t *m=&e->pool->memory[j];fprintf(stderr," %s=%zu/%zu/%zu/%zu",pn_memory_tag_name((pn_memory_tag_t)j),m->used,m->peak,m->allocations,m->failures);}fprintf(stderr," heap=unavailable stack=unavailable\n");}
+    if(e->pool)for(unsigned k=0;k<PN_CACHE_COUNT;k++){const pn_cache_stats_t *c=&e->pool->cache_stats[k];fprintf(stderr,"cache phase=%s kind=%u bytes=%zu peak=%zu hits=%zu misses=%zu denied=%zu evictions=%zu reclaimed=%zu backend=host\n",e->phase,k,c->bytes,c->peak,c->hits,c->misses,c->denied,c->evictions,c->reclaimed);}
 }
 /* 呈现并记住最近一帧（工具栏打开时不记，以便关闭后恢复原页面）。/ Present and remember the latest frame (not while the toolbar is open, so closing restores the original page). */
 static pn_status_t present_raw_main(void *ctx,const pn_frame_t *frame);
@@ -184,7 +187,14 @@ static pn_status_t favorites_ensure(library_t *s){
     if(s->favorites_valid)return PN_OK;
     pn_status_t status=favorites_load(s);s->favorites_valid=status==PN_OK;return status;
 }
+static size_t cover_bytes(void *ctx){library_t *s=ctx;return pn_alloc_size(s->covers);}
+static void cover_drop(void *ctx){library_t *s=ctx;if(s->covers_inactive){pn_free(s->covers);s->covers=NULL;s->covers_dirty=false;}}
+static void covers_ensure(library_t *s){
+    s->covers_inactive=false;
+    if(!s->covers){s->covers=pn_cache_alloc(s->pool,PN_CACHE_COVER,PN_MEM_UI,sizeof *s->covers);if(s->covers)pn_shelf_covers_reset(s->covers,NULL);}
+}
 static pn_status_t draw_impl(library_t *s){
+    covers_ensure(s);
     pn_wallpaper_mask_close(&s->reading_mask);
     if(!s->frame.pixels){uint8_t *pixels=pn_alloc_tagged(s->pool,PN_MEM_FRAME,342u*1216u);if(!pixels || !pn_frame_bind(&s->frame,pixels,342u*1216u,684,1216)){pn_free(pixels);return PN_NO_MEMORY;}}
     if(!s->font.impl){pn_text_source_t builtin=pn_font_builtin_source();pn_status_t opened=pn_font_open(&s->font,s->pool,&builtin,24);if(opened!=PN_OK)return opened;}
@@ -215,15 +225,15 @@ static void covers_last(library_t *s){
 /* 换页：先复用缓存封面再绘制，其余空闲逐条解码。/ Page change: reuse cached covers before drawing; the rest decode one per idle tick. */
 static void covers_reset(library_t *s){
     s->shelf_focus_visible=false;
-    if(!s->covers)return;
+    covers_ensure(s);if(!s->covers)return;
     bool changed;covers_last(s);pn_shelf_covers_reset(s->covers,s->page);s->covers_dirty=false;
     if(*s->cover_dir && pn_shelf_covers_cached(s->covers,s->page,s->pool,&s->media,s->cover_dir,&changed)!=PN_OK)pn_shelf_covers_reset(s->covers,NULL);
 }
 static void covers_tick(library_t *s){
     if(!s->covers)return;
     bool changed=false;
-    // 空闲大图任务优先于可重建字形缓存，阅读预算不扩大。/ Idle large-image work takes priority over rebuildable glyph caches, without enlarging the reading budget.
-    pn_font_trim(&s->font);
+    // 仅在余量不足时让字形缓存让出，缓存命中不逐屏清空。/ Yield glyph caches only under pressure; cache hits no longer clear them on every screen.
+    pn_cache_reclaim(s->pool,128u*1024u+s->pool->cache_reserve);
     pn_status_t status=pn_shelf_covers_step(s->covers,s->page,s->pool,&s->media,*s->cover_dir?s->cover_dir:NULL,s->salt,s->pool->limit>s->pool->used?s->pool->limit-s->pool->used:1,&changed);
     if(changed)s->covers_dirty=true;
     if(status==PN_EMPTY && s->covers_dirty){size_t ready=0;for(size_t i=0;i<s->page->count;i++)ready+=s->covers->state[i]==PN_COVER_READY;
@@ -312,6 +322,7 @@ static pn_status_t open_item(library_t *s,const pn_catalog_item_t *book,uint64_t
     if(book->format!=PN_BOOK_TXT && book->format!=PN_BOOK_EPUB){pn_sdl_async_title(&s->async,PN_BRAND_NAME " - 此格式尚未接入");return PN_EMPTY;}
     pn_status_t status;
     // 进入阅读后不再使用书架备份，先释放，给首章图片留出解码预算。/ The shelf backup is unused after entering reading; release it before decoding first-section images.
+    s->covers_inactive=true;
     s->open_failed=false;pn_free(s->page_px);s->page_px=NULL;pn_free(s->tool_px);s->tool_px=NULL;
     pn_wallpaper_mask_close(&s->reading_mask);
     if(book->format==PN_BOOK_EPUB){pn_font_close(&s->font);pn_free(s->frame.pixels);s->frame.pixels=NULL;status=pn_epub_app_open_on_media(&s->epub,s->pool,&s->media,book->path,s->font_path,s->state_dir,32,now);}
@@ -349,10 +360,11 @@ static pn_status_t open_book(library_t *s,int selected,uint64_t now){
 }
 /* 继续阅读：直接打开最近一本，不改变书架的全部/最近模式。/ Continue reading: open the latest book directly without changing the shelf's All/Recent mode. */
 static pn_status_t continue_book(library_t *s,uint64_t now){
-    covers_last(s);
-    if(!s->covers || !s->covers->has_last)return PN_EMPTY;
-    pn_catalog_item_t *book=pn_alloc_tagged(s->pool,PN_MEM_UI,sizeof *book);if(!book)return PN_NO_MEMORY;
-    *book=s->covers->last;pn_status_t status=open_item(s,book,now);pn_free(book);return status;
+    if(recent_load(s)!=PN_OK || !s->recent->count)return PN_EMPTY;
+    pn_catalog_page_t *tmp=pn_alloc_tagged(s->pool,PN_MEM_UI,sizeof *tmp);if(!tmp)return PN_NO_MEMORY;
+    pn_status_t status=pn_catalog_recent_page(s->recent,0,tmp);
+    if(status==PN_OK && tmp->count)status=open_item(s,&tmp->items[0],now);else if(status==PN_OK)status=PN_EMPTY;
+    pn_free(tmp);return status;
 }
 /* 工具栏中当前书不能用的入口：TXT没有目录，搜索尚未实现。/ Entries unavailable for the current book: TXT has no TOC and search is not implemented. */
 static unsigned toolbar_unavailable(library_t *s){return s->epub.impl?0u:1u;}
@@ -463,7 +475,7 @@ static int library_worker(void *ctx){
     const char *font_path=s->font_path,*cover_cache=s->cover_argument,*wallpaper_dir=s->wallpaper_dir,*wallpaper_store=s->wallpaper_store_argument,*font_dir=s->font_dir;
     if(font_path){char *resolved=realpath(font_path,NULL);if(resolved){if(strlen(resolved)<sizeof s->font_real)strcpy(s->font_real,resolved);free(resolved);}}
     s->page=pn_alloc_tagged(pool,PN_MEM_UI,sizeof *s->page);s->frame.pixels=pn_alloc_tagged(pool,PN_MEM_FRAME,342u*1216u);
-    s->recent=pn_alloc_tagged(pool,PN_MEM_UI,sizeof *s->recent);s->covers=pn_alloc_tagged(pool,PN_MEM_UI,sizeof *s->covers);if(s->covers)pn_shelf_covers_reset(s->covers,NULL);
+    s->recent=pn_alloc_tagged(pool,PN_MEM_UI,sizeof *s->recent);pn_cache_attach(pool,&s->cover_cache,PN_CACHE_COVER,s,cover_bytes,cover_drop);covers_ensure(s);
     if(cover_cache && (size_t)snprintf(s->cover_dir,sizeof s->cover_dir,"%s",cover_cache)>=sizeof s->cover_dir)s->cover_dir[0]=0;
     s->wallpaper_dir=wallpaper_dir;s->font_dir=font_dir;
     if(font_dir){char *resolved=realpath(font_dir,NULL);if(resolved){if(strlen(resolved)<sizeof s->font_dir_real){strcpy(s->font_dir_real,resolved);s->font_dir=s->font_dir_real;}free(resolved);}}
@@ -474,7 +486,7 @@ static int library_worker(void *ctx){
     {FILE *random=fopen("/dev/urandom","rb");bool seeded=random && fread(s->salt,1,sizeof s->salt,random)==sizeof s->salt;if(random)fclose(random);if(!seeded){pn_free(s->covers);s->covers=NULL;}}
     s->argb=malloc(684u*1216u*sizeof(uint32_t));
     int result=1;pn_status_t status=PN_NO_MEMORY;
-    if(!s->page || !s->recent || !s->covers || !s->frame.pixels || !s->argb)goto cleanup;
+    if(!s->page || !s->recent || !s->frame.pixels || !s->argb)goto cleanup;
     memset(s->page,0,sizeof *s->page);
     if(!pn_frame_bind(&s->frame,s->frame.pixels,342u*1216u,684,1216))goto cleanup;
     if(getenv("PN_SIM_BOOT_PREVIEW")){status=pn_brand_image_render(&s->frame);if(status==PN_OK)status=present_raw(s,&s->frame);if(status!=PN_OK)goto cleanup;SDL_Delay(900);}
@@ -756,7 +768,7 @@ cleanup:;
     pn_wallpaper_mask_close(&s->reading_mask);
     pn_wallpaper_ui_close(&s->wallpaper);pn_font_manage_close(&s->font_manage);pn_settings_ui_close(&s->settings);
     pn_font_ui_close(&s->fonts);
-    pn_font_close(&s->font);pn_free(s->frame.pixels);pn_free(s->page_px);pn_free(s->tool_px);pn_free(s->favorites);pn_free(s->page);pn_free(s->recent);pn_free(s->covers);
+    pn_cache_detach(&s->cover_cache);pn_font_close(&s->font);pn_free(s->frame.pixels);pn_free(s->page_px);pn_free(s->tool_px);pn_free(s->favorites);pn_free(s->page);pn_free(s->recent);pn_free(s->covers);
     free(s->argb);s->argb=NULL;pn_cancel_leave(&shield);return result;
 }
 

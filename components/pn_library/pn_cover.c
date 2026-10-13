@@ -241,6 +241,7 @@ pn_status_t pn_shelf_covers_cached(pn_shelf_covers_t *covers,const pn_catalog_pa
         cover_key_t key;pn_cover_state_t state;pn_status_t reason;
         if(cover_key(item,&key)!=PN_OK)continue;
         status=cache_load(pool,media,&lease,cache_dir,item,&key,&state,&reason,covers->pixels[i],&covers->display[i],0);
+        pn_cache_observe(pool,PN_CACHE_COVER,status==PN_OK);
         if(status==PN_OK){covers->state[i]=state;covers->reason[i]=reason;if(state==PN_COVER_READY || *covers->display[i].title)*changed=true;}
     }
     (void)pn_media_release(media,&lease);return status==PN_STALE_MEDIA?status:PN_OK;
@@ -257,6 +258,7 @@ pn_status_t pn_shelf_covers_step(pn_shelf_covers_t *covers,const pn_catalog_page
         pn_status_t status=pn_media_acquire(media,PN_MEDIA_READ,&lease);if(status!=PN_OK)return status;
         cover_key_t key;bool keyed=cache_dir && cover_key(item,&key)==PN_OK;
         if(keyed){pn_cover_state_t state;pn_status_t reason;status=cache_load(pool,media,&lease,cache_dir,item,&key,&state,&reason,covers->pixels[i],&covers->display[i],budget);
+            pn_cache_observe(pool,PN_CACHE_COVER,status==PN_OK);
             if(status==PN_OK){covers->state[i]=state;covers->reason[i]=reason;*changed=state==PN_COVER_READY || *covers->display[i].title;(void)pn_media_release(media,&lease);return PN_OK;}
             if(status==PN_STALE_MEDIA){(void)pn_media_release(media,&lease);return status;}
         }

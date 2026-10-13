@@ -6,6 +6,8 @@
 typedef struct {uint8_t data[2][PN_BLOB_MAX+32];size_t size[2];unsigned writes;bool fail,after;} memory_t;
 static pn_status_t read_memory(void *ctx,unsigned slot,uint8_t *out,size_t cap,size_t *n){memory_t *m=ctx;if(!m->size[slot])return PN_EMPTY;if(m->size[slot]>cap)return PN_LIMIT;memcpy(out,m->data[slot],m->size[slot]);*n=m->size[slot];return PN_OK;}
 static pn_status_t write_memory(void *ctx,unsigned slot,const uint8_t *data,size_t n){memory_t *m=ctx;m->writes++;if(m->fail)return PN_IO;assert(n<=sizeof m->data[slot]);memcpy(m->data[slot],data,n);m->size[slot]=n;return m->after?PN_IO:PN_OK;}
+static size_t cache_bytes(void *ctx){return pn_alloc_size(*(void **)ctx);}
+static void cache_drop(void *ctx){pn_free(*(void **)ctx);*(void **)ctx=NULL;}
 int main(void){
     memory_t memory={0};pn_journal_io_t io={&memory,read_memory,write_memory};pn_pool_t pool;assert(!pn_pool_init(&pool,1024*1024,NULL,NULL,NULL));
     pn_epub_progress_t p={.book={{42}},.location={.version=1,.position={.element=3,.kind=PN_XHTML_TEXT_POSITION}}};strcpy(p.location.path,"OPS/a.xhtml");
@@ -25,5 +27,12 @@ int main(void){
     memory.fail=false;assert(pn_epub_save_flush(&save,33000)==PN_OK && !save.dirty);
     assert(pn_epub_progress_load(&io,&pool,&p.book,&loaded)==PN_OK && loaded.location.position.offset==9);
     p.book.sha256[1]=1;assert(pn_epub_save_presented(&save,&p,true,34000)==PN_STALE_JOB && !save.dirty);assert(pn_epub_save_tick(&save,32999)==PN_INVALID);
+    // 真实A/B保存可回收预排临时预算，写失败仍留dirty及原位置供重试。/ Real A/B saving can reclaim speculative budget; failed writes retain dirty state and location for retry.
+    p.book.sha256[1]=0;p.location.position.offset=10;assert(!pn_epub_save_presented(&save,&p,false,34001));
+    void *cache=pn_alloc(&pool,65536);assert(cache);pn_cache_owner_t owner={0};pn_cache_attach(&pool,&owner,PN_CACHE_NEIGHBOR,&cache,cache_bytes,cache_drop);
+    size_t limit=pool.limit;pool.limit=pool.used+64;memory.fail=true;
+    assert(pn_epub_save_flush(&save,34002)==PN_IO && !cache && save.dirty && save.current.location.position.offset==10);
+    pool.limit=limit;memory.fail=false;assert(!pn_epub_save_flush(&save,34003) && !save.dirty);
+    assert(!pn_epub_progress_load(&io,&pool,&p.book,&loaded) && loaded.location.position.offset==10);pn_cache_detach(&owner);
     assert(!pool.used && !pool.live);puts("EPUB save: five turns, 30 seconds, retry, explicit close barrier and uncertain-write readback passed");return 0;
 }

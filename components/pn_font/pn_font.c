@@ -35,11 +35,11 @@ static pn_status_t builtin_read(void *,uint64_t,uint8_t *,size_t,size_t *);
 #define BMP_SLOTS 512u
 #define BMP_BUDGET (384u*1024u)
 #define BMP_ENTRY_MAX (64u*1024u)
-#define CACHE_HEADROOM (1536u*1024u) ///< 池剩余不足此值（加本次所需）就不再扩缓存，避免挤占阅读和字体切换的内存 / Stop growing the cache when the pool's remaining space is below this plus the request, so reading and font switching keep their memory
 typedef struct {uint32_t cp;uint16_t pixels;uint8_t state;int32_t advance;} adv_t; ///< state 0空槽 1有字 2缺字 / 0 empty slot, 1 present, 2 missing
 typedef struct {uint32_t cp;uint16_t pixels;int16_t delta;int left,top;uint16_t width,rows;uint8_t data[];} bmp_t;
 typedef struct {
     pn_pool_t *pool;
+    pn_cache_owner_t cache; ///< 字形借用保护 / Glyph borrowing protection
     struct FT_MemoryRec_ memory;
     FT_Library library;
     FT_Face face;
@@ -51,9 +51,10 @@ typedef struct {
     bool allocation_failed;
     adv_t *adv; ///< 按需分配的字宽表 / Advance table, allocated on demand
     bmp_t **bmp; ///< 按需分配的位图指针表 / Bitmap pointer table, allocated on demand
+    size_t cache_bytes; ///< 含头字形计费快照，查询无需扫描槽 / Charged glyph snapshot including headers, queried without scanning slots
     size_t bmp_bytes;
 } engine_t;
-static bool cache_allowed(const engine_t *e,size_t need){const pn_pool_t *p=e->pool;return p->limit>p->used && p->limit-p->used>=need+CACHE_HEADROOM;}
+static bool cache_allowed(const engine_t *e,size_t need){return !e->pool->speculative && pn_cache_allow(e->pool,PN_CACHE_GLYPH,need); }
 static unsigned hash_key(uint32_t cp,int pixels,int delta){uint32_t h=cp*2654435761u;h^=(uint32_t)pixels*40503u;h^=(uint32_t)(delta+64)*2246822519u;h^=h>>15;return h;}
 static void *allocate(FT_Memory memory,long bytes) {
     engine_t *e=memory->user;if(bytes<=0)return NULL;
@@ -87,17 +88,19 @@ static pn_status_t result(engine_t *e,FT_Error error) {
     if(e->allocation_failed || error==FT_Err_Out_Of_Memory)return PN_NO_MEMORY;
     return error?PN_CORRUPT:PN_OK;
 }
+/// 仅回收本face的可重建字形；回退引擎独立注册。/ Reclaim only this face's rebuildable glyphs; fallback engines register independently.
+static size_t glyph_bytes(void *ctx){return ((engine_t *)ctx)->cache_bytes;}
+static void *glyph_alloc(engine_t *e,size_t bytes){void *p=pn_cache_alloc(e->pool,PN_CACHE_GLYPH,PN_MEM_FONT,bytes);e->cache_bytes+=pn_alloc_size(p);return p;}
+static void glyph_drop(void *ctx){engine_t *e=ctx;if(e->bmp){for(unsigned i=0;i<BMP_SLOTS;i++)pn_free(e->bmp[i]);pn_free(e->bmp);e->bmp=NULL;}pn_free(e->adv);e->adv=NULL;e->bmp_bytes=0;e->cache_bytes=0;}
 void pn_font_trim(pn_font_t *font){
     if(!font || !font->impl)return;
     engine_t *e=font->impl;
     pn_font_trim(&e->ui_fallback);
-    if(e->bmp){for(unsigned i=0;i<BMP_SLOTS;i++)pn_free(e->bmp[i]);pn_free(e->bmp);e->bmp=NULL;}
-    pn_free(e->adv);e->adv=NULL;
-    e->bmp_bytes=0;
+    glyph_drop(e);
 }
 void pn_font_close(pn_font_t *font) {
     if(!font || !font->impl)return;
-    engine_t *e=font->impl;pn_font_trim(font);pn_font_close(&e->ui_fallback);
+    engine_t *e=font->impl;pn_cache_detach(&e->cache);pn_font_trim(font);pn_font_close(&e->ui_fallback);
     if(e->face)FT_Done_Face(e->face);
     if(e->library)FT_Done_Library(e->library);
     pn_free(e);font->impl=NULL;font->pixels=0;
@@ -122,6 +125,7 @@ static pn_status_t pn_font_open_impl(pn_font_t *font,pn_pool_t *pool,const pn_te
     if(status==PN_OK)status=result(e,FT_Select_Charmap(e->face,FT_ENCODING_UNICODE));
     if(status==PN_OK)status=pn_font_size(&temporary,pixels);
     if(status!=PN_OK){pn_font_close(&temporary);return status;}
+    pn_cache_attach(pool,&e->cache,PN_CACHE_GLYPH,e,glyph_bytes,glyph_drop);
     *font=temporary;return PN_OK;
 }
 pn_status_t pn_font_open(pn_font_t *font,pn_pool_t *pool,const pn_text_source_t *source,int pixels){
@@ -151,18 +155,20 @@ static pn_status_t load(pn_font_t *font,uint32_t cp,bool render) {
     if(!glyph)return PN_EMPTY;
     FT_Error error=FT_Load_Glyph(e->face,glyph,FT_LOAD_DEFAULT | (render?FT_LOAD_RENDER:0));return result(e,error);
 }
-pn_status_t pn_font_advance(void *ctx,uint32_t cp,int32_t *advance) {
+static pn_status_t advance_impl(void *ctx,uint32_t cp,int32_t *advance) {
     pn_status_t cancel=pn_cancel_checkpoint();if(cancel!=PN_OK)return cancel;
     pn_font_t *font=ctx;if(!advance)return PN_INVALID;
     if(!font || !font->impl || cp>0x10ffff || (cp>=0xd800 && cp<=0xdfff))return PN_INVALID;
     engine_t *e=font->impl;
-    if(!e->adv && cache_allowed(e,sizeof(adv_t)*ADV_SLOTS)){e->adv=pn_alloc_tagged(e->pool,PN_MEM_FONT,sizeof(adv_t)*ADV_SLOTS);if(e->adv)memset(e->adv,0,sizeof(adv_t)*ADV_SLOTS);}
+    if(!e->adv && cache_allowed(e,sizeof(adv_t)*ADV_SLOTS)){e->adv=glyph_alloc(e,sizeof(adv_t)*ADV_SLOTS);if(e->adv)memset(e->adv,0,sizeof(adv_t)*ADV_SLOTS);}
     adv_t *slot=e->adv?&e->adv[hash_key(cp,font->pixels,0)%ADV_SLOTS]:NULL;
     if(slot && slot->state && slot->cp==cp && slot->pixels==(uint16_t)font->pixels){
         pn_status_t checked=ready(e);if(checked!=PN_OK)return checked;
+        pn_cache_observe(e->pool,PN_CACHE_GLYPH,true);
         if(slot->state==2){pn_font_t *fallback;pn_status_t s=ui_fallback(font,&fallback);return s==PN_OK?pn_font_advance(fallback,cp,advance):s;}
         *advance=slot->advance;return PN_OK;
     }
+    pn_cache_observe(e->pool,PN_CACHE_GLYPH,false);
     bool tab=cp==9;
     pn_status_t s=load(font,tab?32:cp,false);
     if(s==PN_EMPTY){if(slot)*slot=(adv_t){cp,(uint16_t)font->pixels,2,0};pn_font_t *fallback;s=ui_fallback(font,&fallback);return s==PN_OK?pn_font_advance(fallback,cp,advance):s;}
@@ -197,18 +203,20 @@ static void composite(pn_frame_t *frame,int64_t left,int64_t top,unsigned width,
         }
     }
 }
-pn_status_t pn_font_draw(pn_font_t *font,pn_frame_t *frame,uint32_t cp,int32_t x_64,int baseline,pn_font_render_t mode) {
+static pn_status_t draw_impl(pn_font_t *font,pn_frame_t *frame,uint32_t cp,int32_t x_64,int baseline,pn_font_render_t mode) {
     pn_status_t cancel=pn_cancel_checkpoint();if(cancel!=PN_OK)return cancel;
     if(!font || !font->impl || !frame || !frame->pixels || (mode!=PN_FONT_GRAY && mode!=PN_FONT_BINARY))return PN_INVALID;
     engine_t *e=font->impl;int offset=(int)(x_64%64);
-    if(!e->bmp && cache_allowed(e,sizeof(bmp_t *)*BMP_SLOTS)){e->bmp=pn_alloc_tagged(e->pool,PN_MEM_FONT,sizeof(bmp_t *)*BMP_SLOTS);if(e->bmp)memset(e->bmp,0,sizeof(bmp_t *)*BMP_SLOTS);}
+    if(!e->bmp && cache_allowed(e,sizeof(bmp_t *)*BMP_SLOTS)){e->bmp=glyph_alloc(e,sizeof(bmp_t *)*BMP_SLOTS);if(e->bmp)memset(e->bmp,0,sizeof(bmp_t *)*BMP_SLOTS);}
     bmp_t **slot=e->bmp?&e->bmp[hash_key(cp,font->pixels,offset)%BMP_SLOTS]:NULL;
     if(slot && *slot && (*slot)->cp==cp && (*slot)->pixels==(uint16_t)font->pixels && (*slot)->delta==(int16_t)offset){
         pn_status_t checked=ready(e);if(checked!=PN_OK)return checked;
+        pn_cache_observe(e->pool,PN_CACHE_GLYPH,true);
         const bmp_t *hit=*slot;
         composite(frame,(int64_t)x_64/64+hit->left,(int64_t)baseline-hit->top,hit->width,hit->rows,hit->data,hit->width,mode,font->ink>15?15u:font->ink);
         return PN_OK;
     }
+    pn_cache_observe(e->pool,PN_CACHE_GLYPH,false);
     FT_Vector delta={offset,0};FT_Set_Transform(e->face,NULL,&delta);
     pn_status_t s=load(font,cp,true);FT_Set_Transform(e->face,NULL,NULL);
     if(s==PN_EMPTY){pn_font_t *fallback;s=ui_fallback(font,&fallback);if(s!=PN_OK)return s;fallback->ink=font->ink;return pn_font_draw(fallback,frame,cp,x_64,baseline,mode);}
@@ -216,8 +224,8 @@ pn_status_t pn_font_draw(pn_font_t *font,pn_frame_t *frame,uint32_t cp,int32_t x
     FT_GlyphSlot glyph=e->face->glyph;FT_Bitmap *b=&glyph->bitmap;
     if(!b->width || !b->rows){
         // 空白字形也记住，免得再加载一遍。/ Remember blank glyphs too so they are not loaded again.
-        bmp_t *blank=slot && cache_allowed(e,sizeof *blank)?pn_alloc_tagged(e->pool,PN_MEM_FONT,sizeof *blank):NULL;
-        if(blank){*blank=(bmp_t){cp,(uint16_t)font->pixels,(int16_t)offset,0,0,0,0};pn_free(*slot);*slot=blank;}
+        bmp_t *blank=slot && cache_allowed(e,sizeof *blank)?glyph_alloc(e,sizeof *blank):NULL;
+        if(blank){*blank=(bmp_t){cp,(uint16_t)font->pixels,(int16_t)offset,0,0,0,0};e->cache_bytes-=pn_alloc_size(*slot);if(*slot)e->bmp_bytes-=(size_t)(*slot)->width*(*slot)->rows;pn_free(*slot);*slot=blank;}
         return PN_OK;
     }
     if(b->pixel_mode!=FT_PIXEL_MODE_GRAY || b->num_grays!=256 || b->width>512 || b->rows>512 || !b->buffer)return PN_LIMIT;
@@ -229,12 +237,12 @@ pn_status_t pn_font_draw(pn_font_t *font,pn_frame_t *frame,uint32_t cp,int32_t x
     bmp_t *entry=NULL;
     if(slot && bytes<=BMP_ENTRY_MAX){
         size_t freed=*slot?(size_t)(*slot)->width*(*slot)->rows:0;
-        if(e->bmp_bytes-freed+bytes<=BMP_BUDGET && cache_allowed(e,sizeof *entry+bytes))entry=pn_alloc_tagged(e->pool,PN_MEM_FONT,sizeof *entry+bytes);
+        if(e->bmp_bytes-freed+bytes<=BMP_BUDGET && cache_allowed(e,sizeof *entry+bytes))entry=glyph_alloc(e,sizeof *entry+bytes);
     }
     if(entry){
         *entry=(bmp_t){cp,(uint16_t)font->pixels,(int16_t)offset,glyph->bitmap_left,glyph->bitmap_top,(uint16_t)b->width,(uint16_t)b->rows};
         for(unsigned y=0;y<b->rows;y++){size_t row=b->pitch>=0?y:b->rows-1-y;memcpy(entry->data+(size_t)y*b->width,b->buffer+row*(size_t)pitch,b->width);}
-        if(*slot){e->bmp_bytes-=(size_t)(*slot)->width*(*slot)->rows;pn_free(*slot);}
+        if(*slot){e->bmp_bytes-=(size_t)(*slot)->width*(*slot)->rows;e->cache_bytes-=pn_alloc_size(*slot);pn_free(*slot);}
         *slot=entry;e->bmp_bytes+=bytes;
         composite(frame,left,top,entry->width,entry->rows,entry->data,entry->width,mode,font->ink>15?15u:font->ink);
     }else{
@@ -242,6 +250,14 @@ pn_status_t pn_font_draw(pn_font_t *font,pn_frame_t *frame,uint32_t cp,int32_t x
         for(unsigned y=0;y<b->rows;y++){size_t row=b->pitch>=0?y:b->rows-1-y;composite(frame,left,top+y,b->width,1,b->buffer+row*(size_t)pitch,(size_t)pitch,mode,font->ink>15?15u:font->ink);}
     }
     return PN_OK;
+}
+pn_status_t pn_font_advance(void *ctx,uint32_t cp,int32_t *advance){
+    pn_font_t *font=ctx;engine_t *e=font?font->impl:NULL;if(e)pn_cache_pin(&e->cache);
+    pn_status_t status=advance_impl(ctx,cp,advance);if(e)pn_cache_unpin(&e->cache);return status;
+}
+pn_status_t pn_font_draw(pn_font_t *font,pn_frame_t *frame,uint32_t cp,int32_t x_64,int baseline,pn_font_render_t mode){
+    engine_t *e=font?font->impl:NULL;if(e)pn_cache_pin(&e->cache);
+    pn_status_t status=draw_impl(font,frame,cp,x_64,baseline,mode);if(e)pn_cache_unpin(&e->cache);return status;
 }
 static pn_status_t builtin_read(void *ctx,uint64_t offset,uint8_t *out,size_t cap,size_t *n) {
     (void)ctx;if(!out || !n || offset>pn_ui_font_size)return PN_INVALID;

@@ -63,6 +63,11 @@ int main(int argc,char **argv){
         assert(!pn_epub_reader_prefetch(&owned_reader));size_t before=pool.attempts;
         assert(!pn_epub_reader_prepare(&owned_reader,PN_READ_NEXT,NULL,&owned_receipt) && owned.nodes!=first && owned.nodes[0].codepoint=='C' && pool.attempts==before);assert(!pn_epub_reader_complete(&owned_reader,&owned_receipt,true,2));
         assert(!pn_epub_reader_prepare(&owned_reader,PN_READ_PREVIOUS,NULL,&owned_receipt) && owned.nodes==first && owned.nodes[0].codepoint=='A' && pool.attempts==before);assert(!pn_epub_reader_complete(&owned_reader,&owned_receipt,true,3));
+        pn_epub_progress_t confirmed,after;assert(!pn_epub_reader_progress(&owned_reader,&confirmed));
+        assert(pn_cache_reclaim(&pool,SIZE_MAX)>0 && owned.nodes==first && owned.valid && owned.nodes[0].codepoint=='A');
+        assert(!pn_epub_reader_progress(&owned_reader,&after) && same(confirmed.location,after.location));
+        size_t cap=pool.limit;pool.limit=pool.used+128;assert(pn_epub_reader_prefetch(&owned_reader)==PN_NO_MEMORY && owned.nodes==first && owned.valid);pool.limit=cap;
+        assert(!pn_epub_reader_prepare(&owned_reader,PN_READ_NEXT,NULL,&owned_receipt) && owned.nodes[0].codepoint=='C');assert(!pn_epub_reader_complete(&owned_reader,&owned_receipt,true,4));
         pn_epub_reader_close(&owned_reader);pn_epub_page_release(&owned);
     }
     assert(pn_epub_reader_init(&reader,&pool,&epub,&book,salt,&layout,&measure,&page,(pn_job_token_t){77,1},saved,&save)==PN_OK);

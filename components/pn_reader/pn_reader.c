@@ -12,17 +12,19 @@
 #include <string.h>
 static bool token_equal(pn_job_token_t a,pn_job_token_t b){return a.session==b.session && a.generation==b.generation;}
 static bool copy_page(pn_reader_t *r,pn_text_page_t *to,const pn_text_page_t *from){
-    pn_page_glyph_t *nodes=from->count?pn_alloc_tagged(r->neighbor_pool,PN_MEM_LAYOUT,from->count*sizeof *nodes):NULL;
+    pn_page_glyph_t *nodes=from->count?pn_cache_alloc(r->neighbor_pool,PN_CACHE_NEIGHBOR,PN_MEM_LAYOUT,from->count*sizeof *nodes):NULL;
     if(from->count && !nodes)return false;
     if(from->count)memcpy(nodes,from->glyphs,from->count*sizeof *nodes);
     pn_free(to->glyphs);*to=*from;to->glyphs=nodes;to->capacity=from->count;return true;
 }
-void pn_reader_neighbors(pn_reader_t *r,pn_pool_t *pool){if(!r)return;pn_free(r->ahead.glyphs);pn_free(r->behind.glyphs);r->ahead=(pn_text_page_t){0};r->behind=(pn_text_page_t){0};r->neighbor_pool=pool;r->neighbor_token=r->token;}
+static size_t neighbor_bytes(void *ctx){pn_reader_t *r=ctx;return pn_alloc_size(r->ahead.glyphs)+pn_alloc_size(r->behind.glyphs);}
+static void neighbor_drop(void *ctx){pn_reader_t *r=ctx;pn_free(r->ahead.glyphs);pn_free(r->behind.glyphs);r->ahead=(pn_text_page_t){0};r->behind=(pn_text_page_t){0};}
+void pn_reader_neighbors(pn_reader_t *r,pn_pool_t *pool){if(!r)return;if(r->neighbor_pool==pool){neighbor_drop(r);r->neighbor_token=r->token;return;}pn_cache_detach(&r->cache);neighbor_drop(r);r->neighbor_pool=pool;r->neighbor_token=r->token;if(pool)pn_cache_attach(pool,&r->cache,PN_CACHE_NEIGHBOR,r,neighbor_bytes,neighbor_drop);}
 static pn_status_t pn_reader_prefetch_impl(pn_reader_t *r){
     if(!r || !r->neighbor_pool || !r->has_visible || r->preparing || r->visible.end>=r->decoder.source.size)return PN_EMPTY;
     if(r->ahead.valid && r->ahead_anchor.begin==r->visible.end && token_equal(r->token,r->neighbor_token))return PN_EMPTY;
     pn_page_glyph_t *nodes=pn_alloc_tagged(r->neighbor_pool,PN_MEM_LAYOUT,r->page.capacity*sizeof *nodes);if(!nodes)return PN_NO_MEMORY;
-    pn_reader_t copy=*r;copy.neighbor_pool=NULL;copy.page=(pn_text_page_t){.glyphs=nodes,.capacity=r->page.capacity};copy.preparing=false;copy.save=NULL;
+    pn_reader_t copy=*r;copy.neighbor_pool=NULL;copy.cache=(pn_cache_owner_t){0};copy.page=(pn_text_page_t){.glyphs=nodes,.capacity=r->page.capacity};copy.preparing=false;copy.save=NULL;
     pn_reader_receipt_t result;pn_status_t status=pn_reader_prepare(&copy,PN_READ_NEXT,0,&result);
     if(status==PN_OK)status=pn_cancel_checkpoint();
     if(status==PN_OK){if(copy_page(r,&r->ahead,&copy.page)){r->ahead_anchor=result.anchor;r->neighbor_token=r->token;}else status=PN_NO_MEMORY;}
@@ -30,7 +32,9 @@ static pn_status_t pn_reader_prefetch_impl(pn_reader_t *r){
 }
 pn_status_t pn_reader_prefetch(pn_reader_t *r){
     pn_profile_span_t span;pn_profile_begin(&span,r?r->neighbor_pool:NULL,"txt.prefetch");
-    pn_status_t status=pn_reader_prefetch_impl(r);pn_profile_end(&span,status);return status;
+    if(r)pn_cache_pin(&r->cache);
+    pn_cache_speculate(r?r->neighbor_pool:NULL,true);
+    pn_status_t status=pn_reader_prefetch_impl(r);pn_cache_speculate(r?r->neighbor_pool:NULL,false);if(r)pn_cache_unpin(&r->cache);pn_profile_end(&span,status);return status;
 }
 static bool valid_layout(const pn_layout_t *l){return l && l->width>0 && l->width<=4096 && l->height>0 && l->height<=4096 && l->line_height>0 && l->line_height<=l->height && l->ascent>=0 && l->ascent<=l->line_height && l->indent>=0 && l->indent<l->width && l->paragraph_gap>=0 && l->paragraph_gap<=4096 && l->letter_spacing_64>=0 && l->letter_spacing_64<=4096;}
 static bool same_anchor(pn_reader_anchor_t a,pn_reader_anchor_t b){return a.begin==b.begin && a.end==b.end && a.paragraph==b.paragraph && a.next_paragraph==b.next_paragraph;}
@@ -80,6 +84,7 @@ pn_status_t pn_reader_prepare_impl(pn_reader_t *r,pn_read_intent_t intent,uint64
         }
     }
     if(intent!=PN_READ_NEXT && intent!=PN_READ_PREVIOUS && r->neighbor_pool)pn_reader_neighbors(r,r->neighbor_pool);
+    pn_cache_observe(r->neighbor_pool,PN_CACHE_NEIGHBOR,cached && cached->count<=r->page.capacity);
     if(cached && cached->count<=r->page.capacity){
         pn_status_t checked=r->decoder.source.validate?r->decoder.source.validate(r->decoder.source.ctx):PN_OK;
         if(checked!=PN_OK)return checked;
@@ -116,7 +121,10 @@ pn_status_t pn_reader_prepare_impl(pn_reader_t *r,pn_read_intent_t intent,uint64
 }
 pn_status_t pn_reader_prepare(pn_reader_t *r,pn_read_intent_t intent,uint64_t offset,pn_reader_receipt_t *receipt){
     pn_profile_span_t span;pn_profile_begin(&span,r?r->neighbor_pool:NULL,intent==PN_READ_NEXT?"txt.next":intent==PN_READ_PREVIOUS?"txt.previous":intent==PN_READ_JUMP?"txt.jump":"txt.prepare");
-    pn_status_t status=pn_reader_prepare_impl(r,intent,offset,receipt);pn_profile_end(&span,status);return status;
+    if(r)pn_cache_reclaim(r->neighbor_pool,r->neighbor_pool?r->neighbor_pool->cache_reserve:0);
+    bool borrowing=r && ((intent==PN_READ_NEXT && r->ahead.valid) || (intent==PN_READ_PREVIOUS && r->behind.valid));
+    if(borrowing)pn_cache_pin(&r->cache);
+    pn_status_t status=pn_reader_prepare_impl(r,intent,offset,receipt);if(borrowing)pn_cache_unpin(&r->cache);pn_profile_end(&span,status);return status;
 }
 pn_status_t pn_reader_progress(const pn_reader_t *r,pn_txt_progress_t *progress){
     if(!r || !progress || !r->decoder.source.read_at)return PN_INVALID;

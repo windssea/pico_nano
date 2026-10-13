@@ -8,6 +8,7 @@ param(
     [string]$WallpaperDir = "build-dev/sim-library/piconano/wallpapers",
     [string]$Script = "",
     [ValidateRange(0,5000)][int]$PresentDelayMs = 0,
+    [ValidateRange(256,6144)][int]$BudgetKiB = 6144,
     [switch]$Timing
 )
 $root = Split-Path -Parent $PSScriptRoot
@@ -49,8 +50,8 @@ $arguments = @("run", "--detach", "--rm", "--name", "pico-sim",
     "-e", "PN_SIM_TIMING=$([int]$Timing.IsPresent)",
     "-e", "TZ=Asia/Shanghai",
     "-v", "/run/desktop/mnt/host/wslg/.X11-unix:/tmp/.X11-unix", "-v", "/run/desktop/mnt/host/wslg:/mnt/wslg",
-    "pico-nano-sdl:dev", "build-sim-sdl-run/pn_sim",
-    "--library", $Books, "--state-dir", "/data/state", "--cover-cache", "/data/covers",
+    "pico-nano-sdl:dev", "stdbuf", "-oL", "build-sim-sdl-run/pn_sim",
+    "--library", $Books, "--budget", "$($BudgetKiB * 1024)", "--state-dir", "/data/state", "--cover-cache", "/data/covers",
     "--wallpaper-dir", $WallpaperDir, "--wallpaper-store", "/data/wallpaper", "--font-dir", $FontDir)
 if ($Font) { $arguments += @("--font", $Font) }
 & docker @arguments

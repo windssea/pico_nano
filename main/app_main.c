@@ -125,8 +125,13 @@ static pn_device_transfer_t transfer;
 static bool reading_menu,transfer_return,transfer_lock;
 static pn_transfer_view_t transfer_view,last_transfer_view;
 static uint64_t last_transfer_draw;
+static pn_cache_owner_t cover_cache_owner; ///< 封面预算owner / Cover-budget owner
+static bool covers_inactive; ///< 非活动且不再借用时可回收 / Reclaim only when inactive and no longer borrowed
 static pn_shelf_covers_t *shelf_covers;
 static bool covers_dirty,touch_held;
+static size_t cover_bytes(void *ctx){(void)ctx;return pn_alloc_size(shelf_covers);}
+static void cover_drop(void *ctx){(void)ctx;if(covers_inactive){pn_free(shelf_covers);shelf_covers=NULL;covers_dirty=false;}}
+
 static uint8_t cover_salt[16];
 static const char *const cover_cache=PN_SD_MOUNT "/" PN_SD_COVER_CACHE;
 /// 最近记录只作展示过滤；用户自行整理同名书后可关联新路径，原记录不因缺文件被清除。
@@ -156,6 +161,7 @@ static void profile_emit(void *ctx,const pn_profile_event_t *e){
     if(e->pool)for(unsigned j=0;j<PN_MEM_COUNT;j++){const pn_memory_stats_t *m=&e->pool->memory[j];ESP_LOGI(TAG,"memory phase=%s tag=%s used=%zu peak=%zu live=%zu allocations=%zu failures=%zu",e->phase,pn_memory_tag_name((pn_memory_tag_t)j),m->used,m->peak,m->live,m->allocations,m->failures);}
     ESP_LOGI(TAG,"stack phase=%s owner=product minimum_bytes=%u",e->phase,(unsigned)uxTaskGetStackHighWaterMark(NULL));
     profile_task_stacks(e->phase);
+    if(e->pool)for(unsigned k=0;k<PN_CACHE_COUNT;k++){const pn_cache_stats_t *c=&e->pool->cache_stats[k];ESP_LOGI(TAG,"cache phase=%s kind=%u bytes=%zu peak=%zu hits=%zu misses=%zu denied=%zu evictions=%zu reclaimed=%zu",e->phase,k,c->bytes,c->peak,c->hits,c->misses,c->denied,c->evictions,c->reclaimed);}
 }
 #endif
 /// 高压轨空闲保活毫秒；断电需等放电、再上电要数十毫秒，连续翻页期间不应反复开关。/ Idle keep-alive for the HV rails; power-off waits for discharge and power-on takes tens of ms, so do not toggle them between consecutive page turns.
@@ -477,7 +483,8 @@ static void show_shelf(const char *cursor,bool previous){
     if(status==PN_OK && (next->count || !*cursor)){*shelf_page=*next;shelf_focus=-1;}
     pn_free(next);
     // 换页先用缓存封面，首帧即完整；未命中的留给空闲逐条解码。/ Use cached covers on page change so the first paint is complete; misses decode later per idle tick.
-    if(status==PN_OK && !shelf_covers)shelf_covers=pn_alloc_tagged(&pool,PN_MEM_UI,sizeof *shelf_covers);
+    covers_inactive=false;
+    if(status==PN_OK && !shelf_covers)shelf_covers=pn_cache_alloc(&pool,PN_CACHE_COVER,PN_MEM_UI,sizeof *shelf_covers);
     if(status==PN_OK && shelf_covers){bool changed;refresh_last();pn_shelf_covers_reset(shelf_covers,shelf_page);covers_dirty=false;
         if(pn_shelf_covers_cached(shelf_covers,shelf_page,&pool,&sd_media,cover_cache,&changed)!=PN_OK)pn_shelf_covers_reset(shelf_covers,NULL);}
     if(status==PN_OK)status=draw_shelf(panel_known?PN_REFRESH_GL16:PN_REFRESH_GC16);
@@ -508,6 +515,7 @@ static void start_reader(void){
         ESP_LOGW(TAG,"Selected book unavailable; returning to canonical library");selected_path[0]=0;selected_identified=false;home_mode=false;show_shelf("",false);return;
     }
     const char *font=NULL;
+    covers_inactive=true;
     uint64_t opened_at=now_ms();(void)opened_at;
     pn_status_t status=selected_format==PN_BOOK_EPUB?pn_epub_app_open_on_media(&epub,&pool,&sd_media,selected_path,font,"/data/progress",44,now_ms()):pn_reader_app_open_on_media(&reader,&pool,&sd_media,selected_path,font,"/data/progress",44,now_ms());
     ESP_LOGI(TAG,"Book prepare format=%u status=%d elapsed=%llu ms",(unsigned)selected_format,(int)status,(unsigned long long)(now_ms()-opened_at));
@@ -992,6 +1000,7 @@ static void device_task(void *arg){
     size_t available=heap_caps_get_free_size(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
     size_t budget=available>256u*1024u?available-256u*1024u:0;if(budget>6u*1024u*1024u)budget=6u*1024u*1024u;
     if(pn_pool_init(&pool,budget,psram_alloc,psram_free,NULL)!=0){read_pico_deinit(&hardware);vTaskDelete(NULL);return;}
+    pn_cache_attach(&pool,&cover_cache_owner,PN_CACHE_COVER,NULL,cover_bytes,cover_drop);
     pn_media_init(&sd_media);pn_media_init(&data_media);pn_media_init(&wallpaper_media);read_pico_pmu_drain_events();esp_fill_random(cover_salt,sizeof cover_salt);
     if(read_pico_pmu_report_ready()!=ESP_OK){ESP_LOGE(TAG,"PMU running handshake failed; display withheld");read_pico_deinit(&hardware);vTaskDelete(NULL);return;}
     shown_px=pn_alloc_tagged(&pool,PN_MEM_FRAME,342u*1216u);

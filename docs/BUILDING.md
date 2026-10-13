@@ -125,3 +125,7 @@ cmake --build build-sim-native
 - 字体子集/fixture：tools/subset_ui_font.py、tools/subset_fallback_fixture.py，源哈希必须匹配；不能手改字体或表。
 
 主设备启动阅读与书架，热点已装配；仍未真机验证。未取得有效PMU VCOM不推屏，不擦NVS、不自动格式化，不写SY7636A标定。当前设备呈现固定25°C工程值，温度/波形/功耗还需实测。
+
+## 缓存压力复跑
+
+`tools/run_sim.ps1 -Timing -BudgetKiB 2048`以2MiB池启动可见窗口；默认6144KiB，限制范围256–6144KiB，过小预算可能无法容纳必需帧或字体。先`tools/dev.py sdl-run`重建，再停止旧`pico-sim`并重启。可见入口使用行缓冲输出，`docker logs pico-sim`可即时核对导航回执。kind 0/1/2的cache日志为邻页/字形/封面快照与准入拒绝、压力淘汰计数；共享预算和统计边界见[内存与响应](MEMORY_AND_RESPONSE.md)。低预算窗口是主机软件验证，不是设备PSRAM或面板指标。

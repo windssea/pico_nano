@@ -23,7 +23,9 @@ static void libc_free(void *ctx, void *ptr) { (void)ctx; free(ptr); }
 int pn_pool_init(pn_pool_t *pool, size_t limit, pn_malloc_fn alloc, pn_free_fn release, void *ctx) {
     if (!pool || ((alloc == NULL) != (release == NULL))) return -1;
     *pool = (pn_pool_t){ .limit=limit, .malloc_fn=alloc ? alloc : libc_alloc,
-        .free_fn=release ? release : libc_free, .ctx=ctx };
+        .free_fn=release ? release : libc_free, .ctx=ctx,
+        .cache_limit=1024u*1024u,.cache_reserve=limit/8<256u*1024u?limit/8:256u*1024u,
+        .cache_caps={512u*1024u,768u*1024u,256u*1024u} };
     return 0;
 }
 
@@ -37,8 +39,16 @@ void *pn_alloc_tagged(pn_pool_t *pool,pn_memory_tag_t tag,size_t bytes) {
     pool->attempts++;
     if (pool->fail_at && pool->attempts == pool->fail_at) {pool->memory[tag].failures++;return NULL;}
     size_t total=sizeof(pn_alloc_header_t)+bytes;
+    if(pool->reclaiming){pool->memory[tag].failures++;return NULL;}
+    if(pool->speculative && !pn_cache_allow(pool,pool->speculative_kind,bytes)){pool->memory[tag].failures++;return NULL;}
+    if(!pool->speculative && (pool->used>pool->limit || total>pool->limit-pool->used || pool->limit-pool->used-total<pool->cache_reserve)){
+        size_t target=total>SIZE_MAX-pool->cache_reserve?SIZE_MAX:total+pool->cache_reserve;
+        pn_cache_reclaim(pool,target);
+    }
     if (pool->used > pool->limit || total > pool->limit-pool->used) {pool->memory[tag].failures++;return NULL;}
     pn_alloc_header_t *header=pool->malloc_fn(pool->ctx,total);
+    // 底层碎片失败只回收并重试一次，注入故障不会进入此路。/ Reclaim and retry backing-heap failures once; injected faults never reach this path.
+    if(!header && !pool->speculative){pn_cache_reclaim(pool,SIZE_MAX);header=pool->malloc_fn(pool->ctx,total);}
     if (!header) {pool->memory[tag].failures++;return NULL;}
     header->record.pool=pool;
     header->record.bytes=total;
@@ -64,4 +74,66 @@ void pn_free(void *ptr) {
     pool->used-=header->record.bytes;
     pool->live--;
     pool->free_fn(pool->ctx,header);
+}
+
+size_t pn_alloc_size(const void *ptr){return ptr?((const pn_alloc_header_t *)ptr-1)->record.bytes:0;}
+size_t pn_alloc_overhead(void){return sizeof(pn_alloc_header_t);}
+void pn_cache_attach(pn_pool_t *p,pn_cache_owner_t *o,pn_cache_class_t kind,void *ctx,pn_cache_bytes_fn bytes,pn_cache_drop_fn drop){
+    if(!p || !o || o->pool || (unsigned)kind>=PN_CACHE_COUNT || !bytes || !drop)return;
+    *o=(pn_cache_owner_t){.pool=p,.ctx=ctx,.bytes=bytes,.drop=drop,.kind=kind};
+    pn_cache_owner_t **at=&p->caches;while(*at)at=&(*at)->next;*at=o;
+}
+void pn_cache_detach(pn_cache_owner_t *o){
+    if(!o || !o->pool)return;
+    pn_cache_owner_t **at=&o->pool->caches;while(*at && *at!=o)at=&(*at)->next;
+    if(*at)*at=o->next;
+    *o=(pn_cache_owner_t){0};
+}
+void pn_cache_pin(pn_cache_owner_t *o){if(o && o->pool)o->pins++;}
+void pn_cache_unpin(pn_cache_owner_t *o){if(o && o->pool && o->pins)o->pins--;}
+void pn_cache_snapshot(pn_pool_t *p){
+    if(!p)return;
+    for(unsigned k=0;k<PN_CACHE_COUNT;k++)p->cache_stats[k].bytes=0;
+    for(pn_cache_owner_t *o=p->caches;o;o=o->next)p->cache_stats[o->kind].bytes+=o->bytes(o->ctx);
+    for(unsigned k=0;k<PN_CACHE_COUNT;k++)if(p->cache_stats[k].bytes>p->cache_stats[k].peak)p->cache_stats[k].peak=p->cache_stats[k].bytes;
+}
+bool pn_cache_allow(pn_pool_t *p,pn_cache_class_t kind,size_t bytes){
+    if(!p || (unsigned)kind>=PN_CACHE_COUNT || bytes>SIZE_MAX-sizeof(pn_alloc_header_t))return false;
+    pn_cache_snapshot(p);size_t total=bytes+sizeof(pn_alloc_header_t),sum=0;
+    for(unsigned k=0;k<PN_CACHE_COUNT;k++)sum+=p->cache_stats[k].bytes;
+    size_t extra=p->speculative && p->used>p->speculative_begin?p->used-p->speculative_begin:0;
+    bool allowed=p->used<=p->limit && total<=p->limit-p->used && p->limit-p->used-total>=p->cache_reserve &&
+        sum<=p->cache_limit && extra<=p->cache_limit-sum && total<=p->cache_limit-sum-extra &&
+        p->cache_stats[kind].bytes<=p->cache_caps[kind] && extra<=p->cache_caps[kind]-p->cache_stats[kind].bytes && total<=p->cache_caps[kind]-p->cache_stats[kind].bytes-extra;
+    if(!allowed)p->cache_stats[kind].denied++;
+    return allowed;
+}
+void *pn_cache_alloc(pn_pool_t *p,pn_cache_class_t kind,pn_memory_tag_t tag,size_t bytes){
+    if(!pn_cache_allow(p,kind,bytes))return NULL;
+    // 可选缓存使用同一个分配器，但不允许抢占或重试。/ Optional caches use the same allocator without eviction or retry.
+    unsigned saved=p->speculative;p->speculative=saved+1;
+    pn_cache_class_t old_kind=p->speculative_kind;if(!saved)p->speculative_kind=kind;
+    size_t begin=p->speculative_begin;if(!saved)p->speculative_begin=p->used;
+    void *result=pn_alloc_tagged(p,tag,bytes);p->speculative=saved;p->speculative_begin=begin;p->speculative_kind=old_kind;return result;
+}
+void pn_cache_observe(pn_pool_t *p,pn_cache_class_t kind,bool hit){
+    if(!p || (unsigned)kind>=PN_CACHE_COUNT)return;
+    pn_cache_snapshot(p);if(hit)p->cache_stats[kind].hits++;else p->cache_stats[kind].misses++;
+}
+size_t pn_cache_reclaim(pn_pool_t *p,size_t headroom){
+    if(!p || p->reclaiming || p->speculative)return 0;
+    size_t before=p->used;p->reclaiming=true;pn_cache_snapshot(p);
+    for(unsigned kind=0;kind<PN_CACHE_COUNT;kind++)for(pn_cache_owner_t *o=p->caches;o;o=o->next){
+        if(p->used<=p->limit && headroom<=p->limit-p->used)goto done;
+        if(o->kind!=kind || o->pins || !o->bytes(o->ctx))continue;
+        size_t old=p->used;o->drop(o->ctx);
+        if(p->used<old){p->cache_stats[kind].evictions++;p->cache_stats[kind].reclaimed+=old-p->used;}
+    }
+done:
+    p->reclaiming=false;pn_cache_snapshot(p);return before-p->used;
+}
+void pn_cache_speculate(pn_pool_t *p,bool enter){
+    if(!p)return;
+    if(enter){if(!p->speculative){p->speculative_begin=p->used;p->speculative_kind=PN_CACHE_NEIGHBOR;}p->speculative++;}
+    else if(p->speculative)p->speculative--;
 }
