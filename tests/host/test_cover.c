@@ -1,12 +1,15 @@
 /* 封面提取、逐分配失败与书架队列驱动。/ Cover extraction, per-allocation failure and shelf-queue driver. */
 #include "pn_cover.h"
 #include "pn_shelf_view.h"
+#include "pn_cancel.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #define BUDGET (8u*1024u*1024u)
 static const uint8_t salt[16]={1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16};
+typedef struct {unsigned calls,limit;} cancellation_t;
+static bool interrupted(void *ctx){cancellation_t *c=ctx;return ++c->calls>=c->limit;}
 static pn_book_format_t format_of(const char *path){const char *dot=strrchr(path,'.');return dot && !strcmp(dot,".epub")?PN_BOOK_EPUB:PN_BOOK_TXT;}
 static void write_pgm(const pn_frame_t *frame,const char *path){
     FILE *file=fopen(path,"wb");assert(file);fprintf(file,"P5\n%d %d\n15\n",frame->width,frame->height);
@@ -49,14 +52,24 @@ static int queue(const char *directory,const char *output,const char *cache){
     pn_catalog_page_t *page=calloc(1,sizeof *page);pn_shelf_covers_t *covers=calloc(1,sizeof *covers);assert(page && covers);
     assert(pn_catalog_page(&media,&lease,directory,"",page)==PN_OK);assert(pn_media_release(&media,&lease)==PN_OK);pn_shelf_covers_reset(covers,page);
     const char *dir=strcmp(cache,"-")?cache:NULL;
+    const char *budget_text=getenv("PN_COVER_QUEUE_BUDGET");size_t budget=budget_text?(size_t)strtoull(budget_text,NULL,10):BUDGET;
     bool changed;pn_status_t status;size_t steps=0;
-    while((status=pn_shelf_covers_step(covers,page,&pool,&media,dir,salt,BUDGET,&changed))==PN_OK){steps++;assert(!pool.used && !pool.live);}
+    const char *cancel_at=getenv("PN_COVER_CANCEL_AFTER");
+    if(cancel_at && page->count){cancellation_t cancel={.limit=(unsigned)strtoul(cancel_at,NULL,10)};uint8_t before[PN_COVER_BYTES];memcpy(before,covers->pixels[0],sizeof before);pn_cancel_scope_t scope;pn_cancel_enter(&scope,interrupted,&cancel);
+        status=pn_shelf_covers_step(covers,page,&pool,&media,NULL,salt,budget,&changed);pn_cancel_leave(&scope);
+        fprintf(stderr,"cancel status=%d state=%d reason=%d changed=%d used=%zu live=%zu leases=%zu pixels=%d calls=%u\n",(int)status,(int)covers->state[0],(int)covers->reason[0],(int)changed,pool.used,pool.live,pn_media_active(&media),memcmp(before,covers->pixels[0],sizeof before),cancel.calls);
+        assert(status==PN_CANCELLED && covers->state[0]==PN_COVER_PENDING && !changed && !pool.used && !pool.live && !pn_media_active(&media) && !memcmp(before,covers->pixels[0],sizeof before));}
+    while((status=pn_shelf_covers_step(covers,page,&pool,&media,dir,salt,budget,&changed))==PN_OK){steps++;assert(!pool.used && !pool.live);}
     assert(status==PN_EMPTY && steps<=page->count);
+    printf("decode peak=%zu attempts=%zu\n",pool.peak,pool.attempts);
     for(size_t i=0;i<page->count;i++)printf("%s state=%d reason=%d title=%s author=%s\n",page->items[i].name,(int)covers->state[i],(int)covers->reason[i],covers->display[i].title,covers->display[i].author);
     /* 缓存预取应完全复现逐条结果，不留PENDING。/ Cache prefetch must reproduce every step result without leaving PENDING. */
     if(dir){pn_shelf_covers_t *again=calloc(1,sizeof *again);assert(again);pn_shelf_covers_reset(again,page);
         assert(pn_shelf_covers_cached(again,page,&pool,&media,dir,&changed)==PN_OK && !pool.used && !pool.live);
-        for(size_t i=0;i<page->count;i++){assert(again->state[i]==covers->state[i] && again->reason[i]==covers->reason[i] && !memcmp(&again->display[i],&covers->display[i],sizeof again->display[i]));if(again->state[i]==PN_COVER_READY)assert(!memcmp(again->pixels[i],covers->pixels[i],PN_COVER_BYTES));}
+        for(size_t i=0;i<page->count;i++){
+            if(covers->state[i]==PN_COVER_FAILED && covers->reason[i]==PN_NO_MEMORY){assert(again->state[i]==PN_COVER_PENDING);continue;}
+            assert(again->state[i]==covers->state[i] && again->reason[i]==covers->reason[i] && !memcmp(&again->display[i],&covers->display[i],sizeof again->display[i]));if(again->state[i]==PN_COVER_READY)assert(!memcmp(again->pixels[i],covers->pixels[i],PN_COVER_BYTES));
+        }
         free(again);}
     pn_font_t font={0};pn_text_source_t builtin=pn_font_builtin_source();assert(pn_font_open(&font,&pool,&builtin,24)==PN_OK);
     uint8_t *bytes=pn_alloc(&pool,684*1216/2);pn_frame_t frame;assert(pn_frame_bind(&frame,bytes,684*1216/2,684,1216));

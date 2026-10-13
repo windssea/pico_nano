@@ -1,5 +1,6 @@
 /* 已显示才记录历史，历史失败保留会话。/ Record history only after display and retain sessions on history failure. */
 #define _POSIX_C_SOURCE 200809L
+#include "test_remove_indexes.h"
 #include "pn_reader_app.h"
 #include <assert.h>
 #include <dirent.h>
@@ -48,6 +49,6 @@ int main(void){
     // 启动可选字体缺失不能阻断书籍；回退只影响运行，不写选择。/ A missing optional startup face must not block the book; fallback is runtime-only.
     assert(pn_reader_app_open(&app,&pool,book,"/missing-startup.ttf",NULL,44,13)==PN_OK && pn_reader_app_font_unavailable(&app));
     assert(pn_reader_app_step(&app,PN_APP_OPEN,14,present,&fail)==PN_OK && pn_reader_app_close(&app,15)==PN_OK);
-    assert(pn_media_release(&media,&lease)==PN_OK);DIR *dir=opendir(state);assert(dir);struct dirent *entry;while((entry=readdir(dir))){if(entry->d_name[0]=='.')continue;char path[1024];int n=snprintf(path,sizeof path,"%s/%s",state,entry->d_name);assert(n>0 && (size_t)n<sizeof path && unlink(path)==0);}assert(closedir(dir)==0 && rmdir(state)==0 && unlink(book)==0 && rmdir(root)==0);
+    assert(pn_media_release(&media,&lease)==PN_OK);pn_test_remove_indexes(state);DIR *dir=opendir(state);assert(dir);struct dirent *entry;while((entry=readdir(dir))){if(entry->d_name[0]=='.')continue;char path[1024];int n=snprintf(path,sizeof path,"%s/%s",state,entry->d_name);assert(n>0 && (size_t)n<sizeof path && unlink(path)==0);}assert(closedir(dir)==0 && rmdir(state)==0 && unlink(book)==0 && rmdir(root)==0);
     free(s);assert(!pool.used && !pool.live);puts("reader recent: failed display absent, confirmed history, close preview and failed-write retry passed");return 0;
 }

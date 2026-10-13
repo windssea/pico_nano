@@ -1,5 +1,6 @@
 /* 草稿、显示失败、取消和跨重启配置。/ Drafts, display failure, cancellation and durable configuration. */
 #define _POSIX_C_SOURCE 200809L
+#include "test_remove_indexes.h"
 #include "pn_reader_app.h"
 #include <assert.h>
 #include <dirent.h>
@@ -27,5 +28,5 @@ int main(void){char root[]="/tmp/pn-reader-style-XXXXXX";assert(mkdtemp(root));c
     assert(pn_reader_app_step(&app,PN_APP_LARGER,10,present,&fail)==PN_IO);assert(pn_reader_app_close(&app,11)==PN_IO && app.impl);
     assert(rmdir(blocked)==0);assert(pn_reader_app_close(&app,12)==PN_OK);
     assert(pn_reader_app_open(&app,&pool,book,NULL,state,44,13)==PN_OK && pn_reader_app_style_get(&app,&shown)==PN_OK && shown.pixels==58);assert(pn_reader_app_close(&app,14)==PN_OK);
-    DIR *dir=opendir(state);assert(dir);struct dirent *entry;while((entry=readdir(dir))){if(entry->d_name[0]=='.')continue;char path[1024];int n=snprintf(path,sizeof path,"%s/%s",state,entry->d_name);assert(n>0 && (size_t)n<sizeof path && unlink(path)==0);}assert(closedir(dir)==0 && rmdir(state)==0 && unlink(book)==0 && rmdir(root)==0);assert(!pool.live && !pool.used);puts("reader style: failed draft rollback, preserved anchor, cancel, apply and durable shortcuts passed");return 0;
+    pn_test_remove_indexes(state);DIR *dir=opendir(state);assert(dir);struct dirent *entry;while((entry=readdir(dir))){if(entry->d_name[0]=='.')continue;char path[1024];int n=snprintf(path,sizeof path,"%s/%s",state,entry->d_name);assert(n>0 && (size_t)n<sizeof path && unlink(path)==0);}assert(closedir(dir)==0 && rmdir(state)==0 && unlink(book)==0 && rmdir(root)==0);assert(!pool.live && !pool.used);puts("reader style: failed draft rollback, preserved anchor, cancel, apply and durable shortcuts passed");return 0;
 }

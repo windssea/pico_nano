@@ -8,6 +8,7 @@
  */
 #define _POSIX_C_SOURCE 200809L
 #include "pn_cover.h"
+#include "pn_cancel.h"
 #include "pn_sd_layout.h"
 #include "pn_epub.h"
 #include "pn_image.h"
@@ -134,6 +135,7 @@ static pn_status_t cover_render_display(pn_pool_t *pool,pn_media_t *media,const 
         if(status==PN_EMPTY)status=epub_cover(&sub,media,lease,item->path,salt,&out,display);
         else if(display)(void)epub_cover(&sub,media,lease,item->path,salt,NULL,display);
     }
+    pn_status_t cancelled=pn_cancel_checkpoint();if(cancelled!=PN_OK)status=cancelled;
     if(status==PN_OK)for(int y=0;y<out.height;y++)for(int x=0;x<out.width;x++)pn_frame_pixel(thumb,x,y,pn_frame_get(&out,x,y));
     pn_free(pixels);return status;
 }
@@ -164,7 +166,7 @@ void pn_shelf_covers_set_last(pn_shelf_covers_t *covers,const pn_catalog_item_t 
 /* 缓存键：书大小/mtime，另含首个外置封面的序号/大小/mtime。/ Cache key: book size/mtime plus the first external cover's index/size/mtime. */
 typedef struct {uint64_t size,side_size;int64_t mtime,side_mtime;uint8_t side;} cover_key_t;
 #define KEY_BYTES 33
-#define HEADER_BYTES (4+2+2+2+1+1+KEY_BYTES+2)
+#define HEADER_BYTES (4+2+2+2+1+1+KEY_BYTES+8+2)
 static void put(uint8_t *p,uint64_t v,unsigned n){for(unsigned i=0;i<n;i++)p[i]=(uint8_t)(v>>(8*i));}
 static uint64_t get(const uint8_t *p,unsigned n){uint64_t v=0;for(unsigned i=0;i<n;i++)v|=(uint64_t)p[i]<<(8*i);return v;}
 static uint32_t crc32(const uint8_t *p,size_t n){uint32_t v=UINT32_MAX;for(size_t i=0;i<n;i++){v^=p[i];for(unsigned b=0;b<8;b++)v=(v>>1)^(0xedb88320u&(0u-(v&1u)));}return ~v;}
@@ -183,7 +185,7 @@ static bool cache_path(const char *dir,const char *book,char out[PN_CATALOG_PATH
 static size_t record_bytes(size_t path_length,pn_cover_state_t state){return HEADER_BYTES+path_length+sizeof(pn_book_display_t)+(state==PN_COVER_READY?PN_COVER_BYTES:0)+4;}
 /* 命中OK；缺失/键或路径不符EMPTY；损坏CORRUPT，调用方重建覆盖。/ Hit OK; missing or key/path mismatch EMPTY; corrupt CORRUPT and the caller rebuilds over it. */
 static pn_status_t cache_load(pn_pool_t *pool,pn_media_t *media,const pn_media_lease_t *lease,const char *dir,const pn_catalog_item_t *item,
-    const cover_key_t *key,pn_cover_state_t *state,pn_status_t *reason,uint8_t *pixels,pn_book_display_t *display){
+    const cover_key_t *key,pn_cover_state_t *state,pn_status_t *reason,uint8_t *pixels,pn_book_display_t *display,size_t budget){
     char path[PN_CATALOG_PATH_MAX];if(!cache_path(dir,item->path,path,""))return PN_LIMIT;
     size_t length=strlen(item->path),capacity=record_bytes(length,PN_COVER_READY);
     uint8_t *data=pn_alloc(pool,capacity+1);if(!data)return PN_NO_MEMORY;
@@ -199,6 +201,7 @@ static pn_status_t cache_load(pn_pool_t *pool,pn_media_t *media,const pn_media_l
             else if(memcmp(data+12,expected,KEY_BYTES) || get(data+HEADER_BYTES-2,2)!=length || memcmp(data+HEADER_BYTES,item->path,length))status=PN_EMPTY;
             else{pn_book_display_t candidate;memcpy(&candidate,data+HEADER_BYTES+length,sizeof candidate);
                 if(!memchr(candidate.title,0,sizeof candidate.title) || !memchr(candidate.author,0,sizeof candidate.author))status=PN_CORRUPT;
+                else if(stored==PN_COVER_FAILED && data[11]==PN_NO_MEMORY && (!budget || budget>get(data+12+KEY_BYTES,8)))status=PN_EMPTY; // 预算增长才重试，首帧不解码。/ Retry only with a larger budget; first paint never decodes.
                 else{*state=stored;*reason=(pn_status_t)data[11];*display=candidate;if(stored==PN_COVER_READY)memcpy(pixels,data+HEADER_BYTES+length+sizeof candidate,PN_COVER_BYTES);}}
         }
     }
@@ -207,12 +210,12 @@ static pn_status_t cache_load(pn_pool_t *pool,pn_media_t *media,const pn_media_l
 static pn_status_t make_dir(const char *path){return mkdir(path,0775)==0 || errno==EEXIST?PN_OK:PN_IO;}
 /* 先写临时文件并同步，再替换；中途掉电最多丢缓存，CRC拒绝残片。/ Write and sync a temporary file, then replace; power loss loses at most the cache and CRC rejects fragments. */
 static pn_status_t cache_store(pn_pool_t *pool,pn_media_t *media,const pn_media_lease_t *lease,const char *dir,const pn_catalog_item_t *item,
-    const cover_key_t *key,pn_cover_state_t state,pn_status_t reason,const uint8_t *pixels,const pn_book_display_t *display){
+    const cover_key_t *key,pn_cover_state_t state,pn_status_t reason,const uint8_t *pixels,const pn_book_display_t *display,size_t budget){
     char path[PN_CATALOG_PATH_MAX],temporary[PN_CATALOG_PATH_MAX],parent[PN_CATALOG_PATH_MAX];
     if(!cache_path(dir,item->path,path,"") || !cache_path(dir,item->path,temporary,".tmp") || strlen(dir)>=sizeof parent)return PN_LIMIT;
     size_t length=strlen(item->path),size=record_bytes(length,state);uint8_t *data=pn_alloc(pool,size);if(!data)return PN_NO_MEMORY;
     memcpy(data,"PNCV",4);put(data+4,PN_COVER_CACHE_VERSION,2);put(data+6,PN_COVER_WIDTH,2);put(data+8,PN_COVER_HEIGHT,2);data[10]=(uint8_t)state;data[11]=(uint8_t)reason;
-    encode_key(data+12,key);put(data+HEADER_BYTES-2,length,2);memcpy(data+HEADER_BYTES,item->path,length);
+    encode_key(data+12,key);put(data+12+KEY_BYTES,budget,8);put(data+HEADER_BYTES-2,length,2);memcpy(data+HEADER_BYTES,item->path,length);
     memcpy(data+HEADER_BYTES+length,display,sizeof *display);
     if(state==PN_COVER_READY)memcpy(data+HEADER_BYTES+length+sizeof *display,pixels,PN_COVER_BYTES);
     put(data+size-4,crc32(data,size-4),4);
@@ -237,7 +240,7 @@ pn_status_t pn_shelf_covers_cached(pn_shelf_covers_t *covers,const pn_catalog_pa
         if(!item || covers->state[i]!=PN_COVER_PENDING)continue;
         cover_key_t key;pn_cover_state_t state;pn_status_t reason;
         if(cover_key(item,&key)!=PN_OK)continue;
-        status=cache_load(pool,media,&lease,cache_dir,item,&key,&state,&reason,covers->pixels[i],&covers->display[i]);
+        status=cache_load(pool,media,&lease,cache_dir,item,&key,&state,&reason,covers->pixels[i],&covers->display[i],0);
         if(status==PN_OK){covers->state[i]=state;covers->reason[i]=reason;if(state==PN_COVER_READY || *covers->display[i].title)*changed=true;}
     }
     (void)pn_media_release(media,&lease);return status==PN_STALE_MEDIA?status:PN_OK;
@@ -246,25 +249,26 @@ pn_status_t pn_shelf_covers_step(pn_shelf_covers_t *covers,const pn_catalog_page
     const char *cache_dir,const uint8_t salt[16],size_t budget,bool *changed){
     if(!covers || !page || page->count>PN_CATALOG_PAGE_MAX || !pool || !media || !salt || !budget || !changed || (cache_dir && (!*cache_dir || strlen(cache_dir)>=PN_CATALOG_PATH_MAX/2)))return PN_INVALID;
     *changed=false;
+    pn_status_t cancelled=pn_cancel_checkpoint();if(cancelled!=PN_OK)return cancelled;
     for(size_t i=0;i<=PN_COVER_SLOT_LAST;i++){
         const pn_catalog_item_t *item=slot_item(covers,page,i);
         if(!item || covers->state[i]!=PN_COVER_PENDING)continue;
         pn_media_lease_t lease;
         pn_status_t status=pn_media_acquire(media,PN_MEDIA_READ,&lease);if(status!=PN_OK)return status;
         cover_key_t key;bool keyed=cache_dir && cover_key(item,&key)==PN_OK;
-        if(keyed){pn_cover_state_t state;pn_status_t reason;status=cache_load(pool,media,&lease,cache_dir,item,&key,&state,&reason,covers->pixels[i],&covers->display[i]);
+        if(keyed){pn_cover_state_t state;pn_status_t reason;status=cache_load(pool,media,&lease,cache_dir,item,&key,&state,&reason,covers->pixels[i],&covers->display[i],budget);
             if(status==PN_OK){covers->state[i]=state;covers->reason[i]=reason;*changed=state==PN_COVER_READY || *covers->display[i].title;(void)pn_media_release(media,&lease);return PN_OK;}
             if(status==PN_STALE_MEDIA){(void)pn_media_release(media,&lease);return status;}
         }
         pn_frame_t thumb;(void)pn_frame_bind(&thumb,covers->pixels[i],PN_COVER_BYTES,PN_COVER_WIDTH,PN_COVER_HEIGHT);
         status=cover_render_display(pool,media,&lease,item,salt,budget,&thumb,&covers->display[i]);(void)pn_media_release(media,&lease);
-        if(status==PN_STALE_MEDIA || status==PN_INVALID)return status;
+        if(status==PN_STALE_MEDIA || status==PN_INVALID || status==PN_CANCELLED)return status;
         covers->reason[i]=status;
         covers->state[i]=status==PN_OK?PN_COVER_READY:status==PN_EMPTY || status==PN_UNSUPPORTED?PN_COVER_NONE:PN_COVER_FAILED;
         *changed=status==PN_OK || *covers->display[i].title;
-        /* 只缓存与内容有关的结论；内存/IO/超限可能下次成功。/ Cache content-determined outcomes only; memory/IO/limit failures may succeed later. */
-        if(keyed && (item->format!=PN_BOOK_EPUB || *covers->display[i].title) && (status==PN_OK || status==PN_EMPTY || status==PN_UNSUPPORTED || status==PN_CORRUPT) && pn_media_acquire(media,PN_MEDIA_WRITE,&lease)==PN_OK){
-            (void)cache_store(pool,media,&lease,cache_dir,item,&key,covers->state[i],status,covers->pixels[i],&covers->display[i]);(void)pn_media_release(media,&lease);
+        /* 内存失败连同预算保存，预算增加才重试；IO/超限不缓存。/ Store memory failures with their budget and retry on growth; do not cache I/O or limit failures. */
+        if(keyed && (item->format!=PN_BOOK_EPUB || *covers->display[i].title) && (status==PN_OK || status==PN_EMPTY || status==PN_UNSUPPORTED || status==PN_CORRUPT || status==PN_NO_MEMORY) && pn_media_acquire(media,PN_MEDIA_WRITE,&lease)==PN_OK){
+            (void)cache_store(pool,media,&lease,cache_dir,item,&key,covers->state[i],status,covers->pixels[i],&covers->display[i],budget);(void)pn_media_release(media,&lease);
         }
         return PN_OK;
     }

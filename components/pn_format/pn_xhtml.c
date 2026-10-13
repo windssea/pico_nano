@@ -8,6 +8,7 @@
  */
 #include "pn_xhtml.h"
 #include "pn_resource.h"
+#include "pn_cancel.h"
 #include <string.h>
 #define HTML "http://www.w3.org/1999/xhtml|"
 #define SVG "http://www.w3.org/2000/svg|"
@@ -33,7 +34,7 @@ static const char *attr(const char *const *attrs,const char *name){
 static pn_xhtml_position_t position(frame_t *f,pn_xhtml_position_kind_t kind){
     return (pn_xhtml_position_t){.element=f->element,.offset=kind==PN_XHTML_ELEMENT?0:f->offset,.run=kind==PN_XHTML_ELEMENT?0:f->run,.kind=kind};
 }
-static pn_status_t send(parser_t *p,pn_xhtml_event_t *event){return p->sink?p->sink(p->ctx,event):PN_OK;}
+static pn_status_t send(parser_t *p,pn_xhtml_event_t *event){pn_status_t cancelled=pn_cancel_checkpoint();return cancelled!=PN_OK?cancelled:p->sink?p->sink(p->ctx,event):PN_OK;}
 static pn_status_t flush_space(parser_t *p){
     if(!p->pending)return PN_OK;
     p->pending=false;p->stats.text_codepoints++;return send(p,&p->pending_space);
@@ -364,20 +365,20 @@ static pn_status_t collect_end(void *ctx,const char *name){
     c->depth--;return status;
 }
 static pn_status_t collect_sheets(sheet_t *sheet,const char *path,const uint8_t salt[16]){
-    pn_zip_stream_t stream={0};pn_status_t status=pn_epub_resource_open(sheet->epub,path,&stream);
-    collect_t *c=pn_alloc(sheet->pool,sizeof *c);if(!c){pn_zip_stream_close(&stream);return PN_NO_MEMORY;}
+    pn_epub_chapter_input_t stream={0};pn_status_t status=pn_epub_chapter_open(sheet->epub,path,&stream);
+    collect_t *c=pn_alloc(sheet->pool,sizeof *c);if(!c){pn_epub_chapter_close(&stream);return PN_NO_MEMORY;}
     *c=(collect_t){.sheet=sheet,.base=path};
-    if(status==PN_OK){pn_xml_input_t input={&stream,read_stream};pn_xml_hooks_t hooks={collect_start,collect_end,collect_text};status=pn_xml_parse(sheet->pool,&input,&hooks,c,32u*1024u*1024u,salt);}
-    pn_free(c->buffer);pn_free(c);pn_zip_stream_close(&stream);return status;
+    if(status==PN_OK){pn_xml_input_t input={&stream,pn_epub_chapter_read};pn_xml_hooks_t hooks={collect_start,collect_end,collect_text};status=pn_xml_parse(sheet->pool,&input,&hooks,c,32u*1024u*1024u,salt);}
+    pn_free(c->buffer);pn_free(c);pn_epub_chapter_close(&stream);return status;
 }
 pn_status_t pn_xhtml_parse(pn_pool_t *pool,pn_epub_t *epub,const char *path,const uint8_t salt[16],pn_xhtml_sink_t sink,void *ctx,pn_xhtml_stats_t *stats){
     if(!pool || !epub || !path || !*path || strlen(path)>=PN_ZIP_PATH_MAX || !salt || !stats)return PN_INVALID;
     size_t ordinal;pn_status_t status=pn_epub_spine_find(epub,path,&ordinal);if(status!=PN_OK)return status;
     sheet_t sheet={.pool=pool,.epub=epub};status=collect_sheets(&sheet,path,salt);
-    pn_zip_stream_t stream={0};pn_xhtml_stats_t candidate;
-    if(status==PN_OK)status=pn_epub_resource_open(epub,path,&stream);
-    if(status==PN_OK){pn_xml_input_t input={&stream,read_stream};status=parse_input(pool,&input,path,salt,sink,ctx,&candidate,&sheet);}
-    pn_zip_stream_close(&stream);
+    pn_epub_chapter_input_t stream={0};pn_xhtml_stats_t candidate;
+    if(status==PN_OK)status=pn_epub_chapter_open(epub,path,&stream);
+    if(status==PN_OK){pn_xml_input_t input={&stream,pn_epub_chapter_read};status=parse_input(pool,&input,path,salt,sink,ctx,&candidate,&sheet);}
+    pn_epub_chapter_close(&stream);
     if(status==PN_OK)status=pn_epub_spine_find(epub,path,&ordinal);
     if(status==PN_OK)*stats=candidate;
     sheet_close(&sheet);return status;
@@ -413,4 +414,24 @@ pn_status_t pn_xhtml_order(pn_pool_t *pool,pn_epub_t *epub,const char *path,cons
     if(status!=PN_OK)return status;
     if(!order.found)return PN_EMPTY;
     *out=order.found;return PN_OK;
+}
+typedef struct {pn_xhtml_position_t position;uint64_t visible,order;} window_point_t;
+typedef struct {const pn_xhtml_position_t *target;uint64_t order,found,visible,selected_order;window_point_t points[32];pn_xhtml_position_t selected;size_t count,cursor;} window_t;
+static void window_select(window_t *w){
+    uint64_t before=w->visible>8192?w->visible-8192:0,best=0;w->selected=(pn_xhtml_position_t){0};w->selected_order=0;
+    for(size_t j=0;j<w->count;j++)if(w->points[j].visible<=before && w->points[j].visible>=best){best=w->points[j].visible;w->selected=w->points[j].position;w->selected_order=w->points[j].order;}
+}
+static pn_status_t window_event(void *ctx,const pn_xhtml_event_t *event){
+    window_t *w=ctx;if(w->order==UINT64_MAX)return PN_LIMIT;w->order++;
+    if(w->target && !w->found){const pn_xhtml_position_t *a=w->target,*b=&event->position;if(a->element==b->element && a->kind==b->kind && a->run==b->run && a->offset==b->offset){if(event->style.hidden)return PN_UNSUPPORTED;w->found=w->order;window_select(w);}}
+    if(w->found || event->style.hidden)return PN_OK;
+    if(event->kind==PN_XHTML_TEXT || event->kind==PN_XHTML_IMAGE || event->kind==PN_XHTML_BREAK){w->visible++;if(w->visible%512==0){w->points[w->cursor]=(window_point_t){event->position,w->visible,w->order};w->cursor=(w->cursor+1)%32;if(w->count<32)w->count++;}}
+    return PN_OK;
+}
+pn_status_t pn_xhtml_window_start(pn_pool_t *pool,pn_epub_t *epub,const char *path,const pn_xhtml_position_t *target,const uint8_t salt[16],uint64_t *order,uint64_t *start_order,pn_xhtml_position_t *out){
+    if(!order || !start_order || !out || (target && (!target->element || (target->kind!=PN_XHTML_ELEMENT && target->kind!=PN_XHTML_TEXT_POSITION))))return PN_INVALID;
+    window_t *w=pn_alloc(pool,sizeof *w);if(!w)return PN_NO_MEMORY;*w=(window_t){.target=target};pn_xhtml_stats_t stats;pn_status_t s=pn_xhtml_parse(pool,epub,path,salt,window_event,w,&stats);
+    if(s==PN_OK && target && !w->found)s=PN_EMPTY;
+    if(s==PN_OK){if(!target)window_select(w);*out=w->selected;*order=target?w->found:w->order;*start_order=w->selected_order;}
+    pn_free(w);return s;
 }

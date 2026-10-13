@@ -2,6 +2,8 @@
 
 本文保留目标架构，当前实现与缺项以 [PROJECT_STATUS](PROJECT_STATUS.md) 为准。deadline/USB/升级等描述是验收目标；现有同步保存/解析等尚不具备全部deadline能力。
 
+输入、产品 worker 与显示 owner 的当前线程接线、取消/回执屏障及节点预排见 [异步阅读](ASYNC_READING.md)。池、字体、介质租约保持产品 owner 串行；长 I/O 不再持有输入事件泵，单次底层调用仍受其自身返回约束。
+
 ## 1. 分层与依赖
 
 ```mermaid
@@ -57,7 +59,7 @@ docs/local/                    忽略的过程日志与实验结果
 
 PC版只替换port与硬件边界，字体/排版/UI使用同一源代码；即时与慢刷新模型均不能代替面板实测。预算、截图、故障回放与真机分工见 [开发与测试流程](DEVELOPMENT_AND_TESTING.md)。
 
-当前首页/书库共享`pn_shelf_view`页面快照与`pn_w_navigation`绘制/命中，SDL与设备适配只管理页面来源、加载最近/目录和处理副作用。`pn_shelf_covers_t`增加9个有界作品元数据槽，OPF title/creator随空闲封面解析取得，缓存v4同时校验路径/快速源键/CRC；显示元数据不能充当内容身份。渲染不解析EPUB；整页队列完成合并重绘，阅读/设置/传书/二级页期间暂停。独立异步router/reader worker仍为W03目标，不把现有单worker空闲队列当成可取消解析。
+当前首页/书库共享`pn_shelf_view`页面快照与`pn_w_navigation`绘制/命中，SDL与设备适配只管理页面来源、加载最近/目录和处理副作用。`pn_shelf_covers_t`增加9个有界作品元数据槽，OPF title/creator随空闲封面解析取得，缓存v5同时校验路径/快速源键/CRC；显示元数据不能充当内容身份。渲染不解析EPUB；整页队列完成合并重绘，阅读/设置/传书/二级页期间暂停。输入、产品worker和唯一显示owner已分开，邮箱与解析检查点支持协作取消；实际owner与剩余deadline门见[异步阅读](ASYNC_READING.md)。
 
 ## 3. 任务与线程所有权
 
@@ -102,28 +104,19 @@ typedef struct {
 
 ## 5. 图书身份、位置与数据持久化
 
-当前流式SHA、A/B记录及TXT位置载荷已实现，调用边界见 [持久位置维护契约](PERSISTENCE.md)；导入/索引/内部挂载/保存屏障仍为后续设计。
+当前流式SHA、A/B记录及TXT位置载荷已实现，调用边界见 [持久位置维护契约](PERSISTENCE.md)；可重建索引已接入，持久位置与缓存的实际边界见[阅读索引](READING_INDEX.md)；完整掉电与硬件出口仍为后续验收。
 
 新导入时流式算 SHA-256，`book_id=content SHA-256`；同内容不同路径映射一个书目，可按用户选择保留副本。原路径/大小/mtime 只做快速变更检测，不作为恢复进度的最终依据。USB 后导入需重新扫描，摘要未完成的文件标为“正在识别”，不恢复旧身份。
 
 TXT 位置采用原文件字节偏移并携带编码/段落策略版本；规范化文本每 4 KiB checkpoint 记录源偏移映射。EPUB/FB2 用 spine/section＋规范化 block＋UTF-8 offset，另存前后各 32 字符锚点与资源摘要。换解析版本找不到锚点时显示“恢复到最近可定位段落”；PDF/CBZ 用原页＋视口，不受正文字号改变。
 
-settings 存小型 NVS blob；频繁翻页不每页 NVS commit。最近位置每 5 页或停留 30 秒持久化（先到者），锁屏/离书必做屏障。内部 1 MiB data 分区内位置 journal 使用 A/B 记录、序号与 CRC，写新校验成功后旧记录可回收；由存储服务原子读取最近有效代。TF 上的完整书签/逐书设置与内部最近位置分开。
+settings 存小型 NVS blob；频繁翻页不每页 NVS commit。最近位置每 5 页或停留 30 秒持久化（先到者），锁屏/离书必做屏障。内部 1 MiB data 分区内位置 journal 使用 A/B 记录、序号与 CRC，写新校验成功后旧记录可回收；由存储服务原子读取最近有效代。书签、逐书设置与位置为独立内部A/B记录；可删除缓存另有专用目录。
 
-### TF 数据目录
+### 当前存储目录与索引边界
 
-```text
-/sdcard/books/                  用户图书与 TXT 同名封面
-/sdcard/fonts/                  完整 TTF 与许可证
-/sdcard/wallpapers/             用户JPEG/PNG锁屏原图
-/sdcard/.readpico/library/       分页索引、记录版本、内容与路径映射
-/sdcard/.readpico/progress/      逐书位置/书签/设置 A/B 记录
-/sdcard/.readpico/covers/        有界灰阶缩略图缓存
-/sdcard/.readpico/layout/        字体摘要+排版键的页表缓存
-/sdcard/.readpico/uploads/       上传分块、manifest、提交恢复日志
-```
+公开TF目录及共享安装契约以[存储卡布局](SD_CARD_LAYOUT.md)为准。书籍/字体/封面/壁纸在`/sdcard/piconano`对应目录，上传暂存在`.readpico/uploads`；封面缓存与书库索引分别在`.readpico/covers`和`.readpico/indexes`。内部`/data/progress`保存进度、书签、样式和字体选择A/B记录，独立`indexes`子目录仅保存可删除的分页窗口。
 
-缓存可全部删除重建，原书/进度不可与缓存混在一类清理。库索引使用分页二进制记录（单页最多 64 书目），UI 只保留可见页＋邻页；不要求全书库常驻 RAM。索引 A/B 与尾日志用于恢复，不先引入 SQLite。
+书库构建以64条排序批次及两路磁盘归并完成；普通取页二分读记录，不常驻整库。分页缓存最多512边界/书、整个目录128KiB配额，当前每书只保留最近一个布局窗口。缓存采用临时文件同步后替换，版本/key/CRC不符重建，不把原书/进度加入缓存清理。实际算法及剩余增量/分段工作见[阅读索引](READING_INDEX.md)。
 
 TF 拔出：提升 media epoch → 禁止新 lease → 通知 worker 取消 → 关闭句柄 → 内部保存屏障 → 字体回退 → 提示。重新插入必须显式挂载，核对新介质与摘要。内部 FAT 挂载失败禁止自动格式化；首次空分区初始化与损坏修复是两个明确路径。
 

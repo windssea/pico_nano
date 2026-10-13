@@ -1,0 +1,39 @@
+/* SPDX-License-Identifier: Apache-2.0
+ * 中文：SDL线程端口；主线程事件/显示，产品worker独占模型和池。/ English: SDL thread port; main owns events/display and the product worker owns models/pool. */
+#pragma once
+#include "pn_async.h"
+#include "pn_reader_app.h"
+#include "input_script.h"
+#include <SDL.h>
+typedef struct {
+    pn_async_t input; ///< 共享有界邮箱 / Shared bounded mailbox
+    SDL_mutex *mutex;SDL_cond *display_done;SDL_sem *wake; ///< 端口同步 / Port synchronization
+    SDL_Thread *worker; ///< 产品worker / Product worker
+    SDL_Window *window;SDL_Renderer *renderer;SDL_Texture *texture; ///< 主线程独占SDL资源 / SDL resources owned by main
+    atomic_bool done; ///< worker已退出 / Worker has exited
+    const pn_frame_t *frame; ///< 等待显示的不可变借用，回执前不能释放 / Immutable borrow until display receipt
+    pn_refresh_t profile;pn_status_t shown; ///< 呈现类型与回执 / Presentation profile and receipt
+    bool pending,ack,scope_active; ///< 显示/脚本回执/取消范围 / Display/script receipt/cancellation scope
+    SDL_Event received,ack_event; ///< 上一事件与脚本回执 / Last event and script receipt
+    char title[256];bool title_pending;int text_input; ///< 主线程窗口命令 / Main-thread window commands
+    atomic_uint mouse; ///< 输入owner发布的按钮状态 / Button state published by the input owner
+    pn_async_scope_t scope; ///< 产品工作范围 / Product work scope
+    sim_script_t script; ///< 主线程拥有的脚本源 / Script source owned by main
+    pn_status_t (*render)(void *,const pn_frame_t *);void *render_ctx; ///< 主线程呈现回调 / Main-thread rendering callback
+    int (*run)(void *);void *run_ctx;int result; ///< 产品worker入口与结果 / Product-worker entry and result
+    uint64_t deadline;unsigned delay_ms; ///< 可测试的面板延迟，不暂停事件泵 / Testable panel delay without stopping event pumping
+    uint32_t revision,context; ///< 管理页成功呈现代次与当前上下文 / Successful management-presentation revision and current context
+} pn_sdl_async_t;
+/// 主线程初始化窗口；失败不启动worker。/ Main initializes the window; failures never start a worker.
+bool pn_sdl_async_init(pn_sdl_async_t *port,pn_status_t (*render)(void *,const pn_frame_t *),void *ctx);
+/// 主线程启动worker并持续事件/显示，退出后join；不调用产品模型。/ Main starts/joins the worker and pumps events/display without calling models.
+int pn_sdl_async_run(pn_sdl_async_t *port,int (*worker)(void *),void *ctx);
+/// worker等待输入/空闲时钟，自动切换取消范围。/ Worker waits for input/idle ticks, switching cancellation scopes.
+bool pn_sdl_async_wait(pn_sdl_async_t *port,SDL_Event *event,unsigned timeout_ms,uint32_t view);
+/// worker借用不可变帧等待主线程回执；返回前帧保持有效。/ Worker lends an immutable frame until the main-thread receipt.
+pn_status_t pn_sdl_async_present(pn_sdl_async_t *port,const pn_frame_t *frame,pn_refresh_t profile);
+/// 主线程销毁端口，须已join。/ Main destroys the port after join.
+void pn_sdl_async_close(pn_sdl_async_t *port);
+/// worker投递窗口标题与文本输入状态，主线程执行。/ Worker posts title/text-input state for main-thread execution.
+void pn_sdl_async_title(pn_sdl_async_t *port,const char *title);
+void pn_sdl_async_text(pn_sdl_async_t *port,bool enabled);

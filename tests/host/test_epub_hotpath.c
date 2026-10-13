@@ -5,11 +5,14 @@
 #include <stdio.h>
 #include <string.h>
 static size_t reads;
+static size_t book_reads;static FILE *book_handle;static const char *book_path;
 static size_t spine_queries;
 static uint64_t frame_hash;
 static bool fail;
 size_t __real_fread(void *,size_t,size_t,FILE *);
-size_t __wrap_fread(void *p,size_t size,size_t n,FILE *f){reads++;return __real_fread(p,size,n,f);}
+size_t __wrap_fread(void *p,size_t size,size_t n,FILE *f){reads++;if(f==book_handle)book_reads++;return __real_fread(p,size,n,f);}
+FILE *__real_fopen(const char *,const char *);
+FILE *__wrap_fopen(const char *path,const char *mode){FILE *f=__real_fopen(path,mode);if(book_path && !strcmp(path,book_path))book_handle=f;return f;}
 pn_status_t __real_pn_epub_spine(pn_epub_t *,size_t,pn_epub_item_t *);
 pn_status_t __wrap_pn_epub_spine(pn_epub_t *e,size_t i,pn_epub_item_t *out){spine_queries++;return __real_pn_epub_spine(e,i,out);}
 static pn_status_t present(void *ctx,const pn_frame_t *f,pn_refresh_t profile){
@@ -18,11 +21,13 @@ static pn_status_t present(void *ctx,const pn_frame_t *f,pn_refresh_t profile){
     return fail?PN_IO:PN_OK;
 }
 int main(int argc,char **argv){
-    assert(argc==3);pn_pool_t pool;assert(!pn_pool_init(&pool,6u*1024u*1024u,NULL,NULL,NULL));
+    assert(argc==3);book_path=argv[1];pn_pool_t pool;assert(!pn_pool_init(&pool,6u*1024u*1024u,NULL,NULL,NULL));
     pn_media_t media;pn_media_init(&media);assert(pn_media_attach(&media,1)==PN_OK);
     pn_epub_app_t app={0};assert(pn_epub_app_open_on_media(&app,&pool,&media,argv[1],NULL,argv[2],44,0)==PN_OK);
     assert(pn_epub_app_step(&app,PN_APP_OPEN,1,present,NULL)==PN_OK);
-    reads=spine_queries=0;assert(pn_epub_app_step(&app,PN_APP_NEXT,2,present,NULL)==PN_OK);
+    reads=spine_queries=book_reads=0;assert(pn_epub_app_step(&app,PN_APP_NEXT,2,present,NULL)==PN_OK);
+    printf("chapter cache: next reads=%zu book_reads=%zu peak=%zu\n",reads,book_reads,pool.peak);
+    assert(book_reads==0); // 同章热翻页不重新读取或解压正文资源。/ Same-chapter hot turns do not reread/inflate the resource.
     assert(reads<80 && spine_queries<20); // 不能随400章节反复扫目录。/ Must not rescan a 400-section directory on every page.
     pn_epub_progress_t before,after;assert(pn_epub_app_progress(&app,&before)==PN_OK);
     assert(pn_epub_app_suspend(&app,3)==PN_OK);uint64_t saved=frame_hash;

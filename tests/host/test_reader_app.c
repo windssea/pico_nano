@@ -7,6 +7,7 @@
  * Frozen: one owner; no formatting or hardware power operations; retain session on close failure.
  */
 #define _POSIX_C_SOURCE 200809L
+#include "test_remove_indexes.h"
 #include "pn_reader_app.h"
 #include "pn_font_preferences.h"
 #include "pn_font_set.h"
@@ -112,6 +113,6 @@ int main(void){
     assert(pn_reader_app_media_lost(&app)==PN_OK);
     assert(pn_reader_app_step(&app,PN_APP_NEXT,130,present,&screen)==PN_STALE_MEDIA);
     assert(pn_reader_app_close(&app,131)==PN_OK && !pool.live && pn_media_active(&shared)==0);
-    DIR *d=opendir(state);assert(d);struct dirent *entry;while((entry=readdir(d))){if(entry->d_name[0]=='.')continue;char path[768];snprintf(path,sizeof path,"%s/%s",state,entry->d_name);assert(unlink(path)==0);}assert(closedir(d)==0);assert(rmdir(state)==0 && unlink(book)==0 && unlink(fallback_path)==0 && rmdir(dir)==0);
+    pn_test_remove_indexes(state);DIR *d=opendir(state);assert(d);struct dirent *entry;while((entry=readdir(d))){if(entry->d_name[0]=='.')continue;char path[768];snprintf(path,sizeof path,"%s/%s",state,entry->d_name);assert(unlink(path)==0);}assert(closedir(d)==0);assert(rmdir(state)==0 && unlink(book)==0 && unlink(fallback_path)==0 && rmdir(dir)==0);
     puts("reader app: native page, failed presentation, reflow anchor, durable reopen and cleanup passed");return 0;
 }

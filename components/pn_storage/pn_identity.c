@@ -7,6 +7,7 @@
  * Frozen: no file writes; caller excludes concurrent mutation; not for security authentication.
  */
 #include "pn_identity.h"
+#include "pn_cancel.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -66,7 +67,7 @@ pn_status_t pn_identity_file(pn_media_t *media, const pn_media_lease_t *lease,
     sha_t hash={.h={0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19}};
     uint8_t buffer[4096];
     for (;;) {
-        status=pn_media_validate(media,lease); if (status!=PN_OK) break;
+        status=pn_cancel_checkpoint();if(status==PN_OK)status=pn_media_validate(media,lease); if (status!=PN_OK) break;
         size_t n=fread(buffer,1,sizeof buffer,file);
         if (ferror(file)) { status=PN_IO;break; }
         if ((uint64_t)n>limit-hash.bytes || (uint64_t)n>UINT64_MAX/8-hash.bytes) { status=PN_LIMIT;break; }

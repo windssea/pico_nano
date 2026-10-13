@@ -8,11 +8,13 @@
  */
 #define _POSIX_C_SOURCE 200809L
 #include "pn_text_file.h"
+#include "pn_cancel.h"
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
 static pn_status_t validate(void *ctx) {
+    pn_status_t cancelled=pn_cancel_checkpoint();if(cancelled!=PN_OK)return cancelled;
     pn_text_file_t *file=ctx;
     if(!file || !file->handle)return PN_INVALID;
     return pn_media_validate(file->media,&file->lease);
@@ -26,6 +28,7 @@ static pn_status_t read_direct(pn_text_file_t *file,uint64_t offset,uint8_t *out
     return ferror(file->handle)!=0?PN_IO:PN_OK;
 }
 static pn_status_t read_at(void *ctx,uint64_t offset,uint8_t *out,size_t cap,size_t *n) {
+    pn_status_t cancelled=pn_cancel_checkpoint();if(cancelled!=PN_OK)return cancelled;
     pn_text_file_t *file=ctx;
     if(!file || !file->handle || !out || !n || offset>file->size)return PN_INVALID;
     pn_status_t status=pn_media_validate(file->media,&file->lease);if(status!=PN_OK)return status;

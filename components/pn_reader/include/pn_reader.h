@@ -8,7 +8,9 @@
  */
 #pragma once
 #include "pn_layout.h"
+#include "pn_alloc.h"
 #include "pn_save_policy.h"
+#include "pn_page_index.h"
 #define PN_READER_HISTORY 32
 
 typedef enum {
@@ -33,6 +35,13 @@ typedef struct {
     pn_reader_anchor_t anchor; ///< 准备位置 / Prepared position
 } pn_reader_receipt_t;
 struct pn_reader {
+    pn_page_index_t *index; ///< 可选同布局页边界窗口，借用 / Optional borrowed page boundaries for this layout
+    const pn_reader_anchor_t *checkpoints; ///< 整源验证所得、布局无关的借用解码检查点 / Borrowed layout-independent decoder checkpoints from full validation
+    size_t checkpoint_count; ///< 有界检查点数量，最多512 / Bounded checkpoint count, at most 512
+    pn_pool_t *neighbor_pool; ///< 可选邻页预算池，owner串行 / Optional neighbor pool, serialized owner
+    pn_text_page_t ahead,behind; ///< 有界下一页/上一页节点 / Bounded next/previous nodes
+    pn_reader_anchor_t ahead_anchor,behind_anchor; ///< 缓存锚点 / Cached anchors
+    pn_job_token_t neighbor_token; ///< 缓存布局代次 / Cache layout generation
     pn_text_reader_t decoder; ///< 不变源的解码上下文 / Decoder context for immutable source
     pn_book_id_t book; ///< 内容身份 / Content identity
     pn_layout_t layout; ///< 当前排版 / Current layout
@@ -68,3 +77,7 @@ pn_status_t pn_reader_reflow(pn_reader_t *reader,const pn_layout_t *layout);
 /// 读取已显示的持久位置；尚未显示返回EMPTY，不返回预绘制位置。
 /// Get durable-location input for displayed position; EMPTY before any display, never a speculative position.
 pn_status_t pn_reader_progress(const pn_reader_t *reader,pn_txt_progress_t *progress);
+/// 绑定可选邻页池，NULL禁用并释放；不扩大全局预算。/ Bind an optional neighbor pool, NULL disables/releases without enlarging global budgets.
+void pn_reader_neighbors(pn_reader_t *reader,pn_pool_t *pool);
+/// 空闲预排NEXT，不呈现、不写位置；新输入可协作取消。/ Idle NEXT preparation without presentation or position writes; new input can cancel cooperatively.
+pn_status_t pn_reader_prefetch(pn_reader_t *reader);

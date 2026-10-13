@@ -6,7 +6,9 @@ param(
     [string]$Font = "",
     [string]$FontDir = "build-dev/sim-library/piconano/fonts",
     [string]$WallpaperDir = "build-dev/sim-library/piconano/wallpapers",
-    [string]$Script = ""
+    [string]$Script = "",
+    [ValidateRange(0,5000)][int]$PresentDelayMs = 0,
+    [switch]$Timing
 )
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
@@ -43,6 +45,8 @@ $arguments = @("run", "--detach", "--rm", "--name", "pico-sim",
     "-e", "PN_SIM_FRAME_DIR=/work/build-dev/sim-frames",
     "-e", "PN_SIM_BOOT_PREVIEW=1",
     "-e", "PN_SIM_LIBRARY_SCRIPT=$Script",
+    "-e", "PN_SIM_PRESENT_DELAY_MS=$PresentDelayMs",
+    "-e", "PN_SIM_TIMING=$([int]$Timing.IsPresent)",
     "-e", "TZ=Asia/Shanghai",
     "-v", "/run/desktop/mnt/host/wslg/.X11-unix:/tmp/.X11-unix", "-v", "/run/desktop/mnt/host/wslg:/mnt/wslg",
     "pico-nano-sdl:dev", "build-sim-sdl-run/pn_sim",

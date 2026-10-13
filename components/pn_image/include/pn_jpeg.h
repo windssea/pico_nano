@@ -13,7 +13,7 @@ typedef struct {
 } pn_jpeg_info_t;
 /// 借助受限解码器探测头；不验证整图，失败info不变。/ Probe headers with the bounded decoder, not the whole image; errors preserve info.
 pn_status_t pn_jpeg_probe(pn_pool_t *pool,const pn_image_input_t *input,pn_jpeg_info_t *info);
-/// 8位灰度/RGB/YCbCr，支持基线与渐进式；最近邻缩放到4bpp；渐进式系数同样计入pool。
-/// Eight-bit grayscale/RGB/YCbCr baseline and progressive decoding to nearest-scaled 4bpp; progressive coefficients also count against pool.
+/// 8位灰度/RGB/YCbCr，基线/渐进式；先IDCT降采样再最近邻到4bpp，渐进系数仍计入pool。
+/// Eight-bit grayscale/RGB/YCbCr baseline/progressive; IDCT downsampling then nearest 4bpp scaling, with progressive coefficients charged to pool.
 /// 需要EOI和验证EOF；错误可能改部分帧，调用方须丢弃。/ Require EOI and verified EOF; errors may change part of the frame, requiring caller discard.
 pn_status_t pn_jpeg_draw(pn_pool_t *pool,const pn_image_input_t *input,pn_frame_t *frame,pn_image_rect_t rect,pn_jpeg_info_t *info);

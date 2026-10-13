@@ -26,23 +26,27 @@ with tempfile.TemporaryDirectory() as folder:
     def run(success=True, anchor=None, env=None):
         command=[binary,str(path)]+(['OPS/a.xhtml',anchor] if anchor else [])
         r=subprocess.run(command,capture_output=True,timeout=20,env=dict(os.environ,**(env or {})))
-        assert (r.returncode==0)==success,r.stderr
+        if success is not None:assert (r.returncode==0)==success,r.stderr
         assert b'used=0 live=0' in r.stderr,r.stderr
-        if not success:assert not r.stdout
+        if r.returncode:assert not r.stdout
         return r
     write();r=run();data=json.loads(r.stdout)[0];expected='A 中B&C Dx\n y'
     assert data['characters']==len(expected) and data['utf32le_crc32']==zlib.crc32(expected.encode('utf-32-le'))
     assert json.loads(run(anchor='start').stdout)=={'element':3,'run':0,'offset':0,'kind':0}
     run(False,anchor='absent')
     attempts=int(re.search(rb'attempts=(\d+)',r.stderr)[1])
-    for fault in range(1,attempts+1):run(False,env={'PN_BODY_FAIL_AT':str(fault)})
+    for fault in range(1,attempts+1):
+        failed=run(None,env={'PN_BODY_FAIL_AT':str(fault)})
+        if failed.returncode==0:assert failed.stdout==r.stdout # 可选缓存失败走流式，结果必须一致。/ Optional cache failure streams identical output.
     styled=body.replace('id="start"','id="start" class="hide"')
     write(styled,css='.hide {display:none} script {display:block}')
     r=run();data=json.loads(r.stdout)[0]
     assert data['characters']==len('x\n y') and data['utf32le_crc32']==zlib.crc32('x\n y'.encode('utf-32-le'))
     run(False,anchor='start')
     attempts=int(re.search(rb'attempts=(\d+)',r.stderr)[1])
-    for fault in range(1,attempts+1):run(False,env={'PN_BODY_FAIL_AT':str(fault)})
+    for fault in range(1,attempts+1):
+        failed=run(None,env={'PN_BODY_FAIL_AT':str(fault)})
+        if failed.returncode==0:assert failed.stdout==r.stdout
     for href,status in [('missing.css',10),('https://example.invalid/sheet.css',9),('../../escape.css',9),('sheet.css?x=1',9)]:
         content=body.replace('<body>','<head><link rel="stylesheet" href="'+href+'"/></head><body>')
         write(content);r=run(False);assert f'body status={status} '.encode() in r.stderr,r.stderr
@@ -54,7 +58,9 @@ with tempfile.TemporaryDirectory() as folder:
     write(body,css=' '*10000+'.hide{display:none}');r=run()
     attempts=int(re.search(rb'attempts=(\d+)',r.stderr)[1])
     # 长源缓冲的增长分配也逐点故障注入。/ Fault-inject every observed allocation including large source-buffer growth.
-    for fault in range(1,attempts+1):run(False,env={'PN_BODY_FAIL_AT':str(fault)})
+    for fault in range(1,attempts+1):
+        failed=run(None,env={'PN_BODY_FAIL_AT':str(fault)})
+        if failed.returncode==0:assert failed.stdout==r.stdout
     write(body.encode('utf-16'));run()
     write(body.replace('<pre>','<pre id="start">'));run(False,anchor='start')
     write(body.replace('id="start"','id="start" hidden="hidden"'));run(False,anchor='start')

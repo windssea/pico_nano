@@ -7,6 +7,7 @@
  * Frozen: no silent replacement or whole-book allocation; immutable source and serialized owner calls.
  */
 #include "pn_text.h"
+#include "pn_cancel.h"
 #include "pn_gbk.generated.h"
 #include <string.h>
 static pn_status_t byte_at(pn_text_reader_t *r,uint64_t offset,uint8_t *out) {
@@ -83,6 +84,7 @@ pn_status_t pn_text_open(pn_text_reader_t *reader,const pn_text_source_t *source
     r.cursor=r.content_begin;*reader=r;return PN_OK;
 }
 pn_status_t pn_text_next(pn_text_reader_t *r,pn_text_char_t *out) {
+    pn_status_t cancel=pn_cancel_checkpoint();if(cancel!=PN_OK)return cancel;
     if(!r || !out || !r->source.read_at || r->encoding<PN_TEXT_UTF8 || r->encoding>PN_TEXT_GBK || r->cursor>r->source.size)return PN_INVALID;
     if(r->source.validate){pn_status_t status=r->source.validate(r->source.ctx);if(status!=PN_OK)return status;}
     uint32_t cp;uint64_t end;pn_status_t status=scalar(r,r->cursor,&cp,&end);if(status!=PN_OK)return status;
@@ -105,18 +107,24 @@ pn_status_t pn_text_seek(pn_text_reader_t *r,uint64_t offset) {
     *r=probe;return PN_OK;
 }
 
-pn_status_t pn_text_probe(const pn_text_source_t *source,uint64_t limit,pn_text_encoding_t *encoding) {
+static pn_status_t probe_scan(pn_text_reader_t *reader,void (*point)(void *,uint64_t,bool),void *ctx){
+    uint64_t last=reader->cursor,stride=reader->source.size/510u+1u;bool paragraph=true;if(point)point(ctx,last,paragraph);
+    pn_text_char_t character;pn_status_t status;
+    while((status=pn_text_next(reader,&character))==PN_OK){paragraph=character.codepoint==10;if(reader->cursor<reader->source.size && reader->cursor-last>=stride){last=reader->cursor;if(point)point(ctx,last,paragraph);}}
+    return status;
+}
+pn_status_t pn_text_probe_checkpoints(const pn_text_source_t *source,uint64_t limit,pn_text_encoding_t *encoding,void (*point)(void *,uint64_t,bool),void *ctx) {
     if(!source || !source->read_at || !encoding)return PN_INVALID;
     if(source->size>limit)return PN_LIMIT;
     pn_text_reader_t reader;pn_status_t status=pn_text_open(&reader,source,PN_TEXT_AUTO);
     if(status!=PN_OK)return status;
     pn_text_encoding_t selected=reader.encoding;bool has_bom=reader.content_begin!=0;
-    pn_text_char_t character;
-    while((status=pn_text_next(&reader,&character))==PN_OK){}
+    status=probe_scan(&reader,point,ctx);
     if(status==PN_CORRUPT && !has_bom) {
         selected=PN_TEXT_GBK;status=pn_text_open(&reader,source,selected);if(status!=PN_OK)return status;
-        while((status=pn_text_next(&reader,&character))==PN_OK){}
+        status=probe_scan(&reader,point,ctx);
     }
     if(status!=PN_EMPTY)return status;
     *encoding=selected;return PN_OK;
 }
+pn_status_t pn_text_probe(const pn_text_source_t *source,uint64_t limit,pn_text_encoding_t *encoding){return pn_text_probe_checkpoints(source,limit,encoding,NULL,NULL);}

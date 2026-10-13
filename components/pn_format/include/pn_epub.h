@@ -44,3 +44,16 @@ pn_status_t pn_epub_spine_find(pn_epub_t *epub,const char *path,size_t *index);
 /// 在出版物所属ZIP打开精确路径资源流；流必须先于出版物关闭，不改源寿命。
 /// Open an exact-path resource stream in the publication's own ZIP; close stream before publication without changing source lifetime.
 pn_status_t pn_epub_resource_open(pn_epub_t *epub,const char *path,pn_zip_stream_t *stream);
+typedef struct {
+    pn_epub_t *epub; ///< 借用出版物，须先关闭输入 / Borrowed publication; close input first
+    pn_zip_stream_t stream; ///< 超限或内存不足时的流式回退 / Streaming fallback for limits or allocation failure
+    const uint8_t *bytes; ///< 已完成CRC验证的章缓存 / Chapter cache verified through CRC completion
+    size_t size,offset; ///< 缓存长度与独立读取位置 / Cache size and independent read offset
+} pn_epub_chapter_input_t;
+/// 打开最多128KiB单章缓存；input初始全零，活动对象返回BUSY；超限走原流，借用期间不替换。
+/// Open a single chapter cache capped at 128 KiB; zero-initialize input, active inputs return BUSY, and oversized/live-borrowed chapters stream.
+pn_status_t pn_epub_chapter_open(pn_epub_t *epub,const char *path,pn_epub_chapter_input_t *input);
+/// XML输入回调，每次仍验证介质有效，EOF前完整CRC已通过。/ XML input callback validating media on every read; cached CRC passed before publication.
+pn_status_t pn_epub_chapter_read(void *ctx,uint8_t *out,size_t capacity,size_t *size);
+/// 释放借用/流，幂等，不释放出版物持有的缓存。/ Release borrow/stream idempotently, keeping the publication-owned cache.
+void pn_epub_chapter_close(pn_epub_chapter_input_t *input);

@@ -20,12 +20,12 @@ with tempfile.TemporaryDirectory() as folder:
  r=run('continue,back,quit');assert re.findall(r'epub_library_position path=(\S+) element=(\d+) run=(\d+) offset=(\d+)',r.stdout)==[positions[1]],r.stdout
  r=run('enter,back,tap:300:500,next,back,tap:100:500,back,quit')
  assert r.stdout.count('library_open name=a.epub')==2 and 'library_open name=b.txt' in r.stdout,r.stdout
- before={p.name:p.read_bytes() for p in state.iterdir()}
+ before={p.name:p.read_bytes() for p in state.iterdir() if p.is_file()}
  with zipfile.ZipFile(book) as z:entries={n:z.read(n) for n in z.namelist()}
  entries['OPS/a.xhtml']=entries['OPS/a.xhtml'].replace('阅读位置'.encode(),'位置改变'.encode(),1)
  with zipfile.ZipFile(book,'w') as z:
   for n,data in entries.items():z.writestr(n,data,compress_type=zipfile.ZIP_STORED)
  r=run('continue,quit')
  assert 'recent_identity status=7' in r.stdout and 'library_open name=a.epub' not in r.stdout,r.stdout
- assert before=={p.name:p.read_bytes() for p in state.iterdir()}
+ assert before=={p.name:p.read_bytes() for p in state.iterdir() if p.is_file()}
  print('EPUB library: mixed shelf, real reading/continue/process restore, recent identity and changed source rejection passed')

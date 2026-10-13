@@ -4,17 +4,24 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-typedef struct {char copy[512];char *next;bool pending;unsigned pointer;int x,y;uint64_t resume;} sim_script_t;
-static void script_init(sim_script_t *script,const char *name){
+typedef struct {char copy[512];char *next;bool pending;unsigned pointer;int x,y;uint64_t resume;SDL_Event future;uint64_t future_at;Uint32 expected_type;SDL_Keycode expected_key;} sim_script_t;
+static inline void script_expect(sim_script_t *script,const SDL_Event *event){script->expected_type=event->type;script->expected_key=event->type==SDL_KEYDOWN?event->key.keysym.sym:0;}
+static inline void script_init(sim_script_t *script,const char *name){
     memset(script,0,sizeof *script);const char *value=getenv(name);if(!value || strlen(value)>500)return;
     strcpy(script->copy,value);script->next=script->copy;
 }
-static void script_queue(sim_script_t *script){
+static inline void script_queue(sim_script_t *script){
+    if(script->future_at){if(SDL_GetTicks64()<script->future_at)return;script_expect(script,&script->future);script->pending=SDL_PushEvent(&script->future)==1;script->future_at=0;return;}
     if(script->pending)return;
     if(script->resume){if(SDL_GetTicks64()<script->resume)return;script->resume=0;}
-    if(script->pointer==1){SDL_Event event={0};event.type=SDL_MOUSEBUTTONUP;event.button.windowID=UINT32_MAX;event.button.button=SDL_BUTTON_LEFT;event.button.x=script->x;event.button.y=script->y;script->pointer=2;script->pending=SDL_PushEvent(&event)==1;return;}
+    if(script->pointer==1){SDL_Event event={0};event.type=SDL_MOUSEBUTTONUP;event.button.windowID=UINT32_MAX;event.button.button=SDL_BUTTON_LEFT;event.button.x=script->x;event.button.y=script->y;script->pointer=2;script_expect(script,&event);script->pending=SDL_PushEvent(&event)==1;return;}
     while(script->next){char *part=script->next,*comma=strchr(part,',');if(comma){*comma=0;script->next=comma+1;}else script->next=NULL;
-        SDL_Event event={0};event.type=SDL_KEYDOWN;event.key.windowID=UINT32_MAX;unsigned wait;
+        SDL_Event event={0};event.type=SDL_KEYDOWN;event.key.windowID=UINT32_MAX;unsigned wait,burst;
+        // 开发竞争注入绕过逐事件回执，用于验证忙碌窗口和合并，不用于文本输入。/ Development race injection bypasses serial acknowledgments to test busy windows/coalescing, never text input.
+        if(sscanf(part,"burst:%u:next",&burst)==1 && burst>0 && burst<=100){event.key.keysym.sym=SDLK_RIGHT;script_expect(script,&event);for(unsigned i=0;i<burst;i++)(void)SDL_PushEvent(&event);script->pending=true;return;}
+        if(sscanf(part,"race-next-home:%u",&wait)==1 && wait<=5000){event.key.keysym.sym=SDLK_RIGHT;script->future=event;script->future.key.keysym.sym=SDLK_h;script->future_at=SDL_GetTicks64()+wait;script_expect(script,&event);script->pending=SDL_PushEvent(&event)==1;return;}
+        if(sscanf(part,"race-open-home:%u",&wait)==1 && wait<=5000){event.key.keysym.sym=SDLK_RETURN;script->future=event;script->future.key.keysym.sym=SDLK_h;script->future_at=SDL_GetTicks64()+wait;script_expect(script,&event);script->pending=SDL_PushEvent(&event)==1;return;}
+        if(sscanf(part,"race-next-tools:%u",&wait)==1 && wait<=5000){event.key.keysym.sym=SDLK_RIGHT;script->future=event;script->future.key.keysym.sym=SDLK_k;script->future_at=SDL_GetTicks64()+wait;script_expect(script,&event);script->pending=SDL_PushEvent(&event)==1;return;}
         // wait:MS暂停投递，让空闲任务（如封面队列）运行。/ wait:MS pauses delivery so idle work such as the cover queue runs.
         if(sscanf(part,"wait:%u",&wait)==1 && wait<=60000){script->resume=SDL_GetTicks64()+wait;return;}
         if(sscanf(part,"tap:%d:%d",&script->x,&script->y)==2 && script->x>=0 && script->x<684 && script->y>=0 && script->y<1216){event.type=SDL_MOUSEBUTTONDOWN;event.button.windowID=UINT32_MAX;event.button.button=SDL_BUTTON_LEFT;event.button.x=script->x;event.button.y=script->y;script->pointer=1;}
@@ -48,6 +55,7 @@ static void script_queue(sim_script_t *script){
         else if(!strcmp(part,"settings"))event.key.keysym.sym=SDLK_p;
         else if(!strcmp(part,"index"))event.key.keysym.sym=SDLK_j;
         else if(!strcmp(part,"toc"))event.key.keysym.sym=SDLK_t;
+        else if(!strcmp(part,"tools"))event.key.keysym.sym=SDLK_k;
         else if(!strcmp(part,"toc-down"))event.key.keysym.sym=SDLK_DOWN;
         else if(!strcmp(part,"toc-up"))event.key.keysym.sym=SDLK_UP;
         else if(!strcmp(part,"toc-select"))event.key.keysym.sym=SDLK_RETURN;
@@ -63,8 +71,11 @@ static void script_queue(sim_script_t *script){
         else if(!strcmp(part,"font-previous"))event.key.keysym.sym=SDLK_PAGEUP;
         else if(!strcmp(part,"font-down"))event.key.keysym.sym=SDLK_DOWN;
         else if(!strcmp(part,"font-up"))event.key.keysym.sym=SDLK_UP;
-        else if(!strcmp(part,"font-primary"))event.key.keysym.sym=SDLK_1;
-        else if(!strcmp(part,"font-fallback"))event.key.keysym.sym=SDLK_2;
+        else if(!strcmp(part,"key-left"))event.key.keysym.sym=SDLK_1;
+        else if(!strcmp(part,"key-home"))event.key.keysym.sym=SDLK_2;
+        else if(!strcmp(part,"key-confirm"))event.key.keysym.sym=SDLK_3;
+        else if(!strcmp(part,"font-primary"))event.key.keysym.sym=SDLK_F6;
+        else if(!strcmp(part,"font-fallback"))event.key.keysym.sym=SDLK_F7;
         else if(!strcmp(part,"font-resident"))event.key.keysym.sym=SDLK_i;
         else if(!strcmp(part,"styles") || !strcmp(part,"style-form"))event.key.keysym.sym=SDLK_s;
         else if(!strcmp(part,"style-down"))event.key.keysym.sym=SDLK_DOWN;
@@ -74,10 +85,11 @@ static void script_queue(sim_script_t *script){
         else if(!strcmp(part,"style-cancel"))event.key.keysym.sym=SDLK_ESCAPE;
         else if(!strcmp(part,"style-apply"))event.key.keysym.sym=SDLK_RETURN;
         else continue;
-        script->pending=SDL_PushEvent(&event)==1;return;
+        script_expect(script,&event);script->pending=SDL_PushEvent(&event)==1;return;
     }
 }
-static void script_received(sim_script_t *script,const SDL_Event *event){
+static inline void script_received(sim_script_t *script,const SDL_Event *event){
+    if(event->type!=script->expected_type || (event->type==SDL_KEYDOWN && event->key.keysym.sym!=script->expected_key))return;
     if((event->type==SDL_KEYDOWN && event->key.windowID==UINT32_MAX) || (event->type==SDL_TEXTINPUT && event->text.windowID==UINT32_MAX))script->pending=false;
     if((event->type==SDL_MOUSEBUTTONDOWN || event->type==SDL_MOUSEBUTTONUP) && event->button.windowID==UINT32_MAX){script->pending=false;if(event->type==SDL_MOUSEBUTTONUP)script->pointer=0;}
 }

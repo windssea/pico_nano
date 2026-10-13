@@ -1,5 +1,6 @@
 /* 真正阅读会话的书签交互与确认屏障。/ Bookmark interactions and confirmation barriers on a real reader session. */
 #define _POSIX_C_SOURCE 200809L
+#include "test_remove_indexes.h"
 #include "pn_bookmark_ui.h"
 #include <assert.h>
 #include <dirent.h>
@@ -100,6 +101,6 @@ int main(void){
     assert(ui.page==15 && ui.count==6);
     assert(pn_bookmark_ui_event(&ui,PN_BUI_BACK,NULL,10,present,&screen)==PN_OK);
     assert(pn_reader_app_close(&app,11)==PN_OK && pool.used==0 && pool.live==0);
-    char hash[65];for(unsigned i=0;i<32;i++)snprintf(hash+i*2,3,"%02x",after.book.sha256[i]);char marks[512];snprintf(marks,sizeof marks,"%s/%s.marks",state,hash);clear_dir(marks);clear_dir(state);if(getenv("PN_BOOKMARK_BAD_GLYPH"))assert(unlink(bad_font)==0);assert(unlink(book)==0 && rmdir(root)==0);
+    char hash[65];for(unsigned i=0;i<32;i++)snprintf(hash+i*2,3,"%02x",after.book.sha256[i]);char marks[512];snprintf(marks,sizeof marks,"%s/%s.marks",state,hash);clear_dir(marks);pn_test_remove_indexes(state);clear_dir(state);if(getenv("PN_BOOKMARK_BAD_GLYPH"))assert(unlink(bad_font)==0);assert(unlink(book)==0 && rmdir(root)==0);
     puts("bookmark UI: real edit, jump/return, delete cancel, unpresented confirmation blocked and cleanup passed");return 0;
 }

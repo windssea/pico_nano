@@ -64,13 +64,15 @@ with tempfile.TemporaryDirectory() as folder:
     render(books/'g-plain.txt',EMPTY,root/'g.pgm')
     render(books/'h-garbage.txt',UNSUPPORTED,root/'h.pgm')
 
-    def queue(cache='-'):
-        r=subprocess.run([binary,'queue',str(books),str(root/'shelf.pgm'),str(cache)],capture_output=True,timeout=300)
+    def queue(cache='-',cancel=False):
+        env=dict(os.environ,PN_COVER_CANCEL_AFTER='64') if cancel else os.environ
+        r=subprocess.run([binary,'queue',str(books),str(root/'shelf.pgm'),str(cache)],env=env,capture_output=True,timeout=300)
         assert r.returncode==0,(r.stdout,r.stderr)
         text=r.stdout.decode();assert "title=封面测试 author=测试作者" in text,text
-        return {line.split()[0]:(int(line.split('state=')[1].split()[0]),int(line.split('reason=')[1].split()[0])) for line in r.stdout.decode().splitlines()}
+        return {line.split()[0]:(int(line.split('state=')[1].split()[0]),int(line.split('reason=')[1].split()[0])) for line in r.stdout.decode().splitlines() if ' state=' in line}
     expected={'a-declared.epub':(2,OK),'b-epub2-jpeg.epub':(2,OK),'c-candidate.epub':(2,OK),'d-none.epub':(0,EMPTY),'e-corrupt.epub':(3,CORRUPT),'f-sidecar.txt':(2,OK)}
     states=queue();assert states==expected,states
+    assert queue(cancel=True)==expected
     w,h,p=pgm(root/'shelf.pgm');assert (w,h)==(684,1216)
     # 第一行封面槽左半为黑，证明缩略图被绘入书架。/ Left half of the first slot is black, proving the thumbnail reached the shelf.
     assert p[(284+H//2)*684+32+10]==0 and p[(284+H//2)*684+32+W-14]==15

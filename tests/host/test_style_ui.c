@@ -1,5 +1,6 @@
 /* 排版交互的呈现屏障和草稿。/ Typesetting interaction presentation barriers and drafts. */
 #define _POSIX_C_SOURCE 200809L
+#include "test_remove_indexes.h"
 #include "pn_style_ui.h"
 #include <assert.h>
 #include <dirent.h>
@@ -40,5 +41,5 @@ int main(void){char root[]="/tmp/pn-style-ui-XXXXXX";assert(mkdtemp(root));char 
     assert(pn_style_ui_event(&ui,PN_SUI_PREVIEW,3,present,&screen)==PN_OK && ui.preview);assert(pn_style_ui_hit(&ui,300,400)==PN_SUI_FORM);screen.capture=false;
     assert(pn_style_ui_event(&ui,PN_SUI_FORM,3,present,&screen)==PN_OK && !ui.preview);assert(pn_style_ui_event(&ui,PN_SUI_CANCEL,4,present,&screen)==PN_OK && !ui.active);
     pn_style_t style;assert(pn_reader_app_style_get(&app,&style)==PN_OK && style.pixels==44);
-    assert(pn_reader_app_close(&app,5)==PN_OK);DIR *dir=opendir(state);assert(dir);struct dirent *entry;while((entry=readdir(dir))){if(entry->d_name[0]=='.')continue;char p[1024];int n=snprintf(p,sizeof p,"%s/%s",state,entry->d_name);assert(n>0 && (size_t)n<sizeof p && unlink(p)==0);}assert(closedir(dir)==0 && rmdir(state)==0 && unlink(book)==0 && rmdir(root)==0 && !pool.used && !pool.live);puts("style UI: confirmed controls, all seven fields, preview return and discarded draft passed");return 0;
+    assert(pn_reader_app_close(&app,5)==PN_OK);pn_test_remove_indexes(state);DIR *dir=opendir(state);assert(dir);struct dirent *entry;while((entry=readdir(dir))){if(entry->d_name[0]=='.')continue;char p[1024];int n=snprintf(p,sizeof p,"%s/%s",state,entry->d_name);assert(n>0 && (size_t)n<sizeof p && unlink(p)==0);}assert(closedir(dir)==0 && rmdir(state)==0 && unlink(book)==0 && rmdir(root)==0 && !pool.used && !pool.live);puts("style UI: confirmed controls, all seven fields, preview return and discarded draft passed");return 0;
 }

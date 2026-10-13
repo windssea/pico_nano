@@ -43,3 +43,5 @@ pn_status_t pn_text_seek(pn_text_reader_t *reader,uint64_t offset);
 /// 在预算内完整验证源：BOM优先，否则严格UTF8再GBK；超预算不猜编码。
 /// Validate the complete source within budget: BOM first, otherwise strict UTF8 then GBK; no guess over budget.
 pn_status_t pn_text_probe(const pn_text_source_t *source,uint64_t byte_limit,pn_text_encoding_t *encoding);
+/// 完整探测时顺带发布最多512个解码检查点；每次编码尝试先回调content_begin，失败尝试须丢弃。/ Publish at most 512 decoder checkpoints during full probing; each encoding attempt begins with content_begin, discard failed attempts.
+pn_status_t pn_text_probe_checkpoints(const pn_text_source_t *,uint64_t,pn_text_encoding_t *,void (*)(void *,uint64_t,bool),void *);

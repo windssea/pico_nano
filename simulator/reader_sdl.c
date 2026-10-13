@@ -43,7 +43,7 @@ int pn_sim_reader_window(pn_reader_app_t *app,pn_pool_t *pool){
         if(styles.request_fonts){styles.request_fonts=false;pn_status_t opened=pn_font_ui_open(&fonts,pool,app,NULL,NULL,present,&s);pn_font_ui_return_to(&fonts,pn_style_ui_render,&styles);printf("font_ui open status=%d active=%d\n",opened,fonts.active);}
         if(!got)continue;
         script_received(&script,&event);
-        if(font_modal(&fonts,&event,now,present,&s,&tap,&font_pointer)){if(!fonts.active){bool returned=fonts.return_presented;pn_font_ui_close(&fonts);if(styles.active){if(returned){styles.presented=true;styles.preview=false;}else (void)pn_style_ui_present(&styles,present,&s);}}continue;}
+        if(font_modal(&fonts,&event,now,present,&s,&tap,&font_pointer,SDL_GetMouseState(NULL,NULL))){if(!fonts.active){bool returned=fonts.return_presented;pn_font_ui_close(&fonts);if(styles.active){if(returned){styles.presented=true;styles.preview=false;}else (void)pn_style_ui_present(&styles,present,&s);}}continue;}
 
         if(styles.active){
             if(!styles.presented && now-ui_retry>=1000){ui_retry=now;(void)pn_style_ui_present(&styles,present,&s);}

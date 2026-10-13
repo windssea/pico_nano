@@ -1,0 +1,21 @@
+{
+  "generator": "Pillow 12.3.0; two original constant-color bands, quality=95, subsampling=2",
+  "jpeg_codec": "8.0",
+  "license": "CC0-1.0",
+  "samples": [
+    {
+      "file": "jpeg-large-baseline.jpg",
+      "width": 1920,
+      "height": 1080,
+      "progressive": false,
+      "sha256": "a4350e1a75c1f47508ec6c83498e85cc6c228cc8861017742c03ad1f04c9ba86"
+    },
+    {
+      "file": "jpeg-large-progressive.jpg",
+      "width": 1092,
+      "height": 1533,
+      "progressive": true,
+      "sha256": "a7e00be2b0cbcae36da202555dfb28806971bce5405a4a7f8628ff78fa050b15"
+    }
+  ]
+}

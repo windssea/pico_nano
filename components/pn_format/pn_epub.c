@@ -17,6 +17,9 @@ typedef struct {char *idref;item_t *item;bool linear;} spine_t;
 typedef struct {
     pn_pool_t *pool;pn_zip_t *zip;pn_epub_info_t info;
     item_t **items;size_t item_capacity;spine_t *spine;size_t spine_capacity;size_t *spine_by_zip;
+    uint8_t *chapter; ///< 单个已验证章节缓存 / One verified chapter cache
+    size_t chapter_size,chapter_borrows; ///< 长度与活动借用数 / Size and active borrow count
+    char chapter_path[PN_ZIP_PATH_MAX]; ///< 本会话的资源路径 / Resource path within this session
 } epub_t;
 enum {UNKNOWN,CONTAINER,ROOTFILES,ROOTFILE,PACKAGE,METADATA,MANIFEST,SPINE,TITLE,CREATOR,IDENTIFIER,LANGUAGE,META_LAYOUT,OTHER_META};
 typedef struct {
@@ -260,7 +263,7 @@ void pn_epub_close(pn_epub_t *epub){
     epub_t *b=epub->impl;
     for(size_t i=0;i<b->info.manifest_count;i++)pn_free(b->items[i]);
     for(size_t i=0;i<b->info.spine_count;i++)pn_free(b->spine[i].idref);
-    pn_free(b->items);pn_free(b->spine);pn_free(b->spine_by_zip);pn_free(b);epub->impl=NULL;
+    pn_free(b->chapter);pn_free(b->items);pn_free(b->spine);pn_free(b->spine_by_zip);pn_free(b);epub->impl=NULL;
 }
 pn_status_t pn_epub_open(pn_epub_t *epub,pn_pool_t *pool,pn_zip_t *zip,const uint8_t salt[16]){
     if(!epub || epub->impl || !pool || !zip || !zip->impl || !salt)return PN_INVALID;
@@ -309,4 +312,50 @@ pn_status_t pn_epub_resource_open(pn_epub_t *epub,const char *path,pn_zip_stream
     epub_t *b;pn_status_t status=validate(epub,&b);if(status!=PN_OK)return status;
     uint32_t index;status=pn_zip_find(b->zip,path,&index);if(status!=PN_OK)return status;
     return pn_zip_stream_open(b->zip,index,stream);
+}
+pn_status_t pn_epub_chapter_open(pn_epub_t *epub,const char *path,pn_epub_chapter_input_t *input){
+    if(!path || !input || strlen(path)>=PN_ZIP_PATH_MAX)return PN_INVALID;
+    if(input->epub || input->stream.impl || input->bytes)return PN_BUSY;
+    epub_t *b;pn_status_t status=validate(epub,&b);if(status!=PN_OK)return status;
+    *input=(pn_epub_chapter_input_t){.epub=epub};
+    if(b->chapter && !strcmp(b->chapter_path,path)){
+        input->bytes=b->chapter;input->size=b->chapter_size;b->chapter_borrows++;return PN_OK;
+    }
+    uint32_t index;pn_zip_info_t info;
+    status=pn_zip_find(b->zip,path,&index);if(status==PN_OK)status=pn_zip_info(b->zip,index,&info);
+    if(status!=PN_OK)return status;
+    bool cache=info.unpacked && info.unpacked<=128u*1024u && !b->chapter_borrows;
+    uint8_t *bytes=NULL;
+    if(cache){pn_free(b->chapter);b->chapter=NULL;b->chapter_size=0;b->chapter_path[0]=0;bytes=pn_alloc(b->pool,(size_t)info.unpacked);}
+    status=pn_zip_stream_open(b->zip,index,&input->stream);
+    if(status==PN_NO_MEMORY && bytes){pn_free(bytes);bytes=NULL;status=pn_zip_stream_open(b->zip,index,&input->stream);}
+    if(status!=PN_OK){pn_free(bytes);return status;}
+    if(!bytes)return PN_OK;
+    size_t total=0;
+    while(status==PN_OK){
+        uint8_t tail;size_t n=0;size_t room=(size_t)info.unpacked-total;
+        status=pn_zip_stream_read(&input->stream,room?bytes+total:&tail,room?room:1,&n);
+        if(!room && n){status=PN_CORRUPT;break;}
+        total+=n;
+    }
+    bool verified=status==PN_EMPTY && total==info.unpacked && pn_zip_stream_verified(&input->stream);
+    pn_zip_stream_close(&input->stream);
+    if(!verified){pn_free(bytes);return status==PN_EMPTY?PN_CORRUPT:status;}
+    b->chapter=bytes;b->chapter_size=total;strcpy(b->chapter_path,path);b->chapter_borrows=1;
+    input->bytes=bytes;input->size=total;return PN_OK;
+}
+pn_status_t pn_epub_chapter_read(void *ctx,uint8_t *out,size_t capacity,size_t *size){
+    pn_epub_chapter_input_t *input=ctx;
+    if(!input || !input->epub || !out || !capacity || !size)return PN_INVALID;
+    *size=0;epub_t *b;pn_status_t status=validate(input->epub,&b);if(status!=PN_OK)return status;
+    if(!input->bytes)return pn_zip_stream_read(&input->stream,out,capacity,size);
+    if(input->offset>input->size)return PN_INVALID;
+    size_t remain=input->size-input->offset;if(!remain)return PN_EMPTY;
+    if(capacity>remain)capacity=remain;
+    memcpy(out,input->bytes+input->offset,capacity);input->offset+=capacity;*size=capacity;return PN_OK;
+}
+void pn_epub_chapter_close(pn_epub_chapter_input_t *input){
+    if(!input)return;
+    if(input->bytes && input->epub && input->epub->impl){epub_t *b=input->epub->impl;if(b->chapter_borrows)b->chapter_borrows--;}
+    pn_zip_stream_close(&input->stream);memset(input,0,sizeof *input);
 }

@@ -7,6 +7,7 @@
  * Frozen: owner keeps sources immutable; returned fragments remain provisional until resource CRC completion.
  */
 #include "pn_zip.h"
+#include "pn_cancel.h"
 #include <limits.h>
 #include <string.h>
 #include <zlib.h>
@@ -26,7 +27,7 @@ typedef struct {
 } stream_t;
 static uint16_t u16(const uint8_t *p){return (uint16_t)(p[0]|((uint16_t)p[1]<<8));}
 static uint32_t u32(const uint8_t *p){return (uint32_t)u16(p)|((uint32_t)u16(p+2)<<16);}
-static pn_status_t current(archive_t *a){return a->source.validate?a->source.validate(a->source.ctx):PN_OK;}
+static pn_status_t current(archive_t *a){pn_status_t status=pn_cancel_checkpoint();return status!=PN_OK?status:a->source.validate?a->source.validate(a->source.ctx):PN_OK;}
 pn_status_t pn_zip_validate(pn_zip_t *zip){return !zip || !zip->impl?PN_INVALID:current(zip->impl);}
 static pn_status_t read_at(archive_t *a,uint64_t off,uint8_t *out,size_t size){
     pn_status_t status=current(a);if(status!=PN_OK)return status;
@@ -36,14 +37,14 @@ static pn_status_t read_at(archive_t *a,uint64_t off,uint8_t *out,size_t size){
 }
 static uint32_t hash_name(const char *name,size_t size){uint32_t hash=2166136261u;for(size_t i=0;i<size;i++)hash=(hash^(unsigned char)name[i])*16777619u;return hash;}
 static pn_status_t string_read(void *ctx,uint64_t off,uint8_t *out,size_t cap,size_t *n){const char *s=ctx;size_t size=strlen(s);if(off>size)return PN_INVALID;size_t take=size-(size_t)off;if(take>cap)take=cap;memcpy(out,s+off,take);*n=take;return PN_OK;}
-static bool safe_path(const char *s,size_t n){
-    if(!n || n>=PN_ZIP_PATH_MAX || s[0]=='/' || strlen(s)!=n)return false;
+static pn_status_t safe_path(const char *s,size_t n){
+    if(!n || n>=PN_ZIP_PATH_MAX || s[0]=='/' || strlen(s)!=n)return PN_INVALID;
     size_t begin=0;for(size_t i=0;i<=n;i++){
-        if(i<n && ((unsigned char)s[i]<32 || (unsigned char)s[i]==127 || strchr("\\:?#",s[i])))return false;
-        if(i==n || s[i]=='/'){size_t length=i-begin;if(!length && i!=n)return false;if((length==1 && s[begin]=='.') || (length==2 && s[begin]=='.' && s[begin+1]=='.'))return false;begin=i+1;}
+        if(i<n && ((unsigned char)s[i]<32 || (unsigned char)s[i]==127 || strchr("\\:?#",s[i])))return PN_INVALID;
+        if(i==n || s[i]=='/'){size_t length=i-begin;if(!length && i!=n)return PN_INVALID;if((length==1 && s[begin]=='.') || (length==2 && s[begin]=='.' && s[begin+1]=='.'))return PN_INVALID;begin=i+1;}
     }
-    pn_text_source_t source={(void *)s,n,string_read,NULL};pn_text_reader_t decoder;if(pn_text_open(&decoder,&source,PN_TEXT_UTF8)!=PN_OK)return false;
-    pn_text_char_t c;pn_status_t status;while((status=pn_text_next(&decoder,&c))==PN_OK){}return status==PN_EMPTY;
+    pn_text_source_t source={(void *)s,n,string_read,NULL};pn_text_reader_t decoder;if(pn_text_open(&decoder,&source,PN_TEXT_UTF8)!=PN_OK)return PN_INVALID;
+    pn_text_char_t c;pn_status_t status;while((status=pn_text_next(&decoder,&c))==PN_OK){}return status==PN_EMPTY?PN_OK:status;
 }
 static pn_status_t name_at(archive_t *a,const entry_t *e,char *name){pn_status_t status=read_at(a,e->name_pos,(uint8_t *)name,e->name_length);if(status==PN_OK)name[e->name_length]=0;return status;}
 static pn_status_t extras(archive_t *a,uint32_t pos,uint16_t size){
@@ -110,7 +111,7 @@ pn_status_t pn_zip_open(pn_zip_t *zip,pn_pool_t *pool,const pn_text_source_t *so
         total+=e->unpacked;if(e->packed>ENTRY_MAX_BYTES || e->unpacked>ENTRY_MAX_BYTES || total>TOTAL_MAX_BYTES){status=PN_LIMIT;goto failed;}
         uint32_t length=46u+e->name_length+u16(h+30)+u16(h+32);if(!e->name_length || e->name_length>=PN_ZIP_PATH_MAX || length>eocd-cursor || (e->method==0 && e->packed!=e->unpacked)){status=PN_CORRUPT;goto failed;}
         char name[PN_ZIP_PATH_MAX];status=name_at(a,e,name);if(status!=PN_OK)goto failed;
-        if(!safe_path(name,e->name_length)){status=PN_CORRUPT;goto failed;}e->hash=hash_name(name,e->name_length);e->directory=name[e->name_length-1]=='/';
+        status=safe_path(name,e->name_length);if(status!=PN_OK){if(status!=PN_CANCELLED)status=PN_CORRUPT;goto failed;}e->hash=hash_name(name,e->name_length);e->directory=name[e->name_length-1]=='/';
         if(e->directory && e->unpacked){status=PN_CORRUPT;goto failed;}
         status=extras(a,e->name_pos+e->name_length,u16(h+30));if(status!=PN_OK)goto failed;
         status=local_header(a,e,name);if(status!=PN_OK)goto failed;cursor+=length;
@@ -134,7 +135,7 @@ size_t pn_zip_count(const pn_zip_t *zip){return zip && zip->impl?((archive_t *)z
 pn_status_t pn_zip_find(pn_zip_t *zip,const char *path,uint32_t *index){
     if(!zip || !zip->impl || !path || !index)return PN_INVALID;
     archive_t *a=zip->impl;pn_status_t status=current(a);if(status!=PN_OK)return status;
-    size_t length=strlen(path);if(!safe_path(path,length))return PN_INVALID;uint32_t hash=hash_name(path,length),lo=0,hi=a->count;
+    size_t length=strlen(path);status=safe_path(path,length);if(status!=PN_OK)return status==PN_CANCELLED?status:PN_INVALID;uint32_t hash=hash_name(path,length),lo=0,hi=a->count;
     while(lo<hi){uint32_t mid=lo+(hi-lo)/2;if(a->entries[mid].hash<hash)lo=mid+1;else hi=mid;}
     for(uint32_t i=lo;i<a->count && a->entries[i].hash==hash;i++){if(a->entries[i].name_length!=length)continue;char name[PN_ZIP_PATH_MAX];status=name_at(a,&a->entries[i],name);if(status!=PN_OK)return status;if(!strcmp(path,name)){*index=i;return PN_OK;}}
     return PN_EMPTY;

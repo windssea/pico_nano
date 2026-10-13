@@ -40,6 +40,8 @@ typedef struct {
     pn_page_glyph_t *glyphs;
     pn_display_t display;
     pn_reader_t reader;
+    pn_page_index_t page_index;uint32_t index_generation;
+    pn_reader_anchor_t checkpoints[512];size_t checkpoint_count;
     pn_save_policy_t save;
     pn_journal_files_t journal;
     pn_journal_io_t io;
@@ -105,6 +107,8 @@ static pn_status_t render(app_t *a,pn_frame_t *frame,const pn_reader_receipt_t *
     return pn_reader_footer_progress(&a->ui,body(a),frame,left,right,a->draft_render?-1:(int)basis);
 }
 static pn_status_t release_app(app_t *a){
+    (void)pn_page_index_flush(&a->page_index,true);pn_page_index_close(&a->page_index);
+    pn_reader_neighbors(&a->reader,NULL);
     pn_font_close(&a->metadata);pn_font_set_close(&a->font_draft);pn_font_set_close(&a->font_live);pn_font_chain_clear(&a->chain);pn_font_close(&a->body);pn_font_close(&a->ui);pn_status_t status=pn_text_file_close(&a->book_file);
     pn_status_t s=pn_text_file_close(&a->font_file);if(status==PN_OK)status=s;s=pn_text_file_close(&a->fallback_file);if(status==PN_OK)status=s;
     if(a->book_lease.ticket)(void)pn_media_release(a->book_media,&a->book_lease);
@@ -132,6 +136,7 @@ static pn_status_t open_state(app_t *a,const char *directory,uint64_t now){
     if(s==PN_OK)a->style=saved;
     a->saved_style=a->style;a->persistent=true;strcpy(a->state_directory,directory);return PN_OK;
 }
+static void decoder_checkpoint(void *ctx,uint64_t offset,bool paragraph){app_t *a=ctx;if(offset<=4)a->checkpoint_count=0;if(a->checkpoint_count<512)a->checkpoints[a->checkpoint_count++]=(pn_reader_anchor_t){.begin=offset,.paragraph=paragraph};}
 pn_status_t pn_reader_app_open_on_media(pn_reader_app_t *app,pn_pool_t *pool,pn_media_t *media,const char *book_path,
     const char *font_path,const char *state_dir,int pixels,uint64_t now){
     if(!app || !pool || !book_path || !*book_path || pixels<28 || pixels>72 || (state_dir && !*state_dir))return PN_INVALID;
@@ -146,7 +151,7 @@ pn_status_t pn_reader_app_open_on_media(pn_reader_app_t *app,pn_pool_t *pool,pn_
     if(status==PN_OK)status=pn_media_acquire(a->book_media,PN_MEDIA_READ,&a->book_lease);
     if(status==PN_OK)status=pn_text_file_open(&a->book_file,a->book_media,&a->book_lease,book_path,&source);
     if(status==PN_OK)status=pn_identity_file(a->book_media,&a->book_lease,book_path,PN_TEXT_FILE_MAX_BYTES,&a->book);
-    if(status==PN_OK)status=pn_text_probe(&source,PN_TEXT_FILE_MAX_BYTES,&encoding);
+    if(status==PN_OK)status=pn_text_probe_checkpoints(&source,PN_TEXT_FILE_MAX_BYTES,&encoding,decoder_checkpoint,a);
     if(status==PN_OK && state_dir)status=open_state(a,state_dir,now);
     pn_font_preferences_t selected_fonts={0};bool has_selected_fonts=false,fonts_from_book=false;
     if(status==PN_OK && a->persistent){pn_journal_files_t global_files,book_files;pn_journal_io_t global_io,book_io;
@@ -195,6 +200,8 @@ pn_status_t pn_reader_app_open_on_media(pn_reader_app_t *app,pn_pool_t *pool,pn_
     if(status==PN_OK)status=layout(a,&current);
     pn_job_token_t token={1,1};pn_font_metrics_t metrics={a,advance};
     if(status==PN_OK)status=pn_reader_init(&a->reader,&source,encoding,&a->book,&current,&metrics,a->glyphs,PN_PAGE_GLYPHS_MAX,token,a->persistent?&a->save:NULL);
+    if(status==PN_OK){a->reader.checkpoints=a->checkpoints;a->reader.checkpoint_count=a->checkpoint_count;}
+    if(status==PN_OK)pn_reader_neighbors(&a->reader,pool);
     if(status==PN_OK)status=pn_display_init(&a->display,&a->frame,1,token);
     if(status==PN_OK && has_selected_fonts && selected_fonts.fallback.kind==PN_FONT_FILE){pn_reader_app_t configured={a};status=pn_reader_app_fallback_font(&configured,selected_fonts.fallback.path);}
     if(status!=PN_OK){(void)release_app(a);return status;}
@@ -208,6 +215,22 @@ static pn_status_t record_recent(app_t *a){
     status=pn_recent_files(&files,&a->state_media,&a->state_lease,a->state_directory,&io);
     if(status==PN_OK)status=pn_recent_touch(&io,a->pool,&item);
     a->recent_status=status;if(status==PN_OK)a->recent_recorded=true;return status;
+}
+pn_status_t pn_reader_app_prefetch(pn_reader_app_t *app){
+    if(!app || !app->impl)return PN_EMPTY;
+    app_t *a=app->impl;
+    if(a->suspended || a->media_lost || a->style_preview || a->style_pending || a->font_preview || a->font_pending || a->font_view)return PN_BUSY;
+    pn_status_t status=pn_reader_prefetch(&a->reader);if(status==PN_EMPTY)(void)pn_page_index_flush(&a->page_index,false);return status;
+}
+// 布局改变后换key，缓存故障不阻止阅读；取消可重试。/ Switch keys after reflow; cache failures never block reading, cancellation can retry.
+static pn_status_t index_layout(app_t *a){
+    if(!a->persistent || a->index_generation==a->reader.token.generation)return PN_OK;
+    a->reader.index=NULL;pn_page_index_close(&a->page_index);
+    pn_text_source_t source;pn_book_id_t key;pn_status_t s=body_source(a,&source);
+    if(s==PN_OK)s=pn_page_index_key(&a->book,&a->style,&source,chain(a),(unsigned)a->reader.decoder.encoding,&key);
+    if(s==PN_OK)s=pn_page_index_open(&a->page_index,a->pool,&a->state_media,&a->state_lease,a->state_directory,&a->book,&key);
+    if(s==PN_CANCELLED || s==PN_STALE_MEDIA)return s;
+    a->index_generation=a->reader.token.generation;if(s==PN_OK)a->reader.index=&a->page_index;return PN_OK;
 }
 /* 字体事务直接画最终目标页，使用候选正文字体；不递归推屏。/ Font transactions paint their final destination with the candidate body font, without recursive presentation. */
 static pn_status_t paint_font_view(app_t *a,pn_frame_t *frame){
@@ -236,7 +259,7 @@ static pn_status_t step_location(pn_reader_app_t *app,pn_reader_action_t action,
     else if(action==PN_APP_BEGINNING)intent=PN_READ_FIRST;
     // 确认继续阅读后丢弃跳转返回点；候选页先不画返回入口。/ Discard the jump origin after confirmed continued reading; omit the entry from the candidate page.
     bool dismiss_return=!jump && (action==PN_APP_NEXT || action==PN_APP_PREVIOUS || action==PN_APP_BEGINNING);
-    pn_reader_receipt_t receipt;pn_status_t s=pn_reader_prepare(&a->reader,intent,offset,&receipt);if(s!=PN_OK)return s;
+    pn_reader_receipt_t receipt;pn_status_t s=index_layout(a);if(s==PN_OK)s=pn_reader_prepare(&a->reader,intent,offset,&receipt);if(s!=PN_OK)return s;
     pn_draw_lease_t lease={0};pn_frame_t *frame=NULL;s=pn_display_begin_draw(&a->display,a->reader.token,&lease,&frame);
     if(s==PN_OK)s=a->font_view?paint_font_view(a,frame):render(a,frame,&receipt,dismiss_return?false:return_hint<0?a->has_bookmark_origin:return_hint!=0);
     if(s==PN_OK && !a->font_view && a->body_layer.paint)s=a->body_layer.paint(a->body_layer.ctx,frame);
@@ -279,7 +302,7 @@ pn_status_t pn_reader_app_suspend(pn_reader_app_t *app,uint64_t now){
     if(!a->reader.has_visible || a->force_full || a->style_preview || a->font_preview || a->font_pending || a->global_pending || a->style_pending)return PN_BUSY;
     pn_status_t status=pn_media_validate(a->book_media,&a->book_lease);if(status!=PN_OK)return status;
     if(a->persistent){status=pn_save_policy_flush(&a->save,now);if(status==PN_OK)status=record_recent(a);}
-    if(status==PN_OK){a->last_now=now;a->suspended=true;}return status;
+    if(status==PN_OK){(void)pn_page_index_flush(&a->page_index,true);a->last_now=now;a->suspended=true;}return status;
 }
 pn_status_t pn_reader_app_resume(pn_reader_app_t *app,uint64_t now,pn_reader_present_fn present,void *ctx){
     if(!app || !app->impl || !present)return PN_INVALID;

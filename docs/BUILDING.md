@@ -6,6 +6,8 @@
 
 新版窗口默认进入阅读首页；键盘B进入书库、H回首页、C继续阅读，脚本对应`library/home/continue`。书库上/下显示轻量焦点，回车打开；PageUp/Down分页。四栏导航可直接点击，阅读返回保持进入来源。
 
+管理页数字1/2/3对应左返回、中首页、右确认，脚本为`key-left/key-home/key-confirm`。阅读弹层仍可用方向键选择当前项；旧测试脚本`font-primary/font-fallback`使用独立功能键事件，不占用管理三键。重建后重启可见窗口加载新代码。
+
 ## 开发时保留可见模拟器
 
 界面开发与本地调试时先启动窗口，观察同源代码的显示效果：
@@ -94,6 +96,8 @@ cmake --build build-sim-native
 ```
 
 书架封面上点右键等同设备上的长按（打开书籍操作面板），窗口脚本用 `rtap:X:Y`；状态带时间取本机时间。书架右上的电量在PC上取 `PN_SIM_BATTERY`（0–100，默认85，仅演示值，负数则不显示）。审查界面时可设环境变量 `PN_SIM_FRAME_DIR=DIR`，书库窗口每次呈现另存一张 `frame-NNNN.pgm`（只是开发辅助，不影响显示）。
+
+异步验证使用书库入口，窗口线程和产品 worker 分离。`tools/run_sim.ps1 -Timing -PresentDelayMs 600` 可在可见窗口加入人工显示等待，验证等待时仍接收输入；默认等待为0。`burst:40:next`、`race-next-home:300`、`race-next-tools:300` 是竞争测试脚本，行为与限制见 [异步阅读](ASYNC_READING.md)。人工等待及PC结果不能当面板性能。
 
 书库窗口可加 `--cover-cache DIR` 把封面缩略图缓存到指定目录；不给时只解码不写盘，见 [书架封面](COVERS.md)；`--wallpaper-dir DIR [--wallpaper-store DIR]` 启用壁纸设置页（书架按W），见 [锁屏与壁纸缓存](LOCK_SCREEN.md)；`--font-dir DIR` 启用字体管理页（书架按F），见 [字体管理](FONT_MANAGEMENT.md)；书架按P进入设置页，见 [翻页与三键](PAGE_TURN.md)；按J打开字母跳转。mockDoc为用户本机样本，Git不提供；先自行放入合法测试文件。单书用 `--book PATH`，EPUB入口按扩展名分派。`--headless --capture FILE.pgm`、`--budget BYTES`、`--scenario ownership`等以simulator/main.c为准；没有通用JSON脚本CLI。窗口脚本测试使用测试专用环境变量，不能当真实用户交互验收。
 

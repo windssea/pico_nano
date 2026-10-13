@@ -43,3 +43,9 @@ pn_status_t pn_epub_reader_page(pn_epub_reader_t *,const pn_epub_page_t **);
 pn_status_t pn_epub_reader_reflow(pn_epub_reader_t *,const pn_layout_t *);
 /// 仅已确认位置；无显示EMPTY、错误不改输出。/ Confirmed position only; EMPTY before presentation, preserving output on errors.
 pn_status_t pn_epub_reader_progress(pn_epub_reader_t *,pn_epub_progress_t *);
+/// 空闲NEXT预排，不修改visible/history/保存；占用原pool，取消不发布缓存。/ Idle NEXT preparation preserving visible/history/save; uses the existing pool and never publishes cancelled results.
+pn_status_t pn_epub_reader_prefetch(pn_epub_reader_t *reader);
+/// 图片解码前释放可选邻页节点，不改变已确认位置。/ Release optional neighbor nodes before image decoding without changing confirmed progress.
+void pn_epub_reader_trim(pn_epub_reader_t *reader);
+/// 绑定同布局的可删除窗口；reflow自动解除，不拥有对象。/ Bind a disposable window for this layout; reflow unbinds it, without taking ownership.
+void pn_epub_reader_index(pn_epub_reader_t *,pn_page_index_t *);

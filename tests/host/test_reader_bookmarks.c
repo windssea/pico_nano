@@ -1,5 +1,6 @@
 /* 书签接入真实阅读与呈现屏障。/ Bookmarks wired into actual reading and presentation barriers. */
 #define _POSIX_C_SOURCE 200809L
+#include "test_remove_indexes.h"
 #include "pn_reader_app.h"
 #include <assert.h>
 #include <dirent.h>
@@ -42,6 +43,6 @@ int main(void){
     assert(pn_reader_app_last_confirmed(&app));
     assert(pn_reader_app_bookmark_jump(&app,1,11,present,&fail)==PN_EMPTY && !pn_reader_app_last_confirmed(&app));
     assert(pn_reader_app_close(&app,12)==PN_OK && !pool.used);
-    char hash[65];for(unsigned i=0;i<32;i++)snprintf(hash+i*2,3,"%02x",after.book.sha256[i]);char directory[512];snprintf(directory,sizeof directory,"%s/%s.marks",state,hash);clear_dir(directory);clear_dir(state);assert(unlink(book)==0 && rmdir(root)==0);
+    char hash[65];for(unsigned i=0;i<32;i++)snprintf(hash+i*2,3,"%02x",after.book.sha256[i]);char directory[512];snprintf(directory,sizeof directory,"%s/%s.marks",state,hash);clear_dir(directory);pn_test_remove_indexes(state);clear_dir(state);assert(unlink(book)==0 && rmdir(root)==0);
     puts("reader bookmarks: confirmed anchor, jump failure, return retry, reopen and progress isolation passed");return 0;
 }

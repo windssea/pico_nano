@@ -87,3 +87,8 @@ pn_status_t pn_catalog_search_page_before_n(pn_media_t *media,const pn_media_lea
 pn_status_t pn_catalog_recent_page_n(const pn_recent_snapshot_t *snapshot,size_t start,size_t limit,pn_catalog_page_t *page);
 /// 收藏夹映射为一页（不扫描目录）；文件不存在的条目大小为0。/ Map favorites into a page without scanning; missing files get size 0.
 pn_status_t pn_catalog_favorites_page(const pn_favorites_t *favorites,size_t start,size_t limit,pn_catalog_page_t *page);
+/// 校验单个书籍条目，不追随链接、不读取内容；仅元数据不是身份。/ Validate one book entry without links or content reads; metadata is never identity.
+pn_status_t pn_catalog_item(pn_media_t *,const pn_media_lease_t *,const char *,const char *,pn_catalog_item_t *);
+
+/// 校验非空UTF8安全文件名，不访问介质。/ Validate a nonempty safe UTF-8 filename without media access.
+bool pn_catalog_name_valid(const char *);

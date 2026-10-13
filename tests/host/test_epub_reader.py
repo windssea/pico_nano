@@ -5,14 +5,19 @@ with tempfile.TemporaryDirectory() as folder:
  with zipfile.ZipFile(p,'w',compression=zipfile.ZIP_DEFLATED) as z:
   z.writestr('mimetype','application/epub+zip',compress_type=zipfile.ZIP_STORED)
   z.writestr('META-INF/container.xml','<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OPS/book.opf" media-type="application/oebps-package+xml"/></rootfiles></container>')
-  names=['a','empty','note','b','c','long'];items=''.join(f'<item id="{n}" href="{n}.xhtml" media-type="application/xhtml+xml"/>' for n in names)
-  spine=''.join(f'<itemref idref="{n}"'+(' linear="no"' if n in ['note','long'] else '')+'/>' for n in names)
+  names=['a','empty','note','b','c','long','deep'];items=''.join(f'<item id="{n}" href="{n}.xhtml" media-type="application/xhtml+xml"/>' for n in names)
+  spine=''.join(f'<itemref idref="{n}"'+(' linear="no"' if n in ['note','long','deep'] else '')+'/>' for n in names)
   z.writestr('OPS/book.opf','<package xmlns="http://www.idpf.org/2007/opf" xmlns:d="http://purl.org/dc/elements/1.1/" version="2.0" unique-identifier="uid"><metadata><d:title>test</d:title><d:identifier id="uid">test</d:identifier></metadata><manifest>'+items+'</manifest><spine>'+spine+'</spine></package>')
   bodies={'a':'<p>A<span>B</span>CDEFGH</p>','empty':'<p/>','note':'<p>ZZ</p>','b':'<p id="target">IJKL</p>','c':'<p>MNO</p>','long':'<p>'+''.join(chr(65+i%26) for i in range(80))+'</p>'}
+  bodies['deep']='<p>'+''.join(chr(65+i%26) for i in range(20000))+'</p>'
   for n,body in bodies.items():z.writestr(f'OPS/{n}.xhtml','<html xmlns="http://www.w3.org/1999/xhtml"><body>'+body+'</body></html>')
  r=subprocess.run([sys.argv[1],str(p)],capture_output=True,timeout=30)
  assert r.returncode==0,(r.stdout,r.stderr)
  print(r.stdout.decode())
+ r=subprocess.run([sys.argv[1],str(p),'prefetch'],capture_output=True,timeout=30);assert r.returncode==0,(r.stdout,r.stderr);print(r.stdout.decode())
+
+ r=subprocess.run([sys.argv[1],str(p),'index'],capture_output=True,timeout=30);assert r.returncode==0,(r.stdout,r.stderr);print(r.stdout.decode())
+ r=subprocess.run([sys.argv[1],str(p),'window'],capture_output=True,timeout=30);assert r.returncode==0,(r.stdout,r.stderr);print(r.stdout.decode())
 
  state=pathlib.Path(folder)/'state'
  import hashlib

@@ -7,6 +7,7 @@
  * Frozen: font source remains valid; serialized owner calls; no settings or hardware writes.
  */
 #include "pn_font.h"
+#include "pn_cancel.h"
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include FT_MODULE_H
@@ -142,6 +143,7 @@ static pn_status_t load(pn_font_t *font,uint32_t cp,bool render) {
     FT_Error error=FT_Load_Glyph(e->face,glyph,FT_LOAD_DEFAULT | (render?FT_LOAD_RENDER:0));return result(e,error);
 }
 pn_status_t pn_font_advance(void *ctx,uint32_t cp,int32_t *advance) {
+    pn_status_t cancel=pn_cancel_checkpoint();if(cancel!=PN_OK)return cancel;
     pn_font_t *font=ctx;if(!advance)return PN_INVALID;
     if(!font || !font->impl || cp>0x10ffff || (cp>=0xd800 && cp<=0xdfff))return PN_INVALID;
     engine_t *e=font->impl;
@@ -187,6 +189,7 @@ static void composite(pn_frame_t *frame,int64_t left,int64_t top,unsigned width,
     }
 }
 pn_status_t pn_font_draw(pn_font_t *font,pn_frame_t *frame,uint32_t cp,int32_t x_64,int baseline,pn_font_render_t mode) {
+    pn_status_t cancel=pn_cancel_checkpoint();if(cancel!=PN_OK)return cancel;
     if(!font || !font->impl || !frame || !frame->pixels || (mode!=PN_FONT_GRAY && mode!=PN_FONT_BINARY))return PN_INVALID;
     engine_t *e=font->impl;int offset=(int)(x_64%64);
     if(!e->bmp && cache_allowed(e,sizeof(bmp_t *)*BMP_SLOTS)){e->bmp=pn_alloc(e->pool,sizeof(bmp_t *)*BMP_SLOTS);if(e->bmp)memset(e->bmp,0,sizeof(bmp_t *)*BMP_SLOTS);}

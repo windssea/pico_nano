@@ -8,6 +8,7 @@
  */
 #define _POSIX_C_SOURCE 200809L
 #include "pn_catalog.h"
+#include "pn_cancel.h"
 #include "pn_text.h"
 #include "pn_pinyin.generated.h"
 #include <dirent.h>
@@ -75,7 +76,7 @@ static pn_status_t scan(pn_media_t *media,const pn_media_lease_t *lease,const ch
     // 资源目录尚未创建或被删除时显示空列表；不吞权限/I/O错误或卡失效。/ Missing resource folders show empty lists; preserve permission/I/O failures and media loss.
     if(!dir){if(errno!=ENOENT)return PN_IO;return pn_media_validate(media,lease);}
     char greatest[PN_CATALOG_NAME_MAX]={0};size_t total=0,at_or_before=0,before=0,skipped_by_letter=0;
-    for(;;){status=pn_media_validate(media,lease);if(status!=PN_OK)break;errno=0;struct dirent *entry=readdir(dir);if(!entry){if(errno)status=PN_IO;break;}
+    for(;;){status=pn_cancel_checkpoint();if(status==PN_OK)status=pn_media_validate(media,lease);if(status!=PN_OK)break;errno=0;struct dirent *entry=readdir(dir);if(!entry){if(errno)status=PN_IO;break;}
         const char *name=entry->d_name;if(name[0]=='.')continue;const char *ext=strrchr(name,'.');pn_book_format_t kind=filter==1?(ext && !strcasecmp(ext,".ttf")?PN_FILE_TTF:0):filter==2?(ext && (!strcasecmp(ext,".jpg") || !strcasecmp(ext,".jpeg") || !strcasecmp(ext,".png"))?PN_FILE_IMAGE:0):format(name);if(!kind)continue;
         if(strlen(name)>=PN_CATALOG_NAME_MAX || !safe_name(name)){page->skipped++;continue;}
         pn_catalog_item_t item={.format=kind};int length=snprintf(item.path,sizeof item.path,"%s/%s",directory,name);
@@ -188,3 +189,22 @@ pn_status_t pn_catalog_favorites_page(const pn_favorites_t *favorites,size_t sta
     }
     page->count=count;page->more=start+count<favorites->count;page->index=start;page->total=favorites->count;return PN_OK;
 }
+pn_status_t pn_catalog_item(pn_media_t *media,const pn_media_lease_t *lease,const char *directory,const char *name,pn_catalog_item_t *out){
+    if(!media || !lease || !directory || !name || !out)return PN_INVALID;
+    pn_status_t status=pn_cancel_checkpoint();if(status==PN_OK)status=pn_media_validate(media,lease);if(status!=PN_OK)return status;
+    if(lease->access==PN_MEDIA_USB)return PN_INVALID;
+    pn_book_format_t kind=format(name);if(!kind || name[0]=='.')return PN_EMPTY;
+    if(strlen(name)>=PN_CATALOG_NAME_MAX || !safe_name(name))return pn_cancel_checkpoint()==PN_OK?PN_INVALID:PN_CANCELLED;
+    pn_catalog_item_t item={.format=kind};int n=snprintf(item.path,sizeof item.path,"%s/%s",directory,name);if(n<0 || (size_t)n>=sizeof item.path)return PN_LIMIT;
+    struct stat info;
+#ifdef ESP_PLATFORM
+    int result=stat(item.path,&info);
+#else
+    int result=lstat(item.path,&info);
+#endif
+    if(result)return errno==ENOENT?PN_EMPTY:PN_IO;
+    if(!S_ISREG(info.st_mode) || info.st_size<0)return PN_EMPTY;
+    strcpy(item.name,name);item.size=(uint64_t)info.st_size;status=pn_media_validate(media,lease);if(status==PN_OK)*out=item;return status;
+}
+
+bool pn_catalog_name_valid(const char *name){return name && *name && strlen(name)<PN_CATALOG_NAME_MAX && safe_name(name);}

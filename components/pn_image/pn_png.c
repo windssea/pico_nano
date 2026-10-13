@@ -7,6 +7,7 @@
  * Frozen: never present failed frames, write sources or use default unbounded allocation.
  */
 #include "pn_png.h"
+#include "pn_cancel.h"
 #include <spng.h>
 #include <zlib.h>
 #include <string.h>
@@ -102,7 +103,7 @@ static pn_status_t draw(pn_pool_t *pool,const pn_image_input_t *input,pn_frame_t
     if(status==PN_OK){rgba=pn_alloc(pool,(size_t)header.width*4);if(!rgba)status=PN_NO_MEMORY;}
     if(status==PN_OK){size_t size=0;rc=spng_decoded_image_size(ctx,SPNG_FMT_RGBA8,&size);status=error(&reader,rc);if(status==PN_OK && size!=(uint64_t)header.width*header.height*4)status=PN_CORRUPT;}
     if(status==PN_OK){rc=spng_decode_image(ctx,NULL,0,SPNG_FMT_RGBA8,SPNG_DECODE_PROGRESSIVE|SPNG_DECODE_TRNS);status=error(&reader,rc);}
-    while(status==PN_OK){struct spng_row_info row;rc=spng_get_row_info(ctx,&row);if(rc){status=error(&reader,rc);break;}
+    while(status==PN_OK){status=pn_cancel_checkpoint();if(status!=PN_OK)break;struct spng_row_info row;rc=spng_get_row_info(ctx,&row);if(rc){status=error(&reader,rc);break;}
         if(row.row_num>=header.height || row.pass<0 || row.pass>6){status=PN_CORRUPT;break;}
         rc=spng_decode_scanline(ctx,rgba,(size_t)header.width*4);
         if(rc && rc!=SPNG_EOI){status=error(&reader,rc);break;}

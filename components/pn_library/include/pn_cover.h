@@ -12,7 +12,7 @@
 #define PN_COVER_WIDTH 184 ///< 网格封面宽，见UI_UX书架布局 / Grid cover width, see the shelf layout in UI_UX
 #define PN_COVER_HEIGHT 256 ///< 网格封面高 / Grid cover height
 #define PN_COVER_BYTES (PN_COVER_WIDTH*PN_COVER_HEIGHT/2)
-#define PN_COVER_CACHE_VERSION 4 ///< 集中封面来源变化后缓存重建 / Rebuild caches after centralized cover-source changes
+#define PN_COVER_CACHE_VERSION 5 ///< 解码降采样与失败预算变化后重建 / Rebuild for scaled decoding and failure-budget records
 #define PN_COVER_SLOT_LAST PN_CATALOG_PAGE_MAX ///< 最近阅读卡使用的额外槽 / Extra slot used by the continue-reading card
 
 /// 单书封面状态。/ Per-book cover state.
@@ -57,8 +57,8 @@ void pn_shelf_covers_set_last(pn_shelf_covers_t *covers,const pn_catalog_item_t 
 /// 只从缓存填充PENDING槽，供首次绘制前调用以免墨水屏二次刷新；未命中仍PENDING，介质失效STALE_MEDIA。
 /// Fill PENDING slots from the cache only, called before the first paint to avoid a second e-ink refresh; misses stay PENDING, STALE_MEDIA on invalidation.
 pn_status_t pn_shelf_covers_cached(pn_shelf_covers_t *covers,const pn_catalog_page_t *page,pn_pool_t *pool,pn_media_t *media,const char *cache_dir,bool *changed);
-/// 处理下一条PENDING，供空闲时逐条调用以免阻塞输入；changed表示需要重绘。
-/// Process the next PENDING slot, called once per idle tick so input is not blocked; changed means a redraw is needed.
+/// 空闲时处理下一条PENDING；单次解码仍同步，changed表示需要重绘。
+/// Process the next PENDING slot while idle; individual decodes remain synchronous, and changed requests a redraw.
 /// 内部短暂取得READ读书/缓存，需写缓存时另取WRITE；cache_dir为NULL不用缓存，由可信owner给出。
 /// Briefly acquires READ for book/cache reads and WRITE for cache stores; NULL cache_dir disables caching; the directory comes from a trusted owner.
 /// budget为单书解码上限（大渐进式JPEG需数MiB）；无剩余EMPTY；介质失效/占用返回STALE_MEDIA/BUSY并保留PENDING；单书失败记FAILED并返回OK。

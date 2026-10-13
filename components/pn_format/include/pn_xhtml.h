@@ -56,3 +56,5 @@ pn_status_t pn_xhtml_anchor(pn_pool_t *pool,pn_epub_t *epub,const char *path,con
 /// 完整校验后返回位置首次事件的临时顺序号；不是持久偏移；错误不改输出。
 /// Return transient first-event order after complete validation, never a durable offset; errors preserve output.
 pn_status_t pn_xhtml_order(pn_pool_t *,pn_epub_t *,const char *,const pn_xhtml_position_t *,const uint8_t salt[16],uint64_t *);
+/// 完整校验后选择目标（NULL为章末）前约8192可见事件的检查点；element为0表示章首，不排序locator。/ After full validation choose a checkpoint about 8192 visible events before target (NULL means chapter end); element zero means chapter start, never sort locators.
+pn_status_t pn_xhtml_window_start(pn_pool_t *,pn_epub_t *,const char *,const pn_xhtml_position_t *,const uint8_t salt[16],uint64_t *,uint64_t *,pn_xhtml_position_t *);

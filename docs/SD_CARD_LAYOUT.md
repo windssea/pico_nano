@@ -8,9 +8,12 @@ SD卡挂载点在固件内部为 `/sdcard`，用户看到的卡根目录按以�
 | `/piconano/fonts/` | 校验通过的TTF字体 | 字体管理/选择；上传不会自动替换当前字体 |
 | `/piconano/covers/` | 书籍封面JPEG/PNG原图 | 与书名主体一致，例如绍宋.epub对应绍宋.jpg |
 | `/piconano/wallpapers/` | 锁屏JPEG/PNG原图 | 锁屏设置中预览、裁切、旋转并应用 |
-| `/piconano/.readpico/piconano/covers/` | 生成的缩略图缓存 | 系统管理，可重建；与封面原图分开 |
+| `/piconano/.readpico/covers/` | 生成的缩略图缓存 | 系统管理，可重建；与封面原图分开 |
+| `/piconano/.readpico/indexes/library.pni` | 可重建文件书库索引 | 按目录/介质变化失效，打开书籍仍核对完整SHA |
 | `/piconano/.readpico/uploads/` | 上传暂存、分块记录、安装恢复日志 | 未完成上传不能出现在书架；不直接手动清理进行中的事务 |
 | `/piconano/.readpico/volume.sync` | 设备FAT同步标记 | 设备存储适配管理 |
+
+持久分页窗口暂放内部状态目录的独立`indexes`子目录，最多512边界/书及128KiB全局配额，可删重建；实现及清理边界见[阅读索引](READING_INDEX.md)。
 
 阅读进度、书签及已应用的锁屏A/B缓存在内部存储分区，不因上述目录划分改为放在TF上。
 
