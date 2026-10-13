@@ -9,7 +9,7 @@ import vm from "node:vm";
 import { isLittleFs, layoutOf, md5, parseTable, planInstall, TABLE_OFFSET, TABLE_SIZE } from "../../installer/plan.js";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
-const release = join(root, "releases", readdirSync(join(root, "releases")).filter((n) => n.startsWith("pico_nano-")).sort().at(-1));
+const release = join(root, "releases", readdirSync(join(root, "releases")).filter((n) => /^pico_nano-\d+\.\d+\.\d+-esp32s3$/.test(n)).sort().at(-1));
 const read = (name) => new Uint8Array(readFileSync(join(release, name)));
 const files = {
   bootloader: read("bootloader.bin"), partitionTable: read("partition-table.bin"), otaData: read("ota_data_initial.bin"),
@@ -33,6 +33,21 @@ function table(rows) {
   return out;
 }
 const names = (plan) => plan.steps.map((s) => `${s.kind}@0x${s.address.toString(16)}`);
+
+test("shipped preserving upgrade writes only app and blocks other layouts or destructive options", () => {
+  const folder = join(root, "releases/pico_nano-0.0.57-c696890-upgrade");
+  const preserving = { app: new Uint8Array(readFileSync(join(folder, "pico_nano.bin"))), partitionTable: new Uint8Array(readFileSync(join(folder, "expected-partition-table.bin"))) };
+  const input = { files: preserving, deviceTable: preserving.partitionTable, mode: "app-only" };
+  const plan = planInstall(input);
+  assert.equal(plan.mode, "app-only");
+  assert.deepEqual(names(plan), ["write@0x20000"]);
+  assert.deepEqual(plan.unrecognizedStorage, []);
+  for (const deviceTable of [files.partitionTable, preserving.partitionTable.slice(0, 32), new Uint8Array(0xc00)])
+    assert.throws(() => planInstall({ ...input, deviceTable }), /不匹配/);
+  assert.throws(() => planInstall({ ...input, clearNvs: true }), /不能清除/);
+  assert.throws(() => planInstall({ ...input, initializeStorage: true }), /不能清除/);
+  assert.throws(() => planInstall({ ...input, files: { ...preserving, app: new Uint8Array(0x600001) } }), /无效/);
+});
 
 test("md5 matches node crypto", () => {
   for (const size of [0, 1, 55, 56, 63, 64, 65, 1000, 4096]) {
@@ -145,4 +160,25 @@ test("page preparation reads unknown partitions fully and wires explicit recover
   const checkbox = document.getElementById("initialize-storage"); checkbox.checked = true; checkbox.events.change();
   assert.ok(vm.runInContext("state.plan.steps.some(s=>s.address===0xc20000)", context));
   assert.match(document.getElementById("plan-note").textContent, /已选择清除并初始化/);
+});
+
+test("preserving page reads only table, disables destructive options and clears stale plans on mismatch", async () => {
+  const elements = new Map();
+  const element = () => ({ checked: false, dataset: {}, style: {}, events: {}, append() {}, replaceChildren() {}, addEventListener(name, fn) { this.events[name] = fn; } });
+  const document = { createElement: element, getElementById(id) { if (!elements.has(id)) elements.set(id, element()); return elements.get(id); } };
+  const reads = [];
+  const loader = { async readFlash(address, size) { reads.push([address, size]); return files.partitionTable; } };
+  const context = vm.createContext({ document, navigator: {}, console, files, loader, isLittleFs, layoutOf, md5, planInstall, TABLE_OFFSET, TABLE_SIZE });
+  const source = readFileSync(join(root, "installer/app.js"), "utf8").replace(/^import .*;\r?$/gm, "").replace("init().then(syncButtons);", "");
+  vm.runInContext(source, context);
+  document.getElementById("clear-nvs").checked = true;
+  await vm.runInContext("state.files=files; state.release={mode:'app-only'}; state.loader=loader; state.device={}; prepare();", context);
+  assert.deepEqual(reads, [[0x8000, 0xc00]]);
+  assert.equal(document.getElementById("clear-nvs").checked, false);
+  assert.equal(document.getElementById("clear-nvs").disabled, true);
+  assert.equal(document.getElementById("initialize-storage").disabled, true);
+  assert.equal(document.getElementById("backup").checked, false);
+  assert.equal(vm.runInContext("state.plan.steps.length", context), 1);
+  await assert.rejects(vm.runInContext("state.loader.readFlash=async()=>new Uint8Array(0); prepare();", context), /不匹配/);
+  assert.equal(vm.runInContext("state.plan", context), null);
 });

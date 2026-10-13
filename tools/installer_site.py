@@ -22,6 +22,26 @@ FILES = {
 # flash_args 中必须出现的固定偏移。/ Fixed offsets that flash_args must list.
 OFFSETS = {"bootloader.bin": 0x0, "partition-table.bin": 0x8000}
 RELEASE = re.compile(r"pico_nano-(\d+\.\d+\.\d+)-esp32s3")
+UPGRADE = re.compile(r"pico_nano-(\d+\.\d+\.\d+)-([0-9a-f]{7})-upgrade")
+
+
+def read_upgrade(folder):
+    """发布保留布局升级，只暴露应用与校验表。 / Publish a preserving upgrade with only the app and reference table."""
+    match = UPGRADE.fullmatch(folder.name)
+    metadata = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
+    files = {}
+    for key, name in (("app", "pico_nano.bin"), ("partitionTable", "expected-partition-table.bin")):
+        data = (folder / name).read_bytes()
+        entry = metadata["files"][name]
+        digest = hashlib.sha256(data).hexdigest()
+        if entry["sha256"] != digest or entry["bytes"] != len(data):
+            raise SystemExit(f"{folder.name}/{name}: checksum mismatch")
+        files[key] = {"name": name, "size": len(data), "sha256": digest}
+    if files["partitionTable"]["size"] != 0xc00 or not 0 < files["app"]["size"] <= 0x600000:
+        raise SystemExit("Invalid preserving upgrade sizes")
+    version = f"{match.group(1)}+{match.group(2)}"
+    return {"version": version, "commit": metadata["source_commit"], "mode": "app-only", "verifiedOnHardware": False,
+            "path": f"firmware/{version}/", "files": files, "_folder": folder}
 
 
 def version_key(version):
@@ -62,8 +82,15 @@ def read_release(folder):
 
 
 def build(out):
-    releases = sorted((read_release(p) for p in (ROOT / "releases").iterdir() if p.is_dir() and RELEASE.fullmatch(p.name)),
-                      key=lambda r: version_key(r["version"]), reverse=True)
+    releases = []
+    for folder in (ROOT / "releases").iterdir():
+        if not folder.is_dir():
+            continue
+        if RELEASE.fullmatch(folder.name):
+            releases.append(read_release(folder))
+        elif UPGRADE.fullmatch(folder.name):
+            releases.append(read_upgrade(folder))
+    releases.sort(key=lambda r: (version_key(r["version"].split("+")[0]), r.get("mode") == "app-only"), reverse=True)
     if not releases:
         raise SystemExit("releases/ has no pico_nano-<version>-esp32s3 folder")
     if out.exists():

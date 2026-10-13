@@ -69,6 +69,8 @@ python tools/dev.py host
 
 ## 产物与SDK隔离
 
+在另一台电脑升级已安装 PicoNano 的当前阅读器，见 [异机烧录步骤](FLASH_ON_ANOTHER_PC.md)。该专用升级包核对设备旧分区表后只写应用，不能用默认完整烧写计划替代。
+
 ### 内存与阶段耗时诊断
 
 `tools/run_sim.ps1 -Timing`保留可见窗口，输出`profile`阶段行及`memory`分类行。分类字段为当前字节/累计峰值/成功分配/失败分配；各类峰值不可相加为同时峰值。阶段记录begin/end/本阶段同时peak/请求数，嵌套阶段耗时不可相加，主机池外堆与栈明确不可用。设备可单独选择`CONFIG_PN_PROFILE=y`编译诊断，默认关闭；此选项不自动刷机，也不把真实堆数据替换为PC估算。

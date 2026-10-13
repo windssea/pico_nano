@@ -4,7 +4,7 @@ import { ESPLoader, Transport } from "./vendor/esptool-js-0.5.7/bundle.js";
 import { isLittleFs, layoutOf, md5, planInstall, TABLE_OFFSET, TABLE_SIZE } from "./plan.js";
 
 const FLASH_BYTES = 16 * 1024 * 1024;
-const BAUD = 921600;
+const BAUD = 115200;
 const HEAD = 0x2000;
 const FILE_KEYS = ["bootloader", "partitionTable", "otaData", "app", "factoryData", "factoryWallpaper"];
 
@@ -39,7 +39,7 @@ async function sha256(bytes) {
 /// 下载并以清单中的 SHA-256 校验固件文件。/ Download firmware files and check them against the manifest SHA-256.
 async function loadFiles(release) {
   const files = {};
-  for (const key of FILE_KEYS) {
+  for (const key of release.mode === "app-only" ? ["partitionTable", "app"] : FILE_KEYS) {
     const entry = release.files[key];
     const response = await fetch(new URL(entry.name, new URL(release.path, location.href)), { cache: "no-cache" });
     if (!response.ok) throw new Error(`下载 ${entry.name} 失败（${response.status}）`);
@@ -79,6 +79,8 @@ async function init() {
     select.append(option);
   }
   select.addEventListener("change", () => {
+    state.plan = null;
+    $("plan").hidden = true;
     state.release = state.manifest.releases.find((r) => r.version === select.value);
     state.files = null;
     renderRelease();
@@ -101,6 +103,7 @@ function syncButtons() {
   $("install").disabled = !ready;
   $("connect").disabled = state.busy || !("serial" in navigator);
   $("connect").textContent = state.loader ? "重新连接" : "连接设备";
+  $("release").disabled = state.busy;
 }
 
 async function disconnect() {
@@ -149,8 +152,9 @@ async function prepare() {
     const head = await state.loader.readFlash(partition.offset, HEAD);
     return isLittleFs(head) ? head : await state.loader.readFlash(partition.offset, partition.size);
   };
-  const dataHead = await readStorage(layout.data);
-  const wallpaperHead = await readStorage(layout.wallpaper);
+  const preserving = state.release?.mode === "app-only";
+  const dataHead = preserving ? null : await readStorage(layout.data);
+  const wallpaperHead = preserving ? null : await readStorage(layout.wallpaper);
   state.device.reads = { deviceTable, dataHead, wallpaperHead };
   buildPlan();
   state.busy = false;
@@ -160,15 +164,22 @@ async function prepare() {
 
 function buildPlan() {
   const { deviceTable, dataHead, wallpaperHead } = state.device.reads;
-  state.plan = planInstall({ files: state.files, deviceTable, dataHead, wallpaperHead, clearNvs: $("clear-nvs").checked, initializeStorage: $("initialize-storage").checked });
+  state.plan = null;
+  const preserving = state.release?.mode === "app-only";
+  for (const id of ["clear-nvs", "initialize-storage"]) {
+    $(id).disabled = preserving;
+    if (preserving) $(id).checked = false;
+  }
+  state.plan = planInstall({ files: state.files, deviceTable, dataHead, wallpaperHead, clearNvs: $("clear-nvs").checked, initializeStorage: $("initialize-storage").checked, mode: preserving ? "app-only" : "full" });
   const plan = state.plan;
-  const mode = plan.mode === "upgrade" ? "升级：设备上已是本固件的分区布局"
+  const mode = preserving ? "保留布局升级：仅更新应用固件"
+    : plan.mode === "upgrade" ? "升级：设备上已是本固件的分区布局"
     : plan.knownTable ? "首次安装：将把设备切换到本固件的分区布局" : "首次安装：未能识别设备上的分区表";
   $("plan-mode").textContent = mode;
-  $("plan-mode").dataset.tone = plan.mode === "upgrade" ? "ok" : "warn";
+  $("plan-mode").dataset.tone = preserving || plan.mode === "upgrade" ? "ok" : "warn";
   const kept = plan.keptNvs.length ? `保留设置区（NVS）扇区 ${plan.keptNvs.map(hex).join("、")}。` : "设置区（NVS）将全部清空。";
   const storage = plan.unrecognizedStorage.length ? `无法识别 ${plan.unrecognizedStorage.join("、")} 分区。${$("initialize-storage").checked ? "已选择清除并初始化，请先备份。" : "保留原数据；安装后可能无法保存，请备份后再决定恢复方式。"}` : "";
-  $("plan-note").textContent = `${kept}${storage}不整片擦除，不触碰存储卡和屏幕电源芯片。`;
+  $("plan-note").textContent = preserving ? "保留引导程序、分区表、OTA 选择、NVS、阅读记录和壁纸。仅用于当前已从 ota_0 启动的 PicoNano 阅读器。" : `${kept}${storage}不整片擦除，不触碰存储卡和屏幕电源芯片。`;
   const list = $("plan-steps");
   list.replaceChildren();
   for (const step of plan.steps) {
@@ -182,7 +193,7 @@ function buildPlan() {
     item.append(name, where, why);
     list.append(item);
   }
-  $("backup").checked = $("backup").dataset.touched ? $("backup").checked : plan.mode !== "upgrade" || plan.unrecognizedStorage.length > 0;
+  $("backup").checked = $("backup").dataset.touched ? $("backup").checked : !preserving && (plan.mode !== "upgrade" || plan.unrecognizedStorage.length > 0);
   $("plan").hidden = false;
 }
 
@@ -241,7 +252,7 @@ async function install() {
     await state.loader.after("hard_reset");
     await disconnect();
     state.plan = null;
-    status("安装完成，设备已重启。若屏幕没有变化，请查看帮助中的“开机后没有画面”。", "ok");
+    status("写入校验通过，已发送复位请求。请观察设备是否正常启动；若仍停在下载模式，请按板级方式复位或拔线开机。", "ok");
   } catch (error) {
     fail(new Error(`安装中断：${error.message || error}。设备可能无法正常启动，请手动进入下载模式后重新安装，或用外部工具写回备份。`));
     return;

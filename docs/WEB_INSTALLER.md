@@ -4,12 +4,16 @@
 
 ## 组成
 
+2026-10-13新增 `0.0.57+c696890` 保留布局升级，固件来源为提交 c696890：只下载应用和已核对旧分区表样本，严格匹配设备布局后只写 `0x20000` 应用；不读取内部文件系统，不写 otadata/bootloader/分区表/NVS/数据。清除和初始化选项禁用。仅适用于当前已从 ota_0 启动的阅读器，不用于首次安装。原有完整安装包与规则仍单独保留。具体操作见 [异机烧录](FLASH_ON_ANOTHER_PC.md)。
+
+GitHub Pages此前部署返回404，部署日志提示确认是否启用Pages；在线地址尚不可用。管理员须在仓库Settings → Pages选择GitHub Actions来源，再重跑工作流。可先使用发布目录里的本地网页ZIP（解压后执行`py serve.py`，打开`http://localhost:8765/`）。本轮网页计划/控制器软件测试通过，但浏览器串口连接、实际写入和复位启动仍待用户实测；当前esptool-js复位请求不能保证原生USB自动退出下载模式。
+
 | 部分 | 作用 |
 | --- | --- |
 | `installer/plan.js` | 纯逻辑：解析分区表、识别 LittleFS、生成写入计划、MD5；不碰串口 |
 | `installer/app.js` | 串口流程与界面：连接、读设备、备份、写入、校验、重启 |
 | `installer/vendor/esptool-js-0.5.7/` | 固定版本的 esptool-js 打包文件（Apache-2.0），摘要见 `LICENSES/esptool-js-manifest.json` |
-| `tools/installer_site.py` | 校验 `releases/pico_nano-<版本>-esp32s3/` 的 `SHA256SUMS` 与 `flash_args`，复制固件并写 `firmware/manifest.json` |
+| `tools/installer_site.py` | 校验完整发布的 SHA256SUMS/flash_args，或专用升级发布的 manifest 摘要，复制固件并写站点清单 |
 | `tests/installer/plan.test.mjs` | 写入计划与 MD5 的主机测试 |
 
 ## 流程

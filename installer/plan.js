@@ -76,9 +76,20 @@ function sameBytes(a, b) {
 /// Only needed regions are written; no whole-chip erase. Sectors that were NVS in the old table are kept and the rest of the
 /// new NVS range is cleared so foreign non-NVS bytes are never parsed as NVS pages; clearNvs clears the whole range.
 /// The partition table is written last to narrow the inconsistent window on power loss.
-export function planInstall({ files, deviceTable, dataHead, wallpaperHead, clearNvs = false, initializeStorage = false }) {
+export function planInstall({ files, deviceTable, dataHead, wallpaperHead, clearNvs = false, initializeStorage = false, mode = "full" }) {
   const layout = layoutOf(files.partitionTable);
   const upgrade = sameBytes(deviceTable, files.partitionTable);
+  // 专用升级包必须匹配已核对布局，禁止迁移或初始化。 / Dedicated upgrades must match the verified layout without migration or initialization.
+  if (mode === "app-only") {
+    if (!upgrade) throw new Error("设备分区与专用升级包不匹配，停止写入 / device layout does not match this upgrade");
+    if (clearNvs || initializeStorage) throw new Error("保留布局升级不能清除数据 / preserving upgrade cannot clear data");
+    if (!files.app?.length || files.app.length > layout.app.size || layout.app.offset !== 0x20000)
+      throw new Error("应用或升级地址无效 / invalid upgrade application or address");
+    return { mode: "app-only", knownTable: true, keptNvs: [], unrecognizedStorage: [], steps: [
+      { kind: "write", name: "应用固件 / app", address: layout.app.offset, data: files.app, reason: "保留全部布局与数据 / preserve layout and data", optional: false },
+    ] };
+  }
+  if (mode !== "full") throw new Error("未知安装模式 / unknown installation mode");
   const oldEntries = upgrade ? null : parseTable(deviceTable);
   const steps = [];
   const write = (name, address, data, reason, optional = false) => steps.push({ kind: "write", name, address, data, reason, optional });
