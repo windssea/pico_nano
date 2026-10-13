@@ -17,6 +17,14 @@ int main(void){
     pn_frame_t frame;assert(pn_frame_bind(&frame,pixels,PN_HW_FRAME_BYTES,684,1216));
     for(unsigned i=0;i<PN_HW_FRAME_BYTES;i++)pixels[i]=copy[i]=(uint8_t)(i*19u);
     pn_font_t font={0};pn_text_source_t source=pn_font_builtin_source();assert(pn_font_open(&font,&pool,&source,34)==PN_OK);
+    // 正文的末行必须完整位于正文更新区；进度圆点不能跨入该区。/ The last text line stays in the body update; the progress knob must not cross into it.
+    assert(PN_READER_TOP+PN_READER_HEIGHT<=1152);
+    for(int basis=0;basis<=10000;basis+=5000){
+        pn_frame_clear(&frame,15);assert(pn_reader_footer_progress(&font,NULL,&frame,"","",basis)==PN_OK);
+        for(int y=PN_READER_FOOTER_Y;y<1152;y++)for(int x=0;x<684;x++)assert(pn_frame_get(&frame,x,y)==15);
+        bool ink=false;for(int y=1152;y<1170;y++)for(int x=0;x<684;x++)ink|=pn_frame_get(&frame,x,y)!=15;assert(ink);
+    }
+    memcpy(pixels,copy,PN_HW_FRAME_BYTES);
     assert(pn_reader_toolbar_present(&pool,&font,&frame,1,"保存失败，当前页保留",show,NULL)==PN_OK && calls==1 && !memcmp(copy,pixels,PN_HW_FRAME_BYTES));
     fail=true;assert(pn_reader_toolbar_present(&pool,&font,&frame,1,NULL,show,NULL)==PN_IO && calls==2 && !memcmp(copy,pixels,PN_HW_FRAME_BYTES));
     pool.fail_at=pool.attempts+1;assert(pn_reader_toolbar_present(&pool,&font,&frame,1,NULL,show,NULL)==PN_NO_MEMORY && calls==2 && !memcmp(copy,pixels,PN_HW_FRAME_BYTES));

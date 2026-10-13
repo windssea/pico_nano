@@ -6,6 +6,7 @@
  * English: reading-page footer and toolbar, see pn_reader_chrome.h.
  */
 #include "pn_reader_chrome.h"
+#include "pn_brand.h"
 #include <string.h>
 #define TOOL_COUNT 6
 #define SHEET_PADDING 32
@@ -22,9 +23,9 @@ pn_status_t pn_reader_footer_progress(pn_font_t *ui,pn_font_t *fallback,pn_frame
     // 进度轨：细灰轨、黑色已读段与小圆点；没有进度时退回一条细线。/ Progress track: a thin gray rail, a black read part and a small knob; a plain hairline without progress.
     if(basis>=0 && basis<=10000){
         int track=PN_UI_WIDTH-2*PN_UI_MARGIN,fill=track*basis/10000;
-        pn_w_round_fill(frame,PN_UI_MARGIN,PN_READER_FOOTER_Y+8,track,4,2,10);
-        if(fill>0)pn_w_round_fill(frame,PN_UI_MARGIN,PN_READER_FOOTER_Y+8,fill,4,2,PN_UI_INK);
-        pn_w_dot(frame,(float)(PN_UI_MARGIN+fill),(float)(PN_READER_FOOTER_Y+10),7.0f,PN_UI_INK);
+        pn_w_round_fill(frame,PN_UI_MARGIN,PN_READER_FOOTER_BAND_Y+6,track,4,2,10);
+        if(fill>0)pn_w_round_fill(frame,PN_UI_MARGIN,PN_READER_FOOTER_BAND_Y+6,fill,4,2,PN_UI_INK);
+        pn_w_dot(frame,(float)(PN_UI_MARGIN+fill),(float)(PN_READER_FOOTER_BAND_Y+8),7.0f,PN_UI_INK);
     }else pn_frame_rect(frame,PN_UI_MARGIN,PN_READER_FOOTER_Y,PN_UI_WIDTH-2*PN_UI_MARGIN,2,PN_UI_RULE);
     pn_w_set_fallback(fallback);
     pn_status_t status=pn_font_size(ui,26);
@@ -68,4 +69,16 @@ int pn_reader_toolbar_hit(int x,int y,unsigned unavailable){
         if(x>=bx && x<bx+BUTTON_W && y>=by && y<by+BUTTON_H)return (unavailable&(1u<<i))?-1:(int)(PN_TOOL_TOC+i);
     }
     return -1;
+}
+pn_status_t pn_reader_loading_render(pn_font_t *ui,pn_frame_t *frame,const char *title){
+    if(!ui || !ui->impl || !frame || !frame->pixels || !title)return PN_INVALID;
+    int original=ui->pixels;pn_frame_clear(frame,PN_UI_PAPER);
+    pn_status_t status=pn_font_size(ui,28);
+    if(status==PN_OK)status=pn_w_text(ui,frame,PN_BRAND_NAME,32,72,620,PN_ALIGN_LEFT);
+    if(status==PN_OK)status=pn_font_size(ui,40);
+    if(status==PN_OK)status=pn_w_text(ui,frame,"正在打开书籍",32,500,620,PN_ALIGN_CENTER);
+    if(status==PN_OK)status=pn_font_size(ui,28);
+    if(status==PN_OK)status=pn_w_text(ui,frame,title,32,570,620,PN_ALIGN_CENTER);
+    if(status==PN_OK)status=pn_w_text(ui,frame,"请稍候，请勿重复点击",32,650,620,PN_ALIGN_CENTER);
+    pn_status_t restored=pn_font_size(ui,original);return status==PN_OK?restored:status;
 }

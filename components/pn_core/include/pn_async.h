@@ -19,6 +19,7 @@ typedef struct {
     pn_async_event_t controls[PN_ASYNC_CONTROLS],navigation; ///< 有界边沿与唯一待执行导航 / Bounded edges and sole pending navigation
     unsigned first,count; ///< 队列首及长度 / Queue head and length
     bool has_navigation,overflow; ///< 待执行导航与溢出取消指针标记 / Pending navigation and overflow pointer-reset flag
+    bool controls_blocked; ///< 开书期间仅接纳紧急导航，由guard保护 / Only urgent navigation is admitted during opening; protected by guard
     uint64_t coalesced,dropped; ///< 合并与丢弃计数 / Coalesced and dropped counts
 } pn_async_t;
 typedef struct {
@@ -36,3 +37,5 @@ pn_status_t pn_async_take(pn_async_t *queue,pn_async_event_t *event);
 void pn_async_begin(pn_async_t *queue,pn_async_scope_t *scope,bool idle);
 /// 结束工作并恢复外层范围。/ End work and restore the outer scope.
 void pn_async_end(pn_async_scope_t *scope);
+/// 开书控制门：进入时丢弃已有普通事件，保留紧急导航；不中断当前worker。/ Opening gate drops ordinary pending events, retaining urgent navigation without cancelling the current worker.
+void pn_async_block_controls(pn_async_t *queue,bool blocked);

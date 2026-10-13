@@ -17,8 +17,8 @@ extern const char *pn_stub_wifi_event;
 #define WPA3_SAE_PWE_BOTH 3
 typedef enum {WIFI_MODE_STA=1,WIFI_MODE_AP} wifi_mode_t;
 typedef enum {WIFI_IF_AP,WIFI_IF_STA} wifi_interface_t;
-typedef struct {int nvs_enable;} wifi_init_config_t;
-#define WIFI_INIT_CONFIG_DEFAULT() ((wifi_init_config_t){.nvs_enable=1})
+typedef struct {int nvs_enable,static_rx_buf_num,dynamic_rx_buf_num,static_tx_buf_num,dynamic_tx_buf_num,rx_ba_win,mgmt_sbuf_num;} wifi_init_config_t;
+#define WIFI_INIT_CONFIG_DEFAULT() ((wifi_init_config_t){.nvs_enable=1,.static_rx_buf_num=10,.dynamic_rx_buf_num=32,.static_tx_buf_num=16,.dynamic_tx_buf_num=32,.rx_ba_win=6,.mgmt_sbuf_num=32})
 typedef union {struct {uint8_t ssid[32],password[64];unsigned ssid_len,channel,max_connection,authmode,pairwise_cipher;} ap;struct {uint8_t ssid[32],password[64];struct {int authmode;} threshold;struct {bool capable,required;} pmf_cfg;int sae_pwe_h2e;} sta;} wifi_config_t;
 esp_err_t esp_wifi_get_mode(wifi_mode_t *);
 esp_err_t esp_wifi_init(const wifi_init_config_t *);

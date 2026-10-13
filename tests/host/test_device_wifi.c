@@ -45,7 +45,7 @@ esp_err_t esp_netif_get_ip_info(esp_netif_t *netif,esp_netif_ip_info_t *out){ass
 esp_err_t esp_event_handler_instance_register(esp_event_base_t base,int32_t id,esp_event_handler_t handler,void *ctx,esp_event_handler_instance_t *instance){(void)id;if(!strcmp(base,WIFI_EVENT)){wifi_handler=handler;wifi_context=ctx;*instance=&wifi_handler;}else{ip_handler=handler;ip_context=ctx;*instance=&ip_handler;}return ESP_OK;}
 esp_err_t esp_event_handler_instance_unregister(esp_event_base_t base,int32_t id,esp_event_handler_instance_t instance){(void)id;(void)instance;if(!strcmp(base,WIFI_EVENT))wifi_handler=NULL;else ip_handler=NULL;return ESP_OK;}
 esp_err_t esp_wifi_get_mode(wifi_mode_t *out){if(!initialized)return ESP_ERR_WIFI_NOT_INIT;*out=mode;return ESP_OK;}
-esp_err_t esp_wifi_init(const wifi_init_config_t *cfg){assert(!entropy && !cfg->nvs_enable);initialized=true;return ESP_OK;}
+esp_err_t esp_wifi_init(const wifi_init_config_t *cfg){assert(!entropy && !cfg->nvs_enable);assert(cfg->static_rx_buf_num==4 && cfg->dynamic_rx_buf_num==8 && cfg->static_tx_buf_num==4 && cfg->dynamic_tx_buf_num==8 && cfg->rx_ba_win==4 && cfg->mgmt_sbuf_num==8);initialized=true;return ESP_OK;}
 esp_err_t esp_wifi_set_storage(int storage){assert(storage==WIFI_STORAGE_RAM);return ESP_OK;}
 esp_err_t esp_wifi_set_mode(wifi_mode_t value){mode=value;return ESP_OK;}
 esp_err_t esp_wifi_set_config(wifi_interface_t iface,const wifi_config_t *value){(void)iface;config=*value;return ESP_OK;}

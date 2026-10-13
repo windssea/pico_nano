@@ -23,5 +23,13 @@ int main(void){
  producer_t p={.queue=&q};atomic_init(&p.done,false);thrd_t thread;assert(thrd_create(&thread,produce,&p)==thrd_success);unsigned last=0;
  do{pn_status_t s=pn_async_take(&q,&e);assert(s==PN_OK || s==PN_EMPTY);if(s==PN_OK){assert(value(e)>last);last=value(e);}}while(!atomic_load(&p.done));
  thrd_join(thread,NULL);if(pn_async_take(&q,&e)==PN_OK)last=value(e);assert(last==10000);
+ // 开书门清除旧普通事件，连点不能重开；紧急返回仍保留。/ Opening clears old ordinary events and repeated taps; urgent Back remains available.
+ pn_async_init(&q);e=event(1,false,false);pn_async_send(&q,&e);e=event(2,true,false);pn_async_send(&q,&e);
+ pn_async_block_controls(&q,true);
+ for(unsigned i=0;i<10;i++){e=event(i,false,true);assert(pn_async_send(&q,&e)==PN_OK);}
+ e=event(72,true,true);pn_async_send(&q,&e);assert(pn_async_take(&q,&e)==PN_OK && value(e)==72);
+ assert(pn_async_take(&q,&e)==PN_EMPTY && q.dropped>=12);
+ pn_async_block_controls(&q,false);
+ e=event(3,false,false);pn_async_send(&q,&e);assert(pn_async_take(&q,&e)==PN_OK && value(e)==3);
  puts("async: bounded/coalesced, urgent priority, cancellation barriers and producer concurrency passed");return 0;
 }

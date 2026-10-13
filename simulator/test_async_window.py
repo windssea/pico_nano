@@ -28,5 +28,6 @@ with tempfile.TemporaryDirectory() as folder:
  (books/'a.txt').write_bytes(b'Large cancellable original content.\n'*(20*1024*1024//36))
  cold=subprocess.run([sys.argv[1],'--library',str(books),'--state-dir',str(root/'cold')],env=dict(os.environ,SDL_VIDEODRIVER='dummy',PN_SIM_LIBRARY_SCRIPT='library,race-open-home:20,wait:300,quit',PN_SIM_PRESENT_DELAY_MS='600',PN_SIM_TIMING='1'),capture_output=True,text=True,timeout=35)
  assert cold.returncode==0 and 'used=0 live=0' in cold.stdout and 'library_open name=a.txt' not in cold.stdout and 'shelf_open_failed' not in cold.stdout,(cold.stdout,cold.stderr)
- assert re.search(r'async capture key=104 pending=0',cold.stderr),(cold.stdout,cold.stderr)
+ # 冷开可在加载画面交接前或期间取消，均不能发布正文。/ Cold opening may cancel before or during loading handoff, never publishing body content.
+ assert re.search(r'async capture key=104 pending=[01]',cold.stderr) and 'opening end status=8' in cold.stdout,(cold.stdout,cold.stderr)
  print(f'Async SDL: 40 captured turns -> {len(turns)} executed, {coalesced} coalesced; Home/More captured during pending display; save barriers and release passed')

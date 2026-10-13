@@ -15,7 +15,7 @@
 #include <unistd.h>
 static pn_status_t short_read(void *ctx,uint64_t at,uint8_t *out,size_t cap,size_t *n){const char *text=ctx;if(at>=strlen(text) || !cap)return PN_IO;*out=(uint8_t)text[at];*n=1;return PN_OK;}
 static pn_status_t invalid_read(void *ctx,uint64_t at,uint8_t *out,size_t cap,size_t *n){(void)ctx;(void)at;(void)out;*n=cap+1;return PN_OK;}
-static pn_status_t failed_accelerator(void *ctx,uint64_t size,pn_identity_read_fn read,pn_book_id_t *out){(void)ctx;assert(size==3 && read==short_read);memset(out,0,sizeof *out);return PN_IO;}
+static pn_status_t failed_accelerator(void *ctx,uint64_t size,pn_identity_read_fn read,uint8_t *buffer,size_t capacity,pn_book_id_t *out){(void)ctx;assert(size==3 && read==short_read && buffer && capacity==4096);memset(out,0,sizeof *out);return PN_IO;}
 static void write_bytes(const char *path, const char *bytes, size_t n) {
     FILE *f=fopen(path,"wb"); assert(f); assert(fwrite(bytes,1,n,f)==n); assert(fclose(f)==0);
 }

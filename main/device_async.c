@@ -27,7 +27,9 @@ static void input_task(void *ctx){
         if(p->hardware->touch_ready && view){cst836u_touch_t touch={0};bool valid=cst836u_read(p->hardware->touch,&touch)==ESP_OK;
             int key=-1;pn_key_event_t ke=pn_key_feed(&keys,touch.count,touch.x,touch.y,valid,now,&key);
             bool body=atomic_load(&p->body);unsigned flags=atomic_load(&p->flags);
-            if(ke!=PN_KEY_NONE && (!body || !(flags&PN_INPUT_NO_KEYS) || key==PN_KEY_2)){pn_device_input_event_t e={.kind=PN_DASYNC_KEY,.at=now,.key=key,.key_event=ke};send(p,&e,body || key==PN_KEY_1 || key==PN_KEY_2,key==PN_KEY_2 || (!body && key==PN_KEY_1));}
+            if((view&0xffffu)==18u){
+                if(ke==PN_KEY_SHORT && (key==PN_KEY_1 || key==PN_KEY_2)){pn_device_input_event_t e={.kind=PN_DASYNC_OPEN_CANCEL,.at=now,.key=key,.key_event=ke};send(p,&e,true,true);}
+            }else if(ke!=PN_KEY_NONE && (!body || !(flags&PN_INPUT_NO_KEYS) || key==PN_KEY_2)){pn_device_input_event_t e={.kind=PN_DASYNC_KEY,.at=now,.key=key,.key_event=ke};send(p,&e,body || key==PN_KEY_1 || key==PN_KEY_2,key==PN_KEY_2 || (!body && key==PN_KEY_1));}
             reader.config=(pn_reader_input_config_t){.left_hand=(flags&PN_INPUT_LEFT_HAND)!=0,.no_swipe=(flags&PN_INPUT_NO_SWIPE)!=0,.no_edge_tap=(flags&PN_INPUT_NO_EDGE_TAP)!=0,.no_keys=true};
             pn_reader_action_t action;if(atomic_load(&p->body) && pn_reader_input_feed(&reader,touch.count,touch.x,touch.y,valid,&action)){pn_device_input_event_t e={.kind=PN_DASYNC_ACTION,.at=now,.action=action};send(p,&e,true,action==PN_APP_TOOLS);}
             // 两个空边沿保证抬起识别；持有每100ms保留一次，避免邮箱被10ms采样淹没。/ Two empty edges detect release; held samples are capped at 100 ms to avoid flooding the mailbox.

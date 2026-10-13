@@ -315,13 +315,14 @@ static pn_status_t page(library_t *s,bool previous,bool first){
     }else if(status==PN_OK)status=PN_EMPTY;
     pn_free(next);return status;
 }
-static pn_status_t open_item(library_t *s,const pn_catalog_item_t *book,uint64_t now){
+static pn_status_t open_item_impl(library_t *s,const pn_catalog_item_t *book,uint64_t now){
     if(book->format!=PN_BOOK_TXT && book->format!=PN_BOOK_EPUB){pn_sdl_async_title(&s->async,PN_BRAND_NAME " - 此格式尚未接入");return PN_EMPTY;}
     pn_status_t status;
     // 进入阅读后不再使用书架备份，先释放，给首章图片留出解码预算。/ The shelf backup is unused after entering reading; release it before decoding first-section images.
     s->covers_inactive=true;
     s->open_failed=false;pn_free(s->page_px);s->page_px=NULL;
     pn_wallpaper_mask_close(&s->reading_mask);
+    if(s->font.impl && s->frame.pixels){status=pn_reader_loading_render(&s->font,&s->frame,book->name);if(status==PN_OK)status=present(s,&s->frame,PN_REFRESH_GL16);if(status==PN_CANCELLED)return status;}
     if(book->format==PN_BOOK_EPUB){pn_font_close(&s->font);pn_free(s->frame.pixels);s->frame.pixels=NULL;status=pn_epub_app_open_on_media(&s->epub,s->pool,&s->media,book->path,s->font_path,s->state_dir,32,now);}
     else status=pn_reader_app_open_on_media(&s->reader,s->pool,&s->media,book->path,s->font_path,s->state_dir,32,now);
     fprintf(stderr,"library_open prepare name=%s status=%d pool=%zu/%zu\n",book->name,(int)status,s->pool->used,s->pool->limit);
@@ -350,6 +351,12 @@ static pn_status_t open_item(library_t *s,const pn_catalog_item_t *book,uint64_t
     else if(reading(s)){s->open_failed=status!=PN_CANCELLED;pn_status_t closed=active_close(s,now);if(closed==PN_OK && status!=PN_CANCELLED){(void)draw(s);printf("shelf_open_failed status=%d notice=1\n",(int)status);}}
     else{s->open_failed=status!=PN_CANCELLED;if(status!=PN_CANCELLED){(void)draw(s);printf("shelf_open_failed status=%d notice=1\n",(int)status);}}
     return status;
+}
+static pn_status_t open_item(library_t *s,const pn_catalog_item_t *book,uint64_t now){
+    pn_async_block_controls(&s->async.input,true);pn_sdl_async_title(&s->async,PN_BRAND_NAME " - 正在打开书籍");
+    printf("opening begin name=%s\n",book->name);pn_status_t status=open_item_impl(s,book,now);
+    pn_async_block_controls(&s->async.input,false);pn_sdl_async_title(&s->async,PN_BRAND_NAME);
+    printf("opening end status=%d\n",(int)status);return status;
 }
 static pn_status_t open_book(library_t *s,int selected,uint64_t now){
     if(selected<0 || (size_t)selected>=s->page->count)return PN_EMPTY;

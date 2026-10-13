@@ -102,6 +102,7 @@ add_test(NAME font_picker_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_S
 add_test(NAME brand_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_brand_window.py $<TARGET_FILE:pn_sim>)
 add_test(NAME management_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_management_window.py $<TARGET_FILE:pn_sim>)
 add_test(NAME async_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_async_window.py $<TARGET_FILE:pn_sim>)
+add_test(NAME opening_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_opening_window.py $<TARGET_FILE:pn_sim>)
 add_test(NAME persistent_index_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_persistent_index_window.py $<TARGET_FILE:pn_sim>)
 set_tests_properties(async_window PROPERTIES LABELS "reader;ui;async")
 set_tests_properties(brand_window PROPERTIES LABELS "ui")

@@ -48,6 +48,13 @@ int main(void){
  while(ms()<end && !middle){if(pn_device_async_take(&p,&e)==PN_OK && e.kind==PN_DASYNC_KEY){assert(e.key==PN_KEY_2 && e.key_event==PN_KEY_SHORT);middle=true;}else vTaskDelay(1);}assert(middle);
  atomic_store(&x,80);atomic_store(&count,1);vTaskDelay(35);atomic_store(&count,0);vTaskDelay(40);while(pn_device_async_take(&p,&e)!=PN_EMPTY)assert(e.kind!=PN_DASYNC_KEY || e.key!=PN_KEY_1);
  assert(pn_device_async_pause(&p,true));unsigned reads=atomic_load(&touch_reads);vTaskDelay(25);assert(atomic_load(&touch_reads)==reads);assert(pn_device_async_pause(&p,false));vTaskDelay(25);assert(atomic_load(&touch_reads)>reads);
+ // 开书中的返回键必须保留取消语义，不能在正文/书架恢复后变成翻页或确认。/ Back during opening must retain cancellation semantics after the body/shelf context changes.
+ while(pn_device_async_take(&p,&e)!=PN_EMPTY){}
+ pn_device_async_view(&p,18,false,0);pn_async_block_controls(&p.input,true);
+ atomic_store(&x,80);atomic_store(&y,1300);atomic_store(&count,1);vTaskDelay(35);atomic_store(&count,0);
+ bool opening_back=false;end=ms()+1000;
+ while(ms()<end && !opening_back){if(pn_device_async_take(&p,&e)==PN_OK && e.key_event==PN_KEY_SHORT && e.key==PN_KEY_1){assert(e.kind==PN_DASYNC_OPEN_CANCEL);opening_back=true;}else vTaskDelay(1);}assert(opening_back);
+ pn_async_block_controls(&p.input,false);
  // 旧管理帧的点击被丢弃，成功回执推进代次。/ Discard clicks from old management frames; successful receipts advance their revision.
  while(pn_device_async_take(&p,&e)!=PN_EMPTY){}
  pn_device_async_view(&p,8,false,0);pn_async_event_t stale={.bytes=sizeof e,.view=atomic_load(&p.input.view)};memcpy(stale.payload,&e,sizeof e);pn_async_send(&p.input,&stale);p.revision++;pn_device_async_view(&p,8,false,0);assert(pn_device_async_take(&p,&e)==PN_CANCELLED);

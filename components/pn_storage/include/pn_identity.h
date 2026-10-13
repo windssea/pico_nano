@@ -8,6 +8,7 @@
  */
 #pragma once
 #include "pn_storage.h"
+#include "pn_alloc.h"
 typedef struct {
     uint8_t sha256[32]; ///< 完整原文件摘要 / Full original-file digest
 } pn_book_id_t;
@@ -20,9 +21,13 @@ pn_status_t pn_identity_file(pn_media_t *media, const pn_media_lease_t *lease,
 pn_status_t pn_identity_bytes(const uint8_t *,size_t,pn_book_id_t *);
 /// 有界流式读取回调；每次必须返回1..capacity字节。/ Bounded streaming reader; each call must return 1..capacity bytes.
 typedef pn_status_t (*pn_identity_read_fn)(void *,uint64_t,uint8_t *,size_t,size_t *);
-/// 可选硬件摘要端口；启动时安装，保留完整SHA与失败不改输出契约。/ Optional hardware digest port; install at startup, preserving full SHA and unchanged output on failure.
-typedef pn_status_t (*pn_identity_stream_port_fn)(void *,uint64_t,pn_identity_read_fn,pn_book_id_t *);
+/// 可选硬件摘要端口；仅同步借用buffer/capacity，启动时安装，保留完整SHA与失败不改输出契约。
+/// Optional hardware digest port borrowing buffer/capacity only during the call; install at startup, preserving full SHA and unchanged output on failure.
+typedef pn_status_t (*pn_identity_stream_port_fn)(void *,uint64_t,pn_identity_read_fn,uint8_t *,size_t,pn_book_id_t *);
 /// NULL恢复同源软件实现；不可在摘要运行期间修改。/ NULL restores shared software hashing; never change while hashing.
 void pn_identity_stream_port(pn_identity_stream_port_fn);
 /// 对精确长度流计算摘要；调用方排除变更并在read中验证介质。/ Hash an exact-length stream; caller excludes mutation and checks media in read.
 pn_status_t pn_identity_stream(void *,uint64_t,pn_identity_read_fn,pn_book_id_t *);
+/// 临时32KiB缓冲计入pool，用后释放；准入失败退回4KiB，完整校验/取消和错误输出契约不变。
+/// Charge a temporary 32 KiB buffer to pool and release it afterwards; fall back to 4 KiB while preserving complete hashing, cancellation and error output.
+pn_status_t pn_identity_stream_pooled(pn_pool_t *,void *,uint64_t,pn_identity_read_fn,pn_book_id_t *);

@@ -16,6 +16,9 @@
 #include "esp_timer.h"
 #include "esp_random.h"
 #include "esp_heap_caps.h"
+#ifdef ESP_PLATFORM
+#include "esp_log.h"
+#endif
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "cJSON.h"
@@ -77,7 +80,12 @@ static esp_err_t send_data(httpd_req_t *r,unsigned status,const char *mime,const
  httpd_resp_set_status(r,value);httpd_resp_set_type(r,mime);
  httpd_resp_set_hdr(r,"Cache-Control","no-store");httpd_resp_set_hdr(r,"X-Content-Type-Options","nosniff");httpd_resp_set_hdr(r,"Connection","close");
  httpd_resp_set_hdr(r,"Content-Security-Policy","default-src 'self'; script-src 'self'; style-src 'self'; worker-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'");
- esp_err_t result=httpd_resp_send(r,data,(int)n);return status>=400?ESP_FAIL:result;
+ esp_err_t result=httpd_resp_send(r,data,(int)n);
+#ifdef ESP_PLATFORM
+ // 只记录响应结果与内存，不记录URL查询、令牌或用户内容。/ Record response results and memory only, never URL queries, tokens or user content.
+ if(result!=ESP_OK){int socket_error=errno;ESP_LOGW("pn_http","response failed status=%u bytes=%zu result=%d errno=%d internal_free=%zu largest=%zu",status,n,(int)result,socket_error,heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));}
+#endif
+ return status>=400?ESP_FAIL:result;
 }
 static esp_err_t error(httpd_req_t *r,unsigned status,const char *message){char bytes[384];int n=snprintf(bytes,sizeof bytes,"{\"message\":\"%s\"}",message);return send_data(r,status,"application/json; charset=utf-8",bytes,(size_t)n);}
 static esp_err_t json_send(httpd_req_t *r,unsigned status,cJSON *json,bool valid){
@@ -363,7 +371,8 @@ pn_status_t pn_device_transfer_http_open(pn_device_transfer_http_t *out,pn_trans
  s->port=port;uint8_t fingerprint[16];esp_fill_random(fingerprint,sizeof fingerprint);encode(fingerprint,16,s->fingerprint);
  if(pn_pool_init(&s->ls_pool,128u*1024u,ls_allocate,ls_release,NULL)!=0 || pn_ls_session_open(&s->ls,&s->ls_pool,ls_entropy,NULL)!=PN_OK){vSemaphoreDelete(s->auth);heap_caps_free(s);return PN_NO_MEMORY;}
  uint32_t value;do{esp_fill_random(&value,sizeof value);}while(value>=UINT32_MAX-UINT32_MAX%1000000u);snprintf(s->pin,sizeof s->pin,"%06u",(unsigned)(value%1000000u));uint8_t token[16];esp_fill_random(token,16);encode(token,16,s->token);s->created=now_ms();
- httpd_config_t cfg=HTTPD_DEFAULT_CONFIG();cfg.server_port=port;cfg.ctrl_port=32768;cfg.stack_size=16384;cfg.max_req_hdr_len=2048;cfg.max_uri_len=1024;cfg.max_open_sockets=4;cfg.max_uri_handlers=4;cfg.max_resp_headers=6;cfg.recv_wait_timeout=10;cfg.send_wait_timeout=10;cfg.uri_match_fn=httpd_uri_match_wildcard;
+ // 接收owner串行处理文件；限制两条连接并回收闲置连接，避免浏览器连接挤尽内部网络内存。/ The receiving owner serializes files; cap connections at two and purge idle connections to preserve internal network memory.
+ httpd_config_t cfg=HTTPD_DEFAULT_CONFIG();cfg.server_port=port;cfg.ctrl_port=32768;cfg.stack_size=16384;cfg.max_req_hdr_len=2048;cfg.max_uri_len=1024;cfg.max_open_sockets=2;cfg.lru_purge_enable=true;cfg.max_uri_handlers=4;cfg.max_resp_headers=6;cfg.recv_wait_timeout=10;cfg.send_wait_timeout=10;cfg.uri_match_fn=httpd_uri_match_wildcard;
  cfg.global_user_ctx=s;cfg.global_user_ctx_free_fn=keep_context;cfg.open_fn=opened;
  esp_err_t result=httpd_start(&s->server,&cfg);out->impl=s;
  if(result==ESP_OK){const int methods[]={HTTP_GET,HTTP_POST,HTTP_PUT,HTTP_DELETE};for(unsigned i=0;i<4;i++){httpd_uri_t uri={.uri="/*",.method=methods[i],.handler=dispatch,.user_ctx=s};result=httpd_register_uri_handler(s->server,&uri);if(result!=ESP_OK)break;}}

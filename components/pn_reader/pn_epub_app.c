@@ -228,7 +228,7 @@ static pn_status_t pn_epub_app_open_on_media_impl(pn_epub_app_t *app,pn_pool_t *
     if(status==PN_OK)status=pn_media_acquire(a->media,PN_MEDIA_READ,&a->book_lease);
     pn_text_source_t source;
     if(status==PN_OK)status=pn_text_file_open(&a->book_file,a->media,&a->book_lease,book,&source);
-    if(status==PN_OK)status=pn_identity_stream(source.ctx,source.size,source.read_at,&a->book);
+    if(status==PN_OK)status=pn_identity_stream_pooled(pool,source.ctx,source.size,source.read_at,&a->book);
 #ifdef ESP_PLATFORM
     if(status==PN_OK)esp_fill_random(a->salt,sizeof a->salt);
 #else

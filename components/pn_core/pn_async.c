@@ -8,6 +8,7 @@ void pn_async_init(pn_async_t *q){memset(q,0,sizeof *q);atomic_flag_clear(&q->gu
 pn_status_t pn_async_send(pn_async_t *q,const pn_async_event_t *e){
     if(!q || !e || !e->bytes || e->bytes>PN_ASYNC_PAYLOAD)return PN_INVALID;
     lock(q);
+    if(q->controls_blocked && !(e->navigation && e->urgent)){q->dropped++;unlock(q);return PN_OK;}
     if(e->urgent || atomic_load_explicit(&q->background,memory_order_acquire))atomic_fetch_add_explicit(&q->epoch,1,memory_order_release);
     if(e->navigation){if(q->has_navigation)q->coalesced++;if(!q->has_navigation || !q->navigation.urgent || e->urgent)q->navigation=*e;q->has_navigation=true;}
     else if(q->count<PN_ASYNC_CONTROLS){q->controls[(q->first+q->count)%PN_ASYNC_CONTROLS]=*e;q->count++;}
@@ -32,3 +33,10 @@ void pn_async_begin(pn_async_t *q,pn_async_scope_t *s,bool idle){
     unlock(q);pn_cancel_enter(&s->cancel,cancelled,s);
 }
 void pn_async_end(pn_async_scope_t *s){pn_cancel_leave(&s->cancel);atomic_store_explicit(&s->owner->background,false,memory_order_release);}
+void pn_async_block_controls(pn_async_t *q,bool blocked){
+    if(!q)return;
+    lock(q);q->controls_blocked=blocked;
+    if(blocked){q->dropped+=q->count;q->count=0;q->first=0;q->overflow=false;
+        if(q->has_navigation && !q->navigation.urgent){q->has_navigation=false;q->dropped++;}}
+    unlock(q);
+}

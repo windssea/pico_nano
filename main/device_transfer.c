@@ -17,6 +17,7 @@
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 #include "esp_heap_caps.h"
+#include "esp_log.h"
 #else
 #include <pthread.h>
 #include <stdlib.h>
@@ -70,6 +71,14 @@ static pn_status_t sink_status(void *ctx,char ssid[PN_NETWORK_SSID_MAX+1],bool *
  transfer_t *s=ctx;lock(s);memcpy(ssid,s->saved_ssid,PN_NETWORK_SSID_MAX+1);*pending=s->inbox_full || s->saving;*last=s->network_last;unlock(s);return PN_OK;
 }
 static bool stopping(transfer_t *s){lock(s);bool value=s->stop;unlock(s);return value;}
+static void memory_stage(const char *phase){
+ (void)phase;
+#ifdef ESP_PLATFORM
+ ESP_LOGI("pn_transfer","phase=%s internal_free=%zu largest=%zu minimum=%zu",phase,heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
+#else
+ (void)phase;
+#endif
+}
 static pn_status_t cleanup(transfer_t *s){
  pn_status_t status=PN_OK;
  if(s->http.impl){status=pn_device_transfer_http_close(&s->http);if(status!=PN_OK)return status;}
@@ -78,10 +87,12 @@ static pn_status_t cleanup(transfer_t *s){
  return pn_media_active(s->media)?PN_BUSY:PN_OK;
 }
 static void run(transfer_t *s){
+ memory_stage("starting");
  pn_upload_files_options_t options;
  pn_status_t cause=pn_device_upload_storage_options(&s->storage,s->media,s->root,&options);
  if(cause==PN_OK && !stopping(s))cause=pn_transfer_worker_open(&s->worker,s->media,&options,6u*1024u*1024u,NULL,NULL,NULL);
  if(cause==PN_OK && !stopping(s))cause=pn_device_wifi_open(&s->wifi,&s->config);
+ memory_stage("wifi-open");
  volatile uint8_t *secret=(volatile uint8_t *)s->config.password;for(size_t i=0;i<sizeof s->config.password;i++)secret[i]=0;
  uint64_t network_generation=0;
  while(cause==PN_OK && !stopping(s)){
@@ -92,6 +103,7 @@ static void run(transfer_t *s){
   if(s->http.impl && (network.phase!=PN_WIFI_READY || network.generation!=network_generation)){cause=PN_STALE_JOB;break;}
   if(!s->http.impl && network.phase==PN_WIFI_READY && !stopping(s)){
    cause=pn_device_transfer_http_open(&s->http,&s->worker,network.address,80);
+   memory_stage("http-open");
    if(cause!=PN_OK)break;
    cause=pn_device_transfer_http_network(&s->http,&s->sink);
    if(cause!=PN_OK)break;
@@ -104,6 +116,9 @@ static void run(transfer_t *s){
   unlock(s);pause_task();
  }
  lock(s);s->stop=true;s->state.phase=PN_DTRANSFER_STOPPING;memset(s->state.pin,0,sizeof s->state.pin);unlock(s);
+#ifdef ESP_PLATFORM
+ ESP_LOGI("pn_transfer","stopping cause=%d",(int)cause);
+#endif
  if(s->http.impl)(void)pn_device_transfer_http_request_stop(&s->http);
  else if(s->worker.impl)(void)pn_transfer_worker_request_stop(&s->worker);
  for(;;){

@@ -1,8 +1,17 @@
 /* SPDX-License-Identifier: Apache-2.0
  * 中文：真实设备路由管理键与面板底图复用，硬件用现有启动桩。/ English: real device management routing and shelf-overlay reuse with existing boot stubs. */
 #define main boot_fixture_main
+#define pn_device_transfer_state boot_transfer_state
+#define pn_device_transfer_close boot_transfer_close
+#define pn_device_transfer_take_network boot_transfer_take_network
 #include "test_device_boot.c"
 #undef main
+#undef pn_device_transfer_state
+#undef pn_device_transfer_close
+#undef pn_device_transfer_take_network
+pn_status_t pn_device_transfer_state(pn_device_transfer_t *s,pn_device_transfer_state_t *out){assert(s->impl);*out=(pn_device_transfer_state_t){.released=true,.phase=PN_DTRANSFER_STOPPED};return PN_OK;}
+pn_status_t pn_device_transfer_close(pn_device_transfer_t *s){assert(s->impl);s->impl=NULL;return PN_OK;}
+pn_status_t pn_device_transfer_take_network(pn_device_transfer_t *s,pn_network_credentials_t *c,bool *f){(void)s;(void)c;(void)f;return PN_EMPTY;}
 #include "../../main/app_main.c"
 int main(void){
     assert(!pn_pool_init(&pool,3u*1024u*1024u,NULL,NULL,NULL));
@@ -39,10 +48,16 @@ int main(void){
     assert(present(NULL,&probe_frame,PN_REFRESH_GC16)==PN_OK && clear_calls==clean_before && gc_updates==gc_before+1);
     // 逻辑周期由阅读控制器决定，显示帧不再次计页；显式刷新与未知参考保留深清。/ Logical periods belong to the reader; display frames never count again, with deep cleaning kept for explicit/unknown references.
     atomic_store(&reading_presentation,true);gc_before=gc_updates;
+    unsigned full_before=area_full_calls,diff_before=area_diff_calls;
     for(unsigned i=0;i<6;i++){pn_frame_rect(&probe_frame,100+(int)i*4,300,4,4,0);assert(present(NULL,&probe_frame,PN_REFRESH_GL16)==PN_OK);}
     assert(clear_calls==clean_before && gc_updates==gc_before);atomic_store(&reading_presentation,false);
+    assert(area_full_calls==full_before+6 && area_diff_calls==diff_before+6);
+    assert(last_full_area.y==0 && last_full_area.height==1152 && last_diff_area.y==1152 && last_diff_area.height==64);
+    atomic_store(&reading_presentation,true);footer_fault=true;pn_frame_rect(&probe_frame,300,500,4,4,0);
+    assert(present(NULL,&probe_frame,PN_REFRESH_GL16)==PN_IO && !panel_known);footer_fault=false;atomic_store(&reading_presentation,false);
     // 管理第24次实际更新才GC；不变帧不占预算，周期不插入额外clear。/ GC on management update 24; unchanged frames spend no budget and periodic refresh adds no clear.
     assert(present(NULL,&probe_frame,PN_REFRESH_GC16)==PN_OK);gc_before=gc_updates;
+    clean_before=clear_calls;
     for(unsigned i=0;i<24;i++){
         for(unsigned repeat=0;repeat<3;repeat++)assert(present(NULL,&probe_frame,PN_REFRESH_GL16)==PN_OK);
         pn_frame_rect(&probe_frame,160+(int)i*4,400,4,4,0);assert(present(NULL,&probe_frame,PN_REFRESH_GL16)==PN_OK);
@@ -57,6 +72,17 @@ int main(void){
     assert(present(NULL,&probe_frame,PN_REFRESH_GL16)==PN_IO && !panel_known && atomic_load(&deep_clean_pending) && !atomic_load(&full_clean_completed));
     panel_fault=false;assert(present(NULL,&probe_frame,PN_REFRESH_GL16)==PN_OK && panel_known && !atomic_load(&deep_clean_pending) && atomic_load(&full_clean_completed));
     pn_free(probe_pixels);
+    // 异步关闭完成属于已提交的前台返回；残留抬手事件不能取消唯一的返回帧。/ Completed asynchronous shutdown commits a foreground return; a trailing touch release must not cancel its only return frame.
+    pn_async_init(&async_port.input);pn_async_scope_t stop_scope;pn_async_begin(&async_port.input,&stop_scope,true);
+    pn_device_input_event_t release={.kind=PN_DASYNC_TOUCH};pn_async_event_t event={.bytes=sizeof release};memcpy(event.payload,&release,sizeof release);
+    assert(pn_async_send(&async_port.input,&event)==PN_OK && pn_cancel_checkpoint()==PN_CANCELLED);
+    transfer.impl=(void *)1;transfer_return=true;management_home_pending=true;selected_path[0]=0;
+    gc_before=gc_updates;full_before=area_full_calls;tick_transfer(now_ms());
+    assert(!transfer.impl && (gc_updates>gc_before || area_full_calls>full_before));pn_async_end(&stop_scope);
+    // 前台返回不能吞掉已到达的紧急导航。/ Foreground return must not swallow pending urgent navigation.
+    pn_async_init(&async_port.input);event.navigation=true;event.urgent=true;assert(pn_async_send(&async_port.input,&event)==PN_OK);
+    transfer.impl=(void *)1;transfer_return=true;management_home_pending=true;gc_before=gc_updates;full_before=area_full_calls;
+    tick_transfer(now_ms());assert(!transfer.impl && gc_updates==gc_before && area_full_calls==full_before);
     pn_free(shown_px);pn_free(page_copy);pn_free(shelf_page);pn_free(shelf_covers);pn_free(recent_snapshot);pn_free(favorites);
     assert(!pool.used && !pool.live);return 0;
 }

@@ -41,7 +41,7 @@ void *xSemaphoreCreateMutex(void){pthread_mutex_t *p=malloc(sizeof *p);if(p)pthr
 int xSemaphoreTake(void *p,unsigned timeout){(void)timeout;return pthread_mutex_lock(p)==0;}
 int xSemaphoreGive(void *p){return pthread_mutex_unlock(p)==0;}
 void vSemaphoreDelete(void *p){pthread_mutex_destroy(p);free(p);}
-esp_err_t httpd_start(httpd_handle_t *h,const httpd_config_t *cfg){assert(cfg->max_uri_handlers>=4);*h=&route;global_context=cfg->global_user_ctx;open_socket=cfg->open_fn;return ESP_OK;}
+esp_err_t httpd_start(httpd_handle_t *h,const httpd_config_t *cfg){assert(cfg->max_uri_handlers>=4 && cfg->max_open_sockets==2 && cfg->lru_purge_enable);*h=&route;global_context=cfg->global_user_ctx;open_socket=cfg->open_fn;return ESP_OK;}
 void *httpd_get_global_user_ctx(httpd_handle_t h){assert(h==&route);return global_context;}
 esp_err_t httpd_sess_set_recv_override(httpd_handle_t h,int fd,httpd_recv_func_t callback){(void)fd;assert(h==&route);receive=callback;return ESP_OK;}
 esp_err_t httpd_stop(httpd_handle_t h){assert(h==&route);return http_stop_fails?ESP_FAIL:ESP_OK;}

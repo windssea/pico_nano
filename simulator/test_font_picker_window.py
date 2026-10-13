@@ -60,7 +60,8 @@ with tempfile.TemporaryDirectory() as directory:
    captures=sorted(frames.glob('*.pgm'))
    assert result.returncode==0 and 'used=0 live=0' in result.stdout,(result.stdout,result.stderr)
    # 关闭窗口会提交会话并绘制一次书库；之前必须恰好是最终排版页。/ Window close commits the session and paints Library once; the frame before it must be the final typesetting page.
-   assert len(captures)==total+1,(kind,name,len(captures),result.stdout)
+   # 开书新增一次loading，字体选择仍只显示预期的最终页。/ Opening adds one loading frame; font selection still shows only the expected final page.
+   assert len(captures)==total+2,(kind,name,len(captures),result.stdout)
    payload=captures[-2].read_bytes().split(b'\n',3)[3]
    assert payload[1140*684+100]==0,(kind,name,'final page must be typesetting Apply')
    if name=='direct':assert any(str(fonts/'b.ttf').encode() in record.read_bytes() for record in session.glob('*.fonts.*'))

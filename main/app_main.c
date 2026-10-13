@@ -109,6 +109,7 @@ static pn_style_ui_t styles;
 static pn_jump_ui_t jump_ui; ///< 进度跳转面板 / Progress jump panel
 static pn_font_ui_t fonts;
 static bool panel_known,data_ready,locked,status_page,shelf_mode;
+static bool opening; ///< 开书控制门，产品owner串行管理 / Opening gate owned by the serial product owner
 static atomic_bool deep_clean_pending; ///< 显式清屏意图，由显示owner消费 / Explicit cleaning intent consumed by the display owner
 static pn_catalog_index_t catalog_index;
 static bool recent_loaded;static uint64_t recent_epoch;
@@ -256,6 +257,12 @@ static pn_status_t present_panel(void *ctx,const pn_frame_t *frame,pn_refresh_t 
     if(!panel_known || deep_clean){reason=deep_clean?"manual":"unknown-reference";mode=MODE_GC16;epd_clear();result=epd_hl_update_screen_from_white(&hardware.hl,MODE_GC16,25);}
     // 已知参考帧的周期GC16直接全屏转换；无需先另做一次白场清除。/ Periodic GC16 with a known reference directly updates every pixel without an extra white-field clear.
     else if(mode==MODE_GC16)result=epd_hl_update_screen_full(&hardware.hl,MODE_GC16,25);
+    else if(body_refresh){
+        // 32列对齐分带，正文清理不反复驱动整条灰色进度轨；页脚只更新实际变化。/ Split on a 32-column boundary so body cleaning does not drive the full gray rail; update only footer differences.
+        const int footer_band=PN_READER_FOOTER_BAND_Y;
+        result=epd_hl_update_area_full(&hardware.hl,MODE_GL16,25,(EpdRect){0,0,684,footer_band});
+        if(result==EPD_DRAW_SUCCESS)result=epd_hl_update_area(&hardware.hl,MODE_GL16,25,(EpdRect){0,footer_band,684,1216-footer_band});
+    }
     else{
         EpdRect box=changed;int limit=actions_mode && !actions.confirming?60:PARTIAL_MAX_PERCENT;
         bool partial=!body_refresh && mode==MODE_GL16 && known && (long)box.width*box.height*100<=684L*1216L*limit;
@@ -525,7 +532,15 @@ static void show_shelf(const char *cursor,bool previous){
 }
 /// 缓存预算查询由设备port提供，不用TF大小推断内部状态容量。/ The device port reports cache capacity without inferring internal-state space from TF size.
 static pn_status_t index_space(void *ctx,uint64_t *available){(void)ctx;size_t total=0,used=0;if(esp_littlefs_info("data",&total,&used)!=ESP_OK || used>total)return PN_IO;*available=total-used;return PN_OK;}
-static void start_reader(void){
+static pn_status_t show_loading(const char *path){
+    uint8_t *pixels=pn_alloc_tagged(&pool,PN_MEM_FRAME,342u*1216u);pn_frame_t frame;pn_font_t font={0};pn_text_source_t source=pn_font_builtin_source();
+    pn_status_t status=pn_frame_bind(&frame,pixels,342u*1216u,684,1216)?pn_font_open(&font,&pool,&source,28):PN_NO_MEMORY;
+    const char *title=strrchr(path,'/');title=title?title+1:path;
+    if(status==PN_OK)status=pn_reader_loading_render(&font,&frame,title);
+    if(status==PN_OK)status=present(NULL,&frame,panel_known?PN_REFRESH_GL16:PN_REFRESH_GC16);
+    pn_font_close(&font);pn_free(pixels);return status;
+}
+static void start_reader_impl(void){
     if(transfer.impl)return;
     if(!stop_reader())return;
     pn_wallpaper_mask_close(&reading_mask);
@@ -548,6 +563,9 @@ static void start_reader(void){
     }
     const char *font=NULL;
     covers_inactive=true;
+    pn_status_t loading=show_loading(selected_path);
+    if(loading==PN_CANCELLED)return;
+    if(loading!=PN_OK)ESP_LOGW(TAG,"Opening feedback unavailable: %d",(int)loading);
     uint64_t opened_at=now_ms();(void)opened_at;
     pn_status_t status=selected_format==PN_BOOK_EPUB?pn_epub_app_open_on_media(&epub,&pool,&sd_media,selected_path,font,"/data/progress",44,now_ms()):pn_reader_app_open_on_media(&reader,&pool,&sd_media,selected_path,font,"/data/progress",44,now_ms());
     ESP_LOGI(TAG,"Book prepare format=%u status=%d elapsed=%llu ms",(unsigned)selected_format,(int)status,(unsigned long long)(now_ms()-opened_at));
@@ -566,9 +584,17 @@ static void start_reader(void){
         }
     }
     if(status==PN_OK)status=active_step(PN_APP_OPEN,now_ms());
+    if(status==PN_CANCELLED){pn_cancel_scope_t shield;pn_cancel_enter(&shield,NULL,NULL);if(stop_reader())show_shelf("",false);pn_cancel_leave(&shield);return;}
     if(status==PN_STALE_JOB){if(stop_reader()){recent_mode=false;selected_identified=false;selected_path[0]=0;message("书籍内容已改变","从全部书架重新选择\n历史记录仍保留");}return;}
     if(status!=PN_OK){ESP_LOGE(TAG,"Reader open/present failed: %d",(int)status);if(stop_reader())message("打开书籍失败","检查书籍或字体后重试");return;}
     locked=false;status_page=false;shelf_mode=false;
+}
+static void start_reader(void){
+    if(opening)return;
+    bool gate=*selected_path!=0 && !transfer.impl;
+    if(gate){opening=true;pn_async_block_controls(&async_port.input,true);pn_device_async_view(&async_port,18,false,input_flags);}
+    start_reader_impl();
+    if(gate){pn_async_block_controls(&async_port.input,false);opening=false;}
 }
 /// 挂载完成后继续原请求，失败保留重试入口；不在轮询中重新发起挂载。/ Continue the original request after mounting, keep Retry on failure, and never restart a mount from polling.
 static void tick_sd_recovery(uint64_t now){
@@ -679,9 +705,12 @@ static void tick_transfer(uint64_t now){
     memcpy(transfer_view.ssid,state.network.ssid,sizeof transfer_view.ssid);memcpy(transfer_view.password,state.network.ap_password,sizeof transfer_view.password);memcpy(transfer_view.pin,state.pin,sizeof transfer_view.pin);
     if(state.network.address[0])snprintf(transfer_view.address,sizeof transfer_view.address,"http://%s",state.network.address);
     if(state.released && transfer_return && pn_device_transfer_close(&transfer)==PN_OK){
+        // 关闭完成后前台返回；抬手等普通事件不能取消这次唯一重绘，紧急导航仍可取消。/ Return in the foreground after shutdown; ordinary release events cannot cancel the only redraw, while urgent navigation can.
+        pn_async_scope_t returned;pn_async_begin(&async_port.input,&returned,false);
         reading_menu=false;favorites_valid=false;recent_loaded=false;pn_catalog_index_invalidate(&catalog_index);
         if(management_home_pending){management_home_pending=false;home_mode=true;selected_path[0]=0;show_shelf("",false);}
         else if(transfer_lock)lock_and_sleep("传输已停止，按电源键继续阅读");else start_reader();
+        pn_async_end(&returned);
         return;
     }
     if(now-last_transfer_draw>=1000 && memcmp(&transfer_view,&last_transfer_view,sizeof transfer_view)){paint_transfer(false);last_transfer_draw=now;}
@@ -1064,6 +1093,7 @@ static void device_task(void *arg){
         pn_async_begin(&async_port.input,&scope,available==PN_EMPTY);scope_active=true;
         if(available==PN_CANCELLED){pn_reader_input_cancel(&input);pn_key_cancel(&keys);int ignored;(void)pn_tap_feed(&tap,1,-1,false,&ignored);hold_hit=-1;touch_held=false;}
         if(available==PN_OK){last_input=queued.at;if(queued.kind==PN_DASYNC_KEY && !locked)handle_key(queued.key,queued.key_event);
+            if(queued.kind==PN_DASYNC_OPEN_CANCEL && !locked){if(queued.key==PN_KEY_2){home_mode=true;selected_path[0]=0;}if(stop_reader())show_shelf("",false);}
             if(queued.kind==PN_DASYNC_ACTION && body && !locked){if(queued.action==PN_APP_TOOLS)toolbar_show();else{pn_status_t status=active_step(queued.action,now);report_reader_result(status);}}}
         if(!async_port.display_active)rails_idle_check(now);
         if(transfer.impl)tick_transfer(now);

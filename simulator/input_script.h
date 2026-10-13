@@ -21,6 +21,7 @@ static inline void script_queue(sim_script_t *script){
         if(sscanf(part,"burst:%u:next",&burst)==1 && burst>0 && burst<=100){event.key.keysym.sym=SDLK_RIGHT;script_expect(script,&event);for(unsigned i=0;i<burst;i++)(void)SDL_PushEvent(&event);script->pending=true;return;}
         if(sscanf(part,"race-next-home:%u",&wait)==1 && wait<=5000){event.key.keysym.sym=SDLK_RIGHT;script->future=event;script->future.key.keysym.sym=SDLK_h;script->future_at=SDL_GetTicks64()+wait;script_expect(script,&event);script->pending=SDL_PushEvent(&event)==1;return;}
         if(sscanf(part,"race-open-home:%u",&wait)==1 && wait<=5000){event.key.keysym.sym=SDLK_RETURN;script->future=event;script->future.key.keysym.sym=SDLK_h;script->future_at=SDL_GetTicks64()+wait;script_expect(script,&event);script->pending=SDL_PushEvent(&event)==1;return;}
+        if(sscanf(part,"race-open-duplicate:%u",&wait)==1 && wait<=5000){event.key.keysym.sym=SDLK_RETURN;script->future=event;script->future_at=SDL_GetTicks64()+wait;script_expect(script,&event);script->pending=SDL_PushEvent(&event)==1;return;}
         if(sscanf(part,"race-next-tools:%u",&wait)==1 && wait<=5000){event.key.keysym.sym=SDLK_RIGHT;script->future=event;script->future.key.keysym.sym=SDLK_k;script->future_at=SDL_GetTicks64()+wait;script_expect(script,&event);script->pending=SDL_PushEvent(&event)==1;return;}
         // wait:MS暂停投递，让空闲任务（如封面队列）运行。/ wait:MS pauses delivery so idle work such as the cover queue runs.
         if(sscanf(part,"wait:%u",&wait)==1 && wait<=60000){script->resume=SDL_GetTicks64()+wait;return;}

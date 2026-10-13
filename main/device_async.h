@@ -5,7 +5,7 @@
 #include "pn_reader_app.h"
 #include "pn_key.h"
 #include "read_pico.h"
-typedef enum {PN_DASYNC_TOUCH,PN_DASYNC_KEY,PN_DASYNC_ACTION,PN_DASYNC_POWER} pn_device_input_kind_t; ///< 输入种类 / Input kind
+typedef enum {PN_DASYNC_TOUCH,PN_DASYNC_KEY,PN_DASYNC_ACTION,PN_DASYNC_POWER,PN_DASYNC_OPEN_CANCEL} pn_device_input_kind_t; ///< 输入种类；开书取消保留原上下文语义 / Input kind; opening cancellation retains its original context semantics
 typedef struct {
     pn_device_input_kind_t kind; ///< 归一输入种类 / Normalized input kind
     uint64_t at; ///< 捕获时刻 / Capture time

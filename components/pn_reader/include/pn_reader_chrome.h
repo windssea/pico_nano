@@ -11,6 +11,7 @@
 #define PN_READER_TOP 32 ///< 正文区顶部y / Top y of the text area
 #define PN_READER_HEIGHT 1112 ///< 正文区高度 / Text area height
 #define PN_READER_FOOTER_Y 1144 ///< 页脚上沿y / Footer top y
+#define PN_READER_FOOTER_BAND_Y 1152 ///< 覆盖完整正文的32像素对齐刷新边界 / 32-pixel-aligned refresh boundary covering the complete text area
 #define PN_TOOLBAR_Y 896 ///< 工具栏上沿y，高度320 / Toolbar top y, height 320
 /// 工具栏入口，值同时是命中返回值。/ Toolbar entries; the values are also the hit-test results.
 typedef enum {
@@ -33,3 +34,5 @@ pn_status_t pn_reader_toolbar_render(pn_font_t *ui,pn_frame_t *frame,unsigned un
 /// 命中返回PN_TOOL_*；工具栏以上区域返回PN_TOOL_CLOSE；不可用入口返回-1。
 /// Hit test returning PN_TOOL_*; the area above the toolbar returns PN_TOOL_CLOSE; unavailable entries return -1.
 int pn_reader_toolbar_hit(int x,int y,unsigned unavailable);
+/// 静态开书反馈，不画假百分比；只绘制，由控制层管理输入门和显示回执。/ Paint static opening feedback without a fake percentage; controllers own input gating and display receipts.
+pn_status_t pn_reader_loading_render(pn_font_t *ui,pn_frame_t *frame,const char *title);

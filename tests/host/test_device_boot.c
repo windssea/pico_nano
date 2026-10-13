@@ -34,6 +34,7 @@ void app_main(void);
 static jmp_buf end;
 static void (*worker)(void *);
 static unsigned vcom_reads,presents,board_calls,mounts,poweroffs,pclk_calls,clear_calls,gc_updates;
+static unsigned area_full_calls,area_diff_calls;static EpdRect last_full_area,last_diff_area;static bool footer_fault;
 static int last_pclk;
 static bool underrun,panel_fault;
 static bool nvs_bad,vcom_bad,mount_bad,ready_bad;
@@ -51,7 +52,8 @@ void read_pico_epd_set_pclk(int mhz){pclk_calls++;last_pclk=mhz;}
 void epd_clear(void){clear_calls++;}
 enum EpdDrawError epd_hl_update_screen_from_white(EpdiyHighlevelState *h,enum EpdDrawMode m,int t){(void)h;(void)m;(void)t;presents++;if(panel_fault)return EPD_DRAW_FAILURE;if(underrun && presents==1)return EPD_DRAW_EMPTY_LINE_QUEUE;return EPD_DRAW_SUCCESS;}
 enum EpdDrawError epd_hl_update_screen_full(EpdiyHighlevelState *h,enum EpdDrawMode m,int t){if(m==MODE_GC16)gc_updates++;return epd_hl_update_screen_from_white(h,m,t);}
-enum EpdDrawError epd_hl_update_area_full(EpdiyHighlevelState *h,enum EpdDrawMode m,int t,EpdRect area){(void)area;return epd_hl_update_screen_from_white(h,m,t);}
+enum EpdDrawError epd_hl_update_area_full(EpdiyHighlevelState *h,enum EpdDrawMode m,int t,EpdRect area){area_full_calls++;last_full_area=area;return epd_hl_update_screen_from_white(h,m,t);}
+enum EpdDrawError epd_hl_update_area(EpdiyHighlevelState *h,enum EpdDrawMode m,int t,EpdRect area){area_diff_calls++;last_diff_area=area;if(footer_fault)return EPD_DRAW_FAILURE;return epd_hl_update_screen_from_white(h,m,t);}
 esp_err_t esp_vfs_littlefs_register(const esp_vfs_littlefs_conf_t *c){if(wake_idle && !strcmp(c->partition_label,"wallpaper"))return ESP_FAIL;mounts++;assert(!c->format_if_mount_failed && !c->grow_on_mount && !c->dont_mount && !c->read_only);assert(strcmp(c->base_path,"/data")==0 && strcmp(c->partition_label,"data")==0);return mount_bad?ESP_FAIL:ESP_OK;}
 esp_err_t esp_vfs_littlefs_unregister(const char *s){(void)s;return ESP_OK;}
 esp_err_t esp_littlefs_info(const char *s,size_t *total,size_t *used){(void)s;*total=1024*1024;*used=8192;return ESP_OK;}
