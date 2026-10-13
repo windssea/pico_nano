@@ -51,7 +51,7 @@ static pn_status_t header(index_t *i,const pn_media_lease_t *lease,FILE *f,size_
 pn_status_t pn_catalog_index_init(pn_catalog_index_t *h,pn_pool_t *pool,pn_media_t *media,const char *directory,const char *cache){
     if(!h || h->impl || !pool || !media || !directory || !cache || !*directory || !*cache)return PN_INVALID;
     if(strlen(directory)>=PN_CATALOG_PATH_MAX || strlen(cache)>PN_CATALOG_PATH_MAX-48)return PN_LIMIT;
-    index_t *i=pn_alloc(pool,sizeof *i);if(!i)return PN_NO_MEMORY;*i=(index_t){.pool=pool,.media=media,.wanted=true,.epoch=media->epoch};strcpy(i->directory,directory);strcpy(i->cache,cache);h->impl=i;return PN_OK;
+    index_t *i=pn_alloc_tagged(pool,PN_MEM_INDEX,sizeof *i);if(!i)return PN_NO_MEMORY;*i=(index_t){.pool=pool,.media=media,.wanted=true,.epoch=media->epoch};strcpy(i->directory,directory);strcpy(i->cache,cache);h->impl=i;return PN_OK;
 }
 pn_status_t pn_catalog_index_page(pn_catalog_index_t *h,const pn_media_lease_t *lease,const char *after,bool reverse,char from,const char *query,size_t limit,pn_catalog_page_t *page){
     if(!h || !h->impl)return PN_EMPTY;
@@ -61,7 +61,7 @@ pn_status_t pn_catalog_index_page(pn_catalog_index_t *h,const pn_media_lease_t *
     if(i->invalid)return PN_EMPTY;
     char filename[PN_CATALOG_PATH_MAX];if(!path(i,filename,".pni"))return PN_EMPTY;FILE *f=fopen(filename,"rb");if(!f){i->wanted=true;return PN_EMPTY;}
     size_t count=0;s=header(i,lease,f,&count);pn_catalog_page_t *result=NULL;item_t item;size_t lo=0,hi=count;
-    if(s==PN_OK){result=pn_alloc(i->pool,sizeof *result);if(!result)s=PN_NO_MEMORY;else{memset(result,0,sizeof *result);if(!limit || limit>PN_CATALOG_PAGE_MAX)limit=PN_CATALOG_PAGE_DEFAULT;result->per_page=limit;result->total=count;}}
+    if(s==PN_OK){result=pn_alloc_tagged(i->pool,PN_MEM_INDEX,sizeof *result);if(!result)s=PN_NO_MEMORY;else{memset(result,0,sizeof *result);if(!limit || limit>PN_CATALOG_PAGE_MAX)limit=PN_CATALOG_PAGE_DEFAULT;result->per_page=limit;result->total=count;}}
     if(s==PN_OK && (!query || !*query)){
         while(lo<hi){size_t mid=lo+(hi-lo)/2;s=record_at(i,lease,f,mid,&item);if(s!=PN_OK)break;
             bool before=from && from!='#'?(pn_catalog_initial(item.name)=='#' || (pn_catalog_initial(item.name)!='~' && pn_catalog_initial(item.name)<from)):reverse?pn_catalog_compare(item.name,after)<0:pn_catalog_compare(item.name,after)<=0;
@@ -118,7 +118,7 @@ pn_status_t pn_catalog_index_build(pn_catalog_index_t *h){
     s=cleanup_runs(i,&lease);if(s!=PN_OK){(void)pn_media_release(i->media,&lease);return s;}
     char old_path[PN_CATALOG_PATH_MAX];if(!i->invalid && path(i,old_path,".pni")){FILE *old=fopen(old_path,"rb");if(old){size_t count;pn_status_t valid=header(i,&lease,old,&count);fclose(old);if(valid==PN_OK){i->wanted=false;(void)pn_media_release(i->media,&lease);return PN_EMPTY;}}}
     uint8_t before[HEADER],after[HEADER];s=cookie(i,before);if(s==PN_OK)s=directory_create(i->cache);
-    DIR *dir=s==PN_OK?opendir(i->directory):NULL;if(s==PN_OK && !dir)s=PN_IO;item_t *batch=s==PN_OK?pn_alloc(i->pool,BATCH*sizeof *batch):NULL;if(s==PN_OK && !batch)s=PN_NO_MEMORY;
+    DIR *dir=s==PN_OK?opendir(i->directory):NULL;if(s==PN_OK && !dir)s=PN_IO;item_t *batch=s==PN_OK?pn_alloc_tagged(i->pool,PN_MEM_INDEX,BATCH*sizeof *batch):NULL;if(s==PN_OK && !batch)s=PN_NO_MEMORY;
     size_t count=0,used=0;unsigned runs=0;char filename[PN_CATALOG_PATH_MAX];
     while(s==PN_OK){s=check(i,&lease);if(s!=PN_OK)break;errno=0;struct dirent *entry=readdir(dir);if(!entry){if(errno)s=PN_IO;break;}
         pn_catalog_item_t item;pn_status_t found=pn_catalog_item(i->media,&lease,i->directory,entry->d_name,&item);if(found==PN_EMPTY || found==PN_INVALID || found==PN_LIMIT)continue;if(found!=PN_OK){s=found;break;}

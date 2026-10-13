@@ -18,6 +18,7 @@
 | [开发环境与测试](docs/DEVELOPMENT_AND_TESTING.md) | Docker/Windows/WSL/SDL、SDK-stub、独立oracle与硬件边界 |
 | [原始开发计划与任务明细](docs/DEVELOPMENT_PLAN.md) | 保留T01–T14详细要求；当前1.0执行顺序见新版计划，不以局部实现代替任务完成 |
 | [总体设计](docs/DESIGN.md) | 产品目标和格式/资源路线 |
+| [内存与响应](docs/MEMORY_AND_RESPONSE.md) | 字体Flash/RAM、整机帧与缓存账本、大书冷开/长章及分阶段优化 |
 | [界面与交互](docs/UI_UX.md) | 设计目标、阅读/设置流程 |
 | [界面组件与图标](docs/UI_KIT.md) | 共用控件、抗锯齿图元与线条图标集 |
 | [UI 规范 V2 对照](docs/UI_SPEC_V2.md) | Mono Glass V2 设计规范的产品决定、已落地与未落地项 |

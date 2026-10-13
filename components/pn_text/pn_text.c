@@ -6,6 +6,7 @@
  * 冻结：不静默替换、不整书分配；source不可并发变更，owner串行调用。
  * Frozen: no silent replacement or whole-book allocation; immutable source and serialized owner calls.
  */
+#include "pn_profile.h"
 #include "pn_text.h"
 #include "pn_cancel.h"
 #include "pn_gbk.generated.h"
@@ -113,7 +114,7 @@ static pn_status_t probe_scan(pn_text_reader_t *reader,void (*point)(void *,uint
     while((status=pn_text_next(reader,&character))==PN_OK){paragraph=character.codepoint==10;if(reader->cursor<reader->source.size && reader->cursor-last>=stride){last=reader->cursor;if(point)point(ctx,last,paragraph);}}
     return status;
 }
-pn_status_t pn_text_probe_checkpoints(const pn_text_source_t *source,uint64_t limit,pn_text_encoding_t *encoding,void (*point)(void *,uint64_t,bool),void *ctx) {
+static pn_status_t pn_text_probe_checkpoints_impl(const pn_text_source_t *source,uint64_t limit,pn_text_encoding_t *encoding,void (*point)(void *,uint64_t,bool),void *ctx) {
     if(!source || !source->read_at || !encoding)return PN_INVALID;
     if(source->size>limit)return PN_LIMIT;
     pn_text_reader_t reader;pn_status_t status=pn_text_open(&reader,source,PN_TEXT_AUTO);
@@ -126,5 +127,9 @@ pn_status_t pn_text_probe_checkpoints(const pn_text_source_t *source,uint64_t li
     }
     if(status!=PN_EMPTY)return status;
     *encoding=selected;return PN_OK;
+}
+pn_status_t pn_text_probe_checkpoints(const pn_text_source_t *source,uint64_t limit,pn_text_encoding_t *encoding,void (*point)(void *,uint64_t,bool),void *ctx){
+    pn_profile_span_t span;pn_profile_begin(&span,NULL,"txt.decode");
+    pn_status_t status=pn_text_probe_checkpoints_impl(source,limit,encoding,point,ctx);pn_profile_end(&span,status);return status;
 }
 pn_status_t pn_text_probe(const pn_text_source_t *source,uint64_t limit,pn_text_encoding_t *encoding){return pn_text_probe_checkpoints(source,limit,encoding,NULL,NULL);}

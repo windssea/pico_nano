@@ -26,7 +26,7 @@
 static bool bitmap_record(const pn_lock_selection_t *s){return s->mode==PN_LOCK_CUSTOM || (s->mode==PN_LOCK_BOOK && s->cached_book);}
 static bool book_identity_valid(const pn_lock_selection_t *s){uint8_t zero[32]={0};return s->mode==PN_LOCK_BOOK && memcmp(s->book.sha256,zero,sizeof zero)!=0;}
 typedef struct {const pn_text_source_t *source;uint64_t offset;} file_input_t;
-static void *sub_alloc(void *ctx,size_t bytes){return pn_alloc(ctx,bytes);}
+static void *sub_alloc(void *ctx,size_t bytes){return pn_alloc_tagged(ctx,PN_MEM_UI,bytes);}
 static void sub_free(void *ctx,void *ptr){(void)ctx;pn_free(ptr);}
 static pn_status_t file_read(void *ctx,uint8_t *out,size_t cap,size_t *n){
     file_input_t *f=ctx;*n=0;if(f->offset>=f->source->size)return PN_EMPTY;
@@ -58,9 +58,9 @@ static pn_status_t prepare(pn_pool_t *pool,const pn_text_source_t *source,pn_wal
     unsigned k=alpha?1:2;
     while(k>1 && ((uint64_t)iw*k>(r&1u?rh:rw) || (uint64_t)ih*k>(r&1u?rw:rh) || iw*k>4096 || ih*k>4096 || (size_t)uw*k/2*(size_t)uh*k>SCRATCH_MAX))k--;
     int sw=uw*(int)k,sh=uh*(int)k;size_t bytes=((size_t)sw+1)/2*(size_t)sh;
-    uint8_t *pixels=pn_alloc(pool,bytes);if(!pixels)return PN_NO_MEMORY;
+    uint8_t *pixels=pn_alloc_tagged(pool,PN_MEM_UI,bytes);if(!pixels)return PN_NO_MEMORY;
     pn_frame_t scratch;(void)pn_frame_bind(&scratch,pixels,bytes,sw,sh);pn_frame_clear(&scratch,15);
-    uint8_t *opacity=alpha?pn_alloc(pool,bytes):NULL;pn_frame_t scratch_alpha;
+    uint8_t *opacity=alpha?pn_alloc_tagged(pool,PN_MEM_UI,bytes):NULL;pn_frame_t scratch_alpha;
     if(alpha && !opacity){pn_free(pixels);return PN_NO_MEMORY;}
     if(alpha){(void)pn_frame_bind(&scratch_alpha,opacity,bytes,sw,sh);pn_frame_clear(&scratch_alpha,0);}
     at.offset=0;pn_image_rect_t rect={(int)(ux*k),(int)(uy*k),(int)(iw*k),(int)(ih*k)};
@@ -99,8 +99,8 @@ typedef struct {pn_frame_t gray,alpha,shown;uint8_t *pixels;bool confirmed;} mas
 pn_status_t pn_wallpaper_mask_open(pn_wallpaper_mask_t *mask,pn_pool_t *pool,pn_media_t *media,const pn_lock_selection_t *selection){
     if(!mask || !pool || !media || !selection || selection->mode!=PN_LOCK_MASK)return PN_INVALID;
     if(mask->impl)return PN_BUSY;
-    mask_t *m=pn_alloc(pool,sizeof *m);if(!m)return PN_NO_MEMORY;memset(m,0,sizeof *m);
-    m->pixels=pn_alloc(pool,3u*PN_WALLPAPER_BYTES);
+    mask_t *m=pn_alloc_tagged(pool,PN_MEM_UI,sizeof *m);if(!m)return PN_NO_MEMORY;memset(m,0,sizeof *m);
+    m->pixels=pn_alloc_tagged(pool,PN_MEM_UI,3u*PN_WALLPAPER_BYTES);
     if(!m->pixels){pn_free(m);return PN_NO_MEMORY;}
     (void)pn_frame_bind(&m->gray,m->pixels,PN_WALLPAPER_BYTES,W,H);
     (void)pn_frame_bind(&m->alpha,m->pixels+PN_WALLPAPER_BYTES,PN_WALLPAPER_BYTES,W,H);

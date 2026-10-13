@@ -5,6 +5,7 @@
  * 冻结：无永久页号，冷上一页按事件顺序重建，不对locator元组排序。
  * Frozen: no permanent page numbers; cold previous pages reconstruct event order without sorting locator tuples.
  */
+#include "pn_profile.h"
 #include "pn_epub_reader.h"
 #include "pn_cancel.h"
 #include <string.h>
@@ -22,12 +23,12 @@ typedef struct {
 } reader_t;
 static void cached_free(pn_epub_page_t *page){pn_free(page->nodes);pn_free(page->images);*page=(pn_epub_page_t){0};}
 static bool cached_store(reader_t *r,pn_epub_page_t *to,const pn_epub_page_t *from){
-    pn_epub_page_node_t *nodes=from->count?pn_alloc(r->pool,from->count*sizeof *nodes):NULL;
-    pn_epub_page_image_t *images=from->image_count?pn_alloc(r->pool,from->image_count*sizeof *images):NULL;
+    pn_epub_page_node_t *nodes=from->count?pn_alloc_tagged(r->pool,PN_MEM_LAYOUT,from->count*sizeof *nodes):NULL;
+    pn_epub_page_image_t *images=from->image_count?pn_alloc_tagged(r->pool,PN_MEM_LAYOUT,from->image_count*sizeof *images):NULL;
     if((from->count && !nodes) || (from->image_count && !images)){pn_free(nodes);pn_free(images);return false;}
     if(nodes)memcpy(nodes,from->nodes,from->count*sizeof *nodes);
     if(images)memcpy(images,from->images,from->image_count*sizeof *images);
-    cached_free(to);*to=*from;to->nodes=nodes;to->images=images;to->capacity=from->count;to->image_capacity=from->image_count;return true;
+    cached_free(to);*to=*from;to->nodes=nodes;to->images=images;to->capacity=from->count;to->image_capacity=from->image_count;to->owner=r->pool;return true;
 }
 static bool layout_valid(const pn_layout_t *l){return l && l->width>0 && l->width<=4096 && l->height>0 && l->height<=4096 && l->line_height>0 && l->line_height<=l->height && l->indent>=0 && l->indent<l->width && l->paragraph_gap>=0 && l->paragraph_gap<=4096 && l->letter_spacing_64>=0 && l->letter_spacing_64<=4096;}
 static bool same_position(pn_xhtml_position_t a,pn_xhtml_position_t b){return a.element==b.element && a.run==b.run && a.offset==b.offset && a.kind==b.kind;}
@@ -117,25 +118,29 @@ pn_status_t pn_epub_reader_init(pn_epub_reader_t *handle,pn_pool_t *pool,pn_epub
     if(!handle || handle->impl || !pool || !epub || !book || !salt || !layout_valid(layout) || !measure || !measure->glyph || !page || !page->nodes || !page->capacity || page->capacity>PN_PAGE_GLYPHS_MAX || page->image_capacity>PN_EPUB_PAGE_IMAGES_MAX || (page->image_capacity && !page->images) || !token.session || !token.generation)return PN_INVALID;
     bool random=false;for(unsigned i=0;i<16;i++)random=random || salt[i]!=0;if(!random)return PN_INVALID;
     pn_epub_info_t info;pn_status_t status=pn_epub_info(epub,&info);if(status!=PN_OK)return status;if(info.fixed_layout)return PN_UNSUPPORTED;
-    reader_t *r=pn_alloc(pool,sizeof *r);if(!r)return PN_NO_MEMORY;
+    reader_t *r=pn_alloc_tagged(pool,PN_MEM_LAYOUT,sizeof *r);if(!r)return PN_NO_MEMORY;
     *r=(reader_t){.pool=pool,.epub=epub,.book=*book,.layout=*layout,.measure=*measure,.page=page,.token=token,.next_ticket=1,.spine_count=info.spine_count,.confirm=confirm,.ctx=ctx,.cache_enabled=true};memcpy(r->salt,salt,16);page->valid=false;handle->impl=r;return PN_OK;
 }
 void pn_epub_reader_close(pn_epub_reader_t *handle){if(handle && handle->impl){reader_t *r=handle->impl;r->page->valid=false;cached_free(&r->ahead);cached_free(&r->behind);pn_free(r);handle->impl=NULL;}}
-pn_status_t pn_epub_reader_prefetch(pn_epub_reader_t *handle){
+static pn_status_t pn_epub_reader_prefetch_impl(pn_epub_reader_t *handle){
     if(!handle || !handle->impl)return PN_EMPTY;
     reader_t *r=handle->impl;if(!r->has_visible || !r->visible.has_next || r->preparing)return PN_EMPTY;
     if(r->ahead.valid && same_location(&r->ahead_target,&r->visible.next))return PN_EMPTY;
-    pn_epub_page_t page={.capacity=PN_PAGE_GLYPHS_MAX,.image_capacity=PN_EPUB_PAGE_IMAGES_MAX};
-    page.nodes=pn_alloc(r->pool,page.capacity*sizeof *page.nodes);page.images=pn_alloc(r->pool,page.image_capacity*sizeof *page.images);
-    if(!page.nodes || !page.images){cached_free(&page);return PN_NO_MEMORY;}
+    pn_epub_page_t page={0};pn_status_t allocated=pn_epub_page_reserve(&page,r->pool,64,0);
+    if(allocated!=PN_OK){cached_free(&page);return allocated;}
     reader_t copy=*r;copy.page=&page;copy.cache_enabled=false;copy.preparing=false;copy.confirm=NULL;
     pn_epub_reader_t shadow={&copy};pn_epub_reader_receipt_t receipt;
     pn_status_t status=pn_epub_reader_prepare(&shadow,PN_READ_NEXT,NULL,&receipt);
     if(status==PN_OK)status=pn_cancel_checkpoint();
-    if(status==PN_OK){if(cached_store(r,&r->ahead,&page)){r->ahead_anchor=receipt.anchor;r->ahead_target=r->visible.next;}else status=PN_NO_MEMORY;}
+    // 已验证页直接转移所有权，避免scratch到ahead的第二份分配与复制。/ Move the validated page instead of allocating and copying a second scratch-to-ahead buffer.
+    if(status==PN_OK){cached_free(&r->ahead);r->ahead=page;page=(pn_epub_page_t){0};r->ahead_anchor=receipt.anchor;r->ahead_target=r->visible.next;}
     cached_free(&page);return status;
 }
-pn_status_t pn_epub_reader_prepare(pn_epub_reader_t *handle,pn_read_intent_t intent,const pn_epub_location_t *jump,pn_epub_reader_receipt_t *out){
+pn_status_t pn_epub_reader_prefetch(pn_epub_reader_t *handle){
+    pn_profile_span_t span;pn_profile_begin(&span,handle && handle->impl?((reader_t *)handle->impl)->pool:NULL,"epub.prefetch");
+    pn_status_t status=pn_epub_reader_prefetch_impl(handle);pn_profile_end(&span,status);return status;
+}
+pn_status_t pn_epub_reader_prepare_impl(pn_epub_reader_t *handle,pn_read_intent_t intent,const pn_epub_location_t *jump,pn_epub_reader_receipt_t *out){
     if(!handle || !handle->impl || !out || intent<PN_READ_FIRST || intent>PN_READ_JUMP)return PN_INVALID;
     reader_t *r=handle->impl;if(r->preparing)return PN_BUSY;if(!r->next_ticket)return PN_LIMIT;
     if(!r->has_visible && intent!=PN_READ_FIRST && intent!=PN_READ_JUMP)return PN_EMPTY;
@@ -143,15 +148,25 @@ pn_status_t pn_epub_reader_prepare(pn_epub_reader_t *handle,pn_read_intent_t int
     if(r->cache_enabled){
         if(intent==PN_READ_NEXT && r->ahead.valid && r->visible.has_next && same_location(&r->ahead_target,&r->visible.next)){cached=&r->ahead;prepared=r->ahead_anchor;}
         if(intent==PN_READ_PREVIOUS && r->behind.valid && r->history_count && same_location(&r->behind_anchor.begin,&r->history[r->history_count-1])){cached=&r->behind;prepared=r->behind_anchor;}
+        if(cached && r->page->owner==r->pool && cached->owner==r->pool){
+            size_t section;pn_status_t checked=check_location(r,&prepared.begin,&section);if(checked!=PN_OK)return checked;
+            // 命中自有节点时直接交接，固定外部缓冲仍走复制兼容路径。/ Transfer owned nodes on hits; fixed external buffers keep the copying compatibility path.
+            if(r->page->valid && r->has_visible && same_position(r->page->begin,r->visible.begin.position)){
+                pn_epub_page_t *opposite=intent==PN_READ_PREVIOUS?&r->ahead:&r->behind;cached_free(opposite);*opposite=*r->page;
+                if(intent==PN_READ_PREVIOUS){r->ahead_anchor=r->visible;r->ahead_target=prepared.next;}else r->behind_anchor=r->visible;
+            }else pn_epub_page_release(r->page);
+            *r->page=*cached;*cached=(pn_epub_page_t){0};
+            r->pending=(pn_epub_reader_receipt_t){handle,r->token,r->next_ticket++,intent,prepared};r->preparing=true;*out=r->pending;return PN_OK;
+        }
         if((intent==PN_READ_NEXT || intent==PN_READ_PREVIOUS) && r->page->valid && r->has_visible && same_position(r->page->begin,r->visible.begin.position)){pn_epub_page_t *slot=intent==PN_READ_PREVIOUS?&r->ahead:&r->behind;if(slot!=cached && cached_store(r,slot,r->page)){if(slot==&r->ahead){r->ahead_anchor=r->visible;saved_forward=true;}else r->behind_anchor=r->visible;}}
     }
     if(intent!=PN_READ_NEXT && intent!=PN_READ_PREVIOUS){cached_free(&r->ahead);cached_free(&r->behind);}
     if(cached && cached->count<=r->page->capacity && cached->image_count<=r->page->image_capacity){
         size_t index;pn_status_t status=check_location(r,&prepared.begin,&index);if(status!=PN_OK)return status;
-        pn_epub_page_node_t *nodes=r->page->nodes;pn_epub_page_image_t *images=r->page->images;size_t cap=r->page->capacity,icap=r->page->image_capacity;
+        pn_epub_page_node_t *nodes=r->page->nodes;pn_epub_page_image_t *images=r->page->images;size_t cap=r->page->capacity,icap=r->page->image_capacity;pn_pool_t *owner=r->page->owner;
         if(cached->count)memcpy(nodes,cached->nodes,cached->count*sizeof *nodes);
         if(cached->image_count)memcpy(images,cached->images,cached->image_count*sizeof *images);
-        *r->page=*cached;r->page->nodes=nodes;r->page->images=images;r->page->capacity=cap;r->page->image_capacity=icap;
+        *r->page=*cached;r->page->nodes=nodes;r->page->images=images;r->page->capacity=cap;r->page->image_capacity=icap;r->page->owner=owner;
         if(saved_forward)r->ahead_target=prepared.next;
         r->pending=(pn_epub_reader_receipt_t){handle,r->token,r->next_ticket++,intent,prepared};r->preparing=true;*out=r->pending;return PN_OK;
     }
@@ -167,6 +182,10 @@ pn_status_t pn_epub_reader_prepare(pn_epub_reader_t *handle,pn_read_intent_t int
     if(status!=PN_OK){r->page->valid=false;return status;}
     if(saved_forward)r->ahead_target=candidate.next;
     r->pending=(pn_epub_reader_receipt_t){handle,r->token,r->next_ticket++,intent,candidate};r->preparing=true;*out=r->pending;return PN_OK;
+}
+pn_status_t pn_epub_reader_prepare(pn_epub_reader_t *handle,pn_read_intent_t intent,const pn_epub_location_t *jump,pn_epub_reader_receipt_t *out){
+    pn_profile_span_t span;pn_profile_begin(&span,handle && handle->impl?((reader_t *)handle->impl)->pool:NULL,intent==PN_READ_NEXT?"epub.next":intent==PN_READ_PREVIOUS?"epub.previous":intent==PN_READ_JUMP?"epub.jump":"epub.prepare");
+    pn_status_t status=pn_epub_reader_prepare_impl(handle,intent,jump,out);pn_profile_end(&span,status);return status;
 }
 pn_status_t pn_epub_reader_page(pn_epub_reader_t *handle,const pn_epub_page_t **out){
     if(!handle || !handle->impl || !out)return PN_INVALID;

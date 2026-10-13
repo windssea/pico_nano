@@ -18,15 +18,17 @@ pn_font_open只接受单TTF的TrueType glyf源，最大32MiB，Unicode cmap；CF
 
 FT_New_Library使用自定义FT_Memory，alloc/free/realloc全部走pn_pool；realloc失败保留旧指针，错误路径释放face/library/engine。模块建立时内存失败也中止，不容许不完整注册伪装成功。字体调用前验证源，缓存命中也可拒绝旧epoch；引擎stream短读/错误被传回status。没有默认无界malloc回退。
 
-打开/尺寸操作/字体查询/光栅目前同步，没有RTOS任务、取消deadline或stack水位验证；上板前需要独立font/reader worker栈与调度。FreeType解析仍不是安全沙箱，仅有预算不能证明任意恶意字体安全；上传结构预检、长时间fuzz、复杂轮廓限制/超时和使用中替换流程尚未完成。
+字体低层调用仍同步，产品路径已有独立reader worker与字体操作边界的协作取消，见[异步阅读](ASYNC_READING.md)；FreeType内部单次调用deadline和真实stack水位尚未验收。FreeType解析仍不是安全沙箱，仅有预算不能证明任意恶意字体安全；长时间fuzz、复杂轮廓限制/超时和资源管理的完整故障出口尚未完成。
 
 ## 度量与绘制
 
 pn_font_advance返回26.6像素advance，不光栅化整章。Tab使用4个空格宽度；调用方处理换行。pn_font_vertical返回当前ascender/descender，分页line_height不能小于它们之和。尺寸8–128px是port限额，产品正文UI仍按28–72px设计。
 
-pn_font_draw在目标像素高度直接光栅化，x保留26.6相位，baseline按像素对齐；使用覆盖率写入4bpp，不缩放整页。gray为线性覆盖（gamma=1候选），binary阈值128仅落黑白，不能把灰阶边缘送DU。裁切用64-bit坐标防溢出，不改邻像素；超大/未知位图形式明确拒绝。当前只缓存FreeType内部当前glyph slot，没有1MiB LRU，热翻页性能仍未验证。
+2026-10-13起，相同字号仍验证源，随后跳过重复FreeType设尺寸；分页key复用内置生成SHA及当前有效文件句柄的摘要，close/reopen和介质代次失效。未知source仍完整扫描，字体字节与key定义不变；验证及范围见[内存与响应](MEMORY_AND_RESPONSE.md)。
 
-缺字返回EMPTY供上层fallback。捕获入口以方框显示缺字并报告数量，不能把UI子集当成全中文字库。缺字退路目前只有这一预览方框，完整用户fallback链/缺字提示、可变字重轴选择、kerning、位图gamma校准、字体安装/删除/替换仍需实现。
+pn_font_draw在目标像素高度直接光栅化，x保留26.6相位，baseline按像素对齐；使用覆盖率写入4bpp，不缩放整页。gray为线性覆盖（gamma=1候选），binary阈值128仅落黑白，不能把灰阶边缘送DU。裁切用64-bit坐标防溢出，不改邻像素；超大/未知位图形式明确拒绝。当前每引擎按需使用1024项字宽哈希槽、512项位图槽及384KiB像素预算，低余量停止增长，trim回收；不是全局LRU。真实热翻页与缓存命中/碎片仍需测量，详见[内存与响应](MEMORY_AND_RESPONSE.md)。
+
+缺字返回EMPTY供上层fallback。正文已接有界用户/内置回退链与缺字提示，最终缺字仍用占位；不能把UI子集当成全中文字库。可变字重轴选择、kerning、位图gamma校准及字体管理完整验收仍需推进。
 
 ## PC真实TXT捕获
 

@@ -7,6 +7,7 @@
  * Frozen: one owner; no formatting or hardware power operations; retain session on close failure.
  */
 #define _POSIX_C_SOURCE 200809L
+#include "pn_profile.h"
 #include "pn_reader_app.h"
 #include "pn_sd_layout.h"
 #include "pn_widgets.h"
@@ -85,7 +86,7 @@ static unsigned progress_basis(const app_t *a,pn_reader_anchor_t anchor){
     if(anchor.end>=size)return 10000;
     return (unsigned)(anchor.begin*10000u/size);
 }
-static pn_status_t render(app_t *a,pn_frame_t *frame,const pn_reader_receipt_t *receipt,bool show_return){
+static pn_status_t render_impl(app_t *a,pn_frame_t *frame,const pn_reader_receipt_t *receipt,bool show_return){
     pn_frame_clear(frame,15);unsigned missing=0;
     // 偶数边距保持4bpp半字节对齐，仅裁切正文区域。/ Even margin preserves 4bpp nibble alignment and clips the content area.
     pn_frame_t viewport={frame->pixels+PN_READER_TOP*frame->stride+a->style.margin/2,684-2*a->style.margin,PN_READER_HEIGHT,frame->stride};
@@ -105,6 +106,10 @@ static pn_status_t render(app_t *a,pn_frame_t *frame,const pn_reader_receipt_t *
     if(!a->draft_render){unsigned long long percent=basis/100;
         if(missing)snprintf(right,sizeof right,"%u 缺字 · %llu%%",missing,percent);else snprintf(right,sizeof right,"%llu%%",percent);}
     return pn_reader_footer_progress(&a->ui,body(a),frame,left,right,a->draft_render?-1:(int)basis);
+}
+static pn_status_t render(app_t *a,pn_frame_t *frame,const pn_reader_receipt_t *receipt,bool show_return){
+    pn_profile_span_t span;pn_profile_begin(&span,a->pool,"txt.raster");
+    pn_status_t status=render_impl(a,frame,receipt,show_return);pn_profile_end(&span,status);return status;
 }
 static pn_status_t release_app(app_t *a){
     (void)pn_page_index_flush(&a->page_index,true);pn_page_index_close(&a->page_index);
@@ -137,12 +142,12 @@ static pn_status_t open_state(app_t *a,const char *directory,uint64_t now){
     a->saved_style=a->style;a->persistent=true;strcpy(a->state_directory,directory);return PN_OK;
 }
 static void decoder_checkpoint(void *ctx,uint64_t offset,bool paragraph){app_t *a=ctx;if(offset<=4)a->checkpoint_count=0;if(a->checkpoint_count<512)a->checkpoints[a->checkpoint_count++]=(pn_reader_anchor_t){.begin=offset,.paragraph=paragraph};}
-pn_status_t pn_reader_app_open_on_media(pn_reader_app_t *app,pn_pool_t *pool,pn_media_t *media,const char *book_path,
+static pn_status_t pn_reader_app_open_on_media_impl(pn_reader_app_t *app,pn_pool_t *pool,pn_media_t *media,const char *book_path,
     const char *font_path,const char *state_dir,int pixels,uint64_t now){
     if(!app || !pool || !book_path || !*book_path || pixels<28 || pixels>72 || (state_dir && !*state_dir))return PN_INVALID;
     if(app->impl)return PN_BUSY;
     if(strlen(book_path)>=PN_RECENT_PATH_MAX)return PN_LIMIT;
-    app_t *a=pn_alloc(pool,sizeof *a);if(!a)return PN_NO_MEMORY;memset(a,0,sizeof *a);a->pool=pool;a->last_now=now;
+    app_t *a=pn_alloc_tagged(pool,PN_MEM_LAYOUT,sizeof *a);if(!a)return PN_NO_MEMORY;memset(a,0,sizeof *a);a->pool=pool;a->last_now=now;
     strcpy(a->book_path,book_path);a->recent_status=PN_EMPTY;
     a->style=a->saved_style=pn_style_default(pixels);
     a->book_media=media?media:&a->local_media;pn_status_t status=PN_OK;
@@ -193,7 +198,7 @@ pn_status_t pn_reader_app_open_on_media(pn_reader_app_t *app,pn_pool_t *pool,pn_
         }
     }
     pn_text_source_t builtin=pn_font_builtin_source();if(status==PN_OK)status=pn_font_open(&a->ui,pool,&builtin,24);
-    if(status==PN_OK){a->pixels=pn_alloc(pool,684u*1216u/2u);a->glyphs=pn_alloc(pool,PN_PAGE_GLYPHS_MAX*sizeof *a->glyphs);if(!a->pixels || !a->glyphs)status=PN_NO_MEMORY;}
+    if(status==PN_OK){a->pixels=pn_alloc_tagged(pool,PN_MEM_FRAME,684u*1216u/2u);a->glyphs=pn_alloc_tagged(pool,PN_MEM_LAYOUT,PN_PAGE_GLYPHS_MAX*sizeof *a->glyphs);if(!a->pixels || !a->glyphs)status=PN_NO_MEMORY;}
     if(status==PN_OK)status=pn_font_chain_init(&a->chain,pool,&a->body,NULL);
     pn_layout_t current;
     if(status==PN_OK && !pn_frame_bind(&a->frame,a->pixels,684u*1216u/2u,684,1216))status=PN_INVALID;
@@ -206,6 +211,11 @@ pn_status_t pn_reader_app_open_on_media(pn_reader_app_t *app,pn_pool_t *pool,pn_
     if(status==PN_OK && has_selected_fonts && selected_fonts.fallback.kind==PN_FONT_FILE){pn_reader_app_t configured={a};status=pn_reader_app_fallback_font(&configured,selected_fonts.fallback.path);}
     if(status!=PN_OK){(void)release_app(a);return status;}
     app->impl=a;return PN_OK;
+}
+pn_status_t pn_reader_app_open_on_media(pn_reader_app_t *app,pn_pool_t *pool,pn_media_t *media,const char *book_path,
+    const char *font_path,const char *state_dir,int pixels,uint64_t now){
+    pn_profile_span_t span;pn_profile_begin(&span,pool,"txt.open");
+    pn_status_t status=pn_reader_app_open_on_media_impl(app,pool,media,book_path,font_path,state_dir,pixels,now);pn_profile_end(&span,status);return status;
 }
 static pn_status_t record_recent(app_t *a){
     if(!a->persistent || !a->reader.has_visible)return PN_OK;

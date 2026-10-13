@@ -13,7 +13,7 @@ typedef union {max_align_t align;struct {size_t bytes;pn_pool_t *pool;} record;}
 static _Thread_local pn_pool_t *current_pool;
 static void *xml_malloc(size_t n){
     if(!n || n>SIZE_MAX-sizeof(xml_memory_t))return NULL;
-    xml_memory_t *m=pn_alloc(current_pool,sizeof *m+n);if(!m)return NULL;
+    xml_memory_t *m=pn_alloc_tagged(current_pool,PN_MEM_DOCUMENT,sizeof *m+n);if(!m)return NULL;
     m->record.bytes=n;m->record.pool=current_pool;return m+1;
 }
 static void xml_free(void *p){if(p)pn_free((xml_memory_t *)p-1);}
@@ -61,7 +61,7 @@ pn_status_t pn_xml_parse(pn_pool_t *pool,const pn_xml_input_t *input,const pn_xm
     xml_owner_t owner={.hooks=hooks,.ctx=ctx,.status=PN_OK};
     owner.parser=XML_ParserCreate_MM(NULL,&memory,&separator);
     if(!owner.parser){current_pool=previous;return PN_NO_MEMORY;}
-    uint8_t *buffer=pn_alloc(pool,4096);
+    uint8_t *buffer=pn_alloc_tagged(pool,PN_MEM_DOCUMENT,4096);
     if(!buffer)owner.status=PN_NO_MEMORY;
     if(!XML_SetHashSalt16Bytes(owner.parser,salt))owner.status=PN_INVALID;
     XML_SetUserData(owner.parser,&owner);XML_SetElementHandler(owner.parser,xml_start,xml_end);

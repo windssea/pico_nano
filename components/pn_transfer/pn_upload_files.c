@@ -139,7 +139,7 @@ pn_status_t pn_upload_files_open(pn_upload_files_t *out,pn_pool_t *pool,const pn
 #ifdef ESP_PLATFORM
  if(!options->sync_directory || !options->space_free)return PN_UNSUPPORTED;
 #endif
- files_t *s=pn_alloc(pool,sizeof *s);if(!s)return PN_NO_MEMORY;*s=(files_t){.pool=pool,.options=*options};strcpy(s->root,options->root);s->options.root=s->root;out->impl=s;*port=(pn_upload_port_t){s,bind,size_part,truncate_part,write_part,read_part,validate,install,remove_part,admit,unbind,recover_initial};return PN_OK;
+ files_t *s=pn_alloc_tagged(pool,PN_MEM_TRANSFER,sizeof *s);if(!s)return PN_NO_MEMORY;*s=(files_t){.pool=pool,.options=*options};strcpy(s->root,options->root);s->options.root=s->root;out->impl=s;*port=(pn_upload_port_t){s,bind,size_part,truncate_part,write_part,read_part,validate,install,remove_part,admit,unbind,recover_initial};return PN_OK;
 }
 pn_status_t pn_upload_files_close(pn_upload_files_t *out){if(!out)return PN_INVALID;if(!out->impl)return PN_OK;files_t *s=out->impl;if(s->bound)return PN_BUSY;(void)pn_text_file_close(&s->reader);pn_free(s);out->impl=NULL;return PN_OK;}
 pn_status_t pn_upload_files_cleanup_pending(pn_upload_files_t *out,bool *pending){if(!out || !out->impl || !pending)return PN_INVALID;intent_t t;pn_status_t status=intent_load(out->impl,&t);if(status==PN_OK)*pending=t.phase==3;return status;}

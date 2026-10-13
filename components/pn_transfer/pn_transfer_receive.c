@@ -11,7 +11,7 @@ pn_status_t pn_transfer_receive(pn_pool_t *pool,pn_transfer_execute_fn execute,v
     if(!pool || !execute || !request || !read || !result)return PN_INVALID;
     *result=(pn_transfer_receive_result_t){.cancel_status=PN_EMPTY};
     pn_status_t status=pn_upload_request_validate(request);if(status!=PN_OK)return status;
-    uint8_t *buffer=pn_alloc(pool,PN_UPLOAD_CHUNK);if(!buffer)return PN_NO_MEMORY;
+    uint8_t *buffer=pn_alloc_tagged(pool,PN_MEM_TRANSFER,PN_UPLOAD_CHUNK);if(!buffer)return PN_NO_MEMORY;
     pn_transfer_command_t command={.operation=PN_TRANSFER_STREAM_BEGIN,.request=*request};pn_transfer_reply_t reply;
     status=execute(owner,&command,&reply);bool started=status==PN_OK;
     uint64_t at=0;

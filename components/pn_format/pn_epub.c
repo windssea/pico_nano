@@ -6,6 +6,7 @@
  * 冻结：不读整本正文，不发布部分OPF；源和ZIP由调用方保活。
  * Frozen: no whole-book prose reads or partial OPF publication; callers keep source and ZIP alive.
  */
+#include "pn_profile.h"
 #include "pn_epub.h"
 #include "pn_resource.h"
 #include <string.h>
@@ -52,7 +53,7 @@ static bool id_valid(const char *id){
 static void *grow(epub_t *b,void *old,size_t count,size_t width,size_t *capacity){
     if(count>=PN_EPUB_ITEMS_MAX)return NULL;
     size_t next=*capacity?*capacity*2:16;if(next>PN_EPUB_ITEMS_MAX)next=PN_EPUB_ITEMS_MAX;
-    void *array=pn_alloc(b->pool,next*width);if(!array)return NULL;
+    void *array=pn_alloc_tagged(b->pool,PN_MEM_DOCUMENT,next*width);if(!array)return NULL;
     if(count)memcpy(array,old,count*width);
     pn_free(old);*capacity=next;return array;
 }
@@ -79,7 +80,7 @@ static pn_status_t add_item(parse_t *p,const char *const *attrs){
         void *next=grow(b,b->items,b->info.manifest_count,sizeof *b->items,&b->item_capacity);if(!next)return PN_NO_MEMORY;b->items=next;
     }
     size_t id_size=strlen(id)+1,path_size=strlen(path)+1;
-    item_t *item=pn_alloc(b->pool,sizeof *item+id_size+path_size);if(!item)return PN_NO_MEMORY;
+    item_t *item=pn_alloc_tagged(b->pool,PN_MEM_DOCUMENT,sizeof *item+id_size+path_size);if(!item)return PN_NO_MEMORY;
     *item=(item_t){.id=(char *)(item+1),.path=(char *)(item+1)+id_size,.index=index,.media=media_type(type),
         .nav=token(attr(attrs,"properties"),"nav"),.cover=token(attr(attrs,"properties"),"cover-image")};
     memcpy(item->id,id,id_size);memcpy(item->path,path,path_size);b->items[b->info.manifest_count++]=item;return PN_OK;
@@ -91,7 +92,7 @@ static pn_status_t add_spine(parse_t *p,const char *const *attrs){
     if(b->info.spine_count==b->spine_capacity){
         void *next=grow(b,b->spine,b->info.spine_count,sizeof *b->spine,&b->spine_capacity);if(!next)return PN_NO_MEMORY;b->spine=next;
     }
-    char *saved=pn_alloc(b->pool,strlen(id)+1);if(!saved)return PN_NO_MEMORY;strcpy(saved,id);
+    char *saved=pn_alloc_tagged(b->pool,PN_MEM_DOCUMENT,strlen(id)+1);if(!saved)return PN_NO_MEMORY;strcpy(saved,id);
     b->spine[b->info.spine_count++]=(spine_t){.idref=saved,.linear=!linear || strcmp(linear,"no")};return PN_OK;
 }
 static void capture(parse_t *p,char *out,size_t size){
@@ -208,7 +209,7 @@ static void sift_spine(epub_t *b,size_t root,size_t count){
     }
 }
 static pn_status_t index_spine(epub_t *b){
-    size_t count=b->info.spine_count;b->spine_by_zip=pn_alloc(b->pool,count*sizeof *b->spine_by_zip);
+    size_t count=b->info.spine_count;b->spine_by_zip=pn_alloc_tagged(b->pool,PN_MEM_DOCUMENT,count*sizeof *b->spine_by_zip);
     if(!b->spine_by_zip)return PN_NO_MEMORY;
     for(size_t i=0;i<count;i++)b->spine_by_zip[i]=i;
     for(size_t root=count/2;root;root--)sift_spine(b,root-1,count);
@@ -265,12 +266,12 @@ void pn_epub_close(pn_epub_t *epub){
     for(size_t i=0;i<b->info.spine_count;i++)pn_free(b->spine[i].idref);
     pn_free(b->chapter);pn_free(b->items);pn_free(b->spine);pn_free(b->spine_by_zip);pn_free(b);epub->impl=NULL;
 }
-pn_status_t pn_epub_open(pn_epub_t *epub,pn_pool_t *pool,pn_zip_t *zip,const uint8_t salt[16]){
+static pn_status_t pn_epub_open_impl(pn_epub_t *epub,pn_pool_t *pool,pn_zip_t *zip,const uint8_t salt[16]){
     if(!epub || epub->impl || !pool || !zip || !zip->impl || !salt)return PN_INVALID;
     pn_status_t status=mimetype(zip);if(status!=PN_OK)return status;
     uint32_t index;status=pn_zip_find(zip,"META-INF/encryption.xml",&index);if(status==PN_OK)return PN_UNSUPPORTED;if(status!=PN_EMPTY)return status;
-    epub_t *b=pn_alloc(pool,sizeof *b);if(!b)return PN_NO_MEMORY;memset(b,0,sizeof *b);b->pool=pool;b->zip=zip;
-    parse_t *p=pn_alloc(pool,sizeof *p);if(!p){pn_free(b);return PN_NO_MEMORY;}
+    epub_t *b=pn_alloc_tagged(pool,PN_MEM_DOCUMENT,sizeof *b);if(!b)return PN_NO_MEMORY;memset(b,0,sizeof *b);b->pool=pool;b->zip=zip;
+    parse_t *p=pn_alloc_tagged(pool,PN_MEM_DOCUMENT,sizeof *p);if(!p){pn_free(b);return PN_NO_MEMORY;}
     *p=(parse_t){.book=b,.container=true};status=parse_xml(p,"META-INF/container.xml",salt);
     if(status==PN_OK && (!p->root || !*b->info.package_path))status=PN_CORRUPT;
     if(status==PN_OK){*p=(parse_t){.book=b};status=parse_xml(p,b->info.package_path,salt);}
@@ -280,6 +281,10 @@ pn_status_t pn_epub_open(pn_epub_t *epub,pn_pool_t *pool,pn_zip_t *zip,const uin
     pn_free(p);
     if(status!=PN_OK){pn_epub_t partial={b};pn_epub_close(&partial);return status;}
     epub->impl=b;return PN_OK;
+}
+pn_status_t pn_epub_open(pn_epub_t *epub,pn_pool_t *pool,pn_zip_t *zip,const uint8_t salt[16]){
+    pn_profile_span_t span;pn_profile_begin(&span,pool,"epub.publication");
+    pn_status_t status=pn_epub_open_impl(epub,pool,zip,salt);pn_profile_end(&span,status);return status;
 }
 static pn_status_t validate(pn_epub_t *epub,epub_t **book){
     if(!epub || !epub->impl)return PN_INVALID;
@@ -326,7 +331,7 @@ pn_status_t pn_epub_chapter_open(pn_epub_t *epub,const char *path,pn_epub_chapte
     if(status!=PN_OK)return status;
     bool cache=info.unpacked && info.unpacked<=128u*1024u && !b->chapter_borrows;
     uint8_t *bytes=NULL;
-    if(cache){pn_free(b->chapter);b->chapter=NULL;b->chapter_size=0;b->chapter_path[0]=0;bytes=pn_alloc(b->pool,(size_t)info.unpacked);}
+    if(cache){pn_free(b->chapter);b->chapter=NULL;b->chapter_size=0;b->chapter_path[0]=0;bytes=pn_alloc_tagged(b->pool,PN_MEM_DOCUMENT,(size_t)info.unpacked);}
     status=pn_zip_stream_open(b->zip,index,&input->stream);
     if(status==PN_NO_MEMORY && bytes){pn_free(bytes);bytes=NULL;status=pn_zip_stream_open(b->zip,index,&input->stream);}
     if(status!=PN_OK){pn_free(bytes);return status;}

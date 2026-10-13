@@ -6,6 +6,7 @@
  * 冻结：不执行脚本，不读取外部实体；CRC完成前不得提交页面或续读位置。
  * Frozen: never execute scripts or load external entities; no page or resume commits before CRC completion.
  */
+#include "pn_profile.h"
 #include "pn_xhtml.h"
 #include "pn_resource.h"
 #include "pn_cancel.h"
@@ -148,7 +149,7 @@ static pn_status_t rule_add(sheet_t *sheet,const char *selector_text,char *decla
     uint32_t specificity;
     if(!selector(selector_text,NULL,NULL,NULL,&specificity))return PN_OK;
     if(sheet->count==512)return PN_LIMIT;
-    if(sheet->count==sheet->capacity){size_t cap=sheet->capacity?sheet->capacity*2:32;rule_t *rules=pn_alloc(sheet->pool,cap*sizeof *rules);if(!rules)return PN_NO_MEMORY;
+    if(sheet->count==sheet->capacity){size_t cap=sheet->capacity?sheet->capacity*2:32;rule_t *rules=pn_alloc_tagged(sheet->pool,PN_MEM_DOCUMENT,cap*sizeof *rules);if(!rules)return PN_NO_MEMORY;
         if(sheet->count)memcpy(rules,sheet->rules,sheet->count*sizeof *rules);
         pn_free(sheet->rules);sheet->rules=rules;sheet->capacity=cap;}
     rule_t *rule=&sheet->rules[sheet->count++];strcpy(rule->selector,selector_text);rule->declarations=declarations;rule->specificity=specificity;return PN_OK;
@@ -283,7 +284,7 @@ static pn_status_t end(void *ctx,const char *name){
 }
 static pn_status_t parse_input(pn_pool_t *pool,const pn_xml_input_t *input,const char *base,const uint8_t salt[16],pn_xhtml_sink_t sink,void *ctx,pn_xhtml_stats_t *stats,sheet_t *sheet){
     if(!pool || !input || !base || !*base || strlen(base)>=PN_ZIP_PATH_MAX || !salt || !stats)return PN_INVALID;
-    parser_t *p=pn_alloc(pool,sizeof *p);if(!p)return PN_NO_MEMORY;*p=(parser_t){.sink=sink,.ctx=ctx,.base=base,.sheet=sheet};
+    parser_t *p=pn_alloc_tagged(pool,PN_MEM_DOCUMENT,sizeof *p);if(!p)return PN_NO_MEMORY;*p=(parser_t){.sink=sink,.ctx=ctx,.base=base,.sheet=sheet};
     pn_xml_hooks_t hooks={start,end,text};pn_status_t status=pn_xml_parse(pool,input,&hooks,p,32u*1024u*1024u,salt);
     if(status==PN_OK && (!p->root || p->bodies!=1))status=PN_CORRUPT;
     if(status==PN_OK)*stats=p->stats;
@@ -298,13 +299,13 @@ static pn_status_t read_stream(void *ctx,uint8_t *out,size_t cap,size_t *n){
 typedef struct {sheet_t *sheet;const char *base;unsigned depth,head,style;char *buffer;size_t size,capacity;} collect_t;
 static pn_status_t sheet_buffer(sheet_t *sheet,char **buffer,size_t *capacity){
     if(sheet->sources==16)return PN_LIMIT;
-    *capacity=4097;*buffer=pn_alloc(sheet->pool,*capacity);return *buffer?PN_OK:PN_NO_MEMORY;
+    *capacity=4097;*buffer=pn_alloc_tagged(sheet->pool,PN_MEM_DOCUMENT,*capacity);return *buffer?PN_OK:PN_NO_MEMORY;
 }
 static pn_status_t sheet_append(sheet_t *sheet,char **buffer,size_t *size,size_t *capacity,const void *data,size_t n){
     if(n>65536-*size || n>131072-sheet->total-*size)return PN_LIMIT;
     if(*size+n+1>*capacity){size_t cap=*capacity;
         while(cap<*size+n+1){cap*=2;if(cap>65537)cap=65537;}
-        char *grown=pn_alloc(sheet->pool,cap);if(!grown)return PN_NO_MEMORY;
+        char *grown=pn_alloc_tagged(sheet->pool,PN_MEM_DOCUMENT,cap);if(!grown)return PN_NO_MEMORY;
         if(*size)memcpy(grown,*buffer,*size);
         pn_free(*buffer);*buffer=grown;*capacity=cap;
     }
@@ -366,12 +367,12 @@ static pn_status_t collect_end(void *ctx,const char *name){
 }
 static pn_status_t collect_sheets(sheet_t *sheet,const char *path,const uint8_t salt[16]){
     pn_epub_chapter_input_t stream={0};pn_status_t status=pn_epub_chapter_open(sheet->epub,path,&stream);
-    collect_t *c=pn_alloc(sheet->pool,sizeof *c);if(!c){pn_epub_chapter_close(&stream);return PN_NO_MEMORY;}
+    collect_t *c=pn_alloc_tagged(sheet->pool,PN_MEM_DOCUMENT,sizeof *c);if(!c){pn_epub_chapter_close(&stream);return PN_NO_MEMORY;}
     *c=(collect_t){.sheet=sheet,.base=path};
     if(status==PN_OK){pn_xml_input_t input={&stream,pn_epub_chapter_read};pn_xml_hooks_t hooks={collect_start,collect_end,collect_text};status=pn_xml_parse(sheet->pool,&input,&hooks,c,32u*1024u*1024u,salt);}
     pn_free(c->buffer);pn_free(c);pn_epub_chapter_close(&stream);return status;
 }
-pn_status_t pn_xhtml_parse(pn_pool_t *pool,pn_epub_t *epub,const char *path,const uint8_t salt[16],pn_xhtml_sink_t sink,void *ctx,pn_xhtml_stats_t *stats){
+static pn_status_t pn_xhtml_parse_impl(pn_pool_t *pool,pn_epub_t *epub,const char *path,const uint8_t salt[16],pn_xhtml_sink_t sink,void *ctx,pn_xhtml_stats_t *stats){
     if(!pool || !epub || !path || !*path || strlen(path)>=PN_ZIP_PATH_MAX || !salt || !stats)return PN_INVALID;
     size_t ordinal;pn_status_t status=pn_epub_spine_find(epub,path,&ordinal);if(status!=PN_OK)return status;
     sheet_t sheet={.pool=pool,.epub=epub};status=collect_sheets(&sheet,path,salt);
@@ -382,6 +383,10 @@ pn_status_t pn_xhtml_parse(pn_pool_t *pool,pn_epub_t *epub,const char *path,cons
     if(status==PN_OK)status=pn_epub_spine_find(epub,path,&ordinal);
     if(status==PN_OK)*stats=candidate;
     sheet_close(&sheet);return status;
+}
+pn_status_t pn_xhtml_parse(pn_pool_t *pool,pn_epub_t *epub,const char *path,const uint8_t salt[16],pn_xhtml_sink_t sink,void *ctx,pn_xhtml_stats_t *stats){
+    pn_profile_span_t span;pn_profile_begin(&span,pool,"epub.model");
+    pn_status_t status=pn_xhtml_parse_impl(pool,epub,path,salt,sink,ctx,stats);pn_profile_end(&span,status);return status;
 }
 typedef struct {const char *id;bool found;pn_xhtml_position_t position;} anchor_t;
 static pn_status_t find_anchor(void *ctx,const pn_xhtml_event_t *event){
@@ -430,7 +435,7 @@ static pn_status_t window_event(void *ctx,const pn_xhtml_event_t *event){
 }
 pn_status_t pn_xhtml_window_start(pn_pool_t *pool,pn_epub_t *epub,const char *path,const pn_xhtml_position_t *target,const uint8_t salt[16],uint64_t *order,uint64_t *start_order,pn_xhtml_position_t *out){
     if(!order || !start_order || !out || (target && (!target->element || (target->kind!=PN_XHTML_ELEMENT && target->kind!=PN_XHTML_TEXT_POSITION))))return PN_INVALID;
-    window_t *w=pn_alloc(pool,sizeof *w);if(!w)return PN_NO_MEMORY;*w=(window_t){.target=target};pn_xhtml_stats_t stats;pn_status_t s=pn_xhtml_parse(pool,epub,path,salt,window_event,w,&stats);
+    window_t *w=pn_alloc_tagged(pool,PN_MEM_DOCUMENT,sizeof *w);if(!w)return PN_NO_MEMORY;*w=(window_t){.target=target};pn_xhtml_stats_t stats;pn_status_t s=pn_xhtml_parse(pool,epub,path,salt,window_event,w,&stats);
     if(s==PN_OK && target && !w->found)s=PN_EMPTY;
     if(s==PN_OK){if(!target)window_select(w);*out=w->selected;*order=target?w->found:w->order;*start_order=w->selected_order;}
     pn_free(w);return s;

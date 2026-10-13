@@ -73,7 +73,7 @@ static void load_global(fm_t *f){
     else if(status==PN_CORRUPT || status==PN_UNSUPPORTED)f->global_known=false;
 }
 static pn_status_t load_page(fm_t *f,const char *cursor,bool previous){
-    pn_catalog_page_t *next=pn_alloc(f->pool,sizeof *next);
+    pn_catalog_page_t *next=pn_alloc_tagged(f->pool,PN_MEM_UI,sizeof *next);
     if(!next)return PN_NO_MEMORY;
     pn_media_lease_t lease;pn_status_t status=pn_media_acquire(f->fonts,PN_MEDIA_READ,&lease);
     if(status==PN_OK){status=previous?pn_catalog_font_page_before(f->fonts,&lease,f->font_dir,cursor,next):pn_catalog_font_page(f->fonts,&lease,f->font_dir,cursor,next);(void)pn_media_release(f->fonts,&lease);}
@@ -176,11 +176,11 @@ pn_status_t pn_font_manage_open(pn_font_manage_t *ui,pn_pool_t *pool,pn_media_t 
     if(!ui || !pool || !font_media || !font_dir || !*font_dir || !present || (state_media && (!state_dir || !*state_dir)))return PN_INVALID;
     if(ui->impl)return PN_BUSY;
     if(strlen(font_dir)>=PN_CATALOG_PATH_MAX || (state_dir && strlen(state_dir)>=PN_JOURNAL_PATH_MAX))return PN_LIMIT;
-    fm_t *f=pn_alloc(pool,sizeof *f);
+    fm_t *f=pn_alloc_tagged(pool,PN_MEM_UI,sizeof *f);
     if(!f)return PN_NO_MEMORY;
     memset(f,0,sizeof *f);f->pool=pool;f->fonts=font_media;f->state=state_media;strcpy(f->font_dir,font_dir);
     if(state_media)strcpy(f->state_dir,state_dir);
-    f->pixels=pn_alloc(pool,(size_t)W/2*H);
+    f->pixels=pn_alloc_tagged(pool,PN_MEM_UI,(size_t)W/2*H);
     pn_status_t status=f->pixels?PN_OK:PN_NO_MEMORY;
     if(status==PN_OK){(void)pn_frame_bind(&f->canvas,f->pixels,(size_t)W/2*H,W,H);pn_text_source_t builtin=pn_font_builtin_source();status=pn_font_open(&f->ui,pool,&builtin,28);}
     if(status!=PN_OK){pn_free(f->pixels);pn_free(f);return status;}

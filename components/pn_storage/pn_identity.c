@@ -6,6 +6,7 @@
  * 冻结：不写文件；调用方排除文件并发变更，不用于安全认证。
  * Frozen: no file writes; caller excludes concurrent mutation; not for security authentication.
  */
+#include "pn_profile.h"
 #include "pn_identity.h"
 #include "pn_cancel.h"
 #include <stdio.h>
@@ -58,7 +59,7 @@ static void finish(sha_t *s, pn_book_id_t *id) {
     compress(s,s->block);
     for (unsigned i=0;i<32;i++) id->sha256[i]=(uint8_t)(s->h[i/4]>>(24-8*(i%4)));
 }
-pn_status_t pn_identity_file(pn_media_t *media, const pn_media_lease_t *lease,
+static pn_status_t pn_identity_file_impl(pn_media_t *media, const pn_media_lease_t *lease,
     const char *path, uint64_t limit, pn_book_id_t *id) {
     if (!media || !lease || !path || !*path || !id) return PN_INVALID;
     pn_status_t status=pn_media_validate(media,lease); if (status!=PN_OK) return status;
@@ -79,6 +80,11 @@ pn_status_t pn_identity_file(pn_media_t *media, const pn_media_lease_t *lease,
     pn_status_t current=pn_media_validate(media,lease); if (current!=PN_OK) return current;
     if (status!=PN_OK) return status;
     pn_book_id_t result; finish(&hash,&result); *id=result; return PN_OK;
+}
+pn_status_t pn_identity_file(pn_media_t *media, const pn_media_lease_t *lease,
+    const char *path, uint64_t limit, pn_book_id_t *id){
+    pn_profile_span_t span;pn_profile_begin(&span,NULL,"content.sha");
+    pn_status_t status=pn_identity_file_impl(media,lease,path,limit,id);pn_profile_end(&span,status);return status;
 }
 
 pn_status_t pn_identity_bytes(const uint8_t *bytes,size_t n,pn_book_id_t *out){

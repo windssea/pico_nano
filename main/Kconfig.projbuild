@@ -1,0 +1,8 @@
+menu "PicoNano diagnostics"
+config PN_PROFILE
+    bool "Log memory and phase timing"
+    default n
+    help
+        Emit owner phase timing, pool accounting and real heap snapshots.
+        Serial logging changes timing; use dedicated diagnostic runs.
+endmenu

@@ -6,9 +6,23 @@
  * 冻结：全资源校验前节点暂定；不提交显示/位置，不隐藏未接入图片能力。
  * Frozen: nodes are provisional before full-resource verification; no display/location commits or hidden image-capability omissions.
  */
+#include "pn_profile.h"
 #include "pn_epub_page.h"
 #include <limits.h>
 #include <string.h>
+pn_status_t pn_epub_page_reserve(pn_epub_page_t *page,pn_pool_t *pool,size_t nodes,size_t images){
+    if(!page || !pool || (page->owner && page->owner!=pool) || (!page->owner && (page->nodes || page->images)))return PN_INVALID;
+    if(nodes>PN_PAGE_GLYPHS_MAX || images>PN_EPUB_PAGE_IMAGES_MAX)return PN_LIMIT;
+    if(nodes>page->capacity){pn_epub_page_node_t *next=pn_alloc_tagged(pool,PN_MEM_LAYOUT,nodes*sizeof *next);if(!next)return PN_NO_MEMORY;
+        if(page->count)memcpy(next,page->nodes,page->count*sizeof *next);
+        pn_free(page->nodes);page->nodes=next;page->capacity=nodes;}
+    page->owner=pool;
+    if(images>page->image_capacity){pn_epub_page_image_t *next=pn_alloc_tagged(pool,PN_MEM_LAYOUT,images*sizeof *next);if(!next)return PN_NO_MEMORY;
+        if(page->image_count)memcpy(next,page->images,page->image_count*sizeof *next);
+        pn_free(page->images);page->images=next;page->image_capacity=images;}
+    return PN_OK;
+}
+void pn_epub_page_release(pn_epub_page_t *page){if(page && page->owner){pn_free(page->nodes);pn_free(page->images);*page=(pn_epub_page_t){0};}}
 typedef struct {
     pn_epub_page_t *page;const pn_layout_t *layout;const pn_epub_measure_t *measure;const pn_xhtml_position_t *start,*stop;uint64_t order;bool stop_seen;
     size_t row,last_space;int y,row_ascent,row_height;int32_t x;
@@ -98,6 +112,7 @@ static pn_status_t item(layout_t *l,const pn_xhtml_event_t *event,bool paragraph
     pn_epub_page_image_t image={0};pn_status_t status;
     if(event->kind==PN_XHTML_IMAGE){
         if(!l->measure->image)return PN_UNSUPPORTED;
+        if(p->image_count>=p->image_capacity && p->owner){size_t cap=p->image_capacity?p->image_capacity*2:2;if(cap>PN_EPUB_PAGE_IMAGES_MAX)cap=PN_EPUB_PAGE_IMAGES_MAX;status=pn_epub_page_reserve(p,p->owner,p->capacity,cap);if(status!=PN_OK)return status;}
         if(!p->images || p->image_count>=p->image_capacity)return PN_LIMIT;
         status=l->measure->image(l->measure->ctx,event->value,l->layout->width,l->layout->height,&image.width,&image.height);if(status!=PN_OK)return status;
         if(image.width<1 || image.height<1 || image.width>l->layout->width || image.height>l->layout->height)return PN_LIMIT;
@@ -120,6 +135,7 @@ static pn_status_t item(layout_t *l,const pn_xhtml_event_t *event,bool paragraph
         if(p->count>l->row){pn_xhtml_position_t at=p->nodes[l->row].position;next(l,&at,l->row,p->nodes[l->row].source_order);}else next(l,&event->position,p->count,l->order);
         return PN_OK;
     }
+    if(p->count==p->capacity && p->owner && p->capacity<PN_PAGE_GLYPHS_MAX){size_t cap=p->capacity*2;if(cap>PN_PAGE_GLYPHS_MAX)cap=PN_PAGE_GLYPHS_MAX;status=pn_epub_page_reserve(p,p->owner,cap,p->image_capacity);if(status!=PN_OK)return status;}
     if(p->count==p->capacity)return PN_LIMIT;
     if(node.image_index!=UINT_MAX)p->images[p->image_count++]=image;
     node.x_64=l->x;p->nodes[p->count++]=node;l->x+=node.metrics.advance_64;if(node.image_index==UINT_MAX)l->x+=l->layout->letter_spacing_64;l->row_ascent=ascent;l->row_height=h;
@@ -155,7 +171,7 @@ static pn_status_t init(pn_pool_t *pool,const pn_xhtml_position_t *start,const p
     if(!pool || !layout || !measure || !measure->glyph || !page->nodes || !page->capacity || page->capacity>PN_PAGE_GLYPHS_MAX || page->image_capacity>PN_EPUB_PAGE_IMAGES_MAX || (page->image_capacity && !page->images) || layout->width<1 || layout->width>4096 || layout->height<1 || layout->height>4096 || layout->line_height<1 || layout->line_height>layout->height || layout->indent<0 || layout->indent>=layout->width || layout->paragraph_gap<0 || layout->paragraph_gap>4096 || layout->letter_spacing_64<0 || layout->letter_spacing_64>4096)return PN_INVALID;
     if(start && (!start->element || (start->kind!=PN_XHTML_ELEMENT && start->kind!=PN_XHTML_TEXT_POSITION) || (start->kind==PN_XHTML_ELEMENT && (start->run || start->offset))))return PN_INVALID;
     if(stop && (!stop->element || (stop->kind!=PN_XHTML_ELEMENT && stop->kind!=PN_XHTML_TEXT_POSITION) || (stop->kind==PN_XHTML_ELEMENT && (stop->run || stop->offset))))return PN_INVALID;
-    layout_t *l=pn_alloc(pool,sizeof *l);if(!l)return PN_NO_MEMORY;
+    layout_t *l=pn_alloc_tagged(pool,PN_MEM_LAYOUT,sizeof *l);if(!l)return PN_NO_MEMORY;
     *l=(layout_t){.page=page,.layout=layout,.measure=measure,.start=start,.stop=stop,.last_space=SIZE_MAX,.active=start==NULL,.matched=start==NULL,.paragraph=true};*owner=l;return PN_OK;
 }
 static pn_status_t finish(layout_t *l,pn_status_t status){
@@ -168,12 +184,20 @@ pn_status_t pn_epub_page_input(pn_pool_t *pool,const pn_xml_input_t *input,const
     layout_t *l;pn_status_t status=init(pool,start,NULL,layout,measure,page,&l);if(status!=PN_OK)return status;
     pn_xhtml_stats_t stats;status=pn_xhtml_parse_input(pool,input,base,salt,consume,l,&stats);return finish(l,status);
 }
-pn_status_t pn_epub_page_prepare(pn_pool_t *pool,pn_epub_t *epub,const char *path,const uint8_t salt[16],const pn_xhtml_position_t *start,const pn_layout_t *layout,const pn_epub_measure_t *measure,pn_epub_page_t *page){
+static pn_status_t pn_epub_page_prepare_impl(pn_pool_t *pool,pn_epub_t *epub,const char *path,const uint8_t salt[16],const pn_xhtml_position_t *start,const pn_layout_t *layout,const pn_epub_measure_t *measure,pn_epub_page_t *page){
     layout_t *l;pn_status_t status=init(pool,start,NULL,layout,measure,page,&l);if(status!=PN_OK)return status;
     pn_xhtml_stats_t stats;status=pn_xhtml_parse(pool,epub,path,salt,consume,l,&stats);return finish(l,status);
 }
+pn_status_t pn_epub_page_prepare(pn_pool_t *pool,pn_epub_t *epub,const char *path,const uint8_t salt[16],const pn_xhtml_position_t *start,const pn_layout_t *layout,const pn_epub_measure_t *measure,pn_epub_page_t *page){
+    pn_profile_span_t span;pn_profile_begin(&span,pool,"epub.layout");
+    pn_status_t status=pn_epub_page_prepare_impl(pool,epub,path,salt,start,layout,measure,page);pn_profile_end(&span,status);return status;
+}
 
-pn_status_t pn_epub_page_prepare_until(pn_pool_t *pool,pn_epub_t *epub,const char *path,const uint8_t salt[16],const pn_xhtml_position_t *start,const pn_xhtml_position_t *stop,const pn_layout_t *layout,const pn_epub_measure_t *measure,pn_epub_page_t *page){
+static pn_status_t pn_epub_page_prepare_until_impl(pn_pool_t *pool,pn_epub_t *epub,const char *path,const uint8_t salt[16],const pn_xhtml_position_t *start,const pn_xhtml_position_t *stop,const pn_layout_t *layout,const pn_epub_measure_t *measure,pn_epub_page_t *page){
     layout_t *l;pn_status_t status=init(pool,start,stop,layout,measure,page,&l);if(status!=PN_OK)return status;
     pn_xhtml_stats_t stats;status=pn_xhtml_parse(pool,epub,path,salt,consume,l,&stats);return finish(l,status);
+}
+pn_status_t pn_epub_page_prepare_until(pn_pool_t *pool,pn_epub_t *epub,const char *path,const uint8_t salt[16],const pn_xhtml_position_t *start,const pn_xhtml_position_t *stop,const pn_layout_t *layout,const pn_epub_measure_t *measure,pn_epub_page_t *page){
+    pn_profile_span_t span;pn_profile_begin(&span,pool,"epub.layout-until");
+    pn_status_t status=pn_epub_page_prepare_until_impl(pool,epub,path,salt,start,stop,layout,measure,page);pn_profile_end(&span,status);return status;
 }

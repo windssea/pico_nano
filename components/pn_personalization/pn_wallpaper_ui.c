@@ -30,7 +30,7 @@ typedef struct {
 static const char *base(const char *path){const char *slash=strrchr(path,'/');return slash?slash+1:path;}
 static const char *mode_name(const pn_lock_selection_t *s){return s->mode==PN_LOCK_MASK?"透明遮罩":s->mode==PN_LOCK_CUSTOM?"全屏壁纸":"系统默认";}
 static pn_status_t load_page(ui_t *u,const char *cursor,bool previous){
-    pn_catalog_page_t *next=pn_alloc(u->pool,sizeof *next);if(!next)return PN_NO_MEMORY;
+    pn_catalog_page_t *next=pn_alloc_tagged(u->pool,PN_MEM_UI,sizeof *next);if(!next)return PN_NO_MEMORY;
     pn_media_lease_t lease;pn_status_t status=pn_media_acquire(u->images,PN_MEDIA_READ,&lease);
     if(status==PN_OK){status=previous?pn_catalog_image_page_before(u->images,&lease,u->directory,cursor,next):pn_catalog_image_page(u->images,&lease,u->directory,cursor,next);(void)pn_media_release(u->images,&lease);}
     if(status==PN_OK && (next->count || !*cursor))u->page=*next;
@@ -53,7 +53,7 @@ static pn_status_t build_preview(ui_t *u){
         size_t free_bytes=u->pool->limit>u->pool->used?u->pool->limit-u->pool->used:0;
         if(status==PN_OK){
             if(u->draft.mode==PN_LOCK_MASK){
-                if(!u->alpha_px)u->alpha_px=pn_alloc(u->pool,PN_WALLPAPER_BYTES);
+                if(!u->alpha_px)u->alpha_px=pn_alloc_tagged(u->pool,PN_MEM_UI,PN_WALLPAPER_BYTES);
                 if(!u->alpha_px)status=PN_NO_MEMORY;
                 else{(void)pn_frame_bind(&u->alpha,u->alpha_px,PN_WALLPAPER_BYTES,W,H);free_bytes=u->pool->limit>u->pool->used?u->pool->limit-u->pool->used:0;
                     status=pn_wallpaper_mask_prepare(u->pool,u->images,&lease,u->draft.source,u->draft.transform,free_bytes>RESERVE?free_bytes-RESERVE:1,&u->bitmap,&u->alpha);}
@@ -131,9 +131,9 @@ pn_status_t pn_wallpaper_ui_open(pn_wallpaper_ui_t *ui,pn_pool_t *pool,pn_media_
     if(!ui || !pool || !images_media || !directory || !*directory || !present)return PN_INVALID;
     if(ui->impl)return PN_BUSY;
     if(strlen(directory)>=PN_CATALOG_PATH_MAX)return PN_LIMIT;
-    ui_t *u=pn_alloc(pool,sizeof *u);if(!u)return PN_NO_MEMORY;memset(u,0,sizeof *u);u->pool=pool;u->images=images_media;strcpy(u->directory,directory);
+    ui_t *u=pn_alloc_tagged(pool,PN_MEM_UI,sizeof *u);if(!u)return PN_NO_MEMORY;memset(u,0,sizeof *u);u->pool=pool;u->images=images_media;strcpy(u->directory,directory);
     if(store){u->store=*store;u->has_store=true;}
-    u->canvas_px=pn_alloc(pool,PN_WALLPAPER_BYTES);u->bitmap_px=pn_alloc(pool,PN_WALLPAPER_BYTES);u->small_px=pn_alloc(pool,(size_t)PW/2*PH);
+    u->canvas_px=pn_alloc_tagged(pool,PN_MEM_UI,PN_WALLPAPER_BYTES);u->bitmap_px=pn_alloc_tagged(pool,PN_MEM_UI,PN_WALLPAPER_BYTES);u->small_px=pn_alloc_tagged(pool,PN_MEM_UI,(size_t)PW/2*PH);
     pn_status_t status=u->canvas_px && u->bitmap_px && u->small_px?PN_OK:PN_NO_MEMORY;
     if(status==PN_OK){(void)pn_frame_bind(&u->canvas,u->canvas_px,PN_WALLPAPER_BYTES,W,H);(void)pn_frame_bind(&u->bitmap,u->bitmap_px,PN_WALLPAPER_BYTES,W,H);(void)pn_frame_bind(&u->small,u->small_px,(size_t)PW/2*PH,PW,PH);
         pn_text_source_t builtin=pn_font_builtin_source();status=pn_font_open(&u->font,pool,&builtin,28);}

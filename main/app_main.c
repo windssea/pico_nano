@@ -7,6 +7,7 @@
  * Frozen: no formatting/NVS erase or SY calibration writes; no presentation without valid VCOM.
  */
 #include "pn_brand.h"
+#include "pn_profile.h"
 #include "pn_catalog_index.h"
 #include "pn_brand_image.h"
 #include "pn_reader_app.h"
@@ -145,6 +146,18 @@ static void filter_recent_available(pn_recent_snapshot_t *snapshot){
 static void *psram_alloc(void *ctx,size_t size){(void)ctx;return heap_caps_malloc(size,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);}
 static void psram_free(void *ctx,void *ptr){(void)ctx;heap_caps_free(ptr);}
 static uint64_t now_ms(void){return (uint64_t)(esp_timer_get_time()/1000);}
+#if defined(ESP_PLATFORM) && defined(CONFIG_PN_PROFILE)
+static void profile_task_stacks(const char *);
+static uint64_t profile_clock(void *ctx){(void)ctx;return (uint64_t)esp_timer_get_time();}
+static void profile_emit(void *ctx,const pn_profile_event_t *e){
+    (void)ctx;ESP_LOGI(TAG,"profile phase=%s elapsed_us=%llu status=%d begin=%zu end=%zu peak=%zu attempts=%zu backend=device",e->phase,(unsigned long long)e->elapsed_us,(int)e->status,e->begin_bytes,e->end_bytes,e->peak_bytes,e->attempts);
+    const unsigned caps[]={MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT};
+    for(unsigned j=0;j<2;j++)ESP_LOGI(TAG,"heap phase=%s region=%s free=%zu minimum=%zu largest=%zu",e->phase,j?"psram":"internal",heap_caps_get_free_size(caps[j]),heap_caps_get_minimum_free_size(caps[j]),heap_caps_get_largest_free_block(caps[j]));
+    if(e->pool)for(unsigned j=0;j<PN_MEM_COUNT;j++){const pn_memory_stats_t *m=&e->pool->memory[j];ESP_LOGI(TAG,"memory phase=%s tag=%s used=%zu peak=%zu live=%zu allocations=%zu failures=%zu",e->phase,pn_memory_tag_name((pn_memory_tag_t)j),m->used,m->peak,m->live,m->allocations,m->failures);}
+    ESP_LOGI(TAG,"stack phase=%s owner=product minimum_bytes=%u",e->phase,(unsigned)uxTaskGetStackHighWaterMark(NULL));
+    profile_task_stacks(e->phase);
+}
+#endif
 /// 高压轨空闲保活毫秒；断电需等放电、再上电要数十毫秒，连续翻页期间不应反复开关。/ Idle keep-alive for the HV rails; power-off waits for discharge and power-on takes tens of ms, so do not toggle them between consecutive page turns.
 #define RAILS_IDLE_MS 8000u
 /// 连续软刷新(GL16)达到该次数后升级为一次整屏GC16，压掉累积灰底（同官方示例每14次）。/ Promote one full GC16 after this many consecutive soft (GL16) refreshes to clear the accumulated gray floor (14, as in the official demo).
@@ -170,6 +183,12 @@ static pn_focus_t focus_nav; ///< 当前页的三键焦点表 / Three-key focus 
 #define PARTIAL_MAX_PERCENT 45
 static uint8_t *shown_px;
 static pn_device_async_t async_port;
+#if defined(ESP_PLATFORM) && defined(CONFIG_PN_PROFILE)
+static void profile_task_stacks(const char *phase){
+    if(async_port.input_task_handle)ESP_LOGI(TAG,"stack phase=%s owner=input minimum_bytes=%u",phase,(unsigned)uxTaskGetStackHighWaterMark(async_port.input_task_handle));
+    if(async_port.display_task_handle)ESP_LOGI(TAG,"stack phase=%s owner=display minimum_bytes=%u",phase,(unsigned)uxTaskGetStackHighWaterMark(async_port.display_task_handle));
+}
+#endif
 static bool dirty_box(const pn_frame_t *frame,EpdRect *box){
     if(!shown_px)return false;
     int top=-1,bottom=-1,left=342,right=-1;
@@ -230,19 +249,23 @@ static pn_status_t present_panel(void *ctx,const pn_frame_t *frame,pn_refresh_t 
     ESP_LOGI(TAG,"Present mode=%u prepare=%llu ms panel=%llu ms pool=%u/%u",(unsigned)mode,(unsigned long long)(panel_at-prepared_at),(unsigned long long)(now_ms()-panel_at),(unsigned)pool.used,(unsigned)pool.limit);
     return panel_known?PN_OK:PN_IO;
 }
-static pn_status_t present(void *ctx,const pn_frame_t *frame,pn_refresh_t profile){
+static pn_status_t present_impl(void *ctx,const pn_frame_t *frame,pn_refresh_t profile){
     (void)ctx;
     // 池只由产品worker分配；显示任务只写预分配的已显示像素。/ Only the product worker allocates; display writes preallocated shown pixels.
-    if(!shown_px)shown_px=pn_alloc(&pool,342u*1216u);
+    if(!shown_px)shown_px=pn_alloc_tagged(&pool,PN_MEM_FRAME,342u*1216u);
     if(!reader_active()){pn_free(page_copy);page_copy=NULL;}
     bool backup=reader_active() && !toolbar_open && frame->width==684 && frame->height==1216 && frame->stride>=342;
-    if(backup && !page_copy)page_copy=pn_alloc(&pool,342u*1216u);
+    if(backup && !page_copy)page_copy=pn_alloc_tagged(&pool,PN_MEM_FRAME,342u*1216u);
     bool ring=ring_pending;ring_pending=false;
     uint8_t *saved=NULL;
-    if(ring){saved=pn_alloc(&pool,342u*1216u);if(saved)for(int y=0;y<1216;y++)memcpy(saved+(size_t)y*342,frame->pixels+(size_t)y*frame->stride,342);pn_frame_t view=*frame;pn_focus_draw(&view,&ring_item);}
+    if(ring){saved=pn_alloc_tagged(&pool,PN_MEM_FRAME,342u*1216u);if(saved)for(int y=0;y<1216;y++)memcpy(saved+(size_t)y*342,frame->pixels+(size_t)y*frame->stride,342);pn_frame_t view=*frame;pn_focus_draw(&view,&ring_item);}
     pn_status_t status=async_port.panel?pn_device_async_present(&async_port,frame,profile):present_panel(NULL,frame,profile);
     if(status==PN_OK && backup && page_copy && frame->pixels!=page_copy){const uint8_t *pixels=saved?saved:frame->pixels;size_t stride=saved?342:frame->stride;for(int y=0;y<1216;y++)memcpy(page_copy+(size_t)y*342,pixels+(size_t)y*stride,342);}
     pn_free(saved);return status;
+}
+static pn_status_t present(void *ctx,const pn_frame_t *frame,pn_refresh_t profile){
+    pn_profile_span_t span;pn_profile_begin(&span,&pool,"display.receipt");
+    pn_status_t status=present_impl(ctx,frame,profile);pn_profile_end(&span,status);return status;
 }
 static bool reader_active(void){return reader.impl || epub.impl;}
 static pn_status_t active_step(pn_reader_action_t action,uint64_t now){
@@ -267,7 +290,7 @@ static void message(const char *title,const char *detail){
     pn_bookmark_ui_cancel(&bookmarks);
     pn_style_ui_close(&styles);pn_font_ui_close(&fonts);pn_wallpaper_ui_close(&wallpaper_ui);pn_font_manage_close(&font_manage);pn_settings_ui_close(&settings_ui);
     status_page=true;shelf_mode=false;index_mode=false;search_mode=false;hub_mode=false;actions_mode=false;
-    uint8_t *pixels=pn_alloc(&pool,684u*1216u/2u);pn_frame_t frame;pn_font_t font={0};pn_text_source_t builtin=pn_font_builtin_source();
+    uint8_t *pixels=pn_alloc_tagged(&pool,PN_MEM_FRAME,684u*1216u/2u);pn_frame_t frame;pn_font_t font={0};pn_text_source_t builtin=pn_font_builtin_source();
     pn_status_t status=pn_frame_bind(&frame,pixels,684u*1216u/2u,684,1216)?PN_OK:PN_NO_MEMORY;
     if(status==PN_OK)status=pn_font_open(&font,&pool,&builtin,28);
     // 状态页：产品名、标题、按行说明，底部圆角“重试”按钮（点击区y>=1070）。/ Status page: product name, title, line-by-line explanation and a rounded Retry button at the bottom (touch area y>=1070).
@@ -305,7 +328,7 @@ static bool mount_wallpaper(void){
 static void show_lock(const char *hint){
     reading_menu=false;pn_toc_ui_close(&toc);pn_bookmark_ui_cancel(&bookmarks);pn_style_ui_close(&styles);pn_font_ui_close(&fonts);pn_wallpaper_ui_close(&wallpaper_ui);pn_font_manage_close(&font_manage);pn_settings_ui_close(&settings_ui);
     status_page=true;shelf_mode=false;index_mode=false;search_mode=false;hub_mode=false;actions_mode=false;
-    uint8_t *pixels=pn_alloc(&pool,PN_WALLPAPER_BYTES);pn_frame_t frame;pn_font_t font={0};pn_text_source_t builtin=pn_font_builtin_source();
+    uint8_t *pixels=pn_alloc_tagged(&pool,PN_MEM_FRAME,PN_WALLPAPER_BYTES);pn_frame_t frame;pn_font_t font={0};pn_text_source_t builtin=pn_font_builtin_source();
     pn_lock_selection_t selection={.mode=PN_LOCK_DEFAULT,.hint=true};
     pn_status_t status=pn_frame_bind(&frame,pixels,PN_WALLPAPER_BYTES,PN_WALLPAPER_WIDTH,PN_WALLPAPER_HEIGHT)?PN_OK:PN_NO_MEMORY;
     if(status==PN_OK && mount_wallpaper()){pn_wallpaper_store_t store;pn_media_lease_t lease;
@@ -366,7 +389,7 @@ static pn_shelf_options_t shelf_options(void){
 /// 读收藏夹到favorites（没有记录为空表）。/ Load favorites (an empty list without a record).
 static pn_status_t favorites_load(void){
     if(!data_ready)return PN_UNSUPPORTED;
-    if(!favorites)favorites=pn_alloc(&pool,sizeof *favorites);
+    if(!favorites)favorites=pn_alloc_tagged(&pool,PN_MEM_UI,sizeof *favorites);
     if(!favorites)return PN_NO_MEMORY;
     pn_media_lease_t lease={0};pn_status_t status=pn_media_acquire(&data_media,PN_MEDIA_READ,&lease);
     pn_journal_files_t files;pn_journal_io_t io;
@@ -384,7 +407,7 @@ static pn_status_t favorites_ensure(void){
 }
 static pn_status_t draw_shelf(pn_refresh_t profile){
     ESP_LOGI(TAG,"Shelf draw profile=%u home=%u covers_dirty=%u",(unsigned)profile,(unsigned)home_mode,(unsigned)covers_dirty);
-    uint8_t *pixels=pn_alloc(&pool,684u*1216u/2u);pn_frame_t frame;pn_font_t font={0};pn_text_source_t builtin=pn_font_builtin_source();
+    uint8_t *pixels=pn_alloc_tagged(&pool,PN_MEM_FRAME,684u*1216u/2u);pn_frame_t frame;pn_font_t font={0};pn_text_source_t builtin=pn_font_builtin_source();
     pn_status_t status=pn_frame_bind(&frame,pixels,684u*1216u/2u,684,1216)?PN_OK:PN_NO_MEMORY;
     if(status==PN_OK)status=pn_font_open(&font,&pool,&builtin,24);
     if(status==PN_OK){pn_w_set_battery(battery_percent());pn_shelf_options_t options=shelf_options();if(favorites_ensure()==PN_OK)options.favorite_items=favorites;status=pn_shelf_render_with_font_file_ex(shelf_page,&font,&frame,shelf_focus,recent_mode,true,shelf_covers,&pool,&sd_media,NULL,&options);}
@@ -403,7 +426,7 @@ static void tick_covers(void){
 /// 最近记录在本owner内复用，关闭阅读或换卡后重载。/ Reuse recents within this owner; reload after closing a reader or changing media.
 static pn_status_t load_recent(void){
     if(recent_loaded && recent_epoch==sd_media.epoch)return PN_OK;
-    if(!recent_snapshot)recent_snapshot=pn_alloc(&pool,sizeof *recent_snapshot);
+    if(!recent_snapshot)recent_snapshot=pn_alloc_tagged(&pool,PN_MEM_UI,sizeof *recent_snapshot);
     pn_media_lease_t lease={0};pn_status_t status=recent_snapshot?pn_media_acquire(&data_media,PN_MEDIA_READ,&lease):PN_NO_MEMORY;
     pn_journal_files_t files;pn_journal_io_t io;
     if(status==PN_OK)status=pn_recent_files(&files,&data_media,&lease,"/data/progress",&io);
@@ -416,7 +439,7 @@ static pn_status_t load_recent(void){
 /// 取最近阅读第一本作为“继续阅读”卡；读取失败或没有记录时不显示卡。/ Use the first recent entry as the continue-reading card; show none when unreadable or empty.
 static void refresh_last(void){
     if(!shelf_covers)return;
-    pn_catalog_page_t *tmp=pn_alloc(&pool,sizeof *tmp);bool found=false;
+    pn_catalog_page_t *tmp=pn_alloc_tagged(&pool,PN_MEM_UI,sizeof *tmp);bool found=false;
     if(tmp && data_ready){
         pn_status_t status=load_recent();
         // 书架条目的“进度 · 格式”行用同一份记录。/ The shelf entries' progress line uses the same snapshot.
@@ -428,8 +451,8 @@ static void refresh_last(void){
 }
 static void show_shelf(const char *cursor,bool previous){
     pn_wallpaper_mask_close(&reading_mask);
-    if(!shelf_page){shelf_page=pn_alloc(&pool,sizeof *shelf_page);if(!shelf_page){message("内存不足","稍后重试");return;}}
-    pn_catalog_page_t *next=pn_alloc(&pool,sizeof *next);if(!next){message("内存不足","稍后重试");return;}
+    if(!shelf_page){shelf_page=pn_alloc_tagged(&pool,PN_MEM_UI,sizeof *shelf_page);if(!shelf_page){message("内存不足","稍后重试");return;}}
+    pn_catalog_page_t *next=pn_alloc_tagged(&pool,PN_MEM_UI,sizeof *next);if(!next){message("内存不足","稍后重试");return;}
     pn_media_lease_t lease={0};pn_status_t status;
     if(!home_mode && fav_mode){
         status=favorites_load();
@@ -454,7 +477,7 @@ static void show_shelf(const char *cursor,bool previous){
     if(status==PN_OK && (next->count || !*cursor)){*shelf_page=*next;shelf_focus=-1;}
     pn_free(next);
     // 换页先用缓存封面，首帧即完整；未命中的留给空闲逐条解码。/ Use cached covers on page change so the first paint is complete; misses decode later per idle tick.
-    if(status==PN_OK && !shelf_covers)shelf_covers=pn_alloc(&pool,sizeof *shelf_covers);
+    if(status==PN_OK && !shelf_covers)shelf_covers=pn_alloc_tagged(&pool,PN_MEM_UI,sizeof *shelf_covers);
     if(status==PN_OK && shelf_covers){bool changed;refresh_last();pn_shelf_covers_reset(shelf_covers,shelf_page);covers_dirty=false;
         if(pn_shelf_covers_cached(shelf_covers,shelf_page,&pool,&sd_media,cover_cache,&changed)!=PN_OK)pn_shelf_covers_reset(shelf_covers,NULL);}
     if(status==PN_OK)status=draw_shelf(panel_known?PN_REFRESH_GL16:PN_REFRESH_GC16);
@@ -538,7 +561,7 @@ static void handle_network_request(void){
     (void)pn_device_transfer_network_result(&transfer,status,saved_network);
 }
 static void paint_transfer(bool menu){
-    uint8_t *pixels=pn_alloc(&pool,684u*1216u/2u);pn_frame_t frame;pn_font_t font={0};pn_text_source_t builtin=pn_font_builtin_source();
+    uint8_t *pixels=pn_alloc_tagged(&pool,PN_MEM_FRAME,684u*1216u/2u);pn_frame_t frame;pn_font_t font={0};pn_text_source_t builtin=pn_font_builtin_source();
     pn_status_t status=pn_frame_bind(&frame,pixels,684u*1216u/2u,684,1216)?PN_OK:PN_NO_MEMORY;
     if(status==PN_OK)status=pn_font_open(&font,&pool,&builtin,32);
     if(status==PN_OK)status=menu?pn_reading_menu_render_lan(reader_active(),*saved_network?saved_network:NULL,&font,&frame):pn_transfer_view_render(&transfer_view,&font,&frame);
@@ -660,7 +683,7 @@ static void lock_and_sleep(const char *hint){
 /// 字母跳转页。/ Letter-index page.
 /// 打开搜索输入页；沿用字母页的状态约定（不在书架模式）。/ Open the search input page, following the letter-index page's state conventions (not in shelf mode).
 static void show_search(void){
-    uint8_t *pixels=pn_alloc(&pool,684u*1216u/2u);pn_frame_t frame;pn_font_t font={0};pn_text_source_t builtin=pn_font_builtin_source();
+    uint8_t *pixels=pn_alloc_tagged(&pool,PN_MEM_FRAME,684u*1216u/2u);pn_frame_t frame;pn_font_t font={0};pn_text_source_t builtin=pn_font_builtin_source();
     pn_status_t status=pn_frame_bind(&frame,pixels,684u*1216u/2u,684,1216)?PN_OK:PN_NO_MEMORY;
     if(status==PN_OK)status=pn_font_open(&font,&pool,&builtin,40);
     if(status==PN_OK)status=pn_search_ui_render(&search_ui,&font,&frame);
@@ -679,7 +702,7 @@ static void show_hub(void){
     if(transfer.impl)return;
     refresh_network_name();storage_note(hub_storage,sizeof hub_storage);
     hub_info=(pn_transfer_hub_info_t){.hotspot=true,.lan=*saved_network!=0,.localsend=true,.lan_name=saved_network,.storage=hub_storage};
-    uint8_t *pixels=pn_alloc(&pool,684u*1216u/2u);pn_frame_t frame;pn_font_t font={0};pn_text_source_t builtin=pn_font_builtin_source();
+    uint8_t *pixels=pn_alloc_tagged(&pool,PN_MEM_FRAME,684u*1216u/2u);pn_frame_t frame;pn_font_t font={0};pn_text_source_t builtin=pn_font_builtin_source();
     pn_status_t status=pn_frame_bind(&frame,pixels,684u*1216u/2u,684,1216)?PN_OK:PN_NO_MEMORY;
     if(status==PN_OK)status=pn_font_open(&font,&pool,&builtin,28);
     if(status==PN_OK)status=pn_transfer_hub_render(&font,&frame,&hub_info);
@@ -689,7 +712,7 @@ static void show_hub(void){
     else message("传书页未打开","稍后重试");
 }
 static void show_index(void){
-    uint8_t *pixels=pn_alloc(&pool,684u*1216u/2u);pn_frame_t frame;pn_font_t font={0};pn_text_source_t builtin=pn_font_builtin_source();
+    uint8_t *pixels=pn_alloc_tagged(&pool,PN_MEM_FRAME,684u*1216u/2u);pn_frame_t frame;pn_font_t font={0};pn_text_source_t builtin=pn_font_builtin_source();
     pn_status_t status=pn_frame_bind(&frame,pixels,684u*1216u/2u,684,1216)?PN_OK:PN_NO_MEMORY;
     if(status==PN_OK)status=pn_font_open(&font,&pool,&builtin,40);
     if(status==PN_OK)status=pn_shelf_index_render(&font,&frame);
@@ -703,7 +726,7 @@ static unsigned tool_unavailable(void){return epub.impl?0u:1u;}
 /// 在最近一页上叠加工具栏并呈现；失败时保持原页面。/ Overlay the toolbar on the latest page and present it; the page stays on failure.
 static void toolbar_show(void){
     if(toolbar_open || !reader_active() || status_page || !page_copy)return;
-    uint8_t *scratch=pn_alloc(&pool,342u*1216u);pn_frame_t frame;pn_font_t font={0};pn_text_source_t builtin=pn_font_builtin_source();
+    uint8_t *scratch=pn_alloc_tagged(&pool,PN_MEM_FRAME,342u*1216u);pn_frame_t frame;pn_font_t font={0};pn_text_source_t builtin=pn_font_builtin_source();
     pn_status_t status=scratch && pn_frame_bind(&frame,scratch,342u*1216u,684,1216)?PN_OK:PN_NO_MEMORY;
     if(status==PN_OK){memcpy(scratch,page_copy,342u*1216u);status=pn_font_open(&font,&pool,&builtin,34);}
     if(status==PN_OK)status=pn_reader_toolbar_render(&font,&frame,tool_unavailable());
@@ -755,7 +778,7 @@ static void open_actions(int index){
     // 成功底图直接叠加面板，按需准备面板文字；不扫描目录或重绘封面。/ Overlay the confirmed shelf with the sheet's glyphs, without directory scans or cover painting.
     pn_status_t status=PN_UNSUPPORTED;
     if(panel_known && shown_px){
-        uint8_t *pixels=pn_alloc(&pool,342u*1216u);pn_frame_t frame;pn_font_t font={0};pn_text_source_t source=pn_font_builtin_source();
+        uint8_t *pixels=pn_alloc_tagged(&pool,PN_MEM_FRAME,342u*1216u);pn_frame_t frame;pn_font_t font={0};pn_text_source_t source=pn_font_builtin_source();
         status=pn_frame_bind(&frame,pixels,342u*1216u,684,1216)?PN_OK:PN_NO_MEMORY;
         if(status==PN_OK){memcpy(pixels,shown_px,342u*1216u);status=pn_font_open(&font,&pool,&source,24);}
         pn_w_font_scope_t scope={0};
@@ -952,14 +975,18 @@ static void apply_selection(int selection){
 }
 /// 共用开机图只借一帧内存，推屏后立即归还；不读TF。/ Shared boot art borrows one frame, releases it after presentation, and never reads the SD card.
 static void show_boot_brand(void){
-    uint8_t *pixels=pn_alloc(&pool,684u*1216u/2u);pn_frame_t frame;
+    uint8_t *pixels=pn_alloc_tagged(&pool,PN_MEM_FRAME,684u*1216u/2u);pn_frame_t frame;
     pn_status_t status=pn_frame_bind(&frame,pixels,684u*1216u/2u,684,1216)?pn_brand_image_render(&frame):PN_NO_MEMORY;
     if(status==PN_OK)status=present(NULL,&frame,PN_REFRESH_GC16);
     pn_free(pixels);if(status!=PN_OK)ESP_LOGW(TAG,"Brand screen unavailable: %d",(int)status);
 }
 static void device_task(void *arg){
+#if defined(ESP_PLATFORM) && defined(CONFIG_PN_PROFILE)
+    pn_profile_port(profile_clock,profile_emit,NULL);
+#endif
     (void)arg;esp_err_t error=nvs_flash_init();if(error!=ESP_OK){ESP_LOGE(TAG,"NVS unavailable: %s; preserving data",esp_err_to_name(error));vTaskDelete(NULL);return;}
-    error=read_pico_init(&hardware);if(error!=ESP_OK){ESP_LOGE(TAG,"Board init failed: %s",esp_err_to_name(error));read_pico_deinit(&hardware);vTaskDelete(NULL);return;}
+    pn_profile_span_t board_span;pn_profile_begin(&board_span,NULL,"device.board-init");
+    error=read_pico_init(&hardware);pn_profile_end(&board_span,error==ESP_OK?PN_OK:PN_IO);if(error!=ESP_OK){ESP_LOGE(TAG,"Board init failed: %s",esp_err_to_name(error));read_pico_deinit(&hardware);vTaskDelete(NULL);return;}
     int vcom=0;if(!hardware.pmu_ready || read_pico_pmu_vcom_get(&vcom)!=ESP_OK){ESP_LOGE(TAG,"Factory VCOM unavailable; display withheld");read_pico_deinit(&hardware);vTaskDelete(NULL);return;}
     epd_set_vcom((uint16_t)vcom);
     size_t available=heap_caps_get_free_size(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
@@ -967,7 +994,7 @@ static void device_task(void *arg){
     if(pn_pool_init(&pool,budget,psram_alloc,psram_free,NULL)!=0){read_pico_deinit(&hardware);vTaskDelete(NULL);return;}
     pn_media_init(&sd_media);pn_media_init(&data_media);pn_media_init(&wallpaper_media);read_pico_pmu_drain_events();esp_fill_random(cover_salt,sizeof cover_salt);
     if(read_pico_pmu_report_ready()!=ESP_OK){ESP_LOGE(TAG,"PMU running handshake failed; display withheld");read_pico_deinit(&hardware);vTaskDelete(NULL);return;}
-    shown_px=pn_alloc(&pool,342u*1216u);
+    shown_px=pn_alloc_tagged(&pool,PN_MEM_FRAME,342u*1216u);
     pn_device_async_start(&async_port,&hardware,present_panel,rails_idle_check,rails_release);
     if(!async_port.input_active || !async_port.display_active)ESP_LOGW(TAG,"Async task startup degraded: input=%d display=%d",(int)async_port.input_active,(int)async_port.display_active);
     clock_read_boot(now_ms());

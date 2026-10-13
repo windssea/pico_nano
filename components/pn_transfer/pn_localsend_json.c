@@ -53,12 +53,12 @@ pn_status_t pn_ls_parse_prepare(pn_pool_t *pool,const uint8_t *bytes,size_t leng
     if(!pool || !bytes || !out || !length)return PN_INVALID;
     if(length>PN_LS_JSON_MAX)return PN_LIMIT;
     if(!preflight(bytes,length))return PN_INVALID;
-    char *copy=pn_alloc(pool,length+1);if(!copy)return PN_NO_MEMORY;
+    char *copy=pn_alloc_tagged(pool,PN_MEM_TRANSFER,length+1);if(!copy)return PN_NO_MEMORY;
     memcpy(copy,bytes,length);copy[length]=0;
     cJSON *json=cJSON_ParseWithLengthOpts(copy,length+1,NULL,true);pn_free(copy);
     if(!json)return PN_INVALID;
     if(!cJSON_IsObject(json) || !unique_tree(json)){cJSON_Delete(json);return PN_INVALID;}
-    pn_ls_request_t *r=pn_alloc(pool,sizeof *r);if(!r){cJSON_Delete(json);return PN_NO_MEMORY;}memset(r,0,sizeof *r);
+    pn_ls_request_t *r=pn_alloc_tagged(pool,PN_MEM_TRANSFER,sizeof *r);if(!r){cJSON_Delete(json);return PN_NO_MEMORY;}memset(r,0,sizeof *r);
     cJSON *info=cJSON_GetObjectItemCaseSensitive(json,"info"),*files=cJSON_GetObjectItemCaseSensitive(json,"files");
     bool valid=cJSON_IsObject(info) && cJSON_IsObject(files) && string(info,"alias",r->alias,sizeof r->alias) && string(info,"version",r->version,sizeof r->version) && string(info,"fingerprint",r->fingerprint,sizeof r->fingerprint);
     for(cJSON *f=valid?files->child:NULL;f && valid;f=f->next){
@@ -84,7 +84,7 @@ pn_status_t pn_ls_encode_grants(pn_pool_t *pool,const pn_ls_grants_t *grants,cha
         if(!memchr(grants->files[i].id,0,PN_LS_ID_MAX) || !*grants->files[i].id || !token_ok(grants->files[i].token))return PN_INVALID;
         for(size_t j=0;j<i;j++)if(!strcmp(grants->files[i].id,grants->files[j].id))return PN_INVALID;
     }
-    char *scratch=pn_alloc(pool,PN_LS_REPLY_MAX);if(!scratch)return PN_NO_MEMORY;
+    char *scratch=pn_alloc_tagged(pool,PN_MEM_TRANSFER,PN_LS_REPLY_MAX);if(!scratch)return PN_NO_MEMORY;
     cJSON *json=cJSON_CreateObject();bool valid=json && cJSON_AddStringToObject(json,"sessionId",grants->session_id);
     cJSON *files=valid?cJSON_AddObjectToObject(json,"files"):NULL;valid=valid && files;
     for(size_t i=0;i<grants->count && valid;i++)valid=cJSON_AddStringToObject(files,grants->files[i].id,grants->files[i].token)!=NULL;

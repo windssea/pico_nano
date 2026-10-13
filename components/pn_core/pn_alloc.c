@@ -9,11 +9,12 @@
  * Frozen: access is serialized by callers; allocation headers count against budgets.
  */
 #include "pn_alloc.h"
+#include "pn_profile.h"
 #include <stdlib.h>
 
 typedef union {
     max_align_t alignment;
-    struct { pn_pool_t *pool; size_t bytes; } record;
+    struct { pn_pool_t *pool; size_t bytes; pn_memory_tag_t tag; } record;
 } pn_alloc_header_t;
 
 static void *libc_alloc(void *ctx, size_t bytes) { (void)ctx; return malloc(bytes); }
@@ -27,26 +28,39 @@ int pn_pool_init(pn_pool_t *pool, size_t limit, pn_malloc_fn alloc, pn_free_fn r
 }
 
 void *pn_alloc(pn_pool_t *pool, size_t bytes) {
+    return pn_alloc_tagged(pool,PN_MEM_OTHER,bytes);
+}
+void *pn_alloc_tagged(pn_pool_t *pool,pn_memory_tag_t tag,size_t bytes) {
+    if((unsigned)tag>=PN_MEM_COUNT)return NULL;
     if (!pool || !pool->malloc_fn || !bytes || bytes > SIZE_MAX-sizeof(pn_alloc_header_t)) return NULL;
     if (pool->attempts == SIZE_MAX) return NULL;
     pool->attempts++;
-    if (pool->fail_at && pool->attempts == pool->fail_at) return NULL;
+    if (pool->fail_at && pool->attempts == pool->fail_at) {pool->memory[tag].failures++;return NULL;}
     size_t total=sizeof(pn_alloc_header_t)+bytes;
-    if (pool->used > pool->limit || total > pool->limit-pool->used) return NULL;
+    if (pool->used > pool->limit || total > pool->limit-pool->used) {pool->memory[tag].failures++;return NULL;}
     pn_alloc_header_t *header=pool->malloc_fn(pool->ctx,total);
-    if (!header) return NULL;
+    if (!header) {pool->memory[tag].failures++;return NULL;}
     header->record.pool=pool;
     header->record.bytes=total;
+    header->record.tag=tag;
     pool->used+=total;
     if (pool->used > pool->peak) pool->peak=pool->used;
     pool->live++;
+    pn_memory_stats_t *stats=&pool->memory[tag];stats->used+=total;stats->live++;stats->allocations++;
+    if(stats->used>stats->peak)stats->peak=stats->used;
+    pn_profile_allocation(pool);
     return header+1;
+}
+const char *pn_memory_tag_name(pn_memory_tag_t tag){
+    static const char *const names[]={"other","frame","font","document","layout","image","index","ui","transfer"};
+    return (unsigned)tag<PN_MEM_COUNT?names[tag]:"invalid";
 }
 
 void pn_free(void *ptr) {
     if (!ptr) return;
     pn_alloc_header_t *header=(pn_alloc_header_t *)ptr-1;
     pn_pool_t *pool=header->record.pool;
+    pn_memory_stats_t *stats=&pool->memory[header->record.tag];stats->used-=header->record.bytes;stats->live--;
     pool->used-=header->record.bytes;
     pool->live--;
     pool->free_fn(pool->ctx,header);

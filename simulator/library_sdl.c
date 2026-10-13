@@ -8,6 +8,7 @@
  */
 #define _XOPEN_SOURCE 700 // realpath
 #include "pn_brand.h"
+#include "pn_profile.h"
 #include "pn_brand_image.h"
 #include "pn_reader_app.h"
 #include "pn_epub_app.h"
@@ -124,6 +125,11 @@ static pn_status_t active_step(library_t *s,pn_reader_action_t action,uint64_t n
 }
 static pn_status_t active_close(library_t *s,uint64_t now){s->recent_loaded=false;return s->epub.impl?pn_epub_app_close(&s->epub,now):pn_reader_app_close(&s->reader,now);}
 static bool timing_on(void){static int on=-1;if(on<0){const char *v=getenv("PN_SIM_TIMING");on=v && *v=='1';}return on;}
+static uint64_t profile_clock(void *ctx){(void)ctx;uint64_t c=SDL_GetPerformanceCounter(),f=SDL_GetPerformanceFrequency();return (c/f)*1000000u+(c%f)*1000000u/f;}
+static void profile_emit(void *ctx,const pn_profile_event_t *e){
+    (void)ctx;fprintf(stderr,"profile phase=%s elapsed_us=%llu status=%d begin=%zu end=%zu peak=%zu attempts=%zu backend=host\n",e->phase,(unsigned long long)e->elapsed_us,(int)e->status,e->begin_bytes,e->end_bytes,e->peak_bytes,e->attempts);
+    if(e->pool){fprintf(stderr,"memory phase=%s",e->phase);for(unsigned j=0;j<PN_MEM_COUNT;j++){const pn_memory_stats_t *m=&e->pool->memory[j];fprintf(stderr," %s=%zu/%zu/%zu/%zu",pn_memory_tag_name((pn_memory_tag_t)j),m->used,m->peak,m->allocations,m->failures);}fprintf(stderr," heap=unavailable stack=unavailable\n");}
+}
 /* 呈现并记住最近一帧（工具栏打开时不记，以便关闭后恢复原页面）。/ Present and remember the latest frame (not while the toolbar is open, so closing restores the original page). */
 static pn_status_t present_raw_main(void *ctx,const pn_frame_t *frame);
 static pn_status_t present_raw(library_t *s,const pn_frame_t *frame){
@@ -143,16 +149,20 @@ static pn_status_t present_raw(library_t *s,const pn_frame_t *frame){
     }
     return status;
 }
-static pn_status_t present(void *ctx,const pn_frame_t *frame,pn_refresh_t profile){
+static pn_status_t present_impl(void *ctx,const pn_frame_t *frame,pn_refresh_t profile){
     library_t *s=ctx;(void)profile;
     if(!reading(s)){pn_free(s->page_px);s->page_px=NULL;pn_free(s->tool_px);s->tool_px=NULL;}
     // 备份只供阅读工具栏关闭时恢复；书架/设置不需要，避免挤占封面解码预算。/ Only reading needs the backup for toolbar restoration; shelf/settings copies waste the cover decode budget.
     pn_status_t status=present_raw(s,frame);
     if(status==PN_OK && reading(s) && !s->toolbar && frame->width==684 && frame->height==1216 && frame->stride>=342){
-        if(!s->page_px)s->page_px=pn_alloc(s->pool,342u*1216u);
+        if(!s->page_px)s->page_px=pn_alloc_tagged(s->pool,PN_MEM_FRAME,342u*1216u);
         if(s->page_px)for(int y=0;y<1216;y++)memcpy(s->page_px+(size_t)y*342,frame->pixels+(size_t)y*frame->stride,342);
     }
     return status;
+}
+static pn_status_t present(void *ctx,const pn_frame_t *frame,pn_refresh_t profile){
+    pn_profile_span_t span;pn_profile_begin(&span,((library_t *)ctx)->pool,"display.receipt");
+    pn_status_t status=present_impl(ctx,frame,profile);pn_profile_end(&span,status);return status;
 }
 static pn_status_t present_effect(void *ctx,const pn_frame_t *frame,pn_refresh_t profile){
     pn_status_t status=present(ctx,frame,profile);if(status==PN_OK)SDL_Delay(100);return status;
@@ -174,9 +184,9 @@ static pn_status_t favorites_ensure(library_t *s){
     if(s->favorites_valid)return PN_OK;
     pn_status_t status=favorites_load(s);s->favorites_valid=status==PN_OK;return status;
 }
-static pn_status_t draw(library_t *s){
+static pn_status_t draw_impl(library_t *s){
     pn_wallpaper_mask_close(&s->reading_mask);
-    if(!s->frame.pixels){uint8_t *pixels=pn_alloc(s->pool,342u*1216u);if(!pixels || !pn_frame_bind(&s->frame,pixels,342u*1216u,684,1216)){pn_free(pixels);return PN_NO_MEMORY;}}
+    if(!s->frame.pixels){uint8_t *pixels=pn_alloc_tagged(s->pool,PN_MEM_FRAME,342u*1216u);if(!pixels || !pn_frame_bind(&s->frame,pixels,342u*1216u,684,1216)){pn_free(pixels);return PN_NO_MEMORY;}}
     if(!s->font.impl){pn_text_source_t builtin=pn_font_builtin_source();pn_status_t opened=pn_font_open(&s->font,s->pool,&builtin,24);if(opened!=PN_OK)return opened;}
     uint64_t t0=SDL_GetTicks64();
     pn_shelf_options_t options=shelf_options(s);
@@ -187,11 +197,15 @@ static pn_status_t draw(library_t *s){
     if(status==PN_OK)printf("navigation root=%s count=%zu\n",s->home?"home":"library",s->page->count);
     return status==PN_OK?present(s,&s->frame,PN_REFRESH_GC16):status;
 }
+static pn_status_t draw(library_t *s){
+    pn_profile_span_t span;pn_profile_begin(&span,s->pool,"ui.shelf");
+    pn_status_t status=draw_impl(s);pn_profile_end(&span,status);return status;
+}
 static pn_status_t recent_load(library_t *s);
 /* 最近阅读第一本作为“继续阅读”卡；没有记录时清除。/ The first recent entry becomes the continue-reading card; cleared when there is none. */
 static void covers_last(library_t *s){
     if(!s->covers)return;
-    pn_catalog_page_t *tmp=pn_alloc(s->pool,sizeof *tmp);bool found=false;
+    pn_catalog_page_t *tmp=pn_alloc_tagged(s->pool,PN_MEM_UI,sizeof *tmp);bool found=false;
     bool loaded=tmp && recent_load(s)==PN_OK;
     if(loaded && s->page)pn_catalog_apply_recent(s->page,s->recent);
     if(loaded && s->recent->count && pn_catalog_recent_page(s->recent,0,tmp)==PN_OK && tmp->count){pn_shelf_covers_set_last(s->covers,&tmp->items[0]);found=true;}
@@ -258,7 +272,7 @@ static pn_status_t open_hub(library_t *s){
 }
 static pn_status_t favorites_load(library_t *s){
     if(!s->state_dir)return PN_UNSUPPORTED;
-    if(!s->favorites)s->favorites=pn_alloc(s->pool,sizeof *s->favorites);
+    if(!s->favorites)s->favorites=pn_alloc_tagged(s->pool,PN_MEM_UI,sizeof *s->favorites);
     if(!s->favorites)return PN_NO_MEMORY;
     pn_media_lease_t lease;pn_status_t status=pn_media_acquire(&s->state_media,PN_MEDIA_READ,&lease);if(status!=PN_OK)return status;
     pn_journal_files_t files;pn_journal_io_t io;status=pn_favorites_files(&files,&s->state_media,&lease,s->state_dir,&io);
@@ -278,7 +292,7 @@ static pn_status_t page(library_t *s,bool previous,bool first){
         status=pn_catalog_recent_page_n(s->recent,start,per,s->page);if(status==PN_OK){s->recent_start=start;s->selected=s->page->count?0:-1;covers_reset(s);status=draw(s);printf("recent_page start=%zu count=%zu\n",start,s->page->count);}return status;
     }
     if(!first && (!s->page->count || (!previous && !s->page->more)))return PN_EMPTY;
-    pn_catalog_page_t *next=pn_alloc(s->pool,sizeof *next);if(!next)return PN_NO_MEMORY;
+    pn_catalog_page_t *next=pn_alloc_tagged(s->pool,PN_MEM_UI,sizeof *next);if(!next)return PN_NO_MEMORY;
     pn_media_lease_t lease={0};pn_status_t status=pn_media_acquire(&s->media,PN_MEDIA_READ,&lease);
     const char *cursor=first?"":s->page->items[previous?0:s->page->count-1].name;
     if(status==PN_OK){
@@ -337,7 +351,7 @@ static pn_status_t open_book(library_t *s,int selected,uint64_t now){
 static pn_status_t continue_book(library_t *s,uint64_t now){
     covers_last(s);
     if(!s->covers || !s->covers->has_last)return PN_EMPTY;
-    pn_catalog_item_t *book=pn_alloc(s->pool,sizeof *book);if(!book)return PN_NO_MEMORY;
+    pn_catalog_item_t *book=pn_alloc_tagged(s->pool,PN_MEM_UI,sizeof *book);if(!book)return PN_NO_MEMORY;
     *book=s->covers->last;pn_status_t status=open_item(s,book,now);pn_free(book);return status;
 }
 /* 工具栏中当前书不能用的入口：TXT没有目录，搜索尚未实现。/ Entries unavailable for the current book: TXT has no TOC and search is not implemented. */
@@ -345,7 +359,7 @@ static unsigned toolbar_unavailable(library_t *s){return s->epub.impl?0u:1u;}
 /* 在上一帧页面上叠加工具栏并呈现。/ Overlay the toolbar on the last page frame and present it. */
 static pn_status_t toolbar_show(library_t *s){
     if(!reading(s) || !s->page_px)return PN_EMPTY;
-    if(!s->tool_px)s->tool_px=pn_alloc(s->pool,342u*1216u);
+    if(!s->tool_px)s->tool_px=pn_alloc_tagged(s->pool,PN_MEM_FRAME,342u*1216u);
     if(!s->tool_px)return PN_NO_MEMORY;
     memcpy(s->tool_px,s->page_px,342u*1216u);
     pn_frame_t frame;if(!pn_frame_bind(&frame,s->tool_px,342u*1216u,684,1216))return PN_INVALID;
@@ -430,7 +444,7 @@ static pn_status_t lock_preview(library_t *s,uint64_t now){
     if(reading(s)){status=s->epub.impl?pn_epub_app_suspend(&s->epub,now):pn_reader_app_suspend(&s->reader,now);if(status==PN_BUSY)status=active_close(s,now);}
     if(status!=PN_OK)return status;
     s->toolbar=false;
-    if(!s->frame.pixels){uint8_t *pixels=pn_alloc(s->pool,PN_WALLPAPER_BYTES);if(!pixels)return PN_NO_MEMORY;pn_frame_bind(&s->frame,pixels,PN_WALLPAPER_BYTES,684,1216);}
+    if(!s->frame.pixels){uint8_t *pixels=pn_alloc_tagged(s->pool,PN_MEM_FRAME,PN_WALLPAPER_BYTES);if(!pixels)return PN_NO_MEMORY;pn_frame_bind(&s->frame,pixels,PN_WALLPAPER_BYTES,684,1216);}
     if(!s->font.impl){pn_text_source_t font=pn_font_builtin_source();status=pn_font_open(&s->font,s->pool,&font,32);}
     pn_lock_selection_t selection={.mode=PN_LOCK_DEFAULT,.hint=true};
     if(status==PN_OK && s->wallpaper_store_ok){pn_media_lease_t lease;pn_status_t loaded=pn_media_acquire(&s->wallpaper_media,PN_MEDIA_READ,&lease);
@@ -445,10 +459,11 @@ static pn_status_t lock_preview(library_t *s,uint64_t now){
 }
 static int library_worker(void *ctx){
     library_t *s=ctx;pn_pool_t *pool=s->pool;
+    if(timing_on())pn_profile_port(profile_clock,profile_emit,NULL);
     const char *font_path=s->font_path,*cover_cache=s->cover_argument,*wallpaper_dir=s->wallpaper_dir,*wallpaper_store=s->wallpaper_store_argument,*font_dir=s->font_dir;
     if(font_path){char *resolved=realpath(font_path,NULL);if(resolved){if(strlen(resolved)<sizeof s->font_real)strcpy(s->font_real,resolved);free(resolved);}}
-    s->page=pn_alloc(pool,sizeof *s->page);s->frame.pixels=pn_alloc(pool,342u*1216u);
-    s->recent=pn_alloc(pool,sizeof *s->recent);s->covers=pn_alloc(pool,sizeof *s->covers);if(s->covers)pn_shelf_covers_reset(s->covers,NULL);
+    s->page=pn_alloc_tagged(pool,PN_MEM_UI,sizeof *s->page);s->frame.pixels=pn_alloc_tagged(pool,PN_MEM_FRAME,342u*1216u);
+    s->recent=pn_alloc_tagged(pool,PN_MEM_UI,sizeof *s->recent);s->covers=pn_alloc_tagged(pool,PN_MEM_UI,sizeof *s->covers);if(s->covers)pn_shelf_covers_reset(s->covers,NULL);
     if(cover_cache && (size_t)snprintf(s->cover_dir,sizeof s->cover_dir,"%s",cover_cache)>=sizeof s->cover_dir)s->cover_dir[0]=0;
     s->wallpaper_dir=wallpaper_dir;s->font_dir=font_dir;
     if(font_dir){char *resolved=realpath(font_dir,NULL);if(resolved){if(strlen(resolved)<sizeof s->font_dir_real){strcpy(s->font_dir_real,resolved);s->font_dir=s->font_dir_real;}free(resolved);}}
@@ -552,7 +567,7 @@ static int library_worker(void *ctx){
                 if(status==PN_OK){if(remove(s->actions.item.path)!=0)status=PN_IO;else{pn_catalog_index_invalidate(&s->catalog_index);s->recent_loaded=false;}(void)pn_media_release(&s->media,&lease);}
                 if(status==PN_OK){s->actions_mode=false;status=page(s,false,true);}else{s->actions.notice="删除失败，文件仍保留";(void)draw(s);}
             }
-            else if(hit==PN_BA_OPEN){pn_catalog_item_t *book=pn_alloc(s->pool,sizeof *book);s->actions_mode=false;if(book){*book=s->actions.item;status=open_item(s,book,now);pn_free(book);}}
+            else if(hit==PN_BA_OPEN){pn_catalog_item_t *book=pn_alloc_tagged(s->pool,PN_MEM_UI,sizeof *book);s->actions_mode=false;if(book){*book=s->actions.item;status=open_item(s,book,now);pn_free(book);}}
             printf("actions command=%d status=%d active=%d favorite=%d\n",hit,(int)status,(int)s->actions_mode,(int)s->actions.favorite);
             continue;
         }
@@ -746,7 +761,7 @@ cleanup:;
 }
 
 int pn_sim_library_window(pn_pool_t *pool,const char *directory,const char *font_path,const char *fallback_path,const char *state_dir,const char *cover_cache,const char *wallpaper_dir,const char *wallpaper_store,const char *font_dir){
-    library_t *s=pn_alloc(pool,sizeof *s);if(!s)return 1;memset(s,0,sizeof *s);
+    library_t *s=pn_alloc_tagged(pool,PN_MEM_UI,sizeof *s);if(!s)return 1;memset(s,0,sizeof *s);
     s->pool=pool;s->directory=directory;s->font_path=font_path;s->fallback_path=fallback_path;s->state_dir=state_dir;s->cover_argument=cover_cache;s->wallpaper_dir=wallpaper_dir;s->wallpaper_store_argument=wallpaper_store;s->font_dir=font_dir;
     if(!pn_sdl_async_init(&s->async,present_raw_main,s)){pn_sdl_async_close(&s->async);pn_free(s);return 1;}
     s->window=s->async.window;s->renderer=s->async.renderer;s->texture=s->async.texture;

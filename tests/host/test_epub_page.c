@@ -11,6 +11,14 @@ static pn_status_t image(void *ctx,const char *path,int maxw,int maxh,int *w,int
 static pn_status_t mixed_height(void *ctx,uint32_t cp,const pn_xhtml_style_t *style,pn_epub_metrics_t *m){(void)ctx;(void)style;*m=(pn_epub_metrics_t){.advance_64=10*64,.ascent=cp=='A'?16:3,.descent=cp=='A'?3:16,.line_height=19,.pixels=16};return PN_OK;}
 static pn_status_t run(pn_pool_t *p,const char *xml,const pn_xhtml_position_t *start,pn_epub_page_t *page,int height){input_t i={xml,0};pn_xml_input_t input={&i,read_input};uint8_t salt[16]={1};pn_layout_t layout={50,height,20,12,0,0,0};pn_epub_measure_t measure={NULL,glyph,NULL};return pn_epub_page_input(p,&input,"OPS/a.xhtml",salt,start,&layout,&measure,page);}
 int main(void){
+    // 自有缓冲增长/复用/失败保留，固定调用方数组不得被接管。/ Owned growth/reuse/failure retention; never adopt fixed caller arrays.
+    pn_pool_t owned_pool;assert(!pn_pool_init(&owned_pool,1024*1024,NULL,NULL,NULL));pn_epub_page_t owned={0};
+    assert(!pn_epub_page_reserve(&owned,&owned_pool,1,0));
+    assert(run(&owned_pool,"<html xmlns='http://www.w3.org/1999/xhtml'><body><p>ABCDEFGHIJKLMNOP</p></body></html>",NULL,&owned,80)==PN_OK && owned.count==16 && owned.capacity>=16);
+    pn_epub_page_node_t *stable=owned.nodes;size_t allocated=owned_pool.memory[PN_MEM_LAYOUT].allocations;
+    assert(run(&owned_pool,"<html xmlns='http://www.w3.org/1999/xhtml'><body><p>ABCDEFGHIJKLMNOP</p></body></html>",NULL,&owned,80)==PN_OK && owned.nodes==stable && owned_pool.memory[PN_MEM_LAYOUT].allocations==allocated+1);
+    owned_pool.fail_at=owned_pool.attempts+1;assert(pn_epub_page_reserve(&owned,&owned_pool,32,0)==PN_NO_MEMORY && owned.nodes==stable && owned.count==16);owned_pool.fail_at=0;
+    pn_epub_page_release(&owned);assert(!owned_pool.used && !owned_pool.live);
     const char *xml="<html xmlns='http://www.w3.org/1999/xhtml'><body><p>ABCDEFGHIJKLMNOP</p></body></html>";
     pn_pool_t pool;assert(!pn_pool_init(&pool,1024*1024,NULL,NULL,NULL));pn_epub_page_node_t nodes[100];pn_epub_page_t page={.nodes=nodes,.capacity=100};
     assert(run(&pool,xml,NULL,&page,40)==PN_OK && page.valid && page.count==10 && page.has_next);

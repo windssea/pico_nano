@@ -26,7 +26,7 @@ typedef struct {
     const pn_text_source_t *file; ///< 或侧车文件 / Or sidecar file
     pn_zip_stream_t stream;file_input_t at;
 } cover_source_t;
-static void *sub_alloc(void *ctx,size_t bytes){return pn_alloc(ctx,bytes);}
+static void *sub_alloc(void *ctx,size_t bytes){return pn_alloc_tagged(ctx,PN_MEM_IMAGE,bytes);}
 static void sub_free(void *ctx,void *ptr){(void)ctx;pn_free(ptr);}
 static pn_status_t file_read(void *ctx,uint8_t *out,size_t cap,size_t *n){
     file_input_t *f=ctx;*n=0;if(f->offset>=f->source->size)return PN_EMPTY;
@@ -55,7 +55,7 @@ static pn_status_t decode(pn_pool_t *pool,cover_source_t *c,pn_frame_t *out){
     unsigned k=SUPERSAMPLE_MAX;
     while(k>1 && (fw*k>info.width || fh*k>info.height || (fw*k+1)/2*fh*k>SCRATCH_MAX))k--;
     int sw=(int)(fw*k),sh=(int)(fh*k);size_t bytes=((size_t)sw+1)/2*(size_t)sh;
-    uint8_t *pixels=pn_alloc(pool,bytes);if(!pixels)return PN_NO_MEMORY;
+    uint8_t *pixels=pn_alloc_tagged(pool,PN_MEM_UI,bytes);if(!pixels)return PN_NO_MEMORY;
     pn_frame_t scratch;if(!pn_frame_bind(&scratch,pixels,bytes,sw,sh)){pn_free(pixels);return PN_INVALID;}
     pn_frame_clear(&scratch,15);
     status=source_open(c,&input);
@@ -71,7 +71,7 @@ static pn_status_t decode(pn_pool_t *pool,cover_source_t *c,pn_frame_t *out){
 }
 static pn_status_t epub_cover(pn_pool_t *pool,pn_media_t *media,const pn_media_lease_t *lease,const char *path,const uint8_t salt[16],pn_frame_t *out,pn_book_display_t *display){
     pn_text_file_t file={0};pn_text_source_t source;pn_zip_t zip={0};pn_epub_t epub={0};
-    pn_epub_info_t *info=pn_alloc(pool,sizeof *info);if(!info)return PN_NO_MEMORY;
+    pn_epub_info_t *info=pn_alloc_tagged(pool,PN_MEM_UI,sizeof *info);if(!info)return PN_NO_MEMORY;
     pn_status_t status=pn_text_file_open(&file,media,lease,path,&source);
     if(status==PN_OK)status=pn_zip_open(&zip,pool,&source);
     if(status==PN_OK)status=pn_epub_open(&epub,pool,&zip,salt);
@@ -128,7 +128,7 @@ static pn_status_t cover_render_display(pn_pool_t *pool,pn_media_t *media,const 
     pn_status_t status=pn_media_validate(media,lease);if(status!=PN_OK)return status;
     if(lease->access==PN_MEDIA_USB)return PN_INVALID;
     pn_pool_t sub;if(pn_pool_init(&sub,budget,sub_alloc,sub_free,pool)!=0)return PN_INVALID;
-    size_t bytes=((size_t)thumb->width+1)/2*(size_t)thumb->height;uint8_t *pixels=pn_alloc(&sub,bytes);if(!pixels)return PN_NO_MEMORY;
+    size_t bytes=((size_t)thumb->width+1)/2*(size_t)thumb->height;uint8_t *pixels=pn_alloc_tagged(&sub,PN_MEM_UI,bytes);if(!pixels)return PN_NO_MEMORY;
     pn_frame_t out;(void)pn_frame_bind(&out,pixels,bytes,thumb->width,thumb->height);
     status=external_cover(&sub,media,lease,item->path,&out);
     if(item->format==PN_BOOK_EPUB){
@@ -188,7 +188,7 @@ static pn_status_t cache_load(pn_pool_t *pool,pn_media_t *media,const pn_media_l
     const cover_key_t *key,pn_cover_state_t *state,pn_status_t *reason,uint8_t *pixels,pn_book_display_t *display,size_t budget){
     char path[PN_CATALOG_PATH_MAX];if(!cache_path(dir,item->path,path,""))return PN_LIMIT;
     size_t length=strlen(item->path),capacity=record_bytes(length,PN_COVER_READY);
-    uint8_t *data=pn_alloc(pool,capacity+1);if(!data)return PN_NO_MEMORY;
+    uint8_t *data=pn_alloc_tagged(pool,PN_MEM_UI,capacity+1);if(!data)return PN_NO_MEMORY;
     pn_status_t status=pn_media_validate(media,lease);FILE *file=status==PN_OK?fopen(path,"rb"):NULL;size_t n=0;
     if(status==PN_OK && !file)status=errno==ENOENT?PN_EMPTY:PN_IO;
     if(file){n=fread(data,1,capacity+1,file);if(ferror(file))status=PN_IO;if(fclose(file))status=PN_IO;}
@@ -213,7 +213,7 @@ static pn_status_t cache_store(pn_pool_t *pool,pn_media_t *media,const pn_media_
     const cover_key_t *key,pn_cover_state_t state,pn_status_t reason,const uint8_t *pixels,const pn_book_display_t *display,size_t budget){
     char path[PN_CATALOG_PATH_MAX],temporary[PN_CATALOG_PATH_MAX],parent[PN_CATALOG_PATH_MAX];
     if(!cache_path(dir,item->path,path,"") || !cache_path(dir,item->path,temporary,".tmp") || strlen(dir)>=sizeof parent)return PN_LIMIT;
-    size_t length=strlen(item->path),size=record_bytes(length,state);uint8_t *data=pn_alloc(pool,size);if(!data)return PN_NO_MEMORY;
+    size_t length=strlen(item->path),size=record_bytes(length,state);uint8_t *data=pn_alloc_tagged(pool,PN_MEM_UI,size);if(!data)return PN_NO_MEMORY;
     memcpy(data,"PNCV",4);put(data+4,PN_COVER_CACHE_VERSION,2);put(data+6,PN_COVER_WIDTH,2);put(data+8,PN_COVER_HEIGHT,2);data[10]=(uint8_t)state;data[11]=(uint8_t)reason;
     encode_key(data+12,key);put(data+12+KEY_BYTES,budget,8);put(data+HEADER_BYTES-2,length,2);memcpy(data+HEADER_BYTES,item->path,length);
     memcpy(data+HEADER_BYTES+length,display,sizeof *display);

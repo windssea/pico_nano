@@ -142,7 +142,7 @@ static pn_status_t list_resources(service_t *s,const pn_upload_request_t *cursor
  status=pn_media_acquire(s->media,PN_MEDIA_READ,&lease);
  if(status!=PN_OK)return status;
  char dir[PN_JOURNAL_PATH_MAX];
- pn_transfer_reply_t *candidate=pn_alloc(s->pool,sizeof *candidate);
+ pn_transfer_reply_t *candidate=pn_alloc_tagged(s->pool,PN_MEM_TRANSFER,sizeof *candidate);
  if(!candidate){(void)pn_media_release(s->media,&lease);return PN_NO_MEMORY;}
  memset(candidate,0,sizeof *candidate);candidate->has_list=true;
  status=resource_directory(s,cursor->kind,dir);
@@ -219,7 +219,7 @@ pn_status_t pn_transfer_service_open(pn_transfer_service_t *out,pn_pool_t *pool,
  if(!media->available)return PN_STALE_MEDIA;
  if(options->replace || options->old_size || !zero(options->old_digest.sha256,32))return PN_INVALID;
  size_t n=strlen(options->root);if(n>=PN_UPLOAD_FILES_ROOT_MAX)return PN_LIMIT;
- service_t *s=pn_alloc(pool,sizeof *s);if(!s)return PN_NO_MEMORY;
+ service_t *s=pn_alloc_tagged(pool,PN_MEM_TRANSFER,sizeof *s);if(!s)return PN_NO_MEMORY;
  *s=(service_t){.pool=pool,.media=media,.epoch=media->epoch,.options=*options};
  memcpy(s->root,options->root,n+1);s->options.root=s->root;
  pn_status_t status=create_port(s,NULL);

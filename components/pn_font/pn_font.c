@@ -6,8 +6,11 @@
  * 冻结：字体源保持有效；owner串行使用；不写设置或硬件。
  * Frozen: font source remains valid; serialized owner calls; no settings or hardware writes.
  */
+#include "pn_profile.h"
 #include "pn_font.h"
 #include "pn_cancel.h"
+#include "pn_identity.h"
+#include "pn_text_file.h"
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include FT_MODULE_H
@@ -21,6 +24,7 @@ extern const uint8_t pn_reading_font_bytes[];
 extern const size_t pn_reading_font_size;
 extern const uint8_t pn_harmony_font_bytes[];
 extern const size_t pn_harmony_font_size;
+extern const uint8_t pn_harmony_font_sha256[32],pn_reading_font_sha256[32],pn_ui_font_sha256[32];
 static pn_status_t harmony_ui_read(void *,uint64_t,uint8_t *,size_t,size_t *);
 static pn_status_t builtin_read(void *,uint64_t,uint8_t *,size_t,size_t *);
 /* 字形缓存：同一字符在分页量宽和绘制各加载一次轮廓，而每次加载要经cmap二分和loca/glyf多次小读取，在SD/网络盘上很慢。
@@ -53,7 +57,7 @@ static bool cache_allowed(const engine_t *e,size_t need){const pn_pool_t *p=e->p
 static unsigned hash_key(uint32_t cp,int pixels,int delta){uint32_t h=cp*2654435761u;h^=(uint32_t)pixels*40503u;h^=(uint32_t)(delta+64)*2246822519u;h^=h>>15;return h;}
 static void *allocate(FT_Memory memory,long bytes) {
     engine_t *e=memory->user;if(bytes<=0)return NULL;
-    void *result=pn_alloc(e->pool,(size_t)bytes);if(!result)e->allocation_failed=true;return result;
+    void *result=pn_alloc_tagged(e->pool,PN_MEM_FONT,(size_t)bytes);if(!result)e->allocation_failed=true;return result;
 }
 static void release(FT_Memory memory,void *block){(void)memory;pn_free(block);}
 static void *resize(FT_Memory memory,long old_size,long new_size,void *block) {
@@ -98,13 +102,13 @@ void pn_font_close(pn_font_t *font) {
     if(e->library)FT_Done_Library(e->library);
     pn_free(e);font->impl=NULL;font->pixels=0;
 }
-pn_status_t pn_font_open(pn_font_t *font,pn_pool_t *pool,const pn_text_source_t *source,int pixels) {
+static pn_status_t pn_font_open_impl(pn_font_t *font,pn_pool_t *pool,const pn_text_source_t *source,int pixels) {
     if(!font || !pool || !source || !source->read_at || pixels<8 || pixels>128)return PN_INVALID;
     if(font->impl)return PN_BUSY;
     if(source->size<12)return PN_CORRUPT;
     if(source->size>32u*1024u*1024u)return PN_LIMIT;
     if(source->validate){pn_status_t s=source->validate(source->ctx);if(s!=PN_OK)return s;}
-    engine_t *e=pn_alloc(pool,sizeof *e);if(!e)return PN_NO_MEMORY;memset(e,0,sizeof *e);e->pool=pool;e->source=*source;e->resident_ui=source->read_at==harmony_ui_read;
+    engine_t *e=pn_alloc_tagged(pool,PN_MEM_FONT,sizeof *e);if(!e)return PN_NO_MEMORY;memset(e,0,sizeof *e);e->pool=pool;e->source=*source;e->resident_ui=source->read_at==harmony_ui_read;
     e->memory=(struct FT_MemoryRec_){e,allocate,release,resize};
     e->stream.size=(unsigned long)source->size;e->stream.descriptor.pointer=e;e->stream.read=stream_read;
     pn_font_t temporary={e,0,0};uint8_t prefix[4];
@@ -120,9 +124,14 @@ pn_status_t pn_font_open(pn_font_t *font,pn_pool_t *pool,const pn_text_source_t 
     if(status!=PN_OK){pn_font_close(&temporary);return status;}
     *font=temporary;return PN_OK;
 }
+pn_status_t pn_font_open(pn_font_t *font,pn_pool_t *pool,const pn_text_source_t *source,int pixels){
+    pn_profile_span_t span;pn_profile_begin(&span,pool,"font.open");
+    pn_status_t status=pn_font_open_impl(font,pool,source,pixels);pn_profile_end(&span,status);return status;
+}
 pn_status_t pn_font_size(pn_font_t *font,int pixels) {
     if(!font || !font->impl || pixels<8 || pixels>128)return PN_INVALID;
     engine_t *e=font->impl;pn_status_t status=ready(e);if(status!=PN_OK)return status;
+    if(font->pixels==pixels)return PN_OK;
     status=result(e,FT_Set_Pixel_Sizes(e->face,0,(FT_UInt)pixels));if(status==PN_OK)font->pixels=pixels;return status;
 }
 /// 延迟打开界面中文回退，保持字号和失败状态一致。/ Lazily open the UI CJK fallback at the same size and preserve errors.
@@ -147,7 +156,7 @@ pn_status_t pn_font_advance(void *ctx,uint32_t cp,int32_t *advance) {
     pn_font_t *font=ctx;if(!advance)return PN_INVALID;
     if(!font || !font->impl || cp>0x10ffff || (cp>=0xd800 && cp<=0xdfff))return PN_INVALID;
     engine_t *e=font->impl;
-    if(!e->adv && cache_allowed(e,sizeof(adv_t)*ADV_SLOTS)){e->adv=pn_alloc(e->pool,sizeof(adv_t)*ADV_SLOTS);if(e->adv)memset(e->adv,0,sizeof(adv_t)*ADV_SLOTS);}
+    if(!e->adv && cache_allowed(e,sizeof(adv_t)*ADV_SLOTS)){e->adv=pn_alloc_tagged(e->pool,PN_MEM_FONT,sizeof(adv_t)*ADV_SLOTS);if(e->adv)memset(e->adv,0,sizeof(adv_t)*ADV_SLOTS);}
     adv_t *slot=e->adv?&e->adv[hash_key(cp,font->pixels,0)%ADV_SLOTS]:NULL;
     if(slot && slot->state && slot->cp==cp && slot->pixels==(uint16_t)font->pixels){
         pn_status_t checked=ready(e);if(checked!=PN_OK)return checked;
@@ -192,7 +201,7 @@ pn_status_t pn_font_draw(pn_font_t *font,pn_frame_t *frame,uint32_t cp,int32_t x
     pn_status_t cancel=pn_cancel_checkpoint();if(cancel!=PN_OK)return cancel;
     if(!font || !font->impl || !frame || !frame->pixels || (mode!=PN_FONT_GRAY && mode!=PN_FONT_BINARY))return PN_INVALID;
     engine_t *e=font->impl;int offset=(int)(x_64%64);
-    if(!e->bmp && cache_allowed(e,sizeof(bmp_t *)*BMP_SLOTS)){e->bmp=pn_alloc(e->pool,sizeof(bmp_t *)*BMP_SLOTS);if(e->bmp)memset(e->bmp,0,sizeof(bmp_t *)*BMP_SLOTS);}
+    if(!e->bmp && cache_allowed(e,sizeof(bmp_t *)*BMP_SLOTS)){e->bmp=pn_alloc_tagged(e->pool,PN_MEM_FONT,sizeof(bmp_t *)*BMP_SLOTS);if(e->bmp)memset(e->bmp,0,sizeof(bmp_t *)*BMP_SLOTS);}
     bmp_t **slot=e->bmp?&e->bmp[hash_key(cp,font->pixels,offset)%BMP_SLOTS]:NULL;
     if(slot && *slot && (*slot)->cp==cp && (*slot)->pixels==(uint16_t)font->pixels && (*slot)->delta==(int16_t)offset){
         pn_status_t checked=ready(e);if(checked!=PN_OK)return checked;
@@ -207,7 +216,7 @@ pn_status_t pn_font_draw(pn_font_t *font,pn_frame_t *frame,uint32_t cp,int32_t x
     FT_GlyphSlot glyph=e->face->glyph;FT_Bitmap *b=&glyph->bitmap;
     if(!b->width || !b->rows){
         // 空白字形也记住，免得再加载一遍。/ Remember blank glyphs too so they are not loaded again.
-        bmp_t *blank=slot && cache_allowed(e,sizeof *blank)?pn_alloc(e->pool,sizeof *blank):NULL;
+        bmp_t *blank=slot && cache_allowed(e,sizeof *blank)?pn_alloc_tagged(e->pool,PN_MEM_FONT,sizeof *blank):NULL;
         if(blank){*blank=(bmp_t){cp,(uint16_t)font->pixels,(int16_t)offset,0,0,0,0};pn_free(*slot);*slot=blank;}
         return PN_OK;
     }
@@ -220,7 +229,7 @@ pn_status_t pn_font_draw(pn_font_t *font,pn_frame_t *frame,uint32_t cp,int32_t x
     bmp_t *entry=NULL;
     if(slot && bytes<=BMP_ENTRY_MAX){
         size_t freed=*slot?(size_t)(*slot)->width*(*slot)->rows:0;
-        if(e->bmp_bytes-freed+bytes<=BMP_BUDGET && cache_allowed(e,sizeof *entry+bytes))entry=pn_alloc(e->pool,sizeof *entry+bytes);
+        if(e->bmp_bytes-freed+bytes<=BMP_BUDGET && cache_allowed(e,sizeof *entry+bytes))entry=pn_alloc_tagged(e->pool,PN_MEM_FONT,sizeof *entry+bytes);
     }
     if(entry){
         *entry=(bmp_t){cp,(uint16_t)font->pixels,(int16_t)offset,glyph->bitmap_left,glyph->bitmap_top,(uint16_t)b->width,(uint16_t)b->rows};
@@ -254,6 +263,23 @@ static pn_status_t reading_read(void *ctx,uint64_t offset,uint8_t *out,size_t ca
 }
 pn_text_source_t pn_font_reading_source(void){return (pn_text_source_t){NULL,pn_harmony_font_size,harmony_read,NULL};}
 pn_text_source_t pn_font_fallback_source(void){return (pn_text_source_t){NULL,pn_reading_font_size,reading_read,NULL};}
+pn_status_t pn_font_source_identity(const pn_text_source_t *source,pn_book_id_t *out){
+    if(!source || !source->read_at || !out)return PN_INVALID;
+    pn_status_t s=pn_cancel_checkpoint();if(s!=PN_OK)return s;
+    if(source->validate){s=source->validate(source->ctx);if(s!=PN_OK)return s;}
+    const uint8_t *digest=NULL;
+    if(!source->ctx){
+        if((source->read_at==harmony_read || source->read_at==harmony_ui_read) && source->size==pn_harmony_font_size)digest=pn_harmony_font_sha256;
+        else if(source->read_at==reading_read && source->size==pn_reading_font_size)digest=pn_reading_font_sha256;
+        else if(source->read_at==builtin_read && source->size==pn_ui_font_size)digest=pn_ui_font_sha256;
+    }
+    if(digest){memcpy(out->sha256,digest,32);return PN_OK;}
+    s=pn_text_file_identity(source,out);if(s!=PN_UNSUPPORTED)return s;
+    pn_book_id_t scanned;s=pn_identity_stream(source->ctx,source->size,source->read_at,&scanned);
+    if(s==PN_OK && source->validate)s=source->validate(source->ctx);
+    if(s==PN_OK)*out=scanned;
+    return s;
+}
 
 /* ---- 有界字体信息 / Bounded font information ---- */
 static bool name_append(char *out,size_t *used,uint32_t cp){

@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: Apache-2.0
  * 中文：版本与CRC校验的有界分页缓存；仅操作专用目录。/ English: bounded versioned, CRC-checked pagination caches confined to their own folder. */
 #define _POSIX_C_SOURCE 200809L
+#include "pn_profile.h"
 #include "pn_page_index.h"
 #include "pn_cancel.h"
 #include "pn_reader_chrome.h"
@@ -33,22 +34,26 @@ static bool decode(const uint8_t *p,pn_page_index_entry_t *e){
     return e->begin<e->end && e->flags<=3 && (e->first.kind==PN_XHTML_ELEMENT || e->first.kind==PN_XHTML_TEXT_POSITION) && (e->next.kind==PN_XHTML_ELEMENT || e->next.kind==PN_XHTML_TEXT_POSITION);
 }
 static pn_status_t checked(index_t *i){pn_status_t s=pn_cancel_checkpoint();return s==PN_OK?pn_media_validate(i->media,&i->lease):s;}
-pn_status_t pn_page_index_key(const pn_book_id_t *book,const pn_style_t *style,const pn_text_source_t *primary,const pn_font_chain_t *chain,unsigned format,pn_book_id_t *out){
+static pn_status_t pn_page_index_key_impl(const pn_book_id_t *book,const pn_style_t *style,const pn_text_source_t *primary,const pn_font_chain_t *chain,unsigned format,pn_book_id_t *out){
     if(!book || !style || !primary || !chain || !out || chain->count>2)return PN_INVALID;
     uint8_t bytes[208]={0};const char version[]="PN-layout-1/xhtml-1/freetype-2.14.3";memcpy(bytes,version,sizeof version);memcpy(bytes+40,book->sha256,32);
     const uint16_t values[]={style->pixels,style->line_percent,style->gap_percent,style->indent_em,style->margin,style->tracking_percent};
     for(unsigned j=0;j<6;j++)put(bytes+72+2*j,values[j],2);
     put(bytes+84,format,4);put(bytes+88,684,2);put(bytes+90,1216,2);put(bytes+92,chain->count,4);
     put(bytes+192,PN_READER_TOP,4);put(bytes+196,PN_READER_HEIGHT,4);put(bytes+200,1,4);put(bytes+204,1,4); // 页脚及可选图片策略版本 / Footer and optional-image policy versions
-    pn_book_id_t digest;pn_status_t s=pn_identity_stream(primary->ctx,primary->size,primary->read_at,&digest);if(s!=PN_OK)return s;memcpy(bytes+96,digest.sha256,32);
-    for(unsigned j=0;j<chain->count;j++){const pn_text_source_t *source=&chain->sources[j];s=pn_identity_stream(source->ctx,source->size,source->read_at,&digest);if(s!=PN_OK)return s;memcpy(bytes+128+32*j,digest.sha256,32);}
+    pn_book_id_t digest;pn_status_t s=pn_font_source_identity(primary,&digest);if(s!=PN_OK)return s;memcpy(bytes+96,digest.sha256,32);
+    for(unsigned j=0;j<chain->count;j++){const pn_text_source_t *source=&chain->sources[j];s=pn_font_source_identity(source,&digest);if(s!=PN_OK)return s;memcpy(bytes+128+32*j,digest.sha256,32);}
     return pn_identity_bytes(bytes,sizeof bytes,out);
+}
+pn_status_t pn_page_index_key(const pn_book_id_t *book,const pn_style_t *style,const pn_text_source_t *primary,const pn_font_chain_t *chain,unsigned format,pn_book_id_t *out){
+    pn_profile_span_t span;pn_profile_begin(&span,chain?chain->pool:NULL,"font.layout-key");
+    pn_status_t status=pn_page_index_key_impl(book,style,primary,chain,format,out);pn_profile_end(&span,status);return status;
 }
 pn_status_t pn_page_index_open(pn_page_index_t *h,pn_pool_t *pool,pn_media_t *media,const pn_media_lease_t *lease,const char *root,const pn_book_id_t *book,const pn_book_id_t *key){
     if(!h || h->impl || !pool || !media || !lease || !root || !book || !key)return PN_INVALID;
     if(lease->access!=PN_MEDIA_WRITE)return PN_INVALID;
     pn_status_t s=pn_media_validate(media,lease);if(s!=PN_OK)return s;
-    index_t *i=pn_alloc(pool,sizeof *i);if(!i)return PN_NO_MEMORY;*i=(index_t){.pool=pool,.media=media,.lease=*lease,.book=*book,.key=*key};
+    index_t *i=pn_alloc_tagged(pool,PN_MEM_INDEX,sizeof *i);if(!i)return PN_NO_MEMORY;*i=(index_t){.pool=pool,.media=media,.lease=*lease,.book=*book,.key=*key};
     char hash[65];for(unsigned j=0;j<32;j++)snprintf(hash+2*j,3,"%02x",book->sha256[j]);
     int a=snprintf(i->directory,sizeof i->directory,"%s/indexes",root),b=snprintf(i->path,sizeof i->path,"%s/%s.pni",i->directory,hash);
     if(a<0 || b<0 || (size_t)a>=sizeof i->directory || (size_t)b>=sizeof i->path){pn_free(i);return PN_LIMIT;}

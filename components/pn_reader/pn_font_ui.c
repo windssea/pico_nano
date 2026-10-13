@@ -108,7 +108,7 @@ pn_status_t pn_font_ui_open(pn_font_ui_t *u,pn_pool_t *pool,pn_reader_app_t *rea
  if(!u || !pool || !present || (!!reader==!!epub) || (reader && !reader->impl) || (epub && !epub->impl))return PN_INVALID;
  if(u->impl)return PN_BUSY;
  if(directory && (!*directory || strlen(directory)>=PN_FONT_REFERENCE_PATH_MAX))return PN_LIMIT;
- ui_t *s=pn_alloc(pool,sizeof *s);if(!s)return PN_NO_MEMORY;*s=(ui_t){.pool=pool,.explicit_directory=directory!=NULL};*u=(pn_font_ui_t){.impl=s,.active=true};s->reader=reader;s->epub=epub;
+ ui_t *s=pn_alloc_tagged(pool,PN_MEM_LAYOUT,sizeof *s);if(!s)return PN_NO_MEMORY;*s=(ui_t){.pool=pool,.explicit_directory=directory!=NULL};*u=(pn_font_ui_t){.impl=s,.active=true};s->reader=reader;s->epub=epub;
  if(directory)strcpy(s->directory,directory);
  pn_status_t status=preferences(s);
  if(status==PN_OK)status=page(u,"",false);

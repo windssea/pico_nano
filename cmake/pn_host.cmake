@@ -75,6 +75,7 @@ add_library(pn_core STATIC ${ui_font_c} ${reading_font_c} ${harmony_font_c} ${br
     ${PN_ROOT}/components/pn_reader/pn_jump_ui.c
     ${PN_ROOT}/components/pn_reader/pn_font_ui.c
     ${PN_ROOT}/components/pn_core/pn_alloc.c
+    ${PN_ROOT}/components/pn_core/pn_profile.c
     ${PN_ROOT}/components/pn_core/pn_cancel.c
     ${PN_ROOT}/components/pn_core/pn_async.c
     ${PN_ROOT}/components/pn_ui/pn_frame.c

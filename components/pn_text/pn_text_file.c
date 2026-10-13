@@ -9,6 +9,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "pn_text_file.h"
 #include "pn_cancel.h"
+#include "pn_identity.h"
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -25,6 +26,7 @@ static pn_status_t validate(void *ctx) {
 static pn_status_t read_direct(pn_text_file_t *file,uint64_t offset,uint8_t *out,size_t cap,size_t *got) {
     if(fseek(file->handle,(long)offset,SEEK_SET)!=0)return PN_IO;
     *got=fread(out,1,cap,file->handle);
+    file->io_reads++;file->io_bytes+=*got;
     return ferror(file->handle)!=0?PN_IO:PN_OK;
 }
 static pn_status_t read_at(void *ctx,uint64_t offset,uint8_t *out,size_t cap,size_t *n) {
@@ -43,6 +45,7 @@ static pn_status_t read_at(void *ctx,uint64_t offset,uint8_t *out,size_t cap,siz
             while(copied<cap && !error){
                 uint64_t position=offset+copied;
                 bool hit=file->block_length && position>=file->block_start && position<file->block_start+file->block_length;
+                if(hit)file->cache_hits++;
                 if(!hit){
                     uint64_t start=position&~(uint64_t)(BLOCK_BYTES-1);uint64_t left=file->size-start;
                     size_t want=left<BLOCK_BYTES?(size_t)left:BLOCK_BYTES,got=0;
@@ -74,10 +77,21 @@ pn_status_t pn_text_file_open(pn_text_file_t *file,pn_media_t *media,const pn_me
     *file=(pn_text_file_t){.handle=handle,.media=media,.lease=*lease,.size=(uint64_t)info.st_size};
     *source=(pn_text_source_t){file,file->size,read_at,validate};return PN_OK;
 }
+pn_status_t pn_text_file_identity(const pn_text_source_t *source,pn_book_id_t *out){
+    if(!source || !out)return PN_INVALID;
+    if(source->read_at!=read_at || source->validate!=validate || !source->ctx)return PN_UNSUPPORTED;
+    pn_text_file_t *file=source->ctx;pn_status_t s=validate(file);if(s!=PN_OK)return s;
+    if(source->size!=file->size)return PN_INVALID;
+    if(file->identity_known){file->identity_hits++;*out=file->identity;return PN_OK;}
+    pn_book_id_t digest;s=pn_identity_stream(source->ctx,source->size,source->read_at,&digest);
+    if(s==PN_OK)s=validate(file);
+    if(s==PN_OK){file->identity=digest;file->identity_known=true;*out=digest;}return s;
+}
 pn_status_t pn_text_file_close(pn_text_file_t *file) {
     if(!file)return PN_INVALID;
     if(!file->handle)return PN_OK;
     int result=fclose(file->handle);file->handle=NULL;
+    file->identity_known=false;
     free(file->block);file->block=NULL;file->block_length=0;
     return result==0?PN_OK:PN_IO;
 }

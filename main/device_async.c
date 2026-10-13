@@ -43,9 +43,11 @@ void pn_device_async_start(pn_device_async_t *p,read_pico_handle_t *hardware,pn_
     memset(p,0,sizeof *p);pn_async_init(&p->input);atomic_init(&p->paused,false);atomic_init(&p->pause_ack,false);atomic_init(&p->body,false);atomic_init(&p->flags,0);p->hardware=hardware;p->panel=panel;p->idle=idle;p->off=off;
 #ifdef ESP_PLATFORM
     p->display_queue=xQueueCreate(1,sizeof(display_t));p->display_done=xSemaphoreCreateBinary();
-    if(p->display_queue && p->display_done && xTaskCreatePinnedToCore(display_task,"pn-display",8192,p,5,NULL,0)==pdPASS)p->display_active=true;
+    TaskHandle_t display_handle=NULL;
+    if(p->display_queue && p->display_done && xTaskCreatePinnedToCore(display_task,"pn-display",8192,p,5,&display_handle,0)==pdPASS){p->display_active=true;p->display_task_handle=display_handle;}
     if(!p->display_active){if(p->display_queue)vQueueDelete(p->display_queue);if(p->display_done)vSemaphoreDelete(p->display_done);p->display_queue=NULL;p->display_done=NULL;}
-    if(xTaskCreatePinnedToCore(input_task,"pn-input",4096,p,6,NULL,0)==pdPASS)p->input_active=true;
+    TaskHandle_t input_handle=NULL;
+    if(xTaskCreatePinnedToCore(input_task,"pn-input",4096,p,6,&input_handle,0)==pdPASS){p->input_active=true;p->input_task_handle=input_handle;}
 #endif
 }
 static pn_status_t receipt(pn_device_async_t *p,pn_status_t status){if(status==PN_OK && !atomic_load(&p->body))p->revision++;return status;}

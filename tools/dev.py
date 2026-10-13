@@ -3,6 +3,7 @@ import argparse
 import pathlib
 import subprocess
 import sys
+import uuid
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 IDF_IMAGE = "espressif/idf:v6.1@sha256:81893c71bb5e570088901f21def8684c25cd2a9020281bd01b843a7655edb18c"
@@ -34,16 +35,35 @@ def run(command, docker, log, container_image=IDF_IMAGE):
 def main():
     prepare_console()
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["host", "sim", "firmware-ci", "firmware-board", "factory-data", "sdl", "docs", "epub-sample", "sdl-run", "installer", "local-samples"])
+    parser.add_argument("action", choices=["host", "sim", "firmware-ci", "firmware-board", "factory-data", "sdl", "docs", "epub-sample", "sdl-run", "installer", "local-samples", "profile"])
     parser.add_argument("--native", action="store_true", help="Use installed tools instead of the pinned IDF container")
     parser.add_argument("--archive", type=pathlib.Path, help="Local EPUB inside the workspace for epub-sample")
     parser.add_argument("--all-resources", action="store_true", help="Compare every ZIP resource for epub-sample")
+    parser.add_argument("--rounds", type=int, default=30, help="Profile rounds, 1-100; use matching samples/builds for comparisons")
     args = parser.parse_args()
     logs = ROOT / "build-dev" / "logs"
     logs.mkdir(parents=True, exist_ok=True)
     docker = not args.native
     container_image = IDF_IMAGE
-    if args.action == "epub-sample":
+    if args.action == "profile":
+        if not args.archive or not 1 <= args.rounds <= 100:
+            parser.error("profile requires --archive BOOK and --rounds 1-100")
+        archive = args.archive.resolve()
+        if not archive.is_file():
+            parser.error("Profile book does not exist")
+        try:
+            book = archive.relative_to(ROOT).as_posix() if docker else str(archive)
+        except ValueError:
+            parser.error("Docker sample must be inside the workspace")
+        # 每次新建独立状态，不覆盖用户阅读位置。/ Fresh isolated state for every run, preserving user reading progress.
+        profile_root = ROOT / "build-dev" / "profile" / uuid.uuid4().hex
+        profile_root.mkdir(parents=True)
+        state = profile_root.relative_to(ROOT).as_posix() if docker else str(profile_root)
+        binary = "build-host/pn_profile_reading" if docker else str(ROOT / "build-host" / ("pn_profile_reading.exe" if sys.platform == "win32" else "pn_profile_reading"))
+        commands = [["cmake", "-S", "tests/host", "-B", "build-host", "-G", "Ninja", "-DPN_SANITIZERS=ON"],
+                    ["cmake", "--build", "build-host", "--target", "pn_profile_reading"],
+                    [binary, book, state, str(args.rounds)]]
+    elif args.action == "epub-sample":
         if not args.archive:
             parser.error("epub-sample requires --archive")
         archive = args.archive.resolve()
@@ -113,10 +133,28 @@ def main():
         base = ["idf.py", "-B", build, "-DIDF_TARGET=esp32s3", f"-DSDKCONFIG={sdkconfig}",
                 f"-DSDKCONFIG_DEFAULTS=sdkconfig.{profile}"]
         commands = [base + ["build"], base + ["size"]]
+    profile_status = 0
     for index, command in enumerate(commands):
         status = run(command, docker, logs / f"{args.action}-{index}.log", container_image)
         if status:
-            return status
+            if args.action == "profile" and index == 2:
+                profile_status = status
+            else:
+                return status
+    if args.action == "profile":
+        from summarize_profile import summarize
+        import json
+        import hashlib
+        report = profile_root / "summary.json"
+        with archive.open("rb") as source:
+            identity = hashlib.file_digest(source, "sha256").hexdigest()
+        result = {"backend": "host", "condition": "fresh_session_isolated_state_os_cache_uncontrolled", "sanitizers": True,
+                  "rounds": args.rounds, "budget_bytes": 6 * 1024 * 1024, "book_sha256": identity,
+                  "book_bytes": archive.stat().st_size, "exit_code": profile_status,
+                  "phases": summarize((logs / "profile-2.log").read_text(encoding="utf-8", errors="replace"))}
+        report.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        print(f"Profile summary: {report}", flush=True)
+        return profile_status
     if args.action == "host":
         # 浏览器异步行为用实际网页源与Node验证，独立于容器的Python/C运行时。/ Verify browser async behavior against actual page source in Node, independently of container Python/C runtimes.
         return run(["node", "--test", "tests/tools/test_transfer_resources.mjs"], False, logs / "host-web.log")

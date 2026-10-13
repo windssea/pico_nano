@@ -27,7 +27,7 @@ pn_status_t pn_turn_present(void *ctx,const pn_frame_t *next,pn_refresh_t profil
     if(t->style==PN_TURN_NONE || !t->before)return t->present(t->ctx,next,profile);
     if(!t->pool || !t->before->pixels || t->before->stride<(size_t)(next->width+1)/2 || t->before->width!=next->width || t->before->height!=next->height)return PN_INVALID;
     size_t row=(size_t)(next->width+1)/2,bytes=row*(size_t)next->height;
-    uint8_t *old=pn_alloc(t->pool,bytes),*pixels=old?pn_alloc(t->pool,bytes):NULL;
+    uint8_t *old=pn_alloc_tagged(t->pool,PN_MEM_FRAME,bytes),*pixels=old?pn_alloc_tagged(t->pool,PN_MEM_FRAME,bytes):NULL;
     if(!old || !pixels){pn_free(old);pn_free(pixels);return t->present(t->ctx,next,profile);}
     pn_frame_t before,frame;bool bound=pn_frame_bind(&before,old,bytes,next->width,next->height) && pn_frame_bind(&frame,pixels,bytes,next->width,next->height);
     if(!bound){pn_free(old);pn_free(pixels);return PN_INVALID;}

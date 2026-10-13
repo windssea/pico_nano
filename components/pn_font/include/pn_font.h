@@ -43,6 +43,8 @@ pn_text_source_t pn_font_builtin_source(void);
 pn_text_source_t pn_font_reading_source(void);
 /// 与HarmonyOS主字体分离的常驻中文回退，不访问TF。/ Resident CJK fallback separate from HarmonyOS, without TF access.
 pn_text_source_t pn_font_fallback_source(void);
+/// 内置源使用构建时SHA，文件源仅当前有效句柄复用，其他源实际扫描；不改错误输出。/ Use build-time SHA for builtins, cache file digests only on valid live handles, scan other sources and preserve output on errors.
+pn_status_t pn_font_source_identity(const pn_text_source_t *,pn_book_id_t *);
 
 #define PN_FONT_NAME_MAX 128
 typedef struct {

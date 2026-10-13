@@ -39,7 +39,7 @@ static void progress(j_common_ptr c){decoder_t *d=c->client_data;pn_status_t can
 static pn_status_t decode(pn_pool_t *pool,const pn_image_input_t *input,pn_frame_t *frame,pn_image_rect_t rect,pn_jpeg_info_t *info){
     if(!pool || !input || !input->read || !info)return PN_INVALID;
     if(frame && (!frame->pixels || frame->width<1 || frame->height<1 || frame->width>4096 || frame->height>4096 || frame->stride<(size_t)(frame->width+1)/2 || frame->stride>SIZE_MAX/(size_t)frame->height || rect.width<1 || rect.height<1 || rect.width>4096 || rect.height>4096))return PN_INVALID;
-    decoder_t *d=pn_alloc(pool,sizeof *d);if(!d)return PN_NO_MEMORY;
+    decoder_t *d=pn_alloc_tagged(pool,PN_MEM_IMAGE,sizeof *d);if(!d)return PN_NO_MEMORY;
     *d=(decoder_t){.input=input,.status=PN_OK};d->jpeg.err=jpeg_std_error(&d->error);d->error.error_exit=fatal;d->error.emit_message=message;d->jpeg.client_data=d;
     pn_pool_t *previous=pn_jpeg_memory_scope(pool);
     if(!setjmp(d->jump)){
@@ -58,7 +58,7 @@ static pn_status_t decode(pn_pool_t *pool,const pn_image_input_t *input,pn_frame
             d->jpeg.scale_num=1;d->jpeg.scale_denom=denominator;
             if(!jpeg_start_decompress(&d->jpeg) || !d->jpeg.output_width || !d->jpeg.output_height || d->jpeg.output_components!=3)stop(d,PN_CORRUPT);
             uint32_t output_w=d->jpeg.output_width,output_h=d->jpeg.output_height;
-            d->row=pn_alloc(pool,(size_t)output_w*3);if(!d->row)stop(d,PN_NO_MEMORY);
+            d->row=pn_alloc_tagged(pool,PN_MEM_IMAGE,(size_t)output_w*3);if(!d->row)stop(d,PN_NO_MEMORY);
             while(d->jpeg.output_scanline<output_h){uint32_t source_y=d->jpeg.output_scanline;JSAMPROW row=d->row;
                 if(jpeg_read_scanlines(&d->jpeg,&row,1)!=1)stop(d,PN_CORRUPT);
                 uint64_t a=((uint64_t)source_y*rect.height+output_h-1)/output_h,b=((uint64_t)(source_y+1)*rect.height+output_h-1)/output_h;

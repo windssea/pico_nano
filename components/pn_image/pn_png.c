@@ -16,7 +16,7 @@ typedef union {max_align_t align;struct {size_t bytes;pn_pool_t *pool;} record;}
 static _Thread_local pn_pool_t *current_pool;
 static void *allocate(size_t size){
     if(!size || size>SIZE_MAX-sizeof(memory_t))return NULL;
-    memory_t *m=pn_alloc(current_pool,sizeof *m+size);if(!m)return NULL;m->record.bytes=size;m->record.pool=current_pool;return m+1;
+    memory_t *m=pn_alloc_tagged(current_pool,PN_MEM_IMAGE,sizeof *m+size);if(!m)return NULL;m->record.bytes=size;m->record.pool=current_pool;return m+1;
 }
 static void release(void *p){if(p)pn_free((memory_t *)p-1);}
 static void *zero_allocate(size_t count,size_t size){
@@ -100,7 +100,7 @@ static pn_status_t draw(pn_pool_t *pool,const pn_image_input_t *input,pn_frame_t
     if(!rc)rc=spng_get_ihdr(ctx,&header);
     status=error(&reader,rc);
     if(status==PN_OK)status=dimensions(header.width,header.height);
-    if(status==PN_OK){rgba=pn_alloc(pool,(size_t)header.width*4);if(!rgba)status=PN_NO_MEMORY;}
+    if(status==PN_OK){rgba=pn_alloc_tagged(pool,PN_MEM_IMAGE,(size_t)header.width*4);if(!rgba)status=PN_NO_MEMORY;}
     if(status==PN_OK){size_t size=0;rc=spng_decoded_image_size(ctx,SPNG_FMT_RGBA8,&size);status=error(&reader,rc);if(status==PN_OK && size!=(uint64_t)header.width*header.height*4)status=PN_CORRUPT;}
     if(status==PN_OK){rc=spng_decode_image(ctx,NULL,0,SPNG_FMT_RGBA8,SPNG_DECODE_PROGRESSIVE|SPNG_DECODE_TRNS);status=error(&reader,rc);}
     while(status==PN_OK){status=pn_cancel_checkpoint();if(status!=PN_OK)break;struct spng_row_info row;rc=spng_get_row_info(ctx,&row);if(rc){status=error(&reader,rc);break;}

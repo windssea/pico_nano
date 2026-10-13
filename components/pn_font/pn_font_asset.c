@@ -28,7 +28,7 @@ pn_status_t pn_font_asset_open(pn_font_asset_t *asset,pn_pool_t *pool,pn_media_t
 #endif
     if(result || !S_ISREG(st.st_mode) || st.st_size<0)return PN_IO;
     uint64_t size=(uint64_t)st.st_size;if(expected_size && expected_size!=size)return PN_STALE_JOB;if(size>PN_FONT_REFERENCE_MAX_BYTES)return PN_LIMIT;if(size<12)return PN_CORRUPT;
-    asset_t *a=pn_alloc(pool,sizeof *a);if(!a)return PN_NO_MEMORY;*a=(asset_t){.pool=pool,.media=media,.reference={.kind=PN_FONT_FILE,.size=size}};strcpy(a->reference.path,path);
+    asset_t *a=pn_alloc_tagged(pool,PN_MEM_FONT,sizeof *a);if(!a)return PN_NO_MEMORY;*a=(asset_t){.pool=pool,.media=media,.reference={.kind=PN_FONT_FILE,.size=size}};strcpy(a->reference.path,path);
     status=pn_media_acquire(media,PN_MEDIA_READ,&a->lease);if(status==PN_OK)status=pn_text_file_open(&a->file,media,&a->lease,path,&a->source);if(status==PN_OK && a->source.size!=size)status=PN_STALE_JOB;
     if(status==PN_OK)status=pn_identity_file(media,&a->lease,path,PN_FONT_REFERENCE_MAX_BYTES,&a->reference.identity);
     if(status==PN_OK)status=pn_font_open(&a->font,pool,&a->source,pixels);
@@ -46,7 +46,7 @@ pn_status_t pn_font_asset_sample(pn_font_asset_t *asset,const uint32_t *points,s
     if(!asset || !asset->impl || !points || !count || count>128 || !missing)return PN_INVALID;
     asset_t *a=asset->impl;pn_status_t status=pn_media_validate(a->media,&a->lease);if(status!=PN_OK)return status;
     for(size_t i=0;i<count;i++)if(points[i]>0x10ffff || (points[i]>=0xd800 && points[i]<=0xdfff))return PN_INVALID;
-    uint8_t *pixels=pn_alloc(a->pool,128*128/2);if(!pixels)return PN_NO_MEMORY;pn_frame_t frame;unsigned absent=0;if(!pn_frame_bind(&frame,pixels,128*128/2,128,128)){pn_free(pixels);return PN_INVALID;}
+    uint8_t *pixels=pn_alloc_tagged(a->pool,PN_MEM_FONT,128*128/2);if(!pixels)return PN_NO_MEMORY;pn_frame_t frame;unsigned absent=0;if(!pn_frame_bind(&frame,pixels,128*128/2,128,128)){pn_free(pixels);return PN_INVALID;}
     for(size_t i=0;status==PN_OK && i<count;i++){int32_t advance;status=pn_font_advance(&a->font,points[i],&advance);if(status==PN_EMPTY){absent++;status=PN_OK;continue;}if(status==PN_OK){pn_frame_clear(&frame,15);status=pn_font_draw(&a->font,&frame,points[i],16*64+17,104,PN_FONT_GRAY);}}
     if(status==PN_OK)*missing=absent;
     pn_free(pixels);return status;

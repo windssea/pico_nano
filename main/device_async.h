@@ -21,6 +21,7 @@ typedef struct {
     bool input_active,display_active; ///< 已启动端口 / Started ports
     uint32_t revision; ///< 产品worker拥有的管理页呈现代次 / Management presentation revision owned by product worker
     void *display_queue,*display_done;pn_status_t display_result; ///< IDF同步对象 / IDF synchronization objects
+    void *input_task_handle,*display_task_handle; ///< 稳定任务句柄，仅诊断读取水位 / Stable task handles used only for diagnostic watermarks
 } pn_device_async_t;
 /// 在VCOM门与BSP初始化成功后启动端口；失败降级不启动半初始化硬件。/ Start after VCOM/BSP gates; failures degrade without using partially initialized hardware.
 void pn_device_async_start(pn_device_async_t *port,read_pico_handle_t *hardware,pn_reader_present_fn panel,void (*idle)(uint64_t),void (*off)(void));

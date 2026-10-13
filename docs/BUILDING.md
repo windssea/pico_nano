@@ -69,6 +69,19 @@ python tools/dev.py host
 
 ## 产物与SDK隔离
 
+### 内存与阶段耗时诊断
+
+`tools/run_sim.ps1 -Timing`保留可见窗口，输出`profile`阶段行及`memory`分类行。分类字段为当前字节/累计峰值/成功分配/失败分配；各类峰值不可相加为同时峰值。阶段记录begin/end/本阶段同时peak/请求数，嵌套阶段耗时不可相加，主机池外堆与栈明确不可用。设备可单独选择`CONFIG_PN_PROFILE=y`编译诊断，默认关闭；此选项不自动刷机，也不把真实堆数据替换为PC估算。
+
+同源软件准备测量入口（TXT/EPUB原件只读，状态按轮独立，显示回调只用于软件诊断；另行观察可见窗口）：
+
+```powershell
+py -V:Astral/CPython3.12.13 tools/dev.py profile --archive "build-dev/sim-library/piconano/books/05-章节目录与书签.epub" --rounds 30
+py -V:Astral/CPython3.12.13 tools/summarize_profile.py build-dev/logs/profile-2.log
+```
+
+每次在忽略的`build-dev/profile/<随机ID>`创建状态与summary.json，记录书籍SHA、轮数、预算、ASan/UBSan、新会话/OS缓存条件、backend、各阶段p50/p95/max及所有状态计数。非零/EMPTY/取消不被过滤，不能把没有工作当成读取失败；日志在`build-dev/logs/profile-*.log`。相同目录构建须串行，不能两个Ninja同时写同一archive。先明确同源构建/字体/样本和冷/热条件，硬件与主机分别比较。控制要求与首批证据见[内存与响应](MEMORY_AND_RESPONSE.md)。
+
 | 入口 | 目录 | 用途 |
 | --- | --- | --- |
 | host | build-host | 同源C可执行测试及原生HTTP worker |

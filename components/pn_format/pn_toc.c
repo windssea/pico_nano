@@ -33,7 +33,7 @@ static pn_status_t add(parse_t *p,unsigned level,size_t *index){
     toc_t *t=p->toc;if(t->count>=PN_EPUB_ITEMS_MAX)return PN_LIMIT;
     if(t->count==t->capacity){
         size_t next=t->capacity?t->capacity*2:16;if(next>PN_EPUB_ITEMS_MAX)next=PN_EPUB_ITEMS_MAX;
-        entry_t *items=pn_alloc(t->pool,next*sizeof *items);if(!items)return PN_NO_MEMORY;
+        entry_t *items=pn_alloc_tagged(t->pool,PN_MEM_DOCUMENT,next*sizeof *items);if(!items)return PN_NO_MEMORY;
         if(t->count)memcpy(items,t->entries,t->count*sizeof *items);
         pn_free(t->entries);t->entries=items;t->capacity=next;
     }
@@ -43,7 +43,7 @@ static pn_status_t label_byte(toc_t *t,entry_t *e,char c){
     if(e->label_size>=PN_EPUB_META_MAX-1)return PN_LIMIT;
     if(e->label_size+1>=e->label_capacity){
         size_t next=e->label_capacity?e->label_capacity*2:64;if(next>PN_EPUB_META_MAX)next=PN_EPUB_META_MAX;
-        char *value=pn_alloc(t->pool,next);if(!value)return PN_NO_MEMORY;
+        char *value=pn_alloc_tagged(t->pool,PN_MEM_DOCUMENT,next);if(!value)return PN_NO_MEMORY;
         if(e->label_size)memcpy(value,e->label,e->label_size);
         pn_free(e->label);e->label=value;e->label_capacity=next;
     }
@@ -64,7 +64,7 @@ static pn_status_t target(parse_t *p,size_t index,const char *href){
     toc_t *t=p->toc;entry_t *e=&t->entries[index];if(e->target)return PN_CORRUPT;
     char path[PN_ZIP_PATH_MAX],fragment[PN_RESOURCE_FRAGMENT_MAX];pn_status_t status=pn_resource_resolve(t->base,href,path,fragment);if(status!=PN_OK)return status;
     size_t spine;status=pn_epub_spine_find(t->epub,path,&spine);if(status!=PN_OK)return status==PN_EMPTY?PN_UNSUPPORTED:status;
-    size_t length=strlen(path)+1,anchor=strlen(fragment)+1;char *saved=pn_alloc(t->pool,length+anchor);if(!saved)return PN_NO_MEMORY;
+    size_t length=strlen(path)+1,anchor=strlen(fragment)+1;char *saved=pn_alloc_tagged(t->pool,PN_MEM_DOCUMENT,length+anchor);if(!saved)return PN_NO_MEMORY;
     memcpy(saved,path,length);memcpy(saved+length,fragment,anchor);e->path=saved;e->fragment=saved+length;e->spine_index=spine;e->target=true;return PN_OK;
 }
 static pn_status_t label(parse_t *p,size_t index){
@@ -127,8 +127,8 @@ pn_status_t pn_toc_open(pn_toc_t *toc,pn_pool_t *pool,pn_epub_t *epub,const uint
     if(!toc || toc->impl || !pool || !epub || !salt)return PN_INVALID;
     pn_epub_info_t info;pn_status_t status=pn_epub_info(epub,&info);if(status!=PN_OK)return status;
     bool nav=*info.nav_path!=0;const char *path=nav?info.nav_path:info.ncx_path;if(!*path)return PN_EMPTY;
-    toc_t *t=pn_alloc(pool,sizeof *t);if(!t)return PN_NO_MEMORY;*t=(toc_t){.pool=pool,.epub=epub};strcpy(t->base,path);
-    parse_t *p=pn_alloc(pool,sizeof *p);if(!p){pn_free(t);return PN_NO_MEMORY;}*p=(parse_t){.toc=t,.nav=nav};
+    toc_t *t=pn_alloc_tagged(pool,PN_MEM_DOCUMENT,sizeof *t);if(!t)return PN_NO_MEMORY;*t=(toc_t){.pool=pool,.epub=epub};strcpy(t->base,path);
+    parse_t *p=pn_alloc_tagged(pool,PN_MEM_DOCUMENT,sizeof *p);if(!p){pn_free(t);return PN_NO_MEMORY;}*p=(parse_t){.toc=t,.nav=nav};
     pn_zip_stream_t stream={0};status=pn_epub_resource_open(epub,path,&stream);
     if(status==PN_OK){pn_xml_input_t input={&stream,read_stream};pn_xml_hooks_t hooks={start,end,text};status=pn_xml_parse(pool,&input,&hooks,p,32u*1024u*1024u,salt);}
     pn_zip_stream_close(&stream);

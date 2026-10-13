@@ -18,7 +18,7 @@ static pn_async_t *interrupt_queue;
 static pn_status_t glyph(void *ctx,uint32_t cp,const pn_xhtml_style_t *style,pn_epub_metrics_t *out){glyphs_measured++;if(interrupt_queue && glyphs_measured==1){pn_async_event_t e={.bytes=1};pn_async_send(interrupt_queue,&e);}(void)ctx;(void)cp;(void)style;*out=(pn_epub_metrics_t){.advance_64=10*64,.ascent=12,.descent=3,.line_height=20,.pixels=16};return PN_OK;}
 static void location(pn_epub_location_t *out,const char *path,const pn_xhtml_position_t *position){*out=(pn_epub_location_t){.version=1,.chapter_start=position==NULL};strcpy(out->path,path);if(position)out->position=*position;}
 static bool same(pn_epub_location_t a,pn_epub_location_t b){return !strcmp(a.path,b.path) && a.position.element==b.position.element && a.position.run==b.position.run && a.position.offset==b.position.offset && a.position.kind==b.position.kind && a.chapter_start==b.chapter_start && a.version==b.version;}
-static void expect(pn_epub_reader_t *r,const char *wanted){const pn_epub_page_t *page;assert(pn_epub_reader_page(r,&page)==PN_OK && page->valid && page->count==strlen(wanted));for(size_t i=0;i<page->count;i++)assert(page->nodes[i].codepoint==(unsigned char)wanted[i]);}
+static void expect(pn_epub_reader_t *r,const char *wanted){const pn_epub_page_t *page;assert(pn_epub_reader_page(r,&page)==PN_OK && page->valid && !page->owner && page->count==strlen(wanted));for(size_t i=0;i<page->count;i++)assert(page->nodes[i].codepoint==(unsigned char)wanted[i]);}
 static void show(pn_epub_reader_t *r,pn_read_intent_t intent,const pn_epub_location_t *jump,const char *text,uint64_t *time){pn_epub_reader_receipt_t receipt;assert(pn_epub_reader_prepare(r,intent,jump,&receipt)==PN_OK);expect(r,text);assert(pn_epub_reader_complete(r,&receipt,true,(*time)++)==PN_OK);}
 int main(int argc,char **argv){
     pn_epub_reader_t reader={0};pn_epub_reader_receipt_t receipt={0};pn_epub_progress_t progress;
@@ -53,6 +53,17 @@ int main(int argc,char **argv){
         }
         pn_epub_close(&epub);assert(pn_zip_close(&zip)==PN_OK && pn_text_file_close(&file)==PN_OK && pn_media_release(&media,&lease)==PN_OK && pn_media_release(&state,&state_lease)==PN_OK && !pool.used && !pool.live);
         fprintf(stderr,"resume used=0 live=0\\n");return result;
+    }
+    if(argc==2){
+        // 自有页预排交接后前/后页命中不分配、不复制度量节点。/ Owned prefetch handoff gives allocation-free forward/backward node hits.
+        pn_epub_page_t owned={0};pn_epub_reader_t owned_reader={0};pn_epub_reader_receipt_t owned_receipt;
+        assert(!pn_epub_page_reserve(&owned,&pool,64,0));assert(!pn_epub_reader_init(&owned_reader,&pool,&epub,&book,salt,&layout,&measure,&owned,(pn_job_token_t){88,1},NULL,NULL));
+        assert(!pn_epub_reader_prepare(&owned_reader,PN_READ_FIRST,NULL,&owned_receipt) && owned.nodes[0].codepoint=='A');assert(!pn_epub_reader_complete(&owned_reader,&owned_receipt,true,1));
+        pn_epub_page_node_t *first=owned.nodes;pool.fail_at=pool.attempts+1;assert(pn_epub_reader_prefetch(&owned_reader)==PN_NO_MEMORY && owned.nodes==first && owned.valid);pool.fail_at=0;
+        assert(!pn_epub_reader_prefetch(&owned_reader));size_t before=pool.attempts;
+        assert(!pn_epub_reader_prepare(&owned_reader,PN_READ_NEXT,NULL,&owned_receipt) && owned.nodes!=first && owned.nodes[0].codepoint=='C' && pool.attempts==before);assert(!pn_epub_reader_complete(&owned_reader,&owned_receipt,true,2));
+        assert(!pn_epub_reader_prepare(&owned_reader,PN_READ_PREVIOUS,NULL,&owned_receipt) && owned.nodes==first && owned.nodes[0].codepoint=='A' && pool.attempts==before);assert(!pn_epub_reader_complete(&owned_reader,&owned_receipt,true,3));
+        pn_epub_reader_close(&owned_reader);pn_epub_page_release(&owned);
     }
     assert(pn_epub_reader_init(&reader,&pool,&epub,&book,salt,&layout,&measure,&page,(pn_job_token_t){77,1},saved,&save)==PN_OK);
     if(argc==3 && !strcmp(argv[2],"window")){

@@ -71,7 +71,7 @@ static bool matches(const char *text,const uint8_t *bytes){
 pn_status_t pn_ls_session_open(pn_ls_session_t *out,pn_pool_t *pool,pn_ls_random_fn random,void *ctx){
     if(!out || !pool || !random)return PN_INVALID;
     if(out->impl)return PN_BUSY;
-    session_t *s=pn_alloc(pool,sizeof *s);
+    session_t *s=pn_alloc_tagged(pool,PN_MEM_TRANSFER,sizeof *s);
     if(!s)return PN_NO_MEMORY;
     *s=(session_t){.pool=pool,.random=random,.random_ctx=ctx,.active=PN_LS_FILES_MAX};out->impl=s;
     return PN_OK;

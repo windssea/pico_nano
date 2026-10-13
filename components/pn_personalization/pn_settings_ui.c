@@ -176,11 +176,11 @@ pn_status_t pn_settings_ui_open(pn_settings_ui_t *ui,pn_pool_t *pool,pn_media_t 
     if(!ui || !pool || !present || (state && (!dir || !*dir)))return PN_INVALID;
     if(ui->impl)return PN_BUSY;
     if(dir && strlen(dir)>=PN_JOURNAL_PATH_MAX)return PN_LIMIT;
-    su_t *u=pn_alloc(pool,sizeof *u);
+    su_t *u=pn_alloc_tagged(pool,PN_MEM_UI,sizeof *u);
     if(!u)return PN_NO_MEMORY;
     memset(u,0,sizeof *u);u->pool=pool;u->state=state;
     if(state)strcpy(u->dir,dir);
-    u->pixels=pn_alloc(pool,(size_t)W/2*H);
+    u->pixels=pn_alloc_tagged(pool,PN_MEM_UI,(size_t)W/2*H);
     pn_status_t status=u->pixels?PN_OK:PN_NO_MEMORY;
     if(status==PN_OK){(void)pn_frame_bind(&u->canvas,u->pixels,(size_t)W/2*H,W,H);pn_text_source_t builtin=pn_font_builtin_source();status=pn_font_open(&u->font,pool,&builtin,30);}
     if(status!=PN_OK){pn_free(u->pixels);pn_free(u);return status;}

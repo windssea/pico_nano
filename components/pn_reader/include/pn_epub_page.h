@@ -43,7 +43,12 @@ typedef struct {
     uint64_t begin_order,next_order; ///< 临时源顺序，用于有界上一页重建 / Transient source order for bounded previous-page reconstruction
     pn_xhtml_position_t begin,next; ///< 首节点及下一页位置，不是永久页号 / First node and next-page positions, not permanent page numbers
     bool valid,has_next; ///< 完整CRC成功及还有下一页 / Complete CRC success and another page exists
+    pn_pool_t *owner; ///< 非NULL为可增长的池内缓冲，NULL为调用方固定缓冲 / Non-NULL pooled growable buffers, NULL fixed caller buffers
 } pn_epub_page_t;
+/// 创建/增长自有缓冲，保留已有节点，最多4096/16项；不接管固定调用方缓冲。/ Create/grow owned buffers preserving nodes, bounded to 4096/16; never adopt fixed caller buffers.
+pn_status_t pn_epub_page_reserve(pn_epub_page_t *,pn_pool_t *,size_t,size_t);
+/// 只释放自有缓冲，固定缓冲保持不变。/ Release only owned buffers, leaving fixed buffers untouched.
+void pn_epub_page_release(pn_epub_page_t *);
 /// 输入流分页，start NULL为资源首；精确TEXT匹配或ELEMENT事件开启，错误清valid/count。
 /// Paginate input, NULL start means resource beginning; exact TEXT match or ELEMENT event activation; errors clear valid/count.
 pn_status_t pn_epub_page_input(pn_pool_t *pool,const pn_xml_input_t *input,const char *base,const uint8_t salt[16],const pn_xhtml_position_t *start,const pn_layout_t *layout,const pn_epub_measure_t *measure,pn_epub_page_t *page);

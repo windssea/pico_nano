@@ -17,7 +17,7 @@ pn_status_t pn_font_set_open(pn_font_set_t *set,pn_pool_t *pool,pn_media_t *medi
     if(set->impl)return PN_BUSY;
     pn_status_t status=pn_font_preferences_validate(prefs,true);if(status!=PN_OK)return status;
     status=pn_media_validate(media,guard);if(status!=PN_OK)return status;if(guard->access==PN_MEDIA_USB)return PN_INVALID;
-    set_t *s=pn_alloc(pool,sizeof *s);if(!s)return PN_NO_MEMORY;*s=(set_t){.pool=pool,.media=media,.guard=*guard};pn_text_source_t source,fallback;
+    set_t *s=pn_alloc_tagged(pool,PN_MEM_FONT,sizeof *s);if(!s)return PN_NO_MEMORY;*s=(set_t){.pool=pool,.media=media,.guard=*guard};pn_text_source_t source,fallback;
     if(prefs->primary.kind==PN_FONT_FILE){status=open_ref(&s->primary,pool,media,guard,&prefs->primary,pixels);if(status==PN_OK)s->body=pn_font_asset_font(&s->primary);}
     else{source=pn_font_reading_source();status=pn_font_open(&s->resident,pool,&source,pixels);s->body=&s->resident;}
     if(status==PN_OK && prefs->fallback.kind==PN_FONT_FILE){status=open_ref(&s->fallback,pool,media,guard,&prefs->fallback,pixels);if(status==PN_OK)status=pn_font_asset_source(&s->fallback,&fallback);pn_font_asset_suspend(&s->fallback);}
