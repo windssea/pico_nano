@@ -56,7 +56,7 @@ static pn_status_t load(pn_toc_ui_t *u){
     if(u->selected>=u->count)u->selected=0;
     return PN_OK;
 }
-pn_status_t pn_toc_ui_present(pn_toc_ui_t *u,pn_reader_present_fn present,void *ctx){if(!u || !u->active || !u->reader)return PN_INVALID;u->presented=false;pn_status_t status=pn_epub_app_toc_count(u->reader,&u->total);if(status==PN_EMPTY){u->total=0;status=PN_OK;}if(status==PN_OK)status=load(u);if(status==PN_OK)status=pn_epub_app_overlay(u->reader,paint,u,present,ctx,PN_REFRESH_GC16);u->presented=status==PN_OK;return status;}
+pn_status_t pn_toc_ui_present(pn_toc_ui_t *u,pn_reader_present_fn present,void *ctx){if(!u || !u->active || !u->reader)return PN_INVALID;u->presented=false;pn_status_t status=pn_epub_app_toc_count(u->reader,&u->total);if(status==PN_EMPTY){u->total=0;status=PN_OK;}if(status==PN_OK)status=load(u);if(status==PN_OK)status=pn_epub_app_overlay(u->reader,paint,u,present,ctx,PN_REFRESH_GL16);u->presented=status==PN_OK;return status;}
 pn_status_t pn_toc_ui_open(pn_toc_ui_t *u,pn_epub_app_t *reader,pn_reader_present_fn present,void *ctx){
     if(!u || !reader || !reader->impl)return PN_INVALID;
     memset(u,0,sizeof *u);u->current=SIZE_MAX;u->reader=reader;u->active=true;pn_status_t status=pn_epub_app_toc_count(reader,&u->total);

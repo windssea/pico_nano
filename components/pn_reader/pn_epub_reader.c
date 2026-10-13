@@ -40,8 +40,9 @@ static bool same_position(pn_xhtml_position_t a,pn_xhtml_position_t b){return a.
 static bool same_location(const pn_epub_location_t *a,const pn_epub_location_t *b){return memchr(a->path,0,sizeof a->path) && memchr(b->path,0,sizeof b->path) && !strcmp(a->path,b->path) && a->version==b->version && a->chapter_start==b->chapter_start && same_position(a->position,b->position);}
 static bool same_anchor(const pn_epub_reader_anchor_t *a,const pn_epub_reader_anchor_t *b){return a->has_next==b->has_next && same_location(&a->begin,&b->begin) && (!a->has_next || same_location(&a->next,&b->next));}
 static void location(pn_epub_location_t *out,const char *path,const pn_xhtml_position_t *position){
-    char saved[PN_ZIP_PATH_MAX];strcpy(saved,path);
-    *out=(pn_epub_location_t){.version=PN_XHTML_LOCATOR_VERSION,.chapter_start=position==NULL};strcpy(out->path,saved);if(position)out->position=*position;
+    // 路径允许原位更新，避免每层调用再保留1024字节栈副本。/ Permit in-place paths without another 1024-byte stack copy at each call depth.
+    memmove(out->path,path,strlen(path)+1);out->version=PN_XHTML_LOCATOR_VERSION;out->chapter_start=position==NULL;
+    out->position=position?*position:(pn_xhtml_position_t){0};
 }
 static pn_status_t check_location(reader_t *r,const pn_epub_location_t *l,size_t *index){
     if(!l || !memchr(l->path,0,sizeof l->path) || !*l->path)return PN_INVALID;
@@ -63,19 +64,21 @@ static pn_status_t next_chapter(reader_t *r,const char *path,bool forward,pn_epu
     if(!forward && !index)return PN_EMPTY;
     return linear(r,forward?index+1:index-1,forward,out);
 }
-static pn_status_t load(reader_t *r,const pn_epub_location_t *at,const pn_xhtml_position_t *stop){
+static pn_status_t load_page(reader_t *r,const pn_epub_location_t *at,const pn_xhtml_position_t *stop,pn_epub_page_t *page){
     const pn_xhtml_position_t *start=at->chapter_start?NULL:&at->position;
-    pn_status_t status=stop?pn_epub_page_prepare_until(r->pool,r->epub,at->path,r->salt,start,stop,&r->layout,&r->measure,r->page):pn_epub_page_prepare(r->pool,r->epub,at->path,r->salt,start,&r->layout,&r->measure,r->page);
-    if(status==PN_OK){size_t section;if(pn_epub_spine_find(r->epub,at->path,&section)==PN_OK){pn_page_index_entry_t e={.section=(uint32_t)section,.begin=r->page->begin_order,.end=r->page->has_next?r->page->next_order:UINT64_MAX,.first=r->page->begin,.next=r->page->next,.flags=r->page->has_next?1u:0u};pn_page_index_add(r->index,&e);}}
+    pn_status_t status=stop?pn_epub_page_prepare_until(r->pool,r->epub,at->path,r->salt,start,stop,&r->layout,&r->measure,page):pn_epub_page_prepare(r->pool,r->epub,at->path,r->salt,start,&r->layout,&r->measure,page);
+    if(status==PN_OK){size_t section;if(pn_epub_spine_find(r->epub,at->path,&section)==PN_OK){pn_page_index_entry_t e={.section=(uint32_t)section,.begin=page->begin_order,.end=page->has_next?page->next_order:UINT64_MAX,.first=page->begin,.next=page->next,.flags=page->has_next?1u:0u};pn_page_index_add(r->index,&e);}}
     return status;
 }
-static pn_status_t forward(reader_t *r,pn_epub_location_t *at){
+static pn_status_t load(reader_t *r,const pn_epub_location_t *at,const pn_xhtml_position_t *stop){return load_page(r,at,stop,r->page);}
+static pn_status_t forward_page(reader_t *r,pn_epub_location_t *at,pn_epub_page_t *page){
     for(size_t i=0;i<=r->spine_count;i++){
-        pn_status_t status=load(r,at,NULL);if(status!=PN_EMPTY)return status;
+        pn_status_t status=load_page(r,at,NULL,page);if(status!=PN_EMPTY)return status;
         status=next_chapter(r,at->path,true,at);if(status!=PN_OK)return status;
     }
     return PN_LIMIT;
 }
+static pn_status_t forward(reader_t *r,pn_epub_location_t *at){return forward_page(r,at,r->page);}
 static pn_status_t last(reader_t *r,pn_epub_location_t *at){
     pn_epub_location_t saved={0};bool have=false;
     size_t section;pn_page_index_entry_t e;bool indexed=pn_epub_spine_find(r->epub,at->path,&section)==PN_OK && pn_page_index_near(r->index,(uint32_t)section,UINT64_MAX,false,&e);
@@ -113,12 +116,13 @@ static pn_status_t previous(reader_t *r,pn_epub_location_t *at){
     }
     return PN_LIMIT;
 }
-static pn_status_t anchor(reader_t *r,const char *path,pn_epub_reader_anchor_t *out){
-    pn_epub_reader_anchor_t value={0};location(&value.begin,path,&r->page->begin);
-    if(r->page->has_next){if(r->page->next_order<=r->page->begin_order)return PN_CORRUPT;location(&value.next,path,&r->page->next);value.has_next=true;}
-    else{pn_status_t status=next_chapter(r,path,true,&value.next);if(status!=PN_OK && status!=PN_EMPTY)return status;value.has_next=status==PN_OK;}
-    *out=value;return PN_OK;
+static pn_status_t anchor_page(reader_t *r,const char *path,const pn_epub_page_t *page,pn_epub_reader_anchor_t *out){
+    memset(out,0,sizeof *out);location(&out->begin,path,&page->begin);
+    if(page->has_next){if(page->next_order<=page->begin_order)return PN_CORRUPT;location(&out->next,path,&page->next);out->has_next=true;}
+    else{pn_status_t status=next_chapter(r,path,true,&out->next);if(status!=PN_OK && status!=PN_EMPTY)return status;out->has_next=status==PN_OK;}
+    return PN_OK;
 }
+static pn_status_t anchor(reader_t *r,const char *path,pn_epub_reader_anchor_t *out){return anchor_page(r,path,r->page,out);}
 pn_status_t pn_epub_reader_init(pn_epub_reader_t *handle,pn_pool_t *pool,pn_epub_t *epub,const pn_book_id_t *book,const uint8_t salt[16],const pn_layout_t *layout,const pn_epub_measure_t *measure,pn_epub_page_t *page,pn_job_token_t token,pn_epub_confirm_fn confirm,void *ctx){
     if(!handle || handle->impl || !pool || !epub || !book || !salt || !layout_valid(layout) || !measure || !measure->glyph || !page || !page->nodes || !page->capacity || page->capacity>PN_PAGE_GLYPHS_MAX || page->image_capacity>PN_EPUB_PAGE_IMAGES_MAX || (page->image_capacity && !page->images) || !token.session || !token.generation)return PN_INVALID;
     bool random=false;for(unsigned i=0;i<16;i++)random=random || salt[i]!=0;if(!random)return PN_INVALID;
@@ -133,12 +137,13 @@ static pn_status_t pn_epub_reader_prefetch_impl(pn_epub_reader_t *handle){
     if(r->ahead.valid && same_location(&r->ahead_target,&r->visible.next))return PN_EMPTY;
     pn_epub_page_t page={0};pn_status_t allocated=pn_epub_page_reserve(&page,r->pool,64,0);
     if(allocated!=PN_OK){cached_free(&page);return allocated;}
-    reader_t copy=*r;copy.cache=(pn_cache_owner_t){0};copy.page=&page;copy.cache_enabled=false;copy.preparing=false;copy.confirm=NULL;
-    pn_epub_reader_t shadow={&copy};pn_epub_reader_receipt_t receipt;
-    pn_status_t status=pn_epub_reader_prepare(&shadow,PN_READ_NEXT,NULL,&receipt);
+    // 只预排独立页，不复制含32条长路径历史的整个阅读器到设备栈。/ Prepare an independent page without copying 32 long-path history entries onto the device stack.
+    pn_epub_location_t at=r->visible.next;pn_epub_reader_anchor_t prepared;
+    pn_status_t status=forward_page(r,&at,&page);
+    if(status==PN_OK)status=anchor_page(r,at.path,&page,&prepared);
     if(status==PN_OK)status=pn_cancel_checkpoint();
     // 已验证页直接转移所有权，避免scratch到ahead的第二份分配与复制。/ Move the validated page instead of allocating and copying a second scratch-to-ahead buffer.
-    if(status==PN_OK){cached_free(&r->ahead);r->ahead=page;page=(pn_epub_page_t){0};r->ahead_anchor=receipt.anchor;r->ahead_target=r->visible.next;}
+    if(status==PN_OK){cached_free(&r->ahead);r->ahead=page;page=(pn_epub_page_t){0};r->ahead_anchor=prepared;r->ahead_target=r->visible.next;}
     cached_free(&page);return status;
 }
 pn_status_t pn_epub_reader_prefetch(pn_epub_reader_t *handle){
@@ -150,33 +155,33 @@ pn_status_t pn_epub_reader_prepare_impl(pn_epub_reader_t *handle,pn_read_intent_
     if(!handle || !handle->impl || !out || intent<PN_READ_FIRST || intent>PN_READ_JUMP)return PN_INVALID;
     reader_t *r=handle->impl;if(r->preparing)return PN_BUSY;if(!r->next_ticket)return PN_LIMIT;
     if(!r->has_visible && intent!=PN_READ_FIRST && intent!=PN_READ_JUMP)return PN_EMPTY;
-    pn_epub_page_t *cached=NULL;pn_epub_reader_anchor_t prepared={0};bool saved_forward=false;
+    pn_epub_page_t *cached=NULL;pn_epub_reader_anchor_t *prepared=&r->pending.anchor;bool saved_forward=false;
     if(r->cache_enabled){
-        if(intent==PN_READ_NEXT && r->ahead.valid && r->visible.has_next && same_location(&r->ahead_target,&r->visible.next)){cached=&r->ahead;prepared=r->ahead_anchor;}
-        if(intent==PN_READ_PREVIOUS && r->behind.valid && r->history_count && same_location(&r->behind_anchor.begin,&r->history[r->history_count-1])){cached=&r->behind;prepared=r->behind_anchor;}
+        if(intent==PN_READ_NEXT && r->ahead.valid && r->visible.has_next && same_location(&r->ahead_target,&r->visible.next)){cached=&r->ahead;*prepared=r->ahead_anchor;}
+        if(intent==PN_READ_PREVIOUS && r->behind.valid && r->history_count && same_location(&r->behind_anchor.begin,&r->history[r->history_count-1])){cached=&r->behind;*prepared=r->behind_anchor;}
         pn_cache_observe(r->pool,PN_CACHE_NEIGHBOR,cached!=NULL);
         if(cached && r->page->owner==r->pool && cached->owner==r->pool){
-            size_t section;pn_status_t checked=check_location(r,&prepared.begin,&section);if(checked!=PN_OK)return checked;
+            size_t section;pn_status_t checked=check_location(r,&prepared->begin,&section);if(checked!=PN_OK)return checked;
             // 命中自有节点时直接交接，固定外部缓冲仍走复制兼容路径。/ Transfer owned nodes on hits; fixed external buffers keep the copying compatibility path.
             if(r->page->valid && r->has_visible && same_position(r->page->begin,r->visible.begin.position)){
                 pn_epub_page_t *opposite=intent==PN_READ_PREVIOUS?&r->ahead:&r->behind;cached_free(opposite);*opposite=*r->page;
-                if(intent==PN_READ_PREVIOUS){r->ahead_anchor=r->visible;r->ahead_target=prepared.next;}else r->behind_anchor=r->visible;
+                if(intent==PN_READ_PREVIOUS){r->ahead_anchor=r->visible;r->ahead_target=prepared->next;}else r->behind_anchor=r->visible;
             }else pn_epub_page_release(r->page);
             *r->page=*cached;*cached=(pn_epub_page_t){0};
             if(!pn_cache_allow(r->pool,PN_CACHE_NEIGHBOR,1))neighbor_drop(r);
-            r->pending=(pn_epub_reader_receipt_t){handle,r->token,r->next_ticket++,intent,prepared};r->preparing=true;*out=r->pending;return PN_OK;
+            r->pending.owner=handle;r->pending.token=r->token;r->pending.ticket=r->next_ticket++;r->pending.intent=intent;r->preparing=true;*out=r->pending;return PN_OK;
         }
         if((intent==PN_READ_NEXT || intent==PN_READ_PREVIOUS) && r->page->valid && r->has_visible && same_position(r->page->begin,r->visible.begin.position)){pn_epub_page_t *slot=intent==PN_READ_PREVIOUS?&r->ahead:&r->behind;if(slot!=cached && cached_store(r,slot,r->page)){if(slot==&r->ahead){r->ahead_anchor=r->visible;saved_forward=true;}else r->behind_anchor=r->visible;}}
     }
     if(intent!=PN_READ_NEXT && intent!=PN_READ_PREVIOUS){cached_free(&r->ahead);cached_free(&r->behind);}
     if(cached && cached->count<=r->page->capacity && cached->image_count<=r->page->image_capacity){
-        size_t index;pn_status_t status=check_location(r,&prepared.begin,&index);if(status!=PN_OK)return status;
+        size_t index;pn_status_t status=check_location(r,&prepared->begin,&index);if(status!=PN_OK)return status;
         pn_epub_page_node_t *nodes=r->page->nodes;pn_epub_page_image_t *images=r->page->images;size_t cap=r->page->capacity,icap=r->page->image_capacity;pn_pool_t *owner=r->page->owner;
         if(cached->count)memcpy(nodes,cached->nodes,cached->count*sizeof *nodes);
         if(cached->image_count)memcpy(images,cached->images,cached->image_count*sizeof *images);
         *r->page=*cached;r->page->nodes=nodes;r->page->images=images;r->page->capacity=cap;r->page->image_capacity=icap;r->page->owner=owner;
-        if(saved_forward)r->ahead_target=prepared.next;
-        r->pending=(pn_epub_reader_receipt_t){handle,r->token,r->next_ticket++,intent,prepared};r->preparing=true;*out=r->pending;return PN_OK;
+        if(saved_forward)r->ahead_target=prepared->next;
+        r->pending.owner=handle;r->pending.token=r->token;r->pending.ticket=r->next_ticket++;r->pending.intent=intent;r->preparing=true;*out=r->pending;return PN_OK;
     }
     r->page->valid=false;pn_epub_location_t at;pn_status_t status=PN_OK;
     if(intent==PN_READ_FIRST)status=linear(r,0,true,&at);
@@ -185,11 +190,10 @@ pn_status_t pn_epub_reader_prepare_impl(pn_epub_reader_t *handle,pn_read_intent_
     else if(intent==PN_READ_JUMP){size_t index;status=check_location(r,jump,&index);if(status==PN_OK){at=*jump;if(!at.chapter_start){uint64_t order;status=pn_xhtml_order(r->pool,r->epub,at.path,&at.position,r->salt,&order);if(status==PN_EMPTY)status=PN_INVALID;}}}
     if(intent==PN_READ_PREVIOUS)status=previous(r,&at);
     else if(status==PN_OK)status=forward(r,&at);
-    pn_epub_reader_anchor_t candidate;
-    if(status==PN_OK)status=anchor(r,at.path,&candidate);
+    if(status==PN_OK)status=anchor(r,at.path,prepared);
     if(status!=PN_OK){r->page->valid=false;return status;}
-    if(saved_forward)r->ahead_target=candidate.next;
-    r->pending=(pn_epub_reader_receipt_t){handle,r->token,r->next_ticket++,intent,candidate};r->preparing=true;*out=r->pending;return PN_OK;
+    if(saved_forward)r->ahead_target=prepared->next;
+    r->pending.owner=handle;r->pending.token=r->token;r->pending.ticket=r->next_ticket++;r->pending.intent=intent;r->preparing=true;*out=r->pending;return PN_OK;
 }
 pn_status_t pn_epub_reader_prepare(pn_epub_reader_t *handle,pn_read_intent_t intent,const pn_epub_location_t *jump,pn_epub_reader_receipt_t *out){
     pn_profile_span_t span;pn_profile_begin(&span,handle && handle->impl?((reader_t *)handle->impl)->pool:NULL,intent==PN_READ_NEXT?"epub.next":intent==PN_READ_PREVIOUS?"epub.previous":intent==PN_READ_JUMP?"epub.jump":"epub.prepare");

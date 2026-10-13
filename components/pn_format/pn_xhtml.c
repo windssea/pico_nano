@@ -190,18 +190,18 @@ static pn_status_t sheet_parse(sheet_t *sheet,char *css,size_t n){
         if(css[begin]=='@' || nested)continue;
         // 未支持的选择器列表整体跳过，防止部分错误列表意外生效。/ Skip whole unsupported selector lists to avoid accidental partial-list application.
         size_t tail=open;while(tail>begin && css_space(css[tail-1]))tail--;
-        bool supported=tail>begin && css[tail-1]!=',';size_t count=0;char selectors[16][256];
+        bool supported=tail>begin && css[tail-1]!=',';size_t count=0,starts[16],lengths[16];char selected[256];
         for(size_t pos=begin;pos<open;){size_t end=pos;while(end<open && css[end]!=',')end++;size_t a=pos,b=end;
             while(a<b && css_space(css[a]))a++;
             while(b>a && css_space(css[b-1]))b--;
             if(count==16 || b==a || b-a>=256){supported=false;break;}
-            memcpy(selectors[count],css+a,b-a);selectors[count][b-a]=0;
-            if(!selector(selectors[count],NULL,NULL,NULL,NULL)){supported=false;break;}
+            memcpy(selected,css+a,b-a);selected[b-a]=0;starts[count]=a;lengths[count]=b-a;
+            if(!selector(selected,NULL,NULL,NULL,NULL)){supported=false;break;}
             count++;pos=end+1;
         }
         if(!supported)continue;
         css[close]=0;
-        for(size_t k=0;k<count;k++){pn_status_t status=rule_add(sheet,selectors[k],css+body);if(status!=PN_OK)return status;}
+        for(size_t k=0;k<count;k++){memcpy(selected,css+starts[k],lengths[k]);selected[lengths[k]]=0;pn_status_t status=rule_add(sheet,selected,css+body);if(status!=PN_OK)return status;}
     }
     return PN_OK;
 }
@@ -318,15 +318,16 @@ static pn_status_t sheet_finish(sheet_t *sheet,char *buffer,size_t size){
 }
 static pn_status_t sheet_load(sheet_t *sheet,const char *path){
     char *buffer=NULL;size_t capacity=0;pn_status_t status=sheet_buffer(sheet,&buffer,&capacity);if(status!=PN_OK)return status;
+    uint8_t *bytes=pn_alloc_tagged(sheet->pool,PN_MEM_DOCUMENT,4096);if(!bytes){pn_free(buffer);return PN_NO_MEMORY;}
     pn_zip_stream_t stream={0};size_t size=0;status=pn_epub_resource_open(sheet->epub,path,&stream);
     if(status==PN_EMPTY)status=PN_CORRUPT;
-    while(status==PN_OK){uint8_t bytes[4096];size_t n=0;status=read_stream(&stream,bytes,sizeof bytes,&n);
+    while(status==PN_OK){size_t n=0;status=read_stream(&stream,bytes,4096,&n);
         if(status==PN_EMPTY){status=PN_OK;break;}
         if(status!=PN_OK)break;
         if(!n){status=PN_CORRUPT;break;}
         status=sheet_append(sheet,&buffer,&size,&capacity,bytes,n);
     }
-    pn_zip_stream_close(&stream);
+    pn_zip_stream_close(&stream);pn_free(bytes);
     if(status==PN_OK)return sheet_finish(sheet,buffer,size);
     pn_free(buffer);return status;
 }

@@ -129,3 +129,6 @@ cmake --build build-sim-native
 ## 缓存压力复跑
 
 `tools/run_sim.ps1 -Timing -BudgetKiB 2048`以2MiB池启动可见窗口；默认6144KiB，限制范围256–6144KiB，过小预算可能无法容纳必需帧或字体。先`tools/dev.py sdl-run`重建，再停止旧`pico-sim`并重启。可见入口使用行缓冲输出，`docker logs pico-sim`可即时核对导航回执。kind 0/1/2的cache日志为邻页/字形/封面快照与准入拒绝、压力淘汰计数；共享预算和统计边界见[内存与响应](MEMORY_AND_RESPONSE.md)。低预算窗口是主机软件验证，不是设备PSRAM或面板指标。
+
+
+硬件资源与模拟约束以[硬件基线](HARDWARE.md)为准。`pn_hardware.h`共享6MiB池上限和32KiB产品任务栈，模拟器命令行也拒绝超限；固件阅读组件生成`.su`栈报告并拒绝大于16KiB的函数栈帧。普通板级固件输出关键EPUB/摘要耗时、缓存及栈水位，CONFIG_PN_PROFILE额外开启全部阶段/分类堆诊断。

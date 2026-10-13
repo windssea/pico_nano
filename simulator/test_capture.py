@@ -25,6 +25,8 @@ with tempfile.TemporaryDirectory() as tmp:
     assert "used=0 live=0" in partial.stdout
     denied = subprocess.run([sys.argv[1], "--headless", "--capture", str(output), "--budget", "4096"], capture_output=True)
     assert denied.returncode != 0 and not output.exists()
+    oversized = subprocess.run([sys.argv[1], "--headless", "--capture", str(output), "--budget", str(6 * 1024 * 1024 + 1)], capture_output=True, text=True)
+    assert oversized.returncode == 2 and "hardware pool limit" in oversized.stderr and not output.exists()
     for arg in ["-1", "no", "18446744073709551616"]:
         invalid = subprocess.run([sys.argv[1], "--headless", "--budget", arg], capture_output=True)
         assert invalid.returncode != 0

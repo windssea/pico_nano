@@ -20,7 +20,7 @@ static pn_status_t preferences(ui_t *s){
  if(status==PN_OK)s->current=s->draft;
  s->ready=status==PN_OK;return status;
 }
-static pn_status_t overlay(pn_font_ui_t *u,pn_reader_overlay_fn paint,pn_reader_present_fn present,void *ctx){ui_t *s=u->impl;return s->epub?pn_epub_app_overlay(s->epub,paint,u,present,ctx,PN_REFRESH_GC16):pn_reader_app_overlay(s->reader,paint,u,present,ctx,PN_REFRESH_GC16);}
+static pn_status_t overlay(pn_font_ui_t *u,pn_reader_overlay_fn paint,pn_reader_present_fn present,void *ctx){ui_t *s=u->impl;return s->epub?pn_epub_app_overlay(s->epub,paint,u,present,ctx,PN_REFRESH_GL16):pn_reader_app_overlay(s->reader,paint,u,present,ctx,PN_REFRESH_GL16);}
 static pn_status_t page(pn_font_ui_t *u,const char *cursor,bool reverse){ui_t *s=u->impl;pn_status_t status=s->epub?pn_epub_app_fonts_page(s->epub,s->directory,cursor,reverse,&s->page):pn_reader_app_fonts_page(s->reader,s->directory,cursor,reverse,&s->page);if(status==PN_OK){memmove(s->cursor,cursor,strlen(cursor)+1);u->selected=0;s->focus_visible=false;}else{s->page.count=0;s->page.more=false;}return status;}
 /* 列表：默认阅读字体和用户外置字体；详情只配置阅读正文。
  * List: default reading font and user external fonts; details configure reading text only. */

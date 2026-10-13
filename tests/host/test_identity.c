@@ -15,6 +15,7 @@
 #include <unistd.h>
 static pn_status_t short_read(void *ctx,uint64_t at,uint8_t *out,size_t cap,size_t *n){const char *text=ctx;if(at>=strlen(text) || !cap)return PN_IO;*out=(uint8_t)text[at];*n=1;return PN_OK;}
 static pn_status_t invalid_read(void *ctx,uint64_t at,uint8_t *out,size_t cap,size_t *n){(void)ctx;(void)at;(void)out;*n=cap+1;return PN_OK;}
+static pn_status_t failed_accelerator(void *ctx,uint64_t size,pn_identity_read_fn read,pn_book_id_t *out){(void)ctx;assert(size==3 && read==short_read);memset(out,0,sizeof *out);return PN_IO;}
 static void write_bytes(const char *path, const char *bytes, size_t n) {
     FILE *f=fopen(path,"wb"); assert(f); assert(fwrite(bytes,1,n,f)==n); assert(fclose(f)==0);
 }
@@ -35,6 +36,7 @@ int main(int argc, char **argv) {
     assert(pn_identity_bytes((const uint8_t *)"abc",3,&id)==PN_OK && !memcmp(id.sha256,abc,32));
     assert(pn_identity_stream((void *)"abc",3,short_read,&id)==PN_OK && !memcmp(id.sha256,abc,32));
     pn_book_id_t unchanged=id;assert(pn_identity_stream(NULL,3,invalid_read,&id)==PN_IO && !memcmp(&id,&unchanged,sizeof id));
+    pn_identity_stream_port(failed_accelerator);assert(pn_identity_stream((void *)"abc",3,short_read,&id)==PN_IO && !memcmp(&id,&unchanged,sizeof id));pn_identity_stream_port(NULL);
     pn_book_id_t copy; assert(pn_identity_file(&media,&lease,b,3,&copy)==PN_OK && memcmp(&id,&copy,sizeof id)==0);
     write_bytes(a,"abd",3); assert(pn_identity_file(&media,&lease,a,3,&copy)==PN_OK && memcmp(&id,&copy,sizeof id)!=0);
     copy=id; assert(pn_identity_file(&media,&lease,a,2,&copy)==PN_LIMIT && memcmp(&id,&copy,sizeof id)==0);

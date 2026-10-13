@@ -33,7 +33,7 @@ pn_status_t pn_device_transfer_network_result(pn_device_transfer_t *s,pn_status_
 void app_main(void);
 static jmp_buf end;
 static void (*worker)(void *);
-static unsigned vcom_reads,presents,board_calls,mounts,poweroffs,pclk_calls;
+static unsigned vcom_reads,presents,board_calls,mounts,poweroffs,pclk_calls,clear_calls;
 static int last_pclk;
 static bool underrun;
 static bool nvs_bad,vcom_bad,mount_bad,ready_bad;
@@ -48,7 +48,7 @@ void read_pico_epd_use_scan(int s){assert(s==READ_PICO_EPD_SCAN_FULL);}
 void epd_poweron(void){assert(!vcom_bad && vcom_reads==1);}
 void epd_poweroff(void){poweroffs++;}
 void read_pico_epd_set_pclk(int mhz){pclk_calls++;last_pclk=mhz;}
-void epd_clear(void){}
+void epd_clear(void){clear_calls++;}
 enum EpdDrawError epd_hl_update_screen_from_white(EpdiyHighlevelState *h,enum EpdDrawMode m,int t){(void)h;(void)m;(void)t;presents++;if(underrun && presents==1)return EPD_DRAW_EMPTY_LINE_QUEUE;return EPD_DRAW_SUCCESS;}
 enum EpdDrawError epd_hl_update_screen_full(EpdiyHighlevelState *h,enum EpdDrawMode m,int t){return epd_hl_update_screen_from_white(h,m,t);}
 enum EpdDrawError epd_hl_update_area_full(EpdiyHighlevelState *h,enum EpdDrawMode m,int t,EpdRect area){(void)area;return epd_hl_update_screen_from_white(h,m,t);}

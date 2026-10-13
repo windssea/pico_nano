@@ -27,6 +27,16 @@ int main(void){
     actions.confirming=true;actions.notice=NULL;handle_key(PN_KEY_3,PN_KEY_SHORT);
     assert(actions_mode && actions.confirming && actions.notice); // 不存在的测试文件删除失败，证明右键送达确认而非焦点切换。/ Failed deletion of the nonexistent fixture proves Confirm delivery, rather than focus movement.
     actions_mode=false;
+    // 管理轻更新不沿用阅读的6页清屏间隔；显式强刷仍生效。/ Management updates ignore the reading six-page cleaning interval; explicit cleaning still works.
+    input_flags=(input_flags&~PN_INPUT_REFRESH_MASK)|0x10;
+    pn_frame_t probe_frame;uint8_t *probe_pixels=pn_alloc(&pool,PN_HW_FRAME_BYTES);assert(probe_pixels);
+    assert(pn_frame_bind(&probe_frame,probe_pixels,PN_HW_FRAME_BYTES,PN_HW_WIDTH,PN_HW_HEIGHT));
+    pn_frame_clear(&probe_frame,15);assert(present(NULL,&probe_frame,PN_REFRESH_GC16)==PN_OK);
+    unsigned clean_before=clear_calls;
+    for(unsigned i=0;i<12;i++){pn_frame_rect(&probe_frame,20+(int)i*4,200,4,4,0);assert(present(NULL,&probe_frame,PN_REFRESH_GL16)==PN_OK);}
+    assert(clear_calls==clean_before);
+    assert(present(NULL,&probe_frame,PN_REFRESH_GC16)==PN_OK && clear_calls==clean_before+1);
+    pn_free(probe_pixels);
     pn_free(shown_px);pn_free(page_copy);pn_free(shelf_page);pn_free(shelf_covers);pn_free(recent_snapshot);pn_free(favorites);
     assert(!pool.used && !pool.live);return 0;
 }

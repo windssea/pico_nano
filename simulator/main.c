@@ -9,6 +9,7 @@
  * Frozen: no simulation of panel optics and no claim of implemented reading features.
  */
 #include "pn_alloc.h"
+#include "pn_hardware.h"
 #include "pn_frame.h"
 #include "pn_display.h"
 #include "reader_capture.h"
@@ -113,11 +114,12 @@ int main(int argc, char **argv) {
     if(cover_cache && (!library || !*cover_cache))return 2;
     if((wallpaper_dir || wallpaper_store) && (!library || !wallpaper_dir || !*wallpaper_dir || (wallpaper_store && !*wallpaper_store)))return 2;
     if(font_dir && (!library || !*font_dir))return 2;
-    if((library || book) && !budget_explicit)budget=6*1024*1024;
+    if((library || book) && !budget_explicit)budget=PN_HW_POOL_BYTES;
     if (ownership && !budget_explicit) budget=2*1024*1024;
     bool epub_book=false;
     if(book){FILE *file=fopen(book,"rb");if(file){uint8_t prefix[4];size_t n=fread(prefix,1,4,file);fclose(file);epub_book=n==4 && prefix[0]=='P' && prefix[1]=='K' && prefix[2]==3 && prefix[3]==4;}}
-    if(epub_book && !budget_explicit)budget=6u*1024u*1024u;
+    if(epub_book && !budget_explicit)budget=PN_HW_POOL_BYTES;
+    if(budget>PN_HW_POOL_BYTES){fprintf(stderr,"PicoNano hardware pool limit: %u bytes\n",PN_HW_POOL_BYTES);return 2;}
     pn_pool_t pool;
     if (pn_pool_init(&pool,budget,NULL,NULL,NULL)!=0) return 1;
     if(library){

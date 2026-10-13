@@ -20,5 +20,9 @@ pn_status_t pn_identity_file(pn_media_t *media, const pn_media_lease_t *lease,
 pn_status_t pn_identity_bytes(const uint8_t *,size_t,pn_book_id_t *);
 /// 有界流式读取回调；每次必须返回1..capacity字节。/ Bounded streaming reader; each call must return 1..capacity bytes.
 typedef pn_status_t (*pn_identity_read_fn)(void *,uint64_t,uint8_t *,size_t,size_t *);
+/// 可选硬件摘要端口；启动时安装，保留完整SHA与失败不改输出契约。/ Optional hardware digest port; install at startup, preserving full SHA and unchanged output on failure.
+typedef pn_status_t (*pn_identity_stream_port_fn)(void *,uint64_t,pn_identity_read_fn,pn_book_id_t *);
+/// NULL恢复同源软件实现；不可在摘要运行期间修改。/ NULL restores shared software hashing; never change while hashing.
+void pn_identity_stream_port(pn_identity_stream_port_fn);
 /// 对精确长度流计算摘要；调用方排除变更并在read中验证介质。/ Hash an exact-length stream; caller excludes mutation and checks media in read.
 pn_status_t pn_identity_stream(void *,uint64_t,pn_identity_read_fn,pn_book_id_t *);

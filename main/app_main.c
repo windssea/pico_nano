@@ -34,6 +34,8 @@
 #include "pn_key.h"
 #include "device_sleep.h"
 #include "device_async.h"
+#include "device_identity.h"
+#include "pn_hardware.h"
 #include "device_sd.h"
 #include "pn_tap.h"
 #include "pn_bookmark_ui.h"
@@ -151,14 +153,20 @@ static void filter_recent_available(pn_recent_snapshot_t *snapshot){
 static void *psram_alloc(void *ctx,size_t size){(void)ctx;return heap_caps_malloc(size,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);}
 static void psram_free(void *ctx,void *ptr){(void)ctx;heap_caps_free(ptr);}
 static uint64_t now_ms(void){return (uint64_t)(esp_timer_get_time()/1000);}
-#if defined(ESP_PLATFORM) && defined(CONFIG_PN_PROFILE)
+#if defined(ESP_PLATFORM)
 static void profile_task_stacks(const char *);
 static uint64_t profile_clock(void *ctx){(void)ctx;return (uint64_t)esp_timer_get_time();}
 static void profile_emit(void *ctx,const pn_profile_event_t *e){
-    (void)ctx;ESP_LOGI(TAG,"profile phase=%s elapsed_us=%llu status=%d begin=%zu end=%zu peak=%zu attempts=%zu backend=device",e->phase,(unsigned long long)e->elapsed_us,(int)e->status,e->begin_bytes,e->end_bytes,e->peak_bytes,e->attempts);
+    (void)ctx;
+#ifndef CONFIG_PN_PROFILE
+    if(e->status==PN_EMPTY || (strcmp(e->phase,"epub.open") && strcmp(e->phase,"content.stream-sha") && strcmp(e->phase,"epub.prepare") && strcmp(e->phase,"epub.next") && strcmp(e->phase,"epub.previous") && strcmp(e->phase,"epub.prefetch") && strcmp(e->phase,"font.layout-key")))return;
+#endif
+    ESP_LOGI(TAG,"profile phase=%s elapsed_us=%llu status=%d begin=%zu end=%zu peak=%zu attempts=%zu backend=device",e->phase,(unsigned long long)e->elapsed_us,(int)e->status,e->begin_bytes,e->end_bytes,e->peak_bytes,e->attempts);
     const unsigned caps[]={MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT};
     for(unsigned j=0;j<2;j++)ESP_LOGI(TAG,"heap phase=%s region=%s free=%zu minimum=%zu largest=%zu",e->phase,j?"psram":"internal",heap_caps_get_free_size(caps[j]),heap_caps_get_minimum_free_size(caps[j]),heap_caps_get_largest_free_block(caps[j]));
+    #ifdef CONFIG_PN_PROFILE
     if(e->pool)for(unsigned j=0;j<PN_MEM_COUNT;j++){const pn_memory_stats_t *m=&e->pool->memory[j];ESP_LOGI(TAG,"memory phase=%s tag=%s used=%zu peak=%zu live=%zu allocations=%zu failures=%zu",e->phase,pn_memory_tag_name((pn_memory_tag_t)j),m->used,m->peak,m->live,m->allocations,m->failures);}
+    #endif
     ESP_LOGI(TAG,"stack phase=%s owner=product minimum_bytes=%u",e->phase,(unsigned)uxTaskGetStackHighWaterMark(NULL));
     profile_task_stacks(e->phase);
     if(e->pool)for(unsigned k=0;k<PN_CACHE_COUNT;k++){const pn_cache_stats_t *c=&e->pool->cache_stats[k];ESP_LOGI(TAG,"cache phase=%s kind=%u bytes=%zu peak=%zu hits=%zu misses=%zu denied=%zu evictions=%zu reclaimed=%zu",e->phase,k,c->bytes,c->peak,c->hits,c->misses,c->denied,c->evictions,c->reclaimed);}
@@ -189,7 +197,7 @@ static pn_focus_t focus_nav; ///< 当前页的三键焦点表 / Three-key focus 
 #define PARTIAL_MAX_PERCENT 45
 static uint8_t *shown_px;
 static pn_device_async_t async_port;
-#if defined(ESP_PLATFORM) && defined(CONFIG_PN_PROFILE)
+#if defined(ESP_PLATFORM)
 static void profile_task_stacks(const char *phase){
     if(async_port.input_task_handle)ESP_LOGI(TAG,"stack phase=%s owner=input minimum_bytes=%u",phase,(unsigned)uxTaskGetStackHighWaterMark(async_port.input_task_handle));
     if(async_port.display_task_handle)ESP_LOGI(TAG,"stack phase=%s owner=display minimum_bytes=%u",phase,(unsigned)uxTaskGetStackHighWaterMark(async_port.display_task_handle));
@@ -227,7 +235,13 @@ static pn_status_t present_panel(void *ctx,const pn_frame_t *frame,pn_refresh_t 
     read_pico_epd_use_scan(READ_PICO_EPD_SCAN_FULL);epd_poweron();
     enum EpdDrawMode mode=profile==PN_REFRESH_GC16?MODE_GC16:MODE_GL16;
     // 软刷新累计满额时改用GC16，目标帧与区域不变。/ When the soft-refresh budget is spent, switch to GC16 with the same target frame and area.
-    if(mode==MODE_GC16)soft_refreshes=0;else if(++soft_refreshes>=SOFT_REFRESH_PER_GC16){mode=MODE_GC16;soft_refreshes=0;}
+    // 阅读页数设置不能让管理页每次点击都清屏；管理页独立使用较长保洁间隔。/ Reading-page preferences must not clear management pages on every tap; use a separate maintenance interval.
+    static unsigned management_refreshes;
+    bool body_refresh=atomic_load(&async_port.body);
+    unsigned refresh_limit=body_refresh?SOFT_REFRESH_PER_GC16:24u;
+    unsigned *refresh_count=body_refresh?&soft_refreshes:&management_refreshes;
+    if(mode==MODE_GC16){soft_refreshes=0;management_refreshes=0;}
+    else if(++*refresh_count>=refresh_limit){mode=MODE_GC16;soft_refreshes=0;management_refreshes=0;}
     enum EpdDrawError result;
     uint64_t panel_at=now_ms();
     (void)panel_at;
@@ -989,8 +1003,11 @@ static void show_boot_brand(void){
     pn_free(pixels);if(status!=PN_OK)ESP_LOGW(TAG,"Brand screen unavailable: %d",(int)status);
 }
 static void device_task(void *arg){
-#if defined(ESP_PLATFORM) && defined(CONFIG_PN_PROFILE)
+#if defined(ESP_PLATFORM)
     pn_profile_port(profile_clock,profile_emit,NULL);
+#endif
+    #ifdef ESP_PLATFORM
+    pn_status_t sha_status=pn_device_identity_init();ESP_LOGI(TAG,"Hardware SHA self-test status=%d",(int)sha_status);
 #endif
     (void)arg;esp_err_t error=nvs_flash_init();if(error!=ESP_OK){ESP_LOGE(TAG,"NVS unavailable: %s; preserving data",esp_err_to_name(error));vTaskDelete(NULL);return;}
     pn_profile_span_t board_span;pn_profile_begin(&board_span,NULL,"device.board-init");
@@ -998,7 +1015,7 @@ static void device_task(void *arg){
     int vcom=0;if(!hardware.pmu_ready || read_pico_pmu_vcom_get(&vcom)!=ESP_OK){ESP_LOGE(TAG,"Factory VCOM unavailable; display withheld");read_pico_deinit(&hardware);vTaskDelete(NULL);return;}
     epd_set_vcom((uint16_t)vcom);
     size_t available=heap_caps_get_free_size(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
-    size_t budget=available>256u*1024u?available-256u*1024u:0;if(budget>6u*1024u*1024u)budget=6u*1024u*1024u;
+    size_t budget=available>PN_HW_PSRAM_RESERVE?available-PN_HW_PSRAM_RESERVE:0;if(budget>PN_HW_POOL_BYTES)budget=PN_HW_POOL_BYTES;
     if(pn_pool_init(&pool,budget,psram_alloc,psram_free,NULL)!=0){read_pico_deinit(&hardware);vTaskDelete(NULL);return;}
     pn_cache_attach(&pool,&cover_cache_owner,PN_CACHE_COVER,NULL,cover_bytes,cover_drop);
     pn_media_init(&sd_media);pn_media_init(&data_media);pn_media_init(&wallpaper_media);read_pico_pmu_drain_events();esp_fill_random(cover_salt,sizeof cover_salt);
@@ -1079,5 +1096,5 @@ static void device_task(void *arg){
 }
 void app_main(void){
     // 字体/解析独占一个较大栈的worker，不在小型启动栈上运行。/ Run font/parsing on one larger-stack worker, not the small boot stack.
-    if(xTaskCreatePinnedToCore(device_task,"pn_device",32768,NULL,3,NULL,1)!=pdPASS)ESP_LOGE(TAG,"Device worker creation failed");
+    if(xTaskCreatePinnedToCore(device_task,"pn_device",PN_HW_PRODUCT_STACK_BYTES,NULL,3,NULL,1)!=pdPASS)ESP_LOGE(TAG,"Device worker creation failed");
 }
