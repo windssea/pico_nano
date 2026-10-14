@@ -57,6 +57,40 @@ function renderRelease() {
   $("version").textContent = release.version;
   $("release-meta").textContent = `提交 ${release.commit} · 应用 ${kib(release.files.app.size)}`;
   $("hw-warning").hidden = release.verifiedOnHardware;
+  const preserving = release.mode === "app-only";
+  $("mode-note").textContent = preserving ? "用于已有 PicoNano 的同布局升级。刷过其他固件请选择完整刷入。"
+    : "完整刷入会恢复引导与启动布局。请核对所选版本、备份及清除选项；不会自动切换刷入方式。";
+}
+
+/// 按刷入方式列出可用包，不把旧升级包当作完整镜像。/ List packages by mode without treating an app-only package as a complete image.
+function selectMode(preferredCommit) {
+  const mode = $("install-mode").value;
+  const releases = state.manifest.releases.filter((r) => (r.mode || "full") === mode && !r.legacy);
+  const select = $("release");
+  select.replaceChildren();
+  for (const release of releases) {
+    const option = document.createElement("option");
+    option.value = release.version;
+    option.textContent = `${release.version}${release.verifiedOnHardware ? "" : "（未经真机验证）"}`;
+    select.append(option);
+  }
+  state.release = releases.find((r) => r.commit === preferredCommit) || releases[0];
+  state.files = null;
+  state.plan = null;
+  $("plan").hidden = true;
+  for (const id of ["clear-nvs", "initialize-storage", "confirm-full", "confirm-model"]) $(id).checked = false;
+  if (!state.release) {
+    $("version").textContent = "—";
+    $("release-meta").textContent = "";
+    $("mode-note").textContent = "没有可用的当前完整包；历史首装包不作为新版本的恢复包。";
+    status("当前没有该方式的固件包，请选择另一种方式或等待完整包发布。", "warn");
+    syncButtons();
+    return;
+  }
+  select.value = state.release.version;
+  renderRelease();
+  if (state.loader && state.device) prepare().catch(fail);
+  else syncButtons();
 }
 
 async function init() {
@@ -73,22 +107,18 @@ async function init() {
     return;
   }
   const select = $("release");
-  for (const release of state.manifest.releases) {
-    const option = document.createElement("option");
-    option.value = release.version;
-    option.textContent = `${release.version}${release.verifiedOnHardware ? "" : "（未经真机验证）"}`;
-    select.append(option);
-  }
   select.addEventListener("change", () => {
     state.plan = null;
     $("plan").hidden = true;
-    state.release = state.manifest.releases.find((r) => r.version === select.value);
+    state.release = state.manifest.releases.find((r) => r.version === select.value && (r.mode || "full") === $("install-mode").value);
     state.files = null;
+    for (const id of ["confirm-model", "confirm-full", "clear-nvs", "initialize-storage"]) $(id).checked = false;
     renderRelease();
     if (state.device) prepare().catch(fail);
+    else syncButtons();
   });
-  state.release = state.manifest.releases[0];
-  renderRelease();
+  $("install-mode").value = state.manifest.releases[0].mode || "full";
+  selectMode();
 }
 
 function fail(error) {
@@ -96,15 +126,22 @@ function fail(error) {
   log(`错误：${error.message || error}`);
   status(`${error.message || error}`, "error");
   state.busy = false;
+  state.plan = null;
+  $("plan").hidden = true;
   syncButtons();
 }
 
 function syncButtons() {
-  const ready = state.plan && $("confirm-model").checked && !state.busy;
+  const full = state.release && state.release.mode !== "app-only";
+  const ready = state.plan && !state.plan.needsNvsClear && !state.plan.needsStorageInitialization &&
+    $("confirm-model").checked && (!full || $("confirm-full").checked) && !state.busy;
   $("install").disabled = !ready;
-  $("connect").disabled = state.busy || !("serial" in navigator);
+  $("connect").disabled = state.busy || !("serial" in navigator) || !state.release;
   $("connect").textContent = state.loader ? "重新连接" : "连接设备";
-  $("release").disabled = state.busy;
+  $("release").disabled = state.busy || !state.release;
+  $("install-mode").disabled = state.busy || !state.manifest;
+  for (const id of ["clear-nvs", "initialize-storage"]) $(id).disabled = state.busy || !full;
+  $("confirm-full-label").hidden = !full;
 }
 
 async function disconnect() {
@@ -113,6 +150,7 @@ async function disconnect() {
   }
   state.transport = null;
   state.loader = null;
+  state.device = null;
 }
 
 /// 连接、确认芯片与闪存容量，并读取当前分区表与数据分区开头。/ Connect, confirm chip and flash size, then read the table and data heads.
@@ -122,6 +160,8 @@ async function connect() {
   $("plan").hidden = true;
   syncButtons();
   await disconnect();
+  $("confirm-model").checked = false;
+  $("confirm-full").checked = false;
   status("请选择设备串口…");
   const port = await navigator.serial.requestPort({});
   state.transport = new Transport(port, false);
@@ -140,6 +180,8 @@ async function connect() {
 /// 读取设备现状并生成写入计划。/ Read the device state and build the write plan.
 async function prepare() {
   state.busy = true;
+  state.plan = null;
+  $("plan").hidden = true;
   syncButtons();
   if (!state.files) {
     status(`正在下载并校验 ${state.release.version} 固件…`);
@@ -151,7 +193,11 @@ async function prepare() {
   // 未识别头部时读取完整分区，不能凭空白头部认定全部数据为空。/ Read the full partition for unrecognized headers; a blank header does not prove all data is blank.
   const readStorage = async (partition) => {
     const head = await state.loader.readFlash(partition.offset, HEAD);
-    return isLittleFs(head) ? head : await state.loader.readFlash(partition.offset, partition.size);
+    if (head.length !== HEAD) throw new Error("内部分区读取不完整，停止写入 / incomplete storage read");
+    if (isLittleFs(head)) return head;
+    const bytes = await state.loader.readFlash(partition.offset, partition.size);
+    if (bytes.length !== partition.size) throw new Error("内部分区读取不完整，停止写入 / incomplete storage read");
+    return bytes;
   };
   const preserving = state.release?.mode === "app-only";
   const dataHead = preserving ? null : await readStorage(layout.data);
@@ -160,7 +206,9 @@ async function prepare() {
   buildPlan();
   state.busy = false;
   syncButtons();
-  status("已读取设备状态，请核对下方计划。", "ok");
+  status(state.plan.needsNvsClear || state.plan.needsStorageInitialization
+    ? "已读取设备状态：迁移需要明确选择清除／初始化，请核对计划并先备份。" : "已读取设备状态，请核对下方计划。",
+    state.plan.needsNvsClear || state.plan.needsStorageInitialization ? "warn" : "ok");
 }
 
 function buildPlan() {
@@ -179,8 +227,11 @@ function buildPlan() {
   $("plan-mode").textContent = mode;
   $("plan-mode").dataset.tone = preserving || plan.mode === "upgrade" ? "ok" : "warn";
   const kept = plan.keptNvs.length ? `保留设置区（NVS）扇区 ${plan.keptNvs.map(hex).join("、")}。` : "设置区（NVS）将全部清空。";
-  const storage = plan.unrecognizedStorage.length ? `无法识别 ${plan.unrecognizedStorage.join("、")} 分区。${$("initialize-storage").checked ? "已选择清除并初始化，请先备份。" : "保留原数据；安装后可能无法保存，请备份后再决定恢复方式。"}` : "";
+  const storage = $("initialize-storage").checked ? "已选择清除并初始化内部数据和壁纸，请先备份。"
+    : plan.unrecognizedStorage.length ? `无法确认 ${plan.unrecognizedStorage.join("、")} 分区兼容。保留原数据；安装后可能无法保存，请备份后再决定恢复方式。` : "";
   $("plan-note").textContent = preserving ? "保留引导程序、分区表、OTA 选择、NVS、阅读记录和壁纸。仅用于当前已从 ota_0 启动的 PicoNano 阅读器。" : `${kept}${storage}不整片擦除，不触碰存储卡和屏幕电源芯片。`;
+  if (plan.needsNvsClear) $("plan-note").textContent += " 新 NVS 范围含原来的非 NVS 或未知数据，必须明确勾选清除设置区才能刷入。";
+  if (plan.needsStorageInitialization) $("plan-note").textContent += " 内部数据布局不兼容，必须明确选择初始化才能刷入。";
   const list = $("plan-steps");
   list.replaceChildren();
   for (const step of plan.steps) {
@@ -194,8 +245,9 @@ function buildPlan() {
     item.append(name, where, why);
     list.append(item);
   }
-  $("backup").checked = $("backup").dataset.touched ? $("backup").checked : !preserving && (plan.mode !== "upgrade" || plan.unrecognizedStorage.length > 0);
+  $("backup").checked = $("backup").dataset.touched ? $("backup").checked : !preserving;
   $("plan").hidden = false;
+  syncButtons();
 }
 
 function saveBlob(bytes, name) {
@@ -215,20 +267,25 @@ async function backup() {
   const image = new Uint8Array(FLASH_BYTES);
   for (let at = 0; at < FLASH_BYTES; at += chunk) {
     progress(`备份整片闪存 ${kib(at)} / 16 MiB`, at, FLASH_BYTES);
-    image.set(await state.loader.readFlash(at, chunk), at);
+    const bytes = await state.loader.readFlash(at, chunk);
+    if (bytes.length !== chunk) throw new Error("备份读取不完整，停止写入 / incomplete backup read");
+    image.set(bytes, at);
   }
   progress("备份完成", 1, 1);
-  const name = `read-pico-backup-${state.device.mac.replaceAll(":", "")}-${new Date().toISOString().slice(0, 10)}.bin`;
+  const name = `PicoNano-backup-${state.device.mac.replaceAll(":", "")}-${new Date().toISOString().slice(0, 10)}.bin`;
   saveBlob(image, name);
   log(`备份已保存：${name}（SHA-256 ${await sha256(image)}）`);
 }
 
 async function install() {
+  syncButtons();
+  if ($("install").disabled) return;
   state.busy = true;
   syncButtons();
+  let writeStarted = false;
   try {
     if ($("backup").checked) {
-      status("正在备份整片闪存，约需数分钟，请勿断开…");
+      status("正在备份整片闪存，请等待进度完成，期间请勿断开…");
       await backup();
     }
     const steps = [];
@@ -242,6 +299,7 @@ async function install() {
     const total = steps.reduce((sum, step) => sum + step.data.length, 0);
     const before = steps.map((_, i) => steps.slice(0, i).reduce((sum, step) => sum + step.data.length, 0));
     status("正在写入，请勿断开设备…");
+    writeStarted = true;
     await state.loader.writeFlash({
       fileArray: steps.map((step) => ({ data: state.loader.ui8ToBstr(step.data), address: step.address })),
       flashSize: "keep", flashMode: "keep", flashFreq: "keep", eraseAll: false, compress: true,
@@ -268,17 +326,21 @@ async function install() {
     state.plan = null;
     status(resetUncertain ? "写入校验通过，复位步骤遇到USB断开。请确认设备是否启动；未启动时按板级方式复位或拔线开机。" : "写入校验通过，已发送复位请求。请观察设备是否正常启动；若仍停在下载模式，请按板级方式复位或拔线开机。", resetUncertain ? "warn" : "ok");
   } catch (error) {
-    fail(new Error(`安装中断：${error.message || error}。设备可能无法正常启动，请手动进入下载模式后重新安装，或用外部工具写回备份。`));
+    fail(new Error(writeStarted
+      ? `安装中断：${error.message || error}。设备可能无法正常启动，请手动进入下载模式后重新安装，或用外部工具写回备份。`
+      : `安装准备失败：${error.message || error}。尚未写入固件，请保留日志并重试。`));
     return;
   }
   state.busy = false;
   syncButtons();
 }
 
-$("connect").addEventListener("click", () => connect().catch(async (error) => { await disconnect(); fail(error); }));
+$("connect").addEventListener("click", () => connect().catch(fail));
 $("install").addEventListener("click", () => install());
 $("confirm-model").addEventListener("change", syncButtons);
+$("confirm-full").addEventListener("change", syncButtons);
+$("install-mode").addEventListener("change", () => selectMode(state.release?.commit));
 $("backup").addEventListener("change", () => { $("backup").dataset.touched = "1"; });
-$("clear-nvs").addEventListener("change", () => { if (state.device?.reads) buildPlan(); });
-$("initialize-storage").addEventListener("change", () => { if (state.device?.reads) buildPlan(); });
+$("clear-nvs").addEventListener("change", () => { if (!state.busy && state.device?.reads) { try { buildPlan(); } catch (error) { fail(error); } } });
+$("initialize-storage").addEventListener("change", () => { if (!state.busy && state.device?.reads) { try { buildPlan(); } catch (error) { fail(error); } } });
 init().then(syncButtons);

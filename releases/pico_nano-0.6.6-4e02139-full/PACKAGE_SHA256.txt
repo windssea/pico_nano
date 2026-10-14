@@ -1,0 +1,2 @@
+e0832e09c51e6fa670a5ff45017ec3f572f6c98bba2888dd4fc72e33bd91ad9c  PicoNano-4e02139-full.zip
+b355a1f6280c99ddca491fe37d63a55c3da886e95f45fd4a01d0b28ee1fc4950  PicoNano-web-installer-4e02139.zip

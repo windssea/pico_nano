@@ -1,12 +1,12 @@
 # PicoNano 安装、异机升级与发布
 
-更新：2026-10-14。默认通过电脑 Chrome/Edge 的 Web Serial 升级，在线入口为[网页安装器](https://windssea.github.io/pico_nano/)。当前默认固件 `0.6.6+eff83f1`，具体源码来源以下载清单的`source_commit`为准（开机右下角与“设置 → 存储与关于”显示版本号）。网页安装与设备无线OTA是不同能力，当前没有已交付的OTA原子回滚。
+更新：2026-10-14。默认通过电脑 Chrome/Edge 的 Web Serial 升级，在线入口为[网页安装器](https://windssea.github.io/pico_nano/)。当前默认固件及完整刷入版本 `0.6.6+4e02139`，具体源码来源以下载清单的`source_commit`为准（开机右下角与“设置 → 存储与关于”显示版本号）。网页安装与设备无线OTA是不同能力，当前没有已交付的OTA原子回滚。
 
 ## 另一台电脑网页升级
 
 1. 退出阅读器USB传书、无线传书/对时，等待USB串口/JTAG数据接口恢复；用数据线接到另一台电脑，关闭占用串口的程序。
 2. 在电脑Chrome/Edge打开上述HTTPS站点，选择带源码后缀的最新专用升级版本，核对型号RDP-G01-W、ESP32-S3、16MiB Flash。手机浏览器是否有串口能力不能假定，不把手机上传页当固件安装页。
-3. 连接真实端口；安装器只读核对已知旧设备分区表，计划应仅包含应用 `0x20000` 一项。分区不匹配或短读必须停止，不能改用旧首次安装包覆盖。
+3. 默认选择“保留布局升级”，连接真实端口；安装器只读核对已知旧设备分区表，计划应仅包含应用 `0x20000` 一项。分区不匹配或短读必须停止；刷过其他固件请按下节使用同源码完整包，不能改用旧首次安装包覆盖。
 4. 开始写入，确认设备端MD5校验，再观察复位/USB重新枚举/正常开机。写入校验成功、自动复位触发和产品正常运行分别记录。
 5. 开书/翻页/锁解锁/传书/保存重开验证，尤其记录插线与拔线的网页响应及上传失败原因；没有验收的数据不要称稳定修复。
 
@@ -17,6 +17,16 @@
 当前专用升级以[已知旧设备表](../releases/pico_nano-0.0.57-6840523-upgrade/expected-partition-table.bin)为基准：从 `0x8000` 只读3072字节并严格比较，匹配后只写 `0x20000` 应用，不写bootloader、分区表、otadata、NVS、内部数据/壁纸或TF。清除/初始化选项禁用。适用前提是该已知布局、当前ota_0路径，不能推广到其他板型/布局/ota_1运行设备。
 
 仓库新分区与旧设备NVS大小不同，不能用 `build-board/flash_args` 的完整写入计划替代升级，不执行erase-flash。串口写应用中断可能无法启动，需要按板级已验证方式重新进入下载模式并重写；它没有设备OTA切槽/回滚保证。已有16MiB备份单独保管，不放进公开升级包。
+
+## 换过其他固件后的完整刷入
+
+安装器提供独立“完整刷入”模式与同源码完整包生成入口。可用版本以网页清单为准；没有完整包时界面明确停止，不借用历史首装包。
+
+完整包发布后，在“刷入方式”选择“完整刷入”，核对版本/源码后缀，再连接设备或沿用已通过芯片/容量检查的连接。分区不匹配不会自动切换模式，历史0.0.57首装包不进入当前完整刷入列表。
+
+完整计划包括应用、OTA选择、引导程序及必要的分区表（最后写）；同布局时仅跳过相同引导程序与无需改写的表。默认勾选16MiB备份，短读导致备份失败即停止写入。NVS默认保留，新范围含原来的非NVS或未知数据时，必须明确勾选“清除设置区”才能开始，所选新NVS范围全部清除。内部数据与壁纸只有完整分区全FF才自动写空镜像；旧布局的同地址/尺寸/类型分区且有LittleFS头才作为可保留候选，头部识别不是健康证明。不兼容且非空时必须明确勾选初始化；该选项也会清除已识别的内部记录和壁纸。
+
+核对逐项地址、长度和清除原因后，确认型号及完整刷入影响，再开始。所有镜像下载校验SHA-256、写入校验MD5，不整片擦除、不访问TF或PMU。写入中断仍有启动失败风险，不能将分区表最后写视为原子恢复；读写、复位与正常启动分别验收。完整包ZIP供站点携带完整镜像；现有`flash_upgrade.py`仍只适用于专用应用升级，不能用它执行完整刷入。
 
 ## 命令行异机升级
 
@@ -62,10 +72,14 @@ watchdog触发后USB可能在返回响应前断开，Windows端口号也可能�
 python tools/dev.py firmware-ci
 python tools/dev.py firmware-board
 python tools/package_upgrade.py --reference releases/pico_nano-0.0.57-6840523-upgrade/expected-partition-table.bin
+python tools/dev.py factory-data
+python tools/package_upgrade.py --full
 python tools/dev.py installer
 ```
 
 [package_upgrade.py](../tools/package_upgrade.py) 要求已登记源码干净，按 `pn_brand.h` 的 `PN_PRODUCT_VERSION` 生成 `releases/pico_nano-<版本>-<源码提交>-upgrade/` 的应用、已知分区样本、脚本、README、manifest/SHA及命令行ZIP。`tools/dev.py installer`测试并生成本地站点；[installer_site.py](../tools/installer_site.py) 支持 `--serve 8765`。现有离线网页ZIP是另行封装站点并附serve.py的发布产物，没有独立自动打包入口，后续需补齐可复跑工具；构建文件和参考表摘要必须匹配包清单。
+
+同一板级构建再用`--full`生成`releases/pico_nano-<版本>-<源码提交>-full/`：包含该构建的bootloader、分区表、OTA初始数据、应用和`factory-data`生成的两个空文件系统镜像，不混用旧包引导/表。生成器核对flash_args固定地址、镜像尺寸与板级应用内版本，站点验证六个镜像清单摘要/身份；完整与专用升级包使用独立URL，网页按模式筛选，默认专用升级。当前软件回归为22项Node与5项完整包Python；完整迁移、备份读回及启动仍需设备验证。
 
 提交并推送发布目录后，现有 [installer-pages.yml](../.github/workflows/installer-pages.yml) 通过用户已启用的GitHub Pages重建。核对工作流成功、在线默认源码后缀、应用/分区样本摘要和复位脚本，再给用户刷入。源码提交和发布提交区分，文件名版本相同不表示二进制相同。离线网页ZIP由生成的站点加原 `serve.py` 打包，并在 `PACKAGE_SHA256.txt` 记录两个ZIP摘要。
 
@@ -74,6 +88,8 @@ python tools/dev.py installer
 设备“传书 → USB传输”手动交出TF，在电脑磁盘的`piconano/books`、`piconano/fonts`、`piconano/covers`、`piconano/wallpapers`分别复制图书、字体、封面和锁屏原图。复制完成先在电脑安全弹出，再点设备“结束USB传输”；恢复失败可重试，记录不会因此清除。MSC期间网页刷机所需的Serial/JTAG暂停，结束后恢复；软件验证与固件构建不代表本机USB已验收，请按开发指南记录枚举、读回SHA和串口恢复。
 
 ## 版本与交付证据
+
+完整刷入批次`4e02139`：基于最新已发布0.6.6阅读修复源码，未混入原工作区0.6.7开发改动。22项安装器Node、5项完整包Python及两套ESP-IDF6.1构建/size通过；板级应用5026336B，6MiB槽余20.11%，SHA-256 `9cc799bd1103d8b3608d94f21f1835bf6de6e4d91106d0659388f1a138a90d8a`。应用/完整包共用同一应用，完整包另含该板级构建的引导/表/OTA与两个空FS，站点及离线ZIP逐文件摘要一致；S3 image-info版本/checksum/validation通过。当前完整刷入仅有软件、构建和分发核验，备份可恢复性、实际迁移/复位/正常启动需用户刷入验收，清单继续`verifiedOnHardware=false`。
 
 0.6.6修复源码`eff83f1`：板级应用5026336字节，SHA-256 `bdfeeb616884b9009f437ab46dfd5d10f0cfadeeb2c1af1f8873b17d24651a8f`。ZIP/JPEG、字体身份、图片缩进与按键回归通过；149CTest/32SDL/10Python/5网页/17安装器基础门通过，最终相关29项设备/核心、3项SDL及完整字体共享源回归补验通过，两套SDK构建/size与包摘要通过。完整系统字体位于TF固定路径，内置应急字库保留；用户本机安装和读回SHA一致，软件绘制通过不代表新固件真机阅读/功耗/光学验收。未在本轮串口烧写，继续`verifiedOnHardware=false`。
 
