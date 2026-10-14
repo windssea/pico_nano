@@ -12,8 +12,8 @@
 static bool release(pn_reader_input_t *i,pn_reader_action_t *a){assert(!pn_reader_input_feed(i,0,0,0,true,a));return pn_reader_input_feed(i,0,0,0,true,a);}
 int main(void){
     pn_reader_input_t i={0};pn_reader_action_t a=PN_APP_OPEN;
-    /* 点按：左右边缘翻页，中间172–512打开工具栏；只提交一次。/ Taps: the edges turn pages, the middle 172–512 opens the toolbar; each commits once. */
-    assert(!pn_reader_input_feed(&i,1,230,500,true,&a));assert(release(&i,&a) && a==PN_APP_TOOLS);
+    /* 点按：左右半屏翻页，中间不再打开工具栏；只提交一次。/ Taps: left/right halves turn pages, the middle no longer opens the toolbar; each commits once. */
+    assert(!pn_reader_input_feed(&i,1,230,500,true,&a));assert(release(&i,&a) && a==PN_APP_PREVIOUS);
     assert(!pn_reader_input_feed(&i,0,0,0,true,&a));
     assert(!pn_reader_input_feed(&i,1,600,500,true,&a));assert(!pn_reader_input_feed(&i,1,350,510,true,&a));assert(release(&i,&a) && a==PN_APP_NEXT); /* 从右边缘横向拖到中间是向左滑，翻下一页 / dragging from the right edge to the middle is a leftward swipe, next page */
     assert(!pn_reader_input_feed(&i,1,600,500,true,&a));assert(!pn_reader_input_feed(&i,1,610,510,true,&a));assert(release(&i,&a) && a==PN_APP_NEXT);

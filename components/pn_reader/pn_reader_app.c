@@ -96,7 +96,7 @@ static pn_status_t render_impl(app_t *a,pn_frame_t *frame,const pn_reader_receip
         int gap=a->reader.layout.line_height-ascent-descent;if(gap<0)gap=0;guide_below=descent+gap/2+a->style.reading_line_offset;}
     for(size_t i=0;i<a->reader.page.count;i++){pn_page_glyph_t *g=&a->glyphs[i];if(g->source.codepoint==10 || g->source.codepoint==9)continue;
         // 阅读线跟随实际行基线，空段和页脚不画，不改变源位置。 / Guides follow actual baselines, omit empty paragraphs/footer and never change source positions.
-        if(a->style.reading_line && g->baseline!=guide_baseline && g->source.codepoint!=' '){guide_baseline=g->baseline;pn_reader_guide_row(&viewport,a->style.reading_line,g->baseline+guide_below);}
+        if(a->style.reading_line && g->baseline!=guide_baseline && g->source.codepoint!=' '){guide_baseline=g->baseline;pn_reader_guide_row(&viewport,a->style.reading_line,a->style.reading_line_shade,g->baseline+guide_below);}
         pn_status_t s=pn_font_chain_draw(chain(a),&viewport,g->source.codepoint,g->x_64,g->baseline,PN_FONT_GRAY);
         if(s==PN_EMPTY){int x=g->x_64/64,y=g->baseline-body(a)->pixels,size=body(a)->pixels-4;pn_frame_rect(&viewport,x,y,size,1,0);pn_frame_rect(&viewport,x,y+size,size,1,0);pn_frame_rect(&viewport,x,y,1,size,0);pn_frame_rect(&viewport,x+size,y,1,size,0);missing++;}
         else if(s!=PN_OK)return s;

@@ -15,11 +15,11 @@ int main(int argc,char **argv){
     capture=argc>1?argv[1]:NULL;
     /* 识别器阈值与偏好。/ Recognizer thresholds and preferences. */
     pn_reader_input_t in={0};pn_reader_action_t a;
-    assert(tap(&in,171,500,&a) && a==PN_APP_PREVIOUS && tap(&in,513,500,&a) && a==PN_APP_NEXT && tap(&in,172,500,&a) && a==PN_APP_TOOLS && tap(&in,512,500,&a) && a==PN_APP_TOOLS);
+    assert(tap(&in,171,500,&a) && a==PN_APP_PREVIOUS && tap(&in,513,500,&a) && a==PN_APP_NEXT && tap(&in,341,500,&a) && a==PN_APP_PREVIOUS && tap(&in,342,500,&a) && a==PN_APP_NEXT);
     assert(swipe(&in,400,500,336,500,&a) && a==PN_APP_NEXT && !swipe(&in,400,500,337,500,&a) && swipe(&in,300,500,400,560,&a) && a==PN_APP_PREVIOUS && !swipe(&in,300,500,400,580,&a));
     in.config.left_hand=true;assert(tap(&in,100,500,&a) && a==PN_APP_NEXT && tap(&in,600,500,&a) && a==PN_APP_PREVIOUS && swipe(&in,400,500,300,500,&a) && a==PN_APP_NEXT);
     in.config=(pn_reader_input_config_t){.no_swipe=true};assert(!swipe(&in,400,500,300,500,&a) && tap(&in,600,500,&a) && a==PN_APP_NEXT);
-    in.config=(pn_reader_input_config_t){.no_edge_tap=true};assert(!tap(&in,600,500,&a) && swipe(&in,400,500,300,500,&a) && tap(&in,342,500,&a) && a==PN_APP_TOOLS);
+    in.config=(pn_reader_input_config_t){.no_edge_tap=true};assert(!tap(&in,600,500,&a) && swipe(&in,400,500,300,500,&a) && !tap(&in,342,500,&a));
     /* 记录：无记录EMPTY、往返、未知标志拒绝。/ Record: EMPTY without one, round trip, unknown flags rejected. */
     char root[]="/tmp/pn-settings-XXXXXX";assert(mkdtemp(root));
     pn_media_t media;pn_media_init(&media);assert(pn_media_attach(&media,1)==PN_OK);
@@ -89,11 +89,10 @@ int main(int argc,char **argv){
     assert(pn_settings_ui_event(&ui,PN_SETUI_TOGGLE+2,present,NULL)==PN_BUSY && ui.flags==before);assert(pn_media_release(&media,&writer)==PN_OK);
     assert(pn_settings_ui_event(&ui,PN_SETUI_BACK,present,NULL)==PN_OK && ui.active && pn_settings_ui_screen(&ui)==0);
     assert(pn_settings_ui_event(&ui,PN_SETUI_FONTS,present,NULL)==PN_OK && ui.request==PN_SETUI_FONTS && ui.active);ui.request=0;
-    /* 局域网传书行：设置网络名后才出现，选中交给调用方。/ The LAN transfer row appears only after a network name is set and selecting it is handed to the caller. */
+    /* 设置页不再有局域网传书行：保存网络后仍只有“存储与关于”，传书只从底栏进入。/ No LAN transfer row: even with a saved network only "Storage & about" remains; transfer starts from the bottom bar. */
     assert(pn_settings_ui_hit(&ui,100,850)==PN_SETUI_ABOUT && pn_settings_ui_event(&ui,PN_SETUI_LAN,present,NULL)==PN_EMPTY && !ui.request);
-    assert(pn_settings_ui_set_lan(&ui,"家里的WiFi",present,NULL)==PN_OK && pn_settings_ui_hit(&ui,100,850)==PN_SETUI_LAN && pn_settings_ui_hit(&ui,100,950)==PN_SETUI_ABOUT);
-    assert(pn_settings_ui_event(&ui,PN_SETUI_LAN,present,NULL)==PN_OK && ui.request==PN_SETUI_LAN);ui.request=0;
-    assert(pn_settings_ui_set_lan(&ui,"",present,NULL)==PN_OK && pn_settings_ui_hit(&ui,100,950)==-1);
+    assert(pn_settings_ui_set_lan(&ui,"家里的WiFi",present,NULL)==PN_OK && pn_settings_ui_hit(&ui,100,850)==PN_SETUI_ABOUT && pn_settings_ui_hit(&ui,100,950)==-1);
+    assert(pn_settings_ui_event(&ui,PN_SETUI_LAN,present,NULL)==PN_EMPTY && !ui.request);
     /* 外观独立保存：密度、四种预览、占用失败与重开；不改翻页标志。/ Appearance saves separately: density, four previews, busy failure and reopen without changing page-turn flags. */
     assert(ui.shelf.columns==3 && ui.shelf.style==PN_SHELF_DEFAULT);
     assert(pn_settings_ui_event(&ui,PN_SETUI_APPEARANCE,present,NULL)==PN_OK && pn_settings_ui_screen(&ui)==4);

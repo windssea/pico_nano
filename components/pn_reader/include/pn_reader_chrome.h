@@ -38,5 +38,5 @@ int pn_reader_toolbar_hit(int x,int y,unsigned unavailable);
 pn_status_t pn_reader_loading_render(pn_font_t *ui,pn_frame_t *frame,const char *title);
 /// 小TXT直接呈现正文，省掉一次面板刷新；大文件保留开书反馈。 / Present small TXT directly to avoid an extra panel update; keep opening feedback for larger files.
 bool pn_reader_loading_needed(bool text_format,uint64_t source_bytes);
-/// 在正文视口的一行绘制灰色虚线/点线；0关闭，越界跳过，不分配或改变排版。 / Draw a gray dashed/dotted row in a text viewport; zero disables, out-of-bounds rows are skipped, without allocation or layout changes.
-void pn_reader_guide_row(pn_frame_t *viewport,unsigned style,int y);
+/// 在正文视口的一行绘制虚线/点线，shade 0浅/1中/2深/3黑；0样式关闭，越界跳过，不分配或改变排版。 / Draw a dashed/dotted row in a text viewport with shade light/medium/dark/black; style zero disables, out-of-bounds rows are skipped, without allocation or layout changes.
+void pn_reader_guide_row(pn_frame_t *viewport,unsigned style,unsigned shade,int y);

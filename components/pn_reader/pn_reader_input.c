@@ -24,13 +24,12 @@ bool pn_reader_input_feed(pn_reader_input_t *i,unsigned count,int x,int y,bool v
         bool submit=i->down && !i->cancelled && !i->blocked;pn_reader_action_t action=PN_APP_OPEN;
         if(submit){
             if(i->region==4){int dx=i->last_x-i->start_x,dy=i->last_y-i->start_y;
-                // 横滑：|dx|≥64且≥1.5|dy|；点按：移动≤24，左0–171、右513–683翻页，中间172–512打开工具栏。
-                // Swipe: |dx|≥64 and ≥1.5|dy|; tap: movement ≤24, left 0–171 / right 513–683 turn the page, the middle 172–512 opens the toolbar.
+                // 横滑：|dx|≥64且≥1.5|dy|；点按：移动≤24，左半0–341、右半342–683翻页。工具栏只由中间实体键打开。
+                // Swipe: |dx|≥64 and ≥1.5|dy|; tap: movement ≤24, left half 0–341 / right half 342–683 turn the page. Only the middle hardware key opens the toolbar.
                 if(abs(dx)>=64 && 2*abs(dx)>=3*abs(dy)){if(i->config.no_swipe)submit=false;else action=dx<0?PN_APP_NEXT:PN_APP_PREVIOUS;}
                 else if(abs(dx)<=24 && abs(dy)<=24){
-                    bool left=i->start_x<172,right=i->start_x>=513;
-                    if(left || right){if(i->config.no_edge_tap)submit=false;else action=(left!=i->config.left_hand)?PN_APP_PREVIOUS:PN_APP_NEXT;}
-                    else action=PN_APP_TOOLS;}
+                    bool left=i->start_x<342;
+                    if(i->config.no_edge_tap)submit=false;else action=(left!=i->config.left_hand)?PN_APP_PREVIOUS:PN_APP_NEXT;}
                 else submit=false;
             }else submit=false;
         }

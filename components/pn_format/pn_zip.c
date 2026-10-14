@@ -17,9 +17,24 @@
 typedef struct {
     uint32_t name_pos,local,data,end,packed,unpacked,crc,hash;
     uint16_t name_length,method,flags;
-    bool directory;
+    bool directory,checked; ///< checked：本地头已在顺序扫描中校验 / Local header already validated during the sequential scan
 } entry_t;
-typedef struct {pn_pool_t *pool;pn_text_source_t source;entry_t *entries;uint32_t count,directory;unsigned streams;uint8_t *directory_bytes;size_t directory_size;} archive_t;
+// 顺序扫描时只截取一个条目的本地头/描述符；扩展区超出上限则留给finish随机读取。
+// The sequential scan captures one entry's local header/descriptor at a time; oversized extras are left for random reads in finish.
+#define CAPTURE_EXTRA 256u
+#define CAPTURE_HEAD (30u+PN_ZIP_PATH_MAX+CAPTURE_EXTRA)
+typedef struct {
+    uint32_t next; ///< 按偏移排序的下一个待截取条目 / Next entry to capture in offset order
+    uint8_t phase; ///< 0开始、1头30字节、2名称与扩展、3描述符 / Start, 30-byte header, name/extras, descriptor
+    uint32_t offset,need,have; ///< 当前段 / Current segment
+    uint8_t head[CAPTURE_HEAD],descriptor[16]; ///< 截取缓冲 / Capture buffers
+    uint32_t head_length,descriptor_offset,descriptor_length; ///< 已完成段 / Completed segments
+    pn_status_t status; ///< 首个校验错误 / First validation error
+} capture_t;
+typedef struct {pn_pool_t *pool;pn_text_source_t source;entry_t *entries;uint32_t count,directory;unsigned streams;uint8_t *directory_bytes;size_t directory_size;
+    capture_t *capture; ///< 仅打开期间存在 / Present only while opening
+    const uint8_t *serve_head,*serve_descriptor;uint32_t serve_head_offset,serve_head_length,serve_descriptor_offset,serve_descriptor_length; ///< 校验时由截取供数 / Served from capture during validation
+} archive_t;
 typedef struct {
     archive_t *archive;entry_t entry;z_stream inflate;
     uint32_t packed_read,produced,crc;
@@ -33,6 +48,13 @@ pn_status_t pn_zip_validate(pn_zip_t *zip){return !zip || !zip->impl?PN_INVALID:
 static pn_status_t read_at(archive_t *a,uint64_t off,uint8_t *out,size_t size){
     pn_status_t status=current(a);if(status!=PN_OK)return status;
     if(off>a->source.size || size>a->source.size-off)return PN_CORRUPT;
+    // 顺序扫描截取的本地头/描述符直接供数，仍验证介质。/ Serve sequentially captured local headers/descriptors directly, still validating media.
+    if(a->serve_head && off>=a->serve_head_offset && off-a->serve_head_offset<=a->serve_head_length && size<=a->serve_head_length-(size_t)(off-a->serve_head_offset)){
+        memcpy(out,a->serve_head+(size_t)(off-a->serve_head_offset),size);return current(a);
+    }
+    if(a->serve_descriptor && off>=a->serve_descriptor_offset && off-a->serve_descriptor_offset<=a->serve_descriptor_length && size<=a->serve_descriptor_length-(size_t)(off-a->serve_descriptor_offset)){
+        memcpy(out,a->serve_descriptor+(size_t)(off-a->serve_descriptor_offset),size);return current(a);
+    }
     // 打开时中央目录快照避免与远处local头交替读卡；仍验证介质。/ An opening-time directory snapshot avoids alternating card reads with distant local headers; still validate media.
     if(a->directory_bytes && off>=a->directory && off-a->directory<=a->directory_size && size<=a->directory_size-(size_t)(off-a->directory)){
         memcpy(out,a->directory_bytes+(size_t)(off-a->directory),size);return current(a);
@@ -92,9 +114,10 @@ static void sort_entries(entry_t *entries,size_t count,int (*compare)(const void
     for(size_t root=count/2;root;root--)sift(entries,root-1,count,compare);
     for(size_t end=count;end>1;end--){entry_t swap=entries[0];entries[0]=entries[end-1];entries[end-1]=swap;sift(entries,0,end-1,compare);}
 }
-static pn_status_t pn_zip_open_impl(pn_zip_t *zip,pn_pool_t *pool,const pn_text_source_t *source){
-    if(!zip || !pool || !source || !source->read_at)return PN_INVALID;
-    if(zip->impl)return PN_BUSY;
+/// 中央目录与路径校验；本地头留到顺序扫描或finish。成功时a按本地偏移排序并保留目录快照。
+/// Central-directory and path validation; local headers wait for the sequential scan or finish. On success entries are sorted by local offset and the directory snapshot is kept.
+static pn_status_t zip_begin(archive_t **out,pn_pool_t *pool,const pn_text_source_t *source){
+    if(!pool || !source || !source->read_at)return PN_INVALID;
     if(source->size<22)return PN_CORRUPT;
     if(source->size>UINT32_MAX)return PN_LIMIT;
     archive_t *a=pn_alloc_tagged(pool,PN_MEM_DOCUMENT,sizeof *a);if(!a)return PN_NO_MEMORY;memset(a,0,sizeof *a);a->pool=pool;a->source=*source;
@@ -121,27 +144,98 @@ static pn_status_t pn_zip_open_impl(pn_zip_t *zip,pn_pool_t *pool,const pn_text_
         char name[PN_ZIP_PATH_MAX];status=name_at(a,e,name);if(status!=PN_OK)goto failed;
         status=safe_path(name,e->name_length);if(status!=PN_OK){if(status!=PN_CANCELLED)status=PN_CORRUPT;goto failed;}e->hash=hash_name(name,e->name_length);e->directory=name[e->name_length-1]=='/';
         if(e->directory && e->unpacked){status=PN_CORRUPT;goto failed;}
-        status=extras(a,e->name_pos+e->name_length,u16(h+30));if(status!=PN_OK)goto failed;
-        status=local_header(a,e,name);if(status!=PN_OK)goto failed;cursor+=length;
+        status=extras(a,e->name_pos+e->name_length,u16(h+30));if(status!=PN_OK)goto failed;cursor+=length;
     }
     if(cursor!=eocd){status=PN_CORRUPT;goto failed;}
+    if(a->count)sort_entries(a->entries,a->count,by_offset);
+    *out=a;return PN_OK;
+failed:
+    pn_free(tail);pn_free(a->directory_bytes);pn_free(a->entries);pn_free(a);return status;
+}
+static void archive_free(archive_t *a){if(!a)return;pn_free(a->capture);pn_free(a->directory_bytes);pn_free(a->entries);pn_free(a);}
+/// 用截取段校验一个条目；段不完整时由read_at退回源读取。/ Validate one entry from captured segments; incomplete segments fall back to source reads through read_at.
+static pn_status_t check_entry(archive_t *a,entry_t *e){
+    char name[PN_ZIP_PATH_MAX];pn_status_t status=name_at(a,e,name);if(status==PN_OK)status=local_header(a,e,name);
+    if(status==PN_OK)e->checked=true;
+    return status;
+}
+static void capture_next(archive_t *a){capture_t *c=a->capture;c->next++;c->phase=0;c->have=c->need=0;c->head_length=c->descriptor_length=0;}
+static void capture_validate(archive_t *a,entry_t *e){
+    capture_t *c=a->capture;
+    a->serve_head=c->head;a->serve_head_offset=e->local;a->serve_head_length=c->head_length;
+    if(c->descriptor_length){a->serve_descriptor=c->descriptor;a->serve_descriptor_offset=c->descriptor_offset;a->serve_descriptor_length=c->descriptor_length;}
+    pn_status_t status=check_entry(a,e);
+    a->serve_head=a->serve_descriptor=NULL;a->serve_head_length=a->serve_descriptor_length=0;
+    if(status!=PN_OK && c->status==PN_OK)c->status=status;
+    capture_next(a);
+}
+static void capture_feed(archive_t *a,uint64_t off,const uint8_t *bytes,size_t n){
+    capture_t *c=a->capture;uint64_t stop=off+n;
+    while(c && c->status==PN_OK && c->next<a->count){
+        entry_t *e=&a->entries[c->next];
+        if(c->phase==0){c->phase=1;c->offset=e->local;c->need=30;c->have=0;}
+        uint64_t want=(uint64_t)c->offset+c->have,limit=(uint64_t)c->offset+c->need;
+        // 越过目录或已错过的段不再等待，留给finish。/ Segments past the directory or already missed are left for finish.
+        if(limit>a->directory || want<off){capture_next(a);continue;}
+        if(want>=stop)return;
+        size_t take=(size_t)((limit<stop?limit:stop)-want);
+        memcpy((c->phase==3?c->descriptor:c->head)+c->have,bytes+(size_t)(want-off),take);c->have+=(uint32_t)take;
+        if(c->have<c->need)return;
+        if(c->phase==1){uint32_t more=(uint32_t)u16(c->head+26)+u16(c->head+28);if(30u+more>CAPTURE_HEAD){capture_next(a);continue;}c->phase=2;c->need=30u+more;if(more)continue;}
+        if(c->phase==2){c->head_length=c->need;
+            if(e->flags&8){uint64_t at=(uint64_t)e->local+c->need+e->packed;if(at>=a->directory){capture_next(a);continue;}
+                c->phase=3;c->offset=(uint32_t)at;c->descriptor_offset=(uint32_t)at;c->have=0;c->need=a->directory-at<16?(uint32_t)(a->directory-at):16u;continue;}
+            capture_validate(a,e);continue;}
+        c->descriptor_length=c->need;capture_validate(a,e);
+    }
+}
+/// 未截取的条目随机读校验，再查重叠与重名。/ Validate uncaptured entries with random reads, then check overlap and duplicate names.
+static pn_status_t zip_finish(archive_t *a){
+    pn_status_t status=a->capture?a->capture->status:PN_OK;
+    for(uint32_t i=0;status==PN_OK && i<a->count;i++)if(!a->entries[i].checked)status=check_entry(a,&a->entries[i]);
+    if(status!=PN_OK)return status;
     if(a->count){
-        sort_entries(a->entries,a->count,by_offset);for(uint32_t i=1;i<a->count;i++)if(a->entries[i-1].end>a->entries[i].local){status=PN_CORRUPT;goto failed;}
+        for(uint32_t i=1;i<a->count;i++)if(a->entries[i-1].end>a->entries[i].local)return PN_CORRUPT;
         sort_entries(a->entries,a->count,by_hash);
     }
     for(uint32_t i=0;i<a->count;i++)for(uint32_t j=i+1;j<a->count && a->entries[j].hash==a->entries[i].hash;j++){
         if(a->entries[i].name_length!=a->entries[j].name_length)continue;
-        char x[PN_ZIP_PATH_MAX],y[PN_ZIP_PATH_MAX];status=name_at(a,&a->entries[i],x);if(status==PN_OK)status=name_at(a,&a->entries[j],y);if(status!=PN_OK)goto failed;
-        if(!strcmp(x,y)){status=PN_CORRUPT;goto failed;}
+        char x[PN_ZIP_PATH_MAX],y[PN_ZIP_PATH_MAX];status=name_at(a,&a->entries[i],x);if(status==PN_OK)status=name_at(a,&a->entries[j],y);if(status!=PN_OK)return status;
+        if(!strcmp(x,y))return PN_CORRUPT;
     }
-    status=current(a);if(status!=PN_OK)goto failed;pn_free(a->directory_bytes);a->directory_bytes=NULL;a->directory_size=0;zip->impl=a;return PN_OK;
-failed:
-    pn_free(tail);pn_free(a->directory_bytes);pn_free(a->entries);pn_free(a);return status;
+    status=current(a);if(status!=PN_OK)return status;
+    pn_free(a->capture);a->capture=NULL;pn_free(a->directory_bytes);a->directory_bytes=NULL;a->directory_size=0;return PN_OK;
+}
+static pn_status_t pn_zip_open_impl(pn_zip_t *zip,pn_pool_t *pool,const pn_text_source_t *source){
+    if(!zip)return PN_INVALID;
+    if(zip->impl)return PN_BUSY;
+    archive_t *a=NULL;pn_status_t status=zip_begin(&a,pool,source);if(status!=PN_OK)return status;
+    status=zip_finish(a);if(status!=PN_OK){archive_free(a);return status;}
+    zip->impl=a;return PN_OK;
 }
 pn_status_t pn_zip_open(pn_zip_t *zip,pn_pool_t *pool,const pn_text_source_t *source){
     pn_profile_span_t span;pn_profile_begin(&span,pool,"epub.zip");
     pn_status_t status=pn_zip_open_impl(zip,pool,source);pn_profile_end(&span,status);return status;
 }
+pn_status_t pn_zip_scan_begin(pn_zip_scan_t *scan,pn_pool_t *pool,const pn_text_source_t *source){
+    if(!scan || scan->impl)return scan?PN_BUSY:PN_INVALID;
+    pn_profile_span_t span;pn_profile_begin(&span,pool,"epub.zip-begin");
+    archive_t *a=NULL;pn_status_t status=zip_begin(&a,pool,source);
+    if(status==PN_OK){a->capture=pn_alloc_tagged(pool,PN_MEM_DOCUMENT,sizeof *a->capture);if(a->capture)*a->capture=(capture_t){.status=PN_OK};scan->impl=a;}
+    pn_profile_end(&span,status);return status;
+}
+void pn_zip_scan_feed(pn_zip_scan_t *scan,uint64_t offset,const uint8_t *bytes,size_t size){
+    if(scan && scan->impl && bytes && size)capture_feed(scan->impl,offset,bytes,size);
+}
+pn_status_t pn_zip_scan_finish(pn_zip_scan_t *scan,pn_zip_t *zip){
+    if(!scan || !scan->impl || !zip)return PN_INVALID;
+    if(zip->impl)return PN_BUSY;
+    pn_profile_span_t span;archive_t *a=scan->impl;pn_profile_begin(&span,a->pool,"epub.zip-finish");
+    pn_status_t status=zip_finish(a);scan->impl=NULL;
+    if(status==PN_OK)zip->impl=a;else archive_free(a);
+    pn_profile_end(&span,status);return status;
+}
+void pn_zip_scan_abort(pn_zip_scan_t *scan){if(scan && scan->impl){archive_free(scan->impl);scan->impl=NULL;}}
 pn_status_t pn_zip_close(pn_zip_t *zip){if(!zip)return PN_INVALID;if(!zip->impl)return PN_OK;archive_t *a=zip->impl;if(a->streams)return PN_BUSY;pn_free(a->entries);pn_free(a);zip->impl=NULL;return PN_OK;}
 size_t pn_zip_count(const pn_zip_t *zip){return zip && zip->impl?((archive_t *)zip->impl)->count:0;}
 pn_status_t pn_zip_find(pn_zip_t *zip,const char *path,uint32_t *index){

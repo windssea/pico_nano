@@ -4,7 +4,7 @@
 #include <stdint.h>
 typedef struct {bool present,mounted;} read_pico_sd_info_t;
 typedef struct {unsigned count;uint16_t x,y;} cst836u_touch_t;
-typedef struct {int unused;} EpdiyHighlevelState;
+typedef struct {uint8_t *back_fb;} EpdiyHighlevelState; ///< 与epdiy相同：绘制后后缓冲等于前缓冲 / Like epdiy: the back buffer equals the front buffer after drawing
 typedef struct {EpdiyHighlevelState hl;uint8_t *framebuffer;void *touch;bool touch_ready,pmu_ready;} read_pico_handle_t;
 enum EpdDrawMode {MODE_GC16,MODE_GL16};
 enum EpdDrawError {EPD_DRAW_SUCCESS=0,EPD_DRAW_FAILURE=1,EPD_DRAW_EMPTY_LINE_QUEUE=0x400};

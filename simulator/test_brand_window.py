@@ -34,7 +34,7 @@ with tempfile.TemporaryDirectory() as directory:
     boot, lock = pixels(captures[0]), pixels(captures[-1])
     assert boot[:684 * 1104] == lock[:684 * 1104]
     # 开机版本号只占右下角固定框，其余墨迹仍须在品牌图内。/ The boot version occupies a fixed bottom-right box; all other ink must stay inside the brand art.
-    version_box = lambda x, y: 600 <= x < 660 and 1171 <= y < 1192
+    version_box = lambda x, y: 540 <= x < 660 and 1171 <= y < 1192  # 宽度随版本号变化 / width varies with the version
     every = [(i % 684, i // 684) for i, value in enumerate(boot) if value < 255]
     assert sum(1 for x, y in every if version_box(x, y)) > 100
     ink = [(x, y) for x, y in every if not version_box(x, y)]

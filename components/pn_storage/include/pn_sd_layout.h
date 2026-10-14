@@ -18,6 +18,7 @@
 #define PN_SD_UPLOADS "uploads" ///< 内部上传暂存 / Internal upload staging
 #define PN_SD_COVER_CACHE PN_SD_PRIVATE "/covers" ///< 可重建缩略图缓存 / Rebuildable thumbnail cache
 #define PN_SD_INDEX_CACHE PN_SD_PRIVATE "/indexes" ///< 可重建书库索引 / Rebuildable catalog indexes
+#define PN_SD_MASK_CACHE PN_SD_PRIVATE "/masks" ///< 可重建透明锁屏平面 / Rebuildable transparent lock-screen planes
 /// 检查设备资源是否位于固定目录下的单层文件，不接受子目录或旧目录。/ Check a device resource is a flat file in the fixed folder, rejecting subfolders and legacy roots.
 static inline bool pn_sd_resource_path(const char *path,const char *folder){
     const char *mount=PN_SD_MOUNT "/";size_t n=strlen(mount),f=folder?strlen(folder):0;

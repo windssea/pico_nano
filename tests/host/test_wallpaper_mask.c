@@ -1,10 +1,13 @@
 /* PNG遮罩：独立alpha oracle、读租约释放、失败保留底图及正文事务。/ PNG mask: independent alpha oracle, lease release, retained underlay and body transactions. */
+#define _POSIX_C_SOURCE 200809L
 #include "pn_wallpaper.h"
 #include "pn_reader_app.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+static double ms(void){struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return t.tv_sec*1e3+t.tv_nsec/1e6;}
 static bool fail;
 static pn_status_t present(void *ctx,const pn_frame_t *f,pn_refresh_t refresh){
     (void)ctx;(void)refresh;
@@ -31,6 +34,18 @@ int main(int argc,char **argv){
     fail=false;assert(pn_reader_app_step(&reader,PN_APP_OPEN,2,present,NULL)==PN_OK && pn_wallpaper_mask_snapshot(&mask,&frame));memcpy(saved,px,PN_WALLPAPER_BYTES);
     pn_frame_clear(&frame,3);pn_wallpaper_mask_complete(&mask,&frame,false);assert(pn_wallpaper_mask_snapshot(&mask,&frame) && !memcmp(saved,px,PN_WALLPAPER_BYTES));
     assert(pn_reader_app_close(&reader,3)==PN_OK);pn_wallpaper_mask_close(&mask);pn_wallpaper_mask_close(&mask);
+    // 平面缓存：首次写入，命中与原解码逐字节一致；损坏或变换改变回到解码。/ Plane cache: first open stores, hits match the decode byte for byte; damage or a new transform decodes again.
+    {char dir[1100],file[1200];snprintf(dir,sizeof dir,"%s/masks",argv[2]);uint8_t *decoded=malloc(PN_WALLPAPER_BYTES);assert(decoded);
+     double t0=ms();pn_frame_clear(&frame,12);assert(pn_wallpaper_mask_open_cached(&mask,&pool,&sd,&restored,dir)==PN_OK && pn_wallpaper_mask_paint(&mask,&frame)==PN_OK);memcpy(decoded,px,PN_WALLPAPER_BYTES);pn_wallpaper_mask_close(&mask);double t1=ms();
+     uint64_t h=1469598103934665603u;for(const unsigned char *c=(const unsigned char *)restored.source;*c;c++){h^=*c;h*=1099511628211u;}snprintf(file,sizeof file,"%s/%016llx.pnm",dir,(unsigned long long)h);
+     FILE *f=fopen(file,"rb");assert(f);assert(!fseek(f,0,SEEK_END) && ftell(f)>2*PN_WALLPAPER_BYTES);fclose(f);
+     double t2=ms();pn_frame_clear(&frame,12);assert(pn_wallpaper_mask_open_cached(&mask,&pool,&sd,&restored,dir)==PN_OK && pn_wallpaper_mask_paint(&mask,&frame)==PN_OK && !memcmp(decoded,px,PN_WALLPAPER_BYTES));pn_wallpaper_mask_close(&mask);
+     printf("Mask lock: decode+store %.1f ms, cache hit %.1f ms (host, not panel timing)\n",t1-t0,ms()-t2);fflush(stdout);
+     f=fopen(file,"r+b");assert(f && !fseek(f,500000,SEEK_SET));int c=fgetc(f);assert(c!=EOF && !fseek(f,500000,SEEK_SET) && fputc(c^0x5a,f)!=EOF);fclose(f);
+     pn_frame_clear(&frame,12);assert(pn_wallpaper_mask_open_cached(&mask,&pool,&sd,&restored,dir)==PN_OK && pn_wallpaper_mask_paint(&mask,&frame)==PN_OK && !memcmp(decoded,px,PN_WALLPAPER_BYTES));pn_wallpaper_mask_close(&mask);
+     pn_lock_selection_t moved=restored;moved.transform.fit=PN_WALLPAPER_CONTAIN;pn_frame_clear(&frame,12);assert(pn_wallpaper_mask_open_cached(&mask,&pool,&sd,&moved,dir)==PN_OK);pn_wallpaper_mask_close(&mask);
+     pn_frame_clear(&frame,12);assert(pn_wallpaper_mask_open_cached(&mask,&pool,&sd,&restored,dir)==PN_OK && pn_wallpaper_mask_paint(&mask,&frame)==PN_OK && !memcmp(decoded,px,PN_WALLPAPER_BYTES));pn_wallpaper_mask_close(&mask);
+     strcpy(moved.source,"/missing-mask.png");assert(pn_wallpaper_mask_open_cached(&mask,&pool,&sd,&moved,dir)!=PN_OK && !mask.impl);free(decoded);}
     strcpy(restored.source,"/missing-mask.png");assert(pn_wallpaper_mask_open(&mask,&pool,&sd,&restored)!=PN_OK && !mask.impl);
     free(px);free(saved);assert(!pool.used && !pool.live);puts("mask: alpha preserved, body presentation confirmed, failed pages retain underlay, missing source falls back");return 0;
 }

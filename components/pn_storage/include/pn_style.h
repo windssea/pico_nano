@@ -18,14 +18,15 @@ typedef struct {
     uint16_t tracking_percent; ///< 字间距0..50字号百分比 / Tracking zero through 50 percent of body size
     uint16_t reading_line; ///< 阅读线：0关闭、1虚线、2点线 / Reading guide: off, dashed or dotted
     int16_t reading_line_offset; ///< 阅读线上下位置-8..8px，2px一步 / Guide vertical offset -8..8 px in 2 px steps
+    uint16_t reading_line_shade; ///< 阅读线深浅：0浅、1中、2深、3黑；旧记录为0 / Guide darkness: light, medium, dark or black; legacy records load as light
 } pn_style_t;
 /// 默认145%行距、25%段距、无缩进、32px边距；刷新使用系统设置。
 /// Default 145% line spacing, 25% gap, no indent, 32px margins refresh follows global settings.
 pn_style_t pn_style_default(int pixels);
 /// 校验所有范围。/ Validate every range.
 pn_status_t pn_style_validate(const pn_style_t *style);
-/// 按内容身份保存64byte schema3配置；旧版阅读线默认关闭，不影响位置/书签。
-/// Save a 64-byte schema3 configuration by content identity; legacy guides default off without affecting positions/bookmarks.
+/// 按内容身份保存64byte schema4配置（58..59为阅读线深浅）；旧版阅读线默认关闭、深浅为浅，不影响位置/书签。
+/// Save a 64-byte schema4 configuration by content identity (bytes 58..59 hold guide darkness); legacy guides default off and light without affecting positions/bookmarks.
 pn_status_t pn_style_save(const pn_journal_io_t *io,const pn_book_id_t *book,const pn_style_t *style);
 /// 错误不改输出；EMPTY由调用方选择默认。
 /// Preserve output on errors; caller chooses defaults for EMPTY only.

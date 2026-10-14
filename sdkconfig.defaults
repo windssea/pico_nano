@@ -45,3 +45,7 @@ CONFIG_FATFS_API_ENCODING_UTF_8=y
 
 # SHA书目文件名与书签ID须完整保留。/ Preserve SHA filenames and bookmark IDs.
 CONFIG_LITTLEFS_OBJ_NAME_LEN=96
+
+# 动态调频：空闲降到80MHz（仍为PLL时钟，不切MSPI低速），工作时由owner锁保持最高频；自动浅睡未启用。
+# DFS: idle drops to 80 MHz (still PLL, no MSPI low-speed switch); owners hold max while working; automatic light sleep stays off.
+CONFIG_PM_ENABLE=y

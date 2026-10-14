@@ -26,11 +26,11 @@ int main(void){char root[]="/tmp/pn-style-ui-XXXXXX";assert(mkdtemp(root));char 
     assert(pn_style_ui_hit(&ui,100,950)==PN_SUI_INDENT && pn_style_ui_event(&ui,PN_SUI_INDENT,2,present,&screen)==PN_OK && ui.draft.indent_em==2);
     assert(pn_style_ui_hit(&ui,100,1030)==PN_SUI_MORE && pn_style_ui_hit(&ui,100,520)==PN_SUI_FONTS && pn_style_ui_hit(&ui,100,60)==PN_SUI_CANCEL && pn_style_ui_hit(&ui,600,90)==PN_SUI_RESET && pn_style_ui_hit(&ui,300,1150)==PN_SUI_APPLY);
     assert(pn_style_ui_event(&ui,PN_SUI_MORE,2,present,&screen)==PN_OK && ui.more && pn_style_ui_hit(&ui,100,60)==PN_SUI_BACK_MAIN);
-    {static const unsigned more[3]={4,6,7};
-     for(unsigned i=0;i<3;i++){int hit=pn_style_ui_hit(&ui,600,180+(int)i*84);assert(hit==PN_SUI_FIELD+(int)more[i]*2+1);assert(pn_style_ui_event(&ui,hit,2,present,&screen)==PN_OK && ui.more);}}
+    {static const unsigned more[4]={4,6,8,7};
+     for(unsigned i=0;i<4;i++){int hit=pn_style_ui_hit(&ui,600,180+(int)i*84);assert(hit==PN_SUI_FIELD+(int)more[i]*2+1);assert(pn_style_ui_event(&ui,hit,2,present,&screen)==PN_OK && ui.more);}}
     assert(pn_style_ui_hit(&ui,100,900)==-1 && pn_style_ui_hit(&ui,100,520)==-1); /* 更多页没有字体行和预设 / the more page has no font row or presets */
     assert(pn_style_ui_event(&ui,PN_SUI_BACK_MAIN,2,present,&screen)==PN_OK && !ui.more);
-    assert(ui.draft.pixels==46 && ui.draft.line_percent==150 && ui.draft.gap_percent==30 && ui.draft.indent_em==2 && ui.draft.margin==48 && ui.draft.gl_before_clear==12 && ui.draft.tracking_percent==5 && ui.draft.reading_line==1 && ui.draft.reading_line_offset==2);
+    assert(ui.draft.pixels==46 && ui.draft.line_percent==150 && ui.draft.gap_percent==30 && ui.draft.indent_em==2 && ui.draft.margin==48 && ui.draft.gl_before_clear==12 && ui.draft.tracking_percent==5 && ui.draft.reading_line==1 && ui.draft.reading_line_offset==2 && ui.draft.reading_line_shade==2);
     /* 预设与恢复默认只改草稿。/ Presets and restore-defaults change only the draft. */
     assert(pn_style_ui_hit(&ui,100,448)==PN_SUI_PRESET && pn_style_ui_hit(&ui,340,448)==PN_SUI_PRESET+1 && pn_style_ui_hit(&ui,560,448)==PN_SUI_PRESET+2);
     assert(pn_style_ui_event(&ui,PN_SUI_PRESET+1,2,present,&screen)==PN_OK && ui.draft.pixels==36 && ui.draft.line_percent==125 && ui.draft.margin==24 && ui.draft.tracking_percent==0);

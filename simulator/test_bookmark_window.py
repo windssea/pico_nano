@@ -9,7 +9,7 @@ with tempfile.TemporaryDirectory() as directory:
     books = root / "books"
     books.mkdir()
     (books / "book.txt").write_text("Read Pico book with editable bookmarks.\n" * 300, encoding="utf8")
-    script = "enter,next,bookmarks,mark-add,mark-select,mark-rename,mark-clear,text:My mark,mark-confirm,tap:150:50,tap:620:500,tap:342:600,tap:342:984,tap:200:280,mark-jump,mark-return,bookmarks,mark-select,mark-delete,mark-back,mark-delete,mark-confirm,mark-back,back,quit"
+    script = "enter,next,bookmarks,mark-add,mark-select,mark-rename,mark-clear,text:My mark,mark-confirm,tap:150:50,tap:620:500,tools,tap:342:984,tap:200:280,mark-jump,mark-return,bookmarks,mark-select,mark-delete,mark-back,mark-delete,mark-confirm,mark-back,back,quit"
     env = dict(os.environ, SDL_VIDEODRIVER="dummy", PN_SIM_LIBRARY_SCRIPT="library,"+script)
     args = [sys.argv[1], "--library", str(books), "--state-dir", str(root / "state")]
     result = subprocess.run(args, capture_output=True, text=True, env=env, timeout=30)

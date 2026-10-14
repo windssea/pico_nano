@@ -45,6 +45,7 @@
 #include "pn_font_ui.h"
 #include "device_text.h"
 #include "device_frame.h"
+#include "device_power.h"
 #include "device_transfer.h"
 #include "device_time.h"
 #include "pn_transfer_view.h"
@@ -206,10 +207,11 @@ static uint8_t *page_copy;
 static const char *reader_notice; ///< 下一次工具栏携带错误反馈 / Error feedback included in the next toolbar
 static bool progress_save_failed; ///< 后台保存失败，不冒充翻页失败 / Background save failure is distinct from turn failure
 static pn_focus_t focus_nav; ///< 当前页的三键焦点表 / Three-key focus table of the current page
-/* 局部刷新：保存上一帧，GL16时只推变化的外接矩形（逻辑坐标，epdiy按旋转换算）；变化超过45%或没有上一帧则整屏。
- * Partial refresh: keep the previous frame and, for GL16, push only the bounding box of what changed (logical coordinates, rotated by epdiy); more than 45% changed or no previous frame means a full update. */
+/* 局部刷新：GL16时只推变化的外接矩形（逻辑坐标，epdiy按旋转换算）；变化超过45%或没有已知参考则整屏。
+ * 已显示参考就是epdiy后缓冲（每次绘制后与前缓冲一致），不再另存一份406KiB逻辑副本。
+ * Partial refresh: for GL16 push only the bounding box of what changed (logical coordinates, rotated by epdiy); more than 45% changed or no known reference means a full update.
+ * The shown reference is epdiy's back buffer (equal to the front buffer after every draw), so no separate 406 KiB logical copy is kept. */
 #define PARTIAL_MAX_PERCENT 45
-static uint8_t *shown_px;
 static pn_device_async_t async_port;
 #if defined(ESP_PLATFORM)
 static void profile_task_stacks(const char *phase){
@@ -217,37 +219,18 @@ static void profile_task_stacks(const char *phase){
     if(async_port.display_task_handle)ESP_LOGI(TAG,"stack phase=%s owner=display minimum_bytes=%u",phase,(unsigned)uxTaskGetStackHighWaterMark(async_port.display_task_handle));
 }
 #endif
-static bool dirty_box(const pn_frame_t *frame,EpdRect *box){
-    if(!shown_px)return false;
-    int top=-1,bottom=-1,left=342,right=-1;
-    for(int y=0;y<1216;y++){
-        const uint8_t *now=frame->pixels+(size_t)y*frame->stride,*was=shown_px+(size_t)y*342;
-        if(!memcmp(now,was,342))continue;
-        if(top<0)top=y;
-        bottom=y;
-        int l=0;while(l<342 && now[l]==was[l])l++;
-        int r=341;while(r>l && now[r]==was[r])r--;
-        if(l<left)left=l;
-        if(r>right)right=r;
-    }
-    if(top<0){*box=(EpdRect){0,0,0,0};return true;}
-    int x=left*2-8,y=top-8,w=(right+1)*2+8-x,h=bottom+9-y;
-    if(x<0)x=0;
-    if(y<0)y=0;
-    if(x+w>684)w=684-x;
-    if(y+h>1216)h=1216-y;
-    *box=(EpdRect){.x=x,.y=y,.width=w,.height=h};return true;
-}
 static pn_status_t present_panel(void *ctx,const pn_frame_t *frame,pn_refresh_t profile){
     (void)ctx;
     uint64_t prepared_at=now_ms();
     (void)prepared_at; // 无日志主机桩仍编译同源路径。/ Compile the same path with logging disabled in host stubs.
     if(profile==PN_REFRESH_DU)return PN_UNSUPPORTED;
-    EpdRect changed={0};bool known=panel_known && dirty_box(frame,&changed);
-    uint64_t dirty_at=now_ms();(void)dirty_at;
-    if(profile==PN_REFRESH_GL16 && known && !changed.width && !atomic_load(&deep_clean_pending))return PN_OK;
+    // 先转换到前缓冲，再与后缓冲（已显示参考）比较；未知参考时不比较。/ Convert into the front buffer first, then compare with the back buffer (shown reference); skip comparison without a known reference.
     pn_status_t converted=pn_device_frame_copy(frame,hardware.framebuffer,684u*1216u/2u);if(converted!=PN_OK)return converted;
     uint64_t converted_at=now_ms();(void)converted_at;
+    pn_device_box_t dirty={0};bool known=panel_known && pn_device_frame_dirty(hardware.framebuffer,hardware.hl.back_fb,684u*1216u/2u,8,&dirty)==PN_OK;
+    EpdRect changed={.x=dirty.x,.y=dirty.y,.width=dirty.width,.height=dirty.height};
+    uint64_t dirty_at=now_ms();(void)dirty_at;
+    if(profile==PN_REFRESH_GL16 && known && !changed.width && !atomic_load(&deep_clean_pending))return PN_OK;
     read_pico_epd_use_scan(READ_PICO_EPD_SCAN_FULL);epd_poweron();
     enum EpdDrawMode mode=profile==PN_REFRESH_GC16?MODE_GC16:MODE_GL16;
     // 软刷新累计满额时改用GC16，目标帧与区域不变。/ When the soft-refresh budget is spent, switch to GC16 with the same target frame and area.
@@ -290,19 +273,17 @@ static pn_status_t present_panel(void *ctx,const pn_frame_t *frame,pn_refresh_t 
         if(mode==MODE_GC16){management_refreshes=0;atomic_store(&full_clean_completed,true);}
         else if(!body_refresh)management_refreshes++;
     }else if(deep_clean)atomic_store(&deep_clean_pending,true);
-    // 记下已显示的帧，供下次算局部刷新区域；失败时丢弃，下次整屏。/ Remember the shown frame for the next dirty box; drop it on failure so the next update is full.
-    if(panel_known && shown_px)for(int y=0;y<1216;y++)memcpy(shown_px+(size_t)y*342,frame->pixels+(size_t)y*frame->stride,342);
+    // epdiy已把前缓冲写入后缓冲；失败时panel_known=false，下次从白场整屏重建。/ epdiy already copied the front buffer into the back buffer; on failure panel_known=false forces a full rebuild from white next time.
     // 成功则保活到空闲期满；失败立即断电。/ Keep the rails up until idle expiry on success; drop them at once on failure.
     rails_deadline_ms=now_ms()+RAILS_IDLE_MS;if(!panel_known)rails_release();
     if(!panel_known)ESP_LOGE(TAG,"Panel present failed: %u",(unsigned)result);
     ESP_LOGI(TAG,"Present mode=%u reason=%s body=%d prepare=%llu ms panel=%llu ms pool=%u/%u",(unsigned)mode,reason,body_refresh,(unsigned long long)(panel_at-prepared_at),(unsigned long long)(now_ms()-panel_at),(unsigned)pool.used,(unsigned)pool.limit);
-    ESP_LOGI(TAG,"Display stages dirty=%llu convert=%llu power=%llu scan=%llu remember=%llu ms",(unsigned long long)(dirty_at-prepared_at),(unsigned long long)(converted_at-dirty_at),(unsigned long long)(panel_at-converted_at),(unsigned long long)(scanned_at-panel_at),(unsigned long long)(now_ms()-scanned_at));
+    ESP_LOGI(TAG,"Display stages dirty=%llu convert=%llu power=%llu scan=%llu remember=%llu ms",(unsigned long long)(dirty_at-converted_at),(unsigned long long)(converted_at-prepared_at),(unsigned long long)(panel_at-dirty_at),(unsigned long long)(scanned_at-panel_at),(unsigned long long)(now_ms()-scanned_at));
     return panel_known?PN_OK:PN_IO;
 }
 static pn_status_t present_impl(void *ctx,const pn_frame_t *frame,pn_refresh_t profile){
     (void)ctx;
-    // 池只由产品worker分配；显示任务只写预分配的已显示像素。/ Only the product worker allocates; display writes preallocated shown pixels.
-    if(!shown_px)shown_px=pn_alloc_tagged(&pool,PN_MEM_FRAME,342u*1216u);
+    // 池只由产品worker分配；显示任务只写epdiy自有缓冲。/ Only the product worker allocates; display writes only epdiy-owned buffers.
     if(!reader_active()){pn_free(page_copy);page_copy=NULL;}
     bool backup=reader_active() && !locked && !toolbar_open && frame->width==684 && frame->height==1216 && frame->stride>=342;
     if(backup && !page_copy)page_copy=pn_alloc_tagged(&pool,PN_MEM_FRAME,342u*1216u);
@@ -391,7 +372,7 @@ static void show_lock(const char *hint){
         // 只在锁屏解码/合成，底图取成功正文副本，绝不修改阅读器帧。 / Decode/composite only while locking, using a confirmed text copy without modifying reader pixels.
         pn_status_t mask=PN_EMPTY;
         if(reader_suspended && page_copy && pn_sd_resource_path(selection.source,PN_SD_WALLPAPERS)){
-            mask=pn_wallpaper_mask_open(&lock_mask,&pool,&sd_media,&selection);
+            mask=pn_wallpaper_mask_open_cached(&lock_mask,&pool,&sd_media,&selection,PN_SD_MOUNT "/" PN_SD_MASK_CACHE);
             if(mask==PN_OK){memcpy(frame.pixels,page_copy,PN_WALLPAPER_BYTES);mask=pn_wallpaper_mask_paint(&lock_mask,&frame);}
         }
         pn_wallpaper_mask_close(&lock_mask);
@@ -485,12 +466,14 @@ static pn_status_t draw_shelf(pn_refresh_t profile){
     pn_font_close(&font);pn_free(pixels);return status;
 }
 /// 空闲时解码一本封面；整页完成后一次GL16重绘，避免逐本闪屏。/ Decode one cover per idle tick; redraw once with GL16 after the page completes to avoid per-book flashing.
-static void tick_covers(void){
+/// 返回本轮是否做了封面/重画工作。/ Return whether this round did cover or redraw work.
+static bool tick_covers(void){
     size_t free_bytes=pool.limit>pool.used?pool.limit-pool.used:0,reserve=128u*1024u;bool changed=false;
     pn_status_t status=pn_shelf_covers_step(shelf_covers,shelf_page,&pool,&sd_media,cover_cache,cover_salt,free_bytes>reserve?free_bytes-reserve:1,&changed);
     if(changed)covers_dirty=true;
     if(status==PN_EMPTY && covers_dirty){pn_status_t shown=draw_shelf(PN_REFRESH_GL16);if(shown==PN_OK)covers_dirty=false;else if(shown!=PN_CANCELLED)ESP_LOGW(TAG,"Cover redraw failed");}
     else if(status!=PN_OK && status!=PN_EMPTY && status!=PN_BUSY && status!=PN_CANCELLED){ESP_LOGW(TAG,"Cover queue stopped: %d",(int)status);pn_shelf_covers_reset(shelf_covers,NULL);covers_dirty=false;}
+    return status==PN_OK || changed;
 }
 /// 最近记录在本owner内复用，关闭阅读或换卡后重载。/ Reuse recents within this owner; reload after closing a reader or changing media.
 static pn_status_t load_recent(void){
@@ -889,10 +872,11 @@ static void open_actions(int index){
     actions_mode=true;
     // 成功底图直接叠加面板，按需准备面板文字；不扫描目录或重绘封面。/ Overlay the confirmed shelf with the sheet's glyphs, without directory scans or cover painting.
     pn_status_t status=PN_UNSUPPORTED;
-    if(panel_known && shown_px){
+    if(panel_known){
         uint8_t *pixels=pn_alloc_tagged(&pool,PN_MEM_FRAME,342u*1216u);pn_frame_t frame;pn_font_t font={0};pn_text_source_t source=pn_font_builtin_source();
         status=pn_frame_bind(&frame,pixels,342u*1216u,684,1216)?PN_OK:PN_NO_MEMORY;
-        if(status==PN_OK){memcpy(pixels,shown_px,342u*1216u);status=pn_font_open(&font,&pool,&source,24);}
+        if(status==PN_OK)status=pn_device_frame_restore(hardware.hl.back_fb,684u*1216u/2u,&frame);
+        if(status==PN_OK)status=pn_font_open(&font,&pool,&source,24);
         pn_w_font_scope_t scope={0};
         if(status==PN_OK)status=pn_w_font_scope_begin(&scope,&pool,NULL);
         if(status==PN_OK)status=pn_book_actions_render(&actions,&font,&frame);
@@ -1101,6 +1085,7 @@ static void device_task(void *arg){
 #endif
     #ifdef ESP_PLATFORM
     pn_status_t sha_status=pn_device_identity_init();ESP_LOGI(TAG,"Hardware SHA self-test status=%d",(int)sha_status);
+    pn_device_power_init();
 #endif
     (void)arg;esp_err_t error=nvs_flash_init();if(error!=ESP_OK){ESP_LOGE(TAG,"NVS unavailable: %s; preserving data",esp_err_to_name(error));vTaskDelete(NULL);return;}
     pn_profile_span_t board_span;pn_profile_begin(&board_span,NULL,"device.board-init");
@@ -1113,7 +1098,6 @@ static void device_task(void *arg){
     pn_cache_attach(&pool,&cover_cache_owner,PN_CACHE_COVER,NULL,cover_bytes,cover_drop);
     pn_media_init(&sd_media);pn_media_init(&data_media);pn_media_init(&wallpaper_media);read_pico_pmu_drain_events();esp_fill_random(cover_salt,sizeof cover_salt);
     if(read_pico_pmu_report_ready()!=ESP_OK){ESP_LOGE(TAG,"PMU running handshake failed; display withheld");read_pico_deinit(&hardware);vTaskDelete(NULL);return;}
-    shown_px=pn_alloc_tagged(&pool,PN_MEM_FRAME,342u*1216u);
     pn_device_async_start(&async_port,&hardware,present_panel,rails_idle_check,rails_release);
     if(!async_port.input_active || !async_port.display_active)ESP_LOGW(TAG,"Async task startup degraded: input=%d display=%d",(int)async_port.input_active,(int)async_port.display_active);
     clock_read_boot(now_ms());
@@ -1122,6 +1106,8 @@ static void device_task(void *arg){
     (void)pn_catalog_index_init(&catalog_index,&pool,&sd_media,book_directory,PN_SD_MOUNT "/" PN_SD_INDEX_CACHE);
     start_reader();pn_reader_input_t input={0};pn_tap_t tap={0};int hold_hit=-1;uint64_t hold_start=0,hold_last=0;bool hold_fired=false;uint64_t last_card=0,last_key=0,last_ui_retry=0,boot=now_ms();
     pn_async_scope_t scope;bool scope_active=false;
+#define POWER_IDLE_ROUNDS 100u ///< 约1秒，覆盖输入后的邻页预排与字形预热 / About one second, covering neighbor prefetch and glyph warming after input
+    unsigned power_idle=0; ///< 连续无输入轮数（每轮约10ms）/ Consecutive rounds without input (about 10 ms each)
     for(;;){uint64_t now=now_ms();
         if(scope_active)pn_async_end(&scope);
         bool body=reader_active() && !locked && !focus_page() && !status_page && !reading_menu && !shelf_mode && !toolbar_open;
@@ -1129,6 +1115,9 @@ static void device_task(void *arg){
         if(shelf_mode && !home_mode && shelf_page)view+=(uint32_t)shelf_page->index*32u;
         pn_device_async_view(&async_port,view,body,input_flags);
         pn_device_input_event_t queued={0};pn_status_t available=async_port.input_active?pn_device_async_take(&async_port,&queued):PN_EMPTY;
+        // 有输入立即回到最高频；连续空闲约1秒才放锁，交互中不反复切频。/ Input returns to maximum at once; release only after about one second idle so interaction does not toggle frequency.
+        if(available==PN_OK){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);}
+        pn_device_power_busy(PN_POWER_SESSION,transfer.impl!=NULL || time_sync.impl!=NULL);
         pn_async_begin(&async_port.input,&scope,available==PN_EMPTY);scope_active=true;
         if(available==PN_CANCELLED){pn_reader_input_cancel(&input);pn_key_cancel(&keys);int ignored;(void)pn_tap_feed(&tap,1,-1,false,&ignored);hold_hit=-1;touch_held=false;}
         if(available==PN_OK){last_input=queued.at;if(queued.kind==PN_DASYNC_KEY && !locked)handle_key(queued.key,queued.key_event);
@@ -1185,9 +1174,11 @@ static void device_task(void *arg){
                 if(action==PN_APP_TOOLS)toolbar_show();
                 else if(reader_active() && !status_page){pn_status_t status=active_step(action,now_ms());report_reader_result(status);}
                 else start_reader();}}
-        if(shelf_mode && shelf_covers && shelf_page && !actions_mode && !transfer.impl && !wallpaper_ui.impl && !font_manage.impl && !settings_ui.impl && !locked && !status_page && !reading_menu && !touch_held && now_ms()>=last_input && now_ms()-last_input>=800){if(available==PN_EMPTY)(void)pn_catalog_index_build(&catalog_index);tick_covers();}
-        if(body && available==PN_EMPTY && !touch_held){pn_status_t prefetched=epub.impl?pn_epub_app_prefetch(&epub):pn_reader_app_prefetch(&reader);(void)prefetched;}
-        if(available!=PN_OK)vTaskDelay(pdMS_TO_TICKS(10));
+        if(shelf_mode && shelf_covers && shelf_page && !actions_mode && !transfer.impl && !wallpaper_ui.impl && !font_manage.impl && !settings_ui.impl && !locked && !status_page && !reading_menu && !touch_held && now_ms()>=last_input && now_ms()-last_input>=800){
+            // 后台确有工作时回到最高频，封面/索引不在降频下变慢。/ Real background work returns to maximum so covers and indexing are not slowed by DFS.
+            bool worked=available==PN_EMPTY && pn_catalog_index_build(&catalog_index)==PN_OK;worked|=tick_covers();if(worked){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);}}
+        if(body && available==PN_EMPTY && !touch_held){pn_status_t prefetched=epub.impl?pn_epub_app_prefetch(&epub):pn_reader_app_prefetch(&reader);if(prefetched==PN_OK){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);}}
+        if(available!=PN_OK){if(power_idle<POWER_IDLE_ROUNDS)power_idle++;if(power_idle>=POWER_IDLE_ROUNDS)pn_device_power_busy(PN_POWER_PRODUCT,false);vTaskDelay(pdMS_TO_TICKS(10));}
     }
 }
 void app_main(void){

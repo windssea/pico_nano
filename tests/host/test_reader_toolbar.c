@@ -17,9 +17,12 @@ int main(void){
     pn_frame_t frame;assert(pn_frame_bind(&frame,pixels,PN_HW_FRAME_BYTES,684,1216));
     // 独立像素检查阅读线的空隙、模式、边界和无副作用关闭。 / Independent pixel checks cover guide gaps, modes, bounds and no-op disabling.
     pn_frame_clear(&frame,15);memcpy(copy,pixels,PN_HW_FRAME_BYTES);
-    pn_reader_guide_row(&frame,0,100);pn_reader_guide_row(&frame,1,-1);pn_reader_guide_row(&frame,2,1216);assert(!memcmp(copy,pixels,PN_HW_FRAME_BYTES));
-    pn_reader_guide_row(&frame,1,100);assert(pn_frame_get(&frame,18,100)==10 && pn_frame_get(&frame,19,100)==15 && pn_frame_get(&frame,31,100)==10 && pn_frame_get(&frame,0,99)==15);
-    pn_reader_guide_row(&frame,2,101);assert(pn_frame_get(&frame,1,101)==10 && pn_frame_get(&frame,2,101)==15 && pn_frame_get(&frame,13,101)==10);
+    pn_reader_guide_row(&frame,0,3,100);pn_reader_guide_row(&frame,1,3,-1);pn_reader_guide_row(&frame,2,3,1216);assert(!memcmp(copy,pixels,PN_HW_FRAME_BYTES));
+    pn_reader_guide_row(&frame,1,0,100);assert(pn_frame_get(&frame,18,100)==10 && pn_frame_get(&frame,19,100)==15 && pn_frame_get(&frame,31,100)==10 && pn_frame_get(&frame,0,99)==15);
+    pn_reader_guide_row(&frame,2,0,101);assert(pn_frame_get(&frame,1,101)==10 && pn_frame_get(&frame,2,101)==15 && pn_frame_get(&frame,13,101)==10);
+    // 深浅：中7、深4、黑0，越界按浅10。/ Darkness: medium 7, dark 4, black 0, out of range falls back to light 10.
+    pn_reader_guide_row(&frame,1,1,102);pn_reader_guide_row(&frame,1,2,103);pn_reader_guide_row(&frame,1,3,104);pn_reader_guide_row(&frame,1,9,105);
+    assert(pn_frame_get(&frame,0,102)==7 && pn_frame_get(&frame,0,103)==4 && pn_frame_get(&frame,0,104)==0 && pn_frame_get(&frame,0,105)==10 && pn_frame_get(&frame,19,104)==15);
     for(unsigned i=0;i<PN_HW_FRAME_BYTES;i++)pixels[i]=copy[i]=(uint8_t)(i*19u);
     pn_font_t font={0};pn_text_source_t source=pn_font_builtin_source();assert(pn_font_open(&font,&pool,&source,34)==PN_OK);
     // 正文的末行必须完整位于正文更新区；进度圆点不能跨入该区。/ The last text line stays in the body update; the progress knob must not cross into it.

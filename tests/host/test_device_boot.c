@@ -47,7 +47,8 @@ static bool underrun,panel_fault;
 static bool nvs_bad,vcom_bad,mount_bad,ready_bad;
 const char *esp_err_to_name(esp_err_t e){(void)e;return "mock";}
 esp_err_t nvs_flash_init(void){return nvs_bad?ESP_FAIL:ESP_OK;}
-esp_err_t read_pico_init(read_pico_handle_t *h){static uint8_t framebuffer[684u*1216u/2u];board_calls++;memset(h,0,sizeof *h);h->pmu_ready=true;h->framebuffer=framebuffer;return ESP_OK;}
+static uint8_t stub_front[684u*1216u/2u],stub_back[684u*1216u/2u];
+esp_err_t read_pico_init(read_pico_handle_t *h){board_calls++;memset(h,0,sizeof *h);h->pmu_ready=true;h->framebuffer=stub_front;memset(stub_front,0xff,sizeof stub_front);memset(stub_back,0xff,sizeof stub_back);h->hl.back_fb=stub_back;return ESP_OK;}
 void read_pico_deinit(read_pico_handle_t *h){(void)h;}
 esp_err_t read_pico_pmu_vcom_get(int *mv){vcom_reads++;if(vcom_bad)return ESP_FAIL;*mv=1230;return ESP_OK;}
 void epd_set_vcom(uint16_t v){assert(v==1230 && vcom_reads==1);}
@@ -57,7 +58,8 @@ void epd_poweron(void){assert(!vcom_bad && vcom_reads==1);}
 void epd_poweroff(void){poweroffs++;}
 void read_pico_epd_set_pclk(int mhz){pclk_calls++;last_pclk=mhz;}
 void epd_clear(void){clear_calls++;}
-enum EpdDrawError epd_hl_update_screen_from_white(EpdiyHighlevelState *h,enum EpdDrawMode m,int t){(void)h;(void)m;(void)t;presents++;if(panel_fault)return EPD_DRAW_FAILURE;if(underrun && presents==1)return EPD_DRAW_EMPTY_LINE_QUEUE;return EPD_DRAW_SUCCESS;}
+// epdiy无论结果都把前缓冲回写后缓冲。/ epdiy copies the front buffer into the back buffer regardless of the result.
+enum EpdDrawError epd_hl_update_screen_from_white(EpdiyHighlevelState *h,enum EpdDrawMode m,int t){(void)m;(void)t;presents++;if(h && h->back_fb)memcpy(h->back_fb,stub_front,sizeof stub_front);if(panel_fault)return EPD_DRAW_FAILURE;if(underrun && presents==1)return EPD_DRAW_EMPTY_LINE_QUEUE;return EPD_DRAW_SUCCESS;}
 enum EpdDrawError epd_hl_update_screen_full(EpdiyHighlevelState *h,enum EpdDrawMode m,int t){if(m==MODE_GC16)gc_updates++;return epd_hl_update_screen_from_white(h,m,t);}
 enum EpdDrawError epd_hl_update_area_full(EpdiyHighlevelState *h,enum EpdDrawMode m,int t,EpdRect area){area_full_calls++;last_full_area=area;return epd_hl_update_screen_from_white(h,m,t);}
 enum EpdDrawError epd_hl_update_area(EpdiyHighlevelState *h,enum EpdDrawMode m,int t,EpdRect area){area_diff_calls++;last_diff_area=area;if(footer_fault)return EPD_DRAW_FAILURE;return epd_hl_update_screen_from_white(h,m,t);}

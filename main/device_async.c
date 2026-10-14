@@ -5,6 +5,7 @@
 #include "pn_input_prefs.h"
 #include "pn_profile.h"
 #include "read_pico_pmu.h"
+#include "device_power.h"
 #include <string.h>
 #include <stdlib.h>
 _Static_assert(sizeof(pn_device_input_event_t)<=PN_ASYNC_PAYLOAD,"Device input payload must stay bounded");
@@ -16,7 +17,8 @@ _Static_assert(sizeof(pn_device_input_event_t)<=PN_ASYNC_PAYLOAD,"Device input p
 #include "esp_timer.h"
 typedef struct {const pn_frame_t *frame;pn_refresh_t profile;bool off;} display_t;
 static uint64_t now_ms(void){return (uint64_t)(esp_timer_get_time()/1000);}
-static void display_task(void *ctx){pn_device_async_t *p=ctx;for(;;){display_t job;if(xQueueReceive(p->display_queue,&job,pdMS_TO_TICKS(20))==pdTRUE){if(job.off){p->off();p->display_result=PN_OK;}else p->display_result=p->panel(NULL,job.frame,job.profile);xSemaphoreGive(p->display_done);}p->idle(now_ms());}}
+static void display_task(void *ctx){pn_device_async_t *p=ctx;for(;;){display_t job;if(xQueueReceive(p->display_queue,&job,pdMS_TO_TICKS(20))==pdTRUE){// 扫描期间行供数依赖CPU，持最高频锁防欠载。/ Line feeding during a scan is CPU-bound, so hold the max lock to avoid underruns.
+            pn_device_power_busy(PN_POWER_DISPLAY,true);if(job.off){p->off();p->display_result=PN_OK;}else p->display_result=p->panel(NULL,job.frame,job.profile);pn_device_power_busy(PN_POWER_DISPLAY,false);xSemaphoreGive(p->display_done);}p->idle(now_ms());}}
 static void send(pn_device_async_t *p,const pn_device_input_event_t *input,bool navigation,bool urgent){pn_async_event_t e={.bytes=sizeof *input,.navigation=navigation,.urgent=urgent,.view=atomic_load(&p->input.view)};memcpy(e.payload,input,sizeof *input);(void)pn_async_send(&p->input,&e);}
 static void input_task(void *ctx){
     pn_device_async_t *p=ctx;pn_key_t keys={0};pn_reader_input_t reader={0};unsigned empty=0;uint64_t last_power=0,last_hold=0;uint32_t old_view=0;int last_x=-1,last_y=-1;
@@ -63,7 +65,8 @@ pn_status_t pn_device_async_present(pn_device_async_t *p,const pn_frame_t *frame
         pn_profile_begin(&span,NULL,"display.wait");bool completed=xSemaphoreTake(p->display_done,portMAX_DELAY)==pdTRUE;
         pn_status_t status=completed?p->display_result:PN_IO;pn_profile_end(&span,status);return receipt(p,status);}
 #endif
-    return receipt(p,p->panel(NULL,frame,profile));
+    pn_device_power_busy(PN_POWER_DISPLAY,true);pn_status_t status=p->panel(NULL,frame,profile);pn_device_power_busy(PN_POWER_DISPLAY,false);
+    return receipt(p,status);
 }
 void pn_device_async_view(pn_device_async_t *p,uint32_t view,bool body,uint8_t flags){atomic_store(&p->flags,flags);atomic_store(&p->body,body);atomic_store(&p->input.view,(view&0xffffu)|(p->revision<<16));}
 pn_status_t pn_device_async_take(pn_device_async_t *p,pn_device_input_event_t *event){pn_async_event_t e;pn_status_t status=pn_async_take(&p->input,&e);if(status==PN_OK){memcpy(event,e.payload,sizeof *event);if((!e.navigation || !e.urgent) && e.view!=atomic_load(&p->input.view))return PN_CANCELLED;}return status;}

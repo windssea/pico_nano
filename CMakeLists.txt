@@ -8,6 +8,8 @@ if(NOT PN_PRODUCT_VERSION MATCHES "^[0-9]+(\\.[0-9]+)*$")
     message(FATAL_ERROR "PN_PRODUCT_VERSION missing from pn_brand.h")
 endif()
 set(PROJECT_VER "${PN_PRODUCT_VERSION}")
+# 改版本号后自动重新配置，避免沿用旧版本描述。/ Reconfigure when the version changes so the app descriptor never keeps a stale version.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/components/pn_core/include/pn_brand.h")
 project(pico_nano VERSION ${PN_PRODUCT_VERSION})
 if(NOT IDF_VERSION_MAJOR EQUAL 6 OR NOT IDF_VERSION_MINOR EQUAL 1)
     message(FATAL_ERROR "pico_nano requires ESP-IDF v6.1")

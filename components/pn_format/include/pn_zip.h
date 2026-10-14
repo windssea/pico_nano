@@ -22,6 +22,17 @@ typedef struct {
 /// 验证全部中央/本地头及重叠，不解压整书；source含validate取消/介质错误。
 /// Validate all central/local headers and overlap without inflating the book; source validate supplies cancellation/media errors.
 pn_status_t pn_zip_open(pn_zip_t *zip,pn_pool_t *pool,const pn_text_source_t *source);
+typedef struct {void *impl;} pn_zip_scan_t; ///< 分步打开句柄，初始NULL / Staged-open handle, initially NULL
+/// 分步打开：先校验EOCD/中央目录；之后把整文件顺序读到的字节交给feed，本地头/描述符在流过时校验，免去逐条随机读。
+/// Staged open: validate EOCD/central directory first; then feed bytes read sequentially across the file so local headers/descriptors are checked as they stream past, avoiding per-entry random reads.
+pn_status_t pn_zip_scan_begin(pn_zip_scan_t *scan,pn_pool_t *pool,const pn_text_source_t *source);
+/// 按偏移递增喂入源字节（可跳过）；不读源、不报错，错误留到finish。/ Feed source bytes in increasing offsets (gaps allowed); never reads the source or reports errors until finish.
+void pn_zip_scan_feed(pn_zip_scan_t *scan,uint64_t offset,const uint8_t *bytes,size_t size);
+/// 未截取的条目随机读校验，再查重叠/重名；与pn_zip_open相同的完整校验，成功才设置zip。scan随后为空。
+/// Validate uncaptured entries with random reads, then overlap/duplicates; the same full validation as pn_zip_open, setting zip only on success. scan is empty afterwards.
+pn_status_t pn_zip_scan_finish(pn_zip_scan_t *scan,pn_zip_t *zip);
+/// 释放未完成的分步打开；幂等。/ Release an unfinished staged open idempotently.
+void pn_zip_scan_abort(pn_zip_scan_t *scan);
 /// 有流仍活动返回BUSY；不关闭借用的source。/ BUSY with active streams; never close borrowed source.
 pn_status_t pn_zip_close(pn_zip_t *zip);
 /// 验证目录数量或0。/ Validated entry count or zero.

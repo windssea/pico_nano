@@ -45,8 +45,9 @@ int main(void){
     strcpy(shelf_page->items[0].name,"Original.txt");strcpy(shelf_page->items[0].path,"/original.txt");shelf_page->items[0].format=PN_BOOK_TXT;
     home_mode=false;shelf_mode=true;status_page=false;
     assert(draw_shelf(PN_REFRESH_GL16)==PN_OK);
-    uint8_t top[342*16];assert(shown_px);memcpy(top,shown_px,sizeof top);
-    open_actions(0);assert(actions_mode && !memcmp(top,shown_px,sizeof top));
+    // 逻辑前16行是每个板级行的前8字节；面板底图来自后缓冲逆变换。/ The logical top 16 rows are the first 8 bytes of each board row; the sheet base is restored from the back buffer.
+    static uint8_t top[684*8];for(int py=0;py<684;py++)memcpy(top+py*8,hardware.hl.back_fb+(size_t)py*608,8);
+    open_actions(0);assert(actions_mode);for(int py=0;py<684;py++)assert(!memcmp(top+py*8,hardware.hl.back_fb+(size_t)py*608,8));
     actions.confirming=true;handle_key(PN_KEY_1,PN_KEY_SHORT);assert(actions_mode && !actions.confirming);
     actions.confirming=true;actions.notice=NULL;handle_key(PN_KEY_3,PN_KEY_SHORT);
     assert(actions_mode && actions.confirming && actions.notice); // 不存在的测试文件删除失败，证明右键送达确认而非焦点切换。/ Failed deletion of the nonexistent fixture proves Confirm delivery, rather than focus movement.
@@ -105,6 +106,6 @@ int main(void){
     time_sync.impl=(void *)1;commit_result=PN_OK;tick_time_sync(1200);assert(!time_sync.impl && time_commits==2 && clock_known && clock_base_sec==1780000000u);
     time_sync.impl=(void *)1;time_result=(pn_device_time_state_t){.phase=PN_TIME_CANCELLED,.released=true,.error=PN_CANCELLED};tick_time_sync(1300);assert(!time_sync.impl && time_commits==2 && clock_base_sec==1780000000u);
     time_sync.impl=(void *)1;time_result=(pn_device_time_state_t){.phase=PN_TIME_SUCCEEDED,.released=true,.utc=1780000000u,.acquired_ms=1000};clock_us=31000000;tick_time_sync(31000);assert(time_commits==3 && clock_base_sec==1780000030u);
-    pn_free(shown_px);pn_free(page_copy);pn_free(shelf_page);pn_free(shelf_covers);pn_free(recent_snapshot);pn_free(favorites);
+    pn_free(page_copy);pn_free(shelf_page);pn_free(shelf_covers);pn_free(recent_snapshot);pn_free(favorites);
     assert(!pool.used && !pool.live);return 0;
 }

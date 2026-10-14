@@ -6,3 +6,19 @@ config PN_PROFILE
         Emit owner phase timing, pool accounting and real heap snapshots.
         Serial logging changes timing; use dedicated diagnostic runs.
 endmenu
+menu "PicoNano power"
+config PN_POWER_DFS
+    bool "Dynamic CPU frequency while idle"
+    depends on PM_ENABLE
+    default y
+    help
+        Product, display and wireless-session owners hold a max-frequency lock while working;
+        idle drops to PN_POWER_MIN_MHZ. Automatic light sleep stays disabled until measured on hardware.
+config PN_POWER_MIN_MHZ
+    int "Idle CPU frequency (MHz)"
+    depends on PN_POWER_DFS
+    range 80 240
+    default 80
+    help
+        Keep at least 80 MHz so the CPU stays on the PLL and MSPI 120 MHz timing is not switched.
+endmenu

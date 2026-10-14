@@ -83,13 +83,14 @@ with tempfile.TemporaryDirectory() as directory:
         plain=capture('plain','')
         dashed=capture('dash','styles,tap:100:1030,tap:600:270,style-apply,')
         assert plain!=dashed and plain[1144*684:]==dashed[1144*684:], (kind,plain==dashed,[i for i,(a,b) in enumerate(zip(plain,dashed)) if a!=b][:8],[i for i,(a,b) in enumerate(zip(plain[1144*684:],dashed[1144*684:])) if a!=b][:8])
-        assert any(a==255 and b==170 for a,b in zip(plain[:1144*684],dashed[:1144*684]))
+        # 新书阅读线默认“中”深浅（灰阶7→119）。/ New books default to the medium guide shade (gray 7 -> 119).
+        assert any(a==255 and b==119 for a,b in zip(plain[:1144*684],dashed[:1144*684]))
         assert capture('reopen','')==dashed
         assert capture('cancel','styles,tap:100:1030,tap:600:270,style-cancel,')==dashed
-        dotted=capture('dot','styles,tap:100:1030,tap:600:270,tap:600:350,style-apply,')
+        dotted=capture('dot','styles,tap:100:1030,tap:600:270,tap:600:450,style-apply,')
         assert dotted!=dashed and dotted[1144*684:]==dashed[1144*684:]
         records=[p.read_bytes() for p in state.glob('*.style.*')];payload=max(records,key=lambda b:int.from_bytes(b[8:16],'little'));at=payload.index(b'PNTS')
-        assert struct.unpack_from('<H',payload,at+4)[0]==3 and any(struct.unpack_from('<Hh',b,b.index(b'PNTS')+54)==(2,2) for b in records)
+        assert struct.unpack_from('<H',payload,at+4)[0]==4 and any(struct.unpack_from('<HhH',b,b.index(b'PNTS')+54)==(2,2,1) for b in records)
         off=capture('off','styles,tap:100:1030,tap:320:270,tap:320:270,style-apply,')
         assert off==plain
 print('reading guides: TXT/EPUB dashed/dotted/off pixels, unchanged footer, cancel, durable mode and offset passed')

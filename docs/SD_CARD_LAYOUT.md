@@ -14,6 +14,7 @@
 | `/piconano/wallpapers/` | 锁屏JPEG/PNG原图 | 用户预览/裁切/旋转并应用 |
 | `/piconano/.readpico/covers/` | 可重建缩略图 | 不与封面原图混放 |
 | `/piconano/.readpico/indexes/library.pni` | 可重建书库索引 | 介质/目录变动失效，打开书仍完整核对SHA |
+| `/piconano/.readpico/masks/` | 可重建透明锁屏灰度/透明平面 | 原图路径/大小/mtime/变换为键，CRC 损坏即重建，可整目录删除 |
 | `/piconano/.readpico/uploads/` | 暂存、分块记录、安装日志及备份 | 未完成文件不入书架，不手动清理活动事务 |
 | `/piconano/.readpico/volume.sync` | FAT同步标记 | 设备存储适配管理 |
 

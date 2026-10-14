@@ -146,7 +146,7 @@ static pn_status_t paint_body(app_t *a,pn_frame_t *frame,unsigned *missing,unsig
     if(a->style.reading_line){int baseline=INT_MIN,descent=0,gap=INT_MAX;bool text=false,illustrated=false;
         for(size_t i=0;i<=a->page.count;i++){
             pn_epub_page_node_t *n=i<a->page.count?&a->page.nodes[i]:NULL;
-            if(!n || n->baseline!=baseline){if(text && !illustrated)pn_reader_guide_row(&viewport,a->style.reading_line,baseline+descent+(gap==INT_MAX?0:gap/2)+a->style.reading_line_offset);baseline=n?n->baseline:INT_MIN;descent=0;gap=INT_MAX;text=illustrated=false;}
+            if(!n || n->baseline!=baseline){if(text && !illustrated)pn_reader_guide_row(&viewport,a->style.reading_line,a->style.reading_line_shade,baseline+descent+(gap==INT_MAX?0:gap/2)+a->style.reading_line_offset);baseline=n?n->baseline:INT_MIN;descent=0;gap=INT_MAX;text=illustrated=false;}
             if(!n)break;
             if(n->image_index!=UINT_MAX){illustrated=true;continue;}
             if(n->codepoint==9 || n->codepoint==10 || n->codepoint==' ')continue;
@@ -230,6 +230,11 @@ static pn_status_t release(app_t *a){
     if(a->state_lease.ticket)(void)pn_media_release(&a->state,&a->state_lease);
     pn_free(a->chapter_starts);pn_free(a->page.nodes);pn_free(a->page.images);pn_free(a->pixels);pn_free(a);return status;
 }
+/// 摘要读取的转发器，把读到的字节交给ZIP分步打开。/ Forwarder for hash reads, handing the bytes to the staged ZIP open.
+typedef struct {void *ctx;pn_status_t (*read_at)(void *,uint64_t,uint8_t *,size_t,size_t *);pn_zip_scan_t *scan;} tap_t;
+static pn_status_t tap_read(void *ctx,uint64_t offset,uint8_t *out,size_t cap,size_t *n){
+    tap_t *t=ctx;pn_status_t status=t->read_at(t->ctx,offset,out,cap,n);if(status==PN_OK && t->scan)pn_zip_scan_feed(t->scan,offset,out,*n);return status;
+}
 static pn_status_t pn_epub_app_open_on_media_impl(pn_epub_app_t *app,pn_pool_t *pool,pn_media_t *media,const char *book,const char *font,const char *state,int pixels,uint64_t now){
     if(!app || !pool || !book || !*book || pixels<28 || pixels>72 || (state && !*state))return PN_INVALID;
     if(strlen(book)>=PN_RECENT_PATH_MAX)return PN_LIMIT;
@@ -240,13 +245,19 @@ static pn_status_t pn_epub_app_open_on_media_impl(pn_epub_app_t *app,pn_pool_t *
     if(status==PN_OK)status=pn_media_acquire(a->media,PN_MEDIA_READ,&a->book_lease);
     pn_text_source_t source;
     if(status==PN_OK)status=pn_text_file_open(&a->book_file,a->media,&a->book_lease,book,&source);
-    if(status==PN_OK)status=pn_identity_stream_pooled(pool,source.ctx,source.size,source.read_at,&a->book);
+    // 整书摘要的顺序读取顺带校验ZIP本地头，打开时不再逐条随机读卡；中央目录失败仍先完成摘要再报同一错误。
+    // The whole-book hash's sequential read also checks ZIP local headers, so opening no longer reads each entry randomly; a directory failure still finishes hashing before reporting the same error.
+    pn_zip_scan_t scan={0};pn_status_t scanned=status==PN_OK?pn_zip_scan_begin(&scan,pool,&source):status;
+    tap_t tap={source.ctx,source.read_at,scanned==PN_OK?&scan:NULL};
+    if(status==PN_OK)status=pn_identity_stream_pooled(pool,&tap,source.size,tap_read,&a->book);
+    if(status==PN_OK && scanned!=PN_OK)status=scanned;
 #ifdef ESP_PLATFORM
     if(status==PN_OK)esp_fill_random(a->salt,sizeof a->salt);
 #else
     if(status==PN_OK){FILE *random=fopen("/dev/urandom","rb");if(!random)status=PN_IO;else{size_t n=fread(a->salt,1,16,random);if(fclose(random) || n!=16)status=PN_IO;}}
 #endif
-    if(status==PN_OK)status=pn_zip_open(&a->zip,pool,&source);
+    if(status==PN_OK)status=pn_zip_scan_finish(&scan,&a->zip);
+    pn_zip_scan_abort(&scan);
     if(status==PN_OK)status=pn_epub_open(&a->epub,pool,&a->zip,a->salt);
     if(status==PN_OK)status=pn_epub_info(&a->epub,&a->info);
     if(status==PN_OK){

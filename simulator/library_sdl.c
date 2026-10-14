@@ -456,7 +456,10 @@ static pn_status_t lock_preview(library_t *s,uint64_t now){
     if(selection.mode==PN_LOCK_MASK){
         pn_status_t mask=PN_EMPTY;
         if(reading(s) && s->page_px){
-            mask=pn_wallpaper_mask_open(&s->lock_mask,s->pool,&s->media,&selection);
+            // 有封面缓存目录时把遮罩平面缓存放在同级masks。/ With a cover cache directory, keep mask planes in the sibling masks directory.
+            char mask_dir[540]={0};const char *slash=*s->cover_dir?strrchr(s->cover_dir,'/'):NULL;
+            if(slash && slash>s->cover_dir && (size_t)snprintf(mask_dir,sizeof mask_dir,"%.*s/masks",(int)(slash-s->cover_dir),s->cover_dir)>=sizeof mask_dir)mask_dir[0]=0;
+            mask=pn_wallpaper_mask_open_cached(&s->lock_mask,s->pool,&s->media,&selection,*mask_dir?mask_dir:NULL);
             if(mask==PN_OK){memcpy(s->frame.pixels,s->page_px,PN_WALLPAPER_BYTES);mask=pn_wallpaper_mask_paint(&s->lock_mask,&s->frame);}
         }
         printf("lock_mask status=%d\n",(int)mask);pn_wallpaper_mask_close(&s->lock_mask);
