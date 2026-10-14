@@ -1,6 +1,6 @@
 # PicoNano 安装、异机升级与发布
 
-更新：2026-10-14。默认通过电脑 Chrome/Edge 的 Web Serial 升级，在线入口为[网页安装器](https://windssea.github.io/pico_nano/)。当前默认固件 `0.6.6+eff83f1`，具体源码来源以下载清单的`source_commit`为准（开机右下角与“设置 → 存储与关于”显示版本号）。网页安装与设备无线OTA是不同能力，当前没有已交付的OTA原子回滚。
+更新：2026-10-14。默认通过电脑 Chrome/Edge 的 Web Serial 升级，在线入口为[网页安装器](https://windssea.github.io/pico_nano/)。当前默认固件及完整刷入版本 `0.6.6+4e02139`，具体源码来源以下载清单的`source_commit`为准（开机右下角与“设置 → 存储与关于”显示版本号）。网页安装与设备无线OTA是不同能力，当前没有已交付的OTA原子回滚。
 
 ## 另一台电脑网页升级
 
@@ -88,6 +88,8 @@ python tools/dev.py installer
 设备“传书 → USB传输”手动交出TF，在电脑磁盘的`piconano/books`、`piconano/fonts`、`piconano/covers`、`piconano/wallpapers`分别复制图书、字体、封面和锁屏原图。复制完成先在电脑安全弹出，再点设备“结束USB传输”；恢复失败可重试，记录不会因此清除。MSC期间网页刷机所需的Serial/JTAG暂停，结束后恢复；软件验证与固件构建不代表本机USB已验收，请按开发指南记录枚举、读回SHA和串口恢复。
 
 ## 版本与交付证据
+
+完整刷入批次`4e02139`：基于最新已发布0.6.6阅读修复源码，未混入原工作区0.6.7开发改动。22项安装器Node、5项完整包Python及两套ESP-IDF6.1构建/size通过；板级应用5026336B，6MiB槽余20.11%，SHA-256 `9cc799bd1103d8b3608d94f21f1835bf6de6e4d91106d0659388f1a138a90d8a`。应用/完整包共用同一应用，完整包另含该板级构建的引导/表/OTA与两个空FS，站点及离线ZIP逐文件摘要一致；S3 image-info版本/checksum/validation通过。当前完整刷入仅有软件、构建和分发核验，备份可恢复性、实际迁移/复位/正常启动需用户刷入验收，清单继续`verifiedOnHardware=false`。
 
 0.6.6修复源码`eff83f1`：板级应用5026336字节，SHA-256 `bdfeeb616884b9009f437ab46dfd5d10f0cfadeeb2c1af1f8873b17d24651a8f`。ZIP/JPEG、字体身份、图片缩进与按键回归通过；149CTest/32SDL/10Python/5网页/17安装器基础门通过，最终相关29项设备/核心、3项SDL及完整字体共享源回归补验通过，两套SDK构建/size与包摘要通过。完整系统字体位于TF固定路径，内置应急字库保留；用户本机安装和读回SHA一致，软件绘制通过不代表新固件真机阅读/功耗/光学验收。未在本轮串口烧写，继续`verifiedOnHardware=false`。
 
