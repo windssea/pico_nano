@@ -310,7 +310,11 @@ static pn_status_t reading_read(void *ctx,uint64_t offset,uint8_t *out,size_t ca
     size_t count=pn_reading_font_size-(size_t)offset;if(count>cap)count=cap;
     memcpy(out,pn_reading_font_bytes+offset,count);*n=count;return PN_OK;
 }
-pn_text_source_t pn_font_reading_source(void){return (pn_text_source_t){NULL,pn_harmony_font_size,harmony_read,NULL};}
+pn_text_source_t pn_font_reading_source(void){
+    // 默认正文与系统UI共用已核验完整字库；显式用户字体仍由阅读偏好选择。/ Default body text shares the verified complete system face; explicit user faces remain controlled by reading preferences.
+    if(system_source.read_at && system_source.validate && system_source.validate(system_source.ctx)==PN_OK)return system_source;
+    return (pn_text_source_t){NULL,pn_harmony_font_size,harmony_read,NULL};
+}
 pn_text_source_t pn_font_fallback_source(void){return (pn_text_source_t){NULL,pn_reading_font_size,reading_read,NULL};}
 pn_status_t pn_font_source_identity(const pn_text_source_t *source,pn_book_id_t *out){
     if(!source || !source->read_at || !out)return PN_INVALID;

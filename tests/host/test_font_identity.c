@@ -30,6 +30,7 @@ int main(void){
     reads=selected.io_reads;assert(!pn_font_source_identity(&selected_source,&actual) && selected.io_reads==reads);assert(!pn_text_file_close(&selected));
     // 完整系统字库按源流读，缺卡/损坏时仍能取内置UI源。/ Stream the external UI face and keep resident UI available after media loss/corruption.
     assert(!pn_font_system_open(&pool,&media,font_path));pn_text_source_t system=pn_font_builtin_source();assert(system.ctx && system.validate);
+    assert(pn_font_reading_source().ctx==system.ctx);
     pn_text_file_t *system_file=system.ctx;reads=system_file->io_reads;
     assert(!pn_font_system_open(&pool,&media,font_path) && system_file->io_reads==reads);
     pn_font_t ui={0};assert(!pn_font_open(&ui,&pool,&system,24));pn_font_close(&ui);
