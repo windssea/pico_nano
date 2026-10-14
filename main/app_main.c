@@ -198,7 +198,7 @@ static uint64_t rails_deadline_ms;
 static atomic_bool full_clean_completed;
 static atomic_bool reading_presentation; ///< 此次显示的用途，独立于输入页面状态 / Purpose of this presentation, independent of input view state
 /// 立即断开高压轨；未上电时无操作。/ Drop the HV rails now; no-op when already off.
-static void rails_release(void){if(rails_deadline_ms){rails_deadline_ms=0;epd_poweroff();}}
+static void rails_release(void){if(rails_deadline_ms){rails_deadline_ms=0;epd_poweroff();}pn_device_power_busy(PN_POWER_RAILS,false);}
 /// 主循环调用：轨空闲满期后断电。/ Called by the main loop: power the rails down once the idle period has elapsed.
 static void rails_idle_check(uint64_t now){if(rails_deadline_ms && now>=rails_deadline_ms)rails_release();}
 /// 阅读工具栏是否显示，以及最近一次呈现帧的副本（关闭工具栏时原样恢复）。/ Whether the reading toolbar is showing, and a copy of the latest presented frame (restored as is when the toolbar closes).
@@ -275,7 +275,7 @@ static pn_status_t present_panel(void *ctx,const pn_frame_t *frame,pn_refresh_t 
     }else if(deep_clean)atomic_store(&deep_clean_pending,true);
     // epdiy已把前缓冲写入后缓冲；失败时panel_known=false，下次从白场整屏重建。/ epdiy already copied the front buffer into the back buffer; on failure panel_known=false forces a full rebuild from white next time.
     // 成功则保活到空闲期满；失败立即断电。/ Keep the rails up until idle expiry on success; drop them at once on failure.
-    rails_deadline_ms=now_ms()+RAILS_IDLE_MS;if(!panel_known)rails_release();
+    rails_deadline_ms=now_ms()+RAILS_IDLE_MS;pn_device_power_busy(PN_POWER_RAILS,true);if(!panel_known)rails_release();
     if(!panel_known)ESP_LOGE(TAG,"Panel present failed: %u",(unsigned)result);
     ESP_LOGI(TAG,"Present mode=%u reason=%s body=%d prepare=%llu ms panel=%llu ms pool=%u/%u",(unsigned)mode,reason,body_refresh,(unsigned long long)(panel_at-prepared_at),(unsigned long long)(now_ms()-panel_at),(unsigned)pool.used,(unsigned)pool.limit);
     ESP_LOGI(TAG,"Display stages dirty=%llu convert=%llu power=%llu scan=%llu remember=%llu ms",(unsigned long long)(dirty_at-converted_at),(unsigned long long)(converted_at-prepared_at),(unsigned long long)(panel_at-dirty_at),(unsigned long long)(scanned_at-panel_at),(unsigned long long)(now_ms()-scanned_at));
@@ -1098,7 +1098,7 @@ static void device_task(void *arg){
     pn_cache_attach(&pool,&cover_cache_owner,PN_CACHE_COVER,NULL,cover_bytes,cover_drop);
     pn_media_init(&sd_media);pn_media_init(&data_media);pn_media_init(&wallpaper_media);read_pico_pmu_drain_events();esp_fill_random(cover_salt,sizeof cover_salt);
     if(read_pico_pmu_report_ready()!=ESP_OK){ESP_LOGE(TAG,"PMU running handshake failed; display withheld");read_pico_deinit(&hardware);vTaskDelete(NULL);return;}
-    pn_device_async_start(&async_port,&hardware,present_panel,rails_idle_check,rails_release);
+    pn_device_async_start(&async_port,&hardware,present_panel,rails_idle_check,rails_release);pn_device_async_bind_product(&async_port);
     if(!async_port.input_active || !async_port.display_active)ESP_LOGW(TAG,"Async task startup degraded: input=%d display=%d",(int)async_port.input_active,(int)async_port.display_active);
     clock_read_boot(now_ms());
     show_boot_brand();
@@ -1178,7 +1178,9 @@ static void device_task(void *arg){
             // 后台确有工作时回到最高频，封面/索引不在降频下变慢。/ Real background work returns to maximum so covers and indexing are not slowed by DFS.
             bool worked=available==PN_EMPTY && pn_catalog_index_build(&catalog_index)==PN_OK;worked|=tick_covers();if(worked){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);}}
         if(body && available==PN_EMPTY && !touch_held){pn_status_t prefetched=epub.impl?pn_epub_app_prefetch(&epub):pn_reader_app_prefetch(&reader);if(prefetched==PN_OK){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);}}
-        if(available!=PN_OK){if(power_idle<POWER_IDLE_ROUNDS)power_idle++;if(power_idle>=POWER_IDLE_ROUNDS)pn_device_power_busy(PN_POWER_PRODUCT,false);vTaskDelay(pdMS_TO_TICKS(10));}
+        if(available!=PN_OK){if(power_idle<POWER_IDLE_ROUNDS)power_idle++;if(power_idle>=POWER_IDLE_ROUNDS)pn_device_power_busy(PN_POWER_PRODUCT,false);
+            // 活动/会话/降级输入时10ms；长空闲时等输入通知，最多100ms处理定时职责。/ 10 ms while active, in sessions or with degraded input; when long idle wait for input notification, at most 100 ms for timed duties.
+            bool slow=async_port.input_active && power_idle>=POWER_IDLE_ROUNDS && !transfer.impl && !time_sync.impl;if(async_port.product_task)pn_device_async_wait(&async_port,slow?100u:10u);else vTaskDelay(pdMS_TO_TICKS(10));}
     }
 }
 void app_main(void){

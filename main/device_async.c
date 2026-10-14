@@ -6,6 +6,7 @@
 #include "pn_profile.h"
 #include "read_pico_pmu.h"
 #include "device_power.h"
+#include "device_touch_wake.h"
 #include <string.h>
 #include <stdlib.h>
 _Static_assert(sizeof(pn_device_input_event_t)<=PN_ASYNC_PAYLOAD,"Device input payload must stay bounded");
@@ -17,9 +18,11 @@ _Static_assert(sizeof(pn_device_input_event_t)<=PN_ASYNC_PAYLOAD,"Device input p
 #include "esp_timer.h"
 typedef struct {const pn_frame_t *frame;pn_refresh_t profile;bool off;} display_t;
 static uint64_t now_ms(void){return (uint64_t)(esp_timer_get_time()/1000);}
-static void display_task(void *ctx){pn_device_async_t *p=ctx;for(;;){display_t job;if(xQueueReceive(p->display_queue,&job,pdMS_TO_TICKS(20))==pdTRUE){// 扫描期间行供数依赖CPU，持最高频锁防欠载。/ Line feeding during a scan is CPU-bound, so hold the max lock to avoid underruns.
+// 空闲只需检查断轨期限（秒级），100ms足够且减少唤醒。/ Idle only checks the rail deadline (seconds), so 100 ms suffices with fewer wakeups.
+static void display_task(void *ctx){pn_device_async_t *p=ctx;for(;;){display_t job;if(xQueueReceive(p->display_queue,&job,pdMS_TO_TICKS(100))==pdTRUE){// 扫描期间行供数依赖CPU，持最高频锁防欠载。/ Line feeding during a scan is CPU-bound, so hold the max lock to avoid underruns.
             pn_device_power_busy(PN_POWER_DISPLAY,true);if(job.off){p->off();p->display_result=PN_OK;}else p->display_result=p->panel(NULL,job.frame,job.profile);pn_device_power_busy(PN_POWER_DISPLAY,false);xSemaphoreGive(p->display_done);}p->idle(now_ms());}}
-static void send(pn_device_async_t *p,const pn_device_input_event_t *input,bool navigation,bool urgent){pn_async_event_t e={.bytes=sizeof *input,.navigation=navigation,.urgent=urgent,.view=atomic_load(&p->input.view)};memcpy(e.payload,input,sizeof *input);(void)pn_async_send(&p->input,&e);}
+static void send(pn_device_async_t *p,const pn_device_input_event_t *input,bool navigation,bool urgent){pn_async_event_t e={.bytes=sizeof *input,.navigation=navigation,.urgent=urgent,.view=atomic_load(&p->input.view)};memcpy(e.payload,input,sizeof *input);(void)pn_async_send(&p->input,&e);
+    if(p->product_task)xTaskNotifyGive((TaskHandle_t)p->product_task);}
 static void input_task(void *ctx){
     pn_device_async_t *p=ctx;pn_key_t keys={0};pn_reader_input_t reader={0};unsigned empty=0;uint64_t last_power=0,last_hold=0;uint32_t old_view=0;int last_x=-1,last_y=-1;
     for(;;){if(atomic_load(&p->paused)){atomic_store(&p->pause_ack,true);vTaskDelay(pdMS_TO_TICKS(10));continue;}atomic_store(&p->pause_ack,false);
@@ -40,7 +43,11 @@ static void input_task(void *ctx){
             if(touch.count){if(post)last_hold=now;empty=0;}else empty++;
             if(post && (touch.y<PN_KEY_AREA_TOP || !touch.count)){pn_device_input_event_t e={.kind=PN_DASYNC_TOUCH,.at=now,.count=touch.count,.x=touch.x,.y=touch.y,.valid=valid};send(p,&e,false,false);}
         }
-        vTaskDelay(pdMS_TO_TICKS(10));
+        // 触摸中、释放确认中或读错时10ms采样；完全空闲时等触摸INT，最多50ms兜底轮询（中断失效时仍可用）。
+        // Sample every 10 ms while touching, confirming release or after read errors; when idle wait for touch INT, polling at most every 50 ms as a fallback if the interrupt fails.
+        bool settling=empty<2 || last_x>=0;
+        // 浅睡时GPIO边沿不能唤醒，改为30ms定时采样（醒着时边沿中断仍立即唤醒）。/ Edges cannot wake light sleep, so sample on a 30 ms timer (edges still wake at once while awake).
+        if(!settling && p->hardware->touch_ready && view && (p->touch_wake || pn_device_power_light_sleep()))(void)pn_device_touch_wake_wait(pn_device_power_light_sleep()?30u:50u);else vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
 #endif
@@ -51,6 +58,7 @@ void pn_device_async_start(pn_device_async_t *p,read_pico_handle_t *hardware,pn_
     TaskHandle_t display_handle=NULL;
     if(p->display_queue && p->display_done && xTaskCreatePinnedToCore(display_task,"pn-display",8192,p,5,&display_handle,0)==pdPASS){p->display_active=true;p->display_task_handle=display_handle;}
     if(!p->display_active){if(p->display_queue)vQueueDelete(p->display_queue);if(p->display_done)vSemaphoreDelete(p->display_done);p->display_queue=NULL;p->display_done=NULL;}
+    p->touch_wake=hardware && hardware->touch_ready && pn_device_touch_wake_init();
     TaskHandle_t input_handle=NULL;
     if(xTaskCreatePinnedToCore(input_task,"pn-input",4096,p,6,&input_handle,0)==pdPASS){p->input_active=true;p->input_task_handle=input_handle;}
 #endif
@@ -82,4 +90,18 @@ bool pn_device_async_off(pn_device_async_t *p){
 #endif
     if(p->off)p->off();
     return true;
+}
+void pn_device_async_bind_product(pn_device_async_t *p){
+#ifdef ESP_PLATFORM
+    if(p)p->product_task=xTaskGetCurrentTaskHandle();
+#else
+    (void)p;
+#endif
+}
+void pn_device_async_wait(pn_device_async_t *p,unsigned timeout_ms){
+#ifdef ESP_PLATFORM
+    if(p && p->product_task)(void)ulTaskNotifyTake(pdTRUE,pdMS_TO_TICKS(timeout_ms));else vTaskDelay(pdMS_TO_TICKS(timeout_ms));
+#else
+    (void)p;(void)timeout_ms;
+#endif
 }

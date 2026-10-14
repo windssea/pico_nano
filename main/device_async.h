@@ -22,6 +22,8 @@ typedef struct {
     uint32_t revision; ///< 产品worker拥有的管理页呈现代次 / Management presentation revision owned by product worker
     void *display_queue,*display_done;pn_status_t display_result; ///< IDF同步对象 / IDF synchronization objects
     void *input_task_handle,*display_task_handle; ///< 稳定任务句柄，仅诊断读取水位 / Stable task handles used only for diagnostic watermarks
+    void *product_task; ///< 输入到达时通知的产品任务 / Product task notified when input arrives
+    bool touch_wake; ///< 触摸INT中断可用 / Touch INT interrupt available
 } pn_device_async_t;
 /// 在VCOM门与BSP初始化成功后启动端口；失败降级不启动半初始化硬件。/ Start after VCOM/BSP gates; failures degrade without using partially initialized hardware.
 void pn_device_async_start(pn_device_async_t *port,read_pico_handle_t *hardware,pn_reader_present_fn panel,void (*idle)(uint64_t),void (*off)(void));
@@ -33,5 +35,9 @@ void pn_device_async_view(pn_device_async_t *port,uint32_t view,bool body,uint8_
 pn_status_t pn_device_async_take(pn_device_async_t *port,pn_device_input_event_t *event);
 /// 等输入owner暂停后才进入睡眠/PMU边界；超时不睡眠。/ Wait for input owner pause before sleep/PMU handoff; never sleep on timeout.
 bool pn_device_async_pause(pn_device_async_t *port,bool paused);
+/// 由产品任务调用一次，之后输入投递会通知它。/ Called once by the product task so input submissions notify it.
+void pn_device_async_bind_product(pn_device_async_t *port);
+/// 产品任务空闲等待：输入到达立即返回，否则最多timeout_ms。/ Product idle wait: returns at once when input arrives, otherwise after at most timeout_ms.
+void pn_device_async_wait(pn_device_async_t *port,unsigned timeout_ms);
 /// 显示owner断轨屏障。/ Display-owner rail-off barrier.
 bool pn_device_async_off(pn_device_async_t *port);

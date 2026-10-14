@@ -21,4 +21,12 @@ config PN_POWER_MIN_MHZ
     default 80
     help
         Keep at least 80 MHz so the CPU stays on the PLL and MSPI 120 MHz timing is not switched.
+config PN_POWER_LIGHT_SLEEP
+    bool "Automatic light sleep when idle"
+    depends on PN_POWER_DFS && FREERTOS_USE_TICKLESS_IDLE
+    default y
+    help
+        Let the tickless idle task enter light sleep when no owner holds a lock. Work, panel scans,
+        powered panel rails, wireless sessions and SD/I2C transactions keep the chip awake.
+        Idle touch input is sampled by a 30 ms timer, so no level-triggered GPIO wake is needed.
 endmenu

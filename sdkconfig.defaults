@@ -49,3 +49,7 @@ CONFIG_LITTLEFS_OBJ_NAME_LEN=96
 # 动态调频：空闲降到80MHz（仍为PLL时钟，不切MSPI低速），工作时由owner锁保持最高频；自动浅睡未启用。
 # DFS: idle drops to 80 MHz (still PLL, no MSPI low-speed switch); owners hold max while working; automatic light sleep stays off.
 CONFIG_PM_ENABLE=y
+# 自动浅睡：tickless空闲在无锁时进入浅睡；插电脑USB时保持唤醒，日志与网页刷写可用。
+# Automatic light sleep: tickless idle sleeps when no lock is held; stay awake while a USB host is connected for logs and web flashing.
+CONFIG_FREERTOS_USE_TICKLESS_IDLE=y
+CONFIG_USJ_NO_AUTO_LS_ON_CONNECTION=y
