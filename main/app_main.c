@@ -953,7 +953,7 @@ static void handle_key(int key,pn_key_event_t event){
             else if(shelf_page->count){int next=shelf_focus<0?0:shelf_focus+(key==PN_KEY_3?1:-1);if(next>=0 && next<(int)shelf_page->count){shelf_focus=next;(void)draw_shelf(PN_REFRESH_GL16);}}
             return;
         }
-        // KEY2：先把焦点放到当前页第一项，再按一次打开焦点项（docs/UI_UX.md第7节）；设置从底栏进入。/ KEY2: first put focus on the page's first entry, press again to open it (docs/UI_UX.md section 7); Settings is reached from the bottom bar.
+        // KEY2：先把焦点放到当前页第一项，再按一次打开焦点项（docs/ARCHITECTURE.md“三键与步进输入”）；设置从底栏进入。/ KEY2: first focus the page's first entry, press again to open it (docs/ARCHITECTURE.md, key and stepper input); Settings is reached from the bottom bar.
         if(key==PN_KEY_2){
             if(!shelf_page->count)return;
             if(shelf_focus<0){shelf_focus=0;if(draw_shelf(PN_REFRESH_GL16)!=PN_OK)ESP_LOGW(TAG,"Shelf focus redraw failed");}
@@ -1164,8 +1164,8 @@ static void device_task(void *arg){
         if(fonts.active && !fonts.presented && !locked && now-last_ui_retry>=1000){last_ui_retry=now;(void)pn_font_ui_present(&fonts,present,NULL);}
         if(hardware.touch_ready && (!async_port.input_active || (available==PN_OK && queued.kind==PN_DASYNC_TOUCH))){cst836u_touch_t touch={0};esp_err_t read;uint64_t touch_at=now_ms();if(async_port.input_active){touch.count=queued.count;touch.x=queued.x;touch.y=queued.y;read=queued.valid?ESP_OK:ESP_FAIL;touch_at=queued.at;}else read=cst836u_read(hardware.touch,&touch);pn_reader_action_t action;touch_held=read==ESP_OK && touch.count>0;if(touch_held)last_input=now_ms();
             int hit=active_hit(touch.x,touch.y),selection=-1;
-            // 步进键长按：按住满600 ms后每180 ms再走一档；松手时不再多走一档（docs/UI_UX.md第5节）。
-            // Stepper hold: after 600 ms held, step again every 180 ms; releasing does not add one more step (docs/UI_UX.md section 5).
+            // 步进键长按：按住满600 ms后每180 ms再走一档；松手时不再多走一档（docs/ARCHITECTURE.md“三键与步进输入”）。
+            // Stepper hold: after 600 ms held, step again every 180 ms; releasing does not add another step (docs/ARCHITECTURE.md, key and stepper input).
             {bool repeatable=(styles.active && hit>=PN_SUI_FIELD && hit<PN_SUI_FIELD+PN_SUI_FIELDS*2) || (jump_ui.active && hit>=PN_JUI_STEP && hit<PN_JUI_STEP+4);
              // 书架封面长按600 ms：打开书籍操作面板（只触发一次，松手不再打开书）。/ A 600 ms long press on a shelf cover opens the book actions sheet (once; releasing does not open the book).
              bool long_press=shelf_mode && shelf_page && !actions_mode && hit>=0 && hit<(int)shelf_page->count && hit<PN_CATALOG_PAGE_MAX;

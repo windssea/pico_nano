@@ -27,3 +27,6 @@ releases/** -text
 
 # 网页安装器内的固定第三方包按字节保存。/ Keep the pinned third-party installer bundle byte-exact.
 installer/vendor/** -text
+
+# 归档浏览副本的摘要按字节保存，原始ZIP也不做换行转换。/ Keep archive digest bytes and original ZIP snapshots without line-ending conversion.
+docs/archive/** -text

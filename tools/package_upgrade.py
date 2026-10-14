@@ -4,10 +4,24 @@ import datetime
 import hashlib
 import json
 import pathlib
+import re
 import subprocess
 import zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+
+
+def installation_readme(commit):
+    """独立升级包将仓库相对链接指向固定源码。 / Point repository links in the portable upgrade README to pinned source."""
+    source = ROOT / "docs/INSTALLATION.md"
+    def replace(match):
+        link = match.group(1)
+        if "://" in link or link.startswith("#"):
+            return match.group(0)
+        path, separator, anchor = link.partition("#")
+        relative = (source.parent / path).resolve().relative_to(ROOT).as_posix()
+        return f"](https://github.com/windssea/pico_nano/blob/{commit}/{relative}{separator}{anchor})"
+    return re.sub(r"\]\(([^)]+)\)", replace, source.read_text(encoding="utf-8")).encode("utf-8")
 
 
 def main():
@@ -30,7 +44,7 @@ def main():
     folder.mkdir(exist_ok=False)
     payload = {"pico_nano.bin": application, "expected-partition-table.bin": table,
                "flash_upgrade.py": (ROOT / "tools/flash_upgrade.py").read_text(encoding="utf-8").encode(),
-               "README.md": (ROOT / "docs/FLASH_ON_ANOTHER_PC.md").read_text(encoding="utf-8").encode(),
+               "README.md": installation_readme(commit),
                "requirements.txt": b"esptool==5.3.1\n"}
     metadata = {"brand": "PicoNano", "source_commit": commit, "version": version, "idf": "v6.1", "target": "esp32s3",
                 "board": "RDP-G01-W", "built_at": datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))).isoformat(),

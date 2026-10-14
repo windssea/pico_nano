@@ -1,0 +1,610 @@
+{
+  "date": "2026-10-14",
+  "source_head": "9f089f96c1c780f8833fc7fdb0e7c6785ffe9a39",
+  "scope": "Tracked project Markdown plus repository README; captures working-tree content, including pending changes. Private handoff/logs and vendor/license/release documents excluded.",
+  "original_zip_sha256": "b310872eb7e246dc8116d3d92676a83881d89b76adb28838959cccaf8ca79e51",
+  "files": [
+    {
+      "original": "README.md",
+      "archive": "docs/archive/2026-10-14/REPOSITORY_README.md",
+      "title": "PicoNano 阅读固件",
+      "original_sha256": "daf2d829d98dfa91d9938d34cd33063a36471a6f5db31e450eb8d078ebaae68c",
+      "archive_sha256": "e19c4e44acacfb8ebebf47d311af44f00b7fae351e3f69a0064d96002383fbf3"
+    },
+    {
+      "original": "docs/ARCHITECTURE.md",
+      "archive": "docs/archive/2026-10-14/ARCHITECTURE.md",
+      "title": "技术架构与维护契约",
+      "original_sha256": "dbff2eca8f570f7461373624d4a21a3b5221a1c4f4a18610b83b78717f53d6ad",
+      "archive_sha256": "b4641c234c3c65803752b97a45ec5da3621f35f0cbc95ea03c56df9c004fa764"
+    },
+    {
+      "original": "docs/ASYNC_READING.md",
+      "archive": "docs/archive/2026-10-14/ASYNC_READING.md",
+      "title": "异步输入、显示回执与邻页预排",
+      "original_sha256": "f0b17eb475e4d8c28ca895c385385a51b69c8c19e3f90bf44a2bc098e4628378",
+      "archive_sha256": "d3414bfd26dc9eda20e03ee20121141c32e95499a150638e597997c2b9bbe1a6"
+    },
+    {
+      "original": "docs/BOOKMARK_UI.md",
+      "archive": "docs/archive/2026-10-14/BOOKMARK_UI.md",
+      "title": "TXT书签界面与编辑",
+      "original_sha256": "3e59d435a6c05810dc0482327f37f9d92c98253ff70f75b08b23a061683e2021",
+      "archive_sha256": "e90132e4549f6c150ef9aaf7bde736efc98172a60d34983fc82ebaf767f8a392"
+    },
+    {
+      "original": "docs/BRANDING.md",
+      "archive": "docs/archive/2026-10-14/BRANDING.md",
+      "title": "PicoNano 品牌与默认图",
+      "original_sha256": "bed966c078448cb660b0a258197082262a21eeef9413972934aad7ea3dc76e38",
+      "archive_sha256": "d28e43e1a2de16c5f741c0b26966ae5e9ec8c772e9169511e05006092f5bf618"
+    },
+    {
+      "original": "docs/BUILDING.md",
+      "archive": "docs/archive/2026-10-14/BUILDING.md",
+      "title": "构建与运行入口",
+      "original_sha256": "bafdb4a637acc32a250e8d4e27c3dba1bf89f7d42cd8a7e5729b326a5c8ab531",
+      "archive_sha256": "f50e660d1d2f76e9d553bef8e74ecae36fd20315e61e60ed03551611606768e4"
+    },
+    {
+      "original": "docs/CATALOG.md",
+      "archive": "docs/archive/2026-10-14/CATALOG.md",
+      "title": "文件书架与选择阅读",
+      "original_sha256": "ebcdd0109db76a18c779d03e2953feb68f29de7c01ee876f18ab29ab55ecf1f5",
+      "archive_sha256": "6815e61913f899a594d89b14ec3945b7b6ac5254abf97da5cf3eb3cf5b000131"
+    },
+    {
+      "original": "docs/CHANGELOG.md",
+      "archive": "docs/archive/2026-10-14/CHANGELOG.md",
+      "title": "功能变化",
+      "original_sha256": "96cb625d62879e856cf549e6b78c65b6c1d5e8a83f8e1287d2d8ce2d81be1753",
+      "archive_sha256": "144ac47eccf456c71b8c578421d44840a57540483613557ef22e6082522eb03a"
+    },
+    {
+      "original": "docs/COVERS.md",
+      "archive": "docs/archive/2026-10-14/COVERS.md",
+      "title": "书架封面与缓存",
+      "original_sha256": "e3a4925f00de2a168122c7a29bd5450068407a4cf2dc4b5ec0ba510c804e18c4",
+      "archive_sha256": "bf2f2c7cefe4be56bfaf4f2094d451bebc7ea3abacea38eb289804c094c30271"
+    },
+    {
+      "original": "docs/DATE_TIME.md",
+      "archive": "docs/archive/2026-10-14/DATE_TIME.md",
+      "title": "日期与网络对时",
+      "original_sha256": "f6ce089380626e6ba0fe8cd8ebd9e934d4721225506a1fb9944f332ade5924fd",
+      "archive_sha256": "10e1600cc4beb5fee8e247881eb87dc616d0258fabf08c9de834ee83916e1246"
+    },
+    {
+      "original": "docs/DEPENDENCIES.md",
+      "archive": "docs/archive/2026-10-14/DEPENDENCIES.md",
+      "title": "依赖与源码来源",
+      "original_sha256": "679b8b660ceebdc16e02b0fa0684f6c29bb9af868ca52da7fff545edac7a27e6",
+      "archive_sha256": "8c129127af7251fb0882a4af37789801090a83a231a42e482299e026d8f98e17"
+    },
+    {
+      "original": "docs/DESIGN.md",
+      "archive": "docs/archive/2026-10-14/DESIGN.md",
+      "title": "PicoNano 独立阅读固件总体设计",
+      "original_sha256": "d618d83c1100c75002054984aa6bea90468064fad0fc28b944f579456223a31b",
+      "archive_sha256": "9c1d2d0d2761a48e0db14eb51bba26d2eac64e28a69ee27a0e55b04f78c43b9a"
+    },
+    {
+      "original": "docs/DEVELOPMENT_AND_TESTING.md",
+      "archive": "docs/archive/2026-10-14/DEVELOPMENT_AND_TESTING.md",
+      "title": "开发环境与测试说明",
+      "original_sha256": "a1b1b4adee145650e8421555db03bf92421a24331b1ff5b8e588271b26c8dd4c",
+      "archive_sha256": "df355dc5df184c0ce4edfe40637a5429766db9e84277201e004cf5fdbc7ee2d1"
+    },
+    {
+      "original": "docs/DEVELOPMENT_PLAN.md",
+      "archive": "docs/archive/2026-10-14/DEVELOPMENT_PLAN.md",
+      "title": "PicoNano 阅读固件开发计划",
+      "original_sha256": "74e277b5fcdd6fa0069d2c9edefa57226277e9d00d8e1294597dab5718c782f2",
+      "archive_sha256": "5ffa7dd4a11227cf01f0dbbdee2cb06653411b37a6a867a5161279b5cfc67d77"
+    },
+    {
+      "original": "docs/DEVICE_PORT.md",
+      "archive": "docs/archive/2026-10-14/DEVICE_PORT.md",
+      "title": "设备TXT入口与内部存储接入",
+      "original_sha256": "bbef474e9ac2fcc6696fa5533f06a6ac707ec323ec8d67ba0ba21732598cb27e",
+      "archive_sha256": "65c78582d7baf7dd508f968add6c312e6451b015a50c4a9e853b10166602334e"
+    },
+    {
+      "original": "docs/DEVICE_TRANSFER_ENTRY.md",
+      "archive": "docs/archive/2026-10-14/DEVICE_TRANSFER_ENTRY.md",
+      "title": "设备热点传输入口",
+      "original_sha256": "2a3acb91a56eb3f658d461a2818eb4ffcb14bcbf88e732663e375e78902c2c44",
+      "archive_sha256": "38bd390cfd88e9fdce34880bf4f8fa043a00821b7f597563f6644b1eeadf679e"
+    },
+    {
+      "original": "docs/DEVICE_TRANSFER_HTTP.md",
+      "archive": "docs/archive/2026-10-14/DEVICE_TRANSFER_HTTP.md",
+      "title": "ESP-IDF设备HTTP上传适配",
+      "original_sha256": "6194308263acaa94b8cfc307efb39e69410014afe08eff35334a6c14ef4cc4f2",
+      "archive_sha256": "0cee208378b0a89f6888410811fba880e34077196ead1ded9e0c74b9625e92c4"
+    },
+    {
+      "original": "docs/DEVICE_TRANSFER_STORAGE.md",
+      "archive": "docs/archive/2026-10-14/DEVICE_TRANSFER_STORAGE.md",
+      "title": "设备上传存储适配",
+      "original_sha256": "a73fe3f7c4627afd1bd7c32f090bd2d28aadc67c1d168a365b384a79081f536e",
+      "archive_sha256": "b52b7313451756348422a0f02675a419486da7db72a1c958516fa1ef06629305"
+    },
+    {
+      "original": "docs/DEVICE_WIFI.md",
+      "archive": "docs/archive/2026-10-14/DEVICE_WIFI.md",
+      "title": "设备WiFi会话生命周期",
+      "original_sha256": "7677f0b57065269efdb2db6afbf7599720e271dd3f3dcf5e09083e3e17f867e9",
+      "archive_sha256": "9ca76cd17dad158087d85f1ab6d0613c87765245ea3d998e701108b8aa743a89"
+    },
+    {
+      "original": "docs/EPUB_APP.md",
+      "archive": "docs/archive/2026-10-14/EPUB_APP.md",
+      "title": "原生EPUB应用与PC窗口",
+      "original_sha256": "0f667283f94dac6346086f4a5e72ac5942a98d3ea6e155182709a4f6daee80f5",
+      "archive_sha256": "e380a186ed2b812860676785f46d826385f503a890bf4f6e7da7ed66e69447b4"
+    },
+    {
+      "original": "docs/EPUB_BODY.md",
+      "archive": "docs/archive/2026-10-14/EPUB_BODY.md",
+      "title": "XHTML正文事件与语义位置",
+      "original_sha256": "bc3ac4cbcb573077719b3942806c9fd5bc419c340b5edb7509cb3393c00eb48e",
+      "archive_sha256": "c6aaffa3af4e032ebe9c271a115ff3f84d8bfc7c47e9cd58f6867c3f68765330"
+    },
+    {
+      "original": "docs/EPUB_BOOKMARKS.md",
+      "archive": "docs/archive/2026-10-14/EPUB_BOOKMARKS.md",
+      "title": "EPUB语义书签",
+      "original_sha256": "bca8f21e345adb71a55e3c9a8c3d7d2fa79140eca6adbfb83bb8eafa5ff08dfc",
+      "archive_sha256": "769fac1d8f14d3605b944bacaf05838108a87ec93a7e42ebe553b99976b01b54"
+    },
+    {
+      "original": "docs/EPUB_CONTAINER.md",
+      "archive": "docs/archive/2026-10-14/EPUB_CONTAINER.md",
+      "title": "EPUB容器与本地资源层",
+      "original_sha256": "6a0f97a07edf57457283564ff46b74a6e19d9e1720cc16be7bc7b23ed089b699",
+      "archive_sha256": "a92b6031969e6b2552c1a7fd199b2e5193023e30181c130fbb137d0d34f49283"
+    },
+    {
+      "original": "docs/EPUB_NAVIGATION.md",
+      "archive": "docs/archive/2026-10-14/EPUB_NAVIGATION.md",
+      "title": "EPUB目录模型",
+      "original_sha256": "c42c0be79f5a03d77c1b584e914624c2b221184ce41e1f06c7a8a979077aa5cd",
+      "archive_sha256": "b15dbd91fa282d7f8f4b58f584e1e0215fd0d9f77aa68d294253904aab9ee11b"
+    },
+    {
+      "original": "docs/EPUB_PAGINATION.md",
+      "archive": "docs/archive/2026-10-14/EPUB_PAGINATION.md",
+      "title": "EPUB页节点与真实捕获",
+      "original_sha256": "683bc29e63cfe1358a868689c4066b3991f232186b9ff3d6dc00ed06a9c3bdc2",
+      "archive_sha256": "05ddbbb6d505e25884d408c026adbe0fdb77a5110fb97f56d0de8391be9ccfec"
+    },
+    {
+      "original": "docs/EPUB_PERSISTENCE.md",
+      "archive": "docs/archive/2026-10-14/EPUB_PERSISTENCE.md",
+      "title": "EPUB语义位置持久化与保存屏障",
+      "original_sha256": "9cca10e245a3cc2f880772dc96424a7333650bc4fbf48e2f5d53ebef1167294d",
+      "archive_sha256": "ae0ebbf128ce1bb9b355d6f46a6eb1f859946a8b31c7272d3d4e05a17419e908"
+    },
+    {
+      "original": "docs/EPUB_PUBLICATION.md",
+      "archive": "docs/archive/2026-10-14/EPUB_PUBLICATION.md",
+      "title": "EPUB出版物结构",
+      "original_sha256": "d4089599575d2ab2192d3c8867201095dfee757a4c52c9a4b76e7ffc32686d11",
+      "archive_sha256": "e65887d4d15f860374ba50da8480d998889c7be9dd094a892e4681dc621bedab"
+    },
+    {
+      "original": "docs/EPUB_ROUTING.md",
+      "archive": "docs/archive/2026-10-14/EPUB_ROUTING.md",
+      "title": "TXT/EPUB混合书架、最近阅读与设备入口",
+      "original_sha256": "5d4739cd3f2be01ce8b737d743736a56fd0e956e5aa05c91a43037e5a08e4a99",
+      "archive_sha256": "60c14234fbc6f2c5e580a147398022539c8ac46209c765fd6f1df5096dd81ce3"
+    },
+    {
+      "original": "docs/EPUB_SESSION.md",
+      "archive": "docs/archive/2026-10-14/EPUB_SESSION.md",
+      "title": "原生EPUB导航会话与显示回执",
+      "original_sha256": "b573ce2262149f2f9b32422a0f92d25bfb030de85763e1d8e167541a33c9ce5b",
+      "archive_sha256": "27356bf58c2559907500f0e341bbda5120091a609e288910f18278b4913d5c3d"
+    },
+    {
+      "original": "docs/EPUB_STYLES.md",
+      "archive": "docs/archive/2026-10-14/EPUB_STYLES.md",
+      "title": "EPUB作者样式与图片版式",
+      "original_sha256": "b5e37ff1c62e9d2052198dbdd6f93afd86e30504c9e5c9e319d233021b0ddab5",
+      "archive_sha256": "9b3d06b74b5866ee69adb9595049ae0b5961a13a74ea65f5f6fe193f3b9bfb4e"
+    },
+    {
+      "original": "docs/EPUB_TOC_UI.md",
+      "archive": "docs/archive/2026-10-14/EPUB_TOC_UI.md",
+      "title": "中文EPUB目录界面与跳转",
+      "original_sha256": "e3c18e199f89d0d597f751f023631a314adee9fda948238898969042e5394974",
+      "archive_sha256": "4bb14829e44dd864f7c43ccb701f28266963659e3218d0d3bb967cd65217f6bc"
+    },
+    {
+      "original": "docs/FLASH_ON_ANOTHER_PC.md",
+      "archive": "docs/archive/2026-10-14/FLASH_ON_ANOTHER_PC.md",
+      "title": "在另一台电脑升级当前阅读器",
+      "original_sha256": "6ad8521704aa310f19c7110a6e93e1277c5720099de018cd52da81076b06694f",
+      "archive_sha256": "f2f11f3d9616f018d95925d155bfea51ea290391095c3101c25f7cd70f8d3be9"
+    },
+    {
+      "original": "docs/FONTS_AND_WALLPAPERS.md",
+      "archive": "docs/archive/2026-10-14/FONTS_AND_WALLPAPERS.md",
+      "title": "字体上传与锁屏壁纸",
+      "original_sha256": "52b02d626c28ef2e9332bc7740f333f47cc0f88715c539933effb9c4cc74cca9",
+      "archive_sha256": "12a7159686b6232ebfa8afec2605c618271d16d61447b894e86fef169ad4c937"
+    },
+    {
+      "original": "docs/FONT_FALLBACK.md",
+      "archive": "docs/archive/2026-10-14/FONT_FALLBACK.md",
+      "title": "正文字体回退",
+      "original_sha256": "ab71c574d792098749efc410c22684db3dd385d40cc42d6e439bb409aa00d28b",
+      "archive_sha256": "d0cbee468a67ce86f3246cc077bd57e2a8700a4970acf6995c66f32d402e1f84"
+    },
+    {
+      "original": "docs/FONT_INSPECTION.md",
+      "archive": "docs/archive/2026-10-14/FONT_INSPECTION.md",
+      "title": "字体目录、信息与样例预览",
+      "original_sha256": "b27e00583763ba4cdf4ce65e02e0736f4f7cac245c8ea3ce76ad4871af2d4bf0",
+      "archive_sha256": "639e5798e3d34d249b58123dc567dbb73322e2b3a082e442a26e6f555b9132fd"
+    },
+    {
+      "original": "docs/FONT_MANAGEMENT.md",
+      "archive": "docs/archive/2026-10-14/FONT_MANAGEMENT.md",
+      "title": "字体管理与缺失回退",
+      "original_sha256": "d317383c58e41145db37dab4f1fc5cf77a1a932f30c2a5be98e3ea712b1b8eed",
+      "archive_sha256": "798b6154378dde728d61ecee1c71dc5162f5ed29befb2371e83c67e361da9b64"
+    },
+    {
+      "original": "docs/FONT_PICKER_UI.md",
+      "archive": "docs/archive/2026-10-14/FONT_PICKER_UI.md",
+      "title": "阅读字体选择",
+      "original_sha256": "8f77e458c0ba6d2336012193960047f8efd36db602f483a040dedccc124bb8b3",
+      "archive_sha256": "2fecff1fe862580043e73cb62138a3affd34efabc5f9d0f0d354729df8be55a9"
+    },
+    {
+      "original": "docs/FONT_PORT.md",
+      "archive": "docs/archive/2026-10-14/FONT_PORT.md",
+      "title": "字体引擎与真实TXT捕获",
+      "original_sha256": "9bae48a43a342e4ee529b21f940636e291b112a5a32cbe8db500c8012e39baf0",
+      "archive_sha256": "c0d19c5fdb25bdeff2af73dd8a3046b8d81b6e76f2affc02b52bfe3d92319d97"
+    },
+    {
+      "original": "docs/FONT_PREFERENCES.md",
+      "archive": "docs/archive/2026-10-14/FONT_PREFERENCES.md",
+      "title": "全局与逐书字体选择记录",
+      "original_sha256": "36f323bea5690c84998b63f66a261ddaebb6a54ea787ff6fa7a984225b5b1c59",
+      "archive_sha256": "acb85e9a3cf2fe5aa53c2872caef024a63d61e5250d843ad1560acf37b4c3559"
+    },
+    {
+      "original": "docs/FONT_SWITCHING.md",
+      "archive": "docs/archive/2026-10-14/FONT_SWITCHING.md",
+      "title": "阅读中的字体预览与逐书应用",
+      "original_sha256": "48d2cf428cb9e5a94926d7c5e8f8bf3a7807c2c7800a0c3150ccb5d31e3cb1ae",
+      "archive_sha256": "a4afe9c6820d89b0b619e924b4fff588d3759e273ace7606c5237bf0f2abcf21"
+    },
+    {
+      "original": "docs/FORMATS.md",
+      "archive": "docs/archive/2026-10-14/FORMATS.md",
+      "title": "格式、元数据与封面设计",
+      "original_sha256": "06b924d8dcb61d676ae890ef1ac30fe919e0ee3996757e538cca40031c5db2e4",
+      "archive_sha256": "4afc0d57e772462ccced25d36c4852ae509b95e9e0bed713bfc4bcbf5a3bd608"
+    },
+    {
+      "original": "docs/HARDWARE.md",
+      "archive": "docs/archive/2026-10-14/HARDWARE.md",
+      "title": "PicoNano 硬件基线",
+      "original_sha256": "f2d89b5332ccc8d0697e122542397063e120e4d5302656f145b8a6be7f88c838",
+      "archive_sha256": "390d9ba86a3b89c73780cb3094310b44254a9c84caf96e0c271566c81776881f"
+    },
+    {
+      "original": "docs/HARDWARE_BRINGUP.md",
+      "archive": "docs/archive/2026-10-14/HARDWARE_BRINGUP.md",
+      "title": "首次上板与恢复准备",
+      "original_sha256": "3e002f28fc1b48b140fd10d645cf257685ea5a5cb1f14be5e7d429ea3fd17f91",
+      "archive_sha256": "43a1e31f530d1e9a3666253a506bd7fd0de22524970350a5f8e338d6dc1ca079"
+    },
+    {
+      "original": "docs/IMAGE_RESOURCES.md",
+      "archive": "docs/archive/2026-10-14/IMAGE_RESOURCES.md",
+      "title": "出版物PNG/JPEG图片资源",
+      "original_sha256": "886c073c396949422ad3a108b93ed1c100e6646e126fc0b9e414deb9944406d4",
+      "archive_sha256": "4882511829136c26ca6485c94c524f68b9e4e8135c4ea207832f6615dd598778"
+    },
+    {
+      "original": "docs/JPEG_RENDERING.md",
+      "archive": "docs/archive/2026-10-14/JPEG_RENDERING.md",
+      "title": "JPEG原生解码层",
+      "original_sha256": "d41a717cdbf52461c7fc45f417c36602fb0540c68c5b659a09e86d738ed6671e",
+      "archive_sha256": "8dffd2051855a32b503ef47debc51a2013b58b8d3005af38595590cf9e698d86"
+    },
+    {
+      "original": "docs/LAN_TRANSFER.md",
+      "archive": "docs/archive/2026-10-14/LAN_TRANSFER.md",
+      "title": "家庭网络与局域网传书",
+      "original_sha256": "45266fb1fcac1712fadfa962f92d4f7ae5a24eb7203a51d7826c2ecdf94885e1",
+      "archive_sha256": "37d65324c3e0d1665b04a9e35d19bdd15538c5f9989c47118d578db84770eab6"
+    },
+    {
+      "original": "docs/LOCALSEND.md",
+      "archive": "docs/archive/2026-10-14/LOCALSEND.md",
+      "title": "LocalSend 接收模式",
+      "original_sha256": "c1e0d6d449925233923a96a80401e5e4b318da80837567da09f989f114bbd5b3",
+      "archive_sha256": "7a402eefdf3569d64937985045abeaed2f20cfb249799514496348c203481a1c"
+    },
+    {
+      "original": "docs/LOCALSEND_PC.md",
+      "archive": "docs/archive/2026-10-14/LOCALSEND_PC.md",
+      "title": "LocalSend PC HTTP 开发入口",
+      "original_sha256": "3828851c2ee3277ff5ac851c6514f609929f74cf662072f3cf919a72060971df",
+      "archive_sha256": "1441641a76fc4a407e8698d0a645821cb7ab7c8ee4b8481e4d4d0110271db18e"
+    },
+    {
+      "original": "docs/LOCALSEND_SESSION.md",
+      "archive": "docs/archive/2026-10-14/LOCALSEND_SESSION.md",
+      "title": "LocalSend 元数据与会话核心",
+      "original_sha256": "8fc2a36f82d26a85625300ff5d13cf849f8b841483b12b946e17f046a55f7b5d",
+      "archive_sha256": "57b5dddea5b7acb2f633dae3034756e45fca515b7357ed4485bbc5953088c09d"
+    },
+    {
+      "original": "docs/LOCALSEND_UI.md",
+      "archive": "docs/archive/2026-10-14/LOCALSEND_UI.md",
+      "title": "附近传书确认与状态界面",
+      "original_sha256": "1f6ea5999aee8d4092c2ce17fda70da17efe00335b2df705fba10c8bc3bd8340",
+      "archive_sha256": "29f1b4d111751154d7cde494a6e1af2e1b612c262fa77c44d79379ff06ff7c5f"
+    },
+    {
+      "original": "docs/LOCK_SCREEN.md",
+      "archive": "docs/archive/2026-10-14/LOCK_SCREEN.md",
+      "title": "锁屏与壁纸缓存",
+      "original_sha256": "0f5de2fe230aaf774afe95cea9eee260569c7c6282b13f1c80c9c3c3a52fb177",
+      "archive_sha256": "28957658799809bfac1a286bb48d90a239cdbfc946539e48435b259e937a4a62"
+    },
+    {
+      "original": "docs/MEMORY_AND_RESPONSE.md",
+      "archive": "docs/archive/2026-10-14/MEMORY_AND_RESPONSE.md",
+      "title": "内存、缓存、索引与响应优化",
+      "original_sha256": "f1d49e0193e8a772a66f014ffb78ad4c7cacdd10647226bc28db4885cde0ea78",
+      "archive_sha256": "f0c9e416d3775586df905be7433d9ae8ce8409bfef40e10cae7adade413f4d76"
+    },
+    {
+      "original": "docs/PAGE_TURN.md",
+      "archive": "docs/archive/2026-10-14/PAGE_TURN.md",
+      "title": "翻页手势、屏下三键与设置页",
+      "original_sha256": "fb3a10187110f6defae11dc96f6ad8feb97f06cf073a11fc9c0d1dc3f29dd532",
+      "archive_sha256": "3c4ab060ecaccdef1fc1043b011d7c219362bb5a66ff7351ebb1b23cc0821821"
+    },
+    {
+      "original": "docs/PERSISTENCE.md",
+      "archive": "docs/archive/2026-10-14/PERSISTENCE.md",
+      "title": "内容身份与持久位置维护契约",
+      "original_sha256": "cbc7f20f3753e5ed3c9d2145e1ec99d90599c87c7368b004919bde42568f537c",
+      "archive_sha256": "3370871213b6917d48ddefe644e7e4a9b79b59c2d2dc705f4e1d6c33d6a93d76"
+    },
+    {
+      "original": "docs/PNG_RENDERING.md",
+      "archive": "docs/archive/2026-10-14/PNG_RENDERING.md",
+      "title": "原生PNG与灰阶图片",
+      "original_sha256": "d44c848fb3789b552a39ba1d99c7f58934cc223364554310a34bb81b38825a7e",
+      "archive_sha256": "c0365480ba4adfb899a597f4e0f5ceafa7c14b9a477541938eec0b80e29945c7"
+    },
+    {
+      "original": "docs/POWER.md",
+      "archive": "docs/archive/2026-10-14/POWER.md",
+      "title": "锁屏浅睡与自动锁屏",
+      "original_sha256": "b6c3f37e462709b21c4d08d6c4c31c3c675e8f67404b9777ae93ec8b806ec1c3",
+      "archive_sha256": "2b204694728498ca4dabac06396ed0ae0dc5ca8368b54b15a3fd4c00aba8c56e"
+    },
+    {
+      "original": "docs/PRODUCT_REQUIREMENTS.md",
+      "archive": "docs/archive/2026-10-14/PRODUCT_REQUIREMENTS.md",
+      "title": "产品需求与用户流程",
+      "original_sha256": "abb34dff3417377d2be803f7c6c821bfd24bf9e8040c4b38438d50f6f0b53898",
+      "archive_sha256": "94d34864f2822aa4a94757b88344f99caf8869ed3ed218bc204e0ba02ea5fb62"
+    },
+    {
+      "original": "docs/PROJECT_STATUS.md",
+      "archive": "docs/archive/2026-10-14/PROJECT_STATUS.md",
+      "title": "项目状态与待办",
+      "original_sha256": "b4af39505a70a45858fd9180c5df0a1c3d9d2ab5f716acd291fb106349853e20",
+      "archive_sha256": "f5dba6adef0c479714b06615ce50bee7f78cbf3736e79fececd6a1f65cb6656d"
+    },
+    {
+      "original": "docs/READER_SESSION.md",
+      "archive": "docs/archive/2026-10-14/READER_SESSION.md",
+      "title": "TXT阅读会话、PC交互与续读契约",
+      "original_sha256": "292e8926319b635c623cb3a23bc64f554e367a03f9c80dff3a4b199b450fab01",
+      "archive_sha256": "aaf2eefeed6d15e56323cecd8b872136051d0996cc7277d5d7e5c1f8cb166073"
+    },
+    {
+      "original": "docs/READING_HOME.md",
+      "archive": "docs/archive/2026-10-14/READING_HOME.md",
+      "title": "阅读首页与独立书库",
+      "original_sha256": "f09db2027406bf54dc890034feea3bbe2035c6a3beabf8bec29e25105c873361",
+      "archive_sha256": "32038c3ffabff43fbc1e365b1713f6acae1a6ec3675ecdf374cd71a08ba07014"
+    },
+    {
+      "original": "docs/READING_INDEX.md",
+      "archive": "docs/archive/2026-10-14/READING_INDEX.md",
+      "title": "阅读索引与浅睡热恢复",
+      "original_sha256": "15fa740caa1ef54c6ca027f704dd1688ee09d94fc6c52208076a736457755ced",
+      "archive_sha256": "8a3fb6d015b11980c69c474db4b226db7cdb56d6508f421ebd5609289feb7d16"
+    },
+    {
+      "original": "docs/READING_RESPONSE_PLAN.md",
+      "archive": "docs/archive/2026-10-14/READING_RESPONSE_PLAN.md",
+      "title": "阅读响应与清残影开发计划",
+      "original_sha256": "75bb3a8fe0ada398b9f027176c7fb0f743aa3f2e2ce1e7c7cf556e4ba998a477",
+      "archive_sha256": "c1024b2e92e420f5de2203507353b6937d425ea9db0fb0e3a5f7e9f58d753d99"
+    },
+    {
+      "original": "docs/READING_STATE.md",
+      "archive": "docs/archive/2026-10-14/READING_STATE.md",
+      "title": "上次位置、自动保存与书签维护契约",
+      "original_sha256": "8e643f39976f7b8fa2b4c42c25c271e9aaaf29bc797ed10a94df8108caa241b3",
+      "archive_sha256": "ea660052476f009802b204c7c4f9e12669f11ee1945bdfcd14f06a6dd47a2056"
+    },
+    {
+      "original": "docs/RECENT_READING.md",
+      "archive": "docs/archive/2026-10-14/RECENT_READING.md",
+      "title": "最近20本与继续阅读",
+      "original_sha256": "bf843378bd19b2bbb59f055495ebc1a699babca6260a2764d2b296d686a87dfb",
+      "archive_sha256": "0ca71de4557159335e89ac2f0f6297543d1a33abcd1745bc1bf4a3ca1173b4c8"
+    },
+    {
+      "original": "docs/RENDERING.md",
+      "archive": "docs/archive/2026-10-14/RENDERING.md",
+      "title": "字体、段落、分页与墨水屏刷新",
+      "original_sha256": "8d9238aafad6a4302440abbbd16ebacc8c42ce7a500073979328edc369f4d165",
+      "archive_sha256": "f7e63a7fa39079a49409d4f03ae7ee377dbe65f4a1be4194220e92dae8bebb06"
+    },
+    {
+      "original": "docs/SD_CARD_LAYOUT.md",
+      "archive": "docs/archive/2026-10-14/SD_CARD_LAYOUT.md",
+      "title": "存储卡目录与上传规则",
+      "original_sha256": "11f3818cd04419e215e355d9f6d5204062467ba6f99e6dcdb440b5c34919bea6",
+      "archive_sha256": "5861bf4df481da58625b8793881f64f06b5517b9aedafbd7d3087ff5bb7201dd"
+    },
+    {
+      "original": "docs/SHELF_APPEARANCE.md",
+      "archive": "docs/archive/2026-10-14/SHELF_APPEARANCE.md",
+      "title": "书架外观",
+      "original_sha256": "72d17eb8129f0fea207b7b5a3e81bfb0a611ad7d735ca16ee806dc5fba47cf67",
+      "archive_sha256": "a08d12c15894d55623d2514e70a238b6811204a593a8a3f1a026c351670cec49"
+    },
+    {
+      "original": "docs/SOURCES_AND_DECISIONS.md",
+      "archive": "docs/archive/2026-10-14/SOURCES_AND_DECISIONS.md",
+      "title": "依据、取舍与技术门",
+      "original_sha256": "c486333081fd4e2d032dbc6344d6a4709b08be416a3755a2921d4e7a284c77d7",
+      "archive_sha256": "bd1a59f65f2f1c102637c1b1704d9de811a4b95a9666db2c4813c43aca3d7357"
+    },
+    {
+      "original": "docs/STORAGE_AND_DISPLAY.md",
+      "archive": "docs/archive/2026-10-14/STORAGE_AND_DISPLAY.md",
+      "title": "存储租约与显示任务维护契约",
+      "original_sha256": "d9ab2d21e7f53175f47c4524629db57ca23799666bd3e9d34bd38330af61a3da",
+      "archive_sha256": "00f4d0606eb50d7c27f6670785cc7ff33baba558b4c0b93a645bc6ed038925d3"
+    },
+    {
+      "original": "docs/TEXT_CORE.md",
+      "archive": "docs/archive/2026-10-14/TEXT_CORE.md",
+      "title": "TXT解码、源映射与分页维护契约",
+      "original_sha256": "d5c433e9a1a6ce14cf68154b6cd5f4378baea4f04023e50055cdccbbe99b3b55",
+      "archive_sha256": "3c801ec53857422036e1b30fa3d1ca70ad68879f3b445597d478889e75b6d2ab"
+    },
+    {
+      "original": "docs/TRANSFER.md",
+      "archive": "docs/archive/2026-10-14/TRANSFER.md",
+      "title": "快速传书与导入方案",
+      "original_sha256": "a4820153150d8d0721f12c1dfbae0e78e39d5943753097da21a7277cf7833063",
+      "archive_sha256": "ea3a2f83c1394de878345419e34fee3f51fa28d2eaa49023009a65f798ce5bff"
+    },
+    {
+      "original": "docs/TRANSFER_QR.md",
+      "archive": "docs/archive/2026-10-14/TRANSFER_QR.md",
+      "title": "扫码传书",
+      "original_sha256": "8a078b57dae6b022c503e481a5c61379a40fdae7646b641ec22f9ae011e3fd3b",
+      "archive_sha256": "231e9bfd753604be9886b85fd37c3cf5b2d0be58c0a31e77c08da29a390cc3e6"
+    },
+    {
+      "original": "docs/TRANSFER_RECEIVE.md",
+      "archive": "docs/archive/2026-10-14/TRANSFER_RECEIVE.md",
+      "title": "整文件流式接收",
+      "original_sha256": "0d8604e16dad13d7d652f9f415090c7f696b50b7eeef93094f7aa8240ab30c1b",
+      "archive_sha256": "a90634ae69788631564e9bb0f234394178250b52dd00e4f11922525ac2df2a8f"
+    },
+    {
+      "original": "docs/TRANSFER_SERVICE.md",
+      "archive": "docs/archive/2026-10-14/TRANSFER_SERVICE.md",
+      "title": "同源串行传输服务",
+      "original_sha256": "7015751f85d2fc19768ffae85ac561c3ad119bca1a0f6bcabe570175e5369aae",
+      "archive_sha256": "3f836051f069523feb2d7e9581fee195edbc309195c76bb45362fb191d98210a"
+    },
+    {
+      "original": "docs/TRANSFER_WEB.md",
+      "archive": "docs/archive/2026-10-14/TRANSFER_WEB.md",
+      "title": "中文传输网页与PC服务",
+      "original_sha256": "1f3e39a899e81a28188b15f3872b521087f6da2031ea3b93ea6b15ecd25c4127",
+      "archive_sha256": "fa2745de1658dd8791baf1005f9ea5a3640a72ab4b74682e1dddadb553f2ee9d"
+    },
+    {
+      "original": "docs/TRANSFER_WORKER.md",
+      "archive": "docs/archive/2026-10-14/TRANSFER_WORKER.md",
+      "title": "有界传输工作任务",
+      "original_sha256": "7842c85729048c8771435c14d333838f7a7a287894247336d203054ab40388e6",
+      "archive_sha256": "4e3502e57a4508b4185529ed17d409b80272327902251118c0d497c1f81ceb18"
+    },
+    {
+      "original": "docs/TYPESETTING_SETTINGS.md",
+      "archive": "docs/archive/2026-10-14/TYPESETTING_SETTINGS.md",
+      "title": "逐书排版设置与草稿",
+      "original_sha256": "f729bb2fc39a79af31697502b4369fa5cfc9cd3ef5aba0ca10ee3ced9d4502f2",
+      "archive_sha256": "8ddf8bf36d53557f3ea843d1b9fe13ed6935cf5c3af80a16ff1e33ab903eb870"
+    },
+    {
+      "original": "docs/UI_KIT.md",
+      "archive": "docs/archive/2026-10-14/UI_KIT.md",
+      "title": "界面组件与图标",
+      "original_sha256": "344151b7b41eab8bb1316d572440b5f122c9e19965035ad8ca672fdec3cc67a6",
+      "archive_sha256": "41c6f978110cb58225c40da846fa9cdd6be28e11723bc82c802d67c822adc308"
+    },
+    {
+      "original": "docs/UI_SPEC_V2.md",
+      "archive": "docs/archive/2026-10-14/UI_SPEC_V2.md",
+      "title": "Pico Mono Glass V2 落地对照",
+      "original_sha256": "f46fdf7ecf0690d3ce5aa2172ce6a4e38d1f4fae76657c55b9e108993ffd68f8",
+      "archive_sha256": "51bf019470f68ba36b4eb1bb5ba8953df5902d25cbb4f3c85c55718e3df21350"
+    },
+    {
+      "original": "docs/UI_UX.md",
+      "archive": "docs/archive/2026-10-14/UI_UX.md",
+      "title": "界面与交互规范",
+      "original_sha256": "0181cb4d0906033fd57b58dcb6323d508e821262a577e436a902363e1acc8597",
+      "archive_sha256": "a932dc9d2016bd37630552748065854c51b3c0d2e7ff70b424017e96578971ee"
+    },
+    {
+      "original": "docs/UPLOAD_FILES.md",
+      "archive": "docs/archive/2026-10-14/UPLOAD_FILES.md",
+      "title": "上传文件安装与恢复",
+      "original_sha256": "8b4c4a6204608024a1cc233f6bc40c5a8231e6bd11e3f2340edb18be2c73aedb",
+      "archive_sha256": "f8098f79d2ad4902693ccd656b348997aed305097da454ec8efb3de4023f3b39"
+    },
+    {
+      "original": "docs/UPLOAD_TRANSACTION.md",
+      "archive": "docs/archive/2026-10-14/UPLOAD_TRANSACTION.md",
+      "title": "上传持久事务内核",
+      "original_sha256": "b6b82d02e3d4ebb426abdf164432a79b758e81ecaf8840ba8091a72cce86aa60",
+      "archive_sha256": "63a6008c11c2bfcda5c4473130a39effd3c70520198420d1ae4854b22a7e5bb7"
+    },
+    {
+      "original": "docs/V1_DEVELOPMENT_PLAN.md",
+      "archive": "docs/archive/2026-10-14/V1_DEVELOPMENT_PLAN.md",
+      "title": "PicoNano 1.0 开发执行计划",
+      "original_sha256": "e26d0efe4cca7c6b2c82d1707479a56b7346481e96481a137b36a6f97bd0798b",
+      "archive_sha256": "f55d997a8fbb56dc8277a484df21e1647b9977f4c7402101b0651ba91f26a08b"
+    },
+    {
+      "original": "docs/V1_PRODUCT_PLAN.md",
+      "archive": "docs/archive/2026-10-14/V1_PRODUCT_PLAN.md",
+      "title": "PicoNano 1.0 产品与验收计划",
+      "original_sha256": "547e85e0d1d7107be0e74c7a6814966ebecae079819bac3cf5df5a3200617fdc",
+      "archive_sha256": "8adc0e8d04a550be01506a4918e9a278ab643d8851f5380c2acc053b4cd62495"
+    },
+    {
+      "original": "docs/VALIDATION.md",
+      "archive": "docs/archive/2026-10-14/VALIDATION.md",
+      "title": "验证、性能与发布门槛",
+      "original_sha256": "5600e0194b72c239eabf0b206fd9e490a7cc3539a1d71b97beaa862378bd18ee",
+      "archive_sha256": "8d10f85ac2e5ab5a5c60262f0037f84f6f8b09a7bbf509fbe135c87d0ef9c2fb"
+    },
+    {
+      "original": "docs/WEB_INSTALLER.md",
+      "archive": "docs/archive/2026-10-14/WEB_INSTALLER.md",
+      "title": "网页安装器",
+      "original_sha256": "36a24110664e95d072e850fa523e6f3ea6c1a33e936b7c21e483c9452f861732",
+      "archive_sha256": "b02d80aabc7b7f28ab32ed3caaa3477786c327dc3d09db8cb121a5290bdcc18e"
+    }
+  ]
+}
