@@ -19,6 +19,9 @@ int main(void){
     for(int i=2;i>=0;i--){c[i].id=(unsigned)i;c[i].order=order;c[i].count=&count;c[i].data=pn_alloc(&p,500);assert(c[i].data);pn_cache_attach(&p,&c[i].owner,(pn_cache_class_t)i,&c[i],bytes,drop);}
     pn_cache_snapshot(&p);assert(p.cache_stats[0].bytes==pn_alloc_size(c[0].data));
     size_t original=p.used;p.fail_at=p.attempts+1;assert(!pn_alloc(&p,7000) && p.used==original && !count);p.fail_at=0;
+    // 可回收字节按类别掩码统计，借用中的owner不计。/ Reclaimable bytes follow the kind mask and exclude pinned owners.
+    {size_t all=pn_cache_reclaimable(&p,7u),one=pn_cache_reclaimable(&p,1u<<1);assert(all>one && one>0 && !pn_cache_reclaimable(&p,0));
+     pn_cache_pin(&c[1].owner);assert(!pn_cache_reclaimable(&p,1u<<1) && pn_cache_reclaimable(&p,7u)==all-one);pn_cache_unpin(&c[1].owner);}
     pn_cache_pin(&c[0].owner);assert(pn_cache_reclaim(&p,SIZE_MAX)>0 && count==2 && order[0]==1 && order[1]==2 && c[0].data);
     pn_cache_unpin(&c[0].owner);assert(pn_cache_reclaim(&p,SIZE_MAX)>0 && count==3 && order[2]==0);
     for(unsigned i=0;i<1000;i++)assert(((unsigned char *)current)[i]==0x5a);

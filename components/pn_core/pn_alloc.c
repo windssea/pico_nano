@@ -24,7 +24,7 @@ int pn_pool_init(pn_pool_t *pool, size_t limit, pn_malloc_fn alloc, pn_free_fn r
     if (!pool || ((alloc == NULL) != (release == NULL))) return -1;
     *pool = (pn_pool_t){ .limit=limit, .malloc_fn=alloc ? alloc : libc_alloc,
         .free_fn=release ? release : libc_free, .ctx=ctx,
-        .cache_limit=1024u*1024u,.cache_reserve=limit/8<256u*1024u?limit/8:256u*1024u,
+        .cache_limit=limit>=4u*1024u*1024u?1536u*1024u:1024u*1024u,.cache_reserve=limit/8<256u*1024u?limit/8:256u*1024u,
         .cache_caps={512u*1024u,768u*1024u,256u*1024u,384u*1024u} };
     return 0;
 }
@@ -119,6 +119,11 @@ void *pn_cache_alloc(pn_pool_t *p,pn_cache_class_t kind,pn_memory_tag_t tag,size
 void pn_cache_observe(pn_pool_t *p,pn_cache_class_t kind,bool hit){
     if(!p || (unsigned)kind>=PN_CACHE_COUNT)return;
     pn_cache_snapshot(p);if(hit)p->cache_stats[kind].hits++;else p->cache_stats[kind].misses++;
+}
+size_t pn_cache_reclaimable(pn_pool_t *p,unsigned kinds){
+    size_t sum=0;if(!p)return 0;
+    for(pn_cache_owner_t *o=p->caches;o;o=o->next)if(!o->pins && (unsigned)o->kind<PN_CACHE_COUNT && (kinds&(1u<<o->kind)))sum+=o->bytes(o->ctx);
+    return sum;
 }
 size_t pn_cache_reclaim(pn_pool_t *p,size_t headroom){
     if(!p || p->reclaiming || p->speculative)return 0;

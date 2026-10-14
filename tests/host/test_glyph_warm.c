@@ -34,7 +34,7 @@ int main(int argc,char **argv){assert(argc==3);
   renders=0;capture_pixels=!warm;compare_pixels=warm;assert((kind?pn_epub_app_step(&epub,PN_APP_NEXT,2,present,NULL):pn_reader_app_step(&app,PN_APP_NEXT,2,present,NULL))==PN_OK);capture_pixels=compare_pixels=false;if(warm){after=renders;assert(image==expected);}else{before=renders;expected=image;}
   assert((kind?pn_epub_app_close(&epub,3):pn_reader_app_close(&app,3))==PN_OK && !p.used && !p.live);
  }
- printf("Foreground glyph rasters %s: cold=%u warmed=%u, exact next-page pixels\n",kind?"EPUB":"TXT",before,after);fflush(stdout);assert(before>0 && after<before);
+ printf("Foreground glyph rasters %s: cold=%u warmed=%u, exact next-page pixels\n",kind?"EPUB":"TXT",before,after);fflush(stdout);assert(before>0 && after*10<=before); // 缓存够两页后预热应几乎消除前台光栅 / With room for two pages, warming should nearly eliminate foreground rasters
  }
  pn_pool_t p;assert(!pn_pool_init(&p,2u*1024u*1024u,NULL,NULL,NULL));pn_font_t font={0};pn_text_source_t source=pn_font_reading_source();source.validate=validate;assert(pn_font_open(&font,&p,&source,44)==PN_OK);
  assert(pn_font_warm(&font,0xd800,0)==PN_INVALID);assert(pn_font_warm(&font,'W',13)==PN_OK);renders=0;uint8_t pixels[5000];pn_frame_t frame;assert(pn_frame_bind(&frame,pixels,sizeof pixels,100,100));pn_frame_clear(&frame,15);assert(pn_font_draw(&font,&frame,'W',10*64+13,60,PN_FONT_GRAY)==PN_OK && !renders);

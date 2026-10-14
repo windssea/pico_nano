@@ -231,7 +231,7 @@ static void covers_tick(library_t *s){
     bool changed=false;
     // 仅在余量不足时让字形缓存让出，缓存命中不逐屏清空。/ Yield glyph caches only under pressure; cache hits no longer clear them on every screen.
     pn_cache_reclaim(s->pool,128u*1024u+s->pool->cache_reserve);
-    pn_status_t status=pn_shelf_covers_step(s->covers,s->page,s->pool,&s->media,*s->cover_dir?s->cover_dir:NULL,s->salt,s->pool->limit>s->pool->used?s->pool->limit-s->pool->used:1,&changed);
+    pn_status_t status=pn_shelf_covers_step(s->covers,s->page,s->pool,&s->media,*s->cover_dir?s->cover_dir:NULL,s->salt,(s->pool->limit>s->pool->used?s->pool->limit-s->pool->used:0)+pn_cache_reclaimable(s->pool,(1u<<PN_CACHE_NEIGHBOR)|(1u<<PN_CACHE_GLYPH)|(1u<<PN_CACHE_CHAPTER))+1,&changed);
     if(changed)s->covers_dirty=true;
     if(status==PN_EMPTY && s->covers_dirty){size_t ready=0;for(size_t i=0;i<s->page->count;i++)ready+=s->covers->state[i]==PN_COVER_READY;
         pn_status_t shown=draw(s);if(shown==PN_OK)s->covers_dirty=false;printf("covers ready=%zu status=%d\n",ready,(int)shown);}

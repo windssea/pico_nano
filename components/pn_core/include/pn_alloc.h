@@ -111,5 +111,8 @@ void pn_cache_observe(pn_pool_t *,pn_cache_class_t,bool hit);
 void pn_cache_snapshot(pn_pool_t *);
 /// 前台安全边界按邻页、字形、非活动封面回收至所需余量。/ At a safe foreground boundary reclaim neighbors, glyphs, inactive covers to the required headroom.
 size_t pn_cache_reclaim(pn_pool_t *,size_t headroom);
+/// 指定类别（位掩码1<<kind）中未借用、可按需回收的缓存字节；前台分配不足时会自动回收这些字节。
+/// Unpinned cache bytes of the given kinds (mask 1<<kind) that foreground allocation reclaims on demand.
+size_t pn_cache_reclaimable(pn_pool_t *,unsigned kinds);
 /// 预排所有临时分配受共享预算约束；必须成对退出。/ All speculative temporary allocations share the budget; entry/exit must be paired.
 void pn_cache_speculate(pn_pool_t *,bool enter);

@@ -33,9 +33,11 @@ static pn_status_t builtin_read(void *,uint64_t,uint8_t *,size_t,size_t *);
  * Glyph cache: layout measuring and drawing each loaded the same outline, and every load costs a cmap binary search plus several small loca/glyf reads, which is slow on SD or network drives.
  * It remembers advances/missing results by (code point, pixel height) and rendered gray bitmaps by (code point, pixel height, subpixel offset). Hits still validate the font source first, so lost media is reported as before. */
 #define ADV_SLOTS 1024u
-#define BMP_SLOTS 512u
+// 真机44px中文字形约1.7KB，384KiB/512槽只容约220字，不足一页，预热下一页会自我驱逐；扩到约两页。
+// On device a 44 px CJK glyph is about 1.7 KB, so 384 KiB/512 slots held only about 220 glyphs, less than a page, and warming the next page evicted itself; size for about two pages.
+#define BMP_SLOTS 1024u
 #define BMP_WAYS 4u
-#define BMP_BUDGET (384u*1024u)
+#define BMP_BUDGET (704u*1024u)
 #define BMP_ENTRY_MAX (64u*1024u)
 typedef struct {uint32_t cp;uint16_t pixels;uint8_t state;int32_t advance;} adv_t; ///< state 0空槽 1有字 2缺字 / 0 empty slot, 1 present, 2 missing
 typedef struct {uint32_t cp;uint16_t pixels;int16_t delta;int left,top;uint16_t width,rows;uint32_t age;uint8_t data[];} bmp_t;
