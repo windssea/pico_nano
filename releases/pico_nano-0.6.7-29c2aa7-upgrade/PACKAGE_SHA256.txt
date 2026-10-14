@@ -1,0 +1,2 @@
+a2098d41601886acd1e5521323d2dbfd3a8a0e7804d59c70a958e976bb702d38  PicoNano-29c2aa7-upgrade.zip
+906440f59807a2fd066c6c262d923e0f002ea34a2c5e40e139d168bfc2cd3dbe  PicoNano-web-installer-29c2aa7.zip
