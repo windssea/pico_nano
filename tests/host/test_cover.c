@@ -75,6 +75,7 @@ static int queue(const char *directory,const char *output,const char *cache){
     pn_font_t font={0};pn_text_source_t builtin=pn_font_builtin_source();assert(pn_font_open(&font,&pool,&builtin,24)==PN_OK);
     uint8_t *bytes=pn_alloc(&pool,684*1216/2);pn_frame_t frame;assert(pn_frame_bind(&frame,bytes,684*1216/2,684,1216));
     assert(pn_shelf_render_covers(page,&font,&frame,-1,false,true,covers)==PN_OK);write_pgm(&frame,output);
+    if(system_read.ticket)assert(pn_media_release(&media,&system_read)==PN_OK);
     /* 他人持有WRITE时BUSY；介质失效STALE；两者都保持PENDING。/ BUSY while another WRITE is held, STALE after invalidation; both keep PENDING. */
     pn_shelf_covers_reset(covers,page);
     if(page->count){pn_media_lease_t writer;assert(pn_media_acquire(&media,PN_MEDIA_WRITE,&writer)==PN_OK);
