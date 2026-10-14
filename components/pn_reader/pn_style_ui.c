@@ -66,7 +66,7 @@ static pn_font_t *body_font(const pn_style_ui_t *u){
 }
 /* 当前字体名：文件取不含扩展名的文件名，否则“默认字体”。/ Current font name: a file's base name without extension, otherwise "default font". */
 static void font_name(pn_style_ui_t *u,char *out,size_t cap){
-    snprintf(out,cap,"默认字体");
+    snprintf(out,cap,"内置字体");
     pn_font_preferences_t prefs;char directory[300];
     pn_status_t status=u->epub?pn_epub_app_fonts_get(u->epub,&prefs,directory,sizeof directory):u->reader?pn_reader_app_fonts_get(u->reader,&prefs,directory,sizeof directory):PN_INVALID;
     if(status==PN_OK && prefs.primary.kind==PN_FONT_FILE && cap>1){
@@ -76,6 +76,14 @@ static void font_name(pn_style_ui_t *u,char *out,size_t cap){
         if(n==cap-1)while(n>0 && ((unsigned char)base[n]&0xc0)==0x80)n--;
         memcpy(out,base,n);out[n]=0;
         char *dot=strrchr(out,'.');if(dot && dot!=out)*dot=0;
+    }
+    bool inherited=u->epub?pn_epub_app_font_is_inherited(u->epub):pn_reader_app_font_is_inherited(u->reader);
+    if(inherited && cap){
+        const char *prefix="全局 · ";size_t lead=strlen(prefix);
+        if(cap<=lead){out[0]=0;return;}
+        size_t n=strlen(out),room=cap-lead-1;
+        if(n>room){n=room;while(n && ((unsigned char)out[n]&0xc0)==0x80)n--;}
+        memmove(out+lead,out,n);memcpy(out,prefix,lead);out[lead+n]=0;
     }
 }
 /* 步进行：左侧名称，右侧圆角框内“- 值 +”。/ Stepper row: name on the left, "- value +" inside a rounded box on the right. */

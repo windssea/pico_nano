@@ -9,12 +9,17 @@ pn_device_refresh_plan_t pn_device_refresh_plan(const pn_device_refresh_t *s,con
     // 灰底/插图与密集黑块转白才提前清理；普通文字变化不能只凭外接框触发。
     // Clean early for gray artwork/dark blocks becoming white, never just a large text bounding box.
     unsigned gray=0,dark=0,whiten=0;
+    const unsigned body=684u*1152u;
+    int bottom=dirty.y+dirty.height;if(bottom>1152)bottom=1152;
+    int height=bottom>dirty.y?bottom-dirty.y:0;
+    // 脏区包围全部变化；转白像素不可能超过它，小操作无需扫描全帧。
+    // Dirty bounds contain every change; whitening cannot exceed them, so small actions need no full-frame scan.
+    if((unsigned)dirty.width*(unsigned)height>=body/10u)
     for(int row=0;row<684;row++)for(int b=0;b<576;b++){
         uint8_t old=shown[(size_t)row*608+b],now=target[(size_t)row*608+b];
         for(unsigned shift=0;shift<8;shift+=4){unsigned a=(old>>shift)&15u,z=(now>>shift)&15u;
             gray+=a>0 && a<14;dark+=a<5;whiten+=a<12 && z>=14;}
     }
-    const unsigned body=684u*1152u;
     p.content_clean=whiten>=body/10u && (gray>=body/6u || dark>=body/3u);
     if(!reading && !p.content_clean){
         int first=dirty.y/64,last=(dirty.y+dirty.height-1)/64;

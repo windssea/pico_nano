@@ -33,7 +33,7 @@ with tempfile.TemporaryDirectory() as directory:
   r=run('styles,fonts,font-inherit,style-cancel,')
   assert 'font_ui command=13 status=0 active=0' in r.stdout,r.stdout
   snapshots=list(state.glob('*.fonts.*'));newest=max(snapshots,key=lambda p:struct.unpack_from('<Q',p.read_bytes(),12)[0]);payload=newest.read_bytes();at=payload.index(b'PNFP')
-  assert not (struct.unpack_from('<H',payload,at+6)[0]&2) and struct.unpack_from('<H',payload,at+40)[0]==0 and struct.unpack_from('<H',payload,at+88)[0]==0
+  assert (struct.unpack_from('<H',payload,at+6)[0]&2) and struct.unpack_from('<H',payload,at+40)[0]==0 and struct.unpack_from('<H',payload,at+88)[0]==0
   r=run('styles,fonts,tap:100:190,style-cancel,')
   assert 'font_ui command=13 status=0 active=0' in r.stdout,r.stdout
 
@@ -42,7 +42,7 @@ with tempfile.TemporaryDirectory() as directory:
  installed=root/'installed';installed.mkdir()
  for i in range(7):shutil.copyfile(primary,installed/f'installed{i}.ttf')
  state=root/'directory-state'
- script='library,enter,styles,fonts,font-next,tap:100:375,style-cancel,back,enter,styles,fonts,font-cancel,style-cancel,back,quit'
+ script='library,enter,styles,fonts,font-next,tap:100:430,style-cancel,back,enter,styles,fonts,font-cancel,style-cancel,back,quit'
  result=subprocess.run([sys.argv[1],'--library',str(books),'--font',str(primary),'--font-dir',str(installed),'--state-dir',str(state)],env=dict(os.environ,SDL_VIDEODRIVER='dummy',PN_SIM_LIBRARY_SCRIPT=script),capture_output=True,text=True,timeout=60)
  assert result.returncode==0 and 'used=0 live=0' in result.stdout,(result.stdout,result.stderr)
  assert 'font_ui command=2 status=0' in result.stdout and 'font_ui command=16 status=0 active=0' in result.stdout,result.stdout
@@ -52,7 +52,7 @@ with tempfile.TemporaryDirectory() as directory:
  # Each selection/cancel presents one final typesetting page; only explicit original-text preview may show body frames.
  for kind in ('txt','epub'):
   single=root/('transition-'+kind);single.mkdir();shutil.copyfile(books/('a.'+kind),single/('a.'+kind))
-  journeys=[('direct','tap:100:460',6),('default','tap:100:190',6),('cancel','font-cancel',6),('detail','font-select,font-preview,font-form,font-apply',9),('preview-cancel','font-select,font-preview,font-form,tap:100:920',9)]
+  journeys=[('direct','tap:100:518',6),('default','tap:100:190',6),('cancel','font-cancel',6),('detail','font-select,font-preview,font-form,font-apply',9),('preview-cancel','font-select,font-preview,font-form,tap:100:920',9)]
   for name,commands,total in journeys:
    frames=root/(kind+'-'+name+'-frames');frames.mkdir();session=root/(kind+'-'+name+'-state')
    script='library,enter,styles,fonts,'+commands+',window-close'
@@ -66,4 +66,4 @@ with tempfile.TemporaryDirectory() as directory:
    assert payload[1140*684+100]==0,(kind,name,'final page must be typesetting Apply')
    if name=='direct':assert any(str(fonts/'b.ttf').encode() in record.read_bytes() for record in session.glob('*.fonts.*'))
 
-print('Reading font picker: TXT/EPUB/library preview/cancel, external primary with automatic fallback, built-in reset, configured directory/page two and durable reopen passed')
+print('Reading font picker: TXT/EPUB/library preview/cancel, external primary with automatic fallback, global inheritance and built-in choice, configured directory/page two and durable reopen passed')

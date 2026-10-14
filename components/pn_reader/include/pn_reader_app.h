@@ -148,8 +148,8 @@ pn_status_t pn_reader_app_fonts_probe(pn_reader_app_t *,const pn_catalog_item_t 
 /// 设置全局默认，不改活动字体或逐书覆盖；写失败由重试/关闭屏障处理。
 /// Set global defaults without changing active fonts or per-book overrides; retry/close handles write failures.
 pn_status_t pn_reader_app_font_default(pn_reader_app_t *,const pn_font_preferences_t *);
-/// 在原文锚点应用已有全局默认，显示成功后保存继承标记；未设全局返回EMPTY。
-/// Apply existing global defaults at the original anchor and save inheritance after presentation; absent global returns EMPTY.
+/// 在原文锚点应用已有全局默认，显示成功后保存继承标记；未设全局使用内置字体。
+/// Apply existing global defaults at the original anchor and save inheritance after presentation; absent global uses the resident font.
 pn_status_t pn_reader_app_font_inherit(pn_reader_app_t *,uint64_t,pn_reader_present_fn,void *);
 
 /// 当前正文字体（借用，不可关闭；字体已挂起时engine为空）。排版预览用它按草稿字号试排。
@@ -165,3 +165,8 @@ pn_status_t pn_reader_app_jump_percent(pn_reader_app_t *app,unsigned basis_point
 void pn_reader_app_refresh_period(pn_reader_app_t *app,unsigned pages);
 /// 显示owner确认整屏清理后，由产品owner重置计数。/ Product owner resets the counter after display owner confirms full cleaning.
 void pn_reader_app_refresh_reset(pn_reader_app_t *app);
+
+/// 跟随全局并呈现目标设置页；无全局记录使用内置字体。/ Inherit global defaults and present the destination; absent defaults use the resident face.
+pn_status_t pn_reader_app_font_inherit_view(pn_reader_app_t *,pn_reader_overlay_fn,void *,uint64_t,pn_reader_present_fn,void *);
+/// 当前接受的字体是否跟随全局；预览不改变它。/ Whether the accepted font follows global defaults; previews do not change it.
+bool pn_reader_app_font_is_inherited(const pn_reader_app_t *);

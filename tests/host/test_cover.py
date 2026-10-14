@@ -47,6 +47,21 @@ with tempfile.TemporaryDirectory() as folder:
     (books/'g-plain.txt').write_text('正文','utf-8')
     (books/'h-garbage.txt').write_text('正文','utf-8');(books/'h-garbage.jpg').write_bytes(b'not an image at all')
 
+    # 在stored mimetype中保留旧压缩提示；封面应正常提取。/ Retain legacy compression hints on stored mimetype; covers must still extract.
+    hinted=root/'hints.epub';epub(hinted,halves)
+    raw=bytearray(hinted.read_bytes());central=raw.index(b'PK\x01\x02')
+    struct.pack_into('<H',raw,6,22);struct.pack_into('<H',raw,central+8,22);hinted.write_bytes(raw)
+    render(hinted,OK,root/'hints.pgm')
+    # JPEG零填充仍完整验证ZIP CRC；截断/非零尾部保持失败。/ Zero-padded JPEG still verifies ZIP CRC; truncation and nonzero tails fail.
+    padded=root/'padded.epub';jpeg=(fixtures/'jpeg-baseline.jpg').read_bytes()
+    epub(padded,jpeg+b'\0'*768549,'art.jpg','epub2');render(padded,OK,root/'padded.pgm')
+    epub(padded,jpeg+b'\0'*8192+b'X','art.jpg','epub2');render(padded,CORRUPT,root/'padded-bad.pgm')
+    epub(padded,jpeg[:-2]+b'\0'*8192,'art.jpg','epub2');render(padded,CORRUPT,root/'padded-short.pgm')
+    epub(padded,jpeg+b'\0'*8192,'art.jpg','epub2',stored=True)
+    with zipfile.ZipFile(padded) as z:entry=z.getinfo('OPS/art.jpg')
+    raw=bytearray(padded.read_bytes());name=b'OPS/art.jpg';central=raw.index(name,raw.index(b'PK\x01\x02'))-46
+    struct.pack_into('<I',raw,entry.header_offset+14,entry.CRC^1);struct.pack_into('<I',raw,central+16,entry.CRC^1);padded.write_bytes(raw)
+    render(padded,CORRUPT,root/'padded-crc.pgm')
     # 宽图contain：上下留白，左黑右白；超采样均值不产生越界灰。/ Wide contain: white bands, left black, right white.
     w,h,p=render(books/'a-declared.epub',OK,root/'a.pgm');assert (w,h)==(W,H)
     band=(H-110*W//170)//2

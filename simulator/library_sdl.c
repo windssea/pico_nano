@@ -59,6 +59,7 @@ typedef struct {
     bool shelf_focus_visible; ///< 仅主动键盘导航显示轻量焦点 / Show subtle focus only during deliberate keyboard navigation
     pn_catalog_page_t *page;
     pn_font_t font;
+    pn_w_font_scope_t ui_scope; ///< owner寿命的常驻补字缓存 / Resident fallback cache with owner lifetime
     pn_frame_t frame;
     pn_reader_app_t reader;
     pn_epub_app_t epub;
@@ -491,6 +492,7 @@ static int library_worker(void *ctx){
     memset(s->page,0,sizeof *s->page);
     if(!pn_frame_bind(&s->frame,s->frame.pixels,342u*1216u,684,1216))goto cleanup;
     if(getenv("PN_SIM_BOOT_PREVIEW")){status=pn_brand_image_render(&s->frame);if(status==PN_OK)status=pn_brand_version_render(&s->frame,PN_PRODUCT_VERSION);if(status==PN_OK)status=present_raw(s,&s->frame);if(status!=PN_OK)goto cleanup;SDL_Delay(900);}
+    if(pool->limit>=4u*1024u*1024u){status=pn_w_font_scope_begin(&s->ui_scope,pool,NULL);if(status!=PN_OK)goto cleanup;}
     pn_text_source_t source=pn_font_builtin_source();status=pn_font_open(&s->font,pool,&source,24);if(status!=PN_OK)goto cleanup;
     pn_media_init(&s->media);status=pn_media_attach(&s->media,1);if(status!=PN_OK)goto cleanup;
     if(cover_cache){char cache[PN_CATALOG_PATH_MAX];int n=snprintf(cache,sizeof cache,"%s/library",cover_cache);if(n>0 && (size_t)n<sizeof cache)(void)pn_catalog_index_init(&s->catalog_index,pool,&s->media,s->directory,cache);}
@@ -773,7 +775,7 @@ cleanup:;
     pn_wallpaper_mask_close(&s->lock_mask);
     pn_wallpaper_ui_close(&s->wallpaper);pn_font_manage_close(&s->font_manage);pn_settings_ui_close(&s->settings);
     pn_font_ui_close(&s->fonts);
-    pn_cache_detach(&s->cover_cache);pn_font_close(&s->font);pn_free(s->frame.pixels);pn_free(s->page_px);pn_free(s->favorites);pn_free(s->page);pn_free(s->recent);pn_free(s->covers);
+    pn_w_font_scope_end(&s->ui_scope);pn_cache_detach(&s->cover_cache);pn_font_close(&s->font);pn_free(s->frame.pixels);pn_free(s->page_px);pn_free(s->favorites);pn_free(s->page);pn_free(s->recent);pn_free(s->covers);
     free(s->argb);s->argb=NULL;pn_cancel_leave(&shield);return result;
 }
 

@@ -29,7 +29,7 @@ pn_status_t pn_device_transfer_close(pn_device_transfer_t *s){assert(s->impl);s-
 pn_status_t pn_device_transfer_take_network(pn_device_transfer_t *s,pn_network_credentials_t *c,bool *f){(void)s;(void)c;(void)f;return PN_EMPTY;}
 #include "../../main/app_main.c"
 int main(void){
-    assert(!pn_pool_init(&pool,3u*1024u*1024u,NULL,NULL,NULL));
+    assert(!pn_pool_init(&pool,6u*1024u*1024u,NULL,NULL,NULL));
     assert(read_pico_init(&hardware)==ESP_OK);pn_media_init(&sd_media);pn_media_init(&data_media);pn_media_init(&wallpaper_media);
     int vcom;assert(read_pico_pmu_vcom_get(&vcom)==ESP_OK);epd_set_vcom((uint16_t)vcom);
     assert(pn_media_attach(&sd_media,1)==PN_OK);
@@ -45,6 +45,9 @@ int main(void){
     strcpy(shelf_page->items[0].name,"Original.txt");strcpy(shelf_page->items[0].path,"/original.txt");shelf_page->items[0].format=PN_BOOK_TXT;
     home_mode=false;shelf_mode=true;status_page=false;
     assert(draw_shelf(PN_REFRESH_GL16)==PN_OK);
+    // 同屏重绘复用界面引擎，字形缓存命中增加，无新增TF租约。/ Repaint reuses the UI engine, gains glyph hits and adds no TF lease.
+    void *ui_engine=management_font.impl;size_t leases=pn_media_active(&sd_media);uint64_t hits=pool.cache_stats[PN_CACHE_GLYPH].hits;
+    assert(ui_engine && management_scope.active && draw_shelf(PN_REFRESH_GL16)==PN_OK && management_font.impl==ui_engine && pn_media_active(&sd_media)==leases && pool.cache_stats[PN_CACHE_GLYPH].hits>hits);
     // 逻辑前16行是每个板级行的前8字节；面板底图来自后缓冲逆变换。/ The logical top 16 rows are the first 8 bytes of each board row; the sheet base is restored from the back buffer.
     static uint8_t top[684*8];for(int py=0;py<684;py++)memcpy(top+py*8,hardware.hl.back_fb+(size_t)py*608,8);
     open_actions(0);assert(actions_mode);for(int py=0;py<684;py++)assert(!memcmp(top+py*8,hardware.hl.back_fb+(size_t)py*608,8));
@@ -122,5 +125,6 @@ int main(void){
     handle_key(PN_KEY_2,PN_KEY_SHORT);assert(usb.open && usb_home && usb_return && usb.stop_requested);
     usb=(pn_device_usb_t){0};
     pn_free(page_copy);pn_free(shelf_page);pn_free(shelf_covers);pn_free(recent_snapshot);pn_free(favorites);
+    pn_font_close(&management_font);pn_w_font_scope_end(&management_scope);
     assert(!pool.used && !pool.live);return 0;
 }

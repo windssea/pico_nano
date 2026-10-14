@@ -24,6 +24,12 @@ with tempfile.TemporaryDirectory() as directory:
             assert result.returncode == 0 and result.stdout == payload and b"used=0 live=0" in result.stderr, result.stderr
         empty = subprocess.run([binary, str(path), "empty"], capture_output=True, timeout=10)
         assert empty.returncode == 0 and empty.stdout == b"", empty.stderr
+    # 常见打包器把deflate选项留在stored项，两份头仍一致。/ Common packers retain deflate options on stored entries with matching headers.
+    with zipfile.ZipFile(path,'w') as z:z.writestr('mimetype',b'application/epub+zip')
+    raw=bytearray(path.read_bytes());central=raw.index(b'PK\x01\x02')
+    struct.pack_into('<H',raw,6,22);struct.pack_into('<H',raw,central+8,22);path.write_bytes(raw)
+    result=subprocess.run([binary,str(path),'mimetype'],capture_output=True,timeout=10)
+    assert result.returncode==0 and result.stdout==b'application/epub+zip' and b'verified=1' in result.stderr,result.stderr
     def rejected(data):
         path.write_bytes(data)
         result = subprocess.run([binary, str(path), "mimetype"], capture_output=True, timeout=10)

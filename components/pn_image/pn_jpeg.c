@@ -70,9 +70,19 @@ static pn_status_t decode(pn_pool_t *pool,const pn_image_input_t *input,pn_frame
                 }
             }
             if(!jpeg_finish_decompress(&d->jpeg))stop(d,PN_CORRUPT);
-            if(d->source.bytes_in_buffer)stop(d,PN_CORRUPT);
-            uint8_t tail;size_t n=0;pn_status_t eof=input->read(input->ctx,&tail,1,&n);
-            if(eof!=PN_EMPTY || n)stop(d,eof==PN_OK || eof==PN_EMPTY?PN_CORRUPT:eof);
+            // 部分封面在真实EOI后留零填充；必须逐字节检查并读到已验证EOF，不接受其他尾部。
+            // Some covers pad with zeros after a real EOI; check every byte through verified EOF and reject other tails.
+            for(size_t i=0;i<d->source.bytes_in_buffer;i++)if(d->source.next_input_byte[i])stop(d,PN_CORRUPT);
+            for(;;){
+                pn_status_t cancel=pn_cancel_checkpoint();if(cancel!=PN_OK)stop(d,cancel);
+                size_t n=0;pn_status_t eof=input->read(input->ctx,d->buffer,sizeof d->buffer,&n);
+                if(eof==PN_EMPTY && !n)break;
+                if(eof!=PN_OK)stop(d,eof==PN_EMPTY?PN_CORRUPT:eof);
+                if(!n || n>sizeof d->buffer)stop(d,PN_CORRUPT);
+                if(n>32u*1024u*1024u-d->bytes)stop(d,PN_LIMIT);
+                d->bytes+=n;
+                for(size_t i=0;i<n;i++)if(d->buffer[i])stop(d,PN_CORRUPT);
+            }
         }
         *info=(pn_jpeg_info_t){w,h,d->jpeg.progressive_mode!=FALSE};
     }

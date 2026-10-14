@@ -33,7 +33,7 @@ typedef struct {
     pn_font_chain_t chain;
     pn_font_set_t font_live,font_draft;pn_font_t *managed_body;pn_font_chain_t *managed_chain;
     bool font_use_draft,font_preview,font_pending,font_render,global_pending;
-    char boot_primary[PN_FONT_REFERENCE_PATH_MAX],boot_fallback[PN_FONT_REFERENCE_PATH_MAX];pn_font_preferences_t live_fonts;bool fonts_known;
+    char boot_primary[PN_FONT_REFERENCE_PATH_MAX],boot_fallback[PN_FONT_REFERENCE_PATH_MAX];pn_font_preferences_t live_fonts;bool fonts_known,font_inherited;
     pn_font_preferences_t draft_fonts,pending_fonts,pending_record,before_fonts,global_fonts;uint64_t font_origin;
     pn_text_source_t font_source;
     bool external_font,metadata_tried,font_unavailable;
@@ -189,6 +189,7 @@ static pn_status_t pn_reader_app_open_on_media_impl(pn_reader_app_t *app,pn_pool
                 if(backup==PN_STALE_MEDIA)status=backup;
                 else if(backup!=PN_OK){a->font_unavailable=true;selected_fonts.fallback=(pn_font_reference_t){.kind=PN_FONT_RESIDENT};}}}
     }
+    a->font_inherited=!fonts_from_book;
     if(status==PN_OK && has_selected_fonts && !a->font_unavailable){a->live_fonts=selected_fonts;a->fonts_known=true;}
     if(status==PN_OK && font_path){if(strlen(font_path)>=sizeof a->boot_primary)status=PN_LIMIT;else strcpy(a->boot_primary,font_path);}
     if(status==PN_OK){
@@ -540,7 +541,7 @@ static pn_status_t font_stage(pn_reader_app_t *app,const pn_font_preferences_t *
     pn_font_set_close(&a->font_draft);(void)pn_font_set_move(&a->font_draft,&previous);a->font_use_draft=old_use;a->draft_fonts=old_draft;font_metadata_reset(a);pn_status_t restored=font_relayout(a);return restored!=PN_OK?restored:status;
 }
 static void font_accept(app_t *a){
-    font_metadata_reset(a);pn_font_set_close(&a->font_live);(void)pn_font_set_move(&a->font_live,&a->font_draft);a->font_use_draft=false;a->font_preview=false;a->font_pending=false;a->live_fonts=a->pending_fonts;a->fonts_known=true;
+    font_metadata_reset(a);pn_font_set_close(&a->font_live);(void)pn_font_set_move(&a->font_live,&a->font_draft);a->font_use_draft=false;a->font_preview=false;a->font_pending=false;a->live_fonts=a->pending_fonts;a->fonts_known=true;a->font_inherited=a->pending_record.inherit;
     pn_font_chain_clear(&a->chain);pn_font_close(&a->body);(void)pn_text_file_close(&a->font_file);(void)pn_text_file_close(&a->fallback_file);
     if(a->font_lease.ticket)(void)pn_media_release(a->book_media,&a->font_lease);
     if(a->fallback_lease.ticket)(void)pn_media_release(a->book_media,&a->fallback_lease);
@@ -574,11 +575,19 @@ pn_status_t pn_reader_app_font_inherit(pn_reader_app_t *app,uint64_t now,pn_read
     if(app && app->impl)((app_t *)app->impl)->last_confirmed=false;
     if(!app || !app->impl || !present)return PN_INVALID;
     app_t *a=app->impl;if(a->media_lost)return PN_STALE_MEDIA;if(!a->persistent)return PN_UNSUPPORTED;if(a->global_pending)return PN_BUSY;
-    pn_font_preferences_t concrete,record={.inherit=true};
+    pn_font_preferences_t concrete={0},record={.inherit=true};
     if(a->font_pending){if(!a->pending_record.inherit)return PN_BUSY;concrete=a->pending_fonts;}
-    else{pn_journal_files_t files;pn_journal_io_t io;pn_status_t status=pn_font_preferences_files(&files,&a->state_media,&a->state_lease,a->state_directory,NULL,&io);if(status==PN_OK)status=pn_font_preferences_load(&io,a->pool,NULL,&concrete);if(status!=PN_OK)return status;}
+    else{pn_journal_files_t files;pn_journal_io_t io;pn_status_t status=pn_font_preferences_files(&files,&a->state_media,&a->state_lease,a->state_directory,NULL,&io);if(status==PN_OK)status=pn_font_preferences_load(&io,a->pool,NULL,&concrete);if(status!=PN_OK && status!=PN_EMPTY)return status;}
     return font_apply_record(app,&concrete,&record,now,present,ctx);
 }
+/// 继承事务只呈现目标页，失败不提交覆盖记录。/ Inheritance presents only the destination and preserves records on failure.
+pn_status_t pn_reader_app_font_inherit_view(pn_reader_app_t *app,pn_reader_overlay_fn paint,void *view_ctx,uint64_t now,pn_reader_present_fn present,void *ctx){
+    if(app && app->impl)((app_t *)app->impl)->last_confirmed=false;
+    if(!app || !app->impl || !paint)return PN_INVALID;
+    app_t *a=app->impl;if(a->font_view)return PN_BUSY;a->font_view=paint;a->font_view_ctx=view_ctx;
+    pn_status_t status=pn_reader_app_font_inherit(app,now,present,ctx);a->font_view=NULL;a->font_view_ctx=NULL;return status;
+}
+bool pn_reader_app_font_is_inherited(const pn_reader_app_t *app){return app && app->impl && ((app_t *)app->impl)->font_inherited;}
 pn_status_t pn_reader_app_font_default(pn_reader_app_t *app,const pn_font_preferences_t *prefs){
     if(!app || !app->impl || pn_font_preferences_validate(prefs,true)!=PN_OK)return PN_INVALID;
     app_t *a=app->impl;if(a->media_lost)return PN_STALE_MEDIA;if(!a->persistent)return PN_UNSUPPORTED;if(a->font_pending || a->style_pending)return PN_BUSY;

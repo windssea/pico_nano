@@ -23,6 +23,9 @@ with tempfile.TemporaryDirectory() as folder:
   run(path,success=False,env={'PN_JPEG_BUDGET':'4096'})
   r=run(path,success=False,env={'PN_JPEG_STOP_AFTER':'50','PN_JPEG_CHUNK':'17'});assert b'jpeg status=6 ' in r.stderr
   raw=path.read_bytes()
+  bad.write_bytes(raw+b'\0'*65537);assert run(bad).stdout==run(path).stdout
+  assert run(bad,env={'PN_JPEG_CHUNK':'17'}).stdout==run(path).stdout
+  bad.write_bytes(raw+b'\0'*8192+b'X');run(bad,success=False)
   for content in [raw[:-2],raw+b'X',raw[:80],b'not a JPEG']:
    bad.write_bytes(content);run(bad,success=False)
 print('jpeg: baseline/progressive independent pixels, short reads, media failure, truncation/tail and all allocation faults passed')

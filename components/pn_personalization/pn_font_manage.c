@@ -13,6 +13,7 @@
 #include "pn_widgets.h"
 #include "pn_text_file.h"
 #include <errno.h>
+#include <ctype.h>
 #include <stdio.h>
 #include <string.h>
 #define W 684
@@ -29,6 +30,9 @@ typedef struct {
 } fm_t;
 static pn_status_t string_read(void *ctx,uint64_t off,uint8_t *out,size_t cap,size_t *n){const char *s=ctx;size_t size=strlen(s);if(off>size)return PN_INVALID;size_t take=size-(size_t)off;if(take>cap)take=cap;memcpy(out,s+off,take);*n=take;return PN_OK;}
 static const char *base(const char *path){const char *slash=strrchr(path,'/');return slash?slash+1:path;}
+/// 名称及实际字体家族均识别鸿蒙保留字库，重命名也不能从管理页删除。/ Reserve HarmonyOS by file name and actual family, including renamed files.
+static bool harmony_name(const char *name){const char *key="HarmonyOS";for(;*key;key++,name++)if(tolower((unsigned char)*name)!=tolower((unsigned char)*key))return false;return true;}
+static bool protected_font(const fm_t *f){return harmony_name(f->name) || harmony_name(f->info.family);}
 static bool is_global(const fm_t *f,const char *path){return f->global_known && f->global_set && f->global.primary.kind==PN_FONT_FILE && !strcmp(f->global.primary.path,path);}
 static void release_asset(fm_t *f){
     (void)pn_font_asset_close(&f->asset);
@@ -111,7 +115,7 @@ static pn_status_t draw(pn_font_manage_t *ui){
         // 当前默认字体卡，再列出已安装字体；默认项用对勾标出。/ A card for the current default font, then the installed fonts with the default marked by a check.
         const char *name="默认字体",*note="系统默认阅读字体，不影响界面";
         if(!f->global_known){name="记录不可读";note="阅读默认记录暂时无法读取";}
-        else if(f->global_set && f->global.primary.kind!=PN_FONT_RESIDENT){const char *slash=strrchr(f->global.primary.path,'/');name=slash?slash+1:f->global.primary.path;note="新打开的书默认使用它";}
+        else if(f->global_set && f->global.primary.kind!=PN_FONT_RESIDENT){const char *slash=strrchr(f->global.primary.path,'/');name=slash?slash+1:f->global.primary.path;note="跟随全局的书重开后使用它";}
         else if(f->global_set)note="阅读默认使用系统字体";
         if(s==PN_OK)s=pn_w_group(&f->ui,&f->canvas,"默认阅读字体",DEFAULT_CARD_Y-14);
         pn_w_card(&f->canvas,DEFAULT_CARD_Y,1);
@@ -144,7 +148,7 @@ static pn_status_t draw(pn_font_manage_t *ui){
         if(s==PN_OK){s=pn_font_size(&f->ui,34);if(s==PN_OK)s=pn_w_text(&f->ui,&f->canvas,pn_brand_label(f->name),PN_UI_MARGIN,DETAIL_NAME_Y,620,PN_ALIGN_LEFT);pn_status_t again=pn_font_size(&f->ui,original);if(s==PN_OK)s=again;}
         if(s==PN_OK){s=pn_font_size(&f->ui,30);
             if(s==PN_OK)s=pn_w_button(&f->ui,&f->canvas,is_global(f,f->selected)?"已是阅读默认":"设为阅读默认",32,DETAIL_BUTTON_Y,300,96,0u);
-            if(s==PN_OK)s=pn_w_button(&f->ui,&f->canvas,"删除",352,DETAIL_BUTTON_Y,300,96,0u);
+            if(s==PN_OK)s=pn_w_button(&f->ui,&f->canvas,protected_font(f)?"保留字库":"删除",352,DETAIL_BUTTON_Y,300,96,0u);
             if(s==PN_OK && *f->message){s=pn_font_size(&f->ui,28);if(s==PN_OK)s=pn_w_text(&f->ui,&f->canvas,f->message,PN_UI_MARGIN,DETAIL_BACK_Y-20,620,PN_ALIGN_LEFT);}
             if(s==PN_OK){s=pn_font_size(&f->ui,30);if(s==PN_OK)s=pn_w_button(&f->ui,&f->canvas,"返回",32,DETAIL_BACK_Y,620,96,0u);}
             pn_status_t again=pn_font_size(&f->ui,original);if(s==PN_OK)s=again;}
@@ -203,7 +207,7 @@ static pn_status_t set_default(fm_t *f){
     return status;
 }
 static pn_status_t remove_font(pn_font_manage_t *ui){
-    fm_t *f=ui->impl;char path[PN_CATALOG_PATH_MAX];strcpy(path,f->selected);
+    fm_t *f=ui->impl;if(protected_font(f))return PN_UNSUPPORTED;char path[PN_CATALOG_PATH_MAX];strcpy(path,f->selected);
     release_asset(f);
     pn_media_lease_t lease;pn_status_t status=pn_media_acquire(f->fonts,PN_MEDIA_WRITE,&lease);
     if(status==PN_OK){if(remove(path))status=errno==ENOENT?PN_EMPTY:PN_IO;
@@ -237,7 +241,7 @@ pn_status_t pn_font_manage_event(pn_font_manage_t *ui,int command,pn_font_manage
     }else if(ui->screen==PN_FMU_DETAIL){
         if(command==PN_FMU_BACK){release_asset(f);ui->screen=PN_FMU_LIST;f->message[0]=0;}
         else if(command==PN_FMU_DEFAULT){if(is_global(f,f->selected))return PN_EMPTY;status=set_default(f);ui->last=status;}
-        else if(command==PN_FMU_DELETE){ui->screen=PN_FMU_CONFIRMING;f->message[0]=0;}
+        else if(command==PN_FMU_DELETE){if(protected_font(f)){status=PN_UNSUPPORTED;snprintf(f->message,sizeof f->message,"鸿蒙保留字库，不能删除");}else{ui->screen=PN_FMU_CONFIRMING;f->message[0]=0;}}
         else return PN_EMPTY;
     }else{
         if(command==PN_FMU_CANCEL)ui->screen=PN_FMU_DETAIL;
@@ -259,7 +263,7 @@ int pn_font_manage_hit(const pn_font_manage_t *ui,int x,int y){
     }
     if(x<32 || x>=652)return -1;
     if(ui->screen==PN_FMU_DETAIL){
-        if(y>=DETAIL_BUTTON_Y && y<DETAIL_BUTTON_Y+96)return x<332?PN_FMU_DEFAULT:x>=352?PN_FMU_DELETE:-1;
+        if(y>=DETAIL_BUTTON_Y && y<DETAIL_BUTTON_Y+96)return x<332?PN_FMU_DEFAULT:x>=352 && !protected_font(f)?PN_FMU_DELETE:-1;
         if(y>=DETAIL_BACK_Y && y<DETAIL_BACK_Y+96)return PN_FMU_BACK;
         return -1;
     }

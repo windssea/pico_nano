@@ -11,9 +11,12 @@ int main(void){
     // Binary text covering about 1/8 remains distinct from a large dark block even when erased.
     for(int row=0;row<684;row++)for(int b=0;b<576;b+=8)old[row*608+b]=0;
     assert(!pn_device_refresh_plan(&s,next,old,true,(pn_device_box_t){0,0,684,1152}).content_clean);
-    memset(old,0x77,sizeof old);assert(pn_device_refresh_plan(&s,next,old,true,box).content_clean);
-    memset(old,0,sizeof old);assert(pn_device_refresh_plan(&s,next,old,false,box).content_clean);
-    memset(next,0,sizeof next);assert(!pn_device_refresh_plan(&s,next,old,true,box).content_clean);
+    memset(old,0x77,sizeof old);assert(pn_device_refresh_plan(&s,next,old,true,(pn_device_box_t){0,0,684,1152}).content_clean);
+    memset(old,0,sizeof old);assert(pn_device_refresh_plan(&s,next,old,false,(pn_device_box_t){0,0,684,1152}).content_clean);
+    memset(next,0,sizeof next);assert(!pn_device_refresh_plan(&s,next,old,true,(pn_device_box_t){0,0,684,1152}).content_clean);
+    memset(old,0x77,sizeof old);memcpy(next,old,sizeof next);
+    for(int row=650;row<664;row++)for(int b=100;b<110;b++)next[row*608+b]=255;
+    assert(!pn_device_refresh_plan(&s,next,old,false,box).content_clean);
     memset(old,255,sizeof old);memset(next,255,sizeof next);
     pn_device_refresh_plan_t p={0};
     for(int i=0;i<5;i++){p=pn_device_refresh_plan(&s,next,old,false,box);assert(!p.regional);pn_device_refresh_commit(&s,false,false,false,p);}

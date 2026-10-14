@@ -61,6 +61,14 @@ int main(int argc,char **argv){
     assert(global(&internal,state,&pool,&g) && !strcmp(g.primary.path,a));
     /* 无内部存储：不能设默认。/ Without internal storage the default cannot be set. */
     assert(pn_font_manage_open(&ui,&pool,&sd,fonts,NULL,NULL,present,NULL)==PN_OK && pn_font_manage_event(&ui,PN_FMU_ROW,present,NULL)==PN_OK && pn_font_manage_event(&ui,PN_FMU_DEFAULT,present,NULL)==PN_UNSUPPORTED);pn_font_manage_close(&ui);
+    /* 改名的鸿蒙字库仍由家族识别保护，触摸和直接命令都拒绝删除。/ Renamed HarmonyOS remains protected by family for touch and direct commands. */
+    char protected_path[600];snprintf(protected_path,sizeof protected_path,"%s/d-renamed.ttf",fonts);
+    pn_text_source_t harmony=pn_font_builtin_source();FILE *protected_file=fopen(protected_path,"wb");assert(protected_file);uint8_t bytes[4096];
+    for(uint64_t off=0;off<harmony.size;){size_t n;assert(harmony.read_at(harmony.ctx,off,bytes,sizeof bytes,&n)==PN_OK && n && fwrite(bytes,1,n,protected_file)==n);off+=n;}assert(!fclose(protected_file));
+    assert(pn_font_manage_open(&ui,&pool,&sd,fonts,&internal,state,present,NULL)==PN_OK);
+    assert(pn_font_manage_event(&ui,PN_FMU_ROW+2,present,NULL)==PN_OK && ui.screen==PN_FMU_DETAIL);
+    assert(pn_font_manage_hit(&ui,500,1000)==-1 && pn_font_manage_event(&ui,PN_FMU_DELETE,present,NULL)==PN_UNSUPPORTED && ui.screen==PN_FMU_DETAIL && access(protected_path,F_OK)==0);
+    assert(pn_font_manage_event(&ui,PN_FMU_CONFIRM,present,NULL)==PN_EMPTY && access(protected_path,F_OK)==0);pn_font_manage_close(&ui);assert(!pool.live);
     /* 打开时逐分配失败完全回收。/ Every allocation failure while opening fully recovers. */
     pn_pool_t probe;assert(!pn_pool_init(&probe,6u*1024u*1024u,NULL,NULL,NULL));assert(pn_font_manage_open(&ui,&probe,&sd,fonts,&internal,state,present,NULL)==PN_OK);size_t attempts=probe.attempts;pn_font_manage_close(&ui);
     for(size_t fail=1;fail<=attempts;fail++){assert(!pn_pool_init(&probe,6u*1024u*1024u,NULL,NULL,NULL));probe.fail_at=fail;pn_status_t s=pn_font_manage_open(&ui,&probe,&sd,fonts,&internal,state,present,NULL);if(s==PN_OK)pn_font_manage_close(&ui);else assert(!ui.impl);assert(!probe.used && !probe.live);}

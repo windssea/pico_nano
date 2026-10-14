@@ -70,6 +70,18 @@
 static const char *TAG="pico_nano";
 static read_pico_handle_t hardware;
 static pn_pool_t pool;
+static pn_font_t management_font; ///< owner间歇借用的界面字库及可回收字形 / UI face with reclaimable glyphs borrowed between owner operations
+static pn_w_font_scope_t management_scope; ///< 常驻中文补字作用域，无TF租约 / Resident CJK scope without a TF lease
+/// 移交字体对象而非重开；字号与缓存随对象回收。/ Transfer the font object instead of reopening; size and caches return with it.
+static pn_status_t management_font_begin(pn_font_t *font,int pixels){
+    pn_status_t s=pool.limit<4u*1024u*1024u || management_scope.active?PN_OK:pn_w_font_scope_begin(&management_scope,&pool,NULL);
+    if(s!=PN_OK)return s;
+    if(management_font.impl){*font=management_font;management_font=(pn_font_t){0};s=pn_font_size(font,pixels);}
+    else{pn_text_source_t source=pn_font_builtin_source();s=pn_font_open(font,&pool,&source,pixels);}
+    return s;
+}
+static void management_font_end(pn_font_t *font){if(pool.limit<4u*1024u*1024u || management_font.impl)pn_font_close(font);else{management_font=*font;*font=(pn_font_t){0};}}
+
 static pn_media_t sd_media;
 static pn_device_sd_t sd_recovery; ///< TF挂载请求的异步完成状态 / Asynchronous completion state of the TF mount request
 static pn_media_t data_media;
@@ -346,9 +358,9 @@ static void message(const char *title,const char *detail){
     pn_bookmark_ui_cancel(&bookmarks);
     pn_style_ui_close(&styles);pn_font_ui_close(&fonts);pn_wallpaper_ui_close(&wallpaper_ui);pn_font_manage_close(&font_manage);pn_settings_ui_close(&settings_ui);
     status_page=true;shelf_mode=false;index_mode=false;search_mode=false;hub_mode=false;actions_mode=false;
-    uint8_t *pixels=pn_alloc_tagged(&pool,PN_MEM_FRAME,684u*1216u/2u);pn_frame_t frame;pn_font_t font={0};pn_text_source_t builtin=pn_font_builtin_source();
+    uint8_t *pixels=pn_alloc_tagged(&pool,PN_MEM_FRAME,684u*1216u/2u);pn_frame_t frame;pn_font_t font={0};
     pn_status_t status=pn_frame_bind(&frame,pixels,684u*1216u/2u,684,1216)?PN_OK:PN_NO_MEMORY;
-    if(status==PN_OK)status=pn_font_open(&font,&pool,&builtin,28);
+    if(status==PN_OK)status=management_font_begin(&font,28);
     // 状态页：产品名、标题、按行说明，底部圆角“重试”按钮（点击区y>=1070）。/ Status page: product name, title, line-by-line explanation and a rounded Retry button at the bottom (touch area y>=1070).
     if(status==PN_OK){pn_frame_clear(&frame,15);status=pn_w_text(&font,&frame,PN_BRAND_NAME,32,44,620,PN_ALIGN_LEFT);}
     if(status==PN_OK)status=pn_font_size(&font,44);
@@ -361,7 +373,7 @@ static void message(const char *title,const char *detail){
     }
     if(status==PN_OK && !locked){status=pn_font_size(&font,34);if(status==PN_OK)status=pn_w_button(&font,&frame,"重试",32,1090,620,96,PN_W_SELECTED);}
     if(status==PN_OK)status=present(NULL,&frame,PN_REFRESH_GC16);
-    pn_font_close(&font);pn_free(pixels);if(status!=PN_OK)ESP_LOGE(TAG,"Message unavailable: %d",(int)status);
+    management_font_end(&font);pn_free(pixels);if(status!=PN_OK)ESP_LOGE(TAG,"Message unavailable: %d",(int)status);
 }
 static bool mount_data(void){
     esp_vfs_littlefs_conf_t config={.base_path="/data",.partition_label="data",.format_if_mount_failed=false,.read_only=false,.dont_mount=false,.grow_on_mount=false};
@@ -384,7 +396,7 @@ static bool mount_wallpaper(void){
 static void show_lock(const char *hint){
     reading_menu=false;pn_toc_ui_close(&toc);pn_bookmark_ui_cancel(&bookmarks);pn_style_ui_close(&styles);pn_font_ui_close(&fonts);pn_wallpaper_ui_close(&wallpaper_ui);pn_font_manage_close(&font_manage);pn_settings_ui_close(&settings_ui);
     status_page=true;shelf_mode=false;index_mode=false;search_mode=false;hub_mode=false;actions_mode=false;
-    uint8_t *pixels=pn_alloc_tagged(&pool,PN_MEM_FRAME,PN_WALLPAPER_BYTES);pn_frame_t frame;pn_font_t font={0};pn_text_source_t builtin=pn_font_builtin_source();
+    uint8_t *pixels=pn_alloc_tagged(&pool,PN_MEM_FRAME,PN_WALLPAPER_BYTES);pn_frame_t frame;pn_font_t font={0};
     pn_lock_selection_t selection={.mode=PN_LOCK_DEFAULT,.hint=true};
     pn_status_t status=pn_frame_bind(&frame,pixels,PN_WALLPAPER_BYTES,PN_WALLPAPER_WIDTH,PN_WALLPAPER_HEIGHT)?PN_OK:PN_NO_MEMORY;
     if(status==PN_OK && mount_wallpaper()){pn_wallpaper_store_t store;pn_media_lease_t lease;
@@ -402,10 +414,10 @@ static void show_lock(const char *hint){
         if(mask!=PN_OK)selection=(pn_lock_selection_t){.mode=PN_LOCK_DEFAULT,.hint=true};
     }
     if(selection.mode==PN_LOCK_SIMPLE || selection.mode==PN_LOCK_BOOK)selection=(pn_lock_selection_t){.mode=PN_LOCK_DEFAULT,.hint=true};
-    if(status==PN_OK)status=pn_font_open(&font,&pool,&builtin,32);
+    if(status==PN_OK)status=management_font_begin(&font,32);
     if(status==PN_OK)status=pn_lock_render(&selection,&font,hint,&frame);
     if(status==PN_OK)status=present(NULL,&frame,PN_REFRESH_GC16);
-    pn_font_close(&font);pn_free(pixels);
+    management_font_end(&font);pn_free(pixels);
     if(status!=PN_OK){ESP_LOGE(TAG,"Lock screen unavailable: %d",(int)status);message("已锁屏",hint);}
 }
 static bool stop_reader(void){
@@ -480,13 +492,13 @@ static pn_status_t favorites_ensure(void){
 }
 static pn_status_t draw_shelf(pn_refresh_t profile){
     ESP_LOGI(TAG,"Shelf draw profile=%u home=%u covers_dirty=%u",(unsigned)profile,(unsigned)home_mode,(unsigned)covers_dirty);
-    uint8_t *pixels=pn_alloc_tagged(&pool,PN_MEM_FRAME,684u*1216u/2u);pn_frame_t frame;pn_font_t font={0};pn_text_source_t builtin=pn_font_builtin_source();
+    uint8_t *pixels=pn_alloc_tagged(&pool,PN_MEM_FRAME,684u*1216u/2u);pn_frame_t frame;pn_font_t font={0};
     pn_status_t status=pn_frame_bind(&frame,pixels,684u*1216u/2u,684,1216)?PN_OK:PN_NO_MEMORY;
-    if(status==PN_OK)status=pn_font_open(&font,&pool,&builtin,24);
+    if(status==PN_OK)status=management_font_begin(&font,24);
     if(status==PN_OK){pn_w_set_battery(battery_percent());pn_shelf_options_t options=shelf_options();if(favorites_ensure()==PN_OK)options.favorite_items=favorites;status=pn_shelf_render_with_font_file_ex(shelf_page,&font,&frame,shelf_focus,recent_mode,true,shelf_covers,&pool,&sd_media,NULL,&options);}
     // 书籍操作面板叠在书架上（删除确认为整页）。/ The book actions sheet overlays the shelf (the delete confirmation is a full page).
     if(status==PN_OK)status=present(NULL,&frame,profile);
-    pn_font_close(&font);pn_free(pixels);return status;
+    management_font_end(&font);pn_free(pixels);return status;
 }
 /// 空闲时解码一本封面；整页完成后一次GL16重绘，避免逐本闪屏。/ Decode one cover per idle tick; redraw once with GL16 after the page completes to avoid per-book flashing.
 /// 返回本轮是否做了封面/重画工作。/ Return whether this round did cover or redraw work.
@@ -564,12 +576,12 @@ static void show_shelf(const char *cursor,bool previous){
 /// 缓存预算查询由设备port提供，不用TF大小推断内部状态容量。/ The device port reports cache capacity without inferring internal-state space from TF size.
 static pn_status_t index_space(void *ctx,uint64_t *available){(void)ctx;size_t total=0,used=0;if(esp_littlefs_info("data",&total,&used)!=ESP_OK || used>total)return PN_IO;*available=total-used;return PN_OK;}
 static pn_status_t show_loading(const char *path){
-    uint8_t *pixels=pn_alloc_tagged(&pool,PN_MEM_FRAME,342u*1216u);pn_frame_t frame;pn_font_t font={0};pn_text_source_t source=pn_font_builtin_source();
-    pn_status_t status=pn_frame_bind(&frame,pixels,342u*1216u,684,1216)?pn_font_open(&font,&pool,&source,28):PN_NO_MEMORY;
+    uint8_t *pixels=pn_alloc_tagged(&pool,PN_MEM_FRAME,342u*1216u);pn_frame_t frame;pn_font_t font={0};
+    pn_status_t status=pn_frame_bind(&frame,pixels,342u*1216u,684,1216)?management_font_begin(&font,28):PN_NO_MEMORY;
     const char *title=strrchr(path,'/');title=title?title+1:path;
     if(status==PN_OK)status=pn_reader_loading_render(&font,&frame,title);
     if(status==PN_OK)status=present(NULL,&frame,panel_known?PN_REFRESH_GL16:PN_REFRESH_GC16);
-    pn_font_close(&font);pn_free(pixels);return status;
+    management_font_end(&font);pn_free(pixels);return status;
 }
 static void start_reader_impl(void){
     if(transfer.impl || usb.open)return;
@@ -655,12 +667,12 @@ static void handle_network_request(void){
     (void)pn_device_transfer_network_result(&transfer,status,saved_network);
 }
 static void paint_transfer(bool menu){
-    uint8_t *pixels=pn_alloc_tagged(&pool,PN_MEM_FRAME,684u*1216u/2u);pn_frame_t frame;pn_font_t font={0};pn_text_source_t builtin=pn_font_builtin_source();
+    uint8_t *pixels=pn_alloc_tagged(&pool,PN_MEM_FRAME,684u*1216u/2u);pn_frame_t frame;pn_font_t font={0};
     pn_status_t status=pn_frame_bind(&frame,pixels,684u*1216u/2u,684,1216)?PN_OK:PN_NO_MEMORY;
-    if(status==PN_OK)status=pn_font_open(&font,&pool,&builtin,32);
+    if(status==PN_OK)status=management_font_begin(&font,32);
     if(status==PN_OK)status=menu?pn_reading_menu_render_lan(reader_active(),*saved_network?saved_network:NULL,&font,&frame):pn_transfer_view_render(&transfer_view,&font,&frame);
     if(status==PN_OK)status=present(NULL,&frame,panel_known?PN_REFRESH_GL16:PN_REFRESH_GC16);
-    pn_font_close(&font);pn_free(pixels);
+    management_font_end(&font);pn_free(pixels);
     if(status==PN_OK){status_page=true;shelf_mode=false;if(!menu)last_transfer_view=transfer_view;}
     else if(!menu)last_transfer_view.phase=(pn_transfer_view_phase_t)-1;
 }
@@ -781,12 +793,12 @@ static void lock_and_sleep(const char *hint){
 /// 字母跳转页。/ Letter-index page.
 /// 打开搜索输入页；沿用字母页的状态约定（不在书架模式）。/ Open the search input page, following the letter-index page's state conventions (not in shelf mode).
 static void show_search(void){
-    uint8_t *pixels=pn_alloc_tagged(&pool,PN_MEM_FRAME,684u*1216u/2u);pn_frame_t frame;pn_font_t font={0};pn_text_source_t builtin=pn_font_builtin_source();
+    uint8_t *pixels=pn_alloc_tagged(&pool,PN_MEM_FRAME,684u*1216u/2u);pn_frame_t frame;pn_font_t font={0};
     pn_status_t status=pn_frame_bind(&frame,pixels,684u*1216u/2u,684,1216)?PN_OK:PN_NO_MEMORY;
-    if(status==PN_OK)status=pn_font_open(&font,&pool,&builtin,40);
+    if(status==PN_OK)status=management_font_begin(&font,40);
     if(status==PN_OK)status=pn_search_ui_render(&search_ui,&font,&frame);
     if(status==PN_OK)status=present(NULL,&frame,PN_REFRESH_GL16);
-    pn_font_close(&font);pn_free(pixels);
+    management_font_end(&font);pn_free(pixels);
     if(status==PN_OK){search_mode=true;shelf_mode=false;status_page=true;}
 }
 /// 存储卡容量说明（实际读取，读不到为空串）。/ Card capacity note from an actual read; empty when unreadable.
@@ -815,23 +827,23 @@ static void show_hub(void){
     refresh_network_name();storage_note(hub_storage,sizeof hub_storage);
     pn_device_usb_port_t usb_port=pn_device_usb_board_port();
     hub_info=(pn_transfer_hub_info_t){.hotspot=true,.lan=*saved_network!=0,.localsend=true,.usb=usb_port.start!=NULL,.lan_name=saved_network,.storage=hub_storage};
-    uint8_t *pixels=pn_alloc_tagged(&pool,PN_MEM_FRAME,684u*1216u/2u);pn_frame_t frame;pn_font_t font={0};pn_text_source_t builtin=pn_font_builtin_source();
+    uint8_t *pixels=pn_alloc_tagged(&pool,PN_MEM_FRAME,684u*1216u/2u);pn_frame_t frame;pn_font_t font={0};
     pn_status_t status=pn_frame_bind(&frame,pixels,684u*1216u/2u,684,1216)?PN_OK:PN_NO_MEMORY;
-    if(status==PN_OK)status=pn_font_open(&font,&pool,&builtin,28);
+    if(status==PN_OK)status=management_font_begin(&font,28);
     if(status==PN_OK)status=pn_transfer_hub_render(&font,&frame,&hub_info);
     if(status==PN_OK)status=present(NULL,&frame,PN_REFRESH_GL16);
-    pn_font_close(&font);pn_free(pixels);
+    management_font_end(&font);pn_free(pixels);
     if(status==PN_OK){shelf_mode=false;index_mode=false;search_mode=false;hub_mode=true;status_page=true;}
     else message("传书页未打开","稍后重试");
 }
 /// USB状态页仅使用内置字体；TF移交期间不可访问外置资源。/ USB status uses built-in fonts only; external resources are forbidden during TF handoff.
 static void paint_usb(void){
-    uint8_t *pixels=pn_alloc_tagged(&pool,PN_MEM_FRAME,PN_HW_FRAME_BYTES);pn_frame_t f;pn_font_t font={0};pn_text_source_t source=pn_font_builtin_source();
+    uint8_t *pixels=pn_alloc_tagged(&pool,PN_MEM_FRAME,PN_HW_FRAME_BYTES);pn_frame_t f;pn_font_t font={0};
     pn_status_t s=pn_frame_bind(&f,pixels,PN_HW_FRAME_BYTES,684,1216)?PN_OK:PN_NO_MEMORY;
-    if(s==PN_OK)s=pn_font_open(&font,&pool,&source,28);
+    if(s==PN_OK)s=management_font_begin(&font,28);
     if(s==PN_OK)s=pn_usb_view_render(&usb_view,&font,&f);
     if(s==PN_OK)s=present(NULL,&f,PN_REFRESH_GL16);
-    pn_font_close(&font);pn_free(pixels);
+    management_font_end(&font);pn_free(pixels);
     if(s==PN_OK){last_usb_view=usb_view;usb_draw_at=now_ms();}
 }
 /// 保存并关闭全部TF消费者，再取得USB独占；没有插线也可等待枚举。/ Save/close all TF consumers before exclusive USB ownership, allowing enumeration wait without a cable.
@@ -864,12 +876,12 @@ static void tick_usb(uint64_t now){
     if(now-usb_draw_at>=500 && memcmp(&usb_view,&last_usb_view,sizeof usb_view))paint_usb();
 }
 static void show_index(void){
-    uint8_t *pixels=pn_alloc_tagged(&pool,PN_MEM_FRAME,684u*1216u/2u);pn_frame_t frame;pn_font_t font={0};pn_text_source_t builtin=pn_font_builtin_source();
+    uint8_t *pixels=pn_alloc_tagged(&pool,PN_MEM_FRAME,684u*1216u/2u);pn_frame_t frame;pn_font_t font={0};
     pn_status_t status=pn_frame_bind(&frame,pixels,684u*1216u/2u,684,1216)?PN_OK:PN_NO_MEMORY;
-    if(status==PN_OK)status=pn_font_open(&font,&pool,&builtin,40);
+    if(status==PN_OK)status=management_font_begin(&font,40);
     if(status==PN_OK)status=pn_shelf_index_render(&font,&frame);
     if(status==PN_OK)status=present(NULL,&frame,PN_REFRESH_GL16);
-    pn_font_close(&font);pn_free(pixels);
+    management_font_end(&font);pn_free(pixels);
     if(status==PN_OK){index_mode=true;shelf_mode=false;status_page=true;}
 }
 /// 屏下三键：阅读KEY1/3翻页、KEY2菜单、长按KEY2回书架；书架KEY1/3翻书目页；菜单KEY2返回。/ Touch keys: reading KEY1/3 turn pages, KEY2 opens the menu and a long KEY2 returns to the shelf; shelf KEY1/3 page the catalog; menu KEY2 goes back.
@@ -878,10 +890,10 @@ static unsigned tool_unavailable(void){return epub.impl?0u:1u;}
 /// 在最近一页上叠加工具栏并呈现；失败时保持原页面。/ Overlay the toolbar on the latest page and present it; the page stays on failure.
 static void toolbar_show(void){
     if(toolbar_open || !reader_active() || status_page || !page_copy)return;
-    pn_frame_t frame;pn_font_t font={0};pn_text_source_t builtin=pn_font_builtin_source();
-    pn_status_t status=pn_frame_bind(&frame,page_copy,342u*1216u,684,1216)?pn_font_open(&font,&pool,&builtin,34):PN_INVALID;
+    pn_frame_t frame;pn_font_t font={0};
+    pn_status_t status=pn_frame_bind(&frame,page_copy,342u*1216u,684,1216)?management_font_begin(&font,34):PN_INVALID;
     if(status==PN_OK){toolbar_open=true;status=pn_reader_toolbar_present(&pool,&font,&frame,tool_unavailable(),progress_save_failed?"保存失败，当前页保留，稍后重试":reader_notice,present,NULL);if(status!=PN_OK)toolbar_open=false;}
-    pn_font_close(&font);if(status!=PN_OK)ESP_LOGW(TAG,"Toolbar: %d",(int)status);
+    management_font_end(&font);if(status!=PN_OK)ESP_LOGW(TAG,"Toolbar: %d",(int)status);
 }
 /// 关闭工具栏并恢复原页面；强刷传PN_REFRESH_GC16。/ Close the toolbar and restore the page; pass PN_REFRESH_GC16 for a full refresh.
 static void toolbar_close(pn_refresh_t profile){
@@ -937,17 +949,17 @@ static void open_actions(int index){
     // 成功底图直接叠加面板，按需准备面板文字；不扫描目录或重绘封面。/ Overlay the confirmed shelf with the sheet's glyphs, without directory scans or cover painting.
     pn_status_t status=PN_UNSUPPORTED;
     if(panel_known){
-        uint8_t *pixels=pn_alloc_tagged(&pool,PN_MEM_FRAME,342u*1216u);pn_frame_t frame;pn_font_t font={0};pn_text_source_t source=pn_font_builtin_source();
+        uint8_t *pixels=pn_alloc_tagged(&pool,PN_MEM_FRAME,342u*1216u);pn_frame_t frame;pn_font_t font={0};
         status=pn_frame_bind(&frame,pixels,342u*1216u,684,1216)?PN_OK:PN_NO_MEMORY;
         if(status==PN_OK)status=pn_device_frame_restore(hardware.hl.back_fb,684u*1216u/2u,&frame);
-        if(status==PN_OK)status=pn_font_open(&font,&pool,&source,24);
+        if(status==PN_OK)status=management_font_begin(&font,24);
         pn_w_font_scope_t scope={0};
         if(status==PN_OK)status=pn_w_font_scope_begin(&scope,&pool,NULL);
         if(status==PN_OK)status=pn_book_actions_render(&actions,&font,&frame);
         pn_w_font_scope_end(&scope);
         paint_ms=now_ms()-started-favorites_ms;
         if(status==PN_OK)status=present(NULL,&frame,PN_REFRESH_GL16);
-        pn_font_close(&font);pn_free(pixels);
+        management_font_end(&font);pn_free(pixels);
     }else status=draw_shelf(PN_REFRESH_GL16);
     ESP_LOGI(TAG,"Actions favorites=%llu ms paint=%llu ms total=%llu ms status=%d",(unsigned long long)favorites_ms,(unsigned long long)paint_ms,(unsigned long long)(now_ms()-started),(int)status);
     if(status!=PN_OK){actions_mode=false;ESP_LOGW(TAG,"Book actions present failed");}
