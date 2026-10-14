@@ -68,7 +68,7 @@ test("page distinguishes post-verify reset failure from write failure", async ()
     resetAfterFlash: async () => { resetCalls++; throw new Error("reset unavailable"); }, md5 });
   const source = readFileSync(join(root, "installer/app.js"), "utf8").replace(/^import .*;\r?$/gm, "").replace("init().then(syncButtons);", "");
   vm.runInContext(source, context);
-  const setup = "state.loader=loader;state.device={portInfo:{}};state.plan={steps:[{name:'app',address:0x20000,data:files.app}]};";
+  const setup = "state.release={mode:'app-only'};document.getElementById('confirm-model').checked=true;state.loader=loader;state.device={portInfo:{}};state.plan={steps:[{name:'app',address:0x20000,data:files.app}]};";
   await vm.runInContext(setup + "install();", context);
   assert.equal(resetCalls, 1);
   assert.match(document.getElementById("status").textContent, /固件写入校验成功，自动复位未完成/);
@@ -130,24 +130,55 @@ test("upgrade on a blank data partition writes the first-install images", () => 
   assert.deepEqual(names(plan), ["write@0x20000", "write@0xf000", "write@0xc20000", "write@0xf00000", "write@0x0"]);
 });
 
-test("factory-style layout keeps old NVS sectors and clears the rest", () => {
+test("foreign layout never silently clears NVS; explicit choice enables migration", () => {
   const factory = table([["nvs", 1, 2, 0x9000, 0x5000], ["phy_init", 1, 1, 0xe000, 0x1000], ["factory", 0, 0, 0x10000, 0x200000], ["spiffs", 1, 0x82, 0x210000, 0x500000]]);
   const plan = planInstall({ files, deviceTable: factory, dataHead: blankHead, wallpaperHead: blankHead });
   assert.equal(plan.mode, "install");
   assert.ok(plan.knownTable);
-  assert.deepEqual(plan.keptNvs, [0x9000, 0xa000, 0xb000, 0xc000, 0xd000]);
-  assert.deepEqual(names(plan), ["write@0x20000", "write@0xf000", "erase@0xe000", "write@0xc20000", "write@0xf00000", "write@0x0", `write@0x${TABLE_OFFSET.toString(16)}`]);
-  assert.ok(plan.steps.find((s) => s.address === 0xe000).data.every((b) => b === 0xff));
+  assert.deepEqual(plan.keptNvs, [0x9000, 0xa000, 0xb000, 0xc000, 0xd000, 0xe000]);
+  assert.ok(plan.needsNvsClear);
+  assert.equal(plan.steps.filter((s) => s.kind === "erase").length, 0);
+  assert.deepEqual(names(plan), ["write@0x20000", "write@0xf000", "write@0xc20000", "write@0xf00000", "write@0x0", `write@0x${TABLE_OFFSET.toString(16)}`]);
+  const cleared = planInstall({ files, deviceTable: factory, dataHead: blankHead, wallpaperHead: blankHead, clearNvs: true });
+  assert.equal(cleared.needsNvsClear, false);
+  assert.equal(cleared.steps.filter((s) => s.kind === "erase").length, 6);
   assert.ok(!plan.steps.at(-2).optional, "bootloader is always written when switching layout");
 });
 
-test("unknown layout clears the whole NVS range; clearNvs does the same on upgrade", () => {
+test("unknown layout requires explicit NVS clearing; no automatic erases", () => {
   const plan = planInstall({ files, deviceTable: new Uint8Array(0xc00).fill(0xff), dataHead: blankHead, wallpaperHead: blankHead });
   assert.ok(!plan.knownTable);
-  assert.equal(plan.steps.filter((s) => s.kind === "erase").length, 6);
+  assert.equal(plan.steps.filter((s) => s.kind === "erase").length, 0);
+  assert.ok(plan.needsNvsClear);
   const cleared = planInstall({ files, deviceTable: files.partitionTable, dataHead: fsHead, wallpaperHead: fsHead, clearNvs: true });
   assert.equal(cleared.steps.filter((s) => s.kind === "erase").length, 6);
   assert.deepEqual(cleared.keptNvs, []);
+});
+
+test("full migration initializes incompatible nonblank storage only by explicit choice", () => {
+  const foreign = table([["nvs", 1, 2, 0x9000, 0x6000], ["factory", 0, 0, 0x10000, 0x600000]]);
+  const input = { files, deviceTable: foreign, dataHead: fsHead, wallpaperHead: fsHead };
+  const plan = planInstall(input);
+  assert.ok(plan.needsStorageInitialization);
+  assert.equal(plan.needsNvsClear, false);
+  assert.ok(!plan.steps.some((s) => s.address === 0xc20000 || s.address === 0xf00000));
+  const initialized = planInstall({ ...input, initializeStorage: true });
+  assert.equal(initialized.needsStorageInitialization, false);
+  assert.ok(initialized.steps.some((s) => s.address === 0xc20000));
+  assert.ok(initialized.steps.some((s) => s.address === 0xf00000));
+  assert.equal(initialized.steps.at(-1).address, TABLE_OFFSET);
+  const recognized = planInstall({ ...input, deviceTable: files.partitionTable, initializeStorage: true });
+  assert.ok(recognized.steps.some((s) => s.address === 0xc20000), "explicit initialization also clears recognized data");
+});
+
+test("full package rejects missing images, wrong sizes, short table reads and overlapping layout", () => {
+  const input = { files, deviceTable: files.partitionTable, dataHead: fsHead, wallpaperHead: fsHead };
+  assert.throws(() => planInstall({ ...input, deviceTable: files.partitionTable.slice(0, 32) }), /读取不完整/);
+  for (const key of ["app", "bootloader", "otaData", "factoryData", "factoryWallpaper"])
+    assert.throws(() => planInstall({ ...input, files: { ...files, [key]: undefined } }), /缺少/);
+  assert.throws(() => planInstall({ ...input, files: { ...files, factoryData: fsHead } }), /大小无效/);
+  const overlap = table(parseTable(files.partitionTable).map((e) => [e.label, e.type, e.subtype, e.label === "data" ? 0x20000 : e.offset, e.size]));
+  assert.throws(() => planInstall({ ...input, files: { ...files, partitionTable: overlap } }), /范围无效/);
 });
 
 test("rejects an app larger than ota_0", () => {
@@ -226,4 +257,89 @@ test("preserving page reads only table, disables destructive options and clears 
   assert.equal(vm.runInContext("state.plan.steps.length", context), 1);
   await assert.rejects(vm.runInContext("state.loader.readFlash=async()=>new Uint8Array(0); prepare();", context), /不匹配/);
   assert.equal(vm.runInContext("state.plan", context), null);
+});
+
+test("page keeps connection after mismatch and supports explicit same-source full migration", async () => {
+  const elements = new Map();
+  const element = () => ({ checked: false, dataset: {}, style: {}, events: {}, children: [],
+    append(child) { this.children.push(child); }, replaceChildren() { this.children = []; }, addEventListener(name, fn) { this.events[name] = fn; } });
+  const document = { createElement: element, getElementById(id) { if (!elements.has(id)) elements.set(id, element()); return elements.get(id); } };
+  const foreign = table([["factory", 0, 0, 0x10000, 0x600000]]);
+  let writes = 0;
+  const loader = { async readFlash(address) { return address === TABLE_OFFSET ? foreign : fsHead; }, async writeFlash() { writes++; } };
+  const context = vm.createContext({ document, navigator: { serial: {} }, console: { ...console, error() {} }, files, loader,
+    isLittleFs, layoutOf, md5, planInstall, TABLE_OFFSET, TABLE_SIZE });
+  const source = readFileSync(join(root, "installer/app.js"), "utf8").replace(/^import .*;\r?$/gm, "").replace("init().then(syncButtons);", "");
+  vm.runInContext(source, context);
+  await vm.runInContext("state.files=files;state.release={mode:'app-only'};state.loader=loader;state.device={};prepare().catch(fail);", context);
+  assert.match(document.getElementById("status").textContent, /完整刷入/);
+  assert.equal(vm.runInContext("state.loader", context), loader);
+  assert.equal(document.getElementById("install").disabled, true);
+  document.getElementById("install-mode").value = "full";
+  vm.runInContext("state.manifest={releases:[{version:'1+abc',commit:'abc',mode:'app-only'},{version:'1+abc',commit:'abc',mode:'full',files:{app:{size:100}}}]};selectMode('abc');", context);
+  assert.equal(vm.runInContext("state.release.mode", context), "full");
+  assert.equal(document.getElementById("confirm-full").checked, false);
+  assert.equal(document.getElementById("clear-nvs").checked, false);
+  await vm.runInContext("state.files=files;prepare();", context);
+  document.getElementById("confirm-model").checked = true;
+  document.getElementById("confirm-full").checked = true;
+  vm.runInContext("syncButtons();", context);
+  await vm.runInContext("install();", context);
+  assert.equal(writes, 0, "confirmation cannot bypass required migration choices");
+  document.getElementById("clear-nvs").checked = true;
+  document.getElementById("clear-nvs").events.change();
+  assert.equal(document.getElementById("install").disabled, true);
+  document.getElementById("initialize-storage").checked = true;
+  document.getElementById("initialize-storage").events.change();
+  assert.equal(document.getElementById("install").disabled, false);
+  document.getElementById("confirm-full").checked = false;
+  vm.runInContext("syncButtons();", context);
+  assert.equal(document.getElementById("install").disabled, true);
+});
+
+test("short backup aborts before any flash write", async () => {
+  const elements = new Map();
+  const element = () => ({ checked: false, dataset: {}, style: {}, append() {}, replaceChildren() {}, addEventListener() {} });
+  const document = { createElement: element, getElementById(id) { if (!elements.has(id)) elements.set(id, element()); return elements.get(id); } };
+  let writes = 0;
+  const loader = { async readFlash() { return new Uint8Array(10); }, async writeFlash() { writes++; } };
+  const context = vm.createContext({ document, navigator: { serial: {} }, console: { ...console, error() {} }, loader, files, md5 });
+  const source = readFileSync(join(root, "installer/app.js"), "utf8").replace(/^import .*;\r?$/gm, "").replace("init().then(syncButtons);", "");
+  vm.runInContext(source, context);
+  await vm.runInContext("state.release={mode:'full'};state.loader=loader;state.device={};state.plan={steps:[]};document.getElementById('backup').checked=true;document.getElementById('confirm-model').checked=true;document.getElementById('confirm-full').checked=true;install();", context);
+  assert.equal(writes, 0);
+  assert.match(document.getElementById("status").textContent, /备份读取不完整/);
+  assert.match(document.getElementById("status").textContent, /尚未写入固件/);
+  assert.equal(vm.runInContext("state.plan", context), null);
+});
+
+test("release picker separates same-version modes, clears destructive choices and excludes legacy fallback", async () => {
+  const elements = new Map();
+  const element = () => ({ checked: false, dataset: {}, style: {}, events: {}, children: [],
+    append(child) { this.children.push(child); }, replaceChildren() { this.children = []; }, addEventListener(name, fn) { this.events[name] = fn; } });
+  const document = { createElement: element, getElementById(id) { if (!elements.has(id)) elements.set(id, element()); return elements.get(id); } };
+  const releases = [
+    { version: "1+abc", commit: "abc", mode: "app-only", files: { app: { size: 100 } } },
+    { version: "1+abc", commit: "abc", mode: "full", files: { app: { size: 100 } } },
+    { version: "0.0.57", mode: "full", legacy: true },
+  ];
+  const context = vm.createContext({ document, navigator: { serial: {} }, console, fetch: async () => ({ async json() { return { releases }; } }) });
+  const source = readFileSync(join(root, "installer/app.js"), "utf8").replace(/^import .*;\r?$/gm, "").replace("init().then(syncButtons);", "");
+  vm.runInContext(source, context);
+  await vm.runInContext("init();", context);
+  assert.equal(vm.runInContext("state.release.mode", context), "app-only");
+  const mode = document.getElementById("install-mode"); mode.value = "full"; mode.events.change();
+  assert.equal(document.getElementById("release").children.length, 1);
+  assert.equal(vm.runInContext("state.release.mode", context), "full");
+  document.getElementById("clear-nvs").checked = true;
+  document.getElementById("initialize-storage").checked = true;
+  document.getElementById("release").events.change();
+  assert.equal(vm.runInContext("state.release.mode", context), "full");
+  assert.equal(document.getElementById("clear-nvs").checked, false);
+  assert.equal(document.getElementById("initialize-storage").checked, false);
+  vm.runInContext("state.manifest.releases=state.manifest.releases.filter(r=>r.mode==='app-only'||r.legacy);selectMode();", context);
+  assert.equal(vm.runInContext("state.release", context), undefined);
+  assert.equal(document.getElementById("connect").disabled, true);
+  assert.equal(document.getElementById("install").disabled, true);
+  assert.match(document.getElementById("mode-note").textContent, /历史首装包/);
 });

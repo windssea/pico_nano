@@ -97,7 +97,9 @@ def main():
         docker = False
     elif args.action == "installer":
         # 网页安装器：测试写入计划并生成 build-dev/installer-site；不连接设备。/ Web installer: test the plan and build the site; no device access.
-        commands = [["node", "--test", "--test-reporter=tap", "tests/installer/plan.test.mjs"], [sys.executable, "tools/installer_site.py"]]
+        commands = [["node", "--test", "--test-reporter=tap", "tests/installer/plan.test.mjs"],
+                    [sys.executable, "-m", "unittest", "discover", "-s", "tests/installer", "-p", "test_*.py", "-v"],
+                    [sys.executable, "tools/installer_site.py"]]
         docker = False
     elif args.action in ("sdl", "sdl-run"):
         if docker:

@@ -54,6 +54,10 @@ function find(entries, predicate, what) {
 export function layoutOf(tableBytes) {
   const entries = parseTable(tableBytes);
   if (!entries) throw new Error("本固件分区表无效 / firmware partition table is invalid");
+  const ordered = [...entries].sort((a, b) => a.offset - b.offset);
+  if (ordered.some((e, i) => !e.size || e.offset < 0x9000 || e.offset % SECTOR || e.size % SECTOR ||
+      e.offset + e.size > 0x1000000 || (i && ordered[i - 1].offset + ordered[i - 1].size > e.offset)))
+    throw new Error("本固件分区范围无效 / invalid firmware partition bounds");
   return {
     nvs: find(entries, (e) => e.type === TYPE_DATA && e.subtype === SUBTYPE_NVS, "nvs"),
     otadata: find(entries, (e) => e.type === TYPE_DATA && e.subtype === SUBTYPE_OTA, "otadata"),
@@ -70,18 +74,16 @@ function sameBytes(a, b) {
 }
 
 /// 生成写入计划。输入为本固件文件、设备分区表与 data/wallpaper 头部或完整分区，以及用户选项。
-/// 计划只写需要的区域：不整片擦除；旧分区表里本就是 NVS 的扇区保留，其余落在新 NVS 范围内的扇区清空，
-/// 避免把旧系统的非 NVS 数据当成 NVS 页；勾选 clearNvs 时整段 NVS 清空。分区表最后写，降低断电后的不一致。
+/// 不整片擦除；NVS 默认保留，迁移有冲突时必须明确选择清除；分区表最后写。
 /// Build the write plan from firmware files, the device table, data/wallpaper heads or full partitions, and user options.
-/// Only needed regions are written; no whole-chip erase. Sectors that were NVS in the old table are kept and the rest of the
-/// new NVS range is cleared so foreign non-NVS bytes are never parsed as NVS pages; clearNvs clears the whole range.
+/// No whole-chip erase; preserve NVS by default and require explicit clearing when migration conflicts exist.
 /// The partition table is written last to narrow the inconsistent window on power loss.
 export function planInstall({ files, deviceTable, dataHead, wallpaperHead, clearNvs = false, initializeStorage = false, mode = "full" }) {
   const layout = layoutOf(files.partitionTable);
   const upgrade = sameBytes(deviceTable, files.partitionTable);
   // 专用升级包必须匹配已核对布局，禁止迁移或初始化。 / Dedicated upgrades must match the verified layout without migration or initialization.
   if (mode === "app-only") {
-    if (!upgrade) throw new Error("设备分区与专用升级包不匹配，停止写入 / device layout does not match this upgrade");
+    if (!upgrade) throw new Error("设备分区与专用升级包不匹配，停止写入。刷过其他固件请选择“完整刷入”，并核对备份与清除选项 / device layout mismatch; select full installation");
     if (clearNvs || initializeStorage) throw new Error("保留布局升级不能清除数据 / preserving upgrade cannot clear data");
     if (!files.app?.length || files.app.length > layout.app.size || layout.app.offset !== 0x20000)
       throw new Error("应用或升级地址无效 / invalid upgrade application or address");
@@ -90,6 +92,14 @@ export function planInstall({ files, deviceTable, dataHead, wallpaperHead, clear
     ] };
   }
   if (mode !== "full") throw new Error("未知安装模式 / unknown installation mode");
+  if (!(deviceTable instanceof Uint8Array) || deviceTable.length !== TABLE_SIZE)
+    throw new Error("设备分区表读取不完整，停止写入 / incomplete device partition read");
+  for (const key of ["bootloader", "otaData", "app", "factoryData", "factoryWallpaper"])
+    if (!(files[key] instanceof Uint8Array) || !files[key].length)
+      throw new Error(`完整刷入包缺少 ${key} / incomplete full installation package`);
+  if (files.bootloader.length > TABLE_OFFSET || files.otaData.length !== layout.otadata.size ||
+      files.factoryData.length !== layout.data.size || files.factoryWallpaper.length !== layout.wallpaper.size)
+    throw new Error("完整刷入镜像大小无效 / invalid full installation image sizes");
   const oldEntries = upgrade ? null : parseTable(deviceTable);
   const steps = [];
   const write = (name, address, data, reason, optional = false) => steps.push({ kind: "write", name, address, data, reason, optional });
@@ -100,15 +110,20 @@ export function planInstall({ files, deviceTable, dataHead, wallpaperHead, clear
   write("OTA 选择 / otadata", layout.otadata.offset, files.otaData, "从 ota_0 启动 / boot from ota_0");
 
   const keptNvs = [];
+  const conflictingNvs = [];
   for (let at = layout.nvs.offset; at < layout.nvs.offset + layout.nvs.size; at += SECTOR) {
     const wasNvs = upgrade || (oldEntries || []).some((e) => e.type === TYPE_DATA && e.subtype === SUBTYPE_NVS && e.offset <= at && at + SECTOR <= e.offset + e.size);
-    if (clearNvs || !wasNvs) blank(`NVS 扇区 0x${at.toString(16)}`, at, SECTOR, clearNvs ? "按选择清除设置 / cleared by choice" : "原先不是 NVS / was not NVS before");
+    if (!wasNvs) conflictingNvs.push(at);
+    if (clearNvs) blank(`NVS 扇区 0x${at.toString(16)}`, at, SECTOR, "按选择清除设置 / cleared by choice");
     else keptNvs.push(at);
   }
   // 只把完整分区全为FF视为空白；头部损坏或短读不能授权覆盖。/ Only a complete all-FF partition is blank; damaged headers or short reads never authorize replacement.
   const unrecognizedStorage = [];
   for (const [name, partition, bytes, image] of [["data", layout.data, dataHead, files.factoryData], ["wallpaper", layout.wallpaper, wallpaperHead, files.factoryWallpaper]]) {
-    if (isLittleFs(bytes)) continue;
+    // 头部相同不能证明其他布局的文件系统可迁移。/ A matching header does not establish filesystem compatibility across layouts.
+    const compatible = upgrade || (oldEntries || []).some((e) => e.label === partition.label && e.type === partition.type &&
+      e.subtype === partition.subtype && e.offset === partition.offset && e.size === partition.size);
+    if (compatible && isLittleFs(bytes) && !initializeStorage) continue;
     const empty = bytes instanceof Uint8Array && bytes.length === partition.size && bytes.every((b) => b === 0xff);
     if (!empty) unrecognizedStorage.push(name);
     if (empty || initializeStorage) write(name === "data" ? "内部数据 / data" : "锁屏壁纸 / wallpaper", partition.offset, image,
@@ -121,7 +136,9 @@ export function planInstall({ files, deviceTable, dataHead, wallpaperHead, clear
   for (const step of steps) {
     if (step.address % SECTOR) throw new Error(`地址未按扇区对齐 / unaligned address 0x${step.address.toString(16)}`);
   }
-  return { mode: upgrade ? "upgrade" : "install", knownTable: upgrade || !!oldEntries, keptNvs, unrecognizedStorage, steps };
+  return { mode: upgrade ? "upgrade" : "install", knownTable: upgrade || !!oldEntries, keptNvs, unrecognizedStorage,
+    needsNvsClear: conflictingNvs.length > 0 && !clearNvs,
+    needsStorageInitialization: !upgrade && unrecognizedStorage.length > 0 && !initializeStorage, steps };
 }
 
 /// 计算 MD5 十六进制摘要（esptool 校验写入用）。/ MD5 hex digest used to verify esptool writes.

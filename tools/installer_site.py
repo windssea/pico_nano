@@ -23,6 +23,32 @@ FILES = {
 OFFSETS = {"bootloader.bin": 0x0, "partition-table.bin": 0x8000}
 RELEASE = re.compile(r"pico_nano-(\d+(?:\.\d+)+)-esp32s3")
 UPGRADE = re.compile(r"pico_nano-(\d+(?:\.\d+)+)-([0-9a-f]{7})-upgrade")
+FULL = re.compile(r"pico_nano-(\d+(?:\.\d+)+)-([0-9a-f]{7})-full")
+
+
+def read_full(folder):
+    """校验同源码完整包的全部镜像，不借用历史引导文件。 / Validate every image in a full package without borrowing historical boot files."""
+    match = FULL.fullmatch(folder.name)
+    metadata = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
+    if (metadata.get("mode") != "full" or metadata.get("target") != "esp32s3" or
+            metadata.get("board") != "RDP-G01-W" or metadata.get("version") != match.group(1) or
+            not metadata.get("source_commit", "").startswith(match.group(2))):
+        raise SystemExit(f"{folder.name}: invalid full package identity")
+    files = {}
+    for key, name in FILES.items():
+        data = (folder / name).read_bytes()
+        entry = metadata["files"][name]
+        digest = hashlib.sha256(data).hexdigest()
+        if entry["sha256"] != digest or entry["bytes"] != len(data):
+            raise SystemExit(f"{folder.name}/{name}: checksum mismatch")
+        files[key] = {"name": name, "size": len(data), "sha256": digest}
+    if (files["partitionTable"]["size"] != 0xc00 or not 0 < files["app"]["size"] <= 0x600000 or
+            not 0 < files["bootloader"]["size"] <= 0x8000 or files["otaData"]["size"] != 0x2000 or
+            any(files[k]["size"] != 0x100000 for k in ("factoryData", "factoryWallpaper"))):
+        raise SystemExit(f"{folder.name}: invalid full image sizes")
+    version = f"{match.group(1)}+{match.group(2)}"
+    return {"version": version, "commit": metadata["source_commit"], "builtAt": metadata.get("built_at", ""),
+            "mode": "full", "verifiedOnHardware": False, "path": f"firmware/{version}-full/", "files": files, "_folder": folder}
 
 
 def read_upgrade(folder):
@@ -73,6 +99,8 @@ def read_release(folder):
     commit = re.search(r"源码提交：([0-9a-f]{7,40})", readme)
     return {
         "version": version,
+        "mode": "full",
+        "legacy": True,
         "commit": commit.group(1) if commit else "",
         "verifiedOnHardware": False,
         "path": f"firmware/{version}/",
@@ -90,6 +118,8 @@ def build(out):
             releases.append(read_release(folder))
         elif UPGRADE.fullmatch(folder.name):
             releases.append(read_upgrade(folder))
+        elif FULL.fullmatch(folder.name):
+            releases.append(read_full(folder))
     releases.sort(key=lambda r: (version_key(r["version"].split("+")[0]), r.get("mode") == "app-only", r.get("builtAt", "")), reverse=True)
     if not releases:
         raise SystemExit("releases/ has no pico_nano-<version>-esp32s3 folder")
