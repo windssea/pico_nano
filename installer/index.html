@@ -56,7 +56,7 @@
       <p id="plan-mode" class="pill"></p>
       <p id="plan-note" class="muted"></p>
       <ol id="plan-steps" class="plan"></ol>
-      <label class="check"><input type="checkbox" id="backup"> 先备份整片闪存（16 MiB，约 3–5 分钟，保存到下载文件夹）</label>
+      <label class="check"><input type="checkbox" id="backup"> 先备份整片闪存（16 MiB，耗时取决于串口速率，请等待进度完成，保存到下载文件夹）</label>
       <label class="check"><input type="checkbox" id="clear-nvs"> 清除设置区（NVS）：分区迁移有冲突或提示“NVS unavailable”时使用，会丢失原固件设置</label>
       <label class="check"><input type="checkbox" id="initialize-storage"> 清除并初始化内部数据与壁纸分区（包括已识别分区，会丢失原有阅读记录和壁纸，请先备份）</label>
       <label id="confirm-full-label" class="check" hidden><input type="checkbox" id="confirm-full"> 我确认完整刷入会替换引导程序、OTA 选择和必要的分区表，并接受计划中列出的清除内容</label>
@@ -97,7 +97,7 @@
       </details>
       <details>
         <summary>如何恢复原来的系统</summary>
-        <p>用安装前保存的整片备份写回 0x0：<code>esptool --chip esp32s3 -p COM? write-flash 0x0 read-pico-backup-….bin</code>。中途断开时设备会停在下载模式，可直接重新安装或写回备份。</p>
+        <p>用安装前保存的整片备份写回 0x0：<code>esptool --chip esp32s3 -p COM? write-flash 0x0 PicoNano-backup-….bin</code>。中途断开时设备会停在下载模式，可直接重新安装或写回备份。</p>
       </details>
       <details>
         <summary>命令行安装</summary>

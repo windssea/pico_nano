@@ -272,7 +272,7 @@ async function backup() {
     image.set(bytes, at);
   }
   progress("备份完成", 1, 1);
-  const name = `read-pico-backup-${state.device.mac.replaceAll(":", "")}-${new Date().toISOString().slice(0, 10)}.bin`;
+  const name = `PicoNano-backup-${state.device.mac.replaceAll(":", "")}-${new Date().toISOString().slice(0, 10)}.bin`;
   saveBlob(image, name);
   log(`备份已保存：${name}（SHA-256 ${await sha256(image)}）`);
 }
@@ -285,7 +285,7 @@ async function install() {
   let writeStarted = false;
   try {
     if ($("backup").checked) {
-      status("正在备份整片闪存，约需数分钟，请勿断开…");
+      status("正在备份整片闪存，请等待进度完成，期间请勿断开…");
       await backup();
     }
     const steps = [];
