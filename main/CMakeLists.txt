@@ -9,4 +9,8 @@ add_custom_command(OUTPUT ${transfer_assets} COMMAND ${PYTHON} ${CMAKE_CURRENT_S
 target_sources(${COMPONENT_LIB} PRIVATE ${transfer_assets})
 
 # 回调借用排空包装；复用组件保持原样。/ Callback-drain wrappers leave reused components unchanged.
-target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=tud_msc_read10_cb" "-Wl,--wrap=tud_msc_write10_cb" "-Wl,--wrap=tud_msc_capacity_cb" "-Wl,--wrap=tud_msc_test_unit_ready_cb" "-Wl,--wrap=tud_msc_start_stop_cb" "-Wl,--wrap=tud_msc_inquiry_cb")
+target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=tud_msc_read10_cb" "-Wl,--wrap=tud_msc_write10_cb" "-Wl,--wrap=tud_msc_capacity_cb" "-Wl,--wrap=tud_msc_test_unit_ready_cb")
+# TinyUSB本体定义这两个弱回调，--wrap不能拦截同对象内的定义；仅为适配层命名库实现。
+# TinyUSB defines these two weak callbacks in its own object, bypassing --wrap; name the library implementations only for the adapter.
+idf_component_get_property(pn_usb_library espressif__esp_tinyusb COMPONENT_LIB)
+target_compile_definitions(${pn_usb_library} PRIVATE tud_msc_start_stop_cb=pn_usb_library_start_stop_cb tud_msc_inquiry_cb=pn_usb_library_inquiry_cb)

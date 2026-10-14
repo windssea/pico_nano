@@ -46,13 +46,13 @@ extern int32_t __real_tud_msc_read10_cb(uint8_t,uint32_t,uint32_t,void *,uint32_
 extern int32_t __real_tud_msc_write10_cb(uint8_t,uint32_t,uint32_t,uint8_t *,uint32_t);
 extern bool __real_tud_msc_test_unit_ready_cb(uint8_t);
 extern void __real_tud_msc_capacity_cb(uint8_t,uint32_t *,uint16_t *);
-extern bool __real_tud_msc_start_stop_cb(uint8_t,uint8_t,bool,bool);
+extern bool pn_usb_library_start_stop_cb(uint8_t,uint8_t,bool,bool);
 int32_t __wrap_tud_msc_read10_cb(uint8_t l,uint32_t b,uint32_t o,void *p,uint32_t n){if(!enter_callback())return -1;int32_t r=__real_tud_msc_read10_cb(l,b,o,p,n);leave_callback();return r;}
 int32_t __wrap_tud_msc_write10_cb(uint8_t l,uint32_t b,uint32_t o,uint8_t *p,uint32_t n){if(!enter_callback())return -1;int32_t r=__real_tud_msc_write10_cb(l,b,o,p,n);leave_callback();return r;}
 bool __wrap_tud_msc_test_unit_ready_cb(uint8_t l){if(!enter_callback())return false;bool r=__real_tud_msc_test_unit_ready_cb(l);leave_callback();return r;}
 void __wrap_tud_msc_capacity_cb(uint8_t l,uint32_t *b,uint16_t *n){if(!enter_callback()){*b=0;*n=512;return;}__real_tud_msc_capacity_cb(l,b,n);leave_callback();}
-bool __wrap_tud_msc_start_stop_cb(uint8_t l,uint8_t p,bool s,bool e){if(!enter_callback())return false;bool r=__real_tud_msc_start_stop_cb(l,p,s,e);leave_callback();return r;}
-void __wrap_tud_msc_inquiry_cb(uint8_t l,uint8_t v[8],uint8_t p[16],uint8_t r[4]){(void)l;memset(v,' ',8);memset(p,' ',16);memset(r,' ',4);memcpy(v,"PicoNano",8);memcpy(p,"TF Card",7);memcpy(r,"066",3);}
+bool tud_msc_start_stop_cb(uint8_t l,uint8_t p,bool s,bool e){if(!enter_callback())return false;bool r=pn_usb_library_start_stop_cb(l,p,s,e);leave_callback();return r;}
+void tud_msc_inquiry_cb(uint8_t l,uint8_t v[8],uint8_t p[16],uint8_t r[4]){(void)l;memset(v,' ',8);memset(p,' ',16);memset(r,' ',4);memcpy(v,"PicoNano",8);memcpy(p,"TF Card",7);memcpy(r,"066",3);}
 static pn_status_t status(esp_err_t r){return r==ESP_OK?PN_OK:r==ESP_ERR_NO_MEM?PN_NO_MEMORY:r==ESP_ERR_NOT_FINISHED?PN_BUSY:PN_IO;}
 static pn_status_t unmount_local(void *ctx){
     (void)ctx;board.remount_started=false;

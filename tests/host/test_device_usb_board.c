@@ -2,6 +2,7 @@
  * 中文：真实板级代码的回调栅栏、异步写排空、PHY和失败重试。/ English: real board-code callback fences, deferred writes, PHY and failure retries. */
 #include "usb_board_stubs.h"
 #include <assert.h>
+#include <string.h>
 static bool mounted=true,host,msc,usb,storage,deferred,remount_busy,phy_fail,callback_stop;
 static unsigned order,storage_at,usb_at,msc_at,phy_at,host_at;
 static pn_device_usb_port_t port;
@@ -29,11 +30,15 @@ int32_t __real_tud_msc_read10_cb(uint8_t l,uint32_t b,uint32_t o,void *p,uint32_
 int32_t __real_tud_msc_write10_cb(uint8_t l,uint32_t b,uint32_t o,uint8_t *p,uint32_t n){(void)l;(void)b;(void)o;(void)p;assert(storage);return (int32_t)n;}
 bool __real_tud_msc_test_unit_ready_cb(uint8_t l){(void)l;return storage;}
 void __real_tud_msc_capacity_cb(uint8_t l,uint32_t *b,uint16_t *n){(void)l;assert(storage);*b=100;*n=512;}
-bool __real_tud_msc_start_stop_cb(uint8_t l,uint8_t p,bool s,bool e){(void)l;(void)p;(void)s;(void)e;return true;}
+bool pn_usb_library_start_stop_cb(uint8_t l,uint8_t p,bool s,bool e){(void)l;(void)p;(void)s;(void)e;return true;}
 extern int32_t __wrap_tud_msc_read10_cb(uint8_t,uint32_t,uint32_t,void *,uint32_t);
 extern int32_t __wrap_tud_msc_write10_cb(uint8_t,uint32_t,uint32_t,uint8_t *,uint32_t);
+extern bool tud_msc_start_stop_cb(uint8_t,uint8_t,bool,bool);
+extern void tud_msc_inquiry_cb(uint8_t,uint8_t *,uint8_t *,uint8_t *);
 int main(void){
     port=pn_device_usb_board_port();
+    uint8_t vendor[8],product[16],revision[4];tud_msc_inquiry_cb(0,vendor,product,revision);
+    assert(!memcmp(vendor,"PicoNano",8) && !memcmp(product,"TF Card",7));
     presence_result=PN_IO;assert(port.unmount(NULL)==PN_IO && mounted && !host);
     presence_result=PN_STALE_MEDIA;assert(port.unmount(NULL)==PN_STALE_MEDIA && mounted && !host);
     presence_result=PN_OK;
@@ -41,6 +46,7 @@ int main(void){
         assert(port.unmount(NULL)==PN_OK && port.start(NULL)==PN_OK && port.connected(NULL));
         callback_stop=true;assert(__wrap_tud_msc_read10_cb(0,0,0,NULL,512)==512);callback_stop=false;
         assert(__wrap_tud_msc_write10_cb(0,0,0,NULL,512)==-1);
+        assert(!tud_msc_start_stop_cb(0,0,false,true));
         deferred=true;assert(port.stop(NULL,351)==PN_BUSY && storage && host);
         deferred=false;phy_fail=true;assert(port.stop(NULL,400)==PN_IO && host && !storage && !usb && !msc);
         phy_fail=false;assert(port.stop(NULL,450)==PN_OK && !host);
