@@ -2,7 +2,7 @@
 
 这里只记简短结果；当前机制见[架构](ARCHITECTURE.md)，剩余门见[开发指南](DEVELOPMENT_PLAN.md)。2026-10-14归档前完整记录见[历史CHANGELOG](archive/2026-10-14/CHANGELOG.md)，早期版本细节不重复维护。
 
-## 2026-10-14：0.6.4 字形缓存扩容
+## 2026-10-14：发布0.6.4（ac87b2d）
 
 - 真机0.6.3启动确认：`DFS max=240 min=80 MHz light_sleep=1 status=ESP_OK`、`Sleep pin pulls set=7 failed=0`、触摸INT正常；输入正常。同书冷开4157→2770ms（整书SHA 3685→2314ms）。
 - 翻页冷字形光栅380–528ms：字形缓存384KiB/512槽只容约220个44px中文，不足一页，预热下一页会自我驱逐。扩为1024槽/704KiB，共享缓存池≥4MiB时1.5MiB；主机预热后前台光栅46/50→1/0。

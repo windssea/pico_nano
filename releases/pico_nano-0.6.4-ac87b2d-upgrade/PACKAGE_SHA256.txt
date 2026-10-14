@@ -1,0 +1,2 @@
+9e66046caf95b22e8de38a96e213a049d208683d600c415d7fc1b425a9148d4d  PicoNano-ac87b2d-upgrade.zip
+70f838f3f96efbc6b586fb0522dc10b0c791b39ec271f59b89dd47f7bca7bc39  PicoNano-web-installer-ac87b2d.zip
