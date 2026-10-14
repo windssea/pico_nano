@@ -237,6 +237,15 @@ static pn_status_t warm_glyph(void *ctx,const pn_page_glyph_t *g){app_t *a=ctx;i
 bool pn_reader_app_warm_pending(const pn_reader_app_t *app){
     const app_t *a=app?app->impl:NULL;return a && !a->suspended && !a->media_lost && !a->style_preview && !a->style_pending && !a->font_preview && !a->font_pending && !a->font_view && pn_reader_warm_pending(&a->reader);
 }
+/// 面板扫描期间的一小步：先为待确认页排下一页，再每次预热8个字形；不呈现、不改提交状态。
+/// One small step during a panel scan: lay out the page after the pending one, then warm 8 glyphs per call; never presents or changes committed state.
+pn_status_t pn_reader_app_overlap(pn_reader_app_t *app){
+    app_t *a=app?app->impl:NULL;
+    if(!a || a->suspended || a->media_lost || a->style_preview || a->style_pending || a->font_preview || a->font_pending || a->font_view)return PN_EMPTY;
+    pn_status_t status=pn_reader_prefetch(&a->reader);if(status==PN_OK)return PN_OK;if(status!=PN_EMPTY || !pn_reader_warm_pending(&a->reader))return PN_EMPTY;
+    pn_cache_class_t kind=a->pool->speculative_kind;pn_cache_speculate(a->pool,true);a->pool->speculative_kind=PN_CACHE_GLYPH;
+    pn_status_t warmed=pn_reader_warm_next(&a->reader,warm_glyph,a,8);a->pool->speculative_kind=kind;pn_cache_speculate(a->pool,false);return warmed==PN_OK?PN_OK:PN_EMPTY;
+}
 pn_status_t pn_reader_app_prefetch(pn_reader_app_t *app){
     if(!app || !app->impl)return PN_EMPTY;
     app_t *a=app->impl;

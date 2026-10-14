@@ -23,7 +23,10 @@ typedef struct {
     void *display_queue,*display_done;pn_status_t display_result; ///< IDF同步对象 / IDF synchronization objects
     void *input_task_handle,*display_task_handle; ///< 稳定任务句柄，仅诊断读取水位 / Stable task handles used only for diagnostic watermarks
     void *product_task; ///< 输入到达时通知的产品任务 / Product task notified when input arrives
+    pn_status_t (*overlap)(void *); ///< 等待扫描回执时由产品任务调用的小步工作，OK继续、其他停止 / Small product-task steps while awaiting a scan receipt; OK continues, anything else stops
+    void *overlap_ctx; ///< overlap上下文 / overlap context
     bool touch_wake; ///< 触摸INT中断可用 / Touch INT interrupt available
+    atomic_uint touch_reads,touch_errors,events_sent; ///< 输入健康计数，仅诊断 / Input-health counters for diagnostics only
 } pn_device_async_t;
 /// 在VCOM门与BSP初始化成功后启动端口；失败降级不启动半初始化硬件。/ Start after VCOM/BSP gates; failures degrade without using partially initialized hardware.
 void pn_device_async_start(pn_device_async_t *port,read_pico_handle_t *hardware,pn_reader_present_fn panel,void (*idle)(uint64_t),void (*off)(void));

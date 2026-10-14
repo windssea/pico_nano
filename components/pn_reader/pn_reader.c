@@ -19,12 +19,16 @@ static bool copy_page(pn_reader_t *r,pn_text_page_t *to,const pn_text_page_t *fr
 }
 static size_t neighbor_bytes(void *ctx){pn_reader_t *r=ctx;return pn_alloc_size(r->ahead.glyphs)+pn_alloc_size(r->behind.glyphs);}
 static void neighbor_drop(void *ctx){pn_reader_t *r=ctx;pn_free(r->ahead.glyphs);pn_free(r->behind.glyphs);r->ahead=(pn_text_page_t){0};r->behind=(pn_text_page_t){0};r->ahead_warm=0;}
+/// 邻页基准：待确认页（面板扫描期间）优先，否则已显示页。/ Neighbor base: the pending page (during a panel scan) first, else the visible page.
+static const pn_reader_anchor_t *neighbor_base(const pn_reader_t *r){return r->preparing?&r->pending.anchor:r->has_visible?&r->visible:NULL;}
 bool pn_reader_warm_pending(const pn_reader_t *r){
-    return r && !r->preparing && r->has_visible && r->ahead.valid && r->ahead_anchor.begin==r->visible.end && token_equal(r->token,r->neighbor_token) && r->ahead_warm<r->ahead.count;
+    const pn_reader_anchor_t *base=r?neighbor_base(r):NULL;
+    return base && r->ahead.valid && r->ahead_anchor.begin==base->end && token_equal(r->token,r->neighbor_token) && r->ahead_warm<r->ahead.count;
 }
 pn_status_t pn_reader_warm_next(pn_reader_t *r,pn_reader_warm_fn warm,void *ctx,size_t budget){
     if(!r || !warm || !budget || budget>64)return PN_INVALID;
-    if(r->preparing || !r->has_visible || !r->ahead.valid || r->ahead_anchor.begin!=r->visible.end || !token_equal(r->token,r->neighbor_token) || r->ahead_warm>=r->ahead.count)return PN_EMPTY;
+    const pn_reader_anchor_t *base=neighbor_base(r);
+    if(!base || !r->ahead.valid || r->ahead_anchor.begin!=base->end || !token_equal(r->token,r->neighbor_token) || r->ahead_warm>=r->ahead.count)return PN_EMPTY;
     pn_cache_pin(&r->cache);pn_status_t s=PN_OK;
     for(size_t i=0;i<budget && r->ahead_warm<r->ahead.count;i++){
         s=pn_cancel_checkpoint();if(s!=PN_OK)break;
@@ -36,10 +40,11 @@ pn_status_t pn_reader_warm_next(pn_reader_t *r,pn_reader_warm_fn warm,void *ctx,
 }
 void pn_reader_neighbors(pn_reader_t *r,pn_pool_t *pool){if(!r)return;if(r->neighbor_pool==pool){neighbor_drop(r);r->neighbor_token=r->token;return;}pn_cache_detach(&r->cache);neighbor_drop(r);r->neighbor_pool=pool;r->neighbor_token=r->token;if(pool)pn_cache_attach(pool,&r->cache,PN_CACHE_NEIGHBOR,r,neighbor_bytes,neighbor_drop);}
 static pn_status_t pn_reader_prefetch_impl(pn_reader_t *r){
-    if(!r || !r->neighbor_pool || !r->has_visible || r->preparing || r->visible.end>=r->decoder.source.size)return PN_EMPTY;
-    if(r->ahead.valid && r->ahead_anchor.begin==r->visible.end && token_equal(r->token,r->neighbor_token))return PN_EMPTY;
+    const pn_reader_anchor_t *base=r?neighbor_base(r):NULL;
+    if(!r || !r->neighbor_pool || !base || base->end>=r->decoder.source.size)return PN_EMPTY;
+    if(r->ahead.valid && r->ahead_anchor.begin==base->end && token_equal(r->token,r->neighbor_token))return PN_EMPTY;
     pn_page_glyph_t *nodes=pn_alloc_tagged(r->neighbor_pool,PN_MEM_LAYOUT,r->page.capacity*sizeof *nodes);if(!nodes)return PN_NO_MEMORY;
-    pn_reader_t copy=*r;copy.neighbor_pool=NULL;copy.cache=(pn_cache_owner_t){0};copy.page=(pn_text_page_t){.glyphs=nodes,.capacity=r->page.capacity};copy.preparing=false;copy.save=NULL;
+    pn_reader_t copy=*r;copy.neighbor_pool=NULL;copy.cache=(pn_cache_owner_t){0};copy.page=(pn_text_page_t){.glyphs=nodes,.capacity=r->page.capacity};copy.preparing=false;copy.save=NULL;copy.visible=*base;copy.has_visible=true;
     pn_reader_receipt_t result;pn_status_t status=pn_reader_prepare(&copy,PN_READ_NEXT,0,&result);
     if(status==PN_OK)status=pn_cancel_checkpoint();
     if(status==PN_OK){if(copy_page(r,&r->ahead,&copy.page)){r->ahead_anchor=result.anchor;r->neighbor_token=r->token;}else status=PN_NO_MEMORY;}

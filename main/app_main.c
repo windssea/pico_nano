@@ -197,6 +197,8 @@ static uint64_t rails_deadline_ms;
 /// 显示owner发布清理回执，产品owner下次操作消费。/ Display owner publishes a cleaning receipt for the next product operation.
 static atomic_bool full_clean_completed;
 static atomic_bool reading_presentation; ///< 此次显示的用途，独立于输入页面状态 / Purpose of this presentation, independent of input view state
+/// 一旦出现供数欠载就停用扫描期重叠，避免PSRAM争用反复触发恢复。/ Stop scan-time overlap after any line-queue underrun so PSRAM contention cannot keep triggering recovery.
+static atomic_bool overlap_disabled;
 /// 立即断开高压轨；未上电时无操作。/ Drop the HV rails now; no-op when already off.
 static void rails_release(void){if(rails_deadline_ms){rails_deadline_ms=0;epd_poweroff();}pn_device_power_busy(PN_POWER_RAILS,false);}
 /// 主循环调用：轨空闲满期后断电。/ Called by the main loop: power the rails down once the idle period has elapsed.
@@ -248,10 +250,13 @@ static pn_status_t present_panel(void *ctx,const pn_frame_t *frame,pn_refresh_t 
     // 已知参考帧的周期GC16直接全屏转换；无需先另做一次白场清除。/ Periodic GC16 with a known reference directly updates every pixel without an extra white-field clear.
     else if(mode==MODE_GC16)result=epd_hl_update_screen_full(&hardware.hl,MODE_GC16,25);
     else if(body_refresh){
-        // 32列对齐分带，正文清理不反复驱动整条灰色进度轨；页脚只更新实际变化。/ Split on a 32-column boundary so body cleaning does not drive the full gray rail; update only footer differences.
+        // 页脚未变时只全像素清理正文带，不驱动灰色进度轨；页脚变化时合并为一次整屏更新。
+        // 面板旋转90°，逻辑页脚是横跨全部物理行的窄列，单独再画一次也要扫完整帧（真机约+400ms，扫描877ms）。
+        // Without footer changes clean only the body band, leaving the gray rail undriven; with footer changes merge into one full-screen update.
+        // The panel is rotated 90 degrees, so the logical footer is a narrow column across every physical row and a separate draw costs a whole extra scan (about +400 ms on device, 877 ms scans).
         const int footer_band=PN_READER_FOOTER_BAND_Y;
-        result=epd_hl_update_area_full(&hardware.hl,MODE_GL16,25,(EpdRect){0,0,684,footer_band});
-        if(result==EPD_DRAW_SUCCESS)result=epd_hl_update_area(&hardware.hl,MODE_GL16,25,(EpdRect){0,footer_band,684,1216-footer_band});
+        bool footer=changed.width && changed.y+changed.height>footer_band;
+        result=epd_hl_update_area_full(&hardware.hl,MODE_GL16,25,(EpdRect){0,0,684,footer?1216:footer_band});
     }
     else{
         EpdRect box=changed;int limit=actions_mode && !actions.confirming?60:PARTIAL_MAX_PERCENT;
@@ -265,7 +270,7 @@ static pn_status_t present_panel(void *ctx,const pn_frame_t *frame,pn_refresh_t 
         // 供数不足：退回安全时钟，白场重建参考帧，目标帧保留在framebuffer。/ Underrun: fall back to the safe clock and rebuild the reference frame from white; the target stays in the framebuffer.
         ESP_LOGW(TAG,"Line queue underrun, pclk back to %d MHz",PCLK_SAFE_MHZ);
         read_pico_epd_set_pclk(PCLK_SAFE_MHZ);read_pico_epd_use_scan(READ_PICO_EPD_SCAN_FULL);
-        epd_clear();result=epd_hl_update_screen_from_white(&hardware.hl,MODE_GC16,25);mode=MODE_GC16;reason="underrun";
+        epd_clear();result=epd_hl_update_screen_from_white(&hardware.hl,MODE_GC16,25);mode=MODE_GC16;reason="underrun";atomic_store(&overlap_disabled,true);
     }
     uint64_t scanned_at=now_ms();(void)scanned_at;
     panel_known=result==EPD_DRAW_SUCCESS;
@@ -296,6 +301,10 @@ static pn_status_t present(void *ctx,const pn_frame_t *frame,pn_refresh_t profil
     pn_status_t status=present_impl(ctx,frame,profile);pn_profile_end(&span,status);return status;
 }
 static bool reader_active(void){return reader.impl || epub.impl;}
+/// 仅阅读翻页的扫描期间为待确认页准备下一页。/ Prepare the page after the pending one only during reading-turn scans.
+static pn_status_t reader_overlap(void *ctx){(void)ctx;
+    if(atomic_load(&overlap_disabled) || !atomic_load(&reading_presentation) || !reader_active())return PN_EMPTY;
+    return epub.impl?pn_epub_app_overlap(&epub):pn_reader_app_overlap(&reader);}
 static pn_status_t active_step(pn_reader_action_t action,uint64_t now){
     uint64_t started=now_ms();(void)started;
     pn_reader_app_refresh_period(&reader,pn_settings_refresh_pages(input_flags));
@@ -1099,7 +1108,7 @@ static void device_task(void *arg){
     pn_cache_attach(&pool,&cover_cache_owner,PN_CACHE_COVER,NULL,cover_bytes,cover_drop);
     pn_media_init(&sd_media);pn_media_init(&data_media);pn_media_init(&wallpaper_media);read_pico_pmu_drain_events();esp_fill_random(cover_salt,sizeof cover_salt);
     if(read_pico_pmu_report_ready()!=ESP_OK){ESP_LOGE(TAG,"PMU running handshake failed; display withheld");read_pico_deinit(&hardware);vTaskDelete(NULL);return;}
-    pn_device_async_start(&async_port,&hardware,present_panel,rails_idle_check,rails_release);pn_device_async_bind_product(&async_port);pn_device_power_sleep_pins();
+    pn_device_async_start(&async_port,&hardware,present_panel,rails_idle_check,rails_release);pn_device_async_bind_product(&async_port);async_port.overlap=reader_overlap;pn_device_power_sleep_pins();
     if(!async_port.input_active || !async_port.display_active)ESP_LOGW(TAG,"Async task startup degraded: input=%d display=%d",(int)async_port.input_active,(int)async_port.display_active);
     clock_read_boot(now_ms());
     show_boot_brand();
@@ -1119,6 +1128,12 @@ static void device_task(void *arg){
         pn_device_input_event_t queued={0};pn_status_t available=async_port.input_active?pn_device_async_take(&async_port,&queued):PN_EMPTY;
         // 有输入立即回到最高频；连续空闲约1秒才放锁，交互中不反复切频。/ Input returns to maximum at once; release only after about one second idle so interaction does not toggle frequency.
         if(available==PN_OK){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);}
+        // 输入健康：首个事件立即记录，之后计数变化时最多每分钟一行。/ Input health: log the first event at once, then at most one line a minute when counters change.
+        {static bool first_logged;static uint64_t health_at;static unsigned last_reads,last_errors,last_sent;unsigned reads=atomic_load(&async_port.touch_reads),errors=atomic_load(&async_port.touch_errors),sent=atomic_load(&async_port.events_sent);
+         if((available==PN_OK && !first_logged) || (now-health_at>=60000u && (reads!=last_reads || errors!=last_errors || sent!=last_sent))){
+            if(available==PN_OK && !first_logged){first_logged=true;ESP_LOGI(TAG,"Input first event kind=%d after boot=%llu ms",(int)queued.kind,(unsigned long long)(now-boot));}
+            else ESP_LOGI(TAG,"Input health reads=%u errors=%u events=%u touch_wake=%d",reads,errors,sent,(int)async_port.touch_wake);
+            health_at=now;last_reads=reads;last_errors=errors;last_sent=sent;}}
         pn_device_power_busy(PN_POWER_SESSION,transfer.impl!=NULL || time_sync.impl!=NULL);
         pn_async_begin(&async_port.input,&scope,available==PN_EMPTY);scope_active=true;
         if(available==PN_CANCELLED){pn_reader_input_cancel(&input);pn_key_cancel(&keys);int ignored;(void)pn_tap_feed(&tap,1,-1,false,&ignored);hold_hit=-1;touch_held=false;}

@@ -21,6 +21,9 @@ typedef struct {void *impl;} pn_reader_app_t; ///< 初始impl=NULL / Initially i
 pn_status_t pn_reader_app_prefetch(pn_reader_app_t *app);
 /// 下一页仍有字形待预热，调用方可缩短空闲间隔。/ Next-page glyphs remain to warm, so callers may shorten idle gaps.
 bool pn_reader_app_warm_pending(const pn_reader_app_t *app);
+/// 面板扫描期间的一小步，为待确认页准备下一页；OK表示做了工作，EMPTY表示无事可做或应停止。
+/// A small step during a panel scan preparing the page after the pending one; OK when work was done, EMPTY when idle or overlap should stop.
+pn_status_t pn_reader_app_overlap(pn_reader_app_t *app);
 
 typedef enum {
     PN_APP_OPEN=0, ///< 首次呈现/恢复 / First presentation or restore

@@ -67,9 +67,13 @@ int main(void){
     unsigned full_before=area_full_calls,diff_before=area_diff_calls;
     for(unsigned i=0;i<6;i++){pn_frame_rect(&probe_frame,100+(int)i*4,300,4,4,0);assert(present(NULL,&probe_frame,PN_REFRESH_GL16)==PN_OK);}
     assert(clear_calls==clean_before && gc_updates==gc_before);atomic_store(&reading_presentation,false);
-    assert(area_full_calls==full_before+6 && area_diff_calls==diff_before+6);
-    assert(last_full_area.y==0 && last_full_area.height==1152 && last_diff_area.y==1152 && last_diff_area.height==64);
-    atomic_store(&reading_presentation,true);footer_fault=true;pn_frame_rect(&probe_frame,300,500,4,4,0);
+    // 页脚未变：每页一次正文带全像素更新，不再单独画页脚。/ Footer unchanged: one full body-band update per page, no separate footer draw.
+    assert(area_full_calls==full_before+6 && area_diff_calls==diff_before);
+    assert(last_full_area.y==0 && last_full_area.height==1152);
+    // 页脚变化：合并为一次整屏更新。/ Footer changed: merged into one full-screen update.
+    atomic_store(&reading_presentation,true);full_before=area_full_calls;pn_frame_rect(&probe_frame,200,1180,8,8,0);
+    assert(present(NULL,&probe_frame,PN_REFRESH_GL16)==PN_OK && area_full_calls==full_before+1 && area_diff_calls==diff_before && last_full_area.height==1216);
+    atomic_store(&reading_presentation,true);footer_fault=true;pn_frame_rect(&probe_frame,300,1190,4,4,0);
     assert(present(NULL,&probe_frame,PN_REFRESH_GL16)==PN_IO && !panel_known);footer_fault=false;atomic_store(&reading_presentation,false);
     // 管理第24次实际更新才GC；不变帧不占预算，周期不插入额外clear。/ GC on management update 24; unchanged frames spend no budget and periodic refresh adds no clear.
     assert(present(NULL,&probe_frame,PN_REFRESH_GC16)==PN_OK);gc_before=gc_updates;

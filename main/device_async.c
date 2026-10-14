@@ -21,7 +21,7 @@ static uint64_t now_ms(void){return (uint64_t)(esp_timer_get_time()/1000);}
 // 空闲只需检查断轨期限（秒级），100ms足够且减少唤醒。/ Idle only checks the rail deadline (seconds), so 100 ms suffices with fewer wakeups.
 static void display_task(void *ctx){pn_device_async_t *p=ctx;for(;;){display_t job;if(xQueueReceive(p->display_queue,&job,pdMS_TO_TICKS(100))==pdTRUE){// 扫描期间行供数依赖CPU，持最高频锁防欠载。/ Line feeding during a scan is CPU-bound, so hold the max lock to avoid underruns.
             pn_device_power_busy(PN_POWER_DISPLAY,true);if(job.off){p->off();p->display_result=PN_OK;}else p->display_result=p->panel(NULL,job.frame,job.profile);pn_device_power_busy(PN_POWER_DISPLAY,false);xSemaphoreGive(p->display_done);}p->idle(now_ms());}}
-static void send(pn_device_async_t *p,const pn_device_input_event_t *input,bool navigation,bool urgent){pn_async_event_t e={.bytes=sizeof *input,.navigation=navigation,.urgent=urgent,.view=atomic_load(&p->input.view)};memcpy(e.payload,input,sizeof *input);(void)pn_async_send(&p->input,&e);
+static void send(pn_device_async_t *p,const pn_device_input_event_t *input,bool navigation,bool urgent){atomic_fetch_add(&p->events_sent,1);pn_async_event_t e={.bytes=sizeof *input,.navigation=navigation,.urgent=urgent,.view=atomic_load(&p->input.view)};memcpy(e.payload,input,sizeof *input);(void)pn_async_send(&p->input,&e);
     if(p->product_task)xTaskNotifyGive((TaskHandle_t)p->product_task);}
 static void input_task(void *ctx){
     pn_device_async_t *p=ctx;pn_key_t keys={0};pn_reader_input_t reader={0};unsigned empty=0;uint64_t last_power=0,last_hold=0;uint32_t old_view=0;int last_x=-1,last_y=-1;
@@ -29,7 +29,7 @@ static void input_task(void *ctx){
         uint64_t now=now_ms();uint32_t view=(uint32_t)atomic_load(&p->input.view);
         if(view!=old_view){pn_key_cancel(&keys);pn_reader_input_cancel(&reader);old_view=view;empty=0;}
         if(now-last_power>=100){last_power=now;if(read_pico_pmu_take_key_short()){pn_device_input_event_t e={.kind=PN_DASYNC_POWER,.at=now};send(p,&e,true,true);}}
-        if(p->hardware->touch_ready && view){cst836u_touch_t touch={0};bool valid=cst836u_read(p->hardware->touch,&touch)==ESP_OK;
+        if(p->hardware->touch_ready && view){cst836u_touch_t touch={0};bool valid=cst836u_read(p->hardware->touch,&touch)==ESP_OK;atomic_fetch_add(valid?&p->touch_reads:&p->touch_errors,1);
             int key=-1;pn_key_event_t ke=pn_key_feed(&keys,touch.count,touch.x,touch.y,valid,now,&key);
             bool body=atomic_load(&p->body);unsigned flags=atomic_load(&p->flags);
             if((view&0xffffu)==18u){
@@ -70,7 +70,11 @@ pn_status_t pn_device_async_present(pn_device_async_t *p,const pn_frame_t *frame
     if(p->display_active){display_t job={.frame=frame,.profile=profile};pn_profile_span_t span;
         pn_profile_begin(&span,NULL,"display.queue");bool queued=xQueueSend(p->display_queue,&job,pdMS_TO_TICKS(100))==pdTRUE;pn_profile_end(&span,queued?PN_OK:PN_BUSY);
         if(!queued)return PN_BUSY; // 队列交接前允许取消，扫描开始后等回执。/ Cancellation is allowed before handoff; once scanning starts, wait for its receipt.
-        pn_profile_begin(&span,NULL,"display.wait");bool completed=xSemaphoreTake(p->display_done,portMAX_DELAY)==pdTRUE;
+        pn_profile_begin(&span,NULL,"display.wait");bool completed=false;
+        // 扫描期间产品任务本会空等：在回执到达前做有界小步（为待确认页排下一页/预热字形），不碰被扫描的帧。
+        // The product task would idle during the scan: do bounded steps (lay out/warm the page after the pending one) before the receipt, never touching the scanned frame.
+        if(p->overlap)for(unsigned steps=0;steps<256u && !completed;steps++){completed=xSemaphoreTake(p->display_done,0)==pdTRUE;if(!completed && p->overlap(p->overlap_ctx)!=PN_OK)break;}
+        if(!completed)completed=xSemaphoreTake(p->display_done,portMAX_DELAY)==pdTRUE;
         pn_status_t status=completed?p->display_result:PN_IO;pn_profile_end(&span,status);return receipt(p,status);}
 #endif
     pn_device_power_busy(PN_POWER_DISPLAY,true);pn_status_t status=p->panel(NULL,frame,profile);pn_device_power_busy(PN_POWER_DISPLAY,false);

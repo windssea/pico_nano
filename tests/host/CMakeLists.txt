@@ -347,3 +347,7 @@ add_test(NAME epub_long_chapter COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SO
 add_executable(test_zip_scan test_zip_scan.c)
 target_link_libraries(test_zip_scan PRIVATE pn_core)
 add_test(NAME zip_scan COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_zip_scan.py $<TARGET_FILE:test_zip_scan>)
+add_executable(test_overlap test_overlap.c)
+target_link_libraries(test_overlap PRIVATE pn_core)
+target_link_options(test_overlap PRIVATE -Wl,--wrap=FT_Load_Glyph)
+add_test(NAME overlap COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_overlap.py $<TARGET_FILE:test_overlap>)

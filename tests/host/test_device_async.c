@@ -41,6 +41,9 @@ bool pn_device_touch_wake_wait(unsigned timeout_ms){vTaskDelay(timeout_ms);retur
 void xTaskNotifyGive(TaskHandle_t task){(void)task;atomic_fetch_add(&notified,1);}
 unsigned ulTaskNotifyTake(int clear,unsigned ticks){(void)clear;vTaskDelay(ticks);return 0;}
 TaskHandle_t xTaskGetCurrentTaskHandle(void){return (TaskHandle_t)&notified;}
+static atomic_uint overlap_calls;
+// 扫描等待期间被调用：前3次报告有工作，之后空闲。/ Called while awaiting the scan: report work three times, then idle.
+static pn_status_t count_overlap(void *ctx){(void)ctx;return atomic_fetch_add(&overlap_calls,1)<3u?PN_OK:PN_EMPTY;}
 static void idle(uint64_t now){(void)now;}
 static void off(void){atomic_fetch_add(&off_calls,1);}
 static pn_status_t panel(void *ctx,const pn_frame_t *frame,pn_refresh_t profile){(void)ctx;(void)profile;assert(pn_frame_get(frame,0,0)==7);assert(pn_device_power_held(PN_POWER_DISPLAY));atomic_store(&entered,true);while(!atomic_load(&release_panel))vTaskDelay(1);assert(pn_frame_get(frame,0,0)==7);return PN_OK;}
@@ -49,9 +52,10 @@ static void wait_entered(void){uint64_t end=ms()+1000;while(!atomic_load(&entere
 int main(void){
  read_pico_handle_t hw={.touch_ready=true};pn_device_async_t p;atomic_store(&reject,true);pn_device_async_start(&p,&hw,panel,idle,off);assert(!p.input_active && !p.display_active && !objects && !task_count);
  atomic_store(&reject,false);pn_device_async_start(&p,&hw,panel,idle,off);assert(p.input_active && p.display_active && objects==2 && task_count==2 && !p.touch_wake);pn_device_async_bind_product(&p);assert(p.product_task);pn_device_async_view(&p,15,true,0);vTaskDelay(35);
- thrd_t foreground;assert(thrd_create(&foreground,present,&p)==thrd_success);wait_entered();atomic_store(&x,342);atomic_store(&y,500);atomic_store(&count,1);vTaskDelay(35);atomic_store(&count,0);
+ p.overlap=count_overlap;thrd_t foreground;assert(thrd_create(&foreground,present,&p)==thrd_success);wait_entered();atomic_store(&x,342);atomic_store(&y,500);atomic_store(&count,1);vTaskDelay(35);atomic_store(&count,0);
  pn_device_input_event_t e;bool action=false;uint64_t end=ms()+1000;while(ms()<end && !action){if(pn_device_async_take(&p,&e)==PN_OK && e.kind==PN_DASYNC_ACTION){assert(e.action==PN_APP_NEXT);action=true;}else vTaskDelay(1);}assert(action && atomic_load(&entered) && !atomic_load(&release_panel) && atomic_load(&notified)>0); // 输入投递通知产品任务 / Input submissions notify the product task
- atomic_store(&release_panel,true);thrd_join(foreground,NULL);assert(!pn_device_power_held(PN_POWER_DISPLAY)); // 扫描期间持最高频锁，结束释放。/ The max lock is held during the scan and released afterwards.
+ atomic_store(&release_panel,true);thrd_join(foreground,NULL);assert(atomic_load(&overlap_calls)>=1 && atomic_load(&overlap_calls)<=4); // 有工作时继续，空闲后转为阻塞等待 / Continue while work remains, then block
+ assert(!pn_device_power_held(PN_POWER_DISPLAY)); // 扫描期间持最高频锁，结束释放。/ The max lock is held during the scan and released afterwards.
  assert(pn_device_async_off(&p) && atomic_load(&off_calls)==1);
  // 关闭三键翻页仍保留中键工具，左右键不发阅读动作。/ Disabling key turns retains middle-key tools and suppresses left/right reader keys.
  pn_device_async_view(&p,15,true,PN_INPUT_NO_KEYS);atomic_store(&x,240);atomic_store(&y,1300);atomic_store(&count,1);vTaskDelay(35);atomic_store(&count,0);bool middle=false;end=ms()+1000;
