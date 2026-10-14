@@ -29,7 +29,7 @@
 
 [sdkconfig.defaults](../sdkconfig.defaults) 是板级配置，[sdkconfig.ci](../sdkconfig.ci) 用于独立编译验证：当前板级 Flash/PSRAM 120MHz、64KiB 数据 cache、64B cache line、性能编译、1ms FreeRTOS tick、USB 控制台；CI 使用独立保守配置，不能相互覆盖。特定 Zbit 的温漂/时序兼容设置保持当前核对值，不自行修改标定、厂表或提频。
 
-CPU 已按 240MHz 使用，产品 owner 在核 1，输入/显示在核 0；LCD/GDMA 条带输出与经过启动自检的 SDK SHA 端口已接入。S3 的 SDMMC 不能直接 DMA 到 PSRAM，IDF 会按 16 扇区临时中转；整书摘要在内部余量足够时临时借 32KiB 内部 DMA 块，否则用内部对齐 4KiB 工作区，避免将 PSRAM 大缓冲误当成直接 DMA。配置启用不代表吞吐已达到上限，详见[架构的资源评估](ARCHITECTURE.md#性能利用与尚未发布的优化)。
+CPU 已按 240MHz 使用，产品 owner 在核 1，输入/显示在核 0；LCD/GDMA 条带输出与经过启动自检的 SDK SHA 端口已接入。S3 的 SDMMC 不能直接 DMA 到 PSRAM，IDF 会按 16 扇区临时中转；整书摘要在内部余量足够时临时借 32KiB 内部 DMA 块，否则用内部对齐 4KiB 工作区，避免将 PSRAM 大缓冲误当成直接 DMA。配置启用不代表吞吐已达到上限，详见[架构的资源评估](ARCHITECTURE.md#性能利用与阅读优化)。
 
 `CONFIG_ESP_PHY_ENABLE_USB` 在无线互斥适配中关闭；无线活动期暂停 USB 数据 PHY，退出并完成清理后恢复，供电/充电继续。插线射频影响的真实根因尚未确认，不能把这项候选修复视为硬件问题已经解决。
 
