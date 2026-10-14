@@ -21,8 +21,8 @@ FILES = {
 }
 # flash_args 中必须出现的固定偏移。/ Fixed offsets that flash_args must list.
 OFFSETS = {"bootloader.bin": 0x0, "partition-table.bin": 0x8000}
-RELEASE = re.compile(r"pico_nano-(\d+\.\d+\.\d+)-esp32s3")
-UPGRADE = re.compile(r"pico_nano-(\d+\.\d+\.\d+)-([0-9a-f]{7})-upgrade")
+RELEASE = re.compile(r"pico_nano-(\d+(?:\.\d+)+)-esp32s3")
+UPGRADE = re.compile(r"pico_nano-(\d+(?:\.\d+)+)-([0-9a-f]{7})-upgrade")
 
 
 def read_upgrade(folder):

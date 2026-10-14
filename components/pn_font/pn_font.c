@@ -34,10 +34,11 @@ static pn_status_t builtin_read(void *,uint64_t,uint8_t *,size_t,size_t *);
  * It remembers advances/missing results by (code point, pixel height) and rendered gray bitmaps by (code point, pixel height, subpixel offset). Hits still validate the font source first, so lost media is reported as before. */
 #define ADV_SLOTS 1024u
 #define BMP_SLOTS 512u
+#define BMP_WAYS 4u
 #define BMP_BUDGET (384u*1024u)
 #define BMP_ENTRY_MAX (64u*1024u)
 typedef struct {uint32_t cp;uint16_t pixels;uint8_t state;int32_t advance;} adv_t; ///< state 0空槽 1有字 2缺字 / 0 empty slot, 1 present, 2 missing
-typedef struct {uint32_t cp;uint16_t pixels;int16_t delta;int left,top;uint16_t width,rows;uint8_t data[];} bmp_t;
+typedef struct {uint32_t cp;uint16_t pixels;int16_t delta;int left,top;uint16_t width,rows;uint32_t age;uint8_t data[];} bmp_t;
 typedef struct {
     pn_pool_t *pool;
     pn_cache_owner_t cache; ///< 字形借用保护 / Glyph borrowing protection
@@ -54,8 +55,10 @@ typedef struct {
     bmp_t **bmp; ///< 按需分配的位图指针表 / Bitmap pointer table, allocated on demand
     size_t cache_bytes; ///< 含头字形计费快照，查询无需扫描槽 / Charged glyph snapshot including headers, queried without scanning slots
     size_t bmp_bytes;
+    uint32_t bmp_clock; ///< 组内LRU时钟，回绕时清零年龄 / Per-set LRU clock, clearing ages on wrap
+    bool warming; ///< 可选光栅预热，禁止触碰呈现帧 / Optional raster warming without touching presentation frames
 } engine_t;
-static bool cache_allowed(const engine_t *e,size_t need){return !e->pool->speculative && pn_cache_allow(e->pool,PN_CACHE_GLYPH,need); }
+static bool cache_allowed(const engine_t *e,size_t need){return (!e->pool->speculative || e->warming) && pn_cache_allow(e->pool,PN_CACHE_GLYPH,need); }
 static unsigned hash_key(uint32_t cp,int pixels,int delta){uint32_t h=cp*2654435761u;h^=(uint32_t)pixels*40503u;h^=(uint32_t)(delta+64)*2246822519u;h^=h>>15;return h;}
 static void *allocate(FT_Memory memory,long bytes) {
     engine_t *e=memory->user;if(bytes<=0)return NULL;
@@ -93,6 +96,8 @@ static pn_status_t result(engine_t *e,FT_Error error) {
 static size_t glyph_bytes(void *ctx){return ((engine_t *)ctx)->cache_bytes;}
 static void *glyph_alloc(engine_t *e,size_t bytes){void *p=pn_cache_alloc(e->pool,PN_CACHE_GLYPH,PN_MEM_FONT,bytes);e->cache_bytes+=pn_alloc_size(p);return p;}
 static void glyph_drop(void *ctx){engine_t *e=ctx;if(e->bmp){for(unsigned i=0;i<BMP_SLOTS;i++)pn_free(e->bmp[i]);pn_free(e->bmp);e->bmp=NULL;}pn_free(e->adv);e->adv=NULL;e->bmp_bytes=0;e->cache_bytes=0;}
+/// 四路共用原512槽，避免相撞字形每次交替重新光栅化。 / Four ways share the original 512 slots, avoiding alternating rerasterization of colliding glyphs.
+static uint32_t bitmap_stamp(engine_t *e){if(++e->bmp_clock)return e->bmp_clock;if(e->bmp)for(unsigned i=0;i<BMP_SLOTS;i++)if(e->bmp[i])e->bmp[i]->age=0;return ++e->bmp_clock;}
 void pn_font_trim(pn_font_t *font){
     if(!font || !font->impl)return;
     engine_t *e=font->impl;
@@ -193,29 +198,36 @@ pn_status_t pn_font_vertical(pn_font_t *font,int *ascent,int *descent) {
 static void composite(pn_frame_t *frame,int64_t left,int64_t top,unsigned width,unsigned rows,const uint8_t *data,size_t pitch,pn_font_render_t mode,unsigned ink) {
     pn_font_composite(frame,left,top,width,rows,data,pitch,mode==PN_FONT_BINARY,ink);
 }
-static pn_status_t draw_impl(pn_font_t *font,pn_frame_t *frame,uint32_t cp,int32_t x_64,int baseline,pn_font_render_t mode) {
+static pn_status_t draw_impl(pn_font_t *font,pn_frame_t *frame,uint32_t cp,int32_t x_64,int baseline,pn_font_render_t mode,bool warm) {
     pn_status_t cancel=pn_cancel_checkpoint();if(cancel!=PN_OK)return cancel;
-    if(!font || !font->impl || !frame || !frame->pixels || (mode!=PN_FONT_GRAY && mode!=PN_FONT_BINARY))return PN_INVALID;
+    if(!font || !font->impl || (!warm && (!frame || !frame->pixels)) || (mode!=PN_FONT_GRAY && mode!=PN_FONT_BINARY))return PN_INVALID;
     engine_t *e=font->impl;int offset=(int)(x_64%64);
     if(!e->bmp && cache_allowed(e,sizeof(bmp_t *)*BMP_SLOTS)){e->bmp=glyph_alloc(e,sizeof(bmp_t *)*BMP_SLOTS);if(e->bmp)memset(e->bmp,0,sizeof(bmp_t *)*BMP_SLOTS);}
-    bmp_t **slot=e->bmp?&e->bmp[hash_key(cp,font->pixels,offset)%BMP_SLOTS]:NULL;
+    bmp_t **slot=NULL;
+    if(e->bmp){unsigned base=hash_key(cp,font->pixels,offset)%(BMP_SLOTS/BMP_WAYS)*BMP_WAYS;
+        for(unsigned i=0;i<BMP_WAYS;i++){bmp_t **candidate=&e->bmp[base+i];bmp_t *entry=*candidate;
+            if(entry && entry->cp==cp && entry->pixels==(uint16_t)font->pixels && entry->delta==(int16_t)offset){slot=candidate;break;}
+            if(!slot || (!entry && *slot) || (entry && *slot && entry->age<(*slot)->age))slot=candidate;
+        }}
     if(slot && *slot && (*slot)->cp==cp && (*slot)->pixels==(uint16_t)font->pixels && (*slot)->delta==(int16_t)offset){
         pn_status_t checked=ready(e);if(checked!=PN_OK)return checked;
         pn_cache_observe(e->pool,PN_CACHE_GLYPH,true);
-        const bmp_t *hit=*slot;
-        composite(frame,(int64_t)x_64/64+hit->left,(int64_t)baseline-hit->top,hit->width,hit->rows,hit->data,hit->width,mode,font->ink>15?15u:font->ink);
+        bmp_t *hit=*slot;hit->age=bitmap_stamp(e);
+        if(!warm)composite(frame,(int64_t)x_64/64+hit->left,(int64_t)baseline-hit->top,hit->width,hit->rows,hit->data,hit->width,mode,font->ink>15?15u:font->ink);
         return PN_OK;
     }
     pn_cache_observe(e->pool,PN_CACHE_GLYPH,false);
+    // 连最小缓存头也容纳不了时不加载轮廓，避免低预算下反复做无用光栅。 / Avoid loading outlines when even a minimal cache header cannot fit, preventing futile low-budget rasterization.
+    if(warm && (!slot || !cache_allowed(e,sizeof(bmp_t))))return PN_EMPTY;
     FT_Vector delta={offset,0};FT_Set_Transform(e->face,NULL,&delta);
     pn_status_t s=load(font,cp,true);FT_Set_Transform(e->face,NULL,NULL);
-    if(s==PN_EMPTY){pn_font_t *fallback;s=ui_fallback(font,&fallback);if(s!=PN_OK)return s;fallback->ink=font->ink;return pn_font_draw(fallback,frame,cp,x_64,baseline,mode);}
+    if(s==PN_EMPTY){pn_font_t *fallback;s=ui_fallback(font,&fallback);if(s!=PN_OK)return s;fallback->ink=font->ink;return warm?pn_font_warm(fallback,cp,x_64):pn_font_draw(fallback,frame,cp,x_64,baseline,mode);}
     if(s!=PN_OK)return s;
     FT_GlyphSlot glyph=e->face->glyph;FT_Bitmap *b=&glyph->bitmap;
     if(!b->width || !b->rows){
         // 空白字形也记住，免得再加载一遍。/ Remember blank glyphs too so they are not loaded again.
         bmp_t *blank=slot && cache_allowed(e,sizeof *blank)?glyph_alloc(e,sizeof *blank):NULL;
-        if(blank){*blank=(bmp_t){cp,(uint16_t)font->pixels,(int16_t)offset,0,0,0,0};e->cache_bytes-=pn_alloc_size(*slot);if(*slot)e->bmp_bytes-=(size_t)(*slot)->width*(*slot)->rows;pn_free(*slot);*slot=blank;}
+        if(blank){*blank=(bmp_t){cp,(uint16_t)font->pixels,(int16_t)offset,0,0,0,0,bitmap_stamp(e)};e->cache_bytes-=pn_alloc_size(*slot);if(*slot)e->bmp_bytes-=(size_t)(*slot)->width*(*slot)->rows;pn_free(*slot);*slot=blank;}
         return PN_OK;
     }
     if(b->pixel_mode!=FT_PIXEL_MODE_GRAY || b->num_grays!=256 || b->width>512 || b->rows>512 || !b->buffer)return PN_LIMIT;
@@ -230,12 +242,13 @@ static pn_status_t draw_impl(pn_font_t *font,pn_frame_t *frame,uint32_t cp,int32
         if(e->bmp_bytes-freed+bytes<=BMP_BUDGET && cache_allowed(e,sizeof *entry+bytes))entry=glyph_alloc(e,sizeof *entry+bytes);
     }
     if(entry){
-        *entry=(bmp_t){cp,(uint16_t)font->pixels,(int16_t)offset,glyph->bitmap_left,glyph->bitmap_top,(uint16_t)b->width,(uint16_t)b->rows};
+        *entry=(bmp_t){cp,(uint16_t)font->pixels,(int16_t)offset,glyph->bitmap_left,glyph->bitmap_top,(uint16_t)b->width,(uint16_t)b->rows,bitmap_stamp(e)};
         for(unsigned y=0;y<b->rows;y++){size_t row=b->pitch>=0?y:b->rows-1-y;memcpy(entry->data+(size_t)y*b->width,b->buffer+row*(size_t)pitch,b->width);}
         if(*slot){e->bmp_bytes-=(size_t)(*slot)->width*(*slot)->rows;e->cache_bytes-=pn_alloc_size(*slot);pn_free(*slot);}
         *slot=entry;e->bmp_bytes+=bytes;
-        composite(frame,left,top,entry->width,entry->rows,entry->data,entry->width,mode,font->ink>15?15u:font->ink);
+        if(!warm)composite(frame,left,top,entry->width,entry->rows,entry->data,entry->width,mode,font->ink>15?15u:font->ink);
     }else{
+        if(warm)return PN_EMPTY;
         // 不入缓存：按FreeType位图直接叠加（行序按pitch符号处理）。/ Not cached: composite straight from the FreeType bitmap, honoring the sign of the pitch.
         for(unsigned y=0;y<b->rows;y++){size_t row=b->pitch>=0?y:b->rows-1-y;composite(frame,left,top+y,b->width,1,b->buffer+row*(size_t)pitch,(size_t)pitch,mode,font->ink>15?15u:font->ink);}
     }
@@ -247,7 +260,15 @@ pn_status_t pn_font_advance(void *ctx,uint32_t cp,int32_t *advance){
 }
 pn_status_t pn_font_draw(pn_font_t *font,pn_frame_t *frame,uint32_t cp,int32_t x_64,int baseline,pn_font_render_t mode){
     engine_t *e=font?font->impl:NULL;if(e)pn_cache_pin(&e->cache);
-    pn_status_t status=draw_impl(font,frame,cp,x_64,baseline,mode);if(e)pn_cache_unpin(&e->cache);return status;
+    pn_status_t status=draw_impl(font,frame,cp,x_64,baseline,mode,false);if(e)pn_cache_unpin(&e->cache);return status;
+}
+pn_status_t pn_font_warm(pn_font_t *font,uint32_t cp,int32_t x_64){
+    if(!font || !font->impl || cp>0x10ffff || (cp>=0xd800 && cp<=0xdfff))return PN_INVALID;
+    engine_t *e=font->impl;pn_status_t checked=ready(e);if(checked!=PN_OK)return checked;
+    pn_cache_pin(&e->cache);pn_cache_class_t kind=e->pool->speculative_kind;
+    pn_cache_speculate(e->pool,true);e->pool->speculative_kind=PN_CACHE_GLYPH;e->warming=true;
+    pn_status_t status=draw_impl(font,NULL,cp,x_64,0,PN_FONT_GRAY,true);
+    e->warming=false;e->pool->speculative_kind=kind;pn_cache_speculate(e->pool,false);pn_cache_unpin(&e->cache);return status;
 }
 static pn_status_t builtin_read(void *ctx,uint64_t offset,uint8_t *out,size_t cap,size_t *n) {
     (void)ctx;if(!out || !n || offset>pn_ui_font_size)return PN_INVALID;

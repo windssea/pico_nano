@@ -266,7 +266,7 @@ static void open_actions(library_t *s,int index){
 static int shelf_hit(library_t *s,int x,int y){pn_shelf_options_t o=shelf_options(s);return pn_shelf_hit_ex(s->page,x,y,&o);}
 static pn_status_t open_settings(library_t *s){
     pn_status_t status=pn_settings_ui_open(&s->settings,s->pool,&s->state_media,s->state_dir,present,s);
-    if(status==PN_OK){pn_settings_about_t about={0};storage_note(s);snprintf(about.version,sizeof about.version,"PC 模拟器");snprintf(about.storage,sizeof about.storage,"%s",s->storage);
+    if(status==PN_OK){pn_settings_about_t about={0};storage_note(s);snprintf(about.version,sizeof about.version,"版本 %s · PC 模拟器",PN_PRODUCT_VERSION);snprintf(about.storage,sizeof about.storage,"%s",s->storage);
         snprintf(about.internal,sizeof about.internal,"%s",s->state_dir?"可用（--state-dir）":"未指定 --state-dir");snprintf(about.screen,sizeof about.screen,"684×1216 · 16 级灰阶（模拟）");pn_settings_ui_set_about(&s->settings,&about);
         pn_settings_time_t clock={0};time_t utc=time(NULL);if(utc>=1704067200 && (uint64_t)utc<=4102444799u)(void)pn_settings_time_format(&clock,(uint32_t)utc);snprintf(clock.message,sizeof clock.message,"模拟器显示本机时间，联网校时需在阅读器验证。");pn_settings_ui_set_time(&s->settings,&clock);}
     return status;
@@ -487,7 +487,7 @@ static int library_worker(void *ctx){
     if(!s->page || !s->recent || !s->frame.pixels || !s->argb)goto cleanup;
     memset(s->page,0,sizeof *s->page);
     if(!pn_frame_bind(&s->frame,s->frame.pixels,342u*1216u,684,1216))goto cleanup;
-    if(getenv("PN_SIM_BOOT_PREVIEW")){status=pn_brand_image_render(&s->frame);if(status==PN_OK)status=present_raw(s,&s->frame);if(status!=PN_OK)goto cleanup;SDL_Delay(900);}
+    if(getenv("PN_SIM_BOOT_PREVIEW")){status=pn_brand_image_render(&s->frame);if(status==PN_OK)status=pn_brand_version_render(&s->frame,PN_PRODUCT_VERSION);if(status==PN_OK)status=present_raw(s,&s->frame);if(status!=PN_OK)goto cleanup;SDL_Delay(900);}
     pn_text_source_t source=pn_font_builtin_source();status=pn_font_open(&s->font,pool,&source,24);if(status!=PN_OK)goto cleanup;
     pn_media_init(&s->media);status=pn_media_attach(&s->media,1);if(status!=PN_OK)goto cleanup;
     if(cover_cache){char cache[PN_CATALOG_PATH_MAX];int n=snprintf(cache,sizeof cache,"%s/library",cover_cache);if(n>0 && (size_t)n<sizeof cache)(void)pn_catalog_index_init(&s->catalog_index,pool,&s->media,s->directory,cache);}

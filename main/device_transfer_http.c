@@ -272,7 +272,7 @@ static esp_err_t dispatch(httpd_req_t *r){
  if((r->method==HTTP_GET || r->method==HTTP_DELETE) && r->content_len)return error(r,400,"该操作不接受请求正文");
  if(r->method==HTTP_GET){
   const pn_transfer_asset_t *asset=pn_transfer_asset(uri);if(asset)return send_data(r,200,asset->mime,(const char *)asset->bytes,asset->size);
-  if(!strcmp(uri,"/api/v1/status")){cJSON *json=cJSON_CreateObject();bool v=string(json,"name",PN_BRAND_NAME);v&=string(json,"version","0.0.57");v&=number(json,"chunk_size",PN_UPLOAD_CHUNK);v&=boolean(json,"preview",false);
+  if(!strcmp(uri,"/api/v1/status")){cJSON *json=cJSON_CreateObject();bool v=string(json,"name",PN_BRAND_NAME);v&=string(json,"version",PN_PRODUCT_VERSION);v&=number(json,"chunk_size",PN_UPLOAD_CHUNK);v&=boolean(json,"preview",false);
    lock(s);bool ready=s->diagnostics.ready,known=s->diagnostics.rssi_known;int rssi=s->diagnostics.rssi;unsigned drops=s->diagnostics.disconnects,recoveries=s->diagnostics.reconnects,reason=s->diagnostics.reason;unlock(s);
    v&=boolean(json,"wifi_ready",ready);v&=boolean(json,"rssi_known",known);if(known)v&=json && cJSON_AddNumberToObject(json,"rssi_dbm",(double)rssi)!=NULL;v&=number(json,"disconnects",drops);v&=number(json,"reconnects",recoveries);v&=number(json,"last_disconnect_reason",reason);return json_send(r,200,json,v);}
  }

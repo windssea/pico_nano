@@ -1090,6 +1090,8 @@ static void apply_selection(int selection){
 static void show_boot_brand(void){
     uint8_t *pixels=pn_alloc_tagged(&pool,PN_MEM_FRAME,684u*1216u/2u);pn_frame_t frame;
     pn_status_t status=pn_frame_bind(&frame,pixels,684u*1216u/2u,684,1216)?pn_brand_image_render(&frame):PN_NO_MEMORY;
+    // 只有开机画面带版本号；默认锁屏仍用纯品牌图。/ Only the boot screen carries the version; the default lock screen keeps the plain brand art.
+    if(status==PN_OK)status=pn_brand_version_render(&frame,PN_PRODUCT_VERSION);
     if(status==PN_OK)status=present(NULL,&frame,PN_REFRESH_GC16);
     pn_free(pixels);if(status!=PN_OK)ESP_LOGW(TAG,"Brand screen unavailable: %d",(int)status);
 }

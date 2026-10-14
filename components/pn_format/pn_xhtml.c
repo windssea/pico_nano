@@ -387,26 +387,38 @@ static pn_status_t parse_source(pn_pool_t *pool,pn_epub_t *epub,const char *path
 }
 // 只保留一个已验证章的语义；连续文本按64标量分组，不复制每个事件的完整样式。/ Retain one verified chapter; group text in 64 scalars instead of repeating full styles per event.
 #define MODEL_TEXT_MAX 64u
+#define MODEL_SEQUENTIAL 0x80u ///< 位置差等于序号，省略差值表 / Offset deltas equal indices, so the delta table is omitted
 typedef struct model_record {
     struct model_record *next;
     uint64_t element,offset;
     uint32_t run;
     uint16_t count,value_size;
     uint8_t kind,block,position_kind,style;
+    uint8_t text; ///< 低位为每标量1/2/4字节，高位MODEL_SEQUENTIAL / Low bits hold 1/2/4 bytes per scalar; the high bit is MODEL_SEQUENTIAL
 } model_record_t;
 typedef struct {uint32_t codepoints[MODEL_TEXT_MAX];uint16_t offsets[MODEL_TEXT_MAX];} model_text_t;
 typedef struct {
     pn_cache_owner_t owner;pn_pool_t *pool;model_record_t *first,*last;size_t charged;
     char path[PN_ZIP_PATH_MAX];uint8_t salt[16];pn_xhtml_stats_t stats;
     pn_xhtml_style_t styles[32];unsigned style_count;
-    bool valid,busy,abandoned,skipped;size_t skipped_cap;
+    bool valid,busy,abandoned,skipped,skipped_window;size_t skipped_cap;
+    // 超上限章只保留焦点附近的已验证窗口；丢弃的事件数与最大元素号保证复放不会漏掉焦点之前的匹配。
+    // Over-cap chapters keep a verified window near the focus; dropped event counts and the largest dropped element ensure replay never misses an earlier focus match.
+    bool windowing,has_focus,focus_seen,windowed,truncated,has_context;pn_xhtml_position_t focus;
+    size_t before; ///< 焦点之前仍保留的计费字节 / Charged bytes still retained before the focus
+    uint64_t base,max_dropped; ///< 已丢弃的前部事件数与其中最大元素号 / Dropped leading events and their largest element number
+    pn_xhtml_event_t context; ///< 最后丢弃的TEXT/IMAGE/非容器BLOCK_OPEN，只填kind/block / Last dropped TEXT/IMAGE/noncontainer BLOCK_OPEN, with only kind/block set
+    model_record_t pending;model_text_t pending_text; ///< 有界构建暂存，完成一段后按实际长度计费 / Bounded construction scratch, charging a completed run at its actual length
 } model_t;
-typedef struct {model_t *model;pn_xhtml_sink_t sink;void *ctx;} model_sink_t;
+typedef struct {model_t *model;pn_xhtml_sink_t sink;pn_xhtml_done_t done;void *ctx;} model_sink_t;
 static size_t model_bytes(void *ctx){return ((model_t *)ctx)->charged;}
+static void model_reset_window(model_t *m){
+    m->focus_seen=!m->has_focus;m->windowed=m->truncated=m->has_context=false;m->before=0;m->base=m->max_dropped=0;m->context=(pn_xhtml_event_t){0};
+}
 static void model_drop(void *ctx){
     model_t *m=ctx;model_record_t *r=m->first;
     while(r){model_record_t *next=r->next;pn_free(r);r=next;}
-    m->first=m->last=NULL;m->charged=0;m->style_count=0;m->valid=false;m->abandoned=m->busy;
+    m->first=m->last=NULL;m->pending.count=0;m->charged=0;m->style_count=0;m->valid=false;m->abandoned=m->busy;model_reset_window(m);
 }
 void pn_xhtml_cache_close(pn_epub_t *epub){
     if(!epub || !epub->semantic_cache)return;
@@ -414,76 +426,163 @@ void pn_xhtml_cache_close(pn_epub_t *epub){
     pn_cache_detach(&m->owner);model_drop(m);pn_free(m);epub->semantic_cache=NULL;
 }
 static bool model_text_matches(const model_t *m,const model_record_t *r,const pn_xhtml_event_t *e){
-    return r && r->kind==PN_XHTML_TEXT && r->count<MODEL_TEXT_MAX &&
+    return r && r->count && r->kind==PN_XHTML_TEXT && r->count<MODEL_TEXT_MAX &&
         r->element==e->position.element && r->run==e->position.run &&
         e->position.offset>=r->offset && e->position.offset-r->offset<=UINT16_MAX &&
         !memcmp(&m->styles[r->style],&e->style,sizeof e->style);
 }
+/// 与页面消费者的起点激活规则一致。/ Mirror the page consumer's start-activation rule.
+static bool model_focus(const model_t *m,const pn_xhtml_event_t *e){
+    const pn_xhtml_position_t *f=&m->focus,*p=&e->position;
+    return (f->kind==PN_XHTML_ELEMENT && p->element==f->element) || (f->kind==p->kind && f->element==p->element && f->run==p->run && f->offset==p->offset);
+}
+static size_t model_text_bytes(const model_record_t *r){
+    size_t width=r->text&7u;return (size_t)r->count*width+((r->text&MODEL_SEQUENTIAL)?0u:(size_t)r->count*sizeof(uint16_t));
+}
+static void model_link(model_t *m,model_record_t *r){
+    r->next=NULL;if(m->last)m->last->next=r;else m->first=r;m->last=r;m->charged+=pn_alloc_size(r);
+}
+/// 从前部丢弃整条记录直至不超过limit；见到焦点后只计before，焦点记录永不丢弃。/ Drop whole leading records until within limit; after the focus only before counts, so its record is never dropped.
+static void model_drop_front(model_t *m,size_t limit){
+    while(m->first && (m->focus_seen?m->before:m->charged)>limit){
+        model_record_t *r=m->first;size_t bytes=pn_alloc_size(r);
+        m->base+=r->kind==PN_XHTML_TEXT?r->count:1u;
+        if(r->element>m->max_dropped)m->max_dropped=r->element;
+        if(r->kind==PN_XHTML_TEXT || r->kind==PN_XHTML_IMAGE || (r->kind==PN_XHTML_BLOCK_OPEN && r->block!=PN_XHTML_CONTAINER)){m->context=(pn_xhtml_event_t){.kind=(pn_xhtml_event_kind_t)r->kind,.block=(pn_xhtml_block_t)r->block};m->has_context=true;}
+        m->first=r->next;if(!m->first)m->last=NULL;
+        m->charged-=bytes;if(m->focus_seen)m->before=m->before>bytes?m->before-bytes:0u;
+        pn_free(r);m->windowed=true;
+    }
+}
+/// 窗口模式超额时先滑动前部：焦点前保留约1/4上限，之后约1/8。/ In window mode slide the front first: about a quarter of the cap before the focus, an eighth afterwards.
+static model_record_t *model_alloc(model_t *m,size_t bytes){
+    model_record_t *r=pn_cache_alloc(m->pool,PN_CACHE_CHAPTER,PN_MEM_DOCUMENT,bytes);
+    if(r || !m->windowing)return r;
+    size_t cap=m->pool->cache_caps[PN_CACHE_CHAPTER];
+    if(!m->focus_seen)model_drop_front(m,cap/4u);
+    else if(m->before>cap/8u)model_drop_front(m,cap/8u);
+    else return NULL;
+    return pn_cache_alloc(m->pool,PN_CACHE_CHAPTER,PN_MEM_DOCUMENT,bytes);
+}
+/// 焦点之后的失败只截断尾部，窗口仍有效；其余情况放弃模型。/ After the focus a failure only truncates the tail and keeps the window; otherwise abandon the model.
+static void model_fail(model_t *m){
+    if(m->windowing && m->focus_seen){m->truncated=m->windowed=true;m->pending.count=0;}
+    else{model_drop(m);m->abandoned=true;}
+}
+/// 尾段只存实际标量与位置差：按最大标量选1/2/4字节，连续位置省略差值表。/ Store actual scalars at 1/2/4 bytes by maximum value, omitting deltas for consecutive positions.
+static void model_flush(model_t *m){
+    if(m->abandoned || m->truncated || !m->pending.count)return;
+    size_t count=m->pending.count;uint32_t high=0;bool sequential=true;
+    for(size_t i=0;i<count;i++){if(m->pending_text.codepoints[i]>high)high=m->pending_text.codepoints[i];if(m->pending_text.offsets[i]!=i)sequential=false;}
+    unsigned width=high<=0xffu?1u:high<=0xffffu?2u:4u;
+    model_record_t record=m->pending;record.text=(uint8_t)(width|(sequential?MODEL_SEQUENTIAL:0u));
+    model_record_t *r=model_alloc(m,sizeof *r+model_text_bytes(&record));
+    if(!r){model_fail(m);return;}
+    *r=record;uint8_t *at=(uint8_t *)(r+1);
+    if(!sequential){memcpy(at,m->pending_text.offsets,count*sizeof(uint16_t));at+=count*sizeof(uint16_t);}
+    for(size_t i=0;i<count;i++){uint32_t cp=m->pending_text.codepoints[i];
+        if(width==1u)at[i]=(uint8_t)cp;else if(width==2u){uint16_t v=(uint16_t)cp;memcpy(at+2u*i,&v,sizeof v);}else memcpy(at+4u*i,&cp,sizeof cp);}
+    model_link(m,r);m->pending.count=0;
+}
 static void model_append(model_t *m,const pn_xhtml_event_t *e){
-    if(m->abandoned)return;
-    model_record_t *r=m->last;
-    if(e->kind!=PN_XHTML_TEXT || !model_text_matches(m,r,e)){
+    if(m->abandoned || m->truncated)return;
+    bool continues=e->kind==PN_XHTML_TEXT && model_text_matches(m,&m->pending,e);
+    if(!continues){model_flush(m);if(m->abandoned || m->truncated)return;}
+    // 焦点记录本身不计入before，滑动不会把它丢掉。/ The focus record is excluded from before, so sliding never drops it.
+    if(!m->focus_seen && model_focus(m,e)){m->focus_seen=true;m->before=m->charged;}
+    if(!continues){
         unsigned style=0;while(style<m->style_count && memcmp(&m->styles[style],&e->style,sizeof e->style))style++;
         if(style==32){model_drop(m);m->abandoned=true;return;}
         if(style==m->style_count)m->styles[m->style_count++]=e->style;
         size_t value=e->value?strlen(e->value)+1:0,alt=e->alt?strlen(e->alt)+1:0;
-        size_t payload=e->kind==PN_XHTML_TEXT?sizeof(model_text_t):value+alt;
-        r=pn_cache_alloc(m->pool,PN_CACHE_CHAPTER,PN_MEM_DOCUMENT,sizeof *r+payload);
-        if(!r){model_drop(m);m->abandoned=true;return;}
-        *r=(model_record_t){.element=e->position.element,.offset=e->position.offset,.run=e->position.run,.value_size=(uint16_t)value,.kind=(uint8_t)e->kind,.block=(uint8_t)e->block,.position_kind=(uint8_t)e->position.kind,.style=(uint8_t)style};m->charged+=pn_alloc_size(r);
-        if(m->last)m->last->next=r;else m->first=r;m->last=r;
-        if(e->kind!=PN_XHTML_TEXT){char *text=(char *)(r+1);if(value){memcpy(text,e->value,value);text+=value;}if(alt){memcpy(text,e->alt,alt);r->count=1;}}
+        model_record_t record={.element=e->position.element,.offset=e->position.offset,.run=e->position.run,.value_size=(uint16_t)value,.kind=(uint8_t)e->kind,.block=(uint8_t)e->block,.position_kind=(uint8_t)e->position.kind,.style=(uint8_t)style};
+        if(e->kind==PN_XHTML_TEXT)m->pending=record;
+        else{
+        model_record_t *r=model_alloc(m,sizeof *r+value+alt);
+        if(!r){model_fail(m);return;}
+        *r=record;
+        char *text=(char *)(r+1);if(value){memcpy(text,e->value,value);text+=value;}if(alt){memcpy(text,e->alt,alt);r->count=1;}
+        model_link(m,r);
+        }
     }
-    if(e->kind==PN_XHTML_TEXT){model_text_t *text=(model_text_t *)(r+1);text->codepoints[r->count]=e->codepoint;text->offsets[r->count]=(uint16_t)(e->position.offset-r->offset);r->count++;}
+    if(e->kind==PN_XHTML_TEXT){unsigned i=m->pending.count++;m->pending_text.codepoints[i]=e->codepoint;m->pending_text.offsets[i]=(uint16_t)(e->position.offset-m->pending.offset);}
 }
 static pn_status_t model_event(void *ctx,const pn_xhtml_event_t *event){
-    model_sink_t *s=ctx;model_append(s->model,event);return s->sink?s->sink(s->ctx,event):PN_OK;
+    model_sink_t *s=ctx;if(s->model)model_append(s->model,event);return s->sink && (!s->done || !s->done(s->ctx))?s->sink(s->ctx,event):PN_OK;
 }
-static pn_status_t model_replay(model_t *m,pn_epub_t *epub,pn_xhtml_sink_t sink,void *ctx){
+static uint32_t model_codepoint(const model_record_t *r,unsigned i){
+    const uint8_t *at=(const uint8_t *)(r+1);if(!(r->text&MODEL_SEQUENTIAL))at+=(size_t)r->count*sizeof(uint16_t);
+    unsigned width=r->text&7u;if(width==1u)return at[i];
+    if(width==2u){uint16_t v;memcpy(&v,at+2u*i,sizeof v);return v;}
+    uint32_t v;memcpy(&v,at+4u*i,sizeof v);return v;
+}
+static uint64_t model_delta(const model_record_t *r,unsigned i){
+    if(r->text&MODEL_SEQUENTIAL)return i;
+    uint16_t v;memcpy(&v,(const uint8_t *)(r+1)+2u*i,sizeof v);return v;
+}
+/// exhausted表示全部记录复放完仍未done。/ exhausted means every record replayed without reaching done.
+static pn_status_t model_replay(model_t *m,pn_epub_t *epub,pn_xhtml_sink_t sink,pn_xhtml_done_t done,void *ctx,bool *exhausted){
     pn_profile_span_t span;pn_profile_begin(&span,m->pool,"epub.model-replay");
     pn_status_t status=PN_OK;size_t events=0,ordinal;m->busy=true;pn_cache_pin(&m->owner);
-    for(model_record_t *r=m->first;r && status==PN_OK;r=r->next){
+    for(model_record_t *r=m->first;r && status==PN_OK && (!done || !done(ctx));r=r->next){
         unsigned count=r->kind==PN_XHTML_TEXT?r->count:1;
-        for(unsigned i=0;i<count && status==PN_OK;i++){
+        for(unsigned i=0;i<count && status==PN_OK && (!done || !done(ctx));i++){
             status=pn_cancel_checkpoint();if(status!=PN_OK)break;
             if((events++&63u)==0){status=pn_epub_spine_find(epub,m->path,&ordinal);if(status!=PN_OK)break;}
             pn_xhtml_event_t e={.kind=(pn_xhtml_event_kind_t)r->kind,.position={.element=r->element,.offset=r->offset,.run=r->run,.kind=(pn_xhtml_position_kind_t)r->position_kind},.style=m->styles[r->style],.block=(pn_xhtml_block_t)r->block};
-            if(e.kind==PN_XHTML_TEXT){model_text_t *t=(model_text_t *)(r+1);e.codepoint=t->codepoints[i];e.position.offset+=t->offsets[i];}
+            if(e.kind==PN_XHTML_TEXT){e.codepoint=model_codepoint(r,i);e.position.offset+=model_delta(r,i);}
             else{if(r->value_size)e.value=(const char *)(r+1);if(r->count)e.alt=(const char *)(r+1)+r->value_size;}
             if(sink)status=sink(ctx,&e);
         }
     }
     if(status==PN_OK)status=pn_cancel_checkpoint();
     if(status==PN_OK)status=pn_epub_spine_find(epub,m->path,&ordinal);
+    if(exhausted)*exhausted=status==PN_OK && (!done || !done(ctx));
     pn_cache_unpin(&m->owner);m->busy=false;pn_profile_end(&span,status);return status;
 }
-static pn_status_t pn_xhtml_parse_impl(pn_pool_t *pool,pn_epub_t *epub,const char *path,const uint8_t salt[16],pn_xhtml_sink_t sink,void *ctx,pn_xhtml_stats_t *stats){
+static pn_status_t pn_xhtml_parse_impl(pn_pool_t *pool,pn_epub_t *epub,const char *path,const uint8_t salt[16],const pn_xhtml_position_t *focus,pn_xhtml_sink_t sink,pn_xhtml_done_t done,pn_xhtml_restart_t restart,void *ctx,pn_xhtml_stats_t *stats){
     if(!pool || !epub || !path || !*path || strlen(path)>=PN_ZIP_PATH_MAX || !salt || !stats)return PN_INVALID;
     size_t ordinal;pn_status_t status=pn_epub_spine_find(epub,path,&ordinal);if(status!=PN_OK)return status;
     model_t *m=epub->semantic_cache;
-    if(m && (m->busy || m->pool!=pool))return parse_source(pool,epub,path,salt,sink,ctx,stats);
+    model_sink_t proxy={.sink=sink,.done=done,.ctx=ctx};
+    if(m && (m->busy || m->pool!=pool))return parse_source(pool,epub,path,salt,model_event,&proxy,stats);
+    bool window=done && restart; // 调用方能从窗口序号接续 / The caller can resume from a window order
     bool same=m && !strcmp(m->path,path) && !memcmp(m->salt,salt,16);
-    bool hit=same && m->valid;pn_cache_observe(pool,PN_CACHE_CHAPTER,hit);
-    if(hit){status=model_replay(m,epub,sink,ctx);if(status==PN_OK)*stats=m->stats;return status;}
+    bool hit=same && m->valid && (!m->windowed || (window && (!m->base || (focus && focus->element>m->max_dropped))));
+    pn_cache_observe(pool,PN_CACHE_CHAPTER,hit);
+    if(hit){
+        if(m->windowed)restart(ctx,m->base,m->has_context?&m->context:NULL);
+        bool exhausted=false;status=model_replay(m,epub,sink,done,ctx,&exhausted);if(status!=PN_OK)return status;
+        if(!m->windowed || !m->truncated || !exhausted){*stats=m->stats;return PN_OK;}
+        // 窗口尾部不够：消费者回到章首状态，冷源完整校验并围绕焦点重建。/ The window tail is short: reset the consumer to chapter start, then fully validate the cold source and rebuild around the focus.
+        restart(ctx,0,NULL);
+    }else if(same && m->valid && m->windowed && !window)return parse_source(pool,epub,path,salt,model_event,&proxy,stats);
     if(!m){
         m=pn_cache_alloc(pool,PN_CACHE_CHAPTER,PN_MEM_DOCUMENT,sizeof *m);
-        if(!m)return parse_source(pool,epub,path,salt,sink,ctx,stats);
+        if(!m)return parse_source(pool,epub,path,salt,model_event,&proxy,stats);
         *m=(model_t){.pool=pool};epub->semantic_cache=m;
         pn_cache_attach(pool,&m->owner,PN_CACHE_CHAPTER,m,model_bytes,model_drop);
     }
-    if(same && m->skipped && pool->cache_caps[PN_CACHE_CHAPTER]<=m->skipped_cap)return parse_source(pool,epub,path,salt,sink,ctx,stats);
+    if(same && m->skipped && pool->cache_caps[PN_CACHE_CHAPTER]<=m->skipped_cap && (!window || m->skipped_window))return parse_source(pool,epub,path,salt,model_event,&proxy,stats);
     model_drop(m);strcpy(m->path,path);memcpy(m->salt,salt,16);m->busy=true;m->abandoned=m->skipped=false;
-    model_sink_t proxy={m,sink,ctx};pn_xhtml_stats_t candidate;
+    m->windowing=window;m->has_focus=window && focus;if(m->has_focus)m->focus=*focus;model_reset_window(m);
+    proxy.model=m;pn_xhtml_stats_t candidate;
     pn_profile_span_t span;pn_profile_begin(&span,pool,"epub.model-build");
     status=parse_source(pool,epub,path,salt,model_event,&proxy,&candidate);
+    if(status==PN_OK)model_flush(m);
     m->busy=false;
-    if(status==PN_OK){*stats=candidate;if(!m->abandoned){m->stats=candidate;m->valid=true;}else{m->skipped=true;m->skipped_cap=pool->cache_caps[PN_CACHE_CHAPTER];}}
+    // 预排期间临时分配也计入可选额度，失败不代表前台也放不下，所以只记录前台跳过。/ Speculative temporaries count against optional budgets, so only foreground failures are remembered as skipped.
+    if(status==PN_OK){*stats=candidate;if(!m->abandoned){m->stats=candidate;m->valid=true;}else if(!pool->speculative){m->skipped=true;m->skipped_window=window;m->skipped_cap=pool->cache_caps[PN_CACHE_CHAPTER];}}
     if(status!=PN_OK)model_drop(m);
     pn_profile_end(&span,status);return status;
 }
 pn_status_t pn_xhtml_parse(pn_pool_t *pool,pn_epub_t *epub,const char *path,const uint8_t salt[16],pn_xhtml_sink_t sink,void *ctx,pn_xhtml_stats_t *stats){
     pn_profile_span_t span;pn_profile_begin(&span,pool,"epub.model");
-    pn_status_t status=pn_xhtml_parse_impl(pool,epub,path,salt,sink,ctx,stats);pn_profile_end(&span,status);return status;
+    pn_status_t status=pn_xhtml_parse_impl(pool,epub,path,salt,NULL,sink,NULL,NULL,ctx,stats);pn_profile_end(&span,status);return status;
+}
+pn_status_t pn_xhtml_parse_window(pn_pool_t *pool,pn_epub_t *epub,const char *path,const uint8_t salt[16],const pn_xhtml_position_t *focus,pn_xhtml_sink_t sink,pn_xhtml_done_t done,pn_xhtml_restart_t restart,void *ctx,pn_xhtml_stats_t *stats){
+    pn_profile_span_t span;pn_profile_begin(&span,pool,"epub.model-window");
+    pn_status_t status=pn_xhtml_parse_impl(pool,epub,path,salt,focus,sink,done,restart,ctx,stats);pn_profile_end(&span,status);return status;
 }
 typedef struct {const char *id;bool found;pn_xhtml_position_t position;} anchor_t;
 static pn_status_t find_anchor(void *ctx,const pn_xhtml_event_t *event){

@@ -5,6 +5,7 @@
 #include "pn_cancel.h"
 #include "psa/crypto.h"
 #include "esp_memory_utils.h"
+#include "esp_heap_caps.h"
 #include <string.h>
 static pn_status_t stream_impl(void *ctx,uint64_t size,pn_identity_read_fn read,uint8_t *buffer,size_t capacity,pn_book_id_t *out){
     psa_hash_operation_t op=PSA_HASH_OPERATION_INIT;
@@ -30,8 +31,17 @@ __attribute__((noinline))
 static pn_status_t dma_stream(void *ctx,uint64_t size,pn_identity_read_fn read,pn_book_id_t *out){
     _Alignas(16) uint8_t buffer[4096];return stream_impl(ctx,size,read,buffer,sizeof buffer,out);
 }
+// PSRAM目标在S3上由SDMMC按16扇区中转；整书摘要临时借32KiB内部DMA块，保留64KiB内部余量，读完即还。
+// S3 SDMMC bounces PSRAM targets through 16-sector chunks; whole-book hashing borrows a 32 KiB internal DMA block, keeping 64 KiB internal headroom, and returns it immediately.
+#define DMA_STREAM_BYTES (32u*1024u)
+#define DMA_INTERNAL_RESERVE (64u*1024u)
 static pn_status_t stream(void *ctx,uint64_t size,pn_identity_read_fn read,uint8_t *buffer,size_t capacity,pn_book_id_t *out){
     if(esp_ptr_dma_capable(buffer) && !((uintptr_t)buffer&3u))return stream_impl(ctx,size,read,buffer,capacity,out);
+    const uint32_t caps=MALLOC_CAP_DMA|MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT;
+    if(size>4096u && heap_caps_get_largest_free_block(caps)>=DMA_STREAM_BYTES+DMA_INTERNAL_RESERVE){
+        uint8_t *block=heap_caps_aligned_alloc(16,DMA_STREAM_BYTES,caps);
+        if(block){pn_status_t status=stream_impl(ctx,size,read,block,DMA_STREAM_BYTES,out);heap_caps_free(block);return status;}
+    }
     return dma_stream(ctx,size,read,out);
 }
 static pn_status_t probe(void *ctx,uint64_t at,uint8_t *out,size_t cap,size_t *n){
@@ -51,6 +61,10 @@ pn_status_t pn_device_identity_init(void){
     if(status==PN_OK)status=pn_identity_stream(NULL,8201,block_probe,&expected);
     if(status==PN_OK)status=stream(NULL,8201,block_probe,buffer,sizeof buffer,&actual);
     if(status==PN_OK && memcmp(&expected,&actual,sizeof actual))status=PN_CORRUPT;
+    // 非DMA调用缓冲覆盖内部临时块分支（余量不足时为4KiB栈分支）。/ A non-DMA caller buffer covers the transient internal block branch (or the 4 KiB stack branch without headroom).
+    uint8_t *external=status==PN_OK?heap_caps_malloc(64,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT):NULL;
+    if(external){status=stream(NULL,8201,block_probe,external,64,&actual);heap_caps_free(external);
+        if(status==PN_OK && memcmp(&expected,&actual,sizeof actual))status=PN_CORRUPT;}
     if(status==PN_OK)pn_identity_stream_port(stream);
     return status;
 }

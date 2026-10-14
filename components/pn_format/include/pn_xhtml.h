@@ -49,6 +49,15 @@ pn_status_t pn_xhtml_parse_input(pn_pool_t *pool,const pn_xml_input_t *input,con
 /// 从出版物解析并按预算复用本会话已验证语义；head样式/完整CRC/XML通过才缓存，复放仍检查介质与取消，失败不改stats。
 /// Parse publication resources and reuse budgeted verified session semantics; cache only after head styles/full CRC/XML pass, rechecking media/cancellation on replay and preserving stats on failure.
 pn_status_t pn_xhtml_parse(pn_pool_t *pool,pn_epub_t *epub,const char *path,const uint8_t salt[16],pn_xhtml_sink_t sink,void *ctx,pn_xhtml_stats_t *stats);
+typedef bool (*pn_xhtml_done_t)(void *); ///< 消费窗口已足够，不代表源已校验 / Consumer window is sufficient, not proof of source validation
+/// 消费者回到“已消费order个事件”的状态；context为最后跳过的TEXT/IMAGE/非容器BLOCK_OPEN（只含kind/block），NULL表示章首。
+/// Reset the consumer as if order events were consumed; context is the last skipped TEXT/IMAGE/noncontainer BLOCK_OPEN (kind/block only), NULL at chapter start.
+typedef void (*pn_xhtml_restart_t)(void *ctx,uint64_t order,const pn_xhtml_event_t *context);
+/// 已验证缓存可在done后结束复放；冷源仍完整CRC/XML校验与建模，stats仍为全章，失败保持输出。
+/// 超出语义上限的章在提供restart时保留focus附近的已验证窗口，复放前以restart接续序号；窗口不够时restart(0)后冷解析重建。
+/// Stop verified replay after done; cold sources still complete CRC/XML validation and modeling, with full-chapter stats preserved on failure.
+/// With restart, over-cap chapters keep a verified window near focus and restart resumes the order before replay; a short window restarts at zero and rebuilds from a cold parse.
+pn_status_t pn_xhtml_parse_window(pn_pool_t *,pn_epub_t *,const char *,const uint8_t salt[16],const pn_xhtml_position_t *focus,pn_xhtml_sink_t,pn_xhtml_done_t,pn_xhtml_restart_t,void *,pn_xhtml_stats_t *);
 /// 释放本出版物语义缓存，借用期间不释放；close使用同一入口。/ Release publication semantics unless borrowed; close uses the same entry point.
 void pn_xhtml_cache_close(pn_epub_t *);
 /// 完整扫描找到唯一id，缺失EMPTY、重复CORRUPT，失败不改position。

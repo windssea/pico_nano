@@ -9,6 +9,8 @@ typedef struct {uint8_t text[8000];unsigned reads,measures;bool lost;pn_async_t 
 static pn_status_t read_at(void *ctx,uint64_t off,uint8_t *out,size_t cap,size_t *n){source_t *s=ctx;s->reads++;if(s->lost)return PN_STALE_MEDIA;if(cap>sizeof s->text-off)cap=sizeof s->text-off;memcpy(out,s->text+off,cap);*n=cap;return PN_OK;}
 static pn_status_t validate(void *ctx){return ((source_t *)ctx)->lost?PN_STALE_MEDIA:pn_cancel_checkpoint();}
 static pn_status_t measure(void *ctx,uint32_t cp,int32_t *out){(void)cp;source_t *s=ctx;s->measures++;if(s->interrupt && s->measures==s->stop_measure){pn_async_event_t e={.bytes=1};pn_async_send(s->interrupt,&e);}*out=5*64;return PN_OK;}
+typedef struct {unsigned count;uint64_t offset;pn_status_t result;} warmth_t;
+static pn_status_t warm(void *ctx,const pn_page_glyph_t *g){warmth_t *w=ctx;if(w->count)assert(g->source.begin>w->offset);w->offset=g->source.begin;w->count++;return w->result;}
 int main(void){
  source_t s={0};memset(s.text,'a',sizeof s.text);pn_text_source_t source={&s,sizeof s.text,read_at,validate};pn_book_id_t book={{42}};
  pn_layout_t layout={25,20,10,8,0,0,0};pn_font_metrics_t metrics={&s,measure};pn_page_glyph_t nodes[100];pn_reader_t r;pn_pool_t pool;assert(!pn_pool_init(&pool,65536,NULL,NULL,NULL));
@@ -16,6 +18,8 @@ int main(void){
  pn_reader_receipt_t receipt;assert(pn_reader_prepare(&r,PN_READ_FIRST,0,&receipt)==PN_OK && pn_reader_complete(&r,&receipt,true,1)==PN_OK);
  pn_reader_anchor_t visible=r.visible;uint64_t ticket=r.next_ticket;pn_page_glyph_t saved[100];memcpy(saved,nodes,sizeof saved);
  assert(pn_reader_prefetch(&r)==PN_OK && !memcmp(&visible,&r.visible,sizeof visible) && r.next_ticket==ticket && !r.history_count && !r.preparing && !memcmp(saved,nodes,sizeof saved));
+ warmth_t w={0};assert(pn_reader_warm_next(&r,warm,&w,3)==PN_OK && w.count==3 && !memcmp(saved,nodes,sizeof saved) && !memcmp(&visible,&r.visible,sizeof visible));
+ assert(pn_reader_warm_next(&r,warm,&w,3)==PN_OK && w.count==6);w.result=PN_NO_MEMORY;assert(pn_reader_warm_next(&r,warm,&w,3)==PN_EMPTY && w.count==7 && pn_reader_warm_next(&r,warm,&w,3)==PN_EMPTY);
  s.reads=s.measures=0;assert(pn_reader_prepare(&r,PN_READ_NEXT,0,&receipt)==PN_OK && !s.reads && !s.measures && receipt.anchor.begin==10);assert(pn_reader_complete(&r,&receipt,false,2)==PN_IO && r.visible.begin==0);
  assert(pn_reader_prepare(&r,PN_READ_NEXT,0,&receipt)==PN_OK && !s.measures && pn_reader_complete(&r,&receipt,true,3)==PN_OK);
  assert(pn_reader_prepare(&r,PN_READ_PREVIOUS,0,&receipt)==PN_OK && !s.measures && pn_reader_complete(&r,&receipt,true,4)==PN_OK && r.visible.begin==0);

@@ -21,10 +21,11 @@ typedef struct {
     pn_epub_reader_anchor_t ahead_anchor,behind_anchor; ///< 缓存语义锚点 / Cached semantic anchors
     pn_epub_location_t ahead_target; ///< 下一页请求键，区分章节入口与首字位置 / Next-request key distinguishing chapter entry from first glyph
     bool cache_enabled; ///< shadow预排禁用递归缓存 / Shadow prefetch disables recursive caching
+    size_t ahead_warm; ///< 邻页替换后从零预热 / Start warming from zero after neighbor replacement
 } reader_t;
 static void cached_free(pn_epub_page_t *page){pn_free(page->nodes);pn_free(page->images);*page=(pn_epub_page_t){0};}
 static size_t neighbor_bytes(void *ctx){reader_t *r=ctx;return pn_alloc_size(r->ahead.nodes)+pn_alloc_size(r->ahead.images)+pn_alloc_size(r->behind.nodes)+pn_alloc_size(r->behind.images);}
-static void neighbor_drop(void *ctx){reader_t *r=ctx;cached_free(&r->ahead);cached_free(&r->behind);}
+static void neighbor_drop(void *ctx){reader_t *r=ctx;cached_free(&r->ahead);cached_free(&r->behind);r->ahead_warm=0;}
 static bool cached_store(reader_t *r,pn_epub_page_t *to,const pn_epub_page_t *from){
     size_t need=from->count*sizeof(pn_epub_page_node_t)+from->image_count*sizeof(pn_epub_page_image_t);
     if(need && !pn_cache_allow(r->pool,PN_CACHE_NEIGHBOR,need+(from->count && from->image_count?pn_alloc_overhead():0)))return false;
@@ -33,7 +34,7 @@ static bool cached_store(reader_t *r,pn_epub_page_t *to,const pn_epub_page_t *fr
     if((from->count && !nodes) || (from->image_count && !images)){pn_free(nodes);pn_free(images);return false;}
     if(nodes)memcpy(nodes,from->nodes,from->count*sizeof *nodes);
     if(images)memcpy(images,from->images,from->image_count*sizeof *images);
-    cached_free(to);*to=*from;to->nodes=nodes;to->images=images;to->capacity=from->count;to->image_capacity=from->image_count;to->owner=r->pool;return true;
+    cached_free(to);*to=*from;to->nodes=nodes;to->images=images;to->capacity=from->count;to->image_capacity=from->image_count;to->owner=r->pool;if(to==&r->ahead)r->ahead_warm=0;return true;
 }
 static bool layout_valid(const pn_layout_t *l){return l && l->width>0 && l->width<=4096 && l->height>0 && l->height<=4096 && l->line_height>0 && l->line_height<=l->height && l->indent>=0 && l->indent<l->width && l->paragraph_gap>=0 && l->paragraph_gap<=4096 && l->letter_spacing_64>=0 && l->letter_spacing_64<=4096;}
 static bool same_position(pn_xhtml_position_t a,pn_xhtml_position_t b){return a.element==b.element && a.run==b.run && a.offset==b.offset && a.kind==b.kind;}
@@ -143,13 +144,25 @@ static pn_status_t pn_epub_reader_prefetch_impl(pn_epub_reader_t *handle){
     if(status==PN_OK)status=anchor_page(r,at.path,&page,&prepared);
     if(status==PN_OK)status=pn_cancel_checkpoint();
     // 已验证页直接转移所有权，避免scratch到ahead的第二份分配与复制。/ Move the validated page instead of allocating and copying a second scratch-to-ahead buffer.
-    if(status==PN_OK){cached_free(&r->ahead);r->ahead=page;page=(pn_epub_page_t){0};r->ahead_anchor=prepared;r->ahead_target=r->visible.next;}
+    if(status==PN_OK){cached_free(&r->ahead);r->ahead=page;page=(pn_epub_page_t){0};r->ahead_anchor=prepared;r->ahead_target=r->visible.next;r->ahead_warm=0;}
     cached_free(&page);return status;
 }
 pn_status_t pn_epub_reader_prefetch(pn_epub_reader_t *handle){
     pn_profile_span_t span;pn_profile_begin(&span,handle && handle->impl?((reader_t *)handle->impl)->pool:NULL,"epub.prefetch");
     reader_t *r=handle && handle->impl?handle->impl:NULL;if(r){pn_cache_pin(&r->cache);pn_cache_speculate(r->pool,true);}
     pn_status_t status=pn_epub_reader_prefetch_impl(handle);if(r){pn_cache_speculate(r->pool,false);pn_cache_unpin(&r->cache);}pn_profile_end(&span,status);return status;
+}
+pn_status_t pn_epub_reader_warm_next(pn_epub_reader_t *handle,pn_epub_warm_fn warm,void *ctx,size_t budget){
+    if(!handle || !handle->impl || !warm || !budget || budget>64)return PN_INVALID;
+    reader_t *r=handle->impl;
+    if(r->preparing || !r->has_visible || !r->ahead.valid || !r->visible.has_next || !same_location(&r->ahead_target,&r->visible.next) || r->ahead_warm>=r->ahead.count || r->ahead.image_count)return PN_EMPTY;
+    pn_cache_pin(&r->cache);pn_status_t s=PN_OK;size_t ordinal;
+    for(size_t i=0;i<budget && r->ahead_warm<r->ahead.count;i++){
+        s=pn_cancel_checkpoint();if(s==PN_OK)s=pn_epub_spine_find(r->epub,r->ahead_anchor.begin.path,&ordinal);if(s!=PN_OK)break;
+        s=warm(ctx,&r->ahead.nodes[r->ahead_warm]);
+        if(s==PN_NO_MEMORY){r->ahead_warm=r->ahead.count;s=PN_EMPTY;break;}if(s!=PN_OK && s!=PN_EMPTY)break;r->ahead_warm++;
+    }
+    pn_cache_unpin(&r->cache);return s;
 }
 pn_status_t pn_epub_reader_prepare_impl(pn_epub_reader_t *handle,pn_read_intent_t intent,const pn_epub_location_t *jump,pn_epub_reader_receipt_t *out){
     if(!handle || !handle->impl || !out || intent<PN_READ_FIRST || intent>PN_READ_JUMP)return PN_INVALID;
@@ -165,7 +178,7 @@ pn_status_t pn_epub_reader_prepare_impl(pn_epub_reader_t *handle,pn_read_intent_
             // 命中自有节点时直接交接，固定外部缓冲仍走复制兼容路径。/ Transfer owned nodes on hits; fixed external buffers keep the copying compatibility path.
             if(r->page->valid && r->has_visible && same_position(r->page->begin,r->visible.begin.position)){
                 pn_epub_page_t *opposite=intent==PN_READ_PREVIOUS?&r->ahead:&r->behind;cached_free(opposite);*opposite=*r->page;
-                if(intent==PN_READ_PREVIOUS){r->ahead_anchor=r->visible;r->ahead_target=prepared->next;}else r->behind_anchor=r->visible;
+                if(intent==PN_READ_PREVIOUS){r->ahead_anchor=r->visible;r->ahead_target=prepared->next;r->ahead_warm=0;}else r->behind_anchor=r->visible;
             }else pn_epub_page_release(r->page);
             *r->page=*cached;*cached=(pn_epub_page_t){0};
             if(!pn_cache_allow(r->pool,PN_CACHE_NEIGHBOR,1))neighbor_drop(r);

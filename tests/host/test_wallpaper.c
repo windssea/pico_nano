@@ -92,6 +92,12 @@ static int lock(const char *prefix){
     assert(pn_lock_render(&plain,&font,hint,&frame)==PN_OK);uint8_t *snapshot=malloc(PN_WALLPAPER_BYTES);assert(snapshot);memcpy(snapshot,p,PN_WALLPAPER_BYTES);
     assert(pn_brand_image_render(&frame)==PN_OK && !memcmp(snapshot,p,PN_WALLPAPER_BYTES) && attempts==pool.attempts);free(snapshot);
     assert(pn_frame_get(&frame,0,0)==15 && pn_frame_get(&frame,683,1215)==15);
+    // 开机版本号只改右下角，非法字符不改帧。/ The boot version only touches the bottom-right corner; invalid characters leave the frame unchanged.
+    memcpy(snapshot=malloc(PN_WALLPAPER_BYTES),p,PN_WALLPAPER_BYTES);assert(snapshot);
+    assert(pn_brand_version_render(&frame,"0.x")==PN_INVALID && !memcmp(snapshot,p,PN_WALLPAPER_BYTES));
+    assert(pn_brand_version_render(&frame,"0.6")==PN_OK && attempts==pool.attempts);unsigned inked=0;
+    for(int y=0;y<1216;y++)for(int x=0;x<684;x++)if(pn_frame_get(&frame,x,y)!=(snapshot[(size_t)y*342+x/2]>>((x&1)?4:0)&15u)){assert(x>=600 && x<660 && y>=1171 && y<1192);inked++;}
+    assert(inked>100);memcpy(p,snapshot,PN_WALLPAPER_BYTES);free(snapshot);
     pn_lock_selection_t bad={.mode=(pn_lock_mode_t)7};assert(pn_lock_render(&bad,&font,hint,&frame)==PN_INVALID);
     pn_font_close(&font);free(p);assert(!pool.used && !pool.live);puts("lock ok");return 0;
 }

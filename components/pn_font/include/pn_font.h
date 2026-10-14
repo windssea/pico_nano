@@ -36,6 +36,8 @@ pn_status_t pn_font_vertical(pn_font_t *font,int *ascent,int *descent);
 /// x使用26.6，baseline为像素；裁切写入，灰阶覆盖或DU二值阈值。
 /// x uses 26.6 and baseline uses pixels; clipped coverage drawing or binary DU threshold.
 pn_status_t pn_font_draw(pn_font_t *font,pn_frame_t *frame,uint32_t codepoint,int32_t x_64,int baseline,pn_font_render_t mode);
+/// 仅预热相同26.6偏移的可回收字形，不画帧；不触发全局缓存回收或抢前台余量，预算不足EMPTY，可协作取消。 / Warm a reclaimable glyph at the same 26.6 offset without painting, global cache reclamation or consuming foreground headroom; EMPTY on limited budget, cooperatively cancellable.
+pn_status_t pn_font_warm(pn_font_t *,uint32_t codepoint,int32_t x_64);
 /// 常驻子集源，不分配、不访问卡；没有完整中文fallback承诺。
 /// Resident HarmonyOS UI primary with a separate resident CJK subset fallback; no card access.
 pn_text_source_t pn_font_builtin_source(void);

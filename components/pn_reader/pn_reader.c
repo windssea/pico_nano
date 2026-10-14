@@ -15,10 +15,22 @@ static bool copy_page(pn_reader_t *r,pn_text_page_t *to,const pn_text_page_t *fr
     pn_page_glyph_t *nodes=from->count?pn_cache_alloc(r->neighbor_pool,PN_CACHE_NEIGHBOR,PN_MEM_LAYOUT,from->count*sizeof *nodes):NULL;
     if(from->count && !nodes)return false;
     if(from->count)memcpy(nodes,from->glyphs,from->count*sizeof *nodes);
-    pn_free(to->glyphs);*to=*from;to->glyphs=nodes;to->capacity=from->count;return true;
+    pn_free(to->glyphs);*to=*from;to->glyphs=nodes;to->capacity=from->count;if(to==&r->ahead)r->ahead_warm=0;return true;
 }
 static size_t neighbor_bytes(void *ctx){pn_reader_t *r=ctx;return pn_alloc_size(r->ahead.glyphs)+pn_alloc_size(r->behind.glyphs);}
-static void neighbor_drop(void *ctx){pn_reader_t *r=ctx;pn_free(r->ahead.glyphs);pn_free(r->behind.glyphs);r->ahead=(pn_text_page_t){0};r->behind=(pn_text_page_t){0};}
+static void neighbor_drop(void *ctx){pn_reader_t *r=ctx;pn_free(r->ahead.glyphs);pn_free(r->behind.glyphs);r->ahead=(pn_text_page_t){0};r->behind=(pn_text_page_t){0};r->ahead_warm=0;}
+pn_status_t pn_reader_warm_next(pn_reader_t *r,pn_reader_warm_fn warm,void *ctx,size_t budget){
+    if(!r || !warm || !budget || budget>64)return PN_INVALID;
+    if(r->preparing || !r->has_visible || !r->ahead.valid || r->ahead_anchor.begin!=r->visible.end || !token_equal(r->token,r->neighbor_token) || r->ahead_warm>=r->ahead.count)return PN_EMPTY;
+    pn_cache_pin(&r->cache);pn_status_t s=PN_OK;
+    for(size_t i=0;i<budget && r->ahead_warm<r->ahead.count;i++){
+        s=pn_cancel_checkpoint();if(s!=PN_OK)break;
+        if(r->decoder.source.validate){s=r->decoder.source.validate(r->decoder.source.ctx);if(s!=PN_OK)break;}
+        s=warm(ctx,&r->ahead.glyphs[r->ahead_warm]);
+        if(s==PN_NO_MEMORY){r->ahead_warm=r->ahead.count;s=PN_EMPTY;break;}if(s!=PN_OK && s!=PN_EMPTY)break;r->ahead_warm++;
+    }
+    pn_cache_unpin(&r->cache);return s;
+}
 void pn_reader_neighbors(pn_reader_t *r,pn_pool_t *pool){if(!r)return;if(r->neighbor_pool==pool){neighbor_drop(r);r->neighbor_token=r->token;return;}pn_cache_detach(&r->cache);neighbor_drop(r);r->neighbor_pool=pool;r->neighbor_token=r->token;if(pool)pn_cache_attach(pool,&r->cache,PN_CACHE_NEIGHBOR,r,neighbor_bytes,neighbor_drop);}
 static pn_status_t pn_reader_prefetch_impl(pn_reader_t *r){
     if(!r || !r->neighbor_pool || !r->has_visible || r->preparing || r->visible.end>=r->decoder.source.size)return PN_EMPTY;

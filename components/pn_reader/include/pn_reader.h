@@ -41,6 +41,7 @@ struct pn_reader {
     pn_cache_owner_t cache; ///< 邻页借用保护，绑定后reader地址须稳定 / Neighbor protection; reader address must remain stable after binding
     pn_pool_t *neighbor_pool; ///< 可选邻页预算池，owner串行 / Optional neighbor pool, serialized owner
     pn_text_page_t ahead,behind; ///< 有界下一页/上一页节点 / Bounded next/previous nodes
+    size_t ahead_warm; ///< 下一页已预热节点数，缓存替换时清零 / Warmed next-page node count, reset on replacement
     pn_reader_anchor_t ahead_anchor,behind_anchor; ///< 缓存锚点 / Cached anchors
     pn_job_token_t neighbor_token; ///< 缓存布局代次 / Cache layout generation
     pn_text_reader_t decoder; ///< 不变源的解码上下文 / Decoder context for immutable source
@@ -82,3 +83,6 @@ pn_status_t pn_reader_progress(const pn_reader_t *reader,pn_txt_progress_t *prog
 void pn_reader_neighbors(pn_reader_t *reader,pn_pool_t *pool);
 /// 空闲预排NEXT，不呈现、不写位置；新输入可协作取消。/ Idle NEXT preparation without presentation or position writes; new input can cancel cooperatively.
 pn_status_t pn_reader_prefetch(pn_reader_t *reader);
+typedef pn_status_t (*pn_reader_warm_fn)(void *,const pn_page_glyph_t *); ///< 可选字形预热，不呈现/保存 / Optional glyph warming without presentation or saving
+/// 最多推进budget个已验证邻页节点，借用保护；缺字跳过、无内存停本页预热，新输入取消，不改变当前位置。 / Advance up to budget verified neighbor nodes under borrow protection; skip missing glyphs, stop warming this page on OOM, cancel on new input and preserve visible position.
+pn_status_t pn_reader_warm_next(pn_reader_t *,pn_reader_warm_fn,void *,size_t budget);

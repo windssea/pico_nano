@@ -39,7 +39,11 @@ def main():
         raise SystemExit("Invalid table or application size")
     if "CONFIG_SPIRAM_SPEED_120M=y" not in config or "CONFIG_ESP_PHY_ENABLE_USB=y" in config or "CONFIG_PN_PROFILE=y" in config:
         raise SystemExit("Expected board 120 MHz configuration with USB/radio exclusion")
-    version = "0.0.57"
+    brand = (ROOT / "components/pn_core/include/pn_brand.h").read_text(encoding="utf-8")
+    match = re.search(r'^#define PN_PRODUCT_VERSION "([0-9.]+)"', brand, re.MULTILINE)
+    if not match:
+        raise SystemExit("PN_PRODUCT_VERSION missing")
+    version = match.group(1)
     folder = ROOT / "releases" / f"pico_nano-{version}-{commit[:7]}-upgrade"
     folder.mkdir(exist_ok=False)
     payload = {"pico_nano.bin": application, "expected-partition-table.bin": table,

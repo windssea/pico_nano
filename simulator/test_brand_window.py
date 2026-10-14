@@ -33,11 +33,15 @@ with tempfile.TemporaryDirectory() as directory:
         return fields[3]
     boot, lock = pixels(captures[0]), pixels(captures[-1])
     assert boot[:684 * 1104] == lock[:684 * 1104]
-    ink = [(i % 684, i // 684) for i, value in enumerate(boot) if value < 255]
+    # 开机版本号只占右下角固定框，其余墨迹仍须在品牌图内。/ The boot version occupies a fixed bottom-right box; all other ink must stay inside the brand art.
+    version_box = lambda x, y: 600 <= x < 660 and 1171 <= y < 1192
+    every = [(i % 684, i // 684) for i, value in enumerate(boot) if value < 255]
+    assert sum(1 for x, y in every if version_box(x, y)) > 100
+    ink = [(x, y) for x, y in every if not version_box(x, y)]
     assert ink and min(x for x, y in ink) >= 62 and max(x for x, y in ink) < 622
     metadata=json.loads((pathlib.Path(sys.argv[1]).parent/'pn_brand_logo.json').read_text())
     assert metadata['source_sha256']==hashlib.sha256(pathlib.Path(__file__).resolve().parents[1].joinpath('assets/image/logo.png').read_bytes()).hexdigest()
     top=metadata['position'][1];height=metadata['image_size'][1]
     assert min(y for x,y in ink)>=top and max(y for x,y in ink)<top+height
     assert len(set(boot)) > 2 and any(value < 255 for value in lock[684 * 1104:])
-print('PicoNano: shared native boot/default logo, white transparency, safe bounds and independent hint passed')
+print('PicoNano: shared native boot/default logo, boot version label, white transparency, safe bounds and independent hint passed')

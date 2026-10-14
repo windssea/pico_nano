@@ -180,13 +180,22 @@ static pn_status_t finish(layout_t *l,pn_status_t status){
     if(status==PN_OK)page->valid=true;else{page->count=0;page->image_count=0;page->has_next=false;page->valid=false;}
     pn_free(l);return status;
 }
+/// 冷章仍验证尾部；已验证章只复放到页面及必要stop锚点完成。 / Cold chapters still validate their tails; verified chapters replay only through the page and required stop anchor.
+static bool page_done(void *ctx){const layout_t *l=ctx;return l->full && (!l->stop || l->stop_seen);}
+/// 窗口复放前回到起点前状态：序号接续，段落标志按最后跳过的流事件推出。/ Before window replay, reset to the pre-start state: continue the order and derive the paragraph flag from the last skipped flow event.
+static void page_restart(void *ctx,uint64_t order,const pn_xhtml_event_t *context){
+    layout_t *l=ctx;pn_epub_page_t *page=l->page;
+    page->count=0;page->image_count=0;page->has_next=false;page->begin_order=page->next_order=0;
+    *l=(layout_t){.page=page,.layout=l->layout,.measure=l->measure,.start=l->start,.stop=l->stop,.order=order,.last_space=SIZE_MAX,.active=l->start==NULL,.matched=l->start==NULL,
+        .paragraph=!context || context->kind==PN_XHTML_BLOCK_OPEN};
+}
 pn_status_t pn_epub_page_input(pn_pool_t *pool,const pn_xml_input_t *input,const char *base,const uint8_t salt[16],const pn_xhtml_position_t *start,const pn_layout_t *layout,const pn_epub_measure_t *measure,pn_epub_page_t *page){
     layout_t *l;pn_status_t status=init(pool,start,NULL,layout,measure,page,&l);if(status!=PN_OK)return status;
     pn_xhtml_stats_t stats;status=pn_xhtml_parse_input(pool,input,base,salt,consume,l,&stats);return finish(l,status);
 }
 static pn_status_t pn_epub_page_prepare_impl(pn_pool_t *pool,pn_epub_t *epub,const char *path,const uint8_t salt[16],const pn_xhtml_position_t *start,const pn_layout_t *layout,const pn_epub_measure_t *measure,pn_epub_page_t *page){
     layout_t *l;pn_status_t status=init(pool,start,NULL,layout,measure,page,&l);if(status!=PN_OK)return status;
-    pn_xhtml_stats_t stats;status=pn_xhtml_parse(pool,epub,path,salt,consume,l,&stats);return finish(l,status);
+    pn_xhtml_stats_t stats;status=pn_xhtml_parse_window(pool,epub,path,salt,start,consume,page_done,page_restart,l,&stats);return finish(l,status);
 }
 pn_status_t pn_epub_page_prepare(pn_pool_t *pool,pn_epub_t *epub,const char *path,const uint8_t salt[16],const pn_xhtml_position_t *start,const pn_layout_t *layout,const pn_epub_measure_t *measure,pn_epub_page_t *page){
     pn_profile_span_t span;pn_profile_begin(&span,pool,"epub.layout");
@@ -195,7 +204,7 @@ pn_status_t pn_epub_page_prepare(pn_pool_t *pool,pn_epub_t *epub,const char *pat
 
 static pn_status_t pn_epub_page_prepare_until_impl(pn_pool_t *pool,pn_epub_t *epub,const char *path,const uint8_t salt[16],const pn_xhtml_position_t *start,const pn_xhtml_position_t *stop,const pn_layout_t *layout,const pn_epub_measure_t *measure,pn_epub_page_t *page){
     layout_t *l;pn_status_t status=init(pool,start,stop,layout,measure,page,&l);if(status!=PN_OK)return status;
-    pn_xhtml_stats_t stats;status=pn_xhtml_parse(pool,epub,path,salt,consume,l,&stats);return finish(l,status);
+    pn_xhtml_stats_t stats;status=pn_xhtml_parse_window(pool,epub,path,salt,start,consume,page_done,page_restart,l,&stats);return finish(l,status);
 }
 pn_status_t pn_epub_page_prepare_until(pn_pool_t *pool,pn_epub_t *epub,const char *path,const uint8_t salt[16],const pn_xhtml_position_t *start,const pn_xhtml_position_t *stop,const pn_layout_t *layout,const pn_epub_measure_t *measure,pn_epub_page_t *page){
     pn_profile_span_t span;pn_profile_begin(&span,pool,"epub.layout-until");
