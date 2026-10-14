@@ -114,9 +114,12 @@ static pn_status_t item(layout_t *l,const pn_xhtml_event_t *event,bool paragraph
         if(!l->measure->image)return PN_UNSUPPORTED;
         if(p->image_count>=p->image_capacity && p->owner){size_t cap=p->image_capacity?p->image_capacity*2:2;if(cap>PN_EPUB_PAGE_IMAGES_MAX)cap=PN_EPUB_PAGE_IMAGES_MAX;status=pn_epub_page_reserve(p,p->owner,p->capacity,cap);if(status!=PN_OK)return status;}
         if(!p->images || p->image_count>=p->image_capacity)return PN_LIMIT;
-        status=l->measure->image(l->measure->ctx,event->value,l->layout->width,l->layout->height,&image.width,&image.height);if(status!=PN_OK)return status;
+        // 段首图片与文字同样占用缩进，测量前扣除该空间，不能对空行反复wrap。/ Paragraph-leading images consume indent like text; reserve it before measurement instead of wrapping an empty row forever.
+        int available_w=l->layout->width;
+        if(p->count==l->row && paragraph && !node.style.pre && !node.style.heading)available_w-=l->layout->indent;
+        status=l->measure->image(l->measure->ctx,event->value,available_w,l->layout->height,&image.width,&image.height);if(status!=PN_OK)return status;
         if(image.width<1 || image.height<1 || image.width>l->layout->width || image.height>l->layout->height)return PN_LIMIT;
-        image_geometry(&event->style,l->layout->width,l->layout->height,&image.width,&image.height);
+        image_geometry(&event->style,available_w,l->layout->height,&image.width,&image.height);
         if(strlen(event->value)>=sizeof image.path || strlen(event->alt)>=sizeof image.alt)return PN_LIMIT;
         strcpy(image.path,event->value);strcpy(image.alt,event->alt);node.image_index=(unsigned)p->image_count;
         node.metrics=(pn_epub_metrics_t){.advance_64=image.width*64,.ascent=image.height,.line_height=image.height};

@@ -8,6 +8,7 @@ typedef struct {const char *xml;size_t pos;} input_t;
 static pn_status_t read_input(void *ctx,uint8_t *out,size_t cap,size_t *n){input_t *i=ctx;size_t len=strlen(i->xml);*n=0;if(i->pos==len)return PN_EMPTY;if(cap>len-i->pos)cap=len-i->pos;memcpy(out,i->xml+i->pos,cap);*n=cap;i->pos+=cap;return PN_OK;}
 static pn_status_t glyph(void *ctx,uint32_t cp,const pn_xhtml_style_t *style,pn_epub_metrics_t *m){(void)ctx;(void)cp;*m=(pn_epub_metrics_t){.advance_64=10*64,.ascent=12,.descent=3,.line_height=20,.pixels=16};if(style->heading)m->ascent=18;return PN_OK;}
 static pn_status_t image(void *ctx,const char *path,int maxw,int maxh,int *w,int *h){(void)ctx;(void)path;(void)maxw;(void)maxh;*w=20;*h=30;return PN_OK;}
+static pn_status_t wide_image(void *ctx,const char *path,int maxw,int maxh,int *w,int *h){(void)ctx;(void)path;(void)maxh;*w=maxw;*h=30;return PN_OK;}
 static pn_status_t mixed_height(void *ctx,uint32_t cp,const pn_xhtml_style_t *style,pn_epub_metrics_t *m){(void)ctx;(void)style;*m=(pn_epub_metrics_t){.advance_64=10*64,.ascent=cp=='A'?16:3,.descent=cp=='A'?3:16,.line_height=19,.pixels=16};return PN_OK;}
 static pn_status_t run(pn_pool_t *p,const char *xml,const pn_xhtml_position_t *start,pn_epub_page_t *page,int height){input_t i={xml,0};pn_xml_input_t input={&i,read_input};uint8_t salt[16]={1};pn_layout_t layout={50,height,20,12,0,0,0};pn_epub_measure_t measure={NULL,glyph,NULL};return pn_epub_page_input(p,&input,"OPS/a.xhtml",salt,start,&layout,&measure,page);}
 int main(void){
@@ -32,6 +33,10 @@ int main(void){
     input_t input_data={"<html xmlns='http://www.w3.org/1999/xhtml'><body><p>A<img src='a.png'/>B</p></body></html>",0};pn_xml_input_t input={&input_data,read_input};uint8_t salt[16]={1};pn_layout_t layout={50,40,20,12,0,0,0};pn_epub_measure_t measures={NULL,glyph,image};pn_epub_page_image_t images[2];page.images=images;page.image_capacity=2;
     assert(pn_epub_page_input(&pool,&input,"OPS/a.xhtml",salt,NULL,&layout,&measures,&page)==PN_OK && page.count==3 && page.image_count==1 && nodes[0].baseline==30 && nodes[2].baseline==30);
     assert(!strcmp(images[0].path,"OPS/a.png") && nodes[1].image_index==0);
+    // 满宽段首图片必须为首行缩进留位置，否则冷上一页会卡在此页。/ A full-width paragraph image must reserve first-line indent, or cold previous turns get stuck here.
+    input_data=(input_t){"<html xmlns='http://www.w3.org/1999/xhtml'><body><p><img src='a.png'/></p></body></html>",0};measures.image=wide_image;layout.indent=12;
+    assert(pn_epub_page_input(&pool,&input,"OPS/a.xhtml",salt,NULL,&layout,&measures,&page)==PN_OK && page.count==1 && images[0].width==38 && nodes[0].x_64==12*64);
+    measures.image=image;layout.indent=0;
     // 尺寸、继承对齐与重排锚点。/ Sizing, inherited alignment and reflow anchors.
     input_data=(input_t){"<html xmlns='http://www.w3.org/1999/xhtml'><body><div style='text-align:right'><img style='width:20%;max-height:12px' src='a.png'/></div><p>A</p></body></html>",0};
     assert(pn_epub_page_input(&pool,&input,"OPS/a.xhtml",salt,NULL,&layout,&measures,&page)==PN_OK);

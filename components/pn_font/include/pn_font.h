@@ -47,6 +47,10 @@ pn_text_source_t pn_font_reading_source(void);
 pn_text_source_t pn_font_fallback_source(void);
 /// 内置源使用构建时SHA，文件源仅当前有效句柄复用，其他源实际扫描；不改错误输出。/ Use build-time SHA for builtins, cache file digests only on valid live handles, scan other sources and preserve output on errors.
 pn_status_t pn_font_source_identity(const pn_text_source_t *,pn_book_id_t *);
+/// 产品owner加载完整外置系统字体；关闭所有消费者后才能替换/关闭，失败使用内置应急源。/ The product owner loads a complete external UI font; close consumers before replacing/closing it; failures keep the resident emergency source.
+pn_status_t pn_font_system_open(pn_pool_t *,pn_media_t *,const char *);
+/// USB交接/换卡/传输前关闭外置系统源，后续UI使用应急字库。/ Close the external UI source before USB handoff/media changes/transfers; subsequent UI uses resident emergency fonts.
+pn_status_t pn_font_system_close(void);
 
 #define PN_FONT_NAME_MAX 128
 typedef struct {

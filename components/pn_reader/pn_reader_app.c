@@ -173,9 +173,9 @@ static pn_status_t pn_reader_app_open_on_media_impl(pn_reader_app_t *app,pn_pool
             // 所选字体缺失/被替换：本次用启动默认字体运行，保留记录不改。/ Missing or replaced selection: run with the startup default this time and keep the record unchanged.
             pn_status_t primary;
 #ifdef ESP_PLATFORM
-            primary=selected_fonts.primary.kind==PN_FONT_FILE && !pn_sd_resource_path(selected_fonts.primary.path,PN_SD_FONTS)?PN_EMPTY:pn_font_reference_verify_pooled(pool,&selected_fonts.primary,a->book_media,&a->book_lease);
+            primary=selected_fonts.primary.kind==PN_FONT_FILE && !pn_sd_resource_path(selected_fonts.primary.path,PN_SD_FONTS)?PN_EMPTY:selected_fonts.primary.kind==PN_FONT_FILE?pn_font_reference_open_file(pool,&selected_fonts.primary,a->book_media,&a->book_lease,&a->font_file,&font_source):pn_font_reference_verify_pooled(pool,&selected_fonts.primary,a->book_media,&a->book_lease);
 #else
-            primary=pn_font_reference_verify_pooled(pool,&selected_fonts.primary,a->book_media,&a->book_lease);
+            primary=selected_fonts.primary.kind==PN_FONT_FILE?pn_font_reference_open_file(pool,&selected_fonts.primary,a->book_media,&a->book_lease,&a->font_file,&font_source):pn_font_reference_verify_pooled(pool,&selected_fonts.primary,a->book_media,&a->book_lease);
 #endif
             if(primary==PN_STALE_MEDIA)status=primary;
             else if(primary!=PN_OK)a->font_unavailable=true;
@@ -192,7 +192,7 @@ static pn_status_t pn_reader_app_open_on_media_impl(pn_reader_app_t *app,pn_pool
     if(status==PN_OK && has_selected_fonts && !a->font_unavailable){a->live_fonts=selected_fonts;a->fonts_known=true;}
     if(status==PN_OK && font_path){if(strlen(font_path)>=sizeof a->boot_primary)status=PN_LIMIT;else strcpy(a->boot_primary,font_path);}
     if(status==PN_OK){
-        if(font_path){status=pn_media_acquire(a->book_media,PN_MEDIA_READ,&a->font_lease);if(status==PN_OK)status=pn_text_file_open(&a->font_file,a->book_media,&a->font_lease,font_path,&font_source);}
+        if(font_path && !a->font_file.handle){status=pn_media_acquire(a->book_media,PN_MEDIA_READ,&a->font_lease);if(status==PN_OK)status=pn_text_file_open(&a->font_file,a->book_media,&a->font_lease,font_path,&font_source);}
         if(status==PN_OK && font_path){a->font_source=font_source;a->external_font=true;}
         if(status==PN_OK)status=pn_font_open(&a->body,pool,&font_source,a->style.pixels);
         // 可选启动字体不可用时只替换运行字体；不吞介质失效/取消/占用，不覆盖原偏好。

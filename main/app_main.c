@@ -525,7 +525,17 @@ static void refresh_last(void){
     if(!found)pn_shelf_covers_set_last(shelf_covers,NULL);
     pn_free(tmp);
 }
+/// 首次正常产品访问加载固定系统字库；关闭/换卡后重新核验，缺失保持应急字体。/ Load the fixed UI face on normal product access; reverify after close/media changes and retain emergency fonts when absent.
+static void system_font_ready(void){
+    static uint32_t reported_epoch;static bool reported;
+    if(sd_media.available && !usb.open && !transfer.impl){
+        pn_status_t s=pn_font_system_open(&pool,&sd_media,PN_SD_MOUNT "/" PN_SD_SYSTEM_FONT);
+        if(s==PN_OK && (!reported || reported_epoch!=sd_media.epoch)){pn_text_source_t source=pn_font_builtin_source();(void)source;ESP_LOGI(TAG,"System font source=TF bytes=%llu",(unsigned long long)source.size);reported=true;reported_epoch=sd_media.epoch;}
+        else if(s!=PN_OK && s!=PN_IO)ESP_LOGW(TAG,"System font unavailable: %d",(int)s);
+    }
+}
 static void show_shelf(const char *cursor,bool previous){
+    system_font_ready();
     pn_wallpaper_mask_close(&lock_mask);
     if(!shelf_page){shelf_page=pn_alloc_tagged(&pool,PN_MEM_UI,sizeof *shelf_page);if(!shelf_page){message("内存不足","稍后重试");return;}}
     pn_catalog_page_t *next=pn_alloc_tagged(&pool,PN_MEM_UI,sizeof *next);if(!next){message("内存不足","稍后重试");return;}
@@ -586,6 +596,7 @@ static void start_reader_impl(void){
         return;
     }
     if(!sd_media.available){pn_status_t s=pn_media_attach(&sd_media,card_instance++);if(s!=PN_OK){message("卡仍被占用","等待旧文件关闭后重试");return;}}
+    system_font_ready();
     if(!*selected_path){show_shelf("",false);return;}
     // 缺失或旧目录的书只退回可操作书库，不反复进入重试错误页；持久记录保留。/ Missing books or legacy paths return to a usable library without an error loop; durable records stay intact.
     const char *prefix=PN_SD_MOUNT "/" PN_SD_BOOKS "/";struct stat selected_info;
@@ -678,6 +689,7 @@ static void begin_wallpaper(void){
 static void begin_fonts(void){
     if(transfer.impl || font_manage.impl || wallpaper_ui.impl)return;
     if(!stop_reader())return;
+    (void)pn_font_system_close();
     pn_wallpaper_mask_close(&lock_mask);
     reading_menu=false;
     if(!data_ready)data_ready=mount_data();
@@ -718,6 +730,7 @@ static void begin_transfer(bool station){
     if(station){pn_network_credentials_t c={0};pn_status_t loaded=load_network(&c);
         if(loaded!=PN_OK || !c.ssid[0]){pn_network_wipe(&c);message("没有已保存的网络","可在热点传书网页中保存");return;}
         config.mode=PN_WIFI_STA;strcpy(config.ssid,c.ssid);strcpy(config.password,c.password);pn_network_wipe(&c);}
+    (void)pn_font_system_close();
     pn_status_t status=pn_device_transfer_open(&transfer,&sd_media,PN_SD_MOUNT,&config);
     {volatile uint8_t *secret=(volatile uint8_t *)config.password;for(size_t i=0;i<sizeof config.password;i++)secret[i]=0;}
     if(status!=PN_OK){message("传输未开启","保留阅读位置，请重试");return;}
@@ -840,6 +853,7 @@ static void begin_usb(void){
     if(!stop_reader())return;
     pn_wallpaper_mask_close(&lock_mask);pn_wallpaper_ui_close(&wallpaper_ui);pn_font_manage_close(&font_manage);pn_settings_ui_close(&settings_ui);
     pn_catalog_index_close(&catalog_index);covers_inactive=true;cover_drop(NULL);
+    (void)pn_font_system_close();
     pn_status_t s=pn_device_usb_open(&usb,&sd_media,pn_device_usb_board_port());
     if(s!=PN_OK){message("USB 未开启","存储卡不可用或仍被占用，请重试");return;}
     usb_return=usb_lock=usb_home=false;hub_mode=shelf_mode=index_mode=search_mode=reading_menu=false;status_page=true;sd_recovery.pending=false;
@@ -896,7 +910,9 @@ static void report_reader_result(pn_status_t status){
     if(confirmed)progress_save_failed=true;
     else reader_notice="翻页未完成，原页保留，请重试";
     ESP_LOGW(TAG,"Reader result=%d confirmed=%d",(int)status,confirmed);
-    if(page_copy)toolbar_show();else message("阅读未完成","重试或按电源键返回");
+    // 未提交的翻页保留正文和输入上下文，不强制打开工具面板。/ Preserve reading/input context after an uncommitted turn without forcing the tools panel open.
+    if(page_copy)return;
+    message("阅读未完成","重试或按电源键返回");
 }
 static int active_hit(int x,int y);
 static void apply_selection(int selection);
@@ -961,6 +977,8 @@ static void open_shelf_item(int index){
 }
 static void handle_key(int key,pn_key_event_t event){
     if(usb.open){if(event==PN_KEY_SHORT){usb_return=true;usb_home=key==PN_KEY_2;usb_lock=false;pn_device_usb_request_stop(&usb);}return;}
+    // 排版中间键先应用草稿，只有成功才回到当前阅读页。/ Apply the draft first on the typesetting middle key and return to reading only on success.
+    if(styles.active && key==PN_KEY_2 && event==PN_KEY_SHORT){apply_selection(PN_SUI_APPLY);return;}
     if(focus_page() && event==PN_KEY_SHORT && key==PN_KEY_2){
         if(transfer.impl){management_home_pending=true;transfer_return=true;transfer_lock=false;(void)pn_device_transfer_request_stop(&transfer);return;}
         if(!stop_reader())return;
@@ -1212,7 +1230,7 @@ static void device_task(void *arg){
          }} // 读取失败限频重试，不能每10ms重复访问存储。/ Rate-limit failed loads instead of repeating storage reads every 10 ms.
         input.config=(pn_reader_input_config_t){.left_hand=(input_flags&PN_INPUT_LEFT_HAND)!=0,.no_swipe=(input_flags&PN_INPUT_NO_SWIPE)!=0,.no_edge_tap=(input_flags&PN_INPUT_NO_EDGE_TAP)!=0,.no_keys=(input_flags&PN_INPUT_NO_KEYS)!=0};
         if(!transfer.impl && !usb.open && now-last_card>=250){last_card=now;
-            if(sd_media.available && pn_device_card_presence()==PN_STALE_MEDIA){if(reader_active()){if(epub.impl)(void)pn_epub_app_media_lost(&epub);else (void)pn_reader_app_media_lost(&reader);(void)stop_reader();}else (void)pn_media_detach(&sd_media);selected_path[0]=0;pn_reader_input_cancel(&input);message("卡已移除","保留上次阅读位置\n插卡后点下方重试");}}
+            if(sd_media.available && pn_device_card_presence()==PN_STALE_MEDIA){if(reader_active()){if(epub.impl)(void)pn_epub_app_media_lost(&epub);else (void)pn_reader_app_media_lost(&reader);(void)stop_reader();}else (void)pn_media_detach(&sd_media);(void)pn_font_system_close();selected_path[0]=0;pn_reader_input_cancel(&input);message("卡已移除","保留上次阅读位置\n插卡后点下方重试");}}
         if((async_port.input_active && available==PN_OK && queued.kind==PN_DASYNC_POWER) || (!async_port.input_active && now-last_key>=100)){last_key=now;if((async_port.input_active || read_pico_pmu_take_key_short()) && now-boot>=1000){pn_reader_input_cancel(&input);
                 if(usb.open){usb_return=true;usb_lock=true;usb_home=false;pn_device_usb_request_stop(&usb);}
                 else if(transfer.impl){transfer_return=true;transfer_lock=true;(void)pn_device_transfer_request_stop(&transfer);}

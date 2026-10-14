@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: Apache-2.0
  * 中文：真实设备路由管理键与面板底图复用，硬件用现有启动桩。/ English: real device management routing and shelf-overlay reuse with existing boot stubs. */
+#define _POSIX_C_SOURCE 200809L
 #define main boot_fixture_main
 #define pn_device_transfer_state boot_transfer_state
 #define pn_device_transfer_close boot_transfer_close
@@ -121,6 +122,18 @@ int main(void){
     usb=(pn_device_usb_t){.open=true,.phase=PN_USB_READY};begin_transfer(false);assert(!transfer.impl);
     handle_key(PN_KEY_2,PN_KEY_SHORT);assert(usb.open && usb_home && usb_return && usb.stop_requested);
     usb=(pn_device_usb_t){0};
+    // 排版页中间键保存并留在原书；翻页错误不强制弹出工具。/ Middle key saves typesetting within the book; turn failures do not force tools open.
+    char book[]="/tmp/pn-device-style-XXXXXX";int fd=mkstemp(book);assert(fd>=0);FILE *story=fdopen(fd,"wb");assert(story);
+    for(unsigned i=0;i<60;i++)assert(fputs("文字阅读保持当前位置。\n",story)>0);
+    assert(!fclose(story));
+    pn_async_init(&async_port.input);home_mode=shelf_mode=status_page=actions_mode=false;
+    assert(pn_reader_app_open(&reader,&pool,book,NULL,NULL,44,0)==PN_OK);
+    assert(active_step(PN_APP_OPEN,now_ms())==PN_OK);
+    assert(pn_style_ui_open(&styles,&reader,present,NULL)==PN_OK);styles.draft.pixels=46;
+    handle_key(PN_KEY_2,PN_KEY_SHORT);assert(reader.impl && !styles.active && !home_mode);
+    pn_style_t saved;assert(pn_reader_app_style_get(&reader,&saved)==PN_OK && saved.pixels==46);
+    toolbar_open=false;report_reader_result(PN_LIMIT);assert(!toolbar_open && reader.impl && (reader_notice || progress_save_failed));
+    assert(stop_reader());assert(!unlink(book));
     pn_free(page_copy);pn_free(shelf_page);pn_free(shelf_covers);pn_free(recent_snapshot);pn_free(favorites);
     assert(!pool.used && !pool.live);return 0;
 }

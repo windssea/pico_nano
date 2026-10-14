@@ -85,16 +85,17 @@ pn_status_t pn_text_file_open(pn_text_file_t *file,pn_media_t *media,const pn_me
     *file=(pn_text_file_t){.handle=handle,.media=media,.lease=*lease,.size=(uint64_t)info.st_size,.read_position_known=true};
     *source=(pn_text_source_t){file,file->size,read_at,validate};return PN_OK;
 }
-pn_status_t pn_text_file_identity(const pn_text_source_t *source,pn_book_id_t *out){
+pn_status_t pn_text_file_identity_pooled(pn_pool_t *pool,const pn_text_source_t *source,pn_book_id_t *out){
     if(!source || !out)return PN_INVALID;
     if(source->read_at!=read_at || source->validate!=validate || !source->ctx)return PN_UNSUPPORTED;
     pn_text_file_t *file=source->ctx;pn_status_t s=validate(file);if(s!=PN_OK)return s;
     if(source->size!=file->size)return PN_INVALID;
     if(file->identity_known){file->identity_hits++;*out=file->identity;return PN_OK;}
-    pn_book_id_t digest;s=pn_identity_stream(source->ctx,source->size,source->read_at,&digest);
+    pn_book_id_t digest;s=pool?pn_identity_stream_pooled(pool,source->ctx,source->size,source->read_at,&digest):pn_identity_stream(source->ctx,source->size,source->read_at,&digest);
     if(s==PN_OK)s=validate(file);
     if(s==PN_OK){file->identity=digest;file->identity_known=true;*out=digest;}return s;
 }
+pn_status_t pn_text_file_identity(const pn_text_source_t *source,pn_book_id_t *out){return pn_text_file_identity_pooled(NULL,source,out);}
 pn_status_t pn_text_file_close(pn_text_file_t *file) {
     if(!file)return PN_INVALID;
     if(!file->handle)return PN_OK;

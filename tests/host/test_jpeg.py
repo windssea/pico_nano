@@ -23,6 +23,10 @@ with tempfile.TemporaryDirectory() as folder:
   run(path,success=False,env={'PN_JPEG_BUDGET':'4096'})
   r=run(path,success=False,env={'PN_JPEG_STOP_AFTER':'50','PN_JPEG_CHUNK':'17'});assert b'jpeg status=6 ' in r.stderr
   raw=path.read_bytes()
+  # 有界零填充不改变像素，非零尾和超限仍拒绝。/ Bounded zero padding preserves pixels; nonzero tails and overflow remain rejected.
+  for padding in [1,77201,128*1024]:
+   bad.write_bytes(raw+b'\0'*padding);assert run(bad).stdout==run(path).stdout
+  bad.write_bytes(raw+b'\0'*(128*1024+1));run(bad,success=False)
   for content in [raw[:-2],raw+b'X',raw[:80],b'not a JPEG']:
    bad.write_bytes(content);run(bad,success=False)
 print('jpeg: baseline/progressive independent pixels, short reads, media failure, truncation/tail and all allocation faults passed')

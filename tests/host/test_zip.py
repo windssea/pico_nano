@@ -28,6 +28,28 @@ with tempfile.TemporaryDirectory() as directory:
         path.write_bytes(data)
         result = subprocess.run([binary, str(path), "mimetype"], capture_output=True, timeout=10)
         assert result.returncode != 0 and b"used=0 live=0" in result.stderr, result.stderr
+    # 旧打包器把冗余选项位写到所有条目，实际数据仍是stored/deflate。/ Legacy packers repeat option bits while payloads remain stored/deflate.
+    for method in [zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED]:
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", compression=method) as z:
+            z.writestr("mimetype", b"application/epub+zip", compress_type=zipfile.ZIP_STORED)
+            z.writestr("chapter", payload)
+        data = bytearray(buf.getvalue())
+        with zipfile.ZipFile(io.BytesIO(data)) as z:
+            cursor = z.start_dir
+            for entry in z.infolist():
+                struct.pack_into("<H", data, cursor + 8, 0x0816)
+                struct.pack_into("<H", data, entry.header_offset + 6, 0x0816)
+                n, e, c = struct.unpack_from("<HHH", data, cursor + 28)
+                cursor += 46 + n + e + c
+        path.write_bytes(data)
+        result = subprocess.run([binary, str(path), "chapter", "4096"], capture_output=True, timeout=40)
+        assert result.returncode == 0 and result.stdout == payload, result.stderr
+        encrypted = bytearray(data)
+        at = encrypted.index(b"PK\x01\x02")
+        struct.pack_into("<H", encrypted, at + 8, 0x0817)
+        struct.pack_into("<H", encrypted, 6, 0x0817)
+        rejected(encrypted)
     for name in ["../bad", "/bad", "a/../bad", "a\\bad"]:
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w") as z:

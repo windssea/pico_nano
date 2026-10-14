@@ -137,7 +137,8 @@ static pn_status_t zip_begin(archive_t **out,pn_pool_t *pool,const pn_text_sourc
         uint8_t h[46];if(cursor>eocd || eocd-cursor<46){status=PN_CORRUPT;goto failed;}status=read_at(a,cursor,h,sizeof h);if(status!=PN_OK)goto failed;
         if(u32(h)!=0x02014b50u){status=PN_CORRUPT;goto failed;}
         entry_t *e=&a->entries[i];memset(e,0,sizeof *e);e->flags=u16(h+8);e->method=u16(h+10);e->crc=u32(h+16);e->packed=u32(h+20);e->unpacked=u32(h+24);e->name_length=u16(h+28);e->local=u32(h+42);e->name_pos=cursor+46;
-        if(u16(h+6)>20 || (e->flags&~0x080eu) || u16(h+34) || (e->method!=0 && e->method!=8) || (e->method==0 && (e->flags&6)) || ((u32(h+38)>>16)&0170000)==0120000){status=PN_UNSUPPORTED;goto failed;}
+        // 兼容旧打包器在stored/deflate上的冗余选项位；仍保留原始flags核对本地头，拒加密与其他方法。/ Tolerate redundant legacy option bits for stored/deflate; retain raw flags for local-header matching and reject encryption/other methods.
+        if(u16(h+6)>20 || (e->flags&~0x081eu) || u16(h+34) || (e->method!=0 && e->method!=8) || ((u32(h+38)>>16)&0170000)==0120000){status=PN_UNSUPPORTED;goto failed;}
         if(e->packed==UINT32_MAX || e->unpacked==UINT32_MAX || e->local==UINT32_MAX){status=PN_UNSUPPORTED;goto failed;}
         total+=e->unpacked;if(e->packed>ENTRY_MAX_BYTES || e->unpacked>ENTRY_MAX_BYTES || total>TOTAL_MAX_BYTES){status=PN_LIMIT;goto failed;}
         uint32_t length=46u+e->name_length+u16(h+30)+u16(h+32);if(!e->name_length || e->name_length>=PN_ZIP_PATH_MAX || length>eocd-cursor || (e->method==0 && e->packed!=e->unpacked)){status=PN_CORRUPT;goto failed;}

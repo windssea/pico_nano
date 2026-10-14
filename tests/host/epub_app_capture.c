@@ -22,6 +22,20 @@ int main(int argc,char **argv){if(argc!=6 && argc!=7)return 2;unsigned page=(uns
     if(status==PN_OK && getenv("PN_EPUB_APP_TOC")){size_t index=(size_t)strtoul(getenv("PN_EPUB_APP_TOC"),NULL,10);screen.write=page==1 && !getenv("PN_EPUB_TOC_MENU");status=pn_epub_app_toc_jump(&app,index,now++,present,&screen);}
     else if(status==PN_OK){screen.write=page==1 && !getenv("PN_EPUB_TOC_MENU");status=pn_epub_app_step(&app,PN_APP_OPEN,now++,present,&screen);}
     for(unsigned i=2;status==PN_OK && i<=page;i++){screen.write=i==page;status=pn_epub_app_step(&app,PN_APP_NEXT,now++,present,&screen);}
+    // 私人样本的冷/热反向回放诊断，不输出正文。/ Cold/hot backward diagnostics for private samples without prose output.
+    if(status==PN_OK && getenv("PN_EPUB_BACKTRACK")){
+        if(getenv("PN_EPUB_BACKTRACK_INDENT")){pn_style_t style;status=pn_epub_app_style_get(&app,&style);style.indent_em=2;screen.write=false;if(status==PN_OK)status=pn_epub_app_style_apply(&app,&style,now++,present,&screen);}
+        if(getenv("PN_EPUB_COLD_BACKTRACK") && argc==7){
+            status=pn_epub_app_close(&app,now++);
+            if(status==PN_OK)status=pn_epub_app_open(&app,&pool,argv[1],argv[2],argv[6],atoi(argv[5]),now++);
+            if(status==PN_OK)status=pn_epub_app_step(&app,PN_APP_OPEN,now++,present,&screen);
+        }
+        unsigned rounds=(unsigned)strtoul(getenv("PN_EPUB_BACKTRACK"),NULL,10);
+        for(unsigned i=0;status==PN_OK && i<rounds;i++){
+            screen.write=true;status=pn_epub_app_step(&app,PN_APP_PREVIOUS,now++,present,&screen);
+            pn_epub_progress_t where;if(pn_epub_app_progress(&app,&where)==PN_OK)fprintf(stderr,"back=%u status=%d path=%s element=%llu offset=%llu\n",i,(int)status,where.location.path,(unsigned long long)where.location.position.element,(unsigned long long)where.location.position.offset);
+        }
+    }
     if(status==PN_OK && getenv("PN_EPUB_TOC_MENU")){pn_toc_ui_t menu={0};screen.write=true;status=pn_toc_ui_open(&menu,&app,present,&screen);pn_toc_ui_close(&menu);}
     if(status==PN_OK && getenv("PN_EPUB_STYLE_FORM")){pn_style_ui_t menu={0};screen.write=true;status=pn_style_ui_open_epub(&menu,&app,present,&screen);pn_style_ui_close(&menu);}
     if(status==PN_OK && getenv("PN_EPUB_STYLE_PREVIEW")){pn_style_t style;status=pn_epub_app_style_get(&app,&style);style.indent_em=2;style.line_percent=160;style.gap_percent=40;style.tracking_percent=5;screen.write=true;if(status==PN_OK)status=pn_epub_app_style_preview(&app,&style,now++,present,&screen);}

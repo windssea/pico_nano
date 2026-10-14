@@ -406,6 +406,8 @@ static bool management_event(library_t *s,SDL_Event *event,uint64_t now){
     if(!active || event->type!=SDL_KEYDOWN || event->key.keysym.sym<SDLK_1 || event->key.keysym.sym>SDLK_3)return false;
     if(event->key.repeat)return true;
     int key=(int)(event->key.keysym.sym-SDLK_1);
+    // 与设备一致：排版中间键保存并留在当前书，预览态也应用草稿。/ Match the device: the typesetting middle key saves within the current book, including preview drafts.
+    if(key==PN_KEY_2 && s->styles.active){pn_status_t status=pn_style_ui_event(&s->styles,PN_SUI_APPLY,now,present,s);style_report(&s->styles,PN_SUI_APPLY,status);return true;}
     if(key==PN_KEY_2){
         pn_status_t status=reading(s)?active_close(s,now):PN_OK;
         if(status!=PN_OK){printf("management home status=%d retained=1\n",(int)status);return true;}
@@ -491,8 +493,10 @@ static int library_worker(void *ctx){
     memset(s->page,0,sizeof *s->page);
     if(!pn_frame_bind(&s->frame,s->frame.pixels,342u*1216u,684,1216))goto cleanup;
     if(getenv("PN_SIM_BOOT_PREVIEW")){status=pn_brand_image_render(&s->frame);if(status==PN_OK)status=pn_brand_version_render(&s->frame,PN_PRODUCT_VERSION);if(status==PN_OK)status=present_raw(s,&s->frame);if(status!=PN_OK)goto cleanup;SDL_Delay(900);}
-    pn_text_source_t source=pn_font_builtin_source();status=pn_font_open(&s->font,pool,&source,24);if(status!=PN_OK)goto cleanup;
     pn_media_init(&s->media);status=pn_media_attach(&s->media,1);if(status!=PN_OK)goto cleanup;
+    // 与设备使用同一系统字库加载器，模拟器只替换目录port。/ Use the same system-font loader as the device with only the directory port replaced.
+    if(s->font_dir){char path[PN_FONT_REFERENCE_PATH_MAX];int n=snprintf(path,sizeof path,"%s/HarmonyOS_Sans_SC_Regular.ttf",s->font_dir);if(n>0 && (size_t)n<sizeof path)(void)pn_font_system_open(pool,&s->media,path);}
+    pn_text_source_t source=pn_font_builtin_source();status=pn_font_open(&s->font,pool,&source,24);if(status!=PN_OK)goto cleanup;
     if(cover_cache){char cache[PN_CATALOG_PATH_MAX];int n=snprintf(cache,sizeof cache,"%s/library",cover_cache);if(n>0 && (size_t)n<sizeof cache)(void)pn_catalog_index_init(&s->catalog_index,pool,&s->media,s->directory,cache);}
     pn_media_init(&s->state_media);status=pn_media_attach(&s->state_media,1);if(status!=PN_OK)goto cleanup;
     s->shelf_prefs=pn_shelf_prefs_default();
@@ -774,6 +778,7 @@ cleanup:;
     pn_wallpaper_ui_close(&s->wallpaper);pn_font_manage_close(&s->font_manage);pn_settings_ui_close(&s->settings);
     pn_font_ui_close(&s->fonts);
     pn_cache_detach(&s->cover_cache);pn_font_close(&s->font);pn_free(s->frame.pixels);pn_free(s->page_px);pn_free(s->favorites);pn_free(s->page);pn_free(s->recent);pn_free(s->covers);
+    (void)pn_font_system_close();
     free(s->argb);s->argb=NULL;pn_cancel_leave(&shield);return result;
 }
 
