@@ -1,0 +1,23 @@
+{
+  "components": [
+    {
+      "name": "espressif/esp_tinyusb",
+      "version": "2.3.0",
+      "source": "https://components.espressif.com/components/espressif/esp_tinyusb/versions/2.3.0",
+      "component_hash": "0fab24246e07bdf919c6489d17a590cffbffbbf6a9c44d6235641645c8b946b7",
+      "license": "Apache-2.0",
+      "notice": "LICENSES/esp-tinyusb-LICENSE.txt",
+      "notice_sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+      "name": "espressif/tinyusb",
+      "version": "0.21.0~2",
+      "source": "https://components.espressif.com/components/espressif/tinyusb/versions/0.21.0~2",
+      "component_hash": "16c8d774dab1f484d3e0c0f61105624d2424bbae864efd19818baf7b451b41e7",
+      "license": "MIT",
+      "notice": "LICENSES/tinyusb-LICENSE.txt",
+      "notice_sha256": "f878d62e47e693ea64160218edb1b9b4755f4839a3179e5bef4a6b0359399431"
+    }
+  ],
+  "distribution": "Resolved through the pinned dependencies.lock; managed sources are unmodified. Local adapters and linker callback wrappers are independently authored."
+}

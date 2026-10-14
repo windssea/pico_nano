@@ -38,3 +38,10 @@ CONFIG_PM_ENABLE=y
 # Automatic light sleep: tickless idle sleeps when no lock is held; stay awake while a USB host is connected for logs and web flashing.
 CONFIG_FREERTOS_USE_TICKLESS_IDLE=y
 CONFIG_USJ_NO_AUTO_LS_ON_CONNECTION=y
+# 手动独占TF的USB MSC；不自动挂载或格式化。/ Manual exclusive TF MSC; no automatic mount/format.
+CONFIG_TINYUSB_MSC_ENABLED=y
+CONFIG_TINYUSB_MSC_BUFSIZE=8192
+CONFIG_TINYUSB_DESC_MANUFACTURER_STRING="PicoNano"
+CONFIG_TINYUSB_DESC_PRODUCT_STRING="PicoNano TF Card"
+CONFIG_TINYUSB_DESC_MSC_STRING="PicoNano TF Card"
+CONFIG_TINYUSB_MSC_MOUNT_PATH="/usb-unmounted"

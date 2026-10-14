@@ -55,6 +55,15 @@ def check_markdown(root):
 
 def main():
     errors = check_markdown(ROOT)
+    usb = json.loads((ROOT / "LICENSES/usb-manifest.json").read_text(encoding="utf8"))
+    lock = (ROOT / "dependencies.lock").read_text(encoding="utf8")
+    for entry in usb["components"]:
+        section = re.search(r"^  " + re.escape(entry["name"]) + r":\n(.*?)(?=^  \S|^direct_dependencies:)", lock, re.M | re.S)
+        if not section or f"component_hash: {entry['component_hash']}" not in section.group(1) or f"version: {entry['version']}" not in section.group(1):
+            errors.append(f"USB dependency lock mismatch: {entry['name']}")
+        notice = ROOT / entry["notice"]
+        if not notice.is_file() or hashlib.sha256(notice.read_bytes()).hexdigest() != entry["notice_sha256"]:
+            errors.append(f"USB license mismatch: {entry['notice']}")
     try:
         check_partitions((ROOT / "partitions.csv").read_text(encoding="utf-8"))
     except ValueError as exc:

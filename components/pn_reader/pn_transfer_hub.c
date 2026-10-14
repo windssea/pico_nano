@@ -31,7 +31,7 @@ pn_status_t pn_transfer_hub_render(pn_font_t *font,pn_frame_t *frame,const pn_tr
     else snprintf(lan,sizeof lan,"%s",info->hotspot?"先在热点传书网页里保存家庭网络":wireless_off);
     if(s==PN_OK)s=pn_w_card_row(font,frame,"局域网传书",lan,NULL,PN_ICON_TRANSFER,info->lan?PN_ROW_CHEVRON:0u,CHANNEL_Y+ROW_H,false);
     if(s==PN_OK)s=pn_w_card_row(font,frame,"LocalSend",info->localsend?"自动接收书籍、字体；图片请在网页选择类别":"此运行环境未接入 LocalSend 网络接收",NULL,PN_ICON_TRANSFER,info->localsend?PN_ROW_CHEVRON:0u,CHANNEL_Y+2*ROW_H,false);
-    if(s==PN_OK)s=pn_w_card_row(font,frame,"USB 传输","暂不支持：阅读与 USB 不能同时使用存储卡",NULL,PN_ICON_IMPORT,0u,CHANNEL_Y+3*ROW_H,true);
+    if(s==PN_OK)s=pn_w_card_row(font,frame,"USB 传输",info->usb?"连接电脑直接复制，期间暂停阅读":"此运行环境未接入 USB 读卡",NULL,PN_ICON_IMPORT,info->usb?PN_ROW_CHEVRON:0u,CHANNEL_Y+3*ROW_H,true);
     if(s==PN_OK)s=pn_w_group(font,frame,"存储",STORAGE_Y-14);
     pn_w_card(frame,STORAGE_Y,1);
     if(s==PN_OK)s=pn_w_card_row(font,frame,"存储卡",info->storage && *info->storage?info->storage:"未读取到存储卡",NULL,-1,0u,STORAGE_Y,true);
@@ -48,5 +48,6 @@ int pn_transfer_hub_hit(const pn_transfer_hub_info_t *info,int x,int y){
     if(y>=CHANNEL_Y && y<CHANNEL_Y+ROW_H)return info->hotspot?PN_HUB_HOTSPOT:-1;
     if(y>=CHANNEL_Y+ROW_H && y<CHANNEL_Y+2*ROW_H)return info->lan?PN_HUB_LAN:-1;
     if(y>=CHANNEL_Y+2*ROW_H && y<CHANNEL_Y+3*ROW_H)return info->localsend?PN_HUB_LOCALSEND:-1;
+    if(y>=CHANNEL_Y+3*ROW_H && y<CHANNEL_Y+4*ROW_H)return info->usb?PN_HUB_USB:-1;
     return -1;
 }

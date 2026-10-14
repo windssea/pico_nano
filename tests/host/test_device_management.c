@@ -91,6 +91,12 @@ int main(void){
     atomic_store(&full_clean_completed,false);atomic_store(&deep_clean_pending,true);panel_fault=true;
     assert(present(NULL,&probe_frame,PN_REFRESH_GL16)==PN_IO && !panel_known && atomic_load(&deep_clean_pending) && !atomic_load(&full_clean_completed));
     panel_fault=false;assert(present(NULL,&probe_frame,PN_REFRESH_GL16)==PN_OK && panel_known && !atomic_load(&deep_clean_pending) && atomic_load(&full_clean_completed));
+    // 内容转换提前GC16，保持同一帧、一次扫描且不插入白场；小文字变化不触发。
+    // Content transitions promote to GC16 for the same target in one scan without a white prepass; small text stays GL16.
+    pn_frame_clear(&probe_frame,7);assert(present(NULL,&probe_frame,PN_REFRESH_GC16)==PN_OK);
+    pn_frame_clear(&probe_frame,15);gc_before=gc_updates;clean_before=clear_calls;
+    atomic_store(&reading_presentation,true);assert(present(NULL,&probe_frame,PN_REFRESH_GL16)==PN_OK);
+    assert(gc_updates==gc_before+1 && clear_calls==clean_before);atomic_store(&reading_presentation,false);
     pn_free(probe_pixels);
     // 异步关闭完成属于已提交的前台返回；残留抬手事件不能取消唯一的返回帧。/ Completed asynchronous shutdown commits a foreground return; a trailing touch release must not cancel its only return frame.
     pn_async_init(&async_port.input);pn_async_scope_t stop_scope;pn_async_begin(&async_port.input,&stop_scope,true);
@@ -110,6 +116,11 @@ int main(void){
     time_sync.impl=(void *)1;commit_result=PN_OK;tick_time_sync(1200);assert(!time_sync.impl && time_commits==2 && clock_known && clock_base_sec==1780000000u);
     time_sync.impl=(void *)1;time_result=(pn_device_time_state_t){.phase=PN_TIME_CANCELLED,.released=true,.error=PN_CANCELLED};tick_time_sync(1300);assert(!time_sync.impl && time_commits==2 && clock_base_sec==1780000000u);
     time_sync.impl=(void *)1;time_result=(pn_device_time_state_t){.phase=PN_TIME_SUCCEEDED,.released=true,.utc=1780000000u,.acquired_ms=1000};clock_us=31000000;tick_time_sync(31000);assert(time_commits==3 && clock_base_sec==1780000030u);
+    // USB会话阻止无线开启与直接导航；首页键必须先结束USB。
+    // USB blocks wireless start/direct navigation; Home must request USB teardown first.
+    usb=(pn_device_usb_t){.open=true,.phase=PN_USB_READY};begin_transfer(false);assert(!transfer.impl);
+    handle_key(PN_KEY_2,PN_KEY_SHORT);assert(usb.open && usb_home && usb_return && usb.stop_requested);
+    usb=(pn_device_usb_t){0};
     pn_free(page_copy);pn_free(shelf_page);pn_free(shelf_covers);pn_free(recent_snapshot);pn_free(favorites);
     assert(!pool.used && !pool.live);return 0;
 }

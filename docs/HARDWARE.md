@@ -20,7 +20,7 @@
 | 加速度传感器 | SC7A20HTR | 器件存在不表示拿起唤醒或自动旋转已交付 |
 | 电池 | 2050mAh LCO 电池组 | 没有最新阅读/待机实测，不能据容量推算续航 |
 | 外部存储 | microSD/TF | 当前 BSP 使用 1 位 SDMMC 高速模式；不假定支持拓宽接线 |
-| 接口 | USB-C | USB 数据、供电和充电应分别验证；MSC 传书尚未交付 |
+| 接口 | USB-C | USB 数据、供电和充电应分别验证；MSC源码已接入，真实读写/退出待验收 |
 | 其他能力 | 芯片有向量扩展 | 自有混合路径尚未加入专用 SIMD；不据此声称 AI 能力 |
 | 无线 | 2.4GHz WiFi 802.11 b/g/n、BLE 5.0（芯片能力） | 已用 WiFi AP/STA 传书与对时；BLE 未使用；无 5GHz、无经典蓝牙音频 |
 | 芯片其他资源 | 384KiB ROM、16KiB RTC SRAM、ULP 协处理器、GDMA、USB OTG/Serial-JTAG | 来自乐鑫芯片资料；RTC SRAM/ULP 当前未使用 |

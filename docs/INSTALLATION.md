@@ -1,10 +1,10 @@
 # PicoNano 安装、异机升级与发布
 
-更新：2026-10-14。默认通过电脑 Chrome/Edge 的 Web Serial 升级，在线入口为[网页安装器](https://windssea.github.io/pico_nano/)。当前默认固件 `0.6.5+766a137`（开机右下角与“设置 → 存储与关于”显示版本号）。网页安装与设备无线OTA是不同能力，当前没有已交付的OTA原子回滚。
+更新：2026-10-14。默认通过电脑 Chrome/Edge 的 Web Serial 升级，在线入口为[网页安装器](https://windssea.github.io/pico_nano/)。本批版本 **0.6.6**，具体源码来源以下载清单的`source_commit`为准（开机右下角与“设置 → 存储与关于”显示版本号）。网页安装与设备无线OTA是不同能力，当前没有已交付的OTA原子回滚。
 
 ## 另一台电脑网页升级
 
-1. 退出阅读器无线传书/对时，等待USB数据接口恢复；用数据线接到另一台电脑，关闭占用串口的程序。
+1. 退出阅读器USB传书、无线传书/对时，等待USB串口/JTAG数据接口恢复；用数据线接到另一台电脑，关闭占用串口的程序。
 2. 在电脑Chrome/Edge打开上述HTTPS站点，选择带源码后缀的最新专用升级版本，核对型号RDP-G01-W、ESP32-S3、16MiB Flash。手机浏览器是否有串口能力不能假定，不把手机上传页当固件安装页。
 3. 连接真实端口；安装器只读核对已知旧设备分区表，计划应仅包含应用 `0x20000` 一项。分区不匹配或短读必须停止，不能改用旧首次安装包覆盖。
 4. 开始写入，确认设备端MD5校验，再观察复位/USB重新枚举/正常开机。写入校验成功、自动复位触发和产品正常运行分别记录。
@@ -68,6 +68,10 @@ python tools/dev.py installer
 [package_upgrade.py](../tools/package_upgrade.py) 要求已登记源码干净，按 `pn_brand.h` 的 `PN_PRODUCT_VERSION` 生成 `releases/pico_nano-<版本>-<源码提交>-upgrade/` 的应用、已知分区样本、脚本、README、manifest/SHA及命令行ZIP。`tools/dev.py installer`测试并生成本地站点；[installer_site.py](../tools/installer_site.py) 支持 `--serve 8765`。现有离线网页ZIP是另行封装站点并附serve.py的发布产物，没有独立自动打包入口，后续需补齐可复跑工具；构建文件和参考表摘要必须匹配包清单。
 
 提交并推送发布目录后，现有 [installer-pages.yml](../.github/workflows/installer-pages.yml) 通过用户已启用的GitHub Pages重建。核对工作流成功、在线默认源码后缀、应用/分区样本摘要和复位脚本，再给用户刷入。源码提交和发布提交区分，文件名版本相同不表示二进制相同。离线网页ZIP由生成的站点加原 `serve.py` 打包，并在 `PACKAGE_SHA256.txt` 记录两个ZIP摘要。
+
+## USB直接复制（0.6.6开发预览）
+
+设备“传书 → USB传输”手动交出TF，在电脑磁盘的`piconano/books`、`piconano/fonts`、`piconano/covers`、`piconano/wallpapers`分别复制图书、字体、封面和锁屏原图。复制完成先在电脑安全弹出，再点设备“结束USB传输”；恢复失败可重试，记录不会因此清除。MSC期间网页刷机所需的Serial/JTAG暂停，结束后恢复；软件验证与固件构建不代表本机USB已验收，请按开发指南记录枚举、读回SHA和串口恢复。
 
 ## 版本与交付证据
 

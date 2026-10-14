@@ -1,6 +1,6 @@
 # PicoNano 当前架构与重点技术实现
 
-更新：2026-10-14。本文描述当前工作区源码，已发布基线为 `0.6.5+766a137`，末节列出阅读优化及证据边界。旧设计与专题推导见[归档](archive/2026-10-14/README.md)，下一步方案见[开发指南](DEVELOPMENT_PLAN.md)。实现不等于真机验收。
+更新：2026-10-14。本文描述当前工作区源码，本批为0.6.6开发预览（源码来源见发布清单），末节列出阅读优化及证据边界。旧设计与专题推导见[归档](archive/2026-10-14/README.md)，下一步方案见[开发指南](DEVELOPMENT_PLAN.md)。实现不等于真机验收。
 
 ## 实际模块与边界
 
@@ -100,6 +100,17 @@ XHTML 不建立通用 DOM：先完整验证章节 XML/CRC 并处理 head 中本�
 
 `Present` 记录 reading/management/requested/maintenance/manual/unknown-reference/underrun 原因；`Display stages` 拆 dirty/convert/power/scan/remember，另有 queue/wait/receipt。等待包含实际面板扫描，不能当纯 CPU 准备时间，子阶段不重复相加。
 
+0.6.6 新增内容风险与区域维护（`main/device_refresh.c`）：比较真实板级前/后帧的正文1152px，不增加全屏副本。旧帧中间灰覆盖≥1/6或深色覆盖≥1/3，且至少1/10正文从灰/深色变回近白时，当前呈现提前提升为GC16；这是可调整的像素风险阈值，不是实际残影检测。普通阅读仍每页全像素GL16与6/14/24页兜底。管理页以19个64px逻辑带记账，第六次局部更新扩展到涉及带的全宽，在同一次GL16扫描内整理；成功后仅重置覆盖带，管理24次GC16兜底继续保留。不变帧、失败与取消不计；GC16成功才重置维护状态。日志新增`content-transition`、`regional-settle`及`maintenance`耗时。波形、VCOM与PMU时序不改，光学收益待真机。
+
+## USB 直接复制与TF独占（0.6.6开发预览）
+
+“传书 → USB传输”手动进入MSC，插线不自动交出卡。控制层先保存并关闭阅读/字体/预排/锁屏遮罩，关闭书库索引与封面缓存，再建立`PN_MEDIA_USB`交接栅栏和独占租约；其他读写租约未排空则不开启。端口通过BSP同步卸载并确认VFS路径已注销，随后独立初始化1位20MHz SDMMC，以固定8KiB MSC缓冲交给电脑。TinyUSB禁止自动本机挂载与格式化，产品不写NVS或PMU寄存器。状态页只使用内置字体，USB会话与无线传输/对时、自动睡眠互斥。
+
+停止先拒绝新的MSC读/写/容量/弹出回调并断开USB，至少150ms后仍须确认活动回调归零与库的延期写计数归零，再删除storage、卸载TinyUSB任务/驱动、归还Serial/JTAG PHY、释放SDMMC。错误保留句柄和独占状态供“重试结束”，不以固定延时冒充排空；全部停止后释放租约、使旧epoch失效、非破坏重挂成功才attach新epoch。重挂失败保留记录并进入可重试卡恢复。返回、首页与电源键均先经过此屏障，电源键不强行断卡。USB序列号来自芯片MAC；应用和接口品牌为PicoNano。
+
+MSC是电脑直接修改卡，不经过`pn_upload_directory`或上传安装事务；设备页明确`piconano/books/fonts/covers/wallpapers`各自路径，封面与锁屏用途分开。书仍在打开时完整校验身份，外部复制不等于资源安装验收。电脑须完成复制并安全弹出，再点击结束；退出后索引与近期展示失效重建，续读重新校验SHA。主机替身验证交接/失败/重试和回调排空，可见SDL只演练共享状态页；Windows/macOS真实枚举、读写、弹出、拔线、串口恢复与TF完整性尚待设备验收。
+
+依赖固定`esp_tinyusb 2.3.0`/`tinyusb 0.21.0~2`，摘要在`dependencies.lock`与[USB来源清单](../LICENSES/usb-manifest.json)，原许可随仓库保存，managed源与原有复用组件不修改。
 ## 阅读记录、书签与保存屏障
 
 [pn_journal.c](../components/pn_storage/pn_journal.c) 使用 PNJR 双槽、序号、CRC、同步及读回确认；进度/书签/设置存放内部 `/data/progress` 系列文件，**不是产品 NVS 设置**。只有确认成功显示的位置进入保存策略：累计 5 次有效翻页，或首次未保存变化满 30 秒触发，连翻不推迟起点。离书、锁屏、传输交接必须强制保存确认，失败不释放关键句柄、不切电。
