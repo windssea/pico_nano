@@ -21,5 +21,10 @@ with tempfile.TemporaryDirectory() as folder:
     before={p.name:p.read_bytes() for p in state.glob('fonts.*')}
     out=run('enter,back,quit');assert 'library_open name=a.txt' in out,out
     assert before=={p.name:p.read_bytes() for p in state.glob('fonts.*')}
+    # 固定系统字库保留READ时，进入管理释放源；仅其他字体可删除，返回可重新加载。/ Management releases the system READ source; only other fonts can be deleted and return reloads it.
+    system_fonts=root/'system-fonts';system_fonts.mkdir();canonical=system_fonts/'HarmonyOS_Sans_SC_Regular.ttf';other=system_fonts/'z-other.ttf'
+    shutil.copy(source,canonical);shutil.copy(source,other)
+    out=run('fonts,tap:100:380,tap:500:1000,back,tap:100:480,tap:500:1000,tap:500:1150,back,enter,back,quit','--font-dir',str(system_fonts))
+    assert canonical.exists() and not other.exists() and 'font_manage command=6 status=0' in out and 'library_open name=a.txt' in out,out
     assert subprocess.run([sys.argv[1],'--font-dir',str(fonts)],env=dict(os.environ,SDL_VIDEODRIVER='dummy'),capture_output=True).returncode==2
 print('font manage window: open, detail, global default, delete cancel/confirm, reading after deletion and option validation passed')

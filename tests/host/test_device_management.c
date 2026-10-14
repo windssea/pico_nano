@@ -49,6 +49,14 @@ int main(void){
     // 同屏重绘复用界面引擎，字形缓存命中增加，无新增TF租约。/ Repaint reuses the UI engine, gains glyph hits and adds no TF lease.
     void *ui_engine=management_font.impl;size_t leases=pn_media_active(&sd_media);uint64_t hits=pool.cache_stats[PN_CACHE_GLYPH].hits;
     assert(ui_engine && management_scope.active && draw_shelf(PN_REFRESH_GL16)==PN_OK && management_font.impl==ui_engine && pn_media_active(&sd_media)==leases && pool.cache_stats[PN_CACHE_GLYPH].hits>hits);
+    // 完整TF源的缓存消费者先关闭，释放源后可继续使用应急字体。/ Close cached TF-source consumers first; emergency fonts remain usable after source release.
+    char tf_path[]="/tmp/pn-management-font-XXXXXX";int tf_fd=mkstemp(tf_path);assert(tf_fd>=0);FILE *tf_file=fdopen(tf_fd,"wb");assert(tf_file);
+    pn_text_source_t tf_source=pn_font_builtin_source();uint8_t tf_bytes[4096];
+    for(uint64_t at=0;at<tf_source.size;){size_t n;assert(tf_source.read_at(tf_source.ctx,at,tf_bytes,sizeof tf_bytes,&n)==PN_OK && n && fwrite(tf_bytes,1,n,tf_file)==n);at+=n;}assert(!fclose(tf_file));
+    management_fonts_close();assert(pn_font_system_open(&pool,&sd_media,tf_path)==PN_OK && pn_font_system_available());
+    assert(draw_shelf(PN_REFRESH_GL16)==PN_OK && management_font.impl && pn_media_active(&sd_media)>0);
+    system_font_release();assert(!management_font.impl && !management_scope.active && !pn_font_system_available() && !pn_media_active(&sd_media));
+    assert(draw_shelf(PN_REFRESH_GL16)==PN_OK);assert(!remove(tf_path));
     // 逻辑前16行是每个板级行的前8字节；面板底图来自后缓冲逆变换。/ The logical top 16 rows are the first 8 bytes of each board row; the sheet base is restored from the back buffer.
     static uint8_t top[684*8];for(int py=0;py<684;py++)memcpy(top+py*8,hardware.hl.back_fb+(size_t)py*608,8);
     open_actions(0);assert(actions_mode);for(int py=0;py<684;py++)assert(!memcmp(top+py*8,hardware.hl.back_fb+(size_t)py*608,8));
