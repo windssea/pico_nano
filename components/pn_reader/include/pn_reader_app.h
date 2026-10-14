@@ -19,6 +19,8 @@
 typedef struct {void *impl;} pn_reader_app_t; ///< 初始impl=NULL / Initially impl=NULL
 /// 空闲预排下一页，不呈现/写进度；候选设置和睡眠时跳过。/ Idle next-page preparation without display/progress writes; skip draft settings and sleep.
 pn_status_t pn_reader_app_prefetch(pn_reader_app_t *app);
+/// 下一页仍有字形待预热，调用方可缩短空闲间隔。/ Next-page glyphs remain to warm, so callers may shorten idle gaps.
+bool pn_reader_app_warm_pending(const pn_reader_app_t *app);
 
 typedef enum {
     PN_APP_OPEN=0, ///< 首次呈现/恢复 / First presentation or restore

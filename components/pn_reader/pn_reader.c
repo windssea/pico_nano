@@ -19,6 +19,9 @@ static bool copy_page(pn_reader_t *r,pn_text_page_t *to,const pn_text_page_t *fr
 }
 static size_t neighbor_bytes(void *ctx){pn_reader_t *r=ctx;return pn_alloc_size(r->ahead.glyphs)+pn_alloc_size(r->behind.glyphs);}
 static void neighbor_drop(void *ctx){pn_reader_t *r=ctx;pn_free(r->ahead.glyphs);pn_free(r->behind.glyphs);r->ahead=(pn_text_page_t){0};r->behind=(pn_text_page_t){0};r->ahead_warm=0;}
+bool pn_reader_warm_pending(const pn_reader_t *r){
+    return r && !r->preparing && r->has_visible && r->ahead.valid && r->ahead_anchor.begin==r->visible.end && token_equal(r->token,r->neighbor_token) && r->ahead_warm<r->ahead.count;
+}
 pn_status_t pn_reader_warm_next(pn_reader_t *r,pn_reader_warm_fn warm,void *ctx,size_t budget){
     if(!r || !warm || !budget || budget>64)return PN_INVALID;
     if(r->preparing || !r->has_visible || !r->ahead.valid || r->ahead_anchor.begin!=r->visible.end || !token_equal(r->token,r->neighbor_token) || r->ahead_warm>=r->ahead.count)return PN_EMPTY;

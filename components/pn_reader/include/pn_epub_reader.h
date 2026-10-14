@@ -48,6 +48,8 @@ pn_status_t pn_epub_reader_prefetch(pn_epub_reader_t *reader);
 typedef pn_status_t (*pn_epub_warm_fn)(void *,const pn_epub_page_node_t *); ///< 字形预热回调，不解码图片 / Glyph warming callback without image decoding
 /// 有界预热已验证邻页，保护借用并复查介质；缺字跳过、内存不足停本页，不提交进度。 / Warm a bounded verified neighbor page under borrow/media protection; skip missing glyphs, stop on OOM, never commit progress.
 pn_status_t pn_epub_reader_warm_next(pn_epub_reader_t *,pn_epub_warm_fn,void *,size_t budget);
+/// 已排好的下一页还有未预热字形（含图页不预热）。/ The prepared next page still has unwarmed glyphs (pages with images are never warmed).
+bool pn_epub_reader_warm_pending(const pn_epub_reader_t *);
 /// 图片解码前释放可选邻页节点，不改变已确认位置。/ Release optional neighbor nodes before image decoding without changing confirmed progress.
 void pn_epub_reader_trim(pn_epub_reader_t *reader);
 /// 绑定同布局的可删除窗口；reflow自动解除，不拥有对象。/ Bind a disposable window for this layout; reflow unbinds it, without taking ownership.

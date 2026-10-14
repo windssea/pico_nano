@@ -3,6 +3,17 @@
  * English: esp_pm DFS; the floor stays on the PLL (>=80 MHz), so MSPI 120 MHz timing and APB peripheral clocks are unchanged. */
 #include "device_power.h"
 #include <stddef.h>
+#ifdef ESP_PLATFORM
+// 必须先取得配置宏，否则下面的#if恒为假，调频/浅睡被静默编译掉（0.6.1–0.6.2真机日志缺DFS行即此原因）。
+// Configuration macros must be visible first; otherwise the #if below is always false and DFS/light sleep silently compile out (why 0.6.1-0.6.2 device logs lacked the DFS line).
+#include "sdkconfig.h"
+#if !defined(CONFIG_IDF_TARGET)
+#error "sdkconfig.h did not provide IDF configuration"
+#endif
+#if defined(CONFIG_PN_POWER_DFS) && !CONFIG_PM_ENABLE
+#error "PN_POWER_DFS requires CONFIG_PM_ENABLE"
+#endif
+#endif
 static bool held[PN_POWER_OWNERS];
 #if defined(ESP_PLATFORM) && CONFIG_PM_ENABLE && CONFIG_PN_POWER_DFS
 #include "esp_pm.h"
@@ -33,11 +44,27 @@ void pn_device_power_busy(pn_device_power_owner_t owner,bool busy){
 }
 bool pn_device_power_active(void){return active;}
 bool pn_device_power_light_sleep(void){return light;}
+#include "driver/gpio.h"
+void pn_device_power_sleep_pins(void){
+    if(!light)return;
+    // 隔离仍保留（输入/输出关闭），只加拉电阻防浮空：SD CMD/D0、I2C、两个低有效中断上拉，蜂鸣器下拉保持关闭。
+    // Isolation stays (input/output off); only pulls are added against floating: SD CMD/D0, I2C and both active-low interrupts pull up, the buzzer pulls down to stay off.
+    static const struct {int pin;gpio_pull_mode_t pull;} pins[]={
+        {42,GPIO_PULLUP_ONLY},{44,GPIO_PULLUP_ONLY}, // SD CMD/D0（BSP read_pico_sd）
+        {CONFIG_READ_PICO_I2C_SDA_GPIO,GPIO_PULLUP_ONLY},{CONFIG_READ_PICO_I2C_SCL_GPIO,GPIO_PULLUP_ONLY},
+        {CONFIG_READ_PICO_IOE_INT_GPIO,GPIO_PULLUP_ONLY},{CONFIG_READ_PICO_TP_INT_GPIO,GPIO_PULLUP_ONLY},
+        {2,GPIO_PULLDOWN_ONLY}, // 蜂鸣器 / buzzer
+    };
+    unsigned failed=0;
+    for(size_t i=0;i<sizeof pins/sizeof *pins;i++)if(gpio_sleep_set_pull_mode((gpio_num_t)pins[i].pin,pins[i].pull)!=ESP_OK)failed++;
+    ESP_LOGI(TAG,"Sleep pin pulls set=%u failed=%u",(unsigned)(sizeof pins/sizeof *pins),failed);
+}
 #else
 // 未启用调频：只记录意图，供主机测试核对取放时机。/ DFS disabled: record intent only, so host tests can check acquire/release points.
 void pn_device_power_init(void){}
 void pn_device_power_busy(pn_device_power_owner_t owner,bool busy){if((unsigned)owner<PN_POWER_OWNERS)held[owner]=busy;}
 bool pn_device_power_active(void){return false;}
 bool pn_device_power_light_sleep(void){return false;}
+void pn_device_power_sleep_pins(void){}
 #endif
 bool pn_device_power_held(pn_device_power_owner_t owner){return (unsigned)owner<PN_POWER_OWNERS && held[owner];}

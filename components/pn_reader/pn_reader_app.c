@@ -234,13 +234,16 @@ static pn_status_t record_recent(app_t *a){
 }
 /// 复用前台选择和精确亚像素偏移，只生成可回收字形，不画正文或页脚。 / Reuse foreground face selection and exact subpixel offsets, generating only reclaimable glyphs without painting body/footer.
 static pn_status_t warm_glyph(void *ctx,const pn_page_glyph_t *g){app_t *a=ctx;if(g->source.codepoint==9 || g->source.codepoint==10)return PN_EMPTY;pn_font_choice_t choice;pn_status_t s=pn_font_chain_choose(chain(a),g->source.codepoint,&choice);return s==PN_OK?pn_font_warm(choice.font,g->source.codepoint,g->x_64):s;}
+bool pn_reader_app_warm_pending(const pn_reader_app_t *app){
+    const app_t *a=app?app->impl:NULL;return a && !a->suspended && !a->media_lost && !a->style_preview && !a->style_pending && !a->font_preview && !a->font_pending && !a->font_view && pn_reader_warm_pending(&a->reader);
+}
 pn_status_t pn_reader_app_prefetch(pn_reader_app_t *app){
     if(!app || !app->impl)return PN_EMPTY;
     app_t *a=app->impl;
     if(a->suspended || a->media_lost || a->style_preview || a->style_pending || a->font_preview || a->font_pending || a->font_view)return PN_BUSY;
     pn_status_t status=pn_reader_prefetch(&a->reader);if(status==PN_EMPTY)(void)pn_page_index_flush(&a->page_index,false);
     if(status==PN_OK || status==PN_EMPTY){pn_profile_span_t span;pn_profile_begin(&span,a->pool,"txt.glyph-warm");pn_cache_class_t kind=a->pool->speculative_kind;pn_cache_speculate(a->pool,true);a->pool->speculative_kind=PN_CACHE_GLYPH;
-        pn_status_t warmed=pn_reader_warm_next(&a->reader,warm_glyph,a,8);a->pool->speculative_kind=kind;pn_cache_speculate(a->pool,false);pn_profile_end(&span,warmed);
+        pn_status_t warmed=pn_reader_warm_next(&a->reader,warm_glyph,a,24);a->pool->speculative_kind=kind;pn_cache_speculate(a->pool,false);pn_profile_end(&span,warmed);
         if(warmed!=PN_OK && warmed!=PN_EMPTY && warmed!=PN_NO_MEMORY)return warmed;}
     return status;
 }

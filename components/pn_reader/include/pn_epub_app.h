@@ -17,6 +17,8 @@
 typedef struct {void *impl;} pn_epub_app_t; ///< 初始NULL，不复制活动对象 / Initially NULL; never copy a live object
 /// 空闲预排下一页，不呈现或提交位置；候选设置/睡眠跳过。/ Idle next-page preparation without display/position commits; skip draft settings and sleep.
 pn_status_t pn_epub_app_prefetch(pn_epub_app_t *app);
+/// 下一页仍有字形待预热，调用方可缩短空闲间隔。/ Next-page glyphs remain to warm, so callers may shorten idle gaps.
+bool pn_epub_app_warm_pending(const pn_epub_app_t *app);
 /// 绑定/清除同源正文叠层，不影响工具页。/ Bind/clear the shared body decoration without affecting tool pages.
 pn_status_t pn_epub_app_body_layer(pn_epub_app_t *app,const pn_reader_body_layer_t *layer);
 /// state可NULL；本地media或借用已挂载media，不挂载/格式化。/ Optional state; local or borrowed mounted media, never mounted/formatted here.

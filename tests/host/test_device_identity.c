@@ -18,7 +18,9 @@ static void *allocate(void *ctx,size_t n){(void)ctx;void *p=malloc(n);blocked_be
 static void release(void *ctx,void *p){(void)ctx;free(p);blocked_begin=blocked_end=0;}
 // 内部DMA余量与临时块替身；SPIRAM分配视为不可DMA。/ Doubles for internal DMA headroom and transient blocks; SPIRAM allocations are non-DMA.
 static size_t largest;static unsigned borrowed,spiram;
+static size_t free_bytes=200u*1024u;
 size_t heap_caps_get_largest_free_block(uint32_t caps){assert(caps&MALLOC_CAP_INTERNAL);return largest;}
+size_t heap_caps_get_free_size(uint32_t caps){assert(caps&MALLOC_CAP_INTERNAL);return free_bytes;}
 void *heap_caps_aligned_alloc(size_t alignment,size_t size,uint32_t caps){assert(alignment==16 && (caps&MALLOC_CAP_DMA) && size==32u*1024u);borrowed++;return aligned_alloc(alignment,size);}
 void *heap_caps_malloc(size_t size,uint32_t caps){assert(caps&MALLOC_CAP_SPIRAM);void *p=malloc(size);blocked_begin=(uintptr_t)p;blocked_end=blocked_begin+size;spiram++;return p;}
 void heap_caps_free(void *ptr){if((uintptr_t)ptr==blocked_begin){blocked_begin=blocked_end=0;spiram--;}else borrowed--;free(ptr);}
@@ -41,7 +43,10 @@ int main(void){
     // 有内部余量时借32KiB块，读完归还；摘要逐字节一致。/ With internal headroom, borrow and return a 32 KiB block with an identical digest.
     largest=96u*1024u;calls=0;maximum=0;assert(pn_identity_stream_pooled(&pool,NULL,sizeof bytes,source,&actual)==PN_OK && !memcmp(&actual,&expected,sizeof actual));
     assert(calls==3 && maximum==32u*1024u && !borrowed && !spiram && !pool.used && !pool.live && !operations);
-    largest=96u*1024u-1u;calls=0;maximum=0;assert(pn_identity_stream_pooled(&pool,NULL,sizeof bytes,source,&actual)==PN_OK && calls==17 && maximum==4096);
+    // 真机内部状态（最大块80KiB、空闲127KiB）可用32KiB块；最大块或空闲不足退回4KiB。/ Device-like internal state (80 KiB block, 127 KiB free) uses the 32 KiB block; a short block or free total falls back to 4 KiB.
+    largest=80u*1024u;free_bytes=127u*1024u;calls=0;maximum=0;assert(pn_identity_stream_pooled(&pool,NULL,sizeof bytes,source,&actual)==PN_OK && calls==3 && maximum==32u*1024u && !borrowed);
+    largest=64u*1024u-1u;calls=0;maximum=0;assert(pn_identity_stream_pooled(&pool,NULL,sizeof bytes,source,&actual)==PN_OK && calls==17 && maximum==4096);
+    largest=80u*1024u;free_bytes=96u*1024u-1u;calls=0;maximum=0;assert(pn_identity_stream_pooled(&pool,NULL,sizeof bytes,source,&actual)==PN_OK && calls==17 && maximum==4096);free_bytes=200u*1024u;
     largest=0;
     fail_hash=true;actual=expected;assert(pn_identity_stream_pooled(&pool,NULL,sizeof bytes,source,&actual)==PN_IO && !memcmp(&actual,&expected,sizeof actual));
     assert(!pool.used && !pool.live && !operations);

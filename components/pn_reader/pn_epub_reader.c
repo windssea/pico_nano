@@ -152,6 +152,10 @@ pn_status_t pn_epub_reader_prefetch(pn_epub_reader_t *handle){
     reader_t *r=handle && handle->impl?handle->impl:NULL;if(r){pn_cache_pin(&r->cache);pn_cache_speculate(r->pool,true);}
     pn_status_t status=pn_epub_reader_prefetch_impl(handle);if(r){pn_cache_speculate(r->pool,false);pn_cache_unpin(&r->cache);}pn_profile_end(&span,status);return status;
 }
+bool pn_epub_reader_warm_pending(const pn_epub_reader_t *handle){
+    const reader_t *r=handle?handle->impl:NULL;
+    return r && !r->preparing && r->has_visible && r->ahead.valid && r->visible.has_next && same_location(&r->ahead_target,&r->visible.next) && r->ahead_warm<r->ahead.count && !r->ahead.image_count;
+}
 pn_status_t pn_epub_reader_warm_next(pn_epub_reader_t *handle,pn_epub_warm_fn warm,void *ctx,size_t budget){
     if(!handle || !handle->impl || !warm || !budget || budget>64)return PN_INVALID;
     reader_t *r=handle->impl;

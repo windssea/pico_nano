@@ -86,3 +86,5 @@ pn_status_t pn_reader_prefetch(pn_reader_t *reader);
 typedef pn_status_t (*pn_reader_warm_fn)(void *,const pn_page_glyph_t *); ///< 可选字形预热，不呈现/保存 / Optional glyph warming without presentation or saving
 /// 最多推进budget个已验证邻页节点，借用保护；缺字跳过、无内存停本页预热，新输入取消，不改变当前位置。 / Advance up to budget verified neighbor nodes under borrow protection; skip missing glyphs, stop warming this page on OOM, cancel on new input and preserve visible position.
 pn_status_t pn_reader_warm_next(pn_reader_t *,pn_reader_warm_fn,void *,size_t budget);
+/// 已排好的下一页还有未预热字形。/ The prepared next page still has unwarmed glyphs.
+bool pn_reader_warm_pending(const pn_reader_t *);

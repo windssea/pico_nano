@@ -377,12 +377,15 @@ static pn_status_t navigate(pn_epub_app_t *app,pn_reader_action_t action,const p
 pn_status_t pn_epub_app_step(pn_epub_app_t *app,pn_reader_action_t action,uint64_t now,pn_reader_present_fn present,void *ctx){return navigate(app,action,NULL,now,present,ctx);}
 /// 图片页不预热；文本使用前台同一字号/回退/亚像素缓存键。 / Skip image-page warming; text uses the foreground size, fallback and subpixel cache key.
 static pn_status_t warm_glyph(void *ctx,const pn_epub_page_node_t *n){app_t *a=ctx;if(n->image_index!=UINT_MAX || n->codepoint==9 || n->codepoint==10)return PN_EMPTY;pn_status_t s=font_size(a,n->metrics.pixels);pn_font_choice_t choice;if(s==PN_OK)s=pn_font_chain_choose(chain(a),n->codepoint,&choice);return s==PN_OK?pn_font_warm(choice.font,n->codepoint,n->x_64):s;}
+bool pn_epub_app_warm_pending(const pn_epub_app_t *app){
+    const app_t *a=app?app->impl:NULL;return a && !a->suspended && !a->lost && !a->style_preview && !a->style_pending && !a->font_preview && !a->font_pending && !a->font_view && pn_epub_reader_warm_pending(&a->reader);
+}
 pn_status_t pn_epub_app_prefetch(pn_epub_app_t *app){
     if(!app || !app->impl)return PN_EMPTY;
     app_t *a=app->impl;if(a->suspended || a->lost || a->style_preview || a->style_pending || a->font_preview || a->font_pending || a->font_view)return PN_BUSY;
     pn_status_t status=pn_epub_reader_prefetch(&a->reader);if(status==PN_EMPTY)(void)pn_page_index_flush(&a->page_index,false);
     if(status==PN_OK || status==PN_EMPTY){pn_profile_span_t span;pn_profile_begin(&span,a->pool,"epub.glyph-warm");int pixels=body(a)->pixels;pn_cache_class_t kind=a->pool->speculative_kind;pn_cache_speculate(a->pool,true);a->pool->speculative_kind=PN_CACHE_GLYPH;
-        pn_status_t warmed=pn_epub_reader_warm_next(&a->reader,warm_glyph,a,8);if(body(a)->impl && body(a)->pixels!=pixels)(void)font_size(a,pixels);
+        pn_status_t warmed=pn_epub_reader_warm_next(&a->reader,warm_glyph,a,24);if(body(a)->impl && body(a)->pixels!=pixels)(void)font_size(a,pixels);
         a->pool->speculative_kind=kind;pn_cache_speculate(a->pool,false);pn_profile_end(&span,warmed);if(warmed!=PN_OK && warmed!=PN_EMPTY && warmed!=PN_NO_MEMORY)return warmed;}
     return status;
 }
