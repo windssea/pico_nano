@@ -57,14 +57,16 @@ pn_status_t pn_media_detach(pn_media_t *media) {
 }
 
 pn_status_t pn_media_acquire(pn_media_t *media, pn_media_access_t access, pn_media_lease_t *lease) {
-    if (!media || !lease || access < PN_MEDIA_READ || access > PN_MEDIA_USB) return PN_INVALID;
+    if (!media || !lease || access < PN_MEDIA_READ || access > PN_MEDIA_CACHE_WRITE) return PN_INVALID;
     if (!media->available || media->exhausted) return PN_STALE_MEDIA;
     if (access==PN_MEDIA_USB && !media->usb_pending) return PN_INVALID;
     if (access!=PN_MEDIA_USB && media->usb_pending) return PN_BUSY;
     int free_slot=-1;
     for (int i=0;i<PN_MEDIA_MAX_LEASES;i++) {
         if (!media->slots[i].ticket) { if (free_slot < 0) free_slot=i; continue; }
-        if (access!=PN_MEDIA_READ || media->slots[i].access!=PN_MEDIA_READ) return PN_BUSY;
+        // 服务owner串行写可重建缓存，不覆盖只读源；只允许一个缓存写租约。/ The service owner serially writes rebuildable caches without replacing read-only sources; allow only one cache writer.
+        pn_media_access_t held=media->slots[i].access;
+        if ((access!=PN_MEDIA_READ && access!=PN_MEDIA_CACHE_WRITE) || (held!=PN_MEDIA_READ && held!=PN_MEDIA_CACHE_WRITE) || (access==PN_MEDIA_CACHE_WRITE && held==PN_MEDIA_CACHE_WRITE)) return PN_BUSY;
     }
     if (free_slot < 0 || !media->next_ticket) return PN_LIMIT;
     pn_media_lease_t acquired={ .owner=media, .ticket=media->next_ticket,

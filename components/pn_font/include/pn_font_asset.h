@@ -8,6 +8,9 @@
 #pragma once
 #include "pn_font.h"
 #include "pn_font_preferences.h"
+#include "pn_text_file.h"
+/// 打开并核对选定字体，摘要留在实际消费源；失败关闭文件且不改source，lease由调用方持有。/ Open and verify a selected face, retaining its digest in the consumed source; close on failure and preserve source; caller owns lease.
+pn_status_t pn_font_reference_open_file(pn_pool_t *,const pn_font_reference_t *,pn_media_t *,const pn_media_lease_t *,pn_text_file_t *,pn_text_source_t *);
 typedef struct {void *impl;} pn_font_asset_t; ///< 初始NULL，活动对象不可复制 / Initially NULL; never copy live objects
 /// guard保持有效，expected_size=0表示未知；借用media/pool并自持READ租约。
 /// Keep guard valid, zero expected_size means unknown; borrow media/pool and own a READ lease.

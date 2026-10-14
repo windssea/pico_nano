@@ -19,8 +19,8 @@
 #define PN_FUI_FORM 10
 #define PN_FUI_RETRY 11
 #define PN_FUI_DEFAULT 12
-#define PN_FUI_RESTORE_DEFAULT 13 ///< 本书恢复系统默认阅读字体 / Restore this book's system reading font
-#define PN_FUI_INHERIT PN_FUI_RESTORE_DEFAULT ///< 保留旧事件编号，不再表示继承 / Preserve the old event number, no longer inheritance
+#define PN_FUI_RESTORE_DEFAULT 13 ///< 本书跟随全局默认阅读字体 / Follow the global reading font for this book
+#define PN_FUI_INHERIT PN_FUI_RESTORE_DEFAULT ///< 继承事件别名，保持编号兼容 / Inheritance alias retaining event-number compatibility
 #define PN_FUI_ROW 16
 #define PN_FUI_INFO 48 ///< 48+行：查看该字体详情（行右侧箭头）/ 48+row: open that font's details (the chevron on the right)
 #define PN_FUI_UP 32

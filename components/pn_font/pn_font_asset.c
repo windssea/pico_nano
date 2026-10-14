@@ -13,6 +13,26 @@
 #include <sys/stat.h>
 #include <stdlib.h>
 typedef struct {pn_pool_t *pool;pn_media_t *media;pn_media_lease_t lease;pn_text_file_t file;pn_text_source_t source;pn_font_t font;pn_font_reference_t reference;pn_font_info_t info;} asset_t;
+pn_status_t pn_font_reference_open_file(pn_pool_t *pool,const pn_font_reference_t *ref,pn_media_t *media,const pn_media_lease_t *lease,pn_text_file_t *file,pn_text_source_t *source){
+    if(!pool || !ref || !media || !lease || !file || !source || ref->kind!=PN_FONT_FILE)return PN_INVALID;
+    if(file->handle)return PN_BUSY;
+    pn_font_preferences_t check={.primary=*ref};pn_status_t status=pn_font_preferences_validate(&check,true);if(status!=PN_OK)return status;
+    status=pn_media_validate(media,lease);if(status!=PN_OK)return status;if(lease->access==PN_MEDIA_USB)return PN_INVALID;
+    struct stat info;
+#ifdef ESP_PLATFORM
+    int result=stat(ref->path,&info);
+#else
+    int result=lstat(ref->path,&info);
+#endif
+    if(result || !S_ISREG(info.st_mode) || info.st_size<0)return PN_IO;
+    if((uint64_t)info.st_size!=ref->size)return PN_STALE_JOB;
+    pn_text_source_t candidate;status=pn_text_file_open(file,media,lease,ref->path,&candidate);
+    pn_book_id_t actual;
+    if(status==PN_OK)status=pn_text_file_identity_pooled(pool,&candidate,&actual);
+    if(status==PN_OK && memcmp(actual.sha256,ref->identity.sha256,32))status=PN_STALE_JOB;
+    if(status!=PN_OK){(void)pn_text_file_close(file);return status;}
+    *source=candidate;return PN_OK;
+}
 static pn_status_t release(asset_t *a){pn_font_close(&a->font);pn_status_t status=pn_text_file_close(&a->file);if(a->lease.ticket){pn_status_t s=pn_media_release(a->media,&a->lease);if(status==PN_OK)status=s;}pn_free(a);return status;}
 pn_status_t pn_font_asset_open(pn_font_asset_t *asset,pn_pool_t *pool,pn_media_t *media,const pn_media_lease_t *guard,const char *path,uint64_t expected_size,int pixels){
     if(!asset || !pool || !media || !guard || !path || !*path || pixels<8 || pixels>128)return PN_INVALID;
@@ -30,7 +50,7 @@ pn_status_t pn_font_asset_open(pn_font_asset_t *asset,pn_pool_t *pool,pn_media_t
     uint64_t size=(uint64_t)st.st_size;if(expected_size && expected_size!=size)return PN_STALE_JOB;if(size>PN_FONT_REFERENCE_MAX_BYTES)return PN_LIMIT;if(size<12)return PN_CORRUPT;
     asset_t *a=pn_alloc_tagged(pool,PN_MEM_FONT,sizeof *a);if(!a)return PN_NO_MEMORY;*a=(asset_t){.pool=pool,.media=media,.reference={.kind=PN_FONT_FILE,.size=size}};strcpy(a->reference.path,path);
     status=pn_media_acquire(media,PN_MEDIA_READ,&a->lease);if(status==PN_OK)status=pn_text_file_open(&a->file,media,&a->lease,path,&a->source);if(status==PN_OK && a->source.size!=size)status=PN_STALE_JOB;
-    if(status==PN_OK)status=pn_identity_file_pooled(pool,media,&a->lease,path,PN_FONT_REFERENCE_MAX_BYTES,&a->reference.identity);
+    if(status==PN_OK)status=pn_text_file_identity_pooled(pool,&a->source,&a->reference.identity);
     if(status==PN_OK)status=pn_font_open(&a->font,pool,&a->source,pixels);
     if(status==PN_OK)status=pn_font_info(&a->font,&a->info);
     if(status==PN_OK)status=pn_media_validate(media,guard);

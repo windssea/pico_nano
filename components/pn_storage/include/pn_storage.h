@@ -17,7 +17,8 @@
 typedef enum {
     PN_MEDIA_READ=1, ///< 可共享读取 / Shared reading
     PN_MEDIA_WRITE, ///< 独占写入 / Exclusive writing
-    PN_MEDIA_USB ///< 独占主机访问 / Exclusive host access
+    PN_MEDIA_USB, ///< 独占主机访问 / Exclusive host access
+    PN_MEDIA_CACHE_WRITE ///< 仅固定可重建缓存写入，与只读源共享，仍排斥普通写入/USB / Fixed rebuildable cache writes sharing read-only sources, excluding ordinary writes/USB
 } pn_media_access_t;
 
 typedef struct pn_media pn_media_t;

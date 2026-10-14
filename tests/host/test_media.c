@@ -21,6 +21,11 @@ int main(void) {
     CHECK(pn_media_active(&m)==2);
     CHECK(pn_media_acquire(&m,PN_MEDIA_WRITE,&c)==PN_BUSY);
     CHECK(pn_media_validate(&other,&a)==PN_INVALID);
+    pn_media_lease_t cache,cache2;
+    CHECK(pn_media_acquire(&m,PN_MEDIA_CACHE_WRITE,&cache)==PN_OK && pn_media_validate(&m,&cache)==PN_OK);
+    CHECK(pn_media_acquire(&m,PN_MEDIA_CACHE_WRITE,&cache2)==PN_BUSY && pn_media_acquire(&m,PN_MEDIA_WRITE,&c)==PN_BUSY);
+    CHECK(pn_media_request_usb(&m)==PN_OK && pn_media_acquire(&m,PN_MEDIA_USB,&c)==PN_BUSY && pn_media_acquire(&m,PN_MEDIA_CACHE_WRITE,&cache2)==PN_BUSY);
+    CHECK(pn_media_cancel_usb(&m)==PN_OK && pn_media_release(&m,&cache)==PN_OK);
     pn_media_lease_t duplicate=a;
     CHECK(pn_media_release(&m,&a)==PN_OK);
     CHECK(pn_media_release(&m,&duplicate)==PN_INVALID && pn_media_active(&m)==1);

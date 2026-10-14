@@ -11,6 +11,7 @@
 #include "pn_font_manage.h"
 #include "pn_font_preview.h"
 #include "pn_widgets.h"
+#include "pn_sd_layout.h"
 #include "pn_text_file.h"
 #include <errno.h>
 #include <ctype.h>
@@ -32,7 +33,7 @@ static pn_status_t string_read(void *ctx,uint64_t off,uint8_t *out,size_t cap,si
 static const char *base(const char *path){const char *slash=strrchr(path,'/');return slash?slash+1:path;}
 /// 名称及实际字体家族均识别鸿蒙保留字库，重命名也不能从管理页删除。/ Reserve HarmonyOS by file name and actual family, including renamed files.
 static bool harmony_name(const char *name){const char *key="HarmonyOS";for(;*key;key++,name++)if(tolower((unsigned char)*name)!=tolower((unsigned char)*key))return false;return true;}
-static bool protected_font(const fm_t *f){return harmony_name(f->name) || harmony_name(f->info.family);}
+static bool protected_font(const fm_t *f){return !strcmp(base(f->selected),base(PN_SD_SYSTEM_FONT)) || harmony_name(f->name) || harmony_name(f->info.family);}
 static bool is_global(const fm_t *f,const char *path){return f->global_known && f->global_set && f->global.primary.kind==PN_FONT_FILE && !strcmp(f->global.primary.path,path);}
 static void release_asset(fm_t *f){
     (void)pn_font_asset_close(&f->asset);

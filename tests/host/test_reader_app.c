@@ -137,6 +137,11 @@ int main(void){
     assert(pn_reader_app_step(&app,PN_APP_PREVIOUS,refresh_now++,present,&screen)==PN_OK && screen.profile==PN_REFRESH_GC16);
     pn_reader_app_refresh_reset(&app);
     assert(pn_reader_app_step(&app,PN_APP_NEXT,refresh_now++,present,&screen)==PN_OK && screen.profile==PN_REFRESH_GL16);
+    // 保存成功提示不能产生失败重试按钮。/ A successful save notice must not produce an error Retry button.
+    pn_font_ui_t font_menu={0};assert(pn_font_ui_open(&font_menu,&pool,&app,NULL,dir,present,&screen)==PN_OK);
+    assert(pn_font_ui_event(&font_menu,PN_FUI_RESIDENT,refresh_now++,present,&screen)==PN_OK && font_menu.mode==1);
+    assert(pn_font_ui_event(&font_menu,PN_FUI_DEFAULT,refresh_now++,present,&screen)==PN_OK);
+    assert(pn_font_ui_hit(&font_menu,600,60)!=PN_FUI_RETRY);pn_font_ui_close(&font_menu);
     assert(pn_reader_app_media_lost(&app)==PN_OK);
     assert(pn_reader_app_step(&app,PN_APP_NEXT,refresh_now++,present,&screen)==PN_STALE_MEDIA);
     assert(pn_reader_app_close(&app,refresh_now++)==PN_OK && !pool.live && pn_media_active(&shared)==0);

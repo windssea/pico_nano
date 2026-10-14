@@ -36,6 +36,25 @@ static void skip(j_decompress_ptr c,long bytes){
     c->src->next_input_byte+=bytes;c->src->bytes_in_buffer-=(size_t)bytes;
 }
 static void progress(j_common_ptr c){decoder_t *d=c->client_data;pn_status_t cancel=pn_cancel_checkpoint();if(cancel!=PN_OK)stop(d,cancel);if(d->jpeg.input_scan_number>128)stop(d,PN_LIMIT);}
+/// EOI后只允许最多1MiB零填充，排空到真实EOF以保留ZIP完整性校验。/ Allow at most 1 MiB of zeros after EOI and drain to real EOF for ZIP integrity validation.
+static void padding(decoder_t *d){
+    size_t total=0;
+    for(;;){
+        pn_status_t status=pn_cancel_checkpoint();if(status!=PN_OK)stop(d,status);
+        size_t n=d->source.bytes_in_buffer;
+        if(n){
+            if(n>1024u*1024u-total)stop(d,PN_LIMIT);
+            for(size_t i=0;i<n;i++)if(d->source.next_input_byte[i])stop(d,PN_CORRUPT);
+            total+=n;d->source.bytes_in_buffer=0;
+        }
+        n=0;status=d->input->read(d->input->ctx,d->buffer,sizeof d->buffer,&n);
+        if(status==PN_EMPTY){if(n)stop(d,PN_CORRUPT);return;}
+        if(status!=PN_OK)stop(d,status);
+        if(!n || n>sizeof d->buffer)stop(d,PN_CORRUPT);
+        if(n>32u*1024u*1024u-d->bytes)stop(d,PN_LIMIT);
+        d->bytes+=n;d->source.next_input_byte=d->buffer;d->source.bytes_in_buffer=n;
+    }
+}
 static pn_status_t decode(pn_pool_t *pool,const pn_image_input_t *input,pn_frame_t *frame,pn_image_rect_t rect,pn_jpeg_info_t *info){
     if(!pool || !input || !input->read || !info)return PN_INVALID;
     if(frame && (!frame->pixels || frame->width<1 || frame->height<1 || frame->width>4096 || frame->height>4096 || frame->stride<(size_t)(frame->width+1)/2 || frame->stride>SIZE_MAX/(size_t)frame->height || rect.width<1 || rect.height<1 || rect.width>4096 || rect.height>4096))return PN_INVALID;
@@ -70,19 +89,7 @@ static pn_status_t decode(pn_pool_t *pool,const pn_image_input_t *input,pn_frame
                 }
             }
             if(!jpeg_finish_decompress(&d->jpeg))stop(d,PN_CORRUPT);
-            // 部分封面在真实EOI后留零填充；必须逐字节检查并读到已验证EOF，不接受其他尾部。
-            // Some covers pad with zeros after a real EOI; check every byte through verified EOF and reject other tails.
-            for(size_t i=0;i<d->source.bytes_in_buffer;i++)if(d->source.next_input_byte[i])stop(d,PN_CORRUPT);
-            for(;;){
-                pn_status_t cancel=pn_cancel_checkpoint();if(cancel!=PN_OK)stop(d,cancel);
-                size_t n=0;pn_status_t eof=input->read(input->ctx,d->buffer,sizeof d->buffer,&n);
-                if(eof==PN_EMPTY && !n)break;
-                if(eof!=PN_OK)stop(d,eof==PN_EMPTY?PN_CORRUPT:eof);
-                if(!n || n>sizeof d->buffer)stop(d,PN_CORRUPT);
-                if(n>32u*1024u*1024u-d->bytes)stop(d,PN_LIMIT);
-                d->bytes+=n;
-                for(size_t i=0;i<n;i++)if(d->buffer[i])stop(d,PN_CORRUPT);
-            }
+            padding(d);
         }
         *info=(pn_jpeg_info_t){w,h,d->jpeg.progressive_mode!=FALSE};
     }

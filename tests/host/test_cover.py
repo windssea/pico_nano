@@ -79,8 +79,9 @@ with tempfile.TemporaryDirectory() as folder:
     render(books/'g-plain.txt',EMPTY,root/'g.pgm')
     render(books/'h-garbage.txt',UNSUPPORTED,root/'h.pgm')
 
-    def queue(cache='-',cancel=False):
-        env=dict(os.environ,PN_COVER_CANCEL_AFTER='64') if cancel else os.environ
+    def queue(cache='-',cancel=False,held=False):
+        env=dict(os.environ,PN_COVER_CANCEL_AFTER='64') if cancel else dict(os.environ)
+        if held:env['PN_COVER_HELD_READ']='1'
         r=subprocess.run([binary,'queue',str(books),str(root/'shelf.pgm'),str(cache)],env=env,capture_output=True,timeout=300)
         assert r.returncode==0,(r.stdout,r.stderr)
         text=r.stdout.decode();assert "title=封面测试 author=测试作者" in text,text
@@ -95,7 +96,7 @@ with tempfile.TemporaryDirectory() as folder:
 
     # 缓存：首次写入全部六条内容结论，父目录按需创建，无临时残留。/ Cache: first run stores all six content outcomes, creating parents, leaving no temporaries.
     (root/'tf').mkdir();cache=root/'tf'/'.readpico'/'covers'
-    assert queue(cache)==expected
+    assert queue(cache,held=True)==expected
     files=sorted(cache.iterdir());assert len(files)==6 and all(f.suffix=='.pnc' for f in files),files
     assert pgm(root/'shelf.pgm')[2]==plain,'cached path draws identically'
     # 命中：原书改成损坏内容但保持大小与mtime，仍显示缓存。/ Hit: corrupt the book while keeping size and mtime; the cache still serves.

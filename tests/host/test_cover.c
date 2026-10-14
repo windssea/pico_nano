@@ -53,6 +53,7 @@ static int queue(const char *directory,const char *output,const char *cache){
     assert(pn_catalog_page(&media,&lease,directory,"",page)==PN_OK);assert(pn_media_release(&media,&lease)==PN_OK);pn_shelf_covers_reset(covers,page);
     const char *dir=strcmp(cache,"-")?cache:NULL;
     const char *budget_text=getenv("PN_COVER_QUEUE_BUDGET");size_t budget=budget_text?(size_t)strtoull(budget_text,NULL,10):BUDGET;
+    pn_media_lease_t system_read={0};if(getenv("PN_COVER_HELD_READ"))assert(pn_media_acquire(&media,PN_MEDIA_READ,&system_read)==PN_OK);
     bool changed;pn_status_t status;size_t steps=0;
     const char *cancel_at=getenv("PN_COVER_CANCEL_AFTER");
     if(cancel_at && page->count){cancellation_t cancel={.limit=(unsigned)strtoul(cancel_at,NULL,10)};uint8_t before[PN_COVER_BYTES];memcpy(before,covers->pixels[0],sizeof before);pn_cancel_scope_t scope;pn_cancel_enter(&scope,interrupted,&cancel);
@@ -80,7 +81,7 @@ static int queue(const char *directory,const char *output,const char *cache){
         assert(pn_shelf_covers_step(covers,page,&pool,&media,dir,salt,BUDGET,&changed)==PN_BUSY && covers->state[0]==PN_COVER_PENDING && !changed);assert(pn_media_release(&media,&writer)==PN_OK);}
     assert(pn_media_detach(&media)==PN_OK);
     if(page->count)assert(pn_shelf_covers_step(covers,page,&pool,&media,dir,salt,BUDGET,&changed)==PN_STALE_MEDIA && covers->state[0]==PN_COVER_PENDING && !changed);
-    pn_font_close(&font);pn_free(bytes);assert(!pool.used && !pool.live);free(page);free(covers);return 0;
+    pn_font_close(&font);pn_free(bytes);assert(!pool.used && !pool.live);free(page);free(covers);if(system_read.ticket)assert(pn_media_release(&media,&system_read)==PN_OK);return 0;
 }
 int main(int argc,char **argv){
     if(argc==4 && !strcmp(argv[1],"render"))return render(argv[2],argv[3]);

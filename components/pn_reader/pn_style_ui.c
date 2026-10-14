@@ -66,7 +66,7 @@ static pn_font_t *body_font(const pn_style_ui_t *u){
 }
 /* 当前字体名：文件取不含扩展名的文件名，否则“默认字体”。/ Current font name: a file's base name without extension, otherwise "default font". */
 static void font_name(pn_style_ui_t *u,char *out,size_t cap){
-    snprintf(out,cap,"内置字体");
+    snprintf(out,cap,"系统字体");
     pn_font_preferences_t prefs;char directory[300];
     pn_status_t status=u->epub?pn_epub_app_fonts_get(u->epub,&prefs,directory,sizeof directory):u->reader?pn_reader_app_fonts_get(u->reader,&prefs,directory,sizeof directory):PN_INVALID;
     if(status==PN_OK && prefs.primary.kind==PN_FONT_FILE && cap>1){

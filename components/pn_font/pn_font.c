@@ -12,6 +12,7 @@
 #include "pn_cancel.h"
 #include "pn_identity.h"
 #include "pn_text_file.h"
+#include "pn_font_asset.h"
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include FT_MODULE_H
@@ -26,6 +27,23 @@ extern const size_t pn_reading_font_size;
 extern const uint8_t pn_harmony_font_bytes[];
 extern const size_t pn_harmony_font_size;
 extern const uint8_t pn_harmony_font_sha256[32],pn_reading_font_sha256[32],pn_ui_font_sha256[32];
+static pn_font_asset_t system_asset; ///< 产品owner唯一持有的外置系统字体 / External system face owned by the product owner
+static pn_text_source_t system_source; ///< 消费者关闭前保持不变的借用源 / Borrowed source kept immutable until consumers close
+static char system_path[PN_FONT_REFERENCE_PATH_MAX];
+static pn_media_t *system_media;
+pn_status_t pn_font_system_close(void){system_source=(pn_text_source_t){0};system_path[0]=0;system_media=NULL;return pn_font_asset_close(&system_asset);}
+bool pn_font_system_available(void){return system_source.read_at && system_source.validate && system_source.validate(system_source.ctx)==PN_OK;}
+pn_status_t pn_font_system_open(pn_pool_t *pool,pn_media_t *media,const char *path){
+    if(!pool || !media || !path || !*path)return PN_INVALID;
+    if(system_asset.impl && system_media==media && !strcmp(system_path,path) && system_source.validate && system_source.validate(system_source.ctx)==PN_OK)return PN_OK;
+    pn_status_t status=pn_font_system_close();if(status!=PN_OK)return status;
+    pn_media_lease_t guard={0};status=pn_media_acquire(media,PN_MEDIA_READ,&guard);
+    if(status==PN_OK)status=pn_font_asset_open(&system_asset,pool,media,&guard,path,0,24);
+    if(status==PN_OK)status=pn_font_asset_source(&system_asset,&system_source);
+    if(guard.ticket){pn_status_t released=pn_media_release(media,&guard);if(status==PN_OK)status=released;}
+    if(status==PN_OK){strcpy(system_path,path);system_media=media;pn_font_asset_suspend(&system_asset);}else (void)pn_font_system_close();
+    return status;
+}
 static pn_status_t harmony_ui_read(void *,uint64_t,uint8_t *,size_t,size_t *);
 static pn_status_t builtin_read(void *,uint64_t,uint8_t *,size_t,size_t *);
 /* 字形缓存：同一字符在分页量宽和绘制各加载一次轮廓，而每次加载要经cmap二分和loca/glyf多次小读取，在SD/网络盘上很慢。
@@ -119,7 +137,7 @@ static pn_status_t pn_font_open_impl(pn_font_t *font,pn_pool_t *pool,const pn_te
     if(source->size<12)return PN_CORRUPT;
     if(source->size>32u*1024u*1024u)return PN_LIMIT;
     if(source->validate){pn_status_t s=source->validate(source->ctx);if(s!=PN_OK)return s;}
-    engine_t *e=pn_alloc_tagged(pool,PN_MEM_FONT,sizeof *e);if(!e)return PN_NO_MEMORY;memset(e,0,sizeof *e);e->pool=pool;e->source=*source;e->resident_ui=source->read_at==harmony_ui_read;
+    engine_t *e=pn_alloc_tagged(pool,PN_MEM_FONT,sizeof *e);if(!e)return PN_NO_MEMORY;memset(e,0,sizeof *e);e->pool=pool;e->source=*source;e->resident_ui=source->read_at==harmony_ui_read || (system_source.ctx && source->ctx==system_source.ctx && source->read_at==system_source.read_at);
     e->memory=(struct FT_MemoryRec_){e,allocate,release,resize};
     e->stream.size=(unsigned long)source->size;e->stream.descriptor.pointer=e;e->stream.read=stream_read;
     pn_font_t temporary={e,0,0};uint8_t prefix[4];
@@ -283,14 +301,21 @@ static pn_status_t harmony_read(void *ctx,uint64_t offset,uint8_t *out,size_t ca
     memcpy(out,pn_harmony_font_bytes+offset,count);*n=count;return PN_OK;
 }
 static pn_status_t harmony_ui_read(void *ctx,uint64_t off,uint8_t *out,size_t cap,size_t *n){return harmony_read(ctx,off,out,cap,n);}
-pn_text_source_t pn_font_builtin_source(void){return (pn_text_source_t){NULL,pn_harmony_font_size,harmony_ui_read,NULL};}
+pn_text_source_t pn_font_builtin_source(void){
+    if(system_source.read_at && system_source.validate && system_source.validate(system_source.ctx)==PN_OK)return system_source;
+    return (pn_text_source_t){NULL,pn_harmony_font_size,harmony_ui_read,NULL};
+}
 
 static pn_status_t reading_read(void *ctx,uint64_t offset,uint8_t *out,size_t cap,size_t *n){
     (void)ctx;if(!out || !n || offset>pn_reading_font_size)return PN_INVALID;
     size_t count=pn_reading_font_size-(size_t)offset;if(count>cap)count=cap;
     memcpy(out,pn_reading_font_bytes+offset,count);*n=count;return PN_OK;
 }
-pn_text_source_t pn_font_reading_source(void){return (pn_text_source_t){NULL,pn_harmony_font_size,harmony_read,NULL};}
+pn_text_source_t pn_font_reading_source(void){
+    // 默认正文与系统UI共用已核验完整字库；显式用户字体仍由阅读偏好选择。/ Default body text shares the verified complete system face; explicit user faces remain controlled by reading preferences.
+    if(system_source.read_at && system_source.validate && system_source.validate(system_source.ctx)==PN_OK)return system_source;
+    return (pn_text_source_t){NULL,pn_harmony_font_size,harmony_read,NULL};
+}
 pn_text_source_t pn_font_fallback_source(void){return (pn_text_source_t){NULL,pn_reading_font_size,reading_read,NULL};}
 pn_status_t pn_font_source_identity(const pn_text_source_t *source,pn_book_id_t *out){
     if(!source || !source->read_at || !out)return PN_INVALID;

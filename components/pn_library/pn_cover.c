@@ -269,7 +269,7 @@ pn_status_t pn_shelf_covers_step(pn_shelf_covers_t *covers,const pn_catalog_page
         covers->state[i]=status==PN_OK?PN_COVER_READY:status==PN_EMPTY || status==PN_UNSUPPORTED?PN_COVER_NONE:PN_COVER_FAILED;
         *changed=status==PN_OK || *covers->display[i].title;
         /* 内存失败连同预算保存，预算增加才重试；IO/超限不缓存。/ Store memory failures with their budget and retry on growth; do not cache I/O or limit failures. */
-        if(keyed && (item->format!=PN_BOOK_EPUB || *covers->display[i].title) && (status==PN_OK || status==PN_EMPTY || status==PN_UNSUPPORTED || status==PN_CORRUPT || status==PN_NO_MEMORY) && pn_media_acquire(media,PN_MEDIA_WRITE,&lease)==PN_OK){
+        if(keyed && (item->format!=PN_BOOK_EPUB || *covers->display[i].title) && (status==PN_OK || status==PN_EMPTY || status==PN_UNSUPPORTED || status==PN_CORRUPT || status==PN_NO_MEMORY) && pn_media_acquire(media,PN_MEDIA_CACHE_WRITE,&lease)==PN_OK){
             (void)cache_store(pool,media,&lease,cache_dir,item,&key,covers->state[i],status,covers->pixels[i],&covers->display[i],budget);(void)pn_media_release(media,&lease);
         }
         return PN_OK;

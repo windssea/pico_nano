@@ -1,6 +1,6 @@
 # PicoNano 安装、异机升级与发布
 
-更新：2026-10-14。默认通过电脑 Chrome/Edge 的 Web Serial 升级，在线入口为[网页安装器](https://windssea.github.io/pico_nano/)。当前默认固件 `0.6.6+3c8eaf9`，具体源码来源以下载清单的`source_commit`为准（开机右下角与“设置 → 存储与关于”显示版本号）。网页安装与设备无线OTA是不同能力，当前没有已交付的OTA原子回滚。
+更新：2026-10-14。默认通过电脑 Chrome/Edge 的 Web Serial 升级，在线入口为[网页安装器](https://windssea.github.io/pico_nano/)。当前默认固件 `0.6.6+eff83f1`，具体源码来源以下载清单的`source_commit`为准（开机右下角与“设置 → 存储与关于”显示版本号）。网页安装与设备无线OTA是不同能力，当前没有已交付的OTA原子回滚。
 
 ## 另一台电脑网页升级
 
@@ -74,6 +74,8 @@ python tools/dev.py installer
 设备“传书 → USB传输”手动交出TF，在电脑磁盘的`piconano/books`、`piconano/fonts`、`piconano/covers`、`piconano/wallpapers`分别复制图书、字体、封面和锁屏原图。复制完成先在电脑安全弹出，再点设备“结束USB传输”；恢复失败可重试，记录不会因此清除。MSC期间网页刷机所需的Serial/JTAG暂停，结束后恢复；软件验证与固件构建不代表本机USB已验收，请按开发指南记录枚举、读回SHA和串口恢复。
 
 ## 版本与交付证据
+
+0.6.6修复源码`eff83f1`：板级应用5026336字节，SHA-256 `bdfeeb616884b9009f437ab46dfd5d10f0cfadeeb2c1af1f8873b17d24651a8f`。ZIP/JPEG、字体身份、图片缩进与按键回归通过；149CTest/32SDL/10Python/5网页/17安装器基础门通过，最终相关29项设备/核心、3项SDL及完整字体共享源回归补验通过，两套SDK构建/size与包摘要通过。完整系统字体位于TF固定路径，内置应急字库保留；用户本机安装和读回SHA一致，软件绘制通过不代表新固件真机阅读/功耗/光学验收。未在本轮串口烧写，继续`verifiedOnHardware=false`。
 
 0.6.6源码`3c8eaf9`：板级应用5025184字节，6MiB槽约20.1%余量，SHA-256 `6cd8cbda938b04c848f5c2cb9f59d642b7d18e62c2bda40c8fb16e38123229b8`。149项CTest、10项Python、5项网页、32项SDL与17项安装器测试通过；最后回调链接与目录呈现修正补跑相关回归，两套固件构建/镜像/包摘要校验通过。USB和光学效果未做设备验收，清单继续`verifiedOnHardware=false`。
 

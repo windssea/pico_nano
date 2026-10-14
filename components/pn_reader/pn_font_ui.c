@@ -12,7 +12,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <inttypes.h>
-typedef struct {bool ready,explicit_directory,focus_visible,inherited;pn_pool_t *pool;pn_reader_app_t *reader;pn_epub_app_t *epub;pn_catalog_page_t page;pn_font_preferences_t draft,current;pn_font_info_t info;char directory[PN_FONT_REFERENCE_PATH_MAX],cursor[PN_CATALOG_NAME_MAX];unsigned checked,missing;const char *notice;pn_reader_overlay_fn return_paint;void *return_ctx;} ui_t;
+typedef struct {bool ready,explicit_directory,focus_visible,inherited;bool success_notice; ///< 成功提示不提供失败重试 / Success notices do not offer error Retry
+ pn_pool_t *pool;pn_reader_app_t *reader;pn_epub_app_t *epub;pn_catalog_page_t page;pn_font_preferences_t draft,current;pn_font_info_t info;char directory[PN_FONT_REFERENCE_PATH_MAX],cursor[PN_CATALOG_NAME_MAX];unsigned checked,missing;const char *notice;pn_reader_overlay_fn return_paint;void *return_ctx;} ui_t;
 /* 调用方目录优先，重试读取偏好不能改回旧字体所在目录。/ The caller's directory wins; retrying preferences cannot restore the old font's folder. */
 static pn_status_t preferences(ui_t *s){
  char inferred[PN_FONT_REFERENCE_PATH_MAX];pn_status_t status=s->epub?pn_epub_app_fonts_get(s->epub,&s->draft,inferred,sizeof inferred):pn_reader_app_fonts_get(s->reader,&s->draft,inferred,sizeof inferred);
@@ -64,12 +65,12 @@ static pn_status_t font_card(pn_font_t *font,pn_frame_t *frame,const char *name,
 }
 static pn_status_t paint(void *ctx,pn_font_t *font,pn_font_t *metadata,pn_frame_t *frame){
  pn_font_ui_t *u=ctx;ui_t *s=u->impl;if(!s || frame->width!=684 || frame->height!=1216)return PN_INVALID;pn_frame_clear(frame,15);
- pn_status_t status=pn_w_header(font,frame,u->mode==0?"< 返回":"< 返回列表",u->mode==0?"阅读字体":"阅读字体详情",s->notice?"重试":NULL);
+ pn_status_t status=pn_w_header(font,frame,u->mode==0?"< 返回":"< 返回列表",u->mode==0?"阅读字体":"阅读字体详情",s->notice && !s->success_notice?"重试":NULL);
  (void)metadata;
  if(status==PN_OK && u->mode==0){
   bool system=s->current.primary.kind==PN_FONT_RESIDENT;
   status=font_card(font,frame,"跟随全局默认",s->inherited?"已跟随 · 重开读取全局设置":"取消本书覆盖，采用全局默认",INHERIT_Y,DEFAULT_H,s->inherited,false,false);
-  if(status==PN_OK)status=font_card(font,frame,"内置字体","仅设置本书 · 自动补字",RESIDENT_Y,DEFAULT_H,system && !s->inherited,false,true);
+  if(status==PN_OK)status=font_card(font,frame,"系统字体","仅设置本书 · 自动补字",RESIDENT_Y,DEFAULT_H,system && !s->inherited,false,true);
   char count[128];snprintf(count,sizeof count,"已安装 %zu 款",s->page.total);
   if(status==PN_OK)status=label(font,frame,"外置字体",32,TARGET_Y,300,26,PN_UI_MUTED,PN_ALIGN_LEFT);
   if(status==PN_OK)status=label(font,frame,count,352,TARGET_Y,300,24,PN_UI_MUTED,PN_ALIGN_RIGHT);
@@ -91,7 +92,7 @@ static pn_status_t paint(void *ctx,pn_font_t *font,pn_font_t *metadata,pn_frame_
   if(status==PN_OK)status=label(font,frame,"阅读字体独立设置，界面保持固定",32,1170,620,22,PN_UI_MUTED,PN_ALIGN_CENTER);
  }else if(status==PN_OK){
   int original=font->pixels;status=pn_font_size(font,36);
-  if(status==PN_OK)status=pn_w_text_lines(font,frame,*s->info.family?pn_brand_label(s->info.family):"内置字体",PN_UI_MARGIN,196,620,2,48,NULL);
+  if(status==PN_OK)status=pn_w_text_lines(font,frame,*s->info.family?pn_brand_label(s->info.family):"系统字体",PN_UI_MARGIN,196,620,2,48,NULL);
   pn_status_t restored=pn_font_size(font,original);if(status==PN_OK)status=restored;
   char value[128];
   if(status==PN_OK){if(s->info.glyphs)snprintf(value,sizeof value,"字重 %u · 字形 %" PRIu32,s->info.weight,s->info.glyphs);else snprintf(value,sizeof value,"%s","默认阅读字库，缺字由系统回退");status=sized_text(font,frame,value,28,332,PN_ALIGN_LEFT);}
@@ -132,12 +133,12 @@ static pn_status_t cancel_font(ui_t *s,uint64_t now,pn_reader_present_fn present
 static bool confirmed(ui_t *s){return s->epub?pn_epub_app_last_confirmed(s->epub):pn_reader_app_last_confirmed(s->reader);}
 pn_status_t pn_font_ui_event(pn_font_ui_t *u,int command,uint64_t now,pn_reader_present_fn present,void *ctx){
  if(!u || !u->impl || !u->active)return PN_INVALID;
- ui_t *s=u->impl;if(!u->presented && command!=PN_FUI_RETRY)return PN_BUSY;pn_status_t status=PN_OK;s->notice=NULL;
+ ui_t *s=u->impl;if(!u->presented && command!=PN_FUI_RETRY)return PN_BUSY;pn_status_t status=PN_OK;s->notice=NULL;s->success_notice=false;
  if(!s->ready && command!=PN_FUI_BACK && command!=PN_FUI_CANCEL && command!=PN_FUI_RETRY)return PN_BUSY;
  if(command==PN_FUI_RETRY){if(!s->ready)status=preferences(s);if(s->ready && u->mode==0)status=page(u,s->cursor,false);if(status!=PN_OK)s->notice="字体目录读取失败，可重试";return pn_font_ui_present(u,present,ctx);}if(command==PN_FUI_FORM)return pn_font_ui_present(u,present,ctx);
  if(command==PN_FUI_CANCEL || (command==PN_FUI_BACK && u->mode==0)){status=cancel_font(s,now,present,ctx);if(confirmed(s)){u->return_presented=s->return_paint!=NULL;u->active=false;return status;}}
  else if(command==PN_FUI_RESTORE_DEFAULT){status=inherit_font(s,now,present,ctx);if(status==PN_OK){u->return_presented=s->return_paint!=NULL;u->active=false;return status;}}
- else if(command==PN_FUI_DEFAULT && u->mode==1){status=s->epub?pn_epub_app_font_default(s->epub,&s->draft):pn_reader_app_font_default(s->reader,&s->draft);if(status==PN_OK)s->notice="全局已保存，跟随默认的书重开后生效";}
+ else if(command==PN_FUI_DEFAULT && u->mode==1){status=s->epub?pn_epub_app_font_default(s->epub,&s->draft):pn_reader_app_font_default(s->reader,&s->draft);if(status==PN_OK){s->notice="全局已保存，跟随默认的书重开后生效";s->success_notice=true;}}
  else if(command==PN_FUI_BACK){u->mode=0;}
  else if(command==PN_FUI_PRIMARY){u->mode=0;}
  else if(command==PN_FUI_FALLBACK){status=PN_UNSUPPORTED;}
@@ -157,7 +158,7 @@ int pn_font_ui_hit(const pn_font_ui_t *u,int x,int y){
  if(!u || !u->impl || !u->active || x<0 || x>=684 || y<0 || y>=1216)return -1;
  if(u->preview)return PN_FUI_FORM;
  const ui_t *s=u->impl;
- int header=pn_w_header_hit(x,y,s->notice!=NULL);
+ int header=pn_w_header_hit(x,y,s->notice!=NULL && !s->success_notice);
  if(header==1)return u->mode==0?PN_FUI_CANCEL:PN_FUI_BACK;
  if(header==2)return PN_FUI_RETRY;
  if(x<32 || x>=652)return -1;

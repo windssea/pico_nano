@@ -27,6 +27,8 @@ typedef struct {
 } pn_text_file_t;
 /// 仅识别本port原始source；未知UNSUPPORTED，成功摘要绑定当前句柄/租约，失败不改输出。/ Recognize only this port's original source; unknown sources return UNSUPPORTED; bind successful digests to the live handle/lease and preserve output on error.
 pn_status_t pn_text_file_identity(const pn_text_source_t *,pn_book_id_t *);
+/// 用池内有界扫描缓冲核验并缓存当前打开源摘要；不跨句柄复用。/ Verify and cache the live source digest with a bounded pool buffer; never reuse across handles.
+pn_status_t pn_text_file_identity_pooled(pn_pool_t *,const pn_text_source_t *,pn_book_id_t *);
 /// 打开普通文件，不改变source失败输出；最大INT32_MAX bytes以兼容目标fseek。
 /// Open a regular file, preserving source output on failure; cap at INT32_MAX bytes for target fseek compatibility.
 pn_status_t pn_text_file_open(pn_text_file_t *file,pn_media_t *media,const pn_media_lease_t *lease,

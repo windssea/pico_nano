@@ -26,6 +26,9 @@ with tempfile.TemporaryDirectory() as folder:
   bad.write_bytes(raw+b'\0'*65537);assert run(bad).stdout==run(path).stdout
   assert run(bad,env={'PN_JPEG_CHUNK':'17'}).stdout==run(path).stdout
   bad.write_bytes(raw+b'\0'*8192+b'X');run(bad,success=False)
+  for padding in [1,77201,128*1024,768549,1024*1024]:
+   bad.write_bytes(raw+b'\0'*padding);assert run(bad).stdout==run(path).stdout
+  bad.write_bytes(raw+b'\0'*(1024*1024+1));run(bad,success=False)
   for content in [raw[:-2],raw+b'X',raw[:80],b'not a JPEG']:
    bad.write_bytes(content);run(bad,success=False)
 print('jpeg: baseline/progressive independent pixels, short reads, media failure, truncation/tail and all allocation faults passed')

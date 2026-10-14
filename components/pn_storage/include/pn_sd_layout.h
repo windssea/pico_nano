@@ -12,6 +12,7 @@
 #define PN_SD_APP "piconano" ///< TF上的应用根目录 / Application root on TF
 #define PN_SD_BOOKS PN_SD_APP "/books" ///< 书籍 / Books
 #define PN_SD_FONTS PN_SD_APP "/fonts" ///< 字体 / Fonts
+#define PN_SD_SYSTEM_FONT PN_SD_FONTS "/HarmonyOS_Sans_SC_Regular.ttf" ///< 固定完整系统中文字体，缺失时内置应急 / Fixed complete system CJK face, with resident emergency fallback when missing
 #define PN_SD_COVERS PN_SD_APP "/covers" ///< 封面原图 / Original covers
 #define PN_SD_WALLPAPERS PN_SD_APP "/wallpapers" ///< 锁屏原图 / Wallpaper originals
 #define PN_SD_PRIVATE PN_SD_APP "/.readpico" ///< 内部数据，不进入书架 / Internal data, excluded from the shelf
