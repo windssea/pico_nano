@@ -125,6 +125,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/run_sim.ps1
 
 `root_navigation_queue_window`使用既有公开边界文本，分别对四根页和反馈开/关注入扫描中第二次底栏接触，核对最终整帧与串行点击一致，并验证旧内容区触点仍拒绝。`PN_ROOT_RACE_ARTIFACTS`可保留全部日志与画面；`race-root:延迟毫秒:起点X:起点Y:终点X:终点Y`在延迟后释放起点并向终点投递独立点击，仅最终松手确认脚本。`PN_SIM_CAPTURE_CANCELLED=1`仅供竞争诊断捕获已成功显示、随后因新输入取消准备的帧；默认仍跳过这类开发截图，不改变成功显示回执。模拟等待与公开边界样本不代替真实用户整库/字体及面板验收。
 
+`root_navigation_coalesce_window`另查四根页、反馈开/关的密集独立点击：`race-roots:延迟毫秒:首目标:后续目标1:后续目标2:末目标`使用0～3底栏编号，首目标扫描中投递另三次完整接触，核对最终完整帧与串行末目标相同，积压三目标只准备最后一个。`race-focus:延迟毫秒:起点X:起点Y:移动X:移动Y`注入失焦后保持左键的移动，最后才松手，不能把同一持有变成新点击。`PN_ROOT_COALESCE_ARTIFACTS`保留原始日志/帧；扫描中注入须在日志确认pending，不能只凭脚本字符串断言竞态发生。空闲检查须独立配置`--cover-cache`启用索引，冷缓存、释放后等待才要求建索引，不能对未初始化模块要求成功日志。共享`async`及实际`device_management`另查批次上限、后续取消、优先电源项、同一持有、多点/滑入和最终空样本的释放。
+
+`tools/test_local_root_navigation.py --sim build-sim-sdl-idf/pn_sim`已接`local-samples`，重新复制全部用户书籍/四款字体，逐字体比较密集点击和失焦持有的最终整帧、关闭池归零及释放后空闲索引。可选`--baseline`只接受含同样竞争脚本入口的独立冻结程序；原件SHA保持，记录旧/新导航尝试次数，不能把次数直接换算为面板扫描减少或真实速度。开发工具中的700ms等待只制造积压窗口，不是产品延迟或面板实测。
+
 ## EPUB 与性能诊断
 
 本机综合入口也运行`tools/test_local_middle_key.py --sim build-sim-sdl-idf/pn_sim`与`tools/test_local_font_samples.py --binary build-host/font_samples_validate`，使用用户原书/字库的独立副本，检查阅读中间键、排版保存和关闭池归零，以及字体列表首帧不打开外置小样、每轮最多一个与合并呈现。字体工具可加`--baseline <旧探针>`比较完整最终像素；未给旧工具时只报告本版行为及重绘一致，不当作跨版本像素对照。结果位于`build-dev/local-middle-key/`和`local-font-samples/`。公共`catalog_mount`只将挂载根`mkdir`替换为IDF6.1 FatFS的`EINVAL`，其余千本索引、真实文件、重开/取消/分配失败与原测试相同，不能代替实卡掉电或响应计时。

@@ -501,6 +501,30 @@ static int root_navigation_hit(library_t *s,int x,int y){
     if(s->hub){pn_transfer_hub_info_t info=hub_info(s);return pn_transfer_hub_hit(&info,x,y);}
     return reading(s) || !s->page?-1:shelf_hit(s,x,y);
 }
+// 与设备端一样，快照返回后才呈现，释放/失焦先沿原接触所有权消费。
+// As on device, present only after returning from the snapshot frame, consuming release/focus edges through original contact ownership first.
+#if defined(__GNUC__)
+__attribute__((noinline))
+#endif
+static pn_status_t root_navigation_merge(library_t *s,pn_tap_press_t *press,SDL_Event *chosen,int *selected){
+    pn_async_event_t pending[PN_ASYNC_CONTROLS];size_t n=0;pn_status_t status=pn_sdl_async_drain_root(&s->async,pending,PN_ASYNC_CONTROLS,&n);
+    if(status!=PN_OK){int ignored;(void)pn_tap_press_feed(press,1,-1,false,&ignored);return status;}
+    unsigned selections=1;
+    for(size_t i=0;i<n;i++){
+        if(pending[i].bytes!=sizeof(SDL_Event))continue;
+        SDL_Event event;memcpy(&event,pending[i].payload,sizeof event);int next=-1;
+        if(event.type==SDL_WINDOWEVENT && event.window.event==SDL_WINDOWEVENT_FOCUS_LOST){
+            (void)pn_tap_press_feed(press,1,-1,false,&next);if(!(event.window.data1&SDL_BUTTON_LMASK)){(void)pn_tap_press_feed(press,0,-1,true,&next);(void)pn_tap_press_feed(press,0,-1,true,&next);}continue;}
+        bool motion=event.type==SDL_MOUSEMOTION,up=event.type==SDL_MOUSEBUTTONUP;
+        if(!(motion && (event.motion.state&SDL_BUTTON_LMASK)) && !((event.type==SDL_MOUSEBUTTONDOWN || up) && event.button.button==SDL_BUTTON_LEFT))continue;
+        int x=motion?event.motion.x:event.button.x,y=motion?event.motion.y:event.button.y;
+        int hit=pn_async_root_current(&s->async.input,&pending[i])?root_navigation_hit(s,x,y):-1;
+        (void)pn_tap_press_feed(press,up?0u:1u,hit,up || hit>=0,&next);if(up)(void)pn_tap_press_feed(press,0,-1,true,&next);
+        if(next>=0){*selected=next;*chosen=event;selections++;}
+    }
+    if(selections>1)printf("navigation merged events=%zu selections=%u\n",n,selections);
+    return PN_OK;
+}
 /// 从真实显示端口的已确认像素取区域，UI对象关闭后局部原图仍自有。/ Read confirmed port pixels; local originals remain owned after UI closure.
 static pn_status_t feedback_read(void *ctx,pn_feedback_box_t b,pn_frame_t *out){
     library_t *s=ctx;if(!s->feedback_known)return PN_EMPTY;
@@ -683,7 +707,7 @@ static int library_worker(void *ctx){
         int navigation=-1;bool navigation_consumed=false,navigation_selected=false;
         if(got && event.type==SDL_WINDOWEVENT && event.window.event==SDL_WINDOWEVENT_FOCUS_LOST){
             navigation_consumed=pn_tap_press_feed(&navigation_press,1,-1,false,&navigation);
-            if(s->async.discarded_release || !(atomic_load(&s->async.mouse)&SDL_BUTTON_LMASK)){
+            if(s->async.discarded_release || !(event.window.data1&SDL_BUTTON_LMASK)){
                 if(s->async.discarded_release && navigation_press.claimed)printf("navigation stale release consumed\n");
                 (void)pn_tap_press_feed(&navigation_press,0,-1,true,&navigation);(void)pn_tap_press_feed(&navigation_press,0,-1,true,&navigation);}}
         else if(got && ((event.type==SDL_MOUSEMOTION && (event.motion.state&SDL_BUTTON_LMASK)) || ((event.type==SDL_MOUSEBUTTONDOWN || event.type==SDL_MOUSEBUTTONUP) && event.button.button==SDL_BUTTON_LEFT))){
@@ -691,8 +715,9 @@ static int library_worker(void *ctx){
             navigation_consumed=pn_tap_press_feed(&navigation_press,up?0u:1u,root_navigation_hit(s,x,y),true,&navigation);
             if(up)navigation_consumed=pn_tap_press_feed(&navigation_press,0,-1,true,&navigation) || navigation_consumed;
             if(navigation>=0){
+                if(root_navigation_merge(s,&navigation_press,&event,&navigation)!=PN_OK){feedback_restore(s);s->feedback_tap=(pn_tap_t){0};s->pointer_down=false;tap=(pn_tap_t){0};pn_reader_input_cancel(&input);continue;}
                 // 已确认的导航沿原松手分支执行一次；真实松手仍由独立所有权消费。/ Execute confirmed navigation once through its existing release route; separate ownership consumes the real release.
-                feedback_restore(s);s->feedback_tap=(pn_tap_t){0};tap=(pn_tap_t){0};pn_reader_input_cancel(&input);s->pointer_down=true;
+                feedback_restore(s);s->feedback_tap=(pn_tap_t){0};tap=(pn_tap_t){0};pn_reader_input_cancel(&input);s->pointer_down=navigation_press.down || navigation_press.blocked;
                 event.type=SDL_MOUSEBUTTONUP;event.button.type=SDL_MOUSEBUTTONUP;navigation_selected=true;printf("navigation press hit=%d\n",navigation);}}
         else if(!got && !(atomic_load(&s->async.mouse)&SDL_BUTTON_LMASK)){
             (void)pn_tap_press_feed(&navigation_press,0,-1,true,&navigation);(void)pn_tap_press_feed(&navigation_press,0,-1,true,&navigation);}
@@ -731,7 +756,7 @@ static int library_worker(void *ctx){
             (void)pn_toc_ui_tick(&s->toc,now);
             (void)feedback_idle_tick(s,now,s->locked || body || moving.active || s->pointer_down || s->feedback_tap.down || atomic_load(&s->async.mouse)!=0);
             if(!s->locked && body && !s->pointer_down && atomic_load(&s->async.mouse)==0){status=s->epub.impl?pn_epub_app_prefetch(&s->epub):pn_reader_app_prefetch(&s->reader);if(status==PN_OK)printf("neighbor prefetch ready\n");pn_status_t cached=s->epub.impl?pn_epub_app_cache_idle(&s->epub,now):PN_EMPTY;if(cached==PN_OK)printf("semantic cache stored\n");}
-            if(!s->locked && !reading(s) && !s->pointer_down && !s->hub && !s->index && !s->search_open && !s->actions_mode && !s->wallpaper.impl && !s->font_manage.impl && !s->settings.impl && now>=font_activity && now-font_activity>=80){if(now-font_activity>=800){pn_status_t indexed=catalog_build_idle(s);if(indexed==PN_OK)printf("catalog index built\n");}covers_tick(s,now-font_activity>=800);}
+            if(!s->locked && !reading(s) && !s->pointer_down && atomic_load(&s->async.mouse)==0 && !s->hub && !s->index && !s->search_open && !s->actions_mode && !s->wallpaper.impl && !s->font_manage.impl && !s->settings.impl && now>=font_activity && now-font_activity>=80){if(now-font_activity>=800){pn_status_t indexed=catalog_build_idle(s);if(indexed==PN_OK)printf("catalog index built\n");}covers_tick(s,now-font_activity>=800);}
             continue;}
 
         if(!s->locked && management_event(s,&event,now)){cancel_pointer(&input,&tap,true);continue;}
@@ -940,14 +965,16 @@ static int library_worker(void *ctx){
             bool motion=event.type==SDL_MOUSEMOTION;
             if((motion && !(event.motion.state&SDL_BUTTON_LMASK)) || (!motion && event.button.button!=SDL_BUTTON_LEFT))continue;
             if(event.type==SDL_MOUSEBUTTONDOWN)s->pointer_down=true;
-            if(!s->pointer_down)continue;
+            // 批次已释放也执行这次已确认导航；真正持有仍由独立底栏所有权保留。
+            // Execute confirmed navigation even after a drained release; separate navigation ownership still preserves a real hold.
+            if(!s->pointer_down && !navigation_selected)continue;
             int x=motion?event.motion.x:event.button.x,y=motion?event.motion.y:event.button.y;
 
             int target=s->styles.active?pn_style_ui_hit(&s->styles,x,y):s->bookmarks.mode!=PN_BUI_CLOSED?pn_bookmark_ui_hit(&s->bookmarks,x,y):reading(s)?(y>=1144 && x<420 && (s->epub.impl?pn_epub_app_bookmark_can_return(&s->epub):pn_reader_app_bookmark_can_return(&s->reader))?11:y>=1144 && x>=420?14:-1):shelf_hit(s,x,y);
             (void)pn_tap_feed(&tap,1,target,true,&hit);
             if(reading(s) && s->bookmarks.mode==PN_BUI_CLOSED && !s->styles.active)(void)pn_reader_input_feed(&input,1,x,y,true,&action);
             if(event.type==SDL_MOUSEBUTTONUP){
-                s->pointer_down=false;
+                s->pointer_down=navigation_selected && (navigation_press.down || navigation_press.blocked);
                 (void)pn_tap_feed(&tap,0,-1,true,&hit);commit=pn_tap_feed(&tap,0,-1,true,&hit);
                 if(reading(s) && s->bookmarks.mode==PN_BUI_CLOSED && !s->styles.active){(void)pn_reader_input_feed(&input,0,0,0,true,&action);turn=pn_reader_input_feed(&input,0,0,0,true,&action);}
             }

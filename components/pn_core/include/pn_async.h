@@ -46,6 +46,11 @@ void pn_async_set_root(pn_async_t *queue,bool root);
 /// 仅判断印记是否仍在同一连续底栏上下文；端口仍须验证事件种类和固定几何。
 /// Check only continuous root context; ports must still validate event type and fixed geometry.
 bool pn_async_root_current(pn_async_t *queue,const pn_async_event_t *event);
+/// 已确认根页导航的前台owner取出当前普通边沿快照，以合并目标并消费释放；不执行其中旧内容命令。
+/// A foreground owner with confirmed root navigation snapshots pending ordinary edges to merge targets and consume releases, never executing obsolete content commands.
+/// 导航优先项存在返回BUSY且不动队列；溢出返回CANCELLED；成功仅接纳已取批次的取消代次，随后输入仍可取消。
+/// Pending priority navigation returns BUSY without changing the queue; overflow returns CANCELLED. Success accepts only the drained batch generation, so later input can still cancel.
+pn_status_t pn_async_drain_root_controls(pn_async_scope_t *scope,pn_async_event_t *events,size_t capacity,size_t *count);
 /// 产品worker取优先导航再取边沿，空EMPTY；溢出先返回CANCELLED清指针状态。/ Product worker takes priority navigation then edges; EMPTY when empty, CANCELLED first after overflow to reset pointer state.
 pn_status_t pn_async_take(pn_async_t *queue,pn_async_event_t *event);
 /// 开始可取消工作；idle=true使新输入取消预排/封面。/ Begin cancellable work; idle allows new input to cancel prefetch/covers.

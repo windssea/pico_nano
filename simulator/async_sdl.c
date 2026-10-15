@@ -41,6 +41,9 @@ int pn_sdl_async_run(pn_sdl_async_t *p,int (*worker)(void *),void *ctx){
         if(event.type==SDL_KEYUP || (event.type==SDL_MOUSEMOTION && !event.motion.state) || (event.type==SDL_WINDOWEVENT && event.window.event!=SDL_WINDOWEVENT_FOCUS_LOST))continue;
         if(event.type==SDL_MOUSEBUTTONDOWN)atomic_fetch_or(&p->mouse,SDL_BUTTON(event.button.button));
         if(event.type==SDL_MOUSEBUTTONUP)atomic_fetch_and(&p->mouse,~SDL_BUTTON(event.button.button));
+        // 失焦的松手证明必须来自捕获当时，不能借用后来UP更新的全局状态。
+        // A focus-loss release proof belongs to capture time, never to global state updated by a later UP.
+        if(event.type==SDL_WINDOWEVENT && event.window.event==SDL_WINDOWEVENT_FOCUS_LOST)event.window.data1=(Sint32)atomic_load(&p->mouse);
         pn_async_event_t item={.bytes=sizeof event,.view=atomic_load_explicit(&p->input.view,memory_order_acquire)};
         if(event.type==SDL_KEYDOWN){SDL_Keycode key=event.key.keysym.sym;unsigned view=(unsigned)item.view%32u;bool body=view==15;
             item.navigation=key==SDLK_ESCAPE || (body && (key==SDLK_LEFT || key==SDLK_RIGHT || key==SDLK_PAGEUP || key==SDLK_PAGEDOWN || key==SDLK_SPACE || key==SDLK_h || key==SDLK_k)) || (view>=7 && (key==SDLK_2 || key==SDLK_h));
@@ -51,7 +54,7 @@ int pn_sdl_async_run(pn_sdl_async_t *p,int (*worker)(void *),void *ctx){
         bool root=(event.type==SDL_MOUSEBUTTONDOWN && event.button.button==SDL_BUTTON_LEFT && pn_w_navigation_hit(event.button.x,event.button.y)>=0) || (event.type==SDL_MOUSEMOTION && event.motion.state==SDL_BUTTON_LMASK && pn_w_navigation_hit(event.motion.x,event.motion.y)>=0);
         (void)(root?pn_async_send_root(&p->input,&item):pn_async_send(&p->input,&item));SDL_SemPost(p->wake);
         if(getenv("PN_SIM_TIMING") && event.type==SDL_KEYDOWN){SDL_LockMutex(p->mutex);bool pending=p->pending;SDL_UnlockMutex(p->mutex);fprintf(stderr,"async capture key=%d pending=%d at=%llu\n",(int)event.key.keysym.sym,(int)pending,(unsigned long long)SDL_GetTicks64());}
-        if(getenv("PN_SIM_TIMING") && (event.type==SDL_MOUSEBUTTONDOWN || event.type==SDL_MOUSEBUTTONUP) && event.button.windowID==UINT32_MAX-1){SDL_LockMutex(p->mutex);bool pending=p->pending;SDL_UnlockMutex(p->mutex);fprintf(stderr,"async capture root-race type=%u pending=%d view=%llu at=%llu\n",(unsigned)event.type,(int)pending,(unsigned long long)item.view,(unsigned long long)SDL_GetTicks64());}
+        if(getenv("PN_SIM_TIMING") && (((event.type==SDL_MOUSEBUTTONDOWN || event.type==SDL_MOUSEBUTTONUP) && event.button.windowID==UINT32_MAX-1) || (event.type==SDL_MOUSEMOTION && event.motion.windowID==UINT32_MAX-1) || (event.type==SDL_WINDOWEVENT && event.window.windowID==UINT32_MAX-1))){SDL_LockMutex(p->mutex);bool pending=p->pending;SDL_UnlockMutex(p->mutex);fprintf(stderr,"async capture root-race type=%u pending=%d view=%llu at=%llu\n",(unsigned)event.type,(int)pending,(unsigned long long)item.view,(unsigned long long)SDL_GetTicks64());}
     }
     SDL_WaitThread(p->worker,NULL);p->worker=NULL;return p->result;
 }
@@ -67,14 +70,20 @@ bool pn_sdl_async_wait(pn_sdl_async_t *p,SDL_Event *event,unsigned timeout,uint3
             if(scripted(&candidate)){SDL_LockMutex(p->mutex);p->received=candidate;SDL_UnlockMutex(p->mutex);}
             bool fixed=(candidate.type==SDL_MOUSEBUTTONDOWN && candidate.button.button==SDL_BUTTON_LEFT && pn_w_navigation_hit(candidate.button.x,candidate.button.y)>=0) || (candidate.type==SDL_MOUSEMOTION && candidate.motion.state==SDL_BUTTON_LMASK && pn_w_navigation_hit(candidate.motion.x,candidate.motion.y)>=0);
             bool continuous=fixed && pn_async_root_current(&p->input,&item);
-            if((!item.navigation || !item.urgent) && item.view!=view && !continuous){p->discarded_release=candidate.type==SDL_MOUSEBUTTONUP && candidate.button.button==SDL_BUTTON_LEFT;*event=(SDL_Event){.type=SDL_WINDOWEVENT};event->window.event=SDL_WINDOWEVENT_FOCUS_LOST;status=PN_CANCELLED;break;}
+            if((!item.navigation || !item.urgent) && item.view!=view && !continuous){p->discarded_release=candidate.type==SDL_MOUSEBUTTONUP && candidate.button.button==SDL_BUTTON_LEFT;*event=(SDL_Event){.type=SDL_WINDOWEVENT};event->window.event=SDL_WINDOWEVENT_FOCUS_LOST;event->window.data1=candidate.type==SDL_WINDOWEVENT && candidate.window.event==SDL_WINDOWEVENT_FOCUS_LOST?candidate.window.data1:SDL_BUTTON_LMASK;status=PN_CANCELLED;break;}
             *event=candidate;break;
         }
-        if(status==PN_CANCELLED){*event=(SDL_Event){.type=SDL_WINDOWEVENT};event->window.event=SDL_WINDOWEVENT_FOCUS_LOST;break;}
+        if(status==PN_CANCELLED){*event=(SDL_Event){.type=SDL_WINDOWEVENT};event->window.event=SDL_WINDOWEVENT_FOCUS_LOST;event->window.data1=SDL_BUTTON_LMASK;break;}
         uint64_t now=SDL_GetTicks64();if(now>=end)break;
         (void)SDL_SemWaitTimeout(p->wake,(Uint32)(end-now));
     }
     pn_async_begin(&p->input,&p->scope,status==PN_EMPTY);p->scope_active=true;return status==PN_OK || status==PN_CANCELLED;
+}
+pn_status_t pn_sdl_async_drain_root(pn_sdl_async_t *p,pn_async_event_t *events,size_t capacity,size_t *count){
+    if(!p || !p->scope_active)return PN_INVALID;
+    pn_status_t status=pn_async_drain_root_controls(&p->scope,events,capacity,count);if(status!=PN_OK)return status;
+    SDL_Event last={0};for(size_t i=0;i<*count;i++){if(events[i].bytes!=sizeof(SDL_Event))continue;SDL_Event event;memcpy(&event,events[i].payload,sizeof event);if(scripted(&event))last=event;}
+    if(last.type){SDL_LockMutex(p->mutex);p->received=last;SDL_UnlockMutex(p->mutex);}return PN_OK;
 }
 static pn_status_t submit(pn_sdl_async_t *p,const pn_frame_t *frame,pn_refresh_t profile,const pn_feedback_patch_t *patch,pn_status_t (*native)(void *),void *native_ctx){
     if(patch && !p->feedback)return PN_UNSUPPORTED;

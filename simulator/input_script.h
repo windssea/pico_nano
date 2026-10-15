@@ -4,7 +4,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-typedef struct {char copy[512];char *next;bool pending;unsigned pointer;int x,y;uint64_t resume;SDL_Event future;uint64_t future_at;Uint32 expected_type;SDL_Keycode expected_key;bool future_tap;int future_x,future_y;} sim_script_t;
+typedef struct {char copy[512];char *next;bool pending;unsigned pointer;int x,y;uint64_t resume;SDL_Event future;uint64_t future_at;Uint32 expected_type;SDL_Keycode expected_key;bool future_tap;int future_x,future_y;
+    unsigned future_roots,root_targets[3]; ///< 同一扫描中的独立根页点击 / Independent root clicks during one scan
+    bool future_focus; ///< 失焦后持续持有，最后才松手 / Hold through focus loss and release only at the end
+} sim_script_t;
 static inline void script_expect(sim_script_t *script,const SDL_Event *event){script->expected_type=event->type;script->expected_key=event->type==SDL_KEYDOWN?event->key.keysym.sym:0;}
 static inline void script_init(sim_script_t *script,const char *name){
     memset(script,0,sizeof *script);const char *value=getenv(name);if(!value || strlen(value)>500)return;
@@ -12,6 +15,10 @@ static inline void script_init(sim_script_t *script,const char *name){
 }
 static inline void script_queue(sim_script_t *script){
     if(script->future_at){if(SDL_GetTicks64()<script->future_at)return;
+        if(script->future_focus){SDL_Event edge={.type=SDL_WINDOWEVENT};edge.window.windowID=UINT32_MAX-1;edge.window.event=SDL_WINDOWEVENT_FOCUS_LOST;(void)SDL_PushEvent(&edge);edge=(SDL_Event){.type=SDL_MOUSEMOTION};edge.motion.windowID=UINT32_MAX-1;edge.motion.state=SDL_BUTTON_LMASK;edge.motion.x=script->future_x;edge.motion.y=script->future_y;(void)SDL_PushEvent(&edge);script->future.button.x=script->future_x;script->future.button.y=script->future_y;script->future_focus=false;}
+        if(script->future_roots){SDL_Event point=script->future;point.button.windowID=UINT32_MAX-1;(void)SDL_PushEvent(&point);
+            for(unsigned i=0;i<script->future_roots;i++){point.type=SDL_MOUSEBUTTONDOWN;point.button.type=SDL_MOUSEBUTTONDOWN;point.button.x=85+(int)script->root_targets[i]*171;point.button.y=1150;(void)SDL_PushEvent(&point);point.type=SDL_MOUSEBUTTONUP;point.button.type=SDL_MOUSEBUTTONUP;if(i+1<script->future_roots)(void)SDL_PushEvent(&point);else{point.button.windowID=UINT32_MAX;script->future=point;}}
+            script->future_roots=0;}
         // 同一次扫描内松开旧触点、按下新目标；仅最后松手带脚本回执，不能提前推进后续命令。
         // Release the old contact and press a new target within one scan; only the final release acknowledges the script, preventing later commands from advancing early.
         if(script->future_tap){SDL_Event first=script->future;first.button.windowID=UINT32_MAX-1;(void)SDL_PushEvent(&first);first.type=SDL_MOUSEBUTTONDOWN;first.button.type=SDL_MOUSEBUTTONDOWN;first.button.x=script->future_x;first.button.y=script->future_y;(void)SDL_PushEvent(&first);script->future.button.x=script->future_x;script->future.button.y=script->future_y;script->future_tap=false;}
@@ -22,6 +29,9 @@ static inline void script_queue(sim_script_t *script){
     while(script->next){char *part=script->next,*comma=strchr(part,',');if(comma){*comma=0;script->next=comma+1;}else script->next=NULL;
         SDL_Event event={0};event.type=SDL_KEYDOWN;event.key.windowID=UINT32_MAX;unsigned wait,burst;
         // 开发竞争注入绕过逐事件回执，用于验证忙碌窗口和合并，不用于文本输入。/ Development race injection bypasses serial acknowledgments to test busy windows/coalescing, never text input.
+        unsigned root_tab;
+        if(sscanf(part,"race-focus:%u:%d:%d:%d:%d",&wait,&script->x,&script->y,&script->future_x,&script->future_y)==5 && wait<=5000 && script->x>=0 && script->x<684 && script->y>=0 && script->y<1216 && script->future_x>=0 && script->future_x<684 && script->future_y>=0 && script->future_y<1216){event.type=SDL_MOUSEBUTTONDOWN;event.button.windowID=UINT32_MAX;event.button.button=SDL_BUTTON_LEFT;event.button.x=script->x;event.button.y=script->y;script->future=event;script->future.type=SDL_MOUSEBUTTONUP;script->future.button.type=SDL_MOUSEBUTTONUP;script->future_at=SDL_GetTicks64()+wait;script->future_focus=true;script->pointer=2;script_expect(script,&event);script->pending=SDL_PushEvent(&event)==1;return;}
+        if(sscanf(part,"race-roots:%u:%u:%u:%u:%u",&wait,&root_tab,&script->root_targets[0],&script->root_targets[1],&script->root_targets[2])==5 && wait<=5000 && root_tab<4 && script->root_targets[0]<4 && script->root_targets[1]<4 && script->root_targets[2]<4){event.type=SDL_MOUSEBUTTONDOWN;event.button.windowID=UINT32_MAX;event.button.button=SDL_BUTTON_LEFT;event.button.x=85+(int)root_tab*171;event.button.y=1150;script->future=event;script->future.type=SDL_MOUSEBUTTONUP;script->future.button.type=SDL_MOUSEBUTTONUP;script->future_at=SDL_GetTicks64()+wait;script->future_roots=3;script->pointer=2;script_expect(script,&event);script->pending=SDL_PushEvent(&event)==1;return;}
         if(sscanf(part,"race-root:%u:%d:%d:%d:%d",&wait,&script->x,&script->y,&script->future_x,&script->future_y)==5 && wait<=5000 && script->x>=0 && script->x<684 && script->y>=0 && script->y<1216 && script->future_x>=0 && script->future_x<684 && script->future_y>=0 && script->future_y<1216){event.type=SDL_MOUSEBUTTONDOWN;event.button.windowID=UINT32_MAX;event.button.button=SDL_BUTTON_LEFT;event.button.x=script->x;event.button.y=script->y;script->future=event;script->future.type=SDL_MOUSEBUTTONUP;script->future.button.type=SDL_MOUSEBUTTONUP;script->future_at=SDL_GetTicks64()+wait;script->future_tap=true;script->pointer=2;script_expect(script,&event);script->pending=SDL_PushEvent(&event)==1;return;}
         if(sscanf(part,"race-nav:%u:%d:%d",&wait,&script->x,&script->y)==3 && wait<=5000 && script->x>=0 && script->x<684 && script->y>=0 && script->y<1216){event.type=SDL_MOUSEBUTTONDOWN;event.button.windowID=UINT32_MAX;event.button.button=SDL_BUTTON_LEFT;event.button.x=script->x;event.button.y=script->y;script->future=event;script->future.type=SDL_MOUSEBUTTONUP;script->future.button.type=SDL_MOUSEBUTTONUP;script->future_at=SDL_GetTicks64()+wait;script->pointer=2;script_expect(script,&event);script->pending=SDL_PushEvent(&event)==1;return;}
         if(sscanf(part,"burst:%u:next",&burst)==1 && burst>0 && burst<=100){event.key.keysym.sym=SDLK_RIGHT;script_expect(script,&event);for(unsigned i=0;i<burst;i++)(void)SDL_PushEvent(&event);script->pending=true;return;}

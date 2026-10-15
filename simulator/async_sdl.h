@@ -36,6 +36,9 @@ int pn_sdl_async_run(pn_sdl_async_t *port,int (*worker)(void *),void *ctx);
 /// worker等待输入/空闲时钟，同时发布固定底栏资格并切换取消范围。
 /// Worker waits for input/idle ticks, publishing fixed-navigation eligibility and switching cancellation scopes.
 bool pn_sdl_async_wait(pn_sdl_async_t *port,SDL_Event *event,unsigned timeout_ms,uint32_t view,bool root);
+/// 已确认底栏后取普通边沿批次，保留最后脚本回执；只合并已排队内容，不等待新事件。
+/// Drain ordinary edges after confirmed navigation, retaining the last script acknowledgement; merge only queued input without waiting for new events.
+pn_status_t pn_sdl_async_drain_root(pn_sdl_async_t *port,pn_async_event_t *events,size_t capacity,size_t *count);
 /// worker借用不可变帧等待主线程回执；返回前帧保持有效。/ Worker lends an immutable frame until the main-thread receipt.
 pn_status_t pn_sdl_async_present(pn_sdl_async_t *port,const pn_frame_t *frame,pn_refresh_t profile);
 /// 产品worker等待局部反馈真实端口回执，保持同次按压的输入身份。/ Product worker waits for the local feedback receipt while preserving this press's input identity.

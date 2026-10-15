@@ -26,6 +26,19 @@ static pn_status_t send_event(pn_async_t *q,const pn_async_event_t *e,bool root)
 }
 pn_status_t pn_async_send(pn_async_t *q,const pn_async_event_t *e){return send_event(q,e,false);}
 pn_status_t pn_async_send_root(pn_async_t *q,const pn_async_event_t *e){return send_event(q,e,true);}
+pn_status_t pn_async_drain_root_controls(pn_async_scope_t *scope,pn_async_event_t *events,size_t capacity,size_t *count){
+    if(!scope || !scope->owner || !events || !count)return PN_INVALID;
+    pn_async_t *q=scope->owner;lock(q);pn_status_t status=PN_OK;
+    if(!q->root_enabled || atomic_load_explicit(&q->background,memory_order_acquire))status=PN_CANCELLED;
+    else if(q->has_navigation)status=PN_BUSY;
+    else if(q->overflow){q->overflow=false;status=PN_CANCELLED;}
+    else if(capacity<q->count)status=PN_LIMIT;
+    else{
+        size_t n=q->count;for(size_t i=0;i<n;i++)events[i]=q->controls[(q->first+i)%PN_ASYNC_CONTROLS];
+        q->count=0;q->first=0;scope->epoch=atomic_load_explicit(&q->epoch,memory_order_acquire);*count=n;
+    }
+    unlock(q);return status;
+}
 pn_status_t pn_async_take(pn_async_t *q,pn_async_event_t *e){
     if(!q || !e)return PN_INVALID;
     lock(q);pn_status_t status=PN_OK;

@@ -108,6 +108,8 @@ add_test(NAME management_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SO
 add_test(NAME root_navigation_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_root_navigation_window.py $<TARGET_FILE:pn_sim>)
 add_test(NAME root_navigation_queue_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_root_navigation_queue_window.py $<TARGET_FILE:pn_sim>)
 set_tests_properties(root_navigation_queue_window PROPERTIES LABELS "async;ui")
+add_test(NAME root_navigation_coalesce_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_root_navigation_coalesce_window.py $<TARGET_FILE:pn_sim>)
+set_tests_properties(root_navigation_coalesce_window PROPERTIES LABELS "async;ui")
 add_test(NAME feedback_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_feedback_window.py $<TARGET_FILE:pn_sim>)
 add_test(NAME feedback_idle_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_feedback_idle_window.py $<TARGET_FILE:pn_sim>)
 add_test(NAME hot_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_hot_window.py $<TARGET_FILE:pn_sim>)

@@ -43,5 +43,21 @@ int main(void){
  q.root_epoch=UINT64_MAX-1;pn_async_set_root(&q,false);pn_async_set_root(&q,true);assert(!q.root_enabled && q.root_epoch==UINT64_MAX);
  pn_async_set_view(&q,105,true);e.view=105;assert(pn_async_send_root(&q,&e)==PN_OK && pn_async_take(&q,&e)==PN_OK && !e.root_epoch && !pn_async_root_current(&q,&e));
  assert(!pn_async_root_current(NULL,&e) && !pn_async_root_current(&q,NULL));pn_async_set_view(NULL,0,true);pn_async_set_root(NULL,true);
- puts("async: bounded/coalesced, urgent priority, cancellation barriers, continuous root contexts and producer concurrency passed");return 0;
+ // 已确认的底栏合并只接纳已取出的普通批次；优先导航、溢出和后来的新输入不能被重置掉。
+ // Confirmed root merging accepts only the drained ordinary batch; priority navigation, overflow and later input must never be reset away.
+ pn_async_init(&q);pn_async_set_view(&q,16,true);pn_async_begin(&q,&scope,false);pn_async_event_t pending[PN_ASYNC_CONTROLS];size_t n=999;
+ for(unsigned i=0;i<3;i++){e=event(i,false,true);pn_async_send(&q,&e);}assert(pn_cancel_checkpoint()==PN_CANCELLED);
+ assert(pn_async_drain_root_controls(&scope,pending,2,&n)==PN_LIMIT && n==999 && q.count==3 && pn_cancel_checkpoint()==PN_CANCELLED);
+ assert(pn_async_drain_root_controls(&scope,pending,PN_ASYNC_CONTROLS,&n)==PN_OK && n==3 && !q.count && pn_cancel_checkpoint()==PN_OK);
+ for(unsigned i=0;i<3;i++)assert(value(pending[i])==i);
+ e=event(4,false,true);pn_async_send(&q,&e);assert(pn_cancel_checkpoint()==PN_CANCELLED);e=event(80,true,true);pn_async_send(&q,&e);n=999;
+ assert(pn_async_drain_root_controls(&scope,pending,PN_ASYNC_CONTROLS,&n)==PN_BUSY && n==999 && q.count==1 && q.has_navigation && pn_cancel_checkpoint()==PN_CANCELLED);
+ assert(pn_async_take(&q,&e)==PN_OK && value(e)==80);assert(pn_async_drain_root_controls(&scope,pending,PN_ASYNC_CONTROLS,&n)==PN_OK && n==1 && value(pending[0])==4 && pn_cancel_checkpoint()==PN_OK);
+ for(unsigned i=0;i<=PN_ASYNC_CONTROLS;i++){e=event(i,false,false);pn_async_send(&q,&e);}n=999;
+ assert(pn_async_drain_root_controls(&scope,pending,PN_ASYNC_CONTROLS,&n)==PN_CANCELLED && n==999 && pn_cancel_checkpoint()==PN_CANCELLED);
+ assert(pn_async_drain_root_controls(&scope,pending,PN_ASYNC_CONTROLS,&n)==PN_OK && !n && pn_cancel_checkpoint()==PN_OK);
+ pn_async_set_root(&q,false);assert(pn_async_drain_root_controls(&scope,pending,PN_ASYNC_CONTROLS,&n)==PN_CANCELLED);
+ pn_async_end(&scope);pn_async_set_root(&q,true);pn_async_begin(&q,&scope,true);assert(pn_async_drain_root_controls(&scope,pending,PN_ASYNC_CONTROLS,&n)==PN_CANCELLED);pn_async_end(&scope);
+ assert(pn_async_drain_root_controls(NULL,pending,PN_ASYNC_CONTROLS,&n)==PN_INVALID);
+ puts("async: bounded/coalesced, urgent priority, cancellation barriers, root batches and producer concurrency passed");return 0;
 }

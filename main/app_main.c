@@ -1448,9 +1448,34 @@ static void apply_selection(int selection){
     }else if(selection==8){reading_menu=true;refresh_network_name();paint_transfer(true);}
     else if(selection==9){selected_path[0]=0;start_reader();}
 }
-/// 导航消费接触直到释放；只选择首次按下，不为同一次接触追加短反馈扫描。/ Navigation owns contacts through release, selects only the first press and adds no separate press-feedback scan.
-static bool root_navigation_touch(pn_tap_press_t *press,unsigned count,int x,int y,bool valid){
+// 快照单独成帧，返回后才绘制，避免把24条边沿的栈空间叠到字体/页面绘制调用链。
+// Isolate the snapshot in its own stack frame and return before painting, keeping 24 edges off the font/page raster call chain.
+#if defined(__GNUC__)
+__attribute__((noinline))
+#endif
+static int root_navigation_merge(pn_tap_press_t *press,pn_async_scope_t *scope,int selected){
+    pn_async_event_t pending[PN_ASYNC_CONTROLS];size_t n=0;pn_status_t status=pn_async_drain_root_controls(scope,pending,PN_ASYNC_CONTROLS,&n);
+    if(status!=PN_OK){int ignored;(void)pn_tap_press_feed(press,1,-1,false,&ignored);touch_held=true;return -1;}
+    unsigned selections=1;
+    for(size_t i=0;i<n;i++){
+        if(pending[i].bytes!=sizeof(pn_device_input_event_t))continue;
+        pn_device_input_event_t input;memcpy(&input,pending[i].payload,sizeof input);if(input.kind!=PN_DASYNC_TOUCH)continue;
+        int next=-1,hit=input.valid && input.count==1 && pn_async_root_current(&async_port.input,&pending[i])?root_navigation_hit(input.x,input.y):-1;
+        bool release=input.valid && !input.count;
+        (void)pn_tap_press_feed(press,release?0u:input.count?input.count:1u,hit,release || hit>=0,&next);
+        if(next>=0){selected=next;selections++;}
+    }
+    if(selections>1)ESP_LOGI(TAG,"Root navigation merged events=%u selections=%u",(unsigned)n,selections);
+    // 批次可能已消费最后两个空样本；不能再等一个不会重新投递的UP来恢复空闲任务。
+    // The batch may contain both final empty samples; idle work must not wait for an UP that will never be posted again.
+    touch_held=press->down || press->blocked;
+    return selected;
+}
+/// 导航消费接触直到释放；已排队的独立底栏接触只绘制最后目标，同一次持有不能追加选择。
+/// Navigation owns contacts through release; queued independent root contacts paint only the last target, while the same hold never adds a selection.
+static bool root_navigation_touch(pn_tap_press_t *press,unsigned count,int x,int y,bool valid,pn_async_scope_t *scope){
     int navigation=-1;if(!pn_tap_press_feed(press,count,root_navigation_hit(x,y),valid,&navigation))return false;
+    if(navigation>=0 && async_port.input_active && scope)navigation=root_navigation_merge(press,scope,navigation);
 #if defined(CONFIG_PN_UI_FEEDBACK) && CONFIG_PN_UI_FEEDBACK
     feedback_restore();
 #endif
@@ -1594,7 +1619,7 @@ static void device_task(void *arg){
         if(fonts.active && !fonts.presented && !locked && now-last_ui_retry>=1000){last_ui_retry=now;(void)pn_font_ui_present(&fonts,present,NULL);}
         if(hardware.touch_ready && (!async_port.input_active || (available==PN_OK && queued.kind==PN_DASYNC_TOUCH))){cst836u_touch_t touch={0};esp_err_t read;bool ending=false;uint64_t touch_at=now_ms();if(async_port.input_active){touch.count=queued.count;touch.x=queued.x;touch.y=queued.y;read=queued.valid?ESP_OK:ESP_FAIL;ending=queued.ending;touch_at=queued.at;}else{read=cst836u_read(hardware.touch,&touch);if(read==ESP_OK && pn_device_touch_normalize(&touch,&ending)!=PN_OK)read=ESP_FAIL;}pn_reader_action_t action;touch_held=read==ESP_OK && touch.count>0;if(touch_held)last_input=now_ms();
             if(!async_port.input_active && (read!=ESP_OK || touch.count)){pn_cover_work_abort(&cover_work);pn_epub_app_cache_activity(&epub,now_ms());}
-            bool list_consumed=root_navigation_touch(&navigation_press,touch.count,touch.x,touch.y,read==ESP_OK);
+            bool list_consumed=root_navigation_touch(&navigation_press,touch.count,touch.x,touch.y,read==ESP_OK,&scope);
             if(list_consumed)shelf_gesture=(pn_shelf_gesture_t){0};
             else list_consumed=shelf_content_touch(&shelf_gesture,touch.count,touch.x,touch.y,read==ESP_OK,ending,touch_at);
             if(list_consumed){pn_reader_input_cancel(&input);tap=(pn_tap_t){0};hold_hit=-1;hold_fired=false;}

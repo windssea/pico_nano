@@ -15,7 +15,7 @@ static void sample(unsigned count,unsigned event,int x,int y){
     cst836u_touch_t touch={.count=count,.x=x,.y=y};bool ending=false;
     for(unsigned i=0;i<count && i<CST836U_MAX_POINTS;i++)touch.points[i]=(cst836u_point_t){.active=event!=1,.event=event,.id=i,.x=x,.y=y};
     assert(pn_device_touch_normalize(&touch,&ending)==PN_OK);
-    if(!root_navigation_touch(&navigation,touch.count,touch.x,touch.y,true))
+    if(!root_navigation_touch(&navigation,touch.count,touch.x,touch.y,true,NULL))
         (void)shelf_content_touch(&gesture,touch.count,touch.x,touch.y,true,ending,tick+=30);
 }
 static void quick(bool previous,int drift){

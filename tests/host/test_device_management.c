@@ -30,6 +30,34 @@ pn_status_t pn_device_transfer_close(pn_device_transfer_t *s){assert(s->impl);s-
 pn_status_t pn_device_transfer_take_network(pn_device_transfer_t *s,pn_network_credentials_t *c,bool *f){(void)s;(void)c;(void)f;return PN_EMPTY;}
 #include "../../main/app_main.c"
 static bool feedback_cancelled(void *ctx){(void)ctx;return true;}
+static void queued_root_pointer(unsigned count,int x,int y){
+    pn_device_input_event_t input={.kind=PN_DASYNC_TOUCH,.count=count,.x=x,.y=y,.valid=true};pn_async_event_t event={.bytes=sizeof input,.view=atomic_load(&async_port.input.view)};memcpy(event.payload,&input,sizeof input);
+    assert((count==1 && pn_w_navigation_hit(x,y)>=0?pn_async_send_root(&async_port.input,&event):pn_async_send(&async_port.input,&event))==PN_OK);
+}
+static void queued_root_release(void){queued_root_pointer(0,0,0);queued_root_pointer(0,0,0);}
+static void root_merge_checks(void){
+    unsigned shown=presents;
+    // 实际Settings根页的命令作为独立预期；合并过程不绘制、不执行内容或按键命令。
+    // Actual Settings-root commands are independent expectations; merging never paints or executes content/key commands.
+    for(unsigned mode=0;mode<5;mode++){
+        pn_async_init(&async_port.input);pn_async_set_view(&async_port.input,8,true);pn_tap_press_t press={0};int selected=-1;
+        assert(pn_tap_press_feed(&press,1,PN_SETUI_HOME,true,&selected) && selected==PN_SETUI_HOME);
+        if(mode!=1)queued_root_release();
+        if(mode==2){queued_root_pointer(2,420,1150);queued_root_pointer(1,420,1150);queued_root_release();}
+        if(mode==3){queued_root_pointer(1,100,700);queued_root_pointer(1,420,1150);queued_root_release();}
+        queued_root_pointer(1,250,1150);
+        if(mode!=1){queued_root_release();queued_root_pointer(1,420,1150);queued_root_release();}
+        if(mode==4){pn_async_set_root(&async_port.input,false);pn_async_set_root(&async_port.input,true);}
+        pn_async_scope_t scope;pn_async_begin(&async_port.input,&scope,false);
+        touch_held=true;int merged=root_navigation_merge(&press,&scope,selected);assert(merged==((mode==1 || mode==4)?PN_SETUI_HOME:PN_SETUI_TRANSFER));assert(touch_held==(mode==1));
+        assert(presents==shown && pn_async_take(&async_port.input,&(pn_async_event_t){0})==PN_EMPTY);pn_async_end(&scope);
+    }
+    pn_async_init(&async_port.input);pn_async_set_view(&async_port.input,8,true);queued_root_release();queued_root_pointer(1,420,1150);
+    pn_device_input_event_t power={.kind=PN_DASYNC_POWER};pn_async_event_t priority={.bytes=sizeof power,.navigation=true,.urgent=true};memcpy(priority.payload,&power,sizeof power);assert(pn_async_send(&async_port.input,&priority)==PN_OK);
+    pn_async_scope_t scope;pn_async_begin(&async_port.input,&scope,false);pn_tap_press_t press={.down=true,.claimed=true};
+    assert(root_navigation_merge(&press,&scope,PN_SETUI_HOME)==-1 && presents==shown && async_port.input.count==3);
+    assert(pn_async_take(&async_port.input,&priority)==PN_OK && priority.navigation && priority.urgent);pn_async_end(&scope);pn_async_init(&async_port.input);
+}
 int main(void){
     assert(!pn_pool_init(&pool,6u*1024u*1024u,NULL,NULL,NULL));
     assert(read_pico_init(&hardware)==ESP_OK);pn_media_init(&sd_media);pn_media_init(&data_media);pn_media_init(&wallpaper_media);
@@ -37,6 +65,7 @@ int main(void){
     assert(pn_media_attach(&sd_media,1)==PN_OK);
     assert(pn_settings_ui_open(&settings_ui,&pool,NULL,NULL,present,NULL)==PN_OK);
     assert(root_navigation_hit(80,1150)==PN_SETUI_HOME && root_navigation_hit(100,700)==-1);
+    root_merge_checks();
     assert(pn_settings_ui_event(&settings_ui,PN_SETUI_REFRESH,present,NULL)==PN_OK && pn_settings_ui_screen(&settings_ui)==2);
     assert(root_navigation_hit(80,1150)==-1);
     handle_key(PN_KEY_1,PN_KEY_LONG);assert(pn_settings_ui_screen(&settings_ui)==2);
@@ -51,17 +80,25 @@ int main(void){
     assert(draw_shelf(PN_REFRESH_GL16)==PN_OK);
     // 固定底栏按下即开设置；跨页持有/滑动/多点/释放均不再次执行。/ Fixed navigation opens Settings on press; holding across pages, movement, multitouch and release never execute again.
     pn_tap_press_t nav_press={0};unsigned nav_shown=presents;bool nav_data_ready=data_ready,nav_data_available=data_media.available;
-    assert(root_navigation_hit(600,1150)==PN_SHELF_MENU && root_navigation_touch(&nav_press,1,600,1150,true));
+    // 真实设备入口合并首页/传书/设置，只呈现最终设置一次；批次里的最终释放同时恢复空闲资格。
+    // The real device entry merges Home/Transfer/Settings, presents only Settings once and restores idle eligibility from the drained release.
+    pn_async_init(&async_port.input);pn_async_set_view(&async_port.input,17,true);queued_root_release();queued_root_pointer(1,420,1150);queued_root_release();queued_root_pointer(1,600,1150);queued_root_release();
+    pn_async_scope_t merged_scope;pn_async_begin(&async_port.input,&merged_scope,false);async_port.input_active=true;pn_tap_press_t merged_press={0};
+    assert(root_navigation_touch(&merged_press,1,80,1150,true,&merged_scope));
+    assert(settings_ui.impl && pn_settings_ui_screen(&settings_ui)==0 && presents==nav_shown+1 && !touch_held && !merged_press.down && !merged_press.blocked && !async_port.input.count);
+    assert(pn_cancel_checkpoint()==PN_OK);pn_async_end(&merged_scope);async_port.input_active=false;pn_settings_ui_close(&settings_ui);shelf_mode=true;status_page=false;
+    assert(draw_shelf(PN_REFRESH_GL16)==PN_OK);nav_shown=presents;
+    assert(root_navigation_hit(600,1150)==PN_SHELF_MENU && root_navigation_touch(&nav_press,1,600,1150,true,NULL));
     assert(settings_ui.impl && pn_settings_ui_screen(&settings_ui)==0 && presents>nav_shown);nav_shown=presents;
-    assert(root_navigation_touch(&nav_press,1,80,1150,true) && settings_ui.impl && presents==nav_shown);
-    assert(root_navigation_touch(&nav_press,2,80,1150,true) && presents==nav_shown);
+    assert(root_navigation_touch(&nav_press,1,80,1150,true,NULL) && settings_ui.impl && presents==nav_shown);
+    assert(root_navigation_touch(&nav_press,2,80,1150,true,NULL) && presents==nav_shown);
     pn_device_input_event_t stale_release={.kind=PN_DASYNC_TOUCH,.valid=true,.count=0};
     root_navigation_cancel(&nav_press,&stale_release);assert(nav_press.claimed);
     root_navigation_cancel(&nav_press,&stale_release);
     assert(!nav_press.down && !nav_press.claimed && settings_ui.impl && presents==nav_shown);
-    assert(!root_navigation_touch(&nav_press,1,100,700,true));
-    assert(root_navigation_touch(&nav_press,1,80,1150,true) && presents==nav_shown);
-    assert(root_navigation_touch(&nav_press,0,0,0,true) && root_navigation_touch(&nav_press,0,0,0,true));
+    assert(!root_navigation_touch(&nav_press,1,100,700,true,NULL));
+    assert(root_navigation_touch(&nav_press,1,80,1150,true,NULL) && presents==nav_shown);
+    assert(root_navigation_touch(&nav_press,0,0,0,true,NULL) && root_navigation_touch(&nav_press,0,0,0,true,NULL));
     locked=true;assert(root_navigation_hit(80,1150)==-1);locked=false;
     time_sync.impl=(void *)1;assert(root_navigation_hit(80,1150)==-1);time_sync.impl=NULL;
     pn_settings_ui_close(&settings_ui);shelf_mode=true;status_page=false;
