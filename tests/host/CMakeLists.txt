@@ -339,6 +339,8 @@ add_test(NAME epub_app COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}
 add_executable(epub_app_capture epub_app_capture.c)
 add_test(NAME epub_image_fallback COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_epub_image_fallback.py $<TARGET_FILE:epub_app_capture>)
 target_link_libraries(epub_app_capture PRIVATE pn_core)
+target_link_options(epub_app_capture PRIVATE -Wl,--wrap=pn_epub_image_draw)
+add_test(NAME epub_cover_page COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_epub_cover_page.py $<TARGET_FILE:epub_app_capture>)
 
 add_executable(test_toc_ui test_toc_ui.c)
 target_link_libraries(test_toc_ui PRIVATE pn_core)

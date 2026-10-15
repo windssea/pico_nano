@@ -175,7 +175,16 @@ static pn_status_t paint_body(app_t *a,pn_frame_t *frame,unsigned *missing,unsig
     for(size_t i=0;i<a->page.count;i++){pn_epub_page_node_t *n=&a->page.nodes[i];pn_status_t status;
         if(n->image_index!=UINT_MAX){pn_epub_reader_trim(&a->reader);suspend_fonts(a);pn_font_close(&a->ui);pn_epub_page_image_t *image=&a->page.images[n->image_index];pn_image_info_t info;
             int x=n->x_64/64,y=n->baseline-image->height,w=image->width,h=image->height;
-            status=pn_epub_image_draw(a->pool,&a->epub,image->path,&viewport,(pn_image_rect_t){x,y,w,h},&info);
+            status=PN_OK;
+            if(a->page.count==1 && a->page.image_count==1 && !strcmp(image->path,a->info.cover_path)){
+                // 独页封面按原图比例居中适配正文区，不沿用段首缩进或源CSS的小尺寸；正文插图仍沿原排版。
+                // Fit a standalone declared cover centrally in the body using its native aspect ratio, ignoring paragraph indent/small CSS sizes; inline illustrations retain layout geometry.
+                status=pn_epub_image_probe(a->pool,&a->epub,image->path,&info);
+                if(status==PN_OK){uint64_t width=(unsigned)viewport.width,height=(uint64_t)info.height*width/info.width;
+                    if(height>(unsigned)viewport.height){height=(unsigned)viewport.height;width=(uint64_t)info.width*height/info.height;}
+                    w=width?(int)width:1;h=height?(int)height:1;x=(viewport.width-w)/2;y=(viewport.height-h)/2;}
+            }
+            if(status==PN_OK)status=pn_epub_image_draw(a->pool,&a->epub,image->path,&viewport,(pn_image_rect_t){x,y,w,h},&info);
             if(status!=PN_OK){if(!optional_image_error(status))return status;
                 pn_frame_rect(&viewport,x,y,w,h,15);pn_frame_rect(&viewport,x,y,w,1,8);pn_frame_rect(&viewport,x,y+h-1,w,1,8);pn_frame_rect(&viewport,x,y,1,h,8);pn_frame_rect(&viewport,x+w-1,y,1,h,8);(*missing_images)++;}
             continue;}

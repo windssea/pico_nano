@@ -109,6 +109,7 @@ def main():
                     ["python3" if docker else sys.executable, "tools/test_local_cover_priority.py", "--binary", "build-host/cover_priority_validate"],
                     ["python3" if docker else sys.executable, "tools/test_local_cover_priority.py", "--binary", "build-host/cover_priority_validate", "--rebind-before-write", "--output", "build-dev/local-cover-priority-rebind"],
                     ["python3" if docker else sys.executable, "tools/test_local_cover_resident.py", "--binary", "build-host/cover_resident_validate"],
+                    ["python3" if docker else sys.executable, "tools/test_local_cover_fit.py", "--capture", "build-host/epub_app_capture"],
                     ["python3" if docker else sys.executable, "tools/test_local_semantic_probe.py", "--capture", "build-host/epub_app_capture", "--probe", "build-host/semantic_probe_validate"],
                     ["python3" if docker else sys.executable, "tools/test_local_compat.py", "--filter", "build-host/test_xhtml_compat", "--validate", "build-host/epub_validate", "--capture", "build-host/epub_app_capture"]]
     elif args.action == "docs":

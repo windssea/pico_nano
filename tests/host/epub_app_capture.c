@@ -6,9 +6,17 @@
 #include "pn_font_asset.h"
 #include "pn_font_ui.h"
 #include "pn_profile.h"
+#include "pn_epub_image.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+// 仅主机捕获器观察真实解码矩形；产品渲染无诊断分支。/ Only the host capture tool observes actual decode rectangles; product rendering has no diagnostic branch.
+pn_status_t __real_pn_epub_image_draw(pn_pool_t *,pn_epub_t *,const char *,pn_frame_t *,pn_image_rect_t,pn_image_info_t *);
+pn_status_t __wrap_pn_epub_image_draw(pn_pool_t *pool,pn_epub_t *epub,const char *path,pn_frame_t *frame,pn_image_rect_t rect,pn_image_info_t *info){
+    pn_status_t s=__real_pn_epub_image_draw(pool,epub,path,frame,rect,info);
+    if(getenv("PN_EPUB_IMAGE_RECTS"))fprintf(stderr,"image_rect path=%s x=%d y=%d w=%d h=%d viewport_w=%d viewport_h=%d native_w=%u native_h=%u status=%d\n",path,rect.x,rect.y,rect.width,rect.height,frame->width,frame->height,s==PN_OK?info->width:0,s==PN_OK?info->height:0,(int)s);
+    return s;
+}
 typedef struct {const char *path;bool write;} screen_t;
 static uint64_t trace_clock(void *ctx){(void)ctx;return 1;}
 static void trace_emit(void *ctx,const pn_profile_event_t *event){(void)ctx;fprintf(stderr,"capture_profile phase=%s status=%d\n",event->phase,(int)event->status);}
