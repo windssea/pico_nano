@@ -27,7 +27,7 @@ $env:DOCKER_CONTEXT='desktop-linux'
 
 `epub_cover_page`检查独页封面竖图/横图/极长图/方图的原图比例、双向居中与实际像素边界，另检正文夹图/配文/多图/徽标及坏图占位。`tools/test_local_cover_fit.py --capture build-host/epub_app_capture`用用户全部EPUB和实际霞鹜文楷逐本捕获前三页；可传`--baseline <修改前捕获器>`逐完整帧、页脚和源位置对照。该入口已加入`local-samples`，原件只读，窗口与主机结果不代替面板验收。
 
-未发布的封面重绑检查为`cover_resident`，以1/2/13个公开边界样本对照原缓存路径、随机子集/环形换序、继续阅读重复、来源变化、取消及USB；不替代实际书籍。`tools/test_local_cover_resident.py --binary build-host/cover_resident_validate`扫描全部用户EPUB/TXT副本，每13本一组，比较41次完整帧并统计真实PNCV文件读取。`tools/test_local_cover_priority.py --binary build-host/cover_priority_validate --rebind-before-write`在尚未落盘时换序、返回首页再回书库，对照最终PNCV完整字节与唯一写入次数。两者已纳入`local-samples`，原件SHA须保持；端口读取计数和主机画面不是实卡或面板计时。
+0.6.15的封面重绑检查为`cover_resident`，以1/2/13个公开边界样本对照原缓存路径、随机子集/环形换序、继续阅读重复、来源变化、取消及USB；不替代实际书籍。`tools/test_local_cover_resident.py --binary build-host/cover_resident_validate`扫描全部用户EPUB/TXT副本，每13本一组，比较41次完整帧并统计真实PNCV文件读取。`tools/test_local_cover_priority.py --binary build-host/cover_priority_validate --rebind-before-write`在尚未落盘时换序、返回首页再回书库，对照最终PNCV完整字节与唯一写入次数。两者已纳入`local-samples`，原件SHA须保持；端口读取计数和主机画面不是实卡或面板计时。
 
 0.6.14的`device_async`覆盖真实输入线程对UP占槽的两次空触点和终点投递；`tools/test_local_device_shelf.py --binary build-host/device_shelf_validate`用用户整库副本驱动真实产品翻页路由，覆盖三列/四列/列表、只有DOWN/UP的快速滑动、略斜横滑、普通空报告、垂直/多点取消及首末页。固定`/sdcard`路径仅在全新一次性Docker中创建，脚本不接设备或映射TF；已纳入默认Docker `local-samples`，原生运行须改用该容器入口。SDK替身与窗口不能代替实际触控验收。
 
