@@ -85,7 +85,9 @@ with tempfile.TemporaryDirectory() as directory:
                 z.writestr('a.xhtml','<html xmlns="http://www.w3.org/1999/xhtml"><body>'+'<p>阅读线跟随真实文字行。关闭后恢复纯正文。</p>'*50+'</body></html>')
         def capture(label,script):
             frames=root/(kind+'-'+label);frames.mkdir()
-            result=subprocess.run([sys.argv[1],'--library',str(books),'--state-dir',str(state)],env=dict(os.environ,SDL_VIDEODRIVER='dummy',PN_SIM_LIBRARY_SCRIPT='library,enter,'+script+'window-close',PN_SIM_FRAME_DIR=str(frames)),capture_output=True,text=True,timeout=45)
+            # 整帧对照固定HUD时钟，避免跨分钟把时间变化误判为取消后的正文差异。
+            # Freeze the HUD clock for full-frame comparisons so a minute change cannot masquerade as changed body pixels after cancellation.
+            result=subprocess.run([sys.argv[1],'--library',str(books),'--state-dir',str(state)],env=dict(os.environ,SDL_VIDEODRIVER='dummy',PN_SIM_CLOCK='12:34',PN_SIM_LIBRARY_SCRIPT='library,enter,'+script+'window-close',PN_SIM_FRAME_DIR=str(frames)),capture_output=True,text=True,timeout=45)
             assert result.returncode==0 and 'used=0 live=0' in result.stdout,(result.stdout,result.stderr)
             # 关闭窗口先归还阅读并画书架；取此前最后一张正文。 / Window close returns to the shelf first; inspect the last preceding reader frame.
             assert 'library_return status=0' in result.stdout,result.stdout

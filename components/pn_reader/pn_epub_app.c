@@ -271,6 +271,8 @@ typedef struct {void *ctx;pn_status_t (*read_at)(void *,uint64_t,uint8_t *,size_
 static pn_status_t tap_read(void *ctx,uint64_t offset,uint8_t *out,size_t cap,size_t *n){
     tap_t *t=ctx;pn_status_t status=t->read_at(t->ctx,offset,out,cap,n);if(status==PN_OK && t->scan)pn_zip_scan_feed(t->scan,offset,out,*n);return status;
 }
+/// prepared只借用本会话已校验的稳定文件源；不移动活动文件或重读完整摘要。/ prepared borrows only this session's verified stable source, without moving live files or rehashing complete content.
+static pn_status_t configure_fallback(app_t *,const char *,const pn_text_source_t *prepared);
 static pn_status_t pn_epub_app_open_on_media_impl(pn_epub_app_t *app,pn_pool_t *pool,pn_media_t *media,const char *book,const char *font,const char *state,int pixels,uint64_t now){
     if(!app || !pool || !book || !*book || pixels<28 || pixels>72 || (state && !*state))return PN_INVALID;
     if(strlen(book)>=PN_RECENT_PATH_MAX)return PN_LIMIT;
@@ -279,7 +281,7 @@ static pn_status_t pn_epub_app_open_on_media_impl(pn_epub_app_t *app,pn_pool_t *
     app_t *a=pn_alloc_tagged(pool,PN_MEM_LAYOUT,sizeof *a);if(!a)return PN_NO_MEMORY;*a=(app_t){.pool=pool,.style=pn_style_default(pixels),.last_now=now,.force_full=true};pn_page_bitmap_init(&a->bitmap,pool);a->media=media?media:&a->local;strcpy(a->book_path,book);
     pn_status_t status=PN_OK;if(!media){pn_media_init(a->media);status=pn_media_attach(a->media,1);}
     if(status==PN_OK)status=pn_media_acquire(a->media,PN_MEDIA_READ,&a->book_lease);
-    pn_text_source_t source;
+    pn_text_source_t source,fallback_source={0};
     if(status==PN_OK)status=pn_text_file_open(&a->book_file,a->media,&a->book_lease,book,&source);
     // 整书摘要的顺序读取顺带校验ZIP本地头，打开时不再逐条随机读卡；中央目录失败仍先完成摘要再报同一错误。
     // The whole-book hash's sequential read also checks ZIP local headers, so opening no longer reads each entry randomly; a directory failure still finishes hashing before reporting the same error.
@@ -329,9 +331,9 @@ static pn_status_t pn_epub_app_open_on_media_impl(pn_epub_app_t *app,pn_pool_t *
             else{has_selected_fonts=true;font=selected_fonts.primary.kind==PN_FONT_FILE?selected_fonts.primary.path:NULL;
                 pn_status_t backup;
 #ifdef ESP_PLATFORM
-                backup=selected_fonts.fallback.kind==PN_FONT_FILE && !pn_sd_resource_path(selected_fonts.fallback.path,PN_SD_FONTS)?PN_EMPTY:pn_font_reference_verify_pooled(pool,&selected_fonts.fallback,a->media,&a->book_lease);
+                backup=selected_fonts.fallback.kind==PN_FONT_FILE && !pn_sd_resource_path(selected_fonts.fallback.path,PN_SD_FONTS)?PN_EMPTY:selected_fonts.fallback.kind==PN_FONT_FILE?pn_font_reference_open_file(pool,&selected_fonts.fallback,a->media,&a->book_lease,&a->fallback_file,&fallback_source):pn_font_reference_verify_pooled(pool,&selected_fonts.fallback,a->media,&a->book_lease);
 #else
-                backup=pn_font_reference_verify_pooled(pool,&selected_fonts.fallback,a->media,&a->book_lease);
+                backup=selected_fonts.fallback.kind==PN_FONT_FILE?pn_font_reference_open_file(pool,&selected_fonts.fallback,a->media,&a->book_lease,&a->fallback_file,&fallback_source):pn_font_reference_verify_pooled(pool,&selected_fonts.fallback,a->media,&a->book_lease);
 #endif
                 if(backup==PN_STALE_MEDIA)status=backup;
                 else if(backup!=PN_OK){a->font_unavailable=true;selected_fonts.fallback=(pn_font_reference_t){.kind=PN_FONT_RESIDENT};}}}
@@ -356,7 +358,8 @@ static pn_status_t pn_epub_app_open_on_media_impl(pn_epub_app_t *app,pn_pool_t *
     a->layout=layout(&a->style);a->token=(pn_job_token_t){next_session++,1};pn_epub_measure_t measure={a,glyph,image_size};
     if(status==PN_OK)status=pn_epub_reader_init(&a->reader,pool,&a->epub,&a->book,a->salt,&a->layout,&measure,&a->page,a->token,confirmed,a);
     if(status==PN_OK)status=pn_display_init(&a->display,&a->frame,1,a->token);
-    if(status==PN_OK && has_selected_fonts && selected_fonts.fallback.kind==PN_FONT_FILE){pn_epub_app_t configured={a};status=pn_epub_app_fallback_font(&configured,selected_fonts.fallback.path);}
+    if(status==PN_OK && has_selected_fonts && selected_fonts.fallback.kind==PN_FONT_FILE)status=configure_fallback(a,selected_fonts.fallback.path,&fallback_source);
+    else if(a->fallback_file.handle){pn_status_t closed=pn_text_file_close(&a->fallback_file);if(status==PN_OK)status=closed;}
     if(status!=PN_OK){(void)release(a);return status;}app->impl=a;return PN_OK;
 }
 pn_status_t pn_epub_app_open_on_media(pn_epub_app_t *app,pn_pool_t *pool,pn_media_t *media,const char *book,const char *font,const char *state,int pixels,uint64_t now){
@@ -706,18 +709,23 @@ int pn_epub_app_header_hit(const pn_epub_app_t *app,int x,int y){
     return -1;
 }
 
-pn_status_t pn_epub_app_fallback_font(pn_epub_app_t *app,const char *path){
-    if(!app || !app->impl || !path || !*path)return PN_INVALID;
-    app_t *a=app->impl;if(a->lost)return PN_STALE_MEDIA;
-    if(a->has_visible || a->fallback_lease.ticket)return PN_BUSY;
+static pn_status_t configure_fallback(app_t *a,const char *path,const pn_text_source_t *prepared){
     if(!a->body.impl){pn_status_t ready=font_size(a,a->style.pixels);if(ready!=PN_OK)return ready;}
-    pn_status_t status=pn_media_acquire(a->media,PN_MEDIA_READ,&a->fallback_lease);pn_text_source_t source;
-    if(status==PN_OK)status=pn_text_file_open(&a->fallback_file,a->media,&a->fallback_lease,path,&source);
+    pn_status_t status=PN_OK;pn_text_source_t source={0};
+    if(prepared)source=*prepared;
+    else{status=pn_media_acquire(a->media,PN_MEDIA_READ,&a->fallback_lease);
+        if(status==PN_OK)status=pn_text_file_open(&a->fallback_file,a->media,&a->fallback_lease,path,&source);}
     pn_font_t probe={0};if(status==PN_OK)status=pn_font_open(&probe,a->pool,&source,a->style.pixels);pn_font_close(&probe);
     if(status==PN_OK){pn_font_chain_clear(&a->chain);status=pn_font_chain_init(&a->chain,a->pool,&a->body,&source);if(status==PN_OK)status=pn_epub_reader_reflow(&a->reader,&a->layout);if(status==PN_OK){a->token.generation++;status=pn_display_set_token(&a->display,a->token);}}
     if(status!=PN_OK){pn_font_chain_clear(&a->chain);(void)pn_font_chain_init(&a->chain,a->pool,&a->body,NULL);(void)pn_text_file_close(&a->fallback_file);if(a->fallback_lease.ticket)(void)pn_media_release(a->media,&a->fallback_lease);}
-    if(status==PN_OK){if(strlen(path)<sizeof a->boot_fallback)strcpy(a->boot_fallback,path);a->fonts_known=false;}
+    if(status==PN_OK && strlen(path)<sizeof a->boot_fallback)strcpy(a->boot_fallback,path);
     return status;
+}
+pn_status_t pn_epub_app_fallback_font(pn_epub_app_t *app,const char *path){
+    if(!app || !app->impl || !path || !*path)return PN_INVALID;
+    app_t *a=app->impl;if(a->lost)return PN_STALE_MEDIA;
+    if(a->has_visible || a->fallback_lease.ticket || a->fallback_file.handle)return PN_BUSY;
+    pn_status_t status=configure_fallback(a,path,NULL);if(status==PN_OK)a->fonts_known=false;return status;
 }
 
 /* ---- 字体预览事务 / Font preview transactions ---- */

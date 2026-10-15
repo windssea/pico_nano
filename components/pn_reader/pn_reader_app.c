@@ -83,6 +83,8 @@ static pn_status_t body_source(app_t *a,pn_text_source_t *out){pn_font_set_t *se
 static void suspend_fonts(app_t *a){pn_font_chain_suspend(&a->chain);pn_font_close(&a->body);pn_font_set_suspend(&a->font_live);pn_font_set_suspend(&a->font_draft);}
 static pn_status_t font_write(app_t *,const pn_font_preferences_t *);
 static pn_status_t global_write(app_t *,const pn_font_preferences_t *);
+/// prepared借用同一app内已完整校验的稳定文件，不重新打开或猜身份。/ prepared borrows the same app's fully verified stable file, without reopening or inferring identity.
+static pn_status_t configure_fallback(app_t *,const char *,const pn_text_source_t *prepared);
 static pn_status_t advance(void *ctx,uint32_t cp,int32_t *width){app_t *a=ctx;pn_status_t s=pn_font_chain_advance(chain(a),cp,width);if(s==PN_EMPTY){*width=body(a)->pixels*64;return PN_OK;}return s;}
 static pn_status_t layout(app_t *a,pn_layout_t *out){int ascent,descent;pn_status_t s=pn_font_chain_vertical(chain(a),&ascent,&descent);if(s!=PN_OK)return s;int line=(body(a)->pixels*a->style.line_percent+99)/100;if(line<ascent+descent)line=ascent+descent;*out=(pn_layout_t){684-2*a->style.margin,PN_READER_HEIGHT,line,ascent,body(a)->pixels*a->style.indent_em,body(a)->pixels*a->style.gap_percent/100,body(a)->pixels*64*a->style.tracking_percent/100,true};return PN_OK;}
 /// 展示进度与持久锚点分开：末页显示100%，其余按页首字节估算。/ Display progress is separate from the durable anchor: 100% on the final page, otherwise estimated from its first byte.
@@ -180,7 +182,7 @@ static pn_status_t pn_reader_app_open_on_media_impl(pn_reader_app_t *app,pn_pool
     a->style=a->saved_style=pn_style_default(pixels);
     a->book_media=media?media:&a->local_media;pn_status_t status=PN_OK;
     if(!media){pn_media_init(a->book_media);status=pn_media_attach(a->book_media,1);}
-    pn_text_source_t source={0},font_source=pn_font_reading_source();pn_text_encoding_t encoding;
+    pn_text_source_t source={0},font_source=pn_font_reading_source(),fallback_source={0};pn_text_encoding_t encoding;
     if(status==PN_OK)status=pn_media_acquire(a->book_media,PN_MEDIA_READ,&a->book_lease);
     if(status==PN_OK)status=pn_text_file_open(&a->book_file,a->book_media,&a->book_lease,book_path,&source);
     if(status==PN_OK)status=pn_text_file_inspect(pool,&source,&a->book,&encoding,decoder_checkpoint,a);
@@ -203,9 +205,9 @@ static pn_status_t pn_reader_app_open_on_media_impl(pn_reader_app_t *app,pn_pool
             else{has_selected_fonts=true;font_path=selected_fonts.primary.kind==PN_FONT_FILE?selected_fonts.primary.path:NULL;
                 pn_status_t backup;
 #ifdef ESP_PLATFORM
-                backup=selected_fonts.fallback.kind==PN_FONT_FILE && !pn_sd_resource_path(selected_fonts.fallback.path,PN_SD_FONTS)?PN_EMPTY:pn_font_reference_verify_pooled(pool,&selected_fonts.fallback,a->book_media,&a->book_lease);
+                backup=selected_fonts.fallback.kind==PN_FONT_FILE && !pn_sd_resource_path(selected_fonts.fallback.path,PN_SD_FONTS)?PN_EMPTY:selected_fonts.fallback.kind==PN_FONT_FILE?pn_font_reference_open_file(pool,&selected_fonts.fallback,a->book_media,&a->book_lease,&a->fallback_file,&fallback_source):pn_font_reference_verify_pooled(pool,&selected_fonts.fallback,a->book_media,&a->book_lease);
 #else
-                backup=pn_font_reference_verify_pooled(pool,&selected_fonts.fallback,a->book_media,&a->book_lease);
+                backup=selected_fonts.fallback.kind==PN_FONT_FILE?pn_font_reference_open_file(pool,&selected_fonts.fallback,a->book_media,&a->book_lease,&a->fallback_file,&fallback_source):pn_font_reference_verify_pooled(pool,&selected_fonts.fallback,a->book_media,&a->book_lease);
 #endif
                 if(backup==PN_STALE_MEDIA)status=backup;
                 else if(backup!=PN_OK){a->font_unavailable=true;selected_fonts.fallback=(pn_font_reference_t){.kind=PN_FONT_RESIDENT};}}}
@@ -236,7 +238,8 @@ static pn_status_t pn_reader_app_open_on_media_impl(pn_reader_app_t *app,pn_pool
     if(status==PN_OK){a->reader.checkpoints=a->checkpoints;a->reader.checkpoint_count=a->checkpoint_count;}
     if(status==PN_OK)pn_reader_neighbors(&a->reader,pool);
     if(status==PN_OK)status=pn_display_init(&a->display,&a->frame,1,token);
-    if(status==PN_OK && has_selected_fonts && selected_fonts.fallback.kind==PN_FONT_FILE){pn_reader_app_t configured={a};status=pn_reader_app_fallback_font(&configured,selected_fonts.fallback.path);}
+    if(status==PN_OK && has_selected_fonts && selected_fonts.fallback.kind==PN_FONT_FILE)status=configure_fallback(a,selected_fonts.fallback.path,&fallback_source);
+    else if(a->fallback_file.handle){pn_status_t closed=pn_text_file_close(&a->fallback_file);if(status==PN_OK)status=closed;}
     if(status!=PN_OK){(void)release_app(a);return status;}
     app->impl=a;return PN_OK;
 }
@@ -566,17 +569,22 @@ pn_status_t pn_reader_app_style_cancel(pn_reader_app_t *app,uint64_t now,pn_read
     if(a->last_confirmed){a->style_preview=false;a->style_pending=false;}return status;
 }
 
-pn_status_t pn_reader_app_fallback_font(pn_reader_app_t *app,const char *path){
-    if(!app || !app->impl || !path || !*path)return PN_INVALID;
-    app_t *a=app->impl;if(a->media_lost)return PN_STALE_MEDIA;
-    if(a->reader.has_visible || a->fallback_lease.ticket)return PN_BUSY;
-    pn_status_t status=pn_media_acquire(a->book_media,PN_MEDIA_READ,&a->fallback_lease);pn_text_source_t source;
-    if(status==PN_OK)status=pn_text_file_open(&a->fallback_file,a->book_media,&a->fallback_lease,path,&source);
+static pn_status_t configure_fallback(app_t *a,const char *path,const pn_text_source_t *prepared){
+    pn_status_t status=PN_OK;pn_text_source_t source={0};
+    if(prepared)source=*prepared;
+    else{status=pn_media_acquire(a->book_media,PN_MEDIA_READ,&a->fallback_lease);
+        if(status==PN_OK)status=pn_text_file_open(&a->fallback_file,a->book_media,&a->fallback_lease,path,&source);}
     pn_font_t probe={0};if(status==PN_OK)status=pn_font_open(&probe,a->pool,&source,a->style.pixels);pn_font_close(&probe);
     if(status==PN_OK){pn_font_chain_clear(&a->chain);status=pn_font_chain_init(&a->chain,a->pool,&a->body,&source);pn_layout_t next;if(status==PN_OK)status=layout(a,&next);if(status==PN_OK)status=pn_reader_reflow(&a->reader,&next);if(status==PN_OK)status=pn_display_set_token(&a->display,a->reader.token);}
     if(status!=PN_OK){pn_font_chain_clear(&a->chain);(void)pn_font_chain_init(&a->chain,a->pool,&a->body,NULL);(void)pn_text_file_close(&a->fallback_file);if(a->fallback_lease.ticket)(void)pn_media_release(a->book_media,&a->fallback_lease);}
-    if(status==PN_OK){if(strlen(path)<sizeof a->boot_fallback)strcpy(a->boot_fallback,path);a->fonts_known=false;}
+    if(status==PN_OK && strlen(path)<sizeof a->boot_fallback)strcpy(a->boot_fallback,path);
     return status;
+}
+pn_status_t pn_reader_app_fallback_font(pn_reader_app_t *app,const char *path){
+    if(!app || !app->impl || !path || !*path)return PN_INVALID;
+    app_t *a=app->impl;if(a->media_lost)return PN_STALE_MEDIA;
+    if(a->reader.has_visible || a->fallback_lease.ticket || a->fallback_file.handle)return PN_BUSY;
+    pn_status_t status=configure_fallback(a,path,NULL);if(status==PN_OK)a->fonts_known=false;return status;
 }
 
 /* ---- 字体预览事务 / Font preview transactions ---- */
