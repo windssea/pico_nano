@@ -1,8 +1,8 @@
 /*
  * SPDX-FileCopyrightText: 2026 pico_nano contributors
  * SPDX-License-Identifier: Apache-2.0
- * 中文：按参考固件已验证的顺序：等按键空闲→配置IOE_INT低电平唤醒→循环浅睡直到PMU确认按键。
- * English: following the reference firmware's validated order: wait for key idle → arm IOE_INT low-level wake → loop light sleep until the PMU confirms a key.
+ * 中文：等按键空闲，使用IOE_INT与定时复核浅睡，只有PMU确认的新按键才解锁。
+ * English: wait for key idle, light-sleep with IOE_INT and timer checks, and unlock only for a new PMU-confirmed key.
  * 冻结：不支持拿起唤醒；不改变PMU设置。/ Frozen: no pickup wake; PMU settings untouched.
  */
 #include "device_sleep.h"
@@ -31,28 +31,39 @@ static bool wait_key_idle(int timeout_ms){
 }
 static bool media_unchanged;
 bool pn_device_sleep_media_unchanged(void){return media_unchanged;}
+/// 退出时归还本适配器的显式唤醒源，不能污染之后的自动浅睡。/ Release this adapter's explicit wake sources without leaking them into later automatic light sleep.
+static void wake_sources_close(void){
+    (void)gpio_wakeup_disable((gpio_num_t)READ_PICO_IOE_INT_GPIO);
+    (void)esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_GPIO);
+    (void)esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_TIMER);
+}
 bool pn_device_sleep_until_key(void){
     media_unchanged=true;
-    wait_key_idle(800);
+    if(!wait_key_idle(800)){media_unchanged=false;ESP_LOGW(TAG,"Lock key not idle; staying awake");return false;}
     gpio_config_t io={.pin_bit_mask=1ULL<<READ_PICO_IOE_INT_GPIO,.mode=GPIO_MODE_INPUT,.pull_up_en=GPIO_PULLUP_ENABLE,.pull_down_en=GPIO_PULLDOWN_DISABLE,.intr_type=GPIO_INTR_DISABLE};
-    if(gpio_config(&io)!=ESP_OK){ESP_LOGW(TAG,"IOE_INT config failed; staying awake");return false;}
-    read_pico_clear_ioe_int();
+    if(gpio_config(&io)!=ESP_OK){media_unchanged=false;ESP_LOGW(TAG,"IOE_INT config failed; staying awake");return false;}
     if(gpio_wakeup_enable((gpio_num_t)READ_PICO_IOE_INT_GPIO,GPIO_INTR_LOW_LEVEL)!=ESP_OK || esp_sleep_enable_gpio_wakeup()!=ESP_OK){
-        (void)gpio_wakeup_disable((gpio_num_t)READ_PICO_IOE_INT_GPIO);ESP_LOGW(TAG,"Wake source unavailable; staying awake");return false;}
-    bool slept=false;
+        media_unchanged=false;(void)gpio_wakeup_disable((gpio_num_t)READ_PICO_IOE_INT_GPIO);ESP_LOGW(TAG,"Wake source unavailable; staying awake");return false;}
+    // 不能仅依赖读清式扩展器中断：500ms复核PMU队列，不刷新屏幕，也不访问TF。
+    // A read-cleared expander IRQ cannot be the only wake path: check the PMU queue every 500 ms without drawing or accessing TF.
+    if(esp_sleep_enable_timer_wakeup(500000)!=ESP_OK){media_unchanged=false;wake_sources_close();ESP_LOGW(TAG,"Wake timer unavailable; staying awake");return false;}
     for(;;){
+        // 先读PMU再清扩展器；清中断不代表PMU队列为空，首次入睡前的新按键也有效。
+        // Read the PMU before clearing the expander: clearing an IRQ does not empty the PMU queue, and a new key before the first sleep is valid too.
+        bool low=gpio_get_level((gpio_num_t)READ_PICO_IOE_INT_GPIO)==0;
+        if(read_pico_pmu_take_key_wakeup())break;
+        if(low)media_unchanged=false;
         read_pico_clear_ioe_int();
         // 入睡前中断线仍为低：先处理积压事件，不带着挂起唤醒入睡。/ Line still low before sleeping: drain pending events instead of sleeping with a pending wake.
         if(gpio_get_level((gpio_num_t)READ_PICO_IOE_INT_GPIO)==0){
-            if(slept && read_pico_pmu_take_key_wakeup())break;
-            media_unchanged=false;read_pico_pmu_drain_events();read_pico_clear_ioe_int();vTaskDelay(pdMS_TO_TICKS(20));continue;
+            media_unchanged=false;vTaskDelay(pdMS_TO_TICKS(20));continue;
         }
-        if(esp_light_sleep_start()!=ESP_OK){media_unchanged=false;(void)gpio_wakeup_disable((gpio_num_t)READ_PICO_IOE_INT_GPIO);return false;}slept=true;
-        read_pico_clear_ioe_int();
+        if(esp_light_sleep_start()!=ESP_OK){media_unchanged=false;wake_sources_close();ESP_LOGW(TAG,"Light sleep failed; staying awake");return false;}
+        esp_sleep_wakeup_cause_t cause=esp_sleep_get_wakeup_cause();
         if(read_pico_pmu_take_key_wakeup())break;
-        media_unchanged=false; // 非电源中断可能来自TF拔插，保守禁用热恢复。/ A non-power IRQ may be a card change; conservatively disable warm restore.
+        if(cause!=ESP_SLEEP_WAKEUP_TIMER)media_unchanged=false; // 定时复核不表示换卡，其他非电源唤醒仍禁用热恢复。/ Timer checks do not imply a card change; other non-key wakes still disable warm restore.
     }
-    (void)gpio_wakeup_disable((gpio_num_t)READ_PICO_IOE_INT_GPIO);
+    wake_sources_close();
     // KEY_DOWN可先唤醒，松开后才产生KEY_SHORT；完整消费这一按键周期，避免同一次按键再次锁屏。
     // KEY_DOWN can wake before KEY_SHORT arrives on release; consume the whole press so it cannot lock again.
     if(!wait_key_idle(800)){ESP_LOGW(TAG,"Wake key not idle; staying locked until release");return false;}

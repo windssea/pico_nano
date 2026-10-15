@@ -1014,19 +1014,25 @@ static void resume_reader(void){
         if(checked==ESP_OK && card.mounted && pn_device_sleep_media_unchanged()){
             pn_status_t status=epub.impl?pn_epub_app_resume(&epub,now_ms(),present,NULL):pn_reader_app_resume(&reader,now_ms(),present,NULL);
             if(status==PN_OK){reader_suspended=false;locked=false;status_page=false;shelf_mode=false;ESP_LOGI(TAG,"Warm reader resumed without reopening book");return;}
+            if(status!=PN_STALE_MEDIA && status!=PN_STALE_JOB){
+                locked=true;ESP_LOGW(TAG,"Warm display restore failed: %d; power key retries retained page",(int)status);return;
+            }
         }
         if(checked!=ESP_OK || !card.mounted || !pn_device_sleep_media_unchanged()){
             if(epub.impl)(void)pn_epub_app_media_lost(&epub);else (void)pn_reader_app_media_lost(&reader);
         }
     }
-    start_reader();
+    locked=false;start_reader();
 }
 static void lock_and_sleep_impl(const char *hint){
     ESP_LOGI(TAG,"Locking; idle at %llu ms",(unsigned long long)last_input);
     locked=true;show_lock(hint);if(!reader_suspended)pn_wallpaper_mask_close(&lock_mask);
     if(!pn_device_async_off(&async_port)){ESP_LOGW(TAG,"Display off barrier failed; staying awake");return;} // 显示owner断轨后再交出PMU/触摸。/ Display owner drops rails before handing off PMU/touch.
     if(!pn_device_async_pause(&async_port,true)){ESP_LOGW(TAG,"Input pause timed out; staying awake");(void)pn_device_async_pause(&async_port,false);return;}
-    if(pn_device_sleep_until_key()){locked=false;last_input=now_ms();ESP_LOGI(TAG,"Unlocked at %llu ms",(unsigned long long)last_input);resume_reader();}
+    // 输入owner已暂停，丢弃锁页呈现期间的旧输入；尤其不能在唤醒后重放电源短按再次锁屏。
+    // With the input owner paused, discard input from lock-page presentation, especially power shorts that would relock after waking.
+    pn_device_input_event_t stale;while(pn_device_async_take(&async_port,&stale)!=PN_EMPTY){}
+    if(pn_device_sleep_until_key()){last_input=now_ms();ESP_LOGI(TAG,"Wake key accepted at %llu ms",(unsigned long long)last_input);resume_reader();}
     (void)pn_device_async_pause(&async_port,false);
 }
 static void lock_and_sleep(const char *hint){
@@ -1560,7 +1566,7 @@ static void device_task(void *arg){
                 if(usb.open){usb_return=true;usb_lock=true;usb_home=false;pn_device_usb_request_stop(&usb);}
                 else if(transfer.impl){transfer_return=true;transfer_lock=true;(void)pn_device_transfer_request_stop(&transfer);}
                 else if(time_sync.impl){time_lock_pending=true;(void)pn_device_time_request_stop(&time_sync);}
-                else if(locked){locked=false;last_input=now;resume_reader();}else if(prepare_lock())lock_and_sleep("再按电源键继续阅读");}}
+                else if(locked){last_input=now;resume_reader();}else if(prepare_lock())lock_and_sleep("再按电源键继续阅读");}}
         // 按键路径可能睡眠后更新last_input；重取当前时间，避免睡前时间减去唤醒时间下溢后立即锁屏。
         // The key path can sleep and update last_input; refresh time to avoid subtracting wake time from pre-sleep time.
         now=now_ms();
