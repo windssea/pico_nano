@@ -4,9 +4,23 @@
 #include <assert.h>
 #include <string.h>
 #include <stdio.h>
+#include <ft2build.h>
+#include FT_FREETYPE_H
+static size_t outline_loads;
+FT_Error __real_FT_Load_Glyph(FT_Face,FT_UInt,FT_Int32);
+FT_Error __wrap_FT_Load_Glyph(FT_Face face,FT_UInt index,FT_Int32 flags){outline_loads++;return __real_FT_Load_Glyph(face,index,flags);}
+/// 不同字号的菜单字符反复交替，不应互相驱逐字宽。/ Alternating menu characters at different sizes must not evict each other's advances.
+static void mixed_sizes(pn_font_t *font){
+    const uint32_t characters[]={'3','I','Z','H','>'};const int sizes[]={24,26,30,36,52};int32_t advances[5];
+    for(unsigned i=0;i<5;i++){assert(pn_font_size(font,sizes[i])==PN_OK);assert(pn_font_advance(font,characters[i],&advances[i])==PN_OK);}
+    size_t loaded=outline_loads;
+    for(unsigned pass=0;pass<12;pass++)for(unsigned i=0;i<5;i++){int32_t actual;assert(pn_font_size(font,sizes[i])==PN_OK);assert(pn_font_advance(font,characters[i],&actual)==PN_OK && actual==advances[i]);}
+    assert(outline_loads==loaded);assert(pn_font_size(font,44)==PN_OK);
+}
 int main(void){
     pn_pool_t pool;assert(!pn_pool_init(&pool,4u*1024u*1024u,NULL,NULL,NULL));
     pn_font_t font={0};pn_text_source_t source=pn_font_builtin_source();assert(!pn_font_open(&font,&pool,&source,44));
+    mixed_sizes(&font);
     uint8_t pixels[5000],expected[5000];pn_frame_t frame;assert(pn_frame_bind(&frame,pixels,sizeof pixels,100,100));
     int32_t width,again;assert(!pn_font_advance(&font,'W',&width));pn_frame_clear(&frame,15);assert(!pn_font_draw(&font,&frame,'W',10*64,60,PN_FONT_GRAY));memcpy(expected,pixels,sizeof pixels);
     assert(!pn_font_draw(&font,&frame,'W',10*64,60,PN_FONT_GRAY));pn_cache_snapshot(&pool);

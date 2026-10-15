@@ -51,10 +51,12 @@ static pn_status_t builtin_read(void *,uint64_t,uint8_t *,size_t,size_t *);
  * Glyph cache: layout measuring and drawing each loaded the same outline, and every load costs a cmap binary search plus several small loca/glyf reads, which is slow on SD or network drives.
  * It remembers advances/missing results by (code point, pixel height) and rendered gray bitmaps by (code point, pixel height, subpixel offset). Hits still validate the font source first, so lost media is reported as before. */
 #define ADV_SLOTS 1024u
+// 菜单多字号使用八路组相联，减少空槽仍多时的互相覆盖；槽数和预算保持。/ Eight-way sets reduce mixed-size menu collisions while retaining the slot count and budget.
+#define ADV_WAYS 8u
 // 真机44px中文字形约1.7KB，384KiB/512槽只容约220字，不足一页，预热下一页会自我驱逐；扩到约两页。
 // On device a 44 px CJK glyph is about 1.7 KB, so 384 KiB/512 slots held only about 220 glyphs, less than a page, and warming the next page evicted itself; size for about two pages.
 #define BMP_SLOTS 1024u
-#define BMP_WAYS 4u
+#define BMP_WAYS 8u
 #define BMP_BUDGET (704u*1024u)
 #define BMP_ENTRY_MAX (64u*1024u)
 typedef struct {uint32_t cp;uint16_t pixels;uint8_t state;int32_t advance;} adv_t; ///< state 0空槽 1有字 2缺字 / 0 empty slot, 1 present, 2 missing
@@ -191,28 +193,32 @@ static pn_status_t load(pn_font_t *font,uint32_t cp,bool render) {
     if(!glyph)return PN_EMPTY;
     FT_Error error=FT_Load_Glyph(e->face,glyph,FT_LOAD_DEFAULT | (render?FT_LOAD_RENDER:0));return result(e,error);
 }
+/// 同一组按最近使用排列，复用原1024项内存，不增加时间戳。/ Keep each set in recency order within the original 1024 entries, without timestamps.
+static void advance_promote(adv_t *set,unsigned index,adv_t value){if(index)memmove(set+1,set,index*sizeof *set);set[0]=value;}
 static pn_status_t advance_impl(void *ctx,uint32_t cp,int32_t *advance) {
     pn_status_t cancel=pn_cancel_checkpoint();if(cancel!=PN_OK)return cancel;
     pn_font_t *font=ctx;if(!advance)return PN_INVALID;
     if(!font || !font->impl || cp>0x10ffff || (cp>=0xd800 && cp<=0xdfff))return PN_INVALID;
     engine_t *e=font->impl;
     if(!e->adv && cache_allowed(e,sizeof(adv_t)*ADV_SLOTS)){e->adv=glyph_alloc(e,sizeof(adv_t)*ADV_SLOTS);if(e->adv)memset(e->adv,0,sizeof(adv_t)*ADV_SLOTS);}
-    adv_t *slot=e->adv?&e->adv[hash_key(cp,font->pixels,0)%ADV_SLOTS]:NULL;
-    if(slot && slot->state && slot->cp==cp && slot->pixels==(uint16_t)font->pixels){
+    adv_t *set=e->adv?&e->adv[hash_key(cp,font->pixels,0)%(ADV_SLOTS/ADV_WAYS)*ADV_WAYS]:NULL;
+    unsigned hit=0;if(set)for(;hit<ADV_WAYS;hit++)if(set[hit].state && set[hit].cp==cp && set[hit].pixels==(uint16_t)font->pixels)break;
+    if(set && hit<ADV_WAYS){
         pn_status_t checked=ready(e);if(checked!=PN_OK)return checked;
+        adv_t value=set[hit];advance_promote(set,hit,value);
         pn_cache_observe(e->pool,PN_CACHE_GLYPH,true);
-        if(slot->state==2){pn_font_t *fallback;pn_status_t s=ui_fallback(font,&fallback);return s==PN_OK?pn_font_advance(fallback,cp,advance):s;}
-        *advance=slot->advance;return PN_OK;
+        if(value.state==2){pn_font_t *fallback;pn_status_t s=ui_fallback(font,&fallback);return s==PN_OK?pn_font_advance(fallback,cp,advance):s;}
+        *advance=value.advance;return PN_OK;
     }
     pn_cache_observe(e->pool,PN_CACHE_GLYPH,false);
     bool tab=cp==9;
     pn_status_t s=load(font,tab?32:cp,false);
-    if(s==PN_EMPTY){if(slot)*slot=(adv_t){cp,(uint16_t)font->pixels,2,0};pn_font_t *fallback;s=ui_fallback(font,&fallback);return s==PN_OK?pn_font_advance(fallback,cp,advance):s;}
+    if(s==PN_EMPTY){if(set)advance_promote(set,ADV_WAYS-1,(adv_t){cp,(uint16_t)font->pixels,2,0});pn_font_t *fallback;s=ui_fallback(font,&fallback);return s==PN_OK?pn_font_advance(fallback,cp,advance):s;}
     if(s!=PN_OK)return s;
     FT_Pos value=e->face->glyph->advance.x;
     if(value<0 || value>(tab?INT32_MAX/4:INT32_MAX))return PN_LIMIT;
     if(tab)value*=4;
-    if(slot)*slot=(adv_t){cp,(uint16_t)font->pixels,1,(int32_t)value};
+    if(set)advance_promote(set,ADV_WAYS-1,(adv_t){cp,(uint16_t)font->pixels,1,(int32_t)value});
     *advance=(int32_t)value;return PN_OK;
 }
 pn_status_t pn_font_vertical(pn_font_t *font,int *ascent,int *descent) {
