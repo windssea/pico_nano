@@ -179,6 +179,26 @@ pn_status_t pn_text_file_cache_bind(const pn_text_source_t *source,pn_pool_t *po
     free(file->block);file->block=NULL;file->block_length=0;
     pn_cache_attach(pool,&file->cache_owner,PN_CACHE_SOURCE,file,cache_bytes,cache_drop);return PN_OK;
 }
+pn_status_t pn_text_file_identity_reuse(const pn_text_source_t *target,const pn_text_source_t *verified){
+    if(!target || !verified)return PN_INVALID;
+    pn_status_t status=pn_cancel_checkpoint();if(status!=PN_OK)return status;
+    if(target->read_at!=read_at || target->validate!=validate || !target->ctx || verified->read_at!=read_at || verified->validate!=validate || !verified->ctx)return PN_EMPTY;
+    pn_text_file_t *to=target->ctx;const pn_text_file_t *from=verified->ctx;
+    status=validate(to);if(status!=PN_OK)return status;
+    if(target->size!=to->size || verified->size!=from->size)return PN_INVALID;
+    if(!from->identity_known || !from->handle || from->lease.access!=PN_MEDIA_READ || to->lease.access!=PN_MEDIA_READ || to->media!=from->media || to->lease.epoch!=from->lease.epoch || to->size!=from->size || strcmp(to->path,from->path))return PN_EMPTY;
+    status=verified->validate(verified->ctx);if(status==PN_CANCELLED)return status;if(status!=PN_OK)return PN_EMPTY;
+#if !defined(ESP_PLATFORM) && !defined(PN_TEST_IMMUTABLE_FILE)
+    // PC上的外部进程不遵守产品READ租约，仍完整读取目标文件验证。
+    // External host processes do not honor product READ leases; fully verify the target file instead.
+    return PN_EMPTY;
+#else
+    // 两个句柄同时受同代READ租约保护，WRITE/USB不能更换原文件；不依据mtime推测身份。
+    // Both handles remain protected by same-generation READ leases, blocking WRITE/USB replacement without inferring identity from mtime.
+    if(to->identity_known && memcmp(to->identity.sha256,from->identity.sha256,32))return PN_STALE_JOB;
+    to->identity=from->identity;to->identity_known=true;return PN_OK;
+#endif
+}
 pn_status_t pn_text_file_identity_pooled(pn_pool_t *pool,const pn_text_source_t *source,pn_book_id_t *out){
     if(!source || !out)return PN_INVALID;
     if(source->read_at!=read_at || source->validate!=validate || !source->ctx)return PN_UNSUPPORTED;

@@ -35,6 +35,13 @@ int main(void){
     assert(pn_font_reading_source().ctx==system.ctx);
     pn_text_file_t *system_file=system.ctx;reads=system_file->io_reads;
     assert(!pn_font_system_open(&pool,&media,font_path) && system_file->io_reads==reads);
+    // 已验证系统源也不能覆盖保存引用中的不同摘要或长度，失败不发布候选源。
+    // A verified system source must not override a saved reference's different digest/size; failures never publish a candidate source.
+    pn_font_reference_t mismatched=reference;pn_text_source_t preserved={.size=123};mismatched.identity.sha256[0]^=1;
+    assert(pn_font_reference_open_file(&pool,&mismatched,&media,&lease,&selected,&preserved)==PN_STALE_JOB && !selected.handle && preserved.size==123);
+    mismatched=reference;mismatched.size++;
+    assert(pn_font_reference_open_file(&pool,&mismatched,&media,&lease,&selected,&preserved)==PN_STALE_JOB && !selected.handle && preserved.size==123);
+    reads=system_file->io_reads;
     // 已取消的同路径/替换请求不关闭已核验源；取消发生在源校验内也不得当成失效重开。
     // Cancelled same-path/replacement requests keep the verified source, including cancellation during its validation.
     size_t retained_used=pool.used,retained_leases=pn_media_active(&media);

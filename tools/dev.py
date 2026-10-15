@@ -87,7 +87,7 @@ def main():
         # 私人样本单独复跑，不作为公共CI依赖，不烧写。/ Private samples run separately from public CI, without flashing.
         container_image = "pico-nano-sdl:dev"
         commands = [["cmake", "-S", "tests/host", "-B", "build-host", "-G", "Ninja", "-DPN_SANITIZERS=ON"],
-                    ["cmake", "--build", "build-host", "--target", "font_startup_probe", "device_menu_probe", "device_shelf_validate", "device_lock_validate", "test_text_inspect", "font_probe", "font_samples_validate", "zip_dump", "zip_job_validate", "epub_dump", "epub_validate", "epub_app_capture", "test_xhtml_compat", "epub_job_validate", "cover_priority_validate", "cover_resident_validate", "semantic_probe_validate"],
+                    ["cmake", "--build", "build-host", "--target", "font_startup_probe", "font_system_startup_probe", "device_menu_probe", "device_shelf_validate", "device_lock_validate", "test_text_inspect", "font_probe", "font_samples_validate", "zip_dump", "zip_job_validate", "epub_dump", "epub_validate", "epub_app_capture", "test_xhtml_compat", "epub_job_validate", "cover_priority_validate", "cover_resident_validate", "semantic_probe_validate"],
                     ["cmake", "-S", "simulator", "-B", "build-sim-sdl-idf", "-G", "Ninja", "-DPN_SIM_SDL=ON", "-DPN_SANITIZERS=ON"],
                     ["cmake", "--build", "build-sim-sdl-idf"],
                     ["python3" if docker else sys.executable, "tools/test_local_samples.py", "--sim", "build-sim-sdl-idf/pn_sim", "--probe", "build-host/font_probe", "--zip-binary", "build-host/zip_dump"],
@@ -102,6 +102,8 @@ def main():
                     ["python3" if docker else sys.executable, "tools/test_local_text_decode.py", "--sim", "build-sim-sdl-idf/pn_sim"],
                     ["python3" if docker else sys.executable, "tools/test_local_font_settings.py", "--sim", "build-sim-sdl-idf/pn_sim"],
                     ["python3" if docker else sys.executable, "tools/test_local_fallback_startup.py", "--binary", "build-host/font_startup_probe"],
+                    ["python3" if docker else sys.executable, "tools/test_local_system_startup.py", "--binary", "build-host/font_system_startup_probe", "--expect-reuse", "--output", "build-dev/local-system-startup"],
+                    ["python3" if docker else sys.executable, "tools/test_local_system_startup.py", "--binary", "build-host/font_startup_probe", "--output", "build-dev/local-system-host-startup"],
                     ["python3" if docker else sys.executable, "tools/test_local_middle_key.py", "--sim", "build-sim-sdl-idf/pn_sim"],
                     ["python3" if docker else sys.executable, "tools/test_local_lock.py", "--binary", "build-host/device_lock_validate"],
                     ["python3" if docker else sys.executable, "tools/test_local_font_samples.py", "--binary", "build-host/font_samples_validate"],

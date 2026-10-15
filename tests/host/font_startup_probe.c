@@ -50,14 +50,18 @@ int main(int argc,char **argv){
     assert(pn_media_attach(&state,2)==PN_OK && pn_media_acquire(&state,PN_MEDIA_WRITE,&write)==PN_OK);
     pn_font_preferences_t fonts={0};assert(pn_font_reference_capture(&pool,&media,&guard,argv[2],&fonts.fallback)==PN_OK);fallback_size=fonts.fallback.size;
     if(is_fault("bad-primary")){char path[PN_FONT_REFERENCE_PATH_MAX];int n=snprintf(path,sizeof path,"%s/bad-primary.ttf",argv[3]);assert(n>0 && (size_t)n<sizeof path);uint8_t bad[32]={0};FILE *f=fopen(path,"wb");assert(f && fwrite(bad,1,sizeof bad,f)==sizeof bad && !fclose(f));fonts.primary.kind=PN_FONT_FILE;fonts.primary.size=sizeof bad;strcpy(fonts.primary.path,path);assert(pn_identity_file(&media,&guard,path,1024,&fonts.primary.identity)==PN_OK);}
+    bool system=getenv("PN_FONT_STARTUP_SYSTEM")!=NULL,primary=getenv("PN_FONT_STARTUP_PRIMARY")!=NULL;
+    if(primary){fonts.primary=fonts.fallback;fonts.fallback=(pn_font_reference_t){0};}
+    if(system)assert(pn_font_system_open(&pool,&media,argv[2])==PN_OK);
     pn_journal_files_t files;pn_journal_io_t io;assert(pn_font_preferences_files(&files,&state,&write,argv[3],NULL,&io)==PN_OK && pn_font_preferences_save(&io,&pool,NULL,&fonts)==PN_OK);
     assert(pn_media_release(&state,&write)==PN_OK);
     if(is_fault("missing"))assert(!remove(argv[2]));
     if(is_fault("replaced")){FILE *file=fopen(argv[2],"r+b");assert(file && !fseek(file,-1,SEEK_END));int byte=fgetc(file);assert(byte!=EOF && !fseek(file,-1,SEEK_END) && fputc(byte^1,file)!=EOF && !fclose(file));}
     const char *suffix=strrchr(argv[1],'.');bool epub=suffix && !strcmp(suffix,".epub");pn_epub_app_t e={0};pn_reader_app_t t={0};
-    fallback_path=fonts.fallback.path;book_path=argv[1];active_media=&media;pn_cancel_scope_t scope;pn_cancel_enter(&scope,cancelled,NULL);
+    fallback_path=primary?fonts.primary.path:fonts.fallback.path;book_path=argv[1];active_media=&media;pn_cancel_scope_t scope;pn_cancel_enter(&scope,cancelled,NULL);
+    if(system){pn_text_source_t retained=pn_font_builtin_source();font_handles[0]=((pn_text_file_t *)retained.ctx)->handle;}
     tracing=true;pn_status_t status=epub?pn_epub_app_open_on_media(&e,&pool,&media,argv[1],NULL,argv[3],44,0):pn_reader_app_open_on_media(&t,&pool,&media,argv[1],NULL,argv[3],44,0);
-    bool expected_fallback=!is_fault("missing") && !is_fault("replaced") && !is_fault("bad-primary");
+    bool expected_fallback=!primary && !is_fault("missing") && !is_fault("replaced") && !is_fault("bad-primary");
     if(status==PN_OK && expected_fallback)assert((epub?pn_epub_app_fallback_font(&e,argv[2]):pn_reader_app_fallback_font(&t,argv[2]))==PN_BUSY);
     if(status==PN_OK)status=epub?pn_epub_app_step(&e,PN_APP_OPEN,1,show,NULL):pn_reader_app_step(&t,PN_APP_OPEN,1,show,NULL);
     pn_cancel_leave(&scope);tracing=false;unsigned startup_hashes=hashes,startup_opens=font_opens,startup_book_hashes=book_hashes;size_t startup_bytes=font_read_bytes;
@@ -65,11 +69,12 @@ int main(int argc,char **argv){
     unsigned get_hashes=0;
     if(status==PN_OK){pn_font_preferences_t selected;char directory[PN_FONT_REFERENCE_PATH_MAX];tracing=true;
         pn_status_t loaded=epub?pn_epub_app_fonts_get(&e,&selected,directory,sizeof directory):pn_reader_app_fonts_get(&t,&selected,directory,sizeof directory);
-        tracing=false;get_hashes=hashes-startup_hashes;assert(loaded==PN_OK && selected.fallback.kind==(expected_fallback?PN_FONT_FILE:PN_FONT_RESIDENT));if(expected_fallback)assert(!memcmp(selected.fallback.identity.sha256,fonts.fallback.identity.sha256,32));}
+        tracing=false;get_hashes=hashes-startup_hashes;assert(loaded==PN_OK && selected.fallback.kind==(expected_fallback?PN_FONT_FILE:PN_FONT_RESIDENT));if(expected_fallback)assert(!memcmp(selected.fallback.identity.sha256,fonts.fallback.identity.sha256,32));if(primary)assert(selected.primary.kind==PN_FONT_FILE && !memcmp(selected.primary.identity.sha256,fonts.primary.identity.sha256,32));}
     tracing=true;if(status==PN_OK){pn_status_t next=epub?pn_epub_app_step(&e,PN_APP_NEXT,2,show,NULL):pn_reader_app_step(&t,PN_APP_NEXT,2,show,NULL);if(next!=PN_OK && next!=PN_EMPTY)status=next;}
     if(status==PN_OK){pn_status_t previous=epub?pn_epub_app_step(&e,PN_APP_PREVIOUS,3,show,NULL):pn_reader_app_step(&t,PN_APP_PREVIOUS,3,show,NULL);if(previous!=PN_OK && previous!=PN_EMPTY)status=previous;}
     tracing=false;printf("turn_io book_reads=%u book_bytes=%zu book_seeks=%u font_bytes=%zu\n",book_reads-startup_book_reads,book_read_bytes-startup_book_bytes,book_seeks-startup_book_seeks,font_read_bytes-startup_bytes);
     pn_status_t closed=epub?pn_epub_app_close(&e,4):pn_reader_app_close(&t,4);if(status==PN_OK)status=closed;
+    if(system)assert(pn_font_system_close()==PN_OK);
     assert(pn_media_release(&media,&guard)==PN_OK && !pn_media_active(&media) && !pool.used && !pool.live);
     printf("startup status=%d font_size=%llu full_hashes=%u book_hashes=%u font_opens=%u font_read_bytes=%zu font_get_hashes=%u book_opens=%u book_reads=%u book_read_bytes=%zu book_seeks=%u presents=%u peak=%zu used=%zu live=%zu\n",status,(unsigned long long)fallback_size,startup_hashes,startup_book_hashes,startup_opens,startup_bytes,get_hashes,startup_book_opens,startup_book_reads,startup_book_bytes,startup_book_seeks,presents,pool.peak,pool.used,pool.live);
     pn_status_t expected=is_fault("cancel")?PN_CANCELLED:is_fault("lost")?PN_STALE_MEDIA:is_fault("present")?PN_IO:PN_OK;

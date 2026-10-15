@@ -143,6 +143,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/run_sim.ps1
 
 `font_startup_probe`另记录冷开至首屏的原书stdio打开/读取/字节/定位。`tools/test_local_fallback_startup.py --binary <新探针> --baseline <旧探针> --compare-io`比较两个均只做一次完整摘要的冻结探针，检查字体读取保持、原书读取/定位不增及全部原始帧逐字节一致；不带该选项时保留原双扫描补字优化的基线判据。原件仍只读、使用独立书/字体和状态副本，软件文件计数不代替TF/面板计时。
 
+`identity_reuse_host/immutable`核查同路径、媒体、代次、READ资格、取消、旧句柄关闭及PC同大小外部改写；`font_identity_immutable`另确认已加载系统源不能覆盖所选引用的不匹配摘要/长度。`tools/test_local_system_startup.py --binary build-host/font_system_startup_probe --expect-reuse --output build-dev/local-system-startup`逐本逐字体检查系统源已加载后，选择该同路径为正文或补字的打开/NEXT/PREVIOUS。`font_system_startup_probe`仅将文件port切至`PN_TEST_IMMUTABLE_FILE`来复现设备源不可被外部写入的约束，其余阅读代码与主机同源；这不是SDK/TF/面板实测。传`--baseline <独立冻结旧探针>`逐完整帧、原书读取及后续翻页IO对照，要求恰好少读完整字体一次、峰值不增。普通`font_startup_probe`不加`--expect-reuse`另跑同一矩阵，要求保留完整字体核验；两组已接入`local-samples`。`--limit`只供开发子集，报告明确标记，不能当整库通过。
+
 新版探针另输出首屏后NEXT/PREVIOUS的`turn_io`，与冷开计数分开；`--compare-io`在前后探针均提供该行时也检查翻页原书IO不增及字体读取保持。旧探针缺少此行时不推断其翻页IO。
 
 实体中间键在阅读中短按回主页、长按600ms打开阅读工具栏；排版/字体页短按保存成功才回原书。SDL用数字2或`key-home`模拟短按，用F10或`key-middle-long`模拟长按；此脚本别名不代替真实按住/释放资格测试。

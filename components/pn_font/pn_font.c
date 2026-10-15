@@ -34,6 +34,10 @@ static pn_media_t *system_media;
 pn_status_t pn_font_system_close(void){system_source=(pn_text_source_t){0};system_path[0]=0;system_media=NULL;return pn_font_asset_close(&system_asset);}
 bool pn_font_system_available(void){return system_source.read_at && system_source.validate && system_source.validate(system_source.ctx)==PN_OK;}
 bool pn_font_system_retained(void){return system_asset.impl!=NULL;}
+pn_status_t pn_font_system_identity_reuse(const pn_text_source_t *target){
+    if(!target)return PN_INVALID;
+    return system_asset.impl?pn_text_file_identity_reuse(target,&system_source):PN_EMPTY;
+}
 pn_status_t pn_font_system_open(pn_pool_t *pool,pn_media_t *media,const char *path){
     if(!pool || !media || !path || !*path)return PN_INVALID;
     pn_status_t status=pn_cancel_checkpoint();if(status!=PN_OK)return status;

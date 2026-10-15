@@ -26,7 +26,7 @@ typedef struct {
     uint64_t read_position; ///< 最近成功stdio读取后的实际游标，不是缓存命中位置 / Actual stdio cursor after the last successful read, independent of cache hits
     bool read_position_known; ///< 读/定位失败后失效，下次强制定位 / Invalid after read/seek failures; the next read must seek
     pn_book_id_t identity; ///< 仅当前不可变句柄/租约的已验证摘要 / Verified digest for this immutable handle and lease only
-    bool identity_known; ///< close/reopen失效，不按路径或mtime复用 / Invalidated by close/reopen; never reused by path or mtime
+    bool identity_known; ///< close失效；仅完整校验或同代READ保护的已验证源可置位 / Invalidated on close; set only by full verification or a verified source protected by same-generation READ leases
     uint64_t io_reads,io_bytes,io_seeks,cache_hits,identity_hits; ///< 实际读取/定位与源缓存计数 / Actual reads/seeks and source-cache counters
 } pn_text_file_t;
 /// 为本port的不变source绑定可选32块LRU读缓存；不分配、不读卡，未知source返回UNSUPPORTED，不能跨池重绑。
@@ -34,8 +34,10 @@ typedef struct {
 pn_status_t pn_text_file_cache_bind(const pn_text_source_t *,pn_pool_t *);
 /// 仅识别本port原始source；未知UNSUPPORTED，成功摘要绑定当前句柄/租约，失败不改输出。/ Recognize only this port's original source; unknown sources return UNSUPPORTED; bind successful digests to the live handle/lease and preserve output on error.
 pn_status_t pn_text_file_identity(const pn_text_source_t *,pn_book_id_t *);
-/// 用池内有界扫描缓冲核验并缓存当前打开源摘要；不跨句柄复用。/ Verify and cache the live source digest with a bounded pool buffer; never reuse across handles.
+/// 用池内有界扫描缓冲核验并缓存当前打开源摘要；本函数不搜索其他句柄。/ Verify and cache the live source digest with a bounded pool buffer; this function never searches other handles.
 pn_status_t pn_text_file_identity_pooled(pn_pool_t *,const pn_text_source_t *,pn_book_id_t *);
+/// 仅设备不可变文件port可从同路径/介质/代次且仍持READ的已验证源复制摘要；PC/不匹配返回EMPTY，原有完整校验继续，错误不改目标。/ Only the device immutable-file port may copy a digest from a verified same-path/media/generation source with live READ leases; host/mismatch returns EMPTY for full verification, preserving target on error.
+pn_status_t pn_text_file_identity_reuse(const pn_text_source_t *target,const pn_text_source_t *verified);
 /// 摘要读块同时严格探测编码/检查点，常见UTF编码只扫一次；GBK保持完整重试。/ Strictly probe encoding/checkpoints while reading digest blocks, scanning common UTF encodings once; GBK retains a complete retry.
 pn_status_t pn_text_file_inspect(pn_pool_t *,const pn_text_source_t *,pn_book_id_t *,pn_text_encoding_t *,void (*)(void *,uint64_t,bool),void *);
 /// 校验原已验证句柄仍有效；TF依靠独占所有权/READ租约，主机对句柄和现路径全SHA，不接受size/mtime命中。/ Verify the original validated handle: TF relies on exclusive ownership/READ leases; hosts hash both handle/current path completely, never accepting size/mtime hits.

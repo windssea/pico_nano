@@ -29,7 +29,13 @@ pn_status_t pn_font_reference_open_file(pn_pool_t *pool,const pn_font_reference_
     if((uint64_t)info.st_size!=ref->size)return PN_STALE_JOB;
     pn_text_source_t candidate;status=pn_text_file_open(file,media,lease,ref->path,&candidate);
     pn_book_id_t actual;
-    if(status==PN_OK)status=pn_text_file_identity_pooled(pool,&candidate,&actual);
+    if(status==PN_OK){
+        // 只复用仍受同代READ保护的系统源身份，目标仍由当前阅读器独立关闭。
+        // Reuse only a system identity protected by same-generation READ leases; the current reader still closes its own target.
+        pn_status_t reused=pn_font_system_identity_reuse(&candidate);
+        if(reused!=PN_OK && reused!=PN_EMPTY)status=reused;
+        if(status==PN_OK)status=pn_text_file_identity_pooled(pool,&candidate,&actual);
+    }
     if(status==PN_OK && memcmp(actual.sha256,ref->identity.sha256,32))status=PN_STALE_JOB;
     if(status!=PN_OK){(void)pn_text_file_close(file);return status;}
     *source=candidate;return PN_OK;
