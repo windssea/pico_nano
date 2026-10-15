@@ -138,16 +138,8 @@ static pn_status_t active_step(library_t *s,pn_reader_action_t action,uint64_t n
     return s->epub.impl?pn_epub_app_step(&s->epub,action,now,pn_turn_present,&effect):pn_reader_app_step(&s->reader,action,now,pn_turn_present,&effect);
 }
 static pn_status_t active_close(library_t *s,uint64_t now){s->recent_loaded=false;pn_status_t status=pn_hot_session_drop(&s->hot);if(status!=PN_OK)return status;return s->epub.impl?pn_epub_app_close(&s->epub,now):pn_reader_app_close(&s->reader,now);}
-/// 索引重建保留原独占写契约，必要时归还热会话及闲置字体消费者。/ Keep exclusive index writes, returning warm sessions and idle font consumers when required.
-static pn_status_t catalog_build_idle(library_t *s){
-    pn_status_t status=pn_catalog_index_build(&s->catalog_index);
-    if(status==PN_BUSY && (s->hot.media || pn_font_system_available())){
-        status=pn_hot_session_drop(&s->hot);if(status!=PN_OK)return status;
-        pn_font_close(&s->font);pn_w_font_scope_end(&s->ui_scope);status=pn_font_system_close();
-        if(status==PN_OK)status=pn_catalog_index_build(&s->catalog_index);
-    }
-    return status;
-}
+/// 与设备同源的缓存写租约，不因索引构建关闭只读字体/热会话。/ Match device cache-write leases without closing read-only fonts/warm sessions for indexing.
+static pn_status_t catalog_build_idle(library_t *s){return pn_catalog_index_build(&s->catalog_index);}
 static bool timing_on(void){static int on=-1;if(on<0){const char *v=getenv("PN_SIM_TIMING");on=v && *v=='1';}return on;}
 static uint64_t profile_clock(void *ctx){(void)ctx;uint64_t c=SDL_GetPerformanceCounter(),f=SDL_GetPerformanceFrequency();return (c/f)*1000000u+(c%f)*1000000u/f;}
 static void profile_emit(void *ctx,const pn_profile_event_t *e){

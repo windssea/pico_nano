@@ -602,17 +602,8 @@ static bool stop_reader_impl(bool retain){
 }
 static bool stop_reader(void){return stop_reader_impl(false);}
 static bool leave_reader(void){return stop_reader_impl(true);}
-/// 只有实际索引写请求被READ阻挡时归还闲置源，不为无任务反复关闭字库。/ Return idle sources only when an actual index write is blocked by READ, never closing faces repeatedly without work.
-static pn_status_t catalog_build_idle(void){
-    pn_status_t status=pn_catalog_index_build(&catalog_index);
-    if(status==PN_BUSY && (hot_session.media || pn_font_system_available())){
-        ESP_LOGI(TAG,"Catalog index needs TF write; release idle sources hot=%u system_font=%u",(unsigned)(hot_session.media!=NULL),(unsigned)pn_font_system_available());
-        status=pn_hot_session_drop(&hot_session);if(status!=PN_OK)return status;
-        system_font_release();status=pn_catalog_index_build(&catalog_index);
-        if(status!=PN_OK && status!=PN_EMPTY)ESP_LOGW(TAG,"Catalog index rebuild after source release failed: %d",(int)status);
-    }
-    return status;
-}
+/// 索引只写专用可重建缓存，保留只读字体和热会话，忙时留待下一轮。/ Index writes only its rebuildable cache, retaining read-only fonts/warm sessions and retrying busy work later.
+static pn_status_t catalog_build_idle(void){return pn_catalog_index_build(&catalog_index);}
 /* 状态带时间：开机或手动联网对时后读取已确认的PMU UTC，之后按开机计时推算；锁屏不显示时间。时区固定为UTC+8。
  * Status-band clock: read confirmed PMU UTC at boot or after explicit network synchronization, then advance by uptime; the lock screen shows no time. The time zone is fixed at UTC+8. */
 #define CLOCK_UTC_OFFSET (8*3600)

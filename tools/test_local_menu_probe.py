@@ -40,6 +40,7 @@ def main():
         result = subprocess.run([str(args.binary.resolve())], capture_output=True, text=True, timeout=180, env={**os.environ, 'PN_MENU_FRAMES': str(frames)})
         (args.output / f'{index}.log').write_text(result.stdout + result.stderr, encoding='utf8')
         assert result.returncode == 0 and 'menu_probe closed_pool_zero=1' in result.stdout, (original.name, result.returncode, result.stdout[-2500:], result.stderr[-2500:])
+        assert 'index_rebuild retained_system_face=1 font_bytes=0 font_opens=0' in result.stdout
         rows = []
         for line in result.stdout.splitlines():
             if not line.startswith('menu name='):
@@ -53,7 +54,7 @@ def main():
             before = args.baseline / str(index)
             assert {p.name for p in captured} == {p.name for p in before.glob('*.raw')}
             assert all(p.read_bytes() == (before / p.name).read_bytes() for p in captured)
-        report['fonts'].append({'font': original.name, 'menus': rows, 'closed_pool_zero': True, 'frames': {p.name: digest(p) for p in captured}, 'baseline_frames_match': True if args.baseline else None})
+        report['fonts'].append({'font': original.name, 'index_retained_face': True, 'index_font_bytes': 0, 'menus': rows, 'closed_pool_zero': True, 'frames': {p.name: digest(p) for p in captured}, 'baseline_frames_match': True if args.baseline else None})
         print('PASS menu probe', original.name, flush=True)
     report['originals_unchanged'] = all(digest(p) == identity for p, identity in originals.items())
     assert report['originals_unchanged']

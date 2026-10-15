@@ -124,7 +124,7 @@ static pn_status_t merge(index_t *i,const pn_media_lease_t *lease,const char *le
 }
 pn_status_t pn_catalog_index_build(pn_catalog_index_t *h){
     if(!h || !h->impl)return PN_EMPTY;
-    index_t *i=h->impl;if(!i->wanted)return PN_EMPTY;pn_media_lease_t lease;pn_status_t s=pn_media_acquire(i->media,PN_MEDIA_WRITE,&lease);if(s!=PN_OK)return s;
+    index_t *i=h->impl;if(!i->wanted)return PN_EMPTY;pn_media_lease_t lease;pn_status_t s=pn_media_acquire(i->media,PN_MEDIA_CACHE_WRITE,&lease);if(s!=PN_OK)return s;
     s=cleanup_runs(i,&lease);if(s!=PN_OK){(void)pn_media_release(i->media,&lease);return s;}
     char old_path[PN_CATALOG_PATH_MAX];if(!i->invalid && path(i,old_path,".pni")){FILE *old=fopen(old_path,"rb");if(old){size_t count;pn_status_t valid=header(i,&lease,old,&count);fclose(old);if(valid==PN_OK){i->wanted=false;(void)pn_media_release(i->media,&lease);return PN_EMPTY;}}}
     uint8_t before[HEADER],after[HEADER];s=cookie(i,before);if(s==PN_OK)s=directory_create(i->cache);

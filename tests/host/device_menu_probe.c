@@ -61,6 +61,11 @@ int main(void){
     assert(pn_catalog_index_init(&catalog_index,&pool,&sd_media,book_directory,PN_SD_MOUNT "/" PN_SD_INDEX_CACHE)==PN_OK);
     pn_status_t built=pn_catalog_index_build(&catalog_index);assert(built==PN_OK || built==PN_EMPTY);
     shelf_prefs.columns=3;probe("library-cold",library);
+    // 用真实用户系统字体验证索引重建不关闭字体或读取字体数据。/ Verify with the supplied system face that index rebuild neither closes it nor reads font data.
+    pn_text_source_t indexed_source=pn_font_builtin_source();memset(counts,0,sizeof counts);face_opens=0;watching=true;
+    pn_catalog_index_invalidate(&catalog_index);assert(catalog_build_idle()==PN_OK);watching=false;
+    assert(pn_font_system_available() && pn_font_builtin_source().ctx==indexed_source.ctx && !face_opens && !counts[FONT_IO].bytes && !counts[FONT_IO].opens);
+    puts("index_rebuild retained_system_face=1 font_bytes=0 font_opens=0");
     // 仅种入这三本真实文件的菜单预览，不伪造阅读或内容身份命中。/ Seed menu previews for three real files only, without claiming reading or content-identity hits.
     assert(recent_snapshot && shelf_page->count>=3);memset(recent_snapshot,0,sizeof *recent_snapshot);recent_snapshot->count=3;
     for(size_t i=0;i<3;i++){pn_recent_item_t *item=&recent_snapshot->items[i];strcpy(item->path,shelf_page->items[i].path);item->format=shelf_page->items[i].format;item->progress=1234;}

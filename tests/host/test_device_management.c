@@ -197,8 +197,8 @@ int main(void){
     start_reader_impl();assert(reader.impl==retained && hot_session.hits==1 && !hot_session.media);
     pn_txt_progress_t reopened;assert(pn_reader_app_progress(&reader,&reopened)==PN_OK && reopened.source_offset==location.source_offset);
     assert(leave_reader() && hot_session.media && stop_reader() && !hot_session.media);
-    // 索引实际需要独占写时释放热源和完整系统字库，保留原索引契约。
-    // When an index actually needs exclusive writes, release warm sources and the complete system face, preserving the original index contract.
+    // 索引只写自身缓存，构建和取消都不能驱逐热源或完整系统字库。
+    // Index writes touch only its own cache; building/cancellation must not evict warm sources or the complete system face.
     tf_file=fopen(tf_path,"wb");assert(tf_file);tf_source=pn_font_builtin_source();
     for(uint64_t at=0;at<tf_source.size;){size_t n;assert(tf_source.read_at(tf_source.ctx,at,tf_bytes,sizeof tf_bytes,&n)==PN_OK && n && fwrite(tf_bytes,1,n,tf_file)==n);at+=n;}assert(!fclose(tf_file));
     assert(pn_font_system_open(&pool,&sd_media,tf_path)==PN_OK);
@@ -208,13 +208,18 @@ int main(void){
     snprintf(cache_path,sizeof cache_path,"%s/cache",folder);snprintf(indexed_book,sizeof indexed_book,"%s/books/a.txt",folder);story=fopen(indexed_book,"wb");assert(story && fputs("Original index test.",story)>0 && !fclose(story));
     assert(pn_catalog_index_init(&catalog_index,&pool,&sd_media,books_path,cache_path)==PN_OK);pn_media_lease_t index_lease;
     assert(pn_media_acquire(&sd_media,PN_MEDIA_READ,&index_lease)==PN_OK && pn_catalog_index_page(&catalog_index,&index_lease,"",false,0,NULL,6,shelf_page)==PN_EMPTY && pn_media_release(&sd_media,&index_lease)==PN_OK);
-    assert(catalog_build_idle()==PN_OK && !hot_session.media && !pn_font_system_available() && !pn_media_active(&sd_media));
+    void *index_hot=hot_session.txt.impl;pn_text_source_t retained_system=pn_font_builtin_source();
+    assert(catalog_build_idle()==PN_OK && hot_session.media && hot_session.txt.impl==index_hot && pn_font_system_available() && pn_font_builtin_source().ctx==retained_system.ctx);
+    pn_catalog_index_invalidate(&catalog_index);pn_cancel_scope_t index_cancel;pn_cancel_enter(&index_cancel,feedback_cancelled,NULL);
+    assert(catalog_build_idle()==PN_CANCELLED && hot_session.media && hot_session.txt.impl==index_hot);pn_cancel_leave(&index_cancel);
+    assert(pn_font_system_available() && pn_font_builtin_source().ctx==retained_system.ctx);
+    assert(catalog_build_idle()==PN_OK && hot_session.txt.impl==index_hot && pn_font_builtin_source().ctx==retained_system.ctx);
     // 索引已就绪后，空闲与读页不得再次归还系统字库。/ Once the index is ready, idle work and paging must not release the system face again.
-    assert(pn_font_system_open(&pool,&sd_media,tf_path)==PN_OK);pn_text_source_t retained_system=pn_font_builtin_source();
+    assert(pn_font_system_open(&pool,&sd_media,tf_path)==PN_OK && pn_font_builtin_source().ctx==retained_system.ctx);
     assert(catalog_build_idle()==PN_EMPTY && pn_font_system_available() && pn_font_builtin_source().ctx==retained_system.ctx);
     assert(pn_media_acquire(&sd_media,PN_MEDIA_READ,&index_lease)==PN_OK && pn_catalog_index_page(&catalog_index,&index_lease,"",false,0,NULL,6,shelf_page)==PN_OK && pn_media_release(&sd_media,&index_lease)==PN_OK);
     assert(catalog_build_idle()==PN_EMPTY && pn_font_system_available() && pn_font_builtin_source().ctx==retained_system.ctx);
-    system_font_release();pn_catalog_index_close(&catalog_index);assert(!remove(tf_path));
+    assert(pn_hot_session_drop(&hot_session)==PN_OK);system_font_release();pn_catalog_index_close(&catalog_index);assert(!remove(tf_path));
     selected_path[0]=0;assert(!unlink(book));
     // 真正产品适配的短反馈/恢复：原波形身份与FULL时序归还，失败和欠载恢复原图。
     // Exercise the real product feedback/restore adapter: return waveform identity/FULL timing and restore original pixels after failure/underrun.
