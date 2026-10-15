@@ -31,7 +31,7 @@ int main(void){
     assert(!pn_font_reference_open_file(&pool,&reference,&media,&lease,&selected,&selected_source) && selected.identity_known);
     reads=selected.io_reads;assert(!pn_font_source_identity(&selected_source,&actual) && selected.io_reads==reads);assert(!pn_text_file_close(&selected));
     // 完整系统字库按源流读，缺卡/损坏时仍能取内置UI源。/ Stream the external UI face and keep resident UI available after media loss/corruption.
-    assert(!pn_font_system_open(&pool,&media,font_path));pn_text_source_t system=pn_font_builtin_source();assert(system.ctx && system.validate);
+    assert(!pn_font_system_retained());assert(!pn_font_system_open(&pool,&media,font_path));pn_text_source_t system=pn_font_builtin_source();assert(system.ctx && system.validate && pn_font_system_retained());
     assert(pn_font_reading_source().ctx==system.ctx);
     pn_text_file_t *system_file=system.ctx;reads=system_file->io_reads;
     assert(!pn_font_system_open(&pool,&media,font_path) && system_file->io_reads==reads);
@@ -44,11 +44,11 @@ int main(void){
         assert(pn_font_system_available() && pn_font_builtin_source().ctx==system.ctx && system_file->io_reads==reads && pool.used==retained_used && pn_media_active(&media)==retained_leases);
     }
     pn_font_t ui={0};assert(!pn_font_open(&ui,&pool,&system,24));pn_font_close(&ui);
-    assert(!pn_font_system_close());assert(!pn_font_builtin_source().ctx);
+    assert(!pn_font_system_close());assert(!pn_font_builtin_source().ctx && !pn_font_system_retained());
     assert(pn_font_system_open(&pool,&media,path)!=PN_OK && !pn_font_builtin_source().ctx && !pool.used && !pool.live);
     assert(!pn_text_file_close(&file));FILE *f=fopen(path,"wb");assert(f && fwrite("efgh",1,4,f)==4 && !fclose(f));
     assert(!pn_text_file_open(&file,&media,&lease,path,&source) && !file.identity_known);assert(!pn_font_source_identity(&source,&actual) && memcmp(&actual,&expected,sizeof actual));
-    assert(!pn_font_system_open(&pool,&media,font_path));pn_media_detach(&media);
+    assert(!pn_font_system_open(&pool,&media,font_path));pn_media_detach(&media);assert(pn_font_system_retained() && !pn_font_system_available());
     assert(!pn_font_builtin_source().ctx && !pn_font_system_close() && !pool.used && !pool.live);
     expected=actual;assert(pn_font_source_identity(&source,&actual)==PN_STALE_MEDIA && !memcmp(&actual,&expected,sizeof actual));assert(!pn_text_file_close(&file));pn_media_release(&media,&lease);unlink(path);return 0;
 }

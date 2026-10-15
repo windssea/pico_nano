@@ -16,6 +16,7 @@ static struct {size_t opens,reads,bytes,seeks;} counts[IO_COUNT];
 static struct {FILE *file;unsigned kind;} tracked[128];
 static size_t face_opens,glyph_loads,glyph_advances,glyph_renders,stats;
 static uint64_t glyph_us;
+static bool fail_font_stat;
 static uint64_t monotonic_us(void){struct timespec t;assert(!clock_gettime(CLOCK_MONOTONIC,&t));return (uint64_t)t.tv_sec*1000000u+(uint64_t)t.tv_nsec/1000u;}
 FILE *__real_fopen(const char *,const char *);
 FILE *__wrap_fopen(const char *path,const char *mode){
@@ -33,17 +34,17 @@ int __wrap_fseek(FILE *file,long offset,int origin){if(watching)counts[kind_of(f
 int __real_fclose(FILE *);
 int __wrap_fclose(FILE *file){for(size_t i=0;i<128;i++)if(tracked[i].file==file){tracked[i].file=NULL;break;}return __real_fclose(file);}
 int __real_stat(const char *,struct stat *);
-int __wrap_stat(const char *path,struct stat *out){if(watching)stats++;return __real_stat(path,out);}
+int __wrap_stat(const char *path,struct stat *out){if(watching)stats++;if(fail_font_stat && !strcmp(path,PN_SD_MOUNT "/" PN_SD_SYSTEM_FONT)){fail_font_stat=false;errno=EIO;return -1;}return __real_stat(path,out);}
 int __real_lstat(const char *,struct stat *);
-int __wrap_lstat(const char *path,struct stat *out){if(watching)stats++;return __real_lstat(path,out);}
+int __wrap_lstat(const char *path,struct stat *out){if(watching)stats++;if(fail_font_stat && !strcmp(path,PN_SD_MOUNT "/" PN_SD_SYSTEM_FONT)){fail_font_stat=false;errno=EIO;return -1;}return __real_lstat(path,out);}
 pn_status_t __real_pn_font_open(pn_font_t *,pn_pool_t *,const pn_text_source_t *,int);
 pn_status_t __wrap_pn_font_open(pn_font_t *font,pn_pool_t *p,const pn_text_source_t *source,int pixels){if(watching)face_opens++;return __real_pn_font_open(font,p,source,pixels);}
 FT_Error __real_FT_Load_Glyph(FT_Face,FT_UInt,FT_Int32);
 FT_Error __wrap_FT_Load_Glyph(FT_Face face,FT_UInt index,FT_Int32 flags){uint64_t start=watching?monotonic_us():0;FT_Error result=__real_FT_Load_Glyph(face,index,flags);if(watching){glyph_loads++;if(flags&FT_LOAD_RENDER)glyph_renders++;else glyph_advances++;glyph_us+=monotonic_us()-start;}return result;}
-static void probe(const char *name,void (*operation)(void)){
+static void probe(const char *name,void (*operation)(void),unsigned updates){
     memset(counts,0,sizeof counts);face_opens=glyph_loads=glyph_advances=glyph_renders=stats=0;glyph_us=0;unsigned before=presents;
     watching=true;uint64_t start=monotonic_us();operation();uint64_t elapsed=monotonic_us()-start;watching=false;
-    assert(presents==before+1);
+    assert(presents==before+updates);
     printf("menu name=%s host_us=%llu face_opens=%zu glyph_loads=%zu glyph_advances=%zu glyph_renders=%zu glyph_us=%llu stats=%zu used=%zu peak=%zu",name,(unsigned long long)elapsed,face_opens,glyph_loads,glyph_advances,glyph_renders,(unsigned long long)glyph_us,stats,pool.used,pool.peak);
     for(unsigned i=0;i<IO_COUNT;i++)printf(" %s_opens=%zu %s_reads=%zu %s_bytes=%zu %s_seeks=%zu",labels[i],counts[i].opens,labels[i],counts[i].reads,labels[i],counts[i].bytes,labels[i],counts[i].seeks);
     puts("");fflush(stdout);
@@ -63,6 +64,32 @@ static void cancelled_system_font(void){
     memset(counts,0,sizeof counts);face_opens=0;watching=true;system_font_ready();watching=false;
     printf("system_retry face_opens=%zu font_opens=%zu font_reads=%zu font_bytes=%zu font_seeks=%zu\n",face_opens,counts[FONT_IO].opens,counts[FONT_IO].reads,counts[FONT_IO].bytes,counts[FONT_IO].seeks);
 }
+static void recovered_system_font(void){
+    const char *valid=getenv("PN_MENU_RECOVERY_FONT"),*mode=getenv("PN_MENU_RECOVERY_MODE");assert(valid && mode && system_font_failure.stable && !pn_font_system_available());
+    if(!strcmp(mode,"epoch")){management_fonts_close();assert(pn_media_detach(&sd_media)==PN_OK && pn_media_attach(&sd_media,7)==PN_OK);
+        // 重挂的是同一份私有书库，保留仅供菜单对照的三本预览种子；不伪造实际阅读记录。
+        // Reattach the same private library, preserving the three menu-only preview seeds without claiming actual reading records.
+        recent_epoch=sd_media.epoch;}
+    else{assert(!strcmp(mode,"release"));system_font_release();}
+    // 仅给私有端口夹具安装恢复副本；先独占写租约，不把这当作上传事务验收。
+    // Install a recovery copy only in the private port fixture, under an exclusive write lease; this is not upload-transaction acceptance.
+    pn_media_lease_t write;assert(pn_media_acquire(&sd_media,PN_MEDIA_WRITE,&write)==PN_OK);
+    FILE *input=fopen(valid,"rb"),*output=fopen(PN_SD_MOUNT "/" PN_SD_SYSTEM_FONT,"wb");assert(input && output);uint8_t block[4096];size_t n;
+    while((n=fread(block,1,sizeof block,input)))assert(fwrite(block,1,n,output)==n);
+    assert(!ferror(input) && !fclose(input) && !fclose(output) && pn_media_release(&sd_media,&write)==PN_OK);
+    // 租约不足/忙、瞬态I/O和OOM不产生稳定失败，也不拆除当前不可变应急引擎。
+    // Lease exhaustion/busy, transient IO and OOM never become stable failures or tear down the immutable emergency engine.
+    assert(draw_shelf(PN_REFRESH_GL16)==PN_OK);void *ui=management_font.impl;
+    pn_media_lease_t held[PN_MEDIA_MAX_LEASES];for(unsigned i=0;i<PN_MEDIA_MAX_LEASES;i++)assert(pn_media_acquire(&sd_media,PN_MEDIA_READ,&held[i])==PN_OK);
+    system_font_ready();assert(!pn_font_system_available() && !system_font_failure.stable && management_font.impl==ui);
+    for(unsigned i=0;i<PN_MEDIA_MAX_LEASES;i++)assert(pn_media_release(&sd_media,&held[i])==PN_OK);
+    assert(pn_media_acquire(&sd_media,PN_MEDIA_WRITE,&write)==PN_OK);system_font_ready();assert(!pn_font_system_available() && !system_font_failure.stable && management_font.impl==ui);assert(pn_media_release(&sd_media,&write)==PN_OK);
+    fail_font_stat=true;system_font_ready();assert(!fail_font_stat && !pn_font_system_available() && !system_font_failure.stable && management_font.impl==ui);
+    pool.fail_at=pool.attempts+1;system_font_ready();pool.fail_at=0;assert(!pn_font_system_available() && !system_font_failure.stable && management_font.impl==ui);
+    system_font_ready();assert(pn_font_system_available() && !system_font_failure.stable);
+    library();unsigned steps=0;while(tick_covers())assert(++steps<65536);
+    probe("library-recovered",library,0);printf("system_recovery mode=%s available=1 transient_retry=1\n",mode);
+}
 int main(void){
     assert(pn_pool_init(&pool,6u*1024u*1024u,NULL,NULL,NULL)==PN_OK);assert(read_pico_init(&hardware)==ESP_OK);
     pn_media_init(&sd_media);pn_media_init(&data_media);pn_media_init(&wallpaper_media);
@@ -70,19 +97,21 @@ int main(void){
     int vcom;assert(read_pico_pmu_vcom_get(&vcom)==ESP_OK);epd_set_vcom((uint16_t)vcom);pn_async_init(&async_port.input);
     assert(pn_catalog_index_init(&catalog_index,&pool,&sd_media,book_directory,PN_SD_MOUNT "/" PN_SD_INDEX_CACHE)==PN_OK);
     pn_status_t built=pn_catalog_index_build(&catalog_index);assert(built==PN_OK || built==PN_EMPTY);
-    shelf_prefs.columns=3;probe("library-cold",library);
+    shelf_prefs.columns=3;probe("library-cold",library,1);
     // 用真实用户系统字体验证索引重建不关闭字体或读取字体数据。/ Verify with the supplied system face that index rebuild neither closes it nor reads font data.
     pn_text_source_t indexed_source=pn_font_builtin_source();memset(counts,0,sizeof counts);face_opens=0;watching=true;
     pn_catalog_index_invalidate(&catalog_index);assert(catalog_build_idle()==PN_OK);watching=false;
-    assert(pn_font_system_available() && pn_font_builtin_source().ctx==indexed_source.ctx && !face_opens && !counts[FONT_IO].bytes && !counts[FONT_IO].opens);
-    puts("index_rebuild retained_system_face=1 font_bytes=0 font_opens=0");
+    bool emergency=getenv("PN_MENU_SYSTEM_FAILURE_PROBE")!=NULL;
+    assert(pn_font_system_available()!=emergency && pn_font_builtin_source().ctx==indexed_source.ctx && !face_opens && !counts[FONT_IO].bytes && !counts[FONT_IO].opens);
+    puts(emergency?"index_rebuild retained_emergency_face=1 font_bytes=0 font_opens=0":"index_rebuild retained_system_face=1 font_bytes=0 font_opens=0");
     if(getenv("PN_MENU_CANCEL_SYSTEM_PROBE"))cancelled_system_font();
     // 仅种入这三本真实文件的菜单预览，不伪造阅读或内容身份命中。/ Seed menu previews for three real files only, without claiming reading or content-identity hits.
     assert(recent_snapshot && shelf_page->count>=3);memset(recent_snapshot,0,sizeof *recent_snapshot);recent_snapshot->count=3;
     for(size_t i=0;i<3;i++){pn_recent_item_t *item=&recent_snapshot->items[i];strcpy(item->path,shelf_page->items[i].path);item->format=shelf_page->items[i].format;item->progress=1234;}
     recent_loaded=true;recent_epoch=sd_media.epoch;
     unsigned steps=0;while(tick_covers())assert(++steps<65536);
-    for(unsigned cycle=0;cycle<4;cycle++){probe("home",home);probe("settings",settings);probe("hub",hub);probe("library",library);}
+    for(unsigned cycle=0;cycle<4;cycle++){probe("home",home,1);probe("settings",settings,1);probe("hub",hub,1);probe("library",library,1);}
+    if(emergency)recovered_system_font();
     pn_cover_work_abort(&cover_work);management_fonts_close();assert(pn_font_system_close()==PN_OK);pn_catalog_index_close(&catalog_index);
     pn_free(shelf_page);pn_free(shelf_covers);pn_free(recent_snapshot);pn_free(favorites);pn_free(page_copy);
     assert(!pn_media_active(&sd_media) && !pn_media_active(&data_media) && !pool.used && !pool.live);

@@ -80,3 +80,6 @@ pn_status_t pn_font_validate(pn_font_t *);
 
 /// 完整系统源是否仍有效；仅查询，不重新打开。/ Whether the complete system source remains valid; query without reopening.
 bool pn_font_system_available(void);
+/// 仅报告需先关闭消费者的保留外置源；不校验取消/介质，不是可读取证明。
+/// Report only a retained external source whose consumers must close first; this does not validate cancellation/media or prove readability.
+bool pn_font_system_retained(void);

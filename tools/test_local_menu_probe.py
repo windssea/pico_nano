@@ -14,7 +14,10 @@ def main():
     parser.add_argument('--output', type=pathlib.Path, default=ROOT / 'build-dev/local-menu-probe')
     parser.add_argument('--baseline', type=pathlib.Path, help='Compare every full packed frame with an earlier probe output')
     parser.add_argument('--cancel-system', action='store_true', help='Observe a cancelled system-font readiness check and its retry')
+    parser.add_argument('--system-failure', choices=('missing','corrupt'), help='Use a missing or header-damaged private system-font copy')
+    parser.add_argument('--recovered-baseline', type=pathlib.Path, help='Normal-menu output whose final library frame must match the repaired-font result')
     args = parser.parse_args()
+    if args.cancel_system and args.system_failure:parser.error('Cancellation and failed-source probes use separate runs')
     if not pathlib.Path('/.dockerenv').is_file():
         raise ValueError('Requires a fresh disposable Docker container')
     library = pathlib.Path('/sdcard/piconano/books')
@@ -31,34 +34,51 @@ def main():
     for original in books:
         shutil.copy2(original, library / original.name)
     args.output.mkdir(parents=True, exist_ok=True)
-    report = {'passed': False, 'scope': 'Actual app_main menus with hardware substitutes; supplied fonts each serve as the fixed TF UI source. Host elapsed time is not TF/panel latency; recent previews are seeded, not reading acceptance.', 'cancelled_system_probe':args.cancel_system, 'books': [p.name for p in books], 'fonts': []}
+    report = {'passed': False, 'scope': 'Actual app_main menus with hardware substitutes; supplied font copies target the fixed TF UI path. Failed-font cases use resident emergency UI before repair. Host elapsed time is not TF/panel latency; recent previews are seeded, not reading acceptance.', 'cancelled_system_probe':args.cancel_system, 'system_failure_probe':args.system_failure, 'books': [p.name for p in books], 'fonts': []}
     target = args.output / 'report.json'
     target.write_text(json.dumps(report), encoding='utf8')
     for index, original in enumerate(fonts):
         shutil.copy2(original, font)
+        if args.system_failure=='missing':font.unlink()
+        elif args.system_failure=='corrupt':
+            with font.open('r+b') as damaged:damaged.write(b'BAD!')
         frames = args.output.resolve() / str(index)
         frames.mkdir(exist_ok=True)
         environment={**os.environ, 'PN_MENU_FRAMES': str(frames)}
         environment.pop('PN_MENU_CANCEL_SYSTEM_PROBE', None)
+        environment.pop('PN_MENU_SYSTEM_FAILURE_PROBE', None)
+        environment.pop('PN_MENU_RECOVERY_FONT', None);environment.pop('PN_MENU_RECOVERY_MODE', None)
         if args.cancel_system:environment['PN_MENU_CANCEL_SYSTEM_PROBE']='1'
+        if args.system_failure:
+            environment['PN_MENU_SYSTEM_FAILURE_PROBE']=args.system_failure
+            environment['PN_MENU_RECOVERY_FONT']=str(original.resolve());environment['PN_MENU_RECOVERY_MODE']='epoch' if index%2 else 'release'
         result = subprocess.run([str(args.binary.resolve())], capture_output=True, text=True, timeout=180, env=environment)
         (args.output / f'{index}.log').write_text(result.stdout + result.stderr, encoding='utf8')
         assert result.returncode == 0 and 'menu_probe closed_pool_zero=1' in result.stdout, (original.name, result.returncode, result.stdout[-2500:], result.stderr[-2500:])
-        assert 'index_rebuild retained_system_face=1 font_bytes=0 font_opens=0' in result.stdout
+        label='retained_emergency_face' if args.system_failure else 'retained_system_face'
+        assert f'index_rebuild {label}=1 font_bytes=0 font_opens=0' in result.stdout
         rows = []
         for line in result.stdout.splitlines():
             if not line.startswith('menu name='):
                 continue
             row = dict(word.split('=', 1) for word in line.split()[1:])
             rows.append({key: value if key == 'name' else int(value) for key, value in row.items()})
-        assert len(rows) == 17
+        assert len(rows) == (18 if args.system_failure else 17)
         captured = sorted(frames.glob('*.raw'))
-        assert len(captured) == 17 and all(p.stat().st_size == 415872 for p in captured)
+        assert len(captured) == len(rows) and all(p.stat().st_size == 415872 for p in captured)
         if args.baseline:
             before = args.baseline / str(index)
-            assert {p.name for p in captured} == {p.name for p in before.glob('*.raw')}
-            assert all(p.read_bytes() == (before / p.name).read_bytes() for p in captured)
+            common=captured[:17] if args.system_failure else captured
+            assert {p.name for p in common} == {p.name for p in before.glob('*.raw')}
+            assert all(p.read_bytes() == (before / p.name).read_bytes() for p in common)
         extra={}
+        if args.system_failure:
+            assert all(r['font_opens']==r['font_reads']==r['font_bytes']==r['font_seeks']==0 for r in rows[1:17])
+            assert all(r['face_opens']==0 for r in rows[13:17])
+            mode=environment['PN_MENU_RECOVERY_MODE'];assert f'system_recovery mode={mode} available=1 transient_retry=1' in result.stdout
+            extra['recovery_mode']=mode;extra['recovered_font_available']=True;extra['transient_retry']=True
+            if args.recovered_baseline:assert captured[-1].read_bytes()==(args.recovered_baseline/str(index)/'16-library.raw').read_bytes()
+            extra['recovered_frame_matches_normal']=True if args.recovered_baseline else None
         if args.cancel_system:
             for label in ('system_cancel','system_retry'):
                 lines=[line for line in result.stdout.splitlines() if line.startswith(label+' ')];assert len(lines)==1

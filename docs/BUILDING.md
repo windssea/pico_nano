@@ -31,6 +31,8 @@ $env:DOCKER_CONTEXT='desktop-linux'
 
 同一入口加`--cancel-system`在首次完整字库/菜单缓存就绪后，向真实产品`system_font_ready`注入已取消的准备范围，断言退出后仍保留源/UI/池占用和READ租约；随后的同路径重试不得打开字体、读字节或新建引擎，继续核对原17张菜单帧。`local-samples`分别运行普通及取消两组，后者输出`build-dev/local-menu-cancel`。`font_identity`另查公开打开接口在入口/源验证中取消及替换请求，`device_management`在四个检查点取消，保留原失卡、坏字体及显式交接检查。这些是软件回归，不是人为取消状态下的实机速度；旧基线必须由含同一观察探针的原产品源码独立冻结，不能用新行为改名作旧版。
 
+`--system-failure missing|corrupt`另用每款用户字体的缺失或改坏首4B的私有副本，核对反复菜单不再读字体、末轮不创建引擎，原17帧与独立旧探针对照。第18帧是恢复正常字体后的书库，可传`--recovered-baseline <普通菜单输出>`与其`16-library.raw`直接比较；逐字体交替检查显式资源释放和媒体代次变化后的重试，再检查租约配额/写者占用、一次IO错误和OOM不阻止后续加载。恢复副本只在一次性容器端口夹具中持WRITE租约写入，不是上传事务验收；重挂同一份私有书库时明确保留菜单预览种子，不把它当真实阅读记录。`local-samples`增加独立`local-menu-missing`/`local-menu-corrupt`两组；每次须全新容器，不能在同一容器连续复用固定`/sdcard`和`/data`目录。
+
 `epub_cover_page`检查独页封面竖图/横图/极长图/方图的原图比例、双向居中与实际像素边界，另检正文夹图/配文/多图/徽标及坏图占位。`tools/test_local_cover_fit.py --capture build-host/epub_app_capture`用用户全部EPUB和实际霞鹜文楷逐本捕获前三页；可传`--baseline <修改前捕获器>`逐完整帧、页脚和源位置对照。该入口已加入`local-samples`，原件只读，窗口与主机结果不代替面板验收。
 
 0.6.15的封面重绑检查为`cover_resident`，以1/2/13个公开边界样本对照原缓存路径、随机子集/环形换序、继续阅读重复、来源变化、取消及USB；不替代实际书籍。`tools/test_local_cover_resident.py --binary build-host/cover_resident_validate`扫描全部用户EPUB/TXT副本，每13本一组，比较41次完整帧并统计真实PNCV文件读取。`tools/test_local_cover_priority.py --binary build-host/cover_priority_validate --rebind-before-write`在尚未落盘时换序、返回首页再回书库，对照最终PNCV完整字节与唯一写入次数。两者已纳入`local-samples`，原件SHA须保持；端口读取计数和主机画面不是实卡或面板计时。
@@ -54,6 +56,8 @@ $env:DOCKER_CONTEXT='desktop-linux'
 `xhtml_compat`用内存片段检查词法边界、分块、声明/CDATA/实体、截断根、输入错误/取消、逐分配失败及嵌套XML诊断。综合入口追加`tools/test_local_compat.py`，只从用户原书提取实际失败章，独立构造修正副本并对照1/17/4096字节短读、整本事件摘要、实际字体全帧/后续分页位置、受限池、v1/v2缓存重开及坏CRC/缺失结束根不出半帧；结果在`build-dev/local-compat/`。正常版本1包继续可用，成功容错的章单独写版本2，不能把其接管暂存当落盘。首次异常源多一遍检查，主机结果不代表设备响应或全格式兼容。
 
 `cover_steps`用真实文件观察封面缓存每次最多4KiB写入，逐正常阶段中断后验证原像素重试不再解码；另覆盖取消暂停、低余量、来源变化、部分写后失卡、写入/同步/替换失败、模拟FAT不可覆盖的备份读取/回滚和零租约。`cover_window`检查真实窗口循环的冷提取/重开缓存像素一致、细步骤、键盘输入期间取消/重试及退出。CRC分块与系统调用计数不是时间保证；真实FAT掉电、最大同步/关闭耗时和面板响应另验。
+
+POSIX的`cover_window`持久化场景等待三条实际`cover.cache-clean`回执，再由SDL信号处理转成正常QUIT；测试显式启用其信号处理，要求退出成功与池归零。30秒仅为卡死看门狗，不把1500ms脚本等待当作全部fsync完成上限；原同步/清理次数、三包落盘、缓存重开整帧及中断暂存检查保持。非POSIX沿原脚本退出，不以主机文件系统时序推导设备指标。
 
 | 命令 | 产物/行为 | 证明什么 |
 | --- | --- | --- |

@@ -95,6 +95,8 @@ def main():
                     ["python3" if docker else sys.executable, "tools/test_local_device_shelf.py", "--binary", "build-host/device_shelf_validate"],
                     ["python3" if docker else sys.executable, "tools/test_local_menu_probe.py", "--binary", "build-host/device_menu_probe"],
                     ["python3" if docker else sys.executable, "tools/test_local_menu_probe.py", "--binary", "build-host/device_menu_probe", "--cancel-system", "--output", "build-dev/local-menu-cancel"],
+                    ["python3" if docker else sys.executable, "tools/test_local_menu_probe.py", "--binary", "build-host/device_menu_probe", "--system-failure", "missing", "--recovered-baseline", "build-dev/local-menu-probe", "--output", "build-dev/local-menu-missing"],
+                    ["python3" if docker else sys.executable, "tools/test_local_menu_probe.py", "--binary", "build-host/device_menu_probe", "--system-failure", "corrupt", "--recovered-baseline", "build-dev/local-menu-probe", "--output", "build-dev/local-menu-corrupt"],
                     ["python3" if docker else sys.executable, "tools/test_local_root_navigation.py", "--sim", "build-sim-sdl-idf/pn_sim"],
                     ["python3" if docker else sys.executable, "tools/test_local_text_inspect.py", "--binary", "build-host/test_text_inspect"],
                     ["python3" if docker else sys.executable, "tools/test_local_text_decode.py", "--sim", "build-sim-sdl-idf/pn_sim"],

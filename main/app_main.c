@@ -79,6 +79,7 @@
 #include <sys/stat.h>
 #include <stdio.h>
 #include <time.h>
+#include <errno.h>
 static const char *TAG="pico_nano";
 static read_pico_handle_t hardware;
 static pn_pool_t pool;
@@ -100,7 +101,8 @@ static void management_font_end(pn_font_t *font){if(pool.limit<4u*1024u*1024u ||
 /// 系统源关闭或换代前释放界面消费者，避免缓存借用旧TF句柄。/ Release UI consumers before system-source close/replacement to avoid stale TF handles.
 static void management_fonts_close(void){shelf_draw_valid=false;pn_settings_ui_close(&settings_ui);pn_font_close(&management_font);pn_w_font_scope_end(&management_scope);}
 static pn_cover_work_t cover_work; ///< 封面解析/解码/写入由产品owner分步推进 / Cover parsing/decoding/writes advanced by the product owner
-static void system_font_release(void){pn_cover_work_abort(&cover_work);(void)pn_hot_session_drop(&hot_session);management_fonts_close();(void)pn_font_system_close();}
+static struct {uint64_t epoch;bool stable;} system_font_failure; ///< 仅当前挂载的稳定失败，资源交接清除 / Stable failure for this mount only, cleared on resource handoff
+static void system_font_release(void){system_font_failure.epoch=0;system_font_failure.stable=false;pn_cover_work_abort(&cover_work);(void)pn_hot_session_drop(&hot_session);management_fonts_close();(void)pn_font_system_close();}
 
 static pn_media_t sd_media;
 static pn_device_sd_t sd_recovery; ///< TF挂载请求的异步完成状态 / Asynchronous completion state of the TF mount request
@@ -748,8 +750,18 @@ static void system_font_ready(void){
         // 有效性检查也会返回协作取消；取消不是源失效，不能拆掉仍有效的界面缓存。
         // Availability also observes cooperative cancellation; cancellation is not source invalidation and must not tear down valid UI caches.
         if(pn_cancel_checkpoint()!=PN_OK)return;
-        if(opening)management_fonts_close();
+        if(system_font_failure.epoch!=sd_media.epoch)system_font_failure.stable=false;
+        if(opening && system_font_failure.stable && system_font_failure.epoch==sd_media.epoch)return;
+        // 仍被借用的旧外置源先归还；不可变内置源可以等新源成功后再关闭，失败保留其字形。
+        // Retire consumers of an old external source first; immutable resident consumers close only after a new source succeeds, preserving glyphs on failure.
+        bool retired=opening && pn_font_system_retained();if(retired)management_fonts_close();
         pn_status_t s=pn_font_system_open(&pool,&sd_media,PN_SD_MOUNT "/" PN_SD_SYSTEM_FONT);
+        if(s==PN_OK){system_font_failure.stable=false;if(opening && !retired)management_fonts_close();}
+        else if(s!=PN_CANCELLED && pn_cancel_checkpoint()==PN_OK && sd_media.available){
+            bool stable=s==PN_CORRUPT || s==PN_UNSUPPORTED;
+            if(s==PN_IO){struct stat info;stable=stat(PN_SD_MOUNT "/" PN_SD_SYSTEM_FONT,&info)!=0 && errno==ENOENT;}
+            if(stable){system_font_failure.epoch=sd_media.epoch;system_font_failure.stable=true;}
+        }
         if(opening)ESP_LOGI(TAG,"System font open status=%d elapsed=%llu ms epoch=%llu",(int)s,(unsigned long long)(now_ms()-started),(unsigned long long)sd_media.epoch);
         if(s==PN_OK && (!reported || reported_epoch!=sd_media.epoch)){pn_text_source_t source=pn_font_builtin_source();(void)source;ESP_LOGI(TAG,"System font source=TF bytes=%llu",(unsigned long long)source.size);reported=true;reported_epoch=sd_media.epoch;}
         else if(s!=PN_OK && s!=PN_IO)ESP_LOGW(TAG,"System font unavailable: %d",(int)s);
