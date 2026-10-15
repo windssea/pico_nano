@@ -20,9 +20,12 @@ int main(void){
     pn_layout_t layout={25,20,10,8,0,0,0,false};pn_font_metrics_t metrics={NULL,advance};pn_page_glyph_t glyphs[100];pn_reader_t reader;
     assert(pn_reader_init(&reader,&source,PN_TEXT_UTF8,&book,&layout,&metrics,glyphs,100,(pn_job_token_t){1,1},NULL)==PN_OK);
     pn_txt_progress_t position={0};assert(pn_reader_progress(&reader,&position)==PN_EMPTY);
-    pn_reader_receipt_t page,other;assert(pn_reader_prepare(&reader,PN_READ_FIRST,0,&page)==PN_OK && page.anchor.begin==0 && page.anchor.end==10);
+    pn_reader_receipt_t page,other={.ticket=77};assert(pn_reader_prepared(NULL,&other)==PN_INVALID && pn_reader_prepared(&reader,&other)==PN_EMPTY && other.ticket==77);
+    assert(pn_reader_prepare(&reader,PN_READ_FIRST,0,&page)==PN_OK && page.anchor.begin==0 && page.anchor.end==10);
+    assert(pn_reader_prepared(&reader,&other)==PN_OK && other.ticket==page.ticket && other.owner==page.owner && other.anchor.end==10 && !reader.has_visible);
     assert(pn_reader_prepare(&reader,PN_READ_NEXT,0,&other)==PN_BUSY);assert(pn_reader_progress(&reader,&position)==PN_EMPTY);
     assert(pn_reader_complete(&reader,&page,true,0)==PN_OK);
+    other.ticket=77;assert(pn_reader_prepared(&reader,&other)==PN_EMPTY && other.ticket==77);
     assert(pn_reader_complete(&reader,&page,true,0)==PN_INVALID);
     assert(pn_reader_prepare(&reader,PN_READ_NEXT,0,&page)==PN_OK && page.anchor.begin==10);
     assert(pn_reader_complete(&reader,&page,false,1)==PN_IO);
@@ -40,6 +43,7 @@ int main(void){
     assert(pn_reader_prepare(&reader,PN_READ_JUMP,303,&page)==PN_OK);assert(pn_reader_complete(&reader,&page,true,100)==PN_OK);
     assert(pn_reader_prepare(&reader,PN_READ_NEXT,0,&page)==PN_OK);
     layout.width=40;assert(pn_reader_reflow(&reader,&layout)==PN_OK);
+    assert(pn_reader_prepared(&reader,&other)==PN_EMPTY);
     assert(pn_reader_complete(&reader,&page,true,101)==PN_STALE_JOB);
     assert(pn_reader_prepare(&reader,PN_READ_CURRENT,0,&page)==PN_OK && page.anchor.begin==303);
     assert(pn_reader_complete(&reader,&page,true,102)==PN_OK);

@@ -47,6 +47,7 @@ typedef struct {
     bool persistent,has_restore,has_visible,lost,force_full,last_confirmed,style_pending,font_unavailable;
     uint64_t *chapter_starts; ///< 会话章节累计长度索引 / Session cumulative chapter-length index
     bool suspended; ///< 已保存的热挂起 / Saved warm suspension
+    bool unshown_layout; ///< 本应用拥有未确认的首屏候选，不是可见位置 / This app owns an unconfirmed first page, never a visible position
     pn_reader_overlay_fn font_view;void *font_view_ctx; ///< 仅本次字体事务借用的目标页 / Destination page borrowed only during this font transaction
     pn_reader_body_layer_t body_layer; ///< 控制层借用的常驻正文叠层 / Persistent body decoration borrowed from the controller
     pn_page_bitmap_t bitmap; ///< 独立可回收正文帧，扫描期间只修改此帧 / Independent reclaimable body frame, the only pixels modified during overlapping
@@ -403,7 +404,21 @@ static pn_status_t navigate(pn_epub_app_t *app,pn_reader_action_t action,const p
     // 普通翻页复用页脚face与有界字形，图片路径仍可主动释放。/ Reuse the footer face and bounded glyphs on text turns; images may still release it.
     pn_status_t status=scratch(a);if(status!=PN_OK)return status;
     pn_read_intent_t intent=jump?PN_READ_JUMP:action==PN_APP_NEXT?PN_READ_NEXT:action==PN_APP_PREVIOUS?PN_READ_PREVIOUS:action==PN_APP_BEGINNING?PN_READ_FIRST:a->has_visible?PN_READ_CURRENT:a->has_restore?PN_READ_JUMP:PN_READ_FIRST;
-    pn_epub_reader_receipt_t receipt;status=index_layout(a);if(status==PN_OK)status=pn_epub_reader_prepare(&a->reader,intent,intent==PN_READ_JUMP?(jump?jump:&a->restored.location):NULL,&receipt);if(status!=PN_OK)return status;
+    pn_epub_reader_receipt_t receipt;bool prepared=false;
+    if(a->unshown_layout){
+        prepared=pn_epub_reader_prepared(&a->reader,&receipt)==PN_OK;
+        if(prepared && (action!=PN_APP_OPEN || jump || a->font_view || receipt.intent!=intent)){
+            (void)pn_epub_reader_complete(&a->reader,&receipt,false,now);prepared=false;
+        }
+        a->unshown_layout=false;
+    }
+    status=index_layout(a);
+    if(status!=PN_OK){if(prepared)(void)pn_epub_reader_complete(&a->reader,&receipt,false,now);return status;}
+    if(prepared){
+        status=pn_zip_validate(&a->zip);
+        if(status!=PN_OK)(void)pn_epub_reader_complete(&a->reader,&receipt,false,now);
+    }else status=pn_epub_reader_prepare(&a->reader,intent,intent==PN_READ_JUMP?(jump?jump:&a->restored.location):NULL,&receipt);
+    if(status!=PN_OK)return status;
     // 新页隐藏返回提示，只有呈现确认后才清除返回状态。/ Hide the return hint on the new page; clear its state only after presentation is confirmed.
     bool dismiss_return=!jump && (action==PN_APP_NEXT || action==PN_APP_PREVIOUS || action==PN_APP_BEGINNING);
     pn_draw_lease_t lease={0};pn_frame_t *frame=NULL;
@@ -534,13 +549,20 @@ static pn_status_t verify_sources(app_t *a,bool require_ui){
     if(s==PN_OK && a->fallback_file.handle)s=pn_text_file_verify_handle(a->pool,&a->fallback_file);
     return s;
 }
-static bool unshown(const app_t *a){return !a->has_visible && !a->page.valid && !a->suspended && !a->style_preview && !a->font_preview && !a->font_pending && !a->global_pending && !a->style_pending && !a->body_layer.paint && a->display.active<0 && a->display.queued<0;}
+static bool unshown(const app_t *a){return !a->has_visible && (!a->page.valid || a->unshown_layout) && !a->suspended && !a->style_preview && !a->font_preview && !a->font_pending && !a->global_pending && !a->style_pending && !a->body_layer.paint && a->display.active<0 && a->display.queued<0;}
 pn_status_t pn_epub_app_prepare_unshown(pn_epub_app_t *app){
     if(!app || !app->impl)return PN_INVALID;
     app_t *a=app->impl;if(!unshown(a))return PN_BUSY;
     pn_book_id_t id;pn_status_t s=pn_font_source_identity(&a->font_source,&id);
     if(s==PN_OK)s=pn_font_chain_validate(&a->chain);
-    return s==PN_OK?pn_media_validate(a->media,&a->book_lease):s;
+    if(s==PN_OK)s=pn_media_validate(a->media,&a->book_lease);
+    if(s==PN_OK && !a->unshown_layout){
+        // 保留真实reader的首屏候选，不伪造呈现或创建持久索引。
+        // Retain the real reader's first-page candidate without fake presentation or persistent-index creation.
+        pn_epub_reader_receipt_t receipt;s=pn_epub_reader_prepare(&a->reader,a->has_restore?PN_READ_JUMP:PN_READ_FIRST,a->has_restore?&a->restored.location:NULL,&receipt);
+        if(s==PN_OK)a->unshown_layout=true;
+    }
+    return s;
 }
 pn_status_t pn_epub_app_verify_unshown(pn_epub_app_t *app){if(!app || !app->impl)return PN_INVALID;app_t *a=app->impl;return unshown(a)?verify_sources(a,false):PN_BUSY;}
 pn_status_t pn_epub_app_discard_unshown(pn_epub_app_t *app){

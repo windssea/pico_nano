@@ -19,7 +19,12 @@ static pn_status_t glyph(void *ctx,uint32_t cp,const pn_xhtml_style_t *style,pn_
 static void location(pn_epub_location_t *out,const char *path,const pn_xhtml_position_t *position){*out=(pn_epub_location_t){.version=1,.chapter_start=position==NULL};strcpy(out->path,path);if(position)out->position=*position;}
 static bool same(pn_epub_location_t a,pn_epub_location_t b){return !strcmp(a.path,b.path) && a.position.element==b.position.element && a.position.run==b.position.run && a.position.offset==b.position.offset && a.position.kind==b.position.kind && a.chapter_start==b.chapter_start && a.version==b.version;}
 static void expect(pn_epub_reader_t *r,const char *wanted){const pn_epub_page_t *page;assert(pn_epub_reader_page(r,&page)==PN_OK && page->valid && !page->owner && page->count==strlen(wanted));for(size_t i=0;i<page->count;i++)assert(page->nodes[i].codepoint==(unsigned char)wanted[i]);}
-static void show(pn_epub_reader_t *r,pn_read_intent_t intent,const pn_epub_location_t *jump,const char *text,uint64_t *time){pn_epub_reader_receipt_t receipt;assert(pn_epub_reader_prepare(r,intent,jump,&receipt)==PN_OK);expect(r,text);assert(pn_epub_reader_complete(r,&receipt,true,(*time)++)==PN_OK);}
+static void show(pn_epub_reader_t *r,pn_read_intent_t intent,const pn_epub_location_t *jump,const char *text,uint64_t *time){
+    pn_epub_reader_receipt_t receipt,borrowed={.ticket=77};assert(pn_epub_reader_prepared(r,&borrowed)==PN_EMPTY && borrowed.ticket==77);
+    assert(pn_epub_reader_prepare(r,intent,jump,&receipt)==PN_OK);expect(r,text);
+    assert(!pn_epub_reader_prepared(r,&borrowed) && borrowed.ticket==receipt.ticket && borrowed.owner==r && same(borrowed.anchor.begin,receipt.anchor.begin));
+    assert(pn_epub_reader_complete(r,&borrowed,true,(*time)++)==PN_OK && pn_epub_reader_prepared(r,&borrowed)==PN_EMPTY);
+}
 int main(int argc,char **argv){
     pn_epub_reader_t reader={0};pn_epub_reader_receipt_t receipt={0};pn_epub_progress_t progress;
     assert(pn_epub_reader_prepare(&reader,PN_READ_FIRST,NULL,&receipt)==PN_INVALID);assert(pn_epub_reader_progress(&reader,&progress)==PN_INVALID);pn_epub_reader_close(&reader);

@@ -7,15 +7,26 @@
 #include "pn_font_preferences.h"
 #include "pn_cancel.h"
 #include "pn_hot_session.h"
+#include "pn_profile.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
 
 static bool tracing;static uint64_t fallback_size,book_size;static unsigned hashes,book_hashes,presents,font_opens;static size_t font_read_bytes;static const char *fallback_path;
 static const char *state_path;static FILE *writers[8];static size_t state_writes;
 static FILE *font_handles[4];
+static const char *profile_stage="setup";
+static unsigned layout_calls;
+/// 主机单调时钟仅用于阶段比较，不推导面板时延。/ Host monotonic time supports phase comparisons, never panel latency claims.
+static uint64_t profile_clock(void *ctx){(void)ctx;struct timespec t;assert(!clock_gettime(CLOCK_MONOTONIC,&t));return (uint64_t)t.tv_sec*1000000u+(uint64_t)t.tv_nsec/1000u;}
+static void profile_emit(void *ctx,const pn_profile_event_t *e){
+    (void)ctx;if(!tracing)return;
+    if(!strcmp(e->phase,"txt.prepare") || !strcmp(e->phase,"txt.jump") || !strcmp(e->phase,"epub.prepare") || !strcmp(e->phase,"epub.jump"))layout_calls++;
+    if(getenv("PN_FONT_STARTUP_PROFILE"))printf("phase stage=%s name=%s us=%llu status=%d begin=%zu end=%zu peak=%zu\n",profile_stage,e->phase,(unsigned long long)e->elapsed_us,e->status,e->begin_bytes,e->end_bytes,e->peak_bytes);
+}
 // 从打开到首屏统计原书实际stdio调用，区别于ZIP逻辑读和面板计时。
 // Count actual book stdio calls from open through the first frame, separately from logical ZIP reads or panel timing.
 static FILE *book_handles[2];static const char *book_path;static unsigned book_opens,book_reads,book_seeks;static size_t book_read_bytes;
@@ -47,6 +58,7 @@ static pn_status_t show(void *ctx,const pn_frame_t *frame,pn_refresh_t profile){
 int main(int argc,char **argv){
     if(argc!=4)return 2;
     state_path=argv[3];
+    pn_profile_port(profile_clock,profile_emit,NULL);
     fault=getenv("PN_FONT_STARTUP_FAULT");
     struct stat info;assert(!stat(argv[1],&info) && info.st_size>0);book_size=(uint64_t)info.st_size;
     pn_pool_t pool;assert(pn_pool_init(&pool,6u*1024u*1024u,NULL,NULL,NULL)==PN_OK);
@@ -69,19 +81,21 @@ int main(int argc,char **argv){
     if(warm){
         pn_catalog_item_t item={.identified=true,.format=epub?PN_BOOK_EPUB:PN_BOOK_TXT,.size=book_size};assert(strlen(argv[1])<sizeof item.path);strcpy(item.path,argv[1]);
         assert(pn_identity_file(&media,&guard,argv[1],PN_TEXT_FILE_MAX_BYTES,&item.expected)==PN_OK);
-        tracing=true;pn_status_t staged=pn_hot_session_prepare(&prepared,&pool,&media,&item,NULL,argv[3],44,1,0,0);tracing=false;
+        profile_stage="idle";tracing=true;pn_status_t staged=pn_hot_session_prepare(&prepared,&pool,&media,&item,NULL,argv[3],44,1,0,0);tracing=false;
         if(staged!=PN_OK)fprintf(stderr,"idle_prepare failed status=%d used=%zu txt=%d epub=%d\n",(int)staged,pool.used,prepared.txt.impl!=NULL,prepared.epub.impl!=NULL);
         assert(staged==PN_OK);
         assert(prepared.prepared && !presents && !state_writes && prepared.preparations==1);
         printf("idle_prepare book_hashes=%u font_hashes=%u book_bytes=%zu font_bytes=%zu state_writes=%zu\n",book_hashes,hashes,book_read_bytes,font_read_bytes,state_writes);
+        printf("idle_layout calls=%u\n",layout_calls);layout_calls=0;
         hashes=book_hashes=font_opens=book_opens=book_reads=book_seeks=0;font_read_bytes=book_read_bytes=0;
     }
-    tracing=true;pn_status_t status=warm?pn_hot_session_take_prepared(&prepared,&media,argv[1],epub?PN_BOOK_EPUB:PN_BOOK_TXT,&prepared.book,1,0,&t,&e):epub?pn_epub_app_open_on_media(&e,&pool,&media,argv[1],NULL,argv[3],44,0):pn_reader_app_open_on_media(&t,&pool,&media,argv[1],NULL,argv[3],44,0);
+    profile_stage="click";tracing=true;pn_status_t status=warm?pn_hot_session_take_prepared(&prepared,&media,argv[1],epub?PN_BOOK_EPUB:PN_BOOK_TXT,&prepared.book,1,0,&t,&e):epub?pn_epub_app_open_on_media(&e,&pool,&media,argv[1],NULL,argv[3],44,0):pn_reader_app_open_on_media(&t,&pool,&media,argv[1],NULL,argv[3],44,0);
     bool expected_fallback=!primary && !is_fault("missing") && !is_fault("replaced") && !is_fault("bad-primary");
     if(status==PN_OK && expected_fallback)assert((epub?pn_epub_app_fallback_font(&e,argv[2]):pn_reader_app_fallback_font(&t,argv[2]))==PN_BUSY);
     if(status==PN_OK)status=epub?pn_epub_app_step(&e,PN_APP_OPEN,1,show,NULL):pn_reader_app_step(&t,PN_APP_OPEN,1,show,NULL);
     pn_cancel_leave(&scope);tracing=false;unsigned startup_hashes=hashes,startup_opens=font_opens,startup_book_hashes=book_hashes;size_t startup_bytes=font_read_bytes;
     unsigned startup_book_opens=book_opens,startup_book_reads=book_reads,startup_book_seeks=book_seeks;size_t startup_book_bytes=book_read_bytes;
+    printf("click_layout calls=%u\n",layout_calls);profile_stage="turns";
     unsigned get_hashes=0;
     if(status==PN_OK){pn_font_preferences_t selected;char directory[PN_FONT_REFERENCE_PATH_MAX];tracing=true;
         pn_status_t loaded=epub?pn_epub_app_fonts_get(&e,&selected,directory,sizeof directory):pn_reader_app_fonts_get(&t,&selected,directory,sizeof directory);

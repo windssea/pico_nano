@@ -232,6 +232,12 @@ pn_status_t pn_epub_reader_prepare(pn_epub_reader_t *handle,pn_read_intent_t int
     if(borrowing)pn_cache_pin(&r->cache);
     pn_status_t status=pn_epub_reader_prepare_impl(handle,intent,jump,out);if(borrowing)pn_cache_unpin(&r->cache);pn_profile_end(&span,status);return status;
 }
+pn_status_t pn_epub_reader_prepared(const pn_epub_reader_t *handle,pn_epub_reader_receipt_t *out){
+    if(!handle || !handle->impl || !out)return PN_INVALID;
+    const reader_t *r=handle->impl;
+    if(!r->preparing || !r->page->valid || r->pending.token.session!=r->token.session || r->pending.token.generation!=r->token.generation)return PN_EMPTY;
+    *out=r->pending;return PN_OK;
+}
 pn_status_t pn_epub_reader_page(pn_epub_reader_t *handle,const pn_epub_page_t **out){
     if(!handle || !handle->impl || !out)return PN_INVALID;
     reader_t *r=handle->impl;if(!r->page->valid)return PN_EMPTY;

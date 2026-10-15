@@ -69,6 +69,7 @@ typedef struct {
     pn_reader_body_layer_t body_layer; ///< 控制层借用的常驻正文叠层 / Persistent body decoration borrowed from the controller
     uint64_t last_now;
     bool suspended; ///< 保留已确认正文的热挂起 / Warm suspension retaining confirmed text
+    bool unshown_layout; ///< 本应用拥有尚未显示的首屏候选，不代表已阅读 / This app owns an unshown first-page candidate, never a reading confirmation
     bool persistent,has_restore,media_lost,force_full;
     pn_refresh_policy_t refresh;
 } app_t;
@@ -343,7 +344,21 @@ static pn_status_t step_location(pn_reader_app_t *app,pn_reader_action_t action,
     else if(action==PN_APP_BEGINNING)intent=PN_READ_FIRST;
     // 确认继续阅读后丢弃跳转返回点；候选页先不画返回入口。/ Discard the jump origin after confirmed continued reading; omit the entry from the candidate page.
     bool dismiss_return=!jump && (action==PN_APP_NEXT || action==PN_APP_PREVIOUS || action==PN_APP_BEGINNING);
-    pn_reader_receipt_t receipt;pn_status_t s=index_layout(a);if(s==PN_OK)s=pn_reader_prepare(&a->reader,intent,offset,&receipt);if(s!=PN_OK)return s;
+    pn_reader_receipt_t receipt;bool prepared=false;
+    if(a->unshown_layout){
+        prepared=pn_reader_prepared(&a->reader,&receipt)==PN_OK;
+        if(prepared && (action!=PN_APP_OPEN || jump || a->font_view || receipt.intent!=intent)){
+            (void)pn_reader_complete(&a->reader,&receipt,false,now);prepared=false;
+        }
+        a->unshown_layout=false;
+    }
+    pn_status_t s=index_layout(a);
+    if(s!=PN_OK){if(prepared)(void)pn_reader_complete(&a->reader,&receipt,false,now);return s;}
+    if(prepared){
+        s=a->reader.decoder.source.validate?a->reader.decoder.source.validate(a->reader.decoder.source.ctx):PN_OK;
+        if(s!=PN_OK)(void)pn_reader_complete(&a->reader,&receipt,false,now);
+    }else s=pn_reader_prepare(&a->reader,intent,offset,&receipt);
+    if(s!=PN_OK)return s;
     pn_draw_lease_t lease={0};pn_frame_t *frame=NULL;s=pn_display_begin_draw(&a->display,a->reader.token,&lease,&frame);
     if(s==PN_OK)s=a->font_view?paint_font_view(a,frame):render(a,frame,&receipt,dismiss_return?false:return_hint<0?a->has_bookmark_origin:return_hint!=0);
     if(s==PN_OK && !a->font_view && a->body_layer.paint)s=a->body_layer.paint(a->body_layer.ctx,frame);
@@ -413,13 +428,20 @@ static pn_status_t verify_sources(app_t *a){
     if(s==PN_OK && a->fallback_file.handle)s=pn_text_file_verify_handle(a->pool,&a->fallback_file);
     return s;
 }
-static bool unshown(const app_t *a){return !a->reader.has_visible && !a->reader.preparing && !a->suspended && !a->style_preview && !a->font_preview && !a->font_pending && !a->global_pending && !a->style_pending && !a->body_layer.paint && a->display.active<0 && a->display.queued<0;}
+static bool unshown(const app_t *a){return !a->reader.has_visible && (!a->reader.preparing || a->unshown_layout) && !a->suspended && !a->style_preview && !a->font_preview && !a->font_pending && !a->global_pending && !a->style_pending && !a->body_layer.paint && a->display.active<0 && a->display.queued<0;}
 pn_status_t pn_reader_app_prepare_unshown(pn_reader_app_t *app){
     if(!app || !app->impl)return PN_INVALID;
     app_t *a=app->impl;if(!unshown(a))return PN_BUSY;
     pn_book_id_t id;pn_status_t s=a->external_font?pn_font_source_identity(&a->font_source,&id):pn_font_verify_retained(&a->body);
     if(s==PN_OK)s=pn_font_chain_validate(&a->chain);
-    return s==PN_OK?pn_media_validate(a->book_media,&a->book_lease):s;
+    if(s==PN_OK)s=pn_media_validate(a->book_media,&a->book_lease);
+    if(s==PN_OK && !a->unshown_layout){
+        // 不打开可写页索引，也不调用显示；候选由正常OPEN接管或直接析构。
+        // Open no writable page index and never present; normal OPEN takes the candidate, or destruction releases it.
+        pn_reader_receipt_t receipt;s=pn_reader_prepare(&a->reader,a->has_restore?PN_READ_JUMP:PN_READ_FIRST,a->restored.source_offset,&receipt);
+        if(s==PN_OK)a->unshown_layout=true;
+    }
+    return s;
 }
 pn_status_t pn_reader_app_verify_unshown(pn_reader_app_t *app){if(!app || !app->impl)return PN_INVALID;app_t *a=app->impl;return unshown(a)?verify_sources(a):PN_BUSY;}
 pn_status_t pn_reader_app_discard_unshown(pn_reader_app_t *app){

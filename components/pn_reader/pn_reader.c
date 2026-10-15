@@ -154,6 +154,11 @@ pn_status_t pn_reader_prepare(pn_reader_t *r,pn_read_intent_t intent,uint64_t of
     if(borrowing)pn_cache_pin(&r->cache);
     pn_status_t status=pn_reader_prepare_impl(r,intent,offset,receipt);if(borrowing)pn_cache_unpin(&r->cache);pn_profile_end(&span,status);return status;
 }
+pn_status_t pn_reader_prepared(const pn_reader_t *r,pn_reader_receipt_t *out){
+    if(!r || !out)return PN_INVALID;
+    if(!r->preparing || !r->page.valid || r->pending.token.session!=r->token.session || r->pending.token.generation!=r->token.generation)return PN_EMPTY;
+    *out=r->pending;return PN_OK;
+}
 pn_status_t pn_reader_progress(const pn_reader_t *r,pn_txt_progress_t *progress){
     if(!r || !progress || !r->decoder.source.read_at)return PN_INVALID;
     if(!r->has_visible)return PN_EMPTY;

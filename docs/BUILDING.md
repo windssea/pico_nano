@@ -129,7 +129,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/run_sim.ps1
 
 原件只读，仅复制到隔离目录。`tools/run_sim.ps1`可指定 `-Books/-Font/-FontDir/-WallpaperDir` 和 `-Timing`，容器输入须在工作区内；未指定壁纸目录时用空目录。模拟器时区Asia/Shanghai，电量为演示值，锁页预览不模拟PMU功耗。预算上限6MiB，低预算可降，不可扩大掩盖设备故障。已有公共小型边界fixture仅用于单元回归，不能替代用户资源的综合测试和可见验收。
 
-`root_navigation_queue_window`使用既有公开边界文本，分别对四根页和反馈开/关注入扫描中第二次底栏接触，核对最终整帧与串行点击一致，并验证旧内容区触点仍拒绝。`PN_ROOT_RACE_ARTIFACTS`可保留全部日志与画面；`race-root:延迟毫秒:起点X:起点Y:终点X:终点Y`在延迟后释放起点并向终点投递独立点击，仅最终松手确认脚本。`PN_SIM_CAPTURE_CANCELLED=1`仅供竞争诊断捕获已成功显示、随后因新输入取消准备的帧；默认仍跳过这类开发截图，不改变成功显示回执。模拟等待与公开边界样本不代替真实用户整库/字体及面板验收。
+`root_navigation_queue_window`使用既有公开边界文本，分别对四根页和反馈开/关注入扫描中第二次底栏接触，核对最终整帧与串行点击一致，并验证旧内容区触点仍拒绝。`PN_ROOT_RACE_ARTIFACTS`可保留全部日志与画面；未设置时，首次最终帧差异会先复制产物到模拟器构建目录内的独立`artifacts/root-queue-failure-*`目录并打印路径，容器退出后仍保留。第二点击及密集导航像素测试均固定容量显示输入，完整帧/次数/pending断言保留；`race-root:延迟毫秒:起点X:起点Y:终点X:终点Y`在延迟后释放起点并向终点投递独立点击，仅最终松手确认脚本。`PN_SIM_CAPTURE_CANCELLED=1`仅供竞争诊断捕获已成功显示、随后因新输入取消准备的帧；默认仍跳过这类开发截图，不改变成功显示回执。模拟等待与公开边界样本不代替真实用户整库/字体及面板验收。
 
 `root_navigation_coalesce_window`另查四根页、反馈开/关的密集独立点击：`race-roots:延迟毫秒:首目标:后续目标1:后续目标2:末目标`使用0～3底栏编号，首目标扫描中投递另三次完整接触，核对最终完整帧与串行末目标相同，积压三目标只准备最后一个。`race-focus:延迟毫秒:起点X:起点Y:移动X:移动Y`注入失焦后保持左键的移动，最后才松手，不能把同一持有变成新点击。`PN_ROOT_COALESCE_ARTIFACTS`保留原始日志/帧；扫描中注入须在日志确认pending，不能只凭脚本字符串断言竞态发生。空闲检查须独立配置`--cover-cache`启用索引，冷缓存、释放后等待才要求建索引，不能对未初始化模块要求成功日志。共享`async`及实际`device_management`另查批次上限、后续取消、优先电源项、同一持有、多点/滑入和最终空样本的释放。
 
@@ -146,6 +146,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/run_sim.ps1
 `identity_reuse_host/immutable`核查同路径、媒体、代次、READ资格、取消、旧句柄关闭及PC同大小外部改写；`font_identity_immutable`另确认已加载系统源不能覆盖所选引用的不匹配摘要/长度。`tools/test_local_system_startup.py --binary build-host/font_system_startup_probe --expect-reuse --output build-dev/local-system-startup`逐本逐字体检查系统源已加载后，选择该同路径为正文或补字的打开/NEXT/PREVIOUS。`font_system_startup_probe`仅将文件port切至`PN_TEST_IMMUTABLE_FILE`来复现设备源不可被外部写入的约束，其余阅读代码与主机同源；这不是SDK/TF/面板实测。传`--baseline <独立冻结旧探针>`逐完整帧、原书读取及后续翻页IO对照，要求恰好少读完整字体一次、峰值不增。普通`font_startup_probe`不加`--expect-reuse`另跑同一矩阵，要求保留完整字体核验；两组已接入`local-samples`。`--limit`只供开发子集，报告明确标记，不能当整库通过。
 
 同一工具加`--warm-prepare --expect-reuse`检查未显示准备：记录空闲完整SHA/读取与0次状态写，点击阶段书/字体SHA及打开均0，再核对原始OPEN/NEXT/PREVIOUS全帧。没有`--baseline`时明确以同一个当前程序的普通冷开作策略对照；可另传独立冻结旧冷探针，不能把同程序冷/暖结果称作跨版本实测。`hot_host/immutable`增加未显示所有权、错误身份/路径/格式/策略、首次显示失败无记录、准备/接管取消、24个早期分配故障、菜单cache owner保护、低预算、已有root、TTL不反复重建、USB和媒体失效，显式启动字体的完整身份也在空闲补齐。测试已有公开边界样本只用于契约，用户整库矩阵仍使用原件副本。
+
+继续加`--baseline-warm --expect-layout --baseline <独立旧探针>`可比较两版同样提前开书时的首屏交接：新版本空闲阶段真实FIRST/JUMP排版恰一次，点击不再次prepare；独立旧程序仍在点击排版。探针记录idle/click布局次数，`PN_FONT_STARTUP_PROFILE=1`输出阶段时间与池；这是主机测量，不能作TF或面板时间。`hot_host/immutable`检查重复准备不重排、布局完成后输入取消、非首屏保存后整帧恢复、显式回书首丢弃候选，以及接管后失卡不得呈现；读取核心prepared回执不代表显示成功。
 
 `test_local_menu_probe.py --prepare-books`在原17帧之后追加真实`app_main`的TXT/EPUB准备、1500ms门槛、菜单无额外字体IO、锁屏释放及一次正常OPEN显示，四实际字体均退出池/租约归零；不把内存中构造的已识别Continue选择当作已有阅读记录。此模式每款字体清空一次性容器的私有`/data/progress`，避免上一款实际OPEN写出的记录改变下一款冷菜单；原件和默认记录不动。`prepare_window`另检查真实SDL进程重开的首页空闲准备、冷开最终全帧及设置释放，固定窗口等待后必须看到真实ready/take日志，不以经过时间代替准备成功。这些入口已纳入`local-samples`/窗口回归，不替代面板计时。
 

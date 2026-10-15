@@ -67,6 +67,8 @@ pn_status_t pn_reader_init(pn_reader_t *reader,const pn_text_source_t *source,pn
 /// 准备后返回receipt；pending期间拒绝再次准备；不更改visible或保存状态。
 /// Return receipt after preparation; reject another request while pending; preserve visible/save state.
 pn_status_t pn_reader_prepare(pn_reader_t *reader,pn_read_intent_t intent,uint64_t offset,pn_reader_receipt_t *receipt);
+/// 借出当前完整候选的回执；不准备新页、不确认显示，输出在EMPTY时保持。/ Copy the current complete candidate receipt without preparing or confirming a page; preserve output on EMPTY.
+pn_status_t pn_reader_prepared(const pn_reader_t *,pn_reader_receipt_t *);
 /// 把任意字节位置对齐到不早于它的字符起点（超过末尾则取最后一个字符），供按比例跳转使用；只解码，不排版。
 /// Align an arbitrary byte position to the first character start at or after it (the last character past the end), for proportional jumps; decodes only, never paginates.
 pn_status_t pn_reader_align(const pn_reader_t *reader,uint64_t offset,uint64_t *aligned);
