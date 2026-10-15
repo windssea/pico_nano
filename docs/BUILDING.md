@@ -25,6 +25,8 @@ $env:DOCKER_CONTEXT='desktop-linux'
 
 ## 日常命令和产物
 
+未发布的封面重绑检查为`cover_resident`，以1/2/13个公开边界样本对照原缓存路径、随机子集/环形换序、继续阅读重复、来源变化、取消及USB；不替代实际书籍。`tools/test_local_cover_resident.py --binary build-host/cover_resident_validate`扫描全部用户EPUB/TXT副本，每13本一组，比较41次完整帧并统计真实PNCV文件读取。`tools/test_local_cover_priority.py --binary build-host/cover_priority_validate --rebind-before-write`在尚未落盘时换序、返回首页再回书库，对照最终PNCV完整字节与唯一写入次数。两者已纳入`local-samples`，原件SHA须保持；端口读取计数和主机画面不是实卡或面板计时。
+
 0.6.14的`device_async`覆盖真实输入线程对UP占槽的两次空触点和终点投递；`tools/test_local_device_shelf.py --binary build-host/device_shelf_validate`用用户整库副本驱动真实产品翻页路由，覆盖三列/四列/列表、只有DOWN/UP的快速滑动、略斜横滑、普通空报告、垂直/多点取消及首末页。固定`/sdcard`路径仅在全新一次性Docker中创建，脚本不接设备或映射TF；已纳入默认Docker `local-samples`，原生运行须改用该容器入口。SDK替身与窗口不能代替实际触控验收。
 
 0.6.13追加七项`device_sleep_*`检查及`tools/test_local_lock.py --binary build-host/device_lock_validate`（已接入`local-samples`），用用户全部EPUB/TXT与四款字体的副本驱动真实产品锁屏/唤醒路由，每组检查三次锁解锁、完整像素/位置、旧电源事件清理、恢复扫描失败后原位重试及关闭池归零。睡眠适配器的GPIO/PMU/SDK接口为替身；可见模拟器只用于观察锁页/正文，不模拟实际低功耗或硬件唤醒，不能把两者代替真机验收。

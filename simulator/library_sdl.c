@@ -291,22 +291,20 @@ static pn_status_t draw_focus(library_t *s,int before){
 }
 static pn_status_t recent_load(library_t *s);
 /* 最近阅读第一本作为“继续阅读”卡；没有记录时清除。/ The first recent entry becomes the continue-reading card; cleared when there is none. */
-static void covers_last(library_t *s){
-    if(!s->covers)return;
+static bool covers_last(library_t *s,pn_catalog_item_t *last){
     pn_catalog_page_t *tmp=pn_alloc_tagged(s->pool,PN_MEM_UI,sizeof *tmp);bool found=false;
     bool loaded=tmp && recent_load(s)==PN_OK;
     if(loaded && s->page)pn_catalog_apply_recent(s->page,s->recent);
-    if(loaded && s->recent->count && pn_catalog_recent_page(s->recent,0,tmp)==PN_OK && tmp->count){pn_shelf_covers_set_last(s->covers,&tmp->items[0]);found=true;}
-    if(!found)pn_shelf_covers_set_last(s->covers,NULL);
-    pn_free(tmp);
+    if(loaded && s->recent->count && pn_catalog_recent_page(s->recent,0,tmp)==PN_OK && tmp->count){*last=tmp->items[0];found=true;}
+    pn_free(tmp);return found;
 }
 /* 换页：先复用缓存封面再绘制，其余空闲逐条解码。/ Page change: reuse cached covers before drawing; the rest decode one per idle tick. */
 static void covers_reset(library_t *s){
     pn_cover_work_abort(&s->cover_work);
     s->shelf_focus_visible=false;
     covers_ensure(s);if(!s->covers)return;
-    bool changed;covers_last(s);pn_shelf_covers_reset(s->covers,s->page);s->covers_dirty=false;
-    if(*s->cover_dir && pn_shelf_covers_cached(s->covers,s->page,s->pool,&s->media,s->cover_dir,&changed)!=PN_OK)pn_shelf_covers_reset(s->covers,NULL);
+    bool changed;pn_catalog_item_t last;bool has_last=covers_last(s,&last);s->covers_dirty=false;
+    if(pn_shelf_covers_bind(s->covers,s->page,has_last?&last:NULL,s->pool,&s->media,*s->cover_dir?s->cover_dir:NULL,&changed)!=PN_OK)pn_shelf_covers_reset(s->covers,NULL);
 }
 static void covers_tick(library_t *s){
     if(!s->covers)return;

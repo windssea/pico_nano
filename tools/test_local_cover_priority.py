@@ -17,6 +17,7 @@ def main():
     parser.add_argument('--baseline', type=pathlib.Path, help='Optional previous cover_priority_validate for exact cache-byte compatibility')
     parser.add_argument('--compression-probe', action='store_true', help='Optional historical lossless-size probe; does not change the product')
     parser.add_argument('--deny-source-cache', action='store_true', help='Reject optional parent allocations during extraction to check direct-read fallback')
+    parser.add_argument('--rebind-before-write', action='store_true', help='Reorder resident slots before deferred persistence and compare complete cache files')
     parser.add_argument('--output', type=pathlib.Path, default=ROOT / 'build-dev/local-cover-priority')
     args = parser.parse_args()
     books = sorted(p for p in (ROOT / 'tests/testBook').rglob('*') if p.suffix.lower() in ('.epub', '.txt'))
@@ -42,10 +43,16 @@ def main():
                 env['PN_COVER_FAIL_SOURCE_OPTIONAL'] = '1'
             else:
                 env.pop('PN_COVER_FAIL_SOURCE_OPTIONAL', None)
+            if args.rebind_before_write:
+                env['PN_COVER_REBIND_BEFORE_WRITE'] = '1'
+            else:
+                env.pop('PN_COVER_REBIND_BEFORE_WRITE', None)
             result = subprocess.run([str(args.binary.resolve()), str(old), str(new), *map(str, copies)], capture_output=True, text=True, timeout=300, env=env)
             (args.output / f'{first}.log').write_text(result.stdout + result.stderr, encoding='utf-8')
             match = re.search(r'priority books=(\d+) visible_steps=(\d+) all_steps=(\d+) writes=(\d+) syncs=(\d+) extracts=(\d+) peak=(\d+) used=(\d+) live=(\d+)', result.stdout)
             assert result.returncode == 0 and match and match[8] == match[9] == '0', first
+            if args.rebind_before_write:
+                assert 'priority resident_rebind_before_write=1 offpage_resume=1' in result.stdout
             before = {p.name: p.read_bytes() for p in old.glob('*.pnc')}
             after = {p.name: p.read_bytes() for p in new.glob('*.pnc')}
             assert len(before) == len(selected) and before == after, ('cache bytes', first)
@@ -82,7 +89,7 @@ def main():
                 'source_port_reads': int(source[1]) if source else None, 'source_port_bytes': int(source[2]) if source else None,
                 'source_cache_peak': int(source[3]) if source else None, 'bound_sources': int(source[4]) if source else None,
                 'optional_source_requests': int(optional[1]) if optional else None, 'optional_source_denied': int(optional[2]) if optional else None,
-                'baseline_bytes_equal': True if args.baseline else None, 'compression_size_probe_only': compression})
+                'baseline_bytes_equal': True if args.baseline else None, 'resident_rebind_before_write': args.rebind_before_write, 'offpage_resume': args.rebind_before_write, 'compression_size_probe_only': compression})
             print(f'PASS cover priority page={first//6} books={len(selected)} visible={match[2]} all={match[3]}', flush=True)
     report['originals_unchanged'] = all(digest(p) == value for p, value in identities.items())
     assert report['originals_unchanged']

@@ -73,6 +73,22 @@ int main(int argc,char **argv){
         if(active->state[i]==PN_COVER_READY)assert(!memcmp(active->pixels[i],oracle->pixels[i],PN_COVER_BYTES));
     }
     assert(extracts==epubs);unsigned before=extracts;
+    if(getenv("PN_COVER_REBIND_BEFORE_WRITE")){
+        // 原像素尚未落盘时换序；来源键、脏位和唯一写入资格必须随槽移动。
+        // Reorder before persistence: source keys, dirty bits and unique-write ownership must move with their slots.
+        pn_cover_work_abort(&work);pn_catalog_page_t *reordered=calloc(1,sizeof *reordered);assert(reordered);*reordered=*page;
+        for(size_t i=0;i<page->count;i++)reordered->items[i]=page->items[page->count-1-i];
+        pn_catalog_item_t last=active->last;assert(pn_shelf_covers_bind(active,reordered,&last,&pool,&media,argv[2],&changed)==PN_OK);
+        pn_catalog_page_t *home=calloc(1,sizeof *home);assert(home);*home=*reordered;home->count=home->total=home->per_page=1;
+        assert(pn_shelf_covers_bind(active,home,&last,&pool,&media,argv[2],&changed)==PN_OK);
+        assert(pn_shelf_covers_bind(active,reordered,&last,&pool,&media,argv[2],&changed)==PN_OK);free(home);
+        assert(!writes && !syncs && active->cache_dirty && !pn_shelf_covers_pending(active,reordered));
+        for(size_t i=0;i<page->count;i++){size_t old=page->count-1-i;
+            assert(active->state[i]==oracle->state[old] && active->reason[i]==oracle->reason[old] && !memcmp(&active->display[i],&oracle->display[old],sizeof active->display[i]));
+            if(active->state[i]==PN_COVER_READY)assert(!memcmp(active->pixels[i],oracle->pixels[old],PN_COVER_BYTES));
+        }
+        *page=*reordered;free(reordered);printf("priority resident_rebind_before_write=1 offpage_resume=1\n");
+    }
     // 暂存取消不丢失已验证像素或强迫重复解码。/ Cancelling staging neither loses verified pixels nor forces decoding again.
     assert(pn_shelf_covers_work(&work,active,page,&pool,&media,argv[2],salt,pool.limit,&changed)==PN_BUSY && pn_cover_write_pending(&work.writer));
     pn_cover_work_abort(&work);assert(active->cache_dirty && !pool.used && !pool.live && !pn_media_active(&media));

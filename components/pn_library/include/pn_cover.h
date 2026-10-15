@@ -38,9 +38,15 @@ typedef struct {
     pn_book_display_t display[PN_CATALOG_PAGE_MAX+1]; ///< 当前槽展示快照 / Current slot display snapshots
     bool has_last; ///< last有效 / last is valid
     pn_catalog_item_t last; ///< 继续阅读的书（路径、名称、进度） / The continue-reading book (path, name, progress)
-    uint16_t cache_dirty; ///< 已验证但尚未写入的槽，换页清除 / Verified slots awaiting persistence, cleared on page reset
-    uint8_t cache_key[PN_CATALOG_PAGE_MAX+1][33]; ///< 仅重试用的来源快照，不是书籍身份 / Source snapshots for retries, never book identity
+    uint16_t cache_dirty; ///< 已验证待写槽，重绑随来源移动，离页不继续写 / Verified pending writes move with their sources on rebind; off-page writes stop
+    uint8_t cache_key[PN_CATALOG_PAGE_MAX+1][33]; ///< 重试与内存复用的来源快照，不是书籍身份 / Source snapshots for retries and resident reuse, never book identity
     size_t cache_budget[PN_CATALOG_PAGE_MAX+1]; ///< 失败结论的原解码预算 / Original decode budget for failure outcomes
+    uint8_t resident_path_hash[PN_CATALOG_PAGE_MAX+1][32]; ///< 完整路径字符串的SHA，仅匹配封面来源，不是书籍内容身份 / SHA of the full path string for cover-source matching, never book content identity
+    pn_book_format_t resident_format[PN_CATALOG_PAGE_MAX+1]; ///< 已验证槽的格式 / Format of each verified slot
+    pn_media_t *resident_media; ///< 可重用像素所属介质对象 / Media object owning reusable pixels
+    uint64_t resident_epoch,resident_media_id; ///< 像素所属介质代次与实例号 / Media generation and instance ID owning the pixels
+    uint16_t resident_valid; ///< 路径、来源键和当前像素/结论一致的槽 / Slots whose path, source key and current pixels/outcome agree
+    uint16_t resident_deferred; ///< 离页暂停的待写资格，重绑回来再写 / Pending persistence paused off-page, resumed when rebound
 } pn_shelf_covers_t;
 
 /// 产品owner持有的可暂停缓存写入；零初始化，释放池/介质前abort。/ Resumable cache writer owned by the product owner; zero-initialize and abort before releasing pool/media.
@@ -83,6 +89,9 @@ bool pn_shelf_covers_pending(const pn_shelf_covers_t *,const pn_catalog_page_t *
 /// 只从缓存填充PENDING槽，供首次绘制前调用以免墨水屏二次刷新；未命中仍PENDING，介质失效STALE_MEDIA。
 /// Fill PENDING slots from the cache only, called before the first paint to avoid a second e-ink refresh; misses stay PENDING, STALE_MEDIA on invalidation.
 pn_status_t pn_shelf_covers_cached(pn_shelf_covers_t *covers,const pn_catalog_page_t *page,pn_pool_t *pool,pn_media_t *media,const char *cache_dir,bool *changed);
+/// owner先abort任务；重绑页/继续阅读，复核来源键后原位重排已验证槽，缺失才读PNCV；可用空槽保留离页像素，预算不扩大。
+/// Abort work first; rebind page/continue-reading, recheck source keys and rearrange verified slots in place, reading PNCV only on misses; spare slots retain off-page pixels within the same budget.
+pn_status_t pn_shelf_covers_bind(pn_shelf_covers_t *,const pn_catalog_page_t *,const pn_catalog_item_t *last,pn_pool_t *,pn_media_t *,const char *cache_dir,bool *changed);
 /// 空闲时处理下一条PENDING；单次解码仍同步，changed表示需要重绘。
 /// Process the next PENDING slot while idle; individual decodes remain synchronous, and changed requests a redraw.
 /// 内部短暂取得READ读书/缓存，需写缓存时另取WRITE；cache_dir为NULL不用缓存，由可信owner给出。

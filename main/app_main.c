@@ -728,17 +728,15 @@ static pn_status_t load_recent(void){
     return status;
 }
 /// 取最近阅读第一本作为“继续阅读”卡；读取失败或没有记录时不显示卡。/ Use the first recent entry as the continue-reading card; show none when unreadable or empty.
-static void refresh_last(void){
-    if(!shelf_covers)return;
+static bool refresh_last(pn_catalog_item_t *last){
     pn_catalog_page_t *tmp=pn_alloc_tagged(&pool,PN_MEM_UI,sizeof *tmp);bool found=false;
     if(tmp && data_ready){
         pn_status_t status=load_recent();
         // 书架条目的“进度 · 格式”行用同一份记录。/ The shelf entries' progress line uses the same snapshot.
         if(status==PN_OK && shelf_page)pn_catalog_apply_recent(shelf_page,recent_snapshot);
-        if(status==PN_OK && recent_snapshot->count && pn_catalog_recent_page(recent_snapshot,0,tmp)==PN_OK && tmp->count){pn_shelf_covers_set_last(shelf_covers,&tmp->items[0]);found=true;}
+        if(status==PN_OK && recent_snapshot->count && pn_catalog_recent_page(recent_snapshot,0,tmp)==PN_OK && tmp->count){*last=tmp->items[0];found=true;}
     }
-    if(!found)pn_shelf_covers_set_last(shelf_covers,NULL);
-    pn_free(tmp);
+    pn_free(tmp);return found;
 }
 /// 首次正常产品访问加载固定系统字库；关闭/换卡后重新核验，缺失保持应急字体。/ Load the fixed UI face on normal product access; reverify after close/media changes and retain emergency fonts when absent.
 static void system_font_ready(void){
@@ -783,9 +781,9 @@ static void show_shelf(const char *cursor,bool previous){
     pn_free(next);
     // 换页先用缓存封面，首帧即完整；未命中的留给空闲逐条解码。/ Use cached covers on page change so the first paint is complete; misses decode later per idle tick.
     covers_inactive=false;
-    if(status==PN_OK && !shelf_covers)shelf_covers=pn_cache_alloc(&pool,PN_CACHE_COVER,PN_MEM_UI,sizeof *shelf_covers);
-    if(status==PN_OK && shelf_covers){bool changed;refresh_last();pn_shelf_covers_reset(shelf_covers,shelf_page);covers_dirty=false;
-        if(pn_shelf_covers_cached(shelf_covers,shelf_page,&pool,&sd_media,cover_cache,&changed)!=PN_OK)pn_shelf_covers_reset(shelf_covers,NULL);}
+    if(status==PN_OK && !shelf_covers){shelf_covers=pn_cache_alloc(&pool,PN_CACHE_COVER,PN_MEM_UI,sizeof *shelf_covers);if(shelf_covers)pn_shelf_covers_reset(shelf_covers,NULL);}
+    if(status==PN_OK && shelf_covers){bool changed;pn_catalog_item_t last;bool has_last=refresh_last(&last);covers_dirty=false;
+        if(pn_shelf_covers_bind(shelf_covers,shelf_page,has_last?&last:NULL,&pool,&sd_media,cover_cache,&changed)!=PN_OK)pn_shelf_covers_reset(shelf_covers,NULL);}
     if(status==PN_OK)status=draw_shelf(panel_known?PN_REFRESH_GL16:PN_REFRESH_GC16);
     if(status!=PN_OK){message("读取书架失败","当前位置仍保留，重试");return;}
     status_page=false;shelf_mode=true;locked=false;
