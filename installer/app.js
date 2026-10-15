@@ -40,7 +40,8 @@ async function sha256(bytes) {
 /// 下载并以清单中的 SHA-256 校验固件文件。/ Download firmware files and check them against the manifest SHA-256.
 async function loadFiles(release) {
   const files = {};
-  for (const key of release.mode === "app-only" ? ["partitionTable", "app"] : FILE_KEYS) {
+  const preservingKeys = ["partitionTable", ...(release.files.currentPartitionTable ? ["currentPartitionTable"] : []), "app"];
+  for (const key of release.mode === "app-only" ? preservingKeys : FILE_KEYS) {
     const entry = release.files[key];
     const response = await fetch(new URL(entry.name, new URL(release.path, location.href)), { cache: "no-cache" });
     if (!response.ok) throw new Error(`下载 ${entry.name} 失败（${response.status}）`);
@@ -49,6 +50,7 @@ async function loadFiles(release) {
     files[key] = bytes;
   }
   layoutOf(files.partitionTable);
+  if (files.currentPartitionTable) layoutOf(files.currentPartitionTable);
   return files;
 }
 
@@ -58,7 +60,7 @@ function renderRelease() {
   $("release-meta").textContent = `提交 ${release.commit} · 应用 ${kib(release.files.app.size)}`;
   $("hw-warning").hidden = release.verifiedOnHardware;
   const preserving = release.mode === "app-only";
-  $("mode-note").textContent = preserving ? "用于已有 PicoNano 的同布局升级。刷过其他固件请选择完整刷入。"
+  $("mode-note").textContent = preserving ? "支持已知旧布局及本项目完整刷入后的布局，仅更新应用。其他布局仍需完整刷入。"
     : "完整刷入会恢复引导与启动布局。请核对所选版本、备份及清除选项；不会自动切换刷入方式。";
 }
 

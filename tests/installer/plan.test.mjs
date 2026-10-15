@@ -94,6 +94,55 @@ test("shipped preserving upgrade writes only app and blocks other layouts or des
   assert.throws(() => planInstall({ ...input, files: { ...preserving, app: new Uint8Array(0x600001) } }), /无效/);
 });
 
+test("0.6.8 full-installed devices can preserve either exact known layout when upgrading to 0.6.9", () => {
+  const old = join(root, "releases/pico_nano-0.6.8-c4a44e5-full");
+  const next = join(root, "releases/pico_nano-0.6.9-e446d03-upgrade");
+  const preserving = {
+    app: new Uint8Array(readFileSync(join(next, "pico_nano.bin"))),
+    partitionTable: new Uint8Array(readFileSync(join(next, "expected-partition-table.bin"))),
+    currentPartitionTable: new Uint8Array(readFileSync(join(root, "releases/pico_nano-0.6.9-e446d03-full/partition-table.bin"))),
+  };
+  const installed = new Uint8Array(readFileSync(join(old, "partition-table.bin")));
+  assert.deepEqual(installed, preserving.currentPartitionTable);
+  assert.notDeepEqual(installed, preserving.partitionTable);
+  assert.throws(() => planInstall({ files: { ...preserving, currentPartitionTable: undefined }, deviceTable: installed, mode: "app-only" }), /不匹配/);
+  for (const deviceTable of [installed, preserving.partitionTable]) {
+    const input = { files: preserving, deviceTable, mode: "app-only" };
+    const plan = planInstall(input);
+    assert.deepEqual(names(plan), ["write@0x20000"]);
+    assert.equal(plan.steps[0].data, preserving.app);
+    assert.throws(() => planInstall({ ...input, clearNvs: true }), /不能清除/);
+    assert.throws(() => planInstall({ ...input, initializeStorage: true }), /不能清除/);
+  }
+  for (const at of [0, 8, 12, 31, 95, 511, 3071]) {
+    const changed = installed.slice(); changed[at] ^= 1;
+    assert.throws(() => planInstall({ files: preserving, deviceTable: changed, mode: "app-only" }), /不匹配/);
+  }
+  assert.throws(() => planInstall({ files: preserving, deviceTable: installed.slice(0, -1), mode: "app-only" }), /不匹配/);
+});
+
+test("page downloads and authenticates the additional preserving table before building any plan", async () => {
+  const elements = new Map();
+  const element = () => ({ checked: false, dataset: {}, style: {}, append() {}, replaceChildren() {}, addEventListener() {} });
+  const document = { createElement: element, getElementById(id) { if (!elements.has(id)) elements.set(id, element()); return elements.get(id); } };
+  const source = readFileSync(join(root, "installer/app.js"), "utf8").replace(/^import .*;\r?$/gm, "").replace("init().then(syncButtons);", "");
+  const downloads = [], data = { "legacy.bin": files.partitionTable, "current.bin": files.partitionTable, "app.bin": files.app };
+  const release = { mode: "app-only", path: "firmware/known/", files: Object.fromEntries([
+    ["partitionTable", "legacy.bin"], ["currentPartitionTable", "current.bin"], ["app", "app.bin"],
+  ].map(([key, name]) => [key, { name, size: data[name].length, sha256: createHash("sha256").update(data[name]).digest("hex") }])) };
+  let corrupt = false;
+  const context = vm.createContext({ document, navigator: {}, console, URL, Uint8Array, layoutOf, release,
+    location: { href: "https://example.test/" }, crypto: { subtle: { async digest(algorithm, bytes) { return createHash("sha256").update(bytes).digest(); } } },
+    async fetch(url) { const name = url.pathname.split("/").at(-1); downloads.push(name); const bytes = data[name].slice(); if (corrupt && name === "current.bin") bytes[0] ^= 1; return { ok: true, async arrayBuffer() { return bytes.buffer; } }; } });
+  vm.runInContext(source, context);
+  const loaded = await vm.runInContext("loadFiles(release)", context);
+  assert.deepEqual(downloads, ["legacy.bin", "current.bin", "app.bin"]);
+  assert.deepEqual(loaded.currentPartitionTable, files.partitionTable);
+  corrupt = true; downloads.length = 0;
+  await assert.rejects(vm.runInContext("loadFiles(release)", context), /current.bin 校验失败/);
+  assert.deepEqual(downloads, ["legacy.bin", "current.bin"]);
+});
+
 test("md5 matches node crypto", () => {
   for (const size of [0, 1, 55, 56, 63, 64, 65, 1000, 4096]) {
     const data = new Uint8Array(size).map((_, i) => (i * 31 + 7) & 0xff);

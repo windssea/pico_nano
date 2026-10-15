@@ -83,12 +83,16 @@ export function planInstall({ files, deviceTable, dataHead, wallpaperHead, clear
   const upgrade = sameBytes(deviceTable, files.partitionTable);
   // 专用升级包必须匹配已核对布局，禁止迁移或初始化。 / Dedicated upgrades must match the verified layout without migration or initialization.
   if (mode === "app-only") {
-    if (!upgrade) throw new Error("设备分区与专用升级包不匹配，停止写入。刷过其他固件请选择“完整刷入”，并核对备份与清除选项 / device layout mismatch; select full installation");
+    // 同源码完整包的表是另一项精确白名单，不用相似布局或版本号代替逐字节核对。
+    // The same-source full package supplies another exact allowlist entry; similar layouts or version numbers never replace a byte comparison.
+    const matched = [files.partitionTable, files.currentPartitionTable].find((table) => table?.length === TABLE_SIZE && sameBytes(deviceTable, table));
+    if (!matched) throw new Error("设备分区与专用升级包不匹配，停止写入。刷过其他固件请选择“完整刷入”，并核对备份与清除选项 / device layout mismatch; select full installation");
+    const preserved = layoutOf(matched);
     if (clearNvs || initializeStorage) throw new Error("保留布局升级不能清除数据 / preserving upgrade cannot clear data");
-    if (!files.app?.length || files.app.length > layout.app.size || layout.app.offset !== 0x20000)
+    if (!files.app?.length || files.app.length > preserved.app.size || preserved.app.offset !== 0x20000)
       throw new Error("应用或升级地址无效 / invalid upgrade application or address");
     return { mode: "app-only", knownTable: true, keptNvs: [], unrecognizedStorage: [], steps: [
-      { kind: "write", name: "应用固件 / app", address: layout.app.offset, data: files.app, reason: "保留全部布局与数据 / preserve layout and data", optional: false },
+      { kind: "write", name: "应用固件 / app", address: preserved.app.offset, data: files.app, reason: "保留全部布局与数据 / preserve layout and data", optional: false },
     ] };
   }
   if (mode !== "full") throw new Error("未知安装模式 / unknown installation mode");

@@ -123,15 +123,33 @@ def build(out):
     releases.sort(key=lambda r: (version_key(r["version"].split("+")[0]), r.get("mode") == "app-only", r.get("builtAt", "")), reverse=True)
     if not releases:
         raise SystemExit("releases/ has no pico_nano-<version>-esp32s3 folder")
+    # 完整刷入后的设备也可只更新应用；额外白名单来自同源码同应用的已校验完整包。
+    # Devices installed with a full package can update only the app; obtain the extra allowlist from a verified full package with identical source and app.
+    for release in releases:
+        if release.get("mode") != "app-only":
+            continue
+        matches = [other for other in releases if other.get("mode") == "full" and not other.get("legacy")
+                   and other["version"] == release["version"] and other["commit"] == release["commit"]]
+        if len(matches) > 1:
+            raise SystemExit(f"{release['version']}: ambiguous full package")
+        if not matches:
+            continue
+        full = matches[0]
+        if any(release["files"]["app"][key] != full["files"]["app"][key] for key in ("size", "sha256")):
+            raise SystemExit(f"{release['version']}: full/upgrade application mismatch")
+        release["files"]["currentPartitionTable"] = {**full["files"]["partitionTable"], "name": "current-partition-table.bin"}
+        release["_current_table"] = full["_folder"] / FILES["partitionTable"]
     if out.exists():
         shutil.rmtree(out)
     shutil.copytree(ROOT / "installer", out)
     for release in releases:
         target = out / release["path"]
-        for entry in release["files"].values():
+        for key, entry in release["files"].items():
             (target / entry["name"]).parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(release["_folder"] / entry["name"], target / entry["name"])
+            source = release["_current_table"] if key == "currentPartitionTable" else release["_folder"] / entry["name"]
+            shutil.copyfile(source, target / entry["name"])
         del release["_folder"]
+        release.pop("_current_table", None)
     (out / "firmware" / "manifest.json").write_text(json.dumps({"releases": releases}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     (out / ".nojekyll").write_text("", encoding="utf-8")
     print(f"Installer site: {out} ({', '.join(r['version'] for r in releases)})")

@@ -51,6 +51,61 @@ class FullPackages(unittest.TestCase):
         (folder / "manifest.json").write_text(json.dumps(metadata), encoding="utf-8")
         return folder
 
+    def upgrade(self, app=None):
+        """独立升级包只固定旧表，额外表须站点从同源完整包核验。 / An independent upgrade pins the old table; the site must verify any extra table against the matching full package."""
+        folder = self.root / "releases/pico_nano-0.6.7-abcdef0-upgrade"
+        folder.mkdir(parents=True)
+        payload = {"pico_nano.bin": self.app if app is None else app,
+                   "expected-partition-table.bin": (ROOT / "releases/pico_nano-0.0.57-6840523-upgrade/expected-partition-table.bin").read_bytes()}
+        for name, data in payload.items():
+            (folder / name).write_bytes(data)
+        metadata = {"version": "0.6.7", "source_commit": "abcdef0" + "0" * 33,
+                    "files": {name: {"bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()} for name, data in payload.items()}}
+        (folder / "manifest.json").write_text(json.dumps(metadata), encoding="utf-8")
+        return folder
+
+    def test_preserving_site_adds_only_verified_same_source_full_table(self):
+        self.package()
+        self.upgrade()
+        (self.root / "installer").mkdir()
+        with patch.object(installer_site, "ROOT", self.root):
+            installer_site.build(self.root / "site")
+        release = json.loads((self.root / "site/firmware/manifest.json").read_text())["releases"][0]
+        self.assertEqual(release["mode"], "app-only")
+        table = release["files"]["currentPartitionTable"]
+        copied = (self.root / "site" / release["path"] / table["name"]).read_bytes()
+        self.assertEqual(copied, self.table)
+        self.assertEqual(hashlib.sha256(copied).hexdigest(), table["sha256"])
+        self.assertNotEqual(table["sha256"], release["files"]["partitionTable"]["sha256"])
+
+    def test_preserving_site_without_matching_full_has_no_extra_allowlist(self):
+        self.upgrade()
+        (self.root / "installer").mkdir()
+        with patch.object(installer_site, "ROOT", self.root):
+            installer_site.build(self.root / "site")
+        release = json.loads((self.root / "site/firmware/manifest.json").read_text())["releases"][0]
+        self.assertNotIn("currentPartitionTable", release["files"])
+
+    def test_different_full_application_blocks_preserving_allowlist(self):
+        self.package()
+        self.upgrade(app=b"different app")
+        (self.root / "installer").mkdir()
+        with patch.object(installer_site, "ROOT", self.root), self.assertRaisesRegex(SystemExit, "application mismatch"):
+            installer_site.build(self.root / "site")
+
+    def test_other_source_full_package_does_not_extend_allowlist(self):
+        full = self.package()
+        metadata = json.loads((full / "manifest.json").read_text())
+        metadata["source_commit"] = "1234567" + "0" * 33
+        (full / "manifest.json").write_text(json.dumps(metadata), encoding="utf-8")
+        full.rename(full.with_name("pico_nano-0.6.7-1234567-full"))
+        self.upgrade()
+        (self.root / "installer").mkdir()
+        with patch.object(installer_site, "ROOT", self.root):
+            installer_site.build(self.root / "site")
+        release = next(r for r in json.loads((self.root / "site/firmware/manifest.json").read_text())["releases"] if r["mode"] == "app-only")
+        self.assertNotIn("currentPartitionTable", release["files"])
+
     def test_complete_package_and_same_version_modes_have_distinct_paths(self):
         folder = self.package()
         full = installer_site.read_full(folder)
