@@ -44,6 +44,9 @@ pn_status_t pn_device_async_feedback(pn_device_async_t *port,const pn_feedback_p
 pn_status_t pn_device_async_native(pn_device_async_t *,pn_status_t (*)(void *),void *);
 /// 产品worker发布输入上下文，不暴露页面对象。/ Product worker publishes input context without exposing page objects.
 void pn_device_async_view(pn_device_async_t *port,uint32_t view,bool body,uint8_t flags);
+/// 同时发布连续固定底栏资格；只用于四个一级页，其他调用使用普通view撤销资格。
+/// Publish continuous fixed-navigation eligibility together; only for the four roots, while ordinary view publication revokes it.
+void pn_device_async_root_view(pn_device_async_t *port,uint32_t view,bool body,uint8_t flags,bool root);
 /// 产品worker取一个事件，空EMPTY，溢出CANCELLED。/ Product worker takes an event; EMPTY when empty, CANCELLED after overflow.
 pn_status_t pn_device_async_take(pn_device_async_t *port,pn_device_input_event_t *event);
 /// 等输入owner暂停后才进入睡眠/PMU边界；超时不睡眠。/ Wait for input owner pause before sleep/PMU handoff; never sleep on timeout.

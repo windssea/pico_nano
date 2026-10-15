@@ -4,20 +4,25 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-typedef struct {char copy[512];char *next;bool pending;unsigned pointer;int x,y;uint64_t resume;SDL_Event future;uint64_t future_at;Uint32 expected_type;SDL_Keycode expected_key;} sim_script_t;
+typedef struct {char copy[512];char *next;bool pending;unsigned pointer;int x,y;uint64_t resume;SDL_Event future;uint64_t future_at;Uint32 expected_type;SDL_Keycode expected_key;bool future_tap;int future_x,future_y;} sim_script_t;
 static inline void script_expect(sim_script_t *script,const SDL_Event *event){script->expected_type=event->type;script->expected_key=event->type==SDL_KEYDOWN?event->key.keysym.sym:0;}
 static inline void script_init(sim_script_t *script,const char *name){
     memset(script,0,sizeof *script);const char *value=getenv(name);if(!value || strlen(value)>500)return;
     strcpy(script->copy,value);script->next=script->copy;
 }
 static inline void script_queue(sim_script_t *script){
-    if(script->future_at){if(SDL_GetTicks64()<script->future_at)return;script_expect(script,&script->future);script->pending=SDL_PushEvent(&script->future)==1;script->future_at=0;return;}
+    if(script->future_at){if(SDL_GetTicks64()<script->future_at)return;
+        // 同一次扫描内松开旧触点、按下新目标；仅最后松手带脚本回执，不能提前推进后续命令。
+        // Release the old contact and press a new target within one scan; only the final release acknowledges the script, preventing later commands from advancing early.
+        if(script->future_tap){SDL_Event first=script->future;first.button.windowID=UINT32_MAX-1;(void)SDL_PushEvent(&first);first.type=SDL_MOUSEBUTTONDOWN;first.button.type=SDL_MOUSEBUTTONDOWN;first.button.x=script->future_x;first.button.y=script->future_y;(void)SDL_PushEvent(&first);script->future.button.x=script->future_x;script->future.button.y=script->future_y;script->future_tap=false;}
+        script_expect(script,&script->future);script->pending=SDL_PushEvent(&script->future)==1;script->future_at=0;return;}
     if(script->pending)return;
     if(script->resume){if(SDL_GetTicks64()<script->resume)return;script->resume=0;}
     if(script->pointer==1){SDL_Event event={0};event.type=SDL_MOUSEBUTTONUP;event.button.windowID=UINT32_MAX;event.button.button=SDL_BUTTON_LEFT;event.button.x=script->x;event.button.y=script->y;script->pointer=2;script_expect(script,&event);script->pending=SDL_PushEvent(&event)==1;return;}
     while(script->next){char *part=script->next,*comma=strchr(part,',');if(comma){*comma=0;script->next=comma+1;}else script->next=NULL;
         SDL_Event event={0};event.type=SDL_KEYDOWN;event.key.windowID=UINT32_MAX;unsigned wait,burst;
         // 开发竞争注入绕过逐事件回执，用于验证忙碌窗口和合并，不用于文本输入。/ Development race injection bypasses serial acknowledgments to test busy windows/coalescing, never text input.
+        if(sscanf(part,"race-root:%u:%d:%d:%d:%d",&wait,&script->x,&script->y,&script->future_x,&script->future_y)==5 && wait<=5000 && script->x>=0 && script->x<684 && script->y>=0 && script->y<1216 && script->future_x>=0 && script->future_x<684 && script->future_y>=0 && script->future_y<1216){event.type=SDL_MOUSEBUTTONDOWN;event.button.windowID=UINT32_MAX;event.button.button=SDL_BUTTON_LEFT;event.button.x=script->x;event.button.y=script->y;script->future=event;script->future.type=SDL_MOUSEBUTTONUP;script->future.button.type=SDL_MOUSEBUTTONUP;script->future_at=SDL_GetTicks64()+wait;script->future_tap=true;script->pointer=2;script_expect(script,&event);script->pending=SDL_PushEvent(&event)==1;return;}
         if(sscanf(part,"race-nav:%u:%d:%d",&wait,&script->x,&script->y)==3 && wait<=5000 && script->x>=0 && script->x<684 && script->y>=0 && script->y<1216){event.type=SDL_MOUSEBUTTONDOWN;event.button.windowID=UINT32_MAX;event.button.button=SDL_BUTTON_LEFT;event.button.x=script->x;event.button.y=script->y;script->future=event;script->future.type=SDL_MOUSEBUTTONUP;script->future.button.type=SDL_MOUSEBUTTONUP;script->future_at=SDL_GetTicks64()+wait;script->pointer=2;script_expect(script,&event);script->pending=SDL_PushEvent(&event)==1;return;}
         if(sscanf(part,"burst:%u:next",&burst)==1 && burst>0 && burst<=100){event.key.keysym.sym=SDLK_RIGHT;script_expect(script,&event);for(unsigned i=0;i<burst;i++)(void)SDL_PushEvent(&event);script->pending=true;return;}
         if(sscanf(part,"race-next-home:%u",&wait)==1 && wait<=5000){event.key.keysym.sym=SDLK_RIGHT;script->future=event;script->future.key.keysym.sym=SDLK_h;script->future_at=SDL_GetTicks64()+wait;script_expect(script,&event);script->pending=SDL_PushEvent(&event)==1;return;}

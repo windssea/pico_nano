@@ -141,6 +141,7 @@ static void lock_and_sleep(const char *hint);
 static bool prepare_lock(void);
 static void resume_reader(void);
 static bool reader_active(void);
+static int root_navigation_hit(int x,int y);
 static bool reader_suspended; ///< 热挂起会话 / Warm suspended session
 static bool management_home_pending; ///< 传输停止后回阅读首页 / Return home after transfer shutdown
 static char saved_network[PN_NETWORK_SSID_MAX+1]; ///< 已保存网络名，不缓存口令 / Saved network name; the password is not cached
@@ -400,6 +401,9 @@ static pn_status_t feedback_panel(void *ctx,const pn_feedback_patch_t *patch){
 #endif
 static pn_status_t present_impl(void *ctx,const pn_frame_t *frame,pn_refresh_t profile){
     (void)ctx;
+    // 临时子页/模态在下一轮发布view前也必须撤销旧底栏资格；只有主循环在已返回一级页后重新启用。
+    // Transient subpages/modals revoke old root eligibility before the next view publication; only the loop enables it again after returning to a root.
+    if(async_port.panel && root_navigation_hit(80,1150)<0)pn_async_set_root(&async_port.input,false);
 #if defined(CONFIG_PN_UI_FOLLOW) && CONFIG_PN_UI_FOLLOW
     pn_status_t stopped=pn_font_manage_motion_abort(&font_manage);if(stopped!=PN_OK)return stopped;
     stopped=pn_toc_ui_motion_abort(&toc);if(stopped!=PN_OK)return stopped;
@@ -1520,7 +1524,7 @@ static void device_task(void *arg){
         bool body=reader_active() && !locked && !focus_page() && !status_page && !reading_menu && !shelf_mode && !toolbar_open;
         uint32_t view=locked?1:fonts.active?2:toc.active?3:styles.active?4:jump_ui.active?5:bookmarks.mode!=PN_BUI_CLOSED?6:actions_mode?7:settings_ui.impl?8:wallpaper_ui.impl?9:font_manage.impl?10:hub_mode?11:index_mode?12:search_mode?13:toolbar_open?14:body?15:home_mode?16:17;
         if(shelf_mode && !home_mode && shelf_page)view+=(uint32_t)shelf_page->index*32u;
-        pn_device_async_view(&async_port,view,body,input_flags);
+        pn_device_async_root_view(&async_port,view,body,input_flags,root_navigation_hit(80,1150)>=0);
         pn_device_input_event_t queued={0};pn_status_t available=async_port.input_active?pn_device_async_take(&async_port,&queued):PN_EMPTY;
         // 有输入立即回到最高频；连续空闲约1秒才放锁，交互中不反复切频。/ Input returns to maximum at once; release only after about one second idle so interaction does not toggle frequency.
         if(available==PN_OK){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);pn_feedback_idle_activity(&feedback_idle,now);}

@@ -5,16 +5,27 @@
 static void lock(pn_async_t *q){while(atomic_flag_test_and_set_explicit(&q->guard,memory_order_acquire)){} }
 static void unlock(pn_async_t *q){atomic_flag_clear_explicit(&q->guard,memory_order_release);}
 void pn_async_init(pn_async_t *q){memset(q,0,sizeof *q);atomic_flag_clear(&q->guard);atomic_init(&q->epoch,1);atomic_init(&q->background,false);atomic_init(&q->view,0);}
-pn_status_t pn_async_send(pn_async_t *q,const pn_async_event_t *e){
+static void root_mode(pn_async_t *q,bool enabled){
+    if(q->root_enabled==enabled)return;
+    if(q->root_epoch==UINT64_MAX){q->root_enabled=false;return;}
+    q->root_epoch++;q->root_enabled=enabled;
+}
+void pn_async_set_view(pn_async_t *q,uint32_t view,bool root){if(!q)return;lock(q);root_mode(q,root);atomic_store_explicit(&q->view,view,memory_order_release);unlock(q);}
+void pn_async_set_root(pn_async_t *q,bool root){if(!q)return;lock(q);root_mode(q,root);unlock(q);}
+bool pn_async_root_current(pn_async_t *q,const pn_async_event_t *e){if(!q || !e)return false;lock(q);bool current=q->root_enabled && e->root_epoch && e->root_epoch==q->root_epoch;unlock(q);return current;}
+static pn_status_t send_event(pn_async_t *q,const pn_async_event_t *e,bool root){
     if(!q || !e || !e->bytes || e->bytes>PN_ASYNC_PAYLOAD)return PN_INVALID;
     lock(q);
     if(q->controls_blocked && !(e->navigation && e->urgent)){q->dropped++;unlock(q);return PN_OK;}
+    pn_async_event_t next=*e;next.root_epoch=root && q->root_enabled && e->view==atomic_load_explicit(&q->view,memory_order_acquire)?q->root_epoch:0;
     if(e->urgent || atomic_load_explicit(&q->background,memory_order_acquire))atomic_fetch_add_explicit(&q->epoch,1,memory_order_release);
-    if(e->navigation){if(q->has_navigation)q->coalesced++;if(!q->has_navigation || !q->navigation.urgent || e->urgent)q->navigation=*e;q->has_navigation=true;}
-    else if(q->count<PN_ASYNC_CONTROLS){q->controls[(q->first+q->count)%PN_ASYNC_CONTROLS]=*e;q->count++;}
+    if(e->navigation){if(q->has_navigation)q->coalesced++;if(!q->has_navigation || !q->navigation.urgent || e->urgent)q->navigation=next;q->has_navigation=true;}
+    else if(q->count<PN_ASYNC_CONTROLS){q->controls[(q->first+q->count)%PN_ASYNC_CONTROLS]=next;q->count++;}
     else{q->dropped+=q->count+1;q->count=0;q->first=0;q->overflow=true;atomic_fetch_add_explicit(&q->epoch,1,memory_order_release);}
     unlock(q);return PN_OK;
 }
+pn_status_t pn_async_send(pn_async_t *q,const pn_async_event_t *e){return send_event(q,e,false);}
+pn_status_t pn_async_send_root(pn_async_t *q,const pn_async_event_t *e){return send_event(q,e,true);}
 pn_status_t pn_async_take(pn_async_t *q,pn_async_event_t *e){
     if(!q || !e)return PN_INVALID;
     lock(q);pn_status_t status=PN_OK;
@@ -37,6 +48,7 @@ void pn_async_block_controls(pn_async_t *q,bool blocked){
     if(!q)return;
     lock(q);q->controls_blocked=blocked;
     if(blocked){q->dropped+=q->count;q->count=0;q->first=0;q->overflow=false;
+        root_mode(q,false);
         if(q->has_navigation && !q->navigation.urgent){q->has_navigation=false;q->dropped++;}}
     unlock(q);
 }

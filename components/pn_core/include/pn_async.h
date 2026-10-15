@@ -9,6 +9,7 @@ typedef struct {
     uint8_t bytes; ///< 有效载荷字节 / Valid payload bytes
     bool navigation,urgent; ///< 可合并导航与优先控制 / Coalesced navigation and priority control
     uint64_t view; ///< 捕获输入时的页面身份 / View identity at capture
+    uint64_t root_epoch; ///< 邮箱盖章的固定底栏连续上下文，普通投递为零 / Mailbox-stamped continuous fixed-navigation context, zero for ordinary submissions
     uint8_t payload[PN_ASYNC_PAYLOAD]; ///< 不含产品对象指针的端口载荷 / Port payload without product-object pointers
 } pn_async_event_t;
 typedef struct {
@@ -20,6 +21,8 @@ typedef struct {
     unsigned first,count; ///< 队列首及长度 / Queue head and length
     bool has_navigation,overflow; ///< 待执行导航与溢出取消指针标记 / Pending navigation and overflow pointer-reset flag
     bool controls_blocked; ///< 开书期间仅接纳紧急导航，由guard保护 / Only urgent navigation is admitted during opening; protected by guard
+    bool root_enabled; ///< 当前画面允许固定底栏，guard保护 / Current screen permits fixed navigation, protected by guard
+    uint64_t root_epoch; ///< 进出固定底栏时换代；耗尽后拒绝跨帧接纳 / Changes on entering/leaving fixed navigation; exhaustion rejects cross-frame admission
     uint64_t coalesced,dropped; ///< 合并与丢弃计数 / Coalesced and dropped counts
 } pn_async_t;
 typedef struct {
@@ -31,6 +34,18 @@ typedef struct {
 void pn_async_init(pn_async_t *queue);
 /// 输入owner投递；导航替换待执行项，后台准备收到新输入即取消。/ Input owner submits; navigation replaces the pending item and new input cancels background work.
 pn_status_t pn_async_send(pn_async_t *queue,const pn_async_event_t *event);
+/// 端口只为有效单点底栏事件调用；同锁复核捕获view并盖上下文印记，不改变优先级或顺序。
+/// Ports use this only for valid single-contact navigation hits; stamp context after checking the captured view under the same lock, preserving priority/order.
+pn_status_t pn_async_send_root(pn_async_t *queue,const pn_async_event_t *event);
+/// 产品owner同时发布页面身份和固定底栏资格；离开/重新进入使旧底栏事件永久失效。
+/// Product owner publishes view and fixed-navigation eligibility together; leaving/re-entering permanently invalidates old root events.
+void pn_async_set_view(pn_async_t *queue,uint32_t view,bool root);
+/// 呈现非一级页之前撤销资格，覆盖两次主循环之间的临时子页/模态。
+/// Revoke eligibility before presenting non-root screens, including transient subpages/modals between loop iterations.
+void pn_async_set_root(pn_async_t *queue,bool root);
+/// 仅判断印记是否仍在同一连续底栏上下文；端口仍须验证事件种类和固定几何。
+/// Check only continuous root context; ports must still validate event type and fixed geometry.
+bool pn_async_root_current(pn_async_t *queue,const pn_async_event_t *event);
 /// 产品worker取优先导航再取边沿，空EMPTY；溢出先返回CANCELLED清指针状态。/ Product worker takes priority navigation then edges; EMPTY when empty, CANCELLED first after overflow to reset pointer state.
 pn_status_t pn_async_take(pn_async_t *queue,pn_async_event_t *event);
 /// 开始可取消工作；idle=true使新输入取消预排/封面。/ Begin cancellable work; idle allows new input to cancel prefetch/covers.

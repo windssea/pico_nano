@@ -4,6 +4,7 @@
 #include "pn_reader_input.h"
 #include "pn_input_prefs.h"
 #include "pn_profile.h"
+#include "pn_widgets.h"
 #include "read_pico_pmu.h"
 #include "device_power.h"
 #include "device_touch_wake.h"
@@ -38,7 +39,9 @@ static uint64_t now_ms(void){return (uint64_t)(esp_timer_get_time()/1000);}
 // 空闲只需检查断轨期限（秒级），100ms足够且减少唤醒。/ Idle only checks the rail deadline (seconds), so 100 ms suffices with fewer wakeups.
 static void display_task(void *ctx){pn_device_async_t *p=ctx;for(;;){display_t job;if(xQueueReceive(p->display_queue,&job,pdMS_TO_TICKS(100))==pdTRUE){// 扫描期间行供数依赖CPU，持最高频锁防欠载。/ Line feeding during a scan is CPU-bound, so hold the max lock to avoid underruns.
             pn_device_power_busy(PN_POWER_DISPLAY,true);if(job.off){p->off();p->display_result=PN_OK;}else if(job.native)p->display_result=job.native(job.native_ctx);else if(job.patch)p->display_result=p->feedback?p->feedback(p->panel_ctx,job.patch):PN_UNSUPPORTED;else p->display_result=p->panel(NULL,job.frame,job.profile);pn_device_power_busy(PN_POWER_DISPLAY,false);xSemaphoreGive(p->display_done);}p->idle(now_ms());}}
-static void send(pn_device_async_t *p,const pn_device_input_event_t *input,bool navigation,bool urgent){atomic_fetch_add(&p->events_sent,1);pn_async_event_t e={.bytes=sizeof *input,.navigation=navigation,.urgent=urgent,.view=atomic_load(&p->input.view)};memcpy(e.payload,input,sizeof *input);(void)pn_async_send(&p->input,&e);
+static void send(pn_device_async_t *p,const pn_device_input_event_t *input,bool navigation,bool urgent){atomic_fetch_add(&p->events_sent,1);pn_async_event_t e={.bytes=sizeof *input,.navigation=navigation,.urgent=urgent,.view=atomic_load(&p->input.view)};memcpy(e.payload,input,sizeof *input);
+    bool root=input->kind==PN_DASYNC_TOUCH && input->valid && input->count==1 && pn_w_navigation_hit(input->x,input->y)>=0;
+    (void)(root?pn_async_send_root(&p->input,&e):pn_async_send(&p->input,&e));
     if(p->product_task)xTaskNotifyGive((TaskHandle_t)p->product_task);}
 static void input_task(void *ctx){
     pn_device_async_t *p=ctx;pn_key_t keys={0};pn_reader_input_t reader={0};unsigned empty=0,old_pause=0;uint64_t last_power=0,last_hold=0;uint32_t old_view=0;int last_x=-1,last_y=-1;
@@ -103,9 +106,13 @@ static pn_status_t submit(pn_device_async_t *p,const pn_frame_t *frame,pn_refres
 pn_status_t pn_device_async_present(pn_device_async_t *p,const pn_frame_t *frame,pn_refresh_t profile){return submit(p,frame,profile,NULL,NULL,NULL);}
 pn_status_t pn_device_async_feedback(pn_device_async_t *p,const pn_feedback_patch_t *patch){if(!patch || (patch->settle?(patch->pressed || patch->frame.pixels!=NULL):!patch->frame.pixels))return PN_INVALID;return submit(p,NULL,PN_REFRESH_GL16,patch,NULL,NULL);}
 pn_status_t pn_device_async_native(pn_device_async_t *p,pn_status_t (*native)(void *),void *ctx){if(!native)return PN_INVALID;return submit(p,NULL,PN_REFRESH_GL16,NULL,native,ctx);}
-void pn_device_async_view(pn_device_async_t *p,uint32_t view,bool body,uint8_t flags){atomic_store(&p->flags,flags);atomic_store(&p->body,body);atomic_store(&p->input.view,(view&0xffffu)|(p->revision<<16));}
-pn_status_t pn_device_async_take(pn_device_async_t *p,pn_device_input_event_t *event){pn_async_event_t e;pn_status_t status=pn_async_take(&p->input,&e);if(status==PN_OK){memcpy(event,e.payload,sizeof *event);if((!e.navigation || !e.urgent) && e.view!=atomic_load(&p->input.view))return PN_CANCELLED;}return status;}
+void pn_device_async_root_view(pn_device_async_t *p,uint32_t view,bool body,uint8_t flags,bool root){atomic_store(&p->flags,flags);atomic_store(&p->body,body);pn_async_set_view(&p->input,(view&0xffffu)|(p->revision<<16),root);}
+void pn_device_async_view(pn_device_async_t *p,uint32_t view,bool body,uint8_t flags){pn_device_async_root_view(p,view,body,flags,false);}
+pn_status_t pn_device_async_take(pn_device_async_t *p,pn_device_input_event_t *event){pn_async_event_t e;pn_status_t status=pn_async_take(&p->input,&e);if(status==PN_OK){memcpy(event,e.payload,sizeof *event);
+    bool root=event->kind==PN_DASYNC_TOUCH && event->valid && event->count==1 && pn_w_navigation_hit(event->x,event->y)>=0 && pn_async_root_current(&p->input,&e);
+    if((!e.navigation || !e.urgent) && e.view!=atomic_load(&p->input.view) && !root)return PN_CANCELLED;}return status;}
 bool pn_device_async_pause(pn_device_async_t *p,bool paused){
+    if(paused)pn_async_set_root(&p->input,false);
     unsigned request=((atomic_load(&p->pause_request)+2u)&~1u)|(paused?1u:0u);atomic_store(&p->paused,paused);atomic_store(&p->pause_request,request);
 #ifdef ESP_PLATFORM
     // 旧的true确认不能跨锁屏周期复用；恢复也等输入线程确认，避免下一次暂停读到旧回执。

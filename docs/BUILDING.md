@@ -123,6 +123,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/run_sim.ps1
 
 原件只读，仅复制到隔离目录。`tools/run_sim.ps1`可指定 `-Books/-Font/-FontDir/-WallpaperDir` 和 `-Timing`，容器输入须在工作区内；未指定壁纸目录时用空目录。模拟器时区Asia/Shanghai，电量为演示值，锁页预览不模拟PMU功耗。预算上限6MiB，低预算可降，不可扩大掩盖设备故障。已有公共小型边界fixture仅用于单元回归，不能替代用户资源的综合测试和可见验收。
 
+`root_navigation_queue_window`使用既有公开边界文本，分别对四根页和反馈开/关注入扫描中第二次底栏接触，核对最终整帧与串行点击一致，并验证旧内容区触点仍拒绝。`PN_ROOT_RACE_ARTIFACTS`可保留全部日志与画面；`race-root:延迟毫秒:起点X:起点Y:终点X:终点Y`在延迟后释放起点并向终点投递独立点击，仅最终松手确认脚本。`PN_SIM_CAPTURE_CANCELLED=1`仅供竞争诊断捕获已成功显示、随后因新输入取消准备的帧；默认仍跳过这类开发截图，不改变成功显示回执。模拟等待与公开边界样本不代替真实用户整库/字体及面板验收。
+
 ## EPUB 与性能诊断
 
 本机综合入口也运行`tools/test_local_middle_key.py --sim build-sim-sdl-idf/pn_sim`与`tools/test_local_font_samples.py --binary build-host/font_samples_validate`，使用用户原书/字库的独立副本，检查阅读中间键、排版保存和关闭池归零，以及字体列表首帧不打开外置小样、每轮最多一个与合并呈现。字体工具可加`--baseline <旧探针>`比较完整最终像素；未给旧工具时只报告本版行为及重绘一致，不当作跨版本像素对照。结果位于`build-dev/local-middle-key/`和`local-font-samples/`。公共`catalog_mount`只将挂载根`mkdir`替换为IDF6.1 FatFS的`EINVAL`，其余千本索引、真实文件、重开/取消/分配失败与原测试相同，不能代替实卡掉电或响应计时。

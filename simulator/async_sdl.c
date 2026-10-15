@@ -2,6 +2,7 @@
  * 中文：窗口线程只处理端口消息，所有长I/O留产品worker。/ English: window thread handles port messages only; long I/O stays on the product worker. */
 #include "async_sdl.h"
 #include "pn_brand.h"
+#include "pn_widgets.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -46,22 +47,27 @@ int pn_sdl_async_run(pn_sdl_async_t *p,int (*worker)(void *),void *ctx){
             item.urgent=key==SDLK_ESCAPE || (body && key==SDLK_k) || (view>=7 && (key==SDLK_h || key==SDLK_2));}
         if(event.type==SDL_MOUSEBUTTONDOWN && event.button.button==SDL_BUTTON_LEFT)item.urgent=true;
         if(event.type==SDL_QUIT){item.navigation=true;item.urgent=true;}
-        memcpy(item.payload,&event,sizeof event);(void)pn_async_send(&p->input,&item);SDL_SemPost(p->wake);
+        memcpy(item.payload,&event,sizeof event);
+        bool root=(event.type==SDL_MOUSEBUTTONDOWN && event.button.button==SDL_BUTTON_LEFT && pn_w_navigation_hit(event.button.x,event.button.y)>=0) || (event.type==SDL_MOUSEMOTION && event.motion.state==SDL_BUTTON_LMASK && pn_w_navigation_hit(event.motion.x,event.motion.y)>=0);
+        (void)(root?pn_async_send_root(&p->input,&item):pn_async_send(&p->input,&item));SDL_SemPost(p->wake);
         if(getenv("PN_SIM_TIMING") && event.type==SDL_KEYDOWN){SDL_LockMutex(p->mutex);bool pending=p->pending;SDL_UnlockMutex(p->mutex);fprintf(stderr,"async capture key=%d pending=%d at=%llu\n",(int)event.key.keysym.sym,(int)pending,(unsigned long long)SDL_GetTicks64());}
+        if(getenv("PN_SIM_TIMING") && (event.type==SDL_MOUSEBUTTONDOWN || event.type==SDL_MOUSEBUTTONUP) && event.button.windowID==UINT32_MAX-1){SDL_LockMutex(p->mutex);bool pending=p->pending;SDL_UnlockMutex(p->mutex);fprintf(stderr,"async capture root-race type=%u pending=%d view=%llu at=%llu\n",(unsigned)event.type,(int)pending,(unsigned long long)item.view,(unsigned long long)SDL_GetTicks64());}
     }
     SDL_WaitThread(p->worker,NULL);p->worker=NULL;return p->result;
 }
-bool pn_sdl_async_wait(pn_sdl_async_t *p,SDL_Event *event,unsigned timeout,uint32_t view){
+bool pn_sdl_async_wait(pn_sdl_async_t *p,SDL_Event *event,unsigned timeout,uint32_t view,bool root){
     p->discarded_release=false;
     if(p->scope_active){pn_async_end(&p->scope);p->scope_active=false;}
     SDL_LockMutex(p->mutex);if(p->received.type && !p->ack){p->ack=true;p->ack_event=p->received;p->received=(SDL_Event){0};}SDL_UnlockMutex(p->mutex);
     p->context=view%32u;view=(view&0xffffu)|(p->revision<<16);
-    atomic_store_explicit(&p->input.view,view,memory_order_release);
+    pn_async_set_view(&p->input,view,root);
     uint64_t end=SDL_GetTicks64()+timeout;pn_async_event_t item;pn_status_t status;
     for(;;){status=pn_async_take(&p->input,&item);if(status==PN_OK){
             SDL_Event candidate;memcpy(&candidate,item.payload,sizeof candidate);
             if(scripted(&candidate)){SDL_LockMutex(p->mutex);p->received=candidate;SDL_UnlockMutex(p->mutex);}
-            if((!item.navigation || !item.urgent) && item.view!=view){p->discarded_release=candidate.type==SDL_MOUSEBUTTONUP && candidate.button.button==SDL_BUTTON_LEFT;*event=(SDL_Event){.type=SDL_WINDOWEVENT};event->window.event=SDL_WINDOWEVENT_FOCUS_LOST;status=PN_CANCELLED;break;}
+            bool fixed=(candidate.type==SDL_MOUSEBUTTONDOWN && candidate.button.button==SDL_BUTTON_LEFT && pn_w_navigation_hit(candidate.button.x,candidate.button.y)>=0) || (candidate.type==SDL_MOUSEMOTION && candidate.motion.state==SDL_BUTTON_LMASK && pn_w_navigation_hit(candidate.motion.x,candidate.motion.y)>=0);
+            bool continuous=fixed && pn_async_root_current(&p->input,&item);
+            if((!item.navigation || !item.urgent) && item.view!=view && !continuous){p->discarded_release=candidate.type==SDL_MOUSEBUTTONUP && candidate.button.button==SDL_BUTTON_LEFT;*event=(SDL_Event){.type=SDL_WINDOWEVENT};event->window.event=SDL_WINDOWEVENT_FOCUS_LOST;status=PN_CANCELLED;break;}
             *event=candidate;break;
         }
         if(status==PN_CANCELLED){*event=(SDL_Event){.type=SDL_WINDOWEVENT};event->window.event=SDL_WINDOWEVENT_FOCUS_LOST;break;}

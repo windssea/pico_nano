@@ -149,10 +149,14 @@ static void profile_emit(void *ctx,const pn_profile_event_t *e){
 }
 /* 呈现并记住最近一帧（工具栏打开时不记，以便关闭后恢复原页面）。/ Present and remember the latest frame (not while the toolbar is open, so closing restores the original page). */
 static pn_status_t present_raw_main(void *ctx,const pn_frame_t *frame);
+static int root_navigation_hit(library_t *s,int x,int y);
 static pn_status_t present_raw(library_t *s,const pn_frame_t *frame){
+    // 非一级页呈现立即切断底栏连续上下文，不能等下一轮事件循环。
+    // Non-root presentations immediately break continuous navigation context, without waiting for the next event loop.
+    if(root_navigation_hit(s,80,1150)<0)pn_async_set_root(&s->async.input,false);
     pn_status_t status=pn_sdl_async_present(&s->async,frame,PN_REFRESH_GC16);
     if(status!=PN_OK)return status;
-    if(pn_cancel_checkpoint()!=PN_OK)return status; // 已成功呈现只跳过开发截图，仍返回成功回执。/ After presentation succeeds, skip only the dev capture and retain its successful receipt.
+    if(pn_cancel_checkpoint()!=PN_OK && !getenv("PN_SIM_CAPTURE_CANCELLED"))return status; // 已成功呈现可跳过开发截图；竞争验证可显式捕获已呈现但随后取消的帧。/ A successful presentation may skip its dev capture; race checks may explicitly capture a displayed frame even when cancellation follows.
     // 开发辅助：PN_SIM_FRAME_DIR指向目录时，每次呈现另存一张PGM，便于审查界面；不影响显示。/ Dev aid: when PN_SIM_FRAME_DIR names a directory, every present also saves a PGM for UI review; display is unaffected.
     const char *dump=getenv("PN_SIM_FRAME_DIR");
     if(dump && *dump && strlen(dump)<400){static unsigned index;char path[512];snprintf(path,sizeof path,"%s/frame-%04u.pgm",dump,++index);
@@ -495,7 +499,7 @@ static int root_navigation_hit(library_t *s,int x,int y){
     if(s->locked || s->fonts.active || s->toc.active || s->jumpui.active || s->styles.active || s->bookmarks.mode!=PN_BUI_CLOSED || s->actions_mode || s->font_manage.impl || s->wallpaper.impl || s->search_open || s->index || s->toolbar || pn_w_navigation_hit(x,y)<0)return -1;
     if(s->settings.impl)return pn_settings_ui_screen(&s->settings)==0?pn_settings_ui_hit(&s->settings,x,y):-1;
     if(s->hub){pn_transfer_hub_info_t info=hub_info(s);return pn_transfer_hub_hit(&info,x,y);}
-    return reading(s)?-1:shelf_hit(s,x,y);
+    return reading(s) || !s->page?-1:shelf_hit(s,x,y);
 }
 /// 从真实显示端口的已确认像素取区域，UI对象关闭后局部原图仍自有。/ Read confirmed port pixels; local originals remain owned after UI closure.
 static pn_status_t feedback_read(void *ctx,pn_feedback_box_t b,pn_frame_t *out){
@@ -671,7 +675,7 @@ static int library_worker(void *ctx){
         if(!reading(s) && !s->home && s->page)view+=(uint32_t)s->page->index*32u;
         pn_list_motion_stats_t moving=s->toc.active?pn_toc_ui_motion_stats(&s->toc):pn_font_manage_motion_stats(&s->font_manage);
         bool cache_work=(view==15 && pn_epub_app_cache_pending(&s->epub)) || pn_cover_work_pending(&s->cover_work) || ((view%32u==16u || view%32u==17u) && pn_shelf_covers_pending(s->covers,s->page));
-        SDL_Event event;bool got=pn_sdl_async_wait(&s->async,&event,moving.active || moving.coasting || cache_work?1u:100u,view);uint64_t now=SDL_GetTicks64();
+        SDL_Event event;bool got=pn_sdl_async_wait(&s->async,&event,moving.active || moving.coasting || cache_work?1u:100u,view,root_navigation_hit(s,80,1150)>=0);uint64_t now=SDL_GetTicks64();
         if(got && (event.type==SDL_KEYDOWN || event.type==SDL_MOUSEBUTTONDOWN || event.type==SDL_MOUSEBUTTONUP || event.type==SDL_MOUSEMOTION || event.type==SDL_QUIT || (event.type==SDL_WINDOWEVENT && event.window.event==SDL_WINDOWEVENT_FOCUS_LOST))){pn_epub_app_cache_activity(&s->epub,now);font_activity=now;}
         if(got){bool cover_focus=(view%32u==16u || view%32u==17u) && event.type==SDL_KEYDOWN && (event.key.keysym.sym==SDLK_UP || event.key.keysym.sym==SDLK_DOWN) && s->pool->used<=s->pool->limit && s->pool->limit-s->pool->used>=512u*1024u;
             if(cover_focus)pn_cover_write_abort(&s->cover_work.writer);else pn_cover_work_abort(&s->cover_work);pn_feedback_idle_activity(&s->feedback_idle,now);}

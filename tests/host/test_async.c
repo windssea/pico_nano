@@ -31,5 +31,17 @@ int main(void){
  assert(pn_async_take(&q,&e)==PN_EMPTY && q.dropped>=12);
  pn_async_block_controls(&q,false);
  e=event(3,false,false);pn_async_send(&q,&e);assert(pn_async_take(&q,&e)==PN_OK && value(e)==3);
- puts("async: bounded/coalesced, urgent priority, cancellation barriers and producer concurrency passed");return 0;
+ // 固定底栏只跨连续一级页保留；过时捕获、普通投递、临时模态与开书门都不能借用旧资格。
+ // Fixed navigation survives only continuous roots; stale captures, ordinary sends, transient modals and opening gates cannot borrow old eligibility.
+ pn_async_init(&q);pn_async_set_view(&q,100,true);e=event(80,false,true);e.view=100;assert(pn_async_send_root(&q,&e)==PN_OK);
+ pn_async_set_view(&q,101,true);assert(pn_async_take(&q,&e)==PN_OK && e.root_epoch && e.view==100 && pn_async_root_current(&q,&e));pn_async_event_t held=e;
+ pn_async_set_root(&q,false);pn_async_set_root(&q,true);assert(!pn_async_root_current(&q,&held));
+ e.view=100;assert(pn_async_send_root(&q,&e)==PN_OK && pn_async_take(&q,&e)==PN_OK && !e.root_epoch);
+ e=held;e.view=101;assert(pn_async_send(&q,&e)==PN_OK && pn_async_take(&q,&e)==PN_OK && !e.root_epoch);
+ pn_async_set_view(&q,102,false);e=held;e.view=102;assert(pn_async_send_root(&q,&e)==PN_OK);pn_async_set_view(&q,103,true);assert(pn_async_take(&q,&e)==PN_OK && !e.root_epoch);
+ e.view=103;assert(pn_async_send_root(&q,&e)==PN_OK && pn_async_take(&q,&held)==PN_OK && pn_async_root_current(&q,&held));pn_async_block_controls(&q,true);pn_async_block_controls(&q,false);pn_async_set_view(&q,104,true);assert(!pn_async_root_current(&q,&held));
+ q.root_epoch=UINT64_MAX-1;pn_async_set_root(&q,false);pn_async_set_root(&q,true);assert(!q.root_enabled && q.root_epoch==UINT64_MAX);
+ pn_async_set_view(&q,105,true);e.view=105;assert(pn_async_send_root(&q,&e)==PN_OK && pn_async_take(&q,&e)==PN_OK && !e.root_epoch && !pn_async_root_current(&q,&e));
+ assert(!pn_async_root_current(NULL,&e) && !pn_async_root_current(&q,NULL));pn_async_set_view(NULL,0,true);pn_async_set_root(NULL,true);
+ puts("async: bounded/coalesced, urgent priority, cancellation barriers, continuous root contexts and producer concurrency passed");return 0;
 }

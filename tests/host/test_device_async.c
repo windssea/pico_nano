@@ -142,6 +142,32 @@ int main(void){
  // 旧管理帧的点击被丢弃，成功内容回执推进代次。/ Discard clicks from old management frames; successful content receipts advance their revision.
  while(pn_device_async_take(&p,&e)!=PN_EMPTY){}
  pn_device_async_view(&p,8,false,0);pn_async_event_t stale={.bytes=sizeof e,.view=atomic_load(&p.input.view)};memcpy(stale.payload,&e,sizeof e);pn_async_send(&p.input,&stale);p.revision++;pn_device_async_view(&p,8,false,0);assert(pn_device_async_take(&p,&e)==PN_CANCELLED);
+ // 实际输入线程只为有效单点底栏盖章；资格由产品owner发布，内容区不能借用。
+ // The actual input task stamps only valid single-point navigation hits; eligibility comes from the product owner and never covers content.
+ pn_device_async_root_view(&p,16,false,0,true);atomic_store(&x,80);atomic_store(&y,1150);atomic_store(&count,1);vTaskDelay(35);atomic_store(&count,0);vTaskDelay(35);
+ bool stamped=false;pn_async_event_t captured;while(pn_async_take(&p.input,&captured)!=PN_EMPTY){pn_device_input_event_t input;memcpy(&input,captured.payload,sizeof input);if(input.kind==PN_DASYNC_TOUCH && input.count==1){assert(captured.root_epoch && pn_async_root_current(&p.input,&captured));stamped=true;}}assert(stamped);
+ atomic_store(&y,300);atomic_store(&count,1);vTaskDelay(35);atomic_store(&count,0);vTaskDelay(35);while(pn_async_take(&p.input,&captured)!=PN_EMPTY)assert(!captured.root_epoch);
  atomic_store(&stop,true);for(unsigned i=0;i<task_count;i++)thrd_join(tasks[i].thread,NULL);vQueueDelete(p.display_queue);vSemaphoreDelete(p.display_done);assert(!objects);
+ // 四个一级页两两切换可保留固定底栏；失效view、子页、读书/开书、暂停与坏触点仍拒绝。
+ // Every root pair preserves fixed navigation; stale captures, subpages, reading/opening, pause and invalid contacts remain rejected.
+ pn_device_async_t unit={0};pn_async_init(&unit.input);const unsigned roots[]={8,11,16,17};
+ for(unsigned a=0;a<4;a++)for(unsigned b=0;b<4;b++){
+     pn_device_async_root_view(&unit,roots[a],false,0,true);e=(pn_device_input_event_t){.kind=PN_DASYNC_TOUCH,.count=1,.x=80,.y=1150,.valid=true};
+     captured=(pn_async_event_t){.bytes=sizeof e,.view=atomic_load(&unit.input.view)};memcpy(captured.payload,&e,sizeof e);assert(pn_async_send_root(&unit.input,&captured)==PN_OK);
+     unit.revision++;pn_device_async_root_view(&unit,roots[b],false,0,true);assert(pn_device_async_take(&unit,&e)==PN_OK && e.x==80 && e.y==1150);
+ }
+ for(unsigned fault=0;fault<8;fault++){
+     pn_device_async_root_view(&unit,16,false,0,true);e=(pn_device_input_event_t){.kind=PN_DASYNC_TOUCH,.count=1,.x=80,.y=1150,.valid=true};
+     if(fault==0)e.y=300;
+     if(fault==1)e.count=2;
+     if(fault==2)e.valid=false;
+     if(fault==3)e.kind=PN_DASYNC_KEY;
+     captured=(pn_async_event_t){.bytes=sizeof e,.view=atomic_load(&unit.input.view)};memcpy(captured.payload,&e,sizeof e);assert(pn_async_send_root(&unit.input,&captured)==PN_OK);
+     if(fault==4)pn_async_set_root(&unit.input,false);
+     if(fault==5)pn_device_async_view(&unit,15,true,0);
+     if(fault==6)assert(pn_device_async_pause(&unit,true));
+     if(fault==7){pn_async_set_root(&unit.input,false);pn_async_set_root(&unit.input,true);}
+     unit.revision++;pn_device_async_root_view(&unit,17,false,0,true);assert(pn_device_async_take(&unit,&e)==PN_CANCELLED);
+ }
  puts("Device async port: failed startup cleanup, immutable borrow, input during blocked display, off/pause barriers and stale controls passed");return 0;
 }
