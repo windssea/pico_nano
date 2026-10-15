@@ -38,9 +38,25 @@ pn_status_t pn_device_frame_patch(const pn_frame_t *source,pn_feedback_box_t b,u
         *byte=(uint8_t)((*byte&~(15u<<shift))|((unsigned)pn_frame_get(source,x,y)<<shift));}
     return PN_OK;
 }
-pn_status_t pn_device_frame_copy(const pn_frame_t *source,uint8_t *destination,size_t capacity){
-    if(!source || !source->pixels || source->width!=684 || source->height!=1216 || source->stride<342 || !destination || capacity<684u*1216u/2u || source->pixels==destination)return PN_INVALID;
-    // 512B小块先连续读，再连续写；避免每像素跨整帧访问PSRAM。/ Read a contiguous 512B tile before contiguous writes, avoiding frame-wide PSRAM strides per pixel.
+/// 交换两个字中的半字节组，保持每个4位灰阶完整。/ Swap nibble groups between words, preserving each complete four-bit gray.
+static inline void transpose_group(uint32_t *a,uint32_t *b,unsigned shift,uint32_t mask){
+    uint32_t moved=((*a>>shift)^*b)&mask;*a^=moved<<shift;*b^=moved;
+}
+/// 只有完整2字节对齐的板级位置调用；memcpy保留别名规则。/ Call only for fully two-byte-aligned board positions; memcpy preserves aliasing rules.
+static inline void board_half(uint8_t *destination,uint16_t word){
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+    word=__builtin_bswap16(word);
+#endif
+#if defined(__GNUC__)
+    destination=__builtin_assume_aligned(destination,2);
+#endif
+    memcpy(destination,&word,sizeof word);
+}
+/// 独立栈帧保留原兼容路，避免快路的寄存器压力拖慢奇地址输出。/ Keep the original compatibility path in a separate frame so fast-path register pressure cannot slow odd-address output.
+#if defined(__GNUC__)
+__attribute__((noinline))
+#endif
+static pn_status_t copy_byte_tiles(const pn_frame_t *source,uint8_t *destination){
     uint8_t tile[32][16];
     for(int y=0;y<1216;y+=32)for(int x=0;x<684;x+=32){
         int columns=684-x<32?684-x:32;
@@ -52,6 +68,35 @@ pn_status_t pn_device_frame_copy(const pn_frame_t *source,uint8_t *destination,s
         }
     }
     return PN_OK;
+}
+/// 独立快路只接收2字节对齐目标，不与兼容路同时持有512B块。/ The separate fast path accepts only two-byte-aligned targets, without keeping a 512-byte tile alongside the compatibility path.
+#if defined(__GNUC__)
+__attribute__((noinline))
+#endif
+static pn_status_t copy_half_tiles(const pn_frame_t *source,uint8_t *destination){
+    // 512B小块先连续读，再连续写；避免每像素跨整帧访问PSRAM。/ Read a contiguous 512B tile before contiguous writes, avoiding frame-wide PSRAM strides per pixel.
+    uint16_t tile[32][8];
+    for(int y=0;y<1216;y+=32)for(int x=0;x<684;x+=32){
+        int columns=684-x<32?684-x:32;
+        for(int row=0;row<32;row++)memcpy(tile[row],source->pixels+(size_t)(y+row)*source->stride+x/2,(size_t)columns/2);
+        // 四列×四行转为四次16位连续写；仅用四个字，避免八列转置的临时数组与寄存器压力。
+        // Turn four columns by four rows into four contiguous 16-bit writes, using four words to avoid an eight-column temporary array and register pressure.
+        for(int column=0;column<columns;column+=4)for(int row=0;row<32;row+=4){
+            uint32_t a=tile[row][column/4],b=tile[row+1][column/4],c=tile[row+2][column/4],d=tile[row+3][column/4];
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+            a=__builtin_bswap16((uint16_t)a);b=__builtin_bswap16((uint16_t)b);c=__builtin_bswap16((uint16_t)c);d=__builtin_bswap16((uint16_t)d);
+#endif
+            transpose_group(&a,&b,4,0x0f0fu);transpose_group(&c,&d,4,0x0f0fu);
+            transpose_group(&a,&c,8,0x00ffu);transpose_group(&b,&d,8,0x00ffu);
+            uint8_t *out=destination+(size_t)(683-x-column)*608+(y+row)/2;
+            board_half(out,(uint16_t)a);board_half(out-608,(uint16_t)b);board_half(out-1216,(uint16_t)c);board_half(out-1824,(uint16_t)d);
+        }
+    }
+    return PN_OK;
+}
+pn_status_t pn_device_frame_copy(const pn_frame_t *source,uint8_t *destination,size_t capacity){
+    if(!source || !source->pixels || source->width!=684 || source->height!=1216 || source->stride<342 || !destination || capacity<684u*1216u/2u || source->pixels==destination)return PN_INVALID;
+    return ((uintptr_t)destination&1u)?copy_byte_tiles(source,destination):copy_half_tiles(source,destination);
 }
 // 板级行py对应逻辑列683-py，字节b对应逻辑行2b/2b+1。/ Board row py maps to logical column 683-py; byte b maps to logical rows 2b and 2b+1.
 pn_status_t pn_device_frame_dirty(const uint8_t *target,const uint8_t *shown,size_t capacity,int margin,pn_device_box_t *box){
