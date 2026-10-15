@@ -337,7 +337,9 @@ pn_status_t pn_settings_ui_set_lan(pn_settings_ui_t *ui,const char *ssid,pn_sett
     size_t n=ssid?strlen(ssid):0;if(n>=sizeof u->lan){n=sizeof u->lan-1;while(n>0 && ((unsigned char)ssid[n]&0xc0)==0x80)n--;}
     if(n)memcpy(u->lan,ssid,n);
     u->lan[n]=0;
-    return show(ui,present,ctx);
+    // 设置页已没有网络名行；更新兼容快照不重复绘制/转换相同整帧。
+    // Settings no longer contain an SSID row; updating the compatibility snapshot must not repaint/convert an identical frame.
+    (void)ctx;return PN_OK;
 }
 void pn_settings_ui_set_about(pn_settings_ui_t *ui,const pn_settings_about_t *about){
     if(!ui || !ui->impl || !about)return;

@@ -57,17 +57,47 @@ static float round_distance(float px,float py,float x,float y,float w,float h,fl
     return root(ox*ox+oy*oy)+inner-radius;
 }
 static float limit_radius(float w,float h,float radius){float cap=(w<h?w:h)*0.5f;return radius>cap?cap:radius<0.0f?0.0f:radius;}
+/// 先用64位边界裁剪，避免不可见区域的循环和整数溢出。/ Clip with 64-bit bounds before iterating invisible pixels or overflowing coordinates.
+static bool round_bounds(const pn_frame_t *frame,int x,int y,int width,int height,int *left,int *top,int *right,int *bottom){
+    int64_t l=(int64_t)x-1,t=(int64_t)y-1,r=(int64_t)x+width+1,b=(int64_t)y+height+1;
+    if(l>=frame->width || t>=frame->height || r<=0 || b<=0)return false;
+    *left=l<0?0:(int)l;*top=t<0?0:(int)t;*right=r>frame->width?frame->width:(int)r;*bottom=b>frame->height?frame->height:(int)b;return true;
+}
+/// UI整数范围内半像素可精确表示；极端坐标仍用原距离式。/ Half pixels are exact within the UI integer range; extreme coordinates retain the original distance formula.
+static bool round_spans(int x,int y,int width,int height){return x>=-16384 && x<=16384 && y>=-16384 && y<=16384 && width<=16384 && height<=16384;}
+static int clipped(int value,int low,int high){return value<low?low:value>high?high:value;}
 void pn_w_round_fill(pn_frame_t *frame,int x,int y,int width,int height,int radius,uint8_t shade){
     if(!frame || !frame->pixels || width<=0 || height<=0)return;
-    float r=limit_radius((float)width,(float)height,(float)radius);
-    for(int py=y-1;py<y+height+1;py++)for(int px=x-1;px<x+width+1;px++)put(frame,px,py,shade,clamp01(0.5f-round_distance((float)px+0.5f,(float)py+0.5f,(float)x,(float)y,(float)width,(float)height,r)));
+    int left,top,right,bottom;if(!round_bounds(frame,x,y,width,height,&left,&top,&right,&bottom))return;
+    float r=limit_radius((float)width,(float)height,(float)radius);bool spans=round_spans(x,y,width,height);int inset=(int)r;if((float)inset<r)inset++;
+    for(int py=top;py<bottom;py++){
+        // 只有确定覆盖率为1的内区批量填充；所有圆角仍走原抗锯齿公式。
+        // Bulk-fill only interiors with certain full coverage; every corner keeps the original antialiasing formula.
+        int first=right,last=right;
+        if(spans){
+            if(py>=y+inset && py<y+height-inset){pn_frame_rect(frame,x,py,width,1,shade);continue;}
+            first=clipped(x+inset,left,right);last=clipped(x+width-inset,first,right);
+            if(py>=y && py<y+height && last>first)pn_frame_rect(frame,first,py,last-first,1,shade);
+        }
+        for(int px=left;px<first;px++)put(frame,px,py,shade,clamp01(0.5f-round_distance((float)px+0.5f,(float)py+0.5f,(float)x,(float)y,(float)width,(float)height,r)));
+        for(int px=last;px<right;px++)put(frame,px,py,shade,clamp01(0.5f-round_distance((float)px+0.5f,(float)py+0.5f,(float)x,(float)y,(float)width,(float)height,r)));
+    }
 }
 void pn_w_round_stroke(pn_frame_t *frame,int x,int y,int width,int height,int radius,float thickness,uint8_t shade){
     if(!frame || !frame->pixels || width<=0 || height<=0 || thickness<=0.0f)return;
+    int left,top,right,bottom;if(!round_bounds(frame,x,y,width,height,&left,&top,&right,&bottom))return;
     float r=limit_radius((float)width,(float)height,(float)radius),half=thickness*0.5f;
-    for(int py=y-1;py<y+height+1;py++)for(int px=x-1;px<x+width+1;px++){
-        float d=round_distance((float)px+0.5f,(float)py+0.5f,(float)x,(float)y,(float)width,(float)height,r)+half;
-        put(frame,px,py,shade,clamp01(0.5f-(absf(d)-half)));
+    int inset=0;bool spans=round_spans(x,y,width,height) && thickness<16384.0f;
+    if(spans){float padding=r+thickness+1.0f;inset=(int)padding;if((float)inset<padding)inset++;}
+    for(int py=top;py<bottom;py++){
+        // 深处覆盖率确定为0，不计算透明描边内部；可见边缘的运算保持不变。
+        // Skip the certainly transparent deep interior; preserve all arithmetic along visible edges.
+        int first=right,last=right;
+        if(spans && py>=y+inset && py<y+height-inset){first=clipped(x+inset,left,right);last=clipped(x+width-inset,first,right);}
+        for(int section=0;section<2;section++)for(int px=section?last:left;px<(section?right:first);px++){
+            float d=round_distance((float)px+0.5f,(float)py+0.5f,(float)x,(float)y,(float)width,(float)height,r)+half;
+            put(frame,px,py,shade,clamp01(0.5f-(absf(d)-half)));
+        }
     }
 }
 void pn_w_invert_round(pn_frame_t *frame,int x,int y,int width,int height,int radius){

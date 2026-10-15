@@ -48,8 +48,17 @@ void pn_frame_rect(pn_frame_t *frame, int x, int y, int width, int height, uint8
     int left=x < 0 ? 0 : x, top=y < 0 ? 0 : y;
     int end_x=right > frame->width ? frame->width : (int)right;
     int end_y=bottom > frame->height ? frame->height : (int)bottom;
-    for (int row=top;row<end_y;row++)
-        for (int col=left;col<end_x;col++) pn_frame_pixel(frame,col,row,shade);
+    if (shade > 15) shade=15;
+    // 整字节批量填充，奇数边界只改所属半字节，保留相邻像素和行尾填充。
+    // Fill whole bytes in bulk; odd boundaries preserve neighboring pixels and row padding.
+    size_t first=((size_t)left+1)/2, end=(size_t)end_x/2;
+    uint8_t packed=(uint8_t)(shade | (shade << 4));
+    for (int row=top;row<end_y;row++) {
+        uint8_t *line=frame->pixels+(size_t)row*frame->stride;
+        if (left & 1) line[(size_t)left/2]=(uint8_t)((line[(size_t)left/2]&0x0f) | (shade << 4));
+        if (end>first) memset(line+first,packed,end-first);
+        if (end_x & 1) line[end]=(uint8_t)((line[end]&0xf0) | shade);
+    }
 }
 
 void pn_frame_test_pattern(pn_frame_t *frame) {

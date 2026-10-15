@@ -62,7 +62,7 @@ pn_status_t pn_settings_load_flags(pn_media_t *state_media,const char *state_dir
 /// 读取书架外观，无记录使用默认；错误保留输出。/ Load shelf appearance with defaults without a record; errors preserve output.
 pn_status_t pn_settings_load_shelf(pn_media_t *state_media,const char *state_dir,pn_shelf_prefs_t *prefs);
 
-/// 设置“局域网传书”行显示的已保存网络名；NULL或空串隐藏该行。设置后立即重画。/ Set the saved network name shown on the "LAN transfer" row; NULL or an empty string hides the row. Repaints at once.
+/// 保留网络名兼容快照，不重画；网络入口已移到传书页。/ Retain the network-name compatibility snapshot without repainting; network entry lives on Transfer.
 pn_status_t pn_settings_ui_set_lan(pn_settings_ui_t *ui,const char *ssid,pn_settings_present_fn present,void *ctx);
 /// 填写“存储与关于”信息（不重画）。/ Fill the "storage and about" information (no repaint).
 void pn_settings_ui_set_about(pn_settings_ui_t *ui,const pn_settings_about_t *about);

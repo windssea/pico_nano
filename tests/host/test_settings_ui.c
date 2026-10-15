@@ -7,7 +7,8 @@
 #include <stdlib.h>
 #include <string.h>
 static const char *capture;
-static pn_status_t present(void *ctx,const pn_frame_t *frame,pn_refresh_t profile){(void)ctx;(void)profile;if(capture){FILE *f=fopen(capture,"wb");assert(f);fprintf(f,"P5 684 1216 15 ");for(int y=0;y<1216;y++)for(int x=0;x<684;x++)fputc(pn_frame_get(frame,x,y),f);fclose(f);}return PN_OK;}
+static unsigned presents;
+static pn_status_t present(void *ctx,const pn_frame_t *frame,pn_refresh_t profile){(void)ctx;(void)profile;presents++;if(capture){FILE *f=fopen(capture,"wb");assert(f);fprintf(f,"P5 684 1216 15 ");for(int y=0;y<1216;y++)for(int x=0;x<684;x++)fputc(pn_frame_get(frame,x,y),f);fclose(f);}return PN_OK;}
 static bool release(pn_reader_input_t *i,pn_reader_action_t *a){assert(!pn_reader_input_feed(i,0,0,0,true,a));return pn_reader_input_feed(i,0,0,0,true,a);}
 static bool tap(pn_reader_input_t *i,int x,int y,pn_reader_action_t *a){assert(!pn_reader_input_feed(i,1,x,y,true,a));return release(i,a);}
 static bool swipe(pn_reader_input_t *i,int x0,int y0,int x1,int y1,pn_reader_action_t *a){assert(!pn_reader_input_feed(i,1,x0,y0,true,a));assert(!pn_reader_input_feed(i,1,x1,y1,true,a));return release(i,a);}
@@ -91,7 +92,9 @@ int main(int argc,char **argv){
     assert(pn_settings_ui_event(&ui,PN_SETUI_FONTS,present,NULL)==PN_OK && ui.request==PN_SETUI_FONTS && ui.active);ui.request=0;
     /* 设置页不再有局域网传书行：保存网络后仍只有“存储与关于”，传书只从底栏进入。/ No LAN transfer row: even with a saved network only "Storage & about" remains; transfer starts from the bottom bar. */
     assert(pn_settings_ui_hit(&ui,100,850)==PN_SETUI_ABOUT && pn_settings_ui_event(&ui,PN_SETUI_LAN,present,NULL)==PN_EMPTY && !ui.request);
-    assert(pn_settings_ui_set_lan(&ui,"家里的WiFi",present,NULL)==PN_OK && pn_settings_ui_hit(&ui,100,850)==PN_SETUI_ABOUT && pn_settings_ui_hit(&ui,100,950)==-1);
+    // SSID行已移出设置首页，更新后台快照不能再提交相同画面。
+    // The SSID row moved out of Settings; updating its compatibility snapshot must not submit an identical frame.
+    unsigned shown=presents;assert(pn_settings_ui_set_lan(&ui,"家里的WiFi",present,NULL)==PN_OK && presents==shown && ui.presented && pn_settings_ui_hit(&ui,100,850)==PN_SETUI_ABOUT && pn_settings_ui_hit(&ui,100,950)==-1);
     assert(pn_settings_ui_event(&ui,PN_SETUI_LAN,present,NULL)==PN_EMPTY && !ui.request);
     /* 外观独立保存：密度、四种预览、占用失败与重开；不改翻页标志。/ Appearance saves separately: density, four previews, busy failure and reopen without changing page-turn flags. */
     assert(ui.shelf.columns==3 && ui.shelf.style==PN_SHELF_DEFAULT);
