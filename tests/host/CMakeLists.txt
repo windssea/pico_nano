@@ -377,7 +377,7 @@ add_test(NAME font_set COMMAND test_font_set ${PN_ROOT}/tests/fixtures/font-fall
 
 add_executable(font_startup_probe font_startup_probe.c)
 target_link_libraries(font_startup_probe PRIVATE pn_core)
-target_link_options(font_startup_probe PRIVATE -Wl,--wrap=pn_identity_stream -Wl,--wrap=pn_identity_stream_pooled -Wl,--wrap=pn_identity_file_pooled -Wl,--wrap=fopen -Wl,--wrap=fread -Wl,--wrap=fclose)
+target_link_options(font_startup_probe PRIVATE -Wl,--wrap=pn_identity_stream -Wl,--wrap=pn_identity_stream_pooled -Wl,--wrap=pn_identity_file_pooled -Wl,--wrap=fopen -Wl,--wrap=fread -Wl,--wrap=fclose -Wl,--wrap=fseek)
 add_test(NAME font_startup COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_font_startup.py $<TARGET_FILE:font_startup_probe> ${PN_ROOT}/tests/fixtures/font-fallback.ttf)
 
 add_executable(test_upload test_upload.c)

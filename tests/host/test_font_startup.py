@@ -27,6 +27,6 @@ with tempfile.TemporaryDirectory() as folder:
             assert result.returncode==0,(book.suffix,fault,result.stdout,result.stderr)
             row=next(line for line in result.stdout.splitlines() if line.startswith('startup '));fields={k:int(v) for k,v in (word.split('=') for word in row.split()[1:])}
             assert fields['used']==fields['live']==0
-            if fault=='normal':assert fields['full_hashes']==fields['book_hashes']==fields['font_opens']==1 and fields['font_get_hashes']==0,fields
+            if fault=='normal':assert fields['full_hashes']==fields['book_hashes']==fields['font_opens']==fields['book_opens']==1 and fields['font_get_hashes']==0 and fields['book_read_bytes']>=book.stat().st_size and fields['book_reads']>0,fields
             if fault in ('normal','missing','replaced','bad-primary'):assert fields['status']==0 and fields['presents']>=1
             print(json.dumps({'format':book.suffix,'fault':fault,**fields}),flush=True)

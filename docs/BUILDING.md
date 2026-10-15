@@ -129,6 +129,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/run_sim.ps1
 
 `font_startup`编译真实TXT/EPUB入口，检查外置补字引用沿同一个完整校验句柄进入排版键，该补字文件仅一次完整摘要；另覆盖缺失、同大小替换、主字体损坏、取消、失卡和显示失败的释放。`tools/test_local_fallback_startup.py --binary build-host/font_startup_probe`已接入`local-samples`，使用全部用户EPUB/TXT和TTF的独立副本，记录真实文件端口字节、完整摘要次数、画面摘要与池峰；可选`--baseline`对照修改前冻结探针。它不测物理TF或面板时间。阅读线的整帧SDL对照固定`PN_SIM_CLOCK=12:34`，保留全部像素判据，避免跨分钟HUD变化误报取消失败。
 
+`font_startup_probe`另记录冷开至首屏的原书stdio打开/读取/字节/定位。`tools/test_local_fallback_startup.py --binary <新探针> --baseline <旧探针> --compare-io`比较两个均只做一次完整摘要的冻结探针，检查字体读取保持、原书读取/定位不增及全部原始帧逐字节一致；不带该选项时保留原双扫描补字优化的基线判据。原件仍只读、使用独立书/字体和状态副本，软件文件计数不代替TF/面板计时。
+
+新版探针另输出首屏后NEXT/PREVIOUS的`turn_io`，与冷开计数分开；`--compare-io`在前后探针均提供该行时也检查翻页原书IO不增及字体读取保持。旧探针缺少此行时不推断其翻页IO。
+
 实体中间键在阅读中短按回主页、长按600ms打开阅读工具栏；排版/字体页短按保存成功才回原书。SDL用数字2或`key-home`模拟短按，用F10或`key-middle-long`模拟长按；此脚本别名不代替真实按住/释放资格测试。
 
 ```powershell

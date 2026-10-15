@@ -283,6 +283,9 @@ static pn_status_t pn_epub_app_open_on_media_impl(pn_epub_app_t *app,pn_pool_t *
     if(status==PN_OK)status=pn_media_acquire(a->media,PN_MEDIA_READ,&a->book_lease);
     pn_text_source_t source,fallback_source={0};
     if(status==PN_OK)status=pn_text_file_open(&a->book_file,a->media,&a->book_lease,book,&source);
+    // 出版物小读与字体共用既有可回收块预算；完整摘要的大读仍直通，不增加缓存上限。
+    // Share the existing reclaimable block budget between publication small reads and fonts; full-hash large reads still bypass it without raising the cache limit.
+    if(status==PN_OK)status=pn_text_file_cache_bind(&source,pool);
     // 整书摘要的顺序读取顺带校验ZIP本地头，打开时不再逐条随机读卡；中央目录失败仍先完成摘要再报同一错误。
     // The whole-book hash's sequential read also checks ZIP local headers, so opening no longer reads each entry randomly; a directory failure still finishes hashing before reporting the same error.
     pn_zip_scan_t scan={0};pn_status_t scanned=status==PN_OK?pn_zip_scan_begin(&scan,pool,&source):status;

@@ -1,4 +1,4 @@
-"""用户书籍/字体副本的冷开补字摘要、读取量与完整画面对照。 / Compare cold fallback hashing, reads and full frames with copied user books/fonts."""
+"""用户书籍/字体副本的冷开摘要、原书/字体IO与完整画面对照。 / Compare cold hashing, book/font IO and full frames with copied user books/fonts."""
 import argparse
 import hashlib
 import json
@@ -15,8 +15,11 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary',type=pathlib.Path,required=True)
     parser.add_argument('--baseline',type=pathlib.Path)
+    parser.add_argument('--compare-io',action='store_true',help='Compare two single-hash probes, requiring unchanged font IO, no extra book reads/seeks and exact raw frames')
     parser.add_argument('--output',type=pathlib.Path,default=ROOT/'build-dev/local-fallback-startup')
-    args=parser.parse_args();args.output.mkdir(parents=True,exist_ok=True)
+    args=parser.parse_args()
+    if args.compare_io and not args.baseline:parser.error('--compare-io requires --baseline')
+    args.output.mkdir(parents=True,exist_ok=True)
     books=sorted(p for p in (ROOT/'tests/testBook').rglob('*') if p.is_file() and p.suffix.lower() in ('.txt','.epub'))
     fonts=sorted(p for p in (ROOT/'tests/testFont').rglob('*') if p.is_file() and p.suffix.lower()=='.ttf')
     assert books and fonts
@@ -44,12 +47,25 @@ def main():
                         assert len(captured)==len(pixels) and all(p.stat().st_size==415872 for p in captured)
                         assert [hashlib.sha256(p.read_bytes()).hexdigest() for p in captured]==pixels
                         assert fields['full_hashes']==fields['book_hashes']==fields['font_opens']==1 and fields['font_get_hashes']==0,fields
-                    return {'metrics':fields,'frames':pixels}
+                    turn_line=next((line for line in result.stdout.splitlines() if line.startswith('turn_io ')),None)
+                    turn={k:int(v) for k,v in (word.split('=') for word in turn_line.split()[1:])} if turn_line else None
+                    return {'metrics':fields,'frames':pixels,'turn_io':turn}
                 old=run(args.baseline,'before') if args.baseline else None
                 new=run(args.binary,'after')
                 if old:
-                    assert old['frames']==new['frames'] and old['metrics']['full_hashes']==old['metrics']['font_opens']==2
-                    assert old['metrics']['font_read_bytes']>new['metrics']['font_read_bytes']
+                    assert old['frames']==new['frames']
+                    if args.compare_io:
+                        a,b=old['metrics'],new['metrics']
+                        assert a['full_hashes']==a['book_hashes']==a['font_opens']==a['book_opens']==b['book_opens']==1 and a['font_get_hashes']==0
+                        assert a['font_read_bytes']==b['font_read_bytes'] and all(b[key]<=a[key] for key in ('book_reads','book_read_bytes','book_seeks')),(book.name,font.name,a,b)
+                        for file in (args.output.resolve()/f'{bi}-{fi}-after').glob('frame-*.raw'):
+                            assert file.read_bytes()==(args.output.resolve()/f'{bi}-{fi}-before'/file.name).read_bytes()
+                        if old['turn_io'] and new['turn_io']:
+                            a,b=old['turn_io'],new['turn_io']
+                            assert a['font_bytes']==b['font_bytes'] and all(b[key]<=a[key] for key in ('book_reads','book_bytes','book_seeks')),(book.name,font.name,a,b)
+                    else:
+                        assert old['metrics']['full_hashes']==old['metrics']['font_opens']==2
+                        assert old['metrics']['font_read_bytes']>new['metrics']['font_read_bytes']
                 report['runs'].append({'book':book.name,'font':font.name,'before':old,'after':new,'frame_identities_match':bool(old)})
                 report_path.write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n',encoding='utf8')
                 print('PASS fallback startup',book.name,font.name,flush=True)
