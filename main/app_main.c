@@ -826,6 +826,10 @@ static void start_reader_impl(void){
     pn_cover_work_abort(&cover_work);
     if(transfer.impl || usb.open)return;
     if(!reader_active() && *selected_path){
+        if(pn_hot_session_source_selected(&hot_session,&sd_media,selected_path,selected_format,selected_identified?&selected_expected:NULL,1,now_ms())){
+            pn_status_t loading=show_loading(selected_path);if(loading==PN_CANCELLED)return;
+            if(loading!=PN_OK)ESP_LOGW(TAG,"Opening feedback unavailable: %d",(int)loading);
+        }
         pn_status_t taken=pn_hot_session_take_prepared(&hot_session,&sd_media,selected_path,selected_format,selected_identified?&selected_expected:NULL,1,now_ms(),&reader,&epub);
         if(taken==PN_OK){pn_wallpaper_mask_close(&lock_mask);covers_inactive=true;ESP_LOGI(TAG,"Prepared book take=%zu",hot_session.takes);reader_open_result(active_step(PN_APP_OPEN,now_ms()));return;}
         if(taken==PN_CANCELLED)return;
@@ -871,6 +875,11 @@ static void start_reader_impl(void){
 /// 封面/索引之后才准备继续阅读；不显示、不改选书或记录，每次输入安静周期至多一次。/ Prepare Continue only after covers/indexing; no display, selection or record changes, at most once per quiet-input activity.
 static bool tick_prepare_book(uint64_t now){
     if(!home_mode || !shelf_draw_valid || !panel_known || !shelf_covers || !shelf_covers->has_last || !shelf_covers->last.identified || (shelf_covers->last.format!=PN_BOOK_TXT && shelf_covers->last.format!=PN_BOOK_EPUB) || !data_ready || !sd_media.available || reader_active() || now<last_input || now-last_input<1500 || pn_cover_work_pending(&cover_work) || pn_shelf_covers_pending(shelf_covers,shelf_page))return false;
+    if(pn_hot_session_source_pending(&hot_session)){
+        pn_device_power_busy(PN_POWER_PRODUCT,true);pn_status_t s=pn_hot_session_source_step(&hot_session,now);(void)s;
+        if(s!=PN_BUSY)ESP_LOGI(TAG,"Idle book prepare status=%d ready=%u",(int)s,(unsigned)hot_session.prepared);
+        return true;
+    }
     if(pn_hot_session_layout_pending(&hot_session)){
         pn_device_power_busy(PN_POWER_PRODUCT,true);pn_status_t s=pn_hot_session_layout(&hot_session,now);(void)s;ESP_LOGI(TAG,"Idle book layout status=%d",(int)s);return true;
     }
@@ -880,7 +889,7 @@ static bool tick_prepare_book(uint64_t now){
     if(hot_session.tried && hot_session.activity==last_input && hot_session.attempt_epoch==sd_media.epoch && hot_session.attempt_policy==1)return false;
     bool attempted=!hot_session.txt.impl && !hot_session.epub.impl && pool.used<=pool.limit && pool.limit-pool.used>=PN_HOT_PREPARE_HEADROOM;
     if(attempted)pn_device_power_busy(PN_POWER_PRODUCT,true);
-    pn_status_t status=pn_hot_session_prepare_sources(&hot_session,&pool,&sd_media,&shelf_covers->last,NULL,"/data/progress",PN_STYLE_DEFAULT_PIXELS,1,now,last_input);
+    pn_status_t status=pn_hot_session_prepare_step(&hot_session,&pool,&sd_media,&shelf_covers->last,NULL,"/data/progress",PN_STYLE_DEFAULT_PIXELS,1,now,last_input);
     (void)status;
     if(attempted)ESP_LOGI(TAG,"Idle book prepare status=%d ready=%u",(int)status,(unsigned)hot_session.prepared);
     return attempted;
@@ -1716,7 +1725,7 @@ static void device_task(void *arg){
             if(sampled==PN_OK || sampled==PN_BUSY){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);}}
         if(available==PN_EMPTY && shelf_mode && shelf_covers && shelf_page && !actions_mode && !transfer.impl && !usb.open && !wallpaper_ui.impl && !font_manage.impl && !settings_ui.impl && !locked && !status_page && !reading_menu && !touch_held && !tap.down && now_ms()>=last_input && now_ms()-last_input>=80){
             // 后台确有工作时回到最高频，封面/索引不在降频下变慢。/ Real background work returns to maximum so covers and indexing are not slowed by DFS.
-            bool worked=now_ms()-last_input>=800 && catalog_build_idle()==PN_OK;worked|=tick_covers();worked|=tick_prepare_book(now_ms());background=pn_cover_work_pending(&cover_work) || pn_shelf_covers_pending(shelf_covers,shelf_page) || (home_mode && now_ms()-last_input>=1500 && (pn_hot_session_layout_pending(&hot_session) || pn_hot_session_paint_pending(&hot_session)));if(worked){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);}}
+            bool worked=now_ms()-last_input>=800 && catalog_build_idle()==PN_OK;worked|=tick_covers();worked|=tick_prepare_book(now_ms());background=pn_cover_work_pending(&cover_work) || pn_shelf_covers_pending(shelf_covers,shelf_page) || (home_mode && now_ms()-last_input>=1500 && (pn_hot_session_source_pending(&hot_session) || pn_hot_session_layout_pending(&hot_session) || pn_hot_session_paint_pending(&hot_session)));if(worked){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);}}
 #if defined(CONFIG_PN_UI_FOLLOW) && CONFIG_PN_UI_FOLLOW
         if(!locked && !transfer.impl && !usb.open && font_manage.impl){pn_status_t motion=pn_font_manage_tick(&font_manage,now_ms());pn_list_motion_stats_t moving=pn_font_manage_motion_stats(&font_manage);background|=moving.pending!=0 || moving.coasting;
             if(motion==PN_OK){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);}}

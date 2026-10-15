@@ -23,6 +23,7 @@ static FILE *font_handles[4];
 static const char *profile_stage="setup";
 static unsigned layout_calls;
 static unsigned glyph_loads,glyph_renders,body_hits;
+static uint64_t job_work_bytes;static unsigned job_steps;
 static bool interrupt_layout,layout_interrupted;
 FT_Error __real_FT_Load_Glyph(FT_Face,FT_UInt,FT_Int32);
 FT_Error __wrap_FT_Load_Glyph(FT_Face face,FT_UInt glyph,FT_Int32 flags){if(tracing){glyph_loads++;glyph_renders+=(flags&FT_LOAD_RENDER)!=0;}return __real_FT_Load_Glyph(face,glyph,flags);}
@@ -57,6 +58,15 @@ pn_status_t __real_pn_identity_stream(void *,uint64_t,pn_identity_read_fn,pn_boo
 pn_status_t __wrap_pn_identity_stream(void *ctx,uint64_t size,pn_identity_read_fn read,pn_book_id_t *id){if(tracing && size==fallback_size){hashes++;before_hash();}if(tracing && size==book_size)book_hashes++;return __real_pn_identity_stream(ctx,size,read,id);}
 pn_status_t __real_pn_identity_stream_pooled(pn_pool_t *,void *,uint64_t,pn_identity_read_fn,pn_book_id_t *);
 pn_status_t __wrap_pn_identity_stream_pooled(pn_pool_t *pool,void *ctx,uint64_t size,pn_identity_read_fn read,pn_book_id_t *id){if(tracing && size==fallback_size){hashes++;before_hash();}if(tracing && size==book_size)book_hashes++;return __real_pn_identity_stream_pooled(pool,ctx,size,read,id);}
+pn_status_t __real_pn_identity_job_begin(pn_identity_job_t *,pn_pool_t *,void *,uint64_t,pn_identity_read_fn);
+pn_status_t __wrap_pn_identity_job_begin(pn_identity_job_t *j,pn_pool_t *p,void *ctx,uint64_t size,pn_identity_read_fn read){if(tracing && size==book_size)book_hashes++;return __real_pn_identity_job_begin(j,p,ctx,size,read);}
+pn_status_t __real_pn_identity_job_step(pn_identity_job_t *,pn_book_id_t *);
+pn_status_t __wrap_pn_identity_job_step(pn_identity_job_t *j,pn_book_id_t *id){
+    uint64_t before,size,after,total;assert(!pn_identity_job_progress(j,&before,&size));unsigned reads=book_reads;size_t bytes=book_read_bytes;
+    pn_status_t s=__real_pn_identity_job_step(j,id);assert(!pn_identity_job_progress(j,&after,&total) && total==size && after>=before && after-before<=32768);
+    if(tracing && size==book_size){assert(book_reads-reads<=1 && book_read_bytes-bytes<=32768);job_steps++;job_work_bytes+=after-before;}
+    return s;
+}
 static pn_status_t show(void *ctx,const pn_frame_t *frame,pn_refresh_t profile){
     (void)ctx;(void)profile;pn_book_id_t id;assert(pn_identity_bytes(frame->pixels,frame->stride*(size_t)frame->height,&id)==PN_OK);
     const char *directory=getenv("PN_FONT_STARTUP_FRAMES");if(directory){char path[2048];int n=snprintf(path,sizeof path,"%s/frame-%u.raw",directory,presents);assert(n>0 && (size_t)n<sizeof path);FILE *file=fopen(path,"wb");size_t bytes=frame->stride*(size_t)frame->height;assert(file && fwrite(frame->pixels,1,bytes,file)==bytes && !fclose(file));}
@@ -85,19 +95,29 @@ int main(int argc,char **argv){
     fallback_path=primary?fonts.primary.path:fonts.fallback.path;book_path=argv[1];active_media=&media;pn_cancel_scope_t scope;pn_cancel_enter(&scope,cancelled,NULL);
     if(system){pn_text_source_t retained=pn_font_builtin_source();font_handles[0]=((pn_text_file_t *)retained.ctx)->handle;}
     pn_hot_session_t prepared={0};bool warm=getenv("PN_FONT_STARTUP_WARM")!=NULL;
+    bool partial=getenv("PN_FONT_STARTUP_PARTIAL")!=NULL;
     if(warm){
         pn_catalog_item_t item={.identified=true,.format=epub?PN_BOOK_EPUB:PN_BOOK_TXT,.size=book_size};assert(strlen(argv[1])<sizeof item.path);strcpy(item.path,argv[1]);
         assert(pn_identity_file(&media,&guard,argv[1],PN_TEXT_FILE_MAX_BYTES,&item.expected)==PN_OK);
         interrupt_layout=getenv("PN_FONT_STARTUP_INTERRUPT")!=NULL;
         profile_stage="idle";tracing=true;pn_status_t staged;
-        if(getenv("PN_FONT_STARTUP_STAGED")){
+        if(partial){
+            assert(epub);staged=pn_hot_session_prepare_step(&prepared,&pool,&media,&item,NULL,argv[3],44,1,0,0);assert(staged==PN_BUSY);
+            uint64_t bytes=0,total=0,target=book_size>65536?65536:book_size>32768?32768:0;unsigned steps=0;
+            while(!book_hashes || bytes<target){assert(++steps<4096 && pn_hot_session_source_step(&prepared,0)==PN_BUSY && !pn_hot_session_source_progress(&prepared,&bytes,&total));}
+            assert(bytes==target && bytes<total && !prepared.prepared && !prepared.epub.impl && !layout_calls);
+            cancel_requested=true;assert(pn_hot_session_source_step(&prepared,0)==PN_CANCELLED);cancel_requested=false;
+            uint64_t resumed,checked;assert(!pn_hot_session_source_progress(&prepared,&resumed,&checked) && resumed==bytes && checked==total);
+            printf("idle_stream bytes=%llu total=%llu work_bytes=%llu steps=%u cancelled=1\n",(unsigned long long)bytes,(unsigned long long)total,(unsigned long long)job_work_bytes,job_steps);
+        }else if(getenv("PN_FONT_STARTUP_STAGED")){
             staged=pn_hot_session_prepare_sources(&prepared,&pool,&media,&item,NULL,argv[3],44,1,0,0);
             assert(staged==PN_OK && !layout_calls && pn_hot_session_layout_pending(&prepared));
             printf("idle_sources layout_calls=%u retained=%d\n",layout_calls,prepared.prepared);
             if(!getenv("PN_FONT_STARTUP_SOURCE_ONLY"))staged=pn_hot_session_layout(&prepared,0);
         }else staged=pn_hot_session_prepare(&prepared,&pool,&media,&item,NULL,argv[3],44,1,0,0);
         tracing=false;
-        if(interrupt_layout){assert(staged==PN_CANCELLED && layout_interrupted);printf("idle_interrupt retained=%d\n",prepared.prepared);interrupt_layout=layout_interrupted=false;}
+        if(partial)assert(staged==PN_BUSY && pn_hot_session_source_pending(&prepared));
+        else if(interrupt_layout){assert(staged==PN_CANCELLED && layout_interrupted);printf("idle_interrupt retained=%d\n",prepared.prepared);interrupt_layout=layout_interrupted=false;}
         else{
         if(staged!=PN_OK)fprintf(stderr,"idle_prepare failed status=%d used=%zu txt=%d epub=%d\n",(int)staged,pool.used,prepared.txt.impl!=NULL,prepared.epub.impl!=NULL);
         assert(staged==PN_OK);
@@ -108,13 +128,14 @@ int main(int argc,char **argv){
             tracing=false;
             printf("idle_paint steps=%u status=%d\n",steps,painted);
         }
-        assert(!presents && !state_writes);if(!getenv("PN_FONT_STARTUP_INTERRUPT"))assert(prepared.prepared && prepared.preparations==1);
+        assert(!presents && !state_writes);if(!partial && !getenv("PN_FONT_STARTUP_INTERRUPT"))assert(prepared.prepared && prepared.preparations==1);
         printf("idle_prepare book_hashes=%u font_hashes=%u book_bytes=%zu font_bytes=%zu state_writes=%zu\n",book_hashes,hashes,book_read_bytes,font_read_bytes,state_writes);
         printf("idle_layout calls=%u\n",layout_calls);layout_calls=0;
         printf("idle_glyph loads=%u renders=%u\n",glyph_loads,glyph_renders);glyph_loads=glyph_renders=0;
         hashes=book_hashes=font_opens=book_opens=book_reads=book_seeks=0;font_read_bytes=book_read_bytes=0;
+        job_work_bytes=job_steps=0;
     }
-    profile_stage="click";tracing=true;pn_status_t status=warm && prepared.prepared?pn_hot_session_take_prepared(&prepared,&media,argv[1],epub?PN_BOOK_EPUB:PN_BOOK_TXT,&prepared.book,1,0,&t,&e):epub?pn_epub_app_open_on_media(&e,&pool,&media,argv[1],NULL,argv[3],44,0):pn_reader_app_open_on_media(&t,&pool,&media,argv[1],NULL,argv[3],44,0);
+    profile_stage="click";tracing=true;pn_status_t status=warm && (prepared.prepared || pn_hot_session_source_pending(&prepared))?pn_hot_session_take_prepared(&prepared,&media,argv[1],epub?PN_BOOK_EPUB:PN_BOOK_TXT,&prepared.book,1,0,&t,&e):epub?pn_epub_app_open_on_media(&e,&pool,&media,argv[1],NULL,argv[3],44,0):pn_reader_app_open_on_media(&t,&pool,&media,argv[1],NULL,argv[3],44,0);
     bool expected_fallback=!primary && !is_fault("missing") && !is_fault("replaced") && !is_fault("bad-primary");
     if(status==PN_OK && expected_fallback)assert((epub?pn_epub_app_fallback_font(&e,argv[2]):pn_reader_app_fallback_font(&t,argv[2]))==PN_BUSY);
     if(status==PN_OK)status=epub?pn_epub_app_step(&e,PN_APP_OPEN,1,show,NULL):pn_reader_app_step(&t,PN_APP_OPEN,1,show,NULL);
@@ -123,6 +144,7 @@ int main(int argc,char **argv){
     printf("click_layout calls=%u\n",layout_calls);profile_stage="turns";
     printf("click_glyph loads=%u renders=%u\n",glyph_loads,glyph_renders);
     printf("click_body hits=%u\n",body_hits);
+    if(partial)printf("click_stream work_bytes=%llu steps=%u\n",(unsigned long long)job_work_bytes,job_steps);
     unsigned get_hashes=0;
     if(status==PN_OK){pn_font_preferences_t selected;char directory[PN_FONT_REFERENCE_PATH_MAX];tracing=true;
         pn_status_t loaded=epub?pn_epub_app_fonts_get(&e,&selected,directory,sizeof directory):pn_reader_app_fonts_get(&t,&selected,directory,sizeof directory);

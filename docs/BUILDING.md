@@ -141,6 +141,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/run_sim.ps1
 
 ## EPUB 与性能诊断
 
+`tools/test_local_open_steps.py --binary build-host/font_system_startup_probe --output build-dev/local-open-steps`检查用户全部EPUB×四款字体×正文/补字：真实首页任务先完成64KiB摘要，注入一次取消，再点击接续原任务，核对剩余摘要字节、完整身份、OPEN/NEXT/PREVIOUS三张原始帧及关闭池归零。可传`--baseline <独立冻结旧探针>`作跨版本冷开对照；默认明确标为同程序冷开/部分准备策略对照。全部原件SHA保持；书SHA启动次数为零不等于点击没有剩余摘要工作，报告单列`click.work_bytes`。`tools/test_local_identity_jobs.py --binary build-host/test_device_identity --output build-dev/local-identity-jobs`另对全部用户书籍和字体比较原同步与分步设备适配器的摘要、逻辑fread数及每步DMA归还；可传独立`--baseline`，PSA/DMA是替身且PSA主机堆不计入池，不能用池峰称设备总RAM。这两个命令已加入`local-samples`。真实`device_menu_probe --prepare-books`区分唯一正文回执和部分EPUB接管前的一次加载反馈，旧报告`one_present`仍兼容。
+
 本机综合入口也运行`tools/test_local_middle_key.py --sim build-sim-sdl-idf/pn_sim`与`tools/test_local_font_samples.py --binary build-host/font_samples_validate`，使用用户原书/字库的独立副本，检查阅读中间键、排版保存和关闭池归零，以及字体列表首帧不打开外置小样、每轮最多一个与合并呈现。字体工具可加`--baseline <旧探针>`比较完整最终像素；未给旧工具时只报告本版行为及重绘一致，不当作跨版本像素对照。结果位于`build-dev/local-middle-key/`和`local-font-samples/`。公共`catalog_mount`只将挂载根`mkdir`替换为IDF6.1 FatFS的`EINVAL`，其余千本索引、真实文件、重开/取消/分配失败与原测试相同，不能代替实卡掉电或响应计时。
 
 `font_startup`编译真实TXT/EPUB入口，检查外置补字引用沿同一个完整校验句柄进入排版键，该补字文件仅一次完整摘要；另覆盖缺失、同大小替换、主字体损坏、取消、失卡和显示失败的释放。`tools/test_local_fallback_startup.py --binary build-host/font_startup_probe`已接入`local-samples`，使用全部用户EPUB/TXT和TTF的独立副本，记录真实文件端口字节、完整摘要次数、画面摘要与池峰；可选`--baseline`对照修改前冻结探针。它不测物理TF或面板时间。阅读线的整帧SDL对照固定`PN_SIM_CLOCK=12:34`，保留全部像素判据，避免跨分钟HUD变化误报取消失败。

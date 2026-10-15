@@ -104,7 +104,8 @@ pn_status_t pn_identity_bytes(const uint8_t *bytes,size_t n,pn_book_id_t *out){
 }
 static pn_identity_stream_port_fn stream_port;
 static pn_identity_pooled_port_fn pooled_port;
-void pn_identity_stream_port(pn_identity_stream_port_fn port){stream_port=port;pooled_port=NULL;}
+static const pn_identity_job_port_t *job_port;
+void pn_identity_stream_port(pn_identity_stream_port_fn port){stream_port=port;pooled_port=NULL;job_port=NULL;}
 void pn_identity_pooled_port(pn_identity_pooled_port_fn port){pooled_port=port;}
 static pn_status_t software_stream(void *ctx,uint64_t size,pn_identity_read_fn read,uint8_t *buffer,size_t capacity,pn_book_id_t *out){
     sha_t hash={.h={0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19}};
@@ -142,4 +143,58 @@ pn_status_t pn_identity_stream_pooled(pn_pool_t *pool,void *ctx,uint64_t size,pn
     uint8_t *buffer=pn_alloc_tagged(pool,PN_MEM_DOCUMENT,32u*1024u);
     pn_status_t status=buffer?identity_stream(ctx,size,read,buffer,32u*1024u,out):default_stream(ctx,size,read,out);
     pn_free(buffer);pn_profile_end(&span,status);return status;
+}
+typedef struct {sha_t hash;uint8_t buffer[32768];} software_job_t;
+static pn_status_t software_job_begin(void *ctx){software_job_t *s=ctx;s->hash=(sha_t){.h={0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19}};return PN_OK;}
+static pn_status_t software_job_step(void *ctx,void *source,uint64_t offset,size_t capacity,pn_identity_read_fn read,size_t *got){
+    software_job_t *s=ctx;size_t n=0;pn_status_t status=read(source,offset,s->buffer,capacity,&n);
+    if(status!=PN_OK)return status;
+    if(!n || n>capacity)return PN_IO;
+    update(&s->hash,s->buffer,n);*got=n;return PN_OK;
+}
+static pn_status_t software_job_finish(void *ctx,pn_book_id_t *out){finish(&((software_job_t *)ctx)->hash,out);return PN_OK;}
+static void software_job_abort(void *ctx){(void)ctx;}
+static const pn_identity_job_port_t software_job_port={sizeof(software_job_t),software_job_begin,software_job_step,software_job_finish,software_job_abort};
+typedef struct {
+    pn_identity_job_port_t port;pn_pool_t *pool;void *source;pn_identity_read_fn read;
+    uint64_t bytes,size;pn_status_t status;pn_book_id_t result;bool active;
+    max_align_t state[];
+} identity_job_t;
+void pn_identity_job_port(const pn_identity_job_port_t *port){job_port=port;}
+void pn_identity_job_close(pn_identity_job_t *job){
+    if(!job || !job->impl)return;
+    identity_job_t *s=job->impl;if(s->active)s->port.abort(s->state);pn_free(s);job->impl=NULL;
+}
+pn_status_t pn_identity_job_begin(pn_identity_job_t *job,pn_pool_t *pool,void *ctx,uint64_t size,pn_identity_read_fn read){
+    if(!job || !pool || !read)return PN_INVALID;
+    if(job->impl)return PN_BUSY;
+    if(size>UINT64_MAX/8)return PN_LIMIT;
+    const pn_identity_job_port_t *port=job_port?job_port:&software_job_port;
+    if(!port->bytes || port->bytes>SIZE_MAX-sizeof(identity_job_t) || !port->begin || !port->step || !port->finish || !port->abort)return PN_INVALID;
+    pn_status_t status=pn_cancel_checkpoint();if(status!=PN_OK)return status;
+    identity_job_t *s=pn_alloc_tagged(pool,PN_MEM_DOCUMENT,sizeof *s+port->bytes);if(!s)return PN_NO_MEMORY;
+    memset(s,0,sizeof *s+port->bytes);s->port=*port;s->pool=pool;s->source=ctx;s->read=read;s->size=size;s->status=PN_BUSY;s->active=true;
+    status=s->port.begin(s->state);if(status!=PN_OK){s->port.abort(s->state);pn_free(s);return status;}job->impl=s;return PN_OK;
+}
+pn_status_t pn_identity_job_progress(const pn_identity_job_t *job,uint64_t *bytes,uint64_t *size){
+    if(!job || !bytes || !size)return PN_INVALID;
+    if(!job->impl)return PN_EMPTY;
+    const identity_job_t *s=job->impl;*bytes=s->bytes;*size=s->size;return PN_OK;
+}
+pn_status_t pn_identity_job_step(pn_identity_job_t *job,pn_book_id_t *out){
+    if(!job || !job->impl || !out)return PN_INVALID;
+    identity_job_t *s=job->impl;
+    if(s->status!=PN_BUSY){if(s->status==PN_OK)*out=s->result;return s->status;}
+    pn_status_t status=pn_cancel_checkpoint();if(status!=PN_OK)return status;
+    pn_profile_span_t span;pn_profile_begin(&span,s->pool,"content.sha-step");
+    if(s->bytes<s->size){
+        size_t capacity=s->size-s->bytes<32768?(size_t)(s->size-s->bytes):32768,n=0;
+        status=s->port.step(s->state,s->source,s->bytes,capacity,s->read,&n);
+        if(status==PN_OK){if(!n || n>capacity)status=PN_IO;else{s->bytes+=n;status=PN_BUSY;}}
+    }else{
+        pn_book_id_t result;status=s->port.finish(s->state,&result);
+        if(status==PN_OK){s->result=result;*out=result;}
+    }
+    if(status!=PN_BUSY && status!=PN_CANCELLED){s->status=status;s->port.abort(s->state);s->active=false;}
+    pn_profile_end(&span,status);return status;
 }

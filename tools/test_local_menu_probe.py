@@ -82,7 +82,9 @@ def main():
         if args.prepare_books:
             prepared=[dict(word.split('=',1) for word in line.split()[1:]) for line in result.stdout.splitlines() if line.startswith('device_prepare ')]
             assert len(prepared)==2 and {p['kind'] for p in prepared}=={'txt','epub'}
-            assert all(p[key]=='1' for p in prepared for key in ('quiet_gate','lock_drop','taken','one_present'))
+            assert all(p[key]=='1' for p in prepared for key in ('quiet_gate','lock_drop','taken'))
+            assert all(p.get('body_present',p.get('one_present'))=='1' for p in prepared)
+            if all('loading_present' in p for p in prepared): assert all(p['loading_present']==('1' if p['kind']=='epub' else '0') for p in prepared)
             assert all(p['menu_font_io']=='0' for p in prepared)
             extra['prepared_books']=prepared
         if args.system_failure:

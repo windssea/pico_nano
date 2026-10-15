@@ -9,7 +9,7 @@
 typedef struct {
     pn_reader_app_t txt;pn_epub_app_t epub; ///< 唯一保留对象，原wrapper清空 / Sole retained object; original wrapper is cleared
     char path[PN_CATALOG_PATH_MAX]; ///< 选择路径，不能作为内容身份 / Selection path, never a content identity
-    pn_book_id_t book; ///< 原验证句柄的完整内容身份 / Complete identity of the original verified handle
+    pn_book_id_t book; ///< 打开进行中为期望身份，就绪后是原句柄完整身份 / Expected identity while opening, complete handle identity once ready
     pn_media_t *media;uint64_t epoch,policy,at; ///< 挂载/配置代次与保留时刻 / Mount/config generations and retention time
     size_t hits,parks; ///< 只读诊断计数 / Diagnostic counters
     bool prepared,tried; ///< 未显示准备与本活动周期已尝试标志 / Never-displayed preparation and attempted activity flags
@@ -17,11 +17,22 @@ typedef struct {
     size_t preparations,takes; ///< 准备成功与移交次数，不是显示提交 / Successful preparations and handoffs, never presentation commits
     pn_pool_t *prepare_pool; ///< 分阶段准备原池，须保活到drop/take / Original staged-preparation pool, alive until drop/take
     bool layout_pending; ///< 书源/字体已完整校验，首屏可在下一轮准备或由点击接续 / Sources/fonts fully verified; first layout may run next tick or on click
+    pn_epub_open_job_t opening; ///< 私有部分EPUB准备，不能呈现或当已验证源 / Private partial EPUB preparation, never presentable or a verified source
 } pn_hot_session_t;
 /// 首页空闲只读准备已识别的继续阅读书；不显示/写记录，旧缓存pin保护，不足退EMPTY；同activity/epoch仅一次。/ Read-only idle preparation for an identified continue book; no display/record writes, pin existing caches, EMPTY on admission refusal, once per activity/epoch.
 pn_status_t pn_hot_session_prepare(pn_hot_session_t *,pn_pool_t *,pn_media_t *,const pn_catalog_item_t *,const char *font,const char *state,int pixels,uint64_t policy,uint64_t now,uint64_t activity);
 /// 只完成原书/字体构造与强身份检查，不排首屏；成功即可take，正常OPEN补剩余工作。SHA/构造仍同步。/ Construct and strongly verify book/fonts without first layout; success permits take and normal OPEN finishes remaining work. Hashing/construction remain synchronous.
 pn_status_t pn_hot_session_prepare_sources(pn_hot_session_t *,pn_pool_t *,pn_media_t *,const pn_catalog_item_t *,const char *font,const char *state,int pixels,uint64_t policy,uint64_t now,uint64_t activity);
+/// 产品分步入口：EPUB保留私有任务供后续source_step；TXT沿原同步源准备，不提前交接未验证内容。/ Product entry: EPUB retains a private task for source_step; TXT keeps synchronous source preparation, never handing off unverified content.
+pn_status_t pn_hot_session_prepare_step(pn_hot_session_t *,pn_pool_t *,pn_media_t *,const pn_catalog_item_t *,const char *,const char *,int,uint64_t,uint64_t,uint64_t);
+/// 纯查询部分源任务，不能当作可绘制/已验证状态。/ Query a partial source task, never a drawable/verified state.
+bool pn_hot_session_source_pending(const pn_hot_session_t *);
+/// 纯查询本次选择能否接续部分任务，供控制层决定是否先显示加载反馈。/ Purely match a selection to a partial job so control can show loading feedback before continuing it.
+bool pn_hot_session_source_selected(const pn_hot_session_t *,pn_media_t *,const char *,pn_book_format_t,const pn_book_id_t *,uint64_t,uint64_t);
+/// 推进原任务一轮；摘要阶段取消保留已完成块，后续错误按原释放；不显示或保存。/ Advance the original task once; hash cancellation retains completed chunks, later errors use normal release; never present/save.
+pn_status_t pn_hot_session_source_step(pn_hot_session_t *,uint64_t);
+/// 纯摘要进度查询；任务完成后EMPTY，不替代内容身份。/ Pure hash-progress query; EMPTY after completion, never a content identity.
+pn_status_t pn_hot_session_source_progress(const pn_hot_session_t *,uint64_t *,uint64_t *);
 /// 纯查询已校验源是否待排版；不做IO。/ Query verified sources awaiting layout, without I/O.
 bool pn_hot_session_layout_pending(const pn_hot_session_t *);
 /// 下一安静轮准备首屏，保护旧菜单cache；取消保留已验证对象与可用候选，其他错误释放，仍不显示/写记录。/ Prepare first layout next quiet tick with old menu caches protected; cancellation retains verified objects/usable candidates, other errors release them, without presenting/record writes.

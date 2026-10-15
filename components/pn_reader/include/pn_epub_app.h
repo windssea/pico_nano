@@ -60,6 +60,17 @@ pn_status_t pn_epub_app_body_layer(pn_epub_app_t *app,const pn_reader_body_layer
 pn_status_t pn_epub_app_open_on_media(pn_epub_app_t *,pn_pool_t *,pn_media_t *,const char *book,const char *font,const char *state,int pixels,uint64_t);
 /// 本地/PC便捷打开，仍同源核心。/ Local/PC convenience open using the shared core.
 pn_status_t pn_epub_app_open(pn_epub_app_t *,pn_pool_t *,const char *,const char *,const char *,int,uint64_t);
+typedef struct {void *impl;} pn_epub_open_job_t; ///< 活动打开任务不可移动/复制，不是可阅读app / Never move/copy a live opening job; it is not a readable app
+/// 建立私有原书句柄和只读租约；复制参数，不排版/显示/提交记录。/ Establish a private book handle/READ lease and copy arguments, without layout, presentation or record commits.
+pn_status_t pn_epub_app_open_job_begin(pn_epub_open_job_t *,pn_pool_t *,pn_media_t *,const char *,const char *,const char *,int,uint64_t);
+/// SHA阶段逐步最多32KiB，BUSY待续；其他阶段仍同步。仅全部成功才交出空app；错误须close，源不被提前交接。/ SHA advances by at most 32 KiB per step; BUSY continues, other stages remain synchronous. Transfer only on full success to an empty app; close after errors, never handing off a partial source.
+pn_status_t pn_epub_app_open_job_step(pn_epub_open_job_t *,pn_epub_app_t *);
+/// 仅边界/摘要阶段取消可继续；元信息构造内取消须close；纯查询。/ Boundary/hash cancellation is resumable; cancellation inside metadata construction requires close; pure query.
+bool pn_epub_app_open_job_pending(const pn_epub_open_job_t *);
+/// 只查询完整摘要进度，不表示出版物已验证或可以显示。/ Query full-hash progress, never publication validation or permission to display.
+pn_status_t pn_epub_app_open_job_progress(const pn_epub_open_job_t *,uint64_t *,uint64_t *);
+/// 丢弃私有任务、SHA/ZIP及文件资源，不保存阅读记录，幂等。/ Discard private job/hash/ZIP/file resources without reading-record saves; idempotent.
+pn_status_t pn_epub_app_open_job_close(pn_epub_open_job_t *);
 /// 真实完成字体/图片/显示回调才提交语义位置；保存错误可能在显示后。/ Commit only after fonts/images/presentation; saving may fail after display.
 pn_status_t pn_epub_app_step(pn_epub_app_t *,pn_reader_action_t,uint64_t,pn_reader_present_fn,void *);
 /// 定期保存检查，非异步deadline服务。/ Periodic saving, not an asynchronous deadline service.

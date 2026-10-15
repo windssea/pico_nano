@@ -8,9 +8,10 @@
 static void clear(pn_hot_session_t *h){h->path[0]=0;h->media=NULL;h->epoch=h->policy=h->at=0;h->prepared=false;h->prepare_pool=NULL;h->layout_pending=false;}
 pn_status_t pn_hot_session_drop(pn_hot_session_t *h){
     if(!h)return PN_INVALID;
+    pn_status_t opening=pn_epub_app_open_job_close(&h->opening);
     pn_status_t s=h->prepared?(h->epub.impl?pn_epub_app_discard_unshown(&h->epub):pn_reader_app_discard_unshown(&h->txt)):(h->epub.impl?pn_epub_app_release_retained(&h->epub):pn_reader_app_release_retained(&h->txt));
     if(!h->epub.impl && !h->txt.impl)clear(h);
-    return s;
+    return s==PN_OK?opening:s;
 }
 static pn_status_t prepare(pn_hot_session_t *h,pn_pool_t *pool,pn_media_t *media,const pn_catalog_item_t *item,const char *font,const char *state,int pixels,uint64_t policy,uint64_t now,uint64_t activity,bool sources){
     if(!h || !pool || !media || !item || !policy || !*item->path)return PN_INVALID;
@@ -18,7 +19,7 @@ static pn_status_t prepare(pn_hot_session_t *h,pn_pool_t *pool,pn_media_t *media
     if(strlen(item->path)>=sizeof h->path)return PN_LIMIT;
     if(h->tried && h->activity==activity && h->attempt_epoch==media->epoch && h->attempt_policy==policy)return PN_EMPTY;
     h->tried=true;h->activity=activity;h->attempt_epoch=media->epoch;h->attempt_policy=policy;
-    if(h->txt.impl || h->epub.impl)return PN_BUSY;
+    if(h->txt.impl || h->epub.impl || h->opening.impl)return PN_BUSY;
     if(pool->limit<4u*1024u*1024u || pool->used>pool->limit || pool->limit-pool->used<PN_HOT_PREPARE_HEADROOM)return PN_EMPTY;
     pn_status_t s=pn_cancel_checkpoint();if(s!=PN_OK)return s;
     struct stat directory;if(state && (stat(state,&directory) || !S_ISDIR(directory.st_mode)))return PN_EMPTY;
@@ -39,6 +40,47 @@ static pn_status_t prepare(pn_hot_session_t *h,pn_pool_t *pool,pn_media_t *media
 }
 pn_status_t pn_hot_session_prepare(pn_hot_session_t *h,pn_pool_t *pool,pn_media_t *media,const pn_catalog_item_t *item,const char *font,const char *state,int pixels,uint64_t policy,uint64_t now,uint64_t activity){return prepare(h,pool,media,item,font,state,pixels,policy,now,activity,false);}
 pn_status_t pn_hot_session_prepare_sources(pn_hot_session_t *h,pn_pool_t *pool,pn_media_t *media,const pn_catalog_item_t *item,const char *font,const char *state,int pixels,uint64_t policy,uint64_t now,uint64_t activity){return prepare(h,pool,media,item,font,state,pixels,policy,now,activity,true);}
+pn_status_t pn_hot_session_prepare_step(pn_hot_session_t *h,pn_pool_t *pool,pn_media_t *media,const pn_catalog_item_t *item,const char *font,const char *state,int pixels,uint64_t policy,uint64_t now,uint64_t activity){
+    if(!h || !pool || !media || !item || !policy || !*item->path)return PN_INVALID;
+    if(item->format!=PN_BOOK_EPUB)return pn_hot_session_prepare_sources(h,pool,media,item,font,state,pixels,policy,now,activity);
+    if(!item->identified)return PN_EMPTY;
+    if(strlen(item->path)>=sizeof h->path)return PN_LIMIT;
+    if(h->tried && h->activity==activity && h->attempt_epoch==media->epoch && h->attempt_policy==policy)return PN_EMPTY;
+    if(h->txt.impl || h->epub.impl || h->opening.impl)return PN_BUSY;
+    h->tried=true;h->activity=activity;h->attempt_epoch=media->epoch;h->attempt_policy=policy;
+    if(pool->limit<4u*1024u*1024u || pool->used>pool->limit || pool->limit-pool->used<PN_HOT_PREPARE_HEADROOM)return PN_EMPTY;
+    pn_status_t s=pn_cancel_checkpoint();if(s!=PN_OK)return s;
+    struct stat directory;if(state && (stat(state,&directory) || !S_ISDIR(directory.st_mode)))return PN_EMPTY;
+    pn_cache_owner_t *held=pool->caches;for(pn_cache_owner_t *p=held;p;p=p->next)pn_cache_pin(p);
+    s=pn_epub_app_open_job_begin(&h->opening,pool,media,item->path,font,state,pixels,now);
+    for(pn_cache_owner_t *p=held;p;p=p->next)pn_cache_unpin(p);
+    if(s!=PN_OK)return s;
+    strcpy(h->path,item->path);h->book=item->expected;h->media=media;h->epoch=media->epoch;h->policy=policy;h->at=now;h->prepare_pool=pool;
+    return PN_BUSY;
+}
+bool pn_hot_session_source_pending(const pn_hot_session_t *h){return h && h->media && h->media->available && h->epoch==h->media->epoch && pn_epub_app_open_job_pending(&h->opening);}
+pn_status_t pn_hot_session_source_progress(const pn_hot_session_t *h,uint64_t *bytes,uint64_t *size){return h?pn_epub_app_open_job_progress(&h->opening,bytes,size):PN_INVALID;}
+pn_status_t pn_hot_session_source_step(pn_hot_session_t *h,uint64_t now){
+    if(!h)return PN_INVALID;
+    if(!pn_hot_session_source_pending(h) || now<h->at || now-h->at>=PN_HOT_SESSION_MS)return PN_EMPTY;
+    pn_pool_t *pool=h->prepare_pool;pn_cache_owner_t *held=pool->caches;
+    for(pn_cache_owner_t *p=held;p;p=p->next)pn_cache_pin(p);
+    pn_status_t s=pn_epub_app_open_job_step(&h->opening,&h->epub);
+    for(pn_cache_owner_t *p=held;p;p=p->next)pn_cache_unpin(p);
+    if(s==PN_OK){
+        // 所有权已转入未显示app；身份不符时也必须用未显示析构归还。
+        // Ownership has moved into an unshown app; identity mismatches must use unshown disposal too.
+        h->prepared=true;
+        pn_book_id_t actual;s=pn_epub_app_identity(&h->epub,&actual);
+        if(s==PN_OK && memcmp(actual.sha256,h->book.sha256,32))s=PN_STALE_JOB;
+        if(s==PN_OK){h->book=actual;h->prepared=true;h->layout_pending=true;h->preparations++;}
+    }
+    bool room=pool->used<=pool->limit && pool->limit-pool->used>=PN_HOT_HEADROOM;
+    if(!room || (s!=PN_OK && s!=PN_BUSY && !(s==PN_CANCELLED && pn_epub_app_open_job_pending(&h->opening)))){
+        pn_status_t dropped=pn_hot_session_drop(h);if(s==PN_OK || s==PN_BUSY)s=dropped==PN_OK?PN_EMPTY:dropped;
+    }
+    return s;
+}
 bool pn_hot_session_layout_pending(const pn_hot_session_t *h){return h && h->prepared && h->layout_pending && h->prepare_pool && h->media && h->media->available && h->epoch==h->media->epoch;}
 pn_status_t pn_hot_session_layout(pn_hot_session_t *h,uint64_t now){
     if(!h)return PN_INVALID;
@@ -57,7 +99,10 @@ pn_status_t pn_hot_session_layout(pn_hot_session_t *h,uint64_t now){
     return s;
 }
 static bool matches(const pn_hot_session_t *h,pn_media_t *media,const char *path,pn_book_format_t kind,uint64_t policy,uint64_t now){
-    return h->media && h->media==media && h->epoch==media->epoch && media->available && h->policy==policy && !strcmp(h->path,path) && now>=h->at && now-h->at<PN_HOT_SESSION_MS && (kind==PN_BOOK_EPUB?h->epub.impl!=NULL:kind==PN_BOOK_TXT && h->txt.impl!=NULL);
+    return h->media && h->media==media && h->epoch==media->epoch && media->available && h->policy==policy && !strcmp(h->path,path) && now>=h->at && now-h->at<PN_HOT_SESSION_MS && (kind==PN_BOOK_EPUB?(h->epub.impl!=NULL || h->opening.impl!=NULL):kind==PN_BOOK_TXT && h->txt.impl!=NULL);
+}
+bool pn_hot_session_source_selected(const pn_hot_session_t *h,pn_media_t *media,const char *path,pn_book_format_t kind,const pn_book_id_t *expected,uint64_t policy,uint64_t now){
+    return media && path && pn_hot_session_source_pending(h) && matches(h,media,path,kind,policy,now) && (!expected || !memcmp(expected->sha256,h->book.sha256,32));
 }
 bool pn_hot_session_paint_pending(const pn_hot_session_t *h){return h && h->prepared && !h->layout_pending && h->media && h->media->available && h->epoch==h->media->epoch && (h->epub.impl?pn_epub_app_unshown_paint_pending(&h->epub):pn_reader_app_unshown_paint_pending(&h->txt));}
 pn_status_t pn_hot_session_paint(pn_hot_session_t *h,uint64_t now,size_t budget){
@@ -68,8 +113,13 @@ pn_status_t pn_hot_session_paint(pn_hot_session_t *h,uint64_t now,size_t budget)
 pn_status_t pn_hot_session_take_prepared(pn_hot_session_t *h,pn_media_t *media,const char *path,pn_book_format_t kind,const pn_book_id_t *expected,uint64_t policy,uint64_t now,pn_reader_app_t *txt,pn_epub_app_t *epub){
     if(!h || !media || !path || !txt || !epub)return PN_INVALID;
     if(txt->impl || epub->impl)return PN_BUSY;
-    if(!h->prepared || !matches(h,media,path,kind,policy,now))return PN_EMPTY;
+    if(!matches(h,media,path,kind,policy,now))return PN_EMPTY;
     if(expected && memcmp(expected->sha256,h->book.sha256,32))return PN_STALE_JOB;
+    if(h->opening.impl){
+        pn_status_t s;do{s=pn_hot_session_source_step(h,now);}while(s==PN_BUSY);
+        if(s!=PN_OK)return s;
+    }
+    if(!h->prepared)return PN_EMPTY;
     pn_status_t s=h->epub.impl?pn_epub_app_verify_unshown(&h->epub):pn_reader_app_verify_unshown(&h->txt);if(s!=PN_OK)return s;
     txt->impl=h->txt.impl;epub->impl=h->epub.impl;h->txt.impl=h->epub.impl=NULL;h->takes++;clear(h);return PN_OK;
 }
@@ -80,7 +130,7 @@ pn_status_t pn_hot_session_expire(pn_hot_session_t *h,uint64_t now){
 }
 pn_status_t pn_hot_session_park(pn_hot_session_t *h,pn_pool_t *pool,pn_media_t *media,const char *path,uint64_t policy,uint64_t now,pn_reader_app_t *txt,pn_epub_app_t *epub){
     if(!h || !pool || !media || !path || !*path || !policy || !txt || !epub || (!!txt->impl==!!epub->impl))return PN_INVALID;
-    if(h->txt.impl || h->epub.impl)return PN_BUSY;
+    if(h->txt.impl || h->epub.impl || h->opening.impl)return PN_BUSY;
     if(strlen(path)>=sizeof h->path)return PN_LIMIT;
     if(pool->limit<4u*1024u*1024u || pool->used>pool->limit || pool->limit-pool->used<PN_HOT_HEADROOM)return PN_EMPTY;
     pn_status_t s=epub->impl?pn_epub_app_retained_source(epub,media,path):pn_reader_app_retained_source(txt,media,path);if(s!=PN_OK)return s;
@@ -94,7 +144,7 @@ pn_status_t pn_hot_session_park(pn_hot_session_t *h,pn_pool_t *pool,pn_media_t *
 pn_status_t pn_hot_session_resume(pn_hot_session_t *h,pn_media_t *media,const char *path,pn_book_format_t kind,const pn_book_id_t *expected,uint64_t policy,uint64_t now,pn_reader_app_t *txt,pn_epub_app_t *epub,pn_reader_present_fn present,void *ctx){
     if(!h || !media || !path || !txt || !epub || !present)return PN_INVALID;
     if(txt->impl || epub->impl)return PN_BUSY;
-    if(h->prepared || !matches(h,media,path,kind,policy,now))return PN_EMPTY;
+    if(h->prepared || h->opening.impl || !matches(h,media,path,kind,policy,now))return PN_EMPTY;
     if(expected && memcmp(expected->sha256,h->book.sha256,32))return PN_STALE_JOB;
     pn_status_t s=h->epub.impl?pn_epub_app_retained_ready(&h->epub):pn_reader_app_retained_ready(&h->txt);if(s!=PN_OK)return s;
     txt->impl=h->txt.impl;epub->impl=h->epub.impl;h->txt.impl=h->epub.impl=NULL;

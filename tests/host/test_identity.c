@@ -8,6 +8,7 @@
  */
 #define _POSIX_C_SOURCE 200809L
 #include "pn_identity.h"
+#include "pn_cancel.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -21,6 +22,45 @@ static pn_status_t failed_owned(void *ctx,uint64_t size,pn_identity_read_fn read
 static void write_bytes(const char *path, const char *bytes, size_t n) {
     FILE *f=fopen(path,"wb"); assert(f); assert(fwrite(bytes,1,n,f)==n); assert(fclose(f)==0);
 }
+typedef struct {size_t calls,maximum,short_cap;bool cancel,invalid;} job_source_t;
+static pn_status_t job_read(void *ctx,uint64_t at,uint8_t *out,size_t cap,size_t *got){
+    job_source_t *s=ctx;s->calls++;if(cap>s->maximum)s->maximum=cap;
+    if(s->cancel){s->cancel=false;return PN_CANCELLED;}
+    if(s->invalid){*got=cap+1;return PN_OK;}
+    if(s->short_cap && cap>s->short_cap)cap=s->short_cap;
+    for(size_t i=0;i<cap;i++)out[i]=(uint8_t)((at+i)*37u);
+    *got=cap;return PN_OK;
+}
+static bool job_cancel(void *ctx){return *(bool *)ctx;}
+static unsigned job_aborts;
+static pn_status_t job_bad_begin(void *ctx){(void)ctx;return PN_IO;}
+static pn_status_t job_bad_step(void *a,void *b,uint64_t c,size_t d,pn_identity_read_fn e,size_t *f){(void)a;(void)b;(void)c;(void)d;(void)e;(void)f;abort();}
+static pn_status_t job_bad_finish(void *a,pn_book_id_t *b){(void)a;(void)b;abort();}
+static void job_bad_abort(void *a){(void)a;job_aborts++;}
+static void jobs(void){
+    uint8_t bytes[65549];for(size_t i=0;i<sizeof bytes;i++)bytes[i]=(uint8_t)(i*37u);
+    pn_pool_t pool;assert(!pn_pool_init(&pool,128u*1024u,NULL,NULL,NULL));
+    const size_t lengths[]={0,3,4096,32768,sizeof bytes};
+    for(unsigned i=0;i<sizeof lengths/sizeof *lengths;i++){
+        pn_identity_job_t job={0};job_source_t source={0};pn_book_id_t expected,actual;memset(&actual,0xa5,sizeof actual);pn_book_id_t original=actual;
+        assert(!pn_identity_bytes(bytes,lengths[i],&expected) && !pn_identity_job_begin(&job,&pool,&source,lengths[i],job_read));
+        pn_status_t s;do{size_t calls=source.calls;s=pn_identity_job_step(&job,&actual);assert(source.calls-calls<=1 && source.maximum<=32768);if(s==PN_BUSY)assert(!memcmp(&actual,&original,sizeof actual));}while(s==PN_BUSY);
+        assert(s==PN_OK && !memcmp(&actual,&expected,sizeof actual));size_t calls=source.calls;
+        assert(!pn_identity_job_step(&job,&actual) && calls==source.calls);pn_identity_job_close(&job);pn_identity_job_close(&job);assert(!pool.used && !pool.live);
+    }
+    pn_identity_job_t job={0};job_source_t source={0};pn_book_id_t actual,expected;memset(&actual,0x5a,sizeof actual);pn_book_id_t original=actual;
+    assert(!pn_identity_bytes(bytes,sizeof bytes,&expected) && !pn_identity_job_begin(&job,&pool,&source,sizeof bytes,job_read));
+    assert(pn_identity_job_step(&job,&actual)==PN_BUSY);uint64_t offset,size;assert(!pn_identity_job_progress(&job,&offset,&size) && offset==32768 && size==sizeof bytes);
+    bool cancel=true;pn_cancel_scope_t scope;pn_cancel_enter(&scope,job_cancel,&cancel);size_t calls=source.calls;assert(pn_identity_job_step(&job,&actual)==PN_CANCELLED && calls==source.calls);pn_cancel_leave(&scope);
+    source.cancel=true;assert(pn_identity_job_step(&job,&actual)==PN_CANCELLED && !pn_identity_job_progress(&job,&offset,&size) && offset==32768 && !memcmp(&actual,&original,sizeof actual));
+    pn_status_t s;do{s=pn_identity_job_step(&job,&actual);}while(s==PN_BUSY);assert(s==PN_OK && !memcmp(&actual,&expected,sizeof actual));pn_identity_job_close(&job);
+    source=(job_source_t){.short_cap=17};assert(!pn_identity_bytes(bytes,803,&expected) && !pn_identity_job_begin(&job,&pool,&source,803,job_read));do{s=pn_identity_job_step(&job,&actual);}while(s==PN_BUSY);assert(s==PN_OK && !memcmp(&actual,&expected,sizeof actual));pn_identity_job_close(&job);
+    source=(job_source_t){.invalid=true};actual=original;assert(!pn_identity_job_begin(&job,&pool,&source,100,job_read) && pn_identity_job_step(&job,&actual)==PN_IO && !memcmp(&actual,&original,sizeof actual));calls=source.calls;assert(pn_identity_job_step(&job,&actual)==PN_IO && calls==source.calls);pn_identity_job_close(&job);
+    assert(pn_identity_job_begin(&job,&pool,&source,UINT64_MAX,job_read)==PN_LIMIT && !job.impl);
+    pn_identity_job_port_t bad={16,job_bad_begin,job_bad_step,job_bad_finish,job_bad_abort};pn_identity_job_port(&bad);
+    assert(pn_identity_job_begin(&job,&pool,&source,100,job_read)==PN_IO && job_aborts==1 && !pool.used && !pool.live);
+    pn_identity_stream_port(NULL);source=(job_source_t){0};assert(!pn_identity_job_begin(&job,&pool,&source,0,job_read));pn_identity_job_close(&job);assert(!pool.used && !pool.live);
+}
 int main(int argc, char **argv) {
     pn_media_t media; pn_media_init(&media); assert(pn_media_attach(&media,1)==PN_OK);
     pn_media_lease_t lease; assert(pn_media_acquire(&media,PN_MEDIA_READ,&lease)==PN_OK);
@@ -30,6 +70,7 @@ int main(int argc, char **argv) {
         for (size_t i=0;i<32;i++) printf("%02x",id.sha256[i]);
         puts(""); return 0;
     }
+    jobs();
     char dir[]="/tmp/pn-identity-XXXXXX"; assert(mkdtemp(dir));
     char a[384],b[384]; snprintf(a,sizeof a,"%s/book",dir); snprintf(b,sizeof b,"%s/copy",dir);
     write_bytes(a,"abc",3); write_bytes(b,"abc",3);

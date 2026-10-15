@@ -106,22 +106,26 @@ static void prepared_books(void){
         shelf_draw_valid=false;assert(!tick_prepare_book(now_ms()+2000));shelf_draw_valid=true;
         last_input=now_ms();clock_us+=1499000;assert(!tick_prepare_book(now_ms()));clock_us+=1000;
         unsigned shown=presents;bool attempted=tick_prepare_book(now_ms());
-        if(!attempted || !hot_session.prepared)fprintf(stderr,"device_prepare failed attempted=%d ready=%d tried=%d home=%d available=%d held=%zu pending=%d/%d used=%zu quiet=%llu\n",attempted,hot_session.prepared,hot_session.tried,home_mode,sd_media.available,pn_media_active(&sd_media),pn_cover_work_pending(&cover_work),pn_shelf_covers_pending(shelf_covers,shelf_page),pool.used,(unsigned long long)(now_ms()-last_input));
-        assert(attempted && hot_session.prepared && !reader_active() && presents==shown);
+        if(!attempted || (!hot_session.prepared && !pn_hot_session_source_pending(&hot_session)))fprintf(stderr,"device_prepare failed attempted=%d ready=%d tried=%d home=%d available=%d held=%zu pending=%d/%d used=%zu quiet=%llu\n",attempted,hot_session.prepared,hot_session.tried,home_mode,sd_media.available,pn_media_active(&sd_media),pn_cover_work_pending(&cover_work),pn_shelf_covers_pending(shelf_covers,shelf_page),pool.used,(unsigned long long)(now_ms()-last_input));
+        assert(attempted && (hot_session.prepared || pn_hot_session_source_pending(&hot_session)) && !reader_active() && presents==shown);
+        unsigned source_steps=0;while(pn_hot_session_source_pending(&hot_session)){assert(++source_steps<65536 && tick_prepare_book(now_ms()) && presents==shown);}
+        assert(hot_session.prepared);
         assert(pn_hot_session_layout_pending(&hot_session));
         assert(tick_prepare_book(now_ms()) && !pn_hot_session_layout_pending(&hot_session) && presents==shown);
           unsigned paint_steps=0;while(pn_hot_session_paint_pending(&hot_session)){assert(++paint_steps<4096 && tick_prepare_book(now_ms()) && presents==shown);}
         memset(counts,0,sizeof counts);watching=true;assert(draw_shelf(PN_REFRESH_GL16)==PN_OK);watching=false;
         assert(hot_session.prepared && presents==shown && !counts[FONT_IO].opens && !counts[FONT_IO].reads && !counts[FONT_IO].bytes);
         assert(prepare_lock() && !hot_session.prepared && !hot_session.txt.impl && !hot_session.epub.impl && !reader_active() && presents==shown);
-        last_input=now_ms();clock_us+=1500000;assert(tick_prepare_book(now_ms()) && hot_session.prepared && presents==shown);
-        // 第二次在排版前直接点击，必须接管已校验源而不是重新冷开。
-        // Click before layout on the second preparation, taking verified sources instead of cold-opening again.
-        assert(pn_hot_session_layout_pending(&hot_session));
+        last_input=now_ms();clock_us+=1500000;assert(tick_prepare_book(now_ms()) && (hot_session.prepared || pn_hot_session_source_pending(&hot_session)) && presents==shown);
+        // 第二次在排版前点击，接续私有任务或接管已校验源，不重开原书。
+        // Click before layout on the second preparation, continuing the private job or taking verified sources without reopening.
+        assert(pn_hot_session_layout_pending(&hot_session) || pn_hot_session_source_pending(&hot_session));
         selected_format=item->format;strcpy(selected_path,item->path);selected_identified=true;selected_expected=item->expected;size_t takes=hot_session.takes;
-        start_reader();assert(reader_active() && !shelf_mode && !status_page && hot_session.takes==takes+1 && !hot_session.prepared && presents==shown+1);
+        bool loading=pn_hot_session_source_selected(&hot_session,&sd_media,selected_path,selected_format,&selected_expected,1,now_ms());
+        start_reader();assert(reader_active() && !shelf_mode && !status_page && hot_session.takes==takes+1 && !hot_session.prepared && presents==shown+1+(unsigned)loading);
+        assert(epub.impl?pn_epub_app_last_confirmed(&epub):pn_reader_app_last_confirmed(&reader));
         pn_book_id_t actual;assert((epub.impl?pn_epub_app_identity(&epub,&actual):pn_reader_app_identity(&reader,&actual))==PN_OK && !memcmp(actual.sha256,item->expected.sha256,32));
-        assert(stop_reader());printf("device_prepare kind=%s quiet_gate=1 menu_font_io=0 lock_drop=1 taken=1 one_present=1 peak=%zu\n",index?"epub":"txt",pool.peak);
+        assert(stop_reader());printf("device_prepare kind=%s quiet_gate=1 menu_font_io=0 lock_drop=1 taken=1 body_present=1 loading_present=%u peak=%zu\n",index?"epub":"txt",(unsigned)loading,pool.peak);
     }
     pn_free(items);
 }

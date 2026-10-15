@@ -92,6 +92,8 @@ def main():
                     ["cmake", "--build", "build-sim-sdl-idf"],
                     ["python3" if docker else sys.executable, "tools/test_local_samples.py", "--sim", "build-sim-sdl-idf/pn_sim", "--probe", "build-host/font_probe", "--zip-binary", "build-host/zip_dump"],
                     ["python3" if docker else sys.executable, "tools/test_local_identity_scratch.py", "--binary", "build-host/test_device_identity", "--output", "build-dev/local-identity-scratch"],
+                    ["python3" if docker else sys.executable, "tools/test_local_identity_jobs.py", "--binary", "build-host/test_device_identity", "--output", "build-dev/local-identity-jobs"],
+                    ["python3" if docker else sys.executable, "tools/test_local_open_steps.py", "--binary", "build-host/font_system_startup_probe", "--output", "build-dev/local-open-steps"],
                     ["python3" if docker else sys.executable, "tools/test_local_shelf.py", "--sim", "build-sim-sdl-idf/pn_sim"],
                     ["python3" if docker else sys.executable, "tools/test_local_device_shelf.py", "--binary", "build-host/device_shelf_validate"],
                     ["python3" if docker else sys.executable, "tools/test_local_menu_probe.py", "--binary", "build-host/device_menu_probe"],

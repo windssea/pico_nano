@@ -53,6 +53,32 @@ static pn_status_t stream(void *ctx,uint64_t size,pn_identity_read_fn read,uint8
 }
 /// 大流由端口直接取得原DMA工作区，省去不用的池内PSRAM缓冲；内部余量门和4KiB退路不变。/ Large streams obtain the original DMA scratch directly, avoiding unused pool PSRAM; internal headroom gates and the 4 KiB fallback stay unchanged.
 static pn_status_t pooled_stream(void *ctx,uint64_t size,pn_identity_read_fn read,pn_book_id_t *out){return stream(ctx,size,read,NULL,0,out);}
+static pn_status_t job_begin(void *state){psa_hash_operation_t *op=state;*op=(psa_hash_operation_t)PSA_HASH_OPERATION_INIT;return psa_hash_setup(op,PSA_ALG_SHA_256)==PSA_SUCCESS?PN_OK:PN_IO;}
+static pn_status_t job_read(void *state,void *ctx,uint64_t offset,size_t cap,pn_identity_read_fn read,uint8_t *buffer,size_t capacity,size_t *got){
+    if(cap>capacity)cap=capacity;
+    size_t n=0;pn_status_t s=read(ctx,offset,buffer,cap,&n);if(s!=PN_OK)return s;
+    if(!n || n>cap)return PN_IO;
+    if(psa_hash_update(state,buffer,n)!=PSA_SUCCESS)return PN_IO;
+    *got=n;return PN_OK;
+}
+/// 每步归还DMA工作区，不在界面输入轮之间占用内部大块。/ Return DMA scratch every step instead of retaining a large internal block between input ticks.
+__attribute__((noinline)) static pn_status_t job_small(void *state,void *ctx,uint64_t offset,size_t cap,pn_identity_read_fn read,size_t *got){
+    _Alignas(16) uint8_t buffer[4096]={0};
+    if(esp_ptr_dma_capable(buffer))return job_read(state,ctx,offset,cap,read,buffer,sizeof buffer,got);
+    uint8_t *block=heap_caps_aligned_alloc(16,sizeof buffer,MALLOC_CAP_DMA|MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);if(!block)return PN_NO_MEMORY;
+    pn_status_t s=job_read(state,ctx,offset,cap,read,block,sizeof buffer,got);heap_caps_free(block);return s;
+}
+static pn_status_t job_step(void *state,void *ctx,uint64_t offset,size_t cap,pn_identity_read_fn read,size_t *got){
+    const uint32_t caps=MALLOC_CAP_DMA|MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT;
+    if(cap>4096 && heap_caps_get_largest_free_block(caps)>=DMA_STREAM_BYTES+DMA_LARGEST_RESERVE && heap_caps_get_free_size(caps)>=DMA_STREAM_BYTES+DMA_INTERNAL_RESERVE){
+        uint8_t *block=heap_caps_aligned_alloc(16,DMA_STREAM_BYTES,caps);
+        if(block){pn_status_t s=job_read(state,ctx,offset,cap,read,block,DMA_STREAM_BYTES,got);heap_caps_free(block);return s;}
+    }
+    return job_small(state,ctx,offset,cap,read,got);
+}
+static pn_status_t job_finish(void *state,pn_book_id_t *out){size_t n=0;return psa_hash_finish(state,out->sha256,sizeof out->sha256,&n)==PSA_SUCCESS && n==sizeof out->sha256?PN_OK:PN_IO;}
+static void job_abort(void *state){(void)psa_hash_abort(state);}
+static const pn_identity_job_port_t incremental={sizeof(psa_hash_operation_t),job_begin,job_step,job_finish,job_abort};
 static pn_status_t probe(void *ctx,uint64_t at,uint8_t *out,size_t cap,size_t *n){
     (void)ctx;if(at>=3 || !cap)return PN_IO;*n=3-(size_t)at;if(*n>cap)*n=cap;memcpy(out,"abc"+at,*n);return PN_OK;
 }
@@ -76,6 +102,15 @@ pn_status_t pn_device_identity_init(void){
         if(status==PN_OK && memcmp(&expected,&actual,sizeof actual))status=PN_CORRUPT;}
     if(status==PN_OK)status=pooled_stream(NULL,8201,block_probe,&actual);
     if(status==PN_OK && memcmp(&expected,&actual,sizeof actual))status=PN_CORRUPT;
-    if(status==PN_OK){pn_identity_stream_port(stream);pn_identity_pooled_port(pooled_stream);}
+    // 分块摘要跨调用保存SDK上下文；自检仍与同源完整软件摘要一致。
+    // Chunked hashing retains its SDK context across calls, self-tested against the complete shared software digest.
+    if(status==PN_OK){
+        psa_hash_operation_t operation=PSA_HASH_OPERATION_INIT;status=job_begin(&operation);
+        for(uint64_t offset=0;status==PN_OK && offset<8201;){size_t n=0;status=job_step(&operation,NULL,offset,8201-offset<4096?(size_t)(8201-offset):4096,block_probe,&n);if(status==PN_OK)offset+=n;}
+        if(status==PN_OK)status=job_finish(&operation,&actual);
+        job_abort(&operation);
+    }
+    if(status==PN_OK && memcmp(&expected,&actual,sizeof actual))status=PN_CORRUPT;
+    if(status==PN_OK){pn_identity_stream_port(stream);pn_identity_pooled_port(pooled_stream);pn_identity_job_port(&incremental);}
     return status;
 }

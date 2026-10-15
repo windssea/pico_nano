@@ -4,6 +4,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "device_identity.h"
 #include "pn_identity.h"
+#include "pn_cancel.h"
 #include "esp_memory_utils.h"
 #include "esp_heap_caps.h"
 #include "psa/crypto.h"
@@ -12,6 +13,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <sys/stat.h>
 static uintptr_t blocked_begin,blocked_end;static bool fail_hash,external_stack,fail_internal;static unsigned operations,calls;static size_t maximum;static uintptr_t internal_begin,internal_end;
 bool esp_ptr_dma_capable(const void *p){uintptr_t at=(uintptr_t)p;if(at>=internal_begin && at<internal_end)return true;return !external_stack && (at<blocked_begin || at>=blocked_end);}
 static void *allocate(void *ctx,size_t n){(void)ctx;void *p=malloc(n);blocked_begin=(uintptr_t)p;blocked_end=blocked_begin+n;return p;}
@@ -40,13 +42,43 @@ static pn_status_t source(void *ctx,uint64_t at,uint8_t *out,size_t cap,size_t *
 typedef struct {void *data;unsigned drops;} menu_t;
 static size_t menu_bytes(void *ctx){return pn_alloc_size(((menu_t *)ctx)->data);}
 static void menu_drop(void *ctx){menu_t *m=ctx;pn_free(m->data);m->data=NULL;m->drops++;}
+static bool cancelled(void *ctx){return *(bool *)ctx;}
+typedef struct {FILE *file;pn_media_t *media;pn_media_lease_t *lease;uint64_t offset;} file_source_t;
+static pn_status_t file_read(void *ctx,uint64_t at,uint8_t *out,size_t cap,size_t *got){file_source_t *f=ctx;pn_status_t s=pn_media_validate(f->media,f->lease);if(s!=PN_OK)return s;assert(at==f->offset);*got=fread(out,1,cap,f->file);f->offset+=*got;return ferror(f->file)?PN_IO:PN_OK;}
+static void jobs(void){
+    pn_pool_t pool;assert(!pn_pool_init(&pool,65536,allocate,release,NULL));uint8_t bytes[65549];for(size_t i=0;i<sizeof bytes;i++)bytes[i]=(uint8_t)(i*37u);
+    pn_book_id_t expected,actual;assert(!pn_identity_bytes(bytes,sizeof bytes,&expected));
+    for(unsigned slow=0;slow<2;slow++){
+        largest=slow?0:80u*1024u;free_bytes=127u*1024u;pn_identity_job_t job={0};assert(!pn_identity_job_begin(&job,&pool,NULL,sizeof bytes,source) && operations==1);
+        calls=0;maximum=0;assert(pn_identity_job_step(&job,&actual)==PN_BUSY);uint64_t offset,size;assert(!pn_identity_job_progress(&job,&offset,&size) && offset==(slow?4096u:32768u));
+        bool cancel=true;pn_cancel_scope_t scope;pn_cancel_enter(&scope,cancelled,&cancel);unsigned count=calls;assert(pn_identity_job_step(&job,&actual)==PN_CANCELLED && calls==count && !borrowed);pn_cancel_leave(&scope);
+        pn_status_t s;do{count=calls;s=pn_identity_job_step(&job,&actual);assert(calls-count<=1 && !borrowed);}while(s==PN_BUSY);
+        assert(s==PN_OK && !operations && !memcmp(&actual,&expected,sizeof actual) && calls==(slow?17u:3u));pn_identity_job_close(&job);assert(!pool.used && !pool.live);
+    }
+    largest=80u*1024u;pn_identity_job_t job={0};assert(!pn_identity_job_begin(&job,&pool,NULL,sizeof bytes,source));fail_hash=true;actual=expected;
+    assert(pn_identity_job_step(&job,&actual)==PN_IO && !operations && !borrowed && !memcmp(&actual,&expected,sizeof actual));fail_hash=false;pn_identity_job_close(&job);
+    largest=0;external_stack=true;assert(!pn_identity_job_begin(&job,&pool,NULL,sizeof bytes,source));fail_internal=true;
+    assert(pn_identity_job_step(&job,&actual)==PN_NO_MEMORY && !operations && !borrowed);fail_internal=false;external_stack=false;pn_identity_job_close(&job);
+    assert(!pool.used && !pool.live);
+}
 int main(int argc,char **argv){
     if(argc>1){
-        assert(argc==3);largest=80u*1024u;free_bytes=127u*1024u;assert(pn_device_identity_init()==PN_OK);
+        assert(argc==3 || (argc==4 && !strcmp(argv[3],"job-cancel")));largest=80u*1024u;free_bytes=127u*1024u;assert(pn_device_identity_init()==PN_OK);
         if(getenv("PN_IDENTITY_BORROWED"))pn_identity_pooled_port(NULL);
         pn_pool_t pool;assert(!pn_pool_init(&pool,(size_t)strtoull(argv[2],NULL,10),allocate,release,NULL));
         pn_media_t media;pn_media_init(&media);pn_media_lease_t lease;assert(!pn_media_attach(&media,1) && !pn_media_acquire(&media,PN_MEDIA_READ,&lease));
-        pn_book_id_t actual;watching=true;pn_status_t status=pn_identity_file_pooled(&pool,&media,&lease,argv[1],UINT64_MAX,&actual);watching=false;
+        pn_book_id_t actual;watching=true;pn_status_t status;
+        if(argc==4){
+            FILE *file=fopen(argv[1],"rb");struct stat info;assert(file && !fstat(fileno(file),&info) && S_ISREG(info.st_mode) && info.st_size>=0);
+            file_source_t input={file,&media,&lease,0};pn_identity_job_t job={0};assert(!pn_identity_job_begin(&job,&pool,&input,(uint64_t)info.st_size,file_read));
+            bool injected=false;do{
+                size_t reads=file_reads,bytes=file_bytes;status=pn_identity_job_step(&job,&actual);
+                assert(file_reads-reads<=1 && file_bytes-bytes<=32768 && !borrowed);
+                if(!injected && status==PN_BUSY && file_bytes){bool cancel=true;pn_cancel_scope_t scope;pn_cancel_enter(&scope,cancelled,&cancel);reads=file_reads;assert(pn_identity_job_step(&job,&actual)==PN_CANCELLED && reads==file_reads);pn_cancel_leave(&scope);injected=true;}
+            }while(status==PN_BUSY);
+            assert(status==PN_OK && fgetc(file)==EOF && !ferror(file) && !fclose(file));pn_identity_job_close(&job);
+        }else status=pn_identity_file_pooled(&pool,&media,&lease,argv[1],UINT64_MAX,&actual);
+        watching=false;
         assert(!status && !pool.used && !pool.live && !operations && !borrowed && !spiram && !pn_media_release(&media,&lease));
         printf("file reads=%zu bytes=%zu maximum=%zu attempts=%zu peak=%zu digest=",file_reads,file_bytes,file_max,pool.attempts,pool.peak);for(unsigned i=0;i<32;i++)printf("%02x",actual.sha256[i]);puts("");return 0;
     }
@@ -86,5 +118,5 @@ int main(int argc,char **argv){
     assert(!pn_identity_stream_pooled(&pool,NULL,sizeof bytes,source,&actual) && !memcmp(&actual,&expected,sizeof actual) && menu.data && !menu.drops && pool.used==used && pool.attempts==attempts && ((uint8_t *)menu.data)[0]==0x5a);
     pn_identity_pooled_port(NULL);
     assert(!pn_identity_stream_pooled(&pool,NULL,sizeof bytes,source,&actual) && !memcmp(&actual,&expected,sizeof actual) && menu.drops==1 && !menu.data && !pool.used && !pool.live);
-    pn_cache_detach(&owner);pn_identity_stream_port(NULL);return 0;
+    pn_cache_detach(&owner);jobs();pn_identity_stream_port(NULL);return 0;
 }
