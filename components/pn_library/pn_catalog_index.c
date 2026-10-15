@@ -88,7 +88,17 @@ pn_status_t pn_catalog_index_page(pn_catalog_index_t *h,const pn_media_lease_t *
 }
 static pn_status_t directory_create(const char *path_name){
     char p[PN_CATALOG_PATH_MAX];strcpy(p,path_name);
-    for(char *c=p+1;;c++){if(*c!='/' && *c)continue;char saved=*c;*c=0;if(mkdir(p,0700) && errno!=EEXIST)return PN_IO;*c=saved;if(!saved)break;}
+    for(char *c=p+1;;c++){
+        if(*c!='/' && *c)continue;
+        char saved=*c;*c=0;struct stat info;
+        // FatFS挂载根的mkdir返回EINVAL；已存在目录先stat，不对根重复mkdir。
+        // FatFS returns EINVAL for mkdir at a mount root; stat existing directories before attempting creation.
+        if(stat(p,&info)){
+            if(errno!=ENOENT || (mkdir(p,0700) && errno!=EEXIST) || stat(p,&info))return PN_IO;
+        }
+        if(!S_ISDIR(info.st_mode))return PN_IO;
+        *c=saved;if(!saved)break;
+    }
     return PN_OK;
 }
 // 取消时留下的临时批次在下一次独占空闲时回收。/ Reclaim cancelled temporary runs during the next exclusive idle interval.

@@ -77,6 +77,7 @@ static inline void script_queue(sim_script_t *script){
         else if(!strcmp(part,"font-up"))event.key.keysym.sym=SDLK_UP;
         else if(!strcmp(part,"key-left"))event.key.keysym.sym=SDLK_1;
         else if(!strcmp(part,"key-home"))event.key.keysym.sym=SDLK_2;
+        else if(!strcmp(part,"key-middle-long"))event.key.keysym.sym=SDLK_F10;
         else if(!strcmp(part,"key-confirm"))event.key.keysym.sym=SDLK_3;
         else if(!strcmp(part,"font-primary"))event.key.keysym.sym=SDLK_F6;
         else if(!strcmp(part,"font-fallback"))event.key.keysym.sym=SDLK_F7;

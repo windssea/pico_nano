@@ -139,16 +139,25 @@ int main(void){
     for(unsigned i=0;i<60;i++)assert(fputs("文字阅读保持当前位置。\n",story)>0);
     assert(!fclose(story));
     pn_async_init(&async_port.input);home_mode=shelf_mode=status_page=actions_mode=false;
-    assert(pn_reader_app_open(&reader,&pool,book,NULL,NULL,44,0)==PN_OK);
+    strcpy(selected_path,book);selected_format=PN_BOOK_TXT;selected_identified=false;
+    assert(pn_reader_app_open_on_media(&reader,&pool,&sd_media,book,NULL,NULL,44,0)==PN_OK);
     assert(active_step(PN_APP_OPEN,now_ms())==PN_OK);
+    // 长按只打开阅读设置，短按关闭工具回正文；之后短按正文才返回首页。
+    // Long opens reading settings only, short closes tools into the body, and a subsequent body short goes Home.
+    void *key_reader=reader.impl;handle_key(PN_KEY_2,PN_KEY_LONG);assert(toolbar_open && reader.impl==key_reader && !home_mode && !shelf_mode);
+    handle_key(PN_KEY_2,PN_KEY_SHORT);assert(!toolbar_open && reader.impl==key_reader && !home_mode);
     assert(pn_style_ui_open(&styles,&reader,present,NULL)==PN_OK);styles.draft.pixels=46;
+    panel_fault=true;handle_key(PN_KEY_2,PN_KEY_SHORT);assert(styles.active && reader.impl==key_reader && !home_mode);panel_fault=false;
+    assert(pn_style_ui_present(&styles,present,NULL)==PN_OK);
     handle_key(PN_KEY_2,PN_KEY_SHORT);assert(reader.impl && !styles.active && !home_mode);
     pn_style_t saved;assert(pn_reader_app_style_get(&reader,&saved)==PN_OK && saved.pixels==46);
     toolbar_open=false;report_reader_result(PN_LIMIT);assert(!toolbar_open && reader.impl && (reader_notice || progress_save_failed));
+    status_page=false;handle_key(PN_KEY_2,PN_KEY_SHORT);assert(!reader_active() && home_mode && !*selected_path);
     assert(stop_reader());
     // 真实main返回/重开路径保持对象；强制停止归还热会话READ租约。
     // Actual main return/reopen preserves the object; forced stop returns the warm READ lease.
     strcpy(selected_path,book);selected_format=PN_BOOK_TXT;selected_identified=false;
+    home_mode=shelf_mode=status_page=false;
     assert(pn_reader_app_open_on_media(&reader,&pool,&sd_media,book,NULL,NULL,44,0)==PN_OK);
     assert(active_step(PN_APP_OPEN,now_ms())==PN_OK && active_step(PN_APP_NEXT,now_ms())==PN_OK);
     void *retained=reader.impl;pn_txt_progress_t location;assert(pn_reader_app_progress(&reader,&location)==PN_OK);
@@ -167,7 +176,13 @@ int main(void){
     snprintf(cache_path,sizeof cache_path,"%s/cache",folder);snprintf(indexed_book,sizeof indexed_book,"%s/books/a.txt",folder);story=fopen(indexed_book,"wb");assert(story && fputs("Original index test.",story)>0 && !fclose(story));
     assert(pn_catalog_index_init(&catalog_index,&pool,&sd_media,books_path,cache_path)==PN_OK);pn_media_lease_t index_lease;
     assert(pn_media_acquire(&sd_media,PN_MEDIA_READ,&index_lease)==PN_OK && pn_catalog_index_page(&catalog_index,&index_lease,"",false,0,NULL,6,shelf_page)==PN_EMPTY && pn_media_release(&sd_media,&index_lease)==PN_OK);
-    assert(catalog_build_idle()==PN_OK && !hot_session.media && !pn_font_system_available() && !pn_media_active(&sd_media));pn_catalog_index_close(&catalog_index);assert(!remove(tf_path));
+    assert(catalog_build_idle()==PN_OK && !hot_session.media && !pn_font_system_available() && !pn_media_active(&sd_media));
+    // 索引已就绪后，空闲与读页不得再次归还系统字库。/ Once the index is ready, idle work and paging must not release the system face again.
+    assert(pn_font_system_open(&pool,&sd_media,tf_path)==PN_OK);pn_text_source_t retained_system=pn_font_builtin_source();
+    assert(catalog_build_idle()==PN_EMPTY && pn_font_system_available() && pn_font_builtin_source().ctx==retained_system.ctx);
+    assert(pn_media_acquire(&sd_media,PN_MEDIA_READ,&index_lease)==PN_OK && pn_catalog_index_page(&catalog_index,&index_lease,"",false,0,NULL,6,shelf_page)==PN_OK && pn_media_release(&sd_media,&index_lease)==PN_OK);
+    assert(catalog_build_idle()==PN_EMPTY && pn_font_system_available() && pn_font_builtin_source().ctx==retained_system.ctx);
+    system_font_release();pn_catalog_index_close(&catalog_index);assert(!remove(tf_path));
     selected_path[0]=0;assert(!unlink(book));
     // 真正产品适配的短反馈/恢复：原波形身份与FULL时序归还，失败和欠载恢复原图。
     // Exercise the real product feedback/restore adapter: return waveform identity/FULL timing and restore original pixels after failure/underrun.

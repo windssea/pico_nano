@@ -13,6 +13,7 @@
 #include "pn_widgets.h"
 #include "pn_sd_layout.h"
 #include "pn_text_file.h"
+#include "pn_cancel.h"
 #include <errno.h>
 #include <ctype.h>
 #include <stdio.h>
@@ -31,6 +32,7 @@ typedef struct {
     uint8_t samples[PN_CATALOG_PAGE_MAX][46*46/2]; ///< 有界原生字体小样槽，约8KiB / Bounded native font tile slots, about 8 KiB
     bool sample_ready[PN_CATALOG_PAGE_MAX]; ///< 已生成可显示样例 / Generated displayable samples
     bool sample_checked[PN_CATALOG_PAGE_MAX]; ///< 本页已确认成功或损坏，瞬态失败仍可重试 / Success or corrupt input confirmed for this page; transient failures remain retryable
+    size_t sample_next;uint64_t sample_retry_at;bool samples_dirty; ///< 控制层逐字库准备与合并呈现，瞬态错误限频 / Controller prepares one face per step and batches presentation, rate-limiting transient retries
     pn_list_motion_t motion;pn_catalog_page_t neighbors[2]; ///< 同源滚动与两份邻页元数据 / Shared motion and two neighboring metadata pages
     pn_cache_owner_t row_owner;row_t *rows;uint64_t row_age;int render_offset; ///< 可回收灰阶行，渲染时借用保护 / Reclaimable gray rows pinned while rendering
 } fm_t;
@@ -70,11 +72,6 @@ static void sample_tile(fm_t *f,size_t index,int y){
     if(f->sample_ready[index]){pn_frame_t tile;pn_frame_bind(&tile,f->samples[index],sizeof f->samples[index],46,46);
         for(int row=0;row<46;row++)for(int x=0;x<46;x++)pn_frame_pixel(&f->canvas,53+x,y+27+row,pn_frame_get(&tile,x,row));
         return;}
-    if(f->sample_checked[index])return;
-    pn_frame_t tile;pn_frame_bind(&tile,f->samples[index],sizeof f->samples[index],46,46);
-    pn_status_t status=build_sample(f,f->page.items[index].path,&tile);f->sample_ready[index]=status==PN_OK;
-    f->sample_checked[index]=f->sample_ready[index] || status==PN_CORRUPT || status==PN_UNSUPPORTED || status==PN_EMPTY;
-    if(f->sample_ready[index])sample_tile(f,index,y);
 }
 /* 读全局记录；读不到保留已知值。/ Read the global record; keep known values when unreadable. */
 static void load_global(fm_t *f){
@@ -94,7 +91,7 @@ static pn_status_t load_page(fm_t *f,const char *cursor,bool previous){
     if(!next)return PN_NO_MEMORY;
     pn_media_lease_t lease;pn_status_t status=pn_media_acquire(f->fonts,PN_MEDIA_READ,&lease);
     if(status==PN_OK){status=previous?pn_catalog_font_page_before(f->fonts,&lease,f->font_dir,cursor,next):pn_catalog_font_page(f->fonts,&lease,f->font_dir,cursor,next);(void)pn_media_release(f->fonts,&lease);}
-    if(status==PN_OK && (next->count || !*cursor)){f->page=*next;memset(f->sample_ready,0,sizeof f->sample_ready);memset(f->sample_checked,0,sizeof f->sample_checked);}
+    if(status==PN_OK && (next->count || !*cursor)){f->page=*next;memset(f->sample_ready,0,sizeof f->sample_ready);memset(f->sample_checked,0,sizeof f->sample_checked);f->sample_next=0;f->sample_retry_at=0;f->samples_dirty=false;}
     pn_free(next);return status;
 }
 /* 打开候选并做样例检测；失败释放全部资源。/ Open the candidate and run the sample check; failures release everything. */
@@ -245,8 +242,30 @@ static pn_status_t show(pn_font_manage_t *ui,pn_font_manage_present_fn present,v
     if(s==PN_OK)s=draw_screen(f,ui->screen);
     pn_w_font_scope_end(&scope);
     if(s==PN_OK)s=present(ctx,&f->canvas,ui->screen==PN_FMU_DETAIL?PN_REFRESH_GC16:PN_REFRESH_GL16);
-    if(s==PN_OK)ui->presented=true;
+    if(s==PN_OK){ui->presented=true;f->samples_dirty=false;}
     return s;
+}
+pn_status_t pn_font_manage_samples_idle(pn_font_manage_t *ui,uint64_t now,pn_font_manage_present_fn present,void *ctx){
+    if(!ui || !ui->impl || !ui->active || ui->screen!=PN_FMU_LIST)return PN_EMPTY;
+    if(!present)return PN_INVALID;
+    fm_t *f=ui->impl;if(f->motion.impl || now<f->sample_retry_at || (!ui->presented && !f->samples_dirty))return PN_EMPTY;
+    pn_status_t s=pn_cancel_checkpoint();if(s!=PN_OK)return s;
+    size_t shown=f->page.count<LIST_ROWS?f->page.count:LIST_ROWS;
+    while(f->sample_next<shown && f->sample_checked[f->sample_next])f->sample_next++;
+    if(f->sample_next<shown){
+        size_t i=f->sample_next;pn_frame_t tile;pn_frame_bind(&tile,f->samples[i],sizeof f->samples[i],46,46);
+        s=build_sample(f,f->page.items[i].path,&tile);
+        // 输入取消不消费槽位，失败像素不交付；下一轮可在原槽重试。/ Input cancellation does not consume a slot or publish failed pixels; retry the same slot next time.
+        if(s==PN_OK)s=pn_cancel_checkpoint();
+        if(s==PN_CANCELLED)return s;
+        if(s==PN_OK){f->sample_ready[i]=true;f->sample_checked[i]=true;f->samples_dirty=true;}
+        else if(s==PN_CORRUPT || s==PN_UNSUPPORTED || s==PN_EMPTY)f->sample_checked[i]=true;
+        f->sample_next++;return s==PN_OK || f->sample_checked[i]?PN_BUSY:s;
+    }
+    // 一批可见小样只合并呈现一次，失败保留已准备像素，重试不重开字库。/ Present one batch of visible samples once; retain prepared pixels after failure without reopening faces.
+    bool changed=f->samples_dirty;if(changed)s=show(ui,present,ctx);
+    f->sample_next=0;f->sample_retry_at=now>UINT64_MAX-1000?UINT64_MAX:now+1000;
+    return s!=PN_OK?s:changed?PN_OK:PN_EMPTY;
 }
 pn_status_t pn_font_manage_open(pn_font_manage_t *ui,pn_pool_t *pool,pn_media_t *font_media,const char *font_dir,
     pn_media_t *state_media,const char *state_dir,pn_font_manage_present_fn present,void *ctx){

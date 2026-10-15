@@ -32,3 +32,6 @@ pn_key_event_t pn_key_feed(pn_key_t *keys,unsigned count,int x,int y,bool valid,
 void pn_key_cancel(pn_key_t *keys);
 /// 管理页短按：左返回、中首页、右确认；长按/未知键不提交。/ Management short press: left Back, middle Home, right Confirm; no action on long/unknown keys.
 int pn_key_management_command(int key,pn_key_event_t event,int back,int confirm,int home);
+typedef enum {PN_KEY_READING_NONE=0,PN_KEY_READING_HOME,PN_KEY_READING_SETTINGS} pn_key_reading_command_t; ///< 阅读中间键意图 / Reading middle-key intent
+/// 阅读正文中间键：短按首页，长按阅读设置；只分类，不访问UI或硬件。/ Reading-body middle key: short Home, long reading settings; classification only, with no UI or hardware access.
+pn_key_reading_command_t pn_key_reading_middle(pn_key_event_t);

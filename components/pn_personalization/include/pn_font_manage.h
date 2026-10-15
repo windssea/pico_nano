@@ -29,6 +29,12 @@ typedef struct {
     pn_status_t last; ///< 最近一次写操作结果，未操作EMPTY / Latest write result, EMPTY before any
 } pn_font_manage_t;
 
+/// 安静时由控制层调用：每轮最多准备一个可见字体小样，全部结论就绪后合并一次GL16；绘制函数不打开小样字体。
+/// Controller-only idle work: prepare at most one visible face per call, then batch one GL16 after all conclusions; drawing never opens sample faces.
+/// CANCELLED保留槽供重试，瞬态失败一轮后至少等待1秒；调用方先让输入/触摸/显示交接优先，单次字体读取仍可能阻塞。
+/// CANCELLED retains its slot; retry transient failures after at least one second per round. Callers prioritize input/touch/display handoff; a face read may still block.
+pn_status_t pn_font_manage_samples_idle(pn_font_manage_t *,uint64_t,pn_font_manage_present_fn,void *);
+
 /// 打开：font_media/font_dir为TF字体目录；state_media/state_dir为全局字体记录所在内部目录（可NULL则不能设默认）。
 /// Open: font_media/font_dir locate TF fonts; state_media/state_dir hold the global font record (NULL disables setting the default).
 pn_status_t pn_font_manage_open(pn_font_manage_t *ui,pn_pool_t *pool,pn_media_t *font_media,const char *font_dir,

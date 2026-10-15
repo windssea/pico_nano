@@ -20,7 +20,9 @@ int main(void){
     char directory[]="/tmp/pn-font-motion-XXXXXX";assert(mkdtemp(directory));pn_text_source_t source=pn_font_builtin_source();uint8_t block[4096];
     for(unsigned i=0;i<24;i++){char path[256];snprintf(path,sizeof path,"%s/Font%02u.ttf",directory,i);FILE *f=fopen(path,"wb");assert(f);for(uint64_t at=0;at<source.size;){size_t n;assert(source.read_at(source.ctx,at,block,sizeof block,&n)==PN_OK && n && fwrite(block,1,n,f)==n);at+=n;}assert(!fclose(f));}
     pn_pool_t pool;assert(pn_pool_init(&pool,6u*1024u*1024u,NULL,NULL,NULL)==PN_OK);pn_media_t media;pn_media_init(&media);assert(pn_media_attach(&media,1)==PN_OK);
-    assert(pn_font_manage_open(&ui,&pool,&media,directory,NULL,NULL,present,NULL)==PN_OK && opens==6);
+    assert(pn_font_manage_open(&ui,&pool,&media,directory,NULL,NULL,present,NULL)==PN_OK && opens==0);
+    for(unsigned i=0;i<6;i++)assert(pn_font_manage_samples_idle(&ui,1000+i,present,NULL)==PN_BUSY && opens==i+1);
+    assert(pn_font_manage_samples_idle(&ui,1006,present,NULL)==PN_OK);
     assert(pn_font_manage_motion(&ui,motion_present,NULL)==PN_OK);
     unsigned before=opens;pointer(1,850,100);pointer(1,550,1100);pointer(1,213,2100);assert(opens==before && pn_font_manage_motion_stats(&ui).offset==637 && stages[PN_LIST_NORMALIZE]==1);
     // 多指取消惯性，释放仍由滚动器吞掉；定稿前不读取真实字库。/ Multi-touch cancels inertia and its release stays consumed; no face is read before settling.

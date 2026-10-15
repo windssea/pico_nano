@@ -28,6 +28,7 @@ int main(int argc,char **argv){
     char a[600],c[600];snprintf(a,sizeof a,"%s/a-ui.ttf",fonts);snprintf(c,sizeof c,"%s/c-bad.ttf",fonts);
     pn_font_manage_t ui={0};pn_font_preferences_t g;
     assert(pn_font_manage_open(&ui,&pool,&sd,fonts,&internal,state,present,NULL)==PN_OK && ui.active && ui.presented && ui.screen==PN_FMU_LIST);
+    for(unsigned i=0;i<8;i++){pn_status_t sampled=pn_font_manage_samples_idle(&ui,1000+i,present,NULL);assert(sampled==PN_OK || sampled==PN_BUSY || sampled==PN_EMPTY);if(sampled==PN_EMPTY)break;}
     /* 暂时移走两个样本字体，重绘仍保持小样像素，证明不重复依赖外置源。/ Temporarily move both sample fonts; unchanged tile pixels prove repainting does not reread external sources. */
     assert(pn_font_manage_present(&ui,checksum,NULL)==PN_OK);uint64_t first_pixels=list_pixels;
     char tile_paths[2][1200],tile_hidden[2][1200];const char *tile_names[]={"a-ui.ttf","b-fallback.ttf"};

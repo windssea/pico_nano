@@ -23,5 +23,6 @@ int main(void){
     assert(pn_key_feed(&k,1,80,1500,true,6000,&key)==PN_KEY_NONE && pn_key_feed(&k,1,80,1500,false,6010,&key)==PN_KEY_NONE && release(&k,&key)==PN_KEY_NONE);
     assert(pn_key_feed(&k,1,80,1500,true,7000,&key)==PN_KEY_NONE);pn_key_cancel(&k);assert(pn_key_feed(&k,1,80,1500,true,8000,&key)==PN_KEY_NONE && release(&k,&key)==PN_KEY_NONE);
     assert(pn_key_feed(&k,1,80,1000,true,9000,&key)==PN_KEY_NONE && pn_key_feed(&k,1,80,1500,true,9700,&key)==PN_KEY_NONE && release(&k,&key)==PN_KEY_NONE);
-    puts("key: hits, short, single long, glitch tolerance, slide/multitouch/error/cancel/outside start passed");return 0;
+    assert(pn_key_reading_middle(PN_KEY_SHORT)==PN_KEY_READING_HOME && pn_key_reading_middle(PN_KEY_LONG)==PN_KEY_READING_SETTINGS && pn_key_reading_middle(PN_KEY_NONE)==PN_KEY_READING_NONE);
+    puts("key: hits, short, single long, reading home/settings, glitch tolerance, slide/multitouch/error/cancel/outside start passed");return 0;
 }

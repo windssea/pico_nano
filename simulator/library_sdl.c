@@ -557,7 +557,13 @@ static bool management_event(library_t *s,SDL_Event *event,uint64_t now){
     if(event->key.repeat)return true;
     int key=(int)(event->key.keysym.sym-SDLK_1);
     // 与设备一致：排版中间键保存并留在当前书，预览态也应用草稿。/ Match the device: the typesetting middle key saves within the current book, including preview drafts.
+    if(key==PN_KEY_2 && s->fonts.active){
+        pn_status_t status=pn_font_ui_event(&s->fonts,s->fonts.mode==1?PN_FUI_APPLY:PN_FUI_BACK,now,present,s);
+        if(!s->fonts.active){pn_font_ui_close(&s->fonts);if(s->styles.active)status=pn_style_ui_event(&s->styles,PN_SUI_APPLY,now,present,s);}
+        printf("reading settings middle status=%d active=%d\n",(int)status,(int)(s->fonts.active || s->styles.active));return true;
+    }
     if(key==PN_KEY_2 && s->styles.active){pn_status_t status=pn_style_ui_event(&s->styles,PN_SUI_APPLY,now,present,s);style_report(&s->styles,PN_SUI_APPLY,status);return true;}
+    if(key==PN_KEY_2 && s->toolbar){pn_status_t status=toolbar_close(s,false);printf("reading settings middle status=%d active=%d\n",(int)status,(int)s->toolbar);return true;}
     if(key==PN_KEY_2){
         pn_status_t status=active_close(s,now);
         if(status!=PN_OK){printf("management home status=%d retained=1\n",(int)status);return true;}
@@ -655,7 +661,7 @@ static int library_worker(void *ctx){
     (void)pn_settings_load_shelf(&s->state_media,s->state_dir,&s->shelf_prefs);
     s->home=true;status=page(s,false,true);if(status!=PN_OK)goto cleanup;
     if(pn_settings_load_flags(&s->state_media,s->state_dir,&s->input_flags)!=PN_OK)s->input_flags=0;
-    result=0;bool running=true;pn_tap_t tap={0};pn_reader_input_t input={0};
+    result=0;bool running=true;pn_tap_t tap={0};pn_reader_input_t input={0};uint64_t font_activity=SDL_GetTicks64();
     while(running){
         if(s->feedback_release){feedback_restore(s);s->feedback_release=false;}
         {static time_t last;const char *fixed=getenv("PN_SIM_CLOCK");time_t t=time(NULL);if(fixed)pn_w_set_clock(fixed);else if(t!=last){last=t;struct tm local;char text[8];if(localtime_r(&t,&local) && strftime(text,sizeof text,"%H:%M",&local))pn_w_set_clock(text);}} // 本机时钟；固定值仅用于可复跑测试 / Host clock; a fixed value is only for reproducible tests
@@ -665,7 +671,7 @@ static int library_worker(void *ctx){
         pn_list_motion_stats_t moving=s->toc.active?pn_toc_ui_motion_stats(&s->toc):pn_font_manage_motion_stats(&s->font_manage);
         bool cache_work=(view==15 && pn_epub_app_cache_pending(&s->epub)) || pn_cover_work_pending(&s->cover_work) || ((view%32u==16u || view%32u==17u) && pn_shelf_covers_pending(s->covers,s->page));
         SDL_Event event;bool got=pn_sdl_async_wait(&s->async,&event,moving.active || moving.coasting || cache_work?1u:100u,view);uint64_t now=SDL_GetTicks64();
-        if(got && (event.type==SDL_KEYDOWN || event.type==SDL_MOUSEBUTTONDOWN || event.type==SDL_MOUSEBUTTONUP || event.type==SDL_MOUSEMOTION || event.type==SDL_QUIT || (event.type==SDL_WINDOWEVENT && event.window.event==SDL_WINDOWEVENT_FOCUS_LOST)))pn_epub_app_cache_activity(&s->epub,now);
+        if(got && (event.type==SDL_KEYDOWN || event.type==SDL_MOUSEBUTTONDOWN || event.type==SDL_MOUSEBUTTONUP || event.type==SDL_MOUSEMOTION || event.type==SDL_QUIT || (event.type==SDL_WINDOWEVENT && event.window.event==SDL_WINDOWEVENT_FOCUS_LOST))){pn_epub_app_cache_activity(&s->epub,now);font_activity=now;}
         if(got){bool cover_focus=(view%32u==16u || view%32u==17u) && event.type==SDL_KEYDOWN && (event.key.keysym.sym==SDLK_UP || event.key.keysym.sym==SDLK_DOWN) && s->pool->used<=s->pool->limit && s->pool->limit-s->pool->used>=512u*1024u;
             if(cover_focus)pn_cover_write_abort(&s->cover_work.writer);else pn_cover_work_abort(&s->cover_work);pn_feedback_idle_activity(&s->feedback_idle,now);}
         if(got && event.type==SDL_WINDOWEVENT && event.window.event==SDL_WINDOWEVENT_FOCUS_LOST){s->pointer_down=false;s->toc_pointer=false;s->font_pointer=false;cancel_pointer(&input,&tap,true);}
@@ -686,6 +692,7 @@ static int library_worker(void *ctx){
         // 页面请求不等待下一次输入，空闲轮询也完成导航。/ Navigation requests complete during idle polling without waiting for another input.
         if(!s->locked && s->styles.request_fonts){s->styles.request_fonts=false;status=pn_font_ui_open(&s->fonts,s->pool,s->epub.impl?NULL:&s->reader,s->epub.impl?&s->epub:NULL,s->font_dir,present,s);pn_font_ui_return_to(&s->fonts,pn_style_ui_render,&s->styles);printf("font_ui open status=%d active=%d\n",status,s->fonts.active);}
         if(!got){bool body=reading(s) && !s->toolbar && !s->styles.active && !s->fonts.active && !s->toc.active && !s->jumpui.active && s->bookmarks.mode==PN_BUI_CLOSED;
+            if(!s->locked && !s->pointer_down && !s->feedback_tap.down && atomic_load(&s->async.mouse)==0 && now>=font_activity && now-font_activity>=800){pn_status_t sampled=pn_font_manage_samples_idle(&s->font_manage,now,present,s);if(sampled==PN_OK)printf("font samples presented\n");}
             (void)pn_font_manage_tick(&s->font_manage,now);
             (void)pn_toc_ui_tick(&s->toc,now);
             (void)feedback_idle_tick(s,now,s->locked || body || moving.active || s->pointer_down || s->feedback_tap.down || atomic_load(&s->async.mouse)!=0);
@@ -864,6 +871,12 @@ static int library_worker(void *ctx){
             if(key==SDLK_h && reading(s)){s->toolbar=false;s->home=true;status=return_to_shelf(s,now);continue;}
             if(reading(s)){
                 if(s->styles.active)continue;
+                if(key==SDLK_2 || key==SDLK_F10){
+                    pn_key_reading_command_t command=pn_key_reading_middle(key==SDLK_F10?PN_KEY_LONG:PN_KEY_SHORT);
+                    if(command==PN_KEY_READING_HOME){s->toolbar=false;s->home=true;status=return_to_shelf(s,now);printf("reading middle home status=%d\n",(int)status);}
+                    else if(command==PN_KEY_READING_SETTINGS){status=toolbar_show(s);printf("reading middle long settings status=%d\n",(int)status);}
+                    continue;
+                }
                 if(key==SDLK_g){status=s->epub.impl?pn_jump_ui_open_epub(&s->jumpui,&s->epub,present,s):pn_jump_ui_open(&s->jumpui,&s->reader,present,s);printf("jump_ui open status=%d\n",(int)status);continue;}
                 if(s->bookmarks.mode!=PN_BUI_CLOSED)continue;
                 if(key==SDLK_t && s->epub.impl){status=open_toc(s);toc_report(&s->toc,0,status);continue;}

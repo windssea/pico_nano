@@ -605,8 +605,10 @@ static bool leave_reader(void){return stop_reader_impl(true);}
 static pn_status_t catalog_build_idle(void){
     pn_status_t status=pn_catalog_index_build(&catalog_index);
     if(status==PN_BUSY && (hot_session.media || pn_font_system_available())){
+        ESP_LOGI(TAG,"Catalog index needs TF write; release idle sources hot=%u system_font=%u",(unsigned)(hot_session.media!=NULL),(unsigned)pn_font_system_available());
         status=pn_hot_session_drop(&hot_session);if(status!=PN_OK)return status;
         system_font_release();status=pn_catalog_index_build(&catalog_index);
+        if(status!=PN_OK && status!=PN_EMPTY)ESP_LOGW(TAG,"Catalog index rebuild after source release failed: %d",(int)status);
     }
     return status;
 }
@@ -741,8 +743,10 @@ static void refresh_last(void){
 static void system_font_ready(void){
     static uint32_t reported_epoch;static bool reported;
     if(sd_media.available && !usb.open && !transfer.impl){
-        if(!pn_font_system_available())management_fonts_close();
+        bool opening=!pn_font_system_available();uint64_t started=now_ms();(void)started;
+        if(opening)management_fonts_close();
         pn_status_t s=pn_font_system_open(&pool,&sd_media,PN_SD_MOUNT "/" PN_SD_SYSTEM_FONT);
+        if(opening)ESP_LOGI(TAG,"System font open status=%d elapsed=%llu ms epoch=%llu",(int)s,(unsigned long long)(now_ms()-started),(unsigned long long)sd_media.epoch);
         if(s==PN_OK && (!reported || reported_epoch!=sd_media.epoch)){pn_text_source_t source=pn_font_builtin_source();(void)source;ESP_LOGI(TAG,"System font source=TF bytes=%llu",(unsigned long long)source.size);reported=true;reported_epoch=sd_media.epoch;}
         else if(s!=PN_OK && s!=PN_IO)ESP_LOGW(TAG,"System font unavailable: %d",(int)s);
     }
@@ -1213,7 +1217,18 @@ static void open_shelf_item(int index){
 static void handle_key(int key,pn_key_event_t event){
     if(usb.open){if(event==PN_KEY_SHORT){usb_return=true;usb_home=key==PN_KEY_2;usb_lock=false;pn_device_usb_request_stop(&usb);}return;}
     // 排版中间键先应用草稿，只有成功才回到当前阅读页。/ Apply the draft first on the typesetting middle key and return to reading only on success.
+    if(fonts.active && key==PN_KEY_2 && event==PN_KEY_SHORT){
+        apply_selection(fonts.mode==1?PN_FUI_APPLY:PN_FUI_BACK);
+        if(!fonts.active && styles.active)apply_selection(PN_SUI_APPLY);
+        return;
+    }
     if(styles.active && key==PN_KEY_2 && event==PN_KEY_SHORT){apply_selection(PN_SUI_APPLY);return;}
+    // 阅读入口的设置已逐项持久化，中间键返回原书；保存失败的草稿仍由各页保留。/ Reading-entered settings persist each change; the middle key resumes the book, while individual pages retain failed drafts.
+    if(settings_ui.impl && *selected_path && key==PN_KEY_2 && event==PN_KEY_SHORT){end_settings();return;}
+    if(reader_active() && key==PN_KEY_2 && event==PN_KEY_SHORT){
+        if(toolbar_open){toolbar_close(PN_REFRESH_GL16);return;}
+        if(reading_menu){apply_selection(PN_READING_MENU_RESUME);return;}
+    }
     if(focus_page() && event==PN_KEY_SHORT && key==PN_KEY_2){
         if(transfer.impl){management_home_pending=true;transfer_return=true;transfer_lock=false;(void)pn_device_transfer_request_stop(&transfer);return;}
         if(!stop_reader())return;
@@ -1267,8 +1282,9 @@ static void handle_key(int key,pn_key_event_t event){
     }
     if(!reader_active() || status_page)return;
     if(key==PN_KEY_2){
-        if(event==PN_KEY_LONG){if(leave_reader()){selected_path[0]=0;show_shelf("",false);}}
-        else toolbar_show();
+        pn_key_reading_command_t command=pn_key_reading_middle(event);
+        if(command==PN_KEY_READING_HOME){if(leave_reader()){home_mode=true;selected_path[0]=0;show_shelf("",false);}}
+        else if(command==PN_KEY_READING_SETTINGS)toolbar_show();
         return;
     }
     if(event!=PN_KEY_SHORT || (input_flags&PN_INPUT_NO_KEYS))return;
@@ -1587,11 +1603,14 @@ static void device_task(void *arg){
                 else if(reader_active() && !status_page){pn_status_t status=active_step(action,now_ms());report_reader_result(status);}
                 else start_reader();}}}
         bool background=false;
+        if(available==PN_EMPTY && !locked && !transfer.impl && !usb.open && font_manage.impl && !touch_held && !tap.down && now_ms()>=last_input && now_ms()-last_input>=800){
+            pn_status_t sampled=pn_font_manage_samples_idle(&font_manage,now_ms(),present,NULL);background=sampled==PN_BUSY;
+            if(sampled==PN_OK || sampled==PN_BUSY){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);}}
         if(shelf_mode && shelf_covers && shelf_page && !actions_mode && !transfer.impl && !usb.open && !wallpaper_ui.impl && !font_manage.impl && !settings_ui.impl && !locked && !status_page && !reading_menu && !touch_held && now_ms()>=last_input && now_ms()-last_input>=800){
             // 后台确有工作时回到最高频，封面/索引不在降频下变慢。/ Real background work returns to maximum so covers and indexing are not slowed by DFS.
             bool worked=available==PN_EMPTY && catalog_build_idle()==PN_OK;worked|=tick_covers();background=pn_cover_work_pending(&cover_work) || pn_shelf_covers_pending(shelf_covers,shelf_page);if(worked){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);}}
 #if defined(CONFIG_PN_UI_FOLLOW) && CONFIG_PN_UI_FOLLOW
-        if(!locked && !transfer.impl && !usb.open && font_manage.impl){pn_status_t motion=pn_font_manage_tick(&font_manage,now_ms());pn_list_motion_stats_t moving=pn_font_manage_motion_stats(&font_manage);background=moving.pending!=0 || moving.coasting;
+        if(!locked && !transfer.impl && !usb.open && font_manage.impl){pn_status_t motion=pn_font_manage_tick(&font_manage,now_ms());pn_list_motion_stats_t moving=pn_font_manage_motion_stats(&font_manage);background|=moving.pending!=0 || moving.coasting;
             if(motion==PN_OK){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);}}
         else if(!locked && !transfer.impl && !usb.open && toc.active){pn_status_t motion=pn_toc_ui_tick(&toc,now_ms());pn_list_motion_stats_t moving=pn_toc_ui_motion_stats(&toc);background=moving.pending!=0 || moving.coasting;
             if(motion==PN_OK){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);}}

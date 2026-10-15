@@ -18,6 +18,8 @@ with tempfile.TemporaryDirectory() as folder:
     assert book.exists()
     out=run('enter,styles,style-plus,key-home,next,quit,quit')
     assert 'style_ui command=2 status=0 active=0' in out and 'management home status=0' not in out,out
+    out=run('enter,key-middle-long,key-home,key-home,quit')
+    assert 'reading middle long settings status=0' in out and 'reading settings middle status=0 active=0' in out and 'reading middle home status=0' in out,out
     # 右键仅在已打开确认页才删除，读取记录保留。/ Right deletes only from the explicit confirmation page; reading records remain.
     out=run('rtap:100:520,tap:300:1060,key-confirm,quit')
     assert 'actions command=5 status=0' in out and not book.exists(),out
