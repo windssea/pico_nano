@@ -63,15 +63,21 @@ pn_status_t pn_catalog_index_page(pn_catalog_index_t *h,const pn_media_lease_t *
     size_t count=0;s=header(i,lease,f,&count);pn_catalog_page_t *result=NULL;item_t item;size_t lo=0,hi=count;
     if(s==PN_OK){result=pn_alloc_tagged(i->pool,PN_MEM_INDEX,sizeof *result);if(!result)s=PN_NO_MEMORY;else{memset(result,0,sizeof *result);if(!limit || limit>PN_CATALOG_PAGE_MAX)limit=PN_CATALOG_PAGE_DEFAULT;result->per_page=limit;result->total=count;}}
     if(s==PN_OK && (!query || !*query)){
-        while(lo<hi){size_t mid=lo+(hi-lo)/2;s=record_at(i,lease,f,mid,&item);if(s!=PN_OK)break;
+        // 空游标的下界就是首条；有游标或字母跳转才二分查找，首屏不探读页外记录。
+        // Empty cursors start at record zero; binary-search only for cursors or letter jumps, without probing off-page records for the first page.
+        while(lo<hi && (*after || (from && from!='#'))){size_t mid=lo+(hi-lo)/2;s=record_at(i,lease,f,mid,&item);if(s!=PN_OK)break;
             bool before=from && from!='#'?(pn_catalog_initial(item.name)=='#' || (pn_catalog_initial(item.name)!='~' && pn_catalog_initial(item.name)<from)):reverse?pn_catalog_compare(item.name,after)<0:pn_catalog_compare(item.name,after)<=0;
             if(before)lo=mid+1;else hi=mid;}
         if(reverse || (from && from!='#' && lo==count)){size_t end=lo;lo=end>limit?end-limit:0;hi=end;}else hi=lo+limit<count?lo+limit:count;
         if(s==PN_OK){result->index=lo;result->more=hi<count;
-            for(size_t at=lo;s==PN_OK && at<hi;at++){s=record_at(i,lease,f,at,&item);if(s==PN_OK)s=pn_catalog_item(i->media,lease,i->directory,item.name,&result->items[result->count]);if(s==PN_OK)result->count++;}}
+            // 同页记录连续读，只定位一次；每条仍走完整CRC/文件与介质验证。
+            // Seek once for consecutive page records; retain every record CRC, file and media check.
+            if(lo<hi && fseek(f,(long)(HEADER+lo*RECORD),SEEK_SET))s=PN_IO;
+            for(size_t at=lo;s==PN_OK && at<hi;at++){s=record_read(i,lease,f,&item);if(s==PN_OK)s=pn_catalog_item(i->media,lease,i->directory,item.name,&result->items[result->count]);if(s==PN_OK)result->count++;}}
     }else if(s==PN_OK){
         result->total=0;size_t before=0;bool more=false;
-        for(size_t at=0;s==PN_OK && at<count;at++){s=record_at(i,lease,f,at,&item);if(s!=PN_OK || !pn_catalog_match(item.name,query))continue;result->total++;int order=pn_catalog_compare(item.name,after);
+        if(count && fseek(f,HEADER,SEEK_SET))s=PN_IO;
+        for(size_t at=0;s==PN_OK && at<count;at++){s=record_read(i,lease,f,&item);if(s!=PN_OK || !pn_catalog_match(item.name,query))continue;result->total++;int order=pn_catalog_compare(item.name,after);
             if(order<0 || (!reverse && order==0))before++;
             bool chosen=reverse?order<0:order>0;if(!chosen)continue;
             if(reverse && result->count==limit){memmove(result->items,result->items+1,(limit-1)*sizeof result->items[0]);result->count--;}

@@ -18,6 +18,11 @@ int __real_mkdir(const char *,mode_t);
 int __wrap_mkdir(const char *path,mode_t mode){if(*fat_mount && !strcmp(path,fat_mount)){mount_mkdir_calls++;errno=EINVAL;return -1;}return __real_mkdir(path,mode);}
 #endif
 #ifdef PN_TEST_FAT_RENAME
+static bool watching_seeks;static unsigned seeks,fail_seek;
+int __real_fseek(FILE *,long,int);
+// 定位计数和故障仅作用于单次索引查询；原记录CRC与目录扫描作为独立对照。
+// Count/inject seeks only during one index query; retain original record CRCs and directory scans as independent checks.
+int __wrap_fseek(FILE *file,long offset,int origin){if(watching_seeks){seeks++;if(fail_seek==seeks){errno=EIO;return -1;}}return __real_fseek(file,offset,origin);}
 int __real_rename(const char *,const char *);
 // 主机桩只替换rename的覆盖语义，不替代文件读写。/ The host stub replaces only rename-overwrite semantics, retaining real file I/O.
 int __wrap_rename(const char *source,const char *dest){struct stat info;if(!lstat(dest,&info)){errno=EEXIST;return -1;}return __real_rename(source,dest);}
@@ -33,11 +38,35 @@ int main(void){
     assert(!pn_media_acquire(&media,PN_MEDIA_READ,&lease));assert(pn_catalog_index_page(&index,&lease,"",false,0,NULL,6,&a)==PN_EMPTY);pn_media_lease_t writer;assert(pn_media_acquire(&media,PN_MEDIA_CACHE_WRITE,&writer)==PN_OK && pn_catalog_index_build(&index)==PN_BUSY && pn_media_release(&media,&writer)==PN_OK);
     assert(pn_media_request_usb(&media)==PN_OK && pn_catalog_index_build(&index)==PN_BUSY && pn_media_cancel_usb(&media)==PN_OK);
     assert(pn_catalog_index_build(&index)==PN_OK && pn_media_validate(&media,&lease)==PN_OK && pn_media_active(&media)==1);assert(!pn_media_release(&media,&lease));assert(pn_catalog_index_build(&index)==PN_EMPTY);
-    assert(!pn_media_acquire(&media,PN_MEDIA_READ,&lease));pn_catalog_index_stats_t before,after;pn_catalog_index_stats(&index,&before);assert(!pn_catalog_index_page(&index,&lease,"Book0500.txt",false,0,NULL,8,&a));pn_catalog_index_stats(&index,&after);assert(after.records_read-before.records_read<25 && a.count==8 && a.total==1000 && a.index==501);assert(!pn_catalog_page_n(&media,&lease,books,"Book0500.txt",8,&b));same(&a,&b);printf("1000 books page records=%llu total=%zu\n",(unsigned long long)(after.records_read-before.records_read),a.total);
+    assert(!pn_media_acquire(&media,PN_MEDIA_READ,&lease));pn_catalog_index_stats_t before,after;
+#ifdef PN_TEST_FAT_RENAME
+    pn_catalog_index_stats(&index,&before);watching_seeks=true;seeks=0;
+    assert(pn_catalog_index_page(&index,&lease,"",false,0,NULL,8,&a)==PN_OK);watching_seeks=false;pn_catalog_index_stats(&index,&after);
+    assert(seeks==3 && after.records_read-before.records_read==8 && pn_catalog_page_n(&media,&lease,books,"",8,&b)==PN_OK);same(&a,&b);
+    watching_seeks=true;seeks=0;assert(pn_catalog_index_page(&index,&lease,"",true,0,NULL,8,&a)==PN_OK);watching_seeks=false;
+    assert(seeks==2 && !a.count && !a.index && a.total==1000);
+#endif
+    pn_catalog_index_stats(&index,&before);assert(!pn_catalog_index_page(&index,&lease,"Book0500.txt",false,0,NULL,8,&a));pn_catalog_index_stats(&index,&after);assert(after.records_read-before.records_read<25 && a.count==8 && a.total==1000 && a.index==501);assert(!pn_catalog_page_n(&media,&lease,books,"Book0500.txt",8,&b));same(&a,&b);printf("1000 books page records=%llu total=%zu\n",(unsigned long long)(after.records_read-before.records_read),a.total);
     assert(!pn_catalog_index_page(&index,&lease,"Book0500.txt",true,0,NULL,5,&a) && !pn_catalog_page_before_n(&media,&lease,books,"Book0500.txt",5,&b));same(&a,&b);
     assert(!pn_catalog_index_page(&index,&lease,"",false,'z',NULL,6,&a) && !pn_catalog_page_from_n(&media,&lease,books,'z',6,&b));same(&a,&b);
-    assert(!pn_catalog_index_page(&index,&lease,"Book0500.txt",false,0,"5",6,&a) && !pn_catalog_search_page_n(&media,&lease,books,"5","Book0500.txt",6,&b));same(&a,&b);
+#ifdef PN_TEST_FAT_RENAME
+    watching_seeks=true;seeks=0;
+#endif
+    assert(!pn_catalog_index_page(&index,&lease,"Book0500.txt",false,0,"5",6,&a));
+#ifdef PN_TEST_FAT_RENAME
+    watching_seeks=false;assert(seeks==3);
+#endif
+    assert(!pn_catalog_search_page_n(&media,&lease,books,"5","Book0500.txt",6,&b));same(&a,&b);
     assert(!pn_catalog_index_page(&index,&lease,"Book0500.txt",true,0,"5",6,&a) && !pn_catalog_search_page_before_n(&media,&lease,books,"5","Book0500.txt",6,&b));same(&a,&b);
+#ifdef PN_TEST_FAT_RENAME
+    // 三次定位任一失败都不能发布半页，之后仍能重建；不只测正常快路。
+    // Failure at any of the three seeks must preserve the output and allow rebuilding, beyond the successful fast path.
+    for(unsigned failure=1;failure<=3;failure++){
+        pn_catalog_page_t preserved={.count=7,.index=42};memcpy(&a,&preserved,sizeof a);watching_seeks=true;seeks=0;fail_seek=failure;
+        assert(pn_catalog_index_page(&index,&lease,"",false,0,NULL,8,&a)==PN_EMPTY);watching_seeks=false;fail_seek=0;
+        assert(!memcmp(&a,&preserved,sizeof a) && pn_catalog_index_build(&index)==PN_OK && pn_media_validate(&media,&lease)==PN_OK);
+    }
+#endif
     assert(!pn_media_release(&media,&lease));pn_catalog_index_close(&index);assert(!pn_catalog_index_init(&index,&pool,&media,books,cache));assert(pn_catalog_index_build(&index)==PN_EMPTY);assert(!pn_media_acquire(&media,PN_MEDIA_READ,&lease) && !pn_catalog_index_page(&index,&lease,"",false,0,NULL,6,&a));assert(!pn_media_release(&media,&lease));
     snprintf(file,sizeof file,"%s/Added.txt",books);FILE *f=fopen(file,"wb");assert(f && !fclose(f));assert(!pn_media_acquire(&media,PN_MEDIA_READ,&lease) && pn_catalog_index_page(&index,&lease,"",false,0,NULL,6,&a)==PN_EMPTY && !pn_media_release(&media,&lease));assert(!pn_catalog_index_build(&index));
     snprintf(file,sizeof file,"%s/library.pni",cache);f=fopen(file,"r+b");assert(f && !fseek(f,96+500*784,SEEK_SET) && fputc(255,f)!=EOF && !fclose(f));assert(!pn_media_acquire(&media,PN_MEDIA_READ,&lease) && pn_catalog_index_page(&index,&lease,"Book0500.txt",false,0,NULL,6,&a)==PN_EMPTY && !pn_media_release(&media,&lease));assert(!pn_catalog_index_build(&index));
