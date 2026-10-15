@@ -30,10 +30,10 @@ static void check(const char *path,pn_text_encoding_t expected,bool once){
     pn_text_file_t file={0};pn_text_source_t source;assert(pn_text_file_open(&file,&media,&lease,path,&source)==PN_OK);points_t actual={0},oracle={0};pn_book_id_t id,reference;pn_text_encoding_t encoding=PN_TEXT_AUTO;
     clock_t start=clock();assert(pn_text_file_inspect(&pool,&source,&id,&encoding,point,&actual)==PN_OK && encoding==expected);double elapsed=(double)(clock()-start)/CLOCKS_PER_SEC;uint64_t bytes=file.io_bytes,reads=file.io_reads;
     if(once)assert(bytes<=source.size+8192);
-    assert(pn_identity_file_pooled(&pool,&media,&lease,path,PN_TEXT_FILE_MAX_BYTES,&reference)==PN_OK && !memcmp(&id,&reference,sizeof id));scalar_points(&source,encoding,&oracle);
+    start=clock();assert(pn_identity_file_pooled(&pool,&media,&lease,path,PN_TEXT_FILE_MAX_BYTES,&reference)==PN_OK && !memcmp(&id,&reference,sizeof id));double hash_elapsed=(double)(clock()-start)/CLOCKS_PER_SEC;scalar_points(&source,encoding,&oracle);
     assert(actual.count==oracle.count && !memcmp(actual.offsets,oracle.offsets,actual.count*sizeof actual.offsets[0]) && !memcmp(actual.paragraph,oracle.paragraph,actual.count*sizeof actual.paragraph[0]));
-    printf("inspect bytes=%llu input=%llu reads=%llu points=%zu cpu=%.6f pool_peak=%zu encoding=%u sha256=",(unsigned long long)bytes,(unsigned long long)source.size,(unsigned long long)reads,actual.count,elapsed,pool.peak,(unsigned)encoding);for(unsigned i=0;i<32;i++)printf("%02x",id.sha256[i]);puts("");
-    pn_book_id_t saved=id;assert(pn_text_file_inspect(&pool,&source,&id,&encoding,point,&actual)==PN_OK && !memcmp(&id,&saved,sizeof id));
+    pn_book_id_t saved=id;start=clock();assert(pn_text_file_inspect(&pool,&source,&id,&encoding,point,&actual)==PN_OK && !memcmp(&id,&saved,sizeof id));double probe_elapsed=(double)(clock()-start)/CLOCKS_PER_SEC;
+    printf("inspect bytes=%llu input=%llu reads=%llu points=%zu cpu=%.6f hash_cpu=%.6f probe_cpu=%.6f pool_peak=%zu encoding=%u sha256=",(unsigned long long)bytes,(unsigned long long)source.size,(unsigned long long)reads,actual.count,elapsed,hash_elapsed,probe_elapsed,pool.peak,(unsigned)encoding);for(unsigned i=0;i<32;i++)printf("%02x",id.sha256[i]);puts("");
     size_t n=0;pn_cancel_scope_t scope;pn_cancel_enter(&scope,cancel,&n);id=(pn_book_id_t){{42}};encoding=PN_TEXT_AUTO;assert(pn_text_file_inspect(&pool,&source,&id,&encoding,point,&actual)==PN_CANCELLED && id.sha256[0]==42 && encoding==PN_TEXT_AUTO);pn_cancel_leave(&scope);
     assert(pn_text_file_close(&file)==PN_OK && pn_media_release(&media,&lease)==PN_OK && !pool.used && !pool.live);
 }

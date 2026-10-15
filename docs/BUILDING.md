@@ -37,6 +37,8 @@ $env:DOCKER_CONTEXT='desktop-linux'
 
 0.6.12追加`text_inspect`、`shelf_gesture`及`shelf_gesture_window`专项；`tools/test_local_text_inspect.py --binary build-host/test_text_inspect`只读核查用户三本TXT的一遍读取、独立逐字符检查点与Python完整SHA，`tools/test_local_shelf.py --sim build-sim-sdl-idf/pn_sim`核查用户全书库三/四列、左右滑动、封面冷暖完整字节与菜单往返；两者已纳入`local-samples`。这些文件读取/CPU计数不代替真实TF、触控和面板计时。
 
+`text`增加缓存内/跨块的UTF8最短形式、代理区和Unicode上下界，使用1～17字节及256字节短读检查字符/范围与损坏时输出保持。`text_inspect`另记录仅摘要和已知身份后仅探测的CPU时间，仍用独立逐字符检查点对照；比较构建须注明优化/消毒器，不能把主机时间当设备时间。`tools/test_local_text_decode.py --sim build-sim-sdl-idf/pn_sim [--baseline <旧窗口程序>]`在三本用户TXT×四字体副本上比较打开、两次向后和一次向前的48张正文帧/源位置、反向页像素及关闭池归零；已加入`local-samples`。窗口退出会先保存回书库，脚本明确排除最后的书库帧。
+
 语义持久缓存的同源检查为`semantic_snapshot`（事件/结构校验）、`semantic_file`（真实文件/配额/租约）、`semantic_disk`（真实关闭重开、短章/长段、整书SHA、完整帧/位置、损坏/空间不足/2MiB及同路径换内容），窗口旅程为`semantic_cache_window`（两进程、SHA保留、命中不再正文建模、损坏重建和工具菜单抑制）。缓存目录是内部状态root下`semantic`，不在TF上传目录；这些是软件检查，不是面板首显/稳定计时。
 
 `semantic_steps`观察真实文件端口每次最多一次4KiB写入，并把flush/fsync/close/rename分成不同调用；覆盖暂停续写、部分写后放弃、写入/同步/替换失败和低空间/介质失效时旧包保持。`semantic_disk`另检查实际阅读器的新输入、重绘、热挂起及关闭优先释放暂存，安静后可重试；BUSY不能当作已存。底层系统调用的真实耗时不由这些软件检查证明。

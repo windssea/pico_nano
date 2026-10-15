@@ -61,7 +61,11 @@ static pn_status_t scalar(pn_text_reader_t *r,uint64_t offset,uint32_t *cp,uint6
     else if(first>=0xf0 && first<=0xf4){count=4;value=first&7;minimum=0x10000;}
     else return PN_CORRUPT;
     if(r->source.size-offset<count)return PN_CORRUPT;
-    for(unsigned i=1;i<count;i++) {
+    // 完整标量已在同一缓存块时直接取续字节，跨块仍沿逐字节错误/短读契约。/ Read continuations directly when the complete scalar is cached; preserve bytewise errors and short reads across blocks.
+    if(r->cache_size>=count && offset>=r->cache_begin && offset-r->cache_begin<=r->cache_size-count){
+        const uint8_t *bytes=r->cache+(size_t)(offset-r->cache_begin);
+        for(unsigned i=1;i<count;i++){uint8_t b=bytes[i];if((b&0xc0)!=0x80)return PN_CORRUPT;value=(value<<6)|(b&0x3f);}
+    }else for(unsigned i=1;i<count;i++) {
         uint8_t b;status=required(r,offset+i,&b);if(status!=PN_OK)return status;
         if((b&0xc0)!=0x80)return PN_CORRUPT;
         value=(value<<6)|(b&0x3f);

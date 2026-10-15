@@ -19,7 +19,23 @@ static pn_status_t read_at(void *ctx,uint64_t offset,uint8_t *out,size_t cap,siz
     memcpy(out,m->data+offset,count);*n=count;return PN_OK;
 }
 static void expect(pn_text_reader_t *r,uint32_t cp,uint64_t begin,uint64_t end){pn_text_char_t c;assert(pn_text_next(r,&c)==PN_OK);assert(c.codepoint==cp && c.begin==begin && c.end==end);}
+/// 同时覆盖缓存内与跨块的UTF8标量边界，不放宽最短编码和代理区限制。/ Cover cached and split UTF8 scalar boundaries without relaxing shortest forms or surrogate restrictions.
+static void utf8_boundaries(void){
+    const uint8_t bytes[]={0x7f,0xc2,0x80,0xdf,0xbf,0xe0,0xa0,0x80,0xed,0x9f,0xbf,0xee,0x80,0x80,0xef,0xbf,0xbf,0xf0,0x90,0x80,0x80,0xf4,0x8f,0xbf,0xbf,13,10};
+    const uint32_t cp[]={0x7f,0x80,0x7ff,0x800,0xd7ff,0xe000,0xffff,0x10000,0x10ffff,10};
+    const unsigned ends[]={1,3,5,8,11,14,17,21,25,27};
+    const uint8_t bad[][4]={{0xc0,0xaf,0,0},{0xe0,0x9f,0xbf,0},{0xed,0xa0,0x80,0},{0xf0,0x8f,0xbf,0xbf},{0xf4,0x90,0x80,0x80},{0xc2,0x7f,0,0},{0xe4,0xb8,0x7f,0},{0xf1,0x80,0x80,0x7f}};
+    const unsigned lengths[]={2,3,3,4,4,2,3,4};
+    for(unsigned chunk=1;chunk<=18;chunk++){
+        memory_t m={bytes,sizeof bytes,chunk==18?256:chunk,false};pn_text_source_t source={&m,m.size,read_at,NULL};pn_text_reader_t r;
+        assert(pn_text_open(&r,&source,PN_TEXT_UTF8)==PN_OK);
+        for(unsigned i=0;i<10;i++)expect(&r,cp[i],i?ends[i-1]:0,ends[i]);
+        pn_text_char_t c={.codepoint=42};assert(pn_text_next(&r,&c)==PN_EMPTY && r.cursor==sizeof bytes && c.codepoint==42);
+        for(unsigned i=0;i<8;i++){m=(memory_t){bad[i],lengths[i],chunk==18?256:chunk,false};source.size=m.size;assert(pn_text_open(&r,&source,PN_TEXT_UTF8)==PN_OK);c=(pn_text_char_t){42,43,44};assert(pn_text_next(&r,&c)==PN_CORRUPT && !r.cursor && c.codepoint==42 && c.begin==43 && c.end==44);}
+    }
+}
 int main(void){
+    utf8_boundaries();
     const uint8_t utf8[]={0xef,0xbb,0xbf,'A',0xe4,0xb8,0xad,0xf0,0x9f,0x98,0x80,'\r','\n','B','\r','C'};
     memory_t m={utf8,sizeof utf8,1,false};pn_text_source_t s={&m,m.size,read_at,NULL};pn_text_reader_t r;
     assert(pn_text_open(&r,&s,PN_TEXT_AUTO)==PN_OK && r.content_begin==3 && r.encoding==PN_TEXT_UTF8);
