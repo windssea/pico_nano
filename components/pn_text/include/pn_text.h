@@ -45,3 +45,5 @@ pn_status_t pn_text_seek(pn_text_reader_t *reader,uint64_t offset);
 pn_status_t pn_text_probe(const pn_text_source_t *source,uint64_t byte_limit,pn_text_encoding_t *encoding);
 /// 完整探测时顺带发布最多512个解码检查点；每次编码尝试先回调content_begin，失败尝试须丢弃。/ Publish at most 512 decoder checkpoints during full probing; each encoding attempt begins with content_begin, discard failed attempts.
 pn_status_t pn_text_probe_checkpoints(const pn_text_source_t *,uint64_t,pn_text_encoding_t *,void (*)(void *,uint64_t,bool),void *);
+/// 探测已可读前缀至stop附近的完整字符，last跨块保持；调用方为标量/CRLF预留8字节前瞻。/ Probe a readable prefix to a complete character near stop, retaining last across blocks; caller reserves eight bytes for scalar/CRLF lookahead.
+pn_status_t pn_text_probe_range(pn_text_reader_t *,uint64_t stop,uint64_t *last,void (*)(void *,uint64_t,bool),void *);

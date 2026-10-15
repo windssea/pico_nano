@@ -163,7 +163,7 @@ static bool recent_mode,selected_identified;
 static size_t recent_start;
 static bool list_mode; ///< 书架列表模式（每页5本）/ Shelf list mode (five per page)
 /// 当前书架每页条数。/ Entries per shelf page right now.
-static size_t shelf_per_page(void){return home_mode?3u:list_mode || (!recent_mode && !fav_mode && *search_query)?5u:(size_t)shelf_prefs.columns*2u;}
+static size_t shelf_per_page(void){return home_mode?3u:list_mode || (!recent_mode && !fav_mode && *search_query)?5u:(size_t)shelf_prefs.columns*3u;}
 static pn_book_id_t selected_expected;
 static char selected_path[PN_CATALOG_PATH_MAX];
 static pn_catalog_item_t last_read_book; ///< 已成功关闭阅读的书快照，不借用正文句柄 / Snapshot of a successfully closed book, without borrowing a reader handle
@@ -592,6 +592,7 @@ static bool stop_reader_impl(bool retain){
         status=pn_hot_session_park(&hot_session,&pool,&sd_media,selected_path,1,now_ms(),&reader,&epub);
     if(status==PN_EMPTY || status==PN_BUSY)status=active_close(now_ms());
     if(status!=PN_OK && reader_active()){ESP_LOGE(TAG,"Save barrier failed: %d; session retained",(int)status);message("保存失败","仍保留当前位置\n修复内部存储后重试");return false;}
+    if(status==PN_OK)recent_loaded=false; // 热挂起也已写入最近记录，下次首页须重读。/ Parking also writes recents; reload the next home snapshot.
     if(status==PN_OK && identified){memset(&last_read_book,0,sizeof last_read_book);last_read_book.format=selected_format;last_read_book.expected=id;last_read_book.identified=true;
         snprintf(last_read_book.path,sizeof last_read_book.path,"%s",selected_path);const char *name=strrchr(selected_path,'/');name=name?name+1:selected_path;
         size_t length=strlen(name);if(length<sizeof last_read_book.name)memcpy(last_read_book.name,name,length+1); // 超长名保留完整路径/身份，不切断UTF8。/ Keep full path/identity for overlong names without splitting UTF-8.
@@ -649,7 +650,7 @@ static int battery_percent(void){
 /// 书架选项（绘制与命中共用）。/ Shelf options shared by drawing and hit testing.
 static pn_shelf_options_t shelf_options(void){
     bool query=!recent_mode && !fav_mode && *search_query;
-    return (pn_shelf_options_t){.home=home_mode,.battery_percent=-1,.columns=shelf_prefs.columns,.style=shelf_prefs.style,.actions=actions_mode?&actions:NULL,.search=true,.import_tile=true,.layout_toggle=true,.favorites_tab=true,.favorites=fav_mode,.list_mode=list_mode || query,.query=query};
+    return (pn_shelf_options_t){.home=home_mode,.battery_percent=-1,.columns=shelf_prefs.columns,.style=shelf_prefs.style,.actions=actions_mode?&actions:NULL,.search=false,.import_tile=true,.layout_toggle=true,.favorites_tab=true,.favorites=fav_mode,.list_mode=list_mode || query,.query=query};
 }
 /// 读收藏夹到favorites（没有记录为空表）。/ Load favorites (an empty list without a record).
 static pn_status_t favorites_load(void){
@@ -982,7 +983,8 @@ static void tick_transfer(uint64_t now){
     pn_device_transfer_state_t state;if(pn_device_transfer_state(&transfer,&state)!=PN_OK)return;
     handle_network_request();
     memset(&transfer_view,0,sizeof transfer_view);transfer_view.released=state.released;transfer_view.busy=state.work.busy;transfer_view.station=state.network.mode==PN_WIFI_STA;
-    transfer_view.localsend=true;transfer_view.phase=state.phase==PN_DTRANSFER_READY?PN_TVIEW_READY:state.phase==PN_DTRANSFER_STOPPING?PN_TVIEW_STOPPING:state.phase==PN_DTRANSFER_STARTING?PN_TVIEW_STARTING:PN_TVIEW_FAILED;
+    transfer_view.localsend=state.localsend;transfer_view.phase=state.phase==PN_DTRANSFER_READY?PN_TVIEW_READY:state.phase==PN_DTRANSFER_STOPPING?PN_TVIEW_STOPPING:state.phase==PN_DTRANSFER_STARTING?PN_TVIEW_STARTING:PN_TVIEW_FAILED;
+    transfer_view.failed_stage=state.stage;transfer_view.error=state.error;transfer_view.native_error=state.network.error;
     memcpy(transfer_view.ssid,state.network.ssid,sizeof transfer_view.ssid);memcpy(transfer_view.password,state.network.ap_password,sizeof transfer_view.password);
     if(state.network.address[0])snprintf(transfer_view.address,sizeof transfer_view.address,"http://%s",state.network.address);
     if(state.released && transfer_return && pn_device_transfer_close(&transfer)==PN_OK){
@@ -1493,7 +1495,7 @@ static void device_task(void *arg){
     pn_semantic_file_space_port(semantic_space,NULL);
     (void)pn_catalog_index_init(&catalog_index,&pool,&sd_media,book_directory,PN_SD_MOUNT "/" PN_SD_INDEX_CACHE);
     start_reader();pn_reader_input_t input={0};pn_tap_t tap={0};int hold_hit=-1;uint64_t hold_start=0,hold_last=0;bool hold_fired=false;uint64_t last_card=0,last_key=0,last_ui_retry=0,boot=now_ms();
-    pn_async_scope_t scope;bool scope_active=false;pn_tap_press_t navigation_press={0};
+    pn_async_scope_t scope;bool scope_active=false;pn_tap_press_t navigation_press={0};pn_shelf_gesture_t shelf_gesture={0};
 #define POWER_IDLE_ROUNDS 100u ///< 约1秒，覆盖输入后的邻页预排与字形预热 / About one second, covering neighbor prefetch and glyph warming after input
     unsigned power_idle=0; ///< 连续无输入轮数（每轮约10ms）/ Consecutive rounds without input (about 10 ms each)
     unsigned background_rounds=0; ///< 连续1ms让出的预热轮数 / Consecutive warming rounds using 1 ms yields
@@ -1523,6 +1525,7 @@ static void device_task(void *arg){
         if(available==PN_CANCELLED){pn_reader_input_cancel(&input);pn_key_cancel(&keys);int ignored;(void)pn_tap_feed(&tap,1,-1,false,&ignored);
             // 旧页有效松手只解除输入所有权，不把旧坐标交给新页面。/ Valid releases from an old view only end input ownership; never route old coordinates into the new page.
             root_navigation_cancel(&navigation_press,&queued);hold_hit=-1;touch_held=false;
+            if(queued.kind==PN_DASYNC_TOUCH && queued.valid && !queued.count){int ignored;(void)pn_shelf_gesture_feed(&shelf_gesture,false,false,0,0,0,true,-1,now,&ignored);}else shelf_gesture=(pn_shelf_gesture_t){.blocked=true};
 #if defined(CONFIG_PN_UI_FOLLOW) && CONFIG_PN_UI_FOLLOW
             pn_status_t motion;(void)pn_font_manage_pointer(&font_manage,0,0,0,false,now,present,NULL,&motion);
             (void)pn_toc_ui_pointer(&toc,0,0,0,false,now,present,NULL,&motion);
@@ -1573,6 +1576,11 @@ static void device_task(void *arg){
         if(hardware.touch_ready && (!async_port.input_active || (available==PN_OK && queued.kind==PN_DASYNC_TOUCH))){cst836u_touch_t touch={0};esp_err_t read;uint64_t touch_at=now_ms();if(async_port.input_active){touch.count=queued.count;touch.x=queued.x;touch.y=queued.y;read=queued.valid?ESP_OK:ESP_FAIL;touch_at=queued.at;}else read=cst836u_read(hardware.touch,&touch);pn_reader_action_t action;touch_held=read==ESP_OK && touch.count>0;if(touch_held)last_input=now_ms();
             if(!async_port.input_active && (read!=ESP_OK || touch.count)){pn_cover_work_abort(&cover_work);pn_epub_app_cache_activity(&epub,now_ms());}
             bool list_consumed=root_navigation_touch(&navigation_press,touch.count,touch.x,touch.y,read==ESP_OK);
+            if(list_consumed)shelf_gesture=(pn_shelf_gesture_t){0};
+            else{bool active=shelf_mode && shelf_page && !locked && !actions_mode && !status_page && !reading_menu && !hub_mode && !index_mode && !search_mode && !settings_ui.impl && !transfer.impl && !usb.open;
+                int hit=active?active_hit(touch.x,touch.y):-1,command=-1;
+                list_consumed=pn_shelf_gesture_feed(&shelf_gesture,active,!home_mode,touch.count,touch.x,touch.y,read==ESP_OK,hit>=0 && hit<PN_CATALOG_PAGE_MAX?hit:-1,touch_at,&command);
+                if(command>=0 && (command!=PN_SHELF_NEXT || shelf_page->more) && (command!=PN_SHELF_PREVIOUS || shelf_page->index>0))apply_selection(command);}
             if(list_consumed){pn_reader_input_cancel(&input);tap=(pn_tap_t){0};hold_hit=-1;hold_fired=false;}
 #if defined(CONFIG_PN_UI_FOLLOW) && CONFIG_PN_UI_FOLLOW
             if(!list_consumed && !locked && font_manage.impl){bool was_list_down=pn_font_manage_motion_stats(&font_manage).down;pn_status_t motion;
@@ -1603,13 +1611,9 @@ static void device_task(void *arg){
             // 步进键长按：按住满600 ms后每180 ms再走一档；松手时不再多走一档（docs/ARCHITECTURE.md“三键与步进输入”）。
             // Stepper hold: after 600 ms held, step again every 180 ms; releasing does not add another step (docs/ARCHITECTURE.md, key and stepper input).
             {bool repeatable=(styles.active && hit>=PN_SUI_FIELD && hit<PN_SUI_FIELD+PN_SUI_FIELDS*2) || (jump_ui.active && hit>=PN_JUI_STEP && hit<PN_JUI_STEP+4);
-             // 书架封面长按600 ms：打开书籍操作面板（只触发一次，松手不再打开书）。/ A 600 ms long press on a shelf cover opens the book actions sheet (once; releasing does not open the book).
-             bool long_press=shelf_mode && shelf_page && !actions_mode && hit>=0 && hit<(int)shelf_page->count && hit<PN_CATALOG_PAGE_MAX;
              uint64_t tick=touch_at;
-             if(touch_held && (repeatable || long_press) && hit==hold_hit){
-                 if(long_press){if(!hold_fired && tick-hold_start>=600 && !locked){hold_fired=true;open_actions(hit);}}
-                 else if(tick-hold_start>=600 && tick-hold_last>=180 && !locked){hold_last=tick;hold_fired=true;apply_selection(hit);}}
-             else{hold_hit=touch_held && (repeatable || long_press)?hit:-1;hold_start=tick;hold_last=0;if(touch_held)hold_fired=false;}}
+             if(touch_held && repeatable && hit==hold_hit){if(tick-hold_start>=600 && tick-hold_last>=180 && !locked){hold_last=tick;hold_fired=true;apply_selection(hit);}}
+             else{hold_hit=touch_held && repeatable?hit:-1;hold_start=tick;hold_last=0;if(touch_held)hold_fired=false;}}
             bool was_down=tap.down;bool commit=pn_tap_feed(&tap,touch.count,hit,read==ESP_OK,&selection);(void)was_down;
 #if defined(CONFIG_PN_UI_FEEDBACK) && CONFIG_PN_UI_FEEDBACK
             if(press_feedback.active && (tap.cancelled || tap.blocked || locked))feedback_restore();

@@ -29,8 +29,8 @@ typedef struct {
     char author[512]; ///< OPF作者，不从文件名猜测 / OPF author, never guessed from filenames
 } pn_book_display_t;
 
-/// 当前书目页最多八条封面槽外加一个“继续阅读”槽，调用方拥有，可放pool或静态区。
-/// Up to eight cover slots for the current catalog page plus one continue-reading slot, caller-owned in pool or static storage.
+/// 当前书目页最多十二条封面槽外加一个“继续阅读”槽，调用方拥有，可放pool或静态区。
+/// Up to twelve cover slots for the current catalog page plus one continue-reading slot, caller-owned in pool or static storage.
 typedef struct {
     uint8_t pixels[PN_CATALOG_PAGE_MAX+1][PN_COVER_BYTES]; ///< 4bpp行内低半字节在左 / 4bpp rows, left pixel in low nibble
     pn_cover_state_t state[PN_CATALOG_PAGE_MAX+1]; ///< 每槽状态 / Per-slot state

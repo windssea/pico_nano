@@ -52,7 +52,7 @@ with tempfile.TemporaryDirectory() as folder:
             assert len(positions) == 2 and positions[0] != positions[1], result.stdout
         aggregate = 0
         # 文件块也计入同一总额，不能只核对原四类缓存。/ File blocks share the aggregate cap; verify beyond the original four classes.
-        caps_kib = [512, 768, 256, 384, 132, 416]
+        caps_kib = [512, 768, 384, 384, 132, 416]
         for line in result.stderr.splitlines():
             if line.startswith("cache "):
                 fields = dict(re.findall(r"(\w+)=([^\s]+)", line))

@@ -75,6 +75,7 @@ static pn_status_t sink_status(void *ctx,char ssid[PN_NETWORK_SSID_MAX+1],bool *
  transfer_t *s=ctx;lock(s);memcpy(ssid,s->saved_ssid,PN_NETWORK_SSID_MAX+1);*pending=s->inbox_full || s->saving;*last=s->network_last;unlock(s);return PN_OK;
 }
 static bool stopping(transfer_t *s){lock(s);bool value=s->stop;unlock(s);return value;}
+static void stage(transfer_t *s,unsigned value){lock(s);s->state.stage=value;unlock(s);}
 static void memory_stage(const char *phase){
  (void)phase;
 #ifdef ESP_PLATFORM
@@ -94,8 +95,9 @@ static void run(transfer_t *s){
  memory_stage("starting");
  pn_upload_files_options_t options;
  pn_status_t cause=pn_device_upload_storage_options(&s->storage,s->media,s->root,&options);
- if(cause==PN_OK && !stopping(s))cause=pn_transfer_worker_open(&s->worker,s->media,&options,6u*1024u*1024u,NULL,NULL,NULL);
- if(cause==PN_OK && !stopping(s))cause=pn_device_wifi_open(&s->wifi,&s->config);
+ if(cause==PN_OK && !stopping(s)){stage(s,1);cause=pn_transfer_worker_open(&s->worker,s->media,&options,6u*1024u*1024u,NULL,NULL,NULL);}
+ if(cause==PN_OK && !stopping(s)){stage(s,2);int error=0;cause=pn_device_wifi_open_detailed(&s->wifi,&s->config,&error);lock(s);s->state.network.error=error;unlock(s);}
+ if(cause==PN_OK)stage(s,3);
  memory_stage("wifi-open");
  volatile uint8_t *secret=(volatile uint8_t *)s->config.password;for(size_t i=0;i<sizeof s->config.password;i++)secret[i]=0;
  uint64_t network_generation=0,card_error_since=0;
@@ -118,6 +120,7 @@ static void run(transfer_t *s){
    network_generation=network.generation;
   }
   if(!s->http.impl && network.phase==PN_WIFI_READY && !stopping(s)){
+   stage(s,4);
    cause=pn_device_transfer_http_open(&s->http,&s->worker,network.address,80);
    memory_stage("http-open");
    if(cause!=PN_OK)break;
@@ -128,10 +131,12 @@ static void run(transfer_t *s){
   }
   pn_transfer_worker_state_t work={0};if(s->worker.impl)(void)pn_transfer_worker_state(&s->worker,&work);
   if(s->http.impl)(void)pn_device_transfer_http_diagnostics(&s->http,&network);
-  lock(s);s->state.network=network;s->state.work=work;
+  bool localsend=s->http.impl && pn_device_transfer_http_localsend(&s->http);
+  lock(s);s->state.network=network;s->state.work=work;s->state.localsend=localsend;
   if(!s->stop){s->state.phase=s->http.impl && network.phase==PN_WIFI_READY?PN_DTRANSFER_READY:PN_DTRANSFER_STARTING;}
   unlock(s);pause_task();
  }
+ pn_device_wifi_state_t failed_network;if(s->wifi.impl && pn_device_wifi_state(&s->wifi,&failed_network)==PN_OK){lock(s);s->state.network=failed_network;unlock(s);}
  lock(s);s->stop=true;s->state.phase=PN_DTRANSFER_STOPPING;unlock(s);
 #ifdef ESP_PLATFORM
  ESP_LOGI("pn_transfer","stopping cause=%d",(int)cause);
@@ -156,7 +161,7 @@ pn_status_t pn_device_transfer_open(pn_device_transfer_t *out,pn_media_t *media,
  if(!out || !media || !root || !config || strlen(root)>=PN_UPLOAD_FILES_ROOT_MAX)return PN_INVALID;
  if(out->impl || pn_media_active(media))return PN_BUSY;
  if(!media->available)return PN_STALE_MEDIA;
- transfer_t *s=allocate(sizeof *s);if(!s)return PN_NO_MEMORY;memset(s,0,sizeof *s);s->media=media;s->config=*config;strcpy(s->root,root);s->state.phase=PN_DTRANSFER_STARTING;s->network_last=PN_EMPTY;s->sink=(pn_device_network_sink_t){s,sink_submit,sink_status};
+ transfer_t *s=allocate(sizeof *s);if(!s)return PN_NO_MEMORY;memset(s,0,sizeof *s);s->media=media;s->config=*config;strcpy(s->root,root);s->state.phase=PN_DTRANSFER_STARTING;s->state.network.mode=config->mode;s->network_last=PN_EMPTY;s->sink=(pn_device_network_sink_t){s,sink_submit,sink_status};
 #ifdef ESP_PLATFORM
  s->mutex=xSemaphoreCreateMutex();if(!s->mutex){release(s);return PN_NO_MEMORY;}
  bool created=xTaskCreatePinnedToCore(entry,"pn_transfer_ctl",16384,s,4,&s->task,0)==pdPASS;

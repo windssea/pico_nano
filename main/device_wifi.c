@@ -82,7 +82,8 @@ pn_status_t pn_device_wifi_close(pn_device_wifi_t *out){
  pn_device_usb_radio_restore(s->usb_enabled);
  vSemaphoreDelete(s->mutex);clear_secret(s,sizeof *s);heap_caps_free(s);active=NULL;out->impl=NULL;return PN_OK;
 }
-pn_status_t pn_device_wifi_open(pn_device_wifi_t *out,const pn_device_wifi_config_t *config){
+pn_status_t pn_device_wifi_open_detailed(pn_device_wifi_t *out,const pn_device_wifi_config_t *config,int *error){
+ if(error)*error=0;
  if(!out || !config || (config->mode!=PN_WIFI_AP && config->mode!=PN_WIFI_STA))return PN_INVALID;
  if(out->impl || active)return PN_BUSY;
  if(config->mode==PN_WIFI_STA){
@@ -131,9 +132,10 @@ pn_status_t pn_device_wifi_open(pn_device_wifi_t *out,const pn_device_wifi_confi
  if(result==ESP_OK){s->start_attempted=true;result=esp_wifi_start();if(result==ESP_OK)s->started=true;}
  // 仅联网会话关闭STA modem sleep，停止后驱动销毁，不改变离线阅读功耗。 / Disable STA modem sleep only for network sessions; driver teardown leaves offline reading power unchanged.
  if(result==ESP_OK && config->mode==PN_WIFI_STA)result=esp_wifi_set_ps(WIFI_PS_NONE);
- if(result!=ESP_OK){lock(s);s->state.phase=PN_WIFI_FAILED;s->state.error=result;unlock(s);(void)pn_device_wifi_close(out);return PN_IO;}
+ if(result!=ESP_OK){if(error)*error=result;lock(s);s->state.phase=PN_WIFI_FAILED;s->state.error=result;unlock(s);(void)pn_device_wifi_close(out);return PN_IO;}
  return PN_OK;
 }
+pn_status_t pn_device_wifi_open(pn_device_wifi_t *out,const pn_device_wifi_config_t *config){return pn_device_wifi_open_detailed(out,config,NULL);}
 pn_status_t pn_device_wifi_poll(pn_device_wifi_t *out){
  if(!out || !out->impl)return PN_INVALID;
  wifi_t *s=out->impl;uint64_t now=now_ms();lock(s);

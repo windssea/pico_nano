@@ -17,7 +17,7 @@ static pn_status_t advance(void *ctx,uint32_t cp,int32_t *out){(void)ctx;(void)c
 int main(void){
     memory_t m={.available=true};memset(m.data,'a',sizeof m.data);
     pn_text_source_t source={&m,sizeof m.data,read_at,validate};pn_book_id_t book={{42}};
-    pn_layout_t layout={25,20,10,8,0,0,0};pn_font_metrics_t metrics={NULL,advance};pn_page_glyph_t glyphs[100];pn_reader_t reader;
+    pn_layout_t layout={25,20,10,8,0,0,0,false};pn_font_metrics_t metrics={NULL,advance};pn_page_glyph_t glyphs[100];pn_reader_t reader;
     assert(pn_reader_init(&reader,&source,PN_TEXT_UTF8,&book,&layout,&metrics,glyphs,100,(pn_job_token_t){1,1},NULL)==PN_OK);
     pn_txt_progress_t position={0};assert(pn_reader_progress(&reader,&position)==PN_EMPTY);
     pn_reader_receipt_t page,other;assert(pn_reader_prepare(&reader,PN_READ_FIRST,0,&page)==PN_OK && page.anchor.begin==0 && page.anchor.end==10);

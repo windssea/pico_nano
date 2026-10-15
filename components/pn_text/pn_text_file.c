@@ -190,6 +190,51 @@ pn_status_t pn_text_file_identity_pooled(pn_pool_t *pool,const pn_text_source_t 
     if(s==PN_OK){file->identity=digest;file->identity_known=true;*out=digest;}return s;
 }
 pn_status_t pn_text_file_identity(const pn_text_source_t *source,pn_book_id_t *out){return pn_text_file_identity_pooled(NULL,source,out);}
+typedef struct {
+    const pn_text_source_t *source; ///< 原完整源 / Original complete source
+    pn_text_reader_t reader; ///< 仅保留有界解码缓存 / Bounded decoder cache only
+    const uint8_t *bytes;size_t size;uint64_t begin; ///< 当前摘要借用块 / Current borrowed digest block
+    uint8_t tail[8];size_t tail_size; ///< 跨块标量及CRLF前瞻 / Cross-block scalar and CRLF lookahead
+    uint64_t last;pn_status_t scan;bool opened; ///< 检查点和探测状态 / Checkpoint and probe state
+    void (*point)(void *,uint64_t,bool);void *ctx; ///< 原调用方回调 / Original caller callback
+} inspect_t;
+static pn_status_t inspect_bytes(void *ctx,uint64_t offset,uint8_t *out,size_t cap,size_t *got){
+    inspect_t *s=ctx;uint64_t end=s->begin+s->size;if(offset>end || offset+s->tail_size<s->begin)return PN_IO;
+    size_t n=0;if(offset<s->begin){size_t take=(size_t)(s->begin-offset);if(take>cap)take=cap;memcpy(out,s->tail+s->tail_size-(size_t)(s->begin-offset),take);n=take;offset+=take;}
+    size_t take=(size_t)(end-offset);if(take>cap-n)take=cap-n;if(take)memcpy(out+n,s->bytes+(size_t)(offset-s->begin),take);*got=n+take;return PN_OK;
+}
+static pn_status_t inspect_read(void *ctx,uint64_t offset,uint8_t *bytes,size_t cap,size_t *got){
+    inspect_t *s=ctx;pn_status_t status=s->source->read_at(s->source->ctx,offset,bytes,cap,got);if(status!=PN_OK)return status;
+    if(!*got || *got>cap)return PN_IO;
+    s->begin=offset;s->bytes=bytes;s->size=*got;uint64_t end=offset+*got;bool final=end==s->source->size;
+    if(s->scan==PN_OK && (end>=3 || final)){
+        if(!s->opened){pn_text_source_t view={s,s->source->size,inspect_bytes,NULL};s->scan=pn_text_open(&s->reader,&view,PN_TEXT_AUTO);if(s->scan==PN_OK){s->opened=true;s->last=s->reader.cursor;if(s->point)s->point(s->ctx,s->last,true);}}
+        if(s->scan==PN_OK){s->reader.cache_size=0;uint64_t stop=final?end:end>8?end-8:0;if(stop<s->reader.cursor)stop=s->reader.cursor;s->scan=pn_text_probe_range(&s->reader,stop,&s->last,s->point,s->ctx);}
+        if(s->scan!=PN_OK && s->scan!=PN_CORRUPT)return s->scan;
+    }
+    // 借用摘要块只在回调内有效，下一次只需最后8字节。/ Digest blocks are borrowed only during this callback; retain only their final eight bytes.
+    if(*got>=sizeof s->tail){memcpy(s->tail,bytes+*got-sizeof s->tail,sizeof s->tail);s->tail_size=sizeof s->tail;}
+    else{size_t keep=s->tail_size;if(keep+*got>sizeof s->tail)keep=sizeof s->tail-*got;memmove(s->tail,s->tail+s->tail_size-keep,keep);memcpy(s->tail+keep,bytes,*got);s->tail_size=keep+*got;}
+    return PN_OK;
+}
+pn_status_t pn_text_file_inspect(pn_pool_t *pool,const pn_text_source_t *source,pn_book_id_t *id,pn_text_encoding_t *encoding,void (*point)(void *,uint64_t,bool),void *ctx){
+    if(!pool || !source || !id || !encoding || source->read_at!=read_at || source->validate!=validate || !source->ctx)return PN_INVALID;
+    pn_text_file_t *file=source->ctx;pn_status_t status=validate(file);if(status!=PN_OK)return status;
+    if(source->size!=file->size)return PN_INVALID;
+    if(file->identity_known){pn_text_encoding_t selected;status=pn_text_probe_checkpoints(source,PN_TEXT_FILE_MAX_BYTES,&selected,point,ctx);if(status==PN_OK){*id=file->identity;*encoding=selected;}return status;}
+    inspect_t scan={.source=source,.scan=PN_OK,.point=point,.ctx=ctx};pn_book_id_t digest;
+    status=pn_identity_stream_pooled(pool,&scan,source->size,inspect_read,&digest);
+    if(status==PN_OK && !scan.opened){pn_text_source_t view=*source;status=pn_text_open(&scan.reader,&view,PN_TEXT_AUTO);if(status==PN_OK && point)point(ctx,scan.reader.content_begin,true);}
+    if(status==PN_OK && scan.scan==PN_CORRUPT){
+        // 已完整尝试UTF，不再重复失败前缀；BOM损坏拒绝，无BOM仅严格GBK重试。/ UTF was already attempted; never reread its failed prefix. Reject broken BOM text; retry strict GBK only without a BOM.
+        if(!scan.opened || scan.reader.content_begin)status=PN_CORRUPT;
+        else{status=pn_text_open(&scan.reader,source,PN_TEXT_GBK);if(status==PN_OK){scan.last=scan.reader.cursor;if(point)point(ctx,scan.last,true);status=pn_text_probe_range(&scan.reader,source->size,&scan.last,point,ctx);}}
+    }
+    pn_text_encoding_t selected=scan.reader.encoding;
+    if(status==PN_OK)status=validate(file);
+    if(status==PN_OK){file->identity=digest;file->identity_known=true;*id=digest;*encoding=selected;}
+    return status;
+}
 #if !defined(ESP_PLATFORM) && !defined(PN_TEST_IMMUTABLE_FILE)
 static pn_status_t retained_read(void *ctx,uint64_t offset,uint8_t *out,size_t cap,size_t *got){pn_text_file_t *f=ctx;pn_status_t s=validate(f);if(s!=PN_OK)return s;return read_direct(f,offset,out,cap,got);}
 #endif

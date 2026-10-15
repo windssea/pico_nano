@@ -19,7 +19,7 @@ with tempfile.TemporaryDirectory() as folder:
     for line in ('actions open index=0 status=0 favorite=0','actions command=2 status=0 active=1 favorite=1','actions command=4 status=0 active=0','favorites_page start=0 count=1'):assert line in out,(line,out)
     # 收藏与取消的封面像素确实改变，重启后仍然正确。/ Cover pixels change on toggle and stay correct after restarting.
     run('quit');marked=frames[-1]
-    def badge(image):return b''.join(image[y*684+42:y*684+70] for y in range(294,322))
+    def badge(image):return b''.join(image[y*684+54:y*684+82] for y in range(276,304))
     assert badge(unmarked)!=badge(marked)
     run('tap:600:190,quit');marked_list=frames[-1]
     # 再次打开：已收藏；取消收藏。/ Reopen: already a favorite; remove it.
@@ -31,6 +31,6 @@ with tempfile.TemporaryDirectory() as folder:
     # 删除：先进确认页，取消不删；确认才删。/ Delete: the confirmation page first, cancel keeps the file, confirm deletes it.
     out=run(','.join((COVER,DELETE,CANCEL,CLOSE,'quit')));assert (books/'a.txt').exists() and 'actions command=3 status=0 active=1' in out,out
     out=run(','.join((COVER,DELETE,CONFIRM,'quit')));assert not (books/'a.txt').exists() and (books/'b.txt').exists() and 'actions command=5 status=0 active=0' in out,out
-    # 封面角落“⋯”同样打开面板。/ The "⋯" in the cover corner opens the sheet too.
-    out=run('tap:190:300,tap:300:300,quit');assert 'actions open index=0 status=0' in out,out
-print('actions window: long press sheet, favorites toggle and page, confirmed delete passed')
+    # 原省略号位置恢复为普通开书，长按已另有真实持有旅程。/ The former ellipsis area opens the book normally; actual held contacts are tested separately.
+    out=run('tap:180:300,back,quit');assert 'library_open name=b.txt' in out and 'actions open' not in out,out
+print('actions window: long press sheet, favorites toggle and page, confirmed delete and unobstructed cover passed')

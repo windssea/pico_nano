@@ -126,7 +126,7 @@ typedef struct {
 /* 模拟器没有电量计：电量取环境变量PN_SIM_BATTERY（0–100，默认85，仅为演示值，不是实测）。
  * The simulator has no fuel gauge: the battery comes from PN_SIM_BATTERY (0–100, default 85), a demo value, not a measurement. */
 static int sim_battery(void){const char *v=getenv("PN_SIM_BATTERY");if(!v || !*v)return 85;int n=atoi(v);return n<0?-1:n>100?100:n;}
-static pn_shelf_options_t shelf_options(const library_t *s){pn_w_set_battery(sim_battery());bool query=!s->recent_mode && !s->fav_mode && *s->query;return (pn_shelf_options_t){.home=s->home,.battery_percent=-1,.columns=s->shelf_prefs.columns,.style=s->shelf_prefs.style,.actions=s->actions_mode?&s->actions:NULL,.search=true,.layout_toggle=true,.favorites_tab=true,.favorites=s->fav_mode,.list_mode=s->list_mode || query,.query=query};}
+static pn_shelf_options_t shelf_options(const library_t *s){pn_w_set_battery(sim_battery());bool query=!s->recent_mode && !s->fav_mode && *s->query;return (pn_shelf_options_t){.home=s->home,.battery_percent=-1,.columns=s->shelf_prefs.columns,.style=s->shelf_prefs.style,.actions=s->actions_mode?&s->actions:NULL,.search=false,.layout_toggle=true,.favorites_tab=true,.favorites=s->fav_mode,.list_mode=s->list_mode || query,.query=query};}
 static size_t shelf_per_page(const library_t *s){pn_shelf_options_t o=shelf_options(s);return s->home?3u:pn_shelf_capacity(&o);}
 static bool reading(library_t *s){return s->reader.impl || s->epub.impl;}
 static pn_status_t active_step(library_t *s,pn_reader_action_t action,uint64_t now,pn_reader_present_fn present,void *ctx){
@@ -668,7 +668,7 @@ static int library_worker(void *ctx){
     (void)pn_settings_load_shelf(&s->state_media,s->state_dir,&s->shelf_prefs);
     s->home=true;status=page(s,false,true);if(status!=PN_OK)goto cleanup;
     if(pn_settings_load_flags(&s->state_media,s->state_dir,&s->input_flags)!=PN_OK)s->input_flags=0;
-    result=0;bool running=true;pn_tap_t tap={0};pn_tap_press_t navigation_press={0};pn_reader_input_t input={0};uint64_t font_activity=SDL_GetTicks64();
+    result=0;bool running=true;pn_tap_t tap={0};pn_tap_press_t navigation_press={0};pn_shelf_gesture_t shelf_gesture={0};pn_reader_input_t input={0};uint64_t font_activity=SDL_GetTicks64();
     while(running){
         if(s->feedback_release){feedback_restore(s);s->feedback_release=false;}
         {static time_t last;const char *fixed=getenv("PN_SIM_CLOCK");time_t t=time(NULL);if(fixed)pn_w_set_clock(fixed);else if(t!=last){last=t;struct tm local;char text[8];if(localtime_r(&t,&local) && strftime(text,sizeof text,"%H:%M",&local))pn_w_set_clock(text);}} // 本机时钟；固定值仅用于可复跑测试 / Host clock; a fixed value is only for reproducible tests
@@ -698,7 +698,19 @@ static int library_worker(void *ctx){
                 event.type=SDL_MOUSEBUTTONUP;event.button.type=SDL_MOUSEBUTTONUP;navigation_selected=true;printf("navigation press hit=%d\n",navigation);}}
         else if(!got && !(atomic_load(&s->async.mouse)&SDL_BUTTON_LMASK)){
             (void)pn_tap_press_feed(&navigation_press,0,-1,true,&navigation);(void)pn_tap_press_feed(&navigation_press,0,-1,true,&navigation);}
+        if(navigation_consumed)shelf_gesture=(pn_shelf_gesture_t){0};
         if(navigation_consumed && !navigation_selected){feedback_restore(s);s->feedback_tap=(pn_tap_t){0};s->pointer_down=false;tap=(pn_tap_t){0};pn_reader_input_cancel(&input);continue;}
+        {bool active=!reading(s) && !s->locked && !s->hub && !s->index && !s->search_open && !s->actions_mode && !s->settings.impl && !s->wallpaper.impl && !s->font_manage.impl;
+         int command=-1;bool consumed=false;
+         bool pointer=got && ((event.type==SDL_MOUSEMOTION && (event.motion.state&SDL_BUTTON_LMASK)) || ((event.type==SDL_MOUSEBUTTONDOWN || event.type==SDL_MOUSEBUTTONUP) && event.button.button==SDL_BUTTON_LEFT));
+         if(!navigation_selected && pointer){bool motion=event.type==SDL_MOUSEMOTION,up=event.type==SDL_MOUSEBUTTONUP;int x=motion?event.motion.x:event.button.x,y=motion?event.motion.y:event.button.y,book=active?shelf_hit(s,x,y):-1;
+             consumed=pn_shelf_gesture_feed(&shelf_gesture,active,!s->home,1,x,y,true,book>=0 && book<(int)s->page->count?book:-1,now,&command);
+             if(up){consumed=pn_shelf_gesture_feed(&shelf_gesture,active,!s->home,0,x,y,true,-1,now,&command) || consumed;consumed=pn_shelf_gesture_feed(&shelf_gesture,active,!s->home,0,x,y,true,-1,now,&command) || consumed;}}
+         else if(!got && shelf_gesture.down && (atomic_load(&s->async.mouse)&SDL_BUTTON_LMASK))consumed=pn_shelf_gesture_feed(&shelf_gesture,active,!s->home,1,shelf_gesture.last_x,shelf_gesture.last_y,true,shelf_gesture.hit,now,&command);
+         else if(got && event.type==SDL_WINDOWEVENT && event.window.event==SDL_WINDOWEVENT_FOCUS_LOST)shelf_gesture=(pn_shelf_gesture_t){.blocked=(atomic_load(&s->async.mouse)&SDL_BUTTON_LMASK)!=0};
+         if(command>=PN_SHELF_MORE && command<PN_SHELF_MORE+PN_CATALOG_PAGE_MAX){open_actions(s,command-PN_SHELF_MORE);printf("shelf long press book=%d\n",command-PN_SHELF_MORE);}
+         else if((command==PN_SHELF_NEXT && s->page->more) || (command==PN_SHELF_PREVIOUS && s->page->index>0)){status=page(s,command==PN_SHELF_PREVIOUS,false);printf("shelf swipe command=%d index=%zu status=%d\n",command,s->page->index,(int)status);}
+         if(consumed){feedback_restore(s);s->feedback_tap=(pn_tap_t){0};tap=(pn_tap_t){0};pn_reader_input_cancel(&input);s->pointer_down=pointer && event.type!=SDL_MOUSEBUTTONUP;continue;}}
         if(got && s->follow_enabled && (s->font_manage.impl || s->toc.active) && (((event.type==SDL_MOUSEBUTTONDOWN || event.type==SDL_MOUSEBUTTONUP) && event.button.button==SDL_BUTTON_LEFT) || (event.type==SDL_MOUSEMOTION && (event.motion.state&SDL_BUTTON_LMASK)) || (event.type==SDL_WINDOWEVENT && event.window.event==SDL_WINDOWEVENT_FOCUS_LOST))){
             unsigned count=event.type==SDL_MOUSEBUTTONUP || event.type==SDL_WINDOWEVENT?0u:1u;int px=event.type==SDL_MOUSEMOTION?event.motion.x:event.button.x,py=event.type==SDL_MOUSEMOTION?event.motion.y:event.button.y;
             bool consumed=s->toc.active?pn_toc_ui_pointer(&s->toc,count,px,py,event.type!=SDL_WINDOWEVENT,now,present,s,&status):pn_font_manage_pointer(&s->font_manage,count,px,py,event.type!=SDL_WINDOWEVENT,now,present,s,&status);
@@ -918,7 +930,6 @@ static int library_worker(void *ctx){
                 if(key==SDLK_p){status=open_settings(s);printf("settings open status=%d flags=%u\n",(int)status,(unsigned)s->settings.flags);continue;}
                 if(key==SDLK_f && s->font_dir){status=open_font_management(s);printf("font_manage open status=%d\n",(int)status);continue;}
                 if(key==SDLK_w && s->wallpaper_dir){status=wallpaper_open(s);printf("wallpaper_ui open status=%d\n",(int)status);continue;}
-                if(key==SDLK_SLASH){s->home=false;pn_search_ui_open(&s->search,NULL);s->search_open=true;status=pn_search_ui_render(&s->search,&s->font,&s->frame);if(status==PN_OK)status=present(s,&s->frame,PN_REFRESH_GL16);continue;}
                 if(key==SDLK_r){s->home=false;s->recent_mode=!s->recent_mode;*s->query=0;status=page(s,false,true);continue;}
                 if(key==SDLK_c){status=continue_book(s,now);continue;}
                 if(key==SDLK_RETURN){hit=s->home?(s->page->count?(s->shelf_focus_visible?s->selected:PN_SHELF_CONTINUE):PN_SHELF_HOME):s->selected;commit=true;}

@@ -29,7 +29,11 @@ static pn_status_t stream_impl(void *ctx,uint64_t size,pn_identity_read_fn read,
 __attribute__((noinline))
 #endif
 static pn_status_t dma_stream(void *ctx,uint64_t size,pn_identity_read_fn read,pn_book_id_t *out){
-    _Alignas(16) uint8_t buffer[4096];return stream_impl(ctx,size,read,buffer,sizeof buffer,out);
+    _Alignas(16) uint8_t buffer[4096]={0};
+    if(esp_ptr_dma_capable(buffer))return stream_impl(ctx,size,read,buffer,sizeof buffer,out);
+    // 传输worker可用PSRAM栈，不能再假设局部数组能DMA；小块申请失败明确返回。/ Transfer workers may have PSRAM stacks: never assume local arrays are DMA-capable; fail explicitly if the small internal block is unavailable.
+    uint8_t *internal=heap_caps_aligned_alloc(16,sizeof buffer,MALLOC_CAP_DMA|MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);if(!internal)return PN_NO_MEMORY;
+    pn_status_t status=stream_impl(ctx,size,read,internal,sizeof buffer,out);heap_caps_free(internal);return status;
 }
 // PSRAM目标在S3上由SDMMC按16扇区中转；整书摘要临时借32KiB内部DMA块，借后仍保留≥64KiB内部空闲与≥32KiB最大块，读完即还。
 // 真机阅读时内部最大块约80KiB、空闲约127KiB，原“最大块≥96KiB”门槛从未满足。

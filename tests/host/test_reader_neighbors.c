@@ -13,7 +13,7 @@ typedef struct {unsigned count;uint64_t offset;pn_status_t result;} warmth_t;
 static pn_status_t warm(void *ctx,const pn_page_glyph_t *g){warmth_t *w=ctx;if(w->count)assert(g->source.begin>w->offset);w->offset=g->source.begin;w->count++;return w->result;}
 int main(void){
  source_t s={0};memset(s.text,'a',sizeof s.text);pn_text_source_t source={&s,sizeof s.text,read_at,validate};pn_book_id_t book={{42}};
- pn_layout_t layout={25,20,10,8,0,0,0};pn_font_metrics_t metrics={&s,measure};pn_page_glyph_t nodes[100];pn_reader_t r;pn_pool_t pool;assert(!pn_pool_init(&pool,65536,NULL,NULL,NULL));
+ pn_layout_t layout={25,20,10,8,0,0,0,false};pn_font_metrics_t metrics={&s,measure};pn_page_glyph_t nodes[100];pn_reader_t r;pn_pool_t pool;assert(!pn_pool_init(&pool,65536,NULL,NULL,NULL));
  assert(pn_reader_init(&r,&source,PN_TEXT_UTF8,&book,&layout,&metrics,nodes,100,(pn_job_token_t){1,1},NULL)==PN_OK);pn_reader_neighbors(&r,&pool);
  pn_reader_receipt_t receipt;assert(pn_reader_prepare(&r,PN_READ_FIRST,0,&receipt)==PN_OK && pn_reader_complete(&r,&receipt,true,1)==PN_OK);
  pn_reader_anchor_t visible=r.visible;uint64_t ticket=r.next_ticket;pn_page_glyph_t saved[100];memcpy(saved,nodes,sizeof saved);

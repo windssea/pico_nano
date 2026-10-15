@@ -19,6 +19,8 @@ typedef struct {void *impl;} pn_device_transfer_http_t; ///< 活动对象不可�
 /// WiFi启动后调用，authority为固定IP[:port]；先准备活动worker，平台随机数须有熵。
 /// Call after WiFi starts with a fixed IP[:port] authority and active worker; platform randomness requires entropy.
 pn_status_t pn_device_transfer_http_open(pn_device_transfer_http_t *,pn_transfer_worker_t *,const char *,uint16_t);
+/// 监督owner查询/限频重试发现服务，失败不关闭已就绪网页。/ Supervisor queries/retries discovery at a bounded rate; failure keeps the ready web service alive.
+bool pn_device_transfer_http_localsend(pn_device_transfer_http_t *);
 /// 启用/network接口；sink须活到close之后，NULL关闭接口。/ Enable the /network endpoints; sink must outlive close, NULL disables them.
 pn_status_t pn_device_transfer_http_network(pn_device_transfer_http_t *,const pn_device_network_sink_t *);
 /// 复制无凭据无线诊断供/status查询，不增加网页轮询。 / Copy credential-free radio diagnostics for /status without adding browser polling.

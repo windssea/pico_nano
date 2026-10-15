@@ -1,6 +1,7 @@
 /* 中文：真实设备handler、JSON和上传worker；SDK传输API显式stub。/ English: real device handler, JSON and upload worker with explicitly stubbed SDK transport APIs. */
 #define _POSIX_C_SOURCE 200809L
 #include "device_transfer_http.h"
+#include "device_ls_discovery.h"
 #include "esp_http_server.h"
 #include "esp_httpd_priv.h"
 #include "cJSON.h"
@@ -29,6 +30,10 @@ int getpeername(int fd,struct sockaddr *address,socklen_t *length){assert(fd==50
 static _Atomic uint64_t now=1000;
 static size_t native_allocations;
 static _Atomic bool http_stop_fails;
+static _Atomic bool discovery_fails;
+static _Atomic unsigned discovery_attempts;
+pn_status_t __real_pn_device_ls_discovery_open(pn_device_ls_discovery_t *,const char *,uint16_t,const char *);
+pn_status_t __wrap_pn_device_ls_discovery_open(pn_device_ls_discovery_t *out,const char *address,uint16_t port,const char *fingerprint){discovery_attempts++;return discovery_fails?PN_IO:__real_pn_device_ls_discovery_open(out,address,port,fingerprint);}
 static void *global_context;
 static httpd_recv_func_t receive;
 static esp_err_t (*open_socket)(httpd_handle_t,int);
@@ -72,7 +77,8 @@ static const pn_device_network_sink_t net_sink={NULL,sink_submit,sink_status};
 int main(void){
  char root[]="/tmp/pn-device-http-XXXXXX";assert(mkdtemp(root));pn_media_t media;pn_media_init(&media);assert(pn_media_attach(&media,123)==PN_OK);
  pn_upload_files_options_t options={.root=root};pn_transfer_worker_t worker={0};assert(pn_transfer_worker_open(&worker,&media,&options,6u*1024u*1024u,NULL,NULL,NULL)==PN_OK);
- pn_device_transfer_http_t server={0};assert(pn_device_transfer_http_open(&server,&worker,"192.168.4.1",80)==PN_OK);
+ pn_device_transfer_http_t server={0};discovery_fails=true;discovery_attempts=0;assert(pn_device_transfer_http_open(&server,&worker,"192.168.4.1",80)==PN_OK && server.impl);
+ assert(discovery_attempts==1 && !pn_device_transfer_http_localsend(&server) && discovery_attempts==1);now+=2000;assert(!pn_device_transfer_http_localsend(&server) && discovery_attempts==2);discovery_fails=false;now+=2000;assert(pn_device_transfer_http_localsend(&server) && discovery_attempts==3);
  int sockets[2];assert(socketpair(AF_UNIX,SOCK_STREAM,0,sockets)==0);assert(open_socket(&route,sockets[0])==ESP_OK);assert(write(sockets[1],"a",1)==1);char received;assert(receive(&route,sockets[0],&received,1,0)==1 && received=='a');
  cJSON *json=request(HTTP_GET,"/api/v1/status",NULL,0,NULL,NULL);assert(code==200 && json && !strcmp(cJSON_GetObjectItemCaseSensitive(json,"name")->valuestring,"PicoNano"));cJSON_Delete(json);
  pn_device_wifi_state_t radio={.phase=PN_WIFI_READY,.rssi_known=true,.rssi=-61,.disconnects=2,.reconnects=1,.last_disconnect_reason=201};strcpy(radio.ap_password,"private");

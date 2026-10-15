@@ -32,6 +32,8 @@ typedef struct {void *impl;} pn_device_wifi_t; ///< 活动会话不复制 / Neve
 /// 单owner打开，不取得TF租约；短暂SAR熵窗口必须在RF/ADC未使用时完成。
 /// Single-owner opening without TF leases; finish the brief SAR entropy window before RF/ADC use.
 pn_status_t pn_device_wifi_open(pn_device_wifi_t *,const pn_device_wifi_config_t *);
+/// 与open相同，失败清理后仍返回本次SDK错误；不含凭据。/ Same as open, retaining this attempt's SDK error after cleanup; no credentials.
+pn_status_t pn_device_wifi_open_detailed(pn_device_wifi_t *,const pn_device_wifi_config_t *,int *error);
 /// owner驱动连接/地址确认，回调只更新锁保护状态。/ Owner drives connection/address confirmation; callbacks update locked state only.
 pn_status_t pn_device_wifi_poll(pn_device_wifi_t *);
 /// 锁保护只读快照，不暴露STA口令。/ Locked read-only snapshot without exposing STA passwords.

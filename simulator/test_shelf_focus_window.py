@@ -13,7 +13,7 @@ with tempfile.TemporaryDirectory() as folder:
         frames=sorted(capture.glob('frame-*.pgm'));assert len(frames)>=5
         pixels=[p.read_bytes().split(b'\n',3)[3] for p in frames[-3:]];assert pixels[0]==pixels[2] and pixels[0]!=pixels[1]
         if mode=='grid':
-            for p in pixels[1:]:assert p[:284*684]==pixels[0][:284*684] and p[638*684:]==pixels[0][638*684:]
+            for p in pixels[1:]:assert p[:266*684]==pixels[0][:266*684] and p[528*684:]==pixels[0][528*684:]
         else:
             for p in pixels[1:]:
                 for y in range(1216):assert p[y*684:y*684+18]==pixels[0][y*684:y*684+18] and p[y*684+28:(y+1)*684]==pixels[0][y*684+28:(y+1)*684]

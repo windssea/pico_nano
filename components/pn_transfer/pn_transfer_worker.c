@@ -11,6 +11,7 @@
 #ifdef ESP_PLATFORM
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/idf_additions.h"
 #include "freertos/semphr.h"
 #include "esp_heap_caps.h"
 #else
@@ -110,8 +111,9 @@ static void run(worker_t *w){
  // Never access w after unlocking; FreeRTOS idle reclaims the stack after storage has stopped.
 }
 #ifdef ESP_PLATFORM
-static void entry(void *ctx){run(ctx);vTaskDelete(NULL);}
-static bool start(worker_t *w){return xTaskCreatePinnedToCore(entry,"pn_transfer",32768,w,4,&w->task,0)==pdPASS;}
+static void entry(void *ctx){run(ctx);vTaskDeleteWithCaps(NULL);}
+// 文件校验栈不占无线所需的内部连续堆；SDK配对释放外部栈。/ File validation stacks leave internal contiguous RAM for radio; use the SDK's paired stack deletion.
+static bool start(worker_t *w){return xTaskCreatePinnedToCoreWithCaps(entry,"pn_transfer",32768,w,4,&w->task,0,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT)==pdPASS;}
 #else
 static void *entry(void *ctx){run(ctx);return NULL;}
 static bool start(worker_t *w){return pthread_create(&w->task,NULL,entry,w)==0;}

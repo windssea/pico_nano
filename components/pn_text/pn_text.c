@@ -108,11 +108,24 @@ pn_status_t pn_text_seek(pn_text_reader_t *r,uint64_t offset) {
     *r=probe;return PN_OK;
 }
 
+pn_status_t pn_text_probe_range(pn_text_reader_t *reader,uint64_t stop,uint64_t *last,void (*point)(void *,uint64_t,bool),void *ctx){
+    if(!reader || !last || !reader->source.read_at || reader->encoding<PN_TEXT_UTF8 || reader->encoding>PN_TEXT_GBK || reader->cursor>reader->source.size || stop>reader->source.size)return PN_INVALID;
+    uint64_t stride=reader->source.size/510u+1u;
+    uint64_t checked=reader->cursor;
+    pn_status_t initial=pn_cancel_checkpoint();if(initial==PN_OK && reader->source.validate)initial=reader->source.validate(reader->source.ctx);if(initial!=PN_OK)return initial;
+    while(reader->cursor<stop){
+        // 整书探测每256字节检查取消/租约，仍完整严格解码；普通next契约保持。/ Check cancellation/lease every 256 bytes during full strict probing; ordinary next keeps its contract.
+        if(reader->cursor-checked>=256 || reader->cursor==reader->source.size){pn_status_t s=pn_cancel_checkpoint();if(s==PN_OK && reader->source.validate)s=reader->source.validate(reader->source.ctx);if(s!=PN_OK)return s;checked=reader->cursor;}
+        uint32_t cp;uint64_t end;pn_status_t status=scalar(reader,reader->cursor,&cp,&end);if(status!=PN_OK)return status;
+        if(cp==13){uint32_t next;uint64_t after;status=scalar(reader,end,&next,&after);if(status!=PN_OK && status!=PN_EMPTY && status!=PN_CORRUPT)return status;if(status==PN_OK && next==10)end=after;cp=10;}
+        reader->cursor=end;
+        if(reader->cursor<reader->source.size && reader->cursor-*last>=stride){*last=reader->cursor;if(point)point(ctx,*last,cp==10);}
+    }
+    pn_status_t status=pn_cancel_checkpoint();if(status==PN_OK && reader->source.validate)status=reader->source.validate(reader->source.ctx);return status;
+}
 static pn_status_t probe_scan(pn_text_reader_t *reader,void (*point)(void *,uint64_t,bool),void *ctx){
-    uint64_t last=reader->cursor,stride=reader->source.size/510u+1u;bool paragraph=true;if(point)point(ctx,last,paragraph);
-    pn_text_char_t character;pn_status_t status;
-    while((status=pn_text_next(reader,&character))==PN_OK){paragraph=character.codepoint==10;if(reader->cursor<reader->source.size && reader->cursor-last>=stride){last=reader->cursor;if(point)point(ctx,last,paragraph);}}
-    return status;
+    uint64_t last=reader->cursor;if(point)point(ctx,last,true);
+    pn_status_t s=pn_text_probe_range(reader,reader->source.size,&last,point,ctx);return s==PN_OK?PN_EMPTY:s;
 }
 static pn_status_t pn_text_probe_checkpoints_impl(const pn_text_source_t *source,uint64_t limit,pn_text_encoding_t *encoding,void (*point)(void *,uint64_t,bool),void *ctx) {
     if(!source || !source->read_at || !encoding)return PN_INVALID;

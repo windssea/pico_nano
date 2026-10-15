@@ -36,6 +36,8 @@ pn_status_t pn_text_file_cache_bind(const pn_text_source_t *,pn_pool_t *);
 pn_status_t pn_text_file_identity(const pn_text_source_t *,pn_book_id_t *);
 /// 用池内有界扫描缓冲核验并缓存当前打开源摘要；不跨句柄复用。/ Verify and cache the live source digest with a bounded pool buffer; never reuse across handles.
 pn_status_t pn_text_file_identity_pooled(pn_pool_t *,const pn_text_source_t *,pn_book_id_t *);
+/// 摘要读块同时严格探测编码/检查点，常见UTF编码只扫一次；GBK保持完整重试。/ Strictly probe encoding/checkpoints while reading digest blocks, scanning common UTF encodings once; GBK retains a complete retry.
+pn_status_t pn_text_file_inspect(pn_pool_t *,const pn_text_source_t *,pn_book_id_t *,pn_text_encoding_t *,void (*)(void *,uint64_t,bool),void *);
 /// 校验原已验证句柄仍有效；TF依靠独占所有权/READ租约，主机对句柄和现路径全SHA，不接受size/mtime命中。/ Verify the original validated handle: TF relies on exclusive ownership/READ leases; hosts hash both handle/current path completely, never accepting size/mtime hits.
 pn_status_t pn_text_file_verify_retained(pn_pool_t *,const pn_text_source_t *);
 /// 与源接口相同，但直接校验稳定文件对象。/ Same retained-source check through a stable file object.

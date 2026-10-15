@@ -22,6 +22,7 @@ typedef struct {
     int indent; ///< 段首缩进像素 / Paragraph indentation pixels
     int paragraph_gap; ///< 换段额外间距 / Extra paragraph gap
     int32_t letter_spacing_64; ///< 字间额外26.6间距，0..4096 / Extra inter-glyph spacing in 26.6 units, zero through 4096
+    bool compact_paragraphs; ///< TXT忽略重复空行的额外高度，源字符仍保留 / TXT collapses repeated blank-line height while retaining source characters
 } pn_layout_t;
 typedef struct {
     pn_text_char_t source; ///< 字符与原文件范围 / Character and original range

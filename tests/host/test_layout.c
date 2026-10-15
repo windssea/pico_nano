@@ -49,5 +49,10 @@ int main(void){
         for(;;){pn_status_t status=pn_text_paginate(&reader,&layout,&metrics,para,&page);if(status==PN_EMPTY)break;assert(status==PN_OK && page.count && page.valid);for(size_t i=0;i<page.count;i++){assert(seen<sizeof input);assert(page.glyphs[i].source.codepoint==input[seen]);assert(page.glyphs[i].source.begin==seen && page.glyphs[i].source.end==seen+1);seen++;}para=page.next_paragraph_start;}
         assert(seen==sizeof input);
     }
-    puts("layout: page source continuity, word wrap, capacity and oversized glyph passed");return 0;
+    const uint8_t compact[]="AB\n\n\nC";m=(memory_t){compact,sizeof compact-1};source.size=m.size;assert(pn_text_open(&reader,&source,PN_TEXT_UTF8)==PN_OK);
+    layout=(pn_layout_t){.width=100,.height=100,.line_height=10,.ascent=8,.paragraph_gap=3,.compact_paragraphs=true};page.capacity=100;
+    assert(pn_text_paginate(&reader,&layout,&metrics,true,&page)==PN_OK && page.count==sizeof compact-1 && page.end==sizeof compact-1 && glyphs[5].baseline==21);
+    uint8_t blank[5000];memset(blank,10,sizeof blank);m=(memory_t){blank,sizeof blank};source.size=m.size;assert(pn_text_open(&reader,&source,PN_TEXT_UTF8)==PN_OK);size_t consumed=0;
+    for(;;){pn_status_t s=pn_text_paginate(&reader,&layout,&metrics,true,&page);if(s==PN_EMPTY)break;assert(s==PN_OK && page.count && page.end>page.begin);consumed+=page.count;}assert(consumed==sizeof blank);
+    puts("layout: page source continuity, word wrap, compact blank paragraphs, capacity and oversized glyph passed");return 0;
 }

@@ -91,7 +91,7 @@ with tempfile.TemporaryDirectory() as folder:
     assert queue(cancel=True)==expected
     w,h,p=pgm(root/'shelf.pgm');assert (w,h)==(684,1216)
     # 第一行封面槽左半为黑，证明缩略图被绘入书架。/ Left half of the first slot is black, proving the thumbnail reached the shelf.
-    assert p[(284+H//2)*684+32+10]==0 and p[(284+H//2)*684+32+W-14]==15
+    assert p[(266+210//2)*684+44+10]==0 and p[(266+210//2)*684+44+152-14]==15
     plain=p
 
     # 缓存：首次写入全部六条内容结论，父目录按需创建，无临时残留。/ Cache: first run stores all six content outcomes, creating parents, leaving no temporaries.

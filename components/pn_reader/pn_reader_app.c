@@ -83,7 +83,7 @@ static void suspend_fonts(app_t *a){pn_font_chain_suspend(&a->chain);pn_font_clo
 static pn_status_t font_write(app_t *,const pn_font_preferences_t *);
 static pn_status_t global_write(app_t *,const pn_font_preferences_t *);
 static pn_status_t advance(void *ctx,uint32_t cp,int32_t *width){app_t *a=ctx;pn_status_t s=pn_font_chain_advance(chain(a),cp,width);if(s==PN_EMPTY){*width=body(a)->pixels*64;return PN_OK;}return s;}
-static pn_status_t layout(app_t *a,pn_layout_t *out){int ascent,descent;pn_status_t s=pn_font_chain_vertical(chain(a),&ascent,&descent);if(s!=PN_OK)return s;int line=(body(a)->pixels*a->style.line_percent+99)/100;if(line<ascent+descent)line=ascent+descent;*out=(pn_layout_t){684-2*a->style.margin,PN_READER_HEIGHT,line,ascent,body(a)->pixels*a->style.indent_em,body(a)->pixels*a->style.gap_percent/100,body(a)->pixels*64*a->style.tracking_percent/100};return PN_OK;}
+static pn_status_t layout(app_t *a,pn_layout_t *out){int ascent,descent;pn_status_t s=pn_font_chain_vertical(chain(a),&ascent,&descent);if(s!=PN_OK)return s;int line=(body(a)->pixels*a->style.line_percent+99)/100;if(line<ascent+descent)line=ascent+descent;*out=(pn_layout_t){684-2*a->style.margin,PN_READER_HEIGHT,line,ascent,body(a)->pixels*a->style.indent_em,body(a)->pixels*a->style.gap_percent/100,body(a)->pixels*64*a->style.tracking_percent/100,true};return PN_OK;}
 /// 展示进度与持久锚点分开：末页显示100%，其余按页首字节估算。/ Display progress is separate from the durable anchor: 100% on the final page, otherwise estimated from its first byte.
 static unsigned progress_basis(const app_t *a,pn_reader_anchor_t anchor){
     uint64_t size=a->reader.decoder.source.size;
@@ -182,8 +182,7 @@ static pn_status_t pn_reader_app_open_on_media_impl(pn_reader_app_t *app,pn_pool
     pn_text_source_t source={0},font_source=pn_font_reading_source();pn_text_encoding_t encoding;
     if(status==PN_OK)status=pn_media_acquire(a->book_media,PN_MEDIA_READ,&a->book_lease);
     if(status==PN_OK)status=pn_text_file_open(&a->book_file,a->book_media,&a->book_lease,book_path,&source);
-    if(status==PN_OK)status=pn_text_file_identity_pooled(pool,&source,&a->book);
-    if(status==PN_OK)status=pn_text_probe_checkpoints(&source,PN_TEXT_FILE_MAX_BYTES,&encoding,decoder_checkpoint,a);
+    if(status==PN_OK)status=pn_text_file_inspect(pool,&source,&a->book,&encoding,decoder_checkpoint,a);
     if(status==PN_OK && state_dir)status=open_state(a,state_dir,now);
     pn_font_preferences_t selected_fonts={0};bool has_selected_fonts=false,fonts_from_book=false;
     if(status==PN_OK && a->persistent){pn_journal_files_t global_files,book_files;pn_journal_io_t global_io,book_io;
@@ -307,7 +306,8 @@ static pn_status_t index_layout(app_t *a){
     if(!a->persistent || a->index_generation==a->reader.token.generation)return PN_OK;
     a->reader.index=NULL;pn_page_index_close(&a->page_index);
     pn_text_source_t source;pn_book_id_t key;pn_status_t s=body_source(a,&source);
-    if(s==PN_OK)s=pn_page_index_key(&a->book,&a->style,&source,chain(a),(unsigned)a->reader.decoder.encoding,&key);
+    // TXT空行策略独立换键，不失效EPUB的既有布局索引。/ Version TXT blank-line policy independently, preserving existing EPUB layout indexes.
+    if(s==PN_OK)s=pn_page_index_key(&a->book,&a->style,&source,chain(a),(unsigned)a->reader.decoder.encoding|0x100u,&key);
     if(s==PN_OK)s=pn_page_index_open(&a->page_index,a->pool,&a->state_media,&a->state_lease,a->state_directory,&a->book,&key);
     if(s==PN_CANCELLED || s==PN_STALE_MEDIA)return s;
     a->index_generation=a->reader.token.generation;if(s==PN_OK)a->reader.index=&a->page_index;return PN_OK;

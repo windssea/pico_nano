@@ -17,6 +17,7 @@ static void *wifi_ctx,*ip_ctx;
 static wifi_mode_t network_mode;
 static unsigned connection_calls;
 static bool radio;
+static bool radio_init_fails;
 static _Atomic bool card_present=true;
 esp_err_t read_pico_sd_get_info(read_pico_sd_info_t *out){bool present=card_present;*out=(read_pico_sd_info_t){.present=present,.mounted=present};return present?ESP_OK:ESP_ERR_NOT_FOUND;}
 esp_err_t esp_vfs_fat_info(const char *root,uint64_t *total,uint64_t *free_bytes){assert(root);*total=128u*1024u*1024u;*free_bytes=64u*1024u*1024u;return ESP_OK;}
@@ -38,7 +39,7 @@ esp_err_t esp_wifi_clear_default_wifi_driver_and_handlers(void *netif){assert(ne
 esp_err_t esp_netif_get_ip_info(esp_netif_t *netif,esp_netif_ip_info_t *out){assert(netif);uint8_t *ip=(uint8_t *)&out->ip.addr;ip[0]=192;ip[1]=168;ip[2]=4;ip[3]=1;return ESP_OK;}
 esp_err_t esp_event_handler_instance_register(esp_event_base_t base,int32_t id,esp_event_handler_t fn,void *ctx,esp_event_handler_instance_t *instance){(void)id;if(base==WIFI_EVENT){wifi_callback=fn;wifi_ctx=ctx;}else{ip_callback=fn;ip_ctx=ctx;}*instance=(void *)1;return ESP_OK;}
 esp_err_t esp_event_handler_instance_unregister(esp_event_base_t base,int32_t id,esp_event_handler_instance_t instance){(void)id;(void)instance;if(base==WIFI_EVENT)wifi_callback=NULL;else ip_callback=NULL;return ESP_OK;}
-esp_err_t esp_wifi_init(const wifi_init_config_t *config){assert(!config->nvs_enable);radio=true;return ESP_OK;}
+esp_err_t esp_wifi_init(const wifi_init_config_t *config){assert(!config->nvs_enable);if(radio_init_fails)return 0x101;radio=true;return ESP_OK;}
 esp_err_t esp_wifi_set_storage(int storage){assert(storage==WIFI_STORAGE_RAM);return ESP_OK;}
 esp_err_t esp_wifi_set_mode(wifi_mode_t value){assert(value==WIFI_MODE_AP || value==WIFI_MODE_STA);network_mode=value;return ESP_OK;}
 esp_err_t esp_wifi_set_config(wifi_interface_t iface,const wifi_config_t *config){assert(iface==WIFI_IF_AP?config->ap.authmode==WIFI_AUTH_WPA2_PSK:iface==WIFI_IF_STA);return ESP_OK;}
@@ -80,6 +81,7 @@ int main(void){
  json=request(HTTP_GET,retained,NULL,0,automatic,NULL);assert(code==200 && cJSON_GetObjectItemCaseSensitive(json,"next_offset")->valueint==PN_UPLOAD_CHUNK);cJSON_Delete(json);
  assert(pn_device_transfer_request_stop(&session)==PN_OK);wait_for(&session,0);assert(pn_device_transfer_close(&session)==PN_OK && !native_allocations);
  config.mode=PN_WIFI_AP;
+ radio_init_fails=true;assert(pn_device_transfer_open(&session,&media,root,&config)==PN_OK);state=wait_for(&session,0);assert(state.phase==PN_DTRANSFER_FAILED && state.stage==2 && state.error==PN_IO && state.network.error==0x101 && state.network.mode==PN_WIFI_AP);assert(pn_device_transfer_close(&session)==PN_OK && !native_allocations && !radio && !pn_media_active(&media));radio_init_fails=false;
  assert(pn_device_transfer_open(&session,&media,root,&config)==PN_OK);wait_for(&session,true);card_present=false;state=wait_for(&session,false);assert(state.phase==PN_DTRANSFER_FAILED && state.error==PN_STALE_MEDIA);assert(pn_device_transfer_close(&session)==PN_OK && !native_allocations && !pn_media_active(&media));
  assert(!pool.used && !pool.live);puts("Transfer supervisor: reader progress, TF handoff, automatic session, STA reconnect with persisted chunk, stop return and card-loss drain passed");return 0;
 }

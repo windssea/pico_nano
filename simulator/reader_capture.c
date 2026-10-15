@@ -47,7 +47,7 @@ pn_status_t pn_sim_reader_prepare(pn_display_t *display,pn_job_token_t token,pn_
     int ascent=0,descent=0;
     if(status==PN_OK)status=pn_font_chain_vertical(&chain,&ascent,&descent);
     int line=(pixels*145+99)/100;if(line<ascent+descent)line=ascent+descent;
-    pn_layout_t layout={620,1020,line,ascent,0,pixels/4,0};pn_font_metrics_t metrics={&chain,advance};
+    pn_layout_t layout={620,1020,line,ascent,0,pixels/4,0,false};pn_font_metrics_t metrics={&chain,advance};
     pn_text_page_t page={.glyphs=glyphs,.capacity=PN_PAGE_GLYPHS_MAX};bool paragraph=true;
     for(unsigned n=1;status==PN_OK && n<=requested;n++){status=pn_text_paginate(&reader,&layout,&metrics,paragraph,&page);paragraph=page.next_paragraph_start;}
     if(status==PN_OK)status=pn_display_begin_draw(display,token,&draw,&frame);

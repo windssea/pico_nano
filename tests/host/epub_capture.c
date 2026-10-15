@@ -51,7 +51,7 @@ int main(int argc,char **argv){
     if(status==PN_OK)status=pn_text_file_open(&font_file,&media,&font_lease,argv[2],&font_source);
     if(status==PN_OK)status=pn_font_open(&font.font,&pool,&font_source,pixels);
     if(status==PN_OK){nodes=pn_alloc(&pool,PN_PAGE_GLYPHS_MAX*sizeof *nodes);images=pn_alloc(&pool,PN_EPUB_PAGE_IMAGES_MAX*sizeof *images);bytes=pn_alloc(&pool,684*1216/2);if(!nodes || !images || !bytes)status=PN_NO_MEMORY;}
-    pn_xhtml_position_t cursor={0};bool resume=false;pn_layout_t layout={620,960,(pixels*145+99)/100,pixels,0,pixels/4,0};pn_epub_measure_t metrics={&font,measure,image_measure};
+    pn_xhtml_position_t cursor={0};bool resume=false;pn_layout_t layout={620,960,(pixels*145+99)/100,pixels,0,pixels/4,0,false};pn_epub_measure_t metrics={&font,measure,image_measure};
     page=(pn_epub_page_t){.nodes=nodes,.capacity=PN_PAGE_GLYPHS_MAX,.images=images,.image_capacity=PN_EPUB_PAGE_IMAGES_MAX};
     for(unsigned long i=1;status==PN_OK && i<=requested;i++){
         status=pn_epub_page_prepare(&pool,&epub,item.path,salt,resume?&cursor:NULL,&layout,&metrics,&page);

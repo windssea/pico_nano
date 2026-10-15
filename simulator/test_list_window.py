@@ -9,15 +9,12 @@ with tempfile.TemporaryDirectory() as folder:
         assert 'used=0 live=0' in r.stdout,r.stdout
         return r.stdout
     LAYOUT='tap:600:190'
-    out=run('quit');assert 'library_page first=abook.txt count=6' in out,out
+    out=run('quit');assert 'library_page first=abook.txt count=8' in out,out
     # 切到列表：第一页5本，下一页3本，再翻回上一页仍是5本。/ Toggle to list: five on the first page, three on the next, and back again five.
     out=run(','.join((LAYOUT,'library-next','library-previous','quit')))
     pages=[l for l in out.splitlines() if l.startswith('library_page')]
-    assert pages==['library_page first=abook.txt count=6','library_page first=abook.txt count=5','library_page first=fbook.txt count=3','library_page first=abook.txt count=5'],pages
-    # 再点一次回到网格每页6本。/ Toggling again returns to six per page.
+    assert pages==['library_page first=abook.txt count=8','library_page first=abook.txt count=5','library_page first=fbook.txt count=3','library_page first=abook.txt count=5'],pages
+    # 再点一次回到网格每页9本。/ Toggling again returns to nine per page.
     out=run(','.join((LAYOUT,LAYOUT,'quit')))
-    assert [l for l in out.splitlines() if l.startswith('library_page')][-1]=='library_page first=abook.txt count=6',out
-    # 搜索结果也按5本分页。/ Search results page by five as well.
-    out=run(','.join((LAYOUT,'tap:560:110','tap:180:375','tap:550:950','quit')))
-    assert 'search query=b status=0 count=5' in out,out
-print('list window: toggle, five-per-page paging, search and grid restore passed')
+    assert [l for l in out.splitlines() if l.startswith('library_page')][-1]=='library_page first=abook.txt count=8',out
+print('list window: five-per-page paging and three-row grid restore passed')

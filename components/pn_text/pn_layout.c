@@ -39,11 +39,17 @@ pn_status_t pn_text_paginate(pn_text_reader_t *reader,const pn_layout_t *layout,
             page->count=cut;y+=layout->line_height;x=0;line_start=page->count;last_space=SIZE_MAX;next_paragraph=false;
             continue;
         }
-        if(page->count==page->capacity)return failure(page,PN_LIMIT);
+        if(page->count==page->capacity){if(layout->compact_paragraphs){work.cursor=character.begin;break;}return failure(page,PN_LIMIT);}
         page->glyphs[page->count]=(pn_page_glyph_t){character,x,y+layout->ascent,advance};
         if(character.codepoint==' ' || character.codepoint==9)last_space=page->count;
         page->count++;x+=advance;if(character.codepoint!=10)x+=layout->letter_spacing_64;next_paragraph=false;
-        if(character.codepoint==10){y+=layout->line_height+layout->paragraph_gap;x=layout->indent*64;line_start=page->count;last_space=SIZE_MAX;next_paragraph=true;}
+        if(character.codepoint==10){
+            // 原文空行仅作分段，不再与用户段距叠加；保留换行节点及字节范围。/ Blank source lines mark paragraphs without stacking onto user spacing; retain newline nodes and byte ranges.
+            bool blank=layout->compact_paragraphs;
+            for(size_t i=line_start;blank && i+1<page->count;i++){uint32_t c=page->glyphs[i].source.codepoint;if(c!=' ' && c!=9 && c!=0x3000)blank=false;}
+            if(!blank)y+=layout->line_height+layout->paragraph_gap;
+            x=layout->indent*64;line_start=page->count;last_space=SIZE_MAX;next_paragraph=true;
+        }
     }
     if(!page->count)return PN_EMPTY;
     page->end=work.cursor;page->next_paragraph_start=next_paragraph;page->valid=true;*reader=work;return PN_OK;

@@ -15,7 +15,7 @@ static pn_status_t no_space(void *ctx,uint64_t *available){(void)ctx;*available=
 int main(void){
     char root[]="/tmp/pn-pages-XXXXXX";assert(mkdtemp(root));pn_pool_t pool;assert(!pn_pool_init(&pool,128*1024,NULL,NULL,NULL));pn_media_t media;pn_media_init(&media);pn_media_lease_t lease;assert(!pn_media_attach(&media,1) && !pn_media_acquire(&media,PN_MEDIA_WRITE,&lease));
     pn_book_id_t book={{42}},key={{1}};pn_page_index_t index={0};assert(!pn_page_index_open(&index,&pool,&media,&lease,root,&book,&key));
-    counters_t c={0};pn_text_source_t source={&c,20u*1024u*1024u,read_at,NULL};pn_layout_t layout={25,20,10,8,0,0,0};pn_font_metrics_t metrics={&c,measure};pn_page_glyph_t nodes[100];pn_reader_t reader;pn_reader_receipt_t receipt;uint64_t time=1;
+    counters_t c={0};pn_text_source_t source={&c,20u*1024u*1024u,read_at,NULL};pn_layout_t layout={25,20,10,8,0,0,0,false};pn_font_metrics_t metrics={&c,measure};pn_page_glyph_t nodes[100];pn_reader_t reader;pn_reader_receipt_t receipt;uint64_t time=1;
     assert(!pn_reader_init(&reader,&source,PN_TEXT_UTF8,&book,&layout,&metrics,nodes,100,(pn_job_token_t){1,1},NULL));reader.index=&index;
     assert(!pn_reader_prepare(&reader,PN_READ_JUMP,source.size-8000,&receipt) && !pn_reader_complete(&reader,&receipt,true,time++));
     for(unsigned j=0;j<600;j++)assert(!pn_reader_prepare(&reader,PN_READ_NEXT,0,&receipt) && !pn_reader_complete(&reader,&receipt,true,time++));

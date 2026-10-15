@@ -7,14 +7,14 @@
 #include "pn_shelf_prefs.h"
 #define PN_SHELF_PREVIOUS 40
 #define PN_SHELF_NEXT 41
-#define PN_SHELF_TOGGLE 8
+#define PN_SHELF_TOGGLE 43
 #define PN_SHELF_READING_HOME 42 ///< 独立阅读首页 / Independent reading home
-#define PN_SHELF_CONTINUE 9 ///< 点继续阅读卡 / Tap the continue-reading card
+#define PN_SHELF_CONTINUE 44 ///< 点继续阅读卡 / Tap the continue-reading card
 /// 绘制六行文字/无封面卡，纯绘制，不打开书籍或修改状态。
 /// Draw six text/cover-fallback rows only, without opening books or changing state.
 pn_status_t pn_shelf_render(const pn_catalog_page_t *page,pn_font_t *font,pn_frame_t *frame);
-/// 命中已存在的条目/两个翻页控件，否则-1。
-/// Hit existing entries or the two page controls, otherwise -1.
+/// 命中已存在的条目或导航，否则-1；分页由内容手势输出命令。
+/// Hit existing entries or navigation, otherwise -1; content gestures emit paging commands.
 int pn_shelf_hit(const pn_catalog_page_t *page,int x,int y);
 
 /// 可选键盘选中行，-1表示无选中。/ Optional keyboard-selected row; -1 means none.
@@ -30,9 +30,19 @@ pn_status_t pn_shelf_render_mode(const pn_catalog_page_t *page,pn_font_t *font,p
 #define PN_SHELF_TAB_RECENT 19 ///< 点“最近” / Tap Recent
 #define PN_SHELF_SEARCH 20 ///< 点“搜索” / Tap Search
 #define PN_SHELF_TAB_FAVORITES 23 ///< 点“收藏” / Tap Favorites
-#define PN_SHELF_MORE 24 ///< 24+序号：该书的“⋯”（书籍操作）/ 24+index: that book's "⋯" (book actions)
+#define PN_SHELF_MORE 24 ///< 24+序号：长按该书的操作菜单 / 24+index: long-press book actions
 #define PN_SHELF_IMPORT 22 ///< 点“导入图书”（进入传书）/ Tap "import books" (opens transfer)
 #define PN_SHELF_LAYOUT 21 ///< 点网格/列表切换 / Tap the grid/list toggle
+/// 内容手势只输出命令，不绘制或访问存储；跨页保持至释放。/ Content gestures emit commands only, without drawing/storage; retain across page changes until release.
+typedef struct {
+    int x,y,last_x,last_y,hit; ///< 起点、终点和初始书籍 / Origin, endpoint and original book
+    uint64_t began; ///< 单调按下时间 / Monotonic press time
+    unsigned empty; ///< 释放确认样本数 / Release confirmation sample count
+    bool down,blocked,claimed,moved,swipe; ///< 接触所有权与取消状态 / Contact ownership and cancellation state
+} pn_shelf_gesture_t;
+/// active仅普通书架内容，swipe在首页关闭；book仅0..PAGE_MAX-1。返回是否消费，command仅触发时改写。
+/// Active only for ordinary shelf content; disable swipe on home. Book is 0..PAGE_MAX-1. Return consumption; change command only on activation.
+bool pn_shelf_gesture_feed(pn_shelf_gesture_t *,bool active,bool swipe,unsigned count,int x,int y,bool valid,int book,uint64_t now,int *command);
 /// 书架的可选外观与入口；全零（battery_percent=-1）等价于旧行为。
 /// Optional shelf appearance and entries; all-zero with battery_percent=-1 matches the legacy behaviour.
 typedef struct {
@@ -47,7 +57,7 @@ typedef struct {
     bool favorites; ///< 当前为收藏视图 / Showing the favorites view
     bool import_tile; ///< 最后一页空格放“导入图书”卡、空书架给“导入图书”按钮 / An import tile in a free last-page slot and an import button on an empty shelf
     bool layout_toggle; ///< 显示网格/列表切换 / Show the grid/list toggle
-    bool search; ///< 显示“搜索”入口 / Show the Search entry
+    bool search; ///< 兼容保留，书架不提供搜索入口 / Retained for compatibility; no shelf search entry
     bool query; ///< 当前为搜索结果，标题改为“搜索结果”、入口改为“清除” / Showing search results: heading says results and the entry says Clear
 } pn_shelf_options_t;
 /// 同源的可见容量与样式缩略预览，纯绘制。/ Shared visible capacity and miniature style preview; drawing only.

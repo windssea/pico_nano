@@ -39,6 +39,7 @@ typedef struct {
  const pn_device_network_sink_t *network;
  pn_pool_t ls_pool;pn_ls_session_t ls;char fingerprint[33];uint16_t port; ///< 单HTTP owner的LocalSend会话 / LocalSend session owned by the single HTTP task
  pn_device_ls_discovery_t discovery; ///< 生命周期先于HTTP上下文结束 / Ends before the HTTP context is released
+ bool discovery_ready;uint64_t discovery_retry; ///< 发现故障不关闭网页，限频重试 / Discovery failures keep the web service alive with bounded retries
  pn_ls_request_t ls_request;pn_ls_snapshot_t ls_snapshot;pn_ls_grants_t ls_grants; ///< 串行复用PSRAM模型，避免撑满HTTP任务栈 / Serially reused PSRAM models avoid exhausting the HTTP task stack
  uint8_t bytes[PN_UPLOAD_CHUNK+1];
 } http_t;
@@ -370,8 +371,14 @@ pn_status_t pn_device_transfer_http_open(pn_device_transfer_http_t *out,pn_trans
  if(result==ESP_OK){const int methods[]={HTTP_GET,HTTP_POST,HTTP_PUT,HTTP_DELETE};for(unsigned i=0;i<4;i++){httpd_uri_t uri={.uri="/*",.method=methods[i],.handler=dispatch,.user_ctx=s};result=httpd_register_uri_handler(s->server,&uri);if(result!=ESP_OK)break;}}
  if(result!=ESP_OK){(void)pn_device_transfer_http_request_stop(out);if(s->server && httpd_stop(s->server)!=ESP_OK)return PN_IO;(void)pn_ls_stop_after_join(&s->ls);(void)pn_ls_session_close(&s->ls);vSemaphoreDelete(s->auth);heap_caps_free(s);out->impl=NULL;return PN_IO;}
  char address[64];snprintf(address,sizeof address,"%s",authority);char *colon=strchr(address,':');if(colon)*colon=0;
- pn_status_t discovery=pn_device_ls_discovery_open(&s->discovery,address,port,s->fingerprint);if(discovery!=PN_OK){(void)pn_device_transfer_http_close(out);return discovery;}
+ pn_status_t discovery=pn_device_ls_discovery_open(&s->discovery,address,port,s->fingerprint);s->discovery_ready=discovery==PN_OK;s->discovery_retry=now_ms()+2000;
  return PN_OK;
+}
+bool pn_device_transfer_http_localsend(pn_device_transfer_http_t *out){
+ if(!out || !out->impl)return false;
+ http_t *s=out->impl;
+ if(!s->discovery_ready && !is_closing(s) && now_ms()>=s->discovery_retry){char address[64];strcpy(address,s->authority);char *colon=strchr(address,':');if(colon)*colon=0;s->discovery_ready=pn_device_ls_discovery_open(&s->discovery,address,s->port,s->fingerprint)==PN_OK;s->discovery_retry=now_ms()+2000;}
+ return s->discovery_ready;
 }
 pn_status_t pn_device_transfer_http_request_stop(pn_device_transfer_http_t *out){if(!out || !out->impl)return PN_INVALID;http_t *s=out->impl;lock(s);s->closing=true;memset(s->token,0,sizeof s->token);unlock(s);return pn_transfer_worker_request_stop(s->worker);}
 pn_status_t pn_device_transfer_http_diagnostics(pn_device_transfer_http_t *out,const pn_device_wifi_state_t *state){if(!out || !out->impl || !state)return PN_INVALID;http_t *s=out->impl;lock(s);s->diagnostics.ready=state->phase==PN_WIFI_READY;s->diagnostics.rssi_known=state->rssi_known;s->diagnostics.rssi=state->rssi;s->diagnostics.disconnects=state->disconnects;s->diagnostics.reconnects=state->reconnects;s->diagnostics.reason=state->last_disconnect_reason;unlock(s);return PN_OK;}

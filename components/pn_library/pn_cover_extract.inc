@@ -77,7 +77,13 @@ static pn_status_t cover_extract_step(cover_extract_t *j){
         j->scratch_pixels=pn_alloc_tagged(&j->sub,PN_MEM_UI,bytes);if(!j->scratch_pixels){cover_extract_image_done(j,PN_NO_MEMORY);break;}
         (void)pn_frame_bind(&j->scratch,j->scratch_pixels,bytes,sw,sh);pn_frame_clear(&j->scratch,15);s=source_open(&j->source,&j->input);
         if(s==PN_OK)s=pn_image_job_begin(&j->image,&j->sub,&j->input,&j->scratch,(pn_image_rect_t){0,0,sw,sh});
-        if(s==PN_OK)j->phase=CEX_DRAW;else cover_extract_image_done(j,s);break;
+        if(s==PN_OK){
+            // 元数据已复制，资源流只借ZIP；解码前释放OPF模型给大JPEG系数让位。/ Metadata is copied and the resource stream borrows only ZIP; release the OPF model before decoding to leave room for large JPEG coefficients.
+            if(j->source.epub)pn_epub_close(&j->epub);
+            // 顺序图片流无需保留元信息读取块；避免JPEG误走被禁止的磁盘后备。/ Sequential image streams need no metadata read blocks; avoid forcing JPEG into forbidden disk backing.
+            (void)pn_cache_reclaim(&j->sub,SIZE_MAX);
+            j->phase=CEX_DRAW;
+        }else cover_extract_image_done(j,s);break;
     }
     case CEX_DRAW:
         s=pn_image_job_step(&j->image,&j->image_info);

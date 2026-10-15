@@ -10,7 +10,7 @@ static pn_status_t glyph(void *ctx,uint32_t cp,const pn_xhtml_style_t *style,pn_
 static pn_status_t image(void *ctx,const char *path,int maxw,int maxh,int *w,int *h){(void)ctx;(void)path;(void)maxw;(void)maxh;*w=20;*h=30;return PN_OK;}
 static pn_status_t wide_image(void *ctx,const char *path,int maxw,int maxh,int *w,int *h){(void)ctx;(void)path;(void)maxh;*w=maxw;*h=30;return PN_OK;}
 static pn_status_t mixed_height(void *ctx,uint32_t cp,const pn_xhtml_style_t *style,pn_epub_metrics_t *m){(void)ctx;(void)style;*m=(pn_epub_metrics_t){.advance_64=10*64,.ascent=cp=='A'?16:3,.descent=cp=='A'?3:16,.line_height=19,.pixels=16};return PN_OK;}
-static pn_status_t run(pn_pool_t *p,const char *xml,const pn_xhtml_position_t *start,pn_epub_page_t *page,int height){input_t i={xml,0};pn_xml_input_t input={&i,read_input};uint8_t salt[16]={1};pn_layout_t layout={50,height,20,12,0,0,0};pn_epub_measure_t measure={NULL,glyph,NULL};return pn_epub_page_input(p,&input,"OPS/a.xhtml",salt,start,&layout,&measure,page);}
+static pn_status_t run(pn_pool_t *p,const char *xml,const pn_xhtml_position_t *start,pn_epub_page_t *page,int height){input_t i={xml,0};pn_xml_input_t input={&i,read_input};uint8_t salt[16]={1};pn_layout_t layout={50,height,20,12,0,0,0,false};pn_epub_measure_t measure={NULL,glyph,NULL};return pn_epub_page_input(p,&input,"OPS/a.xhtml",salt,start,&layout,&measure,page);}
 int main(void){
     // 自有缓冲增长/复用/失败保留，固定调用方数组不得被接管。/ Owned growth/reuse/failure retention; never adopt fixed caller arrays.
     pn_pool_t owned_pool;assert(!pn_pool_init(&owned_pool,1024*1024,NULL,NULL,NULL));pn_epub_page_t owned={0};
@@ -30,7 +30,7 @@ int main(void){
     assert(run(&pool,mixed,NULL,&page,40)==PN_OK && page.count==3 && nodes[2].position.element<nodes[1].position.element);
     begin=nodes[2].position;assert(run(&pool,mixed,&begin,&page,40)==PN_OK && page.count==1 && nodes[0].codepoint=='C');
     assert(run(&pool,"<html xmlns='http://www.w3.org/1999/xhtml'><body><img src='a.png'/></body></html>",NULL,&page,40)==PN_UNSUPPORTED && !page.valid && !page.count);
-    input_t input_data={"<html xmlns='http://www.w3.org/1999/xhtml'><body><p>A<img src='a.png'/>B</p></body></html>",0};pn_xml_input_t input={&input_data,read_input};uint8_t salt[16]={1};pn_layout_t layout={50,40,20,12,0,0,0};pn_epub_measure_t measures={NULL,glyph,image};pn_epub_page_image_t images[2];page.images=images;page.image_capacity=2;
+    input_t input_data={"<html xmlns='http://www.w3.org/1999/xhtml'><body><p>A<img src='a.png'/>B</p></body></html>",0};pn_xml_input_t input={&input_data,read_input};uint8_t salt[16]={1};pn_layout_t layout={50,40,20,12,0,0,0,false};pn_epub_measure_t measures={NULL,glyph,image};pn_epub_page_image_t images[2];page.images=images;page.image_capacity=2;
     assert(pn_epub_page_input(&pool,&input,"OPS/a.xhtml",salt,NULL,&layout,&measures,&page)==PN_OK && page.count==3 && page.image_count==1 && nodes[0].baseline==30 && nodes[2].baseline==30);
     assert(!strcmp(images[0].path,"OPS/a.png") && nodes[1].image_index==0);
     // 满宽段首图片必须为首行缩进留位置，否则冷上一页会卡在此页。/ A full-width paragraph image must reserve first-line indent, or cold previous turns get stuck here.

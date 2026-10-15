@@ -18,36 +18,36 @@ int main(void){
      pn_frame_clear(&frame,15);assert(pn_font_size(&outer.resident,24)==PN_OK && pn_font_draw(&outer.resident,&frame,cp,32*64,80,PN_FONT_GRAY)==PN_OK);
      assert(!memcmp(before,bytes,684*1216/2));pn_w_font_scope_end(&outer);pn_w_font_scope_end(&outer);}
     pn_catalog_page_t *p=calloc(1,sizeof *p);pn_shelf_covers_t *covers=calloc(1,sizeof *covers);assert(p && covers);
-    p->count=8;p->total=18;p->more=true;
-    for(size_t i=0;i<8;i++){snprintf(p->items[i].name,sizeof p->items[i].name,"Book %zu.epub",i);snprintf(p->items[i].path,sizeof p->items[i].path,"/books/%zu.epub",i);p->items[i].format=PN_BOOK_EPUB;}
+    p->count=12;p->total=18;p->more=true;
+    for(size_t i=0;i<12;i++){snprintf(p->items[i].name,sizeof p->items[i].name,"Book %zu.epub",i);snprintf(p->items[i].path,sizeof p->items[i].path,"/books/%zu.epub",i);p->items[i].format=PN_BOOK_EPUB;}
     strcpy(p->items[0].name,"一本很长很长很长很长的中文文件名.epub");
     /* 密度与装饰不改变选择身份，也不碰游标文件名。/ Density and decoration preserve selection identity and cursor filenames. */
     for(unsigned cols=3;cols<=4;cols++)for(unsigned style=0;style<PN_SHELF_STYLE_COUNT;style++){
         pn_shelf_options_t o={.columns=cols,.style=style,.search=true,.layout_toggle=true,.favorites_tab=true};
-        assert(pn_shelf_capacity(&o)==cols*2);
+        assert(pn_shelf_capacity(&o)==cols*3);
         assert(pn_shelf_render_ex(p,&font,&frame,-1,false,true,covers,&o)==PN_OK && font.pixels==24);
         memcpy(before,bytes,684*1216/2);
         assert(pn_shelf_render_ex(p,&font,&frame,0,false,true,covers,&o)==PN_OK);
-        int pitch=cols==4?162:222,w=cols==4?134:176,h=cols==4?186:244,y0=cols==4?308:284;
-        for(unsigned i=0;i<cols*2;i++){
-            int x=32+(int)(i%cols)*pitch,y=y0+(int)(i/cols)*354;
+        int pitch=cols==4?162:222,w=cols==4?134:152,h=cols==4?186:210,y0=cols==4?278:266;
+        for(unsigned i=0;i<cols*3;i++){
+            int x=32+(cols==3?12:0)+(int)(i%cols)*pitch,y=y0+(int)(i/cols)*262;
             assert(pn_shelf_hit_ex(p,x+24,y+100,&o)==(int)i);
-            assert(pn_shelf_hit_ex(p,x+w-24,y+24,&o)==PN_SHELF_MORE+(int)i);
-            assert(pn_shelf_hit_ex(p,x+w-94,y+94,&o)==PN_SHELF_MORE+(int)i);
+            assert(pn_shelf_hit_ex(p,x+w-24,y+24,&o)==(int)i);
+            assert(pn_shelf_hit_ex(p,x+w-94,y+94,&o)==(int)i);
             assert(pn_shelf_hit_ex(p,x+w-94,y+98,&o)==(int)i);
         }
         /* 焦点不改变封面像素，避免默认黑框。/ Focus leaves cover pixels untouched, avoiding a default black frame. */
         for(int y=y0;y<y0+h-12;y++)for(int x=40;x<32+w-10;x++)assert(pn_frame_get(&frame,x,y)==((before[y*342+x/2]>>(x%2?4:0))&15));
-        assert(pn_shelf_hit_ex(p,600,190,&o)==PN_SHELF_LAYOUT && pn_shelf_hit_ex(p,560,110,&o)==PN_SHELF_SEARCH);
+        assert(pn_shelf_hit_ex(p,600,190,&o)==PN_SHELF_LAYOUT && pn_shelf_hit_ex(p,560,110,&o)==-1);
         assert(pn_shelf_hit_ex(p,50,190,&o)==PN_SHELF_TAB_ALL && pn_shelf_hit_ex(p,200,190,&o)==PN_SHELF_TAB_RECENT && pn_shelf_hit_ex(p,300,190,&o)==PN_SHELF_TAB_FAVORITES);
-        assert(pn_shelf_hit_ex(p,600,1080,&o)==PN_SHELF_NEXT && pn_shelf_hit_ex(p,100,1080,&o)==-1);
+        assert(pn_shelf_hit_ex(p,600,1080,&o)==-1 && pn_shelf_hit_ex(p,100,1080,&o)==-1);
     }
     /* 四栏不与书籍序号或翻页命令冲突。/ Four tabs cannot collide with book or paging commands. */
     assert(pn_shelf_hit(p,85,1150)==PN_SHELF_READING_HOME && pn_shelf_hit(p,256,1150)==PN_SHELF_HOME && pn_shelf_hit(p,427,1150)==PN_SHELF_TRANSFER && pn_shelf_hit(p,598,1150)==PN_SHELF_MENU);
     for(int tab=0;tab<4;tab++){assert(pn_w_navigation_hit(85+171*tab,1150)==tab);assert(pn_w_navigation(&font,&frame,(pn_navigation_t)tab)==PN_OK && font.pixels==24);}
     assert(pn_w_navigation_hit(-1,1150)==-1 && pn_w_navigation_hit(100,1103)==-1);
     pn_shelf_options_t list={.list_mode=true,.search=true};assert(pn_shelf_capacity(&list)==5);
-    for(int i=0;i<5;i++){assert(pn_shelf_hit_ex(p,150,300+i*150,&list)==i);assert(pn_shelf_hit_ex(p,600,300+i*150,&list)==PN_SHELF_MORE+i);}
+    for(int i=0;i<5;i++){assert(pn_shelf_hit_ex(p,150,300+i*150,&list)==i);assert(pn_shelf_hit_ex(p,600,300+i*150,&list)==i);}
     assert(pn_shelf_hit_ex(p,100,1030,&list)==-1);
     /* 元数据改变展示，而原文件名保留。/ Metadata changes presentation while raw filenames remain untouched. */
     strcpy(covers->display[0].title,"真正的作品名");strcpy(covers->display[0].author,"测试作者");

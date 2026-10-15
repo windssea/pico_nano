@@ -43,7 +43,7 @@ with tempfile.TemporaryDirectory() as directory:
     assert any(b'Actual Publication\0' in b and b'Actual Author\0' in b for b in records)
     assert book.read_bytes()==original
     # 冷缓存封面完成后的图书封面确为灰阶带；副标题元数据有像素输出。/ The completed cold-cache cover has the decoded bands and visible subtitle pixels.
-    assert any(f[320*684+100]<100 and 120<f[400*684+100]<230 for f in frames)
+    assert any(f[290*684+100]<100 and 120<f[370*684+100]<230 for f in frames)
     out,warm=run('wait:800,tap:300:540,back,window-close','warm')
     assert out.startswith('navigation root=home count=1') and 'library_open name=01-file-name.epub' in out,out
     assert 'covers ready=' not in out,out

@@ -12,8 +12,8 @@
 #include <string.h>
 #include <stdio.h>
 #include <unistd.h>
-static uintptr_t blocked_begin,blocked_end;static bool fail_hash;static unsigned operations,calls;static size_t maximum;
-bool esp_ptr_dma_capable(const void *p){return (uintptr_t)p<blocked_begin || (uintptr_t)p>=blocked_end;}
+static uintptr_t blocked_begin,blocked_end;static bool fail_hash,external_stack,fail_internal;static unsigned operations,calls;static size_t maximum;static uintptr_t internal_begin,internal_end;
+bool esp_ptr_dma_capable(const void *p){uintptr_t at=(uintptr_t)p;if(at>=internal_begin && at<internal_end)return true;return !external_stack && (at<blocked_begin || at>=blocked_end);}
 static void *allocate(void *ctx,size_t n){(void)ctx;void *p=malloc(n);blocked_begin=(uintptr_t)p;blocked_end=blocked_begin+n;return p;}
 static void release(void *ctx,void *p){(void)ctx;free(p);blocked_begin=blocked_end=0;}
 // 内部DMA余量与临时块替身；SPIRAM分配视为不可DMA。/ Doubles for internal DMA headroom and transient blocks; SPIRAM allocations are non-DMA.
@@ -21,9 +21,9 @@ static size_t largest;static unsigned borrowed,spiram;
 static size_t free_bytes=200u*1024u;
 size_t heap_caps_get_largest_free_block(uint32_t caps){assert(caps&MALLOC_CAP_INTERNAL);return largest;}
 size_t heap_caps_get_free_size(uint32_t caps){assert(caps&MALLOC_CAP_INTERNAL);return free_bytes;}
-void *heap_caps_aligned_alloc(size_t alignment,size_t size,uint32_t caps){assert(alignment==16 && (caps&MALLOC_CAP_DMA) && size==32u*1024u);borrowed++;return aligned_alloc(alignment,size);}
+void *heap_caps_aligned_alloc(size_t alignment,size_t size,uint32_t caps){assert(alignment==16 && (caps&MALLOC_CAP_DMA) && (size==32u*1024u || size==4096));if(fail_internal)return NULL;void *p=aligned_alloc(alignment,size);assert(p);borrowed++;internal_begin=(uintptr_t)p;internal_end=internal_begin+size;return p;}
 void *heap_caps_malloc(size_t size,uint32_t caps){assert(caps&MALLOC_CAP_SPIRAM);void *p=malloc(size);blocked_begin=(uintptr_t)p;blocked_end=blocked_begin+size;spiram++;return p;}
-void heap_caps_free(void *ptr){if((uintptr_t)ptr==blocked_begin){blocked_begin=blocked_end=0;spiram--;}else borrowed--;free(ptr);}
+void heap_caps_free(void *ptr){if((uintptr_t)ptr==blocked_begin){blocked_begin=blocked_end=0;spiram--;}else{borrowed--;internal_begin=internal_end=0;}free(ptr);}
 psa_status_t psa_crypto_init(void){return PSA_SUCCESS;}
 psa_status_t psa_hash_setup(psa_hash_operation_t *op,int algorithm){assert(algorithm==PSA_ALG_SHA_256);*op=(psa_hash_operation_t){0};operations++;return PSA_SUCCESS;}
 psa_status_t psa_hash_update(psa_hash_operation_t *op,const uint8_t *data,size_t n){if(fail_hash)return -1;uint8_t *p=realloc(op->data,op->size+n);assert(p);op->data=p;memcpy(p+op->size,data,n);op->size+=n;return PSA_SUCCESS;}
@@ -48,6 +48,8 @@ int main(void){
     largest=64u*1024u-1u;calls=0;maximum=0;assert(pn_identity_stream_pooled(&pool,NULL,sizeof bytes,source,&actual)==PN_OK && calls==17 && maximum==4096);
     largest=80u*1024u;free_bytes=96u*1024u-1u;calls=0;maximum=0;assert(pn_identity_stream_pooled(&pool,NULL,sizeof bytes,source,&actual)==PN_OK && calls==17 && maximum==4096);free_bytes=200u*1024u;
     largest=0;
+    external_stack=true;calls=0;maximum=0;assert(pn_identity_stream_pooled(&pool,NULL,sizeof bytes,source,&actual)==PN_OK && calls==17 && maximum==4096 && !borrowed && !operations && !memcmp(&actual,&expected,sizeof actual));
+    fail_internal=true;actual=expected;assert(pn_identity_stream_pooled(&pool,NULL,sizeof bytes,source,&actual)==PN_NO_MEMORY && !memcmp(&actual,&expected,sizeof actual) && !pool.used && !pool.live);fail_internal=false;external_stack=false;
     fail_hash=true;actual=expected;assert(pn_identity_stream_pooled(&pool,NULL,sizeof bytes,source,&actual)==PN_IO && !memcmp(&actual,&expected,sizeof actual));
     assert(!pool.used && !pool.live && !operations);
     // 文件入口也必须调用硬件端口并保持错误时的输出与池余额。 / File hashing must also call the hardware port and preserve output and pool balances on failure.
