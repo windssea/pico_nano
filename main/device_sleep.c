@@ -23,9 +23,10 @@ static bool wait_key_idle(int timeout_ms,bool watch_new,bool *new_key){
     bool released=false;
     while(now_ms()-start<timeout_ms){
         if(!watch_new)read_pico_pmu_drain_events();
-        bool held=read_pico_pmu_poll()!=ESP_OK || !read_pico_pmu_get()->status_ok || (read_pico_pmu_get()->key_state&0x01)!=0;
+        bool valid=read_pico_pmu_poll()==ESP_OK && read_pico_pmu_get()->status_ok;
+        bool held=!valid || (read_pico_pmu_get()->key_state&0x01)!=0;
         bool key=watch_new && read_pico_pmu_take_key_wakeup();
-        if(watch_new && released && (key || held))*new_key=true;
+        if(watch_new && released && (key || (valid && held)))*new_key=true;
         if(!held)released=true;
         read_pico_clear_ioe_int();
         if(!held){if(!high_from)high_from=now_ms();if(now_ms()-high_from>=150)return true;}

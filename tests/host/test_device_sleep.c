@@ -23,7 +23,8 @@ int64_t esp_timer_get_time(void){return clock_ms*1000;}
 void vTaskDelay(unsigned ms){clock_ms+=ms;if(scenario==EARLY_KEY && !waking && clock_ms>=1040)press();update();assert(clock_ms<10000);}
 void read_pico_clear_ioe_int(void){clears++;line_low=scenario==SHARED_IRQ && waking;}
 void read_pico_pmu_drain_events(void){drains++;update();short_pending=key_pending=false;}
-esp_err_t read_pico_pmu_poll(void){update();snapshot.status_ok=!(scenario==PMU_FAILURE && gpio_armed);polls++;return snapshot.status_ok?ESP_OK:ESP_FAIL;}
+// 正常场景在准备睡眠时插入一次读错；无效快照不能冒充新按键。/ Inject a transient entry read failure in the normal case; an invalid snapshot must never impersonate a new key.
+esp_err_t read_pico_pmu_poll(void){update();polls++;snapshot.status_ok=!(scenario==PMU_FAILURE && gpio_armed) && !(scenario==NORMAL && polls==2);return snapshot.status_ok?ESP_OK:ESP_FAIL;}
 const pmu_snapshot_t *read_pico_pmu_get(void){return &snapshot;}
 bool read_pico_pmu_take_key_wakeup(void){
     // 读清扩展器后仍须读PMU队列；只消费事件，不伪造中断电平。/ Read the PMU queue even after clearing the expander; consume events without inventing an IRQ level.
