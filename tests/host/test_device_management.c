@@ -29,6 +29,7 @@ pn_status_t pn_device_transfer_state(pn_device_transfer_t *s,pn_device_transfer_
 pn_status_t pn_device_transfer_close(pn_device_transfer_t *s){assert(s->impl);s->impl=NULL;return PN_OK;}
 pn_status_t pn_device_transfer_take_network(pn_device_transfer_t *s,pn_network_credentials_t *c,bool *f){(void)s;(void)c;(void)f;return PN_EMPTY;}
 #include "../../main/app_main.c"
+static bool feedback_cancelled(void *ctx){(void)ctx;return true;}
 int main(void){
     assert(!pn_pool_init(&pool,6u*1024u*1024u,NULL,NULL,NULL));
     assert(read_pico_init(&hardware)==ESP_OK);pn_media_init(&sd_media);pn_media_init(&data_media);pn_media_init(&wallpaper_media);
@@ -144,7 +145,81 @@ int main(void){
     handle_key(PN_KEY_2,PN_KEY_SHORT);assert(reader.impl && !styles.active && !home_mode);
     pn_style_t saved;assert(pn_reader_app_style_get(&reader,&saved)==PN_OK && saved.pixels==46);
     toolbar_open=false;report_reader_result(PN_LIMIT);assert(!toolbar_open && reader.impl && (reader_notice || progress_save_failed));
-    assert(stop_reader());assert(!unlink(book));
+    assert(stop_reader());
+    // 真实main返回/重开路径保持对象；强制停止归还热会话READ租约。
+    // Actual main return/reopen preserves the object; forced stop returns the warm READ lease.
+    strcpy(selected_path,book);selected_format=PN_BOOK_TXT;selected_identified=false;
+    assert(pn_reader_app_open_on_media(&reader,&pool,&sd_media,book,NULL,NULL,44,0)==PN_OK);
+    assert(active_step(PN_APP_OPEN,now_ms())==PN_OK && active_step(PN_APP_NEXT,now_ms())==PN_OK);
+    void *retained=reader.impl;pn_txt_progress_t location;assert(pn_reader_app_progress(&reader,&location)==PN_OK);
+    assert(leave_reader() && !reader_active() && hot_session.txt.impl==retained);
+    start_reader_impl();assert(reader.impl==retained && hot_session.hits==1 && !hot_session.media);
+    pn_txt_progress_t reopened;assert(pn_reader_app_progress(&reader,&reopened)==PN_OK && reopened.source_offset==location.source_offset);
+    assert(leave_reader() && hot_session.media && stop_reader() && !hot_session.media);
+    // 索引实际需要独占写时释放热源和完整系统字库，保留原索引契约。
+    // When an index actually needs exclusive writes, release warm sources and the complete system face, preserving the original index contract.
+    tf_file=fopen(tf_path,"wb");assert(tf_file);tf_source=pn_font_builtin_source();
+    for(uint64_t at=0;at<tf_source.size;){size_t n;assert(tf_source.read_at(tf_source.ctx,at,tf_bytes,sizeof tf_bytes,&n)==PN_OK && n && fwrite(tf_bytes,1,n,tf_file)==n);at+=n;}assert(!fclose(tf_file));
+    assert(pn_font_system_open(&pool,&sd_media,tf_path)==PN_OK);
+    assert(pn_reader_app_open_on_media(&reader,&pool,&sd_media,book,NULL,NULL,44,0)==PN_OK && active_step(PN_APP_OPEN,now_ms())==PN_OK && leave_reader());
+    char folder[]="/tmp/pn-hot-index-XXXXXX",cache_path[256],indexed_book[256],books_path[256];assert(mkdtemp(folder));
+    snprintf(books_path,sizeof books_path,"%s/books",folder);assert(!mkdir(books_path,0700));
+    snprintf(cache_path,sizeof cache_path,"%s/cache",folder);snprintf(indexed_book,sizeof indexed_book,"%s/books/a.txt",folder);story=fopen(indexed_book,"wb");assert(story && fputs("Original index test.",story)>0 && !fclose(story));
+    assert(pn_catalog_index_init(&catalog_index,&pool,&sd_media,books_path,cache_path)==PN_OK);pn_media_lease_t index_lease;
+    assert(pn_media_acquire(&sd_media,PN_MEDIA_READ,&index_lease)==PN_OK && pn_catalog_index_page(&catalog_index,&index_lease,"",false,0,NULL,6,shelf_page)==PN_EMPTY && pn_media_release(&sd_media,&index_lease)==PN_OK);
+    assert(catalog_build_idle()==PN_OK && !hot_session.media && !pn_font_system_available() && !pn_media_active(&sd_media));pn_catalog_index_close(&catalog_index);assert(!remove(tf_path));
+    selected_path[0]=0;assert(!unlink(book));
+    // 真正产品适配的短反馈/恢复：原波形身份与FULL时序归还，失败和欠载恢复原图。
+    // Exercise the real product feedback/restore adapter: return waveform identity/FULL timing and restore original pixels after failure/underrun.
+    pn_async_init(&async_port.input);async_port.panel=present_panel;async_port.feedback=feedback_panel;pn_device_async_view(&async_port,8,false,0);atomic_store(&reading_presentation,false);
+    home_mode=shelf_mode=status_page=actions_mode=false;assert(pn_settings_ui_open(&settings_ui,&pool,NULL,NULL,present,NULL)==PN_OK);status_page=true;
+    uint8_t *original=malloc(sizeof stub_back),*logical=malloc(sizeof stub_back);assert(original && logical);memcpy(original,stub_back,sizeof stub_back);const void *wave=hardware.hl.waveform;
+    pn_frame_t normal;assert(pn_frame_bind(&normal,logical,sizeof stub_back,684,1216));assert(pn_device_frame_restore(original,sizeof stub_back,&normal)==PN_OK);
+    unsigned management_before=maintenance.management;unsigned revision=async_port.revision;
+    feedback_begin(100,600);assert(press_feedback.active && memcmp(stub_back,original,sizeof stub_back) && hardware.hl.waveform==wave && last_scan==READ_PICO_EPD_SCAN_FULL && maintenance.management==management_before && async_port.revision==revision);
+    feedback_restore();assert(!press_feedback.active && !memcmp(stub_back,original,sizeof stub_back) && maintenance.management==management_before);
+    assert(feedback_idle.pending && feedback_idle_tick(feedback_idle.due-1,false)==PN_EMPTY && feedback_idle_tick(feedback_idle.due+1,true)==PN_EMPTY);
+    maintenance.bands[8]=maintenance.bands[9]=maintenance.bands[10]=3;maintenance.bands[5]=2;size_t attempts=pool.attempts;unsigned areas=area_full_calls;
+    clock_us=(int64_t)(feedback_idle.due+1)*1000;assert(feedback_idle_tick(now_ms(),false)==PN_OK && !feedback_idle.pending && feedback_idle.completed==1 && pool.attempts==attempts && area_full_calls==areas+1);
+    assert(last_full_area.y==512 && last_full_area.height==192 && maintenance.management==management_before && !maintenance.bands[8] && !maintenance.bands[9] && !maintenance.bands[10] && maintenance.bands[5]==2 && !memcmp(stub_back,original,sizeof stub_back) && async_port.revision==revision);
+    feedback_begin(100,600);feedback_restore();panel_fault=true;clock_us=(int64_t)(feedback_idle.due+1)*1000;
+    assert(feedback_idle_tick(now_ms(),false)==PN_IO && feedback_idle.pending && !panel_known && settle_recoverable);panel_fault=false;
+    clock_us=(int64_t)(feedback_idle.due+1)*1000;assert(feedback_idle_tick(now_ms(),false)==PN_OK && !feedback_idle.pending && panel_known && !memcmp(stub_back,original,sizeof stub_back));
+    feedback_begin(100,600);feedback_restore();panel_fault=true;clock_us=(int64_t)(feedback_idle.due+1)*1000;assert(feedback_idle_tick(now_ms(),false)==PN_IO);
+    pn_cancel_scope_t abandoned;pn_cancel_enter(&abandoned,feedback_cancelled,NULL);assert(present(NULL,&normal,PN_REFRESH_GL16)==PN_CANCELLED && !settle_recoverable);pn_cancel_leave(&abandoned);
+    pn_frame_rect(&normal,0,0,80,80,0);assert(present(NULL,&normal,PN_REFRESH_GL16)==PN_IO && !settle_recoverable);areas=area_full_calls;
+    clock_us=(int64_t)(feedback_idle.due+1)*1000;assert(feedback_idle_tick(now_ms(),false)==PN_EMPTY && area_full_calls==areas);panel_fault=false;
+    assert(pn_device_frame_restore(original,sizeof stub_back,&normal)==PN_OK && present(NULL,&normal,PN_REFRESH_GL16)==PN_OK && !feedback_idle.pending);
+    feedback_fault=true;feedback_begin(100,600);assert(!press_feedback.active && panel_known && !memcmp(stub_back,original,sizeof stub_back) && hardware.hl.waveform==wave && last_scan==READ_PICO_EPD_SCAN_FULL && !maintenance.management);
+    atomic_store(&overlap_disabled,false);feedback_underrun=true;feedback_begin(100,600);assert(!press_feedback.active && panel_known && atomic_load(&overlap_disabled) && last_pclk==PCLK_SAFE_MHZ && !memcmp(stub_back,original,sizeof stub_back));
+    panel_fault=true;feedback_begin(100,600);assert(!press_feedback.active && !panel_known);feedback_begin(100,600);assert(!press_feedback.active);panel_fault=false;assert(pn_settings_ui_present(&settings_ui,present,NULL)==PN_OK && panel_known && !memcmp(stub_back,original,sizeof stub_back));
+    feedback_begin(100,600);assert(press_feedback.active);assert(pn_device_frame_restore(original,sizeof stub_back,&normal)==PN_OK);
+    pn_cancel_scope_t cancelled;pn_cancel_enter(&cancelled,feedback_cancelled,NULL);assert(present(NULL,&normal,PN_REFRESH_GL16)==PN_CANCELLED && press_feedback.active);
+    feedback_restore();assert(!press_feedback.active && panel_known && !memcmp(stub_back,original,sizeof stub_back));pn_cancel_leave(&cancelled);
+    feedback_begin(100,600);assert(press_feedback.active);assert(pn_settings_ui_event(&settings_ui,PN_SETUI_KEYS,present,NULL)==PN_OK && !press_feedback.active && !feedback_idle.pending);
+    panel_known=false;feedback_begin(100,600);assert(!press_feedback.active);assert(pn_settings_ui_present(&settings_ui,present,NULL)==PN_OK);
+    pn_settings_ui_close(&settings_ui);
+    // 实际设备底图/三键出口的焦点回执：失败不复用未确认像素，下一次完整恢复。
+    // Focus receipts through actual device references/keys: failed pixels are never reused; the next attempt restores fully.
+    if(!shelf_page)shelf_page=pn_alloc(&pool,sizeof *shelf_page);
+    assert(shelf_page);memset(shelf_page,0,sizeof *shelf_page);shelf_page->count=6;shelf_page->total=18;shelf_page->more=true;
+    for(size_t i=0;i<6;i++){snprintf(shelf_page->items[i].name,sizeof shelf_page->items[i].name,"Book %zu.txt",i);snprintf(shelf_page->items[i].path,sizeof shelf_page->items[i].path,"/books/%zu.txt",i);shelf_page->items[i].format=PN_BOOK_TXT;}
+    pn_shelf_covers_reset(shelf_covers,shelf_page);shelf_mode=true;home_mode=false;status_page=false;actions_mode=false;recent_mode=false;fav_mode=false;covers_dirty=false;shelf_focus=-1;
+    assert(draw_shelf(PN_REFRESH_GL16)==PN_OK && shelf_draw_valid);unsigned shown=presents;handle_key(PN_KEY_2,PN_KEY_SHORT);assert(shelf_focus==0 && shelf_draw_valid && presents==shown+1);
+    pn_frame_t expected;assert(pn_frame_bind(&expected,logical,415872,684,1216));pn_font_t face={0};assert(management_font_begin(&face,24)==PN_OK);pn_shelf_options_t options=shelf_options();if(favorites_valid)options.favorite_items=favorites;
+    assert(pn_shelf_render_with_font_file_ex(shelf_page,&face,&expected,0,false,true,shelf_covers,&pool,&sd_media,NULL,&options)==PN_OK && pn_device_frame_copy(&expected,original,415872)==PN_OK && !memcmp(stub_back,original,415872));management_font_end(&face);
+    shown=presents;assert(draw_shelf_focus(0)==PN_OK && presents==shown);
+    shelf_focus=1;pn_cancel_scope_t focus_cancel;pn_cancel_enter(&focus_cancel,feedback_cancelled,NULL);assert(draw_shelf_focus(0)==PN_CANCELLED && !shelf_draw_valid);pn_cancel_leave(&focus_cancel);assert(draw_shelf_focus(0)==PN_OK && shelf_draw_valid);
+    panel_fault=true;shelf_focus=2;assert(draw_shelf_focus(1)==PN_IO && !shelf_draw_valid && !panel_known);panel_fault=false;unsigned cleaned=clear_calls;shelf_focus=3;assert(draw_shelf_focus(2)==PN_OK && shelf_draw_valid && panel_known && clear_calls==cleaned+1);
+    assert(present(NULL,&normal,PN_REFRESH_GL16)==PN_OK && shelf_draw_revision!=async_port.revision);shelf_focus=4;assert(draw_shelf_focus(3)==PN_OK && shelf_draw_revision==async_port.revision);
+    assert(management_font_begin(&face,24)==PN_OK);options=shelf_options();if(favorites_valid)options.favorite_items=favorites;
+    assert(pn_shelf_render_with_font_file_ex(shelf_page,&face,&expected,4,false,true,shelf_covers,&pool,&sd_media,NULL,&options)==PN_OK && pn_device_frame_copy(&expected,original,415872)==PN_OK && !memcmp(stub_back,original,415872));management_font_end(&face);
+    pn_w_set_clock("23:45");shelf_focus=5;assert(draw_shelf_focus(4)==PN_OK && !strcmp(shelf_draw_status.clock,"23:45"));
+    management_fonts_close();assert(!shelf_draw_valid);shelf_focus=0;assert(draw_shelf_focus(5)==PN_OK && shelf_draw_valid);
+    list_mode=true;shelf_focus=-1;assert(draw_shelf(PN_REFRESH_GL16)==PN_OK);shelf_focus=0;assert(draw_shelf_focus(-1)==PN_OK);assert(management_font_begin(&face,24)==PN_OK);options=shelf_options();if(favorites_valid)options.favorite_items=favorites;
+    assert(pn_shelf_render_with_font_file_ex(shelf_page,&face,&expected,0,false,true,shelf_covers,&pool,&sd_media,NULL,&options)==PN_OK && pn_device_frame_copy(&expected,original,415872)==PN_OK && !memcmp(stub_back,original,415872));management_font_end(&face);
+    home_mode=true;list_mode=false;shelf_focus=-1;assert(draw_shelf(PN_REFRESH_GL16)==PN_OK);shown=presents;handle_key(PN_KEY_3,PN_KEY_SHORT);assert(shelf_focus==0 && presents==shown);handle_key(PN_KEY_3,PN_KEY_SHORT);assert(shelf_focus==1 && presents==shown+1);
+    free(original);free(logical);
     pn_free(page_copy);pn_free(shelf_page);pn_free(shelf_covers);pn_free(recent_snapshot);pn_free(favorites);
     pn_font_close(&management_font);pn_w_font_scope_end(&management_scope);
     assert(!pool.used && !pool.live);return 0;

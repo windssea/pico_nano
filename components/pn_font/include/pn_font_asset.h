@@ -33,6 +33,8 @@ void pn_font_asset_suspend(pn_font_asset_t *);
 pn_status_t pn_font_asset_ensure(pn_font_asset_t *,int,pn_font_t **);
 /// 复制借用源，寿命到asset关闭，不释放它。/ Copy borrowed source valid until asset closes, never release it.
 pn_status_t pn_font_asset_source(const pn_font_asset_t *,pn_text_source_t *);
+/// 校验保留的已验证文件，不重开引擎或改变字号。/ Verify the retained validated file without reopening the engine or changing size.
+pn_status_t pn_font_asset_verify_retained(const pn_font_asset_t *);
 
 /// 只读捕获启动字体引用，PC解析绝对路径，错误保持输出。/ Read-only boot-font reference capture; PC resolves absolute path, preserving output on error.
 pn_status_t pn_font_reference_capture(pn_pool_t *,pn_media_t *,const pn_media_lease_t *,const char *,pn_font_reference_t *);

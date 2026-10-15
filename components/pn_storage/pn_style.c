@@ -10,7 +10,7 @@
 #include <string.h>
 static unsigned get(const uint8_t *p){return p[0]|((unsigned)p[1]<<8);}
 static void put(uint8_t *p,unsigned v){p[0]=(uint8_t)v;p[1]=(uint8_t)(v>>8);}
-pn_style_t pn_style_default(int pixels){return (pn_style_t){(uint16_t)pixels,145,25,0,32,12,0,0,0,1};}
+pn_style_t pn_style_default(int pixels){return (pn_style_t){(uint16_t)pixels,145,40,2,32,12,0,0,0,1};}
 pn_status_t pn_style_validate(const pn_style_t *s){return !s || s->pixels<28 || s->pixels>72 || s->line_percent<100 || s->line_percent>220 || s->gap_percent>100 || s->indent_em>2 || s->margin<16 || s->margin>80 || (s->margin&1) || s->gl_before_clear>30 || s->tracking_percent>50 || s->reading_line>2 || s->reading_line_offset< -8 || s->reading_line_offset>8 || s->reading_line_offset%2 || s->reading_line_shade>3?PN_INVALID:PN_OK;}
 pn_status_t pn_style_save(const pn_journal_io_t *io,const pn_book_id_t *book,const pn_style_t *s){
     if(!book || pn_style_validate(s)!=PN_OK)return PN_INVALID;

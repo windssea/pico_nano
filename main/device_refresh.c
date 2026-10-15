@@ -3,6 +3,11 @@
  * English: content risk and regional maintenance selecting existing paths without waveform changes. */
 #include "device_refresh.h"
 #include <string.h>
+void pn_device_refresh_settle(pn_device_refresh_t *s,pn_device_box_t b){
+    if(!s || b.x!=0 || b.width!=684 || b.y<0 || b.height<1 || b.height>1216-b.y)return;
+    int first=(b.y+63)/64,last=(b.y+b.height)/64;
+    for(int i=first;i<last && i<PN_REFRESH_BANDS;i++)s->bands[i]=0;
+}
 pn_device_refresh_plan_t pn_device_refresh_plan(const pn_device_refresh_t *s,const uint8_t *target,const uint8_t *shown,bool reading,pn_device_box_t dirty){
     pn_device_refresh_plan_t p={.area=dirty};
     if(!s || !target || !shown || !dirty.width)return p;

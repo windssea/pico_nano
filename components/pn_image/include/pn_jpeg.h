@@ -17,3 +17,12 @@ pn_status_t pn_jpeg_probe(pn_pool_t *pool,const pn_image_input_t *input,pn_jpeg_
 /// Eight-bit grayscale/RGB/YCbCr baseline/progressive; IDCT downsampling then nearest 4bpp scaling, with progressive coefficients charged to pool.
 /// 需要EOI和验证EOF；错误可能改部分帧，调用方须丢弃。/ Require EOI and verified EOF; errors may change part of the frame, requiring caller discard.
 pn_status_t pn_jpeg_draw(pn_pool_t *pool,const pn_image_input_t *input,pn_frame_t *frame,pn_image_rect_t rect,pn_jpeg_info_t *info);
+
+typedef struct {void *impl;} pn_jpeg_job_t; ///< 零初始化任务；不复制活动句柄 / Zero-initialized job; never copy a live handle
+/// 创建可恢复JPEG解码；渐进式先逐iMCU行收集系数，再绘制最终扫描。/ Create resumable JPEG decoding; progressive images collect coefficients per iMCU row before rendering the final scan.
+pn_status_t pn_jpeg_job_begin(pn_jpeg_job_t *,pn_pool_t *,const pn_image_input_t *,pn_frame_t *,pn_image_rect_t);
+/// 推进一个库阶段、iMCU行、输出行、最多4096像素或4KiB尾填充；BUSY继续，info仅OK更新。
+/// Advance one library stage, iMCU row, output row, up to 4096 pixels or 4 KiB trailing padding; continue on BUSY and update info only on OK.
+pn_status_t pn_jpeg_job_step(pn_jpeg_job_t *,pn_jpeg_info_t *);
+/// 释放暂定解码，源由调用方关闭。/ Release provisional decoding; the caller closes the source.
+void pn_jpeg_job_close(pn_jpeg_job_t *);

@@ -3,6 +3,7 @@
 #pragma once
 #include "pn_async.h"
 #include "pn_reader_app.h"
+#include "pn_feedback.h"
 #include "input_script.h"
 #include <SDL.h>
 typedef struct {
@@ -12,6 +13,9 @@ typedef struct {
     SDL_Window *window;SDL_Renderer *renderer;SDL_Texture *texture; ///< 主线程独占SDL资源 / SDL resources owned by main
     atomic_bool done; ///< worker已退出 / Worker has exited
     const pn_frame_t *frame; ///< 等待显示的不可变借用，回执前不能释放 / Immutable borrow until display receipt
+    const pn_feedback_patch_t *patch; ///< 局部反馈借用，回执不推进页面代次 / Local feedback borrow without advancing the view revision
+    pn_status_t (*native)(void *);void *native_ctx; ///< 主线程端口任务借用，不访问模型/池 / Borrowed main-thread port task, never touching models/pool
+    pn_feedback_present_fn feedback; ///< 主线程绘制局部像素 / Main-thread local pixel renderer
     pn_refresh_t profile;pn_status_t shown; ///< 呈现类型与回执 / Presentation profile and receipt
     bool pending,ack,scope_active; ///< 显示/脚本回执/取消范围 / Display/script receipt/cancellation scope
     SDL_Event received,ack_event; ///< 上一事件与脚本回执 / Last event and script receipt
@@ -32,6 +36,10 @@ int pn_sdl_async_run(pn_sdl_async_t *port,int (*worker)(void *),void *ctx);
 bool pn_sdl_async_wait(pn_sdl_async_t *port,SDL_Event *event,unsigned timeout_ms,uint32_t view);
 /// worker借用不可变帧等待主线程回执；返回前帧保持有效。/ Worker lends an immutable frame until the main-thread receipt.
 pn_status_t pn_sdl_async_present(pn_sdl_async_t *port,const pn_frame_t *frame,pn_refresh_t profile);
+/// 产品worker等待局部反馈真实端口回执，保持同次按压的输入身份。/ Product worker waits for the local feedback receipt while preserving this press's input identity.
+pn_status_t pn_sdl_async_feedback(pn_sdl_async_t *,const pn_feedback_patch_t *);
+/// 主线程执行借用窗口任务，等真实回执且不推进语义view；不保留ctx。/ Main executes a borrowed window task until real receipt without advancing semantic view; never retain ctx.
+pn_status_t pn_sdl_async_native(pn_sdl_async_t *,pn_status_t (*)(void *),void *);
 /// 主线程销毁端口，须已join。/ Main destroys the port after join.
 void pn_sdl_async_close(pn_sdl_async_t *port);
 /// worker投递窗口标题与文本输入状态，主线程执行。/ Worker posts title/text-input state for main-thread execution.

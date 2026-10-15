@@ -29,6 +29,8 @@
 /tests/*.epub
 /tests/*.ttf
 /tests/*.TTF
+/tests/testBook/
+/tests/testFont/
 /docs/local/
 /docs/HANDOFF.local.md
 

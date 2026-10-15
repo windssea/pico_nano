@@ -87,11 +87,21 @@ def main():
         # 私人样本单独复跑，不作为公共CI依赖，不烧写。/ Private samples run separately from public CI, without flashing.
         container_image = "pico-nano-sdl:dev"
         commands = [["cmake", "-S", "tests/host", "-B", "build-host", "-G", "Ninja", "-DPN_SANITIZERS=ON"],
-                    ["cmake", "--build", "build-host", "--target", "font_probe", "zip_dump"],
+                    ["cmake", "--build", "build-host", "--target", "font_probe", "zip_dump", "zip_job_validate", "epub_dump", "epub_validate", "epub_app_capture", "test_xhtml_compat", "epub_job_validate", "cover_priority_validate", "semantic_probe_validate"],
                     ["cmake", "-S", "simulator", "-B", "build-sim-sdl-idf", "-G", "Ninja", "-DPN_SIM_SDL=ON", "-DPN_SANITIZERS=ON"],
                     ["cmake", "--build", "build-sim-sdl-idf"],
-                    ["python3" if docker else sys.executable, "tools/make_sim_library.py"],
-                    ["python3" if docker else sys.executable, "tools/test_local_samples.py", "--sim", "build-sim-sdl-idf/pn_sim", "--probe", "build-host/font_probe", "--zip-binary", "build-host/zip_dump"]]
+                    ["python3" if docker else sys.executable, "tools/test_local_samples.py", "--sim", "build-sim-sdl-idf/pn_sim", "--probe", "build-host/font_probe", "--zip-binary", "build-host/zip_dump"],
+                    ["python3" if docker else sys.executable, "tools/test_local_font_settings.py", "--sim", "build-sim-sdl-idf/pn_sim"],
+                    ["python3" if docker else sys.executable, "tools/test_local_mimetype.py", "--binary", "build-host/epub_dump"],
+                    ["python3" if docker else sys.executable, "tools/test_local_memory.py", "--sim", "build-sim-sdl-idf/pn_sim"],
+                    ["python3" if docker else sys.executable, "tools/test_local_cache.py", "--sim", "build-sim-sdl-idf/pn_sim"],
+                    ["python3" if docker else sys.executable, "tools/test_local_unsupported.py", "--sim", "build-sim-sdl-idf/pn_sim"],
+                    ["python3" if docker else sys.executable, "tools/test_local_chapters.py", "--binary", "build-host/epub_validate"],
+                    ["python3" if docker else sys.executable, "tools/test_local_publication.py", "--binary", "build-host/epub_job_validate"],
+                    ["python3" if docker else sys.executable, "tools/test_local_zip_job.py", "--binary", "build-host/zip_job_validate"],
+                    ["python3" if docker else sys.executable, "tools/test_local_cover_priority.py", "--binary", "build-host/cover_priority_validate"],
+                    ["python3" if docker else sys.executable, "tools/test_local_semantic_probe.py", "--capture", "build-host/epub_app_capture", "--probe", "build-host/semantic_probe_validate"],
+                    ["python3" if docker else sys.executable, "tools/test_local_compat.py", "--filter", "build-host/test_xhtml_compat", "--validate", "build-host/epub_validate", "--capture", "build-host/epub_app_capture"]]
     elif args.action == "docs":
         commands = [[sys.executable, "tools/check_docs.py"]]
         docker = False
@@ -136,11 +146,15 @@ def main():
                 f"-DSDKCONFIG_DEFAULTS=sdkconfig.{profile}"]
         commands = [base + ["build"], base + ["size"]]
     profile_status = 0
+    local_status = 0
     for index, command in enumerate(commands):
         status = run(command, docker, logs / f"{args.action}-{index}.log", container_image)
         if status:
             if args.action == "profile" and index == 2:
                 profile_status = status
+            elif args.action == "local-samples" and index >= 4:
+                # 样本失败仍完成其他矩阵，最终保留非零退出。/ Finish other corpus matrices after a sample failure, retaining a nonzero final exit.
+                local_status = status
             else:
                 return status
     if args.action == "profile":
@@ -160,7 +174,7 @@ def main():
     if args.action == "host":
         # 浏览器异步行为用实际网页源与Node验证，独立于容器的Python/C运行时。/ Verify browser async behavior against actual page source in Node, independently of container Python/C runtimes.
         return run(["node", "--test", "tests/tools/test_transfer_resources.mjs"], False, logs / "host-web.log")
-    return 0
+    return local_status
 
 
 if __name__ == "__main__":

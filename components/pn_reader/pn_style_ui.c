@@ -41,7 +41,7 @@ static pn_status_t cancel(pn_style_ui_t *u,uint64_t now,pn_reader_present_fn pre
 #define MORE_STEP_Y0 156
 static const char *const names[PN_SUI_FIELDS]={"字号","行距","段距","首行缩进","字间距","边距","阅读线","上下位置","阅读线深浅"};
 typedef struct {unsigned pixels,line,gap,indent,margin;} preset_t;
-static const preset_t presets[3]={{44,145,40,2,32},{36,125,20,2,24},{56,160,40,2,32}};
+static const preset_t presets[3]={{PN_STYLE_DEFAULT_PIXELS,145,40,2,32},{36,125,20,2,24},{56,160,40,2,32}};
 static const char *const preset_names[3]={"舒适","紧凑","大字"};
 static unsigned field_value(const pn_style_t *s,unsigned i){switch(i){case 0:return s->pixels;case 1:return s->line_percent;case 2:return s->gap_percent;case 3:return s->indent_em;case 4:return s->tracking_percent;case 5:return s->margin;case 6:return s->reading_line;case 8:return s->reading_line_shade;default:return (unsigned)(s->reading_line_offset+8);}}
 static void field_set(pn_style_t *s,unsigned i,unsigned v){switch(i){case 0:s->pixels=(uint16_t)v;break;case 1:s->line_percent=(uint16_t)v;break;case 2:s->gap_percent=(uint16_t)v;break;case 3:s->indent_em=(uint16_t)v;break;case 4:s->tracking_percent=(uint16_t)v;break;case 5:s->margin=(uint16_t)v;break;case 6:s->reading_line=(uint16_t)v;break;case 8:s->reading_line_shade=(uint16_t)v;break;default:s->reading_line_offset=(int16_t)((int)v-8);break;}}
@@ -196,7 +196,7 @@ pn_status_t pn_style_ui_event(pn_style_ui_t *u,int command,uint64_t now,pn_reade
     }else if(command==PN_SUI_INDENT){u->draft.indent_em=u->draft.indent_em?0:2;u->selected=3;
     }else if(command==PN_SUI_MORE){u->more=true;u->selected=4;
     }else if(command==PN_SUI_BACK_MAIN){u->more=false;u->selected=0;
-    }else if(command==PN_SUI_RESET){u->draft=pn_style_default(44);
+    }else if(command==PN_SUI_RESET){u->draft=pn_style_default(PN_STYLE_DEFAULT_PIXELS);
     }else if(command>=PN_SUI_PRESET && command<PN_SUI_PRESET+3){
         const preset_t *chosen=&presets[command-PN_SUI_PRESET];
         u->draft.pixels=(uint16_t)chosen->pixels;u->draft.line_percent=(uint16_t)chosen->line;u->draft.gap_percent=(uint16_t)chosen->gap;u->draft.indent_em=(uint16_t)chosen->indent;u->draft.margin=(uint16_t)chosen->margin;u->draft.tracking_percent=0;

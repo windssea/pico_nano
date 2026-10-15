@@ -54,13 +54,17 @@ static int queue(const char *directory,const char *output,const char *cache){
     const char *dir=strcmp(cache,"-")?cache:NULL;
     const char *budget_text=getenv("PN_COVER_QUEUE_BUDGET");size_t budget=budget_text?(size_t)strtoull(budget_text,NULL,10):BUDGET;
     pn_media_lease_t system_read={0};if(getenv("PN_COVER_HELD_READ"))assert(pn_media_acquire(&media,PN_MEDIA_READ,&system_read)==PN_OK);
-    bool changed;pn_status_t status;size_t steps=0;
+    bool changed;pn_status_t status;size_t steps=0,rounds=0;pn_cover_work_t work={0};bool staged=getenv("PN_COVER_WORK")!=NULL;
     const char *cancel_at=getenv("PN_COVER_CANCEL_AFTER");
     if(cancel_at && page->count){cancellation_t cancel={.limit=(unsigned)strtoul(cancel_at,NULL,10)};uint8_t before[PN_COVER_BYTES];memcpy(before,covers->pixels[0],sizeof before);pn_cancel_scope_t scope;pn_cancel_enter(&scope,interrupted,&cancel);
-        status=pn_shelf_covers_step(covers,page,&pool,&media,NULL,salt,budget,&changed);pn_cancel_leave(&scope);
+        if(staged){do{status=pn_shelf_covers_work(&work,covers,page,&pool,&media,NULL,salt,budget,&changed);assert(++rounds<65536);}while(status==PN_BUSY);pn_cover_work_abort(&work);}
+        else status=pn_shelf_covers_step(covers,page,&pool,&media,NULL,salt,budget,&changed);
+        pn_cancel_leave(&scope);
         fprintf(stderr,"cancel status=%d state=%d reason=%d changed=%d used=%zu live=%zu leases=%zu pixels=%d calls=%u\n",(int)status,(int)covers->state[0],(int)covers->reason[0],(int)changed,pool.used,pool.live,pn_media_active(&media),memcmp(before,covers->pixels[0],sizeof before),cancel.calls);
         assert(status==PN_CANCELLED && covers->state[0]==PN_COVER_PENDING && !changed && !pool.used && !pool.live && !pn_media_active(&media) && !memcmp(before,covers->pixels[0],sizeof before));}
-    while((status=pn_shelf_covers_step(covers,page,&pool,&media,dir,salt,budget,&changed))==PN_OK){steps++;assert(!pool.used && !pool.live);}
+    for(;;){status=staged?pn_shelf_covers_work(&work,covers,page,&pool,&media,dir,salt,budget,&changed):pn_shelf_covers_step(covers,page,&pool,&media,dir,salt,budget,&changed);
+        assert(++rounds<65536);if(status!=PN_OK && status!=PN_BUSY)break;if(status==PN_OK)steps++;if(!pn_cover_work_pending(&work))assert(!pool.used && !pool.live);}
+    pn_cover_work_abort(&work);assert(!pool.used && !pool.live);
     assert(status==PN_EMPTY && steps<=page->count);
     printf("decode peak=%zu attempts=%zu\n",pool.peak,pool.attempts);
     for(size_t i=0;i<page->count;i++)printf("%s state=%d reason=%d title=%s author=%s\n",page->items[i].name,(int)covers->state[i],(int)covers->reason[i],covers->display[i].title,covers->display[i].author);

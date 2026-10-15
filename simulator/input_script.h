@@ -25,7 +25,10 @@ static inline void script_queue(sim_script_t *script){
         if(sscanf(part,"race-next-tools:%u",&wait)==1 && wait<=5000){event.key.keysym.sym=SDLK_RIGHT;script->future=event;script->future.key.keysym.sym=SDLK_k;script->future_at=SDL_GetTicks64()+wait;script_expect(script,&event);script->pending=SDL_PushEvent(&event)==1;return;}
         // wait:MS暂停投递，让空闲任务（如封面队列）运行。/ wait:MS pauses delivery so idle work such as the cover queue runs.
         if(sscanf(part,"wait:%u",&wait)==1 && wait<=60000){script->resume=SDL_GetTicks64()+wait;return;}
-        if(sscanf(part,"tap:%d:%d",&script->x,&script->y)==2 && script->x>=0 && script->x<684 && script->y>=0 && script->y<1216){event.type=SDL_MOUSEBUTTONDOWN;event.button.windowID=UINT32_MAX;event.button.button=SDL_BUTTON_LEFT;event.button.x=script->x;event.button.y=script->y;script->pointer=1;}
+        if(sscanf(part,"press:%d:%d",&script->x,&script->y)==2){event.type=SDL_MOUSEBUTTONDOWN;event.button.windowID=UINT32_MAX;event.button.button=SDL_BUTTON_LEFT;event.button.x=script->x;event.button.y=script->y;script->pointer=2;}
+        else if(sscanf(part,"move:%d:%d",&script->x,&script->y)==2){event.type=SDL_MOUSEMOTION;event.motion.windowID=UINT32_MAX;event.motion.state=SDL_BUTTON_LMASK;event.motion.x=script->x;event.motion.y=script->y;}
+        else if(!strcmp(part,"focus-lost")){event.type=SDL_WINDOWEVENT;event.window.windowID=UINT32_MAX;event.window.event=SDL_WINDOWEVENT_FOCUS_LOST;}
+        else if(sscanf(part,"tap:%d:%d",&script->x,&script->y)==2 && script->x>=0 && script->x<684 && script->y>=0 && script->y<1216){event.type=SDL_MOUSEBUTTONDOWN;event.button.windowID=UINT32_MAX;event.button.button=SDL_BUTTON_LEFT;event.button.x=script->x;event.button.y=script->y;script->pointer=1;}
         // rtap:X:Y是右键单击，模拟器里代表长按。/ rtap:X:Y is a right click, which stands for a long press in the simulator.
         else if(sscanf(part,"rtap:%d:%d",&script->x,&script->y)==2){event.type=SDL_MOUSEBUTTONUP;event.button.windowID=UINT32_MAX;event.button.button=SDL_BUTTON_RIGHT;event.button.x=script->x;event.button.y=script->y;}
         else if(sscanf(part,"release:%d:%d",&script->x,&script->y)==2){event.type=SDL_MOUSEBUTTONUP;event.button.windowID=UINT32_MAX;event.button.button=SDL_BUTTON_LEFT;event.button.x=script->x;event.button.y=script->y;}
@@ -93,4 +96,5 @@ static inline void script_received(sim_script_t *script,const SDL_Event *event){
     if(event->type!=script->expected_type || (event->type==SDL_KEYDOWN && event->key.keysym.sym!=script->expected_key))return;
     if((event->type==SDL_KEYDOWN && event->key.windowID==UINT32_MAX) || (event->type==SDL_TEXTINPUT && event->text.windowID==UINT32_MAX))script->pending=false;
     if((event->type==SDL_MOUSEBUTTONDOWN || event->type==SDL_MOUSEBUTTONUP) && event->button.windowID==UINT32_MAX){script->pending=false;if(event->type==SDL_MOUSEBUTTONUP)script->pointer=0;}
+    if((event->type==SDL_MOUSEMOTION && event->motion.windowID==UINT32_MAX) || (event->type==SDL_WINDOWEVENT && event->window.windowID==UINT32_MAX))script->pending=false;
 }

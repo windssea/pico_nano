@@ -5,6 +5,39 @@
  */
 #include "device_frame.h"
 #include <string.h>
+pn_status_t pn_device_follow_difference(const pn_follow_job_t *job,uint8_t *difference,size_t capacity,bool *lines,uint8_t *columns){
+    if(!job || !difference || capacity<684u*1216u || !lines || !columns)return PN_INVALID;
+    int direction;pn_status_t status=pn_follow_drive(job,683,1215,&direction);if(status!=PN_OK)return status;
+    memset(difference,0x88,684u*1216u);memset(lines,0,684u*sizeof *lines);memset(columns,0,608u);
+    pn_follow_box_t b=job->box;
+    // 32行冻结小块按板级行连续写，保留原计数并减少PSRAM跨行写与逐像素API调用。
+    // Write a frozen 32-row tile in board-row order, preserving counts and reducing strided PSRAM stores and per-pixel API calls.
+    for(int top=b.y;top<b.y+b.height;top+=32){int height=b.y+b.height-top;if(height>32)height=32;pn_follow_row_t rows[32];
+        for(int y=0;y<height;y++){status=pn_follow_row(job,top+y,&rows[y]);if(status!=PN_OK)return status;}
+        for(int x=b.x;x<b.x+b.width;x++){size_t row=(size_t)(683-x);uint8_t *output=difference+row*1216u+(size_t)top;
+            for(int y=0;y<height;y++){int8_t state=rows[y].cells[x-rows[y].x];if(state==9 || state==-9)continue;output[y]=state>0?0x0f:0xf0;lines[row]=true;columns[(size_t)(top+y)/2u]=0xff;}}
+    }
+    return PN_OK;
+}
+static bool region_valid(pn_feedback_box_t b,const pn_frame_t *f,const uint8_t *board,size_t capacity){
+    if(!board || capacity<684u*1216u/2u || !f || !f->pixels || b.x<0 || b.y<0 || b.width<1 || b.height<1 || b.width>684-b.x || b.height>1216-b.y || f->width!=b.width || f->height!=b.height || f->stride<((size_t)b.width+1u)/2u || f->stride>SIZE_MAX/(size_t)b.height)return false;
+    uintptr_t a=(uintptr_t)board,p=(uintptr_t)f->pixels;size_t local=f->stride*(size_t)b.height;
+    return a<p?p-a>=684u*1216u/2u:a-p>=local;
+}
+pn_status_t pn_device_frame_extract(const uint8_t *source,size_t capacity,pn_feedback_box_t b,pn_frame_t *out){
+    if(!region_valid(b,out,source,capacity))return PN_INVALID;
+    for(int y=0;y<b.height;y++)for(int x=0;x<b.width;x++){
+        unsigned shift=((unsigned)(b.y+y)&1u)*4u;uint8_t byte=source[(size_t)(683-b.x-x)*608+(size_t)(b.y+y)/2u];
+        pn_frame_pixel(out,x,y,(uint8_t)((byte>>shift)&15u));}
+    return PN_OK;
+}
+pn_status_t pn_device_frame_patch(const pn_frame_t *source,pn_feedback_box_t b,uint8_t *out,size_t capacity){
+    if(!region_valid(b,source,out,capacity))return PN_INVALID;
+    for(int y=0;y<b.height;y++)for(int x=0;x<b.width;x++){
+        unsigned shift=((unsigned)(b.y+y)&1u)*4u;uint8_t *byte=out+(size_t)(683-b.x-x)*608+(size_t)(b.y+y)/2u;
+        *byte=(uint8_t)((*byte&~(15u<<shift))|((unsigned)pn_frame_get(source,x,y)<<shift));}
+    return PN_OK;
+}
 pn_status_t pn_device_frame_copy(const pn_frame_t *source,uint8_t *destination,size_t capacity){
     if(!source || !source->pixels || source->width!=684 || source->height!=1216 || source->stride<342 || !destination || capacity<684u*1216u/2u || source->pixels==destination)return PN_INVALID;
     // 512B小块先连续读，再连续写；避免每像素跨整帧访问PSRAM。/ Read a contiguous 512B tile before contiguous writes, avoiding frame-wide PSRAM strides per pixel.

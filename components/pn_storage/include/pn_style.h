@@ -20,8 +20,10 @@ typedef struct {
     int16_t reading_line_offset; ///< 阅读线上下位置-8..8px，2px一步 / Guide vertical offset -8..8 px in 2 px steps
     uint16_t reading_line_shade; ///< 阅读线深浅：0浅、1中、2深、3黑；旧记录为0 / Guide darkness: light, medium, dark or black; legacy records load as light
 } pn_style_t;
-/// 默认145%行距、25%段距、无缩进、32px边距；刷新使用系统设置。
-/// Default 145% line spacing, 25% gap, no indent, 32px margins refresh follows global settings.
+/// 产品默认舒适模式字号。/ Product default comfortable-mode body size.
+enum { PN_STYLE_DEFAULT_PIXELS = 44 };
+/// 舒适模式间距：145%行距、40%段距、缩进2字、32px边距；调用方可指定字号。
+/// Comfortable spacing: 145% line height, 40% paragraph gap, two-em indent, 32px margins; callers may specify body size.
 pn_style_t pn_style_default(int pixels);
 /// 校验所有范围。/ Validate every range.
 pn_status_t pn_style_validate(const pn_style_t *style);

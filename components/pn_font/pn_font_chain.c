@@ -38,3 +38,10 @@ pn_status_t pn_font_chain_vertical(pn_font_chain_t *c,int *ascent,int *descent){
     *ascent=a;*descent=d;return PN_OK;
 }
 pn_status_t pn_font_chain_draw(pn_font_chain_t *c,pn_frame_t *frame,uint32_t cp,int32_t x,int baseline,pn_font_render_t mode){pn_font_choice_t choice;pn_status_t status=pn_font_chain_choose(c,cp,&choice);return status==PN_OK?pn_font_draw(choice.font,frame,cp,x,baseline,mode):status;}
+pn_status_t pn_font_chain_prerender(pn_font_chain_t *c,pn_frame_t *frame,uint32_t cp,int32_t x,int baseline,pn_font_render_t mode){pn_font_choice_t choice;pn_status_t status=pn_font_chain_choose(c,cp,&choice);return status==PN_OK?pn_font_prerender(choice.font,frame,cp,x,baseline,mode):status;}
+pn_status_t pn_font_chain_validate(const pn_font_chain_t *c){
+    if(!c || !c->primary || !c->count || c->count>2)return PN_INVALID;
+    pn_status_t s=pn_font_source_ready(c->primary);
+    for(unsigned i=0;s==PN_OK && i<c->count;i++)if(c->sources[i].validate)s=c->sources[i].validate(c->sources[i].ctx);
+    return s;
+}

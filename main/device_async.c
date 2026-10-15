@@ -16,11 +16,11 @@ _Static_assert(sizeof(pn_device_input_event_t)<=PN_ASYNC_PAYLOAD,"Device input p
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "esp_timer.h"
-typedef struct {const pn_frame_t *frame;pn_refresh_t profile;bool off;} display_t;
+typedef struct {const pn_frame_t *frame;pn_refresh_t profile;bool off;const pn_feedback_patch_t *patch;pn_status_t (*native)(void *);void *native_ctx;} display_t;
 static uint64_t now_ms(void){return (uint64_t)(esp_timer_get_time()/1000);}
 // 空闲只需检查断轨期限（秒级），100ms足够且减少唤醒。/ Idle only checks the rail deadline (seconds), so 100 ms suffices with fewer wakeups.
 static void display_task(void *ctx){pn_device_async_t *p=ctx;for(;;){display_t job;if(xQueueReceive(p->display_queue,&job,pdMS_TO_TICKS(100))==pdTRUE){// 扫描期间行供数依赖CPU，持最高频锁防欠载。/ Line feeding during a scan is CPU-bound, so hold the max lock to avoid underruns.
-            pn_device_power_busy(PN_POWER_DISPLAY,true);if(job.off){p->off();p->display_result=PN_OK;}else p->display_result=p->panel(NULL,job.frame,job.profile);pn_device_power_busy(PN_POWER_DISPLAY,false);xSemaphoreGive(p->display_done);}p->idle(now_ms());}}
+            pn_device_power_busy(PN_POWER_DISPLAY,true);if(job.off){p->off();p->display_result=PN_OK;}else if(job.native)p->display_result=job.native(job.native_ctx);else if(job.patch)p->display_result=p->feedback?p->feedback(p->panel_ctx,job.patch):PN_UNSUPPORTED;else p->display_result=p->panel(NULL,job.frame,job.profile);pn_device_power_busy(PN_POWER_DISPLAY,false);xSemaphoreGive(p->display_done);}p->idle(now_ms());}}
 static void send(pn_device_async_t *p,const pn_device_input_event_t *input,bool navigation,bool urgent){atomic_fetch_add(&p->events_sent,1);pn_async_event_t e={.bytes=sizeof *input,.navigation=navigation,.urgent=urgent,.view=atomic_load(&p->input.view)};memcpy(e.payload,input,sizeof *input);(void)pn_async_send(&p->input,&e);
     if(p->product_task)xTaskNotifyGive((TaskHandle_t)p->product_task);}
 static void input_task(void *ctx){
@@ -63,23 +63,27 @@ void pn_device_async_start(pn_device_async_t *p,read_pico_handle_t *hardware,pn_
     if(xTaskCreatePinnedToCore(input_task,"pn-input",4096,p,6,&input_handle,0)==pdPASS){p->input_active=true;p->input_task_handle=input_handle;}
 #endif
 }
-static pn_status_t receipt(pn_device_async_t *p,pn_status_t status){if(status==PN_OK && !atomic_load(&p->body))p->revision++;return status;}
-pn_status_t pn_device_async_present(pn_device_async_t *p,const pn_frame_t *frame,pn_refresh_t profile){
+static pn_status_t receipt(pn_device_async_t *p,pn_status_t status,bool feedback){if(status==PN_OK && !feedback && !atomic_load(&p->body))p->revision++;return status;}
+static pn_status_t submit(pn_device_async_t *p,const pn_frame_t *frame,pn_refresh_t profile,const pn_feedback_patch_t *patch,pn_status_t (*native)(void *),void *native_ctx){
+    if(!p || (!native && (patch?!p->feedback:!p->panel)))return PN_UNSUPPORTED;
     pn_status_t cancel=pn_cancel_checkpoint();if(cancel!=PN_OK)return cancel;
 #ifdef ESP_PLATFORM
-    if(p->display_active){display_t job={.frame=frame,.profile=profile};pn_profile_span_t span;
+    if(p->display_active){display_t job={.frame=frame,.profile=profile,.patch=patch,.native=native,.native_ctx=native_ctx};pn_profile_span_t span;
         pn_profile_begin(&span,NULL,"display.queue");bool queued=xQueueSend(p->display_queue,&job,pdMS_TO_TICKS(100))==pdTRUE;pn_profile_end(&span,queued?PN_OK:PN_BUSY);
         if(!queued)return PN_BUSY; // 队列交接前允许取消，扫描开始后等回执。/ Cancellation is allowed before handoff; once scanning starts, wait for its receipt.
         pn_profile_begin(&span,NULL,"display.wait");bool completed=false;
         // 扫描期间产品任务本会空等：在回执到达前做有界小步（为待确认页排下一页/预热字形），不碰被扫描的帧。
         // The product task would idle during the scan: do bounded steps (lay out/warm the page after the pending one) before the receipt, never touching the scanned frame.
-        if(p->overlap)for(unsigned steps=0;steps<256u && !completed;steps++){completed=xSemaphoreTake(p->display_done,0)==pdTRUE;if(!completed && p->overlap(p->overlap_ctx)!=PN_OK)break;}
+        if(!patch && !native && p->overlap)for(unsigned steps=0;steps<256u && !completed;steps++){completed=xSemaphoreTake(p->display_done,0)==pdTRUE;if(!completed && p->overlap(p->overlap_ctx)!=PN_OK)break;}
         if(!completed)completed=xSemaphoreTake(p->display_done,portMAX_DELAY)==pdTRUE;
-        pn_status_t status=completed?p->display_result:PN_IO;pn_profile_end(&span,status);return receipt(p,status);}
+        pn_status_t status=completed?p->display_result:PN_IO;pn_profile_end(&span,status);return receipt(p,status,patch!=NULL || native!=NULL);}
 #endif
-    pn_device_power_busy(PN_POWER_DISPLAY,true);pn_status_t status=p->panel(NULL,frame,profile);pn_device_power_busy(PN_POWER_DISPLAY,false);
-    return receipt(p,status);
+    pn_device_power_busy(PN_POWER_DISPLAY,true);pn_status_t status=native?native(native_ctx):patch?p->feedback(p->panel_ctx,patch):p->panel(NULL,frame,profile);pn_device_power_busy(PN_POWER_DISPLAY,false);
+    return receipt(p,status,patch!=NULL || native!=NULL);
 }
+pn_status_t pn_device_async_present(pn_device_async_t *p,const pn_frame_t *frame,pn_refresh_t profile){return submit(p,frame,profile,NULL,NULL,NULL);}
+pn_status_t pn_device_async_feedback(pn_device_async_t *p,const pn_feedback_patch_t *patch){if(!patch || (patch->settle?(patch->pressed || patch->frame.pixels!=NULL):!patch->frame.pixels))return PN_INVALID;return submit(p,NULL,PN_REFRESH_GL16,patch,NULL,NULL);}
+pn_status_t pn_device_async_native(pn_device_async_t *p,pn_status_t (*native)(void *),void *ctx){if(!native)return PN_INVALID;return submit(p,NULL,PN_REFRESH_GL16,NULL,native,ctx);}
 void pn_device_async_view(pn_device_async_t *p,uint32_t view,bool body,uint8_t flags){atomic_store(&p->flags,flags);atomic_store(&p->body,body);atomic_store(&p->input.view,(view&0xffffu)|(p->revision<<16));}
 pn_status_t pn_device_async_take(pn_device_async_t *p,pn_device_input_event_t *event){pn_async_event_t e;pn_status_t status=pn_async_take(&p->input,&e);if(status==PN_OK){memcpy(event,e.payload,sizeof *event);if((!e.navigation || !e.urgent) && e.view!=atomic_load(&p->input.view))return PN_CANCELLED;}return status;}
 bool pn_device_async_pause(pn_device_async_t *p,bool paused){atomic_store(&p->paused,paused);

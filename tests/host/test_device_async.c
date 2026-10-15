@@ -4,6 +4,7 @@
 #include "device_async.h"
 #include "freertos/task.h"
 #include "pn_input_prefs.h"
+#include "pn_cancel.h"
 #include <assert.h>
 #include <threads.h>
 #include <string.h>
@@ -42,6 +43,14 @@ void xTaskNotifyGive(TaskHandle_t task){(void)task;atomic_fetch_add(&notified,1)
 unsigned ulTaskNotifyTake(int clear,unsigned ticks){(void)clear;vTaskDelay(ticks);return 0;}
 TaskHandle_t xTaskGetCurrentTaskHandle(void){return (TaskHandle_t)&notified;}
 static atomic_uint overlap_calls;
+static atomic_bool release_feedback,fail_feedback;
+static pn_feedback_patch_t feedback_patch;
+static pn_status_t feedback_panel(void *ctx,const pn_feedback_patch_t *p){
+ (void)ctx;assert(p==&feedback_patch && pn_device_power_held(PN_POWER_DISPLAY));if(p->settle)assert(!p->frame.pixels && p->box.y==128 && p->box.height==192);else assert(pn_frame_get(&p->frame,0,0)==5);atomic_store(&entered,true);
+ while(!atomic_load(&release_feedback))vTaskDelay(1);
+ if(p->settle)assert(!p->frame.pixels);else assert(pn_frame_get(&p->frame,0,0)==5);return atomic_load(&fail_feedback)?PN_IO:PN_OK;
+}
+static int present_feedback(void *ctx){assert(pn_device_async_feedback(ctx,&feedback_patch)==PN_OK);return 0;}
 // 扫描等待期间被调用：前3次报告有工作，之后空闲。/ Called while awaiting the scan: report work three times, then idle.
 static pn_status_t count_overlap(void *ctx){(void)ctx;return atomic_fetch_add(&overlap_calls,1)<3u?PN_OK:PN_EMPTY;}
 static void idle(uint64_t now){(void)now;}
@@ -49,6 +58,12 @@ static void off(void){atomic_fetch_add(&off_calls,1);}
 static pn_status_t panel(void *ctx,const pn_frame_t *frame,pn_refresh_t profile){(void)ctx;(void)profile;assert(pn_frame_get(frame,0,0)==7);assert(pn_device_power_held(PN_POWER_DISPLAY));atomic_store(&entered,true);while(!atomic_load(&release_panel))vTaskDelay(1);assert(pn_frame_get(frame,0,0)==7);return PN_OK;}
 static int present(void *ctx){pn_device_async_t *p=ctx;uint8_t pixels[2]={0x77,0x77};pn_frame_t frame;assert(pn_frame_bind(&frame,pixels,sizeof pixels,2,2));assert(pn_device_async_present(p,&frame,PN_REFRESH_GL16)==PN_OK);return 0;}
 static void wait_entered(void){uint64_t end=ms()+1000;while(!atomic_load(&entered) && ms()<end)vTaskDelay(1);assert(atomic_load(&entered));}
+typedef struct {pn_device_async_t *port;thrd_t owner;uint64_t token;pn_status_t result;} native_job_t; ///< 借用的不可变队列参数 / Borrowed immutable queue arguments
+static atomic_uint native_calls;
+static atomic_bool release_native,fail_native;
+static pn_status_t native_scan(void *ctx){native_job_t *job=ctx;assert(job->token==UINT64_C(0x1122334455667788) && !thrd_equal(thrd_current(),job->owner) && pn_device_power_held(PN_POWER_DISPLAY));atomic_fetch_add(&native_calls,1);atomic_store(&entered,true);while(!atomic_load(&release_native))vTaskDelay(1);assert(job->token==UINT64_C(0x1122334455667788));return atomic_load(&fail_native)?PN_IO:PN_OK;}
+static int native_present(void *ctx){native_job_t *job=ctx;job->owner=thrd_current();job->result=pn_device_async_native(job->port,native_scan,job);return 0;}
+static bool cancelled(void *ctx){(void)ctx;return true;}
 int main(void){
  read_pico_handle_t hw={.touch_ready=true};pn_device_async_t p;atomic_store(&reject,true);pn_device_async_start(&p,&hw,panel,idle,off);assert(!p.input_active && !p.display_active && !objects && !task_count);
  atomic_store(&reject,false);pn_device_async_start(&p,&hw,panel,idle,off);assert(p.input_active && p.display_active && objects==2 && task_count==2 && !p.touch_wake);pn_device_async_bind_product(&p);assert(p.product_task);pn_device_async_view(&p,15,true,0);vTaskDelay(35);
@@ -69,7 +84,31 @@ int main(void){
  bool opening_back=false;end=ms()+1000;
  while(ms()<end && !opening_back){if(pn_device_async_take(&p,&e)==PN_OK && e.key_event==PN_KEY_SHORT && e.key==PN_KEY_1){assert(e.kind==PN_DASYNC_OPEN_CANCEL);opening_back=true;}else vTaskDelay(1);}assert(opening_back);
  pn_async_block_controls(&p.input,false);
- // 旧管理帧的点击被丢弃，成功回执推进代次。/ Discard clicks from old management frames; successful receipts advance their revision.
+ // 反馈等待期间真实输入继续投递；反馈回执不让这次按压的释放过期，不运行阅读预热。
+ // Real input continues during feedback; its receipt preserves this press's release and never runs reader warming.
+ while(pn_device_async_take(&p,&e)!=PN_EMPTY){}
+ pn_device_async_view(&p,8,false,0);vTaskDelay(35);while(pn_device_async_take(&p,&e)!=PN_EMPTY){}
+ unsigned revision=p.revision,overlaps=atomic_load(&overlap_calls);uint8_t local[128];memset(local,0x55,sizeof local);
+ feedback_patch=(pn_feedback_patch_t){.box={32,190,16,16},.view=atomic_load(&p.input.view),.hit=42,.pressed=true};assert(pn_frame_bind(&feedback_patch.frame,local,sizeof local,16,16));
+ assert(pn_device_async_feedback(&p,&feedback_patch)==PN_UNSUPPORTED);p.feedback=feedback_panel;atomic_store(&entered,false);
+ assert(thrd_create(&foreground,present_feedback,&p)==thrd_success);wait_entered();atomic_store(&x,100);atomic_store(&y,220);atomic_store(&count,1);vTaskDelay(35);atomic_store(&count,0);vTaskDelay(35);
+ atomic_store(&release_feedback,true);thrd_join(foreground,NULL);assert(p.revision==revision && atomic_load(&overlap_calls)==overlaps);pn_device_async_view(&p,8,false,0);
+ unsigned releases=0;while(pn_device_async_take(&p,&e)!=PN_EMPTY){assert(e.valid);if(e.kind==PN_DASYNC_TOUCH && !e.count)releases++;}assert(releases==2);
+ atomic_store(&fail_feedback,true);assert(pn_device_async_feedback(&p,&feedback_patch)==PN_IO && p.revision==revision);atomic_store(&fail_feedback,false);
+ feedback_patch=(pn_feedback_patch_t){.box={0,128,684,192},.settle=true};atomic_store(&release_feedback,false);atomic_store(&entered,false);
+ assert(thrd_create(&foreground,present_feedback,&p)==thrd_success);wait_entered();atomic_store(&count,1);vTaskDelay(35);atomic_store(&count,0);vTaskDelay(35);atomic_store(&release_feedback,true);thrd_join(foreground,NULL);
+ assert(p.revision==revision && atomic_load(&overlap_calls)==overlaps);pn_device_async_view(&p,8,false,0);releases=0;
+ while(pn_device_async_take(&p,&e)!=PN_EMPTY){assert(e.valid);if(e.kind==PN_DASYNC_TOUCH && !e.count)releases++;}assert(releases==2);
+ feedback_patch.pressed=true;assert(pn_device_async_feedback(&p,&feedback_patch)==PN_INVALID);feedback_patch.pressed=false;
+ // 原生逐相队列借用直到真实回执；等待中输入继续，代次和阅读重叠都不变化。
+ // Native phase jobs retain their borrow until the real receipt; input continues without changing revisions or running reader overlap.
+ native_job_t job={.port=&p,.token=UINT64_C(0x1122334455667788)};atomic_store(&entered,false);pn_device_async_view(&p,8,false,0);vTaskDelay(35);while(pn_device_async_take(&p,&e)!=PN_EMPTY){}
+ assert(thrd_create(&foreground,native_present,&job)==thrd_success);wait_entered();atomic_store(&count,1);vTaskDelay(35);atomic_store(&count,0);vTaskDelay(35);assert(!atomic_load(&release_native) && pn_device_power_held(PN_POWER_DISPLAY));atomic_store(&release_native,true);thrd_join(foreground,NULL);
+ assert(job.result==PN_OK && p.revision==revision && atomic_load(&overlap_calls)==overlaps && atomic_load(&native_calls)==1 && task_count==2);pn_device_async_view(&p,8,false,0);releases=0;while(pn_device_async_take(&p,&e)!=PN_EMPTY){assert(e.valid);if(e.kind==PN_DASYNC_TOUCH && !e.count)releases++;}assert(releases==2);
+ atomic_store(&fail_native,true);assert(thrd_create(&foreground,native_present,&job)==thrd_success);thrd_join(foreground,NULL);assert(job.result==PN_IO && p.revision==revision && atomic_load(&overlap_calls)==overlaps);atomic_store(&fail_native,false);
+ pn_cancel_scope_t cancel_scope;pn_cancel_enter(&cancel_scope,cancelled,NULL);unsigned calls=atomic_load(&native_calls);assert(pn_device_async_native(&p,native_scan,&job)==PN_CANCELLED && atomic_load(&native_calls)==calls && p.revision==revision);pn_cancel_leave(&cancel_scope);assert(pn_device_async_native(&p,NULL,&job)==PN_INVALID);
+ assert(thrd_create(&foreground,present,&p)==thrd_success);thrd_join(foreground,NULL);assert(p.revision==revision+1);
+ // 旧管理帧的点击被丢弃，成功内容回执推进代次。/ Discard clicks from old management frames; successful content receipts advance their revision.
  while(pn_device_async_take(&p,&e)!=PN_EMPTY){}
  pn_device_async_view(&p,8,false,0);pn_async_event_t stale={.bytes=sizeof e,.view=atomic_load(&p.input.view)};memcpy(stale.payload,&e,sizeof e);pn_async_send(&p.input,&stale);p.revision++;pn_device_async_view(&p,8,false,0);assert(pn_device_async_take(&p,&e)==PN_CANCELLED);
  atomic_store(&stop,true);for(unsigned i=0;i<task_count;i++)thrd_join(tasks[i].thread,NULL);vQueueDelete(p.display_queue);vSemaphoreDelete(p.display_done);assert(!objects);

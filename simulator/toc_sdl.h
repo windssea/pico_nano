@@ -7,7 +7,7 @@ static int toc_key(pn_toc_ui_t *u,SDL_Keycode key){
     if(key==SDLK_F5)return PN_TOC_UI_RETRY;
     if(key==SDLK_ESCAPE || key==SDLK_t)return PN_TOC_UI_BACK;
     if(!u->presented)return -1;
-    if(key==SDLK_RETURN)return PN_TOC_UI_ROW+(int)u->selected;
+    if(key==SDLK_RETURN)return pn_toc_ui_selected_command(u);
     if(key==SDLK_HOME)return PN_TOC_UI_CURRENT;
     if(key==SDLK_RIGHT || key==SDLK_PAGEDOWN)return PN_TOC_UI_NEXT;
     if(key==SDLK_LEFT || key==SDLK_PAGEUP)return PN_TOC_UI_PREVIOUS;

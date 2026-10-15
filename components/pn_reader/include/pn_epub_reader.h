@@ -45,6 +45,11 @@ pn_status_t pn_epub_reader_reflow(pn_epub_reader_t *,const pn_layout_t *);
 pn_status_t pn_epub_reader_progress(pn_epub_reader_t *,pn_epub_progress_t *);
 /// 空闲NEXT预排，不修改visible/history/保存；占用原pool，取消不发布缓存。/ Idle NEXT preparation preserving visible/history/save; uses the existing pool and never publishes cancelled results.
 pn_status_t pn_epub_reader_prefetch(pn_epub_reader_t *reader);
+typedef pn_status_t (*pn_epub_next_fn)(void *,const pn_epub_page_t *,const pn_epub_reader_anchor_t *,pn_job_token_t); ///< 只读邻页借用，不重入会话 / Read-only neighbor borrowing without reader reentry
+/// 回调期pin保护并复查媒体；不提交位置，借用只在回调内有效。/ Pin and revalidate media for a callback without committing progress; borrowing lasts only for the callback.
+pn_status_t pn_epub_reader_visit_next(pn_epub_reader_t *,pn_epub_next_fn,void *);
+/// 仅查询键匹配的完整邻页，不读源；借用仍须visit_next验证。/ Query a complete key-matching neighbor without source IO; borrowing still requires visit_next validation.
+bool pn_epub_reader_next_ready(const pn_epub_reader_t *);
 typedef pn_status_t (*pn_epub_warm_fn)(void *,const pn_epub_page_node_t *); ///< 字形预热回调，不解码图片 / Glyph warming callback without image decoding
 /// 有界预热已验证邻页，保护借用并复查介质；缺字跳过、内存不足停本页，不提交进度。 / Warm a bounded verified neighbor page under borrow/media protection; skip missing glyphs, stop on OOM, never commit progress.
 pn_status_t pn_epub_reader_warm_next(pn_epub_reader_t *,pn_epub_warm_fn,void *,size_t budget);

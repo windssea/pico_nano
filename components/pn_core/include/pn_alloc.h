@@ -19,6 +19,8 @@ typedef enum {
     PN_CACHE_GLYPH, ///< 可重建字形 / Rebuildable glyphs
     PN_CACHE_COVER, ///< 非活动封面 / Inactive covers
     PN_CACHE_CHAPTER, ///< 已验证章节语义，可在压力时重建 / Verified chapter semantics, rebuildable under pressure
+    PN_CACHE_SOURCE, ///< 不变文件的小读块，压力时可重读 / Small-read blocks of immutable files, reloadable under pressure
+    PN_CACHE_BITMAP, ///< 下一页像素帧，与节点分开计费 / Next-page pixels, charged separately from nodes
     PN_CACHE_COUNT ///< 类别数 / Class count
 } pn_cache_class_t;
 typedef struct pn_cache_owner pn_cache_owner_t;
@@ -70,6 +72,7 @@ struct pn_pool {
     pn_cache_owner_t *caches; ///< owner串行访问的回收链 / Serialized owner reclamation chain
     size_t cache_limit,cache_reserve,cache_caps[PN_CACHE_COUNT]; ///< 总缓存/前台余量/分项上限 / Aggregate cache cap, foreground headroom and class caps
     pn_cache_stats_t cache_stats[PN_CACHE_COUNT]; ///< 池内可回收缓存诊断 / Reclaimable pool-cache diagnostics
+    uint64_t source_cache_clock; ///< 不变文件块的同池LRU时钟，owner串行 / Same-pool LRU clock for immutable-file blocks, serialized owner
     unsigned speculative; ///< 预排范围不回收或重试 / Speculative scopes never reclaim or retry
     pn_cache_class_t speculative_kind; ///< 最外层可选分配类别 / Outermost optional allocation class
     size_t speculative_begin; ///< 最外层预排开始用量 / Usage at outer speculative entry
@@ -84,6 +87,8 @@ int pn_pool_init(pn_pool_t *pool, size_t limit, pn_malloc_fn alloc, pn_free_fn r
 void *pn_alloc(pn_pool_t *pool, size_t bytes);
 /// 分类计费；分类错误拒绝，释放时使用块内原分类。/ Charge by class; reject invalid classes and free using the stored original class.
 void *pn_alloc_tagged(pn_pool_t *pool,pn_memory_tag_t tag,size_t bytes);
+/// 可选临时块保留前台余量，不回收缓存或底层重试；失败不影响已有数据。/ Optional temporary blocks preserve foreground headroom without cache eviction/backing-heap retries; failures leave existing data intact.
+void *pn_alloc_optional(pn_pool_t *pool,pn_memory_tag_t tag,size_t bytes);
 /// 稳定诊断名称，不分配或修改池。/ Stable diagnostic name without allocations or pool mutations.
 const char *pn_memory_tag_name(pn_memory_tag_t tag);
 /// 空指针安全；仅释放本接口返回的活动指针，池须比指针活得久。
@@ -109,7 +114,7 @@ void *pn_cache_alloc(pn_pool_t *,pn_cache_class_t,pn_memory_tag_t,size_t bytes);
 void pn_cache_observe(pn_pool_t *,pn_cache_class_t,bool hit);
 /// 刷新当前/峰值字节，不修改命中计数。/ Refresh current/peak bytes without changing hit counts.
 void pn_cache_snapshot(pn_pool_t *);
-/// 前台安全边界按邻页、字形、非活动封面回收至所需余量。/ At a safe foreground boundary reclaim neighbors, glyphs, inactive covers to the required headroom.
+/// 前台安全边界先回收文件块、像素帧，再回收邻页、字形、封面与章节。/ At a safe foreground boundary reclaim file blocks and pixel frames, then neighbors, glyphs, covers and chapters.
 size_t pn_cache_reclaim(pn_pool_t *,size_t headroom);
 /// 指定类别（位掩码1<<kind）中未借用、可按需回收的缓存字节；前台分配不足时会自动回收这些字节。
 /// Unpinned cache bytes of the given kinds (mask 1<<kind) that foreground allocation reclaims on demand.

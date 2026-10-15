@@ -56,6 +56,9 @@ void pn_shelf_style_preview(pn_frame_t *frame,unsigned style,unsigned columns,in
 /// 带选项的绘制与命中（options可为NULL）。list_mode下每页5行，条目序号按行计。
 /// Drawing and hit testing with options (may be NULL). In list mode a page has five rows and item numbers count rows.
 pn_status_t pn_shelf_render_ex(const pn_catalog_page_t *page,pn_font_t *font,pn_frame_t *frame,int selected,bool recent,bool transfer,const pn_shelf_covers_t *covers,const pn_shelf_options_t *options);
+/// 仅焦点改变时更新已确认底图；页面/封面/选项须保持相同，EMPTY免呈现，叠层返回UNSUPPORTED。不打开文件。
+/// Update a confirmed base when only focus changes; page/covers/options must match, EMPTY skips presentation, and overlays return UNSUPPORTED. Never opens files.
+pn_status_t pn_shelf_render_focus(const pn_catalog_page_t *,pn_font_t *,pn_frame_t *,int,int,const pn_shelf_covers_t *,const pn_shelf_options_t *);
 int pn_shelf_hit_ex(const pn_catalog_page_t *page,int x,int y,const pn_shelf_options_t *options);
 /// 字母跳转页：A–Z、#与返回，纯绘制。/ Letter-index page with A–Z, # and Back, paint only.
 pn_status_t pn_shelf_index_render(pn_font_t *font,pn_frame_t *frame);
@@ -75,4 +78,6 @@ pn_status_t pn_shelf_render_with_font_file(const pn_catalog_page_t *page,pn_font
 /// 同上，带选项。/ Same with options.
 pn_status_t pn_shelf_render_with_font_file_ex(const pn_catalog_page_t *page,pn_font_t *font,pn_frame_t *frame,int selected,bool recent,bool transfer,const pn_shelf_covers_t *covers,
     pn_pool_t *pool,pn_media_t *media,const char *font_path,const pn_shelf_options_t *options);
+/// 控制层为焦点准备与完整绘制相同的补字作用域；纯列表标记无需打开外置字体。/ Controller prepares the same fallback scope for focus as full painting; list markers need no external font opens.
+pn_status_t pn_shelf_focus_with_font_file(const pn_catalog_page_t *,pn_font_t *,pn_frame_t *,int,int,const pn_shelf_covers_t *,pn_pool_t *,pn_media_t *,const char *,const pn_shelf_options_t *);
 

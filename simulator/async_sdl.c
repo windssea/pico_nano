@@ -6,7 +6,7 @@
 #include <string.h>
 #include <stdio.h>
 _Static_assert(sizeof(SDL_Event)<=PN_ASYNC_PAYLOAD,"SDL event payload must stay bounded");
-static bool scripted(const SDL_Event *e){return (e->type==SDL_KEYDOWN && e->key.windowID==UINT32_MAX) || (e->type==SDL_TEXTINPUT && e->text.windowID==UINT32_MAX) || ((e->type==SDL_MOUSEBUTTONDOWN || e->type==SDL_MOUSEBUTTONUP) && e->button.windowID==UINT32_MAX);}
+static bool scripted(const SDL_Event *e){return (e->type==SDL_KEYDOWN && e->key.windowID==UINT32_MAX) || (e->type==SDL_TEXTINPUT && e->text.windowID==UINT32_MAX) || ((e->type==SDL_MOUSEBUTTONDOWN || e->type==SDL_MOUSEBUTTONUP) && e->button.windowID==UINT32_MAX) || (e->type==SDL_MOUSEMOTION && e->motion.windowID==UINT32_MAX) || (e->type==SDL_WINDOWEVENT && e->window.windowID==UINT32_MAX);}
 bool pn_sdl_async_init(pn_sdl_async_t *p,pn_status_t (*render)(void *,const pn_frame_t *),void *ctx){
     memset(p,0,sizeof *p);pn_async_init(&p->input);atomic_init(&p->done,false);atomic_init(&p->mouse,0);p->render=render;p->render_ctx=ctx;
     if(SDL_Init(SDL_INIT_VIDEO)!=0)return false;
@@ -29,7 +29,7 @@ int pn_sdl_async_run(pn_sdl_async_t *p,int (*worker)(void *),void *ctx){
         if(p->text_input){if(p->text_input>0)SDL_StartTextInput();else SDL_StopTextInput();p->text_input=0;}
         if(p->pending){
             if(!p->deadline)p->deadline=SDL_GetTicks64()+p->delay_ms;
-            if(SDL_GetTicks64()>=p->deadline){p->shown=p->render(p->render_ctx,p->frame);p->pending=false;p->deadline=0;SDL_CondSignal(p->display_done);
+            if(SDL_GetTicks64()>=p->deadline){p->shown=p->native?p->native(p->native_ctx):p->patch?p->feedback(p->render_ctx,p->patch):p->render(p->render_ctx,p->frame);p->pending=false;p->deadline=0;SDL_CondSignal(p->display_done);
                 // 焦点噪声复现真实窗口的迟到事件，不能覆盖脚本回执。/ Focus noise reproduces late native-window events which must not overwrite script receipts.
                 if(getenv("PN_SIM_FOCUS_NOISE")){SDL_Event noise={.type=SDL_WINDOWEVENT};noise.window.windowID=SDL_GetWindowID(p->window);noise.window.event=SDL_WINDOWEVENT_FOCUS_LOST;for(unsigned i=0;i<3;i++)(void)SDL_PushEvent(&noise);}}
         }
@@ -69,14 +69,18 @@ bool pn_sdl_async_wait(pn_sdl_async_t *p,SDL_Event *event,unsigned timeout,uint3
     }
     pn_async_begin(&p->input,&p->scope,status==PN_EMPTY);p->scope_active=true;return status==PN_OK || status==PN_CANCELLED;
 }
-pn_status_t pn_sdl_async_present(pn_sdl_async_t *p,const pn_frame_t *frame,pn_refresh_t profile){
+static pn_status_t submit(pn_sdl_async_t *p,const pn_frame_t *frame,pn_refresh_t profile,const pn_feedback_patch_t *patch,pn_status_t (*native)(void *),void *native_ctx){
+    if(patch && !p->feedback)return PN_UNSUPPORTED;
     pn_status_t cancel=pn_cancel_checkpoint();if(cancel!=PN_OK)return cancel;
-    SDL_LockMutex(p->mutex);p->frame=frame;p->profile=profile;p->pending=true;
+    SDL_LockMutex(p->mutex);p->frame=frame;p->patch=patch;p->profile=profile;p->native=native;p->native_ctx=native_ctx;p->pending=true;
     while(p->pending)SDL_CondWait(p->display_done,p->mutex);
-    pn_status_t result=p->shown;p->frame=NULL;SDL_UnlockMutex(p->mutex);
-    if(result==PN_OK && p->context!=15)p->revision++;
+    pn_status_t result=p->shown;p->frame=NULL;p->patch=NULL;p->native=NULL;p->native_ctx=NULL;SDL_UnlockMutex(p->mutex);
+    if(result==PN_OK && !patch && !native && p->context!=15)p->revision++;
     return result;
 }
+pn_status_t pn_sdl_async_present(pn_sdl_async_t *p,const pn_frame_t *frame,pn_refresh_t profile){return submit(p,frame,profile,NULL,NULL,NULL);}
+pn_status_t pn_sdl_async_feedback(pn_sdl_async_t *p,const pn_feedback_patch_t *patch){if(!p || !patch || (patch->settle?(patch->pressed || patch->frame.pixels!=NULL):!patch->frame.pixels))return PN_INVALID;return submit(p,NULL,PN_REFRESH_GL16,patch,NULL,NULL);}
+pn_status_t pn_sdl_async_native(pn_sdl_async_t *p,pn_status_t (*native)(void *),void *ctx){if(!p || !native)return PN_INVALID;return submit(p,NULL,PN_REFRESH_GL16,NULL,native,ctx);}
 void pn_sdl_async_close(pn_sdl_async_t *p){SDL_DestroyTexture(p->texture);SDL_DestroyRenderer(p->renderer);SDL_DestroyWindow(p->window);if(p->wake)SDL_DestroySemaphore(p->wake);if(p->display_done)SDL_DestroyCond(p->display_done);if(p->mutex)SDL_DestroyMutex(p->mutex);SDL_Quit();}
 void pn_sdl_async_title(pn_sdl_async_t *p,const char *title){SDL_LockMutex(p->mutex);snprintf(p->title,sizeof p->title,"%s",title);p->title_pending=true;SDL_UnlockMutex(p->mutex);}
 void pn_sdl_async_text(pn_sdl_async_t *p,bool enabled){SDL_LockMutex(p->mutex);p->text_input=enabled?1:-1;SDL_UnlockMutex(p->mutex);}

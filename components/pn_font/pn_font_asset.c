@@ -13,6 +13,7 @@
 #include <sys/stat.h>
 #include <stdlib.h>
 typedef struct {pn_pool_t *pool;pn_media_t *media;pn_media_lease_t lease;pn_text_file_t file;pn_text_source_t source;pn_font_t font;pn_font_reference_t reference;pn_font_info_t info;} asset_t;
+pn_status_t pn_font_asset_verify_retained(const pn_font_asset_t *asset){if(!asset || !asset->impl)return PN_INVALID;const asset_t *a=asset->impl;return pn_text_file_verify_retained(a->pool,&a->source);}
 pn_status_t pn_font_reference_open_file(pn_pool_t *pool,const pn_font_reference_t *ref,pn_media_t *media,const pn_media_lease_t *lease,pn_text_file_t *file,pn_text_source_t *source){
     if(!pool || !ref || !media || !lease || !file || !source || ref->kind!=PN_FONT_FILE)return PN_INVALID;
     if(file->handle)return PN_BUSY;

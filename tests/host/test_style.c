@@ -8,7 +8,8 @@
 #include <unistd.h>
 int main(void){char root[]="/tmp/pn-style-XXXXXX";assert(mkdtemp(root));char a[384],b[384];snprintf(a,sizeof a,"%s/a",root);snprintf(b,sizeof b,"%s/b",root);
     pn_media_t media;pn_media_init(&media);assert(pn_media_attach(&media,1)==PN_OK);pn_media_lease_t lease;assert(pn_media_acquire(&media,PN_MEDIA_WRITE,&lease)==PN_OK);pn_journal_files_t files;pn_journal_io_t io;assert(pn_journal_files_init(&files,&media,&lease,a,b,&io)==PN_OK);
-    pn_book_id_t book={{42}};pn_style_t s=pn_style_default(44),loaded;assert(pn_style_validate(&s)==PN_OK);
+    pn_book_id_t book={{42}};pn_style_t s=pn_style_default(PN_STYLE_DEFAULT_PIXELS),loaded;assert(pn_style_validate(&s)==PN_OK);
+    assert(s.pixels==44 && s.line_percent==145 && s.gap_percent==40 && s.indent_em==2 && s.margin==32);
     assert(pn_style_load(&io,&book,&loaded)==PN_EMPTY);s=(pn_style_t){56,180,50,2,64,0,15,2,-8,3};assert(pn_style_save(&io,&book,&s)==PN_OK);assert(pn_style_load(&io,&book,&loaded)==PN_OK && !memcmp(&s,&loaded,sizeof s));
     // schema4深浅往返；schema3同载荷按浅读取，越界深浅拒绝保存。/ Schema 4 darkness round-trips; the same payload as schema 3 loads light, and out-of-range darkness is rejected.
     assert(pn_style_default(44).reading_line_shade==1);{pn_record_t v3;assert(pn_journal_load(&io,&v3)==PN_OK && v3.payload[4]==4 && v3.payload[58]==3);v3.payload[4]=3;v3.payload[58]=0;

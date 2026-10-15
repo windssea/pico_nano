@@ -218,6 +218,7 @@ void pn_w_set_battery(int percent){status_battery=percent<0?-1:percent>100?100:p
 int pn_w_battery_level(void){return status_battery;}
 void pn_w_set_clock(const char *hhmm){size_t n=0;if(hhmm)while(hhmm[n] && n<sizeof status_clock-1){status_clock[n]=hhmm[n];n++;}status_clock[n]=0;}
 void pn_w_set_wifi(bool connected){status_wifi=connected;}
+pn_w_status_snapshot_t pn_w_status_snapshot(void){pn_w_status_snapshot_t view={.battery=status_battery,.wifi=status_wifi};strcpy(view.clock,status_clock);return view;}
 pn_status_t pn_w_status(pn_font_t *font,pn_frame_t *frame){
     if(!font || !font->impl || !frame)return PN_INVALID;
     int original=font->pixels;pn_status_t status=pn_font_size(font,24);

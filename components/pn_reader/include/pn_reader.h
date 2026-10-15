@@ -83,6 +83,11 @@ pn_status_t pn_reader_progress(const pn_reader_t *reader,pn_txt_progress_t *prog
 void pn_reader_neighbors(pn_reader_t *reader,pn_pool_t *pool);
 /// 空闲预排NEXT，不呈现、不写位置；新输入可协作取消。/ Idle NEXT preparation without presentation or position writes; new input can cancel cooperatively.
 pn_status_t pn_reader_prefetch(pn_reader_t *reader);
+typedef pn_status_t (*pn_reader_next_fn)(void *,const pn_text_page_t *,pn_reader_anchor_t,pn_job_token_t); ///< 只读借用完整邻页，不重入阅读会话 / Read-only borrowing of a complete neighbor, without reader reentry
+/// 回调期pin保护，复查源及邻页键，不提交位置；借用只在回调内有效。/ Pin and validate the source/neighbor key for a callback, without committing progress; borrowing lasts only for the callback.
+pn_status_t pn_reader_visit_next(pn_reader_t *,pn_reader_next_fn,void *);
+/// 仅查询键匹配的完整邻页，不读源；借用仍须visit_next验证。/ Query a complete key-matching neighbor without source IO; borrowing still requires visit_next validation.
+bool pn_reader_next_ready(const pn_reader_t *);
 typedef pn_status_t (*pn_reader_warm_fn)(void *,const pn_page_glyph_t *); ///< 可选字形预热，不呈现/保存 / Optional glyph warming without presentation or saving
 /// 最多推进budget个已验证邻页节点，借用保护；缺字跳过、无内存停本页预热，新输入取消，不改变当前位置。 / Advance up to budget verified neighbor nodes under borrow protection; skip missing glyphs, stop warming this page on OOM, cancel on new input and preserve visible position.
 pn_status_t pn_reader_warm_next(pn_reader_t *,pn_reader_warm_fn,void *,size_t budget);

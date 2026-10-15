@@ -15,7 +15,10 @@
 #define W 684
 #define H 1216
 enum {SCREEN_MAIN=0,SCREEN_KEYS,SCREEN_REFRESH,SCREEN_ABOUT,SCREEN_APPEARANCE,SCREEN_TIME};
-typedef struct {pn_pool_t *pool;pn_media_t *state;char dir[PN_JOURNAL_PATH_MAX];pn_font_t font;uint8_t *pixels;pn_frame_t canvas;char message[96];char lan[40];int screen;pn_settings_about_t about;pn_settings_time_t time;} su_t;
+typedef struct {pn_pool_t *pool;pn_media_t *state;char dir[PN_JOURNAL_PATH_MAX];pn_font_t font;uint8_t *pixels;pn_frame_t canvas;char message[96];char lan[40];int screen;pn_settings_about_t about;pn_settings_time_t time;
+    bool snapshot_dirty; ///< 外部快照更新后先完整重画 / Repaint completely after external snapshot changes
+    pn_w_status_snapshot_t status; ///< 最近成功画布的实时状态带 / Live status band of the last successful canvas
+} su_t;
 static const char *const names[]={"左手模式","滑动翻页","点按翻页","屏下三键翻页"};
 static const char *const hints[]={"点左半屏翻到下一页","左右滑动翻页","点屏幕左半或右半翻页","KEY1 上一页，KEY3 下一页"};
 static const uint8_t bits[]={PN_INPUT_LEFT_HAND,PN_INPUT_NO_SWIPE,PN_INPUT_NO_EDGE_TAP,PN_INPUT_NO_KEYS};
@@ -95,14 +98,17 @@ static pn_status_t draw_keys(pn_settings_ui_t *ui,su_t *u){
     if(s==PN_OK && *u->message)s=note(u,u->message,TOGGLE_Y+4*ROW_H+48);
     return s;
 }
-static pn_status_t draw_refresh(pn_settings_ui_t *ui,su_t *u){
-    pn_font_t *font=&u->font;pn_frame_t *f=&u->canvas;
-    pn_status_t s=pn_w_header(font,f,"< 设置","刷新与屏幕",NULL);
+static pn_status_t draw_levels(pn_settings_ui_t *ui,su_t *u){
     static const char *const labels[3]={"清晰","均衡","省电"},*const notes[3]={"每 6 页全刷","每 14 页全刷","每 24 页全刷"};
     static const int order[3]={1,0,2}; // 显示顺序：清晰、均衡、省电 / Display order: crisp, balanced, saver
     int chosen=0;for(int i=0;i<3;i++)if(order[i]==(int)level_of(ui->flags))chosen=i;
+    return pn_w_segments(&u->font,&u->canvas,labels,notes,3,chosen,LEVEL_Y,LEVEL_H);
+}
+static pn_status_t draw_refresh(pn_settings_ui_t *ui,su_t *u){
+    pn_font_t *font=&u->font;pn_frame_t *f=&u->canvas;
+    pn_status_t s=pn_w_header(font,f,"< 设置","刷新与屏幕",NULL);
     if(s==PN_OK)s=pn_w_group(font,f,"自动清残影",LEVEL_Y-18);
-    if(s==PN_OK)s=pn_w_segments(font,f,labels,notes,3,chosen,LEVEL_Y,LEVEL_H);
+    if(s==PN_OK)s=draw_levels(ui,u);
     if(s==PN_OK)s=note(u,"所有书籍共用此设置。成功翻到第 6、14 或 24 页时整屏刷新；工具栏、排版预览和重复点击不计页。周期越短，闪屏越多。",LEVEL_Y+LEVEL_H+50);
     if(s==PN_OK)s=pn_w_group(font,f,"手动刷新",FULL_Y-18);
     if(s==PN_OK){int original=font->pixels;s=pn_font_size(font,30);if(s==PN_OK)s=pn_w_button(font,f,"立即整屏刷新",PN_UI_MARGIN,FULL_Y,620,88,PN_W_SELECTED);pn_status_t restored=pn_font_size(font,original);if(s==PN_OK)s=restored;}
@@ -137,33 +143,64 @@ static pn_status_t draw_time(su_t *u){
     return s;
 }
 /* 设置中直接预览静态样式；无贴图、无动画或额外封面解码。/ Preview static styles in settings without textures, animation or extra cover decoding. */
+static pn_status_t draw_columns(pn_settings_ui_t *ui,su_t *u){
+    static const char *const labels[]={"每行 3 本","每行 4 本"},*const hints[]={"封面更大 · 每页 6 本","浏览更多 · 每页 8 本"};
+    return pn_w_segments(&u->font,&u->canvas,labels,hints,2,ui->shelf.columns==4?1:0,196,96);
+}
+static pn_status_t draw_style(pn_settings_ui_t *ui,su_t *u,unsigned i){
+    pn_font_t *font=&u->font;pn_frame_t *f=&u->canvas;
+    int x=32+(int)(i%2)*318,y=460+(int)(i/2)*230;
+    pn_w_round_fill(f,x,y,302,210,16,PN_UI_SURFACE);
+    pn_w_round_stroke(f,x,y,302,210,16,ui->shelf.style==i?3:1,ui->shelf.style==i?PN_UI_INK:PN_UI_STROKE);
+    pn_shelf_style_preview(f,i,ui->shelf.columns,x+18,y+20,266,128);
+    pn_status_t s=pn_font_size(font,28);if(s==PN_OK)s=pn_w_text_ex(font,f,style_names[i],x+20,y+184,240,PN_ALIGN_LEFT,PN_UI_INK,ui->shelf.style==i);
+    if(ui->shelf.style==i)pn_w_icon(f,PN_ICON_CHECK,x+254,y+160,28,PN_UI_INK);
+    return s;
+}
 static pn_status_t draw_appearance(pn_settings_ui_t *ui,su_t *u){
     pn_font_t *font=&u->font;pn_frame_t *f=&u->canvas;pn_status_t s=pn_w_header(font,f,"< 设置","书架外观",NULL);
-    static const char *const labels[]={"每行 3 本","每行 4 本"},*const hints[]={"封面更大 · 每页 6 本","浏览更多 · 每页 8 本"};
     if(s==PN_OK)s=pn_w_group(font,f,"书架密度",176);
-    if(s==PN_OK)s=pn_w_segments(font,f,labels,hints,2,ui->shelf.columns==4?1:0,196,96);
+    if(s==PN_OK)s=draw_columns(ui,u);
     if(s==PN_OK)s=note(u,"选项会自动保存。网格使用此密度，列表与搜索结果仍每页显示 5 本。",342);
     if(s==PN_OK)s=pn_w_group(font,f,"书架样式",432);
-    for(unsigned i=0;i<PN_SHELF_STYLE_COUNT && s==PN_OK;i++){
-        int x=32+(int)(i%2)*318,y=460+(int)(i/2)*230;
-        pn_w_round_fill(f,x,y,302,210,16,PN_UI_SURFACE);
-        pn_w_round_stroke(f,x,y,302,210,16,ui->shelf.style==i?3:1,ui->shelf.style==i?PN_UI_INK:PN_UI_STROKE);
-        pn_shelf_style_preview(f,i,ui->shelf.columns,x+18,y+20,266,128);
-        s=pn_font_size(font,28);if(s==PN_OK)s=pn_w_text_ex(font,f,style_names[i],x+20,y+184,240,PN_ALIGN_LEFT,PN_UI_INK,ui->shelf.style==i);
-        if(ui->shelf.style==i)pn_w_icon(f,PN_ICON_CHECK,x+254,y+160,28,PN_UI_INK);
-    }
+    for(unsigned i=0;i<PN_SHELF_STYLE_COUNT && s==PN_OK;i++)s=draw_style(ui,u,i);
     if(s==PN_OK)s=note(u,"封面角标：空心标记未读，实心点已开始，勾号已读完。细线显示阅读进度；长按封面可查看格式与详情。",958);
     if(s==PN_OK && *u->message)s=note(u,u->message,1100);
     return s;
 }
 static pn_status_t show_profile(pn_settings_ui_t *ui,pn_settings_present_fn present,void *ctx,pn_refresh_t profile){
-    su_t *u=ui->impl;ui->presented=false;pn_frame_clear(&u->canvas,15);
+    su_t *u=ui->impl;pn_w_status_snapshot_t snapshot=pn_w_status_snapshot();ui->presented=false;pn_frame_clear(&u->canvas,15);
     pn_status_t s=u->screen==SCREEN_KEYS?draw_keys(ui,u):u->screen==SCREEN_REFRESH?draw_refresh(ui,u):u->screen==SCREEN_ABOUT?draw_about(u):u->screen==SCREEN_TIME?draw_time(u):u->screen==SCREEN_APPEARANCE?draw_appearance(ui,u):draw_main(ui,u);
     if(s==PN_OK)s=present(ctx,&u->canvas,profile);
-    if(s==PN_OK)ui->presented=true;
+    if(s==PN_OK){ui->presented=true;u->snapshot_dirty=false;u->status=snapshot;}
     return s;
 }
 static pn_status_t show(pn_settings_ui_t *ui,pn_settings_present_fn present,void *ctx){return show_profile(ui,present,ctx,PN_REFRESH_GL16);}
+/* 只重画改变的控件；旧提示、外部快照变化或失败回执走完整路径。
+ * Repaint only changed controls; old notices, changed external snapshots or failed receipts use the complete path. */
+static pn_status_t show_controls(pn_settings_ui_t *ui,su_t *u,uint8_t old_flags,pn_shelf_prefs_t old_shelf,int command,bool local,pn_settings_present_fn present,void *ctx){
+    if(!local || !ui->presented || u->snapshot_dirty || *u->message)return show(ui,present,ctx);
+    pn_status_t s=PN_OK;bool changed=false;
+    if(u->screen==SCREEN_KEYS && command>=PN_SETUI_TOGGLE && command<PN_SETUI_TOGGLE+4){
+        unsigned i=(unsigned)(command-PN_SETUI_TOGGLE);changed=old_flags!=ui->flags;
+        if(changed){int x=PN_UI_WIDTH-PN_UI_MARGIN-16-64,y=TOGGLE_Y+(int)i*ROW_H+32;
+            pn_frame_rect(&u->canvas,x,y,64,36,PN_UI_SURFACE);pn_w_toggle(&u->canvas,x,y,on(ui->flags,i));}
+    }else if(u->screen==SCREEN_REFRESH && command>=PN_SETUI_LEVEL && command<PN_SETUI_LEVEL+3){
+        changed=old_flags!=ui->flags;if(changed){pn_frame_rect(&u->canvas,26,LEVEL_Y-6,632,LEVEL_H+12,PN_UI_PAPER);s=draw_levels(ui,u);}
+    }else if(u->screen==SCREEN_APPEARANCE && command>=PN_SETUI_COLUMNS && command<PN_SETUI_STYLE+PN_SHELF_STYLE_COUNT){
+        bool columns=old_shelf.columns!=ui->shelf.columns;changed=columns || old_shelf.style!=ui->shelf.style;
+        if(columns){pn_frame_rect(&u->canvas,26,190,632,108,PN_UI_PAPER);s=draw_columns(ui,u);}
+        for(unsigned i=0;i<PN_SHELF_STYLE_COUNT && s==PN_OK && changed;i++)if(columns || old_shelf.style==i || ui->shelf.style==i){
+            int x=32+(int)(i%2)*318,y=460+(int)(i/2)*230;pn_frame_rect(&u->canvas,x,y,302,210,PN_UI_PAPER);s=draw_style(ui,u,i);}
+    }else return show(ui,present,ctx);
+    pn_w_status_snapshot_t snapshot=pn_w_status_snapshot();
+    // 状态带变化不迫使其他静态内容重画，失败仍废弃本次画布的有效标记。
+    // Status changes do not force static content to repaint; failures still invalidate the canvas receipt.
+    if(s==PN_OK && (snapshot.battery!=u->status.battery || snapshot.wifi!=u->status.wifi || strcmp(snapshot.clock,u->status.clock))){
+        changed=true;pn_frame_rect(&u->canvas,0,0,W,40,PN_UI_PAPER);s=pn_w_status(&u->font,&u->canvas);}
+    if(!changed)return PN_OK;
+    ui->presented=false;if(s==PN_OK)s=present(ctx,&u->canvas,PN_REFRESH_GL16);if(s==PN_OK){ui->presented=true;u->status=snapshot;}return s;
+}
 pn_status_t pn_settings_load_flags(pn_media_t *state,const char *dir,uint8_t *flags){
     if(!state || !dir || !*dir || !flags)return PN_INVALID;
     pn_media_lease_t lease;pn_status_t status=pn_media_acquire(state,PN_MEDIA_READ,&lease);
@@ -231,7 +268,7 @@ static pn_status_t commit_shelf(pn_settings_ui_t *ui,su_t *u,pn_shelf_prefs_t ne
 }
 pn_status_t pn_settings_ui_event(pn_settings_ui_t *ui,int command,pn_settings_present_fn present,void *ctx){
     if(!ui || !ui->impl || !ui->active || !present)return PN_INVALID;
-    su_t *u=ui->impl;u->message[0]=0;pn_status_t status=PN_OK;
+    su_t *u=ui->impl;bool local=!*u->message;uint8_t old_flags=ui->flags;pn_shelf_prefs_t old_shelf=ui->shelf;u->message[0]=0;pn_status_t status=PN_OK;
     if(command==PN_SETUI_BACK){if(u->screen!=SCREEN_MAIN){u->screen=u->screen==SCREEN_TIME?SCREEN_ABOUT:SCREEN_MAIN;return show(ui,present,ctx);}ui->active=false;return PN_OK;}
     if(command==PN_SETUI_TIME){u->screen=SCREEN_TIME;return show(ui,present,ctx);}
     if(command==PN_SETUI_TIME_SYNC || command==PN_SETUI_TIME_CANCEL){if(!ui->presented)return PN_BUSY;if(u->screen!=SCREEN_TIME || (command==PN_SETUI_TIME_SYNC?(!u->time.available || u->time.running):!u->time.running))return PN_EMPTY;ui->request=command;return PN_OK;}
@@ -241,20 +278,20 @@ pn_status_t pn_settings_ui_event(pn_settings_ui_t *ui,int command,pn_settings_pr
     if(command>=PN_SETUI_COLUMNS && command<PN_SETUI_STYLE+PN_SHELF_STYLE_COUNT){
         pn_shelf_prefs_t next=ui->shelf;if(command<PN_SETUI_STYLE)next.columns=(uint8_t)(3+command-PN_SETUI_COLUMNS);else next.style=(uint8_t)(command-PN_SETUI_STYLE);
         if(next.columns!=ui->shelf.columns || next.style!=ui->shelf.style)status=commit_shelf(ui,u,next);
-        pn_status_t shown=show(ui,present,ctx);return status==PN_OK?shown:status;
+        pn_status_t shown=show_controls(ui,u,old_flags,old_shelf,command,local,present,ctx);return status==PN_OK?shown:status;
     }
     if(command==PN_SETUI_FULL_REFRESH)return show_profile(ui,present,ctx,PN_REFRESH_GC16);
     if(command>=PN_SETUI_LEVEL && command<PN_SETUI_LEVEL+3){
         uint8_t next=(uint8_t)((ui->flags&~PN_INPUT_REFRESH_MASK)|((unsigned)(command-PN_SETUI_LEVEL)<<4));
         if(next!=ui->flags)status=commit(ui,u,next);
-        pn_status_t shown=show(ui,present,ctx);return status==PN_OK?shown:status;
+        pn_status_t shown=show_controls(ui,u,old_flags,old_shelf,command,local,present,ctx);return status==PN_OK?shown:status;
     }
     if(command<PN_SETUI_TOGGLE || command>PN_SETUI_TOGGLE+3)return PN_EMPTY;
     uint8_t next=(uint8_t)(ui->flags^bits[command-PN_SETUI_TOGGLE]);
     // 关闭全部翻页方式会让正文无法翻页，拒绝。/ Turning every page-turn method off would leave no way to turn pages, so refuse it.
     if((next&(PN_INPUT_NO_SWIPE|PN_INPUT_NO_EDGE_TAP|PN_INPUT_NO_KEYS))==(PN_INPUT_NO_SWIPE|PN_INPUT_NO_EDGE_TAP|PN_INPUT_NO_KEYS)){snprintf(u->message,sizeof u->message,"至少保留一种翻页方式");status=PN_LIMIT;}
     else status=commit(ui,u,next);
-    pn_status_t shown=show(ui,present,ctx);return status==PN_OK?shown:status;
+    pn_status_t shown=show_controls(ui,u,old_flags,old_shelf,command,local,present,ctx);return status==PN_OK?shown:status;
 }
 pn_status_t pn_settings_ui_present(pn_settings_ui_t *ui,pn_settings_present_fn present,void *ctx){if(!ui || !ui->impl || !present)return PN_INVALID;return show(ui,present,ctx);}
 int pn_settings_ui_hit(const pn_settings_ui_t *ui,int x,int y){
@@ -304,12 +341,12 @@ pn_status_t pn_settings_ui_set_lan(pn_settings_ui_t *ui,const char *ssid,pn_sett
 }
 void pn_settings_ui_set_about(pn_settings_ui_t *ui,const pn_settings_about_t *about){
     if(!ui || !ui->impl || !about)return;
-    su_t *u=ui->impl;u->about=*about;
+    su_t *u=ui->impl;u->about=*about;u->snapshot_dirty=true;
     // 外部字符串保证结尾。/ Make sure caller strings are terminated.
     u->about.version[sizeof u->about.version-1]=0;u->about.storage[sizeof u->about.storage-1]=0;u->about.internal[sizeof u->about.internal-1]=0;u->about.screen[sizeof u->about.screen-1]=0;
 }
 int pn_settings_ui_screen(const pn_settings_ui_t *ui){return ui && ui->impl?((const su_t *)ui->impl)->screen:0;}
-void pn_settings_ui_set_time(pn_settings_ui_t *ui,const pn_settings_time_t *time){if(!ui || !ui->impl || !time)return;su_t *u=ui->impl;u->time=*time;u->time.datetime[sizeof u->time.datetime-1]=0;u->time.message[sizeof u->time.message-1]=0;}
+void pn_settings_ui_set_time(pn_settings_ui_t *ui,const pn_settings_time_t *time){if(!ui || !ui->impl || !time)return;su_t *u=ui->impl;u->time=*time;u->snapshot_dirty=true;u->time.datetime[sizeof u->time.datetime-1]=0;u->time.message[sizeof u->time.message-1]=0;}
 
 pn_status_t pn_settings_time_format(pn_settings_time_t *view,uint32_t utc){
     if(!view || utc<1704067200u || utc>4102444799u)return PN_INVALID;

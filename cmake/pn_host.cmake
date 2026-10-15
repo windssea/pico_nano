@@ -38,11 +38,15 @@ add_library(pn_core STATIC ${ui_font_c} ${reading_font_c} ${harmony_font_c} ${br
     ${PN_ROOT}/components/pn_reader/pn_epub_image.c
     ${PN_ROOT}/components/pn_reader/pn_epub_reader.c
     ${PN_ROOT}/components/pn_reader/pn_epub_app.c
+    ${PN_ROOT}/components/pn_reader/pn_semantic_file.c
+    ${PN_ROOT}/components/pn_reader/pn_page_bitmap.c
+    ${PN_ROOT}/components/pn_reader/pn_hot_session.c
     ${PN_ROOT}/components/pn_reader/pn_turn_transition.c
     ${PN_ROOT}/components/pn_reader/pn_toc_ui.c
     ${PN_ROOT}/components/pn_format/pn_zip.c
     ${PN_ROOT}/components/pn_format/pn_resource.c
     ${PN_ROOT}/components/pn_format/pn_xml.c
+      ${PN_ROOT}/components/pn_format/pn_xml_diagnostic.c
     ${PN_ROOT}/components/pn_format/pn_epub.c
     ${PN_ROOT}/components/pn_format/pn_toc.c
     ${PN_ROOT}/components/pn_format/pn_xhtml.c
@@ -57,6 +61,8 @@ add_library(pn_core STATIC ${ui_font_c} ${reading_font_c} ${harmony_font_c} ${br
     ${PN_ROOT}/components/pn_library/pn_search_ui.c
     ${PN_ROOT}/components/pn_library/pn_book_actions.c
     ${PN_ROOT}/components/pn_widgets/pn_widgets.c
+    ${PN_ROOT}/components/pn_widgets/pn_feedback.c
+    ${PN_ROOT}/components/pn_widgets/pn_feedback_idle.c
     ${PN_ROOT}/components/pn_widgets/pn_gfx.c
     ${PN_ROOT}/components/pn_widgets/pn_icons.c
     ${PN_ROOT}/components/pn_widgets/pn_focus.c
@@ -80,6 +86,7 @@ add_library(pn_core STATIC ${ui_font_c} ${reading_font_c} ${harmony_font_c} ${br
     ${PN_ROOT}/components/pn_core/pn_profile.c
     ${PN_ROOT}/components/pn_core/pn_cancel.c
     ${PN_ROOT}/components/pn_core/pn_async.c
+    ${PN_ROOT}/components/pn_core/pn_crc32.c
     ${PN_ROOT}/components/pn_ui/pn_frame.c
     ${PN_ROOT}/components/pn_ui/pn_tap.c
     ${PN_ROOT}/components/pn_ui/pn_key.c
@@ -102,6 +109,8 @@ add_library(pn_core STATIC ${ui_font_c} ${reading_font_c} ${harmony_font_c} ${br
     ${PN_ROOT}/components/pn_storage/pn_bookmarks.c
     ${PN_ROOT}/components/pn_storage/pn_epub_bookmarks.c
     ${PN_ROOT}/components/pn_display/pn_scheduler.c
+    ${PN_ROOT}/components/pn_display/pn_follow.c
+    ${PN_ROOT}/components/pn_widgets/pn_list_motion.c
     ${PN_ROOT}/components/pn_text/pn_text.c
     ${PN_ROOT}/components/pn_text/pn_layout.c
     ${PN_ROOT}/components/pn_text/pn_text_file.c)

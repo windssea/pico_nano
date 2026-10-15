@@ -21,6 +21,14 @@ static size_t neighbor_bytes(void *ctx){pn_reader_t *r=ctx;return pn_alloc_size(
 static void neighbor_drop(void *ctx){pn_reader_t *r=ctx;pn_free(r->ahead.glyphs);pn_free(r->behind.glyphs);r->ahead=(pn_text_page_t){0};r->behind=(pn_text_page_t){0};r->ahead_warm=0;}
 /// 邻页基准：待确认页（面板扫描期间）优先，否则已显示页。/ Neighbor base: the pending page (during a panel scan) first, else the visible page.
 static const pn_reader_anchor_t *neighbor_base(const pn_reader_t *r){return r->preparing?&r->pending.anchor:r->has_visible?&r->visible:NULL;}
+bool pn_reader_next_ready(const pn_reader_t *r){const pn_reader_anchor_t *base=r?neighbor_base(r):NULL;return base && r->ahead.valid && r->ahead_anchor.begin==base->end && token_equal(r->token,r->neighbor_token);}
+pn_status_t pn_reader_visit_next(pn_reader_t *r,pn_reader_next_fn visit,void *ctx){
+    if(!r || !visit)return PN_INVALID;
+    const pn_reader_anchor_t *base=neighbor_base(r);
+    if(!base || !r->ahead.valid || r->ahead_anchor.begin!=base->end || !token_equal(r->token,r->neighbor_token))return PN_EMPTY;
+    pn_status_t s=pn_cancel_checkpoint();if(s==PN_OK && r->decoder.source.validate)s=r->decoder.source.validate(r->decoder.source.ctx);if(s!=PN_OK)return s;
+    pn_cache_pin(&r->cache);s=visit(ctx,&r->ahead,r->ahead_anchor,r->token);pn_cache_unpin(&r->cache);return s;
+}
 bool pn_reader_warm_pending(const pn_reader_t *r){
     const pn_reader_anchor_t *base=r?neighbor_base(r):NULL;
     return base && r->ahead.valid && r->ahead_anchor.begin==base->end && token_equal(r->token,r->neighbor_token) && r->ahead_warm<r->ahead.count;

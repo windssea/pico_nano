@@ -97,3 +97,4 @@ static pn_status_t decode(pn_pool_t *pool,const pn_image_input_t *input,pn_frame
 }
 pn_status_t pn_jpeg_probe(pn_pool_t *pool,const pn_image_input_t *input,pn_jpeg_info_t *info){return decode(pool,input,NULL,(pn_image_rect_t){0},info);}
 pn_status_t pn_jpeg_draw(pn_pool_t *pool,const pn_image_input_t *input,pn_frame_t *frame,pn_image_rect_t rect,pn_jpeg_info_t *info){if(!frame)return PN_INVALID;return decode(pool,input,frame,rect,info);}
+#include "pn_jpeg_job.inc"

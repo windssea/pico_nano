@@ -17,8 +17,11 @@
 #include <ctype.h>
 #include <stdio.h>
 #include <string.h>
+#include <limits.h>
 #define W 684
 #define H 1216
+#define ROW_CACHE_SLOTS 12
+typedef struct {size_t index;uint64_t age;bool valid,sample_checked;uint8_t pixels[684*PN_W_CARD_ROW_H/2];} row_t; ///< 十二行原灰阶，不存字体句柄 / Twelve original-gray rows, without font handles
 typedef struct {
     pn_pool_t *pool;pn_media_t *fonts,*state;char font_dir[PN_CATALOG_PATH_MAX],state_dir[PN_JOURNAL_PATH_MAX];
     pn_font_t ui;uint8_t *pixels;pn_frame_t canvas;pn_catalog_page_t page;
@@ -28,7 +31,11 @@ typedef struct {
     uint8_t samples[PN_CATALOG_PAGE_MAX][46*46/2]; ///< 有界原生字体小样槽，约8KiB / Bounded native font tile slots, about 8 KiB
     bool sample_ready[PN_CATALOG_PAGE_MAX]; ///< 已生成可显示样例 / Generated displayable samples
     bool sample_checked[PN_CATALOG_PAGE_MAX]; ///< 本页已确认成功或损坏，瞬态失败仍可重试 / Success or corrupt input confirmed for this page; transient failures remain retryable
+    pn_list_motion_t motion;pn_catalog_page_t neighbors[2]; ///< 同源滚动与两份邻页元数据 / Shared motion and two neighboring metadata pages
+    pn_cache_owner_t row_owner;row_t *rows;uint64_t row_age;int render_offset; ///< 可回收灰阶行，渲染时借用保护 / Reclaimable gray rows pinned while rendering
 } fm_t;
+static size_t row_bytes(void *ctx){return pn_alloc_size(((fm_t *)ctx)->rows);}
+static void row_drop(void *ctx){fm_t *f=ctx;pn_free(f->rows);f->rows=NULL;}
 static pn_status_t string_read(void *ctx,uint64_t off,uint8_t *out,size_t cap,size_t *n){const char *s=ctx;size_t size=strlen(s);if(off>size)return PN_INVALID;size_t take=size-(size_t)off;if(take>cap)take=cap;memcpy(out,s+off,take);*n=take;return PN_OK;}
 static const char *base(const char *path){const char *slash=strrchr(path,'/');return slash?slash+1:path;}
 /// 名称及实际字体家族均识别鸿蒙保留字库，重命名也不能从管理页删除。/ Reserve HarmonyOS by file name and actual family, including renamed files.
@@ -39,6 +46,24 @@ static void release_asset(fm_t *f){
     (void)pn_font_asset_close(&f->asset);
     if(f->guard.ticket){(void)pn_media_release(f->fonts,&f->guard);f->guard=(pn_media_lease_t){0};}
 }
+/// 资源准备阶段生成原生小样，所有分支释放文件、字体和介质租约。/ Generate a native tile during resource preparation, releasing the file, face and media lease on every branch.
+static pn_status_t build_sample(fm_t *f,const char *path,pn_frame_t *tile){
+    pn_media_lease_t lease;pn_status_t status=pn_media_acquire(f->fonts,PN_MEDIA_READ,&lease);if(status!=PN_OK)return status;
+    pn_text_file_t file={0};pn_text_source_t source={0};pn_font_t font={0};
+    status=pn_text_file_open(&file,f->fonts,&lease,path,&source);
+    if(status==PN_OK){
+        status=pn_font_open(&font,f->pool,&source,30);
+        if(status==PN_OK){
+            pn_frame_clear(tile,13);int32_t advance;
+            const char *sample=pn_font_advance(&font,0x9605,&advance)==PN_OK?"阅":"Aa";
+            status=pn_w_text(&font,tile,sample,0,35,46,PN_ALIGN_CENTER);
+            pn_font_close(&font);
+        }
+        (void)pn_text_file_close(&file);
+    }
+    (void)pn_media_release(f->fonts,&lease);
+    return status;
+}
 /* 每页缓存原生“阅”字，非中文字体使用Aa；重绘不重复打开字体。/ Cache a native Chinese reading glyph per page, using Aa for non-CJK fonts; repaints do not reopen fonts. */
 static void sample_tile(fm_t *f,size_t index,int y){
     if(index>=PN_CATALOG_PAGE_MAX)return;
@@ -46,21 +71,8 @@ static void sample_tile(fm_t *f,size_t index,int y){
         for(int row=0;row<46;row++)for(int x=0;x<46;x++)pn_frame_pixel(&f->canvas,53+x,y+27+row,pn_frame_get(&tile,x,row));
         return;}
     if(f->sample_checked[index])return;
-    const char *path=f->page.items[index].path;
-    pn_media_lease_t lease;if(pn_media_acquire(f->fonts,PN_MEDIA_READ,&lease)!=PN_OK)return;
-    pn_text_file_t file={0};pn_text_source_t source={0};pn_font_t font={0};
-    pn_status_t status=pn_text_file_open(&file,f->fonts,&lease,path,&source);
-    if(status==PN_OK){
-        status=pn_font_open(&font,f->pool,&source,30);
-        if(status==PN_OK){
-            pn_frame_t tile;pn_frame_bind(&tile,f->samples[index],sizeof f->samples[index],46,46);pn_frame_clear(&tile,13);int32_t advance;
-            const char *sample=pn_font_advance(&font,0x9605,&advance)==PN_OK?"阅":"Aa";
-            f->sample_ready[index]=pn_w_text(&font,&tile,sample,0,35,46,PN_ALIGN_CENTER)==PN_OK;
-            pn_font_close(&font);
-        }
-        (void)pn_text_file_close(&file);
-    }
-    (void)pn_media_release(f->fonts,&lease);
+    pn_frame_t tile;pn_frame_bind(&tile,f->samples[index],sizeof f->samples[index],46,46);
+    pn_status_t status=build_sample(f,f->page.items[index].path,&tile);f->sample_ready[index]=status==PN_OK;
     f->sample_checked[index]=f->sample_ready[index] || status==PN_CORRUPT || status==PN_UNSUPPORTED || status==PN_EMPTY;
     if(f->sample_ready[index])sample_tile(f,index,y);
 }
@@ -99,8 +111,65 @@ static pn_status_t inspect(fm_t *f,const pn_catalog_item_t *item){
     if(status!=PN_OK){release_asset(f);return status;}
     f->checked=(unsigned)count;f->missing=missing;strcpy(f->selected,item->path);strcpy(f->name,item->name);return PN_OK;
 }
-/* 版式：列表页每行88px，底部上一页/下一页；详情页下半部为名称与两个按钮；确认页为说明与取消/确认。
- * Layout: list rows are 88 px with paging buttons at the bottom; the detail page puts the name and two buttons in its lower half; the confirmation page has a note and cancel/confirm. */
+static pn_status_t item_at(fm_t *f,size_t index,pn_catalog_item_t *out){
+    for(unsigned tries=0;tries<17000;tries++){
+        pn_catalog_page_t *pages[]={&f->page,&f->neighbors[0],&f->neighbors[1]};pn_catalog_page_t *nearest=&f->page;
+        for(unsigned i=0;i<3;i++){pn_catalog_page_t *p=pages[i];if(p->count && index>=p->index && index-p->index<p->count){*out=p->items[index-p->index];return PN_OK;}if(p->count && (index>=p->index?index-p->index:p->index-index)<(index>=nearest->index?index-nearest->index:nearest->index-index))nearest=p;}
+        if(!nearest->count)return PN_EMPTY;
+        bool previous=index<nearest->index;char cursor[PN_CATALOG_NAME_MAX];strcpy(cursor,nearest->items[previous?0:nearest->count-1].name);
+        pn_catalog_page_t *next=pn_alloc_tagged(f->pool,PN_MEM_UI,sizeof *next);if(!next)return PN_NO_MEMORY;
+        pn_media_lease_t lease;pn_status_t status=pn_media_acquire(f->fonts,PN_MEDIA_READ,&lease);
+        if(status==PN_OK){status=previous?pn_catalog_font_page_before(f->fonts,&lease,f->font_dir,cursor,next):pn_catalog_font_page(f->fonts,&lease,f->font_dir,cursor,next);(void)pn_media_release(f->fonts,&lease);}
+        if(status!=PN_OK || !next->count){pn_free(next);return status==PN_OK?PN_EMPTY:status;}
+        f->neighbors[1]=f->neighbors[0];f->neighbors[0]=f->page;f->page=*next;pn_free(next);
+    }
+    return PN_LIMIT;
+}
+static pn_status_t cached_row(fm_t *f,size_t index,row_t **out){
+    if(!f->rows)return PN_NO_MEMORY;
+    if(f->row_age==UINT64_MAX){for(unsigned i=0;i<ROW_CACHE_SLOTS;i++)f->rows[i].age=0;f->row_age=0;}
+    row_t *slot=&f->rows[0];for(unsigned i=0;i<ROW_CACHE_SLOTS;i++){row_t *r=&f->rows[i];if(r->valid && r->index==index){r->age=++f->row_age;*out=r;return PN_OK;}if(!r->valid || (slot->valid && r->age<slot->age))slot=r;}
+    pn_catalog_item_t *item=pn_alloc_tagged(f->pool,PN_MEM_UI,sizeof *item);if(!item)return PN_NO_MEMORY;
+    pn_status_t status=item_at(f,index,item);if(status!=PN_OK){pn_free(item);return status;}slot->valid=false;slot->sample_checked=false;pn_frame_t row;
+    (void)pn_frame_bind(&row,slot->pixels,sizeof slot->pixels,684,PN_W_CARD_ROW_H);pn_frame_clear(&row,15);pn_frame_rect(&row,32,0,620,PN_W_CARD_ROW_H,PN_UI_SURFACE);
+    char line[96];if(status==PN_OK){snprintf(line,sizeof line,"%llu KB%s",(unsigned long long)((item->size+1023)/1024),is_global(f,item->path)?" · 阅读默认":"");status=pn_w_card_row(&f->ui,&row,pn_brand_label(item->name),line,NULL,PN_ICON_FONT,PN_ROW_CHEVRON,0,false);if(status==PN_OK && is_global(f,item->path))pn_w_icon(&row,PN_ICON_CHECK,552,34,32,PN_UI_INK);}
+    pn_free(item);if(status!=PN_OK)return status;slot->index=index;slot->valid=true;slot->sample_checked=false;slot->age=++f->row_age;*out=slot;return PN_OK;
+}
+/// 控制层准备元数据/像素行，运动期间不打开外置字体样例。/ Controller prepares metadata/pixel rows without opening external sample faces during motion.
+static pn_status_t prepare_rows(void *ctx,int offset,bool binary){
+    (void)binary;fm_t *f=ctx;
+    if(!f->rows){f->rows=pn_cache_alloc(f->pool,PN_CACHE_BITMAP,PN_MEM_UI,ROW_CACHE_SLOTS*sizeof *f->rows);if(!f->rows)return PN_NO_MEMORY;memset(f->rows,0,ROW_CACHE_SLOTS*sizeof *f->rows);}
+    pn_cache_pin(&f->row_owner);pn_w_font_scope_t scope={0};pn_status_t status=pn_w_font_scope_begin(&scope,f->pool,NULL);size_t first=(size_t)offset/PN_W_CARD_ROW_H;
+    for(size_t index=first;index<f->page.total && index<first+7 && status==PN_OK;index++){
+        row_t *r=NULL;status=cached_row(f,index,&r);
+        if(status==PN_OK && !binary && !r->sample_checked){
+            pn_catalog_item_t *item=pn_alloc_tagged(f->pool,PN_MEM_UI,sizeof *item);if(!item){status=PN_NO_MEMORY;break;}
+            pn_status_t sample=item_at(f,index,item);uint8_t pixels[46*46/2];pn_frame_t tile;pn_frame_bind(&tile,pixels,sizeof pixels,46,46);
+            if(sample==PN_OK)sample=build_sample(f,item->path,&tile);
+            pn_free(item);r->sample_checked=sample==PN_OK || sample==PN_CORRUPT || sample==PN_UNSUPPORTED || sample==PN_EMPTY;
+            if(sample==PN_OK){pn_frame_t row;pn_frame_bind(&row,r->pixels,sizeof r->pixels,684,PN_W_CARD_ROW_H);for(int y=0;y<46;y++)for(int x=0;x<46;x++)pn_frame_pixel(&row,53+x,27+y,pn_frame_get(&tile,x,y));}
+            if(sample==PN_CANCELLED || sample==PN_STALE_MEDIA)status=sample;
+        }
+    }
+    pn_w_font_scope_end(&scope);pn_cache_unpin(&f->row_owner);return status;
+}
+/// 纯复制已准备行，缺失返回失败；不分配、不遍历目录、不打开字体。/ Copy prepared rows only; fail on a miss without allocating, scanning directories or opening fonts.
+static pn_status_t scroll_rows(fm_t *f){
+    if(!f->rows)return PN_EMPTY;
+    pn_cache_pin(&f->row_owner);pn_status_t status=PN_OK;size_t first=(size_t)f->render_offset/PN_W_CARD_ROW_H;
+    pn_frame_rect(&f->canvas,0,334,684,6*PN_W_CARD_ROW_H,15);
+    for(size_t index=first;index<f->page.total && index<first+7 && status==PN_OK;index++){
+        row_t *r=NULL;for(unsigned slot=0;slot<ROW_CACHE_SLOTS;slot++)if(f->rows[slot].valid && f->rows[slot].index==index){r=&f->rows[slot];break;}if(!r){status=PN_EMPTY;break;}
+        int top=334+(int)(index*PN_W_CARD_ROW_H)-f->render_offset;pn_frame_t row;pn_frame_bind(&row,r->pixels,sizeof r->pixels,684,PN_W_CARD_ROW_H);
+        for(int y=0;y<PN_W_CARD_ROW_H;y++){int dest=top+y;if(dest<334 || dest>=334+6*PN_W_CARD_ROW_H)continue;memcpy(f->canvas.pixels+(size_t)dest*f->canvas.stride,row.pixels+(size_t)y*row.stride,342u);}
+    }
+    // 容器边框固定在viewport，不能把分页末行的圆角当作行内容一起移动。
+    // Keep container borders fixed to the viewport; paging-page bottom corners must never move with a row.
+    pn_w_round_stroke(&f->canvas,32,334,620,6*PN_W_CARD_ROW_H,PN_UI_CARD_RADIUS,2.0f,PN_UI_STROKE);
+    pn_cache_unpin(&f->row_owner);return status;
+}
+/* 版式：列表行高使用共享控件常量，底部上一页/下一页；详情页下半部为名称与两个按钮；确认页为说明与取消/确认。
+ * Layout: list rows use the shared widget height, with paging below; the detail page puts the name and two buttons in its lower half; confirmation has a note and cancel/confirm. */
 #define DEFAULT_CARD_Y 184
 #define LIST_ROW_Y 334
 #define LIST_ROWS 6
@@ -109,9 +178,9 @@ static pn_status_t inspect(fm_t *f,const pn_catalog_item_t *item){
 #define DETAIL_BUTTON_Y 924
 #define DETAIL_BACK_Y 1044
 #define CONFIRM_BUTTON_Y 1084
-static pn_status_t draw(pn_font_manage_t *ui){
-    fm_t *f=ui->impl;pn_frame_clear(&f->canvas,15);pn_status_t s=PN_OK;char line[PN_CATALOG_PATH_MAX+128];
-    if(ui->screen==PN_FMU_LIST){
+static pn_status_t draw_screen(fm_t *f,pn_font_manage_screen_t screen){
+    pn_frame_clear(&f->canvas,15);pn_status_t s=PN_OK;char line[PN_CATALOG_PATH_MAX+128];
+    if(screen==PN_FMU_LIST){
         s=pn_w_header(&f->ui,&f->canvas,"< 返回","阅读字体管理",NULL);
         // 当前默认字体卡，再列出已安装字体；默认项用对勾标出。/ A card for the current default font, then the installed fonts with the default marked by a check.
         const char *name="默认字体",*note="系统默认阅读字体，不影响界面";
@@ -123,6 +192,7 @@ static pn_status_t draw(pn_font_manage_t *ui){
         if(s==PN_OK)s=pn_w_card_row(&f->ui,&f->canvas,pn_brand_label(name),note,"默认",PN_ICON_FONT,0u,DEFAULT_CARD_Y,true);
         if(s==PN_OK)s=pn_w_group(&f->ui,&f->canvas,"外置字体（用户上传）",LIST_ROW_Y-14);
         size_t shown=f->page.count<LIST_ROWS?f->page.count:LIST_ROWS;
+        if(f->motion.impl){if(s==PN_OK)s=scroll_rows(f);shown=0;}
         if(shown)pn_w_card(&f->canvas,LIST_ROW_Y,(int)shown);
         for(size_t i=0;i<shown && s==PN_OK;i++){const pn_catalog_item_t *item=&f->page.items[i];bool global=is_global(f,item->path);
             snprintf(line,sizeof line,"%llu KB%s",(unsigned long long)((item->size+1023)/1024),global?" · 阅读默认":"");
@@ -133,14 +203,14 @@ static pn_status_t draw(pn_font_manage_t *ui){
         if(s==PN_OK && !f->page.count){int original=f->ui.pixels;s=pn_font_size(&f->ui,30);if(s==PN_OK)s=pn_w_text_lines(&f->ui,&f->canvas,"还没有安装字体。用“传书”把 TTF 字体放进 fonts 目录。",PN_UI_MARGIN,LIST_ROW_Y+48,620,3,44,NULL);pn_status_t restored=pn_font_size(&f->ui,original);if(s==PN_OK)s=restored;}
         if(s==PN_OK && *f->message){int original=f->ui.pixels;s=pn_font_size(&f->ui,28);if(s==PN_OK)s=pn_w_text(&f->ui,&f->canvas,f->message,PN_UI_MARGIN,PAGER_Y-24,620,PN_ALIGN_LEFT);pn_status_t restored=pn_font_size(&f->ui,original);if(s==PN_OK)s=restored;}
         if(s==PN_OK){int original=f->ui.pixels;s=pn_font_size(&f->ui,30);
-            char count[128];if(f->page.total)snprintf(count,sizeof count,"共 %zu 款 · %zu / %zu",f->page.total,f->page.index/PN_CATALOG_PAGE_DEFAULT+1,(f->page.total+PN_CATALOG_PAGE_DEFAULT-1)/PN_CATALOG_PAGE_DEFAULT);else snprintf(count,sizeof count,"共 0 款");
+            char count[128];if(f->motion.impl){size_t end=((size_t)f->render_offset+6*PN_W_CARD_ROW_H+PN_W_CARD_ROW_H-1)/PN_W_CARD_ROW_H;if(end>f->page.total)end=f->page.total;snprintf(count,sizeof count,"共 %zu 款 · %zu–%zu",f->page.total,(size_t)f->render_offset/PN_W_CARD_ROW_H+1,end);}else if(f->page.total)snprintf(count,sizeof count,"共 %zu 款 · %zu / %zu",f->page.total,f->page.index/PN_CATALOG_PAGE_DEFAULT+1,(f->page.total+PN_CATALOG_PAGE_DEFAULT-1)/PN_CATALOG_PAGE_DEFAULT);else snprintf(count,sizeof count,"共 0 款");
             if(s==PN_OK)s=pn_font_size(&f->ui,24);
             if(s==PN_OK)s=pn_w_text(&f->ui,&f->canvas,count,32,PAGER_Y-46,620,PN_ALIGN_CENTER);
             if(s==PN_OK)s=pn_font_size(&f->ui,30);
             if(s==PN_OK)s=pn_w_button(&f->ui,&f->canvas,"上一页",32,PAGER_Y,196,80,0u);
             if(s==PN_OK)s=pn_w_button(&f->ui,&f->canvas,"下一页",456,PAGER_Y,196,80,0u);
             pn_status_t restored=pn_font_size(&f->ui,original);if(s==PN_OK)s=restored;}
-    }else if(ui->screen==PN_FMU_DETAIL){
+    }else if(screen==PN_FMU_DETAIL){
         pn_font_t *body=pn_font_asset_font(&f->asset);int original=f->ui.pixels;
         s=pn_font_size(&f->ui,36);
         if(s==PN_OK)s=pn_font_preview_draw(&f->ui,body,&f->info,f->reference.size,f->checked,f->missing,&f->canvas);
@@ -170,7 +240,9 @@ static pn_status_t draw(pn_font_manage_t *ui){
 static pn_status_t show(pn_font_manage_t *ui,pn_font_manage_present_fn present,void *ctx){
     fm_t *f=ui->impl;ui->presented=false;pn_w_font_scope_t scope={0};
     pn_status_t s=pn_w_font_scope_begin(&scope,f->pool,ui->screen==PN_FMU_DETAIL?pn_font_asset_font(&f->asset):NULL);
-    if(s==PN_OK)s=draw(ui);
+    if(f->motion.impl)f->render_offset=pn_list_motion_stats(&f->motion).offset;
+    if(s==PN_OK && f->motion.impl && ui->screen==PN_FMU_LIST)s=prepare_rows(f,f->render_offset,false);
+    if(s==PN_OK)s=draw_screen(f,ui->screen);
     pn_w_font_scope_end(&scope);
     if(s==PN_OK)s=present(ctx,&f->canvas,ui->screen==PN_FMU_DETAIL?PN_REFRESH_GC16:PN_REFRESH_GL16);
     if(s==PN_OK)ui->presented=true;
@@ -184,11 +256,12 @@ pn_status_t pn_font_manage_open(pn_font_manage_t *ui,pn_pool_t *pool,pn_media_t 
     fm_t *f=pn_alloc_tagged(pool,PN_MEM_UI,sizeof *f);
     if(!f)return PN_NO_MEMORY;
     memset(f,0,sizeof *f);f->pool=pool;f->fonts=font_media;f->state=state_media;strcpy(f->font_dir,font_dir);
+    pn_cache_attach(pool,&f->row_owner,PN_CACHE_BITMAP,f,row_bytes,row_drop);
     if(state_media)strcpy(f->state_dir,state_dir);
     f->pixels=pn_alloc_tagged(pool,PN_MEM_UI,(size_t)W/2*H);
     pn_status_t status=f->pixels?PN_OK:PN_NO_MEMORY;
     if(status==PN_OK){(void)pn_frame_bind(&f->canvas,f->pixels,(size_t)W/2*H,W,H);pn_text_source_t builtin=pn_font_builtin_source();status=pn_font_open(&f->ui,pool,&builtin,28);}
-    if(status!=PN_OK){pn_free(f->pixels);pn_free(f);return status;}
+    if(status!=PN_OK){pn_cache_detach(&f->row_owner);pn_free(f->pixels);pn_free(f);return status;}
     load_global(f);
     if(load_page(f,"",false)!=PN_OK)memset(&f->page,0,sizeof f->page);
     *ui=(pn_font_manage_t){.impl=f,.active=true,.screen=PN_FMU_LIST,.last=PN_EMPTY};
@@ -228,25 +301,27 @@ static pn_status_t remove_font(pn_font_manage_t *ui){
 }
 pn_status_t pn_font_manage_event(pn_font_manage_t *ui,int command,pn_font_manage_present_fn present,void *ctx){
     if(!ui || !ui->impl || !ui->active || !present)return PN_INVALID;
-    fm_t *f=ui->impl;pn_status_t status=PN_OK;
+    fm_t *f=ui->impl;pn_status_t status=pn_list_motion_abort(&f->motion);if(status!=PN_OK)return status;
     if(ui->screen==PN_FMU_LIST){
         f->message[0]=0;
         if(command==PN_FMU_BACK){ui->active=false;return PN_OK;}
-        if(command>=PN_FMU_ROW && command<PN_FMU_ROW+(int)f->page.count){
-            status=inspect(f,&f->page.items[command-PN_FMU_ROW]);
+        if(command>=PN_FMU_ROW && command<PN_FMU_ROW+(int)(f->motion.impl?f->page.total:f->page.count)){
+            if(f->motion.impl){pn_catalog_item_t *item=pn_alloc_tagged(f->pool,PN_MEM_UI,sizeof *item);if(!item)status=PN_NO_MEMORY;else{status=item_at(f,(size_t)(command-PN_FMU_ROW),item);if(status==PN_OK)status=inspect(f,item);pn_free(item);}}
+            else status=inspect(f,&f->page.items[command-PN_FMU_ROW]);
             if(status==PN_OK)ui->screen=PN_FMU_DETAIL;
             else snprintf(f->message,sizeof f->message,status==PN_NO_MEMORY?"字体过大，内存不足":"不是可用的TrueType字体（%d）",(int)status);}
         else if((command==PN_FMU_NEXT || command==PN_FMU_PREVIOUS) && f->page.count){char cursor[PN_CATALOG_NAME_MAX];strcpy(cursor,f->page.items[command==PN_FMU_NEXT?f->page.count-1:0].name);
-            if(command==PN_FMU_PREVIOUS || f->page.more)status=load_page(f,cursor,command==PN_FMU_PREVIOUS);}
+            if(f->motion.impl){int at=pn_list_motion_stats(&f->motion).offset;status=pn_list_motion_offset(&f->motion,at+(command==PN_FMU_NEXT?6:-6)*PN_W_CARD_ROW_H);}
+            else if(command==PN_FMU_PREVIOUS || f->page.more)status=load_page(f,cursor,command==PN_FMU_PREVIOUS);}
         else return PN_EMPTY;
     }else if(ui->screen==PN_FMU_DETAIL){
         if(command==PN_FMU_BACK){release_asset(f);ui->screen=PN_FMU_LIST;f->message[0]=0;}
-        else if(command==PN_FMU_DEFAULT){if(is_global(f,f->selected))return PN_EMPTY;status=set_default(f);ui->last=status;}
+        else if(command==PN_FMU_DEFAULT){if(is_global(f,f->selected))return PN_EMPTY;status=set_default(f);ui->last=status;if(f->rows)memset(f->rows,0,ROW_CACHE_SLOTS*sizeof *f->rows);}
         else if(command==PN_FMU_DELETE){if(protected_font(f)){status=PN_UNSUPPORTED;snprintf(f->message,sizeof f->message,"鸿蒙保留字库，不能删除");}else{ui->screen=PN_FMU_CONFIRMING;f->message[0]=0;}}
         else return PN_EMPTY;
     }else{
         if(command==PN_FMU_CANCEL)ui->screen=PN_FMU_DETAIL;
-        else if(command==PN_FMU_CONFIRM){status=remove_font(ui);ui->last=status;}
+        else if(command==PN_FMU_CONFIRM){status=remove_font(ui);ui->last=status;if(f->rows)memset(f->rows,0,ROW_CACHE_SLOTS*sizeof *f->rows);memset(f->neighbors,0,sizeof f->neighbors);if(f->motion.impl)(void)pn_list_motion_extent(&f->motion,(int)f->page.total*PN_W_CARD_ROW_H);}
         else return PN_EMPTY;
     }
     pn_status_t shown=show(ui,present,ctx);return status==PN_OK?shown:status;
@@ -258,7 +333,7 @@ int pn_font_manage_hit(const pn_font_manage_t *ui,int x,int y){
     if(ui->screen==PN_FMU_LIST){
         if(pn_w_header_hit(x,y,false)==1)return PN_FMU_BACK;
         if(x<32 || x>=652)return -1;
-        if(y>=LIST_ROW_Y && y<LIST_ROW_Y+LIST_ROWS*PN_W_CARD_ROW_H){int row=(y-LIST_ROW_Y)/PN_W_CARD_ROW_H;return row<(int)f->page.count?PN_FMU_ROW+row:-1;}
+        if(y>=LIST_ROW_Y && y<LIST_ROW_Y+LIST_ROWS*PN_W_CARD_ROW_H){int row=(y-LIST_ROW_Y+(f->motion.impl?pn_list_motion_stats(&f->motion).offset:0))/PN_W_CARD_ROW_H;return row<(int)(f->motion.impl?f->page.total:f->page.count)?PN_FMU_ROW+row:-1;}
         if(y>=PAGER_Y && y<PAGER_Y+80)return x<228?PN_FMU_PREVIOUS:x>=456?PN_FMU_NEXT:-1;
         return -1;
     }
@@ -273,6 +348,39 @@ int pn_font_manage_hit(const pn_font_manage_t *ui,int x,int y){
 }
 void pn_font_manage_close(pn_font_manage_t *ui){
     if(!ui || !ui->impl)return;
-    fm_t *f=ui->impl;release_asset(f);pn_font_close(&f->ui);pn_free(f->pixels);pn_free(f);
+    fm_t *f=ui->impl;pn_list_motion_close(&f->motion);if(f->motion.impl)return;pn_cache_detach(&f->row_owner);row_drop(f);release_asset(f);pn_font_close(&f->ui);pn_free(f->pixels);pn_free(f);
     *ui=(pn_font_manage_t){0};
 }
+static pn_status_t render_motion(void *ctx,int offset,bool binary,const pn_frame_t **out){
+    fm_t *f=ctx;f->render_offset=offset;pn_w_font_scope_t scope={0};pn_status_t status=pn_w_font_scope_begin(&scope,f->pool,NULL);
+    if(status==PN_OK)status=binary?scroll_rows(f):draw_screen(f,PN_FMU_LIST);
+    pn_w_font_scope_end(&scope);
+    if(status==PN_OK && binary)for(int y=LIST_ROW_Y;y<LIST_ROW_Y+LIST_ROWS*PN_W_CARD_ROW_H;y++)for(int x=32;x<652;x++)pn_frame_pixel(&f->canvas,x,y,pn_frame_get(&f->canvas,x,y)<8?0:15);
+    if(status==PN_OK)*out=&f->canvas;
+    return status;
+}
+pn_status_t pn_font_manage_motion(pn_font_manage_t *ui,pn_list_present_fn present,void *ctx){
+    if(!ui || !ui->impl || !present || ui->screen!=PN_FMU_LIST)return PN_INVALID;
+    fm_t *f=ui->impl;if(f->motion.impl)return PN_BUSY;if(f->page.total>(size_t)(INT_MAX-1216)/PN_W_CARD_ROW_H)return PN_LIMIT;
+    if(f->page.total<=LIST_ROWS)return PN_EMPTY;
+    if(!f->rows){f->rows=pn_cache_alloc(f->pool,PN_CACHE_BITMAP,PN_MEM_UI,ROW_CACHE_SLOTS*sizeof *f->rows);if(!f->rows)return PN_EMPTY;memset(f->rows,0,ROW_CACHE_SLOTS*sizeof *f->rows);}
+    size_t initial=f->page.index,shown=f->page.count<LIST_ROWS?f->page.count:LIST_ROWS;
+    pn_status_t status=prepare_rows(f,(int)initial*PN_W_CARD_ROW_H,true);
+    // 仅保留已生成的小样；重新准备统一行背景，不复制分页卡片的外框和阴影。
+    // Retain prepared sample tiles only; prepare uniform row backgrounds without copying paging-card borders or shadows.
+    if(status==PN_OK)for(size_t i=0;i<shown;i++){row_t *r=NULL;for(unsigned slot=0;slot<ROW_CACHE_SLOTS;slot++)if(f->rows[slot].valid && f->rows[slot].index==initial+i){r=&f->rows[slot];break;}if(!r){status=PN_INVALID;break;}r->sample_checked=f->sample_checked[i];if(f->sample_ready[i]){pn_frame_t row;pn_frame_bind(&row,r->pixels,sizeof r->pixels,684,PN_W_CARD_ROW_H);for(int y=0;y<46;y++)for(int x=0;x<46;x++)pn_frame_pixel(&row,53+x,27+y,pn_frame_get(&f->canvas,53+x,LIST_ROW_Y+(int)i*PN_W_CARD_ROW_H+27+y));}}
+    if(status==PN_OK)status=pn_list_motion_open(&f->motion,f->pool,(pn_follow_box_t){32,LIST_ROW_Y,620,LIST_ROWS*PN_W_CARD_ROW_H},(int)f->page.total*PN_W_CARD_ROW_H,(int)initial*PN_W_CARD_ROW_H,render_motion,f,present,ctx);
+    if(status==PN_OK)status=pn_list_motion_prepare_port(&f->motion,prepare_rows);
+    if(status!=PN_OK){pn_list_motion_close(&f->motion);row_drop(f);}
+    return status;
+}
+bool pn_font_manage_pointer(pn_font_manage_t *ui,unsigned count,int x,int y,bool valid,uint64_t now,pn_font_manage_present_fn present,void *ctx,pn_status_t *status){
+    if(!ui || !ui->impl || !status || ui->screen!=PN_FMU_LIST)return false;
+    fm_t *f=ui->impl;int click=-1;bool consumed=pn_list_motion_pointer(&f->motion,count,x,y,valid,now,&click,status);
+    if(click>=0)*status=pn_font_manage_event(ui,pn_font_manage_hit(ui,342,click),present,ctx);
+    if(*status!=PN_OK && *status!=PN_EMPTY && *status!=PN_CANCELLED)ui->presented=false;
+    return consumed;
+}
+pn_status_t pn_font_manage_tick(pn_font_manage_t *ui,uint64_t now){if(!ui || !ui->impl || ui->screen!=PN_FMU_LIST)return PN_EMPTY;fm_t *f=ui->impl;pn_status_t status=pn_list_motion_tick(&f->motion,now);if(status==PN_OK && !pn_list_motion_stats(&f->motion).active)ui->presented=true;return status;}
+pn_status_t pn_font_manage_motion_abort(pn_font_manage_t *ui){return ui && ui->impl?pn_list_motion_abort(&((fm_t *)ui->impl)->motion):PN_OK;}
+pn_list_motion_stats_t pn_font_manage_motion_stats(const pn_font_manage_t *ui){return ui && ui->impl?pn_list_motion_stats(&((fm_t *)ui->impl)->motion):(pn_list_motion_stats_t){0};}

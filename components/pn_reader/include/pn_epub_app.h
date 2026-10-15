@@ -9,19 +9,39 @@
 #include "pn_font_preferences.h"
 #include "pn_catalog.h"
 #include "pn_epub_reader.h"
+#include "pn_page_bitmap.h"
 #include "pn_epub_save.h"
 #include "pn_epub_bookmarks.h"
 #include "pn_epub_image.h"
 #include "pn_toc.h"
 #include "pn_reader_app.h"
 typedef struct {void *impl;} pn_epub_app_t; ///< 初始NULL，不复制活动对象 / Initially NULL; never copy a live object
+/// 验证已保存挂起会话的原书/字体源，不绘制或推进位置。/ Verify original book/font sources of a saved suspended session without drawing/position commits.
+pn_status_t pn_epub_app_retained_ready(pn_epub_app_t *);
+/// 验证选择的路径/介质就是当前会话的源，不读文件内容。/ Verify the selected path/media are this session's source, without content reads.
+pn_status_t pn_epub_app_retained_source(const pn_epub_app_t *,pn_media_t *,const char *);
+/// 仅释放已保存挂起会话，不重写进度/最近记录；失败候选返回BUSY。/ Release only a saved suspended session without rewriting progress/recents; uncommitted candidates return BUSY.
+pn_status_t pn_epub_app_release_retained(pn_epub_app_t *);
 /// 空闲预排下一页，不呈现或提交位置；候选设置/睡眠跳过。/ Idle next-page preparation without display/position commits; skip draft settings and sleep.
 pn_status_t pn_epub_app_prefetch(pn_epub_app_t *app);
+/// 正文安静1.5秒后接管已验证包，后续每次推进一个文件步骤；BUSY未提交、OK完成，错误不影响阅读/进度。菜单、按压或扫描期不得调用。
+/// Take a verified packet after 1.5 quiet seconds, then advance one file step per call; BUSY is uncommitted, OK complete, errors leave reading/progress intact. Never call during menus, presses or scanning.
+pn_status_t pn_epub_app_cache_idle(pn_epub_app_t *,uint64_t);
+/// 新输入先归还可选写入包并重新等待1.5秒安静期，不提交缓存或改变阅读位置。/ New input frees optional staging and restarts the 1.5-second quiet delay, without committing or changing position.
+void pn_epub_app_cache_activity(pn_epub_app_t *,uint64_t);
+/// 只查询未提交包，用于空闲调度；菜单/按压期间仍不可推进。/ Query uncommitted staging for idle scheduling only; menus/presses must still pause it.
+bool pn_epub_app_cache_pending(const pn_epub_app_t *);
 /// 下一页仍有字形待预热，调用方可缩短空闲间隔。/ Next-page glyphs remain to warm, so callers may shorten idle gaps.
 bool pn_epub_app_warm_pending(const pn_epub_app_t *app);
 /// 面板扫描（呈现回调阻塞）期间调用的一小步，为待确认页准备下一页；OK表示做了工作，EMPTY表示无事可做或应停止。
 /// A small step called during a panel scan (while the present callback blocks) preparing the page after the pending one; OK when work was done, EMPTY when idle or overlap should stop.
 pn_status_t pn_epub_app_overlap(pn_epub_app_t *app);
+/// 可选整页正文预绘制开关，不改变位置或排版。/ Optional full-body prerender switch without changing location or layout.
+pn_status_t pn_epub_app_prerender(pn_epub_app_t *,bool);
+/// 管理覆盖页准入前释放可选下一页像素，保留原预绘制启用策略与阅读位置。/ Release optional next-page pixels for management-overlay admission, preserving prerender policy and reading position.
+pn_status_t pn_epub_app_trim_bitmap(pn_epub_app_t *);
+/// 当前会话预绘制统计，不读硬件。/ Current-session prerender stats without hardware reads.
+pn_page_bitmap_stats_t pn_epub_app_prerender_stats(const pn_epub_app_t *);
 /// 绑定/清除同源正文叠层，不影响工具页。/ Bind/clear the shared body decoration without affecting tool pages.
 pn_status_t pn_epub_app_body_layer(pn_epub_app_t *app,const pn_reader_body_layer_t *layer);
 /// state可NULL；本地media或借用已挂载media，不挂载/格式化。/ Optional state; local or borrowed mounted media, never mounted/formatted here.

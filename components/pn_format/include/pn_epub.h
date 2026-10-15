@@ -12,9 +12,11 @@
 #define PN_EPUB_ID_MAX 256
 #define PN_EPUB_META_MAX 512
 #define PN_EPUB_ITEMS_MAX PN_ZIP_ENTRIES_MAX
+struct pn_xhtml_store;
 typedef struct {
     void *impl; ///< 出版物模型，初始NULL，不可复制活动对象 / Publication model, initially NULL; never copy a live object
     void *semantic_cache; ///< 本会话可选语义缓存，初始NULL，由close释放 / Optional session semantic cache, initially NULL, released by close
+    const struct pn_xhtml_store *semantic_store; ///< 控制层可选持久缓存端口，寿命覆盖出版物 / Optional controller persistence port, outliving the publication
 } pn_epub_t;
 typedef enum {PN_EPUB_OTHER=0,PN_EPUB_XHTML,PN_EPUB_NCX,PN_EPUB_IMAGE,PN_EPUB_CSS,PN_EPUB_FONT} pn_epub_media_t;
 typedef struct {
@@ -35,6 +37,16 @@ typedef struct {
 /// 借用有效ZIP；salt须来自可信随机源；错误epub仍为空，必须先close再关ZIP和源。
 /// Borrow a valid ZIP with trusted random salt; errors leave epub empty; close before ZIP and source.
 pn_status_t pn_epub_open(pn_epub_t *epub,pn_pool_t *pool,pn_zip_t *zip,const uint8_t salt[16]);
+typedef struct {
+    void *impl; ///< 暂定出版物/流式XML状态，零初始化且不可移动 / Provisional publication/streaming XML state; zero-initialize and never move while active
+} pn_epub_job_t;
+/// 开始可暂停元信息解析；借用ZIP直到任务终结，尚不发布出版物。/ Begin resumable metadata parsing, borrowing ZIP until termination without publishing a book.
+pn_status_t pn_epub_job_begin(pn_epub_job_t *,pn_pool_t *,pn_zip_t *,const uint8_t[16]);
+/// 每次一个阶段或4KiB XML；BUSY待续，OK才设置epub，输入前取消保留任务供暂停/关闭。
+/// One stage or 4 KiB of XML per call; continue on BUSY, set epub only on OK, and pre-input cancellation retains the job for pause/close.
+pn_status_t pn_epub_job_step(pn_epub_job_t *,pn_epub_t *);
+/// 丢弃暂定模型并关闭流，不关闭借用ZIP。/ Discard the provisional model and close streams, keeping the borrowed ZIP open.
+void pn_epub_job_close(pn_epub_job_t *);
 /// 幂等释放出版物模型，不关闭ZIP。/ Idempotently release the publication model without closing ZIP.
 void pn_epub_close(pn_epub_t *epub);
 /// 验证媒体后复制元数据，失败输出不变。/ Validate media then copy metadata, preserving output on errors.

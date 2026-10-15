@@ -25,14 +25,14 @@ int pn_pool_init(pn_pool_t *pool, size_t limit, pn_malloc_fn alloc, pn_free_fn r
     *pool = (pn_pool_t){ .limit=limit, .malloc_fn=alloc ? alloc : libc_alloc,
         .free_fn=release ? release : libc_free, .ctx=ctx,
         .cache_limit=limit>=4u*1024u*1024u?1536u*1024u:1024u*1024u,.cache_reserve=limit/8<256u*1024u?limit/8:256u*1024u,
-        .cache_caps={512u*1024u,768u*1024u,256u*1024u,384u*1024u} };
+        .cache_caps={512u*1024u,768u*1024u,256u*1024u,384u*1024u,132u*1024u,416u*1024u} };
     return 0;
 }
 
 void *pn_alloc(pn_pool_t *pool, size_t bytes) {
     return pn_alloc_tagged(pool,PN_MEM_OTHER,bytes);
 }
-void *pn_alloc_tagged(pn_pool_t *pool,pn_memory_tag_t tag,size_t bytes) {
+static void *allocate(pn_pool_t *pool,pn_memory_tag_t tag,size_t bytes,bool optional) {
     if((unsigned)tag>=PN_MEM_COUNT)return NULL;
     if (!pool || !pool->malloc_fn || !bytes || bytes > SIZE_MAX-sizeof(pn_alloc_header_t)) return NULL;
     if (pool->attempts == SIZE_MAX) return NULL;
@@ -41,14 +41,15 @@ void *pn_alloc_tagged(pn_pool_t *pool,pn_memory_tag_t tag,size_t bytes) {
     size_t total=sizeof(pn_alloc_header_t)+bytes;
     if(pool->reclaiming){pool->memory[tag].failures++;return NULL;}
     if(pool->speculative && !pn_cache_allow(pool,pool->speculative_kind,bytes)){pool->memory[tag].failures++;return NULL;}
-    if(!pool->speculative && (pool->used>pool->limit || total>pool->limit-pool->used || pool->limit-pool->used-total<pool->cache_reserve)){
+    if(optional && (pool->used>pool->limit || total>pool->limit-pool->used || pool->limit-pool->used-total<pool->cache_reserve)){pool->memory[tag].failures++;return NULL;}
+    if(!optional && !pool->speculative && (pool->used>pool->limit || total>pool->limit-pool->used || pool->limit-pool->used-total<pool->cache_reserve)){
         size_t target=total>SIZE_MAX-pool->cache_reserve?SIZE_MAX:total+pool->cache_reserve;
         pn_cache_reclaim(pool,target);
     }
     if (pool->used > pool->limit || total > pool->limit-pool->used) {pool->memory[tag].failures++;return NULL;}
     pn_alloc_header_t *header=pool->malloc_fn(pool->ctx,total);
     // 底层碎片失败只回收并重试一次，注入故障不会进入此路。/ Reclaim and retry backing-heap failures once; injected faults never reach this path.
-    if(!header && !pool->speculative){pn_cache_reclaim(pool,SIZE_MAX);header=pool->malloc_fn(pool->ctx,total);}
+    if(!header && !optional && !pool->speculative){pn_cache_reclaim(pool,SIZE_MAX);header=pool->malloc_fn(pool->ctx,total);}
     if (!header) {pool->memory[tag].failures++;return NULL;}
     header->record.pool=pool;
     header->record.bytes=total;
@@ -61,6 +62,8 @@ void *pn_alloc_tagged(pn_pool_t *pool,pn_memory_tag_t tag,size_t bytes) {
     pn_profile_allocation(pool);
     return header+1;
 }
+void *pn_alloc_tagged(pn_pool_t *pool,pn_memory_tag_t tag,size_t bytes){return allocate(pool,tag,bytes,false);}
+void *pn_alloc_optional(pn_pool_t *pool,pn_memory_tag_t tag,size_t bytes){return allocate(pool,tag,bytes,true);}
 const char *pn_memory_tag_name(pn_memory_tag_t tag){
     static const char *const names[]={"other","frame","font","document","layout","image","index","ui","transfer"};
     return (unsigned)tag<PN_MEM_COUNT?names[tag]:"invalid";
@@ -128,7 +131,10 @@ size_t pn_cache_reclaimable(pn_pool_t *p,unsigned kinds){
 size_t pn_cache_reclaim(pn_pool_t *p,size_t headroom){
     if(!p || p->reclaiming || p->speculative)return 0;
     size_t before=p->used;p->reclaiming=true;pn_cache_snapshot(p);
-    for(unsigned kind=0;kind<PN_CACHE_COUNT;kind++)for(pn_cache_owner_t *o=p->caches;o;o=o->next){
+    // 便宜的文件块先让位，避免为保留读缓存而驱逐已光栅字形。/ Cheap file blocks yield first rather than evicting rasterized glyphs to retain read caches.
+    static const pn_cache_class_t order[]={PN_CACHE_SOURCE,PN_CACHE_BITMAP,PN_CACHE_NEIGHBOR,PN_CACHE_GLYPH,PN_CACHE_COVER,PN_CACHE_CHAPTER};
+    for(unsigned rank=0;rank<PN_CACHE_COUNT;rank++)for(pn_cache_owner_t *o=p->caches;o;o=o->next){
+        pn_cache_class_t kind=order[rank];
         if(p->used<=p->limit && headroom<=p->limit-p->used)goto done;
         if(o->kind!=kind || o->pins || !o->bytes(o->ctx))continue;
         size_t old=p->used;o->drop(o->ctx);

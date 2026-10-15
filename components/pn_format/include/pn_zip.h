@@ -22,6 +22,16 @@ typedef struct {
 /// 验证全部中央/本地头及重叠，不解压整书；source含validate取消/介质错误。
 /// Validate all central/local headers and overlap without inflating the book; source validate supplies cancellation/media errors.
 pn_status_t pn_zip_open(pn_zip_t *zip,pn_pool_t *pool,const pn_text_source_t *source);
+typedef struct {void *impl;} pn_zip_job_t; ///< 可恢复打开任务，初始NULL且活动时不可复制 / Resumable open job, initially NULL and never copied while active
+/// 只准备任务，借用稳定源；不发布部分ZIP。/ Prepare a job borrowing a stable source, without publishing a partial ZIP.
+pn_status_t pn_zip_job_begin(pn_zip_job_t *,pn_pool_t *,const pn_text_source_t *);
+/// 每步最多4096B源供数、8次源read_at、32次状态推进；排序/条目另有固定配额。
+/// At most 4096 source bytes, eight source read_at calls and 32 state transitions per step, with separate fixed sorting/entry quotas.
+/// BUSY继续；CANCELLED保留任务可恢复；其他错误释放任务。完整校验成功才设置空zip并清空任务。
+/// Continue on BUSY; CANCELLED preserves the job for resumption, other errors release it. Only full success sets an empty zip and clears the job.
+pn_status_t pn_zip_job_step(pn_zip_job_t *,pn_zip_t *);
+/// 放弃并释放私有暂存，不关闭借用源；幂等。/ Abandon private staging without closing the borrowed source; idempotent.
+void pn_zip_job_close(pn_zip_job_t *);
 typedef struct {void *impl;} pn_zip_scan_t; ///< 分步打开句柄，初始NULL / Staged-open handle, initially NULL
 /// 分步打开：先校验EOCD/中央目录；之后把整文件顺序读到的字节交给feed，本地头/描述符在流过时校验，免去逐条随机读。
 /// Staged open: validate EOCD/central directory first; then feed bytes read sequentially across the file so local headers/descriptors are checked as they stream past, avoiding per-entry random reads.

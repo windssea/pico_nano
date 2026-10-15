@@ -5,6 +5,20 @@ config PN_PROFILE
     help
         Emit owner phase timing, pool accounting and real heap snapshots.
         Serial logging changes timing; use dedicated diagnostic runs.
+config PN_UI_FEEDBACK
+    bool "Qualify local press feedback on the panel"
+    default n
+    help
+        Use the existing FOLLOW DU table only for bounded reversible control feedback.
+        Keep disabled until press/restore ghosting, gray restoration and underruns
+        have been qualified on the actual panel. Ordinary content stays GL16/GC16.
+config PN_UI_FOLLOW
+    bool "Qualify continuous font-list scrolling on the panel"
+    default n
+    help
+        Use the original FOLLOW phase and black7/white8 counts for binary list motion.
+        Enable only in a panel qualification image. Gray normalization, settling,
+        failed scans and navigation/media/USB/sleep barriers require device testing.
 endmenu
 menu "PicoNano power"
 config PN_POWER_DFS

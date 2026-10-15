@@ -74,29 +74,42 @@ static pn_status_t safe_path(const char *s,size_t n){
     pn_text_char_t c;pn_status_t status;while((status=pn_text_next(&decoder,&c))==PN_OK){}return status==PN_EMPTY?PN_OK:status;
 }
 static pn_status_t name_at(archive_t *a,const entry_t *e,char *name){pn_status_t status=read_at(a,e->name_pos,(uint8_t *)name,e->name_length);if(status==PN_OK)name[e->name_length]=0;return status;}
+static pn_status_t extra_field(const uint8_t *h,uint16_t remaining,uint32_t *step){
+    if(remaining<4 || u16(h+2)>remaining-4)return PN_CORRUPT;
+    if(u16(h)==1)return PN_UNSUPPORTED;
+    *step=4u+u16(h+2);return PN_OK;
+}
 static pn_status_t extras(archive_t *a,uint32_t pos,uint16_t size){
-    while(size){uint8_t h[4];if(size<4)return PN_CORRUPT;pn_status_t status=read_at(a,pos,h,4);if(status!=PN_OK)return status;uint16_t count=u16(h+2);if(count>size-4)return PN_CORRUPT;if(u16(h)==1)return PN_UNSUPPORTED;uint32_t step=4u+count;pos+=step;size=(uint16_t)(size-step);}
+    while(size){uint8_t h[4];if(size<4)return PN_CORRUPT;pn_status_t status=read_at(a,pos,h,4);if(status!=PN_OK)return status;uint32_t step;status=extra_field(h,size,&step);if(status!=PN_OK)return status;pos+=step;size=(uint16_t)(size-step);}
     return PN_OK;
 }
+static pn_status_t local_fields(archive_t *a,entry_t *e,const uint8_t *h,uint16_t *extra,uint64_t *data,uint64_t *end){
+    if(u32(h)!=0x04034b50u || u16(h+6)!=e->flags || u16(h+8)!=e->method || u16(h+26)!=e->name_length)return PN_CORRUPT;
+    if(u16(h+4)>20)return PN_UNSUPPORTED;
+    *extra=u16(h+28);*data=(uint64_t)e->local+30+e->name_length+*extra;*end=*data+e->packed;
+    return *end>a->directory?PN_CORRUPT:PN_OK;
+}
+static pn_status_t local_sizes(const entry_t *e,const uint8_t *h){
+    uint32_t crc=u32(h+14),packed=u32(h+18),unpacked=u32(h+22);
+    if(e->flags&8)return ((crc && crc!=e->crc)||(packed && packed!=e->packed)||(unpacked && unpacked!=e->unpacked))?PN_CORRUPT:PN_OK;
+    return crc!=e->crc || packed!=e->packed || unpacked!=e->unpacked?PN_CORRUPT:PN_OK;
+}
+static bool descriptor_valid(const entry_t *e,const uint8_t *p){return u32(p)==e->crc && u32(p+4)==e->packed && u32(p+8)==e->unpacked;}
 static pn_status_t local_header(archive_t *a,entry_t *e,const char *expected){
     uint8_t h[30];if(e->local>=a->directory || a->directory-e->local<30)return PN_CORRUPT;
     pn_status_t status=read_at(a,e->local,h,sizeof h);if(status!=PN_OK)return status;
-    if(u32(h)!=0x04034b50u || u16(h+6)!=e->flags || u16(h+8)!=e->method || u16(h+26)!=e->name_length)return PN_CORRUPT;
-    if(u16(h+4)>20)return PN_UNSUPPORTED;
-    uint16_t extra=u16(h+28);uint64_t data=(uint64_t)e->local+30+e->name_length+extra,end=data+e->packed;
-    if(end>a->directory)return PN_CORRUPT;
+    uint16_t extra;uint64_t data,end;status=local_fields(a,e,h,&extra,&data,&end);if(status!=PN_OK)return status;
     char name[PN_ZIP_PATH_MAX];status=read_at(a,e->local+30,(uint8_t *)name,e->name_length);if(status!=PN_OK)return status;
     if(memcmp(name,expected,e->name_length))return PN_CORRUPT;
     status=extras(a,e->local+30+e->name_length,extra);if(status!=PN_OK)return status;
-    uint32_t crc=u32(h+14),packed=u32(h+18),unpacked=u32(h+22);
+    status=local_sizes(e,h);if(status!=PN_OK)return status;
     if(e->flags&8){
-        if((crc && crc!=e->crc)||(packed && packed!=e->packed)||(unpacked && unpacked!=e->unpacked))return PN_CORRUPT;
         uint8_t descriptor[16];if(a->directory-end<12)return PN_CORRUPT;
         status=read_at(a,end,descriptor,12);if(status!=PN_OK)return status;
         unsigned skip=u32(descriptor)==0x08074b50u?4:0;if(skip){if(a->directory-end<16)return PN_CORRUPT;status=read_at(a,end+12,descriptor+12,4);if(status!=PN_OK)return status;}
-        if(u32(descriptor+skip)!=e->crc || u32(descriptor+skip+4)!=e->packed || u32(descriptor+skip+8)!=e->unpacked)return PN_CORRUPT;
+        if(!descriptor_valid(e,descriptor+skip))return PN_CORRUPT;
         end+=12+skip;
-    }else if(crc!=e->crc || packed!=e->packed || unpacked!=e->unpacked)return PN_CORRUPT;
+    }
     e->data=(uint32_t)data;e->end=(uint32_t)end;return PN_OK;
 }
 static int by_offset(const void *x,const void *y){const entry_t *a=x,*b=y;return (a->local>b->local)-(a->local<b->local);}
@@ -114,6 +127,26 @@ static void sort_entries(entry_t *entries,size_t count,int (*compare)(const void
     for(size_t root=count/2;root;root--)sift(entries,root-1,count,compare);
     for(size_t end=count;end>1;end--){entry_t swap=entries[0];entries[0]=entries[end-1];entries[end-1]=swap;sift(entries,0,end-1,compare);}
 }
+static pn_status_t eocd_fields(archive_t *a,const uint8_t *end,uint32_t eocd,uint32_t *directory_size){
+    *directory_size=u32(end+12);
+    if(u16(end+4)||u16(end+6)||u16(end+8)!=u16(end+10)||u16(end+10)==65535 || *directory_size==UINT32_MAX || u32(end+16)==UINT32_MAX)return PN_UNSUPPORTED;
+    a->count=u16(end+10);a->directory=u32(end+16);if(a->count>PN_ZIP_ENTRIES_MAX)return PN_LIMIT;
+    return a->directory>eocd || *directory_size!=eocd-a->directory?PN_CORRUPT:PN_OK;
+}
+static pn_status_t central_fields(entry_t *e,const uint8_t *h,uint32_t cursor,uint32_t eocd,uint64_t *total,uint32_t *length){
+    if(u32(h)!=0x02014b50u)return PN_CORRUPT;
+    *e=(entry_t){.flags=u16(h+8),.method=u16(h+10),.crc=u32(h+16),.packed=u32(h+20),.unpacked=u32(h+24),.name_length=u16(h+28),.local=u32(h+42),.name_pos=cursor+46};
+    // 同步和可恢复路径共用兼容位/大小/方法约束。/ Synchronous and resumable paths share compatibility-bit, size and method constraints.
+    if(u16(h+6)>20 || (e->flags&~0x081eu) || u16(h+34) || (e->method!=0 && e->method!=8) || ((u32(h+38)>>16)&0170000)==0120000)return PN_UNSUPPORTED;
+    if(e->packed==UINT32_MAX || e->unpacked==UINT32_MAX || e->local==UINT32_MAX)return PN_UNSUPPORTED;
+    *total+=e->unpacked;if(e->packed>ENTRY_MAX_BYTES || e->unpacked>ENTRY_MAX_BYTES || *total>TOTAL_MAX_BYTES)return PN_LIMIT;
+    *length=46u+e->name_length+u16(h+30)+u16(h+32);
+    return !e->name_length || e->name_length>=PN_ZIP_PATH_MAX || *length>eocd-cursor || (e->method==0 && e->packed!=e->unpacked)?PN_CORRUPT:PN_OK;
+}
+static pn_status_t central_name(entry_t *e,const char *name){
+    pn_status_t status=safe_path(name,e->name_length);if(status!=PN_OK)return status==PN_CANCELLED?status:PN_CORRUPT;
+    e->hash=hash_name(name,e->name_length);e->directory=name[e->name_length-1]=='/';return e->directory && e->unpacked?PN_CORRUPT:PN_OK;
+}
 /// 中央目录与路径校验；本地头留到顺序扫描或finish。成功时a按本地偏移排序并保留目录快照。
 /// Central-directory and path validation; local headers wait for the sequential scan or finish. On success entries are sorted by local offset and the directory snapshot is kept.
 static pn_status_t zip_begin(archive_t **out,pn_pool_t *pool,const pn_text_source_t *source){
@@ -123,10 +156,8 @@ static pn_status_t zip_begin(archive_t **out,pn_pool_t *pool,const pn_text_sourc
     archive_t *a=pn_alloc_tagged(pool,PN_MEM_DOCUMENT,sizeof *a);if(!a)return PN_NO_MEMORY;memset(a,0,sizeof *a);a->pool=pool;a->source=*source;
     size_t size=source->size<65557? (size_t)source->size:65557;uint8_t *tail=pn_alloc_tagged(pool,PN_MEM_DOCUMENT,size);pn_status_t status=tail?read_at(a,source->size-size,tail,size):PN_NO_MEMORY;if(status!=PN_OK)goto failed;
     size_t pos=size-22;for(;;){if(u32(tail+pos)==0x06054b50u && pos+22+u16(tail+pos+20)==size)break;if(!pos){status=PN_CORRUPT;goto failed;}pos--;}
-    const uint8_t *end=tail+pos;uint32_t eocd=(uint32_t)(source->size-size+pos),directory_size=u32(end+12);
-    if(u16(end+4)||u16(end+6)||u16(end+8)!=u16(end+10)||u16(end+10)==65535 || directory_size==UINT32_MAX || u32(end+16)==UINT32_MAX){status=PN_UNSUPPORTED;goto failed;}
-    a->count=u16(end+10);a->directory=u32(end+16);if(a->count>PN_ZIP_ENTRIES_MAX){status=PN_LIMIT;goto failed;}
-    if(a->directory>eocd || directory_size!=eocd-a->directory){status=PN_CORRUPT;goto failed;}
+    const uint8_t *end=tail+pos;uint32_t eocd=(uint32_t)(source->size-size+pos),directory_size;
+    status=eocd_fields(a,end,eocd,&directory_size);if(status!=PN_OK)goto failed;
     pn_free(tail);tail=NULL;
     if(a->count){a->entries=pn_alloc_tagged(pool,PN_MEM_DOCUMENT,a->count*sizeof *a->entries);if(!a->entries){status=PN_NO_MEMORY;goto failed;}}
     // 最多128KiB暂存；准入失败保留原有逐段校验路径，不保留到阅读会话。/ At most 128 KiB of temporary storage; admission failure keeps original validation, never retaining it for reading.
@@ -135,16 +166,9 @@ static pn_status_t zip_begin(archive_t **out,pn_pool_t *pool,const pn_text_sourc
     uint32_t cursor=a->directory;uint64_t total=0;
     for(uint32_t i=0;i<a->count;i++){
         uint8_t h[46];if(cursor>eocd || eocd-cursor<46){status=PN_CORRUPT;goto failed;}status=read_at(a,cursor,h,sizeof h);if(status!=PN_OK)goto failed;
-        if(u32(h)!=0x02014b50u){status=PN_CORRUPT;goto failed;}
-        entry_t *e=&a->entries[i];memset(e,0,sizeof *e);e->flags=u16(h+8);e->method=u16(h+10);e->crc=u32(h+16);e->packed=u32(h+20);e->unpacked=u32(h+24);e->name_length=u16(h+28);e->local=u32(h+42);e->name_pos=cursor+46;
-        // 兼容旧打包器遗留的压缩选项位；方法字段决定解码，头、大小及CRC仍须一致。/ Accept legacy compression hint bits; the method selects decoding and headers, sizes and CRC must still match.
-        if(u16(h+6)>20 || (e->flags&~0x081eu) || u16(h+34) || (e->method!=0 && e->method!=8) || ((u32(h+38)>>16)&0170000)==0120000){status=PN_UNSUPPORTED;goto failed;}
-        if(e->packed==UINT32_MAX || e->unpacked==UINT32_MAX || e->local==UINT32_MAX){status=PN_UNSUPPORTED;goto failed;}
-        total+=e->unpacked;if(e->packed>ENTRY_MAX_BYTES || e->unpacked>ENTRY_MAX_BYTES || total>TOTAL_MAX_BYTES){status=PN_LIMIT;goto failed;}
-        uint32_t length=46u+e->name_length+u16(h+30)+u16(h+32);if(!e->name_length || e->name_length>=PN_ZIP_PATH_MAX || length>eocd-cursor || (e->method==0 && e->packed!=e->unpacked)){status=PN_CORRUPT;goto failed;}
+        entry_t *e=&a->entries[i];uint32_t length;status=central_fields(e,h,cursor,eocd,&total,&length);if(status!=PN_OK)goto failed;
         char name[PN_ZIP_PATH_MAX];status=name_at(a,e,name);if(status!=PN_OK)goto failed;
-        status=safe_path(name,e->name_length);if(status!=PN_OK){if(status!=PN_CANCELLED)status=PN_CORRUPT;goto failed;}e->hash=hash_name(name,e->name_length);e->directory=name[e->name_length-1]=='/';
-        if(e->directory && e->unpacked){status=PN_CORRUPT;goto failed;}
+        status=central_name(e,name);if(status!=PN_OK)goto failed;
         status=extras(a,e->name_pos+e->name_length,u16(h+30));if(status!=PN_OK)goto failed;cursor+=length;
     }
     if(cursor!=eocd){status=PN_CORRUPT;goto failed;}
@@ -207,6 +231,7 @@ static pn_status_t zip_finish(archive_t *a){
     status=current(a);if(status!=PN_OK)return status;
     pn_free(a->capture);a->capture=NULL;pn_free(a->directory_bytes);a->directory_bytes=NULL;a->directory_size=0;return PN_OK;
 }
+#include "pn_zip_job.inc"
 static pn_status_t pn_zip_open_impl(pn_zip_t *zip,pn_pool_t *pool,const pn_text_source_t *source){
     if(!zip)return PN_INVALID;
     if(zip->impl)return PN_BUSY;

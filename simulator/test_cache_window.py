@@ -51,13 +51,17 @@ with tempfile.TemporaryDirectory() as folder:
             positions = re.findall(r"epub_library_position (.+)", result.stdout)
             assert len(positions) == 2 and positions[0] != positions[1], result.stdout
         aggregate = 0
+        # 文件块也计入同一总额，不能只核对原四类缓存。/ File blocks share the aggregate cap; verify beyond the original four classes.
+        caps_kib = [512, 768, 256, 384, 132, 416]
         for line in result.stderr.splitlines():
             if line.startswith("cache "):
                 fields = dict(re.findall(r"(\w+)=([^\s]+)", line))
-                assert int(fields["bytes"]) <= [512, 768, 256, 384][int(fields["kind"])] * 1024, line
+                kind = int(fields["kind"])
+                assert 0 <= kind < len(caps_kib), line
+                assert int(fields["bytes"]) <= caps_kib[kind] * 1024, line
                 if fields["kind"] == "0":
                     aggregate = 0
                 aggregate += int(fields["bytes"])
-                if fields["kind"] == "3":
+                if kind == len(caps_kib) - 1:
                     assert aggregate <= 1024 * 1024, line
 print("2MiB TXT/EPUB: foreground turns, eviction, source preservation, real close/save/resume and zero live allocations passed")

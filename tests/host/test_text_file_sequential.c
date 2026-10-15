@@ -45,11 +45,14 @@ int main(void){
     assert(pn_text_file_close(&file)==PN_OK && pn_text_file_open(&file,&media,&lease,path,&source)==PN_OK);seeks=reads=0;short_reads=true;
     assert(pn_identity_stream(source.ctx,source.size,source.read_at,&actual)==PN_OK && !memcmp(&expected,&actual,sizeof actual));
     assert(seeks==1); // 短读后连续直读不定位，仅末尾小读按缓存块重新对齐。/ Continue directly after a short read; only the final small read realigns its cache block.
+    // 新多块缓存的装载也必须接受正常短读，并只在完整填块后发布。/ New multi-block fills must accept normal short reads and publish only complete blocks.
+    assert(pn_text_file_cache_bind(&source,&pool)==PN_OK);short_reads=true;check(&source,bytes,13,17);
+    unsigned cached_reads=reads;check(&source,bytes,14,17);assert(reads==cached_reads);
     pn_cancel_scope_t scope;pn_cancel_enter(&scope,cancelled,NULL);unsigned before=reads;n=123;
     assert(source.read_at(source.ctx,0,out,sizeof out,&n)==PN_CANCELLED && n==123 && reads==before);pn_cancel_leave(&scope);
     assert(pn_media_detach(&media)==PN_OK);n=123;
     assert(source.read_at(source.ctx,0,out,sizeof out,&n)==PN_STALE_MEDIA && n==123 && reads==before);
-    assert(pn_text_file_close(&file)==PN_OK && !file.read_position_known && pn_media_release(&media,&lease)==PN_OK);
+    assert(pn_text_file_close(&file)==PN_OK && !file.read_position_known && !pool.used && !pool.live && !pool.caches && pn_media_release(&media,&lease)==PN_OK);
     assert(pn_media_attach(&media,2)==PN_OK && pn_media_acquire(&media,PN_MEDIA_READ,&lease)==PN_OK);
     assert(pn_text_file_open(&file,&media,&lease,path,&source)==PN_OK);actual=expected;
     // 文件被外部截断的故障夹具：完整扫描失败，不能返回部分内容的摘要。/ Fault fixture truncates the file externally: a failed full scan must never return a partial digest.

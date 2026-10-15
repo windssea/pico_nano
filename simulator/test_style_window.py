@@ -17,13 +17,22 @@ with tempfile.TemporaryDirectory() as directory:
     assert "style_ui command=1 status=0" in result.stdout and "style_ui command=3 status=0 active=0" in result.stdout and "style_ui command=2 status=0 active=0" in result.stdout, result.stdout
     env["PN_SIM_LIBRARY_SCRIPT"] = "library,continue,styles,style-cancel,back,quit"
     reopened = subprocess.run(args, capture_output=True, text=True, env=env, timeout=30)
-    assert reopened.returncode == 0 and "style_ui open status=0 pixels=34" in reopened.stdout and "used=0 live=0" in reopened.stdout, (reopened.stdout, reopened.stderr)
+    assert "style_ui open status=0 pixels=44" in result.stdout, result.stdout
+    assert reopened.returncode == 0 and "style_ui open status=0 pixels=46" in reopened.stdout and "used=0 live=0" in reopened.stdout, (reopened.stdout, reopened.stderr)
     assert "tracking=5" in result.stdout, result.stdout
     # 从真实保存载荷检查第七项，避免仅凭运行日志判断恢复。/ Check the actual saved payload for the seventh field rather than inferring restore from logs.
     import struct
     snapshots=list((root / 'state').glob('*.style.*'))
     assert snapshots
     assert any(b'PNTS' in p.read_bytes() and struct.unpack_from('<H',p.read_bytes(),p.read_bytes().index(b'PNTS')+52)[0]==5 for p in snapshots)
+    # 明确保留旧字号34的单书设置，不因新默认44而重置。/ Preserve an explicit per-book size of 34 rather than resetting it to the new default of 44.
+    # previous脚本发送左箭头，在表单中减少当前字段。/ The previous script sends Left, which decrements the current form field.
+    env['PN_SIM_LIBRARY_SCRIPT'] = 'library,continue,styles,' + 'previous,' * 6 + 'style-apply,back,quit'
+    legacy = subprocess.run(args, capture_output=True, text=True, env=env, timeout=30)
+    assert legacy.returncode == 0 and 'style_ui command=2 status=0 active=0 preview=0 pixels=34' in legacy.stdout and 'used=0 live=0' in legacy.stdout, (legacy.stdout, legacy.stderr)
+    env['PN_SIM_LIBRARY_SCRIPT'] = 'library,continue,styles,style-cancel,back,quit'
+    legacy_reopen = subprocess.run(args, capture_output=True, text=True, env=env, timeout=30)
+    assert legacy_reopen.returncode == 0 and 'style_ui open status=0 pixels=34' in legacy_reopen.stdout and 'used=0 live=0' in legacy_reopen.stdout, (legacy_reopen.stdout, legacy_reopen.stderr)
     standalone_env = dict(os.environ, SDL_VIDEODRIVER="dummy", PN_SIM_INPUT_SCRIPT="styles,style-plus,style-preview,style-form,style-cancel,styles,style-plus,style-apply,quit")
     single = subprocess.run([sys.argv[1], "--book", str(books / "book.txt"), "--state-dir", str(root / "single")], capture_output=True, text=True, env=standalone_env, timeout=30)
     assert single.returncode == 0 and "style_ui command=2 status=0 active=0" in single.stdout and "used=0 live=0" in single.stdout, (single.stdout, single.stderr)
@@ -50,11 +59,12 @@ with tempfile.TemporaryDirectory() as directory:
             return result
         run('tap:520:40,style-plus,style-preview,style-form,style-cancel,')
         assert not list(state.glob('*.style.*'))
-        result=run('styles,style-plus,style-down,style-down,style-down,style-plus,style-down,style-plus,style-preview,style-form,style-apply,')
+        # 将舒适默认缩进2改为1，并同时核查字号及字距落盘。/ Change the comfort indent from two to one and verify saved size and tracking together.
+        result=run('styles,style-plus,style-down,style-down,style-down,previous,style-down,style-plus,style-preview,style-form,style-apply,')
         assert 'style_ui command=2 status=0 active=0' in result.stdout,result.stdout
         snapshots=list(state.glob('*.style.*')); assert snapshots
         payload=snapshots[0].read_bytes(); at=payload.index(b'PNTS')
-        assert struct.unpack_from('<H',payload,at+40)[0]==(46 if mode=='--book' else 34) and struct.unpack_from('<H',payload,at+46)[0]==1 and struct.unpack_from('<H',payload,at+52)[0]==5
+        assert struct.unpack_from('<H',payload,at+40)[0]==46 and struct.unpack_from('<H',payload,at+46)[0]==1 and struct.unpack_from('<H',payload,at+52)[0]==5
         before={p.name:p.read_bytes() for p in snapshots}
         run('styles,style-plus,style-preview,window-close,')
         assert {p.name:p.read_bytes() for p in state.glob('*.style.*')}==before

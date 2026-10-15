@@ -100,6 +100,14 @@ pn_status_t pn_w_header(pn_font_t *font,pn_frame_t *frame,const char *back,const
 /// 状态带时间（"HH:MM"，NULL或空则不显示）与无线连接状态。/ Status-band clock ("HH:MM"; hidden when NULL or empty) and wireless connection state.
 void pn_w_set_clock(const char *hhmm);
 void pn_w_set_wifi(bool connected);
+/// 只读状态带快照，供保留画布的页面识别实时变化。/ Read-only status-band snapshot for retained canvases to detect live changes.
+typedef struct {
+    int battery; ///< 实际显示的百分比，负数未知 / Displayed percentage, negative when unknown
+    char clock[8]; ///< 实际显示的短时间字符串 / Displayed short clock string
+    bool wifi; ///< 当前连接图标 / Current connection icon
+} pn_w_status_snapshot_t;
+/// 不读硬件、不修改状态，返回控制层已提供的显示值。/ Return controller-supplied display values without hardware reads or state changes.
+pn_w_status_snapshot_t pn_w_status_snapshot(void);
 /// 拟玻璃面板：静态下沿灰影＋雾面＋细描边。/ Faux-glass panel: a static under-edge shade, fog surface and hairline.
 void pn_w_glass(pn_frame_t *frame,int x,int y,int width,int height,int radius);
 /// 状态带（y=0..40）：左侧产品名，右侧电量（未设置电量则不画）。/ Status band (y=0..40): product name on the left and the battery on the right (omitted until a level is set).

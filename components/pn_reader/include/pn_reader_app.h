@@ -16,7 +16,14 @@
 #include "pn_bookmarks.h"
 #include "pn_recent.h"
 #include "pn_style.h"
+#include "pn_page_bitmap.h"
 typedef struct {void *impl;} pn_reader_app_t; ///< 初始impl=NULL / Initially impl=NULL
+/// 只接受已保存挂起会话，校验原书/字体源，不绘制或推进位置。/ Accept only a saved suspended session and verify original book/font sources without drawing or advancing position.
+pn_status_t pn_reader_app_retained_ready(pn_reader_app_t *);
+/// 验证选择的路径/介质就是当前会话的源，不读文件内容。/ Verify the selected path/media are this session's source, without content reads.
+pn_status_t pn_reader_app_retained_source(const pn_reader_app_t *,pn_media_t *,const char *);
+/// 仅释放已保存挂起会话，不重写进度/最近记录；失败候选返回BUSY。/ Release only a saved suspended session without rewriting progress/recents; uncommitted candidates return BUSY.
+pn_status_t pn_reader_app_release_retained(pn_reader_app_t *);
 /// 空闲预排下一页，不呈现/写进度；候选设置和睡眠时跳过。/ Idle next-page preparation without display/progress writes; skip draft settings and sleep.
 pn_status_t pn_reader_app_prefetch(pn_reader_app_t *app);
 /// 下一页仍有字形待预热，调用方可缩短空闲间隔。/ Next-page glyphs remain to warm, so callers may shorten idle gaps.
@@ -24,6 +31,10 @@ bool pn_reader_app_warm_pending(const pn_reader_app_t *app);
 /// 面板扫描期间的一小步，为待确认页准备下一页；OK表示做了工作，EMPTY表示无事可做或应停止。
 /// A small step during a panel scan preparing the page after the pending one; OK when work was done, EMPTY when idle or overlap should stop.
 pn_status_t pn_reader_app_overlap(pn_reader_app_t *app);
+/// 可选整页正文预绘制开关，诊断/欠载退路；不改变位置。/ Optional full-body prerender switch for diagnostics/underrun fallback, preserving location.
+pn_status_t pn_reader_app_prerender(pn_reader_app_t *,bool);
+/// 当前会话的预绘制统计，不读硬件。/ Current-session prerender stats without hardware reads.
+pn_page_bitmap_stats_t pn_reader_app_prerender_stats(const pn_reader_app_t *);
 
 typedef enum {
     PN_APP_OPEN=0, ///< 首次呈现/恢复 / First presentation or restore

@@ -1,0 +1,34 @@
+/* SPDX-License-Identifier: Apache-2.0
+ * 中文：真实缓存文件端口的租约、配额、空间、临时替换与取消，原记录不动。
+ * English: real file-port leases, quotas, space, temporary replacement and cancellation, leaving original records unchanged. */
+#define _POSIX_C_SOURCE 200809L
+#include "pn_semantic_file.h"
+#include "pn_cancel.h"
+#include <assert.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include <dirent.h>
+#include <sys/stat.h>
+#include <unistd.h>
+static pn_status_t space(void *ctx,const char *path,uint64_t *n){(void)path;*n=*(uint64_t *)ctx;return PN_OK;}
+static bool cancel_now(void *ctx){(void)ctx;return true;}
+static pn_status_t save_file(pn_semantic_file_t *f,pn_pool_t *pool,const uint8_t *bytes,size_t n){
+    uint8_t *packet=pn_alloc_tagged(pool,PN_MEM_INDEX,n);assert(packet);memcpy(packet,bytes,n);pn_status_t s=f->store.take(f,pool,packet,n);
+    if(s!=PN_OK){pn_free(packet);return s;}unsigned steps=0;do{s=pn_semantic_file_step(f);assert(++steps<4096);}while(s==PN_BUSY);return s;
+}
+int main(void){
+    char root[]="/tmp/pn-semantic-files-XXXXXX";assert(mkdtemp(root));pn_media_t media;pn_media_init(&media);assert(pn_media_attach(&media,1)==PN_OK);pn_media_lease_t lease={0};assert(pn_media_acquire(&media,PN_MEDIA_READ,&lease)==PN_OK);pn_book_id_t book={{1}};pn_semantic_file_t file={0};assert(pn_semantic_file_bind(&file,&media,&lease,root,&book)==PN_INVALID && pn_media_release(&media,&lease)==PN_OK && pn_media_acquire(&media,PN_MEDIA_WRITE,&lease)==PN_OK);
+    pn_pool_t pool;assert(pn_pool_init(&pool,2u*1024u*1024u,NULL,NULL,NULL)==PN_OK);
+    assert(pn_semantic_file_bind(&file,&media,&lease,root,&book)==PN_OK && access(file.directory,F_OK)!=0);uint64_t free_bytes=4u*1024u*1024u;pn_semantic_file_space_port(space,&free_bytes);uint8_t *data=malloc(PN_XHTML_SNAPSHOT_MAX);assert(data);memset(data,0x55,PN_XHTML_SNAPSHOT_MAX);assert(save_file(&file,&pool,data,PN_XHTML_SNAPSHOT_MAX)==PN_OK);
+    char original[PN_JOURNAL_PATH_MAX],temporary[512];strcpy(original,file.path);snprintf(temporary,sizeof temporary,"%s.tmp",original);FILE *f=fopen(temporary,"wb");assert(f && fputs("abandoned",f)>=0 && !fclose(f));char unrelated[512];snprintf(unrelated,sizeof unrelated,"%s/favorites.a",file.directory);f=fopen(unrelated,"wb");assert(f && fputs("keep",f)>=0 && !fclose(f));
+    for(unsigned i=2;i<=5;i++){book.sha256[0]=(uint8_t)i;assert(pn_semantic_file_bind(&file,&media,&lease,root,&book)==PN_OK && save_file(&file,&pool,data,PN_XHTML_SNAPSHOT_MAX)==PN_OK);}
+    assert(access(original,F_OK)!=0 && access(temporary,F_OK)!=0 && access(unrelated,F_OK)==0);
+    uint8_t *loaded=NULL;size_t n=0;assert(file.store.load(&file,&pool,&loaded,&n)==PN_OK && n==PN_XHTML_SNAPSHOT_MAX && !memcmp(loaded,data,n));pn_free(loaded);
+    free_bytes=0;assert(save_file(&file,&pool,data,152)==PN_EMPTY && access(file.path,F_OK)==0);free_bytes=4u*1024u*1024u;
+    pn_cancel_scope_t scope;pn_cancel_enter(&scope,cancel_now,NULL);assert(save_file(&file,&pool,data,152)==PN_CANCELLED);pn_cancel_leave(&scope);assert(file.store.load(&file,&pool,&loaded,&n)==PN_OK && n==PN_XHTML_SNAPSHOT_MAX);pn_free(loaded);
+    // 超限旧缓存可重建，不能永久挡住同一书的新窗口。/ An oversized old cache is rebuildable and must not permanently block the same book's new window.
+    f=fopen(file.path,"ab");assert(f && fputc(1,f)!=EOF && !fclose(f));assert(file.store.load(&file,&pool,&loaded,&n)==PN_EMPTY && save_file(&file,&pool,data,152)==PN_OK);
+    assert(pn_media_detach(&media)==PN_OK && save_file(&file,&pool,data,152)==PN_STALE_MEDIA && pn_media_release(&media,&lease)==PN_OK && !pool.used && !pool.live);pn_semantic_file_space_port(NULL,NULL);
+    DIR *dir=opendir(file.directory);assert(dir);struct dirent *e;while((e=readdir(dir)))if(strcmp(e->d_name,".") && strcmp(e->d_name,"..")){char path[768];snprintf(path,sizeof path,"%s/%s",file.directory,e->d_name);assert(!remove(path));}closedir(dir);assert(!rmdir(file.directory) && !rmdir(root));free(data);puts("semantic file: exclusive borrowed leases, bounded namespace-only eviction, temporary cleanup, low space/cancel preserving old data, oversized recovery and stale-media cleanup passed");return 0;
+}

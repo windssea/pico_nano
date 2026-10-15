@@ -7,6 +7,7 @@
  * Frozen: no whole-book prose reads or partial OPF publication; callers keep source and ZIP alive.
  */
 #include "pn_profile.h"
+#include "pn_cancel.h"
 #include "pn_epub.h"
 #include "pn_xhtml.h"
 #include "pn_resource.h"
@@ -254,7 +255,8 @@ static pn_status_t mimetype(pn_zip_t *zip){
     uint32_t index;pn_status_t status=pn_zip_find(zip,"mimetype",&index);if(status!=PN_OK)return status==PN_EMPTY?PN_CORRUPT:status;
     pn_zip_info_t info;status=pn_zip_info(zip,index,&info);if(status!=PN_OK)return status;
     const char expected[]="application/epub+zip";
-    if(info.directory || info.local_offset!=0 || info.method!=0 || info.packed!=sizeof expected-1 || info.unpacked!=sizeof expected-1 || (info.flags&8))return PN_CORRUPT;
+    // 部分打包器压缩mimetype或写数据描述符；ZIP层已验证方法/描述符/长度，仍完整校验实际内容与CRC。/ Some packagers compress mimetype or add a descriptor; ZIP has verified method/descriptor/sizes, and content/CRC are still fully checked.
+    if(info.directory || info.local_offset!=0 || info.unpacked!=sizeof expected-1)return PN_CORRUPT;
     pn_zip_stream_t stream={0};status=pn_zip_stream_open(zip,index,&stream);uint8_t value[32];size_t used=0;
     while(status==PN_OK){size_t n=0;status=pn_zip_stream_read(&stream,value+used,sizeof value-used,&n);used+=n;}
     if(status==PN_EMPTY)status=pn_zip_stream_verified(&stream) && used==sizeof expected-1 && !memcmp(value,expected,sizeof expected-1)?PN_OK:PN_CORRUPT;
@@ -266,7 +268,7 @@ void pn_epub_close(pn_epub_t *epub){
     epub_t *b=epub->impl;
     for(size_t i=0;i<b->info.manifest_count;i++)pn_free(b->items[i]);
     for(size_t i=0;i<b->info.spine_count;i++)pn_free(b->spine[i].idref);
-    pn_free(b->chapter);pn_free(b->items);pn_free(b->spine);pn_free(b->spine_by_zip);pn_free(b);epub->impl=NULL;
+    pn_free(b->chapter);pn_free(b->items);pn_free(b->spine);pn_free(b->spine_by_zip);pn_free(b);epub->impl=NULL;epub->semantic_store=NULL;
 }
 static pn_status_t pn_epub_open_impl(pn_epub_t *epub,pn_pool_t *pool,pn_zip_t *zip,const uint8_t salt[16]){
     if(!epub || epub->impl || !pool || !zip || !zip->impl || !salt)return PN_INVALID;
@@ -287,6 +289,70 @@ static pn_status_t pn_epub_open_impl(pn_epub_t *epub,pn_pool_t *pool,pn_zip_t *z
 pn_status_t pn_epub_open(pn_epub_t *epub,pn_pool_t *pool,pn_zip_t *zip,const uint8_t salt[16]){
     pn_profile_span_t span;pn_profile_begin(&span,pool,"epub.publication");
     pn_status_t status=pn_epub_open_impl(epub,pool,zip,salt);pn_profile_end(&span,status);return status;
+}
+typedef enum {EJOB_MIME,EJOB_CONTAINER_OPEN,EJOB_CONTAINER_XML,EJOB_PACKAGE_OPEN,EJOB_PACKAGE_XML,EJOB_RESOLVE,EJOB_INDEX,EJOB_VERIFY} epub_job_phase_t;
+typedef struct {
+    epub_t *book;parse_t *parse;pn_xml_job_t xml;pn_zip_stream_t stream;
+    uint8_t salt[16];epub_job_phase_t phase;
+} epub_job_t;
+void pn_epub_job_close(pn_epub_job_t *job){
+    if(!job || !job->impl)return;
+    epub_job_t *j=job->impl;job->impl=NULL;pn_xml_job_close(&j->xml);pn_zip_stream_close(&j->stream);
+    pn_epub_t partial={.impl=j->book};pn_epub_close(&partial);pn_free(j->parse);pn_free(j);
+}
+pn_status_t pn_epub_job_begin(pn_epub_job_t *job,pn_pool_t *pool,pn_zip_t *zip,const uint8_t salt[16]){
+    if(!job || !pool || !zip || !zip->impl || !salt)return PN_INVALID;
+    if(job->impl)return PN_BUSY;
+    uint8_t entropy=0;for(size_t i=0;i<16;i++)entropy|=salt[i];if(!entropy)return PN_INVALID;
+    pn_status_t s=pn_zip_validate(zip);if(s!=PN_OK)return s;
+    epub_job_t *j=pn_alloc_tagged(pool,PN_MEM_DOCUMENT,sizeof *j);if(!j)return PN_NO_MEMORY;
+    *j=(epub_job_t){0};job->impl=j;memcpy(j->salt,salt,16);
+    j->book=pn_alloc_tagged(pool,PN_MEM_DOCUMENT,sizeof *j->book);
+    if(j->book)*j->book=(epub_t){.pool=pool,.zip=zip};
+    j->parse=pn_alloc_tagged(pool,PN_MEM_DOCUMENT,sizeof *j->parse);
+    if(!j->book || !j->parse){pn_epub_job_close(job);return PN_NO_MEMORY;}
+    *j->parse=(parse_t){.book=j->book,.container=true};return PN_OK;
+}
+static pn_status_t epub_job_xml_open(epub_job_t *j,const char *path){
+    uint32_t index;pn_status_t s=pn_zip_find(j->book->zip,path,&index);if(s==PN_EMPTY)s=PN_CORRUPT;
+    if(s==PN_OK)s=pn_zip_stream_open(j->book->zip,index,&j->stream);
+    if(s==PN_OK){pn_xml_input_t input={&j->stream,stream_read};pn_xml_hooks_t hooks={start,end,text};
+        s=pn_xml_job_begin(&j->xml,j->book->pool,&input,&hooks,j->parse,32u*1024u*1024u,j->salt);}
+    return s;
+}
+pn_status_t pn_epub_job_step(pn_epub_job_t *job,pn_epub_t *epub){
+    if(!epub || epub->impl)return PN_INVALID;
+    if(!job || !job->impl)return PN_EMPTY;
+    pn_status_t s=pn_cancel_checkpoint();if(s!=PN_OK)return s;
+    epub_job_t *j=job->impl;s=pn_zip_validate(j->book->zip);
+    if(s!=PN_OK){pn_epub_job_close(job);return s;}
+    switch(j->phase){
+    case EJOB_MIME:{
+        s=mimetype(j->book->zip);uint32_t index;
+        if(s==PN_OK){s=pn_zip_find(j->book->zip,"META-INF/encryption.xml",&index);if(s==PN_OK)s=PN_UNSUPPORTED;else if(s==PN_EMPTY)s=PN_OK;}
+        if(s==PN_OK)j->phase=EJOB_CONTAINER_OPEN;
+        break;
+    }
+    case EJOB_CONTAINER_OPEN:s=epub_job_xml_open(j,"META-INF/container.xml");if(s==PN_OK)j->phase=EJOB_CONTAINER_XML;break;
+    case EJOB_PACKAGE_OPEN:s=epub_job_xml_open(j,j->book->info.package_path);if(s==PN_OK)j->phase=EJOB_PACKAGE_XML;break;
+    case EJOB_CONTAINER_XML:case EJOB_PACKAGE_XML:
+        s=pn_xml_job_step(&j->xml);
+        if(s==PN_BUSY)return s;
+        if(s==PN_CANCELLED && j->xml.impl)return s;
+        pn_zip_stream_close(&j->stream);
+        if(s==PN_OK && j->phase==EJOB_CONTAINER_XML){
+            if(!j->parse->root || !*j->book->info.package_path)s=PN_CORRUPT;
+            else{*j->parse=(parse_t){.book=j->book};j->phase=EJOB_PACKAGE_OPEN;}
+        }else if(s==PN_OK)j->phase=EJOB_RESOLVE;
+        break;
+    case EJOB_RESOLVE:s=resolve_model(j->parse);if(s==PN_OK)j->phase=EJOB_INDEX;break;
+    case EJOB_INDEX:s=index_spine(j->book);if(s==PN_OK)j->phase=EJOB_VERIFY;break;
+    case EJOB_VERIFY:{
+        pn_zip_info_t current;s=pn_zip_info(j->book->zip,0,&current);
+        if(s==PN_OK){epub->impl=j->book;j->book=NULL;pn_epub_job_close(job);return PN_OK;}break;
+    }
+    }
+    if(s!=PN_OK){pn_epub_job_close(job);return s;}return PN_BUSY;
 }
 static pn_status_t validate(pn_epub_t *epub,epub_t **book){
     if(!epub || !epub->impl)return PN_INVALID;

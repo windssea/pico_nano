@@ -10,6 +10,7 @@
 #include "pn_catalog.h"
 #include "pn_display.h"
 #include "pn_font_asset.h"
+#include "pn_list_motion.h"
 #define PN_FMU_BACK 1
 #define PN_FMU_PREVIOUS 2
 #define PN_FMU_NEXT 3
@@ -40,3 +41,13 @@ pn_status_t pn_font_manage_present(pn_font_manage_t *ui,pn_font_manage_present_f
 int pn_font_manage_hit(const pn_font_manage_t *ui,int x,int y);
 /// 释放资源与字体源，幂等。/ Release resources and font sources idempotently.
 void pn_font_manage_close(pn_font_manage_t *ui);
+/// 接入可选连续列表端口，低预算或六项以内EMPTY保留分页；ROW命令在此模式使用全局序号。/ Attach an optional continuous-list port; EMPTY keeps paging on low budgets or at most six items; ROW commands use global indices in this mode.
+pn_status_t pn_font_manage_motion(pn_font_manage_t *,pn_list_present_fn,void *);
+/// 连续列表指针，consumed为真时外层不得重复点击；拖动不选中字体。/ Continuous-list pointer; a consumed event must not also click in the outer controller; dragging never selects a font.
+bool pn_font_manage_pointer(pn_font_manage_t *,unsigned,int,int,bool,uint64_t,pn_font_manage_present_fn,void *,pn_status_t *);
+/// 空闲/运动每轮一相及定稿，真实工作OK、无任务EMPTY。/ One phase/settling per idle or movement iteration, OK for actual work, EMPTY without work.
+pn_status_t pn_font_manage_tick(pn_font_manage_t *,uint64_t);
+/// 普通内容/导航前归还运动状态，下一内容恢复责任交端口。/ Return motion state before normal content/navigation, handing subsequent recovery to the port.
+pn_status_t pn_font_manage_motion_abort(pn_font_manage_t *);
+/// 只读同源滚动状态。/ Read-only shared scrolling state.
+pn_list_motion_stats_t pn_font_manage_motion_stats(const pn_font_manage_t *);

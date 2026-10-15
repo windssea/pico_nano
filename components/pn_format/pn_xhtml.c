@@ -21,7 +21,21 @@ typedef struct {char selector[256];char *declarations;uint32_t specificity;} rul
 typedef struct {
     pn_pool_t *pool;pn_epub_t *epub;rule_t *rules;size_t count,capacity,total,sources;
     char *buffers[16];
+    bool compat,syntax;size_t repairs; ///< 有界词法回退及原始语法错误 / Bounded lexical fallback and original syntax failure
 } sheet_t;
+#include "pn_xhtml_compat.inc"
+static pn_status_t body_xml(sheet_t *sheet,pn_pool_t *pool,const pn_xml_input_t *input,const pn_xml_hooks_t *hooks,void *ctx,const uint8_t salt[16]){
+    if(!sheet)return pn_xml_parse(pool,input,hooks,ctx,32u*1024u*1024u,salt);
+    bool syntax=false;pn_status_t status;
+    if(!sheet->compat)status=pn_xml_parse_diagnostic(pool,input,hooks,ctx,32u*1024u*1024u,salt,&syntax);
+    else{
+        compat_input_t *compat=pn_alloc_tagged(pool,PN_MEM_DOCUMENT,sizeof *compat);if(!compat)return PN_NO_MEMORY;
+        *compat=(compat_input_t){.source=*input};pn_xml_input_t adapted={compat,compat_read};
+        status=pn_xml_parse_diagnostic(pool,&adapted,hooks,ctx,32u*1024u*1024u,salt,&syntax);
+        sheet->repairs+=compat->repairs;pn_free(compat);
+    }
+    sheet->syntax|=syntax;return status;
+}
 typedef struct {uint32_t rank[10];bool display_hidden,visibility_hidden;} cascade_t;
 typedef struct {
     sheet_t *sheet;
@@ -285,7 +299,7 @@ static pn_status_t end(void *ctx,const char *name){
 static pn_status_t parse_input(pn_pool_t *pool,const pn_xml_input_t *input,const char *base,const uint8_t salt[16],pn_xhtml_sink_t sink,void *ctx,pn_xhtml_stats_t *stats,sheet_t *sheet){
     if(!pool || !input || !base || !*base || strlen(base)>=PN_ZIP_PATH_MAX || !salt || !stats)return PN_INVALID;
     parser_t *p=pn_alloc_tagged(pool,PN_MEM_DOCUMENT,sizeof *p);if(!p)return PN_NO_MEMORY;*p=(parser_t){.sink=sink,.ctx=ctx,.base=base,.sheet=sheet};
-    pn_xml_hooks_t hooks={start,end,text};pn_status_t status=pn_xml_parse(pool,input,&hooks,p,32u*1024u*1024u,salt);
+    pn_xml_hooks_t hooks={start,end,text};pn_status_t status=body_xml(sheet,pool,input,&hooks,p,salt);
     if(status==PN_OK && (!p->root || p->bodies!=1))status=PN_CORRUPT;
     if(status==PN_OK)*stats=p->stats;
     pn_free(p);return status;
@@ -370,20 +384,77 @@ static pn_status_t collect_sheets(sheet_t *sheet,const char *path,const uint8_t 
     pn_epub_chapter_input_t stream={0};pn_status_t status=pn_epub_chapter_open(sheet->epub,path,&stream);
     collect_t *c=pn_alloc_tagged(sheet->pool,PN_MEM_DOCUMENT,sizeof *c);if(!c){pn_epub_chapter_close(&stream);return PN_NO_MEMORY;}
     *c=(collect_t){.sheet=sheet,.base=path};
-    if(status==PN_OK){pn_xml_input_t input={&stream,pn_epub_chapter_read};pn_xml_hooks_t hooks={collect_start,collect_end,collect_text};status=pn_xml_parse(sheet->pool,&input,&hooks,c,32u*1024u*1024u,salt);}
+    if(status==PN_OK){pn_xml_input_t input={&stream,pn_epub_chapter_read};pn_xml_hooks_t hooks={collect_start,collect_end,collect_text};status=body_xml(sheet,sheet->pool,&input,&hooks,c,salt);}
     pn_free(c->buffer);pn_free(c);pn_epub_chapter_close(&stream);return status;
 }
-static pn_status_t parse_source(pn_pool_t *pool,pn_epub_t *epub,const char *path,const uint8_t salt[16],pn_xhtml_sink_t sink,void *ctx,pn_xhtml_stats_t *stats){
+typedef struct {
+    parser_t *body;collect_t *collect;pn_status_t body_status;bool body_seen,late_head; ///< 暂定正文与样式收集共享XML；后置head须重放 / Provisional body and styles share XML; late heads require replay
+} combined_t;
+static pn_status_t combined_status(combined_t *c,pn_status_t status){
+    if(status!=PN_OK)c->body_status=status;
+    // 取消/失效立即退出；正文语义错误先保留，晚到样式可能隐藏该内容。/ Cancel/stale exits immediately; retain body semantic errors because late styles may hide that content.
+    return status==PN_CANCELLED || status==PN_STALE_MEDIA?status:PN_OK;
+}
+static pn_status_t combined_start(void *ctx,const char *name,const char *const *attrs){
+    combined_t *c=ctx;pn_status_t s=collect_start(c->collect,name,attrs);if(s!=PN_OK)return s;
+    if(c->collect->depth==2 && html_name(name,"head") && c->body_seen)c->late_head=true;
+    if(c->collect->depth==2 && html_name(name,"body"))c->body_seen=true;
+    return c->late_head || c->body_status!=PN_OK?PN_OK:combined_status(c,start(c->body,name,attrs));
+}
+static pn_status_t combined_text(void *ctx,const char *value,size_t n){
+    combined_t *c=ctx;pn_status_t s=collect_text(c->collect,value,n);if(s!=PN_OK)return s;
+    return c->late_head || c->body_status!=PN_OK?PN_OK:combined_status(c,text(c->body,value,n));
+}
+static pn_status_t combined_end(void *ctx,const char *name){
+    combined_t *c=ctx;pn_status_t s=collect_end(c->collect,name);if(s!=PN_OK)return s;
+    return c->late_head || c->body_status!=PN_OK?PN_OK:combined_status(c,end(c->body,name));
+}
+static pn_status_t parse_combined(sheet_t *sheet,const char *path,const uint8_t salt[16],pn_xhtml_sink_t sink,void *ctx,pn_xhtml_stats_t *stats,bool *replay,bool *oom_retry){
+    *replay=*oom_retry=false;parser_t *p=pn_alloc_tagged(sheet->pool,PN_MEM_DOCUMENT,sizeof *p);if(!p)return PN_NO_MEMORY;
+    *p=(parser_t){.sink=sink,.ctx=ctx,.base=path,.sheet=sheet};collect_t collect={.sheet=sheet,.base=path};combined_t combined={.body=p,.collect=&collect,.body_status=PN_OK};
+    pn_epub_chapter_input_t stream={0};pn_status_t status=pn_epub_chapter_open(sheet->epub,path,&stream);
+    if(status==PN_OK){pn_xml_input_t input={&stream,pn_epub_chapter_read};pn_xml_hooks_t hooks={combined_start,combined_end,combined_text};status=body_xml(sheet,sheet->pool,&input,&hooks,&combined,salt);}
+    pn_epub_chapter_close(&stream);pn_free(collect.buffer);
+    if(status==PN_OK){
+        if(combined.late_head)*replay=true;
+        else{status=combined.body_status;if(status==PN_OK && (!p->root || p->bodies!=1))status=PN_CORRUPT;if(status==PN_OK)*stats=p->stats;}
+    }
+    *oom_retry=status==PN_NO_MEMORY;
+    pn_free(p);return status;
+}
+static pn_status_t parse_source_pass(pn_pool_t *pool,pn_epub_t *epub,const char *path,const uint8_t salt[16],pn_xhtml_sink_t sink,void *ctx,pn_xhtml_stats_t *stats,pn_xhtml_restart_t reset,bool compat,bool *syntax,bool *delivered,bool *repaired){
     if(!pool || !epub || !path || !*path || strlen(path)>=PN_ZIP_PATH_MAX || !salt || !stats)return PN_INVALID;
     size_t ordinal;pn_status_t status=pn_epub_spine_find(epub,path,&ordinal);if(status!=PN_OK)return status;
-    sheet_t sheet={.pool=pool,.epub=epub};status=collect_sheets(&sheet,path,salt);
-    pn_epub_chapter_input_t stream={0};pn_xhtml_stats_t candidate;
-    if(status==PN_OK)status=pn_epub_chapter_open(epub,path,&stream);
-    if(status==PN_OK){pn_xml_input_t input={&stream,pn_epub_chapter_read};status=parse_input(pool,&input,path,salt,sink,ctx,&candidate,&sheet);}
+    sheet_t sheet={.pool=pool,.epub=epub,.compat=compat};pn_xhtml_stats_t candidate;bool replay=true;*delivered=false;
+    if(reset){
+        *delivered=true;
+        bool oom_retry;status=parse_combined(&sheet,path,salt,sink,ctx,&candidate,&replay,&oom_retry);
+        if(status==PN_NO_MEMORY && oom_retry){
+            // 额外parser与CSS解码峰值不应缩小原可读范围；一次退回原先分阶段路径。/ The combined parser/CSS peak must not reduce readable inputs; fall back once to the original staged path.
+            reset(ctx,0,NULL);sheet_close(&sheet);sheet=(sheet_t){.pool=pool,.epub=epub,.compat=compat};status=collect_sheets(&sheet,path,salt);replay=true;
+        }else if(status==PN_OK && replay)reset(ctx,0,NULL);
+    }else status=collect_sheets(&sheet,path,salt);
+    pn_epub_chapter_input_t stream={0};
+    if(status==PN_OK && replay)status=pn_epub_chapter_open(epub,path,&stream);
+    if(status==PN_OK && replay){*delivered=true;pn_xml_input_t input={&stream,pn_epub_chapter_read};status=parse_input(pool,&input,path,salt,sink,ctx,&candidate,&sheet);}
     pn_epub_chapter_close(&stream);
     if(status==PN_OK)status=pn_epub_spine_find(epub,path,&ordinal);
     if(status==PN_OK)*stats=candidate;
+    *syntax=sheet.syntax;*repaired=sheet.repairs!=0;
     sheet_close(&sheet);return status;
+}
+static pn_status_t parse_source(pn_pool_t *pool,pn_epub_t *epub,const char *path,const uint8_t salt[16],pn_xhtml_sink_t sink,void *ctx,pn_xhtml_stats_t *stats,pn_xhtml_restart_t reset,bool *compatible){
+    if(!stats)return PN_INVALID;
+    bool syntax=false,delivered=false,repaired=false;pn_xhtml_stats_t candidate;if(compatible)*compatible=false;
+    pn_status_t status=parse_source_pass(pool,epub,path,salt,sink,ctx,&candidate,reset,false,&syntax,&delivered,&repaired);
+    if(status!=PN_CORRUPT || !syntax || (delivered && !reset)){if(status==PN_OK)*stats=candidate;return status;}
+    // 只有可撤销消费者或尚未开始正文时才能重试；绝不拼接失败尝试的暂定事件。/ Retry only resettable consumers or before body consumption, never append provisional failed events.
+    if(reset)reset(ctx,0,NULL);
+    pn_profile_span_t span;pn_profile_begin(&span,pool,"epub.compat");
+    status=parse_source_pass(pool,epub,path,salt,sink,ctx,&candidate,reset,true,&syntax,&delivered,&repaired);
+    if(status==PN_OK && !repaired)status=PN_CORRUPT;
+    if(status==PN_OK){*stats=candidate;if(compatible)*compatible=true;}
+    pn_profile_end(&span,status);return status;
 }
 // 只保留一个已验证章的语义；连续文本按64标量分组，不复制每个事件的完整样式。/ Retain one verified chapter; group text in 64 scalars instead of repeating full styles per event.
 #define MODEL_TEXT_MAX 64u
@@ -392,16 +463,18 @@ typedef struct model_record {
     struct model_record *next;
     uint64_t element,offset;
     uint32_t run;
-    uint16_t count,value_size;
+    uint16_t count,value_size,alt_size;
     uint8_t kind,block,position_kind,style;
     uint8_t text; ///< 低位为每标量1/2/4字节，高位MODEL_SEQUENTIAL / Low bits hold 1/2/4 bytes per scalar; the high bit is MODEL_SEQUENTIAL
 } model_record_t;
 typedef struct {uint32_t codepoints[MODEL_TEXT_MAX];uint16_t offsets[MODEL_TEXT_MAX];} model_text_t;
+typedef struct snapshot_write snapshot_write_t;
 typedef struct {
     pn_cache_owner_t owner;pn_pool_t *pool;model_record_t *first,*last;size_t charged;
+    snapshot_write_t *snapshot; ///< 分步编码持有的有限暂存，独立于可回收记录 / Bounded staged encoding, separate from reclaimable records
     char path[PN_ZIP_PATH_MAX];uint8_t salt[16];pn_xhtml_stats_t stats;
     pn_xhtml_style_t styles[32];unsigned style_count;
-    bool valid,busy,abandoned,skipped,skipped_window;size_t skipped_cap;
+    bool valid,busy,abandoned,skipped,skipped_window,dirty,compatible;size_t skipped_cap;
     // 超上限章只保留焦点附近的已验证窗口；丢弃的事件数与最大元素号保证复放不会漏掉焦点之前的匹配。
     // Over-cap chapters keep a verified window near the focus; dropped event counts and the largest dropped element ensure replay never misses an earlier focus match.
     bool windowing,has_focus,focus_seen,windowed,truncated,has_context;pn_xhtml_position_t focus;
@@ -410,7 +483,7 @@ typedef struct {
     pn_xhtml_event_t context; ///< 最后丢弃的TEXT/IMAGE/非容器BLOCK_OPEN，只填kind/block / Last dropped TEXT/IMAGE/noncontainer BLOCK_OPEN, with only kind/block set
     model_record_t pending;model_text_t pending_text; ///< 有界构建暂存，完成一段后按实际长度计费 / Bounded construction scratch, charging a completed run at its actual length
 } model_t;
-typedef struct {model_t *model;pn_xhtml_sink_t sink;pn_xhtml_done_t done;void *ctx;} model_sink_t;
+typedef struct {model_t *model;pn_xhtml_sink_t sink;pn_xhtml_done_t done;pn_xhtml_restart_t restart;void *ctx;} model_sink_t;
 static size_t model_bytes(void *ctx){return ((model_t *)ctx)->charged;}
 static void model_reset_window(model_t *m){
     m->focus_seen=!m->has_focus;m->windowed=m->truncated=m->has_context=false;m->before=0;m->base=m->max_dropped=0;m->context=(pn_xhtml_event_t){0};
@@ -418,10 +491,11 @@ static void model_reset_window(model_t *m){
 static void model_drop(void *ctx){
     model_t *m=ctx;model_record_t *r=m->first;
     while(r){model_record_t *next=r->next;pn_free(r);r=next;}
-    m->first=m->last=NULL;m->pending.count=0;m->charged=0;m->style_count=0;m->valid=false;m->abandoned=m->busy;model_reset_window(m);
+    m->first=m->last=NULL;m->pending.count=0;m->charged=0;m->style_count=0;m->valid=m->dirty=false;m->abandoned=m->busy;model_reset_window(m);
 }
 void pn_xhtml_cache_close(pn_epub_t *epub){
     if(!epub || !epub->semantic_cache)return;
+    pn_xhtml_cache_abort(epub);
     model_t *m=epub->semantic_cache;if(m->busy)return;
     pn_cache_detach(&m->owner);model_drop(m);pn_free(m);epub->semantic_cache=NULL;
 }
@@ -495,7 +569,8 @@ static void model_append(model_t *m,const pn_xhtml_event_t *e){
         if(style==32){model_drop(m);m->abandoned=true;return;}
         if(style==m->style_count)m->styles[m->style_count++]=e->style;
         size_t value=e->value?strlen(e->value)+1:0,alt=e->alt?strlen(e->alt)+1:0;
-        model_record_t record={.element=e->position.element,.offset=e->position.offset,.run=e->position.run,.value_size=(uint16_t)value,.kind=(uint8_t)e->kind,.block=(uint8_t)e->block,.position_kind=(uint8_t)e->position.kind,.style=(uint8_t)style};
+        if(value>UINT16_MAX || alt>UINT16_MAX){model_fail(m);return;}
+        model_record_t record={.element=e->position.element,.offset=e->position.offset,.run=e->position.run,.value_size=(uint16_t)value,.alt_size=(uint16_t)alt,.kind=(uint8_t)e->kind,.block=(uint8_t)e->block,.position_kind=(uint8_t)e->position.kind,.style=(uint8_t)style};
         if(e->kind==PN_XHTML_TEXT)m->pending=record;
         else{
         model_record_t *r=model_alloc(m,sizeof *r+value+alt);
@@ -510,6 +585,11 @@ static void model_append(model_t *m,const pn_xhtml_event_t *e){
 static pn_status_t model_event(void *ctx,const pn_xhtml_event_t *event){
     model_sink_t *s=ctx;if(s->model)model_append(s->model,event);return s->sink && (!s->done || !s->done(s->ctx))?s->sink(s->ctx,event):PN_OK;
 }
+static void model_restart(void *ctx,uint64_t order,const pn_xhtml_event_t *context){
+    model_sink_t *s=ctx;
+    if(s->model){model_drop(s->model);s->model->abandoned=false;model_reset_window(s->model);}
+    s->restart(s->ctx,order,context);
+}
 static uint32_t model_codepoint(const model_record_t *r,unsigned i){
     const uint8_t *at=(const uint8_t *)(r+1);if(!(r->text&MODEL_SEQUENTIAL))at+=(size_t)r->count*sizeof(uint16_t);
     unsigned width=r->text&7u;if(width==1u)return at[i];
@@ -520,6 +600,14 @@ static uint64_t model_delta(const model_record_t *r,unsigned i){
     if(r->text&MODEL_SEQUENTIAL)return i;
     uint16_t v;memcpy(&v,(const uint8_t *)(r+1)+2u*i,sizeof v);return v;
 }
+/// 文本位置在同一元素/run内唯一；只认精确记录，不按locator元组排序或猜元素起点。
+/// Text positions are unique within an element/run; require exact records without sorting locator tuples or guessing element beginnings.
+static bool model_contains_text(const model_t *m,const pn_xhtml_position_t *focus){
+    if(!focus || focus->kind!=PN_XHTML_TEXT_POSITION)return false;
+    for(const model_record_t *r=m->first;r;r=r->next)if(r->kind==PN_XHTML_TEXT && r->element==focus->element && r->run==focus->run && r->count && focus->offset>=r->offset && focus->offset-r->offset<=model_delta(r,r->count-1))for(unsigned i=0;i<r->count;i++)if(model_delta(r,i)==focus->offset-r->offset)return true;
+    return false;
+}
+#include "pn_xhtml_snapshot.inc"
 /// exhausted表示全部记录复放完仍未done。/ exhausted means every record replayed without reaching done.
 static pn_status_t model_replay(model_t *m,pn_epub_t *epub,pn_xhtml_sink_t sink,pn_xhtml_done_t done,void *ctx,bool *exhausted){
     pn_profile_span_t span;pn_profile_begin(&span,m->pool,"epub.model-replay");
@@ -543,12 +631,18 @@ static pn_status_t model_replay(model_t *m,pn_epub_t *epub,pn_xhtml_sink_t sink,
 static pn_status_t pn_xhtml_parse_impl(pn_pool_t *pool,pn_epub_t *epub,const char *path,const uint8_t salt[16],const pn_xhtml_position_t *focus,pn_xhtml_sink_t sink,pn_xhtml_done_t done,pn_xhtml_restart_t restart,void *ctx,pn_xhtml_stats_t *stats){
     if(!pool || !epub || !path || !*path || strlen(path)>=PN_ZIP_PATH_MAX || !salt || !stats)return PN_INVALID;
     size_t ordinal;pn_status_t status=pn_epub_spine_find(epub,path,&ordinal);if(status!=PN_OK)return status;
+    // 前台语义消费优先，不因后台编码的busy标志退回完整解析。/ Foreground semantic consumption wins instead of falling back to a full parse due to background encoding's busy flag.
+    pn_xhtml_cache_abort(epub);
     model_t *m=epub->semantic_cache;
-    model_sink_t proxy={.sink=sink,.done=done,.ctx=ctx};
-    if(m && (m->busy || m->pool!=pool))return parse_source(pool,epub,path,salt,model_event,&proxy,stats);
+    model_sink_t proxy={.sink=sink,.done=done,.restart=restart,.ctx=ctx};pn_xhtml_restart_t reset=restart?model_restart:NULL;
+    if(m && (m->busy || m->pool!=pool))return parse_source(pool,epub,path,salt,model_event,&proxy,stats,reset,NULL);
     bool window=done && restart; // 调用方能从窗口序号接续 / The caller can resume from a window order
     bool same=m && !strcmp(m->path,path) && !memcmp(m->salt,salt,16);
-    bool hit=same && m->valid && (!m->windowed || (window && (!m->base || (focus && focus->element>m->max_dropped))));
+    if(epub->semantic_store && !pool->speculative && (!m || !same || !m->valid)){
+        if(!m){m=pn_cache_alloc(pool,PN_CACHE_CHAPTER,PN_MEM_DOCUMENT,sizeof *m);if(m){*m=(model_t){.pool=pool};epub->semantic_cache=m;pn_cache_attach(pool,&m->owner,PN_CACHE_CHAPTER,m,model_bytes,model_drop);}}
+        if(m){status=snapshot_load(m,epub,path,salt);if(status==PN_CANCELLED)return status;same=!strcmp(m->path,path) && !memcmp(m->salt,salt,16);}
+    }
+    bool hit=same && m->valid && (!m->windowed || (window && (!m->base || (focus && focus->element>m->max_dropped) || model_contains_text(m,focus))));
     pn_cache_observe(pool,PN_CACHE_CHAPTER,hit);
     if(hit){
         if(m->windowed)restart(ctx,m->base,m->has_context?&m->context:NULL);
@@ -556,23 +650,23 @@ static pn_status_t pn_xhtml_parse_impl(pn_pool_t *pool,pn_epub_t *epub,const cha
         if(!m->windowed || !m->truncated || !exhausted){*stats=m->stats;return PN_OK;}
         // 窗口尾部不够：消费者回到章首状态，冷源完整校验并围绕焦点重建。/ The window tail is short: reset the consumer to chapter start, then fully validate the cold source and rebuild around the focus.
         restart(ctx,0,NULL);
-    }else if(same && m->valid && m->windowed && !window)return parse_source(pool,epub,path,salt,model_event,&proxy,stats);
+    }else if(same && m->valid && m->windowed && !window)return parse_source(pool,epub,path,salt,model_event,&proxy,stats,reset,NULL);
     if(!m){
         m=pn_cache_alloc(pool,PN_CACHE_CHAPTER,PN_MEM_DOCUMENT,sizeof *m);
-        if(!m)return parse_source(pool,epub,path,salt,model_event,&proxy,stats);
+        if(!m)return parse_source(pool,epub,path,salt,model_event,&proxy,stats,reset,NULL);
         *m=(model_t){.pool=pool};epub->semantic_cache=m;
         pn_cache_attach(pool,&m->owner,PN_CACHE_CHAPTER,m,model_bytes,model_drop);
     }
-    if(same && m->skipped && pool->cache_caps[PN_CACHE_CHAPTER]<=m->skipped_cap && (!window || m->skipped_window))return parse_source(pool,epub,path,salt,model_event,&proxy,stats);
+    if(same && m->skipped && pool->cache_caps[PN_CACHE_CHAPTER]<=m->skipped_cap && (!window || m->skipped_window))return parse_source(pool,epub,path,salt,model_event,&proxy,stats,reset,NULL);
     model_drop(m);strcpy(m->path,path);memcpy(m->salt,salt,16);m->busy=true;m->abandoned=m->skipped=false;
     m->windowing=window;m->has_focus=window && focus;if(m->has_focus)m->focus=*focus;model_reset_window(m);
     proxy.model=m;pn_xhtml_stats_t candidate;
     pn_profile_span_t span;pn_profile_begin(&span,pool,"epub.model-build");
-    status=parse_source(pool,epub,path,salt,model_event,&proxy,&candidate);
+    status=parse_source(pool,epub,path,salt,model_event,&proxy,&candidate,reset,&m->compatible);
     if(status==PN_OK)model_flush(m);
     m->busy=false;
     // 预排期间临时分配也计入可选额度，失败不代表前台也放不下，所以只记录前台跳过。/ Speculative temporaries count against optional budgets, so only foreground failures are remembered as skipped.
-    if(status==PN_OK){*stats=candidate;if(!m->abandoned){m->stats=candidate;m->valid=true;}else if(!pool->speculative){m->skipped=true;m->skipped_window=window;m->skipped_cap=pool->cache_caps[PN_CACHE_CHAPTER];}}
+    if(status==PN_OK){*stats=candidate;if(!m->abandoned){m->stats=candidate;m->valid=m->dirty=true;}else if(!pool->speculative){m->skipped=true;m->skipped_window=window;m->skipped_cap=pool->cache_caps[PN_CACHE_CHAPTER];}}
     if(status!=PN_OK)model_drop(m);
     pn_profile_end(&span,status);return status;
 }
@@ -591,9 +685,12 @@ static pn_status_t find_anchor(void *ctx,const pn_xhtml_event_t *event){
     if(a->found)return PN_CORRUPT;
     a->found=true;a->position=event->position;return PN_OK;
 }
+static void anchor_restart(void *ctx,uint64_t order,const pn_xhtml_event_t *context){
+    (void)order;(void)context;anchor_t *a=ctx;a->found=false;a->position=(pn_xhtml_position_t){0};
+}
 pn_status_t pn_xhtml_anchor(pn_pool_t *pool,pn_epub_t *epub,const char *path,const char *id,const uint8_t salt[16],pn_xhtml_position_t *out){
     if(!id || !*id || strlen(id)>=PN_RESOURCE_FRAGMENT_MAX || !out)return PN_INVALID;
-    anchor_t anchor={.id=id};pn_xhtml_stats_t stats;pn_status_t status=pn_xhtml_parse(pool,epub,path,salt,find_anchor,&anchor,&stats);
+    anchor_t anchor={.id=id};pn_xhtml_stats_t stats;pn_status_t status=pn_xhtml_parse_window(pool,epub,path,salt,NULL,find_anchor,NULL,anchor_restart,&anchor,&stats);
     if(status!=PN_OK)return status;
     if(!anchor.found)return PN_EMPTY;
     *out=anchor.position;return PN_OK;
@@ -609,9 +706,13 @@ static pn_status_t find_order(void *ctx,const pn_xhtml_event_t *event){
     }
     return PN_OK;
 }
+static bool order_done(void *ctx){return ((order_t *)ctx)->found!=0;}
+static void order_restart(void *ctx,uint64_t base,const pn_xhtml_event_t *context){(void)context;order_t *o=ctx;o->order=base;o->found=0;}
 pn_status_t pn_xhtml_order(pn_pool_t *pool,pn_epub_t *epub,const char *path,const pn_xhtml_position_t *position,const uint8_t salt[16],uint64_t *out){
     if(!position || !out || !position->element || (position->kind!=PN_XHTML_ELEMENT && position->kind!=PN_XHTML_TEXT_POSITION) || (position->kind==PN_XHTML_ELEMENT && (position->run || position->offset)))return PN_INVALID;
-    order_t order={.target=position};pn_xhtml_stats_t stats;pn_status_t status=pn_xhtml_parse(pool,epub,path,salt,find_order,&order,&stats);
+    // 缓存窗口已有完整源证明；冷源仍扫描到EOF，命中后只停止消费者，不停止CRC/XML验证。
+    // Cached windows already prove the complete source; cold input still reaches EOF, stopping only the consumer after a match, never CRC/XML verification.
+    order_t order={.target=position};pn_xhtml_stats_t stats;pn_status_t status=pn_xhtml_parse_window(pool,epub,path,salt,position,find_order,order_done,order_restart,&order,&stats);
     if(status!=PN_OK)return status;
     if(!order.found)return PN_EMPTY;
     *out=order.found;return PN_OK;
@@ -629,9 +730,13 @@ static pn_status_t window_event(void *ctx,const pn_xhtml_event_t *event){
     if(event->kind==PN_XHTML_TEXT || event->kind==PN_XHTML_IMAGE || event->kind==PN_XHTML_BREAK){w->visible++;if(w->visible%512==0){w->points[w->cursor]=(window_point_t){event->position,w->visible,w->order};w->cursor=(w->cursor+1)%32;if(w->count<32)w->count++;}}
     return PN_OK;
 }
+static void window_restart(void *ctx,uint64_t order,const pn_xhtml_event_t *context){
+    // 仍全章检查，不把已有局部窗口当完整计数；重放时只保留目标引用。/ Still inspect the full chapter, never treating a partial window as complete counts; retain only the target reference on replay.
+    (void)order;(void)context;window_t *w=ctx;const pn_xhtml_position_t *target=w->target;memset(w,0,sizeof *w);w->target=target;
+}
 pn_status_t pn_xhtml_window_start(pn_pool_t *pool,pn_epub_t *epub,const char *path,const pn_xhtml_position_t *target,const uint8_t salt[16],uint64_t *order,uint64_t *start_order,pn_xhtml_position_t *out){
     if(!order || !start_order || !out || (target && (!target->element || (target->kind!=PN_XHTML_ELEMENT && target->kind!=PN_XHTML_TEXT_POSITION))))return PN_INVALID;
-    window_t *w=pn_alloc_tagged(pool,PN_MEM_DOCUMENT,sizeof *w);if(!w)return PN_NO_MEMORY;*w=(window_t){.target=target};pn_xhtml_stats_t stats;pn_status_t s=pn_xhtml_parse(pool,epub,path,salt,window_event,w,&stats);
+    window_t *w=pn_alloc_tagged(pool,PN_MEM_DOCUMENT,sizeof *w);if(!w)return PN_NO_MEMORY;*w=(window_t){.target=target};pn_xhtml_stats_t stats;pn_status_t s=pn_xhtml_parse_window(pool,epub,path,salt,NULL,window_event,NULL,window_restart,w,&stats);
     if(s==PN_OK && target && !w->found)s=PN_EMPTY;
     if(s==PN_OK){if(!target)window_select(w);*out=w->selected;*order=target?w->found:w->order;*start_order=w->selected_order;}
     pn_free(w);return s;

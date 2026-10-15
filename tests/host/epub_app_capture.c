@@ -5,10 +5,13 @@
 #include "pn_bookmark_ui.h"
 #include "pn_font_asset.h"
 #include "pn_font_ui.h"
+#include "pn_profile.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 typedef struct {const char *path;bool write;} screen_t;
+static uint64_t trace_clock(void *ctx){(void)ctx;return 1;}
+static void trace_emit(void *ctx,const pn_profile_event_t *event){(void)ctx;fprintf(stderr,"capture_profile phase=%s status=%d\n",event->phase,(int)event->status);}
 static pn_status_t present(void *ctx,const pn_frame_t *frame,pn_refresh_t profile){(void)profile;screen_t *s=ctx;if(!s->write)return PN_OK;FILE *f=fopen(s->path,"wb");if(!f)return PN_IO;
     pn_status_t status=PN_OK;if(fprintf(f,"P5\n684 1216\n255\n")<0)status=PN_IO;
     for(int y=0;status==PN_OK && y<frame->height;y++){uint8_t row[684];for(int x=0;x<684;x++)row[x]=(uint8_t)(pn_frame_get(frame,x,y)*17);if(fwrite(row,1,sizeof row,f)!=sizeof row)status=PN_IO;}
@@ -16,10 +19,12 @@ static pn_status_t present(void *ctx,const pn_frame_t *frame,pn_refresh_t profil
     return status;
 }
 int main(int argc,char **argv){if(argc!=6 && argc!=7)return 2;unsigned page=(unsigned)strtoul(argv[3],NULL,10);if(!page || page>10000)return 2;
+    if(getenv("PN_EPUB_TRACE"))pn_profile_port(trace_clock,trace_emit,NULL);
     pn_pool_t pool;const char *budget=getenv("PN_EPUB_APP_BUDGET");if(pn_pool_init(&pool,budget?(size_t)strtoul(budget,NULL,10):6u*1024u*1024u,NULL,NULL,NULL))return 2;
     pn_epub_app_t app={0};screen_t screen={.path=argv[4]};pn_status_t status=pn_epub_app_open(&app,&pool,argv[1],argv[2],argc==7?argv[6]:NULL,atoi(argv[5]),0);uint64_t now=1;
     if(status==PN_OK && getenv("PN_EPUB_FALLBACK_FONT"))status=pn_epub_app_fallback_font(&app,getenv("PN_EPUB_FALLBACK_FONT"));
-    if(status==PN_OK && getenv("PN_EPUB_APP_TOC")){size_t index=(size_t)strtoul(getenv("PN_EPUB_APP_TOC"),NULL,10);screen.write=page==1 && !getenv("PN_EPUB_TOC_MENU");status=pn_epub_app_toc_jump(&app,index,now++,present,&screen);}
+    if(status==PN_OK && getenv("PN_EPUB_APP_SECTION")){size_t index=(size_t)strtoul(getenv("PN_EPUB_APP_SECTION"),NULL,10);screen.write=false;status=pn_epub_app_step(&app,PN_APP_OPEN,now++,present,&screen);screen.write=page==1;if(status==PN_OK)status=pn_epub_app_section_jump(&app,index,now++,present,&screen);}
+    else if(status==PN_OK && getenv("PN_EPUB_APP_TOC")){size_t index=(size_t)strtoul(getenv("PN_EPUB_APP_TOC"),NULL,10);screen.write=page==1 && !getenv("PN_EPUB_TOC_MENU");status=pn_epub_app_toc_jump(&app,index,now++,present,&screen);}
     else if(status==PN_OK){screen.write=page==1 && !getenv("PN_EPUB_TOC_MENU");status=pn_epub_app_step(&app,PN_APP_OPEN,now++,present,&screen);}
     for(unsigned i=2;status==PN_OK && i<=page;i++){screen.write=i==page;status=pn_epub_app_step(&app,PN_APP_NEXT,now++,present,&screen);}
     // 私人样本的冷/热反向回放诊断，不输出正文。/ Cold/hot backward diagnostics for private samples without prose output.
@@ -48,6 +53,8 @@ int main(int argc,char **argv){if(argc!=6 && argc!=7)return 2;unsigned page=(uns
         (void)pn_media_detach(&media);screen.write=true;if(status==PN_OK)status=pn_epub_app_font_preview(&app,&prefs,now++,present,&screen);
     }
     if(status==PN_OK && getenv("PN_EPUB_FONT_MENU")){pn_font_ui_t menu={0};screen.write=true;status=pn_font_ui_open(&menu,&pool,NULL,&app,NULL,present,&screen);if(status==PN_OK && getenv("PN_EPUB_FONT_DETAIL"))status=pn_font_ui_event(&menu,PN_FUI_SELECT,now++,present,&screen);pn_font_ui_close(&menu);}
+    // 实际空闲缓存入口用于用户章节的版本/重开诊断；不把接管当作已落盘。/ Use the actual idle-cache entry for user-chapter version/reopen checks; acceptance alone is not persistence.
+    if(status==PN_OK && getenv("PN_EPUB_CACHE_IDLE"))for(unsigned i=0;i<4096;i++){pn_status_t cached=pn_epub_app_cache_idle(&app,now+3000+i);if(cached==PN_OK && !pn_epub_app_cache_pending(&app))break;if(cached!=PN_OK && cached!=PN_BUSY && cached!=PN_EMPTY){status=cached;break;}}
     pn_epub_progress_t progress;if(status==PN_OK && pn_epub_app_progress(&app,&progress)==PN_OK)printf("path=%s element=%llu run=%u offset=%llu\n",progress.location.path,(unsigned long long)progress.location.position.element,progress.location.position.run,(unsigned long long)progress.location.position.offset);
     pn_status_t closed=pn_epub_app_close(&app,now);if(status==PN_OK)status=closed;fprintf(stderr,"EPUB app status=%d peak=%zu used=%zu live=%zu\n",(int)status,pool.peak,pool.used,pool.live);return status==PN_OK && !pool.used && !pool.live?0:1;
 }

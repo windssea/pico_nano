@@ -22,6 +22,8 @@ pn_status_t pn_font_open(pn_font_t *font,pn_pool_t *pool,const pn_text_source_t 
 /// 释放引擎，不关闭调用方源，幂等。
 /// Release engine without closing caller source, idempotently.
 void pn_font_close(pn_font_t *font);
+/// 仅验证活动字体源/取消，不加载或绘制字形。/ Validate the active font source/cancellation without loading or drawing glyphs.
+pn_status_t pn_font_source_ready(const pn_font_t *);
 /// 释放可重建的字形/度量缓存，保留字体源、字号和引擎；不访问文件或硬件。/ Free rebuildable glyph/metric caches while retaining the source, size and engine; no file or hardware I/O.
 void pn_font_trim(pn_font_t *font);
 /// 设置8至128像素，不保存全局或逐书设置。
@@ -38,11 +40,16 @@ pn_status_t pn_font_vertical(pn_font_t *font,int *ascent,int *descent);
 pn_status_t pn_font_draw(pn_font_t *font,pn_frame_t *frame,uint32_t codepoint,int32_t x_64,int baseline,pn_font_render_t mode);
 /// 仅预热相同26.6偏移的可回收字形，不画帧；不触发全局缓存回收或抢前台余量，预算不足EMPTY，可协作取消。 / Warm a reclaimable glyph at the same 26.6 offset without painting, global cache reclamation or consuming foreground headroom; EMPTY on limited budget, cooperatively cancellable.
 pn_status_t pn_font_warm(pn_font_t *,uint32_t codepoint,int32_t x_64);
+/// 可选绘制到独立预备帧，同时复用/补充同一字形缓存；调用方提供speculative范围，不抢占其他缓存。
+/// Paint an independent prepared frame while reusing/populating the same glyph cache; callers provide a speculative scope without evicting other caches.
+pn_status_t pn_font_prerender(pn_font_t *,pn_frame_t *,uint32_t,int32_t,int,pn_font_render_t);
 /// 常驻子集源，不分配、不访问卡；没有完整中文fallback承诺。
 /// Resident HarmonyOS UI primary with a separate resident CJK subset fallback; no card access.
 pn_text_source_t pn_font_builtin_source(void);
 /// 内置HarmonyOS默认主字体；汉字由独立回退链绘制，不访问存储卡。/ Resident HarmonyOS primary; CJK uses a separate fallback chain, without card access.
 pn_text_source_t pn_font_reading_source(void);
+/// 校验引擎实际捕获的保留源；仅接受已验证文件或固件内置源，不画字形。/ Verify the engine's captured retained source; accept only verified files or firmware-resident sources, without drawing glyphs.
+pn_status_t pn_font_verify_retained(const pn_font_t *);
 /// 与HarmonyOS主字体分离的常驻中文回退，不访问TF。/ Resident CJK fallback separate from HarmonyOS, without TF access.
 pn_text_source_t pn_font_fallback_source(void);
 /// 内置源使用构建时SHA，文件源仅当前有效句柄复用，其他源实际扫描；不改错误输出。/ Use build-time SHA for builtins, cache file digests only on valid live handles, scan other sources and preserve output on errors.

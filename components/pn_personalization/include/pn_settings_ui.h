@@ -49,7 +49,7 @@ typedef struct {
 } pn_settings_ui_t;
 /// 打开并读取翻页记录；state_media为NULL时只读默认且不能保存。/ Open and read the page-turn record; NULL state_media shows defaults without saving.
 pn_status_t pn_settings_ui_open(pn_settings_ui_t *ui,pn_pool_t *pool,pn_media_t *state_media,const char *state_dir,pn_settings_present_fn present,void *ctx);
-/// 处理命令并重绘。/ Handle a command and repaint.
+/// 保存成功后只重画变化的开关/分段/预览；旧提示、外部快照或显示失败后完整恢复。/ After persistence succeeds repaint changed toggles/segments/previews; restore completely after old notices, external snapshots or display failure.
 pn_status_t pn_settings_ui_event(pn_settings_ui_t *ui,int command,pn_settings_present_fn present,void *ctx);
 /// 重画。/ Repaint.
 pn_status_t pn_settings_ui_present(pn_settings_ui_t *ui,pn_settings_present_fn present,void *ctx);

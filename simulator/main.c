@@ -72,7 +72,7 @@ static pn_status_t ownership_scenario(pn_display_t *display, pn_display_job_t *v
 int main(int argc, char **argv) {
     bool headless=false, ownership=false, budget_explicit=false;
     const char *capture=NULL,*book=NULL,*font_path=NULL,*fallback_path=NULL,*state_dir=NULL,*library=NULL,*cover_cache=NULL,*wallpaper_dir=NULL,*wallpaper_store=NULL,*font_dir=NULL;
-    unsigned book_page=1;int font_pixels=44;
+    unsigned book_page=1;int font_pixels=PN_STYLE_DEFAULT_PIXELS;
     size_t budget=1024*1024;
     for (int i=1;i<argc;i++) {
         if (strcmp(argv[i],"--headless")==0) headless=true;

@@ -31,5 +31,9 @@ pn_status_t pn_font_chain_choose(pn_font_chain_t *,uint32_t,pn_font_choice_t *);
 pn_status_t pn_font_chain_advance(void *,uint32_t,int32_t *);
 /// 各有效字体最大垂直尺寸，供TXT行框使用。/ Maximum vertical metrics across valid fonts for TXT line boxes.
 pn_status_t pn_font_chain_vertical(pn_font_chain_t *,int *,int *);
+/// 验证主字体与所有回退源，不加载face或改变字号。/ Validate primary and all fallback sources without loading faces or changing sizes.
+pn_status_t pn_font_chain_validate(const pn_font_chain_t *);
 /// 同源字形绘制；不把错误伪装成缺字。/ Draw the selected glyph without disguising errors as missing glyphs.
 pn_status_t pn_font_chain_draw(pn_font_chain_t *,pn_frame_t *,uint32_t,int32_t,int,pn_font_render_t);
+/// 预备帧使用同一选择/绘制路径，并允许有界字形缓存填充。/ Prepared frames use the same selection/drawing path with bounded glyph-cache population.
+pn_status_t pn_font_chain_prerender(pn_font_chain_t *,pn_frame_t *,uint32_t,int32_t,int,pn_font_render_t);

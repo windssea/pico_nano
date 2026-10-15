@@ -19,5 +19,7 @@ void pn_font_set_suspend(pn_font_set_t *);
 pn_status_t pn_font_set_ensure(pn_font_set_t *,int,pn_font_t **,pn_font_chain_t **);
 /// 借用主源，不能关闭或移动它。/ Borrow primary source without closing or moving it.
 pn_status_t pn_font_set_source(const pn_font_set_t *,pn_text_source_t *);
+/// 校验所有保留的文件/源，不绘制、不改变选择。/ Verify all retained files/sources without drawing or changing selection.
+pn_status_t pn_font_set_verify_retained(const pn_font_set_t *);
 /// 显式移交到空对象，源地址不变。/ Explicitly transfer to an empty object without moving sources.
 pn_status_t pn_font_set_move(pn_font_set_t *to,pn_font_set_t *from);

@@ -4,6 +4,7 @@
 #include "pn_async.h"
 #include "pn_reader_app.h"
 #include "pn_key.h"
+#include "pn_feedback.h"
 #include "read_pico.h"
 typedef enum {PN_DASYNC_TOUCH,PN_DASYNC_KEY,PN_DASYNC_ACTION,PN_DASYNC_POWER,PN_DASYNC_OPEN_CANCEL} pn_device_input_kind_t; ///< 输入种类；开书取消保留原上下文语义 / Input kind; opening cancellation retains its original context semantics
 typedef struct {
@@ -26,12 +27,17 @@ typedef struct {
     pn_status_t (*overlap)(void *); ///< 等待扫描回执时由产品任务调用的小步工作，OK继续、其他停止 / Small product-task steps while awaiting a scan receipt; OK continues, anything else stops
     void *overlap_ctx; ///< overlap上下文 / overlap context
     bool touch_wake; ///< 触摸INT中断可用 / Touch INT interrupt available
+    pn_feedback_present_fn feedback; ///< 局部反馈端口，语义页面代次不变 / Local feedback port preserving the semantic view revision
     atomic_uint touch_reads,touch_errors,events_sent; ///< 输入健康计数，仅诊断 / Input-health counters for diagnostics only
 } pn_device_async_t;
 /// 在VCOM门与BSP初始化成功后启动端口；失败降级不启动半初始化硬件。/ Start after VCOM/BSP gates; failures degrade without using partially initialized hardware.
 void pn_device_async_start(pn_device_async_t *port,read_pico_handle_t *hardware,pn_reader_present_fn panel,void (*idle)(uint64_t),void (*off)(void));
 /// 产品worker呈现不可变借用帧并等真实面板回执；不提交阅读位置。/ Product worker lends an immutable frame and waits for actual panel receipt without committing progress.
 pn_status_t pn_device_async_present(pn_device_async_t *port,const pn_frame_t *frame,pn_refresh_t profile);
+/// 借用局部像素等真实反馈回执；不预热、不推进页面/阅读代次。/ Borrow local pixels until the real feedback receipt, without warming or advancing view/reader revisions.
+pn_status_t pn_device_async_feedback(pn_device_async_t *port,const pn_feedback_patch_t *patch);
+/// 显示owner执行端口任务并等真实回执；不预热/推进view，可读冻结job但不得修改模型/池或保留ctx。/ Display owner executes a port task until real receipt; no warming/view revision; it may read frozen jobs but never mutate models/pool or retain ctx.
+pn_status_t pn_device_async_native(pn_device_async_t *,pn_status_t (*)(void *),void *);
 /// 产品worker发布输入上下文，不暴露页面对象。/ Product worker publishes input context without exposing page objects.
 void pn_device_async_view(pn_device_async_t *port,uint32_t view,bool body,uint8_t flags);
 /// 产品worker取一个事件，空EMPTY，溢出CANCELLED。/ Product worker takes an event; EMPTY when empty, CANCELLED after overflow.

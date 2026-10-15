@@ -30,3 +30,12 @@ pn_status_t pn_png_draw(pn_pool_t *pool,const pn_image_input_t *input,pn_frame_t
 /// 分别写4bpp原灰度与透明度（0透明、15不透明），不与背景合成；两帧尺寸必须相同。
 /// Write separate 4bpp raw gray and alpha (0 transparent, 15 opaque) planes without compositing; frame dimensions must match.
 pn_status_t pn_png_draw_planes(pn_pool_t *pool,const pn_image_input_t *input,pn_frame_t *gray,pn_frame_t *alpha,pn_image_rect_t rect,pn_png_info_t *info);
+
+typedef struct {void *impl;} pn_png_job_t; ///< 零初始化的扫描线任务，输入/目标须保活 / Zero-initialized scanline job; retain input and target lifetimes
+/// 创建可恢复解码；alpha可为NULL，像素直到OK都暂定；不提交显示。/ Create resumable decoding with optional alpha; pixels remain provisional until OK; no presentation.
+pn_status_t pn_png_job_begin(pn_png_job_t *,pn_pool_t *,const pn_image_input_t *,pn_frame_t *,pn_frame_t *alpha,pn_image_rect_t);
+/// 推进一个头/扫描线/最多4096目标像素/尾校验阶段；BUSY继续，info仅成功更新。
+/// Advance one header/scanline/up-to-4096-target-pixels/tail-validation stage; continue on BUSY, updating info only on success.
+pn_status_t pn_png_job_step(pn_png_job_t *,pn_png_info_t *);
+/// 释放所有解码分配，不关闭借用源；幂等。/ Free all decoding allocations without closing the borrowed source, idempotently.
+void pn_png_job_close(pn_png_job_t *);

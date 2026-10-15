@@ -135,6 +135,14 @@ void pn_epub_reader_close(pn_epub_reader_t *handle){if(handle && handle->impl){r
 /// 邻页基准：待确认页（面板扫描期间）优先，否则已显示页；只读，不改提交状态。
 /// Neighbor base: the pending page (during a panel scan) first, else the visible page; read-only, never changing committed state.
 static const pn_epub_reader_anchor_t *neighbor_base(const reader_t *r){return r->preparing?&r->pending.anchor:r->has_visible?&r->visible:NULL;}
+bool pn_epub_reader_next_ready(const pn_epub_reader_t *handle){const reader_t *r=handle?handle->impl:NULL;const pn_epub_reader_anchor_t *base=r?neighbor_base(r):NULL;return base && base->has_next && r->ahead.valid && same_location(&r->ahead_target,&base->next);}
+pn_status_t pn_epub_reader_visit_next(pn_epub_reader_t *handle,pn_epub_next_fn visit,void *ctx){
+    if(!handle || !handle->impl || !visit)return PN_INVALID;
+    reader_t *r=handle->impl;const pn_epub_reader_anchor_t *base=neighbor_base(r);
+    if(!base || !base->has_next || !r->ahead.valid || !same_location(&r->ahead_target,&base->next))return PN_EMPTY;
+    size_t section;pn_status_t s=pn_cancel_checkpoint();if(s==PN_OK)s=pn_epub_spine_find(r->epub,r->ahead_anchor.begin.path,&section);if(s!=PN_OK)return s;
+    pn_cache_pin(&r->cache);s=visit(ctx,&r->ahead,&r->ahead_anchor,r->token);pn_cache_unpin(&r->cache);return s;
+}
 static pn_status_t pn_epub_reader_prefetch_impl(pn_epub_reader_t *handle){
     if(!handle || !handle->impl)return PN_EMPTY;
     reader_t *r=handle->impl;const pn_epub_reader_anchor_t *base=neighbor_base(r);if(!base || !base->has_next)return PN_EMPTY;

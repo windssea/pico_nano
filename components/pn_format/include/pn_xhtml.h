@@ -46,8 +46,8 @@ typedef pn_status_t (*pn_xhtml_sink_t)(void *,const pn_xhtml_event_t *);
 /// 消费已验证EOF的XML流；支持严格XHTML与元素行内样式（无样式表加载），全部解析分配走pool；失败不改stats，sink须丢弃暂定内容。
 /// Consume XML with verified EOF, supporting strict XHTML and inline attributes (no stylesheet loading) with pooled allocations; errors preserve stats and require discarding provisional sink content.
 pn_status_t pn_xhtml_parse_input(pn_pool_t *pool,const pn_xml_input_t *input,const char *base,const uint8_t salt[16],pn_xhtml_sink_t sink,void *ctx,pn_xhtml_stats_t *stats);
-/// 从出版物解析并按预算复用本会话已验证语义；head样式/完整CRC/XML通过才缓存，复放仍检查介质与取消，失败不改stats。
-/// Parse publication resources and reuse budgeted verified session semantics; cache only after head styles/full CRC/XML pass, rechecking media/cancellation on replay and preserving stats on failure.
+/// 从出版物解析并按预算复用已验证语义；原始词法失败可有界重试，head样式/完整来源CRC/最终XML通过才缓存，失败不改stats。
+/// Parse publication resources with bounded lexical retry and budgeted verified semantics; cache only after head styles/full source CRC/final XML pass, preserving stats on failure.
 pn_status_t pn_xhtml_parse(pn_pool_t *pool,pn_epub_t *epub,const char *path,const uint8_t salt[16],pn_xhtml_sink_t sink,void *ctx,pn_xhtml_stats_t *stats);
 typedef bool (*pn_xhtml_done_t)(void *); ///< 消费窗口已足够，不代表源已校验 / Consumer window is sufficient, not proof of source validation
 /// 消费者回到“已消费order个事件”的状态；context为最后跳过的TEXT/IMAGE/非容器BLOCK_OPEN（只含kind/block），NULL表示章首。
@@ -60,6 +60,36 @@ typedef void (*pn_xhtml_restart_t)(void *ctx,uint64_t order,const pn_xhtml_event
 pn_status_t pn_xhtml_parse_window(pn_pool_t *,pn_epub_t *,const char *,const uint8_t salt[16],const pn_xhtml_position_t *focus,pn_xhtml_sink_t,pn_xhtml_done_t,pn_xhtml_restart_t,void *,pn_xhtml_stats_t *);
 /// 释放本出版物语义缓存，借用期间不释放；close使用同一入口。/ Release publication semantics unless borrowed; close uses the same entry point.
 void pn_xhtml_cache_close(pn_epub_t *);
+#define PN_XHTML_SNAPSHOT_MAX (384u*1024u) ///< 含头的可重建序列化上限 / Rebuildable serialized size including header
+#define PN_XHTML_SNAPSHOT_HEADER_BYTES 152u ///< 固定小端包头长度 / Fixed little-endian packet header size
+/// 只筛选包头的版本/书/章节/长度/头CRC，不证明载荷或模型有效；命中仍须完整解码校验。
+/// Filter only header version/book/chapter/size/header CRC; a match still requires full payload/model validation.
+bool pn_xhtml_snapshot_header_matches(const uint8_t *,size_t,size_t,const pn_book_id_t *,const char *);
+typedef struct pn_xhtml_store {
+    void *ctx; ///< 串行控制层上下文 / Serialized controller context
+    pn_book_id_t book; ///< 同一打开源完整校验所得摘要 / Full digest verified from the same open source
+    pn_status_t (*load)(void *,pn_pool_t *,uint8_t **,size_t *); ///< 返回池计费的完整包，核心用pn_free释放 / Return a complete pool-charged packet, freed by core with pn_free
+    pn_status_t (*save)(void *,const uint8_t *,size_t); ///< 同步借用完整包，不呈现或修改原书 / Synchronously borrow a complete packet without presenting or changing the book
+    pn_status_t (*take)(void *,pn_pool_t *,uint8_t *,size_t); ///< 可选异步接管：仅OK转移池内包所有权，其他结果仍由核心释放 / Optional deferred ownership: only OK transfers the pooled packet, otherwise core frees it
+    pn_status_t (*load_for)(void *,pn_pool_t *,const char *,uint8_t **,size_t *); ///< 可选章节筛选读取，优先于load；相同完整包所有权，不可仅返回包头 / Optional chapter-filtered load preferred over load; same full-packet ownership, never just a header
+} pn_xhtml_store_t;
+/// 空闲控制层显式同步已验证且对应path的模型；失败只影响缓存，不保存位置，不隐式关闭源。
+/// Idle controller explicitly syncs a verified model matching path; failures affect cache only, never positions or source lifetime.
+pn_status_t pn_xhtml_cache_flush(pn_epub_t *,const char *path);
+typedef enum {PN_XHTML_SNAPSHOT_COUNT,PN_XHTML_SNAPSHOT_ALLOC,PN_XHTML_SNAPSHOT_ZERO,PN_XHTML_SNAPSHOT_HEADER,PN_XHTML_SNAPSHOT_RECORDS,PN_XHTML_SNAPSHOT_CRC,PN_XHTML_SNAPSHOT_HEADER_CRC,PN_XHTML_SNAPSHOT_OFFER} pn_xhtml_snapshot_phase_t;
+typedef struct {
+    pn_xhtml_snapshot_phase_t phase; ///< 本轮实际阶段 / Actual phase of this step
+    size_t bytes,records; ///< 本轮处理的字节及记录数，不代表毫秒预算 / Bytes and records processed in this step, not a millisecond budget
+} pn_xhtml_snapshot_work_t;
+/// 每轮最多16条记录或4096字节编码/清零/CRC；BUSY为准备中，OK为存储端口已接受，不代表异步落盘完成。work可NULL。
+/// Encode/zero/CRC at most 16 records or 4096 bytes per step; BUSY means preparing, OK means accepted by storage, not durable asynchronous completion. work may be NULL.
+pn_status_t pn_xhtml_cache_flush_step(pn_epub_t *,const char *,pn_xhtml_snapshot_work_t *work);
+/// 查询未完成编码，无IO；新输入应先abort再做前台工作。/ Query unfinished encoding without I/O; abort before foreground work on new input.
+bool pn_xhtml_cache_pending(const pn_epub_t *);
+/// 释放编码暂存和本任务的模型pin，不改已验证语义，保留可重试标记；不能在存储回调内重入。/ Release staging and this job's model pin, preserving verified semantics and retry eligibility; never reenter from a storage callback.
+void pn_xhtml_cache_abort(pn_epub_t *);
+/// 控制层放弃已接管包后允许当前已验证模型再次空闲同步；无IO、不使未验证模型有效。/ After abandoning a taken packet, allow idle retry of the currently verified model without I/O or validating a provisional model.
+void pn_xhtml_cache_retry(pn_epub_t *);
 /// 完整扫描找到唯一id，缺失EMPTY、重复CORRUPT，失败不改position。
 /// Scan completely for a unique ID, EMPTY if absent, CORRUPT on duplicates, preserving position on failure.
 pn_status_t pn_xhtml_anchor(pn_pool_t *pool,pn_epub_t *epub,const char *path,const char *id,const uint8_t salt[16],pn_xhtml_position_t *position);

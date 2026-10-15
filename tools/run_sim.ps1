@@ -2,14 +2,17 @@
 # 先运行 py tools/dev.py sdl-run 生成Release二进制。 / Run `py tools/dev.py sdl-run` first to build the Release binary.
 # 用法 / Usage:  powershell -File tools\run_sim.ps1 [-Books DIR] [-Font TTF] [-FontDir DIR] [-WallpaperDir DIR]
 param(
-    [string]$Books = "build-dev/sim-library/piconano/books",
+    [string]$Books = "tests/testBook",
     [string]$Font = "",
-    [string]$FontDir = "build-dev/sim-library/piconano/fonts",
-    [string]$WallpaperDir = "build-dev/sim-library/piconano/wallpapers",
+    [string]$FontDir = "tests/testFont",
+    [string]$WallpaperDir = "",
     [string]$Script = "",
+    [ValidatePattern('^$|^[a-z0-9][a-z0-9-]{0,47}$')][string]$CoverCacheNamespace = "",
     [ValidateRange(0,5000)][int]$PresentDelayMs = 0,
     [ValidateRange(256,6144)][int]$BudgetKiB = 6144,
-    [switch]$Timing
+    [switch]$Timing,
+    [switch]$Feedback,
+    [switch]$Follow
 )
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
@@ -18,11 +21,7 @@ if (-not (Test-Path "build-sim-sdl-run/pn_sim")) { Write-Error "缺少 build-sim
 $running = docker ps --filter "name=^/pico-sim$" --format '{{.ID}}'
 if ($LASTEXITCODE -ne 0) { Write-Error "Docker不可用，请检查 docker context ls 与 docker version"; exit 1 }
 if ($running) { Write-Host "模拟器已运行，保留当前窗口；重建后用 docker stop pico-sim 再启动。"; exit 0 }
-# 默认书库可复建，原小说只复制，不把阅读器删除操作指向私人源文件。/ Rebuild the default library and copy the novel so reader deletes never target private originals.
-# 使用已有SDL镜像中的Python，避免Windows应用商店别名与解释器差异。/ Use Python in the existing SDL image, avoiding Windows Store aliases and interpreter differences.
-docker run --rm --mount "type=bind,source=$root,target=/work" -w /work pico-nano-sdl:dev python3 tools/make_sim_library.py
-if ($LASTEXITCODE -ne 0) { Write-Error "测试资源生成失败"; exit 1 }
-foreach ($path in @($Books, $FontDir, $WallpaperDir)) {
+foreach ($path in @($Books, $FontDir)) {
     if (-not (Test-Path -LiteralPath $path)) { Write-Error "模拟器输入不存在：$path"; exit 1 }
 }
 # 所有输入都在当前绑定工作区内；转换成容器相对路径。/ All inputs stay in the bound workspace and become container-relative paths.
@@ -34,13 +33,35 @@ function Get-SimPath([string]$path) {
 }
 $Books = Get-SimPath $Books
 $FontDir = Get-SimPath $FontDir
-$WallpaperDir = Get-SimPath $WallpaperDir
-if ($Font) { $Font = Get-SimPath $Font }
+# 真实用户原件只读，所有删除/覆盖演练只作用于新建副本。/ Keep user originals read-only; deletion/overwrite journeys operate on fresh copies.
+docker run --rm --mount "type=bind,source=$root,target=/work" -w /work pico-nano-sdl:dev python3 tools/prepare_local_samples.py --books $Books --fonts $FontDir
+if ($LASTEXITCODE -ne 0) { Write-Error "用户测试资源复制失败"; exit 1 }
+$samples = Get-Content -LiteralPath 'build-dev/user-samples/current.json' -Raw -Encoding UTF8 | ConvertFrom-Json
+# 每次仍用新副本，但容器内路径固定，封面缓存和字体选择才能跨窗口复用。/ Keep fresh copies but stable in-container paths so cover caches and font choices survive window restarts.
+$sampleRelative = Get-SimPath $samples.root
+$sampleRoot = (Resolve-Path -LiteralPath $sampleRelative).Path
+$sourceFontDir = (Resolve-Path -LiteralPath $FontDir).Path.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+$Books = '/samples/books'
+$FontDir = '/samples/fonts'
+if ($WallpaperDir) { $WallpaperDir = Get-SimPath $WallpaperDir } else { $WallpaperDir = '/samples/wallpapers' }
+if ($Font) {
+    $sourceFont = (Resolve-Path -LiteralPath $Font).Path
+    if ($sourceFont.StartsWith($sourceFontDir, [StringComparison]::OrdinalIgnoreCase)) { $Font = '/samples/fonts/' + $sourceFont.Substring($sourceFontDir.Length).Replace('\', '/') }
+    else { $Font = Get-SimPath $Font }
+}
+# 用户样本与早期生成样本分开保留状态；不删除旧进度或缓存。/ Keep user-sample state separate from earlier generated fixtures without deleting old progress or caches.
+docker run --rm -v pico-sim-data:/data --entrypoint python3 pico-nano-sdl:dev -c "import pathlib; [pathlib.Path(p).mkdir(parents=True,exist_ok=True) for p in ('/data/user-samples/state','/data/user-samples/covers','/data/user-samples/wallpaper')]"
+if ($LASTEXITCODE -ne 0) { Write-Error "用户样本状态目录初始化失败"; exit 1 }
+
+# 开发冷缓存对照使用独立命名空间，保留默认缓存与阅读状态。/ Use an isolated namespace for development cold-cache comparisons, preserving default caches and reading state.
+$coverCacheDirectory = "/data/user-samples/covers"
+if ($CoverCacheNamespace) { $coverCacheDirectory = "/data/user-samples/covers-$CoverCacheNamespace" }
 New-Item -ItemType Directory -Force -Path "build-dev/sim-frames" | Out-Null
 # 阅读状态与封面缓存放在Docker卷（容器内ext4）而不是Windows绑定挂载：后者的fsync和小读取很慢。
 # Reading state and the cover cache live in a Docker volume (ext4 inside the VM) rather than the Windows bind mount, whose fsync and small reads are slow.
 $arguments = @("run", "--detach", "--rm", "--name", "pico-sim",
     "--mount", "type=bind,source=$root,target=/work", "-w", "/work",
+    "--mount", "type=bind,source=$sampleRoot,target=/samples",
     "-v", "pico-sim-data:/data",
     "-e", "DISPLAY=:0", "-e", "WAYLAND_DISPLAY=wayland-0", "-e", "XDG_RUNTIME_DIR=/mnt/wslg/runtime-dir", "-e", "SDL_VIDEODRIVER=x11",
     "-e", "PN_SIM_FRAME_DIR=/work/build-dev/sim-frames",
@@ -48,11 +69,13 @@ $arguments = @("run", "--detach", "--rm", "--name", "pico-sim",
     "-e", "PN_SIM_LIBRARY_SCRIPT=$Script",
     "-e", "PN_SIM_PRESENT_DELAY_MS=$PresentDelayMs",
     "-e", "PN_SIM_TIMING=$([int]$Timing.IsPresent)",
+    "-e", "PN_SIM_FEEDBACK=$([int]$Feedback.IsPresent)",
+    "-e", "PN_SIM_FOLLOW=$([int]$Follow.IsPresent)",
     "-e", "TZ=Asia/Shanghai",
     "-v", "/run/desktop/mnt/host/wslg/.X11-unix:/tmp/.X11-unix", "-v", "/run/desktop/mnt/host/wslg:/mnt/wslg",
     "pico-nano-sdl:dev", "stdbuf", "-oL", "build-sim-sdl-run/pn_sim",
-    "--library", $Books, "--budget", "$($BudgetKiB * 1024)", "--state-dir", "/data/state", "--cover-cache", "/data/covers",
-    "--wallpaper-dir", $WallpaperDir, "--wallpaper-store", "/data/wallpaper", "--font-dir", $FontDir)
+    "--library", $Books, "--budget", "$($BudgetKiB * 1024)", "--state-dir", "/data/user-samples/state", "--cover-cache", $coverCacheDirectory,
+    "--wallpaper-dir", $WallpaperDir, "--wallpaper-store", "/data/user-samples/wallpaper", "--font-dir", $FontDir)
 if ($Font) { $arguments += @("--font", $Font) }
 & docker @arguments
 if ($LASTEXITCODE -ne 0) { Write-Error "模拟器启动失败"; exit 1 }

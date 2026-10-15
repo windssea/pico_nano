@@ -119,3 +119,4 @@ pn_status_t pn_png_draw_planes(pn_pool_t *pool,const pn_image_input_t *input,pn_
     if(!gray || !alpha || !alpha->pixels || alpha->pixels==gray->pixels || alpha->width!=gray->width || alpha->height!=gray->height || alpha->stride<(size_t)(alpha->width+1)/2)return PN_INVALID;
     return draw(pool,input,gray,alpha,rect,info);
 }
+#include "pn_png_job.inc"

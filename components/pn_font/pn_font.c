@@ -96,6 +96,7 @@ static pn_status_t ready(engine_t *e) {
     if(e->source.validate){pn_status_t s=e->source.validate(e->source.ctx);if(s!=PN_OK){e->source_error=s;return s;}}
     return PN_OK;
 }
+pn_status_t pn_font_source_ready(const pn_font_t *font){pn_status_t s=pn_cancel_checkpoint();if(s!=PN_OK)return s;return font && font->impl?ready(font->impl):PN_INVALID;}
 static unsigned long stream_read(FT_Stream stream,unsigned long offset,unsigned char *buffer,unsigned long count) {
     engine_t *e=stream->descriptor.pointer;
     if((uint64_t)offset>e->source.size){e->source_error=PN_IO;return count?0:1;}
@@ -137,6 +138,8 @@ static pn_status_t pn_font_open_impl(pn_font_t *font,pn_pool_t *pool,const pn_te
     if(source->size<12)return PN_CORRUPT;
     if(source->size>32u*1024u*1024u)return PN_LIMIT;
     if(source->validate){pn_status_t s=source->validate(source->ctx);if(s!=PN_OK)return s;}
+    // 所有文件字体共用源端缓存；未知/跨池源保留原读取路径。/ All file fonts share their source cache; unknown or cross-pool sources retain their existing read path.
+    (void)pn_text_file_cache_bind(source,pool);
     engine_t *e=pn_alloc_tagged(pool,PN_MEM_FONT,sizeof *e);if(!e)return PN_NO_MEMORY;memset(e,0,sizeof *e);e->pool=pool;e->source=*source;e->resident_ui=source->read_at==harmony_ui_read || (system_source.ctx && source->ctx==system_source.ctx && source->read_at==system_source.read_at);
     e->memory=(struct FT_MemoryRec_){e,allocate,release,resize};
     e->stream.size=(unsigned long)source->size;e->stream.descriptor.pointer=e;e->stream.read=stream_read;
@@ -282,6 +285,11 @@ pn_status_t pn_font_draw(pn_font_t *font,pn_frame_t *frame,uint32_t cp,int32_t x
     engine_t *e=font?font->impl:NULL;if(e)pn_cache_pin(&e->cache);
     pn_status_t status=draw_impl(font,frame,cp,x_64,baseline,mode,false);if(e)pn_cache_unpin(&e->cache);return status;
 }
+pn_status_t pn_font_prerender(pn_font_t *font,pn_frame_t *frame,uint32_t cp,int32_t x_64,int baseline,pn_font_render_t mode){
+    if(!font || !font->impl)return PN_INVALID;
+    engine_t *e=font->impl;if(!e->pool->speculative)return PN_INVALID;pn_cache_pin(&e->cache);bool warming=e->warming;e->warming=true;
+    pn_status_t s=draw_impl(font,frame,cp,x_64,baseline,mode,false);e->warming=warming;pn_cache_unpin(&e->cache);return s;
+}
 pn_status_t pn_font_warm(pn_font_t *font,uint32_t cp,int32_t x_64){
     if(!font || !font->impl || cp>0x10ffff || (cp>=0xd800 && cp<=0xdfff))return PN_INVALID;
     engine_t *e=font->impl;pn_status_t checked=ready(e);if(checked!=PN_OK)return checked;
@@ -317,6 +325,16 @@ pn_text_source_t pn_font_reading_source(void){
     return (pn_text_source_t){NULL,pn_harmony_font_size,harmony_read,NULL};
 }
 pn_text_source_t pn_font_fallback_source(void){return (pn_text_source_t){NULL,pn_reading_font_size,reading_read,NULL};}
+pn_status_t pn_font_verify_retained(const pn_font_t *font){
+    if(!font || !font->impl)return PN_BUSY;
+    const engine_t *e=font->impl;pn_status_t s=pn_text_file_verify_retained(e->pool,&e->source);
+    if(s!=PN_UNSUPPORTED)return s;
+    // 仅这些常驻资源不受主机外部文件替换影响；未知port不作热命中。
+    // Only these resident resources are unaffected by outside host file replacement; unknown ports cannot be warm hits.
+    bool resident=((e->source.read_at==harmony_read || e->source.read_at==harmony_ui_read) && e->source.size==pn_harmony_font_size) || (e->source.read_at==reading_read && e->source.size==pn_reading_font_size) || (e->source.read_at==builtin_read && e->source.size==pn_ui_font_size);
+    if(e->source.ctx || !resident)return PN_UNSUPPORTED;
+    return e->source.validate?e->source.validate(e->source.ctx):PN_OK;
+}
 pn_status_t pn_font_source_identity(const pn_text_source_t *source,pn_book_id_t *out){
     if(!source || !source->read_at || !out)return PN_INVALID;
     pn_status_t s=pn_cancel_checkpoint();if(s!=PN_OK)return s;

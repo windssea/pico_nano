@@ -7,11 +7,12 @@ with tempfile.TemporaryDirectory() as folder:
     with zipfile.ZipFile(book, "w", compression=zipfile.ZIP_DEFLATED) as z:
         z.writestr("mimetype", "application/epub+zip", compress_type=zipfile.ZIP_STORED)
         z.writestr("META-INF/container.xml", '<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="book.opf" media-type="application/oebps-package+xml"/></rootfiles></container>')
-        names = [("a.xhtml", "application/xhtml+xml"), ("b.xhtml", "application/xhtml+xml"), ("bad.xhtml", "application/xhtml+xml"), ("a.css", "text/css"), ("image.png", "image/png")]
-        z.writestr("book.opf", '<package xmlns="http://www.idpf.org/2007/opf" xmlns:d="http://purl.org/dc/elements/1.1/" version="2.0" unique-identifier="u"><metadata><d:title>Original semantic test</d:title><d:identifier id="u">original-semantics</d:identifier></metadata><manifest>' + ''.join(f'<item id="i{i}" href="{name}" media-type="{kind}"/>' for i, (name, kind) in enumerate(names)) + '</manifest><spine><itemref idref="i0"/><itemref idref="i1"/><itemref idref="i2"/></spine></package>')
+        names = [("a.xhtml", "application/xhtml+xml"), ("b.xhtml", "application/xhtml+xml"), ("bad.xhtml", "application/xhtml+xml"), ("a.css", "text/css"), ("image.png", "image/png"), ("c.xhtml", "application/xhtml+xml")]
+        z.writestr("book.opf", '<package xmlns="http://www.idpf.org/2007/opf" xmlns:d="http://purl.org/dc/elements/1.1/" version="2.0" unique-identifier="u"><metadata><d:title>Original semantic test</d:title><d:identifier id="u">original-semantics</d:identifier></metadata><manifest>' + ''.join(f'<item id="i{i}" href="{name}" media-type="{kind}"/>' for i, (name, kind) in enumerate(names)) + '</manifest><spine><itemref idref="i0"/><itemref idref="i1"/><itemref idref="i2"/><itemref idref="i5"/></spine></package>')
         z.writestr("a.xhtml", head + text + '</body></html>')
         z.writestr("b.xhtml", head + '<p>另一章节</p></body></html>')
         z.writestr("bad.xhtml", head + text + '</wrong></html>')
+        z.writestr("c.xhtml", head + '<img src="image.png" alt="' + 'x' * 4095 + '"/></body></html>')
         z.writestr("a.css", 'p {font-weight:bold} p.x {text-align:right} img {width:60%;max-height:80px}')
         z.writestr("image.png", b"source identity only; no image decoding in this test")
     subprocess.run([sys.argv[1], str(book)], check=True, timeout=30)
