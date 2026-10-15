@@ -76,6 +76,9 @@ int main(void){
  raw=(cst836u_touch_t){.count=0,.points={{.id=0,.event=1,.x=150,.y=650}}};assert(pn_device_touch_normalize(&raw,&ending)==PN_OK && ending && !raw.count);
  raw=(cst836u_touch_t){.count=0,.points={{0},{.id=1,.event=1,.x=550,.y=650}}};assert(pn_device_touch_normalize(&raw,&ending)==PN_OK && !ending && !raw.count);
  raw.count=3;assert(pn_device_touch_normalize(&raw,&ending)==PN_INVALID && !ending);
+ raw=(cst836u_touch_t){.count=1,.points={{.id=15,.event=3}}};assert(pn_device_touch_normalize(&raw,&ending)==PN_OK && !raw.count && !ending);
+ raw=(cst836u_touch_t){.count=2,.points={{.id=15,.event=3},{.id=1,.event=2,.active=true,.x=400,.y=600}}};assert(pn_device_touch_normalize(&raw,&ending)==PN_OK && raw.count==1 && raw.x==400 && raw.y==600);
+ raw=(cst836u_touch_t){.count=1,.points={{.id=15,.event=3,.active=true}}};assert(pn_device_touch_normalize(&raw,&ending)==PN_INVALID);
  read_pico_handle_t hw={.touch_ready=true};pn_device_async_t p;atomic_store(&reject,true);pn_device_async_start(&p,&hw,panel,idle,off);assert(!p.input_active && !p.display_active && !objects && !task_count);
  atomic_store(&reject,false);pn_device_async_start(&p,&hw,panel,idle,off);assert(p.input_active && p.display_active && objects==2 && task_count==2 && !p.touch_wake);pn_device_async_bind_product(&p);assert(p.product_task);pn_device_async_view(&p,15,true,0);vTaskDelay(35);
  p.overlap=count_overlap;thrd_t foreground;assert(thrd_create(&foreground,present,&p)==thrd_success);wait_entered();atomic_store(&x,342);atomic_store(&y,500);atomic_store(&count,1);vTaskDelay(35);atomic_store(&count,0);

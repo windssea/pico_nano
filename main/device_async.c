@@ -16,7 +16,9 @@ pn_status_t pn_device_touch_normalize(cst836u_touch_t *touch,bool *ending){
     unsigned active=0;int x=touch->x,y=touch->y,up_x=x,up_y=y;bool up=false;
     for(unsigned i=0;i<CST836U_MAX_POINTS;i++){
         const cst836u_point_t *point=&touch->points[i];
-        if(i<touch->count && (point->id>1 || point->event>2))return PN_INVALID;
+        // 驱动已判为未激活的无效槽可出现在松手报告；不能把它误当一次读错取消横滑。
+        // Invalid slots already marked inactive by the driver may appear on release; they must not cancel a swipe as a read error.
+        if(i<touch->count && (point->id>1 || point->event>2)){if(point->active)return PN_INVALID;continue;}
         if((i<touch->count || (!touch->count && !i)) && point->id<=1 && point->event==1){if(!up){up_x=point->x;up_y=point->y;}up=true;}
         if(i<touch->count && point->active && point->event!=1){if(!active){x=point->x;y=point->y;}active++;}
     }
