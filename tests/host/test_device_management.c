@@ -56,7 +56,18 @@ int main(void){
     for(uint64_t at=0;at<tf_source.size;){size_t n;assert(tf_source.read_at(tf_source.ctx,at,tf_bytes,sizeof tf_bytes,&n)==PN_OK && n && fwrite(tf_bytes,1,n,tf_file)==n);at+=n;}assert(!fclose(tf_file));
     management_fonts_close();assert(pn_font_system_open(&pool,&sd_media,tf_path)==PN_OK && pn_font_system_available());
     assert(draw_shelf(PN_REFRESH_GL16)==PN_OK && management_font.impl && pn_media_active(&sd_media)>0);
-    system_font_release();assert(!management_font.impl && !management_scope.active && !pn_font_system_available() && !pn_media_active(&sd_media));
+    // 设置正持有TF界面引擎时，源交接先关闭设置并归还，再释放全部消费者。
+    // Source handoff closes Settings and returns its TF UI engine before releasing all consumers.
+    void *shared_ui=management_font.impl;bool prior_shelf=shelf_mode,prior_status=status_page,prior_data=data_ready;
+    begin_settings();assert(settings_ui.impl && !management_font.impl);
+    pn_settings_ui_close(&settings_ui);assert(management_font.impl==shared_ui);shelf_mode=prior_shelf;status_page=prior_status;
+    pn_cancel_scope_t settings_cancel;pn_cancel_enter(&settings_cancel,feedback_cancelled,NULL);begin_settings();pn_cancel_leave(&settings_cancel);
+    assert(!settings_ui.impl && management_font.impl==shared_ui && shelf_mode==prior_shelf && status_page==prior_status);
+    // 真实入口的挂载替身会附加内部介质；恢复本用例原来的无内部存储背景。
+    // The real entry's mount stub attaches internal media; restore this test's original no-storage background.
+    if(!prior_data){assert(!pn_media_active(&data_media));(void)pn_media_detach(&data_media);data_ready=false;}
+    assert(pn_settings_ui_open_cached(&settings_ui,&pool,NULL,NULL,&management_font,present,NULL)==PN_OK);
+    system_font_release();assert(!settings_ui.impl && !management_font.impl && !management_scope.active && !pn_font_system_available() && !pn_media_active(&sd_media));
     assert(draw_shelf(PN_REFRESH_GL16)==PN_OK);assert(!remove(tf_path));
     // 逻辑前16行是每个板级行的前8字节；面板底图来自后缓冲逆变换。/ The logical top 16 rows are the first 8 bytes of each board row; the sheet base is restored from the back buffer.
     static uint8_t top[684*8];for(int py=0;py<684;py++)memcpy(top+py*8,hardware.hl.back_fb+(size_t)py*608,8);

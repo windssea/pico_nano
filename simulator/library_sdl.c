@@ -228,7 +228,7 @@ static void system_font_ready(library_t *s){
 }
 static pn_status_t list_motion_present(void *,pn_list_stage_t,const pn_frame_t *,pn_follow_box_t,const pn_follow_job_t *);
 static void feedback_restore(library_t *);
-static pn_status_t open_font_management(library_t *s){pn_status_t status=pn_hot_session_drop(&s->hot);if(status!=PN_OK)return status;pn_font_close(&s->font);(void)pn_font_system_close();status=pn_font_manage_open(&s->font_manage,s->pool,&s->media,s->font_dir,&s->state_media,s->state_dir,present,s);if(status==PN_OK && s->follow_enabled){pn_status_t enabled=pn_font_manage_motion(&s->font_manage,list_motion_present,s);printf("font_scroll enabled=%d status=%d\n",enabled==PN_OK,(int)enabled);}return status;}
+static pn_status_t open_font_management(library_t *s){pn_status_t status=pn_hot_session_drop(&s->hot);if(status!=PN_OK)return status;pn_settings_ui_close(&s->settings);pn_font_close(&s->font);(void)pn_font_system_close();status=pn_font_manage_open(&s->font_manage,s->pool,&s->media,s->font_dir,&s->state_media,s->state_dir,present,s);if(status==PN_OK && s->follow_enabled){pn_status_t enabled=pn_font_manage_motion(&s->font_manage,list_motion_present,s);printf("font_scroll enabled=%d status=%d\n",enabled==PN_OK,(int)enabled);}return status;}
 static pn_status_t open_toc(library_t *s){pn_status_t status=s->follow_enabled?pn_toc_ui_open_motion(&s->toc,&s->epub,s->pool,present,s,list_motion_present,s):pn_toc_ui_open(&s->toc,&s->epub,present,s);if(s->follow_enabled)printf("toc_scroll enabled=%d status=%d\n",s->toc.motion_ctx!=NULL,(int)status);return status;}
 typedef struct {library_t *s;pn_list_stage_t stage;const pn_frame_t *frame;pn_follow_box_t area;bool fail,started;} motion_window_t; ///< 原生窗口借用，主线程不读模型 / Native window borrow, main never reads models
 static pn_status_t motion_window(void *ctx){
@@ -348,7 +348,7 @@ static void open_actions(library_t *s,int index){
 static int shelf_hit(library_t *s,int x,int y){pn_shelf_options_t o=shelf_options(s);return pn_shelf_hit_ex(s->page,x,y,&o);}
 static pn_status_t open_settings(library_t *s){
     pn_status_t dropped=pn_hot_session_drop(&s->hot);if(dropped!=PN_OK)return dropped;
-    pn_status_t status=pn_settings_ui_open(&s->settings,s->pool,&s->state_media,s->state_dir,present,s);
+    pn_status_t status=pn_settings_ui_open_cached(&s->settings,s->pool,&s->state_media,s->state_dir,s->pool->limit>=4u*1024u*1024u?&s->font:NULL,present,s);
     if(status==PN_OK){pn_settings_about_t about={0};storage_note(s);snprintf(about.version,sizeof about.version,"版本 %s · PC 模拟器",PN_PRODUCT_VERSION);snprintf(about.storage,sizeof about.storage,"%s",s->storage);
         snprintf(about.internal,sizeof about.internal,"%s",s->state_dir?"可用（--state-dir）":"未指定 --state-dir");snprintf(about.screen,sizeof about.screen,"684×1216 · 16 级灰阶（模拟）");pn_settings_ui_set_about(&s->settings,&about);
         pn_settings_time_t clock={0};time_t utc=time(NULL);if(utc>=1704067200 && (uint64_t)utc<=4102444799u)(void)pn_settings_time_format(&clock,(uint32_t)utc);snprintf(clock.message,sizeof clock.message,"模拟器显示本机时间，联网校时需在阅读器验证。");pn_settings_ui_set_time(&s->settings,&clock);}

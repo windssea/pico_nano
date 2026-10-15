@@ -94,6 +94,7 @@ def main():
                     ["python3" if docker else sys.executable, "tools/test_local_font_settings.py", "--sim", "build-sim-sdl-idf/pn_sim"],
                     ["python3" if docker else sys.executable, "tools/test_local_middle_key.py", "--sim", "build-sim-sdl-idf/pn_sim"],
                     ["python3" if docker else sys.executable, "tools/test_local_font_samples.py", "--binary", "build-host/font_samples_validate"],
+                    ["python3" if docker else sys.executable, "tools/test_local_settings_font.py", "--binary", "build-host/test_settings_font"],
                     ["python3" if docker else sys.executable, "tools/test_local_mimetype.py", "--binary", "build-host/epub_dump"],
                     ["python3" if docker else sys.executable, "tools/test_local_memory.py", "--sim", "build-sim-sdl-idf/pn_sim"],
                     ["python3" if docker else sys.executable, "tools/test_local_cache.py", "--sim", "build-sim-sdl-idf/pn_sim"],

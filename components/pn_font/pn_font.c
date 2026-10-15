@@ -132,6 +132,13 @@ void pn_font_close(pn_font_t *font) {
     if(e->library)FT_Done_Library(e->library);
     pn_free(e);font->impl=NULL;font->pixels=0;
 }
+pn_status_t pn_font_move(pn_font_t *destination,pn_font_t *source,pn_pool_t *pool){
+    if(!destination || !source || destination==source || !pool)return PN_INVALID;
+    if(destination->impl)return PN_BUSY;
+    if(!source->impl)return PN_EMPTY;
+    if(((engine_t *)source->impl)->pool!=pool)return PN_INVALID;
+    *destination=*source;*source=(pn_font_t){0};return PN_OK;
+}
 static pn_status_t pn_font_open_impl(pn_font_t *font,pn_pool_t *pool,const pn_text_source_t *source,int pixels) {
     if(!font || !pool || !source || !source->read_at || pixels<8 || pixels>128)return PN_INVALID;
     if(font->impl)return PN_BUSY;

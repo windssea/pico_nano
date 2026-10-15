@@ -16,6 +16,7 @@
 #define H 1216
 enum {SCREEN_MAIN=0,SCREEN_KEYS,SCREEN_REFRESH,SCREEN_ABOUT,SCREEN_APPEARANCE,SCREEN_TIME};
 typedef struct {pn_pool_t *pool;pn_media_t *state;char dir[PN_JOURNAL_PATH_MAX];pn_font_t font;uint8_t *pixels;pn_frame_t canvas;char message[96];char lan[40];int screen;pn_settings_about_t about;pn_settings_time_t time;
+    pn_font_t *return_font; ///< 单owner移交的空槽，close归还或正常释放 / Empty slot transferred by the single owner, returned on close or normally released
     bool snapshot_dirty; ///< 外部快照更新后先完整重画 / Repaint completely after external snapshot changes
     pn_w_status_snapshot_t status; ///< 最近成功画布的实时状态带 / Live status band of the last successful canvas
 } su_t;
@@ -220,7 +221,7 @@ pn_status_t pn_settings_load_shelf(pn_media_t *state,const char *dir,pn_shelf_pr
     s=pn_shelf_prefs_files(&files,state,&lease,dir,&io);if(s==PN_OK)s=pn_shelf_prefs_load(&io,&value);
     (void)pn_media_release(state,&lease);if(s==PN_EMPTY)s=PN_OK;if(s==PN_OK)*out=value;return s;
 }
-pn_status_t pn_settings_ui_open(pn_settings_ui_t *ui,pn_pool_t *pool,pn_media_t *state,const char *dir,pn_settings_present_fn present,void *ctx){
+pn_status_t pn_settings_ui_open_cached(pn_settings_ui_t *ui,pn_pool_t *pool,pn_media_t *state,const char *dir,pn_font_t *return_slot,pn_settings_present_fn present,void *ctx){
     if(!ui || !pool || !present || (state && (!dir || !*dir)))return PN_INVALID;
     if(ui->impl)return PN_BUSY;
     if(dir && strlen(dir)>=PN_JOURNAL_PATH_MAX)return PN_LIMIT;
@@ -230,8 +231,13 @@ pn_status_t pn_settings_ui_open(pn_settings_ui_t *ui,pn_pool_t *pool,pn_media_t 
     if(state)strcpy(u->dir,dir);
     u->pixels=pn_alloc_tagged(pool,PN_MEM_UI,(size_t)W/2*H);
     pn_status_t status=u->pixels?PN_OK:PN_NO_MEMORY;
-    if(status==PN_OK){(void)pn_frame_bind(&u->canvas,u->pixels,(size_t)W/2*H,W,H);pn_text_source_t builtin=pn_font_builtin_source();status=pn_font_open(&u->font,pool,&builtin,30);}
-    if(status!=PN_OK){pn_free(u->pixels);pn_free(u);return status;}
+    if(status==PN_OK){
+        (void)pn_frame_bind(&u->canvas,u->pixels,(size_t)W/2*H,W,H);
+        if(return_slot && return_slot->impl){status=pn_font_source_ready(return_slot);if(status==PN_OK)status=pn_font_move(&u->font,return_slot,pool);if(status==PN_OK)status=pn_font_size(&u->font,30);}
+        else{pn_text_source_t builtin=pn_font_builtin_source();status=pn_font_open(&u->font,pool,&builtin,30);}
+    }
+    if(status!=PN_OK){if(u->font.impl && (!return_slot || pn_font_move(return_slot,&u->font,pool)!=PN_OK))pn_font_close(&u->font);pn_free(u->pixels);pn_free(u);return status;}
+    u->return_font=return_slot;
     uint8_t flags=0;
     if(state && pn_settings_load_flags(state,dir,&flags)!=PN_OK){flags=0;snprintf(u->message,sizeof u->message,"设置记录不可读，显示默认值");}
     pn_shelf_prefs_t shelf=pn_shelf_prefs_default();
@@ -239,6 +245,7 @@ pn_status_t pn_settings_ui_open(pn_settings_ui_t *ui,pn_pool_t *pool,pn_media_t 
     *ui=(pn_settings_ui_t){.impl=u,.active=true,.flags=flags,.shelf=shelf};
     (void)show(ui,present,ctx);return PN_OK;
 }
+pn_status_t pn_settings_ui_open(pn_settings_ui_t *ui,pn_pool_t *pool,pn_media_t *state,const char *dir,pn_settings_present_fn present,void *ctx){return pn_settings_ui_open_cached(ui,pool,state,dir,NULL,present,ctx);}
 static pn_status_t save(su_t *u,uint8_t flags){
     if(!u->state)return PN_UNSUPPORTED;
     pn_media_lease_t lease;pn_status_t status=pn_media_acquire(u->state,PN_MEDIA_WRITE,&lease);
@@ -328,7 +335,11 @@ int pn_settings_ui_hit(const pn_settings_ui_t *ui,int x,int y){
 }
 void pn_settings_ui_close(pn_settings_ui_t *ui){
     if(!ui || !ui->impl)return;
-    su_t *u=ui->impl;pn_font_close(&u->font);pn_free(u->pixels);pn_free(u);*ui=(pn_settings_ui_t){0};
+    su_t *u=ui->impl;
+    // 引擎保持地址与缓存owner，归还不读文件、不分配，也不受取消状态阻挡。
+    // Keep the engine address and cache owner; returning it neither reads nor allocates and is not blocked by cancellation.
+    if(!u->return_font || pn_font_move(u->return_font,&u->font,u->pool)!=PN_OK)pn_font_close(&u->font);
+    pn_free(u->pixels);pn_free(u);*ui=(pn_settings_ui_t){0};
 }
 pn_status_t pn_settings_ui_set_lan(pn_settings_ui_t *ui,const char *ssid,pn_settings_present_fn present,void *ctx){
     if(!ui || !ui->impl || !present)return PN_INVALID;

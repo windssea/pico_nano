@@ -49,6 +49,8 @@ typedef struct {
 } pn_settings_ui_t;
 /// 打开并读取翻页记录；state_media为NULL时只读默认且不能保存。/ Open and read the page-turn record; NULL state_media shows defaults without saving.
 pn_status_t pn_settings_ui_open(pn_settings_ui_t *ui,pn_pool_t *pool,pn_media_t *state_media,const char *state_dir,pn_settings_present_fn present,void *ctx);
+/// 可选移交同池固定UI字体并在close时归还；空槽首次创建，槽须存活到close且期间不得使用，源失效/交接前先close并释放槽。/ Optionally move a same-pool fixed UI face in and return it on close; an empty slot is created on first use, must outlive the UI and remain unused until close, and must be closed/released before source invalidation or handoff.
+pn_status_t pn_settings_ui_open_cached(pn_settings_ui_t *,pn_pool_t *,pn_media_t *,const char *,pn_font_t *return_slot,pn_settings_present_fn,void *);
 /// 保存成功后只重画变化的开关/分段/预览；旧提示、外部快照或显示失败后完整恢复。/ After persistence succeeds repaint changed toggles/segments/previews; restore completely after old notices, external snapshots or display failure.
 pn_status_t pn_settings_ui_event(pn_settings_ui_t *ui,int command,pn_settings_present_fn present,void *ctx);
 /// 重画。/ Repaint.

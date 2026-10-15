@@ -22,6 +22,8 @@ pn_status_t pn_font_open(pn_font_t *font,pn_pool_t *pool,const pn_text_source_t 
 /// 释放引擎，不关闭调用方源，幂等。
 /// Release engine without closing caller source, idempotently.
 void pn_font_close(pn_font_t *font);
+/// 将同池引擎和缓存移交到空目标，源置空；不分配、不访问源，调用方串行管理源寿命。/ Move a same-pool engine and caches into an empty destination, clearing the source; no allocation or source access, with serialized source lifetime managed by the caller.
+pn_status_t pn_font_move(pn_font_t *destination,pn_font_t *source,pn_pool_t *pool);
 /// 仅验证活动字体源/取消，不加载或绘制字形。/ Validate the active font source/cancellation without loading or drawing glyphs.
 pn_status_t pn_font_source_ready(const pn_font_t *);
 /// 释放可重建的字形/度量缓存，保留字体源、字号和引擎；不访问文件或硬件。/ Free rebuildable glyph/metric caches while retaining the source, size and engine; no file or hardware I/O.

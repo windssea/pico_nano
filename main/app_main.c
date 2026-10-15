@@ -84,6 +84,7 @@ static read_pico_handle_t hardware;
 static pn_pool_t pool;
 static pn_hot_session_t hot_session; ///< 已保存热会话，所有写入/换卡出口先释放 / Saved warm session, released before writes/card changes
 static pn_font_t management_font; ///< owner间歇借用的界面字库及可回收字形 / UI face with reclaimable glyphs borrowed between owner operations
+static pn_settings_ui_t settings_ui; ///< 设置借用同一界面引擎，源交接前先归还 / Settings borrow the same UI engine and return it before source handoff
 static pn_w_font_scope_t management_scope; ///< 常驻中文补字作用域，无TF租约 / Resident CJK scope without a TF lease
 static bool shelf_draw_valid; ///< 最近普通书架回执及字库来源仍有效 / Latest ordinary shelf receipt and font source remain valid
 /// 移交字体对象而非重开；字号与缓存随对象回收。/ Transfer the font object instead of reopening; size and caches return with it.
@@ -97,7 +98,7 @@ static pn_status_t management_font_begin(pn_font_t *font,int pixels){
 static void management_font_end(pn_font_t *font){if(pool.limit<4u*1024u*1024u || management_font.impl)pn_font_close(font);else{management_font=*font;*font=(pn_font_t){0};}}
 
 /// 系统源关闭或换代前释放界面消费者，避免缓存借用旧TF句柄。/ Release UI consumers before system-source close/replacement to avoid stale TF handles.
-static void management_fonts_close(void){shelf_draw_valid=false;pn_font_close(&management_font);pn_w_font_scope_end(&management_scope);}
+static void management_fonts_close(void){shelf_draw_valid=false;pn_settings_ui_close(&settings_ui);pn_font_close(&management_font);pn_w_font_scope_end(&management_scope);}
 static pn_cover_work_t cover_work; ///< 封面解析/解码/写入由产品owner分步推进 / Cover parsing/decoding/writes advanced by the product owner
 static void system_font_release(void){pn_cover_work_abort(&cover_work);(void)pn_hot_session_drop(&hot_session);management_fonts_close();(void)pn_font_system_close();}
 
@@ -109,7 +110,6 @@ static bool wallpaper_ready;
 static pn_wallpaper_ui_t wallpaper_ui;
 static pn_wallpaper_mask_t lock_mask; ///< 锁屏时临时遮罩 / Temporary mask used only while locked
 static pn_font_manage_t font_manage;
-static pn_settings_ui_t settings_ui;
 static pn_device_time_t time_sync;
 static char time_notice[96];
 static bool time_lock_pending;
@@ -937,7 +937,8 @@ static void begin_settings(void){
     pn_wallpaper_mask_close(&lock_mask);
     reading_menu=false;
     if(!data_ready)data_ready=mount_data();
-    pn_status_t status=pn_settings_ui_open(&settings_ui,&pool,data_ready?&data_media:NULL,data_ready?"/data/progress":NULL,present,NULL);
+    pn_status_t status=pn_settings_ui_open_cached(&settings_ui,&pool,data_ready?&data_media:NULL,data_ready?"/data/progress":NULL,pool.limit>=4u*1024u*1024u?&management_font:NULL,present,NULL);
+    if(status==PN_CANCELLED)return;
     if(status!=PN_OK){message("设置未打开","原设置保留，稍后重试");return;}
     {pn_settings_about_t about={0};const esp_app_desc_t *app=esp_app_get_description();if(app){char version[24];memcpy(version,app->version,sizeof version-1);version[sizeof version-1]=0;snprintf(about.version,sizeof about.version,"版本 %.20s",version);}
      storage_note(about.storage,sizeof about.storage);snprintf(about.internal,sizeof about.internal,"%s",data_ready?"可用（阅读记录、书签与设置）":"不可用");
