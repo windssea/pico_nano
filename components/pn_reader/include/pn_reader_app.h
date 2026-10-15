@@ -20,6 +20,10 @@
 typedef struct {void *impl;} pn_reader_app_t; ///< 初始impl=NULL / Initially impl=NULL
 /// 仅未显示对象，补齐字体身份并保留首屏排版候选；不绘制、显示或写记录。/ For a never-displayed object, finish font identity and retain first-page layout without rasterization, presentation or record writes.
 pn_status_t pn_reader_app_prepare_unshown(pn_reader_app_t *);
+/// 未显示首屏正文仍可绘制；不读取源或分配。/ Whether the unshown first body can still be painted, without source reads or allocation.
+bool pn_reader_app_unshown_paint_pending(const pn_reader_app_t *);
+/// 每步至多8节点，借原帧绘正文，保留reserve余量；失败停止可选绘制，前台仍可正常OPEN。/ Paint at most eight body nodes per step into the original frame, preserving reserve headroom; failure stops optional painting while normal OPEN remains available.
+pn_status_t pn_reader_app_paint_unshown(pn_reader_app_t *,size_t budget,size_t reserve);
 /// 接管前验证未显示对象的原书/字体源，PC额外重查外部变化。/ Verify a never-displayed object's book/font sources before handoff, including external host changes.
 pn_status_t pn_reader_app_verify_unshown(pn_reader_app_t *);
 /// 丢弃未显示对象及其自有首屏候选；其他设置事务仍拒绝，不保存阅读记录。/ Discard an unshown object and its owned first-page candidate; reject other settings transactions and save no reading records.

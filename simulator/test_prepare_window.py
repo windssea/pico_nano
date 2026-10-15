@@ -24,8 +24,10 @@ with tempfile.TemporaryDirectory() as directory:
     cold, cold_pixels, _ = run('cold', 'continue,close-window', seed)
     warm, warm_pixels, _ = run('warm', 'wait:2500,continue,close-window', seed)
     assert 'book_prepare status=0 ready=1 preparations=1' in warm and warm.count('library_prepared take=1') == 1, warm
+    assert 'book_paint status=0' in warm, warm
     assert 'library_prepared' not in cold and 'book_prepare' not in cold, cold
     assert warm_pixels == cold_pixels
     closed, _, _ = run('closed', 'wait:2500,settings,close-window', seed)
     assert 'book_prepare status=0 ready=1' in closed and 'library_prepared' not in closed and 'library_open name=' not in closed, closed
+    assert 'book_paint status=0' in closed, closed
 print('Home idle preparation, exact cold-open frame, settings release and pool zero passed; no panel timing claim')

@@ -88,7 +88,7 @@ add_test(NAME prefetch_quiet COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURC
 foreach(port host immutable)
     add_executable(test_hot_${port} test_hot_session.c)
     target_link_libraries(test_hot_${port} PRIVATE pn_core)
-    target_link_options(test_hot_${port} PRIVATE -Wl,--wrap=pn_font_draw -Wl,--wrap=fread)
+    target_link_options(test_hot_${port} PRIVATE -Wl,--wrap=pn_font_draw -Wl,--wrap=pn_font_prerender -Wl,--wrap=fread)
     if(port STREQUAL immutable)
         target_sources(test_hot_${port} PRIVATE ${PN_ROOT}/components/pn_text/pn_text_file.c)
         target_compile_definitions(test_hot_${port} PRIVATE PN_TEST_IMMUTABLE_FILE=1)
@@ -390,14 +390,14 @@ add_test(NAME font_set COMMAND test_font_set ${PN_ROOT}/tests/fixtures/font-fall
 
 add_executable(font_startup_probe font_startup_probe.c)
 target_link_libraries(font_startup_probe PRIVATE pn_core)
-target_link_options(font_startup_probe PRIVATE -Wl,--wrap=pn_identity_stream -Wl,--wrap=pn_identity_stream_pooled -Wl,--wrap=pn_identity_file_pooled -Wl,--wrap=fopen -Wl,--wrap=fread -Wl,--wrap=fwrite -Wl,--wrap=fclose -Wl,--wrap=fseek)
+target_link_options(font_startup_probe PRIVATE -Wl,--wrap=pn_identity_stream -Wl,--wrap=pn_identity_stream_pooled -Wl,--wrap=pn_identity_file_pooled -Wl,--wrap=fopen -Wl,--wrap=fread -Wl,--wrap=fwrite -Wl,--wrap=fclose -Wl,--wrap=fseek -Wl,--wrap=FT_Load_Glyph)
 add_test(NAME font_startup COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_font_startup.py $<TARGET_FILE:font_startup_probe> ${PN_ROOT}/tests/fixtures/font-fallback.ttf)
 
 # 固定文件端口仅模拟设备READ排他约束，不代表真实TF或面板性能。/ Immutable-file port models device READ exclusion, not physical TF/panel performance.
 add_executable(font_system_startup_probe font_startup_probe.c ${PN_ROOT}/components/pn_text/pn_text_file.c)
 target_compile_definitions(font_system_startup_probe PRIVATE PN_TEST_IMMUTABLE_FILE=1)
 target_link_libraries(font_system_startup_probe PRIVATE pn_core)
-target_link_options(font_system_startup_probe PRIVATE -Wl,--wrap=pn_identity_stream -Wl,--wrap=pn_identity_stream_pooled -Wl,--wrap=pn_identity_file_pooled -Wl,--wrap=fopen -Wl,--wrap=fread -Wl,--wrap=fwrite -Wl,--wrap=fclose -Wl,--wrap=fseek)
+target_link_options(font_system_startup_probe PRIVATE -Wl,--wrap=pn_identity_stream -Wl,--wrap=pn_identity_stream_pooled -Wl,--wrap=pn_identity_file_pooled -Wl,--wrap=fopen -Wl,--wrap=fread -Wl,--wrap=fwrite -Wl,--wrap=fclose -Wl,--wrap=fseek -Wl,--wrap=FT_Load_Glyph)
 
 add_executable(test_upload test_upload.c)
 target_link_libraries(test_upload PRIVATE pn_core)

@@ -17,6 +17,7 @@
 #include "pn_font_set.h"
 #include "pn_font_preview.h"
 #include "pn_reader_chrome.h"
+#include "pn_first_paint.h"
 #include <errno.h>
 #include <limits.h>
 #include <stdio.h>
@@ -70,6 +71,7 @@ typedef struct {
     uint64_t last_now;
     bool suspended; ///< 保留已确认正文的热挂起 / Warm suspension retaining confirmed text
     bool unshown_layout; ///< 本应用拥有尚未显示的首屏候选，不代表已阅读 / This app owns an unshown first-page candidate, never a reading confirmation
+    pn_first_paint_t first_paint; ///< 借原帧准备首屏正文，不持有额外像素 / First body preparation borrowing the original frame without extra pixels
     bool persistent,has_restore,media_lost,force_full;
     pn_refresh_policy_t refresh;
 } app_t;
@@ -133,7 +135,11 @@ static pn_status_t bitmap_copy(app_t *a,pn_frame_t *frame,const pn_reader_receip
     if(s==PN_NO_MEMORY){pn_page_bitmap_enable(&a->bitmap,false);pn_page_bitmap_enable(&a->bitmap,true);return PN_EMPTY;}return s;
 }
 static pn_status_t render_impl(app_t *a,pn_frame_t *frame,const pn_reader_receipt_t *receipt,bool show_return){
-    unsigned missing=0;pn_status_t s=bitmap_copy(a,frame,receipt,&missing);
+    unsigned missing=0;pn_status_t s;
+    if(a->first_paint.ready && frame->pixels==a->frame.pixels && pn_first_paint_matches(&a->first_paint,receipt->token,receipt->ticket)){
+        pn_profile_span_t span;pn_profile_begin(&span,a->pool,"txt.first.use");
+        s=pn_font_chain_validate(chain(a));missing=a->first_paint.missing;a->first_paint.ready=false;pn_profile_end(&span,s);
+    }else s=bitmap_copy(a,frame,receipt,&missing);
     if(s==PN_EMPTY){pn_frame_clear(frame,15);int guide=INT_MIN;s=paint_text(a,frame,a->reader.page.glyphs,0,a->reader.page.count,&guide,&missing,false);}
     return s==PN_OK?paint_footer(a,frame,receipt,show_return,missing):s;
 }
@@ -444,6 +450,29 @@ pn_status_t pn_reader_app_prepare_unshown(pn_reader_app_t *app){
     return s;
 }
 pn_status_t pn_reader_app_verify_unshown(pn_reader_app_t *app){if(!app || !app->impl)return PN_INVALID;app_t *a=app->impl;return unshown(a)?verify_sources(a):PN_BUSY;}
+bool pn_reader_app_unshown_paint_pending(const pn_reader_app_t *app){
+    const app_t *a=app?app->impl:NULL;return a && unshown(a) && a->unshown_layout && a->reader.page.valid && !a->first_paint.ready && !a->first_paint.stopped;
+}
+pn_status_t pn_reader_app_paint_unshown(pn_reader_app_t *app,size_t budget,size_t reserve){
+    if(!app || !app->impl || !budget)return PN_INVALID;
+    if(!pn_reader_app_unshown_paint_pending(app))return PN_EMPTY;
+    app_t *a=app->impl;if(a->pool->speculative)return PN_BUSY;
+    pn_reader_receipt_t receipt;pn_status_t s=pn_reader_prepared(&a->reader,&receipt);if(s!=PN_OK)return s;
+    pn_profile_span_t span;pn_profile_begin(&span,a->pool,"txt.first.body");
+    if(a->reader.decoder.source.validate)s=a->reader.decoder.source.validate(a->reader.decoder.source.ctx);
+    pn_draw_lease_t lease={0};pn_frame_t *frame=NULL;if(s==PN_OK)s=pn_display_begin_draw(&a->display,a->reader.token,&lease,&frame);
+    pn_first_scope_t scope=pn_first_scope_enter(a->pool,reserve);
+    if(s==PN_OK && !pn_first_paint_matches(&a->first_paint,receipt.token,receipt.ticket)){
+        a->first_paint=(pn_first_paint_t){.token=receipt.token,.ticket=receipt.ticket,.guide=INT_MIN};pn_frame_clear(frame,15);
+    }
+    size_t count=s==PN_OK?a->reader.page.count-a->first_paint.cursor:0;if(count>budget)count=budget;if(count>8)count=8;
+    if(s==PN_OK)s=paint_text(a,frame,a->reader.page.glyphs,a->first_paint.cursor,count,&a->first_paint.guide,&a->first_paint.missing,true);
+    if(s==PN_OK)s=pn_cancel_checkpoint();
+    if(lease.ticket){pn_status_t discarded=pn_display_discard(&a->display,&lease);if(s==PN_OK)s=discarded;}
+    if(s==PN_OK){a->first_paint.cursor+=count;a->first_paint.ready=a->first_paint.cursor==a->reader.page.count;}
+    else{a->first_paint.ready=false;a->first_paint.stopped=true;}
+    pn_first_scope_leave(a->pool,scope);pn_profile_end(&span,s);return s;
+}
 pn_status_t pn_reader_app_discard_unshown(pn_reader_app_t *app){
     if(!app)return PN_INVALID;
     if(!app->impl)return PN_OK;

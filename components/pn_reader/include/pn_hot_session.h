@@ -18,6 +18,10 @@ typedef struct {
 } pn_hot_session_t;
 /// 首页空闲只读准备已识别的继续阅读书；不显示/写记录，旧缓存pin保护，不足退EMPTY；同activity/epoch仅一次。/ Read-only idle preparation for an identified continue book; no display/record writes, pin existing caches, EMPTY on admission refusal, once per activity/epoch.
 pn_status_t pn_hot_session_prepare(pn_hot_session_t *,pn_pool_t *,pn_media_t *,const pn_catalog_item_t *,const char *font,const char *state,int pixels,uint64_t policy,uint64_t now,uint64_t activity);
+/// 仅查询未显示正文是否有可选绘制，不做IO。/ Query optional unshown-body painting without I/O.
+bool pn_hot_session_paint_pending(const pn_hot_session_t *);
+/// 安静期每步至多8节点，原帧/原池并保留管理余量；不呈现或写记录。/ At most eight nodes per quiet step in the original frame/pool with management headroom; never present or write records.
+pn_status_t pn_hot_session_paint(pn_hot_session_t *,uint64_t now,size_t budget);
 /// 强校验后移交未显示对象；调用方随后走正常OPEN和真实回执，不提前确认页面。/ Hand off a verified never-displayed object; caller then uses normal OPEN and actual receipts, never confirming early.
 pn_status_t pn_hot_session_take_prepared(pn_hot_session_t *,pn_media_t *,const char *,pn_book_format_t,const pn_book_id_t *,uint64_t,uint64_t,pn_reader_app_t *,pn_epub_app_t *);
 /// 保存挂起后移交到空缓存，低预算EMPTY保留原对象供正常关闭；不得复制活动资源。/ Save/suspend then transfer to an empty cache; EMPTY on low budgets leaves the original for ordinary close; never copy live resources.

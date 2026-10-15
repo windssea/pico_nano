@@ -18,6 +18,10 @@
 typedef struct {void *impl;} pn_epub_app_t; ///< 初始NULL，不复制活动对象 / Initially NULL; never copy a live object
 /// 仅未显示对象，补齐字体身份并保留首屏排版候选；不绘制、显示或写记录。/ For a never-displayed object, finish font identity and retain first-page layout without rasterization, presentation or record writes.
 pn_status_t pn_epub_app_prepare_unshown(pn_epub_app_t *);
+/// 未显示纯文字首屏仍可绘制；含图页沿原前台路径。/ Whether an unshown text-only first body can still be painted; image pages keep the foreground path.
+bool pn_epub_app_unshown_paint_pending(const pn_epub_app_t *);
+/// 每步至多8节点，在原帧绘纯文字正文并保留reserve余量；不画页脚、不呈现或写记录。/ Paint at most eight text-body nodes per step into the original frame with reserve headroom; no footer, presentation or record writes.
+pn_status_t pn_epub_app_paint_unshown(pn_epub_app_t *,size_t budget,size_t reserve);
 /// 接管前验证未显示对象的原书/字体源，PC额外重查外部变化。/ Verify a never-displayed object's book/font sources before handoff, including external host changes.
 pn_status_t pn_epub_app_verify_unshown(pn_epub_app_t *);
 /// 丢弃未显示对象及其自有首屏候选；其他设置事务仍拒绝，不保存阅读记录。/ Discard an unshown object and its owned first-page candidate; reject other settings transactions and save no reading records.

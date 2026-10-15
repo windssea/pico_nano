@@ -14,17 +14,23 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <time.h>
+#include <ft2build.h>
+#include FT_FREETYPE_H
 
 static bool tracing;static uint64_t fallback_size,book_size;static unsigned hashes,book_hashes,presents,font_opens;static size_t font_read_bytes;static const char *fallback_path;
 static const char *state_path;static FILE *writers[8];static size_t state_writes;
 static FILE *font_handles[4];
 static const char *profile_stage="setup";
 static unsigned layout_calls;
+static unsigned glyph_loads,glyph_renders,body_hits;
+FT_Error __real_FT_Load_Glyph(FT_Face,FT_UInt,FT_Int32);
+FT_Error __wrap_FT_Load_Glyph(FT_Face face,FT_UInt glyph,FT_Int32 flags){if(tracing){glyph_loads++;glyph_renders+=(flags&FT_LOAD_RENDER)!=0;}return __real_FT_Load_Glyph(face,glyph,flags);}
 /// 主机单调时钟仅用于阶段比较，不推导面板时延。/ Host monotonic time supports phase comparisons, never panel latency claims.
 static uint64_t profile_clock(void *ctx){(void)ctx;struct timespec t;assert(!clock_gettime(CLOCK_MONOTONIC,&t));return (uint64_t)t.tv_sec*1000000u+(uint64_t)t.tv_nsec/1000u;}
 static void profile_emit(void *ctx,const pn_profile_event_t *e){
     (void)ctx;if(!tracing)return;
     if(!strcmp(e->phase,"txt.prepare") || !strcmp(e->phase,"txt.jump") || !strcmp(e->phase,"epub.prepare") || !strcmp(e->phase,"epub.jump"))layout_calls++;
+    if(e->status==PN_OK && (!strcmp(e->phase,"txt.first.use") || !strcmp(e->phase,"epub.first.use")))body_hits++;
     if(getenv("PN_FONT_STARTUP_PROFILE"))printf("phase stage=%s name=%s us=%llu status=%d begin=%zu end=%zu peak=%zu\n",profile_stage,e->phase,(unsigned long long)e->elapsed_us,e->status,e->begin_bytes,e->end_bytes,e->peak_bytes);
 }
 // 从打开到首屏统计原书实际stdio调用，区别于ZIP逻辑读和面板计时。
@@ -84,9 +90,16 @@ int main(int argc,char **argv){
         profile_stage="idle";tracing=true;pn_status_t staged=pn_hot_session_prepare(&prepared,&pool,&media,&item,NULL,argv[3],44,1,0,0);tracing=false;
         if(staged!=PN_OK)fprintf(stderr,"idle_prepare failed status=%d used=%zu txt=%d epub=%d\n",(int)staged,pool.used,prepared.txt.impl!=NULL,prepared.epub.impl!=NULL);
         assert(staged==PN_OK);
+        if(getenv("PN_FONT_STARTUP_PAINT")){
+            unsigned steps=0;pn_status_t painted=PN_EMPTY;tracing=true;
+            while(pn_hot_session_paint_pending(&prepared)){assert(steps++<4096);painted=pn_hot_session_paint(&prepared,0,8);assert(painted==PN_OK || painted==PN_NO_MEMORY || painted==PN_EMPTY);}
+            tracing=false;
+            printf("idle_paint steps=%u status=%d\n",steps,painted);
+        }
         assert(prepared.prepared && !presents && !state_writes && prepared.preparations==1);
         printf("idle_prepare book_hashes=%u font_hashes=%u book_bytes=%zu font_bytes=%zu state_writes=%zu\n",book_hashes,hashes,book_read_bytes,font_read_bytes,state_writes);
         printf("idle_layout calls=%u\n",layout_calls);layout_calls=0;
+        printf("idle_glyph loads=%u renders=%u\n",glyph_loads,glyph_renders);glyph_loads=glyph_renders=0;
         hashes=book_hashes=font_opens=book_opens=book_reads=book_seeks=0;font_read_bytes=book_read_bytes=0;
     }
     profile_stage="click";tracing=true;pn_status_t status=warm?pn_hot_session_take_prepared(&prepared,&media,argv[1],epub?PN_BOOK_EPUB:PN_BOOK_TXT,&prepared.book,1,0,&t,&e):epub?pn_epub_app_open_on_media(&e,&pool,&media,argv[1],NULL,argv[3],44,0):pn_reader_app_open_on_media(&t,&pool,&media,argv[1],NULL,argv[3],44,0);
@@ -96,6 +109,8 @@ int main(int argc,char **argv){
     pn_cancel_leave(&scope);tracing=false;unsigned startup_hashes=hashes,startup_opens=font_opens,startup_book_hashes=book_hashes;size_t startup_bytes=font_read_bytes;
     unsigned startup_book_opens=book_opens,startup_book_reads=book_reads,startup_book_seeks=book_seeks;size_t startup_book_bytes=book_read_bytes;
     printf("click_layout calls=%u\n",layout_calls);profile_stage="turns";
+    printf("click_glyph loads=%u renders=%u\n",glyph_loads,glyph_renders);
+    printf("click_body hits=%u\n",body_hits);
     unsigned get_hashes=0;
     if(status==PN_OK){pn_font_preferences_t selected;char directory[PN_FONT_REFERENCE_PATH_MAX];tracing=true;
         pn_status_t loaded=epub?pn_epub_app_fonts_get(&e,&selected,directory,sizeof directory):pn_reader_app_fonts_get(&t,&selected,directory,sizeof directory);

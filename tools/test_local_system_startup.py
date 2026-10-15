@@ -19,6 +19,7 @@ def main():
     parser.add_argument('--warm-prepare', action='store_true', help='Compare a never-displayed idle preparation with a cold single-hash baseline on the immutable port')
     parser.add_argument('--baseline-warm', action='store_true', help='Use idle preparation in the independent baseline too')
     parser.add_argument('--expect-layout', action='store_true', help='Require first-page layout in idle and no repeated layout on click')
+    parser.add_argument('--paint-unshown', action='store_true', help='Step optional first-body painting before clicking; keep image-page foreground behavior')
     parser.add_argument('--limit', type=int, help='Development subset only; omit for the full user library')
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
@@ -28,11 +29,11 @@ def main():
     originals = {p: digest(p) for p in books+fonts}
     selected = books[:args.limit] if args.limit else books
     if args.warm_prepare and not args.expect_reuse: parser.error('--warm-prepare requires --expect-reuse')
-    if (args.baseline_warm or args.expect_layout) and not args.warm_prepare: parser.error('layout comparisons require --warm-prepare')
+    if (args.baseline_warm or args.expect_layout or args.paint_unshown) and not args.warm_prepare: parser.error('idle comparisons require --warm-prepare')
     if args.baseline_warm and not args.baseline: parser.error('--baseline-warm requires an independent --baseline')
     if args.warm_prepare and not args.baseline: args.baseline = args.binary
     report = {'passed': False, 'scope': __doc__, 'subset': bool(args.limit), 'expect_reuse': args.expect_reuse, 'warm_prepare': args.warm_prepare,
-              'baseline_warm': args.baseline_warm, 'expect_layout': args.expect_layout,
+              'baseline_warm': args.baseline_warm, 'expect_layout': args.expect_layout, 'paint_unshown': args.paint_unshown,
               'binary_sha256': digest(args.binary), 'baseline_sha256': digest(args.baseline) if args.baseline else None, 'runs': []}
     report_path = args.output/'report.json'
     with tempfile.TemporaryDirectory() as directory:
@@ -53,6 +54,8 @@ def main():
                         if primary: env['PN_FONT_STARTUP_PRIMARY'] = '1'
                         env.pop('PN_FONT_STARTUP_WARM', None)
                         if args.warm_prepare and (label == 'after' or args.baseline_warm): env['PN_FONT_STARTUP_WARM'] = '1'
+                        env.pop('PN_FONT_STARTUP_PAINT', None)
+                        if args.paint_unshown and label == 'after': env['PN_FONT_STARTUP_PAINT'] = '1'
                         result = subprocess.run([str(binary.resolve()), str(copied_book), str(copied_font), str(state)], capture_output=True, text=True, env=env, timeout=180)
                         (args.output/f'{case}-{label}.log').write_text(result.stdout+result.stderr, encoding='utf8')
                         assert result.returncode == 0, (case, label, result.stdout[-2000:], result.stderr[-2000:])
@@ -71,7 +74,11 @@ def main():
                         turn = next(line for line in result.stdout.splitlines() if line.startswith('turn_io '))
                         layout = {line.split()[0]: int(line.split('calls=')[1]) for line in result.stdout.splitlines() if line.startswith(('idle_layout calls=', 'click_layout calls='))}
                         if args.expect_layout and label == 'after': assert layout == {'idle_layout': 1, 'click_layout': 0}, (case, layout)
-                        return {'metrics': metrics, 'idle_prepare': idle, 'layout': layout, 'turn_io': turn, 'frames': [hashlib.sha256(p.read_bytes()).hexdigest() for p in pixels]}, pixels
+                        paint = {line.split()[0]: {k: int(v) for k, v in (word.split('=') for word in line.split()[1:])} for line in result.stdout.splitlines() if line.startswith(('idle_paint ', 'idle_glyph ', 'click_glyph ', 'click_body '))}
+                        if args.paint_unshown and label == 'after':
+                            assert paint['idle_paint']['status'] in (0, 3, 5), paint
+                            assert paint['click_body']['hits'] == int(paint['idle_paint']['steps'] > 0 and paint['idle_paint']['status'] == 0), paint
+                        return {'metrics': metrics, 'idle_prepare': idle, 'layout': layout, 'paint': paint, 'turn_io': turn, 'frames': [hashlib.sha256(p.read_bytes()).hexdigest() for p in pixels]}, pixels
 
                     before, old_frames = run(args.baseline, 'before') if args.baseline else (None, None)
                     after, frames = run(args.binary, 'after')

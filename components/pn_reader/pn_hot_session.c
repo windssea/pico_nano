@@ -40,6 +40,12 @@ pn_status_t pn_hot_session_prepare(pn_hot_session_t *h,pn_pool_t *pool,pn_media_
 static bool matches(const pn_hot_session_t *h,pn_media_t *media,const char *path,pn_book_format_t kind,uint64_t policy,uint64_t now){
     return h->media && h->media==media && h->epoch==media->epoch && media->available && h->policy==policy && !strcmp(h->path,path) && now>=h->at && now-h->at<PN_HOT_SESSION_MS && (kind==PN_BOOK_EPUB?h->epub.impl!=NULL:kind==PN_BOOK_TXT && h->txt.impl!=NULL);
 }
+bool pn_hot_session_paint_pending(const pn_hot_session_t *h){return h && h->prepared && h->media && h->media->available && h->epoch==h->media->epoch && (h->epub.impl?pn_epub_app_unshown_paint_pending(&h->epub):pn_reader_app_unshown_paint_pending(&h->txt));}
+pn_status_t pn_hot_session_paint(pn_hot_session_t *h,uint64_t now,size_t budget){
+    if(!h || !budget)return PN_INVALID;
+    if(!pn_hot_session_paint_pending(h) || now<h->at || now-h->at>=PN_HOT_SESSION_MS)return PN_EMPTY;
+    return h->epub.impl?pn_epub_app_paint_unshown(&h->epub,budget,PN_HOT_HEADROOM):pn_reader_app_paint_unshown(&h->txt,budget,PN_HOT_HEADROOM);
+}
 pn_status_t pn_hot_session_take_prepared(pn_hot_session_t *h,pn_media_t *media,const char *path,pn_book_format_t kind,const pn_book_id_t *expected,uint64_t policy,uint64_t now,pn_reader_app_t *txt,pn_epub_app_t *epub){
     if(!h || !media || !path || !txt || !epub)return PN_INVALID;
     if(txt->impl || epub->impl)return PN_BUSY;

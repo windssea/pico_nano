@@ -14,7 +14,10 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <dirent.h>
-static unsigned draws,reads;
+static unsigned draws,reads,prerenders;
+static unsigned cancel_prerender;static bool paint_cancelled;
+pn_status_t __real_pn_font_prerender(pn_font_t *,pn_frame_t *,uint32_t,int32_t,int,pn_font_render_t);
+pn_status_t __wrap_pn_font_prerender(pn_font_t *f,pn_frame_t *b,uint32_t cp,int32_t x,int y,pn_font_render_t m){prerenders++;pn_status_t s=__real_pn_font_prerender(f,b,cp,x,y,m);if(cancel_prerender && !--cancel_prerender)paint_cancelled=true;return s;}
 static unsigned first_layouts;static bool cancel_layout,layout_cancelled;
 static uint64_t phase_clock(void *ctx){(void)ctx;return 0;}
 static void phase_done(void *ctx,const pn_profile_event_t *e){
@@ -139,6 +142,15 @@ static size_t file_count(const char *path){DIR *d=opendir(path);assert(d);size_t
 static size_t reading_records(const char *path){DIR *d=opendir(path);assert(d);size_t n=0;struct dirent *entry;while((entry=readdir(d)))if(strcmp(entry->d_name,".") && strcmp(entry->d_name,"..") && strcmp(entry->d_name,"indexes"))n++;assert(!closedir(d));return n;}
 static bool cancel_after(void *ctx){unsigned *left=ctx;return !--*left;}
 static bool cancel_after_read(void *ctx){(void)ctx;return reads!=0;}
+static bool cancel_after_paint(void *ctx){(void)ctx;return paint_cancelled;}
+static void paint_all(pn_hot_session_t *h,pn_pool_t *pool,uint64_t now){
+    unsigned steps=0;size_t reserve=pool->cache_reserve;pn_cache_class_t kind=pool->speculative_kind;
+    while(pn_hot_session_paint_pending(h)){
+        unsigned before=prerenders;assert(++steps<4096 && pn_hot_session_paint(h,now,99)==PN_OK && prerenders-before<=8);
+        assert(pool->cache_reserve==reserve && !pool->speculative && pool->speculative_kind==kind);
+    }
+    assert(steps && pn_hot_session_paint(h,now,8)==PN_EMPTY);
+}
 static void prepare_case(const char *path,bool epub){
     pn_pool_t pool;assert(!pn_pool_init(&pool,6u*1024u*1024u,NULL,NULL,NULL));
     pn_media_t media;pn_media_init(&media);assert(!pn_media_attach(&media,1));pn_media_lease_t lease;
@@ -149,6 +161,7 @@ static void prepare_case(const char *path,bool epub){
     size_t used=pool.used,live=pool.live;pn_hot_session_t h={0};pn_reader_app_t t={0};pn_epub_app_t e={0};
     first_layouts=0;assert(!pn_hot_session_prepare(&h,&pool,&media,&item,NULL,state,32,1,0,1) && h.prepared && h.preparations==1 && !h.hits && !menu.drops && !menu.owner.pins && first_layouts==1);
     assert((epub?pn_epub_app_prepare_unshown(&h.epub):pn_reader_app_prepare_unshown(&h.txt))==PN_OK && first_layouts==1);
+    paint_all(&h,&pool,0);assert(!menu.drops && !menu.owner.pins);
     void *original=epub?h.epub.impl:h.txt.impl;pn_txt_progress_t tp;pn_epub_progress_t ep;
     assert((epub?pn_epub_app_progress(&h.epub,&ep):pn_reader_app_progress(&h.txt,&tp))==PN_EMPTY && !file_count(state));
     size_t attempts=pool.attempts;assert(pn_hot_session_prepare(&h,&pool,&media,&item,NULL,state,32,1,1,1)==PN_EMPTY && pool.attempts==attempts);
@@ -177,6 +190,27 @@ static void prepare_case(const char *path,bool epub){
     // 前台失败OPEN可能创建可重建indexes目录，但不得产生阅读记录；后台仍不得新增任何根条目。
     // A failed foreground OPEN may create the rebuildable indexes directory, never reading records; idle preparation must add no root entries.
     assert(closed==PN_OK && pool.used==used && pool.live==live && !pn_media_active(&media) && !reading_records(state));size_t entries=file_count(state);
+    // 部分正文或取消后的像素不得冒充完整首屏；正常绘制仍匹配完整结果。
+    // Partial or cancelled pixels must never masquerade as a complete first body; normal painting still matches the full result.
+    for(unsigned cancel=0;cancel<3;cancel++){
+        assert(!pn_hot_session_prepare(&h,&pool,&media,&item,NULL,state,32,1,4+cancel,40+cancel));
+        unsigned before=prerenders;assert(!pn_hot_session_paint(&h,4+cancel,1) && prerenders-before<=1 && pn_hot_session_paint_pending(&h));
+        if(cancel==1){unsigned left=1;pn_cancel_scope_t scope;pn_cancel_enter(&scope,cancel_after,&left);assert(pn_hot_session_paint(&h,5,8)==PN_CANCELLED);pn_cancel_leave(&scope);assert(!pn_hot_session_paint_pending(&h));}
+        if(cancel==2){paint_cancelled=false;cancel_prerender=1;pn_cancel_scope_t scope;pn_cancel_enter(&scope,cancel_after_paint,NULL);assert(pn_hot_session_paint(&h,6,8)==PN_CANCELLED && paint_cancelled);pn_cancel_leave(&scope);assert(!pn_hot_session_paint_pending(&h));paint_cancelled=false;}
+        assert(!pn_hot_session_take_prepared(&h,&media,path,item.format,&item.expected,1,6,&t,&e));screen.compare=true;
+        assert(step(&t,&e,PN_APP_OPEN,7,&screen)==PN_IO);
+        assert((epub?pn_epub_app_close(&e,8):pn_reader_app_close(&t,8))==PN_OK && !reading_records(state) && pool.used==used && pool.live==live);
+    }
+    // 将分配故障落到新增正文绘制阶段，检查旧菜单和未显示析构，不局限于构造早期。
+    // Inject faults in the new body stage, checking old menus and unshown disposal beyond early construction.
+    for(unsigned n=1;n<=12;n++){
+        assert(!pn_hot_session_prepare(&h,&pool,&media,&item,NULL,state,32,1,9,60+n));pool.fail_at=pool.attempts+n;unsigned steps=0;
+        while(pn_hot_session_paint_pending(&h)){assert(++steps<4096);pn_status_t p=pn_hot_session_paint(&h,9,8);assert(p==PN_OK || p==PN_NO_MEMORY || p==PN_EMPTY);}
+        pool.fail_at=0;assert(!pool.speculative && !menu.drops && !menu.owner.pins);
+        assert(!pn_hot_session_take_prepared(&h,&media,path,item.format,&item.expected,1,10,&t,&e));screen.compare=true;
+        assert(step(&t,&e,PN_APP_OPEN,11,&screen)==PN_IO && (epub?pn_epub_app_close(&e,12):pn_reader_app_close(&t,12))==PN_OK);
+        assert(pool.used==used && pool.live==live && !reading_records(state) && file_count(state)==entries);
+    }
     // 每个早期分配失败都必须归还准备对象，且不能驱逐已存在的菜单缓存。
     // Every early allocation failure must release preparation resources without evicting existing menu caches.
     for(unsigned n=1;n<=24;n++){pool.fail_at=pool.attempts+n;pn_status_t status=pn_hot_session_prepare(&h,&pool,&media,&item,NULL,state,32,1,10+n,10+n);pool.fail_at=0;assert(status==PN_OK || status==PN_NO_MEMORY || status==PN_EMPTY);assert(!pn_hot_session_drop(&h) && pool.used==used && pool.live==live && !pn_media_active(&media) && !menu.drops && !menu.owner.pins && file_count(state)==entries && !reading_records(state));}
@@ -205,6 +239,7 @@ static void prepare_case(const char *path,bool epub){
     assert((epub?pn_epub_app_progress(&e,&saved_epub):pn_reader_app_progress(&t,&saved_txt))==PN_OK);
     assert((epub?pn_epub_app_close(&e,3):pn_reader_app_close(&t,3))==PN_OK);
     first_layouts=0;assert(!pn_hot_session_prepare(&h,&pool,&media,&item,NULL,state,32,1,4,500) && first_layouts==1);
+    paint_all(&h,&pool,4);
     assert((epub?pn_epub_app_progress(&h.epub,&ep):pn_reader_app_progress(&h.txt,&tp))==PN_EMPTY);
     assert(!pn_hot_session_take_prepared(&h,&media,path,item.format,&item.expected,1,5,&t,&e));screen.compare=true;
     assert(!step(&t,&e,PN_APP_OPEN,6,&screen) && first_layouts==1);
@@ -213,6 +248,7 @@ static void prepare_case(const char *path,bool epub){
     else assert(tp.source_offset==saved_txt.source_offset && tp.source_offset>0);
     assert((epub?pn_epub_app_close(&e,7):pn_reader_app_close(&t,7))==PN_OK);
     first_layouts=0;assert(!pn_hot_session_prepare(&h,&pool,&media,&item,NULL,state,32,1,8,501));
+    paint_all(&h,&pool,8);
     assert(!pn_hot_session_take_prepared(&h,&media,path,item.format,&item.expected,1,9,&t,&e));memcpy(screen.pixels,first,415872);
     assert(!step(&t,&e,PN_APP_BEGINNING,10,&screen) && first_layouts==2);
     assert((epub?pn_epub_app_close(&e,11):pn_reader_app_close(&t,11))==PN_OK);
@@ -220,6 +256,19 @@ static void prepare_case(const char *path,bool epub){
     unsigned shown=screen.calls;assert(!pn_media_detach(&media) && step(&t,&e,PN_APP_OPEN,14,&screen)==PN_STALE_MEDIA && screen.calls==shown);
     assert((epub?pn_epub_app_close(&e,15):pn_reader_app_close(&t,15))==PN_OK);
     assert(pool.used==used && pool.live==live && !pn_media_active(&media));free(first);
+    // 两种阅读线在跨8节点分片后仍与普通完整绘制相同，页脚保持正常提交态。
+    // Both guide styles match ordinary full painting across eight-node chunks, with a normally committed footer.
+    for(unsigned line=1;line<=2;line++){
+        assert(!pn_media_attach(&media,3+line));screen.fail=false;screen.compare=false;
+        assert((epub?pn_epub_app_open_on_media(&e,&pool,&media,path,NULL,state,32,0):pn_reader_app_open_on_media(&t,&pool,&media,path,NULL,state,32,0))==PN_OK && !step(&t,&e,PN_APP_OPEN,1,&screen));
+        pn_style_t style;assert((epub?pn_epub_app_style_get(&e,&style):pn_reader_app_style_get(&t,&style))==PN_OK);style.reading_line=(uint8_t)line;style.reading_line_shade=2;style.reading_line_offset=2;
+        assert((epub?pn_epub_app_style_apply(&e,&style,2,present,&screen):pn_reader_app_style_apply(&t,&style,2,present,&screen))==PN_OK && !step(&t,&e,PN_APP_OPEN,3,&screen));
+        assert((epub?pn_epub_app_close(&e,4):pn_reader_app_close(&t,4))==PN_OK);
+        assert(!pn_hot_session_prepare(&h,&pool,&media,&item,NULL,state,32,1,5,600+line));paint_all(&h,&pool,5);
+        assert(!pn_hot_session_take_prepared(&h,&media,path,item.format,&item.expected,1,6,&t,&e));screen.compare=true;
+        assert(!step(&t,&e,PN_APP_OPEN,7,&screen) && (epub?pn_epub_app_close(&e,8):pn_reader_app_close(&t,8))==PN_OK);
+        assert(!pn_media_detach(&media) && !pn_media_active(&media) && pool.used==used && pool.live==live);
+    }
     assert(((uint8_t *)menu.bytes)[0]==0x5a && ((uint8_t *)menu.bytes)[128u*1024u-1]==0x5a);pn_cache_detach(&menu.owner);pn_free(menu.bytes);assert(!pool.used && !pool.live);
     free(screen.pixels);puts("idle preparation: no early records, independent ownership, protected menus, cancel/budget/fault/TTL/USB/media checks passed");
 }

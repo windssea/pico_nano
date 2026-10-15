@@ -149,7 +149,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/run_sim.ps1
 
 继续加`--baseline-warm --expect-layout --baseline <独立旧探针>`可比较两版同样提前开书时的首屏交接：新版本空闲阶段真实FIRST/JUMP排版恰一次，点击不再次prepare；独立旧程序仍在点击排版。探针记录idle/click布局次数，`PN_FONT_STARTUP_PROFILE=1`输出阶段时间与池；这是主机测量，不能作TF或面板时间。`hot_host/immutable`检查重复准备不重排、布局完成后输入取消、非首屏保存后整帧恢复、显式回书首丢弃候选，以及接管后失卡不得呈现；读取核心prepared回执不代表显示成功。
 
-`test_local_menu_probe.py --prepare-books`在原17帧之后追加真实`app_main`的TXT/EPUB准备、1500ms门槛、菜单无额外字体IO、锁屏释放及一次正常OPEN显示，四实际字体均退出池/租约归零；不把内存中构造的已识别Continue选择当作已有阅读记录。此模式每款字体清空一次性容器的私有`/data/progress`，避免上一款实际OPEN写出的记录改变下一款冷菜单；原件和默认记录不动。`prepare_window`另检查真实SDL进程重开的首页空闲准备、冷开最终全帧及设置释放，固定窗口等待后必须看到真实ready/take日志，不以经过时间代替准备成功。这些入口已纳入`local-samples`/窗口回归，不替代面板计时。
+再加`--paint-unshown`推进首屏正文分步绘制，独立旧基线保持仅提前排版。探针完整统计空闲绘制的原书/字体读取与FT_Load_Glyph（含RENDER标记），点击命中计数及三张全帧；不把绘制过程排除在idle计数之外。图片页保持前台渲染，预算不足允许停止可选准备并原路绘制。`hot_host/immutable`检查每步至多8节点、部分像素/取消回退、12个正文阶段分配故障后的完整帧回退、混合字号与两种阅读线、非首屏恢复/回书首及池策略/pin归还。
+
+`test_local_menu_probe.py --prepare-books`在原17帧之后追加真实`app_main`的TXT/EPUB准备、1500ms门槛、菜单无额外字体IO、锁屏释放及一次正常OPEN显示，四实际字体均退出池/租约归零；不把内存中构造的已识别Continue选择当作已有阅读记录。此模式每款字体清空一次性容器的私有`/data/progress`，避免上一款实际OPEN写出的记录改变下一款冷菜单；原件和默认记录不动。`prepare_window`另检查真实SDL进程重开的首页空闲准备、冷开最终全帧及设置释放，固定窗口等待后必须看到真实ready/正文绘制完成/take日志，不以经过时间代替准备成功。这些入口已纳入`local-samples`/窗口回归，不替代面板计时。
 
 像素测试可用`PN_SIM_STORAGE`固定传书页/关于页的容量显示，与`PN_SIM_CLOCK`同为显式显示输入；磁盘写入空间准入仍用真实statvfs，不受该值影响。密集导航专项固定此输入并保留全帧对照，以免测试自身或并行产物改变可用量；普通可见启动不设置它。前次未保留的差异帧仍不能据此追溯断言其原因。
 

@@ -108,10 +108,12 @@ static void prepared_books(void){
         unsigned shown=presents;bool attempted=tick_prepare_book(now_ms());
         if(!attempted || !hot_session.prepared)fprintf(stderr,"device_prepare failed attempted=%d ready=%d tried=%d home=%d available=%d held=%zu pending=%d/%d used=%zu quiet=%llu\n",attempted,hot_session.prepared,hot_session.tried,home_mode,sd_media.available,pn_media_active(&sd_media),pn_cover_work_pending(&cover_work),pn_shelf_covers_pending(shelf_covers,shelf_page),pool.used,(unsigned long long)(now_ms()-last_input));
         assert(attempted && hot_session.prepared && !reader_active() && presents==shown);
+          unsigned paint_steps=0;while(pn_hot_session_paint_pending(&hot_session)){assert(++paint_steps<4096 && tick_prepare_book(now_ms()) && presents==shown);}
         memset(counts,0,sizeof counts);watching=true;assert(draw_shelf(PN_REFRESH_GL16)==PN_OK);watching=false;
         assert(hot_session.prepared && presents==shown && !counts[FONT_IO].opens && !counts[FONT_IO].reads && !counts[FONT_IO].bytes);
         assert(prepare_lock() && !hot_session.prepared && !hot_session.txt.impl && !hot_session.epub.impl && !reader_active() && presents==shown);
         last_input=now_ms();clock_us+=1500000;assert(tick_prepare_book(now_ms()) && hot_session.prepared && presents==shown);
+          while(pn_hot_session_paint_pending(&hot_session)){assert(++paint_steps<8192 && tick_prepare_book(now_ms()) && presents==shown);}
         selected_format=item->format;strcpy(selected_path,item->path);selected_identified=true;selected_expected=item->expected;size_t takes=hot_session.takes;
         start_reader();assert(reader_active() && !shelf_mode && !status_page && hot_session.takes==takes+1 && !hot_session.prepared && presents==shown+1);
         pn_book_id_t actual;assert((epub.impl?pn_epub_app_identity(&epub,&actual):pn_reader_app_identity(&reader,&actual))==PN_OK && !memcmp(actual.sha256,item->expected.sha256,32));
