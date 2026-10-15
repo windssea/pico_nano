@@ -25,5 +25,8 @@ int main(void){
     for(int book=0;book<PN_CATALOG_PAGE_MAX;book++){g=(pn_shelf_gesture_t){0};out=-1;assert(!feed(&g,1,200,500,true,book,0,&out));assert(feed(&g,1,200,500,true,book,600,&out) && out==PN_SHELF_MORE+book);}
     g=(pn_shelf_gesture_t){0};out=-1;(void)feed(&g,1,500,500,true,0,0,&out);assert(feed(&g,1,100,500,true,0,100,&out));assert(pn_shelf_gesture_feed(&g,false,true,0,0,0,true,-1,200,&out));assert(pn_shelf_gesture_feed(&g,false,true,0,0,0,true,-1,210,&out) && out==-1);
     assert(PN_SHELF_TOGGLE>=PN_CATALOG_PAGE_MAX && PN_SHELF_CONTINUE>=PN_CATALOG_PAGE_MAX);
+    g=(pn_shelf_gesture_t){0};out=-1;assert(!feed(&g,1,550,500,true,2,0,&out));
+    assert(feed(&g,1,150,610,true,0,100,&out));assert(feed(&g,0,0,0,true,-1,110,&out));
+    assert(feed(&g,0,0,0,true,-1,120,&out) && out==PN_SHELF_NEXT);
     puts("shelf gestures: both directions, 12 book identities, hold once, movement, vertical/short drag, invalid/multitouch/modal/header cancellation and release passed");return 0;
 }

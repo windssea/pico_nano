@@ -21,7 +21,7 @@ bool pn_shelf_gesture_feed(pn_shelf_gesture_t *g,bool active,bool swipe,unsigned
     if(!count){
         if(g->empty<2)g->empty++;
         if(g->empty<2)return owned;
-        if(g->down && !g->blocked && g->moved && g->swipe){int dx=g->last_x-g->x,dy=g->last_y-g->y;if(abs(dx)>=100 && abs(dy)<=80 && abs(dx)>abs(dy)*2)*command=dx<0?PN_SHELF_NEXT:PN_SHELF_PREVIOUS;}
+        if(g->down && !g->blocked && g->moved && g->swipe){int dx=g->last_x-g->x,dy=g->last_y-g->y;if(abs(dx)>=100 && abs(dx)>abs(dy)*2)*command=dx<0?PN_SHELF_NEXT:PN_SHELF_PREVIOUS;}
         *g=(pn_shelf_gesture_t){0};return owned;
     }
     g->empty=0;if(g->blocked)return owned;
@@ -29,7 +29,7 @@ bool pn_shelf_gesture_feed(pn_shelf_gesture_t *g,bool active,bool swipe,unsigned
         if(!active || y<266 || y>=1104){g->blocked=true;return false;}}
     if(!active){g->blocked=true;return owned;}
     g->last_x=x;g->last_y=y;
-    if(abs(y-g->y)>80)g->swipe=false;
+    if(abs(y-g->y)>80 && abs(y-g->y)>=abs(x-g->x))g->swipe=false;
     if(abs(x-g->x)>20 || abs(y-g->y)>20){g->moved=true;g->claimed=true;}
     if(!g->moved && !g->claimed && g->hit>=0 && g->hit<PN_CATALOG_PAGE_MAX && now>=g->began && now-g->began>=600){g->claimed=true;*command=PN_SHELF_MORE+g->hit;}
     return g->claimed;

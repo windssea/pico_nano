@@ -10,6 +10,8 @@ with tempfile.TemporaryDirectory() as folder:
         return r.stdout
     out=run('press:550:500,move:150:500,release:150:500,press:150:500,move:550:500,release:550:500')
     assert 'library_page first=b00.txt count=9' in out and 'library_page first=b09.txt count=4' in out and 'shelf swipe command=41 index=9 status=0' in out and 'shelf swipe command=40 index=0 status=0' in out and 'library_open' not in out,out
+    out=run('press:550:500,release:150:610,press:150:500,release:550:610')
+    assert 'shelf swipe command=41 index=9 status=0' in out and 'shelf swipe command=40 index=0 status=0' in out and 'library_open' not in out,out
     out=run('press:100:400,wait:800,release:100:400')
     assert out.count('actions open index=0 status=0')==1 and 'shelf long press book=0' in out and 'library_open' not in out,out
     for script in ('tap:560:110,tap:100:1080,tap:600:1080','press:100:400,move:130:400,release:130:400','press:200:500,move:200:800,release:200:800','press:150:500,move:550:500,release:550:500'):

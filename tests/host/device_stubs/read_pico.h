@@ -6,7 +6,9 @@
 #include "epd_waveform.h"
 #endif
 typedef struct {bool present,mounted;} read_pico_sd_info_t;
-typedef struct {unsigned count;uint16_t x,y;} cst836u_touch_t;
+#define CST836U_MAX_POINTS 2
+typedef struct {bool active;uint8_t id,event;uint16_t x,y;} cst836u_point_t;
+typedef struct {bool touched;unsigned count;uint16_t x,y;cst836u_point_t points[CST836U_MAX_POINTS];uint8_t raw[15];} cst836u_touch_t;
 typedef struct {uint8_t *back_fb;const void *waveform;uint8_t *difference_fb;bool *dirty_lines;uint8_t *dirty_columns;} EpdiyHighlevelState; ///< 与epdiy相同：绘制后后缓冲等于前缓冲 / Like epdiy: the back buffer equals the front buffer after drawing
 typedef struct {EpdiyHighlevelState hl;uint8_t *framebuffer;void *touch;bool touch_ready,pmu_ready;} read_pico_handle_t;
 enum EpdDrawMode {MODE_GC16=2,MODE_GL16=5,MODE_DU=1,MODE_PACKING_1PPB_DIFFERENCE=0x100};

@@ -10,7 +10,7 @@ typedef enum {PN_DASYNC_TOUCH,PN_DASYNC_KEY,PN_DASYNC_ACTION,PN_DASYNC_POWER,PN_
 typedef struct {
     pn_device_input_kind_t kind; ///< 归一输入种类 / Normalized input kind
     uint64_t at; ///< 捕获时刻 / Capture time
-    unsigned count;int x,y;bool valid; ///< 触摸边沿 / Touch edge
+    unsigned count;int x,y;bool valid,ending; ///< 活动触点及显式UP终点 / Active contacts and explicit UP endpoint
     int key;pn_key_event_t key_event;pn_reader_action_t action; ///< 三键/阅读动作 / Key/reader action
 } pn_device_input_event_t;
 typedef struct {
@@ -30,6 +30,9 @@ typedef struct {
     pn_feedback_present_fn feedback; ///< 局部反馈端口，语义页面代次不变 / Local feedback port preserving the semantic view revision
     atomic_uint touch_reads,touch_errors,events_sent; ///< 输入健康计数，仅诊断 / Input-health counters for diagnostics only
 } pn_device_async_t;
+/// 将驱动原始记录归一为活动触点；UP可带有效终点但不算按住，坏记录返回INVALID。
+/// Normalize driver records to active contacts; UP may carry an endpoint but is not held, and malformed records return INVALID.
+pn_status_t pn_device_touch_normalize(cst836u_touch_t *touch,bool *ending);
 /// 在VCOM门与BSP初始化成功后启动端口；失败降级不启动半初始化硬件。/ Start after VCOM/BSP gates; failures degrade without using partially initialized hardware.
 void pn_device_async_start(pn_device_async_t *port,read_pico_handle_t *hardware,pn_reader_present_fn panel,void (*idle)(uint64_t),void (*off)(void));
 /// 产品worker呈现不可变借用帧并等真实面板回执；不提交阅读位置。/ Product worker lends an immutable frame and waits for actual panel receipt without committing progress.

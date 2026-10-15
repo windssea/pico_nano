@@ -1431,8 +1431,8 @@ static void apply_selection(int selection){
     else if(styles.active){pn_status_t status=pn_style_ui_event(&styles,selection,now_ms(),present,NULL);if(status!=PN_OK && status!=PN_EMPTY && status!=PN_BUSY)ESP_LOGW(TAG,"Style UI: %d",(int)status);}
     else if(selection==12 && reader_active() && bookmarks.mode==PN_BUI_CLOSED && !shelf_mode && !status_page){if(epub.impl)(void)pn_style_ui_open_epub(&styles,&epub,present,NULL);else (void)pn_style_ui_open(&styles,&reader,present,NULL);}
     else if(bookmarks.mode!=PN_BUI_CLOSED){pn_status_t status=pn_bookmark_ui_event(&bookmarks,selection,NULL,now_ms(),present,NULL);if(status!=PN_OK && status!=PN_EMPTY && status!=PN_BUSY)ESP_LOGW(TAG,"Bookmark UI: %d",(int)status);}
-    else if(selection==10){if(epub.impl)(void)pn_bookmark_ui_open_epub(&bookmarks,&epub,present,NULL);else (void)pn_bookmark_ui_open(&bookmarks,&reader,present,NULL);}
-    else if(selection==11){if(epub.impl)(void)pn_epub_app_bookmark_return(&epub,now_ms(),present,NULL);else (void)pn_reader_app_bookmark_return(&reader,now_ms(),present,NULL);}
+    else if(selection==10 && reader_active() && !shelf_mode && !status_page){if(epub.impl)(void)pn_bookmark_ui_open_epub(&bookmarks,&epub,present,NULL);else (void)pn_bookmark_ui_open(&bookmarks,&reader,present,NULL);}
+    else if(selection==11 && reader_active() && !shelf_mode && !status_page){if(epub.impl)(void)pn_epub_app_bookmark_return(&epub,now_ms(),present,NULL);else (void)pn_reader_app_bookmark_return(&reader,now_ms(),present,NULL);}
     else if(shelf_mode && (selection==PN_SHELF_TAB_ALL || selection==PN_SHELF_TAB_RECENT || selection==PN_SHELF_HOME || selection==PN_SHELF_TAB_FAVORITES)){bool want_recent=selection==PN_SHELF_TAB_RECENT,want_fav=selection==PN_SHELF_TAB_FAVORITES;if(home_mode || want_recent!=recent_mode || want_fav!=fav_mode){home_mode=false;recent_mode=want_recent;fav_mode=want_fav;fav_start=0;search_query[0]=0;show_shelf("",false);}}
     else if(shelf_mode && selection==PN_SHELF_CONTINUE){
         // 继续阅读卡直接打开最近一本，不改变当前书架模式。/ The continue card opens the latest book directly without changing the shelf mode.
@@ -1458,6 +1458,16 @@ static bool root_navigation_touch(pn_tap_press_t *press,unsigned count,int x,int
 static void root_navigation_cancel(pn_tap_press_t *press,const pn_device_input_event_t *event){
     bool released=event && event->kind==PN_DASYNC_TOUCH && event->valid && !event->count;int ignored;
     (void)pn_tap_press_feed(press,released?0u:1u,-1,released,&ignored);
+}
+/// 真机UP先补最后坐标，再确认释放；普通空报告不得伪造终点。/ Apply the hardware UP endpoint before release confirmation; ordinary empty reports never invent an endpoint.
+static bool shelf_content_touch(pn_shelf_gesture_t *gesture,unsigned count,int x,int y,bool valid,bool ending,uint64_t at){
+    bool active=shelf_mode && shelf_page && !locked && !actions_mode && !status_page && !reading_menu && !hub_mode && !index_mode && !search_mode && !settings_ui.impl && !transfer.impl && !usb.open;
+    int hit=active?active_hit(x,y):-1,command=-1;bool consumed=false;
+    if(valid && !count && ending && gesture->down && !gesture->empty)
+        consumed=pn_shelf_gesture_feed(gesture,active,!home_mode,1,x,y,true,hit>=0 && hit<PN_CATALOG_PAGE_MAX?hit:-1,at,&command);
+    consumed=pn_shelf_gesture_feed(gesture,active,!home_mode,count,x,y,valid,hit>=0 && hit<PN_CATALOG_PAGE_MAX?hit:-1,at,&command) || consumed;
+    if(command>=0 && (command!=PN_SHELF_NEXT || shelf_page->more) && (command!=PN_SHELF_PREVIOUS || shelf_page->index>0))apply_selection(command);
+    return consumed;
 }
 /// 共用开机图只借一帧内存，推屏后立即归还；不读TF。/ Shared boot art borrows one frame, releases it after presentation, and never reads the SD card.
 static void show_boot_brand(void){
@@ -1579,14 +1589,11 @@ static void device_task(void *arg){
         if(jump_ui.active && !jump_ui.presented && !locked && now-last_ui_retry>=1000){last_ui_retry=now;(void)pn_jump_ui_present(&jump_ui,present,NULL);}
         if(styles.request_fonts && !locked){styles.request_fonts=false;(void)pn_font_ui_open(&fonts,&pool,epub.impl?NULL:&reader,epub.impl?&epub:NULL,PN_SD_MOUNT "/" PN_SD_FONTS,present,NULL);pn_font_ui_return_to(&fonts,pn_style_ui_render,&styles);}
         if(fonts.active && !fonts.presented && !locked && now-last_ui_retry>=1000){last_ui_retry=now;(void)pn_font_ui_present(&fonts,present,NULL);}
-        if(hardware.touch_ready && (!async_port.input_active || (available==PN_OK && queued.kind==PN_DASYNC_TOUCH))){cst836u_touch_t touch={0};esp_err_t read;uint64_t touch_at=now_ms();if(async_port.input_active){touch.count=queued.count;touch.x=queued.x;touch.y=queued.y;read=queued.valid?ESP_OK:ESP_FAIL;touch_at=queued.at;}else read=cst836u_read(hardware.touch,&touch);pn_reader_action_t action;touch_held=read==ESP_OK && touch.count>0;if(touch_held)last_input=now_ms();
+        if(hardware.touch_ready && (!async_port.input_active || (available==PN_OK && queued.kind==PN_DASYNC_TOUCH))){cst836u_touch_t touch={0};esp_err_t read;bool ending=false;uint64_t touch_at=now_ms();if(async_port.input_active){touch.count=queued.count;touch.x=queued.x;touch.y=queued.y;read=queued.valid?ESP_OK:ESP_FAIL;ending=queued.ending;touch_at=queued.at;}else{read=cst836u_read(hardware.touch,&touch);if(read==ESP_OK && pn_device_touch_normalize(&touch,&ending)!=PN_OK)read=ESP_FAIL;}pn_reader_action_t action;touch_held=read==ESP_OK && touch.count>0;if(touch_held)last_input=now_ms();
             if(!async_port.input_active && (read!=ESP_OK || touch.count)){pn_cover_work_abort(&cover_work);pn_epub_app_cache_activity(&epub,now_ms());}
             bool list_consumed=root_navigation_touch(&navigation_press,touch.count,touch.x,touch.y,read==ESP_OK);
             if(list_consumed)shelf_gesture=(pn_shelf_gesture_t){0};
-            else{bool active=shelf_mode && shelf_page && !locked && !actions_mode && !status_page && !reading_menu && !hub_mode && !index_mode && !search_mode && !settings_ui.impl && !transfer.impl && !usb.open;
-                int hit=active?active_hit(touch.x,touch.y):-1,command=-1;
-                list_consumed=pn_shelf_gesture_feed(&shelf_gesture,active,!home_mode,touch.count,touch.x,touch.y,read==ESP_OK,hit>=0 && hit<PN_CATALOG_PAGE_MAX?hit:-1,touch_at,&command);
-                if(command>=0 && (command!=PN_SHELF_NEXT || shelf_page->more) && (command!=PN_SHELF_PREVIOUS || shelf_page->index>0))apply_selection(command);}
+            else list_consumed=shelf_content_touch(&shelf_gesture,touch.count,touch.x,touch.y,read==ESP_OK,ending,touch_at);
             if(list_consumed){pn_reader_input_cancel(&input);tap=(pn_tap_t){0};hold_hit=-1;hold_fired=false;}
 #if defined(CONFIG_PN_UI_FOLLOW) && CONFIG_PN_UI_FOLLOW
             if(!list_consumed && !locked && font_manage.impl){bool was_list_down=pn_font_manage_motion_stats(&font_manage).down;pn_status_t motion;

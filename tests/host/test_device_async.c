@@ -5,6 +5,7 @@
 #include "freertos/task.h"
 #include "pn_input_prefs.h"
 #include "pn_cancel.h"
+#include "pn_shelf_view.h"
 #include <assert.h>
 #include <threads.h>
 #include <string.h>
@@ -16,6 +17,7 @@ typedef struct {void (*run)(void *);void *ctx;thrd_t thread;} task_t;
 static task_t tasks[2];static unsigned task_count,objects;
 static atomic_bool stop,reject,entered,release_panel;
 static atomic_uint count,x,y,touch_reads,off_calls;
+static atomic_bool touch_ending;
 int64_t esp_timer_get_time(void){struct timespec t;timespec_get(&t,TIME_UTC);return (int64_t)t.tv_sec*1000000+t.tv_nsec/1000;}
 static uint64_t ms(void){return (uint64_t)esp_timer_get_time()/1000;}
 void vTaskDelay(unsigned ticks){if(atomic_load(&stop))thrd_exit(0);struct timespec t={.tv_sec=ticks/1000,.tv_nsec=(long)(ticks%1000)*1000000};thrd_sleep(&t,NULL);}
@@ -34,7 +36,9 @@ int xSemaphoreGive(void *ctx){return xQueueSend(ctx,NULL,100);}
 void vQueueDelete(void *ctx){channel_t *c=ctx;mtx_destroy(&c->mutex);free(c);objects--;}
 void vSemaphoreDelete(void *ctx){vQueueDelete(ctx);}
 bool read_pico_pmu_take_key_short(void){return false;}
-esp_err_t cst836u_read(void *ctx,cst836u_touch_t *touch){(void)ctx;atomic_fetch_add(&touch_reads,1);*touch=(cst836u_touch_t){.count=atomic_load(&count),.x=atomic_load(&x),.y=atomic_load(&y)};return ESP_OK;}
+esp_err_t cst836u_read(void *ctx,cst836u_touch_t *touch){(void)ctx;atomic_fetch_add(&touch_reads,1);bool up=atomic_load(&touch_ending);*touch=(cst836u_touch_t){.count=atomic_load(&count),.x=atomic_load(&x),.y=atomic_load(&y)};
+ for(unsigned i=0;i<touch->count && i<CST836U_MAX_POINTS;i++){touch->points[i]=(cst836u_point_t){.id=i,.event=up?1:2,.active=!up,.x=touch->x,.y=touch->y};}
+ touch->touched=touch->count && !up;return ESP_OK;}
 // 触摸INT不可用：输入任务回到10ms轮询；通知替身记录投递。/ Touch INT unavailable: the input task falls back to 10 ms polling; the notification double counts submissions.
 static atomic_uint notified;
 bool pn_device_touch_wake_init(void){return false;}
@@ -65,6 +69,13 @@ static pn_status_t native_scan(void *ctx){native_job_t *job=ctx;assert(job->toke
 static int native_present(void *ctx){native_job_t *job=ctx;job->owner=thrd_current();job->result=pn_device_async_native(job->port,native_scan,job);return 0;}
 static bool cancelled(void *ctx){(void)ctx;return true;}
 int main(void){
+ bool ending=false;cst836u_touch_t raw={.count=1,.x=550,.y=650,.points={{.id=0,.event=1,.x=150,.y=650}}};
+ assert(pn_device_touch_normalize(&raw,&ending)==PN_OK && !raw.count && ending && raw.x==150 && raw.y==650 && !raw.touched);
+ raw=(cst836u_touch_t){.count=2,.points={{.id=0,.event=1,.x=100,.y=200},{.id=1,.event=2,.active=true,.x=400,.y=600}}};
+ assert(pn_device_touch_normalize(&raw,&ending)==PN_OK && raw.count==1 && !ending && raw.x==400 && raw.y==600 && raw.touched);
+ raw=(cst836u_touch_t){.count=0,.points={{.id=0,.event=1,.x=150,.y=650}}};assert(pn_device_touch_normalize(&raw,&ending)==PN_OK && ending && !raw.count);
+ raw=(cst836u_touch_t){.count=0,.points={{0},{.id=1,.event=1,.x=550,.y=650}}};assert(pn_device_touch_normalize(&raw,&ending)==PN_OK && !ending && !raw.count);
+ raw.count=3;assert(pn_device_touch_normalize(&raw,&ending)==PN_INVALID && !ending);
  read_pico_handle_t hw={.touch_ready=true};pn_device_async_t p;atomic_store(&reject,true);pn_device_async_start(&p,&hw,panel,idle,off);assert(!p.input_active && !p.display_active && !objects && !task_count);
  atomic_store(&reject,false);pn_device_async_start(&p,&hw,panel,idle,off);assert(p.input_active && p.display_active && objects==2 && task_count==2 && !p.touch_wake);pn_device_async_bind_product(&p);assert(p.product_task);pn_device_async_view(&p,15,true,0);vTaskDelay(35);
  p.overlap=count_overlap;thrd_t foreground;assert(thrd_create(&foreground,present,&p)==thrd_success);wait_entered();atomic_store(&x,342);atomic_store(&y,500);atomic_store(&count,1);vTaskDelay(35);atomic_store(&count,0);
@@ -72,6 +83,20 @@ int main(void){
  atomic_store(&release_panel,true);thrd_join(foreground,NULL);assert(atomic_load(&overlap_calls)>=1 && atomic_load(&overlap_calls)<=4); // 有工作时继续，空闲后转为阻塞等待 / Continue while work remains, then block
  assert(!pn_device_power_held(PN_POWER_DISPLAY)); // 扫描期间持最高频锁，结束释放。/ The max lock is held during the scan and released afterwards.
  assert(pn_device_async_off(&p) && atomic_load(&off_calls)==1);
+ // 真正输入线程必须把占槽的UP发成两次空样本，并带最后坐标；不依赖SDL人为补释放。
+ // The real input thread must emit two empty samples for a slotted UP, carrying its endpoint without SDL-synthesized releases.
+ pn_device_async_view(&p,17,false,0);vTaskDelay(30);while(pn_device_async_take(&p,&e)!=PN_EMPTY){}
+ atomic_store(&x,550);atomic_store(&y,650);atomic_store(&count,1);vTaskDelay(35);
+ pn_shelf_gesture_t gesture={0};int command=-1;bool pressed=false;
+ while(pn_device_async_take(&p,&e)!=PN_EMPTY)if(e.kind==PN_DASYNC_TOUCH && e.count==1){(void)pn_shelf_gesture_feed(&gesture,true,true,e.count,e.x,e.y,e.valid,0,e.at,&command);pressed=true;}
+ assert(pressed && gesture.down);atomic_store(&x,150);atomic_store(&touch_ending,true);vTaskDelay(35);
+ unsigned up_samples=0;while(pn_device_async_take(&p,&e)!=PN_EMPTY)if(e.kind==PN_DASYNC_TOUCH){
+     assert(!e.count && e.ending && e.x==150 && e.valid);up_samples++;
+     if(gesture.down && !gesture.empty)(void)pn_shelf_gesture_feed(&gesture,true,true,1,e.x,e.y,true,0,e.at,&command);
+     (void)pn_shelf_gesture_feed(&gesture,true,true,e.count,e.x,e.y,e.valid,-1,e.at,&command);
+ }
+ assert(up_samples==2 && command==PN_SHELF_NEXT && !gesture.down);atomic_store(&count,0);atomic_store(&touch_ending,false);vTaskDelay(30);
+ pn_device_async_view(&p,15,true,0);vTaskDelay(30);while(pn_device_async_take(&p,&e)!=PN_EMPTY){}
  // 关闭三键翻页仍保留中键工具，左右键不发阅读动作。/ Disabling key turns retains middle-key tools and suppresses left/right reader keys.
  pn_device_async_view(&p,15,true,PN_INPUT_NO_KEYS);atomic_store(&x,240);atomic_store(&y,1300);atomic_store(&count,1);vTaskDelay(35);atomic_store(&count,0);bool middle=false;end=ms()+1000;
  while(ms()<end && !middle){if(pn_device_async_take(&p,&e)==PN_OK && e.kind==PN_DASYNC_KEY){assert(e.key==PN_KEY_2 && e.key_event==PN_KEY_SHORT);middle=true;}else vTaskDelay(1);}assert(middle);

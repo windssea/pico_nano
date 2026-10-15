@@ -10,6 +10,21 @@
 #include <string.h>
 #include <stdlib.h>
 _Static_assert(sizeof(pn_device_input_event_t)<=PN_ASYNC_PAYLOAD,"Device input payload must stay bounded");
+pn_status_t pn_device_touch_normalize(cst836u_touch_t *touch,bool *ending){
+    if(!touch || !ending)return PN_INVALID;
+    *ending=false;if(touch->count>CST836U_MAX_POINTS)return PN_INVALID;
+    unsigned active=0;int x=touch->x,y=touch->y,up_x=x,up_y=y;bool up=false;
+    for(unsigned i=0;i<CST836U_MAX_POINTS;i++){
+        const cst836u_point_t *point=&touch->points[i];
+        if(i<touch->count && (point->id>1 || point->event>2))return PN_INVALID;
+        if((i<touch->count || (!touch->count && !i)) && point->id<=1 && point->event==1){if(!up){up_x=point->x;up_y=point->y;}up=true;}
+        if(i<touch->count && point->active && point->event!=1){if(!active){x=point->x;y=point->y;}active++;}
+    }
+    // 报告数不是按住数：UP记录可能仍占一个槽；保留快速滑动最后的有效坐标。
+    // Reported records are not held contacts: an UP record may still occupy a slot; retain the final coordinates of a quick swipe.
+    touch->count=active;touch->touched=active!=0;*ending=!active && up;
+    touch->x=*ending?up_x:x;touch->y=*ending?up_y:y;return PN_OK;
+}
 #ifdef ESP_PLATFORM
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -29,7 +44,7 @@ static void input_task(void *ctx){
         uint64_t now=now_ms();uint32_t view=(uint32_t)atomic_load(&p->input.view);
         if(view!=old_view){pn_key_cancel(&keys);pn_reader_input_cancel(&reader);old_view=view;empty=0;}
         if(now-last_power>=100){last_power=now;if(read_pico_pmu_take_key_short()){pn_device_input_event_t e={.kind=PN_DASYNC_POWER,.at=now};send(p,&e,true,true);}}
-        if(p->hardware->touch_ready && view){cst836u_touch_t touch={0};bool valid=cst836u_read(p->hardware->touch,&touch)==ESP_OK;atomic_fetch_add(valid?&p->touch_reads:&p->touch_errors,1);
+        if(p->hardware->touch_ready && view){cst836u_touch_t touch={0};bool ending=false,valid=cst836u_read(p->hardware->touch,&touch)==ESP_OK;if(valid)valid=pn_device_touch_normalize(&touch,&ending)==PN_OK;atomic_fetch_add(valid?&p->touch_reads:&p->touch_errors,1);
             int key=-1;pn_key_event_t ke=pn_key_feed(&keys,touch.count,touch.x,touch.y,valid,now,&key);
             bool body=atomic_load(&p->body);unsigned flags=atomic_load(&p->flags);
             if((view&0xffffu)==18u){
@@ -41,7 +56,7 @@ static void input_task(void *ctx){
             bool post=!valid || (touch.count && (empty || last_x<0 || abs(touch.x-last_x)>=8 || abs(touch.y-last_y)>=8 || now-last_hold>=100)) || (!touch.count && empty<2);
             if(post){last_x=touch.count?touch.x:-1;last_y=touch.count?touch.y:-1;}
             if(touch.count){if(post)last_hold=now;empty=0;}else empty++;
-            if(post && (touch.y<PN_KEY_AREA_TOP || !touch.count)){pn_device_input_event_t e={.kind=PN_DASYNC_TOUCH,.at=now,.count=touch.count,.x=touch.x,.y=touch.y,.valid=valid};send(p,&e,false,false);}
+            if(post && (touch.y<PN_KEY_AREA_TOP || !touch.count)){pn_device_input_event_t e={.kind=PN_DASYNC_TOUCH,.at=now,.count=touch.count,.x=touch.x,.y=touch.y,.valid=valid,.ending=ending};send(p,&e,false,false);}
         }
         // 触摸中、释放确认中或读错时10ms采样；完全空闲时等触摸INT，最多50ms兜底轮询（中断失效时仍可用）。
         // Sample every 10 ms while touching, confirming release or after read errors; when idle wait for touch INT, polling at most every 50 ms as a fallback if the interrupt fails.

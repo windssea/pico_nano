@@ -266,6 +266,13 @@ int main(void){
     list_mode=true;shelf_focus=-1;assert(draw_shelf(PN_REFRESH_GL16)==PN_OK);shelf_focus=0;assert(draw_shelf_focus(-1)==PN_OK);assert(management_font_begin(&face,24)==PN_OK);options=shelf_options();if(favorites_valid)options.favorite_items=favorites;
     assert(pn_shelf_render_with_font_file_ex(shelf_page,&face,&expected,0,false,true,shelf_covers,&pool,&sd_media,NULL,&options)==PN_OK && pn_device_frame_copy(&expected,original,415872)==PN_OK && !memcmp(stub_back,original,415872));management_font_end(&face);
     home_mode=true;list_mode=false;shelf_focus=-1;assert(draw_shelf(PN_REFRESH_GL16)==PN_OK);shown=presents;handle_key(PN_KEY_3,PN_KEY_SHORT);assert(shelf_focus==0 && presents==shown);handle_key(PN_KEY_3,PN_KEY_SHORT);assert(shelf_focus==1 && presents==shown+1);
+    // 四列后两项不被旧阅读书签快捷码10/11截走；不支持格式仍应到达开书提示路由。
+    // The last two four-column slots must bypass legacy reader bookmark codes 10/11 and reach the unsupported-format opening notice.
+    home_mode=false;shelf_page->count=12;
+    for(int slot=10;slot<=11;slot++){
+        shelf_page->items[slot].format=PN_BOOK_PDF;shelf_mode=true;status_page=false;shown=presents;
+        apply_selection(slot);assert(status_page && !shelf_mode && presents>shown && !reader_active());
+    }
     free(original);free(logical);
     pn_free(page_copy);pn_free(shelf_page);pn_free(shelf_covers);pn_free(recent_snapshot);pn_free(favorites);
     pn_font_close(&management_font);pn_w_font_scope_end(&management_scope);
