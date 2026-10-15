@@ -17,6 +17,8 @@ def main():
             result=subprocess.run([str(args.binary.resolve()),str(cache),*map(str,copies)],capture_output=True,text=True,timeout=300)
             (args.output/f'raw-{batch}.log').write_text(result.stdout+result.stderr,encoding='utf8')
             assert result.returncode==0,(batch,result.returncode,result.stdout[-2500:],result.stderr[-2500:])
+            assert 'cache_probe first_bind_opens=0 first_bind_source_stats=0 max_files_per_tick=1' in result.stdout
+            report['cold_bind_cache_reads']=0;report['cold_bind_source_stats']=0;report['max_cache_files_per_tick']=1
             pattern=r'resident case=([^ ]+) legacy_opens=(\d+) legacy_bytes=(\d+) resident_opens=(\d+) resident_bytes=(\d+) exact_frames=1 legacy_stats=(\d+) resident_stats=(\d+)'
             rows=[]
             for name,old_opens,old_bytes,new_opens,new_bytes,old_stats,new_stats in re.findall(pattern,result.stdout):

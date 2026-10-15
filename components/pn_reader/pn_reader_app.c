@@ -24,6 +24,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 typedef struct {
+    pn_w_status_snapshot_t status; ///< 当前帧的状态带，热恢复未变时不重画 / Status band in the current frame; unchanged warm restores never redraw it
     pn_pool_t *pool;
     pn_media_t local_media,state_media;
     pn_media_t *book_media;
@@ -117,7 +118,7 @@ static pn_status_t paint_footer(app_t *a,pn_frame_t *frame,const pn_reader_recei
     unsigned long long basis=progress_basis(a,receipt->anchor);
     if(!a->draft_render){unsigned long long percent=basis/100;
         if(missing)snprintf(right,sizeof right,"%u 缺字 · %llu%%",missing,percent);else snprintf(right,sizeof right,"%llu%%",percent);}
-    return pn_reader_footer_progress(&a->ui,body(a),frame,left,right,a->draft_render?-1:(int)basis);
+    pn_status_t status=pn_reader_footer_progress(&a->ui,body(a),frame,left,right,a->draft_render?-1:(int)basis);if(status==PN_OK)a->status=pn_w_status_snapshot();return status;
 }
 static bool bitmap_key(app_t *a,pn_job_token_t token,pn_reader_anchor_t anchor){
     pn_reader_anchor_t old=a->bitmap_anchor;return a->bitmap_token.session==token.session && a->bitmap_token.generation==token.generation && old.begin==anchor.begin && old.end==anchor.end && old.paragraph==anchor.paragraph && old.next_paragraph==anchor.next_paragraph;
@@ -390,6 +391,8 @@ pn_status_t pn_reader_app_resume(pn_reader_app_t *app,uint64_t now,pn_reader_pre
     app_t *a=app->impl;if(now<a->last_now)return PN_INVALID;
     if(!a->suspended)return PN_BUSY;
     pn_status_t status=a->media_lost?PN_STALE_MEDIA:pn_media_validate(a->book_media,&a->book_lease);if(status!=PN_OK)return status;
+    pn_w_status_snapshot_t current=pn_w_status_snapshot();
+    if(a->ui.impl && (current.battery!=a->status.battery || strcmp(current.clock,a->status.clock)) && pn_reader_status_render(&a->ui,&a->frame)==PN_OK)a->status=current;
     status=present(ctx,&a->frame,PN_REFRESH_GC16);a->last_now=now;
     if(status==PN_OK){a->suspended=false;a->force_full=false;a->refresh.turns=0;}return status;
 }

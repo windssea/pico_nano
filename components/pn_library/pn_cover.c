@@ -288,6 +288,23 @@ static pn_status_t resident_load(pn_shelf_covers_t *covers,const pn_catalog_item
     if(status==PN_OK){covers->state[i]=state;covers->reason[i]=reason;resident_remember(covers,media,item,key,i);if(state==PN_COVER_READY || *covers->display[i].title)*changed=true;}
     return status;
 }
+pn_status_t pn_shelf_covers_cache_step(pn_cover_work_t *work,pn_shelf_covers_t *covers,const pn_catalog_page_t *page,pn_pool_t *pool,pn_media_t *media,const char *directory,bool *changed){
+    if(!work || !covers || !page || page->count>PN_CATALOG_PAGE_MAX || !pool || !media || !changed || (directory && (!*directory || strlen(directory)>=PN_CATALOG_PATH_MAX/2)))return PN_INVALID;
+    *changed=false;if(!directory)return PN_EMPTY;
+    pn_status_t s=pn_cancel_checkpoint();if(s!=PN_OK)return s;
+    for(size_t i=0;i<=PN_COVER_SLOT_LAST;i++){
+        const pn_catalog_item_t *item=slot_item(covers,page,i);
+        if(!item || covers->state[i]!=PN_COVER_PENDING || (work->cache_checked&(1u<<i)))continue;
+        pn_media_lease_t lease;s=pn_media_acquire(media,PN_MEDIA_READ,&lease);if(s!=PN_OK)return s;
+        cover_key_t key;s=cover_key(item,&key);
+        if(s==PN_OK)s=resident_load(covers,item,&key,i,pool,media,&lease,directory,changed);
+        pn_status_t valid=pn_media_validate(media,&lease);(void)pn_media_release(media,&lease);
+        if(valid!=PN_OK)return valid;
+        if(s==PN_CANCELLED || s==PN_STALE_MEDIA)return s;
+        work->cache_checked|=(uint16_t)(1u<<i);return PN_OK;
+    }
+    return PN_EMPTY;
+}
 /* 只用缓存填充PENDING；未命中保持PENDING由step解码。/ Fill PENDING slots from cache only; misses stay PENDING for step to decode. */
 pn_status_t pn_shelf_covers_cached(pn_shelf_covers_t *covers,const pn_catalog_page_t *page,pn_pool_t *pool,pn_media_t *media,const char *cache_dir,bool *changed){
     if(!covers || !page || page->count>PN_CATALOG_PAGE_MAX || !pool || !media || !cache_dir || !*cache_dir || strlen(cache_dir)>=PN_CATALOG_PATH_MAX/2 || !changed)return PN_INVALID;
@@ -318,6 +335,14 @@ pn_status_t pn_shelf_covers_bind(pn_shelf_covers_t *c,const pn_catalog_page_t *p
         duplicate[i]=-1;items[i]=i==PN_COVER_SLOT_LAST?last:i<page->count?&page->items[i]:NULL;
         if(!coverable(items[i]))continue;
         wanted|=(uint16_t)(1u<<i);cover_key_t key;s=pn_cancel_checkpoint();if(s!=PN_OK)break;
+        if(!cache_dir){
+            // 没有可复用像素的书无需在首帧扫描旁图；来源验证随该槽的空闲探测执行。
+            // Books without reusable pixels need no sidecar scan before first paint; validate sources during their idle probe.
+            bool found=false;
+            if(c->resident_media==media && c->resident_epoch==media->epoch && c->resident_media_id==media->media_id && c->resident_valid && pn_identity_bytes((const uint8_t *)items[i]->path,strlen(items[i]->path),&paths[i])==PN_OK)
+                for(size_t other=0;other<=PN_COVER_SLOT_LAST;other++)if((c->resident_valid&(1u<<other)) && c->resident_format[other]==items[i]->format && !memcmp(c->resident_path_hash[other],paths[i].sha256,32)){found=true;break;}
+            if(!found)continue;
+        }
         if(cover_key(items[i],&key)==PN_OK && pn_identity_bytes((const uint8_t *)items[i]->path,strlen(items[i]->path),&paths[i])==PN_OK){encode_key(keys[i],&key);keyed|=(uint16_t)(1u<<i);}
     }
     if(s==PN_OK)s=pn_media_validate(media,&lease);

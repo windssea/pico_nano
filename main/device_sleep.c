@@ -6,6 +6,7 @@
  * 冻结：不支持拿起唤醒；不改变PMU设置。/ Frozen: no pickup wake; PMU settings untouched.
  */
 #include "device_sleep.h"
+#include <stddef.h>
 #include "driver/gpio.h"
 #include "esp_log.h"
 #include "esp_sleep.h"
@@ -16,14 +17,18 @@
 #include "read_pico_pmu.h"
 static const char *TAG="pn_sleep";
 static int64_t now_ms(void){return esp_timer_get_time()/1000;}
-/* 电源键松开且中断线保持高电平150ms才算空闲，最多等800ms。/ Idle means the key is released and the interrupt line stays high for 150 ms, waiting at most 800 ms. */
-static bool wait_key_idle(int timeout_ms){
+/* 电源键有效松开150ms才算空闲；其他共享中断不能阻止解锁。/ Require a valid released key for 150 ms; unrelated shared interrupts cannot prevent unlocking. */
+static bool wait_key_idle(int timeout_ms,bool watch_new,bool *new_key){
     int64_t start=now_ms(),high_from=0;
+    bool released=false;
     while(now_ms()-start<timeout_ms){
-        read_pico_pmu_drain_events();read_pico_clear_ioe_int();
-        bool held=read_pico_pmu_poll()!=ESP_OK || (read_pico_pmu_get()->key_state&0x01)!=0;
-        bool high=gpio_get_level((gpio_num_t)READ_PICO_IOE_INT_GPIO)!=0;
-        if(!held && high){if(!high_from)high_from=now_ms();if(now_ms()-high_from>=150)return true;}
+        if(!watch_new)read_pico_pmu_drain_events();
+        bool held=read_pico_pmu_poll()!=ESP_OK || !read_pico_pmu_get()->status_ok || (read_pico_pmu_get()->key_state&0x01)!=0;
+        bool key=watch_new && read_pico_pmu_take_key_wakeup();
+        if(watch_new && released && (key || held))*new_key=true;
+        if(!held)released=true;
+        read_pico_clear_ioe_int();
+        if(!held){if(!high_from)high_from=now_ms();if(now_ms()-high_from>=150)return true;}
         else high_from=0;
         vTaskDelay(pdMS_TO_TICKS(20));
     }
@@ -39,7 +44,9 @@ static void wake_sources_close(void){
 }
 bool pn_device_sleep_until_key(void){
     media_unchanged=true;
-    if(!wait_key_idle(800)){media_unchanged=false;ESP_LOGW(TAG,"Lock key not idle; staying awake");return false;}
+    bool early_key=false;
+    if(!wait_key_idle(800,true,&early_key)){media_unchanged=false;ESP_LOGW(TAG,"Lock key not idle; staying awake");return false;}
+    if(early_key){ESP_LOGI(TAG,"Wake key received while preparing sleep");return true;}
     gpio_config_t io={.pin_bit_mask=1ULL<<READ_PICO_IOE_INT_GPIO,.mode=GPIO_MODE_INPUT,.pull_up_en=GPIO_PULLUP_ENABLE,.pull_down_en=GPIO_PULLDOWN_DISABLE,.intr_type=GPIO_INTR_DISABLE};
     if(gpio_config(&io)!=ESP_OK){media_unchanged=false;ESP_LOGW(TAG,"IOE_INT config failed; staying awake");return false;}
     if(gpio_wakeup_enable((gpio_num_t)READ_PICO_IOE_INT_GPIO,GPIO_INTR_LOW_LEVEL)!=ESP_OK || esp_sleep_enable_gpio_wakeup()!=ESP_OK){
@@ -47,11 +54,16 @@ bool pn_device_sleep_until_key(void){
     // 不能仅依赖读清式扩展器中断：500ms复核PMU队列，不刷新屏幕，也不访问TF。
     // A read-cleared expander IRQ cannot be the only wake path: check the PMU queue every 500 ms without drawing or accessing TF.
     if(esp_sleep_enable_timer_wakeup(500000)!=ESP_OK){media_unchanged=false;wake_sources_close();ESP_LOGW(TAG,"Wake timer unavailable; staying awake");return false;}
+    unsigned poll_failures=0;
     for(;;){
         // 先读PMU再清扩展器；清中断不代表PMU队列为空，首次入睡前的新按键也有效。
         // Read the PMU before clearing the expander: clearing an IRQ does not empty the PMU queue, and a new key before the first sleep is valid too.
         bool low=gpio_get_level((gpio_num_t)READ_PICO_IOE_INT_GPIO)==0;
-        if(read_pico_pmu_take_key_wakeup())break;
+        bool key=read_pico_pmu_take_key_wakeup();
+        bool valid=read_pico_pmu_poll()==ESP_OK && read_pico_pmu_get()->status_ok;
+        if(key || (valid && (read_pico_pmu_get()->key_state&1u)))break;
+        poll_failures=valid?0:poll_failures+1;
+        if(poll_failures>=3){media_unchanged=false;wake_sources_close();ESP_LOGW(TAG,"PMU status unavailable; returning to awake key polling");return false;}
         if(low)media_unchanged=false;
         read_pico_clear_ioe_int();
         // 入睡前中断线仍为低：先处理积压事件，不带着挂起唤醒入睡。/ Line still low before sleeping: drain pending events instead of sleeping with a pending wake.
@@ -60,12 +72,15 @@ bool pn_device_sleep_until_key(void){
         }
         if(esp_light_sleep_start()!=ESP_OK){media_unchanged=false;wake_sources_close();ESP_LOGW(TAG,"Light sleep failed; staying awake");return false;}
         esp_sleep_wakeup_cause_t cause=esp_sleep_get_wakeup_cause();
-        if(read_pico_pmu_take_key_wakeup())break;
+        key=read_pico_pmu_take_key_wakeup();valid=read_pico_pmu_poll()==ESP_OK && read_pico_pmu_get()->status_ok;
+        if(key || (valid && (read_pico_pmu_get()->key_state&1u)))break;
+        poll_failures=valid?0:poll_failures+1;
+        if(poll_failures>=3){media_unchanged=false;wake_sources_close();ESP_LOGW(TAG,"PMU status unavailable; returning to awake key polling");return false;}
         if(cause!=ESP_SLEEP_WAKEUP_TIMER)media_unchanged=false; // 定时复核不表示换卡，其他非电源唤醒仍禁用热恢复。/ Timer checks do not imply a card change; other non-key wakes still disable warm restore.
     }
     wake_sources_close();
     // KEY_DOWN可先唤醒，松开后才产生KEY_SHORT；完整消费这一按键周期，避免同一次按键再次锁屏。
     // KEY_DOWN can wake before KEY_SHORT arrives on release; consume the whole press so it cannot lock again.
-    if(!wait_key_idle(800)){ESP_LOGW(TAG,"Wake key not idle; staying locked until release");return false;}
+    if(!wait_key_idle(800,false,NULL)){ESP_LOGW(TAG,"Wake key not idle; staying locked until release");return false;}
     ESP_LOGI(TAG,"Woken by power key");return true;
 }

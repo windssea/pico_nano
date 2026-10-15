@@ -85,7 +85,7 @@ static grid_box_t grid_box(size_t i,const pn_shelf_options_t *o){
 }
 /* 拟物只画书挡、搁板与书脊，不贴纹理或分配额外画布。/ Skeuomorphism uses ledges and spines without textures or extra canvases. */
 static void ledge(pn_frame_t *f,int x,int y,int w){
-    pn_frame_rect(f,x,y,w,2,10);pn_frame_rect(f,x+2,y+2,w-4,5,13);pn_frame_rect(f,x+8,y+7,w-16,1,11);
+    pn_frame_rect(f,x,y,w,2,4);pn_frame_rect(f,x+2,y+2,w-4,6,8);pn_frame_rect(f,x+8,y+8,w-16,2,5);
 }
 static void style_cover(pn_frame_t *f,unsigned style,int x,int y,int w,int h){
     if(style==PN_SHELF_WOOD){pn_frame_rect(f,x+4,y+8,2,h-16,10);pn_frame_rect(f,x+7,y+8,1,h-16,13);pn_frame_rect(f,x+w-5,y+8,1,h-16,13);}
@@ -163,6 +163,15 @@ static void frame_cover(pn_frame_t *frame,int x,int y,int w,int h,int radius){
     pn_w_mask_corners(frame,x,y,w,h,radius,PN_UI_PAPER);pn_w_round_stroke(frame,x,y,w,h,radius,2.0f,PN_UI_STROKE);
 }
 static pn_status_t monogram_cover(pn_font_t *font,pn_frame_t *frame,int x,int y,int w,int h,const char *title,unsigned style);
+/// 格式标签独立于封面缓存，真实图片与占位图均放在右下角。/ Format badges are independent of cached pixels and sit bottom-right on real and placeholder covers.
+static pn_status_t format_badge(pn_font_t *font,pn_frame_t *frame,pn_book_format_t format,int x,int y,int w,int h){
+    int original=font->pixels;pn_status_t s=pn_font_size(font,18);int width=0;
+    if(s==PN_OK)s=pn_w_text_width(font,kind(format),&width);
+    int box=width+14;if(box>w-8)box=w-8;
+    pn_w_round_fill(frame,x+w-box-5,y+h-37,box,26,4,PN_UI_PAPER);pn_w_round_stroke(frame,x+w-box-5,y+h-37,box,26,4,1,PN_UI_MUTED);
+    if(s==PN_OK)s=pn_w_text(font,frame,kind(format),x+w-box-4,y+h-17,box-2,PN_ALIGN_CENTER);
+    pn_status_t restored=pn_font_size(font,original);return s==PN_OK?restored:s;
+}
 static pn_status_t cover_or_placeholder(pn_font_t *font,pn_frame_t *frame,const pn_shelf_covers_t *covers,size_t slot,const pn_catalog_item_t *item,int x,int y,int w,int h,bool large,int radius){
     pn_frame_t cover;pn_status_t s=PN_OK;char title[PN_CATALOG_NAME_MAX];title_of(item,covers,slot,title,sizeof title);
     pn_w_round_fill(frame,x+2,y+5,w-4,h,radius,PN_UI_SELECT); // 下沿浅影，先画以免盖住封面 / Under-edge shade, drawn first so it never covers the cover
@@ -170,6 +179,7 @@ static pn_status_t cover_or_placeholder(pn_font_t *font,pn_frame_t *frame,const 
     else s=monogram_cover(font,frame,x,y,w,h,title,PN_SHELF_MINIMAL);
     (void)large;
     if(s==PN_OK)frame_cover(frame,x,y,w,h,radius);
+    if(s==PN_OK)s=format_badge(font,frame,item->format,x,y,w,h);
     return s;
 }
 // 白底黑书签在深浅封面上均清晰；不增加点击入口。/ A black bookmark on white stays visible on any cover; no extra tap target.
@@ -256,7 +266,7 @@ static pn_status_t grid_item(const pn_catalog_item_t *item,const pn_shelf_covers
     grid_box_t b=grid_box(i,o);int x=b.x,y=b.y,w=b.w,h=b.h;char title[PN_CATALOG_NAME_MAX];title_of(item,covers,i,title,sizeof title);
     unsigned style=o->style<PN_SHELF_STYLE_COUNT?o->style:PN_SHELF_DEFAULT;
     int radius=style==PN_SHELF_DEFAULT?10:3;
-    // 占位封面不再重复格式文字；格式详情仍在书籍信息中。/ Placeholder covers no longer repeat format text; exact formats remain in book information.
+    // 占位图与真实图共用独立右下角格式标签。/ Placeholder and real covers share the separate bottom-right format badge.
     pn_frame_t cover;pn_status_t s=PN_OK;
     if(style==PN_SHELF_DEFAULT)pn_w_round_fill(frame,x+2,y+5,w-4,h,radius,PN_UI_SELECT);
     if(pn_shelf_cover_frame(covers,i,&cover))blit_scaled(frame,&cover,x,y,w,h);
@@ -264,7 +274,7 @@ static pn_status_t grid_item(const pn_catalog_item_t *item,const pn_shelf_covers
     frame_cover(frame,x,y,w,h,radius);style_cover(frame,style,x,y,w,h);
     if(s==PN_OK && favorite)favorite_badge(frame,x+10,y+10,28);
     // 书籍操作由长按打开，封面保持完整。/ Long press opens book actions, leaving covers unobstructed.
-    /* 格式与未读文字留给详情，封面仅保留必要标识。/ Format and unread text live in details; covers retain only necessary markers. */
+    if(s==PN_OK)s=format_badge(font,frame,item->format,x,y,w,h);
     bool started=item->identified || item->has_progress;
     if(started && item->progress<=10000){pn_frame_rect(frame,x+8,y+h-9,w-16,4,PN_UI_PAPER);pn_frame_rect(frame,x+8,y+h-9,(int)((unsigned)(w-16)*item->progress/10000u),4,PN_UI_INK);}
     int inset=style==PN_SHELF_WOOD?4:0,cx=x-inset,cw=w+inset*2,baseline=y+h+(inset?46:34);

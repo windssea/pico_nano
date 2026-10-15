@@ -64,11 +64,15 @@ pn_status_t pn_cover_write_step(pn_cover_write_t *write);
 typedef struct {
     pn_cover_write_t writer; ///< 独立持久化状态 / Independent persistence state
     void *extract; ///< 自有解析/解码上下文，不借用UI槽 / Owned parsing/decoding context without borrowed UI slots
+    uint16_t cache_checked; ///< 当前绑定已探测缓存的槽；abort后清零 / Cache-probed slots for the current binding; cleared on abort
 } pn_cover_work_t; ///< 产品owner零初始化且不可移动的后台任务 / Product-owner background task, zero-initialized and never moved while active
 /// 是否有解码或持久化待续；不是完成回执。/ Whether decoding or persistence remains, never a completion receipt.
 bool pn_cover_work_pending(const pn_cover_work_t *);
 /// 放弃全部暂定工作，关源/解码器/租约；不提交像素。/ Discard provisional work, closing sources/decoders/leases without presenting pixels.
 void pn_cover_work_abort(pn_cover_work_t *);
+/// 每轮只探测一个PENDING槽的磁盘缓存，不解析书籍或写盘；EMPTY表示探测结束。重绑前须abort。
+/// Probe disk cache for only one PENDING slot per call without book parsing or writes; EMPTY means probes finished. Abort before rebinding.
+pn_status_t pn_shelf_covers_cache_step(pn_cover_work_t *,pn_shelf_covers_t *,const pn_catalog_page_t *,pn_pool_t *,pn_media_t *,const char *,bool *);
 
 /// 提取单本封面并contain缩放到thumb整帧（白底居中）；EPUB用OPF声明或cover文件名候选，TXT用同名侧车。
 /// Extract one cover and contain-fit it into the whole thumb frame (centered on white); EPUB uses OPF declarations or cover filename candidates, TXT uses same-basename sidecars.
@@ -91,6 +95,8 @@ bool pn_shelf_covers_pending(const pn_shelf_covers_t *,const pn_catalog_page_t *
 pn_status_t pn_shelf_covers_cached(pn_shelf_covers_t *covers,const pn_catalog_page_t *page,pn_pool_t *pool,pn_media_t *media,const char *cache_dir,bool *changed);
 /// owner先abort任务；重绑页/继续阅读，复核来源键后原位重排已验证槽，缺失才读PNCV；可用空槽保留离页像素，预算不扩大。
 /// Abort work first; rebind page/continue-reading, recheck source keys and rearrange verified slots in place, reading PNCV only on misses; spare slots retain off-page pixels within the same budget.
+/// cache_dir为空时只复核可匹配的内存源，无内存结果的来源stat与磁盘读取由cache_step延后。
+/// With NULL cache_dir, validate only matching resident sources; cache_step defers source stats and disk reads for absent results.
 pn_status_t pn_shelf_covers_bind(pn_shelf_covers_t *,const pn_catalog_page_t *,const pn_catalog_item_t *last,pn_pool_t *,pn_media_t *,const char *cache_dir,bool *changed);
 /// 空闲时处理下一条PENDING；单次解码仍同步，changed表示需要重绘。
 /// Process the next PENDING slot while idle; individual decodes remain synchronous, and changed requests a redraw.

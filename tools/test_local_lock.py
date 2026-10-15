@@ -37,9 +37,9 @@ def main():
                 result = subprocess.run([str(args.binary.resolve()), original.suffix[1:].lower(), str(local_book), str(local_font), str(state)],
                                         capture_output=True, text=True, timeout=180)
                 (args.output / f'{index}-{font_index}.log').write_text(result.stdout + result.stderr, encoding='utf-8')
-                match = re.search(r'device_lock kind=(epub|txt) cycles=3 pixels_exact=1 position_exact=1 restore_failure_retry=1 stale_power_drained=1 used=0 live=0 peak=(\d+)', result.stdout)
+                match = re.search(r'device_lock kind=(epub|txt) cycles=16 fresh_power_kept=1 pixels_exact=1 position_exact=1 restore_failure_retry=1 stale_power_drained=1 used=0 live=0 peak=(\d+)', result.stdout)
                 assert result.returncode == 0 and match, (original.name, original_font.name, result.returncode, result.stdout[-1000:], result.stderr[-2500:])
-                report['runs'].append({'book': original.name, 'font': original_font.name, 'cycles': 3, 'exact_pixels_and_position': True,
+                report['runs'].append({'book': original.name, 'font': original_font.name, 'cycles': 16, 'fresh_power_kept': True, 'exact_pixels_and_position': True,
                                        'restore_failure_retry': True, 'stale_power_drained': True, 'closed_pool_zero': True, 'pool_peak': int(match[2])})
                 target.write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
                 print(f'PASS lock {original.name} / {original_font.name} peak={match[2]}', flush=True)

@@ -2,8 +2,11 @@
  * 中文：用户书库驱动真实设备书架/手势/翻页路由，硬件只替换port。
  * English: supplied library drives real device shelf, gesture and paging routes with hardware ports replaced. */
 #define main boot_fixture_main
+#define read_pico_sd_get_info boot_fixture_sd_info
 #include "test_device_boot.c"
 #undef main
+#undef read_pico_sd_get_info
+esp_err_t read_pico_sd_get_info(read_pico_sd_info_t *info){*info=(read_pico_sd_info_t){.mounted=true,.present=true};return ESP_OK;}
 #include "../../main/app_main.c"
 static pn_shelf_gesture_t gesture;
 static pn_tap_press_t navigation;
@@ -41,6 +44,10 @@ int main(int argc,char **argv){
     size_t end=shelf_page->index;quick(false,0);assert(shelf_page->index==end);
     while(shelf_page->index){quick(true,0);assert(++flips<20);}assert(!strcmp(first,shelf_page->items[0].name));
     assert(!reader_active() && !actions_mode);
+    // 主页面连续锁解锁，真实产品路由不得积累暂停或丢失主页。/ Repeated Home locks exercise real product routing without accumulating pauses or losing Home.
+    assert(pn_media_attach(&data_media,1)==PN_OK);data_ready=true;wake_idle=true;home_mode=true;selected_path[0]=0;show_shelf("",false);assert(shelf_mode && !locked && home_mode);
+    for(unsigned cycle=0;cycle<64;cycle++){clock_us+=100000;assert(prepare_lock());lock_and_sleep("按电源键继续");assert(!locked && shelf_mode && home_mode && !reader_active() && !atomic_load(&async_port.paused));}
+    assert(sleep_calls==64);puts("home_lock cycles=64 resumed=1");
     pn_cover_work_abort(&cover_work);management_fonts_close();pn_free(shelf_page);pn_free(shelf_covers);pn_free(recent_snapshot);pn_free(favorites);pn_free(page_copy);
     assert(!pn_media_active(&sd_media) && pool.used==0 && pool.live==0);
     printf("device_shelf columns=%u capacity=%zu raw_up_swipe=1 diagonal_swipe=1 ordinary_swipe=1 edges_cancel=1 position_restored=1 used=0 live=0 peak=%zu\n",columns,capacity,pool.peak);return 0;

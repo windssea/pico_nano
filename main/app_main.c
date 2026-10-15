@@ -181,7 +181,7 @@ static uint64_t last_transfer_draw;
 static pn_cache_owner_t cover_cache_owner; ///< 封面预算owner / Cover-budget owner
 static bool covers_inactive; ///< 非活动且不再借用时可回收 / Reclaim only when inactive and no longer borrowed
 static pn_shelf_covers_t *shelf_covers;
-static bool covers_dirty,touch_held;
+static bool covers_dirty,covers_cache_done,touch_held;
 static size_t cover_bytes(void *ctx){(void)ctx;return pn_alloc_size(shelf_covers);}
 static void cover_drop(void *ctx){(void)ctx;if(covers_inactive){pn_free(shelf_covers);shelf_covers=NULL;covers_dirty=false;}}
 
@@ -706,6 +706,13 @@ static pn_status_t draw_shelf_focus(int before){
 /// 空闲补齐封面后一次GL16重绘，随后再写缓存，不逐本闪屏。/ Fill covers while idle, redraw once with GL16, then persist caches without per-book flashes.
 /// 返回本轮是否做了封面/重画工作。/ Return whether this round did cover or redraw work.
 static bool tick_covers(void){
+    if(!covers_cache_done){
+        bool changed=false;pn_status_t s=pn_shelf_covers_cache_step(&cover_work,shelf_covers,shelf_page,&pool,&sd_media,cover_cache,&changed);
+        covers_dirty|=changed;
+        if(s==PN_EMPTY){covers_cache_done=true;if(covers_dirty && draw_shelf(PN_REFRESH_GL16)==PN_OK)covers_dirty=false;}
+        return s==PN_OK || changed;
+    }
+    if(now_ms()<last_input || now_ms()-last_input<800)return false;
     // 邻页/字形/章节缓存可按需回收，计入封面解码预算；封面缓存本身不计。/ Neighbor/glyph/chapter caches are reclaimable on demand and count toward the cover budget; the cover cache itself does not.
     size_t free_bytes=(pool.limit>pool.used?pool.limit-pool.used:0)+pn_cache_reclaimable(&pool,(1u<<PN_CACHE_BITMAP)|(1u<<PN_CACHE_SOURCE)|(1u<<PN_CACHE_NEIGHBOR)|(1u<<PN_CACHE_GLYPH)|(1u<<PN_CACHE_CHAPTER)),reserve=128u*1024u;bool changed=false;
     pn_status_t status=pn_shelf_covers_work(&cover_work,shelf_covers,shelf_page,&pool,&sd_media,cover_cache,cover_salt,free_bytes>reserve?free_bytes-reserve:1,&changed);
@@ -779,11 +786,11 @@ static void show_shelf(const char *cursor,bool previous){
     }
     if(status==PN_OK && (next->count || !*cursor)){*shelf_page=*next;shelf_focus=-1;}
     pn_free(next);
-    // 换页先用缓存封面，首帧即完整；未命中的留给空闲逐条解码。/ Use cached covers on page change so the first paint is complete; misses decode later per idle tick.
+    // 首帧只复用内存封面；磁盘每轮一张，解码等输入安静后推进。/ First paint reuses RAM covers only; probe one disk cover per tick and decode after input settles.
     covers_inactive=false;
     if(status==PN_OK && !shelf_covers){shelf_covers=pn_cache_alloc(&pool,PN_CACHE_COVER,PN_MEM_UI,sizeof *shelf_covers);if(shelf_covers)pn_shelf_covers_reset(shelf_covers,NULL);}
-    if(status==PN_OK && shelf_covers){bool changed;pn_catalog_item_t last;bool has_last=refresh_last(&last);covers_dirty=false;
-        if(pn_shelf_covers_bind(shelf_covers,shelf_page,has_last?&last:NULL,&pool,&sd_media,cover_cache,&changed)!=PN_OK)pn_shelf_covers_reset(shelf_covers,NULL);}
+    if(status==PN_OK && shelf_covers){bool changed;pn_catalog_item_t last;bool has_last=refresh_last(&last);covers_dirty=false;covers_cache_done=false;
+        if(pn_shelf_covers_bind(shelf_covers,shelf_page,has_last?&last:NULL,&pool,&sd_media,NULL,&changed)!=PN_OK)pn_shelf_covers_reset(shelf_covers,NULL);}
     if(status==PN_OK)status=draw_shelf(panel_known?PN_REFRESH_GL16:PN_REFRESH_GC16);
     if(status!=PN_OK){message("读取书架失败","当前位置仍保留，重试");return;}
     status_page=false;shelf_mode=true;locked=false;
@@ -1007,6 +1014,7 @@ static bool prepare_lock(void){
     ESP_LOGE(TAG,"Warm save barrier failed: %d",(int)status);message("保存失败","当前位置仍保留，稍后重试");return false;
 }
 static void resume_reader(void){
+    clock_tick(now_ms());pn_w_set_battery(battery_percent());
     if(reader_suspended){
         read_pico_sd_info_t card={0};esp_err_t checked=read_pico_sd_get_info(&card);
         if(checked==ESP_OK && card.mounted && pn_device_sleep_media_unchanged()){
@@ -1023,15 +1031,17 @@ static void resume_reader(void){
     locked=false;start_reader();
 }
 static void lock_and_sleep_impl(const char *hint){
+    uint64_t lock_at=now_ms();bool wake_pending=false;
     ESP_LOGI(TAG,"Locking; idle at %llu ms",(unsigned long long)last_input);
     locked=true;show_lock(hint);if(!reader_suspended)pn_wallpaper_mask_close(&lock_mask);
     if(!pn_device_async_off(&async_port)){ESP_LOGW(TAG,"Display off barrier failed; staying awake");return;} // 显示owner断轨后再交出PMU/触摸。/ Display owner drops rails before handing off PMU/touch.
     if(!pn_device_async_pause(&async_port,true)){ESP_LOGW(TAG,"Input pause timed out; staying awake");(void)pn_device_async_pause(&async_port,false);return;}
     // 输入owner已暂停，丢弃锁页呈现期间的旧输入；尤其不能在唤醒后重放电源短按再次锁屏。
     // With the input owner paused, discard input from lock-page presentation, especially power shorts that would relock after waking.
-    pn_device_input_event_t stale;while(pn_device_async_take(&async_port,&stale)!=PN_EMPTY){}
-    if(pn_device_sleep_until_key()){last_input=now_ms();ESP_LOGI(TAG,"Wake key accepted at %llu ms",(unsigned long long)last_input);resume_reader();}
-    (void)pn_device_async_pause(&async_port,false);
+    pn_device_input_event_t stale;while(pn_device_async_take(&async_port,&stale)!=PN_EMPTY)if(stale.kind==PN_DASYNC_POWER && stale.at>lock_at)wake_pending=true;
+    // 锁页扫描期间的新短按仍表示解锁，不与触发锁屏的旧事件一起丢弃。/ A new short press during lock-page scanning still requests unlock, unlike stale lock-trigger events.
+    if(wake_pending || pn_device_sleep_until_key()){last_input=now_ms();ESP_LOGI(TAG,"Wake key accepted at %llu ms",(unsigned long long)last_input);resume_reader();}
+    if(!pn_device_async_pause(&async_port,false))ESP_LOGW(TAG,"Input resume acknowledgement timed out");
 }
 static void lock_and_sleep(const char *hint){
     // 锁屏/断轨/交接是串行屏障，后到输入在唤醒后处理，不半途取消硬件步骤。/ Lock/off/handoff form a serial barrier; handle later input after wake without cancelling hardware steps midway.
@@ -1646,9 +1656,9 @@ static void device_task(void *arg){
         if(available==PN_EMPTY && !locked && !transfer.impl && !usb.open && font_manage.impl && !touch_held && !tap.down && now_ms()>=last_input && now_ms()-last_input>=800){
             pn_status_t sampled=pn_font_manage_samples_idle(&font_manage,now_ms(),present,NULL);background=sampled==PN_BUSY;
             if(sampled==PN_OK || sampled==PN_BUSY){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);}}
-        if(shelf_mode && shelf_covers && shelf_page && !actions_mode && !transfer.impl && !usb.open && !wallpaper_ui.impl && !font_manage.impl && !settings_ui.impl && !locked && !status_page && !reading_menu && !touch_held && now_ms()>=last_input && now_ms()-last_input>=800){
+        if(available==PN_EMPTY && shelf_mode && shelf_covers && shelf_page && !actions_mode && !transfer.impl && !usb.open && !wallpaper_ui.impl && !font_manage.impl && !settings_ui.impl && !locked && !status_page && !reading_menu && !touch_held && !tap.down && now_ms()>=last_input && now_ms()-last_input>=80){
             // 后台确有工作时回到最高频，封面/索引不在降频下变慢。/ Real background work returns to maximum so covers and indexing are not slowed by DFS.
-            bool worked=available==PN_EMPTY && catalog_build_idle()==PN_OK;worked|=tick_covers();background=pn_cover_work_pending(&cover_work) || pn_shelf_covers_pending(shelf_covers,shelf_page);if(worked){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);}}
+            bool worked=now_ms()-last_input>=800 && catalog_build_idle()==PN_OK;worked|=tick_covers();background=pn_cover_work_pending(&cover_work) || pn_shelf_covers_pending(shelf_covers,shelf_page);if(worked){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);}}
 #if defined(CONFIG_PN_UI_FOLLOW) && CONFIG_PN_UI_FOLLOW
         if(!locked && !transfer.impl && !usb.open && font_manage.impl){pn_status_t motion=pn_font_manage_tick(&font_manage,now_ms());pn_list_motion_stats_t moving=pn_font_manage_motion_stats(&font_manage);background|=moving.pending!=0 || moving.coasting;
             if(motion==PN_OK){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);}}

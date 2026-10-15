@@ -11,6 +11,7 @@ def main():
     # 固定设备路径只在一次性容器内创建，绝不映射用户TF。/ Create fixed device paths only in a disposable container, never mapping the user's TF.
     if not pathlib.Path('/.dockerenv').is_file():raise ValueError('Requires a fresh disposable Docker container')
     library=pathlib.Path('/sdcard/piconano/books');assert not library.exists();library.mkdir(parents=True)
+    pathlib.Path('/data/progress').mkdir(parents=True)
     originals=sorted(p for p in (ROOT/'tests/testBook').rglob('*') if p.is_file());assert originals
     assert len({p.name for p in originals})==len(originals)
     identities={p:digest(p) for p in originals}
@@ -22,8 +23,8 @@ def main():
         result=subprocess.run([str(args.binary.resolve()),str(columns)],capture_output=True,text=True,timeout=120)
         (args.output/f'{columns}.log').write_text(result.stdout+result.stderr,encoding='utf8')
         match=re.search(r'device_shelf columns=(\d+) capacity=(\d+) raw_up_swipe=1 diagonal_swipe=1 ordinary_swipe=1 edges_cancel=1 position_restored=1 used=0 live=0 peak=(\d+)',result.stdout)
-        assert result.returncode==0 and match,(columns,result.returncode,result.stdout[-2000:],result.stderr[-2000:])
-        report['runs'].append({'columns':columns,'capacity':int(match[2]),'pool_peak':int(match[3]),'raw_up_swipe':True,'diagonal_swipe':True,'ordinary_swipe':True,'edges_cancel':True,'position_restored':True,'closed_pool_zero':True})
+        assert result.returncode==0 and match and 'home_lock cycles=64 resumed=1' in result.stdout,(columns,result.returncode,result.stdout[-2000:],result.stderr[-2000:])
+        report['runs'].append({'columns':columns,'home_lock_cycles':64,'capacity':int(match[2]),'pool_peak':int(match[3]),'raw_up_swipe':True,'diagonal_swipe':True,'ordinary_swipe':True,'edges_cancel':True,'position_restored':True,'closed_pool_zero':True})
         print('PASS device shelf',report['runs'][-1],flush=True)
     report['originals_unchanged']=all(digest(p)==sha for p,sha in identities.items());assert report['originals_unchanged'];report['passed']=True
     target.write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n',encoding='utf8')

@@ -105,6 +105,9 @@ int main(void){
  while(ms()<end && !middle){if(pn_device_async_take(&p,&e)==PN_OK && e.kind==PN_DASYNC_KEY){assert(e.key==PN_KEY_2 && e.key_event==PN_KEY_SHORT);middle=true;}else vTaskDelay(1);}assert(middle);
  atomic_store(&x,80);atomic_store(&count,1);vTaskDelay(35);atomic_store(&count,0);vTaskDelay(40);while(pn_device_async_take(&p,&e)!=PN_EMPTY)assert(e.kind!=PN_DASYNC_KEY || e.key!=PN_KEY_1);
  assert(pn_device_async_pause(&p,true));unsigned reads=atomic_load(&touch_reads);vTaskDelay(25);assert(atomic_load(&touch_reads)==reads);assert(pn_device_async_pause(&p,false));vTaskDelay(25);assert(atomic_load(&touch_reads)>reads);
+ // 不留恢复间隔地反复交接，旧代次确认不能充当新暂停成功。/ Repeat handoffs without a resume gap; old acknowledgements cannot satisfy a new pause.
+ for(unsigned i=0;i<64;i++){assert(pn_device_async_pause(&p,true));assert(atomic_load(&p.pause_ack)==atomic_load(&p.pause_request));reads=atomic_load(&touch_reads);vTaskDelay(2);assert(atomic_load(&touch_reads)==reads);assert(pn_device_async_pause(&p,false));assert(atomic_load(&p.pause_ack)==atomic_load(&p.pause_request));}
+ pn_device_async_t stale_port={.input_active=true};atomic_init(&stale_port.pause_ack,1);assert(!pn_device_async_pause(&stale_port,true));
  // 开书中的返回键必须保留取消语义，不能在正文/书架恢复后变成翻页或确认。/ Back during opening must retain cancellation semantics after the body/shelf context changes.
  while(pn_device_async_take(&p,&e)!=PN_EMPTY){}
  pn_device_async_view(&p,18,false,0);pn_async_block_controls(&p.input,true);

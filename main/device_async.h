@@ -18,7 +18,8 @@ typedef struct {
     read_pico_handle_t *hardware; ///< 只借用稳定BSP句柄 / Borrow stable BSP handle
     pn_reader_present_fn panel;void *panel_ctx; ///< 仅显示owner调用 / Called only by display owner
     void (*idle)(uint64_t);void (*off)(void); ///< 显示轨owner操作 / Display-rail owner operations
-    atomic_bool paused,pause_ack,body;atomic_uint flags; ///< 输入暂停与阅读快照 / Input pause and reader snapshot
+    atomic_bool paused,body;atomic_uint flags; ///< 输入暂停意图与阅读快照 / Input pause intent and reader snapshot
+    atomic_uint pause_request,pause_ack; ///< 单字包含代次和暂停位，确认必须对应本次请求 / Generation and pause bit in one word; acknowledgement must match this request
     bool input_active,display_active; ///< 已启动端口 / Started ports
     uint32_t revision; ///< 产品worker拥有的管理页呈现代次 / Management presentation revision owned by product worker
     void *display_queue,*display_done;pn_status_t display_result; ///< IDF同步对象 / IDF synchronization objects

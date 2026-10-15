@@ -26,7 +26,7 @@ with tempfile.TemporaryDirectory() as folder:
     cache = root / "covers"
     cover_args = [sys.argv[1], "--library", str(books), "--state-dir", str(root / "cover-state"), "--cover-cache", str(cache)]
     covered = subprocess.run(cover_args,
-        env=dict(os.environ, SDL_VIDEODRIVER="dummy", PN_SIM_LIBRARY_SCRIPT="library,wait:1500,quit"),
+        env=dict(os.environ, SDL_VIDEODRIVER="dummy", PN_SIM_LIBRARY_SCRIPT="library,wait:5000,quit"),
         capture_output=True, text=True, timeout=60)
     assert covered.returncode == 0 and "covers ready=1 status=0" in covered.stdout, (covered.stdout, covered.stderr)
     assert "used=0 live=0" in covered.stdout, covered.stdout

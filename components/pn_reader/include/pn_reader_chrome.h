@@ -28,6 +28,8 @@ typedef enum {
 pn_status_t pn_reader_footer_render(pn_font_t *ui,pn_font_t *fallback,pn_frame_t *frame,const char *left,const char *right);
 /// 同上，另在页脚上沿画进度轨（basis为0–10000，<0则只画细线）。/ Same as above, plus a progress track along the footer top (basis 0–10000; a hairline when negative).
 pn_status_t pn_reader_footer_progress(pn_font_t *ui,pn_font_t *fallback,pn_frame_t *frame,const char *left,const char *right,int basis);
+/// 阅读顶部预留32px内只画时间/电量，不改变正文或分页。/ Draw only time/battery in the reserved top 32 px without changing prose or pagination.
+pn_status_t pn_reader_status_render(pn_font_t *ui,pn_frame_t *frame);
 /// 在frame底部画工具栏（白底覆盖原页面）；unavailable按位标记不可用入口（bit0对应PN_TOOL_TOC，依此类推）。
 /// Draw the toolbar over the bottom of the frame (a white sheet over the page); unavailable marks entries bitwise (bit 0 is PN_TOOL_TOC and so on).
 pn_status_t pn_reader_toolbar_render(pn_font_t *ui,pn_frame_t *frame,unsigned unavailable);

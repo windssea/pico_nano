@@ -7,6 +7,7 @@
  */
 #include "pn_reader_chrome.h"
 #include "pn_brand.h"
+#include <stdio.h>
 #include <string.h>
 #define TOOL_COUNT 6
 #define SHEET_PADDING 32
@@ -17,9 +18,18 @@
 #define ROW_PITCH 120
 static const char *const labels[TOOL_COUNT]={"目录","书签","跳转","排版","刷新","返回"};
 static const pn_icon_t icons[TOOL_COUNT]={PN_ICON_TOC,PN_ICON_BOOKMARK,PN_ICON_PROGRESS,PN_ICON_TYPESET,PN_ICON_REFRESH,PN_ICON_BACK};
+pn_status_t pn_reader_status_render(pn_font_t *ui,pn_frame_t *frame){
+    if(!ui || !ui->impl || !frame || !frame->pixels)return PN_INVALID;
+    pn_w_status_snapshot_t state=pn_w_status_snapshot();char text[32];
+    if(state.battery>=0)snprintf(text,sizeof text,"%s   %d%%",*state.clock?state.clock:"--:--",state.battery);
+    else snprintf(text,sizeof text,"%s   --%%",*state.clock?state.clock:"--:--");
+    int original=ui->pixels;pn_frame_rect(frame,0,0,684,PN_READER_TOP,PN_UI_PAPER);
+    pn_status_t s=pn_font_size(ui,20);if(s==PN_OK)s=pn_w_text_ex(ui,frame,text,410,24,242,PN_ALIGN_RIGHT,PN_UI_MUTED,false);
+    pn_status_t restored=pn_font_size(ui,original);return s==PN_OK?restored:s;
+}
 pn_status_t pn_reader_footer_progress(pn_font_t *ui,pn_font_t *fallback,pn_frame_t *frame,const char *left,const char *right,int basis){
     if(!ui || !ui->impl || !frame || !frame->pixels || !left || !right)return PN_INVALID;
-    int original=ui->pixels;
+    int original=ui->pixels;pn_status_t top=pn_reader_status_render(ui,frame);if(top!=PN_OK)return top;
     // 进度轨：细灰轨、黑色已读段与小圆点；没有进度时退回一条细线。/ Progress track: a thin gray rail, a black read part and a small knob; a plain hairline without progress.
     if(basis>=0 && basis<=10000){
         int track=PN_UI_WIDTH-2*PN_UI_MARGIN,fill=track*basis/10000;
@@ -84,9 +94,9 @@ pn_status_t pn_reader_loading_render(pn_font_t *ui,pn_frame_t *frame,const char 
     pn_status_t status=pn_font_size(ui,28);
     if(status==PN_OK)status=pn_w_text(ui,frame,PN_BRAND_NAME,32,72,620,PN_ALIGN_LEFT);
     if(status==PN_OK)status=pn_font_size(ui,40);
-    if(status==PN_OK)status=pn_w_text(ui,frame,"正在打开书籍",32,500,620,PN_ALIGN_CENTER);
+    if(status==PN_OK)status=pn_w_text(ui,frame,"正在为你打开",32,478,620,PN_ALIGN_CENTER);
     if(status==PN_OK)status=pn_font_size(ui,28);
     if(status==PN_OK)status=pn_w_text(ui,frame,title,32,570,620,PN_ALIGN_CENTER);
-    if(status==PN_OK)status=pn_w_text(ui,frame,"请稍候，请勿重复点击",32,650,620,PN_ALIGN_CENTER);
+    if(status==PN_OK)status=pn_w_text_ex(ui,frame,"整理书页，接续阅读时光",32,650,620,PN_ALIGN_CENTER,PN_UI_MUTED,false);
     pn_status_t restored=pn_font_size(ui,original);return status==PN_OK?restored:status;
 }

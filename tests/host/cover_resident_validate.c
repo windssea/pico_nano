@@ -56,6 +56,18 @@ int main(int argc,char **argv){
     fill(actual,full,&last,&pool,&media,argv[1]);
     uint8_t *x=pn_alloc(&pool,415872),*y=pn_alloc(&pool,415872);assert(x && y);pn_frame_t a,b;assert(pn_frame_bind(&a,x,415872,684,1216) && pn_frame_bind(&b,y,415872,684,1216));
     pn_font_t font={0};pn_text_source_t face=pn_font_builtin_source();assert(pn_font_open(&font,&pool,&face,24)==PN_OK);
+    // 冷绑定零磁盘封面读取，后续每轮最多一个文件，最终像素/元数据保持。/ Cold binding reads no disk covers; later ticks read at most one file with identical final pixels/metadata.
+    memset(actual,0,sizeof *actual);bool probe_changed=false;cache_opens=cache_bytes=source_stats=0;watching=true;
+    assert(pn_shelf_covers_bind(actual,full,&last,&pool,&media,NULL,&probe_changed)==PN_OK && !cache_opens && !cache_bytes && !source_stats);
+    pn_cover_work_t probe={0};unsigned probe_steps=0;pn_status_t probe_status;
+    assert(pn_media_request_usb(&media)==PN_OK && pn_shelf_covers_cache_step(&probe,actual,full,&pool,&media,argv[1],&probe_changed)==PN_BUSY && !probe.cache_checked);assert(pn_media_cancel_usb(&media)==PN_OK);
+    unsigned cancelled_calls=2;pn_cancel_scope_t cancelled_scope;pn_cancel_enter(&cancelled_scope,cancel,&cancelled_calls);
+    assert(pn_shelf_covers_cache_step(&probe,actual,full,&pool,&media,argv[1],&probe_changed)==PN_CANCELLED && !probe.cache_checked);pn_cancel_leave(&cancelled_scope);
+    do{size_t before=cache_opens;probe_status=pn_shelf_covers_cache_step(&probe,actual,full,&pool,&media,argv[1],&probe_changed);assert(cache_opens-before<=1 && !pn_media_active(&media));assert(++probe_steps<=PN_CATALOG_PAGE_MAX+2);}while(probe_status==PN_OK);
+    assert(probe_status==PN_EMPTY);watching=false;pn_cover_work_abort(&probe);assert(!probe.cache_checked);
+    legacy(expected,full,&last,&pool,&media,argv[1]);
+    for(size_t i=0;i<=PN_COVER_SLOT_LAST;i++)if(i<full->count || i==PN_COVER_SLOT_LAST){assert(actual->state[i]==expected->state[i] && !memcmp(&actual->display[i],&expected->display[i],sizeof actual->display[i]));if(actual->state[i]==PN_COVER_READY)assert(!memcmp(actual->pixels[i],expected->pixels[i],PN_COVER_BYTES));}
+    printf("cache_probe first_bind_opens=0 first_bind_source_stats=0 max_files_per_tick=1 steps=%u exact=1\n",probe_steps);
     compare("same",actual,expected,full,&last,&pool,&media,argv[1],&font,&a,&b,true);
     *shown=*full;for(size_t i=0;i<full->count;i++)shown->items[i]=full->items[(i+3)%full->count];
     compare("rotate",actual,expected,shown,&last,&pool,&media,argv[1],&font,&a,&b,true);

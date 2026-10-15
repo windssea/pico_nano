@@ -90,6 +90,7 @@ typedef struct {
     char cover_dir[512]; ///< 显式--cover-cache目录，空则只解码不缓存 / Explicit --cover-cache directory; empty decodes without caching
     uint8_t salt[16]; ///< EPUB XML哈希盐 / EPUB XML hash salt
     bool covers_dirty; ///< 本页有新封面待重绘 / New covers await a redraw for this page
+    bool covers_cache_done; ///< 当前绑定的逐槽磁盘探测完成 / Per-slot disk probes finished for this binding
     pn_wallpaper_ui_t wallpaper; ///< 壁纸设置页 / Wallpaper settings page
     pn_wallpaper_mask_t lock_mask; ///< 锁屏时临时遮罩 / Temporary mask used only while locked
     const char *wallpaper_dir; ///< 原图目录，NULL禁用 / Source directory, NULL disables the page
@@ -298,16 +299,19 @@ static bool covers_last(library_t *s,pn_catalog_item_t *last){
     if(loaded && s->recent->count && pn_catalog_recent_page(s->recent,0,tmp)==PN_OK && tmp->count){*last=tmp->items[0];found=true;}
     pn_free(tmp);return found;
 }
-/* 换页：先复用缓存封面再绘制，其余空闲逐条解码。/ Page change: reuse cached covers before drawing; the rest decode one per idle tick. */
+/* 首帧只复用内存封面，磁盘读取留给可打断的空闲轮次。/ First paint reuses RAM covers; disk reads wait for interruptible idle ticks. */
 static void covers_reset(library_t *s){
     pn_cover_work_abort(&s->cover_work);
     s->shelf_focus_visible=false;
     covers_ensure(s);if(!s->covers)return;
-    bool changed;pn_catalog_item_t last;bool has_last=covers_last(s,&last);s->covers_dirty=false;
-    if(pn_shelf_covers_bind(s->covers,s->page,has_last?&last:NULL,s->pool,&s->media,*s->cover_dir?s->cover_dir:NULL,&changed)!=PN_OK)pn_shelf_covers_reset(s->covers,NULL);
+    bool changed;pn_catalog_item_t last;bool has_last=covers_last(s,&last);s->covers_dirty=false;s->covers_cache_done=false;
+    if(pn_shelf_covers_bind(s->covers,s->page,has_last?&last:NULL,s->pool,&s->media,NULL,&changed)!=PN_OK)pn_shelf_covers_reset(s->covers,NULL);
 }
-static void covers_tick(library_t *s){
+static void covers_tick(library_t *s,bool decode){
     if(!s->covers)return;
+    if(!s->covers_cache_done){bool changed=false;pn_status_t status=pn_shelf_covers_cache_step(&s->cover_work,s->covers,s->page,s->pool,&s->media,*s->cover_dir?s->cover_dir:NULL,&changed);s->covers_dirty|=changed;
+        if(status==PN_EMPTY){s->covers_cache_done=true;if(s->covers_dirty && draw(s)==PN_OK)s->covers_dirty=false;}return;}
+    if(!decode)return;
     bool changed=false;
     // 仅在余量不足时让字形缓存让出，缓存命中不逐屏清空。/ Yield glyph caches only under pressure; cache hits no longer clear them on every screen.
     pn_cache_reclaim(s->pool,128u*1024u+s->pool->cache_reserve);
@@ -731,7 +735,7 @@ static int library_worker(void *ctx){
             (void)pn_toc_ui_tick(&s->toc,now);
             (void)feedback_idle_tick(s,now,s->locked || body || moving.active || s->pointer_down || s->feedback_tap.down || atomic_load(&s->async.mouse)!=0);
             if(!s->locked && body && !s->pointer_down && atomic_load(&s->async.mouse)==0){status=s->epub.impl?pn_epub_app_prefetch(&s->epub):pn_reader_app_prefetch(&s->reader);if(status==PN_OK)printf("neighbor prefetch ready\n");pn_status_t cached=s->epub.impl?pn_epub_app_cache_idle(&s->epub,now):PN_EMPTY;if(cached==PN_OK)printf("semantic cache stored\n");}
-            if(!s->locked && !reading(s) && !s->pointer_down && !s->hub && !s->index && !s->search_open && !s->actions_mode && !s->wallpaper.impl && !s->font_manage.impl && !s->settings.impl){pn_status_t indexed=catalog_build_idle(s);if(indexed==PN_OK)printf("catalog index built\n");covers_tick(s);}
+            if(!s->locked && !reading(s) && !s->pointer_down && !s->hub && !s->index && !s->search_open && !s->actions_mode && !s->wallpaper.impl && !s->font_manage.impl && !s->settings.impl && now>=font_activity && now-font_activity>=80){if(now-font_activity>=800){pn_status_t indexed=catalog_build_idle(s);if(indexed==PN_OK)printf("catalog index built\n");}covers_tick(s,now-font_activity>=800);}
             continue;}
 
         if(!s->locked && management_event(s,&event,now)){cancel_pointer(&input,&tap,true);continue;}

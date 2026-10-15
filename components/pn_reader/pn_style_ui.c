@@ -19,26 +19,20 @@ static pn_status_t preview(pn_style_ui_t *u,uint64_t now,pn_reader_present_fn pr
 static pn_status_t apply(pn_style_ui_t *u,uint64_t now,pn_reader_present_fn present,void *ctx){return u->epub?pn_epub_app_style_apply(u->epub,&u->draft,now,present,ctx):pn_reader_app_style_apply(u->reader,&u->draft,now,present,ctx);}
 static pn_status_t cancel(pn_style_ui_t *u,uint64_t now,pn_reader_present_fn present,void *ctx){return u->epub?pn_epub_app_style_cancel(u->epub,now,present,ctx):pn_reader_app_style_cancel(u->reader,now,present,ctx);}
 #include "pn_widgets.h"
-/* 版式（docs/UI_UX.md第5节）：顶栏、段落预览、字体行、四个步进行、更多入口、三个预设、底部链接。
- * Layout (docs/UI_UX.md section 5): header, paragraph preview, font row, four steppers, a "more" entry, three presets and bottom links. */
-#define HEADER_H 128
+/* 双列草稿面板：全部九项保留在一页，字体与预览独立入口。/ Two-column draft panel: all nine fields on one page, with separate font and preview entries. */
 #define PREVIEW_Y 140
-#define PREVIEW_H 228
-#define MODE_BASE 404
-#define PRESET_Y 416
+#define PREVIEW_H 180
+#define MODE_BASE 360
+#define PRESET_Y 372
 #define PRESET_H 64
-#define FONT_ROW_Y 494
-#define STEP_Y0 576
-#define STEP_PITCH 84
-#define MARGIN_ROW_Y (STEP_Y0+3*STEP_PITCH)
-#define INDENT_ROW_Y (STEP_Y0+4*STEP_PITCH)
-#define MORE_Y (STEP_Y0+5*STEP_PITCH)
+#define FONT_ROW_Y 448
+#define STEP_Y0 548
+#define STEP_PITCH 100
+#define CELL_W 300
+#define CELL_PITCH 320
 #define APPLY_Y 1112
 #define APPLY_H 88
-#define LINKS_Y 1084
-#define BOX_X 300
-#define BOX_W 352
-#define MORE_STEP_Y0 156
+static const unsigned fields[PN_SUI_FIELDS]={0,1,2,5,3,4,6,8,7};
 static const char *const names[PN_SUI_FIELDS]={"字号","行距","段距","首行缩进","字间距","边距","阅读线","上下位置","阅读线深浅"};
 typedef struct {unsigned pixels,line,gap,indent,margin;} preset_t;
 static const preset_t presets[3]={{PN_STYLE_DEFAULT_PIXELS,145,40,2,32},{36,125,20,2,24},{56,160,40,2,32}};
@@ -86,17 +80,15 @@ static void font_name(pn_style_ui_t *u,char *out,size_t cap){
         memmove(out+lead,out,n);memcpy(out,prefix,lead);out[lead+n]=0;
     }
 }
-/* 步进行：左侧名称，右侧圆角框内“- 值 +”。/ Stepper row: name on the left, "- value +" inside a rounded box on the right. */
-static pn_status_t stepper(pn_font_t *font,pn_frame_t *frame,const pn_style_t *draft,unsigned field,int y,bool selected){
+/* 每项占半行，标签在上、减值加在下，触控区不互相重叠。/ Each field uses half a row, with its label above minus/value/plus and disjoint touch targets. */
+static pn_status_t stepper(pn_font_t *font,pn_frame_t *frame,const pn_style_t *draft,unsigned field,int x,int y,bool selected){
     char value[40];field_text(draft,field,value,sizeof value);
-    pn_status_t s=pn_font_size(font,34);
-    if(s==PN_OK)s=pn_w_text(font,frame,names[field],PN_UI_MARGIN,y+52,230,PN_ALIGN_LEFT);
-    pn_w_round_outline(frame,BOX_X,y+8,BOX_W,64,PN_UI_RADIUS,selected?3:2,PN_UI_INK);
-    // 减/加用线条图标，中间值两侧各一条细分隔。/ Minus and plus are line icons with a hairline divider on each side of the value.
-    pn_w_icon(frame,PN_ICON_MINUS,BOX_X+30,y+26,28,PN_UI_INK);pn_w_icon(frame,PN_ICON_PLUS,BOX_X+BOX_W-58,y+26,28,PN_UI_INK);
-    pn_frame_rect(frame,BOX_X+88,y+20,1,40,10);pn_frame_rect(frame,BOX_X+BOX_W-88,y+20,1,40,10);
-    if(s==PN_OK)s=pn_font_size(font,32);
-    if(s==PN_OK)s=pn_w_text(font,frame,value,BOX_X+88,y+52,BOX_W-176,PN_ALIGN_CENTER);
+    pn_w_round_stroke(frame,x,y,CELL_W,92,10,selected?2:1,selected?PN_UI_INK:8);
+    pn_status_t s=pn_font_size(font,22);
+    if(s==PN_OK)s=pn_w_text_ex(font,frame,names[field],x+12,y+28,CELL_W-24,PN_ALIGN_LEFT,PN_UI_MUTED,false);
+    pn_w_icon(frame,PN_ICON_MINUS,x+22,y+54,24,PN_UI_INK);pn_w_icon(frame,PN_ICON_PLUS,x+CELL_W-46,y+54,24,PN_UI_INK);
+    if(s==PN_OK)s=pn_font_size(font,28);
+    if(s==PN_OK)s=pn_w_text(font,frame,value,x+68,y+77,CELL_W-136,PN_ALIGN_CENTER);
     return s;
 }
 /* 用草稿的字号/行距/缩进/字距试排一段，让数值变化立刻可见；正文字体不可用时用UI字体。
@@ -120,50 +112,29 @@ static pn_status_t sample(pn_style_ui_t *u,pn_font_t *ui,pn_frame_t *frame){
     return s==PN_OK?restored:s;
 }
 static pn_status_t paint_main(pn_style_ui_t *u,pn_font_t *font,pn_frame_t *frame){
-    pn_status_t s=sample(u,font,frame);
-    // 排版模式：三段分段控件；手动调过的组合标“自定义”。/ Typesetting modes as a three-way segmented control; hand-tuned combinations are marked "custom".
-    int chosen=selected_preset(&u->draft);
+    pn_status_t s=sample(u,font,frame);int chosen=selected_preset(&u->draft);
     if(s==PN_OK)s=pn_font_size(font,24);
-    if(s==PN_OK)s=pn_w_text_ex(font,frame,"排版模式",PN_UI_MARGIN+8,MODE_BASE,300,PN_ALIGN_LEFT,PN_UI_MUTED,true);
+    if(s==PN_OK)s=pn_w_text_ex(font,frame,"排版模式",32,MODE_BASE,300,PN_ALIGN_LEFT,PN_UI_MUTED,true);
     if(s==PN_OK && chosen<0)s=pn_w_text_ex(font,frame,"自定义",352,MODE_BASE,300,PN_ALIGN_RIGHT,PN_UI_INK,true);
     if(s==PN_OK)s=pn_w_segments(font,frame,preset_names,NULL,3,chosen,PRESET_Y,PRESET_H);
-    // 字体行。/ Font row.
     char name[PN_FONT_NAME_MAX+8];font_name(u,name,sizeof name);
-    if(s==PN_OK)s=pn_font_size(font,32);
-    if(s==PN_OK)s=pn_w_text(font,frame,"字体",PN_UI_MARGIN,FONT_ROW_Y+52,200,PN_ALIGN_LEFT);
-    pn_font_t *body=body_font(u);
-    pn_w_set_fallback(body);
     if(s==PN_OK)s=pn_font_size(font,28);
-    if(s==PN_OK)s=pn_w_text_ex(font,frame,pn_brand_label(name),200,FONT_ROW_Y+52,390,PN_ALIGN_RIGHT,PN_UI_MUTED,false);
-    pn_w_set_fallback(NULL);
-    pn_w_icon(frame,PN_ICON_CHEVRON,PN_UI_WIDTH-PN_UI_MARGIN-28,FONT_ROW_Y+28,28,PN_UI_INK);
-    pn_frame_rect(frame,PN_UI_MARGIN,FONT_ROW_Y+81,620,1,PN_UI_SELECT);
-    // 字号、行距、段距、页边距四个步进行，首行缩进为开关。/ Size, line, gap and margin steppers; the first-line indent is a toggle.
-    static const unsigned rows[4]={0,1,2,5};
-    for(unsigned i=0;i<4 && s==PN_OK;i++){s=stepper(font,frame,&u->draft,rows[i],STEP_Y0+(int)i*STEP_PITCH,u->selected==rows[i]);pn_frame_rect(frame,PN_UI_MARGIN,STEP_Y0+(int)i*STEP_PITCH+81,620,1,PN_UI_SELECT);}
-    if(s==PN_OK)s=pn_font_size(font,32);
-    if(s==PN_OK)s=pn_w_text(font,frame,"首行缩进",PN_UI_MARGIN,INDENT_ROW_Y+52,300,PN_ALIGN_LEFT);
-    pn_w_toggle(frame,PN_UI_WIDTH-PN_UI_MARGIN-64,INDENT_ROW_Y+24,u->draft.indent_em>0);
-    pn_frame_rect(frame,PN_UI_MARGIN,INDENT_ROW_Y+81,620,1,PN_UI_SELECT);
-    // 更多入口与固定“应用”。/ The "more" entry and the fixed Apply button.
-    if(s==PN_OK)s=pn_font_size(font,32);
-    if(s==PN_OK)s=pn_w_text(font,frame,"字间距与阅读线",PN_UI_MARGIN,MORE_Y+52,400,PN_ALIGN_LEFT);
-    pn_w_icon(frame,PN_ICON_CHEVRON,PN_UI_WIDTH-PN_UI_MARGIN-28,MORE_Y+28,28,PN_UI_INK);
-    return s;
-}
-static pn_status_t paint_more(pn_style_ui_t *u,pn_font_t *font,pn_frame_t *frame){
-    pn_status_t s=PN_OK;static const unsigned rows[4]={4,6,8,7};
-    for(unsigned i=0;i<4 && s==PN_OK;i++)s=stepper(font,frame,&u->draft,rows[i],MORE_STEP_Y0+(int)i*STEP_PITCH,u->selected==rows[i]);
+    if(s==PN_OK)s=pn_w_text(font,frame,"字体",32,FONT_ROW_Y+48,140,PN_ALIGN_LEFT);
+    pn_w_set_fallback(body_font(u));
     if(s==PN_OK)s=pn_font_size(font,26);
-    if(s==PN_OK)s=pn_w_text_lines_ex(font,frame,"阅读线跟随文字行，不改变分页。深浅分浅/中/深/黑，上下位置每次移动2像素，默认关闭。清残影仍在系统“刷新与屏幕”调整。",PN_UI_MARGIN,MORE_STEP_Y0+4*STEP_PITCH+40,620,5,38,PN_UI_MUTED,false);
+    if(s==PN_OK)s=pn_w_text_ex(font,frame,pn_brand_label(name),176,FONT_ROW_Y+48,420,PN_ALIGN_RIGHT,PN_UI_MUTED,false);
+    pn_w_set_fallback(NULL);pn_w_icon(frame,PN_ICON_CHEVRON,624,FONT_ROW_Y+25,28,PN_UI_INK);
+    pn_frame_rect(frame,32,FONT_ROW_Y+78,620,1,PN_UI_SELECT);
+    for(unsigned i=0;i<PN_SUI_FIELDS && s==PN_OK;i++)s=stepper(font,frame,&u->draft,fields[i],32+(int)(i%2)*CELL_PITCH,STEP_Y0+(int)(i/2)*STEP_PITCH,u->selected==fields[i]);
+    if(s==PN_OK){s=pn_font_size(font,26);if(s==PN_OK)s=pn_w_button(font,frame,"整页预览",352,STEP_Y0+4*STEP_PITCH,CELL_W,92,0);}
     return s;
 }
 pn_status_t pn_style_ui_render(void *ctx,pn_font_t *font,pn_font_t *metadata,pn_frame_t *frame){
     (void)metadata;pn_style_ui_t *u=ctx;if(!live(u) || !u->active || !font || !font->impl || !frame || !frame->pixels)return PN_INVALID;pn_frame_clear(frame,PN_UI_PAPER);
     int original=font->pixels;
-    pn_status_t s=pn_w_header(font,frame,"< 返回",u->more?"更多排版":"排版设置",NULL);
+    pn_status_t s=pn_w_header(font,frame,"< 返回","排版设置",NULL);
     if(s==PN_OK && !u->more){s=pn_font_size(font,26);if(s==PN_OK)s=pn_w_text_ex(font,frame,"恢复默认",480,100,172,PN_ALIGN_RIGHT,PN_UI_MUTED,false);}
-    if(s==PN_OK)s=u->more?paint_more(u,font,frame):paint_main(u,font,frame);
+    if(s==PN_OK)s=paint_main(u,font,frame);
     // 底部固定的深色“应用”；取消即左上返回，“恢复默认”在右上。/ A fixed dark Apply at the bottom; cancelling is the Back at the top left and Restore defaults sits at the top right.
     if(s==PN_OK)s=pn_font_size(font,32);
     if(s==PN_OK)s=pn_w_button(font,frame,"应用",PN_UI_MARGIN,APPLY_Y,620,APPLY_H,PN_W_SELECTED);
@@ -181,20 +152,20 @@ pn_status_t pn_style_ui_open(pn_style_ui_t *u,pn_reader_app_t *reader,pn_reader_
 pn_status_t pn_style_ui_event(pn_style_ui_t *u,int command,uint64_t now,pn_reader_present_fn present,void *ctx){
     if(!u || !u->active || !live(u))return PN_INVALID;
     if(!u->presented && command!=PN_SUI_RETRY)return PN_BUSY;
-    if(command==PN_SUI_FORM)u->more=u->selected==4 || u->selected>=6;
+    if(command==PN_SUI_FORM)u->more=false;
     if(command==PN_SUI_RETRY || command==PN_SUI_FORM)return pn_style_ui_present(u,present,ctx);
     pn_status_t status=PN_OK;u->notice=NULL;
     if(command==PN_SUI_FONTS){if(u->application_failed){u->notice="请先应用或取消排版";(void)pn_style_ui_present(u,present,ctx);return PN_BUSY;}if(u->did_preview){status=cancel(u,now,present,ctx);if(status!=PN_OK)return status;u->did_preview=false;}u->request_fonts=true;return PN_OK;}
     if(command>=PN_SUI_FIELD && command<PN_SUI_FIELD+PN_SUI_FIELDS*2){
         static const unsigned steps[]={2,5,5,1,5,2,1,2,1},minimum[]={28,100,0,0,0,16,0,0,0},maximum[]={72,220,100,2,50,80,2,16,3};
-        unsigned field=(unsigned)(command-PN_SUI_FIELD)/2;bool up=(command-PN_SUI_FIELD)&1;unsigned v=field_value(&u->draft,field);u->selected=field;u->more=field==4 || field>=6;
+        unsigned field=(unsigned)(command-PN_SUI_FIELD)/2;bool up=(command-PN_SUI_FIELD)&1;unsigned v=field_value(&u->draft,field);u->selected=field;u->more=false;
         // 页边距只有窄/中/宽三档。/ Margins have just three levels: narrow, medium and wide.
         if(field==5){unsigned level=v<=20?0u:v<=32?1u:2u;static const unsigned margins[3]={20,32,48};if(up && level<2)level++;else if(!up && level>0)level--;else status=PN_EMPTY;field_set(&u->draft,5,margins[level]);}
         else{
         if(up && v+steps[field]<=maximum[field])v+=steps[field];else if(!up && v>=minimum[field]+steps[field])v-=steps[field];else status=PN_EMPTY;
         field_set(&u->draft,field,v);}
     }else if(command==PN_SUI_INDENT){u->draft.indent_em=u->draft.indent_em?0:2;u->selected=3;
-    }else if(command==PN_SUI_MORE){u->more=true;u->selected=4;
+    }else if(command==PN_SUI_MORE){u->more=false;u->selected=4;
     }else if(command==PN_SUI_BACK_MAIN){u->more=false;u->selected=0;
     }else if(command==PN_SUI_RESET){u->draft=pn_style_default(PN_STYLE_DEFAULT_PIXELS);
     }else if(command>=PN_SUI_PRESET && command<PN_SUI_PRESET+3){
@@ -210,22 +181,16 @@ pn_status_t pn_style_ui_event(pn_style_ui_t *u,int command,uint64_t now,pn_reade
 int pn_style_ui_hit(const pn_style_ui_t *u,int x,int y){
     if(!u || !u->active || x<0 || x>=684 || y<0 || y>=1216)return -1;
     if(u->preview)return PN_SUI_FORM;
-    if(y<PN_W_HEADER_H){if(pn_w_header_hit(x,y,false)==1)return u->more?PN_SUI_BACK_MAIN:PN_SUI_CANCEL;return !u->more && x>=480 && y>=44?PN_SUI_RESET:-1;}
-    if(y>=APPLY_Y && y<APPLY_Y+APPLY_H)return x>=PN_UI_MARGIN && x<652?PN_SUI_APPLY:-1;
-    if(!u->more && y>=PREVIEW_Y && y<PREVIEW_Y+PREVIEW_H && x>=32 && x<652)return PN_SUI_PREVIEW;
-    static const unsigned main_rows[4]={0,1,2,5},more_rows[4]={4,6,8,7};
-    const unsigned *rows=u->more?more_rows:main_rows;unsigned count=4;int top=u->more?MORE_STEP_Y0:STEP_Y0;
-    for(unsigned i=0;i<count;i++){
-        int row=top+(int)i*STEP_PITCH;
-        if(y>=row && y<row+STEP_PITCH){if(x>=BOX_X && x<BOX_X+110)return PN_SUI_FIELD+(int)rows[i]*2;if(x>=BOX_X+BOX_W-110 && x<BOX_X+BOX_W)return PN_SUI_FIELD+(int)rows[i]*2+1;return -1;}
+    if(y<PN_W_HEADER_H){if(pn_w_header_hit(x,y,false)==1)return PN_SUI_CANCEL;return x>=480 && y>=44?PN_SUI_RESET:-1;}
+    if(y>=APPLY_Y && y<APPLY_Y+APPLY_H)return x>=32 && x<652?PN_SUI_APPLY:-1;
+    if(y>=PREVIEW_Y && y<PREVIEW_Y+PREVIEW_H && x>=32 && x<652)return PN_SUI_PREVIEW;
+    if(y>=FONT_ROW_Y && y<FONT_ROW_Y+80 && x>=32 && x<652)return PN_SUI_FONTS;
+    for(unsigned i=0;i<PN_SUI_FIELDS;i++){
+        int left=32+(int)(i%2)*CELL_PITCH,top=STEP_Y0+(int)(i/2)*STEP_PITCH;
+        if(y>=top+38 && y<top+92){if(x>=left && x<left+68)return PN_SUI_FIELD+(int)fields[i]*2;if(x>=left+CELL_W-68 && x<left+CELL_W)return PN_SUI_FIELD+(int)fields[i]*2+1;}
     }
-    if(!u->more){
-        if(y>=FONT_ROW_Y && y<FONT_ROW_Y+82)return PN_SUI_FONTS;
-        if(y>=INDENT_ROW_Y && y<INDENT_ROW_Y+STEP_PITCH)return PN_SUI_INDENT;
-        if(y>=MORE_Y && y<MORE_Y+STEP_PITCH)return PN_SUI_MORE;
-        {int preset=pn_w_segments_hit(3,PRESET_Y-10,PRESET_H+20,x,y);if(preset>=0)return PN_SUI_PRESET+preset;}
-    }
-    return -1;
+    if(x>=352 && x<652 && y>=STEP_Y0+4*STEP_PITCH && y<STEP_Y0+4*STEP_PITCH+92)return PN_SUI_PREVIEW;
+    int preset=pn_w_segments_hit(3,PRESET_Y,PRESET_H,x,y);return preset>=0?PN_SUI_PRESET+preset:-1;
 }
 void pn_style_ui_close(pn_style_ui_t *u){if(u)memset(u,0,sizeof *u);}
 

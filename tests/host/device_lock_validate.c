@@ -12,11 +12,11 @@
 #undef epd_hl_update_screen_full
 #include "device_async.h"
 static pn_device_async_t *lock_port;
-static bool inject_power;
+static bool inject_power,fresh_power;
 enum EpdDrawError epd_hl_update_screen_full(EpdiyHighlevelState *h,enum EpdDrawMode m,int t){
     enum EpdDrawError result=boot_fixture_full(h,m,t);
     if(inject_power){
-        inject_power=false;pn_device_input_event_t input={.kind=PN_DASYNC_POWER,.at=(uint64_t)clock_us/1000};
+        inject_power=false;pn_device_input_event_t input={.kind=PN_DASYNC_POWER,.at=(uint64_t)clock_us/1000+(fresh_power?1u:0u)};
         pn_async_event_t event={.bytes=sizeof input,.navigation=true,.urgent=true};memcpy(event.payload,&input,sizeof input);
         assert(pn_async_send(&lock_port->input,&event)==PN_OK);
     }
@@ -41,13 +41,13 @@ int main(int argc,char **argv){
     // 内部锁屏存储不可用时走真实默认锁屏，不访问设备目录。/ Use the real default lock fallback when internal wallpaper storage is unavailable, without device paths.
     wake_idle=true;pn_async_init(&async_port.input);lock_port=&async_port;
     pn_status_t status=is_epub?pn_epub_app_open_on_media(&epub,&pool,&sd_media,argv[2],argv[3],argv[4],32,now_ms()):pn_reader_app_open_on_media(&reader,&pool,&sd_media,argv[2],argv[3],argv[4],32,now_ms());
-    assert(status==PN_OK);assert(active_step(PN_APP_OPEN,now_ms())==PN_OK);
+    assert(status==PN_OK);pn_w_set_battery(battery_percent());assert(active_step(PN_APP_OPEN,now_ms())==PN_OK);
     clock_us+=100000;status=active_step(PN_APP_NEXT,now_ms());assert(status==PN_OK || status==PN_EMPTY);
     pn_txt_progress_t text={0};pn_epub_progress_t publication={0};
     assert((is_epub?pn_epub_app_progress(&epub,&publication):pn_reader_app_progress(&reader,&text))==PN_OK);
     void *original=is_epub?epub.impl:reader.impl;uint8_t confirmed[sizeof stub_back];memcpy(confirmed,stub_back,sizeof confirmed);
-    for(unsigned round=0;round<3;round++){
-        clock_us+=100000;assert(prepare_lock() && reader_suspended);inject_power=true;
+    for(unsigned round=0;round<16;round++){
+        clock_us+=100000;assert(prepare_lock() && reader_suspended);inject_power=true;fresh_power=round%2!=0;
         lock_and_sleep("按电源键继续阅读");
         assert(!inject_power && !locked && !reader_suspended && !status_page && !shelf_mode && !atomic_load(&async_port.paused));
         assert((is_epub?epub.impl:reader.impl)==original && !memcmp(confirmed,stub_back,sizeof confirmed));check_position(&text,&publication);
@@ -57,7 +57,7 @@ int main(int argc,char **argv){
     resume_reader();assert(locked && reader_suspended && (is_epub?epub.impl:reader.impl)==original);check_position(&text,&publication);
     panel_fault=false;clock_us+=100000;resume_reader();assert(!locked && !reader_suspended && !memcmp(confirmed,stub_back,sizeof confirmed));check_position(&text,&publication);
     clock_us+=100000;assert(stop_reader());management_fonts_close();pn_free(page_copy);page_copy=NULL;
-    assert(!pn_media_active(&sd_media) && pool.used==0 && pool.live==0 && sleep_calls==3);
-    printf("device_lock kind=%s cycles=3 pixels_exact=1 position_exact=1 restore_failure_retry=1 stale_power_drained=1 used=%zu live=%zu peak=%zu\n",argv[1],pool.used,pool.live,pool.peak);
+    assert(!pn_media_active(&sd_media) && pool.used==0 && pool.live==0 && sleep_calls==8);
+    printf("device_lock kind=%s cycles=16 fresh_power_kept=1 pixels_exact=1 position_exact=1 restore_failure_retry=1 stale_power_drained=1 used=%zu live=%zu peak=%zu\n",argv[1],pool.used,pool.live,pool.peak);
     return 0;
 }

@@ -20,7 +20,7 @@ static void cover_extract_close(pn_cover_work_t *work){
     if(!work)return;
     if(work->extract){cover_extract_t *j=work->extract;work->extract=NULL;(void)cover_extract_sources_close(j);pn_free(j->pixels);(void)pn_media_release(j->media,&j->lease);pn_free(j);}
 }
-void pn_cover_work_abort(pn_cover_work_t *work){if(work){cover_extract_close(work);pn_cover_write_abort(&work->writer);}}
+void pn_cover_work_abort(pn_cover_work_t *work){if(work){cover_extract_close(work);pn_cover_write_abort(&work->writer);work->cache_checked=0;}}
 static pn_status_t cover_extract_begin(pn_cover_work_t *work,pn_pool_t *pool,pn_media_t *media,const pn_media_lease_t *lease,const pn_catalog_item_t *item,
     const cover_key_t *key,bool keyed,const uint8_t salt[16],size_t budget,size_t slot){
     if(budget<=sizeof(cover_extract_t)+2*pn_alloc_overhead())return PN_NO_MEMORY;

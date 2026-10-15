@@ -28,6 +28,7 @@
 #include "esp_random.h"
 #endif
 typedef struct {
+    pn_w_status_snapshot_t status; ///< 当前帧的状态带，热恢复未变时不重画 / Status band in the current frame; unchanged warm restores never redraw it
     pn_page_index_t page_index;uint32_t index_generation;
     pn_pool_t *pool;pn_media_t local,state;pn_media_t *media;pn_media_lease_t book_lease,font_lease,fallback_lease,state_lease;
     pn_text_file_t book_file,font_file,fallback_file;pn_text_source_t font_source;pn_book_id_t book;pn_zip_t zip;pn_epub_t epub;pn_toc_t toc;pn_epub_info_t info;
@@ -210,7 +211,7 @@ static pn_status_t paint_footer(app_t *a,pn_frame_t *frame,unsigned missing,unsi
         if(missing_images)snprintf(right,sizeof right,"图片未显示%s%s",percent[0]?" · ":"",percent);
         else if(missing)snprintf(right,sizeof right,"%u 缺字%s%s",missing,percent[0]?" · ":"",percent);else snprintf(right,sizeof right,"%s",percent);
     }
-    return pn_reader_footer_progress(&a->ui,body(a),frame,left,right,known && !a->draft_render?(int)basis:-1);
+    pn_status_t status=pn_reader_footer_progress(&a->ui,body(a),frame,left,right,known && !a->draft_render?(int)basis:-1);if(status==PN_OK)a->status=pn_w_status_snapshot();return status;
 }
 static bool bitmap_location(const pn_epub_location_t *a,const pn_epub_location_t *b){return !strcmp(a->path,b->path) && a->version==b->version && a->chapter_start==b->chapter_start && a->position.element==b->position.element && a->position.run==b->position.run && a->position.offset==b->position.offset && a->position.kind==b->position.kind;}
 static bool bitmap_key(app_t *a,pn_job_token_t token,const pn_epub_reader_anchor_t *anchor){return a->bitmap_token.session==token.session && a->bitmap_token.generation==token.generation && a->bitmap_anchor.has_next==anchor->has_next && bitmap_location(&a->bitmap_anchor.begin,&anchor->begin) && (!anchor->has_next || bitmap_location(&a->bitmap_anchor.next,&anchor->next));}
@@ -508,6 +509,8 @@ pn_status_t pn_epub_app_resume(pn_epub_app_t *app,uint64_t now,pn_reader_present
     app_t *a=app->impl;if(now<a->last_now)return PN_INVALID;
     if(!a->suspended)return PN_BUSY;
     pn_status_t status=a->lost?PN_STALE_MEDIA:pn_zip_validate(&a->zip);if(status!=PN_OK)return status;
+    pn_w_status_snapshot_t current=pn_w_status_snapshot();
+    if(a->ui.impl && (current.battery!=a->status.battery || strcmp(current.clock,a->status.clock)) && pn_reader_status_render(&a->ui,&a->frame)==PN_OK)a->status=current;
     status=present(ctx,&a->frame,PN_REFRESH_GC16);a->last_now=now;
     if(status==PN_OK){a->suspended=false;a->force_full=false;a->refresh.turns=0;a->semantic_due=now>UINT64_MAX-1500?UINT64_MAX:now+1500;}return status;
 }

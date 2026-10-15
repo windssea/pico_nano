@@ -3,6 +3,7 @@
  * English: regional snapshots retain the original body after display/allocation failure; success presents once. */
 #include "pn_reader_toolbar.h"
 #include "pn_hardware.h"
+#include "pn_widgets.h"
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
@@ -25,6 +26,12 @@ int main(void){
     assert(pn_frame_get(&frame,0,102)==7 && pn_frame_get(&frame,0,103)==4 && pn_frame_get(&frame,0,104)==0 && pn_frame_get(&frame,0,105)==10 && pn_frame_get(&frame,19,104)==15);
     for(unsigned i=0;i<PN_HW_FRAME_BYTES;i++)pixels[i]=copy[i]=(uint8_t)(i*19u);
     pn_font_t font={0};pn_text_source_t source=pn_font_builtin_source();assert(pn_font_open(&font,&pool,&source,34)==PN_OK);
+    // 状态带仅改顶部留白，变化不触碰正文，字体大小复原。/ Status changes only the reserved top band, preserving body pixels and font size.
+    pn_w_set_clock("12:34");pn_w_set_battery(87);assert(pn_reader_status_render(&font,&frame)==PN_OK && font.pixels==34);
+    assert(!memcmp(pixels+PN_READER_TOP*342u,copy+PN_READER_TOP*342u,PN_HW_FRAME_BYTES-PN_READER_TOP*342u));
+    memcpy(copy,pixels,PN_HW_FRAME_BYTES);pn_w_set_clock("12:35");pn_w_set_battery(86);assert(pn_reader_status_render(&font,&frame)==PN_OK);
+    assert(memcmp(pixels,copy,PN_READER_TOP*342u) && !memcmp(pixels+PN_READER_TOP*342u,copy+PN_READER_TOP*342u,PN_HW_FRAME_BYTES-PN_READER_TOP*342u));
+    pn_w_set_clock(NULL);pn_w_set_battery(-1);assert(pn_reader_status_render(&font,&frame)==PN_OK && font.pixels==34);
     // 正文的末行必须完整位于正文更新区；进度圆点不能跨入该区。/ The last text line stays in the body update; the progress knob must not cross into it.
     assert(PN_READER_TOP+PN_READER_HEIGHT<=1152);
     for(int basis=0;basis<=10000;basis+=5000){

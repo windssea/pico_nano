@@ -41,8 +41,10 @@ static void display_task(void *ctx){pn_device_async_t *p=ctx;for(;;){display_t j
 static void send(pn_device_async_t *p,const pn_device_input_event_t *input,bool navigation,bool urgent){atomic_fetch_add(&p->events_sent,1);pn_async_event_t e={.bytes=sizeof *input,.navigation=navigation,.urgent=urgent,.view=atomic_load(&p->input.view)};memcpy(e.payload,input,sizeof *input);(void)pn_async_send(&p->input,&e);
     if(p->product_task)xTaskNotifyGive((TaskHandle_t)p->product_task);}
 static void input_task(void *ctx){
-    pn_device_async_t *p=ctx;pn_key_t keys={0};pn_reader_input_t reader={0};unsigned empty=0;uint64_t last_power=0,last_hold=0;uint32_t old_view=0;int last_x=-1,last_y=-1;
-    for(;;){if(atomic_load(&p->paused)){atomic_store(&p->pause_ack,true);vTaskDelay(pdMS_TO_TICKS(10));continue;}atomic_store(&p->pause_ack,false);
+    pn_device_async_t *p=ctx;pn_key_t keys={0};pn_reader_input_t reader={0};unsigned empty=0,old_pause=0;uint64_t last_power=0,last_hold=0;uint32_t old_view=0;int last_x=-1,last_y=-1;
+    for(;;){unsigned request=atomic_load(&p->pause_request);
+        if(request!=old_pause){pn_key_cancel(&keys);pn_reader_input_cancel(&reader);empty=0;last_x=last_y=-1;old_pause=request;}
+        atomic_store(&p->pause_ack,request);if(request&1u){vTaskDelay(pdMS_TO_TICKS(10));continue;}
         uint64_t now=now_ms();uint32_t view=(uint32_t)atomic_load(&p->input.view);
         if(view!=old_view){pn_key_cancel(&keys);pn_reader_input_cancel(&reader);old_view=view;empty=0;}
         if(now-last_power>=100){last_power=now;if(read_pico_pmu_take_key_short()){pn_device_input_event_t e={.kind=PN_DASYNC_POWER,.at=now};send(p,&e,true,true);}}
@@ -69,7 +71,7 @@ static void input_task(void *ctx){
 }
 #endif
 void pn_device_async_start(pn_device_async_t *p,read_pico_handle_t *hardware,pn_reader_present_fn panel,void (*idle)(uint64_t),void (*off)(void)){
-    memset(p,0,sizeof *p);pn_async_init(&p->input);atomic_init(&p->paused,false);atomic_init(&p->pause_ack,false);atomic_init(&p->body,false);atomic_init(&p->flags,0);p->hardware=hardware;p->panel=panel;p->idle=idle;p->off=off;
+    memset(p,0,sizeof *p);pn_async_init(&p->input);atomic_init(&p->paused,false);atomic_init(&p->pause_request,0);atomic_init(&p->pause_ack,0);atomic_init(&p->body,false);atomic_init(&p->flags,0);p->hardware=hardware;p->panel=panel;p->idle=idle;p->off=off;
 #ifdef ESP_PLATFORM
     p->display_queue=xQueueCreate(1,sizeof(display_t));p->display_done=xSemaphoreCreateBinary();
     TaskHandle_t display_handle=NULL;
@@ -103,10 +105,14 @@ pn_status_t pn_device_async_feedback(pn_device_async_t *p,const pn_feedback_patc
 pn_status_t pn_device_async_native(pn_device_async_t *p,pn_status_t (*native)(void *),void *ctx){if(!native)return PN_INVALID;return submit(p,NULL,PN_REFRESH_GL16,NULL,native,ctx);}
 void pn_device_async_view(pn_device_async_t *p,uint32_t view,bool body,uint8_t flags){atomic_store(&p->flags,flags);atomic_store(&p->body,body);atomic_store(&p->input.view,(view&0xffffu)|(p->revision<<16));}
 pn_status_t pn_device_async_take(pn_device_async_t *p,pn_device_input_event_t *event){pn_async_event_t e;pn_status_t status=pn_async_take(&p->input,&e);if(status==PN_OK){memcpy(event,e.payload,sizeof *event);if((!e.navigation || !e.urgent) && e.view!=atomic_load(&p->input.view))return PN_CANCELLED;}return status;}
-bool pn_device_async_pause(pn_device_async_t *p,bool paused){atomic_store(&p->paused,paused);
+bool pn_device_async_pause(pn_device_async_t *p,bool paused){
+    unsigned request=((atomic_load(&p->pause_request)+2u)&~1u)|(paused?1u:0u);atomic_store(&p->paused,paused);atomic_store(&p->pause_request,request);
 #ifdef ESP_PLATFORM
-    if(paused && p->input_active){uint64_t end=now_ms()+300;while(!atomic_load(&p->pause_ack) && now_ms()<end)vTaskDelay(pdMS_TO_TICKS(5));return atomic_load(&p->pause_ack);}
+    // 旧的true确认不能跨锁屏周期复用；恢复也等输入线程确认，避免下一次暂停读到旧回执。
+    // Never reuse an old true acknowledgement across lock cycles; also acknowledge resume before another pause can begin.
+    if(p->input_active){uint64_t end=now_ms()+300;while(atomic_load(&p->pause_ack)!=request && now_ms()<end)vTaskDelay(pdMS_TO_TICKS(5));return atomic_load(&p->pause_ack)==request;}
 #endif
+    atomic_store(&p->pause_ack,request);
     return true;
 }
 bool pn_device_async_off(pn_device_async_t *p){
