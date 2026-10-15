@@ -36,7 +36,9 @@ int main(void){
     int vcom;assert(read_pico_pmu_vcom_get(&vcom)==ESP_OK);epd_set_vcom((uint16_t)vcom);
     assert(pn_media_attach(&sd_media,1)==PN_OK);
     assert(pn_settings_ui_open(&settings_ui,&pool,NULL,NULL,present,NULL)==PN_OK);
+    assert(root_navigation_hit(80,1150)==PN_SETUI_HOME && root_navigation_hit(100,700)==-1);
     assert(pn_settings_ui_event(&settings_ui,PN_SETUI_REFRESH,present,NULL)==PN_OK && pn_settings_ui_screen(&settings_ui)==2);
+    assert(root_navigation_hit(80,1150)==-1);
     handle_key(PN_KEY_1,PN_KEY_LONG);assert(pn_settings_ui_screen(&settings_ui)==2);
     handle_key(PN_KEY_1,PN_KEY_SHORT);assert(settings_ui.active && pn_settings_ui_screen(&settings_ui)==0);
     focus_rescan();bool found=false;for(size_t i=0;i<focus_nav.count;i++)found|=focus_nav.items[i].code==PN_SETUI_FONTS;assert(found);
@@ -47,6 +49,25 @@ int main(void){
     strcpy(shelf_page->items[0].name,"Original.txt");strcpy(shelf_page->items[0].path,"/original.txt");shelf_page->items[0].format=PN_BOOK_TXT;
     home_mode=false;shelf_mode=true;status_page=false;
     assert(draw_shelf(PN_REFRESH_GL16)==PN_OK);
+    // 固定底栏按下即开设置；跨页持有/滑动/多点/释放均不再次执行。/ Fixed navigation opens Settings on press; holding across pages, movement, multitouch and release never execute again.
+    pn_tap_press_t nav_press={0};unsigned nav_shown=presents;bool nav_data_ready=data_ready,nav_data_available=data_media.available;
+    assert(root_navigation_hit(600,1150)==PN_SHELF_MENU && root_navigation_touch(&nav_press,1,600,1150,true));
+    assert(settings_ui.impl && pn_settings_ui_screen(&settings_ui)==0 && presents>nav_shown);nav_shown=presents;
+    assert(root_navigation_touch(&nav_press,1,80,1150,true) && settings_ui.impl && presents==nav_shown);
+    assert(root_navigation_touch(&nav_press,2,80,1150,true) && presents==nav_shown);
+    pn_device_input_event_t stale_release={.kind=PN_DASYNC_TOUCH,.valid=true,.count=0};
+    root_navigation_cancel(&nav_press,&stale_release);assert(nav_press.claimed);
+    root_navigation_cancel(&nav_press,&stale_release);
+    assert(!nav_press.down && !nav_press.claimed && settings_ui.impl && presents==nav_shown);
+    assert(!root_navigation_touch(&nav_press,1,100,700,true));
+    assert(root_navigation_touch(&nav_press,1,80,1150,true) && presents==nav_shown);
+    assert(root_navigation_touch(&nav_press,0,0,0,true) && root_navigation_touch(&nav_press,0,0,0,true));
+    locked=true;assert(root_navigation_hit(80,1150)==-1);locked=false;
+    time_sync.impl=(void *)1;assert(root_navigation_hit(80,1150)==-1);time_sync.impl=NULL;
+    pn_settings_ui_close(&settings_ui);shelf_mode=true;status_page=false;
+    // 恢复后续传输故障夹具原来的未挂载背景，不弱化产品租约规则。/ Restore the later transfer fault fixture's original unmounted background without weakening product leases.
+    if(!nav_data_available && data_media.available)assert(pn_media_detach(&data_media)==PN_OK);
+    data_ready=nav_data_ready;
     // 同屏重绘复用界面引擎，字形缓存命中增加，无新增TF租约。/ Repaint reuses the UI engine, gains glyph hits and adds no TF lease.
     void *ui_engine=management_font.impl;size_t leases=pn_media_active(&sd_media);uint64_t hits=pool.cache_stats[PN_CACHE_GLYPH].hits;
     assert(ui_engine && management_scope.active && draw_shelf(PN_REFRESH_GL16)==PN_OK && management_font.impl==ui_engine && pn_media_active(&sd_media)==leases && pool.cache_stats[PN_CACHE_GLYPH].hits>hits);

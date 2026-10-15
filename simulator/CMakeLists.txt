@@ -105,6 +105,7 @@ add_test(NAME font_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_D
 add_test(NAME font_picker_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_font_picker_window.py $<TARGET_FILE:pn_sim>)
 add_test(NAME brand_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_brand_window.py $<TARGET_FILE:pn_sim>)
 add_test(NAME management_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_management_window.py $<TARGET_FILE:pn_sim>)
+add_test(NAME root_navigation_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_root_navigation_window.py $<TARGET_FILE:pn_sim>)
 add_test(NAME feedback_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_feedback_window.py $<TARGET_FILE:pn_sim>)
 add_test(NAME feedback_idle_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_feedback_idle_window.py $<TARGET_FILE:pn_sim>)
 add_test(NAME hot_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_hot_window.py $<TARGET_FILE:pn_sim>)

@@ -1317,6 +1317,13 @@ static int active_hit(int x,int y){
     else if(status_page && y>=1070)hit=9;
     return hit;
 }
+/// 只有显示固定底栏的四个一级页允许按下切页；子页、模态和活动传输沿原确认规则。/ Only the four roots with fixed navigation switch on press; subpages, modals and active transfers retain normal confirmation.
+static int root_navigation_hit(int x,int y){
+    if(locked || usb.open || transfer.impl || time_sync.impl || wallpaper_ui.impl || font_manage.impl || reading_menu || fonts.active || toc.active || jump_ui.active || styles.active || bookmarks.mode!=PN_BUI_CLOSED || actions_mode || index_mode || search_mode || toolbar_open)return -1;
+    if(settings_ui.impl){if(pn_settings_ui_screen(&settings_ui)!=0)return -1;}
+    else if(!hub_mode && !(shelf_mode && shelf_page))return -1;
+    return pn_w_navigation_hit(x,y)>=0?active_hit(x,y):-1;
+}
 #if defined(CONFIG_PN_UI_FEEDBACK) && CONFIG_PN_UI_FEEDBACK
 static pn_status_t feedback_read(void *ctx,pn_feedback_box_t box,pn_frame_t *out){(void)ctx;if(!panel_known)return PN_EMPTY;return pn_device_frame_extract(hardware.hl.back_fb,684u*1216u/2u,box,out);}
 static pn_status_t feedback_submit(void *ctx,const pn_feedback_patch_t *patch){(void)ctx;pn_status_t s=pn_device_async_feedback(&async_port,patch);if(s==PN_OK && !patch->settle){if(feedback_was_full)pn_feedback_idle_cover(&feedback_idle,(pn_feedback_box_t){0,0,684,1216});else pn_feedback_idle_note(&feedback_idle,patch->box,now_ms());}return s;}
@@ -1430,6 +1437,20 @@ static void apply_selection(int selection){
     }else if(selection==8){reading_menu=true;refresh_network_name();paint_transfer(true);}
     else if(selection==9){selected_path[0]=0;start_reader();}
 }
+/// 导航消费接触直到释放；只选择首次按下，不为同一次接触追加短反馈扫描。/ Navigation owns contacts through release, selects only the first press and adds no separate press-feedback scan.
+static bool root_navigation_touch(pn_tap_press_t *press,unsigned count,int x,int y,bool valid){
+    int navigation=-1;if(!pn_tap_press_feed(press,count,root_navigation_hit(x,y),valid,&navigation))return false;
+#if defined(CONFIG_PN_UI_FEEDBACK) && CONFIG_PN_UI_FEEDBACK
+    feedback_restore();
+#endif
+    if(navigation>=0){ESP_LOGI(TAG,"Root navigation press hit=%d",navigation);apply_selection(navigation);}
+    return true;
+}
+/// 过期输入只可用有效松手解除所有权；其他过期事件等待重新释放。/ Stale input can end ownership only with a valid release; other stale events wait for release again.
+static void root_navigation_cancel(pn_tap_press_t *press,const pn_device_input_event_t *event){
+    bool released=event && event->kind==PN_DASYNC_TOUCH && event->valid && !event->count;int ignored;
+    (void)pn_tap_press_feed(press,released?0u:1u,-1,released,&ignored);
+}
 /// 共用开机图只借一帧内存，推屏后立即归还；不读TF。/ Shared boot art borrows one frame, releases it after presentation, and never reads the SD card.
 static void show_boot_brand(void){
     uint8_t *pixels=pn_alloc_tagged(&pool,PN_MEM_FRAME,684u*1216u/2u);pn_frame_t frame;
@@ -1472,7 +1493,7 @@ static void device_task(void *arg){
     pn_semantic_file_space_port(semantic_space,NULL);
     (void)pn_catalog_index_init(&catalog_index,&pool,&sd_media,book_directory,PN_SD_MOUNT "/" PN_SD_INDEX_CACHE);
     start_reader();pn_reader_input_t input={0};pn_tap_t tap={0};int hold_hit=-1;uint64_t hold_start=0,hold_last=0;bool hold_fired=false;uint64_t last_card=0,last_key=0,last_ui_retry=0,boot=now_ms();
-    pn_async_scope_t scope;bool scope_active=false;
+    pn_async_scope_t scope;bool scope_active=false;pn_tap_press_t navigation_press={0};
 #define POWER_IDLE_ROUNDS 100u ///< 约1秒，覆盖输入后的邻页预排与字形预热 / About one second, covering neighbor prefetch and glyph warming after input
     unsigned power_idle=0; ///< 连续无输入轮数（每轮约10ms）/ Consecutive rounds without input (about 10 ms each)
     unsigned background_rounds=0; ///< 连续1ms让出的预热轮数 / Consecutive warming rounds using 1 ms yields
@@ -1499,7 +1520,9 @@ static void device_task(void *arg){
             bool keep_cover=available==PN_OK && queued.kind==PN_DASYNC_KEY && shelf_mode && !focus_page() && !actions_mode && !locked && !status_page && !reading_menu && pool.used<=pool.limit && pool.limit-pool.used>=512u*1024u;
             if(keep_cover)pn_cover_write_abort(&cover_work.writer);else pn_cover_work_abort(&cover_work);
             pn_epub_app_cache_activity(&epub,now_ms());}
-        if(available==PN_CANCELLED){pn_reader_input_cancel(&input);pn_key_cancel(&keys);int ignored;(void)pn_tap_feed(&tap,1,-1,false,&ignored);hold_hit=-1;touch_held=false;
+        if(available==PN_CANCELLED){pn_reader_input_cancel(&input);pn_key_cancel(&keys);int ignored;(void)pn_tap_feed(&tap,1,-1,false,&ignored);
+            // 旧页有效松手只解除输入所有权，不把旧坐标交给新页面。/ Valid releases from an old view only end input ownership; never route old coordinates into the new page.
+            root_navigation_cancel(&navigation_press,&queued);hold_hit=-1;touch_held=false;
 #if defined(CONFIG_PN_UI_FOLLOW) && CONFIG_PN_UI_FOLLOW
             pn_status_t motion;(void)pn_font_manage_pointer(&font_manage,0,0,0,false,now,present,NULL,&motion);
             (void)pn_toc_ui_pointer(&toc,0,0,0,false,now,present,NULL,&motion);
@@ -1549,9 +1572,10 @@ static void device_task(void *arg){
         if(fonts.active && !fonts.presented && !locked && now-last_ui_retry>=1000){last_ui_retry=now;(void)pn_font_ui_present(&fonts,present,NULL);}
         if(hardware.touch_ready && (!async_port.input_active || (available==PN_OK && queued.kind==PN_DASYNC_TOUCH))){cst836u_touch_t touch={0};esp_err_t read;uint64_t touch_at=now_ms();if(async_port.input_active){touch.count=queued.count;touch.x=queued.x;touch.y=queued.y;read=queued.valid?ESP_OK:ESP_FAIL;touch_at=queued.at;}else read=cst836u_read(hardware.touch,&touch);pn_reader_action_t action;touch_held=read==ESP_OK && touch.count>0;if(touch_held)last_input=now_ms();
             if(!async_port.input_active && (read!=ESP_OK || touch.count)){pn_cover_work_abort(&cover_work);pn_epub_app_cache_activity(&epub,now_ms());}
-            bool list_consumed=false;
+            bool list_consumed=root_navigation_touch(&navigation_press,touch.count,touch.x,touch.y,read==ESP_OK);
+            if(list_consumed){pn_reader_input_cancel(&input);tap=(pn_tap_t){0};hold_hit=-1;hold_fired=false;}
 #if defined(CONFIG_PN_UI_FOLLOW) && CONFIG_PN_UI_FOLLOW
-            if(!locked && font_manage.impl){bool was_list_down=pn_font_manage_motion_stats(&font_manage).down;pn_status_t motion;
+            if(!list_consumed && !locked && font_manage.impl){bool was_list_down=pn_font_manage_motion_stats(&font_manage).down;pn_status_t motion;
                 list_consumed=pn_font_manage_pointer(&font_manage,touch.count,touch.x,touch.y,read==ESP_OK,touch_at,present,NULL,&motion);
                 if(list_consumed){pn_reader_input_cancel(&input);tap=(pn_tap_t){0};hold_hit=-1;hold_fired=false;
 #if defined(CONFIG_PN_UI_FEEDBACK) && CONFIG_PN_UI_FEEDBACK
@@ -1562,7 +1586,7 @@ static void device_task(void *arg){
 #endif
                     if(motion!=PN_OK && motion!=PN_EMPTY && motion!=PN_CANCELLED && motion!=PN_BUSY)ESP_LOGW(TAG,"Font list input status=%d",(int)motion);
                 }}
-            else if(!locked && toc.active){bool was_list_down=pn_toc_ui_motion_stats(&toc).down;pn_status_t motion;
+            else if(!list_consumed && !locked && toc.active){bool was_list_down=pn_toc_ui_motion_stats(&toc).down;pn_status_t motion;
                 list_consumed=pn_toc_ui_pointer(&toc,touch.count,touch.x,touch.y,read==ESP_OK,touch_at,present,NULL,&motion);
                 if(list_consumed){pn_reader_input_cancel(&input);tap=(pn_tap_t){0};hold_hit=-1;hold_fired=false;
 #if defined(CONFIG_PN_UI_FEEDBACK) && CONFIG_PN_UI_FEEDBACK

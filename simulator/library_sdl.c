@@ -496,6 +496,13 @@ static int management_hit(void *ctx,int x,int y){
     if(s->toolbar)return pn_reader_toolbar_hit(x,y,toolbar_unavailable(s));
     return -1;
 }
+/// 只把一级页真实底栏交给按下路由，内容区、子页与模态保留原点击语义。/ Route only real root navigation on press; content, subpages and modals retain their click semantics.
+static int root_navigation_hit(library_t *s,int x,int y){
+    if(s->locked || s->fonts.active || s->toc.active || s->jumpui.active || s->styles.active || s->bookmarks.mode!=PN_BUI_CLOSED || s->actions_mode || s->font_manage.impl || s->wallpaper.impl || s->search_open || s->index || s->toolbar || pn_w_navigation_hit(x,y)<0)return -1;
+    if(s->settings.impl)return pn_settings_ui_screen(&s->settings)==0?pn_settings_ui_hit(&s->settings,x,y):-1;
+    if(s->hub){pn_transfer_hub_info_t info=hub_info(s);return pn_transfer_hub_hit(&info,x,y);}
+    return reading(s)?-1:shelf_hit(s,x,y);
+}
 /// 从真实显示端口的已确认像素取区域，UI对象关闭后局部原图仍自有。/ Read confirmed port pixels; local originals remain owned after UI closure.
 static pn_status_t feedback_read(void *ctx,pn_feedback_box_t b,pn_frame_t *out){
     library_t *s=ctx;if(!s->feedback_known)return PN_EMPTY;
@@ -661,7 +668,7 @@ static int library_worker(void *ctx){
     (void)pn_settings_load_shelf(&s->state_media,s->state_dir,&s->shelf_prefs);
     s->home=true;status=page(s,false,true);if(status!=PN_OK)goto cleanup;
     if(pn_settings_load_flags(&s->state_media,s->state_dir,&s->input_flags)!=PN_OK)s->input_flags=0;
-    result=0;bool running=true;pn_tap_t tap={0};pn_reader_input_t input={0};uint64_t font_activity=SDL_GetTicks64();
+    result=0;bool running=true;pn_tap_t tap={0};pn_tap_press_t navigation_press={0};pn_reader_input_t input={0};uint64_t font_activity=SDL_GetTicks64();
     while(running){
         if(s->feedback_release){feedback_restore(s);s->feedback_release=false;}
         {static time_t last;const char *fixed=getenv("PN_SIM_CLOCK");time_t t=time(NULL);if(fixed)pn_w_set_clock(fixed);else if(t!=last){last=t;struct tm local;char text[8];if(localtime_r(&t,&local) && strftime(text,sizeof text,"%H:%M",&local))pn_w_set_clock(text);}} // 本机时钟；固定值仅用于可复跑测试 / Host clock; a fixed value is only for reproducible tests
@@ -675,6 +682,23 @@ static int library_worker(void *ctx){
         if(got){bool cover_focus=(view%32u==16u || view%32u==17u) && event.type==SDL_KEYDOWN && (event.key.keysym.sym==SDLK_UP || event.key.keysym.sym==SDLK_DOWN) && s->pool->used<=s->pool->limit && s->pool->limit-s->pool->used>=512u*1024u;
             if(cover_focus)pn_cover_write_abort(&s->cover_work.writer);else pn_cover_work_abort(&s->cover_work);pn_feedback_idle_activity(&s->feedback_idle,now);}
         if(got && event.type==SDL_WINDOWEVENT && event.window.event==SDL_WINDOWEVENT_FOCUS_LOST){s->pointer_down=false;s->toc_pointer=false;s->font_pointer=false;cancel_pointer(&input,&tap,true);}
+        int navigation=-1;bool navigation_consumed=false,navigation_selected=false;
+        if(got && event.type==SDL_WINDOWEVENT && event.window.event==SDL_WINDOWEVENT_FOCUS_LOST){
+            navigation_consumed=pn_tap_press_feed(&navigation_press,1,-1,false,&navigation);
+            if(s->async.discarded_release || !(atomic_load(&s->async.mouse)&SDL_BUTTON_LMASK)){
+                if(s->async.discarded_release && navigation_press.claimed)printf("navigation stale release consumed\n");
+                (void)pn_tap_press_feed(&navigation_press,0,-1,true,&navigation);(void)pn_tap_press_feed(&navigation_press,0,-1,true,&navigation);}}
+        else if(got && ((event.type==SDL_MOUSEMOTION && (event.motion.state&SDL_BUTTON_LMASK)) || ((event.type==SDL_MOUSEBUTTONDOWN || event.type==SDL_MOUSEBUTTONUP) && event.button.button==SDL_BUTTON_LEFT))){
+            bool motion=event.type==SDL_MOUSEMOTION,up=event.type==SDL_MOUSEBUTTONUP;int x=motion?event.motion.x:event.button.x,y=motion?event.motion.y:event.button.y;
+            navigation_consumed=pn_tap_press_feed(&navigation_press,up?0u:1u,root_navigation_hit(s,x,y),true,&navigation);
+            if(up)navigation_consumed=pn_tap_press_feed(&navigation_press,0,-1,true,&navigation) || navigation_consumed;
+            if(navigation>=0){
+                // 已确认的导航沿原松手分支执行一次；真实松手仍由独立所有权消费。/ Execute confirmed navigation once through its existing release route; separate ownership consumes the real release.
+                feedback_restore(s);s->feedback_tap=(pn_tap_t){0};tap=(pn_tap_t){0};pn_reader_input_cancel(&input);s->pointer_down=true;
+                event.type=SDL_MOUSEBUTTONUP;event.button.type=SDL_MOUSEBUTTONUP;navigation_selected=true;printf("navigation press hit=%d\n",navigation);}}
+        else if(!got && !(atomic_load(&s->async.mouse)&SDL_BUTTON_LMASK)){
+            (void)pn_tap_press_feed(&navigation_press,0,-1,true,&navigation);(void)pn_tap_press_feed(&navigation_press,0,-1,true,&navigation);}
+        if(navigation_consumed && !navigation_selected){feedback_restore(s);s->feedback_tap=(pn_tap_t){0};s->pointer_down=false;tap=(pn_tap_t){0};pn_reader_input_cancel(&input);continue;}
         if(got && s->follow_enabled && (s->font_manage.impl || s->toc.active) && (((event.type==SDL_MOUSEBUTTONDOWN || event.type==SDL_MOUSEBUTTONUP) && event.button.button==SDL_BUTTON_LEFT) || (event.type==SDL_MOUSEMOTION && (event.motion.state&SDL_BUTTON_LMASK)) || (event.type==SDL_WINDOWEVENT && event.window.event==SDL_WINDOWEVENT_FOCUS_LOST))){
             unsigned count=event.type==SDL_MOUSEBUTTONUP || event.type==SDL_WINDOWEVENT?0u:1u;int px=event.type==SDL_MOUSEMOTION?event.motion.x:event.button.x,py=event.type==SDL_MOUSEMOTION?event.motion.y:event.button.y;
             bool consumed=s->toc.active?pn_toc_ui_pointer(&s->toc,count,px,py,event.type!=SDL_WINDOWEVENT,now,present,s,&status):pn_font_manage_pointer(&s->font_manage,count,px,py,event.type!=SDL_WINDOWEVENT,now,present,s,&status);
@@ -685,7 +709,7 @@ static int library_worker(void *ctx){
                 cancel_pointer(&input,&tap,true);if(s->toc.active)(void)pn_toc_ui_tick(&s->toc,now);else (void)pn_font_manage_tick(&s->font_manage,now);continue;
             }
         }
-        if(got && !feedback_event(s,&event))continue;
+        if(got && !navigation_selected && !feedback_event(s,&event))continue;
 
         if(reading(s)){status=s->epub.impl?pn_epub_app_tick(&s->epub,now):pn_reader_app_tick(&s->reader,now);if(status!=PN_OK && status!=PN_BUSY)pn_sdl_async_title(&s->async,PN_BRAND_NAME " - 保存失败，关闭前请重试");}
         if(s->bookmarks.mode!=PN_BUI_CLOSED && !s->bookmarks.presented && now-s->ui_retry>=1000){s->ui_retry=now;status=pn_bookmark_ui_present(&s->bookmarks,present,s);}

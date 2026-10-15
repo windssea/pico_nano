@@ -52,6 +52,7 @@ int pn_sdl_async_run(pn_sdl_async_t *p,int (*worker)(void *),void *ctx){
     SDL_WaitThread(p->worker,NULL);p->worker=NULL;return p->result;
 }
 bool pn_sdl_async_wait(pn_sdl_async_t *p,SDL_Event *event,unsigned timeout,uint32_t view){
+    p->discarded_release=false;
     if(p->scope_active){pn_async_end(&p->scope);p->scope_active=false;}
     SDL_LockMutex(p->mutex);if(p->received.type && !p->ack){p->ack=true;p->ack_event=p->received;p->received=(SDL_Event){0};}SDL_UnlockMutex(p->mutex);
     p->context=view%32u;view=(view&0xffffu)|(p->revision<<16);
@@ -60,7 +61,7 @@ bool pn_sdl_async_wait(pn_sdl_async_t *p,SDL_Event *event,unsigned timeout,uint3
     for(;;){status=pn_async_take(&p->input,&item);if(status==PN_OK){
             SDL_Event candidate;memcpy(&candidate,item.payload,sizeof candidate);
             if(scripted(&candidate)){SDL_LockMutex(p->mutex);p->received=candidate;SDL_UnlockMutex(p->mutex);}
-            if((!item.navigation || !item.urgent) && item.view!=view){*event=(SDL_Event){.type=SDL_WINDOWEVENT};event->window.event=SDL_WINDOWEVENT_FOCUS_LOST;status=PN_CANCELLED;break;}
+            if((!item.navigation || !item.urgent) && item.view!=view){p->discarded_release=candidate.type==SDL_MOUSEBUTTONUP && candidate.button.button==SDL_BUTTON_LEFT;*event=(SDL_Event){.type=SDL_WINDOWEVENT};event->window.event=SDL_WINDOWEVENT_FOCUS_LOST;status=PN_CANCELLED;break;}
             *event=candidate;break;
         }
         if(status==PN_CANCELLED){*event=(SDL_Event){.type=SDL_WINDOWEVENT};event->window.event=SDL_WINDOWEVENT_FOCUS_LOST;break;}

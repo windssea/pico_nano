@@ -18,6 +18,7 @@ static inline void script_queue(sim_script_t *script){
     while(script->next){char *part=script->next,*comma=strchr(part,',');if(comma){*comma=0;script->next=comma+1;}else script->next=NULL;
         SDL_Event event={0};event.type=SDL_KEYDOWN;event.key.windowID=UINT32_MAX;unsigned wait,burst;
         // 开发竞争注入绕过逐事件回执，用于验证忙碌窗口和合并，不用于文本输入。/ Development race injection bypasses serial acknowledgments to test busy windows/coalescing, never text input.
+        if(sscanf(part,"race-nav:%u:%d:%d",&wait,&script->x,&script->y)==3 && wait<=5000 && script->x>=0 && script->x<684 && script->y>=0 && script->y<1216){event.type=SDL_MOUSEBUTTONDOWN;event.button.windowID=UINT32_MAX;event.button.button=SDL_BUTTON_LEFT;event.button.x=script->x;event.button.y=script->y;script->future=event;script->future.type=SDL_MOUSEBUTTONUP;script->future.button.type=SDL_MOUSEBUTTONUP;script->future_at=SDL_GetTicks64()+wait;script->pointer=2;script_expect(script,&event);script->pending=SDL_PushEvent(&event)==1;return;}
         if(sscanf(part,"burst:%u:next",&burst)==1 && burst>0 && burst<=100){event.key.keysym.sym=SDLK_RIGHT;script_expect(script,&event);for(unsigned i=0;i<burst;i++)(void)SDL_PushEvent(&event);script->pending=true;return;}
         if(sscanf(part,"race-next-home:%u",&wait)==1 && wait<=5000){event.key.keysym.sym=SDLK_RIGHT;script->future=event;script->future.key.keysym.sym=SDLK_h;script->future_at=SDL_GetTicks64()+wait;script_expect(script,&event);script->pending=SDL_PushEvent(&event)==1;return;}
         if(sscanf(part,"race-open-home:%u",&wait)==1 && wait<=5000){event.key.keysym.sym=SDLK_RETURN;script->future=event;script->future.key.keysym.sym=SDLK_h;script->future_at=SDL_GetTicks64()+wait;script_expect(script,&event);script->pending=SDL_PushEvent(&event)==1;return;}
@@ -43,6 +44,7 @@ static inline void script_queue(sim_script_t *script){
         else if(!strcmp(part,"smaller"))event.key.keysym.sym=SDLK_MINUS;
         else if(!strcmp(part,"beginning"))event.key.keysym.sym=SDLK_HOME;
         else if(!strcmp(part,"quit") || !strcmp(part,"back") || !strcmp(part,"mark-back"))event.key.keysym.sym=SDLK_ESCAPE;
+        else if(!strcmp(part,"close-window"))event.type=SDL_QUIT; // 真正关闭窗口，不把返回键当退出。/ Close the window instead of treating Back as exit.
         else if(!strcmp(part,"library-next"))event.key.keysym.sym=SDLK_PAGEDOWN;
         else if(!strcmp(part,"library-previous"))event.key.keysym.sym=SDLK_PAGEUP;
         else if(!strcmp(part,"jump"))event.key.keysym.sym=SDLK_g;

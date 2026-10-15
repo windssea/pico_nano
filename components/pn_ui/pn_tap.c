@@ -1,5 +1,14 @@
 /* 矩形控件释放、滑出、多点取消。/ Rectangle-control release, leave and multitouch cancellation. */
 #include "pn_tap.h"
+bool pn_tap_press_feed(pn_tap_press_t *p,unsigned count,int eligible,bool valid,int *selected){
+    if(!p || !selected)return false;
+    bool owned=p->claimed;
+    if(!valid || count>1){p->blocked=true;p->empty=0;if(eligible>=0)p->claimed=true;return p->claimed;}
+    if(!count){if(p->empty<2)p->empty++;if(p->empty==2)*p=(pn_tap_press_t){0};return owned || eligible>=0;}
+    p->empty=0;if(p->down || p->blocked){if(eligible>=0)p->claimed=true;return p->claimed;}
+    p->down=true;if(eligible<0)return false;
+    p->claimed=true;*selected=eligible;return true;
+}
 bool pn_tap_feed(pn_tap_t *t,unsigned count,int hit,bool valid,int *out){
     if(!t || !out)return false;
     if(!valid || count>1){t->cancelled=true;t->blocked=true;t->empty=0;return false;}

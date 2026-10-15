@@ -27,6 +27,7 @@ typedef struct {
     int (*run)(void *);void *run_ctx;int result; ///< 产品worker入口与结果 / Product-worker entry and result
     uint64_t deadline;unsigned delay_ms; ///< 可测试的面板延迟，不暂停事件泵 / Testable panel delay without stopping event pumping
     uint32_t revision,context; ///< 管理页成功呈现代次与当前上下文 / Successful management-presentation revision and current context
+    bool discarded_release; ///< 本轮因旧页面丢弃了真实左键松手，供输入所有权释放 / A real left release discarded for an old view this round, allowing input ownership to end
 } pn_sdl_async_t;
 /// 主线程初始化窗口；失败不启动worker。/ Main initializes the window; failures never start a worker.
 bool pn_sdl_async_init(pn_sdl_async_t *port,pn_status_t (*render)(void *,const pn_frame_t *),void *ctx);
