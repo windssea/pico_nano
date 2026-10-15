@@ -113,6 +113,7 @@ set_tests_properties(root_navigation_coalesce_window PROPERTIES LABELS "async;ui
 add_test(NAME feedback_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_feedback_window.py $<TARGET_FILE:pn_sim>)
 add_test(NAME feedback_idle_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_feedback_idle_window.py $<TARGET_FILE:pn_sim>)
 add_test(NAME hot_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_hot_window.py $<TARGET_FILE:pn_sim>)
+add_test(NAME prepare_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_prepare_window.py $<TARGET_FILE:pn_sim>)
 add_test(NAME font_scroll_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_font_scroll_window.py $<TARGET_FILE:pn_sim> ${PN_ROOT}/assets/fonts/read-pico-ui.ttf)
 add_test(NAME toc_scroll_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_toc_scroll_window.py $<TARGET_FILE:pn_sim> ${PN_ROOT}/assets/fonts/read-pico-ui.ttf)
 add_test(NAME shelf_focus_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_shelf_focus_window.py $<TARGET_FILE:pn_sim> ${PN_ROOT}/assets/fonts/read-pico-ui.ttf)

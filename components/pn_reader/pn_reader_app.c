@@ -404,9 +404,7 @@ pn_status_t pn_reader_app_retained_source(const pn_reader_app_t *app,pn_media_t 
     const app_t *a=app->impl;if(a->book_media!=media || strcmp(a->book_path,path))return PN_STALE_JOB;
     return pn_media_validate(media,&a->book_lease);
 }
-pn_status_t pn_reader_app_retained_ready(pn_reader_app_t *app){
-    if(!app || !app->impl)return PN_INVALID;
-    app_t *a=app->impl;if(!a->suspended || a->force_full || a->style_preview || a->font_preview || a->font_pending || a->global_pending || a->style_pending || a->body_layer.paint)return PN_BUSY;
+static pn_status_t verify_sources(app_t *a){
     if(a->media_lost)return PN_STALE_MEDIA;
     pn_status_t s=pn_text_file_verify_handle(a->pool,&a->book_file);
     if(s==PN_OK && a->font_live.impl)s=pn_font_set_verify_retained(&a->font_live);
@@ -414,6 +412,26 @@ pn_status_t pn_reader_app_retained_ready(pn_reader_app_t *app){
     if(s==PN_OK)s=pn_font_verify_retained(&a->ui);
     if(s==PN_OK && a->fallback_file.handle)s=pn_text_file_verify_handle(a->pool,&a->fallback_file);
     return s;
+}
+static bool unshown(const app_t *a){return !a->reader.has_visible && !a->reader.preparing && !a->suspended && !a->style_preview && !a->font_preview && !a->font_pending && !a->global_pending && !a->style_pending && !a->body_layer.paint && a->display.active<0 && a->display.queued<0;}
+pn_status_t pn_reader_app_prepare_unshown(pn_reader_app_t *app){
+    if(!app || !app->impl)return PN_INVALID;
+    app_t *a=app->impl;if(!unshown(a))return PN_BUSY;
+    pn_book_id_t id;pn_status_t s=a->external_font?pn_font_source_identity(&a->font_source,&id):pn_font_verify_retained(&a->body);
+    if(s==PN_OK)s=pn_font_chain_validate(&a->chain);
+    return s==PN_OK?pn_media_validate(a->book_media,&a->book_lease):s;
+}
+pn_status_t pn_reader_app_verify_unshown(pn_reader_app_t *app){if(!app || !app->impl)return PN_INVALID;app_t *a=app->impl;return unshown(a)?verify_sources(a):PN_BUSY;}
+pn_status_t pn_reader_app_discard_unshown(pn_reader_app_t *app){
+    if(!app)return PN_INVALID;
+    if(!app->impl)return PN_OK;
+    app_t *a=app->impl;if(!unshown(a))return PN_BUSY;
+    pn_status_t s=release_app(a);app->impl=NULL;return s;
+}
+pn_status_t pn_reader_app_retained_ready(pn_reader_app_t *app){
+    if(!app || !app->impl)return PN_INVALID;
+    app_t *a=app->impl;if(!a->suspended || a->force_full || a->style_preview || a->font_preview || a->font_pending || a->global_pending || a->style_pending || a->body_layer.paint)return PN_BUSY;
+    return verify_sources(a);
 }
 pn_status_t pn_reader_app_release_retained(pn_reader_app_t *app){
     if(!app)return PN_INVALID;

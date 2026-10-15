@@ -326,6 +326,9 @@ static pn_status_t recent_load(library_t *s){
 }
 /* 书库所在磁盘的容量（模拟器的“存储卡”）。/ Capacity of the disk holding the library (the simulator's "card"). */
 static void storage_note(library_t *s){
+    // 像时钟一样允许像素测试固定显示输入；真实文件空间准入仍直接查询文件系统。
+    // Like the clock, allow pixel tests to fix this display input; real file-space admission still queries the filesystem directly.
+    const char *fixed=getenv("PN_SIM_STORAGE");if(fixed && *fixed){snprintf(s->storage,sizeof s->storage,"%s",fixed);return;}
     struct statvfs st;s->storage[0]=0;
     if(statvfs(s->directory,&st)==0 && st.f_blocks){unsigned long long total=(unsigned long long)st.f_blocks*st.f_frsize,avail=(unsigned long long)st.f_bavail*st.f_frsize;
         snprintf(s->storage,sizeof s->storage,"共 %llu.%llu GB · 可用 %llu.%llu GB",total>>30,((total%(1ull<<30))*10)>>30,avail>>30,((avail%(1ull<<30))*10)>>30);}
@@ -405,6 +408,9 @@ static pn_status_t open_item_impl(library_t *s,const pn_catalog_item_t *book,uin
     s->covers_inactive=true;
     s->open_failed=false;pn_free(s->page_px);s->page_px=NULL;
     pn_wallpaper_mask_close(&s->lock_mask);
+    status=pn_hot_session_take_prepared(&s->hot,&s->media,book->path,book->format,book->identified?&book->expected:NULL,1,now,&s->reader,&s->epub);
+    if(status==PN_OK){if(s->epub.impl){pn_font_close(&s->font);pn_free(s->frame.pixels);s->frame.pixels=NULL;}printf("library_prepared take=%zu name=%s\n",s->hot.takes,book->name);goto first_page;}
+    if(status==PN_CANCELLED)return status;
     status=pn_hot_session_resume(&s->hot,&s->media,book->path,book->format,book->identified?&book->expected:NULL,1,now,&s->reader,&s->epub,present,s);
     if(status==PN_OK){s->last_read=*book;s->last_read.identified=(s->epub.impl?pn_epub_app_identity(&s->epub,&s->last_read.expected):pn_reader_app_identity(&s->reader,&s->last_read.expected))==PN_OK;s->last_read_known=s->last_read.identified;printf("library_hot hit=%zu name=%s\n",s->hot.hits,book->name);if(book->identified)printf("recent_identity status=0\n");printf("library_open name=%s\n",book->name);
         if(s->epub.impl){pn_epub_progress_t location;if(pn_epub_app_progress(&s->epub,&location)==PN_OK)printf("epub_library_position path=%s element=%llu run=%u offset=%llu\n",location.location.path,(unsigned long long)location.location.position.element,location.location.position.run,(unsigned long long)location.location.position.offset);}
@@ -415,6 +421,7 @@ static pn_status_t open_item_impl(library_t *s,const pn_catalog_item_t *book,uin
     if(pn_reader_loading_needed(book->format==PN_BOOK_TXT,book->size) && s->font.impl && s->frame.pixels){status=pn_reader_loading_render(&s->font,&s->frame,book->name);if(status==PN_OK)status=present(s,&s->frame,PN_REFRESH_GL16);if(status==PN_CANCELLED)return status;}
     if(book->format==PN_BOOK_EPUB){pn_font_close(&s->font);pn_free(s->frame.pixels);s->frame.pixels=NULL;status=pn_epub_app_open_on_media(&s->epub,s->pool,&s->media,book->path,s->font_path,s->state_dir,PN_STYLE_DEFAULT_PIXELS,now);}
     else status=pn_reader_app_open_on_media(&s->reader,s->pool,&s->media,book->path,s->font_path,s->state_dir,PN_STYLE_DEFAULT_PIXELS,now);
+first_page:
     fprintf(stderr,"library_open prepare name=%s status=%d pool=%zu/%zu\n",book->name,(int)status,s->pool->used,s->pool->limit);
     if(status==PN_OK && s->fallback_path)status=s->epub.impl?pn_epub_app_fallback_font(&s->epub,s->fallback_path):pn_reader_app_fallback_font(&s->reader,s->fallback_path);
     if(status==PN_OK && book->identified){pn_book_id_t actual;status=s->epub.impl?pn_epub_app_identity(&s->epub,&actual):pn_reader_app_identity(&s->reader,&actual);if(status==PN_OK && memcmp(actual.sha256,book->expected.sha256,32))status=PN_STALE_JOB;printf("recent_identity status=%d\n",(int)status);}
@@ -447,6 +454,12 @@ static pn_status_t continue_book(library_t *s,uint64_t now){
     pn_status_t status=pn_catalog_recent_page(s->recent,0,tmp);
     if(status==PN_OK && tmp->count)status=open_item(s,&tmp->items[0],now);else if(status==PN_OK)status=PN_EMPTY;
     pn_free(tmp);return status;
+}
+/// 原书/字体准备在首页安静且封面全部完成后进行，CLI额外补字仍走原显式配置。/ Prepare book/fonts only on a quiet Home after all covers finish; an extra CLI fallback retains explicit configuration.
+static void prepare_continue(library_t *s,uint64_t now,uint64_t activity){
+    if(!s->home || !s->shelf_draw_valid || !s->covers || !s->covers->has_last || !s->covers->last.identified || (s->covers->last.format!=PN_BOOK_TXT && s->covers->last.format!=PN_BOOK_EPUB) || s->fallback_path || now<activity || now-activity<1500 || pn_cover_work_pending(&s->cover_work) || pn_shelf_covers_pending(s->covers,s->page))return;
+    pn_status_t status=pn_hot_session_prepare(&s->hot,s->pool,&s->media,&s->covers->last,s->font_path,s->state_dir,PN_STYLE_DEFAULT_PIXELS,1,now,activity);
+    if(status!=PN_EMPTY && status!=PN_BUSY)printf("book_prepare status=%d ready=%d preparations=%zu\n",(int)status,s->hot.prepared,s->hot.preparations);
 }
 /* 工具栏中当前书不能用的入口：TXT没有目录，搜索尚未实现。/ Entries unavailable for the current book: TXT has no TOC and search is not implemented. */
 static unsigned toolbar_unavailable(library_t *s){return s->epub.impl?0u:1u;}
@@ -756,7 +769,7 @@ static int library_worker(void *ctx){
             (void)pn_toc_ui_tick(&s->toc,now);
             (void)feedback_idle_tick(s,now,s->locked || body || moving.active || s->pointer_down || s->feedback_tap.down || atomic_load(&s->async.mouse)!=0);
             if(!s->locked && body && !s->pointer_down && atomic_load(&s->async.mouse)==0){status=s->epub.impl?pn_epub_app_prefetch(&s->epub):pn_reader_app_prefetch(&s->reader);if(status==PN_OK)printf("neighbor prefetch ready\n");pn_status_t cached=s->epub.impl?pn_epub_app_cache_idle(&s->epub,now):PN_EMPTY;if(cached==PN_OK)printf("semantic cache stored\n");}
-            if(!s->locked && !reading(s) && !s->pointer_down && atomic_load(&s->async.mouse)==0 && !s->hub && !s->index && !s->search_open && !s->actions_mode && !s->wallpaper.impl && !s->font_manage.impl && !s->settings.impl && now>=font_activity && now-font_activity>=80){if(now-font_activity>=800){pn_status_t indexed=catalog_build_idle(s);if(indexed==PN_OK)printf("catalog index built\n");}covers_tick(s,now-font_activity>=800);}
+            if(!s->locked && !reading(s) && !s->pointer_down && atomic_load(&s->async.mouse)==0 && !s->hub && !s->index && !s->search_open && !s->actions_mode && !s->wallpaper.impl && !s->font_manage.impl && !s->settings.impl && now>=font_activity && now-font_activity>=80){if(now-font_activity>=800){pn_status_t indexed=catalog_build_idle(s);if(indexed==PN_OK)printf("catalog index built\n");}covers_tick(s,now-font_activity>=800);prepare_continue(s,now,font_activity);}
             continue;}
 
         if(!s->locked && management_event(s,&event,now)){cancel_pointer(&input,&tap,true);continue;}

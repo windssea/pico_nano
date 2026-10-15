@@ -18,6 +18,12 @@
 #include "pn_style.h"
 #include "pn_page_bitmap.h"
 typedef struct {void *impl;} pn_reader_app_t; ///< 初始impl=NULL / Initially impl=NULL
+/// 仅首次未显示对象，补齐实际字体身份，不排版/显示/写阅读记录。/ For a never-displayed object only, finish actual font identities without layout/display/reading-record writes.
+pn_status_t pn_reader_app_prepare_unshown(pn_reader_app_t *);
+/// 接管前验证未显示对象的原书/字体源，PC额外重查外部变化。/ Verify a never-displayed object's book/font sources before handoff, including external host changes.
+pn_status_t pn_reader_app_verify_unshown(pn_reader_app_t *);
+/// 仅丢弃未显示且无候选事务的对象，不保存任何阅读记录。/ Discard only a never-displayed object without pending transactions, saving no reading records.
+pn_status_t pn_reader_app_discard_unshown(pn_reader_app_t *);
 /// 只接受已保存挂起会话，校验原书/字体源，不绘制或推进位置。/ Accept only a saved suspended session and verify original book/font sources without drawing or advancing position.
 pn_status_t pn_reader_app_retained_ready(pn_reader_app_t *);
 /// 验证选择的路径/介质就是当前会话的源，不读文件内容。/ Verify the selected path/media are this session's source, without content reads.

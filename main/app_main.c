@@ -816,10 +816,19 @@ static pn_status_t show_loading(const char *path){
     if(status==PN_OK)status=present(NULL,&frame,panel_known?PN_REFRESH_GL16:PN_REFRESH_GC16);
     management_font_end(&font);pn_free(pixels);return status;
 }
+static void reader_open_result(pn_status_t status){
+    if(status==PN_CANCELLED){pn_cancel_scope_t shield;pn_cancel_enter(&shield,NULL,NULL);if(stop_reader())show_shelf("",false);pn_cancel_leave(&shield);return;}
+    if(status==PN_STALE_JOB){if(stop_reader()){recent_mode=false;selected_identified=false;selected_path[0]=0;message("书籍内容已改变","从全部书架重新选择\n历史记录仍保留");}return;}
+    if(status!=PN_OK){ESP_LOGE(TAG,"Reader open/present failed: %d",(int)status);if(stop_reader())message("打开书籍失败","检查书籍或字体后重试");return;}
+    locked=false;status_page=false;shelf_mode=false;
+}
 static void start_reader_impl(void){
     pn_cover_work_abort(&cover_work);
     if(transfer.impl || usb.open)return;
     if(!reader_active() && *selected_path){
+        pn_status_t taken=pn_hot_session_take_prepared(&hot_session,&sd_media,selected_path,selected_format,selected_identified?&selected_expected:NULL,1,now_ms(),&reader,&epub);
+        if(taken==PN_OK){pn_wallpaper_mask_close(&lock_mask);covers_inactive=true;ESP_LOGI(TAG,"Prepared book take=%zu",hot_session.takes);reader_open_result(active_step(PN_APP_OPEN,now_ms()));return;}
+        if(taken==PN_CANCELLED)return;
         atomic_store(&reading_presentation,true);
         pn_status_t resumed=pn_hot_session_resume(&hot_session,&sd_media,selected_path,selected_format,selected_identified?&selected_expected:NULL,1,now_ms(),&reader,&epub,present,NULL);
         atomic_store(&reading_presentation,false);
@@ -857,10 +866,18 @@ static void start_reader_impl(void){
     ESP_LOGI(TAG,"Book prepare format=%u status=%d elapsed=%llu ms",(unsigned)selected_format,(int)status,(unsigned long long)(now_ms()-opened_at));
     if(status==PN_OK && selected_identified){pn_book_id_t actual;status=epub.impl?pn_epub_app_identity(&epub,&actual):pn_reader_app_identity(&reader,&actual);if(status==PN_OK && memcmp(actual.sha256,selected_expected.sha256,32))status=PN_STALE_JOB;}
     if(status==PN_OK)status=active_step(PN_APP_OPEN,now_ms());
-    if(status==PN_CANCELLED){pn_cancel_scope_t shield;pn_cancel_enter(&shield,NULL,NULL);if(stop_reader())show_shelf("",false);pn_cancel_leave(&shield);return;}
-    if(status==PN_STALE_JOB){if(stop_reader()){recent_mode=false;selected_identified=false;selected_path[0]=0;message("书籍内容已改变","从全部书架重新选择\n历史记录仍保留");}return;}
-    if(status!=PN_OK){ESP_LOGE(TAG,"Reader open/present failed: %d",(int)status);if(stop_reader())message("打开书籍失败","检查书籍或字体后重试");return;}
-    locked=false;status_page=false;shelf_mode=false;
+    reader_open_result(status);
+}
+/// 封面/索引之后才准备继续阅读；不显示、不改选书或记录，每次输入安静周期至多一次。/ Prepare Continue only after covers/indexing; no display, selection or record changes, at most once per quiet-input activity.
+static bool tick_prepare_book(uint64_t now){
+    if(!home_mode || !shelf_draw_valid || !panel_known || !shelf_covers || !shelf_covers->has_last || !shelf_covers->last.identified || (shelf_covers->last.format!=PN_BOOK_TXT && shelf_covers->last.format!=PN_BOOK_EPUB) || !data_ready || !sd_media.available || reader_active() || now<last_input || now-last_input<1500 || pn_cover_work_pending(&cover_work) || pn_shelf_covers_pending(shelf_covers,shelf_page))return false;
+    if(hot_session.tried && hot_session.activity==last_input && hot_session.attempt_epoch==sd_media.epoch && hot_session.attempt_policy==1)return false;
+    bool attempted=!hot_session.txt.impl && !hot_session.epub.impl && pool.used<=pool.limit && pool.limit-pool.used>=PN_HOT_PREPARE_HEADROOM;
+    if(attempted)pn_device_power_busy(PN_POWER_PRODUCT,true);
+    pn_status_t status=pn_hot_session_prepare(&hot_session,&pool,&sd_media,&shelf_covers->last,NULL,"/data/progress",PN_STYLE_DEFAULT_PIXELS,1,now,last_input);
+    (void)status;
+    if(attempted)ESP_LOGI(TAG,"Idle book prepare status=%d ready=%u",(int)status,(unsigned)hot_session.prepared);
+    return attempted;
 }
 static void start_reader(void){
     if(opening)return;
@@ -1693,7 +1710,7 @@ static void device_task(void *arg){
             if(sampled==PN_OK || sampled==PN_BUSY){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);}}
         if(available==PN_EMPTY && shelf_mode && shelf_covers && shelf_page && !actions_mode && !transfer.impl && !usb.open && !wallpaper_ui.impl && !font_manage.impl && !settings_ui.impl && !locked && !status_page && !reading_menu && !touch_held && !tap.down && now_ms()>=last_input && now_ms()-last_input>=80){
             // 后台确有工作时回到最高频，封面/索引不在降频下变慢。/ Real background work returns to maximum so covers and indexing are not slowed by DFS.
-            bool worked=now_ms()-last_input>=800 && catalog_build_idle()==PN_OK;worked|=tick_covers();background=pn_cover_work_pending(&cover_work) || pn_shelf_covers_pending(shelf_covers,shelf_page);if(worked){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);}}
+            bool worked=now_ms()-last_input>=800 && catalog_build_idle()==PN_OK;worked|=tick_covers();worked|=tick_prepare_book(now_ms());background=pn_cover_work_pending(&cover_work) || pn_shelf_covers_pending(shelf_covers,shelf_page);if(worked){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);}}
 #if defined(CONFIG_PN_UI_FOLLOW) && CONFIG_PN_UI_FOLLOW
         if(!locked && !transfer.impl && !usb.open && font_manage.impl){pn_status_t motion=pn_font_manage_tick(&font_manage,now_ms());pn_list_motion_stats_t moving=pn_font_manage_motion_stats(&font_manage);background|=moving.pending!=0 || moving.coasting;
             if(motion==PN_OK){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);}}

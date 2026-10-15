@@ -14,10 +14,12 @@ def main():
     parser.add_argument('--output', type=pathlib.Path, default=ROOT / 'build-dev/local-menu-probe')
     parser.add_argument('--baseline', type=pathlib.Path, help='Compare every full packed frame with an earlier probe output')
     parser.add_argument('--cancel-system', action='store_true', help='Observe a cancelled system-font readiness check and its retry')
+    parser.add_argument('--prepare-books', action='store_true', help='Also drive real idle preparation, lock discard and foreground OPEN for one supplied TXT/EPUB per font')
     parser.add_argument('--system-failure', choices=('missing','corrupt'), help='Use a missing or header-damaged private system-font copy')
     parser.add_argument('--recovered-baseline', type=pathlib.Path, help='Normal-menu output whose final library frame must match the repaired-font result')
     args = parser.parse_args()
     if args.cancel_system and args.system_failure:parser.error('Cancellation and failed-source probes use separate runs')
+    if args.prepare_books and (args.cancel_system or args.system_failure):parser.error('Idle-book preparation uses a separate normal-font run')
     if not pathlib.Path('/.dockerenv').is_file():
         raise ValueError('Requires a fresh disposable Docker container')
     library = pathlib.Path('/sdcard/piconano/books')
@@ -34,10 +36,13 @@ def main():
     for original in books:
         shutil.copy2(original, library / original.name)
     args.output.mkdir(parents=True, exist_ok=True)
-    report = {'passed': False, 'scope': 'Actual app_main menus with hardware substitutes; supplied font copies target the fixed TF UI path. Failed-font cases use resident emergency UI before repair. Host elapsed time is not TF/panel latency; recent previews are seeded, not reading acceptance.', 'cancelled_system_probe':args.cancel_system, 'system_failure_probe':args.system_failure, 'books': [p.name for p in books], 'fonts': []}
+    report = {'passed': False, 'scope': 'Actual app_main menus with hardware substitutes; supplied font copies target the fixed TF UI path. Failed-font cases use resident emergency UI before repair. Host elapsed time is not TF/panel latency; recent previews are seeded, not reading acceptance.', 'cancelled_system_probe':args.cancel_system, 'system_failure_probe':args.system_failure, 'prepared_books_probe':args.prepare_books, 'books': [p.name for p in books], 'fonts': []}
     target = args.output / 'report.json'
     target.write_text(json.dumps(report), encoding='utf8')
     for index, original in enumerate(fonts):
+        if args.prepare_books and index:
+            assert state == pathlib.Path('/data/progress') and state.parent == pathlib.Path('/data')
+            shutil.rmtree(state);state.mkdir()
         shutil.copy2(original, font)
         if args.system_failure=='missing':font.unlink()
         elif args.system_failure=='corrupt':
@@ -47,8 +52,10 @@ def main():
         environment={**os.environ, 'PN_MENU_FRAMES': str(frames)}
         environment.pop('PN_MENU_CANCEL_SYSTEM_PROBE', None)
         environment.pop('PN_MENU_SYSTEM_FAILURE_PROBE', None)
+        environment.pop('PN_MENU_PREPARE_BOOKS', None)
         environment.pop('PN_MENU_RECOVERY_FONT', None);environment.pop('PN_MENU_RECOVERY_MODE', None)
         if args.cancel_system:environment['PN_MENU_CANCEL_SYSTEM_PROBE']='1'
+        if args.prepare_books:environment['PN_MENU_PREPARE_BOOKS']='1'
         if args.system_failure:
             environment['PN_MENU_SYSTEM_FAILURE_PROBE']=args.system_failure
             environment['PN_MENU_RECOVERY_FONT']=str(original.resolve());environment['PN_MENU_RECOVERY_MODE']='epoch' if index%2 else 'release'
@@ -72,6 +79,12 @@ def main():
             assert {p.name for p in common} == {p.name for p in before.glob('*.raw')}
             assert all(p.read_bytes() == (before / p.name).read_bytes() for p in common)
         extra={}
+        if args.prepare_books:
+            prepared=[dict(word.split('=',1) for word in line.split()[1:]) for line in result.stdout.splitlines() if line.startswith('device_prepare ')]
+            assert len(prepared)==2 and {p['kind'] for p in prepared}=={'txt','epub'}
+            assert all(p[key]=='1' for p in prepared for key in ('quiet_gate','lock_drop','taken','one_present'))
+            assert all(p['menu_font_io']=='0' for p in prepared)
+            extra['prepared_books']=prepared
         if args.system_failure:
             assert all(r['font_opens']==r['font_reads']==r['font_bytes']==r['font_seeks']==0 for r in rows[1:17])
             assert all(r['face_opens']==0 for r in rows[13:17])

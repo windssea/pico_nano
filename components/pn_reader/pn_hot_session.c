@@ -2,12 +2,51 @@
  * 中文：保留同一验证源及已显示位置，不制造新阅读提交。
  * English: retain the same verified source and displayed location without creating reading commits. */
 #include "pn_hot_session.h"
+#include "pn_cancel.h"
 #include <string.h>
+#include <sys/stat.h>
+static void clear(pn_hot_session_t *h){h->path[0]=0;h->media=NULL;h->epoch=h->policy=h->at=0;h->prepared=false;}
 pn_status_t pn_hot_session_drop(pn_hot_session_t *h){
     if(!h)return PN_INVALID;
-    pn_status_t s=h->epub.impl?pn_epub_app_release_retained(&h->epub):pn_reader_app_release_retained(&h->txt);
-    if(!h->epub.impl && !h->txt.impl){h->path[0]=0;h->media=NULL;h->epoch=h->policy=h->at=0;}
+    pn_status_t s=h->prepared?(h->epub.impl?pn_epub_app_discard_unshown(&h->epub):pn_reader_app_discard_unshown(&h->txt)):(h->epub.impl?pn_epub_app_release_retained(&h->epub):pn_reader_app_release_retained(&h->txt));
+    if(!h->epub.impl && !h->txt.impl)clear(h);
     return s;
+}
+pn_status_t pn_hot_session_prepare(pn_hot_session_t *h,pn_pool_t *pool,pn_media_t *media,const pn_catalog_item_t *item,const char *font,const char *state,int pixels,uint64_t policy,uint64_t now,uint64_t activity){
+    if(!h || !pool || !media || !item || !policy || !*item->path)return PN_INVALID;
+    if(!item->identified || (item->format!=PN_BOOK_TXT && item->format!=PN_BOOK_EPUB))return PN_EMPTY;
+    if(strlen(item->path)>=sizeof h->path)return PN_LIMIT;
+    if(h->tried && h->activity==activity && h->attempt_epoch==media->epoch && h->attempt_policy==policy)return PN_EMPTY;
+    h->tried=true;h->activity=activity;h->attempt_epoch=media->epoch;h->attempt_policy=policy;
+    if(h->txt.impl || h->epub.impl)return PN_BUSY;
+    if(pool->limit<4u*1024u*1024u || pool->used>pool->limit || pool->limit-pool->used<PN_HOT_PREPARE_HEADROOM)return PN_EMPTY;
+    pn_status_t s=pn_cancel_checkpoint();if(s!=PN_OK)return s;
+    struct stat directory;if(state && (stat(state,&directory) || !S_ISDIR(directory.st_mode)))return PN_EMPTY;
+    // 单owner内pin旧链；新对象只在链首注册，不能回收或转走已有菜单缓存。
+    // Pin the old chain in the single owner; new objects register at its head and cannot reclaim or transfer existing menu caches.
+    pn_cache_owner_t *held=pool->caches;for(pn_cache_owner_t *p=held;p;p=p->next)pn_cache_pin(p);
+    h->prepared=true;
+    s=item->format==PN_BOOK_EPUB?pn_epub_app_open_on_media(&h->epub,pool,media,item->path,font,state,pixels,now):pn_reader_app_open_on_media(&h->txt,pool,media,item->path,font,state,pixels,now);
+    pn_book_id_t id;if(s==PN_OK)s=h->epub.impl?pn_epub_app_identity(&h->epub,&id):pn_reader_app_identity(&h->txt,&id);
+    if(s==PN_OK && memcmp(id.sha256,item->expected.sha256,32))s=PN_STALE_JOB;
+    if(s==PN_OK)s=h->epub.impl?pn_epub_app_prepare_unshown(&h->epub):pn_reader_app_prepare_unshown(&h->txt);
+    if(s==PN_OK)s=pn_cancel_checkpoint();
+    if(s==PN_OK && (pool->used>pool->limit || pool->limit-pool->used<PN_HOT_HEADROOM))s=PN_EMPTY;
+    if(s!=PN_OK){pn_status_t discarded=pn_hot_session_drop(h);if(s==PN_EMPTY && discarded!=PN_OK)s=discarded;}
+    for(pn_cache_owner_t *p=held;p;p=p->next)pn_cache_unpin(p);
+    if(s!=PN_OK)return s;
+    strcpy(h->path,item->path);h->book=id;h->media=media;h->epoch=media->epoch;h->policy=policy;h->at=now;h->prepared=true;h->preparations++;return PN_OK;
+}
+static bool matches(const pn_hot_session_t *h,pn_media_t *media,const char *path,pn_book_format_t kind,uint64_t policy,uint64_t now){
+    return h->media && h->media==media && h->epoch==media->epoch && media->available && h->policy==policy && !strcmp(h->path,path) && now>=h->at && now-h->at<PN_HOT_SESSION_MS && (kind==PN_BOOK_EPUB?h->epub.impl!=NULL:kind==PN_BOOK_TXT && h->txt.impl!=NULL);
+}
+pn_status_t pn_hot_session_take_prepared(pn_hot_session_t *h,pn_media_t *media,const char *path,pn_book_format_t kind,const pn_book_id_t *expected,uint64_t policy,uint64_t now,pn_reader_app_t *txt,pn_epub_app_t *epub){
+    if(!h || !media || !path || !txt || !epub)return PN_INVALID;
+    if(txt->impl || epub->impl)return PN_BUSY;
+    if(!h->prepared || !matches(h,media,path,kind,policy,now))return PN_EMPTY;
+    if(expected && memcmp(expected->sha256,h->book.sha256,32))return PN_STALE_JOB;
+    pn_status_t s=h->epub.impl?pn_epub_app_verify_unshown(&h->epub):pn_reader_app_verify_unshown(&h->txt);if(s!=PN_OK)return s;
+    txt->impl=h->txt.impl;epub->impl=h->epub.impl;h->txt.impl=h->epub.impl=NULL;h->takes++;clear(h);return PN_OK;
 }
 pn_status_t pn_hot_session_expire(pn_hot_session_t *h,uint64_t now){
     if(!h)return PN_INVALID;
@@ -30,7 +69,7 @@ pn_status_t pn_hot_session_park(pn_hot_session_t *h,pn_pool_t *pool,pn_media_t *
 pn_status_t pn_hot_session_resume(pn_hot_session_t *h,pn_media_t *media,const char *path,pn_book_format_t kind,const pn_book_id_t *expected,uint64_t policy,uint64_t now,pn_reader_app_t *txt,pn_epub_app_t *epub,pn_reader_present_fn present,void *ctx){
     if(!h || !media || !path || !txt || !epub || !present)return PN_INVALID;
     if(txt->impl || epub->impl)return PN_BUSY;
-    if(!h->media || h->media!=media || h->epoch!=media->epoch || !media->available || h->policy!=policy || strcmp(h->path,path) || now<h->at || now-h->at>=PN_HOT_SESSION_MS || (kind==PN_BOOK_EPUB?!h->epub.impl:kind!=PN_BOOK_TXT || !h->txt.impl))return PN_EMPTY;
+    if(h->prepared || !matches(h,media,path,kind,policy,now))return PN_EMPTY;
     if(expected && memcmp(expected->sha256,h->book.sha256,32))return PN_STALE_JOB;
     pn_status_t s=h->epub.impl?pn_epub_app_retained_ready(&h->epub):pn_reader_app_retained_ready(&h->txt);if(s!=PN_OK)return s;
     txt->impl=h->txt.impl;epub->impl=h->epub.impl;h->txt.impl=h->epub.impl=NULL;

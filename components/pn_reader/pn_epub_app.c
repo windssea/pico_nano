@@ -525,16 +525,34 @@ pn_status_t pn_epub_app_retained_source(const pn_epub_app_t *app,pn_media_t *med
     const app_t *a=app->impl;if(a->media!=media || strcmp(a->book_path,path))return PN_STALE_JOB;
     return pn_media_validate(media,&a->book_lease);
 }
-pn_status_t pn_epub_app_retained_ready(pn_epub_app_t *app){
-    if(!app || !app->impl)return PN_INVALID;
-    app_t *a=app->impl;if(!a->suspended || a->force_full || a->style_preview || a->font_preview || a->font_pending || a->global_pending || a->style_pending || a->body_layer.paint)return PN_BUSY;
+static pn_status_t verify_sources(app_t *a,bool require_ui){
     if(a->lost)return PN_STALE_MEDIA;
     pn_status_t s=pn_text_file_verify_handle(a->pool,&a->book_file);
     if(s==PN_OK && a->font_live.impl)s=pn_font_set_verify_retained(&a->font_live);
     else if(s==PN_OK)s=pn_font_verify_retained(&a->body);
-    if(s==PN_OK)s=pn_font_verify_retained(&a->ui);
+    if(s==PN_OK && (require_ui || a->ui.impl))s=pn_font_verify_retained(&a->ui);
     if(s==PN_OK && a->fallback_file.handle)s=pn_text_file_verify_handle(a->pool,&a->fallback_file);
     return s;
+}
+static bool unshown(const app_t *a){return !a->has_visible && !a->page.valid && !a->suspended && !a->style_preview && !a->font_preview && !a->font_pending && !a->global_pending && !a->style_pending && !a->body_layer.paint && a->display.active<0 && a->display.queued<0;}
+pn_status_t pn_epub_app_prepare_unshown(pn_epub_app_t *app){
+    if(!app || !app->impl)return PN_INVALID;
+    app_t *a=app->impl;if(!unshown(a))return PN_BUSY;
+    pn_book_id_t id;pn_status_t s=pn_font_source_identity(&a->font_source,&id);
+    if(s==PN_OK)s=pn_font_chain_validate(&a->chain);
+    return s==PN_OK?pn_media_validate(a->media,&a->book_lease):s;
+}
+pn_status_t pn_epub_app_verify_unshown(pn_epub_app_t *app){if(!app || !app->impl)return PN_INVALID;app_t *a=app->impl;return unshown(a)?verify_sources(a,false):PN_BUSY;}
+pn_status_t pn_epub_app_discard_unshown(pn_epub_app_t *app){
+    if(!app)return PN_INVALID;
+    if(!app->impl)return PN_OK;
+    app_t *a=app->impl;if(!unshown(a))return PN_BUSY;
+    pn_status_t s=release(a);app->impl=NULL;return s;
+}
+pn_status_t pn_epub_app_retained_ready(pn_epub_app_t *app){
+    if(!app || !app->impl)return PN_INVALID;
+    app_t *a=app->impl;if(!a->suspended || a->force_full || a->style_preview || a->font_preview || a->font_pending || a->global_pending || a->style_pending || a->body_layer.paint)return PN_BUSY;
+    return verify_sources(a,true);
 }
 pn_status_t pn_epub_app_release_retained(pn_epub_app_t *app){
     if(!app)return PN_INVALID;

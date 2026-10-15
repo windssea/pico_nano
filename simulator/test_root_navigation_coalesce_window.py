@@ -12,7 +12,7 @@ with tempfile.TemporaryDirectory() as directory:
     saved=os.environ.get('PN_ROOT_COALESCE_ARTIFACTS');artifacts=Path(saved) if saved else root/'artifacts';artifacts.mkdir(parents=True,exist_ok=True)
     def run(name,script,feedback):
         state=root/(name+'-state');state.mkdir();cache=root/(name+'-cache');cache.mkdir();frames=artifacts/name;frames.mkdir()
-        result=subprocess.run([sys.argv[1],'--library',str(books),'--state-dir',str(state),'--cover-cache',str(cache)],capture_output=True,text=True,timeout=60,env={**os.environ,'SDL_VIDEODRIVER':'dummy','PN_SIM_LIBRARY_SCRIPT':'home,'+script+',close-window','PN_SIM_CLOCK':'12:34','PN_SIM_PRESENT_DELAY_MS':'700','PN_SIM_TIMING':'1','PN_SIM_CAPTURE_CANCELLED':'1','PN_SIM_FEEDBACK':str(feedback),'PN_SIM_FRAME_DIR':str(frames)})
+        result=subprocess.run([sys.argv[1],'--library',str(books),'--state-dir',str(state),'--cover-cache',str(cache)],capture_output=True,text=True,timeout=60,env={**os.environ,'SDL_VIDEODRIVER':'dummy','PN_SIM_LIBRARY_SCRIPT':'home,'+script+',close-window','PN_SIM_CLOCK':'12:34','PN_SIM_STORAGE':'共 16.0 GB · 可用 8.0 GB','PN_SIM_PRESENT_DELAY_MS':'700','PN_SIM_TIMING':'1','PN_SIM_CAPTURE_CANCELLED':'1','PN_SIM_FEEDBACK':str(feedback),'PN_SIM_FRAME_DIR':str(frames)})
         (artifacts/(name+'.log')).write_text(result.stdout+result.stderr,encoding='utf8')
         assert result.returncode==0 and 'used=0 live=0' in result.stdout,(name,result.stdout[-4000:],result.stderr[-4000:])
         return result.stdout,sorted(frames.glob('*.pgm'))[-1].read_bytes(),result.stderr

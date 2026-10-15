@@ -6,6 +6,7 @@
 #include "pn_font_asset.h"
 #include "pn_font_preferences.h"
 #include "pn_cancel.h"
+#include "pn_hot_session.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,6 +14,7 @@
 #include <sys/stat.h>
 
 static bool tracing;static uint64_t fallback_size,book_size;static unsigned hashes,book_hashes,presents,font_opens;static size_t font_read_bytes;static const char *fallback_path;
+static const char *state_path;static FILE *writers[8];static size_t state_writes;
 static FILE *font_handles[4];
 // 从打开到首屏统计原书实际stdio调用，区别于ZIP逻辑读和面板计时。
 // Count actual book stdio calls from open through the first frame, separately from logical ZIP reads or panel timing.
@@ -22,13 +24,15 @@ static bool is_fault(const char *name){return fault && !strcmp(fault,name);}
 static bool cancelled(void *ctx){(void)ctx;return cancel_requested;}
 static void before_hash(void){if(fault_fired)return;if(is_fault("cancel")){cancel_requested=true;fault_fired=true;}else if(is_fault("lost")){assert(pn_media_detach(active_media)==PN_OK);fault_fired=true;}}
 FILE *__real_fopen(const char *,const char *);
-FILE *__wrap_fopen(const char *path,const char *mode){FILE *f=__real_fopen(path,mode);if(f && tracing && !strcmp(path,fallback_path)){font_opens++;unsigned i=0;while(i<4 && font_handles[i])i++;assert(i<4);font_handles[i]=f;}if(f && tracing && !strcmp(path,book_path)){book_opens++;unsigned i=0;while(i<2 && book_handles[i])i++;assert(i<2);book_handles[i]=f;}return f;}
+FILE *__wrap_fopen(const char *path,const char *mode){FILE *f=__real_fopen(path,mode);if(f && tracing && !strcmp(path,fallback_path)){font_opens++;unsigned i=0;while(i<4 && font_handles[i])i++;assert(i<4);font_handles[i]=f;}if(f && tracing && !strcmp(path,book_path)){book_opens++;unsigned i=0;while(i<2 && book_handles[i])i++;assert(i<2);book_handles[i]=f;}if(f && state_path && !strncmp(path,state_path,strlen(state_path)) && (strchr(mode,'w') || strchr(mode,'a') || strchr(mode,'+'))){unsigned i=0;while(i<8 && writers[i])i++;assert(i<8);writers[i]=f;}return f;}
+size_t __real_fwrite(const void *,size_t,size_t,FILE *);
+size_t __wrap_fwrite(const void *p,size_t size,size_t count,FILE *f){if(tracing)for(unsigned i=0;i<8;i++)if(writers[i]==f)state_writes++;return __real_fwrite(p,size,count,f);}
 size_t __real_fread(void *,size_t,size_t,FILE *);
 size_t __wrap_fread(void *out,size_t size,size_t count,FILE *file){size_t got=__real_fread(out,size,count,file);if(tracing){for(unsigned i=0;i<4;i++)if(font_handles[i]==file)font_read_bytes+=size*got;for(unsigned i=0;i<2;i++)if(book_handles[i]==file){book_reads++;book_read_bytes+=size*got;}}return got;}
 int __real_fseek(FILE *,long,int);
 int __wrap_fseek(FILE *file,long offset,int origin){if(tracing)for(unsigned i=0;i<2;i++)if(book_handles[i]==file)book_seeks++;return __real_fseek(file,offset,origin);}
 int __real_fclose(FILE *);
-int __wrap_fclose(FILE *file){for(unsigned i=0;i<4;i++)if(font_handles[i]==file)font_handles[i]=NULL;for(unsigned i=0;i<2;i++)if(book_handles[i]==file)book_handles[i]=NULL;return __real_fclose(file);}
+int __wrap_fclose(FILE *file){for(unsigned i=0;i<4;i++)if(font_handles[i]==file)font_handles[i]=NULL;for(unsigned i=0;i<2;i++)if(book_handles[i]==file)book_handles[i]=NULL;for(unsigned i=0;i<8;i++)if(writers[i]==file)writers[i]=NULL;return __real_fclose(file);}
 pn_status_t __real_pn_identity_file_pooled(pn_pool_t *,pn_media_t *,const pn_media_lease_t *,const char *,uint64_t,pn_book_id_t *);
 pn_status_t __wrap_pn_identity_file_pooled(pn_pool_t *p,pn_media_t *m,const pn_media_lease_t *l,const char *path,uint64_t max,pn_book_id_t *id){if(tracing && !strcmp(path,fallback_path)){hashes++;before_hash();}return __real_pn_identity_file_pooled(p,m,l,path,max,id);}
 pn_status_t __real_pn_identity_stream(void *,uint64_t,pn_identity_read_fn,pn_book_id_t *);
@@ -42,6 +46,7 @@ static pn_status_t show(void *ctx,const pn_frame_t *frame,pn_refresh_t profile){
 }
 int main(int argc,char **argv){
     if(argc!=4)return 2;
+    state_path=argv[3];
     fault=getenv("PN_FONT_STARTUP_FAULT");
     struct stat info;assert(!stat(argv[1],&info) && info.st_size>0);book_size=(uint64_t)info.st_size;
     pn_pool_t pool;assert(pn_pool_init(&pool,6u*1024u*1024u,NULL,NULL,NULL)==PN_OK);
@@ -60,7 +65,18 @@ int main(int argc,char **argv){
     const char *suffix=strrchr(argv[1],'.');bool epub=suffix && !strcmp(suffix,".epub");pn_epub_app_t e={0};pn_reader_app_t t={0};
     fallback_path=primary?fonts.primary.path:fonts.fallback.path;book_path=argv[1];active_media=&media;pn_cancel_scope_t scope;pn_cancel_enter(&scope,cancelled,NULL);
     if(system){pn_text_source_t retained=pn_font_builtin_source();font_handles[0]=((pn_text_file_t *)retained.ctx)->handle;}
-    tracing=true;pn_status_t status=epub?pn_epub_app_open_on_media(&e,&pool,&media,argv[1],NULL,argv[3],44,0):pn_reader_app_open_on_media(&t,&pool,&media,argv[1],NULL,argv[3],44,0);
+    pn_hot_session_t prepared={0};bool warm=getenv("PN_FONT_STARTUP_WARM")!=NULL;
+    if(warm){
+        pn_catalog_item_t item={.identified=true,.format=epub?PN_BOOK_EPUB:PN_BOOK_TXT,.size=book_size};assert(strlen(argv[1])<sizeof item.path);strcpy(item.path,argv[1]);
+        assert(pn_identity_file(&media,&guard,argv[1],PN_TEXT_FILE_MAX_BYTES,&item.expected)==PN_OK);
+        tracing=true;pn_status_t staged=pn_hot_session_prepare(&prepared,&pool,&media,&item,NULL,argv[3],44,1,0,0);tracing=false;
+        if(staged!=PN_OK)fprintf(stderr,"idle_prepare failed status=%d used=%zu txt=%d epub=%d\n",(int)staged,pool.used,prepared.txt.impl!=NULL,prepared.epub.impl!=NULL);
+        assert(staged==PN_OK);
+        assert(prepared.prepared && !presents && !state_writes && prepared.preparations==1);
+        printf("idle_prepare book_hashes=%u font_hashes=%u book_bytes=%zu font_bytes=%zu state_writes=%zu\n",book_hashes,hashes,book_read_bytes,font_read_bytes,state_writes);
+        hashes=book_hashes=font_opens=book_opens=book_reads=book_seeks=0;font_read_bytes=book_read_bytes=0;
+    }
+    tracing=true;pn_status_t status=warm?pn_hot_session_take_prepared(&prepared,&media,argv[1],epub?PN_BOOK_EPUB:PN_BOOK_TXT,&prepared.book,1,0,&t,&e):epub?pn_epub_app_open_on_media(&e,&pool,&media,argv[1],NULL,argv[3],44,0):pn_reader_app_open_on_media(&t,&pool,&media,argv[1],NULL,argv[3],44,0);
     bool expected_fallback=!primary && !is_fault("missing") && !is_fault("replaced") && !is_fault("bad-primary");
     if(status==PN_OK && expected_fallback)assert((epub?pn_epub_app_fallback_font(&e,argv[2]):pn_reader_app_fallback_font(&t,argv[2]))==PN_BUSY);
     if(status==PN_OK)status=epub?pn_epub_app_step(&e,PN_APP_OPEN,1,show,NULL):pn_reader_app_step(&t,PN_APP_OPEN,1,show,NULL);

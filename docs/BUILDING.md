@@ -145,6 +145,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/run_sim.ps1
 
 `identity_reuse_host/immutable`核查同路径、媒体、代次、READ资格、取消、旧句柄关闭及PC同大小外部改写；`font_identity_immutable`另确认已加载系统源不能覆盖所选引用的不匹配摘要/长度。`tools/test_local_system_startup.py --binary build-host/font_system_startup_probe --expect-reuse --output build-dev/local-system-startup`逐本逐字体检查系统源已加载后，选择该同路径为正文或补字的打开/NEXT/PREVIOUS。`font_system_startup_probe`仅将文件port切至`PN_TEST_IMMUTABLE_FILE`来复现设备源不可被外部写入的约束，其余阅读代码与主机同源；这不是SDK/TF/面板实测。传`--baseline <独立冻结旧探针>`逐完整帧、原书读取及后续翻页IO对照，要求恰好少读完整字体一次、峰值不增。普通`font_startup_probe`不加`--expect-reuse`另跑同一矩阵，要求保留完整字体核验；两组已接入`local-samples`。`--limit`只供开发子集，报告明确标记，不能当整库通过。
 
+同一工具加`--warm-prepare --expect-reuse`检查未显示准备：记录空闲完整SHA/读取与0次状态写，点击阶段书/字体SHA及打开均0，再核对原始OPEN/NEXT/PREVIOUS全帧。没有`--baseline`时明确以同一个当前程序的普通冷开作策略对照；可另传独立冻结旧冷探针，不能把同程序冷/暖结果称作跨版本实测。`hot_host/immutable`增加未显示所有权、错误身份/路径/格式/策略、首次显示失败无记录、准备/接管取消、24个早期分配故障、菜单cache owner保护、低预算、已有root、TTL不反复重建、USB和媒体失效，显式启动字体的完整身份也在空闲补齐。测试已有公开边界样本只用于契约，用户整库矩阵仍使用原件副本。
+
+`test_local_menu_probe.py --prepare-books`在原17帧之后追加真实`app_main`的TXT/EPUB准备、1500ms门槛、菜单无额外字体IO、锁屏释放及一次正常OPEN显示，四实际字体均退出池/租约归零；不把内存中构造的已识别Continue选择当作已有阅读记录。此模式每款字体清空一次性容器的私有`/data/progress`，避免上一款实际OPEN写出的记录改变下一款冷菜单；原件和默认记录不动。`prepare_window`另检查真实SDL进程重开的首页空闲准备、冷开最终全帧及设置释放，固定窗口等待后必须看到真实ready/take日志，不以经过时间代替准备成功。这些入口已纳入`local-samples`/窗口回归，不替代面板计时。
+
+像素测试可用`PN_SIM_STORAGE`固定传书页/关于页的容量显示，与`PN_SIM_CLOCK`同为显式显示输入；磁盘写入空间准入仍用真实statvfs，不受该值影响。密集导航专项固定此输入并保留全帧对照，以免测试自身或并行产物改变可用量；普通可见启动不设置它。前次未保留的差异帧仍不能据此追溯断言其原因。
+
 新版探针另输出首屏后NEXT/PREVIOUS的`turn_io`，与冷开计数分开；`--compare-io`在前后探针均提供该行时也检查翻页原书IO不增及字体读取保持。旧探针缺少此行时不推断其翻页IO。
 
 实体中间键在阅读中短按回主页、长按600ms打开阅读工具栏；排版/字体页短按保存成功才回原书。SDL用数字2或`key-home`模拟短按，用F10或`key-middle-long`模拟长按；此脚本别名不代替真实按住/释放资格测试。

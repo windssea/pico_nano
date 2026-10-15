@@ -90,6 +90,35 @@ static void recovered_system_font(void){
     library();unsigned steps=0;while(tick_covers())assert(++steps<65536);
     probe("library-recovered",library,0);printf("system_recovery mode=%s available=1 transient_retry=1\n",mode);
 }
+static void prepared_books(void){
+    pn_catalog_item_t *items=pn_alloc_tagged(&pool,PN_MEM_UI,2u*sizeof *items);assert(items);bool found[2]={false,false};
+    for(size_t i=0;i<shelf_page->count;i++){pn_book_format_t kind=shelf_page->items[i].format;unsigned index=kind==PN_BOOK_EPUB?1u:0u;if((kind==PN_BOOK_TXT || kind==PN_BOOK_EPUB) && !found[index]){items[index]=shelf_page->items[i];found[index]=true;}}
+    assert(found[0] && found[1]);
+    for(unsigned index=0;index<2;index++){
+        pn_catalog_item_t *item=&items[index];pn_media_lease_t guard;assert(pn_media_acquire(&sd_media,PN_MEDIA_READ,&guard)==PN_OK);
+        assert(pn_identity_file(&sd_media,&guard,item->path,PN_TEXT_FILE_MAX_BYTES,&item->expected)==PN_OK && pn_media_release(&sd_media,&guard)==PN_OK);item->identified=true;
+        // 用实际源摘要构造可选择的Continue夹具，不写最近记录或伪造已显示页。
+        // Build a selectable Continue fixture from the real source digest, without writing recents or fabricating a shown page.
+        memset(recent_snapshot,0,sizeof *recent_snapshot);recent_snapshot->count=1;pn_recent_item_t *recent=&recent_snapshot->items[0];recent->book=item->expected;recent->source_size=item->size;recent->format=(uint16_t)item->format;strcpy(recent->path,item->path);recent_loaded=true;recent_epoch=sd_media.epoch;
+        home_mode=true;recent_mode=fav_mode=false;show_shelf("",false);assert(shelf_covers->has_last && !strcmp(shelf_covers->last.path,item->path) && shelf_covers->last.identified);
+        unsigned steps=0;while(!covers_cache_done || pn_cover_work_pending(&cover_work) || pn_shelf_covers_pending(shelf_covers,shelf_page) || covers_dirty){(void)tick_covers();assert(++steps<65536);}
+        shelf_covers->last.format=PN_BOOK_PDF;assert(!tick_prepare_book(now_ms()+2000));shelf_covers->last.format=item->format;
+        shelf_draw_valid=false;assert(!tick_prepare_book(now_ms()+2000));shelf_draw_valid=true;
+        last_input=now_ms();clock_us+=1499000;assert(!tick_prepare_book(now_ms()));clock_us+=1000;
+        unsigned shown=presents;bool attempted=tick_prepare_book(now_ms());
+        if(!attempted || !hot_session.prepared)fprintf(stderr,"device_prepare failed attempted=%d ready=%d tried=%d home=%d available=%d held=%zu pending=%d/%d used=%zu quiet=%llu\n",attempted,hot_session.prepared,hot_session.tried,home_mode,sd_media.available,pn_media_active(&sd_media),pn_cover_work_pending(&cover_work),pn_shelf_covers_pending(shelf_covers,shelf_page),pool.used,(unsigned long long)(now_ms()-last_input));
+        assert(attempted && hot_session.prepared && !reader_active() && presents==shown);
+        memset(counts,0,sizeof counts);watching=true;assert(draw_shelf(PN_REFRESH_GL16)==PN_OK);watching=false;
+        assert(hot_session.prepared && presents==shown && !counts[FONT_IO].opens && !counts[FONT_IO].reads && !counts[FONT_IO].bytes);
+        assert(prepare_lock() && !hot_session.prepared && !hot_session.txt.impl && !hot_session.epub.impl && !reader_active() && presents==shown);
+        last_input=now_ms();clock_us+=1500000;assert(tick_prepare_book(now_ms()) && hot_session.prepared && presents==shown);
+        selected_format=item->format;strcpy(selected_path,item->path);selected_identified=true;selected_expected=item->expected;size_t takes=hot_session.takes;
+        start_reader();assert(reader_active() && !shelf_mode && !status_page && hot_session.takes==takes+1 && !hot_session.prepared && presents==shown+1);
+        pn_book_id_t actual;assert((epub.impl?pn_epub_app_identity(&epub,&actual):pn_reader_app_identity(&reader,&actual))==PN_OK && !memcmp(actual.sha256,item->expected.sha256,32));
+        assert(stop_reader());printf("device_prepare kind=%s quiet_gate=1 menu_font_io=0 lock_drop=1 taken=1 one_present=1 peak=%zu\n",index?"epub":"txt",pool.peak);
+    }
+    pn_free(items);
+}
 int main(void){
     assert(pn_pool_init(&pool,6u*1024u*1024u,NULL,NULL,NULL)==PN_OK);assert(read_pico_init(&hardware)==ESP_OK);
     pn_media_init(&sd_media);pn_media_init(&data_media);pn_media_init(&wallpaper_media);
@@ -112,6 +141,7 @@ int main(void){
     unsigned steps=0;while(tick_covers())assert(++steps<65536);
     for(unsigned cycle=0;cycle<4;cycle++){probe("home",home,1);probe("settings",settings,1);probe("hub",hub,1);probe("library",library,1);}
     if(emergency)recovered_system_font();
+    if(getenv("PN_MENU_PREPARE_BOOKS"))prepared_books();
     pn_cover_work_abort(&cover_work);management_fonts_close();assert(pn_font_system_close()==PN_OK);pn_catalog_index_close(&catalog_index);
     pn_free(shelf_page);pn_free(shelf_covers);pn_free(recent_snapshot);pn_free(favorites);pn_free(page_copy);
     assert(!pn_media_active(&sd_media) && !pn_media_active(&data_media) && !pool.used && !pool.live);
