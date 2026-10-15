@@ -1,0 +1,2 @@
+9fcea2232b6a9c8d5b9966e9d7f09ce496a6082d174a27e2ddd0711e8b5bab53  PicoNano-fc455c8-upgrade.zip
+4791fe8114f37a8d03aec4a96e37159b6da3b3f2c8391aaeb52e1158ef22d9d6  PicoNano-web-installer-fc455c8.zip
