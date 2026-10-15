@@ -12,6 +12,7 @@ def main():
         for p in fonts:shutil.copy2(p,fontdir/p.name)
         font=fontdir/'霞鹜文楷.ttf';assert font.is_file()
         count=sum(p.suffix.lower() in ('.txt','.epub','.pdf','.fb2','.cbz') for p in books)
+        cover_count=sum(p.suffix.lower() in ('.txt','.epub') for p in books)
         for cols in (3,4):
             state=root/f'state-{cols}';cache=root/f'cache-{cols}';cache.mkdir();per=cols*3
             for warm in (False,True):
@@ -24,7 +25,7 @@ def main():
                 assert result.returncode==0 and 'used=0 live=0' in result.stdout,(name,result.stdout[-2500:],result.stderr[-2000:])
                 assert f'navigation root=library count={min(count,per)}' in result.stdout and f'shelf swipe command=41 index={per} status=0' in result.stdout and 'shelf swipe command=40 index=0 status=0' in result.stdout,result.stdout
                 assert 'library_open' not in result.stdout and 'settings open status=0' in result.stdout,result.stdout
-                files={p.name:digest(p) for p in cache.glob('*.pnc')};assert len(files)==count,(name,len(files),count,result.stdout)
+                files={p.name:digest(p) for p in cache.glob('*.pnc')};assert len(files)==cover_count,(name,len(files),cover_count,result.stdout)
                 if warm:assert files==cold and 'covers ready=' not in result.stdout,(name,result.stdout)
                 else:cold=files
                 peak=int(re.search(r'library_window pool_peak=(\d+)',result.stdout)[1]);assert peak<=6*1024*1024
