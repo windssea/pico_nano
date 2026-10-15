@@ -30,6 +30,8 @@ pn_status_t pn_device_transfer_close(pn_device_transfer_t *s){assert(s->impl);s-
 pn_status_t pn_device_transfer_take_network(pn_device_transfer_t *s,pn_network_credentials_t *c,bool *f){(void)s;(void)c;(void)f;return PN_EMPTY;}
 #include "../../main/app_main.c"
 static bool feedback_cancelled(void *ctx){(void)ctx;return true;}
+typedef struct {unsigned calls,limit;} font_cancel_t;
+static bool font_cancel_after(void *ctx){font_cancel_t *c=ctx;return ++c->calls>=c->limit;}
 static void queued_root_pointer(unsigned count,int x,int y){
     pn_device_input_event_t input={.kind=PN_DASYNC_TOUCH,.count=count,.x=x,.y=y,.valid=true};pn_async_event_t event={.bytes=sizeof input,.view=atomic_load(&async_port.input.view)};memcpy(event.payload,&input,sizeof input);
     assert((count==1 && pn_w_navigation_hit(x,y)>=0?pn_async_send_root(&async_port.input,&event):pn_async_send(&async_port.input,&event))==PN_OK);
@@ -114,6 +116,15 @@ int main(void){
     for(uint64_t at=0;at<tf_source.size;){size_t n;assert(tf_source.read_at(tf_source.ctx,at,tf_bytes,sizeof tf_bytes,&n)==PN_OK && n && fwrite(tf_bytes,1,n,tf_file)==n);at+=n;}assert(!fclose(tf_file));
     management_fonts_close();assert(pn_font_system_open(&pool,&sd_media,tf_path)==PN_OK && pn_font_system_available());
     assert(draw_shelf(PN_REFRESH_GL16)==PN_OK && management_font.impl && pn_media_active(&sd_media)>0);
+    // 在有效性检查、入口或内部验证时取消都保留UI引擎/源/租约；失败后重试不重新读字体。
+    // Cancellation during availability, entry or internal validation preserves the UI/source/lease; retry does not reread the font.
+    pn_text_source_t retained_ui_source=pn_font_builtin_source();void *retained_ui_engine=management_font.impl;
+    pn_text_file_t *retained_ui_file=retained_ui_source.ctx;uint64_t retained_ui_reads=retained_ui_file->io_reads;size_t retained_ui_used=pool.used,retained_ui_leases=pn_media_active(&sd_media);
+    for(unsigned limit=1;limit<=4;limit++){
+        font_cancel_t interrupted={.limit=limit};pn_cancel_scope_t scope;pn_cancel_enter(&scope,font_cancel_after,&interrupted);system_font_ready();pn_cancel_leave(&scope);
+        assert(interrupted.calls>=limit && management_font.impl==retained_ui_engine && pn_font_builtin_source().ctx==retained_ui_source.ctx && pool.used==retained_ui_used && pn_media_active(&sd_media)==retained_ui_leases && retained_ui_file->io_reads==retained_ui_reads);
+        assert(pn_font_system_open(&pool,&sd_media,tf_path)==PN_OK);assert(management_font.impl==retained_ui_engine && pn_font_builtin_source().ctx==retained_ui_source.ctx && retained_ui_file->io_reads==retained_ui_reads);
+    }
     // 设置正持有TF界面引擎时，源交接先关闭设置并归还，再释放全部消费者。
     // Source handoff closes Settings and returns its TF UI engine before releasing all consumers.
     void *shared_ui=management_font.impl;bool prior_shelf=shelf_mode,prior_status=status_page,prior_data=data_ready;

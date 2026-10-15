@@ -6,10 +6,12 @@
 #include "pn_identity.h"
 #include "pn_text_file.h"
 #include "pn_font_asset.h"
+#include "pn_cancel.h"
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+static bool cancelled(void *ctx){unsigned *remaining=ctx;if(*remaining)--*remaining;return !*remaining;}
 int main(void){
     pn_text_source_t sources[]={pn_font_reading_source(),pn_font_builtin_source(),pn_font_fallback_source()};pn_book_id_t expected,actual;
     for(unsigned j=0;j<3;j++){assert(!pn_identity_stream(sources[j].ctx,sources[j].size,sources[j].read_at,&expected));assert(!pn_font_source_identity(&sources[j],&actual));assert(!memcmp(&actual,&expected,sizeof actual));}
@@ -33,6 +35,14 @@ int main(void){
     assert(pn_font_reading_source().ctx==system.ctx);
     pn_text_file_t *system_file=system.ctx;reads=system_file->io_reads;
     assert(!pn_font_system_open(&pool,&media,font_path) && system_file->io_reads==reads);
+    // 已取消的同路径/替换请求不关闭已核验源；取消发生在源校验内也不得当成失效重开。
+    // Cancelled same-path/replacement requests keep the verified source, including cancellation during its validation.
+    size_t retained_used=pool.used,retained_leases=pn_media_active(&media);
+    for(unsigned mode=0;mode<3;mode++){
+        unsigned remaining=mode==1?2:1;pn_cancel_scope_t scope;pn_cancel_enter(&scope,cancelled,&remaining);
+        assert(pn_font_system_open(&pool,&media,mode==2?path:font_path)==PN_CANCELLED);pn_cancel_leave(&scope);
+        assert(pn_font_system_available() && pn_font_builtin_source().ctx==system.ctx && system_file->io_reads==reads && pool.used==retained_used && pn_media_active(&media)==retained_leases);
+    }
     pn_font_t ui={0};assert(!pn_font_open(&ui,&pool,&system,24));pn_font_close(&ui);
     assert(!pn_font_system_close());assert(!pn_font_builtin_source().ctx);
     assert(pn_font_system_open(&pool,&media,path)!=PN_OK && !pn_font_builtin_source().ctx && !pool.used && !pool.live);

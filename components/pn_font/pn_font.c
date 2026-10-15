@@ -35,8 +35,12 @@ pn_status_t pn_font_system_close(void){system_source=(pn_text_source_t){0};syste
 bool pn_font_system_available(void){return system_source.read_at && system_source.validate && system_source.validate(system_source.ctx)==PN_OK;}
 pn_status_t pn_font_system_open(pn_pool_t *pool,pn_media_t *media,const char *path){
     if(!pool || !media || !path || !*path)return PN_INVALID;
+    pn_status_t status=pn_cancel_checkpoint();if(status!=PN_OK)return status;
     if(system_asset.impl && system_media==media && !strcmp(system_path,path) && system_source.validate && system_source.validate(system_source.ctx)==PN_OK)return PN_OK;
-    pn_status_t status=pn_font_system_close();if(status!=PN_OK)return status;
+    // 源验证中的取消也不能当作失效：保留旧句柄，交给下一前台请求复用。
+    // Cancellation during source validation is not invalidation: retain the old handle for the next foreground request.
+    status=pn_cancel_checkpoint();if(status!=PN_OK)return status;
+    status=pn_font_system_close();if(status!=PN_OK)return status;
     pn_media_lease_t guard={0};status=pn_media_acquire(media,PN_MEDIA_READ,&guard);
     if(status==PN_OK)status=pn_font_asset_open(&system_asset,pool,media,&guard,path,0,24);
     if(status==PN_OK)status=pn_font_asset_source(&system_asset,&system_source);

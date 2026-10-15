@@ -13,6 +13,7 @@ def main():
     parser.add_argument('--binary', type=pathlib.Path, required=True)
     parser.add_argument('--output', type=pathlib.Path, default=ROOT / 'build-dev/local-menu-probe')
     parser.add_argument('--baseline', type=pathlib.Path, help='Compare every full packed frame with an earlier probe output')
+    parser.add_argument('--cancel-system', action='store_true', help='Observe a cancelled system-font readiness check and its retry')
     args = parser.parse_args()
     if not pathlib.Path('/.dockerenv').is_file():
         raise ValueError('Requires a fresh disposable Docker container')
@@ -30,14 +31,17 @@ def main():
     for original in books:
         shutil.copy2(original, library / original.name)
     args.output.mkdir(parents=True, exist_ok=True)
-    report = {'passed': False, 'scope': 'Actual app_main menus with hardware substitutes; supplied fonts each serve as the fixed TF UI source. Host elapsed time is not TF/panel latency; recent previews are seeded, not reading acceptance.', 'books': [p.name for p in books], 'fonts': []}
+    report = {'passed': False, 'scope': 'Actual app_main menus with hardware substitutes; supplied fonts each serve as the fixed TF UI source. Host elapsed time is not TF/panel latency; recent previews are seeded, not reading acceptance.', 'cancelled_system_probe':args.cancel_system, 'books': [p.name for p in books], 'fonts': []}
     target = args.output / 'report.json'
     target.write_text(json.dumps(report), encoding='utf8')
     for index, original in enumerate(fonts):
         shutil.copy2(original, font)
         frames = args.output.resolve() / str(index)
         frames.mkdir(exist_ok=True)
-        result = subprocess.run([str(args.binary.resolve())], capture_output=True, text=True, timeout=180, env={**os.environ, 'PN_MENU_FRAMES': str(frames)})
+        environment={**os.environ, 'PN_MENU_FRAMES': str(frames)}
+        environment.pop('PN_MENU_CANCEL_SYSTEM_PROBE', None)
+        if args.cancel_system:environment['PN_MENU_CANCEL_SYSTEM_PROBE']='1'
+        result = subprocess.run([str(args.binary.resolve())], capture_output=True, text=True, timeout=180, env=environment)
         (args.output / f'{index}.log').write_text(result.stdout + result.stderr, encoding='utf8')
         assert result.returncode == 0 and 'menu_probe closed_pool_zero=1' in result.stdout, (original.name, result.returncode, result.stdout[-2500:], result.stderr[-2500:])
         assert 'index_rebuild retained_system_face=1 font_bytes=0 font_opens=0' in result.stdout
@@ -54,7 +58,15 @@ def main():
             before = args.baseline / str(index)
             assert {p.name for p in captured} == {p.name for p in before.glob('*.raw')}
             assert all(p.read_bytes() == (before / p.name).read_bytes() for p in captured)
-        report['fonts'].append({'font': original.name, 'index_retained_face': True, 'index_font_bytes': 0, 'menus': rows, 'closed_pool_zero': True, 'frames': {p.name: digest(p) for p in captured}, 'baseline_frames_match': True if args.baseline else None})
+        extra={}
+        if args.cancel_system:
+            for label in ('system_cancel','system_retry'):
+                lines=[line for line in result.stdout.splitlines() if line.startswith(label+' ')];assert len(lines)==1
+                extra[label]={k:int(v) for k,v in (word.split('=',1) for word in lines[0].split()[1:])}
+            assert extra['system_cancel']['retained_source']==extra['system_cancel']['retained_ui']==1
+            assert extra['system_cancel']['used_before']==extra['system_cancel']['used_after'] and extra['system_cancel']['leases_before']==extra['system_cancel']['leases_after']
+            assert all(value==0 for value in extra['system_retry'].values())
+        report['fonts'].append({'font': original.name, 'index_retained_face': True, 'index_font_bytes': 0, 'menus': rows, 'closed_pool_zero': True, 'frames': {p.name: digest(p) for p in captured}, 'baseline_frames_match': True if args.baseline else None, **extra})
         print('PASS menu probe', original.name, flush=True)
     report['originals_unchanged'] = all(digest(p) == identity for p, identity in originals.items())
     assert report['originals_unchanged']

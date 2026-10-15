@@ -745,6 +745,9 @@ static void system_font_ready(void){
     static uint32_t reported_epoch;static bool reported;
     if(sd_media.available && !usb.open && !transfer.impl){
         bool opening=!pn_font_system_available();uint64_t started=now_ms();(void)started;
+        // 有效性检查也会返回协作取消；取消不是源失效，不能拆掉仍有效的界面缓存。
+        // Availability also observes cooperative cancellation; cancellation is not source invalidation and must not tear down valid UI caches.
+        if(pn_cancel_checkpoint()!=PN_OK)return;
         if(opening)management_fonts_close();
         pn_status_t s=pn_font_system_open(&pool,&sd_media,PN_SD_MOUNT "/" PN_SD_SYSTEM_FONT);
         if(opening)ESP_LOGI(TAG,"System font open status=%d elapsed=%llu ms epoch=%llu",(int)s,(unsigned long long)(now_ms()-started),(unsigned long long)sd_media.epoch);

@@ -53,6 +53,16 @@ static void library(void){home_mode=recent_mode=fav_mode=false;show_shelf("",fal
 static void home(void){home_mode=true;show_shelf("",false);assert(shelf_mode && shelf_page->count==3);}
 static void settings(void){begin_settings();assert(settings_ui.impl);}
 static void hub(void){pn_settings_ui_close(&settings_ui);show_hub();assert(hub_mode);}
+static bool cancelled_probe(void *ctx){(void)ctx;return true;}
+static void cancelled_system_font(void){
+    pn_text_source_t before=pn_font_builtin_source();void *ui=management_font.impl;size_t used=pool.used,leases=pn_media_active(&sd_media);
+    pn_cancel_scope_t scope;pn_cancel_enter(&scope,cancelled_probe,NULL);system_font_ready();pn_cancel_leave(&scope);
+    printf("system_cancel retained_source=%d retained_ui=%d used_before=%zu used_after=%zu leases_before=%zu leases_after=%zu\n",pn_font_system_available() && pn_font_builtin_source().ctx==before.ctx,management_font.impl==ui && ui!=NULL,used,pool.used,leases,pn_media_active(&sd_media));
+    // 仅观察取消后的重试IO，不增加菜单帧或伪造面板耗时。
+    // Observe retry IO after cancellation without adding menu captures or fabricating panel timing.
+    memset(counts,0,sizeof counts);face_opens=0;watching=true;system_font_ready();watching=false;
+    printf("system_retry face_opens=%zu font_opens=%zu font_reads=%zu font_bytes=%zu font_seeks=%zu\n",face_opens,counts[FONT_IO].opens,counts[FONT_IO].reads,counts[FONT_IO].bytes,counts[FONT_IO].seeks);
+}
 int main(void){
     assert(pn_pool_init(&pool,6u*1024u*1024u,NULL,NULL,NULL)==PN_OK);assert(read_pico_init(&hardware)==ESP_OK);
     pn_media_init(&sd_media);pn_media_init(&data_media);pn_media_init(&wallpaper_media);
@@ -66,6 +76,7 @@ int main(void){
     pn_catalog_index_invalidate(&catalog_index);assert(catalog_build_idle()==PN_OK);watching=false;
     assert(pn_font_system_available() && pn_font_builtin_source().ctx==indexed_source.ctx && !face_opens && !counts[FONT_IO].bytes && !counts[FONT_IO].opens);
     puts("index_rebuild retained_system_face=1 font_bytes=0 font_opens=0");
+    if(getenv("PN_MENU_CANCEL_SYSTEM_PROBE"))cancelled_system_font();
     // 仅种入这三本真实文件的菜单预览，不伪造阅读或内容身份命中。/ Seed menu previews for three real files only, without claiming reading or content-identity hits.
     assert(recent_snapshot && shelf_page->count>=3);memset(recent_snapshot,0,sizeof *recent_snapshot);recent_snapshot->count=3;
     for(size_t i=0;i<3;i++){pn_recent_item_t *item=&recent_snapshot->items[i];strcpy(item->path,shelf_page->items[i].path);item->format=shelf_page->items[i].format;item->progress=1234;}

@@ -29,6 +29,8 @@ $env:DOCKER_CONTEXT='desktop-linux'
 
 `tools/test_local_menu_probe.py --binary build-host/device_menu_probe`在全新一次性Docker中复制全部用户书籍，逐款把四款用户字体副本装到固定系统字库路径，驱动真实`app_main`首页/设置/传书/书库路由。每款记录冷进入和四轮往返的stdio读量、seek/stat、字体创建与字宽/光栅轮廓加载、池峰值及17张完整4bpp帧；可用`--baseline <旧输出目录>`逐字节对照。最近阅读预览由三本真实文件的元数据种入，不代表阅读位置/内容身份验收；硬件接口为替身，单调时钟记录的是主机经过时间，不能当TF/面板耗时。已加入`local-samples`；`font_cache`另检查五个不同字号的常用字符反复交替后不再加载轮廓，以及原回收/低预算/故障退路。
 
+同一入口加`--cancel-system`在首次完整字库/菜单缓存就绪后，向真实产品`system_font_ready`注入已取消的准备范围，断言退出后仍保留源/UI/池占用和READ租约；随后的同路径重试不得打开字体、读字节或新建引擎，继续核对原17张菜单帧。`local-samples`分别运行普通及取消两组，后者输出`build-dev/local-menu-cancel`。`font_identity`另查公开打开接口在入口/源验证中取消及替换请求，`device_management`在四个检查点取消，保留原失卡、坏字体及显式交接检查。这些是软件回归，不是人为取消状态下的实机速度；旧基线必须由含同一观察探针的原产品源码独立冻结，不能用新行为改名作旧版。
+
 `epub_cover_page`检查独页封面竖图/横图/极长图/方图的原图比例、双向居中与实际像素边界，另检正文夹图/配文/多图/徽标及坏图占位。`tools/test_local_cover_fit.py --capture build-host/epub_app_capture`用用户全部EPUB和实际霞鹜文楷逐本捕获前三页；可传`--baseline <修改前捕获器>`逐完整帧、页脚和源位置对照。该入口已加入`local-samples`，原件只读，窗口与主机结果不代替面板验收。
 
 0.6.15的封面重绑检查为`cover_resident`，以1/2/13个公开边界样本对照原缓存路径、随机子集/环形换序、继续阅读重复、来源变化、取消及USB；不替代实际书籍。`tools/test_local_cover_resident.py --binary build-host/cover_resident_validate`扫描全部用户EPUB/TXT副本，每13本一组，比较41次完整帧并统计真实PNCV文件读取。`tools/test_local_cover_priority.py --binary build-host/cover_priority_validate --rebind-before-write`在尚未落盘时换序、返回首页再回书库，对照最终PNCV完整字节与唯一写入次数。两者已纳入`local-samples`，原件SHA须保持；端口读取计数和主机画面不是实卡或面板计时。
