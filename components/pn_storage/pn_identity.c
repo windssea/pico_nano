@@ -103,7 +103,9 @@ pn_status_t pn_identity_bytes(const uint8_t *bytes,size_t n,pn_book_id_t *out){
     sha_t hash={.h={0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19}};update(&hash,bytes,n);pn_book_id_t result;finish(&hash,&result);*out=result;return PN_OK;
 }
 static pn_identity_stream_port_fn stream_port;
-void pn_identity_stream_port(pn_identity_stream_port_fn port){stream_port=port;}
+static pn_identity_pooled_port_fn pooled_port;
+void pn_identity_stream_port(pn_identity_stream_port_fn port){stream_port=port;pooled_port=NULL;}
+void pn_identity_pooled_port(pn_identity_pooled_port_fn port){pooled_port=port;}
 static pn_status_t software_stream(void *ctx,uint64_t size,pn_identity_read_fn read,uint8_t *buffer,size_t capacity,pn_book_id_t *out){
     sha_t hash={.h={0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19}};
     while(hash.bytes<size){size_t cap=size-hash.bytes<capacity?(size_t)(size-hash.bytes):capacity,n=0;
@@ -136,6 +138,7 @@ pn_status_t pn_identity_stream_pooled(pn_pool_t *pool,void *ctx,uint64_t size,pn
     if(size>UINT64_MAX/8)return PN_LIMIT;
     if(size<=4096)return pn_identity_stream(ctx,size,read,out);
     pn_profile_span_t span;pn_profile_begin(&span,pool,"content.stream-sha");
+    if(pooled_port){pn_book_id_t result;pn_status_t status=pooled_port(ctx,size,read,&result);if(status==PN_OK)*out=result;pn_profile_end(&span,status);return status;}
     uint8_t *buffer=pn_alloc_tagged(pool,PN_MEM_DOCUMENT,32u*1024u);
     pn_status_t status=buffer?identity_stream(ctx,size,read,buffer,32u*1024u,out):default_stream(ctx,size,read,out);
     pn_free(buffer);pn_profile_end(&span,status);return status;

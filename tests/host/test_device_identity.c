@@ -18,6 +18,9 @@ static void *allocate(void *ctx,size_t n){(void)ctx;void *p=malloc(n);blocked_be
 static void release(void *ctx,void *p){(void)ctx;free(p);blocked_begin=blocked_end=0;}
 // 内部DMA余量与临时块替身；SPIRAM分配视为不可DMA。/ Doubles for internal DMA headroom and transient blocks; SPIRAM allocations are non-DMA.
 static size_t largest;static unsigned borrowed,spiram;
+static bool watching;static size_t file_reads,file_bytes,file_max;
+size_t __real_fread(void *,size_t,size_t,FILE *);
+size_t __wrap_fread(void *p,size_t size,size_t count,FILE *f){size_t n=__real_fread(p,size,count,f);if(watching){assert(esp_ptr_dma_capable(p));file_reads++;file_bytes+=n*size;if(size*count>file_max)file_max=size*count;}return n;}
 static size_t free_bytes=200u*1024u;
 size_t heap_caps_get_largest_free_block(uint32_t caps){assert(caps&MALLOC_CAP_INTERNAL);return largest;}
 size_t heap_caps_get_free_size(uint32_t caps){assert(caps&MALLOC_CAP_INTERNAL);return free_bytes;}
@@ -34,7 +37,19 @@ static pn_status_t source(void *ctx,uint64_t at,uint8_t *out,size_t cap,size_t *
     for(size_t i=0;i<cap;i++)out[i]=(uint8_t)((at+i)*37u);
     *n=cap;return PN_OK;
 }
-int main(void){
+typedef struct {void *data;unsigned drops;} menu_t;
+static size_t menu_bytes(void *ctx){return pn_alloc_size(((menu_t *)ctx)->data);}
+static void menu_drop(void *ctx){menu_t *m=ctx;pn_free(m->data);m->data=NULL;m->drops++;}
+int main(int argc,char **argv){
+    if(argc>1){
+        assert(argc==3);largest=80u*1024u;free_bytes=127u*1024u;assert(pn_device_identity_init()==PN_OK);
+        if(getenv("PN_IDENTITY_BORROWED"))pn_identity_pooled_port(NULL);
+        pn_pool_t pool;assert(!pn_pool_init(&pool,(size_t)strtoull(argv[2],NULL,10),allocate,release,NULL));
+        pn_media_t media;pn_media_init(&media);pn_media_lease_t lease;assert(!pn_media_attach(&media,1) && !pn_media_acquire(&media,PN_MEDIA_READ,&lease));
+        pn_book_id_t actual;watching=true;pn_status_t status=pn_identity_file_pooled(&pool,&media,&lease,argv[1],UINT64_MAX,&actual);watching=false;
+        assert(!status && !pool.used && !pool.live && !operations && !borrowed && !spiram && !pn_media_release(&media,&lease));
+        printf("file reads=%zu bytes=%zu maximum=%zu attempts=%zu peak=%zu digest=",file_reads,file_bytes,file_max,pool.attempts,pool.peak);for(unsigned i=0;i<32;i++)printf("%02x",actual.sha256[i]);puts("");return 0;
+    }
     largest=96u*1024u;assert(pn_device_identity_init()==PN_OK && !operations && !borrowed && !spiram);largest=0;uint8_t bytes[65549];for(size_t i=0;i<sizeof bytes;i++)bytes[i]=(uint8_t)(i*37u);
     pn_book_id_t expected,actual;assert(pn_identity_bytes(bytes,sizeof bytes,&expected)==PN_OK);
     pn_pool_t pool;assert(!pn_pool_init(&pool,65536,allocate,release,NULL));
@@ -62,5 +77,14 @@ int main(void){
     assert(calls==previous_calls && !operations && !pool.used && !pool.live);
     fail_hash=true;assert(pn_identity_file_pooled(&pool,&media,&lease,path,sizeof bytes,&actual)==PN_IO && !memcmp(&actual,&expected,sizeof actual));
     assert(!operations && !pool.used && !pool.live);
-    assert(pn_media_release(&media,&lease)==PN_OK && !unlink(path));pn_identity_stream_port(NULL);return 0;
+    assert(pn_media_release(&media,&lease)==PN_OK && !unlink(path));
+    // 自管端口不为无用缓冲驱逐菜单；显式关闭能力后对照原借用路径。
+    // Owning scratch must not evict menus for an unused buffer; disabling the capability compares the original borrowed path.
+    fail_hash=false;largest=80u*1024u;free_bytes=127u*1024u;assert(!pn_pool_init(&pool,192u*1024u,allocate,release,NULL));
+    menu_t menu={0};menu.data=pn_cache_alloc(&pool,PN_CACHE_GLYPH,PN_MEM_UI,150u*1024u);assert(menu.data);memset(menu.data,0x5a,150u*1024u);
+    pn_cache_owner_t owner={0};pn_cache_attach(&pool,&owner,PN_CACHE_GLYPH,&menu,menu_bytes,menu_drop);size_t used=pool.used,attempts=pool.attempts;
+    assert(!pn_identity_stream_pooled(&pool,NULL,sizeof bytes,source,&actual) && !memcmp(&actual,&expected,sizeof actual) && menu.data && !menu.drops && pool.used==used && pool.attempts==attempts && ((uint8_t *)menu.data)[0]==0x5a);
+    pn_identity_pooled_port(NULL);
+    assert(!pn_identity_stream_pooled(&pool,NULL,sizeof bytes,source,&actual) && !memcmp(&actual,&expected,sizeof actual) && menu.drops==1 && !menu.data && !pool.used && !pool.live);
+    pn_cache_detach(&owner);pn_identity_stream_port(NULL);return 0;
 }

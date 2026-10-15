@@ -16,6 +16,8 @@
 static pn_status_t short_read(void *ctx,uint64_t at,uint8_t *out,size_t cap,size_t *n){const char *text=ctx;if(at>=strlen(text) || !cap)return PN_IO;*out=(uint8_t)text[at];*n=1;return PN_OK;}
 static pn_status_t invalid_read(void *ctx,uint64_t at,uint8_t *out,size_t cap,size_t *n){(void)ctx;(void)at;(void)out;*n=cap+1;return PN_OK;}
 static pn_status_t failed_accelerator(void *ctx,uint64_t size,pn_identity_read_fn read,uint8_t *buffer,size_t capacity,pn_book_id_t *out){(void)ctx;assert(size==3 && read==short_read && buffer && capacity==4096);memset(out,0,sizeof *out);return PN_IO;}
+static unsigned owned_calls;
+static pn_status_t failed_owned(void *ctx,uint64_t size,pn_identity_read_fn read,pn_book_id_t *out){(void)ctx;assert(size==4097 && read==invalid_read);owned_calls++;memset(out,0,sizeof *out);return PN_IO;}
 static void write_bytes(const char *path, const char *bytes, size_t n) {
     FILE *f=fopen(path,"wb"); assert(f); assert(fwrite(bytes,1,n,f)==n); assert(fclose(f)==0);
 }
@@ -37,6 +39,12 @@ int main(int argc, char **argv) {
     assert(pn_identity_stream((void *)"abc",3,short_read,&id)==PN_OK && !memcmp(id.sha256,abc,32));
     pn_book_id_t unchanged=id;assert(pn_identity_stream(NULL,3,invalid_read,&id)==PN_IO && !memcmp(&id,&unchanged,sizeof id));
     pn_identity_stream_port(failed_accelerator);assert(pn_identity_stream((void *)"abc",3,short_read,&id)==PN_IO && !memcmp(&id,&unchanged,sizeof id));pn_identity_stream_port(NULL);
+    pn_pool_t tiny;assert(!pn_pool_init(&tiny,1,NULL,NULL,NULL));pn_identity_pooled_port(failed_owned);
+    assert(pn_identity_stream_pooled(&tiny,NULL,4097,invalid_read,&id)==PN_IO && owned_calls==1 && !tiny.attempts && !memcmp(&id,&unchanged,sizeof id));
+    assert(pn_identity_stream_pooled(&tiny,(void *)"abc",3,short_read,&id)==PN_OK && owned_calls==1 && !tiny.attempts);
+    assert(pn_identity_stream_pooled(&tiny,NULL,UINT64_MAX,invalid_read,&id)==PN_LIMIT && owned_calls==1);
+    pn_identity_stream_port(NULL);
+    assert(pn_identity_stream_pooled(&tiny,NULL,4097,invalid_read,&id)==PN_IO && owned_calls==1 && tiny.attempts==1 && !tiny.used && !tiny.live && !memcmp(&id,&unchanged,sizeof id));
     pn_book_id_t copy; assert(pn_identity_file(&media,&lease,b,3,&copy)==PN_OK && memcmp(&id,&copy,sizeof id)==0);
     write_bytes(a,"abd",3); assert(pn_identity_file(&media,&lease,a,3,&copy)==PN_OK && memcmp(&id,&copy,sizeof id)!=0);
     copy=id; assert(pn_identity_file(&media,&lease,a,2,&copy)==PN_LIMIT && memcmp(&id,&copy,sizeof id)==0);

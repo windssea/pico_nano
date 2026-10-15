@@ -28,8 +28,12 @@ typedef pn_status_t (*pn_identity_read_fn)(void *,uint64_t,uint8_t *,size_t,size
 typedef pn_status_t (*pn_identity_stream_port_fn)(void *,uint64_t,pn_identity_read_fn,uint8_t *,size_t,pn_book_id_t *);
 /// NULL恢复同源软件实现；不可在摘要运行期间修改。/ NULL restores shared software hashing; never change while hashing.
 void pn_identity_stream_port(pn_identity_stream_port_fn);
+/// 自管临时缓冲的同步池摘要端口，仅用于大于4KiB的pooled入口；不得保留read/ctx，失败不改调用方输出。/ Synchronous pooled port owning its scratch, used only above 4 KiB; never retain read/ctx, and preserve caller output on failure.
+typedef pn_status_t (*pn_identity_pooled_port_fn)(void *,uint64_t,pn_identity_read_fn,pn_book_id_t *);
+/// 启动时与stream端口配套安装；切换stream端口会清除此能力，NULL回原借用缓冲路径。/ Install alongside the stream port at startup; changing the stream port clears this capability, and NULL restores borrowed scratch.
+void pn_identity_pooled_port(pn_identity_pooled_port_fn);
 /// 对精确长度流计算摘要；调用方排除变更并在read中验证介质。/ Hash an exact-length stream; caller excludes mutation and checks media in read.
 pn_status_t pn_identity_stream(void *,uint64_t,pn_identity_read_fn,pn_book_id_t *);
-/// 临时32KiB缓冲计入pool，用后释放；准入失败退回4KiB，完整校验/取消和错误输出契约不变。
-/// Charge a temporary 32 KiB buffer to pool and release it afterwards; fall back to 4 KiB while preserving complete hashing, cancellation and error output.
+/// 自管端口可直接借其工作区；否则临时32KiB计入pool，准入失败退4KiB，保留完整校验/取消/错误输出契约。
+/// An owning port supplies its scratch directly; otherwise charge 32 KiB to pool with a 4 KiB fallback, preserving full verification/cancellation/error-output contracts.
 pn_status_t pn_identity_stream_pooled(pn_pool_t *,void *,uint64_t,pn_identity_read_fn,pn_book_id_t *);

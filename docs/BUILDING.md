@@ -27,6 +27,8 @@ $env:DOCKER_CONTEXT='desktop-linux'
 
 ## 日常命令和产物
 
+`tools/test_local_identity_scratch.py --binary build-host/test_device_identity --output build-dev/local-identity-scratch`复制并完整校验用户`testBook`与`testFont`的全部文件，每份分别在64KiB与1B池预算下比较自管DMA工作区和显式关闭能力后的原借用策略，输出明确标为同程序策略对照。可用`--baseline <独立旧产品观察器>`改为独立版本对照；不将切换同一程序的策略冒称旧固件。该工具已加入`local-samples`。观察真实设备适配器的逻辑fread次数、字节及池分配，PSA/DMA接口为替身，PSA替身暂存整个输入的主机堆在池账本之外；不是TF事务、设备总内存或耗时证据。MOBI/PDF仅参加摘要，不表示支持阅读；原件SHA必须保持。`device_identity`另检查192KiB池中150KiB界面缓存不因多余摘要缓冲被回收，关闭能力的原策略作为对照，并保留内部余量、PSRAM栈与失败退路。
+
 `tools/test_local_menu_probe.py --binary build-host/device_menu_probe`在全新一次性Docker中复制全部用户书籍，逐款把四款用户字体副本装到固定系统字库路径，驱动真实`app_main`首页/设置/传书/书库路由。每款记录冷进入和四轮往返的stdio读量、seek/stat、字体创建与字宽/光栅轮廓加载、池峰值及17张完整4bpp帧；可用`--baseline <旧输出目录>`逐字节对照。最近阅读预览由三本真实文件的元数据种入，不代表阅读位置/内容身份验收；硬件接口为替身，单调时钟记录的是主机经过时间，不能当TF/面板耗时。已加入`local-samples`；`font_cache`另检查五个不同字号的常用字符反复交替后不再加载轮廓，以及原回收/低预算/故障退路。
 
 同一入口加`--cancel-system`在首次完整字库/菜单缓存就绪后，向真实产品`system_font_ready`注入已取消的准备范围，断言退出后仍保留源/UI/池占用和READ租约；随后的同路径重试不得打开字体、读字节或新建引擎，继续核对原17张菜单帧。`local-samples`分别运行普通及取消两组，后者输出`build-dev/local-menu-cancel`。`font_identity`另查公开打开接口在入口/源验证中取消及替换请求，`device_management`在四个检查点取消，保留原失卡、坏字体及显式交接检查。这些是软件回归，不是人为取消状态下的实机速度；旧基线必须由含同一观察探针的原产品源码独立冻结，不能用新行为改名作旧版。

@@ -465,6 +465,7 @@ add_test(NAME device_time_pmu COMMAND test_device_time_pmu)
 add_executable(test_device_identity test_device_identity.c ${PN_ROOT}/main/device_identity.c)
 target_include_directories(test_device_identity BEFORE PRIVATE identity_stubs ${PN_ROOT}/main)
 target_link_libraries(test_device_identity PRIVATE pn_core)
+target_link_options(test_device_identity PRIVATE -Wl,--wrap=fread)
 add_test(NAME device_identity COMMAND test_device_identity)
 
 add_executable(test_transfer_view test_transfer_view.c)

@@ -43,7 +43,7 @@ static pn_status_t dma_stream(void *ctx,uint64_t size,pn_identity_read_fn read,p
 #define DMA_INTERNAL_RESERVE (64u*1024u)
 #define DMA_LARGEST_RESERVE (32u*1024u)
 static pn_status_t stream(void *ctx,uint64_t size,pn_identity_read_fn read,uint8_t *buffer,size_t capacity,pn_book_id_t *out){
-    if(esp_ptr_dma_capable(buffer) && !((uintptr_t)buffer&3u))return stream_impl(ctx,size,read,buffer,capacity,out);
+    if(buffer && capacity && esp_ptr_dma_capable(buffer) && !((uintptr_t)buffer&3u))return stream_impl(ctx,size,read,buffer,capacity,out);
     const uint32_t caps=MALLOC_CAP_DMA|MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT;
     if(size>4096u && heap_caps_get_largest_free_block(caps)>=DMA_STREAM_BYTES+DMA_LARGEST_RESERVE && heap_caps_get_free_size(caps)>=DMA_STREAM_BYTES+DMA_INTERNAL_RESERVE){
         uint8_t *block=heap_caps_aligned_alloc(16,DMA_STREAM_BYTES,caps);
@@ -51,6 +51,8 @@ static pn_status_t stream(void *ctx,uint64_t size,pn_identity_read_fn read,uint8
     }
     return dma_stream(ctx,size,read,out);
 }
+/// 大流由端口直接取得原DMA工作区，省去不用的池内PSRAM缓冲；内部余量门和4KiB退路不变。/ Large streams obtain the original DMA scratch directly, avoiding unused pool PSRAM; internal headroom gates and the 4 KiB fallback stay unchanged.
+static pn_status_t pooled_stream(void *ctx,uint64_t size,pn_identity_read_fn read,pn_book_id_t *out){return stream(ctx,size,read,NULL,0,out);}
 static pn_status_t probe(void *ctx,uint64_t at,uint8_t *out,size_t cap,size_t *n){
     (void)ctx;if(at>=3 || !cap)return PN_IO;*n=3-(size_t)at;if(*n>cap)*n=cap;memcpy(out,"abc"+at,*n);return PN_OK;
 }
@@ -72,6 +74,8 @@ pn_status_t pn_device_identity_init(void){
     uint8_t *external=status==PN_OK?heap_caps_malloc(64,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT):NULL;
     if(external){status=stream(NULL,8201,block_probe,external,64,&actual);heap_caps_free(external);
         if(status==PN_OK && memcmp(&expected,&actual,sizeof actual))status=PN_CORRUPT;}
-    if(status==PN_OK)pn_identity_stream_port(stream);
+    if(status==PN_OK)status=pooled_stream(NULL,8201,block_probe,&actual);
+    if(status==PN_OK && memcmp(&expected,&actual,sizeof actual))status=PN_CORRUPT;
+    if(status==PN_OK){pn_identity_stream_port(stream);pn_identity_pooled_port(pooled_stream);}
     return status;
 }
