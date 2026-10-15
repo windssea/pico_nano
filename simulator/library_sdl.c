@@ -458,10 +458,11 @@ static pn_status_t continue_book(library_t *s,uint64_t now){
 /// 原书/字体准备在首页安静且封面全部完成后进行，CLI额外补字仍走原显式配置。/ Prepare book/fonts only on a quiet Home after all covers finish; an extra CLI fallback retains explicit configuration.
 static void prepare_continue(library_t *s,uint64_t now,uint64_t activity){
     if(!s->home || !s->shelf_draw_valid || !s->covers || !s->covers->has_last || !s->covers->last.identified || (s->covers->last.format!=PN_BOOK_TXT && s->covers->last.format!=PN_BOOK_EPUB) || s->fallback_path || now<activity || now-activity<1500 || pn_cover_work_pending(&s->cover_work) || pn_shelf_covers_pending(s->covers,s->page))return;
+    if(pn_hot_session_layout_pending(&s->hot)){pn_status_t laid=pn_hot_session_layout(&s->hot,now);printf("book_layout status=%d\n",(int)laid);return;}
     if(pn_hot_session_paint_pending(&s->hot)){
         pn_status_t painted=pn_hot_session_paint(&s->hot,now,8);if(!pn_hot_session_paint_pending(&s->hot))printf("book_paint status=%d\n",(int)painted);return;
     }
-    pn_status_t status=pn_hot_session_prepare(&s->hot,s->pool,&s->media,&s->covers->last,s->font_path,s->state_dir,PN_STYLE_DEFAULT_PIXELS,1,now,activity);
+    pn_status_t status=pn_hot_session_prepare_sources(&s->hot,s->pool,&s->media,&s->covers->last,s->font_path,s->state_dir,PN_STYLE_DEFAULT_PIXELS,1,now,activity);
     if(status!=PN_EMPTY && status!=PN_BUSY)printf("book_prepare status=%d ready=%d preparations=%zu\n",(int)status,s->hot.prepared,s->hot.preparations);
 }
 /* 工具栏中当前书不能用的入口：TXT没有目录，搜索尚未实现。/ Entries unavailable for the current book: TXT has no TOC and search is not implemented. */
@@ -714,7 +715,7 @@ static int library_worker(void *ctx){
         uint32_t view=s->locked?1:s->fonts.active?2:s->toc.active?3:s->styles.active?4:s->jumpui.active?5:s->bookmarks.mode!=PN_BUI_CLOSED?6:s->actions_mode?7:s->settings.impl?8:s->wallpaper.impl?9:s->font_manage.impl?10:s->hub?11:s->index?12:s->search_open?13:s->toolbar?14:reading(s)?15:s->home?16:17;
         if(!reading(s) && !s->home && s->page)view+=(uint32_t)s->page->index*32u;
         pn_list_motion_stats_t moving=s->toc.active?pn_toc_ui_motion_stats(&s->toc):pn_font_manage_motion_stats(&s->font_manage);
-        uint64_t paint_now=SDL_GetTicks64();bool paint_work=view==16 && !s->pointer_down && atomic_load(&s->async.mouse)==0 && paint_now>=font_activity && paint_now-font_activity>=1500 && pn_hot_session_paint_pending(&s->hot);
+        uint64_t paint_now=SDL_GetTicks64();bool paint_work=view==16 && !s->pointer_down && atomic_load(&s->async.mouse)==0 && paint_now>=font_activity && paint_now-font_activity>=1500 && (pn_hot_session_layout_pending(&s->hot) || pn_hot_session_paint_pending(&s->hot));
         bool cache_work=(view==15 && pn_epub_app_cache_pending(&s->epub)) || pn_cover_work_pending(&s->cover_work) || ((view%32u==16u || view%32u==17u) && pn_shelf_covers_pending(s->covers,s->page)) || paint_work;
         SDL_Event event;bool got=pn_sdl_async_wait(&s->async,&event,moving.active || moving.coasting || cache_work?1u:100u,view,root_navigation_hit(s,80,1150)>=0);uint64_t now=SDL_GetTicks64();
         if(got && (event.type==SDL_KEYDOWN || event.type==SDL_MOUSEBUTTONDOWN || event.type==SDL_MOUSEBUTTONUP || event.type==SDL_MOUSEMOTION || event.type==SDL_QUIT || (event.type==SDL_WINDOWEVENT && event.window.event==SDL_WINDOWEVENT_FOCUS_LOST))){pn_epub_app_cache_activity(&s->epub,now);font_activity=now;}

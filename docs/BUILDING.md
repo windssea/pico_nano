@@ -27,6 +27,8 @@ $env:DOCKER_CONTEXT='desktop-linux'
 
 ## 日常命令和产物
 
+tools/test_local_system_startup.py的--staged-prepare使用产品同源的源/排版两个阶段；--sources-only在源准备后立即点击，检查0次空闲布局、1次前台布局，完整书/字体身份已就绪。--interrupt-layout --baseline-warm --baseline <独立旧观察器>在实际首屏布局完成时注入新输入取消，再点击；要求旧对象丢弃/新对象保留，点击阶段旧书SHA一次/新零次、完整三帧一致。--expect-layout用于完整候选交接，--paint-unshown继续演练原8节点正文预绘。普通PC仍重查外部修改；固定文件port仅模拟设备READ排他约束。local-samples的原准备矩阵改为分阶段，另加local-idle-source-handoff全量源后点击；中断版本对照需指定独立冻结观察器，不能把同一程序切换策略称为旧固件。hot_host/immutable另在首字度量期间及布局完成后取消，检查对象/菜单缓存保留、失败不提交进度、原帧重试及TTL/USB归还；这些是软件行为，不是TF或面板计时。
+
 `tools/test_local_identity_scratch.py --binary build-host/test_device_identity --output build-dev/local-identity-scratch`复制并完整校验用户`testBook`与`testFont`的全部文件，每份分别在64KiB与1B池预算下比较自管DMA工作区和显式关闭能力后的原借用策略，输出明确标为同程序策略对照。可用`--baseline <独立旧产品观察器>`改为独立版本对照；不将切换同一程序的策略冒称旧固件。该工具已加入`local-samples`。观察真实设备适配器的逻辑fread次数、字节及池分配，PSA/DMA接口为替身，PSA替身暂存整个输入的主机堆在池账本之外；不是TF事务、设备总内存或耗时证据。MOBI/PDF仅参加摘要，不表示支持阅读；原件SHA必须保持。`device_identity`另检查192KiB池中150KiB界面缓存不因多余摘要缓冲被回收，关闭能力的原策略作为对照，并保留内部余量、PSRAM栈与失败退路。
 
 `tools/test_local_menu_probe.py --binary build-host/device_menu_probe`在全新一次性Docker中复制全部用户书籍，逐款把四款用户字体副本装到固定系统字库路径，驱动真实`app_main`首页/设置/传书/书库路由。每款记录冷进入和四轮往返的stdio读量、seek/stat、字体创建与字宽/光栅轮廓加载、池峰值及17张完整4bpp帧；可用`--baseline <旧输出目录>`逐字节对照。最近阅读预览由三本真实文件的元数据种入，不代表阅读位置/内容身份验收；硬件接口为替身，单调时钟记录的是主机经过时间，不能当TF/面板耗时。已加入`local-samples`；`font_cache`另检查五个不同字号的常用字符反复交替后不再加载轮廓，以及原回收/低预算/故障退路。

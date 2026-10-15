@@ -88,7 +88,7 @@ add_test(NAME prefetch_quiet COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURC
 foreach(port host immutable)
     add_executable(test_hot_${port} test_hot_session.c)
     target_link_libraries(test_hot_${port} PRIVATE pn_core)
-    target_link_options(test_hot_${port} PRIVATE -Wl,--wrap=pn_font_draw -Wl,--wrap=pn_font_prerender -Wl,--wrap=fread)
+    target_link_options(test_hot_${port} PRIVATE -Wl,--wrap=pn_font_draw -Wl,--wrap=pn_font_prerender -Wl,--wrap=pn_font_advance -Wl,--wrap=fread)
     if(port STREQUAL immutable)
         target_sources(test_hot_${port} PRIVATE ${PN_ROOT}/components/pn_text/pn_text_file.c)
         target_compile_definitions(test_hot_${port} PRIVATE PN_TEST_IMMUTABLE_FILE=1)

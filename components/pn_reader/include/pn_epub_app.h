@@ -16,6 +16,8 @@
 #include "pn_toc.h"
 #include "pn_reader_app.h"
 typedef struct {void *impl;} pn_epub_app_t; ///< 初始NULL，不复制活动对象 / Initially NULL; never copy a live object
+/// 补齐未显示对象的字体身份/介质检查，不排版、不显示或写记录。/ Complete font identity/media checks on an unshown object, without layout, presentation or record writes.
+pn_status_t pn_epub_app_prepare_unshown_sources(pn_epub_app_t *);
 /// 仅未显示对象，补齐字体身份并保留首屏排版候选；不绘制、显示或写记录。/ For a never-displayed object, finish font identity and retain first-page layout without rasterization, presentation or record writes.
 pn_status_t pn_epub_app_prepare_unshown(pn_epub_app_t *);
 /// 未显示纯文字首屏仍可绘制；含图页沿原前台路径。/ Whether an unshown text-only first body can still be painted; image pages keep the foreground path.

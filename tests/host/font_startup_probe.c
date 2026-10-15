@@ -23,13 +23,14 @@ static FILE *font_handles[4];
 static const char *profile_stage="setup";
 static unsigned layout_calls;
 static unsigned glyph_loads,glyph_renders,body_hits;
+static bool interrupt_layout,layout_interrupted;
 FT_Error __real_FT_Load_Glyph(FT_Face,FT_UInt,FT_Int32);
 FT_Error __wrap_FT_Load_Glyph(FT_Face face,FT_UInt glyph,FT_Int32 flags){if(tracing){glyph_loads++;glyph_renders+=(flags&FT_LOAD_RENDER)!=0;}return __real_FT_Load_Glyph(face,glyph,flags);}
 /// 主机单调时钟仅用于阶段比较，不推导面板时延。/ Host monotonic time supports phase comparisons, never panel latency claims.
 static uint64_t profile_clock(void *ctx){(void)ctx;struct timespec t;assert(!clock_gettime(CLOCK_MONOTONIC,&t));return (uint64_t)t.tv_sec*1000000u+(uint64_t)t.tv_nsec/1000u;}
 static void profile_emit(void *ctx,const pn_profile_event_t *e){
     (void)ctx;if(!tracing)return;
-    if(!strcmp(e->phase,"txt.prepare") || !strcmp(e->phase,"txt.jump") || !strcmp(e->phase,"epub.prepare") || !strcmp(e->phase,"epub.jump"))layout_calls++;
+    if(!strcmp(e->phase,"txt.prepare") || !strcmp(e->phase,"txt.jump") || !strcmp(e->phase,"epub.prepare") || !strcmp(e->phase,"epub.jump")){layout_calls++;if(interrupt_layout && e->status==PN_OK)layout_interrupted=true;}
     if(e->status==PN_OK && (!strcmp(e->phase,"txt.first.use") || !strcmp(e->phase,"epub.first.use")))body_hits++;
     if(getenv("PN_FONT_STARTUP_PROFILE"))printf("phase stage=%s name=%s us=%llu status=%d begin=%zu end=%zu peak=%zu\n",profile_stage,e->phase,(unsigned long long)e->elapsed_us,e->status,e->begin_bytes,e->end_bytes,e->peak_bytes);
 }
@@ -38,7 +39,7 @@ static void profile_emit(void *ctx,const pn_profile_event_t *e){
 static FILE *book_handles[2];static const char *book_path;static unsigned book_opens,book_reads,book_seeks;static size_t book_read_bytes;
 static const char *fault;static pn_media_t *active_media;static bool cancel_requested,fault_fired;
 static bool is_fault(const char *name){return fault && !strcmp(fault,name);}
-static bool cancelled(void *ctx){(void)ctx;return cancel_requested;}
+static bool cancelled(void *ctx){(void)ctx;return cancel_requested || layout_interrupted;}
 static void before_hash(void){if(fault_fired)return;if(is_fault("cancel")){cancel_requested=true;fault_fired=true;}else if(is_fault("lost")){assert(pn_media_detach(active_media)==PN_OK);fault_fired=true;}}
 FILE *__real_fopen(const char *,const char *);
 FILE *__wrap_fopen(const char *path,const char *mode){FILE *f=__real_fopen(path,mode);if(f && tracing && !strcmp(path,fallback_path)){font_opens++;unsigned i=0;while(i<4 && font_handles[i])i++;assert(i<4);font_handles[i]=f;}if(f && tracing && !strcmp(path,book_path)){book_opens++;unsigned i=0;while(i<2 && book_handles[i])i++;assert(i<2);book_handles[i]=f;}if(f && state_path && !strncmp(path,state_path,strlen(state_path)) && (strchr(mode,'w') || strchr(mode,'a') || strchr(mode,'+'))){unsigned i=0;while(i<8 && writers[i])i++;assert(i<8);writers[i]=f;}return f;}
@@ -87,22 +88,33 @@ int main(int argc,char **argv){
     if(warm){
         pn_catalog_item_t item={.identified=true,.format=epub?PN_BOOK_EPUB:PN_BOOK_TXT,.size=book_size};assert(strlen(argv[1])<sizeof item.path);strcpy(item.path,argv[1]);
         assert(pn_identity_file(&media,&guard,argv[1],PN_TEXT_FILE_MAX_BYTES,&item.expected)==PN_OK);
-        profile_stage="idle";tracing=true;pn_status_t staged=pn_hot_session_prepare(&prepared,&pool,&media,&item,NULL,argv[3],44,1,0,0);tracing=false;
+        interrupt_layout=getenv("PN_FONT_STARTUP_INTERRUPT")!=NULL;
+        profile_stage="idle";tracing=true;pn_status_t staged;
+        if(getenv("PN_FONT_STARTUP_STAGED")){
+            staged=pn_hot_session_prepare_sources(&prepared,&pool,&media,&item,NULL,argv[3],44,1,0,0);
+            assert(staged==PN_OK && !layout_calls && pn_hot_session_layout_pending(&prepared));
+            printf("idle_sources layout_calls=%u retained=%d\n",layout_calls,prepared.prepared);
+            if(!getenv("PN_FONT_STARTUP_SOURCE_ONLY"))staged=pn_hot_session_layout(&prepared,0);
+        }else staged=pn_hot_session_prepare(&prepared,&pool,&media,&item,NULL,argv[3],44,1,0,0);
+        tracing=false;
+        if(interrupt_layout){assert(staged==PN_CANCELLED && layout_interrupted);printf("idle_interrupt retained=%d\n",prepared.prepared);interrupt_layout=layout_interrupted=false;}
+        else{
         if(staged!=PN_OK)fprintf(stderr,"idle_prepare failed status=%d used=%zu txt=%d epub=%d\n",(int)staged,pool.used,prepared.txt.impl!=NULL,prepared.epub.impl!=NULL);
         assert(staged==PN_OK);
+        }
         if(getenv("PN_FONT_STARTUP_PAINT")){
             unsigned steps=0;pn_status_t painted=PN_EMPTY;tracing=true;
             while(pn_hot_session_paint_pending(&prepared)){assert(steps++<4096);painted=pn_hot_session_paint(&prepared,0,8);assert(painted==PN_OK || painted==PN_NO_MEMORY || painted==PN_EMPTY);}
             tracing=false;
             printf("idle_paint steps=%u status=%d\n",steps,painted);
         }
-        assert(prepared.prepared && !presents && !state_writes && prepared.preparations==1);
+        assert(!presents && !state_writes);if(!getenv("PN_FONT_STARTUP_INTERRUPT"))assert(prepared.prepared && prepared.preparations==1);
         printf("idle_prepare book_hashes=%u font_hashes=%u book_bytes=%zu font_bytes=%zu state_writes=%zu\n",book_hashes,hashes,book_read_bytes,font_read_bytes,state_writes);
         printf("idle_layout calls=%u\n",layout_calls);layout_calls=0;
         printf("idle_glyph loads=%u renders=%u\n",glyph_loads,glyph_renders);glyph_loads=glyph_renders=0;
         hashes=book_hashes=font_opens=book_opens=book_reads=book_seeks=0;font_read_bytes=book_read_bytes=0;
     }
-    profile_stage="click";tracing=true;pn_status_t status=warm?pn_hot_session_take_prepared(&prepared,&media,argv[1],epub?PN_BOOK_EPUB:PN_BOOK_TXT,&prepared.book,1,0,&t,&e):epub?pn_epub_app_open_on_media(&e,&pool,&media,argv[1],NULL,argv[3],44,0):pn_reader_app_open_on_media(&t,&pool,&media,argv[1],NULL,argv[3],44,0);
+    profile_stage="click";tracing=true;pn_status_t status=warm && prepared.prepared?pn_hot_session_take_prepared(&prepared,&media,argv[1],epub?PN_BOOK_EPUB:PN_BOOK_TXT,&prepared.book,1,0,&t,&e):epub?pn_epub_app_open_on_media(&e,&pool,&media,argv[1],NULL,argv[3],44,0):pn_reader_app_open_on_media(&t,&pool,&media,argv[1],NULL,argv[3],44,0);
     bool expected_fallback=!primary && !is_fault("missing") && !is_fault("replaced") && !is_fault("bad-primary");
     if(status==PN_OK && expected_fallback)assert((epub?pn_epub_app_fallback_font(&e,argv[2]):pn_reader_app_fallback_font(&t,argv[2]))==PN_BUSY);
     if(status==PN_OK)status=epub?pn_epub_app_step(&e,PN_APP_OPEN,1,show,NULL):pn_reader_app_step(&t,PN_APP_OPEN,1,show,NULL);

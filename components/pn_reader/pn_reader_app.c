@@ -435,12 +435,17 @@ static pn_status_t verify_sources(app_t *a){
     return s;
 }
 static bool unshown(const app_t *a){return !a->reader.has_visible && (!a->reader.preparing || a->unshown_layout) && !a->suspended && !a->style_preview && !a->font_preview && !a->font_pending && !a->global_pending && !a->style_pending && !a->body_layer.paint && a->display.active<0 && a->display.queued<0;}
-pn_status_t pn_reader_app_prepare_unshown(pn_reader_app_t *app){
+pn_status_t pn_reader_app_prepare_unshown_sources(pn_reader_app_t *app){
     if(!app || !app->impl)return PN_INVALID;
     app_t *a=app->impl;if(!unshown(a))return PN_BUSY;
     pn_book_id_t id;pn_status_t s=a->external_font?pn_font_source_identity(&a->font_source,&id):pn_font_verify_retained(&a->body);
     if(s==PN_OK)s=pn_font_chain_validate(&a->chain);
     if(s==PN_OK)s=pn_media_validate(a->book_media,&a->book_lease);
+    return s;
+}
+pn_status_t pn_reader_app_prepare_unshown(pn_reader_app_t *app){
+    pn_status_t s=pn_reader_app_prepare_unshown_sources(app);if(s!=PN_OK)return s;
+    app_t *a=app->impl;
     if(s==PN_OK && !a->unshown_layout){
         // 不打开可写页索引，也不调用显示；候选由正常OPEN接管或直接析构。
         // Open no writable page index and never present; normal OPEN takes the candidate, or destruction releases it.

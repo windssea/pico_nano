@@ -15,9 +15,17 @@ typedef struct {
     bool prepared,tried; ///< 未显示准备与本活动周期已尝试标志 / Never-displayed preparation and attempted activity flags
     uint64_t activity,attempt_epoch,attempt_policy; ///< 一次输入安静周期/媒体/策略代次只尝试一次 / Attempt once per quiet-input activity/media/policy generation
     size_t preparations,takes; ///< 准备成功与移交次数，不是显示提交 / Successful preparations and handoffs, never presentation commits
+    pn_pool_t *prepare_pool; ///< 分阶段准备原池，须保活到drop/take / Original staged-preparation pool, alive until drop/take
+    bool layout_pending; ///< 书源/字体已完整校验，首屏可在下一轮准备或由点击接续 / Sources/fonts fully verified; first layout may run next tick or on click
 } pn_hot_session_t;
 /// 首页空闲只读准备已识别的继续阅读书；不显示/写记录，旧缓存pin保护，不足退EMPTY；同activity/epoch仅一次。/ Read-only idle preparation for an identified continue book; no display/record writes, pin existing caches, EMPTY on admission refusal, once per activity/epoch.
 pn_status_t pn_hot_session_prepare(pn_hot_session_t *,pn_pool_t *,pn_media_t *,const pn_catalog_item_t *,const char *font,const char *state,int pixels,uint64_t policy,uint64_t now,uint64_t activity);
+/// 只完成原书/字体构造与强身份检查，不排首屏；成功即可take，正常OPEN补剩余工作。SHA/构造仍同步。/ Construct and strongly verify book/fonts without first layout; success permits take and normal OPEN finishes remaining work. Hashing/construction remain synchronous.
+pn_status_t pn_hot_session_prepare_sources(pn_hot_session_t *,pn_pool_t *,pn_media_t *,const pn_catalog_item_t *,const char *font,const char *state,int pixels,uint64_t policy,uint64_t now,uint64_t activity);
+/// 纯查询已校验源是否待排版；不做IO。/ Query verified sources awaiting layout, without I/O.
+bool pn_hot_session_layout_pending(const pn_hot_session_t *);
+/// 下一安静轮准备首屏，保护旧菜单cache；取消保留已验证对象与可用候选，其他错误释放，仍不显示/写记录。/ Prepare first layout next quiet tick with old menu caches protected; cancellation retains verified objects/usable candidates, other errors release them, without presenting/record writes.
+pn_status_t pn_hot_session_layout(pn_hot_session_t *,uint64_t now);
 /// 仅查询未显示正文是否有可选绘制，不做IO。/ Query optional unshown-body painting without I/O.
 bool pn_hot_session_paint_pending(const pn_hot_session_t *);
 /// 安静期每步至多8节点，原帧/原池并保留管理余量；不呈现或写记录。/ At most eight nodes per quiet step in the original frame/pool with management headroom; never present or write records.

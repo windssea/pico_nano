@@ -558,12 +558,17 @@ static pn_status_t verify_sources(app_t *a,bool require_ui){
     return s;
 }
 static bool unshown(const app_t *a){return !a->has_visible && (!a->page.valid || a->unshown_layout) && !a->suspended && !a->style_preview && !a->font_preview && !a->font_pending && !a->global_pending && !a->style_pending && !a->body_layer.paint && a->display.active<0 && a->display.queued<0;}
-pn_status_t pn_epub_app_prepare_unshown(pn_epub_app_t *app){
+pn_status_t pn_epub_app_prepare_unshown_sources(pn_epub_app_t *app){
     if(!app || !app->impl)return PN_INVALID;
     app_t *a=app->impl;if(!unshown(a))return PN_BUSY;
     pn_book_id_t id;pn_status_t s=pn_font_source_identity(&a->font_source,&id);
     if(s==PN_OK)s=pn_font_chain_validate(&a->chain);
     if(s==PN_OK)s=pn_media_validate(a->media,&a->book_lease);
+    return s;
+}
+pn_status_t pn_epub_app_prepare_unshown(pn_epub_app_t *app){
+    pn_status_t s=pn_epub_app_prepare_unshown_sources(app);if(s!=PN_OK)return s;
+    app_t *a=app->impl;
     if(s==PN_OK && !a->unshown_layout){
         // 保留真实reader的首屏候选，不伪造呈现或创建持久索引。
         // Retain the real reader's first-page candidate without fake presentation or persistent-index creation.
