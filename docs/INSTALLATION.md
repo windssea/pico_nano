@@ -1,6 +1,6 @@
 # PicoNano 安装、异机升级与发布
 
-更新：2026-10-14。默认通过电脑 Chrome/Edge 的 Web Serial 升级，在线入口为[网页安装器](https://windssea.github.io/pico_nano/)。当前默认固件及完整刷入版本 `0.6.6+4e02139`，具体源码来源以下载清单的`source_commit`为准（开机右下角与“设置 → 存储与关于”显示版本号）。网页安装与设备无线OTA是不同能力，当前没有已交付的OTA原子回滚。
+更新：2026-10-15。默认通过电脑 Chrome/Edge 的 Web Serial 升级，在线入口为[网页安装器](https://windssea.github.io/pico_nano/)。本批目标版本为 `0.6.8`，以在线清单实际可选版本及下载清单的`source_commit`为准（开机右下角与“设置 → 存储与关于”显示版本号）。网页安装与设备无线OTA是不同能力，当前没有已交付的OTA原子回滚。
 
 ## 另一台电脑网页升级
 
