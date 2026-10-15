@@ -14,7 +14,7 @@ def main():
         count=sum(p.suffix.lower() in ('.txt','.epub','.pdf','.fb2','.cbz') for p in books)
         cover_count=sum(p.suffix.lower() in ('.txt','.epub') for p in books)
         for cols in (3,4):
-            state=root/f'state-{cols}';cache=root/f'cache-{cols}';cache.mkdir();per=cols*3
+            state=root/f'state-{cols}';state.mkdir();cache=root/f'cache-{cols}';cache.mkdir();per=cols*3
             for warm in (False,True):
                 name=f'{cols}-'+('warm' if warm else 'cold');wait=1800 if warm else 6500
                 appearance='settings,tap:100:450,tap:550:240,back,back,' if cols==4 and not warm else ''
