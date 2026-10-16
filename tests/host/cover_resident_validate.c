@@ -46,7 +46,7 @@ static void compare(const char *name,pn_shelf_covers_t *actual,pn_shelf_covers_t
 static bool cancel(void *ctx){unsigned *calls=ctx;return ++*calls>=3;}
 int main(int argc,char **argv){
     assert(argc>=3 && argc<=15);pn_pool_t pool;assert(pn_pool_init(&pool,6u*1024u*1024u,NULL,NULL,NULL)==PN_OK);
-    assert(sizeof(pn_shelf_covers_t)<384u*1024u);pn_media_t media;pn_media_init(&media);assert(pn_media_attach(&media,1)==PN_OK);
+    assert(sizeof(pn_shelf_covers_t)<700u*1024u);pn_media_t media;pn_media_init(&media);assert(pn_media_attach(&media,1)==PN_OK);
     pn_catalog_page_t *full=pn_alloc(&pool,sizeof *full),*shown=pn_alloc(&pool,sizeof *shown);assert(full && shown);memset(full,0,sizeof *full);
     size_t books=(size_t)argc-2;full->count=books>12?12:books;full->total=full->count;full->per_page=full->count;
     pn_catalog_item_t last={0};
@@ -76,6 +76,19 @@ int main(int argc,char **argv){
     compare("return",actual,expected,full,&last,&pool,&media,argv[1],&font,&a,&b,true);
     compare("duplicate",actual,expected,full,&full->items[0],&pool,&media,argv[1],&font,&a,&b,true);
     compare("last-return",actual,expected,full,&last,&pool,&media,argv[1],&font,&a,&b,false);
+    // 跨页往返：两页都见过后，备用槽保留已验证封面，再次翻回不读磁盘缓存。
+    // Cross-page round trips: once both pages were seen, spare slots keep verified covers so flipping back reads no disk caches.
+    if(full->count>=4){
+        pn_catalog_page_t *first=malloc(sizeof *first),*second=malloc(sizeof *second);assert(first && second);
+        *first=*full;*second=*full;first->count=full->count/2;second->count=full->count-first->count;
+        for(size_t i=0;i<second->count;i++)second->items[i]=full->items[first->count+i];
+        first->total=first->per_page=first->count;second->total=second->per_page=second->count;
+        compare("page-a",actual,expected,first,&last,&pool,&media,argv[1],&font,&a,&b,false);
+        compare("page-b",actual,expected,second,&last,&pool,&media,argv[1],&font,&a,&b,false);
+        compare("page-a-again",actual,expected,first,&last,&pool,&media,argv[1],&font,&a,&b,true);
+        compare("page-b-again",actual,expected,second,&last,&pool,&media,argv[1],&font,&a,&b,true);
+        free(first);free(second);
+    }
     // 取消和USB栅栏不能破坏原内存槽；换代必须重新校验磁盘缓存。/ Cancellation and USB fencing preserve original slots; a new media generation must revalidate disk caches.
     pn_shelf_covers_t *saved=malloc(sizeof *saved);assert(saved);memcpy(saved,actual,sizeof *saved);bool changed;unsigned calls=0;pn_cancel_scope_t scope;pn_cancel_enter(&scope,cancel,&calls);
     assert(pn_shelf_covers_bind(actual,full,&last,&pool,&media,argv[1],&changed)==PN_CANCELLED);pn_cancel_leave(&scope);assert(!memcmp(saved,actual,sizeof *saved));

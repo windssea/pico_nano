@@ -14,6 +14,8 @@
 #define PN_COVER_BYTES (PN_COVER_WIDTH*PN_COVER_HEIGHT/2)
 #define PN_COVER_CACHE_VERSION 6 ///< ZIP兼容及提取修正后重建失败记录 / Rebuild failure records after ZIP compatibility and extraction fixes
 #define PN_COVER_SLOT_LAST PN_CATALOG_PAGE_MAX ///< 最近阅读卡使用的额外槽 / Extra slot used by the continue-reading card
+#define PN_COVER_SPARE 15 ///< 跨页暂存已验证封面的备用槽，三页九格可全部常驻 / Spare slots keeping verified covers across pages, enough for three nine-cover pages
+#define PN_COVER_SLOTS (PN_COVER_SLOT_LAST+1+PN_COVER_SPARE) ///< 当前页+继续阅读+备用 / Current page + continue reading + spares
 
 /// 单书封面状态。/ Per-book cover state.
 typedef enum {
@@ -29,24 +31,24 @@ typedef struct {
     char author[512]; ///< OPF作者，不从文件名猜测 / OPF author, never guessed from filenames
 } pn_book_display_t;
 
-/// 当前书目页最多十二条封面槽外加一个“继续阅读”槽，调用方拥有，可放pool或静态区。
-/// Up to twelve cover slots for the current catalog page plus one continue-reading slot, caller-owned in pool or static storage.
+/// 当前书目页最多十二条封面槽、一个“继续阅读”槽及跨页备用槽，调用方拥有，可放pool或静态区。
+/// Up to twelve cover slots for the current catalog page, one continue-reading slot and cross-page spares, caller-owned in pool or static storage.
 typedef struct {
-    uint8_t pixels[PN_CATALOG_PAGE_MAX+1][PN_COVER_BYTES]; ///< 4bpp行内低半字节在左 / 4bpp rows, left pixel in low nibble
-    pn_cover_state_t state[PN_CATALOG_PAGE_MAX+1]; ///< 每槽状态 / Per-slot state
-    pn_status_t reason[PN_CATALOG_PAGE_MAX+1]; ///< 最后一次提取结果 / Last extraction status
-    pn_book_display_t display[PN_CATALOG_PAGE_MAX+1]; ///< 当前槽展示快照 / Current slot display snapshots
+    uint8_t pixels[PN_COVER_SLOTS][PN_COVER_BYTES]; ///< 4bpp行内低半字节在左 / 4bpp rows, left pixel in low nibble
+    pn_cover_state_t state[PN_COVER_SLOTS]; ///< 每槽状态 / Per-slot state
+    pn_status_t reason[PN_COVER_SLOTS]; ///< 最后一次提取结果 / Last extraction status
+    pn_book_display_t display[PN_COVER_SLOTS]; ///< 当前槽展示快照 / Current slot display snapshots
     bool has_last; ///< last有效 / last is valid
     pn_catalog_item_t last; ///< 继续阅读的书（路径、名称、进度） / The continue-reading book (path, name, progress)
-    uint16_t cache_dirty; ///< 已验证待写槽，重绑随来源移动，离页不继续写 / Verified pending writes move with their sources on rebind; off-page writes stop
-    uint8_t cache_key[PN_CATALOG_PAGE_MAX+1][33]; ///< 重试与内存复用的来源快照，不是书籍身份 / Source snapshots for retries and resident reuse, never book identity
-    size_t cache_budget[PN_CATALOG_PAGE_MAX+1]; ///< 失败结论的原解码预算 / Original decode budget for failure outcomes
-    uint8_t resident_path_hash[PN_CATALOG_PAGE_MAX+1][32]; ///< 完整路径字符串的SHA，仅匹配封面来源，不是书籍内容身份 / SHA of the full path string for cover-source matching, never book content identity
-    pn_book_format_t resident_format[PN_CATALOG_PAGE_MAX+1]; ///< 已验证槽的格式 / Format of each verified slot
+    uint32_t cache_dirty; ///< 已验证待写槽，重绑随来源移动，离页不继续写 / Verified pending writes move with their sources on rebind; off-page writes stop
+    uint8_t cache_key[PN_COVER_SLOTS][33]; ///< 重试与内存复用的来源快照，不是书籍身份 / Source snapshots for retries and resident reuse, never book identity
+    size_t cache_budget[PN_COVER_SLOTS]; ///< 失败结论的原解码预算 / Original decode budget for failure outcomes
+    uint8_t resident_path_hash[PN_COVER_SLOTS][32]; ///< 完整路径字符串的SHA，仅匹配封面来源，不是书籍内容身份 / SHA of the full path string for cover-source matching, never book content identity
+    pn_book_format_t resident_format[PN_COVER_SLOTS]; ///< 已验证槽的格式 / Format of each verified slot
     pn_media_t *resident_media; ///< 可重用像素所属介质对象 / Media object owning reusable pixels
     uint64_t resident_epoch,resident_media_id; ///< 像素所属介质代次与实例号 / Media generation and instance ID owning the pixels
-    uint16_t resident_valid; ///< 路径、来源键和当前像素/结论一致的槽 / Slots whose path, source key and current pixels/outcome agree
-    uint16_t resident_deferred; ///< 离页暂停的待写资格，重绑回来再写 / Pending persistence paused off-page, resumed when rebound
+    uint32_t resident_valid; ///< 路径、来源键和当前像素/结论一致的槽 / Slots whose path, source key and current pixels/outcome agree
+    uint32_t resident_deferred; ///< 离页暂停的待写资格，重绑回来再写 / Pending persistence paused off-page, resumed when rebound
 } pn_shelf_covers_t;
 
 /// 产品owner持有的可暂停缓存写入；零初始化，释放池/介质前abort。/ Resumable cache writer owned by the product owner; zero-initialize and abort before releasing pool/media.

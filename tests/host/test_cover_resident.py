@@ -13,7 +13,7 @@ for count in (1,2,13):
             path=root/f'boundary-{index}.txt';path.write_text('Boundary fixture.\n',encoding='utf8');path.with_suffix('.png').write_bytes(png(index*19));books.append(path)
         r=subprocess.run([sys.argv[1],str(cache),*map(str,books)],capture_output=True,text=True,timeout=120)
         assert r.returncode==0,(r.stdout[-2000:],r.stderr[-3000:])
-        assert r.stdout.count('exact_frames=1')==41 and 'used=0 live=0 cancellation=1 usb_fence=1 source_change=1' in r.stdout,r.stdout
+        assert r.stdout.count('exact_frames=1')==(45 if min(count,12)>=4 else 41) and 'used=0 live=0 cancellation=1 usb_fence=1 source_change=1' in r.stdout,r.stdout
         print(r.stdout)
         # 另走实际延后写入任务，确认离页后返回仍完整落盘。/ Exercise the real deferred writer separately and require complete persistence after leaving and returning.
         before,after=root/'before',root/'after'
