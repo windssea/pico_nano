@@ -594,7 +594,9 @@ static void show_lock(const char *hint){
         // 只在锁屏解码/合成，底图取成功正文副本，绝不修改阅读器帧。 / Decode/composite only while locking, using a confirmed text copy without modifying reader pixels.
         pn_status_t mask=PN_EMPTY;
         if(reader_suspended && page_copy && pn_sd_resource_path(selection.source,PN_SD_WALLPAPERS)){
-            mask=pn_wallpaper_mask_open_cached(&lock_mask,&pool,&sd_media,&selection,PN_SD_MOUNT "/" PN_SD_MASK_CACHE);
+            // 缓存放内部壁纸分区：锁屏时书仍持TF读租约，TF上的缓存永远写不进（真机每次重解码约3.9s）。
+            // Cache on the internal wallpaper partition: the open book still holds a TF read lease while locking, so a TF cache could never be written (about 3.9 s re-decode per lock on hardware).
+            mask=pn_wallpaper_mask_open_stored(&lock_mask,&pool,&sd_media,&selection,&wallpaper_media,"/wallpaper");
             if(mask==PN_OK){memcpy(frame.pixels,page_copy,PN_WALLPAPER_BYTES);mask=pn_wallpaper_mask_paint(&lock_mask,&frame);}
         }
         pn_wallpaper_mask_close(&lock_mask);
@@ -1105,19 +1107,27 @@ static bool prepare_lock(void){
     if(status==PN_BUSY || status==PN_EMPTY)return stop_reader();
     ESP_LOGE(TAG,"Warm save barrier failed: %d",(int)status);message("保存失败","当前位置仍保留，稍后重试");return false;
 }
+static bool lock_slept; ///< 最近一次锁屏确实进入了睡眠等待 / The latest lock actually entered the sleep wait
 static void resume_reader(void){
     clock_tick(now_ms());pn_w_set_battery(battery_percent());
     if(reader_suspended){
         read_pico_sd_info_t card={0};esp_err_t checked=read_pico_sd_get_info(&card);
-        if(checked==ESP_OK && card.mounted && pn_device_sleep_media_unchanged()){
+        // 锁页绘制中再按电源键会跳过睡眠，介质不可能变化；不能读取上一次（或初始false）的睡眠结论。
+        // A power press while the lock page is drawing skips sleep, so the media cannot have changed; never reuse the previous (or initial false) sleep verdict.
+        bool unchanged=!lock_slept || pn_device_sleep_media_unchanged();
+        if(checked==ESP_OK && card.mounted && unchanged){
             pn_status_t status=epub.impl?pn_epub_app_resume(&epub,now_ms(),present,NULL):pn_reader_app_resume(&reader,now_ms(),present,NULL);
             if(status==PN_OK){reader_suspended=false;locked=false;status_page=false;shelf_mode=false;ESP_LOGI(TAG,"Warm reader resumed without reopening book");return;}
             if(status!=PN_STALE_MEDIA && status!=PN_STALE_JOB){
                 locked=true;ESP_LOGW(TAG,"Warm display restore failed: %d; power key retries retained page",(int)status);return;
             }
         }
-        if(checked!=ESP_OK || !card.mounted || !pn_device_sleep_media_unchanged()){
+        if(checked!=ESP_OK || !card.mounted || !unchanged){
+            // 与拔卡相同：关闭书并释放系统字库的TF租约，start_reader才能重新挂载并完整校验后重开；否则旧租约令挂载BUSY、所有界面STALE而卡死在锁屏。
+            // Same as card removal: close the book and release the system font's TF leases so start_reader can remount and reopen with full verification; otherwise stale leases make the mount BUSY and every screen STALE, freezing on the lock page.
             if(epub.impl)(void)pn_epub_app_media_lost(&epub);else (void)pn_reader_app_media_lost(&reader);
+            reader_suspended=false;(void)stop_reader();system_font_release();
+            if(sd_media.available)(void)pn_media_detach(&sd_media);
         }
     }
     locked=false;start_reader();
@@ -1132,6 +1142,7 @@ static void lock_and_sleep_impl(const char *hint){
     // With the input owner paused, discard input from lock-page presentation, especially power shorts that would relock after waking.
     pn_device_input_event_t stale;while(pn_device_async_take(&async_port,&stale)!=PN_EMPTY)if(stale.kind==PN_DASYNC_POWER && stale.at>lock_at)wake_pending=true;
     // 锁页扫描期间的新短按仍表示解锁，不与触发锁屏的旧事件一起丢弃。/ A new short press during lock-page scanning still requests unlock, unlike stale lock-trigger events.
+    lock_slept=!wake_pending;
     if(wake_pending || pn_device_sleep_until_key()){last_input=now_ms();ESP_LOGI(TAG,"Wake key accepted at %llu ms",(unsigned long long)last_input);resume_reader();}
     if(!pn_device_async_pause(&async_port,false))ESP_LOGW(TAG,"Input resume acknowledgement timed out");
 }

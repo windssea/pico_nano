@@ -105,8 +105,10 @@ pn_status_t pn_wallpaper_mask_render(const pn_frame_t *gray,const pn_frame_t *al
 // 遮罩预处理缓存：原图路径/大小/mtime/变换/算法版本为键，与书封缓存相同，只是可重建显示缓存，不当内容身份。
 // Mask preprocessing cache keyed by source path/size/mtime/transform/algorithm version like the cover cache; a rebuildable display cache, never a content identity.
 #define MASK_MAGIC "PNMK"
-#define MASK_VERSION 1u
+#define MASK_VERSION 2u ///< v2：PackBits流，内部分区也放得下 / v2: PackBits stream that fits internal partitions
 #define MASK_HEADER (4+2+2+2+8+8+1+1+1+2)
+#define MASK_PLANES (2u*PN_WALLPAPER_BYTES)
+#define MASK_CHUNK 4096u
 static void mput(uint8_t *p,uint64_t v,unsigned n){for(unsigned i=0;i<n;i++)p[i]=(uint8_t)(v>>(8*i));}
 static uint64_t mget(const uint8_t *p,unsigned n){uint64_t v=0;for(unsigned i=0;i<n;i++)v|=(uint64_t)p[i]<<(8*i);return v;}
 static uint32_t mcrc(uint32_t crc,const uint8_t *p,size_t n){
@@ -114,48 +116,83 @@ static uint32_t mcrc(uint32_t crc,const uint8_t *p,size_t n){
     if(!ready){for(uint32_t i=0;i<256;i++){uint32_t v=i;for(unsigned b=0;b<8;b++)v=(v>>1)^(0xedb88320u&(0u-(v&1u)));table[i]=v;}ready=true;}
     crc=~crc;for(size_t i=0;i<n;i++)crc=table[(crc^p[i])&255u]^(crc>>8);return ~crc;
 }
-static bool mask_cache_path(const char *dir,const char *source,char *out,size_t cap,const char *suffix){
-    uint64_t h=1469598103934665603u;for(const unsigned char *c=(const unsigned char *)source;*c;c++){h^=*c;h*=1099511628211u;}
-    int n=snprintf(out,cap,"%s/%016llx.pnm%s",dir,(unsigned long long)h,suffix);return n>=0 && (size_t)n<cap;
+// 只保留当前一张遮罩的缓存，换图即覆盖，避免内部小分区堆积旧文件。/ Keep the cache for the current mask only, overwritten on change, so small internal partitions never accumulate stale files.
+static bool mask_cache_path(const char *dir,char *out,size_t cap,const char *suffix){
+    int n=snprintf(out,cap,"%s/" PN_WALLPAPER_MASK_CACHE "%s",dir,suffix);return n>=0 && (size_t)n<cap;
 }
 static void mask_header(uint8_t *p,const struct stat *info,const pn_wallpaper_transform_t *t,size_t length){
     memcpy(p,MASK_MAGIC,4);mput(p+4,MASK_VERSION,2);mput(p+6,W,2);mput(p+8,H,2);mput(p+10,(uint64_t)info->st_size,8);mput(p+18,(uint64_t)(int64_t)info->st_mtime,8);
     p[26]=t->rotation;p[27]=(uint8_t)t->fit;p[28]=(uint8_t)t->shift;mput(p+29,length,2);
 }
-/// 命中OK并写入两平面；缺失或键不符EMPTY；损坏CORRUPT。失败不改平面以外的状态。/ Hit OK filling both planes; missing or key mismatch EMPTY; damage CORRUPT.
+/// PackBits流式编码到输出块，满块回调写出；返回编码字节数或0表示写失败。/ Stream PackBits into an output block, flushing full blocks; returns the encoded size, or 0 on a write failure.
+typedef struct {FILE *file;uint8_t block[MASK_CHUNK];size_t used,total;uint32_t crc;bool failed;} packer_t;
+static void pack_put(packer_t *k,const uint8_t *data,size_t n){
+    while(n && !k->failed){size_t take=MASK_CHUNK-k->used<n?MASK_CHUNK-k->used:n;memcpy(k->block+k->used,data,take);k->used+=take;data+=take;n-=take;
+        if(k->used==MASK_CHUNK){k->crc=mcrc(k->crc,k->block,k->used);k->failed=fwrite(k->block,1,k->used,k->file)!=k->used;k->total+=k->used;k->used=0;}}
+}
+static void pack(packer_t *k,const uint8_t *in,size_t n){
+    size_t i=0;
+    while(i<n){size_t run=1;while(i+run<n && run<128 && in[i+run]==in[i])run++;
+        if(run>=2){uint8_t head[2]={(uint8_t)(257u-run),in[i]};pack_put(k,head,2);i+=run;continue;}
+        size_t lit=1;while(i+lit<n && lit<128 && !(i+lit+1<n && in[i+lit]==in[i+lit+1]))lit++;
+        uint8_t head=(uint8_t)(lit-1u);pack_put(k,&head,1);pack_put(k,in+i,lit);i+=lit;}
+}
+/// 命中OK并写入两平面；缺失或键不符EMPTY；损坏CORRUPT。只用4KiB读缓冲。/ Hit OK filling both planes; missing or key mismatch EMPTY; damage CORRUPT. Uses only a 4 KiB read buffer.
 static pn_status_t mask_cache_load(pn_media_t *media,const pn_media_lease_t *lease,const char *dir,const pn_lock_selection_t *s,uint8_t *planes){
     struct stat info;char path[PN_WALLPAPER_PATH_MAX+64];size_t length=strlen(s->source);
-    if(!mask_cache_path(dir,s->source,path,sizeof path,"") || length>=PN_WALLPAPER_PATH_MAX)return PN_LIMIT;
+    if(!mask_cache_path(dir,path,sizeof path,"") || length>=PN_WALLPAPER_PATH_MAX)return PN_LIMIT;
     if(stat(s->source,&info) || !S_ISREG(info.st_mode))return PN_EMPTY;
-    uint8_t expected[MASK_HEADER+PN_WALLPAPER_PATH_MAX],stored[MASK_HEADER+PN_WALLPAPER_PATH_MAX],tail[5];mask_header(expected,&info,&s->transform,length);memcpy(expected+MASK_HEADER,s->source,length);
+    uint8_t expected[MASK_HEADER+PN_WALLPAPER_PATH_MAX],stored[MASK_HEADER+PN_WALLPAPER_PATH_MAX];mask_header(expected,&info,&s->transform,length);memcpy(expected+MASK_HEADER,s->source,length);
     pn_status_t status=pn_media_validate(media,lease);FILE *file=status==PN_OK?fopen(path,"rb"):NULL;
     if(status==PN_OK && !file)return errno==ENOENT?PN_EMPTY:PN_IO;
     if(status!=PN_OK)return status;
     size_t head=MASK_HEADER+length;
     if(fread(stored,1,head,file)!=head)status=PN_CORRUPT;
     else if(memcmp(stored,expected,head))status=memcmp(stored,MASK_MAGIC,4)?PN_CORRUPT:PN_EMPTY;
-    else if(fread(planes,1,2u*PN_WALLPAPER_BYTES,file)!=2u*PN_WALLPAPER_BYTES || fread(tail,1,sizeof tail,file)!=4)status=PN_CORRUPT;
-    else if(mget(tail,4)!=mcrc(mcrc(0,stored,head),planes,2u*PN_WALLPAPER_BYTES))status=PN_CORRUPT;
-    if(ferror(file))status=PN_IO;
+    else{
+        // 流式解码：控制字节可跨读块，状态保存在literal/repeat剩余量。/ Streaming decode: control bytes may span blocks, with state kept in the remaining literal/repeat counts.
+        static uint8_t chunk[MASK_CHUNK];uint32_t crc=mcrc(0,stored,head);size_t out=0,consumed=0,literal=0,repeat=0;bool want_value=false;
+        while(status==PN_OK && out<MASK_PLANES){size_t n=fread(chunk,1,MASK_CHUNK,file);if(!n){status=PN_CORRUPT;break;}
+            size_t i=0;
+            while(i<n && out<MASK_PLANES){uint8_t c=chunk[i];
+                if(literal){planes[out++]=c;literal--;i++;continue;}
+                if(want_value){size_t r=repeat<MASK_PLANES-out?repeat:MASK_PLANES-out;memset(planes+out,c,r);out+=r;want_value=false;repeat=0;i++;continue;}
+                i++;if(c<128)literal=(size_t)c+1u;else if(c>128){repeat=257u-c;want_value=true;}}
+            crc=mcrc(crc,chunk,i);consumed+=i;
+            // 平面填满时剩余字节属于尾部，回退到尾部起点。/ Once planes are full the rest belongs to the tail, so seek back to its start.
+            if(out==MASK_PLANES && (literal || want_value))status=PN_CORRUPT;
+            else if(out==MASK_PLANES && fseek(file,(long)(head+consumed),SEEK_SET))status=PN_IO;}
+        uint8_t tail[9];
+        if(status==PN_OK && fread(tail,1,sizeof tail,file)!=8)status=PN_CORRUPT;
+        if(status==PN_OK && (mget(tail,4)!=consumed || mget(tail+4,4)!=crc))status=PN_CORRUPT;}
+    if(ferror(file) && status==PN_OK)status=PN_IO;
     if(fclose(file) && status==PN_OK)status=PN_IO;
     if(status==PN_OK)status=pn_media_validate(media,lease);
     return status;
 }
-/// 先写临时文件并同步再替换；失败最多丢缓存。/ Write and sync a temporary file, then replace; failures lose at most the cache.
+/// 先写临时文件并同步再替换；失败最多丢缓存，空间不足只删临时文件。/ Write and sync a temporary file, then replace; failures lose at most the cache, and a full volume only removes the temporary file.
 static pn_status_t mask_cache_store(pn_media_t *media,const pn_media_lease_t *lease,const char *dir,const pn_lock_selection_t *s,const uint8_t *planes){
     struct stat info;char path[PN_WALLPAPER_PATH_MAX+64],temporary[PN_WALLPAPER_PATH_MAX+64],parent[PN_WALLPAPER_PATH_MAX+64];size_t length=strlen(s->source);
-    if(!mask_cache_path(dir,s->source,path,sizeof path,"") || !mask_cache_path(dir,s->source,temporary,sizeof temporary,".tmp") || length>=PN_WALLPAPER_PATH_MAX || strlen(dir)>=sizeof parent)return PN_LIMIT;
+    if(!mask_cache_path(dir,path,sizeof path,"") || !mask_cache_path(dir,temporary,sizeof temporary,".tmp") || length>=PN_WALLPAPER_PATH_MAX || strlen(dir)>=sizeof parent)return PN_LIMIT;
     if(stat(s->source,&info) || !S_ISREG(info.st_mode))return PN_EMPTY;
-    uint8_t header[MASK_HEADER+PN_WALLPAPER_PATH_MAX],tail[4];mask_header(header,&info,&s->transform,length);memcpy(header+MASK_HEADER,s->source,length);
-    size_t head=MASK_HEADER+length;mput(tail,mcrc(mcrc(0,header,head),planes,2u*PN_WALLPAPER_BYTES),4);
+    uint8_t header[MASK_HEADER+PN_WALLPAPER_PATH_MAX];mask_header(header,&info,&s->transform,length);memcpy(header+MASK_HEADER,s->source,length);
+    size_t head=MASK_HEADER+length;
     pn_status_t status=pn_media_validate(media,lease);
     strcpy(parent,dir);char *slash=strrchr(parent,'/');
     if(status==PN_OK && slash && slash!=parent){*slash=0;if(mkdir(parent,0775) && errno!=EEXIST)status=PN_IO;}
     if(status==PN_OK && mkdir(dir,0775) && errno!=EEXIST)status=PN_IO;
-    FILE *file=status==PN_OK?fopen(temporary,"wb"):NULL;if(status==PN_OK && !file)status=PN_IO;
-    if(file){if(fwrite(header,1,head,file)!=head || fwrite(planes,1,2u*PN_WALLPAPER_BYTES,file)!=2u*PN_WALLPAPER_BYTES || fwrite(tail,1,4,file)!=4 || fflush(file) || fsync(fileno(file)))status=PN_IO;if(fclose(file))status=PN_IO;}
-    if(status==PN_OK)status=pn_media_validate(media,lease);
+    // 旧缓存先删除，内部分区需要它的空间写新文件。/ Remove the old cache first; internal partitions need its space for the new file.
     if(status==PN_OK && remove(path) && errno!=ENOENT)status=PN_IO;
+    FILE *file=status==PN_OK?fopen(temporary,"wb"):NULL;if(status==PN_OK && !file)status=PN_IO;
+    static packer_t packer;
+    if(file){packer=(packer_t){.file=file,.crc=mcrc(0,header,head)};
+        if(fwrite(header,1,head,file)!=head)status=PN_IO;
+        if(status==PN_OK){pack(&packer,planes,MASK_PLANES);
+            if(!packer.failed && packer.used){packer.crc=mcrc(packer.crc,packer.block,packer.used);packer.failed=fwrite(packer.block,1,packer.used,file)!=packer.used;packer.total+=packer.used;}
+            uint8_t tail[8];mput(tail,packer.total,4);mput(tail+4,packer.crc,4);
+            if(packer.failed || fwrite(tail,1,8,file)!=8 || fflush(file) || fsync(fileno(file)))status=PN_IO;}
+        if(fclose(file))status=PN_IO;}
+    if(status==PN_OK)status=pn_media_validate(media,lease);
     if(status==PN_OK && rename(temporary,path))status=PN_IO;
     if(status!=PN_OK && file)(void)remove(temporary);
     return status;
@@ -165,7 +202,10 @@ pn_status_t pn_wallpaper_mask_open(pn_wallpaper_mask_t *mask,pn_pool_t *pool,pn_
     return pn_wallpaper_mask_open_cached(mask,pool,media,selection,NULL);
 }
 pn_status_t pn_wallpaper_mask_open_cached(pn_wallpaper_mask_t *mask,pn_pool_t *pool,pn_media_t *media,const pn_lock_selection_t *selection,const char *cache_dir){
-    if(!mask || !pool || !media || !selection || selection->mode!=PN_LOCK_MASK || (cache_dir && !*cache_dir))return PN_INVALID;
+    return pn_wallpaper_mask_open_stored(mask,pool,media,selection,cache_dir?media:NULL,cache_dir);
+}
+pn_status_t pn_wallpaper_mask_open_stored(pn_wallpaper_mask_t *mask,pn_pool_t *pool,pn_media_t *media,const pn_lock_selection_t *selection,pn_media_t *cache_media,const char *cache_dir){
+    if(!mask || !pool || !media || !selection || selection->mode!=PN_LOCK_MASK || (cache_dir && (!*cache_dir || !cache_media)))return PN_INVALID;
     if(mask->impl)return PN_BUSY;
     mask_t *m=pn_alloc_tagged(pool,PN_MEM_UI,sizeof *m);if(!m)return PN_NO_MEMORY;memset(m,0,sizeof *m);
     m->pixels=pn_alloc_tagged(pool,PN_MEM_UI,3u*PN_WALLPAPER_BYTES);
@@ -173,15 +213,18 @@ pn_status_t pn_wallpaper_mask_open_cached(pn_wallpaper_mask_t *mask,pn_pool_t *p
     (void)pn_frame_bind(&m->gray,m->pixels,PN_WALLPAPER_BYTES,W,H);
     (void)pn_frame_bind(&m->alpha,m->pixels+PN_WALLPAPER_BYTES,PN_WALLPAPER_BYTES,W,H);
     (void)pn_frame_bind(&m->shown,m->pixels+2u*PN_WALLPAPER_BYTES,PN_WALLPAPER_BYTES,W,H);
-    pn_media_lease_t lease;pn_status_t s=pn_media_acquire(media,PN_MEDIA_READ,&lease);bool hit=false;
-    if(s==PN_OK){
-        // 缓存命中只读两平面，不再解码原图；未命中或损坏回到完整预处理。/ A cache hit reads both planes without decoding; misses or damage fall back to full preprocessing.
-        if(cache_dir)hit=mask_cache_load(media,&lease,cache_dir,selection,m->pixels)==PN_OK;
-        if(!hit){size_t free_bytes=pool->limit>pool->used?pool->limit-pool->used:0;
-            s=pn_wallpaper_mask_prepare(pool,media,&lease,selection->source,selection->transform,free_bytes>262144?free_bytes-262144:1,&m->gray,&m->alpha);}
-        pn_status_t released=pn_media_release(media,&lease);if(s==PN_OK)s=released;}
+    bool hit=false;pn_media_lease_t lease;pn_status_t s=PN_OK;
+    // 缓存命中只读两平面，不再解码原图；缓存介质可与原图不同，避免与阅读中的书争用写租约。
+    // A cache hit reads both planes without decoding; the cache media may differ from the source so it never contends with an open book for a write lease.
+    if(cache_dir && cache_media!=media && pn_media_acquire(cache_media,PN_MEDIA_READ,&lease)==PN_OK){hit=mask_cache_load(cache_media,&lease,cache_dir,selection,m->pixels)==PN_OK;(void)pn_media_release(cache_media,&lease);}
+    if(!hit){s=pn_media_acquire(media,PN_MEDIA_READ,&lease);
+        if(s==PN_OK){
+            if(cache_dir && cache_media==media)hit=mask_cache_load(media,&lease,cache_dir,selection,m->pixels)==PN_OK;
+            if(!hit){size_t free_bytes=pool->limit>pool->used?pool->limit-pool->used:0;
+                s=pn_wallpaper_mask_prepare(pool,media,&lease,selection->source,selection->transform,free_bytes>262144?free_bytes-262144:1,&m->gray,&m->alpha);}
+            pn_status_t released=pn_media_release(media,&lease);if(s==PN_OK)s=released;}}
     // 写缓存失败不影响本次锁屏。/ Cache-write failures never affect this lock screen.
-    if(s==PN_OK && !hit && cache_dir && pn_media_acquire(media,PN_MEDIA_WRITE,&lease)==PN_OK){(void)mask_cache_store(media,&lease,cache_dir,selection,m->pixels);(void)pn_media_release(media,&lease);}
+    if(s==PN_OK && !hit && cache_dir && pn_media_acquire(cache_media,PN_MEDIA_WRITE,&lease)==PN_OK){(void)mask_cache_store(cache_media,&lease,cache_dir,selection,m->pixels);(void)pn_media_release(cache_media,&lease);}
     if(s!=PN_OK){pn_free(m->pixels);pn_free(m);return s;}mask->impl=m;return PN_OK;
 }
 pn_status_t pn_wallpaper_mask_paint(void *ctx,pn_frame_t *frame){
@@ -269,6 +312,9 @@ pn_status_t pn_wallpaper_save(const pn_wallpaper_store_t *store,const pn_media_l
        selection->transform.rotation>3 || selection->transform.fit>PN_WALLPAPER_COVER || selection->transform.shift<-PN_WALLPAPER_SHIFT_MAX || selection->transform.shift>PN_WALLPAPER_SHIFT_MAX)return PN_INVALID;
     size_t path_length=strnlen(selection->source,PN_WALLPAPER_PATH_MAX);if(path_length>=PN_WALLPAPER_PATH_MAX)return PN_LIMIT;
     pn_status_t status=pn_media_validate(store->media,lease);if(status!=PN_OK)return status;
+    // 位图记录需要内部分区空间：先删同目录的遮罩缓存（可重建）。/ Bitmap records need internal partition space: remove the rebuildable mask cache in the same directory first.
+    if(bitmap_record(selection)){char cache[PN_WALLPAPER_PATH_MAX+64];const char *slash=strrchr(store->slots[0],'/');
+        if(slash){int n=snprintf(cache,sizeof cache,"%.*s/" PN_WALLPAPER_MASK_CACHE,(int)(slash-store->slots[0]),store->slots[0]);if(n>0 && (size_t)n<sizeof cache)(void)remove(cache);}}
     pn_lock_selection_t current;int which=-1;status=best(store,lease,&current,NULL,&which);
     if(status!=PN_OK && status!=PN_EMPTY && status!=PN_CORRUPT)return status;
     uint64_t sequence=status==PN_OK?current.sequence+1:1;if(!sequence)return PN_LIMIT;

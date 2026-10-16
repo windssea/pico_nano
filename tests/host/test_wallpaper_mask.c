@@ -37,15 +37,31 @@ int main(int argc,char **argv){
     // 平面缓存：首次写入，命中与原解码逐字节一致；损坏或变换改变回到解码。/ Plane cache: first open stores, hits match the decode byte for byte; damage or a new transform decodes again.
     {char dir[1100],file[1200];snprintf(dir,sizeof dir,"%s/masks",argv[2]);uint8_t *decoded=malloc(PN_WALLPAPER_BYTES);assert(decoded);
      double t0=ms();pn_frame_clear(&frame,12);assert(pn_wallpaper_mask_open_cached(&mask,&pool,&sd,&restored,dir)==PN_OK && pn_wallpaper_mask_paint(&mask,&frame)==PN_OK);memcpy(decoded,px,PN_WALLPAPER_BYTES);pn_wallpaper_mask_close(&mask);double t1=ms();
-     uint64_t h=1469598103934665603u;for(const unsigned char *c=(const unsigned char *)restored.source;*c;c++){h^=*c;h*=1099511628211u;}snprintf(file,sizeof file,"%s/%016llx.pnm",dir,(unsigned long long)h);
-     FILE *f=fopen(file,"rb");assert(f);assert(!fseek(f,0,SEEK_END) && ftell(f)>2*PN_WALLPAPER_BYTES);fclose(f);
+     snprintf(file,sizeof file,"%s/" PN_WALLPAPER_MASK_CACHE,dir);
+     // PackBits后明显小于原始两平面，内部1MiB分区放得下。/ After PackBits it is far below the raw two planes and fits a 1 MiB internal partition.
+     FILE *f=fopen(file,"rb");assert(f);assert(!fseek(f,0,SEEK_END));long cached_size=ftell(f);assert(cached_size>0 && cached_size<(long)PN_WALLPAPER_BYTES);fclose(f);
      double t2=ms();pn_frame_clear(&frame,12);assert(pn_wallpaper_mask_open_cached(&mask,&pool,&sd,&restored,dir)==PN_OK && pn_wallpaper_mask_paint(&mask,&frame)==PN_OK && !memcmp(decoded,px,PN_WALLPAPER_BYTES));pn_wallpaper_mask_close(&mask);
      printf("Mask lock: decode+store %.1f ms, cache hit %.1f ms (host, not panel timing)\n",t1-t0,ms()-t2);fflush(stdout);
-     f=fopen(file,"r+b");assert(f && !fseek(f,500000,SEEK_SET));int c=fgetc(f);assert(c!=EOF && !fseek(f,500000,SEEK_SET) && fputc(c^0x5a,f)!=EOF);fclose(f);
+     f=fopen(file,"r+b");assert(f && !fseek(f,cached_size/2,SEEK_SET));int c=fgetc(f);assert(c!=EOF && !fseek(f,cached_size/2,SEEK_SET) && fputc(c^0x5a,f)!=EOF);fclose(f);
      pn_frame_clear(&frame,12);assert(pn_wallpaper_mask_open_cached(&mask,&pool,&sd,&restored,dir)==PN_OK && pn_wallpaper_mask_paint(&mask,&frame)==PN_OK && !memcmp(decoded,px,PN_WALLPAPER_BYTES));pn_wallpaper_mask_close(&mask);
      pn_lock_selection_t moved=restored;moved.transform.fit=PN_WALLPAPER_CONTAIN;pn_frame_clear(&frame,12);assert(pn_wallpaper_mask_open_cached(&mask,&pool,&sd,&moved,dir)==PN_OK);pn_wallpaper_mask_close(&mask);
      pn_frame_clear(&frame,12);assert(pn_wallpaper_mask_open_cached(&mask,&pool,&sd,&restored,dir)==PN_OK && pn_wallpaper_mask_paint(&mask,&frame)==PN_OK && !memcmp(decoded,px,PN_WALLPAPER_BYTES));pn_wallpaper_mask_close(&mask);
-     strcpy(moved.source,"/missing-mask.png");assert(pn_wallpaper_mask_open_cached(&mask,&pool,&sd,&moved,dir)!=PN_OK && !mask.impl);free(decoded);}
+     strcpy(moved.source,"/missing-mask.png");assert(pn_wallpaper_mask_open_cached(&mask,&pool,&sd,&moved,dir)!=PN_OK && !mask.impl);
+     // 阅读中的书持TF读租约：TF上缓存写不进，内部介质缓存首次写入、之后命中且逐字节一致。
+     // An open book holds a TF read lease: a TF cache cannot be written, while an internal-media cache stores once and then hits byte for byte.
+     char internal_dir[1100],internal_file[1200];snprintf(internal_dir,sizeof internal_dir,"%s/internal",argv[2]);snprintf(internal_file,sizeof internal_file,"%s/" PN_WALLPAPER_MASK_CACHE,internal_dir);
+     pn_media_lease_t book;assert(pn_media_acquire(&sd,PN_MEDIA_READ,&book)==PN_OK);(void)remove(file);
+     pn_frame_clear(&frame,12);assert(pn_wallpaper_mask_open_cached(&mask,&pool,&sd,&restored,dir)==PN_OK);pn_wallpaper_mask_close(&mask);f=fopen(file,"rb");assert(!f);
+     pn_frame_clear(&frame,12);assert(pn_wallpaper_mask_open_stored(&mask,&pool,&sd,&restored,&internal,internal_dir)==PN_OK && pn_wallpaper_mask_paint(&mask,&frame)==PN_OK && !memcmp(decoded,px,PN_WALLPAPER_BYTES));pn_wallpaper_mask_close(&mask);
+     f=fopen(internal_file,"rb");assert(f);fclose(f);
+     double t3=ms();pn_frame_clear(&frame,12);assert(pn_wallpaper_mask_open_stored(&mask,&pool,&sd,&restored,&internal,internal_dir)==PN_OK && pn_wallpaper_mask_paint(&mask,&frame)==PN_OK && !memcmp(decoded,px,PN_WALLPAPER_BYTES));pn_wallpaper_mask_close(&mask);
+     printf("Mask lock with book lease: internal cache hit %.1f ms, %ld bytes\n",ms()-t3,cached_size);fflush(stdout);
+     assert(pn_media_release(&sd,&book)==PN_OK);
+     // 保存带位图的记录前删除同目录遮罩缓存，为位图腾出内部分区空间。/ Saving a bitmap record first removes the mask cache in the same directory to free internal space.
+     pn_wallpaper_store_t internal_store;char ia[1200],ib[1200];snprintf(ia,sizeof ia,"%s/lock.a",internal_dir);snprintf(ib,sizeof ib,"%s/lock.b",internal_dir);
+     assert(pn_wallpaper_store_init(&internal_store,&internal,ia,ib)==PN_OK);pn_lock_selection_t custom={.mode=PN_LOCK_CUSTOM,.hint=true,.transform={PN_WALLPAPER_COVER,0,0}};snprintf(custom.source,sizeof custom.source,"%s",argv[1]);
+     pn_frame_clear(&frame,7);assert(pn_media_acquire(&internal,PN_MEDIA_WRITE,&lease)==PN_OK && pn_wallpaper_save(&internal_store,&lease,&custom,&frame)==PN_OK && pn_media_release(&internal,&lease)==PN_OK);
+     f=fopen(internal_file,"rb");assert(!f);free(decoded);}
     strcpy(restored.source,"/missing-mask.png");assert(pn_wallpaper_mask_open(&mask,&pool,&sd,&restored)!=PN_OK && !mask.impl);
     free(px);free(saved);assert(!pool.used && !pool.live);puts("mask: alpha preserved, body presentation confirmed, failed pages retain underlay, missing source falls back");return 0;
 }

@@ -56,8 +56,21 @@ int main(int argc,char **argv){
     clock_us+=100000;assert(prepare_lock());locked=true;show_lock("按电源键继续阅读");panel_fault=true;
     resume_reader();assert(locked && reader_suspended && (is_epub?epub.impl:reader.impl)==original);check_position(&text,&publication);
     panel_fault=false;clock_us+=100000;resume_reader();assert(!locked && !reader_suspended && !memcmp(confirmed,stub_back,sizeof confirmed));check_position(&text,&publication);
-    clock_us+=100000;assert(stop_reader());management_fonts_close();pn_free(page_copy);page_copy=NULL;
-    assert(!pn_media_active(&sd_media) && pool.used==0 && pool.live==0 && sleep_calls==8);
+    // 锁页绘制中再按电源键跳过睡眠：即使适配器保留旧的“可能换卡”结论，也必须热恢复原书。
+    // A power press while the lock page draws skips sleep: even with a stale "maybe changed" adapter verdict the original book must resume warm.
+    stub_media_unchanged=false;clock_us+=100000;assert(prepare_lock() && reader_suspended);inject_power=true;fresh_power=true;
+    lock_and_sleep("按电源键继续阅读");
+    assert(!locked && !reader_suspended && (is_epub?epub.impl:reader.impl)==original);check_position(&text,&publication);
+    // 真正睡眠且可能换卡：关闭书、释放旧租约并重新挂载；设备必须解锁可用，不能卡在锁屏（真机曾全部STALE）。
+    // A real sleep with a possible card change: close the book, release stale leases and remount; the device must unlock usable instead of freezing on the lock page (hardware once went all STALE).
+    clock_us+=100000;assert(prepare_lock() && reader_suspended);inject_power=false;
+    lock_and_sleep("按电源键继续阅读");stub_media_unchanged=true;
+    assert(!locked && !reader_suspended && sd_media.available);
+    // 恢复路径重新打开了系统字库，清理时一并释放。/ The recovery path reopened the system font, so release it during cleanup too.
+    clock_us+=100000;assert(stop_reader());management_fonts_close();system_font_release();pn_free(page_copy);page_copy=NULL;
+    // 恢复后显示书库留下的常驻页/封面状态。/ Resident shelf page/cover state left by showing the library after recovery.
+    pn_free(shelf_page);shelf_page=NULL;pn_free(shelf_covers);shelf_covers=NULL;pn_free(recent_snapshot);recent_snapshot=NULL;pn_free(favorites);favorites=NULL;pn_catalog_index_close(&catalog_index);
+    assert(!pn_media_active(&sd_media) && pool.used==0 && pool.live==0 && sleep_calls==9);
     printf("device_lock kind=%s cycles=16 fresh_power_kept=1 pixels_exact=1 position_exact=1 restore_failure_retry=1 stale_power_drained=1 used=%zu live=%zu peak=%zu\n",argv[1],pool.used,pool.live,pool.peak);
     return 0;
 }

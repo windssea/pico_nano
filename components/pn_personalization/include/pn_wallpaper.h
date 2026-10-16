@@ -74,6 +74,10 @@ pn_status_t pn_wallpaper_mask_open(pn_wallpaper_mask_t *mask,pn_pool_t *pool,pn_
 /// 同上，并在cache_dir读写可重建的灰度/透明平面缓存（路径/大小/mtime/变换为键，CRC校验）；写失败不影响结果。
 /// As above, reading/writing a rebuildable gray/alpha plane cache in cache_dir (keyed by path/size/mtime/transform, CRC-checked); write failures do not affect the result.
 pn_status_t pn_wallpaper_mask_open_cached(pn_wallpaper_mask_t *mask,pn_pool_t *pool,pn_media_t *media,const pn_lock_selection_t *selection,const char *cache_dir);
+#define PN_WALLPAPER_MASK_CACHE "mask.pnm" ///< 缓存目录内唯一遮罩缓存文件名 / Sole mask-cache file name inside the cache directory
+/// 同上，但缓存读写使用cache_media（如内部壁纸分区），原图仍只在media上读取；PackBits压缩并整文件CRC。
+/// As above, but cache I/O uses cache_media (such as the internal wallpaper partition) while the source is read only from media; PackBits-compressed with a whole-file CRC.
+pn_status_t pn_wallpaper_mask_open_stored(pn_wallpaper_mask_t *mask,pn_pool_t *pool,pn_media_t *media,const pn_lock_selection_t *selection,pn_media_t *cache_media,const char *cache_dir);
 /// 锁屏遮罩纯绘制回调，不解码或读取文件。/ Lock-mask drawing callback without decoding or reading files.
 pn_status_t pn_wallpaper_mask_paint(void *mask,pn_frame_t *frame);
 /// 正文推屏完成通知；失败保留上一次成功底图。/ Body presentation notification; failures retain the previous successful underlay.
