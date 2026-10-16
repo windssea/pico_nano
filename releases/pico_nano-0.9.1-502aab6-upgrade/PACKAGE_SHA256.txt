@@ -1,0 +1,2 @@
+17a14da043deb8bd534e0fd9459be4bfcdded66463eb91d6d4870f5747413052  PicoNano-502aab6-upgrade.zip
+6fafa859890a706bbe7c5bf72a5d28874cf9cfb66b3003fbbafa777cc1f7d7f8  PicoNano-web-installer-502aab6.zip
