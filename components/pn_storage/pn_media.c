@@ -72,6 +72,8 @@ pn_status_t pn_media_acquire(pn_media_t *media, pn_media_access_t access, pn_med
     pn_media_lease_t acquired={ .owner=media, .ticket=media->next_ticket,
         .epoch=media->epoch, .access=access };
     media->next_ticket=media->next_ticket==UINT64_MAX ? 0 : media->next_ticket+1;
+    // 只有WRITE/USB可能替换源文件；身份备忘以此判定文件自校验后未被改动。/ Only WRITE/USB may replace source files; identity memos use this to know a file is untouched since verification.
+    if (access==PN_MEDIA_WRITE || access==PN_MEDIA_USB) media->writes++;
     media->slots[free_slot]=acquired;
     *lease=acquired;
     return PN_OK;

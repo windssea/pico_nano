@@ -53,7 +53,9 @@ int main(void){
     pn_font_t ui={0};assert(!pn_font_open(&ui,&pool,&system,24));pn_font_close(&ui);
     assert(!pn_font_system_close());assert(!pn_font_builtin_source().ctx && !pn_font_system_retained());
     assert(pn_font_system_open(&pool,&media,path)!=PN_OK && !pn_font_builtin_source().ctx && !pool.used && !pool.live);
-    assert(!pn_text_file_close(&file));FILE *f=fopen(path,"wb");assert(f && fwrite("efgh",1,4,f)==4 && !fclose(f));
+    // 产品改写源文件必须持WRITE租约（上传/USB），这会使已验证身份备忘失效。/ Product rewrites of a source require a WRITE lease (upload/USB), which invalidates verified-identity memos.
+    assert(!pn_text_file_close(&file) && !pn_media_release(&media,&lease));pn_media_lease_t rewrite;assert(!pn_media_acquire(&media,PN_MEDIA_WRITE,&rewrite));
+    FILE *f=fopen(path,"wb");assert(f && fwrite("efgh",1,4,f)==4 && !fclose(f));assert(!pn_media_release(&media,&rewrite) && !pn_media_acquire(&media,PN_MEDIA_READ,&lease));
     assert(!pn_text_file_open(&file,&media,&lease,path,&source) && !file.identity_known);assert(!pn_font_source_identity(&source,&actual) && memcmp(&actual,&expected,sizeof actual));
     assert(!pn_font_system_open(&pool,&media,font_path));pn_media_detach(&media);assert(pn_font_system_retained() && !pn_font_system_available());
     assert(!pn_font_builtin_source().ctx && !pn_font_system_close() && !pool.used && !pool.live);

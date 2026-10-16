@@ -33,6 +33,7 @@ struct pn_media {
     uint64_t epoch; ///< 当前介质代次 / Current media generation
     uint64_t media_id; ///< 介质实例标识，不是书籍摘要 / Media instance ID, not a book hash
     uint64_t next_ticket; ///< 下一个不重复租约号 / Next nonrepeating lease ID
+    uint64_t writes; ///< 已发放的可替换源文件租约（WRITE/USB）次数；缓存写不计 / Leases able to replace source files (WRITE/USB) granted so far; cache writes excluded
     bool available; ///< 挂载服务已确认可用 / Mount service confirmed availability
     bool usb_pending; ///< 交接栅栏，阻止新读写 / Handoff fence blocking new readers/writers
     bool exhausted; ///< 代次耗尽后永久关闭 / Permanently closed after generation exhaustion

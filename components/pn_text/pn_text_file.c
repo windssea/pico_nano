@@ -199,15 +199,42 @@ pn_status_t pn_text_file_identity_reuse(const pn_text_source_t *target,const pn_
     to->identity=from->identity;to->identity_known=true;return PN_OK;
 #endif
 }
+// 已验证身份备忘：同一介质实例、同代挂载、其后未发放任何可替换源的租约、同路径同大小，内容不可能变化。
+// Verified-identity memo: same media instance and mount generation, no source-replacing lease granted since, same path and size, so the content cannot have changed.
+// 关闭/重开字体或书不再整文件重算SHA；PC外部进程不受租约约束，主机端禁用。只由串行owner调用。
+// Closing and reopening a font or book no longer re-hashes the whole file; host builds disable it because external processes ignore leases. Serialized owner calls only.
+#define MEMO_SLOTS 8u
+typedef struct {const pn_media_t *media;uint64_t media_id,epoch,writes,size;char path[PN_TEXT_FILE_PATH_MAX];pn_book_id_t id;bool used;} memo_t;
+static memo_t memo[MEMO_SLOTS];static unsigned memo_next;
+static bool memo_usable(const pn_text_file_t *f){
+#if !defined(ESP_PLATFORM) && !defined(PN_TEST_IMMUTABLE_FILE)
+    (void)f;return false;
+#else
+    return f->media && f->lease.access==PN_MEDIA_READ && f->lease.epoch==f->media->epoch && f->media->available;
+#endif
+}
+static memo_t *memo_find(const pn_text_file_t *f,bool exact){
+    for(unsigned i=0;i<MEMO_SLOTS;i++){memo_t *m=&memo[i];
+        if(!m->used || m->media!=f->media || strcmp(m->path,f->path))continue;
+        if(!exact || (m->media_id==f->media->media_id && m->epoch==f->lease.epoch && m->writes==f->media->writes && m->size==f->size))return m;}
+    return NULL;
+}
+static void memo_store(const pn_text_file_t *f,const pn_book_id_t *id){
+    if(!memo_usable(f) || strlen(f->path)>=PN_TEXT_FILE_PATH_MAX)return;
+    memo_t *m=memo_find(f,false);if(!m){m=&memo[memo_next];memo_next=(memo_next+1u)%MEMO_SLOTS;}
+    *m=(memo_t){.media=f->media,.media_id=f->media->media_id,.epoch=f->lease.epoch,.writes=f->media->writes,.size=f->size,.id=*id,.used=true};strcpy(m->path,f->path);
+}
 pn_status_t pn_text_file_identity_pooled(pn_pool_t *pool,const pn_text_source_t *source,pn_book_id_t *out){
     if(!source || !out)return PN_INVALID;
     if(source->read_at!=read_at || source->validate!=validate || !source->ctx)return PN_UNSUPPORTED;
     pn_text_file_t *file=source->ctx;pn_status_t s=validate(file);if(s!=PN_OK)return s;
     if(source->size!=file->size)return PN_INVALID;
     if(file->identity_known){file->identity_hits++;*out=file->identity;return PN_OK;}
+    if(memo_usable(file)){const memo_t *m=memo_find(file,true);
+        if(m){file->identity=m->id;file->identity_known=true;file->identity_hits++;*out=m->id;return PN_OK;}}
     pn_book_id_t digest;s=pool?pn_identity_stream_pooled(pool,source->ctx,source->size,source->read_at,&digest):pn_identity_stream(source->ctx,source->size,source->read_at,&digest);
     if(s==PN_OK)s=validate(file);
-    if(s==PN_OK){file->identity=digest;file->identity_known=true;*out=digest;}return s;
+    if(s==PN_OK){file->identity=digest;file->identity_known=true;*out=digest;memo_store(file,&digest);}return s;
 }
 pn_status_t pn_text_file_identity(const pn_text_source_t *source,pn_book_id_t *out){return pn_text_file_identity_pooled(NULL,source,out);}
 typedef struct {
