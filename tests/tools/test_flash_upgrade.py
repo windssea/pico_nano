@@ -17,7 +17,7 @@ class UpgradeTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = pathlib.Path(self.temp.name)
-        self.table = b"T" * 0xC00
+        self.table = (pathlib.Path(__file__).resolve().parents[2] / "releases/pico_nano-0.0.57-6840523-upgrade/expected-partition-table.bin").read_bytes()
         files = {"pico_nano.bin": b"firmware", "expected-partition-table.bin": self.table}
         manifest = {"source_commit": "test", "files": {}}
         for name, data in files.items():
@@ -46,13 +46,27 @@ class UpgradeTests(unittest.TestCase):
     def test_matching_table_writes_only_application(self):
         def execute(command):
             if "read-flash" in command:
-                (self.root / "device-partition-readback.bin").write_bytes(self.table + b"\xff" * 0x400)
+                pathlib.Path(command[-1]).write_bytes(self.table + b"\xff" * 0x400 if command[command.index("read-flash")+1]=="0x8000" else b"\xff"*0x2000)
         with mock.patch.object(MODULE, "run", side_effect=execute) as run:
             MODULE.flash(self.root, "TEST", 115200, "usb-reset")
             command = run.call_args.args[0]
             self.assertEqual(command[command.index("write-flash") + 1:], ["0x20000", str(self.root / "pico_nano.bin")])
             self.assertIn("watchdog-reset", command)
-            self.assertEqual(run.call_count, 2)
+            self.assertEqual(run.call_count, 3)
+
+    def test_used_or_short_otadata_never_writes(self):
+        for data in (b"\xff"*4096, b"\0"+b"\xff"*8191):
+            with tempfile.TemporaryDirectory() as tmp:
+                root=pathlib.Path(tmp)
+                for name in ("manifest.json","pico_nano.bin","expected-partition-table.bin"):
+                    (root/name).write_bytes((self.root/name).read_bytes())
+                def execute(command):
+                    self.assertIn("read-flash",command)
+                    pathlib.Path(command[-1]).write_bytes(self.table+b"\xff"*0x400 if command[command.index("read-flash")+1]=="0x8000" else data)
+                with mock.patch.object(MODULE,"run",side_effect=execute) as run:
+                    with self.assertRaisesRegex(ValueError,"OTA selection"):
+                        MODULE.flash(root,"TEST",115200,"usb-reset")
+                    self.assertEqual(run.call_count,2)
 
 
 if __name__ == "__main__":

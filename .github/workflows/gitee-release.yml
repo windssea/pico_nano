@@ -31,6 +31,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Install OTA signature verifier
+        run: python3 -m pip install -r tools/requirements-ota.txt
       - name: Test release mirroring
         run: python3 -m unittest discover -s tests/tools -p test_sync_gitee_release.py -v
       - name: Verify and mirror published packages

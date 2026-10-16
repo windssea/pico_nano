@@ -198,6 +198,8 @@ profile每次生成 `build-dev/profile/<随机ID>/` 隔离状态与summary.json�
 
 ## 验证与开发收口
 
+0.9 OTA源码的主机专项为 `ctest --test-dir build-host -R '^update' --output-on-failure`（`update`同源事务、`update_boot`真实启动端口的SDK替身、`update_ui`同源设置页）；默认`python tools/dev.py host`包含它们。`test_package_ota.py`用真实密码库覆盖逐字节篡改及错误密钥，`test_sync_gitee_release.py`另验证签名OTA附件与三个ZIP内的应用一致。固定IDF镜像已带cryptography48.0.1，原生Python需先 `python -m pip install -r tools/requirements-ota.txt`；未安装时不把签名测试跳过当验证成功。设备PSA/TLS及真正双槽/断电不能由主机替身替代。
+
 国内分发工具独立复跑为 `python -m unittest discover -s tests/tools -p test_sync_gitee_release.py -v` 和 `python tools/sync_gitee_release.py --tag v0.8.0`；后者默认仅验证现有包，不连接设备、不上传。真实同步、匿名下载核验和 GitHub Actions 凭据配置见[安装与发布](INSTALLATION.md#gitee-国内分发)。这类分发/文档变更无需重新构建固件或重启产品模拟器。
 
 `gfx_spans`以修改前逐点距离/混合为独立像素oracle，覆盖6000组裁剪/奇偶行距/灰阶/分数描边，另含实际屏幕大小卡片、退化半径与极端坐标；比较包括相邻半字节、行尾和边界保护。`settings_ui`检查兼容网络名快照更新不再提交相同画面。它们验证绘制等价与重复工作消除，不代表ESP32、TF或面板响应时间。

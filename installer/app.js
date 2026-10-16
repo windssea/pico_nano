@@ -1,7 +1,7 @@
 /// 网页安装器界面与串口流程：读取设备现状、按 plan.js 写入并逐段 MD5 校验。
 /// Web-installer UI and serial flow: read the device state, write per plan.js and verify every region by MD5.
 import { ESPLoader, Transport } from "./vendor/esptool-js-0.5.7/bundle.js";
-import { isLittleFs, layoutOf, md5, planInstall, TABLE_OFFSET, TABLE_SIZE } from "./plan.js";
+import { isLittleFs, layoutOf, preservedLayoutOf, md5, planInstall, TABLE_OFFSET, TABLE_SIZE } from "./plan.js";
 import { resetAfterFlash } from "./reset.js";
 
 const FLASH_BYTES = 16 * 1024 * 1024;
@@ -202,9 +202,11 @@ async function prepare() {
     return bytes;
   };
   const preserving = state.release?.mode === "app-only";
+  const ota = preserving ? preservedLayoutOf(state.files, deviceTable).otadata : null;
+  const otaReadback = preserving ? await state.loader.readFlash(ota.offset, ota.size) : null;
   const dataHead = preserving ? null : await readStorage(layout.data);
   const wallpaperHead = preserving ? null : await readStorage(layout.wallpaper);
-  state.device.reads = { deviceTable, dataHead, wallpaperHead };
+  state.device.reads = { deviceTable, dataHead, wallpaperHead, otaReadback };
   buildPlan();
   state.busy = false;
   syncButtons();
@@ -214,14 +216,14 @@ async function prepare() {
 }
 
 function buildPlan() {
-  const { deviceTable, dataHead, wallpaperHead } = state.device.reads;
+  const { deviceTable, dataHead, wallpaperHead, otaReadback } = state.device.reads;
   state.plan = null;
   const preserving = state.release?.mode === "app-only";
   for (const id of ["clear-nvs", "initialize-storage"]) {
     $(id).disabled = preserving;
     if (preserving) $(id).checked = false;
   }
-  state.plan = planInstall({ files: state.files, deviceTable, dataHead, wallpaperHead, clearNvs: $("clear-nvs").checked, initializeStorage: $("initialize-storage").checked, mode: preserving ? "app-only" : "full" });
+  state.plan = planInstall({ files: state.files, deviceTable, dataHead, wallpaperHead, otaReadback, clearNvs: $("clear-nvs").checked, initializeStorage: $("initialize-storage").checked, mode: preserving ? "app-only" : "full" });
   const plan = state.plan;
   const mode = preserving ? "保留布局升级：仅更新应用固件"
     : plan.mode === "upgrade" ? "升级：设备上已是本固件的分区布局"

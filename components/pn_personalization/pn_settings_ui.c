@@ -15,8 +15,9 @@
 #include <time.h>
 #define W 684
 #define H 1216
-enum {SCREEN_MAIN=0,SCREEN_KEYS,SCREEN_REFRESH,SCREEN_ABOUT,SCREEN_APPEARANCE,SCREEN_TIME};
+enum {SCREEN_MAIN=0,SCREEN_KEYS,SCREEN_REFRESH,SCREEN_ABOUT,SCREEN_APPEARANCE,SCREEN_TIME,SCREEN_UPDATE};
 typedef struct {pn_pool_t *pool;pn_media_t *state;char dir[PN_JOURNAL_PATH_MAX];pn_font_t font;uint8_t *pixels;pn_frame_t canvas;char message[96];char lan[40];int screen;pn_settings_about_t about;pn_settings_time_t time;
+    pn_settings_update_t update; ///< 控制层升级快照 / Controller update snapshot
     pn_font_t *return_font; ///< 单owner移交的空槽，close归还或正常释放 / Empty slot transferred by the single owner, returned on close or normally released
     bool snapshot_dirty; ///< 外部快照更新后先完整重画 / Repaint completely after external snapshot changes
     pn_w_status_snapshot_t status; ///< 最近成功画布的实时状态带 / Live status band of the last successful canvas
@@ -135,6 +136,18 @@ static pn_status_t draw_about(su_t *u){
     for(int i=0;i<4 && s==PN_OK;i++)s=pn_w_card_row(font,f,rows[i][0],rows[i][1],NULL,-1,0u,ABOUT_Y+i*ROW_H,i==3);
     if(s==PN_OK)s=note(u,"本固件使用 HarmonyOS Sans 字体。阅读记录、书签与设置只保存在本机。设备信息按实际读取显示。",ABOUT_Y+4*ROW_H+52);
     pn_w_card(f,840,1);if(s==PN_OK)s=pn_w_card_row(font,f,"日期与时间",*u->time.datetime?u->time.datetime:"时钟尚未校准",NULL,PN_ICON_SETTINGS,PN_ROW_CHEVRON,840,true);
+    pn_w_card(f,960,1);if(s==PN_OK)s=pn_w_card_row(font,f,"系统更新","通过家庭 WiFi 获取 Gitee 更新",NULL,PN_ICON_SETTINGS,PN_ROW_CHEVRON,960,true);
+    return s;
+}
+static pn_status_t draw_update(su_t *u){
+    pn_status_t s=pn_w_header(&u->font,&u->canvas,"< 关于","系统更新",NULL);
+    if(s==PN_OK)s=note(u,*u->update.version?u->update.version:"PicoNano 固件更新",280);
+    if(s==PN_OK)s=note(u,*u->update.message?u->update.message:"连接已保存的家庭 WiFi，检查 Gitee 最新版本。",390);
+    const char *label=u->update.running?"正在处理…":u->update.reboot?"重启并完成升级":u->update.install?"安装这个版本":"检查更新";
+    if(s==PN_OK)s=pn_font_size(&u->font,32);
+    if(s==PN_OK)s=pn_w_button(&u->font,&u->canvas,label,32,700,620,88,!u->update.running && (u->update.available || u->update.install || u->update.reboot)?PN_W_SELECTED:PN_W_DISABLED);
+    if(s==PN_OK && (u->update.running || u->update.install || u->update.reboot))s=pn_w_button(&u->font,&u->canvas,"取消更新",32,810,620,88,0u);
+    if(s==PN_OK)s=note(u,"更新会保留阅读记录与设置，请保持供电。",970);
     return s;
 }
 static pn_status_t draw_time(su_t *u){
@@ -179,7 +192,7 @@ static pn_status_t show_profile(pn_settings_ui_t *ui,pn_settings_present_fn pres
     // 只计时清屏与绘制，供真机拆分菜单准备耗时。/ Time clearing and drawing only, to split menu preparation on hardware.
     pn_profile_span_t span;pn_profile_begin(&span,NULL,"ui.settings.clear");pn_frame_clear(&u->canvas,15);pn_profile_end(&span,PN_OK);
     pn_profile_begin(&span,NULL,"ui.settings.draw");
-    pn_status_t s=u->screen==SCREEN_KEYS?draw_keys(ui,u):u->screen==SCREEN_REFRESH?draw_refresh(ui,u):u->screen==SCREEN_ABOUT?draw_about(u):u->screen==SCREEN_TIME?draw_time(u):u->screen==SCREEN_APPEARANCE?draw_appearance(ui,u):draw_main(ui,u);
+    pn_status_t s=u->screen==SCREEN_KEYS?draw_keys(ui,u):u->screen==SCREEN_REFRESH?draw_refresh(ui,u):u->screen==SCREEN_ABOUT?draw_about(u):u->screen==SCREEN_TIME?draw_time(u):u->screen==SCREEN_UPDATE?draw_update(u):u->screen==SCREEN_APPEARANCE?draw_appearance(ui,u):draw_main(ui,u);
     pn_profile_end(&span,s);
     if(s==PN_OK)s=present(ctx,&u->canvas,profile);
     if(s==PN_OK){ui->presented=true;u->snapshot_dirty=false;u->status=snapshot;}
@@ -285,7 +298,15 @@ static pn_status_t commit_shelf(pn_settings_ui_t *ui,su_t *u,pn_shelf_prefs_t ne
 pn_status_t pn_settings_ui_event(pn_settings_ui_t *ui,int command,pn_settings_present_fn present,void *ctx){
     if(!ui || !ui->impl || !ui->active || !present)return PN_INVALID;
     su_t *u=ui->impl;bool local=!*u->message;uint8_t old_flags=ui->flags;pn_shelf_prefs_t old_shelf=ui->shelf;u->message[0]=0;pn_status_t status=PN_OK;
-    if(command==PN_SETUI_BACK){if(u->screen!=SCREEN_MAIN){u->screen=u->screen==SCREEN_TIME?SCREEN_ABOUT:SCREEN_MAIN;return show(ui,present,ctx);}ui->active=false;return PN_OK;}
+    if(u->update.running && command!=PN_SETUI_UPDATE_CANCEL){if(command==PN_SETUI_BACK)ui->request=PN_SETUI_UPDATE_CANCEL;return PN_BUSY;}
+    if(command==PN_SETUI_BACK){if(u->screen!=SCREEN_MAIN){u->screen=u->screen==SCREEN_TIME || u->screen==SCREEN_UPDATE?SCREEN_ABOUT:SCREEN_MAIN;return show(ui,present,ctx);}ui->active=false;return PN_OK;}
+    if(command==PN_SETUI_UPDATE){u->screen=SCREEN_UPDATE;return show(ui,present,ctx);}
+    if(command>=PN_SETUI_UPDATE_CHECK && command<=PN_SETUI_UPDATE_CANCEL){
+        if(u->screen!=SCREEN_UPDATE || !ui->presented)return PN_BUSY;
+        bool valid=command==PN_SETUI_UPDATE_CHECK?u->update.available && !u->update.running && !u->update.install && !u->update.reboot:command==PN_SETUI_UPDATE_INSTALL?u->update.install:command==PN_SETUI_UPDATE_REBOOT?u->update.reboot:u->update.running || u->update.install || u->update.reboot;
+        if(!valid)return PN_EMPTY;
+        ui->request=command;return PN_OK;
+    }
     if(command==PN_SETUI_TIME){u->screen=SCREEN_TIME;return show(ui,present,ctx);}
     if(command==PN_SETUI_TIME_SYNC || command==PN_SETUI_TIME_CANCEL){if(!ui->presented)return PN_BUSY;if(u->screen!=SCREEN_TIME || (command==PN_SETUI_TIME_SYNC?(!u->time.available || u->time.running):!u->time.running))return PN_EMPTY;ui->request=command;return PN_OK;}
     if(command==PN_SETUI_WALLPAPER || command==PN_SETUI_FONTS || command==PN_SETUI_SHELF || command==PN_SETUI_TRANSFER || command==PN_SETUI_HOME){ui->request=command;return PN_OK;}
@@ -327,6 +348,8 @@ int pn_settings_ui_hit(const pn_settings_ui_t *ui,int x,int y){
     if(pn_w_header_hit(x,y,false)==1)return PN_SETUI_BACK;
     if(x<32 || x>=652)return -1;
     if(u->screen==SCREEN_ABOUT && y>=840 && y<840+ROW_H)return PN_SETUI_TIME;
+    if(u->screen==SCREEN_ABOUT && y>=960 && y<960+ROW_H)return PN_SETUI_UPDATE;
+    if(u->screen==SCREEN_UPDATE){if(y>=810 && y<898 && (u->update.running || u->update.install || u->update.reboot))return PN_SETUI_UPDATE_CANCEL;if(y>=700 && y<788 && !u->update.running)return u->update.reboot?PN_SETUI_UPDATE_REBOOT:u->update.install?PN_SETUI_UPDATE_INSTALL:u->update.available?PN_SETUI_UPDATE_CHECK:-1;return -1;}
     if(u->screen==SCREEN_TIME){if(y>=700 && y<788)return u->time.running?PN_SETUI_TIME_CANCEL:u->time.available?PN_SETUI_TIME_SYNC:-1;return -1;}
     if(u->screen==SCREEN_APPEARANCE){int cell=pn_w_segments_hit(2,190,108,x,y);if(cell>=0)return PN_SETUI_COLUMNS+cell;
         if(y>=460 && y<900){int row=(y-460)/230,col=(x-32)/318;
@@ -369,6 +392,7 @@ void pn_settings_ui_set_about(pn_settings_ui_t *ui,const pn_settings_about_t *ab
 }
 int pn_settings_ui_screen(const pn_settings_ui_t *ui){return ui && ui->impl?((const su_t *)ui->impl)->screen:0;}
 void pn_settings_ui_set_time(pn_settings_ui_t *ui,const pn_settings_time_t *time){if(!ui || !ui->impl || !time)return;su_t *u=ui->impl;u->time=*time;u->snapshot_dirty=true;u->time.datetime[sizeof u->time.datetime-1]=0;u->time.message[sizeof u->time.message-1]=0;}
+void pn_settings_ui_set_update(pn_settings_ui_t *ui,const pn_settings_update_t *value){if(!ui || !ui->impl || !value)return;su_t *u=ui->impl;u->update=*value;u->update.message[sizeof u->update.message-1]=0;u->update.version[sizeof u->update.version-1]=0;u->snapshot_dirty=true;}
 
 pn_status_t pn_settings_time_format(pn_settings_time_t *view,uint32_t utc){
     if(!view || utc<1704067200u || utc>4102444799u)return PN_INVALID;

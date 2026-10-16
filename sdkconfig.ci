@@ -47,3 +47,9 @@ CONFIG_TINYUSB_DESC_MANUFACTURER_STRING="PicoNano"
 CONFIG_TINYUSB_DESC_PRODUCT_STRING="PicoNano TF Card"
 CONFIG_TINYUSB_DESC_MSC_STRING="PicoNano TF Card"
 CONFIG_TINYUSB_MSC_MOUNT_PATH="/usb-unmounted"
+
+# OTA资格镜像：公钥可公开，私钥留在仓库外；实际回滚仍需设备验证。
+# OTA qualification image: public key only; keep signing secrets outside the repository and verify rollback on hardware.
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+CONFIG_PN_DEVICE_OTA=y
+CONFIG_PN_OTA_PUBLIC_KEY_HEX="04f2ce42405655dfa24054164f286172ec8c6bef48bd17a31b5b375f786f1ad586f52164ec09d0326d144d8277febd70f930a39b7225db7fbec0d7a133307085cd"

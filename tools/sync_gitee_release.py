@@ -9,6 +9,9 @@ import pathlib
 import re
 import sys
 import time
+import struct
+import io
+import zipfile
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -90,7 +93,52 @@ def read_bundle(root, tag):
             raise ValueError(f"Package digest mismatch: {name}")
         if not 0 < len(asset.content) < 100_000_000:
             raise ValueError(f"Package exceeds the Gitee attachment limit: {name}")
+        app = (folders["upgrade"] / "pico_nano.bin").read_bytes()
+        with zipfile.ZipFile(io.BytesIO(asset.content)) as archive:
+            paths = [n for n in archive.namelist() if n.endswith("pico_nano.bin")]
+            wanted = ([f"firmware/{version}+{commit[:7]}/pico_nano.bin", f"firmware/{version}+{commit[:7]}-full/pico_nano.bin"]
+                      if name.startswith("PicoNano-web-installer-") else ["pico_nano.bin"])
+            if sorted(paths) != sorted(wanted):
+                raise ValueError("ZIP contains unexpected application entries")
+            for path in paths:
+                if archive.getinfo(path).file_size != len(app) or archive.read(path) != app:
+                    raise ValueError("ZIP application differs from the package manifest")
         assets.append(asset)
+    # OTA附件可选；旧版三ZIP不重打包，新版必须将签名清单与同一应用一起发布。
+    # OTA assets are optional: never repack old ZIPs, and publish a signed manifest with the identical new app.
+    ota = folders["upgrade"] / "ota"
+    if ota.exists():
+        from cryptography.hazmat.primitives import serialization
+        from package_ota import verify_manifest
+        names = [f"PicoNano-{commit[:7]}-ota.bin", "PicoNano-ota-manifest.bin"]
+        rows = (ota / "SHA256SUMS").read_text(encoding="ascii").splitlines()
+        if len(rows) != 2:
+            raise ValueError("OTA checksum list must contain exactly the image and manifest")
+        ota_sums = {}
+        for row in rows:
+            entry = re.fullmatch(r"([0-9a-f]{64})  ([A-Za-z0-9_.-]+)", row)
+            if not entry or entry[2] in ota_sums:
+                raise ValueError("Invalid or duplicate OTA checksum")
+            ota_sums[entry[2]] = entry[1]
+        if set(ota_sums) != set(names):
+            raise ValueError("Unexpected OTA asset names")
+        extra = [Asset(name, (ota / name).read_bytes()) for name in names]
+        if any(asset.sha256 != ota_sums[asset.name] for asset in extra):
+            raise ValueError("OTA attachment digest mismatch")
+        if extra[0].content != (folders["upgrade"] / "pico_nano.bin").read_bytes():
+            raise ValueError("OTA application differs from the published upgrade")
+        public = serialization.load_pem_public_key((ota / "release-public.pem").read_bytes())
+        try:
+            payload = verify_manifest(extra[1].content, public)
+        except Exception:
+            raise ValueError("OTA manifest signature verification failed") from None
+        expected_url = f"https://gitee.com/windssea/pico_nano/releases/download/{tag}/{names[0]}".encode("ascii")
+        if (struct.unpack_from("<I", payload, 12)[0] != len(extra[0].content) or payload[72:112] != commit.encode("ascii") or
+                payload[112:144] != hashlib.sha256(extra[0].content).digest() or
+                payload[40:72].split(b"\0", 1)[0] != version.encode("ascii") or
+                payload[176:432].split(b"\0", 1)[0] != expected_url):
+            raise ValueError("OTA manifest source/version/image/URL mismatch")
+        assets.extend(extra)
     sums = "".join(f"{a.sha256}  {a.name}\n" for a in assets).encode("utf-8")
     assets.append(Asset("SHA256SUMS", sums))
     return Bundle(tag, commit, tuple(assets))
@@ -196,6 +244,9 @@ def github_release(bundle, repository, wait_seconds=0):
 
 def release_body(bundle, github):
     """国内离线安装步骤和来源证据。 / Domestic offline installation steps and source evidence."""
+    ota_note = ("设备 OTA 附件为 `PicoNano-*-ota.bin` 与 `PicoNano-ota-manifest.bin`；"
+                "仅供已完成兼容引导迁移的设备使用，电脑安装仍下载 ZIP。\n\n"
+                if any(a.name == "PicoNano-ota-manifest.bin" for a in bundle.assets) else "")
     return (f"PicoNano {bundle.tag[1:]} 国内安装包，与 GitHub 发布的三个 ZIP 逐字节一致。\n\n"
             f"固件源码：`{bundle.source_commit}`\n\n"
             "- 推荐下载 `PicoNano-web-installer-*.zip`，解压后运行 `py serve.py`，"
@@ -203,7 +254,8 @@ def release_body(bundle, github):
             "- `*-upgrade.zip` 是命令行保留布局升级包。\n"
             "- `*-full.zip` 是完整刷入包，请先备份并阅读安装说明，清除/初始化会丢失对应记录。\n"
             "- 下载后可用 `SHA256SUMS` 核对完整文件；不需要克隆 Git 仓库。\n\n"
-            "这些附件供电脑 USB 串口安装；设备 Wi-Fi OTA 的支持状态以原始发布说明为准。\n\n"
+            "三个 ZIP 供电脑 USB 串口安装；设备 Wi-Fi OTA 的支持状态以原始发布说明为准。\n\n"
+            f"{ota_note}"
             f"[原始发布与说明]({github['html_url']})\n\n"
             "软件验证、固件构建与真机验收分别记录，以原始发布的验收边界为准。\n")
 

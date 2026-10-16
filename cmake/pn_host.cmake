@@ -17,6 +17,7 @@ add_custom_command(OUTPUT ${harmony_font_c} COMMAND ${Python3_EXECUTABLE} ${PN_R
 set(brand_image_c ${CMAKE_CURRENT_BINARY_DIR}/pn_brand_logo.c)
 add_custom_command(OUTPUT ${brand_image_c} COMMAND ${Python3_EXECUTABLE} ${PN_ROOT}/tools/build_brand_image.py ${PN_ROOT}/assets/image/logo.png ${brand_image_c} --report ${CMAKE_CURRENT_BINARY_DIR}/pn_brand_logo.json DEPENDS ${PN_ROOT}/tools/build_brand_image.py ${PN_ROOT}/assets/image/logo.png VERBATIM)
 add_library(pn_core STATIC ${ui_font_c} ${reading_font_c} ${harmony_font_c} ${brand_image_c}
+    ${PN_ROOT}/components/pn_update/pn_update.c
     ${PN_ROOT}/components/pn_personalization/pn_brand_image.c
     ${PN_ROOT}/components/pn_qr/pn_qr.c
     ${PN_ROOT}/components/pn_qr/vendor/qrcodegen.c
@@ -127,6 +128,7 @@ target_include_directories(pn_core PUBLIC
     ${PN_ROOT}/components/pn_widgets/include
     ${PN_ROOT}/components/pn_personalization/include)
 target_include_directories(pn_core PUBLIC ${PN_ROOT}/components/pn_format/include)
+target_include_directories(pn_core PUBLIC ${PN_ROOT}/components/pn_update/include)
 target_include_directories(pn_core PUBLIC ${PN_ROOT}/components/pn_image/include)
 target_link_libraries(pn_core PUBLIC pn_freetype pn_expat pn_spng pn_zlib m)
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")

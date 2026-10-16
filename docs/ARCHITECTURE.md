@@ -1,6 +1,6 @@
 # PicoNano 当前架构与重点技术实现
 
-更新：2026-10-15。本文描述0.6.15开发预览源码（构建来源见发布清单），末节列出阅读优化及证据边界。旧设计与专题推导见[归档](archive/2026-10-14/README.md)，下一步方案见[开发指南](DEVELOPMENT_PLAN.md)。实现不等于真机验收。
+更新：2026-10-16。本文描述0.9测试预览源码（构建来源见发布清单），末节列出阅读优化及证据边界。旧设计与专题推导见[归档](archive/2026-10-14/README.md)，下一步方案见[开发指南](DEVELOPMENT_PLAN.md)。实现不等于真机验收。
 
 ## 实际模块与边界
 
@@ -30,6 +30,7 @@ SDL失焦事件在窗口owner捕获时保存左键状态，消费时不能借用
 | pn_reader | TXT/EPUB 会话、页节点、位置回执、菜单/设置/目录 | [pn_reader_app.c](../components/pn_reader/pn_reader_app.c)、[pn_epub_app.c](../components/pn_reader/pn_epub_app.c) |
 | pn_library | 书库、封面、搜索、收藏操作及目录索引 | [pn_catalog.c](../components/pn_library/pn_catalog.c)、[pn_cover.c](../components/pn_library/pn_cover.c) |
 | pn_transfer | 上传/接收、共享安装事务、worker、LocalSend 协议 | [pn_upload.c](../components/pn_transfer/pn_upload.c)、[pn_transfer_worker.c](../components/pn_transfer/pn_transfer_worker.c) |
+| pn_update | 签名清单、真实应用头校验、非活动槽写入与显式启动提交 | [pn_update.h](../components/pn_update/include/pn_update.h)、[pn_update.c](../components/pn_update/pn_update.c) |
 | pn_ui / pn_widgets / pn_personalization | 灰阶绘制、命中、三键、设置/锁屏与字体管理 | [pn_style_ui.c](../components/pn_reader/pn_style_ui.c)、[pn_wallpaper.c](../components/pn_personalization/pn_wallpaper.c) |
 | pn_display / main/device_* | 显示契约与设备硬件/网络/文件端口 | [device_async.c](../main/device_async.c)、[device_transfer.c](../main/device_transfer.c) |
 | simulator / tests | PC 端口、可见 SDL、同源与故障验证 | [simulator](../simulator)、[tests/host](../tests/host)、[tests/installer](../tests/installer) |
@@ -293,6 +294,26 @@ LocalSend 同源 JSON/授权/确认/整文件接收、PC HTTP/IPv4 发现以及�
 页面返回可让有界任务继续，结束/电源键先取消并等待清理，再锁屏。任务期间禁止自动待机和第二个传输。启动从有效 PMU 时基加 uptime，显示 UTC+8；不猜编译时间，PMU 复位后仍可能需重新对时。手机传入时间、时区设置、自动校时还只是后续方案。
 
 ## 安装、升级及复用来源
+
+### 0.9 开发中的设备 Wi-Fi OTA
+
+源码入口为[设备OTA端口](../main/device_ota.c)与[启动确认端口](../main/device_ota_boot.c)，共享核心、设置页与PC同源。Kconfig默认`PN_DEVICE_OTA`关闭、公钥为空。0.9测试构建的两套独立SDKCONFIG显式启用`BOOTLOADER_APP_ROLLBACK_ENABLE`、`PN_DEVICE_OTA`并配置130位十六进制未压缩ECDSA-P256正式公钥，私钥保留在仓库外；缺失配置时升级按钮保持不可用。设备资格仍待验证，不能据此声称0.8设备已支持OTA。
+
+检查入口为Gitee固定公开API `https://gitee.com/api/v5/repos/windssea/pico_nano/releases/latest`，接收最多8192B，拒绝预发行版、异常标签或多份同名清单。设备只接收同一发行库下的`PicoNano-ota-manifest.bin`和其签名绑定的`PicoNano-<源码短提交>-ota.bin`，不下载ZIP或GitHub固件。所有HTTP均验证TLS证书，重定向最多三次且只接收HTTPS，不携带账号令牌；设备有效PMU时间先同步给TLS时基，没有有效时间则要求先手动对时。
+
+清单固定576B：前512B为载荷、后64B为ECDSA-P256/SHA-256的`r||s`签名。小端字段依次为8B魔数`PNOTA1\r\n`、schema、应用长度、板型1、芯片9、布局1、引导协议1、记录schema1、已资格引导程序长度；offset40为32B版本、72为40B源码提交、112为32B应用SHA-256、144为32B引导SHA-256、176为256B固件URL、432为64B短说明、496起16B保留零。字符串须以NUL结尾且余下字节为零。公钥来自固件配置；载荷绑定可信来源与完整应用摘要，不接收服务器替换信任公钥。
+
+先验签，再核对ESP32-S3/16MiB、两个6MiB应用槽、otadata及内部记录/壁纸布局、版本递增、记录schema和实际Flash中资格引导字节的完整摘要。应用长度最多槽的90%。资格引导摘要是首次USB迁移的兼容锚，打包者必须持续保留该资格镜像；遇到其他引导版本明确拒绝，不能只相信当前应用配置或存在`ota_1`。首版不自动升级引导程序/分区表、不烧写安全启动或防降级eFuse。
+
+下载只写非活动槽。完整288B真实应用头先核对S3、IDF描述魔数、`pico_nano`内部工程身份和精确产品版本，之后才打开擦写；诊断镜像不匹配产品版本。首次USB安装若otadata空白，用户确认安装且上述门通过后先将同一运行槽登记VALID，不改变所选应用，保证首轮回滚有明确有效记录。SDK逐块擦写/完整镜像校验后，再读回非活动应用全部字节验证签名清单的SHA，成功仅进入VERIFIED。网络退出及所有worker访问结束后，由用户再次确认提交otadata并重启；提交前失败或取消不选择新槽；启动元数据提交报错时提示重启核对版本或USB恢复，不凭错误码宣称所选槽一定未变。应用、阅读记录和设置格式未迁移，保留旧版本读取能力。
+
+网络/验签/Flash工作在独立16KiB内部栈worker，使用4KiB内部缓冲；状态对象/有界JSON在PSRAM，SDK TLS/PSA/cJSON开销在池外，须设备测峰。产品owner只做100ms快照轮询，进度每10%或阶段变化重画；取消先等worker最后一次上下文访问结束，HTTP清理后关闭WiFi，失败保留句柄重试。升级会话与传书/对时/USB、自动锁屏互斥，开始前完成阅读保存和热会话释放；安装及最终切槽均要求有效电量至少30%。这些不是网络超时、实机内存或功耗保证。
+
+新槽首次启动处于PENDING_VERIFY时启用45秒一次性重启看门狗；NVS/PMU有效VCOM、非破坏挂载、产品输入/显示owner及真实产品呈现门通过才调用SDK确认。确认失败保留看门狗；未确认重启由资格bootloader回滚。普通已确认启动不启用定时器，也不在主循环反复读otadata。主机测试使用真实同源事务和真实启动适配器的SDK替身，真实密码库覆盖签名篡改；设备PSA、TLS、写槽/断电和面板仍待构建及真机验收。
+
+`tools/package_ota.py`从已有产品升级目录取同一应用，用外置私钥签名并输出`ota/`，不会重建固件或复制私钥。签名私钥对应的公钥必须等于该板级构建配置，回滚/OTA开启且诊断关闭；调用者明确指定已资格迁移bootloader。发布镜像工具独立验签、核对源码/版本/URL、原应用与三个ZIP内部应用一致后，同步两个OTA附件；先上传并匿名核对应用，再上传签名清单，最后上传摘要。现有0.8 ZIP不重打包、不增加OTA支持声明。
+
+串口保留模式现行源码额外读回已知布局的完整8KiB otadata，仅全FF允许旧的固定`ota_0`写入；非空或短读停止，提示备份后使用明确完整刷入。ROM串口无法直接证明实际运行槽，首版不根据单个序号猜槽或模拟SDK切槽。旧离线安装器/CLI已发布字节保持原样，使用过OTA后不可再使用其固定槽升级路径。智能USB非活动槽升级属于后续能力，不影响设备端双槽OTA。
 
 国内分发仓库为`gitee.com/windssea/pico_nano`，保存与GitHub相同的三种既有ZIP及独立SHA256SUMS，不作为第二套固件构建来源。`tools/sync_gitee_release.py`默认仅本地检查；显式同步须先核对同版本升级/完整包的完整源码与应用身份、包内文件和ZIP摘要，再下载GitHub已发布附件复核。Gitee同名附件匿名下载不一致时停止，不覆盖；缺失附件上传后仍匿名下载核验。`gitee-release.yml`从GitHub Release published触发或按标签补跑，令牌只由Actions secret注入。国内离线网页包仍在本机提供串口安装页面，不表示设备OTA已实现；0.9目标和引导迁移见开发指南。
 

@@ -64,6 +64,11 @@
 #include "device_power.h"
 #include "device_transfer.h"
 #include "device_time.h"
+#include "device_ota.h"
+#include <sys/time.h>
+#ifdef ESP_PLATFORM
+#include "esp_system.h"
+#endif
 #include "pn_transfer_view.h"
 #include "read_pico.h"
 #include "read_pico_pmu.h"
@@ -115,6 +120,11 @@ static pn_wallpaper_ui_t wallpaper_ui;
 static pn_wallpaper_mask_t lock_mask; ///< 锁屏时临时遮罩 / Temporary mask used only while locked
 static pn_font_manage_t font_manage;
 static pn_device_time_t time_sync;
+static pn_device_ota_t ota; ///< 独占无线升级会话 / Exclusive wireless update session
+static char ota_notice[160]; ///< 升级阶段及错误 / Update phase and error
+static bool ota_lock_pending; ///< 停止后再执行电源键锁屏 / Lock only after update shutdown
+static bool ota_commit_failed; ///< 启动元数据写入失败，需重启核对实际选择 / Boot-metadata write failed; verify actual selection after restart
+static uint64_t ota_poll_at; ///< 有界快照轮询 / Bounded snapshot polling
 static char time_notice[96];
 static bool time_lock_pending;
 static uint64_t time_poll_at;
@@ -1000,13 +1010,71 @@ static pn_status_t load_network(pn_network_credentials_t *out){
 }
 /// 对时只借用无线；打开时复制凭据，所有长网络等待由poll推进。 / Time sync borrows only radio; opening copies credentials and polls advance all long network waits.
 static void begin_time_sync(void){
-    if(time_sync.impl || transfer.impl || usb.open)return;
+    if(time_sync.impl || ota.impl || transfer.impl || usb.open)return;
     pn_network_credentials_t credentials={0};pn_status_t status=load_network(&credentials);
     if(status==PN_OK && !credentials.ssid[0])status=PN_EMPTY;
     pn_device_wifi_config_t config={.mode=PN_WIFI_STA};
     if(status==PN_OK){memcpy(config.ssid,credentials.ssid,sizeof config.ssid);memcpy(config.password,credentials.password,sizeof config.password);status=pn_device_time_open(&time_sync,&config);}
     pn_network_wipe(&credentials);volatile unsigned char *bytes=(volatile unsigned char *)&config;for(size_t i=0;i<sizeof config;i++)bytes[i]=0;
     snprintf(time_notice,sizeof time_notice,"%s",status==PN_OK?"正在连接家庭WiFi…":status==PN_EMPTY?"请先保存家庭WiFi":"对时未开始，稍后重试");time_poll_at=0;update_time_ui(true);
+}
+/// 升级快照只供同源UI绘制；长网络和Flash操作不进入render。 / Update snapshots only feed the shared UI; render never performs network/flash work.
+static void update_ota_ui(bool paint){
+    pn_device_ota_state_t state={0};if(ota.impl)(void)pn_device_ota_state(&ota,&state);
+    pn_settings_update_t value={.available=pn_device_ota_configured() && *saved_network && clock_known};
+    if(ota.impl){value.running=!state.radio_released;value.install=state.phase==PN_DEVICE_OTA_AVAILABLE;value.reboot=state.phase==PN_DEVICE_OTA_READY;memcpy(value.version,state.version,sizeof value.version);if(state.total)value.percent=(unsigned)((uint64_t)state.bytes*100u/state.total);}
+    const char *text=*ota_notice?ota_notice:!pn_device_ota_configured()?"此固件尚未配置正式更新公钥及回滚能力。":!*saved_network?"请先在传书网页保存家庭 WiFi。":!clock_known?"请先联网校时，以验证 HTTPS 证书。":"从 Gitee 检查经过签名校验的正式更新。";
+    snprintf(value.message,sizeof value.message,"%s",text);pn_settings_ui_set_update(&settings_ui,&value);
+    if(paint && settings_ui.impl && pn_settings_ui_screen(&settings_ui)==6)(void)pn_settings_ui_present(&settings_ui,present,NULL);
+}
+static void update_command(int command){
+    if(command==PN_SETUI_UPDATE_CANCEL){(void)pn_device_ota_stop(&ota);snprintf(ota_notice,sizeof ota_notice,"正在结束升级，等待网络与写入任务退出…");update_ota_ui(true);return;}
+    if(command==PN_SETUI_UPDATE_REBOOT){
+        if(battery_percent()<30){snprintf(ota_notice,sizeof ota_notice,"请充电至至少 30%% 后再完成升级。");update_ota_ui(true);return;}
+        pn_status_t status=pn_device_ota_commit(&ota);
+        if(status==PN_OK){
+#ifdef ESP_PLATFORM
+            esp_restart();
+#endif
+        }else{ota_commit_failed=true;snprintf(ota_notice,sizeof ota_notice,"升级收尾失败，请重启核对版本，必要时使用 USB 恢复。");update_ota_ui(true);}return;
+    }
+    if(time_sync.impl || transfer.impl || usb.open){snprintf(ota_notice,sizeof ota_notice,"请先结束传书或对时，再检查更新。");update_ota_ui(true);return;}
+    if(!pn_device_ota_configured() || !clock_known)return;
+    if(command==PN_SETUI_UPDATE_CHECK){
+        ota_commit_failed=false;
+        if(ota.impl || !leave_reader())return;
+        if(pn_hot_session_drop(&hot_session)!=PN_OK){snprintf(ota_notice,sizeof ota_notice,"阅读保存尚未完成，请稍后重试。");update_ota_ui(true);return;}
+    }
+    pn_network_credentials_t credentials={0};pn_status_t status=load_network(&credentials);pn_device_wifi_config_t config={.mode=PN_WIFI_STA};
+    if(status==PN_OK && credentials.ssid[0]){memcpy(config.ssid,credentials.ssid,sizeof config.ssid);memcpy(config.password,credentials.password,sizeof config.password);
+#ifdef ESP_PLATFORM
+        struct timeval now={.tv_sec=(time_t)((uint64_t)clock_base_sec+(now_ms()-clock_base_ms)/1000u)};
+        if(settimeofday(&now,NULL)!=0)status=PN_IO;
+#endif
+        if(status==PN_OK)status=command==PN_SETUI_UPDATE_INSTALL?pn_device_ota_install(&ota,&config,battery_percent()>=30):pn_device_ota_open(&ota,&config);
+    }else if(status==PN_OK)status=PN_EMPTY;
+    pn_network_wipe(&credentials);volatile uint8_t *bytes=(volatile uint8_t *)&config;for(size_t i=0;i<sizeof config;i++)bytes[i]=0;
+    snprintf(ota_notice,sizeof ota_notice,"%s",status==PN_OK?"正在连接家庭 WiFi…":status==PN_BUSY?"请充电至至少 30%，并等待其他操作完成。":"更新未开始，请检查已保存的 WiFi 和设备时间。");ota_poll_at=0;update_ota_ui(true);
+}
+static void tick_ota(uint64_t now){
+    if(!ota.impl || (ota_poll_at && now<ota_poll_at))return;
+    ota_poll_at=now+100;
+    pn_device_ota_state_t before={0},state={0};(void)pn_device_ota_state(&ota,&before);(void)pn_device_ota_poll(&ota);(void)pn_device_ota_state(&ota,&state);
+    static unsigned last_percent;unsigned percent=state.total?(unsigned)((uint64_t)state.bytes*100u/state.total):0;
+    if(state.phase!=before.phase || (percent/10!=last_percent/10)){
+        last_percent=percent;
+        if(state.phase==PN_DEVICE_OTA_CHECKING)snprintf(ota_notice,sizeof ota_notice,"正在读取 Gitee 更新及签名清单…");
+        else if(state.phase==PN_DEVICE_OTA_DOWNLOADING)snprintf(ota_notice,sizeof ota_notice,"正在下载、写入并验证固件：%u%%",percent);
+        else if(state.phase==PN_DEVICE_OTA_AVAILABLE)snprintf(ota_notice,sizeof ota_notice,"更新清单与兼容检查通过。确认后下载并安装。");
+        else if(state.phase==PN_DEVICE_OTA_READY)snprintf(ota_notice,sizeof ota_notice,"固件与 Flash 读回校验通过。确认重启完成升级。");
+        else if(state.phase==PN_DEVICE_OTA_STOPPING)snprintf(ota_notice,sizeof ota_notice,"正在停止网络与升级任务…");
+        update_ota_ui(true);
+    }
+    if(state.phase==PN_DEVICE_OTA_ERROR && state.radio_released){
+        pn_status_t error=state.error;(void)pn_device_ota_close(&ota);
+        snprintf(ota_notice,sizeof ota_notice,"%s",ota_commit_failed?"升级收尾失败，请重启核对版本，必要时使用 USB 恢复。":error==PN_EMPTY?"当前发行版暂无可用的 OTA 更新。":error==PN_UNSUPPORTED?"此设备需要先通过 USB 安装兼容版本。":error==PN_CANCELLED?"已取消升级，原版本继续使用。":error==PN_CORRUPT?"固件校验失败，原版本继续使用。":"网络或安装失败，原版本继续使用，可稍后重试。");ota_commit_failed=false;update_ota_ui(true);
+        if(ota_lock_pending){ota_lock_pending=false;if(prepare_lock())lock_and_sleep("再按电源键继续阅读");}
+    }
 }
 static void refresh_network_name(void){pn_network_credentials_t c={0};pn_status_t status=load_network(&c);if(status==PN_OK)strcpy(saved_network,c.ssid);else if(status==PN_EMPTY)saved_network[0]=0;pn_network_wipe(&c);}
 /// 主任务保存网页提交的网络，再回报给网页。/ The main task saves the network submitted by the web page, then reports back.
@@ -1073,7 +1141,7 @@ static void begin_settings(void){
     {pn_settings_about_t about={0};const esp_app_desc_t *app=esp_app_get_description();if(app){char version[24];memcpy(version,app->version,sizeof version-1);version[sizeof version-1]=0;snprintf(about.version,sizeof about.version,"版本 %.20s",version);}
      storage_note(about.storage,sizeof about.storage);snprintf(about.internal,sizeof about.internal,"%s",data_ready?"可用（阅读记录、书签与设置）":"不可用");
      snprintf(about.screen,sizeof about.screen,"4.7 英寸 · 684×1216 · 16 级灰阶");pn_settings_ui_set_about(&settings_ui,&about);}
-    refresh_network_name();update_time_ui(false);if(*saved_network)(void)pn_settings_ui_set_lan(&settings_ui,saved_network,present,NULL);
+    refresh_network_name();update_time_ui(false);update_ota_ui(false);if(*saved_network)(void)pn_settings_ui_set_lan(&settings_ui,saved_network,present,NULL);
     status_page=true;shelf_mode=false;index_mode=false;search_mode=false;hub_mode=false;actions_mode=false;
 }
 static void end_settings(void){input_flags=settings_ui.flags;shelf_prefs=settings_ui.shelf;pn_settings_ui_close(&settings_ui);if(*selected_path)start_reader();else show_shelf("",false);}
@@ -1086,7 +1154,7 @@ static pn_status_t begin_toc(void){
 }
 static void end_wallpaper(void){pn_wallpaper_ui_close(&wallpaper_ui);if(back_to_settings){back_to_settings=false;begin_settings();return;}if(*selected_path)start_reader();else show_shelf("",false);}
 static void begin_transfer(bool station){
-    if(time_sync.impl){message("正在对时","请结束对时后再传书");return;}
+    if(time_sync.impl || ota.impl){message("无线操作尚未结束","请先结束对时或固件更新");return;}
     if(transfer.impl || usb.open)return;
     if(reader_active()){
         pn_status_t status=epub.impl?pn_epub_app_identity(&epub,&selected_expected):pn_reader_app_identity(&reader,&selected_expected);
@@ -1241,7 +1309,7 @@ static void paint_usb(void){
 }
 /// 保存并关闭全部TF消费者，再取得USB独占；没有插线也可等待枚举。/ Save/close all TF consumers before exclusive USB ownership, allowing enumeration wait without a cable.
 static void begin_usb(void){
-    if(usb.open || transfer.impl || time_sync.impl)return;
+    if(usb.open || transfer.impl || time_sync.impl || ota.impl)return;
     if(!stop_reader())return;
     pn_wallpaper_mask_close(&lock_mask);pn_wallpaper_ui_close(&wallpaper_ui);pn_font_manage_close(&font_manage);pn_settings_ui_close(&settings_ui);
     pn_catalog_index_close(&catalog_index);covers_inactive=true;cover_drop(NULL);
@@ -1368,6 +1436,7 @@ static void open_shelf_item(int index){
     else message("格式尚未接入","书籍仍保留，选择TXT或EPUB");
 }
 static void handle_key(int key,pn_key_event_t event){
+    if(ota.impl){if(event==PN_KEY_SHORT && (key==PN_KEY_1 || key==PN_KEY_2))update_command(PN_SETUI_UPDATE_CANCEL);else if(event==PN_KEY_SHORT && key==PN_KEY_3){pn_device_ota_state_t state={0};(void)pn_device_ota_state(&ota,&state);if(state.phase==PN_DEVICE_OTA_AVAILABLE)update_command(PN_SETUI_UPDATE_INSTALL);else if(state.phase==PN_DEVICE_OTA_READY)update_command(PN_SETUI_UPDATE_REBOOT);}return;}
     if(opening){if(event==PN_KEY_SHORT && (key==PN_KEY_1 || key==PN_KEY_2))opening_cancel(key);return;}
     if(usb.open){if(event==PN_KEY_SHORT){usb_return=true;usb_home=key==PN_KEY_2;usb_lock=false;pn_device_usb_request_stop(&usb);}return;}
     // 排版中间键先应用草稿，只有成功才回到当前阅读页。/ Apply the draft first on the typesetting middle key and return to reading only on success.
@@ -1473,7 +1542,7 @@ static int active_hit(int x,int y){
 /// 只有显示固定底栏的四个一级页允许按下切页；子页、模态和活动传输沿原确认规则。/ Only the four roots with fixed navigation switch on press; subpages, modals and active transfers retain normal confirmation.
 static int root_navigation_hit(int x,int y){
     if(opening)return -1;
-    if(locked || usb.open || transfer.impl || time_sync.impl || wallpaper_ui.impl || font_manage.impl || reading_menu || fonts.active || toc.active || jump_ui.active || styles.active || bookmarks.mode!=PN_BUI_CLOSED || actions_mode || index_mode || search_mode || toolbar_open)return -1;
+    if(locked || usb.open || transfer.impl || time_sync.impl || ota.impl || wallpaper_ui.impl || font_manage.impl || reading_menu || fonts.active || toc.active || jump_ui.active || styles.active || bookmarks.mode!=PN_BUI_CLOSED || actions_mode || index_mode || search_mode || toolbar_open)return -1;
     if(settings_ui.impl){if(pn_settings_ui_screen(&settings_ui)!=0)return -1;}
     else if(!hub_mode && !(shelf_mode && shelf_page))return -1;
     return pn_w_navigation_hit(x,y)>=0?active_hit(x,y):-1;
@@ -1502,6 +1571,7 @@ static void feedback_begin(int x,int y){
 #endif
 /// 执行一次已确认的选择（点击或KEY2确认）。/ Perform one confirmed selection (a tap or a KEY2 confirmation).
 static void apply_selection(int selection){
+    if(ota.impl && (selection<PN_SETUI_UPDATE_CHECK || selection>PN_SETUI_UPDATE_CANCEL)){if(selection==PN_SETUI_BACK)update_command(PN_SETUI_UPDATE_CANCEL);return;}
     if(usb.open){if(selection==PN_USB_VIEW_STOP){usb_return=true;pn_device_usb_request_stop(&usb);}}
     else if(transfer.impl){if(selection==PN_TRANSFER_VIEW_STOP){transfer_return=true;(void)pn_device_transfer_request_stop(&transfer);}}
     else if(wallpaper_ui.impl){pn_status_t status=pn_wallpaper_ui_event(&wallpaper_ui,selection,present,NULL);if(status!=PN_OK && status!=PN_EMPTY)ESP_LOGW(TAG,"Wallpaper UI: %d",(int)status);if(!wallpaper_ui.active)end_wallpaper();}
@@ -1548,7 +1618,8 @@ static void apply_selection(int selection){
     }
     else if(index_mode){index_mode=false;if(selection!='<'){jump_letter=(char)selection;recent_mode=false;}show_shelf("",false);}
     else if(settings_ui.impl){update_time_ui(false);if(selection==PN_SETUI_FULL_REFRESH)atomic_store(&deep_clean_pending,true);pn_status_t status=pn_settings_ui_event(&settings_ui,selection,present,NULL);if(status!=PN_OK && status!=PN_EMPTY && status!=PN_LIMIT)ESP_LOGW(TAG,"Settings: %d",(int)status);
-        if(settings_ui.request==PN_SETUI_TIME_SYNC || settings_ui.request==PN_SETUI_TIME_CANCEL){int request=settings_ui.request;settings_ui.request=0;if(request==PN_SETUI_TIME_SYNC)begin_time_sync();else{(void)pn_device_time_request_stop(&time_sync);snprintf(time_notice,sizeof time_notice,"正在结束对时…");update_time_ui(true);}}
+        if(settings_ui.request>=PN_SETUI_UPDATE_CHECK && settings_ui.request<=PN_SETUI_UPDATE_CANCEL){int request=settings_ui.request;settings_ui.request=0;update_command(request);}
+        else if(settings_ui.request==PN_SETUI_TIME_SYNC || settings_ui.request==PN_SETUI_TIME_CANCEL){int request=settings_ui.request;settings_ui.request=0;if(request==PN_SETUI_TIME_SYNC)begin_time_sync();else{(void)pn_device_time_request_stop(&time_sync);snprintf(time_notice,sizeof time_notice,"正在结束对时…");update_time_ui(true);}}
         else if(settings_ui.request){int request=settings_ui.request;input_flags=settings_ui.flags;shelf_prefs=settings_ui.shelf;pn_settings_ui_close(&settings_ui);back_to_settings=request==PN_SETUI_WALLPAPER || request==PN_SETUI_FONTS;if(request==PN_SETUI_WALLPAPER)begin_wallpaper();else if(request==PN_SETUI_LAN)begin_transfer(true);else if(request==PN_SETUI_SHELF || request==PN_SETUI_HOME){home_mode=request==PN_SETUI_HOME;selected_path[0]=0;show_shelf("",false);}else if(request==PN_SETUI_TRANSFER)show_hub();else begin_fonts();}
         else if(!settings_ui.active)end_settings();}
     else if(toolbar_open){
@@ -1657,7 +1728,7 @@ static void device_task(void *arg){
     pn_status_t sha_status=pn_device_identity_init();ESP_LOGI(TAG,"Hardware SHA self-test status=%d",(int)sha_status);
     pn_device_power_init();
 #endif
-    (void)arg;esp_err_t error=nvs_flash_init();if(error!=ESP_OK){ESP_LOGE(TAG,"NVS unavailable: %s; preserving data",esp_err_to_name(error));vTaskDelete(NULL);return;}
+    (void)arg;pn_device_ota_boot_begin();esp_err_t error=nvs_flash_init();if(error!=ESP_OK){ESP_LOGE(TAG,"NVS unavailable: %s; preserving data",esp_err_to_name(error));vTaskDelete(NULL);return;}
     pn_profile_span_t board_span;pn_profile_begin(&board_span,NULL,"device.board-init");
     error=read_pico_init(&hardware);pn_profile_end(&board_span,error==ESP_OK?PN_OK:PN_IO);if(error!=ESP_OK){ESP_LOGE(TAG,"Board init failed: %s",esp_err_to_name(error));read_pico_deinit(&hardware);vTaskDelete(NULL);return;}
     int vcom=0;if(!hardware.pmu_ready || read_pico_pmu_vcom_get(&vcom)!=ESP_OK){ESP_LOGE(TAG,"Factory VCOM unavailable; display withheld");read_pico_deinit(&hardware);vTaskDelete(NULL);return;}
@@ -1705,7 +1776,7 @@ static void device_task(void *arg){
             if(available==PN_OK && !first_logged){first_logged=true;ESP_LOGI(TAG,"Input first event kind=%d after boot=%llu ms",(int)queued.kind,(unsigned long long)(now-boot));}
             else ESP_LOGI(TAG,"Input health reads=%u errors=%u events=%u touch_wake=%d",reads,errors,sent,(int)async_port.touch_wake);
             health_at=now;last_reads=reads;last_errors=errors;last_sent=sent;}}
-        pn_device_power_busy(PN_POWER_SESSION,transfer.impl!=NULL || time_sync.impl!=NULL || usb.open || opening);
+        pn_device_power_busy(PN_POWER_SESSION,transfer.impl!=NULL || time_sync.impl!=NULL || ota.impl!=NULL || usb.open || opening);
         pn_async_begin(&async_port.input,&scope,available==PN_EMPTY);scope_active=true;
         if(available==PN_OK || available==PN_CANCELLED){
             // 书架三键焦点只暂停解码；真正开书/换页入口仍先abort，低余量不保活。/ Shelf key focus only pauses decoding; opening/page-change entries still abort, and low headroom never retains it.
@@ -1735,6 +1806,8 @@ static void device_task(void *arg){
         if(transfer.impl)tick_transfer(now);
         if(usb.open)tick_usb(now);
         if(time_sync.impl)tick_time_sync(now);
+        if(ota.impl)tick_ota(now);
+        if(data_ready && panel_known && async_port.input_active && async_port.display_active && (shelf_draw_valid || (reader_active() && !opening && !status_page)))(void)pn_device_ota_boot_confirm(true);
         if(!transfer.impl && !usb.open && !locked && sd_recovery.pending)tick_sd_recovery(now);
         {static uint64_t last_battery,last_clock,date_minute;if(now-last_battery>=60000 || !last_battery){last_battery=now;pn_w_set_battery(battery_percent());}if(now-last_clock>=10000 || !last_clock){last_clock=now;clock_tick(now);if(settings_ui.impl && pn_settings_ui_screen(&settings_ui)==5 && now/60000u!=date_minute){date_minute=now/60000u;update_time_ui(true);}}} // 电量与日期页每分钟推进，正文不因对时刷新。 / Advance battery and the date page once a minute; time sync never redraws reading content.
         {static uint64_t prefs_retry;
@@ -1744,18 +1817,19 @@ static void device_task(void *arg){
             if(!input_flags_loaded && pn_settings_load_flags(&data_media,"/data/progress",&input_flags)==PN_OK)input_flags_loaded=true;
          }} // 读取失败限频重试，不能每10ms重复访问存储。/ Rate-limit failed loads instead of repeating storage reads every 10 ms.
         input.config=(pn_reader_input_config_t){.left_hand=(input_flags&PN_INPUT_LEFT_HAND)!=0,.no_swipe=(input_flags&PN_INPUT_NO_SWIPE)!=0,.no_edge_tap=(input_flags&PN_INPUT_NO_EDGE_TAP)!=0,.no_keys=(input_flags&PN_INPUT_NO_KEYS)!=0};
-        if(!transfer.impl && !usb.open && now-last_card>=250){last_card=now;
+        if(!transfer.impl && !usb.open && !ota.impl && now-last_card>=250){last_card=now;
             if(sd_media.available && pn_device_card_presence()==PN_STALE_MEDIA){if(reader_active()){if(epub.impl)(void)pn_epub_app_media_lost(&epub);else (void)pn_reader_app_media_lost(&reader);(void)stop_reader();}else (void)pn_media_detach(&sd_media);system_font_release();selected_path[0]=0;pn_reader_input_cancel(&input);message("卡已移除","保留上次阅读位置\n插卡后点下方重试");}}
         if((async_port.input_active && available==PN_OK && queued.kind==PN_DASYNC_POWER) || (!async_port.input_active && now-last_key>=100)){last_key=now;if((async_port.input_active || read_pico_pmu_take_key_short()) && now-boot>=1000){pn_reader_input_cancel(&input);
                 if(usb.open){usb_return=true;usb_lock=true;usb_home=false;pn_device_usb_request_stop(&usb);}
                 else if(transfer.impl){transfer_return=true;transfer_lock=true;(void)pn_device_transfer_request_stop(&transfer);}
                 else if(time_sync.impl){time_lock_pending=true;(void)pn_device_time_request_stop(&time_sync);}
+                else if(ota.impl){ota_lock_pending=true;update_command(PN_SETUI_UPDATE_CANCEL);}
                 else if(locked){last_input=now;resume_reader();}else if(prepare_lock())lock_and_sleep("再按电源键继续阅读");}}
         // 按键路径可能睡眠后更新last_input；重取当前时间，避免睡前时间减去唤醒时间下溢后立即锁屏。
         // The key path can sleep and update last_input; refresh time to avoid subtracting wake time from pre-sleep time.
         now=now_ms();
         // 无操作满5分钟自动锁屏；传输中由其停止流程负责。/ Auto-lock after five idle minutes; transfers handle their own stop flow.
-        if(PN_AUTO_LOCK && !locked && !transfer.impl && !usb.open && !time_sync.impl && now>=last_input && now-last_input>=AUTO_LOCK_MS && now-boot>=AUTO_LOCK_MS){pn_reader_input_cancel(&input);if(prepare_lock())lock_and_sleep("再按电源键继续阅读");else last_input=now;}
+        if(PN_AUTO_LOCK && !locked && !transfer.impl && !usb.open && !time_sync.impl && !ota.impl && now>=last_input && now-last_input>=AUTO_LOCK_MS && now-boot>=AUTO_LOCK_MS){pn_reader_input_cancel(&input);if(prepare_lock())lock_and_sleep("再按电源键继续阅读");else last_input=now;}
         if(opening){
             // 加载态独占内容路由；紧急键/电源先处理，普通书架触点与后台画面不进入旧页面。
             // Loading owns content routing: urgent keys/power run first; ordinary shelf contacts and background draws never reach the old page.
@@ -1840,7 +1914,7 @@ static void device_task(void *arg){
             if(motion==PN_OK){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);}}
 #endif
 #if defined(CONFIG_PN_UI_FEEDBACK) && CONFIG_PN_UI_FEEDBACK
-        if(available==PN_EMPTY){pn_status_t settled=feedback_idle_tick(now_ms(),body || locked || touch_held || tap.down || pn_font_manage_motion_stats(&font_manage).active || pn_toc_ui_motion_stats(&toc).active || transfer.impl || usb.open || time_sync.impl);if(settled!=PN_EMPTY){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);}}
+        if(available==PN_EMPTY){pn_status_t settled=feedback_idle_tick(now_ms(),body || locked || touch_held || tap.down || pn_font_manage_motion_stats(&font_manage).active || pn_toc_ui_motion_stats(&toc).active || transfer.impl || usb.open || time_sync.impl || ota.impl);if(settled!=PN_EMPTY){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);}}
 #endif
         if(body && available==PN_EMPTY && !touch_held){pn_status_t prefetched=epub.impl?pn_epub_app_prefetch(&epub):pn_reader_app_prefetch(&reader);
             pn_status_t cached=epub.impl?pn_epub_app_cache_idle(&epub,now_ms()):PN_EMPTY;
@@ -1850,7 +1924,7 @@ static void device_task(void *arg){
             if(background){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);}}
         if(available!=PN_OK){if(power_idle<POWER_IDLE_ROUNDS)power_idle++;if(power_idle>=POWER_IDLE_ROUNDS)pn_device_power_busy(PN_POWER_PRODUCT,false);
             // 活动/会话/降级输入时10ms；长空闲时等输入通知，最多100ms处理定时职责。/ 10 ms while active, in sessions or with degraded input; when long idle wait for input notification, at most 100 ms for timed duties.
-            bool slow=async_port.input_active && power_idle>=POWER_IDLE_ROUNDS && !transfer.impl && !usb.open && !time_sync.impl;
+            bool slow=async_port.input_active && power_idle>=POWER_IDLE_ROUNDS && !transfer.impl && !usb.open && !time_sync.impl && !ota.impl;
             if(background && background_rounds<50u){background_rounds++;vTaskDelay(pdMS_TO_TICKS(1));}
             else{background_rounds=0;if(async_port.product_task)pn_device_async_wait(&async_port,slow?100u:10u);else vTaskDelay(pdMS_TO_TICKS(10));}}
     }

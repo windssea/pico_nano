@@ -5,6 +5,7 @@ import json
 import pathlib
 import subprocess
 import sys
+import struct
 
 
 def verify_package(root):
@@ -44,6 +45,23 @@ def flash(root, port, baud, before):
     actual = readback.read_bytes()
     if len(actual) != 0x1000 or actual[:0xC00] != expected:
         raise ValueError("Device partition table differs; no firmware was written")
+    # ROM串口无法证明实际运行槽；使用过OTA后拒绝旧的固定ota_0写入方式。
+    # ROM serial cannot prove the running slot; reject fixed ota_0 writes after OTA has been used.
+    ranges = []
+    for offset in range(0, len(expected), 32):
+        if expected[offset:offset+2] != b"\xaa\x50":
+            break
+        if expected[offset+2:offset+4] == b"\x01\x00":
+            ranges.append(struct.unpack_from("<II", expected, offset+4))
+    if len(ranges) != 1 or ranges[0][1] != 0x2000 or ranges[0][0] % 0x1000 or not 0x9000 <= ranges[0][0] <= 0xffe000:
+        raise ValueError("Known layout has no valid OTA selection range; no firmware was written")
+    ota_readback = root / "device-otadata-readback.bin"
+    if ota_readback.exists():
+        raise ValueError("OTA readback already exists; retain it separately before retrying")
+    run(base + ["--before", "no-reset", "--after", "no-reset", "read-flash", hex(ranges[0][0]), "0x2000", str(ota_readback)])
+    ota = ota_readback.read_bytes()
+    if len(ota) != 0x2000 or ota != b"\xff" * 0x2000:
+        raise ValueError("OTA selection is active or incomplete; use full installation with backup, no firmware was written")
     # esptool自动校验写入数据；原生USB用watchdog复位退出下载模式。 / esptool verifies writes; watchdog reset exits native USB download mode.
     run(base + ["--before", "no-reset", "--after", "watchdog-reset", "write-flash",
                 "0x20000", str(root / "pico_nano.bin")])

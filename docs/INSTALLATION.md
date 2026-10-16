@@ -1,6 +1,6 @@
 # PicoNano 安装、异机升级与发布
 
-更新：2026-10-16。默认通过电脑 Chrome/Edge 的 Web Serial 升级，在线入口为[网页安装器](https://windssea.github.io/pico_nano/)。本批版本为 `0.8.0+cfb5c2f`。网页安装与设备无线OTA是不同能力，当前没有已交付的OTA原子回滚。
+更新：2026-10-16。默认通过电脑 Chrome/Edge 的 Web Serial 升级，在线入口为[网页安装器](https://windssea.github.io/pico_nano/)。当前开发树为0.9.0 OTA测试预览；最近已发布版本为 `0.8.0+cfb5c2f`。0.9首次OTA准备需备份后使用同源码完整刷入，普通保留升级不会替换旧bootloader。网页安装与设备无线OTA是不同能力，当前没有已交付的OTA原子回滚。
 
 0.8.0聚合首轮串口诊断镜像真机测试后的修复：锁屏卡死与遮罩缓存、阶段日志PSRAM堆遍历欠载、下一页预渲染缓存额度、阅读退出延后落盘、已验证身份备忘、TXT探测快速路径、EPUB加载页内推进开书、圆角描边与书架封面绑定/缩放、字体管理恢复系统默认与界面修正。219项主机、43项SDL及EPUB/TXT锁屏验证通过；真机数据来自诊断镜像，非产品镜像验收。原波形、完整身份与6MiB池保持；新增6MiB池2MiB缓存总额度。本次按用户明确授权构建发布，设备由用户自行刷写。
 
@@ -31,6 +31,8 @@
 也可用发布目录中 `PicoNano-web-installer-<提交>.zip`：解压后运行 `py serve.py`，保持终端，在Chrome/Edge打开 `http://localhost:8765/`。这只需Python提供本地站点，不需ESP-IDF/Docker/esptool；不能直接双击HTML使用Web Serial。
 
 ## 保留布局升级的写入契约
+
+0.9开发树额外读取完整8KiB OTA选择区，仅全FF允许固定`ota_0`保留升级；非空或短读停止并引导先备份、明确完整刷入。使用过设备OTA后，不可再使用旧离线包/CLI的固定`0x20000`升级方式。现有发布包保持原始字节，该保护尚未随新的安装站点发布。
 
 当前专用升级以[已知旧设备表](../releases/pico_nano-0.0.57-6840523-upgrade/expected-partition-table.bin)为基准：从 `0x8000` 只读3072字节并严格比较，匹配后只写 `0x20000` 应用，不写bootloader、分区表、otadata、NVS、内部数据/壁纸或TF。清除/初始化选项禁用。适用前提是该已知布局、当前ota_0路径，不能推广到其他板型/布局/ota_1运行设备。
 
@@ -86,6 +88,16 @@ watchdog触发后USB可能在返回响应前断开，Windows端口号也可能�
 
 ### Gitee 国内分发
 
+0.9源码增加可选的两个OTA附件：`PicoNano-<提交>-ota.bin`与固定名`PicoNano-ota-manifest.bin`。固件构建及打包获授权后，先使用已有的升级包和已资格USB迁移引导镜像生成签名附件，再将三个ZIP和这两个文件都加入同一GitHub Release。自动镜像会独立验签并核对应用/版本/源码与ZIP内应用，先完成Gitee应用上传和匿名校验，再上传签名清单；旧版本缺少OTA目录时仍只同步原来的三个ZIP和摘要。
+
+```powershell
+# 私钥路径仅指向本机受保护文件；公钥须与该板级构建配置相同。
+# The private key stays in a protected local file; its public key must match the board configuration.
+python tools/package_ota.py --release releases/pico_nano-0.9.0-<源码短提交>-upgrade --private-key <本机私钥.pem> --migration-bootloader <已资格引导镜像.bin>
+```
+
+该命令不覆盖已有`ota/`目录，也不将私钥或迁移引导原件复制进发布目录。`ota/release-public.pem`仅用于发布前独立验签，设备信任公钥来自固件配置；下载文件不能替换信任锚。0.9首次迁移与回滚尚待真机资格，不能对现有0.8设备宣称已支持。
+
 国内入口为 [Gitee 发行版](https://gitee.com/windssea/pico_nano/releases)，该仓库用于安装包分发；Gitee 标签标记分发版本，固件精确源码提交以包内 `manifest.json` 的 `source_commit` 为准。推荐国内用户下载 `PicoNano-web-installer-<提交>.zip`，按前文运行本地安装站点，不需要克隆仓库；完整包、命令行升级包与离线网页包保持 GitHub 原始字节，另附 `SHA256SUMS`。
 
 [gitee-release.yml](../.github/workflows/gitee-release.yml) 在 GitHub Release 的 `published` 事件后自动调用 [sync_gitee_release.py](../tools/sync_gitee_release.py)，也可从 Actions 的 `Mirror release packages to Gitee` 手动输入已发布标签补同步。它从主分支选出该版本唯一、同源的升级/完整包，核对包内文件和三个 ZIP 摘要，下载 GitHub 已发布附件逐字节复核，再上传到 Gitee；已有同名附件须匿名下载摘要相同，否则停止，不自动删除或覆盖。它不重建固件，不修改既有 ZIP，也不推送源码历史到 Gitee。
@@ -104,11 +116,11 @@ python tools/sync_gitee_release.py --tag v0.8.0 --verify-only --report build-dev
 python tools/sync_gitee_release.py --tag v0.8.0 --apply --report build-dev/gitee-0.8.0/synced.json
 ```
 
-同步完成以四个附件的匿名下载 SHA-256 校验为准，日志或网页出现文件名不代表下载已经通过。自动流程最多等180秒供GitHub发布后完成附件上传，仍缺包则停止，可在附件齐全后补跑。Gitee 分发仍是电脑 USB 串口安装；设备 Wi-Fi OTA 及其首次引导迁移列入 0.9，详见开发指南。
+同步完成以全部附件的匿名下载 SHA-256 校验为准：旧版为三个ZIP与摘要共四个，含OTA的新版本另有原始应用和签名清单，共六个。日志或网页出现文件名不代表下载已经通过。自动流程最多等180秒供GitHub发布后完成附件上传，仍缺包则停止，可在附件齐全后补跑。当前已发布的Gitee分发供电脑USB串口安装；设备Wi-Fi OTA及其首次引导迁移列入0.9，详见开发指南。
 
 ### 固件构建与 GitHub 发布
 
-按当前AGENTS.md，新批修改验证完成后先询问是否构建发布，不沿用前批授权。本批用户已明确要求构建发布0.6.17；设备由用户自行刷写。源提交、固件构建、发布包和Pages部署均要可核对；不能把未构建的优化写进已发布manifest。
+按当前AGENTS.md，新批修改验证完成后先询问是否构建发布，不沿用前批授权。0.6.17的构建发布授权仅适用于当时批次；当前0.9已获得用户确认构建推送；真实OTA验收与正式发布分别记录。设备由用户自行刷写。源提交、固件构建、发布包和Pages部署均要可核对；不能把未构建的优化写进已发布manifest。
 
 授权后先完成相关软件/可见窗口回归，提交需要发布的源码；复跑两套配置/size，确认board配置120MHz、USB/RF互斥及非诊断构建，slot余量目标至少10%。再打专用升级包：
 

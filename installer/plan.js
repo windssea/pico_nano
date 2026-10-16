@@ -78,16 +78,28 @@ function sameBytes(a, b) {
 /// Build the write plan from firmware files, the device table, data/wallpaper heads or full partitions, and user options.
 /// No whole-chip erase; preserve NVS by default and require explicit clearing when migration conflicts exist.
 /// The partition table is written last to narrow the inconsistent window on power loss.
-export function planInstall({ files, deviceTable, dataHead, wallpaperHead, clearNvs = false, initializeStorage = false, mode = "full" }) {
+export function preservedLayoutOf(files, deviceTable) {
+  const matched = [files.partitionTable, files.currentPartitionTable].find((table) => table?.length === TABLE_SIZE && sameBytes(deviceTable, table));
+  if (!matched) throw new Error("设备分区与专用升级包不匹配，停止写入。刷过其他固件请选择“完整刷入”，并核对备份与清除选项 / device layout mismatch; select full installation");
+  return layoutOf(matched);
+}
+
+/// 保留布局模式仅接收从未启用过OTA选择的设备，不猜测正在运行的槽。
+/// Preserving mode accepts only untouched OTA selection data, never guessing the running slot.
+export function requireUnusedOta(bytes, size = 0x2000) {
+  if (!(bytes instanceof Uint8Array) || bytes.length !== size || size !== 0x2000 || bytes.some((b) => b !== 0xff))
+    throw new Error("设备已使用 OTA 或启动选择读取不完整，不能固定写 ota_0。请使用完整刷入并先备份 / OTA selection is active or unknown; use full installation with backup");
+}
+
+export function planInstall({ files, deviceTable, dataHead, wallpaperHead, otaReadback, clearNvs = false, initializeStorage = false, mode = "full" }) {
   const layout = layoutOf(files.partitionTable);
   const upgrade = sameBytes(deviceTable, files.partitionTable);
   // 专用升级包必须匹配已核对布局，禁止迁移或初始化。 / Dedicated upgrades must match the verified layout without migration or initialization.
   if (mode === "app-only") {
     // 同源码完整包的表是另一项精确白名单，不用相似布局或版本号代替逐字节核对。
     // The same-source full package supplies another exact allowlist entry; similar layouts or version numbers never replace a byte comparison.
-    const matched = [files.partitionTable, files.currentPartitionTable].find((table) => table?.length === TABLE_SIZE && sameBytes(deviceTable, table));
-    if (!matched) throw new Error("设备分区与专用升级包不匹配，停止写入。刷过其他固件请选择“完整刷入”，并核对备份与清除选项 / device layout mismatch; select full installation");
-    const preserved = layoutOf(matched);
+    const preserved = preservedLayoutOf(files, deviceTable);
+    requireUnusedOta(otaReadback, preserved.otadata.size);
     if (clearNvs || initializeStorage) throw new Error("保留布局升级不能清除数据 / preserving upgrade cannot clear data");
     if (!files.app?.length || files.app.length > preserved.app.size || preserved.app.offset !== 0x20000)
       throw new Error("应用或升级地址无效 / invalid upgrade application or address");

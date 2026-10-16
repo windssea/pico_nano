@@ -30,6 +30,17 @@
 #define PN_SETUI_TIME 29 ///< 日期与时间子页 / Date and time page
 #define PN_SETUI_TIME_SYNC 30 ///< 请求联网对时，由控制层处理 / Request network synchronization from the controller
 #define PN_SETUI_TIME_CANCEL 31 ///< 请求结束对时 / Request cancellation of synchronization
+#define PN_SETUI_UPDATE 32 ///< 系统更新子页 / System update page
+#define PN_SETUI_UPDATE_CHECK 33 ///< 只检查新版本 / Check for a new version only
+#define PN_SETUI_UPDATE_INSTALL 34 ///< 用户确认下载并写入非活动槽 / User confirms download into the inactive slot
+#define PN_SETUI_UPDATE_REBOOT 35 ///< 校验成功后确认提交启动及重启 / Confirm boot commit/restart after verification
+#define PN_SETUI_UPDATE_CANCEL 36 ///< 取消并等待完整停止 / Cancel and await complete shutdown
+typedef struct {
+    char message[160]; ///< 端口提供的真实阶段/错误 / Actual phase/error supplied by the port
+    char version[32]; ///< 已签名校验的候选版本 / Signature-verified candidate version
+    unsigned percent; ///< 写入进度，不能代表校验或切槽完成 / Write progress, never verification or boot-commit completion
+    bool available,running,install,reboot; ///< 可检查/处理中/可安装/可重启 / Can check, busy, can install, can reboot
+} pn_settings_update_t;
 typedef struct {
     char datetime[32]; ///< 已确认UTC格式化日期，空串为未知 / Date formatted from confirmed UTC, empty if unknown
     char message[96]; ///< 控制层任务提示 / Operation notice supplied by the controller
@@ -70,6 +81,8 @@ pn_status_t pn_settings_ui_set_lan(pn_settings_ui_t *ui,const char *ssid,pn_sett
 void pn_settings_ui_set_about(pn_settings_ui_t *ui,const pn_settings_about_t *about);
 /// 设置日期/任务快照，不重画、不读时钟或联网。 / Set the clock/operation snapshot without painting, reading the clock or networking.
 void pn_settings_ui_set_time(pn_settings_ui_t *,const pn_settings_time_t *);
+/// 只复制升级快照；不联网、不写Flash或触发重启。 / Copy an update snapshot without networking, flash writes or restarting.
+void pn_settings_ui_set_update(pn_settings_ui_t *,const pn_settings_update_t *);
 /// 当前子页：0首页，1按键，2刷新，3关于，4书架外观，5日期时间。/ Current screen: root, keys, refresh, about, appearance, date/time.
 int pn_settings_ui_screen(const pn_settings_ui_t *ui);
 /// 刷新策略对应的整屏刷新间隔（页）。/ Pages between full refreshes for the saved refresh policy.

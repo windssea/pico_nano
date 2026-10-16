@@ -8,6 +8,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: python3 tools/check_docs.py
+      - run: python3 -m pip install -r tools/requirements-ota.txt
       - run: python3 -m unittest discover -s tests/tools -v
       - run: node --test tests/installer/plan.test.mjs
       - run: node --test tests/tools/test_transfer_resources.mjs

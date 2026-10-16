@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import vm from "node:vm";
 import { resetAfterFlash } from "../../installer/reset.js";
-import { isLittleFs, layoutOf, md5, parseTable, planInstall, TABLE_OFFSET, TABLE_SIZE } from "../../installer/plan.js";
+import { isLittleFs, layoutOf, preservedLayoutOf, requireUnusedOta, md5, parseTable, planInstall, TABLE_OFFSET, TABLE_SIZE } from "../../installer/plan.js";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const release = join(root, "releases", readdirSync(join(root, "releases")).filter((n) => /^pico_nano-\d+\.\d+\.\d+-esp32s3$/.test(n)).sort().at(-1));
@@ -82,7 +82,7 @@ test("page distinguishes post-verify reset failure from write failure", async ()
 test("shipped preserving upgrade writes only app and blocks other layouts or destructive options", () => {
   const folder = join(root, "releases/pico_nano-0.0.57-c696890-upgrade");
   const preserving = { app: new Uint8Array(readFileSync(join(folder, "pico_nano.bin"))), partitionTable: new Uint8Array(readFileSync(join(folder, "expected-partition-table.bin"))) };
-  const input = { files: preserving, deviceTable: preserving.partitionTable, mode: "app-only" };
+  const input = { files: preserving, deviceTable: preserving.partitionTable, mode: "app-only", otaReadback: new Uint8Array(0x2000).fill(0xff) };
   const plan = planInstall(input);
   assert.equal(plan.mode, "app-only");
   assert.deepEqual(names(plan), ["write@0x20000"]);
@@ -107,7 +107,7 @@ test("0.6.8 full-installed devices can preserve either exact known layout when u
   assert.notDeepEqual(installed, preserving.partitionTable);
   assert.throws(() => planInstall({ files: { ...preserving, currentPartitionTable: undefined }, deviceTable: installed, mode: "app-only" }), /不匹配/);
   for (const deviceTable of [installed, preserving.partitionTable]) {
-    const input = { files: preserving, deviceTable, mode: "app-only" };
+    const input = { files: preserving, deviceTable, mode: "app-only", otaReadback: new Uint8Array(0x2000).fill(0xff) };
     const plan = planInstall(input);
     assert.deepEqual(names(plan), ["write@0x20000"]);
     assert.equal(plan.steps[0].data, preserving.app);
@@ -274,7 +274,7 @@ test("page preparation reads unknown partitions fully and wires explicit recover
     if (address === 0xf00000) return fsHead;
     throw new Error("Unexpected read");
   } };
-  const context = vm.createContext({ document, navigator: {}, console, files, loader, isLittleFs, layoutOf, md5, planInstall, TABLE_OFFSET, TABLE_SIZE });
+  const context = vm.createContext({ document, navigator: {}, console, files, loader, isLittleFs, layoutOf, preservedLayoutOf, requireUnusedOta, md5, planInstall, TABLE_OFFSET, TABLE_SIZE });
   const source = readFileSync(join(root, "installer/app.js"), "utf8").replace(/^import .*;\r?$/gm, "").replace("init().then(syncButtons);", "");
   vm.runInContext(source, context);
   await vm.runInContext("state.files=files; state.loader=loader; state.device={}; prepare();", context);
@@ -292,13 +292,13 @@ test("preserving page reads only table, disables destructive options and clears 
   const element = () => ({ checked: false, dataset: {}, style: {}, events: {}, append() {}, replaceChildren() {}, addEventListener(name, fn) { this.events[name] = fn; } });
   const document = { createElement: element, getElementById(id) { if (!elements.has(id)) elements.set(id, element()); return elements.get(id); } };
   const reads = [];
-  const loader = { async readFlash(address, size) { reads.push([address, size]); return files.partitionTable; } };
-  const context = vm.createContext({ document, navigator: {}, console, files, loader, isLittleFs, layoutOf, md5, planInstall, TABLE_OFFSET, TABLE_SIZE });
+  const loader = { async readFlash(address, size) { reads.push([address, size]); return address === TABLE_OFFSET ? files.partitionTable : new Uint8Array(size).fill(0xff); } };
+  const context = vm.createContext({ document, navigator: {}, console, files, loader, isLittleFs, layoutOf, preservedLayoutOf, requireUnusedOta, md5, planInstall, TABLE_OFFSET, TABLE_SIZE });
   const source = readFileSync(join(root, "installer/app.js"), "utf8").replace(/^import .*;\r?$/gm, "").replace("init().then(syncButtons);", "");
   vm.runInContext(source, context);
   document.getElementById("clear-nvs").checked = true;
   await vm.runInContext("state.files=files; state.release={mode:'app-only'}; state.loader=loader; state.device={}; prepare();", context);
-  assert.deepEqual(reads, [[0x8000, 0xc00]]);
+  assert.deepEqual(reads, [[0x8000, 0xc00], [layoutOf(files.partitionTable).otadata.offset, 0x2000]]);
   assert.equal(document.getElementById("clear-nvs").checked, false);
   assert.equal(document.getElementById("clear-nvs").disabled, true);
   assert.equal(document.getElementById("initialize-storage").disabled, true);
@@ -317,7 +317,7 @@ test("page keeps connection after mismatch and supports explicit same-source ful
   let writes = 0;
   const loader = { async readFlash(address) { return address === TABLE_OFFSET ? foreign : fsHead; }, async writeFlash() { writes++; } };
   const context = vm.createContext({ document, navigator: { serial: {} }, console: { ...console, error() {} }, files, loader,
-    isLittleFs, layoutOf, md5, planInstall, TABLE_OFFSET, TABLE_SIZE });
+    isLittleFs, layoutOf, preservedLayoutOf, requireUnusedOta, md5, planInstall, TABLE_OFFSET, TABLE_SIZE });
   const source = readFileSync(join(root, "installer/app.js"), "utf8").replace(/^import .*;\r?$/gm, "").replace("init().then(syncButtons);", "");
   vm.runInContext(source, context);
   await vm.runInContext("state.files=files;state.release={mode:'app-only'};state.loader=loader;state.device={};prepare().catch(fail);", context);
@@ -391,4 +391,10 @@ test("release picker separates same-version modes, clears destructive choices an
   assert.equal(document.getElementById("connect").disabled, true);
   assert.equal(document.getElementById("install").disabled, true);
   assert.match(document.getElementById("mode-note").textContent, /历史首装包/);
+});
+
+// OTA使用后必须拒绝固定槽USB升级。 / Reject fixed-slot USB upgrading after OTA use.
+test("preserving mode rejects active, missing or short OTA selection", () => {
+  requireUnusedOta(new Uint8Array(8192).fill(255));
+  for (const bytes of [undefined, new Uint8Array(4096).fill(255), new Uint8Array(8192)]) assert.throws(() => requireUnusedOta(bytes), /OTA/);
 });

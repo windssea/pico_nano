@@ -6,6 +6,8 @@ import pathlib
 import sys
 import tempfile
 import unittest
+import struct
+import zipfile
 from unittest.mock import patch
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "tools"))
@@ -51,7 +53,12 @@ class MirrorTests(unittest.TestCase):
         for mode in ("upgrade", "full"):
             folder = root / "releases" / f"pico_nano-0.8.0-{commit[:7]}-{mode}"
             folder.mkdir(parents=True)
-            app = b"firmware"
+            app = bytearray(1024)
+            app[0], app[1], app[12] = 0xe9, 3, 9
+            struct.pack_into("<I", app, 32, 0xabcd5432)
+            app[48:53] = b"0.8.0"
+            app[80:89] = b"pico_nano"
+            app = bytes(app)
             (folder / "pico_nano.bin").write_bytes(app)
             info = {"brand": "PicoNano", "version": "0.8.0", "source_commit": commit,
                     "target": "esp32s3", "board": "RDP-G01-W", "mode": mode,
@@ -62,8 +69,11 @@ class MirrorTests(unittest.TestCase):
                 names.append(f"PicoNano-web-installer-{commit[:7]}.zip")
             checksums = []
             for name in names:
-                data = name.encode()
-                (folder / name).write_bytes(data)
+                with zipfile.ZipFile(folder / name,"w",zipfile.ZIP_DEFLATED) as archive:
+                    paths=([f"firmware/0.8.0+{commit[:7]}/pico_nano.bin",f"firmware/0.8.0+{commit[:7]}-full/pico_nano.bin"] if "web-installer" in name else ["pico_nano.bin"])
+                    for path in paths:
+                        archive.writestr(path,app)
+                data = (folder/name).read_bytes()
                 checksums.append(f"{hashlib.sha256(data).hexdigest()}  {name}\n")
             (folder / "PACKAGE_SHA256.txt").write_text("".join(checksums), encoding="utf-8")
 
@@ -200,6 +210,29 @@ class MirrorTests(unittest.TestCase):
         mirror.initialize_guides(api, "owner/repo", "upstream/repo")
         self.assertEqual(len(writes), 2)
         self.assertTrue(all(base64.b64decode(v["content"]).startswith(b"# PicoNano") for v in saved.values()))
+
+    def test_optional_ota_requires_matching_image_and_real_signature(self):
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import ec
+        from package_ota import make_manifest
+        with tempfile.TemporaryDirectory() as tmp:
+            root=pathlib.Path(tmp)
+            self.fixture(root)
+            upgrade=next((root/"releases").glob("*-upgrade"))
+            ota=upgrade/"ota";ota.mkdir()
+            key=ec.generate_private_key(ec.SECP256R1())
+            image=(upgrade/"pico_nano.bin").read_bytes()
+            envelope=make_manifest(image,b"\xe9"+b"\0"*99,"0.8.0","a"*40,key)
+            (ota/"release-public.pem").write_bytes(key.public_key().public_bytes(serialization.Encoding.PEM,serialization.PublicFormat.SubjectPublicKeyInfo))
+            def save(data):
+                assets={"PicoNano-aaaaaaa-ota.bin":image,"PicoNano-ota-manifest.bin":data}
+                for name,content in assets.items():(ota/name).write_bytes(content)
+                (ota/"SHA256SUMS").write_text("".join(f"{hashlib.sha256(content).hexdigest()}  {name}\n" for name,content in assets.items()))
+            save(envelope)
+            self.assertEqual(len(mirror.read_bundle(root,"v0.8.0").assets),6)
+            changed=bytearray(envelope);changed[450]^=1;save(bytes(changed))
+            with self.assertRaisesRegex(ValueError,"signature verification"):
+                mirror.read_bundle(root,"v0.8.0")
 
 
 if __name__ == "__main__":
