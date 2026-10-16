@@ -112,6 +112,39 @@ pn_status_t pn_text_seek(pn_text_reader_t *r,uint64_t offset) {
     *r=probe;return PN_OK;
 }
 
+// 已在缓存块内的完整UTF-8/GBK字符批量严格校验；结果、错误与检查点位置同逐字符scalar。缓存末尾的跨块字符或CR交回慢路径。
+// Strictly validate complete UTF-8/GBK characters already inside the cache block in bulk; results, errors and checkpoint positions match per-character scalar. Cross-block characters or a CR at the block end go back to the slow path.
+// 返回OK继续、EMPTY表示需慢路径一字符、其他为错误。/ Returns OK to continue, EMPTY when the slow path must take one character, other values are errors.
+static pn_status_t probe_cached(pn_text_reader_t *r,uint64_t stop,uint64_t stride,uint64_t *last,uint64_t *checked,void (*point)(void *,uint64_t,bool),void *ctx){
+    if((r->encoding!=PN_TEXT_UTF8 && r->encoding!=PN_TEXT_GBK) || !r->cache_size || r->cursor<r->cache_begin || r->cursor-r->cache_begin>=r->cache_size)return PN_EMPTY;
+    const uint8_t *base=r->cache;size_t i=(size_t)(r->cursor-r->cache_begin),n=r->cache_size;bool gbk=r->encoding==PN_TEXT_GBK;
+    while(i<n && r->cursor<stop){
+        uint8_t first=base[i];size_t len;bool newline=false;
+        if(first<0x80){len=1;
+            if(first==13){if(i+1>=n){if(r->cursor+1<r->source.size)return PN_EMPTY;}else if(base[i+1]==10)len=2;newline=true;}
+            else newline=first==10;}
+        else if(gbk){
+            if(first<0x81 || first>0xfe || r->source.size-r->cursor<2)return PN_CORRUPT;
+            if(i+2>n)return PN_EMPTY;
+            uint8_t trail=base[i+1];if(trail<0x40 || trail>0xfe || trail==0x7f || !pn_gbk_table[(first-0x81)*191+(trail-0x40)])return PN_CORRUPT;
+            len=2;}
+        else{
+            unsigned count;uint32_t value,minimum;
+            if(first>=0xc2 && first<=0xdf){count=2;value=first&0x1f;minimum=0x80;}
+            else if(first>=0xe0 && first<=0xef){count=3;value=first&0x0f;minimum=0x800;}
+            else if(first>=0xf0 && first<=0xf4){count=4;value=first&7;minimum=0x10000;}
+            else return PN_CORRUPT;
+            if(r->source.size-r->cursor<count)return PN_CORRUPT;
+            if(i+count>n)return PN_EMPTY;
+            for(unsigned k=1;k<count;k++){uint8_t c=base[i+k];if((c&0xc0)!=0x80)return PN_CORRUPT;value=(value<<6)|(c&0x3f);}
+            if(value<minimum || value>0x10ffff || (value>=0xd800 && value<=0xdfff))return PN_CORRUPT;
+            len=count;}
+        i+=len;r->cursor+=len;
+        if(r->cursor<r->source.size && r->cursor-*last>=stride){*last=r->cursor;if(point)point(ctx,*last,newline);}
+        if(r->cursor-*checked>=256 || r->cursor==r->source.size){pn_status_t s=pn_cancel_checkpoint();if(s==PN_OK && r->source.validate)s=r->source.validate(r->source.ctx);if(s!=PN_OK)return s;*checked=r->cursor;}
+    }
+    return PN_OK;
+}
 pn_status_t pn_text_probe_range(pn_text_reader_t *reader,uint64_t stop,uint64_t *last,void (*point)(void *,uint64_t,bool),void *ctx){
     if(!reader || !last || !reader->source.read_at || reader->encoding<PN_TEXT_UTF8 || reader->encoding>PN_TEXT_GBK || reader->cursor>reader->source.size || stop>reader->source.size)return PN_INVALID;
     uint64_t stride=reader->source.size/510u+1u;
@@ -120,6 +153,9 @@ pn_status_t pn_text_probe_range(pn_text_reader_t *reader,uint64_t stop,uint64_t 
     while(reader->cursor<stop){
         // 整书探测每256字节检查取消/租约，仍完整严格解码；普通next契约保持。/ Check cancellation/lease every 256 bytes during full strict probing; ordinary next keeps its contract.
         if(reader->cursor-checked>=256 || reader->cursor==reader->source.size){pn_status_t s=pn_cancel_checkpoint();if(s==PN_OK && reader->source.validate)s=reader->source.validate(reader->source.ctx);if(s!=PN_OK)return s;checked=reader->cursor;}
+        pn_status_t fast=probe_cached(reader,stop,stride,last,&checked,point,ctx);if(fast!=PN_OK && fast!=PN_EMPTY)return fast;
+        if(fast==PN_OK && (reader->cursor>=stop || !reader->cache_size || reader->cursor-reader->cache_begin<reader->cache_size))continue;
+        if(reader->cursor>=stop)break;
         uint32_t cp;uint64_t end;pn_status_t status=scalar(reader,reader->cursor,&cp,&end);if(status!=PN_OK)return status;
         if(cp==13){uint32_t next;uint64_t after;status=scalar(reader,end,&next,&after);if(status!=PN_OK && status!=PN_EMPTY && status!=PN_CORRUPT)return status;if(status==PN_OK && next==10)end=after;cp=10;}
         reader->cursor=end;
