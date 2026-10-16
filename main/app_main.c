@@ -169,6 +169,8 @@ static bool test_console_shown(const uint8_t **buffer,size_t *bytes){*buffer=har
 #endif
 static bool opening; ///< 开书控制门，产品owner串行管理 / Opening gate owned by the serial product owner
 static pn_epub_open_job_t foreground_open; ///< 跨输入轮保留的私有开书任务，不是可阅读对象 / Private opening job across input ticks, never a readable object
+static bool opening_overlap; ///< 加载页扫描期间推进前台开书任务 / Advance the foreground opening job while the loading page scans
+static pn_status_t opening_overlap_result=PN_BUSY; ///< 扫描中已结束的开书步骤结果，tick_opening消费 / Result of an opening step that finished during the scan, consumed by tick_opening
 static atomic_bool deep_clean_pending; ///< 显式清屏意图，由显示owner消费 / Explicit cleaning intent consumed by the display owner
 static pn_catalog_index_t catalog_index;
 static bool recent_loaded;static uint64_t recent_epoch;
@@ -279,7 +281,7 @@ static pn_focus_t focus_nav; ///< 当前页的三键焦点表 / Three-key focus 
 #define PARTIAL_MAX_PERCENT 45
 static pn_device_async_t async_port;
 static void opening_controls(bool active){opening=active;pn_async_block_controls(&async_port.input,active);if(active)pn_device_async_view(&async_port,18,false,input_flags);}
-static pn_status_t opening_abort(void){if(!foreground_open.impl)return PN_OK;pn_status_t s=pn_epub_app_open_job_close(&foreground_open);opening_controls(false);return s;}
+static pn_status_t opening_abort(void){opening_overlap_result=PN_BUSY;if(!foreground_open.impl)return PN_OK;pn_status_t s=pn_epub_app_open_job_close(&foreground_open);opening_controls(false);return s;}
 static pn_feedback_t press_feedback; ///< 独立、可撤销的按下区域，不借用UI对象 / Independent reversible press region without borrowing UI objects
 static pn_device_refresh_t maintenance; ///< 内容维护与可选反馈分开记账 / Content maintenance accounted separately from optional feedback
 static pn_feedback_idle_t feedback_idle; ///< 产品owner的反馈定稿候选 / Product-owner feedback settle candidates
@@ -516,6 +518,13 @@ static pn_status_t list_present(void *ctx,pn_list_stage_t stage,const pn_frame_t
 static bool reader_active(void){return reader.impl || epub.impl;}
 /// 仅阅读翻页的扫描期间为待确认页准备下一页。/ Prepare the page after the pending one only during reading-turn scans.
 static pn_status_t reader_overlap(void *ctx){(void)ctx;
+    // 加载页扫描约0.45s CPU原本空等：在此推进开书任务；取消只停重叠，进度保留给事件循环接续。
+    // The loading-page scan used to idle the CPU for about 0.45 s: advance the opening job here; cancellation only stops overlapping and keeps progress for the event loop.
+    if(opening_overlap && foreground_open.impl && opening_overlap_result==PN_BUSY && !atomic_load(&overlap_disabled)){
+        pn_status_t step=pn_epub_app_open_job_step(&foreground_open,&epub);
+        if(step==PN_BUSY)return PN_OK;
+        if(step!=PN_CANCELLED)opening_overlap_result=step;
+        return PN_EMPTY;}
     if(atomic_load(&overlap_disabled) || !atomic_load(&reading_presentation) || !reader_active())return PN_EMPTY;
     return epub.impl?pn_epub_app_overlap(&epub):pn_reader_app_overlap(&reader);}
 static pn_status_t active_step(pn_reader_action_t action,uint64_t now){
@@ -894,11 +903,17 @@ static void start_reader_impl(void){
     }
     const char *font=NULL;
     covers_inactive=true;
-    pn_status_t loading=pn_reader_loading_needed(selected_format==PN_BOOK_TXT,(uint64_t)selected_info.st_size)?show_loading(selected_path):PN_OK;
+    bool need_loading=pn_reader_loading_needed(selected_format==PN_BOOK_TXT,(uint64_t)selected_info.st_size);
+    if(selected_format==PN_BOOK_EPUB){
+        // 先建开书任务再显示加载页，扫描期间即推进；完成结果由tick_opening消费。/ Create the opening job before the loading page so it advances during the scan; tick_opening consumes a finished result.
+        pn_status_t status=pn_epub_app_open_job_begin(&foreground_open,&pool,&sd_media,selected_path,font,"/data/progress",PN_STYLE_DEFAULT_PIXELS,now_ms());if(status!=PN_OK){reader_open_result(status);return;}
+        opening_overlap_result=PN_BUSY;
+        if(need_loading){opening_overlap=true;pn_status_t loading=show_loading(selected_path);opening_overlap=false;if(loading!=PN_OK && loading!=PN_CANCELLED)ESP_LOGW(TAG,"Opening feedback unavailable: %d",(int)loading);}
+        return;}
+    pn_status_t loading=need_loading?show_loading(selected_path):PN_OK;
     if(loading==PN_CANCELLED)return;
     if(loading!=PN_OK)ESP_LOGW(TAG,"Opening feedback unavailable: %d",(int)loading);
     uint64_t opened_at=now_ms();(void)opened_at;
-    if(selected_format==PN_BOOK_EPUB){pn_status_t status=pn_epub_app_open_job_begin(&foreground_open,&pool,&sd_media,selected_path,font,"/data/progress",PN_STYLE_DEFAULT_PIXELS,now_ms());if(status!=PN_OK)reader_open_result(status);return;}
     pn_status_t status=pn_reader_app_open_on_media(&reader,&pool,&sd_media,selected_path,font,"/data/progress",PN_STYLE_DEFAULT_PIXELS,now_ms());
     ESP_LOGI(TAG,"Book prepare format=%u status=%d elapsed=%llu ms",(unsigned)selected_format,(int)status,(unsigned long long)(now_ms()-opened_at));
     if(status==PN_OK && selected_identified){pn_book_id_t actual;status=epub.impl?pn_epub_app_identity(&epub,&actual):pn_reader_app_identity(&reader,&actual);if(status==PN_OK && memcmp(actual.sha256,selected_expected.sha256,32))status=PN_STALE_JOB;}
@@ -944,7 +959,7 @@ static void start_reader(void){
 /// 前台开书每轮一步；任务/加载页不确认正文，完整成功后走原唯一首帧回执。/ One foreground opening step per tick; neither job nor loader confirms content, and full success uses the original sole first-page receipt.
 static bool tick_opening(void){
     if(!foreground_open.impl)return false;
-    pn_status_t s=pn_epub_app_open_job_step(&foreground_open,&epub);
+    pn_status_t s=opening_overlap_result!=PN_BUSY?opening_overlap_result:pn_epub_app_open_job_step(&foreground_open,&epub);opening_overlap_result=PN_BUSY;
     if(s==PN_BUSY || (s==PN_CANCELLED && pn_epub_app_open_job_pending(&foreground_open)))return true;
     if(s==PN_OK && selected_identified){pn_book_id_t actual;s=pn_epub_app_identity(&epub,&actual);if(s==PN_OK && memcmp(actual.sha256,selected_expected.sha256,32))s=PN_STALE_JOB;}
     if(s==PN_OK)s=active_step(PN_APP_OPEN,now_ms());
