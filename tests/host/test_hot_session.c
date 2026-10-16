@@ -89,10 +89,10 @@ static void run(const char *path,bool is_epub){
     unsigned indexes_before=count_index(state);
     // 空闲写入被新输入取消时保持待写且不锁定失败。/ An idle write cancelled by new input stays pending without latching failure.
     pn_cancel_scope_t interrupted;pn_cancel_enter(&interrupted,always_cancelled,NULL);
-    assert(pn_hot_session_index_flush(&h)==PN_CANCELLED);pn_cancel_leave(&interrupted);
-    assert(pn_hot_session_index_pending(&h) && !h.index_failed);
-    assert(pn_hot_session_index_pending(&h) && pn_hot_session_index_flush(&h)==PN_OK && !pn_hot_session_index_pending(&h) && pn_hot_session_index_flush(&h)==PN_EMPTY);
-    assert(count_index(state)>=indexes_before && count_index(state)>0 && !h.index_failed);
+    assert(pn_hot_session_deferred_flush(&h)==PN_CANCELLED);pn_cancel_leave(&interrupted);
+    assert(pn_hot_session_deferred_pending(&h) && !h.deferred_failed);
+    assert(pn_hot_session_deferred_pending(&h) && pn_hot_session_deferred_flush(&h)==PN_OK && !pn_hot_session_deferred_pending(&h) && pn_hot_session_deferred_flush(&h)==PN_EMPTY);
+    assert(count_index(state)>=indexes_before && count_index(state)>0 && !h.deferred_failed);
     assert(pn_hot_session_expire(&h,8+PN_HOT_SESSION_MS-1)==PN_EMPTY && h.media);
     assert(pn_hot_session_expire(&h,8+PN_HOT_SESSION_MS)==PN_OK && !h.media && pool.used==0 && pool.live==0);
     assert(pn_media_acquire(&media,PN_MEDIA_WRITE,&write)==PN_OK && pn_media_release(&media,&write)==PN_OK);

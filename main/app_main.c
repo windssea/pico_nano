@@ -922,11 +922,11 @@ static bool tick_prepare_book(uint64_t now){
     if(attempted)ESP_LOGI(TAG,"Idle book prepare status=%d ready=%u",(int)status,(unsigned)hot_session.prepared);
     return attempted;
 }
-/// 离开阅读后的页码索引在首页首显之后、输入安静800ms才写出，不挡退出反馈。/ Write the page index left by the reader only after the home display and 800 ms of quiet input, never delaying exit feedback.
-static bool tick_hot_index(uint64_t now){
-    if(reader_active() || locked || now<last_input || now-last_input<800 || !pn_hot_session_index_pending(&hot_session))return false;
-    pn_device_power_busy(PN_POWER_PRODUCT,true);pn_status_t s=pn_hot_session_index_flush(&hot_session);
-    if(s!=PN_OK && s!=PN_EMPTY && s!=PN_CANCELLED)ESP_LOGW(TAG,"Deferred page index write: %d",(int)s);
+/// 离开阅读后的进度与页码索引在首页首显之后、输入安静800ms才写出，不挡退出反馈。/ Write the progress and page index left by the reader only after the home display and 800 ms of quiet input, never delaying exit feedback.
+static bool tick_hot_deferred(uint64_t now){
+    if(reader_active() || locked || now<last_input || now-last_input<800 || !pn_hot_session_deferred_pending(&hot_session))return false;
+    pn_device_power_busy(PN_POWER_PRODUCT,true);pn_status_t s=pn_hot_session_deferred_flush(&hot_session);
+    if(s!=PN_OK && s!=PN_EMPTY && s!=PN_CANCELLED)ESP_LOGW(TAG,"Deferred progress/index write: %d",(int)s);
     return true;
 }
 static void start_reader(void){
@@ -1102,8 +1102,10 @@ static bool prepare_lock(void){
     reader_suspended=false;
     if(!reader_active() || toolbar_open || styles.active || fonts.active || toc.active || jump_ui.active || bookmarks.mode!=PN_BUI_CLOSED){toolbar_open=false;return stop_reader();}
     pn_status_t status=epub.impl?pn_epub_app_suspend(&epub,now_ms()):pn_reader_app_suspend(&reader,now_ms());
-    // 锁屏保持原先在挂起时写出页码索引的行为。/ Locking keeps the previous behavior of writing the page index while suspending.
-    if(status==PN_OK){(void)(epub.impl?pn_epub_app_index_flush(&epub):pn_reader_app_index_flush(&reader));reader_suspended=true;return true;}
+    // 锁屏保持原先挂起即写进度与索引的行为；进度写失败不能入睡。/ Locking keeps writing progress and index during suspend; a failed progress write must not sleep.
+    if(status==PN_OK){pn_status_t saved=epub.impl?pn_epub_app_deferred_flush(&epub):pn_reader_app_deferred_flush(&reader);
+        if(saved!=PN_OK && saved!=PN_EMPTY){ESP_LOGE(TAG,"Warm save barrier failed: %d",(int)saved);message("保存失败","当前位置仍保留，稍后重试");return false;}
+        reader_suspended=true;return true;}
     if(status==PN_BUSY || status==PN_EMPTY)return stop_reader();
     ESP_LOGE(TAG,"Warm save barrier failed: %d",(int)status);message("保存失败","当前位置仍保留，稍后重试");return false;
 }
@@ -1799,7 +1801,7 @@ static void device_task(void *arg){
             if(sampled==PN_OK || sampled==PN_BUSY){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);}}
         if(available==PN_EMPTY && shelf_mode && shelf_covers && shelf_page && !actions_mode && !transfer.impl && !usb.open && !wallpaper_ui.impl && !font_manage.impl && !settings_ui.impl && !locked && !status_page && !reading_menu && !touch_held && !tap.down && now_ms()>=last_input && now_ms()-last_input>=80){
             // 后台确有工作时回到最高频，封面/索引不在降频下变慢。/ Real background work returns to maximum so covers and indexing are not slowed by DFS.
-            bool worked=now_ms()-last_input>=800 && catalog_build_idle()==PN_OK;worked|=tick_covers();worked|=tick_hot_index(now_ms());if(!worked)worked|=tick_prepare_book(now_ms());background=pn_cover_work_pending(&cover_work) || pn_shelf_covers_pending(shelf_covers,shelf_page) || (home_mode && now_ms()-last_input>=1500 && (pn_hot_session_source_pending(&hot_session) || pn_hot_session_layout_pending(&hot_session) || pn_hot_session_paint_pending(&hot_session)));if(worked){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);}}
+            bool worked=now_ms()-last_input>=800 && catalog_build_idle()==PN_OK;worked|=tick_covers();worked|=tick_hot_deferred(now_ms());if(!worked)worked|=tick_prepare_book(now_ms());background=pn_cover_work_pending(&cover_work) || pn_shelf_covers_pending(shelf_covers,shelf_page) || (home_mode && now_ms()-last_input>=1500 && (pn_hot_session_source_pending(&hot_session) || pn_hot_session_layout_pending(&hot_session) || pn_hot_session_paint_pending(&hot_session)));if(worked){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);}}
 #if defined(CONFIG_PN_UI_FOLLOW) && CONFIG_PN_UI_FOLLOW
         if(!locked && !transfer.impl && !usb.open && font_manage.impl){pn_status_t motion=pn_font_manage_tick(&font_manage,now_ms());pn_list_motion_stats_t moving=pn_font_manage_motion_stats(&font_manage);background|=moving.pending!=0 || moving.coasting;
             if(motion==PN_OK){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);}}

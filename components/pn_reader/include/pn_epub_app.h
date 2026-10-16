@@ -30,11 +30,11 @@ pn_status_t pn_epub_app_verify_unshown(pn_epub_app_t *);
 pn_status_t pn_epub_app_discard_unshown(pn_epub_app_t *);
 /// 验证已保存挂起会话的原书/字体源，不绘制或推进位置。/ Verify original book/font sources of a saved suspended session without drawing/position commits.
 pn_status_t pn_epub_app_retained_ready(pn_epub_app_t *);
-/// 页码索引缓存有未写记录 / The page-index cache has unwritten records
-bool pn_epub_app_index_pending(const pn_epub_app_t *);
-/// 写出页码索引缓存；挂起后也可调用，不改阅读位置/记录。失败保留未写记录，关闭时仍强制写出。
-/// Write the page-index cache, also while suspended, without touching position or records. Failures keep the records and close still forces a write.
-pn_status_t pn_epub_app_index_flush(pn_epub_app_t *);
+/// 挂起后有延后的进度或页码索引待写 / Deferred progress or page-index records await writing after suspend
+bool pn_epub_app_deferred_pending(const pn_epub_app_t *);
+/// 先写延后的阅读进度再写页码索引；挂起后也可调用。失败保留待写，释放/关闭仍强制写出。
+/// Write deferred reading progress, then the page index; callable while suspended. Failures stay pending and release/close still force the writes.
+pn_status_t pn_epub_app_deferred_flush(pn_epub_app_t *);
 /// 验证选择的路径/介质就是当前会话的源，不读文件内容。/ Verify the selected path/media are this session's source, without content reads.
 pn_status_t pn_epub_app_retained_source(const pn_epub_app_t *,pn_media_t *,const char *);
 /// 仅释放已保存挂起会话，不重写进度/最近记录；失败候选返回BUSY。/ Release only a saved suspended session without rewriting progress/recents; uncommitted candidates return BUSY.

@@ -407,13 +407,22 @@ pn_status_t pn_reader_app_suspend(pn_reader_app_t *app,uint64_t now){
     if(a->media_lost)return PN_STALE_MEDIA;
     if(!a->reader.has_visible || a->force_full || a->style_preview || a->font_preview || a->font_pending || a->global_pending || a->style_pending)return PN_BUSY;
     pn_status_t status=pn_media_validate(a->book_media,&a->book_lease);if(status!=PN_OK)return status;
-    if(a->persistent){status=pn_save_policy_flush(&a->save,now);if(status==PN_OK)status=record_recent(a);}
+    // 最近记录首页要读，同步写；进度日志首页不读，留待首页首显后空闲写（关闭/释放仍强制写）。
+    // Recents feed the home screen and are written now; the progress journal is not read by home and is written when idle after the home display (close/release still force it).
+    if(a->persistent)status=record_recent(a);
     // 页码索引只是可重建缓存，不再挡在离开阅读后的首显之前；由调用者空闲写出，关闭仍强制写出。
     // The page index is a rebuildable cache and no longer precedes the first display after leaving the reader; callers write it when idle and close still forces it.
     if(status==PN_OK){a->last_now=now;a->suspended=true;}return status;
 }
-bool pn_reader_app_index_pending(const pn_reader_app_t *app){return app && app->impl && pn_page_index_pending(&((const app_t *)app->impl)->page_index);}
-pn_status_t pn_reader_app_index_flush(pn_reader_app_t *app){if(!pn_reader_app_index_pending(app))return PN_EMPTY;return pn_page_index_flush(&((app_t *)app->impl)->page_index,true);}
+bool pn_reader_app_deferred_pending(const pn_reader_app_t *app){if(!app || !app->impl)return false;const app_t *a=app->impl;return (a->persistent && a->save.dirty) || pn_page_index_pending(&a->page_index);}
+pn_status_t pn_reader_app_deferred_flush(pn_reader_app_t *app){
+    if(!pn_reader_app_deferred_pending(app))return PN_EMPTY;
+    app_t *a=app->impl;
+    // 先进度后索引：进度是用户数据，索引可重建。/ Progress first, then the index: progress is user data, the index is rebuildable.
+    if(a->persistent && a->save.dirty){pn_status_t s=pn_save_policy_flush(&a->save,a->last_now);if(s!=PN_OK)return s;}
+    if(!pn_page_index_pending(&a->page_index))return PN_OK;
+    return pn_page_index_flush(&a->page_index,true);
+}
 pn_status_t pn_reader_app_resume(pn_reader_app_t *app,uint64_t now,pn_reader_present_fn present,void *ctx){
     if(!app || !app->impl || !present)return PN_INVALID;
     app_t *a=app->impl;if(now<a->last_now)return PN_INVALID;
@@ -497,6 +506,8 @@ pn_status_t pn_reader_app_release_retained(pn_reader_app_t *app){
     if(!app)return PN_INVALID;
     if(!app->impl)return PN_OK;
     app_t *a=app->impl;if(!a->suspended || a->style_pending || a->font_pending || a->global_pending)return PN_BUSY;
+    // 延后的进度在释放前必须落盘；失败保留会话，不丢阅读位置。/ Deferred progress must be durable before release; failures keep the session so no position is lost.
+    if(a->persistent && a->save.dirty){pn_status_t saved=pn_save_policy_flush(&a->save,a->last_now);if(saved!=PN_OK)return saved;}
     pn_status_t s=release_app(a);app->impl=NULL;return s;
 }
 pn_status_t pn_reader_app_close(pn_reader_app_t *app,uint64_t now){

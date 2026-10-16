@@ -18,7 +18,7 @@ typedef struct {
     pn_pool_t *prepare_pool; ///< 分阶段准备原池，须保活到drop/take / Original staged-preparation pool, alive until drop/take
     bool layout_pending; ///< 书源/字体已完整校验，首屏可在下一轮准备或由点击接续 / Sources/fonts fully verified; first layout may run next tick or on click
     pn_epub_open_job_t opening; ///< 私有部分EPUB准备，不能呈现或当已验证源 / Private partial EPUB preparation, never presentable or a verified source
-    bool index_failed; ///< 本次保留期内空闲写页索引已失败，不再重试，关闭兜底 / Idle page-index write failed during this retention; no retry, close still writes
+    bool deferred_failed; ///< 本次保留期内空闲写页索引已失败，不再重试，关闭兜底 / Idle page-index write failed during this retention; no retry, close still writes
 } pn_hot_session_t;
 /// 首页空闲只读准备已识别的继续阅读书；不显示/写记录，旧缓存pin保护，不足退EMPTY；同activity/epoch仅一次。/ Read-only idle preparation for an identified continue book; no display/record writes, pin existing caches, EMPTY on admission refusal, once per activity/epoch.
 pn_status_t pn_hot_session_prepare(pn_hot_session_t *,pn_pool_t *,pn_media_t *,const pn_catalog_item_t *,const char *font,const char *state,int pixels,uint64_t policy,uint64_t now,uint64_t activity);
@@ -54,7 +54,7 @@ pn_status_t pn_hot_session_resume(pn_hot_session_t *,pn_media_t *,const char *,p
 pn_status_t pn_hot_session_drop(pn_hot_session_t *);
 /// 到期后释放；无任务EMPTY。/ Release when expired; EMPTY without work.
 pn_status_t pn_hot_session_expire(pn_hot_session_t *,uint64_t);
-/// 保留对象的页码索引有待写记录且本次未失败 / The retained object's page index has pending records and has not failed this retention
-bool pn_hot_session_index_pending(const pn_hot_session_t *);
-/// 空闲时写出保留对象的页码索引；取消保持待写以便下次空闲重试，其他失败本次保留期不再重试。/ Write the retained object's page index when idle; cancellation keeps it pending for the next idle retry, other failures stop retries for this retention.
-pn_status_t pn_hot_session_index_flush(pn_hot_session_t *);
+/// 保留对象有延后的进度/页码索引待写且本次未失败 / The retained object has deferred progress/page-index writes pending and has not failed this retention
+bool pn_hot_session_deferred_pending(const pn_hot_session_t *);
+/// 空闲时写出保留对象延后的进度与页码索引；取消保持待写以便下次空闲重试，其他失败本次保留期不再重试。/ Write the retained object's deferred progress and page index when idle; cancellation keeps them pending for the next idle retry, other failures stop retries for this retention.
+pn_status_t pn_hot_session_deferred_flush(pn_hot_session_t *);
