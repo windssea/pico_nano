@@ -123,4 +123,5 @@ pn_status_t pn_page_index_flush(pn_page_index_t *h,bool force){
     pn_profile_span_t span;pn_profile_begin(&span,h && h->impl?((index_t *)h->impl)->pool:NULL,"storage.page-index");
     pn_status_t status=index_flush(h,force);pn_profile_end(&span,status);return status;
 }
+bool pn_page_index_pending(const pn_page_index_t *h){return h && h->impl && ((const index_t *)h->impl)->dirty;}
 void pn_page_index_close(pn_page_index_t *h){if(h){pn_free(h->impl);h->impl=NULL;}}

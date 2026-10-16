@@ -610,8 +610,12 @@ pn_status_t pn_epub_app_suspend(pn_epub_app_t *app,uint64_t now){
     pn_status_t status=pn_zip_validate(&a->zip);if(status!=PN_OK)return status;
     cache_abort(a);
     if(a->persistent){status=pn_epub_save_flush(&a->save,now);if(status==PN_OK)status=recent(a,a->visible.location.path);}
-    if(status==PN_OK){(void)pn_page_index_flush(&a->page_index,true);a->last_now=now;a->suspended=true;}return status;
+    // 页码索引只是可重建缓存，不再挡在离开阅读后的首显之前；由调用者空闲写出，关闭仍强制写出。
+    // The page index is a rebuildable cache and no longer precedes the first display after leaving the reader; callers write it when idle and close still forces it.
+    if(status==PN_OK){a->last_now=now;a->suspended=true;}return status;
 }
+bool pn_epub_app_index_pending(const pn_epub_app_t *app){return app && app->impl && pn_page_index_pending(&((const app_t *)app->impl)->page_index);}
+pn_status_t pn_epub_app_index_flush(pn_epub_app_t *app){if(!pn_epub_app_index_pending(app))return PN_EMPTY;return pn_page_index_flush(&((app_t *)app->impl)->page_index,true);}
 pn_status_t pn_epub_app_resume(pn_epub_app_t *app,uint64_t now,pn_reader_present_fn present,void *ctx){
     if(!app || !app->impl || !present)return PN_INVALID;
     app_t *a=app->impl;if(now<a->last_now)return PN_INVALID;

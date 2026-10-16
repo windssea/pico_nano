@@ -37,6 +37,15 @@ static pn_status_t present(void *ctx,const pn_frame_t *f,pn_refresh_t mode){
     for(int y=0;y<f->height;y++){uint8_t *row=s->pixels+(size_t)y*342u;if(s->compare)assert(!memcmp(row,f->pixels+(size_t)y*f->stride,342u));else memcpy(row,f->pixels+(size_t)y*f->stride,342u);}
     return s->fail?PN_IO:PN_OK;
 }
+static bool always_cancelled(void *ctx){(void)ctx;return true;}
+// 状态目录两层内的页码索引文件数。/ Page-index files within two levels of the state directory.
+static unsigned count_index(const char *root){
+    unsigned found=0;DIR *dir=opendir(root);if(!dir)return 0;struct dirent *entry;
+    while((entry=readdir(dir))){if(entry->d_name[0]=='.')continue;size_t n=strlen(entry->d_name);if(n>4 && !strcmp(entry->d_name+n-4,".pni")){found++;continue;}
+        char child[512];if(snprintf(child,sizeof child,"%s/%s",root,entry->d_name)>=(int)sizeof child)continue;DIR *sub=opendir(child);if(!sub)continue;struct dirent *inner;
+        while((inner=readdir(sub))){size_t m=strlen(inner->d_name);if(m>4 && !strcmp(inner->d_name+m-4,".pni"))found++;}closedir(sub);}
+    closedir(dir);return found;
+}
 static pn_status_t step(pn_reader_app_t *t,pn_epub_app_t *e,pn_reader_action_t a,uint64_t now,screen_t *s){return e->impl?pn_epub_app_step(e,a,now,present,s):pn_reader_app_step(t,a,now,present,s);}
 static void run(const char *path,bool is_epub){
     pn_pool_t pool;assert(pn_pool_init(&pool,6u*1024u*1024u,NULL,NULL,NULL)==PN_OK);
@@ -76,6 +85,14 @@ static void run(const char *path,bool is_epub){
     pn_txt_progress_t txt_saved={0};pn_epub_progress_t epub_saved={0};
     assert((is_epub?pn_epub_app_progress(&e,&epub_saved):pn_reader_app_progress(&t,&txt_saved))==PN_OK);
     assert(pn_hot_session_park(&h,&pool,&media,path,1,8,&t,&e)==PN_OK);
+    // 挂起不再同步写页码索引；空闲写出一次后不再待写，再写为EMPTY。/ Suspend no longer writes the page index synchronously; one idle write clears it and another returns EMPTY.
+    unsigned indexes_before=count_index(state);
+    // 空闲写入被新输入取消时保持待写且不锁定失败。/ An idle write cancelled by new input stays pending without latching failure.
+    pn_cancel_scope_t interrupted;pn_cancel_enter(&interrupted,always_cancelled,NULL);
+    assert(pn_hot_session_index_flush(&h)==PN_CANCELLED);pn_cancel_leave(&interrupted);
+    assert(pn_hot_session_index_pending(&h) && !h.index_failed);
+    assert(pn_hot_session_index_pending(&h) && pn_hot_session_index_flush(&h)==PN_OK && !pn_hot_session_index_pending(&h) && pn_hot_session_index_flush(&h)==PN_EMPTY);
+    assert(count_index(state)>=indexes_before && count_index(state)>0 && !h.index_failed);
     assert(pn_hot_session_expire(&h,8+PN_HOT_SESSION_MS-1)==PN_EMPTY && h.media);
     assert(pn_hot_session_expire(&h,8+PN_HOT_SESSION_MS)==PN_OK && !h.media && pool.used==0 && pool.live==0);
     assert(pn_media_acquire(&media,PN_MEDIA_WRITE,&write)==PN_OK && pn_media_release(&media,&write)==PN_OK);

@@ -5,7 +5,7 @@
 #include "pn_cancel.h"
 #include <string.h>
 #include <sys/stat.h>
-static void clear(pn_hot_session_t *h){h->path[0]=0;h->media=NULL;h->epoch=h->policy=h->at=0;h->prepared=false;h->prepare_pool=NULL;h->layout_pending=false;}
+static void clear(pn_hot_session_t *h){h->path[0]=0;h->media=NULL;h->epoch=h->policy=h->at=0;h->prepared=false;h->prepare_pool=NULL;h->layout_pending=false;h->index_failed=false;}
 pn_status_t pn_hot_session_drop(pn_hot_session_t *h){
     if(!h)return PN_INVALID;
     pn_status_t opening=pn_epub_app_open_job_close(&h->opening);
@@ -146,7 +146,12 @@ pn_status_t pn_hot_session_park(pn_hot_session_t *h,pn_pool_t *pool,pn_media_t *
     // 只转移wrapper所有权，堆内reader/file/cache owner的地址始终不变。
     // Transfer wrapper ownership only; heap reader/file/cache-owner addresses never change.
     h->txt.impl=txt->impl;txt->impl=NULL;h->epub.impl=epub->impl;epub->impl=NULL;
-    strcpy(h->path,path);h->book=id;h->media=media;h->epoch=media->epoch;h->policy=policy;h->at=now;h->parks++;return PN_OK;
+    strcpy(h->path,path);h->book=id;h->media=media;h->epoch=media->epoch;h->policy=policy;h->at=now;h->parks++;h->index_failed=false;return PN_OK;
+}
+bool pn_hot_session_index_pending(const pn_hot_session_t *h){return h && !h->index_failed && (h->epub.impl?pn_epub_app_index_pending(&h->epub):pn_reader_app_index_pending(&h->txt));}
+pn_status_t pn_hot_session_index_flush(pn_hot_session_t *h){
+    if(!pn_hot_session_index_pending(h))return PN_EMPTY;
+    pn_status_t s=h->epub.impl?pn_epub_app_index_flush(&h->epub):pn_reader_app_index_flush(&h->txt);if(s!=PN_OK && s!=PN_CANCELLED)h->index_failed=true;return s;
 }
 pn_status_t pn_hot_session_resume(pn_hot_session_t *h,pn_media_t *media,const char *path,pn_book_format_t kind,const pn_book_id_t *expected,uint64_t policy,uint64_t now,pn_reader_app_t *txt,pn_epub_app_t *epub,pn_reader_present_fn present,void *ctx){
     if(!h || !media || !path || !txt || !epub || !present)return PN_INVALID;

@@ -236,6 +236,13 @@ def serve(args):
             try:
                 if request.get("shot"):
                     result = session.shot(request["shot"])
+                elif request.get("wait"):
+                    # 只在主机端等待日志，不向设备发指令，避免轮询干扰扫描。/ Wait on host-side logs only, sending nothing to the device so polling cannot disturb scans.
+                    pattern = re.compile(request["wait"])
+                    with session.cond:
+                        start = len(session.lines) if request.get("new") else 0
+                    found, _ = session._wait(start, lambda t: t if pattern.search(t) else None, float(request.get("timeout", 60)))
+                    result = {"found": found}
                 elif request.get("tail"):
                     with session.cond:
                         result = {"lines": [t for _, t in session.lines[-int(request["tail"]):]]}
@@ -280,6 +287,10 @@ def main():
     c.add_argument("--brief", action="store_true", help="Print one summary line per command")
     p = sub.add_parser("shot", help="Save the shown panel reference as PNG")
     p.add_argument("path", type=pathlib.Path)
+    w = sub.add_parser("wait", help="Wait host-side until a log line matches, without polling the device")
+    w.add_argument("pattern")
+    w.add_argument("--timeout", type=float, default=60)
+    w.add_argument("--new", action="store_true", help="Only lines arriving after this request")
     t = sub.add_parser("tail", help="Print the last raw lines")
     t.add_argument("count", type=int, nargs="?", default=40)
     args = parser.parse_args()
@@ -287,6 +298,9 @@ def main():
         return serve(args)
     if args.action == "shot":
         print(json.dumps(request({"shot": str(args.path.resolve())}), ensure_ascii=False))
+        return 0
+    if args.action == "wait":
+        print(json.dumps(request({"wait": args.pattern, "timeout": args.timeout, "new": args.new}, timeout=args.timeout + 10), ensure_ascii=False))
         return 0
     if args.action == "tail":
         print("\n".join(request({"tail": args.count})["lines"]))

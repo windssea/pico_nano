@@ -146,7 +146,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/run_sim.ps1
 
 | 指令（每行`<seq> <verb> ...`） | 作用 |
 | --- | --- |
-| `ping` / `version` / `status` | 连通、版本与ELF摘要、view/输入计数/内部与PSRAM堆/任务栈水位 |
+| `ping` / `version` / `status` | 连通、版本与ELF摘要、view/输入原子计数（不遍历堆） |
+| `heap` | 堆最大块/最低水位与任务栈；遍历堆会屏蔽中断，只在两显示job之间执行，扫描中执行曾在真机引起欠载 |
 | `tap X Y [ms]`、`long X Y [ms]`、`swipe X0 Y0 X1 Y1 [ms]` | 合成触点；Y可到1399以覆盖屏下键区 |
 | `key left\|middle\|right [long]` | 屏下三键（中心80/240/400，Y=1340） |
 | `power` | 合成电源短按；锁屏后唤醒仍须实体键 |

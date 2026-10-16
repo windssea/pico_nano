@@ -35,7 +35,7 @@ static struct {
     pn_tc_gesture_t gesture;uint32_t gesture_seq;uint64_t armed_at;atomic_uint gesture_state; ///< 输入任务推进，控制台仅在ARMED前后读写 / Advanced by the input task; console touches it only outside ARMED
     atomic_bool power; ///< 待注入电源短按 / Pending synthetic power press
     record_t ring[RING];atomic_uint head,tail,dropped; ///< 显示任务单生产者，控制台单消费者 / Single display-task producer and single console consumer
-    atomic_uint shot_seq; ///< 非0为待处理截屏序号 / Nonzero is a pending screenshot sequence
+    atomic_uint shot_seq,heap_seq; ///< 非0为待处理截屏/堆统计序号 / Nonzero is a pending screenshot/heap sequence
     char line[640];
 } console;
 
@@ -76,8 +76,10 @@ static void hook_display_job(void *ctx,unsigned kind,uint64_t start,uint64_t end
     console.ring[head%RING]=(record_t){kind,start,end,status};atomic_store(&console.head,head+1);
 }
 // 显示任务两job之间：显示任务独占已显示参考，可安全回传。/ Between display jobs the display task owns the shown reference and may stream it safely.
+static void heap_report(unsigned seq);
 static void hook_display_idle(void *ctx){
-    (void)ctx;unsigned seq=atomic_exchange(&console.shot_seq,0);if(!seq)return;
+    (void)ctx;unsigned heap=atomic_exchange(&console.heap_seq,0);if(heap)heap_report(heap);
+    unsigned seq=atomic_exchange(&console.shot_seq,0);if(!seq)return;
     const uint8_t *buffer=NULL;size_t bytes=0;bool known=console.shown && console.shown(&buffer,&bytes);
     if(!buffer || !bytes){reply("PNT %u err unavailable",seq);return;}
     uint64_t started=now_ms();reply("PNT %u shot begin bytes=%u known=%d layout=board-1216x684-4bpp",seq,(unsigned)bytes,(int)known);
@@ -95,10 +97,15 @@ static void status(uint32_t seq){
     pn_device_async_t *p=console.port;
     reply("PNT %lu status t=%llu view=%08x body=%d paused=%d events=%u touch_reads=%u touch_errors=%u gesture=%u dropped=%u",(unsigned long)seq,(unsigned long long)now_ms(),
         (unsigned)atomic_load(&p->input.view),(int)atomic_load(&p->body),(int)atomic_load(&p->paused),atomic_load(&p->events_sent),atomic_load(&p->touch_reads),atomic_load(&p->touch_errors),atomic_load(&console.gesture_state),atomic_load(&console.dropped));
-    reply("PNT %lu heap internal=%u internal_largest=%u internal_min=%u psram=%u psram_largest=%u psram_min=%u",(unsigned long)seq,
+}
+// 显示任务两job之间执行：遍历堆持自旋锁并屏蔽中断，扫描中执行会饿死行DMA造成欠载（真机已复现）。
+// Runs between display jobs on the display task: heap walks hold a spinlock with interrupts masked, which starved line DMA into underruns when done mid-scan (reproduced on hardware).
+static void heap_report(unsigned seq){
+    pn_device_async_t *p=console.port;
+    reply("PNT %u heap internal=%u internal_largest=%u internal_min=%u psram=%u psram_largest=%u psram_min=%u",seq,
         (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),(unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),(unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL),
         (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),(unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM),(unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM));
-    if(p->input_task_handle && p->display_task_handle)reply("PNT %lu stack input=%u display=%u console=%u",(unsigned long)seq,(unsigned)uxTaskGetStackHighWaterMark(p->input_task_handle),(unsigned)uxTaskGetStackHighWaterMark(p->display_task_handle),(unsigned)uxTaskGetStackHighWaterMark(NULL));
+    if(p->input_task_handle && p->display_task_handle)reply("PNT %u stack input=%u display=%u",seq,(unsigned)uxTaskGetStackHighWaterMark(p->input_task_handle),(unsigned)uxTaskGetStackHighWaterMark(p->display_task_handle));
 }
 static void execute(const char *text){
     pn_tc_command_t c;if(pn_tc_parse(text,&c)!=PN_OK){reply("PNT 0 err invalid");return;}
@@ -109,6 +116,7 @@ static void execute(const char *text){
         reply("PNT %lu ok version product=%s app=%.32s idf=%.32s elf=%s",seq,PN_PRODUCT_VERSION,app?app->version:"?",app?app->idf_ver:"?",sha);break;}
     case PN_TC_STATUS:status(c.seq);break;
     case PN_TC_SHOT:{unsigned expected=0;if(!atomic_compare_exchange_strong(&console.shot_seq,&expected,(unsigned)c.seq))reply("PNT %lu err busy",seq);else reply("PNT %lu ok shot-pending",seq);break;}
+    case PN_TC_HEAP:{unsigned expected=0;if(!atomic_compare_exchange_strong(&console.heap_seq,&expected,(unsigned)c.seq))reply("PNT %lu err busy",seq);else reply("PNT %lu ok heap-pending",seq);break;}
     case PN_TC_POWER:atomic_store(&console.power,true);reply("PNT %lu ok power t=%llu",seq,(unsigned long long)now_ms());break;
     default:
         if(!console.port->hardware || !console.port->hardware->touch_ready){reply("PNT %lu err unavailable",seq);break;}

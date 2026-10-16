@@ -26,13 +26,14 @@
 typedef enum {
     PN_TC_PING=1, ///< 连通检查 / Liveness check
     PN_TC_VERSION, ///< 固件版本 / Firmware version
-    PN_TC_STATUS, ///< 输入/内存/任务状态快照 / Input, memory and task snapshot
+    PN_TC_STATUS, ///< 原子计数快照，不遍历堆 / Atomic-counter snapshot without heap walks
     PN_TC_SHOT, ///< 回传面板已显示参考帧 / Dump the panel's shown reference frame
     PN_TC_TAP, ///< 单点点击 / Single tap
     PN_TC_LONG, ///< 单点长按 / Single long press
     PN_TC_SWIPE, ///< 线性滑动 / Linear swipe
     PN_TC_KEY, ///< 屏下三键 / Touch key below the display
     PN_TC_POWER, ///< 电源短按（锁屏后须实体键唤醒） / Power short press (waking requires the physical key)
+    PN_TC_HEAP, ///< 堆最大块/最低水位与任务栈；遍历堆会关中断，只在两显示job之间执行 / Heap largest/minimum and task stacks; heap walks mask interrupts, so it runs only between display jobs
 } pn_tc_kind_t;
 
 /// 解析后的指令；手势坐标已按种类补全 / Parsed command with gesture coordinates resolved per kind

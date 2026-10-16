@@ -25,5 +25,7 @@ bool pn_page_index_near(pn_page_index_t *,uint32_t,uint64_t,bool,pn_page_index_e
 void pn_page_index_add(pn_page_index_t *,const pn_page_index_entry_t *);
 /// 分批同步；force用于关闭，错误仅影响缓存。/ Batch synchronization; force on close, errors affect caches only.
 pn_status_t pn_page_index_flush(pn_page_index_t *,bool force);
+/// 是否有尚未写出的记录；只读内存状态。/ Whether unwritten records exist; reads in-memory state only.
+bool pn_page_index_pending(const pn_page_index_t *);
 /// 释放内存；不隐式保存。/ Free memory without implicit saving.
 void pn_page_index_close(pn_page_index_t *);
