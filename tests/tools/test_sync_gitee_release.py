@@ -202,8 +202,9 @@ class MirrorTests(unittest.TestCase):
             self.assertNotIn("private-token", " ".join(command))
             self.assertIn("Authorization: Bearer private-token", kwargs["input"])
             self.assertNotIn("--location", command)
-            self.assertEqual(command[command.index("--max-time") + 1], "300")
-            self.assertEqual(kwargs["timeout"], 330)
+            seconds = 900 if len(asset.content)>4_000_000 else 300
+            self.assertEqual(command[command.index("--max-time") + 1], str(seconds))
+            self.assertEqual(kwargs["timeout"], seconds+30)
             source = pathlib.Path(command[command.index("--form") + 1].split(";", 1)[0][6:])
             self.assertEqual(source.read_bytes(), asset.content)
             pathlib.Path(command[command.index("--output") + 1]).write_text('{"name":"firmware.zip"}')
@@ -211,6 +212,9 @@ class MirrorTests(unittest.TestCase):
         with patch.object(mirror.shutil, "which", return_value="curl"), patch.object(mirror.subprocess, "run", side_effect=upload) as run:
             self.assertEqual(api.request("/upload", "POST", attachment=asset), {"name":"firmware.zip"})
             self.assertEqual(run.call_count, 1)
+            asset = mirror.Asset("firmware.zip", b"x"*4_000_001)
+            self.assertEqual(api.request("/upload", "POST", attachment=asset), {"name":"firmware.zip"})
+            self.assertEqual(run.call_count, 2)
         failure = subprocess.CompletedProcess([], 28, "000", "private-token and server details")
         with patch.object(mirror.shutil, "which", return_value="curl"), patch.object(mirror.subprocess, "run", return_value=failure) as run:
             with self.assertRaisesRegex(ValueError, "check remote attachments") as caught:

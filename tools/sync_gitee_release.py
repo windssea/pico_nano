@@ -200,6 +200,7 @@ class API:
             raise ValueError("Release uploads require curl")
         if not re.fullmatch(r"[A-Za-z0-9_.-]+", attachment.name):
             raise ValueError("Invalid attachment name")
+        upload_seconds = 900 if len(attachment.content) > 4_000_000 else 300
         headers = 'header = "Accept: application/json"\n'
         if self.token:
             token = self.token.replace("\\", "\\\\").replace('"', '\\"')
@@ -209,13 +210,13 @@ class API:
             response = pathlib.Path(folder) / "response.json"
             source.write_bytes(attachment.content)
             command = [executable, "--disable", "--config", "-", "--silent", "--show-error", "--proto", "=https",
-                       "--connect-timeout", "20", "--max-time", "300", "--request", "POST",
+                       "--connect-timeout", "20", "--max-time", str(upload_seconds), "--request", "POST",
                        "--user-agent", "PicoNano-release-mirror", "--output", str(response),
                        "--write-out", "%{http_code}", "--form",
                        f"file=@{source};filename={attachment.name};type=application/octet-stream",
                        "--url", self.origin + path]
             try:
-                result = subprocess.run(command, input=headers, text=True, capture_output=True, timeout=330)
+                result = subprocess.run(command, input=headers, text=True, capture_output=True, timeout=upload_seconds + 30)
             except subprocess.TimeoutExpired:
                 raise ValueError("Release upload timed out; check remote attachments before retrying") from None
             status = result.stdout.strip()

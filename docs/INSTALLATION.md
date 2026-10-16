@@ -106,7 +106,7 @@ python tools/package_ota.py --release releases/pico_nano-0.9.0-<源码短提交>
 
 首次使用需要由账号所有者在 Gitee 创建仅限目标仓库、含 `projects` 权限的仓库级私人令牌，在 GitHub 仓库 `Settings → Secrets and variables → Actions` 保存为 `GITEE_TOKEN`；浏览器登录状态不能替代后台凭据。令牌只经环境变量读取，不放入代码、URL、命令行或校验报告。失效/权限不足时工作流失败，需要更新 secret 后补跑；附件配额由 Gitee 当前账号规则决定，不为释放配额自动删除旧版本。首次手动补同步可勾选 `initialize_guides`，会替换Gitee的中英文README为下载指南并读回确认；普通发布不修改README，已手工定制后不要再勾选。
 
-附件上传使用curl流式multipart，需本机或runner具备curl；控制API仍使用Python标准库。连接等待20秒、单附件最多300秒，禁止跟随鉴权重定向和盲目重复POST；上传令牌仅经子进程stdin传入，临时文件只保存公开附件与响应。超时后重新运行先读取并核对已有附件，避免未知上传结果造成重复文件。
+附件上传使用curl流式multipart，需本机或runner具备curl；控制API仍使用Python标准库。连接等待20秒，4MB以内附件最多300秒、更大附件最多900秒，禁止跟随鉴权重定向和盲目重复POST；上传令牌仅经子进程stdin传入，临时文件只保存公开附件与响应。工作流最多运行三轮完整预检/同步，每轮先读取并核对已有附件，再上传缺失项，整体最长45分钟；超时结果不明确时不直接重放同一次POST。
 
 ```powershell
 # 只检查本地包，无网络/上传；可在未配置令牌时复跑。

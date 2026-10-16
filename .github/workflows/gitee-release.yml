@@ -21,7 +21,7 @@ concurrency:
 jobs:
   mirror:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
@@ -44,7 +44,14 @@ jobs:
         run: |
           args=()
           if [[ "$INITIALIZE_GUIDES" == "true" ]]; then args+=(--initialize-guides); fi
-          python3 tools/sync_gitee_release.py --tag "$RELEASE_TAG" --apply --wait-for-assets 180 "${args[@]}" --report build-dev/gitee-mirror.json
+          for attempt in 1 2 3; do
+            if python3 tools/sync_gitee_release.py --tag "$RELEASE_TAG" --apply --wait-for-assets 180 "${args[@]}" --report build-dev/gitee-mirror.json; then
+              exit 0
+            fi
+            if [[ "$attempt" == 3 ]]; then exit 1; fi
+            echo "Rechecking existing attachments before the next bounded sync attempt"
+            sleep 15
+          done
       - uses: actions/upload-artifact@v4
         if: success()
         with:
