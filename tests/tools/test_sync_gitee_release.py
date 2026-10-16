@@ -8,6 +8,7 @@ import tempfile
 import unittest
 import struct
 import zipfile
+import subprocess
 from unittest.mock import patch
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "tools"))
@@ -193,6 +194,29 @@ class MirrorTests(unittest.TestCase):
             mirror.verify_asset(self.bundle.assets[0], {"name": "app.zip"})
         with self.assertRaisesRegex(ValueError, "HTTPS"):
             mirror.download({"url": "http://example.test/app.zip", "size": 1, "sha256": "a" * 64})
+
+    def test_streaming_upload_keeps_credentials_off_arguments_and_never_replays(self):
+        api = mirror.API("https://gitee.com/api/v5", "private-token")
+        asset = mirror.Asset("firmware.zip", b"immutable zip bytes")
+        def upload(command, **kwargs):
+            self.assertNotIn("private-token", " ".join(command))
+            self.assertIn("Authorization: Bearer private-token", kwargs["input"])
+            self.assertNotIn("--location", command)
+            self.assertEqual(command[command.index("--max-time") + 1], "300")
+            self.assertEqual(kwargs["timeout"], 330)
+            source = pathlib.Path(command[command.index("--form") + 1].split(";", 1)[0][6:])
+            self.assertEqual(source.read_bytes(), asset.content)
+            pathlib.Path(command[command.index("--output") + 1]).write_text('{"name":"firmware.zip"}')
+            return subprocess.CompletedProcess(command, 0, "201", "")
+        with patch.object(mirror.shutil, "which", return_value="curl"), patch.object(mirror.subprocess, "run", side_effect=upload) as run:
+            self.assertEqual(api.request("/upload", "POST", attachment=asset), {"name":"firmware.zip"})
+            self.assertEqual(run.call_count, 1)
+        failure = subprocess.CompletedProcess([], 28, "000", "private-token and server details")
+        with patch.object(mirror.shutil, "which", return_value="curl"), patch.object(mirror.subprocess, "run", return_value=failure) as run:
+            with self.assertRaisesRegex(ValueError, "check remote attachments") as caught:
+                api.request("/upload", "POST", attachment=asset)
+            self.assertNotIn("private-token", str(caught.exception))
+            self.assertEqual(run.call_count, 1)
 
     def test_explicit_guide_initialization_reads_back_and_is_idempotent(self):
         saved, writes = {}, []

@@ -7,7 +7,10 @@ import json
 import os
 import pathlib
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
 import time
 import struct
 import io
@@ -168,6 +171,10 @@ class API:
 
     def request(self, path, method="GET", payload=None, attachment=None):
         """只输出状态码，不回显请求或服务端错误正文。 / Report status codes without echoing requests or server error bodies."""
+        if attachment is not None:
+            if method != "POST" or payload is not None:
+                raise ValueError("Attachment requests require a standalone POST")
+            return self.upload(path, attachment)
         headers = {"Accept": "application/json", "User-Agent": "PicoNano-release-mirror"}
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
@@ -175,11 +182,6 @@ class API:
         if payload is not None:
             data = json.dumps(payload).encode("utf-8")
             headers["Content-Type"] = "application/json"
-        if attachment is not None:
-            boundary = "PicoNano" + os.urandom(16).hex()
-            data = (f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="{attachment.name}"\r\n'
-                    'Content-Type: application/octet-stream\r\n\r\n').encode() + attachment.content + f"\r\n--{boundary}--\r\n".encode()
-            headers["Content-Type"] = f"multipart/form-data; boundary={boundary}"
         try:
             req = urllib.request.Request(self.origin + path, data=data, headers=headers, method=method)
             with self.opener.open(req, timeout=120) as response:
@@ -190,6 +192,44 @@ class API:
             raise ValueError(f"Release API {urllib.parse.urlsplit(self.origin).hostname} {method} failed (HTTP {exc.code})") from None
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
             raise ValueError("Release API connection or JSON response failed") from None
+
+    def upload(self, path, attachment):
+        """流式multipart上传；令牌只经stdin，超时不盲目重复POST。 / Stream multipart uploads; pass tokens only on stdin and never blindly replay timed-out POSTs."""
+        executable = shutil.which("curl")
+        if not executable:
+            raise ValueError("Release uploads require curl")
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+", attachment.name):
+            raise ValueError("Invalid attachment name")
+        headers = 'header = "Accept: application/json"\n'
+        if self.token:
+            token = self.token.replace("\\", "\\\\").replace('"', '\\"')
+            headers += f'header = "Authorization: Bearer {token}"\n'
+        with tempfile.TemporaryDirectory(prefix="piconano-upload-") as folder:
+            source = pathlib.Path(folder) / attachment.name
+            response = pathlib.Path(folder) / "response.json"
+            source.write_bytes(attachment.content)
+            command = [executable, "--disable", "--config", "-", "--silent", "--show-error", "--proto", "=https",
+                       "--connect-timeout", "20", "--max-time", "300", "--request", "POST",
+                       "--user-agent", "PicoNano-release-mirror", "--output", str(response),
+                       "--write-out", "%{http_code}", "--form",
+                       f"file=@{source};filename={attachment.name};type=application/octet-stream",
+                       "--url", self.origin + path]
+            try:
+                result = subprocess.run(command, input=headers, text=True, capture_output=True, timeout=330)
+            except subprocess.TimeoutExpired:
+                raise ValueError("Release upload timed out; check remote attachments before retrying") from None
+            status = result.stdout.strip()
+            if result.returncode or not re.fullmatch(r"2\d\d", status):
+                code = status if re.fullmatch(r"\d{3}", status) else "unknown"
+                raise ValueError(f"Release upload failed (curl exit {result.returncode}, HTTP {code}); check remote attachments before retrying")
+            try:
+                with response.open("rb") as stream:
+                    data = stream.read(1024 * 1024 + 1)
+                if len(data) > 1024 * 1024:
+                    raise ValueError("Release upload response is too large")
+                return json.loads(data)
+            except (OSError, UnicodeError, json.JSONDecodeError):
+                raise ValueError("Release upload returned invalid JSON; check remote attachments before retrying") from None
 
 
 def download(asset):
