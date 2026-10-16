@@ -12,6 +12,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include "pn_widgets.h"
+#include "pn_profile.h"
 bool pn_shelf_gesture_feed(pn_shelf_gesture_t *g,bool active,bool swipe,unsigned count,int x,int y,bool valid,int book,uint64_t now,int *command){
     if(!g || !command)return false;
     bool owned=g->claimed;
@@ -137,9 +138,14 @@ static void blit_scaled(pn_frame_t *frame,const pn_frame_t *cover,int x,int y,in
         uint16_t first[256],last[256];
         for(int dx=0;dx<w;dx++){first[dx]=(uint16_t)(dx*cover->width/w);last[dx]=(uint16_t)((dx+1)*cover->width/w);if(last[dx]<=first[dx])last[dx]=first[dx]+1;}
         for(int dy=0;dy<h;dy++){int y0=dy*cover->height/h,y1=(dy+1)*cover->height/h;if(y1<=y0)y1=y0+1;uint8_t *dst=frame->pixels+(size_t)(y+dy)*frame->stride+x/2;uint8_t pair=0;
-            for(int dx=0;dx<w;dx++){unsigned sum=0,n=(unsigned)(last[dx]-first[dx])*(unsigned)(y1-y0);
-                for(int sy=y0;sy<y1;sy++){const uint8_t *row=cover->pixels+(size_t)sy*cover->stride;for(int sx=first[dx];sx<last[dx];sx++)sum+=(row[sx/2]>>((sx&1)*4))&15u;}
-                uint8_t pixel=(uint8_t)((sum+n/2)/n);if(!(dx&1))pair=pixel;else dst[dx/2]=(uint8_t)(pair|(pixel<<4));}
+            const uint8_t *top=cover->pixels+(size_t)y0*cover->stride;bool single_row=y1-y0==1;
+            for(int dx=0;dx<w;dx++){uint8_t pixel;
+                // 近1:1缩放时多数采样框只有一个源像素，直接取值，结果与盒滤波相同。/ Near 1:1 scaling most boxes hold one source pixel; take it directly, identical to the box filter.
+                if(single_row && last[dx]-first[dx]==1){unsigned sx=first[dx];pixel=(uint8_t)((top[sx/2]>>((sx&1)*4))&15u);}
+                else{unsigned sum=0,n=(unsigned)(last[dx]-first[dx])*(unsigned)(y1-y0);
+                    for(int sy=y0;sy<y1;sy++){const uint8_t *row=cover->pixels+(size_t)sy*cover->stride;for(int sx=first[dx];sx<last[dx];sx++)sum+=(row[sx/2]>>((sx&1)*4))&15u;}
+                    pixel=(uint8_t)((sum+n/2)/n);}
+                if(!(dx&1))pair=pixel;else dst[dx/2]=(uint8_t)(pair|(pixel<<4));}
         }
         return;
     }
@@ -174,12 +180,17 @@ static pn_status_t format_badge(pn_font_t *font,pn_frame_t *frame,pn_book_format
 }
 static pn_status_t cover_or_placeholder(pn_font_t *font,pn_frame_t *frame,const pn_shelf_covers_t *covers,size_t slot,const pn_catalog_item_t *item,int x,int y,int w,int h,bool large,int radius){
     pn_frame_t cover;pn_status_t s=PN_OK;char title[PN_CATALOG_NAME_MAX];title_of(item,covers,slot,title,sizeof title);
+    pn_profile_span_t span;pn_profile_begin(&span,NULL,"ui.cover.shade");
     pn_w_round_fill(frame,x+2,y+5,w-4,h,radius,PN_UI_SELECT); // 下沿浅影，先画以免盖住封面 / Under-edge shade, drawn first so it never covers the cover
+    pn_profile_end(&span,PN_OK);pn_profile_begin(&span,NULL,"ui.cover.blit");
     if(pn_shelf_cover_frame(covers,slot,&cover))blit_scaled(frame,&cover,x,y,w,h);
     else s=monogram_cover(font,frame,x,y,w,h,title,PN_SHELF_MINIMAL);
     (void)large;
+    pn_profile_end(&span,s);pn_profile_begin(&span,NULL,"ui.cover.frame");
     if(s==PN_OK)frame_cover(frame,x,y,w,h,radius);
+    pn_profile_end(&span,s);pn_profile_begin(&span,NULL,"ui.cover.badge");
     if(s==PN_OK)s=format_badge(font,frame,item->format,x,y,w,h);
+    pn_profile_end(&span,s);
     return s;
 }
 // 白底黑书签在深浅封面上均清晰；不增加点击入口。/ A black bookmark on white stays visible on any cover; no extra tap target.
@@ -269,9 +280,11 @@ static pn_status_t grid_item(const pn_catalog_item_t *item,const pn_shelf_covers
     // 占位图与真实图共用独立右下角格式标签。/ Placeholder and real covers share the separate bottom-right format badge.
     pn_frame_t cover;pn_status_t s=PN_OK;
     if(style==PN_SHELF_DEFAULT)pn_w_round_fill(frame,x+2,y+5,w-4,h,radius,PN_UI_SELECT);
+    pn_profile_span_t span;pn_profile_begin(&span,NULL,"ui.grid.blit");
     if(pn_shelf_cover_frame(covers,i,&cover))blit_scaled(frame,&cover,x,y,w,h);
     else s=monogram_cover(font,frame,x,y,w,h,title,style);
-    frame_cover(frame,x,y,w,h,radius);style_cover(frame,style,x,y,w,h);
+    pn_profile_end(&span,s);pn_profile_begin(&span,NULL,"ui.grid.frame");
+    frame_cover(frame,x,y,w,h,radius);style_cover(frame,style,x,y,w,h);pn_profile_end(&span,PN_OK);
     if(s==PN_OK && favorite)favorite_badge(frame,x+10,y+10,28);
     // 书籍操作由长按打开，封面保持完整。/ Long press opens book actions, leaving covers unobstructed.
     if(s==PN_OK)s=format_badge(font,frame,item->format,x,y,w,h);
