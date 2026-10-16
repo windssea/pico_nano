@@ -530,6 +530,11 @@ static pn_status_t active_step(pn_reader_action_t action,uint64_t now){
     pn_status_t status=epub.impl?pn_epub_app_step(&epub,action,now,pn_turn_present,&effect):pn_reader_app_step(&reader,action,now,pn_turn_present,&effect);
     atomic_store(&reading_presentation,false);
     ESP_LOGI(TAG,"Reader action=%u status=%d elapsed=%llu ms",(unsigned)action,(int)status,(unsigned long long)(now_ms()-started));
+#if PN_DEVICE_TEST_CONSOLE
+    // 诊断：下一页预渲染位图是否命中/被拒，定位翻页光栅耗时。/ Diagnostic: whether the next-page bitmap hit or was denied, locating turn raster cost.
+    {pn_page_bitmap_stats_t b=epub.impl?pn_epub_app_prerender_stats(&epub):pn_reader_app_prerender_stats(&reader);
+     ESP_LOGI(TAG,"Prerender bytes=%zu hits=%zu steps=%zu completed=%zu denied=%zu cache_limit=%zu",b.bytes,b.hits,b.steps,b.completed,b.denied,pool.cache_limit);}
+#endif
     // 翻页诊断区分实际EOF与失败，不把百分比或未确认候选页当作文件结束。/ Turn diagnostics distinguish EOF from failure without treating a percentage or unconfirmed candidate as EOF.
     if(reader.impl && (action==PN_APP_NEXT || action==PN_APP_PREVIOUS)){
         pn_txt_progress_t at;unsigned basis=0;
