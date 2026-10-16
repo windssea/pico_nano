@@ -8,6 +8,7 @@ import os
 import pathlib
 import re
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -162,12 +163,23 @@ def download(asset):
     return content
 
 
-def github_release(bundle, repository):
+def github_release(bundle, repository, wait_seconds=0):
     """同步前逐字节确认 GitHub 已公开发布相同包。 / Verify the same packages are publicly released on GitHub before mirroring."""
     api = API("https://api.github.com", os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN"))
-    info = api.request(f"/repos/{repository}/releases/tags/{bundle.tag}")
-    if not info or info.get("draft") or info.get("tag_name") != bundle.tag:
-        raise ValueError("GitHub release must already be published")
+    required = {a.name for a in bundle.assets if a.name != "SHA256SUMS"}
+    for remaining in range(wait_seconds, -1, -10):
+        info = api.request(f"/repos/{repository}/releases/tags/{bundle.tag}")
+        if not info or info.get("draft") or info.get("tag_name") != bundle.tag:
+            raise ValueError("GitHub release must already be published")
+        ready = {a["name"] for a in info["assets"] if a.get("state", "uploaded") == "uploaded"}
+        if required <= ready:
+            break
+        if remaining:
+            # Release先发布后上传附件，给正常上传留有界等待。 / A release may be published before asset uploads finish; wait within a fixed bound.
+            print("Waiting for GitHub release attachments", flush=True)
+            time.sleep(10)
+    if not required <= ready:
+        raise ValueError("Missing or incomplete GitHub release attachments")
     for asset in bundle.assets:
         if asset.name == "SHA256SUMS":
             continue
@@ -177,6 +189,7 @@ def github_release(bundle, repository):
         remote = candidates[0]
         if remote["size"] != len(asset.content):
             raise ValueError(f"GitHub asset size mismatch: {asset.name}")
+        print(f"Verify GitHub: {asset.name}", flush=True)
         download({"url": remote["browser_download_url"], "size": len(asset.content), "sha256": asset.sha256})
     return info
 
@@ -236,6 +249,7 @@ def sync(bundle, repository, github, api, verify_only=False):
     if verify_only and missing:
         raise ValueError("Gitee release is missing required attachments")
     for asset in missing:
+        print(f"Upload Gitee: {asset.name}", flush=True)
         result = api.request(endpoint, "POST", attachment=asset)
         verify_asset(asset, result)
     for asset in bundle.assets:
@@ -250,6 +264,7 @@ def verify_asset(asset, remote):
     url = remote.get("browser_download_url")
     if not url:
         raise ValueError("Gitee attachment has no public download URL")
+    print(f"Verify Gitee: {asset.name}", flush=True)
     download({"url": url, "size": len(asset.content), "sha256": asset.sha256})
 
 
@@ -314,11 +329,14 @@ def main():
     mode.add_argument("--apply", action="store_true", help="Upload verified packages; requires GITEE_TOKEN")
     mode.add_argument("--verify-only", action="store_true", help="Verify existing public Gitee downloads without writing")
     parser.add_argument("--initialize-guides", action="store_true", help="With --apply, replace Gitee README.md/README.en.md with download guides once")
+    parser.add_argument("--wait-for-assets", type=int, default=0, help="Wait 0-300 seconds in 10-second intervals for GitHub asset uploads")
     parser.add_argument("--report", type=pathlib.Path, help="Write a non-secret JSON verification report")
     args = parser.parse_args()
     try:
         if args.initialize_guides and not args.apply:
             raise ValueError("Guide initialization requires --apply")
+        if not 0 <= args.wait_for_assets <= 300 or args.wait_for_assets % 10:
+            raise ValueError("Asset wait must be 0-300 seconds in 10-second intervals")
         if any(not REPOSITORY.fullmatch(x) for x in (args.gitee_repo, args.github_repo)):
             raise ValueError("Repository must be owner/name")
         bundle = read_bundle(ROOT, args.tag)
@@ -328,7 +346,7 @@ def main():
             token = os.environ.get("GITEE_TOKEN") if args.apply else None
             if args.apply and not token:
                 raise ValueError("Set GITEE_TOKEN in the environment; never pass tokens on the command line")
-            github = github_release(bundle, args.github_repo)
+            github = github_release(bundle, args.github_repo, args.wait_for_assets)
             api = API("https://gitee.com/api/v5", token)
             report = sync(bundle, args.gitee_repo, github, api, args.verify_only)
             if args.initialize_guides:

@@ -104,7 +104,7 @@ python tools/sync_gitee_release.py --tag v0.8.0 --verify-only --report build-dev
 python tools/sync_gitee_release.py --tag v0.8.0 --apply --report build-dev/gitee-0.8.0/synced.json
 ```
 
-同步完成以四个附件的匿名下载 SHA-256 校验为准，日志或网页出现文件名不代表下载已经通过。Gitee 分发仍是电脑 USB 串口安装；设备 Wi-Fi OTA 及其首次引导迁移列入 0.9，详见开发指南。
+同步完成以四个附件的匿名下载 SHA-256 校验为准，日志或网页出现文件名不代表下载已经通过。自动流程最多等180秒供GitHub发布后完成附件上传，仍缺包则停止，可在附件齐全后补跑。Gitee 分发仍是电脑 USB 串口安装；设备 Wi-Fi OTA 及其首次引导迁移列入 0.9，详见开发指南。
 
 ### 固件构建与 GitHub 发布
 

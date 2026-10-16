@@ -155,6 +155,20 @@ class MirrorTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "size mismatch"):
                 mirror.github_release(self.bundle, "owner/repo")
 
+    def test_github_published_before_uploads_gets_a_bounded_wait(self):
+        incomplete = {"tag_name": "v0.8.0", "assets": []}
+        complete = {"tag_name": "v0.8.0", "assets": [{"name": "app.zip", "size": 7, "browser_download_url": "https://example.test/app.zip"}]}
+        with patch.object(mirror.API, "request", side_effect=[incomplete, complete]), \
+                patch.object(mirror.time, "sleep") as sleep, patch.object(mirror, "download") as download:
+            self.assertIs(mirror.github_release(self.bundle, "owner/repo", 20), complete)
+            sleep.assert_called_once_with(10)
+            download.assert_called_once()
+        with patch.object(mirror.API, "request", return_value=incomplete) as request, \
+                patch.object(mirror.time, "sleep") as sleep:
+            with self.assertRaisesRegex(ValueError, "Missing"):
+                mirror.github_release(self.bundle, "owner/repo", 20)
+            self.assertEqual(request.call_count, 3)
+            self.assertEqual(sleep.call_count, 2)
     def test_authentication_redirect_is_not_followed(self):
         redirect = mirror.NoRedirect()
         self.assertIsNone(redirect.redirect_request(None, None, 302, "", {}, "https://other.test"))
