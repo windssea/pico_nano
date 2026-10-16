@@ -17,6 +17,7 @@
 #include "pn_alloc.h"
 #include "device_transfer.h"
 #include "device_time.h"
+#include "device_wifi_probe.h"
 // 启动保护场景不能开启网络；调用这些桩即为回归。/ Boot-gate scenarios must never start networking; reaching these stubs is a regression.
 pn_status_t pn_device_transfer_open(pn_device_transfer_t *s,pn_media_t *m,const char *r,const pn_device_wifi_config_t *c){(void)s;(void)m;(void)r;(void)c;assert(false);return PN_UNSUPPORTED;}
 pn_status_t pn_device_transfer_request_stop(pn_device_transfer_t *s){(void)s;assert(false);return PN_UNSUPPORTED;}
@@ -28,6 +29,11 @@ pn_status_t pn_device_time_request_stop(pn_device_time_t *t){(void)t;assert(fals
 pn_status_t pn_device_time_state(const pn_device_time_t *t,pn_device_time_state_t *s){(void)t;(void)s;assert(false);return PN_UNSUPPORTED;}
 pn_status_t pn_device_time_close(pn_device_time_t *t){(void)t;assert(false);return PN_UNSUPPORTED;}
 pn_status_t pn_device_time_commit(const pn_device_time_state_t *s,uint32_t *u){(void)s;(void)u;assert(false);return PN_UNSUPPORTED;}
+pn_status_t pn_device_wifi_probe_open(pn_device_wifi_probe_t *p,const pn_device_wifi_config_t *c){(void)p;(void)c;assert(false);return PN_UNSUPPORTED;}
+pn_status_t pn_device_wifi_probe_poll(pn_device_wifi_probe_t *p,uint64_t n){(void)p;(void)n;assert(false);return PN_UNSUPPORTED;}
+pn_status_t pn_device_wifi_probe_stop(pn_device_wifi_probe_t *p){(void)p;assert(false);return PN_UNSUPPORTED;}
+pn_status_t pn_device_wifi_probe_state(const pn_device_wifi_probe_t *p,pn_device_wifi_probe_state_t *s){(void)p;(void)s;assert(false);return PN_UNSUPPORTED;}
+pn_status_t pn_device_wifi_probe_close(pn_device_wifi_probe_t *p){(void)p;assert(false);return PN_UNSUPPORTED;}
 static bool wake_idle;
 static unsigned sleep_calls,loop_delays;
 static int64_t clock_us=1000000;

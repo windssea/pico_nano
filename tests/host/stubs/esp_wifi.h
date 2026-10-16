@@ -34,5 +34,7 @@ typedef enum {WIFI_PS_NONE=0,WIFI_PS_MIN_MODEM=1} wifi_ps_type_t;
 esp_err_t esp_wifi_set_ps(wifi_ps_type_t);
 
 typedef struct {uint8_t reason;} wifi_event_sta_disconnected_t;
+// 与ESP-IDF 6.1 wifi_err_reason_t取值一致的断开原因子集。/ Disconnect-reason subset matching ESP-IDF 6.1 wifi_err_reason_t values.
+enum {WIFI_REASON_AUTH_EXPIRE=2,WIFI_REASON_MIC_FAILURE=14,WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT=15,WIFI_REASON_802_1X_AUTH_FAILED=23,WIFI_REASON_NO_AP_FOUND=201,WIFI_REASON_AUTH_FAIL=202,WIFI_REASON_HANDSHAKE_TIMEOUT=204,WIFI_REASON_CONNECTION_FAIL=205,WIFI_REASON_NO_AP_FOUND_W_COMPATIBLE_SECURITY=210,WIFI_REASON_NO_AP_FOUND_IN_AUTHMODE_THRESHOLD=211,WIFI_REASON_NO_AP_FOUND_IN_RSSI_THRESHOLD=212};
 typedef struct {int8_t rssi;} wifi_ap_record_t;
 esp_err_t esp_wifi_sta_get_ap_info(wifi_ap_record_t *);

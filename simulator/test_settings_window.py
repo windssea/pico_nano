@@ -14,9 +14,13 @@ with tempfile.TemporaryDirectory() as folder:
     assert 'settings closed request=0' in out and (state/'input.a').exists() or (state/'input.b').exists()
     out=run('settings,back,quit');assert 'settings open status=0 flags=3' in out,out
     # 日期页在关于页内，PC联网按钮禁用，返回层级不跳回书架。 / The date page is inside About; PC network action is disabled and Back preserves hierarchy.
-    out=run('settings,tap:100:850,tap:100:870,tap:100:740,back,back,back,quit')
+    out=run('settings,tap:100:950,tap:100:870,tap:100:740,back,back,back,quit')
     assert 'settings command=29 status=0' in out and 'settings command=30' not in out and 'settings command=31' not in out,out
     assert out.count('settings command=1 status=0')==3,out
+    # WiFi网络：屏幕键盘输入名称ab与密码12345678；PC不能测试连接，选择仍然保存后写入状态目录。/ WiFi: type the name ab and password 12345678; the PC cannot test the connection, so saving anyway writes the state directory.
+    out=run('settings,tap:100:850,tap:300:384,tap:78:948,tap:403:1044,tap:550:632,tap:46:756,tap:111:756,tap:176:756,tap:241:756,tap:306:756,tap:371:756,tap:436:756,tap:501:756,tap:550:632,tap:300:536,back,back,quit')
+    assert 'settings command=37 status=0' in out and 'settings command=225 status=0' in out and 'settings command=226 status=0' in out and out.count('settings command=40 status=0')==2 and 'settings wifi_test status=0' in out and 'settings command=48 status=0' in out,out
+    assert (state/'network.a').exists() or (state/'network.b').exists(),out
     # 不能关掉全部翻页方式。/ All page-turn methods cannot be switched off.
     out=run('settings,tap:100:600,tap:100:880,tap:100:980,back,back,quit');assert 'settings command=11 status=4 flags=7 active=1' in out,out
     # 子页：字体管理在给出--font-dir时打开。/ Sub-page: font management opens when --font-dir is given.

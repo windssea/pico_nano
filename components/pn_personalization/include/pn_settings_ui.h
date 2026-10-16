@@ -9,6 +9,7 @@
 #include "pn_display.h"
 #include "pn_font.h"
 #include "pn_input_prefs.h"
+#include "pn_network_store.h"
 #include "pn_shelf_prefs.h"
 #define PN_SETUI_BACK 1
 #define PN_SETUI_WALLPAPER 2
@@ -35,6 +36,19 @@
 #define PN_SETUI_UPDATE_INSTALL 34 ///< 用户确认下载并写入非活动槽 / User confirms download into the inactive slot
 #define PN_SETUI_UPDATE_REBOOT 35 ///< 校验成功后确认提交启动及重启 / Confirm boot commit/restart after verification
 #define PN_SETUI_UPDATE_CANCEL 36 ///< 取消并等待完整停止 / Cancel and await complete shutdown
+#define PN_SETUI_WIFI 37 ///< 打开“WiFi 网络”子页 / Open the WiFi network page
+#define PN_SETUI_WIFI_EDIT 38 ///< 开始输入网络名称与密码 / Start entering a network name and password
+#define PN_SETUI_WIFI_FORGET 39 ///< 忘记网络，需再点一次确认 / Forget the network after a second confirming tap
+#define PN_SETUI_WIFI_NEXT 40 ///< 名称页下一步，密码页保存 / Next on the name step, save on the password step
+#define PN_SETUI_WIFI_CLEAR 41 ///< 清空当前输入框 / Clear the current field
+#define PN_SETUI_WIFI_REVEAL 42 ///< 显示/隐藏密码 / Show or hide the password
+#define PN_SETUI_KB_SHIFT 43 ///< 键盘大小写 / Keyboard case latch
+#define PN_SETUI_KB_LAYER 44 ///< 键盘字母/符号层 / Keyboard letter/symbol layer
+#define PN_SETUI_KB_DELETE 45 ///< 删除末位字符 / Delete the last character
+#define PN_SETUI_WIFI_TEST 46 ///< 请求控制层用候选凭据测试连接 / Ask the controller to test the candidate credentials
+#define PN_SETUI_WIFI_TEST_CANCEL 47 ///< 取消测试（请求或命令）/ Cancel the test (request or command)
+#define PN_SETUI_WIFI_FORCE 48 ///< 测试失败后仍然保存 / Save anyway after a failed test
+#define PN_SETUI_CHAR 128 ///< 加可打印ASCII（32–126）输入一个字符 / Plus printable ASCII (32–126) types one character
 typedef struct {
     char message[160]; ///< 端口提供的真实阶段/错误 / Actual phase/error supplied by the port
     char version[32]; ///< 已签名校验的候选版本 / Signature-verified candidate version
@@ -57,6 +71,7 @@ typedef struct {
     int request; ///< 0或导航/对时请求，调用方处理后清零 / Zero or a navigation/time request; callers clear it after handling
     uint8_t flags; ///< 当前已保存翻页标志 / Saved page-turn flags
     pn_shelf_prefs_t shelf; ///< 当前已保存书架外观 / Saved shelf appearance
+    bool network_changed; ///< 本页保存或忘记了WiFi，调用方刷新网络名后清零 / WiFi was saved or forgotten here; callers refresh the network name and clear it
 } pn_settings_ui_t;
 /// 打开并读取翻页记录；state_media为NULL时只读默认且不能保存。/ Open and read the page-turn record; NULL state_media shows defaults without saving.
 pn_status_t pn_settings_ui_open(pn_settings_ui_t *ui,pn_pool_t *pool,pn_media_t *state_media,const char *state_dir,pn_settings_present_fn present,void *ctx);
@@ -83,6 +98,11 @@ void pn_settings_ui_set_about(pn_settings_ui_t *ui,const pn_settings_about_t *ab
 void pn_settings_ui_set_time(pn_settings_ui_t *,const pn_settings_time_t *);
 /// 只复制升级快照；不联网、不写Flash或触发重启。 / Copy an update snapshot without networking, flash writes or restarting.
 void pn_settings_ui_set_update(pn_settings_ui_t *,const pn_settings_update_t *);
+/// 测试中复制候选凭据；调用方用后pn_network_wipe。非测试中返回EMPTY。/ Copy the candidate credentials while testing; callers wipe them after use. EMPTY when not testing.
+pn_status_t pn_settings_ui_wifi_candidate(const pn_settings_ui_t *,pn_network_credentials_t *);
+/// 交回连接测试结果：OK则保存并回网络页；EMPTY找不到网络、INVALID认证失败、IO超时、BUSY无线占用、UNSUPPORTED不能测试、CANCELLED已取消，均保留输入，除取消外可选择仍然保存。
+/// Report the connection test: OK saves and returns to the network page; EMPTY no network, INVALID authentication, IO timeout, BUSY radio in use, UNSUPPORTED untestable, CANCELLED; all keep the input and, except cancellation, offer saving anyway.
+pn_status_t pn_settings_ui_wifi_result(pn_settings_ui_t *,pn_status_t result,pn_settings_present_fn present,void *ctx);
 /// 当前子页：0首页，1按键，2刷新，3关于，4书架外观，5日期时间。/ Current screen: root, keys, refresh, about, appearance, date/time.
 int pn_settings_ui_screen(const pn_settings_ui_t *ui);
 /// 刷新策略对应的整屏刷新间隔（页）。/ Pages between full refreshes for the saved refresh policy.

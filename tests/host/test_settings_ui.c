@@ -51,7 +51,7 @@ int main(int argc,char **argv){
     pn_pool_t pool;assert(!pn_pool_init(&pool,2u*1024u*1024u,NULL,NULL,NULL));pn_settings_ui_t ui={0};
     assert(pn_settings_ui_open(&ui,&pool,&media,root,present,NULL)==PN_OK && ui.active && ui.presented && ui.flags==0);
     /* 一级页：字体、壁纸、按键与手势、刷新与屏幕、存储与关于；底栏书架/传书交给调用方，标题区无返回。/ Root page: fonts, wallpaper, keys, refresh, about; the bottom-bar shelf/transfer go to the caller and the title has no back. */
-    assert(pn_settings_ui_hit(&ui,100,220)==PN_SETUI_FONTS && pn_settings_ui_hit(&ui,100,380)==PN_SETUI_WALLPAPER && pn_settings_ui_hit(&ui,100,450)==PN_SETUI_APPEARANCE && pn_settings_ui_hit(&ui,100,600)==PN_SETUI_KEYS && pn_settings_ui_hit(&ui,100,700)==PN_SETUI_REFRESH && pn_settings_ui_hit(&ui,100,850)==PN_SETUI_ABOUT && pn_settings_ui_hit(&ui,100,1050)==-1 && pn_settings_ui_hit(&ui,100,60)==-1);
+    assert(pn_settings_ui_hit(&ui,100,220)==PN_SETUI_FONTS && pn_settings_ui_hit(&ui,100,380)==PN_SETUI_WALLPAPER && pn_settings_ui_hit(&ui,100,450)==PN_SETUI_APPEARANCE && pn_settings_ui_hit(&ui,100,600)==PN_SETUI_KEYS && pn_settings_ui_hit(&ui,100,700)==PN_SETUI_REFRESH && pn_settings_ui_hit(&ui,100,850)==PN_SETUI_WIFI && pn_settings_ui_hit(&ui,100,950)==PN_SETUI_ABOUT && pn_settings_ui_hit(&ui,100,1050)==-1 && pn_settings_ui_hit(&ui,100,60)==-1);
     assert(pn_settings_ui_hit(&ui,100,1150)==PN_SETUI_HOME && pn_settings_ui_hit(&ui,260,1150)==PN_SETUI_SHELF && pn_settings_ui_hit(&ui,430,1150)==PN_SETUI_TRANSFER && pn_settings_ui_hit(&ui,600,1150)==-1);
     assert(pn_settings_ui_event(&ui,PN_SETUI_TRANSFER,present,NULL)==PN_OK && ui.request==PN_SETUI_TRANSFER && ui.active);ui.request=0;
     /* 刷新与屏幕：三档策略立即保存，整屏刷新只重画本页。/ Refresh page: the three policies save at once and a full refresh only repaints this page. */
@@ -91,10 +91,10 @@ int main(int argc,char **argv){
     assert(pn_settings_ui_event(&ui,PN_SETUI_BACK,present,NULL)==PN_OK && ui.active && pn_settings_ui_screen(&ui)==0);
     assert(pn_settings_ui_event(&ui,PN_SETUI_FONTS,present,NULL)==PN_OK && ui.request==PN_SETUI_FONTS && ui.active);ui.request=0;
     /* 设置页不再有局域网传书行：保存网络后仍只有“存储与关于”，传书只从底栏进入。/ No LAN transfer row: even with a saved network only "Storage & about" remains; transfer starts from the bottom bar. */
-    assert(pn_settings_ui_hit(&ui,100,850)==PN_SETUI_ABOUT && pn_settings_ui_event(&ui,PN_SETUI_LAN,present,NULL)==PN_EMPTY && !ui.request);
+    assert(pn_settings_ui_hit(&ui,100,950)==PN_SETUI_ABOUT && pn_settings_ui_event(&ui,PN_SETUI_LAN,present,NULL)==PN_EMPTY && !ui.request);
     // SSID行已移出设置首页，更新后台快照不能再提交相同画面。
     // The SSID row moved out of Settings; updating its compatibility snapshot must not submit an identical frame.
-    unsigned shown=presents;assert(pn_settings_ui_set_lan(&ui,"家里的WiFi",present,NULL)==PN_OK && presents==shown && ui.presented && pn_settings_ui_hit(&ui,100,850)==PN_SETUI_ABOUT && pn_settings_ui_hit(&ui,100,950)==-1);
+    unsigned shown=presents;assert(pn_settings_ui_set_lan(&ui,"家里的WiFi",present,NULL)==PN_OK && presents==shown && ui.presented && pn_settings_ui_hit(&ui,100,850)==PN_SETUI_WIFI && pn_settings_ui_hit(&ui,100,950)==PN_SETUI_ABOUT && pn_settings_ui_hit(&ui,100,1050)==-1);
     assert(pn_settings_ui_event(&ui,PN_SETUI_LAN,present,NULL)==PN_EMPTY && !ui.request);
     /* 外观独立保存：密度、四种预览、占用失败与重开；不改翻页标志。/ Appearance saves separately: density, four previews, busy failure and reopen without changing page-turn flags. */
     assert(ui.shelf.columns==3 && ui.shelf.style==PN_SHELF_DEFAULT);

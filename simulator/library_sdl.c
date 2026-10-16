@@ -932,6 +932,8 @@ static int library_worker(void *ctx){
             if(event.type==SDL_KEYDOWN && !event.key.repeat && event.key.keysym.sym==SDLK_ESCAPE)command=PN_SETUI_BACK;
             else if(event.type==SDL_MOUSEBUTTONUP && event.button.button==SDL_BUTTON_LEFT)command=pn_settings_ui_hit(&s->settings,event.button.x,event.button.y);
             if(command>=0){status=pn_settings_ui_event(&s->settings,command,present,s);if(command==PN_SETUI_FULL_REFRESH && status==PN_OK){pn_reader_app_refresh_reset(&s->reader);pn_epub_app_refresh_reset(&s->epub);}s->input_flags=s->settings.flags;s->shelf_prefs=s->settings.shelf;printf("settings command=%d status=%d flags=%u active=%d\n",command,(int)status,(unsigned)s->settings.flags,(int)s->settings.active);
+                // PC没有无线：连接测试回报不能测试，用户可选择仍然保存。/ The PC has no radio: report the test as unsupported so the user may save anyway.
+                if(s->settings.request==PN_SETUI_WIFI_TEST || s->settings.request==PN_SETUI_WIFI_TEST_CANCEL){int test=s->settings.request;s->settings.request=0;status=pn_settings_ui_wifi_result(&s->settings,test==PN_SETUI_WIFI_TEST?PN_UNSUPPORTED:PN_CANCELLED,present,s);printf("settings wifi_test status=%d\n",(int)status);}
                 int request=s->settings.request;
                 if(request || !s->settings.active){pn_settings_ui_close(&s->settings);
                     s->back_to_settings=(request==PN_SETUI_FONTS && s->font_dir) || (request==PN_SETUI_WALLPAPER && s->wallpaper_dir);
