@@ -162,7 +162,8 @@ static pn_status_t discover(ota_t *s,char url[256]){
     if(root && end==json+bytes){
         const cJSON *pre=cJSON_GetObjectItemCaseSensitive(root,"prerelease"),*tag=cJSON_GetObjectItemCaseSensitive(root,"tag_name"),*assets=cJSON_GetObjectItemCaseSensitive(root,"assets");
         uint32_t version=0;
-        if(cJSON_IsFalse(pre) && cJSON_IsString(tag) && tag->valuestring[0]=='v' && pn_update_version(tag->valuestring+1,&version)==PN_OK && cJSON_IsArray(assets) && cJSON_GetArraySize(assets)<=16){
+        if(cJSON_IsTrue(pre))status=PN_EMPTY;
+        else if(cJSON_IsFalse(pre) && cJSON_IsString(tag) && tag->valuestring[0]=='v' && pn_update_version(tag->valuestring+1,&version)==PN_OK && cJSON_IsArray(assets) && cJSON_GetArraySize(assets)<=16){
             int n=snprintf(url,256,PN_OTA_GITEE_ROOT "%s/PicoNano-ota-manifest.bin",tag->valuestring);unsigned found=0;
             const cJSON *a=NULL;cJSON_ArrayForEach(a,assets){const cJSON *name=cJSON_GetObjectItemCaseSensitive(a,"name"),*link=cJSON_GetObjectItemCaseSensitive(a,"browser_download_url");if(cJSON_IsString(name) && !strcmp(name->valuestring,"PicoNano-ota-manifest.bin") && cJSON_IsString(link) && !strcmp(link->valuestring,url))found++;}
             status=n>0 && n<256 && found==1?PN_OK:PN_EMPTY;
