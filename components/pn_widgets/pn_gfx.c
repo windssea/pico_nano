@@ -94,6 +94,19 @@ void pn_w_round_stroke(pn_frame_t *frame,int x,int y,int width,int height,int ra
         // Skip the certainly transparent deep interior; preserve all arithmetic along visible edges.
         int first=right,last=right;
         if(spans && py>=y+inset && py<y+height-inset){first=clipped(x+inset,left,right);last=clipped(x+width-inset,first,right);}
+        else if(spans){
+            // 上下圆角带的中段距直边距离只随行变化：每行算一次覆盖率，逐像素混合同值，数值与逐点公式相同。
+            // In the top/bottom corner bands the middle span's distance depends only on the row: compute coverage once per row and blend the same value per pixel, numerically identical to the per-point formula.
+            int mid_first=clipped(x+inset,left,right),mid_last=clipped(x+width-inset,mid_first,right);
+            // 仅当行向分量不小于中段两端列向分量时，距离与列无关；小矩形中部行退回逐点。/ Only when the row component is at least the column component at both span ends is the distance column-independent; middle rows of small rectangles fall back to per-point.
+            float cx=(float)x+(float)width*0.5f,cy=(float)y+(float)height*0.5f,half_w=(float)width*0.5f-r,qy=absf((float)py+0.5f-cy)-((float)height*0.5f-r);
+            float qxl=absf((float)mid_first+0.5f-cx)-half_w,qxr=absf((float)(mid_last-1)+0.5f-cx)-half_w;
+            if(mid_last>mid_first && qy>=qxl && qy>=qxr){
+                float d=round_distance((float)mid_first+0.5f,(float)py+0.5f,(float)x,(float)y,(float)width,(float)height,r)+half;
+                float cov=clamp01(0.5f-(absf(d)-half));
+                if(cov>0.004f)for(int px=mid_first;px<mid_last;px++)put(frame,px,py,shade,cov);
+                first=mid_first;last=mid_last;}
+        }
         for(int section=0;section<2;section++)for(int px=section?last:left;px<(section?right:first);px++){
             float d=round_distance((float)px+0.5f,(float)py+0.5f,(float)x,(float)y,(float)width,(float)height,r)+half;
             put(frame,px,py,shade,clamp01(0.5f-(absf(d)-half)));

@@ -9,6 +9,7 @@
 #include "pn_settings_ui.h"
 #include "pn_widgets.h"
 #include "pn_shelf_view.h"
+#include "pn_profile.h"
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -50,12 +51,14 @@ static pn_status_t note(su_t *u,const char *text,int baseline){
     pn_status_t restored=pn_font_size(&u->font,original);return s==PN_OK?restored:s;
 }
 static pn_status_t draw_main(pn_settings_ui_t *ui,su_t *u){
-    pn_font_t *font=&u->font;pn_frame_t *f=&u->canvas;
-    pn_status_t s=pn_w_status(font,f);
+    pn_font_t *font=&u->font;pn_frame_t *f=&u->canvas;pn_profile_span_t span;
+    pn_profile_begin(&span,NULL,"ui.settings.status");pn_status_t s=pn_w_status(font,f);pn_profile_end(&span,s);
+    pn_profile_begin(&span,NULL,"ui.settings.title");
     if(s==PN_OK)s=pn_font_size(font,50);
     if(s==PN_OK)s=pn_w_text_ex(font,f,"设置",PN_UI_MARGIN,124,400,PN_ALIGN_LEFT,PN_UI_INK,true);
+    pn_profile_end(&span,s);pn_profile_begin(&span,NULL,"ui.settings.card");
     if(s==PN_OK)s=pn_w_group(font,f,"显示与字体",DISPLAY_Y-14);
-    pn_w_card(f,DISPLAY_Y,3);
+    pn_w_card(f,DISPLAY_Y,3);pn_profile_end(&span,s);pn_profile_begin(&span,NULL,"ui.settings.rows");
     if(s==PN_OK)s=pn_w_card_row(font,f,"字体管理","正文字体、全局默认与删除",NULL,PN_ICON_FONT,PN_ROW_CHEVRON,DISPLAY_Y,false);
     if(s==PN_OK)s=pn_w_card_row(font,f,"锁屏壁纸","系统默认、简洁、当前书封面或自定义",NULL,PN_ICON_IMAGE,PN_ROW_CHEVRON,DISPLAY_Y+ROW_H,false);
     char appearance[64];snprintf(appearance,sizeof appearance,"每行 %u 本 · %s",ui->shelf.columns,style_names[ui->shelf.style]);
@@ -72,8 +75,10 @@ static pn_status_t draw_main(pn_settings_ui_t *ui,su_t *u){
     // 正常时不显示内部说明，只在有问题时提示。/ No internal note when all is well; only problems are shown.
     const char *problem=*u->message?u->message:u->state?"":"内部存储不可用，设置不能保存";
     if(s==PN_OK && *problem)s=note(u,problem,y+ROW_H+52);
+    pn_profile_end(&span,s);pn_profile_begin(&span,NULL,"ui.settings.nav");
     if(s==PN_OK){
         int original=font->pixels;s=pn_font_size(font,24);if(s==PN_OK)s=pn_w_navigation(font,f,PN_NAV_SETTINGS);pn_status_t restored=pn_font_size(font,original);if(s==PN_OK)s=restored;}
+    pn_profile_end(&span,s);
     return s;
 }
 /* 机身示意：屏幕下方三个触摸键与顶部电源键，按本机实际布局画。/ Device sketch: three touch keys under the screen and the power key on top, drawn after the actual hardware. */
@@ -170,8 +175,12 @@ static pn_status_t draw_appearance(pn_settings_ui_t *ui,su_t *u){
     return s;
 }
 static pn_status_t show_profile(pn_settings_ui_t *ui,pn_settings_present_fn present,void *ctx,pn_refresh_t profile){
-    su_t *u=ui->impl;pn_w_status_snapshot_t snapshot=pn_w_status_snapshot();ui->presented=false;pn_frame_clear(&u->canvas,15);
+    su_t *u=ui->impl;pn_w_status_snapshot_t snapshot=pn_w_status_snapshot();ui->presented=false;
+    // 只计时清屏与绘制，供真机拆分菜单准备耗时。/ Time clearing and drawing only, to split menu preparation on hardware.
+    pn_profile_span_t span;pn_profile_begin(&span,NULL,"ui.settings.clear");pn_frame_clear(&u->canvas,15);pn_profile_end(&span,PN_OK);
+    pn_profile_begin(&span,NULL,"ui.settings.draw");
     pn_status_t s=u->screen==SCREEN_KEYS?draw_keys(ui,u):u->screen==SCREEN_REFRESH?draw_refresh(ui,u):u->screen==SCREEN_ABOUT?draw_about(u):u->screen==SCREEN_TIME?draw_time(u):u->screen==SCREEN_APPEARANCE?draw_appearance(ui,u):draw_main(ui,u);
+    pn_profile_end(&span,s);
     if(s==PN_OK)s=present(ctx,&u->canvas,profile);
     if(s==PN_OK){ui->presented=true;u->snapshot_dirty=false;u->status=snapshot;}
     return s;

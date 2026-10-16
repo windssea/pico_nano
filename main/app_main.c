@@ -227,6 +227,12 @@ static uint64_t profile_clock(void *ctx){(void)ctx;return (uint64_t)esp_timer_ge
 static void profile_emit(void *ctx,const pn_profile_event_t *e){
     (void)ctx;
     bool timing=!strcmp(e->phase,"cover.extract") || !strcmp(e->phase,"cover.cache-snapshot") || !strncmp(e->phase,"epub.model-",11) || !strncmp(e->phase,"epub.raster",11) || !strncmp(e->phase,"epub.layout",11) || !strcmp(e->phase,"epub.zip") || !strcmp(e->phase,"epub.publication") || !strncmp(e->phase,"storage.",8) || !strncmp(e->phase,"display.",8);
+#if PN_DEVICE_TEST_CONSOLE
+    // 界面绘制分段只在诊断镜像输出，产品镜像不增加菜单日志。/ UI drawing splits log only in diagnostic images; product images add no menu logs.
+    timing=timing || !strncmp(e->phase,"ui.",3);
+#else
+    if(!strncmp(e->phase,"ui.",3))return;
+#endif
 #ifndef CONFIG_PN_PROFILE
     if(e->status==PN_EMPTY || (!timing && strcmp(e->phase,"epub.open") && strcmp(e->phase,"content.stream-sha") && strcmp(e->phase,"epub.prepare") && strcmp(e->phase,"epub.next") && strcmp(e->phase,"epub.previous") && strcmp(e->phase,"epub.prefetch") && strcmp(e->phase,"font.layout-key")))return;
 #endif
@@ -1056,7 +1062,9 @@ static void begin_settings(void){
     pn_wallpaper_mask_close(&lock_mask);
     reading_menu=false;
     if(!data_ready)data_ready=mount_data();
+    pn_profile_span_t span;pn_profile_begin(&span,NULL,"ui.settings.open");
     pn_status_t status=pn_settings_ui_open_cached(&settings_ui,&pool,data_ready?&data_media:NULL,data_ready?"/data/progress":NULL,pool.limit>=4u*1024u*1024u?&management_font:NULL,present,NULL);
+    pn_profile_end(&span,status);
     if(status==PN_CANCELLED)return;
     if(status!=PN_OK){message("设置未打开","原设置保留，稍后重试");return;}
     {pn_settings_about_t about={0};const esp_app_desc_t *app=esp_app_get_description();if(app){char version[24];memcpy(version,app->version,sizeof version-1);version[sizeof version-1]=0;snprintf(about.version,sizeof about.version,"版本 %.20s",version);}
