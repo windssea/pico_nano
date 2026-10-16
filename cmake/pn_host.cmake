@@ -90,6 +90,7 @@ add_library(pn_core STATIC ${ui_font_c} ${reading_font_c} ${harmony_font_c} ${br
     ${PN_ROOT}/components/pn_ui/pn_frame.c
     ${PN_ROOT}/components/pn_ui/pn_tap.c
     ${PN_ROOT}/components/pn_ui/pn_key.c
+    ${PN_ROOT}/components/pn_ui/pn_test_console.c
     ${PN_ROOT}/components/pn_storage/pn_media.c
     ${PN_ROOT}/components/pn_storage/pn_journal.c
     ${PN_ROOT}/components/pn_storage/pn_blob.c

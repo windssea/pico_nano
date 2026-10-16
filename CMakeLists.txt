@@ -8,6 +8,11 @@ if(NOT PN_PRODUCT_VERSION MATCHES "^[0-9]+(\\.[0-9]+)*$")
     message(FATAL_ERROR "PN_PRODUCT_VERSION missing from pn_brand.h")
 endif()
 set(PROJECT_VER "${PN_PRODUCT_VERSION}")
+# 诊断镜像在版本描述后加-diag，设置页与串口都能区分，不可当发布包。/ Diagnostic images append -diag to the descriptor so settings and serial distinguish them from releases.
+option(PN_DIAG_IMAGE "Build the serial-test diagnostic image" OFF)
+if(PN_DIAG_IMAGE)
+    set(PROJECT_VER "${PN_PRODUCT_VERSION}-diag")
+endif()
 # 改版本号后自动重新配置，避免沿用旧版本描述。/ Reconfigure when the version changes so the app descriptor never keeps a stale version.
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/components/pn_core/include/pn_brand.h")
 project(pico_nano VERSION ${PN_PRODUCT_VERSION})

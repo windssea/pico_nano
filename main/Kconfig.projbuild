@@ -5,6 +5,14 @@ config PN_PROFILE
     help
         Emit owner phase timing, pool accounting and real heap snapshots.
         Serial logging changes timing; use dedicated diagnostic runs.
+config PN_TEST_CONSOLE
+    bool "Serial test console (diagnostic images only)"
+    default n
+    help
+        Accept line commands on USB Serial/JTAG that inject synthetic touch samples,
+        a power short press, status queries and shown-frame screenshots, and report
+        every display job. Anyone with USB access can drive the device, and logging
+        changes timing, so never enable this in a product or release image.
 config PN_UI_FEEDBACK
     bool "Qualify local press feedback on the panel"
     default n

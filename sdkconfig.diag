@@ -1,0 +1,3 @@
+# 诊断镜像：在sdkconfig.defaults之上启用串口测试控制台。只供真机自动测试，禁止用于发布包。
+# Diagnostic image: enable the serial test console on top of sdkconfig.defaults. Hardware automation only; never for release packages.
+CONFIG_PN_TEST_CONSOLE=y

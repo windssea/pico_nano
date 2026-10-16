@@ -4,6 +4,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "pn_test_console.h"
+#include "pn_key.h"
 typedef struct {char copy[512];char *next;bool pending;unsigned pointer;int x,y;uint64_t resume;SDL_Event future;uint64_t future_at;Uint32 expected_type;SDL_Keycode expected_key;bool future_tap;int future_x,future_y;
     unsigned future_roots,root_targets[3]; ///< 同一扫描中的独立根页点击 / Independent root clicks during one scan
     bool future_focus; ///< 失焦后持续持有，最后才松手 / Hold through focus loss and release only at the end
@@ -39,6 +41,18 @@ static inline void script_queue(sim_script_t *script){
         if(sscanf(part,"race-open-home:%u",&wait)==1 && wait<=5000){event.key.keysym.sym=SDLK_RETURN;script->future=event;script->future.key.keysym.sym=SDLK_h;script->future_at=SDL_GetTicks64()+wait;script_expect(script,&event);script->pending=SDL_PushEvent(&event)==1;return;}
         if(sscanf(part,"race-open-duplicate:%u",&wait)==1 && wait<=5000){event.key.keysym.sym=SDLK_RETURN;script->future=event;script->future_at=SDL_GetTicks64()+wait;script_expect(script,&event);script->pending=SDL_PushEvent(&event)==1;return;}
         if(sscanf(part,"race-next-tools:%u",&wait)==1 && wait<=5000){event.key.keysym.sym=SDLK_RIGHT;script->future=event;script->future.key.keysym.sym=SDLK_k;script->future_at=SDL_GetTicks64()+wait;script_expect(script,&event);script->pending=SDL_PushEvent(&event)==1;return;}
+        // pnt:<指令>沿用设备诊断控制台语法；三键映射模拟器按键，长按坐标映射右键，滑动按真实事件序列投递，仅最后松手带回执。
+        // pnt:<command> reuses the device diagnostic-console grammar; keys map to simulator keys, coordinate long presses to right clicks, and swipes queue a real event sequence acknowledged only by the final release.
+        if(!strncmp(part,"pnt:",4)){char line[PN_TC_LINE_MAX+1];pn_tc_command_t command;
+            if(snprintf(line,sizeof line,"1 %s",part+4)>=(int)sizeof line || pn_tc_parse(line,&command)!=PN_OK || !pn_tc_is_gesture(&command) || (command.y0>=1216 && command.kind!=PN_TC_KEY))continue;
+            if(command.kind==PN_TC_KEY){bool held=command.hold_ms>=PN_KEY_LONG_MS;
+                if(command.x0<160 && !held)event.key.keysym.sym=SDLK_1;else if(command.x0<320)event.key.keysym.sym=held?SDLK_F10:SDLK_2;else if(!held)event.key.keysym.sym=SDLK_3;else continue;}
+            else if(command.kind==PN_TC_LONG){event.type=SDL_MOUSEBUTTONUP;event.button.windowID=UINT32_MAX;event.button.button=SDL_BUTTON_RIGHT;event.button.x=command.x0;event.button.y=command.y0;}
+            else if(command.kind==PN_TC_TAP){event.type=SDL_MOUSEBUTTONDOWN;event.button.windowID=UINT32_MAX;event.button.button=SDL_BUTTON_LEFT;script->x=event.button.x=command.x0;script->y=event.button.y=command.y0;script->pointer=1;}
+            else{if(command.y1>=1216)continue;SDL_Event edge={.type=SDL_MOUSEBUTTONDOWN};edge.button.windowID=UINT32_MAX-1;edge.button.button=SDL_BUTTON_LEFT;edge.button.x=command.x0;edge.button.y=command.y0;(void)SDL_PushEvent(&edge);
+                for(int step=1;step<=4;step++){edge=(SDL_Event){.type=SDL_MOUSEMOTION};edge.motion.windowID=UINT32_MAX-1;edge.motion.state=SDL_BUTTON_LMASK;edge.motion.x=command.x0+(command.x1-command.x0)*step/4;edge.motion.y=command.y0+(command.y1-command.y0)*step/4;(void)SDL_PushEvent(&edge);}
+                event.type=SDL_MOUSEBUTTONUP;event.button.windowID=UINT32_MAX;event.button.button=SDL_BUTTON_LEFT;event.button.x=command.x1;event.button.y=command.y1;}
+            script_expect(script,&event);script->pending=SDL_PushEvent(&event)==1;return;}
         // wait:MS暂停投递，让空闲任务（如封面队列）运行。/ wait:MS pauses delivery so idle work such as the cover queue runs.
         if(sscanf(part,"wait:%u",&wait)==1 && wait<=60000){script->resume=SDL_GetTicks64()+wait;return;}
         if(sscanf(part,"press:%d:%d",&script->x,&script->y)==2){event.type=SDL_MOUSEBUTTONDOWN;event.button.windowID=UINT32_MAX;event.button.button=SDL_BUTTON_LEFT;event.button.x=script->x;event.button.y=script->y;script->pointer=2;}

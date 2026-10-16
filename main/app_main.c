@@ -41,6 +41,7 @@
 #include "pn_key.h"
 #include "device_sleep.h"
 #include "device_async.h"
+#include "device_test_console.h"
 #include "device_identity.h"
 #include "pn_hardware.h"
 #include "device_sd.h"
@@ -157,6 +158,10 @@ static pn_style_ui_t styles;
 static pn_jump_ui_t jump_ui; ///< 进度跳转面板 / Progress jump panel
 static pn_font_ui_t fonts;
 static bool panel_known,data_ready,locked,status_page,shelf_mode;
+#if PN_DEVICE_TEST_CONSOLE
+// 仅显示任务调用：panel_known与后缓冲都由显示owner维护。/ Display task only: both panel_known and the back buffer are maintained by the display owner.
+static bool test_console_shown(const uint8_t **buffer,size_t *bytes){*buffer=hardware.hl.back_fb;*bytes=hardware.hl.back_fb?684u*1216u/2u:0;return panel_known;}
+#endif
 static bool opening; ///< 开书控制门，产品owner串行管理 / Opening gate owned by the serial product owner
 static pn_epub_open_job_t foreground_open; ///< 跨输入轮保留的私有开书任务，不是可阅读对象 / Private opening job across input ticks, never a readable object
 static atomic_bool deep_clean_pending; ///< 显式清屏意图，由显示owner消费 / Explicit cleaning intent consumed by the display owner
@@ -1604,6 +1609,9 @@ static void device_task(void *arg){
     pn_device_async_start(&async_port,&hardware,present_panel,rails_idle_check,rails_release);pn_device_async_bind_product(&async_port);async_port.overlap=reader_overlap;pn_device_power_sleep_pins();
 #if defined(CONFIG_PN_UI_FEEDBACK) && CONFIG_PN_UI_FEEDBACK
     async_port.feedback=feedback_panel;
+#endif
+#if PN_DEVICE_TEST_CONSOLE
+    pn_device_test_console_start(&async_port,test_console_shown);
 #endif
     if(!async_port.input_active || !async_port.display_active)ESP_LOGW(TAG,"Async task startup degraded: input=%d display=%d",(int)async_port.input_active,(int)async_port.display_active);
     clock_read_boot(now_ms());

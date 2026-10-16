@@ -72,6 +72,7 @@ POSIX的`cover_window`持久化场景等待三条实际`cover.cache-clean`回执
 | `python tools/dev.py sdl-run` | build-sim-sdl-run，Release；启动可见窗口 | 人工观察同源界面，非设备性能 |
 | `python tools/dev.py firmware-ci` | build-ci-s3，独立sdkconfig.ci | CI/保守时序交叉编译与size |
 | `python tools/dev.py firmware-board` | build-board，独立sdkconfig.defaults | 已核对Zbit120MHz板级编译与size |
+| `python tools/dev.py firmware-diag` | build-diag，sdkconfig.defaults叠加sdkconfig.diag，版本带`-diag` | 串口测试控制台诊断镜像；禁止打包发布 |
 | `python tools/dev.py factory-data` | build-dev/factory-data.bin、factory-wallpaper.bin | 生成首装空镜像；不写设备，不用于默认升级 |
 | `python tools/dev.py installer` | 计划测试+build-dev/installer-site | 生成本地站点；不发布、不连接设备 |
 | `python tools/dev.py local-samples` | build-dev/local-samples/report.json | 本机私人书/字体独立验证，不作为公共CI依赖 |
@@ -138,6 +139,20 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/run_sim.ps1
 `root_navigation_coalesce_window`另查四根页、反馈开/关的密集独立点击：`race-roots:延迟毫秒:首目标:后续目标1:后续目标2:末目标`使用0～3底栏编号，首目标扫描中投递另三次完整接触，核对最终完整帧与串行末目标相同，积压三目标只准备最后一个。`race-focus:延迟毫秒:起点X:起点Y:移动X:移动Y`注入失焦后保持左键的移动，最后才松手，不能把同一持有变成新点击。`PN_ROOT_COALESCE_ARTIFACTS`保留原始日志/帧；扫描中注入须在日志确认pending，不能只凭脚本字符串断言竞态发生。空闲检查须独立配置`--cover-cache`启用索引，冷缓存、释放后等待才要求建索引，不能对未初始化模块要求成功日志。共享`async`及实际`device_management`另查批次上限、后续取消、优先电源项、同一持有、多点/滑入和最终空样本的释放。
 
 `tools/test_local_root_navigation.py --sim build-sim-sdl-idf/pn_sim`已接`local-samples`，重新复制全部用户书籍/四款字体，逐字体比较密集点击和失焦持有的最终整帧、关闭池归零及释放后空闲索引。可选`--baseline`只接受含同样竞争脚本入口的独立冻结程序；原件SHA保持，记录旧/新导航尝试次数，不能把次数直接换算为面板扫描减少或真实速度。开发工具中的700ms等待只制造积压窗口，不是产品延迟或面板实测。
+
+## 真机串口自动测试（诊断镜像）
+
+`python tools/dev.py firmware-diag`构建`build-diag`，仅在板级默认上开启`CONFIG_PN_TEST_CONSOLE`，应用版本为`<版本>-diag`，设置页可见；产品/发布构建不编译该控制台，钩子为空。指令语法与合成时间线在`components/pn_ui/pn_test_console.c`，设备与模拟器共用；设备在输入任务的触摸采样层用合成采样替代一次读数，因此三键、阅读手势和底栏导航仍走产品原代码，但不覆盖触控芯片I2C/固件本身。截屏在显示任务两job之间读取epdiy已显示参考（后缓冲），回传board布局4bpp并逐行CRC，`known=0`表示参考未知。每个显示job完成后上报`PNT 0 display kind start end ms status`，时间为设备esp_timer毫秒。
+
+| 指令（每行`<seq> <verb> ...`） | 作用 |
+| --- | --- |
+| `ping` / `version` / `status` | 连通、版本与ELF摘要、view/输入计数/内部与PSRAM堆/任务栈水位 |
+| `tap X Y [ms]`、`long X Y [ms]`、`swipe X0 Y0 X1 Y1 [ms]` | 合成触点；Y可到1399以覆盖屏下键区 |
+| `key left\|middle\|right [long]` | 屏下三键（中心80/240/400，Y=1340） |
+| `power` | 合成电源短按；锁屏后唤醒仍须实体键 |
+| `shot` | 回传当前已显示画面 |
+
+刷写只写应用分区：`build-dev/device-venv/Scripts/python.exe -m esptool --chip esp32s3 -p COM3 write-flash 0x20000 build-diag/pico_nano.bin`（venv由`py -m venv build-dev/device-venv`并安装esptool创建）。打开串口会触发一次USB复位，所以`tools/device_test.py serve --port COM3`常驻持有端口并记录`build-dev/device-test/<时间>/serial.log`与`results.jsonl`；其他终端用`tools/device_test.py cmd "tap 85 1150" --brief`、`shot out.png`、`tail`。手势返回首个/最后显示job相对合成首采样的时间及期间产品计时日志。控制台启动后常持禁浅睡锁（产品默认空闲自动浅睡会让USB串口停止响应），并把产品日志改为整行非阻塞写入驱动、电脑不读时直接丢弃（驱动VFS逐字符50ms超时会拖住产品任务），所以诊断镜像不能用于功耗测量。进入传书无线或USB传书会断开串口；串口日志本身改变时序，结果是诊断镜像上的近似值，不等于产品镜像、光学稳定或功耗验收。模拟器脚本可用`pnt:<指令>`复用同一语法。
 
 ## EPUB 与性能诊断
 

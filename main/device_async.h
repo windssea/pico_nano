@@ -6,6 +6,14 @@
 #include "pn_key.h"
 #include "pn_feedback.h"
 #include "read_pico.h"
+#ifdef ESP_PLATFORM
+#include "sdkconfig.h"
+#endif
+#if defined(CONFIG_PN_TEST_CONSOLE) && CONFIG_PN_TEST_CONSOLE
+#define PN_DEVICE_TEST_CONSOLE 1 ///< 诊断镜像启用串口测试钩子 / Diagnostic image enables serial test hooks
+#else
+#define PN_DEVICE_TEST_CONSOLE 0 ///< 产品镜像不含测试钩子 / Product image has no test hooks
+#endif
 typedef enum {PN_DASYNC_TOUCH,PN_DASYNC_KEY,PN_DASYNC_ACTION,PN_DASYNC_POWER,PN_DASYNC_OPEN_CANCEL} pn_device_input_kind_t; ///< 输入种类；开书取消保留原上下文语义 / Input kind; opening cancellation retains its original context semantics
 typedef struct {
     pn_device_input_kind_t kind; ///< 归一输入种类 / Normalized input kind
@@ -13,6 +21,17 @@ typedef struct {
     unsigned count;int x,y;bool valid,ending; ///< 活动触点及显式UP终点 / Active contacts and explicit UP endpoint
     int key;pn_key_event_t key_event;pn_reader_action_t action; ///< 三键/阅读动作 / Key/reader action
 } pn_device_input_event_t;
+#if PN_DEVICE_TEST_CONSOLE
+/// 诊断钩子：只在诊断镜像存在；由输入/显示任务在各自线程调用，不得触碰产品模型或池。
+/// Diagnostic hooks present only in diagnostic images; called by the input/display tasks on their own threads and never touching product models or the pool.
+typedef struct {
+    bool (*touch)(void *ctx,uint64_t now,unsigned *count,int *x,int *y,bool *ending); ///< 返回true时以合成采样替代触摸读数 / True replaces the touch read with a synthetic sample
+    bool (*power)(void *ctx); ///< 消费一次合成电源短按 / Consume one synthetic power short press
+    void (*display_job)(void *ctx,unsigned kind,uint64_t start_ms,uint64_t end_ms,pn_status_t status); ///< 每个显示job完成后记录 / Record after every display job
+    void (*display_idle)(void *ctx); ///< 显示任务两job之间的空隙 / Gap between display jobs on the display task
+    void *ctx; ///< 钩子上下文 / Hook context
+} pn_device_async_diag_t;
+#endif
 typedef struct {
     pn_async_t input; ///< 产品输入邮箱 / Product input mailbox
     read_pico_handle_t *hardware; ///< 只借用稳定BSP句柄 / Borrow stable BSP handle
@@ -30,6 +49,9 @@ typedef struct {
     bool touch_wake; ///< 触摸INT中断可用 / Touch INT interrupt available
     pn_feedback_present_fn feedback; ///< 局部反馈端口，语义页面代次不变 / Local feedback port preserving the semantic view revision
     atomic_uint touch_reads,touch_errors,events_sent; ///< 输入健康计数，仅诊断 / Input-health counters for diagnostics only
+#if PN_DEVICE_TEST_CONSOLE
+    _Atomic(const pn_device_async_diag_t *) diag; ///< 诊断钩子，启动后发布 / Diagnostic hooks published after start
+#endif
 } pn_device_async_t;
 /// 将驱动原始记录归一为活动触点；UP可带有效终点但不算按住，坏记录返回INVALID。
 /// Normalize driver records to active contacts; UP may carry an endpoint but is not held, and malformed records return INVALID.

@@ -38,7 +38,20 @@ typedef struct {const pn_frame_t *frame;pn_refresh_t profile;bool off;const pn_f
 static uint64_t now_ms(void){return (uint64_t)(esp_timer_get_time()/1000);}
 // 空闲只需检查断轨期限（秒级），100ms足够且减少唤醒。/ Idle only checks the rail deadline (seconds), so 100 ms suffices with fewer wakeups.
 static void display_task(void *ctx){pn_device_async_t *p=ctx;for(;;){display_t job;if(xQueueReceive(p->display_queue,&job,pdMS_TO_TICKS(100))==pdTRUE){// 扫描期间行供数依赖CPU，持最高频锁防欠载。/ Line feeding during a scan is CPU-bound, so hold the max lock to avoid underruns.
-            pn_device_power_busy(PN_POWER_DISPLAY,true);if(job.off){p->off();p->display_result=PN_OK;}else if(job.native)p->display_result=job.native(job.native_ctx);else if(job.patch)p->display_result=p->feedback?p->feedback(p->panel_ctx,job.patch):PN_UNSUPPORTED;else p->display_result=p->panel(NULL,job.frame,job.profile);pn_device_power_busy(PN_POWER_DISPLAY,false);xSemaphoreGive(p->display_done);}p->idle(now_ms());}}
+#if PN_DEVICE_TEST_CONSOLE
+            uint64_t started=now_ms();
+#endif
+            pn_device_power_busy(PN_POWER_DISPLAY,true);if(job.off){p->off();p->display_result=PN_OK;}else if(job.native)p->display_result=job.native(job.native_ctx);else if(job.patch)p->display_result=p->feedback?p->feedback(p->panel_ctx,job.patch):PN_UNSUPPORTED;else p->display_result=p->panel(NULL,job.frame,job.profile);pn_device_power_busy(PN_POWER_DISPLAY,false);
+#if PN_DEVICE_TEST_CONSOLE
+            // 回执前只记入诊断环，不打印，避免串口阻塞产品等待。/ Only record into the diagnostic ring before the receipt, never print, so the serial port cannot stall the product wait.
+            const pn_device_async_diag_t *diag=atomic_load(&p->diag);if(diag && diag->display_job)diag->display_job(diag->ctx,job.off?3u:job.native?2u:job.patch?1u:0u,started,now_ms(),p->display_result);
+#endif
+            xSemaphoreGive(p->display_done);}p->idle(now_ms());
+#if PN_DEVICE_TEST_CONSOLE
+        // 截屏只在两job之间读取已显示参考，显示任务独占该缓冲。/ Screenshots read the shown reference only between jobs, where the display task owns that buffer.
+        const pn_device_async_diag_t *idle_diag=atomic_load(&p->diag);if(idle_diag && idle_diag->display_idle)idle_diag->display_idle(idle_diag->ctx);
+#endif
+    }}
 static void send(pn_device_async_t *p,const pn_device_input_event_t *input,bool navigation,bool urgent){atomic_fetch_add(&p->events_sent,1);pn_async_event_t e={.bytes=sizeof *input,.navigation=navigation,.urgent=urgent,.view=atomic_load(&p->input.view)};memcpy(e.payload,input,sizeof *input);
     bool root=input->kind==PN_DASYNC_TOUCH && input->valid && input->count==1 && pn_w_navigation_hit(input->x,input->y)>=0;
     (void)(root?pn_async_send_root(&p->input,&e):pn_async_send(&p->input,&e));
@@ -50,8 +63,19 @@ static void input_task(void *ctx){
         atomic_store(&p->pause_ack,request);if(request&1u){vTaskDelay(pdMS_TO_TICKS(10));continue;}
         uint64_t now=now_ms();uint32_t view=(uint32_t)atomic_load(&p->input.view);
         if(view!=old_view){pn_key_cancel(&keys);pn_reader_input_cancel(&reader);old_view=view;empty=0;}
-        if(now-last_power>=100){last_power=now;if(read_pico_pmu_take_key_short()){pn_device_input_event_t e={.kind=PN_DASYNC_POWER,.at=now};send(p,&e,true,true);}}
-        if(p->hardware->touch_ready && view){cst836u_touch_t touch={0};bool ending=false,valid=cst836u_read(p->hardware->touch,&touch)==ESP_OK;if(valid)valid=pn_device_touch_normalize(&touch,&ending)==PN_OK;atomic_fetch_add(valid?&p->touch_reads:&p->touch_errors,1);
+        if(now-last_power>=100){last_power=now;bool power=read_pico_pmu_take_key_short();
+#if PN_DEVICE_TEST_CONSOLE
+            const pn_device_async_diag_t *power_diag=atomic_load(&p->diag);if(!power && power_diag && power_diag->power)power=power_diag->power(power_diag->ctx);
+#endif
+            if(power){pn_device_input_event_t e={.kind=PN_DASYNC_POWER,.at=now};send(p,&e,true,true);}}
+        if(p->hardware->touch_ready && view){cst836u_touch_t touch={0};bool ending=false,valid;
+#if PN_DEVICE_TEST_CONSOLE
+            // 合成采样替代本次读数，下游三键/手势/导航仍走原逻辑。/ A synthetic sample replaces this read; keys, gestures and navigation downstream stay unchanged.
+            const pn_device_async_diag_t *diag=atomic_load(&p->diag);unsigned synthetic=0;int sx=0,sy=0;
+            if(diag && diag->touch && diag->touch(diag->ctx,now,&synthetic,&sx,&sy,&ending)){touch.count=(uint8_t)synthetic;touch.touched=synthetic!=0;touch.x=(uint16_t)sx;touch.y=(uint16_t)sy;valid=true;}else
+#endif
+            {valid=cst836u_read(p->hardware->touch,&touch)==ESP_OK;if(valid)valid=pn_device_touch_normalize(&touch,&ending)==PN_OK;}
+            atomic_fetch_add(valid?&p->touch_reads:&p->touch_errors,1);
             int key=-1;pn_key_event_t ke=pn_key_feed(&keys,touch.count,touch.x,touch.y,valid,now,&key);
             bool body=atomic_load(&p->body);unsigned flags=atomic_load(&p->flags);
             if((view&0xffffu)==18u){
