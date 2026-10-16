@@ -47,7 +47,8 @@ int pn_sdl_async_run(pn_sdl_async_t *p,int (*worker)(void *),void *ctx){
         pn_async_event_t item={.bytes=sizeof event,.view=atomic_load_explicit(&p->input.view,memory_order_acquire)};
         if(event.type==SDL_KEYDOWN){SDL_Keycode key=event.key.keysym.sym;unsigned view=(unsigned)item.view%32u;bool body=view==15;
             item.navigation=key==SDLK_ESCAPE || (body && (key==SDLK_LEFT || key==SDLK_RIGHT || key==SDLK_PAGEUP || key==SDLK_PAGEDOWN || key==SDLK_SPACE || key==SDLK_h || key==SDLK_k)) || (view>=7 && (key==SDLK_2 || key==SDLK_h));
-            item.urgent=key==SDLK_ESCAPE || (body && key==SDLK_k) || (view>=7 && (key==SDLK_h || key==SDLK_2));}
+            item.urgent=key==SDLK_ESCAPE || (body && key==SDLK_k) || (view>=7 && (key==SDLK_h || key==SDLK_2));
+            if(view==18 && (key==SDLK_1 || key==SDLK_l || key==SDLK_k)){item.navigation=true;item.urgent=true;}}
         if(event.type==SDL_MOUSEBUTTONDOWN && event.button.button==SDL_BUTTON_LEFT)item.urgent=true;
         if(event.type==SDL_QUIT){item.navigation=true;item.urgent=true;}
         memcpy(item.payload,&event,sizeof event);
@@ -61,9 +62,11 @@ int pn_sdl_async_run(pn_sdl_async_t *p,int (*worker)(void *),void *ctx){
 bool pn_sdl_async_wait(pn_sdl_async_t *p,SDL_Event *event,unsigned timeout,uint32_t view,bool root){
     p->discarded_release=false;
     if(p->scope_active){pn_async_end(&p->scope);p->scope_active=false;}
-    SDL_LockMutex(p->mutex);if(p->received.type && !p->ack){p->ack=true;p->ack_event=p->received;p->received=(SDL_Event){0};}SDL_UnlockMutex(p->mutex);
     p->context=view%32u;view=(view&0xffffu)|(p->revision<<16);
     pn_async_set_view(&p->input,view,root);
+    // 先发布新输入上下文再确认脚本，避免下一命令捕获旧加载页代次。
+    // Publish the new input context before acknowledging a script, so its next command cannot capture the old loading revision.
+    SDL_LockMutex(p->mutex);if(p->received.type && !p->ack && !p->defer_ack){p->ack=true;p->ack_event=p->received;p->received=(SDL_Event){0};}SDL_UnlockMutex(p->mutex);
     uint64_t end=SDL_GetTicks64()+timeout;pn_async_event_t item;pn_status_t status;
     for(;;){status=pn_async_take(&p->input,&item);if(status==PN_OK){
             SDL_Event candidate;memcpy(&candidate,item.payload,sizeof candidate);

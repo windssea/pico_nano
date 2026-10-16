@@ -29,6 +29,8 @@ pn_status_t pn_hot_session_prepare_step(pn_hot_session_t *,pn_pool_t *,pn_media_
 bool pn_hot_session_source_pending(const pn_hot_session_t *);
 /// 纯查询本次选择能否接续部分任务，供控制层决定是否先显示加载反馈。/ Purely match a selection to a partial job so control can show loading feedback before continuing it.
 bool pn_hot_session_source_selected(const pn_hot_session_t *,pn_media_t *,const char *,pn_book_format_t,const pn_book_id_t *,uint64_t,uint64_t);
+/// 匹配同书后只移交部分EPUB任务给前台逐轮推进，不同步drain、不交出app或写记录。/ Match and transfer a partial EPUB job for foreground polling, without synchronous draining, an app handoff or record writes.
+pn_status_t pn_hot_session_take_opening(pn_hot_session_t *,pn_media_t *,const char *,const pn_book_id_t *,uint64_t,uint64_t,pn_epub_open_job_t *);
 /// 推进原任务一轮；摘要阶段取消保留已完成块，后续错误按原释放；不显示或保存。/ Advance the original task once; hash cancellation retains completed chunks, later errors use normal release; never present/save.
 pn_status_t pn_hot_session_source_step(pn_hot_session_t *,uint64_t);
 /// 纯摘要进度查询；任务完成后EMPTY，不替代内容身份。/ Pure hash-progress query; EMPTY after completion, never a content identity.

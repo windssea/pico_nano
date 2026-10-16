@@ -141,6 +141,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/run_sim.ps1
 
 ## EPUB 与性能诊断
 
+`tools/test_local_foreground_open.py --binary build-host/device_menu_probe --scenarios --output build-dev/local-foreground-open`已纳入`local-samples`，在全新一次性Docker中复制全部用户书籍/字体，逐款系统字体驱动真实`start_reader`与`tick_opening`的普通EPUB冷开。要求加载后尚无可阅读app、逐轮完成且唯一正文回执，记录完整OPEN/NEXT/PREVIOUS三帧及池；八种场景检查目录阶段返回、摘要后返回、协作取消、锁屏准备、失卡、USB租约归还、首帧显示失败和错误内容身份，失败不得写最近阅读。默认只验证当前行为并保留画面，不能称新旧像素一致；传`--baseline <独立旧产品观察器>`才逐字节比较完整原始帧。测试端口显式报告已挂载的TF，只访问副本，不模拟实际卡吞吐/面板/低功耗；普通文件port保留外部改写检查。`--limit`只作明确子集，实际整库和低预算/设备峰值应分别报告。
+
 `tools/test_local_zip_job.py --binary build-host/zip_job_validate --scan-prepare --output build-dev/local-zip-scan-job`在用户全部EPUB副本上，先以4096B/8读配额准备中央目录，再顺序喂入原书并完整finish；与原同步归档逐目录、逐资源字节对照，覆盖目录1/17字节短读、取消/重试、可选快照拒绝、失效源/IO及最小样本每步放弃/分配失败。配额只指目录job，后续顺序供数/收尾单独执行，不能当整个开书耗时保证。默认完整ZIP job模式保持，两模式均加入`local-samples`；`zip_scan_job_oracle`和`zip_job`另核对独立zipfile解包、坏头/重叠/同哈希/重复名状态。`test_local_open_steps.py --baseline-partial --baseline <独立旧探针>`可比较两版均先完成64KiB摘要再点击，明确区别于旧冷开基线。
 
 `tools/test_local_open_steps.py --binary build-host/font_system_startup_probe --output build-dev/local-open-steps`检查用户全部EPUB×四款字体×正文/补字：真实首页任务先完成64KiB摘要，注入一次取消，再点击接续原任务，核对剩余摘要字节、完整身份、OPEN/NEXT/PREVIOUS三张原始帧及关闭池归零。可传`--baseline <独立冻结旧探针>`作跨版本冷开对照；默认明确标为同程序冷开/部分准备策略对照。全部原件SHA保持；书SHA启动次数为零不等于点击没有剩余摘要工作，报告单列`click.work_bytes`。`tools/test_local_identity_jobs.py --binary build-host/test_device_identity --output build-dev/local-identity-jobs`另对全部用户书籍和字体比较原同步与分步设备适配器的摘要、逻辑fread数及每步DMA归还；可传独立`--baseline`，PSA/DMA是替身且PSA主机堆不计入池，不能用池峰称设备总RAM。这两个命令已加入`local-samples`。真实`device_menu_probe --prepare-books`区分唯一正文回执和部分EPUB接管前的一次加载反馈，旧报告`one_present`仍兼容。

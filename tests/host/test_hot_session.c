@@ -162,7 +162,7 @@ static void opening_case(const char *path){
     assert(!pn_epub_app_open_on_media(&e,&pool,&media,path,NULL,NULL,32,0) && !step(&t,&e,PN_APP_OPEN,1,&screen) && !pn_epub_app_close(&e,2));
     menu_cache_t menu={0};menu.bytes=pn_cache_alloc(&pool,PN_CACHE_GLYPH,PN_MEM_UI,128u*1024u);assert(menu.bytes);memset(menu.bytes,0x5a,128u*1024u);pn_cache_attach(&pool,&menu.owner,PN_CACHE_GLYPH,&menu,menu_bytes,menu_drop);
     size_t used=pool.used,live=pool.live;screen.compare=true;
-    for(unsigned mode=0;mode<3;mode++){
+    for(unsigned mode=0;mode<4;mode++){
         pn_hot_session_t h={0};assert(pn_hot_session_prepare_step(&h,&pool,&media,&item,NULL,NULL,32,1,0,mode)==PN_BUSY);
         assert(!h.prepared && !h.epub.impl && h.opening.impl && pn_hot_session_source_pending(&h));
         assert(pn_hot_session_source_selected(&h,&media,path,PN_BOOK_EPUB,&item.expected,1,0));
@@ -170,13 +170,23 @@ static void opening_case(const char *path){
         uint64_t bytes,total;assert(!pn_hot_session_source_progress(&h,&bytes,&total) && bytes==0 && total>0);
         pn_book_id_t wrong=item.expected;wrong.sha256[0]^=1;assert(pn_hot_session_take_prepared(&h,&media,path,PN_BOOK_EPUB,&wrong,1,1,&t,&e)==PN_STALE_JOB && !e.impl);
         unsigned phases=0;
-        if(mode==1){
+        if(mode==1 || mode==3){
             while(!bytes){assert(++phases<4096 && pn_hot_session_source_step(&h,1)==PN_BUSY && !pn_hot_session_source_progress(&h,&bytes,&total));}
             assert(bytes<=32768);uint64_t before=bytes;unsigned left=1;pn_cancel_scope_t scope;pn_cancel_enter(&scope,cancel_after,&left);assert(pn_hot_session_source_step(&h,1)==PN_CANCELLED);pn_cancel_leave(&scope);
             assert(!pn_hot_session_source_progress(&h,&bytes,&total) && bytes==before && h.opening.impl && !h.prepared);
         }
         if(mode==2)while(pn_hot_session_source_pending(&h)){pn_status_t s=pn_hot_session_source_step(&h,1);assert(++phases<4096 && (s==PN_BUSY || s==PN_OK));}
-        unsigned shown=screen.calls;assert(!pn_hot_session_take_prepared(&h,&media,path,PN_BOOK_EPUB,&item.expected,1,2,&t,&e) && !h.opening.impl && !h.media && e.impl && screen.calls==shown);
+        unsigned shown=screen.calls;
+        if(mode==3){
+            pn_epub_open_job_t request={0},busy={.impl=(void *)(uintptr_t)1};void *original=h.opening.impl;uint64_t before=bytes,after,size;
+            assert(pn_hot_session_take_opening(&h,&media,path,&item.expected,1,2,&busy)==PN_BUSY && h.opening.impl==original);
+            assert(pn_hot_session_take_opening(&h,&media,path,&wrong,1,2,&request)==PN_STALE_JOB && !request.impl && h.opening.impl==original);
+            assert(!pn_hot_session_take_opening(&h,&media,path,&item.expected,1,2,&request) && request.impl==original && !h.opening.impl && !h.media && h.takes==1);
+            assert(!pn_epub_app_open_job_progress(&request,&after,&size) && after==before && !pn_hot_session_drop(&h) && request.impl==original);
+            assert(pn_epub_app_open_job_move(&request,&request)==PN_INVALID);
+            pn_status_t s;do{s=pn_epub_app_open_job_step(&request,&e);assert(++phases<4096);}while(s==PN_BUSY);
+            assert(s==PN_OK && !request.impl && e.impl && screen.calls==shown);
+        }else assert(!pn_hot_session_take_prepared(&h,&media,path,PN_BOOK_EPUB,&item.expected,1,2,&t,&e) && !h.opening.impl && !h.media && e.impl && screen.calls==shown);
         assert(!step(&t,&e,PN_APP_OPEN,3,&screen) && !pn_epub_app_close(&e,4) && pool.used==used && pool.live==live && !pn_media_active(&media) && !menu.drops && !menu.owner.pins);
     }
     // ZIP入口取消可重试；出版物构造中取消必须释放私有任务，不能交出半成品。

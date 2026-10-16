@@ -18,6 +18,7 @@ typedef struct {
     pn_feedback_present_fn feedback; ///< 主线程绘制局部像素 / Main-thread local pixel renderer
     pn_refresh_t profile;pn_status_t shown; ///< 呈现类型与回执 / Presentation profile and receipt
     bool pending,ack,scope_active; ///< 显示/脚本回执/取消范围 / Display/script receipt/cancellation scope
+    bool defer_ack; ///< worker跨轮加载时保留原脚本请求，直到完成或取消；不拦截真实输入 / Worker retains a scripted request across loading ticks until completion/cancellation, without blocking real input
     SDL_Event received,ack_event; ///< 上一事件与脚本回执 / Last event and script receipt
     char title[256];bool title_pending;int text_input; ///< 主线程窗口命令 / Main-thread window commands
     atomic_uint mouse; ///< 输入owner发布的按钮状态 / Button state published by the input owner

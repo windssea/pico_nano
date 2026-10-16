@@ -216,6 +216,7 @@ target_include_directories(device_shelf_validate BEFORE PRIVATE ${CMAKE_CURRENT_
 target_link_libraries(device_shelf_validate PRIVATE pn_core)
 add_executable(device_menu_probe device_menu_probe.c ${PN_ROOT}/main/device_async.c ${PN_ROOT}/main/device_power.c ${PN_ROOT}/main/device_frame.c ${PN_ROOT}/main/device_refresh.c ${PN_ROOT}/main/device_usb.c ${PN_ROOT}/main/device_usb_board.c ${PN_ROOT}/main/device_text.c ${PN_ROOT}/main/device_sd.c ${PN_ROOT}/main/device_card_presence.c)
 target_include_directories(device_menu_probe BEFORE PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/device_stubs ${PN_ROOT}/main)
+target_compile_definitions(device_menu_probe PRIVATE PN_TEST_FOREGROUND_OPEN=1)
 target_link_libraries(device_menu_probe PRIVATE pn_core)
 target_link_options(device_menu_probe PRIVATE -Wl,--wrap=fopen -Wl,--wrap=fread -Wl,--wrap=fseek -Wl,--wrap=fclose -Wl,--wrap=stat -Wl,--wrap=lstat -Wl,--wrap=pn_font_open -Wl,--wrap=FT_Load_Glyph)
 target_compile_definitions(test_device_management PRIVATE CONFIG_PN_UI_FEEDBACK=1)

@@ -60,7 +60,9 @@ pn_status_t pn_epub_app_body_layer(pn_epub_app_t *app,const pn_reader_body_layer
 pn_status_t pn_epub_app_open_on_media(pn_epub_app_t *,pn_pool_t *,pn_media_t *,const char *book,const char *font,const char *state,int pixels,uint64_t);
 /// 本地/PC便捷打开，仍同源核心。/ Local/PC convenience open using the shared core.
 pn_status_t pn_epub_app_open(pn_epub_app_t *,pn_pool_t *,const char *,const char *,const char *,int,uint64_t);
-typedef struct {void *impl;} pn_epub_open_job_t; ///< 活动打开任务不可移动/复制，不是可阅读app / Never move/copy a live opening job; it is not a readable app
+typedef struct {void *impl;} pn_epub_open_job_t; ///< 活动任务只能显式move移交，禁止复制；不是可阅读app / Transfer live ownership only through move, never copy; not a readable app
+/// 转移唯一任务至空目标，清空原wrapper；源/内部地址保持，不显示/推进。/ Transfer sole ownership to an empty target and clear the original wrapper; preserve source/internal addresses without presenting/advancing.
+pn_status_t pn_epub_app_open_job_move(pn_epub_open_job_t *,pn_epub_open_job_t *);
 /// 建立私有原书句柄和只读租约；复制参数，不排版/显示/提交记录。/ Establish a private book handle/READ lease and copy arguments, without layout, presentation or record commits.
 pn_status_t pn_epub_app_open_job_begin(pn_epub_open_job_t *,pn_pool_t *,pn_media_t *,const char *,const char *,const char *,int,uint64_t);
 /// 目录逐步4096B/8读，SHA逐步最多32KiB，BUSY待续；元信息/字体仍同步。仅全部成功才交出空app；错误须close。/ Directory steps allow 4096 bytes/eight reads, SHA steps at most 32 KiB; BUSY continues, metadata/fonts remain synchronous. Transfer only on full success to an empty app; close after errors.

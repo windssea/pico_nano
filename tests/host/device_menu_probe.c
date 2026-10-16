@@ -3,9 +3,15 @@
  * English: host file/glyph counters for real product menu routes; hardware ports are substitutes, not panel timing. */
 #define _POSIX_C_SOURCE 200809L
 #define main boot_fixture_main
+#define read_pico_sd_get_info fixture_sd_get_info
 #include "test_device_boot.c"
+#undef read_pico_sd_get_info
 #undef main
-#include "../../main/app_main.c"
+esp_err_t read_pico_sd_get_info(read_pico_sd_info_t *info){if(getenv("PN_MENU_COLD_BOOK")){memset(info,0,sizeof *info);info->present=info->mounted=true;return ESP_OK;}return fixture_sd_get_info(info);}
+#ifndef PN_DEVICE_MAIN_SOURCE
+#define PN_DEVICE_MAIN_SOURCE "../../main/app_main.c"
+#endif
+#include PN_DEVICE_MAIN_SOURCE
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include <time.h>
@@ -122,12 +128,51 @@ static void prepared_books(void){
         assert(pn_hot_session_layout_pending(&hot_session) || pn_hot_session_source_pending(&hot_session));
         selected_format=item->format;strcpy(selected_path,item->path);selected_identified=true;selected_expected=item->expected;size_t takes=hot_session.takes;
         bool loading=pn_hot_session_source_selected(&hot_session,&sd_media,selected_path,selected_format,&selected_expected,1,now_ms());
-        start_reader();assert(reader_active() && !shelf_mode && !status_page && hot_session.takes==takes+1 && !hot_session.prepared && presents==shown+1+(unsigned)loading);
+        start_reader();
+#if PN_TEST_FOREGROUND_OPEN
+        unsigned foreground_steps=0;while(opening){assert(++foreground_steps<65536 && !reader_active() && tick_opening());}
+#endif
+        assert(reader_active() && !shelf_mode && !status_page && hot_session.takes==takes+1 && !hot_session.prepared && presents==shown+1+(unsigned)loading);
         assert(epub.impl?pn_epub_app_last_confirmed(&epub):pn_reader_app_last_confirmed(&reader));
         pn_book_id_t actual;assert((epub.impl?pn_epub_app_identity(&epub,&actual):pn_reader_app_identity(&reader,&actual))==PN_OK && !memcmp(actual.sha256,item->expected.sha256,32));
         assert(stop_reader());printf("device_prepare kind=%s quiet_gate=1 menu_font_io=0 lock_drop=1 taken=1 body_present=1 loading_present=%u peak=%zu\n",index?"epub":"txt",(unsigned)loading,pool.peak);
     }
     pn_free(items);
+}
+static void opening_frame(unsigned number){
+    const char *directory=getenv("PN_OPEN_FRAMES");assert(directory);char path[2048];int n=snprintf(path,sizeof path,"%s/%u.raw",directory,number);assert(n>0 && (size_t)n<sizeof path);
+    FILE *file=fopen(path,"wb");assert(file && fwrite(hardware.hl.back_fb,1,415872,file)==415872 && !fclose(file));
+}
+static void cold_book_probe(const char *path){
+    assert(strlen(path)<sizeof selected_path);strcpy(selected_path,path);selected_format=PN_BOOK_EPUB;selected_identified=false;pn_w_set_clock("12:34");pn_w_set_battery(85);
+#if PN_TEST_FOREGROUND_OPEN
+    const char *scenario=getenv("PN_OPEN_SCENARIO");
+    if(scenario && !strcmp(scenario,"wrong-id")){pn_media_lease_t lease;assert(!pn_media_acquire(&sd_media,PN_MEDIA_READ,&lease) && !pn_identity_file(&sd_media,&lease,path,PN_TEXT_FILE_MAX_BYTES,&selected_expected) && !pn_media_release(&sd_media,&lease));selected_expected.sha256[0]^=1;selected_identified=true;}
+#endif
+    unsigned before=presents,polls=0;memset(counts,0,sizeof counts);watching=true;start_reader();
+#if PN_TEST_FOREGROUND_OPEN
+    assert(opening && foreground_open.impl && !reader_active() && presents==before+1);
+    if(scenario && strcmp(scenario,"wrong-id")){
+        if(strcmp(scenario,"cancel-home")){uint64_t bytes=0,size=1;while(bytes<65536 && bytes<size){assert(++polls<65536 && tick_opening() && opening && !reader_active() && !pn_epub_app_open_job_progress(&foreground_open,&bytes,&size));}}
+        if(!strcmp(scenario,"cancel-scope")){void *original=foreground_open.impl;pn_cancel_scope_t scope;pn_cancel_enter(&scope,cancelled_probe,NULL);assert(tick_opening() && foreground_open.impl==original && opening);pn_cancel_leave(&scope);handle_key(PN_KEY_2,PN_KEY_SHORT);}
+        else if(!strcmp(scenario,"cancel-home"))handle_key(PN_KEY_2,PN_KEY_SHORT);
+        else if(!strcmp(scenario,"cancel-back"))handle_key(PN_KEY_1,PN_KEY_SHORT);
+        else if(!strcmp(scenario,"lock"))assert(prepare_lock());
+        else if(!strcmp(scenario,"stale")){assert(!pn_media_detach(&sd_media));system_font_release();}
+        else if(!strcmp(scenario,"usb")){pn_media_lease_t lease;assert(!pn_media_request_usb(&sd_media) && stop_reader());system_font_release();assert(!pn_media_acquire(&sd_media,PN_MEDIA_USB,&lease) && !pn_media_release(&sd_media,&lease) && !pn_media_cancel_usb(&sd_media));}
+        else{assert(!strcmp(scenario,"display-fail"));panel_fault=true;while(opening){assert(++polls<65536 && tick_opening());}panel_fault=false;}
+        assert(!opening && !foreground_open.impl && !reader_active());recent_loaded=false;assert(load_recent()==PN_OK && !recent_snapshot->count);
+        watching=false;printf("cold_cancel case=%s no_record=1 released=1 polls=%u\n",scenario,polls);return;
+    }
+    while(opening){assert(++polls<65536);bool worked=tick_opening();assert(worked);if(opening){assert(!reader_active() && presents==before+1);recent_loaded=false;assert(load_recent()==PN_OK && !recent_snapshot->count);}}
+    if(scenario){assert(!strcmp(scenario,"wrong-id") && !reader_active() && !foreground_open.impl && status_page);recent_loaded=false;assert(load_recent()==PN_OK && !recent_snapshot->count);watching=false;printf("cold_cancel case=%s no_record=1 released=1 polls=%u\n",scenario,polls);return;}
+#endif
+    watching=false;if(!reader_active() || status_page || shelf_mode || presents!=before+2)fprintf(stderr,"cold result reader=%d status=%d shelf=%d shown=%u expected=%u\n",reader_active(),status_page,shelf_mode,presents,before+2);
+    assert(reader_active() && !status_page && !shelf_mode && presents==before+2);
+    assert(pn_epub_app_last_confirmed(&epub));opening_frame(0);
+    assert(active_step(PN_APP_NEXT,now_ms())==PN_OK);opening_frame(1);
+    assert(active_step(PN_APP_PREVIOUS,now_ms())==PN_OK);opening_frame(2);
+    assert(stop_reader());printf("cold_open polls=%u body_once=1 loader_once=1 status=0 used=%zu peak=%zu\n",polls,pool.used,pool.peak);
 }
 int main(void){
     assert(pn_pool_init(&pool,6u*1024u*1024u,NULL,NULL,NULL)==PN_OK);assert(read_pico_init(&hardware)==ESP_OK);
@@ -136,7 +181,9 @@ int main(void){
     int vcom;assert(read_pico_pmu_vcom_get(&vcom)==ESP_OK);epd_set_vcom((uint16_t)vcom);pn_async_init(&async_port.input);
     assert(pn_catalog_index_init(&catalog_index,&pool,&sd_media,book_directory,PN_SD_MOUNT "/" PN_SD_INDEX_CACHE)==PN_OK);
     pn_status_t built=pn_catalog_index_build(&catalog_index);assert(built==PN_OK || built==PN_EMPTY);
-    shelf_prefs.columns=3;probe("library-cold",library,1);
+    shelf_prefs.columns=3;
+    const char *cold=getenv("PN_MENU_COLD_BOOK");if(cold){library();cold_book_probe(cold);goto closed;}
+    probe("library-cold",library,1);
     // 用真实用户系统字体验证索引重建不关闭字体或读取字体数据。/ Verify with the supplied system face that index rebuild neither closes it nor reads font data.
     pn_text_source_t indexed_source=pn_font_builtin_source();memset(counts,0,sizeof counts);face_opens=0;watching=true;
     pn_catalog_index_invalidate(&catalog_index);assert(catalog_build_idle()==PN_OK);watching=false;
@@ -152,6 +199,7 @@ int main(void){
     for(unsigned cycle=0;cycle<4;cycle++){probe("home",home,1);probe("settings",settings,1);probe("hub",hub,1);probe("library",library,1);}
     if(emergency)recovered_system_font();
     if(getenv("PN_MENU_PREPARE_BOOKS"))prepared_books();
+closed:
     pn_cover_work_abort(&cover_work);management_fonts_close();assert(pn_font_system_close()==PN_OK);pn_catalog_index_close(&catalog_index);
     pn_free(shelf_page);pn_free(shelf_covers);pn_free(recent_snapshot);pn_free(favorites);pn_free(page_copy);
     assert(!pn_media_active(&sd_media) && !pn_media_active(&data_media) && !pool.used && !pool.live);

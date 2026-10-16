@@ -104,6 +104,13 @@ static bool matches(const pn_hot_session_t *h,pn_media_t *media,const char *path
 bool pn_hot_session_source_selected(const pn_hot_session_t *h,pn_media_t *media,const char *path,pn_book_format_t kind,const pn_book_id_t *expected,uint64_t policy,uint64_t now){
     return media && path && pn_hot_session_source_pending(h) && matches(h,media,path,kind,policy,now) && (!expected || !memcmp(expected->sha256,h->book.sha256,32));
 }
+pn_status_t pn_hot_session_take_opening(pn_hot_session_t *h,pn_media_t *media,const char *path,const pn_book_id_t *expected,uint64_t policy,uint64_t now,pn_epub_open_job_t *out){
+    if(!h || !media || !path || !out)return PN_INVALID;
+    if(out->impl)return PN_BUSY;
+    if(!pn_hot_session_source_pending(h) || !matches(h,media,path,PN_BOOK_EPUB,policy,now))return PN_EMPTY;
+    if(expected && memcmp(expected->sha256,h->book.sha256,32))return PN_STALE_JOB;
+    pn_status_t s=pn_epub_app_open_job_move(out,&h->opening);if(s==PN_OK){h->takes++;clear(h);}return s;
+}
 bool pn_hot_session_paint_pending(const pn_hot_session_t *h){return h && h->prepared && !h->layout_pending && h->media && h->media->available && h->epoch==h->media->epoch && (h->epub.impl?pn_epub_app_unshown_paint_pending(&h->epub):pn_reader_app_unshown_paint_pending(&h->txt));}
 pn_status_t pn_hot_session_paint(pn_hot_session_t *h,uint64_t now,size_t budget){
     if(!h || !budget)return PN_INVALID;

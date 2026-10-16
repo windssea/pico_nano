@@ -400,6 +400,12 @@ pn_status_t pn_epub_app_open_job_close(pn_epub_open_job_t *job){
     open_job_t *r=job->impl;pn_identity_job_close(&r->hash);pn_zip_job_close(&r->directory);pn_zip_scan_abort(&r->scan);
     pn_status_t s=r->app?release(r->app):PN_OK;pn_free(r);job->impl=NULL;return s;
 }
+pn_status_t pn_epub_app_open_job_move(pn_epub_open_job_t *out,pn_epub_open_job_t *from){
+    if(!out || !from || out==from)return PN_INVALID;
+    if(out->impl)return PN_BUSY;
+    if(!from->impl)return PN_EMPTY;
+    out->impl=from->impl;from->impl=NULL;return PN_OK;
+}
 pn_status_t pn_epub_app_open_job_begin(pn_epub_open_job_t *job,pn_pool_t *pool,pn_media_t *media,const char *book,const char *font,const char *state,int pixels,uint64_t now){
     if(!job || !pool || !book || !*book || pixels<28 || pixels>72 || (state && !*state))return PN_INVALID;
     if(job->impl)return PN_BUSY;

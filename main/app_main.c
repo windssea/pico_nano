@@ -102,7 +102,8 @@ static void management_font_end(pn_font_t *font){if(pool.limit<4u*1024u*1024u ||
 static void management_fonts_close(void){shelf_draw_valid=false;pn_settings_ui_close(&settings_ui);pn_font_close(&management_font);pn_w_font_scope_end(&management_scope);}
 static pn_cover_work_t cover_work; ///< 封面解析/解码/写入由产品owner分步推进 / Cover parsing/decoding/writes advanced by the product owner
 static struct {uint64_t epoch;bool stable;} system_font_failure; ///< 仅当前挂载的稳定失败，资源交接清除 / Stable failure for this mount only, cleared on resource handoff
-static void system_font_release(void){system_font_failure.epoch=0;system_font_failure.stable=false;pn_cover_work_abort(&cover_work);(void)pn_hot_session_drop(&hot_session);management_fonts_close();(void)pn_font_system_close();}
+static pn_status_t opening_abort(void);
+static void system_font_release(void){system_font_failure.epoch=0;system_font_failure.stable=false;pn_cover_work_abort(&cover_work);(void)opening_abort();(void)pn_hot_session_drop(&hot_session);management_fonts_close();(void)pn_font_system_close();}
 
 static pn_media_t sd_media;
 static pn_device_sd_t sd_recovery; ///< TF挂载请求的异步完成状态 / Asynchronous completion state of the TF mount request
@@ -157,6 +158,7 @@ static pn_jump_ui_t jump_ui; ///< 进度跳转面板 / Progress jump panel
 static pn_font_ui_t fonts;
 static bool panel_known,data_ready,locked,status_page,shelf_mode;
 static bool opening; ///< 开书控制门，产品owner串行管理 / Opening gate owned by the serial product owner
+static pn_epub_open_job_t foreground_open; ///< 跨输入轮保留的私有开书任务，不是可阅读对象 / Private opening job across input ticks, never a readable object
 static atomic_bool deep_clean_pending; ///< 显式清屏意图，由显示owner消费 / Explicit cleaning intent consumed by the display owner
 static pn_catalog_index_t catalog_index;
 static bool recent_loaded;static uint64_t recent_epoch;
@@ -258,6 +260,8 @@ static pn_focus_t focus_nav; ///< 当前页的三键焦点表 / Three-key focus 
  * The shown reference is epdiy's back buffer (equal to the front buffer after every draw), so no separate 406 KiB logical copy is kept. */
 #define PARTIAL_MAX_PERCENT 45
 static pn_device_async_t async_port;
+static void opening_controls(bool active){opening=active;pn_async_block_controls(&async_port.input,active);if(active)pn_device_async_view(&async_port,18,false,input_flags);}
+static pn_status_t opening_abort(void){if(!foreground_open.impl)return PN_OK;pn_status_t s=pn_epub_app_open_job_close(&foreground_open);opening_controls(false);return s;}
 static pn_feedback_t press_feedback; ///< 独立、可撤销的按下区域，不借用UI对象 / Independent reversible press region without borrowing UI objects
 static pn_device_refresh_t maintenance; ///< 内容维护与可选反馈分开记账 / Content maintenance accounted separately from optional feedback
 static pn_feedback_idle_t feedback_idle; ///< 产品owner的反馈定稿候选 / Product-owner feedback settle candidates
@@ -586,6 +590,7 @@ static void show_lock(const char *hint){
     if(status!=PN_OK){ESP_LOGE(TAG,"Lock screen unavailable: %d",(int)status);message("已锁屏",hint);}
 }
 static bool stop_reader_impl(bool retain){
+    if(opening_abort()!=PN_OK)return false;
 #if defined(CONFIG_PN_UI_FOLLOW) && CONFIG_PN_UI_FOLLOW
     if(pn_font_manage_motion_abort(&font_manage)!=PN_OK)return false;
     if(pn_toc_ui_motion_abort(&toc)!=PN_OK)return false;
@@ -829,6 +834,8 @@ static void start_reader_impl(void){
         if(pn_hot_session_source_selected(&hot_session,&sd_media,selected_path,selected_format,selected_identified?&selected_expected:NULL,1,now_ms())){
             pn_status_t loading=show_loading(selected_path);if(loading==PN_CANCELLED)return;
             if(loading!=PN_OK)ESP_LOGW(TAG,"Opening feedback unavailable: %d",(int)loading);
+            pn_status_t moved=pn_hot_session_take_opening(&hot_session,&sd_media,selected_path,selected_identified?&selected_expected:NULL,1,now_ms(),&foreground_open);
+            if(moved==PN_OK)return;
         }
         pn_status_t taken=pn_hot_session_take_prepared(&hot_session,&sd_media,selected_path,selected_format,selected_identified?&selected_expected:NULL,1,now_ms(),&reader,&epub);
         if(taken==PN_OK){pn_wallpaper_mask_close(&lock_mask);covers_inactive=true;ESP_LOGI(TAG,"Prepared book take=%zu",hot_session.takes);reader_open_result(active_step(PN_APP_OPEN,now_ms()));return;}
@@ -866,7 +873,8 @@ static void start_reader_impl(void){
     if(loading==PN_CANCELLED)return;
     if(loading!=PN_OK)ESP_LOGW(TAG,"Opening feedback unavailable: %d",(int)loading);
     uint64_t opened_at=now_ms();(void)opened_at;
-    pn_status_t status=selected_format==PN_BOOK_EPUB?pn_epub_app_open_on_media(&epub,&pool,&sd_media,selected_path,font,"/data/progress",PN_STYLE_DEFAULT_PIXELS,now_ms()):pn_reader_app_open_on_media(&reader,&pool,&sd_media,selected_path,font,"/data/progress",PN_STYLE_DEFAULT_PIXELS,now_ms());
+    if(selected_format==PN_BOOK_EPUB){pn_status_t status=pn_epub_app_open_job_begin(&foreground_open,&pool,&sd_media,selected_path,font,"/data/progress",PN_STYLE_DEFAULT_PIXELS,now_ms());if(status!=PN_OK)reader_open_result(status);return;}
+    pn_status_t status=pn_reader_app_open_on_media(&reader,&pool,&sd_media,selected_path,font,"/data/progress",PN_STYLE_DEFAULT_PIXELS,now_ms());
     ESP_LOGI(TAG,"Book prepare format=%u status=%d elapsed=%llu ms",(unsigned)selected_format,(int)status,(unsigned long long)(now_ms()-opened_at));
     if(status==PN_OK && selected_identified){pn_book_id_t actual;status=epub.impl?pn_epub_app_identity(&epub,&actual):pn_reader_app_identity(&reader,&actual);if(status==PN_OK && memcmp(actual.sha256,selected_expected.sha256,32))status=PN_STALE_JOB;}
     if(status==PN_OK)status=active_step(PN_APP_OPEN,now_ms());
@@ -897,9 +905,25 @@ static bool tick_prepare_book(uint64_t now){
 static void start_reader(void){
     if(opening)return;
     bool gate=*selected_path!=0 && !transfer.impl && !usb.open;
-    if(gate){opening=true;pn_async_block_controls(&async_port.input,true);pn_device_async_view(&async_port,18,false,input_flags);}
+    if(gate)opening_controls(true);
     start_reader_impl();
-    if(gate){pn_async_block_controls(&async_port.input,false);opening=false;}
+    if(gate && !foreground_open.impl)opening_controls(false);
+}
+/// 前台开书每轮一步；任务/加载页不确认正文，完整成功后走原唯一首帧回执。/ One foreground opening step per tick; neither job nor loader confirms content, and full success uses the original sole first-page receipt.
+static bool tick_opening(void){
+    if(!foreground_open.impl)return false;
+    pn_status_t s=pn_epub_app_open_job_step(&foreground_open,&epub);
+    if(s==PN_BUSY || (s==PN_CANCELLED && pn_epub_app_open_job_pending(&foreground_open)))return true;
+    if(s==PN_OK && selected_identified){pn_book_id_t actual;s=pn_epub_app_identity(&epub,&actual);if(s==PN_OK && memcmp(actual.sha256,selected_expected.sha256,32))s=PN_STALE_JOB;}
+    if(s==PN_OK)s=active_step(PN_APP_OPEN,now_ms());
+    if(foreground_open.impl)(void)pn_epub_app_open_job_close(&foreground_open);
+    reader_open_result(s);opening_controls(false);return true;
+}
+static void opening_cancel(int key){
+    pn_cancel_scope_t shield;pn_cancel_enter(&shield,NULL,NULL);
+    if(key==PN_KEY_2){home_mode=true;selected_path[0]=0;}
+    if(stop_reader())show_shelf("",false);
+    pn_cancel_leave(&shield);
 }
 /// 挂载完成后继续原请求，失败保留重试入口；不在轮询中重新发起挂载。/ Continue the original request after mounting, keep Retry on failure, and never restart a mount from polling.
 static void tick_sd_recovery(uint64_t now){
@@ -1274,6 +1298,7 @@ static void open_shelf_item(int index){
     else message("格式尚未接入","书籍仍保留，选择TXT或EPUB");
 }
 static void handle_key(int key,pn_key_event_t event){
+    if(opening){if(event==PN_KEY_SHORT && (key==PN_KEY_1 || key==PN_KEY_2))opening_cancel(key);return;}
     if(usb.open){if(event==PN_KEY_SHORT){usb_return=true;usb_home=key==PN_KEY_2;usb_lock=false;pn_device_usb_request_stop(&usb);}return;}
     // 排版中间键先应用草稿，只有成功才回到当前阅读页。/ Apply the draft first on the typesetting middle key and return to reading only on success.
     if(fonts.active && key==PN_KEY_2 && event==PN_KEY_SHORT){
@@ -1377,6 +1402,7 @@ static int active_hit(int x,int y){
 }
 /// 只有显示固定底栏的四个一级页允许按下切页；子页、模态和活动传输沿原确认规则。/ Only the four roots with fixed navigation switch on press; subpages, modals and active transfers retain normal confirmation.
 static int root_navigation_hit(int x,int y){
+    if(opening)return -1;
     if(locked || usb.open || transfer.impl || time_sync.impl || wallpaper_ui.impl || font_manage.impl || reading_menu || fonts.active || toc.active || jump_ui.active || styles.active || bookmarks.mode!=PN_BUI_CLOSED || actions_mode || index_mode || search_mode || toolbar_open)return -1;
     if(settings_ui.impl){if(pn_settings_ui_screen(&settings_ui)!=0)return -1;}
     else if(!hub_mode && !(shelf_mode && shelf_page))return -1;
@@ -1594,8 +1620,8 @@ static void device_task(void *arg){
         (void)pn_hot_session_expire(&hot_session,now);
         if(scope_active)pn_async_end(&scope);
         bool body=reader_active() && !locked && !focus_page() && !status_page && !reading_menu && !shelf_mode && !toolbar_open;
-        uint32_t view=locked?1:fonts.active?2:toc.active?3:styles.active?4:jump_ui.active?5:bookmarks.mode!=PN_BUI_CLOSED?6:actions_mode?7:settings_ui.impl?8:wallpaper_ui.impl?9:font_manage.impl?10:hub_mode?11:index_mode?12:search_mode?13:toolbar_open?14:body?15:home_mode?16:17;
-        if(shelf_mode && !home_mode && shelf_page)view+=(uint32_t)shelf_page->index*32u;
+        uint32_t view=locked?1:opening?18:fonts.active?2:toc.active?3:styles.active?4:jump_ui.active?5:bookmarks.mode!=PN_BUI_CLOSED?6:actions_mode?7:settings_ui.impl?8:wallpaper_ui.impl?9:font_manage.impl?10:hub_mode?11:index_mode?12:search_mode?13:toolbar_open?14:body?15:home_mode?16:17;
+        if(!opening && shelf_mode && !home_mode && shelf_page)view+=(uint32_t)shelf_page->index*32u;
         pn_device_async_root_view(&async_port,view,body,input_flags,root_navigation_hit(80,1150)>=0);
         pn_device_input_event_t queued={0};pn_status_t available=async_port.input_active?pn_device_async_take(&async_port,&queued):PN_EMPTY;
         // 有输入立即回到最高频；连续空闲约1秒才放锁，交互中不反复切频。/ Input returns to maximum at once; release only after about one second idle so interaction does not toggle frequency.
@@ -1606,7 +1632,7 @@ static void device_task(void *arg){
             if(available==PN_OK && !first_logged){first_logged=true;ESP_LOGI(TAG,"Input first event kind=%d after boot=%llu ms",(int)queued.kind,(unsigned long long)(now-boot));}
             else ESP_LOGI(TAG,"Input health reads=%u errors=%u events=%u touch_wake=%d",reads,errors,sent,(int)async_port.touch_wake);
             health_at=now;last_reads=reads;last_errors=errors;last_sent=sent;}}
-        pn_device_power_busy(PN_POWER_SESSION,transfer.impl!=NULL || time_sync.impl!=NULL || usb.open);
+        pn_device_power_busy(PN_POWER_SESSION,transfer.impl!=NULL || time_sync.impl!=NULL || usb.open || opening);
         pn_async_begin(&async_port.input,&scope,available==PN_EMPTY);scope_active=true;
         if(available==PN_OK || available==PN_CANCELLED){
             // 书架三键焦点只暂停解码；真正开书/换页入口仍先abort，低余量不保活。/ Shelf key focus only pauses decoding; opening/page-change entries still abort, and low headroom never retains it.
@@ -1630,7 +1656,7 @@ static void device_task(void *arg){
             if(queued.kind!=PN_DASYNC_TOUCH)feedback_restore();
 #endif
             if(queued.kind==PN_DASYNC_KEY && !locked)handle_key(queued.key,queued.key_event);
-            if(queued.kind==PN_DASYNC_OPEN_CANCEL && !locked && !usb.open){if(queued.key==PN_KEY_2){home_mode=true;selected_path[0]=0;}if(stop_reader())show_shelf("",false);}
+            if(queued.kind==PN_DASYNC_OPEN_CANCEL && !locked && !usb.open)opening_cancel(queued.key);
             if(queued.kind==PN_DASYNC_ACTION && body && !locked){if(queued.action==PN_APP_TOOLS)toolbar_show();else{pn_status_t status=active_step(queued.action,now);report_reader_result(status);}}}
         if(!async_port.display_active)rails_idle_check(now);
         if(transfer.impl)tick_transfer(now);
@@ -1639,7 +1665,7 @@ static void device_task(void *arg){
         if(!transfer.impl && !usb.open && !locked && sd_recovery.pending)tick_sd_recovery(now);
         {static uint64_t last_battery,last_clock,date_minute;if(now-last_battery>=60000 || !last_battery){last_battery=now;pn_w_set_battery(battery_percent());}if(now-last_clock>=10000 || !last_clock){last_clock=now;clock_tick(now);if(settings_ui.impl && pn_settings_ui_screen(&settings_ui)==5 && now/60000u!=date_minute){date_minute=now/60000u;update_time_ui(true);}}} // 电量与日期页每分钟推进，正文不因对时刷新。 / Advance battery and the date page once a minute; time sync never redraws reading content.
         {static uint64_t prefs_retry;
-         if(data_ready && (!shelf_prefs_loaded || !input_flags_loaded) && now>=prefs_retry){
+         if(!opening && data_ready && (!shelf_prefs_loaded || !input_flags_loaded) && now>=prefs_retry){
             prefs_retry=now+3000;
             if(!shelf_prefs_loaded && pn_settings_load_shelf(&data_media,"/data/progress",&shelf_prefs)==PN_OK){shelf_prefs_loaded=true;if(shelf_mode)show_shelf("",false);}
             if(!input_flags_loaded && pn_settings_load_flags(&data_media,"/data/progress",&input_flags)==PN_OK)input_flags_loaded=true;
@@ -1657,6 +1683,14 @@ static void device_task(void *arg){
         now=now_ms();
         // 无操作满5分钟自动锁屏；传输中由其停止流程负责。/ Auto-lock after five idle minutes; transfers handle their own stop flow.
         if(!locked && !transfer.impl && !usb.open && !time_sync.impl && now>=last_input && now-last_input>=AUTO_LOCK_MS && now-boot>=AUTO_LOCK_MS){pn_reader_input_cancel(&input);if(prepare_lock())lock_and_sleep("再按电源键继续阅读");else last_input=now;}
+        if(opening){
+            // 加载态独占内容路由；紧急键/电源先处理，普通书架触点与后台画面不进入旧页面。
+            // Loading owns content routing: urgent keys/power run first; ordinary shelf contacts and background draws never reach the old page.
+            if(!async_port.input_active && hardware.touch_ready){cst836u_touch_t touch={0};bool ending=false;bool valid=cst836u_read(hardware.touch,&touch)==ESP_OK && pn_device_touch_normalize(&touch,&ending)==PN_OK;int key=-1;pn_key_event_t event=pn_key_feed(&keys,touch.count,touch.x,touch.y,valid,now_ms(),&key);if(event!=PN_KEY_NONE)handle_key(key,event);}
+            if(opening && available==PN_EMPTY){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);(void)tick_opening();}
+            if(++background_rounds>=50u){background_rounds=0;pn_device_async_wait(&async_port,10);}else pn_device_async_wait(&async_port,1);
+            continue;
+        }
         if(reader_active() && !locked){pn_status_t saved=epub.impl?pn_epub_app_tick(&epub,now_ms()):pn_reader_app_tick(&reader,now_ms());if(saved==PN_OK)progress_save_failed=false;else if(saved!=PN_BUSY){progress_save_failed=true;ESP_LOGW(TAG,"Pending progress save: %d",(int)saved);}}
         if(bookmarks.mode!=PN_BUI_CLOSED && !bookmarks.presented && !locked && now-last_ui_retry>=1000){last_ui_retry=now;(void)pn_bookmark_ui_present(&bookmarks,present,NULL);}
         if(toc.active && !toc.presented && !locked && now-last_ui_retry>=1000){last_ui_retry=now;(void)pn_toc_ui_present(&toc,present,NULL);}
