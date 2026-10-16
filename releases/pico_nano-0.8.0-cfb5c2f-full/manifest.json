@@ -1,0 +1,56 @@
+{
+  "brand": "PicoNano",
+  "source_commit": "cfb5c2fb9189ee76591f79b94b865a985095e547",
+  "version": "0.8.0",
+  "idf": "v6.1",
+  "target": "esp32s3",
+  "board": "RDP-G01-W",
+  "built_at": "2026-10-16T17:31:24.038601+08:00",
+  "config": "board defaults; USB/radio exclusion; CONFIG_PN_PROFILE disabled",
+  "application_offset": "0x20000",
+  "slot_bytes": 6291456,
+  "write_files": [
+    "bootloader.bin",
+    "partition-table.bin",
+    "ota_data_initial.bin",
+    "pico_nano.bin"
+  ],
+  "write_executed": false,
+  "hardware_acceptance": false,
+  "files": {
+    "pico_nano.bin": {
+      "bytes": 5123488,
+      "sha256": "be40592abb0fc6cab691482781af0ad2360878b7ea476bf3dad476fb38cba899"
+    },
+    "partition-table.bin": {
+      "bytes": 3072,
+      "sha256": "4646b56edb1df3f9267761b147692d17cb8d45c2f061cc33dc38bc26fd11376d"
+    },
+    "bootloader.bin": {
+      "bytes": 21168,
+      "sha256": "636661c185935cec845b7cae86fe18d116e9124c7436adbb2f9db5011871819d"
+    },
+    "ota_data_initial.bin": {
+      "bytes": 8192,
+      "sha256": "7d2c7ac4888bfd75cd5f56e8d61f69595121183afc81556c876732fd3782c62f"
+    },
+    "first-install/factory-data.bin": {
+      "bytes": 1048576,
+      "sha256": "52ab475d7a7a181f739caca3512b19c0ced37ca407a9cae84c9ba63a49e16bd8"
+    },
+    "first-install/factory-wallpaper.bin": {
+      "bytes": 1048576,
+      "sha256": "b29da7b4ca5feebe40150c13f250912b6a23686f80347738196ff63f47e504f9"
+    },
+    "flash_args": {
+      "bytes": 148,
+      "sha256": "6463a96d204c10a078987fafc244c3cb2f5c4671df9643b5ed7f7de506143757"
+    },
+    "README.md": {
+      "bytes": 21903,
+      "sha256": "8b66e901a6561d93276ef1480f212475db5938d87d5c4cfeef63ad12448378cd"
+    }
+  },
+  "mode": "full",
+  "storage_initialization": "blank complete partitions or explicit user choice only"
+}
