@@ -93,7 +93,10 @@ void pn_w_round_stroke(pn_frame_t *frame,int x,int y,int width,int height,int ra
         // 深处覆盖率确定为0，不计算透明描边内部；可见边缘的运算保持不变。
         // Skip the certainly transparent deep interior; preserve all arithmetic along visible edges.
         int first=right,last=right;
-        if(spans && py>=y+inset && py<y+height-inset){first=clipped(x+inset,left,right);last=clipped(x+width-inset,first,right);}
+        if(spans && py>=y+inset && py<y+height-inset){
+            // 中间行离上下边都超过线宽，只有贴左右边线宽+2内可能有覆盖率，更内侧覆盖率为0。/ Middle rows are farther than the thickness from top/bottom edges, so only pixels within thickness+2 of the side edges can have coverage; further inside is zero.
+            int band=(int)thickness+2;
+            first=clipped(x+band<x+inset?x+band:x+inset,left,right);last=clipped(x+width-band>x+width-inset?x+width-band:x+width-inset,first,right);}
         else if(spans){
             // 上下圆角带的中段距直边距离只随行变化：每行算一次覆盖率，逐像素混合同值，数值与逐点公式相同。
             // In the top/bottom corner bands the middle span's distance depends only on the row: compute coverage once per row and blend the same value per pixel, numerically identical to the per-point formula.
