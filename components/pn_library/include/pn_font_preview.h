@@ -12,3 +12,6 @@ const char *pn_font_preview_text(void);
 /// 684x1216纯绘制，metadata与缺字统计由owner预先校验。
 /// Paint-only 684x1216 panel with metadata/missing counts validated by the owner first.
 pn_status_t pn_font_preview_draw(pn_font_t *ui,pn_font_t *body,const pn_font_info_t *,uint64_t bytes,unsigned checked,unsigned missing,pn_frame_t *);
+/// 同上，但样例文本只排到bottom（540–1068）之前的完整行，不画底部说明，供下方另有控件的页面使用。
+/// As above, but the sample lays out only whole lines above bottom (540-1068) without the footer note, for pages with controls below.
+pn_status_t pn_font_preview_draw_bounded(pn_font_t *ui,pn_font_t *body,const pn_font_info_t *,uint64_t bytes,unsigned checked,unsigned missing,int bottom,pn_frame_t *);

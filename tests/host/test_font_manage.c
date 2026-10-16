@@ -44,7 +44,11 @@ int main(int argc,char **argv){
     assert(!global(&internal,state,&pool,&g));
     assert(pn_font_manage_event(&ui,PN_FMU_DEFAULT,present,NULL)==PN_OK && ui.last==PN_OK);
     assert(global(&internal,state,&pool,&g) && g.primary.kind==PN_FONT_FILE && !strcmp(g.primary.path,a) && g.fallback.kind==PN_FONT_RESIDENT);
-    assert(pn_font_manage_event(&ui,PN_FMU_DEFAULT,present,NULL)==PN_EMPTY);
+    // 已是默认时再按即恢复系统内置字体；再按又设回该文件。/ Pressing again on the current default restores the built-in system font; pressing once more sets the file again.
+    assert(pn_font_manage_event(&ui,PN_FMU_DEFAULT,present,NULL)==PN_OK && ui.last==PN_OK);
+    assert(global(&internal,state,&pool,&g) && g.primary.kind==PN_FONT_RESIDENT);
+    assert(pn_font_manage_event(&ui,PN_FMU_DEFAULT,present,NULL)==PN_OK && ui.last==PN_OK);
+    assert(global(&internal,state,&pool,&g) && g.primary.kind==PN_FONT_FILE && !strcmp(g.primary.path,a));
     /* 删除：取消回详情；他人持有READ时删除失败、文件保留。/ Delete: cancel returns to detail; deletion fails and keeps the file while another READ is held. */
     assert(pn_font_manage_event(&ui,PN_FMU_DELETE,present,NULL)==PN_OK && ui.screen==PN_FMU_CONFIRMING && pn_font_manage_hit(&ui,500,1150)==PN_FMU_CONFIRM);
     assert(pn_font_manage_event(&ui,PN_FMU_CANCEL,present,NULL)==PN_OK && ui.screen==PN_FMU_DETAIL);

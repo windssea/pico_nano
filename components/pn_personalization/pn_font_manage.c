@@ -195,8 +195,8 @@ static pn_status_t draw_screen(fm_t *f,pn_font_manage_screen_t screen){
             snprintf(line,sizeof line,"%llu KB%s",(unsigned long long)((item->size+1023)/1024),global?" · 阅读默认":"");
             int y=LIST_ROW_Y+(int)i*PN_W_CARD_ROW_H;
             s=pn_w_card_row(&f->ui,&f->canvas,pn_brand_label(item->name),line,NULL,PN_ICON_FONT,PN_ROW_CHEVRON,y,i+1==shown);
-            if(s==PN_OK)sample_tile(f,i,y);
-            if(s==PN_OK && global)pn_w_icon(&f->canvas,PN_ICON_CHECK,PN_UI_WIDTH-PN_UI_MARGIN-100,y+34,32,PN_UI_INK);}
+            // 默认标记只在副标题“· 阅读默认”，不另画会压住长文件名的对勾。/ The default mark lives in the “· 阅读默认” subtitle, without a check icon that overlapped long names.
+            if(s==PN_OK)sample_tile(f,i,y);}
         if(s==PN_OK && !f->page.count){int original=f->ui.pixels;s=pn_font_size(&f->ui,30);if(s==PN_OK)s=pn_w_text_lines(&f->ui,&f->canvas,"还没有安装字体。用“传书”把 TTF 字体放进 fonts 目录。",PN_UI_MARGIN,LIST_ROW_Y+48,620,3,44,NULL);pn_status_t restored=pn_font_size(&f->ui,original);if(s==PN_OK)s=restored;}
         if(s==PN_OK && *f->message){int original=f->ui.pixels;s=pn_font_size(&f->ui,28);if(s==PN_OK)s=pn_w_text(&f->ui,&f->canvas,f->message,PN_UI_MARGIN,PAGER_Y-24,620,PN_ALIGN_LEFT);pn_status_t restored=pn_font_size(&f->ui,original);if(s==PN_OK)s=restored;}
         if(s==PN_OK){int original=f->ui.pixels;s=pn_font_size(&f->ui,30);
@@ -210,14 +210,14 @@ static pn_status_t draw_screen(fm_t *f,pn_font_manage_screen_t screen){
     }else if(screen==PN_FMU_DETAIL){
         pn_font_t *body=pn_font_asset_font(&f->asset);int original=f->ui.pixels;
         s=pn_font_size(&f->ui,36);
-        if(s==PN_OK)s=pn_font_preview_draw(&f->ui,body,&f->info,f->reference.size,f->checked,f->missing,&f->canvas);
+        if(s==PN_OK)s=pn_font_preview_draw_bounded(&f->ui,body,&f->info,f->reference.size,f->checked,f->missing,DETAIL_NAME_Y-60,&f->canvas);
         pn_status_t restored=pn_font_size(&f->ui,original);if(s==PN_OK)s=restored;
         if(s==PN_OK){pn_frame_rect(&f->canvas,0,DETAIL_NAME_Y-48,W,H-(DETAIL_NAME_Y-48),15);pn_frame_rect(&f->canvas,32,DETAIL_NAME_Y-44,620,2,PN_UI_RULE);}
-        if(s==PN_OK){s=pn_font_size(&f->ui,34);if(s==PN_OK)s=pn_w_text(&f->ui,&f->canvas,pn_brand_label(f->name),PN_UI_MARGIN,DETAIL_NAME_Y,620,PN_ALIGN_LEFT);pn_status_t again=pn_font_size(&f->ui,original);if(s==PN_OK)s=again;}
+        // 操作结果暂代文件名行显示，不压到按钮。/ Action results temporarily replace the file-name line instead of overlapping the buttons.
+        if(s==PN_OK){s=pn_font_size(&f->ui,*f->message?28:34);if(s==PN_OK)s=pn_w_text(&f->ui,&f->canvas,*f->message?f->message:pn_brand_label(f->name),PN_UI_MARGIN,DETAIL_NAME_Y,620,PN_ALIGN_LEFT);pn_status_t again=pn_font_size(&f->ui,original);if(s==PN_OK)s=again;}
         if(s==PN_OK){s=pn_font_size(&f->ui,30);
-            if(s==PN_OK)s=pn_w_button(&f->ui,&f->canvas,is_global(f,f->selected)?"已是阅读默认":"设为阅读默认",32,DETAIL_BUTTON_Y,300,96,0u);
+            if(s==PN_OK)s=pn_w_button(&f->ui,&f->canvas,is_global(f,f->selected)?"恢复系统默认":"设为阅读默认",32,DETAIL_BUTTON_Y,300,96,0u);
             if(s==PN_OK)s=pn_w_button(&f->ui,&f->canvas,protected_font(f)?"保留字库":"删除",352,DETAIL_BUTTON_Y,300,96,0u);
-            if(s==PN_OK && *f->message){s=pn_font_size(&f->ui,28);if(s==PN_OK)s=pn_w_text(&f->ui,&f->canvas,f->message,PN_UI_MARGIN,DETAIL_BACK_Y-20,620,PN_ALIGN_LEFT);}
             if(s==PN_OK){s=pn_font_size(&f->ui,30);if(s==PN_OK)s=pn_w_button(&f->ui,&f->canvas,"返回",32,DETAIL_BACK_Y,620,96,0u);}
             pn_status_t again=pn_font_size(&f->ui,original);if(s==PN_OK)s=again;}
     }else{
@@ -287,16 +287,17 @@ pn_status_t pn_font_manage_open(pn_font_manage_t *ui,pn_pool_t *pool,pn_media_t 
     (void)show(ui,present,ctx);return PN_OK;
 }
 /* 阅读默认：只选择正文，缺字使用系统回退。/ Reading default: select primary text only, with system fallback for missing glyphs. */
-static pn_status_t set_default(fm_t *f){
+/// reset为真时恢复系统内置字体为阅读默认。/ With reset, restore the built-in system font as the reading default.
+static pn_status_t set_default_mode(fm_t *f,bool reset){
     if(!f->state){snprintf(f->message,sizeof f->message,"内部存储不可用，未更改");return PN_UNSUPPORTED;}
     if(!f->global_known){snprintf(f->message,sizeof f->message,"阅读默认记录不可读，未覆盖");return PN_CORRUPT;}
-    pn_font_preferences_t g={0};g.primary=f->reference;g.fallback=(pn_font_reference_t){.kind=PN_FONT_RESIDENT};
+    pn_font_preferences_t g={0};g.primary=reset?(pn_font_reference_t){.kind=PN_FONT_RESIDENT}:f->reference;g.fallback=(pn_font_reference_t){.kind=PN_FONT_RESIDENT};
     pn_media_lease_t lease;pn_status_t status=pn_media_acquire(f->state,PN_MEDIA_WRITE,&lease);
     if(status==PN_OK){pn_journal_files_t files;pn_journal_io_t io;status=pn_font_preferences_files(&files,f->state,&lease,f->state_dir,NULL,&io);
         if(status==PN_OK)status=pn_font_preferences_save(&io,f->pool,NULL,&g);
         (void)pn_media_release(f->state,&lease);
         load_global(f);}
-    snprintf(f->message,sizeof f->message,status==PN_OK?"已设为阅读默认，未单独设置的书将使用它":"保存失败（%d），阅读默认以读回为准",(int)status);
+    snprintf(f->message,sizeof f->message,status==PN_OK?(reset?"已恢复系统默认阅读字体":"已设为阅读默认，未单独设置的书将使用它"):"保存失败（%d），阅读默认以读回为准",(int)status);
     return status;
 }
 static pn_status_t remove_font(pn_font_manage_t *ui){
@@ -335,7 +336,7 @@ pn_status_t pn_font_manage_event(pn_font_manage_t *ui,int command,pn_font_manage
         else return PN_EMPTY;
     }else if(ui->screen==PN_FMU_DETAIL){
         if(command==PN_FMU_BACK){release_asset(f);ui->screen=PN_FMU_LIST;f->message[0]=0;}
-        else if(command==PN_FMU_DEFAULT){if(is_global(f,f->selected))return PN_EMPTY;status=set_default(f);ui->last=status;if(f->rows)memset(f->rows,0,ROW_CACHE_SLOTS*sizeof *f->rows);}
+        else if(command==PN_FMU_DEFAULT){status=set_default_mode(f,is_global(f,f->selected));ui->last=status;if(f->rows)memset(f->rows,0,ROW_CACHE_SLOTS*sizeof *f->rows);}
         else if(command==PN_FMU_DELETE){if(protected_font(f)){status=PN_UNSUPPORTED;snprintf(f->message,sizeof f->message,"鸿蒙保留字库，不能删除");}else{ui->screen=PN_FMU_CONFIRMING;f->message[0]=0;}}
         else return PN_EMPTY;
     }else{
