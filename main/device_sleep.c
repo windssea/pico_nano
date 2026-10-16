@@ -15,6 +15,12 @@
 #include "freertos/task.h"
 #include "read_pico_board.h"
 #include "read_pico_pmu.h"
+#if defined(CONFIG_PN_DIAG_NO_LOCK_SLEEP) && CONFIG_PN_DIAG_NO_LOCK_SLEEP
+#include "device_test_console.h"
+#define PN_LOCK_SLEEP 0 ///< 诊断镜像锁屏只轮询，USB串口保持在线 / Diagnostic images only poll while locked, keeping USB serial alive
+#else
+#define PN_LOCK_SLEEP 1 ///< 产品镜像锁屏浅睡 / Product images light-sleep while locked
+#endif
 static const char *TAG="pn_sleep";
 static int64_t now_ms(void){return esp_timer_get_time()/1000;}
 /* 电源键有效松开150ms才算空闲；其他共享中断不能阻止解锁。/ Require a valid released key for 150 ms; unrelated shared interrupts cannot prevent unlocking. */
@@ -61,6 +67,9 @@ bool pn_device_sleep_until_key(void){
         // Read the PMU before clearing the expander: clearing an IRQ does not empty the PMU queue, and a new key before the first sleep is valid too.
         bool low=gpio_get_level((gpio_num_t)READ_PICO_IOE_INT_GPIO)==0;
         bool key=read_pico_pmu_take_key_wakeup();
+#if !PN_LOCK_SLEEP
+        key=key || pn_device_test_console_take_power();
+#endif
         bool valid=read_pico_pmu_poll()==ESP_OK && read_pico_pmu_get()->status_ok;
         if(key || (valid && (read_pico_pmu_get()->key_state&1u)))break;
         poll_failures=valid?0:poll_failures+1;
@@ -71,8 +80,13 @@ bool pn_device_sleep_until_key(void){
         if(gpio_get_level((gpio_num_t)READ_PICO_IOE_INT_GPIO)==0){
             media_unchanged=false;vTaskDelay(pdMS_TO_TICKS(20));continue;
         }
+#if PN_LOCK_SLEEP
         if(esp_light_sleep_start()!=ESP_OK){media_unchanged=false;wake_sources_close();ESP_LOGW(TAG,"Light sleep failed; staying awake");return false;}
         esp_sleep_wakeup_cause_t cause=esp_sleep_get_wakeup_cause();
+#else
+        // 诊断：以同周期延时代替浅睡，保留PMU复核与按键空闲判定。/ Diagnostic: a delay of the same period replaces light sleep, keeping PMU checks and key-idle rules.
+        vTaskDelay(pdMS_TO_TICKS(500));esp_sleep_wakeup_cause_t cause=ESP_SLEEP_WAKEUP_TIMER;
+#endif
         key=read_pico_pmu_take_key_wakeup();valid=read_pico_pmu_poll()==ESP_OK && read_pico_pmu_get()->status_ok;
         if(key || (valid && (read_pico_pmu_get()->key_state&1u)))break;
         poll_failures=valid?0:poll_failures+1;

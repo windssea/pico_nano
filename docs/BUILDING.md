@@ -153,7 +153,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/run_sim.ps1
 | `power` | 合成电源短按；锁屏后唤醒仍须实体键 |
 | `shot` | 回传当前已显示画面 |
 
-刷写只写应用分区：`build-dev/device-venv/Scripts/python.exe -m esptool --chip esp32s3 -p COM3 write-flash 0x20000 build-diag/pico_nano.bin`（venv由`py -m venv build-dev/device-venv`并安装esptool创建）。打开串口会触发一次USB复位，所以`tools/device_test.py serve --port COM3`常驻持有端口并记录`build-dev/device-test/<时间>/serial.log`与`results.jsonl`；其他终端用`tools/device_test.py cmd "tap 85 1150" --brief`、`shot out.png`、`tail`。手势返回首个/最后显示job相对合成首采样的时间及期间产品计时日志。控制台启动后常持禁浅睡锁（产品默认空闲自动浅睡会让USB串口停止响应），并把产品日志改为整行非阻塞写入驱动、电脑不读时直接丢弃（驱动VFS逐字符50ms超时会拖住产品任务），所以诊断镜像不能用于功耗测量。进入传书无线或USB传书会断开串口；串口日志本身改变时序，结果是诊断镜像上的近似值，不等于产品镜像、光学稳定或功耗验收。模拟器脚本可用`pnt:<指令>`复用同一语法。
+刷写只写应用分区：`build-dev/device-venv/Scripts/python.exe -m esptool --chip esp32s3 -p COM3 write-flash 0x20000 build-diag/pico_nano.bin`（venv由`py -m venv build-dev/device-venv`并安装esptool创建）。打开串口会触发一次USB复位，所以`tools/device_test.py serve --port COM3`常驻持有端口并记录`build-dev/device-test/<时间>/serial.log`与`results.jsonl`；其他终端用`tools/device_test.py cmd "tap 85 1150" --brief`、`shot out.png`、`tail`。手势返回首个/最后显示job相对合成首采样的时间及期间产品计时日志。`sdkconfig.diag`另开`CONFIG_PN_DIAG_NO_AUTO_LOCK`（不自动锁屏，电源键锁屏保留）与`CONFIG_PN_DIAG_NO_LOCK_SLEEP`（锁屏只轮询不浅睡，`power`指令也可唤醒，硬件睡眠/唤醒须在非诊断镜像另测）。控制台启动后常持禁浅睡锁（产品默认空闲自动浅睡会让USB串口停止响应），并把产品日志改为整行非阻塞写入驱动、电脑不读时直接丢弃（驱动VFS逐字符50ms超时会拖住产品任务），所以诊断镜像不能用于功耗测量。进入传书无线或USB传书会断开串口；串口日志本身改变时序，结果是诊断镜像上的近似值，不等于产品镜像、光学稳定或功耗验收。模拟器脚本可用`pnt:<指令>`复用同一语法。
 
 ## EPUB 与性能诊断
 

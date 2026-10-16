@@ -141,6 +141,11 @@ static char search_query[PN_CATALOG_QUERY_MAX+1]; ///< 生效中的搜索词，�
 static char jump_letter; ///< 下次书架查询从此字母起 / The next shelf query starts at this letter
 static uint64_t last_input; ///< 最近一次触摸/按键，用于自动锁屏 / Latest touch or key, for auto-lock
 #define AUTO_LOCK_MS (5u*60u*1000u)
+#if defined(CONFIG_PN_DIAG_NO_AUTO_LOCK) && CONFIG_PN_DIAG_NO_AUTO_LOCK
+#define PN_AUTO_LOCK 0 ///< 诊断镜像不自动锁屏，电源键锁屏保留 / Diagnostic images never auto-lock; the power key still locks
+#else
+#define PN_AUTO_LOCK 1 ///< 产品镜像空闲自动锁屏 / Product images lock when idle
+#endif
 static void lock_and_sleep(const char *hint);
 static bool prepare_lock(void);
 static void resume_reader(void);
@@ -1706,7 +1711,7 @@ static void device_task(void *arg){
         // The key path can sleep and update last_input; refresh time to avoid subtracting wake time from pre-sleep time.
         now=now_ms();
         // 无操作满5分钟自动锁屏；传输中由其停止流程负责。/ Auto-lock after five idle minutes; transfers handle their own stop flow.
-        if(!locked && !transfer.impl && !usb.open && !time_sync.impl && now>=last_input && now-last_input>=AUTO_LOCK_MS && now-boot>=AUTO_LOCK_MS){pn_reader_input_cancel(&input);if(prepare_lock())lock_and_sleep("再按电源键继续阅读");else last_input=now;}
+        if(PN_AUTO_LOCK && !locked && !transfer.impl && !usb.open && !time_sync.impl && now>=last_input && now-last_input>=AUTO_LOCK_MS && now-boot>=AUTO_LOCK_MS){pn_reader_input_cancel(&input);if(prepare_lock())lock_and_sleep("再按电源键继续阅读");else last_input=now;}
         if(opening){
             // 加载态独占内容路由；紧急键/电源先处理，普通书架触点与后台画面不进入旧页面。
             // Loading owns content routing: urgent keys/power run first; ordinary shelf contacts and background draws never reach the old page.

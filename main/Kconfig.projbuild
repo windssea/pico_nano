@@ -13,6 +13,20 @@ config PN_TEST_CONSOLE
         a power short press, status queries and shown-frame screenshots, and report
         every display job. Anyone with USB access can drive the device, and logging
         changes timing, so never enable this in a product or release image.
+config PN_DIAG_NO_AUTO_LOCK
+    bool "Disable idle auto-lock (diagnostic images only)"
+    default n
+    help
+        Skip the five-minute idle lock and its sleep so long serial test runs keep USB alive.
+        The power key still locks and wakes. Never enable this in product or release images.
+config PN_DIAG_NO_LOCK_SLEEP
+    bool "Poll instead of light-sleeping while locked (diagnostic images only)"
+    depends on PN_TEST_CONSOLE
+    default n
+    help
+        Keep the lock-screen wait loop and PMU checks but replace light sleep with a 500 ms delay,
+        so USB serial stays alive and the console power command can also wake. Hardware sleep and
+        wake are then not exercised; never enable this in product or release images.
 config PN_UI_FEEDBACK
     bool "Qualify local press feedback on the panel"
     default n

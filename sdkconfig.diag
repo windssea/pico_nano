@@ -1,3 +1,7 @@
 # 诊断镜像：在sdkconfig.defaults之上启用串口测试控制台。只供真机自动测试，禁止用于发布包。
 # Diagnostic image: enable the serial test console on top of sdkconfig.defaults. Hardware automation only; never for release packages.
 CONFIG_PN_TEST_CONSOLE=y
+# 长时间串口测试不自动锁屏睡眠，电源键锁屏仍可测。/ No idle auto-lock during long serial runs; power-key locking stays testable.
+CONFIG_PN_DIAG_NO_AUTO_LOCK=y
+# 锁屏只轮询不浅睡，串口可观察锁屏/解锁并用power指令唤醒；硬件睡眠须另测。/ Poll instead of sleeping while locked so serial observes lock/unlock and power can wake; test hardware sleep separately.
+CONFIG_PN_DIAG_NO_LOCK_SLEEP=y

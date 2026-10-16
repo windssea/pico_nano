@@ -42,8 +42,9 @@ static struct {
 static uint64_t now_ms(void){return (uint64_t)(esp_timer_get_time()/1000);}
 // 整行一次写入驱动环形缓冲，日志字符不会插入行内；未连接时丢弃。/ Write a whole line into the driver ring at once so log characters cannot split it; drop while disconnected.
 // 默认不等待：电脑未读取时发送环满即丢弃，任何任务都不会被串口拖住。/ No waiting by default: drop when the transmit ring is full because the host is not reading, so no task is held by the serial port.
-static bool emit_wait(const char *text,size_t bytes,TickType_t wait){return usb_serial_jtag_is_connected() && usb_serial_jtag_write_bytes(text,bytes,wait)==(int)bytes;}
-static void emit(const char *text,size_t bytes){(void)emit_wait(text,bytes,0);}
+// 连接检测在大流量时可能瞬时为假；需要送达的行只按超时写入，不先检查连接。/ The connection check can read false momentarily under heavy traffic; lines that must arrive write with a timeout only, without that check.
+static bool emit_wait(const char *text,size_t bytes,TickType_t wait){return usb_serial_jtag_write_bytes(text,bytes,wait)==(int)bytes;}
+static void emit(const char *text,size_t bytes){if(usb_serial_jtag_is_connected())(void)emit_wait(text,bytes,0);}
 // 产品日志整行非阻塞写入；替代驱动VFS逐字符50ms超时，后者在电脑不读时会让产品任务近乎停住。
 // Product logs are written whole and non-blocking, replacing the driver VFS per-character 50 ms timeout that nearly stalls product tasks when the host is not reading.
 static int log_line(const char *format,va_list args){char text[200];int n=vsnprintf(text,sizeof text,format,args);if(n>0)emit(text,(size_t)n<sizeof text?(size_t)n:sizeof text-1u);return n;}
@@ -69,6 +70,7 @@ static bool hook_touch(void *ctx,uint64_t now,unsigned *count,int *x,int *y,bool
     unsigned armed=GESTURE_ARMED;(void)atomic_compare_exchange_strong(&console.gesture_state,&armed,GESTURE_DONE);return false;
 }
 static bool hook_power(void *ctx){(void)ctx;return atomic_exchange(&console.power,false);}
+bool pn_device_test_console_take_power(void){return console.port && atomic_exchange(&console.power,false);}
 // 显示任务线程：回执前只写环，不做IO。/ Display-task thread: only write the ring before the receipt, no IO.
 static void hook_display_job(void *ctx,unsigned kind,uint64_t start,uint64_t end,pn_status_t status){
     (void)ctx;unsigned head=atomic_load(&console.head);
@@ -88,7 +90,8 @@ static void hook_display_idle(void *ctx){
         int head=snprintf(console.line,sizeof console.line,"\nPNT %u shot %u %08lx ",seq,(unsigned)at,(unsigned long)crc);
         size_t length=(size_t)head+base64(buffer+at,n,console.line+head);console.line[length++]='\n';
         // 截屏行允许短暂等待；电脑停止读取时中止，不长时间占住显示任务。/ Screenshot lines may wait briefly; abort when the host stops reading instead of holding the display task.
-        if(!emit_wait(console.line,length,pdMS_TO_TICKS(200))){reply("PNT %u err stream",seq);return;}}
+        unsigned tries=0;while(!emit_wait(console.line,length,pdMS_TO_TICKS(200)) && ++tries<10)vTaskDelay(pdMS_TO_TICKS(20));
+        if(tries>=10){reply("PNT %u err stream",seq);return;}}
     reply("PNT %u shot end crc=%08lx ms=%llu",seq,(unsigned long)total,(unsigned long long)(now_ms()-started));
 }
 
