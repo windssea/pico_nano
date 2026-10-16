@@ -188,9 +188,9 @@ void pn_shelf_covers_reset(pn_shelf_covers_t *covers,const pn_catalog_page_t *pa
 }
 void pn_shelf_covers_set_last(pn_shelf_covers_t *covers,const pn_catalog_item_t *item){
     if(!covers)return;
-    covers->resident_valid&=~(1u<<PN_COVER_SLOT_LAST);
-    covers->resident_deferred&=~(1u<<PN_COVER_SLOT_LAST);
-    covers->cache_dirty&=~(1u<<PN_COVER_SLOT_LAST);
+    covers->resident_valid&=(uint16_t)~(1u<<PN_COVER_SLOT_LAST);
+    covers->resident_deferred&=(uint16_t)~(1u<<PN_COVER_SLOT_LAST);
+    covers->cache_dirty&=(uint16_t)~(1u<<PN_COVER_SLOT_LAST);
     memset(&covers->display[PN_COVER_SLOT_LAST],0,sizeof covers->display[0]);
     covers->has_last=item!=NULL;
     if(item){covers->last=*item;}
@@ -214,15 +214,15 @@ static cover_key_t decode_key(const uint8_t *p){return (cover_key_t){.size=get(p
 /// 只记完整已验证结果；IO/取消/预算失败仍须重试。/ Remember only fully verified results; I/O, cancellation and budget failures remain retryable.
 static void resident_remember(pn_shelf_covers_t *c,pn_media_t *m,const pn_catalog_item_t *item,const cover_key_t *key,size_t slot){
     if(c->resident_media!=m || c->resident_epoch!=m->epoch || c->resident_media_id!=m->media_id)c->resident_valid=c->resident_deferred=0;
-    c->resident_media=m;c->resident_epoch=m->epoch;c->resident_media_id=m->media_id;c->resident_valid&=~(1u<<slot);
+    c->resident_media=m;c->resident_epoch=m->epoch;c->resident_media_id=m->media_id;c->resident_valid&=(uint16_t)~(1u<<slot);
     if(c->state[slot]==PN_COVER_PENDING || (c->reason[slot]!=PN_OK && c->reason[slot]!=PN_EMPTY && c->reason[slot]!=PN_UNSUPPORTED && c->reason[slot]!=PN_CORRUPT))return;
     if(item->format==PN_BOOK_EPUB && c->reason[slot]!=PN_OK && !*c->display[slot].title)return;
     pn_book_id_t path;if(pn_identity_bytes((const uint8_t *)item->path,strlen(item->path),&path)!=PN_OK)return;
-    memcpy(c->resident_path_hash[slot],path.sha256,sizeof path.sha256);c->resident_format[slot]=item->format;encode_key(c->cache_key[slot],key);c->resident_valid|=1u<<slot;
+    memcpy(c->resident_path_hash[slot],path.sha256,sizeof path.sha256);c->resident_format[slot]=item->format;encode_key(c->cache_key[slot],key);c->resident_valid|=(uint16_t)(1u<<slot);
 }
 /// 小栈块交换，避免另申请整张缩略图。/ Swap with a small stack block instead of allocating another thumbnail.
 static void resident_swap_bytes(void *a,void *b,size_t size){uint8_t block[128],*x=a,*y=b;while(size){size_t n=size<sizeof block?size:sizeof block;memcpy(block,x,n);memcpy(x,y,n);memcpy(y,block,n);x+=n;y+=n;size-=n;}}
-static uint32_t resident_swap_bits(uint32_t mask,size_t a,size_t b){bool x=(mask&(1u<<a))!=0,y=(mask&(1u<<b))!=0;mask&=~((1u<<a)|(1u<<b));return mask|((uint32_t)x<<b)|((uint32_t)y<<a);}
+static uint16_t resident_swap_bits(uint16_t mask,size_t a,size_t b){bool x=(mask&(1u<<a))!=0,y=(mask&(1u<<b))!=0;mask&=(uint16_t)~((1u<<a)|(1u<<b));return (uint16_t)(mask|((unsigned)x<<b)|((unsigned)y<<a));}
 static void resident_swap(pn_shelf_covers_t *c,size_t a,size_t b){
     if(a==b)return;
     resident_swap_bytes(c->pixels[a],c->pixels[b],PN_COVER_BYTES);resident_swap_bytes(&c->display[a],&c->display[b],sizeof c->display[0]);
@@ -269,14 +269,14 @@ static pn_status_t make_dir(const char *path){return mkdir(path,0775)==0 || errn
 static void cover_publish(pn_cover_write_t *write,pn_shelf_covers_t *covers,pn_pool_t *pool,pn_media_t *media,const char *cache_dir,
     const pn_catalog_item_t *item,const cover_key_t *key,bool keyed,size_t i,size_t budget,pn_status_t status,bool defer,bool *changed){
     covers->reason[i]=status;covers->state[i]=status==PN_OK?PN_COVER_READY:status==PN_EMPTY || status==PN_UNSUPPORTED?PN_COVER_NONE:PN_COVER_FAILED;
-    if(keyed)resident_remember(covers,media,item,key,i);else covers->resident_valid&=~(1u<<i);
+    if(keyed)resident_remember(covers,media,item,key,i);else covers->resident_valid&=(uint16_t)~(1u<<i);
     *changed=status==PN_OK || *covers->display[i].title;
     if(keyed && (item->format!=PN_BOOK_EPUB || *covers->display[i].title) && (status==PN_OK || status==PN_EMPTY || status==PN_UNSUPPORTED || status==PN_CORRUPT || status==PN_NO_MEMORY)){
         // 产品先补齐可见封面，写盘稍后从槽重新快照；无需额外持有每本缓存包。/ Fill visible covers first, snapshot slots for persistence later, without retaining a packet per book.
-        if(defer && write){covers->cache_dirty|=(uint32_t)(1u<<i);encode_key(covers->cache_key[i],key);covers->cache_budget[i]=budget;return;}
+        if(defer && write){covers->cache_dirty|=(uint16_t)(1u<<i);encode_key(covers->cache_key[i],key);covers->cache_budget[i]=budget;return;}
         pn_cover_write_t local={0};pn_cover_write_t *target=write?write:&local;pn_profile_span_t span;pn_profile_begin(&span,pool,"cover.cache-snapshot");
         pn_status_t stored=cover_write_begin(target,pool,media,cache_dir,item,key,covers->state[i],status,covers->pixels[i],&covers->display[i],budget,i);pn_profile_end(&span,stored);
-        if(write && stored==PN_OK){covers->cache_dirty|=(uint32_t)(1u<<i);encode_key(covers->cache_key[i],key);covers->cache_budget[i]=budget;}
+        if(write && stored==PN_OK){covers->cache_dirty|=(uint16_t)(1u<<i);encode_key(covers->cache_key[i],key);covers->cache_budget[i]=budget;}
         if(!write){while(pn_cover_write_pending(&local) && (stored=pn_cover_write_step(&local))==PN_BUSY){}pn_cover_write_abort(&local);}
     }
 }
@@ -301,7 +301,7 @@ pn_status_t pn_shelf_covers_cache_step(pn_cover_work_t *work,pn_shelf_covers_t *
         pn_status_t valid=pn_media_validate(media,&lease);(void)pn_media_release(media,&lease);
         if(valid!=PN_OK)return valid;
         if(s==PN_CANCELLED || s==PN_STALE_MEDIA)return s;
-        work->cache_checked|=(uint32_t)(1u<<i);return PN_OK;
+        work->cache_checked|=(uint16_t)(1u<<i);return PN_OK;
     }
     return PN_EMPTY;
 }
@@ -324,27 +324,26 @@ static bool resident_match(const pn_shelf_covers_t *c,size_t slot,const pn_catal
 /// 用不显示且无有效像素的槽保留即将被覆盖的旧源，不增加缓存容量。/ Keep a displaced source in an undisplayed invalid slot without enlarging the cache.
 static void resident_preserve(pn_shelf_covers_t *c,const pn_catalog_item_t *const *items,size_t slot){
     if(!(c->resident_valid&(1u<<slot)))return;
-    // 先用备用槽再用空页槽；备用槽不在items范围内。/ Prefer spares, then empty page slots; spares lie outside the items range.
-    for(size_t other=PN_COVER_SLOTS;other-->0;)if(other!=slot && (other>PN_COVER_SLOT_LAST || !items[other]) && !(c->resident_valid&(1u<<other))){resident_swap(c,slot,other);return;}
+    for(size_t other=0;other<=PN_COVER_SLOT_LAST;other++)if(other!=slot && !items[other] && !(c->resident_valid&(1u<<other))){resident_swap(c,slot,other);return;}
 }
 pn_status_t pn_shelf_covers_bind(pn_shelf_covers_t *c,const pn_catalog_page_t *page,const pn_catalog_item_t *last,pn_pool_t *pool,pn_media_t *media,const char *cache_dir,bool *changed){
     if(!c || !page || page->count>PN_CATALOG_PAGE_MAX || !pool || !media || !changed || (cache_dir && (!*cache_dir || strlen(cache_dir)>=PN_CATALOG_PATH_MAX/2)))return PN_INVALID;
     *changed=false;pn_status_t s=pn_cancel_checkpoint();if(s!=PN_OK)return s;
     pn_media_lease_t lease;s=pn_media_acquire(media,PN_MEDIA_READ,&lease);if(s!=PN_OK)return s;
-    const pn_catalog_item_t *items[PN_CATALOG_PAGE_MAX+1]={0};uint8_t keys[PN_CATALOG_PAGE_MAX+1][KEY_BYTES];pn_book_id_t paths[PN_CATALOG_PAGE_MAX+1];uint32_t keyed=0,kept=0,wanted=0;int duplicate[PN_CATALOG_PAGE_MAX+1];
+    const pn_catalog_item_t *items[PN_CATALOG_PAGE_MAX+1]={0};uint8_t keys[PN_CATALOG_PAGE_MAX+1][KEY_BYTES];pn_book_id_t paths[PN_CATALOG_PAGE_MAX+1];uint16_t keyed=0,kept=0,wanted=0;int duplicate[PN_CATALOG_PAGE_MAX+1];
     for(size_t i=0;i<=PN_COVER_SLOT_LAST;i++){
         duplicate[i]=-1;items[i]=i==PN_COVER_SLOT_LAST?last:i<page->count?&page->items[i]:NULL;
         if(!coverable(items[i]))continue;
-        wanted|=(uint32_t)(1u<<i);cover_key_t key;s=pn_cancel_checkpoint();if(s!=PN_OK)break;
+        wanted|=(uint16_t)(1u<<i);cover_key_t key;s=pn_cancel_checkpoint();if(s!=PN_OK)break;
         if(!cache_dir){
             // 没有可复用像素的书无需在首帧扫描旁图；来源验证随该槽的空闲探测执行。
             // Books without reusable pixels need no sidecar scan before first paint; validate sources during their idle probe.
             bool found=false;
             if(c->resident_media==media && c->resident_epoch==media->epoch && c->resident_media_id==media->media_id && c->resident_valid && pn_identity_bytes((const uint8_t *)items[i]->path,strlen(items[i]->path),&paths[i])==PN_OK)
-                for(size_t other=0;other<PN_COVER_SLOTS;other++)if((c->resident_valid&(1u<<other)) && c->resident_format[other]==items[i]->format && !memcmp(c->resident_path_hash[other],paths[i].sha256,32)){found=true;break;}
+                for(size_t other=0;other<=PN_COVER_SLOT_LAST;other++)if((c->resident_valid&(1u<<other)) && c->resident_format[other]==items[i]->format && !memcmp(c->resident_path_hash[other],paths[i].sha256,32)){found=true;break;}
             if(!found)continue;
         }
-        if(cover_key(items[i],&key)==PN_OK && pn_identity_bytes((const uint8_t *)items[i]->path,strlen(items[i]->path),&paths[i])==PN_OK){encode_key(keys[i],&key);keyed|=(uint32_t)(1u<<i);}
+        if(cover_key(items[i],&key)==PN_OK && pn_identity_bytes((const uint8_t *)items[i]->path,strlen(items[i]->path),&paths[i])==PN_OK){encode_key(keys[i],&key);keyed|=(uint16_t)(1u<<i);}
     }
     if(s==PN_OK)s=pn_media_validate(media,&lease);
     if(s!=PN_OK){(void)pn_media_release(media,&lease);return s;}
@@ -357,25 +356,25 @@ pn_status_t pn_shelf_covers_bind(pn_shelf_covers_t *c,const pn_catalog_page_t *p
     for(size_t i=0;i<=PN_COVER_SLOT_LAST;i++)if(keyed&(1u<<i)){
         for(size_t prior=0;prior<i;prior++)if((kept&(1u<<prior)) && resident_match(c,prior,items[i],keys[i],&paths[i])){duplicate[i]=(int)prior;break;}
         if(duplicate[i]>=0)continue;
-        size_t found=PN_COVER_SLOTS;
-        for(size_t other=0;other<PN_COVER_SLOTS;other++)if(!(kept&(1u<<other)) && resident_match(c,other,items[i],keys[i],&paths[i])){found=other;if(c->cache_dirty&(1u<<other))break;}
-        if(found<PN_COVER_SLOTS){resident_swap(c,i,found);kept|=(uint32_t)(1u<<i);}
+        size_t found=PN_COVER_SLOT_LAST+1;
+        for(size_t other=0;other<=PN_COVER_SLOT_LAST;other++)if(!(kept&(1u<<other)) && resident_match(c,other,items[i],keys[i],&paths[i])){found=other;if(c->cache_dirty&(1u<<other))break;}
+        if(found<=PN_COVER_SLOT_LAST){resident_swap(c,i,found);kept|=(uint16_t)(1u<<i);}
     }
     for(size_t i=0;i<=PN_COVER_SLOT_LAST;i++)if(duplicate[i]>=0){
         size_t from=(size_t)duplicate[i];resident_preserve(c,items,i);
         if(c->state[from]==PN_COVER_READY)memcpy(c->pixels[i],c->pixels[from],PN_COVER_BYTES);
         c->state[i]=c->state[from];c->reason[i]=c->reason[from];c->display[i]=c->display[from];c->cache_budget[i]=c->cache_budget[from];
         cover_key_t key=decode_key(keys[i]);resident_remember(c,media,items[i],&key,i);
-        c->cache_dirty&=~(1u<<i); // 同源只由前面的活动槽写一次。/ The earlier active slot persists this source once.
-        kept|=(uint32_t)(1u<<i);
+        c->cache_dirty&=(uint16_t)~(1u<<i); // 同源只由前面的活动槽写一次。/ The earlier active slot persists this source once.
+        kept|=(uint16_t)(1u<<i);
     }
     for(size_t i=0;i<=PN_COVER_SLOT_LAST;i++){
         if(kept&(1u<<i)){pn_cache_observe(pool,PN_CACHE_COVER,true);if(c->state[i]==PN_COVER_READY || *c->display[i].title)*changed=true;continue;}
         if(!items[i])continue; // 非当前页槽保留可验证的旧像素，下次绑定再复核来源键。/ Off-page slots retain old pixels, rechecking their source keys on the next bind.
-        resident_preserve(c,items,i);c->resident_valid&=~(1u<<i);c->cache_dirty&=~(1u<<i);
+        resident_preserve(c,items,i);c->resident_valid&=(uint16_t)~(1u<<i);c->cache_dirty&=(uint16_t)~(1u<<i);
         memset(&c->display[i],0,sizeof c->display[i]);c->state[i]=coverable(items[i])?PN_COVER_PENDING:PN_COVER_NONE;c->reason[i]=PN_EMPTY;
     }
-    c->resident_deferred=(uint32_t)(c->cache_dirty&c->resident_valid&~wanted);c->cache_dirty&=wanted;c->has_last=last!=NULL;if(last)c->last=*last;
+    c->resident_deferred=(uint16_t)(c->cache_dirty&c->resident_valid&~wanted);c->cache_dirty&=wanted;c->has_last=last!=NULL;if(last)c->last=*last;
     if(cache_dir)for(size_t i=0;i<=PN_COVER_SLOT_LAST;i++)if((keyed&(1u<<i)) && c->state[i]==PN_COVER_PENDING){
         cover_key_t key=decode_key(keys[i]);s=resident_load(c,items[i],&key,i,pool,media,&lease,cache_dir,changed);if(s==PN_STALE_MEDIA)break;
     }
@@ -448,7 +447,7 @@ static pn_status_t covers_idle(pn_cover_write_t *write,pn_cover_work_t *work,pn_
         bool same=item && !strcmp(item->path,w->item.path) && !memcmp(key,covers->cache_key[slot],sizeof key);
         if(!same || w->media!=media || !cache_dir || strcmp(cache_dir,w->directory)){pn_cover_write_abort(write);return PN_BUSY;}
         pn_status_t s=pn_cover_write_step(write);
-        if(s!=PN_CANCELLED && !pn_cover_write_pending(write))covers->cache_dirty&=~(1u<<slot);
+        if(s!=PN_CANCELLED && !pn_cover_write_pending(write))covers->cache_dirty&=(uint16_t)~(1u<<slot);
         // 可重建缓存错误只结束该写入；本轮不再解码下一本。/ A rebuildable-cache error only ends this write; never decode another book in the same round.
         return s==PN_CANCELLED || s==PN_STALE_MEDIA?s:PN_BUSY;
     }
@@ -459,10 +458,10 @@ static pn_status_t covers_idle(pn_cover_write_t *write,pn_cover_work_t *work,pn_
         const pn_catalog_item_t *item=slot_item(covers,page,i);cover_key_t now;uint8_t encoded[KEY_BYTES];pn_status_t s=item?cover_key(item,&now):PN_EMPTY;
         if(s==PN_OK)encode_key(encoded,&now);
         if(s!=PN_OK || memcmp(encoded,covers->cache_key[i],sizeof encoded)){
-            covers->cache_dirty&=~(1u<<i);if(item)covers->state[i]=PN_COVER_PENDING;return PN_BUSY;
+            covers->cache_dirty&=(uint16_t)~(1u<<i);if(item)covers->state[i]=PN_COVER_PENDING;return PN_BUSY;
         }
         cover_key_t key=decode_key(covers->cache_key[i]);s=cover_write_begin(write,pool,media,cache_dir,item,&key,covers->state[i],covers->reason[i],covers->pixels[i],&covers->display[i],covers->cache_budget[i],i);
-        if(s!=PN_OK)covers->cache_dirty&=~(1u<<i);
+        if(s!=PN_OK)covers->cache_dirty&=(uint16_t)~(1u<<i);
         return s==PN_STALE_MEDIA || s==PN_CANCELLED?s:PN_BUSY;
     }
     return covers_step(write,work,covers,page,pool,media,cache_dir,salt,budget,changed);
