@@ -15,7 +15,7 @@ typedef struct {
     char expected[PN_ZIP_PATH_MAX];uint8_t buffer[PN_ZIP_PATH_MAX],local_head[30]; ///< 跨步名称/头暂存 / Names and headers retained across steps
     struct {uint64_t offset;uint8_t *out;size_t size,done;bool active;} read; ///< 短读/取消后继续同一个读取 / Resume the same read after short input or cancellation
     size_t bytes,reads,entries,sifts,pairs; ///< 本轮配额，非持续累计 / Per-call budgets, not lifetime totals
-    zip_job_phase_t phase;
+    zip_job_phase_t phase;bool directory_only; ///< 只准备顺序扫描，不提前确认本地头 / Prepare sequential scanning without confirming local headers
 } zip_job_t;
 static pn_status_t zip_job_read(zip_job_t *j,uint64_t offset,uint8_t *out,size_t size){
     archive_t *a=j->archive;pn_status_t status=current(a);if(status!=PN_OK)return status;
@@ -43,7 +43,7 @@ static pn_status_t zip_job_sort(zip_job_t *j,bool hash){
     archive_t *a=j->archive;int (*compare)(const void *,const void *)=hash?by_hash:by_offset;
     if(j->sort_left){sift(a->entries,--j->sort_left,a->count,compare);j->sifts++;return PN_BUSY;}
     if(j->sort_end>1){entry_t swap=a->entries[0];a->entries[0]=a->entries[j->sort_end-1];a->entries[j->sort_end-1]=swap;sift(a->entries,0,--j->sort_end,compare);j->sifts++;return PN_BUSY;}
-    j->index=0;j->partner=1;j->phase=hash?ZJ_DUPLICATES:ZJ_LOCAL_NAME;return PN_BUSY;
+    j->index=0;j->partner=1;j->phase=hash?ZJ_DUPLICATES:j->directory_only?ZJ_FINISH:ZJ_LOCAL_NAME;return PN_BUSY;
 }
 static pn_status_t zip_job_extra(zip_job_t *j,zip_job_phase_t next){
     if(!j->extra_left){j->phase=next;return PN_BUSY;}
@@ -159,17 +159,25 @@ pn_status_t pn_zip_job_begin(pn_zip_job_t *job,pn_pool_t *pool,const pn_text_sou
     j->archive=pn_alloc_tagged(pool,PN_MEM_DOCUMENT,sizeof *j->archive);if(!j->archive){pn_free(j);return PN_NO_MEMORY;}
     *j->archive=(archive_t){.pool=pool,.source=*source};job->impl=j;return PN_OK;
 }
-pn_status_t pn_zip_job_step(pn_zip_job_t *job,pn_zip_t *zip){
-    if(!job || !job->impl || !zip)return PN_INVALID;
-    if(zip->impl)return PN_BUSY;
-    zip_job_t *j=job->impl;pn_profile_span_t span;pn_profile_begin(&span,j->archive->pool,"epub.zip-step");
+pn_status_t pn_zip_scan_job_begin(pn_zip_job_t *job,pn_pool_t *pool,const pn_text_source_t *source){
+    pn_status_t s=pn_zip_job_begin(job,pool,source);if(s==PN_OK)((zip_job_t *)job->impl)->directory_only=true;return s;
+}
+static pn_status_t zip_job_step(pn_zip_job_t *job,void **out,bool scan){
+    if(!job || !job->impl || !out)return PN_INVALID;
+    if(*out)return PN_BUSY;
+    zip_job_t *j=job->impl;if(j->directory_only!=scan)return PN_INVALID;
+    pn_profile_span_t span;pn_profile_begin(&span,j->archive->pool,scan?"epub.zip-scan-step":"epub.zip-step");
     j->bytes=j->reads=j->entries=j->sifts=j->pairs=0;pn_status_t s=PN_BUSY;
     for(unsigned transitions=0;transitions<32 && j->bytes<4096u && j->reads<8u && j->entries<8u && j->sifts<16u && j->pairs<8u;transitions++){
         s=current(j->archive);if(s!=PN_OK)break;s=zip_job_advance(j);if(s!=PN_BUSY)break;
     }
     if(s==PN_OK){
-        archive_t *a=j->archive;pn_free(a->directory_bytes);a->directory_bytes=NULL;a->directory_size=0;
-        j->archive=NULL;zip->impl=a;pn_zip_job_close(job);
+        archive_t *a=j->archive;
+        if(scan){a->capture=pn_alloc_tagged(a->pool,PN_MEM_DOCUMENT,sizeof *a->capture);if(a->capture)*a->capture=(capture_t){.status=PN_OK};}
+        else{pn_free(a->directory_bytes);a->directory_bytes=NULL;a->directory_size=0;}
+        j->archive=NULL;*out=a;pn_zip_job_close(job);
     }else if(s!=PN_BUSY && s!=PN_CANCELLED)pn_zip_job_close(job);
     pn_profile_end(&span,s);return s;
 }
+pn_status_t pn_zip_job_step(pn_zip_job_t *job,pn_zip_t *zip){return zip?zip_job_step(job,&zip->impl,false):PN_INVALID;}
+pn_status_t pn_zip_scan_job_step(pn_zip_job_t *job,pn_zip_scan_t *scan){return scan?zip_job_step(job,&scan->impl,true):PN_INVALID;}

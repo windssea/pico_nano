@@ -121,6 +121,7 @@ def main():
                     ["python3" if docker else sys.executable, "tools/test_local_chapters.py", "--binary", "build-host/epub_validate"],
                     ["python3" if docker else sys.executable, "tools/test_local_publication.py", "--binary", "build-host/epub_job_validate"],
                     ["python3" if docker else sys.executable, "tools/test_local_zip_job.py", "--binary", "build-host/zip_job_validate"],
+                    ["python3" if docker else sys.executable, "tools/test_local_zip_job.py", "--binary", "build-host/zip_job_validate", "--scan-prepare", "--output", "build-dev/local-zip-scan-job"],
                     ["python3" if docker else sys.executable, "tools/test_local_cover_priority.py", "--binary", "build-host/cover_priority_validate"],
                     ["python3" if docker else sys.executable, "tools/test_local_cover_priority.py", "--binary", "build-host/cover_priority_validate", "--rebind-before-write", "--output", "build-dev/local-cover-priority-rebind"],
                     ["python3" if docker else sys.executable, "tools/test_local_cover_resident.py", "--binary", "build-host/cover_resident_validate"],

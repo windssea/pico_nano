@@ -9,12 +9,15 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--binary',type=Path,required=True);p.add_argument('--baseline',type=Path)
     p.add_argument('--output',type=Path,required=True);p.add_argument('--limit',type=int)
+    p.add_argument('--baseline-partial',action='store_true',help='Compare against an independently frozen producer that also prepares a partial SHA before clicking')
     a=p.parse_args();a.output.mkdir(parents=True,exist_ok=True);baseline=a.baseline or a.binary
     books=sorted(x for x in (ROOT/'tests/testBook').rglob('*') if x.is_file() and x.suffix.lower()=='.epub')
     fonts=sorted(x for x in (ROOT/'tests/testFont').rglob('*') if x.is_file() and x.suffix.lower()=='.ttf')
     originals={str(x.relative_to(ROOT)):digest(x) for folder in ('testBook','testFont') for x in (ROOT/'tests'/folder).rglob('*') if x.is_file()}
     assert books and fonts
     report={'passed':False,'scope':__doc__,'subset':bool(a.limit),'comparison':'independent_product' if digest(baseline)!=digest(a.binary) else 'same_binary_cold_vs_partial','binary_sha256':digest(a.binary),'baseline_sha256':digest(baseline),'originals':originals,'runs':[]}
+    report['baseline_partial']=a.baseline_partial
+    if a.baseline_partial and digest(baseline)==digest(a.binary):report['comparison']='same_binary_partial_vs_partial'
     (a.output/'report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n',encoding='utf8')
     with tempfile.TemporaryDirectory() as temp:
         root=Path(temp)
@@ -30,21 +33,22 @@ def main():
                         for key in ('FAULT','PRIMARY','WARM','STAGED','PAINT','INTERRUPT','SOURCE_ONLY','PARTIAL'):env.pop('PN_FONT_STARTUP_'+key,None)
                         env.update(PN_FONT_STARTUP_SYSTEM='1',PN_FONT_STARTUP_FRAMES=str(frames))
                         if primary:env['PN_FONT_STARTUP_PRIMARY']='1'
-                        if label=='after':env.update(PN_FONT_STARTUP_WARM='1',PN_FONT_STARTUP_PARTIAL='1')
+                        partial=label=='after' or a.baseline_partial
+                        if partial:env.update(PN_FONT_STARTUP_WARM='1',PN_FONT_STARTUP_PARTIAL='1')
                         r=subprocess.run([str(binary.resolve()),str(copied_book),str(copied_font),str(state)],env=env,capture_output=True,text=True,timeout=180)
                         (a.output/(case+'-'+label+'.log')).write_text(r.stdout+r.stderr,encoding='utf8')
                         assert r.returncode==0,(case,label,r.stdout[-2500:],r.stderr[-2500:])
                         lines=r.stdout.splitlines();metrics=fields(next(x for x in lines if x.startswith('startup ')))
                         assert metrics['status']==metrics['used']==metrics['live']==metrics['full_hashes']==metrics['font_get_hashes']==0
-                        assert metrics['book_hashes']==metrics['book_opens']==(1 if label=='before' else 0) and metrics['font_opens']==1
+                        assert metrics['book_hashes']==metrics['book_opens']==(0 if partial else 1) and metrics['font_opens']==1
                         layout={x.split()[0]:int(x.split('calls=')[1]) for x in lines if x.startswith(('idle_layout calls=','click_layout calls='))}
-                        assert layout==({'click_layout':1} if label=='before' else {'idle_layout':0,'click_layout':1})
+                        assert layout==({'idle_layout':0,'click_layout':1} if partial else {'click_layout':1})
                         hashes=[]
                         for i in range(3):
                             frame=frames/f'frame-{i}.raw';assert frame.stat().st_size==415872;hashes.append(digest(frame))
                         assert len(list(frames.glob('frame-*.raw')))==metrics['presents']==3
                         results[label]={'metrics':metrics,'frames':hashes,'layout':layout,'turn_io':next(x for x in lines if x.startswith('turn_io '))}
-                        if label=='after':
+                        if partial:
                             idle=fields(next(x for x in lines if x.startswith('idle_prepare ')));progress=fields(next(x for x in lines if x.startswith('idle_stream ')));click=fields(next(x for x in lines if x.startswith('click_stream ')))
                             target=65536 if book.stat().st_size>65536 else 32768 if book.stat().st_size>32768 else 0
                             assert progress['bytes']==progress['work_bytes']==target and progress['total']==book.stat().st_size and progress['cancelled']==1

@@ -14,6 +14,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary', type=pathlib.Path, required=True)
     parser.add_argument('--output', type=pathlib.Path, default=ROOT / 'build-dev/local-zip-job')
+    parser.add_argument('--scan-prepare',action='store_true',help='Bound only central-directory preparation, then sequentially feed and fully validate the original archive')
     args = parser.parse_args()
     books = sorted(p for p in (ROOT / 'tests/testBook').rglob('*') if p.suffix.lower() == '.epub')
     if not books:
@@ -25,6 +26,7 @@ def main():
     smallest = min(books, key=entries)
     args.output.mkdir(parents=True, exist_ok=True)
     report = {'passed': False, 'books': [], 'scope': 'Parser/FD-source budgets and complete resource-byte equivalence; not physical TF/panel or whole-application memory'}
+    report['scan_prepare']=args.scan_prepare
     target = args.output / 'report.json'
     target.write_text(json.dumps(report), encoding='utf-8')
     with tempfile.TemporaryDirectory() as folder:
@@ -33,6 +35,7 @@ def main():
             book = root / original.name
             shutil.copy2(original, book)
             command = [str(args.binary.resolve()), str(book)]
+            if args.scan_prepare:command.append('--scan')
             if original == smallest:
                 command.append('--faults')
             result = subprocess.run(command, capture_output=True, text=True, timeout=300)

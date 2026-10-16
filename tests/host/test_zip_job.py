@@ -9,22 +9,23 @@ import tempfile
 import warnings
 import zipfile
 
-validate, old, new = sys.argv[1:4]
+validate, old, new, scan = sys.argv[1:5]
 with tempfile.TemporaryDirectory() as temporary:
     root = pathlib.Path(temporary)
     def run(name, data, good=True):
         path = root / (name + '.zip')
         path.write_bytes(data)
         if good:
-            result = subprocess.run([validate, str(path)], capture_output=True, timeout=180)
-            assert result.returncode == 0 and b'used=0 live=0' in result.stdout, result.stdout + result.stderr
+            for flags in ([],['--scan']):
+                result = subprocess.run([validate, str(path),*flags], capture_output=True, timeout=180)
+                assert result.returncode == 0 and b'used=0 live=0' in result.stdout, result.stdout + result.stderr
         else:
             statuses = []
-            for binary in (old, new):
+            for binary in (old, new, scan):
                 result = subprocess.run([binary, str(path), 'probe'], capture_output=True, timeout=30)
                 assert result.returncode and b'used=0 live=0' in result.stderr, result.stderr
                 statuses.append(re.search(rb'zip status=(\d+)', result.stderr)[1])
-            assert statuses[0] == statuses[1], statuses
+            assert len(set(statuses))==1, statuses
     def container(names=('probe',), extra=b'', comment=b''):
         out = io.BytesIO()
         with warnings.catch_warnings():

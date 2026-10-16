@@ -33,6 +33,12 @@ pn_status_t pn_zip_job_step(pn_zip_job_t *,pn_zip_t *);
 /// 放弃并释放私有暂存，不关闭借用源；幂等。/ Abandon private staging without closing the borrowed source; idempotent.
 void pn_zip_job_close(pn_zip_job_t *);
 typedef struct {void *impl;} pn_zip_scan_t; ///< 分步打开句柄，初始NULL / Staged-open handle, initially NULL
+/// 只建立可暂停中央目录任务；沿用job关闭接口，不读取源、不交出可用ZIP。/ Establish a resumable central-directory job; close with the job API, without reading or publishing a usable ZIP.
+pn_status_t pn_zip_scan_job_begin(pn_zip_job_t *,pn_pool_t *,const pn_text_source_t *);
+/// 与完整job相同的4096B/8读/32状态配额；成功只交出待顺序feed和finish的scan，不代表本地头已验证。
+/// The full job's 4096-byte/eight-read/32-transition budgets apply; success returns only a scan awaiting sequential feed and finish, never local-header validation.
+/// BUSY继续，CANCELLED保留，其他错误释放；完整job与scan job不能混用step。/ BUSY continues, CANCELLED retains, other errors release; never mix full-job and scan-job step APIs.
+pn_status_t pn_zip_scan_job_step(pn_zip_job_t *,pn_zip_scan_t *);
 /// 分步打开：先校验EOCD/中央目录；之后把整文件顺序读到的字节交给feed，本地头/描述符在流过时校验，免去逐条随机读。
 /// Staged open: validate EOCD/central directory first; then feed bytes read sequentially across the file so local headers/descriptors are checked as they stream past, avoiding per-entry random reads.
 pn_status_t pn_zip_scan_begin(pn_zip_scan_t *scan,pn_pool_t *pool,const pn_text_source_t *source);

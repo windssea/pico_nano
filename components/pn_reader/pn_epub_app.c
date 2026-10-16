@@ -390,14 +390,14 @@ pn_status_t pn_epub_app_open_on_media(pn_epub_app_t *app,pn_pool_t *pool,pn_medi
 }
 pn_status_t pn_epub_app_open(pn_epub_app_t *app,pn_pool_t *pool,const char *book,const char *font,const char *state,int pixels,uint64_t now){return pn_epub_app_open_on_media(app,pool,NULL,book,font,state,pixels,now);}
 typedef struct {
-    app_t *app;pn_text_source_t source;pn_zip_scan_t scan;tap_t tap;pn_identity_job_t hash;
+    app_t *app;pn_text_source_t source;pn_zip_scan_t scan;pn_zip_job_t directory;tap_t tap;pn_identity_job_t hash;
     char font[PN_FONT_REFERENCE_PATH_MAX],state[PN_JOURNAL_PATH_MAX];
     uint64_t now;pn_status_t status,scanned;unsigned stage;bool has_font,has_state;
 } open_job_t;
 pn_status_t pn_epub_app_open_job_close(pn_epub_open_job_t *job){
     if(!job)return PN_INVALID;
     if(!job->impl)return PN_OK;
-    open_job_t *r=job->impl;pn_identity_job_close(&r->hash);pn_zip_scan_abort(&r->scan);
+    open_job_t *r=job->impl;pn_identity_job_close(&r->hash);pn_zip_job_close(&r->directory);pn_zip_scan_abort(&r->scan);
     pn_status_t s=r->app?release(r->app):PN_OK;pn_free(r);job->impl=NULL;return s;
 }
 pn_status_t pn_epub_app_open_job_begin(pn_epub_open_job_t *job,pn_pool_t *pool,pn_media_t *media,const char *book,const char *font,const char *state,int pixels,uint64_t now){
@@ -427,7 +427,8 @@ pn_status_t pn_epub_app_open_job_step(pn_epub_open_job_t *job,pn_epub_app_t *out
     pn_status_t s=pn_cancel_checkpoint();if(s!=PN_OK)return s;
     s=pn_media_validate(r->app->media,&r->app->book_lease);if(s!=PN_OK){r->status=s;return s;}
     if(r->stage==0){
-        s=pn_zip_scan_begin(&r->scan,r->app->pool,&r->source);if(s==PN_CANCELLED)return s;
+        if(!r->directory.impl){s=pn_zip_scan_job_begin(&r->directory,r->app->pool,&r->source);if(s==PN_CANCELLED)return s;if(s!=PN_OK){r->scanned=s;r->stage=1;return PN_BUSY;}}
+        s=pn_zip_scan_job_step(&r->directory,&r->scan);if(s==PN_BUSY || s==PN_CANCELLED)return s;
         r->scanned=s;r->stage=1;return PN_BUSY;
     }
     if(r->stage==1){

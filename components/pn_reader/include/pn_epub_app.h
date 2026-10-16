@@ -63,7 +63,7 @@ pn_status_t pn_epub_app_open(pn_epub_app_t *,pn_pool_t *,const char *,const char
 typedef struct {void *impl;} pn_epub_open_job_t; ///< 活动打开任务不可移动/复制，不是可阅读app / Never move/copy a live opening job; it is not a readable app
 /// 建立私有原书句柄和只读租约；复制参数，不排版/显示/提交记录。/ Establish a private book handle/READ lease and copy arguments, without layout, presentation or record commits.
 pn_status_t pn_epub_app_open_job_begin(pn_epub_open_job_t *,pn_pool_t *,pn_media_t *,const char *,const char *,const char *,int,uint64_t);
-/// SHA阶段逐步最多32KiB，BUSY待续；其他阶段仍同步。仅全部成功才交出空app；错误须close，源不被提前交接。/ SHA advances by at most 32 KiB per step; BUSY continues, other stages remain synchronous. Transfer only on full success to an empty app; close after errors, never handing off a partial source.
+/// 目录逐步4096B/8读，SHA逐步最多32KiB，BUSY待续；元信息/字体仍同步。仅全部成功才交出空app；错误须close。/ Directory steps allow 4096 bytes/eight reads, SHA steps at most 32 KiB; BUSY continues, metadata/fonts remain synchronous. Transfer only on full success to an empty app; close after errors.
 pn_status_t pn_epub_app_open_job_step(pn_epub_open_job_t *,pn_epub_app_t *);
 /// 仅边界/摘要阶段取消可继续；元信息构造内取消须close；纯查询。/ Boundary/hash cancellation is resumable; cancellation inside metadata construction requires close; pure query.
 bool pn_epub_app_open_job_pending(const pn_epub_open_job_t *);

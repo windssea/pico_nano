@@ -14,7 +14,7 @@
 typedef struct {
     int fd;uint64_t size;size_t calls,bytes,chunk;bool cancel,stale,after_cancel,after_stale,in_step;pn_status_t error;
 } source_t;
-static size_t max_calls,max_bytes,cancelled_steps,aborts,faults;
+static size_t max_calls,max_bytes,cancelled_steps,aborts,faults;static bool scan_mode;
 static bool cancelled(void *ctx){return ((source_t *)ctx)->cancel;}
 static pn_status_t valid(void *ctx){return ((source_t *)ctx)->stale?PN_STALE_MEDIA:PN_OK;}
 static pn_status_t input(void *ctx,uint64_t off,uint8_t *out,size_t cap,size_t *n){
@@ -27,19 +27,27 @@ static pn_status_t input(void *ctx,uint64_t off,uint8_t *out,size_t cap,size_t *
     return PN_OK;
 }
 static pn_status_t step(pn_zip_job_t *job,pn_zip_t *zip,source_t *source){
-    size_t calls=source->calls,bytes=source->bytes;source->in_step=true;pn_status_t s=pn_zip_job_step(job,zip);source->in_step=false;
+    size_t calls=source->calls,bytes=source->bytes;pn_zip_scan_t scan={0};source->in_step=true;pn_status_t s=scan_mode?pn_zip_scan_job_step(job,&scan):pn_zip_job_step(job,zip);source->in_step=false;
     calls=source->calls-calls;bytes=source->bytes-bytes;assert(calls<=8 && bytes<=4096);
     if(calls>max_calls)max_calls=calls;
     if(bytes>max_bytes)max_bytes=bytes;
     if(s!=PN_OK)assert(!zip->impl);
     if(s==PN_CANCELLED)cancelled_steps++;
+    if(s==PN_OK && scan_mode){
+        // 目录成功只交出scan；顺序供数后仍必须finish完整验证，未验证前不能使用zip。
+        // Directory success yields only a scan; sequential input must still finish full validation before a ZIP becomes usable.
+        assert(scan.impl && !zip->impl);pn_cancel_scope_t shield;pn_cancel_enter(&shield,NULL,NULL);size_t chunk=source->chunk;source->chunk=0;
+        for(uint64_t at=0;at<source->size;){uint8_t data[4096];size_t got=0;s=input(source,at,data,sizeof data,&got);assert(s==PN_OK && got);pn_zip_scan_feed(&scan,at,data,got);at+=got;}
+        source->chunk=chunk;s=pn_zip_scan_finish(&scan,zip);pn_cancel_leave(&shield);assert(!scan.impl);
+    }
     return s;
 }
 static pn_status_t open_job(pn_zip_t *zip,pn_pool_t *pool,pn_text_source_t *input_source,source_t *source,bool pre_cancel){
-    pn_zip_job_t job={0};size_t calls=source->calls;pn_status_t s=pn_zip_job_begin(&job,pool,input_source);assert(source->calls==calls);
+    pn_zip_job_t job={0};size_t calls=source->calls;pn_status_t s=scan_mode?pn_zip_scan_job_begin(&job,pool,input_source):pn_zip_job_begin(&job,pool,input_source);assert(source->calls==calls);
     if(s!=PN_OK)return s;
     pn_zip_t busy={.impl=(void *)(uintptr_t)1};void *handle=job.impl;size_t used=pool->used;
-    assert(pn_zip_job_step(&job,&busy)==PN_BUSY && busy.impl==(void *)(uintptr_t)1 && job.impl==handle && pool->used==used && source->calls==calls);
+    if(scan_mode){pn_zip_scan_t occupied={.impl=(void *)(uintptr_t)1};assert(pn_zip_scan_job_step(&job,&occupied)==PN_BUSY && occupied.impl==(void *)(uintptr_t)1 && job.impl==handle && pool->used==used && source->calls==calls);}
+    else assert(pn_zip_job_step(&job,&busy)==PN_BUSY && busy.impl==(void *)(uintptr_t)1 && job.impl==handle && pool->used==used && source->calls==calls);
     size_t steps=0;pn_cancel_scope_t scope;pn_cancel_enter(&scope,cancelled,source);
     do{
         if(pre_cancel){source->cancel=true;calls=source->calls;used=pool->used;handle=job.impl;assert(step(&job,zip,source)==PN_CANCELLED && source->calls==calls && pool->used==used && job.impl==handle);}
@@ -59,16 +67,17 @@ static void compare(pn_zip_t *old,pn_zip_t *zip,bool payload){
     }
 }
 static void abort_checks(pn_pool_t *pool,pn_text_source_t *src,source_t *source,size_t base_used,size_t base_live){
-    pn_zip_job_t measured={0};pn_zip_t zip={0};assert(pn_zip_job_begin(&measured,pool,src)==PN_OK);size_t steps=0;pn_status_t s;
+    pn_zip_job_t measured={0};pn_zip_t zip={0};assert((scan_mode?pn_zip_scan_job_begin(&measured,pool,src):pn_zip_job_begin(&measured,pool,src))==PN_OK);size_t steps=0;pn_status_t s;
     do{s=step(&measured,&zip,source);steps++;assert(steps<1000000);}while(s==PN_BUSY);assert(s==PN_OK && pn_zip_close(&zip)==PN_OK && pool->used==base_used && pool->live==base_live);
     for(size_t stop=0;stop<=steps;stop++){
-        pn_zip_job_t job={0};assert(pn_zip_job_begin(&job,pool,src)==PN_OK);
+        pn_zip_job_t job={0};assert((scan_mode?pn_zip_scan_job_begin(&job,pool,src):pn_zip_job_begin(&job,pool,src))==PN_OK);
         for(size_t i=0;i<stop;i++){s=step(&job,&zip,source);assert(s==PN_BUSY || (s==PN_OK && i+1==stop));}
         pn_zip_job_close(&job);pn_zip_job_close(&job);assert(pn_zip_close(&zip)==PN_OK && pool->used==base_used && pool->live==base_live);aborts++;
     }
 }
 int main(int argc,char **argv){
-    assert(argc==2 || (argc==3 && !strcmp(argv[2],"--faults")));source_t source={.fd=open(argv[1],O_RDONLY)};assert(source.fd>=0);struct stat info;assert(!fstat(source.fd,&info) && info.st_size>=0);source.size=(uint64_t)info.st_size;
+    assert(argc>=2 && argc<=4);bool fault_mode=false;for(int i=2;i<argc;i++){if(!strcmp(argv[i],"--scan"))scan_mode=true;else{assert(!strcmp(argv[i],"--faults"));fault_mode=true;}}
+    source_t source={.fd=open(argv[1],O_RDONLY)};assert(source.fd>=0);struct stat info;assert(!fstat(source.fd,&info) && info.st_size>=0);source.size=(uint64_t)info.st_size;
     pn_pool_t pool;assert(!pn_pool_init(&pool,6u*1024u*1024u,NULL,NULL,NULL));pn_text_source_t src={&source,source.size,input,valid};pn_zip_t old={0};assert(pn_zip_open(&old,&pool,&src)==PN_OK);size_t base_used=pool.used,base_live=pool.live;
     size_t allocations=0;
     for(unsigned mode=0;mode<5;mode++){
@@ -76,10 +85,10 @@ int main(int argc,char **argv){
         size_t attempts=pool.attempts;assert(open_job(&zip,&pool,&src,&source,mode==0)==PN_OK);if(mode==0)allocations=pool.attempts-attempts;
         source.chunk=0;source.after_cancel=false;compare(&old,&zip,true);assert(pn_zip_close(&zip)==PN_OK && pool.used==base_used && pool.live==base_live);pool.cache_caps[PN_CACHE_CHAPTER]=384u*1024u;
     }
-    pn_zip_job_t job={0};pn_zip_t zip={0};assert(pn_zip_job_begin(&job,&pool,&src)==PN_OK);source.after_stale=true;assert(step(&job,&zip,&source)==PN_STALE_MEDIA && !job.impl && !zip.impl);source.after_stale=source.stale=false;assert(pool.used==base_used && pool.live==base_live);
-    assert(pn_zip_job_begin(&job,&pool,&src)==PN_OK);source.error=PN_IO;assert(step(&job,&zip,&source)==PN_IO && !job.impl && !zip.impl);source.error=PN_OK;assert(pool.used==base_used && pool.live==base_live);
-    source.cancel=true;pn_cancel_scope_t scope;pn_cancel_enter(&scope,cancelled,&source);assert(pn_zip_job_begin(&job,&pool,&src)==PN_CANCELLED && !job.impl);pn_cancel_leave(&scope);source.cancel=false;
-    if(argc==3){
+    pn_zip_job_t job={0};pn_zip_t zip={0};assert((scan_mode?pn_zip_scan_job_begin(&job,&pool,&src):pn_zip_job_begin(&job,&pool,&src))==PN_OK);source.after_stale=true;assert(step(&job,&zip,&source)==PN_STALE_MEDIA && !job.impl && !zip.impl);source.after_stale=source.stale=false;assert(pool.used==base_used && pool.live==base_live);
+    assert((scan_mode?pn_zip_scan_job_begin(&job,&pool,&src):pn_zip_job_begin(&job,&pool,&src))==PN_OK);source.error=PN_IO;assert(step(&job,&zip,&source)==PN_IO && !job.impl && !zip.impl);source.error=PN_OK;assert(pool.used==base_used && pool.live==base_live);
+    source.cancel=true;pn_cancel_scope_t scope;pn_cancel_enter(&scope,cancelled,&source);assert((scan_mode?pn_zip_scan_job_begin(&job,&pool,&src):pn_zip_job_begin(&job,&pool,&src))==PN_CANCELLED && !job.impl);pn_cancel_leave(&scope);source.cancel=false;
+    if(fault_mode){
         for(size_t fault=1;fault<=allocations;fault++){
             pool.fail_at=pool.attempts+fault;pn_status_t s=open_job(&zip,&pool,&src,&source,false);assert(s==PN_OK || s==PN_NO_MEMORY);pool.fail_at=0;
             if(s==PN_OK)compare(&old,&zip,false);
