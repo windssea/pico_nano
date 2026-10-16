@@ -294,6 +294,8 @@ LocalSend 同源 JSON/授权/确认/整文件接收、PC HTTP/IPv4 发现以及�
 
 ## 安装、升级及复用来源
 
+国内分发仓库为`gitee.com/windssea/pico_nano`，保存与GitHub相同的三种既有ZIP及独立SHA256SUMS，不作为第二套固件构建来源。`tools/sync_gitee_release.py`默认仅本地检查；显式同步须先核对同版本升级/完整包的完整源码与应用身份、包内文件和ZIP摘要，再下载GitHub已发布附件复核。Gitee同名附件匿名下载不一致时停止，不覆盖；缺失附件上传后仍匿名下载核验。`gitee-release.yml`从GitHub Release published触发或按标签补跑，令牌只由Actions secret注入。国内离线网页包仍在本机提供串口安装页面，不表示设备OTA已实现；0.9目标和引导迁移见开发指南。
+
 当前网页是电脑 Chrome/Edge Web Serial 安装器，由 `installer/`、固定 esptool-js0.5.7、发布清单与 Pages 工作流组成。默认升级核对已知旧设备 3072 字节分区表，只写 `0x20000` 应用；RTC 强制下载位/原生 USB watchdog 复位放在自有适配，不改 vendor。它不是设备无线 OTA，也没有已交付的原子切槽/签名/失败回滚，详细规则见[安装文档](INSTALLATION.md)。
 
 0.6.10网页布局兼容修正：生成器从相同版本、完整提交一致且应用长度/摘要相同的已校验完整包提取第二张白名单表，独立下载并校验SHA后允许该布局仅更新应用。两张表均须完整3072B逐字节匹配，写入地址和应用大小仍按实际匹配的表检查；不把相似布局或显示的版本号当授权。已发布ZIP/命令行脚本保留原始契约，不因站点修正而自动扩展。

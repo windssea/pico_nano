@@ -84,6 +84,30 @@ watchdog触发后USB可能在返回响应前断开，Windows端口号也可能�
 
 ## 开发者发布流程
 
+### Gitee 国内分发
+
+国内入口为 [Gitee 发行版](https://gitee.com/windssea/pico_nano/releases)，该仓库用于安装包分发；Gitee 标签标记分发版本，固件精确源码提交以包内 `manifest.json` 的 `source_commit` 为准。推荐国内用户下载 `PicoNano-web-installer-<提交>.zip`，按前文运行本地安装站点，不需要克隆仓库；完整包、命令行升级包与离线网页包保持 GitHub 原始字节，另附 `SHA256SUMS`。
+
+[gitee-release.yml](../.github/workflows/gitee-release.yml) 在 GitHub Release 的 `published` 事件后自动调用 [sync_gitee_release.py](../tools/sync_gitee_release.py)，也可从 Actions 的 `Mirror release packages to Gitee` 手动输入已发布标签补同步。它从主分支选出该版本唯一、同源的升级/完整包，核对包内文件和三个 ZIP 摘要，下载 GitHub 已发布附件逐字节复核，再上传到 Gitee；已有同名附件须匿名下载摘要相同，否则停止，不自动删除或覆盖。它不重建固件，不修改既有 ZIP，也不推送源码历史到 Gitee。
+
+首次使用需要由账号所有者在 Gitee 创建仅限目标仓库、含 `projects` 权限的仓库级私人令牌，在 GitHub 仓库 `Settings → Secrets and variables → Actions` 保存为 `GITEE_TOKEN`；浏览器登录状态不能替代后台凭据。令牌只经环境变量读取，不放入代码、URL、命令行或校验报告。失效/权限不足时工作流失败，需要更新 secret 后补跑；附件配额由 Gitee 当前账号规则决定，不为释放配额自动删除旧版本。首次手动补同步可勾选 `initialize_guides`，会替换Gitee的中英文README为下载指南并读回确认；普通发布不修改README，已手工定制后不要再勾选。
+
+```powershell
+# 只检查本地包，无网络/上传；可在未配置令牌时复跑。
+# Check local packages only; no network/upload or token required.
+python tools/sync_gitee_release.py --tag v0.8.0
+# 匿名核查已经公开的国内附件，不进行写入。
+# Verify public domestic attachments anonymously without writing.
+python tools/sync_gitee_release.py --tag v0.8.0 --verify-only --report build-dev/gitee-0.8.0/verified.json
+# 仅在环境已注入 GITEE_TOKEN 且本批已获发布授权时上传。
+# Upload only with an environment-provided GITEE_TOKEN and authorization for this batch.
+python tools/sync_gitee_release.py --tag v0.8.0 --apply --report build-dev/gitee-0.8.0/synced.json
+```
+
+同步完成以四个附件的匿名下载 SHA-256 校验为准，日志或网页出现文件名不代表下载已经通过。Gitee 分发仍是电脑 USB 串口安装；设备 Wi-Fi OTA 及其首次引导迁移列入 0.9，详见开发指南。
+
+### 固件构建与 GitHub 发布
+
 按当前AGENTS.md，新批修改验证完成后先询问是否构建发布，不沿用前批授权。本批用户已明确要求构建发布0.6.17；设备由用户自行刷写。源提交、固件构建、发布包和Pages部署均要可核对；不能把未构建的优化写进已发布manifest。
 
 授权后先完成相关软件/可见窗口回归，提交需要发布的源码；复跑两套配置/size，确认board配置120MHz、USB/RF互斥及非诊断构建，slot余量目标至少10%。再打专用升级包：

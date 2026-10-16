@@ -198,6 +198,8 @@ profile每次生成 `build-dev/profile/<随机ID>/` 隔离状态与summary.json�
 
 ## 验证与开发收口
 
+国内分发工具独立复跑为 `python -m unittest discover -s tests/tools -p test_sync_gitee_release.py -v` 和 `python tools/sync_gitee_release.py --tag v0.8.0`；后者默认仅验证现有包，不连接设备、不上传。真实同步、匿名下载核验和 GitHub Actions 凭据配置见[安装与发布](INSTALLATION.md#gitee-国内分发)。这类分发/文档变更无需重新构建固件或重启产品模拟器。
+
 `gfx_spans`以修改前逐点距离/混合为独立像素oracle，覆盖6000组裁剪/奇偶行距/灰阶/分数描边，另含实际屏幕大小卡片、退化半径与极端坐标；比较包括相邻半字节、行尾和边界保护。`settings_ui`检查兼容网络名快照更新不再提交相同画面。它们验证绘制等价与重复工作消除，不代表ESP32、TF或面板响应时间。
 
 `settings_font`检查同池引擎移交、连续12次设置热打开零字体创建、冷/热完整像素一致、分配/取消/错池/呈现失败、压力回收、被违规填满的归还槽和最终零资源；`device_management`实际设备控制层另检查设置借用期间源交接和取消仍保留原页。`tools/test_local_settings_font.py --binary build-host/test_settings_font`已接入`local-samples`，逐款扫描用户TTF，独立复制后作为TF界面源检查，原件SHA保持，结果默认`build-dev/local-settings-font/`。这验证借用/缓存和像素，不把任意测试字体当真实鸿蒙系统资源验收。

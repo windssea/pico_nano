@@ -8,6 +8,8 @@ TXT、受限重排 EPUB、字体与排版、阅读线、书签/续读、锁屏�
 
 从[文档入口](docs/README.md)开始：
 
+国内下载安装包请访问 [Gitee 发行版](https://gitee.com/windssea/pico_nano/releases)。推荐离线网页安装器：解压后运行 `py serve.py`，用电脑 Chrome/Edge 打开 `http://localhost:8765/`；刷机时无需访问 GitHub。GitHub 与 Gitee 使用同一份发布包，详情见[安装与发布](docs/INSTALLATION.md)。设备 Wi-Fi OTA 列入 **0.9** 交付目标，当前版本尚未支持。
+
 | 目的 | 现行文档 |
 | --- | --- |
 | 查硬件、资源上限与安全约束 | [硬件规格](docs/HARDWARE.md) |
