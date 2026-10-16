@@ -719,8 +719,10 @@ static pn_status_t draw_shelf(pn_refresh_t profile){
     uint8_t *pixels=pn_alloc_tagged(&pool,PN_MEM_FRAME,684u*1216u/2u);pn_frame_t frame;pn_font_t font={0};
     pn_status_t status=pn_frame_bind(&frame,pixels,684u*1216u/2u,684,1216)?PN_OK:PN_NO_MEMORY;
     if(status==PN_OK)status=management_font_begin(&font,24);
+    pn_profile_span_t span;pn_profile_begin(&span,NULL,"ui.shelf.render");
     if(status==PN_OK){pn_w_set_battery(battery_percent());pn_shelf_options_t options=shelf_options();if(favorites_ensure()==PN_OK)options.favorite_items=favorites;status=pn_shelf_render_with_font_file_ex(shelf_page,&font,&frame,shelf_focus,recent_mode,true,shelf_covers,&pool,&sd_media,NULL,&options);}
     // 书籍操作面板叠在书架上（删除确认为整页）。/ The book actions sheet overlays the shelf (the delete confirmation is a full page).
+    pn_profile_end(&span,status);
     if(status==PN_OK)status=present(NULL,&frame,profile);
     if(status==PN_OK){shelf_draw_valid=true;shelf_draw_revision=async_port.revision;shelf_draw_status=pn_w_status_snapshot();}
     management_font_end(&font);pn_free(pixels);return status;
@@ -818,7 +820,7 @@ static void show_shelf(const char *cursor,bool previous){
     pn_wallpaper_mask_close(&lock_mask);
     if(!shelf_page){shelf_page=pn_alloc_tagged(&pool,PN_MEM_UI,sizeof *shelf_page);if(!shelf_page){message("内存不足","稍后重试");return;}}
     pn_catalog_page_t *next=pn_alloc_tagged(&pool,PN_MEM_UI,sizeof *next);if(!next){message("内存不足","稍后重试");return;}
-    pn_media_lease_t lease={0};pn_status_t status;
+    pn_media_lease_t lease={0};pn_status_t status;pn_profile_span_t span;pn_profile_begin(&span,NULL,"ui.shelf.catalog");
     if(!home_mode && fav_mode){
         status=favorites_load();
         size_t start=!*cursor?0:previous?(fav_start>=shelf_per_page()?fav_start-shelf_per_page():0):fav_start+shelf_per_page();
@@ -840,12 +842,13 @@ static void show_shelf(const char *cursor,bool previous){
         if(lease.ticket)(void)pn_media_release(&sd_media,&lease);
     }
     if(status==PN_OK && (next->count || !*cursor)){*shelf_page=*next;shelf_focus=-1;}
-    pn_free(next);
+    pn_free(next);pn_profile_end(&span,status);pn_profile_begin(&span,NULL,"ui.shelf.bind");
     // 首帧只复用内存封面；磁盘每轮一张，解码等输入安静后推进。/ First paint reuses RAM covers only; probe one disk cover per tick and decode after input settles.
     covers_inactive=false;
     if(status==PN_OK && !shelf_covers){shelf_covers=pn_cache_alloc(&pool,PN_CACHE_COVER,PN_MEM_UI,sizeof *shelf_covers);if(shelf_covers)pn_shelf_covers_reset(shelf_covers,NULL);}
     if(status==PN_OK && shelf_covers){bool changed;pn_catalog_item_t last;bool has_last=refresh_last(&last);covers_dirty=false;covers_cache_done=false;
         if(pn_shelf_covers_bind(shelf_covers,shelf_page,has_last?&last:NULL,&pool,&sd_media,NULL,&changed)!=PN_OK)pn_shelf_covers_reset(shelf_covers,NULL);}
+    pn_profile_end(&span,status);
     if(status==PN_OK)status=draw_shelf(panel_known?PN_REFRESH_GL16:PN_REFRESH_GC16);
     if(status!=PN_OK){message("读取书架失败","当前位置仍保留，重试");return;}
     status_page=false;shelf_mode=true;locked=false;

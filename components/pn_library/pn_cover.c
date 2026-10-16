@@ -218,7 +218,7 @@ static void resident_remember(pn_shelf_covers_t *c,pn_media_t *m,const pn_catalo
     if(c->state[slot]==PN_COVER_PENDING || (c->reason[slot]!=PN_OK && c->reason[slot]!=PN_EMPTY && c->reason[slot]!=PN_UNSUPPORTED && c->reason[slot]!=PN_CORRUPT))return;
     if(item->format==PN_BOOK_EPUB && c->reason[slot]!=PN_OK && !*c->display[slot].title)return;
     pn_book_id_t path;if(pn_identity_bytes((const uint8_t *)item->path,strlen(item->path),&path)!=PN_OK)return;
-    memcpy(c->resident_path_hash[slot],path.sha256,sizeof path.sha256);c->resident_format[slot]=item->format;encode_key(c->cache_key[slot],key);c->resident_valid|=(uint16_t)(1u<<slot);
+    memcpy(c->resident_path_hash[slot],path.sha256,sizeof path.sha256);c->resident_format[slot]=item->format;encode_key(c->cache_key[slot],key);c->resident_writes[slot]=m->writes;c->resident_valid|=(uint16_t)(1u<<slot);
 }
 /// 小栈块交换，避免另申请整张缩略图。/ Swap with a small stack block instead of allocating another thumbnail.
 static void resident_swap_bytes(void *a,void *b,size_t size){uint8_t block[128],*x=a,*y=b;while(size){size_t n=size<sizeof block?size:sizeof block;memcpy(block,x,n);memcpy(x,y,n);memcpy(y,block,n);x+=n;y+=n;size-=n;}}
@@ -228,7 +228,7 @@ static void resident_swap(pn_shelf_covers_t *c,size_t a,size_t b){
     resident_swap_bytes(c->pixels[a],c->pixels[b],PN_COVER_BYTES);resident_swap_bytes(&c->display[a],&c->display[b],sizeof c->display[0]);
     resident_swap_bytes(&c->state[a],&c->state[b],sizeof c->state[0]);resident_swap_bytes(&c->reason[a],&c->reason[b],sizeof c->reason[0]);
     resident_swap_bytes(c->cache_key[a],c->cache_key[b],sizeof c->cache_key[0]);resident_swap_bytes(&c->cache_budget[a],&c->cache_budget[b],sizeof c->cache_budget[0]);
-    resident_swap_bytes(c->resident_path_hash[a],c->resident_path_hash[b],sizeof c->resident_path_hash[0]);resident_swap_bytes(&c->resident_format[a],&c->resident_format[b],sizeof c->resident_format[0]);
+    resident_swap_bytes(c->resident_path_hash[a],c->resident_path_hash[b],sizeof c->resident_path_hash[0]);resident_swap_bytes(&c->resident_format[a],&c->resident_format[b],sizeof c->resident_format[0]);resident_swap_bytes(&c->resident_writes[a],&c->resident_writes[b],sizeof c->resident_writes[0]);
     c->resident_valid=resident_swap_bits(c->resident_valid,a,b);c->cache_dirty=resident_swap_bits(c->cache_dirty,a,b);
 }
 /* 路径FNV-1a决定文件名，头部仍存完整路径防碰撞。/ Path FNV-1a picks the filename; the header still stores the full path against collisions. */
@@ -338,10 +338,17 @@ pn_status_t pn_shelf_covers_bind(pn_shelf_covers_t *c,const pn_catalog_page_t *p
         if(!cache_dir){
             // 没有可复用像素的书无需在首帧扫描旁图；来源验证随该槽的空闲探测执行。
             // Books without reusable pixels need no sidecar scan before first paint; validate sources during their idle probe.
-            bool found=false;
+            bool found=false;int fresh=-1;
             if(c->resident_media==media && c->resident_epoch==media->epoch && c->resident_media_id==media->media_id && c->resident_valid && pn_identity_bytes((const uint8_t *)items[i]->path,strlen(items[i]->path),&paths[i])==PN_OK)
-                for(size_t other=0;other<=PN_COVER_SLOT_LAST;other++)if((c->resident_valid&(1u<<other)) && c->resident_format[other]==items[i]->format && !memcmp(c->resident_path_hash[other],paths[i].sha256,32)){found=true;break;}
+                for(size_t other=0;other<=PN_COVER_SLOT_LAST;other++)if((c->resident_valid&(1u<<other)) && c->resident_format[other]==items[i]->format && !memcmp(c->resident_path_hash[other],paths[i].sha256,32)){found=true;if(c->resident_writes[other]==media->writes)fresh=(int)other;break;}
             if(!found)continue;
+            // 验证后未发放替换源文件的租约：书与旁图不可能变化，沿用原来源键，免去每书最多9次TF stat。
+            // No source-replacing lease since verification: the book and sidecars cannot have changed, so reuse the source key and skip up to nine TF stats per book.
+#if defined(ESP_PLATFORM) || defined(PN_TEST_IMMUTABLE_FILE)
+            if(fresh>=0){memcpy(keys[i],c->cache_key[fresh],KEY_BYTES);keyed|=(uint16_t)(1u<<i);continue;}
+#else
+            (void)fresh; // PC外部进程不遵守租约，仍stat复核。/ Host external processes ignore leases, so still stat.
+#endif
         }
         if(cover_key(items[i],&key)==PN_OK && pn_identity_bytes((const uint8_t *)items[i]->path,strlen(items[i]->path),&paths[i])==PN_OK){encode_key(keys[i],&key);keyed|=(uint16_t)(1u<<i);}
     }

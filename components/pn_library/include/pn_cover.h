@@ -45,6 +45,7 @@ typedef struct {
     pn_book_format_t resident_format[PN_CATALOG_PAGE_MAX+1]; ///< 已验证槽的格式 / Format of each verified slot
     pn_media_t *resident_media; ///< 可重用像素所属介质对象 / Media object owning reusable pixels
     uint64_t resident_epoch,resident_media_id; ///< 像素所属介质代次与实例号 / Media generation and instance ID owning the pixels
+    uint64_t resident_writes[PN_CATALOG_PAGE_MAX+1]; ///< 各槽来源键验证时介质的替换租约计数；未变则书与旁图不可能变化 / Per-slot media replacing-lease count when its source key was verified; unchanged means the book and sidecars cannot have changed
     uint16_t resident_valid; ///< 路径、来源键和当前像素/结论一致的槽 / Slots whose path, source key and current pixels/outcome agree
     uint16_t resident_deferred; ///< 离页暂停的待写资格，重绑回来再写 / Pending persistence paused off-page, resumed when rebound
 } pn_shelf_covers_t;
