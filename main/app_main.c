@@ -229,7 +229,15 @@ static void profile_emit(void *ctx,const pn_profile_event_t *e){
     if(timing)return;
 #endif
     const unsigned caps[]={MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT};
+#ifdef CONFIG_PN_PROFILE
+    // 最大块需遍历整个堆并屏蔽中断（PSRAM约10ms），只留在诊断构建；扫描期间调用会造成行欠载。
+    // The largest block walks the whole heap with interrupts masked (about 10 ms on PSRAM), so only diagnostic builds keep it; calling it mid-scan causes line underruns.
     for(unsigned j=0;j<2;j++)ESP_LOGI(TAG,"heap phase=%s region=%s free=%zu minimum=%zu largest=%zu",e->phase,j?"psram":"internal",heap_caps_get_free_size(caps[j]),heap_caps_get_minimum_free_size(caps[j]),heap_caps_get_largest_free_block(caps[j]));
+#else
+    // 产品阶段日志只读O(1)计数：真机连续翻页时PSRAM最大块遍历正落在重叠预取的扫描中并触发欠载。
+    // Product phase logs read O(1) counters only: on hardware the PSRAM largest-block walk landed inside an overlapped-prefetch scan and triggered an underrun.
+    for(unsigned j=0;j<2;j++)ESP_LOGI(TAG,"heap phase=%s region=%s free=%zu minimum=%zu",e->phase,j?"psram":"internal",heap_caps_get_free_size(caps[j]),heap_caps_get_minimum_free_size(caps[j]));
+#endif
     #ifdef CONFIG_PN_PROFILE
     if(e->pool)for(unsigned j=0;j<PN_MEM_COUNT;j++){const pn_memory_stats_t *m=&e->pool->memory[j];ESP_LOGI(TAG,"memory phase=%s tag=%s used=%zu peak=%zu live=%zu allocations=%zu failures=%zu",e->phase,pn_memory_tag_name((pn_memory_tag_t)j),m->used,m->peak,m->live,m->allocations,m->failures);}
     #endif
