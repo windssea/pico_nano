@@ -1807,7 +1807,7 @@ static void device_task(void *arg){
         if(usb.open)tick_usb(now);
         if(time_sync.impl)tick_time_sync(now);
         if(ota.impl)tick_ota(now);
-        if(data_ready && panel_known && async_port.input_active && async_port.display_active && (shelf_draw_valid || (reader_active() && !opening && !status_page)))(void)pn_device_ota_boot_confirm(true);
+        if(data_ready && shelf_prefs_loaded && input_flags_loaded && panel_known && async_port.input_active && async_port.display_active && (shelf_draw_valid || (reader_active() && !opening && !status_page)))(void)pn_device_ota_boot_confirm(true);
         if(!transfer.impl && !usb.open && !locked && sd_recovery.pending)tick_sd_recovery(now);
         {static uint64_t last_battery,last_clock,date_minute;if(now-last_battery>=60000 || !last_battery){last_battery=now;pn_w_set_battery(battery_percent());}if(now-last_clock>=10000 || !last_clock){last_clock=now;clock_tick(now);if(settings_ui.impl && pn_settings_ui_screen(&settings_ui)==5 && now/60000u!=date_minute){date_minute=now/60000u;update_time_ui(true);}}} // 电量与日期页每分钟推进，正文不因对时刷新。 / Advance battery and the date page once a minute; time sync never redraws reading content.
         {static uint64_t prefs_retry;

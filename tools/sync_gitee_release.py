@@ -244,10 +244,12 @@ def github_release(bundle, repository, wait_seconds=0):
 
 def release_body(bundle, github):
     """国内离线安装步骤和来源证据。 / Domestic offline installation steps and source evidence."""
+    preview_note = "测试预览，尚未作为稳定版本交付；迁移方法和设备验收边界见原始发布说明。\n\n" if github.get("prerelease") else ""
     ota_note = ("设备 OTA 附件为 `PicoNano-*-ota.bin` 与 `PicoNano-ota-manifest.bin`；"
                 "仅供已完成兼容引导迁移的设备使用，电脑安装仍下载 ZIP。\n\n"
                 if any(a.name == "PicoNano-ota-manifest.bin" for a in bundle.assets) else "")
     return (f"PicoNano {bundle.tag[1:]} 国内安装包，与 GitHub 发布的三个 ZIP 逐字节一致。\n\n"
+            f"{preview_note}"
             f"固件源码：`{bundle.source_commit}`\n\n"
             "- 推荐下载 `PicoNano-web-installer-*.zip`，解压后运行 `py serve.py`，"
             "在电脑 Chrome/Edge 打开 `http://localhost:8765/`，刷机过程中不再访问 GitHub。\n"
