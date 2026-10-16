@@ -461,9 +461,10 @@ static pn_status_t present_impl(void *ctx,const pn_frame_t *frame,pn_refresh_t p
     if(status==PN_OK && backup && page_copy && frame->pixels!=page_copy)for(int y=0;y<1216;y++)memcpy(page_copy+(size_t)y*342,frame->pixels+(size_t)y*frame->stride,342);
     return status;
 }
+static unsigned presents_ok; ///< 成功回执计数，饱和于2；开机图之后的首帧证明界面可用 / Successful receipts saturating at two; the first frame after boot art proves a usable UI
 static pn_status_t present(void *ctx,const pn_frame_t *frame,pn_refresh_t profile){
     pn_profile_span_t span;pn_profile_begin(&span,&pool,"display.receipt");
-    pn_status_t status=present_impl(ctx,frame,profile);pn_profile_end(&span,status);return status;
+    pn_status_t status=present_impl(ctx,frame,profile);pn_profile_end(&span,status);if(status==PN_OK && presents_ok<2u)presents_ok++;return status;
 }
 #if defined(CONFIG_PN_UI_FOLLOW) && CONFIG_PN_UI_FOLLOW
 typedef struct {pn_list_stage_t stage;const pn_frame_t *frame;pn_follow_box_t area;const EpdWaveform *wave;const pn_follow_job_t *job;uint8_t *difference;bool *lines;uint8_t *columns;bool started,full;} list_scan_t; ///< 回执前只读借用，显示owner不分配或修改模型 / Read-only borrow until receipt; display owner never allocates or mutates models
@@ -1076,6 +1077,9 @@ static void tick_ota(uint64_t now){
         if(ota_lock_pending){ota_lock_pending=false;if(prepare_lock())lock_and_sleep("再按电源键继续阅读");}
     }
 }
+/// 无线或写入仍在进行；AVAILABLE/READY只等用户确认，不阻止锁屏或休眠。
+/// Radio or writes still running; AVAILABLE/READY merely await confirmation and never block locking or sleep.
+static bool ota_busy(void){pn_device_ota_state_t state={0};return ota.impl && (pn_device_ota_state(&ota,&state)!=PN_OK || !state.radio_released);}
 static void refresh_network_name(void){pn_network_credentials_t c={0};pn_status_t status=load_network(&c);if(status==PN_OK)strcpy(saved_network,c.ssid);else if(status==PN_EMPTY)saved_network[0]=0;pn_network_wipe(&c);}
 /// 主任务保存网页提交的网络，再回报给网页。/ The main task saves the network submitted by the web page, then reports back.
 static void handle_network_request(void){
@@ -1776,7 +1780,7 @@ static void device_task(void *arg){
             if(available==PN_OK && !first_logged){first_logged=true;ESP_LOGI(TAG,"Input first event kind=%d after boot=%llu ms",(int)queued.kind,(unsigned long long)(now-boot));}
             else ESP_LOGI(TAG,"Input health reads=%u errors=%u events=%u touch_wake=%d",reads,errors,sent,(int)async_port.touch_wake);
             health_at=now;last_reads=reads;last_errors=errors;last_sent=sent;}}
-        pn_device_power_busy(PN_POWER_SESSION,transfer.impl!=NULL || time_sync.impl!=NULL || ota.impl!=NULL || usb.open || opening);
+        pn_device_power_busy(PN_POWER_SESSION,transfer.impl!=NULL || time_sync.impl!=NULL || ota_busy() || usb.open || opening);
         pn_async_begin(&async_port.input,&scope,available==PN_EMPTY);scope_active=true;
         if(available==PN_OK || available==PN_CANCELLED){
             // 书架三键焦点只暂停解码；真正开书/换页入口仍先abort，低余量不保活。/ Shelf key focus only pauses decoding; opening/page-change entries still abort, and low headroom never retains it.
@@ -1807,7 +1811,9 @@ static void device_task(void *arg){
         if(usb.open)tick_usb(now);
         if(time_sync.impl)tick_time_sync(now);
         if(ota.impl)tick_ota(now);
-        if(data_ready && shelf_prefs_loaded && input_flags_loaded && panel_known && async_port.input_active && async_port.display_active && (shelf_draw_valid || (reader_active() && !opening && !status_page)))(void)pn_device_ota_boot_confirm(true);
+        // 首启确认只看固件自身：内部记录可读、输入/显示任务在线、开机图后又成功推出一帧；无卡、坏书或提示页不算失败。
+        // First-boot confirmation checks the firmware itself: readable internal records, live input/display tasks and one more frame after boot art; no card, bad books or notice pages are not failures.
+        if(data_ready && shelf_prefs_loaded && input_flags_loaded && panel_known && async_port.input_active && async_port.display_active && presents_ok>=2u)(void)pn_device_ota_boot_confirm(true);
         if(!transfer.impl && !usb.open && !locked && sd_recovery.pending)tick_sd_recovery(now);
         {static uint64_t last_battery,last_clock,date_minute;if(now-last_battery>=60000 || !last_battery){last_battery=now;pn_w_set_battery(battery_percent());}if(now-last_clock>=10000 || !last_clock){last_clock=now;clock_tick(now);if(settings_ui.impl && pn_settings_ui_screen(&settings_ui)==5 && now/60000u!=date_minute){date_minute=now/60000u;update_time_ui(true);}}} // 电量与日期页每分钟推进，正文不因对时刷新。 / Advance battery and the date page once a minute; time sync never redraws reading content.
         {static uint64_t prefs_retry;
@@ -1823,13 +1829,16 @@ static void device_task(void *arg){
                 if(usb.open){usb_return=true;usb_lock=true;usb_home=false;pn_device_usb_request_stop(&usb);}
                 else if(transfer.impl){transfer_return=true;transfer_lock=true;(void)pn_device_transfer_request_stop(&transfer);}
                 else if(time_sync.impl){time_lock_pending=true;(void)pn_device_time_request_stop(&time_sync);}
-                else if(ota.impl){ota_lock_pending=true;update_command(PN_SETUI_UPDATE_CANCEL);}
+                else if(ota.impl){if(!ota_lock_pending){ota_lock_pending=true;update_command(PN_SETUI_UPDATE_CANCEL);}}
                 else if(locked){last_input=now;resume_reader();}else if(prepare_lock())lock_and_sleep("再按电源键继续阅读");}}
         // 按键路径可能睡眠后更新last_input；重取当前时间，避免睡前时间减去唤醒时间下溢后立即锁屏。
         // The key path can sleep and update last_input; refresh time to avoid subtracting wake time from pre-sleep time.
         now=now_ms();
         // 无操作满5分钟自动锁屏；传输中由其停止流程负责。/ Auto-lock after five idle minutes; transfers handle their own stop flow.
-        if(PN_AUTO_LOCK && !locked && !transfer.impl && !usb.open && !time_sync.impl && !ota.impl && now>=last_input && now-last_input>=AUTO_LOCK_MS && now-boot>=AUTO_LOCK_MS){pn_reader_input_cancel(&input);if(prepare_lock())lock_and_sleep("再按电源键继续阅读");else last_input=now;}
+        // 升级只等确认时也自动锁屏：先取消会话，停止完成后由tick_ota锁屏，新版本留在非活动槽不切换。
+        // Auto-lock also while an update merely awaits confirmation: cancel first and let tick_ota lock after shutdown, leaving the inactive slot unselected.
+        if(PN_AUTO_LOCK && !locked && !transfer.impl && !usb.open && !time_sync.impl && !ota_busy() && !ota_lock_pending && now>=last_input && now-last_input>=AUTO_LOCK_MS && now-boot>=AUTO_LOCK_MS){pn_reader_input_cancel(&input);
+            if(ota.impl){ota_lock_pending=true;update_command(PN_SETUI_UPDATE_CANCEL);}else if(prepare_lock())lock_and_sleep("再按电源键继续阅读");else last_input=now;}
         if(opening){
             // 加载态独占内容路由；紧急键/电源先处理，普通书架触点与后台画面不进入旧页面。
             // Loading owns content routing: urgent keys/power run first; ordinary shelf contacts and background draws never reach the old page.
@@ -1914,7 +1923,7 @@ static void device_task(void *arg){
             if(motion==PN_OK){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);}}
 #endif
 #if defined(CONFIG_PN_UI_FEEDBACK) && CONFIG_PN_UI_FEEDBACK
-        if(available==PN_EMPTY){pn_status_t settled=feedback_idle_tick(now_ms(),body || locked || touch_held || tap.down || pn_font_manage_motion_stats(&font_manage).active || pn_toc_ui_motion_stats(&toc).active || transfer.impl || usb.open || time_sync.impl || ota.impl);if(settled!=PN_EMPTY){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);}}
+        if(available==PN_EMPTY){pn_status_t settled=feedback_idle_tick(now_ms(),body || locked || touch_held || tap.down || pn_font_manage_motion_stats(&font_manage).active || pn_toc_ui_motion_stats(&toc).active || transfer.impl || usb.open || time_sync.impl || ota_busy());if(settled!=PN_EMPTY){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);}}
 #endif
         if(body && available==PN_EMPTY && !touch_held){pn_status_t prefetched=epub.impl?pn_epub_app_prefetch(&epub):pn_reader_app_prefetch(&reader);
             pn_status_t cached=epub.impl?pn_epub_app_cache_idle(&epub,now_ms()):PN_EMPTY;
@@ -1924,7 +1933,7 @@ static void device_task(void *arg){
             if(background){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);}}
         if(available!=PN_OK){if(power_idle<POWER_IDLE_ROUNDS)power_idle++;if(power_idle>=POWER_IDLE_ROUNDS)pn_device_power_busy(PN_POWER_PRODUCT,false);
             // 活动/会话/降级输入时10ms；长空闲时等输入通知，最多100ms处理定时职责。/ 10 ms while active, in sessions or with degraded input; when long idle wait for input notification, at most 100 ms for timed duties.
-            bool slow=async_port.input_active && power_idle>=POWER_IDLE_ROUNDS && !transfer.impl && !usb.open && !time_sync.impl && !ota.impl;
+            bool slow=async_port.input_active && power_idle>=POWER_IDLE_ROUNDS && !transfer.impl && !usb.open && !time_sync.impl && !ota_busy();
             if(background && background_rounds<50u){background_rounds++;vTaskDelay(pdMS_TO_TICKS(1));}
             else{background_rounds=0;if(async_port.product_task)pn_device_async_wait(&async_port,slow?100u:10u);else vTaskDelay(pdMS_TO_TICKS(10));}}
     }

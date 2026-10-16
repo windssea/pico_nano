@@ -84,11 +84,12 @@ export function preservedLayoutOf(files, deviceTable) {
   return layoutOf(matched);
 }
 
-/// 保留布局模式仅接收从未启用过OTA选择的设备，不猜测正在运行的槽。
-/// Preserving mode accepts only untouched OTA selection data, never guessing the running slot.
-export function requireUnusedOta(bytes, size = 0x2000) {
-  if (!(bytes instanceof Uint8Array) || bytes.length !== size || size !== 0x2000 || bytes.some((b) => b !== 0xff))
-    throw new Error("设备已使用 OTA 或启动选择读取不完整，不能固定写 ota_0。请使用完整刷入并先备份 / OTA selection is active or unknown; use full installation with backup");
+/// 保留布局模式不猜测运行槽：OTA选择已使用时，写完ota_0再清空otadata，使启动确定回到ota_0；读取不完整则停止。
+/// Preserving mode never guesses the running slot: when OTA selection is in use, blank otadata after writing ota_0 so boot deterministically returns to ota_0; stop on incomplete reads.
+export function otaNeedsReset(bytes, size = 0x2000) {
+  if (!(bytes instanceof Uint8Array) || bytes.length !== size || size !== 0x2000)
+    throw new Error("启动选择（otadata）读取不完整，停止写入 / incomplete OTA selection read; nothing was written");
+  return bytes.some((b) => b !== 0xff);
 }
 
 export function planInstall({ files, deviceTable, dataHead, wallpaperHead, otaReadback, clearNvs = false, initializeStorage = false, mode = "full" }) {
@@ -99,13 +100,15 @@ export function planInstall({ files, deviceTable, dataHead, wallpaperHead, otaRe
     // 同源码完整包的表是另一项精确白名单，不用相似布局或版本号代替逐字节核对。
     // The same-source full package supplies another exact allowlist entry; similar layouts or version numbers never replace a byte comparison.
     const preserved = preservedLayoutOf(files, deviceTable);
-    requireUnusedOta(otaReadback, preserved.otadata.size);
+    const resetOta = otaNeedsReset(otaReadback, preserved.otadata.size);
     if (clearNvs || initializeStorage) throw new Error("保留布局升级不能清除数据 / preserving upgrade cannot clear data");
     if (!files.app?.length || files.app.length > preserved.app.size || preserved.app.offset !== 0x20000)
       throw new Error("应用或升级地址无效 / invalid upgrade application or address");
-    return { mode: "app-only", knownTable: true, keptNvs: [], unrecognizedStorage: [], steps: [
-      { kind: "write", name: "应用固件 / app", address: preserved.app.offset, data: files.app, reason: "保留全部布局与数据 / preserve layout and data", optional: false },
-    ] };
+    // 先写应用后清选择：中途断电仍从原有效槽启动。 / App first, selection last: a power loss in between still boots the previous valid slot.
+    const steps = [{ kind: "write", name: "应用固件 / app", address: preserved.app.offset, data: files.app, reason: "保留全部布局与数据 / preserve layout and data", optional: false }];
+    if (resetOta) steps.push({ kind: "erase", name: "OTA 选择 / otadata", address: preserved.otadata.offset, size: preserved.otadata.size,
+      data: new Uint8Array(preserved.otadata.size).fill(0xff), reason: "设备用过 OTA，清空后从 ota_0 启动 / OTA was used; blank it to boot ota_0", optional: false });
+    return { mode: "app-only", knownTable: true, keptNvs: [], unrecognizedStorage: [], resetOta, steps };
   }
   if (mode !== "full") throw new Error("未知安装模式 / unknown installation mode");
   if (!(deviceTable instanceof Uint8Array) || deviceTable.length !== TABLE_SIZE)

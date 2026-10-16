@@ -233,7 +233,7 @@ function buildPlan() {
   const kept = plan.keptNvs.length ? `保留设置区（NVS）扇区 ${plan.keptNvs.map(hex).join("、")}。` : "设置区（NVS）将全部清空。";
   const storage = $("initialize-storage").checked ? "已选择清除并初始化内部数据和壁纸，请先备份。"
     : plan.unrecognizedStorage.length ? `无法确认 ${plan.unrecognizedStorage.join("、")} 分区兼容。保留原数据；安装后可能无法保存，请备份后再决定恢复方式。` : "";
-  $("plan-note").textContent = preserving ? "保留引导程序、分区表、OTA 选择、NVS、阅读记录和壁纸。仅用于当前已从 ota_0 启动的 PicoNano 阅读器。" : `${kept}${storage}不整片擦除，不触碰存储卡和屏幕电源芯片。`;
+  $("plan-note").textContent = preserving ? (plan.resetOta ? "保留引导程序、分区表、NVS、阅读记录和壁纸。设备用过 OTA：写入 ota_0 后清空 OTA 选择，下次从新写入的固件启动。" : "保留引导程序、分区表、OTA 选择、NVS、阅读记录和壁纸。") : `${kept}${storage}不整片擦除，不触碰存储卡和屏幕电源芯片。`;
   if (plan.needsNvsClear) $("plan-note").textContent += " 新 NVS 范围含原来的非 NVS 或未知数据，必须明确勾选清除设置区才能刷入。";
   if (plan.needsStorageInitialization) $("plan-note").textContent += " 内部数据布局不兼容，必须明确选择初始化才能刷入。";
   const list = $("plan-steps");

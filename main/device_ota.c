@@ -25,6 +25,9 @@
 
 #define OTA_HTTP_MAX 8192u
 #define OTA_CHUNK 4096u
+#define OTA_TIMEOUT_MS 10000 ///< 单次连接/读取等待 / Per connect/read wait
+#define OTA_READ_STALLS 3u ///< 同一连接连续超时上限，约30秒无数据 / Consecutive timeouts per connection, about 30 s without data
+#define OTA_RESUMES 4u ///< 下载断线后的Range续传次数 / Range resumptions after a dropped download
 typedef struct {
     pn_device_ota_state_t state;
     pn_device_wifi_t wifi;
@@ -35,6 +38,7 @@ typedef struct {
     esp_ota_handle_t handle;
     bool writing,started,installing,worker_active,network_failed;
     char location[512];
+    char range[96]; ///< 最近响应的Content-Range / Content-Range of the latest response
     _Atomic bool stop,worker_done;
     _Atomic uint32_t progress;
     pn_status_t result;
@@ -128,27 +132,53 @@ static esp_err_t http_event(esp_http_client_event_t *event){
         if(n<sizeof s->location && !s->location[0])memcpy(s->location,event->header_value,n+1);
         else s->location[0]=0;
     }
+    if(event->event_id==HTTP_EVENT_ON_HEADER && event->header_key && event->header_value && !strcasecmp(event->header_key,"Content-Range")){
+        size_t n=strlen(event->header_value);
+        if(n<sizeof s->range && !s->range[0])memcpy(s->range,event->header_value,n+1);
+        else s->range[0]=0;
+    }
     return ESP_OK;
 }
-static esp_http_client_handle_t http_open(ota_t *s,const char *url,pn_status_t *status){
+/// 解析"bytes a-b/total"，其他形式（含*）拒绝。 / Parse "bytes a-b/total", rejecting any other form including "*".
+static bool content_range(const char *text,uint64_t *first,uint64_t *last,uint64_t *total){
+    if(strncasecmp(text,"bytes ",6))return false;
+    const char *p=text+6;uint64_t v[3];
+    for(unsigned i=0;i<3;i++){
+        if(*p<'0' || *p>'9')return false;
+        uint64_t x=0;while(*p>='0' && *p<='9'){if(x>UINT32_MAX)return false;x=x*10u+(uint64_t)(*p++-'0');}
+        v[i]=x;if(i<2 && *p++!=(i?'/':'-'))return false;
+    }
+    if(*p || v[0]>v[1] || v[1]>=v[2])return false;
+    *first=v[0];*last=v[1];*total=v[2];return true;
+}
+/// 按协作取消分片等待，避免重连间隔阻塞stop。 / Wait in slices that honour cooperative stop between reconnections.
+static bool pause_ms(ota_t *s,unsigned ms){for(unsigned t=0;t<ms;t+=100){if(atomic_load(&s->stop))return false;vTaskDelay(pdMS_TO_TICKS(100));}return !atomic_load(&s->stop);}
+/// from>0时每跳都带Range，只接受200或206；其余重定向限于HTTPS。 / With from>0 every hop carries Range and only 200 or 206 is accepted; redirects stay on HTTPS.
+static esp_http_client_handle_t http_open(ota_t *s,const char *url,uint32_t from,pn_status_t *status){
     *status=PN_IO;char current[512];if(strlen(url)>=sizeof current)return NULL;strcpy(current,url);
     for(unsigned redirects=0;redirects<4;redirects++){
         if(atomic_load(&s->stop)){*status=PN_CANCELLED;return NULL;}
-        s->location[0]=0;
-        esp_http_client_config_t config={.url=current,.crt_bundle_attach=esp_crt_bundle_attach,.timeout_ms=3000,.buffer_size=4096,.buffer_size_tx=1024,.disable_auto_redirect=true,.user_agent="PicoNano/OTA",.event_handler=http_event,.user_data=s};
+        s->location[0]=0;s->range[0]=0;
+        esp_http_client_config_t config={.url=current,.crt_bundle_attach=esp_crt_bundle_attach,.timeout_ms=OTA_TIMEOUT_MS,.buffer_size=4096,.buffer_size_tx=1024,.disable_auto_redirect=true,.user_agent="PicoNano/OTA",.event_handler=http_event,.user_data=s};
         esp_http_client_handle_t h=esp_http_client_init(&config);if(!h)return NULL;
+        if(from){char value[32];snprintf(value,sizeof value,"bytes=%lu-",(unsigned long)from);if(esp_http_client_set_header(h,"Range",value)!=ESP_OK){esp_http_client_cleanup(h);return NULL;}}
         if(esp_http_client_open(h,0)!=ESP_OK || esp_http_client_fetch_headers(h)<0){esp_http_client_cleanup(h);return NULL;}
         int code=esp_http_client_get_status_code(h);
-        if(code==200){*status=PN_OK;return h;}
+        if(code==200 || (from && code==206)){*status=PN_OK;return h;}
         if((code==301 || code==302 || code==303 || code==307 || code==308) && !strncmp(s->location,"https://",8)){strcpy(current,s->location);esp_http_client_cleanup(h);continue;}
         esp_http_client_cleanup(h);return NULL;
     }
     return NULL;
 }
 static pn_status_t fetch(ota_t *s,const char *url,uint8_t *out,size_t capacity,size_t *received){
-    pn_status_t status;esp_http_client_handle_t h=http_open(s,url,&status);if(!h)return status;
-    size_t used=0;int n=0;
-    while(!atomic_load(&s->stop) && used<capacity && (n=esp_http_client_read(h,(char *)out+used,(int)(capacity-used)))>0)used+=(size_t)n;
+    pn_status_t status;esp_http_client_handle_t h=http_open(s,url,0,&status);if(!h)return status;
+    size_t used=0;int n=0;unsigned stalls=0;
+    while(!atomic_load(&s->stop) && used<capacity){
+        n=esp_http_client_read(h,(char *)out+used,(int)(capacity-used));
+        if(n==-ESP_ERR_HTTP_EAGAIN && ++stalls<=OTA_READ_STALLS)continue;
+        if(n<=0)break;
+        used+=(size_t)n;stalls=0;
+    }
     if(atomic_load(&s->stop))status=PN_CANCELLED;
     else if(n<0 || !esp_http_client_is_complete_data_received(h))status=PN_IO;
     esp_http_client_close(h);esp_http_client_cleanup(h);if(status==PN_OK)*received=used;return status;
@@ -171,6 +201,48 @@ static pn_status_t discover(ota_t *s,char url[256]){
     }
     cJSON_Delete(root);heap_caps_free(json);return status;
 }
+/// 一次连接：校验206范围或200全长，忽略Range的200丢弃已写前缀；*retry只在网络中断时置位。
+/// One connection: verify the 206 range or full 200 length, discard the written prefix when a 200 ignores Range; *retry is set only for network drops.
+static pn_status_t download_once(ota_t *s,bool *retry){
+    *retry=false;uint32_t from=s->update.received,total=s->update.manifest.image_bytes,skip=0;pn_status_t status;
+    esp_http_client_handle_t h=http_open(s,s->update.manifest.url,from,&status);
+    if(!h){*retry=status==PN_IO;return status;}
+    int64_t length=esp_http_client_get_content_length(h);
+    if(esp_http_client_get_status_code(h)==206){
+        uint64_t first=0,last=0,size=0;
+        if(!content_range(s->range,&first,&last,&size) || first!=from || last+1u!=total || size!=total || (length>=0 && length!=(int64_t)(total-from)))status=PN_CORRUPT;
+    }else{skip=from;if(length>=0 && length!=(int64_t)total)status=PN_CORRUPT;}
+    unsigned stalls=0;bool done=false;
+    while(status==PN_OK && !done){
+        if(atomic_load(&s->stop)){status=PN_CANCELLED;break;}
+        int n=esp_http_client_read(h,(char *)s->scratch,OTA_CHUNK);
+        if(n==-ESP_ERR_HTTP_EAGAIN){if(++stalls>OTA_READ_STALLS){status=PN_IO;*retry=true;}continue;}
+        if(n<0){status=PN_IO;*retry=true;break;}
+        if(!n){if(esp_http_client_is_complete_data_received(h))done=true;else{status=PN_IO;*retry=true;}break;}
+        stalls=0;const uint8_t *data=s->scratch;size_t used=(size_t)n;
+        if(skip){size_t drop=used<skip?used:skip;skip-=(uint32_t)drop;data+=drop;used-=drop;}
+        // 写入或校验失败已由状态机终止事务，不能续传。 / Write or validation failures already ended the transaction and must not resume.
+        if(used){status=pn_update_feed(&s->update,data,used);atomic_store(&s->progress,s->update.received);}
+        vTaskDelay(1);
+    }
+    esp_http_client_close(h);esp_http_client_cleanup(h);
+    if(atomic_load(&s->stop))return PN_CANCELLED;
+    if(status==PN_OK && skip)status=PN_CORRUPT;
+    return status;
+}
+/// 有界续传；全部字节写入后才做SDK封口与读回校验。 / Bounded resumption; SDK sealing and read-back verification only after every byte is written.
+static pn_status_t download(ota_t *s){
+    pn_status_t status=PN_IO;
+    for(unsigned attempt=0;attempt<=OTA_RESUMES;attempt++){
+        if(attempt && !pause_ms(s,1000))return PN_CANCELLED;
+        bool retry=false;uint32_t before=s->update.received;status=download_once(s,&retry);
+        if(status==PN_OK)return pn_update_finish(&s->update);
+        if(!retry)return status;
+        // 断线前有进展则重置续传次数；无进展的重连仍计数，避免无限重连。 / A drop after progress resets the resume budget; reconnects without progress still count, preventing endless retries.
+        if(s->update.received>before)attempt=0;
+    }
+    return status;
+}
 static void worker(void *ctx){
     ota_t *s=ctx;pn_status_t status=PN_OK;
     if(!s->installing){
@@ -179,22 +251,7 @@ static void worker(void *ctx){
         if(status==PN_OK)status=fetch(s,url,envelope,sizeof envelope,&n);
         if(status==PN_OK)status=target(s);
         if(status==PN_OK)status=pn_update_prepare(&s->update,envelope,n,PN_PRODUCT_VERSION,&s->target,&port,s);
-    }else{
-        esp_http_client_handle_t h=http_open(s,s->update.manifest.url,&status);
-        if(h){
-            int64_t length=esp_http_client_get_content_length(h);
-            if(length>=0 && length!=(int64_t)s->update.manifest.image_bytes)status=PN_CORRUPT;
-            while(status==PN_OK && !atomic_load(&s->stop)){
-                int n=esp_http_client_read(h,(char *)s->scratch,OTA_CHUNK);
-                if(n<0){status=PN_IO;break;}
-                if(!n){if(!esp_http_client_is_complete_data_received(h))status=PN_IO;break;}
-                status=pn_update_feed(&s->update,s->scratch,(size_t)n);atomic_store(&s->progress,s->update.received);vTaskDelay(1);
-            }
-            esp_http_client_close(h);esp_http_client_cleanup(h);
-            if(atomic_load(&s->stop))status=PN_CANCELLED;
-            if(status==PN_OK)status=pn_update_finish(&s->update);
-        }
-    }
+    }else status=download(s);
     if(status!=PN_OK)(void)pn_update_cancel(&s->update);
     s->result=status;atomic_store_explicit(&s->worker_done,true,memory_order_release);vTaskDelete(NULL);
 }

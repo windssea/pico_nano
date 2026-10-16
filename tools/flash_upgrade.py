@@ -31,7 +31,7 @@ def run(command):
 
 
 def flash(root, port, baud, before):
-    """只读核对分区后，仅写应用。 / Read-check the partition table, then write only the application."""
+    """只读核对分区后写应用；用过OTA时另清空otadata。 / Read-check the partition table, write the application, and blank otadata only after OTA use."""
     manifest, expected = verify_package(root)
     print(f"PicoNano source: {manifest['source_commit']}", flush=True)
     base = [sys.executable, "-m", "esptool", "--chip", "esp32s3", "--port", port,
@@ -45,8 +45,8 @@ def flash(root, port, baud, before):
     actual = readback.read_bytes()
     if len(actual) != 0x1000 or actual[:0xC00] != expected:
         raise ValueError("Device partition table differs; no firmware was written")
-    # ROM串口无法证明实际运行槽；使用过OTA后拒绝旧的固定ota_0写入方式。
-    # ROM serial cannot prove the running slot; reject fixed ota_0 writes after OTA has been used.
+    # ROM串口无法证明实际运行槽；用过OTA时写完ota_0再清空otadata，让启动确定回到ota_0。
+    # ROM serial cannot prove the running slot; after OTA use, blank otadata once ota_0 is written so boot deterministically returns to ota_0.
     ranges = []
     for offset in range(0, len(expected), 32):
         if expected[offset:offset+2] != b"\xaa\x50":
@@ -60,11 +60,21 @@ def flash(root, port, baud, before):
         raise ValueError("OTA readback already exists; retain it separately before retrying")
     run(base + ["--before", "no-reset", "--after", "no-reset", "read-flash", hex(ranges[0][0]), "0x2000", str(ota_readback)])
     ota = ota_readback.read_bytes()
-    if len(ota) != 0x2000 or ota != b"\xff" * 0x2000:
-        raise ValueError("OTA selection is active or incomplete; use full installation with backup, no firmware was written")
-    # esptool自动校验写入数据；原生USB用watchdog复位退出下载模式。 / esptool verifies writes; watchdog reset exits native USB download mode.
-    run(base + ["--before", "no-reset", "--after", "watchdog-reset", "write-flash",
+    if len(ota) != 0x2000:
+        raise ValueError("OTA selection read is incomplete; no firmware was written")
+    reset_ota = ota != b"\xff" * 0x2000
+    # esptool自动校验写入数据；原生USB用watchdog复位退出下载模式。先写应用后清选择，中途断电仍启动原有效槽。
+    # esptool verifies writes; watchdog reset exits native USB download mode. App first, selection last: a power loss in between still boots the previous valid slot.
+    run(base + ["--before", "no-reset", "--after", "no-reset" if reset_ota else "watchdog-reset", "write-flash",
                 "0x20000", str(root / "pico_nano.bin")])
+    if reset_ota:
+        print("OTA selection was in use; blanking it so the device boots ota_0.", flush=True)
+        run(base + ["--before", "no-reset", "--after", "no-reset", "erase-region", hex(ranges[0][0]), "0x2000"])
+        blanked = root / "device-otadata-after.bin"
+        blanked.unlink(missing_ok=True)
+        run(base + ["--before", "no-reset", "--after", "watchdog-reset", "read-flash", hex(ranges[0][0]), "0x2000", str(blanked)])
+        if blanked.read_bytes() != b"\xff" * 0x2000:
+            raise ValueError("OTA selection did not read back blank; rerun the upgrade before using the device")
     print("Write and device hash verification completed. Check device startup separately.", flush=True)
 
 

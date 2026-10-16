@@ -54,8 +54,33 @@ class UpgradeTests(unittest.TestCase):
             self.assertIn("watchdog-reset", command)
             self.assertEqual(run.call_count, 3)
 
-    def test_used_or_short_otadata_never_writes(self):
-        for data in (b"\xff"*4096, b"\0"+b"\xff"*8191):
+    def test_used_otadata_is_blanked_after_application(self):
+        used = b"\0" + b"\xff" * 8191
+        def execute(command):
+            if "read-flash" in command:
+                at = command[command.index("read-flash") + 1]
+                data = self.table + b"\xff" * 0x400 if at == "0x8000" else used if command[-1].endswith("readback.bin") else b"\xff" * 0x2000
+                pathlib.Path(command[-1]).write_bytes(data)
+        with mock.patch.object(MODULE, "run", side_effect=execute) as run:
+            MODULE.flash(self.root, "TEST", 115200, "usb-reset")
+            commands = [call.args[0] for call in run.call_args_list]
+            verbs = [next(v for v in ("read-flash", "write-flash", "erase-region") if v in c) for c in commands]
+            self.assertEqual(verbs, ["read-flash", "read-flash", "write-flash", "erase-region", "read-flash"])
+            self.assertEqual(commands[3][commands[3].index("erase-region") + 1:], ["0xf000", "0x2000"])
+            self.assertNotIn("watchdog-reset", commands[2])
+            self.assertIn("watchdog-reset", commands[4])
+
+    def test_otadata_not_blank_after_erase_is_reported(self):
+        def execute(command):
+            if "read-flash" in command:
+                at = command[command.index("read-flash") + 1]
+                pathlib.Path(command[-1]).write_bytes(self.table + b"\xff" * 0x400 if at == "0x8000" else b"\0" * 0x2000)
+        with mock.patch.object(MODULE, "run", side_effect=execute):
+            with self.assertRaisesRegex(ValueError, "blank"):
+                MODULE.flash(self.root, "TEST", 115200, "usb-reset")
+
+    def test_short_otadata_never_writes(self):
+        for data in (b"\xff"*4096,):
             with tempfile.TemporaryDirectory() as tmp:
                 root=pathlib.Path(tmp)
                 for name in ("manifest.json","pico_nano.bin","expected-partition-table.bin"):
@@ -64,7 +89,7 @@ class UpgradeTests(unittest.TestCase):
                     self.assertIn("read-flash",command)
                     pathlib.Path(command[-1]).write_bytes(self.table+b"\xff"*0x400 if command[command.index("read-flash")+1]=="0x8000" else data)
                 with mock.patch.object(MODULE,"run",side_effect=execute) as run:
-                    with self.assertRaisesRegex(ValueError,"OTA selection"):
+                    with self.assertRaisesRegex(ValueError,"incomplete"):
                         MODULE.flash(root,"TEST",115200,"usb-reset")
                     self.assertEqual(run.call_count,2)
 
