@@ -96,7 +96,7 @@ void heap_caps_free(void *p){free(p);}
 int64_t esp_timer_get_time(void){return clock_us;}
 void vTaskDelete(void *t){(void)t;longjmp(end,1);}
 void vTaskDelay(unsigned n){assert(n==10);if(sd_async && loop_delays++<10){clock_us+=100000;return;}if(wake_idle && loop_delays++==0){clock_us=301000000;return;}longjmp(end,1);}
-int xTaskCreatePinnedToCore(void (*fn)(void *),const char *name,unsigned stack,void *arg,unsigned priority,void *handle,int core){(void)name;(void)arg;(void)priority;(void)handle;assert(stack==32768 && core==1);worker=fn;return 1;}
+int xTaskCreatePinnedToCore(void (*fn)(void *),const char *name,unsigned stack,void *arg,unsigned priority,void *handle,int core){(void)name;(void)arg;(void)priority;(void)handle;assert(stack==36864 && core==1);worker=fn;return 1;}
 int main(int argc,char **argv){assert(argc==2);sd_async=strcmp(argv[1],"sd_async")==0;if(sd_async){(void)mkdir("/data",0700);(void)mkdir("/data/progress",0700);}wake_idle=strcmp(argv[1],"wake_idle")==0;nvs_bad=strcmp(argv[1],"nvs")==0;vcom_bad=strcmp(argv[1],"vcom")==0;mount_bad=strcmp(argv[1],"mount")==0;ready_bad=strcmp(argv[1],"ready")==0;underrun=strcmp(argv[1],"underrun")==0;app_main();assert(worker);if(!setjmp(end))worker(NULL);
     // 睡眠推进时钟后，同一循环不能把新last_input减出无符号下溢并再次锁屏。/ Advancing time in sleep must not underflow the new last_input and lock again in the same iteration.
     if(sd_async)assert(sd_remounts==1 && sd_polls>=3 && presents>=3);

@@ -10,7 +10,7 @@
 #define PN_HW_POOL_BYTES (6u*1024u*1024u)
 #define PN_HW_PSRAM_RESERVE (256u*1024u)
 /// 产品worker任务栈，以字节计。/ Product worker stack in bytes.
-#define PN_HW_PRODUCT_STACK_BYTES 32768u
+#define PN_HW_PRODUCT_STACK_BYTES 36864u ///< 实测最低余量约4.3KiB；随FreeType光栅池8KiB同步加4KiB / Measured minimum headroom about 4.3 KiB; grown 4 KiB with the 8 KiB FreeType raster pool
 /// 当前面板逻辑像素与原生灰阶。/ Current panel logical pixels and native gray levels.
 #define PN_HW_WIDTH 684u
 #define PN_HW_HEIGHT 1216u
