@@ -1,6 +1,6 @@
 // 中文传输队列，原文只读；名称使用textContent。/ Chinese transfer queue, read-only originals and textContent names.
 import {SHA256} from './sha256.mjs';
-const $=id=>document.getElementById(id),kinds={book:{label:'书籍',accept:'.txt,.epub',hint:'TXT、EPUB 电子书，支持多本添加',limit:512*1024*1024},font:{label:'字体',accept:'.ttf,.otf',hint:'TTF、OTF 字体，最大 32 MiB',limit:32*1024*1024},cover:{label:'封面',accept:'.png,.jpg,.jpeg',hint:'PNG、JPEG 图片，最大 8 MiB',limit:8*1024*1024},wallpaper:{label:'锁屏图片',accept:'.png,.jpg,.jpeg',hint:'上传后在阅读器菜单“锁屏壁纸”中预览并应用',limit:8*1024*1024}};
+const $=id=>document.getElementById(id),kinds={book:{label:'书籍',accept:'.txt,.epub',hint:'TXT、EPUB 电子书，支持多本添加',limit:512*1024*1024},font:{label:'字体',accept:'.ttf,.otf',hint:'TTF、OTF 字体，最大 32 MiB',limit:32*1024*1024},cover:{label:'封面',accept:'.png,.jpg,.jpeg',hint:'PNG、JPEG 图片，大图会在上传前自动缩小',limit:8*1024*1024},wallpaper:{label:'锁屏图片',accept:'.png,.jpg,.jpeg',hint:'大图会在上传前自动缩小；上传后在阅读器菜单“锁屏壁纸”中预览并应用',limit:8*1024*1024}};
 let kind='book',token=null,running=false,entries=[],resourceGeneration=0;
 function notice(text,error=false){$('notice').textContent=text;$('notice').classList.toggle('error',error);}
 function connected(value){$('connection').textContent=value?'已连接':'正在连接';$('connection').classList.toggle('connected',value);if(!value)$('network-panel').hidden=true;else loadNetwork();syncFonts();render();}
@@ -63,14 +63,24 @@ async function removeFont(item,selected){
 const suffixOf=name=>name.includes('.')?'.'+name.split('.').pop().toLowerCase():'';
 const accepts=(k,suffix)=>kinds[k].accept.split(',').includes(suffix);
 async function fontHeader(file){try{const b=new Uint8Array(await file.slice(0,4).arrayBuffer());const tag=String.fromCharCode(...b);return tag==='OTTO'?'.otf':tag==='\0\x01\0\0'||tag==='true'?'.ttf':'';}catch(error){return '';}}
+// 封面/锁屏图上传前在浏览器里处理：按EXIF转正，长边超过1824（面板1.5倍）时缩小；渐进JPEG/交错PNG重编码为基线JPEG/普通PNG，免设备整图解码内存不足；PNG保持PNG以保留透明。失败或无收益时保留原图。
+// Covers/lock images are prepared in the browser before upload: EXIF-upright, shrunk when the long edge exceeds 1824 (1.5x the panel); progressive JPEG / interlaced PNG are re-encoded as baseline JPEG / plain PNG so the device avoids whole-image decode OOM; PNG stays PNG to keep transparency. Failures or no gain keep the original.
+const IMAGE_EDGE=1824;
+async function imageNeeds(file,png){try{const b=new Uint8Array(await file.slice(0,Math.min(file.size,262144)).arrayBuffer());if(png)return b.length>28&&b[28]===1;for(let i=2;i+3<b.length;){if(b[i]!==0xff){i++;continue;}const m=b[i+1];if(m===0xc2||m===0xc6||m===0xca||m===0xce)return true;if(m===0xda||m===0xd9)return false;if(m===0xff||m===0x01||(m>=0xd0&&m<=0xd7)){i+=2;continue;}i+=2+((b[i+2]<<8)|b[i+3]);}return false;}catch{return false;}}
+async function prepareImage(file,name){const png=suffixOf(name)==='.png';if(typeof createImageBitmap!=='function')return {file};let bitmap;try{bitmap=await createImageBitmap(file,{imageOrientation:'from-image'});}catch{return {file};}
+ try{const scale=Math.min(1,IMAGE_EDGE/Math.max(bitmap.width,bitmap.height)),w=Math.max(1,Math.round(bitmap.width*scale)),h=Math.max(1,Math.round(bitmap.height*scale));const needed=scale<1||await imageNeeds(file,png);if(!needed)return {file};
+  const canvas=document.createElement('canvas');canvas.width=w;canvas.height=h;const g=canvas.getContext('2d');if(!png){g.fillStyle='#fff';g.fillRect(0,0,w,h);}g.drawImage(bitmap,0,0,w,h);
+  const blob=await new Promise(resolve=>canvas.toBlob(resolve,png?'image/png':'image/jpeg',0.9));if(!blob||!blob.size)return {file};
+  return {file:new File([blob],name,{type:blob.type}),note:w+'×'+h};}finally{bitmap.close?.();}}
 async function add(files){for(const file of files){let name=file.name,target=kind;const suffix=suffixOf(name);
  if(!accepts(target,suffix)){const other=['book','font'].find(k=>accepts(k,suffix));if(other)target=other;else if(kind==='font'){const ext=await fontHeader(file);if(ext){name=(name||'font')+ext;}}}
  if(!accepts(target,suffixOf(name))){notice('“'+file.name+'”不是'+kinds[kind].label+'支持的格式：'+kinds[kind].hint+'。',true);continue;}
  if(!file.size){notice('“'+file.name+'”是空文件。',true);continue;}
- if(file.size>kinds[target].limit){notice('“'+file.name+'”有 '+size(file.size)+'，超过'+kinds[target].label+'上限 '+size(kinds[target].limit)+'。',true);continue;}
+ let upload=file;if(target==='cover'||target==='wallpaper'){const prepared=await prepareImage(file,name);upload=prepared.file;if(prepared.note)notice('“'+file.name+'”已在浏览器优化为 '+prepared.note+'（'+size(file.size)+' → '+size(upload.size)+'）。');}
+ if(upload.size>kinds[target].limit){notice('“'+file.name+'”有 '+size(upload.size)+'，超过'+kinds[target].label+'上限 '+size(kinds[target].limit)+'。',true);continue;}
  if(entries.length>=32){notice('一次最多添加 32 项。',true);break;}
  if(target!==kind)notice('“'+file.name+'”已按'+kinds[target].label+'发送。');
- entries.push({file,name,kind:target,state:'等待发送',offset:0,progress:0,paused:false,cancelled:false});}render();}
+ entries.push({file:upload,name,kind:target,state:'等待发送',offset:0,progress:0,paused:false,cancelled:false});}render();}
 $('files').onchange=()=>{add($('files').files);$('files').value='';};$('choose').onclick=event=>{event.stopPropagation();$('files').click();};$('drop').onclick=()=> $('files').click();$('drop').onkeydown=event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();$('files').click();}};
 for(const event of ['dragenter','dragover'])$('drop').addEventListener(event,e=>{e.preventDefault();$('drop').classList.add('drag');});for(const event of ['dragleave','drop'])$('drop').addEventListener(event,e=>{e.preventDefault();$('drop').classList.remove('drag');if(event==='drop')add(e.dataTransfer.files);});
 function size(bytes){return bytes<1024*1024?(bytes/1024).toFixed(1)+' KiB':(bytes/1024/1024).toFixed(1)+' MiB';}

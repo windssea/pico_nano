@@ -15,7 +15,7 @@ function harness(fetch,bootstrap=false){
   const tabs=['book','font','cover','wallpaper'].map(kind=>{const e=new Element();e.dataset.kind=kind;return e;});
   const context=vm.createContext({document:{getElementById:element,createElement:()=>new Element(),querySelectorAll:()=>tabs},fetch,URLSearchParams,Uint8Array,TextEncoder,location:{hash:'',pathname:'/',search:''},history:{replaceState(){}},sessionStorage:{getItem(){return null;},setItem(){}},setTimeout,clearTimeout,AbortController});
   const source=readFileSync(new URL('../../assets/transfer/app.js',import.meta.url),'utf8').replace(/^import .*;\r?$/m,'');
-  vm.runInContext((bootstrap?source:source.slice(0,source.indexOf('// 打开页面'))+'render();')+'\nglobalThis.qa={token:value=>{token=value;},auth:()=>token,api,remove:removeFont};',context);
+  vm.runInContext((bootstrap?source:source.slice(0,source.indexOf('// 打开页面'))+'render();')+'\nglobalThis.qa={token:value=>{token=value;},auth:()=>token,api,remove:removeFont,needs:imageNeeds,prepare:prepareImage};',context);
   return {context,element,choose:kind=>tabs.find(t=>t.dataset.kind===kind).onclick()};
 }
 const reply=(value,status=200)=>({ok:status<400,status,json:async()=>value});
@@ -56,4 +56,16 @@ test('idempotent chunk retries retain offset and bytes; creation is never replay
  const result=await h.context.qa.api('/uploads/id/chunks','PUT',bytes,{'X-Offset':'0'});
  assert.equal(result.next_offset,3);assert.equal(puts,2);assert.equal(bodies[0].body,bodies[1].body);assert.equal(bodies[1].headers['X-Offset'],'0');
  await assert.rejects(h.context.qa.api('/uploads','POST',{}),/network lost/);assert.equal(posts,1);
+});
+
+test('progressive JPEG and interlaced PNG need re-encoding; baseline and plain do not',async()=>{
+ const h=harness(()=>Promise.resolve(reply({})));const jpeg=sof=>new Blob([new Uint8Array([0xff,0xd8,0xff,0xe0,0,4,0,0,0xff,sof,0,4,0,0,0xff,0xda,0,2])]);
+ assert.equal(await h.context.qa.needs(jpeg(0xc2),false),true);assert.equal(await h.context.qa.needs(jpeg(0xc0),false),false);
+ const png=flag=>{const b=new Uint8Array(33);b[28]=flag;return new Blob([b]);};
+ assert.equal(await h.context.qa.needs(png(1),true),true);assert.equal(await h.context.qa.needs(png(0),true),false);
+});
+
+test('image preparation keeps the original when the browser cannot decode',async()=>{
+ const h=harness(()=>Promise.resolve(reply({})));const file=new Blob([new Uint8Array([1,2,3])]);
+ const prepared=await h.context.qa.prepare(file,'cover.jpg');assert.equal(prepared.file,file);assert.equal(prepared.note,undefined);
 });

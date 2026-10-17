@@ -11,7 +11,7 @@
 | `/piconano/books/` | 已校验TXT/EPUB | 书架固定扫描根，未实现格式不因扩展名通过而安装成功 |
 | `/piconano/fonts/` | 已校验TTF，最多32MiB/文件 | 字体管理/选择；上传不自动替换当前字体 |
 | `/piconano/covers/` | 封面JPEG/PNG原图 | 通过书名主体关联 |
-| `/piconano/wallpapers/` | 锁屏JPEG/PNG原图 | 用户预览/裁切/旋转并应用 |
+| `/piconano/wallpapers/` | 锁屏JPEG/PNG原图（网页上传的大图/渐进JPEG/交错PNG为浏览器优化副本） | 用户预览/裁切/旋转并应用 |
 | `/piconano/.readpico/covers/` | 可重建缩略图 | 不与封面原图混放 |
 | `/piconano/.readpico/indexes/library.pni` | 可重建书库索引 | 介质/目录变动失效，打开书仍完整核对SHA |
 | `/piconano/.readpico/masks/` | 可重建透明锁屏灰度/透明平面 | 原图路径/大小/mtime/变换为键，CRC 损坏即重建，可整目录删除 |
