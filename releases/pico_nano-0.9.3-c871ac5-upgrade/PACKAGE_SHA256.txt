@@ -1,0 +1,2 @@
+e19faf1dadfed1aab1db90c4ca0a22fd6209e342ae26dd4272fad6136769fe1a  PicoNano-c871ac5-upgrade.zip
+cead7cb6d1952a69cf25e480e5c6e91753bd3f6855d60d2b50a145d9d45c8e88  PicoNano-web-installer-c871ac5.zip
