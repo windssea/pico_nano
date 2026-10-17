@@ -36,6 +36,11 @@ pn_status_t pn_font_preferences_load(const pn_journal_io_t *,pn_pool_t *,const p
 pn_status_t pn_font_preferences_resolve(const pn_journal_io_t *global,const pn_journal_io_t *per_book,pn_pool_t *,const pn_book_id_t *,pn_font_preferences_t *,bool *from_book);
 /// 绑定既有root的全局或逐书路径，不创建目录。/ Bind global/per-book paths under existing root without creating directories.
 pn_status_t pn_font_preferences_files(pn_journal_files_t *,pn_media_t *,const pn_media_lease_t *,const char *,const pn_book_id_t *,pn_journal_io_t *);
+/// 绑定root下的系统（界面）字体选择记录，格式同全局阅读记录，不创建目录。/ Bind the system (UI) font choice record under root, in the global reading format, without creating directories.
+pn_status_t pn_font_preferences_system_files(pn_journal_files_t *,pn_media_t *,const pn_media_lease_t *,const char *,pn_journal_io_t *);
+/// 读出所选系统字体路径：记录存在、是字体目录内的文件且仍可stat时OK；未选/文件已删EMPTY（调用方回退默认），记录损坏返回错误。
+/// Read the chosen system font path: OK when the record names a file inside the fonts directory that still stats; EMPTY when unset or deleted (callers fall back to the default); errors for damaged records.
+pn_status_t pn_font_preferences_system_path(pn_media_t *state,const char *root,pn_pool_t *,const char *fonts_dir,char *out,size_t cap);
 /// 校验预期大小和完整SHA；不代替字体引擎校验。/ Verify expected size and complete SHA; does not replace font-engine validation.
 pn_status_t pn_font_reference_verify(const pn_font_reference_t *,pn_media_t *,const pn_media_lease_t *);
 /// 完整校验字体原文，借用pool临时缓冲而不缓存路径身份。 / Verify full font content using a temporary pool buffer without caching identity by path.

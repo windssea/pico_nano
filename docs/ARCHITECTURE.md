@@ -166,6 +166,8 @@ PNSM固定小端编码保存紧凑文本、样式、locator、全章统计和窗
 
 ## 字体、灰阶与阅读线
 
+字重（排版“字重”，单书schema5）由[pn_font_weight](../components/pn_font/pn_font.c)在光栅前对轮廓按字号1/48每级外扩或内缩，字宽沿用原值，分页键不含字重；改变时丢弃该引擎字形缓存，补字链与界面中文回退同步字重。字体引擎另编入FreeType CFF/psaux/pshinter以支持CFF轮廓OTF。系统字体可由字体管理选择（`system-font`记录），产品与模拟器共用[pn_font_preferences_system_path](../components/pn_storage/pn_font_preferences.c)解析，所选文件缺失或打不开回到默认HarmonyOS文件再回到内置应急字库。
+
 [pn_font.c](../components/pn_font/pn_font.c) 使用固定 FreeType 2.14.3 子集构建，完整 TTF 按需读，度量与字形缓存纳入池；默认正文黑体、外置主字体/备用字体及常驻中文 fallback 分层。界面中文不依赖用户正文字体，删除/缺卡/源失效时保持 UI 可用并提示正文回退。
 
 系统UI可加载TF固定 `piconano/fonts/HarmonyOS_Sans_SC_Regular.ttf` 完整字库，产品owner持有不可变文件源及READ租约，脸和字形仍受既有池预算约束，不将整TTF载入RAM。缺失/损坏/介质失效使用内置应急源；停止阅读及UI消费者后才关闭系统源，USB/传输/字体管理交接前释放，恢复产品访问重新核验。主机加载同源实现，只替换配置目录。文件身份摘要绑定实际消费句柄，不按路径/mtime跨关闭复用；字号/排版键重算使用同一已核验摘要，关闭、重新打开和换卡失效。
@@ -227,6 +229,12 @@ EPUB目录在同一资格入口下复用滚动控制器和设备出口。十行�
 `Present` 记录 reading/management/requested/maintenance/manual/unknown-reference/underrun 原因；`Display stages` 拆 dirty/convert/power/scan/remember，另有 queue/wait/receipt。等待包含实际面板扫描，不能当纯 CPU 准备时间，子阶段不重复相加。
 
 0.6.6 新增内容风险与区域维护（`main/device_refresh.c`）：比较真实板级前/后帧的正文1152px，不增加全屏副本。旧帧中间灰覆盖≥1/6或深色覆盖≥1/3，且至少1/10正文从灰/深色变回近白时，当前呈现提前提升为GC16；这是可调整的像素风险阈值，不是实际残影检测。普通阅读仍每页全像素GL16与6/14/24页兜底。管理页以19个64px逻辑带记账，第六次局部更新扩展到涉及带的全宽，在同一次GL16扫描内整理；成功后仅重置覆盖带，管理24次GC16兜底继续保留。不变帧、失败与取消不计；GC16成功才重置维护状态。日志新增`content-transition`、`regional-settle`及`maintenance`耗时。波形、VCOM与PMU时序不改，光学收益待真机。
+
+### 同起点GL16与水波纹翻页（开发树）
+
+原GL16各迁移按同一相结束排列：灰边（4/8/12→15）第7～15相先压黑、黑芯（0→15）第16相才擦白，新字浅边（15→12）第14相、黑芯（15→0）第21相才起步，翻页时旧字像描了黑边、新字先现空心。[device_wave.c](../main/device_wave.c)在启动时从原表只读派生GL16：以黑芯/灰边擦白中最早起点为基准相S，晚于S起步的迁移把完整原动作段整体前移到S，早于S的不动；每像素动作序列、压黑/擦白次数和相数不增加，DU/GC16借用原表。失败保持原表。它改变的是各迁移的起步时间，光学观感与灰阶须真机确认。
+
+水波纹（设置“翻页效果”，输入标志位6–7=3、PNIP v3）只用于真实上一页/下一页且参考已知：[pn_turn_present](../components/pn_reader/pn_turn_transition.c)把GL16/GC16档改为`PN_REFRESH_RIPPLE(_REVERSE)`，显示owner用[device_ripple.c](../main/device_ripple.c)执行完整原GC16，8个弧形等级（[同源几何](../components/pn_display/pn_ripple.c)，圆心在翻页侧外320px）各延迟1相，共43拍。载体波形只复制原GC16前36相供前导跳过读取；`-Wl,--wrap=find_lut_functions`仅在水波纹活动时替换构表/查表对：每拍为8级各构一张片内1KiB原LUT，查表按输入行指针（须为冻结差分缓冲内整行）确定物理行，长段调用原S3查表、跨段4像素组逐像素选表，未起步/已完成等级输出保持；坏指针整行保持并使本次失败。全部像素（含同色与页脚）都驱动，本身即清残影，成功按GC16记账，水波纹模式不再周期闪屏。片内LUT 8KiB与两方向行段表各约31KiB（PSRAM）在产品任务首次选用时分配，不足时退回直接显示。模拟器只按同源等级逐级示意顺序，不代表粒子光学。
 
 ## USB 直接复制与TF独占（0.6.6开发预览）
 

@@ -88,3 +88,5 @@ bool pn_font_system_available(void);
 /// 仅报告需先关闭消费者的保留外置源；不校验取消/介质，不是可读取证明。
 /// Report only a retained external source whose consumers must close first; this does not validate cancellation/media or prove readability.
 bool pn_font_system_retained(void);
+/// 当前保留的外置系统字体路径，没有时为空串。/ Path of the retained external system font, or an empty string.
+const char *pn_font_system_path(void);

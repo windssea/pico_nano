@@ -18,6 +18,7 @@
 #define PN_FMU_DELETE 5
 #define PN_FMU_CONFIRM 6
 #define PN_FMU_CANCEL 7
+#define PN_FMU_SYSTEM 8 ///< 设为/恢复系统（界面）字体 / Set or restore the system (UI) font
 #define PN_FMU_ROW 16
 typedef pn_status_t (*pn_font_manage_present_fn)(void *,const pn_frame_t *,pn_refresh_t); ///< 与阅读呈现同签名 / Same signature as reader presentation
 typedef enum {PN_FMU_LIST=0,PN_FMU_DETAIL=1,PN_FMU_CONFIRMING=2} pn_font_manage_screen_t; ///< 列表/详情/删除确认 / List/detail/delete confirmation
@@ -27,6 +28,7 @@ typedef struct {
     bool presented; ///< 最近绘制已呈现 / Latest drawing was presented
     pn_font_manage_screen_t screen; ///< 当前页面 / Current screen
     pn_status_t last; ///< 最近一次写操作结果，未操作EMPTY / Latest write result, EMPTY before any
+    bool system_changed; ///< 改过系统字体，调用方关闭后须重载界面字体 / The system font changed; callers must reload the UI face after closing
 } pn_font_manage_t;
 
 /// 安静时由控制层调用：每轮最多准备一个可见字体小样，全部结论就绪后合并一次GL16；绘制函数不打开小样字体。

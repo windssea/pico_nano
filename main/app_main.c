@@ -855,11 +855,18 @@ static void system_font_ready(void){
         // 仍被借用的旧外置源先归还；不可变内置源可以等新源成功后再关闭，失败保留其字形。
         // Retire consumers of an old external source first; immutable resident consumers close only after a new source succeeds, preserving glyphs on failure.
         bool retired=opening && pn_font_system_retained();if(retired)management_fonts_close();
-        pn_status_t s=pn_font_system_open(&pool,&sd_media,PN_SD_MOUNT "/" PN_SD_SYSTEM_FONT);
+        // 字体管理里选的系统字体优先；未选、已删除或打不开时回到默认系统字体，再不行用内置应急字库。
+        // The system font chosen in font management wins; unset, deleted or unopenable choices fall back to the default system font, then the resident emergency face.
+        static char chosen[PN_FONT_REFERENCE_PATH_MAX];const char *path=PN_SD_MOUNT "/" PN_SD_SYSTEM_FONT;
+        if(opening && data_ready && pn_font_preferences_system_path(&data_media,"/data/progress",&pool,PN_SD_MOUNT "/" PN_SD_FONTS,chosen,sizeof chosen)==PN_OK)path=chosen;
+        // 已可用时用当前路径复核（快速路径），不因默认路径不同而重开。/ When available, recheck the current path via the fast path instead of reopening a different default.
+        if(!opening && *pn_font_system_path())path=pn_font_system_path();
+        pn_status_t s=pn_font_system_open(&pool,&sd_media,path);
+        if(s!=PN_OK && s!=PN_CANCELLED && path==chosen){ESP_LOGW(TAG,"Chosen system font unavailable: %d; using default",(int)s);path=PN_SD_MOUNT "/" PN_SD_SYSTEM_FONT;s=pn_font_system_open(&pool,&sd_media,path);}
         if(s==PN_OK){system_font_failure.stable=false;if(opening && !retired)management_fonts_close();}
         else if(s!=PN_CANCELLED && pn_cancel_checkpoint()==PN_OK && sd_media.available){
             bool stable=s==PN_CORRUPT || s==PN_UNSUPPORTED;
-            if(s==PN_IO){struct stat info;stable=stat(PN_SD_MOUNT "/" PN_SD_SYSTEM_FONT,&info)!=0 && errno==ENOENT;}
+            if(s==PN_IO){struct stat info;stable=stat(path,&info)!=0 && errno==ENOENT;}
             if(stable){system_font_failure.epoch=sd_media.epoch;system_font_failure.stable=true;}
         }
         if(opening)ESP_LOGI(TAG,"System font open status=%d elapsed=%llu ms epoch=%llu",(int)s,(unsigned long long)(now_ms()-started),(unsigned long long)sd_media.epoch);
@@ -1205,6 +1212,8 @@ static void begin_settings(void){
     pn_wallpaper_mask_close(&lock_mask);
     reading_menu=false;
     if(!data_ready)data_ready=mount_data();
+    // 从字体管理返回时系统字体可能已更换，先按新选择加载再画设置。/ Returning from font management may have changed the system font; load the new choice before painting settings.
+    system_font_ready();
     pn_profile_span_t span;pn_profile_begin(&span,NULL,"ui.settings.open");
     pn_status_t status=pn_settings_ui_open_cached(&settings_ui,&pool,data_ready?&data_media:NULL,data_ready?"/data/progress":NULL,pool.limit>=4u*1024u*1024u?&management_font:NULL,present,NULL);
     pn_profile_end(&span,status);

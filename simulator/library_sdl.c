@@ -241,6 +241,9 @@ static void covers_ensure(library_t *s){
 static void system_font_ready(library_t *s){
     if(!s->font_dir || pn_font_system_available())return;
     pn_font_close(&s->font);char path[PN_FONT_REFERENCE_PATH_MAX];int n=snprintf(path,sizeof path,"%s/HarmonyOS_Sans_SC_Regular.ttf",s->font_dir);
+    // 与设备同源：字体管理所选系统字体优先，失败回到默认。/ Same as the device: the font-management choice wins, falling back to the default on failure.
+    char chosen[PN_FONT_REFERENCE_PATH_MAX];
+    if(s->state_dir && *s->state_dir && pn_font_preferences_system_path(&s->state_media,s->state_dir,s->pool,s->font_dir,chosen,sizeof chosen)==PN_OK && pn_font_system_open(s->pool,&s->media,chosen)==PN_OK)return;
     if(n>0 && (size_t)n<sizeof path)(void)pn_font_system_open(s->pool,&s->media,path);
 }
 static pn_status_t list_motion_present(void *,pn_list_stage_t,const pn_frame_t *,pn_follow_box_t,const pn_follow_job_t *);
@@ -369,6 +372,7 @@ static void open_actions(library_t *s,int index){
 static int shelf_hit(library_t *s,int x,int y){pn_shelf_options_t o=shelf_options(s);return pn_shelf_hit_ex(s->page,x,y,&o);}
 static pn_status_t open_settings(library_t *s){
     pn_status_t dropped=pn_hot_session_drop(&s->hot);if(dropped!=PN_OK)return dropped;
+    system_font_ready(s);
     pn_status_t status=pn_settings_ui_open_cached(&s->settings,s->pool,&s->state_media,s->state_dir,s->pool->limit>=4u*1024u*1024u?&s->font:NULL,present,s);
     if(status==PN_OK){pn_settings_about_t about={0};storage_note(s);snprintf(about.version,sizeof about.version,"版本 %s · PC 模拟器",PN_PRODUCT_VERSION);snprintf(about.storage,sizeof about.storage,"%s",s->storage);
         snprintf(about.internal,sizeof about.internal,"%s",s->state_dir?"可用（--state-dir）":"未指定 --state-dir");snprintf(about.screen,sizeof about.screen,"684×1216 · 16 级灰阶（模拟）");pn_settings_ui_set_about(&s->settings,&about);

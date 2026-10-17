@@ -27,8 +27,10 @@ typedef struct {
     pn_pool_t *pool;pn_media_t *fonts,*state;char font_dir[PN_CATALOG_PATH_MAX],state_dir[PN_JOURNAL_PATH_MAX];
     pn_font_t ui;uint8_t *pixels;pn_frame_t canvas;pn_catalog_page_t page;
     pn_font_preferences_t global;bool global_known,global_set;
+    pn_font_preferences_t system;bool system_known,system_set; ///< 系统（界面）字体选择 / System (UI) font choice
     pn_media_lease_t guard;pn_font_asset_t asset;pn_font_reference_t reference;pn_font_info_t info;unsigned checked,missing;
     char selected[PN_CATALOG_PATH_MAX],name[PN_CATALOG_NAME_MAX],message[128];
+    bool system_changed; ///< 本次打开改过系统字体，关闭后调用方重载 / The system font changed during this session; callers reload after closing
     uint8_t samples[PN_CATALOG_PAGE_MAX][46*46/2]; ///< 有界原生字体小样槽，约8KiB / Bounded native font tile slots, about 8 KiB
     bool sample_ready[PN_CATALOG_PAGE_MAX]; ///< 已生成可显示样例 / Generated displayable samples
     bool sample_checked[PN_CATALOG_PAGE_MAX]; ///< 本页已确认成功或损坏，瞬态失败仍可重试 / Success or corrupt input confirmed for this page; transient failures remain retryable
@@ -73,19 +75,23 @@ static void sample_tile(fm_t *f,size_t index,int y){
         for(int row=0;row<46;row++)for(int x=0;x<46;x++)pn_frame_pixel(&f->canvas,53+x,y+27+row,pn_frame_get(&tile,x,row));
         return;}
 }
-/* 读全局记录；读不到保留已知值。/ Read the global record; keep known values when unreadable. */
-static void load_global(fm_t *f){
+/* 读全局阅读或系统字体记录；读不到保留已知值。/ Read the global reading or system font record; keep known values when unreadable. */
+static void load_record(fm_t *f,bool system){
     if(!f->state)return;
     pn_media_lease_t lease;
     if(pn_media_acquire(f->state,PN_MEDIA_READ,&lease)!=PN_OK)return;
     pn_journal_files_t files;pn_journal_io_t io;pn_font_preferences_t g;
-    pn_status_t status=pn_font_preferences_files(&files,f->state,&lease,f->state_dir,NULL,&io);
+    pn_status_t status=system?pn_font_preferences_system_files(&files,f->state,&lease,f->state_dir,&io):pn_font_preferences_files(&files,f->state,&lease,f->state_dir,NULL,&io);
     if(status==PN_OK)status=pn_font_preferences_load(&io,f->pool,NULL,&g);
     (void)pn_media_release(f->state,&lease);
-    if(status==PN_OK){f->global=g;f->global_known=f->global_set=true;}
-    else if(status==PN_EMPTY){f->global_known=true;f->global_set=false;}
-    else if(status==PN_CORRUPT || status==PN_UNSUPPORTED)f->global_known=false;
+    pn_font_preferences_t *out=system?&f->system:&f->global;bool *known=system?&f->system_known:&f->global_known,*set=system?&f->system_set:&f->global_set;
+    if(status==PN_OK){*out=g;*known=*set=true;}
+    else if(status==PN_EMPTY){*known=true;*set=false;}
+    else if(status==PN_CORRUPT || status==PN_UNSUPPORTED)*known=false;
 }
+static void load_global(fm_t *f){load_record(f,false);load_record(f,true);}
+/// 当前系统字体是否为该文件。/ Whether the current system font is this file.
+static bool is_system(const fm_t *f,const char *path){return f->system_known && f->system_set && f->system.primary.kind==PN_FONT_FILE && !strcmp(f->system.primary.path,path);}
 static pn_status_t load_page(fm_t *f,const char *cursor,bool previous){
     pn_catalog_page_t *next=pn_alloc_tagged(f->pool,PN_MEM_UI,sizeof *next);
     if(!next)return PN_NO_MEMORY;
@@ -178,21 +184,28 @@ static pn_status_t scroll_rows(fm_t *f){
 static pn_status_t draw_screen(fm_t *f,pn_font_manage_screen_t screen){
     pn_frame_clear(&f->canvas,15);pn_status_t s=PN_OK;char line[PN_CATALOG_PATH_MAX+128];
     if(screen==PN_FMU_LIST){
-        s=pn_w_header(&f->ui,&f->canvas,"< 返回","阅读字体管理",NULL);
+        s=pn_w_header(&f->ui,&f->canvas,"< 返回","字体管理",NULL);
         // 当前默认字体卡，再列出已安装字体；默认项用对勾标出。/ A card for the current default font, then the installed fonts with the default marked by a check.
         const char *name="默认字体",*note="系统默认阅读字体，不影响界面";
         if(!f->global_known){name="记录不可读";note="阅读默认记录暂时无法读取";}
         else if(f->global_set && f->global.primary.kind!=PN_FONT_RESIDENT){const char *slash=strrchr(f->global.primary.path,'/');name=slash?slash+1:f->global.primary.path;note="跟随全局的书重开后使用它";}
         else if(f->global_set)note="阅读默认使用系统字体";
-        if(s==PN_OK)s=pn_w_group(&f->ui,&f->canvas,"默认阅读字体",DEFAULT_CARD_Y-14);
+        // 系统字体只影响界面；单书字体优先于全局阅读字体，文件被删时都自动回到内置字体。
+        // The system font affects the UI only; per-book fonts override the global reading font, and deleted files fall back to built-ins.
+        char system_line[PN_CATALOG_NAME_MAX+32];
+        if(!f->system_known)snprintf(system_line,sizeof system_line,"系统字体记录暂时无法读取");
+        else if(f->system_set && f->system.primary.kind==PN_FONT_FILE){const char *slash=strrchr(f->system.primary.path,'/');snprintf(system_line,sizeof system_line,"系统字体 · %.*s",(int)PN_CATALOG_NAME_MAX-1,pn_brand_label(slash?slash+1:f->system.primary.path));}
+        else snprintf(system_line,sizeof system_line,"系统字体 · 默认");
+        (void)note;
+        if(s==PN_OK)s=pn_w_group(&f->ui,&f->canvas,"阅读默认与系统字体",DEFAULT_CARD_Y-14);
         pn_w_card(&f->canvas,DEFAULT_CARD_Y,1);
-        if(s==PN_OK)s=pn_w_card_row(&f->ui,&f->canvas,pn_brand_label(name),note,"默认",PN_ICON_FONT,0u,DEFAULT_CARD_Y,true);
+        if(s==PN_OK)s=pn_w_card_row(&f->ui,&f->canvas,pn_brand_label(name),system_line,"阅读",PN_ICON_FONT,0u,DEFAULT_CARD_Y,true);
         if(s==PN_OK)s=pn_w_group(&f->ui,&f->canvas,"外置字体（用户上传）",LIST_ROW_Y-14);
         size_t shown=f->page.count<LIST_ROWS?f->page.count:LIST_ROWS;
         if(f->motion.impl){if(s==PN_OK)s=scroll_rows(f);shown=0;}
         if(shown)pn_w_card(&f->canvas,LIST_ROW_Y,(int)shown);
         for(size_t i=0;i<shown && s==PN_OK;i++){const pn_catalog_item_t *item=&f->page.items[i];bool global=is_global(f,item->path);
-            snprintf(line,sizeof line,"%llu KB%s",(unsigned long long)((item->size+1023)/1024),global?" · 阅读默认":"");
+            snprintf(line,sizeof line,"%llu KB%s%s",(unsigned long long)((item->size+1023)/1024),global?" · 阅读默认":"",is_system(f,item->path)?" · 系统":"");
             int y=LIST_ROW_Y+(int)i*PN_W_CARD_ROW_H;
             s=pn_w_card_row(&f->ui,&f->canvas,pn_brand_label(item->name),line,NULL,PN_ICON_FONT,PN_ROW_CHEVRON,y,i+1==shown);
             // 默认标记只在副标题“· 阅读默认”，不另画会压住长文件名的对勾。/ The default mark lives in the “· 阅读默认” subtitle, without a check icon that overlapped long names.
@@ -218,7 +231,9 @@ static pn_status_t draw_screen(fm_t *f,pn_font_manage_screen_t screen){
         if(s==PN_OK){s=pn_font_size(&f->ui,30);
             if(s==PN_OK)s=pn_w_button(&f->ui,&f->canvas,is_global(f,f->selected)?"恢复系统默认":"设为阅读默认",32,DETAIL_BUTTON_Y,300,96,0u);
             if(s==PN_OK)s=pn_w_button(&f->ui,&f->canvas,protected_font(f)?"保留字库":"删除",352,DETAIL_BUTTON_Y,300,96,0u);
-            if(s==PN_OK){s=pn_font_size(&f->ui,30);if(s==PN_OK)s=pn_w_button(&f->ui,&f->canvas,"返回",32,DETAIL_BACK_Y,620,96,0u);}
+            if(s==PN_OK){s=pn_font_size(&f->ui,30);
+                if(s==PN_OK)s=pn_w_button(&f->ui,&f->canvas,is_system(f,f->selected)?"恢复默认系统字体":"设为系统字体",32,DETAIL_BACK_Y,300,96,0u);
+                if(s==PN_OK)s=pn_w_button(&f->ui,&f->canvas,"返回",352,DETAIL_BACK_Y,300,96,0u);}
             pn_status_t again=pn_font_size(&f->ui,original);if(s==PN_OK)s=again;}
     }else{
         s=pn_w_header(&f->ui,&f->canvas,"","删除字体？",NULL);
@@ -286,20 +301,24 @@ pn_status_t pn_font_manage_open(pn_font_manage_t *ui,pn_pool_t *pool,pn_media_t 
     *ui=(pn_font_manage_t){.impl=f,.active=true,.screen=PN_FMU_LIST,.last=PN_EMPTY};
     (void)show(ui,present,ctx);return PN_OK;
 }
-/* 阅读默认：只选择正文，缺字使用系统回退。/ Reading default: select primary text only, with system fallback for missing glyphs. */
-/// reset为真时恢复系统内置字体为阅读默认。/ With reset, restore the built-in system font as the reading default.
-static pn_status_t set_default_mode(fm_t *f,bool reset){
+/* 阅读默认：只选择正文，缺字使用系统回退；系统字体：只换界面字体。/ Reading default selects body text only with system fallback; the system font changes only the UI face. */
+/// reset为真时恢复内置默认；system选择写系统字体记录。/ With reset, restore the built-in default; system writes the system font record.
+static pn_status_t set_choice(fm_t *f,bool system,bool reset){
     if(!f->state){snprintf(f->message,sizeof f->message,"内部存储不可用，未更改");return PN_UNSUPPORTED;}
-    if(!f->global_known){snprintf(f->message,sizeof f->message,"阅读默认记录不可读，未覆盖");return PN_CORRUPT;}
+    if(!(system?f->system_known:f->global_known)){snprintf(f->message,sizeof f->message,system?"系统字体记录不可读，未覆盖":"阅读默认记录不可读，未覆盖");return PN_CORRUPT;}
     pn_font_preferences_t g={0};g.primary=reset?(pn_font_reference_t){.kind=PN_FONT_RESIDENT}:f->reference;g.fallback=(pn_font_reference_t){.kind=PN_FONT_RESIDENT};
     pn_media_lease_t lease;pn_status_t status=pn_media_acquire(f->state,PN_MEDIA_WRITE,&lease);
-    if(status==PN_OK){pn_journal_files_t files;pn_journal_io_t io;status=pn_font_preferences_files(&files,f->state,&lease,f->state_dir,NULL,&io);
+    if(status==PN_OK){pn_journal_files_t files;pn_journal_io_t io;status=system?pn_font_preferences_system_files(&files,f->state,&lease,f->state_dir,&io):pn_font_preferences_files(&files,f->state,&lease,f->state_dir,NULL,&io);
         if(status==PN_OK)status=pn_font_preferences_save(&io,f->pool,NULL,&g);
         (void)pn_media_release(f->state,&lease);
         load_global(f);}
-    snprintf(f->message,sizeof f->message,status==PN_OK?(reset?"已恢复系统默认阅读字体":"已设为阅读默认，未单独设置的书将使用它"):"保存失败（%d），阅读默认以读回为准",(int)status);
+    if(status!=PN_OK)snprintf(f->message,sizeof f->message,"保存失败（%d），以读回为准",(int)status);
+    else if(system)snprintf(f->message,sizeof f->message,reset?"已恢复默认系统字体，返回后生效":"已设为系统字体，返回后生效");
+    else snprintf(f->message,sizeof f->message,reset?"已恢复系统默认阅读字体":"已设为阅读默认，未单独设置的书将使用它");
+    if(status==PN_OK && system)f->system_changed=true;
     return status;
 }
+static pn_status_t set_default_mode(fm_t *f,bool reset){return set_choice(f,false,reset);}
 static pn_status_t remove_font(pn_font_manage_t *ui){
     fm_t *f=ui->impl;if(protected_font(f))return PN_UNSUPPORTED;char path[PN_CATALOG_PATH_MAX];strcpy(path,f->selected);
     release_asset(f);
@@ -337,6 +356,7 @@ pn_status_t pn_font_manage_event(pn_font_manage_t *ui,int command,pn_font_manage
     }else if(ui->screen==PN_FMU_DETAIL){
         if(command==PN_FMU_BACK){release_asset(f);ui->screen=PN_FMU_LIST;f->message[0]=0;}
         else if(command==PN_FMU_DEFAULT){status=set_default_mode(f,is_global(f,f->selected));ui->last=status;if(f->rows)memset(f->rows,0,ROW_CACHE_SLOTS*sizeof *f->rows);}
+        else if(command==PN_FMU_SYSTEM){status=set_choice(f,true,is_system(f,f->selected));ui->last=status;ui->system_changed|=f->system_changed;if(f->rows)memset(f->rows,0,ROW_CACHE_SLOTS*sizeof *f->rows);}
         else if(command==PN_FMU_DELETE){if(protected_font(f)){status=PN_UNSUPPORTED;snprintf(f->message,sizeof f->message,"鸿蒙保留字库，不能删除");}else{ui->screen=PN_FMU_CONFIRMING;f->message[0]=0;}}
         else return PN_EMPTY;
     }else{
@@ -360,7 +380,7 @@ int pn_font_manage_hit(const pn_font_manage_t *ui,int x,int y){
     if(x<32 || x>=652)return -1;
     if(ui->screen==PN_FMU_DETAIL){
         if(y>=DETAIL_BUTTON_Y && y<DETAIL_BUTTON_Y+96)return x<332?PN_FMU_DEFAULT:x>=352 && !protected_font(f)?PN_FMU_DELETE:-1;
-        if(y>=DETAIL_BACK_Y && y<DETAIL_BACK_Y+96)return PN_FMU_BACK;
+        if(y>=DETAIL_BACK_Y && y<DETAIL_BACK_Y+96)return x<332?PN_FMU_SYSTEM:x>=352?PN_FMU_BACK:-1;
         return -1;
     }
     if(y>=CONFIRM_BUTTON_Y && y<CONFIRM_BUTTON_Y+96)return x<332?PN_FMU_CANCEL:x>=352?PN_FMU_CONFIRM:-1;

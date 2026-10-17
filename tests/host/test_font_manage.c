@@ -40,7 +40,13 @@ int main(int argc,char **argv){
     assert(pn_font_manage_event(&ui,PN_FMU_ROW+2,present,NULL)!=PN_OK && ui.screen==PN_FMU_LIST);
     /* 详情→设为全局默认→重复无操作。/ Detail → set global default → repeat is a no-op. */
     assert(pn_font_manage_event(&ui,PN_FMU_ROW,save_frame,NULL)==PN_OK && ui.screen==PN_FMU_DETAIL);
-    assert(pn_font_manage_hit(&ui,100,1000)==PN_FMU_DEFAULT && pn_font_manage_hit(&ui,500,1000)==PN_FMU_DELETE && pn_font_manage_hit(&ui,300,1100)==PN_FMU_BACK);
+    assert(pn_font_manage_hit(&ui,100,1000)==PN_FMU_DEFAULT && pn_font_manage_hit(&ui,500,1000)==PN_FMU_DELETE && pn_font_manage_hit(&ui,300,1100)==PN_FMU_SYSTEM && pn_font_manage_hit(&ui,500,1100)==PN_FMU_BACK);
+    /* 设为系统字体→记录指向该文件；再按恢复默认（未选择）。/ Set as system font → the record names this file; pressing again restores the default (unset). */
+    {char chosen[1024],dir[1024];strcpy(dir,a);*strrchr(dir,'/')=0;
+     assert(pn_font_preferences_system_path(&internal,state,&pool,dir,chosen,sizeof chosen)==PN_EMPTY);
+     assert(pn_font_manage_event(&ui,PN_FMU_SYSTEM,present,NULL)==PN_OK && ui.last==PN_OK && ui.system_changed && ui.screen==PN_FMU_DETAIL);
+     assert(pn_font_preferences_system_path(&internal,state,&pool,dir,chosen,sizeof chosen)==PN_OK && !strcmp(chosen,a));
+     assert(pn_font_manage_event(&ui,PN_FMU_SYSTEM,present,NULL)==PN_OK && pn_font_preferences_system_path(&internal,state,&pool,dir,chosen,sizeof chosen)==PN_EMPTY);}
     assert(!global(&internal,state,&pool,&g));
     assert(pn_font_manage_event(&ui,PN_FMU_DEFAULT,present,NULL)==PN_OK && ui.last==PN_OK);
     assert(global(&internal,state,&pool,&g) && g.primary.kind==PN_FONT_FILE && !strcmp(g.primary.path,a) && g.fallback.kind==PN_FONT_RESIDENT);

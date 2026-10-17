@@ -80,6 +80,25 @@ pn_status_t pn_font_preferences_files(pn_journal_files_t *files,pn_media_t *medi
     n=snprintf(b,sizeof b,"%s/%s.b",root,name);if(n<0 || (size_t)n>=sizeof b)return PN_LIMIT;
     return pn_journal_files_init(files,media,lease,a,b,io);
 }
+pn_status_t pn_font_preferences_system_files(pn_journal_files_t *files,pn_media_t *media,const pn_media_lease_t *lease,const char *root,pn_journal_io_t *io){
+    if(!root || !*root)return PN_INVALID;
+    char a[PN_JOURNAL_PATH_MAX],b[PN_JOURNAL_PATH_MAX];int n=snprintf(a,sizeof a,"%s/system-font.a",root);if(n<0 || (size_t)n>=sizeof a)return PN_LIMIT;
+    n=snprintf(b,sizeof b,"%s/system-font.b",root);if(n<0 || (size_t)n>=sizeof b)return PN_LIMIT;
+    return pn_journal_files_init(files,media,lease,a,b,io);
+}
+pn_status_t pn_font_preferences_system_path(pn_media_t *state,const char *root,pn_pool_t *pool,const char *fonts_dir,char *out,size_t cap){
+    if(!state || !root || !pool || !fonts_dir || !*fonts_dir || !out || !cap)return PN_INVALID;
+    out[0]=0;pn_media_lease_t lease;pn_status_t status=pn_media_acquire(state,PN_MEDIA_READ,&lease);if(status!=PN_OK)return status;
+    pn_journal_files_t files;pn_journal_io_t io;pn_font_preferences_t *choice=pn_alloc_tagged(pool,PN_MEM_UI,sizeof *choice);if(!choice){(void)pn_media_release(state,&lease);return PN_NO_MEMORY;}
+    status=pn_font_preferences_system_files(&files,state,&lease,root,&io);
+    if(status==PN_OK)status=pn_font_preferences_load(&io,pool,NULL,choice);
+    (void)pn_media_release(state,&lease);
+    // 只接受字体目录内的文件；内置/已删除都按未选择处理。/ Accept only files inside the fonts directory; resident or deleted choices count as unset.
+    size_t dir=strlen(fonts_dir);struct stat info;
+    if(status==PN_OK && (choice->primary.kind!=PN_FONT_FILE || strncmp(choice->primary.path,fonts_dir,dir) || choice->primary.path[dir]!='/' || strchr(choice->primary.path+dir+1,'/') || stat(choice->primary.path,&info) || !S_ISREG(info.st_mode)))status=PN_EMPTY;
+    if(status==PN_OK){if(strlen(choice->primary.path)>=cap)status=PN_LIMIT;else strcpy(out,choice->primary.path);}
+    pn_free(choice);return status;
+}
 pn_status_t pn_font_reference_verify_pooled(pn_pool_t *pool,const pn_font_reference_t *r,pn_media_t *media,const pn_media_lease_t *lease){
     pn_status_t status=reference_valid(r);if(status!=PN_OK)return status;
     status=pn_media_validate(media,lease);if(status!=PN_OK)return status;if(lease->access==PN_MEDIA_USB)return PN_INVALID;
