@@ -15,6 +15,8 @@ typedef struct {
  pn_status_t (*submit)(void *ctx,const pn_network_credentials_t *credentials,bool forget); ///< 排队保存或忘记，忙时BUSY / Queue a save or forget, BUSY while one is pending
  pn_status_t (*status)(void *ctx,char ssid[PN_NETWORK_SSID_MAX+1],bool *pending,pn_status_t *last); ///< 已保存名称与最近结果，不含口令 / Saved name and latest result, never the password
 } pn_device_network_sink_t;
+/// LocalSend标准端口；客户端组播失败后的子网HTTP扫描只探测此端口。/ LocalSend standard port; client subnet HTTP scans after multicast failure probe only this port.
+#define PN_DEVICE_LS_PORT 53317
 typedef struct {void *impl;} pn_device_transfer_http_t; ///< 活动对象不可复制 / Never copy a live object
 /// WiFi启动后调用，authority为固定IP[:port]；先准备活动worker，平台随机数须有熵。
 /// Call after WiFi starts with a fixed IP[:port] authority and active worker; platform randomness requires entropy.

@@ -27,7 +27,7 @@
 #define PN_SETUI_COLUMNS 19 ///< 加0或1选择3或4列 / Plus zero or one for three or four columns
 #define PN_SETUI_HOME 25 ///< 底栏首页请求 / Bottom-bar home request
 #define PN_SETUI_STYLE 21 ///< 加0至3选择书架样式 / Plus zero through three for a shelf style
-#define PN_SETUI_TURN 26 ///< 加0至2选择默认/扫除/仿真翻页 / Plus zero through two for direct/sweep/fold turns
+#define PN_SETUI_TURN 26 ///< 加0直接、加1水波纹翻页 / Plus zero for direct, plus one for ripple turns
 #define PN_SETUI_TIME 29 ///< 日期与时间子页 / Date and time page
 #define PN_SETUI_TIME_SYNC 30 ///< 请求联网对时，由控制层处理 / Request network synchronization from the controller
 #define PN_SETUI_TIME_CANCEL 31 ///< 请求结束对时 / Request cancellation of synchronization

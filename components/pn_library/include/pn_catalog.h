@@ -55,7 +55,7 @@ int pn_catalog_compare(const char *a,const char *b);
 char pn_catalog_initial(const char *name);
 /// 从字母letter（a–z）起的第一页（含之后所有字母及'~'）；'#'即首页。/ First page from letter (a–z) onward, including later letters and '~'; '#' is the first page.
 pn_status_t pn_catalog_page_from(pn_media_t *media,const pn_media_lease_t *lease,const char *directory,char letter,pn_catalog_page_t *page);
-/// 字体目录专用，仅TTF扩展名；仍须实际引擎校验。/ Font-only directory pages, TTF extensions only; actual engine validation remains required.
+/// 字体目录专用，仅TTF/OTF扩展名；仍须实际引擎校验。/ Font-only directory pages, TTF/OTF extensions only; actual engine validation remains required.
 pn_status_t pn_catalog_font_page(pn_media_t *,const pn_media_lease_t *,const char *,const char *,pn_catalog_page_t *);
 /// 字体目录向前六项，源/输出规则同普通目录。/ Previous six font items using the same source/output rules as regular catalogs.
 pn_status_t pn_catalog_font_page_before(pn_media_t *,const pn_media_lease_t *,const char *,const char *,pn_catalog_page_t *);

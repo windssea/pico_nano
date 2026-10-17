@@ -77,7 +77,7 @@ static pn_status_t scan(pn_media_t *media,const pn_media_lease_t *lease,const ch
     if(!dir){if(errno!=ENOENT)return PN_IO;return pn_media_validate(media,lease);}
     char greatest[PN_CATALOG_NAME_MAX]={0};size_t total=0,at_or_before=0,before=0,skipped_by_letter=0;
     for(;;){status=pn_cancel_checkpoint();if(status==PN_OK)status=pn_media_validate(media,lease);if(status!=PN_OK)break;errno=0;struct dirent *entry=readdir(dir);if(!entry){if(errno)status=PN_IO;break;}
-        const char *name=entry->d_name;if(name[0]=='.')continue;const char *ext=strrchr(name,'.');pn_book_format_t kind=filter==1?(ext && !strcasecmp(ext,".ttf")?PN_FILE_TTF:0):filter==2?(ext && (!strcasecmp(ext,".jpg") || !strcasecmp(ext,".jpeg") || !strcasecmp(ext,".png"))?PN_FILE_IMAGE:0):format(name);if(!kind)continue;
+        const char *name=entry->d_name;if(name[0]=='.')continue;const char *ext=strrchr(name,'.');pn_book_format_t kind=filter==1?(ext && (!strcasecmp(ext,".ttf") || !strcasecmp(ext,".otf"))?PN_FILE_TTF:0):filter==2?(ext && (!strcasecmp(ext,".jpg") || !strcasecmp(ext,".jpeg") || !strcasecmp(ext,".png"))?PN_FILE_IMAGE:0):format(name);if(!kind)continue;
         if(strlen(name)>=PN_CATALOG_NAME_MAX || !safe_name(name)){page->skipped++;continue;}
         pn_catalog_item_t item={.format=kind};int length=snprintf(item.path,sizeof item.path,"%s/%s",directory,name);
         if(length<0 || (size_t)length>=sizeof item.path){page->skipped++;continue;}

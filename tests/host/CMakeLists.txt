@@ -92,6 +92,15 @@ target_include_directories(test_device_follow BEFORE PRIVATE ${CMAKE_CURRENT_SOU
 # 保留vendor原文件，ISO C数组限定符诊断仅在这两份原始源上降级。/ Keep original vendor files; suppress ISO C array-qualifier diagnostics only for these two original sources.
 set_source_files_properties(${PN_ROOT}/components/e0470_epaper_waveform/e0470_epaper_waveform.c ${PN_ROOT}/components/e0470_epaper_waveform/e0470_waveform_trim.c PROPERTIES COMPILE_OPTIONS "-Wno-pedantic")
 add_test(NAME device_follow COMMAND test_device_follow)
+add_executable(test_device_wave test_device_wave.c ${PN_ROOT}/main/device_wave.c ${PN_ROOT}/components/e0470_epaper_waveform/e0470_epaper_waveform.c ${PN_ROOT}/components/e0470_epaper_waveform/e0470_waveform_trim.c)
+target_include_directories(test_device_wave BEFORE PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/follow_stubs)
+target_include_directories(test_device_wave PRIVATE ${PN_ROOT}/main ${PN_ROOT}/components/e0470_epaper_waveform/include ${PN_ROOT}/components/e0470_epaper_waveform/waveforms ${PN_ROOT}/components/epdiy/include ${PN_ROOT}/components/epdiy/src)
+add_test(NAME device_wave COMMAND test_device_wave)
+add_executable(test_device_ripple test_device_ripple.c ${PN_ROOT}/main/device_ripple.c ${PN_ROOT}/components/e0470_epaper_waveform/e0470_epaper_waveform.c ${PN_ROOT}/components/e0470_epaper_waveform/e0470_waveform_trim.c)
+target_include_directories(test_device_ripple BEFORE PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/follow_stubs)
+target_include_directories(test_device_ripple PRIVATE ${PN_ROOT}/main ${PN_ROOT}/components/e0470_epaper_waveform/include ${PN_ROOT}/components/e0470_epaper_waveform/waveforms ${PN_ROOT}/components/epdiy/include ${PN_ROOT}/components/epdiy/src)
+target_link_libraries(test_device_ripple PRIVATE pn_core)
+add_test(NAME device_ripple COMMAND test_device_ripple)
 add_executable(test_device_list test_device_list.c ${PN_ROOT}/main/device_follow.c ${PN_ROOT}/main/device_async.c ${PN_ROOT}/main/device_power.c ${PN_ROOT}/main/device_frame.c ${PN_ROOT}/main/device_refresh.c ${PN_ROOT}/main/device_usb.c ${PN_ROOT}/main/device_usb_board.c ${PN_ROOT}/main/device_text.c ${PN_ROOT}/main/device_sd.c ${PN_ROOT}/main/device_card_presence.c ${PN_ROOT}/components/e0470_epaper_waveform/e0470_epaper_waveform.c ${PN_ROOT}/components/e0470_epaper_waveform/e0470_waveform_trim.c)
 target_include_directories(test_device_list BEFORE PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/device_stubs ${CMAKE_CURRENT_SOURCE_DIR}/follow_stubs)
 target_include_directories(test_device_list PRIVATE ${PN_ROOT}/main ${PN_ROOT}/components/e0470_epaper_waveform/include ${PN_ROOT}/components/e0470_epaper_waveform/waveforms ${PN_ROOT}/components/epdiy/include ${PN_ROOT}/components/epdiy/src)
@@ -411,6 +420,8 @@ add_test(NAME font_preferences_restart COMMAND ${Python3_EXECUTABLE} ${CMAKE_CUR
 add_executable(test_font_asset test_font_asset.c)
 target_link_libraries(test_font_asset PRIVATE pn_core)
 add_test(NAME font_asset COMMAND test_font_asset ${PN_ROOT}/tests/fixtures/font-fallback.ttf)
+# 同一字形转成CFF轮廓的OTF走完全相同的打开/采样/故障注入。/ The same glyphs as a CFF-outline OTF take the identical open/sample/fault-injection path.
+add_test(NAME font_asset_cff COMMAND test_font_asset ${PN_ROOT}/tests/fixtures/font-fallback-cff.otf)
 
 add_test(NAME font_metadata COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_font_metadata.py $<TARGET_FILE:test_font_asset> ${PN_ROOT}/tests/fixtures/font-fallback.ttf)
 

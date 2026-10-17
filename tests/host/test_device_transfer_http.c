@@ -17,7 +17,8 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <errno.h>
-static httpd_uri_t route;
+static httpd_uri_t route,ls_route; ///< 网页80与LocalSend53317两个监听 / Web 80 and LocalSend 53317 listeners
+static unsigned ls_routes;
 static char scratch[2048],response[4096];
 static unsigned code,headers;
 static const uint8_t *body;
@@ -46,11 +47,15 @@ void *xSemaphoreCreateMutex(void){pthread_mutex_t *p=malloc(sizeof *p);if(p)pthr
 int xSemaphoreTake(void *p,unsigned timeout){(void)timeout;return pthread_mutex_lock(p)==0;}
 int xSemaphoreGive(void *p){return pthread_mutex_unlock(p)==0;}
 void vSemaphoreDelete(void *p){pthread_mutex_destroy(p);free(p);}
-esp_err_t httpd_start(httpd_handle_t *h,const httpd_config_t *cfg){assert(cfg->max_uri_handlers>=4 && cfg->max_open_sockets==2 && cfg->lru_purge_enable);*h=&route;global_context=cfg->global_user_ctx;open_socket=cfg->open_fn;return ESP_OK;}
-void *httpd_get_global_user_ctx(httpd_handle_t h){assert(h==&route);return global_context;}
-esp_err_t httpd_sess_set_recv_override(httpd_handle_t h,int fd,httpd_recv_func_t callback){(void)fd;assert(h==&route);receive=callback;return ESP_OK;}
-esp_err_t httpd_stop(httpd_handle_t h){assert(h==&route);return http_stop_fails?ESP_FAIL:ESP_OK;}
-esp_err_t httpd_register_uri_handler(httpd_handle_t h,const httpd_uri_t *r){assert(h==&route);route=*r;return ESP_OK;}
+esp_err_t httpd_start(httpd_handle_t *h,const httpd_config_t *cfg){
+    assert(cfg->max_uri_handlers>=4 && cfg->lru_purge_enable && cfg->global_user_ctx);
+    // LocalSend监听在独立控制端口、栈放PSRAM，连接上限不挤占网页。/ The LocalSend listener uses its own control port and a PSRAM stack, with a socket cap separate from the web page.
+    if(cfg->server_port==53317){assert(cfg->ctrl_port!=32768 && cfg->max_open_sockets==2 && cfg->task_caps && global_context==cfg->global_user_ctx);*h=&ls_route;ls_routes=0;return ESP_OK;}
+    assert(cfg->max_open_sockets==4);*h=&route;global_context=cfg->global_user_ctx;open_socket=cfg->open_fn;return ESP_OK;}
+void *httpd_get_global_user_ctx(httpd_handle_t h){assert(h==&route || h==&ls_route);return global_context;}
+esp_err_t httpd_sess_set_recv_override(httpd_handle_t h,int fd,httpd_recv_func_t callback){(void)fd;assert(h==&route || h==&ls_route);receive=callback;return ESP_OK;}
+esp_err_t httpd_stop(httpd_handle_t h){assert(h==&route || h==&ls_route);return http_stop_fails?ESP_FAIL:ESP_OK;}
+esp_err_t httpd_register_uri_handler(httpd_handle_t h,const httpd_uri_t *r){assert(h==&route || h==&ls_route);if(h==&ls_route){ls_route=*r;ls_routes++;}else route=*r;return ESP_OK;}
 static const char *header(const char *name){const char *at=scratch;for(unsigned i=0;i<headers;i++){const char *colon=strchr(at,':');if(colon && (size_t)(colon-at)==strlen(name) && !strncasecmp(at,name,strlen(name))){while(*++colon==' ');return colon;}if(i+1<headers){at+=strlen(at)+1;while(!*at)at++;}}return NULL;}
 size_t httpd_req_get_hdr_value_len(httpd_req_t *r,const char *name){(void)r;const char *value=header(name);return value?strlen(value):0;}
 esp_err_t httpd_req_get_hdr_value_str(httpd_req_t *r,const char *name,char *out,size_t cap){(void)r;const char *value=header(name);if(!value || strlen(value)>=cap)return ESP_FAIL;strcpy(out,value);return ESP_OK;}
@@ -91,7 +96,7 @@ int main(void){
  const char *request_body="{\"ssid\":\"test\",\"password\":\"\"}";
  const uint8_t text[]="device HTTP\n";pn_book_id_t digest;assert(pn_identity_bytes(text,sizeof text-1,&digest)==PN_OK);char sha[65];for(unsigned i=0;i<32;i++)sprintf(sha+i*2,"%02x",digest.sha256[i]);
  /* LocalSend自动书籍接收使用真实共享安装器，连接来源和一次性令牌必须匹配。/ LocalSend book auto-reception uses the real shared installer with matching connection origin and single-use grants. */
- json=request(HTTP_GET,"/api/localsend/v2/info",NULL,0,NULL,NULL);assert(code==200 && cJSON_IsString(cJSON_GetObjectItemCaseSensitive(json,"fingerprint")) && cJSON_GetObjectItemCaseSensitive(json,"port")->valueint==80);cJSON_Delete(json);
+ json=request(HTTP_GET,"/api/localsend/v2/info",NULL,0,NULL,NULL);assert(code==200 && cJSON_IsString(cJSON_GetObjectItemCaseSensitive(json,"fingerprint")) && cJSON_GetObjectItemCaseSensitive(json,"port")->valueint==53317 && ls_routes==2 && ls_route.handler==route.handler && ls_route.user_ctx==route.user_ctx);cJSON_Delete(json);
  json=request(HTTP_GET,"/api/localsend/v2/info",NULL,0,NULL,"Origin: http://192.168.4.1");assert(code==403);cJSON_Delete(json);
  char metadata[1200];snprintf(metadata,sizeof metadata,"{\"info\":{\"alias\":\"Sender\",\"version\":\"2.2\",\"fingerprint\":\"sender\"},\"files\":{\"native\":{\"id\":\"native\",\"fileName\":\"native.txt\",\"size\":%zu,\"fileType\":\"text/plain\",\"sha256\":\"%s\"}}}",sizeof text-1,sha);
  json=request(HTTP_POST,"/api/localsend/v2/prepare-upload",metadata,strlen(metadata),NULL,NULL);assert(code==200 && json);char ls_id[33],ls_token[33];strcpy(ls_id,cJSON_GetObjectItemCaseSensitive(json,"sessionId")->valuestring);strcpy(ls_token,cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(json,"files"),"native")->valuestring);cJSON_Delete(json);

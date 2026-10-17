@@ -18,6 +18,7 @@
 #include FT_MODULE_H
 #include FT_TRUETYPE_TABLES_H
 #include FT_SFNT_NAMES_H
+#include FT_OUTLINE_H
 #include <limits.h>
 #include <string.h>
 extern const uint8_t pn_ui_font_bytes[];
@@ -88,6 +89,7 @@ typedef struct {
     size_t bmp_bytes;
     uint32_t bmp_clock; ///< 组内LRU时钟，回绕时清零年龄 / Per-set LRU clock, clearing ages on wrap
     bool warming; ///< 可选光栅预热，禁止触碰呈现帧 / Optional raster warming without touching presentation frames
+    int8_t weight; ///< 合成字重-1..3 / Synthetic weight -1..3
 } engine_t;
 static bool cache_allowed(const engine_t *e,size_t need){return (!e->pool->speculative || e->warming) && pn_cache_allow(e->pool,PN_CACHE_GLYPH,need); }
 static unsigned hash_key(uint32_t cp,int pixels,int delta){uint32_t h=cp*2654435761u;h^=(uint32_t)pixels*40503u;h^=(uint32_t)(delta+64)*2246822519u;h^=h>>15;return h;}
@@ -136,6 +138,13 @@ void pn_font_trim(pn_font_t *font){
     pn_font_trim(&e->ui_fallback);
     glyph_drop(e);
 }
+pn_status_t pn_font_weight(pn_font_t *font,int level){
+    if(!font || !font->impl || level< -1 || level>3)return PN_INVALID;
+    engine_t *e=font->impl;if(e->weight==level)return PN_OK;
+    e->weight=(int8_t)level;glyph_drop(e);
+    return e->ui_fallback.impl?pn_font_weight(&e->ui_fallback,level):PN_OK;
+}
+int pn_font_weight_level(const pn_font_t *font){return font && font->impl?((const engine_t *)font->impl)->weight:0;}
 void pn_font_close(pn_font_t *font) {
     if(!font || !font->impl)return;
     engine_t *e=font->impl;pn_cache_detach(&e->cache);pn_font_trim(font);pn_font_close(&e->ui_fallback);
@@ -163,12 +172,14 @@ static pn_status_t pn_font_open_impl(pn_font_t *font,pn_pool_t *pool,const pn_te
     e->stream.size=(unsigned long)source->size;e->stream.descriptor.pointer=e;e->stream.read=stream_read;
     pn_font_t temporary={e,0,0};uint8_t prefix[4];
     if(stream_read(&e->stream,0,prefix,4)!=4){pn_status_t s=e->source_error;pn_font_close(&temporary);return s;}
-    if(memcmp(prefix,"\0\1\0\0",4)!=0 && memcmp(prefix,"true",4)!=0){pn_font_close(&temporary);return PN_UNSUPPORTED;}
+    // TrueType轮廓(TTF/OTF)与CFF轮廓OTF(OTTO)；字体集合等仍拒绝。/ TrueType outlines (TTF/OTF) and CFF-outline OTF (OTTO); collections and others stay refused.
+    bool cff=!memcmp(prefix,"OTTO",4);
+    if(memcmp(prefix,"\0\1\0\0",4)!=0 && memcmp(prefix,"true",4)!=0 && !cff){pn_font_close(&temporary);return PN_UNSUPPORTED;}
     FT_Error error=FT_New_Library(&e->memory,&e->library);
     if(!error)FT_Add_Default_Modules(e->library);
     pn_status_t status=result(e,error);
     if(status==PN_OK){FT_Open_Args args={0};args.flags=FT_OPEN_STREAM;args.stream=&e->stream;error=FT_Open_Face(e->library,&args,0,&e->face);status=result(e,error);}
-    if(status==PN_OK){FT_ULong length=0;error=FT_Load_Sfnt_Table(e->face,FT_MAKE_TAG('g','l','y','f'),0,NULL,&length);status=result(e,error);if(status==PN_OK && (!length || e->face->num_faces!=1 || !FT_IS_SCALABLE(e->face)))status=PN_UNSUPPORTED;}
+    if(status==PN_OK){FT_ULong length=0;error=FT_Load_Sfnt_Table(e->face,cff?FT_MAKE_TAG('C','F','F',' '):FT_MAKE_TAG('g','l','y','f'),0,NULL,&length);status=result(e,error);if(status==PN_OK && (!length || e->face->num_faces!=1 || !FT_IS_SCALABLE(e->face)))status=PN_UNSUPPORTED;}
     if(status==PN_OK)status=result(e,FT_Select_Charmap(e->face,FT_ENCODING_UNICODE));
     if(status==PN_OK)status=pn_font_size(&temporary,pixels);
     if(status!=PN_OK){pn_font_close(&temporary);return status;}
@@ -191,6 +202,7 @@ static pn_status_t ui_fallback(pn_font_t *font,pn_font_t **out){
     pn_status_t s;
     if(e->ui_fallback.impl)s=pn_font_size(&e->ui_fallback,font->pixels);
     else{pn_text_source_t source={NULL,pn_ui_font_size,builtin_read,NULL};s=pn_font_open(&e->ui_fallback,e->pool,&source,font->pixels);}
+    if(s==PN_OK)s=pn_font_weight(&e->ui_fallback,e->weight);
     if(s==PN_OK)*out=&e->ui_fallback;
     return s;
 }
@@ -200,7 +212,13 @@ static pn_status_t load(pn_font_t *font,uint32_t cp,bool render) {
     FT_UInt glyph=FT_Get_Char_Index(e->face,cp);
     if(e->source_error!=PN_OK || e->allocation_failed)return result(e,0);
     if(!glyph)return PN_EMPTY;
-    FT_Error error=FT_Load_Glyph(e->face,glyph,FT_LOAD_DEFAULT | (render?FT_LOAD_RENDER:0));return result(e,error);
+    bool embolden=render && e->weight;
+    FT_Error error=FT_Load_Glyph(e->face,glyph,FT_LOAD_DEFAULT | (render && !embolden?FT_LOAD_RENDER:0));
+    // 合成字重：轮廓双向外扩/内缩约每级字号的1/48，再光栅；字宽沿用原值。/ Synthetic weight: grow or shrink the outline by about 1/48 of the size per level before rasterizing; advances keep their original values.
+    if(!error && embolden){FT_GlyphSlot slot=e->face->glyph;
+        if(slot->format==FT_GLYPH_FORMAT_OUTLINE){FT_Pos strength=(FT_Pos)font->pixels*64*e->weight/48;error=FT_Outline_EmboldenXY(&slot->outline,strength,strength);}
+        if(!error)error=FT_Render_Glyph(slot,FT_RENDER_MODE_NORMAL);}
+    return result(e,error);
 }
 /// 同一组按最近使用排列，复用原1024项内存，不增加时间戳。/ Keep each set in recency order within the original 1024 entries, without timestamps.
 static void advance_promote(adv_t *set,unsigned index,adv_t value){if(index)memmove(set+1,set,index*sizeof *set);set[0]=value;}

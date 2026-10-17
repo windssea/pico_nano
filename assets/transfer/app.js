@@ -1,6 +1,6 @@
 // 中文传输队列，原文只读；名称使用textContent。/ Chinese transfer queue, read-only originals and textContent names.
 import {SHA256} from './sha256.mjs';
-const $=id=>document.getElementById(id),kinds={book:{label:'书籍',accept:'.txt,.epub',hint:'TXT、EPUB 电子书，支持多本添加',limit:512*1024*1024},font:{label:'字体',accept:'.ttf',hint:'TTF 字体，最大 32 MiB',limit:32*1024*1024},cover:{label:'封面',accept:'.png,.jpg,.jpeg',hint:'PNG、JPEG 图片，最大 8 MiB',limit:8*1024*1024},wallpaper:{label:'锁屏图片',accept:'.png,.jpg,.jpeg',hint:'上传后在阅读器菜单“锁屏壁纸”中预览并应用',limit:8*1024*1024}};
+const $=id=>document.getElementById(id),kinds={book:{label:'书籍',accept:'.txt,.epub',hint:'TXT、EPUB 电子书，支持多本添加',limit:512*1024*1024},font:{label:'字体',accept:'.ttf,.otf',hint:'TTF、OTF 字体，最大 32 MiB',limit:32*1024*1024},cover:{label:'封面',accept:'.png,.jpg,.jpeg',hint:'PNG、JPEG 图片，最大 8 MiB',limit:8*1024*1024},wallpaper:{label:'锁屏图片',accept:'.png,.jpg,.jpeg',hint:'上传后在阅读器菜单“锁屏壁纸”中预览并应用',limit:8*1024*1024}};
 let kind='book',token=null,running=false,entries=[],resourceGeneration=0;
 function notice(text,error=false){$('notice').textContent=text;$('notice').classList.toggle('error',error);}
 function connected(value){$('connection').textContent=value?'已连接':'正在连接';$('connection').classList.toggle('connected',value);if(!value)$('network-panel').hidden=true;else loadNetwork();syncFonts();render();}
@@ -56,7 +56,21 @@ async function removeFont(item,selected){
   notice('已删除'+kinds[selected].label+'原文件：'+item.name+'。');if(kind===selected)await loadFonts('');
  }catch(error){notice(error.message,true);await loadFonts('');}
 }
-function add(files){for(const file of files){const type=kinds[kind],suffix='.'+file.name.split('.').pop().toLowerCase();if(!type.accept.split(',').includes(suffix)||!file.size||file.size>type.limit){notice('文件格式或大小不符合当前类别，请检查。',true);continue;}if(entries.length>=32){notice('一次最多添加 32 项。',true);break;}entries.push({file,name:file.name,kind,state:'等待发送',offset:0,progress:0,paused:false,cancelled:false});}render();}
+// 后缀决定类别；书籍/字体放错标签时自动归类（图片用途必须由用户选封面或锁屏）。
+// 手机文件选择器常给出无扩展名的名称，字体再按文件头识别并补上扩展名；错误分别说明格式、空文件与大小。
+// The suffix decides the category; books/fonts dropped on the wrong tab are routed automatically (image use must be chosen as cover or lock screen).
+// Phone pickers often give names without extensions, so fonts are also recognized by their header and get an extension; errors explain format, empty files and size separately.
+const suffixOf=name=>name.includes('.')?'.'+name.split('.').pop().toLowerCase():'';
+const accepts=(k,suffix)=>kinds[k].accept.split(',').includes(suffix);
+async function fontHeader(file){try{const b=new Uint8Array(await file.slice(0,4).arrayBuffer());const tag=String.fromCharCode(...b);return tag==='OTTO'?'.otf':tag==='\0\x01\0\0'||tag==='true'?'.ttf':'';}catch(error){return '';}}
+async function add(files){for(const file of files){let name=file.name,target=kind;const suffix=suffixOf(name);
+ if(!accepts(target,suffix)){const other=['book','font'].find(k=>accepts(k,suffix));if(other)target=other;else if(kind==='font'){const ext=await fontHeader(file);if(ext){name=(name||'font')+ext;}}}
+ if(!accepts(target,suffixOf(name))){notice('“'+file.name+'”不是'+kinds[kind].label+'支持的格式：'+kinds[kind].hint+'。',true);continue;}
+ if(!file.size){notice('“'+file.name+'”是空文件。',true);continue;}
+ if(file.size>kinds[target].limit){notice('“'+file.name+'”有 '+size(file.size)+'，超过'+kinds[target].label+'上限 '+size(kinds[target].limit)+'。',true);continue;}
+ if(entries.length>=32){notice('一次最多添加 32 项。',true);break;}
+ if(target!==kind)notice('“'+file.name+'”已按'+kinds[target].label+'发送。');
+ entries.push({file,name,kind:target,state:'等待发送',offset:0,progress:0,paused:false,cancelled:false});}render();}
 $('files').onchange=()=>{add($('files').files);$('files').value='';};$('choose').onclick=event=>{event.stopPropagation();$('files').click();};$('drop').onclick=()=> $('files').click();$('drop').onkeydown=event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();$('files').click();}};
 for(const event of ['dragenter','dragover'])$('drop').addEventListener(event,e=>{e.preventDefault();$('drop').classList.add('drag');});for(const event of ['dragleave','drop'])$('drop').addEventListener(event,e=>{e.preventDefault();$('drop').classList.remove('drag');if(event==='drop')add(e.dataTransfer.files);});
 function size(bytes){return bytes<1024*1024?(bytes/1024).toFixed(1)+' KiB':(bytes/1024/1024).toFixed(1)+' MiB';}

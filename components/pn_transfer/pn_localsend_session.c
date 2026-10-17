@@ -53,7 +53,7 @@ static pn_status_t infer(const pn_ls_file_t *f,pn_upload_kind_t *kind){
     const char *ext=strrchr(f->name,'.');
     if(!ext)return PN_UNSUPPORTED;
     if(ascii_equal(ext,".txt") || ascii_equal(ext,".epub"))*kind=PN_UPLOAD_BOOK;
-    else if(ascii_equal(ext,".ttf"))*kind=PN_UPLOAD_FONT;
+    else if(ascii_equal(ext,".ttf") || ascii_equal(ext,".otf"))*kind=PN_UPLOAD_FONT;
     else if(ascii_equal(ext,".jpg") || ascii_equal(ext,".jpeg") || ascii_equal(ext,".png"))*kind=0;
     else return PN_UNSUPPORTED;
     pn_upload_request_t r={.kind=*kind?*kind:PN_UPLOAD_WALLPAPER,.size=f->size,.has_digest=f->has_digest,.digest=f->digest};r.id[0]=1;memcpy(r.name,f->name,sizeof r.name);

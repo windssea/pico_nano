@@ -16,7 +16,9 @@
 typedef enum {
     PN_REFRESH_GC16=0, ///< 清残影整刷 / Ghost-clearing full update
     PN_REFRESH_GL16, ///< 清晰页刷新 / Clear page update
-    PN_REFRESH_DU ///< 快速二值刷新 / Fast binary update
+    PN_REFRESH_DU, ///< 快速二值刷新 / Fast binary update
+    PN_REFRESH_RIPPLE, ///< 下一页水波纹：原GC16按弧形错峰，同时清残影；只由翻页呈现产生，不进入调度队列 / Next-page ripple: original GC16 staggered by arc, cleaning ghosts too; produced only by turn presentation, never queued
+    PN_REFRESH_RIPPLE_REVERSE ///< 上一页水波纹（镜像）/ Previous-page ripple (mirrored)
 } pn_refresh_t;
 typedef enum {
     PN_BUFFER_FREE=0, ///< 空闲 / Free

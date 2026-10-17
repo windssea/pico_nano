@@ -113,6 +113,7 @@ add_library(pn_core STATIC ${ui_font_c} ${reading_font_c} ${harmony_font_c} ${br
     ${PN_ROOT}/components/pn_storage/pn_epub_bookmarks.c
     ${PN_ROOT}/components/pn_display/pn_scheduler.c
     ${PN_ROOT}/components/pn_display/pn_follow.c
+    ${PN_ROOT}/components/pn_display/pn_ripple.c
     ${PN_ROOT}/components/pn_widgets/pn_list_motion.c
     ${PN_ROOT}/components/pn_text/pn_text.c
     ${PN_ROOT}/components/pn_text/pn_layout.c

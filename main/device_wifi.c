@@ -120,8 +120,9 @@ pn_status_t pn_device_wifi_open_detailed(pn_device_wifi_t *out,const pn_device_w
   if(result==ESP_OK)result=config->mode==PN_WIFI_AP?esp_wifi_set_default_wifi_ap_handlers():esp_wifi_set_default_wifi_sta_handlers();
  }
  if(result==ESP_OK){wifi_init_config_t init=WIFI_INIT_CONFIG_DEFAULT();init.nvs_enable=0;
-  // 单接收会话限制无线缓冲，给HTTP/TCP及内部DMA留余量；BA窗不超过静态RX。/ Bound radio buffers for one receiving session, reserving internal RAM for HTTP/TCP and DMA; BA never exceeds static RX.
-  init.static_rx_buf_num=4;init.dynamic_rx_buf_num=8;init.static_tx_buf_num=4;init.dynamic_tx_buf_num=8;init.rx_ba_win=4;init.mgmt_sbuf_num=8;
+  // 静态缓冲仍占内部RAM，保持4个；动态缓冲已允许放PSRAM，加到16个，避免传书时接收队列满而丢包重传。BA窗不超过动态RX。
+  // Static buffers stay in internal RAM, so keep four; dynamic buffers may now live in PSRAM, so raise them to 16 to stop receive-queue drops and retransmits during transfers. BA stays within dynamic RX.
+  init.static_rx_buf_num=4;init.dynamic_rx_buf_num=16;init.static_tx_buf_num=4;init.dynamic_tx_buf_num=16;init.rx_ba_win=6;init.mgmt_sbuf_num=8;
   result=esp_wifi_init(&init);if(result==ESP_OK)s->initialized=true;}
  if(result==ESP_OK)result=esp_wifi_set_storage(WIFI_STORAGE_RAM);
  if(result==ESP_OK)result=esp_wifi_set_mode(config->mode==PN_WIFI_AP?WIFI_MODE_AP:WIFI_MODE_STA);

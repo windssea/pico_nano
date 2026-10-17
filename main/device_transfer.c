@@ -79,7 +79,7 @@ static void stage(transfer_t *s,unsigned value){lock(s);s->state.stage=value;unl
 static void memory_stage(const char *phase){
  (void)phase;
 #ifdef ESP_PLATFORM
- ESP_LOGI("pn_transfer","phase=%s internal_free=%zu largest=%zu minimum=%zu",phase,heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
+ ESP_LOGI("pn_transfer","phase=%s internal_free=%zu largest=%zu minimum=%zu psram_free=%zu psram_largest=%zu",phase,heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),heap_caps_get_free_size(MALLOC_CAP_SPIRAM),heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
 #else
  (void)phase;
 #endif

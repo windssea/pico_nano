@@ -16,8 +16,8 @@ typedef struct {
     int pixels; ///< 当前像素高度 / Current pixel height
     uint8_t ink; ///< 字形混合到的灰阶，0为黑（默认）/ Gray the glyphs blend towards, 0 is black (default)
 } pn_font_t;
-/// 仅接受有glyf的单TTF源，最大32MiB；全部引擎分配走pool。
-/// Accept single glyf TTF sources only, at most 32 MiB; all engine allocations use pool.
+/// 仅接受单字体TrueType(glyf)或CFF(OTTO)源，最大32MiB；全部引擎分配走pool。
+/// Accept single-face TrueType (glyf) or CFF (OTTO) sources only, at most 32 MiB; all engine allocations use pool.
 pn_status_t pn_font_open(pn_font_t *font,pn_pool_t *pool,const pn_text_source_t *source,int pixels);
 /// 释放引擎，不关闭调用方源，幂等。
 /// Release engine without closing caller source, idempotently.
@@ -28,6 +28,11 @@ pn_status_t pn_font_move(pn_font_t *destination,pn_font_t *source,pn_pool_t *poo
 pn_status_t pn_font_source_ready(const pn_font_t *);
 /// 释放可重建的字形/度量缓存，保留字体源、字号和引擎；不访问文件或硬件。/ Free rebuildable glyph/metric caches while retaining the source, size and engine; no file or hardware I/O.
 void pn_font_trim(pn_font_t *font);
+/// 合成字重-1细..3特粗，0原字形；按字号比例加/减描边，字宽不变以保持分页；改变时丢弃本引擎字形缓存。
+/// Synthetic weight from -1 light to 3 heaviest, 0 original; strokes grow/shrink in proportion to size while advances stay to keep pagination; changes drop this engine's glyph cache.
+pn_status_t pn_font_weight(pn_font_t *font,int level);
+/// 当前合成字重，未打开为0。/ Current synthetic weight, zero when closed.
+int pn_font_weight_level(const pn_font_t *font);
 /// 设置8至128像素，不保存全局或逐书设置。
 /// Set 8 through 128 pixels without saving global or per-book settings.
 pn_status_t pn_font_size(pn_font_t *font,int pixels);

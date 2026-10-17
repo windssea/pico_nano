@@ -59,6 +59,11 @@
 #include "device_text.h"
 #include "device_frame.h"
 #include "device_refresh.h"
+#if defined(ESP_PLATFORM)
+#include "device_wave.h"
+#include "device_ripple.h"
+#include "e0470_epaper_waveform.h"
+#endif
 #include "device_usb.h"
 #include "pn_usb_view.h"
 #include "device_power.h"
@@ -322,9 +327,22 @@ static void profile_task_stacks(const char *phase){
     if(async_port.display_task_handle)ESP_LOGI(TAG,"stack phase=%s owner=display minimum_bytes=%u",phase,(unsigned)uxTaskGetStackHighWaterMark(async_port.display_task_handle));
 }
 #endif
+#if defined(ESP_PLATFORM)
+/// 水波纹常驻内存：8张片内LUT与两方向行段表，产品任务首次选用时分配，显示任务只读。
+/// Resident ripple memory: eight internal LUTs and per-direction row runs, allocated by the product task on first use and only read by the display task.
+static pn_device_ripple_memory_t ripple_memory;
+static void ripple_memory_ensure(void){
+    if(!ripple_memory.tables)ripple_memory.tables=heap_caps_aligned_alloc(16,PN_RIPPLE_BANDS*1024u,MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
+    for(int i=0;i<2;i++)if(!ripple_memory.rows[i])ripple_memory.rows[i]=heap_caps_malloc(sizeof(pn_ripple_row_t)*PN_RIPPLE_ROWS,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+}
+#endif
 static pn_status_t present_panel(void *ctx,const pn_frame_t *frame,pn_refresh_t profile){
     (void)ctx;
     content_area=(pn_feedback_box_t){0};settle_recoverable=false;
+    // 水波纹只在已知参考的正文翻页执行；其余情况按普通GL16显示，不让特效阻塞翻页。
+    // Ripple runs only for reading turns with a known reference; otherwise show as plain GL16 so the effect never blocks a turn.
+    bool ripple_turn=profile==PN_REFRESH_RIPPLE || profile==PN_REFRESH_RIPPLE_REVERSE,ripple_reverse=profile==PN_REFRESH_RIPPLE_REVERSE;
+    if(ripple_turn)profile=PN_REFRESH_GL16;
     uint64_t prepared_at=now_ms();
     (void)prepared_at; // 无日志主机桩仍编译同源路径。/ Compile the same path with logging disabled in host stubs.
     if(profile==PN_REFRESH_DU)return PN_UNSUPPORTED;
@@ -355,7 +373,23 @@ static pn_status_t present_panel(void *ctx,const pn_frame_t *frame,pn_refresh_t 
     (void)panel_at;
     bool deep_clean=atomic_exchange(&deep_clean_pending,false);
     content_area=(pn_feedback_box_t){0,0,684,1216};
+#if defined(ESP_PLATFORM)
+    const EpdWaveform *ripple_wave=NULL;
+    bool rippling=ripple_turn && body_refresh && known && !deep_clean && pn_device_ripple_begin(&ripple_memory,hardware.hl.waveform,ripple_reverse,hardware.hl.difference_fb,&ripple_wave);
+#else
+    (void)ripple_reverse;(void)ripple_turn;
+#endif
     if(!panel_known || deep_clean){reason=deep_clean?"manual":"unknown-reference";mode=MODE_GC16;epd_clear();result=epd_hl_update_screen_from_white(&hardware.hl,MODE_GC16,25);}
+#if defined(ESP_PLATFORM)
+    else if(rippling){
+        // 弧形错峰的完整原GC16：所有像素（含同色、页脚）都驱动，本身就是清残影。/ Arc-staggered complete original GC16: every pixel including unchanged ones and the footer is driven, which itself cleans ghosts.
+        const EpdWaveform *saved=hardware.hl.waveform;hardware.hl.waveform=ripple_wave;
+        result=epd_hl_update_screen_full(&hardware.hl,MODE_GC16,25);
+        hardware.hl.waveform=saved;
+        if(!pn_device_ripple_end() && result==EPD_DRAW_SUCCESS)result=EPD_DRAW_LOOKUP_NOT_IMPLEMENTED;
+        mode=MODE_GC16;reason="ripple";
+    }
+#endif
     // 已知参考帧的周期GC16直接全屏转换；无需先另做一次白场清除。/ Periodic GC16 with a known reference directly updates every pixel without an extra white-field clear.
     else if(mode==MODE_GC16)result=epd_hl_update_screen_full(&hardware.hl,MODE_GC16,25);
     else if(body_refresh){
@@ -554,6 +588,10 @@ static pn_status_t active_step(pn_reader_action_t action,uint64_t now){
     pn_epub_app_refresh_period(&epub,pn_settings_refresh_pages(input_flags));
     if(atomic_exchange(&full_clean_completed,false)){pn_reader_app_refresh_reset(&reader);pn_epub_app_refresh_reset(&epub);}
     pn_frame_t before;pn_turn_t effect={.pool=&pool,.style=(pn_turn_style_t)((input_flags&PN_INPUT_TURN_MASK)>>6),.reverse=action==PN_APP_PREVIOUS,.present=present};
+#if defined(ESP_PLATFORM)
+    // 片内LUT不足时水波纹自动退成直接显示。/ Ripple falls back to direct presentation when internal LUT memory is unavailable.
+    if(effect.style==PN_TURN_RIPPLE)ripple_memory_ensure();
+#endif
     if((action==PN_APP_NEXT || action==PN_APP_PREVIOUS) && panel_known && page_copy && pn_frame_bind(&before,page_copy,342u*1216u,684,1216))effect.before=&before;
     else effect.style=PN_TURN_NONE;
     atomic_store(&reading_presentation,true);
@@ -858,11 +896,12 @@ static void show_shelf(const char *cursor,bool previous){
     }
     if(status==PN_OK && (next->count || !*cursor)){*shelf_page=*next;shelf_focus=-1;}
     pn_free(next);pn_profile_end(&span,status);pn_profile_begin(&span,NULL,"ui.shelf.bind");
-    // 首帧只复用内存封面；磁盘每轮一张，解码等输入安静后推进。/ First paint reuses RAM covers only; probe one disk cover per tick and decode after input settles.
+    // 首帧前同步读取已缓存PNCV，书库一次成画不再二次刷封面；未缓存的书仍等输入安静后解码。
+    // Read cached PNCV synchronously before the first paint so the library appears complete without a second cover refresh; uncached books still decode after input settles.
     covers_inactive=false;
     if(status==PN_OK && !shelf_covers){shelf_covers=pn_cache_alloc(&pool,PN_CACHE_COVER,PN_MEM_UI,sizeof *shelf_covers);if(shelf_covers)pn_shelf_covers_reset(shelf_covers,NULL);}
-    if(status==PN_OK && shelf_covers){bool changed;pn_catalog_item_t last;bool has_last=refresh_last(&last);covers_dirty=false;covers_cache_done=false;
-        if(pn_shelf_covers_bind(shelf_covers,shelf_page,has_last?&last:NULL,&pool,&sd_media,NULL,&changed)!=PN_OK)pn_shelf_covers_reset(shelf_covers,NULL);}
+    if(status==PN_OK && shelf_covers){bool changed;pn_catalog_item_t last;bool has_last=refresh_last(&last);covers_dirty=false;covers_cache_done=true;
+        if(pn_shelf_covers_bind(shelf_covers,shelf_page,has_last?&last:NULL,&pool,&sd_media,cover_cache,&changed)!=PN_OK)pn_shelf_covers_reset(shelf_covers,NULL);}
     pn_profile_end(&span,status);
     if(status==PN_OK)status=draw_shelf(panel_known?PN_REFRESH_GL16:PN_REFRESH_GC16);
     if(status!=PN_OK){message("读取书架失败","当前位置仍保留，重试");return;}
@@ -1201,6 +1240,9 @@ static void begin_transfer(bool station){
         if(loaded!=PN_OK || !c.ssid[0]){pn_network_wipe(&c);message("没有已保存的网络","可在热点传书网页中保存");return;}
         config.mode=PN_WIFI_STA;strcpy(config.ssid,c.ssid);strcpy(config.password,c.password);pn_network_wipe(&c);}
     system_font_release();
+    // 传输工作池与无线缓冲都从PSRAM分配；先归还产品池里可重建的封面/字形/页面缓存，避免大字体校验时“内存不足”。
+    // The transfer pool and radio buffers both come from PSRAM; return rebuildable cover/glyph/page caches first so large font validation does not run out of memory.
+    pn_free(page_copy);page_copy=NULL;(void)pn_cache_reclaim(&pool,SIZE_MAX);
     pn_status_t status=pn_device_transfer_open(&transfer,&sd_media,PN_SD_MOUNT,&config);
     {volatile uint8_t *secret=(volatile uint8_t *)config.password;for(size_t i=0;i<sizeof config.password;i++)secret[i]=0;}
     if(status!=PN_OK){message("传输未开启","保留阅读位置，请重试");return;}
@@ -1768,6 +1810,12 @@ static void device_task(void *arg){
     (void)arg;pn_device_ota_boot_begin();esp_err_t error=nvs_flash_init();if(error!=ESP_OK){ESP_LOGE(TAG,"NVS unavailable: %s; preserving data",esp_err_to_name(error));vTaskDelete(NULL);return;}
     pn_profile_span_t board_span;pn_profile_begin(&board_span,NULL,"device.board-init");
     error=read_pico_init(&hardware);pn_profile_end(&board_span,error==ESP_OK?PN_OK:PN_IO);if(error!=ESP_OK){ESP_LOGE(TAG,"Board init failed: %s",esp_err_to_name(error));read_pico_deinit(&hardware);vTaskDelete(NULL);return;}
+    // GL16改用同起点派生时序，消除翻页时旧字描边、新字空心；失败保留原表。
+    // Use start-aligned derived GL16 timing to remove outlined old glyphs and hollow new ones on turns; keep the original on failure.
+#if defined(ESP_PLATFORM)
+    {pn_device_wave_info_t wave;if(pn_device_wave_init(&E0470_WAVEFORM,E0470_TRIM_HOLD,&wave)){hardware.hl.waveform=pn_device_wave_aligned();ESP_LOGI(TAG,"GL16 start-aligned phases=%d/%d start=%d",wave.phases,wave.original_phases,wave.start);}
+     else ESP_LOGW(TAG,"GL16 start alignment unavailable; original timing kept");}
+#endif
     int vcom=0;if(!hardware.pmu_ready || read_pico_pmu_vcom_get(&vcom)!=ESP_OK){ESP_LOGE(TAG,"Factory VCOM unavailable; display withheld");read_pico_deinit(&hardware);vTaskDelete(NULL);return;}
     epd_set_vcom((uint16_t)vcom);
     size_t available=heap_caps_get_free_size(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);

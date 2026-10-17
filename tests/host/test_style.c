@@ -10,8 +10,12 @@ int main(void){char root[]="/tmp/pn-style-XXXXXX";assert(mkdtemp(root));char a[3
     pn_media_t media;pn_media_init(&media);assert(pn_media_attach(&media,1)==PN_OK);pn_media_lease_t lease;assert(pn_media_acquire(&media,PN_MEDIA_WRITE,&lease)==PN_OK);pn_journal_files_t files;pn_journal_io_t io;assert(pn_journal_files_init(&files,&media,&lease,a,b,&io)==PN_OK);
     pn_book_id_t book={{42}};pn_style_t s=pn_style_default(PN_STYLE_DEFAULT_PIXELS),loaded;assert(pn_style_validate(&s)==PN_OK);
     assert(s.pixels==44 && s.line_percent==145 && s.gap_percent==40 && s.indent_em==2 && s.margin==32);
-    assert(pn_style_load(&io,&book,&loaded)==PN_EMPTY);s=(pn_style_t){56,180,50,2,64,0,15,2,-8,3};assert(pn_style_save(&io,&book,&s)==PN_OK);assert(pn_style_load(&io,&book,&loaded)==PN_OK && !memcmp(&s,&loaded,sizeof s));
+    assert(pn_style_load(&io,&book,&loaded)==PN_EMPTY);s=(pn_style_t){56,180,50,2,64,0,15,2,-8,3,-1};assert(pn_style_save(&io,&book,&s)==PN_OK);assert(pn_style_load(&io,&book,&loaded)==PN_OK && !memcmp(&s,&loaded,sizeof s));
     // schema4深浅往返；schema3同载荷按浅读取，越界深浅拒绝保存。/ Schema 4 darkness round-trips; the same payload as schema 3 loads light, and out-of-range darkness is rejected.
+    // 非标准字重写schema5（60..61），标准字重仍写schema4；schema5标准字重或越界字重拒绝。/ Non-regular weights write schema 5 (60..61) while regular stays schema 4; schema 5 with regular or out-of-range weights is refused.
+    {pn_record_t v5;assert(pn_journal_load(&io,&v5)==PN_OK && v5.payload[4]==5 && (int16_t)(v5.payload[60]|v5.payload[61]<<8)==-1);v5.payload[60]=v5.payload[61]=0;assert(pn_journal_save(&io,v5.payload,v5.size)==PN_OK && pn_style_load(&io,&book,&loaded)==PN_UNSUPPORTED);
+     pn_style_t heavy=s;heavy.weight=4;assert(pn_style_validate(&heavy)==PN_INVALID);heavy.weight=-2;assert(pn_style_save(&io,&book,&heavy)==PN_INVALID);}
+    s.weight=0;assert(pn_style_save(&io,&book,&s)==PN_OK && pn_style_load(&io,&book,&loaded)==PN_OK && !loaded.weight);
     assert(pn_style_default(44).reading_line_shade==1);{pn_record_t v3;assert(pn_journal_load(&io,&v3)==PN_OK && v3.payload[4]==4 && v3.payload[58]==3);v3.payload[4]=3;v3.payload[58]=0;
      assert(pn_journal_save(&io,v3.payload,v3.size)==PN_OK && pn_style_load(&io,&book,&loaded)==PN_OK && loaded.reading_line_shade==0 && loaded.reading_line==2 && loaded.reading_line_offset==-8);
      v3.payload[58]=1;assert(pn_journal_save(&io,v3.payload,v3.size)==PN_OK && pn_style_load(&io,&book,&loaded)==PN_UNSUPPORTED);}

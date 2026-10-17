@@ -51,6 +51,7 @@ unsigned pn_settings_refresh_pages(uint8_t flags){static const unsigned pages[3]
 #define FULL_Y 520
 #define ABOUT_Y 190
 #define TURN_Y 900
+#define TURN_H 92
 // 传书只从底栏进入，设置页不再放局域网传书行；设备卡为WiFi网络与存储关于。
 // Transfer is entered only from the bottom bar; the device card holds WiFi and storage/about.
 static int device_rows(const su_t *u){(void)u;return 2;}
@@ -130,6 +131,12 @@ static pn_status_t draw_levels(pn_settings_ui_t *ui,su_t *u){
     int chosen=0;for(int i=0;i<3;i++)if(order[i]==(int)level_of(ui->flags))chosen=i;
     return pn_w_segments(&u->font,&u->canvas,labels,notes,3,chosen,LEVEL_Y,LEVEL_H);
 }
+/// 翻页样式只有直接与水波纹；旧扫除/页折记录按直接显示。/ Turn styles are direct or ripple; legacy sweep/fold records show as direct.
+static bool ripple(uint8_t flags){return (flags&PN_INPUT_TURN_MASK)==PN_INPUT_TURN_MASK;}
+static pn_status_t draw_turns(pn_settings_ui_t *ui,su_t *u){
+    static const char *const labels[2]={"直接","水波纹"},*const notes[2]={"最快","翻页即清残影"};
+    return pn_w_segments(&u->font,&u->canvas,labels,notes,2,ripple(ui->flags)?1:0,TURN_Y,TURN_H);
+}
 static pn_status_t draw_refresh(pn_settings_ui_t *ui,su_t *u){
     pn_font_t *font=&u->font;pn_frame_t *f=&u->canvas;
     pn_status_t s=pn_w_header(font,f,"< 设置","刷新与屏幕",NULL);
@@ -141,9 +148,10 @@ static pn_status_t draw_refresh(pn_settings_ui_t *ui,su_t *u){
     if(s==PN_OK)s=pn_w_group(font,f,"屏幕",FULL_Y+150);
     pn_w_card(f,FULL_Y+162,1);
     if(s==PN_OK)s=pn_w_card_row(font,f,*u->about.screen?u->about.screen:"4.7 英寸墨水屏","16 级灰阶，阅读页保持纯白底",NULL,-1,0u,FULL_Y+162,true);
-    if(s==PN_OK)s=pn_w_group(font,f,"翻页显示",TURN_Y-18);
-    if(s==PN_OK)s=note(u,"每次翻页直接显示完整的 16 灰阶正文。",TURN_Y+40);
-    if(s==PN_OK && *u->message)s=note(u,u->message,TURN_Y+228);
+    if(s==PN_OK)s=pn_w_group(font,f,"翻页效果",TURN_Y-18);
+    if(s==PN_OK)s=draw_turns(ui,u);
+    if(s==PN_OK)s=note(u,ripple(ui->flags)?"翻页时从翻页一侧推开弧形波纹，同时完成清残影，不再定期闪屏。":"直接显示完整 16 灰阶正文，按上方周期整屏刷新。",TURN_Y+TURN_H+50);
+    if(s==PN_OK && *u->message)s=note(u,u->message,TURN_Y+TURN_H+150);
     return s;
 }
 static pn_status_t draw_about(su_t *u){
@@ -279,6 +287,9 @@ static pn_status_t show_controls(pn_settings_ui_t *ui,su_t *u,uint8_t old_flags,
         unsigned i=(unsigned)(command-PN_SETUI_TOGGLE);changed=old_flags!=ui->flags;
         if(changed){int x=PN_UI_WIDTH-PN_UI_MARGIN-16-64,y=TOGGLE_Y+(int)i*ROW_H+32;
             pn_frame_rect(&u->canvas,x,y,64,36,PN_UI_SURFACE);pn_w_toggle(&u->canvas,x,y,on(ui->flags,i));}
+    }else if(u->screen==SCREEN_REFRESH && (command==PN_SETUI_TURN || command==PN_SETUI_TURN+1)){
+        // 说明文字随样式改变，整页重画。/ The note changes with the style, so repaint the page.
+        return show(ui,present,ctx);
     }else if(u->screen==SCREEN_REFRESH && command>=PN_SETUI_LEVEL && command<PN_SETUI_LEVEL+3){
         changed=old_flags!=ui->flags;if(changed){pn_frame_rect(&u->canvas,26,LEVEL_Y-6,632,LEVEL_H+12,PN_UI_PAPER);s=draw_levels(ui,u);}
     }else if(u->screen==SCREEN_APPEARANCE && command>=PN_SETUI_COLUMNS && command<PN_SETUI_STYLE+PN_SHELF_STYLE_COUNT){
@@ -476,6 +487,12 @@ pn_status_t pn_settings_ui_event(pn_settings_ui_t *ui,int command,pn_settings_pr
         pn_status_t shown=show_controls(ui,u,old_flags,old_shelf,command,local,present,ctx);return status==PN_OK?shown:status;
     }
     if(command==PN_SETUI_FULL_REFRESH)return show_profile(ui,present,ctx,PN_REFRESH_GC16);
+    if(command==PN_SETUI_TURN || command==PN_SETUI_TURN+1){
+        uint8_t next=(uint8_t)((ui->flags&~PN_INPUT_TURN_MASK)|(command==PN_SETUI_TURN?0u:PN_INPUT_TURN_MASK));
+        if(next==ui->flags)return PN_EMPTY;
+        status=commit(ui,u,next);
+        pn_status_t shown=show_controls(ui,u,old_flags,old_shelf,command,local,present,ctx);return status==PN_OK?shown:status;
+    }
     if(command>=PN_SETUI_LEVEL && command<PN_SETUI_LEVEL+3){
         uint8_t next=(uint8_t)((ui->flags&~PN_INPUT_REFRESH_MASK)|((unsigned)(command-PN_SETUI_LEVEL)<<4));
         if(next!=ui->flags)status=commit(ui,u,next);
@@ -530,6 +547,7 @@ int pn_settings_ui_hit(const pn_settings_ui_t *ui,int x,int y){
         static const int order[3]={1,0,2};
         int cell=pn_w_segments_hit(3,LEVEL_Y-6,LEVEL_H+12,x,y);if(cell>=0)return PN_SETUI_LEVEL+order[cell];
         if(y>=FULL_Y && y<FULL_Y+88)return PN_SETUI_FULL_REFRESH;
+        cell=pn_w_segments_hit(2,TURN_Y-6,TURN_H+12,x,y);if(cell>=0)return PN_SETUI_TURN+cell;
         return -1;
     }
     return -1;

@@ -46,7 +46,7 @@ pn_status_t pn_device_ls_discovery_open(pn_device_ls_discovery_t *out,const char
  discovery_t *s=calloc(1,sizeof *s);if(!s)return PN_NO_MEMORY;s->socket=-1;
  struct in_addr interface;if(inet_pton(AF_INET,address,&interface)!=1){free(s);return PN_INVALID;}
  memcpy(s->fingerprint,fingerprint,33);
- const char *format="{\"alias\":\"" PN_BRAND_NAME "\",\"version\":\"2.2\",\"deviceModel\":\"" PN_BRAND_NAME "\",\"deviceType\":\"headless\",\"fingerprint\":\"%s\",\"port\":%u,\"protocol\":\"http\",\"download\":false,\"announce\":%s}";
+ const char *format="{\"alias\":\"" PN_BRAND_NAME "\",\"version\":\"2.1\",\"deviceModel\":\"" PN_BRAND_NAME "\",\"deviceType\":\"headless\",\"fingerprint\":\"%s\",\"port\":%u,\"protocol\":\"http\",\"download\":false,\"announce\":%s}";
  snprintf(s->announce,sizeof s->announce,format,fingerprint,(unsigned)port,"true");snprintf(s->reply,sizeof s->reply,format,fingerprint,(unsigned)port,"false");
  s->group=(struct sockaddr_in){.sin_family=AF_INET,.sin_port=htons(53317)};(void)inet_pton(AF_INET,"224.0.0.167",&s->group.sin_addr);
  s->socket=socket(AF_INET,SOCK_DGRAM,IPPROTO_UDP);if(s->socket<0){free(s);return PN_IO;}

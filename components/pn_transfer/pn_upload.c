@@ -29,7 +29,7 @@ pn_status_t pn_upload_request_validate(const pn_upload_request_t *r){
  if(!r || !memchr(r->name,0,sizeof r->name) || zero(r->id,sizeof r->id) || !r->size || (!r->has_digest && !zero(r->digest.sha256,32)))return PN_INVALID;
  size_t n=strlen(r->name);if(!name_valid(r->name,n))return PN_INVALID;
  uint64_t limit;bool supported;
- switch(r->kind){case PN_UPLOAD_BOOK:limit=512u*1024u*1024u;supported=extension(r->name,".txt") || extension(r->name,".epub") || extension(r->name,".pdf") || extension(r->name,".fb2") || extension(r->name,".cbz");break;case PN_UPLOAD_FONT:limit=32u*1024u*1024u;supported=extension(r->name,".ttf");break;case PN_UPLOAD_COVER:case PN_UPLOAD_WALLPAPER:limit=8u*1024u*1024u;supported=extension(r->name,".png") || extension(r->name,".jpg") || extension(r->name,".jpeg");break;default:return PN_INVALID;}
+ switch(r->kind){case PN_UPLOAD_BOOK:limit=512u*1024u*1024u;supported=extension(r->name,".txt") || extension(r->name,".epub") || extension(r->name,".pdf") || extension(r->name,".fb2") || extension(r->name,".cbz");break;case PN_UPLOAD_FONT:limit=32u*1024u*1024u;supported=extension(r->name,".ttf") || extension(r->name,".otf");break;case PN_UPLOAD_COVER:case PN_UPLOAD_WALLPAPER:limit=8u*1024u*1024u;supported=extension(r->name,".png") || extension(r->name,".jpg") || extension(r->name,".jpeg");break;default:return PN_INVALID;}
  if(!supported)return PN_UNSUPPORTED;
  return r->size>limit?PN_LIMIT:PN_OK;
 }

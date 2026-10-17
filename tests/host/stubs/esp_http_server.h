@@ -6,7 +6,7 @@ typedef void *httpd_handle_t;
 typedef enum {HTTP_GET,HTTP_POST,HTTP_PUT,HTTP_DELETE} httpd_method_t;
 typedef struct httpd_req {httpd_handle_t handle;int method;const char *uri;size_t content_len;void *user_ctx,*aux;} httpd_req_t;
 typedef struct {const char *uri;int method;esp_err_t (*handler)(httpd_req_t *);void *user_ctx;} httpd_uri_t;
-typedef struct {unsigned stack_size,max_req_hdr_len,max_uri_len,server_port,ctrl_port,max_open_sockets,max_uri_handlers,max_resp_headers,recv_wait_timeout,send_wait_timeout;bool lru_purge_enable;void *uri_match_fn,*global_user_ctx;void (*global_user_ctx_free_fn)(void *);esp_err_t (*open_fn)(httpd_handle_t,int);} httpd_config_t;
+typedef struct {unsigned stack_size,max_req_hdr_len,max_uri_len,server_port,ctrl_port,max_open_sockets,max_uri_handlers,max_resp_headers,recv_wait_timeout,send_wait_timeout,task_caps;bool lru_purge_enable;void *uri_match_fn,*global_user_ctx;void (*global_user_ctx_free_fn)(void *);esp_err_t (*open_fn)(httpd_handle_t,int);} httpd_config_t;
 #define HTTPD_DEFAULT_CONFIG() ((httpd_config_t){0})
 #define HTTPD_RESP_USE_STR -1
 #define HTTPD_SOCK_ERR_FAIL -1

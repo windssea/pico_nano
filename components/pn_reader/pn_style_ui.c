@@ -19,7 +19,7 @@ static pn_status_t preview(pn_style_ui_t *u,uint64_t now,pn_reader_present_fn pr
 static pn_status_t apply(pn_style_ui_t *u,uint64_t now,pn_reader_present_fn present,void *ctx){return u->epub?pn_epub_app_style_apply(u->epub,&u->draft,now,present,ctx):pn_reader_app_style_apply(u->reader,&u->draft,now,present,ctx);}
 static pn_status_t cancel(pn_style_ui_t *u,uint64_t now,pn_reader_present_fn present,void *ctx){return u->epub?pn_epub_app_style_cancel(u->epub,now,present,ctx):pn_reader_app_style_cancel(u->reader,now,present,ctx);}
 #include "pn_widgets.h"
-/* 双列草稿面板：全部九项保留在一页，字体与预览独立入口。/ Two-column draft panel: all nine fields on one page, with separate font and preview entries. */
+/* 双列草稿面板：全部十项（含字重）保留在一页；点上方段落预览查看整页。/ Two-column draft panel: all ten fields including weight stay on one page; tap the paragraph preview for the full page. */
 #define PREVIEW_Y 140
 #define PREVIEW_H 180
 #define MODE_BASE 360
@@ -32,13 +32,13 @@ static pn_status_t cancel(pn_style_ui_t *u,uint64_t now,pn_reader_present_fn pre
 #define CELL_PITCH 320
 #define APPLY_Y 1112
 #define APPLY_H 88
-static const unsigned fields[PN_SUI_FIELDS]={0,1,2,5,3,4,6,8,7};
-static const char *const names[PN_SUI_FIELDS]={"字号","行距","段距","首行缩进","字间距","边距","阅读线","上下位置","阅读线深浅"};
+static const unsigned fields[PN_SUI_FIELDS]={0,1,2,5,3,4,6,8,7,9}; // 字重占原“整页预览”格，其余位置不变 / Weight takes the former full-preview cell; other positions are unchanged
+static const char *const names[PN_SUI_FIELDS]={"字号","行距","段距","首行缩进","字间距","边距","阅读线","上下位置","阅读线深浅","字重"};
 typedef struct {unsigned pixels,line,gap,indent,margin;} preset_t;
 static const preset_t presets[3]={{PN_STYLE_DEFAULT_PIXELS,145,40,2,32},{36,125,20,2,24},{56,160,40,2,32}};
 static const char *const preset_names[3]={"舒适","紧凑","大字"};
-static unsigned field_value(const pn_style_t *s,unsigned i){switch(i){case 0:return s->pixels;case 1:return s->line_percent;case 2:return s->gap_percent;case 3:return s->indent_em;case 4:return s->tracking_percent;case 5:return s->margin;case 6:return s->reading_line;case 8:return s->reading_line_shade;default:return (unsigned)(s->reading_line_offset+8);}}
-static void field_set(pn_style_t *s,unsigned i,unsigned v){switch(i){case 0:s->pixels=(uint16_t)v;break;case 1:s->line_percent=(uint16_t)v;break;case 2:s->gap_percent=(uint16_t)v;break;case 3:s->indent_em=(uint16_t)v;break;case 4:s->tracking_percent=(uint16_t)v;break;case 5:s->margin=(uint16_t)v;break;case 6:s->reading_line=(uint16_t)v;break;case 8:s->reading_line_shade=(uint16_t)v;break;default:s->reading_line_offset=(int16_t)((int)v-8);break;}}
+static unsigned field_value(const pn_style_t *s,unsigned i){switch(i){case 0:return s->pixels;case 1:return s->line_percent;case 2:return s->gap_percent;case 3:return s->indent_em;case 4:return s->tracking_percent;case 5:return s->margin;case 6:return s->reading_line;case 8:return s->reading_line_shade;case 9:return (unsigned)(s->weight+1);default:return (unsigned)(s->reading_line_offset+8);}}
+static void field_set(pn_style_t *s,unsigned i,unsigned v){switch(i){case 0:s->pixels=(uint16_t)v;break;case 1:s->line_percent=(uint16_t)v;break;case 2:s->gap_percent=(uint16_t)v;break;case 3:s->indent_em=(uint16_t)v;break;case 4:s->tracking_percent=(uint16_t)v;break;case 5:s->margin=(uint16_t)v;break;case 6:s->reading_line=(uint16_t)v;break;case 8:s->reading_line_shade=(uint16_t)v;break;case 9:s->weight=(int16_t)((int)v-1);break;default:s->reading_line_offset=(int16_t)((int)v-8);break;}}
 static void field_text(const pn_style_t *s,unsigned i,char *out,size_t cap){
     unsigned v=field_value(s,i);
     if(i==1 || i==2)snprintf(out,cap,"%u.%02u",v/100,v%100);
@@ -48,6 +48,7 @@ static void field_text(const pn_style_t *s,unsigned i,char *out,size_t cap){
     else if(i==6)snprintf(out,cap,"%s",v==1?"虚线":v==2?"点线":"关闭");
     else if(i==7)snprintf(out,cap,"%+d px",s->reading_line_offset);
     else if(i==8){static const char *const shades[4]={"浅","中","深","黑"};snprintf(out,cap,"%s",shades[v<4?v:0]);}
+    else if(i==9){static const char *const weights[5]={"细","标准","稍粗","粗","特粗"};snprintf(out,cap,"%s",weights[v<5?v:1]);}
     else snprintf(out,cap,"%u",v);
 }
 static int selected_preset(const pn_style_t *s){
@@ -98,9 +99,11 @@ static pn_status_t sample(pn_style_ui_t *u,pn_font_t *ui,pn_frame_t *frame){
     pn_status_t s=pn_font_size(ui,26);
     if(s==PN_OK)s=pn_w_text(ui,frame,"当前段落预览",52,PREVIEW_Y+40,560,PN_ALIGN_LEFT);
     if(s==PN_OK)s=pn_w_text(ui,frame,"轻点查看整页",52,PREVIEW_Y+40,560,PN_ALIGN_RIGHT);
-    pn_font_t *body=body_font(u);pn_font_t *face=body?body:ui;int saved=face->pixels;
+    pn_font_t *body=body_font(u);pn_font_t *face=body?body:ui;int saved=face->pixels,saved_weight=pn_font_weight_level(face);
     int pixels=(int)u->draft.pixels;if(pixels>56)pixels=56;
     if(s==PN_OK)s=pn_font_size(face,pixels);
+    // 预览按草稿字重画，结束后恢复正文原字重。/ Preview with the draft weight, then restore the body's original weight.
+    if(s==PN_OK && face==body)s=pn_font_weight(face,u->draft.weight);
     int pitch=pixels*(int)u->draft.line_percent/100;
     unsigned room=(unsigned)((PREVIEW_H-60)/pitch);if(room<1)room=1;if(room>4)room=4;
     unsigned lines=0;
@@ -109,6 +112,7 @@ static pn_status_t sample(pn_style_ui_t *u,pn_font_t *ui,pn_frame_t *frame){
         if(s==PN_OK){pn_frame_t preview={frame->pixels+(PREVIEW_Y+60)*frame->stride+26,556,PREVIEW_H-72,frame->stride};int gap=pitch-ascent-descent;if(gap<0)gap=0;
             for(unsigned i=0;i<lines;i++)pn_reader_guide_row(&preview,u->draft.reading_line,u->draft.reading_line_shade,pixels+(int)i*pitch+descent+gap/2+u->draft.reading_line_offset);}}
     pn_status_t restored=pn_font_size(face,saved);
+    if(restored==PN_OK)restored=pn_font_weight(face,saved_weight);
     return s==PN_OK?restored:s;
 }
 static pn_status_t paint_main(pn_style_ui_t *u,pn_font_t *font,pn_frame_t *frame){
@@ -126,7 +130,6 @@ static pn_status_t paint_main(pn_style_ui_t *u,pn_font_t *font,pn_frame_t *frame
     pn_w_set_fallback(NULL);pn_w_icon(frame,PN_ICON_CHEVRON,624,FONT_ROW_Y+25,28,PN_UI_INK);
     pn_frame_rect(frame,32,FONT_ROW_Y+78,620,1,PN_UI_SELECT);
     for(unsigned i=0;i<PN_SUI_FIELDS && s==PN_OK;i++)s=stepper(font,frame,&u->draft,fields[i],32+(int)(i%2)*CELL_PITCH,STEP_Y0+(int)(i/2)*STEP_PITCH,u->selected==fields[i]);
-    if(s==PN_OK){s=pn_font_size(font,26);if(s==PN_OK)s=pn_w_button(font,frame,"整页预览",352,STEP_Y0+4*STEP_PITCH,CELL_W,92,0);}
     return s;
 }
 pn_status_t pn_style_ui_render(void *ctx,pn_font_t *font,pn_font_t *metadata,pn_frame_t *frame){
@@ -157,7 +160,7 @@ pn_status_t pn_style_ui_event(pn_style_ui_t *u,int command,uint64_t now,pn_reade
     pn_status_t status=PN_OK;u->notice=NULL;
     if(command==PN_SUI_FONTS){if(u->application_failed){u->notice="请先应用或取消排版";(void)pn_style_ui_present(u,present,ctx);return PN_BUSY;}if(u->did_preview){status=cancel(u,now,present,ctx);if(status!=PN_OK)return status;u->did_preview=false;}u->request_fonts=true;return PN_OK;}
     if(command>=PN_SUI_FIELD && command<PN_SUI_FIELD+PN_SUI_FIELDS*2){
-        static const unsigned steps[]={2,5,5,1,5,2,1,2,1},minimum[]={28,100,0,0,0,16,0,0,0},maximum[]={72,220,100,2,50,80,2,16,3};
+        static const unsigned steps[]={2,5,5,1,5,2,1,2,1,1},minimum[]={28,100,0,0,0,16,0,0,0,0},maximum[]={72,220,100,2,50,80,2,16,3,4};
         unsigned field=(unsigned)(command-PN_SUI_FIELD)/2;bool up=(command-PN_SUI_FIELD)&1;unsigned v=field_value(&u->draft,field);u->selected=field;u->more=false;
         // 页边距只有窄/中/宽三档。/ Margins have just three levels: narrow, medium and wide.
         if(field==5){unsigned level=v<=20?0u:v<=32?1u:2u;static const unsigned margins[3]={20,32,48};if(up && level<2)level++;else if(!up && level>0)level--;else status=PN_EMPTY;field_set(&u->draft,5,margins[level]);}
@@ -189,7 +192,6 @@ int pn_style_ui_hit(const pn_style_ui_t *u,int x,int y){
         int left=32+(int)(i%2)*CELL_PITCH,top=STEP_Y0+(int)(i/2)*STEP_PITCH;
         if(y>=top+38 && y<top+92){if(x>=left && x<left+68)return PN_SUI_FIELD+(int)fields[i]*2;if(x>=left+CELL_W-68 && x<left+CELL_W)return PN_SUI_FIELD+(int)fields[i]*2+1;}
     }
-    if(x>=352 && x<652 && y>=STEP_Y0+4*STEP_PITCH && y<STEP_Y0+4*STEP_PITCH+92)return PN_SUI_PREVIEW;
     int preset=pn_w_segments_hit(3,PRESET_Y,PRESET_H,x,y);return preset>=0?PN_SUI_PRESET+preset:-1;
 }
 void pn_style_ui_close(pn_style_ui_t *u){if(u)memset(u,0,sizeof *u);}

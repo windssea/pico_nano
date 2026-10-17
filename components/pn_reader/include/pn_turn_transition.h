@@ -5,7 +5,8 @@
 typedef enum {
     PN_TURN_NONE=0, ///< 默认直接呈现 / Default direct presentation
     PN_TURN_SWEEP=1, ///< 历史扫除ID，产品直接显示 / Legacy sweep ID, product presents directly
-    PN_TURN_CURL=2 ///< 历史页折ID，产品直接显示 / Legacy fold ID, product presents directly
+    PN_TURN_CURL=2, ///< 历史页折ID，产品直接显示 / Legacy fold ID, product presents directly
+    PN_TURN_RIPPLE=3 ///< 水波纹：真实上一页/下一页以弧形错峰GC16呈现 / Ripple: real previous/next turns present as arc-staggered GC16
 } pn_turn_style_t;
 typedef struct {
     pn_pool_t *pool; ///< 保留调用兼容，无动画分配 / Retained for call compatibility, no animation allocation
@@ -17,5 +18,6 @@ typedef struct {
 } pn_turn_t;
 /// 纯绘制：step=0为旧页，step=total为新页；禁止输出与输入重叠。/ Paint only: zero is old and total is new; output cannot alias input.
 pn_status_t pn_turn_frame(const pn_frame_t *,const pn_frame_t *,pn_frame_t *,pn_turn_style_t,unsigned step,unsigned total,bool reverse);
-/// 各历史样式仅呈现最终页一次；失败尽力恢复借用旧帧，无分配。/ Every legacy style presents the final page once; best-effort restore from the borrowed old frame on failure, without allocation.
+/// 各样式仅呈现最终页一次；水波纹且有已确认旧页时改用水波纹刷新档，由显示适配决定能否执行；失败尽力恢复借用旧帧，无分配。
+/// Every style presents the final page once; ripple with a confirmed old page switches to the ripple profile and the display adapter decides whether it can run; best-effort restore from the borrowed old frame on failure, without allocation.
 pn_status_t pn_turn_present(void *,const pn_frame_t *,pn_refresh_t);

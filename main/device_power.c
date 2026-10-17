@@ -20,6 +20,9 @@ static bool held[PN_POWER_OWNERS];
 #include "esp_log.h"
 static const char *TAG="pn_power";
 static esp_pm_lock_handle_t locks[PN_POWER_OWNERS];
+/// 联网/USB会话另持禁浅睡锁：CPU满频锁不阻止自动浅睡，浅睡会让WiFi收包与TCP应答抖动甚至断流。
+/// Network/USB sessions also hold a no-light-sleep lock: the max-CPU lock does not stop automatic light sleep, which makes WiFi reception and TCP acks stall or drop.
+static esp_pm_lock_handle_t session_awake;
 static bool active,light;
 void pn_device_power_init(void){
     static const char *const names[PN_POWER_OWNERS]={"pn-product","pn-display","pn-session","pn-rails"};
@@ -28,6 +31,7 @@ void pn_device_power_init(void){
         if(esp_pm_lock_create(i==PN_POWER_RAILS?ESP_PM_NO_LIGHT_SLEEP:ESP_PM_CPU_FREQ_MAX,0,names[i],&locks[i])!=ESP_OK || esp_pm_lock_acquire(locks[i])!=ESP_OK){ESP_LOGW(TAG,"DFS lock unavailable; staying at maximum");return;}
         held[i]=true;
     }
+    if(esp_pm_lock_create(ESP_PM_NO_LIGHT_SLEEP,0,"pn-session-awake",&session_awake)!=ESP_OK || esp_pm_lock_acquire(session_awake)!=ESP_OK){ESP_LOGW(TAG,"Session wake lock unavailable; staying at maximum");return;}
 #if CONFIG_PN_POWER_LIGHT_SLEEP
     const bool sleep=true;
 #else
@@ -40,7 +44,9 @@ void pn_device_power_init(void){
 }
 void pn_device_power_busy(pn_device_power_owner_t owner,bool busy){
     if(!active || (unsigned)owner>=PN_POWER_OWNERS || held[owner]==busy)return;
-    if((busy?esp_pm_lock_acquire(locks[owner]):esp_pm_lock_release(locks[owner]))==ESP_OK)held[owner]=busy;
+    if((busy?esp_pm_lock_acquire(locks[owner]):esp_pm_lock_release(locks[owner]))!=ESP_OK)return;
+    held[owner]=busy;
+    if(owner==PN_POWER_SESSION)(void)(busy?esp_pm_lock_acquire(session_awake):esp_pm_lock_release(session_awake));
 }
 bool pn_device_power_active(void){return active;}
 bool pn_device_power_light_sleep(void){return light;}

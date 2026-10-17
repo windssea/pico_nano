@@ -3,7 +3,7 @@
 #include "pn_turn_transition.h"
 #include <string.h>
 pn_status_t pn_turn_frame(const pn_frame_t *old,const pn_frame_t *next,pn_frame_t *out,pn_turn_style_t style,unsigned step,unsigned total,bool reverse){
-    if(!old || !next || !out || !old->pixels || !next->pixels || !out->pixels || !total || step>total || style>PN_TURN_CURL || old->width!=next->width || old->height!=next->height || out->width!=next->width || out->height!=next->height || out->pixels==old->pixels || out->pixels==next->pixels)return PN_INVALID;
+    if(!old || !next || !out || !old->pixels || !next->pixels || !out->pixels || !total || step>total || style>PN_TURN_RIPPLE || old->width!=next->width || old->height!=next->height || out->width!=next->width || out->height!=next->height || out->pixels==old->pixels || out->pixels==next->pixels)return PN_INVALID;
     if(next->width<1 || next->width>4096 || next->height<1 || next->height>4096 || old->stride<(size_t)(next->width+1)/2 || next->stride<(size_t)(next->width+1)/2 || out->stride<(size_t)(next->width+1)/2)return PN_INVALID;
     int edge=(int)((uint64_t)next->width*(total-step)/total),fold=next->width/8;
     if(fold<1)fold=1;
@@ -23,9 +23,11 @@ pn_status_t pn_turn_frame(const pn_frame_t *old,const pn_frame_t *next,pn_frame_
 pn_status_t pn_turn_present(void *ctx,const pn_frame_t *next,pn_refresh_t profile){
     pn_turn_t *t=ctx;if(!t || !t->present || !next)return PN_INVALID;
     if(!next->pixels || next->width<1 || next->width>4096 || next->height<1 || next->height>4096 || next->stride<(size_t)(next->width+1)/2)return PN_INVALID;
-    if(t->style>PN_TURN_CURL)return PN_INVALID;
+    if(t->style>PN_TURN_RIPPLE)return PN_INVALID;
     // 历史样式都直接显示一次；不分配动画帧。/ All legacy styles present once, without animation frame allocation.
     if(t->before && (!t->before->pixels || t->before->stride<(size_t)(next->width+1)/2 || t->before->width!=next->width || t->before->height!=next->height))return PN_INVALID;
+    // 水波纹本身就是完整GC16，周期清理页也走它，不再另闪一次全屏。/ Ripple is itself a complete GC16, so periodic cleaning turns use it too instead of a separate full flash.
+    if(t->style==PN_TURN_RIPPLE && t->before && (profile==PN_REFRESH_GL16 || profile==PN_REFRESH_GC16))profile=t->reverse?PN_REFRESH_RIPPLE_REVERSE:PN_REFRESH_RIPPLE;
     pn_status_t status=t->present(t->ctx,next,profile);
     if(status!=PN_OK && status!=PN_CANCELLED && status!=PN_BUSY && t->before)(void)t->present(t->ctx,t->before,PN_REFRESH_GC16);
     return status;
