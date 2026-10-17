@@ -1,6 +1,8 @@
 # PicoNano 安装、异机升级与发布
 
-更新：2026-10-16。默认通过电脑 Chrome/Edge 的 Web Serial 升级，在线入口为[网页安装器](https://windssea.github.io/pico_nano/)。0.9.7 OTA迁移测试预览为 `0.9.7+07e1fba`（接替 `0.9.6+8901f74`），稳定分发版本仍为 `0.8.0+cfb5c2f`。0.9首次OTA准备需备份后使用同源码完整刷入，普通保留升级不会替换旧bootloader。网页安装与设备无线OTA是不同能力，当前没有已交付的OTA原子回滚。
+更新：2026-10-16。默认通过电脑 Chrome/Edge 的 Web Serial 升级，在线入口为[网页安装器](https://windssea.github.io/pico_nano/)。0.9.8 OTA迁移测试预览为 `0.9.8+c4ce79d`（接替 `0.9.7+07e1fba`），稳定分发版本仍为 `0.8.0+cfb5c2f`。0.9首次OTA准备需备份后使用同源码完整刷入，普通保留升级不会替换旧bootloader。网页安装与设备无线OTA是不同能力，当前没有已交付的OTA原子回滚。
+
+0.9.8固件源`c4ce79dc0e954eb2032e2517887b286ce3edf5d6`加入网页上传封面/锁屏图片的浏览器端缩放与转码，并暂时隐藏传书页LocalSend入口。229项主机C（含7项网页脚本）、43项SDL、安装器测试及离线站点下载核对通过；两套ESP-IDF6.1完整构建/size与S3镜像校验通过。板级应用5418848B，6MiB槽余872608B（13.87%），SHA-256为`5379a6e05563dd1e169ca43713192e6c2b8a174ae20a86216bd5e7b1ed180b7b`；板级引导仍与0.9.0逐字节相同。只发布三个USB安装ZIP与摘要，不发布OTA清单；未连接设备或刷写。
 
 0.9.7固件源`07e1fbae0ea874f356e5747d3cb783eb6db56ba5`修正切换CFF(OTF)字体溢栈重启（CFF字形改在40KiB PSRAM栈任务执行）与LocalSend v3路径/错误响应。229项主机C、43项SDL、安装器测试及离线站点下载核对通过；两套ESP-IDF6.1完整构建/size与S3镜像校验通过。板级应用5416752B，6MiB槽余874704B（13.90%），SHA-256为`cddb91ad8a513f7f41f7aff8f2fa941a021831a7eeccae3f0b19af0b25cf0ccd`；板级引导仍与0.9.0逐字节相同。只发布三个USB安装ZIP与摘要，不发布OTA清单；未连接设备或刷写。
 
