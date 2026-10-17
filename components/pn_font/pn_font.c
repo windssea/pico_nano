@@ -92,6 +92,7 @@ typedef struct {
     bool warming; ///< 可选光栅预热，禁止触碰呈现帧 / Optional raster warming without touching presentation frames
     int8_t weight; ///< 合成字重-1..3 / Synthetic weight -1..3
     bool deep; ///< CFF轮廓：字形载入须走深栈runner / CFF outlines: glyph loading must go through the deep-stack runner
+    int8_t clarity; ///< 清晰度0..3，选择覆盖率曲线 / Sharpness 0..3 selecting the coverage curve
 } engine_t;
 static pn_font_deep_runner_t deep_runner;
 void pn_font_set_deep_runner(pn_font_deep_runner_t runner){deep_runner=runner;}
@@ -163,6 +164,13 @@ pn_status_t pn_font_weight(pn_font_t *font,int level){
     return e->ui_fallback.impl?pn_font_weight(&e->ui_fallback,level):PN_OK;
 }
 int pn_font_weight_level(const pn_font_t *font){return font && font->impl?((const engine_t *)font->impl)->weight:0;}
+pn_status_t pn_font_clarity(pn_font_t *font,int level){
+    if(!font || !font->impl || level<0 || level>3)return PN_INVALID;
+    engine_t *e=font->impl;if(e->clarity==level)return PN_OK;
+    e->clarity=(int8_t)level;glyph_drop(e);
+    return e->ui_fallback.impl?pn_font_clarity(&e->ui_fallback,level):PN_OK;
+}
+int pn_font_clarity_level(const pn_font_t *font){return font && font->impl?((const engine_t *)font->impl)->clarity:0;}
 void pn_font_close(pn_font_t *font) {
     if(!font || !font->impl)return;
     engine_t *e=font->impl;pn_cache_detach(&e->cache);pn_font_trim(font);pn_font_close(&e->ui_fallback);
@@ -221,6 +229,7 @@ static pn_status_t ui_fallback(pn_font_t *font,pn_font_t **out){
     if(e->ui_fallback.impl)s=pn_font_size(&e->ui_fallback,font->pixels);
     else{pn_text_source_t source={NULL,pn_ui_font_size,builtin_read,NULL};s=pn_font_open(&e->ui_fallback,e->pool,&source,font->pixels);}
     if(s==PN_OK)s=pn_font_weight(&e->ui_fallback,e->weight);
+    if(s==PN_OK)s=pn_font_clarity(&e->ui_fallback,e->clarity);
     if(s==PN_OK)*out=&e->ui_fallback;
     return s;
 }
@@ -236,14 +245,18 @@ static pn_status_t load(pn_font_t *font,uint32_t cp,bool render) {
 }
 /// 墨水屏清晰度曲线：去掉覆盖率低于约6%的浅灰晕，部分覆盖的细笔画（楷体、宋体横画）按1-(1-t)²为主加深，满覆盖不变；只作用于新光栅，缓存保存曲线后的值。
 /// E-ink clarity curve: drop faint halos below about 6% coverage and darken partially covered thin strokes (Kai/Song hairlines) mainly by 1-(1-t)²; full coverage is unchanged. Applied to fresh rasters only, and caches hold the curved values.
-static uint8_t clarity_curve(unsigned c){
-    if(c<16u)return 0;
-    unsigned t=(c-16u)*255u/239u,curve=255u-(255u-t)*(255u-t)/255u;
-    return (uint8_t)((curve*3u+t)/4u);
+/// 0标准（上述）；1清晰：去晕门槛约9%，纯1-(1-t)²；2锐利：门槛约12%，1-(1-t)³；3黑白：覆盖约38%以上全黑，无灰边。
+/// 0 standard (above); 1 clear: halo cut about 9%, pure 1-(1-t)^2; 2 sharp: cut about 12%, 1-(1-t)^3; 3 black-and-white: full black from about 38% coverage, no gray edges.
+static uint8_t clarity_curve(unsigned level,unsigned c){
+    if(level==3)return c>=96u?255u:0u;
+    unsigned cut=level==0?16u:level==1?24u:32u;if(c<cut)return 0;
+    unsigned t=(c-cut)*255u/(255u-cut),inverse=255u-t,curve=level==2?255u-inverse*inverse/255u*inverse/255u:255u-inverse*inverse/255u;
+    return (uint8_t)(level==0?(curve*3u+t)/4u:curve);
 }
-static void clarity(FT_Bitmap *b){
-    static uint8_t table[256];static bool ready_table;
-    if(!ready_table){for(unsigned i=0;i<256u;i++)table[i]=clarity_curve(i);ready_table=true;}
+static void clarity(FT_Bitmap *b,unsigned level){
+    static uint8_t tables[4][256];static bool ready_table;
+    if(!ready_table){for(unsigned l=0;l<4u;l++)for(unsigned i=0;i<256u;i++)tables[l][i]=clarity_curve(l,i);ready_table=true;}
+    const uint8_t *table=tables[level<4u?level:0u];
     if(b->pixel_mode!=FT_PIXEL_MODE_GRAY || !b->buffer)return;
     size_t pitch=(size_t)(b->pitch<0?-b->pitch:b->pitch);
     for(unsigned y=0;y<b->rows;y++){uint8_t *row=b->buffer+(size_t)y*pitch;for(unsigned x=0;x<b->width;x++)row[x]=table[row[x]];}
@@ -324,7 +337,7 @@ static pn_status_t draw_impl(pn_font_t *font,pn_frame_t *frame,uint32_t cp,int32
     if(b->pixel_mode!=FT_PIXEL_MODE_GRAY || b->num_grays!=256 || b->width>512 || b->rows>512 || !b->buffer)return PN_LIMIT;
     int64_t pitch=b->pitch;if(pitch<0)pitch=-pitch;
     if(pitch<b->width)return PN_CORRUPT;
-    clarity(b);
+    clarity(b,(unsigned)e->clarity);
     int64_t left=(int64_t)x_64/64+glyph->bitmap_left,top=(int64_t)baseline-glyph->bitmap_top;
     // 先画再缓存；缓存失败（预算或内存）只是下次重新渲染，不影响本次结果。/ Draw first, then cache; a failed insert only means re-rendering next time and never changes this result.
     size_t bytes=(size_t)b->width*b->rows;

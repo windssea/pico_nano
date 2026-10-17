@@ -38,6 +38,11 @@ void pn_font_trim(pn_font_t *font);
 pn_status_t pn_font_weight(pn_font_t *font,int level);
 /// 当前合成字重，未打开为0。/ Current synthetic weight, zero when closed.
 int pn_font_weight_level(const pn_font_t *font);
+/// 清晰度0标准、1清晰、2锐利、3黑白：选择字形边缘的覆盖率曲线，不改字宽与分页；改变时丢弃该引擎字形缓存。
+/// Sharpness 0 standard, 1 clear, 2 sharp, 3 black-and-white: selects the glyph-edge coverage curve without changing advances or pagination; changes drop this engine's glyph cache.
+pn_status_t pn_font_clarity(pn_font_t *font,int level);
+/// 当前清晰度。/ Current sharpness level.
+int pn_font_clarity_level(const pn_font_t *font);
 /// 设置8至128像素，不保存全局或逐书设置。
 /// Set 8 through 128 pixels without saving global or per-book settings.
 pn_status_t pn_font_size(pn_font_t *font,int pixels);

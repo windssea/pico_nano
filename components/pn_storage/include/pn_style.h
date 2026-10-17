@@ -20,6 +20,7 @@ typedef struct {
     int16_t reading_line_offset; ///< 阅读线上下位置-8..8px，2px一步 / Guide vertical offset -8..8 px in 2 px steps
     uint16_t reading_line_shade; ///< 阅读线深浅：0浅、1中、2深、3黑；旧记录为0 / Guide darkness: light, medium, dark or black; legacy records load as light
     int16_t weight; ///< 字重-1细、0标准、1..3加粗；只改字形笔画不改字宽与分页，旧记录为0 / Weight: -1 light, 0 regular, 1..3 bolder; changes strokes only, never advances or pagination; legacy records load as 0
+    uint16_t clarity; ///< 清晰度0标准、1清晰、2锐利、3黑白；只改字形边缘灰阶，不改分页，旧记录为0 / Sharpness: standard, clear, sharp or black-and-white; changes glyph edge grays only, never pagination; legacy records load as 0
 } pn_style_t;
 /// 产品默认舒适模式字号。/ Product default comfortable-mode body size.
 enum { PN_STYLE_DEFAULT_PIXELS = 44 };
@@ -28,8 +29,8 @@ enum { PN_STYLE_DEFAULT_PIXELS = 44 };
 pn_style_t pn_style_default(int pixels);
 /// 校验所有范围。/ Validate every range.
 pn_status_t pn_style_validate(const pn_style_t *style);
-/// 按内容身份保存64byte配置：标准字重写schema4（58..59为阅读线深浅），非标准字重写schema5（60..61为字重），旧固件读到schema5时退回默认。
-/// Save a 64-byte configuration by content identity: regular weight writes schema4 (bytes 58..59 guide darkness), other weights schema5 (bytes 60..61 weight), which older firmware treats as defaults.
+/// 按内容身份保存64byte配置：标准字重写schema4（58..59为阅读线深浅），非标准字重写schema5（60..61为字重），非标准清晰度写schema6（62..63为清晰度），旧固件读到更高schema时退回默认。
+/// Save a 64-byte configuration by content identity: regular weight writes schema4 (bytes 58..59 guide darkness), other weights schema5 (bytes 60..61 weight), non-standard sharpness schema6 (bytes 62..63), which older firmware treats as defaults.
 pn_status_t pn_style_save(const pn_journal_io_t *io,const pn_book_id_t *book,const pn_style_t *style);
 /// 错误不改输出；EMPTY由调用方选择默认。
 /// Preserve output on errors; caller chooses defaults for EMPTY only.

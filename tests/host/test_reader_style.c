@@ -15,13 +15,16 @@ int main(void){char root[]="/tmp/pn-reader-style-XXXXXX";assert(mkdtemp(root));c
     pn_pool_t pool;assert(pn_pool_init(&pool,2*1024*1024,NULL,NULL,NULL)==0);pn_reader_app_t app={0};bool fail=false;pn_style_t original,draft,shown;
     assert(pn_reader_app_open(&app,&pool,book,NULL,state,44,0)==PN_OK && pn_reader_app_step(&app,PN_APP_OPEN,1,present,&fail)==PN_OK);
     assert(pn_reader_app_step(&app,PN_APP_NEXT,2,present,&fail)==PN_OK);pn_txt_progress_t before,after;assert(pn_reader_app_progress(&app,&before)==PN_OK && before.source_offset>0);
-    assert(pn_reader_app_style_get(&app,&original)==PN_OK && original.pixels==44);draft=(pn_style_t){56,180,50,2,64,0,15,2,2,2,2};
+    assert(pn_reader_app_style_get(&app,&original)==PN_OK && original.pixels==44);draft=(pn_style_t){56,180,50,2,64,0,15,2,2,2,2,0};
     pn_style_t invalid=draft;invalid.pixels=73;
     assert(pn_reader_app_style_preview(&app,&invalid,2,present,&fail)==PN_INVALID && !pn_reader_app_last_confirmed(&app));
     fail=true;assert(pn_reader_app_style_preview(&app,&draft,3,present,&fail)==PN_IO);assert(pn_reader_app_style_get(&app,&shown)==PN_OK && !memcmp(&shown,&original,sizeof shown));
     fail=false;assert(pn_reader_app_style_preview(&app,&draft,4,present,&fail)==PN_OK);assert(pn_reader_app_progress(&app,&after)==PN_OK && after.source_offset==before.source_offset);
     assert(pn_reader_app_style_cancel(&app,5,present,&fail)==PN_OK);assert(pn_reader_app_style_get(&app,&shown)==PN_OK && !memcmp(&shown,&original,sizeof shown));
-    assert(pn_reader_app_style_apply(&app,&draft,6,present,&fail)==PN_OK);assert(pn_reader_app_close(&app,7)==PN_OK && pool.live==0);
+    draft.clarity=3;assert(pn_reader_app_style_apply(&app,&draft,6,present,&fail)==PN_OK);
+    // 应用后正文字体立刻带新字重/清晰度（曾因先同步字体后换样式而沿用旧值）。/ Right after applying, the body font carries the new weight/sharpness (it once kept old values by syncing before swapping the style).
+    {pn_font_t *face=pn_reader_app_body_font(&app);assert(face && pn_font_weight_level(face)==2 && pn_font_clarity_level(face)==3);}
+    assert(pn_reader_app_close(&app,7)==PN_OK && pool.live==0);
     assert(pn_reader_app_open(&app,&pool,book,NULL,state,44,8)==PN_OK);assert(pn_reader_app_style_get(&app,&shown)==PN_OK && !memcmp(&shown,&draft,sizeof shown));
     assert(pn_reader_app_step(&app,PN_APP_OPEN,9,present,&fail)==PN_OK);assert(pn_reader_app_progress(&app,&after)==PN_OK && after.source_offset==before.source_offset);
     char hash[65];for(unsigned i=0;i<32;i++)snprintf(hash+i*2,3,"%02x",after.book.sha256[i]);char blocked[768];snprintf(blocked,sizeof blocked,"%s/%s.style.b",state,hash);assert(mkdir(blocked,0700)==0);

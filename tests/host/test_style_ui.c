@@ -20,22 +20,22 @@ int main(void){char root[]="/tmp/pn-style-ui-XXXXXX";assert(mkdtemp(root));char 
     screen.fail=true;assert(pn_style_ui_open(&ui,&app,present,&screen)==PN_IO && !ui.presented);
     assert(pn_style_ui_event(&ui,PN_SUI_APPLY,2,present,&screen)==PN_BUSY && ui.active);
     screen.fail=false;screen.capture=true;assert(pn_style_ui_event(&ui,PN_SUI_RETRY,2,present,&screen)==PN_OK && ui.presented);
-    /* 十项（含字重）双列在一页可达，标签与列间隙不误触。/ All ten two-column fields including weight are reachable on one page, without label/gutter hits. */
-    {static const unsigned rows[10]={0,1,2,5,3,4,6,8,7,9};
-     for(unsigned i=0;i<10;i++){if(rows[i]==3)continue;int hit=pn_style_ui_hit(&ui,i%2?620:300,608+(int)(i/2)*100);assert(hit==PN_SUI_FIELD+(int)rows[i]*2+1);assert(pn_style_ui_event(&ui,hit,2,present,&screen)==PN_OK && !ui.more);}}
-    for(unsigned i=0;i<2;i++){int hit=pn_style_ui_hit(&ui,60,808);assert(hit==PN_SUI_FIELD+6);assert(pn_style_ui_event(&ui,hit,2,present,&screen)==PN_OK);}
+    /* 十一项（含字重、清晰度）六行双列在一页可达，标签与列间隙不误触。/ All eleven two-column fields including weight and sharpness are reachable on one page in six rows, without label/gutter hits. */
+    {static const unsigned rows[11]={0,1,2,5,3,4,9,10,6,8,7};
+     for(unsigned i=0;i<11;i++){if(rows[i]==3)continue;int hit=pn_style_ui_hit(&ui,i%2?620:300,558+(int)(i/2)*88);assert(hit==PN_SUI_FIELD+(int)rows[i]*2+1);assert(pn_style_ui_event(&ui,hit,2,present,&screen)==PN_OK && !ui.more);}}
+    for(unsigned i=0;i<2;i++){int hit=pn_style_ui_hit(&ui,60,734);assert(hit==PN_SUI_FIELD+6);assert(pn_style_ui_event(&ui,hit,2,present,&screen)==PN_OK);}
     assert(pn_style_ui_hit(&ui,340,610)==-1 && pn_style_ui_hit(&ui,100,560)==-1);
     assert(pn_style_ui_hit(&ui,300,200)==PN_SUI_PREVIEW && pn_style_ui_hit(&ui,500,1000)==-1 && pn_style_ui_hit(&ui,100,480)==PN_SUI_FONTS && pn_style_ui_hit(&ui,100,60)==PN_SUI_CANCEL && pn_style_ui_hit(&ui,600,90)==PN_SUI_RESET && pn_style_ui_hit(&ui,300,1150)==PN_SUI_APPLY);
     assert(pn_style_ui_event(&ui,PN_SUI_MORE,2,present,&screen)==PN_OK && !ui.more && pn_style_ui_hit(&ui,100,60)==PN_SUI_CANCEL);
     assert(pn_style_ui_event(&ui,PN_SUI_BACK_MAIN,2,present,&screen)==PN_OK && !ui.more);
-    assert(ui.draft.pixels==46 && ui.draft.line_percent==150 && ui.draft.gap_percent==45 && ui.draft.indent_em==0 && ui.draft.margin==48 && ui.draft.gl_before_clear==12 && ui.draft.tracking_percent==5 && ui.draft.reading_line==1 && ui.draft.reading_line_offset==2 && ui.draft.reading_line_shade==2 && ui.draft.weight==1);
+    assert(ui.draft.pixels==46 && ui.draft.line_percent==150 && ui.draft.gap_percent==45 && ui.draft.indent_em==0 && ui.draft.margin==48 && ui.draft.gl_before_clear==12 && ui.draft.tracking_percent==5 && ui.draft.reading_line==1 && ui.draft.reading_line_offset==2 && ui.draft.reading_line_shade==2 && ui.draft.weight==1 && ui.draft.clarity==1);
     /* 预设与恢复默认只改草稿。/ Presets and restore-defaults change only the draft. */
-    assert(pn_style_ui_hit(&ui,100,402)==PN_SUI_PRESET && pn_style_ui_hit(&ui,340,402)==PN_SUI_PRESET+1 && pn_style_ui_hit(&ui,560,402)==PN_SUI_PRESET+2);
+    assert(pn_style_ui_hit(&ui,100,372)==PN_SUI_PRESET && pn_style_ui_hit(&ui,340,372)==PN_SUI_PRESET+1 && pn_style_ui_hit(&ui,560,372)==PN_SUI_PRESET+2);
     assert(pn_style_ui_event(&ui,PN_SUI_PRESET+1,2,present,&screen)==PN_OK && ui.draft.pixels==36 && ui.draft.line_percent==125 && ui.draft.margin==24 && ui.draft.tracking_percent==0);
     assert(pn_style_ui_event(&ui,PN_SUI_PRESET+2,2,present,&screen)==PN_OK && ui.draft.pixels==56);
     assert(pn_style_ui_event(&ui,PN_SUI_RESET,2,present,&screen)==PN_OK && ui.draft.pixels==44 && ui.draft.line_percent==145 && ui.draft.gap_percent==40 && ui.draft.indent_em==2 && ui.draft.margin==32);
     {pn_style_t reset=ui.draft;assert(pn_style_ui_event(&ui,PN_SUI_PRESET,2,present,&screen)==PN_OK && !memcmp(&reset,&ui.draft,sizeof reset));}
-    assert(pn_style_ui_hit(&ui,300,300)==PN_SUI_PREVIEW && pn_style_ui_hit(&ui,300,1100)==-1);
+    assert(pn_style_ui_hit(&ui,300,250)==PN_SUI_PREVIEW && pn_style_ui_hit(&ui,300,1100)==-1);
     screen.capture=false;const char *preview_path=getenv("PN_STYLE_PREVIEW_CAPTURE");if(preview_path){assert(setenv("PN_STYLE_CAPTURE",preview_path,1)==0);screen.capture=true;}
     assert(pn_style_ui_event(&ui,PN_SUI_PREVIEW,3,present,&screen)==PN_OK && ui.preview);assert(pn_style_ui_hit(&ui,300,400)==PN_SUI_FORM);screen.capture=false;
     assert(pn_style_ui_event(&ui,PN_SUI_FORM,3,present,&screen)==PN_OK && !ui.preview);assert(pn_style_ui_event(&ui,PN_SUI_CANCEL,4,present,&screen)==PN_OK && !ui.active);

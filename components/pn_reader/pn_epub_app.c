@@ -70,7 +70,7 @@ static pn_status_t ensure_size(app_t *a,int pixels){
     if(!a->body.impl){pn_text_source_t source=a->font_source;return pn_font_open(&a->body,a->pool,&source,pixels);}return pn_font_size(&a->body,pixels);
 }
 /// 字号之外同步排版的合成字重；字重不参与分页。/ Besides size, apply the style's synthetic weight, which never affects pagination.
-static pn_status_t ensure_body(app_t *a,int pixels){pn_status_t s=ensure_size(a,pixels);return s==PN_OK?pn_font_weight(body(a),a->style.weight):s;}
+static pn_status_t ensure_body(app_t *a,int pixels){pn_status_t s=ensure_size(a,pixels);if(s==PN_OK)s=pn_font_weight(body(a),a->style.weight);return s==PN_OK?pn_font_clarity(body(a),a->style.clarity):s;}
 static void suspend_fonts(app_t *a){pn_font_chain_suspend(&a->chain);pn_font_close(&a->body);pn_font_set_suspend(&a->font_live);pn_font_set_suspend(&a->font_draft);}
 static pn_status_t font_write(app_t *,const pn_font_preferences_t *);
 static pn_status_t global_write(app_t *,const pn_font_preferences_t *);

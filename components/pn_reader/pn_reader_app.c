@@ -88,7 +88,7 @@ static pn_status_t ensure_size(app_t *a,int pixels){
     if(!a->body.impl){pn_text_source_t source=a->external_font?a->font_source:pn_font_reading_source();return pn_font_open(&a->body,a->pool,&source,pixels);}return pn_font_size(&a->body,pixels);
 }
 /// 字号之外同步排版的合成字重；字重不参与分页。/ Besides size, apply the style's synthetic weight, which never affects pagination.
-static pn_status_t ensure_body(app_t *a,int pixels){pn_status_t s=ensure_size(a,pixels);return s==PN_OK?pn_font_weight(body(a),a->style.weight):s;}
+static pn_status_t ensure_body(app_t *a,int pixels){pn_status_t s=ensure_size(a,pixels);if(s==PN_OK)s=pn_font_weight(body(a),a->style.weight);return s==PN_OK?pn_font_clarity(body(a),a->style.clarity):s;}
 static pn_status_t body_source(app_t *a,pn_text_source_t *out){pn_font_set_t *set=font_set(a);if(set)return pn_font_set_source(set,out);*out=a->external_font?a->font_source:pn_font_reading_source();return PN_OK;}
 static void suspend_fonts(app_t *a){pn_font_chain_suspend(&a->chain);pn_font_close(&a->body);pn_font_set_suspend(&a->font_live);pn_font_set_suspend(&a->font_draft);}
 static pn_status_t font_write(app_t *,const pn_font_preferences_t *);
@@ -667,8 +667,10 @@ pn_status_t pn_reader_app_identity(const pn_reader_app_t *app,pn_book_id_t *book
 pn_status_t pn_reader_app_recent_status(const pn_reader_app_t *app){return app && app->impl?((app_t *)app->impl)->recent_status:PN_INVALID;}
 pn_status_t pn_reader_app_style_get(const pn_reader_app_t *app,pn_style_t *style){if(!app || !app->impl || !style)return PN_INVALID;*style=((app_t *)app->impl)->style;return PN_OK;}
 static pn_status_t change_layout(app_t *a,const pn_style_t *style){
-    pn_style_t previous=a->style;pn_status_t status=ensure_body(a,style->pixels);if(status!=PN_OK)return status;
-    a->style=*style;pn_layout_t next;status=layout(a,&next);if(status==PN_OK)status=pn_reader_reflow(&a->reader,&next);
+    // 先换入新样式再同步正文字体：字重/清晰度取自a->style，顺序颠倒会让字形沿用上一次的设置。
+    // Swap in the new style before syncing the body font: weight/sharpness come from a->style, and the reverse order leaves glyphs on the previous settings.
+    pn_style_t previous=a->style;a->style=*style;pn_status_t status=ensure_body(a,style->pixels);if(status!=PN_OK){a->style=previous;(void)ensure_body(a,previous.pixels);return status;}
+    pn_layout_t next;status=layout(a,&next);if(status==PN_OK)status=pn_reader_reflow(&a->reader,&next);
     if(status==PN_OK)status=pn_display_set_token(&a->display,a->reader.token);
     if(status!=PN_OK){a->style=previous;(void)ensure_body(a,previous.pixels);}else a->force_full=true;
     return status;

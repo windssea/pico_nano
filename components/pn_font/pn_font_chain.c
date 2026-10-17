@@ -21,6 +21,7 @@ static pn_status_t slot(pn_font_chain_t *c,unsigned i,pn_font_t **font){
     pn_status_t status=c->fonts[i].impl?(c->fonts[i].pixels==c->primary->pixels?PN_OK:pn_font_size(&c->fonts[i],c->primary->pixels)):pn_font_open(&c->fonts[i],c->pool,&c->sources[i],c->primary->pixels);
     // 补字字体与主字体同字重，避免缺字处笔画粗细不一。/ Fallback faces share the primary's weight so filled-in glyphs match stroke thickness.
     if(status==PN_OK)status=pn_font_weight(&c->fonts[i],pn_font_weight_level(c->primary));
+    if(status==PN_OK)status=pn_font_clarity(&c->fonts[i],pn_font_clarity_level(c->primary));
     if(status==PN_OK)*font=&c->fonts[i];
     return status;
 }
