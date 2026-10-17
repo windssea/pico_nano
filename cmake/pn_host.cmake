@@ -42,6 +42,7 @@ add_library(pn_core STATIC ${ui_font_c} ${reading_font_c} ${harmony_font_c} ${br
     ${PN_ROOT}/components/pn_reader/pn_semantic_file.c
     ${PN_ROOT}/components/pn_reader/pn_page_bitmap.c
     ${PN_ROOT}/components/pn_reader/pn_hot_session.c
+    ${PN_ROOT}/components/pn_reader/pn_identity_cache.c
     ${PN_ROOT}/components/pn_reader/pn_turn_transition.c
     ${PN_ROOT}/components/pn_reader/pn_toc_ui.c
     ${PN_ROOT}/components/pn_format/pn_zip.c

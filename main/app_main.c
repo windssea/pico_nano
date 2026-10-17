@@ -18,6 +18,7 @@
 #include "pn_epub_app.h"
 #include "pn_semantic_file.h"
 #include "pn_hot_session.h"
+#include "pn_identity_cache.h"
 #include "pn_toc_ui.h"
 #include "pn_reader_input.h"
 #include "pn_reader_chrome.h"
@@ -118,7 +119,8 @@ static void management_fonts_close(void){shelf_draw_valid=false;pn_settings_ui_c
 static pn_cover_work_t cover_work; ///< 封面解析/解码/写入由产品owner分步推进 / Cover parsing/decoding/writes advanced by the product owner
 static struct {uint64_t epoch;bool stable;} system_font_failure; ///< 仅当前挂载的稳定失败，资源交接清除 / Stable failure for this mount only, cleared on resource handoff
 static pn_status_t opening_abort(void);
-static void system_font_release(void){system_font_failure.epoch=0;system_font_failure.stable=false;pn_cover_work_abort(&cover_work);(void)opening_abort();(void)pn_hot_session_drop(&hot_session);management_fonts_close();(void)pn_font_system_close();}
+static void identity_job_stop(void);
+static void system_font_release(void){identity_job_stop();system_font_failure.epoch=0;system_font_failure.stable=false;pn_cover_work_abort(&cover_work);(void)opening_abort();(void)pn_hot_session_drop(&hot_session);management_fonts_close();(void)pn_font_system_close();}
 
 static pn_media_t sd_media;
 static pn_device_sd_t sd_recovery; ///< TF挂载请求的异步完成状态 / Asynchronous completion state of the TF mount request
@@ -344,6 +346,9 @@ static void ripple_memory_ensure(void){
 #endif
 /// 书库翻页：只局部替换变化的列表像素，不升级为内容风险整屏GC16。/ Library paging: replace only the changed list pixels locally, never escalating to a content-risk full GC16.
 static atomic_bool shelf_flip;
+#if defined(ESP_PLATFORM)
+static unsigned reading_cleans,menu_cleans; ///< 清理计数：每四次第四次才用原GC16 / Clean counters: only every fourth uses the original GC16
+#endif
 static pn_status_t present_panel(void *ctx,const pn_frame_t *frame,pn_refresh_t profile){
     (void)ctx;
     content_area=(pn_feedback_box_t){0};settle_recoverable=false;
@@ -377,7 +382,16 @@ static pn_status_t present_panel(void *ctx,const pn_frame_t *frame,pn_refresh_t 
     // Management pages with a known reference (tab switches, entering/leaving settings, book-action sheets, library paging) replace only changed pixels locally without content-risk full flashes; regional settling still uses the original full drive.
     bool flip=known && !body_refresh && mode!=MODE_GC16 && !maintenance_plan.regional;(void)atomic_load(&shelf_flip);
     if(mode!=MODE_GC16 && maintenance_plan.content_clean && !flip){mode=MODE_GC16;reason="content-transition";}
-    if(!body_refresh && mode!=MODE_GC16 && maintenance.management+1>=24u){mode=MODE_GC16;reason="maintenance";}
+    bool flat_white=false; ///< 菜单维护改为平铺白推，不整屏闪黑 / Menu maintenance as a flat white push instead of a full dark flash
+    if(!body_refresh && mode!=MODE_GC16 && maintenance.management+1>=24u){
+#if defined(ESP_PLATFORM)
+        // 账本完整时四次维护里三次只白推变过色、现为纯白的像素，第四次才用原GC16整屏清理（均衡直流、清深色残影）。
+        // With a complete ledger, three of four maintenances only white-push pixels that changed and are now pure white; the fourth uses the original full GC16 (DC balance, dark ghosts).
+        if(known && pn_device_ripple_ghost_selective() && (menu_cleans++%4u)!=3u){flat_white=true;reason="maintenance-white";}
+        else
+#endif
+        {mode=MODE_GC16;reason="maintenance";}
+    }
     uint64_t maintenance_at=now_ms();(void)maintenance_at;
     read_pico_epd_use_scan(READ_PICO_EPD_SCAN_FULL);epd_poweron();
     bool management_full=false;
@@ -388,12 +402,20 @@ static pn_status_t present_panel(void *ctx,const pn_frame_t *frame,pn_refresh_t 
     content_area=(pn_feedback_box_t){0,0,684,1216};
 #if defined(ESP_PLATFORM)
     const EpdWaveform *ripple_wave=NULL;
-    // 内容风险要求清理时，柔和波纹升级为GC16波纹。/ When content risk demands cleaning, a gentle ripple upgrades to a GC16 ripple.
-    int ripple_mode=ripple_clean || mode==MODE_GC16?MODE_GC16:MODE_GL16;
-    if(ripple_turn && body_refresh && known && !deep_clean && !ripple_memory.tables)ripple_memory.tables=heap_caps_aligned_alloc(16,PN_RIPPLE_BANDS*1024u,MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
-    bool rippling=ripple_turn && body_refresh && known && !deep_clean && pn_device_ripple_begin(&ripple_memory,hardware.hl.waveform,ripple_mode,ripple_reverse,hardware.hl.difference_fb,&ripple_wave);
+    // 清理页（到期或内容风险）：账本完整时四次里三次用柔和GL16波纹并白推账上纯白像素（无黑闪），第四次才用原GC16波纹。
+    // Cleaning pages (due or content risk): with a complete ledger, three of four use the gentle GL16 ripple plus a white push of ledger pure-white pixels (no dark flash); the fourth uses the original GC16 ripple.
+    bool clean_wanted=ripple_clean || mode==MODE_GC16,white_push=false;
+    int ripple_mode=clean_wanted?MODE_GC16:MODE_GL16;
+    if(ripple_turn && clean_wanted && body_refresh && known && !deep_clean && pn_device_ripple_ghost_selective() && (reading_cleans++%4u)!=3u){ripple_mode=MODE_GL16;white_push=true;}
+    if(((ripple_turn && body_refresh) || flat_white) && known && !deep_clean && !ripple_memory.tables)ripple_memory.tables=heap_caps_aligned_alloc(16,PN_RIPPLE_BANDS*1024u,MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
+    bool rippling=ripple_turn && body_refresh && known && !deep_clean && pn_device_ripple_begin_ex(&ripple_memory,hardware.hl.waveform,ripple_mode,ripple_reverse,false,white_push,hardware.hl.difference_fb,&ripple_wave);
+    bool flat_running=!rippling && flat_white && known && !deep_clean && pn_device_ripple_begin_ex(&ripple_memory,hardware.hl.waveform,MODE_GL16,false,true,true,hardware.hl.difference_fb,&ripple_wave);
+    if(flat_white && !flat_running){mode=MODE_GC16;reason="maintenance";} // 白推不可用时退回原GC16 / Fall back to the original GC16 when the white push is unavailable
+    bool white_cleaned=false;
+    // 非水波纹显示无法逐像素记账，先比较目标帧与已显示参考，把将变化的像素记入账本。/ Non-ripple draws record the pixels about to change by comparing the target with the shown reference.
+    if(known && !rippling && !flat_running)pn_device_ripple_ghost_note(hardware.framebuffer,hardware.hl.back_fb);
 #else
-    (void)ripple_reverse;(void)ripple_turn;
+    (void)ripple_reverse;(void)ripple_turn;(void)flat_white;bool white_cleaned=false;
 #endif
     if(!panel_known || deep_clean){reason=deep_clean?"manual":"unknown-reference";mode=MODE_GC16;epd_clear();result=epd_hl_update_screen_from_white(&hardware.hl,MODE_GC16,25);}
 #if defined(ESP_PLATFORM)
@@ -404,7 +426,17 @@ static pn_status_t present_panel(void *ctx,const pn_frame_t *frame,pn_refresh_t 
         result=epd_hl_update_screen_full(&hardware.hl,(enum EpdDrawMode)ripple_mode,25);
         hardware.hl.waveform=saved;
         if(!pn_device_ripple_end() && result==EPD_DRAW_SUCCESS)result=EPD_DRAW_LOOKUP_NOT_IMPLEMENTED;
-        mode=(enum EpdDrawMode)ripple_mode;reason=ripple_mode==MODE_GC16?"ripple-clean":"ripple";
+        mode=(enum EpdDrawMode)ripple_mode;reason=ripple_mode==MODE_GC16?"ripple-clean":white_push?"ripple-white":"ripple";
+        white_cleaned=white_push && result==EPD_DRAW_SUCCESS;
+        heap_caps_free(ripple_memory.tables);ripple_memory.tables=NULL;
+    }
+    else if(flat_running){
+        // 菜单维护白推：整屏平铺GL16，只驱动变化像素与账上纯白像素。/ Menu maintenance white push: flat full-screen GL16 driving only changed pixels and ledger pure-white pixels.
+        const EpdWaveform *saved=hardware.hl.waveform;hardware.hl.waveform=ripple_wave;
+        result=epd_hl_update_screen_full(&hardware.hl,MODE_GL16,25);
+        hardware.hl.waveform=saved;
+        if(!pn_device_ripple_end() && result==EPD_DRAW_SUCCESS)result=EPD_DRAW_LOOKUP_NOT_IMPLEMENTED;
+        mode=MODE_GL16;management_full=true;white_cleaned=result==EPD_DRAW_SUCCESS;
         heap_caps_free(ripple_memory.tables);ripple_memory.tables=NULL;
     }
 #endif
@@ -454,11 +486,13 @@ static pn_status_t present_panel(void *ctx,const pn_frame_t *frame,pn_refresh_t 
 #if defined(ESP_PLATFORM)
     // 水波纹自行记账；整屏GC16清空账本，其余显示无法逐像素记账，下一次清残影退回整页。
     // Ripples keep their own ledger; a full-screen GC16 empties it, and any other draw cannot be recorded per pixel, so the next clean covers the whole page.
-    if(!rippling){if(panel_known && mode==MODE_GC16)pn_device_ripple_ghost_clear();else pn_device_ripple_ghost_forget();}
+    if(!panel_known)pn_device_ripple_ghost_forget();
+    else if(!rippling && !flat_running && mode==MODE_GC16)pn_device_ripple_ghost_clear();
 #endif
     if(panel_known){
-        pn_device_refresh_commit(&maintenance,body_refresh,mode==MODE_GC16,management_full,maintenance_plan);
-        if(mode==MODE_GC16)atomic_store(&full_clean_completed,true);
+        // 白推同样算一次清理：重置翻页/维护计数，避免下一次立即再触发。/ A white push also counts as a clean, resetting turn/maintenance counters so it does not retrigger at once.
+        pn_device_refresh_commit(&maintenance,body_refresh,mode==MODE_GC16 || white_cleaned,management_full,maintenance_plan);
+        if(mode==MODE_GC16 || white_cleaned)atomic_store(&full_clean_completed,true);
     }else if(deep_clean)atomic_store(&deep_clean_pending,true);
     // epdiy已把前缓冲写入后缓冲；失败时panel_known=false，下次从白场整屏重建。/ epdiy already copied the front buffer into the back buffer; on failure panel_known=false forces a full rebuild from white next time.
     // 成功则保活到空闲期满；失败立即断电。/ Keep the rails up until idle expiry on success; drop them at once on failure.
@@ -472,9 +506,6 @@ static pn_status_t present_panel(void *ctx,const pn_frame_t *frame,pn_refresh_t 
 /// 显示owner的有界局部反馈，仅使用原FOLLOW表；恢复失败时丢失已知参考。/ Display-owner bounded feedback using the original FOLLOW table; failed restoration loses the known reference.
 static pn_status_t feedback_panel(void *ctx,const pn_feedback_patch_t *patch){
     feedback_was_full=false;
-#if defined(ESP_PLATFORM)
-    pn_device_ripple_ghost_forget();
-#endif
     (void)ctx;if(!patch || atomic_load(&reading_presentation) || atomic_load(&deep_clean_pending))return PN_EMPTY;
     if(patch->settle){
         pn_feedback_box_t b=patch->box;
@@ -498,6 +529,10 @@ static pn_status_t feedback_panel(void *ctx,const pn_feedback_patch_t *patch){
     if(patch->pressed && !panel_known)return PN_EMPTY;
     if(patch->frame.height<1 || patch->frame.width<1 || patch->frame.stride>PN_FEEDBACK_MAX_PIXELS/2u/(size_t)patch->frame.height)return PN_INVALID;
     pn_status_t s=pn_device_frame_patch(&patch->frame,patch->box,hardware.framebuffer,684u*1216u/2u);if(s!=PN_OK)return s;
+#if defined(ESP_PLATFORM)
+    // 按下反馈也记入残影账本，不让菜单维护因此退回整屏GC16。/ Press feedback is recorded in the ghost ledger too, so menu maintenance does not fall back to full GC16.
+    if(panel_known)pn_device_ripple_ghost_note(hardware.framebuffer,hardware.hl.back_fb);else pn_device_ripple_ghost_forget();
+#endif
     enum EpdDrawError result;
     epd_poweron();
     if(!panel_known){
@@ -975,8 +1010,65 @@ static void reader_open_result(pn_status_t status){
     locked=false;status_page=false;shelf_mode=false;
 }
 static bool loading_shown; ///< 解锁时已立即显示加载页，开书不再重复显示 / The loading page was shown at unlock, so opening does not show it again
+/* 书籍身份预计算：书库空闲时为未读过的书分步算整书SHA并按路径/大小/修改时间缓存，点开即走可信快开（后台仍完整复核）。
+ * Book-identity precompute: while the library idles, hash not-yet-read books step by step and cache by path/size/mtime so opening takes the trusted fast path (still fully verified in the background). */
+#define IDENTITY_CACHE_FILE "/data/progress/book-identities.bin"
+#if defined(ESP_PLATFORM)
+static pn_identity_cache_t identity_cache EXT_RAM_BSS_ATTR;
+#else
+static pn_identity_cache_t identity_cache;
+#endif
+static bool identity_cache_loaded;
+static pn_identity_cache_job_t identity_job;
+static uint64_t identity_next_scan;
+static char identity_failed_path[PN_CATALOG_PATH_MAX]; ///< 计算失败过的书，本次开机不再重试 / A book whose computation failed, not retried this boot
+static void identity_job_stop(void){pn_identity_cache_job_close(&identity_job);}
+static void identity_cache_ready(void){
+    if(identity_cache_loaded || !data_ready)return;
+    pn_status_t s=pn_identity_cache_load(&identity_cache,IDENTITY_CACHE_FILE);identity_cache_loaded=true;
+    if(s!=PN_OK && s!=PN_EMPTY)ESP_LOGW(TAG,"Identity cache discarded: %d",(int)s);
+}
+static void identity_cache_store(void){
+    if(!identity_cache.dirty || !data_ready)return;
+    pn_media_lease_t lease={0};pn_status_t s=pn_media_acquire(&data_media,PN_MEDIA_WRITE,&lease);
+    if(s==PN_OK){s=pn_identity_cache_save(&identity_cache,IDENTITY_CACHE_FILE);(void)pn_media_release(&data_media,&lease);}
+    if(s!=PN_OK)ESP_LOGW(TAG,"Identity cache save deferred: %d",(int)s);
+}
+/// 未读过的书若已预计算身份，就当作已识别书交给可信快开。/ A not-yet-read book with a precomputed identity is treated as identified and handed to the trusted fast path.
+static void identity_trust_selected(void){
+    if(selected_identified || !*selected_path)return;
+    identity_cache_ready();if(!identity_cache_loaded)return;
+    uint64_t size;int64_t mtime;pn_book_id_t id;
+    if(pn_identity_cache_stat(selected_path,&size,&mtime) && pn_identity_cache_find(&identity_cache,selected_path,size,mtime,&id)){
+        selected_identified=true;selected_expected=id;selected_size=size;ESP_LOGI(TAG,"Precomputed identity used for first open");
+    }
+}
+/// 书库空闲至少2秒时推进一块；无任务时每秒最多扫描一次当前页。/ Advance one block after at least 2 s of library idle; without a job scan the current page at most once a second.
+static bool tick_identity(uint64_t now){
+    if(!data_ready || !sd_media.available || !shelf_page || now<last_input || now-last_input<2000)return false;
+    identity_cache_ready();if(!identity_cache_loaded)return false;
+    if(identity_job.impl){
+        pn_device_power_busy(PN_POWER_PRODUCT,true);
+        pn_status_t s=pn_identity_cache_job_step(&identity_job,&identity_cache);if(s==PN_BUSY)return true;
+        identity_job_stop();
+        if(s==PN_OK)identity_cache_store();else ESP_LOGW(TAG,"Identity precompute stopped: %d",(int)s);
+        return true;
+    }
+    if(now<identity_next_scan)return false;
+    identity_next_scan=now+1000;identity_cache_store();
+    for(size_t i=0;i<shelf_page->count;i++){
+        const pn_catalog_item_t *item=&shelf_page->items[i];
+        if(item->identified || (item->format!=PN_BOOK_TXT && item->format!=PN_BOOK_EPUB) || !strcmp(item->path,identity_failed_path))continue;
+        uint64_t size;int64_t mtime;pn_book_id_t id;
+        if(!pn_identity_cache_stat(item->path,&size,&mtime) || pn_identity_cache_find(&identity_cache,item->path,size,mtime,&id))continue;
+        pn_status_t s=pn_identity_cache_job_begin(&identity_job,&pool,&sd_media,item->path);
+        if(s!=PN_OK){snprintf(identity_failed_path,sizeof identity_failed_path,"%s",item->path);return false;}
+        pn_device_power_busy(PN_POWER_PRODUCT,true);return true;
+    }
+    return false;
+}
 static void start_reader_impl(void){
-    pn_cover_work_abort(&cover_work);
+    pn_cover_work_abort(&cover_work);identity_job_stop();identity_trust_selected();
     if(transfer.impl || usb.open)return;
     if(!reader_active() && *selected_path){
         if(pn_hot_session_source_selected(&hot_session,&sd_media,selected_path,selected_format,selected_identified?&selected_expected:NULL,1,now_ms())){
@@ -2068,7 +2160,7 @@ static void device_task(void *arg){
             if(sampled==PN_OK || sampled==PN_BUSY){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);}}
         if(available==PN_EMPTY && shelf_mode && shelf_covers && shelf_page && !actions_mode && !transfer.impl && !usb.open && !wallpaper_ui.impl && !font_manage.impl && !settings_ui.impl && !locked && !status_page && !reading_menu && !touch_held && !tap.down && now_ms()>=last_input && now_ms()-last_input>=80){
             // 后台确有工作时回到最高频，封面/索引不在降频下变慢。/ Real background work returns to maximum so covers and indexing are not slowed by DFS.
-            bool worked=now_ms()-last_input>=800 && catalog_build_idle()==PN_OK;worked|=tick_covers();worked|=tick_hot_deferred(now_ms());if(!worked)worked|=tick_prepare_book(now_ms());background=pn_cover_work_pending(&cover_work) || pn_shelf_covers_pending(shelf_covers,shelf_page) || (home_mode && now_ms()-last_input>=1500 && (pn_hot_session_source_pending(&hot_session) || pn_hot_session_layout_pending(&hot_session) || pn_hot_session_paint_pending(&hot_session)));if(worked){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);}}
+            bool worked=now_ms()-last_input>=800 && catalog_build_idle()==PN_OK;worked|=tick_covers();worked|=tick_hot_deferred(now_ms());if(!worked)worked|=tick_prepare_book(now_ms());if(!worked)worked|=tick_identity(now_ms());background=pn_cover_work_pending(&cover_work) || pn_shelf_covers_pending(shelf_covers,shelf_page) || (home_mode && now_ms()-last_input>=1500 && (pn_hot_session_source_pending(&hot_session) || pn_hot_session_layout_pending(&hot_session) || pn_hot_session_paint_pending(&hot_session)));if(worked){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);}}
 #if defined(CONFIG_PN_UI_FOLLOW) && CONFIG_PN_UI_FOLLOW
         if(!locked && !transfer.impl && !usb.open && font_manage.impl){pn_status_t motion=pn_font_manage_tick(&font_manage,now_ms());pn_list_motion_stats_t moving=pn_font_manage_motion_stats(&font_manage);background|=moving.pending!=0 || moving.coasting;
             if(motion==PN_OK){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);}}
@@ -2090,7 +2182,7 @@ static void device_task(void *arg){
                 pn_status_t verified=epub.impl?pn_epub_app_verify_step(&epub):pn_reader_app_verify_step(&reader);background=verified==PN_BUSY || verified==PN_CANCELLED;power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);
                 if(verified==PN_OK)ESP_LOGI(TAG,"Fast-open verification complete");
                 else if(verified==PN_STALE_JOB || verified==PN_CORRUPT){ESP_LOGW(TAG,"Fast-open verification failed: %d; reopening fully",(int)verified);
-                    snprintf(trust_failed_path,sizeof trust_failed_path,"%s",selected_path);if(stop_reader())start_reader();}
+                    snprintf(trust_failed_path,sizeof trust_failed_path,"%s",selected_path);pn_identity_cache_forget(&identity_cache,selected_path);if(stop_reader())start_reader();}
                 else if(!background)ESP_LOGW(TAG,"TXT fast-open verification stopped: %d",(int)verified);}}
         if(available!=PN_OK){if(power_idle<POWER_IDLE_ROUNDS)power_idle++;if(power_idle>=POWER_IDLE_ROUNDS)pn_device_power_busy(PN_POWER_PRODUCT,false);
             // 活动/会话/降级输入时10ms；长空闲时等输入通知，最多100ms处理定时职责。/ 10 ms while active, in sessions or with degraded input; when long idle wait for input notification, at most 100 ms for timed duties.

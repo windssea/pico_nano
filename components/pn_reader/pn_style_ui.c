@@ -87,7 +87,10 @@ static pn_status_t stepper(pn_font_t *font,pn_frame_t *frame,const pn_style_t *d
     pn_w_round_stroke(frame,x,y,CELL_W,92,10,selected?2:1,selected?PN_UI_INK:8);
     pn_status_t s=pn_font_size(font,22);
     if(s==PN_OK)s=pn_w_text_ex(font,frame,names[field],x+12,y+28,CELL_W-24,PN_ALIGN_LEFT,PN_UI_MUTED,false);
-    pn_w_icon(frame,PN_ICON_MINUS,x+22,y+54,24,PN_UI_INK);pn_w_icon(frame,PN_ICON_PLUS,x+CELL_W-46,y+54,24,PN_UI_INK);
+    // 档位选择（边距、阅读线、深浅、字重）用左右切换符号，数值项（字号、行距等）保留减加号。
+    // Option fields (margin, reading line, shade, weight) use left/right switch arrows; numeric fields (size, spacing...) keep minus/plus.
+    bool choice=field==5 || field==6 || field==8 || field==9;
+    pn_w_icon(frame,choice?PN_ICON_BACK:PN_ICON_MINUS,x+22,y+54,24,PN_UI_INK);pn_w_icon(frame,choice?PN_ICON_CHEVRON:PN_ICON_PLUS,x+CELL_W-46,y+54,24,PN_UI_INK);
     if(s==PN_OK)s=pn_font_size(font,28);
     if(s==PN_OK)s=pn_w_text(font,frame,value,x+68,y+77,CELL_W-136,PN_ALIGN_CENTER);
     return s;

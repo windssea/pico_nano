@@ -121,6 +121,31 @@ int main(void){
      // 失败的清理不信任账本。/ A failed clean distrusts the ledger.
      pn_device_ripple_ghost_clear();assert(pn_device_ripple_begin(&memory,&E0470_WAVEFORM,2,false,second,&wave) && !pn_device_ripple_end() && !pn_device_ripple_ghost_selective());
      (void)gl;free(copy);free(second);}
+    // 白推与平铺：帧比较记账；白推把账上保持纯白(0xFF)的像素改为0->15（原GL16仅白相），推后出账；账外与变化像素不受影响；平铺各行同一相位。
+    // White push and flat: frame comparison records the ledger; the white push turns ledger pixels staying pure white (0xFF) into 0->15 (white phases only in the original GL16) and removes them from the ledger; off-ledger and changed pixels are unaffected; flat applies one phase to every row.
+    {const EpdWaveformPhases *gl=e0470_waveform_phases(&E0470_WAVEFORM,5);size_t fb=(size_t)W*H/2;uint8_t *front=calloc(fb,1),*back=calloc(fb,1),*diff=aligned_alloc(16,(size_t)W*H);assert(front && back && diff);
+     for(int f=0;f<gl->phases;f++)assert(e0470_phase_action(gl,f,15,0)!=1); // 0->15只有白相或保持 / 0->15 has only white or hold phases
+     pn_device_ripple_ghost_forget();pn_device_ripple_ghost_note(front,back);
+     assert(!pn_device_ripple_begin_ex(&memory,&E0470_WAVEFORM,5,false,false,true,diff,&wave)); // 账本不完整不白推 / No white push without a complete ledger
+     pn_device_ripple_ghost_clear();assert(!pn_device_ripple_begin_ex(&memory,&E0470_WAVEFORM,2,false,false,true,diff,&wave)); // 白推只用GL16 / White push is GL16 only
+     // 像素p=行*W+列；4bpp帧字节p/2，偶数像素在低半字节。/ Pixel p = row*W + column; 4bpp frame byte p/2 with even pixels in the low nibble.
+     const size_t marked[]={0,1,7,W+5,(size_t)(H-1)*W+W-1};for(size_t i=0;i<5;i++){size_t q=marked[i];front[q/2]^=(uint8_t)((q&1u)?0x30:0x03);}
+     pn_device_ripple_ghost_note(front,back);
+     for(size_t i=0;i<(size_t)W*H;i++){diff[i]=0xFF;}diff[1]=0x0F; // 像素1本次变化(0->15之外的方向) / Pixel 1 changes this turn
+     assert(pn_device_ripple_begin_ex(&memory,&E0470_WAVEFORM,5,false,false,true,diff,&wave));build=reference_build;lookup=reference_lookup;assert(pn_device_ripple_select(0x100|5,&build,&lookup));
+     for(size_t i=0;i<(size_t)W*H;i++){bool pushed=i==0 || i==7 || i==(size_t)W+5 || i==(size_t)(H-1)*W+W-1;assert(diff[i]==(i==1?0x0F:pushed?0xF0:0xFF));}
+     assert(pn_device_ripple_end() && pn_device_ripple_ghost_selective());
+     // 推过的像素出账：再次白推时不再改写；本次变化的像素1入账。/ Pushed pixels leave the ledger: another push leaves them; pixel 1, changed this turn, joins it.
+     for(size_t i=0;i<(size_t)W*H;i++)diff[i]=0xFF;
+     assert(pn_device_ripple_begin_ex(&memory,&E0470_WAVEFORM,5,false,false,true,diff,&wave));build=reference_build;lookup=reference_lookup;assert(pn_device_ripple_select(0x100|5,&build,&lookup));
+     for(size_t i=0;i<(size_t)W*H;i++){assert(diff[i]==(i==1?0xF0:0xFF));}assert(pn_device_ripple_end());
+     // 平铺：载体相数等于原表，查表与位置无关。/ Flat: carrier phases equal the original and lookup ignores position.
+     for(size_t i=0;i<(size_t)W*H;i++)diff[i]=(uint8_t)((i%16u)<<4|((i/16u)%16u));
+     assert(pn_device_ripple_begin_ex(&memory,&E0470_WAVEFORM,5,false,true,false,diff,&wave));const EpdWaveformPhases *flat=e0470_waveform_phases(wave,5);assert(flat && flat->phases==gl->phases);
+     build=reference_build;lookup=reference_lookup;assert(pn_device_ripple_select(0x100|5,&build,&lookup));
+     for(int tick=0;tick<gl->phases;tick+=4){build(lut,flat,tick);for(unsigned row=0;row<H;row+=97){lookup((const uint32_t *)(diff+(size_t)row*W),out+1,lut,W);
+      for(int c=0;c<W;c++){uint8_t d=diff[(size_t)row*W+c];int expected=(d>>4)==(d&15)?0:e0470_phase_action(gl,tick,d>>4,d&15);assert(((out[1+c/4]>>((c&3)*2))&3)==expected);checked++;}}}
+     assert(pn_device_ripple_end());free(front);free(back);free(diff);}
     printf("device_ripple checks=%u max_runs=%u ticks=%d\n",checked,max_runs,gc->phases+7*PN_DEVICE_RIPPLE_STEP);
     free(difference);free(out);free(lut);free(memory.tables);free(memory.rows[0]);free(memory.rows[1]);return 0;
 }

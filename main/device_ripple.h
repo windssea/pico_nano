@@ -26,6 +26,12 @@ typedef struct {
 /// 扫描开始前冻结方向、差分缓冲与所选模式（MODE_GL16=5柔和、MODE_GC16=2清残影）的原相位表；返回专用波形。失败不改变任何驱动状态。
 /// Freeze direction, difference buffer and the phases of the chosen mode (MODE_GL16=5 gentle, MODE_GC16=2 cleaning) before scanning, returning the dedicated waveform; failure changes no driver state.
 bool pn_device_ripple_begin(pn_device_ripple_memory_t *memory,const EpdWaveform *original,int mode,bool reverse,const uint8_t *difference,const EpdWaveform **waveform);
+/// 同上并可选：flat为真时不错峰（整屏同一相位，菜单维护用）；white_push为真（仅GL16且账本完整）时账上保持纯白的像素改走原GL16的0→15纯白相迁移，无黑闪地推掉浅灰残影。
+/// As above, optionally: flat removes the stagger (one phase across the screen, for menu maintenance); white_push (GL16 with a complete ledger only) sends ledger pixels staying pure white through the original GL16 0->15 all-white-phase transition, removing light-gray ghosts without a dark flash.
+bool pn_device_ripple_begin_ex(pn_device_ripple_memory_t *memory,const EpdWaveform *original,int mode,bool reverse,bool flat,bool white_push,const uint8_t *difference,const EpdWaveform **waveform);
+/// 非水波纹显示前调用：把目标帧与已显示参考（同为板级4bpp布局）不同的像素记入残影账本。账本不完整时不做事。
+/// Call before non-ripple draws: record pixels where the target differs from the shown reference (both board 4bpp layout) into the ghost ledger. No-op while the ledger is incomplete.
+void pn_device_ripple_ghost_note(const uint8_t *target,const uint8_t *shown);
 /// 驱动选表入口：活动且为同模式1ppB差分时换成分区函数，记住原函数对。/ Driver selection hook: while active for the same-mode 1ppB difference, substitute regional functions and remember the original pair.
 bool pn_device_ripple_select(int mode,pn_ripple_build_fn *build,pn_ripple_lookup_fn *lookup);
 /// 扫描及两生产者停止后结束；仅在确实选表且无错误行指针时true。/ End after the scan and both producers stop; true only if selection happened with no invalid row pointer.

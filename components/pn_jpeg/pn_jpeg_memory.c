@@ -41,8 +41,9 @@ static size_t encode_group(const JBLOCK *blocks,uint8_t *out){
     size_t at=0;
     for(unsigned b=0;b<GROUP_BLOCKS;b++){
         uint64_t mask=0;for(unsigned i=0;i<DCTSIZE2;i++)if(blocks[b][i])mask|=(uint64_t)1u<<i;
-        if(out)memcpy(out+at,&mask,8);at+=8;
-        for(unsigned i=0;i<DCTSIZE2;i++)if(mask>>i&1u){if(out)memcpy(out+at,&blocks[b][i],2);at+=2;}
+        if(out){memcpy(out+at,&mask,8);}
+        at+=8;
+        for(unsigned i=0;i<DCTSIZE2;i++)if(mask>>i&1u){if(out){memcpy(out+at,&blocks[b][i],2);}at+=2;}
     }
     return at;
 }

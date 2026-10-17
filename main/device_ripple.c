@@ -16,7 +16,7 @@
 #endif
 
 static struct {
-    bool armed,selected,invalid,changed_only;int mode;
+    bool armed,selected,invalid,changed_only,flat,white_push;int mode;
     const EpdWaveformPhases *source;
     const pn_ripple_row_t *rows;
     uint32_t (*tables)[256];
@@ -40,6 +40,15 @@ int pn_device_ripple_ticks(void){return carrier.phases;}
 void pn_device_ripple_ghost_forget(void){ghost_all=true;}
 void pn_device_ripple_ghost_clear(void){memset(ghost,0,sizeof ghost);ghost_all=false;}
 bool pn_device_ripple_ghost_selective(void){return !ghost_all;}
+void pn_device_ripple_ghost_note(const uint8_t *target,const uint8_t *shown){
+    if(ghost_all || !target || !shown)return;
+    // 4bpp帧每字节两像素且行宽恰为1216/2，故像素序号=2×字节偏移；每32位字8像素正好对应账本1字节。
+    // 4bpp frames hold two pixels per byte with rows exactly 1216/2 bytes, so pixel index = 2 x byte offset; each 32-bit word's 8 pixels map to exactly one ledger byte.
+    for(size_t k=0;k<sizeof ghost;k++){
+        uint32_t a,b;memcpy(&a,target+4*k,4);memcpy(&b,shown+4*k,4);uint32_t x=a^b;if(!x)continue;
+        x|=x>>1;x|=x>>2;x&=0x11111111u;uint8_t bits=0;for(unsigned i=0;i<8;i++)bits|=(uint8_t)(((x>>(4*i))&1u)<<i);ghost[k]|=bits;
+    }
+}
 /// 四字节内各像素(to<<4|from)是否同色：同色字节结果为0。/ Same-color test for four (to<<4|from) bytes: a same-color byte yields zero.
 static inline uint32_t changed_bytes(uint32_t w){return ((w>>4)^w)&0x0F0F0F0Fu;}
 /// 差分就绪后、首拍前执行一次：柔和波纹把变化像素记入账本；选择性清理把账上同色像素改成from相差一级的迁移，
@@ -52,6 +61,10 @@ static void ghost_prepare(uint8_t *difference){
     for(size_t i=0;i<(size_t)PN_RIPPLE_ROWS*PN_RIPPLE_COLUMNS/4u;i++){
         uint32_t w=words[i],changed=changed_bytes(w);uint8_t *bits=&ghost[i/2u];unsigned shift=(unsigned)(i&1u)*4u;
         if(active.mode==GL16_TYPE){
+            // 白推：账上且保持纯白(0xFF)的像素改为0→15迁移——原GL16该项只有约18个白相、没有黑相，推掉浅灰残影而不闪黑；推后出账。
+            // White push: ledger pixels staying pure white (0xFF) become the 0->15 transition, whose original GL16 entry is about 18 white phases with no black phase, removing light-gray ghosts without a dark flash; pushed pixels leave the ledger.
+            if(active.white_push){unsigned marks=(*bits>>shift)&15u;
+                if(marks){for(unsigned j=0;j<4;j++)if((marks&(1u<<j)) && ((w>>(8*j))&0xFFu)==0xFFu){w&=~(0x0Fu<<(8*j));*bits&=(uint8_t)~(1u<<(shift+j));}words[i]=w;}}
             if(!changed)continue;
             for(unsigned j=0;j<4;j++)if(changed&(0xFFu<<(8*j)))*bits|=(uint8_t)(1u<<(shift+j));
         }else{
@@ -65,7 +78,7 @@ static void ghost_prepare(uint8_t *difference){
 /// 每拍为各等级构表；前导保持判断仍读载体中原样复制的前P相。/ Build one table per level per tick; leading-hold detection still reads the first P phases copied verbatim into the carrier.
 static void ripple_build(uint8_t *lut,const EpdWaveformPhases *phases,int frame){
     (void)lut;(void)phases;
-    for(int b=0;b<PN_RIPPLE_BANDS;b++){
+    for(int b=0;b<(active.flat?1:PN_RIPPLE_BANDS);b++){
         int phase=frame-b*PN_DEVICE_RIPPLE_STEP;
         if(phase>=0 && phase<active.source->phases)active.build((uint8_t *)active.tables[b],active.source,phase);
         else memset(active.tables[b],0,sizeof active.tables[b]);
@@ -84,6 +97,8 @@ static void IRAM_ATTR ripple_lookup(const uint32_t *line,uint8_t *out,const uint
     uintptr_t at=(uintptr_t)line,base=(uintptr_t)active.difference;
     // 只接受冻结的完整差分布局；行号来自指针，禁止用调用次数推测。/ Accept only the frozen full difference layout; the row comes from the pointer, never a call count.
     if(width!=PN_RIPPLE_COLUMNS || at<base || at-base>=(uintptr_t)PN_RIPPLE_ROWS*PN_RIPPLE_COLUMNS || (at-base)%PN_RIPPLE_COLUMNS){active.invalid=true;memset(out,0,width/4);return;}
+    // 平铺（菜单维护）不错峰：整行一张表，交给原查表。/ Flat (menu maintenance) has no stagger: one table per line through the original lookup.
+    if(active.flat){active.lookup(line,out,(const uint8_t *)active.tables[0],width);return;}
     const pn_ripple_row_t *row=&active.rows[(at-base)/PN_RIPPLE_COLUMNS];const uint8_t *bytes=(const uint8_t *)line;
     unsigned x=0,segment=0;
     while(x<PN_RIPPLE_COLUMNS){
@@ -100,15 +115,21 @@ static void IRAM_ATTR ripple_lookup(const uint32_t *line,uint8_t *out,const uint
     }
 }
 bool pn_device_ripple_begin(pn_device_ripple_memory_t *memory,const EpdWaveform *original,int mode,bool reverse,const uint8_t *difference,const EpdWaveform **waveform){
+    return pn_device_ripple_begin_ex(memory,original,mode,reverse,false,false,difference,waveform);
+}
+bool pn_device_ripple_begin_ex(pn_device_ripple_memory_t *memory,const EpdWaveform *original,int mode,bool reverse,bool flat,bool white_push,const uint8_t *difference,const EpdWaveform **waveform){
+    if((white_push && (mode!=GL16_TYPE || ghost_all)))return false;
     if(active.armed || !memory || !memory->tables || !original || !difference || !waveform || ((uintptr_t)difference&15u) || original->num_temp_ranges!=1 || !original->mode_data || (mode!=GC16_TYPE && mode!=GL16_TYPE))return false;
     const EpdWaveformPhases *source=NULL;
     for(int i=0;i<original->num_modes;i++)if(original->mode_data[i] && original->mode_data[i]->type==mode && original->mode_data[i]->temp_ranges==1)source=original->mode_data[i]->range_data[0];
     // 逐相变时会让同拍不同等级要求不同时长，拒绝。/ Per-phase timing would demand different durations for levels sharing a tick, so refuse.
     if(!source || !source->luts || source->phase_times || source->phases<1 || source->phases>PN_DEVICE_RIPPLE_MAX_PHASES)return false;
     int direction=reverse?1:0;
-    if(!memory->rows[direction])return false;
-    if(!memory->rows_ready[direction]){if(pn_ripple_rows(reverse,memory->rows[direction],PN_RIPPLE_ROWS)!=PN_OK)return false;memory->rows_ready[direction]=true;}
-    int ticks=source->phases+(PN_RIPPLE_BANDS-1)*PN_DEVICE_RIPPLE_STEP;
+    if(!flat){
+        if(!memory->rows[direction])return false;
+        if(!memory->rows_ready[direction]){if(pn_ripple_rows(reverse,memory->rows[direction],PN_RIPPLE_ROWS)!=PN_OK)return false;memory->rows_ready[direction]=true;}
+    }
+    int ticks=source->phases+(flat?0:(PN_RIPPLE_BANDS-1)*PN_DEVICE_RIPPLE_STEP);
     memset(carrier_luts,0,sizeof carrier_luts);memcpy(carrier_luts,source->luts,(size_t)source->phases*16u*4u);
     carrier=(EpdWaveformPhases){.phases=ticks,.luts=&carrier_luts[0][0][0],.phase_times=NULL};
     carrier_ranges[0]=&carrier;carrier_mode=(EpdWaveformMode){.type=(uint8_t)mode,.temp_ranges=1,.range_data=carrier_ranges};carrier_modes[0]=&carrier_mode;
@@ -116,7 +137,8 @@ bool pn_device_ripple_begin(pn_device_ripple_memory_t *memory,const EpdWaveform 
     bool changed_only=mode==GL16_TYPE || !ghost_all;
     if(changed_only)for(int f=0;f<source->phases;f++)for(int v=0;v<16;v++)carrier_luts[f][v][v/4]&=(uint8_t)~(3u<<(6-2*(v%4)));
     carrier_wave=(EpdWaveform){.num_modes=1,.num_temp_ranges=1,.mode_data=carrier_modes,.temp_intervals=original->temp_intervals};
-    active.source=source;active.rows=memory->rows[direction];active.tables=memory->tables;active.difference=difference;
+    active.flat=flat;active.white_push=white_push;
+    active.source=source;active.rows=flat?NULL:memory->rows[direction];active.tables=memory->tables;active.difference=difference;
     active.selected=false;active.invalid=false;active.build=NULL;active.lookup=NULL;active.mode=mode;active.changed_only=changed_only;active.armed=true;
     *waveform=&carrier_wave;return true;
 }
@@ -130,6 +152,7 @@ bool pn_device_ripple_end(void){
     bool ok=active.armed && active.selected && !active.invalid;
     // 清残影成功清空账本；失败的扫描状态未知，下一次清整页。/ A successful clean empties the ledger; a failed scan leaves unknown state, so the next clean covers the page.
     if(ok && active.mode==GC16_TYPE)pn_device_ripple_ghost_clear();else if(!ok)ghost_all=true;
+    active.flat=false;active.white_push=false;
     active.armed=false;active.selected=false;active.build=NULL;active.lookup=NULL;active.rows=NULL;active.difference=NULL;
     return ok;
 }
