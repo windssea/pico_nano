@@ -264,6 +264,60 @@ static pn_status_t inspect_read(void *ctx,uint64_t offset,uint8_t *bytes,size_t 
     else{size_t keep=s->tail_size;if(keep+*got>sizeof s->tail)keep=sizeof s->tail-*got;memmove(s->tail,s->tail+s->tail_size-keep,keep);memcpy(s->tail+keep,bytes,*got);s->tail_size=keep+*got;}
     return PN_OK;
 }
+pn_status_t pn_text_file_inspect_prefix(const pn_text_source_t *source,uint64_t limit,pn_text_encoding_t *encoding,void (*point)(void *,uint64_t,bool),void *ctx){
+    if(!source || !source->read_at || !encoding || !limit)return PN_INVALID;
+    if(source->size>PN_TEXT_FILE_MAX_BYTES)return PN_LIMIT;
+    uint64_t stop=source->size<limit?source->size:limit;
+    pn_text_reader_t reader;pn_status_t status=pn_text_open(&reader,source,PN_TEXT_AUTO);if(status!=PN_OK)return status;
+    bool bom=reader.content_begin!=0;uint64_t last=reader.cursor;if(point)point(ctx,last,true);
+    // 末字符可越过stop完整解码，前段截断不会误判损坏。/ The final character may decode past stop, so truncation never fakes corruption.
+    status=pn_text_probe_range(&reader,stop,&last,point,ctx);
+    if(status==PN_CORRUPT && !bom){status=pn_text_open(&reader,source,PN_TEXT_GBK);if(status==PN_OK){last=reader.cursor;if(point)point(ctx,last,true);status=pn_text_probe_range(&reader,stop,&last,point,ctx);}}
+    if(status==PN_OK)*encoding=reader.encoding;
+    return status;
+}
+typedef struct {
+    inspect_t scan; ///< 与inspect相同的同趟探测 / Same single-pass probing as inspect
+    pn_text_source_t source; ///< 源副本，scan指向它 / Source copy referenced by scan
+    pn_identity_job_t job;pn_book_id_t expected;bool probe;pn_pool_t *pool;
+} verify_t;
+static pn_status_t verify_read(void *ctx,uint64_t offset,uint8_t *bytes,size_t cap,size_t *got){
+    verify_t *v=ctx;
+    if(v->probe){
+        // 取消后同块会被重读；探测游标已在块内前进，从游标继续即可。/ A cancelled block is reread; the probe cursor already advanced within it, so continue from the cursor.
+        if(v->scan.scan==PN_CANCELLED)v->scan.scan=PN_OK;
+        return inspect_read(&v->scan,offset,bytes,cap,got);
+    }
+    pn_status_t s=v->source.validate?v->source.validate(v->source.ctx):PN_OK;if(s!=PN_OK)return s;
+    s=v->source.read_at(v->source.ctx,offset,bytes,cap,got);if(s!=PN_OK)return s;return *got && *got<=cap?PN_OK:PN_IO;
+}
+pn_status_t pn_text_file_verify_begin(pn_text_file_verify_t *out,pn_pool_t *pool,const pn_text_source_t *source,const pn_book_id_t *expected,bool probe,void (*point)(void *,uint64_t,bool),void *ctx){
+    if(!out || !pool || !source || !source->read_at || !expected || !source->size)return PN_INVALID;
+    if(out->impl)return PN_BUSY;
+    verify_t *v=pn_alloc_tagged(pool,PN_MEM_LAYOUT,sizeof *v);if(!v)return PN_NO_MEMORY;memset(v,0,sizeof *v);
+    v->source=*source;v->expected=*expected;v->probe=probe;v->pool=pool;
+    v->scan=(inspect_t){.source=&v->source,.scan=PN_OK,.point=point,.ctx=ctx};
+    pn_status_t s=pn_identity_job_begin(&v->job,pool,v,source->size,verify_read);
+    if(s!=PN_OK){pn_free(v);return s;}
+    out->impl=v;return PN_OK;
+}
+pn_status_t pn_text_file_verify_step(pn_text_file_verify_t *out,pn_text_encoding_t *encoding){
+    if(!out || !out->impl)return PN_INVALID;
+    verify_t *v=out->impl;pn_book_id_t digest;pn_status_t s=pn_identity_job_step(&v->job,&digest);
+    if(s!=PN_OK)return s;
+    if(v->probe){
+        if(v->scan.scan==PN_CORRUPT || !v->scan.opened)return PN_CORRUPT;
+        if(v->scan.scan!=PN_OK)return v->scan.scan;
+        if(encoding)*encoding=v->scan.reader.encoding;
+    }
+    if(memcmp(digest.sha256,v->expected.sha256,sizeof digest.sha256))return PN_STALE_JOB;
+    if(v->source.read_at==read_at && v->source.validate==validate && v->source.ctx){pn_text_file_t *file=v->source.ctx;file->identity=digest;file->identity_known=true;}
+    return PN_OK;
+}
+void pn_text_file_verify_close(pn_text_file_verify_t *out){
+    if(!out || !out->impl)return;
+    verify_t *v=out->impl;(void)pn_identity_job_close(&v->job);pn_free(v);out->impl=NULL;
+}
 pn_status_t pn_text_file_inspect(pn_pool_t *pool,const pn_text_source_t *source,pn_book_id_t *id,pn_text_encoding_t *encoding,void (*point)(void *,uint64_t,bool),void *ctx){
     if(!pool || !source || !id || !encoding || source->read_at!=read_at || source->validate!=validate || !source->ctx)return PN_INVALID;
     pn_text_file_t *file=source->ctx;pn_status_t status=validate(file);if(status!=PN_OK)return status;

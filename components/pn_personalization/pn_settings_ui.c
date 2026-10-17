@@ -134,7 +134,7 @@ static pn_status_t draw_levels(pn_settings_ui_t *ui,su_t *u){
 /// 翻页样式只有直接与水波纹；旧扫除/页折记录按直接显示。/ Turn styles are direct or ripple; legacy sweep/fold records show as direct.
 static bool ripple(uint8_t flags){return (flags&PN_INPUT_TURN_MASK)==PN_INPUT_TURN_MASK;}
 static pn_status_t draw_turns(pn_settings_ui_t *ui,su_t *u){
-    static const char *const labels[2]={"直接","水波纹"},*const notes[2]={"最快","翻页即清残影"};
+    static const char *const labels[2]={"直接","水波纹"},*const notes[2]={"最快","柔和过渡"};
     return pn_w_segments(&u->font,&u->canvas,labels,notes,2,ripple(ui->flags)?1:0,TURN_Y,TURN_H);
 }
 static pn_status_t draw_refresh(pn_settings_ui_t *ui,su_t *u){
@@ -150,7 +150,7 @@ static pn_status_t draw_refresh(pn_settings_ui_t *ui,su_t *u){
     if(s==PN_OK)s=pn_w_card_row(font,f,*u->about.screen?u->about.screen:"4.7 英寸墨水屏","16 级灰阶，阅读页保持纯白底",NULL,-1,0u,FULL_Y+162,true);
     if(s==PN_OK)s=pn_w_group(font,f,"翻页效果",TURN_Y-18);
     if(s==PN_OK)s=draw_turns(ui,u);
-    if(s==PN_OK)s=note(u,ripple(ui->flags)?"翻页时从翻页一侧推开弧形波纹，同时完成清残影，不再定期闪屏。":"直接显示完整 16 灰阶正文，按上方周期整屏刷新。",TURN_Y+TURN_H+50);
+    if(s==PN_OK)s=note(u,ripple(ui->flags)?"翻页时文字从翻页一侧随弧形波纹逐步替换，只刷新变化的文字；到清残影的页数时也以波纹完成，不整屏同时闪。":"直接显示完整 16 灰阶正文，按上方周期整屏刷新。",TURN_Y+TURN_H+50);
     if(s==PN_OK && *u->message)s=note(u,u->message,TURN_Y+TURN_H+150);
     return s;
 }

@@ -13,6 +13,12 @@ static const EpdWaveformPhases *derived_ranges[1];
 static EpdWaveformMode derived_mode;
 static const EpdWaveformMode *modes[MAX_MODES];
 static EpdWaveform aligned;
+static uint8_t changed[PN_DEVICE_WAVE_MAX_PHASES][16][4];
+static EpdWaveformPhases changed_phases;
+static const EpdWaveformPhases *changed_ranges[1];
+static EpdWaveformMode changed_mode;
+static const EpdWaveformMode *changed_modes[MAX_MODES];
+static EpdWaveform changed_only;
 static bool ready;
 
 /// 原表单元：data[phase][to][from/4]，from0在高位。/ Original cell: data[phase][to][from/4], with from0 in the high bits.
@@ -59,7 +65,16 @@ bool pn_device_wave_init(const EpdWaveform *original,int trailing_hold,pn_device
     derived_mode=(EpdWaveformMode){.type=GL16_TYPE,.temp_ranges=1,.range_data=derived_ranges};
     for(int i=0;i<original->num_modes;i++)modes[i]=original->mode_data[i]->type==GL16_TYPE?&derived_mode:original->mode_data[i];
     aligned=(EpdWaveform){.num_modes=original->num_modes,.num_temp_ranges=1,.mode_data=modes,.temp_intervals=original->temp_intervals};
+    // 同色项（to==from）清零：未变像素不驱动，只有变化的内容被替换。/ Zero same-color entries (to==from): unchanged pixels stay undriven and only changed content is replaced.
+    memcpy(changed,derived,sizeof changed);
+    for(int phase=0;phase<phases;phase++)for(int v=0;v<16;v++)changed[phase][v][v/4]&=(uint8_t)~(3u<<(6-2*(v%4)));
+    changed_phases=(EpdWaveformPhases){.phases=phases,.luts=&changed[0][0][0],.phase_times=NULL};
+    changed_ranges[0]=&changed_phases;
+    changed_mode=(EpdWaveformMode){.type=GL16_TYPE,.temp_ranges=1,.range_data=changed_ranges};
+    for(int i=0;i<original->num_modes;i++)changed_modes[i]=original->mode_data[i]->type==GL16_TYPE?&changed_mode:original->mode_data[i];
+    changed_only=(EpdWaveform){.num_modes=original->num_modes,.num_temp_ranges=1,.mode_data=changed_modes,.temp_intervals=original->temp_intervals};
     if(info)*info=(pn_device_wave_info_t){.original_phases=total,.phases=phases,.start=start};
     ready=true;return true;
 }
 const EpdWaveform *pn_device_wave_aligned(void){return ready?&aligned:NULL;}
+const EpdWaveform *pn_device_wave_changed_only(void){return ready?&changed_only:NULL;}

@@ -92,6 +92,15 @@ pn_status_t pn_reader_app_percent(const pn_reader_app_t *app,unsigned *basis_poi
 /// Device path borrows a confirmed-mounted shared media without initializing/remounting it; arbitrate with transfers.
 pn_status_t pn_reader_app_open_on_media(pn_reader_app_t *app,pn_pool_t *pool,pn_media_t *media,
     const char *book_path,const char *font_path,const char *state_dir,int pixels,uint64_t now_ms);
+/// 快开：最近记录给出expected且文件大小等于expected_size时，只探测开头即排首屏，完整SHA/探测及外置正文字体SHA留给verify_step；否则同open_on_media。
+/// Fast open: when a recent record supplies expected and the file size equals expected_size, probe only the start before the first screen, leaving the full SHA/probe and external body-font SHA to verify_step; otherwise identical to open_on_media.
+pn_status_t pn_reader_app_open_trusted(pn_reader_app_t *app,pn_pool_t *pool,pn_media_t *media,const char *book_path,
+    const char *font_path,const char *state_dir,int pixels,uint64_t now_ms,const pn_book_id_t *expected,uint64_t expected_size);
+/// 是否仍有快开后的后台复核。/ Whether background verification after fast opening remains.
+bool pn_reader_app_verify_pending(const pn_reader_app_t *app);
+/// 空闲时推进一块复核（32KiB）：EMPTY无任务，BUSY/CANCELLED待续，OK完成；STALE_JOB内容已变、CORRUPT编码与快开不符或字体损坏，调用方关闭后按完整路径重开。
+/// Advance one verification block (32 KiB) when idle: EMPTY without work, BUSY/CANCELLED continue, OK done; STALE_JOB for changed content, CORRUPT for an encoding mismatch with fast opening or a damaged font, after which callers close and reopen through the complete path.
+pn_status_t pn_reader_app_verify_step(pn_reader_app_t *app);
 /// owner检测拔卡后立即失效源和pending；不画屏、不挂载、不丢最后已显示位置。
 /// Expire source and pending work after owner detects media loss; no paint/mount or loss of last displayed position.
 pn_status_t pn_reader_app_media_lost(pn_reader_app_t *app);

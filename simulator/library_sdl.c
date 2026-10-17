@@ -173,9 +173,9 @@ static pn_status_t present_raw(library_t *s,const pn_frame_t *frame){
     }
     return status;
 }
-/// 模拟器演示水波纹调度：与设备同源的弧形等级逐级推进，前沿一级显示深色波带；只示意顺序，不模拟粒子光学。
-/// Simulator demo of the ripple schedule: the same arc levels as the device advance one by one with a dark band at the front; it shows order only, not particle optics.
-static pn_status_t ripple_demo(library_t *s,const pn_frame_t *next,bool reverse){
+/// 模拟器演示水波纹调度：与设备同源的弧形等级逐级推进；柔和波纹只替换变化像素，清理波纹前沿显示深色波带；只示意顺序，不模拟粒子光学。
+/// Simulator demo of the ripple schedule: the same arc levels as the device advance one by one; gentle ripples replace changed pixels only and cleaning ripples show a dark band at the front; order only, not particle optics.
+static pn_status_t ripple_demo(library_t *s,const pn_frame_t *next,bool reverse,bool clean){
     static pn_ripple_row_t rows[2][PN_RIPPLE_ROWS];static bool ready[2];int d=reverse?1:0;
     if(!s->page_px || next->width!=684 || next->height!=1216)return PN_OK;
     if(!ready[d]){if(pn_ripple_rows(reverse,rows[d],PN_RIPPLE_ROWS)!=PN_OK)return PN_OK;ready[d]=true;}
@@ -184,14 +184,15 @@ static pn_status_t ripple_demo(library_t *s,const pn_frame_t *next,bool reverse)
     for(unsigned front=0;front<PN_RIPPLE_BANDS && status==PN_OK;front++){
         for(int x=0;x<684;x++){const pn_ripple_row_t *row=&rows[d][683-x];unsigned segment=0;
             for(int y=0;y<1216;y++){while(row->end[segment]<=y)segment++;unsigned band=row->band[segment];
-                pn_frame_pixel(&step,x,y,band<front?pn_frame_get(next,x,y):band==front?(uint8_t)(pn_frame_get(next,x,y)/3u):pn_frame_get(&old,x,y));}}
+                uint8_t to=pn_frame_get(next,x,y),from=pn_frame_get(&old,x,y);
+                pn_frame_pixel(&step,x,y,band<front?to:band==front?(clean?(uint8_t)(to/3u):(uint8_t)((to+from)/2u)):from);}}
         status=present_raw(s,&step);SDL_Delay(30);
     }
     pn_free(pixels);return status;
 }
 static pn_status_t present_impl(void *ctx,const pn_frame_t *frame,pn_refresh_t profile){
     library_t *s=ctx;
-    if(profile==PN_REFRESH_RIPPLE || profile==PN_REFRESH_RIPPLE_REVERSE){pn_status_t shown=ripple_demo(s,frame,profile==PN_REFRESH_RIPPLE_REVERSE);if(shown!=PN_OK)return shown;profile=PN_REFRESH_GC16;}
+    if(profile>=PN_REFRESH_RIPPLE && profile<=PN_REFRESH_RIPPLE_CLEAN_REVERSE){bool clean=profile>=PN_REFRESH_RIPPLE_CLEAN;pn_status_t shown=ripple_demo(s,frame,profile==PN_REFRESH_RIPPLE_REVERSE || profile==PN_REFRESH_RIPPLE_CLEAN_REVERSE,clean);if(shown!=PN_OK)return shown;profile=clean?PN_REFRESH_GC16:PN_REFRESH_GL16;}
     pn_status_t stopped=pn_font_manage_motion_abort(&s->font_manage);if(stopped!=PN_OK)return stopped;stopped=pn_toc_ui_motion_abort(&s->toc);if(stopped!=PN_OK)return stopped;
     if(!reading(s)){pn_free(s->page_px);s->page_px=NULL;}
     // 备份只供阅读工具栏关闭时恢复；书架/设置不需要，避免挤占封面解码预算。/ Only reading needs the backup for toolbar restoration; shelf/settings copies waste the cover decode budget.

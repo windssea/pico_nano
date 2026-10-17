@@ -10,7 +10,7 @@
 #endif
 
 static struct {
-    bool armed,selected,invalid;
+    bool armed,selected,invalid,changed_only;int mode;
     const EpdWaveformPhases *source;
     const pn_ripple_row_t *rows;
     uint32_t (*tables)[256];
@@ -25,7 +25,7 @@ static EpdWaveformMode carrier_mode;
 static const EpdWaveformMode *carrier_modes[1];
 static EpdWaveform carrier_wave;
 
-enum { GC16_TYPE=2, PACKING_1PPB_DIFFERENCE=0x100 };
+enum { GC16_TYPE=2, GL16_TYPE=5, PACKING_1PPB_DIFFERENCE=0x100 };
 
 int pn_device_ripple_ticks(void){return carrier.phases;}
 
@@ -36,6 +36,8 @@ static void ripple_build(uint8_t *lut,const EpdWaveformPhases *phases,int frame)
         int phase=frame-b*PN_DEVICE_RIPPLE_STEP;
         if(phase>=0 && phase<active.source->phases)active.build((uint8_t *)active.tables[b],active.source,phase);
         else memset(active.tables[b],0,sizeof active.tables[b]);
+        // 柔和波纹不驱动颜色未变的像素（差分索引to==from），只有变化的文字随波前替换。/ Gentle ripples never drive unchanged pixels (difference index to==from); only changed text follows the wavefront.
+        if(active.changed_only)for(unsigned v=0;v<16;v++)active.tables[b][v<<4|v]=0;
     }
 }
 /// 四像素一组跨段时逐像素选表，组内像素顺序同原查表（低位在左）。/ A four-pixel group crossing runs selects per pixel, in the original order (low bits first).
@@ -64,10 +66,10 @@ static void IRAM_ATTR ripple_lookup(const uint32_t *line,uint8_t *out,const uint
         out[x/4]=mixed_group(row,segment,bytes,x);x+=4;
     }
 }
-bool pn_device_ripple_begin(pn_device_ripple_memory_t *memory,const EpdWaveform *original,bool reverse,const uint8_t *difference,const EpdWaveform **waveform){
-    if(active.armed || !memory || !memory->tables || !original || !difference || !waveform || ((uintptr_t)difference&15u) || original->num_temp_ranges!=1 || !original->mode_data)return false;
+bool pn_device_ripple_begin(pn_device_ripple_memory_t *memory,const EpdWaveform *original,int mode,bool reverse,const uint8_t *difference,const EpdWaveform **waveform){
+    if(active.armed || !memory || !memory->tables || !original || !difference || !waveform || ((uintptr_t)difference&15u) || original->num_temp_ranges!=1 || !original->mode_data || (mode!=GC16_TYPE && mode!=GL16_TYPE))return false;
     const EpdWaveformPhases *source=NULL;
-    for(int i=0;i<original->num_modes;i++)if(original->mode_data[i] && original->mode_data[i]->type==GC16_TYPE && original->mode_data[i]->temp_ranges==1)source=original->mode_data[i]->range_data[0];
+    for(int i=0;i<original->num_modes;i++)if(original->mode_data[i] && original->mode_data[i]->type==mode && original->mode_data[i]->temp_ranges==1)source=original->mode_data[i]->range_data[0];
     // 逐相变时会让同拍不同等级要求不同时长，拒绝。/ Per-phase timing would demand different durations for levels sharing a tick, so refuse.
     if(!source || !source->luts || source->phase_times || source->phases<1 || source->phases>PN_DEVICE_RIPPLE_MAX_PHASES)return false;
     int direction=reverse?1:0;
@@ -76,14 +78,16 @@ bool pn_device_ripple_begin(pn_device_ripple_memory_t *memory,const EpdWaveform 
     int ticks=source->phases+(PN_RIPPLE_BANDS-1)*PN_DEVICE_RIPPLE_STEP;
     memset(carrier_luts,0,sizeof carrier_luts);memcpy(carrier_luts,source->luts,(size_t)source->phases*16u*4u);
     carrier=(EpdWaveformPhases){.phases=ticks,.luts=&carrier_luts[0][0][0],.phase_times=NULL};
-    carrier_ranges[0]=&carrier;carrier_mode=(EpdWaveformMode){.type=GC16_TYPE,.temp_ranges=1,.range_data=carrier_ranges};carrier_modes[0]=&carrier_mode;
+    carrier_ranges[0]=&carrier;carrier_mode=(EpdWaveformMode){.type=(uint8_t)mode,.temp_ranges=1,.range_data=carrier_ranges};carrier_modes[0]=&carrier_mode;
+    // 前导跳过只看载体：柔和波纹的同色迁移不驱动，载体里也清零，免得因其早起步少跳。/ Leading skip reads only the carrier: gentle ripples zero same-color transitions there too so their early start never shortens the skip.
+    if(mode==GL16_TYPE)for(int f=0;f<source->phases;f++)for(int v=0;v<16;v++)carrier_luts[f][v][v/4]&=(uint8_t)~(3u<<(6-2*(v%4)));
     carrier_wave=(EpdWaveform){.num_modes=1,.num_temp_ranges=1,.mode_data=carrier_modes,.temp_intervals=original->temp_intervals};
     active.source=source;active.rows=memory->rows[direction];active.tables=memory->tables;active.difference=difference;
-    active.selected=false;active.invalid=false;active.build=NULL;active.lookup=NULL;active.armed=true;
+    active.selected=false;active.invalid=false;active.build=NULL;active.lookup=NULL;active.mode=mode;active.changed_only=mode==GL16_TYPE;active.armed=true;
     *waveform=&carrier_wave;return true;
 }
 bool pn_device_ripple_select(int mode,pn_ripple_build_fn *build,pn_ripple_lookup_fn *lookup){
-    if(!active.armed || !build || !lookup || !*build || !*lookup || !(mode&PACKING_1PPB_DIFFERENCE) || (mode&0x3f)!=GC16_TYPE)return false;
+    if(!active.armed || !build || !lookup || !*build || !*lookup || !(mode&PACKING_1PPB_DIFFERENCE) || (mode&0x3f)!=active.mode)return false;
     active.build=*build;active.lookup=*lookup;active.selected=true;
     *build=ripple_build;*lookup=ripple_lookup;return true;
 }
@@ -95,7 +99,7 @@ bool pn_device_ripple_end(void){
 
 #if defined(ESP_PLATFORM)
 #include "output_common/lut.h"
-_Static_assert((int)MODE_PACKING_1PPB_DIFFERENCE==(int)PACKING_1PPB_DIFFERENCE && (int)MODE_GC16==(int)GC16_TYPE,"epdiy mode values");
+_Static_assert((int)MODE_PACKING_1PPB_DIFFERENCE==(int)PACKING_1PPB_DIFFERENCE && (int)MODE_GC16==(int)GC16_TYPE && (int)MODE_GL16==(int)GL16_TYPE,"epdiy mode values");
 /// 链接包装：仅render.c对外部选表函数的引用被替换，非水波纹任务原样返回。
 /// Link wrapper: only render.c's external selector reference is replaced; non-ripple jobs return unchanged.
 LutFunctionPair __real_find_lut_functions(enum EpdDrawMode mode,uint32_t size);

@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: Apache-2.0
- * 中文：水波纹翻页的板级端口：原GC16按弧形等级错峰，每像素完整执行原相位序列；复用驱动保持原样。
- * English: board port for ripple turns: the original GC16 staggered by arc level, every pixel running the complete original phase sequence; reused drivers stay unchanged. */
+ * 中文：水波纹翻页的板级端口：GL16或GC16按弧形等级错峰，每个驱动像素完整执行原相位序列；GL16波纹不驱动颜色未变的像素；复用驱动保持原样。
+ * English: board port for ripple turns: GL16 or GC16 staggered by arc level, every driven pixel running its complete phase sequence; GL16 ripples skip unchanged pixels; reused drivers stay unchanged. */
 #pragma once
 #include <stdbool.h>
 #include <stdint.h>
@@ -23,10 +23,10 @@ typedef struct {
     bool rows_ready[2]; ///< 行段表已生成 / Row runs generated
 } pn_device_ripple_memory_t;
 
-/// 扫描开始前冻结方向、差分缓冲与原GC16；返回专用波形。失败不改变任何驱动状态。
-/// Freeze direction, difference buffer and the original GC16 before scanning, returning the dedicated waveform; failure changes no driver state.
-bool pn_device_ripple_begin(pn_device_ripple_memory_t *memory,const EpdWaveform *original,bool reverse,const uint8_t *difference,const EpdWaveform **waveform);
-/// 驱动选表入口：活动且为1ppB差分GC16时换成分区函数，记住原函数对。/ Driver selection hook: while active for 1ppB difference GC16, substitute regional functions and remember the original pair.
+/// 扫描开始前冻结方向、差分缓冲与所选模式（MODE_GL16=5柔和、MODE_GC16=2清残影）的原相位表；返回专用波形。失败不改变任何驱动状态。
+/// Freeze direction, difference buffer and the phases of the chosen mode (MODE_GL16=5 gentle, MODE_GC16=2 cleaning) before scanning, returning the dedicated waveform; failure changes no driver state.
+bool pn_device_ripple_begin(pn_device_ripple_memory_t *memory,const EpdWaveform *original,int mode,bool reverse,const uint8_t *difference,const EpdWaveform **waveform);
+/// 驱动选表入口：活动且为同模式1ppB差分时换成分区函数，记住原函数对。/ Driver selection hook: while active for the same-mode 1ppB difference, substitute regional functions and remember the original pair.
 bool pn_device_ripple_select(int mode,pn_ripple_build_fn *build,pn_ripple_lookup_fn *lookup);
 /// 扫描及两生产者停止后结束；仅在确实选表且无错误行指针时true。/ End after the scan and both producers stop; true only if selection happened with no invalid row pointer.
 bool pn_device_ripple_end(void);

@@ -26,8 +26,10 @@ pn_status_t pn_turn_present(void *ctx,const pn_frame_t *next,pn_refresh_t profil
     if(t->style>PN_TURN_RIPPLE)return PN_INVALID;
     // 历史样式都直接显示一次；不分配动画帧。/ All legacy styles present once, without animation frame allocation.
     if(t->before && (!t->before->pixels || t->before->stride<(size_t)(next->width+1)/2 || t->before->width!=next->width || t->before->height!=next->height))return PN_INVALID;
-    // 水波纹本身就是完整GC16，周期清理页也走它，不再另闪一次全屏。/ Ripple is itself a complete GC16, so periodic cleaning turns use it too instead of a separate full flash.
-    if(t->style==PN_TURN_RIPPLE && t->before && (profile==PN_REFRESH_GL16 || profile==PN_REFRESH_GC16))profile=t->reverse?PN_REFRESH_RIPPLE_REVERSE:PN_REFRESH_RIPPLE;
+    // 普通翻页是只刷变化像素的GL16波纹；周期清理页改用GC16波纹，不再整屏同时闪。
+    // Ordinary turns are GL16 ripples over changed pixels; periodic cleaning turns use GC16 ripples instead of a simultaneous full flash.
+    if(t->style==PN_TURN_RIPPLE && t->before && profile==PN_REFRESH_GL16)profile=t->reverse?PN_REFRESH_RIPPLE_REVERSE:PN_REFRESH_RIPPLE;
+    else if(t->style==PN_TURN_RIPPLE && t->before && profile==PN_REFRESH_GC16)profile=t->reverse?PN_REFRESH_RIPPLE_CLEAN_REVERSE:PN_REFRESH_RIPPLE_CLEAN;
     pn_status_t status=t->present(t->ctx,next,profile);
     if(status!=PN_OK && status!=PN_CANCELLED && status!=PN_BUSY && t->before)(void)t->present(t->ctx,t->before,PN_REFRESH_GC16);
     return status;

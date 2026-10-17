@@ -196,6 +196,8 @@ static bool recent_loaded;static uint64_t recent_epoch;
 static pn_catalog_page_t *shelf_page;
 static pn_recent_snapshot_t *recent_snapshot;
 static bool recent_mode,selected_identified;
+static uint64_t selected_size; ///< 最近记录中的原书大小，快开门槛 / Source size from the recent record, gating fast opening
+static char trust_failed_path[PN_CATALOG_PATH_MAX]; ///< 后台复核失败过的书，下次走完整打开 / A book whose background verification failed opens fully next time
 static size_t recent_start;
 static bool list_mode; ///< 书架列表模式（每页5本）/ Shelf list mode (five per page)
 /// 当前书架每页条数。/ Entries per shelf page right now.
@@ -336,13 +338,17 @@ static void ripple_memory_ensure(void){
     for(int i=0;i<2;i++)if(!ripple_memory.rows[i])ripple_memory.rows[i]=heap_caps_malloc(sizeof(pn_ripple_row_t)*PN_RIPPLE_ROWS,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
 }
 #endif
+/// 书库翻页：只局部替换变化的列表像素，不升级为内容风险整屏GC16。/ Library paging: replace only the changed list pixels locally, never escalating to a content-risk full GC16.
+static atomic_bool shelf_flip;
 static pn_status_t present_panel(void *ctx,const pn_frame_t *frame,pn_refresh_t profile){
     (void)ctx;
     content_area=(pn_feedback_box_t){0};settle_recoverable=false;
     // 水波纹只在已知参考的正文翻页执行；其余情况按普通GL16显示，不让特效阻塞翻页。
     // Ripple runs only for reading turns with a known reference; otherwise show as plain GL16 so the effect never blocks a turn.
-    bool ripple_turn=profile==PN_REFRESH_RIPPLE || profile==PN_REFRESH_RIPPLE_REVERSE,ripple_reverse=profile==PN_REFRESH_RIPPLE_REVERSE;
-    if(ripple_turn)profile=PN_REFRESH_GL16;
+    bool ripple_clean=profile==PN_REFRESH_RIPPLE_CLEAN || profile==PN_REFRESH_RIPPLE_CLEAN_REVERSE;
+    bool ripple_turn=ripple_clean || profile==PN_REFRESH_RIPPLE || profile==PN_REFRESH_RIPPLE_REVERSE,ripple_reverse=profile==PN_REFRESH_RIPPLE_REVERSE || profile==PN_REFRESH_RIPPLE_CLEAN_REVERSE;
+    // 退路：清理页按原GC16、普通页按GL16显示。/ Fallback: cleaning pages use the original GC16 and ordinary pages GL16.
+    if(ripple_turn)profile=ripple_clean?PN_REFRESH_GC16:PN_REFRESH_GL16;
     uint64_t prepared_at=now_ms();
     (void)prepared_at; // 无日志主机桩仍编译同源路径。/ Compile the same path with logging disabled in host stubs.
     if(profile==PN_REFRESH_DU)return PN_UNSUPPORTED;
@@ -363,7 +369,8 @@ static pn_status_t present_panel(void *ctx,const pn_frame_t *frame,pn_refresh_t 
     pn_device_refresh_plan_t maintenance_plan=known?pn_device_refresh_plan(&maintenance,hardware.framebuffer,hardware.hl.back_fb,body_refresh,dirty):(pn_device_refresh_plan_t){.area=dirty};
     const char *reason=mode==MODE_GC16?"requested":body_refresh?"reading":"management";
     (void)reason;
-    if(mode!=MODE_GC16 && maintenance_plan.content_clean){mode=MODE_GC16;reason="content-transition";}
+    bool flip=atomic_load(&shelf_flip) && known && !body_refresh && mode!=MODE_GC16;
+    if(mode!=MODE_GC16 && maintenance_plan.content_clean && !flip){mode=MODE_GC16;reason="content-transition";}
     if(!body_refresh && mode!=MODE_GC16 && maintenance.management+1>=24u){mode=MODE_GC16;reason="maintenance";}
     uint64_t maintenance_at=now_ms();(void)maintenance_at;
     read_pico_epd_use_scan(READ_PICO_EPD_SCAN_FULL);epd_poweron();
@@ -375,23 +382,36 @@ static pn_status_t present_panel(void *ctx,const pn_frame_t *frame,pn_refresh_t 
     content_area=(pn_feedback_box_t){0,0,684,1216};
 #if defined(ESP_PLATFORM)
     const EpdWaveform *ripple_wave=NULL;
-    bool rippling=ripple_turn && body_refresh && known && !deep_clean && pn_device_ripple_begin(&ripple_memory,hardware.hl.waveform,ripple_reverse,hardware.hl.difference_fb,&ripple_wave);
+    // 内容风险要求清理时，柔和波纹升级为GC16波纹。/ When content risk demands cleaning, a gentle ripple upgrades to a GC16 ripple.
+    int ripple_mode=ripple_clean || mode==MODE_GC16?MODE_GC16:MODE_GL16;
+    bool rippling=ripple_turn && body_refresh && known && !deep_clean && pn_device_ripple_begin(&ripple_memory,hardware.hl.waveform,ripple_mode,ripple_reverse,hardware.hl.difference_fb,&ripple_wave);
 #else
     (void)ripple_reverse;(void)ripple_turn;
 #endif
     if(!panel_known || deep_clean){reason=deep_clean?"manual":"unknown-reference";mode=MODE_GC16;epd_clear();result=epd_hl_update_screen_from_white(&hardware.hl,MODE_GC16,25);}
 #if defined(ESP_PLATFORM)
     else if(rippling){
-        // 弧形错峰的完整原GC16：所有像素（含同色、页脚）都驱动，本身就是清残影。/ Arc-staggered complete original GC16: every pixel including unchanged ones and the footer is driven, which itself cleans ghosts.
+        // GL16波纹只驱动变化像素；GC16波纹驱动全部像素（含同色、页脚），本身就是清残影。
+        // GL16 ripples drive changed pixels only; GC16 ripples drive every pixel including unchanged ones and the footer, which itself cleans ghosts.
         const EpdWaveform *saved=hardware.hl.waveform;hardware.hl.waveform=ripple_wave;
-        result=epd_hl_update_screen_full(&hardware.hl,MODE_GC16,25);
+        result=epd_hl_update_screen_full(&hardware.hl,(enum EpdDrawMode)ripple_mode,25);
         hardware.hl.waveform=saved;
         if(!pn_device_ripple_end() && result==EPD_DRAW_SUCCESS)result=EPD_DRAW_LOOKUP_NOT_IMPLEMENTED;
-        mode=MODE_GC16;reason="ripple";
+        mode=(enum EpdDrawMode)ripple_mode;reason=ripple_mode==MODE_GC16?"ripple-clean":"ripple";
     }
 #endif
     // 已知参考帧的周期GC16直接全屏转换；无需先另做一次白场清除。/ Periodic GC16 with a known reference directly updates every pixel without an extra white-field clear.
     else if(mode==MODE_GC16)result=epd_hl_update_screen_full(&hardware.hl,MODE_GC16,25);
+#if defined(ESP_PLATFORM)
+    else if(flip && changed.width && pn_device_wave_changed_only()){
+        // 只扫变化外接框，且框内颜色未变的像素（标题、底栏、留白）不驱动，避免整屏闪动；累计仍计入管理带维护。
+        // Scan only the changed bounds and leave unchanged pixels (header, bar, margins) undriven to avoid a full-screen flicker; the update still counts toward band maintenance.
+        const EpdWaveform *saved=hardware.hl.waveform;hardware.hl.waveform=pn_device_wave_changed_only();
+        result=epd_hl_update_area_full(&hardware.hl,MODE_GL16,25,changed);
+        hardware.hl.waveform=saved;
+        content_area=(pn_feedback_box_t){changed.x,changed.y,changed.width,changed.height};reason="shelf-flip";
+    }
+#endif
     else if(body_refresh){
         // 页脚未变时只全像素清理正文带，不驱动灰色进度轨；页脚变化时合并为一次整屏更新。
         // 面板旋转90°，逻辑页脚是横跨全部物理行的窄列，单独再画一次也要扫完整帧（真机约+400ms，扫描877ms）。
@@ -910,7 +930,11 @@ static void show_shelf(const char *cursor,bool previous){
     if(status==PN_OK && shelf_covers){bool changed;pn_catalog_item_t last;bool has_last=refresh_last(&last);covers_dirty=false;covers_cache_done=true;
         if(pn_shelf_covers_bind(shelf_covers,shelf_page,has_last?&last:NULL,&pool,&sd_media,cover_cache,&changed)!=PN_OK)pn_shelf_covers_reset(shelf_covers,NULL);}
     pn_profile_end(&span,status);
+    // 同一书库内翻页只局部替换列表；首次进入、换栏仍整页显示。/ Paging within the library replaces the list locally; first entry and tab switches still show the whole page.
+    bool flipping=shelf_mode && *cursor && panel_known;
+    if(flipping)atomic_store(&shelf_flip,true);
     if(status==PN_OK)status=draw_shelf(panel_known?PN_REFRESH_GL16:PN_REFRESH_GC16);
+    if(flipping)atomic_store(&shelf_flip,false);
     if(status!=PN_OK){message("读取书架失败","当前位置仍保留，重试");return;}
     status_page=false;shelf_mode=true;locked=false;
 }
@@ -984,7 +1008,11 @@ static void start_reader_impl(void){
     if(loading==PN_CANCELLED)return;
     if(loading!=PN_OK)ESP_LOGW(TAG,"Opening feedback unavailable: %d",(int)loading);
     uint64_t opened_at=now_ms();(void)opened_at;
-    pn_status_t status=pn_reader_app_open_on_media(&reader,&pool,&sd_media,selected_path,font,"/data/progress",PN_STYLE_DEFAULT_PIXELS,now_ms());
+    // 最近记录已知身份且大小一致：不在首屏前读完整本书，完整核对在阅读空闲时后台完成。
+    // A recent record with known identity and matching size: never read the whole book before the first screen; full checks finish in the background while reading is idle.
+    bool fast=selected_identified && selected_size && strcmp(trust_failed_path,selected_path);
+    pn_status_t status=fast?pn_reader_app_open_trusted(&reader,&pool,&sd_media,selected_path,font,"/data/progress",PN_STYLE_DEFAULT_PIXELS,now_ms(),&selected_expected,selected_size)
+        :pn_reader_app_open_on_media(&reader,&pool,&sd_media,selected_path,font,"/data/progress",PN_STYLE_DEFAULT_PIXELS,now_ms());
     ESP_LOGI(TAG,"Book prepare format=%u status=%d elapsed=%llu ms",(unsigned)selected_format,(int)status,(unsigned long long)(now_ms()-opened_at));
     if(status==PN_OK && selected_identified){pn_book_id_t actual;status=epub.impl?pn_epub_app_identity(&epub,&actual):pn_reader_app_identity(&reader,&actual);if(status==PN_OK && memcmp(actual.sha256,selected_expected.sha256,32))status=PN_STALE_JOB;}
     if(status==PN_OK)status=active_step(PN_APP_OPEN,now_ms());
@@ -1516,7 +1544,7 @@ static void open_actions(int index){
 static void open_shelf_item(int index){
     if(!shelf_page || index<0 || (size_t)index>=shelf_page->count)return;
     const pn_catalog_item_t *item=&shelf_page->items[index];
-    if(item->format==PN_BOOK_TXT || item->format==PN_BOOK_EPUB){selected_format=item->format;strcpy(selected_path,item->path);selected_identified=item->identified;selected_expected=item->expected;start_reader();}
+    if(item->format==PN_BOOK_TXT || item->format==PN_BOOK_EPUB){selected_format=item->format;strcpy(selected_path,item->path);selected_identified=item->identified;selected_expected=item->expected;selected_size=item->identified?item->size:0;start_reader();}
     else message("格式尚未接入","书籍仍保留，选择TXT或EPUB");
 }
 static void handle_key(int key,pn_key_event_t event){
@@ -1663,7 +1691,7 @@ static void apply_selection(int selection){
     else if(actions_mode){
         if(selection==PN_BA_CANCEL){if(actions.confirming){actions.confirming=false;actions.notice=NULL;(void)draw_shelf(PN_REFRESH_GL16);}else{actions_mode=false;(void)draw_shelf(PN_REFRESH_GL16);}}
         else if(selection==PN_BA_OPEN){actions_mode=false;
-            if(actions.item.format==PN_BOOK_TXT || actions.item.format==PN_BOOK_EPUB){selected_format=actions.item.format;strcpy(selected_path,actions.item.path);selected_identified=false;start_reader();}
+            if(actions.item.format==PN_BOOK_TXT || actions.item.format==PN_BOOK_EPUB){selected_format=actions.item.format;strcpy(selected_path,actions.item.path);selected_identified=false;selected_size=0;start_reader();}
             else message("格式尚未接入","书籍仍保留，选择TXT或EPUB");}
         else if(selection==PN_BA_FAVORITE){
             pn_media_lease_t lease={0};pn_status_t status=data_ready?pn_media_acquire(&data_media,PN_MEDIA_WRITE,&lease):PN_UNSUPPORTED;pn_journal_files_t files;pn_journal_io_t io;bool now=actions.favorite;
@@ -1743,7 +1771,7 @@ static void apply_selection(int selection){
         // 继续阅读卡直接打开最近一本，不改变当前书架模式。/ The continue card opens the latest book directly without changing the shelf mode.
         if(shelf_covers && shelf_covers->has_last){const pn_catalog_item_t *last=&shelf_covers->last;
             if(last->format!=PN_BOOK_TXT && last->format!=PN_BOOK_EPUB)message("格式尚未接入","历史记录仍保留");
-            else{selected_format=last->format;strcpy(selected_path,last->path);selected_identified=last->identified;selected_expected=last->expected;start_reader();}}
+            else{selected_format=last->format;strcpy(selected_path,last->path);selected_identified=last->identified;selected_expected=last->expected;selected_size=last->identified?last->size:0;start_reader();}}
     }
     else if(shelf_mode && selection>=0 && selection<PN_CATALOG_PAGE_MAX && shelf_page)open_shelf_item(selection);else if(shelf_mode && shelf_page && shelf_page->count && (selection==PN_SHELF_NEXT || selection==PN_SHELF_PREVIOUS)){
         char cursor[PN_CATALOG_NAME_MAX];strcpy(cursor,shelf_page->items[selection==PN_SHELF_NEXT?shelf_page->count-1:0].name);show_shelf(cursor,selection==PN_SHELF_PREVIOUS);
@@ -2022,7 +2050,15 @@ static void device_task(void *arg){
             // 真机连翻约1秒一页时，10ms间隔会让预热来不及；仍有字形待预热就以1ms让出继续，最多连续50轮。
             // On device, turning about once per second leaves 10 ms gaps too slow for warming; keep going with 1 ms yields while glyphs remain, at most 50 rounds in a row.
             background=prefetched==PN_OK || cached==PN_OK || cached==PN_BUSY || (epub.impl?pn_epub_app_warm_pending(&epub):pn_reader_app_warm_pending(&reader));
-            if(background){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);}}
+            if(background){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);}
+            // TXT快开的后台复核排在预取/预热之后，输入安静300ms才推进一块（32KiB）；不符则关闭并按完整路径重开。
+            // TXT fast-open verification runs after prefetch/warming, one 32 KiB block once input has been quiet for 300 ms; a mismatch closes and reopens through the complete path.
+            else if(reader.impl && pn_reader_app_verify_pending(&reader) && now_ms()>=last_input && now_ms()-last_input>=300){
+                pn_status_t verified=pn_reader_app_verify_step(&reader);background=verified==PN_BUSY || verified==PN_CANCELLED;power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);
+                if(verified==PN_OK)ESP_LOGI(TAG,"TXT fast-open verification complete");
+                else if(verified==PN_STALE_JOB || verified==PN_CORRUPT){ESP_LOGW(TAG,"TXT fast-open verification failed: %d; reopening fully",(int)verified);
+                    snprintf(trust_failed_path,sizeof trust_failed_path,"%s",selected_path);if(stop_reader())start_reader();}
+                else if(!background)ESP_LOGW(TAG,"TXT fast-open verification stopped: %d",(int)verified);}}
         if(available!=PN_OK){if(power_idle<POWER_IDLE_ROUNDS)power_idle++;if(power_idle>=POWER_IDLE_ROUNDS)pn_device_power_busy(PN_POWER_PRODUCT,false);
             // 活动/会话/降级输入时10ms；长空闲时等输入通知，最多100ms处理定时职责。/ 10 ms while active, in sessions or with degraded input; when long idle wait for input notification, at most 100 ms for timed duties.
             bool slow=async_port.input_active && power_idle>=POWER_IDLE_ROUNDS && !transfer.impl && !usb.open && !time_sync.impl && !ota_busy() && !wifi_probe.impl;

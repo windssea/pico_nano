@@ -40,6 +40,20 @@ pn_status_t pn_text_file_identity_pooled(pn_pool_t *,const pn_text_source_t *,pn
 pn_status_t pn_text_file_identity_reuse(const pn_text_source_t *target,const pn_text_source_t *verified);
 /// 摘要读块同时严格探测编码/检查点，常见UTF编码只扫一次；GBK保持完整重试。/ Strictly probe encoding/checkpoints while reading digest blocks, scanning common UTF encodings once; GBK retains a complete retry.
 pn_status_t pn_text_file_inspect(pn_pool_t *,const pn_text_source_t *,pn_book_id_t *,pn_text_encoding_t *,void (*)(void *,uint64_t,bool),void *);
+/// 快开：只严格探测前limit字节确定编码并发出前段检查点，不计算身份；无BOM且UTF前段无效时按GBK探测。完整核对交给verify。
+/// Fast open: strictly probe only the first limit bytes for encoding and early checkpoints, without identity; without a BOM an invalid UTF prefix retries GBK. Full checks are left to verify.
+pn_status_t pn_text_file_inspect_prefix(const pn_text_source_t *,uint64_t limit,pn_text_encoding_t *,void (*)(void *,uint64_t,bool),void *);
+typedef struct {void *impl;} pn_text_file_verify_t; ///< 零初始化，活动期间源须保活 / Zero-initialize; the source outlives an active job
+/// 后台完整复核：按32KiB分步摘要（probe时同时完整探测并发出全部检查点），只初始化不读取。
+/// Background full verification: hash in 32 KiB steps (with probe, also strictly probe and emit every checkpoint); initializes without reading.
+pn_status_t pn_text_file_verify_begin(pn_text_file_verify_t *,pn_pool_t *,const pn_text_source_t *,const pn_book_id_t *expected,bool probe,void (*)(void *,uint64_t,bool),void *);
+/// 每步至多一块；BUSY待续、CANCELLED保留进度；OK时身份与expected一致（文件对象记为已验证）并给出完整探测的编码；
+/// STALE_JOB内容不同、CORRUPT完整探测失败（需按完整路径重开），其余错误终止。
+/// One block per step; BUSY continues and CANCELLED keeps progress; OK means identity equals expected (the file object becomes verified) and reports the fully probed encoding;
+/// STALE_JOB for different content, CORRUPT when full probing fails (reopen through the complete path); other errors stop.
+pn_status_t pn_text_file_verify_step(pn_text_file_verify_t *,pn_text_encoding_t *encoding);
+/// 放弃或完成后释放，幂等，不关闭源。/ Release after abort or completion, idempotently, without closing the source.
+void pn_text_file_verify_close(pn_text_file_verify_t *);
 /// 校验原已验证句柄仍有效；TF依靠独占所有权/READ租约，主机对句柄和现路径全SHA，不接受size/mtime命中。/ Verify the original validated handle: TF relies on exclusive ownership/READ leases; hosts hash both handle/current path completely, never accepting size/mtime hits.
 pn_status_t pn_text_file_verify_retained(pn_pool_t *,const pn_text_source_t *);
 /// 与源接口相同，但直接校验稳定文件对象。/ Same retained-source check through a stable file object.

@@ -38,11 +38,11 @@ int main(void){
     // 未准备时选表透明。/ Selection is transparent while unarmed.
     pn_ripple_build_fn build=reference_build;pn_ripple_lookup_fn lookup=reference_lookup;
     assert(!pn_device_ripple_select(0x100|2,&build,&lookup) && build==reference_build && lookup==reference_lookup && !pn_device_ripple_end());
-    assert(!pn_device_ripple_begin(&memory,&E0470_WAVEFORM,false,difference+4,&wave));
+    assert(!pn_device_ripple_begin(&memory,&E0470_WAVEFORM,2,false,difference+4,&wave));
     unsigned checked=0,max_runs=0;
     for(int reverse=0;reverse<2;reverse++){
-        assert(pn_device_ripple_begin(&memory,&E0470_WAVEFORM,reverse,difference,&wave) && wave);
-        assert(!pn_device_ripple_begin(&memory,&E0470_WAVEFORM,reverse,difference,&wave)); // 不可重入 / Not reentrant
+        assert(pn_device_ripple_begin(&memory,&E0470_WAVEFORM,2,reverse,difference,&wave) && wave);
+        assert(!pn_device_ripple_begin(&memory,&E0470_WAVEFORM,2,reverse,difference,&wave)); // 不可重入 / Not reentrant
         const EpdWaveformPhases *carrier=e0470_waveform_phases(wave,2);int ticks=gc->phases+7*PN_DEVICE_RIPPLE_STEP;
         assert(carrier && carrier->phases==ticks && pn_device_ripple_ticks()==ticks && !carrier->phase_times);
         // 载体前P相是原表逐字节副本，余下全保持，前导跳过不会越界或误判。/ The carrier's first P phases copy the original byte for byte and the rest hold, so leading skip stays in bounds and correct.
@@ -70,12 +70,26 @@ int main(void){
     }
     assert(max_runs>3 && max_runs<=PN_RIPPLE_SEGMENTS);
     // 错误行指针：输出保持并使本次失败，不越界写。/ Bad row pointers: hold output and fail this job without writing out of bounds.
-    assert(pn_device_ripple_begin(&memory,&E0470_WAVEFORM,false,difference,&wave));build=reference_build;lookup=reference_lookup;assert(pn_device_ripple_select(0x100|2,&build,&lookup));
+    assert(pn_device_ripple_begin(&memory,&E0470_WAVEFORM,2,false,difference,&wave));build=reference_build;lookup=reference_lookup;assert(pn_device_ripple_select(0x100|2,&build,&lookup));
     build(lut,e0470_waveform_phases(wave,2),10);memset(out,0x5a,W/4+2);
     lookup((const uint32_t *)(difference+4),out+1,lut,W);assert(out[0]==0x5a && out[W/4+1]==0x5a);for(int i=1;i<=W/4;i++)assert(!out[i]);
     assert(!pn_device_ripple_end());
     // 未选表（例如驱动走了别的模式）不得算成功。/ No selection (e.g. the driver took another mode) is never success.
-    assert(pn_device_ripple_begin(&memory,&E0470_WAVEFORM,true,difference,&wave) && !pn_device_ripple_end());
+    assert(pn_device_ripple_begin(&memory,&E0470_WAVEFORM,2,true,difference,&wave) && !pn_device_ripple_end());
+    // 柔和GL16波纹：同色迁移(to==from)不驱动，其余逐像素等于原GL16相位；载体中同色项清零。
+    // Gentle GL16 ripple: same-color transitions (to==from) are never driven, others equal the original GL16 phase per pixel; the carrier zeroes same-color entries.
+    {const EpdWaveformPhases *gl=e0470_waveform_phases(&E0470_WAVEFORM,5);assert(gl);
+     assert(!pn_device_ripple_begin(&memory,&E0470_WAVEFORM,3,false,difference,&wave));
+     assert(pn_device_ripple_begin(&memory,&E0470_WAVEFORM,5,false,difference,&wave));
+     const EpdWaveformPhases *carrier=e0470_waveform_phases(wave,5);assert(carrier && carrier->phases==gl->phases+7);
+     for(int f=0;f<gl->phases;f++)for(int v=0;v<16;v++)assert(!e0470_phase_action(carrier,f,v,v));
+     build=reference_build;lookup=reference_lookup;assert(!pn_device_ripple_select(0x100|2,&build,&lookup));assert(pn_device_ripple_select(0x100|5,&build,&lookup));
+     for(int tick=0;tick<carrier->phases;tick+=2){build(lut,carrier,tick);
+      for(unsigned row=0;row<H;row+=7){lookup((const uint32_t *)(difference+(size_t)row*W),out+1,lut,W);
+       for(int c=0;c<W;c++){uint8_t d=difference[(size_t)row*W+c];int phase=tick-(int)oracle_band(false,(int)row,c);
+        int expected=(d>>4)==(d&15)?0:phase>=0 && phase<gl->phases?e0470_phase_action(gl,phase,d>>4,d&15):0;
+        assert(((out[1+c/4]>>((c&3)*2))&3)==expected);checked++;}}}
+     assert(pn_device_ripple_end());}
     printf("device_ripple checks=%u max_runs=%u ticks=%d\n",checked,max_runs,gc->phases+7*PN_DEVICE_RIPPLE_STEP);
     free(difference);free(out);free(lut);free(memory.tables);free(memory.rows[0]);free(memory.rows[1]);return 0;
 }

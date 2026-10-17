@@ -50,6 +50,10 @@ typedef struct {
     pn_reader_t reader;
     pn_page_index_t page_index;uint32_t index_generation;
     pn_reader_anchor_t checkpoints[512];size_t checkpoint_count;
+    /// 快开后的后台完整复核：先字体后正文，完成前身份暂用最近记录 / Background full verification after fast opening: font first, then body text, using the recent-record identity meanwhile
+    pn_text_file_verify_t verify;bool verify_font,verify_book;void *verify_font_handle;pn_book_id_t font_expected;
+    pn_text_source_t book_source;pn_text_encoding_t opened_encoding;
+    pn_reader_anchor_t verify_points[512];size_t verify_count;
     pn_save_policy_t save;
     pn_journal_files_t journal;
     pn_journal_io_t io;
@@ -150,6 +154,7 @@ static pn_status_t render(app_t *a,pn_frame_t *frame,const pn_reader_receipt_t *
     pn_status_t status=render_impl(a,frame,receipt,show_return);pn_profile_end(&span,status);return status;
 }
 static pn_status_t release_app(app_t *a){
+    pn_text_file_verify_close(&a->verify);
     pn_page_bitmap_close(&a->bitmap);
     (void)pn_page_index_flush(&a->page_index,true);pn_page_index_close(&a->page_index);
     pn_reader_neighbors(&a->reader,NULL);
@@ -181,8 +186,12 @@ static pn_status_t open_state(app_t *a,const char *directory,uint64_t now){
     a->saved_style=a->style;a->persistent=true;strcpy(a->state_directory,directory);return PN_OK;
 }
 static void decoder_checkpoint(void *ctx,uint64_t offset,bool paragraph){app_t *a=ctx;if(offset<=4)a->checkpoint_count=0;if(a->checkpoint_count<512)a->checkpoints[a->checkpoint_count++]=(pn_reader_anchor_t){.begin=offset,.paragraph=paragraph};}
+/// 复核期间检查点写入独立数组，完成后一次换入，阅读中借用的数组不缩短。/ Verification checkpoints go to a separate array swapped in on completion, so the borrowed array never shrinks mid-reading.
+static void verify_checkpoint(void *ctx,uint64_t offset,bool paragraph){app_t *a=ctx;if(offset<=4)a->verify_count=0;if(a->verify_count<512)a->verify_points[a->verify_count++]=(pn_reader_anchor_t){.begin=offset,.paragraph=paragraph};}
+/// 快开只探测前256KiB，足够确定编码并排出首屏。/ Fast opening probes only the first 256 KiB, enough to settle the encoding and lay out the first screen.
+#define FAST_PREFIX_BYTES (256u*1024u)
 static pn_status_t pn_reader_app_open_on_media_impl(pn_reader_app_t *app,pn_pool_t *pool,pn_media_t *media,const char *book_path,
-    const char *font_path,const char *state_dir,int pixels,uint64_t now){
+    const char *font_path,const char *state_dir,int pixels,uint64_t now,const pn_book_id_t *trusted,uint64_t trusted_size){
     if(!app || !pool || !book_path || !*book_path || pixels<28 || pixels>72 || (state_dir && !*state_dir))return PN_INVALID;
     if(app->impl)return PN_BUSY;
     if(strlen(book_path)>=PN_RECENT_PATH_MAX)return PN_LIMIT;
@@ -194,7 +203,11 @@ static pn_status_t pn_reader_app_open_on_media_impl(pn_reader_app_t *app,pn_pool
     pn_text_source_t source={0},font_source=pn_font_reading_source(),fallback_source={0};pn_text_encoding_t encoding;
     if(status==PN_OK)status=pn_media_acquire(a->book_media,PN_MEDIA_READ,&a->book_lease);
     if(status==PN_OK)status=pn_text_file_open(&a->book_file,a->book_media,&a->book_lease,book_path,&source);
-    if(status==PN_OK)status=pn_text_file_inspect(pool,&source,&a->book,&encoding,decoder_checkpoint,a);
+    // 最近记录给出身份且大小一致时不在首屏前读完整本书：先探测开头，完整SHA与探测交给后台复核。
+    // With a recent-record identity and matching size, never read the whole book before the first screen: probe the start now and leave the full SHA/probe to background verification.
+    bool fast=status==PN_OK && trusted && state_dir && source.size==trusted_size;
+    if(status==PN_OK && fast){status=pn_text_file_inspect_prefix(&source,FAST_PREFIX_BYTES,&encoding,decoder_checkpoint,a);if(status==PN_OK){a->book=*trusted;a->verify_book=true;a->opened_encoding=encoding;a->book_source=source;}}
+    else if(status==PN_OK)status=pn_text_file_inspect(pool,&source,&a->book,&encoding,decoder_checkpoint,a);
     if(status==PN_OK && state_dir)status=open_state(a,state_dir,now);
     pn_font_preferences_t selected_fonts={0};bool has_selected_fonts=false,fonts_from_book=false;
     if(status==PN_OK && a->persistent){pn_journal_files_t global_files,book_files;pn_journal_io_t global_io,book_io;
@@ -204,11 +217,14 @@ static pn_status_t pn_reader_app_open_on_media_impl(pn_reader_app_t *app,pn_pool
         if(status==PN_EMPTY)status=PN_OK;else if(status==PN_OK){
             // 所选字体缺失/被替换：本次用启动默认字体运行，保留记录不改。/ Missing or replaced selection: run with the startup default this time and keep the record unchanged.
             pn_status_t primary;
+            // 快开时外置正文字体也只核对大小，完整SHA随后台复核。/ When fast opening, an external body font also checks size only, with the full SHA in background verification.
+            pn_status_t (*open_font)(pn_pool_t *,const pn_font_reference_t *,pn_media_t *,const pn_media_lease_t *,pn_text_file_t *,pn_text_source_t *)=fast?pn_font_reference_open_file_fast:pn_font_reference_open_file;
 #ifdef ESP_PLATFORM
-            primary=selected_fonts.primary.kind==PN_FONT_FILE && !pn_sd_resource_path(selected_fonts.primary.path,PN_SD_FONTS)?PN_EMPTY:selected_fonts.primary.kind==PN_FONT_FILE?pn_font_reference_open_file(pool,&selected_fonts.primary,a->book_media,&a->book_lease,&a->font_file,&font_source):pn_font_reference_verify_pooled(pool,&selected_fonts.primary,a->book_media,&a->book_lease);
+            primary=selected_fonts.primary.kind==PN_FONT_FILE && !pn_sd_resource_path(selected_fonts.primary.path,PN_SD_FONTS)?PN_EMPTY:selected_fonts.primary.kind==PN_FONT_FILE?open_font(pool,&selected_fonts.primary,a->book_media,&a->book_lease,&a->font_file,&font_source):pn_font_reference_verify_pooled(pool,&selected_fonts.primary,a->book_media,&a->book_lease);
 #else
-            primary=selected_fonts.primary.kind==PN_FONT_FILE?pn_font_reference_open_file(pool,&selected_fonts.primary,a->book_media,&a->book_lease,&a->font_file,&font_source):pn_font_reference_verify_pooled(pool,&selected_fonts.primary,a->book_media,&a->book_lease);
+            primary=selected_fonts.primary.kind==PN_FONT_FILE?open_font(pool,&selected_fonts.primary,a->book_media,&a->book_lease,&a->font_file,&font_source):pn_font_reference_verify_pooled(pool,&selected_fonts.primary,a->book_media,&a->book_lease);
 #endif
+            if(primary==PN_OK && fast && selected_fonts.primary.kind==PN_FONT_FILE){a->verify_font=true;a->font_expected=selected_fonts.primary.identity;a->verify_font_handle=a->font_file.handle;}
             if(primary==PN_STALE_MEDIA)status=primary;
             else if(primary!=PN_OK)a->font_unavailable=true;
             else{has_selected_fonts=true;font_path=selected_fonts.primary.kind==PN_FONT_FILE?selected_fonts.primary.path:NULL;
@@ -255,7 +271,38 @@ static pn_status_t pn_reader_app_open_on_media_impl(pn_reader_app_t *app,pn_pool
 pn_status_t pn_reader_app_open_on_media(pn_reader_app_t *app,pn_pool_t *pool,pn_media_t *media,const char *book_path,
     const char *font_path,const char *state_dir,int pixels,uint64_t now){
     pn_profile_span_t span;pn_profile_begin(&span,pool,"txt.open");
-    pn_status_t status=pn_reader_app_open_on_media_impl(app,pool,media,book_path,font_path,state_dir,pixels,now);pn_profile_end(&span,status);return status;
+    pn_status_t status=pn_reader_app_open_on_media_impl(app,pool,media,book_path,font_path,state_dir,pixels,now,NULL,0);pn_profile_end(&span,status);return status;
+}
+pn_status_t pn_reader_app_open_trusted(pn_reader_app_t *app,pn_pool_t *pool,pn_media_t *media,const char *book_path,
+    const char *font_path,const char *state_dir,int pixels,uint64_t now,const pn_book_id_t *expected,uint64_t expected_size){
+    if(!expected)return PN_INVALID;
+    pn_profile_span_t span;pn_profile_begin(&span,pool,"txt.open-fast");
+    pn_status_t status=pn_reader_app_open_on_media_impl(app,pool,media,book_path,font_path,state_dir,pixels,now,expected,expected_size);pn_profile_end(&span,status);return status;
+}
+bool pn_reader_app_verify_pending(const pn_reader_app_t *app){const app_t *a=app && app->impl?app->impl:NULL;return a && (a->verify_font || a->verify_book);}
+pn_status_t pn_reader_app_verify_step(pn_reader_app_t *app){
+    if(!app || !app->impl)return PN_INVALID;
+    app_t *a=app->impl;
+    if(!a->verify_font && !a->verify_book)return PN_EMPTY;
+    if(a->media_lost || a->suspended)return PN_BUSY;
+    // 用户换了正文字体时旧字体文件已关闭，新字体走完整打开，不再复核旧引用。/ If the user switched body fonts the old file is closed and the new one opened fully, so drop the old reference check.
+    if(a->verify_font && (a->font_file.handle!=a->verify_font_handle || !a->font_file.handle || a->font_preview || a->font_pending || a->font_view)){pn_text_file_verify_close(&a->verify);a->verify_font=false;}
+    if(!a->verify_font && !a->verify_book)return PN_OK;
+    if(!a->verify.impl){
+        pn_status_t s=a->verify_font?pn_text_file_verify_begin(&a->verify,a->pool,&a->font_source,&a->font_expected,false,NULL,NULL)
+            :pn_text_file_verify_begin(&a->verify,a->pool,&a->book_source,&a->book,true,verify_checkpoint,a);
+        if(s!=PN_OK)return s;
+    }
+    pn_text_encoding_t encoding=a->opened_encoding;pn_status_t s=pn_text_file_verify_step(&a->verify,&encoding);
+    if(s==PN_BUSY || s==PN_CANCELLED)return s;
+    pn_text_file_verify_close(&a->verify);
+    if(s!=PN_OK)return s;
+    if(a->verify_font){a->verify_font=false;return a->verify_book?PN_BUSY:PN_OK;}
+    a->verify_book=false;
+    // 前段与完整探测得到的编码必须一致，否则调用方按完整路径重开。/ The prefix and full probes must agree on encoding; otherwise callers reopen through the complete path.
+    if(encoding!=a->opened_encoding)return PN_CORRUPT;
+    memcpy(a->checkpoints,a->verify_points,a->verify_count*sizeof *a->checkpoints);a->checkpoint_count=a->verify_count;a->reader.checkpoint_count=a->checkpoint_count;
+    return PN_OK;
 }
 static pn_status_t record_recent(app_t *a){
     if(!a->persistent || !a->reader.has_visible)return PN_OK;
@@ -529,7 +576,7 @@ pn_status_t pn_reader_app_close(pn_reader_app_t *app,uint64_t now){
 pn_status_t pn_reader_app_open(pn_reader_app_t *a,pn_pool_t *p,const char *b,const char *f,const char *s,int n,uint64_t t){return pn_reader_app_open_on_media(a,p,NULL,b,f,s,n,t);}
 pn_status_t pn_reader_app_media_lost(pn_reader_app_t *app){
     if(!app || !app->impl)return PN_INVALID;
-    app_t *a=app->impl;if(a->media_lost)return PN_OK;a->media_lost=true;pn_page_bitmap_enable(&a->bitmap,false);
+    app_t *a=app->impl;if(a->media_lost)return PN_OK;a->media_lost=true;pn_page_bitmap_enable(&a->bitmap,false);pn_text_file_verify_close(&a->verify);
     pn_status_t status=pn_media_detach(a->book_media);
     suspend_fonts(a);
     pn_font_close(&a->metadata);

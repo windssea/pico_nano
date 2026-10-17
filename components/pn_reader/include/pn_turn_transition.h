@@ -6,7 +6,7 @@ typedef enum {
     PN_TURN_NONE=0, ///< 默认直接呈现 / Default direct presentation
     PN_TURN_SWEEP=1, ///< 历史扫除ID，产品直接显示 / Legacy sweep ID, product presents directly
     PN_TURN_CURL=2, ///< 历史页折ID，产品直接显示 / Legacy fold ID, product presents directly
-    PN_TURN_RIPPLE=3 ///< 水波纹：真实上一页/下一页以弧形错峰GC16呈现 / Ripple: real previous/next turns present as arc-staggered GC16
+    PN_TURN_RIPPLE=3 ///< 水波纹：真实翻页以弧形错峰呈现，普通页GL16只刷变化像素，清理页GC16 / Ripple: real turns present arc-staggered, ordinary pages as GL16 over changed pixels and cleaning pages as GC16
 } pn_turn_style_t;
 typedef struct {
     pn_pool_t *pool; ///< 保留调用兼容，无动画分配 / Retained for call compatibility, no animation allocation

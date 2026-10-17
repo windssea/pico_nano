@@ -17,8 +17,10 @@ typedef enum {
     PN_REFRESH_GC16=0, ///< 清残影整刷 / Ghost-clearing full update
     PN_REFRESH_GL16, ///< 清晰页刷新 / Clear page update
     PN_REFRESH_DU, ///< 快速二值刷新 / Fast binary update
-    PN_REFRESH_RIPPLE, ///< 下一页水波纹：原GC16按弧形错峰，同时清残影；只由翻页呈现产生，不进入调度队列 / Next-page ripple: original GC16 staggered by arc, cleaning ghosts too; produced only by turn presentation, never queued
-    PN_REFRESH_RIPPLE_REVERSE ///< 上一页水波纹（镜像）/ Previous-page ripple (mirrored)
+    PN_REFRESH_RIPPLE, ///< 下一页水波纹：GL16按弧形错峰、只驱动变化像素；只由翻页呈现产生，不进入调度队列 / Next-page ripple: GL16 staggered by arc driving changed pixels only; produced only by turn presentation, never queued
+    PN_REFRESH_RIPPLE_REVERSE, ///< 上一页水波纹（镜像）/ Previous-page ripple (mirrored)
+    PN_REFRESH_RIPPLE_CLEAN, ///< 定期清残影的下一页：原GC16按弧形错峰 / Next page on a cleaning turn: original GC16 staggered by arc
+    PN_REFRESH_RIPPLE_CLEAN_REVERSE ///< 定期清残影的上一页 / Previous page on a cleaning turn
 } pn_refresh_t;
 typedef enum {
     PN_BUFFER_FREE=0, ///< 空闲 / Free

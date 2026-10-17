@@ -21,3 +21,6 @@ bool pn_device_wave_init(const EpdWaveform *original,int trailing_hold,pn_device
 /// 同起点波形：DU/GC16原样借用，GL16为派生表；未初始化时NULL。
 /// Start-aligned waveform: DU/GC16 borrowed unchanged, GL16 derived; NULL before initialization.
 const EpdWaveform *pn_device_wave_aligned(void);
+/// 只换变化像素的同起点波形：GL16中颜色不变的迁移全部保持，用于书库翻页等局部替换；未初始化时NULL。
+/// Changed-pixels-only start-aligned waveform: GL16 holds every unchanged-color transition, for local replacements such as library paging; NULL before initialization.
+const EpdWaveform *pn_device_wave_changed_only(void);

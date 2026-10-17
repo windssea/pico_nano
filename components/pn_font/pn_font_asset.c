@@ -14,7 +14,7 @@
 #include <stdlib.h>
 typedef struct {pn_pool_t *pool;pn_media_t *media;pn_media_lease_t lease;pn_text_file_t file;pn_text_source_t source;pn_font_t font;pn_font_reference_t reference;pn_font_info_t info;} asset_t;
 pn_status_t pn_font_asset_verify_retained(const pn_font_asset_t *asset){if(!asset || !asset->impl)return PN_INVALID;const asset_t *a=asset->impl;return pn_text_file_verify_retained(a->pool,&a->source);}
-pn_status_t pn_font_reference_open_file(pn_pool_t *pool,const pn_font_reference_t *ref,pn_media_t *media,const pn_media_lease_t *lease,pn_text_file_t *file,pn_text_source_t *source){
+static pn_status_t open_reference(pn_pool_t *pool,const pn_font_reference_t *ref,pn_media_t *media,const pn_media_lease_t *lease,pn_text_file_t *file,pn_text_source_t *source,bool full){
     if(!pool || !ref || !media || !lease || !file || !source || ref->kind!=PN_FONT_FILE)return PN_INVALID;
     if(file->handle)return PN_BUSY;
     pn_font_preferences_t check={.primary=*ref};pn_status_t status=pn_font_preferences_validate(&check,true);if(status!=PN_OK)return status;
@@ -32,6 +32,8 @@ pn_status_t pn_font_reference_open_file(pn_pool_t *pool,const pn_font_reference_
     if(status==PN_OK){
         // 只复用仍受同代READ保护的系统源身份，目标仍由当前阅读器独立关闭。
         // Reuse only a system identity protected by same-generation READ leases; the current reader still closes its own target.
+        // 快开只核对大小，完整SHA由调用方随后后台复核。/ Fast opening checks size only; callers verify the full SHA in the background afterwards.
+        if(!full){*source=candidate;return PN_OK;}
         pn_status_t reused=pn_font_system_identity_reuse(&candidate);
         if(reused!=PN_OK && reused!=PN_EMPTY)status=reused;
         if(status==PN_OK)status=pn_text_file_identity_pooled(pool,&candidate,&actual);
@@ -40,6 +42,8 @@ pn_status_t pn_font_reference_open_file(pn_pool_t *pool,const pn_font_reference_
     if(status!=PN_OK){(void)pn_text_file_close(file);return status;}
     *source=candidate;return PN_OK;
 }
+pn_status_t pn_font_reference_open_file(pn_pool_t *pool,const pn_font_reference_t *ref,pn_media_t *media,const pn_media_lease_t *lease,pn_text_file_t *file,pn_text_source_t *source){return open_reference(pool,ref,media,lease,file,source,true);}
+pn_status_t pn_font_reference_open_file_fast(pn_pool_t *pool,const pn_font_reference_t *ref,pn_media_t *media,const pn_media_lease_t *lease,pn_text_file_t *file,pn_text_source_t *source){return open_reference(pool,ref,media,lease,file,source,false);}
 static pn_status_t release(asset_t *a){pn_font_close(&a->font);pn_status_t status=pn_text_file_close(&a->file);if(a->lease.ticket){pn_status_t s=pn_media_release(a->media,&a->lease);if(status==PN_OK)status=s;}pn_free(a);return status;}
 pn_status_t pn_font_asset_open(pn_font_asset_t *asset,pn_pool_t *pool,pn_media_t *media,const pn_media_lease_t *guard,const char *path,uint64_t expected_size,int pixels){
     if(!asset || !pool || !media || !guard || !path || !*path || pixels<8 || pixels>128)return PN_INVALID;

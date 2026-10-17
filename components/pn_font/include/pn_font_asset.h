@@ -11,6 +11,9 @@
 #include "pn_text_file.h"
 /// 打开并核对选定字体，摘要留在实际消费源；失败关闭文件且不改source，lease由调用方持有。/ Open and verify a selected face, retaining its digest in the consumed source; close on failure and preserve source; caller owns lease.
 pn_status_t pn_font_reference_open_file(pn_pool_t *,const pn_font_reference_t *,pn_media_t *,const pn_media_lease_t *,pn_text_file_t *,pn_text_source_t *);
+/// 快开：同上但只核对路径与大小，不算完整SHA；调用方必须随后用pn_text_file_verify对ref->identity后台复核，不符时按完整路径重开。
+/// Fast open: as above but checks only path and size without the full SHA; callers must verify ref->identity in the background with pn_text_file_verify and reopen through the complete path on mismatch.
+pn_status_t pn_font_reference_open_file_fast(pn_pool_t *,const pn_font_reference_t *,pn_media_t *,const pn_media_lease_t *,pn_text_file_t *,pn_text_source_t *);
 /// 尝试从仍持有的系统源复用同文件完整摘要；EMPTY继续原校验，不借用源或句柄，不读卡。/ Try reusing the retained system source's full digest for the same file; EMPTY keeps original verification, borrowing no source/handle and performing no IO.
 pn_status_t pn_font_system_identity_reuse(const pn_text_source_t *);
 typedef struct {void *impl;} pn_font_asset_t; ///< 初始NULL，活动对象不可复制 / Initially NULL; never copy live objects

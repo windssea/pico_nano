@@ -39,6 +39,11 @@ int main(void){
     int edge=99;for(int from=0;from<=12;from++)for(int p=0;p<gl->phases;p++)if(e0470_phase_action(gl,p,15,from)){if(p<edge)edge=p;break;}
     assert(info.start==edge && e0470_phase_action(derived,info.start,15,0)==2 && e0470_phase_action(derived,info.start,15,12)==1);
     assert(moved>0 && e0470_phase_action(gl,info.start,0,15)==0 && e0470_phase_action(derived,info.start,0,15)==1);
+    // 只换变化像素的表：同色迁移全部保持，其余与同起点表逐相相同，DU/GC16仍借原表。
+    // Changed-only table: every same-color transition holds, others match the start-aligned table phase by phase, DU/GC16 still borrow the originals.
+    {const EpdWaveform *c=pn_device_wave_changed_only();assert(c && e0470_waveform_phases(c,2)==gc && e0470_waveform_phases(c,1)==du);
+     const EpdWaveformPhases *only=e0470_waveform_phases(c,5);assert(only && only->phases==derived->phases && only!=derived);
+     for(int p=0;p<only->phases;p++)for(int to=0;to<16;to++)for(int from=0;from<16;from++)assert(e0470_phase_action(only,p,to,from)==(to==from?0:e0470_phase_action(derived,p,to,from)));}
     printf("device_wave original=%d derived=%d start=%d moved=%u\n",info.original_phases,info.phases,info.start,moved);
     return 0;
 }
