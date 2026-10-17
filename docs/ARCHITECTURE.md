@@ -168,7 +168,7 @@ PNSM固定小端编码保存紧凑文本、样式、locator、全章统计和窗
 
 ## 字体、灰阶与阅读线
 
-字重（排版“字重”，单书schema5）由[pn_font_weight](../components/pn_font/pn_font.c)在光栅前对轮廓按字号1/48每级外扩或内缩，字宽沿用原值，分页键不含字重；改变时丢弃该引擎字形缓存，补字链与界面中文回退同步字重。字体引擎另编入FreeType CFF/psaux/pshinter以支持CFF轮廓OTF。系统字体可由字体管理选择（`system-font`记录），产品与模拟器共用[pn_font_preferences_system_path](../components/pn_storage/pn_font_preferences.c)解析，所选文件缺失或打不开回到默认HarmonyOS文件再回到内置应急字库。排版换字体时，探查（`fonts_probe`）完整校验所得引用记在阅读器上并绑定当次READ租约号；同一租约内应用/设为默认若正文引用逐字段相同，经`pn_font_set_open_verified`/`pn_font_asset_open_known`只核对路径与大小、直接采用该摘要，租约更换或引用不同仍完整校验。字形光栅后统一经墨水屏清晰度曲线（低于约6%覆盖清零、部分覆盖加深）再缓存与合成。
+字重（排版“字重”，单书schema5）由[pn_font_weight](../components/pn_font/pn_font.c)在光栅前对轮廓按字号1/48每级外扩或内缩，字宽沿用原值，分页键不含字重；改变时丢弃该引擎字形缓存，补字链与界面中文回退同步字重。字体引擎另编入FreeType CFF/psaux/pshinter以支持CFF轮廓OTF。系统字体可由字体管理选择（`system-font`记录），产品与模拟器共用[pn_font_preferences_system_path](../components/pn_storage/pn_font_preferences.c)解析，所选文件缺失或打不开回到默认HarmonyOS文件再回到内置应急字库。排版换字体时，探查（`fonts_probe`）完整校验所得引用记在阅读器上并绑定当次READ租约号；同一租约内应用/设为默认若正文引用逐字段相同，经`pn_font_set_open_verified`/`pn_font_asset_open_known`只核对路径与大小、直接采用该摘要，租约更换或引用不同仍完整校验。字形光栅后统一经墨水屏清晰度曲线（低于约6%覆盖清零、部分覆盖加深）再缓存与合成。CFF轮廓（OTTO）字形的`FT_Load_Glyph`/合成字重/光栅经`pn_font_set_deep_runner`执行：板级[device_font_stack](../main/device_font_stack.c)以40KiB PSRAM栈任务同步代跑（解释器单帧约16KiB，超过产品栈余量），主机未注册时直接调用；runner拒绝时报内存不足。深栈任务无取消作用域，单个字形载入期间不响应取消。
 
 [pn_font.c](../components/pn_font/pn_font.c) 使用固定 FreeType 2.14.3 子集构建，完整 TTF 按需读，度量与字形缓存纳入池；默认正文黑体、外置主字体/备用字体及常驻中文 fallback 分层。界面中文不依赖用户正文字体，删除/缺卡/源失效时保持 UI 可用并提示正文回退。
 

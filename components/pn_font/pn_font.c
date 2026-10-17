@@ -91,7 +91,24 @@ typedef struct {
     uint32_t bmp_clock; ///< 组内LRU时钟，回绕时清零年龄 / Per-set LRU clock, clearing ages on wrap
     bool warming; ///< 可选光栅预热，禁止触碰呈现帧 / Optional raster warming without touching presentation frames
     int8_t weight; ///< 合成字重-1..3 / Synthetic weight -1..3
+    bool deep; ///< CFF轮廓：字形载入须走深栈runner / CFF outlines: glyph loading must go through the deep-stack runner
 } engine_t;
+static pn_font_deep_runner_t deep_runner;
+void pn_font_set_deep_runner(pn_font_deep_runner_t runner){deep_runner=runner;}
+/// 一次字形载入（可选合成字重与光栅），在调用方栈或深栈上执行。/ One glyph load (with optional synthetic weight and rasterizing), run on the caller's stack or the deep stack.
+typedef struct {FT_Face face;FT_UInt glyph;FT_Int32 flags;FT_Pos strength;bool embolden;FT_Error error;} glyph_job_t;
+static void glyph_job(void *ctx){
+    glyph_job_t *j=ctx;j->error=FT_Load_Glyph(j->face,j->glyph,j->flags);
+    // 合成字重：轮廓双向外扩/内缩约每级字号的1/48，再光栅；字宽沿用原值。/ Synthetic weight: grow or shrink the outline by about 1/48 of the size per level before rasterizing; advances keep their original values.
+    if(!j->error && j->embolden){FT_GlyphSlot slot=j->face->glyph;
+        if(slot->format==FT_GLYPH_FORMAT_OUTLINE)j->error=FT_Outline_EmboldenXY(&slot->outline,j->strength,j->strength);
+        if(!j->error)j->error=FT_Render_Glyph(slot,FT_RENDER_MODE_NORMAL);}
+}
+/// CFF字形没有深栈时报内存不足，绝不在小栈上冒险。/ CFF glyphs without a deep stack report out-of-memory and never risk the small stack.
+static FT_Error run_glyph(const engine_t *e,glyph_job_t *job){
+    if(e->deep && deep_runner){if(!deep_runner(glyph_job,job))return FT_Err_Out_Of_Memory;}else glyph_job(job);
+    return job->error;
+}
 static bool cache_allowed(const engine_t *e,size_t need){return (!e->pool->speculative || e->warming) && pn_cache_allow(e->pool,PN_CACHE_GLYPH,need); }
 static unsigned hash_key(uint32_t cp,int pixels,int delta){uint32_t h=cp*2654435761u;h^=(uint32_t)pixels*40503u;h^=(uint32_t)(delta+64)*2246822519u;h^=h>>15;return h;}
 static void *allocate(FT_Memory memory,long bytes) {
@@ -174,7 +191,7 @@ static pn_status_t pn_font_open_impl(pn_font_t *font,pn_pool_t *pool,const pn_te
     pn_font_t temporary={e,0,0};uint8_t prefix[4];
     if(stream_read(&e->stream,0,prefix,4)!=4){pn_status_t s=e->source_error;pn_font_close(&temporary);return s;}
     // TrueType轮廓(TTF/OTF)与CFF轮廓OTF(OTTO)；字体集合等仍拒绝。/ TrueType outlines (TTF/OTF) and CFF-outline OTF (OTTO); collections and others stay refused.
-    bool cff=!memcmp(prefix,"OTTO",4);
+    bool cff=!memcmp(prefix,"OTTO",4);e->deep=cff;
     if(memcmp(prefix,"\0\1\0\0",4)!=0 && memcmp(prefix,"true",4)!=0 && !cff){pn_font_close(&temporary);return PN_UNSUPPORTED;}
     FT_Error error=FT_New_Library(&e->memory,&e->library);
     if(!error)FT_Add_Default_Modules(e->library);
@@ -214,12 +231,8 @@ static pn_status_t load(pn_font_t *font,uint32_t cp,bool render) {
     if(e->source_error!=PN_OK || e->allocation_failed)return result(e,0);
     if(!glyph)return PN_EMPTY;
     bool embolden=render && e->weight;
-    FT_Error error=FT_Load_Glyph(e->face,glyph,FT_LOAD_DEFAULT | (render && !embolden?FT_LOAD_RENDER:0));
-    // 合成字重：轮廓双向外扩/内缩约每级字号的1/48，再光栅；字宽沿用原值。/ Synthetic weight: grow or shrink the outline by about 1/48 of the size per level before rasterizing; advances keep their original values.
-    if(!error && embolden){FT_GlyphSlot slot=e->face->glyph;
-        if(slot->format==FT_GLYPH_FORMAT_OUTLINE){FT_Pos strength=(FT_Pos)font->pixels*64*e->weight/48;error=FT_Outline_EmboldenXY(&slot->outline,strength,strength);}
-        if(!error)error=FT_Render_Glyph(slot,FT_RENDER_MODE_NORMAL);}
-    return result(e,error);
+    glyph_job_t job={e->face,glyph,FT_LOAD_DEFAULT | (render && !embolden?FT_LOAD_RENDER:0),(FT_Pos)font->pixels*64*e->weight/48,embolden,0};
+    return result(e,run_glyph(e,&job));
 }
 /// 墨水屏清晰度曲线：去掉覆盖率低于约6%的浅灰晕，部分覆盖的细笔画（楷体、宋体横画）按1-(1-t)²为主加深，满覆盖不变；只作用于新光栅，缓存保存曲线后的值。
 /// E-ink clarity curve: drop faint halos below about 6% coverage and darken partially covered thin strokes (Kai/Song hairlines) mainly by 1-(1-t)²; full coverage is unchanged. Applied to fresh rasters only, and caches hold the curved values.
@@ -452,6 +465,6 @@ pn_status_t pn_font_info(pn_font_t *font,pn_font_info_t *out){
 pn_status_t pn_font_validate(pn_font_t *font){
     if(!font || !font->impl)return PN_INVALID;
     engine_t *e=font->impl;if(e->face->num_glyphs<1 || e->face->num_glyphs>65535)return PN_CORRUPT;
-    for(FT_UInt i=0;i<(FT_UInt)e->face->num_glyphs;i++){pn_status_t status=ready(e);if(status!=PN_OK)return status;status=result(e,FT_Load_Glyph(e->face,i,FT_LOAD_NO_SCALE | FT_LOAD_NO_HINTING | FT_LOAD_NO_BITMAP));if(status!=PN_OK)return status;}
+    for(FT_UInt i=0;i<(FT_UInt)e->face->num_glyphs;i++){pn_status_t status=ready(e);if(status!=PN_OK)return status;glyph_job_t job={e->face,i,FT_LOAD_NO_SCALE | FT_LOAD_NO_HINTING | FT_LOAD_NO_BITMAP,0,false,0};status=result(e,run_glyph(e,&job));if(status!=PN_OK)return status;}
     return PN_OK;
 }

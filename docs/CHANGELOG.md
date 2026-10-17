@@ -1,5 +1,9 @@
 # PicoNano 变更记录
 
+## 2026-10-17：开发树CFF(OTF)字形深栈
+
+- 切换思源黑体`SourceHanSansSC-Normal.otf`自动重启：CFF轮廓的FreeType解释器`cf2_interpT2CharString`在Xtensa上单帧16144字节，而产品任务36KiB栈实测余量约4.3KiB（TrueType路径帧仅数百字节），载入OTF字形即溢栈复位；主机同场景所需栈比TTF多约18KiB。现CFF字形的载入/光栅经`pn_font_set_deep_runner`交给40KiB PSRAM栈的`pn_font_deep`任务同步执行（只读卡与池分配），TrueType仍直接调用；深栈不可用时CFF字形报内存不足而不在小栈执行。上传校验同样覆盖。vendor FreeType未改。
+
 ## 2026-10-17：开发树LocalSend v3路径与错误响应
 
 - 新版LocalSend客户端先请求`/api/localsend/v3/…`，原先落入网页路由被拒且错误响应不读正文就关连接，对端只见“error sending request”（手机发送失败、电脑注册失败而发现不了设备）。现v3路径映射到同一v2处理；错误响应先读掉至多64KiB未读正文再关闭，对端能收到实际状态码。LocalSend仍只自动接收书籍与字体，图片须经网页选择封面或锁屏。

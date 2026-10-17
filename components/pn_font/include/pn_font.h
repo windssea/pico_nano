@@ -19,6 +19,11 @@ typedef struct {
 /// 仅接受单字体TrueType(glyf)或CFF(OTTO)源，最大32MiB；全部引擎分配走pool。
 /// Accept single-face TrueType (glyf) or CFF (OTTO) sources only, at most 32 MiB; all engine allocations use pool.
 pn_status_t pn_font_open(pn_font_t *font,pn_pool_t *pool,const pn_text_source_t *source,int pixels);
+/// 深栈执行函数：同步执行fn(ctx)后返回true；不能提供深栈时返回false且不得执行。/ Deep-stack runner: run fn(ctx) synchronously and return true; return false without running when no deep stack is available.
+typedef bool (*pn_font_deep_runner_t)(void (*fn)(void *),void *ctx);
+/// 板级端口注册：CFF轮廓（OTTO）的FreeType解释器单帧约16KiB栈，载入/光栅这类字形交给runner在大栈上执行；未注册时直接调用（主机）。
+/// Board port registration: FreeType's CFF (OTTO) interpreter needs about 16 KiB in one frame, so loading/rasterizing such glyphs runs through the runner on a large stack; without registration the call is direct (host).
+void pn_font_set_deep_runner(pn_font_deep_runner_t runner);
 /// 释放引擎，不关闭调用方源，幂等。
 /// Release engine without closing caller source, idempotently.
 void pn_font_close(pn_font_t *font);

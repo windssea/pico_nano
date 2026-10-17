@@ -62,6 +62,9 @@
 #if defined(ESP_PLATFORM)
 #include "device_wave.h"
 #include "device_ripple.h"
+#if defined(ESP_PLATFORM)
+#include "device_font_stack.h"
+#endif
 #include "e0470_epaper_waveform.h"
 #endif
 #include "device_usb.h"
@@ -2097,6 +2100,10 @@ static void device_task(void *arg){
     }
 }
 void app_main(void){
+    // CFF(OTF)字形解释器单帧约16KiB，先备好深栈worker再启动任何读字体的任务。/ The CFF (OTF) glyph interpreter needs about 16 KiB in one frame; prepare the deep-stack worker before any font-reading task starts.
+#if defined(ESP_PLATFORM)
+    (void)pn_device_font_stack_start();
+#endif
     // 字体/解析独占一个较大栈的worker，不在小型启动栈上运行。/ Run font/parsing on one larger-stack worker, not the small boot stack.
     if(xTaskCreatePinnedToCore(device_task,"pn_device",PN_HW_PRODUCT_STACK_BYTES,NULL,3,NULL,1)!=pdPASS)ESP_LOGE(TAG,"Device worker creation failed");
 }
