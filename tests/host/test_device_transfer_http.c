@@ -97,6 +97,8 @@ int main(void){
  const uint8_t text[]="device HTTP\n";pn_book_id_t digest;assert(pn_identity_bytes(text,sizeof text-1,&digest)==PN_OK);char sha[65];for(unsigned i=0;i<32;i++)sprintf(sha+i*2,"%02x",digest.sha256[i]);
  /* LocalSend自动书籍接收使用真实共享安装器，连接来源和一次性令牌必须匹配。/ LocalSend book auto-reception uses the real shared installer with matching connection origin and single-use grants. */
  json=request(HTTP_GET,"/api/localsend/v2/info",NULL,0,NULL,NULL);assert(code==200 && cJSON_IsString(cJSON_GetObjectItemCaseSensitive(json,"fingerprint")) && cJSON_GetObjectItemCaseSensitive(json,"port")->valueint==53317 && ls_routes==2 && ls_route.handler==route.handler && ls_route.user_ctx==route.user_ctx);cJSON_Delete(json);
+ // 新版客户端的v3路径映射到同一处理。/ Newer clients' v3 paths map to the same handlers.
+ json=request(HTTP_GET,"/api/localsend/v3/info",NULL,0,NULL,NULL);assert(code==200 && cJSON_IsString(cJSON_GetObjectItemCaseSensitive(json,"fingerprint")));cJSON_Delete(json);
  json=request(HTTP_GET,"/api/localsend/v2/info",NULL,0,NULL,"Origin: http://192.168.4.1");assert(code==403);cJSON_Delete(json);
  char metadata[1200];snprintf(metadata,sizeof metadata,"{\"info\":{\"alias\":\"Sender\",\"version\":\"2.2\",\"fingerprint\":\"sender\"},\"files\":{\"native\":{\"id\":\"native\",\"fileName\":\"native.txt\",\"size\":%zu,\"fileType\":\"text/plain\",\"sha256\":\"%s\"}}}",sizeof text-1,sha);
  json=request(HTTP_POST,"/api/localsend/v2/prepare-upload",metadata,strlen(metadata),NULL,NULL);assert(code==200 && json);char ls_id[33],ls_token[33];strcpy(ls_id,cJSON_GetObjectItemCaseSensitive(json,"sessionId")->valuestring);strcpy(ls_token,cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(json,"files"),"native")->valuestring);cJSON_Delete(json);

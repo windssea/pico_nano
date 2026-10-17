@@ -87,6 +87,9 @@ static esp_err_t send_data(httpd_req_t *r,unsigned status,const char *mime,const
  // 只记录响应结果与内存，不记录URL查询、令牌或用户内容。/ Record response results and memory only, never URL queries, tokens or user content.
  if(result!=ESP_OK){int socket_error=errno;ESP_LOGW("pn_http","response failed status=%u bytes=%zu result=%d errno=%d internal_free=%zu largest=%zu",status,n,(int)result,socket_error,heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));}
 #endif
+ // 错误会关闭连接；先读掉不超过64KiB的未读正文，否则对端在发送中收到RST，只看到“发送请求失败”而不是状态码。
+ // Errors close the connection; drain up to 64 KiB of unread body first, otherwise the peer gets a reset mid-send and sees "error sending request" instead of the status.
+ if(status>=400){char sink[256];size_t drained=0;while(drained<64u*1024u){int got=httpd_req_recv(r,sink,sizeof sink);if(got<=0)break;drained+=(size_t)got;}}
  return status>=400?ESP_FAIL:result;
 }
 static esp_err_t error(httpd_req_t *r,unsigned status,const char *message){char bytes[384];int n=snprintf(bytes,sizeof bytes,"{\"message\":\"%s\"}",message);return send_data(r,status,"application/json; charset=utf-8",bytes,(size_t)n);}
@@ -207,12 +210,13 @@ static pn_status_t ls_read(void *ctx,uint8_t *out,size_t cap,size_t *n){
  int got=httpd_req_recv(stream->request,(char *)out,cap);if(got<=0 || (size_t)got>cap)return PN_IO;
  stream->received+=(size_t)got;*n=(size_t)got;return pn_ls_progress(&s->ls,stream->received,now_ms());
 }
-static esp_err_t ls_dispatch(http_t *s,httpd_req_t *r,unsigned presence){
+/// uri为规范化后的v2路由（v3客户端路径映射到同一处理）。/ uri is the normalized v2 route (v3 client paths map to the same handlers).
+static esp_err_t ls_dispatch(http_t *s,httpd_req_t *r,unsigned presence,const char *uri){
  // Native LocalSend uses peer/session grants; browser requests retain their separate pairing contract.
  // 原生LocalSend使用连接来源与会话授权；浏览器仍走独立配对契约。
  if(is_closing(s))return error(r,503,"传输服务已停止");
  if(presence&2u)return error(r,403,"LocalSend仅接受原生客户端");
- const char *uri=r->uri;pn_ls_peer_t peer;if(!ls_peer(r,&peer))return error(r,403,"无法确认连接来源");
+ pn_ls_peer_t peer;if(!ls_peer(r,&peer))return error(r,403,"无法确认连接来源");
  (void)pn_ls_poll(&s->ls,now_ms());
  bool info=r->method==HTTP_GET && !strcmp(uri,"/api/localsend/v2/info");
  bool registration=r->method==HTTP_POST && !strcmp(uri,"/api/localsend/v2/register");
@@ -263,10 +267,13 @@ static esp_err_t dispatch_serial(httpd_req_t *r){
  if(strlen(r->uri)>1024)return error(r,400,"请求地址过长");
  unsigned presence=0;
  if(!unique_headers(r,&presence))return error(r,400,"请求头重复或无效");
- bool localsend=!strncmp(r->uri,"/api/localsend/v2/",18);char host_port[72];snprintf(host_port,sizeof host_port,"%s:%u",s->authority,s->port);
+ // 新版LocalSend客户端先请求v3路径；其注册/准备/上传与v2同形，映射到同一处理，避免被网页路由拒绝。
+ // Newer LocalSend clients request v3 paths first; register/prepare/upload keep the v2 shape, so map them onto the same handlers instead of letting web routing reject them.
+ bool localsend=!strncmp(r->uri,"/api/localsend/v2/",18) || !strncmp(r->uri,"/api/localsend/v3/",18);
+ char ls_route[1032];if(localsend){snprintf(ls_route,sizeof ls_route,"%s",r->uri);ls_route[16]='2';}char host_port[72];snprintf(host_port,sizeof host_port,"%s:%u",s->authority,s->port);
  char ls_host[72];snprintf(ls_host,sizeof ls_host,"%s:%u",s->authority,(unsigned)PN_DEVICE_LS_PORT);
  if(!header(r,"Host",host,sizeof host) || (strcmp(host,s->authority) && (!localsend || (strcmp(host,host_port) && strcmp(host,ls_host)))))return error(r,403,"传输地址不匹配");
- if(localsend)return ls_dispatch(s,r,presence);
+ if(localsend)return ls_dispatch(s,r,presence,ls_route);
  bool has_origin=(presence&2u)!=0;bool valid_origin=header(r,"Origin",origin,sizeof origin);
  if((has_origin && (!valid_origin || strcmp(origin,s->origin))) || (r->method!=HTTP_GET && !has_origin))return error(r,403,"请求来源不匹配");
  lock(s);bool closing=s->closing;bool authorized=false;
