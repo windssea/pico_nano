@@ -1,0 +1,2 @@
+5191df8eff4cf0db56d8abfd0429373f03c1880ea5f841ef3ace95da8f0ebbf8  PicoNano-514bff8-upgrade.zip
+7403aa4e41319c85e7ecb545d85165af0c49db9167ce0adcb9f6e62d87c55799  PicoNano-web-installer-514bff8.zip
