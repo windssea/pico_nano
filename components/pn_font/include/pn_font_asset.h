@@ -20,6 +20,9 @@ typedef struct {void *impl;} pn_font_asset_t; ///< 初始NULL，活动对象不�
 /// guard保持有效，expected_size=0表示未知；借用media/pool并自持READ租约。
 /// Keep guard valid, zero expected_size means unknown; borrow media/pool and own a READ lease.
 pn_status_t pn_font_asset_open(pn_font_asset_t *,pn_pool_t *,pn_media_t *,const pn_media_lease_t *,const char *,uint64_t,int);
+/// 已知身份打开：known须是本会话在同一guard下刚完整校验的引用（guard的READ租约期间文件不能被传输/USB替换），只核对路径与大小，身份直接取known。
+/// Open with a known identity: known must be a reference fully verified moments ago in this session under the same guard (its READ lease keeps transfers/USB from replacing the file), so only path and size are checked and the identity is taken from known.
+pn_status_t pn_font_asset_open_known(pn_font_asset_t *,pn_pool_t *,pn_media_t *,const pn_media_lease_t *,const pn_font_reference_t *known,int);
 /// 释放引擎/文件/自持租约，不释放guard，幂等。/ Release engine/file/owned lease without releasing guard, idempotently.
 pn_status_t pn_font_asset_close(pn_font_asset_t *);
 /// 借用字体可调字号和画字，不能自行关闭，寿命到asset关闭。

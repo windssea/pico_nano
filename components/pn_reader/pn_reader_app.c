@@ -78,6 +78,7 @@ typedef struct {
     pn_first_paint_t first_paint; ///< 借原帧准备首屏正文，不持有额外像素 / First body preparation borrowing the original frame without extra pixels
     bool persistent,has_restore,media_lost,force_full;
     pn_refresh_policy_t refresh;
+    pn_font_reference_t probed;bool probed_valid;uint64_t probed_ticket; ///< 本会话同一READ租约下刚由探查完整校验的字体引用，应用时免重复整文件SHA / Font reference fully verified by this session's probe under the same READ lease, letting apply skip a second whole-file SHA
 } app_t;
 static pn_font_set_t *font_set(app_t *a){return a->font_use_draft?&a->font_draft:a->font_live.impl?&a->font_live:NULL;}
 static pn_font_t *body(app_t *a){return font_set(a)?a->managed_body:&a->body;}
@@ -750,7 +751,7 @@ static pn_status_t font_stage(pn_reader_app_t *app,const pn_font_preferences_t *
     if(!app || !app->impl || !present || pn_font_preferences_validate(prefs,true)!=PN_OK)return PN_INVALID;
     app_t *a=app->impl;if(a->media_lost)return PN_STALE_MEDIA;if(!a->reader.has_visible)return PN_EMPTY;if(now<a->last_now)return PN_INVALID;if(a->style_preview || a->style_pending)return PN_BUSY;
     uint64_t origin=a->font_preview?a->font_origin:a->reader.visible.begin;pn_font_set_t candidate={0},previous={0};bool old_use=a->font_use_draft;pn_font_preferences_t old_draft=a->draft_fonts;
-    pn_status_t status=pn_font_set_open(&candidate,a->pool,a->book_media,&a->book_lease,prefs,a->style.pixels);if(status!=PN_OK)return status;
+    pn_status_t status=pn_font_set_open_verified(&candidate,a->pool,a->book_media,&a->book_lease,prefs,a->style.pixels,a->probed_valid && a->probed_ticket==a->book_lease.ticket?&a->probed:NULL);if(status!=PN_OK)return status;
     (void)pn_font_set_move(&previous,&a->font_draft);(void)pn_font_set_move(&a->font_draft,&candidate);a->font_use_draft=true;a->draft_fonts=*prefs;font_metadata_reset(a);status=font_relayout(a);
     a->font_render=hint;a->draft_render=hint;if(status==PN_OK)status=step_location(app,PN_APP_OPEN,true,origin,now,present,ctx,NULL,-1);a->draft_render=false;a->font_render=false;
     if(a->last_confirmed){pn_font_set_close(&previous);a->font_origin=origin;a->font_preview=true;a->draft_fonts=*prefs;return status;}
@@ -809,7 +810,7 @@ pn_status_t pn_reader_app_font_default(pn_reader_app_t *app,const pn_font_prefer
     app_t *a=app->impl;if(a->media_lost)return PN_STALE_MEDIA;if(!a->persistent)return PN_UNSUPPORTED;if(a->font_pending || a->style_pending)return PN_BUSY;
     if(a->global_pending){if(!font_equal(prefs,&a->global_fonts))return PN_BUSY;pn_status_t status=global_write(a,&a->global_fonts);if(status==PN_OK)a->global_pending=false;return status;}
     pn_journal_files_t files;pn_journal_io_t io;pn_font_preferences_t old;pn_status_t status=pn_font_preferences_files(&files,&a->state_media,&a->state_lease,a->state_directory,NULL,&io);if(status==PN_OK)status=pn_font_preferences_load(&io,a->pool,NULL,&old);if(status!=PN_OK && status!=PN_EMPTY)return status;
-    pn_font_set_t candidate={0};status=pn_font_set_open(&candidate,a->pool,a->book_media,&a->book_lease,prefs,a->style.pixels);if(status!=PN_OK)return status;pn_font_set_close(&candidate);
+    pn_font_set_t candidate={0};status=pn_font_set_open_verified(&candidate,a->pool,a->book_media,&a->book_lease,prefs,a->style.pixels,a->probed_valid && a->probed_ticket==a->book_lease.ticket?&a->probed:NULL);if(status!=PN_OK)return status;pn_font_set_close(&candidate);
     a->global_fonts=*prefs;a->global_pending=true;status=global_write(a,prefs);if(status==PN_OK)a->global_pending=false;return status;
 }
 pn_status_t pn_reader_app_font_cancel(pn_reader_app_t *app,uint64_t now,pn_reader_present_fn present,void *ctx){
@@ -845,13 +846,13 @@ pn_status_t pn_reader_app_fonts_page(pn_reader_app_t *app,const char *directory,
 pn_status_t pn_reader_app_fonts_probe(pn_reader_app_t *app,const pn_catalog_item_t *item,pn_font_reference_t *ref,pn_font_info_t *info,unsigned *checked,unsigned *missing){
     if(!app || !app->impl || !item || !ref || !info || !checked || !missing || item->format!=PN_FILE_TTF)return PN_INVALID;
     app_t *a=app->impl;if(a->media_lost)return PN_STALE_MEDIA;
-    pn_font_asset_t asset={0};pn_status_t status=pn_font_asset_open(&asset,a->pool,a->book_media,&a->book_lease,item->path,item->size,a->style.pixels);pn_font_reference_t reference;pn_font_info_t metadata;unsigned absent=0;uint32_t points[128];size_t count=0;
+    a->probed_valid=false;pn_font_asset_t asset={0};pn_status_t status=pn_font_asset_open(&asset,a->pool,a->book_media,&a->book_lease,item->path,item->size,a->style.pixels);pn_font_reference_t reference;pn_font_info_t metadata;unsigned absent=0;uint32_t points[128];size_t count=0;
     const char *text=pn_font_preview_text();pn_text_source_t source={(void *)text,strlen(text),sample_read,NULL};pn_text_reader_t reader;pn_text_char_t c;pn_status_t decoded=pn_text_open(&reader,&source,PN_TEXT_UTF8);if(decoded==PN_OK)while((decoded=pn_text_next(&reader,&c))==PN_OK){if(c.codepoint==10 || c.codepoint==32)continue;if(count>=128){decoded=PN_LIMIT;break;}points[count++]=c.codepoint;}
     if(status==PN_OK && decoded!=PN_EMPTY)status=decoded;
     if(status==PN_OK)status=pn_font_asset_sample(&asset,points,count,&absent);
     if(status==PN_OK)status=pn_font_asset_details(&asset,&reference,&metadata);
     (void)pn_font_asset_close(&asset);
-    if(status==PN_OK){*ref=reference;*info=metadata;*checked=(unsigned)count;*missing=absent;}return status;
+    if(status==PN_OK){*ref=reference;*info=metadata;*checked=(unsigned)count;*missing=absent;a->probed=reference;a->probed_valid=true;a->probed_ticket=a->book_lease.ticket;}return status;
 }
 pn_font_t *pn_reader_app_body_font(const pn_reader_app_t *app){return app && app->impl?body((app_t *)app->impl):NULL;}
 

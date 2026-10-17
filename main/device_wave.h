@@ -24,3 +24,6 @@ const EpdWaveform *pn_device_wave_aligned(void);
 /// 只换变化像素的同起点波形：GL16中颜色不变的迁移全部保持，用于书库翻页等局部替换；未初始化时NULL。
 /// Changed-pixels-only start-aligned waveform: GL16 holds every unchanged-color transition, for local replacements such as library paging; NULL before initialization.
 const EpdWaveform *pn_device_wave_changed_only(void);
+/// 菜单用：原GL16时序（旧内容先淡出、新内容后出现）且颜色不变的像素不驱动；同起点表在整页内容替换时会让新旧重叠成一下发黑。
+/// For menus: original GL16 timing (old content fades before new content appears) with unchanged pixels undriven; the start-aligned table overlaps old and new into a dark blink on whole-page replacements.
+const EpdWaveform *pn_device_wave_menu(void);

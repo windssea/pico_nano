@@ -30,10 +30,37 @@ static const EpdWaveformPhases *carrier_ranges[1];
 static EpdWaveformMode carrier_mode;
 static const EpdWaveformMode *carrier_modes[1];
 static EpdWaveform carrier_wave;
+/// 残影账本：每像素1bit，按差分缓冲物理布局（行×列）。/ Ghost ledger: one bit per pixel in the difference buffer's physical layout (rows × columns).
+static uint8_t ghost[PN_RIPPLE_ROWS*PN_RIPPLE_COLUMNS/8] PN_EXT_BSS;
+static bool ghost_all=true; ///< 账本不完整：下一次清理驱动整页 / Ledger incomplete: the next clean drives the whole page
 
 enum { GC16_TYPE=2, GL16_TYPE=5, PACKING_1PPB_DIFFERENCE=0x100 };
 
 int pn_device_ripple_ticks(void){return carrier.phases;}
+void pn_device_ripple_ghost_forget(void){ghost_all=true;}
+void pn_device_ripple_ghost_clear(void){memset(ghost,0,sizeof ghost);ghost_all=false;}
+bool pn_device_ripple_ghost_selective(void){return !ghost_all;}
+/// 四字节内各像素(to<<4|from)是否同色：同色字节结果为0。/ Same-color test for four (to<<4|from) bytes: a same-color byte yields zero.
+static inline uint32_t changed_bytes(uint32_t w){return ((w>>4)^w)&0x0F0F0F0Fu;}
+/// 差分就绪后、首拍前执行一次：柔和波纹把变化像素记入账本；选择性清理把账上同色像素改成from相差一级的迁移，
+/// 使其仍按原GC16完整清理并落到同一目标灰度，而账外同色像素命中清零的同色项保持不动。
+/// Run once after the difference is ready and before the first tick: gentle ripples record changed pixels; a selective clean rewrites ledger same-color pixels into a transition whose from differs by one level,
+/// so they still run the complete original GC16 and land on the same target gray, while off-ledger same-color pixels hit the zeroed same-color entries and hold.
+static void ghost_prepare(uint8_t *difference){
+    if(ghost_all)return;
+    uint32_t *words=(uint32_t *)difference;
+    for(size_t i=0;i<(size_t)PN_RIPPLE_ROWS*PN_RIPPLE_COLUMNS/4u;i++){
+        uint32_t w=words[i],changed=changed_bytes(w);uint8_t *bits=&ghost[i/2u];unsigned shift=(unsigned)(i&1u)*4u;
+        if(active.mode==GL16_TYPE){
+            if(!changed)continue;
+            for(unsigned j=0;j<4;j++)if(changed&(0xFFu<<(8*j)))*bits|=(uint8_t)(1u<<(shift+j));
+        }else{
+            unsigned marks=(*bits>>shift)&15u;if(!marks)continue;
+            for(unsigned j=0;j<4;j++)if((marks&(1u<<j)) && !(changed&(0xFFu<<(8*j))))w^=1u<<(8*j);
+            words[i]=w;
+        }
+    }
+}
 
 /// 每拍为各等级构表；前导保持判断仍读载体中原样复制的前P相。/ Build one table per level per tick; leading-hold detection still reads the first P phases copied verbatim into the carrier.
 static void ripple_build(uint8_t *lut,const EpdWaveformPhases *phases,int frame){
@@ -86,19 +113,23 @@ bool pn_device_ripple_begin(pn_device_ripple_memory_t *memory,const EpdWaveform 
     carrier=(EpdWaveformPhases){.phases=ticks,.luts=&carrier_luts[0][0][0],.phase_times=NULL};
     carrier_ranges[0]=&carrier;carrier_mode=(EpdWaveformMode){.type=(uint8_t)mode,.temp_ranges=1,.range_data=carrier_ranges};carrier_modes[0]=&carrier_mode;
     // 前导跳过只看载体：柔和波纹的同色迁移不驱动，载体里也清零，免得因其早起步少跳。/ Leading skip reads only the carrier: gentle ripples zero same-color transitions there too so their early start never shortens the skip.
-    if(mode==GL16_TYPE)for(int f=0;f<source->phases;f++)for(int v=0;v<16;v++)carrier_luts[f][v][v/4]&=(uint8_t)~(3u<<(6-2*(v%4)));
+    bool changed_only=mode==GL16_TYPE || !ghost_all;
+    if(changed_only)for(int f=0;f<source->phases;f++)for(int v=0;v<16;v++)carrier_luts[f][v][v/4]&=(uint8_t)~(3u<<(6-2*(v%4)));
     carrier_wave=(EpdWaveform){.num_modes=1,.num_temp_ranges=1,.mode_data=carrier_modes,.temp_intervals=original->temp_intervals};
     active.source=source;active.rows=memory->rows[direction];active.tables=memory->tables;active.difference=difference;
-    active.selected=false;active.invalid=false;active.build=NULL;active.lookup=NULL;active.mode=mode;active.changed_only=mode==GL16_TYPE;active.armed=true;
+    active.selected=false;active.invalid=false;active.build=NULL;active.lookup=NULL;active.mode=mode;active.changed_only=changed_only;active.armed=true;
     *waveform=&carrier_wave;return true;
 }
 bool pn_device_ripple_select(int mode,pn_ripple_build_fn *build,pn_ripple_lookup_fn *lookup){
     if(!active.armed || !build || !lookup || !*build || !*lookup || !(mode&PACKING_1PPB_DIFFERENCE) || (mode&0x3f)!=active.mode)return false;
     active.build=*build;active.lookup=*lookup;active.selected=true;
+    ghost_prepare((uint8_t *)active.difference);
     *build=ripple_build;*lookup=ripple_lookup;return true;
 }
 bool pn_device_ripple_end(void){
     bool ok=active.armed && active.selected && !active.invalid;
+    // 清残影成功清空账本；失败的扫描状态未知，下一次清整页。/ A successful clean empties the ledger; a failed scan leaves unknown state, so the next clean covers the page.
+    if(ok && active.mode==GC16_TYPE)pn_device_ripple_ghost_clear();else if(!ok)ghost_all=true;
     active.armed=false;active.selected=false;active.build=NULL;active.lookup=NULL;active.rows=NULL;active.difference=NULL;
     return ok;
 }

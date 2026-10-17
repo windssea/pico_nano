@@ -44,6 +44,9 @@ int main(void){
     {const EpdWaveform *c=pn_device_wave_changed_only();assert(c && e0470_waveform_phases(c,2)==gc && e0470_waveform_phases(c,1)==du);
      const EpdWaveformPhases *only=e0470_waveform_phases(c,5);assert(only && only->phases==derived->phases && only!=derived);
      for(int p=0;p<only->phases;p++)for(int to=0;to<16;to++)for(int from=0;from<16;from++)assert(e0470_phase_action(only,p,to,from)==(to==from?0:e0470_phase_action(derived,p,to,from)));}
+    // 菜单表：原GL16逐相相同，只有同色项保持。/ Menu table: identical to the original GL16 per phase, only same-color entries hold.
+    {const EpdWaveform *m=pn_device_wave_menu();assert(m && e0470_waveform_phases(m,2)==gc);const EpdWaveformPhases *mp=e0470_waveform_phases(m,5);assert(mp && mp->phases==gl->phases);
+     for(int p=0;p<mp->phases;p++)for(int to=0;to<16;to++)for(int from=0;from<16;from++)assert(e0470_phase_action(mp,p,to,from)==(to==from?0:e0470_phase_action(gl,p,to,from)));}
     printf("device_wave original=%d derived=%d start=%d moved=%u\n",info.original_phases,info.phases,info.start,moved);
     return 0;
 }

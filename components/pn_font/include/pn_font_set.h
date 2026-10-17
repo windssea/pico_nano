@@ -11,6 +11,9 @@
 typedef struct {void *impl;} pn_font_set_t; ///< 初始NULL，不可复制活动组 / Initially NULL, never copy live sets
 /// 校验所有引用身份并装配，prefs必须为明确选择。/ Verify all identities and wire concrete preferences.
 pn_status_t pn_font_set_open(pn_font_set_t *,pn_pool_t *,pn_media_t *,const pn_media_lease_t *,const pn_font_preferences_t *,int);
+/// 同上；正文引用与verified完全相同时（本会话同guard下刚完整校验）免去重复整文件SHA，其余引用照常校验。verified可为NULL。
+/// As above; when the primary reference equals verified (fully checked moments ago under the same guard) the repeated whole-file SHA is skipped, other references verify as usual. verified may be NULL.
+pn_status_t pn_font_set_open_verified(pn_font_set_t *,pn_pool_t *,pn_media_t *,const pn_media_lease_t *,const pn_font_preferences_t *,int,const pn_font_reference_t *verified);
 /// 关闭所有资源，幂等。/ Close all resources, idempotently.
 void pn_font_set_close(pn_font_set_t *);
 /// 关闭临时引擎但保持源和租约，用于大图前。/ Close temporary engines while retaining sources/leases before large images.

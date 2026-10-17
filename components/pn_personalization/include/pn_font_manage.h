@@ -19,6 +19,8 @@
 #define PN_FMU_CONFIRM 6
 #define PN_FMU_CANCEL 7
 #define PN_FMU_SYSTEM 8 ///< 设为/恢复系统（界面）字体 / Set or restore the system (UI) font
+#define PN_FMU_RESET_SYSTEM 9 ///< 列表顶部：系统字体恢复为固件字体 / List top: reset the system font to the firmware face
+#define PN_FMU_RESET_READING 10 ///< 列表顶部：阅读字体恢复为固件字体 / List top: reset the reading font to the firmware face
 #define PN_FMU_ROW 16
 typedef pn_status_t (*pn_font_manage_present_fn)(void *,const pn_frame_t *,pn_refresh_t); ///< 与阅读呈现同签名 / Same signature as reader presentation
 typedef enum {PN_FMU_LIST=0,PN_FMU_DETAIL=1,PN_FMU_CONFIRMING=2} pn_font_manage_screen_t; ///< 列表/详情/删除确认 / List/detail/delete confirmation

@@ -25,6 +25,12 @@ static const EpdWaveformPhases *changed_ranges[1];
 static EpdWaveformMode changed_mode;
 static const EpdWaveformMode *changed_modes[MAX_MODES];
 static EpdWaveform changed_only;
+static uint8_t menu[PN_DEVICE_WAVE_MAX_PHASES][16][4] PN_EXT_BSS;
+static EpdWaveformPhases menu_phases;
+static const EpdWaveformPhases *menu_ranges[1];
+static EpdWaveformMode menu_mode;
+static const EpdWaveformMode *menu_modes[MAX_MODES];
+static EpdWaveform menu_wave;
 static bool ready;
 
 /// 原表单元：data[phase][to][from/4]，from0在高位。/ Original cell: data[phase][to][from/4], with from0 in the high bits.
@@ -79,8 +85,17 @@ bool pn_device_wave_init(const EpdWaveform *original,int trailing_hold,pn_device
     changed_mode=(EpdWaveformMode){.type=GL16_TYPE,.temp_ranges=1,.range_data=changed_ranges};
     for(int i=0;i<original->num_modes;i++)changed_modes[i]=original->mode_data[i]->type==GL16_TYPE?&changed_mode:original->mode_data[i];
     changed_only=(EpdWaveform){.num_modes=original->num_modes,.num_temp_ranges=1,.mode_data=changed_modes,.temp_intervals=original->temp_intervals};
+    // 菜单表：原表逐字节复制后只清同色项。/ Menu table: a byte copy of the original with only same-color entries cleared.
+    memcpy(menu,source->luts,(size_t)total*16u*4u);
+    for(int phase=0;phase<total;phase++)for(int v=0;v<16;v++)menu[phase][v][v/4]&=(uint8_t)~(3u<<(6-2*(v%4)));
+    menu_phases=(EpdWaveformPhases){.phases=total,.luts=&menu[0][0][0],.phase_times=NULL};
+    menu_ranges[0]=&menu_phases;
+    menu_mode=(EpdWaveformMode){.type=GL16_TYPE,.temp_ranges=1,.range_data=menu_ranges};
+    for(int i=0;i<original->num_modes;i++)menu_modes[i]=original->mode_data[i]->type==GL16_TYPE?&menu_mode:original->mode_data[i];
+    menu_wave=(EpdWaveform){.num_modes=original->num_modes,.num_temp_ranges=1,.mode_data=menu_modes,.temp_intervals=original->temp_intervals};
     if(info)*info=(pn_device_wave_info_t){.original_phases=total,.phases=phases,.start=start};
     ready=true;return true;
 }
 const EpdWaveform *pn_device_wave_aligned(void){return ready?&aligned:NULL;}
 const EpdWaveform *pn_device_wave_changed_only(void){return ready?&changed_only:NULL;}
+const EpdWaveform *pn_device_wave_menu(void){return ready?&menu_wave:NULL;}

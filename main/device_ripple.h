@@ -32,3 +32,12 @@ bool pn_device_ripple_select(int mode,pn_ripple_build_fn *build,pn_ripple_lookup
 bool pn_device_ripple_end(void);
 /// 专用波形总拍数，供日志/测试。/ Total ticks of the dedicated waveform for logs and tests.
 int pn_device_ripple_ticks(void);
+/// 残影账本：柔和波纹记下每个变过色的像素；下一次清残影波纹只驱动本次变化及账上像素，其余（从未变过的留白）保持不动。
+/// 非水波纹的局部显示无法逐像素记账，调用forget让下一次清理退回整页；整屏GC16之后调用clear清空账本。
+/// Ghost ledger: gentle ripples record every pixel that changed color; the next cleaning ripple drives only this turn's changes and ledger pixels, holding the rest (never-touched margins).
+/// Non-ripple partial draws cannot be recorded per pixel, so call forget to make the next clean a full page; call clear after a full-screen GC16.
+void pn_device_ripple_ghost_forget(void);
+/// 整屏GC16已清除全部残影，清空账本。/ A full-screen GC16 removed every ghost; empty the ledger.
+void pn_device_ripple_ghost_clear(void);
+/// 下一次清残影是否只驱动账上像素（测试/日志）。/ Whether the next clean drives only ledger pixels (tests/logs).
+bool pn_device_ripple_ghost_selective(void);

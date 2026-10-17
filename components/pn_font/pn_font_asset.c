@@ -45,7 +45,7 @@ static pn_status_t open_reference(pn_pool_t *pool,const pn_font_reference_t *ref
 pn_status_t pn_font_reference_open_file(pn_pool_t *pool,const pn_font_reference_t *ref,pn_media_t *media,const pn_media_lease_t *lease,pn_text_file_t *file,pn_text_source_t *source){return open_reference(pool,ref,media,lease,file,source,true);}
 pn_status_t pn_font_reference_open_file_fast(pn_pool_t *pool,const pn_font_reference_t *ref,pn_media_t *media,const pn_media_lease_t *lease,pn_text_file_t *file,pn_text_source_t *source){return open_reference(pool,ref,media,lease,file,source,false);}
 static pn_status_t release(asset_t *a){pn_font_close(&a->font);pn_status_t status=pn_text_file_close(&a->file);if(a->lease.ticket){pn_status_t s=pn_media_release(a->media,&a->lease);if(status==PN_OK)status=s;}pn_free(a);return status;}
-pn_status_t pn_font_asset_open(pn_font_asset_t *asset,pn_pool_t *pool,pn_media_t *media,const pn_media_lease_t *guard,const char *path,uint64_t expected_size,int pixels){
+static pn_status_t asset_open(pn_font_asset_t *asset,pn_pool_t *pool,pn_media_t *media,const pn_media_lease_t *guard,const char *path,uint64_t expected_size,int pixels,const pn_book_id_t *known){
     if(!asset || !pool || !media || !guard || !path || !*path || pixels<8 || pixels>128)return PN_INVALID;
     if(asset->impl)return PN_BUSY;
     if(expected_size>PN_FONT_REFERENCE_MAX_BYTES || strlen(path)>=PN_FONT_REFERENCE_PATH_MAX)return PN_LIMIT;
@@ -61,11 +61,16 @@ pn_status_t pn_font_asset_open(pn_font_asset_t *asset,pn_pool_t *pool,pn_media_t
     uint64_t size=(uint64_t)st.st_size;if(expected_size && expected_size!=size)return PN_STALE_JOB;if(size>PN_FONT_REFERENCE_MAX_BYTES)return PN_LIMIT;if(size<12)return PN_CORRUPT;
     asset_t *a=pn_alloc_tagged(pool,PN_MEM_FONT,sizeof *a);if(!a)return PN_NO_MEMORY;*a=(asset_t){.pool=pool,.media=media,.reference={.kind=PN_FONT_FILE,.size=size}};strcpy(a->reference.path,path);
     status=pn_media_acquire(media,PN_MEDIA_READ,&a->lease);if(status==PN_OK)status=pn_text_file_open(&a->file,media,&a->lease,path,&a->source);if(status==PN_OK && a->source.size!=size)status=PN_STALE_JOB;
-    if(status==PN_OK)status=pn_text_file_identity_pooled(pool,&a->source,&a->reference.identity);
+    if(status==PN_OK){if(known)a->reference.identity=*known;else status=pn_text_file_identity_pooled(pool,&a->source,&a->reference.identity);}
     if(status==PN_OK)status=pn_font_open(&a->font,pool,&a->source,pixels);
     if(status==PN_OK)status=pn_font_info(&a->font,&a->info);
     if(status==PN_OK)status=pn_media_validate(media,guard);
     if(status!=PN_OK){(void)release(a);return status;}asset->impl=a;return PN_OK;
+}
+pn_status_t pn_font_asset_open(pn_font_asset_t *asset,pn_pool_t *pool,pn_media_t *media,const pn_media_lease_t *guard,const char *path,uint64_t expected_size,int pixels){return asset_open(asset,pool,media,guard,path,expected_size,pixels,NULL);}
+pn_status_t pn_font_asset_open_known(pn_font_asset_t *asset,pn_pool_t *pool,pn_media_t *media,const pn_media_lease_t *guard,const pn_font_reference_t *known,int pixels){
+    if(!known || known->kind!=PN_FONT_FILE || !known->size)return PN_INVALID;
+    return asset_open(asset,pool,media,guard,known->path,known->size,pixels,&known->identity);
 }
 pn_status_t pn_font_asset_close(pn_font_asset_t *asset){if(!asset)return PN_INVALID;if(!asset->impl)return PN_OK;pn_status_t status=release(asset->impl);asset->impl=NULL;return status;}
 pn_font_t *pn_font_asset_font(pn_font_asset_t *asset){return asset && asset->impl?&((asset_t *)asset->impl)->font:NULL;}

@@ -14,13 +14,16 @@ static void release(set_t *s){pn_font_chain_clear(&s->chain);pn_font_close(&s->r
 static pn_status_t open_ref(pn_font_asset_t *asset,pn_pool_t *pool,pn_media_t *media,const pn_media_lease_t *guard,const pn_font_reference_t *ref,int pixels){
     pn_status_t status=pn_font_asset_open(asset,pool,media,guard,ref->path,ref->size,pixels);if(status!=PN_OK)return status;pn_font_reference_t actual;status=pn_font_asset_details(asset,&actual,NULL);if(status==PN_OK && !memcmp(actual.identity.sha256,ref->identity.sha256,32))return PN_OK;return status==PN_OK?PN_STALE_JOB:status;
 }
-pn_status_t pn_font_set_open(pn_font_set_t *set,pn_pool_t *pool,pn_media_t *media,const pn_media_lease_t *guard,const pn_font_preferences_t *prefs,int pixels){
+/// 两个文件引用逐字段相同。/ Two file references match field by field.
+static bool same_reference(const pn_font_reference_t *a,const pn_font_reference_t *b){return a && b && a->kind==PN_FONT_FILE && b->kind==PN_FONT_FILE && a->size==b->size && !strcmp(a->path,b->path) && !memcmp(a->identity.sha256,b->identity.sha256,32);}
+pn_status_t pn_font_set_open(pn_font_set_t *set,pn_pool_t *pool,pn_media_t *media,const pn_media_lease_t *guard,const pn_font_preferences_t *prefs,int pixels){return pn_font_set_open_verified(set,pool,media,guard,prefs,pixels,NULL);}
+pn_status_t pn_font_set_open_verified(pn_font_set_t *set,pn_pool_t *pool,pn_media_t *media,const pn_media_lease_t *guard,const pn_font_preferences_t *prefs,int pixels,const pn_font_reference_t *verified){
     if(!set || !pool || !media || !guard || pixels<8 || pixels>128)return PN_INVALID;
     if(set->impl)return PN_BUSY;
     pn_status_t status=pn_font_preferences_validate(prefs,true);if(status!=PN_OK)return status;
     status=pn_media_validate(media,guard);if(status!=PN_OK)return status;if(guard->access==PN_MEDIA_USB)return PN_INVALID;
     set_t *s=pn_alloc_tagged(pool,PN_MEM_FONT,sizeof *s);if(!s)return PN_NO_MEMORY;*s=(set_t){.pool=pool,.media=media,.guard=*guard};pn_text_source_t source,fallback;
-    if(prefs->primary.kind==PN_FONT_FILE){status=open_ref(&s->primary,pool,media,guard,&prefs->primary,pixels);if(status==PN_OK)s->body=pn_font_asset_font(&s->primary);}
+    if(prefs->primary.kind==PN_FONT_FILE){status=same_reference(&prefs->primary,verified)?pn_font_asset_open_known(&s->primary,pool,media,guard,&prefs->primary,pixels):open_ref(&s->primary,pool,media,guard,&prefs->primary,pixels);if(status==PN_OK)s->body=pn_font_asset_font(&s->primary);}
     else{source=pn_font_reading_source();s->default_source=source;status=pn_font_open(&s->resident,pool,&source,pixels);s->body=&s->resident;}
     if(status==PN_OK && prefs->fallback.kind==PN_FONT_FILE){status=open_ref(&s->fallback,pool,media,guard,&prefs->fallback,pixels);if(status==PN_OK)status=pn_font_asset_source(&s->fallback,&fallback);pn_font_asset_suspend(&s->fallback);}
     if(status==PN_OK)status=pn_font_chain_init(&s->chain,pool,s->body,prefs->fallback.kind==PN_FONT_FILE?&fallback:NULL);

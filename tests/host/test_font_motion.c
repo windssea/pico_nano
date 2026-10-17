@@ -30,7 +30,7 @@ int main(void){
     for(unsigned i=0;i<8;i++)assert(pn_font_manage_tick(&ui,2300+i)==PN_OK);
     assert(opens==before && !pn_font_manage_motion_stats(&ui).pending);
     assert(pn_font_manage_tick(&ui,2520)==PN_OK && stages[PN_LIST_SETTLE]==1 && opens>before && !pn_font_manage_motion_stats(&ui).active && ui.screen==PN_FMU_LIST && ui.presented);
-    assert(pn_font_manage_hit(&ui,400,350)==PN_FMU_ROW+6);uint64_t pixels=latest;unsigned prepared=opens;
+    assert(pn_font_manage_hit(&ui,400,450)==PN_FMU_ROW+6);uint64_t pixels=latest;unsigned prepared=opens;
     // 移走全部输入后相同offset仍逐像素一致，证明小样与可见行均已自有。/ Hide every input and require identical pixels at the same offset, proving ownership of native tiles and visible rows.
     for(unsigned i=0;i<24;i++){char a[256],b[256];snprintf(a,sizeof a,"%s/Font%02u.ttf",directory,i);snprintf(b,sizeof b,"%s/.Font%02u.hidden",directory,i);assert(!rename(a,b));}
     assert(pn_font_manage_present(&ui,present,NULL)==PN_OK && latest==pixels && opens==prepared && !pn_media_active(&media));

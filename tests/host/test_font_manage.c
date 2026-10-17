@@ -35,7 +35,11 @@ int main(int argc,char **argv){
     for(unsigned i=0;i<2;i++){snprintf(tile_paths[i],sizeof tile_paths[i],"%s/%s",fonts,tile_names[i]);snprintf(tile_hidden[i],sizeof tile_hidden[i],"%s/.sample-%u",fonts,i);assert(rename(tile_paths[i],tile_hidden[i])==0);}
     assert(pn_font_manage_present(&ui,checksum,NULL)==PN_OK && list_pixels==first_pixels);
     for(unsigned i=0;i<2;i++)assert(rename(tile_hidden[i],tile_paths[i])==0);
-    assert(pn_font_manage_hit(&ui,100,380)==PN_FMU_ROW && pn_font_manage_hit(&ui,100,580)==PN_FMU_ROW+2 && pn_font_manage_hit(&ui,100,740)==-1 && pn_font_manage_hit(&ui,100,60)==PN_FMU_BACK && pn_font_manage_hit(&ui,100,1120)==PN_FMU_PREVIOUS && pn_font_manage_hit(&ui,600,1120)==PN_FMU_NEXT);
+    // 顶部两行当前字体右侧是重置按钮；TF卡字体从434开始。/ The two current-font rows carry reset buttons on the right; TF-card fonts start at 434.
+    assert(pn_font_manage_hit(&ui,600,230)==PN_FMU_RESET_SYSTEM && pn_font_manage_hit(&ui,600,330)==PN_FMU_RESET_READING && pn_font_manage_hit(&ui,100,230)==-1);
+    // 尚未选择外置字体时重置无操作。/ Reset is a no-op while no external font is chosen.
+    assert(pn_font_manage_event(&ui,PN_FMU_RESET_SYSTEM,present,NULL)==PN_EMPTY && pn_font_manage_event(&ui,PN_FMU_RESET_READING,present,NULL)==PN_EMPTY);
+    assert(pn_font_manage_hit(&ui,100,480)==PN_FMU_ROW && pn_font_manage_hit(&ui,100,680)==PN_FMU_ROW+2 && pn_font_manage_hit(&ui,100,840)==-1 && pn_font_manage_hit(&ui,100,60)==PN_FMU_BACK && pn_font_manage_hit(&ui,100,1120)==PN_FMU_PREVIOUS && pn_font_manage_hit(&ui,600,1120)==PN_FMU_NEXT);
     /* 坏字体留在列表。/ A bad font stays on the list. */
     assert(pn_font_manage_event(&ui,PN_FMU_ROW+2,present,NULL)!=PN_OK && ui.screen==PN_FMU_LIST);
     /* 详情→设为全局默认→重复无操作。/ Detail → set global default → repeat is a no-op. */
@@ -62,7 +66,7 @@ int main(int argc,char **argv){
     assert(pn_font_manage_event(&ui,PN_FMU_DELETE,present,NULL)==PN_OK && pn_font_manage_event(&ui,PN_FMU_CONFIRM,present,NULL)==PN_BUSY && ui.screen==PN_FMU_LIST && access(a,F_OK)==0);
     assert(pn_media_release(&sd,&reader_lease)==PN_OK);
     assert(pn_font_manage_event(&ui,PN_FMU_ROW,present,NULL)==PN_OK && pn_font_manage_event(&ui,PN_FMU_DELETE,present,NULL)==PN_OK && pn_font_manage_event(&ui,PN_FMU_CONFIRM,present,NULL)==PN_OK && ui.last==PN_OK);
-    assert(access(a,F_OK)!=0 && access(c,F_OK)==0 && pn_font_manage_hit(&ui,100,580)==-1 && pn_font_manage_hit(&ui,100,480)==PN_FMU_ROW+1);
+    assert(access(a,F_OK)!=0 && access(c,F_OK)==0 && pn_font_manage_hit(&ui,100,680)==-1 && pn_font_manage_hit(&ui,100,580)==PN_FMU_ROW+1);
     /* 删除不清选择记录。/ Deletion keeps the selection record. */
     assert(global(&internal,state,&pool,&g) && !strcmp(g.primary.path,a));
     assert(pn_font_manage_event(&ui,PN_FMU_BACK,present,NULL)==PN_OK && !ui.active);pn_font_manage_close(&ui);pn_font_manage_close(&ui);assert(!pool.used && !pool.live);
@@ -70,6 +74,9 @@ int main(int argc,char **argv){
     pn_reader_app_t app={0};assert(pn_reader_app_open(&app,&pool,book,NULL,state,44,1)==PN_OK && pn_reader_app_font_unavailable(&app));
     assert(pn_reader_app_step(&app,PN_APP_OPEN,2,present,NULL)==PN_OK && pn_reader_app_close(&app,3)==PN_OK && !pool.live);
     assert(global(&internal,state,&pool,&g) && !strcmp(g.primary.path,a));
+    /* 列表顶部“重置”把阅读字体恢复为固件字体。/ The list-top reset restores the reading font to the firmware face. */
+    assert(pn_font_manage_open(&ui,&pool,&sd,fonts,&internal,state,present,NULL)==PN_OK && pn_font_manage_event(&ui,PN_FMU_RESET_READING,present,NULL)==PN_OK && ui.screen==PN_FMU_LIST);
+    assert(global(&internal,state,&pool,&g) && g.primary.kind==PN_FONT_RESIDENT && pn_font_manage_event(&ui,PN_FMU_RESET_READING,present,NULL)==PN_EMPTY);pn_font_manage_close(&ui);assert(!pool.live);
     /* 无内部存储：不能设默认。/ Without internal storage the default cannot be set. */
     assert(pn_font_manage_open(&ui,&pool,&sd,fonts,NULL,NULL,present,NULL)==PN_OK && pn_font_manage_event(&ui,PN_FMU_ROW,present,NULL)==PN_OK && pn_font_manage_event(&ui,PN_FMU_DEFAULT,present,NULL)==PN_UNSUPPORTED);pn_font_manage_close(&ui);
     /* 改名的鸿蒙字库仍由家族识别保护，触摸和直接命令都拒绝删除。/ Renamed HarmonyOS remains protected by family for touch and direct commands. */

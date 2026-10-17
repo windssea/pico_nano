@@ -131,6 +131,11 @@ static pn_status_t cancel_font(ui_t *s,uint64_t now,pn_reader_present_fn present
  return s->epub?pn_epub_app_font_cancel(s->epub,now,present,ctx):pn_reader_app_font_cancel(s->reader,now,present,ctx);
 }
 static bool confirmed(ui_t *s){return s->epub?pn_epub_app_last_confirmed(s->epub):pn_reader_app_last_confirmed(s->reader);}
+/// 载入大字体要整文件校验与重排，先立即画出等待提示，避免点按后无反馈；提示失败不影响随后的操作。
+/// Loading a large font verifies the whole file and reflows, so draw a waiting notice at once to avoid a silent tap; a failed notice never blocks the operation.
+static void busy_notice(pn_font_ui_t *u,pn_reader_present_fn present,void *ctx){
+ ui_t *s=u->impl;s->notice="正在载入字体，请稍候…";s->success_notice=true;(void)pn_font_ui_present(u,present,ctx);s->notice=NULL;s->success_notice=false;
+}
 pn_status_t pn_font_ui_event(pn_font_ui_t *u,int command,uint64_t now,pn_reader_present_fn present,void *ctx){
  if(!u || !u->impl || !u->active)return PN_INVALID;
  ui_t *s=u->impl;if(!u->presented && command!=PN_FUI_RETRY)return PN_BUSY;pn_status_t status=PN_OK;s->notice=NULL;s->success_notice=false;
@@ -145,11 +150,11 @@ pn_status_t pn_font_ui_event(pn_font_ui_t *u,int command,uint64_t now,pn_reader_
  else if(command==PN_FUI_NEXT || command==PN_FUI_PREVIOUS){char cursor[PN_CATALOG_NAME_MAX];if(!s->page.count || (command==PN_FUI_NEXT && !s->page.more))status=PN_EMPTY;else{strcpy(cursor,s->page.items[command==PN_FUI_NEXT?s->page.count-1:0].name);status=page(u,cursor,command==PN_FUI_PREVIOUS);}}
  else if(command==PN_FUI_UP || command==PN_FUI_DOWN){int next=(int)u->selected+(command==PN_FUI_UP?-1:1);if(next>=0 && (size_t)next<s->page.count){u->selected=(unsigned)next;s->focus_visible=true;}else status=PN_EMPTY;}
  else if(command==PN_FUI_RESIDENT){s->draft=(pn_font_preferences_t){0};s->info=(pn_font_info_t){0};s->checked=s->missing=0;u->mode=1;}
- else if(command==PN_FUI_SELECT || (command>=PN_FUI_ROW && command<PN_FUI_ROW+6) || (command>=PN_FUI_INFO && command<PN_FUI_INFO+6)){bool direct=command>=PN_FUI_ROW && command<PN_FUI_ROW+6;unsigned row=command==PN_FUI_SELECT?u->selected:direct?(unsigned)(command-PN_FUI_ROW):(unsigned)(command-PN_FUI_INFO);if(row>=s->page.count)status=PN_EMPTY;else{pn_font_reference_t ref;pn_font_info_t info;unsigned checked,missing;status=s->epub?pn_epub_app_fonts_probe(s->epub,&s->page.items[row],&ref,&info,&checked,&missing):pn_reader_app_fonts_probe(s->reader,&s->page.items[row],&ref,&info,&checked,&missing);if(status==PN_OK){u->selected=row;s->draft=(pn_font_preferences_t){.primary=ref};s->info=info;s->checked=checked;s->missing=missing;u->mode=1;
+ else if(command==PN_FUI_SELECT || (command>=PN_FUI_ROW && command<PN_FUI_ROW+6) || (command>=PN_FUI_INFO && command<PN_FUI_INFO+6)){bool direct=command>=PN_FUI_ROW && command<PN_FUI_ROW+6;unsigned row=command==PN_FUI_SELECT?u->selected:direct?(unsigned)(command-PN_FUI_ROW):(unsigned)(command-PN_FUI_INFO);if(row>=s->page.count)status=PN_EMPTY;else{busy_notice(u,present,ctx);pn_font_reference_t ref;pn_font_info_t info;unsigned checked,missing;status=s->epub?pn_epub_app_fonts_probe(s->epub,&s->page.items[row],&ref,&info,&checked,&missing):pn_reader_app_fonts_probe(s->reader,&s->page.items[row],&ref,&info,&checked,&missing);if(status==PN_OK){u->selected=row;s->draft=(pn_font_preferences_t){.primary=ref};s->info=info;s->checked=checked;s->missing=missing;u->mode=1;
    // 点行即应用到本书并返回排版页看效果；右侧箭头才进详情。/ Tapping a row applies it to this book and returns to typesetting to show the result; only the chevron opens details.
    if(direct){status=apply_font(s,&s->draft,now,present,ctx);if(status==PN_OK){u->return_presented=s->return_paint!=NULL;u->active=false;return status;}u->mode=0;}}}}
  else if(command==PN_FUI_PREVIEW && u->mode==1){status=s->epub?pn_epub_app_font_preview(s->epub,&s->draft,now,present,ctx):pn_reader_app_font_preview(s->reader,&s->draft,now,present,ctx);if(confirmed(s)){u->preview=true;u->presented=true;return status;}}
- else if(command==PN_FUI_APPLY && u->mode==1){status=apply_font(s,&s->draft,now,present,ctx);if(status==PN_OK){u->return_presented=s->return_paint!=NULL;u->active=false;return status;}}
+ else if(command==PN_FUI_APPLY && u->mode==1){busy_notice(u,present,ctx);status=apply_font(s,&s->draft,now,present,ctx);if(status==PN_OK){u->return_presented=s->return_paint!=NULL;u->active=false;return status;}}
  else status=PN_INVALID;
  if(status!=PN_OK && status!=PN_EMPTY)s->notice="操作失败，选择仍保留";
  pn_status_t drawn=pn_font_ui_present(u,present,ctx);return drawn!=PN_OK?drawn:status;

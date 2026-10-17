@@ -52,7 +52,8 @@ with tempfile.TemporaryDirectory() as directory:
  # Each selection/cancel presents one final typesetting page; only explicit original-text preview may show body frames.
  for kind in ('txt','epub'):
   single=root/('transition-'+kind);single.mkdir();shutil.copyfile(books/('a.'+kind),single/('a.'+kind))
-  journeys=[('direct','tap:100:518',6),('default','tap:100:190',6),('cancel','font-cancel',6),('detail','font-select,font-preview,font-form,font-apply',9),('preview-cancel','font-select,font-preview,font-form,tap:100:920',9)]
+  # 选字体行与“应用”各先画一张“正在载入字体”提示页。/ Choosing a font row and Apply each first draw one "loading font" notice page.
+  journeys=[('direct','tap:100:518',7),('default','tap:100:190',6),('cancel','font-cancel',6),('detail','font-select,font-preview,font-form,font-apply',11),('preview-cancel','font-select,font-preview,font-form,tap:100:920',10)]
   for name,commands,total in journeys:
    frames=root/(kind+'-'+name+'-frames');frames.mkdir();session=root/(kind+'-'+name+'-state')
    script='library,enter,styles,fonts,'+commands+',window-close'

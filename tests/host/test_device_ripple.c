@@ -41,6 +41,7 @@ int main(void){
     assert(!pn_device_ripple_begin(&memory,&E0470_WAVEFORM,2,false,difference+4,&wave));
     unsigned checked=0,max_runs=0;
     for(int reverse=0;reverse<2;reverse++){
+        pn_device_ripple_ghost_forget(); // 账本不完整：整页清理 / Incomplete ledger: full-page clean
         assert(pn_device_ripple_begin(&memory,&E0470_WAVEFORM,2,reverse,difference,&wave) && wave);
         assert(!pn_device_ripple_begin(&memory,&E0470_WAVEFORM,2,reverse,difference,&wave)); // 不可重入 / Not reentrant
         const EpdWaveformPhases *carrier=e0470_waveform_phases(wave,2);int ticks=gc->phases+7*PN_DEVICE_RIPPLE_STEP;
@@ -90,6 +91,36 @@ int main(void){
         int expected=(d>>4)==(d&15)?0:phase>=0 && phase<gl->phases?e0470_phase_action(gl,phase,d>>4,d&15):0;
         assert(((out[1+c/4]>>((c&3)*2))&3)==expected);checked++;}}}
      assert(pn_device_ripple_end());}
+    // 选择性清残影：柔和波纹记下变化像素；随后的GC16波纹账上同色像素改为from差一级并完整清理，账外同色像素保持；成功后清账。
+    // Selective cleaning: a gentle ripple records changed pixels; the following GC16 ripple turns ledger same-color pixels into a one-level-off transition and cleans them fully, holds off-ledger same-color pixels, and empties the ledger on success.
+    {const EpdWaveformPhases *gl=e0470_waveform_phases(&E0470_WAVEFORM,5);uint8_t *second=aligned_alloc(16,(size_t)W*H);assert(second);
+     pn_device_ripple_ghost_clear();assert(pn_device_ripple_ghost_selective());
+     for(size_t i=0;i<(size_t)W*H;i++){unsigned v=(unsigned)(i%13u);difference[i]=(uint8_t)(i%5u==0?(v<<4)|((v+3u)&15u):(v<<4)|v);}
+     assert(pn_device_ripple_begin(&memory,&E0470_WAVEFORM,5,false,difference,&wave));build=reference_build;lookup=reference_lookup;assert(pn_device_ripple_select(0x100|5,&build,&lookup));assert(pn_device_ripple_end());
+     for(size_t i=0;i<(size_t)W*H;i++){unsigned v=(unsigned)((i/7u)%16u);second[i]=(uint8_t)(i%11u==0?(v<<4)|((v+1u)&15u):(v<<4)|v);}
+     uint8_t *copy=malloc((size_t)W*H);assert(copy);memcpy(copy,second,(size_t)W*H);
+     assert(pn_device_ripple_begin(&memory,&E0470_WAVEFORM,2,false,second,&wave));const EpdWaveformPhases *carrier=e0470_waveform_phases(wave,2);
+     for(int f=0;f<gc->phases;f++)for(int v=0;v<16;v++)assert(!e0470_phase_action(carrier,f,v,v));
+     build=reference_build;lookup=reference_lookup;assert(pn_device_ripple_select(0x100|2,&build,&lookup));
+     size_t held=0,cleaned=0;
+     for(size_t i=0;i<(size_t)W*H;i++){bool ledger=i%5u==0,same=(copy[i]>>4)==(copy[i]&15);
+      assert(second[i]==(same && ledger?(uint8_t)(copy[i]^1u):copy[i]));if(same){if(ledger)cleaned++;else held++;}}
+     assert(held && cleaned);
+     for(int tick=0;tick<carrier->phases;tick+=5){build(lut,carrier,tick);
+      for(unsigned row=0;row<H;row+=13){lookup((const uint32_t *)(second+(size_t)row*W),out+1,lut,W);
+       for(int c=0;c<W;c++){uint8_t d=second[(size_t)row*W+c];int phase=tick-(int)oracle_band(false,(int)row,c);
+        int expected=(d>>4)==(d&15)?0:phase>=0 && phase<gc->phases?e0470_phase_action(gc,phase,d>>4,d&15):0;
+        assert(((out[1+c/4]>>((c&3)*2))&3)==expected);checked++;}}}
+     assert(pn_device_ripple_end() && pn_device_ripple_ghost_selective());
+     // 清账后再清理：同色像素全部保持；forget后退回整页（载体为原表副本）。/ After emptying, another clean holds every same-color pixel; after forget it reverts to a full page (verbatim carrier).
+     memcpy(second,copy,(size_t)W*H);assert(pn_device_ripple_begin(&memory,&E0470_WAVEFORM,2,false,second,&wave));build=reference_build;lookup=reference_lookup;assert(pn_device_ripple_select(0x100|2,&build,&lookup));
+     assert(!memcmp(second,copy,(size_t)W*H) && pn_device_ripple_end());
+     pn_device_ripple_ghost_forget();assert(!pn_device_ripple_ghost_selective());
+     assert(pn_device_ripple_begin(&memory,&E0470_WAVEFORM,2,false,second,&wave));assert(!memcmp(e0470_waveform_phases(wave,2)->luts,gc->luts,(size_t)gc->phases*64u));
+     build=reference_build;lookup=reference_lookup;assert(pn_device_ripple_select(0x100|2,&build,&lookup) && !memcmp(second,copy,(size_t)W*H) && pn_device_ripple_end());
+     // 失败的清理不信任账本。/ A failed clean distrusts the ledger.
+     pn_device_ripple_ghost_clear();assert(pn_device_ripple_begin(&memory,&E0470_WAVEFORM,2,false,second,&wave) && !pn_device_ripple_end() && !pn_device_ripple_ghost_selective());
+     (void)gl;free(copy);free(second);}
     printf("device_ripple checks=%u max_runs=%u ticks=%d\n",checked,max_runs,gc->phases+7*PN_DEVICE_RIPPLE_STEP);
     free(difference);free(out);free(lut);free(memory.tables);free(memory.rows[0]);free(memory.rows[1]);return 0;
 }

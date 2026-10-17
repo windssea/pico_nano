@@ -408,10 +408,10 @@ static pn_status_t present_panel(void *ctx,const pn_frame_t *frame,pn_refresh_t 
     // 已知参考帧的周期GC16直接全屏转换；无需先另做一次白场清除。/ Periodic GC16 with a known reference directly updates every pixel without an extra white-field clear.
     else if(mode==MODE_GC16)result=epd_hl_update_screen_full(&hardware.hl,MODE_GC16,25);
 #if defined(ESP_PLATFORM)
-    else if(flip && changed.width && pn_device_wave_changed_only()){
+    else if(flip && changed.width && pn_device_wave_menu()){
         // 只扫变化外接框，且框内颜色未变的像素（标题、底栏、留白）不驱动，避免整屏闪动；累计仍计入管理带维护。
         // Scan only the changed bounds and leave unchanged pixels (header, bar, margins) undriven to avoid a full-screen flicker; the update still counts toward band maintenance.
-        const EpdWaveform *saved=hardware.hl.waveform;hardware.hl.waveform=pn_device_wave_changed_only();
+        const EpdWaveform *saved=hardware.hl.waveform;hardware.hl.waveform=pn_device_wave_menu();
         result=epd_hl_update_area_full(&hardware.hl,MODE_GL16,25,changed);
         hardware.hl.waveform=saved;
         content_area=(pn_feedback_box_t){changed.x,changed.y,changed.width,changed.height};reason=atomic_load(&shelf_flip)?"shelf-flip":"local";
@@ -448,6 +448,11 @@ static pn_status_t present_panel(void *ctx,const pn_frame_t *frame,pn_refresh_t 
     }
     uint64_t scanned_at=now_ms();(void)scanned_at;
     panel_known=result==EPD_DRAW_SUCCESS;
+#if defined(ESP_PLATFORM)
+    // 水波纹自行记账；整屏GC16清空账本，其余显示无法逐像素记账，下一次清残影退回整页。
+    // Ripples keep their own ledger; a full-screen GC16 empties it, and any other draw cannot be recorded per pixel, so the next clean covers the whole page.
+    if(!rippling){if(panel_known && mode==MODE_GC16)pn_device_ripple_ghost_clear();else pn_device_ripple_ghost_forget();}
+#endif
     if(panel_known){
         pn_device_refresh_commit(&maintenance,body_refresh,mode==MODE_GC16,management_full,maintenance_plan);
         if(mode==MODE_GC16)atomic_store(&full_clean_completed,true);
@@ -464,6 +469,9 @@ static pn_status_t present_panel(void *ctx,const pn_frame_t *frame,pn_refresh_t 
 /// 显示owner的有界局部反馈，仅使用原FOLLOW表；恢复失败时丢失已知参考。/ Display-owner bounded feedback using the original FOLLOW table; failed restoration loses the known reference.
 static pn_status_t feedback_panel(void *ctx,const pn_feedback_patch_t *patch){
     feedback_was_full=false;
+#if defined(ESP_PLATFORM)
+    pn_device_ripple_ghost_forget();
+#endif
     (void)ctx;if(!patch || atomic_load(&reading_presentation) || atomic_load(&deep_clean_pending))return PN_EMPTY;
     if(patch->settle){
         pn_feedback_box_t b=patch->box;
@@ -548,6 +556,9 @@ static pn_status_t list_scan_result(enum EpdDrawError result){
 /// 只有显示owner访问SDK缓冲；借用job被冻结，仅作只读差分，模型回执留产品owner。/ Only display owner touches SDK buffers; frozen jobs provide read-only differences, with model receipts left to product owner.
 static pn_status_t list_scan_native(void *ctx){
     list_scan_t *p=ctx;if(!list_vcom_valid || !hardware.framebuffer || !hardware.hl.back_fb)return PN_UNSUPPORTED;
+#if defined(ESP_PLATFORM)
+    pn_device_ripple_ghost_forget();
+#endif
     if(p->stage==PN_LIST_PHASE){
         pn_status_t s=pn_device_follow_difference(p->job,p->difference,684u*1216u,p->lines,p->columns);if(s!=PN_OK)return s;
         p->started=true;settle_recoverable=false;atomic_store(&list_unknown,true);panel_known=false;read_pico_epd_use_scan(READ_PICO_EPD_SCAN_FAST);epd_poweron();
@@ -960,6 +971,7 @@ static void reader_open_result(pn_status_t status){
     if(status!=PN_OK){ESP_LOGE(TAG,"Reader open/present failed: %d",(int)status);if(stop_reader())message("打开书籍失败","检查书籍或字体后重试");return;}
     locked=false;status_page=false;shelf_mode=false;
 }
+static bool loading_shown; ///< 解锁时已立即显示加载页，开书不再重复显示 / The loading page was shown at unlock, so opening does not show it again
 static void start_reader_impl(void){
     pn_cover_work_abort(&cover_work);
     if(transfer.impl || usb.open)return;
@@ -1002,7 +1014,7 @@ static void start_reader_impl(void){
     }
     const char *font=NULL;
     covers_inactive=true;
-    bool need_loading=pn_reader_loading_needed(selected_format==PN_BOOK_TXT,(uint64_t)selected_info.st_size);
+    bool need_loading=!loading_shown && pn_reader_loading_needed(selected_format==PN_BOOK_TXT,(uint64_t)selected_info.st_size);
     if(selected_format==PN_BOOK_EPUB){
         // 先建开书任务再显示加载页，扫描期间即推进；完成结果由tick_opening消费。/ Create the opening job before the loading page so it advances during the scan; tick_opening consumes a finished result.
         // 读过的EPUB同样跳过首屏前整书摘要，阅读空闲时后台复核。/ Previously read EPUBs also skip the pre-screen whole-book hash and verify in the background while idle.
@@ -1329,6 +1341,7 @@ static bool prepare_lock(void){
     ESP_LOGE(TAG,"Warm save barrier failed: %d",(int)status);message("保存失败","当前位置仍保留，稍后重试");return false;
 }
 static bool lock_slept; ///< 最近一次锁屏确实进入了睡眠等待 / The latest lock actually entered the sleep wait
+static uint64_t unlocked_at; ///< 最近一次解锁时间：随后1.5秒内的电源短按不再锁屏，避免连按来回切换 / Latest unlock time: power shorts within the next 1.5 s never relock, preventing toggling from repeated presses
 static void resume_reader(void){
     clock_tick(now_ms());pn_w_set_battery(battery_percent());
     if(reader_suspended){
@@ -1351,7 +1364,11 @@ static void resume_reader(void){
             if(sd_media.available)(void)pn_media_detach(&sd_media);
         }
     }
-    locked=false;start_reader();
+    // 不能热恢复时先立即显示加载页，让解锁马上有反馈，再在后台完成开书；不留在锁屏上让人以为没解锁。
+    // When warm resume is impossible, show the loading page at once so unlocking responds immediately, then finish opening; never linger on the lock page as if still locked.
+    locked=false;
+    if(*selected_path && show_loading(selected_path)==PN_OK)loading_shown=true;
+    start_reader();loading_shown=false;
 }
 static void lock_and_sleep_impl(const char *hint){
     uint64_t lock_at=now_ms();bool wake_pending=false;
@@ -1961,7 +1978,9 @@ static void device_task(void *arg){
                 else if(time_sync.impl){time_lock_pending=true;(void)pn_device_time_request_stop(&time_sync);}
                 else if(ota.impl){if(!ota_lock_pending){ota_lock_pending=true;update_command(PN_SETUI_UPDATE_CANCEL);}}
                 else if(wifi_probe.impl){probe_lock_pending=true;(void)pn_device_wifi_probe_stop(&wifi_probe);}
-                else if(locked){last_input=now;resume_reader();}else if(prepare_lock())lock_and_sleep("再按电源键继续阅读");}}
+                else if(locked){last_input=now;resume_reader();unlocked_at=now_ms();}
+                else if(now>=unlocked_at && now-unlocked_at<1500){} // 解锁后紧接的连按不再锁屏 / Presses right after unlocking never relock
+                else if(prepare_lock())lock_and_sleep("再按电源键继续阅读");}}
         // 按键路径可能睡眠后更新last_input；重取当前时间，避免睡前时间减去唤醒时间下溢后立即锁屏。
         // The key path can sleep and update last_input; refresh time to avoid subtracting wake time from pre-sleep time.
         now=now_ms();

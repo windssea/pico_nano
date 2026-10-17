@@ -168,7 +168,7 @@ PNSM固定小端编码保存紧凑文本、样式、locator、全章统计和窗
 
 ## 字体、灰阶与阅读线
 
-字重（排版“字重”，单书schema5）由[pn_font_weight](../components/pn_font/pn_font.c)在光栅前对轮廓按字号1/48每级外扩或内缩，字宽沿用原值，分页键不含字重；改变时丢弃该引擎字形缓存，补字链与界面中文回退同步字重。字体引擎另编入FreeType CFF/psaux/pshinter以支持CFF轮廓OTF。系统字体可由字体管理选择（`system-font`记录），产品与模拟器共用[pn_font_preferences_system_path](../components/pn_storage/pn_font_preferences.c)解析，所选文件缺失或打不开回到默认HarmonyOS文件再回到内置应急字库。
+字重（排版“字重”，单书schema5）由[pn_font_weight](../components/pn_font/pn_font.c)在光栅前对轮廓按字号1/48每级外扩或内缩，字宽沿用原值，分页键不含字重；改变时丢弃该引擎字形缓存，补字链与界面中文回退同步字重。字体引擎另编入FreeType CFF/psaux/pshinter以支持CFF轮廓OTF。系统字体可由字体管理选择（`system-font`记录），产品与模拟器共用[pn_font_preferences_system_path](../components/pn_storage/pn_font_preferences.c)解析，所选文件缺失或打不开回到默认HarmonyOS文件再回到内置应急字库。排版换字体时，探查（`fonts_probe`）完整校验所得引用记在阅读器上并绑定当次READ租约号；同一租约内应用/设为默认若正文引用逐字段相同，经`pn_font_set_open_verified`/`pn_font_asset_open_known`只核对路径与大小、直接采用该摘要，租约更换或引用不同仍完整校验。字形光栅后统一经墨水屏清晰度曲线（低于约6%覆盖清零、部分覆盖加深）再缓存与合成。
 
 [pn_font.c](../components/pn_font/pn_font.c) 使用固定 FreeType 2.14.3 子集构建，完整 TTF 按需读，度量与字形缓存纳入池；默认正文黑体、外置主字体/备用字体及常驻中文 fallback 分层。界面中文不依赖用户正文字体，删除/缺卡/源失效时保持 UI 可用并提示正文回退。
 
@@ -236,7 +236,9 @@ EPUB目录在同一资格入口下复用滚动控制器和设备出口。十行�
 
 片内内存：HTTP（80与53317）与LocalSend发现任务栈在PSRAM；水波纹8KiB LUT仅扫描期间`heap_caps`临时分配，两方向行段表开机分配；`device_wave`派生表、水波纹载体及书库旁图名缓存以`EXT_RAM_BSS_ATTR`置于PSRAM（`CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY`）。管理页（非正文、参考已知、非区域整理）一律以`pn_device_wave_changed_only`在变化外接框内只驱动变化像素，不做内容风险升级。
 
-2026-10-17起水波纹分两档：普通翻页`PN_REFRESH_RIPPLE`用同起点GL16错峰，构表时把同色迁移（to==from）清零，未变像素不驱动；`pn_refresh_policy`到期的清理页或内容风险页用`PN_REFRESH_RIPPLE_CLEAN`执行原GC16错峰并按GC16记账。书库翻页（`shelf_flip`）用`pn_device_wave_changed_only`同样清零同色迁移的GL16，只扫变化外接框，不因内容风险升级为整屏GC16，计入管理带维护。
+2026-10-17起水波纹分两档：普通翻页`PN_REFRESH_RIPPLE`用同起点GL16错峰，构表时把同色迁移（to==from）清零，未变像素不驱动；`pn_refresh_policy`到期的清理页或内容风险页用`PN_REFRESH_RIPPLE_CLEAN`执行原GC16错峰并按GC16记账。书库翻页（`shelf_flip`）用`pn_device_wave_changed_only`同样清零同色迁移的GL16，只扫变化外接框，不因内容风险升级为整屏GC16，计入管理带维护。管理页局部刷新改用`pn_device_wave_menu`：原GL16时序（旧内容先退、新内容后出）只清零同色项，避免同起点表在整块内容替换时新旧重叠的发黑闪。
+
+选择性清残影：`device_ripple`维护每像素1bit残影账本（684×1216，PSRAM）。柔和GL16波纹在选表钩子（差分已就绪、首拍前）把to≠from的像素记入账本；清残影GC16波纹在账本完整时同样清零同色项，并把账上同色像素的差分字节改为from^1，使其执行原GC16完整序列落到原目标灰度，账外同色像素保持。成功清理清空账本，失败或任何非水波纹显示（`pn_device_ripple_ghost_forget`）使下一次清理退回整页，整屏GC16后`pn_device_ripple_ghost_clear`。开机首个清理总是整页。
 
 原GL16各迁移按同一相结束排列：灰边（4/8/12→15）第7～15相先压黑、黑芯（0→15）第16相才擦白，新字浅边（15→12）第14相、黑芯（15→0）第21相才起步，翻页时旧字像描了黑边、新字先现空心。[device_wave.c](../main/device_wave.c)在启动时从原表只读派生GL16：以黑芯/灰边擦白中最早起点为基准相S，晚于S起步的迁移把完整原动作段整体前移到S，早于S的不动；每像素动作序列、压黑/擦白次数和相数不增加，DU/GC16借用原表。失败保持原表。它改变的是各迁移的起步时间，光学观感与灰阶须真机确认。
 
