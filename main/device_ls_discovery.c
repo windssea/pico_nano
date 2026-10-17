@@ -55,7 +55,8 @@ pn_status_t pn_device_ls_discovery_open(pn_device_ls_discovery_t *out,const char
  bool failed=setsockopt(s->socket,SOL_SOCKET,SO_REUSEADDR,&reuse,sizeof reuse) || setsockopt(s->socket,SOL_SOCKET,SO_RCVTIMEO,&timeout,sizeof timeout) || setsockopt(s->socket,IPPROTO_IP,IP_MULTICAST_TTL,&ttl,sizeof ttl) || setsockopt(s->socket,IPPROTO_IP,IP_MULTICAST_IF,&interface,sizeof interface) || bind(s->socket,(struct sockaddr *)&local,sizeof local) || setsockopt(s->socket,IPPROTO_IP,IP_ADD_MEMBERSHIP,&member,sizeof member);
  if(failed){close(s->socket);free(s);return PN_IO;}
  atomic_init(&s->stop,false);atomic_init(&s->running,true);
- if(xTaskCreate(run,"pn_ls_discovery",6144,s,3,NULL)!=pdPASS){close(s->socket);free(s);return PN_NO_MEMORY;}
+ // 只做UDP收发与JSON解析，栈放PSRAM，不占片内。/ UDP and JSON only, so the stack lives in PSRAM instead of internal RAM.
+ if(xTaskCreatePinnedToCoreWithCaps(run,"pn_ls_discovery",6144,s,3,NULL,tskNO_AFFINITY,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT)!=pdPASS){close(s->socket);free(s);return PN_NO_MEMORY;}
  out->impl=s;return PN_OK;
 }
 pn_status_t pn_device_ls_discovery_close(pn_device_ls_discovery_t *out){

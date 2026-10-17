@@ -314,7 +314,7 @@ pn_status_t pn_settings_load_flags(pn_media_t *state,const char *dir,uint8_t *fl
     status=pn_input_prefs_files(&files,state,&lease,dir,&io);
     if(status==PN_OK)status=pn_input_prefs_load(&io,&value);
     (void)pn_media_release(state,&lease);
-    if(status==PN_EMPTY){value=0;status=PN_OK;}
+    if(status==PN_EMPTY){value=PN_INPUT_FLAGS_DEFAULT;status=PN_OK;}
     if(status==PN_OK)*flags=value;
     return status;
 }

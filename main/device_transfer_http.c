@@ -376,7 +376,10 @@ pn_status_t pn_device_transfer_http_open(pn_device_transfer_http_t *out,pn_trans
  uint8_t token[16];esp_fill_random(token,16);encode(token,16,s->token);
  // 接收owner串行处理文件；浏览器上传与状态轮询会并行开连接，两条上限加LRU回收会掐断进行中的上传，放宽到四条。
  // The receiving owner serializes files; browsers open parallel connections for uploads and status polls, and a two-socket cap with LRU purging cut in-flight uploads, so allow four.
- httpd_config_t cfg=HTTPD_DEFAULT_CONFIG();cfg.server_port=port;cfg.ctrl_port=32768;cfg.stack_size=16384;cfg.max_req_hdr_len=2048;cfg.max_uri_len=1024;cfg.max_open_sockets=4;cfg.lru_purge_enable=true;cfg.max_uri_handlers=4;cfg.max_resp_headers=6;cfg.recv_wait_timeout=10;cfg.send_wait_timeout=10;cfg.uri_match_fn=httpd_uri_match_wildcard;
+ httpd_config_t cfg=HTTPD_DEFAULT_CONFIG();cfg.server_port=port;cfg.ctrl_port=32768;cfg.stack_size=16384;cfg.max_req_hdr_len=2048;cfg.max_uri_len=1024;cfg.max_open_sockets=4;
+ // 处理函数不直接写片内flash（存储写入交主任务/接收任务），栈放PSRAM，16KiB片内不足曾让“接收服务”启动失败（阶段4、PN_IO）。
+ // Handlers never write internal flash directly (storage writes go to the main/receiving tasks), so the stack lives in PSRAM; a 16 KiB internal shortage made the receiving service fail to start (stage 4, PN_IO).
+ cfg.task_caps=MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT;cfg.lru_purge_enable=true;cfg.max_uri_handlers=4;cfg.max_resp_headers=6;cfg.recv_wait_timeout=10;cfg.send_wait_timeout=10;cfg.uri_match_fn=httpd_uri_match_wildcard;
  cfg.global_user_ctx=s;cfg.global_user_ctx_free_fn=keep_context;cfg.open_fn=opened;
  esp_err_t result=httpd_start(&s->server,&cfg);out->impl=s;
  if(result==ESP_OK){const int methods[]={HTTP_GET,HTTP_POST,HTTP_PUT,HTTP_DELETE};for(unsigned i=0;i<4;i++){httpd_uri_t uri={.uri="/*",.method=methods[i],.handler=dispatch,.user_ctx=s};result=httpd_register_uri_handler(s->server,&uri);if(result!=ESP_OK)break;}}

@@ -25,7 +25,7 @@ static pn_status_t cover_extract_begin(pn_cover_work_t *work,pn_pool_t *pool,pn_
     const cover_key_t *key,bool keyed,const uint8_t salt[16],size_t budget,size_t slot){
     if(budget<=sizeof(cover_extract_t)+2*pn_alloc_overhead())return PN_NO_MEMORY;
     cover_extract_t *j=pn_alloc_tagged(pool,PN_MEM_IMAGE,sizeof *j);if(!j)return PN_NO_MEMORY;
-    *j=(cover_extract_t){.media=media,.lease=*lease,.item=*item,.slot=slot,.budget=budget,.keyed=keyed,.result=PN_EMPTY};if(keyed){j->key=*key;j->key_known=true;}else j->key_known=cover_key(item,&j->key)==PN_OK;memcpy(j->salt,salt,16);
+    *j=(cover_extract_t){.media=media,.lease=*lease,.item=*item,.slot=slot,.budget=budget,.keyed=keyed,.result=PN_EMPTY};if(keyed){j->key=*key;j->key_known=true;}else j->key_known=cover_key(NULL,item,&j->key)==PN_OK;memcpy(j->salt,salt,16);
     if(cover_pool_init(&j->sub,pool,budget-pn_alloc_size(j),&j->allocator)!=PN_OK){pn_free(j);return PN_INVALID;}
     work->extract=j;return PN_BUSY;
 }
@@ -100,7 +100,7 @@ static pn_status_t cover_extract_step(cover_extract_t *j){
     }
     case CEX_FINISH:{
         pn_status_t closed=cover_extract_sources_close(j);if(j->result==PN_OK && !j->external)j->result=closed;
-        if(j->key_known){cover_key_t now;s=cover_key(&j->item,&now);if(s==PN_OK){uint8_t a[KEY_BYTES],b[KEY_BYTES];encode_key(a,&now);encode_key(b,&j->key);if(memcmp(a,b,sizeof a))s=PN_STALE_JOB;}if(s!=PN_OK)j->result=s;}
+        if(j->key_known){cover_key_t now;s=cover_key(NULL,&j->item,&now);if(s==PN_OK){uint8_t a[KEY_BYTES],b[KEY_BYTES];encode_key(a,&now);encode_key(b,&j->key);if(memcmp(a,b,sizeof a))s=PN_STALE_JOB;}if(s!=PN_OK)j->result=s;}
         j->phase=CEX_DONE;break;
     }
     case CEX_DONE:break;

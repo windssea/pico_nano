@@ -177,6 +177,8 @@ static pn_status_t present_raw(library_t *s,const pn_frame_t *frame){
 /// Simulator demo of the ripple schedule: the same arc levels as the device advance one by one; gentle ripples replace changed pixels only and cleaning ripples show a dark band at the front; order only, not particle optics.
 static pn_status_t ripple_demo(library_t *s,const pn_frame_t *next,bool reverse,bool clean){
     static pn_ripple_row_t rows[2][PN_RIPPLE_ROWS];static bool ready[2];int d=reverse?1:0;
+    // 只在可见窗口演示；无头自动测试不插入示意帧与延时。/ Demonstrate only in a visible window; headless automated tests get no illustrative frames or delays.
+    const char *driver=SDL_GetCurrentVideoDriver();if(driver && !strcmp(driver,"dummy"))return PN_OK;
     if(!s->page_px || next->width!=684 || next->height!=1216)return PN_OK;
     if(!ready[d]){if(pn_ripple_rows(reverse,rows[d],PN_RIPPLE_ROWS)!=PN_OK)return PN_OK;ready[d]=true;}
     uint8_t *pixels=pn_alloc_tagged(s->pool,PN_MEM_FRAME,342u*1216u);if(!pixels)return PN_OK;
@@ -761,7 +763,7 @@ static int library_worker(void *ctx){
     s->shelf_prefs=pn_shelf_prefs_default();
     (void)pn_settings_load_shelf(&s->state_media,s->state_dir,&s->shelf_prefs);
     s->home=true;status=page(s,false,true);if(status!=PN_OK)goto cleanup;
-    if(pn_settings_load_flags(&s->state_media,s->state_dir,&s->input_flags)!=PN_OK)s->input_flags=0;
+    if(pn_settings_load_flags(&s->state_media,s->state_dir,&s->input_flags)!=PN_OK)s->input_flags=PN_INPUT_FLAGS_DEFAULT;
     result=0;bool running=true;pn_tap_t tap={0};pn_tap_press_t navigation_press={0};pn_shelf_gesture_t shelf_gesture={0};pn_reader_input_t input={0};uint64_t font_activity=SDL_GetTicks64();
     while(running){
         if(s->feedback_release){feedback_restore(s);s->feedback_release=false;}

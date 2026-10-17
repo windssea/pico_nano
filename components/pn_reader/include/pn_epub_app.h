@@ -70,6 +70,14 @@ typedef struct {void *impl;} pn_epub_open_job_t; ///< 活动任务只能显式mo
 pn_status_t pn_epub_app_open_job_move(pn_epub_open_job_t *,pn_epub_open_job_t *);
 /// 建立私有原书句柄和只读租约；复制参数，不排版/显示/提交记录。/ Establish a private book handle/READ lease and copy arguments, without layout, presentation or record commits.
 pn_status_t pn_epub_app_open_job_begin(pn_epub_open_job_t *,pn_pool_t *,pn_media_t *,const char *,const char *,const char *,int,uint64_t);
+/// 快开：最近记录身份且文件大小等于expected_size时跳过首屏前整书SHA（ZIP本地头逐条随机读校验），开书后用verify_step后台复核；否则同begin。
+/// Fast open: with a recent-record identity and a file size equal to expected_size, skip the whole-book SHA before the first screen (local headers validated by per-entry random reads) and verify afterwards with verify_step; otherwise identical to begin.
+pn_status_t pn_epub_app_open_job_begin_trusted(pn_epub_open_job_t *,pn_pool_t *,pn_media_t *,const char *,const char *,const char *,int,uint64_t,const pn_book_id_t *expected,uint64_t expected_size);
+/// 是否仍有快开后的整书复核。/ Whether whole-book verification after fast opening remains.
+bool pn_epub_app_verify_pending(const pn_epub_app_t *);
+/// 空闲推进一块（32KiB）：EMPTY无任务，BUSY/CANCELLED待续，OK完成；STALE_JOB内容已变，调用方关闭后按完整路径重开。
+/// Advance one 32 KiB block when idle: EMPTY without work, BUSY/CANCELLED continue, OK done; STALE_JOB for changed content, after which callers close and reopen through the complete path.
+pn_status_t pn_epub_app_verify_step(pn_epub_app_t *);
 /// 目录逐步4096B/8读，SHA逐步最多32KiB，BUSY待续；元信息/字体仍同步。仅全部成功才交出空app；错误须close。/ Directory steps allow 4096 bytes/eight reads, SHA steps at most 32 KiB; BUSY continues, metadata/fonts remain synchronous. Transfer only on full success to an empty app; close after errors.
 pn_status_t pn_epub_app_open_job_step(pn_epub_open_job_t *,pn_epub_app_t *);
 /// 仅边界/摘要阶段取消可继续；元信息构造内取消须close；纯查询。/ Boundary/hash cancellation is resumable; cancellation inside metadata construction requires close; pure query.

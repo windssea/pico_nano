@@ -25,7 +25,7 @@ with tempfile.TemporaryDirectory() as folder:
     lines=[line for line in out.splitlines() if line.startswith('feedback ')]
     assert lines[0].split('revision=')[1].split()[0]==lines[1].split('revision=')[1].split()[0],out
     out,cap=run('press:100:600,wait:60,release:100:600,tap:100:680,tap:100:680,back,back,quit','commit')
-    assert out.count('settings command=5 status=0')==1 and 'settings command=8 status=0 flags=1' in out and 'settings command=8 status=0 flags=0' in out,out
+    assert out.count('settings command=5 status=0')==1 and 'settings command=8 status=0 flags=193' in out and 'settings command=8 status=0 flags=192' in out,out
     assert 'feedback pressed=0 hit=5' not in out,out  # 新内容回执替代反馈 / New content supersedes feedback.
     out,cap=run('press:100:600,focus-lost,release:100:600,quit,quit','focus')
     assert 'settings command=5 ' not in out and 'feedback pressed=0 hit=5' in out,out

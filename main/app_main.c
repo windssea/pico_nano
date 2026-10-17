@@ -137,7 +137,7 @@ static uint64_t ota_poll_at; ///< 有界快照轮询 / Bounded snapshot polling
 static char time_notice[96];
 static bool time_lock_pending;
 static uint64_t time_poll_at;
-static uint8_t input_flags; ///< 已保存翻页标志 / Saved page-turn flags
+static uint8_t input_flags=PN_INPUT_FLAGS_DEFAULT; ///< 已保存翻页标志，无记录时默认水波纹 / Saved page-turn flags, ripple by default without a record
 static bool input_flags_loaded;
 static pn_shelf_prefs_t shelf_prefs={3,PN_SHELF_DEFAULT}; ///< 已保存书架外观 / Saved shelf appearance
 static bool shelf_prefs_loaded;
@@ -333,8 +333,9 @@ static void profile_task_stacks(const char *phase){
 /// 水波纹常驻内存：8张片内LUT与两方向行段表，产品任务首次选用时分配，显示任务只读。
 /// Resident ripple memory: eight internal LUTs and per-direction row runs, allocated by the product task on first use and only read by the display task.
 static pn_device_ripple_memory_t ripple_memory;
+/// 行段表开机时一次分配，避免运行中切碎PSRAM大块（大图解码需要连续大块）；片内LUT只在扫描期间临时借用，传书等不再因片内不足失败。
+/// Row runs are allocated once at boot so they never fragment large PSRAM blocks later (big image decodes need them); internal LUTs are borrowed only during a scan so transfers no longer fail on internal shortages.
 static void ripple_memory_ensure(void){
-    if(!ripple_memory.tables)ripple_memory.tables=heap_caps_aligned_alloc(16,PN_RIPPLE_BANDS*1024u,MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
     for(int i=0;i<2;i++)if(!ripple_memory.rows[i])ripple_memory.rows[i]=heap_caps_malloc(sizeof(pn_ripple_row_t)*PN_RIPPLE_ROWS,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
 }
 #endif
@@ -369,7 +370,9 @@ static pn_status_t present_panel(void *ctx,const pn_frame_t *frame,pn_refresh_t 
     pn_device_refresh_plan_t maintenance_plan=known?pn_device_refresh_plan(&maintenance,hardware.framebuffer,hardware.hl.back_fb,body_refresh,dirty):(pn_device_refresh_plan_t){.area=dirty};
     const char *reason=mode==MODE_GC16?"requested":body_refresh?"reading":"management";
     (void)reason;
-    bool flip=atomic_load(&shelf_flip) && known && !body_refresh && mode!=MODE_GC16;
+    // 已知参考的管理页（菜单切换、设置进出、书籍菜单开合、书库翻页）都只局部替换变化像素，不因内容风险整屏闪；需要区域整理时仍走原全驱动。
+    // Management pages with a known reference (tab switches, entering/leaving settings, book-action sheets, library paging) replace only changed pixels locally without content-risk full flashes; regional settling still uses the original full drive.
+    bool flip=known && !body_refresh && mode!=MODE_GC16 && !maintenance_plan.regional;(void)atomic_load(&shelf_flip);
     if(mode!=MODE_GC16 && maintenance_plan.content_clean && !flip){mode=MODE_GC16;reason="content-transition";}
     if(!body_refresh && mode!=MODE_GC16 && maintenance.management+1>=24u){mode=MODE_GC16;reason="maintenance";}
     uint64_t maintenance_at=now_ms();(void)maintenance_at;
@@ -384,6 +387,7 @@ static pn_status_t present_panel(void *ctx,const pn_frame_t *frame,pn_refresh_t 
     const EpdWaveform *ripple_wave=NULL;
     // 内容风险要求清理时，柔和波纹升级为GC16波纹。/ When content risk demands cleaning, a gentle ripple upgrades to a GC16 ripple.
     int ripple_mode=ripple_clean || mode==MODE_GC16?MODE_GC16:MODE_GL16;
+    if(ripple_turn && body_refresh && known && !deep_clean && !ripple_memory.tables)ripple_memory.tables=heap_caps_aligned_alloc(16,PN_RIPPLE_BANDS*1024u,MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
     bool rippling=ripple_turn && body_refresh && known && !deep_clean && pn_device_ripple_begin(&ripple_memory,hardware.hl.waveform,ripple_mode,ripple_reverse,hardware.hl.difference_fb,&ripple_wave);
 #else
     (void)ripple_reverse;(void)ripple_turn;
@@ -398,6 +402,7 @@ static pn_status_t present_panel(void *ctx,const pn_frame_t *frame,pn_refresh_t 
         hardware.hl.waveform=saved;
         if(!pn_device_ripple_end() && result==EPD_DRAW_SUCCESS)result=EPD_DRAW_LOOKUP_NOT_IMPLEMENTED;
         mode=(enum EpdDrawMode)ripple_mode;reason=ripple_mode==MODE_GC16?"ripple-clean":"ripple";
+        heap_caps_free(ripple_memory.tables);ripple_memory.tables=NULL;
     }
 #endif
     // 已知参考帧的周期GC16直接全屏转换；无需先另做一次白场清除。/ Periodic GC16 with a known reference directly updates every pixel without an extra white-field clear.
@@ -409,7 +414,7 @@ static pn_status_t present_panel(void *ctx,const pn_frame_t *frame,pn_refresh_t 
         const EpdWaveform *saved=hardware.hl.waveform;hardware.hl.waveform=pn_device_wave_changed_only();
         result=epd_hl_update_area_full(&hardware.hl,MODE_GL16,25,changed);
         hardware.hl.waveform=saved;
-        content_area=(pn_feedback_box_t){changed.x,changed.y,changed.width,changed.height};reason="shelf-flip";
+        content_area=(pn_feedback_box_t){changed.x,changed.y,changed.width,changed.height};reason=atomic_load(&shelf_flip)?"shelf-flip":"local";
     }
 #endif
     else if(body_refresh){
@@ -610,7 +615,7 @@ static pn_status_t active_step(pn_reader_action_t action,uint64_t now){
     pn_frame_t before;pn_turn_t effect={.pool=&pool,.style=(pn_turn_style_t)((input_flags&PN_INPUT_TURN_MASK)>>6),.reverse=action==PN_APP_PREVIOUS,.present=present};
 #if defined(ESP_PLATFORM)
     // 片内LUT不足时水波纹自动退成直接显示。/ Ripple falls back to direct presentation when internal LUT memory is unavailable.
-    if(effect.style==PN_TURN_RIPPLE)ripple_memory_ensure();
+    if(effect.style==PN_TURN_RIPPLE && (!ripple_memory.rows[0] || !ripple_memory.rows[1]))ripple_memory_ensure();
 #endif
     if((action==PN_APP_NEXT || action==PN_APP_PREVIOUS) && panel_known && page_copy && pn_frame_bind(&before,page_copy,342u*1216u,684,1216))effect.before=&before;
     else effect.style=PN_TURN_NONE;
@@ -1000,7 +1005,10 @@ static void start_reader_impl(void){
     bool need_loading=pn_reader_loading_needed(selected_format==PN_BOOK_TXT,(uint64_t)selected_info.st_size);
     if(selected_format==PN_BOOK_EPUB){
         // 先建开书任务再显示加载页，扫描期间即推进；完成结果由tick_opening消费。/ Create the opening job before the loading page so it advances during the scan; tick_opening consumes a finished result.
-        pn_status_t status=pn_epub_app_open_job_begin(&foreground_open,&pool,&sd_media,selected_path,font,"/data/progress",PN_STYLE_DEFAULT_PIXELS,now_ms());if(status!=PN_OK){reader_open_result(status);return;}
+        // 读过的EPUB同样跳过首屏前整书摘要，阅读空闲时后台复核。/ Previously read EPUBs also skip the pre-screen whole-book hash and verify in the background while idle.
+        bool fast=selected_identified && selected_size && strcmp(trust_failed_path,selected_path);
+        pn_status_t status=fast?pn_epub_app_open_job_begin_trusted(&foreground_open,&pool,&sd_media,selected_path,font,"/data/progress",PN_STYLE_DEFAULT_PIXELS,now_ms(),&selected_expected,selected_size)
+            :pn_epub_app_open_job_begin(&foreground_open,&pool,&sd_media,selected_path,font,"/data/progress",PN_STYLE_DEFAULT_PIXELS,now_ms());if(status!=PN_OK){reader_open_result(status);return;}
         opening_overlap_result=PN_BUSY;
         if(need_loading){opening_overlap=true;pn_status_t loading=show_loading(selected_path);opening_overlap=false;if(loading!=PN_OK && loading!=PN_CANCELLED)ESP_LOGW(TAG,"Opening feedback unavailable: %d",(int)loading);}
         return;}
@@ -1865,6 +1873,9 @@ static void device_task(void *arg){
     list_vcom_valid=true;
 #endif
     pn_device_async_start(&async_port,&hardware,present_panel,rails_idle_check,rails_release);pn_device_async_bind_product(&async_port);async_port.overlap=reader_overlap;pn_device_power_sleep_pins();
+#if defined(ESP_PLATFORM)
+    ripple_memory_ensure(); // 开机早分配行段表，PSRAM尚未碎片化 / Allocate row runs early at boot, before PSRAM fragments
+#endif
 #if defined(CONFIG_PN_UI_FEEDBACK) && CONFIG_PN_UI_FEEDBACK
     async_port.feedback=feedback_panel;
 #endif
@@ -2053,10 +2064,10 @@ static void device_task(void *arg){
             if(background){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);}
             // TXT快开的后台复核排在预取/预热之后，输入安静300ms才推进一块（32KiB）；不符则关闭并按完整路径重开。
             // TXT fast-open verification runs after prefetch/warming, one 32 KiB block once input has been quiet for 300 ms; a mismatch closes and reopens through the complete path.
-            else if(reader.impl && pn_reader_app_verify_pending(&reader) && now_ms()>=last_input && now_ms()-last_input>=300){
-                pn_status_t verified=pn_reader_app_verify_step(&reader);background=verified==PN_BUSY || verified==PN_CANCELLED;power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);
-                if(verified==PN_OK)ESP_LOGI(TAG,"TXT fast-open verification complete");
-                else if(verified==PN_STALE_JOB || verified==PN_CORRUPT){ESP_LOGW(TAG,"TXT fast-open verification failed: %d; reopening fully",(int)verified);
+            else if(((reader.impl && pn_reader_app_verify_pending(&reader)) || (epub.impl && pn_epub_app_verify_pending(&epub))) && now_ms()>=last_input && now_ms()-last_input>=300){
+                pn_status_t verified=epub.impl?pn_epub_app_verify_step(&epub):pn_reader_app_verify_step(&reader);background=verified==PN_BUSY || verified==PN_CANCELLED;power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);
+                if(verified==PN_OK)ESP_LOGI(TAG,"Fast-open verification complete");
+                else if(verified==PN_STALE_JOB || verified==PN_CORRUPT){ESP_LOGW(TAG,"Fast-open verification failed: %d; reopening fully",(int)verified);
                     snprintf(trust_failed_path,sizeof trust_failed_path,"%s",selected_path);if(stop_reader())start_reader();}
                 else if(!background)ESP_LOGW(TAG,"TXT fast-open verification stopped: %d",(int)verified);}}
         if(available!=PN_OK){if(power_idle<POWER_IDLE_ROUNDS)power_idle++;if(power_idle>=POWER_IDLE_ROUNDS)pn_device_power_busy(PN_POWER_PRODUCT,false);

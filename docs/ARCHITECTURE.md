@@ -234,6 +234,8 @@ EPUB目录在同一资格入口下复用滚动控制器和设备出口。十行�
 
 ### 同起点GL16与水波纹翻页（开发树）
 
+片内内存：HTTP（80与53317）与LocalSend发现任务栈在PSRAM；水波纹8KiB LUT仅扫描期间`heap_caps`临时分配，两方向行段表开机分配；`device_wave`派生表、水波纹载体及书库旁图名缓存以`EXT_RAM_BSS_ATTR`置于PSRAM（`CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY`）。管理页（非正文、参考已知、非区域整理）一律以`pn_device_wave_changed_only`在变化外接框内只驱动变化像素，不做内容风险升级。
+
 2026-10-17起水波纹分两档：普通翻页`PN_REFRESH_RIPPLE`用同起点GL16错峰，构表时把同色迁移（to==from）清零，未变像素不驱动；`pn_refresh_policy`到期的清理页或内容风险页用`PN_REFRESH_RIPPLE_CLEAN`执行原GC16错峰并按GC16记账。书库翻页（`shelf_flip`）用`pn_device_wave_changed_only`同样清零同色迁移的GL16，只扫变化外接框，不因内容风险升级为整屏GC16，计入管理带维护。
 
 原GL16各迁移按同一相结束排列：灰边（4/8/12→15）第7～15相先压黑、黑芯（0→15）第16相才擦白，新字浅边（15→12）第14相、黑芯（15→0）第21相才起步，翻页时旧字像描了黑边、新字先现空心。[device_wave.c](../main/device_wave.c)在启动时从原表只读派生GL16：以黑芯/灰边擦白中最早起点为基准相S，晚于S起步的迁移把完整原动作段整体前移到S，早于S的不动；每像素动作序列、压黑/擦白次数和相数不增加，DU/GC16借用原表。失败保持原表。它改变的是各迁移的起步时间，光学观感与灰阶须真机确认。

@@ -33,6 +33,7 @@ typedef struct {
     pn_page_index_t page_index;uint32_t index_generation;
     pn_pool_t *pool;pn_media_t local,state;pn_media_t *media;pn_media_lease_t book_lease,font_lease,fallback_lease,state_lease;
     pn_text_file_t book_file,font_file,fallback_file;pn_text_source_t font_source;pn_book_id_t book;pn_zip_t zip;pn_epub_t epub;pn_toc_t toc;pn_epub_info_t info;
+    pn_text_file_verify_t verify;bool verify_book;pn_text_source_t book_source; ///< 快开后的整书SHA后台复核 / Background whole-book SHA verification after fast opening
     pn_font_t body,ui;pn_font_chain_t chain;
     pn_font_set_t font_live,font_draft;pn_font_t *managed_body;pn_font_chain_t *managed_chain;
     bool font_use_draft,font_preview,font_pending,font_render,global_pending;
@@ -265,6 +266,7 @@ static pn_status_t state_open(app_t *a,const char *directory,uint64_t now){
     if(status==PN_OK){a->saved_style=a->style;a->persistent=true;}return status;
 }
 static pn_status_t release(app_t *a){
+    pn_text_file_verify_close(&a->verify);
     pn_xhtml_cache_abort(&a->epub);
     pn_semantic_file_abort(&a->semantic_file);
     pn_page_bitmap_close(&a->bitmap);
@@ -395,6 +397,7 @@ typedef struct {
     app_t *app;pn_text_source_t source;pn_zip_scan_t scan;pn_zip_job_t directory;tap_t tap;pn_identity_job_t hash;
     char font[PN_FONT_REFERENCE_PATH_MAX],state[PN_JOURNAL_PATH_MAX];
     uint64_t now;pn_status_t status,scanned;unsigned stage;bool has_font,has_state;
+    bool fast;pn_book_id_t expected; ///< 最近记录身份且大小一致：跳过首屏前整书摘要 / Recent-record identity with matching size: skip the whole-book hash before the first screen
 } open_job_t;
 pn_status_t pn_epub_app_open_job_close(pn_epub_open_job_t *job){
     if(!job)return PN_INVALID;
@@ -420,6 +423,13 @@ pn_status_t pn_epub_app_open_job_begin(pn_epub_open_job_t *job,pn_pool_t *pool,p
     s=open_start(&r->app,pool,media,book,pixels,now,&r->source);
     if(s!=PN_OK){if(r->app)(void)release(r->app);pn_free(r);return s;}job->impl=r;return PN_OK;
 }
+pn_status_t pn_epub_app_open_job_begin_trusted(pn_epub_open_job_t *job,pn_pool_t *pool,pn_media_t *media,const char *book,const char *font,const char *state,int pixels,uint64_t now,const pn_book_id_t *expected,uint64_t expected_size){
+    if(!expected)return PN_INVALID;
+    pn_status_t s=pn_epub_app_open_job_begin(job,pool,media,book,font,state,pixels,now);if(s!=PN_OK)return s;
+    open_job_t *r=job->impl;
+    if(state && r->source.size==expected_size){r->fast=true;r->expected=*expected;}
+    return PN_OK;
+}
 bool pn_epub_app_open_job_pending(const pn_epub_open_job_t *job){return job && job->impl && ((const open_job_t *)job->impl)->status==PN_BUSY;}
 pn_status_t pn_epub_app_open_job_progress(const pn_epub_open_job_t *job,uint64_t *bytes,uint64_t *size){
     if(!job || !bytes || !size)return PN_INVALID;
@@ -427,6 +437,18 @@ pn_status_t pn_epub_app_open_job_progress(const pn_epub_open_job_t *job,uint64_t
     const open_job_t *r=job->impl;
     if(r->hash.impl)return pn_identity_job_progress(&r->hash,bytes,size);
     *bytes=r->stage>=3?r->source.size:0;*size=r->source.size;return PN_OK;
+}
+bool pn_epub_app_verify_pending(const pn_epub_app_t *app){const app_t *a=app && app->impl?app->impl:NULL;return a && a->verify_book;}
+pn_status_t pn_epub_app_verify_step(pn_epub_app_t *app){
+    if(!app || !app->impl)return PN_INVALID;
+    app_t *a=app->impl;if(!a->verify_book)return PN_EMPTY;
+    if(a->lost)return PN_BUSY;
+    if(!a->verify.impl){pn_status_t s=pn_text_file_verify_begin(&a->verify,a->pool,&a->book_source,&a->book,false,NULL,NULL);if(s!=PN_OK)return s;}
+    pn_status_t s=pn_text_file_verify_step(&a->verify,NULL);
+    if(s==PN_BUSY || s==PN_CANCELLED)return s;
+    pn_text_file_verify_close(&a->verify);
+    if(s==PN_OK)a->verify_book=false;
+    return s;
 }
 pn_status_t pn_epub_app_open_job_step(pn_epub_open_job_t *job,pn_epub_app_t *out){
     if(!job || !job->impl || !out)return PN_INVALID;
@@ -438,6 +460,11 @@ pn_status_t pn_epub_app_open_job_step(pn_epub_open_job_t *job,pn_epub_app_t *out
         if(!r->directory.impl){s=pn_zip_scan_job_begin(&r->directory,r->app->pool,&r->source);if(s==PN_CANCELLED)return s;if(s!=PN_OK){r->scanned=s;r->stage=1;return PN_BUSY;}}
         s=pn_zip_scan_job_step(&r->directory,&r->scan);if(s==PN_BUSY || s==PN_CANCELLED)return s;
         r->scanned=s;r->stage=1;return PN_BUSY;
+    }
+    if(r->stage==1 && r->fast){
+        // 快开：身份暂用最近记录，ZIP本地头改由finish逐条随机读校验，整书SHA开书后后台复核。
+        // Fast open: use the recent-record identity for now, let finish validate local headers with per-entry random reads, and verify the whole-book SHA in the background after opening.
+        r->app->book=r->expected;r->app->verify_book=true;r->app->book_source=r->source;r->stage=3;return PN_BUSY;
     }
     if(r->stage==1){
         r->tap=(tap_t){r->source.ctx,r->source.read_at,r->scanned==PN_OK?&r->scan:NULL};
@@ -727,7 +754,7 @@ pn_status_t pn_epub_app_close(pn_epub_app_t *app,uint64_t now){
 }
 pn_status_t pn_epub_app_media_lost(pn_epub_app_t *app){
     if(!app || !app->impl)return PN_INVALID;
-    app_t *a=app->impl;if(a->lost)return PN_OK;cache_abort(a);a->lost=true;a->last_confirmed=false;pn_page_bitmap_enable(&a->bitmap,false);
+    app_t *a=app->impl;if(a->lost)return PN_OK;cache_abort(a);a->lost=true;a->last_confirmed=false;pn_page_bitmap_enable(&a->bitmap,false);pn_text_file_verify_close(&a->verify);
     pn_status_t status=pn_media_detach(a->media);suspend_fonts(a);pn_font_close(&a->ui);
     if(pn_epub_reader_reflow(&a->reader,&a->layout)==PN_OK){a->token.generation++;(void)pn_display_set_token(&a->display,a->token);}
     return status;

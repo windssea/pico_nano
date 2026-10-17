@@ -17,6 +17,13 @@
 #include "pn_identity.h"
 #include "pn_text_file.h"
 #include <errno.h>
+#include <dirent.h>
+#if defined(ESP_PLATFORM)
+#include "esp_attr.h"
+#define PN_EXT_BSS EXT_RAM_BSS_ATTR ///< 大静态表放PSRAM，片内留给无线与任务栈 / Large static tables live in PSRAM, leaving internal RAM for radio and task stacks
+#else
+#define PN_EXT_BSS
+#endif
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -203,10 +210,42 @@ typedef struct {uint64_t size,side_size;int64_t mtime,side_mtime;uint8_t side;} 
 static void put(uint8_t *p,uint64_t v,unsigned n){for(unsigned i=0;i<n;i++)p[i]=(uint8_t)(v>>(8*i));}
 static uint64_t get(const uint8_t *p,unsigned n){uint64_t v=0;for(unsigned i=0;i<n;i++)v|=(uint64_t)p[i]<<(8*i);return v;}
 static uint32_t crc32(const uint8_t *p,size_t n){return pn_crc32_update(0,p,n);}
-static pn_status_t cover_key(const pn_catalog_item_t *item,cover_key_t *key){
+/* 旁图候选的目录名缓存：FAT上不存在的文件stat要扫描整个目录，一页12本×8个候选曾造成近百次目录扫描。
+ * 每个目录读一次，记下小写文件名的16位散列；只有散列命中才真正stat（碰撞只多一次stat，不会漏掉旁图）。
+ * 换卡（epoch）或发放可替换文件的租约（writes）后重建；超出容量则退回逐个stat。
+ * Sidecar directory name cache: a missing-file stat on FAT scans the whole directory, and 12 books × 8 candidates once cost nearly a hundred scans.
+ * Read each directory once and keep 16-bit hashes of lowercased names; only a hash hit performs the real stat (a collision costs one extra stat and never hides a sidecar).
+ * Rebuild after a media epoch change or a source-replacing lease (writes); beyond capacity fall back to per-candidate stats. */
+#define NAME_SLOTS 2
+#define NAME_HASHES 1024
+static struct {
+    const pn_media_t *media;uint64_t epoch,writes,media_id;
+    char dir[NAME_SLOTS][PN_CATALOG_PATH_MAX];uint16_t hash[NAME_SLOTS][NAME_HASHES];size_t count[NAME_SLOTS];bool full[NAME_SLOTS],used[NAME_SLOTS];unsigned next;
+} names PN_EXT_BSS;
+static uint16_t name_hash(const char *name,size_t n){uint32_t h=2166136261u;for(size_t i=0;i<n;i++){unsigned char c=(unsigned char)name[i];if(c>='A' && c<='Z')c=(unsigned char)(c+32);h=(h^c)*16777619u;}return (uint16_t)(h^(h>>16));}
+/// 候选可能存在则true；无法确定（目录读不出、超容量）也返回true，保持原stat语义。/ True when a candidate may exist; also true when unknown (unreadable directory, over capacity), keeping the original stat semantics.
+static bool name_may_exist(const pn_media_t *media,const char *path){
+    if(!media)return true;
+    const char *slash=strrchr(path,'/');if(!slash || slash==path)return true;
+    size_t dir_len=(size_t)(slash-path);if(dir_len>=PN_CATALOG_PATH_MAX)return true;
+    if(names.media!=media || names.epoch!=media->epoch || names.writes!=media->writes || names.media_id!=media->media_id){memset(names.used,0,sizeof names.used);names.media=media;names.epoch=media->epoch;names.writes=media->writes;names.media_id=media->media_id;}
+    size_t slot=NAME_SLOTS;
+    for(size_t i=0;i<NAME_SLOTS;i++)if(names.used[i] && strlen(names.dir[i])==dir_len && !memcmp(names.dir[i],path,dir_len)){slot=i;break;}
+    if(slot==NAME_SLOTS){
+        slot=names.next++%NAME_SLOTS;names.used[slot]=true;names.full[slot]=false;names.count[slot]=0;memcpy(names.dir[slot],path,dir_len);names.dir[slot][dir_len]=0;
+        DIR *dir=opendir(names.dir[slot]);if(!dir){names.full[slot]=true;return true;}
+        struct dirent *entry;while((entry=readdir(dir))){if(names.count[slot]==NAME_HASHES){names.full[slot]=true;break;}names.hash[slot][names.count[slot]++]=name_hash(entry->d_name,strlen(entry->d_name));}
+        closedir(dir);
+    }
+    if(names.full[slot])return true;
+    uint16_t h=name_hash(slash+1,strlen(slash+1));
+    for(size_t i=0;i<names.count[slot];i++)if(names.hash[slot][i]==h)return true;
+    return false;
+}
+static pn_status_t cover_key(const pn_media_t *media,const pn_catalog_item_t *item,cover_key_t *key){
     struct stat info;if(!file_info(item->path,&info))return PN_IO;
     *key=(cover_key_t){.size=(uint64_t)info.st_size,.mtime=(int64_t)info.st_mtime,.side=0xff};
-    for(size_t i=0;i<2*SUFFIXES;i++){char candidate[PN_CATALOG_PATH_MAX];if(cover_candidate(item->path,i,candidate) && file_info(candidate,&info)){key->side=(uint8_t)i;key->side_size=(uint64_t)info.st_size;key->side_mtime=(int64_t)info.st_mtime;break;}}
+    for(size_t i=0;i<2*SUFFIXES;i++){char candidate[PN_CATALOG_PATH_MAX];if(cover_candidate(item->path,i,candidate) && name_may_exist(media,candidate) && file_info(candidate,&info)){key->side=(uint8_t)i;key->side_size=(uint64_t)info.st_size;key->side_mtime=(int64_t)info.st_mtime;break;}}
     return PN_OK;
 }
 static void encode_key(uint8_t *p,const cover_key_t *k){put(p,k->size,8);put(p+8,(uint64_t)k->mtime,8);p[16]=k->side;put(p+17,k->side_size,8);put(p+25,(uint64_t)k->side_mtime,8);}
@@ -296,7 +335,7 @@ pn_status_t pn_shelf_covers_cache_step(pn_cover_work_t *work,pn_shelf_covers_t *
         const pn_catalog_item_t *item=slot_item(covers,page,i);
         if(!item || covers->state[i]!=PN_COVER_PENDING || (work->cache_checked&(1u<<i)))continue;
         pn_media_lease_t lease;s=pn_media_acquire(media,PN_MEDIA_READ,&lease);if(s!=PN_OK)return s;
-        cover_key_t key;s=cover_key(item,&key);
+        cover_key_t key;s=cover_key(media,item,&key);
         if(s==PN_OK)s=resident_load(covers,item,&key,i,pool,media,&lease,directory,changed);
         pn_status_t valid=pn_media_validate(media,&lease);(void)pn_media_release(media,&lease);
         if(valid!=PN_OK)return valid;
@@ -313,7 +352,7 @@ pn_status_t pn_shelf_covers_cached(pn_shelf_covers_t *covers,const pn_catalog_pa
         const pn_catalog_item_t *item=slot_item(covers,page,i);
         if(!item || covers->state[i]!=PN_COVER_PENDING)continue;
         cover_key_t key;
-        if(cover_key(item,&key)!=PN_OK)continue;
+        if(cover_key(media,item,&key)!=PN_OK)continue;
         status=resident_load(covers,item,&key,i,pool,media,&lease,cache_dir,changed);
     }
     (void)pn_media_release(media,&lease);return status==PN_STALE_MEDIA?status:PN_OK;
@@ -335,13 +374,15 @@ pn_status_t pn_shelf_covers_bind(pn_shelf_covers_t *c,const pn_catalog_page_t *p
         duplicate[i]=-1;items[i]=i==PN_COVER_SLOT_LAST?last:i<page->count?&page->items[i]:NULL;
         if(!coverable(items[i]))continue;
         wanted|=(uint16_t)(1u<<i);cover_key_t key;s=pn_cancel_checkpoint();if(s!=PN_OK)break;
-        if(!cache_dir){
-            // 没有可复用像素的书无需在首帧扫描旁图；来源验证随该槽的空闲探测执行。
-            // Books without reusable pixels need no sidecar scan before first paint; validate sources during their idle probe.
+        {
+            // 先找可复用的常驻结果：验证后未写过TF就沿用来源键，不再逐书stat；读磁盘缓存时也一样。
+            // Look for reusable resident results first: with no TF writes since verification reuse the source key without per-book stats, also when reading the disk cache.
             bool found=false;int fresh=-1;
             if(c->resident_media==media && c->resident_epoch==media->epoch && c->resident_media_id==media->media_id && c->resident_valid && pn_identity_bytes((const uint8_t *)items[i]->path,strlen(items[i]->path),&paths[i])==PN_OK)
                 for(size_t other=0;other<=PN_COVER_SLOT_LAST;other++)if((c->resident_valid&(1u<<other)) && c->resident_format[other]==items[i]->format && !memcmp(c->resident_path_hash[other],paths[i].sha256,32)){found=true;if(c->resident_writes[other]==media->writes)fresh=(int)other;break;}
-            if(!found)continue;
+            // 没有可复用像素且不读磁盘缓存时，首帧无需扫描旁图；来源验证随该槽的空闲探测执行。
+            // Without reusable pixels and without the disk cache, first paint needs no sidecar scan; validate sources during the slot's idle probe.
+            if(!found && !cache_dir)continue;
             // 验证后未发放替换源文件的租约：书与旁图不可能变化，沿用原来源键，免去每书最多9次TF stat。
             // No source-replacing lease since verification: the book and sidecars cannot have changed, so reuse the source key and skip up to nine TF stats per book.
 #if defined(ESP_PLATFORM) || defined(PN_TEST_IMMUTABLE_FILE)
@@ -350,7 +391,7 @@ pn_status_t pn_shelf_covers_bind(pn_shelf_covers_t *c,const pn_catalog_page_t *p
             (void)fresh; // PC外部进程不遵守租约，仍stat复核。/ Host external processes ignore leases, so still stat.
 #endif
         }
-        if(cover_key(items[i],&key)==PN_OK && pn_identity_bytes((const uint8_t *)items[i]->path,strlen(items[i]->path),&paths[i])==PN_OK){encode_key(keys[i],&key);keyed|=(uint16_t)(1u<<i);}
+        if(cover_key(media,items[i],&key)==PN_OK && pn_identity_bytes((const uint8_t *)items[i]->path,strlen(items[i]->path),&paths[i])==PN_OK){encode_key(keys[i],&key);keyed|=(uint16_t)(1u<<i);}
     }
     if(s==PN_OK)s=pn_media_validate(media,&lease);
     if(s!=PN_OK){(void)pn_media_release(media,&lease);return s;}
@@ -398,7 +439,7 @@ static pn_status_t covers_step(pn_cover_write_t *write,pn_cover_work_t *work,pn_
         if(!item || covers->state[i]!=PN_COVER_PENDING)continue;
         pn_media_lease_t lease;
         pn_status_t status=pn_media_acquire(media,PN_MEDIA_READ,&lease);if(status!=PN_OK)return status;
-        cover_key_t key;bool keyed=cache_dir && cover_key(item,&key)==PN_OK;
+        cover_key_t key;bool keyed=cache_dir && cover_key(media,item,&key)==PN_OK;
         // 同页/继续阅读重复书复用刚验证的未落盘结果，来源键和失败预算仍须匹配。/ Reuse verified, not-yet-persisted results for duplicate page/continue-reading books, checking source keys and failure budgets.
         if(work && keyed){uint8_t encoded[KEY_BYTES];encode_key(encoded,&key);
             for(size_t other=0;other<=PN_COVER_SLOT_LAST;other++)if(other!=i && (covers->cache_dirty&(1u<<other)) && covers->state[other]!=PN_COVER_PENDING){
@@ -462,7 +503,7 @@ static pn_status_t covers_idle(pn_cover_write_t *write,pn_cover_work_t *work,pn_
     if(work && pn_shelf_covers_pending(covers,page))return covers_step(write,work,covers,page,pool,media,cache_dir,salt,budget,changed);
     // 新输入释放写入暂存后，同页已验证像素可重新快照，不再解码。/ After input releases staging, snapshot verified pixels again on the same page without decoding.
     for(size_t i=0;cache_dir && i<=PN_COVER_SLOT_LAST;i++)if(covers->cache_dirty&(1u<<i)){
-        const pn_catalog_item_t *item=slot_item(covers,page,i);cover_key_t now;uint8_t encoded[KEY_BYTES];pn_status_t s=item?cover_key(item,&now):PN_EMPTY;
+        const pn_catalog_item_t *item=slot_item(covers,page,i);cover_key_t now;uint8_t encoded[KEY_BYTES];pn_status_t s=item?cover_key(media,item,&now):PN_EMPTY;
         if(s==PN_OK)encode_key(encoded,&now);
         if(s!=PN_OK || memcmp(encoded,covers->cache_key[i],sizeof encoded)){
             covers->cache_dirty&=(uint16_t)~(1u<<i);if(item)covers->state[i]=PN_COVER_PENDING;return PN_BUSY;

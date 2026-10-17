@@ -8,6 +8,12 @@
 #else
 #define IRAM_ATTR
 #endif
+#if defined(ESP_PLATFORM)
+#include "esp_attr.h"
+#define PN_EXT_BSS EXT_RAM_BSS_ATTR ///< 大静态表放PSRAM，片内留给无线与任务栈 / Large static tables live in PSRAM, leaving internal RAM for radio and task stacks
+#else
+#define PN_EXT_BSS
+#endif
 
 static struct {
     bool armed,selected,invalid,changed_only;int mode;
@@ -18,7 +24,7 @@ static struct {
     pn_ripple_build_fn build;
     pn_ripple_lookup_fn lookup;
 } active;
-static uint8_t carrier_luts[PN_DEVICE_RIPPLE_MAX_PHASES+(PN_RIPPLE_BANDS-1)*PN_DEVICE_RIPPLE_STEP][16][4];
+static uint8_t carrier_luts[PN_DEVICE_RIPPLE_MAX_PHASES+(PN_RIPPLE_BANDS-1)*PN_DEVICE_RIPPLE_STEP][16][4] PN_EXT_BSS;
 static EpdWaveformPhases carrier;
 static const EpdWaveformPhases *carrier_ranges[1];
 static EpdWaveformMode carrier_mode;

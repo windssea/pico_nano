@@ -24,7 +24,7 @@ int main(int argc,char **argv){
     /* 记录：无记录EMPTY、往返、未知标志拒绝。/ Record: EMPTY without one, round trip, unknown flags rejected. */
     char root[]="/tmp/pn-settings-XXXXXX";assert(mkdtemp(root));
     pn_media_t media;pn_media_init(&media);assert(pn_media_attach(&media,1)==PN_OK);
-    uint8_t flags=0xee;assert(pn_settings_load_flags(&media,root,&flags)==PN_OK && flags==0);
+    uint8_t flags=0xee;assert(pn_settings_load_flags(&media,root,&flags)==PN_OK && flags==PN_INPUT_FLAGS_DEFAULT);
     pn_media_lease_t lease;assert(pn_media_acquire(&media,PN_MEDIA_WRITE,&lease)==PN_OK);pn_journal_files_t files;pn_journal_io_t io;assert(pn_input_prefs_files(&files,&media,&lease,root,&io)==PN_OK);
     assert(pn_input_prefs_save(&io,0xc0)==PN_OK && pn_input_prefs_load(&io,&flags)==PN_OK && flags==0xc0 && pn_input_prefs_save(&io,0x20)==PN_OK && pn_input_prefs_save(&io,PN_INPUT_LEFT_HAND)==PN_OK && pn_input_prefs_load(&io,&flags)==PN_OK && flags==PN_INPUT_LEFT_HAND);
     uint8_t future[6]={'P','N','I','P',4,0};assert(pn_journal_save(&io,future,6)==PN_OK && pn_input_prefs_load(&io,&flags)==PN_UNSUPPORTED);

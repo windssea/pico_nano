@@ -76,7 +76,7 @@ static pn_status_t cover_write_step_impl(pn_cover_write_t *write){
         else w->phase=CWRITE_SOURCE;
         break;
     case CWRITE_SOURCE:{
-        cover_key_t key;s=cover_key(&w->item,&key);if(s==PN_OK){uint8_t a[KEY_BYTES],b[KEY_BYTES];encode_key(a,&key);encode_key(b,&w->key);if(memcmp(a,b,sizeof a))s=PN_STALE_JOB;else w->phase=CWRITE_REPLACE;}break;
+        cover_key_t key;s=cover_key(NULL,&w->item,&key);if(s==PN_OK){uint8_t a[KEY_BYTES],b[KEY_BYTES];encode_key(a,&key);encode_key(b,&w->key);if(memcmp(a,b,sizeof a))s=PN_STALE_JOB;else w->phase=CWRITE_REPLACE;}break;
     }
     case CWRITE_REPLACE:
         if(!rename(w->temporary,w->path)){w->temporary_owned=false;w->committed=true;w->phase=CWRITE_CLEAN;}

@@ -5,15 +5,21 @@
  * This only moves each transition's complete original action run to a common start; the table, actions, counts and order are untouched. */
 #include "device_wave.h"
 #include <string.h>
+#if defined(ESP_PLATFORM)
+#include "esp_attr.h"
+#define PN_EXT_BSS EXT_RAM_BSS_ATTR ///< 大静态表放PSRAM，片内留给无线与任务栈 / Large static tables live in PSRAM, leaving internal RAM for radio and task stacks
+#else
+#define PN_EXT_BSS
+#endif
 
 enum { GL16_TYPE=5, MAX_MODES=8 };
-static uint8_t derived[PN_DEVICE_WAVE_MAX_PHASES][16][4];
+static uint8_t derived[PN_DEVICE_WAVE_MAX_PHASES][16][4] PN_EXT_BSS;
 static EpdWaveformPhases derived_phases;
 static const EpdWaveformPhases *derived_ranges[1];
 static EpdWaveformMode derived_mode;
 static const EpdWaveformMode *modes[MAX_MODES];
 static EpdWaveform aligned;
-static uint8_t changed[PN_DEVICE_WAVE_MAX_PHASES][16][4];
+static uint8_t changed[PN_DEVICE_WAVE_MAX_PHASES][16][4] PN_EXT_BSS;
 static EpdWaveformPhases changed_phases;
 static const EpdWaveformPhases *changed_ranges[1];
 static EpdWaveformMode changed_mode;
