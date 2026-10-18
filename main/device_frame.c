@@ -69,6 +69,41 @@ static pn_status_t copy_byte_tiles(const pn_frame_t *source,uint8_t *destination
     }
     return PN_OK;
 }
+/// 8行×4列成对转置后一次32位写，目标偏移按8行对齐，减少一半存储指令。/ Transpose eight rows by four columns and write one 32-bit word; the offset is aligned for eight rows, halving stores.
+static inline void board_word(uint8_t *dst,uint16_t low,uint16_t high){
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+    uint32_t word=((uint32_t)__builtin_bswap16(low)<<16)|__builtin_bswap16(high);
+#else
+    uint32_t word=(uint32_t)low|((uint32_t)high<<16);
+#endif
+#if defined(__GNUC__)
+    dst=__builtin_assume_aligned(dst,4);
+#endif
+    memcpy(dst,&word,sizeof word);
+}
+/// 独立快路：八行一块，四个32位连续写；仅目标4字节对齐时调用。/ Fast path: eight-row blocks with four contiguous 32-bit writes, only for four-byte-aligned destinations.
+#if defined(__GNUC__)
+__attribute__((noinline))
+#endif
+static pn_status_t copy_quad_tiles(const pn_frame_t *source,uint8_t *destination){
+    uint16_t tile[32][8];
+    for(int y=0;y<1216;y+=32)for(int x=0;x<684;x+=32){
+        int columns=684-x<32?684-x:32;
+        for(int row=0;row<32;row++)memcpy(tile[row],source->pixels+(size_t)(y+row)*source->stride+x/2,(size_t)columns/2);
+        for(int column=0;column<columns;column+=4)for(int row=0;row<32;row+=8){
+            uint32_t a=tile[row][column/4],b=tile[row+1][column/4],c=tile[row+2][column/4],d=tile[row+3][column/4];
+            uint32_t e=tile[row+4][column/4],f=tile[row+5][column/4],g=tile[row+6][column/4],h=tile[row+7][column/4];
+            transpose_group(&a,&b,4,0x0f0fu);transpose_group(&c,&d,4,0x0f0fu);
+            transpose_group(&e,&f,4,0x0f0fu);transpose_group(&g,&h,4,0x0f0fu);
+            transpose_group(&a,&c,8,0x00ffu);transpose_group(&b,&d,8,0x00ffu);
+            transpose_group(&e,&g,8,0x00ffu);transpose_group(&f,&h,8,0x00ffu);
+            uint8_t *out=destination+(size_t)(683-x-column)*608+(y+row)/2;
+            board_word(out,(uint16_t)a,(uint16_t)e);board_word(out-608,(uint16_t)b,(uint16_t)f);
+            board_word(out-1216,(uint16_t)c,(uint16_t)g);board_word(out-1824,(uint16_t)d,(uint16_t)h);
+        }
+    }
+    return PN_OK;
+}
 /// 独立快路只接收2字节对齐目标，不与兼容路同时持有512B块。/ The separate fast path accepts only two-byte-aligned targets, without keeping a 512-byte tile alongside the compatibility path.
 #if defined(__GNUC__)
 __attribute__((noinline))
@@ -96,7 +131,9 @@ static pn_status_t copy_half_tiles(const pn_frame_t *source,uint8_t *destination
 }
 pn_status_t pn_device_frame_copy(const pn_frame_t *source,uint8_t *destination,size_t capacity){
     if(!source || !source->pixels || source->width!=684 || source->height!=1216 || source->stride<342 || !destination || capacity<684u*1216u/2u || source->pixels==destination)return PN_INVALID;
-    return ((uintptr_t)destination&1u)?copy_byte_tiles(source,destination):copy_half_tiles(source,destination);
+    if((uintptr_t)destination&1u)return copy_byte_tiles(source,destination);
+    if(!((uintptr_t)destination&3u))return copy_quad_tiles(source,destination);
+    return copy_half_tiles(source,destination);
 }
 // 板级行py对应逻辑列683-py，字节b对应逻辑行2b/2b+1。/ Board row py maps to logical column 683-py; byte b maps to logical rows 2b and 2b+1.
 pn_status_t pn_device_frame_dirty(const uint8_t *target,const uint8_t *shown,size_t capacity,int margin,pn_device_box_t *box){
