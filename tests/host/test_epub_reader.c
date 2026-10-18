@@ -33,6 +33,8 @@ int main(int argc,char **argv){
     pn_media_t media;pn_media_init(&media);pn_media_lease_t lease={0};pn_text_file_t file={0};pn_text_source_t source;pn_zip_t zip={0};pn_epub_t epub={0};uint8_t salt[16]={1};pn_book_id_t book={{42}};
     assert(pn_media_attach(&media,1)==PN_OK && pn_media_acquire(&media,PN_MEDIA_READ,&lease)==PN_OK && pn_text_file_open(&file,&media,&lease,argv[1],&source)==PN_OK);
     assert(pn_zip_open(&zip,&pool,&source)==PN_OK && pn_epub_open(&epub,&pool,&zip,salt)==PN_OK);
+    pn_epub_info_t opened;assert(pn_epub_info(&epub,&opened)==PN_OK);
+    for(size_t i=0;i<opened.spine_count;i++){pn_epub_item_t item;pn_zip_info_t zip_item;assert(pn_epub_spine(&epub,i,&item)==PN_OK && pn_zip_info(&zip,item.zip_index,&zip_item)==PN_OK && item.unpacked==zip_item.unpacked);}
     pn_epub_page_node_t nodes[100];pn_epub_page_t page={.nodes=nodes,.capacity=100};pn_layout_t layout={.width=20,.height=20,.line_height=20};pn_epub_measure_t measure={.glyph=glyph};save_t save={0};uint64_t time=1;
     if(argc==4){
         bool writing=!strcmp(argv[3],"write");assert(writing || !strcmp(argv[3],"read"));if(writing)assert(!mkdir(argv[2],0700) || errno==EEXIST);

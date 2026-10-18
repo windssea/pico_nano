@@ -24,6 +24,7 @@ typedef struct {
     char id[PN_EPUB_ID_MAX]; ///< OPF资源ID / OPF resource ID
     char path[PN_ZIP_PATH_MAX]; ///< 容器内归一资源路径 / Normalized container resource path
     uint32_t zip_index; ///< 本次ZIP代次索引，不作永久locator / Current ZIP-generation index, not a persistent locator
+    uint64_t unpacked; ///< 资源未压缩长度，打开时已由ZIP目录取得 / Uncompressed resource size already read from the ZIP directory during open
     pn_epub_media_t media; ///< 资源类别 / Resource kind
     bool linear; ///< 章节主阅读流标志 / Primary reading-flow flag
 } pn_epub_item_t;

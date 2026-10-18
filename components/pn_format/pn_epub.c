@@ -15,7 +15,7 @@
 #define OCF "urn:oasis:names:tc:opendocument:xmlns:container|"
 #define OPF "http://www.idpf.org/2007/opf|"
 #define DC "http://purl.org/dc/elements/1.1/|"
-typedef struct {char *id,*path;uint32_t index;pn_epub_media_t media;bool nav,cover;} item_t;
+typedef struct {char *id,*path;uint32_t index;uint64_t unpacked;pn_epub_media_t media;bool nav,cover;} item_t;
 typedef struct {char *idref;item_t *item;bool linear;} spine_t;
 typedef struct {
     pn_pool_t *pool;pn_zip_t *zip;pn_epub_info_t info;
@@ -83,7 +83,7 @@ static pn_status_t add_item(parse_t *p,const char *const *attrs){
     }
     size_t id_size=strlen(id)+1,path_size=strlen(path)+1;
     item_t *item=pn_alloc_tagged(b->pool,PN_MEM_DOCUMENT,sizeof *item+id_size+path_size);if(!item)return PN_NO_MEMORY;
-    *item=(item_t){.id=(char *)(item+1),.path=(char *)(item+1)+id_size,.index=index,.media=media_type(type),
+    *item=(item_t){.id=(char *)(item+1),.path=(char *)(item+1)+id_size,.index=index,.unpacked=info.unpacked,.media=media_type(type),
         .nav=token(attr(attrs,"properties"),"nav"),.cover=token(attr(attrs,"properties"),"cover-image")};
     memcpy(item->id,id,id_size);memcpy(item->path,path,path_size);b->items[b->info.manifest_count++]=item;return PN_OK;
 }
@@ -368,7 +368,7 @@ pn_status_t pn_epub_spine(pn_epub_t *epub,size_t index,pn_epub_item_t *out){
     if(!out)return PN_INVALID;
     epub_t *b;pn_status_t status=validate(epub,&b);if(status!=PN_OK)return status;
     if(index>=b->info.spine_count)return PN_EMPTY;
-    spine_t *spine=&b->spine[index];item_t *item=spine->item;pn_epub_item_t result={.zip_index=item->index,.media=item->media,.linear=spine->linear};
+    spine_t *spine=&b->spine[index];item_t *item=spine->item;pn_epub_item_t result={.zip_index=item->index,.unpacked=item->unpacked,.media=item->media,.linear=spine->linear};
     strcpy(result.id,item->id);strcpy(result.path,item->path);*out=result;return PN_OK;
 }
 pn_status_t pn_epub_spine_find(pn_epub_t *epub,const char *path,size_t *index){

@@ -320,8 +320,7 @@ static pn_status_t open_complete(app_t *a,const char *font,const char *state,uin
         a->chapter_starts=pn_alloc_tagged(pool,PN_MEM_LAYOUT,(a->info.spine_count+1)*sizeof *a->chapter_starts);
         if(!a->chapter_starts)status=PN_NO_MEMORY;
         else{a->chapter_starts[0]=0;for(size_t i=0;status==PN_OK && i<a->info.spine_count;i++){
-            pn_epub_item_t item;pn_zip_info_t info;status=pn_epub_spine(&a->epub,i,&item);uint64_t size=0;
-            if(status==PN_OK && item.media==PN_EPUB_XHTML){status=pn_zip_info(&a->zip,item.zip_index,&info);if(status==PN_OK)size=info.unpacked;}
+            pn_epub_item_t item;status=pn_epub_spine(&a->epub,i,&item);uint64_t size=item.media==PN_EPUB_XHTML?item.unpacked:0;
             if(status==PN_OK)a->chapter_starts[i+1]=a->chapter_starts[i]+size;
         }}
     }
