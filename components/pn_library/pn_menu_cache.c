@@ -28,14 +28,16 @@ void pn_menu_cache_close(pn_menu_cache_t *cache){
     if(!cache || !cache->owner.pool)return;
     pn_cache_detach(&cache->owner);drop(cache);
 }
-uint8_t *pn_menu_cache_begin(pn_menu_cache_t *cache,uint64_t key,bool *hit){
+uint8_t *pn_menu_cache_begin(pn_menu_cache_t *cache,uint64_t key,uint64_t aux,bool *hit,bool *same_aux){
     if(hit)*hit=false;
+    if(same_aux)*same_aux=false;
     if(!cache || !cache->owner.pool || !key)return NULL;
     for(unsigned i=0;i<PN_MENU_CACHE_SLOTS;i++){
         if(cache->entries[i].valid && cache->entries[i].key==key){
             cache->last=i;cache->entries[i].age=++cache->clock;
             pn_cache_pin(&cache->owner);pn_cache_observe(cache->pool,PN_CACHE_MENU,true);
             if(hit)*hit=true;
+            if(same_aux)*same_aux=cache->entries[i].aux==aux;
             return cache->entries[i].pixels;
         }
     }
@@ -48,14 +50,14 @@ uint8_t *pn_menu_cache_begin(pn_menu_cache_t *cache,uint64_t key,bool *hit){
     pn_menu_cache_entry_t *entry=&cache->entries[slot];
     if(!entry->pixels)entry->pixels=pn_cache_alloc(cache->pool,PN_CACHE_MENU,PN_MEM_FRAME,MENU_PAGE_BYTES);
     if(!entry->pixels)return NULL;
-    entry->valid=false;entry->key=0;cache->last=slot;
+    entry->valid=false;entry->key=0;entry->aux=0;cache->last=slot;
     pn_cache_pin(&cache->owner);
     return entry->pixels;
 }
-void pn_menu_cache_commit(pn_menu_cache_t *cache,uint64_t key){
+void pn_menu_cache_commit(pn_menu_cache_t *cache,uint64_t key,uint64_t aux){
     if(!cache || !cache->owner.pool || cache->last>=PN_MENU_CACHE_SLOTS)return;
     pn_menu_cache_entry_t *entry=&cache->entries[cache->last];
-    if(entry->pixels && key){entry->key=key;entry->valid=true;entry->age=++cache->clock;}
+    if(entry->pixels && key){entry->key=key;entry->aux=aux;entry->valid=true;entry->age=++cache->clock;}
     else entry->valid=false;
     pn_cache_unpin(&cache->owner);
 }

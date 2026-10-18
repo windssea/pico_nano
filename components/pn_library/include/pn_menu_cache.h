@@ -15,6 +15,7 @@
 typedef struct {
     bool valid; ///< 内容与key仍有效 / Content still matches key
     uint64_t key; ///< 调用方计算的全部绘制输入摘要 / Digest of every drawing input
+    uint64_t aux; ///< 每槽独立的动态带摘要（时间/电量/无线）/ Per-slot dynamic-band digest (clock/battery/radio)
     uint64_t age; ///< LRU时间戳 / LRU stamp
     uint8_t *pixels; ///< 684×1216/4bpp整页 / Full 684×1216 4bpp page
 } pn_menu_cache_entry_t;
@@ -31,10 +32,12 @@ pn_status_t pn_menu_cache_init(pn_menu_cache_t *cache,pn_pool_t *pool);
 /// 注销并释放全部帧。/ Detach and free every frame.
 void pn_menu_cache_close(pn_menu_cache_t *cache);
 /// 查找key；命中返回只读/可整页复用的像素，未命中返回可绘制槽（可能为NULL，调用方走原路径）。
+/// same_aux报告该槽保存时的动态带摘要是否仍匹配；不匹配时调用方只补画状态带。
 /// Find key; a hit returns reusable pixels, a miss returns a drawable slot (NULL means the caller keeps its original path).
-uint8_t *pn_menu_cache_begin(pn_menu_cache_t *cache,uint64_t key,bool *hit);
+/// same_aux reports whether the per-slot dynamic-band digest still matches; on mismatch the caller patches only the status band.
+uint8_t *pn_menu_cache_begin(pn_menu_cache_t *cache,uint64_t key,uint64_t aux,bool *hit,bool *same_aux);
 /// begin成功后确认该槽；失败调用abort，绝不能提交半帧。/ Confirm the slot after begin; an abort is mandatory on failure, never commit a partial frame.
-void pn_menu_cache_commit(pn_menu_cache_t *cache,uint64_t key);
+void pn_menu_cache_commit(pn_menu_cache_t *cache,uint64_t key,uint64_t aux);
 /// begin后放弃本槽并解除pin；已绘制的半帧不可再用。/ Abandon the slot and unpin after begin; a partial frame is never reusable.
 void pn_menu_cache_abort(pn_menu_cache_t *cache);
 /// 使全部槽失效但保留已分配像素；任何页面/字体/偏好/封面变化都应调用。/ Invalidate all slots but keep pixels; call on any page, font, preference or cover change.

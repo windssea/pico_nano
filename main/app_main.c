@@ -118,7 +118,6 @@ static void management_font_end(pn_font_t *font){if(pool.limit<4u*1024u*1024u ||
 /// 系统源关闭或换代前释放界面消费者，避免缓存借用旧TF句柄。/ Release UI consumers before system-source close/replacement to avoid stale TF handles.
 static pn_menu_cache_t menu_cache; ///< 首页/书库整页帧，返回时复用 / Whole home/library frames reused on return
 static uint32_t menu_font_epoch; ///< 界面字体变化即失效 / Invalidated whenever the UI font changes
-static pn_w_status_snapshot_t menu_cache_status; ///< 缓存帧的状态带 / Status band inside the cached frame
 static void management_fonts_close(void){menu_font_epoch++;pn_menu_cache_invalidate(&menu_cache);pn_menu_cache_drop(&menu_cache);shelf_draw_valid=false;pn_settings_ui_close(&settings_ui);pn_font_close(&management_font);pn_w_font_scope_end(&management_scope);}
 static pn_cover_work_t cover_work; ///< 封面解析/解码/写入由产品owner分步推进 / Cover parsing/decoding/writes advanced by the product owner
 static struct {uint64_t epoch;bool stable;} system_font_failure; ///< 仅当前挂载的稳定失败，资源交接清除 / Stable failure for this mount only, cleared on resource handoff
@@ -865,6 +864,11 @@ static uint64_t shelf_render_key(void){
     if(favorites_valid && favorites){h=menu_hash(h,favorites->count);for(size_t i=0;i<favorites->count;i++)h=menu_hash_text(h,favorites->paths[i]);}
     return h?h:1;
 }
+/// 动态带摘要：每槽单独保存，避免返回另一页时沿用上一页的时间/电量。/ Dynamic-band digest stored per slot so returning to another page never reuses the previous page's clock/battery.
+static uint64_t shelf_status_key(void){
+    pn_w_set_battery(battery_percent());pn_w_status_snapshot_t status=pn_w_status_snapshot();
+    uint64_t h=menu_hash(0,(uint64_t)(status.battery+1));h=menu_hash(h,status.wifi);return menu_hash_text(h,status.clock);
+}
 static pn_status_t draw_shelf(pn_refresh_t profile){
     shelf_draw_valid=false;
     ESP_LOGI(TAG,"Shelf draw profile=%u home=%u covers_dirty=%u",(unsigned)profile,(unsigned)home_mode,(unsigned)covers_dirty);
@@ -872,20 +876,19 @@ static pn_status_t draw_shelf(pn_refresh_t profile){
     // 只在GL16、无操作面板、封面已收口时复用整页；命中只补状态带，未命中直接画进缓存槽。
     // Reuse a whole page only for GL16 with no action sheet and settled covers; a hit patches the status band, a miss draws into the cache slot.
     if(profile==PN_REFRESH_GL16 && !actions_mode && !covers_dirty && !transfer.impl && !usb.open && !time_sync.impl && menu_cache.pool){
-        uint64_t key=shelf_render_key();bool hit=false;uint8_t *cached=pn_menu_cache_begin(&menu_cache,key,&hit);
+        uint64_t key=shelf_render_key(),aux=shelf_status_key();bool hit=false,same_status=false;uint8_t *cached=pn_menu_cache_begin(&menu_cache,key,aux,&hit,&same_status);
         if(cached){
             pn_frame_t frame;pn_font_t font={0};
             pn_status_t status=pn_frame_bind(&frame,cached,684u*1216u/2u,684,1216)?PN_OK:PN_NO_MEMORY;
             if(status==PN_OK && hit){
-                pn_w_set_battery(battery_percent());pn_w_status_snapshot_t now=pn_w_status_snapshot();
-                if(memcmp(&now,&menu_cache_status,sizeof now)!=0){
+                if(!same_status){
                     status=management_font_begin(&font,24);
                     if(status==PN_OK){pn_frame_rect(&frame,0,0,684,40,PN_UI_PAPER);status=pn_w_status(&font,&frame);management_font_end(&font);}
                 }
             }else if(status==PN_OK){
                 status=management_font_begin(&font,24);
                 if(status==PN_OK){
-                    pn_w_set_battery(battery_percent());pn_shelf_options_t options=shelf_options();if(favorites_ensure()==PN_OK)options.favorite_items=favorites;
+                    pn_shelf_options_t options=shelf_options();if(favorites_ensure()==PN_OK)options.favorite_items=favorites;
                     pn_profile_span_t span;pn_profile_begin(&span,NULL,"ui.shelf.render");
                     status=pn_shelf_render_with_font_file_ex(shelf_page,&font,&frame,shelf_focus,recent_mode,true,shelf_covers,&pool,&sd_media,NULL,&options);
                     pn_profile_end(&span,status);management_font_end(&font);
@@ -893,8 +896,8 @@ static pn_status_t draw_shelf(pn_refresh_t profile){
             }
             if(status==PN_OK)status=present(NULL,&frame,profile);
             if(status==PN_OK){
-                pn_menu_cache_commit(&menu_cache,key);menu_cache_status=pn_w_status_snapshot();
-                shelf_draw_valid=true;shelf_draw_revision=async_port.revision;shelf_draw_status=menu_cache_status;return PN_OK;
+                pn_menu_cache_commit(&menu_cache,key,aux);
+                shelf_draw_valid=true;shelf_draw_revision=async_port.revision;shelf_draw_status=pn_w_status_snapshot();return PN_OK;
             }
             pn_menu_cache_abort(&menu_cache);
             if(status==PN_CANCELLED)return status;
