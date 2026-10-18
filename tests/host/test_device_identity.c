@@ -26,7 +26,7 @@ size_t __wrap_fread(void *p,size_t size,size_t count,FILE *f){size_t n=__real_fr
 static size_t free_bytes=200u*1024u;
 size_t heap_caps_get_largest_free_block(uint32_t caps){assert(caps&MALLOC_CAP_INTERNAL);return largest;}
 size_t heap_caps_get_free_size(uint32_t caps){assert(caps&MALLOC_CAP_INTERNAL);return free_bytes;}
-void *heap_caps_aligned_alloc(size_t alignment,size_t size,uint32_t caps){assert(alignment==16 && (caps&MALLOC_CAP_DMA) && (size==32u*1024u || size==4096));if(fail_internal)return NULL;void *p=aligned_alloc(alignment,size);assert(p);borrowed++;internal_begin=(uintptr_t)p;internal_end=internal_begin+size;return p;}
+void *heap_caps_aligned_alloc(size_t alignment,size_t size,uint32_t caps){assert(alignment==16 && (caps&MALLOC_CAP_DMA) && (size==48u*1024u || size==32u*1024u || size==4096));if(fail_internal)return NULL;void *p=aligned_alloc(alignment,size);assert(p);borrowed++;internal_begin=(uintptr_t)p;internal_end=internal_begin+size;return p;}
 void *heap_caps_malloc(size_t size,uint32_t caps){assert(caps&MALLOC_CAP_SPIRAM);void *p=malloc(size);blocked_begin=(uintptr_t)p;blocked_end=blocked_begin+size;spiram++;return p;}
 void heap_caps_free(void *ptr){if((uintptr_t)ptr==blocked_begin){blocked_begin=blocked_end=0;spiram--;}else{borrowed--;internal_begin=internal_end=0;}free(ptr);}
 psa_status_t psa_crypto_init(void){return PSA_SUCCESS;}
@@ -87,11 +87,11 @@ int main(int argc,char **argv){
     pn_pool_t pool;assert(!pn_pool_init(&pool,65536,allocate,release,NULL));
     assert(pn_identity_stream_pooled(&pool,NULL,sizeof bytes,source,&actual)==PN_OK && !memcmp(&actual,&expected,sizeof actual));
     assert(calls==17 && maximum==4096 && !pool.used && !pool.live && !operations);
-    // 有内部余量时借32KiB块，读完归还；摘要逐字节一致。/ With internal headroom, borrow and return a 32 KiB block with an identical digest.
+    // 有内部余量时优先借48KiB块，读完归还；摘要逐字节一致。/ With internal headroom, borrow and return a 48 KiB block with an identical digest.
     largest=96u*1024u;calls=0;maximum=0;assert(pn_identity_stream_pooled(&pool,NULL,sizeof bytes,source,&actual)==PN_OK && !memcmp(&actual,&expected,sizeof actual));
-    assert(calls==3 && maximum==32u*1024u && !borrowed && !spiram && !pool.used && !pool.live && !operations);
-    // 真机内部状态（最大块80KiB、空闲127KiB）可用32KiB块；最大块或空闲不足退回4KiB。/ Device-like internal state (80 KiB block, 127 KiB free) uses the 32 KiB block; a short block or free total falls back to 4 KiB.
-    largest=80u*1024u;free_bytes=127u*1024u;calls=0;maximum=0;assert(pn_identity_stream_pooled(&pool,NULL,sizeof bytes,source,&actual)==PN_OK && calls==3 && maximum==32u*1024u && !borrowed);
+    assert(calls==2 && maximum==48u*1024u && !borrowed && !spiram && !pool.used && !pool.live && !operations);
+    // 真机内部状态（最大块80KiB、空闲127KiB）刚好满足48KiB块；最大块或空闲不足退回4KiB。/ Device-like internal state (80 KiB block, 127 KiB free) fits exactly the 48 KiB block; a short block or free total falls back to 4 KiB.
+    largest=80u*1024u;free_bytes=127u*1024u;calls=0;maximum=0;assert(pn_identity_stream_pooled(&pool,NULL,sizeof bytes,source,&actual)==PN_OK && calls==2 && maximum==48u*1024u && !borrowed);
     largest=64u*1024u-1u;calls=0;maximum=0;assert(pn_identity_stream_pooled(&pool,NULL,sizeof bytes,source,&actual)==PN_OK && calls==17 && maximum==4096);
     largest=80u*1024u;free_bytes=96u*1024u-1u;calls=0;maximum=0;assert(pn_identity_stream_pooled(&pool,NULL,sizeof bytes,source,&actual)==PN_OK && calls==17 && maximum==4096);free_bytes=200u*1024u;
     largest=0;
