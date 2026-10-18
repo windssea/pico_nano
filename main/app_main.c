@@ -1490,6 +1490,8 @@ static void tick_transfer(uint64_t now){
     transfer_view.failed_stage=state.stage;transfer_view.error=state.error;transfer_view.native_error=state.network.error;
     memcpy(transfer_view.ssid,state.network.ssid,sizeof transfer_view.ssid);memcpy(transfer_view.password,state.network.ap_password,sizeof transfer_view.password);
     if(state.network.address[0])snprintf(transfer_view.address,sizeof transfer_view.address,"http://%s",state.network.address);
+    // 资源已释放但页面尚未返回时也落身份缓存；空环时只是一次空检查。/ Record identities as soon as resources are released, even before leaving the page; an empty ring is just one EMPTY check.
+    if(state.released && transfer.impl)identity_cache_transfer_installs();
     if(state.released && transfer_return){
         // 先取出本轮已确认安装身份，再释放传输上下文；写缓存失败只记日志，不回滚安装。
         // Take this session's confirmed install identities before releasing the transfer context; a cache write failure is logged and never rolls back the install.
