@@ -27,7 +27,7 @@ int pn_pool_init(pn_pool_t *pool, size_t limit, pn_malloc_fn alloc, pn_free_fn r
         // 6MiB产品池在字形/邻页缓存满时仍要容下一整页预渲染位图（约406KiB），否则真机预渲染被拒、翻页每次重光栅约0.35s。
         // A 6 MiB product pool must still fit a whole prerendered page (about 406 KiB) when glyph/neighbor caches are full; otherwise hardware denied every prerender and re-rastered each turn (about 0.35 s).
         .cache_limit=limit>=6u*1024u*1024u?2048u*1024u:limit>=4u*1024u*1024u?1536u*1024u:1024u*1024u,.cache_reserve=limit/8<256u*1024u?limit/8:256u*1024u,
-        .cache_caps={512u*1024u,768u*1024u,384u*1024u,384u*1024u,132u*1024u,416u*1024u} };
+        .cache_caps={512u*1024u,768u*1024u,384u*1024u,384u*1024u,132u*1024u,416u*1024u,limit>=6u*1024u*1024u?832u*1024u:limit>=4u*1024u*1024u?416u*1024u:0u} };
     return 0;
 }
 
@@ -133,8 +133,8 @@ size_t pn_cache_reclaimable(pn_pool_t *p,unsigned kinds){
 size_t pn_cache_reclaim(pn_pool_t *p,size_t headroom){
     if(!p || p->reclaiming || p->speculative)return 0;
     size_t before=p->used;p->reclaiming=true;pn_cache_snapshot(p);
-    // 便宜的文件块先让位，避免为保留读缓存而驱逐已光栅字形。/ Cheap file blocks yield first rather than evicting rasterized glyphs to retain read caches.
-    static const pn_cache_class_t order[]={PN_CACHE_SOURCE,PN_CACHE_BITMAP,PN_CACHE_NEIGHBOR,PN_CACHE_GLYPH,PN_CACHE_COVER,PN_CACHE_CHAPTER};
+    // 菜单整页帧最先让位：阅读时它不再需要，丢掉后仍可重绘。/ Menu frames yield first: they are not needed while reading and can be repainted.
+    static const pn_cache_class_t order[]={PN_CACHE_MENU,PN_CACHE_SOURCE,PN_CACHE_BITMAP,PN_CACHE_NEIGHBOR,PN_CACHE_GLYPH,PN_CACHE_COVER,PN_CACHE_CHAPTER};
     for(unsigned rank=0;rank<PN_CACHE_COUNT;rank++)for(pn_cache_owner_t *o=p->caches;o;o=o->next){
         pn_cache_class_t kind=order[rank];
         if(p->used<=p->limit && headroom<=p->limit-p->used)goto done;

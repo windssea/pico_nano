@@ -60,6 +60,7 @@ add_library(pn_core STATIC ${ui_font_c} ${reading_font_c} ${harmony_font_c} ${br
     ${PN_ROOT}/components/pn_personalization/pn_font_manage.c
     ${PN_ROOT}/components/pn_personalization/pn_settings_ui.c
     ${PN_ROOT}/components/pn_library/pn_shelf_view.c
+    ${PN_ROOT}/components/pn_library/pn_menu_cache.c
     ${PN_ROOT}/components/pn_library/pn_search_ui.c
     ${PN_ROOT}/components/pn_library/pn_book_actions.c
     ${PN_ROOT}/components/pn_widgets/pn_widgets.c

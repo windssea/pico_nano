@@ -21,6 +21,7 @@ typedef enum {
     PN_CACHE_CHAPTER, ///< 已验证章节语义，可在压力时重建 / Verified chapter semantics, rebuildable under pressure
     PN_CACHE_SOURCE, ///< 不变文件的小读块，压力时可重读 / Small-read blocks of immutable files, reloadable under pressure
     PN_CACHE_BITMAP, ///< 下一页像素帧，与节点分开计费 / Next-page pixels, charged separately from nodes
+    PN_CACHE_MENU, ///< 首页/书库整页帧，返回时复用，压力下可丢 / Home/library whole-page frames reused on return, droppable under pressure
     PN_CACHE_COUNT ///< 类别数 / Class count
 } pn_cache_class_t;
 typedef struct pn_cache_owner pn_cache_owner_t;

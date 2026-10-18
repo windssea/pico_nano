@@ -48,7 +48,7 @@ int main(int argc,char **argv){
     assert(pn_media_attach(&data_media,1)==PN_OK);data_ready=true;wake_idle=true;home_mode=true;selected_path[0]=0;show_shelf("",false);assert(shelf_mode && !locked && home_mode);
     for(unsigned cycle=0;cycle<64;cycle++){clock_us+=100000;assert(prepare_lock());lock_and_sleep("按电源键继续");assert(!locked && shelf_mode && home_mode && !reader_active() && !atomic_load(&async_port.paused));}
     assert(sleep_calls==64);puts("home_lock cycles=64 resumed=1");
-    pn_cover_work_abort(&cover_work);management_fonts_close();pn_free(shelf_page);pn_free(shelf_covers);pn_free(recent_snapshot);pn_free(favorites);pn_free(page_copy);
+    pn_cover_work_abort(&cover_work);management_fonts_close();pn_free(shelf_page);pn_free(shelf_covers);pn_free(recent_snapshot);pn_free(favorites);pn_free(page_copy);pn_menu_cache_close(&menu_cache);
     assert(!pn_media_active(&sd_media) && pool.used==0 && pool.live==0);
     printf("device_shelf columns=%u capacity=%zu raw_up_swipe=1 diagonal_swipe=1 ordinary_swipe=1 edges_cancel=1 position_restored=1 used=0 live=0 peak=%zu\n",columns,capacity,pool.peak);return 0;
 }

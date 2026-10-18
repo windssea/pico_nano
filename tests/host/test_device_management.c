@@ -107,7 +107,9 @@ int main(void){
     // 恢复后续传输故障夹具原来的未挂载背景，不弱化产品租约规则。/ Restore the later transfer fault fixture's original unmounted background without weakening product leases.
     if(!nav_data_available && data_media.available)assert(pn_media_detach(&data_media)==PN_OK);
     data_ready=nav_data_ready;
-    // 同屏重绘复用界面引擎，字形缓存命中增加，无新增TF租约。/ Repaint reuses the UI engine, gains glyph hits and adds no TF lease.
+    // 同屏重绘复用界面引擎，字形缓存命中增加，无新增TF租约；先失效整页缓存以走真实重绘路径。
+    // Repaint reuses the UI engine, gains glyph hits and adds no TF lease; invalidate whole-page reuse so the real repaint runs.
+    pn_menu_cache_invalidate(&menu_cache);
     void *ui_engine=management_font.impl;size_t leases=pn_media_active(&sd_media);uint64_t hits=pool.cache_stats[PN_CACHE_GLYPH].hits;
     assert(ui_engine && management_scope.active && draw_shelf(PN_REFRESH_GL16)==PN_OK && management_font.impl==ui_engine && pn_media_active(&sd_media)==leases && pool.cache_stats[PN_CACHE_GLYPH].hits>hits);
     // 完整TF源的缓存消费者先关闭，释放源后可继续使用应急字体。/ Close cached TF-source consumers first; emergency fonts remain usable after source release.
@@ -308,6 +310,10 @@ int main(void){
     assert(draw_shelf(PN_REFRESH_GL16)==PN_OK && shelf_draw_valid);unsigned shown=presents;handle_key(PN_KEY_2,PN_KEY_SHORT);assert(shelf_focus==0 && shelf_draw_valid && presents==shown+1);
     pn_frame_t expected;assert(pn_frame_bind(&expected,logical,415872,684,1216));pn_font_t face={0};assert(management_font_begin(&face,24)==PN_OK);pn_shelf_options_t options=shelf_options();if(favorites_valid)options.favorite_items=favorites;
     assert(pn_shelf_render_with_font_file_ex(shelf_page,&face,&expected,0,false,true,shelf_covers,&pool,&sd_media,NULL,&options)==PN_OK && pn_device_frame_copy(&expected,original,415872)==PN_OK && !memcmp(stub_back,original,415872));management_font_end(&face);
+    // 同一输入第二次绘制命中整页帧：不再重绘，但必须呈现同一已确认像素。/ A second draw with the same inputs hits the whole-page frame: no repaint, same confirmed pixels.
+    shelf_focus=0;assert(draw_shelf(PN_REFRESH_GL16)==PN_OK);
+    uint64_t menu_hits=pool.cache_stats[PN_CACHE_MENU].hits;uint8_t *cached_snapshot=malloc(415872);assert(cached_snapshot);memcpy(cached_snapshot,stub_back,415872);
+    assert(draw_shelf(PN_REFRESH_GL16)==PN_OK && pool.cache_stats[PN_CACHE_MENU].hits>menu_hits && !memcmp(cached_snapshot,stub_back,415872));free(cached_snapshot);
     shown=presents;assert(draw_shelf_focus(0)==PN_OK && presents==shown);
     shelf_focus=1;pn_cancel_scope_t focus_cancel;pn_cancel_enter(&focus_cancel,feedback_cancelled,NULL);assert(draw_shelf_focus(0)==PN_CANCELLED && !shelf_draw_valid);pn_cancel_leave(&focus_cancel);assert(draw_shelf_focus(0)==PN_OK && shelf_draw_valid);
     panel_fault=true;shelf_focus=2;assert(draw_shelf_focus(1)==PN_IO && !shelf_draw_valid && !panel_known);panel_fault=false;unsigned cleaned=clear_calls;shelf_focus=3;assert(draw_shelf_focus(2)==PN_OK && shelf_draw_valid && panel_known && clear_calls==cleaned+1);
@@ -327,7 +333,7 @@ int main(void){
         apply_selection(slot);assert(status_page && !shelf_mode && presents>shown && !reader_active());
     }
     free(original);free(logical);
-    pn_free(page_copy);pn_free(shelf_page);pn_free(shelf_covers);pn_free(recent_snapshot);pn_free(favorites);
+    pn_free(page_copy);pn_free(shelf_page);pn_free(shelf_covers);pn_free(recent_snapshot);pn_free(favorites);pn_menu_cache_close(&menu_cache);
     pn_font_close(&management_font);pn_w_font_scope_end(&management_scope);
     assert(!pool.used && !pool.live);return 0;
 }

@@ -34,6 +34,7 @@
 #include "pn_focus.h"
 #include "pn_sd_layout.h"
 #include "pn_shelf_view.h"
+#include "pn_menu_cache.h"
 #include "pn_wallpaper.h"
 #include "pn_wallpaper_ui.h"
 #include "pn_font_manage.h"
@@ -115,12 +116,15 @@ static pn_status_t management_font_begin(pn_font_t *font,int pixels){
 static void management_font_end(pn_font_t *font){if(pool.limit<4u*1024u*1024u || management_font.impl)pn_font_close(font);else{management_font=*font;*font=(pn_font_t){0};}}
 
 /// 系统源关闭或换代前释放界面消费者，避免缓存借用旧TF句柄。/ Release UI consumers before system-source close/replacement to avoid stale TF handles.
-static void management_fonts_close(void){shelf_draw_valid=false;pn_settings_ui_close(&settings_ui);pn_font_close(&management_font);pn_w_font_scope_end(&management_scope);}
+static pn_menu_cache_t menu_cache; ///< 首页/书库整页帧，返回时复用 / Whole home/library frames reused on return
+static uint32_t menu_font_epoch; ///< 界面字体变化即失效 / Invalidated whenever the UI font changes
+static pn_w_status_snapshot_t menu_cache_status; ///< 缓存帧的状态带 / Status band inside the cached frame
+static void management_fonts_close(void){menu_font_epoch++;pn_menu_cache_invalidate(&menu_cache);pn_menu_cache_drop(&menu_cache);shelf_draw_valid=false;pn_settings_ui_close(&settings_ui);pn_font_close(&management_font);pn_w_font_scope_end(&management_scope);}
 static pn_cover_work_t cover_work; ///< 封面解析/解码/写入由产品owner分步推进 / Cover parsing/decoding/writes advanced by the product owner
 static struct {uint64_t epoch;bool stable;} system_font_failure; ///< 仅当前挂载的稳定失败，资源交接清除 / Stable failure for this mount only, cleared on resource handoff
 static pn_status_t opening_abort(void);
 static void identity_job_stop(void);
-static void system_font_release(void){identity_job_stop();system_font_failure.epoch=0;system_font_failure.stable=false;pn_cover_work_abort(&cover_work);(void)opening_abort();(void)pn_hot_session_drop(&hot_session);management_fonts_close();(void)pn_font_system_close();}
+static void system_font_release(void){menu_font_epoch++;pn_menu_cache_invalidate(&menu_cache);identity_job_stop();system_font_failure.epoch=0;system_font_failure.stable=false;pn_cover_work_abort(&cover_work);(void)opening_abort();(void)pn_hot_session_drop(&hot_session);management_fonts_close();(void)pn_font_system_close();}
 
 static pn_media_t sd_media;
 static pn_device_sd_t sd_recovery; ///< TF挂载请求的异步完成状态 / Asynchronous completion state of the TF mount request
@@ -226,7 +230,7 @@ static bool covers_inactive; ///< 非活动且不再借用时可回收 / Reclaim
 static pn_shelf_covers_t *shelf_covers;
 static bool covers_dirty,covers_cache_done,touch_held;
 static size_t cover_bytes(void *ctx){(void)ctx;return pn_alloc_size(shelf_covers);}
-static void cover_drop(void *ctx){(void)ctx;if(covers_inactive){pn_free(shelf_covers);shelf_covers=NULL;covers_dirty=false;}}
+static void cover_drop(void *ctx){(void)ctx;if(covers_inactive){pn_free(shelf_covers);shelf_covers=NULL;covers_dirty=false;pn_menu_cache_invalidate(&menu_cache);}}
 
 static uint8_t cover_salt[16];
 static const char *const cover_cache=PN_SD_MOUNT "/" PN_SD_COVER_CACHE;
@@ -841,9 +845,61 @@ static pn_status_t favorites_ensure(void){
     if(favorites_valid)return PN_OK;
     pn_status_t status=favorites_load();favorites_valid=status==PN_OK;return status;
 }
+/// 菜单帧键：所有会改变首页/书库像素的输入都参与；状态带单独补画，因此时间/电量不使整页失效。
+/// Menu-frame key: every input that changes home/library pixels participates; the status band is patched separately, so clock/battery do not invalidate the page.
+static uint64_t menu_hash(uint64_t h,uint64_t value){h^=value+0x9e3779b97f4a7c15ull+(h<<6)+(h>>2);return h;}
+static uint64_t menu_hash_text(uint64_t h,const char *text){if(!text)return menu_hash(h,0);while(*text){h^=(unsigned char)*text++;h*=1099511628211ull;}return h;}
+static uint64_t shelf_render_key(void){
+    uint64_t h=0x504e4d454e5531ull; // "PNMENU1"
+    h=menu_hash(h,home_mode);h=menu_hash(h,recent_mode);h=menu_hash(h,fav_mode);h=menu_hash(h,list_mode);h=menu_hash(h,search_mode);
+    h=menu_hash(h,shelf_prefs.columns);h=menu_hash(h,shelf_prefs.style);h=menu_hash(h,(uint64_t)(shelf_focus+1));
+    h=menu_hash_text(h,search_query);h=menu_hash(h,menu_font_epoch);
+    if(shelf_page){
+        h=menu_hash(h,shelf_page->count);h=menu_hash(h,shelf_page->index);h=menu_hash(h,shelf_page->total);h=menu_hash(h,shelf_page->per_page);h=menu_hash(h,shelf_page->more);
+        for(size_t i=0;i<shelf_page->count;i++){
+            const pn_catalog_item_t *item=&shelf_page->items[i];
+            h=menu_hash_text(h,item->path);h=menu_hash_text(h,item->name);h=menu_hash(h,item->size);h=menu_hash(h,(uint64_t)item->format);
+            h=menu_hash(h,item->progress);h=menu_hash(h,item->identified);h=menu_hash(h,item->has_progress);
+        }
+    }
+    if(favorites_valid && favorites){h=menu_hash(h,favorites->count);for(size_t i=0;i<favorites->count;i++)h=menu_hash_text(h,favorites->paths[i]);}
+    return h?h:1;
+}
 static pn_status_t draw_shelf(pn_refresh_t profile){
     shelf_draw_valid=false;
     ESP_LOGI(TAG,"Shelf draw profile=%u home=%u covers_dirty=%u",(unsigned)profile,(unsigned)home_mode,(unsigned)covers_dirty);
+    if(!menu_cache.pool)(void)pn_menu_cache_init(&menu_cache,&pool);
+    // 只在GL16、无操作面板、封面已收口时复用整页；命中只补状态带，未命中直接画进缓存槽。
+    // Reuse a whole page only for GL16 with no action sheet and settled covers; a hit patches the status band, a miss draws into the cache slot.
+    if(profile==PN_REFRESH_GL16 && !actions_mode && !covers_dirty && !transfer.impl && !usb.open && !time_sync.impl && menu_cache.pool){
+        uint64_t key=shelf_render_key();bool hit=false;uint8_t *cached=pn_menu_cache_begin(&menu_cache,key,&hit);
+        if(cached){
+            pn_frame_t frame;pn_font_t font={0};
+            pn_status_t status=pn_frame_bind(&frame,cached,684u*1216u/2u,684,1216)?PN_OK:PN_NO_MEMORY;
+            if(status==PN_OK && hit){
+                pn_w_set_battery(battery_percent());pn_w_status_snapshot_t now=pn_w_status_snapshot();
+                if(memcmp(&now,&menu_cache_status,sizeof now)!=0){
+                    status=management_font_begin(&font,24);
+                    if(status==PN_OK){pn_frame_rect(&frame,0,0,684,40,PN_UI_PAPER);status=pn_w_status(&font,&frame);management_font_end(&font);}
+                }
+            }else if(status==PN_OK){
+                status=management_font_begin(&font,24);
+                if(status==PN_OK){
+                    pn_w_set_battery(battery_percent());pn_shelf_options_t options=shelf_options();if(favorites_ensure()==PN_OK)options.favorite_items=favorites;
+                    pn_profile_span_t span;pn_profile_begin(&span,NULL,"ui.shelf.render");
+                    status=pn_shelf_render_with_font_file_ex(shelf_page,&font,&frame,shelf_focus,recent_mode,true,shelf_covers,&pool,&sd_media,NULL,&options);
+                    pn_profile_end(&span,status);management_font_end(&font);
+                }
+            }
+            if(status==PN_OK)status=present(NULL,&frame,profile);
+            if(status==PN_OK){
+                pn_menu_cache_commit(&menu_cache,key);menu_cache_status=pn_w_status_snapshot();
+                shelf_draw_valid=true;shelf_draw_revision=async_port.revision;shelf_draw_status=menu_cache_status;return PN_OK;
+            }
+            pn_menu_cache_abort(&menu_cache);
+            if(status==PN_CANCELLED)return status;
+        }
+    }
     uint8_t *pixels=pn_alloc_tagged(&pool,PN_MEM_FRAME,684u*1216u/2u);pn_frame_t frame;pn_font_t font={0};
     pn_status_t status=pn_frame_bind(&frame,pixels,684u*1216u/2u,684,1216)?PN_OK:PN_NO_MEMORY;
     if(status==PN_OK)status=management_font_begin(&font,24);
@@ -880,7 +936,7 @@ static pn_status_t draw_shelf_focus(int before){
 static bool tick_covers(void){
     if(!covers_cache_done){
         bool changed=false;pn_status_t s=pn_shelf_covers_cache_step(&cover_work,shelf_covers,shelf_page,&pool,&sd_media,cover_cache,&changed);
-        covers_dirty|=changed;
+        covers_dirty|=changed;if(changed)pn_menu_cache_invalidate(&menu_cache);
         if(s==PN_EMPTY){covers_cache_done=true;if(covers_dirty && draw_shelf(PN_REFRESH_GL16)==PN_OK)covers_dirty=false;}
         return s==PN_OK || changed;
     }
@@ -888,7 +944,7 @@ static bool tick_covers(void){
     // 邻页/字形/章节缓存可按需回收，计入封面解码预算；封面缓存本身不计。/ Neighbor/glyph/chapter caches are reclaimable on demand and count toward the cover budget; the cover cache itself does not.
     size_t free_bytes=(pool.limit>pool.used?pool.limit-pool.used:0)+pn_cache_reclaimable(&pool,(1u<<PN_CACHE_BITMAP)|(1u<<PN_CACHE_SOURCE)|(1u<<PN_CACHE_NEIGHBOR)|(1u<<PN_CACHE_GLYPH)|(1u<<PN_CACHE_CHAPTER)),reserve=128u*1024u;bool changed=false;
     pn_status_t status=pn_shelf_covers_work(&cover_work,shelf_covers,shelf_page,&pool,&sd_media,cover_cache,cover_salt,free_bytes>reserve?free_bytes-reserve:1,&changed);
-    if(changed)covers_dirty=true;
+    if(changed){covers_dirty=true;pn_menu_cache_invalidate(&menu_cache);}
     if((status==PN_OK || status==PN_EMPTY || status==PN_BUSY) && covers_dirty && !pn_shelf_covers_pending(shelf_covers,shelf_page)){pn_status_t shown=draw_shelf(PN_REFRESH_GL16);if(shown==PN_OK)covers_dirty=false;else if(shown!=PN_CANCELLED)ESP_LOGW(TAG,"Cover redraw failed");}
     else if(status!=PN_OK && status!=PN_EMPTY && status!=PN_BUSY && status!=PN_CANCELLED){ESP_LOGW(TAG,"Cover queue stopped: %d",(int)status);pn_shelf_covers_reset(shelf_covers,NULL);covers_dirty=false;}
     return status==PN_OK || status==PN_BUSY || changed;
