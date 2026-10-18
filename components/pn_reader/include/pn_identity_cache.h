@@ -12,7 +12,7 @@
 #include "pn_identity.h"
 #include "pn_storage.h"
 
-#define PN_IDENTITY_CACHE_MAX 64 ///< 最多记住的书 / Maximum remembered books
+#define PN_IDENTITY_CACHE_MAX 256 ///< 最多记住的书；大书库避免预计算结果被过早淘汰 / Maximum remembered books; large libraries must not evict precomputed results too early
 
 /// 一条记录：路径哈希、大小、修改时间与整书身份。/ One record: path hash, size, modification time and whole-book identity.
 typedef struct {uint64_t key;uint64_t size;int64_t mtime;pn_book_id_t id;} pn_identity_cache_entry_t;
