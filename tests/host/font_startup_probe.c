@@ -65,6 +65,8 @@ pn_status_t __wrap_pn_identity_job_step(pn_identity_job_t *j,pn_book_id_t *id){
     uint64_t before,size,after,total;assert(!pn_identity_job_progress(j,&before,&size));unsigned reads=book_reads;size_t bytes=book_read_bytes;
     pn_status_t s=__real_pn_identity_job_step(j,id);assert(!pn_identity_job_progress(j,&after,&total) && total==size && after>=before && after-before<=32768);
     if(tracing && size==book_size){assert(book_reads-reads<=1 && book_read_bytes-bytes<=32768);job_steps++;job_work_bytes+=after-before;}
+    // 字体后台复核走job端口；完成时记一次字体摘要，便于区分首屏前与后台。/ Deferred font verification uses the job port; count one font digest on completion to separate pre-frame from background.
+    if(tracing && size==fallback_size && s==PN_OK)hashes++;
     return s;
 }
 static pn_status_t show(void *ctx,const pn_frame_t *frame,pn_refresh_t profile){
@@ -139,8 +141,22 @@ int main(int argc,char **argv){
     bool expected_fallback=!primary && !is_fault("missing") && !is_fault("replaced") && !is_fault("bad-primary");
     if(status==PN_OK && expected_fallback)assert((epub?pn_epub_app_fallback_font(&e,argv[2]):pn_reader_app_fallback_font(&t,argv[2]))==PN_BUSY);
     if(status==PN_OK)status=epub?pn_epub_app_step(&e,PN_APP_OPEN,1,show,NULL):pn_reader_app_step(&t,PN_APP_OPEN,1,show,NULL);
-    pn_cancel_leave(&scope);tracing=false;unsigned startup_hashes=hashes,startup_opens=font_opens,startup_book_hashes=book_hashes;size_t startup_bytes=font_read_bytes;
+    unsigned startup_hashes=hashes,startup_opens=font_opens,startup_book_hashes=book_hashes;size_t startup_bytes=font_read_bytes;
     unsigned startup_book_opens=book_opens,startup_book_reads=book_reads,startup_book_seeks=book_seeks;size_t startup_book_bytes=book_read_bytes;
+    // 可选：首屏后推进后台字体/整书复核，区分“首屏前摘要”和“后台摘要”。/ Optional: drain deferred font/book verification after the first frame to separate pre-frame from background hashing.
+    unsigned deferred_hashes=0;
+    if(status==PN_OK && getenv("PN_FONT_STARTUP_VERIFY")){
+        unsigned before=hashes;
+        for(unsigned step=0;step<8192;step++){
+            bool pending=epub?pn_epub_app_verify_pending(&e):pn_reader_app_verify_pending(&t);
+            if(!pending)break;
+            pn_status_t verified=epub?pn_epub_app_verify_step(&e):pn_reader_app_verify_step(&t);
+            if(verified==PN_BUSY || verified==PN_CANCELLED)continue;
+            if(verified!=PN_OK){status=verified;break;}
+        }
+        deferred_hashes=hashes-before;
+    }
+    pn_cancel_leave(&scope);tracing=false;
     printf("click_layout calls=%u\n",layout_calls);profile_stage="turns";
     printf("click_glyph loads=%u renders=%u\n",glyph_loads,glyph_renders);
     printf("click_body hits=%u\n",body_hits);
@@ -148,14 +164,14 @@ int main(int argc,char **argv){
     unsigned get_hashes=0;
     if(status==PN_OK){pn_font_preferences_t selected;char directory[PN_FONT_REFERENCE_PATH_MAX];tracing=true;
         pn_status_t loaded=epub?pn_epub_app_fonts_get(&e,&selected,directory,sizeof directory):pn_reader_app_fonts_get(&t,&selected,directory,sizeof directory);
-        tracing=false;get_hashes=hashes-startup_hashes;assert(loaded==PN_OK && selected.fallback.kind==(expected_fallback?PN_FONT_FILE:PN_FONT_RESIDENT));if(expected_fallback)assert(!memcmp(selected.fallback.identity.sha256,fonts.fallback.identity.sha256,32));if(primary)assert(selected.primary.kind==PN_FONT_FILE && !memcmp(selected.primary.identity.sha256,fonts.primary.identity.sha256,32));}
+        tracing=false;get_hashes=hashes-startup_hashes-deferred_hashes;assert(loaded==PN_OK && selected.fallback.kind==(expected_fallback?PN_FONT_FILE:PN_FONT_RESIDENT));if(expected_fallback)assert(!memcmp(selected.fallback.identity.sha256,fonts.fallback.identity.sha256,32));if(primary)assert(selected.primary.kind==PN_FONT_FILE && !memcmp(selected.primary.identity.sha256,fonts.primary.identity.sha256,32));}
     tracing=true;if(status==PN_OK){pn_status_t next=epub?pn_epub_app_step(&e,PN_APP_NEXT,2,show,NULL):pn_reader_app_step(&t,PN_APP_NEXT,2,show,NULL);if(next!=PN_OK && next!=PN_EMPTY)status=next;}
     if(status==PN_OK){pn_status_t previous=epub?pn_epub_app_step(&e,PN_APP_PREVIOUS,3,show,NULL):pn_reader_app_step(&t,PN_APP_PREVIOUS,3,show,NULL);if(previous!=PN_OK && previous!=PN_EMPTY)status=previous;}
     tracing=false;printf("turn_io book_reads=%u book_bytes=%zu book_seeks=%u font_bytes=%zu\n",book_reads-startup_book_reads,book_read_bytes-startup_book_bytes,book_seeks-startup_book_seeks,font_read_bytes-startup_bytes);
     pn_status_t closed=epub?pn_epub_app_close(&e,4):pn_reader_app_close(&t,4);if(status==PN_OK)status=closed;
     if(system)assert(pn_font_system_close()==PN_OK);
     assert(pn_media_release(&media,&guard)==PN_OK && !pn_media_active(&media) && !pool.used && !pool.live);
-    printf("startup status=%d font_size=%llu full_hashes=%u book_hashes=%u font_opens=%u font_read_bytes=%zu font_get_hashes=%u book_opens=%u book_reads=%u book_read_bytes=%zu book_seeks=%u presents=%u peak=%zu used=%zu live=%zu\n",status,(unsigned long long)fallback_size,startup_hashes,startup_book_hashes,startup_opens,startup_bytes,get_hashes,startup_book_opens,startup_book_reads,startup_book_bytes,startup_book_seeks,presents,pool.peak,pool.used,pool.live);
+    printf("startup status=%d font_size=%llu full_hashes=%u deferred_hashes=%u book_hashes=%u font_opens=%u font_read_bytes=%zu font_get_hashes=%u book_opens=%u book_reads=%u book_read_bytes=%zu book_seeks=%u presents=%u peak=%zu used=%zu live=%zu\n",status,(unsigned long long)fallback_size,startup_hashes,deferred_hashes,startup_book_hashes,startup_opens,startup_bytes,get_hashes,startup_book_opens,startup_book_reads,startup_book_bytes,startup_book_seeks,presents,pool.peak,pool.used,pool.live);
     pn_status_t expected=is_fault("cancel")?PN_CANCELLED:is_fault("lost")?PN_STALE_MEDIA:is_fault("present")?PN_IO:PN_OK;
     assert(status==expected);return 0;
 }

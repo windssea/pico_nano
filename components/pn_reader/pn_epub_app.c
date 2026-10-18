@@ -335,15 +335,15 @@ static pn_status_t open_complete(app_t *a,const char *font,const char *state,uin
         if(status==PN_EMPTY)status=PN_OK;else if(status==PN_OK){
             // 所选字体缺失/被替换：本次用启动默认字体运行，保留记录不改。/ Missing or replaced selection: run with the startup default this time and keep the record unchanged.
             pn_status_t primary;
-            // 快开（最近记录身份）时外置正文字体也只核对大小，完整SHA交后台复核；与TXT一致。大CJK字体整读要数秒。
-            // On a fast open (recent-record identity) the external body font also checks size only, leaving the full SHA to background verification, as for TXT; reading a large CJK font whole takes seconds.
-            pn_status_t (*open_font)(pn_pool_t *,const pn_font_reference_t *,pn_media_t *,const pn_media_lease_t *,pn_text_file_t *,pn_text_source_t *)=a->verify_book?pn_font_reference_open_file_fast:pn_font_reference_open_file;
+            // 冷开和快开的外置正文字体都只核对大小；完整SHA由后台在首屏后复核，避免大CJK字体整读数秒。
+            // Both cold and fast opens size-check the external body font; the full SHA is verified after the first frame in the background, avoiding seconds of large-CJK whole-file reads.
+            pn_status_t (*open_font)(pn_pool_t *,const pn_font_reference_t *,pn_media_t *,const pn_media_lease_t *,pn_text_file_t *,pn_text_source_t *)=pn_font_reference_open_file_fast;
 #ifdef ESP_PLATFORM
             primary=selected_fonts.primary.kind==PN_FONT_FILE && !pn_sd_resource_path(selected_fonts.primary.path,PN_SD_FONTS)?PN_EMPTY:selected_fonts.primary.kind==PN_FONT_FILE?open_font(pool,&selected_fonts.primary,a->media,&a->book_lease,&a->font_file,&a->font_source):pn_font_reference_verify_pooled(pool,&selected_fonts.primary,a->media,&a->book_lease);
 #else
             primary=selected_fonts.primary.kind==PN_FONT_FILE?open_font(pool,&selected_fonts.primary,a->media,&a->book_lease,&a->font_file,&a->font_source):pn_font_reference_verify_pooled(pool,&selected_fonts.primary,a->media,&a->book_lease);
 #endif
-            if(primary==PN_OK && a->verify_book && selected_fonts.primary.kind==PN_FONT_FILE){a->verify_font=true;a->font_expected=selected_fonts.primary.identity;a->verify_font_handle=a->font_file.handle;}
+            if(primary==PN_OK && selected_fonts.primary.kind==PN_FONT_FILE){a->verify_font=true;a->font_expected=selected_fonts.primary.identity;a->verify_font_handle=a->font_file.handle;}
             if(primary==PN_STALE_MEDIA)status=primary;
             else if(primary!=PN_OK)a->font_unavailable=true;
             else{has_selected_fonts=true;font=selected_fonts.primary.kind==PN_FONT_FILE?selected_fonts.primary.path:NULL;
@@ -519,7 +519,7 @@ static pn_status_t index_layout(app_t *a){
     pn_epub_reader_index(&a->reader,NULL);pn_page_index_close(&a->page_index);
     pn_text_source_t source=a->font_source;pn_book_id_t key;pn_status_t s=PN_OK;
     if(font_set(a))s=pn_font_set_source(font_set(a),&source);
-    if(s==PN_OK)s=pn_page_index_key(&a->book,&a->style,&source,chain(a),0x100u,&key);
+    if(s==PN_OK)s=pn_page_index_key_known(&a->book,&a->style,&source,chain(a),0x100u,a->verify_font?&a->font_expected:NULL,&key);
     if(s==PN_OK)s=pn_page_index_open(&a->page_index,a->pool,&a->state,&a->state_lease,a->state_directory,&a->book,&key);
     if(s==PN_CANCELLED || s==PN_STALE_MEDIA)return s;
     a->index_generation=a->token.generation;if(s==PN_OK)pn_epub_reader_index(&a->reader,&a->page_index);return PN_OK;

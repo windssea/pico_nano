@@ -30,3 +30,11 @@ with tempfile.TemporaryDirectory() as folder:
             if fault=='normal':assert fields['full_hashes']==fields['book_hashes']==fields['font_opens']==fields['book_opens']==1 and fields['font_get_hashes']==0 and fields['book_read_bytes']>=book.stat().st_size and fields['book_reads']>0,fields
             if fault in ('normal','missing','replaced','bad-primary'):assert fields['status']==0 and fields['presents']>=1
             print(json.dumps({'format':book.suffix,'fault':fault,**fields}),flush=True)
+    # 冷开外置主字体：首屏前不得整读字体；首屏后后台复核才支付完整SHA。/ Cold external primary: no whole-font read before the first frame; the background check pays it afterwards.
+    case=root/'epub-primary-deferred';case.mkdir();state=case/'state';state.mkdir();font=case/'font.ttf';shutil.copy2(sys.argv[2],font)
+    env=dict(os.environ,PN_FONT_STARTUP_PRIMARY='1',PN_FONT_STARTUP_VERIFY='1')
+    result=subprocess.run([sys.argv[1],str(epub),str(font),str(state)],env=env,capture_output=True,text=True,timeout=30)
+    assert result.returncode==0,(result.stdout,result.stderr)
+    row=next(line for line in result.stdout.splitlines() if line.startswith('startup '));fields={k:int(v) for k,v in (word.split('=') for word in row.split()[1:])}
+    assert fields['status']==0 and fields['presents']>=1 and fields['full_hashes']==0 and fields['deferred_hashes']==1 and fields['font_opens']==1,fields
+    print(json.dumps({'format':'epub-primary-deferred',**fields}),flush=True)
