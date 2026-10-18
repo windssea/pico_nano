@@ -176,8 +176,14 @@ int main(int argc,char **argv){
 
     assert(pn_epub_app_close(&app,now++)==PN_OK && !pool.used && !pool.live);
     fonts.primary.identity.sha256[0]^=1;assert(pn_font_preferences_save(&global_io,&pool,NULL,&fonts)==PN_OK);
-    // 所选字体被替换：用启动字体打开并标记，记录保持原样。/ Replaced selection: open with the startup font, flag it, keep the record.
-    assert(pn_epub_app_open(&app,&pool,argv[1],argv[3],argv[2],44,now++)==PN_OK && pn_epub_app_font_unavailable(&app) && pn_epub_app_step(&app,PN_APP_OPEN,now++,present,&screen)==PN_OK && pn_epub_app_close(&app,now++)==PN_OK && !pool.used && !pool.live);
+    // 所选字体被替换：外置字体首屏后后台复核，失配才回退常驻字体并标记；记录保持原样。
+    // Replaced selection: the external font is verified after the first frame; only a mismatch falls back to the resident face and flags it; the record stays intact.
+    assert(pn_epub_app_open(&app,&pool,argv[1],argv[3],argv[2],44,now++)==PN_OK);
+    pn_status_t verify_status;while((verify_status=pn_epub_app_verify_step(&app))==PN_BUSY){}
+    bool unavailable=pn_epub_app_font_unavailable(&app);
+    pn_status_t reopen=pn_epub_app_step(&app,PN_APP_OPEN,now++,present,&screen);
+    pn_status_t closed=pn_epub_app_close(&app,now++);
+    assert(verify_status==PN_STALE_JOB && unavailable && reopen==PN_OK && closed==PN_OK && !pool.used && !pool.live);
     {pn_font_preferences_t kept;assert(pn_font_preferences_load(&global_io,&pool,NULL,&kept)==PN_OK && !memcmp(&kept.primary.identity,&fonts.primary.identity,sizeof kept.primary.identity));}
     pn_font_preferences_t per_book={0};assert(pn_font_preferences_save(&book_io,&pool,&current.book,&per_book)==PN_OK);
     assert(pn_epub_app_open(&app,&pool,argv[1],"/missing-boot-font.ttf",argv[2],44,now++)==PN_OK && pn_epub_app_step(&app,PN_APP_OPEN,now++,present,&screen)==PN_OK && pn_epub_app_close(&app,now++)==PN_OK);

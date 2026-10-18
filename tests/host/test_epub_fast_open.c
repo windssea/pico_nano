@@ -44,7 +44,9 @@ int main(int argc,char **argv){
      prefs.primary.identity.sha256[0]^=1;assert(pn_font_preferences_save(&io,&pool,NULL,&prefs)==PN_OK);
      assert(pn_epub_app_open_job_begin_trusted(&job,&pool,NULL,book,NULL,state,44,now++,&id,(uint64_t)size)==PN_OK && finish(&job,&app)==PN_OK && !pn_epub_app_font_unavailable(&app));
      while((s=pn_epub_app_verify_step(&app))==PN_BUSY){}assert(s==PN_STALE_JOB && pn_epub_app_close(&app,now++)==PN_OK);
-     assert(pn_epub_app_open_job_begin(&job,&pool,NULL,book,NULL,state,44,now++)==PN_OK && finish(&job,&app)==PN_OK && pn_epub_app_font_unavailable(&app) && pn_epub_app_close(&app,now++)==PN_OK);
+     assert(pn_epub_app_open_job_begin(&job,&pool,NULL,book,NULL,state,44,now++)==PN_OK && finish(&job,&app)==PN_OK);
+     while((s=pn_epub_app_verify_step(&app))==PN_BUSY){}
+     assert(s==PN_STALE_JOB && pn_epub_app_font_unavailable(&app) && pn_epub_app_close(&app,now++)==PN_OK);
      assert(pn_media_release(&media,&lease)==PN_OK);}
     assert(pool.used==0 && pool.live==0);
     printf("epub_fast_open verify_steps=%u\n",steps);return 0;

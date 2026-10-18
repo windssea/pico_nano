@@ -450,6 +450,27 @@ pn_status_t pn_epub_app_open_job_progress(const pn_epub_open_job_t *job,uint64_t
     *bytes=r->stage>=3?r->source.size:0;*size=r->source.size;return PN_OK;
 }
 bool pn_epub_app_verify_pending(const pn_epub_app_t *app){const app_t *a=app && app->impl?app->impl:NULL;return a && (a->verify_font || a->verify_book);}
+/// 后台字体摘要失配时丢弃未经验证的外置字体，恢复常驻字体并强制重建分页键；保留用户偏好供下次修复。
+/// On deferred font digest mismatch, drop the unverified external face, restore the resident face and force a new layout key; keep the preference for the next repair.
+static pn_status_t font_verification_fallback(app_t *a){
+    if(!a)return PN_INVALID;
+    a->verify_font=false;
+    pn_font_chain_clear(&a->chain);
+    pn_font_close(&a->body);
+    if(a->font_file.handle)(void)pn_text_file_close(&a->font_file);
+    if(a->font_lease.ticket)(void)pn_media_release(a->media,&a->font_lease);
+    if(a->fallback_file.handle)(void)pn_text_file_close(&a->fallback_file);
+    if(a->fallback_lease.ticket)(void)pn_media_release(a->media,&a->fallback_lease);
+    a->font_source=pn_font_reading_source();
+    a->font_unavailable=true;a->fonts_known=false;a->boot_primary[0]=0;a->live_fonts=(pn_font_preferences_t){0};
+    a->index_generation=0;a->token.generation++;
+    pn_status_t s=pn_display_set_token(&a->display,a->token);
+    a->force_full=true;
+    if(s==PN_OK)s=font_size(a,a->style.pixels);
+    if(s==PN_OK)s=pn_font_chain_init(&a->chain,a->pool,&a->body,NULL);
+    if(s==PN_OK)s=pn_epub_reader_reflow(&a->reader,&a->layout);
+    return s;
+}
 pn_status_t pn_epub_app_verify_step(pn_epub_app_t *app){
     if(!app || !app->impl)return PN_INVALID;
     app_t *a=app->impl;if(!a->verify_font && !a->verify_book)return PN_EMPTY;
@@ -462,7 +483,12 @@ pn_status_t pn_epub_app_verify_step(pn_epub_app_t *app){
     pn_status_t s=pn_text_file_verify_step(&a->verify,NULL);
     if(s==PN_BUSY || s==PN_CANCELLED)return s;
     pn_text_file_verify_close(&a->verify);
-    if(s!=PN_OK)return s;
+    if(s!=PN_OK){
+        // 字体只在首屏后复核；失配/损坏时回退常驻字体，正文继续可用，分页缓存不复用坏字体键。
+        // Fonts are verified only after the first frame; on mismatch/corruption fall back to the resident face so reading stays usable and the bad key is not reused.
+        if(a->verify_font){pn_status_t fallback=font_verification_fallback(a);if(fallback!=PN_OK)return fallback;}
+        return s;
+    }
     if(a->verify_font){a->verify_font=false;return a->verify_book?PN_BUSY:PN_OK;}
     a->verify_book=false;return PN_OK;
 }
