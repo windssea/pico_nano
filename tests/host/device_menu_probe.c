@@ -7,7 +7,7 @@
 #include "test_device_boot.c"
 #undef read_pico_sd_get_info
 #undef main
-esp_err_t read_pico_sd_get_info(read_pico_sd_info_t *info){if(getenv("PN_MENU_COLD_BOOK") || getenv("PN_SWITCH_A") || getenv("PN_TAKEOVER_BOOK")){memset(info,0,sizeof *info);info->present=info->mounted=true;return ESP_OK;}return fixture_sd_get_info(info);}
+esp_err_t read_pico_sd_get_info(read_pico_sd_info_t *info){if(getenv("PN_MENU_COLD_BOOK") || getenv("PN_SWITCH_A") || getenv("PN_TAKEOVER_BOOK") || getenv("PN_IDENTITY_PRIORITY")){memset(info,0,sizeof *info);info->present=info->mounted=true;return ESP_OK;}return fixture_sd_get_info(info);}
 #ifndef PN_DEVICE_MAIN_SOURCE
 #define PN_DEVICE_MAIN_SOURCE "../../main/app_main.c"
 #endif
@@ -222,6 +222,15 @@ static void takeover_probe(const char *path){
     assert(reader_active() && !status_page && !strcmp(selected_path,path));
     printf("takeover_probe polls=%u\n",polls);assert(stop_reader());
 }
+static void priority_probe(void){
+    assert(shelf_page && shelf_page->count>=3);
+    identity_job_stop();memset(&identity_cache,0,sizeof identity_cache);identity_cache_loaded=true;
+    identity_failed_path[0]=0;identity_next_scan=0;last_read_known=true;last_read_book=shelf_page->items[2];last_read_book.identified=false;
+    strcpy(selected_path,shelf_page->items[1].path);selected_format=shelf_page->items[1].format;selected_identified=false;
+    last_input=0;assert(tick_identity(1000000));assert(pn_identity_cache_job_path(&identity_job) && !strcmp(pn_identity_cache_job_path(&identity_job),shelf_page->items[2].path));identity_job_stop();
+    last_read_known=false;identity_next_scan=0;assert(tick_identity(2000000));assert(pn_identity_cache_job_path(&identity_job) && !strcmp(pn_identity_cache_job_path(&identity_job),shelf_page->items[1].path));identity_job_stop();
+    printf("priority_probe ok\n");
+}
 #endif
 int main(void){
     assert(pn_pool_init(&pool,6u*1024u*1024u,NULL,NULL,NULL)==PN_OK);assert(read_pico_init(&hardware)==ESP_OK);
@@ -234,7 +243,8 @@ int main(void){
     const char *cold=getenv("PN_MENU_COLD_BOOK");if(cold){library();cold_book_probe(cold);goto closed;}
 #if PN_TEST_FOREGROUND_OPEN
     {const char *sa=getenv("PN_SWITCH_A"),*sb=getenv("PN_SWITCH_B");if(sa && sb){switch_probe(sa,sb);goto closed;}
-     const char *takeover=getenv("PN_TAKEOVER_BOOK");if(takeover){takeover_probe(takeover);goto closed;}}
+     const char *takeover=getenv("PN_TAKEOVER_BOOK");if(takeover){takeover_probe(takeover);goto closed;}
+     if(getenv("PN_IDENTITY_PRIORITY")){library();priority_probe();goto closed;}}
 #endif
     probe("library-cold",library,1);
     // 用真实用户系统字体验证索引重建不关闭字体或读取字体数据。/ Verify with the supplied system face that index rebuild neither closes it nor reads font data.

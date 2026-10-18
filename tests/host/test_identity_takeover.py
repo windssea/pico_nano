@@ -23,6 +23,13 @@ result = subprocess.run([sys.argv[1]], env=env, capture_output=True, text=True, 
 assert result.returncode == 0, (result.stdout, result.stderr)
 assert 'takeover_probe polls=' in result.stdout and 'menu_probe closed_pool_zero=1' in result.stdout, (result.stdout, result.stderr)
 print(next(line for line in result.stdout.splitlines() if line.startswith('takeover_probe')))
+# 预计算顺序：最近阅读优先于当前选择；测试结束清理状态。
+# Precompute priority: last-read before selected; clean state afterwards.
+for name in ('aaa.txt', 'bbb.txt', 'ccc.txt'):
+    (root / name).write_text('priority order example\n' * 200, encoding='utf-8')
+priority = subprocess.run([sys.argv[1]], env=dict(os.environ, PN_IDENTITY_PRIORITY='1'), capture_output=True, text=True, timeout=120)
+assert priority.returncode == 0 and 'priority_probe ok' in priority.stdout, (priority.stdout, priority.stderr)
+print('priority_probe ok')
 # 不给同一容器里的后续启动用例留下书籍/进度状态。/ Leave no book/progress state for later boot cases in the same container.
 shutil.rmtree(root)
 shutil.rmtree(state)
