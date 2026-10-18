@@ -206,8 +206,8 @@ static void opening_case(const char *path){
         }else assert(!pn_hot_session_take_prepared(&h,&media,path,PN_BOOK_EPUB,&item.expected,1,2,&t,&e) && !h.opening.impl && !h.media && e.impl && screen.calls==shown);
         assert(!step(&t,&e,PN_APP_OPEN,3,&screen) && !pn_epub_app_close(&e,4) && pool.used==used && pool.live==live && !pn_media_active(&media) && !menu.drops && !menu.owner.pins);
     }
-    // ZIP入口取消可重试；出版物构造中取消必须释放私有任务，不能交出半成品。
-    // ZIP-entry cancellation can retry; cancellation inside publication construction must dispose the private job, never transfer a partial app.
+    // ZIP及摘要后的校验取消均可接续，不能交出半成品或重算已完成摘要。
+    // Cancellation in ZIP or post-hash validation resumes without publishing a partial app or repeating the completed hash.
     unsigned zip_cancelled=0,metadata_cancelled=0;
     for(unsigned checkpoint=2;checkpoint<=128;checkpoint*=4){
         for(unsigned metadata=0;metadata<2;metadata++){
@@ -221,9 +221,9 @@ static void opening_case(const char *path){
             pn_status_t status=pn_hot_session_source_step(&h,1);pn_cancel_leave(&scope);
             assert((status==PN_CANCELLED || status==PN_BUSY) && !h.epub.impl && !h.prepared && screen.calls==shown);
             if(status==PN_CANCELLED){
-                if(metadata){metadata_cancelled++;assert(!h.opening.impl && !pn_hot_session_source_pending(&h));}
-                else{
-                    zip_cancelled++;assert(pn_hot_session_source_pending(&h));unsigned phases=0;
+                if(metadata)metadata_cancelled++;else zip_cancelled++;
+                {
+                    assert(pn_hot_session_source_pending(&h));unsigned phases=0;
                     while(pn_hot_session_source_pending(&h)){pn_status_t continued=pn_hot_session_source_step(&h,1);assert(++phases<4096 && (continued==PN_BUSY || continued==PN_OK));}
                     assert(h.prepared);
                 }

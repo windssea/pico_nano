@@ -39,6 +39,8 @@ pn_status_t pn_zip_scan_job_begin(pn_zip_job_t *,pn_pool_t *,const pn_text_sourc
 /// The full job's 4096-byte/eight-read/32-transition budgets apply; success returns only a scan awaiting sequential feed and finish, never local-header validation.
 /// BUSY继续，CANCELLED保留，其他错误释放；完整job与scan job不能混用step。/ BUSY continues, CANCELLED retains, other errors release; never mix full-job and scan-job step APIs.
 pn_status_t pn_zip_scan_job_step(pn_zip_job_t *,pn_zip_scan_t *);
+/// 接管scan并分步补齐本地头/重叠/重名校验，不重读中央目录；成功才清空scan。/ Adopt a scan and finish local-header/overlap/duplicate checks incrementally without rereading the directory; clear the scan only on successful adoption.
+pn_status_t pn_zip_scan_finish_job_begin(pn_zip_job_t *,pn_zip_scan_t *);
 /// 分步打开：先校验EOCD/中央目录；之后把整文件顺序读到的字节交给feed，本地头/描述符在流过时校验，免去逐条随机读。
 /// Staged open: validate EOCD/central directory first; then feed bytes read sequentially across the file so local headers/descriptors are checked as they stream past, avoiding per-entry random reads.
 pn_status_t pn_zip_scan_begin(pn_zip_scan_t *scan,pn_pool_t *pool,const pn_text_source_t *source);

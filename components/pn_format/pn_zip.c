@@ -191,7 +191,8 @@ static void capture_validate(archive_t *a,entry_t *e){
     if(c->descriptor_length){a->serve_descriptor=c->descriptor;a->serve_descriptor_offset=c->descriptor_offset;a->serve_descriptor_length=c->descriptor_length;}
     pn_status_t status=check_entry(a,e);
     a->serve_head=a->serve_descriptor=NULL;a->serve_head_length=a->serve_descriptor_length=0;
-    if(status!=PN_OK && c->status==PN_OK)c->status=status;
+    // 输入暂停不污染归档：此条仍未checked，finish会重新完整验证。/ An input pause must not poison the archive: this entry remains unchecked and finish validates it fully again.
+    if(status!=PN_OK && status!=PN_CANCELLED && c->status==PN_OK)c->status=status;
     capture_next(a);
 }
 static void capture_feed(archive_t *a,uint64_t off,const uint8_t *bytes,size_t n){

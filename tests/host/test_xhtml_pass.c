@@ -5,14 +5,18 @@
 #include "test_semantic_cache.c"
 #undef main
 #include "pn_resource.h"
+#include "pn_profile.h"
 #include <stdlib.h>
-static unsigned xml_calls,chapter_opens;static uint64_t chapter_bytes;static bool fail_xml_once;
+static unsigned xml_calls,chapter_opens;static uint64_t chapter_bytes;static bool fail_xml_once,fail_tail;
+static unsigned known_passes,fresh_passes;
+static uint64_t compat_clock(void *ctx){(void)ctx;return 0;}
+static void compat_emit(void *ctx,const pn_profile_event_t *e){(void)ctx;if(!strcmp(e->phase,"epub.compat-known"))known_passes++;if(!strcmp(e->phase,"epub.compat"))fresh_passes++;}
 pn_status_t __real_pn_xml_parse(pn_pool_t *,const pn_xml_input_t *,const pn_xml_hooks_t *,void *,uint64_t,const uint8_t[16]);
 pn_status_t __wrap_pn_xml_parse(pn_pool_t *p,const pn_xml_input_t *i,const pn_xml_hooks_t *h,void *c,uint64_t limit,const uint8_t s[16]){xml_calls++;if(fail_xml_once){fail_xml_once=false;p->fail_at=p->attempts+1;}return __real_pn_xml_parse(p,i,h,c,limit,s);}
 pn_status_t __real_pn_epub_chapter_open(pn_epub_t *,const char *,pn_epub_chapter_input_t *);
 pn_status_t __wrap_pn_epub_chapter_open(pn_epub_t *e,const char *path,pn_epub_chapter_input_t *i){chapter_opens++;return __real_pn_epub_chapter_open(e,path,i);}
 pn_status_t __real_pn_epub_chapter_read(void *,uint8_t *,size_t,size_t *);
-pn_status_t __wrap_pn_epub_chapter_read(void *ctx,uint8_t *p,size_t n,size_t *size){pn_status_t s=__real_pn_epub_chapter_read(ctx,p,n,size);chapter_bytes+=*size;return s;}
+pn_status_t __wrap_pn_epub_chapter_read(void *ctx,uint8_t *p,size_t n,size_t *size){pn_status_t s=__real_pn_epub_chapter_read(ctx,p,n,size);chapter_bytes+=*size;return fail_tail && s==PN_EMPTY?PN_CORRUPT:s;}
 typedef struct {digest_t digest;unsigned resets;bool short_page,detach,has_anchor,fail_once;pn_xhtml_position_t anchor;uint64_t anchor_order;char anchor_id[PN_RESOURCE_FRAGMENT_MAX];pn_media_t *media;} consumer_t;
 static void consumer_init(consumer_t *c){c->digest=(digest_t){.hash=UINT64_C(14695981039346656037)};c->has_anchor=false;c->anchor=(pn_xhtml_position_t){0};c->anchor_order=0;*c->anchor_id=0;}
 static pn_status_t consume(void *ctx,const pn_xhtml_event_t *e){consumer_t *c=ctx;pn_status_t s=event(&c->digest,e);if(e->kind==PN_XHTML_ANCHOR && !c->has_anchor){c->has_anchor=true;c->anchor=e->position;c->anchor_order=c->digest.count;assert(strlen(e->value)<sizeof c->anchor_id);strcpy(c->anchor_id,e->value);}if(c->detach && c->digest.count==32)assert(pn_media_detach(c->media)==PN_OK);if(c->fail_once && c->digest.count==32){c->fail_once=false;return PN_NO_MEMORY;}return s;}
@@ -42,6 +46,17 @@ int main(int argc,char **argv){
     // 注入合并XML初始化失败，释放额外峰值后只回退一次，消费者不重复累计。/ Inject combined XML-init failure; release the extra peak and retry once without duplicate consumer output.
     pn_xhtml_cache_close(&epub);pool.cache_caps[PN_CACHE_CHAPTER]=0;consumer_t baseline={0};consumer_init(&baseline);pn_xhtml_stats_t expected;assert(run(&pool,&epub,"normal.xhtml",&baseline,false,&expected)==PN_OK);consumer_t recovered={0};consumer_init(&recovered);pn_xhtml_stats_t actual;counters();fail_xml_once=true;assert(run(&pool,&epub,"normal.xhtml",&recovered,true,&actual)==PN_OK && xml_calls==3 && recovered.resets==1);pool.fail_at=0;equal(baseline,recovered,expected,actual);
     recovered=(consumer_t){.fail_once=true};consumer_init(&recovered);counters();assert(run(&pool,&epub,"normal.xhtml",&recovered,true,&actual)==PN_OK && xml_calls==3 && recovered.resets==1);equal(baseline,recovered,expected,actual);
+    // 已验证兼容模式在记录回收后仍可复用，但仍完整读取；输出事件/位置/统计逐项相同。
+    // Reuse a verified compatible mode after record eviction, still reading fully and matching every output event/location/statistic.
+    pn_xhtml_cache_close(&epub);pn_profile_port(compat_clock,compat_emit,NULL);pool.cache_caps[PN_CACHE_CHAPTER]=384u*1024u;
+    consumer_t compat_before={0};consumer_init(&compat_before);pn_xhtml_stats_t compat_stats;
+    assert(run(&pool,&epub,"compatible.xhtml",&compat_before,true,&compat_stats)==PN_OK && fresh_passes==1 && !known_passes);
+    pn_cache_reclaim(&pool,SIZE_MAX);consumer_t compat_after={0};consumer_init(&compat_after);pn_xhtml_stats_t compat_again;counters();
+    assert(run(&pool,&epub,"compatible.xhtml",&compat_after,true,&compat_again)==PN_OK && fresh_passes==1 && known_passes==1 && chapter_bytes>0);
+    equal(compat_before,compat_after,compat_stats,compat_again);
+    pn_cache_reclaim(&pool,SIZE_MAX);compat_after=(consumer_t){0};consumer_init(&compat_after);compat_again=(pn_xhtml_stats_t){.elements=12345};fail_tail=true;
+    assert(run(&pool,&epub,"compatible.xhtml",&compat_after,true,&compat_again)==PN_CORRUPT && compat_again.elements==12345 && known_passes==2 && !pn_xhtml_cache_pending(&epub));
+    fail_tail=false;pn_profile_port(NULL,NULL,NULL);
     const char *bad[]={"bad.xhtml","crc.xhtml"};for(unsigned i=0;i<2;i++){
         // 词法错误允许一次有界重试，但坏根仍拒绝；CRC错误不重试，均不得形成有效热缓存。/ Lexical errors get one bounded retry but a bad root still fails; CRC errors never retry, and neither path may form a valid hot cache.
         unsigned passes=i==0?2u:1u,resets=i==0?1u:0u;

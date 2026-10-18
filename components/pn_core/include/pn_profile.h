@@ -5,11 +5,15 @@
 #include "pn_alloc.h"
 #include "pn_types.h"
 typedef struct {
+    uint64_t bytes,reads,seeks,hits; ///< 累计实际文件IO，不含推测工作 / Actual cumulative file I/O, excluding speculative estimates
+} pn_profile_io_t;
+typedef struct {
     const char *phase; ///< 借用静态阶段名称 / Borrowed static phase name
     uint64_t elapsed_us; ///< 单调时钟耗时，包含嵌套阶段 / Monotonic elapsed time including nested phases
     pn_status_t status; ///< 操作真实结果，失败样本不隐藏 / Actual operation result, including failures
     size_t begin_bytes,end_bytes,peak_bytes,attempts; ///< 本阶段池内起止/同时峰值/请求数 / Phase start/end/simultaneous peak and requests
     const pn_pool_t *pool; ///< 仅回调期间借用，由当前owner独占 / Borrowed only during callback, exclusively owned by the caller
+    pn_profile_io_t io; ///< 可选IO快照，普通scope为零 / Optional I/O snapshot, zero for ordinary scopes
 } pn_profile_event_t;
 typedef uint64_t (*pn_profile_clock_fn)(void *); ///< 单调微秒时钟 / Monotonic microsecond clock
 typedef void (*pn_profile_emit_fn)(void *,const pn_profile_event_t *); ///< 同步只读回调，不得递归产品操作 / Synchronous read-only callback without recursive product operations
@@ -23,6 +27,10 @@ typedef struct pn_profile_span {
 } pn_profile_span_t;
 /// 当前线程装配诊断，NULL禁用；只在无活动scope时修改。/ Configure this thread while no scopes are active; NULL disables diagnostics.
 void pn_profile_port(pn_profile_clock_fn,pn_profile_emit_fn,void *);
+/// 仅诊断启用时读取微秒时钟；禁用为0，不作为产品调度时钟。/ Read microseconds only with diagnostics enabled; zero when disabled, never a product scheduling clock.
+uint64_t pn_profile_time(void);
+/// 输出跨让出的累计诊断，不保留栈scope、不分配；IO可NULL。/ Emit a cumulative observation across yields without retaining stack scopes or allocating; I/O may be NULL.
+void pn_profile_observe(pn_pool_t *,const char *,pn_status_t,uint64_t,const pn_profile_io_t *);
 /// 开始栈scope，必须在同线程逆序end；禁用时不读时钟。/ Begin a stack scope; end in reverse order on the same thread; disabled scopes do not read the clock.
 void pn_profile_begin(pn_profile_span_t *,pn_pool_t *,const char *);
 /// 结束并同步输出；回调耗时不计入本阶段。/ End and emit synchronously; callback time is excluded from this phase.

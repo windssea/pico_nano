@@ -100,6 +100,7 @@ static pn_status_t zip_job_advance(zip_job_t *j){
     case ZJ_SORT_OFFSET:return zip_job_sort(j,false);
     case ZJ_LOCAL_NAME:
         if(j->index==a->count){j->index=1;j->phase=ZJ_OVERLAP;break;}
+        if(e->checked){j->index++;j->entries++;break;}
         s=zip_job_read(j,e->name_pos,(uint8_t *)j->expected,e->name_length);if(s!=PN_OK)return s;j->expected[e->name_length]=0;j->phase=ZJ_LOCAL_HEAD;break;
     case ZJ_LOCAL_HEAD:
         if(e->local>=a->directory || a->directory-e->local<30)return PN_CORRUPT;
@@ -162,6 +163,15 @@ pn_status_t pn_zip_job_begin(pn_zip_job_t *job,pn_pool_t *pool,const pn_text_sou
 pn_status_t pn_zip_scan_job_begin(pn_zip_job_t *job,pn_pool_t *pool,const pn_text_source_t *source){
     pn_status_t s=pn_zip_job_begin(job,pool,source);if(s==PN_OK)((zip_job_t *)job->impl)->directory_only=true;return s;
 }
+pn_status_t pn_zip_scan_finish_job_begin(pn_zip_job_t *job,pn_zip_scan_t *scan){
+    if(!job || !scan || !scan->impl)return PN_INVALID;
+    if(job->impl)return PN_BUSY;
+    archive_t *a=scan->impl;pn_status_t s=current(a);if(s!=PN_OK)return s;
+    if(a->capture && a->capture->status==PN_CANCELLED)a->capture->status=PN_OK;
+    if(a->capture && a->capture->status!=PN_OK)return a->capture->status;
+    zip_job_t *j=pn_alloc_tagged(a->pool,PN_MEM_DOCUMENT,sizeof *j);if(!j)return PN_NO_MEMORY;
+    *j=(zip_job_t){.archive=a,.phase=ZJ_LOCAL_NAME};job->impl=j;scan->impl=NULL;return PN_OK;
+}
 static pn_status_t zip_job_step(pn_zip_job_t *job,void **out,bool scan){
     if(!job || !job->impl || !out)return PN_INVALID;
     if(*out)return PN_BUSY;
@@ -174,7 +184,7 @@ static pn_status_t zip_job_step(pn_zip_job_t *job,void **out,bool scan){
     if(s==PN_OK){
         archive_t *a=j->archive;
         if(scan){a->capture=pn_alloc_tagged(a->pool,PN_MEM_DOCUMENT,sizeof *a->capture);if(a->capture)*a->capture=(capture_t){.status=PN_OK};}
-        else{pn_free(a->directory_bytes);a->directory_bytes=NULL;a->directory_size=0;}
+        else{pn_free(a->capture);a->capture=NULL;pn_free(a->directory_bytes);a->directory_bytes=NULL;a->directory_size=0;}
         j->archive=NULL;*out=a;pn_zip_job_close(job);
     }else if(s!=PN_BUSY && s!=PN_CANCELLED)pn_zip_job_close(job);
     pn_profile_end(&span,s);return s;

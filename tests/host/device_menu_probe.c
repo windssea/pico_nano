@@ -24,6 +24,10 @@ static size_t face_opens,glyph_loads,glyph_advances,glyph_renders,stats;
 static uint64_t glyph_us;
 static bool fail_font_stat;
 static uint64_t monotonic_us(void){struct timespec t;assert(!clock_gettime(CLOCK_MONOTONIC,&t));return (uint64_t)t.tv_sec*1000000u+(uint64_t)t.tv_nsec/1000u;}
+static uint64_t open_profile_clock(void *ctx){(void)ctx;return monotonic_us();}
+static void open_profile_emit(void *ctx,const pn_profile_event_t *e){
+    (void)ctx;printf("profile phase=%s elapsed_us=%llu status=%d begin=%zu end=%zu peak=%zu attempts=%zu bytes=%llu reads=%llu seeks=%llu hits=%llu backend=host\n",e->phase,(unsigned long long)e->elapsed_us,(int)e->status,e->begin_bytes,e->end_bytes,e->peak_bytes,e->attempts,(unsigned long long)e->io.bytes,(unsigned long long)e->io.reads,(unsigned long long)e->io.seeks,(unsigned long long)e->io.hits);
+}
 FILE *__real_fopen(const char *,const char *);
 FILE *__wrap_fopen(const char *path,const char *mode){
     unsigned kind=strstr(path,".ttf") || strstr(path,".TTF")?FONT_IO:strstr(path,".pni")?INDEX_IO:strstr(path,".pnc")?COVER_IO:strstr(path,"/progress/")?STATE_IO:OTHER_IO;
@@ -164,6 +168,10 @@ static void cold_book_probe(const char *path){
         assert(!opening && !foreground_open.impl && !reader_active());recent_loaded=false;assert(load_recent()==PN_OK && !recent_snapshot->count);
         watching=false;printf("cold_cancel case=%s no_record=1 released=1 polls=%u\n",scenario,polls);return;
     }
+    if(!scenario && getenv("PN_OPEN_PREPARE_FIRST")){
+        opening_overlap=true;unsigned steps=0;while(reader_overlap(NULL)==PN_OK)assert(++steps<200000);opening_overlap=false;
+        assert(loading_layout_ready && presents==before+1);printf("first_prepare layout=1 steps=%u\n",steps);
+    }
     while(opening){assert(++polls<65536);bool worked=tick_opening();assert(worked);if(opening){assert(!reader_active() && presents==before+1);recent_loaded=false;assert(load_recent()==PN_OK && !recent_snapshot->count);}}
     if(scenario){assert(!strcmp(scenario,"wrong-id") && !reader_active() && !foreground_open.impl && status_page);recent_loaded=false;assert(load_recent()==PN_OK && !recent_snapshot->count);watching=false;printf("cold_cancel case=%s no_record=1 released=1 polls=%u\n",scenario,polls);return;}
 #endif
@@ -199,7 +207,10 @@ static void switch_idle(void){
 static void overlap_open(const char *path){
     strcpy(selected_path,path);selected_format=PN_BOOK_EPUB;selected_identified=false;selected_size=0;
     start_reader();assert(opening && foreground_open.impl && !reader_active());
-    opening_overlap=true;unsigned n=0;while(foreground_open.impl){assert(++n<200000);(void)reader_overlap(NULL);}opening_overlap=false;
+    opening_overlap=true;unsigned n=0;while(foreground_open.impl){assert(++n<200000);(void)reader_overlap(NULL);}
+    unsigned shown=presents;while(reader_overlap(NULL)==PN_OK){assert(++n<200000 && presents==shown);}
+    opening_overlap=false;
+    assert(loading_layout_ready && presents==shown);
     assert(opening && opening_overlap_result==PN_OK && epub.impl);
     assert(tick_opening() && !opening && reader_active() && !status_page && opening_overlap_result==PN_BUSY);printf("overlap_open steps=%u\n",n);
 }
@@ -214,8 +225,11 @@ static void switch_probe(const char *a,const char *b){
 }
 static void takeover_probe(const char *path){
     assert(stop_reader());strcpy(selected_path,path);selected_format=PN_BOOK_EPUB;selected_identified=false;selected_size=0;
+    identity_cache_ready();
     assert(pn_identity_cache_job_begin(&identity_job,&pool,&sd_media,path)==PN_OK);
     start_reader();assert(identity_takeover_active && opening && !foreground_open.impl);
+    void *pending=identity_job.impl;pn_cancel_scope_t pause;pn_cancel_enter(&pause,cancelled_probe,NULL);
+    assert(tick_identity_takeover() && identity_job.impl==pending && identity_takeover_active && !foreground_open.impl);pn_cancel_leave(&pause);
     unsigned polls=0;while(identity_takeover_active){assert(++polls<200000);last_input=now_ms();(void)tick_identity_takeover();}
     while(opening){assert(++polls<400000);(void)tick_opening();}
     if(!(reader_active() && !status_page && !strcmp(selected_path,path)))fprintf(stderr,"takeover active=%d opening=%d fg=%d reader=%d status=%d shelf=%d path=%s\n",(int)identity_takeover_active,(int)opening,(int)(foreground_open.impl!=NULL),(int)reader_active(),(int)status_page,(int)shelf_mode,selected_path);
@@ -229,10 +243,14 @@ static void priority_probe(void){
     strcpy(selected_path,shelf_page->items[1].path);selected_format=shelf_page->items[1].format;selected_identified=false;
     last_input=0;assert(tick_identity(1000000));assert(pn_identity_cache_job_path(&identity_job) && !strcmp(pn_identity_cache_job_path(&identity_job),shelf_page->items[2].path));identity_job_stop();
     last_read_known=false;identity_next_scan=0;assert(tick_identity(2000000));assert(pn_identity_cache_job_path(&identity_job) && !strcmp(pn_identity_cache_job_path(&identity_job),shelf_page->items[1].path));identity_job_stop();
+    identity_next_scan=0;home_mode=false;shelf_focus=0;last_input=3000000;
+    assert(!tick_identity(last_input+299) && !identity_job.impl);
+    assert(tick_identity(last_input+300) && !strcmp(pn_identity_cache_job_path(&identity_job),shelf_page->items[0].path));identity_job_stop();shelf_focus=-1;
     printf("priority_probe ok\n");
 }
 #endif
 int main(void){
+    if(getenv("PN_OPEN_PROFILE"))pn_profile_port(open_profile_clock,open_profile_emit,NULL);
     assert(pn_pool_init(&pool,6u*1024u*1024u,NULL,NULL,NULL)==PN_OK);assert(read_pico_init(&hardware)==ESP_OK);
     pn_media_init(&sd_media);pn_media_init(&data_media);pn_media_init(&wallpaper_media);
     assert(pn_media_attach(&sd_media,1)==PN_OK && pn_media_attach(&data_media,2)==PN_OK);data_ready=true;

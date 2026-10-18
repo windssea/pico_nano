@@ -80,9 +80,9 @@ bool pn_epub_app_font_recovery_pending(const pn_epub_app_t *);
 /// 空闲推进一块（32KiB）：EMPTY无任务，BUSY/CANCELLED待续，OK完成；STALE_JOB内容已变，调用方关闭后按完整路径重开。
 /// Advance one 32 KiB block when idle: EMPTY without work, BUSY/CANCELLED continue, OK done; STALE_JOB for changed content, after which callers close and reopen through the complete path.
 pn_status_t pn_epub_app_verify_step(pn_epub_app_t *);
-/// 目录逐步4096B/8读，SHA逐步最多32KiB，BUSY待续；元信息/字体仍同步。仅全部成功才交出空app；错误须close。/ Directory steps allow 4096 bytes/eight reads, SHA steps at most 32 KiB; BUSY continues, metadata/fonts remain synchronous. Transfer only on full success to an empty app; close after errors.
+/// 目录/本地头逐步4096B/8读，SHA最多32KiB，出版物XML每步4KiB；状态/字体分阶段。全部成功才交出app；错误须close。/ Directory/local-header steps allow 4096 bytes/eight reads, SHA at most 32 KiB and publication XML 4 KiB; state/fonts are separate stages. Transfer only on full success; close after errors.
 pn_status_t pn_epub_app_open_job_step(pn_epub_open_job_t *,pn_epub_app_t *);
-/// 仅边界/摘要阶段取消可继续；元信息构造内取消须close；纯查询。/ Boundary/hash cancellation is resumable; cancellation inside metadata construction requires close; pure query.
+/// 边界/目录/摘要/XML取消可继续；状态/字体构造内取消须close；纯查询。/ Boundary/directory/hash/XML cancellation is resumable; cancellation inside state/font construction requires close; pure query.
 bool pn_epub_app_open_job_pending(const pn_epub_open_job_t *);
 /// 只查询完整摘要进度，不表示出版物已验证或可以显示。/ Query full-hash progress, never publication validation or permission to display.
 pn_status_t pn_epub_app_open_job_progress(const pn_epub_open_job_t *,uint64_t *,uint64_t *);

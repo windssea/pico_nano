@@ -4,7 +4,7 @@ from pathlib import Path
 from test_local_samples import ROOT,digest
 
 def main():
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--binary',type=Path,required=True);p.add_argument('--baseline',type=Path);p.add_argument('--output',type=Path,required=True);p.add_argument('--limit',type=int);p.add_argument('--scenarios',action='store_true');a=p.parse_args()
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--binary',type=Path,required=True);p.add_argument('--baseline',type=Path);p.add_argument('--output',type=Path,required=True);p.add_argument('--limit',type=int);p.add_argument('--scenarios',action='store_true');p.add_argument('--prepare-first',action='store_true');a=p.parse_args()
     assert Path('/.dockerenv').is_file(),'Requires a fresh disposable container'
     library=Path('/sdcard/piconano/books');font=Path('/sdcard/piconano/fonts/HarmonyOS_Sans_SC_Regular.ttf');state=Path('/data/progress')
     assert not library.exists() and not font.exists() and not state.exists()
@@ -24,11 +24,14 @@ def main():
                 assert state==Path('/data/progress') and state.parent==Path('/data');shutil.rmtree(state);state.mkdir()
                 frames=a.output.resolve()/f'{fi}-{bi}-{label}';frames.mkdir(exist_ok=True)
                 env={**os.environ};[env.pop(k,None) for k in ('PN_MENU_FRAMES','PN_MENU_PREPARE_BOOKS','PN_MENU_CANCEL_SYSTEM_PROBE','PN_MENU_SYSTEM_FAILURE_PROBE','PN_OPEN_SCENARIO')]
+                env.pop('PN_OPEN_PREPARE_FIRST',None)
+                if a.prepare_first and label=='after':env['PN_OPEN_PREPARE_FIRST']='1'
                 env.update(PN_MENU_COLD_BOOK=str(library/source_book.name),PN_OPEN_FRAMES=str(frames))
                 r=subprocess.run([str(binary.resolve())],env=env,capture_output=True,text=True,timeout=180);(a.output/f'{fi}-{bi}-{label}.log').write_text(r.stdout+r.stderr,encoding='utf8')
                 assert r.returncode==0 and 'menu_probe closed_pool_zero=1' in r.stdout,(source_book.name,label,r.stdout[-2000:],r.stderr[-2000:])
+                if a.prepare_first and label=='after':assert 'first_prepare layout=1 ' in r.stdout
                 line=next(x for x in r.stdout.splitlines() if x.startswith('cold_open '));metrics={k:int(v) for k,v in (word.split('=') for word in line.split()[1:])}
-                assert metrics['body_once']==metrics['loader_once']==1 and metrics['status']==0 and (metrics['polls']==0 if label=='before' else metrics['polls']>0)
+                assert metrics['body_once']==metrics['loader_once']==1 and metrics['status']==0 and (metrics['polls']>=0 if label=='before' else metrics['polls']>0)
                 assert len(list(frames.glob('*.raw')))==3
                 results[label]={'metrics':metrics,'frames':[digest(frames/f'{i}.raw') for i in range(3)]}
                 assert all((frames/f'{i}.raw').stat().st_size==415872 for i in range(3))

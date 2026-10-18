@@ -2,7 +2,7 @@
  * 中文：嵌套局部峰值、分类释放与禁用端口。/ English: nested local peaks, classified frees and disabled ports. */
 #include "pn_profile.h"
 #include <assert.h>
-static uint64_t tick;static unsigned emitted;static pn_profile_event_t events[2];
+static uint64_t tick;static unsigned emitted;static pn_profile_event_t events[3];
 static uint64_t clock_us(void *ctx){(void)ctx;return tick;}
 static void emit(void *ctx,const pn_profile_event_t *e){(void)ctx;events[emitted++]=*e;}
 int main(void){
@@ -16,5 +16,9 @@ int main(void){
     assert(events[1].elapsed_us==40 && !events[1].end_bytes && events[1].peak_bytes==simultaneous && p.peak==global);
     assert(!p.memory[PN_MEM_FONT].used && !p.memory[PN_MEM_LAYOUT].live && p.memory[PN_MEM_FONT].allocations==1);
     p.fail_at=p.attempts+1;assert(!pn_alloc_tagged(&p,PN_MEM_IMAGE,1) && p.memory[PN_MEM_IMAGE].failures==1);
-    pn_profile_port(NULL,NULL,NULL);pn_profile_begin(&outer,&p,"off");pn_profile_end(&outer,PN_IO);assert(emitted==2 && !p.used && !p.live);return 0;
+    pn_profile_io_t io={4096,1,2,3};size_t attempts=p.attempts;
+    assert(pn_profile_time()==50);pn_profile_observe(&p,"job.wall",PN_CANCELLED,40,&io);
+    assert(emitted==3 && events[2].elapsed_us==40 && events[2].io.bytes==4096 && events[2].io.hits==3 && p.attempts==attempts);
+    pn_profile_port(NULL,NULL,NULL);pn_profile_begin(&outer,&p,"off");pn_profile_end(&outer,PN_IO);pn_profile_observe(&p,"off",PN_IO,10,&io);
+    assert(!pn_profile_time() && emitted==3 && !p.used && !p.live);return 0;
 }

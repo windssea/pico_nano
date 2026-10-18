@@ -11,6 +11,7 @@ with tempfile.TemporaryDirectory() as folder:
            'late.xhtml':opening+'<body><p class="hide">'+words+'</p><img src="http://invalid.example/a.png"/><p id="keep">'+words+'</p></body><head><style>.hide,img {display:none} p {font-weight:bold}</style></head></html>',
            'multi.xhtml':opening+head+'<head><style>p.x {text-align:left!important}</style></head>'+body+'</html>',
            'bare.xhtml':opening+body+'</html>',
+           'compatible.xhtml':opening+head+('<body><p>'+('A & B literal <Cardinal> text '*2000)+'</p></body></html>'),
            'bad.xhtml':opening+head+big+'</wrong>',
            'crc.xhtml':opening+head+big+'</html>',
            'hidden.xhtml':opening+'<body><p class="hide" id="secret">'+words+'</p></body><head><style>.hide {display:none}</style></head></html>',

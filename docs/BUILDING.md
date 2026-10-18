@@ -144,7 +144,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/run_sim.ps1
 
 ## 真机串口自动测试（诊断镜像）
 
-`python tools/dev.py firmware-diag`构建`build-diag`，仅在板级默认上开启`CONFIG_PN_TEST_CONSOLE`，应用版本为`<版本>-diag`，设置页可见；产品/发布构建不编译该控制台，钩子为空。指令语法与合成时间线在`components/pn_ui/pn_test_console.c`，设备与模拟器共用；设备在输入任务的触摸采样层用合成采样替代一次读数，因此三键、阅读手势和底栏导航仍走产品原代码，但不覆盖触控芯片I2C/固件本身。截屏在显示任务两job之间读取epdiy已显示参考（后缓冲），回传board布局4bpp并逐行CRC，`known=0`表示参考未知。每个显示job完成后上报`PNT 0 display kind start end ms status`，时间为设备esp_timer毫秒。
+`python tools/dev.py firmware-diag`构建`build-diag`，在板级默认上开启`CONFIG_PN_TEST_CONSOLE`与`CONFIG_PN_PROFILE`，应用版本为`<版本>-diag`，设置页可见；产品/发布构建关闭性能计时且不编译该控制台，钩子为空。指令语法与合成时间线在`components/pn_ui/pn_test_console.c`，设备与模拟器共用；设备在输入任务的触摸采样层用合成采样替代一次读数，因此三键、阅读手势和底栏导航仍走产品原代码，但不覆盖触控芯片I2C/固件本身。截屏在显示任务两job之间读取epdiy已显示参考（后缓冲），回传board布局4bpp并逐行CRC，`known=0`表示参考未知。每个显示job完成后上报`PNT 0 display kind start end ms status`，时间为设备esp_timer毫秒。
 
 | 指令（每行`<seq> <verb> ...`） | 作用 |
 | --- | --- |
@@ -193,6 +193,10 @@ python tools/dev.py profile --archive "build-dev/sim-library/piconano/books/05-�
 ```
 
 profile每次生成 `build-dev/profile/<随机ID>/` 隔离状态与summary.json；保留源书SHA、轮数、预算、后端、冷/热条件、失败计数和各阶段p50/p95/max。普通软件显示回调不测面板，OS缓存通常未受控。相同书/字体/布局/工具链对照，不能修改原书后宣称同样本提速。
+
+真实设备控制器的主机诊断可在独立一次性容器运行`tools/test_local_foreground_open.py --binary build-host/device_menu_probe --output build-dev/foreground-profile --prepare-first`，并给容器传入`PN_OPEN_PROFILE=1`。夹具复制用户样本，比较加载期间提前准备后的完整首屏/翻页；`--baseline`可指定另一独立二进制做逐字节对照。`--scenarios`另覆盖取消、锁屏、换卡、USB、显示失败、错身份和多书切换。容器需全新`/sdcard`、`/data`，不要对用户挂载目录运行夹具。原`profile`入口仍调用同步开书，不能代替这个真实产品job入口。
+
+设备诊断关注`epub.open.request/loading/first-frame`及`full-wall/trusted-wall/wait/max-step`，具体分步为`directory/identity/zip-finish/publication/metadata/state/fonts/sources`；`content.sha-read/update`区分增量源回调与摘要更新，读取回调可能含ZIP feed校验，进一步看`storage.file-read/seek`中的真实stdio调用耗时，不能把整个回调都当读卡时间；`idle.*`观察后台预算。墙钟/最长单步与嵌套子阶段不相加；IO快照是本job累计值，汇总工具的`max_io`取最大值而非相加。发布配置不输出这些新增高频诊断，诊断镜像也不在高频步骤或扫描中遍历堆/栈。首屏完整校验与图像质量保持，主机吞吐/软件回执不能当实卡/面板实测。
 
 主机 `-Timing`/profile记录分类账本及阶段局部同时峰值；分类峰值不相加，嵌套耗时不重复相加。设备可单独用 `CONFIG_PN_PROFILE=y` 做诊断，但不自动刷机，默认发布配置关闭。诊断日志有测量成本；记录是否开启，池外堆和任务栈必须设备独立测量。
 

@@ -14,7 +14,9 @@ def summarize(text):
             continue
         fields = dict(re.findall(r"(\w+)=([^\s]+)", line))
         key = (fields.get("backend", "unknown"), fields["phase"])
-        row = groups.setdefault(key, {"times": [], "failures": 0, "peak": 0, "attempts": [], "statuses": {}})
+        row = groups.setdefault(key, {"times": [], "failures": 0, "peak": 0, "attempts": [], "statuses": {}, "io": {k: 0 for k in ("bytes", "reads", "seeks", "hits")}})
+        for counter in row["io"]:
+            row["io"][counter] = max(row["io"][counter], int(fields.get(counter, 0)))
         row["times"].append(int(fields["elapsed_us"]))
         row["failures"] += int(fields["status"]) != 0
         status = fields["status"]
@@ -28,7 +30,7 @@ def summarize(text):
         output.append({"backend": backend, "phase": phase, "samples": len(values),
                        "non_ok": row["failures"], "statuses": row["statuses"], "p50_us": percentile(.5),
                        "p95_us": percentile(.95), "max_us": values[-1],
-                       "max_pool_phase_bytes": row["peak"], "max_attempts": max(row["attempts"])})
+                       "max_pool_phase_bytes": row["peak"], "max_attempts": max(row["attempts"]), "max_io": row["io"]})
     return output
 
 

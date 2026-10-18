@@ -31,6 +31,21 @@ static void directory_job(pn_zip_scan_t *scan,pn_pool_t *pool,const pn_text_sour
     pn_cancel_leave(&scope);m->cancel=m->after_cancel=false;assert(s==PN_OK && scan->impl && !job.impl);
     pn_zip_job_close(&job);
 }
+static pn_status_t finish_job(pn_zip_scan_t *scan,pn_zip_t *zip,memory_t *m){
+    pn_zip_job_t job={0};pn_status_t s=pn_zip_scan_finish_job_begin(&job,scan);
+    if(s==PN_OK){
+        pn_cancel_scope_t scope;pn_cancel_enter(&scope,cancelled,m);unsigned steps=0;
+        do{
+            unsigned reads=m->reads;size_t bytes=m->read_bytes;m->cancel=true;
+            assert(pn_zip_job_step(&job,zip)==PN_CANCELLED && !zip->impl && m->reads==reads);
+            m->cancel=false;m->in_step=true;s=pn_zip_job_step(&job,zip);m->in_step=false;
+            assert(m->reads-reads<=8 && m->read_bytes-bytes<=4096 && ++steps<1000000);
+            if(s==PN_BUSY)assert(job.impl && !zip->impl);
+        }while(s==PN_BUSY || s==PN_CANCELLED);
+        pn_cancel_leave(&scope);m->cancel=false;
+    }
+    pn_zip_scan_abort(scan);pn_zip_job_close(&job);return s;
+}
 int main(int argc,char **argv){
     assert(argc>=3 && argc%2==1);unsigned seed=20261014u;
     for(int i=1;i+1<argc;i+=2){
@@ -41,18 +56,21 @@ int main(int argc,char **argv){
         for(unsigned round=0;round<8;round++){
             pn_zip_scan_t scan={0};pn_zip_t staged={0};if(round<4)assert(pn_zip_scan_begin(&scan,&pool,&source)==PN_OK);else directory_job(&scan,&pool,&source,&m,round>=6);
             // 随机块大小顺序喂入，覆盖跨块的本地头和描述符。/ Feed sequentially in random chunk sizes so headers and descriptors straddle chunks.
+            pn_cancel_scope_t feed_pause;if(round==7){m.cancel=true;pn_cancel_enter(&feed_pause,cancelled,&m);}
             for(size_t at=0;at<m.size;){seed=seed*1103515245u+12345u;size_t n=1+(seed>>8)%(round==0?7u:round==1?97u:5000u);if(n>m.size-at)n=m.size-at;pn_zip_scan_feed(&scan,at,m.bytes+at,n);at+=n;}
-            m.reads=0;pn_status_t status=pn_zip_scan_finish(&scan,&staged);assert(status==expected && !scan.impl);
+            if(round==7){pn_cancel_leave(&feed_pause);m.cancel=false;}
+            m.reads=0;pn_status_t status=round<4?pn_zip_scan_finish(&scan,&staged):finish_job(&scan,&staged,&m);assert(status==expected && !scan.impl);
             if(status==PN_OK){
                 assert(pn_zip_count(&staged)==pn_zip_count(&whole));
                 // 普通与描述符样本全部截取，finish零随机读；超大扩展允许回退读取。/ Plain and descriptor fixtures are fully captured with zero reads in finish; oversized extras may fall back.
-                if(!strstr(argv[i],"extra"))assert(m.reads==0);
+                if(round!=7 && !strstr(argv[i],"extra"))assert(m.reads==0);
                 for(uint32_t k=0;k<pn_zip_count(&staged);k++){pn_zip_info_t a,b;assert(pn_zip_info(&staged,k,&a)==PN_OK && pn_zip_info(&whole,k,&b)==PN_OK && !memcmp(&a,&b,sizeof a));
                     uint32_t index;assert(pn_zip_find(&staged,a.path,&index)==PN_OK && index==k);}
                 assert(pn_zip_close(&staged)==PN_OK);
             }
             // 未喂入也必须与整体打开一致（全部回退随机读）。/ Without feeding the result must also match the whole open (all random reads).
-            pn_zip_scan_t cold={0};pn_zip_t other={0};assert(pn_zip_scan_begin(&cold,&pool,&source)==PN_OK && pn_zip_scan_finish(&cold,&other)==expected);(void)pn_zip_close(&other);
+            pn_zip_scan_t cold={0};pn_zip_t other={0};assert(pn_zip_scan_begin(&cold,&pool,&source)==PN_OK);
+            assert((round<4?pn_zip_scan_finish(&cold,&other):finish_job(&cold,&other,&m))==expected);(void)pn_zip_close(&other);
             pn_zip_scan_t dropped={0};assert(pn_zip_scan_begin(&dropped,&pool,&source)==PN_OK);pn_zip_scan_abort(&dropped);pn_zip_scan_abort(&dropped);assert(!dropped.impl);
         }
         if(expected==PN_OK)assert(pn_zip_close(&whole)==PN_OK);

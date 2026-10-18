@@ -445,12 +445,15 @@ static pn_status_t parse_source_pass(pn_pool_t *pool,pn_epub_t *epub,const char 
 }
 static pn_status_t parse_source(pn_pool_t *pool,pn_epub_t *epub,const char *path,const uint8_t salt[16],pn_xhtml_sink_t sink,void *ctx,pn_xhtml_stats_t *stats,pn_xhtml_restart_t reset,bool *compatible){
     if(!stats)return PN_INVALID;
-    bool syntax=false,delivered=false,repaired=false;pn_xhtml_stats_t candidate;if(compatible)*compatible=false;
-    pn_status_t status=parse_source_pass(pool,epub,path,salt,sink,ctx,&candidate,reset,false,&syntax,&delivered,&repaired);
+    bool known_compat=compatible && *compatible;
+    bool syntax=known_compat,delivered=false,repaired=false;pn_xhtml_stats_t candidate;if(compatible)*compatible=false;
+    // 仅已完整验证的同源兼容章可省掉必败的严格尝试；兼容解析仍读取至CRC验证EOF。
+    // Only a fully verified same-source compatible chapter can skip the doomed strict attempt; compatible parsing still reads through CRC-verified EOF.
+    pn_status_t status=known_compat?PN_CORRUPT:parse_source_pass(pool,epub,path,salt,sink,ctx,&candidate,reset,false,&syntax,&delivered,&repaired);
     if(status!=PN_CORRUPT || !syntax || (delivered && !reset)){if(status==PN_OK)*stats=candidate;return status;}
     // 只有可撤销消费者或尚未开始正文时才能重试；绝不拼接失败尝试的暂定事件。/ Retry only resettable consumers or before body consumption, never append provisional failed events.
     if(reset)reset(ctx,0,NULL);
-    pn_profile_span_t span;pn_profile_begin(&span,pool,"epub.compat");
+    pn_profile_span_t span;pn_profile_begin(&span,pool,known_compat?"epub.compat-known":"epub.compat");
     status=parse_source_pass(pool,epub,path,salt,sink,ctx,&candidate,reset,true,&syntax,&delivered,&repaired);
     if(status==PN_OK && !repaired)status=PN_CORRUPT;
     if(status==PN_OK){*stats=candidate;if(compatible)*compatible=true;}
@@ -634,7 +637,8 @@ static pn_status_t model_replay(model_t *m,pn_epub_t *epub,pn_xhtml_sink_t sink,
 /// 在同一model对象内完整校验并构建；调用者负责选择当前章或预排槽。/ Fully validate and build into one model object; the caller selects the current chapter or the prefetch slot.
 static pn_status_t model_build(pn_pool_t *pool,pn_epub_t *epub,model_t *m,const char *path,const uint8_t salt[16],const pn_xhtml_position_t *focus,pn_xhtml_sink_t sink,pn_xhtml_done_t done,pn_xhtml_restart_t restart,void *ctx,pn_xhtml_stats_t *stats,bool window,pn_xhtml_restart_t reset){
     model_sink_t proxy={.model=m,.sink=sink,.done=done,.restart=restart,.ctx=ctx};
-    model_drop(m);strcpy(m->path,path);memcpy(m->salt,salt,16);m->busy=true;m->abandoned=m->skipped=false;
+    bool known_compat=m->compatible && !strcmp(m->path,path) && !memcmp(m->salt,salt,16);
+    model_drop(m);m->compatible=known_compat;strcpy(m->path,path);memcpy(m->salt,salt,16);m->busy=true;m->abandoned=m->skipped=false;
     m->windowing=window;m->has_focus=window && focus;if(m->has_focus)m->focus=*focus;model_reset_window(m);
     pn_xhtml_stats_t candidate;pn_profile_span_t span;pn_profile_begin(&span,pool,"epub.model-build");
     pn_status_t status=parse_source(pool,epub,path,salt,model_event,&proxy,&candidate,reset,&m->compatible);

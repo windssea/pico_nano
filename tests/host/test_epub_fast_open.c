@@ -8,6 +8,7 @@
 #include "pn_epub_app.h"
 #include "pn_font_asset.h"
 #include "pn_font_preferences.h"
+#include "pn_cancel.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -16,10 +17,28 @@ static pn_status_t capture(void *ctx,const pn_frame_t *f,pn_refresh_t profile){
     (void)profile;uint8_t *out=ctx;for(int y=0;y<f->height;y++)memcpy(out+(size_t)y*342,f->pixels+(size_t)y*f->stride,342);return PN_OK;
 }
 static pn_status_t finish(pn_epub_open_job_t *job,pn_epub_app_t *app){pn_status_t s;while((s=pn_epub_app_open_job_step(job,app))==PN_BUSY){}return s;}
+static bool stop(void *ctx){(void)ctx;return true;}
+static void opening_boundaries(pn_pool_t *pool,const char *book,const char *state){
+    pn_epub_open_job_t job={0};pn_epub_app_t app={0};unsigned steps=0;pn_status_t s;
+    assert(!pn_epub_app_open_job_begin(&job,pool,NULL,book,NULL,state,44,0));
+    do{s=pn_epub_app_open_job_step(&job,&app);assert(++steps<4096);}while(s==PN_BUSY);
+    assert(s==PN_OK && !job.impl && !pn_epub_app_discard_unshown(&app) && !pool->used);
+    for(unsigned pause=0;pause<steps;pause++){
+        assert(!pn_epub_app_open_job_begin(&job,pool,NULL,book,NULL,state,44,0));
+        for(unsigned k=0;k<pause;k++)assert(pn_epub_app_open_job_step(&job,&app)==PN_BUSY && !app.impl);
+        pn_cancel_scope_t scope;pn_cancel_enter(&scope,stop,NULL);
+        assert(pn_epub_app_open_job_step(&job,&app)==PN_CANCELLED && !app.impl && pn_epub_app_open_job_pending(&job));pn_cancel_leave(&scope);
+        if(pause&1){assert(finish(&job,&app)==PN_OK && !pn_epub_app_discard_unshown(&app));}
+        else assert(!pn_epub_app_open_job_close(&job));
+        assert(!job.impl && !pool->used && !pool->live);
+    }
+    printf("opening cancellation boundaries=%u used=0 live=0\n",steps);
+}
 int main(int argc,char **argv){
     assert(argc==4);const char *book=argv[1],*state=argv[2],*font=argv[3];
     pn_pool_t pool;assert(pn_pool_init(&pool,6u*1024u*1024u,NULL,NULL,NULL)==0);
     pn_epub_app_t app={0};pn_epub_open_job_t job={0};pn_book_id_t id;uint64_t now=1;
+    opening_boundaries(&pool,book,state);
     FILE *f=fopen(book,"rb");assert(f && !fseek(f,0,SEEK_END));long size=ftell(f);fclose(f);
     assert(pn_epub_app_open_job_begin(&job,&pool,NULL,book,NULL,state,44,now++)==PN_OK && finish(&job,&app)==PN_OK && !pn_epub_app_verify_pending(&app));
     assert(pn_epub_app_step(&app,PN_APP_OPEN,now++,capture,full)==PN_OK && pn_epub_app_identity(&app,&id)==PN_OK && pn_epub_app_close(&app,now++)==PN_OK);

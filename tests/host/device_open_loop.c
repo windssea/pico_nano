@@ -16,6 +16,15 @@ esp_err_t read_pico_sd_get_info(read_pico_sd_info_t *info){*info=(read_pico_sd_i
 static const char *book_path,*scenario;
 static unsigned rounds,phase,opening_frames;
 static void *retained_reader;
+static unsigned idle_warms,idle_checks,warms_since_check,max_warms_between_checks;
+static uint64_t idle_clock(void *ctx){(void)ctx;return (uint64_t)clock_us;}
+static void idle_observe(void *ctx,const pn_profile_event_t *e){
+    (void)ctx;
+    if(!strcmp(e->phase,"idle.verify")){idle_checks++;warms_since_check=0;}
+    if(!strcmp(e->phase,"idle.prefetch") && e->status==PN_OK && now_ms()>=last_input && now_ms()-last_input>=300 && pn_epub_app_verify_pending(&epub)){
+        idle_warms++;if(++warms_since_check>max_warms_between_checks)max_warms_between_checks=warms_since_check;
+    }
+}
 void __wrap_pn_device_async_wait(pn_device_async_t *port,unsigned n){(void)port;loop_delay(n);}
 static void loop_delay(unsigned n){
     clock_us+=(int64_t)n*1000;assert(++rounds<2000);
@@ -34,7 +43,9 @@ static void loop_delay(unsigned n){
         if(!menu_cache.pool)assert(pn_menu_cache_init(&menu_cache,&pool)==PN_OK);
         bool hit,aux;assert(pn_menu_cache_begin(&menu_cache,123,1,&hit,&aux));pn_menu_cache_commit(&menu_cache,123,1);
         assert(pn_menu_cache_bytes(&menu_cache)>0);
-        assert(pn_identity_cache_job_begin(&identity_job,&pool,&sd_media,book_path)==PN_OK);
+        // 更早的空闲调度可能已经启动任务；明确重置本用例，并沿产品预计算入口先载入缓存。
+        // Earlier idle scheduling may already have started a job; reset this scenario and load the cache as the product precompute entry does.
+        identity_job_stop();identity_cache_ready();assert(pn_identity_cache_job_begin(&identity_job,&pool,&sd_media,book_path)==PN_OK);
         opening_frames=presents;
         start_reader();assert(opening && identity_takeover_active && !foreground_open.impl && !pn_menu_cache_bytes(&menu_cache));
         phase=1;return;
@@ -55,7 +66,8 @@ static void loop_delay(unsigned n){
         assert(!pn_menu_cache_bytes(&menu_cache));
         if(!strcmp(scenario,"success"))assert(presents==opening_frames+2u);
         if(!strcmp(scenario,"font")){
-            if(!retained_reader)retained_reader=epub.impl;
+            // 推进模拟安静时钟，让复核与未完预热同时具备资格。/ Advance the fake quiet clock so verification competes with unfinished warming.
+            if(!retained_reader){retained_reader=epub.impl;clock_us+=300000;}
             assert(epub.impl==retained_reader && !*trust_failed_path);
             if(!pn_epub_app_font_unavailable(&epub) || pn_epub_app_font_recovery_pending(&epub) || pn_epub_app_verify_pending(&epub))return;
         }
@@ -65,7 +77,9 @@ static void loop_delay(unsigned n){
 }
 int main(int argc,char **argv){
     assert(argc==3);book_path=argv[1];scenario=argv[2];
+    if(!strcmp(scenario,"font"))pn_profile_port(idle_clock,idle_observe,NULL);
     if(!setjmp(end))device_task(NULL);
+    if(!strcmp(scenario,"font")){assert(idle_warms && idle_checks && max_warms_between_checks<=1);pn_profile_port(NULL,NULL,NULL);printf("idle fairness warms=%u checks=%u max_warms_between=%u\n",idle_warms,idle_checks,max_warms_between_checks);}
     assert(phase==3);printf("product_loop scenario=%s rounds=%u opening_clear=1 wake_restored=1\n",scenario,rounds);
     // longjmp结束模拟任务；清理不能再借用该任务栈上的取消scope。/ longjmp ended the simulated task; cleanup must not borrow its stack cancellation scope.
     pn_cancel_scope_t shield;pn_cancel_enter(&shield,NULL,NULL);

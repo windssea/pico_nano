@@ -10,6 +10,7 @@
 #include "pn_text_file.h"
 #include "pn_cancel.h"
 #include "pn_identity.h"
+#include "pn_profile.h"
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -67,12 +68,15 @@ static pn_status_t read_direct(pn_text_file_t *file,uint64_t offset,uint8_t *out
     // 完整扫描连续读取，不反复触发FAT定位；随机读与失败后仍重新定位。/ Read full scans sequentially without repeated FAT seeks; random reads and recovery still seek.
     if(!file->read_position_known || file->read_position!=offset){
         file->read_position_known=false;file->io_seeks++;
-        if(fseek(file->handle,(long)offset,SEEK_SET)!=0)return PN_IO;
+        pn_profile_span_t seek;pn_profile_begin(&seek,file->cache_owner.pool,"storage.file-seek");
+        pn_status_t status=fseek(file->handle,(long)offset,SEEK_SET)==0?PN_OK:PN_IO;pn_profile_end(&seek,status);if(status!=PN_OK)return status;
     }
+    pn_profile_span_t read;pn_profile_begin(&read,file->cache_owner.pool,"storage.file-read");
     *got=fread(out,1,cap,file->handle);
     file->io_reads++;file->io_bytes+=*got;
     file->read_position_known=ferror(file->handle)==0;
     if(file->read_position_known)file->read_position=offset+*got;
+    pn_profile_end(&read,file->read_position_known?PN_OK:PN_IO);
     return file->read_position_known?PN_OK:PN_IO;
 }
 static pn_status_t read_pooled(pn_text_file_t *file,uint64_t offset,uint8_t *out,size_t cap,size_t *copied){

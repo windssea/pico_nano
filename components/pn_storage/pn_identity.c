@@ -147,10 +147,11 @@ pn_status_t pn_identity_stream_pooled(pn_pool_t *pool,void *ctx,uint64_t size,pn
 typedef struct {sha_t hash;uint8_t buffer[32768];} software_job_t;
 static pn_status_t software_job_begin(void *ctx){software_job_t *s=ctx;s->hash=(sha_t){.h={0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19}};return PN_OK;}
 static pn_status_t software_job_step(void *ctx,void *source,uint64_t offset,size_t capacity,pn_identity_read_fn read,size_t *got){
-    software_job_t *s=ctx;size_t n=0;pn_status_t status=read(source,offset,s->buffer,capacity,&n);
+    software_job_t *s=ctx;size_t n=0;pn_profile_span_t timing;pn_profile_begin(&timing,NULL,"content.sha-read");
+    pn_status_t status=read(source,offset,s->buffer,capacity,&n);pn_profile_end(&timing,status);
     if(status!=PN_OK)return status;
     if(!n || n>capacity)return PN_IO;
-    update(&s->hash,s->buffer,n);*got=n;return PN_OK;
+    pn_profile_begin(&timing,NULL,"content.sha-update");update(&s->hash,s->buffer,n);pn_profile_end(&timing,PN_OK);*got=n;return PN_OK;
 }
 static pn_status_t software_job_finish(void *ctx,pn_book_id_t *out){finish(&((software_job_t *)ctx)->hash,out);return PN_OK;}
 static void software_job_abort(void *ctx){(void)ctx;}

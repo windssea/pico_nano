@@ -2,6 +2,7 @@
  * 中文：SDK管理SHA外设锁，文件读取与完整身份语义留在共享层。/ English: SDK owns SHA peripheral locking; shared code owns file reads and complete identities. */
 #include "device_identity.h"
 #include "pn_identity.h"
+#include "pn_profile.h"
 #include "pn_cancel.h"
 #include "psa/crypto.h"
 #include "esp_memory_utils.h"
@@ -84,9 +85,11 @@ static pn_status_t pooled_stream(void *ctx,uint64_t size,pn_identity_read_fn rea
 static pn_status_t job_begin(void *state){psa_hash_operation_t *op=state;*op=(psa_hash_operation_t)PSA_HASH_OPERATION_INIT;return psa_hash_setup(op,PSA_ALG_SHA_256)==PSA_SUCCESS?PN_OK:PN_IO;}
 static pn_status_t job_read(void *state,void *ctx,uint64_t offset,size_t cap,pn_identity_read_fn read,uint8_t *buffer,size_t capacity,size_t *got){
     if(cap>capacity)cap=capacity;
-    size_t n=0;pn_status_t s=read(ctx,offset,buffer,cap,&n);if(s!=PN_OK)return s;
+    pn_profile_span_t timing;pn_profile_begin(&timing,NULL,"content.sha-read");
+    size_t n=0;pn_status_t s=read(ctx,offset,buffer,cap,&n);pn_profile_end(&timing,s);if(s!=PN_OK)return s;
     if(!n || n>cap)return PN_IO;
-    if(psa_hash_update(state,buffer,n)!=PSA_SUCCESS)return PN_IO;
+    pn_profile_begin(&timing,NULL,"content.sha-update");
+    s=psa_hash_update(state,buffer,n)==PSA_SUCCESS?PN_OK:PN_IO;pn_profile_end(&timing,s);if(s!=PN_OK)return s;
     *got=n;return PN_OK;
 }
 /// 每步归还DMA工作区，不在界面输入轮之间占用内部大块。/ Return DMA scratch every step instead of retaining a large internal block between input ticks.
