@@ -35,17 +35,23 @@ static pn_status_t dma_stream(void *ctx,uint64_t size,pn_identity_read_fn read,p
     uint8_t *internal=heap_caps_aligned_alloc(16,sizeof buffer,MALLOC_CAP_DMA|MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);if(!internal)return PN_NO_MEMORY;
     pn_status_t status=stream_impl(ctx,size,read,internal,sizeof buffer,out);heap_caps_free(internal);return status;
 }
-// PSRAM目标在S3上由SDMMC按16扇区中转；整书摘要临时借32KiB内部DMA块，借后仍保留≥64KiB内部空闲与≥32KiB最大块，读完即还。
-// 真机阅读时内部最大块约80KiB、空闲约127KiB，原“最大块≥96KiB”门槛从未满足。
-// S3 SDMMC bounces PSRAM targets through 16-sector chunks; whole-book hashing borrows a 32 KiB internal DMA block while keeping >=64 KiB free and a >=32 KiB largest block, returning it immediately.
-// On device the internal largest block is about 80 KiB with about 127 KiB free, so the old ">=96 KiB block" gate never passed.
+// 48KiB块优先：真机内部最大块约80KiB、空闲约127KiB，48+32/48+64 gates刚好满足；失败退回32KiB，再退4KiB。
+// Prefer a 48 KiB block: the device has about 80 KiB largest/127 KiB free, so 48+32/48+64 gates fit; fall back to 32 KiB, then 4 KiB.
 #define DMA_STREAM_BYTES (32u*1024u)
+#define DMA_STREAM_LARGE (48u*1024u)
 #define DMA_INTERNAL_RESERVE (64u*1024u)
 #define DMA_LARGEST_RESERVE (32u*1024u)
+static bool stream_headroom(size_t block,uint32_t caps){return heap_caps_get_largest_free_block(caps)>=block+DMA_LARGEST_RESERVE && heap_caps_get_free_size(caps)>=block+DMA_INTERNAL_RESERVE;}
 static pn_status_t stream(void *ctx,uint64_t size,pn_identity_read_fn read,uint8_t *buffer,size_t capacity,pn_book_id_t *out){
     if(buffer && capacity && esp_ptr_dma_capable(buffer) && !((uintptr_t)buffer&3u))return stream_impl(ctx,size,read,buffer,capacity,out);
     const uint32_t caps=MALLOC_CAP_DMA|MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT;
-    if(size>4096u && heap_caps_get_largest_free_block(caps)>=DMA_STREAM_BYTES+DMA_LARGEST_RESERVE && heap_caps_get_free_size(caps)>=DMA_STREAM_BYTES+DMA_INTERNAL_RESERVE){
+    if(size>DMA_STREAM_BYTES){
+        size_t blocks[]={DMA_STREAM_LARGE,DMA_STREAM_BYTES};
+        for(unsigned i=0;i<2;i++)if(stream_headroom(blocks[i],caps)){
+            uint8_t *block=heap_caps_aligned_alloc(16,blocks[i],caps);
+            if(block){pn_status_t status=stream_impl(ctx,size,read,block,blocks[i],out);heap_caps_free(block);return status;}
+        }
+    }else if(size>4096u && stream_headroom(DMA_STREAM_BYTES,caps)){
         uint8_t *block=heap_caps_aligned_alloc(16,DMA_STREAM_BYTES,caps);
         if(block){pn_status_t status=stream_impl(ctx,size,read,block,DMA_STREAM_BYTES,out);heap_caps_free(block);return status;}
     }
