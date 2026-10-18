@@ -48,7 +48,7 @@ static pn_status_t label(pn_font_t *font,pn_frame_t *part,const char *s,unsigned
     return status==PN_EMPTY?PN_OK:status;
 }
 static pn_status_t at(pn_font_t *font,pn_frame_t *frame,const char *s,int x,int y,int w,int h,unsigned lines){pn_frame_t part={frame->pixels+(size_t)y*frame->stride+(size_t)x/2,w,h,frame->stride};return label(font,&part,s,lines);}
-static const char *kind(pn_book_format_t f){switch(f){case PN_BOOK_TXT:return "TXT";case PN_BOOK_EPUB:return "EPUB";case PN_BOOK_PDF:return "PDF";case PN_BOOK_FB2:return "FB2";case PN_BOOK_CBZ:return "CBZ";default:return "?";}}
+static const char *kind(pn_book_format_t f){switch(f){case PN_BOOK_TXT:return "TXT";case PN_BOOK_EPUB:return "EPUB";case PN_BOOK_FB2:return "FB2";case PN_BOOK_CBZ:return "CBZ";default:return "?";}}
 
 /* 版式常量（Mono Glass V2，1u≈1.9px）：状态带、标题行、继续阅读卡、分类、排序行、3/4列封面网格、分页、固定底栏。
  * Layout constants (Mono Glass V2, 1u≈1.9 px): status band, title row, continue card, categories, sort row, a three/four-column cover grid, paging and the fixed bottom bar. */
@@ -108,7 +108,7 @@ static void title_of(const pn_catalog_item_t *item,const pn_shelf_covers_t *cove
     if(covers && slot<=PN_COVER_SLOT_LAST && *covers->display[slot].title){snprintf(out,cap,"%s",covers->display[slot].title);return;}
     snprintf(out,cap,"%s",item->name);
     char *dot=strrchr(out,'.');
-    if(dot && (!strcasecmp(dot,".txt") || !strcasecmp(dot,".epub") || !strcasecmp(dot,".pdf") || !strcasecmp(dot,".fb2") || !strcasecmp(dot,".cbz")))*dot=0;
+    if(dot && (!strcasecmp(dot,".txt") || !strcasecmp(dot,".epub") || !strcasecmp(dot,".fb2") || !strcasecmp(dot,".cbz")))*dot=0;
 }
 /* 条目的第二行：“27% · EPUB”“已开始 · EPUB”或“未读 · TXT”。/ Second line of an entry: "27% · EPUB", "started · EPUB" or "unread · TXT". */
 static void meta_of(const pn_catalog_item_t *item,char *out,size_t cap){

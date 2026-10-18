@@ -27,7 +27,7 @@ static bool path(index_t *i,char *out,const char *suffix){int n=snprintf(out,PN_
 static bool run_path(index_t *i,char *out,unsigned phase,unsigned run){int n=snprintf(out,PN_CATALOG_PATH_MAX,"%s/library-%u-%u.tmp",i->cache,phase,run);return n>=0 && (size_t)n<PN_CATALOG_PATH_MAX;}
 static pn_status_t cookie(index_t *i,uint8_t data[HEADER]){
     struct stat st;if(stat(i->directory,&st))return errno==ENOENT?PN_EMPTY:PN_IO;if(!S_ISDIR(st.st_mode))return PN_IO;
-    memset(data,0,HEADER);memcpy(data,"PNLI",4);put(data+4,1,4);pn_book_id_t hash;pn_status_t s=pn_identity_bytes((uint8_t *)i->directory,strlen(i->directory),&hash);if(s!=PN_OK)return s;memcpy(data+8,hash.sha256,32);
+    memset(data,0,HEADER);memcpy(data,"PNLI",4);put(data+4,2,4);pn_book_id_t hash;pn_status_t s=pn_identity_bytes((uint8_t *)i->directory,strlen(i->directory),&hash);if(s!=PN_OK)return s;memcpy(data+8,hash.sha256,32);
     put(data+40,(uint64_t)st.st_mtime,8);put(data+48,(uint64_t)st.st_ctime,8);put(data+56,(uint64_t)st.st_ino,8);put(data+64,(uint64_t)st.st_dev,8);
 #ifndef ESP_PLATFORM
     put(data+72,(uint64_t)st.st_mtim.tv_nsec,4);put(data+76,(uint64_t)st.st_ctim.tv_nsec,4);
@@ -37,7 +37,7 @@ static pn_status_t cookie(index_t *i,uint8_t data[HEADER]){
 static pn_status_t record_read(index_t *i,const pn_media_lease_t *lease,FILE *f,item_t *out){
     pn_status_t s=check(i,lease);if(s!=PN_OK)return s;uint8_t bytes[RECORD];size_t n=fread(bytes,1,sizeof bytes,f);if(!n && !ferror(f))return PN_EMPTY;
     if(n!=sizeof bytes || get(bytes+RECORD-4,4)!=crc(bytes,RECORD-4) || !memchr(bytes,0,PN_CATALOG_NAME_MAX))return PN_CORRUPT;
-    out->size=get(bytes+PN_CATALOG_NAME_MAX,8);out->format=(uint32_t)get(bytes+PN_CATALOG_NAME_MAX+8,4);if(out->format<PN_BOOK_TXT || out->format>PN_BOOK_CBZ)return PN_CORRUPT;
+    out->size=get(bytes+PN_CATALOG_NAME_MAX,8);out->format=(uint32_t)get(bytes+PN_CATALOG_NAME_MAX+8,4);if(out->format<PN_BOOK_TXT || out->format>PN_BOOK_CBZ || out->format==PN_BOOK_PDF)return PN_CORRUPT;
     if(!pn_catalog_name_valid((char *)bytes))return pn_cancel_checkpoint()==PN_OK?PN_CORRUPT:PN_CANCELLED;
     strcpy(out->name,(char *)bytes);i->stats.records_read++;return PN_OK;
 }

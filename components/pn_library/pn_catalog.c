@@ -22,7 +22,7 @@ static bool safe_name(const char *name){
     for(const unsigned char *p=(const unsigned char *)name;*p;p++)if(*p<32 || *p==127 || strchr("\\/:*?<>\"|",*p))return false;
     pn_text_source_t source={(void *)name,strlen(name),string_read,NULL};pn_text_reader_t reader;if(pn_text_open(&reader,&source,PN_TEXT_UTF8)!=PN_OK)return false;pn_text_char_t c;pn_status_t s;while((s=pn_text_next(&reader,&c))==PN_OK){}return s==PN_EMPTY;
 }
-static pn_book_format_t format(const char *name){const char *ext=strrchr(name,'.');if(!ext)return 0;if(!strcasecmp(ext,".txt"))return PN_BOOK_TXT;if(!strcasecmp(ext,".epub"))return PN_BOOK_EPUB;if(!strcasecmp(ext,".pdf"))return PN_BOOK_PDF;if(!strcasecmp(ext,".fb2"))return PN_BOOK_FB2;if(!strcasecmp(ext,".cbz"))return PN_BOOK_CBZ;return 0;}
+static pn_book_format_t format(const char *name){const char *ext=strrchr(name,'.');if(!ext)return 0;if(!strcasecmp(ext,".txt"))return PN_BOOK_TXT;if(!strcasecmp(ext,".epub"))return PN_BOOK_EPUB;if(!strcasecmp(ext,".fb2"))return PN_BOOK_FB2;if(!strcasecmp(ext,".cbz"))return PN_BOOK_CBZ;return 0;}
 /* 解一个UTF-8码点；名称已由safe_name校验。/ Decode one UTF-8 code point; names were validated by safe_name. */
 static uint32_t next_point(const unsigned char **p){
     const unsigned char *s=*p;uint32_t c=*s;size_t n=c<0x80?1:(c>>5)==6?2:(c>>4)==14?3:4;

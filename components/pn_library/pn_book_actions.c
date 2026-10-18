@@ -19,10 +19,10 @@
 #define FAVORITE_Y 944
 #define DELETE_Y 1042
 #define CONFIRM_Y 900
-static const char *kind(pn_book_format_t f){switch(f){case PN_BOOK_TXT:return "TXT";case PN_BOOK_EPUB:return "EPUB";case PN_BOOK_PDF:return "PDF";case PN_BOOK_FB2:return "FB2";case PN_BOOK_CBZ:return "CBZ";default:return "文件";}}
+static const char *kind(pn_book_format_t f){switch(f){case PN_BOOK_TXT:return "TXT";case PN_BOOK_EPUB:return "EPUB";case PN_BOOK_FB2:return "FB2";case PN_BOOK_CBZ:return "CBZ";default:return "文件";}}
 static void title_of(const pn_catalog_item_t *item,char *out,size_t cap){
     snprintf(out,cap,"%s",item->name);char *dot=strrchr(out,'.');
-    if(dot && (!strcasecmp(dot,".txt") || !strcasecmp(dot,".epub") || !strcasecmp(dot,".pdf") || !strcasecmp(dot,".fb2") || !strcasecmp(dot,".cbz")))*dot=0;
+    if(dot && (!strcasecmp(dot,".txt") || !strcasecmp(dot,".epub") || !strcasecmp(dot,".fb2") || !strcasecmp(dot,".cbz")))*dot=0;
 }
 static void info_of(const pn_catalog_item_t *item,char *out,size_t cap){
     char size[32];if(item->size>=1024u*1024u)snprintf(size,sizeof size,"%llu.%llu MB",(unsigned long long)(item->size>>20),(unsigned long long)((item->size%(1u<<20))*10>>20));else snprintf(size,sizeof size,"%llu KB",(unsigned long long)((item->size+1023)/1024));

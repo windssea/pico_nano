@@ -16,6 +16,7 @@
 #define PN_CATALOG_PATH_MAX 1024
 
 typedef enum {PN_BOOK_TXT=1,PN_BOOK_EPUB,PN_BOOK_PDF,PN_BOOK_FB2,PN_BOOK_CBZ,PN_FILE_TTF,PN_FILE_IMAGE} pn_book_format_t;
+/// PDF值保留给旧索引/失败路径兼容，但书架不再扫描或支持.pdf。/ The PDF value remains for legacy index/failure-path compatibility; the shelf no longer scans or supports .pdf.
 typedef struct {
     char name[PN_CATALOG_NAME_MAX]; ///< 原始UTF8文件名 / Original UTF8 filename
     char path[PN_CATALOG_PATH_MAX]; ///< 原实例路径，不是身份 / Instance path, not identity
