@@ -29,6 +29,14 @@ int main(void){char root[]="/tmp/pn-style-ui-XXXXXX";assert(mkdtemp(root));char 
     assert(pn_style_ui_event(&ui,PN_SUI_MORE,2,present,&screen)==PN_OK && !ui.more && pn_style_ui_hit(&ui,100,60)==PN_SUI_CANCEL);
     assert(pn_style_ui_event(&ui,PN_SUI_BACK_MAIN,2,present,&screen)==PN_OK && !ui.more);
     assert(ui.draft.pixels==46 && ui.draft.line_percent==150 && ui.draft.gap_percent==45 && ui.draft.indent_em==0 && ui.draft.margin==48 && ui.draft.gl_before_clear==12 && ui.draft.tracking_percent==5 && ui.draft.reading_line==1 && ui.draft.reading_line_offset==2 && ui.draft.reading_line_shade==2 && ui.draft.weight==1 && ui.draft.clarity==1);
+    /* 档位项首尾循环：清晰度从黑白再右切回到标准，再左切回黑白；字重从细左切到特粗；数值项字号到上限仍停住。
+     * Option fields wrap: sharpness steps right from black-and-white back to standard and left again to black-and-white; weight steps left from light to heaviest; numeric size still stops at its limit. */
+    {pn_style_t keep=ui.draft;ui.draft.clarity=3;assert(pn_style_ui_event(&ui,PN_SUI_FIELD+10*2+1,2,present,&screen)==PN_OK && ui.draft.clarity==0);
+     assert(pn_style_ui_event(&ui,PN_SUI_FIELD+10*2,2,present,&screen)==PN_OK && ui.draft.clarity==3);
+     ui.draft.weight=-1;assert(pn_style_ui_event(&ui,PN_SUI_FIELD+9*2,2,present,&screen)==PN_OK && ui.draft.weight==3);
+     ui.draft.reading_line=2;assert(pn_style_ui_event(&ui,PN_SUI_FIELD+6*2+1,2,present,&screen)==PN_OK && ui.draft.reading_line==0);
+     ui.draft.margin=20;assert(pn_style_ui_event(&ui,PN_SUI_FIELD+5*2,2,present,&screen)==PN_OK && ui.draft.margin==48);
+     ui.draft.pixels=72;assert(pn_style_ui_event(&ui,PN_SUI_FIELD+1,2,present,&screen)==PN_EMPTY && ui.draft.pixels==72);ui.draft=keep;}
     /* 预设与恢复默认只改草稿。/ Presets and restore-defaults change only the draft. */
     assert(pn_style_ui_hit(&ui,100,372)==PN_SUI_PRESET && pn_style_ui_hit(&ui,340,372)==PN_SUI_PRESET+1 && pn_style_ui_hit(&ui,560,372)==PN_SUI_PRESET+2);
     assert(pn_style_ui_event(&ui,PN_SUI_PRESET+1,2,present,&screen)==PN_OK && ui.draft.pixels==36 && ui.draft.line_percent==125 && ui.draft.margin==24 && ui.draft.tracking_percent==0);

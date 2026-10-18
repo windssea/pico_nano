@@ -313,7 +313,8 @@ static pn_focus_t focus_nav; ///< 当前页的三键焦点表 / Three-key focus 
 #define PARTIAL_MAX_PERCENT 45
 static pn_device_async_t async_port;
 static void opening_controls(bool active){opening=active;pn_async_block_controls(&async_port.input,active);if(active)pn_device_async_view(&async_port,18,false,input_flags);}
-static pn_status_t opening_abort(void){opening_overlap_result=PN_BUSY;if(!foreground_open.impl)return PN_OK;pn_status_t s=pn_epub_app_open_job_close(&foreground_open);opening_controls(false);return s;}
+// 任务可能已在加载页扫描期间完成并自行关闭：结果仍挂起时也要解除开书门。/ The job may have finished and closed itself during the loading scan: still release the gate while its result is pending.
+static pn_status_t opening_abort(void){bool parked=opening_overlap_result!=PN_BUSY;opening_overlap_result=PN_BUSY;if(!foreground_open.impl){if(parked)opening_controls(false);return PN_OK;}pn_status_t s=pn_epub_app_open_job_close(&foreground_open);opening_controls(false);return s;}
 static pn_feedback_t press_feedback; ///< 独立、可撤销的按下区域，不借用UI对象 / Independent reversible press region without borrowing UI objects
 static pn_device_refresh_t maintenance; ///< 内容维护与可选反馈分开记账 / Content maintenance accounted separately from optional feedback
 static pn_feedback_idle_t feedback_idle; ///< 产品owner的反馈定稿候选 / Product-owner feedback settle candidates
@@ -1162,16 +1163,21 @@ static bool tick_hot_deferred(uint64_t now){
     if(s!=PN_OK && s!=PN_EMPTY && s!=PN_CANCELLED)ESP_LOGW(TAG,"Deferred progress/index write: %d",(int)s);
     return true;
 }
+static bool tick_opening(void);
 static void start_reader(void){
     if(opening)return;
     bool gate=*selected_path!=0 && !transfer.impl && !usb.open;
     if(gate)opening_controls(true);
     start_reader_impl();
-    if(gate && !foreground_open.impl)opening_controls(false);
+    // 加载页显示期间任务若已完成，结果挂在opening_overlap_result：立即消费并显示正文，不能只解锁按键而让已打开却未显示的书接收输入。
+    // If the job finished while the loading page was shown, its result is parked in opening_overlap_result: consume it now and show the text, never just unblock keys while an opened but unshown book receives input.
+    if(gate && !foreground_open.impl){if(opening_overlap_result!=PN_BUSY)(void)tick_opening();else opening_controls(false);}
 }
 /// 前台开书每轮一步；任务/加载页不确认正文，完整成功后走原唯一首帧回执。/ One foreground opening step per tick; neither job nor loader confirms content, and full success uses the original sole first-page receipt.
 static bool tick_opening(void){
-    if(!foreground_open.impl)return false;
+    // 扫描重叠中完成的任务已自行关闭，只留结果；仍须在此消费，否则开书门永不解除（加载页卡住）。
+    // A job finished during scan overlap has closed itself, leaving only its result; it must still be consumed here or the opening gate never releases (stuck loading page).
+    if(!foreground_open.impl && opening_overlap_result==PN_BUSY)return false;
     pn_status_t s=opening_overlap_result!=PN_BUSY?opening_overlap_result:pn_epub_app_open_job_step(&foreground_open,&epub);opening_overlap_result=PN_BUSY;
     if(s==PN_BUSY || (s==PN_CANCELLED && pn_epub_app_open_job_pending(&foreground_open)))return true;
     if(s==PN_OK && selected_identified){pn_book_id_t actual;s=pn_epub_app_identity(&epub,&actual);if(s==PN_OK && memcmp(actual.sha256,selected_expected.sha256,32))s=PN_STALE_JOB;}

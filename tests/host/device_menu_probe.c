@@ -7,7 +7,7 @@
 #include "test_device_boot.c"
 #undef read_pico_sd_get_info
 #undef main
-esp_err_t read_pico_sd_get_info(read_pico_sd_info_t *info){if(getenv("PN_MENU_COLD_BOOK")){memset(info,0,sizeof *info);info->present=info->mounted=true;return ESP_OK;}return fixture_sd_get_info(info);}
+esp_err_t read_pico_sd_get_info(read_pico_sd_info_t *info){if(getenv("PN_MENU_COLD_BOOK") || getenv("PN_SWITCH_A")){memset(info,0,sizeof *info);info->present=info->mounted=true;return ESP_OK;}return fixture_sd_get_info(info);}
 #ifndef PN_DEVICE_MAIN_SOURCE
 #define PN_DEVICE_MAIN_SOURCE "../../main/app_main.c"
 #endif
@@ -174,6 +174,45 @@ static void cold_book_probe(const char *path){
     assert(active_step(PN_APP_PREVIOUS,now_ms())==PN_OK);opening_frame(2);
     assert(stop_reader());printf("cold_open polls=%u body_once=1 loader_once=1 status=0 used=%zu peak=%zu\n",polls,pool.used,pool.peak);
 }
+#if PN_TEST_FOREGROUND_OPEN
+/* 切换EPUB：读A→回书库（热会话停放）→空闲准备/身份预计算→开B→回书库→按最近记录重开A；每次开书须在轮询上限内完成。
+ * Switching EPUBs: read A -> back to the library (hot-session park) -> idle prepare/identity precompute -> open B -> back -> reopen A from recents; every open must finish within a poll cap. */
+static void switch_open(const char *path,bool identified,const pn_book_id_t *expected,uint64_t size){
+    strcpy(selected_path,path);selected_format=PN_BOOK_EPUB;selected_identified=identified;if(identified){selected_expected=*expected;selected_size=size;}else selected_size=0;
+    start_reader();unsigned polls=0;
+    while(opening){if(++polls>=200000){fprintf(stderr,"switch stuck path=%s polls=%u\n",path,polls);abort();}(void)tick_opening();}
+    if(!reader_active() || status_page)fprintf(stderr,"switch open failed path=%s reader=%d status=%d shelf=%d\n",path,reader_active(),status_page,shelf_mode);
+    assert(reader_active() && !status_page && !strcmp(selected_path,path));printf("switch_open polls=%u identified=%d\n",polls,(int)selected_identified);
+}
+static void switch_idle(void){
+    library();
+    for(unsigned i=0;i<400;i++){
+        last_input=now_ms();clock_us+=2500000;
+        bool worked=tick_covers();worked|=tick_hot_deferred(now_ms());
+        if(!worked)worked|=tick_prepare_book(now_ms());
+        if(!worked)worked|=tick_identity(now_ms());
+        if(!worked)break;
+    }
+}
+/// 加载页扫描期间开书任务即完成（真机小书/快开常见）：结果挂起，tick_opening仍须消费并显示正文、解除开书门。
+/// The opening job finishes during the loading-page scan (common on device for small/fast-opened books): the parked result must still be consumed by tick_opening, showing the text and releasing the gate.
+static void overlap_open(const char *path){
+    strcpy(selected_path,path);selected_format=PN_BOOK_EPUB;selected_identified=false;selected_size=0;
+    start_reader();assert(opening && foreground_open.impl && !reader_active());
+    opening_overlap=true;unsigned n=0;while(foreground_open.impl){assert(++n<200000);(void)reader_overlap(NULL);}opening_overlap=false;
+    assert(opening && opening_overlap_result==PN_OK && epub.impl);
+    assert(tick_opening() && !opening && reader_active() && !status_page && opening_overlap_result==PN_BUSY);printf("overlap_open steps=%u\n",n);
+}
+static void switch_probe(const char *a,const char *b){
+    library();switch_open(a,false,NULL,0);assert(active_step(PN_APP_NEXT,now_ms())==PN_OK);assert(leave_reader());switch_idle();
+    switch_open(b,false,NULL,0);assert(active_step(PN_APP_NEXT,now_ms())==PN_OK);assert(leave_reader());switch_idle();
+    recent_loaded=false;assert(load_recent()==PN_OK && recent_snapshot->count>=2);
+    const pn_recent_item_t *hit=NULL;for(size_t i=0;i<recent_snapshot->count;i++)if(!strcmp(recent_snapshot->items[i].path,a))hit=&recent_snapshot->items[i];
+    assert(hit);pn_book_id_t id=hit->book;uint64_t size=hit->source_size;switch_open(a,true,&id,size);
+    assert(leave_reader());switch_idle();overlap_open(b);
+    assert(stop_reader());printf("switch_probe ok\n");
+}
+#endif
 int main(void){
     assert(pn_pool_init(&pool,6u*1024u*1024u,NULL,NULL,NULL)==PN_OK);assert(read_pico_init(&hardware)==ESP_OK);
     pn_media_init(&sd_media);pn_media_init(&data_media);pn_media_init(&wallpaper_media);
@@ -183,6 +222,9 @@ int main(void){
     pn_status_t built=pn_catalog_index_build(&catalog_index);assert(built==PN_OK || built==PN_EMPTY);
     shelf_prefs.columns=3;
     const char *cold=getenv("PN_MENU_COLD_BOOK");if(cold){library();cold_book_probe(cold);goto closed;}
+#if PN_TEST_FOREGROUND_OPEN
+    {const char *sa=getenv("PN_SWITCH_A"),*sb=getenv("PN_SWITCH_B");if(sa && sb){switch_probe(sa,sb);goto closed;}}
+#endif
     probe("library-cold",library,1);
     // 用真实用户系统字体验证索引重建不关闭字体或读取字体数据。/ Verify with the supplied system face that index rebuild neither closes it nor reads font data.
     pn_text_source_t indexed_source=pn_font_builtin_source();memset(counts,0,sizeof counts);face_opens=0;watching=true;

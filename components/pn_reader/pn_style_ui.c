@@ -172,7 +172,10 @@ pn_status_t pn_style_ui_event(pn_style_ui_t *u,int command,uint64_t now,pn_reade
         static const unsigned steps[]={2,5,5,1,5,2,1,2,1,1,1},minimum[]={28,100,0,0,0,16,0,0,0,0,0},maximum[]={72,220,100,2,50,80,2,16,3,4,3};
         unsigned field=(unsigned)(command-PN_SUI_FIELD)/2;bool up=(command-PN_SUI_FIELD)&1;unsigned v=field_value(&u->draft,field);u->selected=field;u->more=false;
         // 页边距只有窄/中/宽三档。/ Margins have just three levels: narrow, medium and wide.
-        if(field==5){unsigned level=v<=20?0u:v<=32?1u:2u;static const unsigned margins[3]={20,32,48};if(up && level<2)level++;else if(!up && level>0)level--;else status=PN_EMPTY;field_set(&u->draft,5,margins[level]);}
+        // 左右切换的档位项（边距、阅读线、深浅、字重、清晰度）首尾循环，不在两端卡住；数值项仍在上下限停住。
+        // Option fields switched with left/right (margin, reading line, shade, weight, sharpness) wrap around instead of sticking at either end; numeric fields still stop at their limits.
+        if(field==5){unsigned level=v<=20?0u:v<=32?1u:2u;static const unsigned margins[3]={20,32,48};level=up?(level+1u)%3u:(level+2u)%3u;field_set(&u->draft,5,margins[level]);}
+        else if(field==6 || field==8 || field==9 || field==10){unsigned span=maximum[field]-minimum[field]+1u,offset=v-minimum[field];offset=up?(offset+1u)%span:(offset+span-1u)%span;field_set(&u->draft,field,minimum[field]+offset);}
         else{
         if(up && v+steps[field]<=maximum[field])v+=steps[field];else if(!up && v>=minimum[field]+steps[field])v-=steps[field];else status=PN_EMPTY;
         field_set(&u->draft,field,v);}

@@ -44,6 +44,13 @@ def main():
                 assert r.returncode==0 and 'menu_probe closed_pool_zero=1' in r.stdout,(case,r.stdout[-2000:],r.stderr[-2000:])
                 line=next(x for x in r.stdout.splitlines() if x.startswith('cold_cancel '));fields=dict(word.split('=') for word in line.split()[1:]);assert fields['case']==case and fields['no_record']==fields['released']=='1'
                 report['scenarios'].append({'font':source_font.name,**fields});print('PASS foreground interruption',fi,case,flush=True)
+            # 切换EPUB：读A→回书库→空闲准备/身份预计算→开B→最近记录重开A→加载页扫描期间即完成的开书。/ Switching EPUBs: read A, back, idle prepare/identity precompute, open B, reopen A from recents, then an open finishing during the loading scan.
+            if len(epubs)>=2:
+                shutil.rmtree(state);state.mkdir()
+                env={k:v for k,v in os.environ.items() if k not in ('PN_MENU_COLD_BOOK','PN_OPEN_SCENARIO')};env.update(PN_SWITCH_A=str(library/epubs[0].name),PN_SWITCH_B=str(library/epubs[1].name))
+                r=subprocess.run([str(a.binary.resolve())],env=env,capture_output=True,text=True,timeout=600);(a.output/f'{fi}-switch.log').write_text(r.stdout+r.stderr,encoding='utf8')
+                assert r.returncode==0 and 'switch_probe ok' in r.stdout and 'overlap_open steps=' in r.stdout,(r.stdout[-2000:],r.stderr[-2000:])
+                report['scenarios'].append({'font':source_font.name,'case':'switch'});print('PASS foreground switch',fi,flush=True)
     assert all(digest(ROOT/name)==value for name,value in originals.items());report['passed']=report['originals_unchanged']=True
     target.write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n',encoding='utf8')
 
