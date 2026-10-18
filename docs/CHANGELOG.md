@@ -1,5 +1,10 @@
 # PicoNano 变更记录
 
+## 2026-10-18：风险扫描先读旧帧门槛
+
+- 内容风险改为两趟：第一趟只读旧帧统计`gray/dark`，两者都达不到阈值时`content_clean`必为false，直接跳过target读取与`whiten`分类；只有门槛可能成立才做第二趟whiten。判据与单趟逐像素oracle一致。
+- 3本用户EPUB的主机页面捕获显示正文→正文页（第2→3页）gate=false，封面/插图→正文页（第1→2页）gate=true；因此普通文本翻页可省target读取，图像转文本仍走完整whiten。未构建发布或刷写，真机时延另测。
+
 ## 2026-10-18：内容风险按脏行省目标读取
 
 - `pn_device_frame_dirty_mask`在原有外接框之外输出684行脏位图（86B）；`pn_device_refresh_plan_masked`对未变行仍统计旧像素gray/dark，只跳过target读取与whiten分类，判据与全扫描完全一致。整页翻页仍全行扫描，管理页大面积变化且多数行未变时可少读target。

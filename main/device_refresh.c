@@ -13,6 +13,34 @@ static inline uint32_t aligned_word(const uint8_t *source){
 #endif
     uint32_t value;memcpy(&value,source,sizeof value);return value;
 }
+/// 只统计旧帧gray/dark，不读target；用于判断是否可能满足风险门槛。
+/// Count only old-frame gray/dark without reading the target; used to test whether the risk gate can ever be satisfied.
+static inline void risk_gate_word(risk_t *risk,uint32_t old){
+    if((old&0xeeeeeeeeu)==0xeeeeeeeeu)return;
+    const uint32_t lanes=0x11111111u;
+    uint32_t one=old>>1,two=old>>2,three=old>>3;
+    uint32_t white=three&two&one,nonzero=old|one|two|three;
+    risk->gray+=nibble_count(nonzero&~white&lanes);
+    risk->dark+=nibble_count(~(three|(two&(old|one)))&lanes);
+}
+static inline void risk_gate_byte(risk_t *risk,uint8_t old){
+    if((old&0xeeu)==0xeeu)return;
+    unsigned lo=old&15u,hi=old>>4;risk->gray+=(lo>0 && lo<14)+(hi>0 && hi<14);risk->dark+=(lo<5)+(hi<5);
+}
+/// 只统计旧帧可转白像素的新值是否到白，不重复gray/dark。
+/// Count only whether old pixels eligible to whiten reach white in the target, without recomputing gray/dark.
+static inline void risk_whiten_word(risk_t *risk,uint32_t old,const uint8_t *target){
+    if(!target || (old&0xeeeeeeeeu)==0xeeeeeeeeu)return;
+    const uint32_t lanes=0x11111111u;
+    uint32_t two=old>>2,three=old>>3;
+    uint32_t from=~(three&two)&lanes;
+    if(from){uint32_t now=aligned_word(target);risk->whiten+=nibble_count(from&(now>>3)&(now>>2)&(now>>1));}
+}
+static inline void risk_whiten_byte(risk_t *risk,uint8_t old,const uint8_t *target){
+    if(!target || (old&0xeeu)==0xeeu)return;
+    unsigned lo=old&15u,hi=old>>4;
+    unsigned now=*target;risk->whiten+=(lo<12 && (now&15u)>=14)+(hi<12 && (now>>4)>=14);
+}
 /// 32位同时分类八个4bpp像素，只有可能转白时读取目标，不查表或分配。/ Classify eight 4bpp pixels in one word, reading the target only for possible whitening, without a table or allocation.
 static inline void risk_word(risk_t *risk,uint32_t old,const uint8_t *target){
     if((old&0xeeeeeeeeu)==0xeeeeeeeeu)return;
@@ -48,16 +76,25 @@ pn_device_refresh_plan_t pn_device_refresh_plan_masked(const pn_device_refresh_t
     bool use_rows=rows && row_bytes>=PN_DEVICE_ROW_MASK_BYTES;
     // 脏区包围全部变化；转白像素不可能超过它，小操作无需扫描全帧。
     // Dirty bounds contain every change; whitening cannot exceed them, so small actions need no full-frame scan.
-    if((unsigned)dirty.width*(unsigned)height>=body/10u)
-    for(int row=0;row<684;row++){
-        // 未变行的旧像素仍参与gray/dark判据，只省target读取与whiten分类；不能整行跳过。
-        // Unchanged rows still contribute old-pixel gray/dark, so only target reads and whitening classification are skipped; a row is never skipped entirely.
-        const uint8_t *target_row=(!use_rows || (rows[(unsigned)row>>3]&(1u<<(row&7))))?target:NULL;
-        if(aligned){for(int b=0;b<576;b+=4){size_t at=(size_t)row*608+b;risk_word(&risk,aligned_word(shown+at),target_row?target_row+at:NULL);}}
-        else{for(int b=0;b<576;b++){size_t at=(size_t)row*608+b;risk_byte(&risk,shown[at],target_row?target_row+at:NULL);}}
-        // 计数只会增加，已满足原阈值后即可结束；未满足仍完整扫描，不改变风险规则。
-        // Counts only increase, so stop once the original thresholds hold; otherwise scan fully without changing the risk rule.
-        if(risk.whiten>=body/10u && (risk.gray>=body/6u || risk.dark>=body/3u))break;
+    if((unsigned)dirty.width*(unsigned)height>=body/10u){
+        // 第一趟只读旧帧：gray/dark都达不到门槛时content_clean必为false，无需读target。
+        // First pass reads the old frame only: if neither gray nor dark can reach its threshold, content_clean is necessarily false and target reads are unnecessary.
+        bool gate=false;
+        for(int row=0;row<684 && !gate;row++){
+            if(aligned){for(int b=0;b<576 && !gate;b+=4){size_t at=(size_t)row*608+b;risk_gate_word(&risk,aligned_word(shown+at));if(risk.gray>=body/6u || risk.dark>=body/3u)gate=true;}}
+            else{for(int b=0;b<576 && !gate;b++){size_t at=(size_t)row*608+b;risk_gate_byte(&risk,shown[at]);if(risk.gray>=body/6u || risk.dark>=body/3u)gate=true;}}
+        }
+        // 第二趟只在门槛可能成立时数whiten；未变行无需读target。
+        // Second pass counts whitening only when the gate can hold; unchanged rows need no target read.
+        if(gate){
+            for(int row=0;row<684;row++){
+                const uint8_t *target_row=(!use_rows || (rows[(unsigned)row>>3]&(1u<<(row&7))))?target:NULL;
+                if(!target_row)continue;
+                if(aligned){for(int b=0;b<576;b+=4){size_t at=(size_t)row*608+b;risk_whiten_word(&risk,aligned_word(shown+at),target_row+at);}}
+                else{for(int b=0;b<576;b++){size_t at=(size_t)row*608+b;risk_whiten_byte(&risk,shown[at],target_row+at);}}
+                if(risk.whiten>=body/10u)break;
+            }
+        }
     }
     p.content_clean=risk.whiten>=body/10u && (risk.gray>=body/6u || risk.dark>=body/3u);
     if(!reading && !p.content_clean){
