@@ -1120,7 +1120,19 @@ static void identity_trust_selected(void){
         selected_identified=true;selected_expected=id;selected_size=size;ESP_LOGI(TAG,"Precomputed identity used for first open");
     }
 }
-/// 书库空闲至少2秒时推进一块；无任务时每秒最多扫描一次当前页。/ Advance one block after at least 2 s of library idle; without a job scan the current page at most once a second.
+/// 启动一个可回收身份任务；缓存命中、格式不支持或失败路径返回false。
+/// Start one reclaimable identity job; cache hits, unsupported formats and the failed path return false.
+static bool identity_precompute_start(const char *path,pn_book_format_t format){
+    if(!path || !*path || (format!=PN_BOOK_TXT && format!=PN_BOOK_EPUB))return false;
+    if(!strcmp(path,identity_failed_path))return false;
+    uint64_t size;int64_t mtime;pn_book_id_t id;
+    if(!pn_identity_cache_stat(path,&size,&mtime) || pn_identity_cache_find(&identity_cache,path,size,mtime,&id))return false;
+    pn_status_t s=pn_identity_cache_job_begin(&identity_job,&pool,&sd_media,path);
+    if(s!=PN_OK){snprintf(identity_failed_path,sizeof identity_failed_path,"%s",path);return false;}
+    pn_device_power_busy(PN_POWER_PRODUCT,true);return true;
+}
+/// 书库空闲至少2秒时推进一块；无任务时每秒最多扫描一次当前页，并优先最近阅读/当前选择/最近记录。
+/// Advance one block after at least 2 s of library idle; without a job scan at most once a second, preferring last-read, selected and recent books.
 static bool tick_identity(uint64_t now){
     if(!data_ready || !sd_media.available || !shelf_page || now<last_input || now-last_input<2000)return false;
     identity_cache_ready();if(!identity_cache_loaded)return false;
@@ -1133,14 +1145,16 @@ static bool tick_identity(uint64_t now){
     }
     if(now<identity_next_scan)return false;
     identity_next_scan=now+1000;identity_cache_store();
+    if(last_read_known && !last_read_book.identified && identity_precompute_start(last_read_book.path,last_read_book.format))return true;
+    if(*selected_path && !selected_identified && identity_precompute_start(selected_path,selected_format))return true;
+    if(recent_snapshot){
+        size_t recent=recent_snapshot->count<3?recent_snapshot->count:3;
+        for(size_t i=0;i<recent;i++)if(identity_precompute_start(recent_snapshot->items[i].path,(pn_book_format_t)recent_snapshot->items[i].format))return true;
+    }
     for(size_t i=0;i<shelf_page->count;i++){
         const pn_catalog_item_t *item=&shelf_page->items[i];
-        if(item->identified || (item->format!=PN_BOOK_TXT && item->format!=PN_BOOK_EPUB) || !strcmp(item->path,identity_failed_path))continue;
-        uint64_t size;int64_t mtime;pn_book_id_t id;
-        if(!pn_identity_cache_stat(item->path,&size,&mtime) || pn_identity_cache_find(&identity_cache,item->path,size,mtime,&id))continue;
-        pn_status_t s=pn_identity_cache_job_begin(&identity_job,&pool,&sd_media,item->path);
-        if(s!=PN_OK){snprintf(identity_failed_path,sizeof identity_failed_path,"%s",item->path);return false;}
-        pn_device_power_busy(PN_POWER_PRODUCT,true);return true;
+        if(item->identified)continue;
+        if(identity_precompute_start(item->path,item->format))return true;
     }
     return false;
 }
