@@ -30,6 +30,14 @@ int main(int argc,char **argv){
     p.cache_caps[PN_CACHE_CHAPTER]=0;digest_t baseline=parse(&p,&e,"a.xhtml");p.cache_caps[PN_CACHE_CHAPTER]=384u*1024u;
     digest_t built=parse(&p,&e,"a.xhtml");assert(built.hash==baseline.hash && built.count==baseline.count);size_t attempts=p.attempts;
     digest_t replay=parse(&p,&e,"a.xhtml");assert(replay.hash==baseline.hash && replay.count==baseline.count && p.attempts==attempts && p.cache_stats[PN_CACHE_CHAPTER].hits==1);
+    // 可选预排另一章写入独立槽，不替换已验证的当前章；随后当前章仍命中。/ Speculative work on another chapter uses a separate slot without replacing the verified current model; the current chapter still hits.
+    uint64_t spec_hits=p.cache_stats[PN_CACHE_CHAPTER].hits;digest_t spec={.hash=UINT64_C(14695981039346656037)};pn_xhtml_stats_t spec_stats;spec_stats.elements=0;
+    pn_cache_speculate(&p,true);assert(pn_xhtml_parse(&p,&e,"b.xhtml",salt,event,&spec,&spec_stats)==PN_OK);pn_cache_speculate(&p,false);
+    assert(spec.count>0 && spec.hash!=baseline.hash && spec_stats.elements>0);
+    digest_t after_spec=parse(&p,&e,"a.xhtml");assert(after_spec.hash==baseline.hash && after_spec.count==baseline.count && p.cache_stats[PN_CACHE_CHAPTER].hits>spec_hits);
+    // 前台切到预排章直接接管独立槽，不再重建。/ A foreground switch to the prefetched chapter takes over the separate slot without rebuilding.
+    size_t transfer_attempts=p.attempts;digest_t b_transfer=parse(&p,&e,"b.xhtml");assert(b_transfer.hash==spec.hash && p.attempts==transfer_attempts);
+    digest_t restore=parse(&p,&e,"a.xhtml");assert(restore.hash==baseline.hash);
     digest_t borrowed={.hash=UINT64_C(14695981039346656037),.pool=&p,.reclaim=true};pn_xhtml_stats_t stats;
     assert(pn_xhtml_parse(&p,&e,"a.xhtml",salt,event,&borrowed,&stats)==PN_OK && borrowed.hash==baseline.hash);
     assert(pn_cache_reclaim(&p,SIZE_MAX)>0 && p.cache_stats[PN_CACHE_CHAPTER].bytes==0);built=parse(&p,&e,"a.xhtml");assert(built.hash==baseline.hash);

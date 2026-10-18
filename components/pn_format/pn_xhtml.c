@@ -494,10 +494,13 @@ static void model_drop(void *ctx){
     m->first=m->last=NULL;m->pending.count=0;m->charged=0;m->style_count=0;m->valid=m->dirty=false;m->abandoned=m->busy;model_reset_window(m);
 }
 void pn_xhtml_cache_close(pn_epub_t *epub){
-    if(!epub || !epub->semantic_cache)return;
+    if(!epub)return;
     pn_xhtml_cache_abort(epub);
-    model_t *m=epub->semantic_cache;if(m->busy)return;
-    pn_cache_detach(&m->owner);model_drop(m);pn_free(m);epub->semantic_cache=NULL;
+    model_t *m=epub->semantic_cache;
+    if(m && m->busy)return;
+    if(m){pn_cache_detach(&m->owner);model_drop(m);pn_free(m);epub->semantic_cache=NULL;}
+    model_t *alt=epub->semantic_cache_alt;
+    if(alt && !alt->busy){pn_cache_detach(&alt->owner);model_drop(alt);pn_free(alt);epub->semantic_cache_alt=NULL;}
 }
 static bool model_text_matches(const model_t *m,const model_record_t *r,const pn_xhtml_event_t *e){
     return r && r->count && r->kind==PN_XHTML_TEXT && r->count<MODEL_TEXT_MAX &&
@@ -628,6 +631,19 @@ static pn_status_t model_replay(model_t *m,pn_epub_t *epub,pn_xhtml_sink_t sink,
     if(exhausted)*exhausted=status==PN_OK && (!done || !done(ctx));
     pn_cache_unpin(&m->owner);m->busy=false;pn_profile_end(&span,status);return status;
 }
+/// 在同一model对象内完整校验并构建；调用者负责选择当前章或预排槽。/ Fully validate and build into one model object; the caller selects the current chapter or the prefetch slot.
+static pn_status_t model_build(pn_pool_t *pool,pn_epub_t *epub,model_t *m,const char *path,const uint8_t salt[16],const pn_xhtml_position_t *focus,pn_xhtml_sink_t sink,pn_xhtml_done_t done,pn_xhtml_restart_t restart,void *ctx,pn_xhtml_stats_t *stats,bool window,pn_xhtml_restart_t reset){
+    model_sink_t proxy={.model=m,.sink=sink,.done=done,.restart=restart,.ctx=ctx};
+    model_drop(m);strcpy(m->path,path);memcpy(m->salt,salt,16);m->busy=true;m->abandoned=m->skipped=false;
+    m->windowing=window;m->has_focus=window && focus;if(m->has_focus)m->focus=*focus;model_reset_window(m);
+    pn_xhtml_stats_t candidate;pn_profile_span_t span;pn_profile_begin(&span,pool,"epub.model-build");
+    pn_status_t status=parse_source(pool,epub,path,salt,model_event,&proxy,&candidate,reset,&m->compatible);
+    if(status==PN_OK)model_flush(m);
+    m->busy=false;
+    if(status==PN_OK){*stats=candidate;if(!m->abandoned){m->stats=candidate;m->valid=m->dirty=true;}else if(!pool->speculative){m->skipped=true;m->skipped_window=window;m->skipped_cap=pool->cache_caps[PN_CACHE_CHAPTER];}}
+    if(status!=PN_OK)model_drop(m);
+    pn_profile_end(&span,status);return status;
+}
 static pn_status_t pn_xhtml_parse_impl(pn_pool_t *pool,pn_epub_t *epub,const char *path,const uint8_t salt[16],const pn_xhtml_position_t *focus,pn_xhtml_sink_t sink,pn_xhtml_done_t done,pn_xhtml_restart_t restart,void *ctx,pn_xhtml_stats_t *stats){
     if(!pool || !epub || !path || !*path || strlen(path)>=PN_ZIP_PATH_MAX || !salt || !stats)return PN_INVALID;
     size_t ordinal;pn_status_t status=pn_epub_spine_find(epub,path,&ordinal);if(status!=PN_OK)return status;
@@ -637,6 +653,33 @@ static pn_status_t pn_xhtml_parse_impl(pn_pool_t *pool,pn_epub_t *epub,const cha
     model_sink_t proxy={.sink=sink,.done=done,.restart=restart,.ctx=ctx};pn_xhtml_restart_t reset=restart?model_restart:NULL;
     if(m && (m->busy || m->pool!=pool))return parse_source(pool,epub,path,salt,model_event,&proxy,stats,reset,NULL);
     bool window=done && restart; // 调用方能从窗口序号接续 / The caller can resume from a window order
+    model_t *alt=epub->semantic_cache_alt;
+    // 可选预排跨章时写入独立槽，绝不替换已验证的当前章；槽已占用或额度不足则放弃，让前台按完整校验构建。
+    // Speculative cross-chapter prefetch uses a separate slot and never replaces the verified current chapter; if the slot or budget is unavailable, give up and let the foreground build fully.
+    if(pool->speculative && m && m->valid && !m->busy && strcmp(m->path,path)){
+        if(alt && alt->pool!=pool)alt=NULL;
+        if(alt && !alt->busy && alt->valid && !strcmp(alt->path,path) && !memcmp(alt->salt,salt,16)){
+            pn_cache_observe(pool,PN_CACHE_CHAPTER,true);
+            if(alt->windowed)restart(ctx,alt->base,alt->has_context?&alt->context:NULL);
+            bool exhausted=false;status=model_replay(alt,epub,sink,done,ctx,&exhausted);if(status!=PN_OK)return status;
+            if(!alt->windowed || !alt->truncated || !exhausted){*stats=alt->stats;return PN_OK;}
+            restart(ctx,0,NULL);
+        }
+        if(alt && (alt->busy || (alt->valid && (strcmp(alt->path,path) || memcmp(alt->salt,salt,16)))))return PN_BUSY;
+        if(!alt){
+            alt=pn_cache_alloc(pool,PN_CACHE_CHAPTER,PN_MEM_DOCUMENT,sizeof *alt);
+            if(!alt)return PN_NO_MEMORY;
+            *alt=(model_t){.pool=pool};epub->semantic_cache_alt=alt;
+            pn_cache_attach(pool,&alt->owner,PN_CACHE_CHAPTER,alt,model_bytes,model_drop);
+        }
+        return model_build(pool,epub,alt,path,salt,focus,sink,done,restart,ctx,stats,window,reset);
+    }
+    // 前台真正切到已预排的章节：把预排槽交给当前章，旧的当前模型按普通缓存让位。
+    // A real foreground switch to the prefetched chapter hands the slot to the current chapter; the old current model yields like any ordinary cache.
+    if(!pool->speculative && alt && alt->pool==pool && !alt->busy && alt->valid && !strcmp(alt->path,path) && !memcmp(alt->salt,salt,16) && (!m || (!m->busy && strcmp(m->path,path)))){
+        if(m){pn_cache_detach(&m->owner);model_drop(m);pn_free(m);}
+        epub->semantic_cache=alt;epub->semantic_cache_alt=NULL;m=alt;alt=NULL;
+    }
     bool same=m && !strcmp(m->path,path) && !memcmp(m->salt,salt,16);
     if(epub->semantic_store && !pool->speculative && (!m || !same || !m->valid)){
         if(!m){m=pn_cache_alloc(pool,PN_CACHE_CHAPTER,PN_MEM_DOCUMENT,sizeof *m);if(m){*m=(model_t){.pool=pool};epub->semantic_cache=m;pn_cache_attach(pool,&m->owner,PN_CACHE_CHAPTER,m,model_bytes,model_drop);}}
@@ -658,17 +701,9 @@ static pn_status_t pn_xhtml_parse_impl(pn_pool_t *pool,pn_epub_t *epub,const cha
         pn_cache_attach(pool,&m->owner,PN_CACHE_CHAPTER,m,model_bytes,model_drop);
     }
     if(same && m->skipped && pool->cache_caps[PN_CACHE_CHAPTER]<=m->skipped_cap && (!window || m->skipped_window))return parse_source(pool,epub,path,salt,model_event,&proxy,stats,reset,NULL);
-    model_drop(m);strcpy(m->path,path);memcpy(m->salt,salt,16);m->busy=true;m->abandoned=m->skipped=false;
-    m->windowing=window;m->has_focus=window && focus;if(m->has_focus)m->focus=*focus;model_reset_window(m);
-    proxy.model=m;pn_xhtml_stats_t candidate;
-    pn_profile_span_t span;pn_profile_begin(&span,pool,"epub.model-build");
-    status=parse_source(pool,epub,path,salt,model_event,&proxy,&candidate,reset,&m->compatible);
-    if(status==PN_OK)model_flush(m);
-    m->busy=false;
-    // 预排期间临时分配也计入可选额度，失败不代表前台也放不下，所以只记录前台跳过。/ Speculative temporaries count against optional budgets, so only foreground failures are remembered as skipped.
-    if(status==PN_OK){*stats=candidate;if(!m->abandoned){m->stats=candidate;m->valid=m->dirty=true;}else if(!pool->speculative){m->skipped=true;m->skipped_window=window;m->skipped_cap=pool->cache_caps[PN_CACHE_CHAPTER];}}
-    if(status!=PN_OK)model_drop(m);
-    pn_profile_end(&span,status);return status;
+    // 前台真正切换或窗口扩展才可替换当前模型；可选预排已在上面独立槽处理。/ Only a foreground switch or window extension may replace the current model; speculative prefetch already used the separate slot above.
+    if(pool->speculative && m->valid)return PN_BUSY;
+    return model_build(pool,epub,m,path,salt,focus,sink,done,restart,ctx,stats,window,reset);
 }
 pn_status_t pn_xhtml_parse(pn_pool_t *pool,pn_epub_t *epub,const char *path,const uint8_t salt[16],pn_xhtml_sink_t sink,void *ctx,pn_xhtml_stats_t *stats){
     pn_profile_span_t span;pn_profile_begin(&span,pool,"epub.model");

@@ -16,6 +16,7 @@ struct pn_xhtml_store;
 typedef struct {
     void *impl; ///< 出版物模型，初始NULL，不可复制活动对象 / Publication model, initially NULL; never copy a live object
     void *semantic_cache; ///< 本会话可选语义缓存，初始NULL，由close释放 / Optional session semantic cache, initially NULL, released by close
+    void *semantic_cache_alt; ///< 可选预排的下一章模型，不替换当前章 / Optional next-chapter model for speculative prefetch; never replaces the current chapter
     const struct pn_xhtml_store *semantic_store; ///< 控制层可选持久缓存端口，寿命覆盖出版物 / Optional controller persistence port, outliving the publication
 } pn_epub_t;
 typedef enum {PN_EPUB_OTHER=0,PN_EPUB_XHTML,PN_EPUB_NCX,PN_EPUB_IMAGE,PN_EPUB_CSS,PN_EPUB_FONT} pn_epub_media_t;
