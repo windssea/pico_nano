@@ -34,6 +34,7 @@ typedef struct {
     pn_pool_t *pool;pn_media_t local,state;pn_media_t *media;pn_media_lease_t book_lease,font_lease,fallback_lease,state_lease;
     pn_text_file_t book_file,font_file,fallback_file;pn_text_source_t font_source;pn_book_id_t book;pn_zip_t zip;pn_epub_t epub;pn_toc_t toc;pn_epub_info_t info;
     pn_text_file_verify_t verify;bool verify_book;pn_text_source_t book_source; ///< 快开后的整书SHA后台复核 / Background whole-book SHA verification after fast opening
+    bool verify_font;void *verify_font_handle;pn_book_id_t font_expected; ///< 快开时外置正文字体只核对大小，完整SHA先于整书在后台复核 / On fast opens the external body font checks size only; its full SHA is verified in the background before the book
     pn_font_t body,ui;pn_font_chain_t chain;
     pn_font_set_t font_live,font_draft;pn_font_t *managed_body;pn_font_chain_t *managed_chain;
     bool font_use_draft,font_preview,font_pending,font_render,global_pending;
@@ -334,11 +335,15 @@ static pn_status_t open_complete(app_t *a,const char *font,const char *state,uin
         if(status==PN_EMPTY)status=PN_OK;else if(status==PN_OK){
             // 所选字体缺失/被替换：本次用启动默认字体运行，保留记录不改。/ Missing or replaced selection: run with the startup default this time and keep the record unchanged.
             pn_status_t primary;
+            // 快开（最近记录身份）时外置正文字体也只核对大小，完整SHA交后台复核；与TXT一致。大CJK字体整读要数秒。
+            // On a fast open (recent-record identity) the external body font also checks size only, leaving the full SHA to background verification, as for TXT; reading a large CJK font whole takes seconds.
+            pn_status_t (*open_font)(pn_pool_t *,const pn_font_reference_t *,pn_media_t *,const pn_media_lease_t *,pn_text_file_t *,pn_text_source_t *)=a->verify_book?pn_font_reference_open_file_fast:pn_font_reference_open_file;
 #ifdef ESP_PLATFORM
-            primary=selected_fonts.primary.kind==PN_FONT_FILE && !pn_sd_resource_path(selected_fonts.primary.path,PN_SD_FONTS)?PN_EMPTY:selected_fonts.primary.kind==PN_FONT_FILE?pn_font_reference_open_file(pool,&selected_fonts.primary,a->media,&a->book_lease,&a->font_file,&a->font_source):pn_font_reference_verify_pooled(pool,&selected_fonts.primary,a->media,&a->book_lease);
+            primary=selected_fonts.primary.kind==PN_FONT_FILE && !pn_sd_resource_path(selected_fonts.primary.path,PN_SD_FONTS)?PN_EMPTY:selected_fonts.primary.kind==PN_FONT_FILE?open_font(pool,&selected_fonts.primary,a->media,&a->book_lease,&a->font_file,&a->font_source):pn_font_reference_verify_pooled(pool,&selected_fonts.primary,a->media,&a->book_lease);
 #else
-            primary=selected_fonts.primary.kind==PN_FONT_FILE?pn_font_reference_open_file(pool,&selected_fonts.primary,a->media,&a->book_lease,&a->font_file,&a->font_source):pn_font_reference_verify_pooled(pool,&selected_fonts.primary,a->media,&a->book_lease);
+            primary=selected_fonts.primary.kind==PN_FONT_FILE?open_font(pool,&selected_fonts.primary,a->media,&a->book_lease,&a->font_file,&a->font_source):pn_font_reference_verify_pooled(pool,&selected_fonts.primary,a->media,&a->book_lease);
 #endif
+            if(primary==PN_OK && a->verify_book && selected_fonts.primary.kind==PN_FONT_FILE){a->verify_font=true;a->font_expected=selected_fonts.primary.identity;a->verify_font_handle=a->font_file.handle;}
             if(primary==PN_STALE_MEDIA)status=primary;
             else if(primary!=PN_OK)a->font_unavailable=true;
             else{has_selected_fonts=true;font=selected_fonts.primary.kind==PN_FONT_FILE?selected_fonts.primary.path:NULL;
@@ -444,17 +449,22 @@ pn_status_t pn_epub_app_open_job_progress(const pn_epub_open_job_t *job,uint64_t
     if(r->hash.impl)return pn_identity_job_progress(&r->hash,bytes,size);
     *bytes=r->stage>=3?r->source.size:0;*size=r->source.size;return PN_OK;
 }
-bool pn_epub_app_verify_pending(const pn_epub_app_t *app){const app_t *a=app && app->impl?app->impl:NULL;return a && a->verify_book;}
+bool pn_epub_app_verify_pending(const pn_epub_app_t *app){const app_t *a=app && app->impl?app->impl:NULL;return a && (a->verify_font || a->verify_book);}
 pn_status_t pn_epub_app_verify_step(pn_epub_app_t *app){
     if(!app || !app->impl)return PN_INVALID;
-    app_t *a=app->impl;if(!a->verify_book)return PN_EMPTY;
+    app_t *a=app->impl;if(!a->verify_font && !a->verify_book)return PN_EMPTY;
     if(a->lost)return PN_BUSY;
-    if(!a->verify.impl){pn_status_t s=pn_text_file_verify_begin(&a->verify,a->pool,&a->book_source,&a->book,false,NULL,NULL);if(s!=PN_OK)return s;}
+    // 用户已换正文字体时旧文件已关闭，新字体走完整打开，不再复核旧引用。/ If the user switched body fonts the old file is closed and the new one opened fully, so drop the old reference check.
+    if(a->verify_font && (a->font_file.handle!=a->verify_font_handle || !a->font_file.handle || a->font_preview || a->font_pending || a->font_view)){pn_text_file_verify_close(&a->verify);a->verify_font=false;}
+    if(!a->verify_font && !a->verify_book)return PN_OK;
+    if(!a->verify.impl){pn_status_t s=a->verify_font?pn_text_file_verify_begin(&a->verify,a->pool,&a->font_source,&a->font_expected,false,NULL,NULL)
+        :pn_text_file_verify_begin(&a->verify,a->pool,&a->book_source,&a->book,false,NULL,NULL);if(s!=PN_OK)return s;}
     pn_status_t s=pn_text_file_verify_step(&a->verify,NULL);
     if(s==PN_BUSY || s==PN_CANCELLED)return s;
     pn_text_file_verify_close(&a->verify);
-    if(s==PN_OK)a->verify_book=false;
-    return s;
+    if(s!=PN_OK)return s;
+    if(a->verify_font){a->verify_font=false;return a->verify_book?PN_BUSY:PN_OK;}
+    a->verify_book=false;return PN_OK;
 }
 pn_status_t pn_epub_app_open_job_step(pn_epub_open_job_t *job,pn_epub_app_t *out){
     if(!job || !job->impl || !out)return PN_INVALID;

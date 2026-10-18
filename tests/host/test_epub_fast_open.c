@@ -6,6 +6,8 @@
  */
 #define _POSIX_C_SOURCE 200809L
 #include "pn_epub_app.h"
+#include "pn_font_asset.h"
+#include "pn_font_preferences.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -15,7 +17,7 @@ static pn_status_t capture(void *ctx,const pn_frame_t *f,pn_refresh_t profile){
 }
 static pn_status_t finish(pn_epub_open_job_t *job,pn_epub_app_t *app){pn_status_t s;while((s=pn_epub_app_open_job_step(job,app))==PN_BUSY){}return s;}
 int main(int argc,char **argv){
-    assert(argc==3);const char *book=argv[1],*state=argv[2];
+    assert(argc==4);const char *book=argv[1],*state=argv[2],*font=argv[3];
     pn_pool_t pool;assert(pn_pool_init(&pool,6u*1024u*1024u,NULL,NULL,NULL)==0);
     pn_epub_app_t app={0};pn_epub_open_job_t job={0};pn_book_id_t id;uint64_t now=1;
     FILE *f=fopen(book,"rb");assert(f && !fseek(f,0,SEEK_END));long size=ftell(f);fclose(f);
@@ -31,5 +33,19 @@ int main(int argc,char **argv){
     assert(s==PN_STALE_JOB && pn_epub_app_close(&app,now++)==PN_OK);
     assert(pn_epub_app_open_job_begin_trusted(&job,&pool,NULL,book,NULL,state,44,now++,&id,(uint64_t)size+1)==PN_OK && finish(&job,&app)==PN_OK && !pn_epub_app_verify_pending(&app));
     assert(pn_epub_app_close(&app,now++)==PN_OK && pool.used==0 && pool.live==0);
+    // 全局外置阅读字体：快开不在首屏前整读字体（故意错的字体摘要也能打开），后台先复核字体并报告不符；完整打开仍校验并拒用该字体。
+    // Global external reading font: a fast open never reads the font whole before the first screen (even a deliberately wrong font digest opens), background verification checks the font first and reports the mismatch; a full open still verifies and refuses that font.
+    {pn_media_t media;pn_media_init(&media);assert(pn_media_attach(&media,1)==PN_OK);pn_media_lease_t lease;assert(pn_media_acquire(&media,PN_MEDIA_READ,&lease)==PN_OK);
+     pn_font_asset_t asset={0};pn_font_preferences_t prefs={0};assert(pn_font_asset_open(&asset,&pool,&media,&lease,font,0,44)==PN_OK && pn_font_asset_details(&asset,&prefs.primary,NULL)==PN_OK && pn_font_asset_close(&asset)==PN_OK);
+     assert(pn_media_release(&media,&lease)==PN_OK && pn_media_acquire(&media,PN_MEDIA_WRITE,&lease)==PN_OK);prefs.fallback.kind=PN_FONT_RESIDENT;pn_journal_files_t files;pn_journal_io_t io;
+     assert(pn_font_preferences_files(&files,&media,&lease,state,NULL,&io)==PN_OK && pn_font_preferences_save(&io,&pool,NULL,&prefs)==PN_OK);
+     assert(pn_epub_app_open_job_begin_trusted(&job,&pool,NULL,book,NULL,state,44,now++,&id,(uint64_t)size)==PN_OK && finish(&job,&app)==PN_OK && !pn_epub_app_font_unavailable(&app) && pn_epub_app_verify_pending(&app));
+     unsigned with_font=0;while((s=pn_epub_app_verify_step(&app))==PN_BUSY)with_font++;assert(s==PN_OK && with_font>steps && pn_epub_app_close(&app,now++)==PN_OK);
+     prefs.primary.identity.sha256[0]^=1;assert(pn_font_preferences_save(&io,&pool,NULL,&prefs)==PN_OK);
+     assert(pn_epub_app_open_job_begin_trusted(&job,&pool,NULL,book,NULL,state,44,now++,&id,(uint64_t)size)==PN_OK && finish(&job,&app)==PN_OK && !pn_epub_app_font_unavailable(&app));
+     while((s=pn_epub_app_verify_step(&app))==PN_BUSY){}assert(s==PN_STALE_JOB && pn_epub_app_close(&app,now++)==PN_OK);
+     assert(pn_epub_app_open_job_begin(&job,&pool,NULL,book,NULL,state,44,now++)==PN_OK && finish(&job,&app)==PN_OK && pn_epub_app_font_unavailable(&app) && pn_epub_app_close(&app,now++)==PN_OK);
+     assert(pn_media_release(&media,&lease)==PN_OK);}
+    assert(pool.used==0 && pool.live==0);
     printf("epub_fast_open verify_steps=%u\n",steps);return 0;
 }
