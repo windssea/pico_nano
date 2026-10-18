@@ -379,7 +379,10 @@ static pn_status_t present_panel(void *ctx,const pn_frame_t *frame,pn_refresh_t 
     // 风险或累计满额时在本次提交选择现有GC16，保持目标帧。/ Select existing GC16 within this submission for risk or accumulated limits, preserving the target frame.
     // 阅读页数设置不能让管理页每次点击都清屏；管理页独立使用较长保洁间隔。/ Reading-page preferences must not clear management pages on every tap; use a separate maintenance interval.
     bool body_refresh=atomic_load(&reading_presentation);
-    pn_device_refresh_plan_t maintenance_plan=known?pn_device_refresh_plan(&maintenance,hardware.framebuffer,hardware.hl.back_fb,body_refresh,dirty):(pn_device_refresh_plan_t){.area=dirty};
+    // 已请求GC16、深清或管理页到期维护时本次必为整屏GC16/白推，风险扫描的content_clean/regional都不再参与，跳过55ms左右的全帧分类。
+    // When this submission is already a full GC16/deep clean or the management maintenance is due, the risk scan's content_clean/regional no longer participate, so skip the ~55 ms full-body classification.
+    bool full_clean=profile==PN_REFRESH_GC16 || atomic_load(&deep_clean_pending) || (!body_refresh && maintenance.management+1u>=24u);
+    pn_device_refresh_plan_t maintenance_plan=(!known || full_clean)?(pn_device_refresh_plan_t){.area=dirty}:pn_device_refresh_plan(&maintenance,hardware.framebuffer,hardware.hl.back_fb,body_refresh,dirty);
     const char *reason=mode==MODE_GC16?"requested":body_refresh?"reading":"management";
     (void)reason;
     // 已知参考的管理页（菜单切换、设置进出、书籍菜单开合、书库翻页）都只局部替换变化像素，不因内容风险整屏闪；需要区域整理时仍走原全驱动。
