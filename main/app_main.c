@@ -1035,6 +1035,20 @@ static void identity_cache_store(void){
     if(s==PN_OK){s=pn_identity_cache_save(&identity_cache,IDENTITY_CACHE_FILE);(void)pn_media_release(&data_media,&lease);}
     if(s!=PN_OK)ESP_LOGW(TAG,"Identity cache save deferred: %d",(int)s);
 }
+/// 传输停止屏障后把本次已确认安装的书籍身份写入预计算缓存；仍从实际文件读取大小/修改时间复核，不按安装名猜身份。
+/// After the transfer stop barrier, record identities confirmed by this session; still re-check size/mtime from the actual file, never infer identity from the install name.
+static void identity_cache_transfer_installs(void){
+    identity_cache_ready();if(!identity_cache_loaded)return;
+    pn_upload_kind_t kind;char name[PN_UPLOAD_NAME_MAX];pn_book_id_t digest;bool changed=false;
+    while(pn_device_transfer_take_install(&transfer,&kind,name,sizeof name,&digest)==PN_OK){
+        if(kind!=PN_UPLOAD_BOOK)continue;
+        char path[PN_CATALOG_PATH_MAX];int n=snprintf(path,sizeof path,"%s/%s/%s",PN_SD_MOUNT,PN_SD_BOOKS,name);
+        if(n<0 || (size_t)n>=sizeof path)continue;
+        uint64_t size;int64_t mtime;if(!pn_identity_cache_stat(path,&size,&mtime))continue;
+        pn_identity_cache_put(&identity_cache,path,size,mtime,&digest);changed=true;
+    }
+    if(changed)identity_cache_store();
+}
 /// 未读过的书若已预计算身份，就当作已识别书交给可信快开。/ A not-yet-read book with a precomputed identity is treated as identified and handed to the trusted fast path.
 static void identity_trust_selected(void){
     if(selected_identified || !*selected_path)return;
@@ -1417,14 +1431,19 @@ static void tick_transfer(uint64_t now){
     transfer_view.failed_stage=state.stage;transfer_view.error=state.error;transfer_view.native_error=state.network.error;
     memcpy(transfer_view.ssid,state.network.ssid,sizeof transfer_view.ssid);memcpy(transfer_view.password,state.network.ap_password,sizeof transfer_view.password);
     if(state.network.address[0])snprintf(transfer_view.address,sizeof transfer_view.address,"http://%s",state.network.address);
-    if(state.released && transfer_return && pn_device_transfer_close(&transfer)==PN_OK){
-        // 关闭完成后前台返回；抬手等普通事件不能取消这次唯一重绘，紧急导航仍可取消。/ Return in the foreground after shutdown; ordinary release events cannot cancel the only redraw, while urgent navigation can.
-        pn_async_scope_t returned;pn_async_begin(&async_port.input,&returned,false);
-        reading_menu=false;favorites_valid=false;recent_loaded=false;pn_catalog_index_invalidate(&catalog_index);
-        if(management_home_pending){management_home_pending=false;home_mode=true;selected_path[0]=0;show_shelf("",false);}
-        else if(transfer_lock)lock_and_sleep("传输已停止，按电源键继续阅读");else start_reader();
-        pn_async_end(&returned);
-        return;
+    if(state.released && transfer_return){
+        // 先取出本轮已确认安装身份，再释放传输上下文；写缓存失败只记日志，不回滚安装。
+        // Take this session's confirmed install identities before releasing the transfer context; a cache write failure is logged and never rolls back the install.
+        identity_cache_transfer_installs();
+        if(pn_device_transfer_close(&transfer)==PN_OK){
+            // 关闭完成后前台返回；抬手等普通事件不能取消这次唯一重绘，紧急导航仍可取消。/ Return in the foreground after shutdown; ordinary release events cannot cancel the only redraw, while urgent navigation can.
+            pn_async_scope_t returned;pn_async_begin(&async_port.input,&returned,false);
+            reading_menu=false;favorites_valid=false;recent_loaded=false;pn_catalog_index_invalidate(&catalog_index);
+            if(management_home_pending){management_home_pending=false;home_mode=true;selected_path[0]=0;show_shelf("",false);}
+            else if(transfer_lock)lock_and_sleep("传输已停止，按电源键继续阅读");else start_reader();
+            pn_async_end(&returned);
+            return;
+        }
     }
     if(now-last_transfer_draw>=1000 && memcmp(&transfer_view,&last_transfer_view,sizeof transfer_view)){paint_transfer(false);last_transfer_draw=now;}
 }

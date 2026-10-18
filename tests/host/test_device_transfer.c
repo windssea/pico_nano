@@ -63,6 +63,7 @@ int main(void){
  assert(pn_device_transfer_open(&session,&media,root,&config)==PN_OK);pn_device_transfer_state_t state=wait_for(&session,true);assert(!state.released && state.network.ap_password[0]);assert(pn_device_transfer_close(&session)==PN_BUSY);
  /* 配网信箱：无请求EMPTY，回报校验名称长度。/ Provisioning mailbox: EMPTY without requests; results validate the name length. */
  {pn_network_credentials_t c;bool forget;assert(pn_device_transfer_take_network(&session,&c,&forget)==PN_EMPTY);assert(pn_device_transfer_network_result(&session,PN_OK,"123456789012345678901234567890123")==PN_INVALID && pn_device_transfer_network_result(&session,PN_OK,"家")==PN_OK);}
+ {pn_upload_kind_t kind;char name[PN_UPLOAD_NAME_MAX];pn_book_id_t digest;assert(pn_device_transfer_take_install(&session,&kind,name,sizeof name,&digest)==PN_EMPTY);}
  cJSON *json=request(HTTP_GET,"/api/v1/session",NULL,0,NULL,NULL);assert(code==200 && cJSON_IsString(cJSON_GetObjectItemCaseSensitive(json,"token")));cJSON_Delete(json);
  assert(pn_device_transfer_request_stop(&session)==PN_OK);state=wait_for(&session,false);assert(state.phase==PN_DTRANSFER_STOPPED);assert(pn_device_transfer_close(&session)==PN_OK && !native_allocations && !radio && !pn_media_active(&media));
  assert(pn_reader_app_open_on_media(&reader,&pool,&media,book,NULL,progress,44,2000)==PN_OK);assert(pn_reader_app_step(&reader,PN_APP_OPEN,2000,presented,NULL)==PN_OK);assert(pn_reader_app_progress(&reader,&after)==PN_OK);assert(before.source_offset==after.source_offset);assert(pn_reader_app_close(&reader,2001)==PN_OK);

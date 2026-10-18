@@ -40,6 +40,9 @@ typedef struct {
  char saved_ssid[PN_NETWORK_SSID_MAX+1]; ///< 已保存名称 / Saved name
  pn_status_t network_last; ///< 最近保存结果 / Latest save result
  pn_device_network_sink_t sink; ///< 交给HTTP的出口 / Outlet handed to HTTP
+ pn_device_transfer_install_sink_t install_sink; ///< HTTP任务只复制已提交书籍身份 / HTTP task copies committed book identities only
+ struct {pn_upload_kind_t kind;char name[PN_UPLOAD_NAME_MAX];pn_book_id_t digest;} installed[8]; ///< 待主任务写入身份缓存的最近安装 / Recent installs for the main task to cache
+ unsigned install_first,install_count; ///< 环形队首与长度 / Ring head and length
 #ifdef ESP_PLATFORM
  SemaphoreHandle_t mutex;
  TaskHandle_t task;
@@ -70,6 +73,18 @@ static pn_status_t sink_submit(void *ctx,const pn_network_credentials_t *c,bool 
  if(s->inbox_full || s->saving)status=PN_BUSY;
  else{if(forget)pn_network_wipe(&s->inbox);else s->inbox=*c;s->inbox_forget=forget;s->inbox_full=true;}
  unlock(s);return status;
+}
+/// HTTP任务只把已提交书籍身份复制进有界环；主任务在停止屏障后写内部缓存，避免跨任务持租约。
+/// The HTTP task only copies committed book identities into a bounded ring; the main task writes the internal cache after the stop barrier, so no lease crosses tasks.
+static void install_note(void *ctx,pn_upload_kind_t kind,const char *name,const pn_book_id_t *digest){
+ transfer_t *s=ctx;if(!s || !name || !digest)return;
+ lock(s);
+ if(s->install_count==sizeof s->installed/sizeof s->installed[0]){
+  s->install_first=(s->install_first+1u)%(unsigned)(sizeof s->installed/sizeof s->installed[0]);s->install_count--;
+ }
+ unsigned at=(s->install_first+s->install_count)%(unsigned)(sizeof s->installed/sizeof s->installed[0]);
+ s->installed[at].kind=kind;snprintf(s->installed[at].name,sizeof s->installed[at].name,"%s",name);s->installed[at].digest=*digest;s->install_count++;
+ unlock(s);
 }
 static pn_status_t sink_status(void *ctx,char ssid[PN_NETWORK_SSID_MAX+1],bool *pending,pn_status_t *last){
  transfer_t *s=ctx;lock(s);memcpy(ssid,s->saved_ssid,PN_NETWORK_SSID_MAX+1);*pending=s->inbox_full || s->saving;*last=s->network_last;unlock(s);return PN_OK;
@@ -126,6 +141,8 @@ static void run(transfer_t *s){
    if(cause!=PN_OK)break;
    cause=pn_device_transfer_http_network(&s->http,&s->sink);
    if(cause!=PN_OK)break;
+   cause=pn_device_transfer_http_install(&s->http,&s->install_sink);
+   if(cause!=PN_OK)break;
    network_generation=network.generation;
    strcpy(network_address,network.address);
   }
@@ -161,7 +178,7 @@ pn_status_t pn_device_transfer_open(pn_device_transfer_t *out,pn_media_t *media,
  if(!out || !media || !root || !config || strlen(root)>=PN_UPLOAD_FILES_ROOT_MAX)return PN_INVALID;
  if(out->impl || pn_media_active(media))return PN_BUSY;
  if(!media->available)return PN_STALE_MEDIA;
- transfer_t *s=allocate(sizeof *s);if(!s)return PN_NO_MEMORY;memset(s,0,sizeof *s);s->media=media;s->config=*config;strcpy(s->root,root);s->state.phase=PN_DTRANSFER_STARTING;s->state.network.mode=config->mode;s->network_last=PN_EMPTY;s->sink=(pn_device_network_sink_t){s,sink_submit,sink_status};
+ transfer_t *s=allocate(sizeof *s);if(!s)return PN_NO_MEMORY;memset(s,0,sizeof *s);s->media=media;s->config=*config;strcpy(s->root,root);s->state.phase=PN_DTRANSFER_STARTING;s->state.network.mode=config->mode;s->network_last=PN_EMPTY;s->sink=(pn_device_network_sink_t){s,sink_submit,sink_status};s->install_sink=(pn_device_transfer_install_sink_t){s,install_note};
 #ifdef ESP_PLATFORM
  s->mutex=xSemaphoreCreateMutex();if(!s->mutex){release(s);return PN_NO_MEMORY;}
  bool created=xTaskCreatePinnedToCore(entry,"pn_transfer_ctl",16384,s,4,&s->task,0)==pdPASS;
@@ -188,6 +205,15 @@ pn_status_t pn_device_transfer_take_network(pn_device_transfer_t *t,pn_network_c
  transfer_t *s=t->impl;lock(s);pn_status_t status=PN_EMPTY;
  if(s->inbox_full){*out=s->inbox;*forget=s->inbox_forget;pn_network_wipe(&s->inbox);s->inbox_full=false;s->saving=true;status=PN_OK;}
  unlock(s);return status;
+}
+pn_status_t pn_device_transfer_take_install(pn_device_transfer_t *t,pn_upload_kind_t *kind,char *name,size_t capacity,pn_book_id_t *digest){
+ if(!t || !t->impl || !kind || !name || !capacity || !digest)return PN_INVALID;
+ transfer_t *s=t->impl;lock(s);
+ if(!s->install_count){unlock(s);return PN_EMPTY;}
+ const size_t ring=sizeof s->installed/sizeof s->installed[0];size_t n=strlen(s->installed[s->install_first].name);
+ if(n>=capacity){unlock(s);return PN_LIMIT;}
+ *kind=s->installed[s->install_first].kind;memcpy(name,s->installed[s->install_first].name,n+1);*digest=s->installed[s->install_first].digest;
+ s->install_first=(s->install_first+1u)%(unsigned)ring;s->install_count--;unlock(s);return PN_OK;
 }
 pn_status_t pn_device_transfer_network_result(pn_device_transfer_t *t,pn_status_t result,const char *saved_ssid){
  if(!t || !t->impl || !saved_ssid || strlen(saved_ssid)>PN_NETWORK_SSID_MAX)return PN_INVALID;

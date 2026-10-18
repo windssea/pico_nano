@@ -39,6 +39,7 @@ typedef struct {
  bool closing;
  struct {bool ready,rssi_known;int rssi;unsigned disconnects,reconnects,reason;} diagnostics; ///< 无口令快照 / Credential-free snapshot
  const pn_device_network_sink_t *network;
+ const pn_device_transfer_install_sink_t *install; ///< 已提交书籍身份出口 / Committed-book identity outlet
  pn_pool_t ls_pool;pn_ls_session_t ls;char fingerprint[33];uint16_t port; ///< 单HTTP owner的LocalSend会话 / LocalSend session owned by the single HTTP task
  pn_device_ls_discovery_t discovery; ///< 生命周期先于HTTP上下文结束 / Ends before the HTTP context is released
  bool discovery_ready;uint64_t discovery_retry; ///< 发现故障不关闭网页，限频重试 / Discovery failures keep the web service alive with bounded retries
@@ -147,6 +148,11 @@ static const char *kind_name(pn_upload_kind_t value){return value==PN_UPLOAD_BOO
 static esp_err_t execute(http_t *s,httpd_req_t *r,pn_transfer_command_t *command,unsigned success){
  pn_transfer_reply_t reply;pn_status_t status=pn_transfer_worker_execute(s->worker,command,&reply);
  if(status!=PN_OK)return error(r,status<=PN_IO?statuses[status]:503,status<=PN_IO?messages[status]:"传输服务不可用");
+ // 安装事务已确认后才通知主任务；只复制身份，不在此写内部存储。/ Notify the main task only after the install commits; copy identity only, never write internal storage here.
+ if(command->operation==PN_TRANSFER_COMPLETE && reply.request.has_digest){
+  const pn_device_transfer_install_sink_t *sink=NULL;lock(s);sink=s->install;unlock(s);
+  if(sink && sink->installed)sink->installed(sink->ctx,reply.request.kind,reply.request.name,&reply.request.digest);
+ }
  cJSON *json=cJSON_CreateObject();bool valid=json!=NULL;
  if(reply.has_file){char sha[65];encode(reply.file_digest.sha256,32,sha);valid&=number(json,"size",reply.file_size);valid&=string(json,"sha256",sha);}
  if(reply.has_upload){char sha[65],id[33];encode(reply.request.digest.sha256,32,sha);encode(reply.request.id,16,id);valid&=string(json,"upload_id",id);valid&=string(json,"name",reply.request.name);valid&=string(json,"kind",kind_name(reply.request.kind));valid&=string(json,"sha256",sha);valid&=number(json,"size",reply.state.size);valid&=number(json,"next_offset",reply.state.offset);valid&=number(json,"phase",reply.state.phase);valid&=number(json,"chunk_size",PN_UPLOAD_CHUNK);valid&=boolean(json,"cleanup_pending",reply.cleanup_pending);}
@@ -259,7 +265,11 @@ static esp_err_t ls_dispatch(http_t *s,httpd_req_t *r,unsigned presence,const ch
  if(!header(r,"Content-Length",length,sizeof length) || !decimal(length,512u*1024u*1024u,&parsed) || parsed!=request.size || parsed!=r->content_len){(void)pn_ls_cancel(&s->ls,now_ms());return error(r,400,"文件长度不匹配");}
  ls_stream_t stream={s,r,0,now_ms()};pn_transfer_receive_result_t receipt;
  status=pn_transfer_receive(&s->ls_pool,ls_execute,s,&request,ls_read,&stream,&receipt);pn_status_t finished=pn_ls_finish(&s->ls,&receipt,now_ms());
- if(status==PN_OK && finished==PN_OK && receipt.committed)return send_data(r,200,"text/plain","",0);
+ if(status==PN_OK && finished==PN_OK && receipt.committed){
+  const pn_device_transfer_install_sink_t *sink=NULL;lock(s);sink=s->install;unlock(s);
+  if(sink && sink->installed)sink->installed(sink->ctx,request.kind,request.name,&receipt.digest);
+  return send_data(r,200,"text/plain","",0);
+ }
  return error(r,status==PN_CORRUPT?422:status==PN_BUSY?409:503,"文件未确认安装，请重试或关闭传输");
 }
 static esp_err_t dispatch_serial(httpd_req_t *r){
@@ -363,6 +373,10 @@ static esp_err_t dispatch_serial(httpd_req_t *r){
 pn_status_t pn_device_transfer_http_network(pn_device_transfer_http_t *http,const pn_device_network_sink_t *sink){
  if(!http || !http->impl || (sink && (!sink->submit || !sink->status)))return PN_INVALID;
  http_t *s=http->impl;lock(s);s->network=sink;unlock(s);return PN_OK;
+}
+pn_status_t pn_device_transfer_http_install(pn_device_transfer_http_t *http,const pn_device_transfer_install_sink_t *sink){
+ if(!http || !http->impl || (sink && !sink->installed))return PN_INVALID;
+ http_t *s=http->impl;lock(s);s->install=sink;unlock(s);return PN_OK;
 }
 /// 网页(80)与LocalSend(53317)两个监听共用一个会话：串行处理，长上传时另一端短暂返回503而不是争用缓冲。
 /// Web (80) and LocalSend (53317) listeners share one session: serialize requests so the other side briefly gets 503 during long uploads instead of racing buffers.

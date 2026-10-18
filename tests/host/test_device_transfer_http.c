@@ -79,10 +79,13 @@ static pn_network_credentials_t sink_last;static bool sink_forget,sink_busy;stat
 static pn_status_t sink_submit(void *ctx,const pn_network_credentials_t *c,bool forget){(void)ctx;if(sink_busy)return PN_BUSY;sink_calls++;sink_forget=forget;if(!forget)sink_last=*c;return PN_OK;}
 static pn_status_t sink_status(void *ctx,char ssid[PN_NETWORK_SSID_MAX+1],bool *pending,pn_status_t *last){(void)ctx;strcpy(ssid,sink_last.ssid);*pending=false;*last=PN_OK;return PN_OK;}
 static const pn_device_network_sink_t net_sink={NULL,sink_submit,sink_status};
+static unsigned install_calls;static pn_upload_kind_t install_kind;static char install_name[PN_UPLOAD_NAME_MAX];static pn_book_id_t install_digest;
+static void install_note(void *ctx,pn_upload_kind_t kind,const char *name,const pn_book_id_t *digest){(void)ctx;install_calls++;install_kind=kind;snprintf(install_name,sizeof install_name,"%s",name);install_digest=*digest;}
+static const pn_device_transfer_install_sink_t install_sink={NULL,install_note};
 int main(void){
  char root[]="/tmp/pn-device-http-XXXXXX";assert(mkdtemp(root));pn_media_t media;pn_media_init(&media);assert(pn_media_attach(&media,123)==PN_OK);
  pn_upload_files_options_t options={.root=root};pn_transfer_worker_t worker={0};assert(pn_transfer_worker_open(&worker,&media,&options,6u*1024u*1024u,NULL,NULL,NULL)==PN_OK);
- pn_device_transfer_http_t server={0};discovery_fails=true;discovery_attempts=0;assert(pn_device_transfer_http_open(&server,&worker,"192.168.4.1",80)==PN_OK && server.impl);
+ pn_device_transfer_http_t server={0};discovery_fails=true;discovery_attempts=0;assert(pn_device_transfer_http_open(&server,&worker,"192.168.4.1",80)==PN_OK && server.impl);assert(pn_device_transfer_http_install(&server,&install_sink)==PN_OK);
  assert(discovery_attempts==1 && !pn_device_transfer_http_localsend(&server) && discovery_attempts==1);now+=2000;assert(!pn_device_transfer_http_localsend(&server) && discovery_attempts==2);discovery_fails=false;now+=2000;assert(pn_device_transfer_http_localsend(&server) && discovery_attempts==3);
  int sockets[2];assert(socketpair(AF_UNIX,SOCK_STREAM,0,sockets)==0);assert(open_socket(&route,sockets[0])==ESP_OK);assert(write(sockets[1],"a",1)==1);char received;assert(receive(&route,sockets[0],&received,1,0)==1 && received=='a');
  cJSON *json=request(HTTP_GET,"/api/v1/status",NULL,0,NULL,NULL);assert(code==200 && json && !strcmp(cJSON_GetObjectItemCaseSensitive(json,"name")->valuestring,"PicoNano"));cJSON_Delete(json);
@@ -107,6 +110,7 @@ int main(void){
  wrong_peer=true;json=request(HTTP_POST,ls_uri,text,sizeof text-1,NULL,NULL);assert(code==403);cJSON_Delete(json);wrong_peer=false;
  json=request(HTTP_POST,ls_uri,text,sizeof text-1,NULL,NULL);assert(code==200 && !json);
  char native_path[512];snprintf(native_path,sizeof native_path,"%s/piconano/books/native.txt",root);FILE *native=fopen(native_path,"rb");assert(native);uint8_t native_bytes[64];assert(fread(native_bytes,1,sizeof native_bytes,native)==sizeof text-1 && !memcmp(native_bytes,text,sizeof text-1));assert(!fclose(native));
+ assert(install_calls==1 && install_kind==PN_UPLOAD_BOOK && !strcmp(install_name,"native.txt") && !memcmp(install_digest.sha256,digest.sha256,32));install_calls=0;
  json=request(HTTP_POST,ls_uri,text,sizeof text-1,NULL,NULL);assert(code==409);cJSON_Delete(json);
  const char *image_meta="{\"info\":{\"alias\":\"Sender\",\"version\":\"2.2\",\"fingerprint\":\"sender\"},\"files\":{\"image\":{\"id\":\"image\",\"fileName\":\"image.png\",\"size\":100,\"fileType\":\"image/png\"}}}";
  json=request(HTTP_POST,"/api/localsend/v2/prepare-upload",image_meta,strlen(image_meta),NULL,NULL);assert(code==403);cJSON_Delete(json);
@@ -122,6 +126,7 @@ int main(void){
  memset(scratch,0,sizeof scratch);headers=0;add("Host: 192.168.4.1");add("Origin: http://192.168.4.1");char line[100];snprintf(line,sizeof line,"Authorization: Bearer %s",token);add(line);snprintf(line,sizeof line,"Content-Length: %zu",sizeof text-1);add(line);add("X-Offset: 0");add(extra);
  body=text;body_at=0;struct httpd_req_aux aux={.scratch=scratch,.scratch_size_limit=sizeof scratch-1,.scratch_cur_size=sizeof scratch-1,.req_hdrs_count=headers};httpd_req_t r={.handle=&route,.method=HTTP_PUT,.uri=uri,.content_len=sizeof text-1,.user_ctx=route.user_ctx,.aux=&aux};route.handler(&r);assert(code==200);
  snprintf(uri,sizeof uri,"/api/v1/uploads/%s/complete",id);char complete[100];snprintf(complete,sizeof complete,"{\"sha256\":\"%s\"}",sha);json=request(HTTP_POST,uri,complete,strlen(complete),token,NULL);assert(code==200 && cJSON_GetObjectItemCaseSensitive(json,"phase")->valueint==2);cJSON_Delete(json);
+ assert(install_calls==1 && install_kind==PN_UPLOAD_BOOK && !strcmp(install_name,"测试.txt") && !memcmp(install_digest.sha256,digest.sha256,32));
  json=request(HTTP_GET,"/api/v1/session",NULL,0,NULL,NULL);assert(code==200);cJSON_Delete(json);
  const char *bad="{\"kind\":\"book\",\"name\":\"../bad.txt\",\"size\":true,\"sha256\":\"bad\"}";json=request(HTTP_POST,"/api/v1/uploads",bad,strlen(bad),token,NULL);assert(code==400);cJSON_Delete(json);
  const char *nul="{\"code\":\"123456\\u0000suffix\"}";json=request(HTTP_POST,"/api/v1/network",nul,strlen(nul),token,NULL);assert(code==400);cJSON_Delete(json);
