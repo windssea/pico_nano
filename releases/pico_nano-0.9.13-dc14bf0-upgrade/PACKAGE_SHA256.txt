@@ -1,0 +1,2 @@
+fe80565fd83453d7af7471de7e1d0cd612189051d933524e01f7e59c979ecce9  PicoNano-dc14bf0-upgrade.zip
+de4a730a88baf7b060d34d356869103c0bff1a3ebdbc6cc5da2fe829f6fcee9d  PicoNano-web-installer-dc14bf0.zip
