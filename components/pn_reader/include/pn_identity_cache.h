@@ -36,6 +36,8 @@ typedef struct {void *impl;} pn_identity_cache_job_t;
 pn_status_t pn_identity_cache_job_begin(pn_identity_cache_job_t *job,pn_pool_t *pool,pn_media_t *media,const char *path);
 /// 推进一块（32KiB）；BUSY未完，OK时已写入cache，其余为错误。/ Advance one 32 KiB block; BUSY means unfinished, OK means the entry is in the cache, anything else is an error.
 pn_status_t pn_identity_cache_job_step(pn_identity_cache_job_t *job,pn_identity_cache_t *cache);
+/// 当前任务路径；无任务或关闭后为NULL。/ Current job path; NULL without a job or after close.
+const char *pn_identity_cache_job_path(const pn_identity_cache_job_t *job);
 /// 释放句柄与租约，幂等。/ Release the handle and lease, idempotently.
 void pn_identity_cache_job_close(pn_identity_cache_job_t *job);
 /// 文件修改时间（stat），失败返回false。/ File modification time via stat; false on failure.

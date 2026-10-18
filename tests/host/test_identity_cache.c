@@ -17,8 +17,9 @@ int main(int argc,char **argv){
      assert(pn_text_file_open(&file,&media,&lease,book,&source)==PN_OK && pn_text_file_identity_pooled(&pool,&source,&expected)==PN_OK);(void)encoding;assert(pn_text_file_close(&file)==PN_OK && pn_media_release(&media,&lease)==PN_OK);}
     static pn_identity_cache_t cache;assert(pn_identity_cache_load(&cache,cache_file)==PN_EMPTY && !cache.count);
     pn_identity_cache_job_t job={0};assert(pn_identity_cache_job_begin(&job,&pool,&media,book)==PN_OK && pn_media_active(&media)==1);
+    assert(pn_identity_cache_job_path(&job) && !strcmp(pn_identity_cache_job_path(&job),book));
     pn_status_t s;unsigned steps=0;while((s=pn_identity_cache_job_step(&job,&cache))==PN_BUSY)steps++;
-    assert(s==PN_OK && steps>=2);pn_identity_cache_job_close(&job);pn_identity_cache_job_close(&job);assert(pn_media_active(&media)==0 && !pool.used);
+    assert(s==PN_OK && steps>=2);pn_identity_cache_job_close(&job);pn_identity_cache_job_close(&job);assert(!pn_identity_cache_job_path(&job) && pn_media_active(&media)==0 && !pool.used);
     uint64_t size;int64_t mtime;assert(pn_identity_cache_stat(book,&size,&mtime) && size==200000);
     pn_book_id_t found;assert(pn_identity_cache_find(&cache,book,size,mtime,&found) && !memcmp(found.sha256,expected.sha256,32));
     assert(!pn_identity_cache_find(&cache,book,size+1,mtime,&found) && !pn_identity_cache_find(&cache,book,size,mtime+2,&found));

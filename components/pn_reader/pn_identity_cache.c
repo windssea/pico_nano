@@ -88,6 +88,9 @@ pn_status_t pn_identity_cache_job_step(pn_identity_cache_job_t *job,pn_identity_
     uint64_t size;int64_t mtime;if(!pn_identity_cache_stat(j->path,&size,&mtime) || size!=j->size || mtime!=j->mtime)return PN_STALE_JOB;
     pn_identity_cache_put(cache,j->path,j->size,j->mtime,&id);return PN_OK;
 }
+const char *pn_identity_cache_job_path(const pn_identity_cache_job_t *job){
+    return job && job->impl?((const job_t *)job->impl)->path:NULL;
+}
 void pn_identity_cache_job_close(pn_identity_cache_job_t *job){
     if(!job || !job->impl)return;
     job_t *j=job->impl;pn_identity_job_close(&j->hash);(void)pn_text_file_close(&j->file);
