@@ -32,9 +32,10 @@ typedef struct {
     pn_w_status_snapshot_t status; ///< 当前帧的状态带，热恢复未变时不重画 / Status band in the current frame; unchanged warm restores never redraw it
     pn_page_index_t page_index;uint32_t index_generation;
     pn_pool_t *pool;pn_media_t local,state;pn_media_t *media;pn_media_lease_t book_lease,font_lease,fallback_lease,state_lease;
-    pn_text_file_t book_file,font_file,fallback_file;pn_text_source_t font_source;pn_book_id_t book;pn_zip_t zip;pn_epub_t epub;pn_toc_t toc;pn_epub_info_t info;
+    pn_text_file_t book_file,font_file,fallback_file;pn_text_source_t font_source,fallback_source;pn_book_id_t book;pn_zip_t zip;pn_epub_t epub;pn_toc_t toc;pn_epub_info_t info;
     pn_text_file_verify_t verify;bool verify_book;pn_text_source_t book_source; ///< 快开后的整书SHA后台复核 / Background whole-book SHA verification after fast opening
-    bool verify_font;void *verify_font_handle;pn_book_id_t font_expected; ///< 快开时外置正文字体只核对大小，完整SHA先于整书在后台复核 / On fast opens the external body font checks size only; its full SHA is verified in the background before the book
+    bool verify_font;void *verify_font_handle;pn_book_id_t font_expected; ///< 外置正文字体只核对大小，完整SHA在首屏后复核 / External body font checks size only; full SHA is verified after the first frame
+    bool verify_fallback;void *verify_fallback_handle;pn_book_id_t fallback_expected; ///< 补字字体同样延迟复核 / The fallback face is deferred and verified the same way
     pn_font_t body,ui;pn_font_chain_t chain;
     pn_font_set_t font_live,font_draft;pn_font_t *managed_body;pn_font_chain_t *managed_chain;
     bool font_use_draft,font_preview,font_pending,font_render,global_pending;
@@ -349,10 +350,11 @@ static pn_status_t open_complete(app_t *a,const char *font,const char *state,uin
             else{has_selected_fonts=true;font=selected_fonts.primary.kind==PN_FONT_FILE?selected_fonts.primary.path:NULL;
                 pn_status_t backup;
 #ifdef ESP_PLATFORM
-                backup=selected_fonts.fallback.kind==PN_FONT_FILE && !pn_sd_resource_path(selected_fonts.fallback.path,PN_SD_FONTS)?PN_EMPTY:selected_fonts.fallback.kind==PN_FONT_FILE?pn_font_reference_open_file(pool,&selected_fonts.fallback,a->media,&a->book_lease,&a->fallback_file,&fallback_source):pn_font_reference_verify_pooled(pool,&selected_fonts.fallback,a->media,&a->book_lease);
+                backup=selected_fonts.fallback.kind==PN_FONT_FILE && !pn_sd_resource_path(selected_fonts.fallback.path,PN_SD_FONTS)?PN_EMPTY:selected_fonts.fallback.kind==PN_FONT_FILE?pn_font_reference_open_file_fast(pool,&selected_fonts.fallback,a->media,&a->book_lease,&a->fallback_file,&fallback_source):pn_font_reference_verify_pooled(pool,&selected_fonts.fallback,a->media,&a->book_lease);
 #else
-                backup=selected_fonts.fallback.kind==PN_FONT_FILE?pn_font_reference_open_file(pool,&selected_fonts.fallback,a->media,&a->book_lease,&a->fallback_file,&fallback_source):pn_font_reference_verify_pooled(pool,&selected_fonts.fallback,a->media,&a->book_lease);
+                backup=selected_fonts.fallback.kind==PN_FONT_FILE?pn_font_reference_open_file_fast(pool,&selected_fonts.fallback,a->media,&a->book_lease,&a->fallback_file,&fallback_source):pn_font_reference_verify_pooled(pool,&selected_fonts.fallback,a->media,&a->book_lease);
 #endif
+                if(backup==PN_OK && selected_fonts.fallback.kind==PN_FONT_FILE){a->fallback_source=fallback_source;a->verify_fallback=true;a->fallback_expected=selected_fonts.fallback.identity;a->verify_fallback_handle=a->fallback_file.handle;}
                 if(backup==PN_STALE_MEDIA)status=backup;
                 else if(backup!=PN_OK){a->font_unavailable=true;selected_fonts.fallback=(pn_font_reference_t){.kind=PN_FONT_RESIDENT};}}}
     }
@@ -449,12 +451,12 @@ pn_status_t pn_epub_app_open_job_progress(const pn_epub_open_job_t *job,uint64_t
     if(r->hash.impl)return pn_identity_job_progress(&r->hash,bytes,size);
     *bytes=r->stage>=3?r->source.size:0;*size=r->source.size;return PN_OK;
 }
-bool pn_epub_app_verify_pending(const pn_epub_app_t *app){const app_t *a=app && app->impl?app->impl:NULL;return a && (a->verify_font || a->verify_book);}
+bool pn_epub_app_verify_pending(const pn_epub_app_t *app){const app_t *a=app && app->impl?app->impl:NULL;return a && (a->verify_font || a->verify_fallback || a->verify_book);}
 /// 后台字体摘要失配时丢弃未经验证的外置字体，恢复常驻字体并强制重建分页键；保留用户偏好供下次修复。
 /// On deferred font digest mismatch, drop the unverified external face, restore the resident face and force a new layout key; keep the preference for the next repair.
 static pn_status_t font_verification_fallback(app_t *a){
     if(!a)return PN_INVALID;
-    a->verify_font=false;
+    a->verify_font=false;a->verify_fallback=false;
     pn_font_chain_clear(&a->chain);
     pn_font_close(&a->body);
     if(a->font_file.handle)(void)pn_text_file_close(&a->font_file);
@@ -471,25 +473,51 @@ static pn_status_t font_verification_fallback(app_t *a){
     if(s==PN_OK)s=pn_epub_reader_reflow(&a->reader,&a->layout);
     return s;
 }
+/// 补字字体复核失配时只丢弃fallback，保留正文字体并重建无补字chain。/ On fallback mismatch drop only the fallback, keep the body face and rebuild a chain without it.
+static pn_status_t fallback_verification_fallback(app_t *a){
+    if(!a)return PN_INVALID;
+    a->verify_fallback=false;
+    pn_font_chain_clear(&a->chain);
+    pn_font_close(&a->body);
+    if(a->fallback_file.handle)(void)pn_text_file_close(&a->fallback_file);
+    if(a->fallback_lease.ticket)(void)pn_media_release(a->media,&a->fallback_lease);
+    a->font_unavailable=true;a->fonts_known=false;a->boot_fallback[0]=0;
+    if(a->live_fonts.fallback.kind!=PN_FONT_RESIDENT)a->live_fonts.fallback=(pn_font_reference_t){.kind=PN_FONT_RESIDENT};
+    a->index_generation=0;a->token.generation++;
+    pn_status_t s=pn_display_set_token(&a->display,a->token);
+    a->force_full=true;
+    if(s==PN_OK)s=font_size(a,a->style.pixels);
+    if(s==PN_OK)s=pn_font_chain_init(&a->chain,a->pool,&a->body,NULL);
+    if(s==PN_OK)s=pn_epub_reader_reflow(&a->reader,&a->layout);
+    return s;
+}
 pn_status_t pn_epub_app_verify_step(pn_epub_app_t *app){
     if(!app || !app->impl)return PN_INVALID;
-    app_t *a=app->impl;if(!a->verify_font && !a->verify_book)return PN_EMPTY;
+    app_t *a=app->impl;if(!a->verify_font && !a->verify_fallback && !a->verify_book)return PN_EMPTY;
     if(a->lost)return PN_BUSY;
-    // 用户已换正文字体时旧文件已关闭，新字体走完整打开，不再复核旧引用。/ If the user switched body fonts the old file is closed and the new one opened fully, so drop the old reference check.
+    // 用户已换字体时旧文件已关闭，不再复核旧引用。/ If fonts were switched the old files are closed; drop the stale references.
     if(a->verify_font && (a->font_file.handle!=a->verify_font_handle || !a->font_file.handle || a->font_preview || a->font_pending || a->font_view)){pn_text_file_verify_close(&a->verify);a->verify_font=false;}
-    if(!a->verify_font && !a->verify_book)return PN_OK;
-    if(!a->verify.impl){pn_status_t s=a->verify_font?pn_text_file_verify_begin(&a->verify,a->pool,&a->font_source,&a->font_expected,false,NULL,NULL)
-        :pn_text_file_verify_begin(&a->verify,a->pool,&a->book_source,&a->book,false,NULL,NULL);if(s!=PN_OK)return s;}
+    if(a->verify_fallback && (a->fallback_file.handle!=a->verify_fallback_handle || !a->fallback_file.handle || a->font_preview || a->font_pending || a->font_view)){pn_text_file_verify_close(&a->verify);a->verify_fallback=false;}
+    if(!a->verify_font && !a->verify_fallback && !a->verify_book)return PN_OK;
+    if(!a->verify.impl){
+        pn_status_t s=PN_INVALID;
+        if(a->verify_font)s=pn_text_file_verify_begin(&a->verify,a->pool,&a->font_source,&a->font_expected,false,NULL,NULL);
+        else if(a->verify_fallback)s=pn_text_file_verify_begin(&a->verify,a->pool,&a->fallback_source,&a->fallback_expected,false,NULL,NULL);
+        else s=pn_text_file_verify_begin(&a->verify,a->pool,&a->book_source,&a->book,false,NULL,NULL);
+        if(s!=PN_OK)return s;
+    }
     pn_status_t s=pn_text_file_verify_step(&a->verify,NULL);
     if(s==PN_BUSY || s==PN_CANCELLED)return s;
     pn_text_file_verify_close(&a->verify);
     if(s!=PN_OK){
-        // 字体只在首屏后复核；失配/损坏时回退常驻字体，正文继续可用，分页缓存不复用坏字体键。
-        // Fonts are verified only after the first frame; on mismatch/corruption fall back to the resident face so reading stays usable and the bad key is not reused.
+        // 字体只在首屏后复核；失配/损坏时回退常驻字体/无补字chain，正文继续可用。
+        // Fonts are verified only after the first frame; on mismatch/corruption fall back to resident/no-fallback faces so reading stays usable.
         if(a->verify_font){pn_status_t fallback=font_verification_fallback(a);if(fallback!=PN_OK)return fallback;}
+        else if(a->verify_fallback){pn_status_t fallback=fallback_verification_fallback(a);if(fallback!=PN_OK)return fallback;}
         return s;
     }
-    if(a->verify_font){a->verify_font=false;return a->verify_book?PN_BUSY:PN_OK;}
+    if(a->verify_font){a->verify_font=false;return (a->verify_fallback||a->verify_book)?PN_BUSY:PN_OK;}
+    if(a->verify_fallback){a->verify_fallback=false;return a->verify_book?PN_BUSY:PN_OK;}
     a->verify_book=false;return PN_OK;
 }
 pn_status_t pn_epub_app_open_job_step(pn_epub_open_job_t *job,pn_epub_app_t *out){

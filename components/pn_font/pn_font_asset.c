@@ -33,7 +33,11 @@ static pn_status_t open_reference(pn_pool_t *pool,const pn_font_reference_t *ref
         // 只复用仍受同代READ保护的系统源身份，目标仍由当前阅读器独立关闭。
         // Reuse only a system identity protected by same-generation READ leases; the current reader still closes its own target.
         // 快开只核对大小，完整SHA由调用方随后后台复核。/ Fast opening checks size only; callers verify the full SHA in the background afterwards.
-        if(!full){*source=candidate;return PN_OK;}
+        if(!full){
+            // 暂用已保存的预期身份作为分页键，后台复核失败时阅读器负责丢弃并回退。
+            // Use the stored expected identity as the provisional layout key; the caller drops it and falls back if background verification fails.
+            file->identity=ref->identity;file->identity_known=true;*source=candidate;return PN_OK;
+        }
         pn_status_t reused=pn_font_system_identity_reuse(&candidate);
         if(reused!=PN_OK && reused!=PN_EMPTY)status=reused;
         if(status==PN_OK)status=pn_text_file_identity_pooled(pool,&candidate,&actual);

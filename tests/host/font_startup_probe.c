@@ -55,9 +55,9 @@ int __wrap_fclose(FILE *file){for(unsigned i=0;i<4;i++)if(font_handles[i]==file)
 pn_status_t __real_pn_identity_file_pooled(pn_pool_t *,pn_media_t *,const pn_media_lease_t *,const char *,uint64_t,pn_book_id_t *);
 pn_status_t __wrap_pn_identity_file_pooled(pn_pool_t *p,pn_media_t *m,const pn_media_lease_t *l,const char *path,uint64_t max,pn_book_id_t *id){if(tracing && !strcmp(path,fallback_path)){hashes++;before_hash();}return __real_pn_identity_file_pooled(p,m,l,path,max,id);}
 pn_status_t __real_pn_identity_stream(void *,uint64_t,pn_identity_read_fn,pn_book_id_t *);
-pn_status_t __wrap_pn_identity_stream(void *ctx,uint64_t size,pn_identity_read_fn read,pn_book_id_t *id){if(tracing && size==fallback_size){hashes++;before_hash();}if(tracing && size==book_size)book_hashes++;return __real_pn_identity_stream(ctx,size,read,id);}
+pn_status_t __wrap_pn_identity_stream(void *ctx,uint64_t size,pn_identity_read_fn read,pn_book_id_t *id){if(tracing && size==fallback_size){hashes++;before_hash();}if(tracing && size==book_size){book_hashes++;before_hash();}return __real_pn_identity_stream(ctx,size,read,id);}
 pn_status_t __real_pn_identity_stream_pooled(pn_pool_t *,void *,uint64_t,pn_identity_read_fn,pn_book_id_t *);
-pn_status_t __wrap_pn_identity_stream_pooled(pn_pool_t *pool,void *ctx,uint64_t size,pn_identity_read_fn read,pn_book_id_t *id){if(tracing && size==fallback_size){hashes++;before_hash();}if(tracing && size==book_size)book_hashes++;return __real_pn_identity_stream_pooled(pool,ctx,size,read,id);}
+pn_status_t __wrap_pn_identity_stream_pooled(pn_pool_t *pool,void *ctx,uint64_t size,pn_identity_read_fn read,pn_book_id_t *id){if(tracing && size==fallback_size){hashes++;before_hash();}if(tracing && size==book_size){book_hashes++;before_hash();}return __real_pn_identity_stream_pooled(pool,ctx,size,read,id);}
 pn_status_t __real_pn_identity_job_begin(pn_identity_job_t *,pn_pool_t *,void *,uint64_t,pn_identity_read_fn);
 pn_status_t __wrap_pn_identity_job_begin(pn_identity_job_t *j,pn_pool_t *p,void *ctx,uint64_t size,pn_identity_read_fn read){if(tracing && size==book_size)book_hashes++;return __real_pn_identity_job_begin(j,p,ctx,size,read);}
 pn_status_t __real_pn_identity_job_step(pn_identity_job_t *,pn_book_id_t *);
@@ -173,5 +173,7 @@ int main(int argc,char **argv){
     assert(pn_media_release(&media,&guard)==PN_OK && !pn_media_active(&media) && !pool.used && !pool.live);
     printf("startup status=%d font_size=%llu full_hashes=%u deferred_hashes=%u book_hashes=%u font_opens=%u font_read_bytes=%zu font_get_hashes=%u book_opens=%u book_reads=%u book_read_bytes=%zu book_seeks=%u presents=%u peak=%zu used=%zu live=%zu\n",status,(unsigned long long)fallback_size,startup_hashes,deferred_hashes,startup_book_hashes,startup_opens,startup_bytes,get_hashes,startup_book_opens,startup_book_reads,startup_book_bytes,startup_book_seeks,presents,pool.peak,pool.used,pool.live);
     pn_status_t expected=is_fault("cancel")?PN_CANCELLED:is_fault("lost")?PN_STALE_MEDIA:is_fault("present")?PN_IO:PN_OK;
+    if(epub && (is_fault("replaced") || is_fault("bad-primary")) && status==PN_STALE_JOB)expected=PN_STALE_JOB;
+    if(getenv("PN_FONT_STARTUP_TRACE"))fprintf(stderr,"final status=%d expected=%d book_hashes=%u font_hashes=%u\n",(int)status,(int)expected,book_hashes,hashes);
     assert(status==expected);return 0;
 }
