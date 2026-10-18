@@ -7,17 +7,39 @@
 #include "esp_memory_utils.h"
 #include "esp_heap_caps.h"
 #include <string.h>
+#if defined(CONFIG_PN_PROFILE) && CONFIG_PN_PROFILE
+#include "esp_timer.h"
+#include "esp_log.h"
+static const char *TAG="pn.identity";
+#endif
 static pn_status_t stream_impl(void *ctx,uint64_t size,pn_identity_read_fn read,uint8_t *buffer,size_t capacity,pn_book_id_t *out){
     psa_hash_operation_t op=PSA_HASH_OPERATION_INIT;
     pn_status_t status=psa_hash_setup(&op,PSA_ALG_SHA_256)==PSA_SUCCESS?PN_OK:PN_IO;
     uint64_t offset=0;pn_book_id_t result;
+#if defined(CONFIG_PN_PROFILE) && CONFIG_PN_PROFILE
+    uint64_t read_us=0,hash_us=0,started=0;
+#endif
     while(status==PN_OK && offset<size){
         status=pn_cancel_checkpoint();if(status!=PN_OK)break;
         size_t cap=size-offset<capacity?(size_t)(size-offset):capacity,n=0;
-        status=read(ctx,offset,buffer,cap,&n);if(status!=PN_OK)break;
+#if defined(CONFIG_PN_PROFILE) && CONFIG_PN_PROFILE
+        started=esp_timer_get_time();
+#endif
+        status=read(ctx,offset,buffer,cap,&n);
+#if defined(CONFIG_PN_PROFILE) && CONFIG_PN_PROFILE
+        read_us+=(uint64_t)esp_timer_get_time()-started;started=esp_timer_get_time();
+#endif
+        if(status!=PN_OK)break;
         if(!n || n>cap){status=PN_IO;break;}
-        if(psa_hash_update(&op,buffer,n)!=PSA_SUCCESS){status=PN_IO;break;}offset+=n;
+        if(psa_hash_update(&op,buffer,n)!=PSA_SUCCESS){status=PN_IO;break;}
+#if defined(CONFIG_PN_PROFILE) && CONFIG_PN_PROFILE
+        hash_us+=(uint64_t)esp_timer_get_time()-started;
+#endif
+        offset+=n;
     }
+#if defined(CONFIG_PN_PROFILE) && CONFIG_PN_PROFILE
+    if(size>=1024u*1024u)ESP_LOGI(TAG,"stream bytes=%llu block=%zu read_us=%llu hash_us=%llu",(unsigned long long)size,capacity,(unsigned long long)read_us,(unsigned long long)hash_us);
+#endif
     size_t written=0;
     if(status==PN_OK && (psa_hash_finish(&op,result.sha256,sizeof result.sha256,&written)!=PSA_SUCCESS || written!=sizeof result.sha256))status=PN_IO;
     (void)psa_hash_abort(&op);
