@@ -36,6 +36,7 @@ typedef struct {
     pn_text_file_verify_t verify;bool verify_book;pn_text_source_t book_source; ///< 快开后的整书SHA后台复核 / Background whole-book SHA verification after fast opening
     bool verify_font;void *verify_font_handle;pn_book_id_t font_expected; ///< 外置正文字体只核对大小，完整SHA在首屏后复核 / External body font checks size only; full SHA is verified after the first frame
     bool verify_fallback;void *verify_fallback_handle;pn_book_id_t fallback_expected; ///< 补字字体同样延迟复核 / The fallback face is deferred and verified the same way
+    bool font_recovery_pending; ///< 字体已降级，原位置正文等待成功重画 / Font degraded; body at the original position awaits a successful repaint
     pn_font_t body,ui;pn_font_chain_t chain;
     pn_font_set_t font_live,font_draft;pn_font_t *managed_body;pn_font_chain_t *managed_chain;
     bool font_use_draft,font_preview,font_pending,font_render,global_pending;
@@ -334,26 +335,26 @@ static pn_status_t open_complete(app_t *a,const char *font,const char *state,uin
         if(status==PN_OK)status=pn_font_preferences_resolve(&global_io,&book_io,pool,&a->book,&selected_fonts,&fonts_from_book);
         if(status==PN_EMPTY)status=PN_OK;else if(status==PN_OK){
             // 所选字体缺失/被替换：本次用启动默认字体运行，保留记录不改。/ Missing or replaced selection: run with the startup default this time and keep the record unchanged.
-            pn_status_t primary;
+            pn_status_t primary;bool primary_verified=false,fallback_verified=false;
             // 冷开和快开的外置正文字体都只核对大小；完整SHA由后台在首屏后复核，避免大CJK字体整读数秒。
             // Both cold and fast opens size-check the external body font; the full SHA is verified after the first frame in the background, avoiding seconds of large-CJK whole-file reads.
-            pn_status_t (*open_font)(pn_pool_t *,const pn_font_reference_t *,pn_media_t *,const pn_media_lease_t *,pn_text_file_t *,pn_text_source_t *)=pn_font_reference_open_file_fast;
+            pn_status_t (*open_font)(pn_pool_t *,const pn_font_reference_t *,pn_media_t *,const pn_media_lease_t *,pn_text_file_t *,pn_text_source_t *,bool *)=pn_font_reference_open_file_deferred;
 #ifdef ESP_PLATFORM
-            primary=selected_fonts.primary.kind==PN_FONT_FILE && !pn_sd_resource_path(selected_fonts.primary.path,PN_SD_FONTS)?PN_EMPTY:selected_fonts.primary.kind==PN_FONT_FILE?open_font(pool,&selected_fonts.primary,a->media,&a->book_lease,&a->font_file,&a->font_source):pn_font_reference_verify_pooled(pool,&selected_fonts.primary,a->media,&a->book_lease);
+            primary=selected_fonts.primary.kind==PN_FONT_FILE && !pn_sd_resource_path(selected_fonts.primary.path,PN_SD_FONTS)?PN_EMPTY:selected_fonts.primary.kind==PN_FONT_FILE?open_font(pool,&selected_fonts.primary,a->media,&a->book_lease,&a->font_file,&a->font_source,&primary_verified):pn_font_reference_verify_pooled(pool,&selected_fonts.primary,a->media,&a->book_lease);
 #else
-            primary=selected_fonts.primary.kind==PN_FONT_FILE?open_font(pool,&selected_fonts.primary,a->media,&a->book_lease,&a->font_file,&a->font_source):pn_font_reference_verify_pooled(pool,&selected_fonts.primary,a->media,&a->book_lease);
+            primary=selected_fonts.primary.kind==PN_FONT_FILE?open_font(pool,&selected_fonts.primary,a->media,&a->book_lease,&a->font_file,&a->font_source,&primary_verified):pn_font_reference_verify_pooled(pool,&selected_fonts.primary,a->media,&a->book_lease);
 #endif
-            if(primary==PN_OK && selected_fonts.primary.kind==PN_FONT_FILE){a->verify_font=true;a->font_expected=selected_fonts.primary.identity;a->verify_font_handle=a->font_file.handle;}
+            if(primary==PN_OK && selected_fonts.primary.kind==PN_FONT_FILE && !primary_verified){a->verify_font=true;a->font_expected=selected_fonts.primary.identity;a->verify_font_handle=a->font_file.handle;}
             if(primary==PN_STALE_MEDIA)status=primary;
             else if(primary!=PN_OK)a->font_unavailable=true;
             else{has_selected_fonts=true;font=selected_fonts.primary.kind==PN_FONT_FILE?selected_fonts.primary.path:NULL;
                 pn_status_t backup;
 #ifdef ESP_PLATFORM
-                backup=selected_fonts.fallback.kind==PN_FONT_FILE && !pn_sd_resource_path(selected_fonts.fallback.path,PN_SD_FONTS)?PN_EMPTY:selected_fonts.fallback.kind==PN_FONT_FILE?pn_font_reference_open_file_fast(pool,&selected_fonts.fallback,a->media,&a->book_lease,&a->fallback_file,&fallback_source):pn_font_reference_verify_pooled(pool,&selected_fonts.fallback,a->media,&a->book_lease);
+                backup=selected_fonts.fallback.kind==PN_FONT_FILE && !pn_sd_resource_path(selected_fonts.fallback.path,PN_SD_FONTS)?PN_EMPTY:selected_fonts.fallback.kind==PN_FONT_FILE?open_font(pool,&selected_fonts.fallback,a->media,&a->book_lease,&a->fallback_file,&fallback_source,&fallback_verified):pn_font_reference_verify_pooled(pool,&selected_fonts.fallback,a->media,&a->book_lease);
 #else
-                backup=selected_fonts.fallback.kind==PN_FONT_FILE?pn_font_reference_open_file_fast(pool,&selected_fonts.fallback,a->media,&a->book_lease,&a->fallback_file,&fallback_source):pn_font_reference_verify_pooled(pool,&selected_fonts.fallback,a->media,&a->book_lease);
+                backup=selected_fonts.fallback.kind==PN_FONT_FILE?open_font(pool,&selected_fonts.fallback,a->media,&a->book_lease,&a->fallback_file,&fallback_source,&fallback_verified):pn_font_reference_verify_pooled(pool,&selected_fonts.fallback,a->media,&a->book_lease);
 #endif
-                if(backup==PN_OK && selected_fonts.fallback.kind==PN_FONT_FILE){a->fallback_source=fallback_source;a->verify_fallback=true;a->fallback_expected=selected_fonts.fallback.identity;a->verify_fallback_handle=a->fallback_file.handle;}
+                if(backup==PN_OK && selected_fonts.fallback.kind==PN_FONT_FILE){a->fallback_source=fallback_source;a->verify_fallback=!fallback_verified;a->fallback_expected=selected_fonts.fallback.identity;a->verify_fallback_handle=a->fallback_file.handle;}
                 if(backup==PN_STALE_MEDIA)status=backup;
                 else if(backup!=PN_OK){a->font_unavailable=true;selected_fonts.fallback=(pn_font_reference_t){.kind=PN_FONT_RESIDENT};}}}
     }
@@ -451,6 +452,7 @@ pn_status_t pn_epub_app_open_job_progress(const pn_epub_open_job_t *job,uint64_t
     *bytes=r->stage>=3?r->source.size:0;*size=r->source.size;return PN_OK;
 }
 bool pn_epub_app_verify_pending(const pn_epub_app_t *app){const app_t *a=app && app->impl?app->impl:NULL;return a && (a->verify_font || a->verify_fallback || a->verify_book);}
+bool pn_epub_app_font_recovery_pending(const pn_epub_app_t *app){return app && app->impl && ((const app_t *)app->impl)->font_recovery_pending;}
 /// 后台字体摘要失配时丢弃未经验证的外置字体，恢复常驻字体并强制重建分页键；保留用户偏好供下次修复。
 /// On deferred font digest mismatch, drop the unverified external face, restore the resident face and force a new layout key; keep the preference for the next repair.
 static pn_status_t font_verification_fallback(app_t *a){
@@ -511,8 +513,9 @@ pn_status_t pn_epub_app_verify_step(pn_epub_app_t *app){
     if(s!=PN_OK){
         // 字体只在首屏后复核；失配/损坏时回退常驻字体/无补字chain，正文继续可用。
         // Fonts are verified only after the first frame; on mismatch/corruption fall back to resident/no-fallback faces so reading stays usable.
-        if(a->verify_font){pn_status_t fallback=font_verification_fallback(a);if(fallback!=PN_OK)return fallback;}
-        else if(a->verify_fallback){pn_status_t fallback=fallback_verification_fallback(a);if(fallback!=PN_OK)return fallback;}
+        if(s==PN_STALE_MEDIA)return s;
+        if(a->verify_font){a->font_recovery_pending=true;pn_status_t fallback=font_verification_fallback(a);if(fallback!=PN_OK)return fallback;}
+        else if(a->verify_fallback){a->font_recovery_pending=true;pn_status_t fallback=fallback_verification_fallback(a);if(fallback!=PN_OK)return fallback;}
         return s;
     }
     if(a->verify_font){a->verify_font=false;return (a->verify_fallback||a->verify_book)?PN_BUSY:PN_OK;}
@@ -618,7 +621,7 @@ static pn_status_t navigate(pn_epub_app_t *app,pn_reader_action_t action,const p
     pn_status_t shown=present(ctx,job.frame,job.profile),displayed=pn_display_complete(&a->display,&job,shown==PN_OK);
     if(!a->font_view && a->body_layer.complete)a->body_layer.complete(a->body_layer.ctx,job.frame,shown==PN_OK && displayed==PN_OK);
     bool success=shown==PN_OK && displayed==PN_OK;pn_status_t committed=pn_epub_reader_complete(&a->reader,&receipt,success,now);
-    if(!success || !a->last_confirmed)a->force_full=true;else{a->force_full=false;a->has_restore=false;if(dismiss_return)a->has_bookmark_origin=false;pn_refresh_policy_commit(&a->refresh,profile,turn);}
+    if(!success || !a->last_confirmed)a->force_full=true;else{a->force_full=false;a->font_recovery_pending=false;a->has_restore=false;if(dismiss_return)a->has_bookmark_origin=false;pn_refresh_policy_commit(&a->refresh,profile,turn);}
     return shown!=PN_OK?shown:displayed!=PN_OK?displayed:committed;
 }
 pn_status_t pn_epub_app_step(pn_epub_app_t *app,pn_reader_action_t action,uint64_t now,pn_reader_present_fn present,void *ctx){return navigate(app,action,NULL,now,present,ctx);}

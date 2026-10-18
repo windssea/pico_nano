@@ -42,5 +42,23 @@ int main(void){
     assert(again>=sizeof data);
     puts("identity memo: disabled on host, full verification each open");
 #endif
+    // 后台完整复核也写入同代备忘；仅有预期身份不算完成校验，WRITE之后必须重新验证。
+    // Full background verification also seeds the generation memo; an expected identity alone is unverified and WRITE requires verification again.
+    pn_book_id_t expected=open_identity(&media,path,&again);pn_media_lease_t lease;
+    assert(pn_media_acquire(&media,PN_MEDIA_WRITE,&lease)==PN_OK && pn_media_release(&media,&lease)==PN_OK);
+    assert(pn_media_acquire(&media,PN_MEDIA_READ,&lease)==PN_OK);
+    pn_text_file_t file={0};pn_text_source_t source;assert(pn_text_file_open(&file,&media,&lease,path,&source)==PN_OK);
+    pn_book_id_t cached=expected;assert(pn_text_file_identity_cached(&source,&cached)==PN_EMPTY && !file.io_bytes);
+    pn_pool_t pool;assert(!pn_pool_init(&pool,1024u*1024u,NULL,NULL,NULL));pn_text_file_verify_t verify={0};
+    assert(pn_text_file_verify_begin(&verify,&pool,&source,&expected,false,NULL,NULL)==PN_OK);
+    pn_status_t s;do{s=pn_text_file_verify_step(&verify,NULL);}while(s==PN_BUSY);assert(s==PN_OK);pn_text_file_verify_close(&verify);
+    assert(pn_text_file_close(&file)==PN_OK && pn_media_release(&media,&lease)==PN_OK);
+    assert(pn_media_acquire(&media,PN_MEDIA_READ,&lease)==PN_OK && pn_text_file_open(&file,&media,&lease,path,&source)==PN_OK);
+#ifdef PN_TEST_IMMUTABLE_FILE
+    assert(pn_text_file_identity_cached(&source,&cached)==PN_OK && !memcmp(&cached,&expected,sizeof cached) && !file.io_bytes);
+#else
+    assert(pn_text_file_identity_cached(&source,&cached)==PN_EMPTY && !file.io_bytes);
+#endif
+    assert(pn_text_file_close(&file)==PN_OK && pn_media_release(&media,&lease)==PN_OK && !pool.used && !pool.live);
     unlink(path);return 0;
 }

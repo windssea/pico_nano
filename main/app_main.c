@@ -195,6 +195,7 @@ static bool panel_known,data_ready,locked,status_page,shelf_mode;
 static bool test_console_shown(const uint8_t **buffer,size_t *bytes){*buffer=hardware.hl.back_fb;*bytes=hardware.hl.back_fb?684u*1216u/2u:0;return panel_known;}
 #endif
 static bool opening; ///< 开书控制门，产品owner串行管理 / Opening gate owned by the serial product owner
+static bool loading_shown; ///< 当前开书已显示加载反馈 / Loading feedback already shown for this opening
 static pn_epub_open_job_t foreground_open; ///< 跨输入轮保留的私有开书任务，不是可阅读对象 / Private opening job across input ticks, never a readable object
 static bool opening_overlap; ///< 加载页扫描期间推进前台开书任务 / Advance the foreground opening job while the loading page scans
 static pn_status_t opening_overlap_result=PN_BUSY; ///< 扫描中已结束的开书步骤结果，tick_opening消费 / Result of an opening step that finished during the scan, consumed by tick_opening
@@ -216,6 +217,7 @@ static bool identity_takeover_active; ///< 点击正在预计算的书，异步�
 static char identity_takeover_path[PN_CATALOG_PATH_MAX];
 static void identity_job_stop(void);
 static void start_reader_impl(void);
+static void start_reader_finish(void);
 static pn_catalog_item_t last_read_book; ///< 已成功关闭阅读的书快照，不借用正文句柄 / Snapshot of a successfully closed book, without borrowing a reader handle
 static bool last_read_known; ///< 已有可信在读书身份 / A trusted in-progress book identity is available
 static const char *const book_directory=PN_SD_MOUNT "/" PN_SD_BOOKS;
@@ -320,8 +322,12 @@ static pn_focus_t focus_nav; ///< 当前页的三键焦点表 / Three-key focus 
 #define PARTIAL_MAX_PERCENT 45
 static pn_device_async_t async_port;
 static void opening_controls(bool active){opening=active;pn_async_block_controls(&async_port.input,active);if(active)pn_device_async_view(&async_port,18,false,input_flags);}
-// 任务可能已在加载页扫描期间完成并自行关闭：结果仍挂起时也要解除开书门。/ The job may have finished and closed itself during the loading scan: still release the gate while its result is pending.
-static pn_status_t opening_abort(void){if(identity_takeover_active){identity_takeover_active=false;identity_job_stop();opening_controls(false);return PN_OK;}bool parked=opening_overlap_result!=PN_BUSY;opening_overlap_result=PN_BUSY;if(!foreground_open.impl){if(parked)opening_controls(false);return PN_OK;}pn_status_t s=pn_epub_app_open_job_close(&foreground_open);opening_controls(false);return s;}
+/// 所有开书阶段共用取消出口；任务已结束或接管标志已清也必须归还输入门。/ Every opening stage shares this abort exit; return the input gate even after the job or takeover flag is gone.
+static pn_status_t opening_abort(void){
+    if(identity_takeover_active)identity_job_stop();
+    identity_takeover_active=false;identity_takeover_path[0]=0;opening_overlap_result=PN_BUSY;loading_shown=false;
+    pn_status_t s=pn_epub_app_open_job_close(&foreground_open);opening_controls(false);return s;
+}
 static pn_feedback_t press_feedback; ///< 独立、可撤销的按下区域，不借用UI对象 / Independent reversible press region without borrowing UI objects
 static pn_device_refresh_t maintenance; ///< 内容维护与可选反馈分开记账 / Content maintenance accounted separately from optional feedback
 static pn_feedback_idle_t feedback_idle; ///< 产品owner的反馈定稿候选 / Product-owner feedback settle candidates
@@ -768,7 +774,6 @@ static void show_lock(const char *hint){
     if(status!=PN_OK){ESP_LOGE(TAG,"Lock screen unavailable: %d",(int)status);message("已锁屏",hint);}
 }
 static bool stop_reader_impl(bool retain){
-    if(identity_takeover_active){identity_takeover_active=false;identity_job_stop();}
     if(opening_abort()!=PN_OK)return false;
 #if defined(CONFIG_PN_UI_FOLLOW) && CONFIG_PN_UI_FOLLOW
     if(pn_font_manage_motion_abort(&font_manage)!=PN_OK)return false;
@@ -1077,7 +1082,6 @@ static void reader_open_result(pn_status_t status){
     if(status!=PN_OK){ESP_LOGE(TAG,"Reader open/present failed: %d",(int)status);if(stop_reader())message("打开书籍失败","检查书籍或字体后重试");return;}
     locked=false;status_page=false;shelf_mode=false;
 }
-static bool loading_shown; ///< 解锁时已立即显示加载页，开书不再重复显示 / The loading page was shown at unlock, so opening does not show it again
 /* 书籍身份预计算：书库空闲时为未读过的书分步算整书SHA并按路径/大小/修改时间缓存，点开即走可信快开（后台仍完整复核）。
  * Book-identity precompute: while the library idles, hash not-yet-read books step by step and cache by path/size/mtime so opening takes the trusted fast path (still fully verified in the background). */
 #define IDENTITY_CACHE_FILE "/data/progress/book-identities.bin"
@@ -1167,21 +1171,22 @@ static bool tick_identity_takeover(void){
     if(!identity_takeover_active)return false;
     const char *path=pn_identity_cache_job_path(&identity_job);
     if(!path || strcmp(path,identity_takeover_path) || strcmp(selected_path,identity_takeover_path)){
-        identity_takeover_active=false;identity_job_stop();start_reader_impl();if(!foreground_open.impl)opening_controls(false);return true;
+        identity_takeover_active=false;identity_job_stop();start_reader_impl();start_reader_finish();return true;
     }
     pn_device_power_busy(PN_POWER_PRODUCT,true);
     pn_status_t s=pn_identity_cache_job_step(&identity_job,&identity_cache);
     if(s==PN_BUSY)return true;
     identity_job_stop();
-    if(s==PN_OK)identity_cache_store();
+    // 身份已在RAM提交，落盘留给后续书库空闲，避免Flash写挡住接管首屏。/ Identity is committed in RAM; persist during later shelf idle so Flash writes do not delay the first page.
     identity_takeover_active=false;
     if(s==PN_OK)identity_trust_selected();
     start_reader_impl();
-    if(!foreground_open.impl)opening_controls(false);
+    start_reader_finish();
     return true;
 }
 static void start_reader_impl(void){
     pn_cover_work_abort(&cover_work);
+    pn_menu_cache_drop(&menu_cache);
     // 点击正在预计算的书：保留任务、先显示加载页，由后台轮次接续；不在此同步读完整书。
     // Clicking a book already being precomputed: keep the job and show the loader; later ticks continue it instead of hashing the whole book synchronously here.
     const char *running_identity=pn_identity_cache_job_path(&identity_job);
@@ -1189,6 +1194,7 @@ static void start_reader_impl(void){
         if(!loading_shown){
             pn_status_t loading=show_loading(selected_path);
             if(loading==PN_CANCELLED){identity_job_stop();return;}
+            if(loading==PN_OK)loading_shown=true;
             if(loading!=PN_OK)ESP_LOGW(TAG,"Opening feedback unavailable: %d",(int)loading);
         }
         snprintf(identity_takeover_path,sizeof identity_takeover_path,"%s",selected_path);
@@ -1213,7 +1219,11 @@ static void start_reader_impl(void){
         if(resumed==PN_CANCELLED)return;
         if(resumed==PN_IO){message("显示失败","保留阅读会话\n请重试打开");return;}
     }
+    bool had_loading=loading_shown;
     if(!stop_reader())return;
+    loading_shown=had_loading;
+    // 旧任务清理已归还控制门；同一次新开书请求重新持有，直到完成或取消。/ Cleanup returned the old gate; the new opening request owns it again until completion or cancellation.
+    if(*selected_path)opening_controls(true);
     pn_wallpaper_mask_close(&lock_mask);
     if(!data_ready){data_ready=mount_data();if(!data_ready){message("内部存储不可用","保留数据，未格式化\n请先初始化数据分区");return;}}
     if(!shelf_prefs_loaded && pn_settings_load_shelf(&data_media,"/data/progress",&shelf_prefs)==PN_OK)shelf_prefs_loaded=true;
@@ -1289,18 +1299,22 @@ static bool tick_hot_deferred(uint64_t now){
     return true;
 }
 static bool tick_opening(void);
+/// 普通打开和身份接管共用完成回执，包含加载扫描中已完成的任务。/ Normal opening and identity takeover share completion handling, including jobs completed during loading scans.
+static void start_reader_finish(void){
+    if(identity_takeover_active)return;
+    loading_shown=false;
+    if(opening && !foreground_open.impl){if(opening_overlap_result!=PN_BUSY)(void)tick_opening();else opening_controls(false);}
+}
 static void start_reader(void){
     if(opening)return;
     bool gate=*selected_path!=0 && !transfer.impl && !usb.open;
     if(gate)opening_controls(true);
     start_reader_impl();
-    if(identity_takeover_active)return;
-    // 加载页显示期间任务若已完成，结果挂在opening_overlap_result：立即消费并显示正文，不能只解锁按键而让已打开却未显示的书接收输入。
-    // If the job finished while the loading page was shown, its result is parked in opening_overlap_result: consume it now and show the text, never just unblock keys while an opened but unshown book receives input.
-    if(gate && !foreground_open.impl){if(opening_overlap_result!=PN_BUSY)(void)tick_opening();else opening_controls(false);}
+    start_reader_finish();
 }
 /// 前台开书每轮一步；任务/加载页不确认正文，完整成功后走原唯一首帧回执。/ One foreground opening step per tick; neither job nor loader confirms content, and full success uses the original sole first-page receipt.
 static bool tick_opening(void){
+    if(identity_takeover_active)return tick_identity_takeover();
     // 扫描重叠中完成的任务已自行关闭，只留结果；仍须在此消费，否则开书门永不解除（加载页卡住）。
     // A job finished during scan overlap has closed itself, leaving only its result; it must still be consumed here or the opening gate never releases (stuck loading page).
     if(!foreground_open.impl && opening_overlap_result==PN_BUSY)return false;
@@ -2294,9 +2308,6 @@ static void device_task(void *arg){
                 else if(reader_active() && !status_page){pn_status_t status=active_step(action,now_ms());report_reader_result(status);}
                 else start_reader();}}}
         bool background=false;
-        if(available==PN_EMPTY && identity_takeover_active && !locked && !transfer.impl && !usb.open){
-            bool worked=tick_identity_takeover();if(worked){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);}
-        }
         if(available==PN_EMPTY && !locked && !transfer.impl && !usb.open && font_manage.impl && !touch_held && !tap.down && now_ms()>=last_input && now_ms()-last_input>=800){
             pn_status_t sampled=pn_font_manage_samples_idle(&font_manage,now_ms(),present,NULL);background=sampled==PN_BUSY;
             if(sampled==PN_OK || sampled==PN_BUSY){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);}}
@@ -2320,9 +2331,12 @@ static void device_task(void *arg){
             if(background){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);}
             // TXT快开的后台复核排在预取/预热之后，输入安静300ms才推进一块（32KiB）；不符则关闭并按完整路径重开。
             // TXT fast-open verification runs after prefetch/warming, one 32 KiB block once input has been quiet for 300 ms; a mismatch closes and reopens through the complete path.
-            else if(((reader.impl && pn_reader_app_verify_pending(&reader)) || (epub.impl && pn_epub_app_verify_pending(&epub))) && now_ms()>=last_input && now_ms()-last_input>=300){
+            else if(((reader.impl && pn_reader_app_verify_pending(&reader)) || (epub.impl && (pn_epub_app_verify_pending(&epub) || pn_epub_app_font_recovery_pending(&epub)))) && now_ms()>=last_input && now_ms()-last_input>=300){
                 pn_status_t verified=epub.impl?pn_epub_app_verify_step(&epub):pn_reader_app_verify_step(&reader);background=verified==PN_BUSY || verified==PN_CANCELLED;power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);
-                if(verified==PN_OK)ESP_LOGI(TAG,"Fast-open verification complete");
+                if(epub.impl && pn_epub_app_font_recovery_pending(&epub)){
+                    // 字体失败已降级，只重画原位置；失败保留会话待下轮，不重读整本书。/ A failed font was degraded: repaint the current position; retain the session for retries without rereading the book.
+                    pn_status_t repainted=active_step(PN_APP_OPEN,now_ms());report_reader_result(repainted);background=true;
+                }else if(verified==PN_OK)ESP_LOGI(TAG,"Fast-open verification complete");
                 else if(verified==PN_STALE_JOB || verified==PN_CORRUPT){ESP_LOGW(TAG,"Fast-open verification failed: %d; reopening fully",(int)verified);
                     snprintf(trust_failed_path,sizeof trust_failed_path,"%s",selected_path);pn_identity_cache_forget(&identity_cache,selected_path);if(stop_reader())start_reader();}
                 else if(!background)ESP_LOGW(TAG,"TXT fast-open verification stopped: %d",(int)verified);}}

@@ -224,6 +224,15 @@ static void memo_store(const pn_text_file_t *f,const pn_book_id_t *id){
     memo_t *m=memo_find(f,false);if(!m){m=&memo[memo_next];memo_next=(memo_next+1u)%MEMO_SLOTS;}
     *m=(memo_t){.media=f->media,.media_id=f->media->media_id,.epoch=f->lease.epoch,.writes=f->media->writes,.size=f->size,.id=*id,.used=true};strcpy(m->path,f->path);
 }
+pn_status_t pn_text_file_identity_cached(const pn_text_source_t *source,pn_book_id_t *out){
+    if(!source || !out)return PN_INVALID;
+    if(source->read_at!=read_at || source->validate!=validate || !source->ctx)return PN_EMPTY;
+    pn_text_file_t *file=source->ctx;pn_status_t s=validate(file);if(s!=PN_OK)return s;
+    if(source->size!=file->size)return PN_INVALID;
+    if(!memo_usable(file))return PN_EMPTY;
+    const memo_t *m=memo_find(file,true);if(!m)return PN_EMPTY;
+    file->identity=m->id;file->identity_known=true;file->identity_hits++;*out=m->id;return PN_OK;
+}
 pn_status_t pn_text_file_identity_pooled(pn_pool_t *pool,const pn_text_source_t *source,pn_book_id_t *out){
     if(!source || !out)return PN_INVALID;
     if(source->read_at!=read_at || source->validate!=validate || !source->ctx)return PN_UNSUPPORTED;
@@ -311,7 +320,7 @@ pn_status_t pn_text_file_verify_step(pn_text_file_verify_t *out,pn_text_encoding
         if(encoding)*encoding=v->scan.reader.encoding;
     }
     if(memcmp(digest.sha256,v->expected.sha256,sizeof digest.sha256))return PN_STALE_JOB;
-    if(v->source.read_at==read_at && v->source.validate==validate && v->source.ctx){pn_text_file_t *file=v->source.ctx;file->identity=digest;file->identity_known=true;}
+    if(v->source.read_at==read_at && v->source.validate==validate && v->source.ctx){pn_text_file_t *file=v->source.ctx;file->identity=digest;file->identity_known=true;memo_store(file,&digest);}
     return PN_OK;
 }
 void pn_text_file_verify_close(pn_text_file_verify_t *out){

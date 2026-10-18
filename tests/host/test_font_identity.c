@@ -35,6 +35,14 @@ int main(void){
     assert(pn_font_reading_source().ctx==system.ctx);
     pn_text_file_t *system_file=system.ctx;reads=system_file->io_reads;
     assert(!pn_font_system_open(&pool,&media,font_path) && system_file->io_reads==reads);
+    // 延迟打开复用受保护的已验证身份；普通主机仍要求后台复核。/ Deferred opening reuses a protected verified identity; ordinary hosts still require background verification.
+    bool verified=false;assert(pn_font_reference_open_file_deferred(&pool,&reference,&media,&lease,&selected,&selected_source,&verified)==PN_OK);
+#ifdef PN_TEST_IMMUTABLE_FILE
+    assert(verified && selected.io_bytes<reference.size);
+#else
+    assert(!verified);
+#endif
+    assert(pn_text_file_close(&selected)==PN_OK);
     // 已验证系统源也不能覆盖保存引用中的不同摘要或长度，失败不发布候选源。
     // A verified system source must not override a saved reference's different digest/size; failures never publish a candidate source.
     pn_font_reference_t mismatched=reference;pn_text_source_t preserved={.size=123};mismatched.identity.sha256[0]^=1;

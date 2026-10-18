@@ -179,9 +179,14 @@ int main(int argc,char **argv){
     // 所选字体被替换：外置字体首屏后后台复核，失配才回退常驻字体并标记；记录保持原样。
     // Replaced selection: the external font is verified after the first frame; only a mismatch falls back to the resident face and flags it; the record stays intact.
     assert(pn_epub_app_open(&app,&pool,argv[1],argv[3],argv[2],44,now++)==PN_OK);
+    screen.fail=false;assert(pn_epub_app_step(&app,PN_APP_OPEN,now++,present,&screen)==PN_OK && pn_epub_app_progress(&app,&first)==PN_OK);
     pn_status_t verify_status;while((verify_status=pn_epub_app_verify_step(&app))==PN_BUSY){}
     bool unavailable=pn_epub_app_font_unavailable(&app);
+    // 字体降级的呈现失败保留同一位置与恢复标志，重试成功后才清除。/ A failed degraded-font repaint retains the position/recovery flag until a successful retry.
+    screen.fail=true;assert(pn_epub_app_font_recovery_pending(&app) && pn_epub_app_step(&app,PN_APP_OPEN,now++,present,&screen)==PN_IO && pn_epub_app_font_recovery_pending(&app));
+    assert(pn_epub_app_progress(&app,&after)==PN_OK && same(&first,&after));screen.fail=false;
     pn_status_t reopen=pn_epub_app_step(&app,PN_APP_OPEN,now++,present,&screen);
+    assert(!pn_epub_app_font_recovery_pending(&app) && pn_epub_app_progress(&app,&after)==PN_OK && same(&first,&after));
     pn_status_t closed=pn_epub_app_close(&app,now++);
     assert(verify_status==PN_STALE_JOB && unavailable && reopen==PN_OK && closed==PN_OK && !pool.used && !pool.live);
     {pn_font_preferences_t kept;assert(pn_font_preferences_load(&global_io,&pool,NULL,&kept)==PN_OK && !memcmp(&kept.primary.identity,&fonts.primary.identity,sizeof kept.primary.identity));}

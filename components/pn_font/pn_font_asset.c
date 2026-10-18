@@ -14,7 +14,8 @@
 #include <stdlib.h>
 typedef struct {pn_pool_t *pool;pn_media_t *media;pn_media_lease_t lease;pn_text_file_t file;pn_text_source_t source;pn_font_t font;pn_font_reference_t reference;pn_font_info_t info;} asset_t;
 pn_status_t pn_font_asset_verify_retained(const pn_font_asset_t *asset){if(!asset || !asset->impl)return PN_INVALID;const asset_t *a=asset->impl;return pn_text_file_verify_retained(a->pool,&a->source);}
-static pn_status_t open_reference(pn_pool_t *pool,const pn_font_reference_t *ref,pn_media_t *media,const pn_media_lease_t *lease,pn_text_file_t *file,pn_text_source_t *source,bool full){
+static pn_status_t open_reference(pn_pool_t *pool,const pn_font_reference_t *ref,pn_media_t *media,const pn_media_lease_t *lease,pn_text_file_t *file,pn_text_source_t *source,bool full,bool *verified){
+    if(verified)*verified=false;
     if(!pool || !ref || !media || !lease || !file || !source || ref->kind!=PN_FONT_FILE)return PN_INVALID;
     if(file->handle)return PN_BUSY;
     pn_font_preferences_t check={.primary=*ref};pn_status_t status=pn_font_preferences_validate(&check,true);if(status!=PN_OK)return status;
@@ -33,21 +34,24 @@ static pn_status_t open_reference(pn_pool_t *pool,const pn_font_reference_t *ref
         // 只复用仍受同代READ保护的系统源身份，目标仍由当前阅读器独立关闭。
         // Reuse only a system identity protected by same-generation READ leases; the current reader still closes its own target.
         // 快开只核对大小，完整SHA由调用方随后后台复核。/ Fast opening checks size only; callers verify the full SHA in the background afterwards.
-        if(!full){
+        pn_status_t reused=pn_font_system_identity_reuse(&candidate);
+        if(reused==PN_EMPTY)reused=pn_text_file_identity_cached(&candidate,&actual);
+        if(reused!=PN_OK && reused!=PN_EMPTY)status=reused;
+        if(status==PN_OK && !full && reused==PN_EMPTY){
             // 暂用已保存的预期身份作为分页键，后台复核失败时阅读器负责丢弃并回退。
             // Use the stored expected identity as the provisional layout key; the caller drops it and falls back if background verification fails.
             file->identity=ref->identity;file->identity_known=true;*source=candidate;return PN_OK;
         }
-        pn_status_t reused=pn_font_system_identity_reuse(&candidate);
-        if(reused!=PN_OK && reused!=PN_EMPTY)status=reused;
         if(status==PN_OK)status=pn_text_file_identity_pooled(pool,&candidate,&actual);
     }
     if(status==PN_OK && memcmp(actual.sha256,ref->identity.sha256,32))status=PN_STALE_JOB;
     if(status!=PN_OK){(void)pn_text_file_close(file);return status;}
+    if(verified)*verified=true;
     *source=candidate;return PN_OK;
 }
-pn_status_t pn_font_reference_open_file(pn_pool_t *pool,const pn_font_reference_t *ref,pn_media_t *media,const pn_media_lease_t *lease,pn_text_file_t *file,pn_text_source_t *source){return open_reference(pool,ref,media,lease,file,source,true);}
-pn_status_t pn_font_reference_open_file_fast(pn_pool_t *pool,const pn_font_reference_t *ref,pn_media_t *media,const pn_media_lease_t *lease,pn_text_file_t *file,pn_text_source_t *source){return open_reference(pool,ref,media,lease,file,source,false);}
+pn_status_t pn_font_reference_open_file(pn_pool_t *pool,const pn_font_reference_t *ref,pn_media_t *media,const pn_media_lease_t *lease,pn_text_file_t *file,pn_text_source_t *source){return open_reference(pool,ref,media,lease,file,source,true,NULL);}
+pn_status_t pn_font_reference_open_file_fast(pn_pool_t *pool,const pn_font_reference_t *ref,pn_media_t *media,const pn_media_lease_t *lease,pn_text_file_t *file,pn_text_source_t *source){return open_reference(pool,ref,media,lease,file,source,false,NULL);}
+pn_status_t pn_font_reference_open_file_deferred(pn_pool_t *pool,const pn_font_reference_t *ref,pn_media_t *media,const pn_media_lease_t *lease,pn_text_file_t *file,pn_text_source_t *source,bool *verified){return open_reference(pool,ref,media,lease,file,source,false,verified);}
 static pn_status_t release(asset_t *a){pn_font_close(&a->font);pn_status_t status=pn_text_file_close(&a->file);if(a->lease.ticket){pn_status_t s=pn_media_release(a->media,&a->lease);if(status==PN_OK)status=s;}pn_free(a);return status;}
 static pn_status_t asset_open(pn_font_asset_t *asset,pn_pool_t *pool,pn_media_t *media,const pn_media_lease_t *guard,const char *path,uint64_t expected_size,int pixels,const pn_book_id_t *known){
     if(!asset || !pool || !media || !guard || !path || !*path || pixels<8 || pixels>128)return PN_INVALID;

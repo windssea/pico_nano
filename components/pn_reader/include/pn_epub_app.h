@@ -75,6 +75,8 @@ pn_status_t pn_epub_app_open_job_begin(pn_epub_open_job_t *,pn_pool_t *,pn_media
 pn_status_t pn_epub_app_open_job_begin_trusted(pn_epub_open_job_t *,pn_pool_t *,pn_media_t *,const char *,const char *,const char *,int,uint64_t,const pn_book_id_t *expected,uint64_t expected_size);
 /// 是否仍有快开后的整书复核。/ Whether whole-book verification after fast opening remains.
 bool pn_epub_app_verify_pending(const pn_epub_app_t *);
+/// 字体复核后已降级，需原位置OPEN重画；成功呈现清除，不能按整书损坏关闭重开。/ Font verification degraded a face and needs an OPEN repaint at the current position; clear only on successful presentation, never close/reopen as a corrupt book.
+bool pn_epub_app_font_recovery_pending(const pn_epub_app_t *);
 /// 空闲推进一块（32KiB）：EMPTY无任务，BUSY/CANCELLED待续，OK完成；STALE_JOB内容已变，调用方关闭后按完整路径重开。
 /// Advance one 32 KiB block when idle: EMPTY without work, BUSY/CANCELLED continue, OK done; STALE_JOB for changed content, after which callers close and reopen through the complete path.
 pn_status_t pn_epub_app_verify_step(pn_epub_app_t *);
