@@ -79,6 +79,8 @@ POSIX的`cover_window`持久化场景等待三条实际`cover.cache-clean`回执
 
 命令日志在 `build-dev/logs/`。相同构建目录串行，不并发启动两个Ninja；执行未结束时读现有会话/日志，不因观察超时反复重启任务。`--native`可使用本地安装工具，仍要记录实际工具链及依赖版本。
 
+设备路由测试使用固定`/sdcard`、`/data`作为硬件替身的存储根。Docker默认在一次性容器里提供；GitHub临时Linux runner在CTest前以`sudo install -d -o "$(id -u)" -g "$(id -g)" /sdcard /data`建立当前runner可写目录，测试本身以普通用户运行，不跳过断言。原生运行须使用专用、无实际设备挂载的隔离环境，不能把产品TF或已有数据目录交给这些夹具。
+
 SDKCONFIG按环境隔离：CI与板级都有各自build目录/sdkconfig，不能拷贝CI配置覆盖板级或把本机生成sdkconfig提交成基线。120MHz只适用于核对器件。无线互斥适配拒绝保留旧 `CONFIG_ESP_PHY_ENABLE_USB=y`；检查defaults及实际build配置，不据缓存旧构建宣布新源码已编译。
 
 ## 开发时保持可见模拟器

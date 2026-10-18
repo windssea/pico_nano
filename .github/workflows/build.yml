@@ -15,6 +15,8 @@ jobs:
       - run: python3 tools/installer_site.py --out build-installer
       - run: cmake -S tests/host -B build-host -G Ninja -DPN_SANITIZERS=ON
       - run: cmake --build build-host
+      - name: Prepare isolated device-stub storage roots
+        run: sudo install -d -o "$(id -u)" -g "$(id -g)" /sdcard /data
       - run: ctest --test-dir build-host --output-on-failure
       - run: cmake -S simulator -B build-sim -G Ninja -DPN_SANITIZERS=ON
       - run: cmake --build build-sim
