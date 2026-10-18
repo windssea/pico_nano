@@ -1,5 +1,10 @@
 # PicoNano 变更记录
 
+## 2026-10-18：内容风险按脏行省目标读取
+
+- `pn_device_frame_dirty_mask`在原有外接框之外输出684行脏位图（86B）；`pn_device_refresh_plan_masked`对未变行仍统计旧像素gray/dark，只跳过target读取与whiten分类，判据与全扫描完全一致。整页翻页仍全行扫描，管理页大面积变化且多数行未变时可少读target。
+- 新增帧位图逐行对照、短位图退回全扫描、masked/全扫描方案逐字节对照；`device_refresh`、`device_frame_rotation`、`device_management`通过。未构建发布或刷写。
+
 ## 2026-10-18：整屏清理跳过内容风险分类
 
 - `present_panel`在已请求GC16、深清待处理或管理页到期维护时不再调用`pn_device_refresh_plan`：这些提交本来就是整屏GC16/白推，`content_clean`/`regional`不参与选择，可省去约55ms的全帧front/back分类。

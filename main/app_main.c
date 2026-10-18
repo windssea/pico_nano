@@ -371,7 +371,7 @@ static pn_status_t present_panel(void *ctx,const pn_frame_t *frame,pn_refresh_t 
     if(atomic_exchange(&list_unknown,false))panel_known=false;
 #endif
     uint64_t converted_at=now_ms();(void)converted_at;
-    pn_device_box_t dirty={0};bool known=panel_known && pn_device_frame_dirty(hardware.framebuffer,hardware.hl.back_fb,684u*1216u/2u,8,&dirty)==PN_OK;
+    pn_device_box_t dirty={0};uint8_t dirty_rows[PN_DEVICE_ROW_MASK_BYTES];bool known=panel_known && pn_device_frame_dirty_mask(hardware.framebuffer,hardware.hl.back_fb,684u*1216u/2u,8,&dirty,dirty_rows,sizeof dirty_rows)==PN_OK;
     EpdRect changed={.x=dirty.x,.y=dirty.y,.width=dirty.width,.height=dirty.height};
     uint64_t dirty_at=now_ms();(void)dirty_at;
     if(profile==PN_REFRESH_GL16 && known && !changed.width && !atomic_load(&deep_clean_pending))return PN_OK;
@@ -382,7 +382,7 @@ static pn_status_t present_panel(void *ctx,const pn_frame_t *frame,pn_refresh_t 
     // 已请求GC16、深清或管理页到期维护时本次必为整屏GC16/白推，风险扫描的content_clean/regional都不再参与，跳过55ms左右的全帧分类。
     // When this submission is already a full GC16/deep clean or the management maintenance is due, the risk scan's content_clean/regional no longer participate, so skip the ~55 ms full-body classification.
     bool full_clean=profile==PN_REFRESH_GC16 || atomic_load(&deep_clean_pending) || (!body_refresh && maintenance.management+1u>=24u);
-    pn_device_refresh_plan_t maintenance_plan=(!known || full_clean)?(pn_device_refresh_plan_t){.area=dirty}:pn_device_refresh_plan(&maintenance,hardware.framebuffer,hardware.hl.back_fb,body_refresh,dirty);
+    pn_device_refresh_plan_t maintenance_plan=(!known || full_clean)?(pn_device_refresh_plan_t){.area=dirty}:pn_device_refresh_plan_masked(&maintenance,hardware.framebuffer,hardware.hl.back_fb,body_refresh,dirty,dirty_rows,sizeof dirty_rows);
     const char *reason=mode==MODE_GC16?"requested":body_refresh?"reading":"management";
     (void)reason;
     // 已知参考的管理页（菜单切换、设置进出、书籍菜单开合、书库翻页）都只局部替换变化像素，不因内容风险整屏闪；需要区域整理时仍走原全驱动。

@@ -9,9 +9,13 @@
 pn_status_t pn_device_frame_copy(const pn_frame_t *source,uint8_t *destination,size_t capacity);
 /// 逻辑坐标中的矩形；width为0表示无变化。/ Rectangle in logical coordinates; zero width means no change.
 typedef struct {int x,y,width,height;} pn_device_box_t;
+#define PN_DEVICE_ROW_MASK_BYTES ((684u+7u)/8u) ///< 684个板级行的脏位图字节数 / Dirty bitmap bytes for 684 board rows
 /// 比较板级布局的目标帧与已显示帧（如epdiy前/后缓冲），给出逻辑坐标外接框并外扩margin像素；不分配。
 /// Compare board-layout target and shown buffers (such as epdiy front/back), returning the logical bounding box grown by margin pixels; no allocations.
 pn_status_t pn_device_frame_dirty(const uint8_t *target,const uint8_t *shown,size_t capacity,int margin,pn_device_box_t *box);
+/// 与pn_device_frame_dirty相同，并额外输出每行是否变化的位图；rows为NULL时行为不变。
+/// Same as pn_device_frame_dirty plus a per-row changed bitmap; rows NULL keeps the original behavior.
+pn_status_t pn_device_frame_dirty_mask(const uint8_t *target,const uint8_t *shown,size_t capacity,int margin,pn_device_box_t *box,uint8_t *rows,size_t row_bytes);
 /// 把板级布局帧还原为684×1216逻辑帧（pn_device_frame_copy的逆变换），不分配。/ Restore a board-layout buffer into a 684×1216 logical frame (the inverse of pn_device_frame_copy) without allocations.
 pn_status_t pn_device_frame_restore(const uint8_t *source,size_t capacity,pn_frame_t *destination);
 /// 仅复制板级参考中的逻辑区域到独立局部帧，奇偶边界不读写邻像素。/ Copy only a logical region of a board reference into an independent local frame, preserving odd-boundary neighbors.

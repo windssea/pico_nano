@@ -15,6 +15,9 @@ typedef struct {
 } pn_device_refresh_plan_t;
 /// 使用真实板级前后帧估算风险；非光学残影检测。/ Estimate risk from actual board buffers; not optical ghost detection.
 pn_device_refresh_plan_t pn_device_refresh_plan(const pn_device_refresh_t *state,const uint8_t *target,const uint8_t *shown,bool reading,pn_device_box_t dirty);
+/// 同上；rows位图标记未变行时仍统计旧帧gray/dark，只省target读取与whiten分类，判据不变。
+/// Same as above; rows marks unchanged rows where old-frame gray/dark are still counted but target reads and whitening classification are skipped, preserving the rule.
+pn_device_refresh_plan_t pn_device_refresh_plan_masked(const pn_device_refresh_t *state,const uint8_t *target,const uint8_t *shown,bool reading,pn_device_box_t dirty,const uint8_t *rows,size_t row_bytes);
 /// 成功后计数；全屏GC16重置全部，区域整理只重置覆盖带。/ Count after success; full GC16 resets all, regional settling resets only covered bands.
 void pn_device_refresh_commit(pn_device_refresh_t *state,bool reading,bool gc16,bool full,pn_device_refresh_plan_t plan);
 /// 成功定稿只归零完整覆盖的管理带，不增加内容额度。/ Successful settling resets fully covered management bands without spending content allowance.

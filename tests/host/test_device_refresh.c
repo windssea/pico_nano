@@ -16,6 +16,14 @@ static pn_device_refresh_plan_t original(const pn_device_refresh_t *s,const uint
 static void compare(const pn_device_refresh_t *s,pn_device_box_t box,bool reading){
     pn_device_refresh_t before=*s;pn_device_refresh_plan_t a=original(s,next,old,reading,box),b=pn_device_refresh_plan(s,next,old,reading,box);
     assert(a.content_clean==b.content_clean && a.regional==b.regional && a.area.x==b.area.x && a.area.y==b.area.y && a.area.width==b.area.width && a.area.height==b.area.height);
+    // 行位图只省未变行的target/whiten，旧像素gray/dark仍完整计入；方案必须与全扫描一致。
+    // The row bitmap only skips target/whitening on unchanged rows while old gray/dark still count; the plan must equal the full scan.
+    uint8_t rows[PN_DEVICE_ROW_MASK_BYTES];memset(rows,0,sizeof rows);
+    for(int py=0;py<684;py++)if(memcmp(next+(size_t)py*608,old+(size_t)py*608,608))rows[(unsigned)py>>3]|=(uint8_t)(1u<<(py&7));
+    pn_device_refresh_plan_t m=pn_device_refresh_plan_masked(s,next,old,reading,box,rows,sizeof rows);
+    assert(m.content_clean==b.content_clean && m.regional==b.regional && m.area.x==b.area.x && m.area.y==b.area.y && m.area.width==b.area.width && m.area.height==b.area.height);
+    pn_device_refresh_plan_t short_mask=pn_device_refresh_plan_masked(s,next,old,reading,box,rows,sizeof rows-1);
+    assert(short_mask.content_clean==b.content_clean && short_mask.regional==b.regional && short_mask.area.x==b.area.x && short_mask.area.y==b.area.y && short_mask.area.width==b.area.width && short_mask.area.height==b.area.height);
     assert(!memcmp(&before,s,sizeof before));
 }
 static void native_pixel(uint8_t *bytes,unsigned pixel,uint8_t shade){size_t at=(size_t)(pixel/1152u)*608u+(pixel%1152u)/2;unsigned shift=(pixel&1u)*4u;bytes[at]=(uint8_t)((bytes[at]&(0xf0u>>shift))|((unsigned)shade<<shift));}

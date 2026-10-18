@@ -52,6 +52,10 @@ int main(void){
             uint8_t old=pn_frame_get(&restored,x,y);pn_frame_pixel(&restored,x,y,(uint8_t)((old+1)&15));
             x0=x<x0?x:x0;x1=x>x1?x:x1;y0=y<y0?y:y0;y1=y>y1?y:y1;}
         assert(pn_device_frame_copy(&restored,target,bytes)==PN_OK && pn_device_frame_dirty(target,shown,bytes,8,&box)==PN_OK);
+        uint8_t rows[PN_DEVICE_ROW_MASK_BYTES];pn_device_box_t masked_box;assert(pn_device_frame_dirty_mask(target,shown,bytes,8,&masked_box,rows,sizeof rows)==PN_OK);
+        assert(masked_box.x==box.x && masked_box.y==box.y && masked_box.width==box.width && masked_box.height==box.height);
+        for(int py=0;py<684;py++){bool changed=memcmp(target+(size_t)py*608,shown+(size_t)py*608,608)!=0;assert((bool)(rows[(unsigned)py>>3]&(1u<<(py&7)))==changed);}
+        assert(pn_device_frame_dirty_mask(target,shown,bytes,8,&masked_box,rows,sizeof rows-1)==PN_INVALID);
         int ex0=x0-8<0?0:x0-8,ex1=x1+9>684?684:x1+9,ey0=(y0&~1)-8<0?0:(y0&~1)-8,ey1=(y1|1)+9>1216?1216:(y1|1)+9;
         assert(box.x==ex0 && box.width==ex1-ex0 && box.y==ey0 && box.height==ey1-ey0);
     }
