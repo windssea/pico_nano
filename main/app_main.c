@@ -212,6 +212,10 @@ static bool list_mode; ///< 书架列表模式（每页5本）/ Shelf list mode 
 static size_t shelf_per_page(void){return home_mode?3u:list_mode || (!recent_mode && !fav_mode && *search_query)?5u:(size_t)shelf_prefs.columns*3u;}
 static pn_book_id_t selected_expected;
 static char selected_path[PN_CATALOG_PATH_MAX];
+static bool identity_takeover_active; ///< 点击正在预计算的书，异步接续后再快开 / Clicked a book already being precomputed; continue it asynchronously before fast open
+static char identity_takeover_path[PN_CATALOG_PATH_MAX];
+static void identity_job_stop(void);
+static void start_reader_impl(void);
 static pn_catalog_item_t last_read_book; ///< 已成功关闭阅读的书快照，不借用正文句柄 / Snapshot of a successfully closed book, without borrowing a reader handle
 static bool last_read_known; ///< 已有可信在读书身份 / A trusted in-progress book identity is available
 static const char *const book_directory=PN_SD_MOUNT "/" PN_SD_BOOKS;
@@ -317,7 +321,7 @@ static pn_focus_t focus_nav; ///< 当前页的三键焦点表 / Three-key focus 
 static pn_device_async_t async_port;
 static void opening_controls(bool active){opening=active;pn_async_block_controls(&async_port.input,active);if(active)pn_device_async_view(&async_port,18,false,input_flags);}
 // 任务可能已在加载页扫描期间完成并自行关闭：结果仍挂起时也要解除开书门。/ The job may have finished and closed itself during the loading scan: still release the gate while its result is pending.
-static pn_status_t opening_abort(void){bool parked=opening_overlap_result!=PN_BUSY;opening_overlap_result=PN_BUSY;if(!foreground_open.impl){if(parked)opening_controls(false);return PN_OK;}pn_status_t s=pn_epub_app_open_job_close(&foreground_open);opening_controls(false);return s;}
+static pn_status_t opening_abort(void){if(identity_takeover_active){identity_takeover_active=false;identity_job_stop();opening_controls(false);return PN_OK;}bool parked=opening_overlap_result!=PN_BUSY;opening_overlap_result=PN_BUSY;if(!foreground_open.impl){if(parked)opening_controls(false);return PN_OK;}pn_status_t s=pn_epub_app_open_job_close(&foreground_open);opening_controls(false);return s;}
 static pn_feedback_t press_feedback; ///< 独立、可撤销的按下区域，不借用UI对象 / Independent reversible press region without borrowing UI objects
 static pn_device_refresh_t maintenance; ///< 内容维护与可选反馈分开记账 / Content maintenance accounted separately from optional feedback
 static pn_feedback_idle_t feedback_idle; ///< 产品owner的反馈定稿候选 / Product-owner feedback settle candidates
@@ -764,6 +768,7 @@ static void show_lock(const char *hint){
     if(status!=PN_OK){ESP_LOGE(TAG,"Lock screen unavailable: %d",(int)status);message("已锁屏",hint);}
 }
 static bool stop_reader_impl(bool retain){
+    if(identity_takeover_active){identity_takeover_active=false;identity_job_stop();}
     if(opening_abort()!=PN_OK)return false;
 #if defined(CONFIG_PN_UI_FOLLOW) && CONFIG_PN_UI_FOLLOW
     if(pn_font_manage_motion_abort(&font_manage)!=PN_OK)return false;
@@ -1158,8 +1163,38 @@ static bool tick_identity(uint64_t now){
     }
     return false;
 }
+static bool tick_identity_takeover(void){
+    if(!identity_takeover_active)return false;
+    const char *path=pn_identity_cache_job_path(&identity_job);
+    if(!path || strcmp(path,identity_takeover_path) || strcmp(selected_path,identity_takeover_path)){
+        identity_takeover_active=false;identity_job_stop();start_reader_impl();if(!foreground_open.impl)opening_controls(false);return true;
+    }
+    pn_device_power_busy(PN_POWER_PRODUCT,true);
+    pn_status_t s=pn_identity_cache_job_step(&identity_job,&identity_cache);
+    if(s==PN_BUSY)return true;
+    identity_job_stop();
+    if(s==PN_OK)identity_cache_store();
+    identity_takeover_active=false;
+    if(s==PN_OK)identity_trust_selected();
+    start_reader_impl();
+    if(!foreground_open.impl)opening_controls(false);
+    return true;
+}
 static void start_reader_impl(void){
-    pn_cover_work_abort(&cover_work);identity_job_stop();identity_trust_selected();
+    pn_cover_work_abort(&cover_work);
+    // 点击正在预计算的书：保留任务、先显示加载页，由后台轮次接续；不在此同步读完整书。
+    // Clicking a book already being precomputed: keep the job and show the loader; later ticks continue it instead of hashing the whole book synchronously here.
+    const char *running_identity=pn_identity_cache_job_path(&identity_job);
+    if(running_identity && *selected_path && !strcmp(running_identity,selected_path)){
+        if(!loading_shown){
+            pn_status_t loading=show_loading(selected_path);
+            if(loading==PN_CANCELLED){identity_job_stop();return;}
+            if(loading!=PN_OK)ESP_LOGW(TAG,"Opening feedback unavailable: %d",(int)loading);
+        }
+        snprintf(identity_takeover_path,sizeof identity_takeover_path,"%s",selected_path);
+        identity_takeover_active=true;return;
+    }
+    identity_job_stop();identity_trust_selected();
     if(transfer.impl || usb.open)return;
     if(!reader_active() && *selected_path){
         if(pn_hot_session_source_selected(&hot_session,&sd_media,selected_path,selected_format,selected_identified?&selected_expected:NULL,1,now_ms())){
@@ -1259,6 +1294,7 @@ static void start_reader(void){
     bool gate=*selected_path!=0 && !transfer.impl && !usb.open;
     if(gate)opening_controls(true);
     start_reader_impl();
+    if(identity_takeover_active)return;
     // 加载页显示期间任务若已完成，结果挂在opening_overlap_result：立即消费并显示正文，不能只解锁按键而让已打开却未显示的书接收输入。
     // If the job finished while the loading page was shown, its result is parked in opening_overlap_result: consume it now and show the text, never just unblock keys while an opened but unshown book receives input.
     if(gate && !foreground_open.impl){if(opening_overlap_result!=PN_BUSY)(void)tick_opening();else opening_controls(false);}
@@ -2258,6 +2294,9 @@ static void device_task(void *arg){
                 else if(reader_active() && !status_page){pn_status_t status=active_step(action,now_ms());report_reader_result(status);}
                 else start_reader();}}}
         bool background=false;
+        if(available==PN_EMPTY && identity_takeover_active && !locked && !transfer.impl && !usb.open){
+            bool worked=tick_identity_takeover();if(worked){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);}
+        }
         if(available==PN_EMPTY && !locked && !transfer.impl && !usb.open && font_manage.impl && !touch_held && !tap.down && now_ms()>=last_input && now_ms()-last_input>=800){
             pn_status_t sampled=pn_font_manage_samples_idle(&font_manage,now_ms(),present,NULL);background=sampled==PN_BUSY;
             if(sampled==PN_OK || sampled==PN_BUSY){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);}}

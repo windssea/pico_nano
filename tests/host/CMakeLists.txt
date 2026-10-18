@@ -260,6 +260,7 @@ target_include_directories(device_menu_probe BEFORE PRIVATE ${CMAKE_CURRENT_SOUR
 target_compile_definitions(device_menu_probe PRIVATE PN_TEST_FOREGROUND_OPEN=1)
 target_link_libraries(device_menu_probe PRIVATE pn_core)
 target_link_options(device_menu_probe PRIVATE -Wl,--wrap=fopen -Wl,--wrap=fread -Wl,--wrap=fseek -Wl,--wrap=fclose -Wl,--wrap=stat -Wl,--wrap=lstat -Wl,--wrap=pn_font_open -Wl,--wrap=FT_Load_Glyph)
+add_test(NAME identity_takeover COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_identity_takeover.py $<TARGET_FILE:device_menu_probe>)
 target_compile_definitions(test_device_management PRIVATE CONFIG_PN_UI_FEEDBACK=1)
 add_test(NAME device_management COMMAND test_device_management)
 target_include_directories(test_device_boot BEFORE PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/device_stubs ${PN_ROOT}/main)

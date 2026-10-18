@@ -7,7 +7,7 @@
 #include "test_device_boot.c"
 #undef read_pico_sd_get_info
 #undef main
-esp_err_t read_pico_sd_get_info(read_pico_sd_info_t *info){if(getenv("PN_MENU_COLD_BOOK") || getenv("PN_SWITCH_A")){memset(info,0,sizeof *info);info->present=info->mounted=true;return ESP_OK;}return fixture_sd_get_info(info);}
+esp_err_t read_pico_sd_get_info(read_pico_sd_info_t *info){if(getenv("PN_MENU_COLD_BOOK") || getenv("PN_SWITCH_A") || getenv("PN_TAKEOVER_BOOK")){memset(info,0,sizeof *info);info->present=info->mounted=true;return ESP_OK;}return fixture_sd_get_info(info);}
 #ifndef PN_DEVICE_MAIN_SOURCE
 #define PN_DEVICE_MAIN_SOURCE "../../main/app_main.c"
 #endif
@@ -212,6 +212,16 @@ static void switch_probe(const char *a,const char *b){
     assert(leave_reader());switch_idle();overlap_open(b);
     assert(stop_reader());printf("switch_probe ok\n");
 }
+static void takeover_probe(const char *path){
+    assert(stop_reader());strcpy(selected_path,path);selected_format=PN_BOOK_EPUB;selected_identified=false;selected_size=0;
+    assert(pn_identity_cache_job_begin(&identity_job,&pool,&sd_media,path)==PN_OK);
+    start_reader();assert(identity_takeover_active && opening && !foreground_open.impl);
+    unsigned polls=0;while(identity_takeover_active){assert(++polls<200000);last_input=now_ms();(void)tick_identity_takeover();}
+    while(opening){assert(++polls<400000);(void)tick_opening();}
+    if(!(reader_active() && !status_page && !strcmp(selected_path,path)))fprintf(stderr,"takeover active=%d opening=%d fg=%d reader=%d status=%d shelf=%d path=%s\n",(int)identity_takeover_active,(int)opening,(int)(foreground_open.impl!=NULL),(int)reader_active(),(int)status_page,(int)shelf_mode,selected_path);
+    assert(reader_active() && !status_page && !strcmp(selected_path,path));
+    printf("takeover_probe polls=%u\n",polls);assert(stop_reader());
+}
 #endif
 int main(void){
     assert(pn_pool_init(&pool,6u*1024u*1024u,NULL,NULL,NULL)==PN_OK);assert(read_pico_init(&hardware)==ESP_OK);
@@ -223,7 +233,8 @@ int main(void){
     shelf_prefs.columns=3;
     const char *cold=getenv("PN_MENU_COLD_BOOK");if(cold){library();cold_book_probe(cold);goto closed;}
 #if PN_TEST_FOREGROUND_OPEN
-    {const char *sa=getenv("PN_SWITCH_A"),*sb=getenv("PN_SWITCH_B");if(sa && sb){switch_probe(sa,sb);goto closed;}}
+    {const char *sa=getenv("PN_SWITCH_A"),*sb=getenv("PN_SWITCH_B");if(sa && sb){switch_probe(sa,sb);goto closed;}
+     const char *takeover=getenv("PN_TAKEOVER_BOOK");if(takeover){takeover_probe(takeover);goto closed;}}
 #endif
     probe("library-cold",library,1);
     // 用真实用户系统字体验证索引重建不关闭字体或读取字体数据。/ Verify with the supplied system face that index rebuild neither closes it nor reads font data.
