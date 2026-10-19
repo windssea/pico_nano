@@ -1,0 +1,2 @@
+16cc2fba258f2f665b206afc4b7424ec0acdc89e43c79bee1877bc7d908956ab  PicoNano-a704b3a-upgrade.zip
+8ca7acf4eefa0b28eaa63abe8caebd10d390c578459fe940d53ed549ae3125f1  PicoNano-web-installer-a704b3a.zip
