@@ -264,8 +264,34 @@ static uint64_t now_ms(void){return (uint64_t)(esp_timer_get_time()/1000);}
 #if defined(ESP_PLATFORM)
 static void profile_task_stacks(const char *);
 static uint64_t profile_clock(void *ctx){(void)ctx;return (uint64_t)esp_timer_get_time();}
+#if PN_DEVICE_TEST_CONSOLE
+/// 串口逐次IO输出会改变字体/摘要耗时；只在阶段边界汇总。/ Per-IO serial output distorts font/hash timing; aggregate at phase boundaries.
+static struct {const char *phase;uint64_t calls,total,maximum,failed;} profile_io[4]={
+    {.phase="storage.file-read"},{.phase="storage.file-seek"},{.phase="content.sha-read"},{.phase="content.sha-update"}};
+static bool profile_io_collect(const pn_profile_event_t *e){
+    for(unsigned i=0;i<4;i++)if(!strcmp(e->phase,profile_io[i].phase)){
+        profile_io[i].calls++;profile_io[i].total+=e->elapsed_us;
+        if(e->elapsed_us>profile_io[i].maximum)profile_io[i].maximum=e->elapsed_us;
+        if(e->status!=PN_OK)profile_io[i].failed++;
+        return true;
+    }
+    return false;
+}
+static void profile_io_flush(void){
+    for(unsigned i=0;i<4;i++)if(profile_io[i].calls){
+        ESP_LOGI(TAG,"diag_io phase=%s calls=%llu total_us=%llu max_us=%llu non_ok=%llu backend=device",profile_io[i].phase,(unsigned long long)profile_io[i].calls,(unsigned long long)profile_io[i].total,(unsigned long long)profile_io[i].maximum,(unsigned long long)profile_io[i].failed);
+        profile_io[i].calls=profile_io[i].total=profile_io[i].maximum=profile_io[i].failed=0;
+    }
+}
+#endif
 static void profile_emit(void *ctx,const pn_profile_event_t *e){
     (void)ctx;
+#if PN_DEVICE_TEST_CONSOLE
+    if(profile_io_collect(e))return;
+    // 空轮次不输出；完整计数仍在独立heap命令中，避免诊断自身主导响应。/ Skip empty ticks; explicit heap commands retain snapshots without diagnostics dominating responsiveness.
+    if(e->status==PN_EMPTY)return;
+    profile_io_flush();
+#endif
     bool detailed=!strncmp(e->phase,"epub.open.",10) || !strncmp(e->phase,"content.sha-",12) || !strncmp(e->phase,"idle.",5) || !strncmp(e->phase,"storage.file-",13);
 #ifndef CONFIG_PN_PROFILE
     if(detailed)return;
@@ -288,6 +314,10 @@ static void profile_emit(void *ctx,const pn_profile_event_t *e){
 #endif
         return;
     }
+#if PN_DEVICE_TEST_CONSOLE
+    // 诊断阶段仅记录时间/池峰，堆与栈按需在显示job间采样。/ Diagnostic phases keep timings/pool peaks; sample heaps/stacks on demand between display jobs.
+    return;
+#endif
     if(opening || atomic_load(&reading_presentation))return;
 #ifndef CONFIG_PN_PROFILE
     // 高频子阶段只记耗时，避免重复堆/栈遍历和串口输出拖慢响应。/ Frequent subphases log timing only, avoiding repeated heap/stack scans and serial overhead.

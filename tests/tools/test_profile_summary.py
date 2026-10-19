@@ -9,6 +9,14 @@ spec.loader.exec_module(summary)
 
 
 class ProfileSummary(unittest.TestCase):
+    def test_incomplete_serial_records_are_reported(self):
+        good="profile phase=open elapsed_us=10 status=2 peak=100 attempts=1 backend=device"
+        invalid=[]
+        rows=summary.summarize("\n".join(["profile phase=open elapsed_",good+good,good.replace("elapsed_us=10","elapsed_us=bad"),good]),invalid)
+        self.assertEqual(len(invalid),3)
+        self.assertEqual(rows[0]["samples"],1)
+        self.assertEqual(rows[0]["non_ok"],1)
+
     def test_backend_status_and_percentiles(self):
         data = "\n".join([
             "profile phase=open elapsed_us=10 status=0 peak=100 attempts=1 backend=host",

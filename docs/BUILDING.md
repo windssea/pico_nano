@@ -196,7 +196,7 @@ profile每次生成 `build-dev/profile/<随机ID>/` 隔离状态与summary.json�
 
 真实设备控制器的主机诊断可在独立一次性容器运行`tools/test_local_foreground_open.py --binary build-host/device_menu_probe --output build-dev/foreground-profile --prepare-first`，并给容器传入`PN_OPEN_PROFILE=1`。夹具复制用户样本，比较加载期间提前准备后的完整首屏/翻页；`--baseline`可指定另一独立二进制做逐字节对照。`--scenarios`另覆盖取消、锁屏、换卡、USB、显示失败、错身份和多书切换。容器需全新`/sdcard`、`/data`，不要对用户挂载目录运行夹具。原`profile`入口仍调用同步开书，不能代替这个真实产品job入口。
 
-设备诊断关注`epub.open.request/loading/first-frame`及`full-wall/trusted-wall/wait/max-step`，具体分步为`directory/identity/zip-finish/publication/metadata/state/fonts/sources`；`content.sha-read/update`区分增量源回调与摘要更新，读取回调可能含ZIP feed校验，进一步看`storage.file-read/seek`中的真实stdio调用耗时，不能把整个回调都当读卡时间；`idle.*`观察后台预算。墙钟/最长单步与嵌套子阶段不相加；IO快照是本job累计值，汇总工具的`max_io`取最大值而非相加。发布配置不输出这些新增高频诊断，诊断镜像也不在高频步骤或扫描中遍历堆/栈。首屏完整校验与图像质量保持，主机吞吐/软件回执不能当实卡/面板实测。
+设备诊断关注`epub.open.request/loading/first-frame`及`full-wall/trusted-wall/wait/max-step`，具体分步为`directory/identity/zip-finish/publication/metadata/state/fonts/sources`。2026-10-19本地诊断将`content.sha-read/update`和`storage.file-read/seek`改为阶段边界`diag_io`累计：calls为调用数、total_us为非重叠同类调用之和、max_us为最长单次、non_ok保留异常；空任务不输出，阶段不再输出重复堆/栈快照，按需在显示job间用heap命令采样。SHA读取回调可能含ZIP feed，不能把整个回调都当读卡时间；`idle.*`观察后台预算。墙钟、最长单步与嵌套子阶段不相加，IO汇总窗口可能包含随后的空闲校验；`diag_io`不能直接当逐次延迟分布。开书IO快照是本job累计值，汇总工具的`max_io`取最大值而非相加；截断/拼接记录排除，指定输出时旁存`.invalid.json`并报告损失数量，不能当完整日志。发布配置不输出新增高频诊断。首屏完整校验与图像质量保持，软件显示回执不是面板光学稳定；输入/显示使用esp_timer，不能将ESP日志前缀的绝对毫秒与其混算。
 
 主机 `-Timing`/profile记录分类账本及阶段局部同时峰值；分类峰值不相加，嵌套耗时不重复相加。设备可单独用 `CONFIG_PN_PROFILE=y` 做诊断，但不自动刷机，默认发布配置关闭。诊断日志有测量成本；记录是否开启，池外堆和任务栈必须设备独立测量。
 

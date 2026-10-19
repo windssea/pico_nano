@@ -6,13 +6,27 @@ import pathlib
 import re
 
 
-def summarize(text):
+def summarize(text, invalid=None):
     groups = {}
     for line in text.splitlines():
         line = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", line)
         if "profile phase=" not in line:
             continue
         fields = dict(re.findall(r"(\w+)=([^\s]+)", line))
+        # 串口环满可能截断/拼接行，保留损失报告，不能冒充有效计时。/ A full serial ring can truncate/join lines; report losses instead of treating them as valid timings.
+        try:
+            if line.count("profile phase=")!=1:
+                raise ValueError("joined records")
+            for name in ("phase", "elapsed_us", "status", "peak", "attempts"):
+                if name not in fields:
+                    raise ValueError("missing "+name)
+            for name in ("elapsed_us", "status", "peak", "attempts", "bytes", "reads", "seeks", "hits"):
+                if name in fields:
+                    int(fields[name])
+        except ValueError as exc:
+            if invalid is not None:
+                invalid.append({"line": line, "error": str(exc)})
+            continue
         key = (fields.get("backend", "unknown"), fields["phase"])
         row = groups.setdefault(key, {"times": [], "failures": 0, "peak": 0, "attempts": [], "statuses": {}, "io": {k: 0 for k in ("bytes", "reads", "seeks", "hits")}})
         for counter in row["io"]:
@@ -39,8 +53,13 @@ if __name__ == "__main__":
     parser.add_argument("log", type=pathlib.Path)
     parser.add_argument("--output", type=pathlib.Path)
     args = parser.parse_args()
-    content = json.dumps(summarize(args.log.read_text(encoding="utf-8", errors="replace")), ensure_ascii=False, indent=2) + "\n"
+    invalid = []
+    content = json.dumps(summarize(args.log.read_text(encoding="utf-8", errors="replace"), invalid), ensure_ascii=False, indent=2) + "\n"
     if args.output:
         args.output.write_text(content, encoding="utf-8")
+        args.output.with_suffix(".invalid.json").write_text(json.dumps(invalid, ensure_ascii=False, indent=2)+"\n", encoding="utf-8")
     else:
         print(content, end="")
+    if invalid:
+        import sys
+        print(f"Incomplete serial profile records: {len(invalid)}; excluded from timing statistics", file=sys.stderr)
