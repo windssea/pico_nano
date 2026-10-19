@@ -78,7 +78,7 @@ static pn_status_t draw_main(pn_settings_ui_t *ui,su_t *u){
     if(s==PN_OK)s=pn_w_group(font,f,"显示与字体",DISPLAY_Y-14);
     pn_w_card(f,DISPLAY_Y,3);pn_profile_end(&span,s);pn_profile_begin(&span,NULL,"ui.settings.rows");
     if(s==PN_OK)s=pn_w_card_row(font,f,"字体管理","系统字体、全局阅读字体与删除",NULL,PN_ICON_FONT,PN_ROW_CHEVRON,DISPLAY_Y,false);
-    if(s==PN_OK)s=pn_w_card_row(font,f,"锁屏壁纸","系统默认、简洁、当前书封面或自定义",NULL,PN_ICON_IMAGE,PN_ROW_CHEVRON,DISPLAY_Y+ROW_H,false);
+    if(s==PN_OK)s=pn_w_card_row(font,f,"锁屏壁纸","系统默认、书签或自定义图片",NULL,PN_ICON_IMAGE,PN_ROW_CHEVRON,DISPLAY_Y+ROW_H,false);
     char appearance[64];snprintf(appearance,sizeof appearance,"每行 %u 本 · %s",ui->shelf.columns,style_names[ui->shelf.style]);
     if(s==PN_OK)s=pn_w_card_row(font,f,"书架外观",appearance,NULL,PN_ICON_SHELF,PN_ROW_CHEVRON,DISPLAY_Y+2*ROW_H,true);
     if(s==PN_OK)s=pn_w_group(font,f,"阅读",READING_Y-14);

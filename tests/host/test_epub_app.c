@@ -27,7 +27,7 @@ int main(int argc,char **argv){
     assert(pn_epub_app_fallback_font(&app,"/missing-font.ttf")==PN_IO);
     assert(pn_epub_app_fallback_font(&app,argv[3])==PN_OK);
     uint64_t mark_id;assert(pn_epub_app_bookmark_add(&app,"未显示",&mark_id)==PN_EMPTY);
-    screen.fail=false;assert(pn_epub_app_step(&app,PN_APP_OPEN,now++,present,&screen)==PN_OK && pn_epub_app_progress(&app,&first)==PN_OK);uint64_t first_hash=screen.hash;assert(pn_epub_app_bookmark_add(&app,"第一页",&mark_id)==PN_OK && mark_id==1);
+    screen.fail=false;assert(pn_epub_app_step(&app,PN_APP_OPEN,now++,present,&screen)==PN_OK && pn_epub_app_progress(&app,&first)==PN_OK);pn_book_display_t metadata;assert(pn_epub_app_book_display(&app,&metadata)==PN_OK);uint64_t first_hash=screen.hash;assert(pn_epub_app_bookmark_add(&app,"第一页",&mark_id)==PN_OK && mark_id==1);
     assert(pn_epub_app_suspend(&app,now++)==PN_OK && app.impl);
     assert(pn_epub_app_resume(&app,now++,present,&screen)==PN_OK && screen.hash==first_hash && pn_epub_app_progress(&app,&current)==PN_OK && same(&first,&current));
     assert(pn_epub_app_suspend(&app,now++)==PN_OK);

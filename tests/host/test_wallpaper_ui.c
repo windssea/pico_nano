@@ -22,7 +22,7 @@ int main(int argc,char **argv){
     assert(pn_wallpaper_ui_open(&ui,&pool,&sd,images,&store,present,NULL)==PN_OK && ui.active && ui.presented && ui.screen==PN_WUI_LIST);
     pn_lock_selection_t cur;assert(pn_wallpaper_ui_current(&ui,&cur) && cur.mode==PN_LOCK_DEFAULT);
     assert(pn_wallpaper_ui_hit(&ui,100,400)==PN_WUI_ROW && pn_wallpaper_ui_hit(&ui,100,500)==PN_WUI_ROW+1 && pn_wallpaper_ui_hit(&ui,100,590)==PN_WUI_ROW+2 && pn_wallpaper_ui_hit(&ui,100,700)==-1);
-    assert(pn_wallpaper_ui_hit(&ui,100,240)==PN_WUI_DEFAULT && pn_wallpaper_ui_hit(&ui,330,240)==PN_WUI_DEFAULT && pn_wallpaper_ui_hit(&ui,600,240)==PN_WUI_DEFAULT && pn_wallpaper_ui_hit(&ui,100,60)==PN_WUI_BACK && pn_wallpaper_ui_hit(&ui,100,1120)==PN_WUI_PREVIOUS && pn_wallpaper_ui_hit(&ui,600,1120)==PN_WUI_NEXT);
+    assert(pn_wallpaper_ui_hit(&ui,100,240)==PN_WUI_DEFAULT && pn_wallpaper_ui_hit(&ui,330,240)==PN_WUI_DEFAULT && pn_wallpaper_ui_hit(&ui,600,240)==PN_WUI_BOOKMARK && pn_wallpaper_ui_hit(&ui,100,60)==PN_WUI_BACK && pn_wallpaper_ui_hit(&ui,100,1120)==PN_WUI_PREVIOUS && pn_wallpaper_ui_hit(&ui,600,1120)==PN_WUI_NEXT);
     /* 伪图片停留列表并提示，不改记录。/ A fake image stays on the list with a message and no record change. */
     assert(pn_wallpaper_ui_event(&ui,PN_WUI_ROW+0,present,NULL)!=PN_OK && ui.screen==PN_WUI_LIST);
     FILE *none=fopen(a,"rb");assert(!none);
@@ -66,6 +66,12 @@ int main(int argc,char **argv){
     assert(pn_wallpaper_ui_current(&ui,&cur) && cur.mode==PN_LOCK_MASK);pn_wallpaper_ui_close(&ui);
     assert(pn_wallpaper_ui_open(&ui,&pool,&sd,images,&store,present,NULL)==PN_OK && pn_wallpaper_ui_current(&ui,&cur) && cur.mode==PN_LOCK_MASK);
     assert(pn_wallpaper_ui_event(&ui,PN_WUI_ROW+1,present,NULL)==PN_OK && pn_wallpaper_ui_event(&ui,PN_WUI_CANCEL,present,NULL)==PN_OK && pn_wallpaper_ui_current(&ui,&cur) && cur.mode==PN_LOCK_MASK);pn_wallpaper_ui_close(&ui);
+    /* 新模式应用/重开/取消，仍使用原A/B事务。/ Apply, reopen and cancel the new mode through the existing A/B transaction. */
+    assert(pn_wallpaper_ui_open(&ui,&pool,&sd,images,&store,present,NULL)==PN_OK);
+    assert(pn_wallpaper_ui_event(&ui,PN_WUI_BOOKMARK,present,NULL)==PN_OK && ui.screen==PN_WUI_PREVIEW);
+    assert(pn_wallpaper_ui_event(&ui,PN_WUI_APPLY,present,NULL)==PN_OK && pn_wallpaper_ui_current(&ui,&cur) && cur.mode==PN_LOCK_BOOKMARK);pn_wallpaper_ui_close(&ui);
+    assert(pn_wallpaper_ui_open(&ui,&pool,&sd,images,&store,present,NULL)==PN_OK && pn_wallpaper_ui_current(&ui,&cur) && cur.mode==PN_LOCK_BOOKMARK);
+    assert(pn_wallpaper_ui_event(&ui,PN_WUI_DEFAULT,present,NULL)==PN_OK && pn_wallpaper_ui_event(&ui,PN_WUI_CANCEL,present,NULL)==PN_OK && pn_wallpaper_ui_current(&ui,&cur) && cur.mode==PN_LOCK_BOOKMARK);pn_wallpaper_ui_close(&ui);
     /* 呈现失败不标记presented。/ A failed presentation leaves presented false. */
     assert(pn_wallpaper_ui_open(&ui,&pool,&sd,images,&store,fail_present,NULL)==PN_OK && !ui.presented);assert(pn_wallpaper_ui_present(&ui,present,NULL)==PN_OK && ui.presented);pn_wallpaper_ui_close(&ui);
     /* 打开时每个分配点失败都完全回收。/ Every allocation failure while opening fully recovers. */

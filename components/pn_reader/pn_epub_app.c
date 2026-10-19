@@ -1193,3 +1193,11 @@ pn_font_t *pn_epub_app_body_font(const pn_epub_app_t *app){return app && app->im
 
 void pn_epub_app_refresh_period(pn_epub_app_t *app,unsigned pages){if(app && app->impl)((app_t *)app->impl)->refresh.period=pages>=1 && pages<=30?pages:14;}
 void pn_epub_app_refresh_reset(pn_epub_app_t *app){if(app && app->impl)((app_t *)app->impl)->refresh.turns=0;}
+
+pn_status_t pn_epub_app_book_display(pn_epub_app_t *app,pn_book_display_t *display){
+    if(!app || !app->impl || !display)return PN_INVALID;
+    app_t *a=app->impl;if(!a->has_visible)return PN_EMPTY;
+    pn_epub_info_t info;pn_status_t status=pn_epub_info(&a->epub,&info);if(status!=PN_OK)return status;
+    _Static_assert(sizeof info.title==sizeof display->title && sizeof info.creator==sizeof display->author,"metadata size");
+    memcpy(display->title,info.title,sizeof display->title);memcpy(display->author,info.creator,sizeof display->author);return PN_OK;
+}

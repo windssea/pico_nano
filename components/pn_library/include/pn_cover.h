@@ -29,6 +29,10 @@ typedef struct {
     char author[512]; ///< OPF作者，不从文件名猜测 / OPF author, never guessed from filenames
 } pn_book_display_t;
 
+/// 只读单书已有PNCV缓存，完整CRC/来源复核后才写输出；未命中不解码或写盘，临时内存约48KiB。
+/// Read one existing PNCV cache only; publish outputs after complete CRC/source checks; misses never decode or write, using about 48 KiB temporary memory.
+pn_status_t pn_cover_cached_one(pn_pool_t *pool,pn_media_t *media,const char *cache_dir,const pn_catalog_item_t *item,pn_frame_t *thumb,pn_book_display_t *display);
+
 /// 当前书目页最多十二条封面槽外加一个“继续阅读”槽，调用方拥有，可放pool或静态区。
 /// Up to twelve cover slots for the current catalog page plus one continue-reading slot, caller-owned in pool or static storage.
 typedef struct {

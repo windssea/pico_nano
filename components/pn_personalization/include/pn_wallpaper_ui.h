@@ -10,6 +10,7 @@
 #include "pn_catalog.h"
 #include "pn_display.h"
 #include "pn_wallpaper.h"
+#include "pn_bookmark_lock.h"
 #define PN_WUI_BACK 1
 #define PN_WUI_PREVIOUS 2
 #define PN_WUI_NEXT 3
@@ -24,6 +25,7 @@
 #define PN_WUI_CANCEL 12
 #define PN_WUI_BOOK 13
 #define PN_WUI_MASK 14
+#define PN_WUI_BOOKMARK 15
 #define PN_WUI_ROW 16
 typedef pn_status_t (*pn_wallpaper_present_fn)(void *,const pn_frame_t *,pn_refresh_t); ///< 与阅读呈现回调同签名 / Same signature as reader presentation callbacks
 /// 页面：列表或预览。/ Screen: list or preview.
@@ -52,3 +54,6 @@ int pn_wallpaper_ui_hit(const pn_wallpaper_ui_t *ui,int x,int y);
 bool pn_wallpaper_ui_current(const pn_wallpaper_ui_t *ui,pn_lock_selection_t *out);
 /// 释放全部页面资源，幂等。/ Release all page resources idempotently.
 void pn_wallpaper_ui_close(pn_wallpaper_ui_t *ui);
+
+/// 设置书签预览快照的副本；不绘制、不读文件。/ Copy the bookmark preview snapshot without drawing or file reads.
+void pn_wallpaper_ui_set_bookmark(pn_wallpaper_ui_t *ui,const pn_bookmark_lock_t *snapshot);

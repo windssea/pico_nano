@@ -74,6 +74,14 @@ static int queue(const char *directory,const char *output,const char *cache){
         for(size_t i=0;i<page->count;i++){
             if(covers->state[i]==PN_COVER_FAILED && covers->reason[i]==PN_NO_MEMORY){assert(again->state[i]==PN_COVER_PENDING);continue;}
             assert(again->state[i]==covers->state[i] && again->reason[i]==covers->reason[i] && !memcmp(&again->display[i],&covers->display[i],sizeof again->display[i]));if(again->state[i]==PN_COVER_READY)assert(!memcmp(again->pixels[i],covers->pixels[i],PN_COVER_BYTES));
+            if(again->state[i]==PN_COVER_READY){uint8_t one[PN_COVER_BYTES];pn_frame_t f;pn_book_display_t metadata;
+                assert(pn_frame_bind(&f,one,sizeof one,PN_COVER_WIDTH,PN_COVER_HEIGHT));
+                assert(pn_cover_cached_one(&pool,&media,dir,&page->items[i],&f,&metadata)==PN_OK);
+                assert(!memcmp(one,covers->pixels[i],sizeof one) && !memcmp(&metadata,&covers->display[i],sizeof metadata));
+                for(size_t fail=1;fail<=2;fail++){memset(one,0x5a,sizeof one);memset(&metadata,0x5a,sizeof metadata);pool.fail_at=pool.attempts+fail;
+                    assert(pn_cover_cached_one(&pool,&media,dir,&page->items[i],&f,&metadata)==PN_NO_MEMORY && one[0]==0x5a && metadata.title[0]==0x5a);pool.fail_at=0;assert(!pool.used && !pool.live);}
+            }
+
         }
         free(again);}
     pn_font_t font={0};pn_text_source_t builtin=pn_font_builtin_source();assert(pn_font_open(&font,&pool,&builtin,24)==PN_OK);

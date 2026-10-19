@@ -49,4 +49,14 @@ with tempfile.TemporaryDirectory() as folder:
     next(images.glob('*.png')).unlink()
     out=run('tap:100:500,lock,enter,back,quit',*opts)
     assert 'lock_mask status=11' in out and 'lock_preview status=0 mode=0 cached=0' in out,out
+    # 书签模式无需图片/联网；应用、跨进程重开与锁解锁逐像素恢复。/ Bookmark needs no image/network: apply, reopen across processes, and restore body pixels exactly.
+    captures=root/'bookmark-frames';captures.mkdir()
+    out=run('wallpaper,tap:600:240,enter,back,tap:100:500,lock,enter,back,quit',*opts,frames=captures)
+    assert 'wallpaper_ui command=15 status=0 screen=1 active=1' in out and 'lock_preview status=0 mode=5 cached=0' in out and 'lock_preview wake status=0' in out,out
+    pages=[p.read_bytes().split(b'255\n',1)[1] for p in sorted(captures.glob('frame-*.pgm'))]
+    assert any(pages[i-1]==pages[i+1] and pages[i]!=pages[i-1] for i in range(1,len(pages)-1)),(len(pages),out)
+    latest=max((p.read_bytes() for p in store.glob('lock.*')),key=lambda b:int.from_bytes(b[12:20],'little'))
+    assert latest[6]==5 and len(latest)<2048
+    out=run('tap:100:500,lock,enter,back,quit',*opts)
+    assert 'lock_preview status=0 mode=5 cached=0' in out and 'lock_preview wake status=0' in out,out
 print('wallpaper window: default/custom choices, preview, mask reading/locking, missing-source fallback, cancel and option validation passed')

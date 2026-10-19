@@ -8,6 +8,7 @@
 #pragma once
 #include "pn_font_preferences.h"
 #include "pn_catalog.h"
+#include "pn_cover.h"
 #include "pn_epub_reader.h"
 #include "pn_page_bitmap.h"
 #include "pn_epub_save.h"
@@ -206,3 +207,6 @@ void pn_epub_app_refresh_reset(pn_epub_app_t *app);
 pn_status_t pn_epub_app_font_inherit_view(pn_epub_app_t *,pn_reader_overlay_fn,void *,uint64_t,pn_reader_present_fn,void *);
 /// 当前接受的字体是否跟随全局；预览不改变它。/ Whether the accepted font follows global defaults; previews do not change it.
 bool pn_epub_app_font_is_inherited(const pn_epub_app_t *);
+
+/// 拷贝已校验OPF作品名/作者；要求已呈现正文并验证源，不重新解析或读正文。/ Copy validated OPF title/author after a body presentation and source validation, without reparsing or body reads.
+pn_status_t pn_epub_app_book_display(pn_epub_app_t *app,pn_book_display_t *display);

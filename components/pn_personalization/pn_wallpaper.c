@@ -10,6 +10,7 @@
 #include "pn_brand.h"
 #include "pn_brand_image.h"
 #include "pn_wallpaper.h"
+#include "pn_bookmark_lock.h"
 #include "pn_image.h"
 #include "pn_text_file.h"
 #include "pn_widgets.h"
@@ -257,7 +258,7 @@ pn_status_t pn_wallpaper_store_init(pn_wallpaper_store_t *store,pn_media_t *medi
 /* 解析头部；路径另读。/ Parse the fixed header; the path is read separately. */
 static bool decode_header(const uint8_t *h,pn_lock_selection_t *s,size_t *path_length){
     unsigned version=(unsigned)get(h+4,2);
-    if(memcmp(h,"PNWP",4) || (version!=1 && version!=VERSION) || h[6]>PN_LOCK_MASK || h[7]>PN_WALLPAPER_COVER || h[8]>3 || (int8_t)h[9]<-PN_WALLPAPER_SHIFT_MAX || (int8_t)h[9]>PN_WALLPAPER_SHIFT_MAX || h[10]>1 || h[11]>1 || (version==1 && h[11]) || (h[11] && h[6]!=PN_LOCK_BOOK))return false;
+    if(memcmp(h,"PNWP",4) || (version!=1 && version!=VERSION) || h[6]>PN_LOCK_BOOKMARK || h[7]>PN_WALLPAPER_COVER || h[8]>3 || (int8_t)h[9]<-PN_WALLPAPER_SHIFT_MAX || (int8_t)h[9]>PN_WALLPAPER_SHIFT_MAX || h[10]>1 || h[11]>1 || (version==1 && h[11]) || (h[11] && h[6]!=PN_LOCK_BOOK))return false;
     *s=(pn_lock_selection_t){.mode=(pn_lock_mode_t)h[6],.transform={(pn_wallpaper_fit_t)h[7],h[8],(int8_t)h[9]},.hint=h[10]!=0,.sequence=get(h+12,8),.source_size=get(h+20,8),.source_mtime=(int64_t)get(h+28,8)};
     s->cached_book=h[11]!=0;*path_length=(size_t)get(h+36,2);return s->sequence && *path_length<PN_WALLPAPER_PATH_MAX;
 }
@@ -308,7 +309,7 @@ pn_status_t pn_wallpaper_load(const pn_wallpaper_store_t *store,const pn_media_l
     pn_lock_selection_t s;int which;status=best(store,lease,&s,frame,&which);if(status==PN_OK)*selection=s;return status;
 }
 pn_status_t pn_wallpaper_save(const pn_wallpaper_store_t *store,const pn_media_lease_t *lease,pn_lock_selection_t *selection,const pn_frame_t *bitmap){
-    if(!store || !store->media || !lease || lease->access!=PN_MEDIA_WRITE || !selection || selection->mode>PN_LOCK_MASK || (bitmap_record(selection) && !full_frame(bitmap)) || (selection->cached_book && !book_identity_valid(selection)) ||
+    if(!store || !store->media || !lease || lease->access!=PN_MEDIA_WRITE || !selection || selection->mode>PN_LOCK_BOOKMARK || (bitmap_record(selection) && !full_frame(bitmap)) || (selection->cached_book && !book_identity_valid(selection)) ||
        selection->transform.rotation>3 || selection->transform.fit>PN_WALLPAPER_COVER || selection->transform.shift<-PN_WALLPAPER_SHIFT_MAX || selection->transform.shift>PN_WALLPAPER_SHIFT_MAX)return PN_INVALID;
     size_t path_length=strnlen(selection->source,PN_WALLPAPER_PATH_MAX);if(path_length>=PN_WALLPAPER_PATH_MAX)return PN_LIMIT;
     pn_status_t status=pn_media_validate(store->media,lease);if(status!=PN_OK)return status;
@@ -361,7 +362,8 @@ static pn_status_t centered(pn_font_t *font,pn_frame_t *frame,const char *s,int 
     int32_t x=(W*64-width)/2;if(x<0)x=0;return line(font,frame,s,x,baseline,NULL);
 }
 pn_status_t pn_lock_render(const pn_lock_selection_t *selection,pn_font_t *font,const char *hint,pn_frame_t *frame){
-    if(!selection || selection->mode>PN_LOCK_MASK || !font || !font->impl || !hint || !full_frame(frame))return PN_INVALID;
+    if(!selection || selection->mode>PN_LOCK_BOOKMARK || !font || !font->impl || !hint || !full_frame(frame))return PN_INVALID;
+    if(selection->mode==PN_LOCK_BOOKMARK){pn_bookmark_lock_t empty={.battery=-1};return pn_bookmark_lock_render(&empty,NULL,font,selection->hint?hint:"",frame);}
     int original=font->pixels;pn_status_t status=PN_OK;
     if(selection->mode==PN_LOCK_DEFAULT){
         status=pn_brand_image_render(frame);

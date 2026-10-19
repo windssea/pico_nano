@@ -23,12 +23,12 @@ typedef struct {
     pn_pool_t *pool;pn_media_t *images;char directory[PN_CATALOG_PATH_MAX];
     pn_wallpaper_store_t store;bool has_store;
     pn_font_t font;uint8_t *canvas_px,*bitmap_px,*small_px,*alpha_px;pn_frame_t canvas,bitmap,small,alpha;
-    pn_catalog_page_t page;pn_lock_selection_t saved,draft;bool saved_known,bitmap_valid;
+    pn_catalog_page_t page;pn_lock_selection_t saved,draft;pn_bookmark_lock_t bookmark;bool saved_known,bitmap_valid;
     pn_wallpaper_transform_t prepared;char prepared_path[PN_WALLPAPER_PATH_MAX];
     char message[96];
 } ui_t;
 static const char *base(const char *path){const char *slash=strrchr(path,'/');return slash?slash+1:path;}
-static const char *mode_name(const pn_lock_selection_t *s){return s->mode==PN_LOCK_MASK?"透明遮罩":s->mode==PN_LOCK_CUSTOM?"全屏壁纸":"系统默认";}
+static const char *mode_name(const pn_lock_selection_t *s){return s->mode==PN_LOCK_BOOKMARK?"书签锁屏":s->mode==PN_LOCK_MASK?"透明遮罩":s->mode==PN_LOCK_CUSTOM?"全屏壁纸":"系统默认";}
 static pn_status_t load_page(ui_t *u,const char *cursor,bool previous){
     pn_catalog_page_t *next=pn_alloc_tagged(u->pool,PN_MEM_UI,sizeof *next);if(!next)return PN_NO_MEMORY;
     pn_media_lease_t lease;pn_status_t status=pn_media_acquire(u->images,PN_MEDIA_READ,&lease);
@@ -70,7 +70,7 @@ static pn_status_t build_preview(ui_t *u){
     }
     // 有效书封与自定义使用相同预览/持久路径；无候选保留系统默认占位。/ Valid book covers share the custom preview/persistence path; no candidate retains default artwork.
     pn_lock_selection_t shown=u->draft;if(shown.mode==PN_LOCK_BOOK && !shown.cached_book)shown.mode=PN_LOCK_DEFAULT;
-    status=pn_lock_render(&shown,&u->font,"再按电源键继续阅读",&u->canvas);
+    status=shown.mode==PN_LOCK_BOOKMARK?pn_bookmark_lock_render(&u->bookmark,NULL,&u->font,shown.hint?"再按电源键继续阅读":"",&u->canvas):pn_lock_render(&shown,&u->font,"再按电源键继续阅读",&u->canvas);
     if(status==PN_OK){for(int y=0;y<PH;y++)for(int x=0;x<PW;x++){unsigned sum=pn_frame_get(&u->canvas,2*x,2*y)+pn_frame_get(&u->canvas,2*x+1,2*y)+pn_frame_get(&u->canvas,2*x,2*y+1)+pn_frame_get(&u->canvas,2*x+1,2*y+1);pn_frame_pixel(&u->small,x,y,(uint8_t)((sum+2)/4));}}
     return status;
 }
@@ -98,7 +98,8 @@ static pn_status_t draw(ui_t *u,pn_wallpaper_screen_t screen){
     if(screen==PN_WUI_LIST){
         s=pn_w_header(&u->font,&u->canvas,"< 返回","锁屏壁纸",NULL);
         if(s==PN_OK){if(!u->saved_known)snprintf(line,sizeof line,"当前：系统默认（内部记录不可用）");else if(u->saved.mode==PN_LOCK_CUSTOM)snprintf(line,sizeof line,"当前：%s",base(u->saved.source));else snprintf(line,sizeof line,"当前：%s",mode_name(&u->saved));s=line_text(u,line,28,168,PN_ALIGN_LEFT);}
-        if(s==PN_OK)s=sized_button(u,"系统默认",32,MODE_BUTTON_Y,620,96,!u->saved_known || u->saved.mode==PN_LOCK_DEFAULT?PN_W_SELECTED:0u);
+        if(s==PN_OK)s=sized_button(u,"系统默认",32,MODE_BUTTON_Y,300,96,!u->saved_known || u->saved.mode==PN_LOCK_DEFAULT?PN_W_SELECTED:0u);
+        if(s==PN_OK)s=sized_button(u,"书签锁屏",352,MODE_BUTTON_Y,300,96,u->saved_known && u->saved.mode==PN_LOCK_BOOKMARK?PN_W_SELECTED:0u);
         if(s==PN_OK)s=pn_w_section(&u->font,&u->canvas,u->page.count?"自定义图片":"自定义图片（wallpapers 目录暂无 JPEG/PNG）",IMAGE_SECTION_Y);
         for(size_t i=0;i<u->page.count && i<IMAGE_ROWS && s==PN_OK;i++)s=pn_w_row_icon(&u->font,&u->canvas,u->page.items[i].name,NULL,PN_ICON_IMAGE,PN_ROW_CHEVRON,IMAGE_ROW_Y+(int)i*PN_W_ROW_H);
         if(s==PN_OK && *u->message)s=line_text(u,u->message,28,PAGER_Y-24,PN_ALIGN_LEFT);
@@ -131,7 +132,7 @@ pn_status_t pn_wallpaper_ui_open(pn_wallpaper_ui_t *ui,pn_pool_t *pool,pn_media_
     if(!ui || !pool || !images_media || !directory || !*directory || !present)return PN_INVALID;
     if(ui->impl)return PN_BUSY;
     if(strlen(directory)>=PN_CATALOG_PATH_MAX)return PN_LIMIT;
-    ui_t *u=pn_alloc_tagged(pool,PN_MEM_UI,sizeof *u);if(!u)return PN_NO_MEMORY;memset(u,0,sizeof *u);u->pool=pool;u->images=images_media;strcpy(u->directory,directory);
+    ui_t *u=pn_alloc_tagged(pool,PN_MEM_UI,sizeof *u);if(!u)return PN_NO_MEMORY;memset(u,0,sizeof *u);u->pool=pool;u->bookmark.battery=-1;u->images=images_media;strcpy(u->directory,directory);
     if(store){u->store=*store;u->has_store=true;}
     u->canvas_px=pn_alloc_tagged(pool,PN_MEM_UI,PN_WALLPAPER_BYTES);u->bitmap_px=pn_alloc_tagged(pool,PN_MEM_UI,PN_WALLPAPER_BYTES);u->small_px=pn_alloc_tagged(pool,PN_MEM_UI,(size_t)PW/2*PH);
     pn_status_t status=u->canvas_px && u->bitmap_px && u->small_px?PN_OK:PN_NO_MEMORY;
@@ -164,6 +165,7 @@ pn_status_t pn_wallpaper_ui_event(pn_wallpaper_ui_t *ui,int command,pn_wallpaper
         u->message[0]=0;
         if(command==PN_WUI_BACK){ui->active=false;return PN_OK;}
         else if(command==PN_WUI_DEFAULT){begin_preview(u,(pn_lock_selection_t){.mode=PN_LOCK_DEFAULT,.hint=true});rebuild=true;}
+        else if(command==PN_WUI_BOOKMARK){begin_preview(u,(pn_lock_selection_t){.mode=PN_LOCK_BOOKMARK,.hint=true});rebuild=true;}
         else if(command>=PN_WUI_ROW && command<PN_WUI_ROW+(int)u->page.count){const pn_catalog_item_t *item=&u->page.items[command-PN_WUI_ROW];
             if(strlen(item->path)>=PN_WALLPAPER_PATH_MAX)return PN_LIMIT;
             pn_lock_selection_t d={.mode=PN_LOCK_CUSTOM,.hint=true,.transform={PN_WALLPAPER_CONTAIN,0,0},.source_size=item->size};strcpy(d.source,item->path);
@@ -199,7 +201,7 @@ int pn_wallpaper_ui_hit(const pn_wallpaper_ui_t *ui,int x,int y){
     if(ui->screen==PN_WUI_LIST){
         if(header==1)return PN_WUI_BACK;
         if(x<32 || x>=652)return -1;
-        if(y>=MODE_BUTTON_Y && y<MODE_BUTTON_Y+96)return PN_WUI_DEFAULT;
+        if(y>=MODE_BUTTON_Y && y<MODE_BUTTON_Y+96){if(x<332)return PN_WUI_DEFAULT;if(x>=352)return PN_WUI_BOOKMARK;return -1;}
         if(y>=IMAGE_ROW_Y && y<IMAGE_ROW_Y+IMAGE_ROWS*PN_W_ROW_H){int row=(y-IMAGE_ROW_Y)/PN_W_ROW_H;return row<(int)u->page.count?PN_WUI_ROW+row:-1;}
         if(y>=PAGER_Y && y<PAGER_Y+80)return x<228?PN_WUI_PREVIOUS:x>=456?PN_WUI_NEXT:-1;
         return -1;
@@ -224,3 +226,5 @@ void pn_wallpaper_ui_close(pn_wallpaper_ui_t *ui){
     ui_t *u=ui->impl;pn_font_close(&u->font);pn_free(u->canvas_px);pn_free(u->bitmap_px);pn_free(u->small_px);pn_free(u->alpha_px);pn_free(u);
     *ui=(pn_wallpaper_ui_t){0};
 }
+
+void pn_wallpaper_ui_set_bookmark(pn_wallpaper_ui_t *ui,const pn_bookmark_lock_t *snapshot){if(ui && ui->impl && snapshot)((ui_t *)ui->impl)->bookmark=*snapshot;}

@@ -37,6 +37,7 @@
 #include "pn_menu_cache.h"
 #include "pn_wallpaper.h"
 #include "pn_wallpaper_ui.h"
+#include "pn_bookmark_lock.h"
 #include "pn_font_manage.h"
 #include "pn_network_store.h"
 #include "pn_settings_ui.h"
@@ -804,6 +805,23 @@ static bool mount_wallpaper(void){
     wallpaper_ready=true;return true;
 }
 /// 锁屏页：读内部有效壁纸记录，任何失败用系统默认图，再失败退回文字页。/ Lock page: load the valid internal wallpaper record, use the system default on any failure, and fall back to the text page last.
+/// 保留最后已呈现的本地书籍快照，退出阅读后仍可锁屏；不保存虚构统计。/ Retain the last presented local book snapshot for locking after leaving reading, without invented statistics.
+static pn_bookmark_lock_t bookmark_lock={.battery=-1};
+static pn_catalog_item_t bookmark_lock_item;
+static uint64_t bookmark_lock_epoch; ///< 快照所属介质代次，不跨换卡复用封面 / Snapshot media generation; never reuse a cover across card changes
+static void bookmark_lock_capture(void){
+    pn_bookmark_lock_t next={.battery=-1};unsigned basis=0;size_t section=0,count=0;
+    pn_status_t status=epub.impl?pn_epub_app_percent(&epub,&basis,&section,&count):pn_reader_app_percent(&reader,&basis);
+    if(status!=PN_OK)return;
+    if(epub.impl && pn_epub_app_book_display(&epub,&next.book)!=PN_OK)return;
+    if(!*next.book.title){const char *name=strrchr(selected_path,'/');name=name?name+1:selected_path;
+        if(strlen(name)<sizeof next.book.title){strcpy(next.book.title,name);char *dot=strrchr(next.book.title,'.');if(dot)*dot=0;}else strcpy(next.book.title,"当前书籍");}
+    next.basis=basis;next.section=section;next.count=count;next.progress_known=true;bookmark_lock=next;
+    memset(&bookmark_lock_item,0,sizeof bookmark_lock_item);bookmark_lock_item.format=selected_format;bookmark_lock_epoch=sd_media.epoch;
+    snprintf(bookmark_lock_item.path,sizeof bookmark_lock_item.path,"%s",selected_path);
+}
+/// 日期与电量由控制层准备，绘制层不访问PMU。/ Prepare date and battery in the controller, keeping PMU access out of drawing.
+static void bookmark_lock_environment(pn_bookmark_lock_t *snapshot);
 static void show_lock(const char *hint){
     reading_menu=false;pn_toc_ui_close(&toc);pn_bookmark_ui_cancel(&bookmarks);pn_style_ui_close(&styles);pn_font_ui_close(&fonts);pn_wallpaper_ui_close(&wallpaper_ui);pn_font_manage_close(&font_manage);pn_settings_ui_close(&settings_ui);
     status_page=true;shelf_mode=false;index_mode=false;search_mode=false;hub_mode=false;actions_mode=false;
@@ -828,12 +846,20 @@ static void show_lock(const char *hint){
     }
     if(selection.mode==PN_LOCK_SIMPLE || selection.mode==PN_LOCK_BOOK)selection=(pn_lock_selection_t){.mode=PN_LOCK_DEFAULT,.hint=true};
     if(status==PN_OK)status=management_font_begin(&font,32);
-    if(status==PN_OK)status=pn_lock_render(&selection,&font,hint,&frame);
+    if(status==PN_OK && selection.mode==PN_LOCK_BOOKMARK){
+        pn_bookmark_lock_t snapshot=bookmark_lock;bookmark_lock_environment(&snapshot);
+        uint8_t *cover_px=pn_alloc_tagged(&pool,PN_MEM_UI,PN_COVER_BYTES);pn_frame_t cover;pn_book_display_t display;bool ready=false;
+        if(cover_px && bookmark_lock_epoch==sd_media.epoch && *bookmark_lock_item.path && pn_frame_bind(&cover,cover_px,PN_COVER_BYTES,PN_COVER_WIDTH,PN_COVER_HEIGHT))
+            ready=pn_cover_cached_one(&pool,&sd_media,cover_cache,&bookmark_lock_item,&cover,&display)==PN_OK;
+        if(ready){if(*display.title)snapshot.book=display;}
+        status=pn_bookmark_lock_render(&snapshot,ready?&cover:NULL,&font,selection.hint?hint:"",&frame);pn_free(cover_px);
+    }else if(status==PN_OK)status=pn_lock_render(&selection,&font,hint,&frame);
     if(status==PN_OK)status=present(NULL,&frame,PN_REFRESH_GC16);
     management_font_end(&font);pn_free(pixels);
     if(status!=PN_OK){ESP_LOGE(TAG,"Lock screen unavailable: %d",(int)status);message("已锁屏",hint);}
 }
 static bool stop_reader_impl(bool retain){
+    if(reader_active())bookmark_lock_capture();
     if(opening_abort()!=PN_OK)return false;
 #if defined(CONFIG_PN_UI_FOLLOW) && CONFIG_PN_UI_FOLLOW
     if(pn_font_manage_motion_abort(&font_manage)!=PN_OK)return false;
@@ -859,8 +885,8 @@ static bool stop_reader(void){return stop_reader_impl(false);}
 static bool leave_reader(void){return stop_reader_impl(true);}
 /// 索引只写专用可重建缓存，保留只读字体和热会话，忙时留待下一轮。/ Index writes only its rebuildable cache, retaining read-only fonts/warm sessions and retrying busy work later.
 static pn_status_t catalog_build_idle(void){return pn_catalog_index_build(&catalog_index);}
-/* 状态带时间：开机或手动联网对时后读取已确认的PMU UTC，之后按开机计时推算；锁屏不显示时间。时区固定为UTC+8。
- * Status-band clock: read confirmed PMU UTC at boot or after explicit network synchronization, then advance by uptime; the lock screen shows no time. The time zone is fixed at UTC+8. */
+/* 状态带时间：开机或手动联网对时后读取已确认的PMU UTC，之后按开机计时推算；书签锁屏复用已确认日期。时区固定为UTC+8。
+ * Status-band clock: read confirmed PMU UTC at boot or after explicit network synchronization, then advance by uptime; the bookmark lock shares the confirmed date. The time zone is fixed at UTC+8. */
 #define CLOCK_UTC_OFFSET (8*3600)
 static bool clock_known;static uint32_t clock_base_sec;static uint64_t clock_base_ms;
 static void clock_read_boot(uint64_t now){
@@ -891,6 +917,11 @@ static int battery_percent(void){
     const pmu_snapshot_t *snapshot=read_pico_pmu_get();
     if(!snapshot || !(snapshot->qb_flags&0x02u) || snapshot->qb_soc>1000u)return -1;
     return (snapshot->qb_soc+5u)/10u;
+}
+static void bookmark_lock_environment(pn_bookmark_lock_t *snapshot){
+    snapshot->battery=battery_percent();snapshot->date_known=false;
+    if(clock_known){uint64_t ms=now_ms(),utc=(uint64_t)clock_base_sec+(ms>=clock_base_ms?(ms-clock_base_ms)/1000u:0);
+        if(utc<=UINT32_MAX){snapshot->utc=(uint32_t)utc;snapshot->date_known=true;}}
 }
 /// 只按当前页与封面槽绘制书架，不扫描目录。/ Draw the shelf from the current page and cover slots only, without scanning.
 /// 书架选项（绘制与命中共用）。/ Shelf options shared by drawing and hit testing.
@@ -1046,6 +1077,10 @@ static bool refresh_last(pn_catalog_item_t *last){
         // 书架条目的“进度 · 格式”行用同一份记录。/ The shelf entries' progress line uses the same snapshot.
         if(status==PN_OK && shelf_page)pn_catalog_apply_recent(shelf_page,recent_snapshot);
         if(status==PN_OK && recent_snapshot->count && pn_catalog_recent_page(recent_snapshot,0,tmp)==PN_OK && tmp->count){*last=tmp->items[0];found=true;}
+    }
+    if(found && !*bookmark_lock.book.title){
+        bookmark_lock_item=*last;bookmark_lock_epoch=sd_media.epoch;bookmark_lock.battery=-1;bookmark_lock.progress_known=last->has_progress && last->progress<=10000;bookmark_lock.basis=bookmark_lock.progress_known?last->progress:0;
+        if(strlen(last->name)<sizeof bookmark_lock.book.title){strcpy(bookmark_lock.book.title,last->name);char *dot=strrchr(bookmark_lock.book.title,'.');if(dot)*dot=0;}else strcpy(bookmark_lock.book.title,"最近阅读书籍");
     }
     pn_free(tmp);return found;
 }
@@ -1586,6 +1621,7 @@ static void begin_wallpaper(void){
     pn_wallpaper_mask_close(&lock_mask);reading_menu=false;pn_wallpaper_store_t store;
     bool store_ok=mount_wallpaper() && pn_wallpaper_store_init(&store,&wallpaper_media,"/wallpaper/lock.a","/wallpaper/lock.b")==PN_OK;
     pn_status_t status=pn_wallpaper_ui_open(&wallpaper_ui,&pool,&sd_media,PN_SD_MOUNT "/" PN_SD_WALLPAPERS,store_ok?&store:NULL,present,NULL);
+    if(status==PN_OK){pn_bookmark_lock_t snapshot=bookmark_lock;bookmark_lock_environment(&snapshot);pn_wallpaper_ui_set_bookmark(&wallpaper_ui,&snapshot);}
     if(status!=PN_OK){message("壁纸设置未打开","保留原锁屏，稍后重试");return;}
     status_page=true;shelf_mode=false;index_mode=false;search_mode=false;hub_mode=false;actions_mode=false;
 }
@@ -1689,6 +1725,7 @@ static void tick_transfer(uint64_t now){
 }
 /// 锁屏后浅睡，电源键唤醒即解锁回原书；唤醒源不可用时保持锁屏等待轮询。/ Light-sleep after locking and unlock back to the book on a power-key wake; if the wake source is unavailable stay locked and keep polling.
 static bool prepare_lock(void){
+    if(reader_active())bookmark_lock_capture();
     pn_cover_work_abort(&cover_work);
     reader_suspended=false;
     if(!reader_active() || toolbar_open || styles.active || fonts.active || toc.active || jump_ui.active || bookmarks.mode!=PN_BUI_CLOSED){toolbar_open=false;return stop_reader();}

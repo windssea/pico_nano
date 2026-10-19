@@ -302,6 +302,23 @@ static pn_status_t cache_load(pn_pool_t *pool,pn_media_t *media,const pn_media_l
     }
     pn_free(data);return status;
 }
+pn_status_t pn_cover_cached_one(pn_pool_t *pool,pn_media_t *media,const char *dir,const pn_catalog_item_t *item,pn_frame_t *thumb,pn_book_display_t *display){
+    if(!pool || !media || !dir || !*dir || !item || !thumb || !thumb->pixels || thumb->width!=PN_COVER_WIDTH || thumb->height!=PN_COVER_HEIGHT || thumb->stride!=PN_COVER_WIDTH/2 || !display)return PN_INVALID;
+    pn_media_lease_t lease;pn_status_t status=pn_media_acquire(media,PN_MEDIA_READ,&lease);if(status!=PN_OK)return status;
+    uint8_t *staging=pn_alloc_tagged(pool,PN_MEM_UI,PN_COVER_BYTES);cover_key_t key,after;pn_book_display_t candidate;
+    pn_cover_state_t state=PN_COVER_PENDING;pn_status_t reason=PN_EMPTY;
+    if(!staging)status=PN_NO_MEMORY;
+    if(status==PN_OK)status=cover_key(media,item,&key);
+    if(status==PN_OK)status=cache_load(pool,media,&lease,dir,item,&key,&state,&reason,staging,&candidate,0);
+    if(status==PN_OK)status=cover_key(media,item,&after);
+    if(status==PN_OK){uint8_t before_bytes[KEY_BYTES],after_bytes[KEY_BYTES];encode_key(before_bytes,&key);encode_key(after_bytes,&after);if(memcmp(before_bytes,after_bytes,KEY_BYTES))status=PN_STALE_MEDIA;}
+    if(status==PN_OK)status=pn_media_validate(media,&lease);
+    if(status==PN_OK && state!=PN_COVER_READY)status=PN_EMPTY;
+    if(status==PN_OK){pn_frame_t source;(void)pn_frame_bind(&source,staging,PN_COVER_BYTES,PN_COVER_WIDTH,PN_COVER_HEIGHT);
+        for(int y=0;y<PN_COVER_HEIGHT;y++)for(int x=0;x<PN_COVER_WIDTH;x++)pn_frame_pixel(thumb,x,y,pn_frame_get(&source,x,y));
+        *display=candidate;}
+    pn_free(staging);(void)pn_media_release(media,&lease);return status;
+}
 static pn_status_t make_dir(const char *path){return mkdir(path,0775)==0 || errno==EEXIST?PN_OK:PN_IO;}
 #include "pn_cover_write.inc"
 #include "pn_cover_extract.inc"

@@ -23,7 +23,8 @@ typedef enum {
     PN_LOCK_CUSTOM=1, ///< 用户图片预处理位图 / Preprocessed user image bitmap
     PN_LOCK_SIMPLE=2, ///< 白底产品名与静态提示 / White background with product name and static hint
     PN_LOCK_BOOK=3, ///< 旧版书封记录 / Legacy book-cover record
-    PN_LOCK_MASK=4 ///< 阅读及锁屏透明PNG遮罩，源缺失回退 / Transparent PNG mask for reading and locking, falling back when absent
+    PN_LOCK_MASK=4, ///< 阅读及锁屏透明PNG遮罩，源缺失回退 / Transparent PNG mask for reading and locking, falling back when absent
+    PN_LOCK_BOOKMARK=5 ///< 本地阅读书签与月历 / Local reading bookmark and month calendar
 } pn_lock_mode_t;
 /// 适配方式。/ Fit mode.
 typedef enum {
