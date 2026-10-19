@@ -1,2 +1,0 @@
-92307bcbf7dc4fd8386c6ee16d2222d9ecd9111e7246f5e2a366d08721d10fb6  PicoNano-f5029ec-upgrade.zip
-fccb1dda4f75429ac14a620a0ead653906d76a94c7a12765a7bbed3a71ff672d  PicoNano-web-installer-f5029ec.zip

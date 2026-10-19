@@ -80,30 +80,28 @@ pn_status_t pn_bookmark_lock_render(const pn_bookmark_lock_t *s,const pn_frame_t
     pn_w_round_fill(frame,24,423,636,10,3,10);if(s->progress_known && s->basis)pn_w_round_fill(frame,24,423,(int)(636u*s->basis/10000u),10,3,0);
     TEXT("章节",23,24,472,260,PN_ALIGN_LEFT,true);
     if(s->count){snprintf(line,sizeof line,"%zu / %zu",s->section+1,s->count);TEXT(line,25,390,472,270,PN_ALIGN_RIGHT,false);}else TEXT("—",25,390,472,270,PN_ALIGN_RIGHT,false);
-    TEXT("本书已读",23,24,520,260,PN_ALIGN_LEFT,true);TEXT("— 字",25,390,520,270,PN_ALIGN_RIGHT,false);
-    TEXT("唤醒已读",23,24,559,260,PN_ALIGN_LEFT,true);TEXT("— 字",25,390,559,270,PN_ALIGN_RIGHT,false);
-    dash(frame,24,608,636,7);
-    pn_frame_rect(frame,45,636,192,1,10);pn_frame_rect(frame,447,636,192,1,10);diamond(frame,248,636);diamond(frame,436,636);
-    TEXT("阅读摘要",29,262,646,160,PN_ALIGN_CENTER,true);
-    TEXT("本书今日",24,24,682,302,PN_ALIGN_CENTER,true);TEXT("本书累计",24,366,682,294,PN_ALIGN_CENTER,true);
-    for(int y=674;y<753;y+=8)pn_frame_rect(frame,342,y,1,5,9);
-    TEXT("翻页",22,24,720,120,PN_ALIGN_LEFT,false);
-    if(s->reading.known && s->reading.dated)snprintf(line,sizeof line,"%" PRIu64 " 次",s->reading.today_turns);else snprintf(line,sizeof line,"— 次");TEXT(line,25,144,720,180,PN_ALIGN_RIGHT,true);
-    TEXT("时长",22,24,753,120,PN_ALIGN_LEFT,false);
-    if(s->reading.known && !s->reading.dated)snprintf(line,sizeof line,"待校时");else snprintf(line,sizeof line,"%" PRIu64 "分钟",s->reading.known?s->reading.today_ms/60000u:0);TEXT(line,25,144,753,180,PN_ALIGN_RIGHT,true);
-    TEXT("翻页",22,366,720,120,PN_ALIGN_LEFT,false);
-    if(s->reading.known)snprintf(line,sizeof line,"%" PRIu64 " 次",s->reading.total_turns);else snprintf(line,sizeof line,"— 次");TEXT(line,25,490,720,170,PN_ALIGN_RIGHT,true);
-    TEXT("时长",22,366,753,120,PN_ALIGN_LEFT,false);snprintf(line,sizeof line,"%" PRIu64 "分钟",s->reading.known?s->reading.total_ms/60000u:0);TEXT(line,25,490,753,170,PN_ALIGN_RIGHT,true);
-    dash(frame,24,770,636,7);
+    dash(frame,24,500,636,7);
+    pn_frame_rect(frame,45,528,192,1,10);pn_frame_rect(frame,447,528,192,1,10);diamond(frame,248,528);diamond(frame,436,528);
+    TEXT("阅读摘要",29,262,538,160,PN_ALIGN_CENTER,true);
+    TEXT("本书今日",24,24,574,302,PN_ALIGN_CENTER,true);TEXT("本书累计",24,366,574,294,PN_ALIGN_CENTER,true);
+    for(int y=566;y<645;y+=8)pn_frame_rect(frame,342,y,1,5,9);
+    TEXT("翻页",22,24,612,120,PN_ALIGN_LEFT,false);
+    if(s->reading.known && s->reading.dated)snprintf(line,sizeof line,"%" PRIu64 " 次",s->reading.today_turns);else snprintf(line,sizeof line,"— 次");TEXT(line,25,144,612,180,PN_ALIGN_RIGHT,true);
+    TEXT("时长",22,24,645,120,PN_ALIGN_LEFT,false);
+    if(s->reading.known && !s->reading.dated)snprintf(line,sizeof line,"待校时");else snprintf(line,sizeof line,"%" PRIu64 "分钟",s->reading.known?s->reading.today_ms/60000u:0);TEXT(line,25,144,645,180,PN_ALIGN_RIGHT,true);
+    TEXT("翻页",22,366,612,120,PN_ALIGN_LEFT,false);
+    if(s->reading.known)snprintf(line,sizeof line,"%" PRIu64 " 次",s->reading.total_turns);else snprintf(line,sizeof line,"— 次");TEXT(line,25,490,612,170,PN_ALIGN_RIGHT,true);
+    TEXT("时长",22,366,645,120,PN_ALIGN_LEFT,false);snprintf(line,sizeof line,"%" PRIu64 "分钟",s->reading.known?s->reading.total_ms/60000u:0);TEXT(line,25,490,645,170,PN_ALIGN_RIGHT,true);
+    dash(frame,24,662,636,7);
     // 日均只除以本周已过的自然日；秒级累计，显示向下取整到分钟。/ Average over elapsed calendar days this week; collect milliseconds and display whole minutes.
     uint64_t total=0,peak=0;for(unsigned i=0;i<7;i++){uint64_t ms=s->reading.dated?s->reading.week_ms[i]:0;if(UINT64_MAX-total<ms)total=UINT64_MAX;else total+=ms;if(ms>peak)peak=ms;}
-    TEXT("本周全局阅读时长",24,24,806,350,PN_ALIGN_LEFT,true);
+    TEXT("本周全局阅读时长",24,24,698,350,PN_ALIGN_LEFT,true);
     if(s->reading.dated)snprintf(line,sizeof line,"日均 %" PRIu64 "分钟 · 总时长 %" PRIu64 "分钟",total/60000u/(s->reading.weekday<7?s->reading.weekday+1u:7u),total/60000u);
     else snprintf(line,sizeof line,dated?"统计暂不可用":"日期待校时");
-    TEXT(line,19,354,806,306,PN_ALIGN_RIGHT,false);
-    if(peak){uint64_t axis=peak/60000u+(peak%60000u!=0);snprintf(line,sizeof line,"%" PRIu64 "分",axis);TEXT(line,17,24,839,72,PN_ALIGN_LEFT,false);
-        for(unsigned i=0;i<7;i++){uint64_t ms=s->reading.week_ms[i];if(ms){int height=(int)(ms/(long double)axis/60000u*68);if(height<1)height=1;pn_frame_rect(frame,92+(int)i*83,918-height,38,height,2);}}}
-    else TEXT(s->reading.dated || dated?"暂无阅读统计":"校时后记录每日统计",22,90,870,552,PN_ALIGN_CENTER,false);
+    TEXT(line,19,354,698,306,PN_ALIGN_RIGHT,false);
+    if(peak){uint64_t axis=peak/60000u+(peak%60000u!=0);snprintf(line,sizeof line,"%" PRIu64 "分",axis);TEXT(line,17,24,731,72,PN_ALIGN_LEFT,false);
+        for(unsigned i=0;i<7;i++){uint64_t ms=s->reading.week_ms[i];if(ms){int height=(int)(ms/(long double)axis/60000u*176);if(height<1)height=1;pn_frame_rect(frame,92+(int)i*83,918-height,38,height,2);}}}
+    else TEXT(s->reading.dated || dated?"暂无阅读统计":"校时后记录每日统计",22,90,816,552,PN_ALIGN_CENTER,false);
     TEXT("0",18,24,918,30,PN_ALIGN_LEFT,false);dash(frame,64,918,596,10);
     for(unsigned i=0;i<7;i++)TEXT(((const char *const[]){"一","二","三","四","五","六","日"})[i],21,70+(int)i*83,947,83,PN_ALIGN_CENTER,false);
     calendar_border(frame);pn_frame_rect(frame,329,986,1,153,12);
