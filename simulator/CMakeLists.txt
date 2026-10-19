@@ -41,6 +41,7 @@ target_link_libraries(pn_shelf_snapshot PRIVATE pn_core)
 
 if(PN_SIM_SDL)
 add_test(NAME library_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_library_window.py $<TARGET_FILE:pn_sim>)
+add_test(NAME reading_stats_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_reading_stats_window.py $<TARGET_FILE:pn_sim>)
 add_test(NAME cache_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_cache_window.py $<TARGET_FILE:pn_sim>)
 add_test(NAME bookmark_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_bookmark_window.py $<TARGET_FILE:pn_sim>)
 add_test(NAME recent_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_recent_window.py $<TARGET_FILE:pn_sim>)

@@ -4,6 +4,7 @@
 #pragma once
 #include "pn_cover.h"
 #include "pn_font.h"
+#include "pn_reading_stats.h"
 
 /// 控制层提供最后确认的数据，不读书或硬件。/ Last confirmed data supplied by the controller, without book or hardware reads.
 typedef struct {
@@ -14,6 +15,7 @@ typedef struct {
     bool date_known; ///< 仅控制层确认的UTC可设为true / True only for controller-confirmed UTC
     uint32_t utc; ///< 已确认UTC秒，显示固定UTC+8 / Confirmed UTC seconds, displayed at UTC+8
     int battery; ///< 0..100，负数未知 / 0..100, negative when unknown
+    pn_reading_summary_t reading; ///< 控制层结算的正文停留和确认翻页 / Controller-settled body dwell and confirmed turns
 } pn_bookmark_lock_t;
 /// 公历年月日与周一为0的星期，支持1970..2100；失败不改输出。/ Gregorian date and Monday-zero weekday, 1970..2100; failure leaves outputs unchanged.
 bool pn_bookmark_lock_date(uint32_t utc,unsigned *year,unsigned *month,unsigned *day,unsigned *weekday);

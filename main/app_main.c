@@ -178,6 +178,11 @@ static void lock_and_sleep(const char *hint);
 static bool prepare_lock(void);
 static void resume_reader(void);
 static bool reader_active(void);
+static void reading_stats_pause(void);
+static void reading_stats_poll(bool body);
+static void reading_stats_turn(void);
+static void reading_stats_flush(void);
+static bool reading_stats_display_failed; ///< 失败推屏后等待成功恢复，不能按模式标记提前计时 / Wait for successful restoration after a failed presentation instead of timing from mode flags alone
 static int root_navigation_hit(int x,int y);
 static bool reader_suspended; ///< 热挂起会话 / Warm suspended session
 static bool management_home_pending; ///< 传输停止后回阅读首页 / Return home after transfer shutdown
@@ -641,8 +646,9 @@ static pn_status_t present_impl(void *ctx,const pn_frame_t *frame,pn_refresh_t p
 }
 static unsigned presents_ok; ///< 成功回执计数，饱和于2；开机图之后的首帧证明界面可用 / Successful receipts saturating at two; the first frame after boot art proves a usable UI
 static pn_status_t present(void *ctx,const pn_frame_t *frame,pn_refresh_t profile){
+    reading_stats_pause();
     pn_profile_span_t span;pn_profile_begin(&span,&pool,"display.receipt");
-    pn_status_t status=present_impl(ctx,frame,profile);pn_profile_end(&span,status);if(status==PN_OK && presents_ok<2u)presents_ok++;return status;
+    pn_status_t status=present_impl(ctx,frame,profile);pn_profile_end(&span,status);reading_stats_display_failed=status!=PN_OK;if(status==PN_OK && presents_ok<2u)presents_ok++;return status;
 }
 #if defined(CONFIG_PN_UI_FOLLOW) && CONFIG_PN_UI_FOLLOW
 typedef struct {pn_list_stage_t stage;const pn_frame_t *frame;pn_follow_box_t area;const EpdWaveform *wave;const pn_follow_job_t *job;uint8_t *difference;bool *lines;uint8_t *columns;bool started,full;} list_scan_t; ///< 回执前只读借用，显示owner不分配或修改模型 / Read-only borrow until receipt; display owner never allocates or mutates models
@@ -735,6 +741,7 @@ static pn_status_t reader_overlap(void *ctx){(void)ctx;
     if(atomic_load(&overlap_disabled) || !atomic_load(&reading_presentation) || !reader_active())return PN_EMPTY;
     return epub.impl?pn_epub_app_overlap(&epub):pn_reader_app_overlap(&reader);}
 static pn_status_t active_step(pn_reader_action_t action,uint64_t now){
+    reading_stats_pause();
     uint64_t started=now_ms();(void)started;
     pn_reader_app_refresh_period(&reader,pn_settings_refresh_pages(input_flags));
     pn_epub_app_refresh_period(&epub,pn_settings_refresh_pages(input_flags));
@@ -749,6 +756,7 @@ static pn_status_t active_step(pn_reader_action_t action,uint64_t now){
     atomic_store(&reading_presentation,true);
     pn_status_t status=epub.impl?pn_epub_app_step(&epub,action,now,pn_turn_present,&effect):pn_reader_app_step(&reader,action,now,pn_turn_present,&effect);
     atomic_store(&reading_presentation,false);
+    if((action==PN_APP_NEXT || action==PN_APP_PREVIOUS) && (epub.impl?pn_epub_app_last_confirmed(&epub):pn_reader_app_last_confirmed(&reader)))reading_stats_turn();
     ESP_LOGI(TAG,"Reader action=%u status=%d elapsed=%llu ms",(unsigned)action,(int)status,(unsigned long long)(now_ms()-started));
 #if PN_DEVICE_TEST_CONSOLE
     // 诊断：下一页预渲染位图是否命中/被拒，定位翻页光栅耗时。/ Diagnostic: whether the next-page bitmap hit or was denied, locating turn raster cost.
@@ -818,6 +826,7 @@ static void bookmark_lock_capture(void){
         if(strlen(name)<sizeof next.book.title){strcpy(next.book.title,name);char *dot=strrchr(next.book.title,'.');if(dot)*dot=0;}else strcpy(next.book.title,"当前书籍");}
     next.basis=basis;next.section=section;next.count=count;next.progress_known=true;bookmark_lock=next;
     memset(&bookmark_lock_item,0,sizeof bookmark_lock_item);bookmark_lock_item.format=selected_format;bookmark_lock_epoch=sd_media.epoch;
+    bookmark_lock_item.identified=(epub.impl?pn_epub_app_identity(&epub,&bookmark_lock_item.expected):pn_reader_app_identity(&reader,&bookmark_lock_item.expected))==PN_OK;
     snprintf(bookmark_lock_item.path,sizeof bookmark_lock_item.path,"%s",selected_path);
 }
 /// 日期与电量由控制层准备，绘制层不访问PMU。/ Prepare date and battery in the controller, keeping PMU access out of drawing.
@@ -859,6 +868,7 @@ static void show_lock(const char *hint){
     if(status!=PN_OK){ESP_LOGE(TAG,"Lock screen unavailable: %d",(int)status);message("已锁屏",hint);}
 }
 static bool stop_reader_impl(bool retain){
+    reading_stats_pause();reading_stats_flush();
     if(reader_active())bookmark_lock_capture();
     if(opening_abort()!=PN_OK)return false;
 #if defined(CONFIG_PN_UI_FOLLOW) && CONFIG_PN_UI_FOLLOW
@@ -889,6 +899,34 @@ static pn_status_t catalog_build_idle(void){return pn_catalog_index_build(&catal
  * Status-band clock: read confirmed PMU UTC at boot or after explicit network synchronization, then advance by uptime; the bookmark lock shares the confirmed date. The time zone is fixed at UTC+8. */
 #define CLOCK_UTC_OFFSET (8*3600)
 static bool clock_known;static uint32_t clock_base_sec;static uint64_t clock_base_ms;
+static pn_reading_stats_t reading_stats; ///< 仅产品owner访问，内部小日志不读TF正文 / Product-owner only; small internal journals never read TF body data
+static uint64_t reading_stats_retry;
+static bool reading_stats_clock(uint64_t now,uint64_t *utc){
+    if(!clock_known || now<clock_base_ms)return false;
+    *utc=(uint64_t)clock_base_sec*1000u+now-clock_base_ms;return *utc<=UINT64_C(4294967295999);
+}
+static void reading_stats_pause(void){uint64_t now=now_ms(),utc=0;bool dated=reading_stats_clock(now,&utc);pn_reading_stats_gate(&reading_stats,now,false,dated,utc);}
+static void reading_stats_poll(bool body){
+    body=body && !reading_stats_display_failed;
+    if(!reading_stats.media && data_ready)(void)pn_reading_stats_init(&reading_stats,&data_media,"/data/progress");
+    uint64_t now=now_ms(),utc=0;bool matched=false;
+    if(body && reading_stats.media){pn_book_id_t id;unsigned basis=0;size_t section=0,count=0;
+        if((epub.impl?pn_epub_app_identity(&epub,&id):pn_reader_app_identity(&reader,&id))==PN_OK){
+            matched=reading_stats.loaded && reading_stats.has_book && !memcmp(id.sha256,reading_stats.book.id.sha256,32);
+            pn_status_t visible=matched?PN_OK:epub.impl?pn_epub_app_percent(&epub,&basis,&section,&count):pn_reader_app_percent(&reader,&basis);
+            if(!matched && visible==PN_OK && now>=reading_stats_retry){reading_stats_pause();pn_status_t status=pn_reading_stats_select(&reading_stats,&id);matched=status==PN_OK;
+                if(!matched){reading_stats_retry=now_ms()+3000u;ESP_LOGW(TAG,"Reading statistics unavailable: %d; retrying without blocking reading",(int)status);}}
+        }}
+    now=now_ms();bool dated=reading_stats_clock(now,&utc);pn_reading_stats_gate(&reading_stats,now,body && matched,dated,utc);
+}
+static void reading_stats_turn(void){
+    reading_stats_poll(true);reading_stats_pause();uint64_t utc=0,now=now_ms();bool dated=reading_stats_clock(now,&utc);
+    pn_book_id_t id;if((epub.impl?pn_epub_app_identity(&epub,&id):pn_reader_app_identity(&reader,&id))==PN_OK && reading_stats.has_book && !memcmp(id.sha256,reading_stats.book.id.sha256,32))pn_reading_stats_turn(&reading_stats,dated,utc);
+}
+static void reading_stats_flush(void){
+    if(!reading_stats.media)return;
+    pn_status_t status=pn_reading_stats_save(&reading_stats,now_ms(),true);if(status!=PN_OK)ESP_LOGW(TAG,"Reading statistics checkpoint failed: %d; pending counters retained",(int)status);
+}
 static void clock_read_boot(uint64_t now){
     if(read_pico_pmu_cmd(PMU_CMD_TIME_GET,NULL,0)!=ESP_OK)return;
     const pmu_snapshot_t *snapshot=read_pico_pmu_get();
@@ -922,6 +960,9 @@ static void bookmark_lock_environment(pn_bookmark_lock_t *snapshot){
     snapshot->battery=battery_percent();snapshot->date_known=false;
     if(clock_known){uint64_t ms=now_ms(),utc=(uint64_t)clock_base_sec+(ms>=clock_base_ms?(ms-clock_base_ms)/1000u:0);
         if(utc<=UINT32_MAX){snapshot->utc=(uint32_t)utc;snapshot->date_known=true;}}
+    if(!reading_stats.media && data_ready)(void)pn_reading_stats_init(&reading_stats,&data_media,"/data/progress");
+    if(reading_stats.media && pn_reading_stats_load(&reading_stats)==PN_OK){uint64_t utc=0;bool dated=reading_stats_clock(now_ms(),&utc);snapshot->reading=pn_reading_stats_summary(&reading_stats,dated,utc);
+        snapshot->reading.known=bookmark_lock_item.identified && reading_stats.has_book && !memcmp(bookmark_lock_item.expected.sha256,reading_stats.book.id.sha256,32);}
 }
 /// 只按当前页与封面槽绘制书架，不扫描目录。/ Draw the shelf from the current page and cover slots only, without scanning.
 /// 书架选项（绘制与命中共用）。/ Shelf options shared by drawing and hit testing.
@@ -1725,6 +1766,7 @@ static void tick_transfer(uint64_t now){
 }
 /// 锁屏后浅睡，电源键唤醒即解锁回原书；唤醒源不可用时保持锁屏等待轮询。/ Light-sleep after locking and unlock back to the book on a power-key wake; if the wake source is unavailable stay locked and keep polling.
 static bool prepare_lock(void){
+    reading_stats_pause();reading_stats_flush();
     if(reader_active())bookmark_lock_capture();
     pn_cover_work_abort(&cover_work);
     reader_suspended=false;
@@ -1970,6 +2012,7 @@ static void open_shelf_item(int index){
     else message("格式尚未接入","书籍仍保留，选择TXT或EPUB");
 }
 static void handle_key(int key,pn_key_event_t event){
+    reading_stats_pause();
     if(ota.impl){if(event==PN_KEY_SHORT && (key==PN_KEY_1 || key==PN_KEY_2))update_command(PN_SETUI_UPDATE_CANCEL);else if(event==PN_KEY_SHORT && key==PN_KEY_3){pn_device_ota_state_t state={0};(void)pn_device_ota_state(&ota,&state);if(state.phase==PN_DEVICE_OTA_AVAILABLE)update_command(PN_SETUI_UPDATE_INSTALL);else if(state.phase==PN_DEVICE_OTA_READY)update_command(PN_SETUI_UPDATE_REBOOT);}return;}
     if(opening){if(event==PN_KEY_SHORT && (key==PN_KEY_1 || key==PN_KEY_2))opening_cancel(key);return;}
     if(usb.open){if(event==PN_KEY_SHORT){usb_return=true;usb_home=key==PN_KEY_2;usb_lock=false;pn_device_usb_request_stop(&usb);}return;}
@@ -2105,6 +2148,7 @@ static void feedback_begin(int x,int y){
 #endif
 /// 执行一次已确认的选择（点击或KEY2确认）。/ Perform one confirmed selection (a tap or a KEY2 confirmation).
 static void apply_selection(int selection){
+    reading_stats_pause();
     if(ota.impl && (selection<PN_SETUI_UPDATE_CHECK || selection>PN_SETUI_UPDATE_CANCEL)){if(selection==PN_SETUI_BACK)update_command(PN_SETUI_UPDATE_CANCEL);return;}
     if(usb.open){if(selection==PN_USB_VIEW_STOP){usb_return=true;pn_device_usb_request_stop(&usb);}}
     else if(transfer.impl){if(selection==PN_TRANSFER_VIEW_STOP){transfer_return=true;(void)pn_device_transfer_request_stop(&transfer);}}
@@ -2311,10 +2355,13 @@ static void device_task(void *arg){
         (void)pn_hot_session_expire(&hot_session,now);
         if(scope_active)pn_async_end(&scope);
         bool body=reader_active() && !locked && !focus_page() && !status_page && !reading_menu && !shelf_mode && !toolbar_open;
+        reading_stats_poll(body && !opening);
         uint32_t view=locked?1:opening?18:fonts.active?2:toc.active?3:styles.active?4:jump_ui.active?5:bookmarks.mode!=PN_BUI_CLOSED?6:actions_mode?7:settings_ui.impl?8:wallpaper_ui.impl?9:font_manage.impl?10:hub_mode?11:index_mode?12:search_mode?13:toolbar_open?14:body?15:home_mode?16:17;
         if(!opening && shelf_mode && !home_mode && shelf_page)view+=(uint32_t)shelf_page->index*32u;
         pn_device_async_root_view(&async_port,view,body,input_flags,root_navigation_hit(80,1150)>=0);
         pn_device_input_event_t queued={0};pn_status_t available=async_port.input_active?pn_device_async_take(&async_port,&queued):PN_EMPTY;
+        if(available!=PN_EMPTY)reading_stats_pause();
+        if(available==PN_EMPTY && reading_stats.media && now>=last_input && now-last_input>=1500u)(void)pn_reading_stats_save(&reading_stats,now,false);
         // 有输入立即回到最高频；连续空闲约1秒才放锁，交互中不反复切频。/ Input returns to maximum at once; release only after about one second idle so interaction does not toggle frequency.
         if(available==PN_OK){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);pn_feedback_idle_activity(&feedback_idle,now);}
         // 输入健康：首个事件立即记录，之后计数变化时最多每分钟一行。/ Input health: log the first event at once, then at most one line a minute when counters change.

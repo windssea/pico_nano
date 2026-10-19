@@ -23,6 +23,11 @@ int main(int argc,char **argv){
     assert(pn_frame_get(&frame,342,0)==0 && pn_frame_get(&frame,342,1215)==0 && pn_frame_get(&frame,342,355)==15);
     // 未采集的七日图只保留空态，不产生虚构柱形。/ The uncollected weekly chart remains empty without invented bars.
     for(int y=885;y<905;y++)for(int x=90;x<640;x++)assert(pn_frame_get(&frame,x,y)==15);
+    // 真实周数据只在对应星期绘柱；不改变正文外的书封、进度与字体恢复。/ Real weekly data paints only the corresponding weekdays, preserving cover/progress and font restoration.
+    s.reading=(pn_reading_summary_t){.known=true,.dated=true,.today_ms=120000,.total_ms=300000,.today_turns=2,.total_turns=7,.weekday=1,.week_ms={60000,120000}};
+    assert(pn_bookmark_lock_render(&s,&cover,&font,"按电源键继续阅读",&frame)==PN_OK && font.pixels==28);
+    assert(pn_frame_get(&frame,110,900)==2 && pn_frame_get(&frame,193,860)==2 && pn_frame_get(&frame,276,900)==15);
+    assert(pn_frame_get(&frame,510,140)==3 && pn_frame_get(&frame,40,427)==0);
     if(argc>1){FILE *f=fopen(argv[1],"wb");assert(f);fprintf(f,"P5\n684 1216\n255\n");for(int y=0;y<1216;y++)for(int x=0;x<684;x++)fputc(pn_frame_get(&frame,x,y)*17,f);assert(!fclose(f));}
     memcpy(before,pixels,342u*1216u);s.basis=10001;assert(pn_bookmark_lock_render(&s,NULL,&font,"",&frame)==PN_INVALID && !memcmp(before,pixels,342u*1216u));
     free(before);free(pixels);pn_font_close(&font);assert(!pool.used && !pool.live);puts("bookmark lock: Gregorian boundaries, unknown date, progress, cover and font restoration passed");return 0;
