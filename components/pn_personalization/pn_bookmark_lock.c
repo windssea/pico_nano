@@ -6,6 +6,7 @@
 #include "pn_brand.h"
 #include "pn_widgets.h"
 #include <stdio.h>
+#include <math.h>
 
 unsigned pn_bookmark_lock_month_days(unsigned year,unsigned month){
     static const unsigned days[]={31,28,31,30,31,30,31,31,30,31,30,31};
@@ -20,67 +21,112 @@ bool pn_bookmark_lock_date(uint32_t utc,unsigned *year,unsigned *month,unsigned 
     while(m<12 && days>=pn_bookmark_lock_month_days(y,m)){days-=pn_bookmark_lock_month_days(y,m);m++;}
     *year=y;*month=m;*day=(unsigned)days+1;*weekday=week;return true;
 }
-static pn_status_t text(pn_font_t *font,pn_frame_t *frame,const char *value,int size,int x,int y,int width,pn_align_t align){
-    pn_status_t status=pn_font_size(font,size);return status==PN_OK?pn_w_text(font,frame,value,x,y,width,align):status;
+static pn_status_t text(pn_font_t *font,pn_frame_t *frame,const char *value,int size,int x,int y,int width,pn_align_t align,bool bold){
+    pn_status_t status=pn_font_size(font,size);return status==PN_OK?pn_w_text_ex(font,frame,value,x,y,width,align,0,bold):status;
+}
+/// 虚线与邮票齿边只绘制，无纹理文件或额外画布。/ Draw dashed rules and postage edges without texture files or extra canvases.
+static void dash(pn_frame_t *f,int x,int y,int width,uint8_t shade){for(int i=0;i<width;i+=10)pn_frame_rect(f,x+i,y,width-i<6?width-i:6,1,shade);}
+static void postage(pn_frame_t *f){
+    pn_frame_rect(f,0,0,684,9,0);pn_frame_rect(f,0,1207,684,9,0);
+    for(int x=10;x<700;x+=36){pn_w_dot(f,(float)x,8,12,0);pn_w_dot(f,(float)x,1208,12,0);}
+}
+static void frame_border(pn_frame_t *f,int x,int y,int w,int h,uint8_t shade){
+    int r=9,xx=x+w,yy=y+h;
+    const int points[][2]={{x+r,y},{xx-r,y},{xx-r,y+4},{xx-4,y+r},{xx,y+r},{xx,yy-r},{xx-4,yy-r},{xx-r,yy-4},{xx-r,yy},{x+r,yy},{x+r,yy-4},{x+4,yy-r},{x,yy-r},{x,y+r},{x+4,y+r},{x+r,y+4},{x+r,y}};
+    for(size_t i=1;i<sizeof points/sizeof points[0];i++)pn_w_line(f,(float)points[i-1][0],(float)points[i-1][1],(float)points[i][0],(float)points[i][1],1.2f,shade);
+}
+/// 淡墨山形和竹叶均为自有矢量，不占用固件图片或TF读取。/ Original pale mountain and bamboo vectors use neither firmware bitmaps nor TF reads.
+static void mountain(pn_frame_t *f,int x,int y,int width,int height,uint8_t shade,unsigned variant){
+    static const int ridge[2][15]={{21,18,23,12,17,7,11,3,8,5,14,9,17,13,22},{25,21,27,17,24,13,18,12,20,14,23,18,27,24,29}};
+    for(int i=0;i<width;i++){unsigned scaled=(unsigned)i*14;size_t k=scaled/(unsigned)width;unsigned fract=scaled%(unsigned)width;
+        int top=(int)((ridge[variant][k]*(width-(int)fract)+ridge[variant][k+1]*(int)fract)/(unsigned)width)*height/32;
+        pn_frame_rect(f,x+i,y+top,1,height-top,shade);}
+}
+static void bamboo(pn_frame_t *f,int x,int y,int direction){
+    pn_w_line(f,(float)x,(float)y,(float)(x+direction*32),(float)(y-46),1,10);
+    for(int i=0;i<5;i++){float xx=(float)(x+direction*(6+i*5)),yy=(float)(y-8-i*7);
+        pn_w_line(f,xx,yy,xx-direction*15,yy-5,2,11);pn_w_line(f,xx,yy,xx+direction*11,yy+4,2,11);}
+}
+static void diamond(pn_frame_t *f,int x,int y){pn_w_line(f,(float)x,(float)(y-4),(float)(x+4),(float)y,1,8);pn_w_line(f,(float)(x+4),(float)y,(float)x,(float)(y+4),1,8);pn_w_line(f,(float)x,(float)(y+4),(float)(x-4),(float)y,1,8);pn_w_line(f,(float)(x-4),(float)y,(float)x,(float)(y-4),1,8);}
+static void cover_paint(pn_frame_t *f,const pn_frame_t *cover){
+    // 每个目标像素按来源覆盖区域平均，保持原16灰阶。/ Average each destination source area, preserving the original sixteen shades.
+    for(int y=0;y<224;y++)for(int x=0;x<160;x++){int x0=x*184/160,x1=(x+1)*184/160,y0=y*256/224,y1=(y+1)*256/224;unsigned sum=0,count=0;
+        for(int sy=y0;sy<y1;sy++)for(int sx=x0;sx<x1;sx++){sum+=pn_frame_get(cover,sx,sy);count++;}
+        pn_frame_pixel(f,500+x,126+y,(uint8_t)((sum+count/2)/count));}
+    pn_w_outline(f,499,125,162,226,1,8);
+}
+static pn_status_t badge(pn_font_t *font,pn_frame_t *f,const char *label,int y){
+    pn_w_round_fill(f,416,y-18,49,25,5,2);pn_w_round_stroke(f,418,y-16,45,21,4,0.7f,13);
+    pn_status_t status=pn_font_size(font,18);return status==PN_OK?pn_w_text_ex(font,f,label,418,y+1,45,PN_ALIGN_CENTER,15,false):status;
 }
 pn_status_t pn_bookmark_lock_render(const pn_bookmark_lock_t *s,const pn_frame_t *cover,pn_font_t *font,const char *hint,pn_frame_t *frame){
     if(!s || !font || !font->impl || !hint || !frame || !frame->pixels || frame->width!=684 || frame->height!=1216 || frame->stride!=342 ||
        s->basis>10000 || s->battery>100 || (s->count && s->section>=s->count) ||
        (cover && (!cover->pixels || cover->width!=PN_COVER_WIDTH || cover->height!=PN_COVER_HEIGHT || cover->stride!=PN_COVER_WIDTH/2)))return PN_INVALID;
-    int original=font->pixels;pn_status_t status=PN_OK;char line[96];unsigned year=0,month=0,day=0,weekday=0;
+    int original=font->pixels;pn_status_t status=PN_OK;char line[128];unsigned year=0,month=0,day=0,weekday=0;
     bool dated=s->date_known && pn_bookmark_lock_date(s->utc,&year,&month,&day,&weekday);
-    pn_frame_clear(frame,15);
-    // 统一检查文字绘制错误，最后恢复字号。/ Check all text errors and restore the original size at exit.
-#define TEXT(value,size,x,y,width,align) do {if(status==PN_OK)status=text(font,frame,value,size,x,y,width,align);}while(0)
-    TEXT(PN_BRAND_NAME,38,32,64,430,PN_ALIGN_LEFT);
-    TEXT("阅读书签",26,462,62,190,PN_ALIGN_RIGHT);
-    pn_frame_rect(frame,32,88,620,2,0);
-    if(dated){snprintf(line,sizeof line,"%04u.%02u.%02u",year,month,day);TEXT(line,30,32,139,380,PN_ALIGN_LEFT);}
-    else TEXT("日期待校时",28,32,139,380,PN_ALIGN_LEFT);
-    if(s->battery>=0){snprintf(line,sizeof line,"电量 %d%%",s->battery);TEXT(line,26,450,139,202,PN_ALIGN_RIGHT);}
-    pn_frame_rect(frame,32,162,620,1,9);
-    TEXT("最近阅读",25,32,206,390,PN_ALIGN_LEFT);
-    if(!*s->book.title)TEXT("暂无阅读信息",38,32,265,620,PN_ALIGN_LEFT);
-    if(*s->book.title){
-        // 标题最多两行，独立于阅读正文排版。/ At most two title lines, independent of body typesetting.
-        if(status==PN_OK){status=pn_font_size(font,38);if(status==PN_OK){pn_frame_rect(frame,32,220,*s->book.title?400:620,128,15);status=pn_w_text_lines(font,frame,s->book.title,32,265,*s->book.title?400:620,2,52,NULL);}}
-        TEXT(*s->book.author?s->book.author:"作者未提供",26,32,397,*s->book.title?400:620,PN_ALIGN_LEFT);
-    }
-    if(cover){for(int y=0;y<PN_COVER_HEIGHT;y++)for(int x=0;x<PN_COVER_WIDTH;x++)pn_frame_pixel(frame,468+x,190+y,pn_frame_get(cover,x,y));pn_w_outline(frame,467,189,186,258,1,9);}
-    if(!cover && *s->book.title){pn_w_outline(frame,468,190,184,256,1,9);pn_w_icon(frame,PN_ICON_BOOKMARK,524,254,72,7);TEXT("暂无封面",24,476,381,168,PN_ALIGN_CENTER);}
-    pn_frame_rect(frame,32,474,620,2,0);
-    TEXT("阅读进度",30,32,526,390,PN_ALIGN_LEFT);
-    if(s->progress_known){snprintf(line,sizeof line,"%u.%u%%",s->basis/100,s->basis%100/10);TEXT(line,32,440,526,212,PN_ALIGN_RIGHT);}
-    else TEXT("暂无进度",26,440,526,212,PN_ALIGN_RIGHT);
-    pn_w_outline(frame,32,552,620,12,1,7);
-    if(s->progress_known)pn_frame_rect(frame,34,554,(int)(616u*s->basis/10000u),8,0);
-    if(s->count){snprintf(line,sizeof line,"章节  %zu / %zu",s->section+1,s->count);TEXT(line,28,32,615,620,PN_ALIGN_LEFT);}
-    TEXT("进度按原文位置估算",23,32,659,620,PN_ALIGN_LEFT);
-    pn_frame_rect(frame,32,686,620,1,9);
-    TEXT("中式黄历",29,32,738,620,PN_ALIGN_LEFT);
-    if(dated){
-        pn_chinese_calendar_t calendar;pn_status_t loaded=pn_chinese_calendar_lookup(year,month,day,&calendar);
+    pn_frame_clear(frame,15);postage(frame);
+#define TEXT(value,size,x,y,width,align,bold) do {if(status==PN_OK)status=text(font,frame,value,size,x,y,width,align,bold);}while(0)
+    TEXT(PN_BRAND_NAME,43,24,73,430,PN_ALIGN_LEFT,true);
+    // 邮戳取消线及双圈“在读”，不改变产品品牌。/ Postal cancellation and a double-ring reading stamp keep the product branding.
+    for(int row=0;row<3;row++)for(int x=522;x<586;x+=3){float y=44.0f+row*9+sinf((x-522)*0.13f)*4;pn_w_line(frame,(float)x,y,(float)(x+3),44.0f+row*9+sinf((x+3-522)*0.13f)*4,1.4f,6);}
+    pn_w_ring(frame,634,55,49,2.4f,0);pn_w_ring(frame,634,55,44,0.9f,0);
+    TEXT("在读",29,588,65,92,PN_ALIGN_CENTER,true);dash(frame,24,99,636,4);
+    if(cover)cover_paint(frame,cover);
+    else{pn_w_outline(frame,500,126,160,224,1,9);pn_w_icon(frame,PN_ICON_BOOKMARK,547,178,64,8);TEXT("暂无封面",21,507,305,146,PN_ALIGN_CENTER,false);}
+    if(status==PN_OK){status=pn_font_size(font,49);if(status==PN_OK)status=pn_w_text_lines_ex(font,frame,*s->book.title?s->book.title:"暂无阅读信息",24,174,451,2,60,0,true);}
+    TEXT("作者",25,24,282,62,PN_ALIGN_LEFT,true);
+    TEXT(*s->book.author?s->book.author:"—",25,102,282,370,PN_ALIGN_LEFT,false);
+    if(dated){snprintf(line,sizeof line,"%04u.%02u.%02u  星期%s",year,month,day,((const char *const[]){"一","二","三","四","五","六","日"})[weekday]);TEXT(line,21,24,326,340,PN_ALIGN_LEFT,false);}
+    else TEXT("日期待校时",21,24,326,340,PN_ALIGN_LEFT,false);
+    if(s->battery>=0){snprintf(line,sizeof line,"电量 %d%%",s->battery);TEXT(line,19,352,326,124,PN_ALIGN_RIGHT,false);}
+    pn_frame_rect(frame,24,365,636,1,0);
+    TEXT("阅读进度",30,24,407,400,PN_ALIGN_LEFT,true);
+    if(s->progress_known){snprintf(line,sizeof line,"%u.%u%%",s->basis/100,s->basis%100/10);TEXT(line,33,440,407,220,PN_ALIGN_RIGHT,true);}
+    else TEXT("—",33,440,407,220,PN_ALIGN_RIGHT,true);
+    pn_w_round_fill(frame,24,423,636,10,3,10);if(s->progress_known && s->basis)pn_w_round_fill(frame,24,423,(int)(636u*s->basis/10000u),10,3,0);
+    TEXT("章节",23,24,472,260,PN_ALIGN_LEFT,true);
+    if(s->count){snprintf(line,sizeof line,"%zu / %zu",s->section+1,s->count);TEXT(line,25,390,472,270,PN_ALIGN_RIGHT,false);}else TEXT("—",25,390,472,270,PN_ALIGN_RIGHT,false);
+    TEXT("已读页数",23,24,511,260,PN_ALIGN_LEFT,true);TEXT("— / — 页",25,390,511,270,PN_ALIGN_RIGHT,false);
+    TEXT("本书已读",23,24,550,260,PN_ALIGN_LEFT,true);TEXT("— 字",25,390,550,270,PN_ALIGN_RIGHT,false);
+    TEXT("唤醒已读",23,24,589,260,PN_ALIGN_LEFT,true);TEXT("— 字",25,390,589,270,PN_ALIGN_RIGHT,false);
+    dash(frame,24,608,636,7);
+    pn_frame_rect(frame,45,636,192,1,10);pn_frame_rect(frame,447,636,192,1,10);diamond(frame,248,636);diamond(frame,436,636);
+    TEXT("阅读摘要",29,262,646,160,PN_ALIGN_CENTER,true);
+    TEXT("本书今日",24,24,682,302,PN_ALIGN_CENTER,true);TEXT("本书累计",24,366,682,294,PN_ALIGN_CENTER,true);
+    for(int y=674;y<753;y+=8)pn_frame_rect(frame,342,y,1,5,9);
+    TEXT("页数",22,24,720,120,PN_ALIGN_LEFT,false);TEXT("— 页",25,160,720,164,PN_ALIGN_RIGHT,true);
+    TEXT("时长",22,24,753,120,PN_ALIGN_LEFT,false);TEXT("— 分钟",25,144,753,180,PN_ALIGN_RIGHT,true);
+    TEXT("页数",22,366,720,120,PN_ALIGN_LEFT,false);TEXT("— 页",25,510,720,150,PN_ALIGN_RIGHT,true);
+    TEXT("时长",22,366,753,120,PN_ALIGN_LEFT,false);TEXT("— 分钟",25,490,753,170,PN_ALIGN_RIGHT,true);
+    dash(frame,24,770,636,7);
+    TEXT("本周全局阅读时长",24,24,806,350,PN_ALIGN_LEFT,true);TEXT("日均 — · 总时长 —",19,354,806,306,PN_ALIGN_RIGHT,false);
+    // 未采集统计不用假柱形或零值冒充；保留设计中的轴与星期。/ Uncollected statistics get neither invented bars nor false zero values; retain the designed axis and weekdays.
+    TEXT("暂无阅读统计",22,90,870,552,PN_ALIGN_CENTER,false);TEXT("0",18,24,918,30,PN_ALIGN_LEFT,false);dash(frame,64,918,596,10);
+    for(unsigned i=0;i<7;i++)TEXT(((const char *const[]){"一","二","三","四","五","六","日"})[i],21,70+(int)i*83,947,83,PN_ALIGN_CENTER,false);
+    frame_border(frame,16,966,652,190,2);frame_border(frame,20,970,644,182,8);
+    pn_w_dot(frame,304,1008,20,14);mountain(frame,32,979,354,61,14,0);mountain(frame,32,990,354,50,13,1);bamboo(frame,644,1014,-1);bamboo(frame,48,1142,1);
+    for(int y=980;y<1146;y+=8)pn_frame_rect(frame,402,y,1,5,9);
+    pn_w_round_fill(frame,30,1034,43,64,5,2);pn_w_round_stroke(frame,33,1037,37,58,4,0.7f,13);
+    if(status==PN_OK){status=pn_font_size(font,23);if(status==PN_OK)status=pn_w_text_ex(font,frame,"农",33,1060,37,PN_ALIGN_CENTER,15,false);if(status==PN_OK)status=pn_w_text_ex(font,frame,"历",33,1088,37,PN_ALIGN_CENTER,15,false);}
+    if(dated){pn_chinese_calendar_t calendar;pn_status_t loaded=pn_chinese_calendar_lookup(year,month,day,&calendar);
         if(loaded==PN_OK){
-            static const char *week[]={"星期一","星期二","星期三","星期四","星期五","星期六","星期日"};
-            snprintf(line,sizeof line,"%04u年%u月",year,month);TEXT(line,24,32,797,168,PN_ALIGN_CENTER);
-            snprintf(line,sizeof line,"%u",day);TEXT(line,112,32,927,168,PN_ALIGN_CENTER);
-            TEXT(calendar.lunar,25,32,978,168,PN_ALIGN_CENTER);
-            TEXT(week[weekday],25,32,1024,168,PN_ALIGN_CENTER);
-            pn_frame_rect(frame,216,774,1,296,9);
-            TEXT(calendar.ganzhi,22,238,796,414,PN_ALIGN_LEFT);
-            if(*calendar.festival)TEXT(calendar.festival,24,238,843,414,PN_ALIGN_LEFT);
-            snprintf(line,sizeof line,"节气  %s",calendar.term);TEXT(line,23,238,882,414,PN_ALIGN_LEFT);
-            pn_frame_rect(frame,238,905,414,1,11);
-            pn_frame_rect(frame,238,922,34,34,0);
-            if(status==PN_OK){status=pn_font_size(font,24);if(status==PN_OK)status=pn_w_text_ex(font,frame,"宜",242,949,28,PN_ALIGN_CENTER,15,false);}
-            if(status==PN_OK){status=pn_font_size(font,24);if(status==PN_OK)status=pn_w_text_lines(font,frame,calendar.yi,286,946,366,2,33,NULL);}
-            pn_w_outline(frame,238,1008,34,34,1,0);
-            TEXT("忌",24,242,1035,28,PN_ALIGN_CENTER);
-            if(status==PN_OK){status=pn_font_size(font,24);if(status==PN_OK)status=pn_w_text_lines(font,frame,calendar.ji,286,1032,366,2,33,NULL);}
-        }else TEXT("该日期暂无本地历表",26,32,884,620,PN_ALIGN_CENTER);
-    }else TEXT("在设置中联网校时后显示",26,32,884,620,PN_ALIGN_CENTER);
-    pn_frame_rect(frame,32,1110,620,2,0);
-    if(*hint)TEXT(hint,27,32,1171,620,PN_ALIGN_CENTER);
+            snprintf(line,sizeof line,"%04u年%u月%u日",year,month,day);TEXT(line,19,76,1007,310,PN_ALIGN_CENTER,false);
+            int size=52,width=0;if(status==PN_OK){do{status=pn_font_size(font,size);if(status==PN_OK)status=pn_w_text_width_ex(font,calendar.lunar,true,&width);if(status!=PN_OK || width<=302 || size<=36)break;size-=2;}while(true);}
+            TEXT(calendar.lunar,size,82,1080,305,PN_ALIGN_CENTER,true);pn_frame_rect(frame,40,1102,345,1,10);
+            TEXT(calendar.ganzhi,19,32,1133,357,PN_ALIGN_CENTER,false);
+            if(status==PN_OK)status=badge(font,frame,"节日",996);
+            TEXT(*calendar.festival?calendar.festival:"—",18,478,997,176,PN_ALIGN_LEFT,false);
+            if(status==PN_OK)status=badge(font,frame,"节气",1028);
+            TEXT(calendar.term,18,478,1029,176,PN_ALIGN_LEFT,false);
+            dash(frame,416,1049,238,10);
+            if(status==PN_OK)status=badge(font,frame,"宜",1075);
+            if(status==PN_OK){status=pn_font_size(font,18);if(status==PN_OK)status=pn_w_text_lines(font,frame,calendar.yi,478,1076,176,2,21,NULL);}
+            if(status==PN_OK)status=badge(font,frame,"忌",1123);
+            if(status==PN_OK){status=pn_font_size(font,18);if(status==PN_OK)status=pn_w_text_lines(font,frame,calendar.ji,478,1124,176,2,21,NULL);}
+        }else TEXT("暂无本地历表",24,84,1070,304,PN_ALIGN_CENTER,false);
+    }else{TEXT("日期待校时",30,84,1070,304,PN_ALIGN_CENTER,true);TEXT("校时后显示黄历",21,416,1080,238,PN_ALIGN_CENTER,false);}
+    if(*hint)TEXT(hint,20,24,1187,636,PN_ALIGN_CENTER,false);
     pn_status_t restored=pn_font_size(font,original);
 #undef TEXT
     return status==PN_OK?restored:status;

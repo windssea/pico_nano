@@ -19,7 +19,10 @@ int main(int argc,char **argv){
     pn_bookmark_lock_t s={.battery=-1};assert(pn_bookmark_lock_render(&s,NULL,&font,"",&frame)==PN_OK && font.pixels==28);memcpy(before,pixels,342u*1216u);
     s=(pn_bookmark_lock_t){.book={"本地阅读书签测试","作者"},.basis=1423,.section=3,.count=31,.progress_known=true,.date_known=true,.utc=1792339200,.battery=86};
     assert(pn_bookmark_lock_render(&s,&cover,&font,"按电源键继续阅读",&frame)==PN_OK && font.pixels==28);
-    assert(memcmp(before,pixels,342u*1216u) && pn_frame_get(&frame,480,210)==3 && pn_frame_get(&frame,40,556)==0 && pn_frame_get(&frame,640,556)==15);
+    assert(memcmp(before,pixels,342u*1216u) && pn_frame_get(&frame,510,140)==3 && pn_frame_get(&frame,40,427)==0 && pn_frame_get(&frame,640,427)==10);
+    assert(pn_frame_get(&frame,342,0)==0 && pn_frame_get(&frame,342,1215)==0 && pn_frame_get(&frame,342,355)==15);
+    // 未采集的七日图只保留空态，不产生虚构柱形。/ The uncollected weekly chart remains empty without invented bars.
+    for(int y=885;y<905;y++)for(int x=90;x<640;x++)assert(pn_frame_get(&frame,x,y)==15);
     if(argc>1){FILE *f=fopen(argv[1],"wb");assert(f);fprintf(f,"P5\n684 1216\n255\n");for(int y=0;y<1216;y++)for(int x=0;x<684;x++)fputc(pn_frame_get(&frame,x,y)*17,f);assert(!fclose(f));}
     memcpy(before,pixels,342u*1216u);s.basis=10001;assert(pn_bookmark_lock_render(&s,NULL,&font,"",&frame)==PN_INVALID && !memcmp(before,pixels,342u*1216u));
     free(before);free(pixels);pn_font_close(&font);assert(!pool.used && !pool.live);puts("bookmark lock: Gregorian boundaries, unknown date, progress, cover and font restoration passed");return 0;
