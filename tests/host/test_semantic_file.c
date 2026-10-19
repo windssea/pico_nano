@@ -4,6 +4,8 @@
 #define _POSIX_C_SOURCE 200809L
 #include "pn_semantic_file.h"
 #include "pn_cancel.h"
+#include "pn_crc32.h"
+#include "pn_identity.h"
 #include <assert.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -12,6 +14,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 static pn_status_t space(void *ctx,const char *path,uint64_t *n){(void)path;*n=*(uint64_t *)ctx;return PN_OK;}
+static void put32(uint8_t *p,uint32_t v){for(unsigned i=0;i<4;i++)p[i]=(uint8_t)(v>>(8*i));}
 static bool cancel_now(void *ctx){(void)ctx;return true;}
 static pn_status_t save_file(pn_semantic_file_t *f,pn_pool_t *pool,const uint8_t *bytes,size_t n){
     uint8_t *packet=pn_alloc_tagged(pool,PN_MEM_INDEX,n);assert(packet);memcpy(packet,bytes,n);pn_status_t s=f->store.take(f,pool,packet,n);
@@ -29,6 +32,19 @@ int main(void){
     pn_cancel_scope_t scope;pn_cancel_enter(&scope,cancel_now,NULL);assert(save_file(&file,&pool,data,152)==PN_CANCELLED);pn_cancel_leave(&scope);assert(file.store.load(&file,&pool,&loaded,&n)==PN_OK && n==PN_XHTML_SNAPSHOT_MAX);pn_free(loaded);
     // 超限旧缓存可重建，不能永久挡住同一书的新窗口。/ An oversized old cache is rebuildable and must not permanently block the same book's new window.
     f=fopen(file.path,"ab");assert(f && fputc(1,f)!=EOF && !fclose(f));assert(file.store.load(&file,&pool,&loaded,&n)==PN_EMPTY && save_file(&file,&pool,data,152)==PN_OK);
+    // 同书多章受同一配额约束；临时包/旧包同计费，随机文件仍不得回收。/ Multiple chapters share the quota, counting staging plus old data without evicting unrelated files.
+    for(unsigned chapter=0;chapter<4;chapter++){
+        memset(data,0x55,PN_XHTML_SNAPSHOT_MAX);memcpy(data,"PNSM",4);put32(data+4,1);memcpy(data+8,book.sha256,32);
+        char requested[16];snprintf(requested,sizeof requested,"chapter-%u",chapter);pn_book_id_t key;assert(pn_identity_bytes((const uint8_t *)requested,strlen(requested),&key)==PN_OK);memcpy(data+40,key.sha256,32);
+        put32(data+140,PN_XHTML_SNAPSHOT_MAX-152);put32(data+148,pn_crc32_update(0,data,148));assert(save_file(&file,&pool,data,PN_XHTML_SNAPSHOT_MAX)==PN_OK);
+        assert(file.store.load_for(&file,&pool,requested,&loaded,&n)==PN_OK && n==PN_XHTML_SNAPSHOT_MAX && !memcmp(loaded,data,n));pn_free(loaded);
+        void *reader=NULL;size_t total=0;assert(file.store.open_for(&file,&pool,requested,&reader,&total)==PN_OK && total==n);
+        uint8_t bytes[4096];size_t got=SIZE_MAX,at=0;while(at<n){assert(file.store.read_step(reader,bytes,sizeof bytes,&got)==PN_OK && got>0 && got<=4096 && !memcmp(bytes,data+at,got));at+=got;}
+        assert(file.store.read_step(reader,bytes,sizeof bytes,&got)==PN_OK && !got);file.store.close_read(reader);assert(!file.read && !pool.used);
+    }
+    DIR *quota=opendir(file.directory);assert(quota);uint64_t total_bytes=0;unsigned chapter_files=0;struct dirent *item;
+    while((item=readdir(quota))){size_t length=strlen(item->d_name);if(length==134 || length==69){char path[768];struct stat info;snprintf(path,sizeof path,"%s/%s",file.directory,item->d_name);assert(!stat(path,&info));total_bytes+=(uint64_t)info.st_size;if(length==134)chapter_files++;}}
+    closedir(quota);assert(total_bytes<=1024u*1024u && chapter_files==2 && access(unrelated,F_OK)==0);
     assert(pn_media_detach(&media)==PN_OK && save_file(&file,&pool,data,152)==PN_STALE_MEDIA && pn_media_release(&media,&lease)==PN_OK && !pool.used && !pool.live);pn_semantic_file_space_port(NULL,NULL);
     DIR *dir=opendir(file.directory);assert(dir);struct dirent *e;while((e=readdir(dir)))if(strcmp(e->d_name,".") && strcmp(e->d_name,"..")){char path[768];snprintf(path,sizeof path,"%s/%s",file.directory,e->d_name);assert(!remove(path));}closedir(dir);assert(!rmdir(file.directory) && !rmdir(root));free(data);puts("semantic file: exclusive borrowed leases, bounded namespace-only eviction, temporary cleanup, low space/cancel preserving old data, oversized recovery and stale-media cleanup passed");return 0;
 }

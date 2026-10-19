@@ -50,6 +50,20 @@ int main(void){
             for(unsigned i=0;i<5;i++){check(&source,17,5);check(&another,31u*4096+17,5);}
             hits=second.cache_hits;check(&another,31u*4096+17,5);assert(second.cache_hits==hits+1);
             pn_cache_snapshot(&pool);assert(pool.cache_stats[PN_CACHE_SOURCE].bytes==pool.used && pool.cache_stats[PN_CACHE_SOURCE].bytes<=pool.cache_caps[PN_CACHE_SOURCE]);assert(pn_text_file_close(&second)==PN_OK);
+            // 冷跨界字形只填一次窗；窗口内/窗口尾和近EOF仍逐字节核对。/ A cold crossing glyph fills one window; check its interior/tail and near EOF byte for byte.
+            pn_cache_reclaim(&pool,SIZE_MAX);physical=file.io_reads;check(&source,4093,17);assert(file.io_reads==physical+1);
+            physical=file.io_reads;check(&source,4094,17);assert(file.io_reads==physical);
+            check(&source,8188,17);check(&source,source.size-13,17);
+            // 字体供数窗逐字节一致，跨界请求可一次覆盖；更大调用和窗口修改错误仍沿原契约。/ Font supply windows preserve every byte, cover crossing requests once, and keep large-call/error contracts.
+            for(unsigned window=512;window<=4096;window*=2){
+                pn_cache_reclaim(&pool,SIZE_MAX);assert(pn_text_file_cache_window(&source,window)==PN_OK);
+                physical=file.io_reads;uint64_t physical_bytes=file.io_bytes;check(&source,window-3,17);
+                assert(file.io_reads==physical+1 && file.io_bytes-physical_bytes==window);
+                physical=file.io_reads;check(&source,window-2,17);assert(file.io_reads==physical);
+                check(&source,source.size-13,17);check(&source,223,3000);check(&source,123,8192);
+                pn_cache_snapshot(&pool);assert(pool.cache_stats[PN_CACHE_SOURCE].bytes<=pool.cache_caps[PN_CACHE_SOURCE]);
+            }
+            assert(pn_text_file_cache_window(&source,0)==PN_INVALID && file.cache_fill_bytes==4096);
             pn_cache_reclaim(&pool,SIZE_MAX);pool.fail_at=pool.attempts+1;check(&source,21,13);pool.fail_at=0;
             check(&source,4096+21,13);pn_cache_reclaim(&pool,SIZE_MAX);
             pool.cache_caps[PN_CACHE_SOURCE]=0;check(&source,9*4096+21,13);assert(!pool.used);pool.cache_caps[PN_CACHE_SOURCE]=132u*1024u;

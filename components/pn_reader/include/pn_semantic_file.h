@@ -8,6 +8,7 @@ typedef struct {
     pn_xhtml_store_t store; ///< 借用端口，对象地址须稳定 / Borrowed port requiring a stable object address
     pn_media_t *media;pn_media_lease_t lease; ///< 借用现有状态WRITE租约 / Borrowed existing state WRITE lease
     char directory[PN_JOURNAL_PATH_MAX],path[PN_JOURNAL_PATH_MAX]; ///< 仅root/semantic及摘要文件名 / Only root/semantic and digest filenames
+    void *read; ///< 分步读取的唯一借用句柄，关闭前禁止重绑/写入 / Sole staged-read handle; no rebinding/writing until closed
     void *write; ///< 单owner的可暂停写入，包含池计费包及有限文件句柄 / Single-owner resumable write with pooled packet and bounded file handles
 } pn_semantic_file_t;
 typedef pn_status_t (*pn_semantic_space_fn)(void *,const char *,uint64_t *); ///< 实际状态卷剩余容量 / Actual free bytes on the state volume

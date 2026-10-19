@@ -9,6 +9,7 @@ typedef struct {
     char pending[160];size_t pending_at,pending_size; ///< 有界实体或字面符号输出 / Bounded entity or literal output
     unsigned mode,tail; ///< 0正文、1注释、2CDATA、3PI / Text, comment, CDATA or PI
     bool eof,literal; ///< 完整EOF与字面标签 / Verified EOF and literal token
+    char known_name[32];size_t known_size;bool known_result; ///< 最后一个精确标签名的静态白名单结果 / Static allowlist result for the last exact tag name
 } compat_input_t;
 static pn_status_t compat_peek(compat_input_t *c,uint8_t *ch){
     if(c->raw_at==c->raw_size){
@@ -23,14 +24,15 @@ static pn_status_t compat_peek(compat_input_t *c,uint8_t *ch){
 }
 static pn_status_t compat_get(compat_input_t *c,uint8_t *ch){pn_status_t s=compat_peek(c,ch);if(s==PN_OK)c->raw_at++;return s;}
 static void compat_pending(compat_input_t *c,const char *text){c->pending_at=0;c->pending_size=strlen(text);memcpy(c->pending,text,c->pending_size);}
-static bool compat_known(const uint8_t *token,size_t size){
+static bool compat_known(compat_input_t *c,const uint8_t *token,size_t size){
     size_t begin=1;if(begin<size && token[begin]=='/')begin++;size_t end=begin;
     while(end<size && token[end]!='>' && token[end]!='/' && !strchr(" \t\r\n",token[end]))end++;
     for(size_t i=begin;i<end;i++)if(token[i]==':')begin=i+1;
     static const char names[]=" a abbr acronym address area article aside audio b base bdi bdo big blockquote body br button caption center cite code col colgroup data datalist dd del details dfn dialog div dl dt em embed fieldset figcaption figure font footer form h1 h2 h3 h4 h5 h6 head header hgroup hr html i iframe img input ins kbd label legend li link main map mark menu meta meter nav noscript object ol optgroup option output p param picture pre progress q rp rt ruby s samp script search section select small source span strike strong style sub summary sup table tbody td template textarea tfoot th thead time title tr track tt u ul var video wbr svg image g path rect circle ellipse line polyline polygon defs use text tspan symbol title desc clipPath mask pattern linearGradient radialGradient stop ";
     if(end==begin || end-begin>31)return false;
+    if(c->known_size==end-begin && !memcmp(c->known_name,token+begin,end-begin))return c->known_result;
     char needle[35];needle[0]=' ';memcpy(needle+1,token+begin,end-begin);needle[end-begin+1]=' ';needle[end-begin+2]=0;
-    return strstr(names,needle)!=NULL;
+    c->known_size=end-begin;memcpy(c->known_name,token+begin,c->known_size);c->known_result=strstr(names,needle)!=NULL;return c->known_result;
 }
 static bool compat_entity_char(uint8_t c){return (c>='a' && c<='z') || (c>='A' && c<='Z') || (c>='0' && c<='9') || c=='#';}
 static bool compat_xml_entity(const char *s){
@@ -75,7 +77,7 @@ static pn_status_t compat_tag(compat_input_t *c){
             c->raw_at++;c->token[c->token_size++]=ch;
         }
         // 不吞掉未知尖括号后面的真实标签：正文可包含未闭合的“<字形”或“<——说明”。/ Never swallow real markup after unknown angle text, including unclosed literal "<glyph" or "<--note" prose.
-        if(!name || !compat_known(c->token,c->token_size)){c->literal=true;c->repairs++;return PN_OK;}
+        if(!name || !compat_known(c,c->token,c->token_size)){c->literal=true;c->repairs++;return PN_OK;}
     }
     while(c->token_size<sizeof c->token){
         pn_status_t status=compat_get(c,&ch);if(status!=PN_OK)return status==PN_EMPTY?PN_CORRUPT:status;c->token[c->token_size++]=ch;
@@ -84,7 +86,7 @@ static pn_status_t compat_tag(compat_input_t *c){
         if(c->token_size==2 && ch=='?'){c->mode=3;c->tail=0;c->literal=false;return PN_OK;}
         if(quote){if(ch==quote)quote=0;}else if(ch=='\'' || ch=='"')quote=ch;else if(ch=='>'){
             // 声明原样交给严格XML；不能把DTD/未知声明转换成可接受正文。/ Pass declarations to strict XML unchanged, never turn DTDs or unknown declarations into accepted prose.
-            c->literal=c->token[1]!='!' && !compat_known(c->token,c->token_size);if(c->literal)c->repairs++;return PN_OK;}
+            c->literal=c->token[1]!='!' && !compat_known(c,c->token,c->token_size);if(c->literal)c->repairs++;return PN_OK;}
     }
     return PN_LIMIT;
 }
@@ -101,6 +103,10 @@ static pn_status_t compat_read(void *ctx,uint8_t *out,size_t cap,size_t *n){
                 entity[count]=0;compat_amp_output(c,entity,false);continue;}
             out[(*n)++]=ch;continue;
         }
+        // 普通正文连续复制，特殊符号/零字节仍回原词法路径；XML继续检查全部UTF8和结构。/ Copy plain text runs; special/zero bytes retain the original lexical path, and XML still validates all UTF-8 and structure.
+        if(!c->mode && c->raw_at<c->raw_size){size_t take=c->raw_size-c->raw_at;if(take>cap-*n)take=cap-*n;size_t plain=0;
+            while(plain<take && c->raw[c->raw_at+plain] && c->raw[c->raw_at+plain]!='<' && c->raw[c->raw_at+plain]!='&')plain++;
+            if(plain){memcpy(out+*n,c->raw+c->raw_at,plain);c->raw_at+=plain;*n+=plain;continue;}}
         uint8_t ch;status=compat_get(c,&ch);if(status!=PN_OK){if(status==PN_EMPTY)return *n?PN_OK:PN_EMPTY;return status;}
         if(c->mode){
             out[(*n)++]=ch;

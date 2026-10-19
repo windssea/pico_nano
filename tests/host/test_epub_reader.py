@@ -14,6 +14,14 @@ with tempfile.TemporaryDirectory() as folder:
  r=subprocess.run([sys.argv[1],str(p)],capture_output=True,timeout=30)
  assert r.returncode==0,(r.stdout,r.stderr)
  print(r.stdout.decode())
+ # ZIP顺序、字母顺序和OPF顺序故意不同，并重复一个资源。/ Deliberately differ ZIP/alphabetic/OPF orders and repeat a resource.
+ with zipfile.ZipFile(p) as z:index_entries={name:z.read(name) for name in z.namelist()}
+ import re
+ index_entries['OPS/book.opf']=re.sub(b'<spine>.*?</spine>',b'<spine><itemref idref="c"/><itemref idref="a"/><itemref idref="c"/><itemref idref="b"/></spine>',index_entries['OPS/book.opf'])
+ index_book=pathlib.Path(folder)/'spine.epub'
+ with zipfile.ZipFile(index_book,'w',compression=zipfile.ZIP_DEFLATED) as z:
+  for name,data in index_entries.items():z.writestr(name,data,compress_type=zipfile.ZIP_STORED if name=='mimetype' else zipfile.ZIP_DEFLATED)
+ r=subprocess.run([sys.argv[1],str(index_book),'spine'],capture_output=True,timeout=30);assert r.returncode==0,(r.stdout,r.stderr);print(r.stdout.decode())
  r=subprocess.run([sys.argv[1],str(p),'prefetch'],capture_output=True,timeout=30);assert r.returncode==0,(r.stdout,r.stderr);print(r.stdout.decode())
 
  r=subprocess.run([sys.argv[1],str(p),'index'],capture_output=True,timeout=30);assert r.returncode==0,(r.stdout,r.stderr);print(r.stdout.decode())

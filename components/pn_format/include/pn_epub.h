@@ -57,6 +57,7 @@ pn_status_t pn_epub_info(pn_epub_t *epub,pn_epub_info_t *out);
 pn_status_t pn_epub_spine(pn_epub_t *epub,size_t index,pn_epub_item_t *out);
 /// 精确资源路径定位首个对应章节，非章节资源返回EMPTY，错误输出不变。
 /// Locate the first corresponding spine entry by exact resource path; EMPTY for non-spine resources, preserving output on errors.
+/// 命中复用完整验证后的内存路径索引，每次仍验证源；不增加索引数组或跳过原始ZIP/OPF/资源校验。/ Hits reuse the fully verified in-memory path index and still validate the source each time; no extra index array or skipped ZIP/OPF/resource checks.
 pn_status_t pn_epub_spine_find(pn_epub_t *epub,const char *path,size_t *index);
 /// 在出版物所属ZIP打开精确路径资源流；流必须先于出版物关闭，不改源寿命。
 /// Open an exact-path resource stream in the publication's own ZIP; close stream before publication without changing source lifetime.

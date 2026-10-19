@@ -21,7 +21,12 @@ static pn_status_t present(void *ctx,const pn_frame_t *f,pn_refresh_t profile){(
 static bool same(pn_epub_progress_t a,pn_epub_progress_t b){return !strcmp(a.location.path,b.location.path) && a.location.position.element==b.location.position.element && a.location.position.run==b.location.position.run && a.location.position.offset==b.location.position.offset && a.location.position.kind==b.location.position.kind;}
 static pn_status_t no_space(void *ctx,const char *path,uint64_t *n){(void)ctx;(void)path;*n=0;return PN_OK;}
 static pn_status_t drain(pn_epub_app_t *app,uint64_t now){pn_status_t s;unsigned steps=0;do{s=pn_epub_app_cache_idle(app,now);assert(++steps<4096);}while(s==PN_BUSY);return s;}
-static void cache_path(char *out,size_t capacity,const char *root,pn_epub_app_t *app){pn_book_id_t id;assert(pn_epub_app_identity(app,&id)==PN_OK);char hash[65];for(unsigned i=0;i<32;i++)snprintf(hash+2*i,3,"%02x",id.sha256[i]);assert(snprintf(out,capacity,"%s/semantic/%s.pnsm",root,hash)>0);}
+static void cache_path(char *out,size_t capacity,const char *root,pn_epub_app_t *app){
+    pn_book_id_t id,key;pn_epub_progress_t position;assert(pn_epub_app_identity(app,&id)==PN_OK && pn_epub_app_progress(app,&position)==PN_OK);
+    assert(pn_identity_bytes((const uint8_t *)position.location.path,strlen(position.location.path),&key)==PN_OK);
+    char hash[65],chapter[65];for(unsigned i=0;i<32;i++){snprintf(hash+2*i,3,"%02x",id.sha256[i]);snprintf(chapter+2*i,3,"%02x",key.sha256[i]);}
+    assert(snprintf(out,capacity,"%s/semantic/%s.%s.pnsm",root,hash,chapter)>0);
+}
 static void size_of(const char *path){struct stat info;assert(!stat(path,&info));book_size=(uint64_t)info.st_size;}
 static void preemption(const char *book,const char *font,const char *root){
     assert(!mkdir(root,0700));pn_pool_t pool;assert(pn_pool_init(&pool,6u*1024u*1024u,NULL,NULL,NULL)==PN_OK);pn_epub_app_t app={0};slot=0;

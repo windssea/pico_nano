@@ -4,6 +4,8 @@
 #define _POSIX_C_SOURCE 200809L
 #include "pn_semantic_file.h"
 #include "pn_cancel.h"
+#include "pn_identity.h"
+#include "pn_crc32.h"
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -25,13 +27,27 @@ static bool load_room(const pn_pool_t *pool,size_t n){return pool->used<=pool->l
 static pn_status_t read_exact(const pn_semantic_file_t *f,FILE *file,uint8_t *out,size_t size){
     size_t at=0;while(at<size){pn_status_t s=checked(f);if(s!=PN_OK)return s;ssize_t n=read(fileno(file),out+at,size-at);if(n<=0)return PN_IO;at+=(size_t)n;}return PN_OK;
 }
+// 每章独立摘要文件；旧的整书单槽只作为读取退路，配额保持不变。/ Chapter-digest files coexist; the legacy single slot is a read fallback under the unchanged quota.
+static pn_status_t chapter_path(const pn_semantic_file_t *f,const uint8_t key[32],char out[PN_JOURNAL_PATH_MAX]){
+    char hex[65];for(unsigned i=0;i<32;i++)snprintf(hex+2*i,3,"%02x",key[i]);
+    size_t base=strlen(f->path)-5;int n=snprintf(out,PN_JOURNAL_PATH_MAX,"%.*s.%s.pnsm",(int)base,f->path,hex);
+    return n>=0 && n<PN_JOURNAL_PATH_MAX?PN_OK:PN_LIMIT;
+}
+static pn_status_t requested_path(const pn_semantic_file_t *f,const char *requested,char out[PN_JOURNAL_PATH_MAX]){
+    if(!requested){strcpy(out,f->path);return PN_OK;}pn_book_id_t key;
+    pn_status_t s=pn_identity_bytes((const uint8_t *)requested,strlen(requested),&key);
+    if(s!=PN_OK)return s;
+    s=chapter_path(f,key.sha256,out);if(s!=PN_OK)return s;
+    struct stat info;if(cache_stat(out,&info)){if(errno!=ENOENT)return PN_IO;strcpy(out,f->path);}return PN_OK;
+}
 static pn_status_t load_packet(void *ctx,pn_pool_t *pool,const char *requested,uint8_t **out,size_t *size){
     pn_semantic_file_t *f=ctx;pn_status_t s=checked(f);if(s!=PN_OK)return s;
-    struct stat info;if(cache_stat(f->path,&info) || !S_ISREG(info.st_mode) || info.st_size<PN_XHTML_SNAPSHOT_HEADER_BYTES || (uint64_t)info.st_size>PN_XHTML_SNAPSHOT_MAX)return PN_EMPTY;
+    char path[PN_JOURNAL_PATH_MAX];s=requested_path(f,requested,path);if(s!=PN_OK)return s;
+    struct stat info;if(cache_stat(path,&info) || !S_ISREG(info.st_mode) || info.st_size<PN_XHTML_SNAPSHOT_HEADER_BYTES || (uint64_t)info.st_size>PN_XHTML_SNAPSHOT_MAX)return PN_EMPTY;
     size_t n=(size_t)info.st_size,at=0;uint8_t *data=NULL;
     if(!requested){if(!load_room(pool,n))return PN_EMPTY;data=pn_alloc_optional(pool,PN_MEM_INDEX,n);if(!data)return PN_EMPTY;
         if(pool->limit-pool->used<RESERVE){pn_free(data);return PN_EMPTY;}}
-    FILE *file=fopen(f->path,"rb");if(!file){pn_free(data);return PN_EMPTY;}
+    FILE *file=fopen(path,"rb");if(!file){pn_free(data);return PN_EMPTY;}
     if(requested){
         // 筛选路径只用fd读取，不混用stdio输入或整块预读，也不申请未命中的模型包。/ The filtered path reads only through the fd, without mixed stdio input/read-ahead or allocating mismatched packets.
         uint8_t header[PN_XHTML_SNAPSHOT_HEADER_BYTES];
@@ -50,7 +66,37 @@ static pn_status_t load_packet(void *ctx,pn_pool_t *pool,const char *requested,u
 }
 static pn_status_t load(void *ctx,pn_pool_t *pool,uint8_t **out,size_t *size){return load_packet(ctx,pool,NULL,out,size);}
 static pn_status_t load_for(void *ctx,pn_pool_t *pool,const char *path,uint8_t **out,size_t *size){if(!path || !*path)return PN_INVALID;return load_packet(ctx,pool,path,out,size);}
-static bool name_valid(const char *name,bool *temporary){size_t n=strlen(name);if(n!=69 && n!=73)return false;for(unsigned i=0;i<64;i++)if(!((name[i]>='0' && name[i]<='9') || (name[i]>='a' && name[i]<='f')))return false;if(strcmp(name+64,n==69?".pnsm":".pnsm.tmp"))return false;*temporary=n==73;return true;}
+static bool name_valid(const char *name,bool *temporary){
+    size_t n=strlen(name),base=(n==134 || n==138)?129u:64u;
+    if(n!=base+5 && n!=base+9)return false;
+    for(size_t i=0;i<base;i++){if(i==64 && base==129){if(name[i]!='.')return false;}else if(!((name[i]>='0' && name[i]<='9') || (name[i]>='a' && name[i]<='f')))return false;}
+    if(strcmp(name+base,n==base+5?".pnsm":".pnsm.tmp"))return false;
+    *temporary=n==base+9;return true;
+}
+typedef struct {pn_semantic_file_t *owner;FILE *file;size_t remaining;} read_t;
+static void close_read(void *ctx){read_t *r=ctx;if(!r)return;if(r->file)fclose(r->file);r->owner->read=NULL;pn_free(r);}
+static pn_status_t open_for(void *ctx,pn_pool_t *pool,const char *requested,void **out,size_t *size){
+    pn_semantic_file_t *f=ctx;if(!requested || !*requested || !pool || !out || !size)return PN_INVALID;
+    pn_status_t s=checked(f);if(s!=PN_OK)return s;if(f->read || f->write)return PN_EMPTY;
+    char path[PN_JOURNAL_PATH_MAX];s=requested_path(f,requested,path);if(s!=PN_OK)return s;
+    FILE *file=fopen(path,"rb");if(!file)return PN_EMPTY;struct stat info;uint8_t header[PN_XHTML_SNAPSHOT_HEADER_BYTES];
+    if(fstat(fileno(file),&info) || !S_ISREG(info.st_mode) || info.st_size<(off_t)sizeof header || (uint64_t)info.st_size>PN_XHTML_SNAPSHOT_MAX)s=PN_EMPTY;
+    if(s==PN_OK)s=read_exact(f,file,header,sizeof header);
+    if(s==PN_OK && !pn_xhtml_snapshot_header_matches(header,sizeof header,(size_t)info.st_size,&f->store.book,requested))s=PN_EMPTY;
+    if(s==PN_OK && lseek(fileno(file),0,SEEK_SET)!=0)s=PN_IO;
+    if(s==PN_OK)s=checked(f);
+    read_t *r=NULL;if(s==PN_OK){r=pn_alloc_optional(pool,PN_MEM_INDEX,sizeof *r);if(!r)s=PN_EMPTY;}
+    if(s!=PN_OK){fclose(file);return s;}*r=(read_t){.owner=f,.file=file,.remaining=(size_t)info.st_size};f->read=r;*out=r;*size=r->remaining;return PN_OK;
+}
+static pn_status_t read_step(void *ctx,uint8_t *out,size_t cap,size_t *got){
+    read_t *r=ctx;if(!r || !out || !got || !cap || cap>4096)return PN_INVALID;
+    pn_status_t s=checked(r->owner);if(s!=PN_OK)return s;size_t n=cap<r->remaining?cap:r->remaining;
+    if(n)s=read_exact(r->owner,r->file,out,n);
+    else{uint8_t tail;if(read(fileno(r->file),&tail,1)!=0)s=PN_IO;}
+    if(s==PN_OK)s=checked(r->owner);
+    if(s!=PN_OK)return s;
+    r->remaining-=n;*got=n;return PN_OK;
+}
 static pn_status_t available(const char *path,uint64_t *out){if(space_fn)return space_fn(space_ctx,path,out);
 #ifdef ESP_PLATFORM
     (void)path;(void)out;return PN_UNSUPPORTED;
@@ -62,7 +108,7 @@ typedef enum {WRITE_CREATE,WRITE_DIRECTORY,WRITE_SCAN_OPEN,WRITE_SCAN_ITEM,WRITE
 typedef struct {
     uint8_t *data;size_t size,at; ///< 接管唯一包，无第二份复制 / Own the sole packet without a second copy
     FILE *file;DIR *directory;write_phase_t phase; ///< 当前一步及最多两个文件系统句柄 / Current step and at most two filesystem handles
-    char temporary[PN_JOURNAL_PATH_MAX],victim[PN_JOURNAL_PATH_MAX]; ///< 仅自有暂存和配额回收候选 / Only owned staging and quota eviction candidates
+    char target[PN_JOURNAL_PATH_MAX],temporary[PN_JOURNAL_PATH_MAX],victim[PN_JOURNAL_PATH_MAX]; ///< 仅自有暂存和配额回收候选 / Only owned staging and quota eviction candidates
     uint64_t total;time_t oldest;unsigned passes;bool temporary_owned; ///< 扫描累计与有限重试 / Scan totals and bounded retries
 } write_t;
 bool pn_semantic_file_pending(const pn_semantic_file_t *f){return f && f->write;}
@@ -76,11 +122,18 @@ void pn_semantic_file_abort(pn_semantic_file_t *f){
 }
 static pn_status_t take(void *ctx,pn_pool_t *pool,uint8_t *data,size_t n){
     pn_semantic_file_t *f=ctx;if(!pool || !data || n<152 || n>PN_XHTML_SNAPSHOT_MAX)return PN_INVALID;
-    pn_status_t s=checked(f);if(s!=PN_OK)return s;if(f->write)return PN_BUSY;
+    pn_status_t s=checked(f);if(s!=PN_OK)return s;if(f->write || f->read)return PN_BUSY;
     if(pool->used>pool->limit || sizeof(write_t)+RESERVE>pool->limit-pool->used)return PN_EMPTY;
     write_t *w=pn_alloc_optional(pool,PN_MEM_INDEX,sizeof *w);if(!w)return PN_EMPTY;
     if(pool->limit-pool->used<RESERVE){pn_free(w);return PN_EMPTY;}
-    *w=(write_t){.data=data,.size=n,.phase=WRITE_CREATE};int length=snprintf(w->temporary,sizeof w->temporary,"%s.tmp",f->path);
+    *w=(write_t){.data=data,.size=n,.phase=WRITE_CREATE};strcpy(w->target,f->path);
+    // 仅编码器的有效头可决定内部章键；不可信包仍沿用旧槽供兼容测试/读取。/ Only a valid encoded header determines an internal chapter key; other packets retain legacy slot behavior.
+    unsigned version=(unsigned)data[4];uint32_t payload=(uint32_t)data[140]|(uint32_t)data[141]<<8|(uint32_t)data[142]<<16|(uint32_t)data[143]<<24;
+    uint32_t crc=(uint32_t)data[148]|(uint32_t)data[149]<<8|(uint32_t)data[150]<<16|(uint32_t)data[151]<<24;
+    if(!memcmp(data,"PNSM",4) && (version==1 || version==2) && !data[5] && !data[6] && !data[7] && !memcmp(data+8,f->store.book.sha256,32) && payload==n-152 && crc==pn_crc32_update(0,data,148)){
+        s=chapter_path(f,data+40,w->target);if(s!=PN_OK){pn_free(w);return s;}
+    }
+    int length=snprintf(w->temporary,sizeof w->temporary,"%s.tmp",w->target);
     if(length<0 || (size_t)length>=sizeof w->temporary){pn_free(w);return PN_LIMIT;}
     f->write=w;return PN_OK;
 }
@@ -112,7 +165,7 @@ pn_status_t pn_semantic_file_step(pn_semantic_file_t *f){
         if(n<0 || (size_t)n>=sizeof path || cache_stat(path,&info) || !S_ISREG(info.st_mode) || info.st_size<0)break;
         if(temporary || (uint64_t)info.st_size>PN_XHTML_SNAPSHOT_MAX){if(remove(path))s=PN_IO;break;}
         w->total+=(uint64_t)info.st_size;
-        if(strcmp(path,f->path) && (!*w->victim || info.st_mtime<w->oldest)){w->oldest=info.st_mtime;strcpy(w->victim,path);}break;
+        if(strcmp(path,w->target) && (!*w->victim || info.st_mtime<w->oldest)){w->oldest=info.st_mtime;strcpy(w->victim,path);}break;
     }
     case WRITE_SPACE:{
         uint64_t free_bytes;s=available(f->directory,&free_bytes);if(s!=PN_OK)break;
@@ -150,7 +203,7 @@ pn_status_t pn_semantic_file_step(pn_semantic_file_t *f){
         break;
     }
     case WRITE_RENAME:
-        if(rename(w->temporary,f->path))s=PN_IO;
+        if(rename(w->temporary,w->target))s=PN_IO;
         else{w->temporary_owned=false;pn_semantic_file_abort(f);return PN_OK;}
         break;
     }
@@ -160,7 +213,7 @@ pn_status_t pn_semantic_file_step(pn_semantic_file_t *f){
 pn_status_t pn_semantic_file_bind(pn_semantic_file_t *f,pn_media_t *media,const pn_media_lease_t *lease,const char *root,const pn_book_id_t *book){
     if(!f || !media || !lease || !root || !*root || !book || lease->access!=PN_MEDIA_WRITE)return PN_INVALID;
     pn_status_t s=pn_media_validate(media,lease);if(s!=PN_OK)return s;
-    if(f->write)return PN_BUSY;
+    if(f->write || f->read)return PN_BUSY;
     *f=(pn_semantic_file_t){.media=media,.lease=*lease};char hash[65];for(unsigned i=0;i<32;i++)snprintf(hash+2*i,3,"%02x",book->sha256[i]);int a=snprintf(f->directory,sizeof f->directory,"%s/semantic",root),b=snprintf(f->path,sizeof f->path,"%s/%s.pnsm",f->directory,hash);if(a<0 || b<0 || (size_t)a>=sizeof f->directory || (size_t)b>=sizeof f->path)return PN_LIMIT;
-    f->store=(pn_xhtml_store_t){.ctx=f,.book=*book,.load=load,.take=take,.load_for=load_for};return PN_OK;
+    f->store=(pn_xhtml_store_t){.ctx=f,.book=*book,.load=load,.take=take,.load_for=load_for,.open_for=open_for,.read_step=read_step,.close_read=close_read};return PN_OK;
 }

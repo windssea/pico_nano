@@ -17,6 +17,25 @@ static void mixed_sizes(pn_font_t *font){
     for(unsigned pass=0;pass<12;pass++)for(unsigned i=0;i<5;i++){int32_t actual;assert(pn_font_size(font,sizes[i])==PN_OK);assert(pn_font_advance(font,characters[i],&actual)==PN_OK && actual==advances[i]);}
     assert(outline_loads==loaded);assert(pn_font_size(font,44)==PN_OK);
 }
+/// 可选量宽/预热只加载一次轮廓，原字宽、字重/清晰度和零/非零相位像素保持。/ Optional metric/warm work loads one outline, retaining original advance, weight/clarity and zero/nonzero-phase pixels.
+static void measured_warm(pn_pool_t *pool,pn_font_t *font){
+    uint8_t pixels[5000],expected[5000];pn_frame_t frame;assert(pn_frame_bind(&frame,pixels,sizeof pixels,100,100));
+    for(int weight=-1;weight<=3;weight++)for(int clarity=0;clarity<4;clarity++)for(int delta=0;delta<=13;delta+=13){
+        assert(pn_font_weight(font,weight)==PN_OK && pn_font_clarity(font,clarity)==PN_OK);pn_font_trim(font);int32_t before,after,space;
+        assert(pn_font_advance(font,'A',&before)==PN_OK);pn_frame_clear(&frame,15);assert(pn_font_draw(font,&frame,'A',10*64+delta,60,PN_FONT_GRAY)==PN_OK);memcpy(expected,pixels,sizeof pixels);
+        pn_font_trim(font);assert(pn_font_advance(font,' ',&space)==PN_OK);size_t loaded=outline_loads;
+        pn_cache_speculate(pool,true);assert(pn_font_advance(font,'A',&after)==PN_OK && after==before);pn_cache_speculate(pool,false);
+        assert(outline_loads==loaded+1);pn_frame_clear(&frame,15);assert(pn_font_draw(font,&frame,'A',10*64+delta,60,PN_FONT_GRAY)==PN_OK && !memcmp(expected,pixels,sizeof pixels));
+        if(!delta)assert(outline_loads==loaded+1);
+    }
+    // 预热的单次分配失败不能破坏原量宽退路或随后原质量绘制。/ A one-shot warm allocation failure must preserve original metric fallback and subsequent full-quality drawing.
+    pn_font_trim(font);int32_t expected_width,actual_width,space;assert(pn_font_advance(font,'A',&expected_width)==PN_OK);pn_frame_clear(&frame,15);assert(pn_font_draw(font,&frame,'A',10*64,60,PN_FONT_GRAY)==PN_OK);memcpy(expected,pixels,sizeof pixels);
+    for(unsigned fail=1;fail<=16;fail++){
+        pn_font_trim(font);assert(pn_font_advance(font,' ',&space)==PN_OK);pool->fail_at=pool->attempts+fail;pn_cache_speculate(pool,true);
+        pn_status_t s=pn_font_advance(font,'A',&actual_width);pn_cache_speculate(pool,false);pool->fail_at=0;
+        assert(s==PN_OK && actual_width==expected_width);pn_frame_clear(&frame,15);assert(pn_font_draw(font,&frame,'A',10*64,60,PN_FONT_GRAY)==PN_OK && !memcmp(expected,pixels,sizeof pixels));
+    }
+}
 int main(void){
     pn_pool_t pool;assert(!pn_pool_init(&pool,4u*1024u*1024u,NULL,NULL,NULL));
     pn_font_t font={0};pn_text_source_t source=pn_font_builtin_source();assert(!pn_font_open(&font,&pool,&source,44));
@@ -34,6 +53,6 @@ int main(void){
     pool.limit=4u*1024u*1024u;assert(!pn_font_advance(&font,'W',&again));pn_frame_clear(&frame,15);assert(!pn_font_draw(&font,&frame,'W',10*64,60,PN_FONT_GRAY));
     // 在已有缓存时逐项注入绘制分配失败，借用槽不得被重试回收。/ Inject rendering allocation failures with warm caches; retry must never reclaim borrowed slots.
     for(unsigned i=1;i<=12;i++){pool.fail_at=pool.attempts+i;pn_status_t s=pn_font_draw(&font,&frame,0x4e2d,10*64,60,PN_FONT_GRAY);assert(s==PN_OK || s==PN_NO_MEMORY);pool.fail_at=0;assert(!pn_font_draw(&font,&frame,'W',10*64,60,PN_FONT_GRAY));}
-    pn_font_close(&font);pn_cache_snapshot(&pool);assert(!pool.used && !pool.live && !pool.caches && !pool.cache_stats[PN_CACHE_GLYPH].bytes);
+    measured_warm(&pool,&font);pn_font_close(&font);pn_cache_snapshot(&pool);assert(!pool.used && !pool.live && !pool.caches && !pool.cache_stats[PN_CACHE_GLYPH].bytes);
     puts("glyph cache: eviction preserves face/metrics/pixels, low-budget direct rendering, warm-cache faults and release passed");return 0;
 }

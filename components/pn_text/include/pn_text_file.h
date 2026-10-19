@@ -25,6 +25,7 @@ typedef struct {
     size_t block_length; ///< 缓存块有效字节数 / Valid bytes in the cached block
     void *read_cache; ///< 池内可回收多块缓存，只有绑定后启用 / Reclaimable pooled multi-block cache, enabled only after binding
     pn_cache_owner_t cache_owner; ///< 文件寿命内注册；池须活到close之后 / Registered for the file lifetime; pool must outlive close
+    unsigned cache_fill_bytes; ///< 可选随机供数窗，0为原4KiB；不改变块分配或类别预算 / Optional random supply window, zero for original 4 KiB; allocation/caps unchanged
     uint64_t read_position; ///< 最近成功stdio读取后的实际游标，不是缓存命中位置 / Actual stdio cursor after the last successful read, independent of cache hits
     bool read_position_known; ///< 读/定位失败后失效，下次强制定位 / Invalid after read/seek failures; the next read must seek
     pn_book_id_t identity; ///< 仅当前不可变句柄/租约的已验证摘要 / Verified digest for this immutable handle and lease only
@@ -34,6 +35,8 @@ typedef struct {
 /// 为本port的不变source绑定可选32块LRU读缓存；不分配、不读卡，未知source返回UNSUPPORTED，不能跨池重绑。
 /// Bind an optional 32-block LRU read cache to this port's immutable source; no allocation/IO, UNSUPPORTED for other sources, no rebinding across pools.
 pn_status_t pn_text_file_cache_bind(const pn_text_source_t *,pn_pool_t *);
+/// 同一串行owner选择512/1024/2048/4096字节供数窗；只验证租约，不读取，不扩大原32块预算。/ Serialized owner selects a 512/1024/2048/4096-byte fill window; validate the lease without IO or increasing the 32-block budget.
+pn_status_t pn_text_file_cache_window(const pn_text_source_t *,unsigned);
 /// 仅识别本port原始source；未知UNSUPPORTED，成功摘要绑定当前句柄/租约，失败不改输出。/ Recognize only this port's original source; unknown sources return UNSUPPORTED; bind successful digests to the live handle/lease and preserve output on error.
 pn_status_t pn_text_file_identity(const pn_text_source_t *,pn_book_id_t *);
 /// 用池内有界扫描缓冲核验并缓存当前打开源摘要；本函数不搜索其他句柄。/ Verify and cache the live source digest with a bounded pool buffer; this function never searches other handles.

@@ -4,7 +4,7 @@
 typedef enum {
     ZJ_TAIL_ALLOC,ZJ_TAIL_READ,ZJ_TAIL_FIND,ZJ_ENTRIES,ZJ_DIRECTORY_ALLOC,ZJ_DIRECTORY_READ,
     ZJ_CENTRAL_HEAD,ZJ_CENTRAL_NAME,ZJ_CENTRAL_EXTRA,ZJ_SORT_OFFSET,ZJ_LOCAL_NAME,ZJ_LOCAL_HEAD,
-    ZJ_LOCAL_COMPARE,ZJ_LOCAL_EXTRA,ZJ_LOCAL_SIZE,ZJ_DESCRIPTOR,ZJ_DESCRIPTOR_TAIL,ZJ_LOCAL_DONE,
+    ZJ_LOCAL_EXTRA,ZJ_LOCAL_SIZE,ZJ_DESCRIPTOR,ZJ_DESCRIPTOR_TAIL,ZJ_LOCAL_DONE,
     ZJ_OVERLAP,ZJ_SORT_HASH,ZJ_DUPLICATES,ZJ_DUPLICATE_X,ZJ_DUPLICATE_Y,ZJ_FINISH
 } zip_job_phase_t;
 typedef struct {
@@ -12,11 +12,39 @@ typedef struct {
     size_t tail_size,at,find,sort_left,sort_end; ///< 尾部/排序游标 / Tail and sorting cursors
     uint32_t eocd,directory_size,cursor,index,partner,length,extra_pos;uint16_t extra_left; ///< 条目及扩展区游标 / Entry and extra-field cursors
     uint64_t total,data,end; ///< 解压总量和本地数据范围 / Total inflated size and local data extent
-    char expected[PN_ZIP_PATH_MAX];uint8_t buffer[PN_ZIP_PATH_MAX],local_head[30]; ///< 跨步名称/头暂存 / Names and headers retained across steps
+    char expected[PN_ZIP_PATH_MAX];uint8_t buffer[PN_ZIP_PATH_MAX+30],local_head[30]; ///< 跨步名称/头暂存 / Names and headers retained across steps
     struct {uint64_t offset;uint8_t *out;size_t size,done;bool active;} read; ///< 短读/取消后继续同一个读取 / Resume the same read after short input or cancellation
     size_t bytes,reads,entries,sifts,pairs; ///< 本轮配额，非持续累计 / Per-call budgets, not lifetime totals
     zip_job_phase_t phase;bool directory_only; ///< 只准备顺序扫描，不提前确认本地头 / Prepare sequential scanning without confirming local headers
+    pn_cache_owner_t look_owner; ///< 原SOURCE额度内的短期读窗，任务结束即释放 / Temporary read windows within the existing SOURCE cap, freed with the job
+    struct {uint8_t *bytes;uint64_t start;size_t filled,size;bool attempted;} look[2]; ///< 中央与本地头分窗，防止相互驱逐 / Separate central/local windows to prevent mutual eviction
+    size_t source_bytes; ///< 本轮真实源字节，预读仍受4KiB约束 / Actual source bytes this call, keeping read-ahead within 4 KiB
 } zip_job_t;
+static size_t zip_job_look_bytes(void *ctx){zip_job_t *j=ctx;return pn_alloc_size(j->look[0].bytes)+pn_alloc_size(j->look[1].bytes);}
+static void zip_job_look_drop(void *ctx){zip_job_t *j=ctx;for(unsigned i=0;i<2;i++){pn_free(j->look[i].bytes);memset(&j->look[i],0,sizeof j->look[i]);}}
+static pn_status_t zip_job_look(zip_job_t *j,uint64_t pos,uint8_t *out,size_t n,bool *claimed){
+    archive_t *a=j->archive;unsigned slot=pos>=a->directory?0:1;
+    if(!j->look[slot].attempted){
+        j->look[slot].attempted=true;j->look[slot].bytes=pn_cache_alloc(a->pool,PN_CACHE_SOURCE,PN_MEM_DOCUMENT,512);
+    }
+    if(!j->look[slot].bytes)return PN_OK;
+    uint64_t start=pos&~UINT64_C(511);size_t size=a->source.size-start<512?(size_t)(a->source.size-start):512;
+    // 跨块请求仍走原短读状态机，不能借一次预读突破每步配额。/ Cross-block requests retain the original short-read machine, never exceeding a step's read budget.
+    if(n>size-(size_t)(pos-start))return PN_OK;
+    *claimed=true;
+    if(j->look[slot].start!=start || j->look[slot].size!=size){j->look[slot].start=start;j->look[slot].size=size;j->look[slot].filled=0;}
+    if(j->look[slot].filled<size){
+        if(j->source_bytes>=4096 || j->reads>=8)return PN_BUSY;
+        size_t want=size-j->look[slot].filled;if(want>4096-j->source_bytes)want=4096-j->source_bytes;
+        size_t got=0;j->reads++;pn_status_t s=a->source.read_at(a->source.ctx,start+j->look[slot].filled,j->look[slot].bytes+j->look[slot].filled,want,&got);
+        if(s!=PN_OK)return s;
+        if(!got || got>want)return PN_IO;
+        j->source_bytes+=got;j->look[slot].filled+=got;
+        if(j->look[slot].filled!=size)return PN_BUSY;
+    }
+    memcpy(out,j->look[slot].bytes+(size_t)(pos-start),n);return current(a);
+}
+static void zip_job_look_bind(zip_job_t *j){pn_cache_attach(j->archive->pool,&j->look_owner,PN_CACHE_SOURCE,j,zip_job_look_bytes,zip_job_look_drop);pn_cache_pin(&j->look_owner);}
 static pn_status_t zip_job_read(zip_job_t *j,uint64_t offset,uint8_t *out,size_t size){
     archive_t *a=j->archive;pn_status_t status=current(a);if(status!=PN_OK)return status;
     if(offset>a->source.size || size>a->source.size-offset)return PN_CORRUPT;
@@ -30,9 +58,16 @@ static pn_status_t zip_job_read(zip_job_t *j,uint64_t offset,uint8_t *out,size_t
         memcpy(out+j->read.done,a->directory_bytes+(size_t)(pos-a->directory),n);
     }else{
         if(j->reads>=8u)return PN_BUSY;
-        j->reads++;size_t got=0;status=a->source.read_at(a->source.ctx,pos,out+j->read.done,n,&got);if(status!=PN_OK)return status;
-        if(!got || got>n)return PN_IO;
-        n=got;
+        bool claimed=false;
+        status=j->phase>=ZJ_CENTRAL_HEAD && n<4096?zip_job_look(j,pos,out+j->read.done,n,&claimed):PN_OK;
+        if(status!=PN_OK)return status;
+        if(!claimed){
+            if(j->source_bytes>=4096)return PN_BUSY;
+            if(n>4096-j->source_bytes)n=4096-j->source_bytes;
+            j->reads++;size_t got=0;status=a->source.read_at(a->source.ctx,pos,out+j->read.done,n,&got);if(status!=PN_OK)return status;
+            if(!got || got>n)return PN_IO;
+            n=got;j->source_bytes+=got;
+        }
     }
     j->read.done+=n;j->bytes+=n;status=current(a);if(status!=PN_OK)return status;
     if(j->read.done!=size)return PN_BUSY;
@@ -104,13 +139,11 @@ static pn_status_t zip_job_advance(zip_job_t *j){
         s=zip_job_read(j,e->name_pos,(uint8_t *)j->expected,e->name_length);if(s!=PN_OK)return s;j->expected[e->name_length]=0;j->phase=ZJ_LOCAL_HEAD;break;
     case ZJ_LOCAL_HEAD:
         if(e->local>=a->directory || a->directory-e->local<30)return PN_CORRUPT;
-        s=zip_job_read(j,e->local,j->local_head,30);if(s!=PN_OK)return s;
+        // 头与中央目录给定长度的名称连续读，仍先验证头字段再比较名称。/ Read the header and central-sized name together, still validating header fields before comparing names.
+        s=zip_job_read(j,e->local,j->buffer,30u+e->name_length);if(s!=PN_OK)return s;memcpy(j->local_head,j->buffer,30);
         s=local_fields(a,e,j->local_head,&j->extra_left,&j->data,&j->end);if(s!=PN_OK)return s;
-        j->extra_pos=e->local+30+e->name_length;j->phase=ZJ_LOCAL_COMPARE;break;
-    case ZJ_LOCAL_COMPARE:
-        s=zip_job_read(j,e->local+30,j->buffer,e->name_length);if(s!=PN_OK)return s;
-        if(memcmp(j->buffer,j->expected,e->name_length))return PN_CORRUPT;
-        j->phase=ZJ_LOCAL_EXTRA;break;
+        if(memcmp(j->buffer+30,j->expected,e->name_length))return PN_CORRUPT;
+        j->extra_pos=e->local+30+e->name_length;j->phase=ZJ_LOCAL_EXTRA;break;
     case ZJ_LOCAL_EXTRA:return zip_job_extra(j,ZJ_LOCAL_SIZE);
     case ZJ_LOCAL_SIZE:
         s=local_sizes(e,j->local_head);if(s!=PN_OK)return s;
@@ -148,7 +181,7 @@ static pn_status_t zip_job_advance(zip_job_t *j){
 }
 void pn_zip_job_close(pn_zip_job_t *job){
     if(!job || !job->impl)return;
-    zip_job_t *j=job->impl;job->impl=NULL;pn_free(j->tail);pn_free(j->snapshot);archive_free(j->archive);pn_free(j);
+    zip_job_t *j=job->impl;job->impl=NULL;pn_cache_detach(&j->look_owner);pn_free(j->look[0].bytes);pn_free(j->look[1].bytes);pn_free(j->tail);pn_free(j->snapshot);archive_free(j->archive);pn_free(j);
 }
 pn_status_t pn_zip_job_begin(pn_zip_job_t *job,pn_pool_t *pool,const pn_text_source_t *source){
     if(!job || !pool || !source || !source->read_at)return PN_INVALID;
@@ -158,7 +191,7 @@ pn_status_t pn_zip_job_begin(pn_zip_job_t *job,pn_pool_t *pool,const pn_text_sou
     pn_status_t s=pn_cancel_checkpoint();if(s==PN_OK && source->validate)s=source->validate(source->ctx);if(s!=PN_OK)return s;
     zip_job_t *j=pn_alloc_tagged(pool,PN_MEM_DOCUMENT,sizeof *j);if(!j)return PN_NO_MEMORY;*j=(zip_job_t){0};
     j->archive=pn_alloc_tagged(pool,PN_MEM_DOCUMENT,sizeof *j->archive);if(!j->archive){pn_free(j);return PN_NO_MEMORY;}
-    *j->archive=(archive_t){.pool=pool,.source=*source};job->impl=j;return PN_OK;
+    *j->archive=(archive_t){.pool=pool,.source=*source};zip_job_look_bind(j);job->impl=j;return PN_OK;
 }
 pn_status_t pn_zip_scan_job_begin(pn_zip_job_t *job,pn_pool_t *pool,const pn_text_source_t *source){
     pn_status_t s=pn_zip_job_begin(job,pool,source);if(s==PN_OK)((zip_job_t *)job->impl)->directory_only=true;return s;
@@ -170,15 +203,15 @@ pn_status_t pn_zip_scan_finish_job_begin(pn_zip_job_t *job,pn_zip_scan_t *scan){
     if(a->capture && a->capture->status==PN_CANCELLED)a->capture->status=PN_OK;
     if(a->capture && a->capture->status!=PN_OK)return a->capture->status;
     zip_job_t *j=pn_alloc_tagged(a->pool,PN_MEM_DOCUMENT,sizeof *j);if(!j)return PN_NO_MEMORY;
-    *j=(zip_job_t){.archive=a,.phase=ZJ_LOCAL_NAME};job->impl=j;scan->impl=NULL;return PN_OK;
+    *j=(zip_job_t){.archive=a,.phase=ZJ_LOCAL_NAME};zip_job_look_bind(j);job->impl=j;scan->impl=NULL;return PN_OK;
 }
 static pn_status_t zip_job_step(pn_zip_job_t *job,void **out,bool scan){
     if(!job || !job->impl || !out)return PN_INVALID;
     if(*out)return PN_BUSY;
     zip_job_t *j=job->impl;if(j->directory_only!=scan)return PN_INVALID;
     pn_profile_span_t span;pn_profile_begin(&span,j->archive->pool,scan?"epub.zip-scan-step":"epub.zip-step");
-    j->bytes=j->reads=j->entries=j->sifts=j->pairs=0;pn_status_t s=PN_BUSY;
-    for(unsigned transitions=0;transitions<32 && j->bytes<4096u && j->reads<8u && j->entries<8u && j->sifts<16u && j->pairs<8u;transitions++){
+    j->bytes=j->reads=j->entries=j->sifts=j->pairs=j->source_bytes=0;pn_status_t s=PN_BUSY;
+    for(unsigned transitions=0;transitions<32 && j->bytes<4096u && j->source_bytes<4096u && j->reads<8u && j->entries<8u && j->sifts<16u && j->pairs<8u;transitions++){
         s=current(j->archive);if(s!=PN_OK)break;s=zip_job_advance(j);if(s!=PN_BUSY)break;
     }
     if(s==PN_OK){

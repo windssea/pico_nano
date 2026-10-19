@@ -22,10 +22,14 @@ typedef struct {
     pn_epub_location_t ahead_target; ///< 下一页请求键，区分章节入口与首字位置 / Next-request key distinguishing chapter entry from first glyph
     bool cache_enabled; ///< shadow预排禁用递归缓存 / Shadow prefetch disables recursive caching
     size_t ahead_warm; ///< 邻页替换后从零预热 / Start warming from zero after neighbor replacement
+    pn_epub_page_job_t prefetch;pn_epub_page_t candidate; ///< 原池内未验证候选 / Unverified candidate in the original pool
+    pn_epub_location_t candidate_at,candidate_target;size_t candidate_chapters;bool prefetch_failed; ///< 跨轮目标与失败退路 / Target across ticks and failure fallback
 } reader_t;
 static void cached_free(pn_epub_page_t *page){pn_free(page->nodes);pn_free(page->images);*page=(pn_epub_page_t){0};}
-static size_t neighbor_bytes(void *ctx){reader_t *r=ctx;return pn_alloc_size(r->ahead.nodes)+pn_alloc_size(r->ahead.images)+pn_alloc_size(r->behind.nodes)+pn_alloc_size(r->behind.images);}
-static void neighbor_drop(void *ctx){reader_t *r=ctx;cached_free(&r->ahead);cached_free(&r->behind);r->ahead_warm=0;}
+static size_t neighbor_bytes(void *ctx){reader_t *r=ctx;return pn_alloc_size(r->ahead.nodes)+pn_alloc_size(r->ahead.images)+pn_alloc_size(r->behind.nodes)+pn_alloc_size(r->behind.images)+pn_alloc_size(r->candidate.nodes)+pn_alloc_size(r->candidate.images);}
+static void prefetch_abort(reader_t *r){pn_epub_page_job_close(&r->prefetch);cached_free(&r->candidate);r->candidate_chapters=0;}
+void pn_epub_reader_prefetch_abort(pn_epub_reader_t *handle){if(handle && handle->impl){reader_t *r=handle->impl;prefetch_abort(r);r->prefetch_failed=false;memset(&r->candidate_target,0,sizeof r->candidate_target);}}
+static void neighbor_drop(void *ctx){reader_t *r=ctx;prefetch_abort(r);cached_free(&r->ahead);cached_free(&r->behind);r->ahead_warm=0;}
 static bool cached_store(reader_t *r,pn_epub_page_t *to,const pn_epub_page_t *from){
     size_t need=from->count*sizeof(pn_epub_page_node_t)+from->image_count*sizeof(pn_epub_page_image_t);
     if(need && !pn_cache_allow(r->pool,PN_CACHE_NEIGHBOR,need+(from->count && from->image_count?pn_alloc_overhead():0)))return false;
@@ -131,7 +135,7 @@ pn_status_t pn_epub_reader_init(pn_epub_reader_t *handle,pn_pool_t *pool,pn_epub
     reader_t *r=pn_alloc_tagged(pool,PN_MEM_LAYOUT,sizeof *r);if(!r)return PN_NO_MEMORY;
     *r=(reader_t){.pool=pool,.epub=epub,.book=*book,.layout=*layout,.measure=*measure,.page=page,.token=token,.next_ticket=1,.spine_count=info.spine_count,.confirm=confirm,.ctx=ctx,.cache_enabled=true};memcpy(r->salt,salt,16);page->valid=false;pn_cache_attach(pool,&r->cache,PN_CACHE_NEIGHBOR,r,neighbor_bytes,neighbor_drop);handle->impl=r;return PN_OK;
 }
-void pn_epub_reader_close(pn_epub_reader_t *handle){if(handle && handle->impl){reader_t *r=handle->impl;pn_cache_detach(&r->cache);r->page->valid=false;cached_free(&r->ahead);cached_free(&r->behind);pn_free(r);handle->impl=NULL;}}
+void pn_epub_reader_close(pn_epub_reader_t *handle){if(handle && handle->impl){reader_t *r=handle->impl;prefetch_abort(r);pn_cache_detach(&r->cache);r->page->valid=false;cached_free(&r->ahead);cached_free(&r->behind);pn_free(r);handle->impl=NULL;}}
 /// 邻页基准：待确认页（面板扫描期间）优先，否则已显示页；只读，不改提交状态。
 /// Neighbor base: the pending page (during a panel scan) first, else the visible page; read-only, never changing committed state.
 static const pn_epub_reader_anchor_t *neighbor_base(const reader_t *r){return r->preparing?&r->pending.anchor:r->has_visible?&r->visible:NULL;}
@@ -145,18 +149,35 @@ pn_status_t pn_epub_reader_visit_next(pn_epub_reader_t *handle,pn_epub_next_fn v
 }
 static pn_status_t pn_epub_reader_prefetch_impl(pn_epub_reader_t *handle){
     if(!handle || !handle->impl)return PN_EMPTY;
+    pn_status_t checkpoint=pn_cancel_checkpoint();if(checkpoint!=PN_OK)return checkpoint;
     reader_t *r=handle->impl;const pn_epub_reader_anchor_t *base=neighbor_base(r);if(!base || !base->has_next)return PN_EMPTY;
     if(r->ahead.valid && same_location(&r->ahead_target,&base->next))return PN_EMPTY;
-    pn_epub_page_t page={0};pn_status_t allocated=pn_epub_page_reserve(&page,r->pool,64,0);
-    if(allocated!=PN_OK){cached_free(&page);return allocated;}
-    // 只预排独立页，不复制含32条长路径历史的整个阅读器到设备栈。/ Prepare an independent page without copying 32 long-path history entries onto the device stack.
-    pn_epub_location_t at=base->next,target=base->next;pn_epub_reader_anchor_t prepared;
-    pn_status_t status=forward_page(r,&at,&page);
-    if(status==PN_OK)status=anchor_page(r,at.path,&page,&prepared);
+    if(!same_location(&r->candidate_target,&base->next)){prefetch_abort(r);r->prefetch_failed=false;r->candidate_target=base->next;r->candidate_at=base->next;}
+    if(r->prefetch_failed)return PN_EMPTY;
+    pn_status_t status;
+    if(r->candidate.valid)status=PN_OK;
+    else{
+    // 一个有界小步内只屏蔽输入撤销，介质校验仍执行；步间保留游标给同目标NEXT接管。/ Shield input cancellation for one bounded step, retaining media validation and cursors for a matching NEXT between steps.
+    pn_cancel_scope_t step;pn_cancel_enter(&step,NULL,NULL);
+    if(!r->prefetch.impl){
+        status=pn_epub_page_reserve(&r->candidate,r->pool,64,0);
+        if(status==PN_OK)status=pn_epub_page_job_begin(&r->prefetch,r->pool,r->epub,r->candidate_at.path,r->salt,r->candidate_at.chapter_start?NULL:&r->candidate_at.position,&r->layout,&r->measure,&r->candidate);
+        if(status==PN_OK)status=PN_BUSY;
+    }else status=pn_epub_page_job_step(&r->prefetch);
+    pn_cancel_leave(&step);
+    }
+    checkpoint=pn_cancel_checkpoint();if(checkpoint!=PN_OK && (status==PN_BUSY || status==PN_OK))return checkpoint;
+    if(status==PN_BUSY)return status;
+    if(status==PN_EMPTY && ++r->candidate_chapters<=r->spine_count){
+        status=next_chapter(r,r->candidate_at.path,true,&r->candidate_at);
+        if(status==PN_OK)return PN_BUSY;
+    }
+    pn_epub_reader_anchor_t prepared;
+    if(status==PN_OK)status=anchor_page(r,r->candidate_at.path,&r->candidate,&prepared);
     if(status==PN_OK)status=pn_cancel_checkpoint();
-    // 已验证页直接转移所有权，避免scratch到ahead的第二份分配与复制。/ Move the validated page instead of allocating and copying a second scratch-to-ahead buffer.
-    if(status==PN_OK){cached_free(&r->ahead);r->ahead=page;page=(pn_epub_page_t){0};r->ahead_anchor=prepared;r->ahead_target=target;r->ahead_warm=0;}
-    cached_free(&page);return status;
+    if(status==PN_OK){cached_free(&r->ahead);r->ahead=r->candidate;r->candidate=(pn_epub_page_t){0};r->ahead_anchor=prepared;r->ahead_target=r->candidate_target;r->ahead_warm=0;}
+    else r->prefetch_failed=status!=PN_NO_MEMORY && status!=PN_CANCELLED && status!=PN_BUSY;
+    prefetch_abort(r);return status;
 }
 pn_status_t pn_epub_reader_prefetch(pn_epub_reader_t *handle){
     pn_profile_span_t span;pn_profile_begin(&span,handle && handle->impl?((reader_t *)handle->impl)->pool:NULL,"epub.prefetch");
@@ -184,6 +205,12 @@ pn_status_t pn_epub_reader_warm_next(pn_epub_reader_t *handle,pn_epub_warm_fn wa
 pn_status_t pn_epub_reader_prepare_impl(pn_epub_reader_t *handle,pn_read_intent_t intent,const pn_epub_location_t *jump,pn_epub_reader_receipt_t *out){
     if(!handle || !handle->impl || !out || intent<PN_READ_FIRST || intent>PN_READ_JUMP)return PN_INVALID;
     reader_t *r=handle->impl;if(r->preparing)return PN_BUSY;if(!r->next_ticket)return PN_LIMIT;
+    // 同目标NEXT接续已完成的校验工作，避免新输入丢弃候选后整章重读；取消仍不提交页面。/ A matching NEXT continues validated work instead of discarding and rereading the chapter; cancellation still commits no page.
+    if(intent==PN_READ_NEXT && r->has_visible && (r->prefetch.impl || r->candidate.valid) && same_location(&r->candidate_target,&r->visible.next)){
+        pn_status_t s;do{s=pn_epub_reader_prefetch(handle);}while(s==PN_BUSY);
+        if(s==PN_CANCELLED || s==PN_STALE_MEDIA){prefetch_abort(r);return s;}
+    }
+    prefetch_abort(r);r->prefetch_failed=false;memset(&r->candidate_target,0,sizeof r->candidate_target);
     if(!r->has_visible && intent!=PN_READ_FIRST && intent!=PN_READ_JUMP)return PN_EMPTY;
     pn_epub_page_t *cached=NULL;pn_epub_reader_anchor_t *prepared=&r->pending.anchor;bool saved_forward=false;
     if(r->cache_enabled){
@@ -228,7 +255,7 @@ pn_status_t pn_epub_reader_prepare_impl(pn_epub_reader_t *handle,pn_read_intent_
 pn_status_t pn_epub_reader_prepare(pn_epub_reader_t *handle,pn_read_intent_t intent,const pn_epub_location_t *jump,pn_epub_reader_receipt_t *out){
     pn_profile_span_t span;pn_profile_begin(&span,handle && handle->impl?((reader_t *)handle->impl)->pool:NULL,intent==PN_READ_NEXT?"epub.next":intent==PN_READ_PREVIOUS?"epub.previous":intent==PN_READ_JUMP?"epub.jump":"epub.prepare");
     reader_t *r=handle && handle->impl?handle->impl:NULL;if(r)pn_cache_reclaim(r->pool,r->pool->cache_reserve);
-    bool borrowing=r && r->cache_enabled && ((intent==PN_READ_NEXT && r->ahead.valid) || (intent==PN_READ_PREVIOUS && r->behind.valid));
+    bool borrowing=r && r->cache_enabled && ((intent==PN_READ_NEXT && (r->ahead.valid || r->prefetch.impl || r->candidate.valid)) || (intent==PN_READ_PREVIOUS && r->behind.valid));
     if(borrowing)pn_cache_pin(&r->cache);
     pn_status_t status=pn_epub_reader_prepare_impl(handle,intent,jump,out);if(borrowing)pn_cache_unpin(&r->cache);pn_profile_end(&span,status);return status;
 }
@@ -260,6 +287,8 @@ static pn_status_t complete_impl(pn_epub_reader_t *handle,const pn_epub_reader_r
     else if(receipt->intent==PN_READ_PREVIOUS){if(r->history_count)r->history_count--;}
     else if(receipt->intent==PN_READ_FIRST || receipt->intent==PN_READ_JUMP)r->history_count=0;
     r->visible=receipt->anchor;r->has_visible=true;
+    // 只有成功呈现才能改变模型首选槽，缓存缺失/忙不改变阅读回执。/ Only successful presentation changes the preferred model slot; missing/busy caches never alter reading receipts.
+    (void)pn_xhtml_cache_select(r->epub,r->visible.begin.path,r->salt);
     if(r->confirm){pn_epub_progress_t progress={r->book,r->visible.begin};return r->confirm(r->ctx,&progress,receipt->intent==PN_READ_NEXT || receipt->intent==PN_READ_PREVIOUS,now);}
     return PN_OK;
 }
@@ -267,6 +296,7 @@ pn_status_t pn_epub_reader_reflow(pn_epub_reader_t *handle,const pn_layout_t *la
     if(!handle || !handle->impl || !layout_valid(layout))return PN_INVALID;
     reader_t *r=handle->impl;
     if(r->token.generation==UINT32_MAX)return PN_LIMIT;
+    prefetch_abort(r);r->prefetch_failed=false;memset(&r->candidate_target,0,sizeof r->candidate_target);
     r->layout=*layout;r->token.generation++;r->index=NULL;r->preparing=false;r->page->valid=false;r->history_count=0;cached_free(&r->ahead);cached_free(&r->behind);return PN_OK;
 }
 pn_status_t pn_epub_reader_complete(pn_epub_reader_t *handle,const pn_epub_reader_receipt_t *receipt,bool success,uint64_t now){
@@ -274,5 +304,5 @@ pn_status_t pn_epub_reader_complete(pn_epub_reader_t *handle,const pn_epub_reade
     pn_cancel_scope_t shield;pn_cancel_enter(&shield,NULL,NULL);
     pn_status_t status=complete_impl(handle,receipt,success,now);pn_cancel_leave(&shield);return status;
 }
-void pn_epub_reader_trim(pn_epub_reader_t *handle){if(handle && handle->impl){reader_t *r=handle->impl;cached_free(&r->ahead);cached_free(&r->behind);}}
+void pn_epub_reader_trim(pn_epub_reader_t *handle){if(handle && handle->impl){reader_t *r=handle->impl;prefetch_abort(r);cached_free(&r->ahead);cached_free(&r->behind);}}
 void pn_epub_reader_index(pn_epub_reader_t *handle,pn_page_index_t *index){if(handle && handle->impl)((reader_t *)handle->impl)->index=index;}

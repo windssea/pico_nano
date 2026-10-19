@@ -6,9 +6,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-typedef struct {uint8_t *bytes;size_t size,read_bytes;unsigned reads;bool in_step,cancel,after_cancel;} memory_t;
+typedef struct {uint8_t *bytes;size_t size,read_bytes;unsigned reads;bool in_step,cancel,after_cancel,fail_read;} memory_t;
 static pn_status_t memory_read(void *ctx,uint64_t at,uint8_t *out,size_t cap,size_t *n){
-    memory_t *m=ctx;if(at>m->size)return PN_IO;if(m->in_step)assert(cap<=4096);size_t take=m->size-(size_t)at<cap?m->size-(size_t)at:cap;memcpy(out,m->bytes+at,take);*n=take;m->reads++;m->read_bytes+=take;if(m->after_cancel)m->cancel=true;return PN_OK;
+    memory_t *m=ctx;if(m->fail_read){m->fail_read=false;m->reads++;*n=0;return PN_UNSUPPORTED;}if(at>m->size)return PN_IO;if(m->in_step)assert(cap<=4096);size_t take=m->size-(size_t)at<cap?m->size-(size_t)at:cap;memcpy(out,m->bytes+at,take);*n=take;m->reads++;m->read_bytes+=take;if(m->after_cancel)m->cancel=true;return PN_OK;
 }
 static memory_t load(const char *path){
     FILE *f=fopen(path,"rb");assert(f);assert(!fseek(f,0,SEEK_END));long size=ftell(f);assert(size>0);rewind(f);
@@ -70,7 +70,15 @@ int main(int argc,char **argv){
             }
             // 未喂入也必须与整体打开一致（全部回退随机读）。/ Without feeding the result must also match the whole open (all random reads).
             pn_zip_scan_t cold={0};pn_zip_t other={0};assert(pn_zip_scan_begin(&cold,&pool,&source)==PN_OK);
+            m.reads=0;
             assert((round<4?pn_zip_scan_finish(&cold,&other):finish_job(&cold,&other,&m))==expected);(void)pn_zip_close(&other);
+            if(round==4 && expected==PN_OK){
+                unsigned cached_reads=m.reads;size_t source_cap=pool.cache_caps[PN_CACHE_SOURCE];pool.cache_caps[PN_CACHE_SOURCE]=0;
+                assert(pn_zip_scan_begin(&cold,&pool,&source)==PN_OK);m.reads=0;assert(finish_job(&cold,&other,&m)==PN_OK);assert(m.reads>=cached_reads);
+                printf("ZIP finish read calls %u -> %u (same verified entries)\n",m.reads,cached_reads);assert(pn_zip_close(&other)==PN_OK);pool.cache_caps[PN_CACHE_SOURCE]=source_cap;
+                // 真实源错误不能被当作可选读窗拒绝而悄悄重试。/ A real source error must not be mistaken for an optional-window decline and silently retried.
+                assert(pn_zip_scan_begin(&cold,&pool,&source)==PN_OK);m.reads=0;m.fail_read=true;assert(finish_job(&cold,&other,&m)==PN_UNSUPPORTED && m.reads==1 && !other.impl);
+            }
             pn_zip_scan_t dropped={0};assert(pn_zip_scan_begin(&dropped,&pool,&source)==PN_OK);pn_zip_scan_abort(&dropped);pn_zip_scan_abort(&dropped);assert(!dropped.impl);
         }
         if(expected==PN_OK)assert(pn_zip_close(&whole)==PN_OK);

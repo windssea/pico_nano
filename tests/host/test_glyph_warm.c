@@ -27,9 +27,9 @@ int main(int argc,char **argv){assert(argc==3);
   assert((kind?pn_epub_app_open(&epub,&p,argv[2],NULL,NULL,44,0):pn_reader_app_open(&app,&p,argv[1],NULL,NULL,44,0))==PN_OK);
   assert((kind?pn_epub_app_step(&epub,PN_APP_OPEN,1,present,NULL):pn_reader_app_step(&app,PN_APP_OPEN,1,present,NULL))==PN_OK);
   pn_txt_progress_t current={0},next={0};pn_epub_progress_t ecurrent={0},enext={0};assert((kind?pn_epub_app_progress(&epub,&ecurrent):pn_reader_app_progress(&app,&current))==PN_OK);
-  uint64_t shown=image;unsigned count=presentations;if(warm){bool pending=false;for(unsigned i=0;i<200;i++){pn_status_t s=kind?pn_epub_app_prefetch(&epub):pn_reader_app_prefetch(&app);assert(s==PN_OK || s==PN_EMPTY);if(!i)pending=kind?pn_epub_app_warm_pending(&epub):pn_reader_app_warm_pending(&app);}
-   // 首轮后仍有字形待预热，循环结束后全部完成。/ Glyphs remain after the first round and are all warmed by the end.
-   assert(pending && !(kind?pn_epub_app_warm_pending(&epub):pn_reader_app_warm_pending(&app)));assert(presentations==count && image==shown);
+  uint64_t shown=image;unsigned count=presentations;if(warm){bool pending=false,finished=false;unsigned ticks=0;for(;ticks<4000;ticks++){pn_status_t s=kind?pn_epub_app_prefetch(&epub):pn_reader_app_prefetch(&app);assert(s==PN_OK || s==PN_EMPTY);bool active=kind?pn_epub_app_warm_pending(&epub):pn_reader_app_warm_pending(&app);pending|=active;if(s==PN_EMPTY && !active){finished=true;break;}}
+   // 等到真实任务静止，不假定更小工作片仍在固定200轮内结束；上限只作卡死保护。/ Wait for real quiescence rather than assuming smaller slices finish in 200 ticks; the limit is only a hang guard.
+   printf("Warm completion %s: ticks=%u pending_seen=%u finished=%u\n",kind?"EPUB":"TXT",ticks,pending,finished);assert(pending && finished);assert(presentations==count && image==shown);
    assert((kind?pn_epub_app_progress(&epub,&enext):pn_reader_app_progress(&app,&next))==PN_OK && (kind?!memcmp(&ecurrent,&enext,sizeof enext):!memcmp(&current,&next,sizeof next)));}
   renders=0;capture_pixels=!warm;compare_pixels=warm;assert((kind?pn_epub_app_step(&epub,PN_APP_NEXT,2,present,NULL):pn_reader_app_step(&app,PN_APP_NEXT,2,present,NULL))==PN_OK);capture_pixels=compare_pixels=false;if(warm){after=renders;assert(image==expected);}else{before=renders;expected=image;}
   assert((kind?pn_epub_app_close(&epub,3):pn_reader_app_close(&app,3))==PN_OK && !p.used && !p.live);

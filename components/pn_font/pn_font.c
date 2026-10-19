@@ -193,6 +193,8 @@ static pn_status_t pn_font_open_impl(pn_font_t *font,pn_pool_t *pool,const pn_te
     if(source->validate){pn_status_t s=source->validate(source->ctx);if(s!=PN_OK)return s;}
     // 所有文件字体共用源端缓存；未知/跨池源保留原读取路径。/ All file fonts share their source cache; unknown or cross-pool sources retain their existing read path.
     (void)pn_text_file_cache_bind(source,pool);
+    // 随机字形冷读不盲目搬运整4KiB；大请求仍自动覆盖，不改变原字体解析/提示/灰阶。/ Cold random glyph reads avoid blindly fetching 4 KiB; larger requests still fit automatically, preserving font parsing/hinting/grayscale.
+    (void)pn_text_file_cache_window(source,1024);
     engine_t *e=pn_alloc_tagged(pool,PN_MEM_FONT,sizeof *e);if(!e)return PN_NO_MEMORY;memset(e,0,sizeof *e);e->pool=pool;e->source=*source;e->resident_ui=source->read_at==harmony_ui_read || (system_source.ctx && source->ctx==system_source.ctx && source->read_at==system_source.read_at);
     e->memory=(struct FT_MemoryRec_){e,allocate,release,resize};
     e->stream.size=(unsigned long)source->size;e->stream.descriptor.pointer=e;e->stream.read=stream_read;
@@ -233,7 +235,8 @@ static pn_status_t ui_fallback(pn_font_t *font,pn_font_t **out){
     if(s==PN_OK)*out=&e->ui_fallback;
     return s;
 }
-static pn_status_t load(pn_font_t *font,uint32_t cp,bool render) {
+static void advance_promote(adv_t *,unsigned,adv_t);
+static pn_status_t load_impl(pn_font_t *font,uint32_t cp,bool render) {
     if(!font || !font->impl || cp>0x10ffff || (cp>=0xd800 && cp<=0xdfff))return PN_INVALID;
     engine_t *e=font->impl;pn_status_t status=ready(e);if(status!=PN_OK)return status;
     FT_UInt glyph=FT_Get_Char_Index(e->face,cp);
@@ -242,6 +245,14 @@ static pn_status_t load(pn_font_t *font,uint32_t cp,bool render) {
     bool embolden=render && e->weight;
     glyph_job_t job={e->face,glyph,FT_LOAD_DEFAULT | (render && !embolden?FT_LOAD_RENDER:0),(FT_Pos)font->pixels*64*e->weight/48,embolden,0};
     return result(e,run_glyph(e,&job));
+}
+/// 轮廓度量/光栅分开累计，诊断端聚合输出，避免逐字串口和缓存遍历扰动。/ Measure outline metrics and rasters separately; diagnostics aggregate them without per-glyph serial output or cache walks.
+static pn_status_t load(pn_font_t *font,uint32_t cp,bool render){
+    uint64_t begin=pn_profile_time();pn_status_t s=load_impl(font,cp,render);uint64_t end=pn_profile_time();
+    engine_t *e=font?font->impl:NULL;
+    // 渲染沿用相同hinting与原advance，合成字重/位移不改字宽；复用已有表，不增加缓存。/ Rendering keeps the same hinting and original advance; weight/delta do not change width. Reuse the existing table without adding cache.
+    if(s==PN_OK && render && e->adv){FT_Pos value=e->face->glyph->advance.x;if(value>=0 && value<=INT32_MAX){adv_t *set=e->adv+hash_key(cp,font->pixels,0)%(ADV_SLOTS/ADV_WAYS)*ADV_WAYS;unsigned i=0;for(;i<ADV_WAYS;i++)if(set[i].state && set[i].cp==cp && set[i].pixels==(uint16_t)font->pixels)break;advance_promote(set,i<ADV_WAYS?i:ADV_WAYS-1,(adv_t){cp,(uint16_t)font->pixels,1,(int32_t)value});}}
+    pn_profile_observe(e?e->pool:NULL,render?"font.raster-load":"font.measure-load",s,end>=begin?end-begin:0,NULL);return s;
 }
 /// 墨水屏清晰度曲线：去掉覆盖率低于约6%的浅灰晕，部分覆盖的细笔画（楷体、宋体横画）按1-(1-t)²为主加深，满覆盖不变；只作用于新光栅，缓存保存曲线后的值。
 /// E-ink clarity curve: drop faint halos below about 6% coverage and darken partially covered thin strokes (Kai/Song hairlines) mainly by 1-(1-t)²; full coverage is unchanged. Applied to fresh rasters only, and caches hold the curved values.
@@ -280,6 +291,12 @@ static pn_status_t advance_impl(void *ctx,uint32_t cp,int32_t *advance) {
     }
     pn_cache_observe(e->pool,PN_CACHE_GLYPH,false);
     bool tab=cp==9;
+    if(e->pool->speculative && e->adv && !e->warming && !tab){
+        // 可选分页合并量宽与零相位预热：一次原质量轮廓加载同时产出advance和位图；拒绝/低内存仍回原度量。/ Optional pagination combines metrics with zero-phase warming: one full-quality outline load yields advance and bitmap; denial/low memory keeps original measurement.
+        pn_status_t warmed=pn_font_warm(font,cp,0);
+        if(warmed==PN_CANCELLED || warmed==PN_STALE_MEDIA || warmed==PN_STALE_JOB || warmed==PN_IO)return warmed;
+        if(warmed==PN_OK || warmed==PN_EMPTY)for(unsigned i=0;i<ADV_WAYS;i++)if(set[i].state==1 && set[i].cp==cp && set[i].pixels==(uint16_t)font->pixels){adv_t value=set[i];advance_promote(set,i,value);*advance=value.advance;return PN_OK;}
+    }
     pn_status_t s=load(font,tab?32:cp,false);
     if(s==PN_EMPTY){if(set)advance_promote(set,ADV_WAYS-1,(adv_t){cp,(uint16_t)font->pixels,2,0});pn_font_t *fallback;s=ui_fallback(font,&fallback);return s==PN_OK?pn_font_advance(fallback,cp,advance):s;}
     if(s!=PN_OK)return s;

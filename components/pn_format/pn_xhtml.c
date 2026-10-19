@@ -22,6 +22,7 @@ typedef struct {
     pn_pool_t *pool;pn_epub_t *epub;rule_t *rules;size_t count,capacity,total,sources;
     char *buffers[16];
     bool compat,syntax;size_t repairs; ///< 有界词法回退及原始语法错误 / Bounded lexical fallback and original syntax failure
+    pn_status_t (*load)(void *,const char *);void *load_ctx; ///< 异步样式依赖适配，NULL保持同步 / Asynchronous stylesheet dependency adapter; NULL stays synchronous
 } sheet_t;
 #include "pn_xhtml_compat.inc"
 static pn_status_t body_xml(sheet_t *sheet,pn_pool_t *pool,const pn_xml_input_t *input,const pn_xml_hooks_t *hooks,void *ctx,const uint8_t salt[16]){
@@ -41,6 +42,8 @@ typedef struct {
     sheet_t *sheet;
     frame_t frames[PN_XML_DEPTH_MAX+1];unsigned depth,bodies;bool root,line_text,pending;
     pn_xhtml_event_t pending_space;pn_xhtml_sink_t sink;void *ctx;const char *base;pn_xhtml_stats_t stats;
+    pn_xhtml_done_t quiet; ///< 仅单调完成的可选消费者省略事件，仍核对全部结构/样式/统计 / Omit events only for monotonic optional completion, retaining all structure/style/stat checks
+    struct {char tag[16];size_t rules;pn_xhtml_style_t before,after;bool valid;} style_memo; ///< 无id/class/inline的同基样式精确复用 / Exact same-base style reuse without id/class/inline declarations
 } parser_t;
 static const char *attr(const char *const *attrs,const char *name){
     for(size_t i=0;attrs[i];i+=2)if(!strcmp(attrs[i],name))return attrs[i+1];
@@ -49,7 +52,7 @@ static const char *attr(const char *const *attrs,const char *name){
 static pn_xhtml_position_t position(frame_t *f,pn_xhtml_position_kind_t kind){
     return (pn_xhtml_position_t){.element=f->element,.offset=kind==PN_XHTML_ELEMENT?0:f->offset,.run=kind==PN_XHTML_ELEMENT?0:f->run,.kind=kind};
 }
-static pn_status_t send(parser_t *p,pn_xhtml_event_t *event){pn_status_t cancelled=pn_cancel_checkpoint();return cancelled!=PN_OK?cancelled:p->sink?p->sink(p->ctx,event):PN_OK;}
+static pn_status_t send(parser_t *p,pn_xhtml_event_t *event){pn_status_t cancelled=pn_cancel_checkpoint();return cancelled!=PN_OK?cancelled:p->quiet && p->quiet(p->ctx)?PN_OK:p->sink?p->sink(p->ctx,event):PN_OK;}
 static pn_status_t flush_space(parser_t *p){
     if(!p->pending)return PN_OK;
     p->pending=false;p->stats.text_codepoints++;return send(p,&p->pending_space);
@@ -244,13 +247,21 @@ static pn_status_t start(void *ctx,const char *name,const char *const *attrs){
     if(!strcmp(local,"pre"))f->style.pre=true;
     f->block=block(local);
     if(f->block==PN_XHTML_HEADING){f->style.heading=(unsigned)(local[1]-'0');f->style.bold=true;}
-    cascade_t cascade={0};
-    if(p->sheet && html)for(size_t i=0;i<p->sheet->count;i++){
+    const char *css_id=attr(attrs,"id"),*classes=attr(attrs,"class"),*declarations=attr(attrs,"style");
+    bool memo=html && !css_id && !classes && !declarations && strlen(local)<sizeof p->style_memo.tag;
+    size_t rules=p->sheet?p->sheet->count:0;
+    if(memo && p->style_memo.valid && p->style_memo.rules==rules && !strcmp(p->style_memo.tag,local) && !memcmp(&p->style_memo.before,&f->style,sizeof f->style))f->style=p->style_memo.after;
+    else{
+    pn_xhtml_style_t before=f->style;cascade_t cascade={0};
+    if(p->sheet && html)for(size_t i=0;i<rules;i++){
         rule_t *rule=&p->sheet->rules[i];
-        if(selector(rule->selector,local,attr(attrs,"id"),attr(attrs,"class"),NULL))inline_style(&f->style,rule->declarations,&cascade,rule->specificity);
+        if(selector(rule->selector,local,css_id,classes,NULL))inline_style(&f->style,rule->declarations,&cascade,rule->specificity);
     }
-    inline_style(&f->style,attr(attrs,"style"),&cascade,UINT32_C(0x01000000));
+    inline_style(&f->style,declarations,&cascade,UINT32_C(0x01000000));
     f->style.hidden=f->style.hidden || cascade.display_hidden || cascade.visibility_hidden;
+    // 只记同标签、完整继承基样式及规则数；任何属性/基样式变化仍走原级联。/ Memoize only the same tag, complete inherited base and rule count; attribute/base changes retain the original cascade.
+    if(memo){strcpy(p->style_memo.tag,local);p->style_memo.rules=rules;p->style_memo.before=before;p->style_memo.after=f->style;p->style_memo.valid=true;}
+    }
     const char *id=attr(attrs,"id");if(!id)id=attr(attrs,"http://www.w3.org/XML/1998/namespace|id");
     if(id && *id){if(strlen(id)>=PN_RESOURCE_FRAGMENT_MAX)return PN_LIMIT;
         pn_xhtml_event_t event={.kind=PN_XHTML_ANCHOR,.position=position(f,PN_XHTML_ELEMENT),.style=f->style,.value=id};
@@ -277,6 +288,19 @@ static pn_status_t text(void *ctx,const char *value,size_t n){
     parser_t *p=ctx;frame_t *f=&p->frames[p->depth];
     if(f->boundary){if(f->seen_text){if(f->run==UINT32_MAX)return PN_LIMIT;f->run++;}f->offset=0;f->boundary=false;}
     f->seen_text=true;
+    if(p->quiet && p->quiet(p->ctx)){
+        // 窗口已满后不再构造逐字样式/事件；UTF8、位置溢出、空白折叠和完整统计照常验证。/ Once the window fills, omit per-scalar styles/events while retaining UTF-8, offset overflow, whitespace folding and complete stats.
+        for(size_t i=0;i<n;){size_t used;uint32_t cp;pn_status_t s=scalar(value+i,n-i,&used,&cp);if(s!=PN_OK)return s;i+=used;
+            if(f->offset==UINT64_MAX)return PN_LIMIT;
+            f->offset++;
+            if(!f->body || f->style.hidden || f->foreign)continue;
+            bool space=cp==32 || cp==9 || cp==10 || cp==13;
+            if(!f->style.pre && space){if(p->line_text && !p->pending)p->pending=true;continue;}
+            if(p->pending){p->stats.text_codepoints++;p->pending=false;}
+            p->stats.text_codepoints++;p->line_text=true;
+        }
+        return PN_OK;
+    }
     for(size_t i=0;i<n;){size_t used;uint32_t cp;pn_status_t status=scalar(value+i,n-i,&used,&cp);if(status!=PN_OK)return status;i+=used;
         pn_xhtml_event_t event={.kind=PN_XHTML_TEXT,.position=position(f,PN_XHTML_TEXT_POSITION),.style=f->style,.codepoint=cp};
         if(f->offset==UINT64_MAX)return PN_LIMIT;
@@ -368,7 +392,7 @@ static pn_status_t collect_start(void *ctx,const char *name,const char *const *a
     char path[PN_ZIP_PATH_MAX],fragment[PN_RESOURCE_FRAGMENT_MAX];pn_status_t status=pn_resource_resolve(c->base,href,path,fragment);
     if(status!=PN_OK)return status;
     if(*fragment)return PN_UNSUPPORTED;
-    return sheet_load(c->sheet,path);
+    return c->sheet->load?c->sheet->load(c->sheet->load_ctx,path):sheet_load(c->sheet,path);
 }
 static pn_status_t collect_text(void *ctx,const char *value,size_t n){
     collect_t *c=ctx;if(!c->style)return PN_OK;
@@ -474,6 +498,7 @@ typedef struct {uint32_t codepoints[MODEL_TEXT_MAX];uint16_t offsets[MODEL_TEXT_
 typedef struct snapshot_write snapshot_write_t;
 typedef struct {
     pn_cache_owner_t owner;pn_pool_t *pool;model_record_t *first,*last;size_t charged;
+    size_t build_cap; ///< 可选候选的记录上限，零使用原分项额度 / Optional candidate record cap; zero uses the original class cap
     snapshot_write_t *snapshot; ///< 分步编码持有的有限暂存，独立于可回收记录 / Bounded staged encoding, separate from reclaimable records
     char path[PN_ZIP_PATH_MAX];uint8_t salt[16];pn_xhtml_stats_t stats;
     pn_xhtml_style_t styles[32];unsigned style_count;
@@ -495,6 +520,16 @@ static void model_drop(void *ctx){
     model_t *m=ctx;model_record_t *r=m->first;
     while(r){model_record_t *next=r->next;pn_free(r);r=next;}
     m->first=m->last=NULL;m->pending.count=0;m->charged=0;m->style_count=0;m->valid=m->dirty=false;m->abandoned=m->busy;model_reset_window(m);
+}
+pn_status_t pn_xhtml_cache_select(pn_epub_t *epub,const char *path,const uint8_t salt[16]){
+    if(!epub || !path || !*path || !salt)return PN_INVALID;
+    size_t ordinal;pn_status_t s=pn_cancel_checkpoint();if(s==PN_OK)s=pn_epub_spine_find(epub,path,&ordinal);if(s!=PN_OK)return s;
+    model_t *m=epub->semantic_cache,*alt=epub->semantic_cache_alt;
+    if(m && m->valid && !strcmp(m->path,path) && !memcmp(m->salt,salt,16))return PN_OK;
+    if(!alt || !alt->valid || strcmp(alt->path,path) || memcmp(alt->salt,salt,16))return PN_EMPTY;
+    if(alt->busy || (m && m->busy))return PN_BUSY;
+    epub->semantic_cache=alt;epub->semantic_cache_alt=m;
+    pn_profile_observe(alt->pool,"epub.model-promote",PN_OK,0,NULL);return PN_OK;
 }
 void pn_xhtml_cache_close(pn_epub_t *epub){
     if(!epub)return;
@@ -537,12 +572,16 @@ static void model_drop_front(model_t *m,size_t limit){
 /// 窗口模式超额时先滑动前部：焦点前保留约1/4上限，之后约1/8。/ In window mode slide the front first: about a quarter of the cap before the focus, an eighth afterwards.
 static model_record_t *model_alloc(model_t *m,size_t bytes){
     model_record_t *r=pn_cache_alloc(m->pool,PN_CACHE_CHAPTER,PN_MEM_DOCUMENT,bytes);
+    if(r && m->build_cap && (m->charged>m->build_cap || pn_alloc_size(r)>m->build_cap-m->charged)){pn_free(r);r=NULL;}
     if(r || !m->windowing)return r;
     size_t cap=m->pool->cache_caps[PN_CACHE_CHAPTER];
+    if(m->build_cap && m->build_cap<cap)cap=m->build_cap;
     if(!m->focus_seen)model_drop_front(m,cap/4u);
     else if(m->before>cap/8u)model_drop_front(m,cap/8u);
     else return NULL;
-    return pn_cache_alloc(m->pool,PN_CACHE_CHAPTER,PN_MEM_DOCUMENT,bytes);
+    r=pn_cache_alloc(m->pool,PN_CACHE_CHAPTER,PN_MEM_DOCUMENT,bytes);
+    if(r && m->build_cap && (m->charged>m->build_cap || pn_alloc_size(r)>m->build_cap-m->charged)){pn_free(r);return NULL;}
+    return r;
 }
 /// 焦点之后的失败只截断尾部，窗口仍有效；其余情况放弃模型。/ After the focus a failure only truncates the tail and keeps the window; otherwise abandon the model.
 static void model_fail(model_t *m){
@@ -638,7 +677,7 @@ static pn_status_t model_replay(model_t *m,pn_epub_t *epub,pn_xhtml_sink_t sink,
 static pn_status_t model_build(pn_pool_t *pool,pn_epub_t *epub,model_t *m,const char *path,const uint8_t salt[16],const pn_xhtml_position_t *focus,pn_xhtml_sink_t sink,pn_xhtml_done_t done,pn_xhtml_restart_t restart,void *ctx,pn_xhtml_stats_t *stats,bool window,pn_xhtml_restart_t reset){
     model_sink_t proxy={.model=m,.sink=sink,.done=done,.restart=restart,.ctx=ctx};
     bool known_compat=m->compatible && !strcmp(m->path,path) && !memcmp(m->salt,salt,16);
-    model_drop(m);m->compatible=known_compat;strcpy(m->path,path);memcpy(m->salt,salt,16);m->busy=true;m->abandoned=m->skipped=false;
+    model_drop(m);m->build_cap=0;m->compatible=known_compat;strcpy(m->path,path);memcpy(m->salt,salt,16);m->busy=true;m->abandoned=m->skipped=false;
     m->windowing=window;m->has_focus=window && focus;if(m->has_focus)m->focus=*focus;model_reset_window(m);
     pn_xhtml_stats_t candidate;pn_profile_span_t span;pn_profile_begin(&span,pool,"epub.model-build");
     pn_status_t status=parse_source(pool,epub,path,salt,model_event,&proxy,&candidate,reset,&m->compatible);
@@ -681,8 +720,7 @@ static pn_status_t pn_xhtml_parse_impl(pn_pool_t *pool,pn_epub_t *epub,const cha
     // 前台真正切到已预排的章节：把预排槽交给当前章，旧的当前模型按普通缓存让位。
     // A real foreground switch to the prefetched chapter hands the slot to the current chapter; the old current model yields like any ordinary cache.
     if(!pool->speculative && alt && alt->pool==pool && !alt->busy && alt->valid && !strcmp(alt->path,path) && !memcmp(alt->salt,salt,16) && (!m || (!m->busy && strcmp(m->path,path)))){
-        if(m){pn_cache_detach(&m->owner);model_drop(m);pn_free(m);}
-        epub->semantic_cache=alt;epub->semantic_cache_alt=NULL;m=alt;alt=NULL;
+        epub->semantic_cache=alt;epub->semantic_cache_alt=m;model_t *previous=m;m=alt;alt=previous;
     }
     bool same=m && !strcmp(m->path,path) && !memcmp(m->salt,salt,16);
     if(epub->semantic_store && !pool->speculative && (!m || !same || !m->valid)){
@@ -717,6 +755,7 @@ pn_status_t pn_xhtml_parse_window(pn_pool_t *pool,pn_epub_t *epub,const char *pa
     pn_profile_span_t span;pn_profile_begin(&span,pool,"epub.model-window");
     pn_status_t status=pn_xhtml_parse_impl(pool,epub,path,salt,focus,sink,done,restart,ctx,stats);pn_profile_end(&span,status);return status;
 }
+#include "pn_xhtml_job.inc"
 typedef struct {const char *id;bool found;pn_xhtml_position_t position;} anchor_t;
 static pn_status_t find_anchor(void *ctx,const pn_xhtml_event_t *event){
     anchor_t *a=ctx;if(event->kind!=PN_XHTML_ANCHOR || strcmp(event->value,a->id))return PN_OK;

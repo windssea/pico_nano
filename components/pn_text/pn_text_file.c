@@ -62,8 +62,8 @@ static uint8_t *cache_take_block(pn_text_file_t *file){
     if(!oldest)return NULL;
     uint8_t *data=oldest->data;old_cache->charged-=pn_alloc_size(data);*oldest=(read_slot_t){0};pool->cache_stats[PN_CACHE_SOURCE].evictions++;return data;
 }
-/* 小读取先落到对齐的4KiB块再从内存取：字体和ZIP这类随机小读很多，每次seek+read在慢介质（SD、网络盘）上代价很高。大读取直通。
- * Small reads land in an aligned 4 KiB block and are served from memory: fonts and ZIPs issue many random small reads, and each seek+read is expensive on slow media (SD, network drives). Large reads go straight through. */
+/* 小读取使用有界供数窗，默认4KiB；字体可收小窗减少无用搬运，块分配/总额度保持。大读取直通。
+ * Small reads use bounded fill windows, 4 KiB by default; fonts may narrow them without changing block allocations or total caps. Large reads bypass the cache. */
 static pn_status_t read_direct(pn_text_file_t *file,uint64_t offset,uint8_t *out,size_t cap,size_t *got) {
     // 完整扫描连续读取，不反复触发FAT定位；随机读与失败后仍重新定位。/ Read full scans sequentially without repeated FAT seeks; random reads and recovery still seek.
     if(!file->read_position_known || file->read_position!=offset){
@@ -88,10 +88,12 @@ static pn_status_t read_pooled(pn_text_file_t *file,uint64_t offset,uint8_t *out
     }
     pn_status_t status=PN_OK;
     while(*copied<cap){
-        read_cache_t *cache=file->read_cache;uint64_t position=offset+*copied,start=position&~(uint64_t)(BLOCK_BYTES-1);read_slot_t *slot=NULL,*victim=NULL;
+        unsigned window=file->cache_fill_bytes?file->cache_fill_bytes:BLOCK_BYTES;
+        size_t remaining=cap-*copied;while(window<remaining && window<BLOCK_BYTES)window*=2;
+        read_cache_t *cache=file->read_cache;uint64_t position=offset+*copied,start=position&~(uint64_t)(window-1u);read_slot_t *slot=NULL,*victim=NULL;
         if(cache)for(unsigned i=0;i<CACHE_SLOTS;i++){
             read_slot_t *candidate=&cache->slots[i];
-            if(candidate->length && candidate->start==start){slot=candidate;break;}
+            if(candidate->length && position>=candidate->start && position-candidate->start<candidate->length){slot=candidate;break;}
             if(!victim || (!candidate->data && victim->data) || (candidate->data && victim->data && candidate->age<victim->age))victim=candidate;
         }
         pn_cache_observe(pool,PN_CACHE_SOURCE,slot!=NULL);
@@ -106,7 +108,9 @@ static pn_status_t read_pooled(pn_text_file_t *file,uint64_t offset,uint8_t *out
             if(!victim->data){for(unsigned i=0;i<CACHE_SLOTS;i++)if(cache->slots[i].data && (!slot || cache->slots[i].age<slot->age))slot=&cache->slots[i];}
             else slot=victim;
             if(slot){
-                size_t want=file->size-start<BLOCK_BYTES?(size_t)(file->size-start):BLOCK_BYTES,got=0;slot->length=0;
+                // 跨对齐边界的小请求从请求起点填窗，字形不因边界强制拆成两次读；总块数/字节额度保持。/ Fill a crossing small request from its own start so glyphs do not require two reads just for alignment; block counts and byte caps stay unchanged.
+                if(cap-*copied>window-(position-start))start=position;
+                size_t want=file->size-start<window?(size_t)(file->size-start):window,got=0;slot->length=0;
                 // 正常短读继续填块，零进展/错误不发布半块；完整扫描直通仍允许调用方累加短读。/ Fill normal short reads without publishing partial blocks; zero progress/errors fail, while direct scans still let callers accumulate short reads.
                 while(got<want){size_t n=0;status=read_direct(file,start+got,slot->data+got,want-got,&n);if(status!=PN_OK || !n){status=PN_IO;break;}got+=n;}
                 if(status!=PN_OK)break;
@@ -114,7 +118,7 @@ static pn_status_t read_pooled(pn_text_file_t *file,uint64_t offset,uint8_t *out
             }
         }
         if(!slot){size_t got=0;status=read_direct(file,position,out+*copied,cap-*copied,&got);*copied+=got;break;}
-        cache_touch(pool,slot);size_t inside=(size_t)(position-start),take=slot->length-inside;
+        cache_touch(pool,slot);size_t inside=(size_t)(position-slot->start),take=slot->length-inside;
         if(take>cap-*copied)take=cap-*copied;
         memcpy(out+*copied,slot->data+inside,take);*copied+=take;
     }
@@ -182,6 +186,13 @@ pn_status_t pn_text_file_cache_bind(const pn_text_source_t *source,pn_pool_t *po
     if(file->cache_owner.pool)return file->cache_owner.pool==pool?PN_OK:PN_BUSY;
     free(file->block);file->block=NULL;file->block_length=0;
     pn_cache_attach(pool,&file->cache_owner,PN_CACHE_SOURCE,file,cache_bytes,cache_drop);return PN_OK;
+}
+pn_status_t pn_text_file_cache_window(const pn_text_source_t *source,unsigned bytes){
+    if(!source || (bytes!=512 && bytes!=1024 && bytes!=2048 && bytes!=BLOCK_BYTES))return PN_INVALID;
+    if(source->read_at!=read_at || source->validate!=validate || !source->ctx)return PN_UNSUPPORTED;
+    pn_text_file_t *file=source->ctx;pn_status_t s=validate(file);if(s!=PN_OK)return s;
+    if(source->size!=file->size)return PN_INVALID;
+    file->cache_fill_bytes=bytes;return PN_OK;
 }
 pn_status_t pn_text_file_identity_reuse(const pn_text_source_t *target,const pn_text_source_t *verified){
     if(!target || !verified)return PN_INVALID;

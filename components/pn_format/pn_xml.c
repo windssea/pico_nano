@@ -90,7 +90,8 @@ pn_status_t pn_xml_job_begin(pn_xml_job_t *job,pn_pool_t *pool,const pn_xml_inpu
     }
     s=xml_allocation_status(s,j->allocation_failed);current_pool=previous;allocation_failed=previous_failure;if(s!=PN_OK)pn_xml_job_close(job);return s;
 }
-pn_status_t pn_xml_job_step(pn_xml_job_t *job){
+pn_status_t pn_xml_job_step_diagnostic(pn_xml_job_t *job,bool *syntax){
+    if(syntax)*syntax=false;
     if(!job || !job->impl)return PN_EMPTY;
     pn_status_t s=pn_cancel_checkpoint();if(s!=PN_OK)return s;
     xml_job_t *j=job->impl;size_t n=0;s=j->input.read(j->input.ctx,j->buffer,sizeof j->buffer,&n);
@@ -102,13 +103,16 @@ pn_status_t pn_xml_job_step(pn_xml_job_t *job){
             j->total+=n;pn_pool_t *previous=current_pool;bool *previous_failure=allocation_failed;current_pool=j->pool;allocation_failed=&j->allocation_failed;
             int parsed=XML_Parse(j->owner.parser,(const char *)j->buffer,(int)n,eof);current_pool=previous;allocation_failed=previous_failure;
             s=j->owner.status;
-            if(parsed==XML_STATUS_ERROR && s==PN_OK)s=XML_GetErrorCode(j->owner.parser)==XML_ERROR_NO_MEMORY?PN_NO_MEMORY:PN_CORRUPT;
+            if(parsed==XML_STATUS_ERROR && s==PN_OK){enum XML_Error error=XML_GetErrorCode(j->owner.parser);s=error==XML_ERROR_NO_MEMORY?PN_NO_MEMORY:PN_CORRUPT;
+                if(syntax)*syntax=error==XML_ERROR_INVALID_TOKEN || error==XML_ERROR_UNDEFINED_ENTITY || error==XML_ERROR_TAG_MISMATCH;}
             s=xml_allocation_status(s,j->allocation_failed);
+            if(j->allocation_failed && syntax)*syntax=false;
         }
     }
     if(s==PN_OK && !eof)return PN_BUSY;
     pn_xml_job_close(job);return s;
 }
+pn_status_t pn_xml_job_step(pn_xml_job_t *job){return pn_xml_job_step_diagnostic(job,NULL);}
 static pn_status_t parse_xml(pn_pool_t *pool,const pn_xml_input_t *input,const pn_xml_hooks_t *hooks,void *ctx,uint64_t byte_limit,const uint8_t salt[16],bool *syntax){
     if(syntax)*syntax=false;
     if(!pool || !input || !input->read || !hooks || !salt || !byte_limit || byte_limit>32u*1024u*1024u)return PN_INVALID;

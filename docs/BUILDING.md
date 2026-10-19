@@ -53,6 +53,8 @@ tools/test_local_system_startup.py的--staged-prepare使用产品同源的源/�
 
 `semantic_steps`观察真实文件端口每次最多一次4KiB写入，并把flush/fsync/close/rename分成不同调用；覆盖暂停续写、部分写后放弃、写入/同步/替换失败和低空间/介质失效时旧包保持。`semantic_disk`另检查实际阅读器的新输入、重绘、热挂起及关闭优先释放暂存，安静后可重试；BUSY不能当作已存。底层系统调用的真实耗时不由这些软件检查证明。
 
+`semantic_snapshot`新增真实章节分槽跨会话加载、读/CRC/解码各边界取消、32个加载/解码分配点单次故障、旧单槽兼容和坏尾退路；逐有效字段核对语义，不把C结构padding当作事件内容。`semantic_file`同时覆盖同书多章共享原配额及每步4KiB读取，`source_cache`逐字节核对512/1024/2048/4096供数窗、跨界、大读取、回收和错误。
+
 `semantic_snapshot`另固定分步前版本1载荷摘要，逐准备阶段检查取消后重试、旧包未被提前交付、pin/回收及前台热复放、存储忙/端口身份变化、低内存、跨4096字节字符串和介质变化；完整事件复放与原源对照。`resource`检查基路径/片段/合并路径取消仍是`PN_CANCELLED`且输出不变，坏UTF-8仍拒绝。细阶段计时为`epub.snapshot.count/alloc/zero/header/records/crc/header-crc/offer`，设备需诊断配置，主机需Timing；这些不代替真实面板和最长系统调用测量。
 
 `xhtml_pass`将可重置冷解析与原双遍通用sink逐事件、样式、位置和全章统计对照，观察XML次数和章节供数字节；覆盖超过128KiB的流式章、后置样式隐藏无效资源、多个前置head、小页完成仍拒绝坏尾部/CRC、隐藏/重复锚点及输出保持、稀疏检查点旧值、内存回退、取消和失卡。XML供数是软件计数，不是TF物理事务；仍须可见窗口与真实面板验收。
@@ -122,7 +124,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/run_sim.ps1
 
 该工具可传`--baseline <旧cover_priority_validate>`比较同源副本的新旧缓存完整字节，记录文件端口调用与源缓存峰值；`--deny-source-cache`压低父池可选分配余量，并用独立可回收前台对象检查零驱逐、直接读取退路及像素/元数据一致。可选`--compression-probe`保留历史zlib/RLE尺寸探针，默认不执行，也不改变产品格式。端口计数/主机编码大小不能证明实卡提速。`crc32`单元以独立逐位oracle/标准向量核查任意初值与分块，`semantic_snapshot`另在每个载荷CRC块后注入取消，检查无事件/统计发布、无源XML回退及随后精确命中。
 
-`tools/test_local_semantic_probe.py`从真实EPUB生成实际语义缓存，核查跨章未命中仅152B包头读取且不申请完整包、命中完整包字节不变、正文事件一致、坏头/坏载荷回退、低内存/取消/失效介质清理；额外覆盖用户刀剑样本的容错章。可选`--baseline <旧epub_app_capture>`比较同书/字体/状态的首帧、跨章帧和缓存包。报告`build-dev/local-semantic-probe/`，文件端口计数不等于TF总线实际读量或响应时间。
+`tools/test_local_semantic_probe.py`从真实EPUB生成实际语义缓存，核查跨章新文件缺失为0载荷读取、旧单槽不匹配仅152B包头读取，且不申请完整包、命中完整包字节不变、正文事件一致、坏头/坏载荷回退、低内存/取消/失效介质清理；额外覆盖用户刀剑样本的容错章。可选`--baseline <旧epub_app_capture>`比较同书/字体/状态的首帧、跨章帧和缓存包。报告`build-dev/local-semantic-probe/`，文件端口计数不等于TF总线实际读量或响应时间。
 
 字体设置逐本核查管理全局默认、四款实际字体的单书覆盖、全局变化保留覆盖、恢复继承、取消预览及显式系统字体；副本数字前缀固定行次序，避免把Python码点顺序误当产品拼音顺序。字体探针以整组正文码点并集检查五种字号和灰阶/二值绘制，单字体缺字数量与引擎状态分开，探针通过不等于全字覆盖；当前用户样本未含完整鸿蒙系统字库，不能据此关闭其删除保护/全字补字的实际资源验收。
 

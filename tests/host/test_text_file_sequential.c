@@ -48,6 +48,10 @@ int main(void){
     // 新多块缓存的装载也必须接受正常短读，并只在完整填块后发布。/ New multi-block fills must accept normal short reads and publish only complete blocks.
     assert(pn_text_file_cache_bind(&source,&pool)==PN_OK);short_reads=true;check(&source,bytes,13,17);
     unsigned cached_reads=reads;check(&source,bytes,14,17);assert(reads==cached_reads);
+    // 移动窗口也要完整填充后发布；定位失败不改输出，正常短读补齐，重试后窗口内不读。/ Publish shifted windows only after filling completely; seek failure preserves output, normal short reads fill, and a retry leaves interior hits IO-free.
+    pn_cache_reclaim(&pool,SIZE_MAX);fail_seek=true;memset(out,0x5a,sizeof out);n=123;
+    assert(source.read_at(source.ctx,8190,out,17,&n)==PN_IO && n==123 && out[0]==0x5a);
+    short_reads=true;check(&source,bytes,8190,17);cached_reads=reads;check(&source,bytes,8191,17);assert(reads==cached_reads);
     pn_cancel_scope_t scope;pn_cancel_enter(&scope,cancelled,NULL);unsigned before=reads;n=123;
     assert(source.read_at(source.ctx,0,out,sizeof out,&n)==PN_CANCELLED && n==123 && reads==before);pn_cancel_leave(&scope);
     assert(pn_media_detach(&media)==PN_OK);n=123;

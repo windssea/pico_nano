@@ -19,7 +19,7 @@ typedef struct {char *id,*path;uint32_t index;uint64_t unpacked;pn_epub_media_t 
 typedef struct {char *idref;item_t *item;bool linear;} spine_t;
 typedef struct {
     pn_pool_t *pool;pn_zip_t *zip;pn_epub_info_t info;
-    item_t **items;size_t item_capacity;spine_t *spine;size_t spine_capacity;size_t *spine_by_zip;
+    item_t **items;size_t item_capacity;spine_t *spine;size_t spine_capacity;size_t *spine_by_path;
     uint8_t *chapter; ///< 单个已验证章节缓存 / One verified chapter cache
     size_t chapter_size,chapter_borrows; ///< 长度与活动借用数 / Size and active borrow count
     char chapter_path[PN_ZIP_PATH_MAX]; ///< 本会话的资源路径 / Resource path within this session
@@ -198,12 +198,12 @@ static void sort_ids(item_t **items,size_t count){
     for(size_t end=count;end>1;end--){item_t *swap=items[0];items[0]=items[end-1];items[end-1]=swap;sift(items,0,end-1);}
 }
 static int spine_order(epub_t *b,size_t a,size_t c){
-    uint32_t ai=b->spine[a].item->index,ci=b->spine[c].item->index;
-    if(ai!=ci)return (ai>ci)-(ai<ci);
+    int order=strcmp(b->spine[a].item->path,b->spine[c].item->path);
+    if(order)return order;
     return (a>c)-(a<c);
 }
 static void sift_spine(epub_t *b,size_t root,size_t count){
-    size_t *indices=b->spine_by_zip;
+    size_t *indices=b->spine_by_path;
     while(root<count/2){size_t child=root*2+1;
         if(child+1<count && spine_order(b,indices[child],indices[child+1])<0)child++;
         if(spine_order(b,indices[root],indices[child])>=0)break;
@@ -211,11 +211,11 @@ static void sift_spine(epub_t *b,size_t root,size_t count){
     }
 }
 static pn_status_t index_spine(epub_t *b){
-    size_t count=b->info.spine_count;b->spine_by_zip=pn_alloc_tagged(b->pool,PN_MEM_DOCUMENT,count*sizeof *b->spine_by_zip);
-    if(!b->spine_by_zip)return PN_NO_MEMORY;
-    for(size_t i=0;i<count;i++)b->spine_by_zip[i]=i;
+    size_t count=b->info.spine_count;b->spine_by_path=pn_alloc_tagged(b->pool,PN_MEM_DOCUMENT,count*sizeof *b->spine_by_path);
+    if(!b->spine_by_path)return PN_NO_MEMORY;
+    for(size_t i=0;i<count;i++)b->spine_by_path[i]=i;
     for(size_t root=count/2;root;root--)sift_spine(b,root-1,count);
-    for(size_t end=count;end>1;end--){size_t swap=b->spine_by_zip[0];b->spine_by_zip[0]=b->spine_by_zip[end-1];b->spine_by_zip[end-1]=swap;sift_spine(b,0,end-1);}
+    for(size_t end=count;end>1;end--){size_t swap=b->spine_by_path[0];b->spine_by_path[0]=b->spine_by_path[end-1];b->spine_by_path[end-1]=swap;sift_spine(b,0,end-1);}
     return PN_OK;
 }
 static item_t *find(epub_t *b,const char *id){
@@ -268,7 +268,7 @@ void pn_epub_close(pn_epub_t *epub){
     epub_t *b=epub->impl;
     for(size_t i=0;i<b->info.manifest_count;i++)pn_free(b->items[i]);
     for(size_t i=0;i<b->info.spine_count;i++)pn_free(b->spine[i].idref);
-    pn_free(b->chapter);pn_free(b->items);pn_free(b->spine);pn_free(b->spine_by_zip);pn_free(b);epub->impl=NULL;epub->semantic_store=NULL;
+    pn_free(b->chapter);pn_free(b->items);pn_free(b->spine);pn_free(b->spine_by_path);pn_free(b);epub->impl=NULL;epub->semantic_store=NULL;
 }
 static pn_status_t pn_epub_open_impl(pn_epub_t *epub,pn_pool_t *pool,pn_zip_t *zip,const uint8_t salt[16]){
     if(!epub || epub->impl || !pool || !zip || !zip->impl || !salt)return PN_INVALID;
@@ -374,11 +374,12 @@ pn_status_t pn_epub_spine(pn_epub_t *epub,size_t index,pn_epub_item_t *out){
 pn_status_t pn_epub_spine_find(pn_epub_t *epub,const char *path,size_t *index){
     if(!path || !index)return PN_INVALID;
     epub_t *b;pn_status_t status=validate(epub,&b);if(status!=PN_OK)return status;
-    uint32_t zip_index;status=pn_zip_find(b->zip,path,&zip_index);if(status!=PN_OK)return status;
+    // 路径在OPF/ZIP完整验证后已常驻，复用原索引数组；每次仍验证源，命中不反复读中央目录名称。/ Paths already reside after full OPF/ZIP validation; reuse the original index array, validating the source on every call without rereading central names on hits.
     size_t lo=0,hi=b->info.spine_count;
-    while(lo<hi){size_t mid=lo+(hi-lo)/2;if(b->spine[b->spine_by_zip[mid]].item->index<zip_index)lo=mid+1;else hi=mid;}
-    if(lo==b->info.spine_count || b->spine[b->spine_by_zip[lo]].item->index!=zip_index)return PN_EMPTY;
-    *index=b->spine_by_zip[lo];return PN_OK;
+    while(lo<hi){size_t mid=lo+(hi-lo)/2;if(strcmp(b->spine[b->spine_by_path[mid]].item->path,path)<0)lo=mid+1;else hi=mid;}
+    if(lo<b->info.spine_count && !strcmp(b->spine[b->spine_by_path[lo]].item->path,path)){*index=b->spine_by_path[lo];return PN_OK;}
+    // 未命中保留原路径合法性/非章节资源及IO错误语义，失败不改输出。/ Misses retain original path validation, non-spine and IO error semantics, preserving output on failure.
+    uint32_t zip_index;status=pn_zip_find(b->zip,path,&zip_index);return status==PN_OK?PN_EMPTY:status;
 }
 pn_status_t pn_epub_resource_open(pn_epub_t *epub,const char *path,pn_zip_stream_t *stream){
     if(!path || !stream)return PN_INVALID;

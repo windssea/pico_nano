@@ -8,6 +8,8 @@
  */
 #pragma once
 #include "pn_xhtml.h"
+typedef struct {void *impl; ///< 私有候选分页状态 / Private candidate pagination state
+} pn_epub_page_job_t;
 #include "pn_layout.h"
 #include "pn_resource.h"
 #define PN_EPUB_PAGE_IMAGES_MAX 16
@@ -49,6 +51,12 @@ typedef struct {
 pn_status_t pn_epub_page_reserve(pn_epub_page_t *,pn_pool_t *,size_t,size_t);
 /// 只释放自有缓冲，固定缓冲保持不变。/ Release only owned buffers, leaving fixed buffers untouched.
 void pn_epub_page_release(pn_epub_page_t *);
+/// 分步候选分页，借用page直到终态；未完整验证前valid保持false。/ Staged candidate pagination, borrowing page until terminal; valid stays false until fully verified.
+pn_status_t pn_epub_page_job_begin(pn_epub_page_job_t *,pn_pool_t *,pn_epub_t *,const char *,const uint8_t[16],const pn_xhtml_position_t *,const pn_layout_t *,const pn_epub_measure_t *,pn_epub_page_t *);
+/// 推进一步，BUSY待续；成功/失败自动释放job，页面仅成功时有效。/ Advance one step; BUSY continues, terminal states release the job and only success validates the page.
+pn_status_t pn_epub_page_job_step(pn_epub_page_job_t *);
+/// 取消暂定页面，无源读取；调用者仍拥有页面缓冲。/ Cancel the provisional page without source reads; caller retains page buffers.
+void pn_epub_page_job_close(pn_epub_page_job_t *);
 /// 输入流分页，start NULL为资源首；精确TEXT匹配或ELEMENT事件开启，错误清valid/count。
 /// Paginate input, NULL start means resource beginning; exact TEXT match or ELEMENT event activation; errors clear valid/count.
 pn_status_t pn_epub_page_input(pn_pool_t *pool,const pn_xml_input_t *input,const char *base,const uint8_t salt[16],const pn_xhtml_position_t *start,const pn_layout_t *layout,const pn_epub_measure_t *measure,pn_epub_page_t *page);

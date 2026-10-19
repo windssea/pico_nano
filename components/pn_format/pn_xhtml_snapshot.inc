@@ -35,21 +35,33 @@ static bool snap_style_get(const uint8_t *p,pn_xhtml_style_t *s){
     s->align=(pn_xhtml_align_t)p[20];s->bold=(p[21]&1)!=0;s->italic=(p[21]&2)!=0;s->pre=(p[21]&4)!=0;s->hidden=(p[21]&8)!=0;s->heading=p[22];return true;
 }
 static size_t snap_extra(const model_record_t *r){return r->kind==PN_XHTML_TEXT?model_text_bytes(r):(size_t)r->value_size+r->alt_size;}
-static pn_status_t snapshot_decode(model_t *m,const pn_xhtml_store_t *store,const char *path,const uint8_t salt[16],const uint8_t *data,size_t n){
-    if(!pn_xhtml_snapshot_header_matches(data,n,n,&store->book,path))return PN_EMPTY;
-    unsigned version=(unsigned)snap_get(data+4,4);
-    // 大包校验期间每4KiB检查取消，完整CRC完成后才建立模型。/ Check cancellation every 4 KiB while validating a large packet, before building any model.
-    uint32_t crc=0;for(size_t at=SNAP_HEADER;at<n;){pn_status_t s=pn_cancel_checkpoint();if(s!=PN_OK)return s;size_t bytes=n-at;if(bytes>4096u)bytes=4096u;crc=pn_crc32_update(crc,data+at,bytes);at+=bytes;}
-    if(snap_get(data+144,4)!=crc)return PN_EMPTY;
-    unsigned styles=(unsigned)snap_get(data+118,2),flags=(unsigned)snap_get(data+112,4);size_t count=(size_t)snap_get(data+136,4);if(styles>32 || flags>7 || ((flags&6u) && !(flags&1u)) || count>(n-SNAP_HEADER)/SNAP_RECORD || (size_t)styles*SNAP_STYLE>n-SNAP_HEADER)return PN_EMPTY;
+typedef struct {
+    uint8_t *data;size_t size,at,record,count;uint32_t crc;unsigned phase;
+} snapshot_read_t;
+/// CRC每步4KiB、记录每步16条；只有完整包和全部字段通过才使模型有效。/ CRC at most 4 KiB and decode at most 16 records per step; only the complete validated packet makes a model valid.
+static pn_status_t snapshot_decode_step(model_t *m,const pn_xhtml_store_t *store,const char *path,const uint8_t salt[16],snapshot_read_t *w){
+    const uint8_t *data=w->data;size_t n=w->size;pn_status_t checkpoint=pn_cancel_checkpoint();if(checkpoint!=PN_OK)return checkpoint;
+    if(w->phase==0){
+        if(!pn_xhtml_snapshot_header_matches(data,n,n,&store->book,path))return PN_EMPTY;
+        w->at=SNAP_HEADER;w->phase=1;return PN_BUSY;
+    }
+    if(w->phase==1){
+        size_t bytes=n-w->at;if(bytes>4096u)bytes=4096u;w->crc=pn_crc32_update(w->crc,data+w->at,bytes);w->at+=bytes;
+        if(w->at==n){if(snap_get(data+144,4)!=w->crc)return PN_EMPTY;w->phase=2;}return PN_BUSY;
+    }
+    if(w->phase==2){
+    unsigned version=(unsigned)snap_get(data+4,4);unsigned styles=(unsigned)snap_get(data+118,2),flags=(unsigned)snap_get(data+112,4);size_t count=(size_t)snap_get(data+136,4);if(styles>32 || flags>7 || ((flags&6u) && !(flags&1u)) || count>(n-SNAP_HEADER)/SNAP_RECORD || (size_t)styles*SNAP_STYLE>n-SNAP_HEADER)return PN_EMPTY;
     if((flags&4u) && !((data[116]==PN_XHTML_TEXT || data[116]==PN_XHTML_IMAGE || data[116]==PN_XHTML_BLOCK_OPEN) && data[117]<=PN_XHTML_PREFORMATTED))return PN_EMPTY;
     model_drop(m);m->compatible=version==2;strcpy(m->path,path);memcpy(m->salt,salt,16);m->style_count=styles;m->windowed=(flags&1)!=0;m->truncated=(flags&2)!=0;m->has_context=(flags&4)!=0;m->base=snap_get(data+120,8);m->max_dropped=snap_get(data+128,8);m->context=(pn_xhtml_event_t){.kind=(pn_xhtml_event_kind_t)data[116],.block=(pn_xhtml_block_t)data[117]};
     m->stats=(pn_xhtml_stats_t){snap_get(data+72,8),snap_get(data+80,8),snap_get(data+88,8),snap_get(data+96,8),snap_get(data+104,8)};if((!m->windowed && (m->base || m->max_dropped)) || m->max_dropped>m->stats.elements || m->stats.elements>UINT64_MAX/8 || m->stats.text_codepoints>UINT64_MAX/8 || m->stats.blocks>m->stats.elements || m->stats.images>m->stats.elements || m->stats.anchors>m->stats.elements || m->base>4*m->stats.elements+m->stats.text_codepoints)return PN_EMPTY;
     size_t at=SNAP_HEADER;for(unsigned i=0;i<styles;i++,at+=SNAP_STYLE)if(!snap_style_get(data+at,&m->styles[i]))return PN_EMPTY;
-    for(size_t i=0;i<count;i++){
+        w->at=at;w->count=count;w->phase=3;return PN_BUSY;
+    }
+    size_t at=w->at;
+    for(unsigned touched=0;touched<16 && w->record<w->count;touched++,w->record++){
         pn_status_t cancelled=pn_cancel_checkpoint();if(cancelled!=PN_OK)return cancelled;if(n-at<SNAP_RECORD)return PN_EMPTY;const uint8_t *p=data+at;at+=SNAP_RECORD;
         model_record_t v={.element=snap_get(p,8),.offset=snap_get(p+8,8),.run=(uint32_t)snap_get(p+16,4),.count=(uint16_t)snap_get(p+20,2),.value_size=(uint16_t)snap_get(p+22,2),.kind=p[24],.block=p[25],.position_kind=p[26],.style=p[27],.text=p[28]};size_t alt=(size_t)snap_get(p+30,2),bytes;
-        if(!v.element || v.element>m->stats.elements || v.kind>PN_XHTML_IMAGE || v.block>PN_XHTML_PREFORMATTED || v.position_kind>PN_XHTML_TEXT_POSITION || v.style>=styles || p[29])return PN_EMPTY;
+        if(!v.element || v.element>m->stats.elements || v.kind>PN_XHTML_IMAGE || v.block>PN_XHTML_PREFORMATTED || v.position_kind>PN_XHTML_TEXT_POSITION || v.style>=m->style_count || p[29])return PN_EMPTY;
         if(v.kind==PN_XHTML_TEXT){unsigned width=v.text&7u;if(v.position_kind!=PN_XHTML_TEXT_POSITION || !v.count || v.count>MODEL_TEXT_MAX || v.value_size || alt || (v.text&~(MODEL_SEQUENTIAL|7u)) || (width!=1 && width!=2 && width!=4))return PN_EMPTY;bytes=model_text_bytes(&v);}
         else{if(v.position_kind!=PN_XHTML_ELEMENT || v.offset || v.text || v.count>1 || (alt!=0)!=(v.count!=0) || (v.kind!=PN_XHTML_IMAGE && alt))return PN_EMPTY;bytes=(size_t)v.value_size+alt;}
         if(bytes>n-at)return PN_EMPTY;
@@ -59,8 +71,13 @@ static pn_status_t snapshot_decode(model_t *m,const pn_xhtml_store_t *store,cons
         }else{if((v.value_size && !snap_string(data+at,v.value_size)) || (alt && !snap_string(data+at+v.value_size,alt))){pn_free(r);return PN_EMPTY;}memcpy(r+1,data+at,bytes);}
         model_link(m,r);at+=bytes;
     }
+    w->at=at;if(w->record<w->count)return PN_BUSY;
     if(at!=n || pn_cancel_checkpoint()!=PN_OK)return at==n?PN_CANCELLED:PN_EMPTY;
     m->valid=true;m->dirty=false;m->abandoned=false;return PN_OK;
+}
+static pn_status_t snapshot_decode(model_t *m,const pn_xhtml_store_t *store,const char *path,const uint8_t salt[16],const uint8_t *data,size_t n){
+    snapshot_read_t w={.data=(uint8_t *)data,.size=n};pn_status_t s;
+    do{s=snapshot_decode_step(m,store,path,salt,&w);}while(s==PN_BUSY);return s;
 }
 static pn_status_t snapshot_load(model_t *m,pn_epub_t *epub,const char *path,const uint8_t salt[16]){
     const pn_xhtml_store_t *store=epub->semantic_store;if(!store || (!store->load && !store->load_for))return PN_EMPTY;pn_profile_span_t span;pn_profile_begin(&span,m->pool,"epub.model-load");uint8_t *data=NULL;size_t n=0;
@@ -76,16 +93,21 @@ struct snapshot_write {
     size_t size,count,at,extra_at;uint32_t crc; ///< 小步长度/输出/CRC游标 / Incremental sizing/output/CRC cursors
     pn_xhtml_snapshot_phase_t phase;bool header; ///< 当前阶段及部分记录的头是否已写 / Phase and header state of a partial record
 };
-bool pn_xhtml_cache_pending(const pn_epub_t *epub){return epub && epub->semantic_cache && ((const model_t *)epub->semantic_cache)->snapshot;}
+bool pn_xhtml_cache_pending(const pn_epub_t *epub){return epub && ((epub->semantic_cache && ((const model_t *)epub->semantic_cache)->snapshot) || (epub->semantic_cache_alt && ((const model_t *)epub->semantic_cache_alt)->snapshot));}
 static void snapshot_finish(model_t *m,bool retry){
     snapshot_write_t *w=m->snapshot;m->snapshot=NULL;if(!w)return;
     pn_free(w->data);pn_free(w);m->busy=false;m->dirty=retry && m->valid;pn_cache_unpin(&m->owner);
 }
-void pn_xhtml_cache_abort(pn_epub_t *epub){model_t *m=epub?epub->semantic_cache:NULL;if(m && m->snapshot)snapshot_finish(m,true);}
-void pn_xhtml_cache_retry(pn_epub_t *epub){
-    pn_xhtml_cache_abort(epub);model_t *m=epub?epub->semantic_cache:NULL;if(m && m->valid && !m->busy)m->dirty=true;
+void pn_xhtml_cache_abort(pn_epub_t *epub){
+    if(!epub)return;
+    model_t *models[]={epub->semantic_cache,epub->semantic_cache_alt};
+    for(unsigned i=0;i<2;i++)if(models[i] && models[i]->snapshot)snapshot_finish(models[i],true);
 }
-static bool snapshot_same_port(const snapshot_write_t *w,const pn_xhtml_store_t *s){return s && s->ctx==w->store.ctx && s->load==w->store.load && s->load_for==w->store.load_for && s->save==w->store.save && s->take==w->store.take && !memcmp(&s->book,&w->store.book,sizeof s->book);}
+void pn_xhtml_cache_retry(pn_epub_t *epub){
+    pn_xhtml_cache_abort(epub);if(!epub)return;model_t *models[]={epub->semantic_cache,epub->semantic_cache_alt};
+    for(unsigned i=0;i<2;i++)if(models[i] && models[i]->valid && !models[i]->busy)models[i]->dirty=true;
+}
+static bool snapshot_same_port(const snapshot_write_t *w,const pn_xhtml_store_t *s){return s && s->ctx==w->store.ctx && s->load==w->store.load && s->load_for==w->store.load_for && s->save==w->store.save && s->take==w->store.take && s->open_for==w->store.open_for && s->read_step==w->store.read_step && s->close_read==w->store.close_read && !memcmp(&s->book,&w->store.book,sizeof s->book);}
 static pn_status_t snapshot_header(model_t *m,snapshot_write_t *w){
     uint8_t *data=w->data;memcpy(data,"PNSM",4);snap_put(data+4,m->compatible?2u:1u,4);memcpy(data+8,w->store.book.sha256,32);
     pn_book_id_t key;pn_status_t s=pn_identity_bytes((const uint8_t *)m->path,strlen(m->path),&key);if(s!=PN_OK)return s;memcpy(data+40,key.sha256,32);
@@ -126,6 +148,7 @@ static pn_status_t snapshot_step_impl(pn_epub_t *epub,const char *path,pn_xhtml_
     pn_xhtml_snapshot_work_t work={0};if(out)*out=work;
     if(!epub || !path)return PN_INVALID;
     model_t *m=epub->semantic_cache;const pn_xhtml_store_t *store=epub->semantic_store;
+    model_t *alt=epub->semantic_cache_alt;if((!m || strcmp(m->path,path)) && alt && !strcmp(alt->path,path))m=alt;
     if(!m)return PN_EMPTY;
     if(m->snapshot && (strcmp(m->path,path) || !snapshot_same_port(m->snapshot,store))){snapshot_finish(m,true);return PN_STALE_JOB;}
     if(m->pool->speculative)return PN_EMPTY;
@@ -179,10 +202,18 @@ static pn_status_t snapshot_step_impl(pn_epub_t *epub,const char *path,pn_xhtml_
 pn_status_t pn_xhtml_cache_flush_step(pn_epub_t *epub,const char *path,pn_xhtml_snapshot_work_t *out){
     // 分段诊断沿用线程port；普通设备日志不输出这些细阶段。/ Phase diagnostics reuse the thread port; ordinary device logs omit these fine phases.
     static const char *const phases[]={"epub.snapshot.count","epub.snapshot.alloc","epub.snapshot.zero","epub.snapshot.header","epub.snapshot.records","epub.snapshot.crc","epub.snapshot.header-crc","epub.snapshot.offer"};
-    model_t *m=epub?epub->semantic_cache:NULL;unsigned phase=m && m->snapshot?(unsigned)m->snapshot->phase:0;if(phase>=sizeof phases/sizeof *phases)phase=0;
+    model_t *m=epub?epub->semantic_cache:NULL;model_t *alt=epub?epub->semantic_cache_alt:NULL;if(path && (!m || strcmp(m->path,path)) && alt && !strcmp(alt->path,path))m=alt;unsigned phase=m && m->snapshot?(unsigned)m->snapshot->phase:0;if(phase>=sizeof phases/sizeof *phases)phase=0;
     pn_profile_span_t span;pn_profile_begin(&span,m?m->pool:NULL,phases[phase]);pn_status_t s=snapshot_step_impl(epub,path,out);pn_profile_end(&span,s);return s;
 }
 pn_status_t pn_xhtml_cache_flush(pn_epub_t *epub,const char *path){
     pn_profile_span_t span;model_t *m=epub?epub->semantic_cache:NULL;pn_profile_begin(&span,m?m->pool:NULL,"epub.model-store");
     pn_status_t s;do{s=pn_xhtml_cache_flush_step(epub,path,NULL);}while(s==PN_BUSY && pn_xhtml_cache_pending(epub));pn_profile_end(&span,s);return s;
+}
+
+/// 仅安静时保存另一份已验证模型，不提升、不呈现或改变阅读位置。/ Quiet-time persistence of the other verified model without promotion, presentation or position changes.
+pn_status_t pn_xhtml_cache_flush_neighbor_step(pn_epub_t *epub,const char *visible,pn_xhtml_snapshot_work_t *work){
+    if(!epub || !visible)return PN_INVALID;
+    model_t *models[]={epub->semantic_cache,epub->semantic_cache_alt};
+    for(unsigned i=0;i<2;i++){model_t *m=models[i];if(m && m->valid && strcmp(m->path,visible) && (m->snapshot || (m->dirty && !m->busy)))return pn_xhtml_cache_flush_step(epub,m->path,work);}
+    return PN_EMPTY;
 }

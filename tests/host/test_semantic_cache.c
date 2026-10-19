@@ -11,7 +11,11 @@ static void bytes(digest_t *d,const void *data,size_t n){const uint8_t *p=data;f
 static pn_status_t event(void *ctx,const pn_xhtml_event_t *e){
     digest_t *d=ctx;d->count++;
     bytes(d,&e->kind,sizeof e->kind);bytes(d,&e->position.element,sizeof e->position.element);bytes(d,&e->position.offset,sizeof e->position.offset);bytes(d,&e->position.run,sizeof e->position.run);bytes(d,&e->position.kind,sizeof e->position.kind);
-    bytes(d,&e->style,sizeof e->style);bytes(d,&e->block,sizeof e->block);bytes(d,&e->codepoint,sizeof e->codepoint);
+    // 结构填充不是语义或画质；逐字段比较，分配故障后也不依赖未规定的padding。/ Struct padding is neither semantics nor image quality; compare fields without allocator-dependent padding after faults.
+    const pn_xhtml_length_t *lengths[]={&e->style.width,&e->style.height,&e->style.max_width,&e->style.max_height};
+    for(unsigned i=0;i<4;i++){bytes(d,&lengths[i]->value,sizeof lengths[i]->value);bytes(d,&lengths[i]->percent,sizeof lengths[i]->percent);}
+    bytes(d,&e->style.align,sizeof e->style.align);bytes(d,&e->style.bold,sizeof e->style.bold);bytes(d,&e->style.italic,sizeof e->style.italic);bytes(d,&e->style.pre,sizeof e->style.pre);bytes(d,&e->style.hidden,sizeof e->style.hidden);bytes(d,&e->style.heading,sizeof e->style.heading);
+    bytes(d,&e->block,sizeof e->block);bytes(d,&e->codepoint,sizeof e->codepoint);
     if(e->value)bytes(d,e->value,strlen(e->value)+1);
     if(e->alt)bytes(d,e->alt,strlen(e->alt)+1);
     if(d->reclaim && d->count==20){pn_cache_reclaim(d->pool,SIZE_MAX);assert(d->pool->cache_stats[PN_CACHE_CHAPTER].bytes>0);}

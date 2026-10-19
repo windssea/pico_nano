@@ -76,7 +76,7 @@ def main():
             result = subprocess.run([str(args.probe.resolve()), str(book), str(state), spine[chapter], spine[other]], capture_output=True, text=True, timeout=180)
             (args.output / f'{i}-probe.log').write_text(result.stdout + result.stderr, encoding='utf-8')
             match = re.search(r'probe old_bytes=(\d+) new_bytes=(\d+) packet_bytes=(\d+) peak=(\d+) used=(\d+) live=(\d+)', result.stdout)
-            assert result.returncode == 0 and match and match[5] == match[6] == '0' and int(match[2]) == 152 and packets[0].read_bytes() == original_packet, original.name
+            assert result.returncode == 0 and match and match[5] == match[6] == '0' and int(match[2]) == (0 if len(packets[0].name)==134 else 152) and packets[0].read_bytes() == original_packet, original.name
             entry = {'book': original.name, 'chapter': chapter, 'other': other, 'old_bytes': int(match[1]), 'new_bytes': int(match[2]),
                      'packet_bytes': int(match[3]), 'pool_peak_bytes': int(match[4]), 'cold_source_events_equal': True, 'cache_restored': True,
                      'version': int.from_bytes(original_packet[4:8], 'little'), 'windowed': bool(original_packet[112]&1)}

@@ -28,6 +28,8 @@ pn_status_t pn_xml_job_begin(pn_xml_job_t *,pn_pool_t *,const pn_xml_input_t *,c
 /// 每次至多读取并解析4KiB；BUSY且impl非空时待续，终态自动释放；输入前取消可原地暂停。
 /// Read/parse at most 4 KiB per step; continue on BUSY with a live impl, terminal results release state, and pre-read cancellation pauses in place.
 pn_status_t pn_xml_job_step(pn_xml_job_t *);
+/// 同step，仅标记可重试的原始词法错误，不将CRC/输入/回调错误当语法。/ Like step, marking retryable lexical errors only, never CRC/input/hook errors.
+pn_status_t pn_xml_job_step_diagnostic(pn_xml_job_t *,bool *syntax);
 /// 丢弃未验证的解析状态，不再读取源；调用方同时丢弃暂定模型。/ Discard parser state without further source reads; callers also discard provisional models.
 void pn_xml_job_close(pn_xml_job_t *);
 /// 串行消费最大32MiB/深度64/属性64，分配全走pool；回调结果为暂定，最终失败须丢弃模型。

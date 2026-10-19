@@ -40,28 +40,32 @@ int main(int argc,char **argv){
     pn_media_lease_t lease={0},state_lease={0};assert(pn_media_attach(&media,1)==PN_OK && pn_media_acquire(&media,PN_MEDIA_READ,&lease)==PN_OK && pn_media_attach(&state,1)==PN_OK && pn_media_acquire(&state,PN_MEDIA_WRITE,&state_lease)==PN_OK);
     pn_text_file_t file={0};pn_text_source_t source;pn_book_id_t book;pn_zip_t zip={0};pn_epub_t epub={0};pn_semantic_file_t cache={0};
     assert(pn_text_file_open(&file,&media,&lease,argv[1],&source)==PN_OK && pn_identity_stream_pooled(&pool,source.ctx,source.size,source.read_at,&book)==PN_OK && pn_zip_open(&zip,&pool,&source)==PN_OK && pn_epub_open(&epub,&pool,&zip,salt)==PN_OK);
-    assert(pn_semantic_file_bind(&cache,&state,&state_lease,argv[2],&book)==PN_OK);watched=cache.path;
+    assert(pn_semantic_file_bind(&cache,&state,&state_lease,argv[2],&book)==PN_OK);
+    char packet_path[PN_JOURNAL_PATH_MAX],chapter[65];pn_book_id_t chapter_key;assert(pn_identity_bytes((const uint8_t *)argv[3],strlen(argv[3]),&chapter_key)==PN_OK);
+    for(unsigned i=0;i<32;i++)snprintf(chapter+2*i,3,"%02x",chapter_key.sha256[i]);
+    assert(snprintf(packet_path,sizeof packet_path,"%.*s.%s.pnsm",(int)strlen(cache.path)-5,cache.path,chapter)>0);if(access(packet_path,F_OK))strcpy(packet_path,cache.path);watched=packet_path;
     uint64_t cold=parse(&pool,&epub,argv[3]);pn_xhtml_cache_close(&epub);uint64_t other=parse(&pool,&epub,argv[4]);pn_xhtml_cache_close(&epub);
     uint8_t *packet=NULL,*loaded=NULL;size_t n=0,size=0;trace=true;reads=0;
-    assert(cache.store.load(&cache,&pool,&packet,&n)==PN_OK && reads==n && n>PN_XHTML_SNAPSHOT_HEADER_BYTES);size_t old_bytes=reads;trace=false;
+    assert(cache.store.load_for(&cache,&pool,argv[3],&packet,&n)==PN_OK && reads==n && n>PN_XHTML_SNAPSHOT_HEADER_BYTES);size_t old_bytes=reads;trace=false;
     assert(pn_xhtml_snapshot_header_matches(packet,n,n,&book,argv[3]) && !pn_xhtml_snapshot_header_matches(packet,n,n,&book,argv[4]));
     trace=true;reads=0;assert(cache.store.load_for(&cache,&pool,argv[3],&loaded,&size)==PN_OK && size==n && reads==n && !memcmp(packet,loaded,n));pn_free(loaded);loaded=NULL;
     size_t used=pool.used,live=pool.live,attempts=pool.attempts;size=777;
-    reads=0;assert(cache.store.load_for(&cache,&pool,argv[4],&loaded,&size)==PN_EMPTY && !loaded && size==777 && reads==PN_XHTML_SNAPSHOT_HEADER_BYTES && pool.attempts==attempts && pool.used==used && pool.live==live);size_t new_bytes=reads;
+    size_t miss_bytes=strcmp(packet_path,cache.path)?0u:PN_XHTML_SNAPSHOT_HEADER_BYTES;
+    reads=0;assert(cache.store.load_for(&cache,&pool,argv[4],&loaded,&size)==PN_EMPTY && !loaded && size==777 && reads==miss_bytes && pool.attempts==attempts && pool.used==used && pool.live==live);size_t new_bytes=reads;
     pool.fail_at=pool.attempts+1;reads=0;assert(cache.store.load_for(&cache,&pool,argv[3],&loaded,&size)==PN_EMPTY && !loaded && size==777 && reads==PN_XHTML_SNAPSHOT_HEADER_BYTES && pool.used==used);pool.fail_at=0;
     pn_cancel_scope_t scope;pn_cancel_enter(&scope,cancelled,NULL);reads=0;assert(cache.store.load_for(&cache,&pool,argv[3],&loaded,&size)==PN_CANCELLED && !reads && !loaded && size==777);pn_cancel_leave(&scope);
-    epub.semantic_store=&cache.store;reads=0;parses=0;assert(parse(&pool,&epub,argv[4])==other && reads==PN_XHTML_SNAPSHOT_HEADER_BYTES && parses>0);pn_xhtml_cache_close(&epub);
+    epub.semantic_store=&cache.store;reads=0;parses=0;assert(parse(&pool,&epub,argv[4])==other && reads==miss_bytes && parses>0);pn_xhtml_cache_close(&epub);
     reads=0;parses=0;assert(parse(&pool,&epub,argv[3])==cold && reads==n);if(!(packet[112]&1))assert(!parses);pn_xhtml_cache_close(&epub);
     // 包头只可拒绝，载荷坏CRC仍完整拒绝并回到原正文。/ A header can only reject; bad payload CRC still forces a full source fallback.
-    trace=false;packet[n-1]^=1;write_packet(cache.path,packet,n);trace=true;reads=0;parses=0;assert(parse(&pool,&epub,argv[3])==cold && reads==n && parses>0);pn_xhtml_cache_close(&epub);packet[n-1]^=1;
+    trace=false;packet[n-1]^=1;write_packet(packet_path,packet,n);trace=true;reads=0;parses=0;assert(parse(&pool,&epub,argv[3])==cold && reads==n && parses>0);pn_xhtml_cache_close(&epub);packet[n-1]^=1;
     uint8_t header[PN_XHTML_SNAPSHOT_HEADER_BYTES];memcpy(header,packet,sizeof header);
     for(unsigned mode=0;mode<6;mode++){
         memcpy(packet,header,sizeof header);if(mode==0)packet[0]^=1;else if(mode==1)packet[4]=99;else if(mode==2)packet[8]^=1;else if(mode==3)packet[40]^=1;else if(mode==4)packet[140]^=1;else packet[148]^=1;
         if(mode!=5)repair_header(packet);
-        trace=false;write_packet(cache.path,packet,n);trace=true;reads=0;attempts=pool.attempts;
+        trace=false;write_packet(packet_path,packet,n);trace=true;reads=0;attempts=pool.attempts;
         assert(cache.store.load_for(&cache,&pool,argv[3],&loaded,&size)==PN_EMPTY && reads==PN_XHTML_SNAPSHOT_HEADER_BYTES && pool.attempts==attempts);
     }
-    memcpy(packet,header,sizeof header);trace=false;write_packet(cache.path,packet,n);trace=true;reads=0;lose_media=&state;
+    memcpy(packet,header,sizeof header);trace=false;write_packet(packet_path,packet,n);trace=true;reads=0;lose_media=&state;
     assert(cache.store.load_for(&cache,&pool,argv[3],&loaded,&size)==PN_STALE_MEDIA && reads==PN_XHTML_SNAPSHOT_HEADER_BYTES && !loaded && size==777);reads=0;
     assert(cache.store.load_for(&cache,&pool,argv[3],&loaded,&size)==PN_STALE_MEDIA && !reads);trace=false;
     pn_free(packet);pn_epub_close(&epub);assert(pn_zip_close(&zip)==PN_OK && pn_text_file_close(&file)==PN_OK && pn_media_release(&media,&lease)==PN_OK && pn_media_release(&state,&state_lease)==PN_OK && !pool.used && !pool.live);

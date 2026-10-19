@@ -78,3 +78,8 @@ CONFIG_LWIP_TCP_SND_BUF_DEFAULT=11520
 CONFIG_LWIP_TCP_RECVMBOX_SIZE=16
 # 自有大静态表（波形派生、水波纹载体、旁图名缓存）可标EXT_RAM_BSS放PSRAM。/ Own large static tables (derived waveforms, ripple carrier, sidecar names) may use EXT_RAM_BSS in PSRAM.
 CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
+
+# 只读TF文件用64词簇链图加速字体/章节回跳，图不足由SDK退回原寻址；每个打开的只读文件增加256B SDK堆。
+# Read-only TF files use a 64-word cluster map for font/chapter seeks; SDK falls back when the map is too small, adding 256 bytes of SDK heap per open read-only file.
+CONFIG_FATFS_USE_FASTSEEK=y
+CONFIG_FATFS_FAST_SEEK_BUFFER_SIZE=64

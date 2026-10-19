@@ -58,8 +58,18 @@ typedef void (*pn_xhtml_restart_t)(void *ctx,uint64_t order,const pn_xhtml_event
 /// Stop verified replay after done; cold sources still complete CRC/XML validation and modeling, with full-chapter stats preserved on failure.
 /// With restart, over-cap chapters keep a verified window near focus and restart resumes the order before replay; a short window restarts at zero and rebuilds from a cold parse.
 pn_status_t pn_xhtml_parse_window(pn_pool_t *,pn_epub_t *,const char *,const uint8_t salt[16],const pn_xhtml_position_t *focus,pn_xhtml_sink_t,pn_xhtml_done_t,pn_xhtml_restart_t,void *,pn_xhtml_stats_t *);
+typedef struct {void *impl; ///< 私有跨轮候选，活动时不可移动 / Private candidate across ticks; immovable while active
+} pn_xhtml_job_t;
+/// 借用出版物/消费者直到close；原模型保持pin，候选在完整XML/CSS/CRC前不可交付。/ Borrow publication/consumer until close; pin the old model and withhold candidates until complete XML/CSS/CRC verification.
+pn_status_t pn_xhtml_job_begin(pn_xhtml_job_t *,pn_pool_t *,pn_epub_t *,const char *,const uint8_t[16],const pn_xhtml_position_t *,pn_xhtml_sink_t,pn_xhtml_done_t,pn_xhtml_restart_t,void *);
+/// 模型验证每步最多4KiB解包输入，验证后最多复放4事件；流式退路未满页时24字节，满页后4KiB。BUSY待续，终态须close。/ Model verification takes at most 4 KiB unpacked input per step, then replays at most four events; the streaming fallback uses 24 bytes until the page fills, then 4 KiB. BUSY continues and terminal states require close.
+pn_status_t pn_xhtml_job_step(pn_xhtml_job_t *,pn_xhtml_stats_t *);
+/// 释放候选/暂定页及只读包句柄；已完成的验证缓存保持，不能在回调中重入，文件关闭仍可能阻塞。/ Release candidates/provisional pages and read-only packet handles, preserving verified caches; no callback reentry, and file close may block.
+void pn_xhtml_job_close(pn_xhtml_job_t *);
 /// 释放本出版物语义缓存，借用期间不释放；close使用同一入口。/ Release publication semantics unless borrowed; close uses the same entry point.
 void pn_xhtml_cache_close(pn_epub_t *);
+/// 显示确认后提升同路径/盐的完整已验证备用模型；只交换槽位，保留两份记录，忙时稍后重试，无IO。/ After display confirmation promote a fully verified alternate matching path/salt; swap slots retaining both models, retry when busy, without IO.
+pn_status_t pn_xhtml_cache_select(pn_epub_t *,const char *,const uint8_t[16]);
 #define PN_XHTML_SNAPSHOT_MAX (384u*1024u) ///< 含头的可重建序列化上限 / Rebuildable serialized size including header
 #define PN_XHTML_SNAPSHOT_HEADER_BYTES 152u ///< 固定小端包头长度 / Fixed little-endian packet header size
 /// 只筛选包头的版本/书/章节/长度/头CRC，不证明载荷或模型有效；命中仍须完整解码校验。
@@ -72,6 +82,9 @@ typedef struct pn_xhtml_store {
     pn_status_t (*save)(void *,const uint8_t *,size_t); ///< 同步借用完整包，不呈现或修改原书 / Synchronously borrow a complete packet without presenting or changing the book
     pn_status_t (*take)(void *,pn_pool_t *,uint8_t *,size_t); ///< 可选异步接管：仅OK转移池内包所有权，其他结果仍由核心释放 / Optional deferred ownership: only OK transfers the pooled packet, otherwise core frees it
     pn_status_t (*load_for)(void *,pn_pool_t *,const char *,uint8_t **,size_t *); ///< 可选章节筛选读取，优先于load；相同完整包所有权，不可仅返回包头 / Optional chapter-filtered load preferred over load; same full-packet ownership, never just a header
+    pn_status_t (*open_for)(void *,pn_pool_t *,const char *,void **,size_t *); ///< 可选分步读：筛选头后交付句柄及总长，失败不改输出 / Optional staged read: return handle/size only after header filtering
+    pn_status_t (*read_step)(void *,uint8_t *,size_t,size_t *); ///< 至多4096字节，EOF必须返回0；错误不改got / At most 4096 bytes; EOF returns zero; errors preserve got
+    void (*close_read)(void *); ///< 关闭并释放句柄，取消/失败同样调用 / Close and free the handle, including cancellation/failure
 } pn_xhtml_store_t;
 /// 空闲控制层显式同步已验证且对应path的模型；失败只影响缓存，不保存位置，不隐式关闭源。
 /// Idle controller explicitly syncs a verified model matching path; failures affect cache only, never positions or source lifetime.
@@ -86,6 +99,8 @@ typedef struct {
 pn_status_t pn_xhtml_cache_flush_step(pn_epub_t *,const char *,pn_xhtml_snapshot_work_t *work);
 /// 查询未完成编码，无IO；新输入应先abort再做前台工作。/ Query unfinished encoding without I/O; abort before foreground work on new input.
 bool pn_xhtml_cache_pending(const pn_epub_t *);
+/// 同样预算保存非显示的另一份完整已验证模型；不提升槽位、不改变位置。/ Persist the other fully verified model with the same work bounds, without slot promotion or position changes.
+pn_status_t pn_xhtml_cache_flush_neighbor_step(pn_epub_t *,const char *visible,pn_xhtml_snapshot_work_t *);
 /// 释放编码暂存和本任务的模型pin，不改已验证语义，保留可重试标记；不能在存储回调内重入。/ Release staging and this job's model pin, preserving verified semantics and retry eligibility; never reenter from a storage callback.
 void pn_xhtml_cache_abort(pn_epub_t *);
 /// 控制层放弃已接管包后允许当前已验证模型再次空闲同步；无IO、不使未验证模型有效。/ After abandoning a taken packet, allow idle retry of the currently verified model without I/O or validating a provisional model.

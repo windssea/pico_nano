@@ -192,6 +192,29 @@ static void page_restart(void *ctx,uint64_t order,const pn_xhtml_event_t *contex
     *l=(layout_t){.page=page,.layout=l->layout,.measure=l->measure,.start=l->start,.stop=l->stop,.order=order,.last_space=SIZE_MAX,.active=l->start==NULL,.matched=l->start==NULL,
         .paragraph=!context || context->kind==PN_XHTML_BLOCK_OPEN};
 }
+typedef struct {layout_t *layout;pn_layout_t geometry;pn_epub_measure_t measure;pn_xhtml_position_t start;pn_xhtml_job_t source;} page_job_t;
+void pn_epub_page_job_close(pn_epub_page_job_t *job){
+    if(!job || !job->impl)return;
+    page_job_t *j=job->impl;job->impl=NULL;pn_xhtml_job_close(&j->source);
+    if(j->layout)(void)finish(j->layout,PN_CANCELLED);
+    pn_free(j);
+}
+pn_status_t pn_epub_page_job_begin(pn_epub_page_job_t *job,pn_pool_t *pool,pn_epub_t *epub,const char *path,const uint8_t salt[16],const pn_xhtml_position_t *start,const pn_layout_t *layout,const pn_epub_measure_t *measure,pn_epub_page_t *page){
+    if(!job || !pool || !layout || !measure)return PN_INVALID;
+    if(job->impl)return PN_BUSY;
+    page_job_t *j=pn_alloc_tagged(pool,PN_MEM_LAYOUT,sizeof *j);if(!j)return PN_NO_MEMORY;
+    *j=(page_job_t){.geometry=*layout,.measure=*measure};if(start)j->start=*start;job->impl=j;
+    pn_status_t s=init(pool,start?&j->start:NULL,NULL,&j->geometry,&j->measure,page,&j->layout);
+    if(s==PN_OK)s=pn_xhtml_job_begin(&j->source,pool,epub,path,salt,start,consume,page_done,page_restart,j->layout);
+    if(s!=PN_OK)pn_epub_page_job_close(job);
+    return s;
+}
+pn_status_t pn_epub_page_job_step(pn_epub_page_job_t *job){
+    if(!job || !job->impl)return PN_EMPTY;
+    page_job_t *j=job->impl;pn_xhtml_stats_t stats;pn_status_t s=pn_xhtml_job_step(&j->source,&stats);
+    if(s!=PN_BUSY){pn_xhtml_job_close(&j->source);s=finish(j->layout,s);j->layout=NULL;pn_epub_page_job_close(job);}
+    return s;
+}
 pn_status_t pn_epub_page_input(pn_pool_t *pool,const pn_xml_input_t *input,const char *base,const uint8_t salt[16],const pn_xhtml_position_t *start,const pn_layout_t *layout,const pn_epub_measure_t *measure,pn_epub_page_t *page){
     layout_t *l;pn_status_t status=init(pool,start,NULL,layout,measure,page,&l);if(status!=PN_OK)return status;
     pn_xhtml_stats_t stats;status=pn_xhtml_parse_input(pool,input,base,salt,consume,l,&stats);return finish(l,status);

@@ -36,9 +36,22 @@ static int dump(const char *path){
     do{size_t n=0;status=compat_read(filter,bytes,sizeof bytes,&n);if(n)assert(fwrite(bytes,1,n,stdout)==n);}while(status==PN_OK);
     fprintf(stderr,"compat status=%d repairs=%zu input=%zu\n",(int)status,filter->repairs,input.at);free(filter);free(data);return status==PN_EMPTY?0:1;
 }
+/// 连续正文跨4KiB边界时与逐字供数完全等价，嵌入零字节仍拒绝。/ Plain runs crossing 4 KiB boundaries exactly match bytewise input, and embedded zero bytes still fail.
+static void bulk_boundaries(void){
+    uint8_t data[9000],reference[18000],actual[18000];memset(data,'x',sizeof data);memcpy(data+4094,"& B <Cardinal>",14);memcpy(data+8187,"<p>tail</p>",11);
+    size_t chunks[]={1,17,4096},expected=0,repairs=0;
+    for(unsigned bad=0;bad<2;bad++){
+        if(bad)data[6000]=0;
+        for(unsigned i=0;i<3;i++){input_t in={data,sizeof data,0,chunks[i],PN_EMPTY};compat_input_t filter={.source={&in,read_input}};size_t total=0;pn_status_t s;
+            do{size_t n=0;assert(total<sizeof actual);s=compat_read(&filter,actual+total,sizeof actual-total,&n);total+=n;}while(s==PN_OK);
+            if(bad)assert(s==PN_CORRUPT);else{assert(s==PN_EMPTY);if(!i){memcpy(reference,actual,total);expected=total;repairs=filter.repairs;}else assert(total==expected && filter.repairs==repairs && !memcmp(reference,actual,total));}
+        }
+    }
+}
 int main(int argc,char **argv){
     if(argc==2)return dump(argv[1]);
     assert(argc==1);
+    bulk_boundaries();
     const char *xml="<?xml version='1.0'?><html xmlns='http://www.w3.org/1999/xhtml'><body><p title='A & B'>A & B <Cardinal> <录音水晶> <字形 &abec &nbsp; &amp; &#65; &#x42;</p><!-- &raw <x> --><![CDATA[<x>&raw]]></body></html>";
     pn_pool_t pool;assert(!pn_pool_init(&pool,1024u*1024u,NULL,NULL,NULL));pn_xhtml_stats_t baseline;
     assert(parse(&pool,xml,4096,PN_EMPTY,&baseline)==PN_OK && !pool.used && !pool.live);size_t attempts=pool.attempts;

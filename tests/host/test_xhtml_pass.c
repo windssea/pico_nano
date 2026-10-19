@@ -8,9 +8,9 @@
 #include "pn_profile.h"
 #include <stdlib.h>
 static unsigned xml_calls,chapter_opens;static uint64_t chapter_bytes;static bool fail_xml_once,fail_tail;
-static unsigned known_passes,fresh_passes;
+static unsigned known_passes,fresh_passes,known_jobs,job_retries;
 static uint64_t compat_clock(void *ctx){(void)ctx;return 0;}
-static void compat_emit(void *ctx,const pn_profile_event_t *e){(void)ctx;if(!strcmp(e->phase,"epub.compat-known"))known_passes++;if(!strcmp(e->phase,"epub.compat"))fresh_passes++;}
+static void compat_emit(void *ctx,const pn_profile_event_t *e){(void)ctx;if(!strcmp(e->phase,"epub.compat-known"))known_passes++;if(!strcmp(e->phase,"epub.compat"))fresh_passes++;if(!strcmp(e->phase,"epub.prefetch.compat-known"))known_jobs++;if(!strcmp(e->phase,"epub.prefetch.xml") && e->status==PN_CORRUPT)job_retries++;}
 pn_status_t __real_pn_xml_parse(pn_pool_t *,const pn_xml_input_t *,const pn_xml_hooks_t *,void *,uint64_t,const uint8_t[16]);
 pn_status_t __wrap_pn_xml_parse(pn_pool_t *p,const pn_xml_input_t *i,const pn_xml_hooks_t *h,void *c,uint64_t limit,const uint8_t s[16]){xml_calls++;if(fail_xml_once){fail_xml_once=false;p->fail_at=p->attempts+1;}return __real_pn_xml_parse(p,i,h,c,limit,s);}
 pn_status_t __real_pn_epub_chapter_open(pn_epub_t *,const char *,pn_epub_chapter_input_t *);
@@ -27,6 +27,11 @@ static void counters(void){xml_calls=chapter_opens=0;chapter_bytes=0;}
 static pn_status_t run(pn_pool_t *p,pn_epub_t *e,const char *path,consumer_t *c,bool fast,pn_xhtml_stats_t *stats){return pn_xhtml_parse_window(p,e,path,salt,NULL,consume,complete,fast?rewind_consumer:NULL,c,stats);}
 static void equal(consumer_t a,consumer_t b,pn_xhtml_stats_t sa,pn_xhtml_stats_t sb){assert(a.digest.hash==b.digest.hash && a.digest.count==b.digest.count && !memcmp(&sa,&sb,sizeof sa));}
 static bool same_position(pn_xhtml_position_t a,pn_xhtml_position_t b){return a.element==b.element && a.run==b.run && a.offset==b.offset && a.kind==b.kind;}
+static pn_status_t staged_run(pn_pool_t *p,pn_epub_t *e,const char *path,consumer_t *c,pn_xhtml_stats_t *stats){
+    pn_xhtml_job_t job={0};pn_status_t s=pn_xhtml_job_begin(&job,p,e,path,salt,NULL,consume,complete,rewind_consumer,c);unsigned steps=0;
+    if(s==PN_OK)do{s=pn_xhtml_job_step(&job,stats);assert(++steps<100000);}while(s==PN_BUSY);
+    pn_xhtml_job_close(&job);return s;
+}
 int main(int argc,char **argv){
     assert(argc==2);pn_pool_t pool;assert(pn_pool_init(&pool,6u*1024u*1024u,NULL,NULL,NULL)==PN_OK);pn_media_t media;pn_media_init(&media);assert(pn_media_attach(&media,1)==PN_OK);pn_media_lease_t lease={0};assert(pn_media_acquire(&media,PN_MEDIA_READ,&lease)==PN_OK);pn_text_file_t f={0};pn_text_source_t source;assert(pn_text_file_open(&f,&media,&lease,argv[1],&source)==PN_OK);pn_zip_t zip={0};pn_epub_t epub={0};assert(pn_zip_open(&zip,&pool,&source)==PN_OK && pn_epub_open(&epub,&pool,&zip,salt)==PN_OK);
     const char *paths[]={"normal.xhtml","large.xhtml","late.xhtml","multi.xhtml","bare.xhtml"};
@@ -38,11 +43,35 @@ int main(int argc,char **argv){
         pn_xhtml_cache_close(&epub);pool.cache_caps[PN_CACHE_CHAPTER]=0;baseline=(consumer_t){.short_page=true};consumer_init(&baseline);assert(run(&pool,&epub,paths[i],&baseline,false,&expected)==PN_OK);
         pool.cache_caps[PN_CACHE_CHAPTER]=384u*1024u;fast=(consumer_t){.short_page=true};consumer_init(&fast);counters();assert(run(&pool,&epub,paths[i],&fast,true,&actual)==PN_OK && chapter_bytes==(uint64_t)passes*info.unpacked);equal(baseline,fast,expected,actual);
         fast=(consumer_t){.short_page=true};consumer_init(&fast);counters();assert(run(&pool,&epub,paths[i],&fast,true,&actual)==PN_OK && !xml_calls && !chapter_bytes);equal(baseline,fast,expected,actual);
+        // 分步冷源与热复放保持完整语义/统计；暂停不推进，候选关闭不留pin。/ Staged cold parsing and hot replay preserve semantics/stats; pauses do not advance and closing leaves no pins.
+        pn_xhtml_cache_close(&epub);
+        for(unsigned pass=0;pass<2;pass++){
+            consumer_t staged={.short_page=true};consumer_init(&staged);pn_xhtml_job_t job={0};pn_xhtml_stats_t staged_stats={.elements=UINT64_MAX};
+            assert(pn_xhtml_job_begin(&job,&pool,&epub,paths[i],salt,NULL,consume,complete,rewind_consumer,&staged)==PN_OK);
+            pn_status_t step;unsigned steps=0;
+            do{step=pn_xhtml_job_step(&job,&staged_stats);assert(++steps<100000);if(step==PN_BUSY)assert(staged_stats.elements==UINT64_MAX);}while(step==PN_BUSY);
+            assert(step==PN_OK);equal(baseline,staged,expected,staged_stats);pn_xhtml_job_close(&job);assert(!job.impl);
+        }
         pn_xhtml_cache_close(&epub);pool.cache_caps[PN_CACHE_CHAPTER]=0;uint64_t order,start_order;pn_xhtml_position_t point;counters();assert(pn_xhtml_window_start(&pool,&epub,paths[i],NULL,salt,&order,&start_order,&point)==PN_OK && xml_calls==passes);
         const uint64_t old_totals[]={2268,78752,2252,2268,2268};assert(order==old_totals[i]);if(i==1)assert(start_order==70146 && point.element==6 && point.run==0 && point.offset==79495 && point.kind==PN_XHTML_TEXT_POSITION);else assert(!start_order && !point.element);
         counters();assert(baseline.has_anchor && pn_xhtml_anchor(&pool,&epub,paths[i],baseline.anchor_id,salt,&point)==PN_OK && same_position(point,baseline.anchor) && xml_calls==passes);
         counters();assert(pn_xhtml_window_start(&pool,&epub,paths[i],&baseline.anchor,salt,&order,&start_order,&point)==PN_OK && xml_calls==passes && order==baseline.anchor_order && !start_order && !point.element);
     }
+    // 相邻章提升只交换已验证槽：盐/路径/忙与取消均不能提升候选，来回复放不重读。/ Neighbor promotion swaps verified slots only: salt/path/busy/cancel cannot promote candidates, and round trips replay without rereading.
+    pn_xhtml_cache_close(&epub);pool.cache_caps[PN_CACHE_CHAPTER]=384u*1024u;consumer_t first={.short_page=true};consumer_init(&first);pn_xhtml_stats_t first_stats;
+    assert(run(&pool,&epub,"normal.xhtml",&first,true,&first_stats)==PN_OK);void *original=epub.semantic_cache;
+    consumer_t next={.short_page=true};consumer_init(&next);pn_xhtml_stats_t next_stats;
+    assert(staged_run(&pool,&epub,"large.xhtml",&next,&next_stats)==PN_OK);void *neighbor=epub.semantic_cache_alt;
+    uint8_t wrong[16];memcpy(wrong,salt,16);wrong[0]^=1;
+    assert(pn_xhtml_cache_select(&epub,"large.xhtml",wrong)==PN_EMPTY && epub.semantic_cache==original);
+    pn_xhtml_job_t borrowed={0};consumer_t replay={.short_page=true};consumer_init(&replay);
+    assert(pn_xhtml_job_begin(&borrowed,&pool,&epub,"large.xhtml",salt,NULL,consume,complete,rewind_consumer,&replay)==PN_OK);
+    assert(pn_xhtml_cache_select(&epub,"large.xhtml",salt)==PN_BUSY && epub.semantic_cache==original);pn_xhtml_job_close(&borrowed);
+    assert(pn_xhtml_cache_select(&epub,"large.xhtml",salt)==PN_OK && epub.semantic_cache==neighbor && epub.semantic_cache_alt==original);
+    replay=(consumer_t){.short_page=true};consumer_init(&replay);pn_xhtml_stats_t replay_stats;counters();
+    assert(run(&pool,&epub,"normal.xhtml",&replay,true,&replay_stats)==PN_OK && !chapter_bytes);equal(first,replay,first_stats,replay_stats);
+    assert(epub.semantic_cache==original && epub.semantic_cache_alt==neighbor);
+    replay=(consumer_t){.short_page=true};consumer_init(&replay);counters();assert(staged_run(&pool,&epub,"large.xhtml",&replay,&replay_stats)==PN_OK && !chapter_bytes);equal(next,replay,next_stats,replay_stats);
     // 注入合并XML初始化失败，释放额外峰值后只回退一次，消费者不重复累计。/ Inject combined XML-init failure; release the extra peak and retry once without duplicate consumer output.
     pn_xhtml_cache_close(&epub);pool.cache_caps[PN_CACHE_CHAPTER]=0;consumer_t baseline={0};consumer_init(&baseline);pn_xhtml_stats_t expected;assert(run(&pool,&epub,"normal.xhtml",&baseline,false,&expected)==PN_OK);consumer_t recovered={0};consumer_init(&recovered);pn_xhtml_stats_t actual;counters();fail_xml_once=true;assert(run(&pool,&epub,"normal.xhtml",&recovered,true,&actual)==PN_OK && xml_calls==3 && recovered.resets==1);pool.fail_at=0;equal(baseline,recovered,expected,actual);
     recovered=(consumer_t){.fail_once=true};consumer_init(&recovered);counters();assert(run(&pool,&epub,"normal.xhtml",&recovered,true,&actual)==PN_OK && xml_calls==3 && recovered.resets==1);equal(baseline,recovered,expected,actual);
@@ -57,6 +86,24 @@ int main(int argc,char **argv){
     pn_cache_reclaim(&pool,SIZE_MAX);compat_after=(consumer_t){0};consumer_init(&compat_after);compat_again=(pn_xhtml_stats_t){.elements=12345};fail_tail=true;
     assert(run(&pool,&epub,"compatible.xhtml",&compat_after,true,&compat_again)==PN_CORRUPT && compat_again.elements==12345 && known_passes==2 && !pn_xhtml_cache_pending(&epub));
     fail_tail=false;pn_profile_port(NULL,NULL,NULL);
+    pn_xhtml_cache_close(&epub);pool.cache_caps[PN_CACHE_CHAPTER]=0;consumer_t compat_short={.short_page=true};consumer_init(&compat_short);pn_xhtml_stats_t compat_short_stats;
+    assert(run(&pool,&epub,"compatible.xhtml",&compat_short,true,&compat_short_stats)==PN_OK);pool.cache_caps[PN_CACHE_CHAPTER]=384u*1024u;
+    compat_after=(consumer_t){.short_page=true};consumer_init(&compat_after);
+    assert(staged_run(&pool,&epub,"compatible.xhtml",&compat_after,&compat_again)==PN_OK);equal(compat_short,compat_after,compat_short_stats,compat_again);
+    // 当前章的已验证兼容模式也供独立邻页槽使用，记录回收后不再重复必败的严格遍；新salt仍走原检查。/ The independent neighbor slot also inherits the current chapter's verified compatibility after record eviction; a new salt still takes the original checks.
+    pn_xhtml_cache_close(&epub);compat_after=(consumer_t){.short_page=true};consumer_init(&compat_after);
+    assert(run(&pool,&epub,"compatible.xhtml",&compat_after,true,&compat_again)==PN_OK);pn_cache_reclaim(&pool,SIZE_MAX);
+    pn_profile_port(compat_clock,compat_emit,NULL);known_jobs=job_retries=0;compat_after=(consumer_t){.short_page=true};consumer_init(&compat_after);
+    assert(staged_run(&pool,&epub,"compatible.xhtml",&compat_after,&compat_again)==PN_OK && known_jobs==1 && !job_retries);equal(compat_short,compat_after,compat_short_stats,compat_again);
+    uint8_t other_salt[16];memcpy(other_salt,salt,16);other_salt[0]^=1;compat_after=(consumer_t){.short_page=true};consumer_init(&compat_after);pn_xhtml_job_t changed={0};
+    assert(pn_xhtml_job_begin(&changed,&pool,&epub,"compatible.xhtml",other_salt,NULL,consume,complete,rewind_consumer,&compat_after)==PN_OK);
+    pn_status_t changed_status;do{changed_status=pn_xhtml_job_step(&changed,&compat_again);}while(changed_status==PN_BUSY);pn_xhtml_job_close(&changed);
+    assert(changed_status==PN_OK && known_jobs==1 && job_retries==1);pn_profile_port(NULL,NULL,NULL);
+    // 换目标后立即取消，旧兼容章不能污染普通新章的首次严格校验。/ Retargeting and immediate cancellation must not poison the new regular chapter with an old compatibility mode.
+    compat_after=(consumer_t){.short_page=true};consumer_init(&compat_after);pn_xhtml_job_t aborted={0};
+    assert(pn_xhtml_job_begin(&aborted,&pool,&epub,"normal.xhtml",salt,NULL,consume,complete,rewind_consumer,&compat_after)==PN_OK);pn_xhtml_job_close(&aborted);
+    known_jobs=job_retries=0;pn_profile_port(compat_clock,compat_emit,NULL);compat_after=(consumer_t){.short_page=true};consumer_init(&compat_after);
+    assert(staged_run(&pool,&epub,"normal.xhtml",&compat_after,&compat_again)==PN_OK && !known_jobs && !job_retries);pn_profile_port(NULL,NULL,NULL);
     const char *bad[]={"bad.xhtml","crc.xhtml"};for(unsigned i=0;i<2;i++){
         // 词法错误允许一次有界重试，但坏根仍拒绝；CRC错误不重试，均不得形成有效热缓存。/ Lexical errors get one bounded retry but a bad root still fails; CRC errors never retry, and neither path may form a valid hot cache.
         unsigned passes=i==0?2u:1u,resets=i==0?1u:0u;
@@ -66,9 +113,27 @@ int main(int argc,char **argv){
         assert(failed==PN_CORRUPT && c.digest.count==32 && untouched.elements==12345 && xml_calls==passes && c.resets==resets && !pn_xhtml_cache_pending(&epub));
         c=(consumer_t){.short_page=true};consumer_init(&c);counters();assert(run(&pool,&epub,bad[i],&c,true,&untouched)==PN_CORRUPT && xml_calls==passes && c.resets==resets && c.digest.count==32 && untouched.elements==12345);
         pn_xhtml_position_t out={.element=12345};uint64_t order=12345,start_order=12345;assert(pn_xhtml_anchor(&pool,&epub,bad[i],"large",salt,&out)==PN_CORRUPT && out.element==12345 && pn_xhtml_window_start(&pool,&epub,bad[i],NULL,salt,&order,&start_order,&out)==PN_CORRUPT && order==12345 && start_order==12345 && out.element==12345);
+        pn_xhtml_cache_close(&epub);c=(consumer_t){.short_page=true};consumer_init(&c);
+        assert(staged_run(&pool,&epub,bad[i],&c,&untouched)==PN_CORRUPT && !c.digest.count && untouched.elements==12345 && !pn_xhtml_cache_pending(&epub));
     }
     pn_xhtml_position_t unavailable={.element=12345};assert(pn_xhtml_anchor(&pool,&epub,"hidden.xhtml","secret",salt,&unavailable)==PN_UNSUPPORTED && unavailable.element==12345 && pn_xhtml_anchor(&pool,&epub,"duplicate.xhtml","dup",salt,&unavailable)==PN_CORRUPT && unavailable.element==12345);
     pn_xhtml_cache_close(&epub);consumer_t stopped={.short_page=true};consumer_init(&stopped);pn_cancel_scope_t scope;pn_cancel_enter(&scope,stop_after_page,&stopped);pn_xhtml_stats_t untouched={.elements=12345};assert(run(&pool,&epub,"large.xhtml",&stopped,true,&untouched)==PN_CANCELLED && stopped.digest.count==32 && untouched.elements==12345);pn_cancel_leave(&scope);
+    pn_xhtml_cache_close(&epub);stopped=(consumer_t){.short_page=true};consumer_init(&stopped);pn_cancel_enter(&scope,stop_after_page,&stopped);
+    assert(staged_run(&pool,&epub,"large.xhtml",&stopped,&untouched)==PN_CANCELLED && stopped.digest.count==32 && untouched.elements==12345);pn_cancel_leave(&scope);
+    pn_xhtml_cache_close(&epub);pool.cache_caps[PN_CACHE_CHAPTER]=0;consumer_t short_reference={.short_page=true};consumer_init(&short_reference);pn_xhtml_stats_t short_stats;
+    assert(run(&pool,&epub,"normal.xhtml",&short_reference,false,&short_stats)==PN_OK);
+    const size_t caps[]={0,4096,16384};
+    for(unsigned i=0;i<3;i++){pool.cache_caps[PN_CACHE_CHAPTER]=caps[i];stopped=(consumer_t){.short_page=true};consumer_init(&stopped);assert(staged_run(&pool,&epub,"normal.xhtml",&stopped,&actual)==PN_OK);equal(short_reference,stopped,short_stats,actual);pn_xhtml_cache_close(&epub);}
+    pool.cache_caps[PN_CACHE_CHAPTER]=384u*1024u;
+    // 任意分步分配失败均释放候选，之后能重新完整读取。/ Every staged allocation failure releases its candidate and permits a complete retry.
+    for(unsigned fail=1;fail<=30;fail++){
+        pn_xhtml_cache_close(&epub);stopped=(consumer_t){.short_page=true};consumer_init(&stopped);untouched=(pn_xhtml_stats_t){.elements=12345};pool.fail_at=pool.attempts+fail;
+        pn_status_t status=staged_run(&pool,&epub,"normal.xhtml",&stopped,&untouched);pool.fail_at=0;assert(status==PN_OK || status==PN_NO_MEMORY);if(status==PN_OK)equal(short_reference,stopped,short_stats,untouched);else assert(untouched.elements==12345);
+        pn_xhtml_cache_close(&epub);
+    }
+    stopped=(consumer_t){.short_page=true};consumer_init(&stopped);assert(staged_run(&pool,&epub,"normal.xhtml",&stopped,&actual)==PN_OK);
+    pn_xhtml_cache_close(&epub);untouched=(pn_xhtml_stats_t){.elements=12345};
+    stopped=(consumer_t){.short_page=true,.detach=true,.media=&media};consumer_init(&stopped);assert(staged_run(&pool,&epub,"large.xhtml",&stopped,&untouched)==PN_STALE_MEDIA && untouched.elements==12345);
     stopped=(consumer_t){.short_page=true,.detach=true,.media=&media};consumer_init(&stopped);assert(run(&pool,&epub,"large.xhtml",&stopped,true,&untouched)==PN_STALE_MEDIA && untouched.elements==12345);
     pn_epub_close(&epub);assert(pn_zip_close(&zip)==PN_OK && pn_text_file_close(&f)==PN_OK && pn_media_release(&media,&lease)==PN_OK && !pool.used && !pool.live);puts("single-pass XHTML: complete legacy event/style/position parity, full tails/CRC, late-head and OOM replay, hot windows, cancellation and stale media passed");return 0;
 }

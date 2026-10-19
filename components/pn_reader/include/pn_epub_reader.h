@@ -47,6 +47,8 @@ pn_status_t pn_epub_reader_reflow(pn_epub_reader_t *,const pn_layout_t *);
 pn_status_t pn_epub_reader_progress(pn_epub_reader_t *,pn_epub_progress_t *);
 /// 空闲NEXT预排，不修改visible/history/保存；占用原pool，取消不发布缓存。/ Idle NEXT preparation preserving visible/history/save; uses the existing pool and never publishes cancelled results.
 pn_status_t pn_epub_reader_prefetch(pn_epub_reader_t *reader);
+/// 放弃尚未完成的预排，不影响当前页或已确认位置。/ Abandon unfinished prefetch without changing the current page or confirmed location.
+void pn_epub_reader_prefetch_abort(pn_epub_reader_t *);
 typedef pn_status_t (*pn_epub_next_fn)(void *,const pn_epub_page_t *,const pn_epub_reader_anchor_t *,pn_job_token_t); ///< 只读邻页借用，不重入会话 / Read-only neighbor borrowing without reader reentry
 /// 回调期pin保护并复查媒体；不提交位置，借用只在回调内有效。/ Pin and revalidate media for a callback without committing progress; borrowing lasts only for the callback.
 pn_status_t pn_epub_reader_visit_next(pn_epub_reader_t *,pn_epub_next_fn,void *);
