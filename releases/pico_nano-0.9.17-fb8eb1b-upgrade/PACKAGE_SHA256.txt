@@ -1,0 +1,2 @@
+2d380c7fc12bdebfccfb0e885cda8550975c6645d2f3a8fb3e762f7652effb50  PicoNano-fb8eb1b-upgrade.zip
+840066656fcb33e0da63ed96ad726b4219f63949d2dcd41a38eccb1e8e4edcda  PicoNano-web-installer-fb8eb1b.zip
