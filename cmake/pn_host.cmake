@@ -57,6 +57,7 @@ add_library(pn_core STATIC ${ui_font_c} ${reading_font_c} ${harmony_font_c} ${br
     ${PN_ROOT}/components/pn_library/pn_cover.c
     ${PN_ROOT}/components/pn_personalization/pn_wallpaper.c
     ${PN_ROOT}/components/pn_personalization/pn_bookmark_lock.c
+    ${PN_ROOT}/components/pn_personalization/pn_chinese_calendar.c
     ${PN_ROOT}/components/pn_personalization/pn_wallpaper_ui.c
     ${PN_ROOT}/components/pn_personalization/pn_font_manage.c
     ${PN_ROOT}/components/pn_personalization/pn_settings_ui.c

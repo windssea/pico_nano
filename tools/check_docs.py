@@ -142,6 +142,12 @@ def main():
     fixture = json.loads((ROOT / "LICENSES/font-fixture-manifest.json").read_text(encoding="utf8"))
     if fixture["source_sha256"] != font_manifest["source_sha256"] or fixture["license"] != "OFL-1.1" or hashlib.sha256((ROOT / "tests/fixtures/font-fallback.ttf").read_bytes()).hexdigest() != fixture["output_sha256"]:
         errors.append("Fallback fixture source/license/hash differs")
+    # 新黄历来源与生成物独立校验，不改旧vendor身份。/ Verify new calendar provenance/generated data independently of existing vendor identities.
+    calendar = json.loads((ROOT / "LICENSES/calendar-manifest.json").read_text(encoding="utf8"))
+    for relative, digest in calendar["files"].items():
+        path = ROOT / relative
+        if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != digest:
+            errors.append(f"Chinese calendar source/generated hash differs: {relative}")
     if errors:
         print("\n".join(errors), file=sys.stderr)
         return 1

@@ -28,6 +28,10 @@ releases/** -text
 # 网页安装器内的固定第三方包按字节保存。/ Keep the pinned third-party installer bundle byte-exact.
 installer/vendor/** -text
 
+# 离线黄历固定上游与生成历表按摘要保存。/ Preserve pinned calendar upstream and generated tables byte-for-byte.
+tools/vendor/** -text whitespace=-blank-at-eol,-blank-at-eof
+components/pn_personalization/pn_chinese_calendar_data.inc -text
+
 # USB许可摘要按原始字节验证。/ Validate USB license digests against their original bytes.
 LICENSES/esp-tinyusb-LICENSE.txt -text
 LICENSES/tinyusb-LICENSE.txt -text

@@ -1,7 +1,8 @@
 /* SPDX-License-Identifier: Apache-2.0
- * 中文：书签锁屏和离线公历；所有数据均由控制层提供。/ English: bookmark lock and offline Gregorian calendar; all data comes from controllers.
+ * 中文：书签锁屏和离线黄历；所有数据均由控制层提供。/ English: bookmark lock and offline Chinese almanac; all data comes from controllers.
  */
 #include "pn_bookmark_lock.h"
+#include "pn_chinese_calendar.h"
 #include "pn_brand.h"
 #include "pn_widgets.h"
 #include <stdio.h>
@@ -56,17 +57,28 @@ pn_status_t pn_bookmark_lock_render(const pn_bookmark_lock_t *s,const pn_frame_t
     if(s->count){snprintf(line,sizeof line,"章节  %zu / %zu",s->section+1,s->count);TEXT(line,28,32,615,620,PN_ALIGN_LEFT);}
     TEXT("进度按原文位置估算",23,32,659,620,PN_ALIGN_LEFT);
     pn_frame_rect(frame,32,686,620,1,9);
+    TEXT("中式黄历",29,32,738,620,PN_ALIGN_LEFT);
     if(dated){
-        snprintf(line,sizeof line,"%04u 年 %u 月",year,month);TEXT(line,30,32,741,620,PN_ALIGN_CENTER);
-        static const char *week[]={"一","二","三","四","五","六","日"};
-        for(unsigned i=0;i<7;i++)TEXT(week[i],24,32+(int)i*88,787,88,PN_ALIGN_CENTER);
-        unsigned start=(weekday+7u-(day-1)%7u)%7u,days=pn_bookmark_lock_month_days(year,month);
-        for(unsigned d=1;d<=days;d++){unsigned cell=start+d-1;int x=32+(int)(cell%7)*88,y=836+(int)(cell/7)*45;
-            snprintf(line,sizeof line,"%u",d);TEXT(line,27,x,y,88,PN_ALIGN_CENTER);if(d==day)pn_w_round_outline(frame,x+17,y-29,54,39,8,2,0);}
-    }else{
-        TEXT("本月日历",30,32,760,620,PN_ALIGN_CENTER);
-        TEXT("在设置中联网校时后显示",26,32,866,620,PN_ALIGN_CENTER);
-    }
+        pn_chinese_calendar_t calendar;pn_status_t loaded=pn_chinese_calendar_lookup(year,month,day,&calendar);
+        if(loaded==PN_OK){
+            static const char *week[]={"星期一","星期二","星期三","星期四","星期五","星期六","星期日"};
+            snprintf(line,sizeof line,"%04u年%u月",year,month);TEXT(line,24,32,797,168,PN_ALIGN_CENTER);
+            snprintf(line,sizeof line,"%u",day);TEXT(line,112,32,927,168,PN_ALIGN_CENTER);
+            TEXT(calendar.lunar,25,32,978,168,PN_ALIGN_CENTER);
+            TEXT(week[weekday],25,32,1024,168,PN_ALIGN_CENTER);
+            pn_frame_rect(frame,216,774,1,296,9);
+            TEXT(calendar.ganzhi,22,238,796,414,PN_ALIGN_LEFT);
+            if(*calendar.festival)TEXT(calendar.festival,24,238,843,414,PN_ALIGN_LEFT);
+            snprintf(line,sizeof line,"节气  %s",calendar.term);TEXT(line,23,238,882,414,PN_ALIGN_LEFT);
+            pn_frame_rect(frame,238,905,414,1,11);
+            pn_frame_rect(frame,238,922,34,34,0);
+            if(status==PN_OK){status=pn_font_size(font,24);if(status==PN_OK)status=pn_w_text_ex(font,frame,"宜",242,949,28,PN_ALIGN_CENTER,15,false);}
+            if(status==PN_OK){status=pn_font_size(font,24);if(status==PN_OK)status=pn_w_text_lines(font,frame,calendar.yi,286,946,366,2,33,NULL);}
+            pn_w_outline(frame,238,1008,34,34,1,0);
+            TEXT("忌",24,242,1035,28,PN_ALIGN_CENTER);
+            if(status==PN_OK){status=pn_font_size(font,24);if(status==PN_OK)status=pn_w_text_lines(font,frame,calendar.ji,286,1032,366,2,33,NULL);}
+        }else TEXT("该日期暂无本地历表",26,32,884,620,PN_ALIGN_CENTER);
+    }else TEXT("在设置中联网校时后显示",26,32,884,620,PN_ALIGN_CENTER);
     pn_frame_rect(frame,32,1110,620,2,0);
     if(*hint)TEXT(hint,27,32,1171,620,PN_ALIGN_CENTER);
     pn_status_t restored=pn_font_size(font,original);

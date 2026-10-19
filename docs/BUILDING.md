@@ -25,6 +25,8 @@ $env:DOCKER_CONTEXT='desktop-linux'
 
 [tools/dev.py](../tools/dev.py) 固定 IDF 镜像为 `espressif/idf:v6.1@sha256:81893c71bb5e570088901f21def8684c25cd2a9020281bd01b843a7655edb18c`；SDL镜像由 [tools/docker](../tools/docker) 构建为 `pico-nano-sdl:dev`。参考仓库只读，不把依赖/波形源整理进自有代码。
 
+离线中式黄历的固定MIT源码及派生历表见`LICENSES/calendar-manifest.json`；`node tools/generate_chinese_calendar.cjs --check`复跑生成物和逐日年度摘要，不联网。主机`chinese_calendar`用同源C查询对照1970..2100全部47,847日，包含闰月、干支、节日和完整宜忌；这不代替设备时间来源、面板显示和真实睡眠验收。
+
 ## 日常命令和产物
 
 tools/test_local_system_startup.py的--staged-prepare使用产品同源的源/排版两个阶段；--sources-only在源准备后立即点击，检查0次空闲布局、1次前台布局，完整书/字体身份已就绪。--interrupt-layout --baseline-warm --baseline <独立旧观察器>在实际首屏布局完成时注入新输入取消，再点击；要求旧对象丢弃/新对象保留，点击阶段旧书SHA一次/新零次、完整三帧一致。--expect-layout用于完整候选交接，--paint-unshown继续演练原8节点正文预绘。普通PC仍重查外部修改；固定文件port仅模拟设备READ排他约束。local-samples的原准备矩阵改为分阶段，另加local-idle-source-handoff全量源后点击；中断版本对照需指定独立冻结观察器，不能把同一程序切换策略称为旧固件。hot_host/immutable另在首字度量期间及布局完成后取消，检查对象/菜单缓存保留、失败不提交进度、原帧重试及TTL/USB归还；这些是软件行为，不是TF或面板计时。

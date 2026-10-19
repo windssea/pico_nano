@@ -1,0 +1,15 @@
+{
+  "repository": "https://github.com/6tail/lunar-javascript",
+  "commit": "4c45a59f79b856125516f31aefa8295035c16afd",
+  "license": "MIT",
+  "copyright": "Copyright (c) 2018 6tail",
+  "range": "1970-01-01..2100-12-31, UTC+8 local dates",
+  "generator": "tools/generate_chinese_calendar.cjs",
+  "rules": "year at lunar new year; month at jie calendar dates (upstream sect 1); day at midnight; festivals are not holiday/workday schedules",
+  "files": {
+    "tools/vendor/lunar-javascript/lunar.js": "9750324bfe1aa63c146f8c72b1143df924466c11c8a5277d7d9225c541a18aaa",
+    "tools/vendor/lunar-javascript/LICENSE": "d9210caf1844dcf410095cea464b79800aad30dbd49df092076b9f0ddc015404",
+    "components/pn_personalization/pn_chinese_calendar_data.inc": "6345ea98620d14248de2afa8bdf4f1a404d04337b5b1e2c2e5cd22cb1b2abd44",
+    "tests/fixtures/chinese-calendar-oracle.json": "ad53c4bc8fa701f96f03c75917838531d7c4cea0bc4abdd10db4cbaca32415e3"
+  }
+}

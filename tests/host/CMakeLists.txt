@@ -354,6 +354,9 @@ add_test(NAME wallpaper COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR
 
 add_executable(test_wallpaper_ui test_wallpaper_ui.c)
 add_executable(test_bookmark_lock test_bookmark_lock.c)
+add_executable(test_chinese_calendar test_chinese_calendar.c)
+target_link_libraries(test_chinese_calendar PRIVATE pn_core)
+add_test(NAME chinese_calendar COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_chinese_calendar.py $<TARGET_FILE:test_chinese_calendar> ${PN_ROOT}/tests/fixtures/chinese-calendar-oracle.json)
 target_link_libraries(test_bookmark_lock PRIVATE pn_core)
 add_test(NAME bookmark_lock COMMAND test_bookmark_lock)
 target_link_libraries(test_wallpaper_ui PRIVATE pn_core)
