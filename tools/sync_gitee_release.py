@@ -364,7 +364,7 @@ def verify_asset(asset, remote):
 
 
 def initialize_guides(api, repository, github_repository):
-    """仅在显式首装请求时设置分发首页，并读回确认。 / Set distribution guides only on explicit initialization and verify readback."""
+    """显式更新分发首页，带上源码仓库的完整鸣谢并读回确认。 / Explicitly update distribution guides with the source repository's full credits and verify readback."""
     releases = f"https://gitee.com/{repository}/releases"
     source = f"https://github.com/{github_repository}"
     texts = {
@@ -399,6 +399,13 @@ def initialize_guides(api, repository, github_repository):
                          "Refer to each release for supported features and hardware acceptance. "
                          "USB serial installation and device Wi-Fi OTA are separate capabilities.\n"),
     }
+    # 统一维护鸣谢，分发库的相对许可证/源码链接指向原仓库。 / Maintain one credits section and resolve distribution links to the source repository.
+    _, heading, credits = (ROOT / "README.md").read_text(encoding="utf-8").partition("\n## 鸣谢\n")
+    if not heading:
+        raise ValueError("Source README is missing acknowledgements")
+    credits = re.sub(r"\]\((?!https?://|#)([^)]+)\)", lambda match: f"]({source}/blob/main/{match.group(1)})", credits)
+    for name in texts:
+        texts[name] += "\n## 鸣谢 / Acknowledgements\n" + credits
     for name, text in texts.items():
         path = f"/repos/{repository}/contents/{name}"
         old = api.request(path)

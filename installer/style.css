@@ -77,6 +77,7 @@ button:focus-visible, select:focus-visible, input:focus-visible, summary:focus-v
 .check input { width: 20px; height: 20px; margin-top: 3px; flex: none; accent-color: var(--ink); }
 .notice { border-radius: 16px; padding: 12px 16px; margin: 12px 0 0; }
 .notice.warn { background: var(--warn-bg); color: var(--warn); }
+.notice.ok { background: var(--ok-bg); color: var(--ok); }
 .notice.error { background: var(--error-bg); color: var(--error); }
 .pill { display: inline-block; margin: 0 0 8px; padding: 4px 14px; border-radius: 999px; font-weight: 600; background: var(--select); }
 .pill[data-tone="ok"] { background: var(--ok-bg); color: var(--ok); }

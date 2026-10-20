@@ -368,7 +368,7 @@ test("release picker separates same-version modes, clears destructive choices an
     append(child) { this.children.push(child); }, replaceChildren() { this.children = []; }, addEventListener(name, fn) { this.events[name] = fn; } });
   const document = { createElement: element, getElementById(id) { if (!elements.has(id)) elements.set(id, element()); return elements.get(id); } };
   const releases = [
-    { version: "1+abc", commit: "abc", mode: "app-only", files: { app: { size: 100 } } },
+    { version: "1+abc", commit: "abc", mode: "app-only", verifiedOnHardware: true, files: { app: { size: 100 } } },
     { version: "1+abc", commit: "abc", mode: "full", files: { app: { size: 100 } } },
     { version: "0.0.57", mode: "full", legacy: true },
   ];
@@ -377,9 +377,14 @@ test("release picker separates same-version modes, clears destructive choices an
   vm.runInContext(source, context);
   await vm.runInContext("init();", context);
   assert.equal(vm.runInContext("state.release.mode", context), "app-only");
+  assert.equal(document.getElementById("hw-warning").hidden, true);
+  assert.equal(document.getElementById("hw-confirmed").hidden, false);
+  assert.match(document.getElementById("release").children[0].textContent, /正式版·已真机验证/);
   const mode = document.getElementById("install-mode"); mode.value = "full"; mode.events.change();
   assert.equal(document.getElementById("release").children.length, 1);
   assert.equal(vm.runInContext("state.release.mode", context), "full");
+  assert.equal(document.getElementById("hw-warning").hidden, false);
+  assert.equal(document.getElementById("hw-confirmed").hidden, true);
   document.getElementById("clear-nvs").checked = true;
   document.getElementById("initialize-storage").checked = true;
   document.getElementById("release").events.change();
@@ -388,6 +393,8 @@ test("release picker separates same-version modes, clears destructive choices an
   assert.equal(document.getElementById("initialize-storage").checked, false);
   vm.runInContext("state.manifest.releases=state.manifest.releases.filter(r=>r.mode==='app-only'||r.legacy);selectMode();", context);
   assert.equal(vm.runInContext("state.release", context), undefined);
+  assert.equal(document.getElementById("hw-warning").hidden, true);
+  assert.equal(document.getElementById("hw-confirmed").hidden, true);
   assert.equal(document.getElementById("connect").disabled, true);
   assert.equal(document.getElementById("install").disabled, true);
   assert.match(document.getElementById("mode-note").textContent, /历史首装包/);

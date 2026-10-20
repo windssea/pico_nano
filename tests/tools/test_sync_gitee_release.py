@@ -238,6 +238,14 @@ class MirrorTests(unittest.TestCase):
         mirror.initialize_guides(api, "owner/repo", "upstream/repo")
         self.assertEqual(len(writes), 2)
         self.assertTrue(all(base64.b64decode(v["content"]).startswith(b"# PicoNano") for v in saved.values()))
+        for value in saved.values():
+            text = base64.b64decode(value["content"]).decode("utf-8")
+            self.assertIn("## 鸣谢 / Acknowledgements", text)
+            for project in ("MindReset/read_pico_firmware", "wegooo-cell/read-pico-reader", "yiifanrecyclable/PicoReader-ifEdition",
+                            "chinoryunqin/RickyOS", "CloudZao/Metalio-E-INK4", "446599/whiteos"):
+                self.assertIn("https://github.com/" + project, text)
+            self.assertIn("https://github.com/upstream/repo/blob/main/LICENSES/reference-manifest.json", text)
+            self.assertNotIn("](LICENSES/", text)
 
     def test_optional_ota_requires_matching_image_and_real_signature(self):
         from cryptography.hazmat.primitives import serialization

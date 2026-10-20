@@ -78,6 +78,40 @@ class FullPackages(unittest.TestCase):
         self.assertEqual(hashlib.sha256(copied).hexdigest(), table["sha256"])
         self.assertNotEqual(table["sha256"], release["files"]["partitionTable"]["sha256"])
 
+    def test_hardware_confirmation_matches_both_modes_by_exact_image_identity(self):
+        self.package()
+        self.upgrade()
+        (self.root / "installer").mkdir()
+        registry = {"schema": 1, "releases": [{"version": "0.6.7", "source_commit": "abcdef0" + "0" * 33,
+                    "application_sha256": hashlib.sha256(self.app).hexdigest(), "verified_on_hardware": True}]}
+        path = self.root / "releases/hardware-verification.json"
+        for field, wrong in ((None, None), ("version", "0.6.8"), ("source_commit", "abcdef0" + "1" * 33),
+                             ("application_sha256", "0" * 64)):
+            with self.subTest(field=field):
+                record = dict(registry["releases"][0])
+                if field:
+                    record[field] = wrong
+                path.write_text(json.dumps({"schema": 1, "releases": [record]}), encoding="utf-8")
+                with patch.object(installer_site, "ROOT", self.root):
+                    installer_site.build(self.root / "site")
+                releases = json.loads((self.root / "site/firmware/manifest.json").read_text())["releases"]
+                self.assertEqual(len(releases), 2)
+                self.assertTrue(all(r["verifiedOnHardware"] == (field is None) for r in releases))
+                self.assertTrue(all(r["files"]["app"]["sha256"] == hashlib.sha256(self.app).hexdigest() for r in releases))
+
+    def test_invalid_hardware_confirmation_does_not_publish_a_site(self):
+        self.upgrade()
+        (self.root / "installer").mkdir()
+        good = {"version": "0.6.7", "source_commit": "abcdef0" + "0" * 33,
+                "application_sha256": hashlib.sha256(self.app).hexdigest(), "verified_on_hardware": True}
+        for records in ([{**good, "verified_on_hardware": "true"}], [{**good, "source_commit": "abcdef0"}], [good, good]):
+            with self.subTest(records=records):
+                (self.root / "releases/hardware-verification.json").write_text(
+                    json.dumps({"schema": 1, "releases": records}), encoding="utf-8")
+                with patch.object(installer_site, "ROOT", self.root), self.assertRaisesRegex(SystemExit, "hardware verification"):
+                    installer_site.build(self.root / "site")
+                self.assertFalse((self.root / "site").exists())
+
     def test_preserving_site_without_matching_full_has_no_extra_allowlist(self):
         self.upgrade()
         (self.root / "installer").mkdir()

@@ -109,6 +109,31 @@ def read_release(folder):
     }
 
 
+def mark_hardware_verified(releases):
+    """按版本、完整源码提交和应用摘要匹配发布后的真机确认。 / Match post-release device confirmation by version, full source commit and application digest."""
+    path = ROOT / "releases/hardware-verification.json"
+    if not path.exists():
+        return
+    registry = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(registry, dict) or registry.get("schema") != 1 or not isinstance(registry.get("releases"), list):
+        raise SystemExit("Invalid hardware verification registry")
+    verified = set()
+    for record in registry["releases"]:
+        if (not isinstance(record, dict) or record.get("verified_on_hardware") is not True or
+                not all(isinstance(record.get(field), str) for field in ("version", "source_commit", "application_sha256")) or
+                not re.fullmatch(r"\d+(?:\.\d+)+", str(record.get("version", ""))) or
+                not re.fullmatch(r"[0-9a-f]{40}", str(record.get("source_commit", ""))) or
+                not re.fullmatch(r"[0-9a-f]{64}", str(record.get("application_sha256", "")))):
+            raise SystemExit("Invalid hardware verification identity")
+        key = (record["version"], record["source_commit"], record["application_sha256"])
+        if key in verified:
+            raise SystemExit("Duplicate hardware verification identity")
+        verified.add(key)
+    for release in releases:
+        key = (release["version"].split("+")[0], release["commit"], release["files"]["app"]["sha256"])
+        release["verifiedOnHardware"] = key in verified
+
+
 def build(out, latest_only=False):
     releases = []
     for folder in (ROOT / "releases").iterdir():
@@ -143,6 +168,8 @@ def build(out, latest_only=False):
             raise SystemExit(f"{release['version']}: full/upgrade application mismatch")
         release["files"]["currentPartitionTable"] = {**full["files"]["partitionTable"], "name": "current-partition-table.bin"}
         release["_current_table"] = full["_folder"] / FILES["partitionTable"]
+    # 先校验所有镜像，再匹配明确登记的正式版本，不继承其他版本的验证结论。 / Validate all images before matching explicitly recorded stable releases; never inherit another version's device status.
+    mark_hardware_verified(releases)
     if out.exists():
         shutil.rmtree(out)
     shutil.copytree(ROOT / "installer", out)

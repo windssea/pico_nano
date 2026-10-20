@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "releases": [
+    {
+      "version": "1.0.1",
+      "source_commit": "318aa8ba38504f24caa49bb76a41947e36105900",
+      "application_sha256": "70477eb41fce89f35930d936ce49fb54d84b38d37bf12b67d8522345c7c3992d",
+      "verified_on_hardware": true,
+      "confirmed_at": "2026-10-20",
+      "confirmation": "维护者确认1.0.1正式版已完成真机验证"
+    }
+  ]
+}
