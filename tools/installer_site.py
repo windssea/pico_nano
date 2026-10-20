@@ -109,7 +109,7 @@ def read_release(folder):
     }
 
 
-def build(out):
+def build(out, latest_only=False):
     releases = []
     for folder in (ROOT / "releases").iterdir():
         if not folder.is_dir():
@@ -123,6 +123,10 @@ def build(out):
     releases.sort(key=lambda r: (version_key(r["version"].split("+")[0]), r.get("mode") == "app-only", r.get("builtAt", "")), reverse=True)
     if not releases:
         raise SystemExit("releases/ has no pico_nano-<version>-esp32s3 folder")
+    # 正式分发只展示最高版本的两种安装方式，历史源码与本地包不删。 / Stable distribution lists both installation modes of the highest version, retaining history and local packages.
+    if latest_only:
+        newest = releases[0]["version"].split("+")[0]
+        releases = [item for item in releases if item["version"].split("+")[0] == newest]
     # 完整刷入后的设备也可只更新应用；额外白名单来自同源码同应用的已校验完整包。
     # Devices installed with a full package can update only the app; obtain the extra allowlist from a verified full package with identical source and app.
     for release in releases:
@@ -159,9 +163,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", type=pathlib.Path, default=ROOT / "build-dev" / "installer-site")
     parser.add_argument("--serve", type=int, metavar="PORT", help="Serve on http://localhost:PORT after building")
+    parser.add_argument("--latest-only", action="store_true", help="Publish only the highest version; keep matching upgrade/full modes")
     args = parser.parse_args()
     out = args.out.resolve()
-    build(out)
+    build(out, args.latest_only)
     if args.serve:
         class Handler(http.server.SimpleHTTPRequestHandler):
             extensions_map = {**http.server.SimpleHTTPRequestHandler.extensions_map, ".js": "text/javascript"}

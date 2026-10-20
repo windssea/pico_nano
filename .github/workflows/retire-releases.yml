@@ -1,0 +1,43 @@
+name: Retire older Gitee releases
+on:
+  workflow_dispatch:
+    inputs:
+      keep_tag:
+        description: Published stable version whose public packages must verify first
+        required: true
+        type: string
+      confirmation:
+        description: Enter REMOVE_OLDER_RELEASES to remove older release records (source tags stay)
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: gitee-release-mirror
+  cancel-in-progress: false
+jobs:
+  retire:
+    if: inputs.confirmation == 'REMOVE_OLDER_RELEASES'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python3 -m pip install -r tools/requirements-ota.txt
+      - run: python3 -m unittest discover -s tests/tools -p test_retire_gitee_releases.py -v
+      - name: Verify stable packages, record inventory, then retire older releases
+        env:
+          KEEP_TAG: ${{ inputs.keep_tag }}
+          GH_TOKEN: ${{ github.token }}
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+        run: python3 tools/retire_gitee_releases.py --keep-tag "$KEEP_TAG" --apply --report build-dev/release-retention.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: release-retention-verification
+          path: build-dev/release-retention.json

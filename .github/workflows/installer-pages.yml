@@ -18,7 +18,7 @@ jobs:
       - uses: actions/checkout@v4
       - run: node --test tests/installer/plan.test.mjs
       - run: python3 -m unittest discover -s tests/installer -p 'test_*.py' -v
-      - run: python3 tools/installer_site.py --out build-installer
+      - run: python3 tools/installer_site.py --out build-installer --latest-only
       - uses: actions/upload-pages-artifact@v3
         with:
           path: build-installer
