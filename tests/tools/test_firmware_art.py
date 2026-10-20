@@ -6,10 +6,20 @@ import tempfile
 import unittest
 import zlib
 sys.path.insert(0,str(pathlib.Path(__file__).resolve().parents[2]/'tools'))
-from build_firmware_art import resize,packed,png4,native_art,packbits,reading_bounds
+from build_firmware_art import resize,packed,png4,native_art,packbits,reading_bounds,selected_sources,READING_ART_IDS,COVER_ART_IDS
 
 
 class FirmwareArt(unittest.TestCase):
+    def test_explicit_artwork_selection_rejects_missing_or_ambiguous_ids(self):
+        self.assertEqual(READING_ART_IDS,(4,7));self.assertEqual(COVER_ART_IDS,(1,2))
+        with tempfile.TemporaryDirectory() as directory:
+            folder=pathlib.Path(directory)
+            for name in ('01_first.png','02_second.png','03_removed.png'):(folder/name).write_bytes(b'unchanged')
+            self.assertEqual([p.name for p in selected_sources(folder,COVER_ART_IDS)],['01_first.png','02_second.png'])
+            with self.assertRaises(ValueError):selected_sources(folder,READING_ART_IDS)
+            (folder/'01_duplicate.png').write_bytes(b'unchanged')
+            with self.assertRaises(ValueError):selected_sources(folder,COVER_ART_IDS)
+
     def test_native_nibbles_and_gray_source(self):
         def chunk(tag,data):
             return struct.pack('>I',len(data))+tag+data+struct.pack('>I',zlib.crc32(tag+data)&0xffffffff)

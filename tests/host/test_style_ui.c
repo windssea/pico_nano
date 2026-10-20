@@ -37,16 +37,19 @@ int main(void){char root[]="/tmp/pn-style-ui-XXXXXX";assert(mkdtemp(root));char 
      ui.draft.reading_line=2;assert(pn_style_ui_event(&ui,PN_SUI_FIELD+6*2+1,2,present,&screen)==PN_OK && ui.draft.reading_line==0);
      ui.draft.margin=20;assert(pn_style_ui_event(&ui,PN_SUI_FIELD+5*2,2,present,&screen)==PN_OK && ui.draft.margin==48);
      ui.draft.pixels=72;assert(pn_style_ui_event(&ui,PN_SUI_FIELD+1,2,present,&screen)==PN_EMPTY && ui.draft.pixels==72);ui.draft=keep;}
-    // 图库只改草稿，返回/选图均不保存；九个入口包含无背景。/ The gallery changes drafts only; Back/select never save, and nine entries include None.
+    // 图库顺序与持久ID分离，只展示无、4、7；返回/选图均不保存。/ Gallery order is separate from IDs and lists only None, 4 and 7; Back/select never save.
     assert(!ui.draft.background && pn_style_ui_event(&ui,PN_SUI_BACKGROUND,2,present,&screen)==PN_OK && ui.backgrounds);
-    for(unsigned i=0;i<9;i++)assert(pn_style_ui_hit(&ui,100+(int)(i%3)*212,220+(int)(i/3)*286)==PN_SUI_BACKGROUND_ITEM+(int)i);
+    {const int ids[]={0,4,7};for(unsigned i=0;i<3;i++)assert(pn_style_ui_hit(&ui,100+(int)i*212,220)==PN_SUI_BACKGROUND_ITEM+ids[i]);}
+    assert(pn_style_ui_hit(&ui,100,506)==-1 && pn_style_ui_hit(&ui,524,792)==-1);
+    assert(pn_style_ui_event(&ui,PN_SUI_BACKGROUND_ITEM+1,2,present,&screen)==PN_EMPTY && ui.backgrounds && !ui.draft.background);
     assert(pn_style_ui_hit(&ui,235,300)==-1 && pn_style_ui_hit(&ui,100,60)==PN_SUI_BACKGROUND_BACK);
-    assert(pn_style_ui_event(&ui,PN_SUI_BACKGROUND_ITEM+8,2,present,&screen)==PN_OK && !ui.backgrounds && ui.draft.background==8);
+    assert(pn_style_ui_event(&ui,PN_SUI_BACKGROUND_ITEM+7,2,present,&screen)==PN_OK && !ui.backgrounds && ui.draft.background==7);
     assert(pn_style_ui_event(&ui,PN_SUI_BACKGROUND,2,present,&screen)==PN_OK);
-    assert(pn_style_ui_event(&ui,PN_SUI_CANCEL,2,present,&screen)==PN_OK && ui.active && !ui.backgrounds && ui.draft.background==8);
+    assert(pn_style_ui_event(&ui,PN_SUI_CANCEL,2,present,&screen)==PN_OK && ui.active && !ui.backgrounds && ui.draft.background==7);
+    {const unsigned ids[]={0,4,7,0};ui.draft.background=0;for(unsigned i=1;i<4;i++){assert(pn_style_ui_event(&ui,PN_SUI_FIELD+11*2+1,2,present,&screen)==PN_OK && ui.draft.background==ids[i]);}assert(pn_style_ui_event(&ui,PN_SUI_FIELD+11*2,2,present,&screen)==PN_OK && ui.draft.background==7);}
     /* 预设与恢复默认只改草稿。/ Presets and restore-defaults change only the draft. */
     assert(pn_style_ui_hit(&ui,100,372)==PN_SUI_PRESET && pn_style_ui_hit(&ui,340,372)==PN_SUI_PRESET+1 && pn_style_ui_hit(&ui,560,372)==PN_SUI_PRESET+2);
-    assert(pn_style_ui_event(&ui,PN_SUI_PRESET+1,2,present,&screen)==PN_OK && ui.draft.pixels==36 && ui.draft.line_percent==125 && ui.draft.margin==24 && ui.draft.tracking_percent==0 && ui.draft.background==8);
+    assert(pn_style_ui_event(&ui,PN_SUI_PRESET+1,2,present,&screen)==PN_OK && ui.draft.pixels==36 && ui.draft.line_percent==125 && ui.draft.margin==24 && ui.draft.tracking_percent==0 && ui.draft.background==7);
     assert(pn_style_ui_event(&ui,PN_SUI_PRESET+2,2,present,&screen)==PN_OK && ui.draft.pixels==56);
     assert(pn_style_ui_event(&ui,PN_SUI_RESET,2,present,&screen)==PN_OK && ui.draft.pixels==44 && ui.draft.line_percent==145 && ui.draft.gap_percent==40 && ui.draft.indent_em==2 && ui.draft.margin==32 && !ui.draft.background);
     {pn_style_t reset=ui.draft;assert(pn_style_ui_event(&ui,PN_SUI_PRESET,2,present,&screen)==PN_OK && !memcmp(&reset,&ui.draft,sizeof reset));}

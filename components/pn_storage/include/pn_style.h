@@ -8,6 +8,7 @@
  */
 #pragma once
 #include "pn_progress.h"
+#include "pn_reading_background.h"
 typedef struct {
     uint16_t pixels; ///< 正文28..72px / Body 28..72 px
     uint16_t line_percent; ///< 行距100..220百分比 / Line spacing 100..220 percent
@@ -21,7 +22,7 @@ typedef struct {
     uint16_t reading_line_shade; ///< 阅读线深浅：0浅、1中、2深、3黑；旧记录为0 / Guide darkness: light, medium, dark or black; legacy records load as light
     int16_t weight; ///< 字重-1细、0标准、1..3加粗；只改字形笔画不改字宽与分页，旧记录为0 / Weight: -1 light, 0 regular, 1..3 bolder; changes strokes only, never advances or pagination; legacy records load as 0
     uint16_t clarity; ///< 清晰度0标准、1清晰、2锐利、3黑白；只改字形边缘灰阶，不改分页，旧记录为0 / Sharpness: standard, clear, sharp or black-and-white; changes glyph edge grays only, never pagination; legacy records load as 0
-    uint16_t background; ///< 阅读背景：0无，1..8内置浅灰图片；不改变分页 / Reading paper: zero none, 1 through 8 built-in light artwork; no pagination change
+    uint16_t background; ///< 持久背景ID：0无、4竹影、7纯色中；旧1..8读取时仅移除款回退无，不改变分页 / Persistent paper ID: None 0, bamboo 4, texture 7; retired legacy IDs 1..8 load as None without changing pagination
 } pn_style_t;
 /// 产品默认舒适模式字号。/ Product default comfortable-mode body size.
 enum { PN_STYLE_DEFAULT_PIXELS = 44 };
@@ -35,4 +36,5 @@ pn_status_t pn_style_validate(const pn_style_t *style);
 pn_status_t pn_style_save(const pn_journal_io_t *io,const pn_book_id_t *book,const pn_style_t *style);
 /// 错误不改输出；EMPTY由调用方选择默认。
 /// Preserve output on errors; caller chooses defaults for EMPTY only.
+/// 旧schema7保留ID4/7；其他合法旧ID仅背景回退0，原日志不重写，其他字段不变。 / Legacy schema7 keeps IDs 4/7; other valid old IDs resolve to paper 0 without rewriting the journal or changing other fields.
 pn_status_t pn_style_load(const pn_journal_io_t *io,const pn_book_id_t *book,pn_style_t *style);

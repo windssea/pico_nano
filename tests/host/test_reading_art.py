@@ -9,6 +9,9 @@ with tempfile.TemporaryDirectory() as directory:
  subprocess.run([sys.argv[1],'--reading',directory],check=True,timeout=120)
  assert pathlib.Path(directory,'0.raw').read_bytes()==b'\xff'*(342*1216)
  for index,path in enumerate(sources,1):
+  if index not in (4,7):
+   assert pathlib.Path(directory,f'{index}.raw').read_bytes()==b'\xff'*(342*1216)
+   continue
   gray,w,h,_=decode(path);assert (w,h)==(684,1216)
   bounds=(10,0,674,1216) if index==3 else ((48,0,636,1216) if index==4 else (0,0,684,1216))
   assert reading_bounds(path)==bounds,path
@@ -16,4 +19,4 @@ with tempfile.TemporaryDirectory() as directory:
   expected=bytes(pixels[i] | pixels[i+1]<<4 for i in range(0,len(pixels),2))
   assert pathlib.Path(directory,f'{index}.raw').read_bytes()==expected,path
 assert identities=={p:hashlib.sha256(p.read_bytes()).digest() for p in sources}
-print('reading art: eight native buffers equal independent native quantized/explicit edge-trim oracle; none is exact white; source SHA unchanged')
+print('reading art: retained IDs 4/7 match original quantized/cropped pixels, retired IDs are exact white, every original source SHA unchanged')

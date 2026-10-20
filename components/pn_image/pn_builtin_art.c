@@ -31,19 +31,22 @@ pn_status_t pn_bookmark_art_draw(pn_frame_t *frame){
 }
 pn_status_t pn_builtin_cover_frame(const char *name,pn_frame_t *frame){
     if(!name || !frame)return PN_INVALID;
-    if(pn_default_cover_pixels_size!=8u*3600u)return PN_CORRUPT;
+    if(pn_default_cover_pixels_size!=2u*3600u)return PN_CORRUPT;
     uint32_t hash=2166136261u;
     for(const unsigned char *p=(const unsigned char *)name;*p;p++){hash^=*p;hash*=16777619u;}
-    *frame=(pn_frame_t){(uint8_t *)pn_default_cover_pixels+(hash%8u)*3600u,72,100,36};return PN_OK;
+    *frame=(pn_frame_t){(uint8_t *)pn_default_cover_pixels+(hash%2u)*3600u,72,100,36};return PN_OK;
 }
 const char *pn_reading_background_name(unsigned index){
-    static const char *const names[]={"无","疏竹映月","玉兰轻影","小猫望远","竹影轻风","远山云岚","纯色浅","纯色中","纯色深"};
-    return index<=PN_READING_BACKGROUND_COUNT?names[index]:NULL;
+    if(index>PN_READING_BACKGROUND_LEGACY_MAX)return NULL;
+    index=pn_reading_background_resolve(index);
+    return index==PN_READING_BACKGROUND_BAMBOO?"竹影轻风":index==PN_READING_BACKGROUND_PAPER?"纯色中":"无";
 }
 static pn_status_t reading_rect(unsigned index,pn_frame_t *frame,int x,int y,int width,int height,int clip_y,int clip_height){
-    if(index>PN_READING_BACKGROUND_COUNT || !frame || !frame->pixels || frame->width<1 || frame->width>4096 || frame->height<1 || frame->height>4096 || frame->stride<((size_t)frame->width+1)/2 || x<0 || y<0 || width<1 || height<1 || x>frame->width-width || y>frame->height-height)return PN_INVALID;
+    if(index>PN_READING_BACKGROUND_LEGACY_MAX || !frame || !frame->pixels || frame->width<1 || frame->width>4096 || frame->height<1 || frame->height>4096 || frame->stride<((size_t)frame->width+1)/2 || x<0 || y<0 || width<1 || height<1 || x>frame->width-width || y>frame->height-height)return PN_INVALID;
+    index=pn_reading_background_resolve(index);
     if(!index){pn_frame_rect(frame,x,clip_y,width,clip_height,15);return PN_OK;}
-    size_t start=pn_reading_art_offsets[index-1],end=pn_reading_art_offsets[index];
+    unsigned slot=index==PN_READING_BACKGROUND_BAMBOO?0u:1u;
+    size_t start=pn_reading_art_offsets[slot],end=pn_reading_art_offsets[slot+1];
     if(start>=end || end>pn_reading_art_packed_size)return PN_CORRUPT;
     const uint8_t *data=pn_reading_art_packed+start;size_t size=end-start,at=1;unsigned remaining=0;bool repeat=false;uint8_t value=0,row[342]={0};
     if(size<2 || data[0]>1)return PN_CORRUPT;

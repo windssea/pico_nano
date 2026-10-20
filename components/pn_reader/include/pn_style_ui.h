@@ -21,7 +21,7 @@
 #define PN_SUI_PRESET 10 ///< 10..12为舒适/紧凑/大字 / 10..12 are comfortable/compact/large
 #define PN_SUI_BACKGROUND 13 ///< 打开阅读背景图库 / Open the reading background gallery
 #define PN_SUI_BACKGROUND_BACK 15 ///< 返回排版草稿 / Return to the typesetting draft
-#define PN_SUI_BACKGROUND_ITEM 64 ///< 64..72：无和八张背景 / 64 through 72: none and eight backgrounds
+#define PN_SUI_BACKGROUND_ITEM 64 ///< 命令保留持久ID：64无、68竹影、71纯色中 / Commands retain persistent IDs: None 64, bamboo 68, paper 71
 #define PN_SUI_INDENT 14 ///< 切换首行缩进（0或2字）/ Toggle the first-line indent (0 or 2 characters)
 #define PN_SUI_FIELD 16
 #define PN_SUI_FIELDS 12 ///< 0字号…10清晰度、11背景 / 0 size ... 10 sharpness, 11 paper

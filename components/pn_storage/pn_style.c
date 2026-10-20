@@ -11,7 +11,7 @@
 static unsigned get(const uint8_t *p){return p[0]|((unsigned)p[1]<<8);}
 static void put(uint8_t *p,unsigned v){p[0]=(uint8_t)v;p[1]=(uint8_t)(v>>8);}
 pn_style_t pn_style_default(int pixels){return (pn_style_t){(uint16_t)pixels,145,40,2,32,12,0,0,0,1,0,0,0};}
-pn_status_t pn_style_validate(const pn_style_t *s){return !s || s->pixels<28 || s->pixels>72 || s->line_percent<100 || s->line_percent>220 || s->gap_percent>100 || s->indent_em>2 || s->margin<16 || s->margin>80 || (s->margin&1) || s->gl_before_clear>30 || s->tracking_percent>50 || s->reading_line>2 || s->reading_line_offset< -8 || s->reading_line_offset>8 || s->reading_line_offset%2 || s->reading_line_shade>3 || s->weight< -1 || s->weight>3 || s->clarity>3 || s->background>8?PN_INVALID:PN_OK;}
+pn_status_t pn_style_validate(const pn_style_t *s){return !s || s->pixels<28 || s->pixels>72 || s->line_percent<100 || s->line_percent>220 || s->gap_percent>100 || s->indent_em>2 || s->margin<16 || s->margin>80 || (s->margin&1) || s->gl_before_clear>30 || s->tracking_percent>50 || s->reading_line>2 || s->reading_line_offset< -8 || s->reading_line_offset>8 || s->reading_line_offset%2 || s->reading_line_shade>3 || s->weight< -1 || s->weight>3 || s->clarity>3 || s->background>PN_READING_BACKGROUND_LEGACY_MAX?PN_INVALID:PN_OK;}
 pn_status_t pn_style_save(const pn_journal_io_t *io,const pn_book_id_t *book,const pn_style_t *s){
     if(!book || pn_style_validate(s)!=PN_OK)return PN_INVALID;
     uint8_t bytes[64]={0};memcpy(bytes,"PNTS",4);put(bytes+4,s->background?7:s->clarity?6:s->weight?5:4);put(bytes+6,s->background);memcpy(bytes+8,book->sha256,32);
@@ -32,5 +32,7 @@ pn_status_t pn_style_load(const pn_journal_io_t *io,const pn_book_id_t *book,pn_
     // schema5只为非标准字重写入，schema6只为非标准清晰度写入。/ Schema 5 is written only for non-regular weights, schema 6 only for non-standard sharpness.
     if((version==5 && !value.weight) || (version==6 && !value.clarity) || (version==7 && !value.background))return PN_UNSUPPORTED;
     if(pn_style_validate(&value)!=PN_OK)return PN_CORRUPT;
+    // 先完整校验旧载荷，只解析被移除的图片；不重置字体/排版或在读取时写盘。 / Validate the full legacy payload before resolving retired artwork; never reset fonts/typesetting or write during reads.
+    value.background=(uint16_t)pn_reading_background_resolve(value.background);
     *s=value;return PN_OK;
 }

@@ -7,6 +7,20 @@ import struct
 import zlib
 from build_brand_image import decode, weights
 
+READING_ART_IDS = (4, 7)
+COVER_ART_IDS = (1, 2)
+
+
+def selected_sources(folder, ids):
+    """只嵌入明确选择的原件，缺少或重号即失败。 / Embed only explicitly selected originals; fail on missing or ambiguous IDs."""
+    sources = []
+    for identifier in ids:
+        matches = sorted(folder.glob(f'{identifier:02d}_*.png'))
+        if len(matches) != 1:
+            raise ValueError(f'Expected one artwork with ID {identifier:02d} in {folder}')
+        sources.append(matches[0])
+    return sources
+
 
 def resize(path, width, height, crop, bounds=None):
     """面积平均、16灰阶；封面居中裁切。 / Area averaging and 16 grays; center-crop covers."""
@@ -93,16 +107,12 @@ def generate(boot, covers, background, output, report):
     boot_art=native_art(boot_pixels,684,1216)
     background_pixels=resize(background,684,1216,False)
     background_art=native_art(background_pixels,684,1216)
-    sources=sorted(covers.glob('*.png'))
-    if len(sources)!=8:
-        raise ValueError('Expected the eight supplied cover images')
+    sources=selected_sources(covers,COVER_ART_IDS)
     # 新原图均为长图：按宽适配，只上下居中裁切。 / New portrait originals fit the width and crop vertically only.
     for path in sources:
         _,sw,sh,_=decode(path)
         if sw*100>sh*72:raise ValueError(f'Cover too wide for vertical-only cropping: {path}')
-    reading_sources=sorted((boot.parent/'bg').glob('*.png'))
-    if len(reading_sources)!=8 or any(not p.name.startswith(f'{i:02d}_') for i,p in enumerate(reading_sources,1)):
-        raise ValueError('Expected reading backgrounds 01 through 08')
+    reading_sources=selected_sources(boot.parent/'bg',READING_ART_IDS)
     reading=[reading_art(p) for p in reading_sources];reading_offsets=[0]
     for _,data in reading:reading_offsets.append(reading_offsets[-1]+len(data))
     reading_data=b''.join(data for _,data in reading)
@@ -120,9 +130,9 @@ def generate(boot, covers, background, output, report):
     (cache/'bookmark.png').write_bytes(png4(background_pixels,684,1216))
     for path in sources:(cache/path.name).write_bytes(png4(resize(path,72,100,True),72,100))
     for path,(values,_) in zip(reading_sources,reading):(cache/('reading-'+path.name)).write_bytes(png4(values,684,1216))
-    metadata={'reading_source_bounds':[reading_bounds(p) for p in reading_sources],'reading_packed_bytes':len(reading_data),'reading_each_bytes':[len(data) for _,data in reading],'reading_size':[684,1216],'reading_gray_levels':list(range(16)),
+    metadata={'reading_ids':list(READING_ART_IDS),'reading_source_bounds':[reading_bounds(p) for p in reading_sources],'reading_packed_bytes':len(reading_data),'reading_each_bytes':[len(data) for _,data in reading],'reading_size':[684,1216],'reading_gray_levels':list(range(16)),
               'boot_packed_bytes':len(boot_art),'bookmark_packed_bytes':len(background_art),'cover_bytes':len(cover_pixels),'cover_count':len(sources),'cover_size':[72,100],
-              'gray_levels':16,'cover_runtime_decode':False,'boot_size':[684,1216],
+              'cover_ids':list(COVER_ART_IDS),'gray_levels':16,'cover_runtime_decode':False,'boot_size':[684,1216],
               'source_sha256':{p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in [boot,background,*sources,*reading_sources]}}
     report.write_text(json.dumps(metadata,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
     print(json.dumps(metadata,ensure_ascii=False))

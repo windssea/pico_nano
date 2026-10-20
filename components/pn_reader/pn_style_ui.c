@@ -149,11 +149,12 @@ static pn_status_t paint_backgrounds(pn_style_ui_t *u,pn_font_t *font,pn_frame_t
     if(s==PN_OK)s=pn_font_size(font,24);
     if(s==PN_OK)s=pn_w_text_ex(font,frame,"仅修改草稿，应用后保存",32,164,620,PN_ALIGN_LEFT,PN_UI_MUTED,false);
     for(unsigned i=0;i<=PN_READING_BACKGROUND_COUNT && s==PN_OK;i++){
-        int x=32+(int)(i%3)*212,y=190+(int)(i/3)*286;bool chosen=u->draft.background==i;
-        s=pn_reading_background_rect(i,frame,x+36,y+12,124,220);
+        unsigned id=pn_reading_background_id(i);
+        int x=32+(int)(i%3)*212,y=190+(int)(i/3)*286;bool chosen=pn_reading_background_resolve(u->draft.background)==id;
+        s=pn_reading_background_rect(id,frame,x+36,y+12,124,220);
         pn_w_round_stroke(frame,x,y,196,266,10,chosen?3:1,chosen?PN_UI_INK:PN_UI_RULE);
         if(s==PN_OK)s=pn_font_size(font,22);
-        if(s==PN_OK)s=pn_w_text_ex(font,frame,pn_reading_background_name(i),x+6,y+252,184,PN_ALIGN_CENTER,PN_UI_INK,chosen);
+        if(s==PN_OK)s=pn_w_text_ex(font,frame,pn_reading_background_name(id),x+6,y+252,184,PN_ALIGN_CENTER,PN_UI_INK,chosen);
     }
     return s;
 }
@@ -186,7 +187,7 @@ pn_status_t pn_style_ui_event(pn_style_ui_t *u,int command,uint64_t now,pn_reade
     pn_status_t status=PN_OK;u->notice=NULL;
     if(u->backgrounds){
         if(command==PN_SUI_BACKGROUND_BACK || command==PN_SUI_CANCEL)u->backgrounds=false;
-        else if(command>=PN_SUI_BACKGROUND_ITEM && command<=PN_SUI_BACKGROUND_ITEM+PN_READING_BACKGROUND_COUNT){u->draft.background=(uint16_t)(command-PN_SUI_BACKGROUND_ITEM);u->backgrounds=false;u->selected=11;}
+        else if(command>=PN_SUI_BACKGROUND_ITEM && command<=PN_SUI_BACKGROUND_ITEM+PN_READING_BACKGROUND_LEGACY_MAX && pn_reading_background_resolve((unsigned)(command-PN_SUI_BACKGROUND_ITEM))==(unsigned)(command-PN_SUI_BACKGROUND_ITEM)){u->draft.background=(uint16_t)(command-PN_SUI_BACKGROUND_ITEM);u->backgrounds=false;u->selected=11;}
         else return PN_EMPTY;
         return pn_style_ui_present(u,present,ctx);
     }
@@ -199,7 +200,8 @@ pn_status_t pn_style_ui_event(pn_style_ui_t *u,int command,uint64_t now,pn_reade
         // 左右切换的档位项（边距、阅读线、深浅、字重、清晰度）首尾循环，不在两端卡住；数值项仍在上下限停住。
         // Option fields switched with left/right (margin, reading line, shade, weight, sharpness) wrap around instead of sticking at either end; numeric fields still stop at their limits.
         if(field==5){unsigned level=v<=20?0u:v<=32?1u:2u;static const unsigned margins[3]={20,32,48};level=up?(level+1u)%3u:(level+2u)%3u;field_set(&u->draft,5,margins[level]);}
-        else if(field==6 || field==8 || field==9 || field==10 || field==11){unsigned span=maximum[field]-minimum[field]+1u,offset=v-minimum[field];offset=up?(offset+1u)%span:(offset+span-1u)%span;field_set(&u->draft,field,minimum[field]+offset);}
+        else if(field==11){unsigned slot=0;while(slot<PN_READING_BACKGROUND_COUNT && pn_reading_background_id(slot)!=pn_reading_background_resolve(v))slot++;slot=up?(slot+1u)%(PN_READING_BACKGROUND_COUNT+1u):(slot+PN_READING_BACKGROUND_COUNT)%(PN_READING_BACKGROUND_COUNT+1u);field_set(&u->draft,field,pn_reading_background_id(slot));}
+        else if(field==6 || field==8 || field==9 || field==10){unsigned span=maximum[field]-minimum[field]+1u,offset=v-minimum[field];offset=up?(offset+1u)%span:(offset+span-1u)%span;field_set(&u->draft,field,minimum[field]+offset);}
         else{
         if(up && v+steps[field]<=maximum[field])v+=steps[field];else if(!up && v>=minimum[field]+steps[field])v-=steps[field];else status=PN_EMPTY;
         field_set(&u->draft,field,v);}
@@ -224,7 +226,8 @@ int pn_style_ui_hit(const pn_style_ui_t *u,int x,int y){
         if(x<32 || x>=652 || y<190 || y>=190+3*286)return -1;
         int col=(x-32)/212,row=(y-190)/286;
         if((x-32)%212>=196 || (y-190)%286>=266)return -1;
-        return PN_SUI_BACKGROUND_ITEM+row*3+col;
+        unsigned slot=(unsigned)(row*3+col);
+        return slot<=PN_READING_BACKGROUND_COUNT?PN_SUI_BACKGROUND_ITEM+(int)pn_reading_background_id(slot):-1;
     }
     if(u->preview)return PN_SUI_FORM;
     if(y<PN_W_HEADER_H){if(pn_w_header_hit(x,y,false)==1)return PN_SUI_CANCEL;return x>=480 && y>=44?PN_SUI_RESET:-1;}

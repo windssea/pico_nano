@@ -25,9 +25,14 @@ int main(void){char root[]="/tmp/pn-style-XXXXXX";assert(mkdtemp(root));char a[3
      pn_record_t v4;assert(pn_journal_load(&io,&v4)==PN_OK && v4.payload[4]==4);}
     // schema7只在有背景时使用保留头字段，旧版本仍严格要求为零。/ Schema 7 uses the reserved header only for selected paper; legacy versions still require zero.
     for(unsigned background=1;background<=8;background++){
-        pn_style_t paper=pn_style_default(44);paper.background=(uint16_t)background;paper.weight=-1;paper.clarity=3;
-        assert(pn_style_save(&io,&book,&paper)==PN_OK && pn_style_load(&io,&book,&loaded)==PN_OK && !memcmp(&paper,&loaded,sizeof paper));
+        pn_style_t paper=s;paper.background=(uint16_t)background;paper.weight=-1;paper.clarity=3;
+        assert(pn_style_save(&io,&book,&paper)==PN_OK);
+        pn_record_t original;assert(pn_journal_load(&io,&original)==PN_OK);
+        assert(pn_style_load(&io,&book,&loaded)==PN_OK);
+        pn_style_t expected=paper;expected.background=(uint16_t)(background==4 || background==7?background:0);
+        assert(!memcmp(&expected,&loaded,sizeof loaded));
         pn_record_t v7;assert(pn_journal_load(&io,&v7)==PN_OK && v7.size==64 && v7.payload[4]==7 && v7.payload[6]==background);
+        assert(v7.sequence==original.sequence && !memcmp(v7.payload,original.payload,v7.size));
         v7.payload[6]=9;assert(pn_journal_save(&io,v7.payload,v7.size)==PN_OK && pn_style_load(&io,&book,&loaded)==PN_CORRUPT);
         v7.payload[6]=0;assert(pn_journal_save(&io,v7.payload,v7.size)==PN_OK && pn_style_load(&io,&book,&loaded)==PN_UNSUPPORTED);
         v7.payload[4]=6;v7.payload[6]=1;assert(pn_journal_save(&io,v7.payload,v7.size)==PN_OK && pn_style_load(&io,&book,&loaded)==PN_UNSUPPORTED);

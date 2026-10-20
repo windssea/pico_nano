@@ -42,7 +42,7 @@ static void run(const char *path,bool enabled,unsigned mode){
     assert((kind?pn_epub_app_prerender(&epub,enabled):pn_reader_app_prerender(&txt,enabled))==PN_OK);
     pn_reader_body_layer_t decoration={.paint=layer};assert((kind?pn_epub_app_body_layer(&epub,&decoration):pn_reader_app_body_layer(&txt,&decoration))==PN_OK);
     assert(step(PN_APP_OPEN,1,present)==PN_OK);uint64_t at=2;
-    if(mode==5){pn_style_t paper;assert((kind?pn_epub_app_style_get(&epub,&paper):pn_reader_app_style_get(&txt,&paper))==PN_OK);paper.background=5;assert(style_apply(&paper,at++)==PN_OK);}
+    if(mode==5){pn_style_t paper;assert((kind?pn_epub_app_style_get(&epub,&paper):pn_reader_app_style_get(&txt,&paper))==PN_OK);paper.background=7;assert(style_apply(&paper,at++)==PN_OK);}
     foreground=background=0;
     for(unsigned i=0;i<8;i++){
         if(mode==2 && i==3){progress_t before=progress();fail_present=true;assert(step(PN_APP_NEXT,at++,present)==PN_IO && same(before,progress()));}
