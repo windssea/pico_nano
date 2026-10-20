@@ -1,5 +1,7 @@
 /* 壁纸设置页：列表/预览/调整/应用/重开/失败路径。/ Wallpaper settings: list/preview/adjust/apply/reopen/failure paths. */
+#define _POSIX_C_SOURCE 200809L
 #include "pn_wallpaper_ui.h"
+#include <sys/stat.h>
 #include <unistd.h>
 #include <assert.h>
 #include <stdio.h>
@@ -52,6 +54,12 @@ int main(int argc,char **argv){
     assert(pn_wallpaper_ui_event(&ui,PN_WUI_BACK,present,NULL)==PN_OK && !ui.active);pn_wallpaper_ui_close(&ui);pn_wallpaper_ui_close(&ui);assert(!pool.used && !pool.live);
     /* 重开选中已保存图片时继承参数。/ Reopening and choosing the saved image inherits its parameters. */
     assert(pn_wallpaper_ui_open(&ui,&pool,&sd,images,&store,present,NULL)==PN_OK && pn_wallpaper_ui_current(&ui,&cur) && cur.mode==PN_LOCK_DEFAULT);pn_wallpaper_ui_close(&ui);
+    // 预览后替换源文件必须拒绝提交，原记录不变。 / Replacing a source after preview must reject apply and retain the original selection.
+    assert(pn_wallpaper_ui_open(&ui,&pool,&sd,images,&store,present,NULL)==PN_OK);
+    assert(pn_wallpaper_ui_event(&ui,PN_WUI_ROW+1,present,NULL)==PN_OK);
+    snprintf(path,sizeof path,"%s/b-photo.png",images);struct stat original;assert(!stat(path,&original));FILE *changed=fopen(path,"ab");assert(changed && fputc(0,changed)!=EOF && !fclose(changed));
+    assert(pn_wallpaper_ui_event(&ui,PN_WUI_APPLY,present,NULL)==PN_STALE_MEDIA && ui.screen==PN_WUI_PREVIEW);
+    assert(pn_wallpaper_ui_current(&ui,&cur) && cur.mode==PN_LOCK_DEFAULT);assert(!truncate(path,original.st_size));pn_wallpaper_ui_close(&ui);
     /* 无内部分区：可预览，应用UNSUPPORTED。/ No internal partition: previews work, apply returns UNSUPPORTED. */
     assert(pn_wallpaper_ui_open(&ui,&pool,&sd,images,NULL,present,NULL)==PN_OK && !pn_wallpaper_ui_current(&ui,&cur));
     assert(pn_wallpaper_ui_event(&ui,PN_WUI_ROW+2,present,NULL)==PN_OK && pn_wallpaper_ui_event(&ui,PN_WUI_APPLY,present,NULL)==PN_UNSUPPORTED && ui.screen==PN_WUI_PREVIEW);pn_wallpaper_ui_close(&ui);
@@ -63,7 +71,9 @@ int main(int argc,char **argv){
     assert(pn_wallpaper_ui_event(&ui,PN_WUI_SIMPLE,present,NULL)==PN_EMPTY && pn_wallpaper_ui_event(&ui,PN_WUI_BOOK,present,NULL)==PN_EMPTY);
     assert(pn_wallpaper_ui_event(&ui,PN_WUI_ROW+1,present,NULL)==PN_OK && pn_wallpaper_ui_hit(&ui,100,1080)==PN_WUI_MASK);
     assert(pn_wallpaper_ui_event(&ui,PN_WUI_MASK,present,NULL)==PN_OK && pn_wallpaper_ui_event(&ui,PN_WUI_APPLY,present,NULL)==PN_OK);
-    assert(pn_wallpaper_ui_current(&ui,&cur) && cur.mode==PN_LOCK_MASK);pn_wallpaper_ui_close(&ui);
+    assert(pn_wallpaper_ui_current(&ui,&cur) && cur.mode==PN_LOCK_MASK);
+    char cached[1200];snprintf(cached,sizeof cached,"%s/" PN_WALLPAPER_MASK_CACHE,argv[2]);FILE *cache=fopen(cached,"rb");assert(cache);fclose(cache);
+    pn_wallpaper_ui_close(&ui);
     assert(pn_wallpaper_ui_open(&ui,&pool,&sd,images,&store,present,NULL)==PN_OK && pn_wallpaper_ui_current(&ui,&cur) && cur.mode==PN_LOCK_MASK);
     assert(pn_wallpaper_ui_event(&ui,PN_WUI_ROW+1,present,NULL)==PN_OK && pn_wallpaper_ui_event(&ui,PN_WUI_CANCEL,present,NULL)==PN_OK && pn_wallpaper_ui_current(&ui,&cur) && cur.mode==PN_LOCK_MASK);pn_wallpaper_ui_close(&ui);
     /* 新模式应用/重开/取消，仍使用原A/B事务。/ Apply, reopen and cancel the new mode through the existing A/B transaction. */

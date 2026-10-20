@@ -5,6 +5,7 @@
 #include "pn_chinese_calendar.h"
 #include "pn_brand.h"
 #include "pn_widgets.h"
+#include "pn_builtin_art.h"
 #include <stdio.h>
 #include <math.h>
 #include <inttypes.h>
@@ -25,104 +26,76 @@ bool pn_bookmark_lock_date(uint32_t utc,unsigned *year,unsigned *month,unsigned 
 static pn_status_t text(pn_font_t *font,pn_frame_t *frame,const char *value,int size,int x,int y,int width,pn_align_t align,bool bold){
     pn_status_t status=pn_font_size(font,size);return status==PN_OK?pn_w_text_ex(font,frame,value,x,y,width,align,0,bold):status;
 }
-/// 虚线与邮票齿边只绘制，无纹理文件或额外画布。/ Draw dashed rules and postage edges without texture files or extra canvases.
-static void dash(pn_frame_t *f,int x,int y,int width,uint8_t shade){for(int i=0;i<width;i+=10)pn_frame_rect(f,x+i,y,width-i<6?width-i:6,1,shade);}
-static void postage(pn_frame_t *f){
-    pn_frame_rect(f,0,0,684,9,0);pn_frame_rect(f,0,1207,684,9,0);
-    for(int x=10;x<700;x+=36){pn_w_dot(f,(float)x,8,12,0);pn_w_dot(f,(float)x,1208,12,0);}
-}
-/// 细框和四角短线保留中式卡片层次，不用压住文字的背景。/ A hairline frame and short corner rules retain a Chinese card style without a background behind text.
-static void calendar_border(pn_frame_t *f){
-    pn_w_outline(f,22,968,640,188,1,10);
-    for(int side=0;side<2;side++)for(int bottom=0;bottom<2;bottom++){
-        int x=side?661:22,y=bottom?1155:968,dx=side?-1:1,dy=bottom?-1:1;
-        pn_w_line(f,(float)x,(float)y,(float)(x+dx*13),(float)y,1.4f,3);
-        pn_w_line(f,(float)x,(float)y,(float)x,(float)(y+dy*13),1.4f,3);
+
+/// 书封沿纸片倾斜，双线性取样避免放大阶梯。 / Tilt the cover with the paper and bilinearly sample to avoid jagged enlargement.
+static void cover_paint(pn_frame_t *frame,const pn_frame_t *cover){
+    const float c=0.991445f,s=-0.130526f;
+    // 按宽适配，保留来源比例，纸片内留白不拉伸书封。 / Fit the width and preserve the source aspect, leaving paper margins without stretching the cover.
+    const float height=176.0f*cover->height/cover->width;
+    for(int y=135;y<454;y++)for(int x=425;x<680;x++){
+        float dx=x-552.0f,dy=y-295.0f,u=(c*dx+s*dy)/176.0f+0.5f,v=(-s*dx+c*dy)/height+0.5f;
+        if(u<0 || u>=1 || v<0 || v>=1)continue;
+        float sx=u*(cover->width-1),sy=v*(cover->height-1);int ix=(int)sx,iy=(int)sy;
+        int nx=ix+1<cover->width?ix+1:ix,ny=iy+1<cover->height?iy+1:iy;float fx=sx-ix,fy=sy-iy;
+        float top=pn_frame_get(cover,ix,iy)*(1-fx)+pn_frame_get(cover,nx,iy)*fx;
+        float bottom=pn_frame_get(cover,ix,ny)*(1-fx)+pn_frame_get(cover,nx,ny)*fx;
+        pn_frame_pixel(frame,x,y,(uint8_t)(top*(1-fy)+bottom*fy+0.5f));
     }
-}
-static void diamond(pn_frame_t *f,int x,int y){pn_w_line(f,(float)x,(float)(y-4),(float)(x+4),(float)y,1,8);pn_w_line(f,(float)(x+4),(float)y,(float)x,(float)(y+4),1,8);pn_w_line(f,(float)x,(float)(y+4),(float)(x-4),(float)y,1,8);pn_w_line(f,(float)(x-4),(float)y,(float)x,(float)(y-4),1,8);}
-static void cover_paint(pn_frame_t *f,const pn_frame_t *cover){
-    // 每个目标像素按来源覆盖区域平均，保持原16灰阶。/ Average each destination source area, preserving the original sixteen shades.
-    for(int y=0;y<224;y++)for(int x=0;x<160;x++){int x0=x*184/160,x1=(x+1)*184/160,y0=y*256/224,y1=(y+1)*256/224;unsigned sum=0,count=0;
-        for(int sy=y0;sy<y1;sy++)for(int sx=x0;sx<x1;sx++){sum+=pn_frame_get(cover,sx,sy);count++;}
-        pn_frame_pixel(f,500+x,126+y,(uint8_t)((sum+count/2)/count));}
-    pn_w_outline(f,499,125,162,226,1,8);
-}
-static pn_status_t badge(pn_font_t *font,pn_frame_t *f,const char *label,int y){
-    pn_w_round_fill(f,347,y-17,25,25,2,2);
-    pn_status_t status=pn_font_size(font,17);return status==PN_OK?pn_w_text_ex(font,f,label,348,y+2,23,PN_ALIGN_CENTER,15,false):status;
 }
 pn_status_t pn_bookmark_lock_render(const pn_bookmark_lock_t *s,const pn_frame_t *cover,pn_font_t *font,const char *hint,pn_frame_t *frame){
     if(!s || !font || !font->impl || !hint || !frame || !frame->pixels || frame->width!=684 || frame->height!=1216 || frame->stride!=342 ||
        s->basis>10000 || s->battery>100 || (s->count && s->section>=s->count) ||
        (cover && (!cover->pixels || cover->width!=PN_COVER_WIDTH || cover->height!=PN_COVER_HEIGHT || cover->stride!=PN_COVER_WIDTH/2)))return PN_INVALID;
-    int original=font->pixels;pn_status_t status=PN_OK;char line[128];unsigned year=0,month=0,day=0,weekday=0;
+    int original=font->pixels;pn_status_t status=pn_bookmark_art_draw(frame);char line[160];unsigned year=0,month=0,day=0,weekday=0;
+    pn_frame_t default_cover;if(!cover && *s->book.title && pn_builtin_cover_frame(s->book.title,&default_cover)==PN_OK)cover=&default_cover;
     bool dated=s->date_known && pn_bookmark_lock_date(s->utc,&year,&month,&day,&weekday);
-    pn_frame_clear(frame,15);postage(frame);
 #define TEXT(value,size,x,y,width,align,bold) do {if(status==PN_OK)status=text(font,frame,value,size,x,y,width,align,bold);}while(0)
-    TEXT(PN_BRAND_NAME,43,24,73,430,PN_ALIGN_LEFT,true);
-    // 邮戳取消线及双圈“在读”，不改变产品品牌。/ Postal cancellation and a double-ring reading stamp keep the product branding.
-    for(int row=0;row<3;row++)for(int x=522;x<586;x+=3){float y=44.0f+row*9+sinf((x-522)*0.13f)*4;pn_w_line(frame,(float)x,y,(float)(x+3),44.0f+row*9+sinf((x+3-522)*0.13f)*4,1.4f,6);}
-    pn_w_ring(frame,634,55,49,2.4f,0);pn_w_ring(frame,634,55,44,0.9f,0);
-    TEXT("在读",29,588,65,92,PN_ALIGN_CENTER,true);dash(frame,24,99,636,4);
     if(cover)cover_paint(frame,cover);
-    else{pn_w_outline(frame,500,126,160,224,1,9);pn_w_icon(frame,PN_ICON_BOOKMARK,547,178,64,8);TEXT("暂无封面",21,507,305,146,PN_ALIGN_CENTER,false);}
-    if(status==PN_OK){status=pn_font_size(font,49);if(status==PN_OK)status=pn_w_text_lines_ex(font,frame,*s->book.title?s->book.title:"暂无阅读信息",24,174,451,2,60,0,true);}
-    TEXT("作者",25,24,282,62,PN_ALIGN_LEFT,true);
-    TEXT(*s->book.author?s->book.author:"—",25,102,282,370,PN_ALIGN_LEFT,false);
-    if(dated){snprintf(line,sizeof line,"%04u.%02u.%02u  星期%s",year,month,day,((const char *const[]){"一","二","三","四","五","六","日"})[weekday]);TEXT(line,21,24,326,340,PN_ALIGN_LEFT,false);}
-    else TEXT("日期待校时",21,24,326,340,PN_ALIGN_LEFT,false);
-    if(s->battery>=0){snprintf(line,sizeof line,"电量 %d%%",s->battery);TEXT(line,19,352,326,124,PN_ALIGN_RIGHT,false);}
-    pn_frame_rect(frame,24,365,636,1,0);
-    TEXT("阅读进度",30,24,407,400,PN_ALIGN_LEFT,true);
-    if(s->progress_known){snprintf(line,sizeof line,"%u.%u%%",s->basis/100,s->basis%100/10);TEXT(line,33,440,407,220,PN_ALIGN_RIGHT,true);}
-    else TEXT("—",33,440,407,220,PN_ALIGN_RIGHT,true);
-    pn_w_round_fill(frame,24,423,636,10,3,10);if(s->progress_known && s->basis)pn_w_round_fill(frame,24,423,(int)(636u*s->basis/10000u),10,3,0);
-    TEXT("章节",23,24,472,260,PN_ALIGN_LEFT,true);
-    if(s->count){snprintf(line,sizeof line,"%zu / %zu",s->section+1,s->count);TEXT(line,25,390,472,270,PN_ALIGN_RIGHT,false);}else TEXT("—",25,390,472,270,PN_ALIGN_RIGHT,false);
-    dash(frame,24,500,636,7);
-    pn_frame_rect(frame,45,528,192,1,10);pn_frame_rect(frame,447,528,192,1,10);diamond(frame,248,528);diamond(frame,436,528);
-    TEXT("阅读摘要",29,262,538,160,PN_ALIGN_CENTER,true);
-    TEXT("本书今日",24,24,574,302,PN_ALIGN_CENTER,true);TEXT("本书累计",24,366,574,294,PN_ALIGN_CENTER,true);
-    for(int y=566;y<645;y+=8)pn_frame_rect(frame,342,y,1,5,9);
-    TEXT("翻页",22,24,612,120,PN_ALIGN_LEFT,false);
-    if(s->reading.known && s->reading.dated)snprintf(line,sizeof line,"%" PRIu64 " 次",s->reading.today_turns);else snprintf(line,sizeof line,"— 次");TEXT(line,25,144,612,180,PN_ALIGN_RIGHT,true);
-    TEXT("时长",22,24,645,120,PN_ALIGN_LEFT,false);
-    if(s->reading.known && !s->reading.dated)snprintf(line,sizeof line,"待校时");else snprintf(line,sizeof line,"%" PRIu64 "分钟",s->reading.known?s->reading.today_ms/60000u:0);TEXT(line,25,144,645,180,PN_ALIGN_RIGHT,true);
-    TEXT("翻页",22,366,612,120,PN_ALIGN_LEFT,false);
-    if(s->reading.known)snprintf(line,sizeof line,"%" PRIu64 " 次",s->reading.total_turns);else snprintf(line,sizeof line,"— 次");TEXT(line,25,490,612,170,PN_ALIGN_RIGHT,true);
-    TEXT("时长",22,366,645,120,PN_ALIGN_LEFT,false);snprintf(line,sizeof line,"%" PRIu64 "分钟",s->reading.known?s->reading.total_ms/60000u:0);TEXT(line,25,490,645,170,PN_ALIGN_RIGHT,true);
-    dash(frame,24,662,636,7);
-    // 日均只除以本周已过的自然日；秒级累计，显示向下取整到分钟。/ Average over elapsed calendar days this week; collect milliseconds and display whole minutes.
-    uint64_t total=0,peak=0;for(unsigned i=0;i<7;i++){uint64_t ms=s->reading.dated?s->reading.week_ms[i]:0;if(UINT64_MAX-total<ms)total=UINT64_MAX;else total+=ms;if(ms>peak)peak=ms;}
-    TEXT("本周全局阅读时长",24,24,698,350,PN_ALIGN_LEFT,true);
-    if(s->reading.dated)snprintf(line,sizeof line,"日均 %" PRIu64 "分钟 · 总时长 %" PRIu64 "分钟",total/60000u/(s->reading.weekday<7?s->reading.weekday+1u:7u),total/60000u);
-    else snprintf(line,sizeof line,dated?"统计暂不可用":"日期待校时");
-    TEXT(line,19,354,698,306,PN_ALIGN_RIGHT,false);
-    if(peak){uint64_t axis=peak/60000u+(peak%60000u!=0);snprintf(line,sizeof line,"%" PRIu64 "分",axis);TEXT(line,17,24,731,72,PN_ALIGN_LEFT,false);
-        for(unsigned i=0;i<7;i++){uint64_t ms=s->reading.week_ms[i];if(ms){int height=(int)(ms/(long double)axis/60000u*176);if(height<1)height=1;pn_frame_rect(frame,92+(int)i*83,918-height,38,height,2);}}}
-    else TEXT(s->reading.dated || dated?"暂无阅读统计":"校时后记录每日统计",22,90,816,552,PN_ALIGN_CENTER,false);
-    TEXT("0",18,24,918,30,PN_ALIGN_LEFT,false);dash(frame,64,918,596,10);
-    for(unsigned i=0;i<7;i++)TEXT(((const char *const[]){"一","二","三","四","五","六","日"})[i],21,70+(int)i*83,947,83,PN_ALIGN_CENTER,false);
-    calendar_border(frame);pn_frame_rect(frame,329,986,1,153,12);
-    pn_w_outline(frame,40,1023,27,57,1,6);
-    TEXT("农",17,42,1046,23,PN_ALIGN_CENTER,false);TEXT("历",17,42,1069,23,PN_ALIGN_CENTER,false);
+    const char *title=*s->book.title?s->book.title:"暂无阅读信息";int width=0,title_size=72;
+    if(status==PN_OK){status=pn_font_size(font,title_size);if(status==PN_OK)status=pn_w_text_width_ex(font,title,true,&width);}
+    if(width>390)title_size=48;
+    if(status==PN_OK){status=pn_font_size(font,title_size);if(status==PN_OK)status=pn_w_text_lines_ex(font,frame,title,26,title_size==72?221:190,392,2,63,0,true);}
+    TEXT("作者",25,26,329,70,PN_ALIGN_LEFT,true);TEXT(*s->book.author?s->book.author:"—",25,105,329,292,PN_ALIGN_LEFT,false);
+    if(dated)snprintf(line,sizeof line,"%04u.%02u.%02u  星期%s",year,month,day,((const char *const[]){"一","二","三","四","五","六","日"})[weekday]);else snprintf(line,sizeof line,"日期待校时");
+    TEXT(line,22,26,383,235,PN_ALIGN_LEFT,false);
+    if(s->battery>=0)snprintf(line,sizeof line,"电量 %d%%",s->battery);else snprintf(line,sizeof line,"电量 —");TEXT(line,21,267,383,133,PN_ALIGN_RIGHT,false);
+    if(s->progress_known)snprintf(line,sizeof line,"%u.%u%%",s->basis/100,s->basis%100/10);else snprintf(line,sizeof line,"—");
+    TEXT(line,72,26,520,375,PN_ALIGN_LEFT,true);
+    pn_w_round_fill(frame,27,526,381,14,6,12);
+    if(s->progress_known && s->basis)pn_w_round_fill(frame,27,526,(int)(381u*s->basis/10000u),14,6,1);
+    // 摘要仅显示章节、确认翻页和正文停留；不恢复全书页数或字数统计。 / Summary shows chapters, confirmed turns and body dwell only; no total-page or character statistics.
+    if(s->count)snprintf(line,sizeof line,"%zu / %zu",s->section+1,s->count);else snprintf(line,sizeof line,"—");
+    TEXT(line,25,91,655,181,PN_ALIGN_CENTER,true);
+    TEXT("阅读位置",20,91,700,181,PN_ALIGN_CENTER,false);
+    TEXT("翻页",21,314,651,65,PN_ALIGN_LEFT,false);
+    if(s->reading.known && s->reading.dated)snprintf(line,sizeof line,"%" PRIu64 "次",s->reading.today_turns);else snprintf(line,sizeof line,"—次");TEXT(line,22,378,651,91,PN_ALIGN_RIGHT,true);
+    TEXT("时长",21,314,698,65,PN_ALIGN_LEFT,false);
+    if(s->reading.known && !s->reading.dated)snprintf(line,sizeof line,"待校时");else snprintf(line,sizeof line,"%" PRIu64 "分钟",s->reading.known?s->reading.today_ms/60000u:0);TEXT(line,22,378,698,91,PN_ALIGN_RIGHT,true);
+    TEXT("翻页",21,516,651,65,PN_ALIGN_LEFT,false);
+    if(s->reading.known)snprintf(line,sizeof line,"%" PRIu64 "次",s->reading.total_turns);else snprintf(line,sizeof line,"—次");TEXT(line,22,579,651,67,PN_ALIGN_RIGHT,true);
+    TEXT("时长",21,516,698,65,PN_ALIGN_LEFT,false);snprintf(line,sizeof line,"%" PRIu64 "分钟",s->reading.known?s->reading.total_ms/60000u:0);TEXT(line,22,579,698,67,PN_ALIGN_RIGHT,true);
+    uint64_t total=0,peak=0;
+    for(unsigned i=0;i<7;i++){uint64_t ms=s->reading.dated?s->reading.week_ms[i]:0;if(UINT64_MAX-total<ms)total=UINT64_MAX;else total+=ms;if(ms>peak)peak=ms;}
+    pn_frame_rect(frame,409,762,238,40,15);
+    if(s->reading.dated)snprintf(line,sizeof line,"日均 %" PRIu64 "分 · 共 %" PRIu64 "分",total/60000u/(s->reading.weekday<7?s->reading.weekday+1u:7u),total/60000u);
+    else snprintf(line,sizeof line,dated?"日均 0分 · 共 0分":"日期待校时");
+    TEXT(line,18,409,790,236,PN_ALIGN_RIGHT,false);
+    if(peak){uint64_t axis=peak/60000u+(peak%60000u!=0);snprintf(line,sizeof line,"%" PRIu64 "分",axis);TEXT(line,16,39,834,50,PN_ALIGN_LEFT,false);
+        for(unsigned i=0;i<7;i++)if(s->reading.week_ms[i]){int height=(int)(s->reading.week_ms[i]/(long double)axis/60000u*103);if(height<1)height=1;pn_frame_rect(frame,86+(int)i*80,930-height,30,height,2);}}
+    else TEXT(s->reading.dated || dated?"暂无阅读统计":"校时后记录每日统计",22,88,885,548,PN_ALIGN_CENTER,false);
+    for(unsigned i=0;i<7;i++){pn_frame_rect(frame,84+(int)i*80,941,34,24,15);TEXT(((const char *const[]){"一","二","三","四","五","六","日"})[i],20,80+(int)i*80,960,42,PN_ALIGN_CENTER,false);}
     if(dated){pn_chinese_calendar_t calendar;pn_status_t loaded=pn_chinese_calendar_lookup(year,month,day,&calendar);
         if(loaded==PN_OK){
-            snprintf(line,sizeof line,"%04u年%u月%u日",year,month,day);TEXT(line,19,40,1003,271,PN_ALIGN_CENTER,false);
-            int size=44,width=0;if(status==PN_OK){do{status=pn_font_size(font,size);if(status==PN_OK)status=pn_w_text_width_ex(font,calendar.lunar,true,&width);if(status!=PN_OK || width<=233 || size<=32)break;size-=2;}while(true);}
-            TEXT(calendar.lunar,size,76,1068,239,PN_ALIGN_CENTER,true);pn_frame_rect(frame,44,1090,267,1,12);
-            TEXT(calendar.ganzhi,17,40,1125,271,PN_ALIGN_CENTER,false);
-            TEXT("节日",17,347,1003,39,PN_ALIGN_LEFT,false);TEXT(*calendar.festival?calendar.festival:"—",19,397,1003,247,PN_ALIGN_LEFT,false);
-            TEXT("节气",17,347,1033,39,PN_ALIGN_LEFT,false);TEXT(calendar.term,19,397,1033,247,PN_ALIGN_LEFT,false);
-            pn_frame_rect(frame,347,1045,297,1,12);
-            if(status==PN_OK)status=badge(font,frame,"宜",1071);
-            if(status==PN_OK){status=pn_font_size(font,19);if(status==PN_OK)status=pn_w_text_lines(font,frame,calendar.yi,384,1072,260,2,23,NULL);}
-            if(status==PN_OK)status=badge(font,frame,"忌",1120);
-            if(status==PN_OK){status=pn_font_size(font,19);if(status==PN_OK)status=pn_w_text_lines(font,frame,calendar.ji,384,1121,260,2,23,NULL);}
-        }else TEXT("暂无本地历表",24,40,1070,271,PN_ALIGN_CENTER,false);
-    }else{TEXT("日期待校时",27,76,1068,239,PN_ALIGN_CENTER,true);TEXT("校时后显示黄历",21,347,1075,297,PN_ALIGN_CENTER,false);}
-    if(*hint)TEXT(hint,20,24,1187,636,PN_ALIGN_CENTER,false);
+            snprintf(line,sizeof line,"%04u年%u月%u日",year,month,day);TEXT(line,18,92,1017,238,PN_ALIGN_CENTER,false);
+            int size=53,lunar_width=0;
+            if(status==PN_OK){do{status=pn_font_size(font,size);if(status==PN_OK)status=pn_w_text_width_ex(font,calendar.lunar,true,&lunar_width);if(status!=PN_OK || lunar_width<=238 || size<=30)break;size-=2;}while(true);}
+            TEXT(calendar.lunar,size,91,1085,239,PN_ALIGN_CENTER,true);TEXT(calendar.ganzhi,16,90,1140,242,PN_ALIGN_CENTER,false);
+            TEXT(*calendar.festival?calendar.festival:"—",18,471,1017,176,PN_ALIGN_LEFT,false);TEXT(calendar.term,18,471,1058,176,PN_ALIGN_LEFT,false);
+            if(status==PN_OK){status=pn_font_size(font,17);if(status==PN_OK)status=pn_w_text_lines(font,frame,calendar.yi,471,1086,176,2,21,NULL);}
+            if(status==PN_OK){status=pn_font_size(font,17);if(status==PN_OK)status=pn_w_text_lines(font,frame,calendar.ji,471,1130,176,2,21,NULL);}
+        }else TEXT("暂无本地历表",25,91,1085,239,PN_ALIGN_CENTER,false);
+    }else{TEXT("日期待校时",28,91,1085,239,PN_ALIGN_CENTER,true);TEXT("校时后显示黄历",19,471,1058,176,PN_ALIGN_LEFT,false);}
+    if(*hint)TEXT(hint,19,26,1190,632,PN_ALIGN_CENTER,false);
     pn_status_t restored=pn_font_size(font,original);
 #undef TEXT
     return status==PN_OK?restored:status;

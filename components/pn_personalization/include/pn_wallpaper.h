@@ -99,6 +99,10 @@ pn_status_t pn_wallpaper_load(const pn_wallpaper_store_t *store,const pn_media_l
 /// 失败可能已经提交，调用方应重新load确认。/ Failures may still have committed; callers should reload to confirm.
 pn_status_t pn_wallpaper_save(const pn_wallpaper_store_t *store,const pn_media_lease_t *lease,pn_lock_selection_t *selection,const pn_frame_t *bitmap);
 
+/// 将已预览的16灰阶/16级透明度平面写入内部缓存；调用方持源READ和缓存WRITE租约，源元数据须与预览一致。
+/// Cache previewed sixteen-gray/sixteen-alpha planes internally; caller holds source READ and cache WRITE leases and verifies source metadata against the preview.
+pn_status_t pn_wallpaper_mask_cache_save(const pn_wallpaper_store_t *store,const pn_media_lease_t *lease,const pn_lock_selection_t *selection,const pn_frame_t *gray,const pn_frame_t *alpha);
+
 /// 按选择绘制锁屏；custom/book时frame须已含位图，只叠加提示带。font为常驻UI字体，hint为一行提示文本。
 /// book模式由调用方先把封面画入frame；取不到封面时调用方应改用默认选择，本函数不检查frame内容。
 /// Draw the lock screen for a selection; in custom/book mode frame already holds the bitmap and only the hint band is overlaid. font is the resident UI font; hint is one line of text.

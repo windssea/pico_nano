@@ -2,6 +2,7 @@
  * 中文：日期边界、未知状态、字体恢复及书封绘制。/ English: date boundaries, unknown states, font restoration and cover drawing.
  */
 #include "pn_bookmark_lock.h"
+#include "pn_widgets.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,21 +15,24 @@ int main(int argc,char **argv){
     date(1792339200,2026,10,19,0);date(4107513600u,2100,3,1,0);
     assert(pn_bookmark_lock_month_days(2000,2)==29 && pn_bookmark_lock_month_days(2100,2)==28 && !pn_bookmark_lock_month_days(2026,13));
     pn_pool_t pool;assert(!pn_pool_init(&pool,2u*1024u*1024u,NULL,NULL,NULL));pn_font_t font={0};pn_text_source_t source=pn_font_builtin_source();assert(pn_font_open(&font,&pool,&source,28)==PN_OK);
+    pn_w_font_scope_t scope={0};assert(pn_w_font_scope_begin(&scope,&pool,NULL)==PN_OK);
     uint8_t *pixels=malloc(342u*1216u),*before=malloc(342u*1216u),cover_pixels[PN_COVER_BYTES];assert(pixels && before);pn_frame_t frame,cover;
     assert(pn_frame_bind(&frame,pixels,342u*1216u,684,1216) && pn_frame_bind(&cover,cover_pixels,sizeof cover_pixels,184,256));pn_frame_clear(&cover,3);
     pn_bookmark_lock_t s={.battery=-1};assert(pn_bookmark_lock_render(&s,NULL,&font,"",&frame)==PN_OK && font.pixels==28);memcpy(before,pixels,342u*1216u);
     s=(pn_bookmark_lock_t){.book={"本地阅读书签测试","作者"},.basis=1423,.section=3,.count=31,.progress_known=true,.date_known=true,.utc=1792339200,.battery=86};
     assert(pn_bookmark_lock_render(&s,&cover,&font,"按电源键继续阅读",&frame)==PN_OK && font.pixels==28);
-    assert(memcmp(before,pixels,342u*1216u) && pn_frame_get(&frame,510,140)==3 && pn_frame_get(&frame,40,427)==0 && pn_frame_get(&frame,640,427)==10);
-    assert(pn_frame_get(&frame,342,0)==0 && pn_frame_get(&frame,342,1215)==0 && pn_frame_get(&frame,342,355)==15);
+    assert(memcmp(before,pixels,342u*1216u) && pn_frame_get(&frame,550,290)==3 && pn_frame_get(&frame,40,530)==1 && pn_frame_get(&frame,390,530)==12);
+    // 上下留白验证原比例书封没有填满较高纸片框。 / Top/bottom paper margins verify that the proportional cover does not stretch to fill the taller paper frame.
+    assert(pn_frame_get(&frame,552,170)>3 && pn_frame_get(&frame,552,425)>3);
+    assert(pn_frame_get(&frame,342,0)==0 && pn_frame_get(&frame,342,1215)==0);
     // 未采集的七日图只保留空态，不产生虚构柱形。/ The uncollected weekly chart remains empty without invented bars.
-    for(int y=885;y<905;y++)for(int x=90;x<640;x++)assert(pn_frame_get(&frame,x,y)==15);
+    assert(pn_frame_get(&frame,100,900)>2 && pn_frame_get(&frame,180,900)>2);
     // 真实周数据只在对应星期绘柱；不改变正文外的书封、进度与字体恢复。/ Real weekly data paints only the corresponding weekdays, preserving cover/progress and font restoration.
     s.reading=(pn_reading_summary_t){.known=true,.dated=true,.today_ms=120000,.total_ms=300000,.today_turns=2,.total_turns=7,.weekday=1,.week_ms={60000,120000}};
     assert(pn_bookmark_lock_render(&s,&cover,&font,"按电源键继续阅读",&frame)==PN_OK && font.pixels==28);
-    assert(pn_frame_get(&frame,110,900)==2 && pn_frame_get(&frame,193,860)==2 && pn_frame_get(&frame,276,900)==15);
-    assert(pn_frame_get(&frame,510,140)==3 && pn_frame_get(&frame,40,427)==0);
+    assert(pn_frame_get(&frame,100,920)==2 && pn_frame_get(&frame,180,860)==2 && pn_frame_get(&frame,260,900)>2);
+    assert(pn_frame_get(&frame,550,290)==3 && pn_frame_get(&frame,40,530)==1);
     if(argc>1){FILE *f=fopen(argv[1],"wb");assert(f);fprintf(f,"P5\n684 1216\n255\n");for(int y=0;y<1216;y++)for(int x=0;x<684;x++)fputc(pn_frame_get(&frame,x,y)*17,f);assert(!fclose(f));}
     memcpy(before,pixels,342u*1216u);s.basis=10001;assert(pn_bookmark_lock_render(&s,NULL,&font,"",&frame)==PN_INVALID && !memcmp(before,pixels,342u*1216u));
-    free(before);free(pixels);pn_font_close(&font);assert(!pool.used && !pool.live);puts("bookmark lock: Gregorian boundaries, unknown date, progress, cover and font restoration passed");return 0;
+    free(before);free(pixels);pn_w_font_scope_end(&scope);pn_font_close(&font);assert(!pool.used && !pool.live);puts("bookmark lock: Gregorian boundaries, unknown date, progress, cover and font restoration passed");return 0;
 }

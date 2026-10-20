@@ -23,7 +23,7 @@
 #define H PN_WALLPAPER_HEIGHT
 #define SCRATCH_MAX (2u*1024u*1024u)
 #define HEADER 38
-#define VERSION 2
+#define VERSION 3
 /// 只有自定义和已缓存书封包含位图；旧BOOK记录继续兼容。/ Only custom/cached-book records contain a bitmap; legacy BOOK records remain compatible.
 static bool bitmap_record(const pn_lock_selection_t *s){return s->mode==PN_LOCK_CUSTOM || (s->mode==PN_LOCK_BOOK && s->cached_book);}
 static bool book_identity_valid(const pn_lock_selection_t *s){uint8_t zero[32]={0};return s->mode==PN_LOCK_BOOK && memcmp(s->book.sha256,zero,sizeof zero)!=0;}
@@ -106,7 +106,7 @@ pn_status_t pn_wallpaper_mask_render(const pn_frame_t *gray,const pn_frame_t *al
 // 遮罩预处理缓存：原图路径/大小/mtime/变换/算法版本为键，与书封缓存相同，只是可重建显示缓存，不当内容身份。
 // Mask preprocessing cache keyed by source path/size/mtime/transform/algorithm version like the cover cache; a rebuildable display cache, never a content identity.
 #define MASK_MAGIC "PNMK"
-#define MASK_VERSION 2u ///< v2：PackBits流，内部分区也放得下 / v2: PackBits stream that fits internal partitions
+#define MASK_VERSION 3u ///< v3：行差分PackBits，灰度和透明度均无损 / v3: lossless row-difference PackBits for gray and alpha
 #define MASK_HEADER (4+2+2+2+8+8+1+1+1+2)
 #define MASK_PLANES (2u*PN_WALLPAPER_BYTES)
 #define MASK_CHUNK 4096u
@@ -129,7 +129,7 @@ static void mask_header(uint8_t *p,const struct stat *info,const pn_wallpaper_tr
 typedef struct {FILE *file;uint8_t block[MASK_CHUNK];size_t used,total;uint32_t crc;bool failed;} packer_t;
 static void pack_put(packer_t *k,const uint8_t *data,size_t n){
     while(n && !k->failed){size_t take=MASK_CHUNK-k->used<n?MASK_CHUNK-k->used:n;memcpy(k->block+k->used,data,take);k->used+=take;data+=take;n-=take;
-        if(k->used==MASK_CHUNK){k->crc=mcrc(k->crc,k->block,k->used);k->failed=fwrite(k->block,1,k->used,k->file)!=k->used;k->total+=k->used;k->used=0;}}
+        if(k->used==MASK_CHUNK){k->crc=mcrc(k->crc,k->block,k->used);k->failed=k->file && fwrite(k->block,1,k->used,k->file)!=k->used;k->total+=k->used;k->used=0;}}
 }
 static void pack(packer_t *k,const uint8_t *in,size_t n){
     size_t i=0;
@@ -137,6 +137,35 @@ static void pack(packer_t *k,const uint8_t *in,size_t n){
         if(run>=2){uint8_t head[2]={(uint8_t)(257u-run),in[i]};pack_put(k,head,2);i+=run;continue;}
         size_t lit=1;while(i+lit<n && lit<128 && !(i+lit+1<n && in[i+lit]==in[i+lit+1]))lit++;
         uint8_t head=(uint8_t)(lit-1u);pack_put(k,&head,1);pack_put(k,in+i,lit);i+=lit;}
+}
+/// 按原生行差分编码，最多使用一行临时内存。 / Encode native row differences with at most one temporary row.
+static void pack_plane(packer_t *k,const uint8_t *pixels){
+    uint8_t row[W/2];
+    for(size_t y=0;y<H;y++){for(size_t x=0;x<W/2;x++){size_t i=y*(W/2)+x;row[x]=pixels[i]^(y?pixels[i-W/2]:0);}pack(k,row,sizeof row);}
+}
+static bool pack_finish(packer_t *k){
+    if(k->used){k->crc=mcrc(k->crc,k->block,k->used);if(k->file && fwrite(k->block,1,k->used,k->file)!=k->used)k->failed=true;k->total+=k->used;k->used=0;}
+    return !k->failed;
+}
+/// 完整验证编码边界；NULL输出用于提交读回，尾部留给调用方校验。 / Fully validate encoding bounds; NULL output verifies commits, leaving the trailer for the caller.
+static pn_status_t unpack(FILE *file,uint8_t *pixels,size_t bytes,bool delta,uint32_t *crc,size_t *encoded){
+    uint8_t block[512];size_t at=0,used=0,out=0,consumed=0;unsigned remaining=0;bool repeat=false,value_pending=false;uint8_t value=0;
+    while(out<bytes){
+        if(!remaining || !repeat || value_pending){
+            if(at==used){used=fread(block,1,sizeof block,file);at=0;if(!used)return ferror(file)?PN_IO:PN_CORRUPT;}
+            uint8_t c=block[at++];*crc=mcrc(*crc,&c,1);consumed++;
+            if(consumed>bytes*2u)return PN_CORRUPT;
+            if(!remaining){if(c==128)return PN_CORRUPT;remaining=c<128?c+1u:257u-c;if(remaining>bytes-out)return PN_CORRUPT;repeat=c>128;value_pending=repeat;continue;}
+            value=c;value_pending=false;
+        }
+        uint8_t v=value;if(delta && out%(size_t)PN_WALLPAPER_BYTES>=W/2 && pixels)v^=pixels[out-W/2];
+        if(pixels)pixels[out]=v;
+        out++;remaining--;
+    }
+    if(remaining || value_pending)return PN_CORRUPT;
+    if(used>at && fseek(file,-(long)(used-at),SEEK_CUR))return PN_IO;
+    if(encoded)*encoded=consumed;
+    return PN_OK;
 }
 /// 命中OK并写入两平面；缺失或键不符EMPTY；损坏CORRUPT。只用4KiB读缓冲。/ Hit OK filling both planes; missing or key mismatch EMPTY; damage CORRUPT. Uses only a 4 KiB read buffer.
 static pn_status_t mask_cache_load(pn_media_t *media,const pn_media_lease_t *lease,const char *dir,const pn_lock_selection_t *s,uint8_t *planes){
@@ -151,18 +180,8 @@ static pn_status_t mask_cache_load(pn_media_t *media,const pn_media_lease_t *lea
     if(fread(stored,1,head,file)!=head)status=PN_CORRUPT;
     else if(memcmp(stored,expected,head))status=memcmp(stored,MASK_MAGIC,4)?PN_CORRUPT:PN_EMPTY;
     else{
-        // 流式解码：控制字节可跨读块，状态保存在literal/repeat剩余量。/ Streaming decode: control bytes may span blocks, with state kept in the remaining literal/repeat counts.
-        static uint8_t chunk[MASK_CHUNK];uint32_t crc=mcrc(0,stored,head);size_t out=0,consumed=0,literal=0,repeat=0;bool want_value=false;
-        while(status==PN_OK && out<MASK_PLANES){size_t n=fread(chunk,1,MASK_CHUNK,file);if(!n){status=PN_CORRUPT;break;}
-            size_t i=0;
-            while(i<n && out<MASK_PLANES){uint8_t c=chunk[i];
-                if(literal){planes[out++]=c;literal--;i++;continue;}
-                if(want_value){size_t r=repeat<MASK_PLANES-out?repeat:MASK_PLANES-out;memset(planes+out,c,r);out+=r;want_value=false;repeat=0;i++;continue;}
-                i++;if(c<128)literal=(size_t)c+1u;else if(c>128){repeat=257u-c;want_value=true;}}
-            crc=mcrc(crc,chunk,i);consumed+=i;
-            // 平面填满时剩余字节属于尾部，回退到尾部起点。/ Once planes are full the rest belongs to the tail, so seek back to its start.
-            if(out==MASK_PLANES && (literal || want_value))status=PN_CORRUPT;
-            else if(out==MASK_PLANES && fseek(file,(long)(head+consumed),SEEK_SET))status=PN_IO;}
+        uint32_t crc=mcrc(0,stored,head);size_t consumed=0;
+        status=unpack(file,planes,MASK_PLANES,true,&crc,&consumed);
         uint8_t tail[9];
         if(status==PN_OK && fread(tail,1,sizeof tail,file)!=8)status=PN_CORRUPT;
         if(status==PN_OK && (mget(tail,4)!=consumed || mget(tail+4,4)!=crc))status=PN_CORRUPT;}
@@ -172,7 +191,7 @@ static pn_status_t mask_cache_load(pn_media_t *media,const pn_media_lease_t *lea
     return status;
 }
 /// 先写临时文件并同步再替换；失败最多丢缓存，空间不足只删临时文件。/ Write and sync a temporary file, then replace; failures lose at most the cache, and a full volume only removes the temporary file.
-static pn_status_t mask_cache_store(pn_media_t *media,const pn_media_lease_t *lease,const char *dir,const pn_lock_selection_t *s,const uint8_t *planes){
+static pn_status_t mask_cache_store(pn_media_t *media,const pn_media_lease_t *lease,const char *dir,const pn_lock_selection_t *s,const pn_frame_t *gray,const pn_frame_t *alpha){
     struct stat info;char path[PN_WALLPAPER_PATH_MAX+64],temporary[PN_WALLPAPER_PATH_MAX+64],parent[PN_WALLPAPER_PATH_MAX+64];size_t length=strlen(s->source);
     if(!mask_cache_path(dir,path,sizeof path,"") || !mask_cache_path(dir,temporary,sizeof temporary,".tmp") || length>=PN_WALLPAPER_PATH_MAX || strlen(dir)>=sizeof parent)return PN_LIMIT;
     if(stat(s->source,&info) || !S_ISREG(info.st_mode))return PN_EMPTY;
@@ -188,8 +207,8 @@ static pn_status_t mask_cache_store(pn_media_t *media,const pn_media_lease_t *le
     static packer_t packer;
     if(file){packer=(packer_t){.file=file,.crc=mcrc(0,header,head)};
         if(fwrite(header,1,head,file)!=head)status=PN_IO;
-        if(status==PN_OK){pack(&packer,planes,MASK_PLANES);
-            if(!packer.failed && packer.used){packer.crc=mcrc(packer.crc,packer.block,packer.used);packer.failed=fwrite(packer.block,1,packer.used,file)!=packer.used;packer.total+=packer.used;}
+        if(status==PN_OK){pack_plane(&packer,gray->pixels);pack_plane(&packer,alpha->pixels);
+            (void)pack_finish(&packer);
             uint8_t tail[8];mput(tail,packer.total,4);mput(tail+4,packer.crc,4);
             if(packer.failed || fwrite(tail,1,8,file)!=8 || fflush(file) || fsync(fileno(file)))status=PN_IO;}
         if(fclose(file))status=PN_IO;}
@@ -198,6 +217,12 @@ static pn_status_t mask_cache_store(pn_media_t *media,const pn_media_lease_t *le
     if(status!=PN_OK && file)(void)remove(temporary);
     return status;
 }
+pn_status_t pn_wallpaper_mask_cache_save(const pn_wallpaper_store_t *store,const pn_media_lease_t *lease,const pn_lock_selection_t *selection,const pn_frame_t *gray,const pn_frame_t *alpha){
+    if(!store || !store->media || !lease || lease->access!=PN_MEDIA_WRITE || !selection || selection->mode!=PN_LOCK_MASK || !full_frame(gray) || !full_frame(alpha))return PN_INVALID;
+    char dir[PN_WALLPAPER_PATH_MAX];strcpy(dir,store->slots[0]);char *slash=strrchr(dir,'/');if(!slash || slash==dir)return PN_INVALID;*slash=0;
+    return mask_cache_store(store->media,lease,dir,selection,gray,alpha);
+}
+
 typedef struct {pn_frame_t gray,alpha,shown;uint8_t *pixels;bool confirmed;} mask_t;
 pn_status_t pn_wallpaper_mask_open(pn_wallpaper_mask_t *mask,pn_pool_t *pool,pn_media_t *media,const pn_lock_selection_t *selection){
     return pn_wallpaper_mask_open_cached(mask,pool,media,selection,NULL);
@@ -225,7 +250,7 @@ pn_status_t pn_wallpaper_mask_open_stored(pn_wallpaper_mask_t *mask,pn_pool_t *p
                 s=pn_wallpaper_mask_prepare(pool,media,&lease,selection->source,selection->transform,free_bytes>262144?free_bytes-262144:1,&m->gray,&m->alpha);}
             pn_status_t released=pn_media_release(media,&lease);if(s==PN_OK)s=released;}}
     // 写缓存失败不影响本次锁屏。/ Cache-write failures never affect this lock screen.
-    if(s==PN_OK && !hit && cache_dir && pn_media_acquire(cache_media,PN_MEDIA_WRITE,&lease)==PN_OK){(void)mask_cache_store(cache_media,&lease,cache_dir,selection,m->pixels);(void)pn_media_release(cache_media,&lease);}
+    if(s==PN_OK && !hit && cache_dir && pn_media_acquire(cache_media,PN_MEDIA_WRITE,&lease)==PN_OK){(void)mask_cache_store(cache_media,&lease,cache_dir,selection,&m->gray,&m->alpha);(void)pn_media_release(cache_media,&lease);}
     if(s!=PN_OK){pn_free(m->pixels);pn_free(m);return s;}mask->impl=m;return PN_OK;
 }
 pn_status_t pn_wallpaper_mask_paint(void *ctx,pn_frame_t *frame){
@@ -258,7 +283,7 @@ pn_status_t pn_wallpaper_store_init(pn_wallpaper_store_t *store,pn_media_t *medi
 /* 解析头部；路径另读。/ Parse the fixed header; the path is read separately. */
 static bool decode_header(const uint8_t *h,pn_lock_selection_t *s,size_t *path_length){
     unsigned version=(unsigned)get(h+4,2);
-    if(memcmp(h,"PNWP",4) || (version!=1 && version!=VERSION) || h[6]>PN_LOCK_BOOKMARK || h[7]>PN_WALLPAPER_COVER || h[8]>3 || (int8_t)h[9]<-PN_WALLPAPER_SHIFT_MAX || (int8_t)h[9]>PN_WALLPAPER_SHIFT_MAX || h[10]>1 || h[11]>1 || (version==1 && h[11]) || (h[11] && h[6]!=PN_LOCK_BOOK))return false;
+    if(memcmp(h,"PNWP",4) || (version<1 || version>VERSION) || h[6]>PN_LOCK_BOOKMARK || h[7]>PN_WALLPAPER_COVER || h[8]>3 || (int8_t)h[9]<-PN_WALLPAPER_SHIFT_MAX || (int8_t)h[9]>PN_WALLPAPER_SHIFT_MAX || h[10]>1 || h[11]>1 || (version==1 && h[11]) || (h[11] && h[6]!=PN_LOCK_BOOK))return false;
     *s=(pn_lock_selection_t){.mode=(pn_lock_mode_t)h[6],.transform={(pn_wallpaper_fit_t)h[7],h[8],(int8_t)h[9]},.hint=h[10]!=0,.sequence=get(h+12,8),.source_size=get(h+20,8),.source_mtime=(int64_t)get(h+28,8)};
     s->cached_book=h[11]!=0;*path_length=(size_t)get(h+36,2);return s->sequence && *path_length<PN_WALLPAPER_PATH_MAX;
 }
@@ -270,11 +295,16 @@ static pn_status_t read_slot(const pn_wallpaper_store_t *store,const pn_media_le
     if(fread(header,1,HEADER,file)!=HEADER)status=ferror(file)?PN_IO:PN_CORRUPT;
     else if(!decode_header(header,&s,&path_length))status=PN_CORRUPT;
     if(status==PN_OK){crc=crc_update(crc,header,HEADER);
-        if(get(header+4,2)==VERSION){if(fread(s.book.sha256,1,32,file)!=32)status=ferror(file)?PN_IO:PN_CORRUPT;else crc=crc_update(crc,s.book.sha256,32);}
+        if(get(header+4,2)>=2){if(fread(s.book.sha256,1,32,file)!=32)status=ferror(file)?PN_IO:PN_CORRUPT;else crc=crc_update(crc,s.book.sha256,32);}
         if(status==PN_OK && s.cached_book && !book_identity_valid(&s))status=PN_CORRUPT;}
     if(status==PN_OK){if(fread(s.source,1,path_length,file)!=path_length)status=ferror(file)?PN_IO:PN_CORRUPT;else{s.source[path_length]=0;crc=crc_update(crc,(uint8_t *)s.source,path_length);if(strlen(s.source)!=path_length)status=PN_CORRUPT;}}
-    if(status==PN_OK && bitmap_record(&s))for(int y=0;y<H && status==PN_OK;y++){uint8_t *row=frame?frame->pixels+(size_t)y*frame->stride:buffer;
-        if(fread(row,1,W/2,file)!=W/2)status=ferror(file)?PN_IO:PN_CORRUPT;else crc=crc_update(crc,row,W/2);}
+    if(status==PN_OK && bitmap_record(&s)){
+        unsigned codec=0;
+        if(get(header+4,2)>=3){uint8_t c;if(fread(&c,1,1,file)!=1)status=PN_CORRUPT;else{codec=c;crc=crc_update(crc,&c,1);if(codec>1)status=PN_CORRUPT;}}
+        if(status==PN_OK && codec){uint32_t normalized=~crc;status=unpack(file,frame?frame->pixels:NULL,PN_WALLPAPER_BYTES,true,&normalized,NULL);crc=~normalized;}
+        else if(status==PN_OK)for(int y=0;y<H && status==PN_OK;y++){uint8_t *row=frame?frame->pixels+(size_t)y*frame->stride:buffer;
+            if(fread(row,1,W/2,file)!=W/2)status=ferror(file)?PN_IO:PN_CORRUPT;else crc=crc_update(crc,row,W/2);}
+    }
     uint8_t tail[5];size_t n=status==PN_OK?fread(tail,1,sizeof tail,file):0;
     if(status==PN_OK && ferror(file))status=PN_IO;
     if(status==PN_OK && (n!=4 || get(tail,4)!=(~crc&UINT32_MAX)))status=PN_CORRUPT;
@@ -327,7 +357,13 @@ pn_status_t pn_wallpaper_save(const pn_wallpaper_store_t *store,const pn_media_l
     uint32_t crc=crc_update(UINT32_MAX,header,HEADER);bool error=fwrite(header,1,HEADER,file)!=HEADER;
     crc=crc_update(crc,selection->book.sha256,32);if(!error && fwrite(selection->book.sha256,1,32,file)!=32)error=true;
     crc=crc_update(crc,(const uint8_t *)selection->source,path_length);if(!error && fwrite(selection->source,1,path_length,file)!=path_length)error=true;
-    if(bitmap_record(selection))for(int y=0;y<H && !error;y++){const uint8_t *row=bitmap->pixels+(size_t)y*bitmap->stride;crc=crc_update(crc,row,W/2);if(fwrite(row,1,W/2,file)!=W/2)error=true;}
+    if(bitmap_record(selection) && !error){
+        // 先计数再选较小编码；高熵图回退原生4bpp，绝不增加像素存储。 / Count first and select the smaller encoding; high-entropy images retain native 4bpp without expanding pixel storage.
+        static packer_t counter;counter=(packer_t){0};pack_plane(&counter,bitmap->pixels);(void)pack_finish(&counter);
+        uint8_t codec=counter.total<PN_WALLPAPER_BYTES?1:0;crc=crc_update(crc,&codec,1);if(fwrite(&codec,1,1,file)!=1)error=true;
+        if(codec && !error){counter=(packer_t){.file=file,.crc=~crc};pack_plane(&counter,bitmap->pixels);error=!pack_finish(&counter);crc=~counter.crc;}
+        else for(int y=0;y<H && !error;y++){const uint8_t *row=bitmap->pixels+(size_t)y*bitmap->stride;crc=crc_update(crc,row,W/2);if(fwrite(row,1,W/2,file)!=W/2)error=true;}
+    }
     uint8_t tail[4];put(tail,~crc&UINT32_MAX,4);if(!error && fwrite(tail,1,4,file)!=4)error=true;
     if(!error && (fflush(file) || fsync(fileno(file))))error=true;
     if(fclose(file))error=true;

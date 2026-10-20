@@ -12,6 +12,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include "pn_widgets.h"
+#include "pn_builtin_art.h"
 #include "pn_profile.h"
 bool pn_shelf_gesture_feed(pn_shelf_gesture_t *g,bool active,bool swipe,unsigned count,int x,int y,bool valid,int book,uint64_t now,int *command){
     if(!g || !command)return false;
@@ -183,7 +184,7 @@ static pn_status_t cover_or_placeholder(pn_font_t *font,pn_frame_t *frame,const 
     pn_profile_span_t span;pn_profile_begin(&span,NULL,"ui.cover.shade");
     pn_w_round_fill(frame,x+2,y+5,w-4,h,radius,PN_UI_SELECT); // 下沿浅影，先画以免盖住封面 / Under-edge shade, drawn first so it never covers the cover
     pn_profile_end(&span,PN_OK);pn_profile_begin(&span,NULL,"ui.cover.blit");
-    if(pn_shelf_cover_frame(covers,slot,&cover))blit_scaled(frame,&cover,x,y,w,h);
+    if(pn_shelf_cover_frame(covers,slot,&cover) || pn_builtin_cover_frame(title,&cover)==PN_OK)blit_scaled(frame,&cover,x,y,w,h);
     else s=monogram_cover(font,frame,x,y,w,h,title,PN_SHELF_MINIMAL);
     (void)large;
     pn_profile_end(&span,s);pn_profile_begin(&span,NULL,"ui.cover.frame");
@@ -281,7 +282,7 @@ static pn_status_t grid_item(const pn_catalog_item_t *item,const pn_shelf_covers
     pn_frame_t cover;pn_status_t s=PN_OK;
     if(style==PN_SHELF_DEFAULT)pn_w_round_fill(frame,x+2,y+5,w-4,h,radius,PN_UI_SELECT);
     pn_profile_span_t span;pn_profile_begin(&span,NULL,"ui.grid.blit");
-    if(pn_shelf_cover_frame(covers,i,&cover))blit_scaled(frame,&cover,x,y,w,h);
+    if(pn_shelf_cover_frame(covers,i,&cover) || pn_builtin_cover_frame(title,&cover)==PN_OK)blit_scaled(frame,&cover,x,y,w,h);
     else s=monogram_cover(font,frame,x,y,w,h,title,style);
     pn_profile_end(&span,s);pn_profile_begin(&span,NULL,"ui.grid.frame");
     frame_cover(frame,x,y,w,h,radius);style_cover(frame,style,x,y,w,h);pn_profile_end(&span,PN_OK);

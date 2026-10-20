@@ -10,6 +10,7 @@
 #include "pn_brand.h"
 #include "pn_profile.h"
 #include "pn_brand_image.h"
+#include "pn_builtin_art.h"
 #include "pn_reader_app.h"
 #include "pn_epub_app.h"
 #include "pn_hot_session.h"
@@ -807,7 +808,7 @@ static int library_worker(void *ctx){
     if(!s->page || !s->recent || !s->frame.pixels || !s->argb)goto cleanup;
     memset(s->page,0,sizeof *s->page);
     if(!pn_frame_bind(&s->frame,s->frame.pixels,342u*1216u,684,1216))goto cleanup;
-    if(getenv("PN_SIM_BOOT_PREVIEW")){status=pn_brand_image_render(&s->frame);if(status==PN_OK)status=pn_brand_version_render(&s->frame,PN_PRODUCT_VERSION);if(status==PN_OK)status=present_raw(s,&s->frame);if(status!=PN_OK)goto cleanup;SDL_Delay(900);}
+    if(getenv("PN_SIM_BOOT_PREVIEW")){status=pn_boot_art_draw(pool,&s->frame);if(status!=PN_OK)status=pn_brand_image_render(&s->frame);if(status==PN_OK)status=pn_brand_version_render(&s->frame,PN_PRODUCT_VERSION);if(status==PN_OK)status=present_raw(s,&s->frame);if(status!=PN_OK)goto cleanup;SDL_Delay(900);}
     pn_media_init(&s->media);status=pn_media_attach(&s->media,1);if(status!=PN_OK)goto cleanup;
     // 与设备使用同一系统字库加载器，模拟器只替换目录port。/ Use the same system-font loader as the device with only the directory port replaced.
     if(s->font_dir){char path[PN_FONT_REFERENCE_PATH_MAX];int n=snprintf(path,sizeof path,"%s/HarmonyOS_Sans_SC_Regular.ttf",s->font_dir);if(n>0 && (size_t)n<sizeof path)(void)pn_font_system_open(pool,&s->media,path);}

@@ -1,4 +1,4 @@
-"""开机图/默认锁屏共用logo，提示带独立，原生帧无品牌图裁切。 / Boot/default lock share the logo, keep the hint separate and preserve native artwork bounds."""
+"""开机插画与默认锁屏分别核验，版本号只叠加到开机帧。 / Verify boot art and default lock separately; overlay the version only on boot."""
 import os
 import json
 import hashlib
@@ -6,6 +6,8 @@ import pathlib
 import subprocess
 import sys
 import tempfile
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / 'tools'))
+from build_firmware_art import resize
 
 # 产品画面描述实体按键，快捷键只属于模拟器控制。 / Product hints describe hardware keys; shortcuts belong to simulator controls.
 source = pathlib.Path(__file__).with_name('library_sdl.c').read_text(encoding='utf-8')
@@ -33,15 +35,12 @@ with tempfile.TemporaryDirectory() as directory:
         return fields[3]
     boot, lock = pixels(captures[0]), pixels(captures[-1])
     assert boot[:684 * 1104] == lock[:684 * 1104]
-    # 开机版本号只占右下角固定框，其余墨迹仍须在品牌图内。/ The boot version occupies a fixed bottom-right box; all other ink must stay inside the brand art.
+    # 开机版本号只占固定框；锁屏使用相同熊猫图。/ The version occupies a fixed box; the lock retains the original brand bounds.
     version_box = lambda x, y: 540 <= x < 660 and 1171 <= y < 1192  # 宽度随版本号变化 / width varies with the version
     every = [(i % 684, i // 684) for i, value in enumerate(boot) if value < 255]
     assert sum(1 for x, y in every if version_box(x, y)) > 100
-    ink = [(x, y) for x, y in every if not version_box(x, y)]
-    assert ink and min(x for x, y in ink) >= 62 and max(x for x, y in ink) < 622
-    metadata=json.loads((pathlib.Path(sys.argv[1]).parent/'pn_brand_logo.json').read_text())
-    assert metadata['source_sha256']==hashlib.sha256(pathlib.Path(__file__).resolve().parents[1].joinpath('assets/image/logo.png').read_bytes()).hexdigest()
-    top=metadata['position'][1];height=metadata['image_size'][1]
-    assert min(y for x,y in ink)>=top and max(y for x,y in ink)<top+height
+    expected = resize(pathlib.Path(__file__).resolve().parents[1] / 'assets/image/水墨熊猫阅读时光.png', 684, 1216, False)
+    assert all(value == expected[i] * 17 for i, value in enumerate(boot) if not version_box(i % 684, i // 684))
+    assert lock[:684*1104] == bytes(v*17 for v in expected[:684*1104])
     assert len(set(boot)) > 2 and any(value < 255 for value in lock[684 * 1104:])
-print('PicoNano: shared native boot/default logo, boot version label, white transparency, safe bounds and independent hint passed')
+print('PicoNano: separate native boot art/default panda, exact boot pixels, version label and independent lock hint passed')

@@ -13,6 +13,7 @@
 #include "pn_profile.h"
 #include "pn_catalog_index.h"
 #include "pn_brand_image.h"
+#include "pn_builtin_art.h"
 #include "pn_reader_app.h"
 #include "pn_turn_transition.h"
 #include "pn_epub_app.h"
@@ -2296,7 +2297,9 @@ static bool shelf_content_touch(pn_shelf_gesture_t *gesture,unsigned count,int x
 /// 共用开机图只借一帧内存，推屏后立即归还；不读TF。/ Shared boot art borrows one frame, releases it after presentation, and never reads the SD card.
 static void show_boot_brand(void){
     uint8_t *pixels=pn_alloc_tagged(&pool,PN_MEM_FRAME,684u*1216u/2u);pn_frame_t frame;
-    pn_status_t status=pn_frame_bind(&frame,pixels,684u*1216u/2u,684,1216)?pn_brand_image_render(&frame):PN_NO_MEMORY;
+    pn_status_t status=pn_frame_bind(&frame,pixels,684u*1216u/2u,684,1216)?pn_boot_art_draw(&pool,&frame):PN_NO_MEMORY;
+    // 资源或内存失败时保留原品牌图退路。/ Retain the original brand fallback on resource or memory failure.
+    if(status!=PN_OK && pixels)status=pn_brand_image_render(&frame);
     // 只有开机画面带版本号；默认锁屏仍用纯品牌图。/ Only the boot screen carries the version; the default lock screen keeps the plain brand art.
     if(status==PN_OK)status=pn_brand_version_render(&frame,PN_PRODUCT_VERSION);
     if(status==PN_OK)status=present(NULL,&frame,PN_REFRESH_GC16);

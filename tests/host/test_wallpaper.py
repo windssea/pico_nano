@@ -66,4 +66,16 @@ with tempfile.TemporaryDirectory() as folder:
     payload=header+source+bytes([0x33])*(W*H//2)
     (legacy/'lock.a').write_bytes(payload+struct.pack('<I',zlib.crc32(payload)))
     r=subprocess.run([binary,'legacy',str(legacy)],capture_output=True,timeout=120);assert r.returncode==0,(r.stdout,r.stderr)
+    # v2原始记录、v3压缩边界及有效CRC的恶意尾部。 / Raw v2 compatibility and v3 compressed bounds with correctly checksummed malicious payloads.
+    for version in (2,3):
+        case=root/f'legacy-{version}';case.mkdir()
+        header=b'PNWP'+struct.pack('<H6BQQqH',version,1,0,0,0,1,0,77,123,0,len(source))
+        payload=header+bytes(32)+source+(b'\0' if version==3 else b'')+bytes([0x33])*(W*H//2)
+        (case/'lock.a').write_bytes(payload+struct.pack('<I',zlib.crc32(payload)))
+        r=subprocess.run([binary,'legacy',str(case)],capture_output=True,timeout=120);assert r.returncode==0,(r.stdout,r.stderr)
+    for name,encoded in [('overrun',b'\x00\x33'+bytes([129,0x33])*(W*H//2//128)),('truncated',b'\x00'),('noop',b'\x80'),('extra',bytes([129,0x33])*(W*H//2//128)+b'\0')]:
+        case=root/name;case.mkdir();header=b'PNWP'+struct.pack('<H6BQQqH',3,1,0,0,0,1,0,77,123,0,len(source))
+        payload=header+bytes(32)+source+b'\1'+encoded
+        (case/'lock.a').write_bytes(payload+struct.pack('<I',zlib.crc32(payload)))
+        r=subprocess.run([binary,'corrupt',str(case)],capture_output=True,timeout=120);assert r.returncode==0,(name,r.stdout,r.stderr)
 print('wallpaper: contain/cover/shift, four rotations, transparency, supersampling, corrupt input, fault injection, A/B records and lock screens passed')

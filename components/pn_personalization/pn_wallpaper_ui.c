@@ -25,6 +25,7 @@ typedef struct {
     pn_font_t font;uint8_t *canvas_px,*bitmap_px,*small_px,*alpha_px;pn_frame_t canvas,bitmap,small,alpha;
     pn_catalog_page_t page;pn_lock_selection_t saved,draft;pn_bookmark_lock_t bookmark;bool saved_known,bitmap_valid;
     pn_wallpaper_transform_t prepared;char prepared_path[PN_WALLPAPER_PATH_MAX];
+    uint64_t prepared_size;int64_t prepared_mtime;
     char message[96];
 } ui_t;
 static const char *base(const char *path){const char *slash=strrchr(path,'/');return slash?slash+1:path;}
@@ -52,12 +53,16 @@ static pn_status_t build_preview(ui_t *u){
         u->bitmap_valid=false;pn_media_lease_t lease;status=pn_media_acquire(u->images,PN_MEDIA_READ,&lease);
         size_t free_bytes=u->pool->limit>u->pool->used?u->pool->limit-u->pool->used:0;
         if(status==PN_OK){
-            if(u->draft.mode==PN_LOCK_MASK){
+            struct stat before,after;
+            if(stat(u->draft.source,&before) || !S_ISREG(before.st_mode))status=PN_IO;
+            if(status==PN_OK && u->draft.mode==PN_LOCK_MASK){
                 if(!u->alpha_px)u->alpha_px=pn_alloc_tagged(u->pool,PN_MEM_UI,PN_WALLPAPER_BYTES);
                 if(!u->alpha_px)status=PN_NO_MEMORY;
                 else{(void)pn_frame_bind(&u->alpha,u->alpha_px,PN_WALLPAPER_BYTES,W,H);free_bytes=u->pool->limit>u->pool->used?u->pool->limit-u->pool->used:0;
                     status=pn_wallpaper_mask_prepare(u->pool,u->images,&lease,u->draft.source,u->draft.transform,free_bytes>RESERVE?free_bytes-RESERVE:1,&u->bitmap,&u->alpha);}
-            }else status=pn_wallpaper_prepare(u->pool,u->images,&lease,u->draft.source,u->draft.transform,free_bytes>RESERVE?free_bytes-RESERVE:1,&u->bitmap);
+            }else if(status==PN_OK)status=pn_wallpaper_prepare(u->pool,u->images,&lease,u->draft.source,u->draft.transform,free_bytes>RESERVE?free_bytes-RESERVE:1,&u->bitmap);
+            if(status==PN_OK && (stat(u->draft.source,&after) || before.st_size!=after.st_size || before.st_mtime!=after.st_mtime))status=PN_STALE_MEDIA;
+            if(status==PN_OK){u->prepared_size=(uint64_t)after.st_size;u->prepared_mtime=(int64_t)after.st_mtime;u->draft.source_size=u->prepared_size;u->draft.source_mtime=u->prepared_mtime;}
             (void)pn_media_release(u->images,&lease);}
         if(status==PN_OK){u->bitmap_valid=true;u->prepared=u->draft.transform;strcpy(u->prepared_path,u->draft.source);}
     }
@@ -148,12 +153,20 @@ static pn_status_t apply(pn_wallpaper_ui_t *ui){
     ui_t *u=ui->impl;
     if(!u->has_store){snprintf(u->message,sizeof u->message,"内部壁纸分区不可用，锁屏未更改");return PN_UNSUPPORTED;}
     if((u->draft.mode==PN_LOCK_CUSTOM || u->draft.mode==PN_LOCK_MASK || u->draft.cached_book) && !u->bitmap_valid){snprintf(u->message,sizeof u->message,"预览尚未生成，锁屏未更改");return PN_INVALID;}
-    pn_media_lease_t lease;pn_status_t status=pn_media_acquire(u->store.media,PN_MEDIA_WRITE,&lease);
-    pn_lock_selection_t record=u->draft;
-    if(status==PN_OK){status=pn_wallpaper_save(&u->store,&lease,&record,u->draft.mode==PN_LOCK_CUSTOM || u->draft.cached_book?&u->bitmap:NULL);(void)pn_media_release(u->store.media,&lease);
-        // 保存失败也可能已提交，以读回为准。/ A failed save may still have committed; trust the readback.
+    // 保存预览与缓存使用同一源代；改图后须重新预览，不能将旧像素标为新缓存。 / Save previews/caches from one source generation; changed files require a new preview so stale pixels never get a new cache key.
+    pn_media_lease_t source_lease;bool source_held=false;pn_status_t status=PN_OK;
+    if(u->draft.mode==PN_LOCK_CUSTOM || u->draft.mode==PN_LOCK_MASK){
+        status=pn_media_acquire(u->images,PN_MEDIA_READ,&source_lease);source_held=status==PN_OK;struct stat info;
+        if(status==PN_OK && (stat(u->draft.source,&info) || (uint64_t)info.st_size!=u->prepared_size || (int64_t)info.st_mtime!=u->prepared_mtime))status=PN_STALE_MEDIA;
+    }
+    pn_media_lease_t lease;pn_lock_selection_t record=u->draft;bool cache_failed=false;
+    if(status==PN_OK)status=pn_media_acquire(u->store.media,PN_MEDIA_WRITE,&lease);
+    if(status==PN_OK){status=pn_wallpaper_save(&u->store,&lease,&record,u->draft.mode==PN_LOCK_CUSTOM || u->draft.cached_book?&u->bitmap:NULL);
+        if(status==PN_OK && record.mode==PN_LOCK_MASK)cache_failed=pn_wallpaper_mask_cache_save(&u->store,&lease,&record,&u->bitmap,&u->alpha)!=PN_OK;
+        (void)pn_media_release(u->store.media,&lease);
         reload_saved(u);}
-    if(status==PN_OK){ui->screen=PN_WUI_LIST;snprintf(u->message,sizeof u->message,"已应用：%s",mode_name(&record));}
+    if(source_held)(void)pn_media_release(u->images,&source_lease);
+    if(status==PN_OK){ui->screen=PN_WUI_LIST;snprintf(u->message,sizeof u->message,cache_failed?"已应用：%s（缓存稍后重试）":"已应用：%s",mode_name(&record));}
     else snprintf(u->message,sizeof u->message,"应用失败（%d），保留原锁屏",(int)status);
     return status;
 }

@@ -9,7 +9,7 @@ import zlib
 
 
 def decode(path):
-    """只接受有界、非隔行8位RGB/RGBA构建输入。 / Accept bounded, noninterlaced 8-bit RGB/RGBA build inputs only."""
+    """接受有界非隔行8位灰阶/RGB/RGBA输入。 / Accept bounded noninterlaced 8-bit gray/RGB/RGBA input."""
     data = path.read_bytes()
     if len(data) > 16 * 1024 * 1024 or data[:8] != b'\x89PNG\r\n\x1a\n':
         raise ValueError('Invalid PNG source')
@@ -31,9 +31,9 @@ def decode(path):
             if width or size != 13:
                 raise ValueError('Invalid PNG header')
             width, height, depth, color, compression, filtering, interlace = struct.unpack('>IIBBBBB', payload)
-            if not (0 < width <= 4096 and 0 < height <= 4096) or depth != 8 or color not in (2, 6) or compression or filtering or interlace:
+            if not (0 < width <= 4096 and 0 < height <= 4096) or depth != 8 or color not in (0, 2, 6) or compression or filtering or interlace:
                 raise ValueError('Expected bounded noninterlaced RGB/RGBA PNG')
-            channels = 4 if color == 6 else 3
+            channels = 4 if color == 6 else 1 if color == 0 else 3
         elif tag == b'IDAT':
             compressed.extend(payload)
         elif tag == b'IEND':
@@ -79,7 +79,7 @@ def decode(path):
         for x in range(width):
             i = x * channels
             alpha = row[i + 3] if channels == 4 else 255
-            luminance = (77 * row[i] + 150 * row[i + 1] + 29 * row[i + 2] + 128) // 256
+            luminance = row[i] if channels == 1 else (77 * row[i] + 150 * row[i + 1] + 29 * row[i + 2] + 128) // 256
             value = (luminance * alpha + 255 * (255 - alpha) + 127) // 255
             gray[y * width + x] = value
             if value < 250:

@@ -23,7 +23,8 @@ with tempfile.TemporaryDirectory() as folder:
     assert 'wallpaper_ui command=6 status=0 screen=1 active=1' in out,out
     assert 'wallpaper_ui command=11 status=0 screen=0 active=1' in out,out
     assert 'wallpaper_ui command=1 status=0 screen=0 active=0' in out,out
-    record=store/'lock.a';assert record.exists() and record.stat().st_size>415872,list(store.iterdir())
+    record=store/'lock.a';assert record.exists() and record.stat().st_size<415872,list(store.iterdir())
+    saved=record.read_bytes();assert saved[:6]==b'PNWP\x03\x00' and zlib.crc32(saved[:-4])==int.from_bytes(saved[-4:],'little')
     # 预览后Esc取消不写新记录。/ Esc after previewing cancels without a new record.
     before=record.read_bytes();out=run('wallpaper,tap:330:240,back,back,quit',*opts)
     assert 'wallpaper_ui command=4 status=0 screen=1 active=1' in out and 'wallpaper_ui command=12 status=0 screen=0 active=1' in out,out
@@ -45,7 +46,7 @@ with tempfile.TemporaryDirectory() as folder:
     probe=10*684+10
     assert any(pages[i-1]==pages[i+1] and pages[i-1][probe]==255 and pages[i][probe]<100 for i in range(1,len(pages)-1)),(len(pages),out)
     latest=max((p.read_bytes() for p in store.glob('lock.*')),key=lambda b:int.from_bytes(b[12:20],'little'))
-    assert latest[:6]==b'PNWP\x02\x00' and latest[6]==4 and latest[11]==0 and len(latest)<2048
+    assert latest[:6]==b'PNWP\x03\x00' and latest[6]==4 and latest[11]==0 and len(latest)<2048
     next(images.glob('*.png')).unlink()
     out=run('tap:100:500,lock,enter,back,quit',*opts)
     assert 'lock_mask status=11' in out and 'lock_preview status=0 mode=0 cached=0' in out,out

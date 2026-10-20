@@ -60,7 +60,7 @@ static int store(const char *dir){
     assert(pn_wallpaper_load(&s,&write,&got,NULL)==PN_OK && got.mode==PN_LOCK_SIMPLE && !got.hint);
     /* 像素位翻转被CRC拒绝，回退。/ A flipped pixel bit is rejected by CRC and falls back. */
     assert(pn_wallpaper_save(&s,&write,&sel,&bitmap)==PN_OK && sel.sequence==3);
-    flip(a,100000);assert(pn_wallpaper_load(&s,&write,&got,&frame)==PN_OK && got.mode==PN_LOCK_SIMPLE && got.sequence==2);
+    flip(a,100);assert(pn_wallpaper_load(&s,&write,&got,&frame)==PN_OK && got.mode==PN_LOCK_SIMPLE && got.sequence==2);
     flip(b,10);assert(pn_wallpaper_load(&s,&write,&got,&frame)==PN_CORRUPT);
     /* 双坏后仍可保存新记录并恢复。/ After both slots are bad a new record can still be saved and recovered. */
     assert(pn_wallpaper_save(&s,&write,&def,NULL)==PN_OK && def.sequence==4);assert(pn_wallpaper_load(&s,&write,&got,NULL)==PN_OK && got.sequence==4 && got.mode==PN_LOCK_DEFAULT);
@@ -72,8 +72,12 @@ static int store(const char *dir){
     assert(pn_wallpaper_save(&s,&write,&book,NULL)==PN_INVALID);
     assert(pn_wallpaper_save(&s,&write,&book,&bitmap)==PN_OK && book.sequence==6);
     memset(fp,0,PN_WALLPAPER_BYTES);assert(pn_wallpaper_load(&s,&write,&got,&frame)==PN_OK && got.cached_book && got.book.sha256[0]==0x52 && !strcmp(got.source,book.source) && !memcmp(fp,bp,PN_WALLPAPER_BYTES));
-    flip(a,100000);assert(pn_wallpaper_load(&s,&write,&got,NULL)==PN_OK && got.sequence==5 && !got.cached_book);
+    flip(a,100);assert(pn_wallpaper_load(&s,&write,&got,NULL)==PN_OK && got.sequence==5 && !got.cached_book);
     memset(book.book.sha256,0,32);assert(pn_wallpaper_save(&s,&write,&book,&bitmap)==PN_INVALID);
+    // 高熵数据回退原生字节；压缩图保存后必须完全还原，源图不再需要。 / High entropy falls back to native bytes; saved pixels must restore exactly without the source image.
+    uint32_t random=1;for(size_t i=0;i<PN_WALLPAPER_BYTES;i++){random=random*1664525u+1013904223u;bp[i]=(uint8_t)(random>>24);}
+    assert(pn_wallpaper_save(&s,&write,&sel,&bitmap)==PN_OK);
+    assert(pn_wallpaper_load(&s,&write,&got,&frame)==PN_OK && !memcmp(fp,bp,PN_WALLPAPER_BYTES));
     assert(pn_media_detach(&media)==PN_OK);assert(pn_wallpaper_load(&s,&write,&got,NULL)==PN_STALE_MEDIA && pn_wallpaper_save(&s,&write,&def,NULL)==PN_STALE_MEDIA);
     free(fp);free(bp);puts("store ok");return 0;
 }
@@ -102,10 +106,12 @@ static int lock(const char *prefix){
     pn_font_close(&font);free(p);assert(!pool.used && !pool.live);puts("lock ok");return 0;
 }
 int main(int argc,char **argv){
-    if(argc==3 && !strcmp(argv[1],"legacy")){
+    if(argc==3 && (!strcmp(argv[1],"legacy") || !strcmp(argv[1],"corrupt"))){
         pn_media_t media;pn_media_init(&media);assert(pn_media_attach(&media,1)==PN_OK);pn_media_lease_t lease;assert(pn_media_acquire(&media,PN_MEDIA_READ,&lease)==PN_OK);
         char a[1024],b[1024];snprintf(a,sizeof a,"%s/lock.a",argv[2]);snprintf(b,sizeof b,"%s/lock.b",argv[2]);pn_wallpaper_store_t s;assert(pn_wallpaper_store_init(&s,&media,a,b)==PN_OK);
-        pn_frame_t frame;uint8_t *pixels=full(&frame);pn_lock_selection_t got;assert(pn_wallpaper_load(&s,&lease,&got,&frame)==PN_OK && got.mode==PN_LOCK_CUSTOM && got.sequence==77 && !got.cached_book && pn_frame_get(&frame,0,0)==3);
+        pn_frame_t frame;uint8_t *pixels=full(&frame);pn_lock_selection_t got;
+        if(!strcmp(argv[1],"corrupt")){memset(&got,0x77,sizeof got);pn_lock_selection_t before=got;assert(pn_wallpaper_load(&s,&lease,&got,&frame)==PN_CORRUPT && !memcmp(&before,&got,sizeof got));assert(pn_media_release(&media,&lease)==PN_OK);free(pixels);return 0;}
+        assert(pn_wallpaper_load(&s,&lease,&got,&frame)==PN_OK && got.mode==PN_LOCK_CUSTOM && got.sequence==77 && !got.cached_book && pn_frame_get(&frame,0,0)==3);
         assert(pn_media_release(&media,&lease)==PN_OK);free(pixels);return 0;
     }
     if(argc==7 && !strcmp(argv[1],"prepare"))return prepare(argv[2],atoi(argv[3]),atoi(argv[4]),atoi(argv[5]),argv[6]);
