@@ -41,7 +41,7 @@ typedef struct {
 typedef struct {
     pn_lock_mode_t mode; ///< 模式 / Mode
     pn_wallpaper_transform_t transform; ///< 自定义时的参数 / Parameters for custom mode
-    bool hint; ///< 底部白色安全带提示 / Bottom white safety-band hint
+    bool hint; ///< 旧记录兼容字段，显示路径忽略 / Legacy record field, ignored by rendering
     uint64_t sequence; ///< 记录序号，零为未保存 / Record sequence, zero when never saved
     uint64_t source_size; ///< 原图大小，仅供编辑页提示 / Source size, for edit-page hints only
     int64_t source_mtime; ///< 原图mtime / Source mtime
@@ -64,6 +64,14 @@ pn_status_t pn_wallpaper_prepare(pn_pool_t *pool,pn_media_t *media,const pn_medi
 /// Preserve PNG gray and alpha, leaving both outputs unchanged on errors; JPEG masks are unsupported.
 pn_status_t pn_wallpaper_mask_prepare(pn_pool_t *pool,pn_media_t *media,const pn_media_lease_t *lease,const char *path,
     pn_wallpaper_transform_t transform,size_t budget,pn_frame_t *gray,pn_frame_t *alpha);
+/// 同步预览缓存：命中须完整源SHA及整缓存CRC通过；失败重走原解码，缓存写失败不影响结果，cache_dir由owner固定。/ Preview cache: require full source SHA and cache CRC; rebuild misses, ignore cache-write failures; the owner fixes cache_dir.
+pn_status_t pn_wallpaper_prepare_cached(pn_pool_t *,pn_media_t *,const pn_media_lease_t *,const char *,pn_wallpaper_transform_t,size_t,pn_frame_t *,const char *cache_dir);
+/// 缓存完整原生灰度/透明平面，不降低遮罩画质。/ Cache native gray/alpha planes without reducing mask quality.
+pn_status_t pn_wallpaper_mask_prepare_cached(pn_pool_t *,pn_media_t *,const pn_media_lease_t *,const char *,pn_wallpaper_transform_t,size_t,pn_frame_t *,pn_frame_t *,const char *cache_dir);
+/// 144x256的16灰阶缩略缓存；路径/size/mtime/算法作变化探测，整CRC；不是源身份或应用校验。失败像素不可呈现。/ 144x256 16-gray thumbnail cache, keyed by path/size/mtime/algorithm with full CRC; never source identity/application validation. Do not present failed pixels.
+pn_status_t pn_wallpaper_thumbnail_load(pn_media_t *,const pn_media_lease_t *,const char *cache_dir,const char *source,pn_frame_t *);
+/// 仅完整解码通过的缩略图可保存，固定目录CACHE_WRITE与源READ共享，写失败可忽略。/ Save only fully decoded thumbnails; fixed-directory CACHE_WRITE shares source READ, and failures are optional.
+pn_status_t pn_wallpaper_thumbnail_save(pn_media_t *,const char *cache_dir,const char *source,const pn_frame_t *);
 /// 将已校验遮罩叠加到文字底图；只绘制，无文件或硬件操作。
 /// Composite a validated mask over a text underlay; drawing only, without file or hardware operations.
 pn_status_t pn_wallpaper_mask_render(const pn_frame_t *gray,const pn_frame_t *alpha,pn_frame_t *underlay);

@@ -11,7 +11,7 @@ from build_firmware_art import resize
 
 # 产品画面描述实体按键，快捷键只属于模拟器控制。 / Product hints describe hardware keys; shortcuts belong to simulator controls.
 source = pathlib.Path(__file__).with_name('library_sdl.c').read_text(encoding='utf-8')
-assert '"按电源键继续阅读"' in source
+assert '"按电源键继续阅读"' not in source
 assert '按 L 或回车' not in source
 
 with tempfile.TemporaryDirectory() as directory:
@@ -41,6 +41,6 @@ with tempfile.TemporaryDirectory() as directory:
     assert sum(1 for x, y in every if version_box(x, y)) > 100
     expected = resize(pathlib.Path(__file__).resolve().parents[1] / 'assets/image/水墨熊猫阅读时光.png', 684, 1216, False)
     assert all(value == expected[i] * 17 for i, value in enumerate(boot) if not version_box(i % 684, i // 684))
-    assert lock[:684*1104] == bytes(v*17 for v in expected[:684*1104])
+    assert lock == bytes(v*17 for v in expected)
     assert len(set(boot)) > 2 and any(value < 255 for value in lock[684 * 1104:])
-print('PicoNano: separate native boot art/default panda, exact boot pixels, version label and independent lock hint passed')
+print('PicoNano: separate native boot art/default panda, exact boot pixels, version label and no lock overlay passed')

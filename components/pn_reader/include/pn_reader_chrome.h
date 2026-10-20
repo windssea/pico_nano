@@ -26,10 +26,10 @@ typedef enum {
 /// 画页脚：y=1144细线，左侧文字（章节/书名）与右侧文字（百分比）；fallback可为NULL，UI字体缺字时用它补。
 /// Draw the footer: a thin rule at y=1144, left text (section/title) and right text (percentage); fallback may be NULL and fills glyphs the UI font lacks.
 pn_status_t pn_reader_footer_render(pn_font_t *ui,pn_font_t *fallback,pn_frame_t *frame,const char *left,const char *right);
-/// 同上，另在页脚上沿画进度轨（basis为0–10000，<0则只画细线）。/ Same as above, plus a progress track along the footer top (basis 0–10000; a hairline when negative).
-pn_status_t pn_reader_footer_progress(pn_font_t *ui,pn_font_t *fallback,pn_frame_t *frame,const char *left,const char *right,int basis);
-/// 阅读顶部预留32px内只画时间/电量，不改变正文或分页。/ Draw only time/battery in the reserved top 32 px without changing prose or pagination.
-pn_status_t pn_reader_status_render(pn_font_t *ui,pn_frame_t *frame);
+/// 同上，另画进度轨（basis为0–10000，<0为细线）；非零background要求已铺好原生背景。/ Same as above, plus a progress track (basis 0–10000; negative for hairline); a nonzero background requires freshly painted native paper.
+pn_status_t pn_reader_footer_progress(pn_font_t *ui,pn_font_t *fallback,pn_frame_t *frame,const char *left,const char *right,int basis,unsigned background);
+/// 恢复顶部32px原生背景后画时间/电量，不改变正文或分页。/ Restore native paper then draw time/battery in the top 32 px without changing prose or pagination.
+pn_status_t pn_reader_status_render(pn_font_t *ui,pn_frame_t *frame,unsigned background);
 /// 在frame底部画工具栏（白底覆盖原页面）；unavailable按位标记不可用入口（bit0对应PN_TOOL_TOC，依此类推）。
 /// Draw the toolbar over the bottom of the frame (a white sheet over the page); unavailable marks entries bitwise (bit 0 is PN_TOOL_TOC and so on).
 pn_status_t pn_reader_toolbar_render(pn_font_t *ui,pn_frame_t *frame,unsigned unavailable);

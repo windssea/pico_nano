@@ -95,7 +95,7 @@ pn_status_t pn_bookmark_lock_render(const pn_bookmark_lock_t *s,const pn_frame_t
             if(status==PN_OK){status=pn_font_size(font,17);if(status==PN_OK)status=pn_w_text_lines(font,frame,calendar.ji,471,1130,176,2,21,NULL);}
         }else TEXT("暂无本地历表",25,91,1085,239,PN_ALIGN_CENTER,false);
     }else{TEXT("日期待校时",28,91,1085,239,PN_ALIGN_CENTER,true);TEXT("校时后显示黄历",19,471,1058,176,PN_ALIGN_LEFT,false);}
-    if(*hint)TEXT(hint,19,26,1190,632,PN_ALIGN_CENTER,false);
+    // 旧调用参数保留兼容，锁屏不再叠加操作文字。/ Retain the legacy argument for compatibility without overlaying lock instructions.
     pn_status_t restored=pn_font_size(font,original);
 #undef TEXT
     return status==PN_OK?restored:status;

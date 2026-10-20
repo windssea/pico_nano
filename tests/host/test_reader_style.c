@@ -15,7 +15,7 @@ int main(void){char root[]="/tmp/pn-reader-style-XXXXXX";assert(mkdtemp(root));c
     pn_pool_t pool;assert(pn_pool_init(&pool,2*1024*1024,NULL,NULL,NULL)==0);pn_reader_app_t app={0};bool fail=false;pn_style_t original,draft,shown;
     assert(pn_reader_app_open(&app,&pool,book,NULL,state,44,0)==PN_OK && pn_reader_app_step(&app,PN_APP_OPEN,1,present,&fail)==PN_OK);
     assert(pn_reader_app_step(&app,PN_APP_NEXT,2,present,&fail)==PN_OK);pn_txt_progress_t before,after;assert(pn_reader_app_progress(&app,&before)==PN_OK && before.source_offset>0);
-    assert(pn_reader_app_style_get(&app,&original)==PN_OK && original.pixels==44);draft=(pn_style_t){56,180,50,2,64,0,15,2,2,2,2,0};
+    assert(pn_reader_app_style_get(&app,&original)==PN_OK && original.pixels==44);draft=(pn_style_t){56,180,50,2,64,0,15,2,2,2,2,0,3};
     pn_style_t invalid=draft;invalid.pixels=73;
     assert(pn_reader_app_style_preview(&app,&invalid,2,present,&fail)==PN_INVALID && !pn_reader_app_last_confirmed(&app));
     fail=true;assert(pn_reader_app_style_preview(&app,&draft,3,present,&fail)==PN_IO);assert(pn_reader_app_style_get(&app,&shown)==PN_OK && !memcmp(&shown,&original,sizeof shown));

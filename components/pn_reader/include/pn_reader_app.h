@@ -74,6 +74,8 @@ pn_status_t pn_reader_app_step(pn_reader_app_t *app,pn_reader_action_t action,ui
 /// 定期检查保存窗口；并非带deadline的异步存储服务。
 /// Periodically check save windows; not an asynchronous storage service with deadlines.
 pn_status_t pn_reader_app_tick(pn_reader_app_t *app,uint64_t now_ms);
+/// 正文空闲且无按压时写待定近期记录，首屏后至少1.5秒；失败保留并限频重试，关闭/挂起仍保存。 / Write pending recents only during untouched body idle at least 1.5 seconds after display; retain and throttle failures, while close/suspend still save.
+pn_status_t pn_reader_app_recent_idle(pn_reader_app_t *app,uint64_t now_ms);
 /// 先保存屏障，保存失败不释放；成功后清理源，关闭I/O错误可在释放后报告。
 /// Save barrier first, retain on save failure; clean sources on success, reporting close I/O errors after release.
 pn_status_t pn_reader_app_close(pn_reader_app_t *app,uint64_t now_ms);

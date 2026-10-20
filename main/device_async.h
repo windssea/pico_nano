@@ -49,6 +49,7 @@ typedef struct {
     bool touch_wake; ///< 触摸INT中断可用 / Touch INT interrupt available
     pn_feedback_present_fn feedback; ///< 局部反馈端口，语义页面代次不变 / Local feedback port preserving the semantic view revision
     atomic_uint touch_reads,touch_errors,events_sent; ///< 输入健康计数，仅诊断 / Input-health counters for diagnostics only
+    atomic_bool first_reader; ///< 首屏扫描期间识别新触点，仅暂存一次翻页 / Recognize new contacts during first-page scanning, holding only one turn
 #if PN_DEVICE_TEST_CONSOLE
     _Atomic(const pn_device_async_diag_t *) diag; ///< 诊断钩子，启动后发布 / Diagnostic hooks published after start
 #endif
@@ -66,6 +67,10 @@ pn_status_t pn_device_async_feedback(pn_device_async_t *port,const pn_feedback_p
 pn_status_t pn_device_async_native(pn_device_async_t *,pn_status_t (*)(void *),void *);
 /// 产品worker发布输入上下文，不暴露页面对象。/ Product worker publishes input context without exposing page objects.
 void pn_device_async_view(pn_device_async_t *port,uint32_t view,bool body,uint8_t flags);
+/// 在唯一首屏呈现前预备阅读输入，旧触点随上下文变化取消；翻页留待确认。 / Prepare reading input before the sole first-page presentation, cancelling old contacts and holding turns for confirmation.
+pn_status_t pn_device_async_first_begin(pn_device_async_t *port,uint8_t flags);
+/// 首屏与模型提交成功才交付暂存翻页；失败丢弃，紧急控制保留。 / Release a held turn only after successful screen/model commit; discard on failure and retain urgent controls.
+void pn_device_async_first_complete(pn_device_async_t *port,bool success);
 /// 同时发布连续固定底栏资格；只用于四个一级页，其他调用使用普通view撤销资格。
 /// Publish continuous fixed-navigation eligibility together; only for the four roots, while ordinary view publication revokes it.
 void pn_device_async_root_view(pn_device_async_t *port,uint32_t view,bool body,uint8_t flags,bool root);

@@ -19,6 +19,7 @@
 #include "pn_font_preview.h"
 #include "pn_reader_chrome.h"
 #include "pn_first_paint.h"
+#include "pn_builtin_art.h"
 #include <string.h>
 #include <stdio.h>
 #include <sys/stat.h>
@@ -44,6 +45,7 @@ typedef struct {
     pn_font_preferences_t draft_fonts,pending_fonts,pending_record,before_fonts,global_fonts;pn_epub_location_t font_origin;pn_epub_reader_t reader;pn_epub_page_t page;pn_layout_t layout;pn_job_token_t token;pn_display_t display;pn_frame_t frame;uint8_t *pixels;
     pn_journal_files_t progress_files,style_files;pn_journal_io_t progress_io,style_io;pn_epub_save_t save;pn_epub_progress_t restored,visible;
     char book_path[PN_RECENT_PATH_MAX],state_directory[PN_JOURNAL_PATH_MAX];bool recent_recorded;size_t recent_section; ///< 最近记录对应的章节序号，换章才更新记录 / Section index of the latest recent record; the record is refreshed only when the section changes
+    bool recent_pending;uint64_t recent_due; ///< 首屏与换章只置待写标记，空闲或安全出口写近期记录 / First display and section changes only mark pending recents, written at idle or safe exits
     
     pn_epub_progress_t bookmark_origin;bool has_bookmark_origin,bookmark_navigation,bookmark_returning;
     char footer_path[PN_ZIP_PATH_MAX]; ///< 当前页所属章节资源，供页脚显示 / Chapter resource of the displayed page, for the footer
@@ -129,7 +131,7 @@ static pn_status_t recent_impl(app_t *a,const char *path){
     size_t index=0;unsigned basis=0;if(section_progress(a,path,&index,&basis)){item.progress=(uint16_t)basis;a->recent_section=index;}
     pn_journal_files_t files;pn_journal_io_t io;pn_status_t status=pn_recent_files(&files,&a->state,&a->state_lease,a->state_directory,&io);
     if(status==PN_OK)status=pn_recent_touch(&io,a->pool,&item);
-    if(status==PN_OK)a->recent_recorded=true;
+    if(status==PN_OK){a->recent_recorded=true;a->recent_pending=false;}
     return status;
 }
 static pn_status_t recent(app_t *a,const char *path){
@@ -139,10 +141,11 @@ static pn_status_t recent(app_t *a,const char *path){
 static pn_status_t confirmed(void *ctx,const pn_epub_progress_t *p,bool turn,uint64_t now){
     app_t *a=ctx;a->visible=*p;a->has_visible=true;a->last_confirmed=true;a->semantic_due=now>UINT64_MAX-1500?UINT64_MAX:now+1500;
     pn_status_t status=a->persistent?pn_epub_save_confirm(&a->save,p,turn,now):PN_OK;
-    // 首次与换章时刷新“最近阅读”记录里的进度。/ Refresh the progress in the recent record on the first page and whenever the chapter changes.
+    // 首屏回执只标记近期记录；同步日志不得挡住阅读输入开放。 / Only mark recents at confirmation; synchronous journals must not block reading input.
     if(a->persistent){
         size_t index=0;unsigned basis=0;
-        if(!a->recent_recorded || (section_progress(a,p->location.path,&index,&basis) && index!=a->recent_section))(void)recent(a,p->location.path);
+        if(!a->recent_recorded || (section_progress(a,p->location.path,&index,&basis) && index!=a->recent_section))a->recent_pending=true;
+        if(a->recent_pending)a->recent_due=now>UINT64_MAX-1500?UINT64_MAX:now+1500;
     }
     return status;
 }
@@ -183,7 +186,7 @@ static pn_status_t paint_text_node(app_t *a,pn_frame_t *viewport,const pn_epub_p
 static pn_status_t paint_body(app_t *a,pn_frame_t *frame,unsigned *missing,unsigned *missing_images){
     // 图片前压缩一次；普通文本页保留有界容量，失败时仍使用原缓冲。/ Compact once before images; text pages reuse bounded capacity and failures retain the original buffers.
     if(a->page.image_count)(void)compact(a);
-    pn_frame_clear(frame,15);paint_guides(a,frame,&a->page);
+    pn_status_t paper=pn_reading_background_draw(a->style.background,frame);if(paper!=PN_OK)return paper;paint_guides(a,frame,&a->page);
     pn_frame_t viewport={frame->pixels+PN_READER_TOP*frame->stride+a->style.margin/2,a->layout.width,PN_READER_HEIGHT,frame->stride};
     for(size_t i=0;i<a->page.count;i++){pn_epub_page_node_t *n=&a->page.nodes[i];pn_status_t status;
         if(n->image_index!=UINT_MAX){pn_epub_reader_trim(&a->reader);suspend_fonts(a);pn_font_close(&a->ui);pn_epub_page_image_t *image=&a->page.images[n->image_index];pn_image_info_t info;
@@ -226,7 +229,7 @@ static pn_status_t paint_footer(app_t *a,pn_frame_t *frame,unsigned missing,unsi
         if(missing_images)snprintf(right,sizeof right,"图片未显示·%d%s%s",(int)last_image_error,percent[0]?" · ":"",percent);
         else if(missing)snprintf(right,sizeof right,"%u 缺字%s%s",missing,percent[0]?" · ":"",percent);else snprintf(right,sizeof right,"%s",percent);
     }
-    pn_status_t status=pn_reader_footer_progress(&a->ui,body(a),frame,left,right,known && !a->draft_render?(int)basis:-1);if(status==PN_OK)a->status=pn_w_status_snapshot();return status;
+    pn_status_t status=pn_reader_footer_progress(&a->ui,body(a),frame,left,right,known && !a->draft_render?(int)basis:-1,a->style.background);if(status==PN_OK)a->status=pn_w_status_snapshot();return status;
 }
 static bool bitmap_location(const pn_epub_location_t *a,const pn_epub_location_t *b){return !strcmp(a->path,b->path) && a->version==b->version && a->chapter_start==b->chapter_start && a->position.element==b->position.element && a->position.run==b->position.run && a->position.offset==b->position.offset && a->position.kind==b->position.kind;}
 static bool bitmap_key(app_t *a,pn_job_token_t token,const pn_epub_reader_anchor_t *anchor){return a->bitmap_token.session==token.session && a->bitmap_token.generation==token.generation && a->bitmap_anchor.has_next==anchor->has_next && bitmap_location(&a->bitmap_anchor.begin,&anchor->begin) && (!anchor->has_next || bitmap_location(&a->bitmap_anchor.next,&anchor->next));}
@@ -697,6 +700,7 @@ static pn_status_t bitmap_visit(void *ctx,const pn_epub_page_t *page,const pn_ep
     if(a->page.image_count || page->image_count){pn_page_bitmap_enable(&a->bitmap,false);pn_page_bitmap_enable(&a->bitmap,true);return PN_EMPTY;}
     if(!bitmap_key(a,token,anchor) || (!a->bitmap.working && !a->bitmap.ready)){
         pn_status_t s=pn_page_bitmap_begin(&a->bitmap,page->count);if(s!=PN_OK)return s;
+        if(a->style.background){pn_cache_pin(&a->bitmap.owner);s=pn_reading_background_draw(a->style.background,&a->bitmap.frame);pn_cache_unpin(&a->bitmap.owner);if(s!=PN_OK){pn_page_bitmap_invalidate(&a->bitmap);return s;}}
         a->bitmap_token=token;a->bitmap_anchor=*anchor;a->bitmap_last_pixels=a->style.pixels;
     }
     if(a->bitmap.ready)return PN_EMPTY;
@@ -734,7 +738,8 @@ pn_status_t pn_epub_app_prefetch(pn_epub_app_t *app){
     app_t *a=app->impl;if(a->suspended || a->lost || a->style_preview || a->style_pending || a->font_preview || a->font_pending || a->font_view || pn_xhtml_cache_pending(&a->epub))return PN_BUSY;
     if(a->bitmap.frame.pixels && !pn_epub_reader_next_ready(&a->reader)){bool enabled=a->bitmap.enabled;pn_page_bitmap_enable(&a->bitmap,false);pn_page_bitmap_enable(&a->bitmap,enabled);}
     pn_status_t status=pn_epub_reader_prefetch(&a->reader);if(status==PN_BUSY)return PN_OK;if(status==PN_EMPTY)(void)pn_page_index_flush(&a->page_index,false);
-    if(status==PN_OK || status==PN_EMPTY){pn_status_t painted=bitmap_prepare(a,8);if(painted==PN_OK)return PN_OK;if(painted!=PN_EMPTY)return painted;if(a->bitmap.ready)return status;}
+    // 空闲每步16节点，缩短位图就绪所需轮数；扫描期仍为8，不增加扫描争用。/ Process 16 nodes per idle step to finish sooner; scan-time steps remain 8 to preserve scan contention limits.
+    if(status==PN_OK || status==PN_EMPTY){pn_status_t painted=bitmap_prepare(a,16);if(painted==PN_OK)return PN_OK;if(painted!=PN_EMPTY)return painted;if(a->bitmap.ready)return status;}
     if(status==PN_OK || status==PN_EMPTY){pn_profile_span_t span;pn_profile_begin(&span,a->pool,"epub.glyph-warm");int pixels=body(a)->pixels;pn_cache_class_t kind=a->pool->speculative_kind;pn_cache_speculate(a->pool,true);a->pool->speculative_kind=PN_CACHE_GLYPH;
         pn_status_t warmed=pn_epub_reader_warm_next(&a->reader,warm_glyph,a,24);if(body(a)->impl && body(a)->pixels!=pixels)(void)font_size(a,pixels);
         a->pool->speculative_kind=kind;pn_cache_speculate(a->pool,false);pn_profile_end(&span,warmed);if(warmed!=PN_OK && warmed!=PN_EMPTY && warmed!=PN_NO_MEMORY)return warmed;}
@@ -744,6 +749,12 @@ pn_status_t pn_epub_app_jump(pn_epub_app_t *app,const pn_epub_location_t *jump,u
 pn_status_t pn_epub_app_tick(pn_epub_app_t *app,uint64_t now){if(!app || !app->impl)return PN_INVALID;
     app_t *a=app->impl;if(now<a->last_now)return PN_INVALID;
     a->last_now=now;return a->persistent?pn_epub_save_tick(&a->save,now):PN_OK;}
+pn_status_t pn_epub_app_recent_idle(pn_epub_app_t *app,uint64_t now){
+    if(!app || !app->impl)return PN_EMPTY;
+    app_t *a=app->impl;if(!a->recent_pending || a->suspended || a->lost || !a->has_visible || a->force_full || a->font_preview || a->style_preview || now<a->last_now || now<a->recent_due)return PN_EMPTY;
+    pn_status_t s=pn_cancel_checkpoint();if(s!=PN_OK)return s;
+    s=recent(a,a->visible.location.path);if(s!=PN_OK)a->recent_due=now>UINT64_MAX-1000?UINT64_MAX:now+1000;return s;
+}
 pn_status_t pn_epub_app_cache_idle(pn_epub_app_t *app,uint64_t now){
     if(!app || !app->impl)return PN_EMPTY;
     app_t *a=app->impl;if(a->lost || a->suspended || a->pool->speculative || !a->has_visible || a->force_full || a->style_preview || a->font_preview || !a->epub.semantic_store || now<a->last_now)return PN_EMPTY;
@@ -792,7 +803,7 @@ pn_status_t pn_epub_app_resume(pn_epub_app_t *app,uint64_t now,pn_reader_present
     if(!a->suspended)return PN_BUSY;
     pn_status_t status=a->lost?PN_STALE_MEDIA:pn_zip_validate(&a->zip);if(status!=PN_OK)return status;
     pn_w_status_snapshot_t current=pn_w_status_snapshot();
-    if(a->ui.impl && (current.battery!=a->status.battery || strcmp(current.clock,a->status.clock)) && pn_reader_status_render(&a->ui,&a->frame)==PN_OK)a->status=current;
+    if(a->ui.impl && (current.battery!=a->status.battery || strcmp(current.clock,a->status.clock)) && pn_reader_status_render(&a->ui,&a->frame,a->style.background)==PN_OK)a->status=current;
     status=present(ctx,&a->frame,PN_REFRESH_GC16);a->last_now=now;
     if(status==PN_OK){a->suspended=false;a->force_full=false;a->refresh.turns=0;a->semantic_due=now>UINT64_MAX-1500?UINT64_MAX:now+1500;}return status;
 }
@@ -843,7 +854,7 @@ pn_status_t pn_epub_app_paint_unshown(pn_epub_app_t *app,size_t budget,size_t re
     pn_draw_lease_t lease={0};pn_frame_t *frame=NULL;if(s==PN_OK)s=pn_display_begin_draw(&a->display,a->token,&lease,&frame);
     pn_first_scope_t scope=pn_first_scope_enter(a->pool,reserve);
     if(s==PN_OK && !pn_first_paint_matches(&a->first_paint,receipt.token,receipt.ticket)){
-        a->first_paint=(pn_first_paint_t){.token=receipt.token,.ticket=receipt.ticket};pn_frame_clear(frame,15);paint_guides(a,frame,&a->page);
+        a->first_paint=(pn_first_paint_t){.token=receipt.token,.ticket=receipt.ticket};s=pn_reading_background_draw(a->style.background,frame);if(s==PN_OK)paint_guides(a,frame,&a->page);
     }
     size_t count=s==PN_OK?a->page.count-a->first_paint.cursor:0;if(count>budget)count=budget;if(count>8)count=8;
     pn_frame_t viewport={a->frame.pixels+PN_READER_TOP*a->frame.stride+a->style.margin/2,a->layout.width,PN_READER_HEIGHT,a->frame.stride};

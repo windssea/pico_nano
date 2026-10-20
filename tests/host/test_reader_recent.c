@@ -17,10 +17,11 @@ int main(void){
     pn_media_t media;pn_media_init(&media);assert(pn_media_attach(&media,1)==PN_OK);pn_media_lease_t lease;assert(pn_media_acquire(&media,PN_MEDIA_READ,&lease)==PN_OK);
     pn_journal_files_t files;pn_journal_io_t io;assert(pn_recent_files(&files,&media,&lease,state,&io)==PN_OK);pn_recent_snapshot_t *s=malloc(sizeof *s);assert(s);
     assert(pn_reader_app_step(&app,PN_APP_OPEN,1,present,&fail)==PN_IO);assert(pn_recent_load(&io,&pool,s)==PN_EMPTY);
-    fail=false;assert(pn_reader_app_step(&app,PN_APP_OPEN,2,present,&fail)==PN_OK && pn_reader_app_recent_status(&app)==PN_OK);
-    assert(pn_recent_load(&io,&pool,s)==PN_OK && s->count==1 && !strcmp(s->items[0].path,book) && s->items[0].progress==0);
+    fail=false;assert(pn_reader_app_step(&app,PN_APP_OPEN,2,present,&fail)==PN_OK && pn_reader_app_recent_status(&app)==PN_EMPTY);
+    assert(pn_recent_load(&io,&pool,s)==PN_EMPTY && pn_reader_app_recent_idle(&app,2)==PN_EMPTY);
     pn_txt_progress_t warm_before,warm_after;
     assert(pn_reader_app_progress(&app,&warm_before)==PN_OK && pn_reader_app_suspend(&app,2)==PN_OK);
+    assert(pn_reader_app_recent_status(&app)==PN_OK && pn_recent_load(&io,&pool,s)==PN_OK && s->count==1 && !strcmp(s->items[0].path,book) && s->items[0].progress==0);
     assert(pn_reader_app_resume(&app,2,present,&fail)==PN_OK && pn_reader_app_progress(&app,&warm_after)==PN_OK && warm_before.source_offset==warm_after.source_offset);
     assert(pn_reader_app_step(&app,PN_APP_NEXT,3,present,&fail)==PN_OK);assert(pn_reader_app_close(&app,4)==PN_OK && !app.impl);
     assert(pn_recent_load(&io,&pool,s)==PN_OK && s->items[0].progress>0);

@@ -18,6 +18,7 @@
 #include "pn_font_preview.h"
 #include "pn_reader_chrome.h"
 #include "pn_first_paint.h"
+#include "pn_builtin_art.h"
 #include <errno.h>
 #include <limits.h>
 #include <stdio.h>
@@ -68,6 +69,7 @@ typedef struct {
     char book_path[PN_RECENT_PATH_MAX];
     pn_status_t recent_status;
     bool recent_recorded;
+    bool recent_pending;uint64_t recent_due; ///< 首屏只标记近期记录，空闲或安全出口写入 / First display only marks recents dirty; write when idle or at safe exits
     pn_txt_progress_t bookmark_origin;
     bool has_bookmark_origin,last_confirmed;
     pn_reader_overlay_fn font_view;void *font_view_ctx; ///< 仅本次字体事务借用的目标页 / Destination page borrowed only during this font transaction
@@ -130,7 +132,7 @@ static pn_status_t paint_footer(app_t *a,pn_frame_t *frame,const pn_reader_recei
     unsigned long long basis=progress_basis(a,receipt->anchor);
     if(!a->draft_render){unsigned long long percent=basis/100;
         if(missing)snprintf(right,sizeof right,"%u 缺字 · %llu%%",missing,percent);else snprintf(right,sizeof right,"%llu%%",percent);}
-    pn_status_t status=pn_reader_footer_progress(&a->ui,body(a),frame,left,right,a->draft_render?-1:(int)basis);if(status==PN_OK)a->status=pn_w_status_snapshot();return status;
+    pn_status_t status=pn_reader_footer_progress(&a->ui,body(a),frame,left,right,a->draft_render?-1:(int)basis,a->style.background);if(status==PN_OK)a->status=pn_w_status_snapshot();return status;
 }
 static bool bitmap_key(app_t *a,pn_job_token_t token,pn_reader_anchor_t anchor){
     pn_reader_anchor_t old=a->bitmap_anchor;return a->bitmap_token.session==token.session && a->bitmap_token.generation==token.generation && old.begin==anchor.begin && old.end==anchor.end && old.paragraph==anchor.paragraph && old.next_paragraph==anchor.next_paragraph;
@@ -147,7 +149,7 @@ static pn_status_t render_impl(app_t *a,pn_frame_t *frame,const pn_reader_receip
         pn_profile_span_t span;pn_profile_begin(&span,a->pool,"txt.first.use");
         s=pn_font_chain_validate(chain(a));missing=a->first_paint.missing;a->first_paint.ready=false;pn_profile_end(&span,s);
     }else s=bitmap_copy(a,frame,receipt,&missing);
-    if(s==PN_EMPTY){pn_frame_clear(frame,15);int guide=INT_MIN;s=paint_text(a,frame,a->reader.page.glyphs,0,a->reader.page.count,&guide,&missing,false);}
+    if(s==PN_EMPTY){s=pn_reading_background_draw(a->style.background,frame);if(s!=PN_OK)return s;int guide=INT_MIN;s=paint_text(a,frame,a->reader.page.glyphs,0,a->reader.page.count,&guide,&missing,false);}
     return s==PN_OK?paint_footer(a,frame,receipt,show_return,missing):s;
 }
 static pn_status_t render(app_t *a,pn_frame_t *frame,const pn_reader_receipt_t *receipt,bool show_return){
@@ -258,6 +260,8 @@ static pn_status_t pn_reader_app_open_on_media_impl(pn_reader_app_t *app,pn_pool
     if(status==PN_OK)status=pn_font_chain_init(&a->chain,pool,&a->body,NULL);
     pn_layout_t current;
     if(status==PN_OK && !pn_frame_bind(&a->frame,a->pixels,684u*1216u/2u,684,1216))status=PN_INVALID;
+    // 首次排版/预绘前应用已保存字重与清晰度；OPEN接管已绘像素后再设置会留下旧灰阶。/ Apply saved weight/sharpness before initial layout and prepaint; setting them at OPEN leaves already painted pixels on the old appearance.
+    if(status==PN_OK)status=ensure_body(a,a->style.pixels);
     if(status==PN_OK)status=layout(a,&current);
     pn_job_token_t token={1,1};pn_font_metrics_t metrics={a,advance};
     if(status==PN_OK)status=pn_reader_init(&a->reader,&source,encoding,&a->book,&current,&metrics,a->glyphs,PN_PAGE_GLYPHS_MAX,token,a->persistent?&a->save:NULL);
@@ -312,7 +316,7 @@ static pn_status_t record_recent(app_t *a){
     strcpy(item.path,a->book_path);pn_journal_files_t files;pn_journal_io_t io;
     status=pn_recent_files(&files,&a->state_media,&a->state_lease,a->state_directory,&io);
     if(status==PN_OK)status=pn_recent_touch(&io,a->pool,&item);
-    a->recent_status=status;if(status==PN_OK)a->recent_recorded=true;return status;
+    a->recent_status=status;if(status==PN_OK){a->recent_recorded=true;a->recent_pending=false;}return status;
 }
 /// 复用前台选择和精确亚像素偏移，只生成可回收字形，不画正文或页脚。 / Reuse foreground face selection and exact subpixel offsets, generating only reclaimable glyphs without painting body/footer.
 static pn_status_t warm_glyph(void *ctx,const pn_page_glyph_t *g){app_t *a=ctx;if(g->source.codepoint==9 || g->source.codepoint==10)return PN_EMPTY;pn_font_choice_t choice;pn_status_t s=pn_font_chain_choose(chain(a),g->source.codepoint,&choice);return s==PN_OK?pn_font_warm(choice.font,g->source.codepoint,g->x_64):s;}
@@ -322,6 +326,7 @@ static pn_status_t bitmap_visit(void *ctx,const pn_text_page_t *page,pn_reader_a
     bitmap_work_t *work=ctx;app_t *a=work->app;if(!a->bitmap.enabled)return PN_EMPTY;
     if(!bitmap_key(a,token,anchor) || (!a->bitmap.working && !a->bitmap.ready)){
         pn_status_t s=pn_page_bitmap_begin(&a->bitmap,page->count);if(s!=PN_OK)return s;
+        if(a->style.background){pn_cache_pin(&a->bitmap.owner);s=pn_reading_background_draw(a->style.background,&a->bitmap.frame);pn_cache_unpin(&a->bitmap.owner);if(s!=PN_OK){pn_page_bitmap_invalidate(&a->bitmap);return s;}}
         a->bitmap_token=token;a->bitmap_anchor=anchor;a->bitmap_guide=INT_MIN;
     }
     if(a->bitmap.ready)return PN_EMPTY;
@@ -434,7 +439,8 @@ static pn_status_t step_location(pn_reader_app_t *app,pn_reader_action_t action,
     a->last_confirmed=true;
     if(dismiss_return)a->has_bookmark_origin=false;
     if(committed)*committed=true;
-    if(a->persistent && !a->recent_recorded)(void)record_recent(a);
+    if(a->persistent && !a->recent_recorded)a->recent_pending=true;
+    if(a->recent_pending)a->recent_due=now>UINT64_MAX-1500?UINT64_MAX:now+1500;
     return a->persistent?pn_save_policy_tick(&a->save,now):PN_OK;
 }
 pn_status_t pn_reader_app_step(pn_reader_app_t *app,pn_reader_action_t action,uint64_t now,pn_reader_present_fn present,void *ctx){
@@ -445,6 +451,14 @@ pn_status_t pn_reader_app_step(pn_reader_app_t *app,pn_reader_action_t action,ui
     return step_location(app,action,false,0,now,present,ctx,NULL,-1);
 }
 pn_status_t pn_reader_app_tick(pn_reader_app_t *app,uint64_t now){if(!app || !app->impl)return PN_INVALID;app_t *a=app->impl;if(now<a->last_now)return PN_INVALID;a->last_now=now;return a->persistent?pn_save_policy_tick(&a->save,now):PN_OK;}
+pn_status_t pn_reader_app_recent_idle(pn_reader_app_t *app,uint64_t now){
+    if(!app || !app->impl)return PN_EMPTY;
+    app_t *a=app->impl;if(!a->recent_pending || a->suspended || a->media_lost || !a->reader.has_visible || a->force_full || a->font_preview || a->style_preview || now<a->last_now || now<a->recent_due)return PN_EMPTY;
+    pn_status_t s=pn_cancel_checkpoint();if(s!=PN_OK)return s;
+    pn_profile_span_t span;pn_profile_begin(&span,a->pool,"storage.recent");s=record_recent(a);pn_profile_end(&span,s);
+    if(s!=PN_OK)a->recent_due=now>UINT64_MAX-1000?UINT64_MAX:now+1000;
+    return s;
+}
 pn_status_t pn_reader_app_progress(const pn_reader_app_t *app,pn_txt_progress_t *progress){if(!app || !app->impl)return PN_INVALID;return pn_reader_progress(&((app_t *)app->impl)->reader,progress);}
 pn_status_t pn_reader_app_percent(const pn_reader_app_t *app,unsigned *basis){
     if(!app || !app->impl || !basis)return PN_INVALID;
@@ -479,7 +493,7 @@ pn_status_t pn_reader_app_resume(pn_reader_app_t *app,uint64_t now,pn_reader_pre
     if(!a->suspended)return PN_BUSY;
     pn_status_t status=a->media_lost?PN_STALE_MEDIA:pn_media_validate(a->book_media,&a->book_lease);if(status!=PN_OK)return status;
     pn_w_status_snapshot_t current=pn_w_status_snapshot();
-    if(a->ui.impl && (current.battery!=a->status.battery || strcmp(current.clock,a->status.clock)) && pn_reader_status_render(&a->ui,&a->frame)==PN_OK)a->status=current;
+    if(a->ui.impl && (current.battery!=a->status.battery || strcmp(current.clock,a->status.clock)) && pn_reader_status_render(&a->ui,&a->frame,a->style.background)==PN_OK)a->status=current;
     status=present(ctx,&a->frame,PN_REFRESH_GC16);a->last_now=now;
     if(status==PN_OK){a->suspended=false;a->force_full=false;a->refresh.turns=0;}return status;
 }
@@ -531,7 +545,7 @@ pn_status_t pn_reader_app_paint_unshown(pn_reader_app_t *app,size_t budget,size_
     pn_draw_lease_t lease={0};pn_frame_t *frame=NULL;if(s==PN_OK)s=pn_display_begin_draw(&a->display,a->reader.token,&lease,&frame);
     pn_first_scope_t scope=pn_first_scope_enter(a->pool,reserve);
     if(s==PN_OK && !pn_first_paint_matches(&a->first_paint,receipt.token,receipt.ticket)){
-        a->first_paint=(pn_first_paint_t){.token=receipt.token,.ticket=receipt.ticket,.guide=INT_MIN};pn_frame_clear(frame,15);
+        a->first_paint=(pn_first_paint_t){.token=receipt.token,.ticket=receipt.ticket,.guide=INT_MIN};s=pn_reading_background_draw(a->style.background,frame);
     }
     size_t count=s==PN_OK?a->reader.page.count-a->first_paint.cursor:0;if(count>budget)count=budget;if(count>8)count=8;
     if(s==PN_OK)s=paint_text(a,frame,a->reader.page.glyphs,a->first_paint.cursor,count,&a->first_paint.guide,&a->first_paint.missing,true);

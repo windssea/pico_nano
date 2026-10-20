@@ -7,9 +7,32 @@
 #include <string.h>
 static pn_async_event_t event(unsigned value,bool nav,bool urgent){pn_async_event_t e={.bytes=sizeof value,.navigation=nav,.urgent=urgent,.view=15};memcpy(e.payload,&value,sizeof value);return e;}
 static unsigned value(pn_async_event_t e){unsigned v;memcpy(&v,e.payload,sizeof v);return v;}
+// 首屏新手势不取消准备、不提前执行、不重复；失败/换页/紧急事件清除暂存。 / Fresh first-page gestures neither cancel preparation nor execute early or twice; failure, view changes and urgency discard the hold.
+static void first_page(void){
+ pn_async_t q;pn_async_init(&q);pn_async_event_t e=event(1,true,false),out;
+ assert(pn_async_first_view(&q,15)==PN_BUSY);pn_async_block_controls(&q,true);assert(pn_async_first_view(&q,15)==PN_OK);
+ pn_async_scope_t scope;pn_async_begin(&q,&scope,true);assert(pn_async_first_navigation(&q,&e)==PN_OK && pn_cancel_checkpoint()==PN_OK);
+ e=event(2,true,false);assert(pn_async_first_navigation(&q,&e)==PN_OK && pn_cancel_checkpoint()==PN_OK);
+ assert(pn_async_take(&q,&out)==PN_EMPTY);pn_async_first_complete(&q,true);pn_async_block_controls(&q,false);
+ assert(pn_async_take(&q,&out)==PN_OK && value(out)==1 && pn_async_take(&q,&out)==PN_EMPTY);pn_async_end(&scope);
+ assert(pn_async_first_navigation(&q,&e)==PN_OK && pn_async_take(&q,&out)==PN_OK && value(out)==2 && pn_async_take(&q,&out)==PN_EMPTY);
+ for(unsigned abort=0;abort<3;abort++){
+  pn_async_block_controls(&q,true);assert(pn_async_first_view(&q,15)==PN_OK);assert(pn_async_first_navigation(&q,&e)==PN_OK);
+  if(abort==0)pn_async_first_complete(&q,false);
+  if(abort==1)pn_async_block_controls(&q,false);
+  if(abort==2){pn_async_set_view(&q,16,false);pn_async_first_complete(&q,true);}
+  assert(pn_async_take(&q,&out)==PN_EMPTY);
+ }
+ pn_async_block_controls(&q,true);assert(pn_async_first_view(&q,15)==PN_OK);assert(pn_async_first_navigation(&q,&e)==PN_OK);
+ pn_async_begin(&q,&scope,true);e=event(9,true,true);assert(pn_async_send(&q,&e)==PN_OK && pn_cancel_checkpoint()==PN_CANCELLED);
+ e=event(3,true,false);assert(pn_async_first_navigation(&q,&e)==PN_OK);pn_async_first_complete(&q,true);
+ assert(pn_async_take(&q,&out)==PN_OK && value(out)==9 && pn_async_take(&q,&out)==PN_EMPTY);pn_async_end(&scope);
+ pn_async_block_controls(&q,true);assert(pn_async_first_view(&q,15)==PN_OK);e.view=16;assert(pn_async_first_navigation(&q,&e)==PN_CANCELLED);pn_async_first_complete(&q,false);
+}
 typedef struct {pn_async_t *queue;atomic_bool done;} producer_t;
 static int produce(void *ctx){producer_t *p=ctx;for(unsigned i=1;i<=10000;i++){pn_async_event_t e=event(i,true,false);assert(pn_async_send(p->queue,&e)==PN_OK);}atomic_store(&p->done,true);return 0;}
 int main(void){
+ first_page();
  pn_async_t q;pn_async_init(&q);pn_async_event_t e;
  for(unsigned i=1;i<=100;i++){e=event(i,true,false);assert(pn_async_send(&q,&e)==PN_OK);}
  assert(q.coalesced==99 && pn_async_take(&q,&e)==PN_OK && value(e)==100 && pn_async_take(&q,&e)==PN_EMPTY);

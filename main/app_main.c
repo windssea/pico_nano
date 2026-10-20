@@ -379,7 +379,7 @@ static pn_focus_t focus_nav; ///< 当前页的三键焦点表 / Three-key focus 
  * The shown reference is epdiy's back buffer (equal to the front buffer after every draw), so no separate 406 KiB logical copy is kept. */
 #define PARTIAL_MAX_PERCENT 45
 static pn_device_async_t async_port;
-static void opening_controls(bool active){opening=active;pn_async_block_controls(&async_port.input,active);if(active)pn_device_async_view(&async_port,18,false,input_flags);}
+static void opening_controls(bool active){opening=active;if(active){pn_device_async_first_complete(&async_port,false);pn_async_block_controls(&async_port.input,true);pn_device_async_view(&async_port,18,false,input_flags);}else pn_device_async_first_complete(&async_port,false);}
 /// 所有开书阶段共用取消出口；任务已结束或接管标志已清也必须归还输入门。/ Every opening stage shares this abort exit; return the input gate even after the job or takeover flag is gone.
 static pn_status_t opening_abort(void){
     if(identity_takeover_active)identity_job_stop();
@@ -741,13 +741,18 @@ static pn_status_t reader_overlap(void *ctx){(void)ctx;
     }
     if(atomic_load(&overlap_disabled) || !atomic_load(&reading_presentation) || !reader_active())return PN_EMPTY;
     return epub.impl?pn_epub_app_overlap(&epub):pn_reader_app_overlap(&reader);}
+/// 完整准备的首屏开始呈现才识别新翻页，提交成功前不执行。 / Recognize new turns only when a fully prepared first page starts presentation, never executing before its commit.
+static pn_status_t first_reader_present(void *ctx,const pn_frame_t *frame,pn_refresh_t profile){
+    if(opening && !atomic_load(&async_port.first_reader)){pn_status_t s=pn_device_async_first_begin(&async_port,input_flags);if(s!=PN_OK)return s;}
+    return present(ctx,frame,profile);
+}
 static pn_status_t active_step(pn_reader_action_t action,uint64_t now){
     reading_stats_pause();
     uint64_t started=now_ms();(void)started;
     pn_reader_app_refresh_period(&reader,pn_settings_refresh_pages(input_flags));
     pn_epub_app_refresh_period(&epub,pn_settings_refresh_pages(input_flags));
     if(atomic_exchange(&full_clean_completed,false)){pn_reader_app_refresh_reset(&reader);pn_epub_app_refresh_reset(&epub);}
-    pn_frame_t before;pn_turn_t effect={.pool=&pool,.style=(pn_turn_style_t)((input_flags&PN_INPUT_TURN_MASK)>>6),.reverse=action==PN_APP_PREVIOUS,.present=present};
+    pn_frame_t before;pn_turn_t effect={.pool=&pool,.style=(pn_turn_style_t)((input_flags&PN_INPUT_TURN_MASK)>>6),.reverse=action==PN_APP_PREVIOUS,.present=action==PN_APP_OPEN?first_reader_present:present};
 #if defined(ESP_PLATFORM)
     // 片内LUT不足时水波纹自动退成直接显示。/ Ripple falls back to direct presentation when internal LUT memory is unavailable.
     if(effect.style==PN_TURN_RIPPLE && (!ripple_memory.rows[0] || !ripple_memory.rows[1]))ripple_memory_ensure();
@@ -836,12 +841,12 @@ static void show_lock(const char *hint){
     reading_menu=false;pn_toc_ui_close(&toc);pn_bookmark_ui_cancel(&bookmarks);pn_style_ui_close(&styles);pn_font_ui_close(&fonts);pn_wallpaper_ui_close(&wallpaper_ui);pn_font_manage_close(&font_manage);pn_settings_ui_close(&settings_ui);
     status_page=true;shelf_mode=false;index_mode=false;search_mode=false;hub_mode=false;actions_mode=false;
     uint8_t *pixels=pn_alloc_tagged(&pool,PN_MEM_FRAME,PN_WALLPAPER_BYTES);pn_frame_t frame;pn_font_t font={0};
-    pn_lock_selection_t selection={.mode=PN_LOCK_DEFAULT,.hint=true};
+    pn_lock_selection_t selection={.mode=PN_LOCK_DEFAULT,.hint=false};
     pn_status_t status=pn_frame_bind(&frame,pixels,PN_WALLPAPER_BYTES,PN_WALLPAPER_WIDTH,PN_WALLPAPER_HEIGHT)?PN_OK:PN_NO_MEMORY;
     if(status==PN_OK && mount_wallpaper()){pn_wallpaper_store_t store;pn_media_lease_t lease;
         if(pn_wallpaper_store_init(&store,&wallpaper_media,"/wallpaper/lock.a","/wallpaper/lock.b")==PN_OK && pn_media_acquire(&wallpaper_media,PN_MEDIA_READ,&lease)==PN_OK){
             pn_status_t loaded=pn_wallpaper_load(&store,&lease,&selection,&frame);(void)pn_media_release(&wallpaper_media,&lease);
-            if(loaded!=PN_OK){if(loaded!=PN_EMPTY)ESP_LOGW(TAG,"Wallpaper record unusable: %d; default lock screen",(int)loaded);selection=(pn_lock_selection_t){.mode=PN_LOCK_DEFAULT,.hint=true};}}}
+            if(loaded!=PN_OK){if(loaded!=PN_EMPTY)ESP_LOGW(TAG,"Wallpaper record unusable: %d; default lock screen",(int)loaded);selection=(pn_lock_selection_t){.mode=PN_LOCK_DEFAULT,.hint=false};}}}
     if(status==PN_OK && selection.mode==PN_LOCK_MASK){
         // 只在锁屏解码/合成，底图取成功正文副本，绝不修改阅读器帧。 / Decode/composite only while locking, using a confirmed text copy without modifying reader pixels.
         pn_status_t mask=PN_EMPTY;
@@ -852,9 +857,9 @@ static void show_lock(const char *hint){
             if(mask==PN_OK){memcpy(frame.pixels,page_copy,PN_WALLPAPER_BYTES);mask=pn_wallpaper_mask_paint(&lock_mask,&frame);}
         }
         pn_wallpaper_mask_close(&lock_mask);
-        if(mask!=PN_OK)selection=(pn_lock_selection_t){.mode=PN_LOCK_DEFAULT,.hint=true};
+        if(mask!=PN_OK)selection=(pn_lock_selection_t){.mode=PN_LOCK_DEFAULT,.hint=false};
     }
-    if(selection.mode==PN_LOCK_SIMPLE || selection.mode==PN_LOCK_BOOK)selection=(pn_lock_selection_t){.mode=PN_LOCK_DEFAULT,.hint=true};
+    if(selection.mode==PN_LOCK_SIMPLE || selection.mode==PN_LOCK_BOOK)selection=(pn_lock_selection_t){.mode=PN_LOCK_DEFAULT,.hint=false};
     if(status==PN_OK)status=management_font_begin(&font,32);
     if(status==PN_OK && selection.mode==PN_LOCK_BOOKMARK){
         pn_bookmark_lock_t snapshot=bookmark_lock;bookmark_lock_environment(&snapshot);
@@ -969,7 +974,12 @@ static void bookmark_lock_environment(pn_bookmark_lock_t *snapshot){
 /// 书架选项（绘制与命中共用）。/ Shelf options shared by drawing and hit testing.
 static pn_shelf_options_t shelf_options(void){
     bool query=!recent_mode && !fav_mode && *search_query;
-    return (pn_shelf_options_t){.home=home_mode,.battery_percent=-1,.columns=shelf_prefs.columns,.style=shelf_prefs.style,.actions=actions_mode?&actions:NULL,.search=false,.import_tile=true,.layout_toggle=true,.favorites_tab=true,.favorites=fav_mode,.list_mode=list_mode || query,.query=query};
+    pn_shelf_options_t o={.home=home_mode,.battery_percent=-1,.columns=shelf_prefs.columns,.style=shelf_prefs.style,.actions=actions_mode?&actions:NULL,.search=false,.import_tile=true,.layout_toggle=true,.favorites_tab=true,.favorites=fav_mode,.list_mode=list_mode || query,.query=query};
+    if(o.home){uint64_t utc=0;bool dated=reading_stats_clock(now_ms(),&utc);o.reading=pn_reading_stats_summary(&reading_stats,dated,utc);
+        o.reading.known=o.reading.known && shelf_covers && shelf_covers->has_last && shelf_covers->last.identified && !memcmp(shelf_covers->last.expected.sha256,reading_stats.book.id.sha256,32);
+        unsigned year,month,day,weekday;if(dated && pn_bookmark_lock_date((uint32_t)(utc/1000u),&year,&month,&day,&weekday)){o.reading.dated=true;o.reading.weekday=weekday;snprintf(o.home_date,sizeof o.home_date,"%u月%u日 · 周%s",month,day,((const char *const[]){"一","二","三","四","五","六","日"})[weekday]);}
+    }
+    return o;
 }
 /// 读收藏夹到favorites（没有记录为空表）。/ Load favorites (an empty list without a record).
 static pn_status_t favorites_load(void){
@@ -999,6 +1009,9 @@ static uint64_t shelf_render_key(void){
     h=menu_hash(h,home_mode);h=menu_hash(h,recent_mode);h=menu_hash(h,fav_mode);h=menu_hash(h,list_mode);h=menu_hash(h,search_mode);
     h=menu_hash(h,shelf_prefs.columns);h=menu_hash(h,shelf_prefs.style);h=menu_hash(h,(uint64_t)(shelf_focus+1));
     h=menu_hash_text(h,search_query);h=menu_hash(h,menu_font_epoch);
+    if(home_mode){pn_shelf_options_t o=shelf_options();h=menu_hash_text(h,o.home_date);h=menu_hash(h,o.reading.known);h=menu_hash(h,o.reading.dated);h=menu_hash(h,o.reading.weekday);h=menu_hash(h,o.reading.total_ms/60000u);
+        for(unsigned i=0;i<7;i++)h=menu_hash(h,o.reading.week_ms[i]);}
+
     if(shelf_page){
         h=menu_hash(h,shelf_page->count);h=menu_hash(h,shelf_page->index);h=menu_hash(h,shelf_page->total);h=menu_hash(h,shelf_page->per_page);h=menu_hash(h,shelf_page->more);
         for(size_t i=0;i<shelf_page->count;i++){
@@ -1096,6 +1109,12 @@ static bool tick_covers(void){
     if(changed){covers_dirty=true;pn_menu_cache_invalidate(&menu_cache);}
     if((status==PN_OK || status==PN_EMPTY || status==PN_BUSY) && covers_dirty && !pn_shelf_covers_pending(shelf_covers,shelf_page)){pn_status_t shown=draw_shelf(PN_REFRESH_GL16);if(shown==PN_OK)covers_dirty=false;else if(shown!=PN_CANCELLED)ESP_LOGW(TAG,"Cover redraw failed");}
     else if(status!=PN_OK && status!=PN_EMPTY && status!=PN_BUSY && status!=PN_CANCELLED){ESP_LOGW(TAG,"Cover queue stopped: %d",(int)status);pn_shelf_covers_reset(shelf_covers,NULL);covers_dirty=false;}
+    // 首页首帧后才读内部统计日志；与封面完成共用原空闲调度，不阻塞开书。/ Read internal statistics only after the home first frame, within existing idle cover scheduling, never on the opening path.
+    static uint64_t stats_at;
+    if(home_mode && !reading_stats.loaded && reading_stats.media && !covers_dirty && !pn_shelf_covers_pending(shelf_covers,shelf_page) && now_ms()>=last_input && now_ms()-last_input>=1500u && now_ms()>=stats_at){
+        stats_at=now_ms()+3000u;pn_status_t loaded=pn_reading_stats_load(&reading_stats);
+        if(loaded==PN_OK){pn_menu_cache_invalidate(&menu_cache);if(draw_shelf(PN_REFRESH_GL16)!=PN_OK)covers_dirty=true;return true;}
+    }
     return status==PN_OK || status==PN_BUSY || changed;
 }
 /// 最近记录在本owner内复用，关闭阅读或换卡后重载。/ Reuse recents within this owner; reload after closing a reader or changing media.
@@ -1220,6 +1239,8 @@ static void reader_open_result(pn_status_t status){
     if(status==PN_STALE_JOB){if(stop_reader()){recent_mode=false;selected_identified=false;selected_path[0]=0;message("书籍内容已改变","从全部书架重新选择\n历史记录仍保留");}return;}
     if(status!=PN_OK){ESP_LOGE(TAG,"Reader open/present failed: %d",(int)status);if(stop_reader())message("打开书籍失败","检查书籍或字体后重试");return;}
     locked=false;status_page=false;shelf_mode=false;
+    // 首屏及模型均已确认；输入不再等待下轮主循环或近期记录IO。 / Both first screen and model are confirmed; input no longer waits for another loop or recent-record IO.
+    if(opening){pn_device_async_first_complete(&async_port,true);opening=false;pn_device_async_view(&async_port,15,true,input_flags);last_input=now_ms();ESP_LOGI(TAG,"Reader input ready t=%llu",(unsigned long long)last_input);}
 }
 /* 书籍身份预计算：书库空闲时为未读过的书分步算整书SHA并按路径/大小/修改时间缓存，点开即走可信快开（后台仍完整复核）。
  * Book-identity precompute: while the library idles, hash not-yet-read books step by step and cache by path/size/mtime so opening takes the trusted fast path (still fully verified in the background). */
@@ -1358,9 +1379,9 @@ static void start_reader_impl(void){
         if(taken==PN_OK){pn_wallpaper_mask_close(&lock_mask);covers_inactive=true;ESP_LOGI(TAG,"Prepared book take=%zu",hot_session.takes);reader_open_result(active_step(PN_APP_OPEN,now_ms()));return;}
         if(taken==PN_CANCELLED)return;
         atomic_store(&reading_presentation,true);
-        pn_status_t resumed=pn_hot_session_resume(&hot_session,&sd_media,selected_path,selected_format,selected_identified?&selected_expected:NULL,1,now_ms(),&reader,&epub,present,NULL);
+        pn_status_t resumed=pn_hot_session_resume(&hot_session,&sd_media,selected_path,selected_format,selected_identified?&selected_expected:NULL,1,now_ms(),&reader,&epub,first_reader_present,NULL);
         atomic_store(&reading_presentation,false);
-        if(resumed==PN_OK){locked=false;status_page=false;shelf_mode=false;ESP_LOGI(TAG,"Hot book hit=%zu",hot_session.hits);return;}
+        if(resumed==PN_OK){reader_open_result(PN_OK);ESP_LOGI(TAG,"Hot book hit=%zu",hot_session.hits);return;}
         if(resumed==PN_CANCELLED)return;
         if(resumed==PN_IO){message("显示失败","保留阅读会话\n请重试打开");return;}
     }
@@ -1496,13 +1517,13 @@ static bool tick_shelf_background(uint64_t now){
     }
     return false;
 }
-/// 预热、语义写入与完整复核轮转，完整复核安静300ms后不再被预热饿死。/ Rotate warming, semantic writes and full verification so warming cannot starve verification after 300 quiet ms.
+/// 预热、语义写入、完整复核及近期记录轮转，近期记录只在安静1.5秒后写。 / Rotate warming, semantic writes, full verification and recents, writing recents only after 1.5 quiet seconds.
 static bool tick_reader_background(uint64_t now){
     static unsigned cursor;int64_t started=esp_timer_get_time();
-    for(unsigned probe=0;probe<3;probe++){
+    for(unsigned probe=0;probe<4;probe++){
         if(pn_cancel_checkpoint()!=PN_OK)return false;
-        unsigned slot=cursor++%3u;pn_status_t s=PN_EMPTY;pn_profile_span_t timing;
-        pn_profile_begin(&timing,&pool,slot==0?"idle.prefetch":slot==1?"idle.semantic":"idle.verify");
+        unsigned slot=cursor++%4u;pn_status_t s=PN_EMPTY;pn_profile_span_t timing;
+        pn_profile_begin(&timing,&pool,slot==0?"idle.prefetch":slot==1?"idle.semantic":slot==2?"idle.verify":"idle.recent");
         if(slot==0)s=epub.impl?pn_epub_app_prefetch(&epub):pn_reader_app_prefetch(&reader);
         else if(slot==1 && epub.impl)s=pn_epub_app_cache_idle(&epub,now);
         else if(slot==2 && now>=last_input && now-last_input>=300 && ((reader.impl && pn_reader_app_verify_pending(&reader)) || (epub.impl && (pn_epub_app_verify_pending(&epub) || pn_epub_app_font_recovery_pending(&epub))))){
@@ -1515,6 +1536,7 @@ static bool tick_reader_background(uint64_t now){
                 snprintf(trust_failed_path,sizeof trust_failed_path,"%s",selected_path);pn_identity_cache_forget(&identity_cache,selected_path);if(stop_reader())start_reader();
             }else if(s!=PN_BUSY && s!=PN_CANCELLED)ESP_LOGW(TAG,"Fast-open verification stopped: %d",(int)s);
         }
+        if(slot==3 && now>=last_input && now-last_input>=1500)s=epub.impl?pn_epub_app_recent_idle(&epub,now_ms()):pn_reader_app_recent_idle(&reader,now_ms());
         pn_profile_end(&timing,s);
         if(opening || s==PN_OK || s==PN_BUSY || s==PN_CANCELLED || esp_timer_get_time()-started>=8000)return true;
     }
@@ -1602,7 +1624,7 @@ static void tick_ota(uint64_t now){
     if(state.phase==PN_DEVICE_OTA_ERROR && state.radio_released){
         pn_status_t error=state.error;(void)pn_device_ota_close(&ota);
         snprintf(ota_notice,sizeof ota_notice,"%s",ota_commit_failed?"升级收尾失败，请重启核对版本，必要时使用 USB 恢复。":error==PN_EMPTY?"当前发行版暂无可用的 OTA 更新。":error==PN_UNSUPPORTED?"此设备需要先通过 USB 安装兼容版本。":error==PN_CANCELLED?"已取消升级，原版本继续使用。":error==PN_CORRUPT?"固件校验失败，原版本继续使用。":"网络或安装失败，原版本继续使用，可稍后重试。");ota_commit_failed=false;update_ota_ui(true);
-        if(ota_lock_pending){ota_lock_pending=false;if(prepare_lock())lock_and_sleep("再按电源键继续阅读");}
+        if(ota_lock_pending){ota_lock_pending=false;if(prepare_lock())lock_and_sleep("");}
     }
 }
 /// 无线或写入仍在进行；AVAILABLE/READY只等用户确认，不阻止锁屏或休眠。
@@ -1631,7 +1653,7 @@ static void tick_wifi_probe(uint64_t now){
     ESP_LOGI(TAG,"WiFi test result=%d reason=%u",(int)state.result,state.reason);
     if(settings_ui.impl){(void)pn_settings_ui_wifi_result(&settings_ui,state.result,present,NULL);
         if(settings_ui.network_changed){settings_ui.network_changed=false;refresh_network_name();update_time_ui(false);update_ota_ui(false);}}
-    if(probe_lock_pending){probe_lock_pending=false;if(prepare_lock())lock_and_sleep("再按电源键继续阅读");}
+    if(probe_lock_pending){probe_lock_pending=false;if(prepare_lock())lock_and_sleep("");}
 }
 static void refresh_network_name(void){pn_network_credentials_t c={0};pn_status_t status=load_network(&c);if(status==PN_OK)strcpy(saved_network,c.ssid);else if(status==PN_EMPTY)saved_network[0]=0;pn_network_wipe(&c);}
 /// 主任务保存网页提交的网络，再回报给网页。/ The main task saves the network submitted by the web page, then reports back.
@@ -1662,7 +1684,7 @@ static void begin_wallpaper(void){
     if(!stop_reader())return;
     pn_wallpaper_mask_close(&lock_mask);reading_menu=false;pn_wallpaper_store_t store;
     bool store_ok=mount_wallpaper() && pn_wallpaper_store_init(&store,&wallpaper_media,"/wallpaper/lock.a","/wallpaper/lock.b")==PN_OK;
-    pn_status_t status=pn_wallpaper_ui_open(&wallpaper_ui,&pool,&sd_media,PN_SD_MOUNT "/" PN_SD_WALLPAPERS,store_ok?&store:NULL,present,NULL);
+    pn_status_t status=pn_wallpaper_ui_open_cached(&wallpaper_ui,&pool,&sd_media,PN_SD_MOUNT "/" PN_SD_WALLPAPERS,store_ok?&store:NULL,present,NULL,PN_SD_MOUNT "/" PN_SD_WALLPAPER_CACHE);
     if(status==PN_OK){pn_bookmark_lock_t snapshot=bookmark_lock;bookmark_lock_environment(&snapshot);pn_wallpaper_ui_set_bookmark(&wallpaper_ui,&snapshot);}
     if(status!=PN_OK){message("壁纸设置未打开","保留原锁屏，稍后重试");return;}
     status_page=true;shelf_mode=false;index_mode=false;search_mode=false;hub_mode=false;actions_mode=false;
@@ -1857,7 +1879,7 @@ static void tick_time_sync(uint64_t now){
         else snprintf(time_notice,sizeof time_notice,"网络时间已获取，设备时钟未确认");}
     else snprintf(time_notice,sizeof time_notice,"%s",state.phase==PN_TIME_CANCELLED?"已结束对时":state.sdk_error==ESP_ERR_TIMEOUT?"网络对时超时，原显示时间保留":"对时失败，原显示时间保留");
     ESP_LOGI(TAG,"Time sync phase=%d error=%d sdk=%d",(int)state.phase,(int)state.error,state.sdk_error);(void)pn_device_time_close(&time_sync);update_time_ui(true);
-    if(time_lock_pending){time_lock_pending=false;if(prepare_lock())lock_and_sleep("再按电源键继续阅读");}
+    if(time_lock_pending){time_lock_pending=false;if(prepare_lock())lock_and_sleep("");}
 }
 /// 传书一级页：按实际能力列出通道。/ Transfer root tab listing channels by real capability.
 static void show_hub(void){
@@ -2427,7 +2449,7 @@ static void device_task(void *arg){
                 else if(wifi_probe.impl){probe_lock_pending=true;(void)pn_device_wifi_probe_stop(&wifi_probe);}
                 else if(locked){last_input=now;resume_reader();unlocked_at=now_ms();}
                 else if(now>=unlocked_at && now-unlocked_at<1500){} // 解锁后紧接的连按不再锁屏 / Presses right after unlocking never relock
-                else if(prepare_lock())lock_and_sleep("再按电源键继续阅读");}}
+                else if(prepare_lock())lock_and_sleep("");}}
         // 按键路径可能睡眠后更新last_input；重取当前时间，避免睡前时间减去唤醒时间下溢后立即锁屏。
         // The key path can sleep and update last_input; refresh time to avoid subtracting wake time from pre-sleep time.
         now=now_ms();
@@ -2435,7 +2457,7 @@ static void device_task(void *arg){
         // 升级只等确认时也自动锁屏：先取消会话，停止完成后由tick_ota锁屏，新版本留在非活动槽不切换。
         // Auto-lock also while an update merely awaits confirmation: cancel first and let tick_ota lock after shutdown, leaving the inactive slot unselected.
         if(PN_AUTO_LOCK && !locked && !transfer.impl && !usb.open && !time_sync.impl && !ota_busy() && !wifi_probe.impl && !ota_lock_pending && now>=last_input && now-last_input>=AUTO_LOCK_MS && now-boot>=AUTO_LOCK_MS){pn_reader_input_cancel(&input);
-            if(ota.impl){ota_lock_pending=true;update_command(PN_SETUI_UPDATE_CANCEL);}else if(prepare_lock())lock_and_sleep("再按电源键继续阅读");else last_input=now;}
+            if(ota.impl){ota_lock_pending=true;update_command(PN_SETUI_UPDATE_CANCEL);}else if(prepare_lock())lock_and_sleep("");else last_input=now;}
         if(opening){
             // 加载态独占内容路由；紧急键/电源先处理，普通书架触点与后台画面不进入旧页面。
             // Loading owns content routing: urgent keys/power run first; ordinary shelf contacts and background draws never reach the old page.
@@ -2507,6 +2529,9 @@ static void device_task(void *arg){
                 else if(reader_active() && !status_page){pn_status_t status=active_step(action,now_ms());report_reader_result(status);}
                 else start_reader();}}}
         bool background=false;
+        if(available==PN_EMPTY && !locked && wallpaper_ui.impl && !touch_held && !tap.down){
+            pn_status_t sampled=pn_wallpaper_ui_tick(&wallpaper_ui,present,NULL);background=sampled==PN_BUSY;
+            if(sampled==PN_OK || sampled==PN_BUSY){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);}}
         if(available==PN_EMPTY && !locked && !transfer.impl && !usb.open && font_manage.impl && !touch_held && !tap.down && now_ms()>=last_input && now_ms()-last_input>=800){
             pn_status_t sampled=pn_font_manage_samples_idle(&font_manage,now_ms(),present,NULL);background=sampled==PN_BUSY;
             if(sampled==PN_OK || sampled==PN_BUSY){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);}}

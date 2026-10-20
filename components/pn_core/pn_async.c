@@ -19,7 +19,7 @@ static pn_status_t send_event(pn_async_t *q,const pn_async_event_t *e,bool root)
     if(q->controls_blocked && !(e->navigation && e->urgent)){q->dropped++;unlock(q);return PN_OK;}
     pn_async_event_t next=*e;next.root_epoch=root && q->root_enabled && e->view==atomic_load_explicit(&q->view,memory_order_acquire)?q->root_epoch:0;
     if(e->urgent || atomic_load_explicit(&q->background,memory_order_acquire))atomic_fetch_add_explicit(&q->epoch,1,memory_order_release);
-    if(e->navigation){if(q->has_navigation)q->coalesced++;if(!q->has_navigation || !q->navigation.urgent || e->urgent)q->navigation=next;q->has_navigation=true;}
+    if(e->navigation){if(q->has_navigation)q->coalesced++;if(!q->has_navigation || !q->navigation.urgent || e->urgent){q->navigation=next;q->first_navigation=false;}q->has_navigation=true;}
     else if(q->count<PN_ASYNC_CONTROLS){q->controls[(q->first+q->count)%PN_ASYNC_CONTROLS]=next;q->count++;}
     else{q->dropped+=q->count+1;q->count=0;q->first=0;q->overflow=true;atomic_fetch_add_explicit(&q->epoch,1,memory_order_release);}
     unlock(q);return PN_OK;
@@ -43,7 +43,7 @@ pn_status_t pn_async_take(pn_async_t *q,pn_async_event_t *e){
     if(!q || !e)return PN_INVALID;
     lock(q);pn_status_t status=PN_OK;
     if(q->overflow){q->overflow=false;status=PN_CANCELLED;}
-    else if(q->has_navigation){*e=q->navigation;q->has_navigation=false;}
+    else if(q->has_navigation && !(q->first_navigation && q->controls_blocked)){*e=q->navigation;q->has_navigation=false;q->first_navigation=false;}
     else if(q->count){*e=q->controls[q->first];q->first=(q->first+1)%PN_ASYNC_CONTROLS;q->count--;}
     else status=PN_EMPTY;
     unlock(q);return status;
@@ -60,8 +60,31 @@ void pn_async_end(pn_async_scope_t *s){pn_cancel_leave(&s->cancel);atomic_store_
 void pn_async_block_controls(pn_async_t *q,bool blocked){
     if(!q)return;
     lock(q);q->controls_blocked=blocked;
+    if(q->first_navigation && q->has_navigation){q->has_navigation=false;q->dropped++;}
+    q->first_view=0;q->first_navigation=false;
     if(blocked){q->dropped+=q->count;q->count=0;q->first=0;q->overflow=false;
         root_mode(q,false);
         if(q->has_navigation && !q->navigation.urgent){q->has_navigation=false;q->dropped++;}}
     unlock(q);
+}
+pn_status_t pn_async_first_view(pn_async_t *q,uint32_t view){
+    if(!q || !view)return PN_INVALID;
+    lock(q);pn_status_t s=q->controls_blocked && !q->first_view?PN_OK:PN_BUSY;
+    if(s==PN_OK){root_mode(q,false);q->first_view=view;atomic_store_explicit(&q->view,view,memory_order_release);}unlock(q);return s;
+}
+pn_status_t pn_async_first_navigation(pn_async_t *q,const pn_async_event_t *e){
+    if(!q || !e || !e->bytes || e->bytes>PN_ASYNC_PAYLOAD || !e->navigation || e->urgent)return PN_INVALID;
+    lock(q);
+    // 完成回执与输入线程可交错；已确认的同一上下文沿普通邮箱投递，不丢晚到的释放。 / Completion may race the input thread; an already-confirmed context uses ordinary delivery without losing a late release.
+    if(!q->controls_blocked){unlock(q);return pn_async_send(q,e);}
+    if(!q->first_view || e->view!=q->first_view || e->view!=atomic_load_explicit(&q->view,memory_order_acquire)){unlock(q);return PN_CANCELLED;}
+    if(q->has_navigation)q->coalesced++;
+    else{q->navigation=*e;q->navigation.root_epoch=0;q->has_navigation=true;q->first_navigation=true;}
+    unlock(q);return PN_OK;
+}
+void pn_async_first_complete(pn_async_t *q,bool success){
+    if(!q)return;
+    lock(q);success=success && q->first_view && q->first_view==atomic_load_explicit(&q->view,memory_order_acquire);
+    if(!success && q->first_navigation && q->has_navigation){q->has_navigation=false;q->dropped++;}
+    q->first_navigation=false;q->first_view=0;q->controls_blocked=false;unlock(q);
 }

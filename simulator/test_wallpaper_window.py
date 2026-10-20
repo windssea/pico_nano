@@ -17,7 +17,7 @@ with tempfile.TemporaryDirectory() as folder:
         return r.stdout
     opts=('--wallpaper-dir',str(images),'--wallpaper-store',str(store))
     # 选图→铺满→Enter应用→Esc返回书架。/ Choose image → cover → Enter apply → Esc back to shelf.
-    out=run('wallpaper,tap:100:400,tap:100:800,enter,back,quit',*opts)
+    out=run('wallpaper,tap:100:440,tap:100:800,enter,back,quit',*opts)
     assert 'wallpaper_ui open status=0' in out,out
     assert 'wallpaper_ui command=16 status=0 screen=1 active=1' in out,out
     assert 'wallpaper_ui command=6 status=0 screen=1 active=1' in out,out
@@ -26,18 +26,18 @@ with tempfile.TemporaryDirectory() as folder:
     record=store/'lock.a';assert record.exists() and record.stat().st_size<415872,list(store.iterdir())
     saved=record.read_bytes();assert saved[:6]==b'PNWP\x03\x00' and zlib.crc32(saved[:-4])==int.from_bytes(saved[-4:],'little')
     # 预览后Esc取消不写新记录。/ Esc after previewing cancels without a new record.
-    before=record.read_bytes();out=run('wallpaper,tap:330:240,back,back,quit',*opts)
-    assert 'wallpaper_ui command=4 status=0 screen=1 active=1' in out and 'wallpaper_ui command=12 status=0 screen=0 active=1' in out,out
+    before=record.read_bytes();out=run('wallpaper,tap:600:240,back,back,quit',*opts)
+    assert 'wallpaper_ui command=15 status=0 screen=1 active=1' in out and 'wallpaper_ui command=12 status=0 screen=0 active=1' in out,out
     assert record.read_bytes()==before and not (store/'lock.b').exists()
     # 无记录目录：应用返回不支持。/ Without a record directory, apply reports unsupported.
-    out=run('wallpaper,tap:100:240,enter,back,back,quit','--wallpaper-dir',str(images))
+    out=run('wallpaper,tap:600:240,enter,back,back,quit','--wallpaper-dir',str(images))
     assert 'wallpaper_ui command=11 status=9 screen=1 active=1' in out,out
     # 未给目录时w键无效；选项须配合书库。/ Without the option the w key does nothing; options require the library mode.
     out=run('wallpaper,quit');assert 'wallpaper_ui' not in out,out
     assert subprocess.run([sys.argv[1],'--wallpaper-dir',str(images)],env=dict(os.environ,SDL_VIDEODRIVER='dummy'),capture_output=True).returncode==2
     # PNG透明遮罩只在锁屏叠加，正文不受影响；缺失原图降级为正文和默认锁屏。/ PNG masks appear only while locked and never alter reading; missing sources fall back to plain text and default locking.
-    out=run('wallpaper,tap:100:400,tap:100:1080,enter,back,tap:100:500,lock,next,enter,back,quit',*opts)
-    assert 'wallpaper_ui command=14 status=0 screen=1 active=1' in out and 'wallpaper_ui command=11 status=0 screen=0 active=1' in out,out
+    out=run('wallpaper,tap:330:240,tap:100:440,enter,back,tap:100:500,lock,next,enter,back,quit',*opts)
+    assert 'wallpaper_ui command=14 status=0 screen=0 active=1' in out and 'wallpaper_ui command=11 status=0 screen=0 active=1' in out,out
     assert 'lock_mask status=0' in out and 'lock_preview status=0 mode=4 cached=0' in out and 'lock_preview wake status=0' in out,out
     # 锁前/锁后正文像素必须逐字节相同，只有锁屏帧在左侧叠加不透明遮罩。 / Reading pixels before/after lock must match bytewise; only the lock frame contains the opaque left mask.
     captures=root/'mask-frames';captures.mkdir()
@@ -60,4 +60,13 @@ with tempfile.TemporaryDirectory() as folder:
     assert latest[6]==5 and len(latest)<2048
     out=run('tap:100:500,lock,enter,back,quit',*opts)
     assert 'lock_preview status=0 mode=5 cached=0' in out and 'lock_preview wake status=0' in out,out
+    # 三列六图：第三列上下行、下一页/上一页、一键重置均走真实窗口命中。/ Three-column gallery: route both third-column rows, next/previous pages and one-tap reset through real window hits.
+    gallery=root/'gallery';gallery.mkdir()
+    for i in range(8):(gallery/f'{i:02d}.png').write_bytes(png(240,400,20+i*25))
+    gallery_opts=('--wallpaper-dir',str(gallery),'--wallpaper-store',str(store))
+    out=run('wallpaper,tap:100:240,tap:560:500,back,tap:560:850,back,tap:600:1120,tap:100:500,back,tap:100:1120,tap:100:320,back,quit',*gallery_opts)
+    for command,screen in [(18,1),(21,1),(3,0),(16,1),(2,0),(4,0)]:
+        assert f'wallpaper_ui command={command} status=0 screen={screen} active=1' in out,out
+    latest=max((p.read_bytes() for p in store.glob('lock.*')),key=lambda b:int.from_bytes(b[12:20],'little'))
+    assert latest[6]==0 and latest[10]==0 and zlib.crc32(latest[:-4])==int.from_bytes(latest[-4:],'little')
 print('wallpaper window: default/custom choices, preview, mask reading/locking, missing-source fallback, cancel and option validation passed')

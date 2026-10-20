@@ -19,17 +19,21 @@
 #define PN_SUI_BACK_MAIN 8 ///< 从更多页回到排版主页 / Back from the more page to the main typesetting page
 #define PN_SUI_RESET 9 ///< 恢复默认草稿 / Restore the default draft
 #define PN_SUI_PRESET 10 ///< 10..12为舒适/紧凑/大字 / 10..12 are comfortable/compact/large
+#define PN_SUI_BACKGROUND 13 ///< 打开阅读背景图库 / Open the reading background gallery
+#define PN_SUI_BACKGROUND_BACK 15 ///< 返回排版草稿 / Return to the typesetting draft
+#define PN_SUI_BACKGROUND_ITEM 64 ///< 64..72：无和八张背景 / 64 through 72: none and eight backgrounds
 #define PN_SUI_INDENT 14 ///< 切换首行缩进（0或2字）/ Toggle the first-line indent (0 or 2 characters)
 #define PN_SUI_FIELD 16
-#define PN_SUI_FIELDS 11 ///< 0字号…9字重、10清晰度 / 0 size ... 9 weight, 10 sharpness
+#define PN_SUI_FIELDS 12 ///< 0字号…10清晰度、11背景 / 0 size ... 10 sharpness, 11 paper
 typedef struct {
     pn_epub_app_t *epub; ///< 可选EPUB会话，与reader互斥 / Optional EPUB session, exclusive with reader
     pn_reader_app_t *reader; ///< 借用会话 / Borrowed session
     pn_style_t draft; ///< 未保存配置 / Uncommitted configuration
     bool request_fonts,did_preview,application_failed; ///< 字体请求及预览/失败应用状态 / Font request, preview and failed-apply states
     bool active,preview,presented; ///< 活动、正文预览与呈现确认 / Active, body preview and presentation confirmation
+    bool backgrounds; ///< 正显示背景选择页，仅修改草稿 / Background picker is showing, modifying the draft only
     bool more; ///< 正显示“更多排版”页 / The more-options page is showing
-    unsigned selected; ///< 键盘选中字段0..10 / Keyboard-selected field zero through ten
+    unsigned selected; ///< 键盘选中字段0..11 / Keyboard-selected field zero through eleven
     const char *notice; ///< 静态反馈 / Static feedback
 } pn_style_ui_t;
 /// 打开排版草稿，不修改设置。/ Open a typesetting draft without changing settings.

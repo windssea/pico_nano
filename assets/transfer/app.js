@@ -1,6 +1,6 @@
 // 中文传输队列，原文只读；名称使用textContent。/ Chinese transfer queue, read-only originals and textContent names.
 import {SHA256} from './sha256.mjs';
-const $=id=>document.getElementById(id),kinds={book:{label:'书籍',accept:'.txt,.epub',hint:'TXT、EPUB 电子书，支持多本添加',limit:512*1024*1024},font:{label:'字体',accept:'.ttf,.otf',hint:'TTF、OTF 字体，最大 32 MiB',limit:32*1024*1024},cover:{label:'封面',accept:'.png,.jpg,.jpeg',hint:'PNG、JPEG 图片，大图会在上传前自动缩小',limit:8*1024*1024},wallpaper:{label:'锁屏图片',accept:'.png,.jpg,.jpeg',hint:'大图会在上传前自动缩小；上传后在阅读器菜单“锁屏壁纸”中预览并应用',limit:8*1024*1024}};
+const $=id=>document.getElementById(id),kinds={book:{label:'书籍',accept:'.txt,.epub',hint:'TXT、EPUB 电子书，支持多本添加',limit:512*1024*1024},font:{label:'字体',accept:'.ttf,.otf',hint:'TTF、OTF 字体，最大 32 MiB',limit:32*1024*1024},cover:{label:'封面',accept:'.png,.jpg,.jpeg',hint:'PNG/JPEG → 184×256、16灰阶 PNG；居中裁切，与书籍同名关联',limit:8*1024*1024},wallpaper:{label:'锁屏图片',accept:'.png,.jpg,.jpeg',hint:'PNG/JPEG → 原生尺寸内的16灰阶 PNG，保留透明度；上传后在阅读器预览并应用',limit:8*1024*1024}};
 let kind='book',token=null,running=false,entries=[],resourceGeneration=0;
 function notice(text,error=false){$('notice').textContent=text;$('notice').classList.toggle('error',error);}
 function connected(value){$('connection').textContent=value?'已连接':'正在连接';$('connection').classList.toggle('connected',value);if(!value)$('network-panel').hidden=true;else loadNetwork();syncFonts();render();}
@@ -32,7 +32,7 @@ async function api(path,method='GET',body,headers={}){
 
 for(const button of document.querySelectorAll('[data-kind]'))button.onclick=()=>{kind=button.dataset.kind;for(const tab of document.querySelectorAll('[data-kind]'))tab.setAttribute('aria-pressed',String(tab===button));$('files').accept=kinds[kind].accept;$('accept-hint').textContent=kinds[kind].hint;syncFonts();};
 // 资源原图管理：切换类别丢弃旧列表回复；删除前现取身份，内部锁屏缓存保留。/ Resource management: discard old-category replies and fetch identity before deletion; retain the internal lock cache.
-const resourceTypes={font:{route:'fonts',title:'已安装字体',note:'删除后，使用它的书会暂用默认字体，阅读位置不变。'},cover:{route:'covers',title:'封面原图',note:'删除外置封面后，书架会重新查找内嵌封面或显示占位。书籍不会删除。'},wallpaper:{route:'wallpapers',title:'锁屏图片原图',note:'支持 PNG、JPEG。删除原图会保留已应用的内部锁屏缓存；上传后仍需在设备预览并应用。'}};
+const resourceTypes={font:{route:'fonts',title:'已安装字体',note:'删除后，使用它的书会暂用默认字体，阅读位置不变。'},cover:{route:'covers',title:'已上传封面',note:'封面与书籍文件同名关联，独立保存，不进入壁纸列表；旧 JPEG 可能优先匹配，替换后仍显示旧图时请删除旧封面。删除封面不删除书籍。'},wallpaper:{route:'wallpapers',title:'已上传锁屏图片',note:'上传前按原生边界优化为16灰阶PNG。删除图片文件会保留已应用的内部锁屏缓存；上传后仍需在设备预览并应用。'}};
 function syncFonts(){resourceGeneration++;const panel=$('fonts-panel'),type=resourceTypes[kind];panel.hidden=!token||!type;if(!panel.hidden){$('resources-title').textContent=type.title;$('resources-note').textContent=type.note;$('fonts-list').replaceChildren();$('fonts-empty').hidden=true;$('fonts-more').hidden=true;loadFonts('');}}
 async function loadFonts(after){
  const list=$('fonts-list'),selected=kind,auth=token,generation=resourceGeneration,type=resourceTypes[selected];if(!auth||!type)return;
@@ -42,7 +42,7 @@ async function loadFonts(after){
   if(!after)list.replaceChildren();
   for(const item of data.items){const row=document.createElement('li'),name=document.createElement('span'),info=document.createElement('span'),button=document.createElement('button');
    name.textContent=item.name;info.textContent=size(item.size);button.className='secondary';button.textContent='删除';button.onclick=()=>removeFont(item,selected);row.append(name,info,button);list.append(row);}
-  $('fonts-empty').textContent='还没有'+type.title+'。';$('fonts-empty').hidden=list.children.length>0;$('fonts-more').hidden=!data.more;
+  $('fonts-empty').textContent='暂无'+kinds[selected].label+'。';$('fonts-empty').hidden=list.children.length>0;$('fonts-more').hidden=!data.more;
   $('fonts-more').onclick=()=>loadFonts(data.items[data.items.length-1].name);
  }catch(error){if(generation!==resourceGeneration||kind!==selected||token!==auth)return;if(error.status===404)$('fonts-panel').hidden=true;else notice(error.message,true);}
 }
@@ -63,20 +63,54 @@ async function removeFont(item,selected){
 const suffixOf=name=>name.includes('.')?'.'+name.split('.').pop().toLowerCase():'';
 const accepts=(k,suffix)=>kinds[k].accept.split(',').includes(suffix);
 async function fontHeader(file){try{const b=new Uint8Array(await file.slice(0,4).arrayBuffer());const tag=String.fromCharCode(...b);return tag==='OTTO'?'.otf':tag==='\0\x01\0\0'||tag==='true'?'.ttf':'';}catch(error){return '';}}
-// 封面/锁屏图上传前在浏览器里处理：按EXIF转正，长边超过1824（面板1.5倍）时缩小；渐进JPEG/交错PNG重编码为基线JPEG/普通PNG，免设备整图解码内存不足；PNG保持PNG以保留透明。失败或无收益时保留原图。
-// Covers/lock images are prepared in the browser before upload: EXIF-upright, shrunk when the long edge exceeds 1824 (1.5x the panel); progressive JPEG / interlaced PNG are re-encoded as baseline JPEG / plain PNG so the device avoids whole-image decode OOM; PNG stays PNG to keep transparency. Failures or no gain keep the original.
-const IMAGE_EDGE=1824;
-async function imageNeeds(file,png){try{const b=new Uint8Array(await file.slice(0,Math.min(file.size,262144)).arrayBuffer());if(png)return b.length>28&&b[28]===1;for(let i=2;i+3<b.length;){if(b[i]!==0xff){i++;continue;}const m=b[i+1];if(m===0xc2||m===0xc6||m===0xca||m===0xce)return true;if(m===0xda||m===0xd9)return false;if(m===0xff||m===0x01||(m>=0xd0&&m<=0xd7)){i+=2;continue;}i+=2+((b[i+2]<<8)|b[i+3]);}return false;}catch{return false;}}
-async function prepareImage(file,name){const png=suffixOf(name)==='.png';if(typeof createImageBitmap!=='function')return {file};let bitmap;try{bitmap=await createImageBitmap(file,{imageOrientation:'from-image'});}catch{return {file};}
- try{const scale=Math.min(1,IMAGE_EDGE/Math.max(bitmap.width,bitmap.height)),w=Math.max(1,Math.round(bitmap.width*scale)),h=Math.max(1,Math.round(bitmap.height*scale));const needed=scale<1||await imageNeeds(file,png);if(!needed)return {file};
-  const canvas=document.createElement('canvas');canvas.width=w;canvas.height=h;const g=canvas.getContext('2d');if(!png){g.fillStyle='#fff';g.fillRect(0,0,w,h);}g.drawImage(bitmap,0,0,w,h);
-  const blob=await new Promise(resolve=>canvas.toBlob(resolve,png?'image/png':'image/jpeg',0.9));if(!blob||!blob.size)return {file};
-  return {file:new File([blob],name,{type:blob.type}),note:w+'×'+h};}finally{bitmap.close?.();}}
-async function add(files){for(const file of files){let name=file.name,target=kind;const suffix=suffixOf(name);
- if(!accepts(target,suffix)){const other=['book','font'].find(k=>accepts(k,suffix));if(other)target=other;else if(kind==='font'){const ext=await fontHeader(file);if(ext){name=(name||'font')+ext;}}}
- if(!accepts(target,suffixOf(name))){notice('“'+file.name+'”不是'+kinds[kind].label+'支持的格式：'+kinds[kind].hint+'。',true);continue;}
+// 原图只在浏览器解码；封面固定184×256，锁屏图按原生边界等比缩小，始终重新编码16灰阶普通PNG。
+// Decode originals only in the browser; covers are 184×256, lock images fit native bounds, and every image becomes a non-interlaced 16-gray PNG.
+const IMAGE_PANEL={width:684,height:1216},IMAGE_COVER={width:184,height:256};
+const pngCrcTable=Uint32Array.from({length:256},(_,i)=>{for(let n=0;n<8;n++)i=i&1?0xedb88320^(i>>>1):i>>>1;return i>>>0;});
+function pngChunk(tag,data){const out=new Uint8Array(data.length+12),view=new DataView(out.buffer);view.setUint32(0,data.length);out.set(new TextEncoder().encode(tag),4);out.set(data,8);let crc=0xffffffff;for(let i=4;i<out.length-4;i++)crc=pngCrcTable[(crc^out[i])&255]^(crc>>>8);view.setUint32(out.length-4,(crc^0xffffffff)>>>0);return out;}
+// HTTP旧浏览器没有压缩流时仍写合法zlib，不允许退回原图；4位像素本身已限制传输上界。
+// Older HTTP browsers without compression streams still receive valid zlib, never original uploads; packed pixels bound the transfer size.
+async function imageDeflate(bytes){
+ if(typeof CompressionStream==='function')return new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(new CompressionStream('deflate'))).arrayBuffer());
+ const blocks=Math.ceil(bytes.length/65535),out=new Uint8Array(2+blocks*5+bytes.length+4);out.set([0x78,0x01]);let at=2,a=1,b=0;
+ for(let start=0;start<bytes.length;start+=65535){const n=Math.min(65535,bytes.length-start);out[at++]=start+n===bytes.length?1:0;out[at++]=n&255;out[at++]=n>>>8;out[at++]=(~n)&255;out[at++]=((~n)>>>8)&255;out.set(bytes.subarray(start,start+n),at);at+=n;}
+ for(const byte of bytes){a=(a+byte)%65521;b=(b+a)%65521;}new DataView(out.buffer).setUint32(at,((b<<16)|a)>>>0);return out;
+}
+async function imagePng(rgba,width,height,preserveAlpha){
+ let alpha=false;if(preserveAlpha)for(let i=3;i<rgba.length;i+=4)if(Math.round(rgba[i]/17)<15){alpha=true;break;}
+ const depth=alpha?8:4,stride=alpha?width:Math.ceil(width/2),rows=new Uint8Array((stride+1)*height),previous=new Uint8Array(stride),row=new Uint8Array(stride);
+ for(let y=0;y<height;y++){
+  row.fill(0);for(let x=0;x<width;x++){const at=4*(y*width+x),opacity=preserveAlpha?Math.round(rgba[at+3]/17):15;let gray=(rgba[at]*77+rgba[at+1]*150+rgba[at+2]*29+128)>>>8;
+   if(!preserveAlpha)gray=Math.floor((gray*rgba[at+3]+255*(255-rgba[at+3])+127)/255);
+   const shade=opacity?Math.min(15,Math.floor((gray+8)/17)):0;if(alpha)row[x]=(opacity<<4)|shade;else row[x>>>1]|=shade<<(x&1?0:4);}
+  // 在None/Sub/Up中选择残差最小的行，兼顾纸纹与大块留白；不加抖动噪点。 / Pick the smallest None/Sub/Up residual without adding dither noise.
+  let filter=0,best=Infinity;for(let f=0;f<3;f++){let score=0;for(let x=0;x<stride;x++){const value=(row[x]-(f===1?(x?row[x-1]:0):f===2?previous[x]:0))&255;score+=Math.min(value,256-value);}if(score<best){best=score;filter=f;}}
+  const offset=y*(stride+1);rows[offset]=filter;for(let x=0;x<stride;x++)rows[offset+1+x]=(row[x]-(filter===1?(x?row[x-1]:0):filter===2?previous[x]:0))&255;previous.set(row);
+ }
+ const header=new Uint8Array(13),view=new DataView(header.buffer);view.setUint32(0,width);view.setUint32(4,height);header[8]=depth;header[9]=3;
+ const count=alpha?256:16,palette=new Uint8Array(count*3),opacity=new Uint8Array(count);for(let i=0;i<count;i++){palette.fill((i&15)*17,i*3,i*3+3);opacity[i]=(i>>>4)*17;}
+ const parts=[new Uint8Array([137,80,78,71,13,10,26,10]),pngChunk('IHDR',header),pngChunk('PLTE',palette)];if(alpha)parts.push(pngChunk('tRNS',opacity));parts.push(pngChunk('IDAT',await imageDeflate(rows)),pngChunk('IEND',new Uint8Array()));return new Blob(parts,{type:'image/png'});
+}
+async function prepareImage(file,name,target){
+ if(target!=='cover'&&target!=='wallpaper')throw Error('请选择图片用途：封面或锁屏图片');
+ if(typeof createImageBitmap!=='function')throw Error('浏览器不支持图片优化，请使用新版浏览器；未上传原图');
+ let bitmap;try{bitmap=await createImageBitmap(file,{imageOrientation:'from-image'});}catch{throw Error('图片无法解码，请重新选择 PNG/JPEG；未上传原图');}
+ try{
+  if(!bitmap.width||!bitmap.height||bitmap.width*bitmap.height>64*1024*1024)throw Error('图片尺寸过大或无效，请先缩小；未上传原图');
+  const cover=target==='cover',landscape=bitmap.width>bitmap.height,bounds=landscape?{width:IMAGE_PANEL.height,height:IMAGE_PANEL.width}:IMAGE_PANEL;
+  const scale=Math.min(1,bounds.width/bitmap.width,bounds.height/bitmap.height),w=cover?IMAGE_COVER.width:Math.max(1,Math.round(bitmap.width*scale)),h=cover?IMAGE_COVER.height:Math.max(1,Math.round(bitmap.height*scale));
+  const canvas=document.createElement('canvas');canvas.width=w;canvas.height=h;const g=canvas.getContext('2d',{willReadFrequently:true});if(!g)throw Error('无法准备图片画布；未上传原图');
+  g.imageSmoothingEnabled=true;g.imageSmoothingQuality='high';if(cover){g.fillStyle='#fff';g.fillRect(0,0,w,h);const fit=Math.max(w/bitmap.width,h/bitmap.height),sw=w/fit,sh=h/fit;g.drawImage(bitmap,(bitmap.width-sw)/2,(bitmap.height-sh)/2,sw,sh,0,0,w,h);}else g.drawImage(bitmap,0,0,w,h);
+  const blob=await imagePng(g.getImageData(0,0,w,h).data,w,h,!cover),outputName=name.replace(/\.[^.]+$/, '')+'.png';
+  return {file:new File([blob],outputName,{type:'image/png'}),name:outputName,note:w+'×'+h+' · 16灰阶 PNG'};
+ }finally{bitmap.close?.();}
+}
+async function add(files){const selected=kind;for(const file of Array.from(files)){let name=file.name,target=selected;const suffix=suffixOf(name);
+ if(entries.length>=32){notice('一次最多添加 32 项。',true);break;}
+ if(!accepts(target,suffix)){const other=['book','font'].find(k=>accepts(k,suffix));if(other)target=other;else if(selected==='font'){const ext=await fontHeader(file);if(ext){name=(name||'font')+ext;}}}
+ if(!accepts(target,suffixOf(name))){notice('“'+file.name+'”不是'+kinds[selected].label+'支持的格式：'+kinds[selected].hint+'。',true);continue;}
  if(!file.size){notice('“'+file.name+'”是空文件。',true);continue;}
- let upload=file;if(target==='cover'||target==='wallpaper'){const prepared=await prepareImage(file,name);upload=prepared.file;if(prepared.note)notice('“'+file.name+'”已在浏览器优化为 '+prepared.note+'（'+size(file.size)+' → '+size(upload.size)+'）。');}
+ let upload=file;if(target==='cover'||target==='wallpaper'){notice('正在优化“'+file.name+'”…');await new Promise(resolve=>setTimeout(resolve,0));try{const prepared=await prepareImage(file,name,target);upload=prepared.file;name=prepared.name;notice('“'+file.name+'”已优化为 '+prepared.note+'（'+size(file.size)+' → '+size(upload.size)+'），保存为“'+name+'”。');}catch(error){notice('“'+file.name+'”：'+error.message,true);continue;}}
  if(upload.size>kinds[target].limit){notice('“'+file.name+'”有 '+size(upload.size)+'，超过'+kinds[target].label+'上限 '+size(kinds[target].limit)+'。',true);continue;}
  if(entries.length>=32){notice('一次最多添加 32 项。',true);break;}
  if(target!==kind)notice('“'+file.name+'”已按'+kinds[target].label+'发送。');

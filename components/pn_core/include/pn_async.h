@@ -21,6 +21,8 @@ typedef struct {
     unsigned first,count; ///< 队列首及长度 / Queue head and length
     bool has_navigation,overflow; ///< 待执行导航与溢出取消指针标记 / Pending navigation and overflow pointer-reset flag
     bool controls_blocked; ///< 开书期间仅接纳紧急导航，由guard保护 / Only urgent navigation is admitted during opening; protected by guard
+    uint32_t first_view; ///< 首屏呈现期间预备的阅读上下文，0为未预备；guard保护 / Prepared first-page reading context, zero when inactive; guarded
+    bool first_navigation; ///< 唯一导航槽持有尚未确认首屏的新翻页；guard保护 / Sole navigation slot holds a turn awaiting first-page confirmation; guarded
     bool root_enabled; ///< 当前画面允许固定底栏，guard保护 / Current screen permits fixed navigation, protected by guard
     uint64_t root_epoch; ///< 进出固定底栏时换代；耗尽后拒绝跨帧接纳 / Changes on entering/leaving fixed navigation; exhaustion rejects cross-frame admission
     uint64_t coalesced,dropped; ///< 合并与丢弃计数 / Coalesced and dropped counts
@@ -59,3 +61,9 @@ void pn_async_begin(pn_async_t *queue,pn_async_scope_t *scope,bool idle);
 void pn_async_end(pn_async_scope_t *scope);
 /// 开书控制门：进入时丢弃已有普通事件，保留紧急导航；不中断当前worker。/ Opening gate drops ordinary pending events, retaining urgent navigation without cancelling the current worker.
 void pn_async_block_controls(pn_async_t *queue,bool blocked);
+/// 控制门关闭时预备首屏上下文，旧触点必须由端口取消；不提前执行翻页。 / Prepare a first-page context under the closed gate; the port must cancel old contacts, and no turn executes yet.
+pn_status_t pn_async_first_view(pn_async_t *queue,uint32_t view);
+/// 仅端口已识别的新翻页调用；首屏期最多留一项且不取消开书，紧急导航优先。 / Only new recognized turns use this; hold at most one without cancelling opening, and retain urgent priority.
+pn_status_t pn_async_first_navigation(pn_async_t *queue,const pn_async_event_t *event);
+/// 成功后交付唯一翻页，失败丢弃；开放控制门，不改变页面身份。 / Release the sole turn on success or discard it on failure; open the gate without changing view identity.
+void pn_async_first_complete(pn_async_t *queue,bool success);

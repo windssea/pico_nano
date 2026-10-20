@@ -89,7 +89,7 @@ static int lock(const char *prefix){
         if(mode==PN_LOCK_CUSTOM || mode==PN_LOCK_BOOK)pn_frame_clear(&frame,3);
         pn_lock_selection_t s={.mode=(pn_lock_mode_t)mode,.hint=true};assert(pn_lock_render(&s,&font,hint,&frame)==PN_OK && font.pixels==24);
         snprintf(path,sizeof path,"%s-%d.pgm",prefix,mode);write_pgm(&frame,path);
-        if(mode==PN_LOCK_CUSTOM || mode==PN_LOCK_BOOK){assert(pn_frame_get(&frame,10,500)==3 && pn_frame_get(&frame,10,1200)==15);s.hint=false;pn_frame_clear(&frame,3);assert(pn_lock_render(&s,&font,hint,&frame)==PN_OK && pn_frame_get(&frame,10,1200)==3);}
+        if(mode==PN_LOCK_CUSTOM || mode==PN_LOCK_BOOK){assert(pn_frame_get(&frame,10,500)==3 && pn_frame_get(&frame,10,1200)==3);s.hint=false;pn_frame_clear(&frame,3);assert(pn_lock_render(&s,&font,hint,&frame)==PN_OK && pn_frame_get(&frame,10,1200)==3);}
     }
     // 关闭提示的默认壁纸与开机图必须逐字节一致，绘制无临时分配。/ Default wallpaper without the hint must exactly match boot art, with no temporary allocations.
     pn_lock_selection_t plain={.mode=PN_LOCK_DEFAULT,.hint=false};size_t attempts=pool.attempts;

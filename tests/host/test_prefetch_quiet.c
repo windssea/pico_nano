@@ -8,10 +8,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-static unsigned draws,presents;
+static unsigned draws,presents;static uint64_t frame_hash;
 pn_status_t __real_pn_font_prerender(pn_font_t *,pn_frame_t *,uint32_t,int32_t,int,pn_font_render_t);
 pn_status_t __wrap_pn_font_prerender(pn_font_t *f,pn_frame_t *b,uint32_t c,int32_t x,int y,pn_font_render_t m){draws++;return __real_pn_font_prerender(f,b,c,x,y,m);}
-static pn_status_t present(void *ctx,const pn_frame_t *frame,pn_refresh_t mode){(void)ctx;(void)frame;(void)mode;presents++;return PN_OK;}
+static pn_status_t present(void *ctx,const pn_frame_t *frame,pn_refresh_t mode){
+    (void)ctx;(void)mode;presents++;frame_hash=UINT64_C(14695981039346656037);
+    for(int y=0;y<frame->height;y++)for(int x=0;x<frame->width/2;x++){frame_hash^=frame->pixels[(size_t)y*frame->stride+x];frame_hash*=UINT64_C(1099511628211);}
+    return PN_OK;
+}
 int main(int argc,char **argv){
     assert(argc==3);
     for(unsigned mode=0;mode<4;mode++)for(unsigned kind=0;kind<2;kind++){
@@ -32,7 +36,11 @@ int main(int argc,char **argv){
         assert(b.completed==1 && draws==before && presents==receipts && pool.attempts==attempts);
         if(kind){pn_epub_progress_t after;assert(pn_epub_app_progress(&e,&after)==PN_OK && !strcmp(after.location.path,epub_before.location.path) && after.location.position.element==epub_before.location.position.element && after.location.position.run==epub_before.location.position.run && after.location.position.offset==epub_before.location.position.offset);}
         else{pn_txt_progress_t after;assert(pn_reader_app_progress(&t,&after)==PN_OK && after.source_offset==txt_before.source_offset);}
-        assert((kind?pn_epub_app_close(&e,2):pn_reader_app_close(&t,2))==PN_OK && pn_font_system_close()==PN_OK && pool.used==0 && pool.live==0);
+        // 必须真正消费已完成位图；A/B日志同时核对下一页完整帧摘要。/ Actually consume the completed bitmap; A/B logs also compare the whole next-frame digest.
+        assert((kind?pn_epub_app_step(&e,PN_APP_NEXT,2,present,NULL):pn_reader_app_step(&t,PN_APP_NEXT,2,present,NULL))==PN_OK);
+        pn_page_bitmap_stats_t consumed=kind?pn_epub_app_prerender_stats(&e):pn_reader_app_prerender_stats(&t);assert(consumed.hits>b.hits);
+        printf("quiet_next mode=%u kind=%u frame=%016llx\n",mode,kind,(unsigned long long)frame_hash);
+        assert((kind?pn_epub_app_close(&e,3):pn_reader_app_close(&t,3))==PN_OK && pn_font_system_close()==PN_OK && pool.used==0 && pool.live==0);
         printf("quiet_prefetch mode=%u kind=%u prep_steps=%u then_100_no_work=1\n",mode,kind,loops);
     }
     return 0;

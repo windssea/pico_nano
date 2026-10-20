@@ -5,6 +5,7 @@
 #include "pn_font.h"
 #include "pn_favorites.h"
 #include "pn_shelf_prefs.h"
+#include "pn_reading_stats.h"
 #define PN_SHELF_PREVIOUS 40
 #define PN_SHELF_NEXT 41
 #define PN_SHELF_TOGGLE 43
@@ -47,6 +48,8 @@ bool pn_shelf_gesture_feed(pn_shelf_gesture_t *,bool active,bool swipe,unsigned 
 /// Optional shelf appearance and entries; all-zero with battery_percent=-1 matches the legacy behaviour.
 typedef struct {
     bool home; ///< 首页读取实际最近快照，书库不画继续卡 / Home reads actual recent snapshots; library omits the continue card
+    char home_date[40]; ///< owner准备的当地日期，空串表示未校时 / Owner-prepared local date; empty when unsynchronized
+    pn_reading_summary_t reading; ///< 已加载的统计快照；known只对应继续卡同一本书 / Loaded statistics; known applies only to the Continue book
     int battery_percent; ///< 0–100，<0不显示 / 0–100, hidden when negative
     bool list_mode; ///< 列表模式（每页5行）/ List mode, five rows per page
     uint8_t columns; ///< 网格3或4列，0默认3列 / Grid with three or four columns; zero defaults to three

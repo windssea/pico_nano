@@ -93,6 +93,8 @@ pn_status_t pn_epub_app_open_job_close(pn_epub_open_job_t *);
 pn_status_t pn_epub_app_step(pn_epub_app_t *,pn_reader_action_t,uint64_t,pn_reader_present_fn,void *);
 /// 定期保存检查，非异步deadline服务。/ Periodic saving, not an asynchronous deadline service.
 pn_status_t pn_epub_app_tick(pn_epub_app_t *,uint64_t);
+/// 正文空闲且无按压时写待定近期记录，首屏后至少1.5秒；失败保留并限频重试，关闭/挂起仍保存。 / Write pending recents only during untouched body idle at least 1.5 seconds after display; retain and throttle failures, while close/suspend still save.
+pn_status_t pn_epub_app_recent_idle(pn_epub_app_t *,uint64_t);
 /// 保存屏障成功后释放，失败不关闭会话。/ Release only after successful save barriers, retaining the session on failure.
 pn_status_t pn_epub_app_close(pn_epub_app_t *,uint64_t);
 /// 保存后热挂起会话；预览/失败候选返回BUSY。/ Save then retain session; previews/failed candidates return BUSY.

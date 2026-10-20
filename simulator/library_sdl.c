@@ -98,6 +98,7 @@ typedef struct {
     pn_wallpaper_ui_t wallpaper; ///< 壁纸设置页 / Wallpaper settings page
     pn_bookmark_lock_t bookmark_lock; ///< 最后确认的本地阅读快照 / Last confirmed local reading snapshot
     pn_reading_stats_t reading_stats; ///< 与设备同源的阅读统计 / Reading statistics shared with the device
+    uint64_t home_stats_retry; ///< 首页空闲读档重试 / Home idle load retry
     uint64_t stats_retry; ///< 读档失败限频 / Throttled load retries
     bool stats_display_failed; ///< 失败推屏后成功恢复才计时 / Resume timing only after successful display recovery
     pn_catalog_item_t bookmark_lock_item; ///< 快照所对应的书，不能跟随未确认选择 / Snapshot source, never an unconfirmed selection
@@ -136,7 +137,16 @@ typedef struct {
 /* 模拟器没有电量计：电量取环境变量PN_SIM_BATTERY（0–100，默认85，仅为演示值，不是实测）。
  * The simulator has no fuel gauge: the battery comes from PN_SIM_BATTERY (0–100, default 85), a demo value, not a measurement. */
 static int sim_battery(void){const char *v=getenv("PN_SIM_BATTERY");if(!v || !*v)return 85;int n=atoi(v);return n<0?-1:n>100?100:n;}
-static pn_shelf_options_t shelf_options(const library_t *s){pn_w_set_battery(sim_battery());bool query=!s->recent_mode && !s->fav_mode && *s->query;return (pn_shelf_options_t){.home=s->home,.battery_percent=-1,.columns=s->shelf_prefs.columns,.style=s->shelf_prefs.style,.actions=s->actions_mode?&s->actions:NULL,.search=false,.layout_toggle=true,.favorites_tab=true,.favorites=s->fav_mode,.list_mode=s->list_mode || query,.query=query};}
+static bool stats_clock(uint64_t *utc);
+static pn_shelf_options_t shelf_options(const library_t *s){
+    pn_w_set_battery(sim_battery());bool query=!s->recent_mode && !s->fav_mode && *s->query;
+    pn_shelf_options_t o={.home=s->home,.battery_percent=-1,.columns=s->shelf_prefs.columns,.style=s->shelf_prefs.style,.actions=s->actions_mode?&s->actions:NULL,.search=false,.layout_toggle=true,.favorites_tab=true,.favorites=s->fav_mode,.list_mode=s->list_mode || query,.query=query};
+    if(o.home){uint64_t utc=0;bool dated=stats_clock(&utc);o.reading=pn_reading_stats_summary(&s->reading_stats,dated,utc);
+        o.reading.known=o.reading.known && s->covers && s->covers->has_last && s->covers->last.identified && !memcmp(s->covers->last.expected.sha256,s->reading_stats.book.id.sha256,32);
+        unsigned year,month,day,weekday;if(dated && pn_bookmark_lock_date((uint32_t)(utc/1000u),&year,&month,&day,&weekday)){o.reading.dated=true;o.reading.weekday=weekday;snprintf(o.home_date,sizeof o.home_date,"%u月%u日 · 周%s",month,day,((const char *const[]){"一","二","三","四","五","六","日"})[weekday]);}
+    }
+    return o;
+}
 static size_t shelf_per_page(const library_t *s){pn_shelf_options_t o=shelf_options(s);return s->home?3u:pn_shelf_capacity(&o);}
 static bool reading(library_t *s){return s->reader.impl || s->epub.impl;}
 static bool stats_clock(uint64_t *utc){struct timespec t;if(clock_gettime(CLOCK_REALTIME,&t) || t.tv_sec<0)return false;*utc=(uint64_t)t.tv_sec*1000u+(uint64_t)t.tv_nsec/1000000u;return *utc<=UINT64_C(4294967295999);}
@@ -743,7 +753,9 @@ static bool management_event(library_t *s,SDL_Event *event,uint64_t now){
 static pn_status_t wallpaper_open(library_t *s){
     pn_status_t dropped=pn_hot_session_drop(&s->hot);if(dropped!=PN_OK)return dropped;
     pn_wallpaper_mask_close(&s->lock_mask);
-    pn_status_t status=pn_wallpaper_ui_open(&s->wallpaper,s->pool,&s->media,s->wallpaper_dir,s->wallpaper_store_ok?&s->wallpaper_store:NULL,present,s);
+    char cache_dir[PN_WALLPAPER_PATH_MAX];const char *cache=NULL;
+    if(s->wallpaper_store_argument && (size_t)snprintf(cache_dir,sizeof cache_dir,"%s/images",s->wallpaper_store_argument)<sizeof cache_dir)cache=cache_dir;
+    pn_status_t status=pn_wallpaper_ui_open_cached(&s->wallpaper,s->pool,&s->media,s->wallpaper_dir,s->wallpaper_store_ok?&s->wallpaper_store:NULL,present,s,cache);
     if(status==PN_OK){pn_bookmark_lock_t snapshot=s->bookmark_lock;snapshot.battery=-1;time_t utc=time(NULL);snapshot.date_known=utc>=0 && (uint64_t)utc<=UINT32_MAX;snapshot.utc=snapshot.date_known?(uint32_t)utc:0;stats_snapshot(s,&snapshot);pn_wallpaper_ui_set_bookmark(&s->wallpaper,&snapshot);}
     return status;
 }
@@ -757,11 +769,11 @@ static pn_status_t lock_preview(library_t *s,uint64_t now){
     s->toolbar=false;
     if(!s->frame.pixels){uint8_t *pixels=pn_alloc_tagged(s->pool,PN_MEM_FRAME,PN_WALLPAPER_BYTES);if(!pixels)return PN_NO_MEMORY;pn_frame_bind(&s->frame,pixels,PN_WALLPAPER_BYTES,684,1216);}
     if(!s->font.impl){pn_text_source_t font=pn_font_builtin_source();status=pn_font_open(&s->font,s->pool,&font,32);}
-    pn_lock_selection_t selection={.mode=PN_LOCK_DEFAULT,.hint=true};
+    pn_lock_selection_t selection={.mode=PN_LOCK_DEFAULT,.hint=false};
     if(status==PN_OK && s->wallpaper_store_ok){pn_media_lease_t lease;pn_status_t loaded=pn_media_acquire(&s->wallpaper_media,PN_MEDIA_READ,&lease);
         if(loaded==PN_OK){loaded=pn_wallpaper_load(&s->wallpaper_store,&lease,&selection,&s->frame);(void)pn_media_release(&s->wallpaper_media,&lease);}
-        if(loaded!=PN_OK)selection=(pn_lock_selection_t){.mode=PN_LOCK_DEFAULT,.hint=true};}
-    if(selection.mode==PN_LOCK_SIMPLE || selection.mode==PN_LOCK_BOOK)selection=(pn_lock_selection_t){.mode=PN_LOCK_DEFAULT,.hint=true};
+        if(loaded!=PN_OK)selection=(pn_lock_selection_t){.mode=PN_LOCK_DEFAULT,.hint=false};}
+    if(selection.mode==PN_LOCK_SIMPLE || selection.mode==PN_LOCK_BOOK)selection=(pn_lock_selection_t){.mode=PN_LOCK_DEFAULT,.hint=false};
     if(selection.mode==PN_LOCK_MASK){
         pn_status_t mask=PN_EMPTY;
         if(reading(s) && s->page_px){
@@ -772,7 +784,7 @@ static pn_status_t lock_preview(library_t *s,uint64_t now){
             if(mask==PN_OK){memcpy(s->frame.pixels,s->page_px,PN_WALLPAPER_BYTES);mask=pn_wallpaper_mask_paint(&s->lock_mask,&s->frame);}
         }
         printf("lock_mask status=%d\n",(int)mask);pn_wallpaper_mask_close(&s->lock_mask);
-        if(mask!=PN_OK)selection=(pn_lock_selection_t){.mode=PN_LOCK_DEFAULT,.hint=true};
+        if(mask!=PN_OK)selection=(pn_lock_selection_t){.mode=PN_LOCK_DEFAULT,.hint=false};
     }
     if(!reading(s))pn_wallpaper_mask_close(&s->lock_mask);
     if(status==PN_OK && selection.mode==PN_LOCK_BOOKMARK){
@@ -783,8 +795,8 @@ static pn_status_t lock_preview(library_t *s,uint64_t now){
         if(cover_px && *s->bookmark_lock_item.path && pn_frame_bind(&cover,cover_px,PN_COVER_BYTES,PN_COVER_WIDTH,PN_COVER_HEIGHT))
             ready=pn_cover_cached_one(s->pool,&s->media,s->cover_dir,&s->bookmark_lock_item,&cover,&display)==PN_OK;
         if(ready){if(*display.title)snapshot.book=display;}
-        status=pn_bookmark_lock_render(&snapshot,ready?&cover:NULL,&s->font,selection.hint?"按电源键继续阅读":"",&s->frame);pn_free(cover_px);
-    }else if(status==PN_OK)status=pn_lock_render(&selection,&s->font,"按电源键继续阅读",&s->frame);
+        status=pn_bookmark_lock_render(&snapshot,ready?&cover:NULL,&s->font,"",&s->frame);pn_free(cover_px);
+    }else if(status==PN_OK)status=pn_lock_render(&selection,&s->font,"",&s->frame);
     if(status==PN_OK)status=present_raw(s,&s->frame);
     s->locked=status==PN_OK;printf("lock_preview status=%d mode=%d cached=%d\n",(int)status,(int)selection.mode,selection.cached_book);return status;
 }
@@ -831,7 +843,7 @@ static int library_worker(void *ctx){
         pn_list_motion_stats_t moving=s->toc.active?pn_toc_ui_motion_stats(&s->toc):pn_font_manage_motion_stats(&s->font_manage);
         uint64_t paint_now=SDL_GetTicks64();bool paint_work=view==16 && !s->pointer_down && atomic_load(&s->async.mouse)==0 && paint_now>=font_activity && paint_now-font_activity>=1500 && (pn_hot_session_source_pending(&s->hot) || pn_hot_session_layout_pending(&s->hot) || pn_hot_session_paint_pending(&s->hot));
         // EPUB候选分步待续时使用短等待，每轮仍先处理真实输入。/ Use a short wait while an EPUB candidate continues, still handling real input first each tick.
-        bool cache_work=s->foreground_open.impl || (view==15 && (prefetch_work || pn_epub_app_cache_pending(&s->epub))) || pn_cover_work_pending(&s->cover_work) || ((view%32u==16u || view%32u==17u) && pn_shelf_covers_pending(s->covers,s->page)) || paint_work;
+        bool cache_work=pn_wallpaper_ui_pending(&s->wallpaper) || s->foreground_open.impl || (view==15 && (prefetch_work || pn_epub_app_cache_pending(&s->epub))) || pn_cover_work_pending(&s->cover_work) || ((view%32u==16u || view%32u==17u) && pn_shelf_covers_pending(s->covers,s->page)) || paint_work;
         SDL_Event event;bool got=pn_sdl_async_wait(&s->async,&event,moving.active || moving.coasting || cache_work?1u:100u,view,root_navigation_hit(s,80,1150)>=0);uint64_t now=SDL_GetTicks64();prefetch_work=false;
         if(got)stats_pause(s);
         else if(s->reading_stats.media && now>=font_activity && now-font_activity>=1500u)(void)pn_reading_stats_save(&s->reading_stats,now,false);
@@ -901,8 +913,13 @@ static int library_worker(void *ctx){
             (void)pn_font_manage_tick(&s->font_manage,now);
             (void)pn_toc_ui_tick(&s->toc,now);
             (void)feedback_idle_tick(s,now,s->locked || body || moving.active || s->pointer_down || s->feedback_tap.down || atomic_load(&s->async.mouse)!=0);
-            if(!s->locked && body && !s->pointer_down && atomic_load(&s->async.mouse)==0){status=s->epub.impl?pn_epub_app_prefetch(&s->epub):pn_reader_app_prefetch(&s->reader);prefetch_work=status==PN_OK;if(status==PN_OK)printf("neighbor prefetch work\n");pn_status_t cached=s->epub.impl?pn_epub_app_cache_idle(&s->epub,now):PN_EMPTY;if(cached==PN_OK)printf("semantic cache stored\n");}
-            if(!s->locked && !reading(s) && !s->pointer_down && atomic_load(&s->async.mouse)==0 && !s->hub && !s->index && !s->search_open && !s->actions_mode && !s->wallpaper.impl && !s->font_manage.impl && !s->settings.impl && now>=font_activity && now-font_activity>=80){if(now-font_activity>=800){pn_status_t indexed=catalog_build_idle(s);if(indexed==PN_OK)printf("catalog index built\n");}covers_tick(s,now-font_activity>=800);prepare_continue(s,now,font_activity);}
+            if(!s->locked && body && !s->pointer_down && atomic_load(&s->async.mouse)==0){status=s->epub.impl?pn_epub_app_prefetch(&s->epub):pn_reader_app_prefetch(&s->reader);prefetch_work=status==PN_OK;if(status==PN_OK)printf("neighbor prefetch work\n");pn_status_t cached=s->epub.impl?pn_epub_app_cache_idle(&s->epub,now):PN_EMPTY;if(cached==PN_OK)printf("semantic cache stored\n");
+                if(now>=font_activity && now-font_activity>=1500u){pn_status_t recent=s->epub.impl?pn_epub_app_recent_idle(&s->epub,now):pn_reader_app_recent_idle(&s->reader,now);if(recent==PN_OK)printf("recent record stored when idle\n");}}
+            if(!s->locked && s->wallpaper.impl && !s->pointer_down && atomic_load(&s->async.mouse)==0)(void)pn_wallpaper_ui_tick(&s->wallpaper,present,s);
+            if(!s->locked && !reading(s) && !s->pointer_down && atomic_load(&s->async.mouse)==0 && !s->hub && !s->index && !s->search_open && !s->actions_mode && !s->wallpaper.impl && !s->font_manage.impl && !s->settings.impl && now>=font_activity && now-font_activity>=80){
+                if(s->home && !s->reading_stats.loaded && s->reading_stats.media && !s->covers_dirty && s->covers && !pn_shelf_covers_pending(s->covers,s->page) && now-font_activity>=1500u && now>=s->home_stats_retry){s->home_stats_retry=now+3000u;
+                    if(pn_reading_stats_load(&s->reading_stats)==PN_OK){if(draw(s)!=PN_OK)s->covers_dirty=true;printf("home statistics ready\n");}}
+if(now-font_activity>=800){pn_status_t indexed=catalog_build_idle(s);if(indexed==PN_OK)printf("catalog index built\n");}covers_tick(s,now-font_activity>=800);prepare_continue(s,now,font_activity);}
             continue;}
 
         if(!s->locked && management_event(s,&event,now)){cancel_pointer(&input,&tap,true);continue;}

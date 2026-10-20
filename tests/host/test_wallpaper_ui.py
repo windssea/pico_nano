@@ -16,5 +16,9 @@ with tempfile.TemporaryDirectory() as folder:
     r=subprocess.run([binary,str(images),str(state),str(root/'preview.pgm')],capture_output=True,timeout=600)
     assert r.returncode==0,(r.stdout,r.stderr)
     data=(root/'preview.pgm').read_bytes();assert data.startswith(b'P5\n684 1216\n15\n')
+    pixels=(root/'preview.pgm-list.pgm').read_bytes().split(b'\n',3)[3]
+    # 横图等比缩入竖缩略框，白色留边；有效图完整出现，伪图只显示图标。/ A landscape thumbnail preserves aspect with white margins; valid pixels appear only after complete decoding.
+    assert pixels[466*684+300]==15 and pixels[686*684+300]==15
+    assert pixels[546*684+290]!=pixels[546*684+390] and pixels[606*684+320]<5
     print(r.stdout.decode().strip())
-print('wallpaper ui: list/preview/cover/shift/rotate/hint/apply/cancel/busy/no-partition/missing-dir/fault-injected open passed')
+print('wallpaper ui: list/preview/cover/shift/rotate/no-overlay/apply/cancel/busy/no-partition/missing-dir/fault-injected open passed')

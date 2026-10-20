@@ -12,6 +12,7 @@
 #include "pn_wallpaper.h"
 #include "pn_bookmark_lock.h"
 #include "pn_image.h"
+#include "pn_profile.h"
 #include "pn_text_file.h"
 #include "pn_widgets.h"
 #include <errno.h>
@@ -127,6 +128,8 @@ static void mask_header(uint8_t *p,const struct stat *info,const pn_wallpaper_tr
 }
 /// PackBits流式编码到输出块，满块回调写出；返回编码字节数或0表示写失败。/ Stream PackBits into an output block, flushing full blocks; returns the encoded size, or 0 on a write failure.
 typedef struct {FILE *file;uint8_t block[MASK_CHUNK];size_t used,total;uint32_t crc;bool failed;} packer_t;
+// 三种壁纸缓存只由同一owner串行编码，共用4KiB块。/ All three wallpaper cache paths encode serially on one owner, sharing a 4 KiB block.
+static packer_t packer;
 static void pack_put(packer_t *k,const uint8_t *data,size_t n){
     while(n && !k->failed){size_t take=MASK_CHUNK-k->used<n?MASK_CHUNK-k->used:n;memcpy(k->block+k->used,data,take);k->used+=take;data+=take;n-=take;
         if(k->used==MASK_CHUNK){k->crc=mcrc(k->crc,k->block,k->used);k->failed=k->file && fwrite(k->block,1,k->used,k->file)!=k->used;k->total+=k->used;k->used=0;}}
@@ -204,7 +207,6 @@ static pn_status_t mask_cache_store(pn_media_t *media,const pn_media_lease_t *le
     // 旧缓存先删除，内部分区需要它的空间写新文件。/ Remove the old cache first; internal partitions need its space for the new file.
     if(status==PN_OK && remove(path) && errno!=ENOENT)status=PN_IO;
     FILE *file=status==PN_OK?fopen(temporary,"wb"):NULL;if(status==PN_OK && !file)status=PN_IO;
-    static packer_t packer;
     if(file){packer=(packer_t){.file=file,.crc=mcrc(0,header,head)};
         if(fwrite(header,1,head,file)!=head)status=PN_IO;
         if(status==PN_OK){pack_plane(&packer,gray->pixels);pack_plane(&packer,alpha->pixels);
@@ -359,9 +361,9 @@ pn_status_t pn_wallpaper_save(const pn_wallpaper_store_t *store,const pn_media_l
     crc=crc_update(crc,(const uint8_t *)selection->source,path_length);if(!error && fwrite(selection->source,1,path_length,file)!=path_length)error=true;
     if(bitmap_record(selection) && !error){
         // 先计数再选较小编码；高熵图回退原生4bpp，绝不增加像素存储。 / Count first and select the smaller encoding; high-entropy images retain native 4bpp without expanding pixel storage.
-        static packer_t counter;counter=(packer_t){0};pack_plane(&counter,bitmap->pixels);(void)pack_finish(&counter);
-        uint8_t codec=counter.total<PN_WALLPAPER_BYTES?1:0;crc=crc_update(crc,&codec,1);if(fwrite(&codec,1,1,file)!=1)error=true;
-        if(codec && !error){counter=(packer_t){.file=file,.crc=~crc};pack_plane(&counter,bitmap->pixels);error=!pack_finish(&counter);crc=~counter.crc;}
+        packer=(packer_t){0};pack_plane(&packer,bitmap->pixels);(void)pack_finish(&packer);
+        uint8_t codec=packer.total<PN_WALLPAPER_BYTES?1:0;crc=crc_update(crc,&codec,1);if(fwrite(&codec,1,1,file)!=1)error=true;
+        if(codec && !error){packer=(packer_t){.file=file,.crc=~crc};pack_plane(&packer,bitmap->pixels);error=!pack_finish(&packer);crc=~packer.crc;}
         else for(int y=0;y<H && !error;y++){const uint8_t *row=bitmap->pixels+(size_t)y*bitmap->stride;crc=crc_update(crc,row,W/2);if(fwrite(row,1,W/2,file)!=W/2)error=true;}
     }
     uint8_t tail[4];put(tail,~crc&UINT32_MAX,4);if(!error && fwrite(tail,1,4,file)!=4)error=true;
@@ -377,6 +379,8 @@ pn_status_t pn_wallpaper_save(const pn_wallpaper_store_t *store,const pn_media_l
 }
 
 static pn_status_t string_read(void *ctx,uint64_t off,uint8_t *out,size_t cap,size_t *n){const char *s=ctx;size_t size=strlen(s);if(off>size)return PN_INVALID;size_t take=size-(size_t)off;if(take>cap)take=cap;memcpy(out,s+off,take);*n=take;return PN_OK;}
+#include "pn_wallpaper_preview.inc"
+
 /* 测量或绘制一行；缺字用方框占位。/ Measure or draw one line; missing glyphs become boxes. */
 static pn_status_t line(pn_font_t *font,pn_frame_t *frame,const char *s,int x_64,int baseline,int32_t *width){
     pn_text_source_t source={(void *)s,strlen(s),string_read,NULL};pn_text_reader_t reader;pn_status_t status=pn_text_open(&reader,&source,PN_TEXT_UTF8);if(status!=PN_OK)return status;
@@ -399,16 +403,12 @@ static pn_status_t centered(pn_font_t *font,pn_frame_t *frame,const char *s,int 
 }
 pn_status_t pn_lock_render(const pn_lock_selection_t *selection,pn_font_t *font,const char *hint,pn_frame_t *frame){
     if(!selection || selection->mode>PN_LOCK_BOOKMARK || !font || !font->impl || !hint || !full_frame(frame))return PN_INVALID;
-    if(selection->mode==PN_LOCK_BOOKMARK){pn_bookmark_lock_t empty={.battery=-1};return pn_bookmark_lock_render(&empty,NULL,font,selection->hint?hint:"",frame);}
+    if(selection->mode==PN_LOCK_BOOKMARK){pn_bookmark_lock_t empty={.battery=-1};return pn_bookmark_lock_render(&empty,NULL,font,"",frame);}
     int original=font->pixels;pn_status_t status=PN_OK;
     if(selection->mode==PN_LOCK_DEFAULT){
         status=pn_brand_image_render(frame);
-        if(status==PN_OK && selection->hint){pn_frame_rect(frame,32,1104,620,2,0);status=centered(font,frame,hint,32,1170);}
     }else if(selection->mode==PN_LOCK_SIMPLE){
         pn_frame_clear(frame,15);status=centered(font,frame,PN_BRAND_NAME,56,600);
-        if(status==PN_OK){pn_frame_rect(frame,242,640,200,2,0);status=centered(font,frame,hint,32,700);}
-    }else if(selection->hint){
-        pn_frame_rect(frame,0,1104,W,H-1104,15);pn_frame_rect(frame,0,1104,W,2,0);status=centered(font,frame,hint,32,1170);
     }
     pn_status_t restored=pn_font_size(font,original);return status==PN_OK?restored:status;
 }

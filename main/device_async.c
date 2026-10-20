@@ -54,10 +54,11 @@ static void display_task(void *ctx){pn_device_async_t *p=ctx;for(;;){display_t j
     }}
 static void send(pn_device_async_t *p,const pn_device_input_event_t *input,bool navigation,bool urgent){atomic_fetch_add(&p->events_sent,1);pn_async_event_t e={.bytes=sizeof *input,.navigation=navigation,.urgent=urgent,.view=atomic_load(&p->input.view)};memcpy(e.payload,input,sizeof *input);
     bool root=input->kind==PN_DASYNC_TOUCH && input->valid && input->count==1 && pn_w_navigation_hit(input->x,input->y)>=0;
-    (void)(root?pn_async_send_root(&p->input,&e):pn_async_send(&p->input,&e));
+    bool first=input->kind==PN_DASYNC_ACTION && (input->action==PN_APP_NEXT || input->action==PN_APP_PREVIOUS) && atomic_load(&p->first_reader);
+    (void)(first?pn_async_first_navigation(&p->input,&e):root?pn_async_send_root(&p->input,&e):pn_async_send(&p->input,&e));
     if(p->product_task)xTaskNotifyGive((TaskHandle_t)p->product_task);}
 static void input_task(void *ctx){
-    pn_device_async_t *p=ctx;pn_key_t keys={0};pn_reader_input_t reader={0};unsigned empty=0,old_pause=0;uint64_t last_power=0,last_hold=0;uint32_t old_view=0;int last_x=-1,last_y=-1;
+    pn_device_async_t *p=ctx;pn_key_t keys={0};pn_reader_input_t reader={0};unsigned empty=0,old_pause=0;uint64_t last_power=0,last_hold=0;uint32_t old_view=0;int last_x=-1,last_y=-1;bool key_opening=false,key_first=false;
     for(;;){unsigned request=atomic_load(&p->pause_request);
         if(request!=old_pause){pn_key_cancel(&keys);pn_reader_input_cancel(&reader);empty=0;last_x=last_y=-1;old_pause=request;}
         atomic_store(&p->pause_ack,request);if(request&1u){vTaskDelay(pdMS_TO_TICKS(10));continue;}
@@ -76,11 +77,15 @@ static void input_task(void *ctx){
 #endif
             {valid=cst836u_read(p->hardware->touch,&touch)==ESP_OK;if(valid)valid=pn_device_touch_normalize(&touch,&ending)==PN_OK;}
             atomic_fetch_add(valid?&p->touch_reads:&p->touch_errors,1);
+            // 键语义以按下时为准，跨首屏确认的返回不能变成上一页；新右键可暂存一次下一页。 / Latch key semantics at press: Back spanning confirmation never becomes Previous, while a fresh Right can hold one Next.
+            if(!keys.down && valid && touch.count==1){key_first=atomic_load(&p->first_reader);key_opening=(view&0xffffu)==18u || key_first;}
             int key=-1;pn_key_event_t ke=pn_key_feed(&keys,touch.count,touch.x,touch.y,valid,now,&key);
             bool body=atomic_load(&p->body);unsigned flags=atomic_load(&p->flags);
-            if((view&0xffffu)==18u){
+            if(key_opening){
                 if(ke==PN_KEY_SHORT && (key==PN_KEY_1 || key==PN_KEY_2)){pn_device_input_event_t e={.kind=PN_DASYNC_OPEN_CANCEL,.at=now,.key=key,.key_event=ke};send(p,&e,true,true);}
+                else if(ke==PN_KEY_SHORT && key==PN_KEY_3 && key_first && !(flags&PN_INPUT_NO_KEYS)){pn_device_input_event_t e={.kind=PN_DASYNC_ACTION,.at=now,.action=PN_APP_NEXT};send(p,&e,true,false);}
             }else if(ke!=PN_KEY_NONE && (!body || !(flags&PN_INPUT_NO_KEYS) || key==PN_KEY_2)){pn_device_input_event_t e={.kind=PN_DASYNC_KEY,.at=now,.key=key,.key_event=ke};send(p,&e,body || key==PN_KEY_1 || key==PN_KEY_2,key==PN_KEY_2 || (!body && key==PN_KEY_1));}
+            if(!keys.down){key_opening=false;key_first=false;}
             reader.config=(pn_reader_input_config_t){.left_hand=(flags&PN_INPUT_LEFT_HAND)!=0,.no_swipe=(flags&PN_INPUT_NO_SWIPE)!=0,.no_edge_tap=(flags&PN_INPUT_NO_EDGE_TAP)!=0,.no_keys=true};
             pn_reader_action_t action;if(atomic_load(&p->body) && pn_reader_input_feed(&reader,touch.count,touch.x,touch.y,valid,&action)){pn_device_input_event_t e={.kind=PN_DASYNC_ACTION,.at=now,.action=action};send(p,&e,true,action==PN_APP_TOOLS);}
             // 两个空边沿保证抬起识别；持有每100ms保留一次，避免邮箱被10ms采样淹没。/ Two empty edges detect release; held samples are capped at 100 ms to avoid flooding the mailbox.
@@ -98,7 +103,7 @@ static void input_task(void *ctx){
 }
 #endif
 void pn_device_async_start(pn_device_async_t *p,read_pico_handle_t *hardware,pn_reader_present_fn panel,void (*idle)(uint64_t),void (*off)(void)){
-    memset(p,0,sizeof *p);pn_async_init(&p->input);atomic_init(&p->paused,false);atomic_init(&p->pause_request,0);atomic_init(&p->pause_ack,0);atomic_init(&p->body,false);atomic_init(&p->flags,0);p->hardware=hardware;p->panel=panel;p->idle=idle;p->off=off;
+    memset(p,0,sizeof *p);pn_async_init(&p->input);atomic_init(&p->paused,false);atomic_init(&p->pause_request,0);atomic_init(&p->pause_ack,0);atomic_init(&p->body,false);atomic_init(&p->flags,0);atomic_init(&p->first_reader,false);p->hardware=hardware;p->panel=panel;p->idle=idle;p->off=off;
 #ifdef ESP_PLATFORM
     p->display_queue=xQueueCreate(1,sizeof(display_t));p->display_done=xSemaphoreCreateBinary();
     TaskHandle_t display_handle=NULL;
@@ -132,6 +137,20 @@ pn_status_t pn_device_async_feedback(pn_device_async_t *p,const pn_feedback_patc
 pn_status_t pn_device_async_native(pn_device_async_t *p,pn_status_t (*native)(void *),void *ctx){if(!native)return PN_INVALID;return submit(p,NULL,PN_REFRESH_GL16,NULL,native,ctx);}
 void pn_device_async_root_view(pn_device_async_t *p,uint32_t view,bool body,uint8_t flags,bool root){atomic_store(&p->flags,flags);atomic_store(&p->body,body);pn_async_set_view(&p->input,(view&0xffffu)|(p->revision<<16),root);}
 void pn_device_async_view(pn_device_async_t *p,uint32_t view,bool body,uint8_t flags){pn_device_async_root_view(p,view,body,flags,false);}
+pn_status_t pn_device_async_first_begin(pn_device_async_t *p,uint8_t flags){
+    if(!p)return PN_INVALID;
+    if(atomic_exchange(&p->first_reader,true))return PN_BUSY;
+    pn_status_t status=pn_async_first_view(&p->input,15u|(p->revision<<16));
+    if(status==PN_OK){atomic_store(&p->flags,flags);atomic_store(&p->body,true);}
+    else atomic_store(&p->first_reader,false);
+    return status;
+}
+void pn_device_async_first_complete(pn_device_async_t *p,bool success){
+    if(!p)return;
+    bool armed=atomic_load(&p->first_reader);
+    if(armed && !success)pn_device_async_view(p,18,false,(uint8_t)atomic_load(&p->flags));
+    pn_async_first_complete(&p->input,success && armed);atomic_store(&p->first_reader,false);
+}
 pn_status_t pn_device_async_take(pn_device_async_t *p,pn_device_input_event_t *event){pn_async_event_t e;pn_status_t status=pn_async_take(&p->input,&e);if(status==PN_OK){memcpy(event,e.payload,sizeof *event);
     bool root=event->kind==PN_DASYNC_TOUCH && event->valid && event->count==1 && pn_w_navigation_hit(event->x,event->y)>=0 && pn_async_root_current(&p->input,&e);
     if((!e.navigation || !e.urgent) && e.view!=atomic_load(&p->input.view) && !root)return PN_CANCELLED;}return status;}

@@ -115,6 +115,26 @@ int main(void){
  bool opening_back=false;end=ms()+1000;
  while(ms()<end && !opening_back){if(pn_device_async_take(&p,&e)==PN_OK && e.key_event==PN_KEY_SHORT && e.key==PN_KEY_1){assert(e.kind==PN_DASYNC_OPEN_CANCEL);opening_back=true;}else vTaskDelay(1);}assert(opening_back);
  pn_async_block_controls(&p.input,false);
+ // 首屏前的旧按压不能变成翻页；新点按只保留一个，确认不换view或重复交付。 / A pre-first-page press cannot turn; hold only one fresh tap and confirm without a view change or duplicate delivery.
+ atomic_store(&x,600);atomic_store(&y,500);atomic_store(&count,1);vTaskDelay(35);pn_async_block_controls(&p.input,true);pn_device_async_view(&p,18,false,0);
+ assert(pn_device_async_first_begin(&p,0)==PN_OK);vTaskDelay(35);atomic_store(&count,0);vTaskDelay(35);
+ atomic_store(&count,1);vTaskDelay(35);atomic_store(&count,0);vTaskDelay(35);
+ atomic_store(&count,1);vTaskDelay(35);atomic_store(&count,0);vTaskDelay(35);
+ assert(pn_device_async_take(&p,&e)==PN_EMPTY);uint32_t first_view=(uint32_t)atomic_load(&p.input.view);pn_device_async_first_complete(&p,true);pn_device_async_view(&p,15,true,0);assert(atomic_load(&p.input.view)==first_view);
+ assert(pn_device_async_take(&p,&e)==PN_OK && e.kind==PN_DASYNC_ACTION && e.action==PN_APP_NEXT);assert(pn_device_async_take(&p,&e)==PN_EMPTY);
+ // 新手势跨确认时保留识别状态，抬起只提交一次；首屏显示失败不交付暂存翻页。 / A fresh gesture spanning confirmation retains its state and commits once on release; failed first display never releases the hold.
+ pn_async_block_controls(&p.input,true);pn_device_async_view(&p,18,false,0);assert(pn_device_async_first_begin(&p,0)==PN_OK);vTaskDelay(35);atomic_store(&count,1);vTaskDelay(35);pn_device_async_first_complete(&p,true);pn_device_async_view(&p,15,true,0);atomic_store(&count,0);vTaskDelay(35);
+ unsigned first_turns=0;while(pn_device_async_take(&p,&e)!=PN_EMPTY)if(e.kind==PN_DASYNC_ACTION){assert(e.action==PN_APP_NEXT);first_turns++;}assert(first_turns==1);
+ // 右键在确认前或跨确认释放均只翻一页；跨确认的左键仍返回而非上一页。 / Right released before or across confirmation turns once; Left spanning confirmation stays Back instead of Previous.
+ for(unsigned crossing=0;crossing<3;crossing++){
+  pn_async_block_controls(&p.input,true);pn_device_async_view(&p,18,false,0);assert(pn_device_async_first_begin(&p,0)==PN_OK);vTaskDelay(35);
+  atomic_store(&x,crossing==2?80:400);atomic_store(&y,1300);atomic_store(&count,1);vTaskDelay(35);
+  if(crossing){pn_device_async_first_complete(&p,true);}
+  atomic_store(&count,0);vTaskDelay(35);if(!crossing){pn_device_async_first_complete(&p,true);}
+  unsigned actions=0;while(pn_device_async_take(&p,&e)!=PN_EMPTY){if(e.kind==PN_DASYNC_ACTION){assert(crossing<2 && e.action==PN_APP_NEXT);actions++;}if(e.kind==PN_DASYNC_OPEN_CANCEL){assert(crossing==2 && e.key==PN_KEY_1);actions++;}}assert(actions==1);
+ }
+ atomic_store(&x,600);atomic_store(&y,500);
+ pn_async_block_controls(&p.input,true);pn_device_async_view(&p,18,false,0);assert(pn_device_async_first_begin(&p,0)==PN_OK);vTaskDelay(35);atomic_store(&count,1);vTaskDelay(35);atomic_store(&count,0);vTaskDelay(35);pn_device_async_first_complete(&p,false);assert(pn_device_async_take(&p,&e)==PN_EMPTY);
  // 反馈等待期间真实输入继续投递；反馈回执不让这次按压的释放过期，不运行阅读预热。
  // Real input continues during feedback; its receipt preserves this press's release and never runs reader warming.
  while(pn_device_async_take(&p,&e)!=PN_EMPTY){}

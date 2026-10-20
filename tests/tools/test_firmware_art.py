@@ -6,7 +6,7 @@ import tempfile
 import unittest
 import zlib
 sys.path.insert(0,str(pathlib.Path(__file__).resolve().parents[2]/'tools'))
-from build_firmware_art import resize,packed,png4,native_art,packbits
+from build_firmware_art import resize,packed,png4,native_art,packbits,reading_bounds
 
 
 class FirmwareArt(unittest.TestCase):
@@ -19,6 +19,20 @@ class FirmwareArt(unittest.TestCase):
             values=resize(p,4,1,False)
             self.assertEqual(values,bytes([0,5,10,15]));self.assertEqual(p.read_bytes(),data)
             self.assertEqual(packed(values,4,1),b'\x50\xfa');self.assertEqual(packed(values,4,1,True),b'\x05\xaf')
+
+    def test_reading_edge_trim_keeps_central_whitespace(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path=pathlib.Path(directory)/'margin.png'
+            # 只裁连续的整列白边；中间白洞不能被压掉。 / Trim only contiguous white edge columns; retain the white center.
+            def source(values):
+                def chunk(tag,data):return struct.pack('>I',len(data))+tag+data+struct.pack('>I',zlib.crc32(tag+data)&0xffffffff)
+                rows=b''.join(b'\0'+bytes(v*17 for v in values[y*10:(y+1)*10]) for y in range(8))
+                return b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('>IIBBBBB',10,8,8,0,0,0,0))+chunk(b'IDAT',zlib.compress(rows))+chunk(b'IEND',b'')
+            pixels=bytes(15 if x<2 or x>=8 or 4<=x<6 else 10 for y in range(8) for x in range(10))
+            path.write_bytes(source(pixels));self.assertEqual(reading_bounds(path),(2,0,6,8))
+            self.assertEqual(resize(path,6,8,False,(2,0,6,8)),bytes(pixels[y*10+x] for y in range(8) for x in range(2,8)))
+            path.write_bytes(source(bytes([15])*80))
+            with self.assertRaises(ValueError):reading_bounds(path)
 
     def test_native_background_roundtrip(self):
         for values in (bytes([15])*64*48,bytes((x//9+y//7)%16 for y in range(48) for x in range(64))):

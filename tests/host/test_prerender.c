@@ -41,7 +41,9 @@ static void run(const char *path,bool enabled,unsigned mode){
     assert((kind?pn_epub_app_open(&epub,&pool,path,NULL,NULL,44,0):pn_reader_app_open(&txt,&pool,path,NULL,NULL,44,0))==PN_OK);
     assert((kind?pn_epub_app_prerender(&epub,enabled):pn_reader_app_prerender(&txt,enabled))==PN_OK);
     pn_reader_body_layer_t decoration={.paint=layer};assert((kind?pn_epub_app_body_layer(&epub,&decoration):pn_reader_app_body_layer(&txt,&decoration))==PN_OK);
-    assert(step(PN_APP_OPEN,1,present)==PN_OK);foreground=background=0;uint64_t at=2;
+    assert(step(PN_APP_OPEN,1,present)==PN_OK);uint64_t at=2;
+    if(mode==5){pn_style_t paper;assert((kind?pn_epub_app_style_get(&epub,&paper):pn_reader_app_style_get(&txt,&paper))==PN_OK);paper.background=5;assert(style_apply(&paper,at++)==PN_OK);}
+    foreground=background=0;
     for(unsigned i=0;i<8;i++){
         if(mode==2 && i==3){progress_t before=progress();fail_present=true;assert(step(PN_APP_NEXT,at++,present)==PN_IO && same(before,progress()));}
         assert(step(PN_APP_NEXT,at++,present)==PN_OK);
@@ -61,7 +63,7 @@ static void run(const char *path,bool enabled,unsigned mode){
     assert((kind?pn_epub_app_close(&epub,at):pn_reader_app_close(&txt,at))==PN_OK && !pool.used && !pool.live && !pool.caches);
 }
 int main(int argc,char **argv){
-    assert(argc==3);for(kind=0;kind<2;kind++)for(unsigned mode=0;mode<5;mode++){
+    assert(argc==3);for(kind=0;kind<2;kind++)for(unsigned mode=0;mode<6;mode++){
         oracle=tmpfile();assert(oracle);run(argv[1+kind],false,mode);unsigned count=frames;assert(!fflush(oracle) && !fseek(oracle,0,SEEK_SET));run(argv[1+kind],true,mode);assert(frames==count && fgetc(oracle)==EOF && !fclose(oracle));
     }
     puts("Prerender: complete frame memcmp, unchanged scanning pixels/failed positions, cross-chapter mixed sizes, live layers, guides/reflow/reversal, partial/low-budget fallback and clean release");return 0;

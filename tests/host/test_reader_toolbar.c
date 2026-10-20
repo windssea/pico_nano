@@ -4,6 +4,7 @@
 #include "pn_reader_toolbar.h"
 #include "pn_hardware.h"
 #include "pn_widgets.h"
+#include "pn_builtin_art.h"
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
@@ -27,15 +28,24 @@ int main(void){
     for(unsigned i=0;i<PN_HW_FRAME_BYTES;i++)pixels[i]=copy[i]=(uint8_t)(i*19u);
     pn_font_t font={0};pn_text_source_t source=pn_font_builtin_source();assert(pn_font_open(&font,&pool,&source,34)==PN_OK);
     // 状态带仅改顶部留白，变化不触碰正文，字体大小复原。/ Status changes only the reserved top band, preserving body pixels and font size.
-    pn_w_set_clock("12:34");pn_w_set_battery(87);assert(pn_reader_status_render(&font,&frame)==PN_OK && font.pixels==34);
+    pn_w_set_clock("12:34");pn_w_set_battery(87);assert(pn_reader_status_render(&font,&frame,0)==PN_OK && font.pixels==34);
     assert(!memcmp(pixels+PN_READER_TOP*342u,copy+PN_READER_TOP*342u,PN_HW_FRAME_BYTES-PN_READER_TOP*342u));
-    memcpy(copy,pixels,PN_HW_FRAME_BYTES);pn_w_set_clock("12:35");pn_w_set_battery(86);assert(pn_reader_status_render(&font,&frame)==PN_OK);
+    memcpy(copy,pixels,PN_HW_FRAME_BYTES);pn_w_set_clock("12:35");pn_w_set_battery(86);assert(pn_reader_status_render(&font,&frame,0)==PN_OK);
     assert(memcmp(pixels,copy,PN_READER_TOP*342u) && !memcmp(pixels+PN_READER_TOP*342u,copy+PN_READER_TOP*342u,PN_HW_FRAME_BYTES-PN_READER_TOP*342u));
-    pn_w_set_clock(NULL);pn_w_set_battery(-1);assert(pn_reader_status_render(&font,&frame)==PN_OK && font.pixels==34);
+    pn_w_set_clock(NULL);pn_w_set_battery(-1);assert(pn_reader_status_render(&font,&frame,0)==PN_OK && font.pixels==34);
+    // 时钟重画恢复相同背景，来回更新不积墨，带外像素保持。/ Clock redraws restore the same paper without accumulated ink or changes outside the band.
+    for(unsigned paper=1;paper<=8;paper++){
+        assert(pn_reading_background_draw(paper,&frame)==PN_OK);memcpy(copy,pixels,PN_HW_FRAME_BYTES);
+        pn_w_set_clock("12:34");assert(pn_reader_status_render(&font,&frame,paper)==PN_OK);
+        assert(!memcmp(pixels+32*342,copy+32*342,PN_HW_FRAME_BYTES-32*342));
+        for(int y=0;y<32;y++)assert(!memcmp(pixels+y*342,copy+y*342,200));
+        memcpy(copy,pixels,PN_HW_FRAME_BYTES);pn_w_set_clock("12:35");assert(pn_reader_status_render(&font,&frame,paper)==PN_OK);
+        pn_w_set_clock("12:34");assert(pn_reader_status_render(&font,&frame,paper)==PN_OK && !memcmp(copy,pixels,PN_HW_FRAME_BYTES));
+    }
     // 正文的末行必须完整位于正文更新区；进度圆点不能跨入该区。/ The last text line stays in the body update; the progress knob must not cross into it.
     assert(PN_READER_TOP+PN_READER_HEIGHT<=1152);
     for(int basis=0;basis<=10000;basis+=5000){
-        pn_frame_clear(&frame,15);assert(pn_reader_footer_progress(&font,NULL,&frame,"","",basis)==PN_OK);
+        pn_frame_clear(&frame,15);assert(pn_reader_footer_progress(&font,NULL,&frame,"","",basis,0)==PN_OK);
         for(int y=PN_READER_FOOTER_Y;y<1152;y++)for(int x=0;x<684;x++)assert(pn_frame_get(&frame,x,y)==15);
         bool ink=false;for(int y=1152;y<1170;y++)for(int x=0;x<684;x++)ink|=pn_frame_get(&frame,x,y)!=15;assert(ink);
     }

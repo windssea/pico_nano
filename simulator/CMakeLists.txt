@@ -125,3 +125,7 @@ add_test(NAME persistent_index_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURR
 set_tests_properties(async_window PROPERTIES LABELS "reader;ui;async")
 set_tests_properties(brand_window PROPERTIES LABELS "ui")
 endif()
+
+if(PN_SIM_SDL)
+    add_test(NAME reading_background_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_reading_background_window.py $<TARGET_FILE:pn_sim>)
+endif()
