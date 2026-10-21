@@ -122,19 +122,23 @@ pn_status_t pn_ls_view_render(const pn_ls_view_t *v,pn_font_t *font,pn_frame_t *
         case PN_LS_RECOVERY:title="文件处理需要恢复";note="暂不能开始新的接收，请关闭传输后恢复";break;
         default:break;
         }
-        if(s==PN_OK)s=pn_font_size(font,36);
-        if(s==PN_OK)s=label(font,frame,title,300);
-        if(s==PN_OK)s=pn_font_size(font,24);
-        if(s==PN_OK)s=label(font,frame,note,365);
-        if((v->snapshot.phase==PN_LS_RECEIVING || v->snapshot.phase==PN_LS_VERIFYING) && v->active_file<v->snapshot.request.count){
+        bool working=v->snapshot.phase==PN_LS_RECEIVING || v->snapshot.phase==PN_LS_VERIFYING;
+        if(working){
+            int measured=-1;if(v->snapshot.phase==PN_LS_RECEIVING && v->active_file<v->snapshot.request.count)measured=(int)(v->received*100/v->snapshot.request.files[v->active_file].size);
+            if(s==PN_OK)s=pn_w_loading(font,frame,title,note,measured,240);
+        }else{
+            if(s==PN_OK)s=pn_font_size(font,36);
+            if(s==PN_OK)s=label(font,frame,title,300);
+            if(s==PN_OK)s=pn_font_size(font,24);
+            if(s==PN_OK)s=label(font,frame,note,365);
+        }
+        if(working && v->active_file<v->snapshot.request.count){
             const pn_ls_file_t *f=&v->snapshot.request.files[v->active_file];char line[128],received[32],size[32];
-            if(s==PN_OK)s=label(font,frame,f->name,475);
-            uint64_t percent=v->received*100/f->size;if(percent>100)percent=100;
-            pn_w_round_fill(frame,32,510,620,16,8,PN_UI_SURFACE);
-            if(percent)pn_w_round_fill(frame,32,510,(int)(620*percent/100),16,8,PN_UI_INK);
+            if(s==PN_OK)s=pn_font_size(font,24);
+            if(s==PN_OK)s=label(font,frame,f->name,600);
             amount(v->received,received,sizeof received);amount(f->size,size,sizeof size);
-            snprintf(line,sizeof line,"%s / %s · %llu%%",received,size,(unsigned long long)percent);
-            if(s==PN_OK)s=label(font,frame,line,576);
+            snprintf(line,sizeof line,"%s / %s",received,size);
+            if(s==PN_OK)s=label(font,frame,line,650);
         }
         char line[128];snprintf(line,sizeof line,"已安装 %zu 个 · 未安装 %zu 个",v->snapshot.installed,v->snapshot.failed);
         if(s==PN_OK)s=label(font,frame,line,730);

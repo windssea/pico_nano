@@ -14,6 +14,13 @@ static pn_status_t present(void *ctx,const pn_frame_t *frame,pn_refresh_t profil
     return PN_OK;
 }
 static pn_status_t fail_present(void *ctx,const pn_frame_t *frame,pn_refresh_t profile){(void)ctx;(void)frame;(void)profile;return PN_IO;}
+typedef struct {pn_wallpaper_ui_t *ui;pn_status_t failure;bool first;} busy_probe_t;
+// 等待帧期间重复点击无效；取消回执不得开始保存。/ Repeated taps during the busy frame are ignored; a cancelled receipt must never start saving.
+static pn_status_t busy_probe(void *ctx,const pn_frame_t *frame,pn_refresh_t profile){
+    busy_probe_t *p=ctx;
+    if(!p->first){p->first=true;assert(pn_wallpaper_ui_hit(p->ui,600,60)==-1);assert(pn_wallpaper_ui_event(p->ui,PN_WUI_APPLY,present,NULL)==PN_BUSY);return p->failure;}
+    return present(NULL,frame,profile);
+}
 int main(int argc,char **argv){
     assert(argc==4);const char *images=argv[1],*state=argv[2];char path[600],a[600],b[600];snprintf(a,sizeof a,"%s/lock.a",state);snprintf(b,sizeof b,"%s/lock.b",state);
     pn_pool_t pool;assert(!pn_pool_init(&pool,6u*1024u*1024u,NULL,NULL,NULL));
@@ -39,11 +46,15 @@ int main(int argc,char **argv){
     assert(pn_wallpaper_ui_event(&ui,PN_WUI_ROW+1,present,NULL)==PN_OK && ui.screen==PN_WUI_PREVIEW);
     assert(pn_wallpaper_ui_hit(&ui,100,800)==PN_WUI_FIT && pn_wallpaper_ui_hit(&ui,100,855)==-1 && pn_wallpaper_ui_hit(&ui,100,60)==PN_WUI_CANCEL && pn_wallpaper_ui_hit(&ui,600,60)==PN_WUI_APPLY);
     assert(pn_wallpaper_ui_event(&ui,PN_WUI_LEFT,present,NULL)==PN_EMPTY);
+    busy_probe_t cancelled_preview={.ui=&ui,.failure=PN_CANCELLED};assert(pn_wallpaper_ui_event(&ui,PN_WUI_FIT,busy_probe,&cancelled_preview)==PN_CANCELLED && ui.screen==PN_WUI_PREVIEW && ui.presented && pn_wallpaper_ui_hit(&ui,500,900)==-1);
     assert(pn_wallpaper_ui_event(&ui,PN_WUI_FIT,present,NULL)==PN_OK && pn_wallpaper_ui_hit(&ui,500,900)==PN_WUI_RIGHT);
     assert(pn_wallpaper_ui_event(&ui,PN_WUI_RIGHT,present,NULL)==PN_OK && pn_wallpaper_ui_event(&ui,PN_WUI_ROTATE,present,NULL)==PN_OK);
     for(int i=0;i<4;i++)(void)pn_wallpaper_ui_event(&ui,PN_WUI_RIGHT,present,NULL);
     assert(pn_wallpaper_ui_event(&ui,PN_WUI_RIGHT,present,NULL)==PN_EMPTY);
     capture=argv[3];assert(pn_wallpaper_ui_present(&ui,present,NULL)==PN_OK);capture=NULL;
+    for(unsigned i=0;i<2;i++){busy_probe_t probe={.ui=&ui,.failure=i?PN_CANCELLED:PN_IO};
+        assert(pn_wallpaper_ui_event(&ui,PN_WUI_APPLY,busy_probe,&probe)==probe.failure && probe.first && ui.presented && ui.screen==PN_WUI_PREVIEW);
+        assert(pn_wallpaper_ui_current(&ui,&cur) && cur.mode==PN_LOCK_DEFAULT);FILE *unwritten=fopen(a,"rb");assert(!unwritten);}
     assert(pn_wallpaper_ui_event(&ui,PN_WUI_APPLY,present,NULL)==PN_OK && ui.last==PN_OK && ui.screen==PN_WUI_LIST);
     assert(pn_wallpaper_ui_current(&ui,&cur) && cur.mode==PN_LOCK_CUSTOM && cur.transform.fit==PN_WALLPAPER_COVER && cur.transform.shift==PN_WALLPAPER_SHIFT_MAX && cur.transform.rotation==1 && !cur.hint && strstr(cur.source,"b-photo.png") && cur.sequence==1);
     /* 记录可独立读回且位图有内容。/ The record reads back independently with bitmap content. */

@@ -93,6 +93,10 @@ void pn_w_icon(pn_frame_t *frame,pn_icon_t icon,int x,int y,int size,uint8_t sha
         line(&c,0.14f,0.66f,0.14f,0.88f);line(&c,0.14f,0.88f,0.86f,0.88f);line(&c,0.86f,0.88f,0.86f,0.66f);break;
     case PN_ICON_HOME: line(&c,0.10f,0.45f,0.50f,0.12f);line(&c,0.50f,0.12f,0.90f,0.45f);line(&c,0.20f,0.38f,0.20f,0.88f);line(&c,0.20f,0.88f,0.80f,0.88f);line(&c,0.80f,0.88f,0.80f,0.38f);line(&c,0.42f,0.88f,0.42f,0.62f);line(&c,0.42f,0.62f,0.58f,0.62f);line(&c,0.58f,0.62f,0.58f,0.88f);break;
     case PN_ICON_PROGRESS: line(&c,0.08f,0.62f,0.92f,0.62f);dot(&c,0.56f,0.62f,0.12f);line(&c,0.56f,0.12f,0.56f,0.36f);line(&c,0.44f,0.26f,0.56f,0.38f);line(&c,0.56f,0.38f,0.68f,0.26f);break;
+    case PN_ICON_LOADING:
+        line(&c,0.22f,0.12f,0.78f,0.12f);line(&c,0.22f,0.88f,0.78f,0.88f);
+        line(&c,0.28f,0.12f,0.28f,0.28f);line(&c,0.28f,0.28f,0.72f,0.72f);line(&c,0.72f,0.72f,0.72f,0.88f);
+        line(&c,0.72f,0.12f,0.72f,0.28f);line(&c,0.72f,0.28f,0.28f,0.72f);line(&c,0.28f,0.72f,0.28f,0.88f);break;
     default: break;
     }
 }

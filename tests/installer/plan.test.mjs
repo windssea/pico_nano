@@ -385,6 +385,7 @@ test("release picker separates same-version modes, clears destructive choices an
   assert.equal(vm.runInContext("state.release.mode", context), "full");
   assert.equal(document.getElementById("hw-warning").hidden, false);
   assert.equal(document.getElementById("hw-confirmed").hidden, true);
+  assert.match(document.getElementById("release").children[0].textContent, /未登记真机验证/);
   document.getElementById("clear-nvs").checked = true;
   document.getElementById("initialize-storage").checked = true;
   document.getElementById("release").events.change();

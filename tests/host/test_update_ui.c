@@ -7,7 +7,12 @@
 #include <stdlib.h>
 static unsigned frames;
 static pn_status_t present_result=PN_OK;
-static pn_status_t present(void *ctx,const pn_frame_t *f,pn_refresh_t mode){(void)ctx;(void)mode;assert(f->width==684 && f->height==1216);frames++;return present_result;}
+static pn_status_t present(void *ctx,const pn_frame_t *f,pn_refresh_t mode){
+ (void)ctx;(void)mode;assert(f->width==684 && f->height==1216);frames++;
+ // 可选保存真实回执帧，供灰化和等待状态视觉检查。/ Optionally save successful receipt frames for disabled/busy visual review.
+ const char *prefix=getenv("PN_UPDATE_UI_CAPTURE");if(prefix && present_result==PN_OK){char path[1200];snprintf(path,sizeof path,"%s-%02u.pgm",prefix,frames);FILE *out=fopen(path,"wb");assert(out);fprintf(out,"P5\n684 1216\n255\n");for(int y=0;y<1216;y++)for(int x=0;x<684;x++)fputc(pn_frame_get(f,x,y)*17,out);assert(!fclose(out));}
+ return present_result;
+}
 int main(void){
  pn_pool_t pool;assert(!pn_pool_init(&pool,6u*1024u*1024u,NULL,NULL,NULL));pn_settings_ui_t ui={0};
  assert(pn_settings_ui_open(&ui,&pool,NULL,NULL,present,NULL)==PN_OK);

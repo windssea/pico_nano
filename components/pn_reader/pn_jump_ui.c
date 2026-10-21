@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "pn_widgets.h"
+#include "pn_reader_chrome.h"
 
 /* 版式：顶栏0–127；当前位置、目标值、进度条、预览、四个步进键、跳转与取消。
  * Layout: header 0–127; current position, target value, progress bar, preview, four step keys, Jump and Cancel. */
@@ -97,6 +98,8 @@ pn_status_t pn_jump_ui_event(pn_jump_ui_t *u,int command,uint64_t now,pn_reader_
     }
     if(command==PN_JUI_CONFIRM){
         if(u->draft==u->current){u->notice="与现在相同，不会移动";return pn_jump_ui_present(u,present,ctx);}
+        u->presented=false;pn_status_t loading=overlay(u,pn_reader_jump_loading_render,present,ctx);
+        if(loading!=PN_OK){(void)pn_jump_ui_present(u,present,ctx);return loading;}
         pn_status_t status=u->epub?pn_epub_app_jump_percent(u->epub,u->draft*100u,now,present,ctx):pn_reader_app_jump_percent(u->reader,u->draft*100u,now,present,ctx);
         bool confirmed=u->epub?pn_epub_app_last_confirmed(u->epub):pn_reader_app_last_confirmed(u->reader);
         // 已确认显示即关闭；保存失败由阅读层另行提示。/ A confirmed display closes the panel; save failures surface through the reading layer.

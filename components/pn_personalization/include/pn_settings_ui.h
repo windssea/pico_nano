@@ -52,6 +52,7 @@
 typedef struct {
     char message[160]; ///< 端口提供的真实阶段/错误 / Actual phase/error supplied by the port
     char version[32]; ///< 已签名校验的候选版本 / Signature-verified candidate version
+    bool determinate; ///< 已获得真实进度 / Measured progress is available
     unsigned percent; ///< 写入进度，不能代表校验或切槽完成 / Write progress, never verification or boot-commit completion
     bool available,running,install,reboot; ///< 可检查/处理中/可安装/可重启 / Can check, busy, can install, can reboot
 } pn_settings_update_t;

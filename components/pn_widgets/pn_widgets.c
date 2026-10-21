@@ -8,6 +8,7 @@
 #include "pn_brand.h"
 #include "pn_widgets.h"
 #include <string.h>
+#include <stdio.h>
 #define MAX_CHARS 256
 /* 文字来源：主字体、方框占位、备用字体、系统补字。/ Glyph source: primary font, box placeholder, external fallback and system fallback. */
 enum {SRC_PRIMARY=0,SRC_BOX=1,SRC_FALLBACK=2,SRC_SYSTEM=3};
@@ -177,12 +178,27 @@ void pn_w_round_outline(pn_frame_t *frame,int x,int y,int width,int height,int r
 pn_status_t pn_w_button(pn_font_t *font,pn_frame_t *frame,const char *label,int x,int y,int width,int height,unsigned style){
     if(!font || !font->impl || !frame || !label || width<=0 || height<=0)return PN_INVALID;
     bool primary=(style&PN_W_SELECTED) && !(style&(PN_W_PLAIN|PN_W_DISABLED));
-    if(!(style&PN_W_PLAIN) && !primary){pn_w_round_fill(frame,x,y,width,height,PN_UI_RADIUS,PN_UI_SURFACE);pn_w_round_stroke(frame,x,y,width,height,PN_UI_RADIUS,2.0f,PN_UI_STROKE);}
+    if(!(style&PN_W_PLAIN) && !primary){pn_w_round_fill(frame,x,y,width,height,PN_UI_RADIUS,PN_UI_SURFACE);pn_w_round_stroke(frame,x,y,width,height,PN_UI_RADIUS,2.0f,(style&PN_W_DISABLED)?PN_UI_SELECT:PN_UI_STROKE);}
     int baseline=y+height/2+font->pixels*3/8;
-    pn_status_t status=pn_w_text_ex(font,frame,label,x+12,baseline,width-24,PN_ALIGN_CENTER,(style&PN_W_DISABLED)?PN_UI_MUTED:PN_UI_INK,primary);
+    pn_status_t status=pn_w_text_ex(font,frame,label,x+12,baseline,width-24,PN_ALIGN_CENTER,(style&PN_W_DISABLED)?PN_UI_DISABLED:PN_UI_INK,primary);
     if(status==PN_OK && primary)pn_w_invert_round(frame,x,y,width,height,PN_UI_RADIUS);
-    if(status==PN_OK && (style&PN_W_DISABLED)){int w;if(pn_w_text_width(font,label,&w)==PN_OK){if(w>width-24)w=width-24;pn_frame_rect(frame,x+(width-w)/2,y+height/2,w,2,PN_UI_INK);}}
     return status;
+}
+pn_status_t pn_w_loading(pn_font_t *font,pn_frame_t *frame,const char *title,const char *detail,int percent,int y){
+    if(!font || !font->impl || !frame || !frame->pixels || !title || percent < -1 || percent>100)return PN_INVALID;
+    int saved=font->pixels;
+    // 静态沙漏避免墨水屏动画刷屏；不生成虚假百分比。/ A static hourglass avoids animated e-paper refreshes; never invent progress.
+    pn_w_round_fill(frame,32,y,620,300,PN_UI_CARD_RADIUS,PN_UI_SURFACE);
+    pn_w_round_stroke(frame,32,y,620,300,PN_UI_CARD_RADIUS,2,PN_UI_STROKE);
+    pn_w_icon(frame,PN_ICON_LOADING,312,y+28,60,PN_UI_INK);
+    pn_status_t s=pn_font_size(font,34);
+    if(s==PN_OK)s=pn_w_text_ex(font,frame,title,56,y+140,572,PN_ALIGN_CENTER,PN_UI_INK,true);
+    if(s==PN_OK)s=pn_font_size(font,26);
+    if(s==PN_OK && detail){int width=0;s=pn_w_text_width(font,detail,&width);
+        if(s==PN_OK)s=width<=556?pn_w_text_ex(font,frame,detail,64,y+190,556,PN_ALIGN_CENTER,PN_UI_MUTED,false):pn_w_text_lines_ex(font,frame,detail,64,y+190,556,2,36,PN_UI_MUTED,false);}
+    if(percent>=0){pn_w_round_fill(frame,64,y+262,492,8,4,PN_UI_SELECT);if(percent)pn_w_round_fill(frame,64,y+262,492*percent/100,8,4,PN_UI_INK);
+        char value[8];snprintf(value,sizeof value,"%d%%",percent);if(s==PN_OK)s=pn_font_size(font,22);if(s==PN_OK)s=pn_w_text(font,frame,value,560,y+274,68,PN_ALIGN_RIGHT);}
+    pn_status_t restored=pn_font_size(font,saved);return s==PN_OK?restored:s;
 }
 pn_status_t pn_w_tabbar_icons(pn_font_t *font,pn_frame_t *frame,const char *const *labels,const pn_icon_t *icons,unsigned count,unsigned active,unsigned disabled,int y,int height){
     if(!font || !font->impl || !frame || !labels || !count || count>4 || height<=0)return PN_INVALID;
@@ -192,15 +208,14 @@ pn_status_t pn_w_tabbar_icons(pn_font_t *font,pn_frame_t *frame,const char *cons
         int x0=(int)(PN_UI_WIDTH*i/count),x1=(int)(PN_UI_WIDTH*(i+1)/count),cx=(x0+x1)/2;
         if(icons){
             // 所在Tab：浅灰圆角底座＋深色图标＋加粗标签（规范2.2）。/ The current tab: a light rounded base, dark icon and bold label (spec 2.2).
-            bool on=i==active;
+            bool off=(disabled&(1u<<i))!=0,on=i==active && !off;
             if(on)pn_w_round_fill(frame,x0+20,y+10,x1-x0-40,height-18,22,PN_UI_SELECT);
-            pn_w_icon(frame,icons[i],cx-18,y+18,36,PN_UI_INK);
-            if(disabled&(1u<<i))pn_w_line(frame,(float)(cx-22),(float)(y+56),(float)(cx+22),(float)(y+16),3.0f,PN_UI_INK);
-            status=pn_w_text_ex(font,frame,labels[i],x0,y+92,x1-x0,PN_ALIGN_CENTER,on?PN_UI_INK:PN_UI_MUTED,on);
+            pn_w_icon(frame,icons[i],cx-18,y+18,36,off?PN_UI_DISABLED:PN_UI_INK);
+            status=pn_w_text_ex(font,frame,labels[i],x0,y+92,x1-x0,PN_ALIGN_CENTER,off?PN_UI_DISABLED:on?PN_UI_INK:PN_UI_MUTED,on);
         }else{
-            if(i==active)pn_frame_rect(frame,x0+24,y+2,x1-x0-48,6,PN_UI_INK);
-            status=pn_w_text(font,frame,labels[i],x0,y+height/2+font->pixels*3/8+4,x1-x0,PN_ALIGN_CENTER);
-            if(status==PN_OK && (disabled&(1u<<i))){int w;if(pn_w_text_width(font,labels[i],&w)==PN_OK)pn_frame_rect(frame,x0+(x1-x0-w)/2,y+height/2+4,w,2,PN_UI_INK);}
+            bool off=(disabled&(1u<<i))!=0;
+            if(i==active && !off)pn_frame_rect(frame,x0+24,y+2,x1-x0-48,6,PN_UI_INK);
+            status=pn_w_text_ex(font,frame,labels[i],x0,y+height/2+font->pixels*3/8+4,x1-x0,PN_ALIGN_CENTER,off?PN_UI_DISABLED:PN_UI_INK,false);
         }
     }
     return status;

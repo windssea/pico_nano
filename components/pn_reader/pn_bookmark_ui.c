@@ -8,6 +8,7 @@
  */
 #include "pn_bookmark_ui.h"
 #include "pn_widgets.h"
+#include "pn_reader_chrome.h"
 #include <stdio.h>
 #include <string.h>
 static bool live(const pn_bookmark_ui_t *u){return u && ((u->reader && u->reader->impl) || (u->epub && u->epub->impl));}
@@ -211,7 +212,7 @@ pn_status_t pn_bookmark_ui_event(pn_bookmark_ui_t *u,int command,const char *val
         else if(command==PN_BUI_UP || command==PN_BUI_DOWN){int row=u->selected+(command==PN_BUI_UP?-1:1);if(row>=0 && (size_t)row<u->count)u->selected=row;else status=PN_EMPTY;}
         else status=PN_INVALID;
     }else if(u->mode==PN_BUI_ACTIONS && mark){
-        if(command==PN_BUI_JUMP){status=u->epub?pn_epub_app_bookmark_jump(u->epub,mark->id,now,present,ctx):pn_reader_app_bookmark_jump(u->reader,mark->id,now,present,ctx);if(confirmed(u)){u->mode=PN_BUI_CLOSED;return status;}}
+        if(command==PN_BUI_JUMP){status=u->epub?pn_epub_app_overlay(u->epub,pn_reader_jump_loading_render,NULL,present,ctx,PN_REFRESH_GL16):pn_reader_app_overlay(u->reader,pn_reader_jump_loading_render,NULL,present,ctx,PN_REFRESH_GL16);if(status!=PN_OK){(void)pn_bookmark_ui_present(u,present,ctx);return status;}status=u->epub?pn_epub_app_bookmark_jump(u->epub,mark->id,now,present,ctx):pn_reader_app_bookmark_jump(u->reader,mark->id,now,present,ctx);if(confirmed(u)){u->mode=PN_BUI_CLOSED;return status;}}
         else if(command==PN_BUI_EDIT){strcpy(u->draft,mark->label);u->shift=false;u->mode=PN_BUI_RENAME;}
         else if(command==PN_BUI_REMOVE)u->mode=PN_BUI_DELETE;
         else status=PN_INVALID;

@@ -169,7 +169,7 @@ static pn_status_t draw_about(su_t *u){
 static pn_status_t draw_update(su_t *u){
     pn_status_t s=pn_w_header(&u->font,&u->canvas,"< 关于","系统更新",NULL);
     if(s==PN_OK)s=note(u,*u->update.version?u->update.version:"PicoNano 固件更新",280);
-    if(s==PN_OK)s=note(u,*u->update.message?u->update.message:"连接已保存的家庭 WiFi，检查 Gitee 最新版本。",390);
+    if(s==PN_OK){if(u->update.running)s=pn_w_loading(&u->font,&u->canvas,"正在处理更新",u->update.message,u->update.determinate?(int)u->update.percent:-1,350);else s=note(u,*u->update.message?u->update.message:"连接已保存的家庭 WiFi，检查 Gitee 最新版本。",390);}
     const char *label=u->update.running?"正在处理…":u->update.reboot?"重启并完成升级":u->update.install?"安装这个版本":"检查更新";
     if(s==PN_OK)s=pn_font_size(&u->font,32);
     if(s==PN_OK)s=pn_w_button(&u->font,&u->canvas,label,32,700,620,88,!u->update.running && (u->update.available || u->update.install || u->update.reboot)?PN_W_SELECTED:PN_W_DISABLED);
@@ -225,8 +225,9 @@ static pn_status_t draw_wifi_edit(su_t *u){
     if(s==PN_OK && pw && u->test_failed)s=pn_w_button(font,f,"仍然保存（不验证）",PN_UI_MARGIN,FORCE_Y,620,72,0u);
     if(s==PN_OK)s=pn_w_button(font,f,"清空",PN_UI_MARGIN,EDIT_BTN_Y,196,88,*value && !u->testing?0u:PN_W_DISABLED);
     if(s==PN_OK && pw)s=pn_w_button(font,f,u->testing?"取消测试":u->reveal?"隐藏密码":"显示密码",240,EDIT_BTN_Y,196,88,0u);
-    if(s==PN_OK)s=pn_w_button(font,f,u->testing?"连接中…":pw?"测试并保存":"下一步",448,EDIT_BTN_Y,204,88,u->testing?0u:PN_W_SELECTED); // 测试中为普通样式：进行中而非不可用 / Plain style while testing: in progress, not unavailable
-    if(s==PN_OK)s=pn_keyboard_render(&u->kb,font,f,KB_Y);
+    if(s==PN_OK)s=pn_w_button(font,f,u->testing?"连接中…":pw?"测试并保存":"下一步",448,EDIT_BTN_Y,204,88,u->testing?PN_W_DISABLED:PN_W_SELECTED);
+    if(s==PN_OK && u->testing)s=pn_w_loading(font,f,"正在连接网络",u->message,-1,720);
+    if(s==PN_OK && !u->testing)s=pn_keyboard_render(&u->kb,font,f,KB_Y);
     return s;
 }
 static pn_status_t draw_time(su_t *u){
@@ -234,7 +235,8 @@ static pn_status_t draw_time(su_t *u){
     if(s==PN_OK)s=pn_font_size(&u->font,38);
     if(s==PN_OK)s=pn_w_text(&u->font,&u->canvas,*u->time.datetime?u->time.datetime:"时间尚未校准",32,290,620,PN_ALIGN_CENTER);
     if(s==PN_OK)s=note(u,"北京时间 · UTC+8",348);
-    if(s==PN_OK)s=note(u,*u->time.message?u->time.message:u->time.available?"使用已保存的家庭WiFi获取网络时间。完成后由设备时钟继续走时。":"请先在设置的“WiFi 网络”或传书网页中保存家庭WiFi，再联网校时。",450);
+    if(s==PN_OK && u->time.running)s=pn_w_loading(&u->font,&u->canvas,"正在联网校时",u->time.message,-1,380);
+    if(s==PN_OK && !u->time.running)s=note(u,*u->time.message?u->time.message:u->time.available?"使用已保存的家庭WiFi获取网络时间。完成后由设备时钟继续走时。":"请先在设置的“WiFi 网络”或传书网页中保存家庭WiFi，再联网校时。",450);
     if(s==PN_OK)s=pn_font_size(&u->font,32);
     if(s==PN_OK)s=pn_w_button(&u->font,&u->canvas,u->time.running?"结束对时":"立即联网校时",32,700,620,88,u->time.running || u->time.available?PN_W_SELECTED:PN_W_DISABLED);
     if(s==PN_OK)s=note(u,"对时期间可以操作其他设置。网络失败时保留原显示时间，稍后可重试。",862);
@@ -523,10 +525,10 @@ int pn_settings_ui_hit(const pn_settings_ui_t *ui,int x,int y){
     }
     if(pn_w_header_hit(x,y,false)==1)return PN_SETUI_BACK;
     if(u->screen==SCREEN_WIFI_EDIT){
+        if(u->testing)return y>=EDIT_BTN_Y && y<EDIT_BTN_Y+88 && x>=240 && x<436?PN_SETUI_WIFI_TEST_CANCEL:-1;
         int key=pn_keyboard_hit(&u->kb,KB_Y,x,y);
         if(key>=32)return PN_SETUI_CHAR+key;
         if(key!=PN_KB_NONE)return key==PN_KB_SHIFT?PN_SETUI_KB_SHIFT:key==PN_KB_LAYER?PN_SETUI_KB_LAYER:PN_SETUI_KB_DELETE;
-        if(u->testing)return y>=EDIT_BTN_Y && y<EDIT_BTN_Y+88 && x>=240 && x<436?PN_SETUI_WIFI_TEST_CANCEL:-1;
         if(u->password_step && u->test_failed && y>=FORCE_Y && y<FORCE_Y+72 && x>=PN_UI_MARGIN && x<652)return PN_SETUI_WIFI_FORCE;
         if(y>=EDIT_BTN_Y && y<EDIT_BTN_Y+88){if(x>=PN_UI_MARGIN && x<228)return PN_SETUI_WIFI_CLEAR;if(x>=240 && x<436 && u->password_step)return PN_SETUI_WIFI_REVEAL;if(x>=448 && x<652)return PN_SETUI_WIFI_NEXT;}
         return -1;

@@ -27,7 +27,7 @@
 #define THUMB_BYTES (TW*TH/2)
 typedef struct {
     pn_pool_t *pool;pn_media_t *images;char directory[PN_CATALOG_PATH_MAX],cache_dir[PN_WALLPAPER_PATH_MAX];
-    pn_wallpaper_store_t store;bool has_store;
+    pn_wallpaper_store_t store;bool has_store,busy;
     pn_font_t font;uint8_t *canvas_px,*bitmap_px,*small_px,*alpha_px;pn_frame_t canvas,bitmap,small,alpha;
     pn_catalog_page_t page;pn_lock_selection_t saved,draft;pn_bookmark_lock_t bookmark;bool saved_known,bitmap_valid;
     pn_wallpaper_transform_t prepared;char prepared_path[PN_WALLPAPER_PATH_MAX];
@@ -143,12 +143,12 @@ static pn_status_t draw(ui_t *u,pn_wallpaper_screen_t screen){
         for(int i=0;i<3 && s==PN_OK;i++)s=sized_button(u,names[i],32+i*212,MODE_BUTTON_Y,196,80,u->chosen==(i==0?PN_LOCK_CUSTOM:i==1?PN_LOCK_MASK:PN_LOCK_BOOKMARK)?PN_W_SELECTED:0u);
         if(s==PN_OK)s=sized_button(u,"重置为系统默认",32,294,620,56,0u);
         bool images=u->chosen!=PN_LOCK_BOOKMARK;
-        if(s==PN_OK)s=pn_w_section(&u->font,&u->canvas,images?(u->page.count?"选择图片":"暂无图片，请先传入 JPEG/PNG"):"书签自动使用本地阅读数据，无需选择图片",IMAGE_SECTION_Y);
+        if(s==PN_OK)s=pn_w_section(&u->font,&u->canvas,images?(u->page.count?(u->thumb_next<u->page.count && u->thumb_next<IMAGE_ROWS?"选择图片 · 预览准备中":"选择图片"):"暂无图片，请先传入 JPEG/PNG"):"书签自动使用本地阅读数据，无需选择图片",IMAGE_SECTION_Y);
         for(size_t i=0;images && i<u->page.count && i<IMAGE_ROWS && s==PN_OK;i++){
             int x=32+(int)(i%3)*212,y=IMAGE_ROW_Y+(int)(i/3)*IMAGE_PITCH;
             pn_w_round_stroke(&u->canvas,x,y,196,300,10,1,PN_UI_RULE);
             if(u->thumb_valid[i]){for(int row=0;row<TH;row++)memcpy(u->canvas.pixels+(size_t)(y+22+row)*u->canvas.stride+(x+26)/2,u->thumbs[i]+row*TW/2,TW/2);}
-            else pn_w_icon(&u->canvas,PN_ICON_IMAGE,x+72,y+124,52,PN_UI_MUTED);
+            else pn_w_icon(&u->canvas,i>=u->thumb_next?PN_ICON_LOADING:PN_ICON_IMAGE,x+72,y+124,52,PN_UI_MUTED);
         }
         if(s==PN_OK && *u->message)s=line_text(u,u->message,22,1196,PN_ALIGN_LEFT);
         if(s==PN_OK && images)s=sized_button(u,"上一页",32,PAGER_Y,196,80,0u);
@@ -170,6 +170,14 @@ static pn_status_t show(pn_wallpaper_ui_t *ui,pn_wallpaper_present_fn present,vo
     ui_t *u=ui->impl;ui->presented=false;pn_status_t s=draw(u,ui->screen);
     if(s==PN_OK)s=present(ctx,&u->canvas,ui->screen==PN_WUI_PREVIEW?PN_REFRESH_GC16:PN_REFRESH_GL16);
     if(s==PN_OK)ui->presented=true;
+    return s;
+}
+// 先确认等待画面，再开始解码或保存；复用画布，不占用额外整屏内存。/ Confirm the busy frame before decoding or saving; reuse the canvas without another full frame.
+static pn_status_t show_busy(pn_wallpaper_ui_t *ui,pn_wallpaper_present_fn present,void *ctx,const char *title){
+    ui_t *u=ui->impl;u->busy=true;ui->presented=false;pn_frame_clear(&u->canvas,PN_UI_PAPER);
+    pn_status_t s=pn_w_header(&u->font,&u->canvas,"","锁屏设置",NULL);
+    if(s==PN_OK)s=pn_w_loading(&u->font,&u->canvas,title,"请稍候，完成后将自动返回",-1,380);
+    if(s==PN_OK)s=present(ctx,&u->canvas,PN_REFRESH_GL16);
     return s;
 }
 pn_status_t pn_wallpaper_ui_open_cached(pn_wallpaper_ui_t *ui,pn_pool_t *pool,pn_media_t *images_media,const char *directory,
@@ -218,11 +226,12 @@ static pn_status_t apply(pn_wallpaper_ui_t *ui){
 static void begin_preview(ui_t *u,pn_lock_selection_t draft){u->bitmap_valid=false;u->draft=draft;u->message[0]=0;}
 pn_status_t pn_wallpaper_ui_event(pn_wallpaper_ui_t *ui,int command,pn_wallpaper_present_fn present,void *ctx){
     if(!ui || !ui->impl || !ui->active || !present)return PN_INVALID;
-    ui_t *u=ui->impl;pn_status_t status=PN_OK;bool rebuild=false;
+    ui_t *u=ui->impl;if(u->busy)return PN_BUSY;pn_status_t status=PN_OK;bool rebuild=false;
+    pn_lock_selection_t old_draft=u->draft;bool old_bitmap_valid=u->bitmap_valid;pn_lock_mode_t old_chosen=u->chosen;
     if(ui->screen==PN_WUI_LIST){
         u->message[0]=0;
         if(command==PN_WUI_BACK){ui->active=false;return PN_OK;}
-        else if(command==PN_WUI_DEFAULT){thumbnail_close(u);begin_preview(u,(pn_lock_selection_t){.mode=PN_LOCK_DEFAULT});status=apply(ui);ui->last=status;if(status==PN_OK)u->chosen=PN_LOCK_CUSTOM;}
+        else if(command==PN_WUI_DEFAULT){thumbnail_close(u);begin_preview(u,(pn_lock_selection_t){.mode=PN_LOCK_DEFAULT});status=show_busy(ui,present,ctx,"正在应用锁屏");if(status==PN_OK)status=apply(ui);ui->last=status;if(status==PN_OK)u->chosen=PN_LOCK_CUSTOM;}
         else if(command==PN_WUI_WALLPAPER || command==PN_WUI_MASK){u->chosen=command==PN_WUI_MASK?PN_LOCK_MASK:PN_LOCK_CUSTOM;}
         else if(command==PN_WUI_BOOKMARK){u->chosen=PN_LOCK_BOOKMARK;thumbnail_close(u);begin_preview(u,(pn_lock_selection_t){.mode=PN_LOCK_BOOKMARK,.hint=false});rebuild=true;}
         else if(u->chosen!=PN_LOCK_BOOKMARK && command>=PN_WUI_ROW && command<PN_WUI_ROW+(int)u->page.count && command<PN_WUI_ROW+IMAGE_ROWS){thumbnail_close(u);const pn_catalog_item_t *item=&u->page.items[command-PN_WUI_ROW];
@@ -237,7 +246,7 @@ pn_status_t pn_wallpaper_ui_event(pn_wallpaper_ui_t *ui,int command,pn_wallpaper
     }else{
         bool custom=u->draft.mode==PN_LOCK_CUSTOM || u->draft.mode==PN_LOCK_MASK,cover=custom && u->draft.transform.fit==PN_WALLPAPER_COVER;
         if(command==PN_WUI_CANCEL){ui->screen=PN_WUI_LIST;u->message[0]=0;}
-        else if(command==PN_WUI_APPLY){status=apply(ui);ui->last=status;}
+        else if(command==PN_WUI_APPLY){status=show_busy(ui,present,ctx,"正在应用锁屏");if(status==PN_OK)status=apply(ui);ui->last=status;}
         else if(command==PN_WUI_FIT && custom){u->draft.transform.fit=cover?PN_WALLPAPER_CONTAIN:PN_WALLPAPER_COVER;u->draft.transform.shift=0;rebuild=true;}
         else if(command==PN_WUI_ROTATE && custom){u->draft.transform.rotation=(uint8_t)((u->draft.transform.rotation+1)&3);rebuild=true;}
         else if((command==PN_WUI_LEFT || command==PN_WUI_RIGHT) && cover){int shift=u->draft.transform.shift+(command==PN_WUI_LEFT?-1:1);
@@ -245,10 +254,13 @@ pn_status_t pn_wallpaper_ui_event(pn_wallpaper_ui_t *ui,int command,pn_wallpaper
             u->draft.transform.shift=(int8_t)shift;rebuild=true;}
         else return PN_EMPTY;
     }
-    if(rebuild){status=build_preview(u);
+    if(rebuild){status=show_busy(ui,present,ctx,"正在生成预览");
+        // 提示未确认时恢复草稿，不能把旧像素与新裁切参数提交。/ Restore drafts after an unconfirmed notice; never commit old pixels with new crop parameters.
+        if(status!=PN_OK){u->draft=old_draft;u->bitmap_valid=old_bitmap_valid;u->chosen=old_chosen;u->busy=false;snprintf(u->message,sizeof u->message,"显示未完成，请重试");(void)show(ui,present,ctx);return status;}
+        status=build_preview(u);
         if(status==PN_OK){ui->screen=PN_WUI_PREVIEW;}
         else{ui->screen=PN_WUI_LIST;snprintf(u->message,sizeof u->message,status==PN_NO_MEMORY?"图片过大，内存不足":status==PN_UNSUPPORTED?"不是可用的JPEG/PNG":"图片无法读取（%d）",(int)status);}}
-    pn_status_t shown=show(ui,present,ctx);return status==PN_OK?shown:status;
+    u->busy=false;pn_status_t shown=show(ui,present,ctx);return status==PN_OK?shown:status;
 }
 bool pn_wallpaper_ui_pending(const pn_wallpaper_ui_t *ui){
     const ui_t *u=ui?ui->impl:NULL;
@@ -291,7 +303,7 @@ pn_status_t pn_wallpaper_ui_tick(pn_wallpaper_ui_t *ui,pn_wallpaper_present_fn p
 }
 pn_status_t pn_wallpaper_ui_present(pn_wallpaper_ui_t *ui,pn_wallpaper_present_fn present,void *ctx){if(!ui || !ui->impl || !present)return PN_INVALID;return show(ui,present,ctx);}
 int pn_wallpaper_ui_hit(const pn_wallpaper_ui_t *ui,int x,int y){
-    if(!ui || !ui->impl || x<0 || x>=W)return -1;
+    if(!ui || !ui->impl || ((const ui_t *)ui->impl)->busy || x<0 || x>=W)return -1;
     const ui_t *u=ui->impl;
     int header=pn_w_header_hit(x,y,ui->screen==PN_WUI_PREVIEW);
     if(ui->screen==PN_WUI_LIST){

@@ -2,27 +2,9 @@
 
 基于 ESP32-S3 的独立墨水屏阅读器固件。核心、解析、字体、排版与界面在设备和 PC 模拟器中共用源码，固定目标为 RDP-G01-W/E0470A01、684×1216、16 灰阶、8MiB PSRAM、16MiB Flash。对外品牌在所有语言中统一为 **PicoNano**。
 
-当前版本为 **1.0.2 正式版**，修复WiFi退出后USB失联、TLS内存分配失败及更新结束后界面停留旧状态，提供签名OTA附件。正式镜像已完成设备远程下载、非活动槽写入、完整读回与重启确认。阅读保持完整书籍/字体校验、原排版与16灰阶；内置背景、默认封面及旧背景ID兼容沿用1.0.1。安装过程中进度刷新与Flash写入争用的问题列入后续修正，详见[开发指南](docs/DEVELOPMENT_PLAN.md)。
+当前版本为 **1.0.3 正式版**，统一禁用按钮灰化和长操作等待提示。壁纸预览/应用、字体、排版与跳转、联网和传书共用静态沙漏卡片；普通翻页保持原快速路径。OTA安装先显示提示，Flash写入及取消收口期间暂停推屏，任务完整退出后显示结果。阅读保持完整书籍/字体校验、原排版与16灰阶；内置资源和旧背景ID兼容沿用1.0.1。
 
-提供保留数据升级包、完整安装包与离线网页安装器，精确源码以包内 `manifest.json` 的 `source_commit` 为准。产品镜像关闭测试控制台；开发设备继续保留独立诊断固件。**1.0.2 正式版已完成设备OTA与启动实测**，验证登记绑定本版源码和应用摘要。
-
-从[文档入口](docs/README.md)开始：
-
-国内下载安装包请访问 [Gitee 发行版](https://gitee.com/windssea/pico_nano/releases)。推荐离线网页安装器：解压后运行 `py serve.py`，用电脑 Chrome/Edge 打开 `http://localhost:8765/`；刷机时无需访问 GitHub。GitHub 与 Gitee 使用同一份发布包，详情见[安装与发布](docs/INSTALLATION.md)。当前版本提供电脑USB安装包和经过签名的设备WiFi OTA附件；请先核对兼容引导及设备时间，见安装文档。
-
-| 目的 | 现行文档 |
-| --- | --- |
-| 查硬件、资源上限与安全约束 | [硬件规格](docs/HARDWARE.md) |
-| 理解最新实现及重点技术 | [架构与实现](docs/ARCHITECTURE.md) |
-| 确定下一步问题、需求和技术方案 | [开发指南](docs/DEVELOPMENT_PLAN.md) |
-| 开发、模拟、测试与性能测量 | [构建与运行](docs/BUILDING.md) |
-| 网页安装、异机烧录与发布规则 | [安装与发布](docs/INSTALLATION.md) |
-| 查询跨通道资源目录契约 | [存储卡目录](docs/SD_CARD_LAYOUT.md) |
-| 查近期变化或旧专题 | [变更记录](docs/CHANGELOG.md)、[历史归档](docs/archive/2026-10-14/README.md) |
-
-最小开发入口为 `python tools/dev.py docs`、`python tools/dev.py host`；界面开发使用可见模拟器 `python tools/dev.py sdl-run`，修改源码后重启窗口。Windows 的真实 Python 路径、Docker、两套 SDKCONFIG 和验证分层见构建文档。
-
-参考仓库只读，复用源码身份及许可保留。自身代码见 [LICENSE](LICENSE)，第三方来源以 [LICENSES](LICENSES) 中的固定清单及组件许可证为准。VCOM 只从 PMU 读取，无有效值不推屏；默认恢复不格式化、不擦 NVS，USB 与应用不得并行访问 TF。
+提供保留数据升级包、完整安装包、离线网页安装器与签名OTA附件，精确源码以包内`manifest.json`的`source_commit`为准。产品镜像关闭测试控制台；设备继续保留原诊断固件。**1.0.3完成软件回归与构建核验，本批未刷机或执行设备OTA复验**；1.0.2的成功远程OTA记录保留在[安装文档](docs/INSTALLATION.md)，不继承为1.0.3真机结论。
 
 ## 鸣谢
 

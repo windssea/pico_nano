@@ -6,6 +6,7 @@
  */
 #include "pn_toc_ui.h"
 #include "pn_widgets.h"
+#include "pn_reader_chrome.h"
 #include <string.h>
 #include <stdio.h>
 #include <limits.h>
@@ -160,6 +161,8 @@ pn_status_t pn_toc_ui_event(pn_toc_ui_t *u,int command,uint64_t now,pn_reader_pr
     size_t index=motion?(size_t)(command-PN_TOC_UI_ROW):u->start+(size_t)(command-PN_TOC_UI_ROW);unsigned row=(unsigned)(index-u->start);bool target;
     if(motion){pn_toc_entry_t entry;pn_status_t status=pn_epub_app_toc_get(u->reader,index,&entry);if(status!=PN_OK)return status;target=entry.target;motion->selected=index;u->selected=row<u->count?row:0;}else{u->selected=row;target=u->rows[row].target;}
     if(!target){u->notice="此项为目录分组";pn_status_t painted=pn_toc_ui_present(u,present,ctx);return painted==PN_OK?PN_EMPTY:painted;}
+    u->presented=false;pn_status_t loading=pn_epub_app_overlay(u->reader,pn_reader_jump_loading_render,NULL,present,ctx,PN_REFRESH_GL16);
+    if(loading!=PN_OK){(void)pn_toc_ui_present(u,present,ctx);return loading;}
     pn_status_t status=pn_epub_app_toc_jump(u->reader,index,now,present,ctx);
     if(pn_epub_app_last_confirmed(u->reader)){motion_dispose(u);u->active=false;return status;}
     u->notice="跳转未完成，位置保留";pn_status_t painted=pn_toc_ui_present(u,present,ctx);return painted==PN_OK?status:painted;

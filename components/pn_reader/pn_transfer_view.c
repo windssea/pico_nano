@@ -55,10 +55,11 @@ pn_status_t pn_transfer_view_render(const pn_transfer_view_t *v,pn_font_t *font,
   const char *labels[]={"热点名称",v->ssid,"热点口令",v->password,"网页地址",v->address};
   for(unsigned i=0;i<6 && s==PN_OK;i++)s=text(font,frame,labels[i],i%2?220:32,636+(int)(i/2)*80);
   if(s==PN_OK)s=text(font,frame,v->busy?"正在接收或校验文件":"已连接，等待网页发送",32,1010);
- }else if(v->phase==PN_TVIEW_STARTING){if(s==PN_OK)s=text(font,frame,v->station?"正在连接已保存网络":"正在开启传输",32,330);if(s==PN_OK)s=text(font,frame,"请稍候，阅读位置已保存",32,420);}
- else if(v->phase==PN_TVIEW_STOPPING){if(s==PN_OK)s=text(font,frame,"正在关闭传输",32,330);if(s==PN_OK)s=text(font,frame,"等待文件处理结束，请勿拔卡",32,420);}
+ }else if(v->phase==PN_TVIEW_STARTING){if(s==PN_OK)s=pn_w_loading(font,frame,v->station?"正在连接网络":"正在开启传输","请稍候，阅读位置已保存",-1,300);}
+ else if(v->phase==PN_TVIEW_STOPPING){if(s==PN_OK)s=pn_w_loading(font,frame,"正在关闭传输","等待文件处理结束，请勿拔卡",-1,300);}
  else{if(s==PN_OK)s=text(font,frame,v->station?"无法连接已保存网络，可改用热点传书":"传输未能继续",32,330);if(s==PN_OK)s=text(font,frame,v->released?"资源已关闭，可返回阅读":"尚未归还存储，请重试关闭",32,420);
   const char *const stages[]={"存储检查","文件任务","无线启动","网络连接","接收服务"};char detail[128];snprintf(detail,sizeof detail,"%s：%d / 0x%X",stages[v->failed_stage<5?v->failed_stage:0],v->error,(unsigned)v->native_error);if(s==PN_OK)s=text(font,frame,detail,32,510);}
+ if(s==PN_OK && v->phase==PN_TVIEW_READY && v->busy)s=pn_w_loading(font,frame,"正在接收或校验文件","请等待保存完成，勿拔出存储卡",-1,724);
  if(s==PN_OK && v->phase==PN_TVIEW_READY){int pixels=font->pixels;s=pn_font_size(font,24);if(s==PN_OK)s=text(font,frame,v->localsend?"LocalSend：自动接收书籍和字体":"LocalSend 发现暂不可用，可用网页传书",32,1048);(void)pn_font_size(font,pixels);}
  if(s==PN_OK && v->phase!=PN_TVIEW_STOPPING)s=button(font,frame,v->phase==PN_TVIEW_FAILED?(v->released?"返回阅读":"重试关闭"):"停止传输并返回",1070);
  return s;

@@ -9,6 +9,12 @@
 static int presents;
 static uint64_t list_pixels; ///< 最近列表像素摘要 / Last list pixel checksum
 static pn_status_t present(void *ctx,const pn_frame_t *frame,pn_refresh_t profile){(void)ctx;(void)frame;(void)profile;presents++;return PN_OK;}
+typedef struct {pn_font_manage_t *ui;bool first;} busy_probe_t;
+// 取消等待回执不进入详情，也不改变全局字体。/ Cancelling the busy receipt must not enter details or change the global font.
+static pn_status_t busy_probe(void *ctx,const pn_frame_t *frame,pn_refresh_t profile){
+    busy_probe_t *p=ctx;if(!p->first){p->first=true;assert(pn_font_manage_hit(p->ui,100,480)==-1);assert(pn_font_manage_event(p->ui,PN_FMU_ROW,present,NULL)==PN_BUSY);return PN_CANCELLED;}
+    return present(NULL,frame,profile);
+}
 static pn_status_t checksum(void *ctx,const pn_frame_t *frame,pn_refresh_t profile){(void)ctx;(void)profile;list_pixels=0;for(int y=0;y<1216;y++)for(int x=0;x<684;x++)list_pixels=list_pixels*33+pn_frame_get(frame,x,y);return PN_OK;}
 static const char *capture;
 static pn_status_t save_frame(void *ctx,const pn_frame_t *frame,pn_refresh_t profile){
@@ -43,6 +49,7 @@ int main(int argc,char **argv){
     /* 坏字体留在列表。/ A bad font stays on the list. */
     assert(pn_font_manage_event(&ui,PN_FMU_ROW+2,present,NULL)!=PN_OK && ui.screen==PN_FMU_LIST);
     /* 详情→设为全局默认→重复无操作。/ Detail → set global default → repeat is a no-op. */
+    busy_probe_t busy_check={.ui=&ui};assert(pn_font_manage_event(&ui,PN_FMU_ROW,busy_probe,&busy_check)==PN_CANCELLED && busy_check.first && ui.presented && ui.screen==PN_FMU_LIST && !global(&internal,state,&pool,&g));
     assert(pn_font_manage_event(&ui,PN_FMU_ROW,save_frame,NULL)==PN_OK && ui.screen==PN_FMU_DETAIL);
     assert(pn_font_manage_hit(&ui,100,1000)==PN_FMU_DEFAULT && pn_font_manage_hit(&ui,500,1000)==PN_FMU_DELETE && pn_font_manage_hit(&ui,300,1100)==PN_FMU_SYSTEM && pn_font_manage_hit(&ui,500,1100)==PN_FMU_BACK);
     /* 设为系统字体→记录指向该文件；再按恢复默认（未选择）。/ Set as system font → the record names this file; pressing again restores the default (unset). */

@@ -9,6 +9,8 @@
 #define pn_device_time_state boot_time_state
 #define pn_device_time_close boot_time_close
 #define pn_device_time_commit boot_time_commit
+#define pn_device_ota_state boot_ota_state
+#include "device_ota.h"
 #include "test_device_boot.c"
 #undef main
 #undef pn_device_transfer_state
@@ -18,6 +20,10 @@
 #undef pn_device_time_state
 #undef pn_device_time_close
 #undef pn_device_time_commit
+#undef pn_device_ota_state
+static pn_device_ota_state_t ota_result;
+static pn_status_t ota_state_result=PN_OK;
+pn_status_t pn_device_ota_state(const pn_device_ota_t *o,pn_device_ota_state_t *s){assert(o->impl);*s=ota_result;return ota_state_result;}
 static pn_device_time_state_t time_result;
 static pn_status_t commit_result=PN_IO;
 static unsigned time_commits;
@@ -74,6 +80,15 @@ int main(void){
     retry_settings_ui(1000,&retry_at);assert(presents==retry_frames && !retry_at);pn_cancel_leave(&cancelled_scope);
     retry_settings_ui(1000,&retry_at);assert(settings_ui.presented && retry_at==1000);retry_frames=presents;
     retry_settings_ui(2000,&retry_at);assert(presents==retry_frames && retry_at==1000);
+    // 写Flash与取消收口期间，主动更新和空闲补画都不能推屏；资源归还后恢复。/ Neither explicit updates nor idle retries may paint during flash writes or cancellation cleanup; resume after release.
+    assert(pn_settings_ui_event(&settings_ui,PN_SETUI_ABOUT,present,NULL)==PN_OK && pn_settings_ui_event(&settings_ui,PN_SETUI_UPDATE,present,NULL)==PN_OK);
+    pn_settings_update_t installing={.running=true};pn_settings_ui_set_update(&settings_ui,&installing);assert(pn_settings_ui_present(&settings_ui,present,NULL)==PN_OK);retry_frames=presents;
+    ota.impl=&ota_result;ota_result=(pn_device_ota_state_t){.phase=PN_DEVICE_OTA_DOWNLOADING,.total=100,.bytes=30};settings_ui.presented=false;
+    assert(ota_display_frozen());update_ota_ui(true);retry_settings_ui(3000,&retry_at);assert(presents==retry_frames && !settings_ui.presented);
+    ota_result.phase=PN_DEVICE_OTA_STOPPING;update_ota_ui(true);retry_settings_ui(4000,&retry_at);assert(presents==retry_frames);
+    ota_state_result=PN_IO;assert(ota_display_frozen());ota_state_result=PN_OK;
+    ota_result.radio_released=true;assert(!ota_display_frozen());update_ota_ui(false);retry_settings_ui(5000,&retry_at);assert(settings_ui.presented && presents==retry_frames+1);ota.impl=NULL;
+    assert(pn_settings_ui_event(&settings_ui,PN_SETUI_BACK,present,NULL)==PN_OK && pn_settings_ui_event(&settings_ui,PN_SETUI_BACK,present,NULL)==PN_OK);
     assert(root_navigation_hit(80,1150)==PN_SETUI_HOME && root_navigation_hit(100,700)==-1);
     root_merge_checks();
     assert(pn_settings_ui_event(&settings_ui,PN_SETUI_REFRESH,present,NULL)==PN_OK && pn_settings_ui_screen(&settings_ui)==2);

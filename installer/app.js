@@ -75,7 +75,7 @@ function selectMode(preferredCommit) {
   for (const release of releases) {
     const option = document.createElement("option");
     option.value = release.version;
-    option.textContent = `${release.version}${release.verifiedOnHardware === true ? "（正式版·已真机验证）" : "（未经真机验证）"}`;
+    option.textContent = `${release.version}${release.verifiedOnHardware === true ? "（正式版·已真机验证）" : "（未登记真机验证）"}`;
     select.append(option);
   }
   state.release = releases.find((r) => r.commit === preferredCommit) || releases[0];

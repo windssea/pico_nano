@@ -30,6 +30,7 @@ typedef struct {
     pn_font_preferences_t system;bool system_known,system_set; ///< 系统（界面）字体选择 / System (UI) font choice
     pn_media_lease_t guard;pn_font_asset_t asset;pn_font_reference_t reference;pn_font_info_t info;unsigned checked,missing;
     char selected[PN_CATALOG_PATH_MAX],name[PN_CATALOG_NAME_MAX],message[128];
+    bool busy; ///< 等待画面期间屏蔽重复输入 / Block repeated input while busy
     bool system_changed; ///< 本次打开改过系统字体，关闭后调用方重载 / The system font changed during this session; callers reload after closing
     uint8_t samples[PN_CATALOG_PAGE_MAX][46*46/2]; ///< 有界原生字体小样槽，约8KiB / Bounded native font tile slots, about 8 KiB
     bool sample_ready[PN_CATALOG_PAGE_MAX]; ///< 已生成可显示样例 / Generated displayable samples
@@ -233,7 +234,7 @@ static pn_status_t draw_screen(fm_t *f,pn_font_manage_screen_t screen){
         if(s==PN_OK){s=pn_font_size(&f->ui,*f->message?28:34);if(s==PN_OK)s=pn_w_text(&f->ui,&f->canvas,*f->message?f->message:pn_brand_label(f->name),PN_UI_MARGIN,DETAIL_NAME_Y,620,PN_ALIGN_LEFT);pn_status_t again=pn_font_size(&f->ui,original);if(s==PN_OK)s=again;}
         if(s==PN_OK){s=pn_font_size(&f->ui,30);
             if(s==PN_OK)s=pn_w_button(&f->ui,&f->canvas,is_global(f,f->selected)?"恢复固件阅读字体":"设为阅读字体",32,DETAIL_BUTTON_Y,300,96,0u);
-            if(s==PN_OK)s=pn_w_button(&f->ui,&f->canvas,protected_font(f)?"保留字库":"删除",352,DETAIL_BUTTON_Y,300,96,0u);
+            if(s==PN_OK)s=pn_w_button(&f->ui,&f->canvas,protected_font(f)?"保留字库":"删除",352,DETAIL_BUTTON_Y,300,96,protected_font(f)?PN_W_DISABLED:0u);
             if(s==PN_OK){s=pn_font_size(&f->ui,30);
                 if(s==PN_OK)s=pn_w_button(&f->ui,&f->canvas,is_system(f,f->selected)?"恢复固件系统字体":"设为系统字体",32,DETAIL_BACK_Y,300,96,0u);
                 if(s==PN_OK)s=pn_w_button(&f->ui,&f->canvas,"返回",352,DETAIL_BACK_Y,300,96,0u);}
@@ -341,16 +342,29 @@ static pn_status_t remove_font(pn_font_manage_t *ui){
     else snprintf(f->message,sizeof f->message,"删除失败（%d），文件保留",(int)status);
     return status;
 }
+// 显示回执成功后才做整文件验证或写入。/ Require a display receipt before full-file validation or writes.
+static pn_status_t show_busy(pn_font_manage_t *ui,pn_font_manage_present_fn present,void *ctx,const char *title){
+    fm_t *f=ui->impl;f->busy=true;ui->presented=false;pn_frame_clear(&f->canvas,PN_UI_PAPER);
+    pn_status_t s=pn_w_header(&f->ui,&f->canvas,"","字体管理",NULL);
+    if(s==PN_OK)s=pn_w_loading(&f->ui,&f->canvas,title,"请稍候，完成后将自动返回",-1,380);
+    if(s==PN_OK)s=present(ctx,&f->canvas,PN_REFRESH_GL16);
+    return s;
+}
 pn_status_t pn_font_manage_event(pn_font_manage_t *ui,int command,pn_font_manage_present_fn present,void *ctx){
     if(!ui || !ui->impl || !ui->active || !present)return PN_INVALID;
-    fm_t *f=ui->impl;pn_status_t status=pn_list_motion_abort(&f->motion);if(status!=PN_OK)return status;
+    fm_t *f=ui->impl;if(f->busy)return PN_BUSY;pn_status_t status=pn_list_motion_abort(&f->motion);if(status!=PN_OK)return status;
+    bool inspect_font=ui->screen==PN_FMU_LIST && command>=PN_FMU_ROW && command<PN_FMU_ROW+(int)(f->motion.impl?f->page.total:f->page.count);
+    bool save_font=ui->screen==PN_FMU_DETAIL && (command==PN_FMU_DEFAULT || command==PN_FMU_SYSTEM);
+    bool delete_font=ui->screen==PN_FMU_CONFIRMING && command==PN_FMU_CONFIRM;
+    if(inspect_font || save_font || delete_font){status=show_busy(ui,present,ctx,inspect_font?"正在校验字体":delete_font?"正在删除字体":"正在保存字体设置");
+        if(status!=PN_OK){f->busy=false;(void)show(ui,present,ctx);return status;}}
     if(ui->screen==PN_FMU_LIST){
         f->message[0]=0;
         if(command==PN_FMU_BACK){ui->active=false;return PN_OK;}
         if(command==PN_FMU_RESET_SYSTEM || command==PN_FMU_RESET_READING){bool system=command==PN_FMU_RESET_SYSTEM;
             if(!(system?f->system_set && f->system.primary.kind==PN_FONT_FILE:f->global_set && f->global.primary.kind==PN_FONT_FILE))return PN_EMPTY;
             status=set_choice(f,system,true);ui->last=status;ui->system_changed|=f->system_changed;if(f->rows)memset(f->rows,0,ROW_CACHE_SLOTS*sizeof *f->rows);
-            pn_status_t shown=show(ui,present,ctx);return status==PN_OK?shown:status;}
+            f->busy=false;pn_status_t shown=show(ui,present,ctx);return status==PN_OK?shown:status;}
         if(command>=PN_FMU_ROW && command<PN_FMU_ROW+(int)(f->motion.impl?f->page.total:f->page.count)){
             if(f->motion.impl){pn_catalog_item_t *item=pn_alloc_tagged(f->pool,PN_MEM_UI,sizeof *item);if(!item)status=PN_NO_MEMORY;else{status=item_at(f,(size_t)(command-PN_FMU_ROW),item);if(status==PN_OK)status=inspect(f,item);pn_free(item);}}
             else status=inspect(f,&f->page.items[command-PN_FMU_ROW]);
@@ -371,11 +385,11 @@ pn_status_t pn_font_manage_event(pn_font_manage_t *ui,int command,pn_font_manage
         else if(command==PN_FMU_CONFIRM){status=remove_font(ui);ui->last=status;if(f->rows)memset(f->rows,0,ROW_CACHE_SLOTS*sizeof *f->rows);memset(f->neighbors,0,sizeof f->neighbors);if(f->motion.impl)(void)pn_list_motion_extent(&f->motion,(int)f->page.total*PN_W_CARD_ROW_H);}
         else return PN_EMPTY;
     }
-    pn_status_t shown=show(ui,present,ctx);return status==PN_OK?shown:status;
+    f->busy=false;pn_status_t shown=show(ui,present,ctx);return status==PN_OK?shown:status;
 }
 pn_status_t pn_font_manage_present(pn_font_manage_t *ui,pn_font_manage_present_fn present,void *ctx){if(!ui || !ui->impl || !present)return PN_INVALID;return show(ui,present,ctx);}
 int pn_font_manage_hit(const pn_font_manage_t *ui,int x,int y){
-    if(!ui || !ui->impl || x<0 || x>=W)return -1;
+    if(!ui || !ui->impl || ((const fm_t *)ui->impl)->busy || x<0 || x>=W)return -1;
     const fm_t *f=ui->impl;
     if(ui->screen==PN_FMU_LIST){
         if(pn_w_header_hit(x,y,false)==1)return PN_FMU_BACK;

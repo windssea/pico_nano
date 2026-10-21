@@ -13,6 +13,8 @@
 #define PN_READER_FOOTER_Y 1144 ///< 页脚上沿y / Footer top y
 #define PN_READER_FOOTER_BAND_Y 1152 ///< 覆盖完整正文的32像素对齐刷新边界 / 32-pixel-aligned refresh boundary covering the complete text area
 #define PN_TOOLBAR_Y 896 ///< 工具栏上沿y，高度320 / Toolbar top y, height 320
+/// 目录、进度与书签跳转共用的纯绘制等待回调；ctx/metadata不使用。/ Paint-only busy callback shared by TOC, progress and bookmark jumps; ctx/metadata are unused.
+pn_status_t pn_reader_jump_loading_render(void *ctx,pn_font_t *font,pn_font_t *metadata,pn_frame_t *frame);
 /// 工具栏入口，值同时是命中返回值。/ Toolbar entries; the values are also the hit-test results.
 typedef enum {
     PN_TOOL_TOC=40, ///< 目录 / Table of contents

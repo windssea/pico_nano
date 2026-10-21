@@ -1569,14 +1569,18 @@ static void begin_time_sync(void){
     pn_network_wipe(&credentials);volatile unsigned char *bytes=(volatile unsigned char *)&config;for(size_t i=0;i<sizeof config;i++)bytes[i]=0;
     snprintf(time_notice,sizeof time_notice,"%s",status==PN_OK?"正在连接家庭WiFi…":status==PN_EMPTY?"请先保存家庭WiFi":"对时未开始，稍后重试");time_poll_at=0;update_time_ui(true);
 }
+/// Flash任务及无线尚未收口时冻结推屏，避免与EPD争用；取消也必须等退出。/ Freeze presentation until flash work and radio cleanup finish, including cancellation, to avoid EPD contention.
+static bool ota_display_frozen(void){
+    pn_device_ota_state_t state={0};return ota.impl && (pn_device_ota_state(&ota,&state)!=PN_OK || (state.total && !state.radio_released));
+}
 /// 升级快照只供同源UI绘制；长网络和Flash操作不进入render。 / Update snapshots only feed the shared UI; render never performs network/flash work.
 static void update_ota_ui(bool paint){
     pn_device_ota_state_t state={0};if(ota.impl)(void)pn_device_ota_state(&ota,&state);
     pn_settings_update_t value={.available=pn_device_ota_configured() && *saved_network && clock_known};
-    if(ota.impl){value.running=!state.radio_released;value.install=state.phase==PN_DEVICE_OTA_AVAILABLE;value.reboot=state.phase==PN_DEVICE_OTA_READY;memcpy(value.version,state.version,sizeof value.version);if(state.total)value.percent=(unsigned)((uint64_t)state.bytes*100u/state.total);}
+    if(ota.impl){value.running=!state.radio_released;value.install=state.phase==PN_DEVICE_OTA_AVAILABLE;value.reboot=state.phase==PN_DEVICE_OTA_READY;value.determinate=state.phase==PN_DEVICE_OTA_DOWNLOADING && state.total;memcpy(value.version,state.version,sizeof value.version);if(state.total)value.percent=(unsigned)((uint64_t)state.bytes*100u/state.total);}
     const char *text=*ota_notice?ota_notice:!pn_device_ota_configured()?"此固件尚未配置正式更新公钥及回滚能力。":!*saved_network?"请先在设置的“WiFi 网络”中保存家庭 WiFi。":!clock_known?"请先联网校时，以验证 HTTPS 证书。":"从 Gitee 检查经过签名校验的正式更新。";
     snprintf(value.message,sizeof value.message,"%s",text);pn_settings_ui_set_update(&settings_ui,&value);
-    if(paint && settings_ui.impl && pn_settings_ui_screen(&settings_ui)==6)(void)pn_settings_ui_present(&settings_ui,present,NULL);
+    if(paint && !ota_display_frozen() && settings_ui.impl && pn_settings_ui_screen(&settings_ui)==6)(void)pn_settings_ui_present(&settings_ui,present,NULL);
 }
 static void update_command(int command){
     if(command==PN_SETUI_UPDATE_CANCEL){(void)pn_device_ota_stop(&ota);snprintf(ota_notice,sizeof ota_notice,"正在结束升级，等待网络与写入任务退出…");update_ota_ui(true);return;}
@@ -1602,6 +1606,11 @@ static void update_command(int command){
         struct timeval now={.tv_sec=(time_t)((uint64_t)clock_base_sec+(now_ms()-clock_base_ms)/1000u)};
         if(settimeofday(&now,NULL)!=0)status=PN_IO;
 #endif
+        // 写入任务启动前确认静态提示，不在擦写中播放动画或刷新进度。/ Confirm static feedback before starting writes; never animate or redraw progress during flash operations.
+        if(status==PN_OK && command==PN_SETUI_UPDATE_INSTALL && battery_percent()>=30){
+            pn_settings_update_t busy={.running=true};snprintf(busy.message,sizeof busy.message,"正在下载、写入并完整校验固件。期间屏幕保持此画面，请保持供电；取消需等待任务退出。");
+            pn_settings_ui_set_update(&settings_ui,&busy);status=pn_settings_ui_present(&settings_ui,present,NULL);
+        }
         if(status==PN_OK)status=command==PN_SETUI_UPDATE_INSTALL?pn_device_ota_install(&ota,&config,battery_percent()>=30):pn_device_ota_open(&ota,&config);
     }else if(status==PN_OK)status=PN_EMPTY;
     pn_network_wipe(&credentials);volatile uint8_t *bytes=(volatile uint8_t *)&config;for(size_t i=0;i<sizeof config;i++)bytes[i]=0;
@@ -1625,11 +1634,11 @@ static void tick_ota(uint64_t now){
         pn_status_t error=state.error;(void)pn_device_ota_close(&ota);
         snprintf(ota_notice,sizeof ota_notice,"%s",ota_commit_failed?"升级收尾失败，请重启核对版本，必要时使用 USB 恢复。":error==PN_EMPTY?"当前发行版暂无可用的 OTA 更新。":error==PN_UNSUPPORTED?"此设备需要先通过 USB 安装兼容版本。":error==PN_CANCELLED?"已取消升级，原版本继续使用。":error==PN_CORRUPT?"固件校验失败，原版本继续使用。":"网络或安装失败，原版本继续使用，可稍后重试。");ota_commit_failed=false;update_ota_ui(true);
         if(ota_lock_pending){ota_lock_pending=false;if(prepare_lock())lock_and_sleep("");}
-    }else if(changed)update_ota_ui(true);
+    }else if(changed || (!before.radio_released && state.radio_released))update_ota_ui(true);
 }
 /// 设置页回执取消后仅在空闲重试最新快照，不覆盖锁屏或子页面。 / Retry the latest settings snapshot only when idle, never over a lock or child page.
 static void retry_settings_ui(uint64_t now,uint64_t *last_retry){
-    if(!settings_ui.impl || !settings_ui.active || settings_ui.presented || locked || opening || wallpaper_ui.impl || font_manage.impl || transfer.impl || usb.open || now-*last_retry<1000 || pn_cancel_checkpoint()!=PN_OK)return;
+    if(!settings_ui.impl || !settings_ui.active || settings_ui.presented || ota_display_frozen() || locked || opening || wallpaper_ui.impl || font_manage.impl || transfer.impl || usb.open || now-*last_retry<1000 || pn_cancel_checkpoint()!=PN_OK)return;
     *last_retry=now;(void)pn_settings_ui_present(&settings_ui,present,NULL);
 }
 /// 无线或写入仍在进行；AVAILABLE/READY只等用户确认，不阻止锁屏或休眠。

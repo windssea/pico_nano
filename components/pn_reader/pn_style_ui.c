@@ -179,12 +179,22 @@ pn_status_t pn_style_ui_open(pn_style_ui_t *u,pn_reader_app_t *reader,pn_reader_
     if(!u || !reader || !reader->impl)return PN_INVALID;
     memset(u,0,sizeof *u);u->reader=reader;pn_status_t status=pn_reader_app_style_get(reader,&u->draft);if(status!=PN_OK)return status;u->active=true;return pn_style_ui_present(u,present,ctx);
 }
+// 与字体和壁纸共用静态等待视觉；不修改阅读像素或校验流程。/ Share static busy visuals with fonts and wallpaper without changing reading pixels or validation.
+static pn_status_t busy_paint(void *ctx,pn_font_t *font,pn_font_t *metadata,pn_frame_t *frame){
+    (void)ctx;(void)metadata;pn_frame_clear(frame,PN_UI_PAPER);
+    pn_status_t s=pn_w_header(font,frame,"","排版设置",NULL);
+    return s==PN_OK?pn_w_loading(font,frame,"正在重新排版","正在准备阅读页面，请稍候",-1,380):s;
+}
 pn_status_t pn_style_ui_event(pn_style_ui_t *u,int command,uint64_t now,pn_reader_present_fn present,void *ctx){
     if(!u || !u->active || !live(u))return PN_INVALID;
     if(!u->presented && command!=PN_SUI_RETRY)return PN_BUSY;
     if(command==PN_SUI_FORM)u->more=false;
     if(command==PN_SUI_RETRY || command==PN_SUI_FORM)return pn_style_ui_present(u,present,ctx);
     pn_status_t status=PN_OK;u->notice=NULL;
+    if(!u->backgrounds && (command==PN_SUI_PREVIEW || command==PN_SUI_APPLY || (command==PN_SUI_CANCEL && u->did_preview))){
+        u->presented=false;status=overlay(u,busy_paint,present,ctx);
+        if(status!=PN_OK){(void)pn_style_ui_present(u,present,ctx);return status;}
+    }
     if(u->backgrounds){
         if(command==PN_SUI_BACKGROUND_BACK || command==PN_SUI_CANCEL)u->backgrounds=false;
         else if(command>=PN_SUI_BACKGROUND_ITEM && command<=PN_SUI_BACKGROUND_ITEM+PN_READING_BACKGROUND_LEGACY_MAX && pn_reading_background_resolve((unsigned)(command-PN_SUI_BACKGROUND_ITEM))==(unsigned)(command-PN_SUI_BACKGROUND_ITEM)){u->draft.background=(uint16_t)(command-PN_SUI_BACKGROUND_ITEM);u->backgrounds=false;u->selected=11;}

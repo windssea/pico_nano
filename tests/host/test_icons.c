@@ -24,6 +24,17 @@ int main(void){
         bad|=!inside;
     }
     bool icons_ok=!bad;
+    // 禁用态只灰化，不可留下黑色删除线；恢复为可用后有正常前景。/ Disabled controls are gray without black strike marks; enabled controls retain normal ink.
+    pn_font_t controls={0};pn_text_source_t control_source=pn_font_builtin_source();assert(pn_font_open(&controls,&pool,&control_source,28)==PN_OK);
+    pn_frame_clear(&frame,PN_UI_PAPER);assert(pn_w_button(&controls,&frame,"Apply",32,100,620,88,PN_W_DISABLED|PN_W_SELECTED)==PN_OK);
+    for(int y=100;y<188;y++)for(int x=32;x<652;x++)assert(pn_frame_get(&frame,x,y)>=PN_UI_DISABLED);
+    const char *tabs[]={"Home","Settings"};const pn_icon_t tab_icons[]={PN_ICON_HOME,PN_ICON_SETTINGS};
+    assert(pn_w_tabbar_icons(&controls,&frame,tabs,tab_icons,2,1,2,400,110)==PN_OK);
+    for(int y=402;y<510;y++)for(int x=342;x<684;x++)assert(pn_frame_get(&frame,x,y)>=PN_UI_DISABLED);
+    pn_frame_clear(&frame,PN_UI_PAPER);assert(pn_w_button(&controls,&frame,"Apply",32,100,620,88,PN_W_SELECTED)==PN_OK && pn_frame_get(&frame,64,144)==PN_UI_INK);
+    assert(pn_w_loading(&controls,&frame,"Working","Please wait",-1,600)==PN_OK && controls.pixels==28);
+    assert(pn_w_loading(&controls,&frame,"Working","Verifying",60,600)==PN_OK && controls.pixels==28);
+    assert(pn_w_loading(&controls,&frame,"Working",NULL,101,600)==PN_INVALID);pn_font_close(&controls);
     /* 抗锯齿：圆的边缘出现中间灰阶，实心区为纯黑。/ Anti-aliasing: a circle's edge shows intermediate grays and its core is pure black. */
     pn_frame_clear(&frame,PN_UI_PAPER);pn_w_dot(&frame,100.0f,100.0f,20.0f,0);
     unsigned grays=0;for(int y=70;y<130;y++)for(int x=70;x<130;x++){uint8_t v=pn_frame_get(&frame,x,y);if(v>0 && v<15)grays++;}

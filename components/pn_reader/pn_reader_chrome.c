@@ -70,9 +70,8 @@ pn_status_t pn_reader_toolbar_render(pn_font_t *ui,pn_frame_t *frame,unsigned un
     for(unsigned i=0;i<TOOL_COUNT && status==PN_OK;i++){
         int x=SHEET_PADDING+(int)(i%3)*COLUMN_PITCH,y=ROW_Y0+(int)(i/3)*ROW_PITCH;bool off=(unavailable&(1u<<i))!=0;
         pn_w_glass(frame,x,y,BUTTON_W,BUTTON_H,PN_UI_RADIUS);
-        pn_w_icon(frame,icons[i],x+(BUTTON_W-36)/2,y+10,36,PN_UI_INK);
-        status=pn_w_text(ui,frame,labels[i],x+8,y+BUTTON_H-12,BUTTON_W-16,PN_ALIGN_CENTER);
-        if(off && status==PN_OK)pn_w_line(frame,(float)(x+BUTTON_W/2-30),(float)(y+BUTTON_H-8-24),(float)(x+BUTTON_W/2+30),(float)(y+14),3.0f,PN_UI_INK);
+        pn_w_icon(frame,icons[i],x+(BUTTON_W-36)/2,y+10,36,off?PN_UI_DISABLED:PN_UI_INK);
+        status=pn_w_text_ex(ui,frame,labels[i],x+8,y+BUTTON_H-12,BUTTON_W-16,PN_ALIGN_CENTER,off?PN_UI_DISABLED:PN_UI_INK,false);
     }
     if(status==PN_OK)status=pn_w_text(ui,frame,"点击空白处或按中间键关闭",PN_UI_MARGIN,PN_UI_HEIGHT-16,PN_UI_WIDTH-2*PN_UI_MARGIN,PN_ALIGN_CENTER);
     pn_status_t restored=pn_font_size(ui,original);return status==PN_OK?restored:status;
@@ -87,6 +86,11 @@ int pn_reader_toolbar_hit(int x,int y,unsigned unavailable){
     return -1;
 }
 bool pn_reader_loading_needed(bool text_format,uint64_t source_bytes){return !text_format || source_bytes>65536u;}
+pn_status_t pn_reader_jump_loading_render(void *ctx,pn_font_t *font,pn_font_t *metadata,pn_frame_t *frame){
+    (void)ctx;(void)metadata;pn_frame_clear(frame,PN_UI_PAPER);
+    pn_status_t s=pn_w_header(font,frame,"","阅读",NULL);
+    return s==PN_OK?pn_w_loading(font,frame,"正在跳转书页","正在准备目标页面，请稍候",-1,380):s;
+}
 void pn_reader_guide_row(pn_frame_t *frame,unsigned style,unsigned shade,int y){
     if(!frame || !frame->pixels || style<1 || style>2 || y<0 || y>=frame->height || frame->width<1)return;
     // 浅档保留原灰阶10；越界深浅按浅处理。/ The light level keeps the original gray 10; out-of-range shades fall back to light.
@@ -99,10 +103,6 @@ pn_status_t pn_reader_loading_render(pn_font_t *ui,pn_frame_t *frame,const char 
     int original=ui->pixels;pn_frame_clear(frame,PN_UI_PAPER);
     pn_status_t status=pn_font_size(ui,28);
     if(status==PN_OK)status=pn_w_text(ui,frame,PN_BRAND_NAME,32,72,620,PN_ALIGN_LEFT);
-    if(status==PN_OK)status=pn_font_size(ui,40);
-    if(status==PN_OK)status=pn_w_text(ui,frame,"正在为你打开",32,478,620,PN_ALIGN_CENTER);
-    if(status==PN_OK)status=pn_font_size(ui,28);
-    if(status==PN_OK)status=pn_w_text(ui,frame,title,32,570,620,PN_ALIGN_CENTER);
-    if(status==PN_OK)status=pn_w_text_ex(ui,frame,"整理书页，接续阅读时光",32,650,620,PN_ALIGN_CENTER,PN_UI_MUTED,false);
+    if(status==PN_OK)status=pn_w_loading(ui,frame,"正在打开书籍",title,-1,380);
     pn_status_t restored=pn_font_size(ui,original);return status==PN_OK?restored:status;
 }

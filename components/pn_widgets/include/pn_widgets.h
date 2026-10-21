@@ -23,20 +23,21 @@
 #define PN_UI_SELECT 13 ///< 选中灰底与细分隔（G13 #DDDDDD）/ Selection base and fine dividers (G13)
 #define PN_UI_SURFACE 14 ///< 雾面卡片（G14 #EEEEEE）/ Fog card surface (G14)
 #define PN_UI_MUTED 5 ///< 次要文字（G05 #555555）/ Secondary text (G05)
+#define PN_UI_DISABLED 9 ///< 禁用文字与图标 / Disabled text and icons
 #define PN_UI_PAPER 15 ///< 背景白 / Background white
 
 /// 文字水平对齐。/ Horizontal text alignment.
 typedef enum {PN_ALIGN_LEFT=0,PN_ALIGN_CENTER,PN_ALIGN_RIGHT} pn_align_t;
 /// 按钮样式位。/ Button style bits.
 #define PN_W_SELECTED 1u ///< 加粗外框表示当前项或焦点 / Thick outline marks the current item or focus
-#define PN_W_DISABLED 2u ///< 删除线表示不可用，不靠浅灰 / Strikethrough marks unavailable, not light gray
+#define PN_W_DISABLED 2u ///< 灰化文字、图标与描边 / Gray text, icons and borders
 #define PN_W_PLAIN 4u ///< 只有文字，不画外框 / Text only, no outline
 
 /// 线条图标编号，绘制见pn_w_icon。/ Line-icon identifiers, drawn by pn_w_icon.
 typedef enum {
     PN_ICON_SEARCH=0,PN_ICON_GRID,PN_ICON_LIST,PN_ICON_BACK,PN_ICON_CHEVRON,PN_ICON_SHELF,PN_ICON_TRANSFER,PN_ICON_SETTINGS,
     PN_ICON_TOC,PN_ICON_BOOKMARK,PN_ICON_TYPESET,PN_ICON_REFRESH,PN_ICON_CLOSE,PN_ICON_PLUS,PN_ICON_MINUS,PN_ICON_ARROW,
-    PN_ICON_FONT,PN_ICON_IMAGE,PN_ICON_LOCK,PN_ICON_TRASH,PN_ICON_CHECK,PN_ICON_WIFI,PN_ICON_MORE,PN_ICON_IMPORT,PN_ICON_PROGRESS,PN_ICON_HOME,PN_ICON_COUNT
+    PN_ICON_FONT,PN_ICON_IMAGE,PN_ICON_LOCK,PN_ICON_TRASH,PN_ICON_CHECK,PN_ICON_WIFI,PN_ICON_MORE,PN_ICON_IMPORT,PN_ICON_PROGRESS,PN_ICON_HOME,PN_ICON_LOADING,PN_ICON_COUNT
 } pn_icon_t;
 
 /// 四个一级页使用同源导航。/ Four root pages share navigation.
@@ -83,8 +84,10 @@ void pn_w_round_outline(pn_frame_t *frame,int x,int y,int width,int height,int r
 /// 画带文字的圆角按钮，文字居中；字号由调用者先设定。
 /// Draw a rounded button with centered text; the caller sets the font size first.
 pn_status_t pn_w_button(pn_font_t *font,pn_frame_t *frame,const char *label,int x,int y,int width,int height,unsigned style);
-/// 底栏：count个等宽入口，active高亮上沿；disabled位图中为1的入口画删除线。
-/// Bottom bar: count equal entries; the active one gets a thick top edge; entries whose bit is set in disabled get a strikethrough.
+/// 统一静态等待卡片，高300；percent为-1时无确定进度，0..100仅用于真实进度；恢复字号。/ Shared static busy card, 300px tall; -1 for unknown progress, 0..100 for measured progress; restores font size.
+pn_status_t pn_w_loading(pn_font_t *font,pn_frame_t *frame,const char *title,const char *detail,int percent,int y);
+/// 底栏：count个等宽入口，active高亮上沿；disabled位图中为1的入口灰化。
+/// Bottom bar: equal entries with an active top edge; disabled entries are gray.
 pn_status_t pn_w_tabbar(pn_font_t *font,pn_frame_t *frame,const char *const *labels,unsigned count,unsigned active,unsigned disabled,int y,int height);
 /// 带图标的底栏：每项图标在上、文字在下，当前项图标后有浅灰胶囊；icons为NULL时退回纯文字样式。
 /// Bottom bar with icons: icon above label, a light-gray pill behind the current icon; plain text style when icons is NULL.

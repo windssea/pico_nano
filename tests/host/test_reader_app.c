@@ -73,7 +73,7 @@ int main(void){
     assert(pn_reader_app_font_inherit(&app,8,present,&screen)==PN_OK && pn_reader_app_progress(&app,&progress)==PN_OK && progress.source_offset==second);
     assert(pn_font_preferences_load(&inspect_io,&pool,&progress.book,&loaded_fonts)==PN_OK && loaded_fonts.inherit);
     char font_directory[1024];assert(pn_reader_app_fonts_get(&app,&loaded_fonts,font_directory,sizeof font_directory)==PN_OK && !loaded_fonts.inherit && loaded_fonts.primary.kind==PN_FONT_RESIDENT);
-    // 实际菜单取消覆盖：失败仍留单书选择，成功一次呈现设置页并存继承标记。/ Real menu clears overrides: failure preserves the book choice; success presents settings once and stores inheritance.
+    // 实际菜单取消覆盖：失败仍留单书选择；先显示等待，成功再呈现设置页并存继承标记。/ Real menu clears overrides: failure preserves the book choice; show busy feedback before the successful destination and inheritance commit.
     assert(pn_reader_app_font_apply(&app,&resident,8,present,&screen)==PN_OK && !pn_reader_app_font_is_inherited(&app));
     assert(pn_reader_app_font_default(&app,&preferences)==PN_OK);
     pn_font_ui_t chooser={0};assert(pn_font_ui_open(&chooser,&pool,&app,NULL,dir,present,&screen)==PN_OK);
@@ -82,7 +82,7 @@ int main(void){
     assert(pn_font_ui_event(&chooser,PN_FUI_RESTORE_DEFAULT,8,present,&screen)==PN_IO && chooser.active && !pn_reader_app_font_is_inherited(&app));screen.fail=false;
     assert(pn_font_preferences_load(&inspect_io,&pool,&progress.book,&loaded_fonts)==PN_OK && !loaded_fonts.inherit);
     assert(pn_font_ui_event(&chooser,PN_FUI_RETRY,8,present,&screen)==PN_OK);
-    calls=screen.calls;assert(pn_font_ui_event(&chooser,PN_FUI_RESTORE_DEFAULT,8,present,&screen)==PN_OK && !chooser.active && chooser.return_presented && screen.calls==calls+1 && screen.tag==9 && pn_reader_app_font_is_inherited(&app));
+    calls=screen.calls;assert(pn_font_ui_event(&chooser,PN_FUI_RESTORE_DEFAULT,8,present,&screen)==PN_OK && !chooser.active && chooser.return_presented && screen.calls==calls+2 && screen.tag==9 && pn_reader_app_font_is_inherited(&app));
     assert(pn_font_preferences_load(&inspect_io,&pool,&progress.book,&loaded_fonts)==PN_OK && loaded_fonts.inherit);pn_font_ui_close(&chooser);
     assert(pn_reader_app_font_default(&app,&preferences)==PN_OK && pn_reader_app_font_apply(&app,&preferences,8,present,&screen)==PN_OK);
     // 在字体校验后注入全局保存故障，关闭只能重试原请求。/ Inject global-save failure after font validation; close must retry the original request.
