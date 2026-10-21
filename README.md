@@ -2,13 +2,13 @@
 
 基于 ESP32-S3 的独立墨水屏阅读器固件。核心、解析、字体、排版与界面在设备和 PC 模拟器中共用源码，固定目标为 RDP-G01-W/E0470A01、684×1216、16 灰阶、8MiB PSRAM、16MiB Flash。对外品牌在所有语言中统一为 **PicoNano**。
 
-当前开发版本为 **1.0.2（正式构建与发布核验中）**，修复WiFi退出后USB失联、TLS内存分配失败及更新页结束后停留旧状态，准备签名OTA附件与远程升级实测。阅读保持完整校验、原排版与16灰阶；1.0.1精简的内置背景、默认封面及旧背景ID兼容不变。保留“远山与书页”首页、本地书签锁屏、中式黄历和阅读时长统计；详细变化见[变更记录](docs/CHANGELOG.md)。
+当前版本为 **1.0.2 正式版**，修复WiFi退出后USB失联、TLS内存分配失败及更新结束后界面停留旧状态，提供签名OTA附件。正式镜像已完成设备远程下载、非活动槽写入、完整读回与重启确认。阅读保持完整书籍/字体校验、原排版与16灰阶；内置背景、默认封面及旧背景ID兼容沿用1.0.1。安装过程中进度刷新与Flash写入争用的问题列入后续修正，详见[开发指南](docs/DEVELOPMENT_PLAN.md)。
 
-提供保留数据升级包、完整安装包与离线网页安装器，精确源码以包内 `manifest.json` 的 `source_commit` 为准。产品镜像关闭测试控制台；开发设备继续保留独立诊断固件。**1.0.1 正式版已完成真机验证**，本版提供 USB 安装包。
+提供保留数据升级包、完整安装包与离线网页安装器，精确源码以包内 `manifest.json` 的 `source_commit` 为准。产品镜像关闭测试控制台；开发设备继续保留独立诊断固件。**1.0.2 正式版已完成设备OTA与启动实测**，验证登记绑定本版源码和应用摘要。
 
 从[文档入口](docs/README.md)开始：
 
-国内下载安装包请访问 [Gitee 发行版](https://gitee.com/windssea/pico_nano/releases)。推荐离线网页安装器：解压后运行 `py serve.py`，用电脑 Chrome/Edge 打开 `http://localhost:8765/`；刷机时无需访问 GitHub。GitHub 与 Gitee 使用同一份发布包，详情见[安装与发布](docs/INSTALLATION.md)。当前发行版通过电脑 USB 安装，不提供设备 Wi-Fi OTA 安装包。
+国内下载安装包请访问 [Gitee 发行版](https://gitee.com/windssea/pico_nano/releases)。推荐离线网页安装器：解压后运行 `py serve.py`，用电脑 Chrome/Edge 打开 `http://localhost:8765/`；刷机时无需访问 GitHub。GitHub 与 Gitee 使用同一份发布包，详情见[安装与发布](docs/INSTALLATION.md)。当前版本提供电脑USB安装包和经过签名的设备WiFi OTA附件；请先核对兼容引导及设备时间，见安装文档。
 
 | 目的 | 现行文档 |
 | --- | --- |

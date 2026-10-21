@@ -8,6 +8,14 @@
       "verified_on_hardware": true,
       "confirmed_at": "2026-10-20",
       "confirmation": "维护者确认1.0.1正式版已完成真机验证"
+    },
+    {
+      "version": "1.0.2",
+      "source_commit": "f387ee2f9d2cd78e31fc42372c5f1cec960f6a67",
+      "application_sha256": "45adc26206b11acbe63f054ac65f9e356862b837f88511e8622c818354ba92e9",
+      "verified_on_hardware": true,
+      "confirmed_at": "2026-10-21",
+      "confirmation": "设备由Gitee远程OTA至正式1.0.2，签名/完整Flash读回、SDK有效槽确认及超过50秒启动观察通过；安装进度页刷新争用另列待修，真实断电与失败回滚未测试"
     }
   ]
 }
