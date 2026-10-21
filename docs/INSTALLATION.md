@@ -10,7 +10,7 @@
 
 243项主机ASan/UBSan、47项工具、45项SDL、15项网页及末次传输专项复验通过；28组真实书/字体对照、30帧新旧正文像素、诊断设备翻页/逻辑锁恢复、外部背景冷会话恢复及三类图片上传通过。真实热点关闭后重连失败可释放资源并返回阅读。**设备继续保留1.0.3-diag开发候选，不刷本版正式镜像或执行OTA安装**；实际断电、实体键与面板光学/温度/功耗另验，不继承旧正式版硬件登记。
 
-本批正式板级120MHz/CI80MHz构建、镜像和分发核验记录将在完成后补充。
+正式板级120MHz/CI80MHz的ESP-IDF6.1构建与size、版本/ELF/checksum/validation、诊断关闭及两套配置隔离核验通过。源码`b684eb0083aa78bef159eaaf5a8fcba671decff1`；板级应用5649360B、槽余642096B（10.21%），SHA-256`048f91a6815e8ee17a98cfbebc3cdbfe4dc90ea5cb52c8fcd8cc8bdeec2dc161`；CI应用5645744B、槽余10.26%。板级引导与1.0.2/1.0.3及诊断设备保持相同摘要`80193053e7c398d196e87db7b63a1eaf008ea5f368d35f918c094d5b804652e1`，分区保持。25项Node/12项Python安装器、三个USB包、离线HTTP九镜像及签名OTA六附件本地核验通过。公开附件和在线安装器以发布后的匿名下载核对为准。
 
 下载：[Gitee正式版](https://gitee.com/windssea/pico_nano/releases/tag/v1.0.4)、[GitHub正式版](https://github.com/windssea/pico_nano/releases/tag/v1.0.4)。
 
