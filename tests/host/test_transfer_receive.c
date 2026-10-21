@@ -77,12 +77,12 @@ int main(int argc,char **argv){
     assert(pn_transfer_worker_request_stop(&worker)==PN_OK && pn_transfer_worker_close(&worker)==PN_OK);
     assert(!pool.used && !pool.live && !pn_media_active(&media));
     assert(pn_transfer_service_open(&service,&pool,&media,&options)==PN_OK);
-    const pn_upload_kind_t kinds[]={PN_UPLOAD_FONT,PN_UPLOAD_COVER,PN_UPLOAD_WALLPAPER};
-    const char *names[]={"stream.ttf","cover.png","lock.jpg"};
-    for(unsigned i=0;i<3;i++){
-        FILE *resource=fopen(argv[i+1],"rb");assert(resource && !fseek(resource,0,SEEK_END));long length=ftell(resource);assert(length>0 && !fseek(resource,0,SEEK_SET));
+    const pn_upload_kind_t kinds[]={PN_UPLOAD_FONT,PN_UPLOAD_COVER,PN_UPLOAD_WALLPAPER,PN_UPLOAD_BACKGROUND};
+    const char *names[]={"stream.ttf","cover.png","lock.jpg","paper.png"};
+    for(unsigned i=0;i<4;i++){
+        FILE *resource=fopen(argv[i==3?2:i+1],"rb");assert(resource && !fseek(resource,0,SEEK_END));long length=ftell(resource);assert(length>0 && !fseek(resource,0,SEEK_SET));
         uint8_t *body=malloc((size_t)length);assert(body && fread(body,1,(size_t)length,resource)==(size_t)length);assert(!fclose(resource));
-        r=request(12+i,names[i],(size_t)length);r.kind=kinds[i];input=(input_t){.bytes=body,.size=(size_t)length};
+        r=request(i==3?18:12+i,names[i],(size_t)length);r.kind=kinds[i];input=(input_t){.bytes=body,.size=(size_t)length};
         assert(pn_transfer_receive(&pool,execute,&service,&r,read_input,&input,&result)==PN_OK && result.committed);
         snprintf(path,sizeof path,"%s/%s/%s",root,pn_upload_directory(kinds[i]),names[i]);assert(access(path,R_OK)==0);free(body);
     }

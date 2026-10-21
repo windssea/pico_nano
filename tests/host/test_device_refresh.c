@@ -57,6 +57,14 @@ static void exhaustive(void){
 }
 int main(void){
     exhaustive();
+    // 静态灰底不计债，大面积灰到灰第四次清理；规划/失败不提前计数。/ Static gray paper accrues no debt; clean the fourth large gray-to-gray transition, never count plans/failures.
+    {pn_device_refresh_t gray={0};pn_device_box_t full={0,0,684,1152};memset(old,0x77,sizeof old);memset(next,0x88,sizeof next);
+     for(unsigned i=0;i<3;i++){pn_device_refresh_plan_t p=pn_device_refresh_plan(&gray,next,old,true,full);assert(p.gray_transition && !p.content_clean && gray.gray_turns==i);pn_device_refresh_commit(&gray,true,false,true,p);}
+     pn_device_refresh_t before=gray;pn_device_refresh_plan_t p=pn_device_refresh_plan(&gray,next,old,true,full);assert(p.gray_transition && p.content_clean && !memcmp(&before,&gray,sizeof gray));
+     pn_device_refresh_plan_t unaligned=pn_device_refresh_plan(&gray,next+1,old+1,true,full);assert(unaligned.gray_transition && unaligned.content_clean);
+     uint8_t rows[PN_DEVICE_ROW_MASK_BYTES];memset(rows,255,sizeof rows);pn_device_refresh_plan_t masked=pn_device_refresh_plan_masked(&gray,next,old,true,full,rows,sizeof rows);assert(masked.gray_transition && masked.content_clean);
+     memcpy(next,old,sizeof next);p=pn_device_refresh_plan(&gray,next,old,true,full);assert(!p.gray_transition && !p.content_clean);pn_device_refresh_commit(&gray,true,false,true,p);assert(gray.gray_turns==3);
+     pn_device_refresh_commit(&gray,true,true,true,p);assert(!gray.gray_turns);}
     pn_device_refresh_t s={0};pn_device_box_t box={20,200,40,20};
     memset(old,255,sizeof old);memset(next,255,sizeof next);
     // 密集二值文字约1/8覆盖率，擦掉整页也不被当成深色大块。

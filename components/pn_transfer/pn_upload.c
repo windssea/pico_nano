@@ -29,12 +29,13 @@ pn_status_t pn_upload_request_validate(const pn_upload_request_t *r){
  if(!r || !memchr(r->name,0,sizeof r->name) || zero(r->id,sizeof r->id) || !r->size || (!r->has_digest && !zero(r->digest.sha256,32)))return PN_INVALID;
  size_t n=strlen(r->name);if(!name_valid(r->name,n))return PN_INVALID;
  uint64_t limit;bool supported;
- switch(r->kind){case PN_UPLOAD_BOOK:limit=512u*1024u*1024u;supported=extension(r->name,".txt") || extension(r->name,".epub") || extension(r->name,".pdf") || extension(r->name,".fb2") || extension(r->name,".cbz");break;case PN_UPLOAD_FONT:limit=32u*1024u*1024u;supported=extension(r->name,".ttf") || extension(r->name,".otf");break;case PN_UPLOAD_COVER:case PN_UPLOAD_WALLPAPER:limit=8u*1024u*1024u;supported=extension(r->name,".png") || extension(r->name,".jpg") || extension(r->name,".jpeg");break;default:return PN_INVALID;}
+ switch(r->kind){case PN_UPLOAD_BOOK:limit=512u*1024u*1024u;supported=extension(r->name,".txt") || extension(r->name,".epub") || extension(r->name,".pdf") || extension(r->name,".fb2") || extension(r->name,".cbz");break;case PN_UPLOAD_FONT:limit=32u*1024u*1024u;supported=extension(r->name,".ttf") || extension(r->name,".otf");break;case PN_UPLOAD_COVER:case PN_UPLOAD_WALLPAPER:case PN_UPLOAD_BACKGROUND:limit=8u*1024u*1024u;supported=extension(r->name,".png") || extension(r->name,".jpg") || extension(r->name,".jpeg");break;default:return PN_INVALID;}
+ if(r->kind==PN_UPLOAD_BACKGROUND && n>=160)return PN_LIMIT;
  if(!supported)return PN_UNSUPPORTED;
  return r->size>limit?PN_LIMIT:PN_OK;
 }
 const char *pn_upload_directory(pn_upload_kind_t kind){
- switch(kind){case PN_UPLOAD_BOOK:return PN_SD_BOOKS;case PN_UPLOAD_FONT:return PN_SD_FONTS;case PN_UPLOAD_COVER:return PN_SD_COVERS;case PN_UPLOAD_WALLPAPER:return PN_SD_WALLPAPERS;default:return NULL;}
+ switch(kind){case PN_UPLOAD_BOOK:return PN_SD_BOOKS;case PN_UPLOAD_FONT:return PN_SD_FONTS;case PN_UPLOAD_COVER:return PN_SD_COVERS;case PN_UPLOAD_WALLPAPER:return PN_SD_WALLPAPERS;case PN_UPLOAD_BACKGROUND:return PN_SD_BACKGROUNDS;default:return NULL;}
 }
 static size_t encode(const snapshot_t *s,uint8_t *b){
  memset(b,0,MAX_RECORD);memcpy(b,"PNUP",4);put(b+4,1,2);b[6]=(uint8_t)s->request.kind;b[7]=(uint8_t)s->phase;put(b+8,s->media_id,8);put(b+16,s->request.size,8);put(b+24,s->offset,8);put(b+32,s->last_offset,8);put(b+40,s->last_length,4);put(b+44,s->request.has_digest?1:0,4);memcpy(b+48,s->request.id,16);memcpy(b+64,s->request.digest.sha256,32);memcpy(b+96,s->last_digest.sha256,32);size_t n=strlen(s->request.name);put(b+128,n,2);memcpy(b+HEADER,s->request.name,n);return HEADER+n;

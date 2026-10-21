@@ -9,7 +9,10 @@ int main(void){
     assert(!strcmp(pn_upload_directory(PN_UPLOAD_COVER),"piconano/covers"));
     assert(!strcmp(pn_upload_directory(PN_UPLOAD_WALLPAPER),"piconano/wallpapers"));
     assert(!pn_upload_directory((pn_upload_kind_t)0));
-    assert(!pn_upload_directory((pn_upload_kind_t)5));
+    assert(PN_UPLOAD_BACKGROUND==5 && !strcmp(pn_upload_directory(PN_UPLOAD_BACKGROUND),"piconano/backgrounds"));
+    assert(!pn_upload_directory((pn_upload_kind_t)6));
+    pn_upload_request_t image={.kind=PN_UPLOAD_BACKGROUND,.size=1024};image.id[0]=1;strcpy(image.name,"paper.png");assert(pn_upload_request_validate(&image)==PN_OK);
+    memset(image.name,'a',160);strcpy(image.name+160,".png");assert(pn_upload_request_validate(&image)==PN_LIMIT);
     assert(!pn_upload_directory((pn_upload_kind_t)-1));
     assert(pn_sd_resource_path("/sdcard/piconano/fonts/a.ttf",PN_SD_FONTS));
     assert(!pn_sd_resource_path("/sdcard/fonts/a.ttf",PN_SD_FONTS));

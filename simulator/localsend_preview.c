@@ -70,9 +70,9 @@ int main(void){
             dirty=true;printf("preview sample=%u phase=%u\n",sample,(unsigned)fixture.phase);fflush(stdout);
         }
         pn_status_t status=PN_OK;
-        if(action>=PN_LSV_CHOICE_BASE){size_t file=(size_t)(action-PN_LSV_CHOICE_BASE)/3;unsigned option=(unsigned)(action-PN_LSV_CHOICE_BASE)%3;
+        if(action>=PN_LSV_CHOICE_BASE){size_t file=(size_t)(action-PN_LSV_CHOICE_BASE)/4;unsigned option=(unsigned)(action-PN_LSV_CHOICE_BASE)%4;
             bool image=view.snapshot.request.files[file].kind==0;
-            status=pn_ls_view_choose(&view,view.snapshot.generation,file,option==0?0:!image?1:option==1?3:4);
+            status=pn_ls_view_choose(&view,view.snapshot.generation,file,option==0?0:!image?1:option==1?3:option==2?4:5);
         }else if(action==PN_LSV_PREVIOUS || action==PN_LSV_NEXT)status=pn_ls_view_page(&view,action==PN_LSV_NEXT?1:-1);
         else if(action==PN_LSV_CONFIRM || action==PN_LSV_REJECT){
             pn_ls_choice_t choices[PN_LS_FILES_MAX]={0};if(action==PN_LSV_CONFIRM)memcpy(choices,view.choices,sizeof choices);

@@ -35,6 +35,8 @@ def prepare(books, fonts, output):
             report['sources'].append({'kind': kind, 'path': original.relative_to(ROOT).as_posix(),
                                       'bytes': original.stat().st_size, 'sha256': identity})
         report[kind] = destination.relative_to(ROOT).as_posix()
+    (target / 'backgrounds').mkdir()
+    report['backgrounds'] = (target / 'backgrounds').relative_to(ROOT).as_posix()
     (target / 'wallpapers').mkdir()
     report['wallpapers'] = (target / 'wallpapers').relative_to(ROOT).as_posix()
     output.mkdir(parents=True, exist_ok=True)

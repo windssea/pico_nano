@@ -25,7 +25,7 @@ pn_status_t pn_upload_validate_file(pn_pool_t *pool,pn_media_t *media,const pn_m
  if(kind==PN_UPLOAD_FONT){pn_font_t font={0};status=pn_font_open(&font,pool,&source,44);if(status==PN_OK)status=pn_font_validate(&font);pn_font_close(&font);}
  else if(kind==PN_UPLOAD_BOOK && extension(name,".txt")){pn_text_encoding_t encoding;status=pn_text_probe(&source,512u*1024u*1024u,&encoding);if(status==PN_OK){pn_text_reader_t reader;pn_text_char_t c;status=pn_text_open(&reader,&source,encoding);if(status==PN_OK){while((status=pn_text_next(&reader,&c))==PN_OK){if(c.codepoint<32 && c.codepoint!=9 && c.codepoint!=10 && c.codepoint!=12 && c.codepoint!=13){status=PN_CORRUPT;break;}}if(status==PN_EMPTY)status=PN_OK;}}}
  else if(kind==PN_UPLOAD_BOOK && extension(name,".epub"))status=epub_validate(pool,&source,salt);
- else if(kind==PN_UPLOAD_COVER || kind==PN_UPLOAD_WALLPAPER){image_t image={&source,0};pn_image_input_t input={&image,image_read};pn_image_info_t info;uint8_t pixels[2];pn_frame_t frame={pixels,2,2,1};pn_frame_clear(&frame,15);status=pn_image_draw(pool,&input,&frame,(pn_image_rect_t){0,0,2,2},&info);if(status==PN_OK && (extension(name,".png")!=(info.kind==PN_IMAGE_PNG)))status=PN_CORRUPT;}
+ else if(kind==PN_UPLOAD_COVER || kind==PN_UPLOAD_WALLPAPER || kind==PN_UPLOAD_BACKGROUND){image_t image={&source,0};pn_image_input_t input={&image,image_read};pn_image_info_t info;uint8_t pixels[2];pn_frame_t frame={pixels,2,2,1};pn_frame_clear(&frame,15);status=pn_image_draw(pool,&input,&frame,(pn_image_rect_t){0,0,2,2},&info);if(status==PN_OK && (extension(name,".png")!=(info.kind==PN_IMAGE_PNG)))status=PN_CORRUPT;}
  else status=PN_UNSUPPORTED;
  pn_status_t closed=pn_text_file_close(&file);return status!=PN_OK?status:closed;
 }

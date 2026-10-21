@@ -4,11 +4,13 @@
 #define PN_REFRESH_BANDS 19
 /// 成功呈现后才提交的区域维护记录。/ Regional maintenance committed only after successful output.
 typedef struct {
+    unsigned gray_turns; ///< 大面积灰阶迁移的成功次数 / Successful large grayscale transitions
     unsigned management; ///< 成功管理更新上限计数 / Successful management update ceiling
     unsigned char bands[PN_REFRESH_BANDS]; ///< 各64px逻辑带的局部更新次数 / Local updates per logical 64px band
 } pn_device_refresh_t;
 /// 本次扫描的候选维护方案，不修改历史。/ Candidate maintenance plan without changing history.
 typedef struct {
+    bool gray_transition; ///< 大面积灰阶变化，成功后才累计 / Large grayscale change, counted only after success
     bool content_clean; ///< 大面积灰/深色内容擦回白底 / Large gray/dark content returning to white
     bool regional; ///< 扩展为区域整理 / Expand into regional settling
     pn_device_box_t area; ///< 合并后单次扫描区域 / Combined single-scan area

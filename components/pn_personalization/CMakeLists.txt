@@ -1,1 +1,1 @@
-idf_component_register(SRCS pn_brand_image.c pn_wallpaper.c pn_bookmark_lock.c pn_chinese_calendar.c pn_wallpaper_ui.c pn_font_manage.c pn_settings_ui.c INCLUDE_DIRS include REQUIRES pn_core pn_ui pn_storage pn_text pn_font pn_image pn_library pn_display pn_widgets)
+idf_component_register(SRCS pn_paper.c pn_background_gallery.c pn_brand_image.c pn_wallpaper.c pn_bookmark_lock.c pn_chinese_calendar.c pn_wallpaper_ui.c pn_font_manage.c pn_settings_ui.c INCLUDE_DIRS include REQUIRES pn_core pn_ui pn_storage pn_text pn_font pn_image pn_library pn_display pn_widgets)

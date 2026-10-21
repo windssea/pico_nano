@@ -20,7 +20,7 @@ static bool snapshot_valid(const pn_ls_snapshot_t *s){
     uint64_t total=0;
     for(size_t i=0;i<s->request.count;i++){
         const pn_ls_file_t *f=&s->request.files[i];
-        if(!memchr(f->name,0,sizeof f->name) || !f->name[0] || !f->size || f->size>512u*1024u*1024u || (unsigned)f->kind>PN_UPLOAD_WALLPAPER)return false;
+        if(!memchr(f->name,0,sizeof f->name) || !f->name[0] || !f->size || f->size>512u*1024u*1024u || (unsigned)f->kind>PN_UPLOAD_BACKGROUND)return false;
         total+=f->size;
     }
     return total<=512u*1024u*1024u;
@@ -45,8 +45,8 @@ pn_status_t pn_ls_view_choose(pn_ls_view_t *v,uint64_t generation,size_t file,un
     if(v->snapshot.phase!=PN_LS_PENDING)return PN_BUSY;
     if(file>=v->snapshot.request.count)return PN_INVALID;
     pn_upload_kind_t kind=v->snapshot.request.files[file].kind;
-    bool image=kind==0 || kind==PN_UPLOAD_COVER || kind==PN_UPLOAD_WALLPAPER;
-    if(choice && (image?(choice!=3 && choice!=4):choice!=1))return PN_INVALID;
+    bool image=kind==0 || kind==PN_UPLOAD_COVER || kind==PN_UPLOAD_WALLPAPER || kind==PN_UPLOAD_BACKGROUND;
+    if(choice && (image?(choice!=3 && choice!=4 && choice!=5):choice!=1))return PN_INVALID;
     v->choices[file]=(pn_ls_choice_t){.accept=choice!=0,.image_kind=image?(pn_upload_kind_t)choice:0};
     return PN_OK;
 }
@@ -55,7 +55,7 @@ bool pn_ls_view_can_confirm(const pn_ls_view_t *v){
     size_t count=0;
     for(size_t i=0;i<v->snapshot.request.count;i++)if(v->choices[i].accept){
         pn_upload_kind_t kind=v->snapshot.request.files[i].kind;
-        if((kind==0 || kind==PN_UPLOAD_COVER || kind==PN_UPLOAD_WALLPAPER) && v->choices[i].image_kind!=PN_UPLOAD_COVER && v->choices[i].image_kind!=PN_UPLOAD_WALLPAPER)return false;
+        if((kind==0 || kind==PN_UPLOAD_COVER || kind==PN_UPLOAD_WALLPAPER || kind==PN_UPLOAD_BACKGROUND) && v->choices[i].image_kind!=PN_UPLOAD_COVER && v->choices[i].image_kind!=PN_UPLOAD_WALLPAPER && v->choices[i].image_kind!=PN_UPLOAD_BACKGROUND)return false;
         count++;
     }
     return count!=0;
@@ -72,7 +72,7 @@ static void amount(uint64_t n,char *out,size_t cap){
     if(n>=1024u*1024u)snprintf(out,cap,"%llu.%llu MB",(unsigned long long)(n/(1024u*1024u)),(unsigned long long)((n%(1024u*1024u))*10/(1024u*1024u)));
     else if(n>=1024u)snprintf(out,cap,"%llu KB",(unsigned long long)(n/1024u));else snprintf(out,cap,"%llu 字节",(unsigned long long)n);
 }
-static bool image(const pn_ls_file_t *f){return f->kind==0 || f->kind==PN_UPLOAD_COVER || f->kind==PN_UPLOAD_WALLPAPER;}
+static bool image(const pn_ls_file_t *f){return f->kind==0 || f->kind==PN_UPLOAD_COVER || f->kind==PN_UPLOAD_WALLPAPER || f->kind==PN_UPLOAD_BACKGROUND;}
 static pn_status_t pending(const pn_ls_view_t *v,pn_font_t *font,pn_frame_t *frame){
     pn_status_t s=PN_OK;char line[160],size[32];size_t selected=0;uint64_t bytes=0;
     for(size_t i=0;i<v->snapshot.request.count;i++){selected+=v->choices[i].accept;bytes+=v->snapshot.request.files[i].size;}
@@ -86,10 +86,10 @@ static pn_status_t pending(const pn_ls_view_t *v,pn_font_t *font,pn_frame_t *fra
         amount(f->size,size,sizeof size);snprintf(line,sizeof line,"%s · %s",image(f)?"图片用途需选择":f->kind==PN_UPLOAD_FONT?"字体 / fonts":"图书 / books",size);
         if(s==PN_OK)s=pn_font_size(font,22);
         if(s==PN_OK)s=pn_w_text_ex(font,frame,line,48,y+82,580,PN_ALIGN_LEFT,PN_UI_MUTED,false);
-        const char *labels[]={"不接收",image(f)?"封面":"接收", "锁屏"};
-        for(unsigned option=0;option<(image(f)?3u:2u) && s==PN_OK;option++){
-            bool selected_option=option==0?!v->choices[i].accept:v->choices[i].accept && (!image(f) || v->choices[i].image_kind==(option==1?PN_UPLOAD_COVER:PN_UPLOAD_WALLPAPER));
-            s=pn_w_button(font,frame,labels[option],48+(int)option*196,y+108,184,88,selected_option?PN_W_SELECTED:0u);
+        const char *labels[]={"不接收",image(f)?"封面":"接收", "锁屏", "背景"};
+        for(unsigned option=0;option<(image(f)?4u:2u) && s==PN_OK;option++){
+            bool selected_option=option==0?!v->choices[i].accept:v->choices[i].accept && (!image(f) || v->choices[i].image_kind==(option==1?PN_UPLOAD_COVER:option==2?PN_UPLOAD_WALLPAPER:PN_UPLOAD_BACKGROUND));
+            s=pn_w_button(font,frame,labels[option],48+(int)option*148,y+108,140,88,selected_option?PN_W_SELECTED:0u);
         }
     }
     if(s==PN_OK)s=pn_font_size(font,24);
@@ -153,8 +153,8 @@ int pn_ls_view_hit(const pn_ls_view_t *v,int x,int y){
         for(size_t row=0;row<3;row++){
             size_t file=v->page*3+row;if(file>=v->snapshot.request.count)break;
             int top=ROW_Y+(int)row*ROW_HEIGHT+108;
-            if(y>=top && y<top+88)for(unsigned option=0;option<(image(&v->snapshot.request.files[file])?3u:2u);option++)
-                if(x>=48+(int)option*196 && x<232+(int)option*196)return PN_LSV_CHOICE_BASE+(int)file*3+(int)option;
+            if(y>=top && y<top+88)for(unsigned option=0;option<(image(&v->snapshot.request.files[file])?4u:2u);option++)
+                if(x>=48+(int)option*148 && x<188+(int)option*148)return PN_LSV_CHOICE_BASE+(int)file*4+(int)option;
         }
         if(y>=NAV_Y && y<NAV_Y+88){if(x<212 && v->page)return PN_LSV_PREVIOUS;if(x>=472 && (v->page+1)*3<v->snapshot.request.count)return PN_LSV_NEXT;}
         if(y>=BUTTON_Y && y<BUTTON_Y+96){if(x<328)return PN_LSV_REJECT;if(x>=356 && pn_ls_view_can_confirm(v))return PN_LSV_CONFIRM;}

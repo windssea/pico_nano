@@ -212,3 +212,6 @@ bool pn_epub_app_font_is_inherited(const pn_epub_app_t *);
 
 /// 拷贝已校验OPF作品名/作者；要求已呈现正文并验证源，不重新解析或读正文。/ Copy validated OPF title/author after a body presentation and source validation, without reparsing or body reads.
 pn_status_t pn_epub_app_book_display(pn_epub_app_t *app,pn_book_display_t *display);
+
+/// 借用当前资源owner，不取得所有权或访问文件。/ Borrow the current resource owner without taking ownership or accessing files.
+pn_status_t pn_epub_app_paper_context(pn_epub_app_t *,pn_pool_t **,pn_media_t **);

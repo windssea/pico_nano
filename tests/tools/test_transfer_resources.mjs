@@ -4,7 +4,7 @@ import vm from 'node:vm';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {File} from 'node:buffer';
-import {inflateSync} from 'node:zlib';
+import {inflateSync,deflateSync} from 'node:zlib';
 
 function harness(fetch,bootstrap=false,extras={}){
   const elements=new Map();
@@ -14,7 +14,7 @@ function harness(fetch,bootstrap=false,extras={}){
     close(){} showModal(){} click(){}
   }
   const element=id=>{if(!elements.has(id))elements.set(id,new Element());return elements.get(id);};
-  const tabs=['book','font','cover','wallpaper'].map(kind=>{const e=new Element();e.dataset.kind=kind;return e;});
+  const tabs=['book','font','cover','wallpaper','background'].map(kind=>{const e=new Element();e.dataset.kind=kind;return e;});
   const context=vm.createContext({document:{getElementById:element,createElement:()=>new Element(),querySelectorAll:()=>tabs},fetch,URLSearchParams,Uint8Array,TextEncoder,Blob,File,Response,CompressionStream,location:{hash:'',pathname:'/',search:''},history:{replaceState(){}},sessionStorage:{getItem(){return null;},setItem(){}},setTimeout,clearTimeout,AbortController,...extras});
   const source=readFileSync(new URL('../../assets/transfer/app.js',import.meta.url),'utf8').replace(/^import .*;\r?$/m,'');
   vm.runInContext((bootstrap?source:source.slice(0,source.indexOf('// 打开页面'))+'render();')+'\nglobalThis.qa={token:value=>{token=value;},auth:()=>token,api,remove:removeFont,prepare:prepareImage,png:imagePng,add,entries:()=>entries};',context);
@@ -65,9 +65,9 @@ async function decode(blob){
  const bytes=Buffer.from(await blob.arrayBuffer());assert.equal(bytes.subarray(0,8).toString('hex'),'89504e470d0a1a0a');const parts=[];let header,palette,alpha;
  for(let at=8;at<bytes.length;){const n=bytes.readUInt32BE(at),tag=bytes.toString('ascii',at+4,at+8),data=bytes.subarray(at+8,at+8+n);let crc=0xffffffff;for(const b of bytes.subarray(at+4,at+8+n)){crc^=b;for(let k=0;k<8;k++)crc=crc&1?(crc>>>1)^0xedb88320:crc>>>1;}assert.equal((crc^0xffffffff)>>>0,bytes.readUInt32BE(at+8+n));
   if(tag==='IHDR')header=data;if(tag==='PLTE')palette=data;if(tag==='tRNS')alpha=data;if(tag==='IDAT')parts.push(data);at+=n+12;if(tag==='IEND'){assert.equal(at,bytes.length);break;}}
- assert.equal(header[9],3);assert.equal(header[12],0);const width=header.readUInt32BE(0),height=header.readUInt32BE(4),depth=header[8],stride=Math.ceil(width*depth/8),raw=inflateSync(Buffer.concat(parts)),pixels=[];assert.equal(raw.length,(stride+1)*height);let previous=Buffer.alloc(stride);
- for(let y=0;y<height;y++){const at=y*(stride+1),filter=raw[at],row=Buffer.alloc(stride);assert.ok(filter<=2);for(let x=0;x<stride;x++)row[x]=(raw[at+1+x]+(filter===1?(x?row[x-1]:0):filter===2?previous[x]:0))&255;
-  for(let x=0;x<width;x++){const i=depth===8?row[x]:(row[x>>>1]>>>(x&1?0:4))&15;assert.equal(palette[i*3],palette[i*3+1]);assert.equal(palette[i*3],palette[i*3+2]);pixels.push([palette[i*3],alpha?alpha[i]:255]);}previous=row;}
+ assert.ok(header[9]===0 || header[9]===3);assert.equal(header[12],0);const width=header.readUInt32BE(0),height=header.readUInt32BE(4),depth=header[8],stride=Math.ceil(width*depth/8),raw=inflateSync(Buffer.concat(parts)),pixels=[];assert.equal(raw.length,(stride+1)*height);let previous=Buffer.alloc(stride);
+ for(let y=0;y<height;y++){const at=y*(stride+1),filter=raw[at],row=Buffer.alloc(stride);assert.ok(filter<=4);for(let x=0;x<stride;x++){const a=x?row[x-1]:0,b=previous[x],c=x?previous[x-1]:0,p=a+b-c,da=Math.abs(p-a),db=Math.abs(p-b),dc=Math.abs(p-c),predict=filter===0?0:filter===1?a:filter===2?b:filter===3?Math.floor((a+b)/2):da<=db&&da<=dc?a:db<=dc?b:c;row[x]=(raw[at+1+x]+predict)&255;}
+  for(let x=0;x<width;x++){const i=depth===8?row[x]:(row[x>>>1]>>>(x&1?0:4))&15;if(palette){assert.equal(palette[i*3],palette[i*3+1]);assert.equal(palette[i*3],palette[i*3+2]);}pixels.push([palette?palette[i*3]:i*17,alpha?alpha[i]:255]);}previous=row;}
  return {width,height,depth,pixels,bytes};
 }
 function fixture(name,png){if(!process.env.PN_TRANSFER_IMAGE_FIXTURES)return;const folder=process.env.PN_TRANSFER_IMAGE_FIXTURES;mkdirSync(folder,{recursive:true});writeFileSync(folder+'/'+name+'.png',png.bytes);writeFileSync(folder+'/'+name+'.json',JSON.stringify({width:png.width,height:png.height,pixels:png.pixels}));}
@@ -120,4 +120,25 @@ test('unavailable decoder, bad image or failed encoder never queue originals, va
 test('asynchronous image batches survive input clearing and category changes',async()=>{
  const item=imageHarness(184,256),h=item.h,files=[new File(['one'],'one.jpg'),new File(['two'],'two.png')];h.choose('cover');const pending=h.context.qa.add(files);files.length=0;h.choose('wallpaper');await pending;
  assert.deepEqual(Array.from(h.context.qa.entries(),e=>[e.name,e.kind]),[['one.png','cover'],['two.png','cover']]);assert.equal(item.closed(),2);
+});
+
+test('reading backgrounds always fill the portrait panel and use opaque native 4-bit grayscale',async()=>{
+ for(const [w,h] of [[3000,2000],[2000,4000],[100,200]]){const item=imageHarness(w,h),file=new File(['original'],'纸张.jpeg'),result=await item.h.context.qa.prepare(file,file.name,'background'),png=await decode(result.file);assert.equal(png.width,684);assert.equal(png.height,1216);assert.equal(png.depth,4);assert.equal(item.draws[0].length,8);assert.equal(png.bytes[25],0);assert.notEqual(result.file,file);assert.ok(png.pixels.every(p=>p[1]===255));}
+ const item=imageHarness(100,200);item.h.choose('background');await item.h.context.qa.add([new File(['original'],'paper.jpg')]);assert.equal(item.h.context.qa.entries()[0].kind,'background');
+});
+
+test('upload previews reference normalized bytes and release their object URL when cleared',async()=>{
+ const seen=[],item=imageHarness(80,140,{URL:{createObjectURL(file){seen.push(file);return 'blob:normalized';},revokeObjectURL(url){seen.push(url);}}}),h=item.h;h.choose('cover');await h.context.qa.add([new File(['original'],'cover.jpg')]);const entry=h.context.qa.entries()[0];assert.equal(seen[0],entry.file);assert.equal(entry.previewURL,'blob:normalized');entry.cancelled=true;h.element('clear').onclick();assert.equal(h.context.qa.entries().length,0);assert.equal(seen[1],'blob:normalized');
+});
+
+test('lossless predictor expansion cannot exceed the frozen three-predictor compressed size',async()=>{
+ const w=184,h=256,rgba=new Uint8Array(w*h*4);let seed=329841;
+ for(let y=0;y<h;y++)for(let x=0;x<w;x++){seed=(Math.imul(seed,1664525)+1013904223)>>>0;const shade=((seed>>>28)+(Math.floor(x/23)^Math.floor(y/19)))&15;rgba.set([shade*17,shade*17,shade*17,255],4*(y*w+x));}
+ const item=harness(()=>{}),png=await decode(await item.context.qa.png(rgba,w,h,false)),stride=w/2,legacy=Buffer.alloc((stride+1)*h);let previous=Buffer.alloc(stride);
+ for(let y=0;y<h;y++){const row=Buffer.alloc(stride);for(let x=0;x<w;x++)row[x>>1]|=(rgba[4*(y*w+x)]/17)<<(x&1?0:4);let best;
+  for(let f=0;f<3;f++){const residual=Buffer.from(row,(v)=>v);for(let x=0;x<stride;x++)residual[x]=(row[x]-(f===1?(x?row[x-1]:0):f===2?previous[x]:0))&255;const score=residual.reduce((sum,v)=>sum+Math.min(v,256-v),0);if(!best||score<best.score)best={f,score,residual};}
+  legacy[y*(stride+1)]=best.f;best.residual.copy(legacy,y*(stride+1)+1);previous=row;}
+ let compressed=0;for(let at=8;at<png.bytes.length;){const n=png.bytes.readUInt32BE(at);if(png.bytes.toString('ascii',at+4,at+8)==='IDAT')compressed+=n;at+=n+12;}
+ assert.ok(compressed<=deflateSync(legacy).length);
+ const long=imageHarness(100,200);await assert.rejects(long.h.context.qa.prepare(new File(['original'],'汉'.repeat(60)+'.jpg'),'汉'.repeat(60)+'.jpg','background'),/文件名过长/);assert.equal(long.closed(),1);
 });

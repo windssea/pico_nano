@@ -9,6 +9,8 @@
 #pragma once
 #include "pn_progress.h"
 #include "pn_reading_background.h"
+#include <stddef.h>
+#include <string.h>
 typedef struct {
     uint16_t pixels; ///< 正文28..72px / Body 28..72 px
     uint16_t line_percent; ///< 行距100..220百分比 / Line spacing 100..220 percent
@@ -23,7 +25,11 @@ typedef struct {
     int16_t weight; ///< 字重-1细、0标准、1..3加粗；只改字形笔画不改字宽与分页，旧记录为0 / Weight: -1 light, 0 regular, 1..3 bolder; changes strokes only, never advances or pagination; legacy records load as 0
     uint16_t clarity; ///< 清晰度0标准、1清晰、2锐利、3黑白；只改字形边缘灰阶，不改分页，旧记录为0 / Sharpness: standard, clear, sharp or black-and-white; changes glyph edge grays only, never pagination; legacy records load as 0
     uint16_t background; ///< 持久背景ID：0无、4竹影、7纯色中；旧1..8读取时仅移除款回退无，不改变分页 / Persistent paper ID: None 0, bamboo 4, texture 7; retired legacy IDs 1..8 load as None without changing pagination
+    char background_name[PN_BACKGROUND_NAME_MAX]; ///< 外部背景单文件名，内置时全零 / External paper basename, all zero for built-ins
+    pn_book_id_t background_identity; ///< 外部背景完整源摘要，内置时全零 / Full external-source digest, all zero for built-ins
 } pn_style_t;
+/// 只比较背景之前的排版字段，背景替换不丢语义邻页。/ Compare typesetting fields preceding the paper reference; replacing paper preserves semantic neighbors.
+static inline bool pn_style_same_typesetting(const pn_style_t *a,const pn_style_t *b){return a && b && !memcmp(a,b,offsetof(pn_style_t,background));}
 /// 产品默认舒适模式字号。/ Product default comfortable-mode body size.
 enum { PN_STYLE_DEFAULT_PIXELS = 44 };
 /// 舒适模式间距：145%行距、40%段距、缩进2字、32px边距；调用方可指定字号。

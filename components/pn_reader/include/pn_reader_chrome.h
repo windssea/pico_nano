@@ -44,3 +44,6 @@ pn_status_t pn_reader_loading_render(pn_font_t *ui,pn_frame_t *frame,const char 
 bool pn_reader_loading_needed(bool text_format,uint64_t source_bytes);
 /// 在正文视口的一行绘制虚线/点线，shade 0浅/1中/2深/3黑；0样式关闭，越界跳过，不分配或改变排版。 / Draw a dashed/dotted row in a text viewport with shade light/medium/dark/black; style zero disables, out-of-bounds rows are skipped, without allocation or layout changes.
 void pn_reader_guide_row(pn_frame_t *viewport,unsigned style,unsigned shade,int y);
+
+/// 只画状态文字，底图由控制层准备。/ Draw status text only over a controller-prepared underlay.
+pn_status_t pn_reader_status_text(pn_font_t *,pn_frame_t *);

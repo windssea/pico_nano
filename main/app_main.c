@@ -133,6 +133,10 @@ static pn_media_t data_media;
 static pn_media_t wallpaper_media;
 static bool wallpaper_ready;
 static pn_wallpaper_ui_t wallpaper_ui;
+static pn_background_gallery_t resource_previews; ///< 上传后空闲缩略预热 / Idle thumbnail warming after uploads
+static unsigned resource_preview_pending,resource_preview_kind,resource_preview_force;
+static uint64_t resource_preview_retry;
+static void resource_previews_close(void);
 static pn_wallpaper_mask_t lock_mask; ///< 锁屏时临时遮罩 / Temporary mask used only while locked
 static pn_font_manage_t font_manage;
 static pn_device_time_t time_sync;
@@ -419,7 +423,7 @@ static void ripple_memory_ensure(void){
 /// 书库翻页：只局部替换变化的列表像素，不升级为内容风险整屏GC16。/ Library paging: replace only the changed list pixels locally, never escalating to a content-risk full GC16.
 static atomic_bool shelf_flip;
 #if defined(ESP_PLATFORM)
-static unsigned reading_cleans,menu_cleans; ///< 清理计数：每四次第四次才用原GC16 / Clean counters: only every fourth uses the original GC16
+static unsigned menu_cleans; ///< 清理计数：每四次第四次才用原GC16 / Clean counters: only every fourth uses the original GC16
 #endif
 static pn_status_t present_panel(void *ctx,const pn_frame_t *frame,pn_refresh_t profile){
     (void)ctx;
@@ -462,7 +466,7 @@ static pn_status_t present_panel(void *ctx,const pn_frame_t *frame,pn_refresh_t 
 #if defined(ESP_PLATFORM)
         // 账本完整时四次维护里三次只白推变过色、现为纯白的像素，第四次才用原GC16整屏清理（均衡直流、清深色残影）。
         // With a complete ledger, three of four maintenances only white-push pixels that changed and are now pure white; the fourth uses the original full GC16 (DC balance, dark ghosts).
-        if(known && pn_device_ripple_ghost_selective() && (menu_cleans++%4u)!=3u){flat_white=true;reason="maintenance-white";}
+        if(known && pn_device_ripple_ghost_selective() && (menu_cleans%4u)!=3u){flat_white=true;reason="maintenance-white";}
         else
 #endif
         {mode=MODE_GC16;reason="maintenance";}
@@ -481,7 +485,7 @@ static pn_status_t present_panel(void *ctx,const pn_frame_t *frame,pn_refresh_t 
     // Cleaning pages (due or content risk): with a complete ledger, three of four use the gentle GL16 ripple plus a white push of ledger pure-white pixels (no dark flash); the fourth uses the original GC16 ripple.
     bool clean_wanted=ripple_clean || mode==MODE_GC16,white_push=false;
     int ripple_mode=clean_wanted?MODE_GC16:MODE_GL16;
-    if(ripple_turn && clean_wanted && body_refresh && known && !deep_clean && pn_device_ripple_ghost_selective() && (reading_cleans++%4u)!=3u){ripple_mode=MODE_GL16;white_push=true;}
+    // 正文到期清理必须执行原GC16；白推不能等价清除深色/灰阶残影。/ Due reading cleans must execute original GC16; white pushes cannot equivalently clear dark/grayscale ghosts.
     if(((ripple_turn && body_refresh) || flat_white) && known && !deep_clean && !ripple_memory.tables)ripple_memory.tables=heap_caps_aligned_alloc(16,PN_RIPPLE_BANDS*1024u,MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
     bool rippling=ripple_turn && body_refresh && known && !deep_clean && pn_device_ripple_begin_ex(&ripple_memory,hardware.hl.waveform,ripple_mode,ripple_reverse,false,white_push,hardware.hl.difference_fb,&ripple_wave);
     bool flat_running=!rippling && flat_white && known && !deep_clean && pn_device_ripple_begin_ex(&ripple_memory,hardware.hl.waveform,MODE_GL16,false,true,true,hardware.hl.difference_fb,&ripple_wave);
@@ -565,6 +569,9 @@ static pn_status_t present_panel(void *ctx,const pn_frame_t *frame,pn_refresh_t 
     else if(!rippling && !flat_running && mode==MODE_GC16)pn_device_ripple_ghost_clear();
 #endif
     if(panel_known){
+#if defined(ESP_PLATFORM)
+        if(!body_refresh && maintenance.management+1u>=24u)menu_cleans++;
+#endif
         // 白推同样算一次清理：重置翻页/维护计数，避免下一次立即再触发。/ A white push also counts as a clean, resetting turn/maintenance counters so it does not retrigger at once.
         pn_device_refresh_commit(&maintenance,body_refresh,mode==MODE_GC16 || white_cleaned,management_full,maintenance_plan);
         if(mode==MODE_GC16 || white_cleaned)atomic_store(&full_clean_completed,true);
@@ -1269,10 +1276,19 @@ static void identity_cache_store(void){
 /// 传输停止屏障后把本次已确认安装的书籍身份写入预计算缓存；仍从实际文件读取大小/修改时间复核，不按安装名猜身份。
 /// After the transfer stop barrier, record identities confirmed by this session; still re-check size/mtime from the actual file, never infer identity from the install name.
 static void identity_cache_transfer_installs(void){
-    identity_cache_ready();if(!identity_cache_loaded)return;
+    identity_cache_ready();unsigned overflow=0;resource_preview_pending|=pn_device_transfer_take_image_changes(&transfer,&overflow);resource_preview_force|=overflow;
     pn_upload_kind_t kind;char name[PN_UPLOAD_NAME_MAX];pn_book_id_t digest;bool changed=false;
     while(pn_device_transfer_take_install(&transfer,&kind,name,sizeof name,&digest)==PN_OK){
-        if(kind!=PN_UPLOAD_BOOK)continue;
+        if(kind==PN_UPLOAD_WALLPAPER || kind==PN_UPLOAD_BACKGROUND){
+            const char *directory=kind==PN_UPLOAD_BACKGROUND?PN_SD_BACKGROUNDS:PN_SD_WALLPAPERS;
+            const char *cache=kind==PN_UPLOAD_BACKGROUND?PN_SD_BACKGROUND_CACHE:PN_SD_WALLPAPER_CACHE;
+            char image[PN_CATALOG_PATH_MAX];int n=snprintf(image,sizeof image,"%s/%s/%s",PN_SD_MOUNT,directory,name);
+            // 使用各类别固定缓存目录，不将客户端名字用作目录。/ Use each purpose's fixed cache directory, never a client name as a folder.
+            char cache_path[PN_CATALOG_PATH_MAX];snprintf(cache_path,sizeof cache_path,"%s/%s",PN_SD_MOUNT,cache);
+            if(n>0 && (size_t)n<sizeof image)(void)pn_wallpaper_thumbnail_invalidate(&sd_media,cache_path,image);
+            resource_preview_pending|=kind==PN_UPLOAD_BACKGROUND?2u:1u;
+        }
+        if(kind!=PN_UPLOAD_BOOK || !identity_cache_loaded)continue;
         char path[PN_CATALOG_PATH_MAX];int n=snprintf(path,sizeof path,"%s/%s/%s",PN_SD_MOUNT,PN_SD_BOOKS,name);
         if(n<0 || (size_t)n>=sizeof path)continue;
         uint64_t size;int64_t mtime;if(!pn_identity_cache_stat(path,&size,&mtime))continue;
@@ -1351,6 +1367,7 @@ static bool tick_identity_takeover(void){
     return true;
 }
 static void start_reader_impl(void){
+    resource_previews_close();
     pn_cover_work_abort(&cover_work);
     pn_menu_cache_drop(&menu_cache);
     // 点击正在预计算的书：保留任务、先显示加载页，由后台轮次接续；不在此同步读完整书。
@@ -1692,6 +1709,20 @@ static void paint_transfer(bool menu){
     if(status==PN_OK){status_page=true;shelf_mode=false;if(!menu)last_transfer_view=transfer_view;}
     else if(!menu)last_transfer_view.phase=(pn_transfer_view_phase_t)-1;
 }
+// 输入/交接立即关闭任务，下一次安静期重用已完成缓存。/ Input/handoff closes jobs immediately; the next quiet period reuses finished caches.
+static void resource_previews_close(void){pn_background_gallery_close(&resource_previews);resource_preview_kind=0;}
+static bool resource_previews_idle(uint64_t now){
+    if(!resource_preview_pending || now<resource_preview_retry)return false;
+    if(!resource_previews.impl){resource_preview_kind=resource_preview_pending&1u?1u:2u;
+        const char *directory=resource_preview_kind==1u?PN_SD_MOUNT "/" PN_SD_WALLPAPERS:PN_SD_MOUNT "/" PN_SD_BACKGROUNDS;
+        const char *cache=resource_preview_kind==1u?PN_SD_MOUNT "/" PN_SD_WALLPAPER_CACHE:PN_SD_MOUNT "/" PN_SD_BACKGROUND_CACHE;
+        if(pn_background_gallery_open_at(&resource_previews,&pool,&sd_media,directory,cache,resource_preview_kind==2u)!=PN_OK){resource_preview_retry=now+5000u;return false;}if(resource_preview_force&resource_preview_kind)pn_background_gallery_invalidate(&resource_previews);}
+    pn_status_t s=pn_background_gallery_tick(&resource_previews);
+    if(s==PN_EMPTY){if(pn_background_gallery_can_page(&resource_previews,false)){if(pn_background_gallery_page(&resource_previews,false)==PN_OK)return true;}
+        resource_preview_pending&=~resource_preview_kind;resource_preview_force&=~resource_preview_kind;resource_previews_close();}
+    else if(s!=PN_BUSY && s!=PN_OK){resource_previews_close();resource_preview_retry=now+5000u;}
+    return s==PN_BUSY || s==PN_OK;
+}
 /// 进入壁纸设置：先保存并关闭正文释放内存，退出后回原书或书架。/ Enter wallpaper settings: save and close the book first to free memory, then return to the book or shelf on exit.
 static void begin_wallpaper(void){
     if(transfer.impl || usb.open || wallpaper_ui.impl)return;
@@ -1750,6 +1781,7 @@ static pn_status_t begin_toc(void){
 }
 static void end_wallpaper(void){pn_wallpaper_ui_close(&wallpaper_ui);if(back_to_settings){back_to_settings=false;begin_settings();return;}if(*selected_path)start_reader();else show_shelf("",false);}
 static void begin_transfer(bool station){
+    resource_previews_close();
     if(time_sync.impl || ota.impl || wifi_probe.impl){message("无线操作尚未结束","请先结束对时或固件更新");return;}
     if(transfer.impl || usb.open)return;
     if(reader_active()){
@@ -1847,6 +1879,7 @@ static void resume_reader(void){
     start_reader();loading_shown=false;
 }
 static void lock_and_sleep_impl(const char *hint){
+    resource_previews_close();
     uint64_t lock_at=now_ms();bool wake_pending=false;
     ESP_LOGI(TAG,"Locking; idle at %llu ms",(unsigned long long)last_input);
     locked=true;show_lock(hint);if(!reader_suspended)pn_wallpaper_mask_close(&lock_mask);
@@ -1922,6 +1955,7 @@ static void paint_usb(void){
 }
 /// 保存并关闭全部TF消费者，再取得USB独占；没有插线也可等待枚举。/ Save/close all TF consumers before exclusive USB ownership, allowing enumeration wait without a cable.
 static void begin_usb(void){
+    resource_previews_close();
     if(usb.open || transfer.impl || time_sync.impl || ota.impl || wifi_probe.impl)return;
     if(!stop_reader())return;
     pn_wallpaper_mask_close(&lock_mask);pn_wallpaper_ui_close(&wallpaper_ui);pn_font_manage_close(&font_manage);pn_settings_ui_close(&settings_ui);
@@ -2399,7 +2433,7 @@ static void device_task(void *arg){
         if(!opening && shelf_mode && !home_mode && shelf_page)view+=(uint32_t)shelf_page->index*32u;
         pn_device_async_root_view(&async_port,view,body,input_flags,root_navigation_hit(80,1150)>=0);
         pn_device_input_event_t queued={0};pn_status_t available=async_port.input_active?pn_device_async_take(&async_port,&queued):PN_EMPTY;
-        if(available!=PN_EMPTY)reading_stats_pause();
+        if(available!=PN_EMPTY){reading_stats_pause();resource_previews_close();}
         if(available==PN_EMPTY && reading_stats.media && now>=last_input && now-last_input>=1500u)(void)pn_reading_stats_save(&reading_stats,now,false);
         // 有输入立即回到最高频；连续空闲约1秒才放锁，交互中不反复切频。/ Input returns to maximum at once; release only after about one second idle so interaction does not toggle frequency.
         if(available==PN_OK){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);pn_feedback_idle_activity(&feedback_idle,now);}
@@ -2544,6 +2578,7 @@ static void device_task(void *arg){
                 else if(reader_active() && !status_page){pn_status_t status=active_step(action,now_ms());report_reader_result(status);}
                 else start_reader();}}}
         bool background=false;
+        if(available==PN_EMPTY && !locked && styles.active && !touch_held && !tap.down){pn_status_t sampled=pn_style_ui_tick(&styles,present,NULL);background=sampled==PN_BUSY;}
         if(available==PN_EMPTY && !locked && wallpaper_ui.impl && !touch_held && !tap.down){
             pn_status_t sampled=pn_wallpaper_ui_tick(&wallpaper_ui,present,NULL);background=sampled==PN_BUSY;
             if(sampled==PN_OK || sampled==PN_BUSY){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);}}
@@ -2562,6 +2597,7 @@ static void device_task(void *arg){
 #if defined(CONFIG_PN_UI_FEEDBACK) && CONFIG_PN_UI_FEEDBACK
         if(available==PN_EMPTY){pn_status_t settled=feedback_idle_tick(now_ms(),body || locked || touch_held || tap.down || pn_font_manage_motion_stats(&font_manage).active || pn_toc_ui_motion_stats(&toc).active || transfer.impl || usb.open || time_sync.impl || ota_busy() || wifi_probe.impl);if(settled!=PN_EMPTY){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);}}
 #endif
+        if(!background && available==PN_EMPTY && shelf_mode && !focus_page() && !transfer.impl && !usb.open && !locked && !opening && !touch_held && !tap.down && now>=last_input && now-last_input>=1500u)background=resource_previews_idle(now);
         if(body && available==PN_EMPTY && !touch_held){background=tick_reader_background(now_ms());
             if(background){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);}}
         if(available!=PN_OK){if(power_idle<POWER_IDLE_ROUNDS)power_idle++;if(power_idle>=POWER_IDLE_ROUNDS)pn_device_power_busy(PN_POWER_PRODUCT,false);

@@ -42,6 +42,7 @@ typedef struct {
  pn_device_network_sink_t sink; ///< 交给HTTP的出口 / Outlet handed to HTTP
  pn_device_transfer_install_sink_t install_sink; ///< HTTP任务只复制已提交书籍身份 / HTTP task copies committed book identities only
  struct {pn_upload_kind_t kind;char name[PN_UPLOAD_NAME_MAX];pn_book_id_t digest;} installed[8]; ///< 待主任务写入身份缓存的最近安装 / Recent installs for the main task to cache
+ unsigned image_changes,image_overflow; ///< 类别标志不因环溢出丢失 / Purpose flags survive ring overflow
  unsigned install_first,install_count; ///< 环形队首与长度 / Ring head and length
 #ifdef ESP_PLATFORM
  SemaphoreHandle_t mutex;
@@ -79,7 +80,9 @@ static pn_status_t sink_submit(void *ctx,const pn_network_credentials_t *c,bool 
 static void install_note(void *ctx,pn_upload_kind_t kind,const char *name,const pn_book_id_t *digest){
  transfer_t *s=ctx;if(!s || !name || !digest)return;
  lock(s);
+ s->image_changes|=kind==PN_UPLOAD_WALLPAPER?1u:kind==PN_UPLOAD_BACKGROUND?2u:0u;
  if(s->install_count==sizeof s->installed/sizeof s->installed[0]){
+  pn_upload_kind_t dropped=s->installed[s->install_first].kind;s->image_overflow|=dropped==PN_UPLOAD_WALLPAPER?1u:dropped==PN_UPLOAD_BACKGROUND?2u:0u;
   s->install_first=(s->install_first+1u)%(unsigned)(sizeof s->installed/sizeof s->installed[0]);s->install_count--;
  }
  unsigned at=(s->install_first+s->install_count)%(unsigned)(sizeof s->installed/sizeof s->installed[0]);
@@ -219,3 +222,5 @@ pn_status_t pn_device_transfer_network_result(pn_device_transfer_t *t,pn_status_
  if(!t || !t->impl || !saved_ssid || strlen(saved_ssid)>PN_NETWORK_SSID_MAX)return PN_INVALID;
  transfer_t *s=t->impl;lock(s);strcpy(s->saved_ssid,saved_ssid);s->network_last=result;s->saving=false;unlock(s);return PN_OK;
 }
+
+unsigned pn_device_transfer_take_image_changes(pn_device_transfer_t *t,unsigned *overflow){if(overflow)*overflow=0;if(!t || !t->impl)return 0;transfer_t *s=t->impl;lock(s);unsigned bits=s->image_changes;if(overflow)*overflow=s->image_overflow;s->image_changes=s->image_overflow=0;unlock(s);return bits;}

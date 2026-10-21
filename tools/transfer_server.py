@@ -12,7 +12,7 @@ import time
 import urllib.parse
 
 ROOT=pathlib.Path(__file__).resolve().parents[1]
-KINDS={'book':1,'font':2,'cover':3,'wallpaper':4}
+KINDS={'book':1,'font':2,'cover':3,'wallpaper':4,'background':5}
 NAMES={value:key for key,value in KINDS.items()}
 MESSAGES={1:'输入参数无效',2:'资源正在使用或同名文件已存在',3:'没有找到该文件或上传会话',4:'空间、配额或大小超过限制',5:'内存不足，请稍后重试',6:'存储介质已失效',7:'文件身份已经变化',8:'上传已取消',9:'暂不支持此格式',10:'摘要或文件格式校验失败',11:'读写失败，请重新查询后续传'}
 HTTP_CODES={1:400,2:409,3:404,4:413,5:503,6:503,7:409,8:409,9:422,10:422,11:503}
@@ -156,14 +156,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
      result=self.native('CANCEL '+identifier)
      if result is not None:self.send_json(200,public_state(result)|{'message':'上传已取消'})
      return
-   match=re.fullmatch('/api/v1/files/(book|font|cover|wallpaper)',path)
+   match=re.fullmatch('/api/v1/files/(book|font|cover|wallpaper|background)',path)
    if self.command=='GET' and match:
     query=urllib.parse.parse_qs(parsed.query,strict_parsing=True)
     if set(query)!=set(('name',)) or len(query['name'])!=1:raise BadRequest('文件名参数无效')
     result=self.native(f'FILE {KINDS[match[1]]} {basename(query["name"][0])}')
     if result is not None:self.send_json(200,{'size':result['size'],'sha256':result['sha256']})
     return
-   resource={'/api/v1/fonts':'font','/api/v1/covers':'cover','/api/v1/wallpapers':'wallpaper'}.get(path)
+   resource={'/api/v1/fonts':'font','/api/v1/covers':'cover','/api/v1/wallpapers':'wallpaper','/api/v1/backgrounds':'background'}.get(path)
    if resource and self.command=='GET':
     query=urllib.parse.parse_qs(parsed.query,strict_parsing=True,keep_blank_values=True) if parsed.query else {}
     if set(query)-set(('after',)) or len(query.get('after',[]))>1:raise BadRequest('查询参数无效')

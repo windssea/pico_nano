@@ -3,15 +3,18 @@ import hashlib,pathlib,subprocess,sys,tempfile
 sys.path.insert(0,str(pathlib.Path(__file__).resolve().parents[2]/'tools'))
 from build_brand_image import decode
 from build_firmware_art import reading_bounds,resize
-sources=sorted(pathlib.Path(sys.argv[2]).glob('*.png'));assert len(sources)==8
+sources=sorted(pathlib.Path(sys.argv[2]).glob('*.png'))
+retained={i:[p for p in sources if p.name.startswith(f'{i:02d}_')] for i in (4,7)}
+assert all(len(paths)==1 for paths in retained.values())
 identities={p:hashlib.sha256(p.read_bytes()).digest() for p in sources}
 with tempfile.TemporaryDirectory() as directory:
  subprocess.run([sys.argv[1],'--reading',directory],check=True,timeout=120)
  assert pathlib.Path(directory,'0.raw').read_bytes()==b'\xff'*(342*1216)
- for index,path in enumerate(sources,1):
+ for index in range(1,9):
   if index not in (4,7):
    assert pathlib.Path(directory,f'{index}.raw').read_bytes()==b'\xff'*(342*1216)
    continue
+  path=retained[index][0]
   gray,w,h,_=decode(path);assert (w,h)==(684,1216)
   bounds=(10,0,674,1216) if index==3 else ((48,0,636,1216) if index==4 else (0,0,684,1216))
   assert reading_bounds(path)==bounds,path

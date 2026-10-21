@@ -21,6 +21,7 @@ int main(int argc,char **argv){
     assert(pn_ls_view_choose(&view,1,1,1)==PN_INVALID);
     assert(pn_ls_view_choose(&view,1,0,1)==PN_OK);
     assert(pn_ls_view_choose(&view,1,1,3)==PN_OK && view.choices[1].image_kind==PN_UPLOAD_COVER);
+    assert(pn_ls_view_choose(&view,1,1,5)==PN_OK && view.choices[1].image_kind==PN_UPLOAD_BACKGROUND);
     assert(pn_ls_view_can_confirm(&view));assert(pn_ls_view_hit(&view,500,1120)==PN_LSV_CONFIRM);
     assert(pn_ls_view_render(&view,&font,&frame)==PN_OK && font.pixels==32);
     if(argc==2)capture(argv[1],"confirm",&frame);

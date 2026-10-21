@@ -6,7 +6,9 @@ enum {
     PN_READING_BACKGROUND_BAMBOO = 4, ///< 竹影轻风，沿用旧ID4 / Bamboo, retaining legacy ID 4
     PN_READING_BACKGROUND_PAPER = 7, ///< 纯色中，沿用旧ID7 / Paper texture, retaining legacy ID 7
     PN_READING_BACKGROUND_LEGACY_MAX = 8, ///< 仍可识别的旧存储范围 / Recognized legacy storage range
-    PN_READING_BACKGROUND_COUNT = 2 ///< 当前非零图片数，不是最大持久ID / Current nonzero artwork count, not the maximum persistent ID
+    PN_READING_BACKGROUND_COUNT = 2, ///< 当前非零图片数，不是最大持久ID / Current nonzero artwork count, not the maximum persistent ID
+    PN_READING_BACKGROUND_EXTERNAL = 65535, ///< 外部资源，不复用旧编号 / External resource, never reusing a legacy ID
+    PN_BACKGROUND_NAME_MAX = 160 ///< 含终止符的UTF8文件名 / UTF8 basename including its terminator
 };
 /// 仅将已移除背景解析为无；调用方先拒绝越界ID，其他排版字段不变。 / Resolve retired paper to None only; callers reject invalid IDs first and retain other typesetting fields.
 static inline unsigned pn_reading_background_resolve(unsigned id){

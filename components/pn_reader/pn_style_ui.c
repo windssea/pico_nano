@@ -42,7 +42,7 @@ typedef struct {unsigned pixels,line,gap,indent,margin;} preset_t;
 static const preset_t presets[3]={{PN_STYLE_DEFAULT_PIXELS,145,40,2,32},{36,125,20,2,24},{56,160,40,2,32}};
 static const char *const preset_names[3]={"舒适","紧凑","大字"};
 static unsigned field_value(const pn_style_t *s,unsigned i){switch(i){case 0:return s->pixels;case 1:return s->line_percent;case 2:return s->gap_percent;case 3:return s->indent_em;case 4:return s->tracking_percent;case 5:return s->margin;case 6:return s->reading_line;case 8:return s->reading_line_shade;case 9:return (unsigned)(s->weight+1);case 10:return s->clarity;case 11:return s->background;default:return (unsigned)(s->reading_line_offset+8);}}
-static void field_set(pn_style_t *s,unsigned i,unsigned v){switch(i){case 0:s->pixels=(uint16_t)v;break;case 1:s->line_percent=(uint16_t)v;break;case 2:s->gap_percent=(uint16_t)v;break;case 3:s->indent_em=(uint16_t)v;break;case 4:s->tracking_percent=(uint16_t)v;break;case 5:s->margin=(uint16_t)v;break;case 6:s->reading_line=(uint16_t)v;break;case 8:s->reading_line_shade=(uint16_t)v;break;case 9:s->weight=(int16_t)((int)v-1);break;case 10:s->clarity=(uint16_t)v;break;case 11:s->background=(uint16_t)v;break;default:s->reading_line_offset=(int16_t)((int)v-8);break;}}
+static void field_set(pn_style_t *s,unsigned i,unsigned v){switch(i){case 0:s->pixels=(uint16_t)v;break;case 1:s->line_percent=(uint16_t)v;break;case 2:s->gap_percent=(uint16_t)v;break;case 3:s->indent_em=(uint16_t)v;break;case 4:s->tracking_percent=(uint16_t)v;break;case 5:s->margin=(uint16_t)v;break;case 6:s->reading_line=(uint16_t)v;break;case 8:s->reading_line_shade=(uint16_t)v;break;case 9:s->weight=(int16_t)((int)v-1);break;case 10:s->clarity=(uint16_t)v;break;case 11:s->background=(uint16_t)v;memset(s->background_name,0,sizeof s->background_name);memset(&s->background_identity,0,sizeof s->background_identity);break;default:s->reading_line_offset=(int16_t)((int)v-8);break;}}
 static void field_text(const pn_style_t *s,unsigned i,char *out,size_t cap){
     unsigned v=field_value(s,i);
     if(i==1 || i==2)snprintf(out,cap,"%u.%02u",v/100,v%100);
@@ -54,7 +54,7 @@ static void field_text(const pn_style_t *s,unsigned i,char *out,size_t cap){
     else if(i==8){static const char *const shades[4]={"浅","中","深","黑"};snprintf(out,cap,"%s",shades[v<4?v:0]);}
     else if(i==9){static const char *const weights[5]={"细","标准","稍粗","粗","特粗"};snprintf(out,cap,"%s",weights[v<5?v:1]);}
     else if(i==10){static const char *const levels[4]={"标准","清晰","锐利","黑白"};snprintf(out,cap,"%s",levels[v<4?v:0]);}
-    else if(i==11)snprintf(out,cap,"%s",pn_reading_background_name(v));
+    else if(i==11)snprintf(out,cap,"%s",v==PN_READING_BACKGROUND_EXTERNAL?"自定义":pn_reading_background_name(v));
     else snprintf(out,cap,"%u",v);
 }
 static int selected_preset(const pn_style_t *s){
@@ -150,12 +150,17 @@ static pn_status_t paint_backgrounds(pn_style_ui_t *u,pn_font_t *font,pn_frame_t
     if(s==PN_OK)s=pn_w_text_ex(font,frame,"仅修改草稿，应用后保存",32,164,620,PN_ALIGN_LEFT,PN_UI_MUTED,false);
     for(unsigned i=0;i<=PN_READING_BACKGROUND_COUNT && s==PN_OK;i++){
         unsigned id=pn_reading_background_id(i);
-        int x=32+(int)(i%3)*212,y=190+(int)(i/3)*286;bool chosen=pn_reading_background_resolve(u->draft.background)==id;
+        int x=32+(int)(i%3)*212,y=190+(int)(i/3)*286;bool chosen=u->draft.background!=PN_READING_BACKGROUND_EXTERNAL && pn_reading_background_resolve(u->draft.background)==id;
         s=pn_reading_background_rect(id,frame,x+36,y+12,124,220);
         pn_w_round_stroke(frame,x,y,196,266,10,chosen?3:1,chosen?PN_UI_INK:PN_UI_RULE);
         if(s==PN_OK)s=pn_font_size(font,22);
         if(s==PN_OK)s=pn_w_text_ex(font,frame,pn_reading_background_name(id),x+6,y+252,184,PN_ALIGN_CENTER,PN_UI_INK,chosen);
     }
+    pn_background_gallery_paint(&u->gallery,&u->draft,frame);
+    if(s==PN_OK)s=pn_font_size(font,24);
+    if(s==PN_OK && !pn_background_gallery_count(&u->gallery))s=pn_w_text_ex(font,frame,"上传的阅读背景会显示在这里",32,556,620,PN_ALIGN_CENTER,PN_UI_MUTED,false);
+    if(s==PN_OK)s=pn_w_button(font,frame,"上一页",32,1104,196,80,pn_background_gallery_can_page(&u->gallery,true)?0:PN_W_DISABLED);
+    if(s==PN_OK)s=pn_w_button(font,frame,"下一页",456,1104,196,80,pn_background_gallery_can_page(&u->gallery,false)?0:PN_W_DISABLED);
     return s;
 }
 pn_status_t pn_style_ui_render(void *ctx,pn_font_t *font,pn_font_t *metadata,pn_frame_t *frame){
@@ -197,11 +202,22 @@ pn_status_t pn_style_ui_event(pn_style_ui_t *u,int command,uint64_t now,pn_reade
     }
     if(u->backgrounds){
         if(command==PN_SUI_BACKGROUND_BACK || command==PN_SUI_CANCEL)u->backgrounds=false;
-        else if(command>=PN_SUI_BACKGROUND_ITEM && command<=PN_SUI_BACKGROUND_ITEM+PN_READING_BACKGROUND_LEGACY_MAX && pn_reading_background_resolve((unsigned)(command-PN_SUI_BACKGROUND_ITEM))==(unsigned)(command-PN_SUI_BACKGROUND_ITEM)){u->draft.background=(uint16_t)(command-PN_SUI_BACKGROUND_ITEM);u->backgrounds=false;u->selected=11;}
-        else return PN_EMPTY;
+        else if(command>=PN_SUI_BACKGROUND_ITEM && command<=PN_SUI_BACKGROUND_ITEM+PN_READING_BACKGROUND_LEGACY_MAX && pn_reading_background_resolve((unsigned)(command-PN_SUI_BACKGROUND_ITEM))==(unsigned)(command-PN_SUI_BACKGROUND_ITEM)){field_set(&u->draft,11,(unsigned)(command-PN_SUI_BACKGROUND_ITEM));u->backgrounds=false;u->selected=11;}
+        else if(command==PN_SUI_BACKGROUND_PREVIOUS || command==PN_SUI_BACKGROUND_NEXT){bool previous=command==PN_SUI_BACKGROUND_PREVIOUS;if(!pn_background_gallery_can_page(&u->gallery,previous))return PN_EMPTY;status=pn_background_gallery_page(&u->gallery,previous);}
+        else if(command>=PN_SUI_BACKGROUND_EXTERNAL && command<PN_SUI_BACKGROUND_EXTERNAL+6){
+            u->presented=false;status=overlay(u,busy_paint,present,ctx);
+            if(status==PN_OK)status=pn_background_gallery_choose(&u->gallery,(unsigned)(command-PN_SUI_BACKGROUND_EXTERNAL),&u->draft);
+            if(status==PN_OK){u->backgrounds=false;u->selected=11;}else u->notice="背景未能读取，请重试";
+        }else return PN_EMPTY;
+        if(!u->backgrounds)pn_background_gallery_close(&u->gallery);
         return pn_style_ui_present(u,present,ctx);
     }
-    if(command==PN_SUI_BACKGROUND){u->backgrounds=true;return pn_style_ui_present(u,present,ctx);}
+    if(command==PN_SUI_BACKGROUND){
+        pn_pool_t *pool=NULL;pn_media_t *media=NULL;status=u->epub?pn_epub_app_paper_context(u->epub,&pool,&media):pn_reader_app_paper_context(u->reader,&pool,&media);
+        if(status==PN_OK)status=pn_background_gallery_open(&u->gallery,pool,media);
+        if(status!=PN_OK){u->notice="图库暂不可用，请重试";return pn_style_ui_present(u,present,ctx);}
+        u->backgrounds=true;return pn_style_ui_present(u,present,ctx);
+    }
     if(command==PN_SUI_FONTS){if(u->application_failed){u->notice="请先应用或取消排版";(void)pn_style_ui_present(u,present,ctx);return PN_BUSY;}if(u->did_preview){status=cancel(u,now,present,ctx);if(status!=PN_OK)return status;u->did_preview=false;}u->request_fonts=true;return PN_OK;}
     if(command>=PN_SUI_FIELD && command<PN_SUI_FIELD+PN_SUI_FIELDS*2){
         static const unsigned steps[]={2,5,5,1,5,2,1,2,1,1,1,1},minimum[]={28,100,0,0,0,16,0,0,0,0,0,0},maximum[]={72,220,100,2,50,80,2,16,3,4,3,8};
@@ -233,11 +249,13 @@ int pn_style_ui_hit(const pn_style_ui_t *u,int x,int y){
     if(!u || !u->active || x<0 || x>=684 || y<0 || y>=1216)return -1;
     if(u->backgrounds){
         if(pn_w_header_hit(x,y,false)==1)return PN_SUI_BACKGROUND_BACK;
+        if(x>=32 && x<652 && y>=1104 && y<1184){bool previous=x<228;if((previous || x>=456) && pn_background_gallery_can_page(&u->gallery,previous))return previous?PN_SUI_BACKGROUND_PREVIOUS:PN_SUI_BACKGROUND_NEXT;return -1;}
         if(x<32 || x>=652 || y<190 || y>=190+3*286)return -1;
         int col=(x-32)/212,row=(y-190)/286;
         if((x-32)%212>=196 || (y-190)%286>=266)return -1;
         unsigned slot=(unsigned)(row*3+col);
-        return slot<=PN_READING_BACKGROUND_COUNT?PN_SUI_BACKGROUND_ITEM+(int)pn_reading_background_id(slot):-1;
+        if(slot<=PN_READING_BACKGROUND_COUNT)return PN_SUI_BACKGROUND_ITEM+(int)pn_reading_background_id(slot);
+        return slot-3<pn_background_gallery_count(&u->gallery)?PN_SUI_BACKGROUND_EXTERNAL+(int)slot-3:-1;
     }
     if(u->preview)return PN_SUI_FORM;
     if(y<PN_W_HEADER_H){if(pn_w_header_hit(x,y,false)==1)return PN_SUI_CANCEL;return x>=480 && y>=44?PN_SUI_RESET:-1;}
@@ -251,7 +269,8 @@ int pn_style_ui_hit(const pn_style_ui_t *u,int x,int y){
     }
     int preset=pn_w_segments_hit(3,PRESET_Y,PRESET_H,x,y);return preset>=0?PN_SUI_PRESET+preset:-1;
 }
-void pn_style_ui_close(pn_style_ui_t *u){if(u)memset(u,0,sizeof *u);}
+void pn_style_ui_close(pn_style_ui_t *u){if(u){pn_background_gallery_close(&u->gallery);memset(u,0,sizeof *u);}}
+pn_status_t pn_style_ui_tick(pn_style_ui_t *u,pn_reader_present_fn present,void *ctx){if(!u || !u->active || !u->backgrounds || !u->presented)return PN_EMPTY;pn_status_t s=pn_background_gallery_tick(&u->gallery);return s==PN_OK?pn_style_ui_present(u,present,ctx):s;}
 
 pn_status_t pn_style_ui_open_epub(pn_style_ui_t *u,pn_epub_app_t *reader,pn_reader_present_fn present,void *ctx){
     if(!u || !reader || !reader->impl)return PN_INVALID;

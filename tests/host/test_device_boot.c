@@ -120,3 +120,5 @@ int main(int argc,char **argv){assert(argc==2);sd_async=strcmp(argv[1],"sd_async
 }
 
 size_t heap_caps_get_free_size(unsigned caps){(void)caps;return 8u*1024u*1024u;}
+
+unsigned pn_device_transfer_take_image_changes(pn_device_transfer_t *t,unsigned *overflow){(void)t;if(overflow)*overflow=0;return 0;}

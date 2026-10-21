@@ -11,7 +11,7 @@ def run(script):
 
 out = run('tap:500:1120,tap:300:420,tap:300:650,tap:500:1120,tap:100:1120,quit')
 assert 'action=101 status=0 phase=1' in out,out
-assert 'action=104 status=0 phase=1' in out,out
+assert 'action=105 status=0 phase=1' in out,out
 assert 'action=1 status=0 phase=2' in out,out
 assert 'action=3 status=0 phase=7' in out,out
 out = run('tap:550:1010,tap:550:1010,tap:550:1010,tap:100:1120,quit')

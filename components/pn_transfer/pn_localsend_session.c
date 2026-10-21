@@ -126,7 +126,7 @@ pn_status_t pn_ls_decide(pn_ls_session_t *out,uint64_t generation,const pn_ls_ch
     if(s->view.phase==PN_LS_EXPIRED)return PN_CANCELLED;
     if(s->view.phase!=PN_LS_PENDING)return PN_BUSY;
     size_t accepted=0;for(size_t i=0;i<s->view.request.count;i++)if(choices[i].accept){
-        if(!s->view.request.files[i].kind && choices[i].image_kind!=PN_UPLOAD_COVER && choices[i].image_kind!=PN_UPLOAD_WALLPAPER)return PN_INVALID;
+        if(!s->view.request.files[i].kind && choices[i].image_kind!=PN_UPLOAD_COVER && choices[i].image_kind!=PN_UPLOAD_WALLPAPER && choices[i].image_kind!=PN_UPLOAD_BACKGROUND)return PN_INVALID;
         accepted++;
     }
     if(!accepted){s->view.phase=PN_LS_REJECTED;

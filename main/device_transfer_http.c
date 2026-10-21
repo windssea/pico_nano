@@ -136,15 +136,15 @@ static bool json_guard(const uint8_t *bytes,size_t n){
  }
  return !quoted && !depth;
 }
-static pn_upload_kind_t kind(const char *s){if(!s)return 0;return !strcmp(s,"book")?PN_UPLOAD_BOOK:!strcmp(s,"font")?PN_UPLOAD_FONT:!strcmp(s,"cover")?PN_UPLOAD_COVER:!strcmp(s,"wallpaper")?PN_UPLOAD_WALLPAPER:0;}
+static pn_upload_kind_t kind(const char *s){if(!s)return 0;return !strcmp(s,"book")?PN_UPLOAD_BOOK:!strcmp(s,"font")?PN_UPLOAD_FONT:!strcmp(s,"cover")?PN_UPLOAD_COVER:!strcmp(s,"wallpaper")?PN_UPLOAD_WALLPAPER:!strcmp(s,"background")?PN_UPLOAD_BACKGROUND:0;}
 /// 精确资源路由，拒绝同前缀的其他路径。/ Match exact resource routes, rejecting other paths with the same prefix.
 static pn_upload_kind_t resource_route(const char *uri,const char **query){
- const char *paths[]={"/api/v1/fonts","/api/v1/covers","/api/v1/wallpapers"};
- const pn_upload_kind_t kinds[]={PN_UPLOAD_FONT,PN_UPLOAD_COVER,PN_UPLOAD_WALLPAPER};
- for(unsigned i=0;i<3;i++){size_t n=strlen(paths[i]);if(!strncmp(uri,paths[i],n) && (!uri[n] || uri[n]=='?')){*query=uri[n]?uri+n:NULL;return kinds[i];}}
+ const char *paths[]={"/api/v1/fonts","/api/v1/covers","/api/v1/wallpapers","/api/v1/backgrounds"};
+ const pn_upload_kind_t kinds[]={PN_UPLOAD_FONT,PN_UPLOAD_COVER,PN_UPLOAD_WALLPAPER,PN_UPLOAD_BACKGROUND};
+ for(unsigned i=0;i<sizeof paths/sizeof paths[0];i++){size_t n=strlen(paths[i]);if(!strncmp(uri,paths[i],n) && (!uri[n] || uri[n]=='?')){*query=uri[n]?uri+n:NULL;return kinds[i];}}
  return 0;
 }
-static const char *kind_name(pn_upload_kind_t value){return value==PN_UPLOAD_BOOK?"book":value==PN_UPLOAD_FONT?"font":value==PN_UPLOAD_COVER?"cover":"wallpaper";}
+static const char *kind_name(pn_upload_kind_t value){return value==PN_UPLOAD_BOOK?"book":value==PN_UPLOAD_FONT?"font":value==PN_UPLOAD_COVER?"cover":value==PN_UPLOAD_WALLPAPER?"wallpaper":value==PN_UPLOAD_BACKGROUND?"background":"";}
 static esp_err_t execute(http_t *s,httpd_req_t *r,pn_transfer_command_t *command,unsigned success){
  pn_transfer_reply_t reply;pn_status_t status=pn_transfer_worker_execute(s->worker,command,&reply);
  if(status!=PN_OK)return error(r,status<=PN_IO?statuses[status]:503,status<=PN_IO?messages[status]:"传输服务不可用");

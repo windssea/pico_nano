@@ -6,6 +6,7 @@ param(
     [string]$Font = "",
     [string]$FontDir = "tests/testFont",
     [string]$WallpaperDir = "",
+    [string]$BackgroundDir = "",
     [string]$Script = "",
     [ValidatePattern('^$|^[a-z0-9][a-z0-9-]{0,47}$')][string]$CoverCacheNamespace = "",
     [ValidateRange(0,5000)][int]$PresentDelayMs = 0,
@@ -44,13 +45,14 @@ $sourceFontDir = (Resolve-Path -LiteralPath $FontDir).Path.TrimEnd('\', '/') + [
 $Books = '/samples/books'
 $FontDir = '/samples/fonts'
 if ($WallpaperDir) { $WallpaperDir = Get-SimPath $WallpaperDir } else { $WallpaperDir = '/samples/wallpapers' }
+if ($BackgroundDir) { $BackgroundDir = Get-SimPath $BackgroundDir } else { $BackgroundDir = '/samples/backgrounds' }
 if ($Font) {
     $sourceFont = (Resolve-Path -LiteralPath $Font).Path
     if ($sourceFont.StartsWith($sourceFontDir, [StringComparison]::OrdinalIgnoreCase)) { $Font = '/samples/fonts/' + $sourceFont.Substring($sourceFontDir.Length).Replace('\', '/') }
     else { $Font = Get-SimPath $Font }
 }
 # 用户样本与早期生成样本分开保留状态；不删除旧进度或缓存。/ Keep user-sample state separate from earlier generated fixtures without deleting old progress or caches.
-docker run --rm -v pico-sim-data:/data --entrypoint python3 pico-nano-sdl:dev -c "import pathlib; [pathlib.Path(p).mkdir(parents=True,exist_ok=True) for p in ('/data/user-samples/state','/data/user-samples/covers','/data/user-samples/wallpaper')]"
+docker run --rm -v pico-sim-data:/data --entrypoint python3 pico-nano-sdl:dev -c "import pathlib; [pathlib.Path(p).mkdir(parents=True,exist_ok=True) for p in ('/data/user-samples/state','/data/user-samples/covers','/data/user-samples/wallpaper','/data/user-samples/backgrounds')]"
 if ($LASTEXITCODE -ne 0) { Write-Error "用户样本状态目录初始化失败"; exit 1 }
 
 # 开发冷缓存对照使用独立命名空间，保留默认缓存与阅读状态。/ Use an isolated namespace for development cold-cache comparisons, preserving default caches and reading state.
@@ -66,6 +68,7 @@ $arguments = @("run", "--detach", "--rm", "--name", "pico-sim",
     "-e", "DISPLAY=:0", "-e", "WAYLAND_DISPLAY=wayland-0", "-e", "XDG_RUNTIME_DIR=/mnt/wslg/runtime-dir", "-e", "SDL_VIDEODRIVER=x11",
     "-e", "PN_SIM_FRAME_DIR=/work/build-dev/sim-frames",
     "-e", "PN_SIM_BOOT_PREVIEW=1",
+    "-e", "PN_BACKGROUND_DIR=$BackgroundDir", "-e", "PN_BACKGROUND_CACHE=/data/user-samples/backgrounds",
     "-e", "PN_SIM_LIBRARY_SCRIPT=$Script",
     "-e", "PN_SIM_PRESENT_DELAY_MS=$PresentDelayMs",
     "-e", "PN_SIM_TIMING=$([int]$Timing.IsPresent)",

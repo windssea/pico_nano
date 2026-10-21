@@ -80,6 +80,12 @@ int main(void){
  wifi_callback(wifi_ctx,WIFI_EVENT,WIFI_EVENT_STA_DISCONNECTED,NULL);state=wait_for(&session,3);assert(!state.released);now+=1000;
  state=wait_for(&session,1);assert(connection_calls==connected_before+1 && route.user_ctx==http_before && !state.released);
  json=request(HTTP_GET,retained,NULL,0,automatic,NULL);assert(code==200 && cJSON_GetObjectItemCaseSensitive(json,"next_offset")->valueint==PN_UPLOAD_CHUNK);cJSON_Delete(json);
+ // 长时间断网必须退出接收态、释放租约，已确认分块仍可跨会话续传。/ A sustained outage must leave receiving state, release leases and retain acknowledged chunks across sessions.
+ wifi_callback(wifi_ctx,WIFI_EVENT,WIFI_EVENT_STA_DISCONNECTED,NULL);state=wait_for(&session,3);assert(state.phase!=PN_DTRANSFER_READY && !state.network.address[0]);now+=20001;
+ state=wait_for(&session,0);assert(state.phase==PN_DTRANSFER_FAILED && state.released && !state.work.busy && !pn_media_active(&media));assert(pn_device_transfer_close(&session)==PN_OK && !native_allocations && !radio);
+ assert(pn_device_transfer_open(&session,&media,root,&config)==PN_OK);wait_for(&session,1);
+ json=request(HTTP_GET,"/api/v1/session",NULL,0,NULL,NULL);assert(code==200);strcpy(automatic,cJSON_GetObjectItemCaseSensitive(json,"token")->valuestring);cJSON_Delete(json);
+ json=request(HTTP_GET,retained,NULL,0,automatic,NULL);assert(code==200 && cJSON_GetObjectItemCaseSensitive(json,"next_offset")->valueint==PN_UPLOAD_CHUNK);cJSON_Delete(json);
  assert(pn_device_transfer_request_stop(&session)==PN_OK);wait_for(&session,0);assert(pn_device_transfer_close(&session)==PN_OK && !native_allocations);
  config.mode=PN_WIFI_AP;
  radio_init_fails=true;assert(pn_device_transfer_open(&session,&media,root,&config)==PN_OK);state=wait_for(&session,0);assert(state.phase==PN_DTRANSFER_FAILED && state.stage==2 && state.error==PN_IO && state.network.error==0x101 && state.network.mode==PN_WIFI_AP);assert(pn_device_transfer_close(&session)==PN_OK && !native_allocations && !radio && !pn_media_active(&media));radio_init_fails=false;

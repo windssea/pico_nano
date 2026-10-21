@@ -12,3 +12,6 @@
 .fonts-panel li span:first-child{flex:1 1 auto;min-width:0;overflow-wrap:anywhere}
 .fonts-panel li span:nth-child(2){flex:none;font-size:12px;color:#718578}
 .fonts-panel li button{flex:none;min-height:44px}
+
+/* 预览来自重新编码后的实际上传文件；不再解码原照片。/ Preview the actual normalized upload instead of decoding the original photograph again. */
+.item-preview{width:50px;height:88px;object-fit:contain;flex-shrink:0;border:1px solid #d8e1d7;border-radius:5px;background:#fff}

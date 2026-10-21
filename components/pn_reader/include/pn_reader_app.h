@@ -209,3 +209,6 @@ void pn_reader_app_refresh_reset(pn_reader_app_t *app);
 pn_status_t pn_reader_app_font_inherit_view(pn_reader_app_t *,pn_reader_overlay_fn,void *,uint64_t,pn_reader_present_fn,void *);
 /// 当前接受的字体是否跟随全局；预览不改变它。/ Whether the accepted font follows global defaults; previews do not change it.
 bool pn_reader_app_font_is_inherited(const pn_reader_app_t *);
+
+/// 借用当前资源owner，不取得所有权或访问文件。/ Borrow the current resource owner without taking ownership or accessing files.
+pn_status_t pn_reader_app_paper_context(pn_reader_app_t *,pn_pool_t **,pn_media_t **);

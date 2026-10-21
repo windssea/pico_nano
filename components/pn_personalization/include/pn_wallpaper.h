@@ -66,12 +66,16 @@ pn_status_t pn_wallpaper_mask_prepare(pn_pool_t *pool,pn_media_t *media,const pn
     pn_wallpaper_transform_t transform,size_t budget,pn_frame_t *gray,pn_frame_t *alpha);
 /// 同步预览缓存：命中须完整源SHA及整缓存CRC通过；失败重走原解码，缓存写失败不影响结果，cache_dir由owner固定。/ Preview cache: require full source SHA and cache CRC; rebuild misses, ignore cache-write failures; the owner fixes cache_dir.
 pn_status_t pn_wallpaper_prepare_cached(pn_pool_t *,pn_media_t *,const pn_media_lease_t *,const char *,pn_wallpaper_transform_t,size_t,pn_frame_t *,const char *cache_dir);
+/// 完整源摘要绑定的原生预览；expected可空，成功才输出身份。/ Native preview bound to a full source digest; expected may be NULL, identity is output only on success.
+pn_status_t pn_wallpaper_prepare_identified(pn_pool_t *,pn_media_t *,const pn_media_lease_t *,const char *,pn_wallpaper_transform_t,size_t,pn_frame_t *,const char *,const pn_book_id_t *expected,pn_book_id_t *identity);
 /// 缓存完整原生灰度/透明平面，不降低遮罩画质。/ Cache native gray/alpha planes without reducing mask quality.
 pn_status_t pn_wallpaper_mask_prepare_cached(pn_pool_t *,pn_media_t *,const pn_media_lease_t *,const char *,pn_wallpaper_transform_t,size_t,pn_frame_t *,pn_frame_t *,const char *cache_dir);
 /// 144x256的16灰阶缩略缓存；路径/size/mtime/算法作变化探测，整CRC；不是源身份或应用校验。失败像素不可呈现。/ 144x256 16-gray thumbnail cache, keyed by path/size/mtime/algorithm with full CRC; never source identity/application validation. Do not present failed pixels.
 pn_status_t pn_wallpaper_thumbnail_load(pn_media_t *,const pn_media_lease_t *,const char *cache_dir,const char *source,pn_frame_t *);
 /// 仅完整解码通过的缩略图可保存，固定目录CACHE_WRITE与源READ共享，写失败可忽略。/ Save only fully decoded thumbnails; fixed-directory CACHE_WRITE shares source READ, and failures are optional.
 pn_status_t pn_wallpaper_thumbnail_save(pn_media_t *,const char *cache_dir,const char *source,const pn_frame_t *);
+/// 安装事务完成且TF归还后失效该源缩略图，避免同size/mtime替换显示旧图。/ Invalidate a source thumbnail after installation and TF handback to reject same-size/mtime replacement previews.
+pn_status_t pn_wallpaper_thumbnail_invalidate(pn_media_t *,const char *cache_dir,const char *source);
 /// 将已校验遮罩叠加到文字底图；只绘制，无文件或硬件操作。
 /// Composite a validated mask over a text underlay; drawing only, without file or hardware operations.
 pn_status_t pn_wallpaper_mask_render(const pn_frame_t *gray,const pn_frame_t *alpha,pn_frame_t *underlay);

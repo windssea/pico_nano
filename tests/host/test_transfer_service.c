@@ -55,6 +55,13 @@ int main(void){
  assert(pn_transfer_service_execute(&service,&end,&reply)==PN_OK && reply.state.phase==PN_UPLOAD_COMMITTED);
  pn_transfer_command_t file={.operation=PN_TRANSFER_FILE,.request={.kind=PN_UPLOAD_BOOK}};strcpy(file.request.name,"one.txt");
  assert(pn_transfer_service_execute(&service,&file,&reply)==PN_OK && reply.has_file && reply.file_size==70000 && !memcmp(reply.file_digest.sha256,a.request.digest.sha256,32));assert(!pn_media_active(&media));
+ // 连续身份查询覆盖实际两种PNG尾块长度；每次都校验完整摘要并归还租约。/ Cover both actual PNG tail lengths; each query verifies the full digest and releases its lease.
+ const size_t lengths[]={31762,66202};
+ for(unsigned i=0;i<2;i++){
+  char tail[256];snprintf(tail,sizeof tail,"%s/piconano/books/tail-%u.txt",root,i);FILE *f=fopen(tail,"wb");assert(f && fwrite(data,1,lengths[i],f)==lengths[i] && fclose(f)==0);
+  snprintf(file.request.name,sizeof file.request.name,"tail-%u.txt",i);pn_book_id_t expected;assert(pn_identity_bytes(data,lengths[i],&expected)==PN_OK);
+  for(unsigned repeat=0;repeat<3;repeat++){assert(pn_transfer_service_execute(&service,&file,&reply)==PN_OK && reply.has_file && reply.file_size==lengths[i] && !memcmp(&reply.file_digest,&expected,sizeof expected));assert(!pn_media_active(&media));}
+ }
  char link[256];snprintf(link,sizeof link,"%s/piconano/books/link.txt",root);assert(symlink("/etc/passwd",link)==0);strcpy(file.request.name,"link.txt");unchanged(&service,&file,PN_INVALID);
  b.request.id[0]=3;strcpy(b.request.name,"lost.txt");
  assert(pn_transfer_service_execute(&service,&b,&reply)==PN_OK && pn_media_active(&media)==1);

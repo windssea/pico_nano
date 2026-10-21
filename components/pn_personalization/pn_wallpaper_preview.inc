@@ -73,23 +73,33 @@ pn_status_t pn_wallpaper_thumbnail_save(pn_media_t *media,const char *dir,const 
     if(!media || !source || !thumb || thumb->width!=144 || thumb->height!=256 || thumb->stride!=72 || !thumb->pixels)return PN_INVALID;
     return preview_store(media,dir,source,NULL,1,NULL,thumb,NULL);
 }
-static pn_status_t prepare_cached(pn_pool_t *pool,pn_media_t *media,const pn_media_lease_t *lease,const char *path,pn_wallpaper_transform_t transform,size_t budget,pn_frame_t *gray,pn_frame_t *alpha,const char *cache_dir){
-    if(!cache_dir || !*cache_dir)return prepare_file(pool,media,lease,path,transform,budget,gray,alpha);
+pn_status_t pn_wallpaper_thumbnail_invalidate(pn_media_t *media,const char *dir,const char *source){
+    static char path[PN_WALLPAPER_PATH_MAX+96];if(!media || !source || !preview_path(dir,source,1,path,sizeof path))return PN_INVALID;
+    pn_media_lease_t lease;pn_status_t s=pn_media_acquire(media,PN_MEDIA_CACHE_WRITE,&lease);if(s!=PN_OK)return s;
+    if(remove(path) && errno!=ENOENT)s=PN_IO;
+    size_t n=strlen(path);if(n+4<sizeof path){memcpy(path+n,".bak",5);if(remove(path) && errno!=ENOENT)s=PN_IO;}
+    (void)pn_media_release(media,&lease);return s;
+}
+static pn_status_t prepare_cached(pn_pool_t *pool,pn_media_t *media,const pn_media_lease_t *lease,const char *path,pn_wallpaper_transform_t transform,size_t budget,pn_frame_t *gray,pn_frame_t *alpha,const char *cache_dir,const pn_book_id_t *expected,pn_book_id_t *identity){
+    if((!cache_dir || !*cache_dir) && !expected && !identity)return prepare_file(pool,media,lease,path,transform,budget,gray,alpha);
     if(!pool || !media || !lease || lease->access==PN_MEDIA_USB || !path || !*path || !budget || !full_frame(gray) || (alpha && (!full_frame(alpha) || alpha->pixels==gray->pixels)) || transform.rotation>3 || transform.fit>PN_WALLPAPER_COVER || transform.shift<-PN_WALLPAPER_SHIFT_MAX || transform.shift>PN_WALLPAPER_SHIFT_MAX)return PN_INVALID;
     pn_status_t valid=pn_media_validate(media,lease);if(valid!=PN_OK)return valid;
     unsigned kind=alpha?3:2;static char cached[PN_WALLPAPER_PATH_MAX+96];struct stat info;pn_book_id_t id;bool known=false;
+    if(expected || identity){pn_status_t s=pn_identity_file_pooled(pool,media,lease,path,UINT64_MAX,&id);if(s!=PN_OK)return s;known=true;if(expected && memcmp(expected->sha256,id.sha256,32))return PN_STALE_JOB;}
     bool found=preview_path(cache_dir,path,kind,cached,sizeof cached);
     if(found && stat(cached,&info)){found=strlen(cached)+4<sizeof cached;if(found){strcat(cached,".bak");found=!stat(cached,&info);}}
     if(found){
         pn_profile_span_t span;pn_profile_begin(&span,pool,"wallpaper.preview-cache");
-        pn_status_t s=pn_identity_file_pooled(pool,media,lease,path,UINT64_MAX,&id);if(s!=PN_OK){pn_profile_end(&span,s);return s;}known=true;
+        pn_status_t s=known?PN_OK:pn_identity_file_pooled(pool,media,lease,path,UINT64_MAX,&id);if(s!=PN_OK){pn_profile_end(&span,s);return s;}known=true;
         s=preview_load(media,lease,cache_dir,path,&transform,kind,&id,gray,alpha);pn_profile_end(&span,s);
-        if(s==PN_OK)return PN_OK;
+        if(s==PN_OK){if(identity)*identity=id;return PN_OK;}
         if(s==PN_CANCELLED || s==PN_STALE_MEDIA)return s;
     }
     pn_status_t status=prepare_file(pool,media,lease,path,transform,budget,gray,alpha);if(status!=PN_OK)return status;
     if(!known){status=pn_identity_file_pooled(pool,media,lease,path,UINT64_MAX,&id);if(status!=PN_OK)return status;}
-    (void)preview_store(media,cache_dir,path,&transform,kind,&id,gray,alpha);return PN_OK;
+    (void)preview_store(media,cache_dir,path,&transform,kind,&id,gray,alpha);if(identity)*identity=id;return PN_OK;
 }
-pn_status_t pn_wallpaper_prepare_cached(pn_pool_t *pool,pn_media_t *media,const pn_media_lease_t *lease,const char *path,pn_wallpaper_transform_t transform,size_t budget,pn_frame_t *out,const char *cache_dir){return prepare_cached(pool,media,lease,path,transform,budget,out,NULL,cache_dir);}
-pn_status_t pn_wallpaper_mask_prepare_cached(pn_pool_t *pool,pn_media_t *media,const pn_media_lease_t *lease,const char *path,pn_wallpaper_transform_t transform,size_t budget,pn_frame_t *gray,pn_frame_t *alpha,const char *cache_dir){return prepare_cached(pool,media,lease,path,transform,budget,gray,alpha,cache_dir);}
+pn_status_t pn_wallpaper_prepare_cached(pn_pool_t *pool,pn_media_t *media,const pn_media_lease_t *lease,const char *path,pn_wallpaper_transform_t transform,size_t budget,pn_frame_t *out,const char *cache_dir){return prepare_cached(pool,media,lease,path,transform,budget,out,NULL,cache_dir,NULL,NULL);}
+pn_status_t pn_wallpaper_mask_prepare_cached(pn_pool_t *pool,pn_media_t *media,const pn_media_lease_t *lease,const char *path,pn_wallpaper_transform_t transform,size_t budget,pn_frame_t *gray,pn_frame_t *alpha,const char *cache_dir){return prepare_cached(pool,media,lease,path,transform,budget,gray,alpha,cache_dir,NULL,NULL);}
+
+pn_status_t pn_wallpaper_prepare_identified(pn_pool_t *p,pn_media_t *m,const pn_media_lease_t *l,const char *path,pn_wallpaper_transform_t t,size_t budget,pn_frame_t *out,const char *dir,const pn_book_id_t *expected,pn_book_id_t *id){return prepare_cached(p,m,l,path,t,budget,out,NULL,dir,expected,id);}

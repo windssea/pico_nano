@@ -142,8 +142,8 @@ int main(void){
  json=request(HTTP_PUT,uri,text,sizeof text-1,token,extra);assert(code==200);cJSON_Delete(json);snprintf(uri,sizeof uri,"/api/v1/uploads/%s/complete",id);
  json=request(HTTP_POST,uri,complete,strlen(complete),token,NULL);assert(code==422);cJSON_Delete(json);
  /* 图片资源路由：各自目录、严格查询、身份核对与删除。/ Image resource routes: separate directories, strict queries, identity checking and deletion. */
- for(unsigned i=0;i<2;i++){
-  const char *dir=i?"piconano/wallpapers":"piconano/covers",*route=i?"/api/v1/wallpapers":"/api/v1/covers";
+ for(unsigned i=0;i<3;i++){
+  const char *dir=i==2?"piconano/backgrounds":i?"piconano/wallpapers":"piconano/covers",*route=i==2?"/api/v1/backgrounds":i?"/api/v1/wallpapers":"/api/v1/covers";
   char folder[256],path[300],uri[400];snprintf(folder,sizeof folder,"%s/%s",root,dir);assert(mkdir(folder,0700)==0 || errno==EEXIST);
   snprintf(path,sizeof path,"%s/x.png",folder);FILE *image=fopen(path,"wb");assert(image && fwrite(text,1,sizeof text-1,image)==sizeof text-1 && fclose(image)==0);
   json=request(HTTP_GET,route,NULL,0,token,NULL);assert(code==200 && cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(json,"items"))==1);cJSON_Delete(json);

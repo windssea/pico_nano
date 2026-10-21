@@ -361,6 +361,9 @@ add_test(NAME image_jobs COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DI
 
 add_executable(test_wallpaper test_wallpaper.c)
 add_executable(test_wallpaper_cache test_wallpaper_cache.c)
+add_executable(test_paper test_paper.c)
+target_link_libraries(test_paper PRIVATE pn_core)
+add_test(NAME paper COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_paper.py $<TARGET_FILE:test_paper>)
 target_link_libraries(test_wallpaper_cache PRIVATE pn_core)
 add_test(NAME wallpaper_cache COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_wallpaper_cache.py $<TARGET_FILE:test_wallpaper_cache>)
 target_link_libraries(test_wallpaper PRIVATE pn_core)

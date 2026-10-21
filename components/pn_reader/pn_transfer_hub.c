@@ -24,7 +24,7 @@ pn_status_t pn_transfer_hub_render(pn_font_t *font,pn_frame_t *frame,const pn_tr
     if(s==PN_OK)s=pn_font_size(font,50);
     if(s==PN_OK)s=pn_w_text_ex(font,frame,"传书",PN_UI_MARGIN,124,400,PN_ALIGN_LEFT,PN_UI_INK,true);
     if(s==PN_OK)s=pn_font_size(font,24);
-    if(s==PN_OK)s=pn_w_text_ex(font,frame,"把手机或电脑上的书、字体和壁纸传到设备。",PN_UI_MARGIN,166,620,PN_ALIGN_LEFT,PN_UI_MUTED,false);
+    if(s==PN_OK)s=pn_w_text_ex(font,frame,"把手机或电脑上的书、字体与图片传到设备。",PN_UI_MARGIN,166,620,PN_ALIGN_LEFT,PN_UI_MUTED,false);
     if(s==PN_OK)s=pn_w_group(font,frame,"传输方式",CHANNEL_Y-14);
     pn_w_card(frame,CHANNEL_Y,PN_HUB_LOCALSEND_VISIBLE?4:3);
     // 可用通道带箭头；不可用的只写原因（规范T01：不展示虚假地址或入口）。/ Available channels get a chevron; unavailable ones only state the reason (spec T01: no fake addresses or entries).
@@ -41,7 +41,7 @@ pn_status_t pn_transfer_hub_render(pn_font_t *font,pn_frame_t *frame,const pn_tr
     if(s==PN_OK)s=pn_w_card_row(font,frame,"存储卡",info->storage && *info->storage?info->storage:"未读取到存储卡",NULL,-1,0u,STORAGE_Y,true);
     if(s==PN_OK)s=pn_w_group(font,frame,"支持的文件",FORMAT_Y-14);
     if(s==PN_OK)s=pn_font_size(font,24);
-    if(s==PN_OK)s=pn_w_text_lines_ex(font,frame,"图书 EPUB / TXT · 字体 TTF · 壁纸 JPG / PNG。传完回到书库即可看到。",PN_UI_MARGIN+8,FORMAT_Y+22,604,3,34,PN_UI_MUTED,false);
+    if(s==PN_OK)s=pn_w_text_lines_ex(font,frame,"图书 EPUB / TXT · 字体 TTF / OTF · 封面、锁屏与阅读背景 JPG / PNG。",PN_UI_MARGIN+8,FORMAT_Y+22,604,3,34,PN_UI_MUTED,false);
     if(s==PN_OK){s=pn_font_size(font,24);if(s==PN_OK)s=pn_w_navigation(font,frame,PN_NAV_TRANSFER);}
     pn_status_t restored=pn_font_size(font,original);return s==PN_OK?restored:s;
 }

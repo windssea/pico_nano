@@ -4,6 +4,12 @@
 
 `catalog_index`与`catalog_mount`增加stdio定位计数及逐次故障注入：首屏不探读页外记录、同页/搜索顺序读，仍用独立目录扫描核对首屏、倒序、字母与搜索；三次定位任一步失败不得发布半页，之后可重建且原READ租约有效。定位次数是软件端口计数，不代表TF事务或耗时。
 
+## 外部背景专项回归
+
+主机paper用独立生成的原生4位灰度PNG核对全部像素、左右边缘、缩略分页/缓存、缺失源、错误摘要、坏缓存、分配失败，以及TXT/EPUB首次NEXT/PREV、失败回执、挂起恢复和跨进程式重新打开；style覆盖旧schema与新256B schema8往返。device_refresh检查静态灰底不累计、第四次大面积灰阶迁移、未对齐/行位图一致与失败不提交。网页资源测试独立解码全部PNG行预测，检查封面/锁屏/背景的尺寸、灰阶、透明度与失败不上传原图。
+
+可见模拟器新增tools/run_sim.ps1 -BackgroundDir <工作区目录>，缓存写Docker用户卷的独立backgrounds目录；主机也可用PN_BACKGROUND_DIR/PN_BACKGROUND_CACHE指定私有样本和缓存。原书、字体、图片保持只读。窗口/主机计时不能当面板残影或TF性能实测；新批正式构建发布仍需确认。
+
 ## Windows 环境
 
 当前仓库 `D:\dev\windssea\pico_nano`，需要真实 Python3、Docker Desktop Linux 引擎；主机 Node 用于工具/安装器测试。Windows 的 python/python3 可能是应用商店别名，先用 `py -0p` 查解释器，本机已验证入口：

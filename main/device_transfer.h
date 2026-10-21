@@ -37,3 +37,6 @@ pn_status_t pn_device_transfer_take_network(pn_device_transfer_t *,pn_network_cr
 pn_status_t pn_device_transfer_take_install(pn_device_transfer_t *,pn_upload_kind_t *,char *name,size_t capacity,pn_book_id_t *digest);
 /// 主任务回报已保存名称与结果，供网页查询；初始化时以PN_EMPTY播种。/ The main task reports the saved name and result for the web page; seed with PN_EMPTY at start.
 pn_status_t pn_device_transfer_network_result(pn_device_transfer_t *,pn_status_t,const char *saved_ssid);
+
+/// 归还TF后取图片安装类别：bit0锁屏、bit1阅读背景；overflow要求重建该类缩略图。/ Take image-purpose flags after TF handback: bit0 lock screen, bit1 paper; overflow requests rebuilding that purpose's thumbnails.
+unsigned pn_device_transfer_take_image_changes(pn_device_transfer_t *,unsigned *overflow);

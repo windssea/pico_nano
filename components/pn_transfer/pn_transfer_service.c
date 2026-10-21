@@ -7,7 +7,6 @@
  */
 #define _POSIX_C_SOURCE 200809L
 #include "pn_transfer_service.h"
-#include "pn_text_file.h"
 #include <string.h>
 #include <stdio.h>
 #include <errno.h>
@@ -95,19 +94,20 @@ static pn_status_t metadata(service_t *s,const pn_upload_request_t *request,pn_t
  struct stat info;
  if(status==PN_OK)status=inspect(path,&info);
  if(status==PN_OK && (!S_ISREG(info.st_mode) || info.st_size<0))status=PN_INVALID;
- pn_text_file_t file={0};pn_text_source_t source={0};pn_transfer_reply_t candidate={0};
- if(status==PN_OK)status=pn_text_file_open(&file,s->media,&lease,path,&source);
- if(status==PN_OK && source.size>512u*1024u*1024u)status=PN_LIMIT;
- if(status==PN_OK){candidate.file_size=source.size;status=pn_identity_stream(source.ctx,source.size,source.read_at,&candidate.file_digest);}
- pn_status_t closed=pn_text_file_close(&file);if(status==PN_OK)status=closed;
+ pn_transfer_reply_t candidate={0};
+ // 连续摘要直接使用身份端口的DMA工作区，避免Wi-Fi低内存时尾块随机缓存再申请SDMMC中转。
+ // Hash sequentially through the identity port's DMA scratch, avoiding a tail read-cache SDMMC bounce allocation under Wi-Fi memory pressure.
+ if(status==PN_OK){candidate.file_size=(uint64_t)info.st_size;status=pn_identity_file_pooled(s->pool,s->media,&lease,path,512u*1024u*1024u,&candidate.file_digest);}
+ struct stat after;
+ if(status==PN_OK){status=inspect(path,&after);if(status==PN_OK && (after.st_size!=info.st_size || after.st_mtime!=info.st_mtime))status=PN_STALE_JOB;}
  pn_status_t current=pn_media_validate(s->media,&lease);if(current!=PN_OK)status=current;
- closed=pn_media_release(s->media,&lease);if(status==PN_OK)status=closed;
+ pn_status_t closed=pn_media_release(s->media,&lease);if(status==PN_OK)status=closed;
  current=guard(s);if(current!=PN_OK)status=current;
  if(status==PN_OK){candidate.has_file=true;*reply=candidate;}
  return status;
 }
 /// 可管理的资源类别，书籍删除仍留给书库控制层。/ Manageable resource kinds; book deletion remains in the library controller.
-static bool resource_kind(pn_upload_kind_t kind){return kind==PN_UPLOAD_FONT || kind==PN_UPLOAD_COVER || kind==PN_UPLOAD_WALLPAPER;}
+static bool resource_kind(pn_upload_kind_t kind){return kind==PN_UPLOAD_FONT || kind==PN_UPLOAD_COVER || kind==PN_UPLOAD_WALLPAPER || kind==PN_UPLOAD_BACKGROUND;}
 /// 固定资源目录绝对路径。/ Absolute path of the fixed resource directory.
 static pn_status_t resource_directory(service_t *s,pn_upload_kind_t kind,char *dir){
  if(!resource_kind(kind))return PN_INVALID;

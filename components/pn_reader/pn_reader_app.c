@@ -10,6 +10,7 @@
 #include "pn_profile.h"
 #include "pn_reader_app.h"
 #include "pn_refresh_policy.h"
+#include "pn_paper.h"
 #include "pn_sd_layout.h"
 #include "pn_widgets.h"
 #include "pn_font_chain.h"
@@ -79,7 +80,7 @@ typedef struct {
     bool unshown_layout; ///< 本应用拥有尚未显示的首屏候选，不代表已阅读 / This app owns an unshown first-page candidate, never a reading confirmation
     pn_first_paint_t first_paint; ///< 借原帧准备首屏正文，不持有额外像素 / First body preparation borrowing the original frame without extra pixels
     bool persistent,has_restore,media_lost,force_full;
-    pn_refresh_policy_t refresh;
+    pn_refresh_policy_t refresh;pn_paper_t paper;
     pn_font_reference_t probed;bool probed_valid;uint64_t probed_ticket; ///< 本会话同一READ租约下刚由探查完整校验的字体引用，应用时免重复整文件SHA / Font reference fully verified by this session's probe under the same READ lease, letting apply skip a second whole-file SHA
 } app_t;
 static pn_font_set_t *font_set(app_t *a){return a->font_use_draft?&a->font_draft:a->font_live.impl?&a->font_live:NULL;}
@@ -149,7 +150,7 @@ static pn_status_t render_impl(app_t *a,pn_frame_t *frame,const pn_reader_receip
         pn_profile_span_t span;pn_profile_begin(&span,a->pool,"txt.first.use");
         s=pn_font_chain_validate(chain(a));missing=a->first_paint.missing;a->first_paint.ready=false;pn_profile_end(&span,s);
     }else s=bitmap_copy(a,frame,receipt,&missing);
-    if(s==PN_EMPTY){s=pn_reading_background_draw(a->style.background,frame);if(s!=PN_OK)return s;int guide=INT_MIN;s=paint_text(a,frame,a->reader.page.glyphs,0,a->reader.page.count,&guide,&missing,false);}
+    if(s==PN_EMPTY){s=pn_paper_draw(&a->paper,a->style.background,frame);if(s!=PN_OK)return s;int guide=INT_MIN;s=paint_text(a,frame,a->reader.page.glyphs,0,a->reader.page.count,&guide,&missing,false);}
     return s==PN_OK?paint_footer(a,frame,receipt,show_return,missing):s;
 }
 static pn_status_t render(app_t *a,pn_frame_t *frame,const pn_reader_receipt_t *receipt,bool show_return){
@@ -158,7 +159,7 @@ static pn_status_t render(app_t *a,pn_frame_t *frame,const pn_reader_receipt_t *
 }
 static pn_status_t release_app(app_t *a){
     pn_text_file_verify_close(&a->verify);
-    pn_page_bitmap_close(&a->bitmap);
+    pn_page_bitmap_close(&a->bitmap);pn_paper_close(&a->paper);
     (void)pn_page_index_flush(&a->page_index,true);pn_page_index_close(&a->page_index);
     pn_reader_neighbors(&a->reader,NULL);
     pn_font_close(&a->metadata);pn_font_set_close(&a->font_draft);pn_font_set_close(&a->font_live);pn_font_chain_clear(&a->chain);pn_font_close(&a->body);pn_font_close(&a->ui);pn_status_t status=pn_text_file_close(&a->book_file);
@@ -186,7 +187,8 @@ static pn_status_t open_state(app_t *a,const char *directory,uint64_t now){
     s=pn_journal_files_init(&a->style_files,&a->state_media,&a->state_lease,path_a,path_b,&a->style_io);if(s!=PN_OK)return s;
     pn_style_t saved;s=pn_style_load(&a->style_io,&a->book,&saved);if(s!=PN_OK && s!=PN_EMPTY)return s;
     if(s==PN_OK)a->style=saved;
-    a->saved_style=a->style;a->persistent=true;strcpy(a->state_directory,directory);return PN_OK;
+    a->saved_style=a->style;a->persistent=true;
+    if(s==PN_OK && a->style.background==PN_READING_BACKGROUND_EXTERNAL){pn_status_t paper=pn_paper_open(&a->paper,a->pool,a->book_media,&a->book_lease,&a->style);if(paper==PN_CANCELLED || paper==PN_STALE_MEDIA)return paper;if(paper!=PN_OK)pn_paper_fallback(&a->paper,&a->style);}strcpy(a->state_directory,directory);return PN_OK;
 }
 static void decoder_checkpoint(void *ctx,uint64_t offset,bool paragraph){app_t *a=ctx;if(offset<=4)a->checkpoint_count=0;if(a->checkpoint_count<512)a->checkpoints[a->checkpoint_count++]=(pn_reader_anchor_t){.begin=offset,.paragraph=paragraph};}
 /// 复核期间检查点写入独立数组，完成后一次换入，阅读中借用的数组不缩短。/ Verification checkpoints go to a separate array swapped in on completion, so the borrowed array never shrinks mid-reading.
@@ -326,7 +328,7 @@ static pn_status_t bitmap_visit(void *ctx,const pn_text_page_t *page,pn_reader_a
     bitmap_work_t *work=ctx;app_t *a=work->app;if(!a->bitmap.enabled)return PN_EMPTY;
     if(!bitmap_key(a,token,anchor) || (!a->bitmap.working && !a->bitmap.ready)){
         pn_status_t s=pn_page_bitmap_begin(&a->bitmap,page->count);if(s!=PN_OK)return s;
-        if(a->style.background){pn_cache_pin(&a->bitmap.owner);s=pn_reading_background_draw(a->style.background,&a->bitmap.frame);pn_cache_unpin(&a->bitmap.owner);if(s!=PN_OK){pn_page_bitmap_invalidate(&a->bitmap);return s;}}
+        if(a->style.background){pn_cache_pin(&a->bitmap.owner);s=pn_paper_draw(&a->paper,a->style.background,&a->bitmap.frame);pn_cache_unpin(&a->bitmap.owner);if(s!=PN_OK){pn_page_bitmap_invalidate(&a->bitmap);return s;}}
         a->bitmap_token=token;a->bitmap_anchor=anchor;a->bitmap_guide=INT_MIN;
     }
     if(a->bitmap.ready)return PN_EMPTY;
@@ -493,7 +495,7 @@ pn_status_t pn_reader_app_resume(pn_reader_app_t *app,uint64_t now,pn_reader_pre
     if(!a->suspended)return PN_BUSY;
     pn_status_t status=a->media_lost?PN_STALE_MEDIA:pn_media_validate(a->book_media,&a->book_lease);if(status!=PN_OK)return status;
     pn_w_status_snapshot_t current=pn_w_status_snapshot();
-    if(a->ui.impl && (current.battery!=a->status.battery || strcmp(current.clock,a->status.clock)) && pn_reader_status_render(&a->ui,&a->frame,a->style.background)==PN_OK)a->status=current;
+    if(a->ui.impl && (current.battery!=a->status.battery || strcmp(current.clock,a->status.clock)) && pn_paper_region(&a->paper,a->style.background,&a->frame,0,PN_READER_TOP)==PN_OK && pn_reader_status_text(&a->ui,&a->frame)==PN_OK)a->status=current;
     status=present(ctx,&a->frame,PN_REFRESH_GC16);a->last_now=now;
     if(status==PN_OK){a->suspended=false;a->force_full=false;a->refresh.turns=0;}return status;
 }
@@ -545,7 +547,7 @@ pn_status_t pn_reader_app_paint_unshown(pn_reader_app_t *app,size_t budget,size_
     pn_draw_lease_t lease={0};pn_frame_t *frame=NULL;if(s==PN_OK)s=pn_display_begin_draw(&a->display,a->reader.token,&lease,&frame);
     pn_first_scope_t scope=pn_first_scope_enter(a->pool,reserve);
     if(s==PN_OK && !pn_first_paint_matches(&a->first_paint,receipt.token,receipt.ticket)){
-        a->first_paint=(pn_first_paint_t){.token=receipt.token,.ticket=receipt.ticket,.guide=INT_MIN};s=pn_reading_background_draw(a->style.background,frame);
+        a->first_paint=(pn_first_paint_t){.token=receipt.token,.ticket=receipt.ticket,.guide=INT_MIN};s=pn_paper_draw(&a->paper,a->style.background,frame);
     }
     size_t count=s==PN_OK?a->reader.page.count-a->first_paint.cursor:0;if(count>budget)count=budget;if(count>8)count=8;
     if(s==PN_OK)s=paint_text(a,frame,a->reader.page.glyphs,a->first_paint.cursor,count,&a->first_paint.guide,&a->first_paint.missing,true);
@@ -684,6 +686,7 @@ static pn_status_t change_layout(app_t *a,const pn_style_t *style){
     // 先换入新样式再同步正文字体：字重/清晰度取自a->style，顺序颠倒会让字形沿用上一次的设置。
     // Swap in the new style before syncing the body font: weight/sharpness come from a->style, and the reverse order leaves glyphs on the previous settings.
     pn_style_t previous=a->style;a->style=*style;pn_status_t status=ensure_body(a,style->pixels);if(status!=PN_OK){a->style=previous;(void)ensure_body(a,previous.pixels);return status;}
+    if(pn_style_same_typesetting(&previous,style)){pn_page_bitmap_invalidate(&a->bitmap);a->first_paint.ready=false;a->force_full=true;return PN_OK;}
     pn_layout_t next;status=layout(a,&next);if(status==PN_OK)status=pn_reader_reflow(&a->reader,&next);
     if(status==PN_OK)status=pn_display_set_token(&a->display,a->reader.token);
     if(status!=PN_OK){a->style=previous;(void)ensure_body(a,previous.pixels);}else a->force_full=true;
@@ -694,10 +697,13 @@ static pn_status_t preview_style(pn_reader_app_t *app,const pn_style_t *style,ui
     if(!app || !app->impl || !present || pn_style_validate(style)!=PN_OK)return PN_INVALID;
     app_t *a=app->impl;a->last_confirmed=false;if(a->font_preview || a->font_pending)return PN_BUSY;if(!a->reader.has_visible)return PN_EMPTY;if(a->media_lost)return PN_STALE_MEDIA;if(now<a->last_now)return PN_INVALID;
     pn_style_t previous=a->style;uint64_t origin=a->style_preview?a->style_origin:a->reader.visible.begin;
-    pn_status_t status=change_layout(a,style);if(status!=PN_OK)return status;
+    pn_paper_t candidate={0},previous_paper=a->paper;bool changed=!pn_paper_matches(&a->paper,style);
+    pn_status_t status=changed?pn_paper_open(&candidate,a->pool,a->book_media,&a->book_lease,style):PN_OK;if(status!=PN_OK)return status;
+    status=change_layout(a,style);if(status!=PN_OK){pn_paper_close(&candidate);return status;}if(changed)a->paper=candidate;
     a->draft_render=hint;status=step_location(app,PN_APP_OPEN,true,origin,now,present,ctx,NULL,-1);a->draft_render=false;
     if(a->last_confirmed){a->style_origin=origin;a->style_preview=true;}
-    else{pn_status_t rollback=change_layout(a,&previous);if(rollback!=PN_OK)return rollback;}
+    else{pn_status_t rollback=change_layout(a,&previous);if(changed){pn_paper_close(&a->paper);a->paper=previous_paper;}if(rollback!=PN_OK)return rollback;}
+    if(changed && a->last_confirmed)pn_paper_close(&previous_paper);
     return status;
 }
 pn_status_t pn_reader_app_style_preview(pn_reader_app_t *app,const pn_style_t *style,uint64_t now,pn_reader_present_fn present,void *ctx){
@@ -874,3 +880,5 @@ pn_font_t *pn_reader_app_body_font(const pn_reader_app_t *app){return app && app
 
 void pn_reader_app_refresh_period(pn_reader_app_t *app,unsigned pages){if(app && app->impl)((app_t *)app->impl)->refresh.period=pages>=1 && pages<=30?pages:14;}
 void pn_reader_app_refresh_reset(pn_reader_app_t *app){if(app && app->impl)((app_t *)app->impl)->refresh.turns=0;}
+
+pn_status_t pn_reader_app_paper_context(pn_reader_app_t *app,pn_pool_t **pool,pn_media_t **media){if(!app || !app->impl || !pool || !media)return PN_INVALID;app_t *a=app->impl;*pool=a->pool;*media=a->book_media;return PN_OK;}
