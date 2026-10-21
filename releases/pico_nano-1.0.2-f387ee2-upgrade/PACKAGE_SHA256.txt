@@ -1,0 +1,2 @@
+333490e0c5fcde07c55b099cd244383a76d55b03fea4ecc9ed288652385c8f24  PicoNano-f387ee2-upgrade.zip
+dc5d141cf1258fee2b1bae4c10bb93e5c0edea35534a7fb67c2eb860e1864d97  PicoNano-web-installer-f387ee2.zip
