@@ -331,7 +331,9 @@ STA 会话有界连接/重连（20秒内至多3次），活动时设 PS_NONE；�
 
 [device_card_presence.c](../main/device_card_presence.c) 从 P0.6 检测适配读取卡状态，将 I2C 读取失败与真实拔卡分开，临时 I/O 不永久当成媒体失效；写入门暂停并有界等待。用户“存储介质已失效”反馈与这条路径相关，但必须设备日志验证，不能仅凭提示证明 RF 或卡物理故障。
 
-[device_usb_radio.c](../main/device_usb_radio.c) 在 WiFi 前暂停 USB 数据 PHY，清理回调/驱动结束后恢复先前状态，充电不受该操作关闭。它是针对 SDK USB/RF 影响的候选规避；插电脑与充电器均触发故障说明仍需排查供电/射频/检测路径，不能归结成电脑串口独占。
+[device_usb_radio.c](../main/device_usb_radio.c) 保留无线开始/结束边界，但不再直接改 Serial/JTAG 时钟或数据 pad。当前开发配置使用 ESP-IDF 6.1 的 USB/WiFi 共存（`CONFIG_ESP_PHY_ENABLE_USB=y`），编译门拒绝旧的关闭配置。原手动切换方案与仅保留时钟的中间候选都已在实机失败返回后复现 USB 描述符错误；SDK共存诊断候选已通过授权网络配网保存及检查更新退出后的串口/截屏。SDK驱动、回调及媒体租约仍须完整停止，USB MSC/TF所有权互斥不变；不能将Serial/JTAG共存当作允许USB磁盘与产品同时访问卡。插线射频/供电根因及实际无线性能另验。
+
+OTA的TLS使用SDK外部内存分配，将可分配工作内存放到PSRAM；保留证书链、签名和镜像读回校验。内部内存候选在真机建立TLS时因`PSA_ERROR_INSUFFICIENT_MEMORY`失败，不能以主机HTTPS成功代替设备结果。更新结束与阶段变化合并为一次快照绘制；设置页绘制被取消/失败时，由产品owner空闲且无锁屏/子页时按秒重试最新快照，不在render联网或写Flash。
 
 LocalSend 同源 JSON/授权/确认/整文件接收、PC HTTP/IPv4 发现以及设备发现/HTTP 适配已有源码。整文件中断重发不等同网页分块续传；官方客户端 HTTPS、设备发现、中文确认/取消和停止屏障完整互通尚未验收。Windows UDP 53317 保留属于主机发现环境问题，不能用它解释路由器 STA 网页上传失败。
 

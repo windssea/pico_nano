@@ -5,6 +5,9 @@
 #include "pn_brand.h"
 #include "pn_network_store.h"
 #include "sdkconfig.h"
+#if CONFIG_PN_DEVICE_OTA && !CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC
+#error "Device OTA requires PSRAM-backed TLS allocation on this board"
+#endif
 #include "esp_ota_ops.h"
 #include "esp_app_desc.h"
 #include "esp_flash.h"

@@ -1612,20 +1612,25 @@ static void tick_ota(uint64_t now){
     ota_poll_at=now+100;
     pn_device_ota_state_t before={0},state={0};(void)pn_device_ota_state(&ota,&before);(void)pn_device_ota_poll(&ota);(void)pn_device_ota_state(&ota,&state);
     static unsigned last_percent;unsigned percent=state.total?(unsigned)((uint64_t)state.bytes*100u/state.total):0;
-    if(state.phase!=before.phase || (percent/10!=last_percent/10)){
+    bool changed=state.phase!=before.phase || (percent/10!=last_percent/10);
+    if(changed){
         last_percent=percent;
         if(state.phase==PN_DEVICE_OTA_CHECKING)snprintf(ota_notice,sizeof ota_notice,"正在读取 Gitee 更新及签名清单…");
         else if(state.phase==PN_DEVICE_OTA_DOWNLOADING)snprintf(ota_notice,sizeof ota_notice,"正在下载、写入并验证固件：%u%%",percent);
         else if(state.phase==PN_DEVICE_OTA_AVAILABLE)snprintf(ota_notice,sizeof ota_notice,"更新清单与兼容检查通过。确认后下载并安装。");
         else if(state.phase==PN_DEVICE_OTA_READY)snprintf(ota_notice,sizeof ota_notice,"固件与 Flash 读回校验通过。确认重启完成升级。");
         else if(state.phase==PN_DEVICE_OTA_STOPPING)snprintf(ota_notice,sizeof ota_notice,"正在停止网络与升级任务…");
-        update_ota_ui(true);
     }
     if(state.phase==PN_DEVICE_OTA_ERROR && state.radio_released){
         pn_status_t error=state.error;(void)pn_device_ota_close(&ota);
         snprintf(ota_notice,sizeof ota_notice,"%s",ota_commit_failed?"升级收尾失败，请重启核对版本，必要时使用 USB 恢复。":error==PN_EMPTY?"当前发行版暂无可用的 OTA 更新。":error==PN_UNSUPPORTED?"此设备需要先通过 USB 安装兼容版本。":error==PN_CANCELLED?"已取消升级，原版本继续使用。":error==PN_CORRUPT?"固件校验失败，原版本继续使用。":"网络或安装失败，原版本继续使用，可稍后重试。");ota_commit_failed=false;update_ota_ui(true);
         if(ota_lock_pending){ota_lock_pending=false;if(prepare_lock())lock_and_sleep("");}
-    }
+    }else if(changed)update_ota_ui(true);
+}
+/// 设置页回执取消后仅在空闲重试最新快照，不覆盖锁屏或子页面。 / Retry the latest settings snapshot only when idle, never over a lock or child page.
+static void retry_settings_ui(uint64_t now,uint64_t *last_retry){
+    if(!settings_ui.impl || !settings_ui.active || settings_ui.presented || locked || opening || wallpaper_ui.impl || font_manage.impl || transfer.impl || usb.open || now-*last_retry<1000 || pn_cancel_checkpoint()!=PN_OK)return;
+    *last_retry=now;(void)pn_settings_ui_present(&settings_ui,present,NULL);
 }
 /// 无线或写入仍在进行；AVAILABLE/READY只等用户确认，不阻止锁屏或休眠。
 /// Radio or writes still running; AVAILABLE/READY merely await confirmation and never block locking or sleep.
@@ -2467,6 +2472,7 @@ static void device_task(void *arg){
             continue;
         }
         if(reader_active() && !locked){pn_status_t saved=epub.impl?pn_epub_app_tick(&epub,now_ms()):pn_reader_app_tick(&reader,now_ms());if(saved==PN_OK)progress_save_failed=false;else if(saved!=PN_BUSY){progress_save_failed=true;ESP_LOGW(TAG,"Pending progress save: %d",(int)saved);}}
+        if(available==PN_EMPTY)retry_settings_ui(now,&last_ui_retry);
         if(bookmarks.mode!=PN_BUI_CLOSED && !bookmarks.presented && !locked && now-last_ui_retry>=1000){last_ui_retry=now;(void)pn_bookmark_ui_present(&bookmarks,present,NULL);}
         if(toc.active && !toc.presented && !locked && now-last_ui_retry>=1000){last_ui_retry=now;(void)pn_toc_ui_present(&toc,present,NULL);}
         if(styles.active && !styles.presented && !locked && now-last_ui_retry>=1000){last_ui_retry=now;(void)pn_style_ui_present(&styles,present,NULL);}

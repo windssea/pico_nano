@@ -18,8 +18,9 @@ CONFIG_ESP32S3_DATA_CACHE_64KB=y
 # 与产品的 PNG 解码栈预算一致。/ Match the product PNG decoding stack budget.
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
-# 与产品的USB/无线互斥行为一致，仅时序保持CI隔离。 / Match product USB/radio exclusion while keeping CI timing isolated.
-CONFIG_ESP_PHY_ENABLE_USB=n
+# 与产品一致使用SDK USB/WiFi共存，不手动切换pad；CI时序保持隔离。
+# Use SDK USB/WiFi coexistence like the product without manual pad switching; keep CI timing isolated.
+CONFIG_ESP_PHY_ENABLE_USB=y
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 CONFIG_COMPILER_OPTIMIZATION_PERF=y
 CONFIG_FREERTOS_HZ=1000
@@ -52,6 +53,9 @@ CONFIG_TINYUSB_MSC_MOUNT_PATH="/usb-unmounted"
 # OTA qualification image: public key only; keep signing secrets outside the repository and verify rollback on hardware.
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 CONFIG_PN_DEVICE_OTA=y
+# 与板级一致使用PSRAM供给TLS握手，保留完整证书和签名校验。
+# Supply TLS handshakes from PSRAM like the board configuration, retaining full certificate and signature verification.
+CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
 CONFIG_PN_OTA_PUBLIC_KEY_HEX="04f2ce42405655dfa24054164f286172ec8c6bef48bd17a31b5b375f786f1ad586f52164ec09d0326d144d8277febd70f930a39b7225db7fbec0d7a133307085cd"
 
 # 传书网络：WiFi/lwIP动态缓冲优先放PSRAM，放大TCP窗口与套接字上限（网页80与LocalSend53317两个监听）。

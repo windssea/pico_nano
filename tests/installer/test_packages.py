@@ -10,10 +10,20 @@ from unittest.mock import patch
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools"))
 import installer_site
-from package_upgrade import full_payload, validate_build_version
+from package_upgrade import full_payload, validate_build_version, validate_build_config
 
 
 class FullPackages(unittest.TestCase):
+    def test_product_config_rejects_stale_policy_and_diagnostics(self):
+        config = "CONFIG_SPIRAM_SPEED_120M=y\nCONFIG_ESP_PHY_ENABLE_USB=y\nCONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y\n"
+        validate_build_config(config)
+        for key in ("CONFIG_SPIRAM_SPEED_120M", "CONFIG_ESP_PHY_ENABLE_USB", "CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC"):
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                validate_build_config(config.replace(key + "=y", "# " + key + " is not set"))
+        for key in ("CONFIG_PN_PROFILE", "CONFIG_PN_TEST_CONSOLE"):
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                validate_build_config(config + key + "=y\n")
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

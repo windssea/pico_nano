@@ -32,9 +32,9 @@ CONFIG_ESP32S3_DATA_CACHE_64KB=y
 # PNG 解码的有界局部缓冲需要额外栈空间。/ Bounded PNG decoder locals need additional stack space.
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
-# 无线会话暂停USB数据以使用SDK的RF干扰规避；退出后板级适配恢复数据，充电不变。
-# Radio sessions suspend USB data for the SDK RF workaround; the board restores data on exit, leaving charging intact.
-CONFIG_ESP_PHY_ENABLE_USB=n
+# USB/WiFi共存交给SDK，避免手动切换pad后主机无法重新枚举；不影响充电。
+# Let the SDK manage USB/WiFi coexistence, avoiding failed host re-enumeration after manual pad switching; charging is unchanged.
+CONFIG_ESP_PHY_ENABLE_USB=y
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 CONFIG_COMPILER_OPTIMIZATION_PERF=y
 # 1ms tick：EPD 上电流程里按毫秒轮询 PGOOD，100Hz 的 tick 会把每次等待放大到 10ms
@@ -67,6 +67,9 @@ CONFIG_TINYUSB_MSC_MOUNT_PATH="/usb-unmounted"
 # OTA qualification image: public key only; keep signing secrets outside the repository and verify rollback on hardware.
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 CONFIG_PN_DEVICE_OTA=y
+# TLS握手缓冲使用PSRAM，避免WiFi/OTA worker耗尽内部连续堆；证书和验签策略不变。
+# Put TLS handshake buffers in PSRAM so WiFi/OTA workers do not exhaust contiguous internal heap; certificate and signature policies stay unchanged.
+CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
 CONFIG_PN_OTA_PUBLIC_KEY_HEX="04f2ce42405655dfa24054164f286172ec8c6bef48bd17a31b5b375f786f1ad586f52164ec09d0326d144d8277febd70f930a39b7225db7fbec0d7a133307085cd"
 
 # 传书网络：WiFi/lwIP动态缓冲优先放PSRAM，放大TCP窗口与套接字上限（网页80与LocalSend53317两个监听）。

@@ -33,7 +33,7 @@ typedef struct {
  esp_event_handler_instance_t wifi_events,ip_events;
  pn_device_wifi_state_t state;
  bool loop_owned,initialized,started,start_attempted,closing,ap_ready,pending_connect;
- bool usb_enabled; ///< 无线前USB数据状态，完整退出后恢复 / USB data state before radio, restored after complete teardown
+ bool usb_enabled; ///< 兼容生命周期令牌；SDK共存不切换USB / Compatibility lifecycle token; SDK coexistence never switches USB
  uint64_t window,next_retry;
  uint64_t signal_at;bool ever_ready; ///< 有界信号采样与首次连接区分 / Bounded signal sampling and first-connection distinction
 } wifi_t;
@@ -97,7 +97,7 @@ pn_status_t pn_device_wifi_open_detailed(pn_device_wifi_t *out,const pn_device_w
  wifi_t *s=heap_caps_malloc(sizeof *s,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);if(!s)return PN_NO_MEMORY;memset(s,0,sizeof *s);
  s->mutex=xSemaphoreCreateMutex();if(!s->mutex){heap_caps_free(s);return PN_NO_MEMORY;}
  s->state.mode=config->mode;s->state.phase=PN_WIFI_STARTING;s->state.generation=1;s->window=now_ms();out->impl=s;active=s;
- // 无线初始化前暂停USB数据，失败清理也走同一恢复路径。 / Suspend USB before radio initialization; failures use the same restoration path.
+ // USB PHY共存由SDK管理，失败清理仍经过同一生命周期边界。 / The SDK manages USB PHY coexistence; failure cleanup retains the same lifecycle boundary.
  s->usb_enabled=pn_device_usb_radio_suspend();
  wifi_config_t settings={0};esp_err_t result=ESP_OK;
  if(config->mode==PN_WIFI_AP){

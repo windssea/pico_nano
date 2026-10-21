@@ -42,8 +42,7 @@ def main():
     config = (ROOT / "build-board/sdkconfig").read_text(encoding="utf-8")
     if len(table) != 0xc00 or not 0 < len(application) <= 0x600000:
         raise SystemExit("Invalid table or application size")
-    if "CONFIG_SPIRAM_SPEED_120M=y" not in config or "CONFIG_ESP_PHY_ENABLE_USB=y" in config or "CONFIG_PN_PROFILE=y" in config:
-        raise SystemExit("Expected board 120 MHz configuration with USB/radio exclusion")
+    validate_build_config(config)
     brand = (ROOT / "components/pn_core/include/pn_brand.h").read_text(encoding="utf-8")
     match = re.search(r'^#define PN_PRODUCT_VERSION "([0-9.]+)"', brand, re.MULTILINE)
     if not match:
@@ -63,7 +62,7 @@ def main():
         payload["README.md"] = installation_readme(commit)
     metadata = {"brand": "PicoNano", "source_commit": commit, "version": version, "idf": "v6.1", "target": "esp32s3",
                 "board": "RDP-G01-W", "built_at": datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))).isoformat(),
-                "config": "board defaults; USB/radio exclusion; CONFIG_PN_PROFILE disabled", "application_offset": "0x20000",
+                "config": "board defaults; SDK USB/radio coexistence; TLS PSRAM; diagnostics disabled", "application_offset": "0x20000",
                 "slot_bytes": 0x600000, "write_files": ["pico_nano.bin"], "write_executed": False, "hardware_acceptance": False,
                 "files": {name: {"bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()} for name, data in payload.items()}}
     if args.full:
@@ -83,6 +82,15 @@ def main():
     (folder / "PACKAGE_SHA256.txt").write_bytes((hashlib.sha256(archive.read_bytes()).hexdigest() + "  " + archive.name + "\n").encode())
     print(folder)
     print("Build the web installer with python tools/dev.py installer, then commit the release folder.")
+
+
+def validate_build_config(config):
+    """拒绝旧无线/TLS策略、CI时钟及诊断包冒充正式板级包。 / Reject stale radio/TLS policy, CI clocks and diagnostics in product board packages."""
+    options = dict(re.findall(r"^(CONFIG_[A-Z0-9_]+)=(.*)$", config, re.MULTILINE))
+    required = ("CONFIG_SPIRAM_SPEED_120M", "CONFIG_ESP_PHY_ENABLE_USB", "CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC")
+    forbidden = ("CONFIG_PN_PROFILE", "CONFIG_PN_TEST_CONSOLE")
+    if any(options.get(key) != "y" for key in required) or any(options.get(key) == "y" for key in forbidden):
+        raise ValueError("Expected product board 120 MHz, SDK USB coexistence, PSRAM TLS and diagnostics disabled")
 
 
 def full_payload(build, factory, application, table):

@@ -15,9 +15,9 @@ int main(void){
  pn_device_wifi_probe_t p={0};pn_device_wifi_config_t c={.mode=PN_WIFI_STA};strcpy(c.ssid,"home");strcpy(c.password,"password123");
  pn_device_wifi_config_t ap={.mode=PN_WIFI_AP},short_pw=c;strcpy(short_pw.password,"short");
  assert(pn_device_wifi_probe_open(&p,&ap)==PN_INVALID && pn_device_wifi_probe_open(&p,&short_pw)==PN_INVALID && !p.impl);
- /* 拿到IP即成功，并完整关闭无线、恢复USB。/ An IP address is success; the radio closes fully and USB is restored. */
+ /* 拿到IP即成功，完整关闭无线，USB全程不中断。/ An IP address is success; the radio closes fully without interrupting USB. */
  assert(pn_device_wifi_probe_open(&p,&c)==PN_OK && !initialized && pn_device_wifi_probe_open(&p,&c)==PN_BUSY);
- assert(pn_device_wifi_probe_poll(&p,now)==PN_OK && initialized && !usb_pad && !snapshot(&p).released && pn_device_wifi_probe_close(&p)==PN_BUSY);
+ assert(pn_device_wifi_probe_poll(&p,now)==PN_OK && initialized && usb_pad && !snapshot(&p).released && pn_device_wifi_probe_close(&p)==PN_BUSY);
  ip_event_got_ip_t got={0};got.ip_info.ip.addr=1;ip_handler(ip_context,IP_EVENT,IP_EVENT_STA_GOT_IP,&got);
  assert(pn_device_wifi_probe_poll(&p,now)==PN_OK && snapshot(&p).released && snapshot(&p).result==PN_OK && !initialized && usb_pad);
  assert(pn_device_wifi_probe_close(&p)==PN_OK && !p.impl && !allocations);

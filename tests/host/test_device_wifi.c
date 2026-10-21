@@ -10,7 +10,6 @@
 const char *pn_stub_wifi_event="wifi",*pn_stub_ip_event="ip";
 static bool initialized,started,entropy,shared_loop,fail_stop,fail_start,fail_netif;
 static bool usb_clock=true,usb_pad=true;
-static bool radio_gates_usb_clock;
 static unsigned usb_suspend,usb_restore;
 bool usb_serial_jtag_ll_module_is_enabled(void){return usb_clock;}
 bool usb_serial_jtag_ll_phy_is_pad_enabled(void){assert(usb_clock);return usb_pad;}
@@ -52,7 +51,7 @@ esp_err_t esp_netif_get_ip_info(esp_netif_t *netif,esp_netif_ip_info_t *out){ass
 esp_err_t esp_event_handler_instance_register(esp_event_base_t base,int32_t id,esp_event_handler_t handler,void *ctx,esp_event_handler_instance_t *instance){(void)id;if(!strcmp(base,WIFI_EVENT)){wifi_handler=handler;wifi_context=ctx;*instance=&wifi_handler;}else{ip_handler=handler;ip_context=ctx;*instance=&ip_handler;}return ESP_OK;}
 esp_err_t esp_event_handler_instance_unregister(esp_event_base_t base,int32_t id,esp_event_handler_instance_t instance){(void)id;(void)instance;if(!strcmp(base,WIFI_EVENT))wifi_handler=NULL;else ip_handler=NULL;return ESP_OK;}
 esp_err_t esp_wifi_get_mode(wifi_mode_t *out){if(!initialized)return ESP_ERR_WIFI_NOT_INIT;*out=mode;return ESP_OK;}
-esp_err_t esp_wifi_init(const wifi_init_config_t *cfg){assert(!usb_pad && !entropy && !cfg->nvs_enable);assert(cfg->static_rx_buf_num==4 && cfg->dynamic_rx_buf_num==16 && cfg->static_tx_buf_num==4 && cfg->dynamic_tx_buf_num==16 && cfg->rx_ba_win==6 && cfg->mgmt_sbuf_num==8);initialized=true;return ESP_OK;}
+esp_err_t esp_wifi_init(const wifi_init_config_t *cfg){assert(!entropy && !cfg->nvs_enable && !usb_suspend && !usb_restore);assert(cfg->static_rx_buf_num==4 && cfg->dynamic_rx_buf_num==16 && cfg->static_tx_buf_num==4 && cfg->dynamic_tx_buf_num==16 && cfg->rx_ba_win==6 && cfg->mgmt_sbuf_num==8);initialized=true;return ESP_OK;}
 esp_err_t esp_wifi_set_storage(int storage){assert(storage==WIFI_STORAGE_RAM);return ESP_OK;}
 esp_err_t esp_wifi_set_mode(wifi_mode_t value){mode=value;return ESP_OK;}
 esp_err_t esp_wifi_set_config(wifi_interface_t iface,const wifi_config_t *value){(void)iface;config=*value;return ESP_OK;}
@@ -61,12 +60,12 @@ esp_err_t esp_wifi_set_ps(wifi_ps_type_t ps){assert(started && mode==WIFI_MODE_S
 esp_err_t esp_wifi_connect(void){connections++;return ESP_OK;}
 esp_err_t esp_wifi_sta_get_ap_info(wifi_ap_record_t *out){out->rssi=-61;return ESP_OK;}
 esp_err_t esp_wifi_stop(void){if(fail_stop)return ESP_FAIL;started=false;return ESP_OK;}
-esp_err_t esp_wifi_deinit(void){assert(!started);initialized=false;if(radio_gates_usb_clock)usb_clock=false;return ESP_OK;}
+esp_err_t esp_wifi_deinit(void){assert(!started);initialized=false;return ESP_OK;}
 int main(void){
  pn_device_wifi_t wifi={0};pn_device_wifi_config_t settings={.mode=PN_WIFI_AP};pn_device_wifi_state_t state;
  assert(pn_device_wifi_open(&wifi,&settings)==PN_OK);assert(config.ap.authmode==WIFI_AUTH_WPA2_PSK && strlen((char *)config.ap.password)==12 && !entropy);
  assert(pn_device_wifi_poll(&wifi)==PN_OK);assert(pn_device_wifi_state(&wifi,&state)==PN_OK && state.phase==PN_WIFI_READY && !strcmp(state.address,"192.168.4.1"));char old[13];strcpy(old,state.ap_password);
- fail_stop=true;assert(pn_device_wifi_close(&wifi)==PN_IO && wifi.impl && wifi_handler && !usb_pad && usb_restore==0);fail_stop=false;assert(pn_device_wifi_close(&wifi)==PN_OK && !wifi.impl && !allocations && deleted==1 && usb_pad && usb_restore==1);
+ fail_stop=true;assert(pn_device_wifi_close(&wifi)==PN_IO && wifi.impl && wifi_handler && usb_pad && usb_restore==0);fail_stop=false;assert(pn_device_wifi_close(&wifi)==PN_OK && !wifi.impl && !allocations && deleted==1 && usb_pad && usb_restore==0);
  fail_start=true;assert(pn_device_wifi_open(&wifi,&settings)==PN_IO && !wifi.impl && !initialized && !started && !allocations && usb_pad && usb_restore==usb_suspend);fail_start=false;
  shared_loop=true;assert(pn_device_wifi_open(&wifi,&settings)==PN_OK);assert(pn_device_wifi_poll(&wifi)==PN_OK);assert(pn_device_wifi_state(&wifi,&state)==PN_OK && strcmp(old,state.ap_password));assert(pn_device_wifi_close(&wifi)==PN_OK && deleted==2);
  settings.mode=PN_WIFI_STA;strcpy(settings.ssid,"家里的网络");strcpy(settings.password,"reader-password");assert(pn_device_wifi_open(&wifi,&settings)==PN_OK);
@@ -82,8 +81,9 @@ int main(void){
  foreign_netif=true;assert(pn_device_wifi_open(&wifi,&settings)==PN_BUSY && !wifi.impl);foreign_netif=false;
  fail_netif=true;assert(pn_device_wifi_open(&wifi,&settings)==PN_IO && !wifi.impl && !allocations);fail_netif=false;
  assert(pn_device_wifi_open(&wifi,&settings)==PN_OK);now+=20000;assert(pn_device_wifi_poll(&wifi)==PN_IO);assert(pn_device_wifi_close(&wifi)==PN_OK && !allocations);
- assert(usb_pad && usb_suspend==usb_restore);
- radio_gates_usb_clock=true;assert(pn_device_wifi_open(&wifi,&settings)==PN_OK);assert(pn_device_wifi_close(&wifi)==PN_OK && usb_clock && usb_pad);radio_gates_usb_clock=false;
+ // 正常、失败、取消与重试都不能中断USB或改写其他owner的关闭状态。/ Normal, failed, cancelled and retried sessions must neither interrupt USB nor change another owner's disabled state.
+ assert(usb_pad && !usb_suspend && !usb_restore);
+ assert(pn_device_wifi_open(&wifi,&settings)==PN_OK);assert(pn_device_wifi_close(&wifi)==PN_OK && usb_clock && usb_pad);
  usb_pad=false;unsigned restored=usb_restore;assert(pn_device_wifi_open(&wifi,&settings)==PN_OK);assert(pn_device_wifi_close(&wifi)==PN_OK && !usb_pad && usb_restore==restored);
  usb_clock=false;assert(pn_device_wifi_open(&wifi,&settings)==PN_OK);assert(pn_device_wifi_close(&wifi)==PN_OK && !usb_pad && usb_restore==restored);usb_clock=true;
  puts("Device WiFi: SDK stubs, fresh AP credentials, entropy ordering, RAM config, STA retry bounds, stop retry and shared-loop preservation passed");return 0;

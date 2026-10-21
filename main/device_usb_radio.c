@@ -1,41 +1,18 @@
 /* SPDX-License-Identifier: Apache-2.0
- * 中文：USB PHY与无线互斥的板级适配，不触碰PMU或TF。
- * English: board adapter separating USB PHY and radio, without PMU or TF access. */
+ * 中文：USB/无线生命周期边界；PHY由SDK管理，不触碰PMU或TF。
+ * English: USB/radio lifecycle boundary; the SDK owns PHY management, without PMU or TF access. */
 #include "device_usb_radio.h"
 #ifdef ESP_PLATFORM
 #include "sdkconfig.h"
-#include "esp_private/periph_ctrl.h"
-#if CONFIG_ESP_PHY_ENABLE_USB
-#error "Radio sessions require CONFIG_ESP_PHY_ENABLE_USB disabled"
-#endif
-#endif
-#if defined(ESP_PLATFORM) || defined(PN_USB_RADIO_STUB)
-#include "hal/usb_serial_jtag_ll.h"
-#ifndef ESP_PLATFORM
-#define PERIPH_RCC_ATOMIC() if(true)
+#if !CONFIG_ESP_PHY_ENABLE_USB
+#error "USB radio coexistence requires CONFIG_ESP_PHY_ENABLE_USB"
 #endif
 #endif
 bool pn_device_usb_radio_suspend(void){
-#if defined(ESP_PLATFORM) || defined(PN_USB_RADIO_STUB)
-    bool enabled=false;
-    PERIPH_RCC_ATOMIC(){
-        enabled=usb_serial_jtag_ll_module_is_enabled() && usb_serial_jtag_ll_phy_is_pad_enabled();
-        if(enabled)usb_serial_jtag_ll_phy_enable_pad(false);
-    }
-    return enabled;
-#else
+    // 中断USB pad会破坏主机枚举；保留调用边界，但不再绕过SDK切换PHY或引脚。
+    // Interrupting USB pads breaks host enumeration; retain the lifecycle boundary without switching PHY or pads behind the SDK.
     return false;
-#endif
 }
 void pn_device_usb_radio_restore(bool enabled){
-#if defined(ESP_PLATFORM) || defined(PN_USB_RADIO_STUB)
-    PERIPH_RCC_ATOMIC(){
-        if(enabled){
-            usb_serial_jtag_ll_enable_bus_clock(true);
-            usb_serial_jtag_ll_phy_enable_pad(true);
-        }
-    }
-#else
     (void)enabled;
-#endif
 }

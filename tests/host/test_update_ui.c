@@ -6,7 +6,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 static unsigned frames;
-static pn_status_t present(void *ctx,const pn_frame_t *f,pn_refresh_t mode){(void)ctx;(void)mode;assert(f->width==684 && f->height==1216);frames++;return PN_OK;}
+static pn_status_t present_result=PN_OK;
+static pn_status_t present(void *ctx,const pn_frame_t *f,pn_refresh_t mode){(void)ctx;(void)mode;assert(f->width==684 && f->height==1216);frames++;return present_result;}
 int main(void){
  pn_pool_t pool;assert(!pn_pool_init(&pool,6u*1024u*1024u,NULL,NULL,NULL));pn_settings_ui_t ui={0};
  assert(pn_settings_ui_open(&ui,&pool,NULL,NULL,present,NULL)==PN_OK);
@@ -21,6 +22,10 @@ int main(void){
  assert(pn_settings_ui_hit(&ui,300,740)==-1 && pn_settings_ui_hit(&ui,300,850)==PN_SETUI_UPDATE_CANCEL);
  assert(pn_settings_ui_event(&ui,PN_SETUI_BACK,present,NULL)==PN_BUSY && ui.request==PN_SETUI_UPDATE_CANCEL && pn_settings_ui_screen(&ui)==6);ui.request=0;
  assert(pn_settings_ui_event(&ui,PN_SETUI_HOME,present,NULL)==PN_BUSY && !ui.request);
+ // 结束快照被取消后保留未呈现标记；重试必须显示最新可检查状态。 / A cancelled terminal draw retains the unpresented marker; retry presents the latest checkable state.
+ state.running=false;pn_settings_ui_set_update(&ui,&state);present_result=PN_CANCELLED;
+ assert(pn_settings_ui_present(&ui,present,NULL)==PN_CANCELLED && !ui.presented);
+ present_result=PN_OK;assert(pn_settings_ui_present(&ui,present,NULL)==PN_OK && ui.presented && pn_settings_ui_hit(&ui,300,740)==PN_SETUI_UPDATE_CHECK);
  state.running=false;state.install=true;pn_settings_ui_set_update(&ui,&state);assert(pn_settings_ui_present(&ui,present,NULL)==PN_OK);
  assert(pn_settings_ui_hit(&ui,300,740)==PN_SETUI_UPDATE_INSTALL);
  assert(pn_settings_ui_event(&ui,PN_SETUI_UPDATE_REBOOT,present,NULL)==PN_EMPTY);

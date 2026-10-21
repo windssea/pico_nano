@@ -29,6 +29,8 @@ $env:DOCKER_CONTEXT='desktop-linux'
 
 ## 日常命令和产物
 
+2026-10-21开发配置使用SDK USB/WiFi共存（`CONFIG_ESP_PHY_ENABLE_USB=y`），不再手动切换USB数据pad；OTA的TLS使用`CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y`将工作内存放入PSRAM，保留完整证书校验。已有`build-*/sdkconfig`不会自动继承修改后的defaults，复跑相应构建前只同步这两项及Kconfig互斥的内存分配选项，保留板级/CI时序隔离；源码编译门会拒绝旧的USB关闭或TLS内部内存配置。诊断构建不替代正式板级/CI构建；本批用户已另行授权1.0.2正式构建发布及远程OTA测试。
+
 阅读统计检查为主机`reading_stats`、`device_reading_stats`和`bookmark_lock`：前者覆盖门控/跨日/校时/换书归档/重启/坏档保留，第二项用真实产品main和TXT/EPUB验证首屏不加载统计、成功翻页、失败扫描、重绘与存档恢复；硬件接口为替身。SDL新增`reading_stats_window`，通过真实菜单/锁屏/加载延迟旅程与跨进程文件快照核对正文停留、翻页和持久恢复。窗口使用主机时间，执行时间及端口延迟都不是TF、面板或睡眠功耗实测；正式板级/CI和实机诊断按本批授权分开进行。
 
 tools/test_local_system_startup.py的--staged-prepare使用产品同源的源/排版两个阶段；--sources-only在源准备后立即点击，检查0次空闲布局、1次前台布局，完整书/字体身份已就绪。--interrupt-layout --baseline-warm --baseline <独立旧观察器>在实际首屏布局完成时注入新输入取消，再点击；要求旧对象丢弃/新对象保留，点击阶段旧书SHA一次/新零次、完整三帧一致。--expect-layout用于完整候选交接，--paint-unshown继续演练原8节点正文预绘。普通PC仍重查外部修改；固定文件port仅模拟设备READ排他约束。local-samples的原准备矩阵改为分阶段，另加local-idle-source-handoff全量源后点击；中断版本对照需指定独立冻结观察器，不能把同一程序切换策略称为旧固件。hot_host/immutable另在首字度量期间及布局完成后取消，检查对象/菜单缓存保留、失败不提交进度、原帧重试及TTL/USB归还；这些是软件行为，不是TF或面板计时。
@@ -87,7 +89,7 @@ POSIX的`cover_window`持久化场景等待三条实际`cover.cache-clean`回执
 
 设备路由测试使用固定`/sdcard`、`/data`作为硬件替身的存储根。Docker默认在一次性容器里提供；GitHub临时Linux runner在CTest前以`sudo install -d -o "$(id -u)" -g "$(id -g)" /sdcard /data`建立当前runner可写目录，测试本身以普通用户运行，不跳过断言。原生运行须使用专用、无实际设备挂载的隔离环境，不能把产品TF或已有数据目录交给这些夹具。
 
-SDKCONFIG按环境隔离：CI与板级都有各自build目录/sdkconfig，不能拷贝CI配置覆盖板级或把本机生成sdkconfig提交成基线。120MHz只适用于核对器件。无线互斥适配拒绝保留旧 `CONFIG_ESP_PHY_ENABLE_USB=y`；检查defaults及实际build配置，不据缓存旧构建宣布新源码已编译。
+SDKCONFIG按环境隔离：CI与板级都有各自build目录/sdkconfig，不能拷贝CI配置覆盖板级或把本机生成sdkconfig提交成基线。120MHz只适用于核对器件。当前无线适配要求 `CONFIG_ESP_PHY_ENABLE_USB=y`；检查defaults及实际build配置，不据缓存旧构建宣布新源码已编译。
 
 ## 开发时保持可见模拟器
 

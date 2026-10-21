@@ -13,12 +13,12 @@ esp_err_t esp_netif_sntp_init(const esp_sntp_config_t *c){assert(!strcmp(c->serv
 void esp_netif_sntp_deinit(void){ntp_stopped++;assert(ntp_stopped==ntp_started);}
 esp_err_t esp_netif_sntp_sync_wait(unsigned ticks){assert(ticks==0);return ntp_wait;}
 static pn_device_time_state_t snapshot(pn_device_time_t *t){pn_device_time_state_t s;assert(pn_device_time_state(t,&s)==PN_OK);return s;}
-static void connect(pn_device_time_t *t){assert(pn_device_time_poll(t,now)==PN_OK);assert(initialized && !usb_pad);ip_event_got_ip_t got={0};got.ip_info.ip.addr=1;ip_handler(ip_context,IP_EVENT,IP_EVENT_STA_GOT_IP,&got);assert(pn_device_time_poll(t,now)==PN_OK);}
+static void connect(pn_device_time_t *t){assert(pn_device_time_poll(t,now)==PN_OK);assert(initialized && usb_pad);ip_event_got_ip_t got={0};got.ip_info.ip.addr=1;ip_handler(ip_context,IP_EVENT,IP_EVENT_STA_GOT_IP,&got);assert(pn_device_time_poll(t,now)==PN_OK);}
 int main(void){
  pn_device_time_t t={0};pn_device_wifi_config_t c={.mode=PN_WIFI_STA};strcpy(c.ssid,"home");strcpy(c.password,"password123");
  assert(pn_device_time_open(&t,&c)==PN_OK && !initialized && usb_pad);assert(pn_device_time_close(&t)==PN_BUSY);connect(&t);
  assert(snapshot(&t).phase==PN_TIME_WAITING && !snapshot(&t).utc);ntp_wait=ESP_OK;fail_stop=true;assert(pn_device_time_poll(&t,now)==PN_OK);
- assert(snapshot(&t).phase==PN_TIME_STOPPING && !snapshot(&t).released && !usb_pad);assert(pn_device_time_close(&t)==PN_BUSY);
+ assert(snapshot(&t).phase==PN_TIME_STOPPING && !snapshot(&t).released && usb_pad);assert(pn_device_time_close(&t)==PN_BUSY);
  fail_stop=false;assert(pn_device_time_poll(&t,++now)==PN_OK);assert(snapshot(&t).phase==PN_TIME_SUCCEEDED && snapshot(&t).released && snapshot(&t).utc==(uint32_t)utc && usb_pad);assert(pn_device_time_close(&t)==PN_OK);
  ntp_wait=ESP_ERR_NOT_FINISHED;assert(pn_device_time_open(&t,&c)==PN_OK);connect(&t);now+=12001;assert(pn_device_time_poll(&t,now)==PN_OK);assert(snapshot(&t).phase==PN_TIME_FAILED && snapshot(&t).sdk_error==ESP_ERR_TIMEOUT && !snapshot(&t).utc);assert(pn_device_time_close(&t)==PN_OK);
  unsigned starts=ntp_started;assert(pn_device_time_open(&t,&c)==PN_OK);assert(pn_device_time_request_stop(&t)==PN_OK);assert(pn_device_time_poll(&t,++now)==PN_OK);assert(snapshot(&t).phase==PN_TIME_CANCELLED && ntp_started==starts && usb_pad);assert(pn_device_time_close(&t)==PN_OK);

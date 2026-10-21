@@ -66,6 +66,14 @@ int main(void){
     int vcom;assert(read_pico_pmu_vcom_get(&vcom)==ESP_OK);epd_set_vcom((uint16_t)vcom);
     assert(pn_media_attach(&sd_media,1)==PN_OK);
     assert(pn_settings_ui_open(&settings_ui,&pool,NULL,NULL,present,NULL)==PN_OK);
+    // 网络结束时若绘制被取消，空闲重试遵守节流、取消与锁屏门控。 / Retry cancelled network-terminal draws subject to idle throttling, cancellation and lock gates.
+    uint64_t retry_at=0;settings_ui.presented=false;unsigned retry_frames=presents;
+    retry_settings_ui(999,&retry_at);assert(presents==retry_frames && !settings_ui.presented);
+    locked=true;retry_settings_ui(1000,&retry_at);assert(presents==retry_frames && !retry_at);locked=false;
+    pn_cancel_scope_t cancelled_scope;pn_cancel_enter(&cancelled_scope,feedback_cancelled,NULL);
+    retry_settings_ui(1000,&retry_at);assert(presents==retry_frames && !retry_at);pn_cancel_leave(&cancelled_scope);
+    retry_settings_ui(1000,&retry_at);assert(settings_ui.presented && retry_at==1000);retry_frames=presents;
+    retry_settings_ui(2000,&retry_at);assert(presents==retry_frames && retry_at==1000);
     assert(root_navigation_hit(80,1150)==PN_SETUI_HOME && root_navigation_hit(100,700)==-1);
     root_merge_checks();
     assert(pn_settings_ui_event(&settings_ui,PN_SETUI_REFRESH,present,NULL)==PN_OK && pn_settings_ui_screen(&settings_ui)==2);
