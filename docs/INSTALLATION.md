@@ -8,7 +8,7 @@
 
 OTA安装在启动写入前确认提示；Flash写入和取消收口期间暂停主动及空闲补画，worker/无线完整退出后显示结果。保持供电，等待完整验证完成后再确认重启；**1.0.3本批未刷机或执行设备OTA，刷新争用改善尚未真机复验**。旧版1.0.2成功OTA与启动的证据范围见下节，不登记为1.0.3硬件验收。
 
-发布前执行隔离的板级120MHz/CI80MHz构建、应用槽余量与镜像版本/ELF/checksum/validation检查，再核三个USB包、签名OTA和公开附件；精确构建记录见本节发布核验信息。应用升级保留引导与布局；OTA仍要求实读引导和分区摘要匹配，不因版本号放宽校验。
+正式板级120MHz/CI80MHz的SDK6.1构建与size、镜像版本/ELF/checksum/validation核验通过。源码`34cf145c3355640868f247e85f63161350607c34`；板级应用5637936B、槽余653520B（10.39%），SHA-256`8b89d30a5df6be0762bf27bf4609129b04ecfae5b033a2fc13d370b9be751984`；CI应用5634320B、槽余10.45%。板级引导与1.0.2保持相同摘要`80193053e7c398d196e87db7b63a1eaf008ea5f368d35f918c094d5b804652e1`，分区保持。三个USB包、九镜像离线HTTP、P-256签名OTA及六附件完整摘要核验通过。
 
 下载：[Gitee正式版](https://gitee.com/windssea/pico_nano/releases/tag/v1.0.3)、[GitHub正式版](https://github.com/windssea/pico_nano/releases/tag/v1.0.3)。
 
