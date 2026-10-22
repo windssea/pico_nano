@@ -58,9 +58,6 @@ function renderRelease() {
   const release = state.release;
   $("version").textContent = release.version;
   $("release-meta").textContent = `提交 ${release.commit} · 应用 ${kib(release.files.app.size)}`;
-  const verified = release.verifiedOnHardware === true;
-  $("hw-warning").hidden = verified;
-  $("hw-confirmed").hidden = !verified;
   const preserving = release.mode === "app-only";
   $("mode-note").textContent = preserving ? "支持已知旧布局及本项目完整刷入后的布局，仅更新应用。其他布局仍需完整刷入。"
     : "完整刷入会恢复引导与启动布局。请核对所选版本、备份及清除选项；不会自动切换刷入方式。";
@@ -75,7 +72,7 @@ function selectMode(preferredCommit) {
   for (const release of releases) {
     const option = document.createElement("option");
     option.value = release.version;
-    option.textContent = `${release.version}${release.verifiedOnHardware === true ? "（正式版·已真机验证）" : "（未登记真机验证）"}`;
+    option.textContent = release.version;
     select.append(option);
   }
   state.release = releases.find((r) => r.commit === preferredCommit) || releases[0];
@@ -86,8 +83,6 @@ function selectMode(preferredCommit) {
   if (!state.release) {
     $("version").textContent = "—";
     $("release-meta").textContent = "";
-    $("hw-warning").hidden = true;
-    $("hw-confirmed").hidden = true;
     $("mode-note").textContent = "没有可用的当前完整包；历史首装包不作为新版本的恢复包。";
     status("当前没有该方式的固件包，请选择另一种方式或等待完整包发布。", "warn");
     syncButtons();

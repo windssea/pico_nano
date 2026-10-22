@@ -3,25 +3,81 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>PicoNano 网页安装</title>
-  <meta name="description" content="在浏览器里为小纸 Pico（Read Pico）安装 PicoNano 固件。">
+  <meta name="theme-color" content="#f7f8f5">
+  <title>PicoNano · 把时间留给阅读</title>
+  <meta name="description" content="认识 PicoNano：为小纸 Pico 打造的独立阅读器固件。浏览真实设备界面，跟随引导，通过 USB 在浏览器中安装或升级。">
   <link rel="stylesheet" href="style.css">
   <script type="module" src="app.js"></script>
+  <script type="module" src="showcase.js"></script>
 </head>
 <body>
-  <main>
-    <header>
-      <p class="eyebrow">小纸 Pico · Read Pico · RDP-G01-W</p>
-      <h1>PicoNano 网页安装</h1>
-      <p class="lead">用电脑上的 Chrome 或 Edge 通过 USB 连接阅读器，一次完成安装或升级。只写需要的区域，不整片擦除。</p>
+  <a class="skip-link" href="#installation">跳到刷机引导</a>
+  <div class="site-header">
+    <nav class="nav container" aria-label="主导航">
+      <a class="wordmark" href="#top" aria-label="PicoNano 首页">PicoNano<span aria-hidden="true">.</span></a>
+      <div class="nav-links"><a href="#features">功能一览</a><a href="#help">安装帮助</a><a class="nav-install" href="#installation">安装 PicoNano <span aria-hidden="true">↗</span></a></div>
+    </nav>
+  </div>
+  <main id="top">
+    <header class="hero container">
+      <div class="hero-copy">
+        <p class="eyebrow">为小纸 Pico，写一段新的阅读时光</p>
+        <h1>小小的屏幕，<br>装下你的<span>大世界。</span></h1>
+        <p class="lead">从熟悉的书架，到恰好的字体。<br>让 PicoNano 陪你，把时间留给阅读。</p>
+        <div class="hero-actions"><a class="button primary" href="#installation">开始安装 <span aria-hidden="true">↗</span></a><a class="text-link" href="#features">先看看能做什么 <span aria-hidden="true">↓</span></a></div>
+      </div>
+      <figure class="hero-visual">
+        <div class="screen-pair">
+          <img class="hero-screen screen-back" src="assets/shelf.png" width="684" height="1216" alt="PicoNano 实机封面书库，支持全部、最近与收藏分类" fetchpriority="high">
+          <img class="hero-screen screen-front" src="assets/home.png" width="684" height="1216" alt="PicoNano 实机首页，展示继续阅读、阅读节奏和最近书籍" fetchpriority="high">
+        </div>
+      </figure>
     </header>
-
-    <p id="unsupported" class="notice error" hidden>当前浏览器不支持 Web Serial。请在电脑上用 Chrome 或 Edge 打开本页（手机和 Safari、Firefox 不支持）。</p>
-
-    <section class="card">
+    <div class="product-facts container" aria-label="产品概览">
+      <p><strong>TXT / EPUB</strong><span>从你的本地书库开始</span></p>
+      <p><strong>字体与排版</strong><span>找到自己的阅读节奏</span></p>
+      <p><strong>阅读背景与锁屏</strong><span>把喜欢留在屏幕上</span></p>
+      <p><strong>开源，持续打磨</strong><span>为 RDP-G01-W 打造</span></p>
+    </div>
+    <section id="features" class="showcase section container" aria-labelledby="features-title">
+      <div class="section-heading"><p class="eyebrow">每一天，都想再翻一页</p><h2 id="features-title">熟悉的阅读，多一点自在。</h2><p>不必想象它的样子。看看 PicoNano 在真实设备上的界面。</p></div>
+      <div class="showcase-layout">
+        <div class="feature-choices" role="group" aria-label="选择要查看的功能">
+          <button type="button" class="feature-choice" aria-pressed="true" aria-controls="feature-preview" data-image="home" data-title="打开，就能接着读。" data-description="正在读的书、上次的位置、最近的阅读，都在首页。用今日与本周的阅读统计，看见一点点积累。" data-caption="首页与阅读统计"><span class="feature-name">首页与续读<span aria-hidden="true">↗</span></span><span>上次的故事，随时继续。</span></button>
+          <button type="button" class="feature-choice" aria-pressed="false" aria-controls="feature-preview" data-image="shelf" data-title="你的书，整整齐齐。" data-description="用封面找到熟悉的故事，在全部、最近与收藏间切换。支持 TXT 和 EPUB，书架可选择三列、四列或列表。" data-caption="封面书库"><span class="feature-name">封面书库<span aria-hidden="true">↗</span></span><span>浏览封面，也收藏偏爱。</span></button>
+          <button type="button" class="feature-choice" aria-pressed="false" aria-controls="feature-preview" data-image="style" data-title="舒服，是自己的标准。" data-description="调整字体、字号、行距、边距与字重，先预览，再应用。让每一本书，都以你喜欢的方式展开。" data-caption="阅读排版设置"><span class="feature-name">字体与排版<span aria-hidden="true">↗</span></span><span>字与字之间，留一点呼吸。</span></button>
+          <button type="button" class="feature-choice" aria-pressed="false" aria-controls="feature-preview" data-image="wallpaper" data-title="不读书时，也有好风景。" data-description="壁纸、透明遮罩与书签，选择适合自己的锁屏方式。图片图库先看缩略图，再进入预览与调整。" data-caption="锁屏壁纸图库"><span class="feature-name">个性化锁屏<span aria-hidden="true">↗</span></span><span>把喜欢的画面，留在手边。</span></button>
+          <button type="button" class="feature-choice" aria-pressed="false" aria-controls="feature-preview" data-image="bookmark-lock" data-title="合上书，也记得这段时光。" data-description="把当前书封、阅读进度与本书统计留在锁屏上。搭配本周阅读记录和离线黄历，读过的时光，一眼就能看见。" data-caption="书签锁屏"><span class="feature-name">书签锁屏<span aria-hidden="true">↗</span></span><span>书封、进度与阅读时光，在这里相遇。</span></button>
+          <button type="button" class="feature-choice" aria-pressed="false" aria-controls="feature-preview" data-image="lock" data-title="给阅读，一个安静的留白。" data-description="内置水墨熊猫默认锁屏，也可以使用自己的图片。阅读中的背景与锁屏分别设置，各有自己的风景。" data-caption="水墨熊猫默认锁屏"><span class="feature-name">水墨与留白<span aria-hidden="true">↗</span></span><span>小小阅读器，也有自己的气质。</span></button>
+        </div>
+        <div id="feature-preview" class="feature-preview">
+          <figure class="preview-figure"><a id="preview-link" href="assets/home.png" target="_blank" rel="noopener" aria-label="打开首页与阅读统计原图（新标签页）"><img id="preview-image" src="assets/home.png" width="684" height="1216" loading="lazy" alt="PicoNano 实机首页与阅读统计"></a><figcaption id="preview-caption">首页与阅读统计 · 点击查看原图</figcaption></figure>
+          <div class="preview-copy" aria-live="polite" aria-atomic="true"><h3 id="preview-title">打开，就能接着读。</h3><p id="preview-description">正在读的书、上次的位置、最近的阅读，都在首页。用今日与本周的阅读统计，看见一点点积累。</p></div>
+        </div>
+      </div>
+      <noscript><p>功能切换需要 JavaScript；也可以直接查看截图：<a href="assets/shelf.png">书库</a>、<a href="assets/style.png">排版</a>、<a href="assets/wallpaper.png">锁屏图库</a>、<a href="assets/bookmark-lock.png">书签锁屏</a>、<a href="assets/lock.png">默认锁屏</a>。</p></noscript>
+    </section>
+    <section class="reading-note container" aria-labelledby="reading-note-title">
+      <h2 id="reading-note-title">书、字体、背景。<br>喜欢的，都可以带过来。</h2>
+      <div><p>通过设备的网页传书功能，管理本地书籍、字体、封面、锁屏与阅读背景。图片会在上传前转换成适合墨水屏的灰阶。</p><p class="muted">先安装固件，开机后进入设备的传书页面，按屏幕指引连接。此处的 USB 安装器用于安装固件。</p><a class="text-link" href="https://github.com/windssea/pico_nano#readme" target="_blank" rel="noopener">了解项目与使用说明 <span aria-hidden="true">↗</span></a></div>
+    </section>
+    <section id="installation" class="installer-section section" aria-labelledby="install-title">
+      <div class="container">
+        <div class="section-heading"><p class="eyebrow">准备好，给阅读器换个新开始</p><h2 id="install-title">跟着步骤，装好 PicoNano。</h2><p>一台电脑、一根数据线。直接在浏览器里完成安装或升级。</p></div>
+        <div class="installer-layout">
+          <aside class="install-guide" aria-label="安装前准备">
+            <h3>开始前，确认这三件事</h3>
+            <ul class="preflight"><li><strong>匹配的阅读器</strong><span>小纸 Pico · RDP-G01-W<br>ESP32-S3 / 16 MiB Flash</span></li><li><strong>电脑上的 Chrome 或 Edge</strong><span>使用 HTTPS 页面或 localhost。<br>手机端不提供此 USB 刷机流程。</span></li><li><strong>一根能传数据的 USB 线</strong><span>连接时关闭占用串口的其他工具，<br>例如串口监视器或其他刷机网页。</span></li></ul>
+            <div class="backup-note"><strong>第一次安装？先留一份备份。</strong><p>从其他固件切换，请选择“完整刷入”。完整模式默认勾选整片备份；清除设置和内部数据都需要你明确确认。</p></div>
+            <ol class="journey" aria-label="刷机步骤"><li><a href="#connection">连接设备</a></li><li><span>核对写入计划</span></li><li><a href="#installation-status">等待写入与校验</a></li><li><a href="#after-install">观察设备启动</a></li></ol>
+          </aside>
+          <div class="installer-panel">
+            <noscript><p class="notice error">安装器需要 JavaScript。请启用后刷新页面，再连接设备。</p></noscript>
+            <p id="unsupported" class="notice error" hidden>当前浏览器无法使用 Web Serial。请用电脑上的 Chrome 或 Edge，通过 HTTPS 或 localhost 打开本页。</p>
+    <section class="card firmware-card" aria-labelledby="firmware-title">
       <div class="row">
         <div>
-          <h2>固件 <span id="version">—</span></h2>
+          <h3 id="firmware-title">选择固件 <span id="version">读取中</span></h3>
           <p id="release-meta" class="muted"></p>
         </div>
         <label class="select">版本
@@ -35,12 +91,9 @@
         </select>
       </label>
       <p id="mode-note" class="muted"></p>
-      <p id="hw-confirmed" class="notice ok" hidden><strong>正式版，已完成真机验证。</strong></p>
-      <p id="hw-warning" class="notice warn" hidden><strong>本版尚未登记真机验证。</strong>发布状态与验证范围请查看发行说明；不会沿用其他版本的硬件验证记录。安装前请备份阅读数据与设置。</p>
     </section>
-
-    <section class="card">
-      <h2>1 · 连接设备</h2>
+    <section id="connection" class="card connection-card">
+      <h3><span class="step-number">1</span> 连接你的阅读器</h3>
       <ol class="steps">
         <li>用能传数据的 USB 线把阅读器接到电脑。</li>
         <li>点“连接设备”，在弹窗里选择出现的串口（通常名为 USB JTAG/serial debug unit）。</li>
@@ -51,9 +104,8 @@
         <span id="device" class="muted"></span>
       </div>
     </section>
-
     <section id="plan" class="card" hidden>
-      <h2>2 · 核对并安装</h2>
+      <h3><span class="step-number">2</span> 核对后，开始安装</h3>
       <p id="plan-mode" class="pill"></p>
       <p id="plan-note" class="muted"></p>
       <ol id="plan-steps" class="plan"></ol>
@@ -67,10 +119,9 @@
         <span id="backup-link"></span>
       </div>
     </section>
-
-    <section class="card">
-      <p id="status" class="status">准备就绪。</p>
-      <div id="progress" hidden>
+    <section id="installation-status" class="card feedback-card" aria-label="安装状态">
+      <p id="status" class="status" role="status" aria-live="polite" aria-atomic="true">请选择刷入方式，再连接设备。</p>
+      <div id="progress" aria-live="polite" hidden>
         <div class="bar"><div id="progress-bar"></div></div>
         <p id="progress-label" class="muted"></p>
       </div>
@@ -79,9 +130,22 @@
         <div id="log" class="log"></div>
       </details>
     </section>
-
-    <section class="card help">
-      <h2>帮助</h2>
+            <div id="after-install" class="after-install"><h3><span class="step-number">3</span> 写入完成后，看看设备</h3><p>写入和校验完成后，安装器会尝试重启。请观察阅读器是否正常启动，再按屏幕提示使用；网页显示写入成功不等于设备已完成启动。</p></div>
+          </div>
+        </div>
+      </div>
+    </section>
+    <div class="container">
+    <section id="help" class="help section" aria-labelledby="help-title">
+      <div class="section-heading"><h2 id="help-title">有疑问？从这里开始。</h2><p>连接、备份与恢复，你可能需要的答案。</p></div>
+      <details>
+        <summary>找不到设备串口，怎么办？</summary>
+        <p>先确认 USB 线能传输数据，尝试换一根线或电脑上的另一个 USB 接口。关闭串口监视器、esptool 和其他占用设备的刷机网页，再点击“连接设备”。如果仍无法连接，按原厂说明进入下载模式后重试。</p>
+      </details>
+      <details>
+        <summary>第一次安装和日常升级，怎么选？</summary>
+        <p>从原厂或其他固件切换，选择“完整刷入”，先保存备份再核对写入计划。已经使用 PicoNano 时，可选择“保留布局升级”；如果布局不匹配，安装器会停止，请根据提示选择完整刷入。清除设置和初始化内部数据均需单独确认。</p>
+      </details>
       <details>
         <summary>安装器会写哪些内容</summary>
         <p>安装器先读取设备上的分区表，再决定要写什么：</p>
@@ -98,15 +162,15 @@
       </details>
       <details>
         <summary>如何恢复原来的系统</summary>
-        <p>用安装前保存的整片备份写回 0x0：<code>esptool --chip esp32s3 -p COM? write-flash 0x0 PicoNano-backup-….bin</code>。中途断开时设备会停在下载模式，可直接重新安装或写回备份。</p>
+        <p>用安装前保存的整片备份写回 0x0：<code>esptool --chip esp32s3 -p COM? write-flash 0x0 PicoNano-backup.bin</code>。中途断开时设备会停在下载模式，可直接重新安装或写回备份。</p>
       </details>
       <details>
         <summary>命令行安装</summary>
         <p>也可以下载各版本文件夹里的分段文件用 esptool 写入，说明见仓库 <code>releases/</code> 中的 README。</p>
       </details>
     </section>
-
-    <footer class="muted">页面在浏览器中直接与设备通信，固件文件从本站下载并经 SHA-256 校验。串口通信使用 esptool-js 0.5.7（Apache-2.0）。</footer>
+    </div>
   </main>
+  <footer class="site-footer container"><div><a class="wordmark" href="#top">PicoNano<span aria-hidden="true">.</span></a><p>把时间留给阅读。</p></div><div class="footer-info"><a href="https://github.com/windssea/pico_nano" target="_blank" rel="noopener">开源项目 ↗</a><p>浏览器直接与设备通信，固件下载后经 SHA-256 校验。<br>串口通信使用 esptool-js 0.5.7（Apache-2.0）。</p></div></footer>
 </body>
 </html>

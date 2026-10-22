@@ -1,0 +1,45 @@
+{
+  "captured_at": "2026-10-22",
+  "method": "tools/device_test.py shot; displayed epdiy reference with per-chunk and whole-frame CRC validation",
+  "board": "RDP-G01-W",
+  "target": "ESP32-S3",
+  "product_version": "1.0.4",
+  "app_version": "1.0.4-diag",
+  "idf_version": "v6.1",
+  "elf_prefix": "6e97a8638",
+  "width": 684,
+  "height": 1216,
+  "notes": "User-authorized real-device UI captures, not optical panel photographs. Example books and custom images shown are not included as firmware resources. No serial identifier, Wi-Fi credentials or session QR codes included.",
+  "files": {
+    "home.png": {
+      "bytes": 32595,
+      "sha256": "57537c50d682c9eb1b9b01a0da1b5d18fe96f6a1448de406bdd775ea8648065b",
+      "captured_at": "2026-10-22",
+      "view": "home",
+      "known": true
+    },
+    "lock.png": {
+      "bytes": 71622,
+      "sha256": "d96864574f2676a05cef13090c59c935feb63ad870226084fce0f32cd7f3f62a"
+    },
+    "shelf.png": {
+      "bytes": 58675,
+      "sha256": "a21cba21f11f5fb94f7003e6c6b77955045bafd33cd441d2f8bd254654c4b1f1"
+    },
+    "style.png": {
+      "bytes": 27696,
+      "sha256": "1242e740a40cfde34a8fff52b859e62459da36bdd6d3cb935f138b6f8c2560fe"
+    },
+    "wallpaper.png": {
+      "bytes": 52960,
+      "sha256": "3f08e7fd2c7b0e30ef857120de5c5eb06ce169cda356bf37cc89febbdf3811b5"
+    },
+    "bookmark-lock.png": {
+      "bytes": 59549,
+      "sha256": "e7db7744fbf9bb8fb16f995c5ff2bfc8a2bea0e60d1fc294d08d66e134de0e2f",
+      "captured_at": "2026-10-22",
+      "view": "bookmark-lock",
+      "known": true
+    }
+  }
+}
