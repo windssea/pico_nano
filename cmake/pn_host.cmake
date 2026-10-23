@@ -39,6 +39,7 @@ add_library(pn_core STATIC ${ui_font_c} ${reading_font_c} ${harmony_font_c} ${ar
     ${PN_ROOT}/components/pn_image/pn_jpeg.c
     ${PN_ROOT}/components/pn_image/pn_image.c
     ${PN_ROOT}/components/pn_reader/pn_epub_image.c
+    ${PN_ROOT}/components/pn_reader/pn_epub_image_cache.c
     ${PN_ROOT}/components/pn_reader/pn_epub_reader.c
     ${PN_ROOT}/components/pn_reader/pn_epub_app.c
     ${PN_ROOT}/components/pn_reader/pn_semantic_file.c

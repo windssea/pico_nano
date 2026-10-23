@@ -174,7 +174,12 @@ int main(int argc,char **argv){
     show(&reader,PN_READ_JUMP,&jump,"IJK",&time);show(&reader,PN_READ_NEXT,NULL,"L",&time);show(&reader,PN_READ_NEXT,NULL,"MNO",&time);
     unsigned calls=save.calls;assert(pn_epub_reader_prepare(&reader,PN_READ_NEXT,NULL,&receipt)==PN_EMPTY && save.calls==calls);
     show(&reader,PN_READ_PREVIOUS,NULL,"L",&time);location(&jump,"OPS/c.xhtml",NULL);show(&reader,PN_READ_JUMP,&jump,"MNO",&time);show(&reader,PN_READ_PREVIOUS,NULL,"L",&time);show(&reader,PN_READ_NEXT,NULL,"MNO",&time);
-    show(&reader,PN_READ_FIRST,NULL,"ABC",&time);show(&reader,PN_READ_NEXT,NULL,"DEF",&time);show(&reader,PN_READ_NEXT,NULL,"GH",&time);show(&reader,PN_READ_NEXT,NULL,"IJK",&time);
+    show(&reader,PN_READ_FIRST,NULL,"ABC",&time);
+    /// 分步NEXT的BUSY不发布回执或进度，最终候选仍须显示确认。/ A stepped NEXT publishes neither receipt nor progress on BUSY, and its final candidate still requires display confirmation.
+    {pn_epub_progress_t before,after;assert(!pn_epub_reader_progress(&reader,&before));pn_epub_reader_receipt_t next={.ticket=999};pn_status_t status;unsigned steps=0;
+     do{status=pn_epub_reader_prepare_step(&reader,PN_READ_NEXT,NULL,&next);assert(++steps<1000);if(status==PN_BUSY){assert(next.ticket==999);assert(!pn_epub_reader_progress(&reader,&after) && same(before.location,after.location));}}while(status==PN_BUSY);
+     assert(status==PN_OK);expect(&reader,"DEF");assert(pn_epub_reader_complete(&reader,&next,false,time++)==PN_IO);assert(!pn_epub_reader_progress(&reader,&after) && same(before.location,after.location));}
+    show(&reader,PN_READ_NEXT,NULL,"DEF",&time);show(&reader,PN_READ_NEXT,NULL,"GH",&time);show(&reader,PN_READ_NEXT,NULL,"IJK",&time);
     location(&jump,"OPS/note.xhtml",NULL);show(&reader,PN_READ_JUMP,&jump,"ZZ",&time);show(&reader,PN_READ_NEXT,NULL,"IJK",&time);
     // 越过32项历史窗口后，仍从有界语义前缀重建前页。/ Beyond the 32-entry history window, reconstruct previous pages from bounded semantic prefixes.
     layout.width=10;assert(pn_epub_reader_reflow(&reader,&layout)==PN_OK);location(&jump,"OPS/long.xhtml",NULL);show(&reader,PN_READ_JUMP,&jump,"A",&time);

@@ -12,6 +12,7 @@ esp_err_t read_pico_sd_get_info(read_pico_sd_info_t *info){if(getenv("PN_MENU_CO
 #define PN_DEVICE_MAIN_SOURCE "../../main/app_main.c"
 #endif
 #include PN_DEVICE_MAIN_SOURCE
+#include "device_reader_step.h"
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include <time.h>
@@ -178,8 +179,8 @@ static void cold_book_probe(const char *path){
     watching=false;if(!reader_active() || status_page || shelf_mode || presents!=before+2)fprintf(stderr,"cold result reader=%d status=%d shelf=%d shown=%u expected=%u\n",reader_active(),status_page,shelf_mode,presents,before+2);
     assert(reader_active() && !status_page && !shelf_mode && presents==before+2);
     assert(pn_epub_app_last_confirmed(&epub));opening_frame(0);
-    assert(active_step(PN_APP_NEXT,now_ms())==PN_OK);opening_frame(1);
-    assert(active_step(PN_APP_PREVIOUS,now_ms())==PN_OK);opening_frame(2);
+    assert(fixture_reader_step(PN_APP_NEXT,now_ms())==PN_OK);opening_frame(1);
+    assert(fixture_reader_step(PN_APP_PREVIOUS,now_ms())==PN_OK);opening_frame(2);
     assert(stop_reader());printf("cold_open polls=%u body_once=1 loader_once=1 status=0 used=%zu peak=%zu\n",polls,pool.used,pool.peak);
 }
 #if PN_TEST_FOREGROUND_OPEN
@@ -215,8 +216,8 @@ static void overlap_open(const char *path){
     assert(tick_opening() && !opening && reader_active() && !status_page && opening_overlap_result==PN_BUSY);printf("overlap_open steps=%u\n",n);
 }
 static void switch_probe(const char *a,const char *b){
-    library();switch_open(a,false,NULL,0);assert(active_step(PN_APP_NEXT,now_ms())==PN_OK);assert(leave_reader());switch_idle();
-    switch_open(b,false,NULL,0);assert(active_step(PN_APP_NEXT,now_ms())==PN_OK);assert(leave_reader());switch_idle();
+    library();switch_open(a,false,NULL,0);assert(fixture_reader_step(PN_APP_NEXT,now_ms())==PN_OK);assert(leave_reader());switch_idle();
+    switch_open(b,false,NULL,0);assert(fixture_reader_step(PN_APP_NEXT,now_ms())==PN_OK);assert(leave_reader());switch_idle();
     recent_loaded=false;assert(load_recent()==PN_OK && recent_snapshot->count>=2);
     const pn_recent_item_t *hit=NULL;for(size_t i=0;i<recent_snapshot->count;i++)if(!strcmp(recent_snapshot->items[i].path,a))hit=&recent_snapshot->items[i];
     assert(hit);pn_book_id_t id=hit->book;uint64_t size=hit->source_size;switch_open(a,true,&id,size);

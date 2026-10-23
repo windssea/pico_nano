@@ -91,6 +91,10 @@ pn_status_t pn_epub_app_open_job_progress(const pn_epub_open_job_t *,uint64_t *,
 pn_status_t pn_epub_app_open_job_close(pn_epub_open_job_t *);
 /// 真实完成字体/图片/显示回调才提交语义位置；保存错误可能在显示后。/ Commit only after fonts/images/presentation; saving may fail after display.
 pn_status_t pn_epub_app_step(pn_epub_app_t *,pn_reader_action_t,uint64_t,pn_reader_present_fn,void *);
+/// NEXT准备每次一步，BUSY时不绘制/提交；调用方处理输入后重试。/ Prepare NEXT one step per call, drawing/committing nothing on BUSY; callers handle input before retrying.
+pn_status_t pn_epub_app_step_yield(pn_epub_app_t *,pn_reader_action_t,uint64_t,pn_reader_present_fn,void *);
+/// 控制层优先下一页/字形，再安排可重建语义落盘，不读文件。/ Let controllers prioritize the next page/glyphs before rebuildable semantic writes without file IO.
+bool pn_epub_app_prefetch_pending(const pn_epub_app_t *);
 /// 定期保存检查，非异步deadline服务。/ Periodic saving, not an asynchronous deadline service.
 pn_status_t pn_epub_app_tick(pn_epub_app_t *,uint64_t);
 /// 正文空闲且无按压时写待定近期记录，首屏后至少1.5秒；失败保留并限频重试，关闭/挂起仍保存。 / Write pending recents only during untouched body idle at least 1.5 seconds after display; retain and throttle failures, while close/suspend still save.

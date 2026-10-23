@@ -59,6 +59,7 @@ esp_err_t nvs_flash_init(void){return nvs_bad?ESP_FAIL:ESP_OK;}
 static uint8_t stub_front[684u*1216u/2u],stub_back[684u*1216u/2u];
 #ifndef PN_TEST_REAL_WAVEFORM
 const int E0470_FOLLOW_WAVEFORM=1;
+const int E0470_WAVEFORM=2;
 #endif
 static int last_scan;
 esp_err_t read_pico_init(read_pico_handle_t *h){board_calls++;memset(h,0,sizeof *h);h->pmu_ready=true;h->framebuffer=stub_front;memset(stub_front,0xff,sizeof stub_front);memset(stub_back,0xff,sizeof stub_back);h->hl.back_fb=stub_back;return ESP_OK;}
@@ -73,7 +74,10 @@ void read_pico_epd_set_pclk(int mhz){pclk_calls++;last_pclk=mhz;}
 void epd_clear(void){clear_calls++;}
 // epdiy无论结果都把前缓冲回写后缓冲。/ epdiy copies the front buffer into the back buffer regardless of the result.
 enum EpdDrawError epd_hl_update_screen_from_white(EpdiyHighlevelState *h,enum EpdDrawMode m,int t){(void)m;(void)t;presents++;if(h && h->back_fb)memcpy(h->back_fb,stub_front,sizeof stub_front);if(panel_fault)return EPD_DRAW_FAILURE;if(underrun && presents==1)return EPD_DRAW_EMPTY_LINE_QUEUE;return EPD_DRAW_SUCCESS;}
-enum EpdDrawError epd_hl_update_screen_full(EpdiyHighlevelState *h,enum EpdDrawMode m,int t){if(m==MODE_GC16)gc_updates++;return epd_hl_update_screen_from_white(h,m,t);}
+static const void *last_screen_wave; ///< 整屏提交时实际使用的波形身份 / Waveform identity used at a full-screen submission
+static enum EpdDrawMode last_screen_mode; ///< 整屏提交实际模式 / Mode used at a full-screen submission
+static unsigned screen_full_calls; ///< 整屏提交次数，不包含白场恢复 / Full-screen submissions excluding from-white recovery
+enum EpdDrawError epd_hl_update_screen_full(EpdiyHighlevelState *h,enum EpdDrawMode m,int t){screen_full_calls++;last_screen_wave=h->waveform;last_screen_mode=m;if(m==MODE_GC16)gc_updates++;return epd_hl_update_screen_from_white(h,m,t);}
 enum EpdDrawError epd_hl_update_area_full(EpdiyHighlevelState *h,enum EpdDrawMode m,int t,EpdRect area){area_full_calls++;last_full_area=area;if(footer_fault && area.height==1216)return EPD_DRAW_FAILURE;return epd_hl_update_screen_from_white(h,m,t);}
 enum EpdDrawError epd_hl_update_area(EpdiyHighlevelState *h,enum EpdDrawMode m,int t,EpdRect area){area_diff_calls++;last_diff_area=area;if(m==MODE_DU)assert(last_scan==READ_PICO_EPD_SCAN_FAST && h->waveform==&E0470_FOLLOW_WAVEFORM);else assert(last_scan==READ_PICO_EPD_SCAN_FULL);if(footer_fault)return EPD_DRAW_FAILURE;enum EpdDrawError r=epd_hl_update_screen_from_white(h,m,t);if(m==MODE_DU && feedback_fault){feedback_fault=false;return EPD_DRAW_FAILURE;}if(m==MODE_DU && feedback_underrun){feedback_underrun=false;return EPD_DRAW_EMPTY_LINE_QUEUE;}return r;}
 esp_err_t esp_vfs_littlefs_register(const esp_vfs_littlefs_conf_t *c){if(wake_idle && !strcmp(c->partition_label,"wallpaper"))return ESP_FAIL;mounts++;assert(!c->format_if_mount_failed && !c->grow_on_mount && !c->dont_mount && !c->read_only);assert(strcmp(c->base_path,"/data")==0 && strcmp(c->partition_label,"data")==0);return mount_bad?ESP_FAIL:ESP_OK;}

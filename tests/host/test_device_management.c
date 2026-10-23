@@ -35,6 +35,7 @@ pn_status_t pn_device_transfer_state(pn_device_transfer_t *s,pn_device_transfer_
 pn_status_t pn_device_transfer_close(pn_device_transfer_t *s){assert(s->impl);s->impl=NULL;return PN_OK;}
 pn_status_t pn_device_transfer_take_network(pn_device_transfer_t *s,pn_network_credentials_t *c,bool *f){(void)s;(void)c;(void)f;return PN_EMPTY;}
 #include "../../main/app_main.c"
+#include "device_reader_step.h"
 static bool feedback_cancelled(void *ctx){(void)ctx;return true;}
 typedef struct {unsigned calls,limit;} font_cancel_t;
 static bool font_cancel_after(void *ctx){font_cancel_t *c=ctx;return ++c->calls>=c->limit;}
@@ -66,11 +67,30 @@ static void root_merge_checks(void){
     assert(root_navigation_merge(&press,&scope,PN_SETUI_HOME)==-1 && presents==shown && async_port.input.count==3);
     assert(pn_async_take(&async_port.input,&priority)==PN_OK && priority.navigation && priority.urgent);pn_async_end(&scope);pn_async_init(&async_port.input);
 }
+/// 退出阅读只提交一次完整整屏GC16，失败归还波形，未知参考沿原GC16恢复。/ Reading exit submits full-screen original GC16 once, restores the waveform on failure, and retains GC16 recovery for unknown references.
+static void reading_exit_refresh_checks(void){
+    pn_device_refresh_t saved=maintenance;bool known=panel_known,clean=atomic_exchange(&full_clean_completed,false);const void *wave=hardware.hl.waveform;
+    uint8_t *pixels=pn_alloc(&pool,415872);pn_frame_t frame;assert(pixels && pn_frame_bind(&frame,pixels,415872,684,1216));
+    pn_frame_clear(&frame,15);pn_frame_rect(&frame,24,250,400,40,0);
+    hardware.hl.waveform=&E0470_FOLLOW_WAVEFORM;panel_known=true;maintenance.management=23;memset(maintenance.bands,6,sizeof maintenance.bands);
+    unsigned calls=screen_full_calls,shown=presents,clears=clear_calls,areas=area_full_calls+area_diff_calls,gcs=gc_updates;
+    assert(present(NULL,&frame,PN_REFRESH_EXIT_GC16)==PN_OK);
+    assert(screen_full_calls==calls+1 && presents==shown+1 && clear_calls==clears && area_full_calls+area_diff_calls==areas);
+    assert(last_screen_wave==&E0470_WAVEFORM && last_screen_mode==MODE_GC16 && hardware.hl.waveform==&E0470_FOLLOW_WAVEFORM && panel_known);
+    assert(gc_updates==gcs+1 && maintenance.management==0 && atomic_load(&full_clean_completed));
+    // 即使目标像素未变仍执行这次退出更新；普通GL16不消耗额外提交。/ Perform the explicit exit update even for unchanged pixels; ordinary GL16 still skips a redundant submission.
+    calls=screen_full_calls;assert(present(NULL,&frame,PN_REFRESH_EXIT_GC16)==PN_OK && screen_full_calls==calls+1);
+    shown=presents;assert(present(NULL,&frame,PN_REFRESH_GL16)==PN_OK && presents==shown);
+    panel_fault=true;calls=screen_full_calls;assert(present(NULL,&frame,PN_REFRESH_EXIT_GC16)==PN_IO && screen_full_calls==calls+1 && !panel_known && hardware.hl.waveform==&E0470_FOLLOW_WAVEFORM);panel_fault=false;
+    clears=clear_calls;shown=presents;assert(present(NULL,&frame,PN_REFRESH_EXIT_GC16)==PN_OK && clear_calls==clears+1 && presents==shown+1 && panel_known && hardware.hl.waveform==&E0470_FOLLOW_WAVEFORM);
+    pn_free(pixels);hardware.hl.waveform=wave;maintenance=saved;panel_known=known;atomic_store(&full_clean_completed,clean);
+}
 int main(void){
     assert(!pn_pool_init(&pool,6u*1024u*1024u,NULL,NULL,NULL));
     assert(read_pico_init(&hardware)==ESP_OK);pn_media_init(&sd_media);pn_media_init(&data_media);pn_media_init(&wallpaper_media);
     int vcom;assert(read_pico_pmu_vcom_get(&vcom)==ESP_OK);epd_set_vcom((uint16_t)vcom);
     assert(pn_media_attach(&sd_media,1)==PN_OK);
+    reading_exit_refresh_checks();
     assert(pn_settings_ui_open(&settings_ui,&pool,NULL,NULL,present,NULL)==PN_OK);
     // 网络结束时若绘制被取消，空闲重试遵守节流、取消与锁屏门控。 / Retry cancelled network-terminal draws subject to idle throttling, cancellation and lock gates.
     uint64_t retry_at=0;settings_ui.presented=false;unsigned retry_frames=presents;
@@ -246,7 +266,7 @@ int main(void){
     pn_async_init(&async_port.input);home_mode=shelf_mode=status_page=actions_mode=false;
     strcpy(selected_path,book);selected_format=PN_BOOK_TXT;selected_identified=false;
     assert(pn_reader_app_open_on_media(&reader,&pool,&sd_media,book,NULL,NULL,44,0)==PN_OK);
-    assert(active_step(PN_APP_OPEN,now_ms())==PN_OK);
+    assert(fixture_reader_step(PN_APP_OPEN,now_ms())==PN_OK);
     // 长按只打开阅读设置，短按关闭工具回正文；之后短按正文才返回首页。
     // Long opens reading settings only, short closes tools into the body, and a subsequent body short goes Home.
     void *key_reader=reader.impl;handle_key(PN_KEY_2,PN_KEY_LONG);assert(toolbar_open && reader.impl==key_reader && !home_mode && !shelf_mode);
@@ -257,14 +277,19 @@ int main(void){
     handle_key(PN_KEY_2,PN_KEY_SHORT);assert(reader.impl && !styles.active && !home_mode);
     pn_style_t saved;assert(pn_reader_app_style_get(&reader,&saved)==PN_OK && saved.pixels==46);
     toolbar_open=false;report_reader_result(PN_LIMIT);assert(!toolbar_open && reader.impl && (reader_notice || progress_save_failed));
-    status_page=false;handle_key(PN_KEY_2,PN_KEY_SHORT);assert(!reader_active() && home_mode && !*selected_path);
+    // 前面的USB故障用例可留下离线内部介质；本用例验证正常首页返回，先恢复真实启动的可读存储条件。
+    // Earlier USB-failure cases may leave internal media offline; this case checks a normal Home return with readable storage as after a real boot.
+    if(!data_media.available)assert(pn_media_attach(&data_media,1)==PN_OK);
+    status_page=false;unsigned exit_calls=screen_full_calls,exit_clears=clear_calls;
+    handle_key(PN_KEY_2,PN_KEY_SHORT);assert(!reader_active() && home_mode && !*selected_path);
+    assert(screen_full_calls==exit_calls+1 && clear_calls==exit_clears && last_screen_wave==&E0470_WAVEFORM && last_screen_mode==MODE_GC16);
     assert(stop_reader());
     // 真实main返回/重开路径保持对象；强制停止归还热会话READ租约。
     // Actual main return/reopen preserves the object; forced stop returns the warm READ lease.
     strcpy(selected_path,book);selected_format=PN_BOOK_TXT;selected_identified=false;
     home_mode=shelf_mode=status_page=false;
     assert(pn_reader_app_open_on_media(&reader,&pool,&sd_media,book,NULL,NULL,44,0)==PN_OK);
-    assert(active_step(PN_APP_OPEN,now_ms())==PN_OK && active_step(PN_APP_NEXT,now_ms())==PN_OK);
+    assert(fixture_reader_step(PN_APP_OPEN,now_ms())==PN_OK && fixture_reader_step(PN_APP_NEXT,now_ms())==PN_OK);
     void *retained=reader.impl;pn_txt_progress_t location;assert(pn_reader_app_progress(&reader,&location)==PN_OK);
     recent_loaded=true;assert(leave_reader() && !reader_active() && hot_session.txt.impl==retained && !recent_loaded);
     start_reader_impl();assert(reader.impl==retained && hot_session.hits==1 && !hot_session.media);
@@ -275,7 +300,7 @@ int main(void){
     tf_file=fopen(tf_path,"wb");assert(tf_file);tf_source=pn_font_builtin_source();
     for(uint64_t at=0;at<tf_source.size;){size_t n;assert(tf_source.read_at(tf_source.ctx,at,tf_bytes,sizeof tf_bytes,&n)==PN_OK && n && fwrite(tf_bytes,1,n,tf_file)==n);at+=n;}assert(!fclose(tf_file));
     assert(pn_font_system_open(&pool,&sd_media,tf_path)==PN_OK);
-    assert(pn_reader_app_open_on_media(&reader,&pool,&sd_media,book,NULL,NULL,44,0)==PN_OK && active_step(PN_APP_OPEN,now_ms())==PN_OK && leave_reader());
+    assert(pn_reader_app_open_on_media(&reader,&pool,&sd_media,book,NULL,NULL,44,0)==PN_OK && fixture_reader_step(PN_APP_OPEN,now_ms())==PN_OK && leave_reader());
     char folder[]="/tmp/pn-hot-index-XXXXXX",cache_path[256],indexed_book[256],books_path[256];assert(mkdtemp(folder));
     snprintf(books_path,sizeof books_path,"%s/books",folder);assert(!mkdir(books_path,0700));
     snprintf(cache_path,sizeof cache_path,"%s/cache",folder);snprintf(indexed_book,sizeof indexed_book,"%s/books/a.txt",folder);story=fopen(indexed_book,"wb");assert(story && fputs("Original index test.",story)>0 && !fclose(story));

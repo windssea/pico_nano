@@ -28,6 +28,7 @@ bool pn_device_sleep_until_key(void){
 }
 esp_err_t read_pico_sd_get_info(read_pico_sd_info_t *info){*info=(read_pico_sd_info_t){.mounted=true,.present=true};return ESP_OK;}
 #include "../../main/app_main.c"
+#include "device_reader_step.h"
 static void check_position(const pn_txt_progress_t *text,const pn_epub_progress_t *publication){
     if(epub.impl){pn_epub_progress_t p;assert(pn_epub_app_progress(&epub,&p)==PN_OK);
         assert(!strcmp(p.location.path,publication->location.path) && !memcmp(&p.location.position,&publication->location.position,sizeof p.location.position));}
@@ -41,8 +42,8 @@ int main(int argc,char **argv){
     // 内部锁屏存储不可用时走真实默认锁屏，不访问设备目录。/ Use the real default lock fallback when internal wallpaper storage is unavailable, without device paths.
     wake_idle=true;pn_async_init(&async_port.input);lock_port=&async_port;
     pn_status_t status=is_epub?pn_epub_app_open_on_media(&epub,&pool,&sd_media,argv[2],argv[3],argv[4],32,now_ms()):pn_reader_app_open_on_media(&reader,&pool,&sd_media,argv[2],argv[3],argv[4],32,now_ms());
-    assert(status==PN_OK);pn_w_set_battery(battery_percent());assert(active_step(PN_APP_OPEN,now_ms())==PN_OK);
-    clock_us+=100000;status=active_step(PN_APP_NEXT,now_ms());assert(status==PN_OK || status==PN_EMPTY);
+    assert(status==PN_OK);pn_w_set_battery(battery_percent());assert(fixture_reader_step(PN_APP_OPEN,now_ms())==PN_OK);
+    clock_us+=100000;status=fixture_reader_step(PN_APP_NEXT,now_ms());assert(status==PN_OK || status==PN_EMPTY);
     pn_txt_progress_t text={0};pn_epub_progress_t publication={0};
     assert((is_epub?pn_epub_app_progress(&epub,&publication):pn_reader_app_progress(&reader,&text))==PN_OK);
     void *original=is_epub?epub.impl:reader.impl;uint8_t confirmed[sizeof stub_back];memcpy(confirmed,stub_back,sizeof confirmed);

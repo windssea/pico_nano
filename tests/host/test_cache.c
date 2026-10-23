@@ -12,6 +12,10 @@ typedef struct {unsigned calls,fail;} heap_t;
 static void *allocate(void *ctx,size_t n){heap_t *h=ctx;h->calls++;return h->calls==h->fail?NULL:malloc(n);}
 static void release(void *ctx,void *ptr){(void)ctx;free(ptr);}
 int main(void){
+    /// 实际设备略低于6MiB时额度连续，池上限和分项硬顶保持。/ Keep quotas continuous just below the real 6 MiB boundary, retaining pool and class caps.
+    {pn_pool_t low,near,full;assert(!pn_pool_init(&low,4u*1024u*1024u,NULL,NULL,NULL));assert(!pn_pool_init(&near,6217360u,NULL,NULL,NULL));assert(!pn_pool_init(&full,6u*1024u*1024u,NULL,NULL,NULL));
+     assert(low.cache_limit==1536u*1024u && near.cache_limit>2000u*1024u && near.cache_limit<full.cache_limit && full.cache_limit==2u*1024u*1024u);
+     assert(near.limit==6217360u && near.cache_reserve==256u*1024u && near.cache_caps[PN_CACHE_COVER]==384u*1024u && near.cache_caps[PN_CACHE_BITMAP]==416u*1024u);}
     pn_pool_t p;assert(!pn_pool_init(&p,8192,NULL,NULL,NULL));p.cache_reserve=512;
     unsigned order[12]={0},count=0;cache_t c[3]={0};
     // 逆序注册也必须按类别回收，不碰前台帧或保存块。/ Reverse registration must still reclaim by class, never foreground frames or save blocks.

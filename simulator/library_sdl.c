@@ -68,6 +68,7 @@ typedef struct {
     pn_frame_t frame;
     pn_reader_app_t reader;
     pn_epub_app_t epub;
+    bool reader_turn_pending; ///< NEXT准备跨事件轮继续 / Continue NEXT preparation across event ticks
     pn_hot_session_t hot; ///< 单个已保存会话，写入前释放 / One saved session, released before writes
     pn_epub_open_job_t foreground_open;pn_catalog_item_t *opening_book; ///< 私有开书任务及唯一请求快照，不提前覆盖last_read / Private opening job and sole request snapshot, never overwriting last_read early
     pn_toc_ui_t toc;
@@ -175,7 +176,12 @@ static pn_status_t active_step(library_t *s,pn_reader_action_t action,uint64_t n
     pn_epub_app_refresh_period(&s->epub,pn_settings_refresh_pages(s->input_flags));
     pn_frame_t before;pn_turn_t effect={.pool=s->pool,.style=(pn_turn_style_t)((s->input_flags&PN_INPUT_TURN_MASK)>>6),.reverse=action==PN_APP_PREVIOUS,.present=present,.ctx=ctx};
     if((action==PN_APP_NEXT || action==PN_APP_PREVIOUS) && s->page_px && pn_frame_bind(&before,s->page_px,342u*1216u,684,1216))effect.before=&before;else effect.style=PN_TURN_NONE;
-    pn_status_t status=s->epub.impl?pn_epub_app_step(&s->epub,action,now,pn_turn_present,&effect):pn_reader_app_step(&s->reader,action,now,pn_turn_present,&effect);
+    // 与设备保持相同步数/软时间预算，不把主机耗时当硬件指标。/ Match the device step/soft-time budget without treating host timings as hardware measurements.
+    pn_status_t status;uint64_t batch_started=SDL_GetTicks64();unsigned batch_steps=0;
+    do{status=s->epub.impl?pn_epub_app_step_yield(&s->epub,action,now,pn_turn_present,&effect):pn_reader_app_step(&s->reader,action,now,pn_turn_present,&effect);}
+    while(s->epub.impl && action==PN_APP_NEXT && status==PN_BUSY && ++batch_steps<32u && SDL_GetTicks64()-batch_started<8u);
+    s->reader_turn_pending=s->epub.impl && action==PN_APP_NEXT && status==PN_BUSY;
+    s->async.defer_ack=s->reader_turn_pending;
     if((action==PN_APP_NEXT || action==PN_APP_PREVIOUS) && (s->epub.impl?pn_epub_app_last_confirmed(&s->epub):pn_reader_app_last_confirmed(&s->reader))){stats_poll(s,true);stats_pause(s);uint64_t utc=0;bool dated=stats_clock(&utc);pn_book_id_t id;
         if((s->epub.impl?pn_epub_app_identity(&s->epub,&id):pn_reader_app_identity(&s->reader,&id))==PN_OK && s->reading_stats.has_book && !memcmp(id.sha256,s->reading_stats.book.id.sha256,32))pn_reading_stats_turn(&s->reading_stats,dated,utc);}
     return status;
@@ -843,7 +849,7 @@ static int library_worker(void *ctx){
         pn_list_motion_stats_t moving=s->toc.active?pn_toc_ui_motion_stats(&s->toc):pn_font_manage_motion_stats(&s->font_manage);
         uint64_t paint_now=SDL_GetTicks64();bool paint_work=view==16 && !s->pointer_down && atomic_load(&s->async.mouse)==0 && paint_now>=font_activity && paint_now-font_activity>=1500 && (pn_hot_session_source_pending(&s->hot) || pn_hot_session_layout_pending(&s->hot) || pn_hot_session_paint_pending(&s->hot));
         // EPUB候选分步待续时使用短等待，每轮仍先处理真实输入。/ Use a short wait while an EPUB candidate continues, still handling real input first each tick.
-        bool cache_work=pn_wallpaper_ui_pending(&s->wallpaper) || s->foreground_open.impl || (view==15 && (prefetch_work || pn_epub_app_cache_pending(&s->epub))) || pn_cover_work_pending(&s->cover_work) || ((view%32u==16u || view%32u==17u) && pn_shelf_covers_pending(s->covers,s->page)) || paint_work;
+        bool cache_work=s->reader_turn_pending || pn_wallpaper_ui_pending(&s->wallpaper) || s->foreground_open.impl || (view==15 && (prefetch_work || pn_epub_app_cache_pending(&s->epub))) || pn_cover_work_pending(&s->cover_work) || ((view%32u==16u || view%32u==17u) && pn_shelf_covers_pending(s->covers,s->page)) || paint_work;
         SDL_Event event;bool got=pn_sdl_async_wait(&s->async,&event,moving.active || moving.coasting || cache_work?1u:100u,view,root_navigation_hit(s,80,1150)>=0);uint64_t now=SDL_GetTicks64();prefetch_work=false;
         if(got)stats_pause(s);
         else if(s->reading_stats.media && now>=font_activity && now-font_activity>=1500u)(void)pn_reading_stats_save(&s->reading_stats,now,false);
@@ -913,7 +919,14 @@ static int library_worker(void *ctx){
             (void)pn_font_manage_tick(&s->font_manage,now);
             (void)pn_toc_ui_tick(&s->toc,now);
             (void)feedback_idle_tick(s,now,s->locked || body || moving.active || s->pointer_down || s->feedback_tap.down || atomic_load(&s->async.mouse)!=0);
-            if(!s->locked && body && !s->pointer_down && atomic_load(&s->async.mouse)==0){status=s->epub.impl?pn_epub_app_prefetch(&s->epub):pn_reader_app_prefetch(&s->reader);prefetch_work=status==PN_OK;if(status==PN_OK)printf("neighbor prefetch work\n");pn_status_t cached=s->epub.impl?pn_epub_app_cache_idle(&s->epub,now):PN_EMPTY;if(cached==PN_OK)printf("semantic cache stored\n");
+            if(s->reader_turn_pending && (!body || s->locked)){s->reader_turn_pending=false;s->async.defer_ack=false;}
+            if(s->reader_turn_pending && !s->pointer_down && atomic_load(&s->async.mouse)==0){status=active_step(s,PN_APP_NEXT,now,present,s);prefetch_work=true;if(status!=PN_BUSY){printf("library_turn pointer=0 status=%d\n",(int)status);pn_sdl_async_title(&s->async,status==PN_OK?PN_BRAND_NAME:PN_BRAND_NAME " - 操作未完成，请重试");}continue;}
+            if(!s->locked && body && !s->pointer_down && atomic_load(&s->async.mouse)==0){
+                // 与设备空闲路径使用相同步数和软预算。/ Match the device idle step count and soft budget.
+                uint64_t batch_started=SDL_GetTicks64();unsigned steps=0;
+                do{status=s->epub.impl?pn_epub_app_prefetch(&s->epub):pn_reader_app_prefetch(&s->reader);}
+                while(s->epub.impl && status==PN_OK && ++steps<32u && SDL_GetTicks64()-batch_started<8u);
+                prefetch_work=status==PN_OK;if(status==PN_OK)printf("neighbor prefetch work\n");pn_status_t cached=s->epub.impl && (pn_epub_app_cache_pending(&s->epub) || !pn_epub_app_prefetch_pending(&s->epub))?pn_epub_app_cache_idle(&s->epub,now):PN_EMPTY;if(cached==PN_OK)printf("semantic cache stored\n");
                 if(now>=font_activity && now-font_activity>=1500u){pn_status_t recent=s->epub.impl?pn_epub_app_recent_idle(&s->epub,now):pn_reader_app_recent_idle(&s->reader,now);if(recent==PN_OK)printf("recent record stored when idle\n");}}
             if(!s->locked && s->styles.active && !s->pointer_down && atomic_load(&s->async.mouse)==0)(void)pn_style_ui_tick(&s->styles,present,s);
             if(!s->locked && s->wallpaper.impl && !s->pointer_down && atomic_load(&s->async.mouse)==0)(void)pn_wallpaper_ui_tick(&s->wallpaper,present,s);
@@ -1178,7 +1191,7 @@ if(now-font_activity>=800){pn_status_t indexed=catalog_build_idle(s);if(indexed=
         if(turn && reading(s) && action==PN_APP_TOOLS){turn=false;status=toolbar_show(s);}
         if(turn && reading(s)){pn_sdl_async_title(&s->async,PN_BRAND_NAME " - 正在翻页");uint64_t turn_start=SDL_GetTicks64();status=active_step(s,action,now,present,s);if(timing_on())fprintf(stderr,"timing page-turn total=%llums\n",(unsigned long long)(SDL_GetTicks64()-turn_start));printf("library_turn pointer=%d status=%d\n",event.type==SDL_MOUSEBUTTONUP,(int)status);if(status==PN_OK && s->reader.impl){pn_txt_progress_t position;if(pn_reader_app_progress(&s->reader,&position)==PN_OK)printf("library_confirmed offset=%llu\n",(unsigned long long)position.source_offset);}}
         if(turn && reading(s) && status==PN_OK)pn_sdl_async_title(&s->async,PN_BRAND_NAME);
-        if(status!=PN_OK && status!=PN_EMPTY && status!=PN_CANCELLED){
+        if(status!=PN_OK && status!=PN_EMPTY && status!=PN_CANCELLED && !(status==PN_BUSY && s->reader_turn_pending)){
             bool confirmed=turn && reading(s) && (s->epub.impl?pn_epub_app_last_confirmed(&s->epub):pn_reader_app_last_confirmed(&s->reader));
             pn_sdl_async_title(&s->async,confirmed?PN_BRAND_NAME " - 当前页已显示，保存失败，请重试":PN_BRAND_NAME " - 操作未完成，请重试");
         }

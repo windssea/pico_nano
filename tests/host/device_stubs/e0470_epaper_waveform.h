@@ -6,4 +6,5 @@
 #include "../../../components/e0470_epaper_waveform/include/e0470_epaper_waveform.h"
 #else
 extern const int E0470_FOLLOW_WAVEFORM;
+extern const int E0470_WAVEFORM;
 #endif

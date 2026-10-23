@@ -33,6 +33,8 @@ void pn_epub_reader_close(pn_epub_reader_t *);
 /// FIRST/JUMP可首次请求；JUMP需location，其他可NULL；pending时BUSY，失败receipt不变。
 /// FIRST/JUMP can start a session; JUMP requires location, others permit NULL; BUSY while pending, preserving receipt on errors.
 pn_status_t pn_epub_reader_prepare(pn_epub_reader_t *,pn_read_intent_t,const pn_epub_location_t *,pn_epub_reader_receipt_t *);
+/// NEXT每次只推进一个预排步骤，BUSY保留候选；其余意图沿原契约。/ Advance one NEXT prefetch step per call, retaining candidates on BUSY; other intents keep their existing contract.
+pn_status_t pn_epub_reader_prepare_step(pn_epub_reader_t *,pn_read_intent_t,const pn_epub_location_t *,pn_epub_reader_receipt_t *);
 /// 读取当前完整候选回执，不解析或确认页面；EMPTY时输出保持。/ Copy the complete pending receipt without parsing or confirming a page; preserve output on EMPTY.
 pn_status_t pn_epub_reader_prepared(const pn_epub_reader_t *,pn_epub_reader_receipt_t *);
 /// 仅完整图片/正文/显示成功后success=true；匹配回执提交，不接受重复或过期确认。
@@ -54,6 +56,8 @@ typedef pn_status_t (*pn_epub_next_fn)(void *,const pn_epub_page_t *,const pn_ep
 pn_status_t pn_epub_reader_visit_next(pn_epub_reader_t *,pn_epub_next_fn,void *);
 /// 仅查询键匹配的完整邻页，不读源；借用仍须visit_next验证。/ Query a complete key-matching neighbor without source IO; borrowing still requires visit_next validation.
 bool pn_epub_reader_next_ready(const pn_epub_reader_t *);
+/// 查询当前锚点是否仍需下一页预排，不读取源。/ Query whether the current anchor still needs next-page preparation without source IO.
+bool pn_epub_reader_next_pending(const pn_epub_reader_t *);
 typedef pn_status_t (*pn_epub_warm_fn)(void *,const pn_epub_page_node_t *); ///< 字形预热回调，不解码图片 / Glyph warming callback without image decoding
 /// 有界预热已验证邻页，保护借用并复查介质；缺字跳过、内存不足停本页，不提交进度。 / Warm a bounded verified neighbor page under borrow/media protection; skip missing glyphs, stop on OOM, never commit progress.
 pn_status_t pn_epub_reader_warm_next(pn_epub_reader_t *,pn_epub_warm_fn,void *,size_t budget);

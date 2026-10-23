@@ -22,11 +22,14 @@ static void libc_free(void *ctx, void *ptr) { (void)ctx; free(ptr); }
 
 int pn_pool_init(pn_pool_t *pool, size_t limit, pn_malloc_fn alloc, pn_free_fn release, void *ctx) {
     if (!pool || ((alloc == NULL) != (release == NULL))) return -1;
+    /// 4至6MiB间平滑增加可回收份额；总池和前台余量不变。/ Grow the reclaimable share smoothly between 4 and 6 MiB, retaining the pool and foreground reserve.
+    size_t growth=limit>4u*1024u*1024u?limit-4u*1024u*1024u:0;
+    if(growth>2u*1024u*1024u)growth=2u*1024u*1024u;
     *pool = (pn_pool_t){ .limit=limit, .malloc_fn=alloc ? alloc : libc_alloc,
         .free_fn=release ? release : libc_free, .ctx=ctx,
         // 6MiB产品池在字形/邻页缓存满时仍要容下一整页预渲染位图（约406KiB），否则真机预渲染被拒、翻页每次重光栅约0.35s。
         // A 6 MiB product pool must still fit a whole prerendered page (about 406 KiB) when glyph/neighbor caches are full; otherwise hardware denied every prerender and re-rastered each turn (about 0.35 s).
-        .cache_limit=limit>=6u*1024u*1024u?2048u*1024u:limit>=4u*1024u*1024u?1536u*1024u:1024u*1024u,.cache_reserve=limit/8<256u*1024u?limit/8:256u*1024u,
+        .cache_limit=limit>=4u*1024u*1024u?1536u*1024u+growth/4u:1024u*1024u,.cache_reserve=limit/8<256u*1024u?limit/8:256u*1024u,
         .cache_caps={512u*1024u,768u*1024u,384u*1024u,384u*1024u,132u*1024u,416u*1024u,limit>=6u*1024u*1024u?832u*1024u:limit>=4u*1024u*1024u?416u*1024u:0u} };
     return 0;
 }
