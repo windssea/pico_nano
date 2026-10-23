@@ -16,6 +16,8 @@
 
 本地真机继续保留 **1.0.5-diag**，正式镜像不在本轮刷入或执行OTA。数字帧与诊断软件回执不代表正式镜像的真实睡眠、断电、面板光学或功耗验收。精确正式应用、源码提交、包摘要与保留数据策略以发布附件清单为准。
 
+正式板级120MHz与CI80MHz的ESP-IDF6.1构建、size、版本/ELF/checksum/validation及诊断关闭核验通过；源码`3c63c464f79479c209cd11ea8d8c0ff6c17bf414`。板级应用5650880B、槽余640576B（10.18%），SHA-256`1d0f14294230141d4347c756323b2eaee1b061f258990e3660121868aa732f9f`；CI应用5647056B、槽余10.24%。板级引导仍为`80193053e7c398d196e87db7b63a1eaf008ea5f368d35f918c094d5b804652e1`，分区保持。25项Node/16项Python安装器、三个USB包、离线HTTP九镜像和P-256签名OTA校验通过。公开附件和在线站点以匿名完整下载核对为准。
+
 下载：[Gitee 1.0.5](https://gitee.com/windssea/pico_nano/releases/tag/v1.0.5)、[GitHub 1.0.5](https://github.com/windssea/pico_nano/releases/tag/v1.0.5)。
 
 ## 1.0.4 正式版（2026-10-21）
