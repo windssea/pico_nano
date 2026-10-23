@@ -1256,6 +1256,8 @@ static void show_shelf_profile(const char *cursor,bool previous,pn_refresh_t pro
 static void show_shelf(const char *cursor,bool previous){show_shelf_profile(cursor,previous,PN_REFRESH_GL16);}
 /// 缓存预算查询由设备port提供，不用TF大小推断内部状态容量。/ The device port reports cache capacity without inferring internal-state space from TF size.
 static pn_status_t index_space(void *ctx,uint64_t *available){(void)ctx;size_t total=0,used=0;if(esp_littlefs_info("data",&total,&used)!=ESP_OK || used>total)return PN_IO;*available=total-used;return PN_OK;}
+/// TF容量来自实际挂载卷，不能用内部LittleFS容量替代。/ Obtain TF capacity from its actual mounted volume, never internal LittleFS.
+static pn_status_t tf_index_space(void *ctx,const char *path,uint64_t *available){(void)ctx;(void)path;uint64_t total=0;return esp_vfs_fat_info(PN_SD_MOUNT,&total,available)==ESP_OK?PN_OK:PN_IO;}
 static pn_status_t semantic_space(void *ctx,const char *path,uint64_t *available){(void)path;return index_space(ctx,available);}
 static pn_status_t show_loading_phase(const char *path,unsigned phase){
     pn_profile_span_t timing;pn_profile_begin(&timing,&pool,"epub.open.loading");
@@ -1923,6 +1925,8 @@ static bool prepare_lock(void){
     pn_status_t status=epub.impl?pn_epub_app_suspend(&epub,now_ms()):pn_reader_app_suspend(&reader,now_ms());
     // 锁屏保持原先挂起即写进度与索引的行为；进度写失败不能入睡。/ Locking keeps writing progress and index during suspend; a failed progress write must not sleep.
     if(status==PN_OK){pn_status_t saved=epub.impl?pn_epub_app_deferred_flush(&epub):pn_reader_app_deferred_flush(&reader);
+        // 用户进度已先同步；可丢缓存不持有写租约跨入睡眠。/ User progress was synchronized first; disposable caches must not carry a write lease into sleep.
+        pn_epub_app_cache_activity(&epub,now_ms());pn_reader_app_cache_activity(&reader,now_ms());
         if(saved!=PN_OK && saved!=PN_EMPTY){ESP_LOGE(TAG,"Warm save barrier failed: %d",(int)saved);message("保存失败","当前位置仍保留，稍后重试");return false;}
         reader_suspended=true;return true;}
     if(status==PN_BUSY || status==PN_EMPTY)return stop_reader();
@@ -2501,6 +2505,7 @@ static void device_task(void *arg){
     clock_read_boot(now_ms());
     show_boot_brand();
     pn_page_index_space_port(index_space,NULL);
+    pn_page_index_tf_space_port(tf_index_space,NULL);
     pn_semantic_file_space_port(semantic_space,NULL);
     (void)pn_catalog_index_init(&catalog_index,&pool,&sd_media,book_directory,PN_SD_MOUNT "/" PN_SD_INDEX_CACHE);
     start_reader();pn_reader_input_t input={0};pn_tap_t tap={0};int hold_hit=-1;uint64_t hold_start=0,hold_last=0;bool hold_fired=false;uint64_t last_card=0,last_key=0,last_ui_retry=0,boot=now_ms();
@@ -2533,7 +2538,7 @@ static void device_task(void *arg){
             // 书架三键焦点只暂停解码；真正开书/换页入口仍先abort，低余量不保活。/ Shelf key focus only pauses decoding; opening/page-change entries still abort, and low headroom never retains it.
             bool keep_cover=available==PN_OK && queued.kind==PN_DASYNC_KEY && shelf_mode && !focus_page() && !actions_mode && !locked && !status_page && !reading_menu && pool.used<=pool.limit && pool.limit-pool.used>=512u*1024u;
             if(keep_cover)pn_cover_write_abort(&cover_work.writer);else pn_cover_work_abort(&cover_work);
-            pn_epub_app_cache_activity(&epub,now_ms());}
+            pn_epub_app_cache_activity(&epub,now_ms());pn_reader_app_cache_activity(&reader,now_ms());}
         if(available==PN_CANCELLED){pn_reader_input_cancel(&input);pn_key_cancel(&keys);int ignored;(void)pn_tap_feed(&tap,1,-1,false,&ignored);
             // 旧页有效松手只解除输入所有权，不把旧坐标交给新页面。/ Valid releases from an old view only end input ownership; never route old coordinates into the new page.
             root_navigation_cancel(&navigation_press,&queued);hold_hit=-1;touch_held=false;
@@ -2623,7 +2628,7 @@ static void device_task(void *arg){
         if(styles.request_fonts && !locked){styles.request_fonts=false;(void)pn_font_ui_open(&fonts,&pool,epub.impl?NULL:&reader,epub.impl?&epub:NULL,PN_SD_MOUNT "/" PN_SD_FONTS,present,NULL);pn_font_ui_return_to(&fonts,pn_style_ui_render,&styles);}
         if(fonts.active && !fonts.presented && !locked && now-last_ui_retry>=1000){last_ui_retry=now;(void)pn_font_ui_present(&fonts,present,NULL);}
         if(hardware.touch_ready && (!async_port.input_active || (available==PN_OK && queued.kind==PN_DASYNC_TOUCH))){cst836u_touch_t touch={0};esp_err_t read;bool ending=false;uint64_t touch_at=now_ms();if(async_port.input_active){touch.count=queued.count;touch.x=queued.x;touch.y=queued.y;read=queued.valid?ESP_OK:ESP_FAIL;ending=queued.ending;touch_at=queued.at;}else{read=cst836u_read(hardware.touch,&touch);if(read==ESP_OK && pn_device_touch_normalize(&touch,&ending)!=PN_OK)read=ESP_FAIL;}pn_reader_action_t action;touch_held=read==ESP_OK && touch.count>0;if(touch_held)last_input=now_ms();
-            if(!async_port.input_active && (read!=ESP_OK || touch.count)){pn_cover_work_abort(&cover_work);pn_epub_app_cache_activity(&epub,now_ms());}
+            if(!async_port.input_active && (read!=ESP_OK || touch.count)){pn_cover_work_abort(&cover_work);pn_epub_app_cache_activity(&epub,now_ms());pn_reader_app_cache_activity(&reader,now_ms());}
             bool list_consumed=root_navigation_touch(&navigation_press,touch.count,touch.x,touch.y,read==ESP_OK,&scope);
             if(list_consumed)shelf_gesture=(pn_shelf_gesture_t){0};
             else list_consumed=shelf_content_touch(&shelf_gesture,touch.count,touch.x,touch.y,read==ESP_OK,ending,touch_at);

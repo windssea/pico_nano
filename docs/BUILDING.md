@@ -105,6 +105,12 @@ SDKCONFIG按环境隔离：CI与板级都有各自build目录/sdkconfig，不能
 
 缓存基础专项为`cache_file`、`page_index`、`wallpaper_cache`、`paper`、`reader_app`和`epub_app`。覆盖缺目录/坏主包有效备份、每个提交步骤中断、失卡后不清理重挂载路径、原生像素，以及索引满盘时真实进度成功保存、正常挂起/恢复；取消不是缓存MISS。主机为真实临时文件/SDK替身，不代表FAT掉电或面板验收。
 
+TF增量索引随上述可见启动器默认启用，用户/演示缓存分别保存在Docker卷`/data/user-samples/reading`与`/data/demo-samples/reading`。可传`-NoReadingCache`切回内部窗口作策略对照，旧缓存/用户位置保留；手动运行程序时用`PN_READING_CACHE=<可重建目录>`启用，空值使用内部退路。不要将模拟器目录映射为实际设备TF卷或原件目录。
+
+主机`page_index_tf`检查1800个边界跨512项RAM窗口、版本/布局隔离、整表SHA、重算CRC伪造、摘要读后取消续建、可信根先提交而TF未发布时中断、孤立大暂存恢复、命名空间GC/根配额与失卡归还。`reader`另检查解码检查点不能充当上一页页首。SDL`tf_index_window`用原创TXT、文字EPUB和图片EPUB，比较冷/暖、PREV/NEXT、坏/缺/不可写缓存共48对完整原生帧；这是同程序后端策略对照，非旧版或真机耗时。GitHub源码CI新增独立SDL任务，完整窗口回归可在其他电脑复跑。
+
+`tools/test_local_tf_index.py --capture build-host/epub_app_capture --baseline <独立旧版capture> --output build-dev/local-tf-index`逐本检查私人EPUB前三页；可用`--books`和`--font`指定本地样本，原件只读。候选通过`PN_EPUB_INDEX_IDLE`显式推进真实延期写入，再跨进程重开，比较旧版/候选冷页/候选暖页的完整像素、位置、原池上限与关闭归零。报告中的host_total_ns包含开书/翻页/落盘/关闭及工具开销，不能称物理开书耗时；没有baseline时仅作同程序冷/暖对照，--limit明确为子集。
+
 ```powershell
 python tools/dev.py sdl-run
 powershell -NoProfile -ExecutionPolicy Bypass -File tools/run_sim.ps1

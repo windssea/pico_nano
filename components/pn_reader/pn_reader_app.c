@@ -160,7 +160,8 @@ static pn_status_t render(app_t *a,pn_frame_t *frame,const pn_reader_receipt_t *
 static pn_status_t release_app(app_t *a){
     pn_text_file_verify_close(&a->verify);
     pn_page_bitmap_close(&a->bitmap);pn_paper_close(&a->paper);
-    (void)pn_page_index_flush(&a->page_index,true);pn_page_index_close(&a->page_index);
+    if(!pn_page_index_is_tf(&a->page_index))(void)pn_page_index_flush(&a->page_index,true);
+    pn_page_index_close(&a->page_index);
     pn_reader_neighbors(&a->reader,NULL);
     pn_font_close(&a->metadata);pn_font_set_close(&a->font_draft);pn_font_set_close(&a->font_live);pn_font_chain_clear(&a->chain);pn_font_close(&a->body);pn_font_close(&a->ui);pn_status_t status=pn_text_file_close(&a->book_file);
     pn_status_t s=pn_text_file_close(&a->font_file);if(status==PN_OK)status=s;s=pn_text_file_close(&a->fallback_file);if(status==PN_OK)status=s;
@@ -357,26 +358,33 @@ pn_status_t pn_reader_app_overlap(pn_reader_app_t *app){
     pn_cache_class_t kind=a->pool->speculative_kind;pn_cache_speculate(a->pool,true);a->pool->speculative_kind=PN_CACHE_GLYPH;
     pn_status_t warmed=pn_reader_warm_next(&a->reader,warm_glyph,a,8);a->pool->speculative_kind=kind;pn_cache_speculate(a->pool,false);return warmed==PN_OK?PN_OK:PN_EMPTY;
 }
+/// 邻页/字形就绪后才推进可选落盘；BUSY让空闲调度继续，扫描重叠入口不调用。/ Persist only after neighbor/glyph work; BUSY requests another idle tick, never a scan-overlap call.
+static pn_status_t index_idle(app_t *a,pn_status_t status){
+    if(status!=PN_EMPTY)return status;
+    pn_status_t stored=pn_page_index_flush(&a->page_index,false);
+    return stored==PN_CANCELLED?stored:(stored==PN_BUSY || stored==PN_OK)?PN_OK:PN_EMPTY;
+}
 pn_status_t pn_reader_app_prefetch(pn_reader_app_t *app){
     if(!app || !app->impl)return PN_EMPTY;
     app_t *a=app->impl;
     if(a->suspended || a->media_lost || a->style_preview || a->style_pending || a->font_preview || a->font_pending || a->font_view)return PN_BUSY;
     if(a->bitmap.frame.pixels && !pn_reader_next_ready(&a->reader)){bool enabled=a->bitmap.enabled;pn_page_bitmap_enable(&a->bitmap,false);pn_page_bitmap_enable(&a->bitmap,enabled);}
-    pn_status_t status=pn_reader_prefetch(&a->reader);if(status==PN_EMPTY)(void)pn_page_index_flush(&a->page_index,false);
-    if(status==PN_OK || status==PN_EMPTY){pn_status_t painted=bitmap_prepare(a,8);if(painted==PN_OK)return PN_OK;if(painted!=PN_EMPTY)return painted;if(a->bitmap.ready)return status;}
+    pn_status_t status=pn_reader_prefetch(&a->reader);
+    if(status==PN_OK || status==PN_EMPTY){pn_status_t painted=bitmap_prepare(a,8);if(painted==PN_OK)return PN_OK;if(painted!=PN_EMPTY)return painted;if(a->bitmap.ready)return index_idle(a,status);}
     if(status==PN_OK || status==PN_EMPTY){pn_profile_span_t span;pn_profile_begin(&span,a->pool,"txt.glyph-warm");pn_cache_class_t kind=a->pool->speculative_kind;pn_cache_speculate(a->pool,true);a->pool->speculative_kind=PN_CACHE_GLYPH;
         pn_status_t warmed=pn_reader_warm_next(&a->reader,warm_glyph,a,24);a->pool->speculative_kind=kind;pn_cache_speculate(a->pool,false);pn_profile_end(&span,warmed);
         if(warmed!=PN_OK && warmed!=PN_EMPTY && warmed!=PN_NO_MEMORY)return warmed;}
-    return status;
+    return pn_reader_warm_pending(&a->reader)?status:index_idle(a,status);
 }
 // 布局改变后换key，缓存故障不阻止阅读；取消可重试。/ Switch keys after reflow; cache failures never block reading, cancellation can retry.
 static pn_status_t index_layout(app_t *a){
     if(!a->persistent || a->index_generation==a->reader.token.generation)return PN_OK;
     a->reader.index=NULL;pn_page_index_close(&a->page_index);
     pn_text_source_t source;pn_book_id_t key;pn_status_t s=body_source(a,&source);
-    // TXT空行策略独立换键，不失效EPUB的既有布局索引。/ Version TXT blank-line policy independently, preserving existing EPUB layout indexes.
-    if(s==PN_OK)s=pn_page_index_key(&a->book,&a->style,&source,chain(a),(unsigned)a->reader.decoder.encoding|0x100u,&key);
+    // TXT冷回翻修正独立换键，旧解码检查点产生的短页不能导入新表；EPUB键不变。/ Version the TXT cold-reverse correction so old decoder-checkpoint fragments cannot enter new tables; EPUB keys stay unchanged.
+    if(s==PN_OK)s=pn_page_index_key(&a->book,&a->style,&source,chain(a),(unsigned)a->reader.decoder.encoding|0x200u,&key);
     if(s==PN_OK)s=pn_page_index_open(&a->page_index,a->pool,&a->state_media,&a->state_lease,a->state_directory,&a->book,&key);
+    if(s==PN_OK && pn_page_index_tf_directory())s=pn_page_index_use_tf(&a->page_index,a->book_media,&a->book_lease,pn_page_index_tf_directory());
     if(s==PN_CANCELLED || s==PN_STALE_MEDIA)return s;
     a->index_generation=a->reader.token.generation;if(s==PN_OK)a->reader.index=&a->page_index;return PN_OK;
 }
@@ -397,6 +405,7 @@ static pn_status_t step_location(pn_reader_app_t *app,pn_reader_action_t action,
     if(app && app->impl)((app_t *)app->impl)->last_confirmed=false;
     if(!app || !app->impl || !present || action<PN_APP_OPEN || action>PN_APP_BEGINNING)return PN_INVALID;
     app_t *a=app->impl;if(now<a->last_now)return PN_INVALID;a->last_now=now;
+    pn_page_index_abort(&a->page_index);
     if(a->media_lost)return PN_STALE_MEDIA;
     if(a->suspended)return PN_BUSY;
     pn_read_intent_t intent=PN_READ_CURRENT;uint64_t offset=0;
@@ -470,6 +479,7 @@ pn_status_t pn_reader_app_percent(const pn_reader_app_t *app,unsigned *basis){
 pn_status_t pn_reader_app_suspend(pn_reader_app_t *app,uint64_t now){
     if(!app || !app->impl)return PN_INVALID;
     app_t *a=app->impl;if(now<a->last_now)return PN_INVALID;
+    pn_page_index_abort(&a->page_index);
     if(a->media_lost)return PN_STALE_MEDIA;
     if(!a->reader.has_visible || a->force_full || a->style_preview || a->font_preview || a->font_pending || a->global_pending || a->style_pending)return PN_BUSY;
     pn_status_t status=pn_media_validate(a->book_media,&a->book_lease);if(status!=PN_OK)return status;
@@ -493,6 +503,7 @@ pn_status_t pn_reader_app_deferred_flush(pn_reader_app_t *app){
 pn_status_t pn_reader_app_resume(pn_reader_app_t *app,uint64_t now,pn_reader_present_fn present,void *ctx){
     if(!app || !app->impl || !present)return PN_INVALID;
     app_t *a=app->impl;if(now<a->last_now)return PN_INVALID;
+    pn_page_index_abort(&a->page_index);
     if(!a->suspended)return PN_BUSY;
     pn_status_t status=a->media_lost?PN_STALE_MEDIA:pn_media_validate(a->book_media,&a->book_lease);if(status!=PN_OK)return status;
     pn_w_status_snapshot_t current=pn_w_status_snapshot();
@@ -883,3 +894,5 @@ void pn_reader_app_refresh_period(pn_reader_app_t *app,unsigned pages){if(app &&
 void pn_reader_app_refresh_reset(pn_reader_app_t *app){if(app && app->impl)((app_t *)app->impl)->refresh.turns=0;}
 
 pn_status_t pn_reader_app_paper_context(pn_reader_app_t *app,pn_pool_t **pool,pn_media_t **media){if(!app || !app->impl || !pool || !media)return PN_INVALID;app_t *a=app->impl;*pool=a->pool;*media=a->book_media;return PN_OK;}
+
+void pn_reader_app_cache_activity(pn_reader_app_t *app,uint64_t now){if(app && app->impl){app_t *a=app->impl;if(now>=a->last_now)pn_page_index_abort(&a->page_index);}}

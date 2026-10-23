@@ -26,6 +26,14 @@ jobs:
         with:
           name: shared-renderer-pattern
           path: build-sim/pattern.pgm
+  sdl:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y libsdl2-dev
+      - run: cmake -S simulator -B build-sdl -G Ninja -DPN_SIM_SDL=ON -DPN_SANITIZERS=ON
+      - run: cmake --build build-sdl
+      - run: ctest --test-dir build-sdl --output-on-failure
   firmware:
     runs-on: ubuntu-24.04
     strategy:

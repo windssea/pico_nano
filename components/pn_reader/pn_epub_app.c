@@ -69,7 +69,7 @@ typedef struct {
     pn_font_reference_t probed;bool probed_valid;uint64_t probed_ticket; ///< 本会话同一READ租约下刚由探查完整校验的字体引用，应用时免重复整文件SHA / Font reference fully verified by this session's probe under the same READ lease, letting apply skip a second whole-file SHA
 } app_t;
 /// 前台腾出可选包，当前已验证模型允许下一次安静时重试。/ Free optional staging for foreground work, allowing the verified model to retry when quiet.
-static void cache_abort(app_t *a){bool file=pn_semantic_file_pending(&a->semantic_file);pn_semantic_file_abort(&a->semantic_file);pn_xhtml_cache_abort(&a->epub);if(file)pn_xhtml_cache_retry(&a->epub);}
+static void cache_abort(app_t *a){pn_page_index_abort(&a->page_index);bool file=pn_semantic_file_pending(&a->semantic_file);pn_semantic_file_abort(&a->semantic_file);pn_xhtml_cache_abort(&a->epub);if(file)pn_xhtml_cache_retry(&a->epub);}
 static pn_font_set_t *font_set(app_t *a){return a->font_use_draft?&a->font_draft:a->font_live.impl?&a->font_live:NULL;}
 static pn_font_t *body(app_t *a){return font_set(a)?a->managed_body:&a->body;}
 static pn_font_chain_t *chain(app_t *a){return font_set(a)?a->managed_chain:&a->chain;}
@@ -291,7 +291,8 @@ static pn_status_t release(app_t *a){
     pn_semantic_file_abort(&a->semantic_file);
     pn_page_bitmap_close(&a->bitmap);pn_paper_close(&a->paper);
     pn_epub_image_cache_close(&a->image_cache);
-    (void)pn_page_index_flush(&a->page_index,true);pn_page_index_close(&a->page_index);
+    if(!pn_page_index_is_tf(&a->page_index))(void)pn_page_index_flush(&a->page_index,true);
+    pn_page_index_close(&a->page_index);
     pn_epub_reader_close(&a->reader);pn_font_set_close(&a->font_draft);pn_font_set_close(&a->font_live);pn_font_chain_clear(&a->chain);pn_font_close(&a->body);pn_font_close(&a->ui);pn_toc_close(&a->toc);pn_epub_close(&a->epub);pn_status_t status=pn_zip_close(&a->zip);
     pn_status_t s=pn_text_file_close(&a->book_file);if(status==PN_OK)status=s;s=pn_text_file_close(&a->font_file);if(status==PN_OK)status=s;s=pn_text_file_close(&a->fallback_file);if(status==PN_OK)status=s;
     if(a->book_lease.ticket)(void)pn_media_release(a->media,&a->book_lease);
@@ -646,6 +647,7 @@ static pn_status_t index_layout(app_t *a){
     if(font_set(a))s=pn_font_set_source(font_set(a),&source);
     if(s==PN_OK)s=pn_page_index_key_known(&a->book,&a->style,&source,chain(a),0x100u,a->verify_font?&a->font_expected:NULL,&key);
     if(s==PN_OK)s=pn_page_index_open(&a->page_index,a->pool,&a->state,&a->state_lease,a->state_directory,&a->book,&key);
+    if(s==PN_OK && pn_page_index_tf_directory())s=pn_page_index_use_tf(&a->page_index,a->media,&a->book_lease,pn_page_index_tf_directory());
     if(s==PN_CANCELLED || s==PN_STALE_MEDIA)return s;
     a->index_generation=a->token.generation;if(s==PN_OK)pn_epub_reader_index(&a->reader,&a->page_index);return PN_OK;
 }
@@ -744,17 +746,23 @@ pn_status_t pn_epub_app_overlap(pn_epub_app_t *app){
     pn_status_t warmed=pn_epub_reader_warm_next(&a->reader,warm_glyph,a,8);if(body(a)->impl && body(a)->pixels!=pixels)(void)font_size(a,pixels);
     a->pool->speculative_kind=kind;pn_cache_speculate(a->pool,false);return warmed==PN_OK?PN_OK:PN_EMPTY;
 }
+/// 邻页/字形就绪后才推进可选落盘；BUSY让空闲调度继续，扫描重叠入口不调用。/ Persist only after neighbor/glyph work; BUSY requests another idle tick, never a scan-overlap call.
+static pn_status_t index_idle(app_t *a,pn_status_t status){
+    if(status!=PN_EMPTY)return status;
+    pn_status_t stored=pn_page_index_flush(&a->page_index,false);
+    return stored==PN_CANCELLED?stored:(stored==PN_BUSY || stored==PN_OK)?PN_OK:PN_EMPTY;
+}
 pn_status_t pn_epub_app_prefetch(pn_epub_app_t *app){
     if(!app || !app->impl)return PN_EMPTY;
     app_t *a=app->impl;if(a->suspended || a->lost || a->style_preview || a->style_pending || a->font_preview || a->font_pending || a->font_view || pn_xhtml_cache_pending(&a->epub))return PN_BUSY;
     if(a->bitmap.frame.pixels && !pn_epub_reader_next_ready(&a->reader)){bool enabled=a->bitmap.enabled;pn_page_bitmap_enable(&a->bitmap,false);pn_page_bitmap_enable(&a->bitmap,enabled);}
-    pn_status_t status=pn_epub_reader_prefetch(&a->reader);if(status==PN_BUSY)return PN_OK;if(status==PN_EMPTY)(void)pn_page_index_flush(&a->page_index,false);
+    pn_status_t status=pn_epub_reader_prefetch(&a->reader);if(status==PN_BUSY)return PN_OK;
     // 空闲每步16节点，缩短位图就绪所需轮数；扫描期仍为8，不增加扫描争用。/ Process 16 nodes per idle step to finish sooner; scan-time steps remain 8 to preserve scan contention limits.
-    if(status==PN_OK || status==PN_EMPTY){pn_status_t painted=bitmap_prepare(a,16);if(painted==PN_OK)return PN_OK;if(painted!=PN_EMPTY)return painted;if(a->bitmap.ready)return status;}
+    if(status==PN_OK || status==PN_EMPTY){pn_status_t painted=bitmap_prepare(a,16);if(painted==PN_OK)return PN_OK;if(painted!=PN_EMPTY)return painted;if(a->bitmap.ready)return index_idle(a,status);}
     if(status==PN_OK || status==PN_EMPTY){pn_profile_span_t span;pn_profile_begin(&span,a->pool,"epub.glyph-warm");int pixels=body(a)->pixels;pn_cache_class_t kind=a->pool->speculative_kind;pn_cache_speculate(a->pool,true);a->pool->speculative_kind=PN_CACHE_GLYPH;
         pn_status_t warmed=pn_epub_reader_warm_next(&a->reader,warm_glyph,a,24);if(body(a)->impl && body(a)->pixels!=pixels)(void)font_size(a,pixels);
         a->pool->speculative_kind=kind;pn_cache_speculate(a->pool,false);pn_profile_end(&span,warmed);if(warmed!=PN_OK && warmed!=PN_EMPTY && warmed!=PN_NO_MEMORY)return warmed;}
-    return status;
+    return pn_epub_reader_warm_pending(&a->reader)?status:index_idle(a,status);
 }
 pn_status_t pn_epub_app_jump(pn_epub_app_t *app,const pn_epub_location_t *jump,uint64_t now,pn_reader_present_fn present,void *ctx){if(app && app->impl)((app_t *)app->impl)->last_confirmed=false;if(!jump)return PN_INVALID;return navigate(app,PN_APP_OPEN,jump,now,present,ctx,false);}
 pn_status_t pn_epub_app_tick(pn_epub_app_t *app,uint64_t now){if(!app || !app->impl)return PN_INVALID;

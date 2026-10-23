@@ -132,7 +132,7 @@ pn_status_t pn_reader_prepare_impl(pn_reader_t *r,pn_read_intent_t intent,uint64
         else {
             work.cursor=work.content_begin;work.source.size=r->visible.begin;
             pn_page_index_entry_t entry;bool indexed=pn_page_index_near(r->index,0,r->visible.begin,true,&entry) && entry.begin>=work.content_begin && entry.end<=r->decoder.source.size;
-            if(!indexed || entry.end!=r->visible.begin)indexed=checkpoint(r,r->visible.begin,true,&entry) && entry.begin>=work.content_begin && entry.end<=r->decoder.source.size;
+            // 解码检查点只证明字符对齐，不能作为同布局页首；缺页表时从可信正文起点重排。/ Decoder checkpoints prove character alignment, never a page start for this layout; reflow from the known content start when page boundaries are absent.
             if(indexed)work.cursor=entry.begin;
             pn_reader_anchor_t previous={0};bool first=true;
             if(indexed)first=(entry.flags&1)!=0;

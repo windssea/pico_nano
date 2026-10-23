@@ -128,4 +128,6 @@ endif()
 
 if(PN_SIM_SDL)
     add_test(NAME reading_background_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_reading_background_window.py $<TARGET_FILE:pn_sim>)
+    add_test(NAME tf_index_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_tf_index_window.py $<TARGET_FILE:pn_sim>)
+    set_tests_properties(tf_index_window PROPERTIES LABELS "reader;storage" TIMEOUT 300)
 endif()

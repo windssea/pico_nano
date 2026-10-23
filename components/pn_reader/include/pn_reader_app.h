@@ -212,3 +212,6 @@ bool pn_reader_app_font_is_inherited(const pn_reader_app_t *);
 
 /// 借用当前资源owner，不取得所有权或访问文件。/ Borrow the current resource owner without taking ownership or accessing files.
 pn_status_t pn_reader_app_paper_context(pn_reader_app_t *,pn_pool_t **,pn_media_t **);
+
+/// 新输入归还可选TF写任务，不提交缓存或改变阅读位置。/ New input returns optional TF writer resources without committing caches or changing reading position.
+void pn_reader_app_cache_activity(pn_reader_app_t *,uint64_t now);

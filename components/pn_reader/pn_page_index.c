@@ -5,6 +5,7 @@
 #include "pn_page_index.h"
 #include "pn_cancel.h"
 #include "pn_cache_file.h"
+#include "pn_sd_layout.h"
 #include "pn_reader_chrome.h"
 #include <stdio.h>
 #include <string.h>
@@ -13,17 +14,24 @@
 #include <sys/stat.h>
 #include <sys/statvfs.h>
 #include <unistd.h>
+#include <stdlib.h>
 #define HEADER 80u
 #define RECORD 80u
 #define QUOTA (128u*1024u)
 static pn_page_index_space_fn capacity_port;static void *capacity_ctx;
 void pn_page_index_space_port(pn_page_index_space_fn fn,void *ctx){capacity_port=fn;capacity_ctx=ctx;}
-typedef struct {
+typedef struct page_index index_t;
+struct page_index {
     pn_pool_t *pool;pn_media_t *media;pn_media_lease_t lease;pn_book_id_t book,key;
     char directory[PN_JOURNAL_PATH_MAX],path[PN_JOURNAL_PATH_MAX];
     size_t count,dirty;pn_page_index_entry_t entries[PN_PAGE_INDEX_MAX];
     bool blocked,backup_loaded; ///< 可选写失败本会话退避，以及完整验证的备份来源 / Session backoff after optional write failure and fully validated backup provenance
-} index_t;
+    bool tf,disk_valid,disk_backup,trust_known,trust_backup; ///< 后端、整表验证和可信根来源 / Backend, whole-table validation and trusted-root provenance
+    uint32_t disk_count;uint64_t blocked_writes;void *writer;index_t *tf_next; ///< 磁盘页数、有界写任务与活动pin链 / Disk pages, bounded writer and active pin chain
+    pn_media_t *trust_media;pn_media_lease_t trust_lease; ///< 内部可信根沿用原状态WRITE资格 / Internal trusted roots reuse the original state WRITE permission
+    char trust_path[PN_JOURNAL_PATH_MAX];pn_book_id_t trust_hash[2],selected_hash; ///< 有界内部身份及当前实际读代 / Bounded internal identities and the actually consumed generation
+    uint32_t floor_section;uint64_t floor_begin;bool floor_exclusive,have_floor; ///< RAM仍完整覆盖的磁盘后缀 / Disk suffix still completely covered by RAM
+};
 static uint64_t get(const uint8_t *p,unsigned n){uint64_t v=0;for(unsigned i=0;i<n;i++)v|=(uint64_t)p[i]<<(8*i);return v;}
 static void put(uint8_t *p,uint64_t v,unsigned n){for(unsigned i=0;i<n;i++)p[i]=(uint8_t)(v>>(8*i));}
 static uint32_t crc(const uint8_t *p,size_t n){uint32_t c=~0u;while(n--){c^=*p++;for(unsigned j=0;j<8;j++)c=(c>>1)^(0xedb88320u&(0u-(c&1u)));}return ~c;}
@@ -80,17 +88,22 @@ pn_status_t pn_page_index_open(pn_page_index_t *h,pn_pool_t *pool,pn_media_t *me
     if(s!=PN_OK){pn_free(i);return s;}
     h->impl=i;return PN_OK;
 }
+#include "pn_page_index_tf.inc"
 bool pn_page_index_near(pn_page_index_t *h,uint32_t section,uint64_t before,bool strict,pn_page_index_entry_t *out){
     if(!h || !h->impl || !out)return false;
     index_t *i=h->impl;bool found=false;
     for(size_t j=0;j<i->count;j++){pn_page_index_entry_t *e=&i->entries[j];if(e->section==section && (strict?e->begin<before:e->begin<=before) && (!found || e->begin>=out->begin)){*out=*e;found=true;}}
+    if(i->tf && !(found && ((!strict && out->begin==before) || tf_window_covers(i,out)))){
+        pn_page_index_entry_t disk;if(tf_near(i,section,before,strict,&disk) && (!found || disk.begin>out->begin)){*out=disk;found=true;}
+    }
     return found;
 }
 void pn_page_index_add(pn_page_index_t *h,const pn_page_index_entry_t *e){
     if(!h || !h->impl || !e || e->begin>=e->end)return;
     index_t *i=h->impl;
-    for(size_t j=0;j<i->count;j++)if(i->entries[j].section==e->section && i->entries[j].begin==e->begin){if(i->entries[j].end!=e->end || i->entries[j].flags!=e->flags){i->entries[j]=*e;i->dirty++;}return;}
-    if(i->count==PN_PAGE_INDEX_MAX){memmove(i->entries,i->entries+1,(PN_PAGE_INDEX_MAX-1)*sizeof *e);i->count--;}
+    for(size_t j=0;j<i->count;j++)if(i->entries[j].section==e->section && i->entries[j].begin==e->begin){uint8_t old[RECORD],next[RECORD];encode(old,&i->entries[j]);encode(next,e);if(memcmp(old,next,RECORD)){if(i->tf)tf_abort(i);i->entries[j]=*e;i->dirty++;}return;}
+    if(i->tf)tf_abort(i);
+    if(i->count==PN_PAGE_INDEX_MAX){if(i->tf)tf_window_drop(i,&i->entries[0]);memmove(i->entries,i->entries+1,(PN_PAGE_INDEX_MAX-1)*sizeof *e);i->count--;}
     i->entries[i->count++]=*e;i->dirty++;
 }
 // 仅清理固定扩展名缓存，预留64KiB给独立状态。/ Evict only owned cache extensions, reserving 64 KiB for independent state.
@@ -118,6 +131,7 @@ static pn_status_t quota(index_t *i,size_t incoming){
 }
 static pn_status_t index_flush(pn_page_index_t *h,bool force){
     if(!h || !h->impl)return PN_EMPTY;
+    if(((index_t *)h->impl)->tf)return tf_flush(h->impl,force);
     index_t *i=h->impl;if(i->blocked || !i->dirty || (!force && i->dirty<16))return PN_EMPTY;
     pn_status_t s=checked(i);if(s!=PN_OK)return s;if(mkdir(i->directory,0700) && errno!=EEXIST)return PN_IO;
     s=quota(i,HEADER+RECORD*i->count);if(s!=PN_OK)return s;
@@ -136,7 +150,9 @@ static pn_status_t index_flush(pn_page_index_t *h,bool force){
 }
 pn_status_t pn_page_index_flush(pn_page_index_t *h,bool force){
     pn_profile_span_t span;pn_profile_begin(&span,h && h->impl?((index_t *)h->impl)->pool:NULL,"storage.page-index");
-    pn_status_t status=index_flush(h,force);if(h && h->impl && status!=PN_EMPTY && pn_cache_file_miss(status))((index_t *)h->impl)->blocked=true;pn_profile_end(&span,status);return status;
+    pn_status_t status=index_flush(h,force);if(h && h->impl && !((index_t *)h->impl)->tf && status!=PN_EMPTY && pn_cache_file_miss(status))((index_t *)h->impl)->blocked=true;pn_profile_end(&span,status);return status;
 }
-bool pn_page_index_pending(const pn_page_index_t *h){return h && h->impl && !((const index_t *)h->impl)->blocked && ((const index_t *)h->impl)->dirty;}
-void pn_page_index_close(pn_page_index_t *h){if(h){pn_free(h->impl);h->impl=NULL;}}
+bool pn_page_index_pending(const pn_page_index_t *h){return h && h->impl && !((const index_t *)h->impl)->blocked && (((const index_t *)h->impl)->dirty || ((const index_t *)h->impl)->writer);}
+void pn_page_index_close(pn_page_index_t *h){if(h){if(h->impl && ((index_t *)h->impl)->tf){tf_abort(h->impl);tf_unlink(h->impl);}pn_free(h->impl);h->impl=NULL;}}
+void pn_page_index_abort(pn_page_index_t *h){if(h && h->impl && ((index_t *)h->impl)->tf)tf_abort(h->impl);}
+bool pn_page_index_is_tf(const pn_page_index_t *h){return h && h->impl && ((const index_t *)h->impl)->tf;}

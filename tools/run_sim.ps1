@@ -13,6 +13,7 @@ param(
     [ValidateRange(256,6144)][int]$BudgetKiB = 6144,
     [switch]$Timing,
     [switch]$Demo,
+    [switch]$NoReadingCache,
     [switch]$Feedback,
     [switch]$Follow
 )
@@ -91,6 +92,8 @@ $arguments = @("run", "--detach", "--rm", "--name", "pico-sim",
     "--library", $Books, "--budget", "$($BudgetKiB * 1024)", "--state-dir", "$stateBase/state", "--cover-cache", $coverCacheDirectory,
     "--wallpaper-dir", $WallpaperDir, "--wallpaper-store", "$stateBase/wallpaper", "--font-dir", $FontDir)
 if ($Font) { $arguments += @("--font", $Font) }
+# 仅切换派生索引后端，不清除缓存、位置或书籍原件。/ Switch only the derived-index backend, preserving caches, positions and original books.
+if (-not $NoReadingCache) { $arguments = @("run", "-e", "PN_READING_CACHE=$stateBase/reading") + $arguments[1..($arguments.Length - 1)] }
 & docker @arguments
 if ($LASTEXITCODE -ne 0) { Write-Error "模拟器启动失败"; exit 1 }
 Start-Sleep -Seconds 2
