@@ -176,7 +176,7 @@ static pn_status_t show(pn_wallpaper_ui_t *ui,pn_wallpaper_present_fn present,vo
 static pn_status_t show_busy(pn_wallpaper_ui_t *ui,pn_wallpaper_present_fn present,void *ctx,const char *title){
     ui_t *u=ui->impl;u->busy=true;ui->presented=false;pn_frame_clear(&u->canvas,PN_UI_PAPER);
     pn_status_t s=pn_w_header(&u->font,&u->canvas,"","锁屏设置",NULL);
-    if(s==PN_OK)s=pn_w_loading(&u->font,&u->canvas,title,"请稍候，完成后将自动返回",-1,380);
+    if(s==PN_OK)s=pn_w_loading(&u->font,&u->canvas,title,"请稍候，完成后将自动返回",-1,-1);
     if(s==PN_OK)s=present(ctx,&u->canvas,PN_REFRESH_GL16);
     return s;
 }

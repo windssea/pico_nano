@@ -135,7 +135,7 @@ static bool confirmed(ui_t *s){return s->epub?pn_epub_app_last_confirmed(s->epub
 static pn_status_t busy_paint(void *ctx,pn_font_t *font,pn_font_t *metadata,pn_frame_t *frame){
  (void)ctx;(void)metadata;pn_frame_clear(frame,PN_UI_PAPER);
  pn_status_t status=pn_w_header(font,frame,"","阅读字体",NULL);
- return status==PN_OK?pn_w_loading(font,frame,"正在处理字体","正在完整校验或重新排版，请稍候",-1,380):status;
+ return status==PN_OK?pn_w_loading(font,frame,"正在处理字体","正在完整校验或重新排版，请稍候",-1,-1):status;
 }
 static pn_status_t busy_notice(pn_font_ui_t *u,pn_reader_present_fn present,void *ctx){
  ui_t *s=u->impl;u->presented=false;

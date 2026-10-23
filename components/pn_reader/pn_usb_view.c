@@ -9,7 +9,7 @@ pn_status_t pn_usb_view_render(const pn_usb_view_t *v,pn_font_t *font,pn_frame_t
     int size=font->pixels;pn_frame_clear(f,15);
     pn_status_t s=pn_w_header(font,f,"","USB 传输",NULL);
     if(!v->failed && (v->starting || v->stopping)){
-        if(s==PN_OK)s=pn_w_loading(font,f,v->stopping?"正在结束 USB 传输":"正在准备 USB 传输","正在交接存储卡，请稍候",-1,380);
+        if(s==PN_OK)s=pn_w_loading(font,f,v->stopping?"正在结束 USB 传输":"正在准备 USB 传输","正在交接存储卡，请稍候",-1,-1);
         if(s==PN_OK)s=pn_font_size(font,32);
         if(s==PN_OK)s=pn_w_button(font,f,v->stopping?"正在恢复存储卡":"结束 USB 传输",32,1030,620,100,v->stopping?PN_W_DISABLED:0);
         pn_status_t restored=pn_font_size(font,size);return s==PN_OK?restored:s;

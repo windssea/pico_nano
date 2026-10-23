@@ -34,6 +34,7 @@ typedef enum {
     PN_TC_KEY, ///< 屏下三键 / Touch key below the display
     PN_TC_POWER, ///< 电源短按（锁屏后须实体键唤醒） / Power short press (waking requires the physical key)
     PN_TC_HEAP, ///< 堆最大块/最低水位与任务栈；遍历堆会关中断，只在两显示job之间执行 / Heap largest/minimum and task stacks; heap walks mask interrupts, so it runs only between display jobs
+    PN_TC_LOADING, ///< 诊断专用等待画面姿态，不打开书或保存记录 / Diagnostic-only waiting pose without opening a book or saving records
 } pn_tc_kind_t;
 
 /// 解析后的指令；手势坐标已按种类补全 / Parsed command with gesture coordinates resolved per kind
@@ -42,6 +43,7 @@ typedef struct {
     uint32_t seq; ///< 主机序号，回执原样带回 / Host sequence echoed in replies
     int x0,y0,x1,y1; ///< 起点与终点；点击/长按两点相同 / Start and end; equal for taps/long presses
     unsigned hold_ms; ///< 按住时长 / Hold duration
+    unsigned phase; ///< loading指令的姿态0..3 / Pose 0..3 for the loading command
 } pn_tc_command_t;
 
 /// 合成触点状态机；由单一输入线程推进 / Synthetic contact state machine advanced by one input thread

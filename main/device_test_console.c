@@ -36,6 +36,7 @@ static struct {
     atomic_bool power; ///< 待注入电源短按 / Pending synthetic power press
     record_t ring[RING];atomic_uint head,tail,dropped; ///< 显示任务单生产者，控制台单消费者 / Single display-task producer and single console consumer
     atomic_uint shot_seq,heap_seq; ///< 非0为待处理截屏/堆统计序号 / Nonzero is a pending screenshot/heap sequence
+    atomic_uint loading_phase; ///< 姿态加1，0表示没有请求 / Pose plus one, zero when no request is pending
     char line[640];
 } console;
 
@@ -71,6 +72,7 @@ static bool hook_touch(void *ctx,uint64_t now,unsigned *count,int *x,int *y,bool
 }
 static bool hook_power(void *ctx){(void)ctx;return atomic_exchange(&console.power,false);}
 bool pn_device_test_console_take_power(void){return console.port && atomic_exchange(&console.power,false);}
+bool pn_device_test_console_take_loading(unsigned *phase){if(!phase || !console.port)return false;unsigned value=atomic_exchange(&console.loading_phase,0);if(!value)return false;*phase=value-1;return true;}
 // 显示任务线程：回执前只写环，不做IO。/ Display-task thread: only write the ring before the receipt, no IO.
 static void hook_display_job(void *ctx,unsigned kind,uint64_t start,uint64_t end,pn_status_t status){
     (void)ctx;unsigned head=atomic_load(&console.head);
@@ -120,6 +122,7 @@ static void execute(const char *text){
     case PN_TC_STATUS:status(c.seq);break;
     case PN_TC_SHOT:{unsigned expected=0;if(!atomic_compare_exchange_strong(&console.shot_seq,&expected,(unsigned)c.seq))reply("PNT %lu err busy",seq);else reply("PNT %lu ok shot-pending",seq);break;}
     case PN_TC_HEAP:{unsigned expected=0;if(!atomic_compare_exchange_strong(&console.heap_seq,&expected,(unsigned)c.seq))reply("PNT %lu err busy",seq);else reply("PNT %lu ok heap-pending",seq);break;}
+    case PN_TC_LOADING:{unsigned expected=0;if(!atomic_compare_exchange_strong(&console.loading_phase,&expected,c.phase+1))reply("PNT %lu err busy",seq);else reply("PNT %lu ok loading-pending",seq);break;}
     case PN_TC_POWER:atomic_store(&console.power,true);reply("PNT %lu ok power t=%llu",seq,(unsigned long long)now_ms());break;
     default:
         if(!console.port->hardware || !console.port->hardware->touch_ready){reply("PNT %lu err unavailable",seq);break;}

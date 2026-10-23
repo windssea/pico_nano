@@ -89,7 +89,7 @@ bool pn_reader_loading_needed(bool text_format,uint64_t source_bytes){return !te
 pn_status_t pn_reader_jump_loading_render(void *ctx,pn_font_t *font,pn_font_t *metadata,pn_frame_t *frame){
     (void)ctx;(void)metadata;pn_frame_clear(frame,PN_UI_PAPER);
     pn_status_t s=pn_w_header(font,frame,"","阅读",NULL);
-    return s==PN_OK?pn_w_loading(font,frame,"正在跳转书页","正在准备目标页面，请稍候",-1,380):s;
+    return s==PN_OK?pn_w_loading(font,frame,"正在跳转书页","正在准备目标页面，请稍候",-1,-1):s;
 }
 void pn_reader_guide_row(pn_frame_t *frame,unsigned style,unsigned shade,int y){
     if(!frame || !frame->pixels || style<1 || style>2 || y<0 || y>=frame->height || frame->width<1)return;
@@ -99,10 +99,13 @@ void pn_reader_guide_row(pn_frame_t *frame,unsigned style,unsigned shade,int y){
     for(int x=0;x<frame->width;x+=period){int width=frame->width-x;if(width>dash)width=dash;pn_frame_rect(frame,x,y,width,1,ink);}
 }
 pn_status_t pn_reader_loading_render(pn_font_t *ui,pn_frame_t *frame,const char *title){
+    return pn_reader_loading_render_phase(ui,frame,title,0);
+}
+pn_status_t pn_reader_loading_render_phase(pn_font_t *ui,pn_frame_t *frame,const char *title,unsigned phase){
     if(!ui || !ui->impl || !frame || !frame->pixels || !title)return PN_INVALID;
     int original=ui->pixels;pn_frame_clear(frame,PN_UI_PAPER);
     pn_status_t status=pn_font_size(ui,28);
-    if(status==PN_OK)status=pn_w_text(ui,frame,PN_BRAND_NAME,32,72,620,PN_ALIGN_LEFT);
-    if(status==PN_OK)status=pn_w_loading(ui,frame,"正在打开书籍",title,-1,380);
+    if(status==PN_OK)status=pn_w_text(ui,frame,PN_BRAND_NAME,32,72,frame->width-64,PN_ALIGN_CENTER);
+    if(status==PN_OK)status=pn_w_loading_phase(ui,frame,"正在打开书籍",title,-1,-1,phase);
     pn_status_t restored=pn_font_size(ui,original);return status==PN_OK?restored:status;
 }

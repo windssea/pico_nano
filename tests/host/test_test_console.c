@@ -21,13 +21,15 @@ static pn_key_event_t run_key(const char *line,int *key,unsigned *samples){
 int main(void){
     pn_tc_command_t c=parse_ok("7 ping");assert(c.kind==PN_TC_PING && c.seq==7);
     assert(parse_ok("1 version").kind==PN_TC_VERSION && parse_ok("2 status").kind==PN_TC_STATUS && parse_ok("3 shot").kind==PN_TC_SHOT && parse_ok("4 power").kind==PN_TC_POWER && parse_ok("5 heap").kind==PN_TC_HEAP);
+    c=parse_ok("6 loading 0");assert(c.kind==PN_TC_LOADING && !c.phase && !pn_tc_is_gesture(&c));
+    c=parse_ok("6 loading 3");assert(c.kind==PN_TC_LOADING && c.phase==3);
     c=parse_ok("  9 tap 85 1150");assert(c.kind==PN_TC_TAP && c.x0==85 && c.y0==1150 && c.x1==85 && c.y1==1150 && c.hold_ms==PN_TC_TAP_MS);
     c=parse_ok("10 long 0 0 1500");assert(c.kind==PN_TC_LONG && c.hold_ms==1500);
     c=parse_ok("11 swipe 600 500 80 520");assert(c.kind==PN_TC_SWIPE && c.x1==80 && c.y1==520 && c.hold_ms==PN_TC_SWIPE_MS);
     c=parse_ok("12 key right long");assert(c.kind==PN_TC_KEY && c.x0==400 && c.y0==PN_TC_KEY_Y && c.hold_ms==PN_TC_LONG_MS);
     c=parse_ok("4294967295 key left");assert(c.seq==4294967295u && c.x0==80);
     const char *bad[]={"","ping","0 ping","4294967296 ping","1 PING","1 ping extra","1 tap 684 0","1 tap 0 1400","1 tap 5","1 tap -1 5","1 tap 5 5 19",
-        "1 tap 5 5 10001","1 swipe 1 2 3","1 key up","1 key left short","1 key","1 shot 1","1 heap 1","1 tap 5x 5","1 unknownverb",NULL};
+        "1 tap 5 5 10001","1 swipe 1 2 3","1 key up","1 key left short","1 key","1 shot 1","1 heap 1","1 tap 5x 5","1 unknownverb","1 loading","1 loading -1","1 loading 4","1 loading 1 extra",NULL};
     for(unsigned i=0;bad[i];i++){pn_tc_command_t out={.seq=99};assert(pn_tc_parse(bad[i],&out)==PN_INVALID && out.seq==99);}
     char longline[PN_TC_LINE_MAX+8];memset(longline,' ',sizeof longline);memcpy(longline,"1 ping",6);longline[PN_TC_LINE_MAX+1]=0;assert(pn_tc_parse(longline,&c)==PN_INVALID);
     longline[PN_TC_LINE_MAX]=0;assert(pn_tc_parse(longline,&c)==PN_OK);

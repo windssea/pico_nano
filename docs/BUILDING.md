@@ -12,6 +12,8 @@
 
 ## Windows 环境
 
+熊猫画面真机观察使用诊断专用指令：先回首页，经既有`device_test.py serve`会话执行`python tools/device_test.py cmd "loading 0"`，随后可发送`loading 1`、`loading 2`、`loading 3`，每帧成功后至少间隔750ms（实际扫描时间另计）；真实开书在首帧成功后100ms即可尝试首次低头，不等待演示完成；中间键返回。只投递给产品owner，不在控制台线程推屏，不开书或改进度；正式镜像不提供该设备入口。原生PNG/串口参考帧用于像素核对，动画观感和残影必须目视观察。正常书籍可能不到动画阈值就已打开，不为演示延长真实开书。
+
 当前仓库 `D:\dev\windssea\pico_nano`，需要真实 Python3、Docker Desktop Linux 引擎；主机 Node 用于工具/安装器测试。Windows 的 python/python3 可能是应用商店别名，先用 `py -0p` 查解释器，本机已验证入口：
 
 ```powershell

@@ -205,8 +205,13 @@ static bool test_console_shown(const uint8_t **buffer,size_t *bytes){*buffer=har
 #endif
 static bool opening; ///< 开书控制门，产品owner串行管理 / Opening gate owned by the serial product owner
 static bool loading_shown; ///< 当前开书已显示加载反馈 / Loading feedback already shown for this opening
+static pn_loading_motion_t opening_motion; ///< 长开书低频姿态，不保留额外画布 / Slow poses for long openings, retaining no extra canvas
+#if PN_DEVICE_TEST_CONSOLE
+static bool loading_preview_active; ///< 诊断专用画面演示，不创建阅读对象或记录 / Diagnostic-only visual rehearsal without reading objects or records
+#endif
 static pn_epub_open_job_t foreground_open; ///< 跨输入轮保留的私有开书任务，不是可阅读对象 / Private opening job across input ticks, never a readable object
 static bool opening_overlap; ///< 加载页扫描期间推进前台开书任务 / Advance the foreground opening job while the loading page scans
+static bool opening_motion_scan; ///< 动画扫描不启动重排版，只接续已有绘制 / Animation scans never start heavy layout, only continue prepared painting
 static bool loading_layout_ready; ///< 只在本次加载扫描中准备一次真实首屏 / Prepare the real first-page layout once during this loading scan
 static uint64_t opening_requested_us; ///< 产品请求到首屏回执的诊断起点，含身份接管 / Diagnostic origin from product request to first-frame receipt, including identity takeover
 static bool opening_request_timed; ///< 活动的跨轮诊断，无栈scope / Active cross-tick observation without a stack scope
@@ -390,7 +395,7 @@ static void opening_controls(bool active){opening=active;if(active){pn_device_as
 /// 所有开书阶段共用取消出口；任务已结束或接管标志已清也必须归还输入门。/ Every opening stage shares this abort exit; return the input gate even after the job or takeover flag is gone.
 static pn_status_t opening_abort(void){
     if(identity_takeover_active)identity_job_stop();
-    identity_takeover_active=false;identity_takeover_path[0]=0;opening_overlap_result=PN_BUSY;loading_shown=false;
+    identity_takeover_active=false;identity_takeover_path[0]=0;opening_overlap_result=PN_BUSY;loading_shown=false;opening_motion.active=false;
     pn_status_t s=pn_epub_app_open_job_close(&foreground_open);opening_controls(false);return s;
 }
 static pn_feedback_t press_feedback; ///< 独立、可撤销的按下区域，不借用UI对象 / Independent reversible press region without borrowing UI objects
@@ -749,6 +754,7 @@ static pn_status_t reader_overlap(void *ctx){(void)ctx;
         if(step!=PN_CANCELLED)opening_overlap_result=step;
         return step==PN_OK?PN_OK:PN_EMPTY;}
     if(opening_overlap && opening_overlap_result==PN_OK && epub.impl && !atomic_load(&overlap_disabled)){
+        if(opening_motion_scan && !loading_layout_ready)return PN_EMPTY;
         if(!loading_layout_ready){
             pn_profile_span_t timing;pn_profile_begin(&timing,&pool,"epub.open.first-layout");
             pn_status_t s=pn_epub_app_prepare_unshown(&epub);pn_profile_end(&timing,s);loading_layout_ready=s==PN_OK;
@@ -1251,14 +1257,34 @@ static void show_shelf(const char *cursor,bool previous){show_shelf_profile(curs
 /// 缓存预算查询由设备port提供，不用TF大小推断内部状态容量。/ The device port reports cache capacity without inferring internal-state space from TF size.
 static pn_status_t index_space(void *ctx,uint64_t *available){(void)ctx;size_t total=0,used=0;if(esp_littlefs_info("data",&total,&used)!=ESP_OK || used>total)return PN_IO;*available=total-used;return PN_OK;}
 static pn_status_t semantic_space(void *ctx,const char *path,uint64_t *available){(void)path;return index_space(ctx,available);}
-static pn_status_t show_loading(const char *path){
+static pn_status_t show_loading_phase(const char *path,unsigned phase){
     pn_profile_span_t timing;pn_profile_begin(&timing,&pool,"epub.open.loading");
     uint8_t *pixels=pn_alloc_tagged(&pool,PN_MEM_FRAME,342u*1216u);pn_frame_t frame;pn_font_t font={0};
     pn_status_t status=pn_frame_bind(&frame,pixels,342u*1216u,684,1216)?management_font_begin(&font,28):PN_NO_MEMORY;
     const char *title=strrchr(path,'/');title=title?title+1:path;
-    if(status==PN_OK)status=pn_reader_loading_render(&font,&frame,title);
+    if(status==PN_OK){
+#if PN_DEVICE_TEST_CONSOLE
+        if(loading_preview_active){pn_frame_clear(&frame,PN_UI_PAPER);status=pn_w_loading_phase(&font,&frame,"熊猫吃竹子","画面演示 · 中间键返回",-1,-1,phase);}
+        else
+#endif
+        status=pn_reader_loading_render_phase(&font,&frame,title,phase);
+    }
     if(status==PN_OK)status=present(NULL,&frame,panel_known?PN_REFRESH_GL16:PN_REFRESH_GC16);
     management_font_end(&font);pn_free(pixels);pn_profile_end(&timing,status);return status;
+}
+static pn_status_t show_loading(const char *path){
+    pn_status_t status=show_loading_phase(path,0);
+    if(status==PN_OK)pn_loading_motion_begin(&opening_motion,now_ms());else opening_motion.active=false;
+    return status;
+}
+/// 从已确认设备帧恢复，只换插画；不重新打开UI字体或重画书名。/ Restore the confirmed device frame and replace only artwork, without reopening UI fonts or redrawing the book name.
+static pn_status_t show_loading_motion(unsigned phase){
+    if(!panel_known)return PN_EMPTY;
+    pn_profile_span_t timing;pn_profile_begin(&timing,&pool,"epub.open.motion");
+    uint8_t *pixels=pn_alloc_tagged(&pool,PN_MEM_FRAME,342u*1216u);pn_frame_t frame;
+    pn_status_t status=pn_frame_bind(&frame,pixels,342u*1216u,684,1216)?pn_device_frame_restore(hardware.hl.back_fb,342u*1216u,&frame):PN_NO_MEMORY;
+    if(status==PN_OK){pn_w_loading_pose(&frame,-1,phase);status=present(NULL,&frame,PN_REFRESH_GL16);}
+    pn_free(pixels);pn_profile_end(&timing,status);return status;
 }
 static void reader_open_result(pn_status_t status){
     if(opening_request_timed){uint64_t end=pn_profile_time();pn_profile_observe(&pool,"epub.open.request",status,end>=opening_requested_us?end-opening_requested_us:0,NULL);opening_request_timed=false;}
@@ -1523,8 +1549,34 @@ static bool tick_opening(void){
     // A job finished during scan overlap has closed itself, leaving only its result; it must still be consumed here or the opening gate never releases (stuck loading page).
     if(!foreground_open.impl && opening_overlap_result==PN_BUSY)return false;
     pn_status_t s=opening_overlap_result!=PN_BUSY?opening_overlap_result:pn_epub_app_open_job_step(&foreground_open,&epub);opening_overlap_result=PN_BUSY;
-    if(s==PN_BUSY || (s==PN_CANCELLED && pn_epub_app_open_job_pending(&foreground_open)))return true;
+    if(s==PN_BUSY || (s==PN_CANCELLED && pn_epub_app_open_job_pending(&foreground_open))){
+        // 先做真实任务，只在无取消且有原池余量时装饰等待；扫描仍重叠推进任务。/ Advance real work first; decorate only without cancellation and with existing pool headroom; scanning still advances the job in overlap.
+        uint64_t motion_now=now_ms();
+        bool long_wait=motion_now>=opening_motion.last_ms && motion_now-opening_motion.last_ms>=750u;
+        if(s==PN_BUSY && (opening_motion.advanced || long_wait) && pn_cancel_checkpoint()==PN_OK && pn_loading_motion_poll(&opening_motion,motion_now)){
+            if(pool.used>pool.limit || pool.limit-pool.used<512u*1024u)opening_motion.active=false;
+            else{
+#if PN_DEVICE_TEST_CONSOLE
+                ESP_LOGI(TAG,"Opening panda pose=%u",opening_motion.phase);
+#endif
+                opening_overlap=true;opening_motion_scan=true;pn_status_t visual=show_loading_motion(opening_motion.phase);opening_motion_scan=false;opening_overlap=false;
+                if(visual!=PN_OK)opening_motion.active=false;else opening_motion.last_ms=now_ms();}
+        }
+        return true;
+    }
     if(s==PN_OK && selected_identified){pn_book_id_t actual;s=pn_epub_app_identity(&epub,&actual);if(s==PN_OK && memcmp(actual.sha256,selected_expected.sha256,32))s=PN_STALE_JOB;}
+    if(s==PN_OK && epub.impl && opening_motion.active && !opening_motion.advanced && pn_cancel_checkpoint()==PN_OK){
+        // 先做必要首屏排版，再用动画扫描重叠正文绘制，避免扫描与重排版争用PSRAM。/ Complete required first-page layout before overlapping animation with body painting, avoiding scan/layout PSRAM contention.
+        if(!loading_layout_ready){pn_profile_span_t timing;pn_profile_begin(&timing,&pool,"epub.open.first-layout");pn_status_t prepared=pn_epub_app_prepare_unshown(&epub);pn_profile_end(&timing,prepared);loading_layout_ready=prepared==PN_OK;}
+        if(loading_layout_ready && pn_epub_app_unshown_paint_pending(&epub) && pool.used<=pool.limit && pool.limit-pool.used>=512u*1024u && pn_loading_motion_poll(&opening_motion,now_ms())){
+#if PN_DEVICE_TEST_CONSOLE
+            ESP_LOGI(TAG,"Opening panda pose=%u after-layout",opening_motion.phase);
+#endif
+            opening_overlap_result=PN_OK;opening_overlap=true;opening_motion_scan=true;
+            (void)show_loading_motion(opening_motion.phase);opening_motion_scan=false;opening_overlap=false;opening_overlap_result=PN_BUSY;
+        }
+    }
+    opening_motion.active=false;
     if(s==PN_OK){pn_profile_span_t timing;pn_profile_begin(&timing,&pool,"epub.open.first-frame");s=active_step(PN_APP_OPEN,now_ms());pn_profile_end(&timing,s);}
     if(foreground_open.impl)(void)pn_epub_app_open_job_close(&foreground_open);
     reader_open_result(s);opening_controls(false);return true;
@@ -2113,6 +2165,9 @@ static void open_shelf_item(int index){
 }
 static void handle_key(int key,pn_key_event_t event){
     reading_stats_pause();
+#if PN_DEVICE_TEST_CONSOLE
+    if(loading_preview_active){if(event==PN_KEY_SHORT && key==PN_KEY_2){loading_preview_active=false;home_mode=true;show_shelf("",false);}return;}
+#endif
     if(ota.impl){if(event==PN_KEY_SHORT && (key==PN_KEY_1 || key==PN_KEY_2))update_command(PN_SETUI_UPDATE_CANCEL);else if(event==PN_KEY_SHORT && key==PN_KEY_3){pn_device_ota_state_t state={0};(void)pn_device_ota_state(&ota,&state);if(state.phase==PN_DEVICE_OTA_AVAILABLE)update_command(PN_SETUI_UPDATE_INSTALL);else if(state.phase==PN_DEVICE_OTA_READY)update_command(PN_SETUI_UPDATE_REBOOT);}return;}
     if(opening){if(event==PN_KEY_SHORT && (key==PN_KEY_1 || key==PN_KEY_2))opening_cancel(key);return;}
     if(usb.open){if(event==PN_KEY_SHORT){usb_return=true;usb_home=key==PN_KEY_2;usb_lock=false;pn_device_usb_request_stop(&usb);}return;}
@@ -2535,6 +2590,22 @@ static void device_task(void *arg){
         // Auto-lock also while an update merely awaits confirmation: cancel first and let tick_ota lock after shutdown, leaving the inactive slot unselected.
         if(PN_AUTO_LOCK && !locked && !transfer.impl && !usb.open && !time_sync.impl && !ota_busy() && !wifi_probe.impl && !ota_lock_pending && now>=last_input && now-last_input>=AUTO_LOCK_MS && now-boot>=AUTO_LOCK_MS){pn_reader_input_cancel(&input);
             if(ota.impl){ota_lock_pending=true;update_command(PN_SETUI_UPDATE_CANCEL);}else if(prepare_lock())lock_and_sleep("");else last_input=now;}
+        #if PN_DEVICE_TEST_CONSOLE
+        if(locked)loading_preview_active=false;
+        {unsigned pose;
+         if(pn_device_test_console_take_loading(&pose)){
+            if(locked || reader_active() || opening || (!loading_preview_active && (!home_mode || !shelf_mode || focus_page())) || pool.used>pool.limit || pool.limit-pool.used<512u*1024u)ESP_LOGW(TAG,"Loading preview rejected: return to idle home first");
+            else{
+                // 演示只在首页进入，阻止旧菜单触点；产品owner绘制，不创建书对象或写进度。/ Enter rehearsal only from home and suppress old menu contacts; the product owner draws without creating books or saving progress.
+                bool already_shown=loading_preview_active;pn_cover_work_abort(&cover_work);loading_preview_active=true;status_page=true;shelf_mode=false;
+                // 下一轮随状态页发布视图，避免提前改代次取消本次绘制。/ Publish the status view next tick, avoiding self-cancellation by an early generation change.
+                pn_status_t visual=already_shown?show_loading_motion(pose):show_loading_phase("",pose);last_input=now_ms();
+                ESP_LOGI(TAG,"Loading preview pose=%u status=%d",pose,(int)visual);
+                if(visual!=PN_OK){loading_preview_active=false;show_shelf("",false);}
+            }
+         }}
+        if(loading_preview_active){pn_device_power_busy(PN_POWER_PRODUCT,false);pn_device_async_wait(&async_port,50);continue;}
+        #endif
         if(opening){
             // 加载态独占内容路由；紧急键/电源先处理，普通书架触点与后台画面不进入旧页面。
             // Loading owns content routing: urgent keys/power run first; ordinary shelf contacts and background draws never reach the old page.

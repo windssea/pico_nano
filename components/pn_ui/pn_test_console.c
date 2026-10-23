@@ -46,6 +46,7 @@ pn_status_t pn_tc_parse(const char *line,pn_tc_command_t *command){
     else if(!strcmp(verb,"shot"))c.kind=PN_TC_SHOT;
     else if(!strcmp(verb,"power"))c.kind=PN_TC_POWER;
     else if(!strcmp(verb,"heap"))c.kind=PN_TC_HEAP;
+    else if(!strcmp(verb,"loading")){uint32_t phase;if(!number(&p,3,&phase))return PN_INVALID;c.kind=PN_TC_LOADING;c.phase=(unsigned)phase;}
     else if(!strcmp(verb,"tap") || !strcmp(verb,"long")){
         c.kind=verb[0]=='t'?PN_TC_TAP:PN_TC_LONG;
         if(!point(&p,&c.x0,&c.y0) || !hold(&p,c.kind==PN_TC_TAP?PN_TC_TAP_MS:PN_TC_LONG_MS,&c.hold_ms))return PN_INVALID;

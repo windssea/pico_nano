@@ -105,7 +105,7 @@ static pn_status_t text_impl(pn_font_t *font,pn_frame_t *frame,const char *utf8,
     for(int i=0;dots && i<3;i++){status=ellipsis_dot(font,frame,start,baseline,dot);if(status!=PN_OK)return status;start+=dot;}
     return PN_OK;
 }
-static pn_status_t text_lines_impl(pn_font_t *font,pn_frame_t *frame,const char *utf8,int x,int baseline,int width,unsigned max_lines,int pitch,int first_indent,int tracking_64,unsigned *used){
+static pn_status_t text_lines_impl(pn_font_t *font,pn_frame_t *frame,const char *utf8,int x,int baseline,int width,unsigned max_lines,int pitch,int first_indent,int tracking_64,bool centered,unsigned *used){
     if(!font || !font->impl || !frame || !frame->pixels || !utf8 || width<=0 || !max_lines || pitch<=0)return PN_INVALID;
     uint32_t cp[MAX_CHARS];int32_t adv[MAX_CHARS];uint8_t miss[MAX_CHARS];size_t n=0;
     pn_status_t status=decode(font,utf8,cp,adv,miss,&n);if(status!=PN_OK)return status;
@@ -129,6 +129,7 @@ static pn_status_t text_lines_impl(pn_font_t *font,pn_frame_t *frame,const char 
         bool cut=last && end<n;
         if(cut){sum=0;end=at;while(end<n && sum+adv[end]+3*period<=room){sum+=adv[end];end++;}}
         int32_t pen=(int32_t)x*64+(line==0?first_indent*64:0);
+        if(centered){int32_t actual=cut?3*period:0;for(size_t i=at;i<end;i++)actual+=adv[i];if(actual<room)pen+=(room-actual)/2;}
         for(size_t i=at;i<end;i++){status=glyph(font,frame,cp[i],miss[i],pen,baseline+(int)line*pitch);if(status!=PN_OK)return status;pen+=adv[i];}
         for(int i=0;cut && i<3;i++){status=ellipsis_dot(font,frame,pen,baseline+(int)line*pitch,period);if(status!=PN_OK)return status;pen+=period;}
         at=end;line++;
@@ -160,8 +161,8 @@ pn_status_t pn_w_text_width_ex(pn_font_t *font,const char *utf8,bool bold,int *w
 }
 pn_status_t pn_w_text_width(pn_font_t *font,const char *utf8,int *width){fallback_sizes_t saved=fallback_saved();return fallback_restore(saved,text_width_impl(font,utf8,width));}
 pn_status_t pn_w_text(pn_font_t *font,pn_frame_t *frame,const char *utf8,int x,int baseline,int max_width,pn_align_t align){fallback_sizes_t saved=fallback_saved();return fallback_restore(saved,text_impl(font,frame,utf8,x,baseline,max_width,align));}
-pn_status_t pn_w_text_lines(pn_font_t *font,pn_frame_t *frame,const char *utf8,int x,int baseline,int width,unsigned max_lines,int pitch,unsigned *used){fallback_sizes_t saved=fallback_saved();return fallback_restore(saved,text_lines_impl(font,frame,utf8,x,baseline,width,max_lines,pitch,0,0,used));}
-pn_status_t pn_w_text_flow(pn_font_t *font,pn_frame_t *frame,const char *utf8,int x,int baseline,int width,unsigned max_lines,int pitch,int first_indent,int tracking_64,unsigned *used){fallback_sizes_t saved=fallback_saved();return fallback_restore(saved,text_lines_impl(font,frame,utf8,x,baseline,width,max_lines,pitch,first_indent,tracking_64,used));}
+pn_status_t pn_w_text_lines(pn_font_t *font,pn_frame_t *frame,const char *utf8,int x,int baseline,int width,unsigned max_lines,int pitch,unsigned *used){fallback_sizes_t saved=fallback_saved();return fallback_restore(saved,text_lines_impl(font,frame,utf8,x,baseline,width,max_lines,pitch,0,0,false,used));}
+pn_status_t pn_w_text_flow(pn_font_t *font,pn_frame_t *frame,const char *utf8,int x,int baseline,int width,unsigned max_lines,int pitch,int first_indent,int tracking_64,unsigned *used){fallback_sizes_t saved=fallback_saved();return fallback_restore(saved,text_lines_impl(font,frame,utf8,x,baseline,width,max_lines,pitch,first_indent,tracking_64,false,used));}
 void pn_w_outline(pn_frame_t *frame,int x,int y,int width,int height,int thickness,uint8_t shade){
     if(!frame || width<=0 || height<=0 || thickness<=0)return;
     if(thickness*2>width)thickness=width/2;
@@ -185,19 +186,31 @@ pn_status_t pn_w_button(pn_font_t *font,pn_frame_t *frame,const char *label,int 
     return status;
 }
 pn_status_t pn_w_loading(pn_font_t *font,pn_frame_t *frame,const char *title,const char *detail,int percent,int y){
+    return pn_w_loading_phase(font,frame,title,detail,percent,y,0);
+}
+pn_status_t pn_w_loading_phase(pn_font_t *font,pn_frame_t *frame,const char *title,const char *detail,int percent,int y,unsigned phase){
     if(!font || !font->impl || !frame || !frame->pixels || !title || percent < -1 || percent>100)return PN_INVALID;
-    int saved=font->pixels;
-    // 静态沙漏避免墨水屏动画刷屏；不生成虚假百分比。/ A static hourglass avoids animated e-paper refreshes; never invent progress.
-    pn_w_round_fill(frame,32,y,620,300,PN_UI_CARD_RADIUS,PN_UI_SURFACE);
-    pn_w_round_stroke(frame,32,y,620,300,PN_UI_CARD_RADIUS,2,PN_UI_STROKE);
-    pn_w_icon(frame,PN_ICON_LOADING,312,y+28,60,PN_UI_INK);
+    int saved=font->pixels;bool centered=y<0;
+    if(centered)y=(frame->height-300)/2;
+    int width=frame->width-2*PN_UI_MARGIN,x=PN_UI_MARGIN,cx=frame->width/2;
+    // 大面积灰底改为纸白；全屏只留插画，嵌入式等待保留细框与现有按钮区域。/ Replace the broad gray fill with paper white; full-screen waits keep just the illustration, while embedded waits retain a hairline and existing button regions.
+    pn_w_round_fill(frame,x,y,width,300,PN_UI_CARD_RADIUS,PN_UI_PAPER);
+    if(!centered)pn_w_round_stroke(frame,x,y,width,300,PN_UI_CARD_RADIUS,1,PN_UI_STROKE);
+    pn_w_loading_pose(frame,y,phase);
     pn_status_t s=pn_font_size(font,34);
-    if(s==PN_OK)s=pn_w_text_ex(font,frame,title,56,y+140,572,PN_ALIGN_CENTER,PN_UI_INK,true);
+    if(s==PN_OK)s=pn_w_text_ex(font,frame,title,x+24,y+184,width-48,PN_ALIGN_CENTER,PN_UI_INK,true);
     if(s==PN_OK)s=pn_font_size(font,26);
-    if(s==PN_OK && detail){int width=0;s=pn_w_text_width(font,detail,&width);
-        if(s==PN_OK)s=width<=556?pn_w_text_ex(font,frame,detail,64,y+190,556,PN_ALIGN_CENTER,PN_UI_MUTED,false):pn_w_text_lines_ex(font,frame,detail,64,y+190,556,2,36,PN_UI_MUTED,false);}
-    if(percent>=0){pn_w_round_fill(frame,64,y+262,492,8,4,PN_UI_SELECT);if(percent)pn_w_round_fill(frame,64,y+262,492*percent/100,8,4,PN_UI_INK);
-        char value[8];snprintf(value,sizeof value,"%d%%",percent);if(s==PN_OK)s=pn_font_size(font,22);if(s==PN_OK)s=pn_w_text(font,frame,value,560,y+274,68,PN_ALIGN_RIGHT);}
+    if(s==PN_OK && detail){
+        fallback_sizes_t fallback=fallback_saved();uint8_t ink_saved=text_ink;bool bold_saved=text_bold;text_ink=PN_UI_MUTED;text_bold=false;
+        s=text_lines_impl(font,frame,detail,x+32,y+226,width-64,2,32,0,0,true,NULL);
+        text_ink=ink_saved;text_bold=bold_saved;s=fallback_restore(fallback,s);
+    }
+    if(percent>=0){int track=width-160;pn_w_round_fill(frame,x+40,y+282,track,6,3,PN_UI_SELECT);if(percent)pn_w_round_fill(frame,x+40,y+282,track*percent/100,6,3,PN_UI_INK);
+        char value[8];snprintf(value,sizeof value,"%d%%",percent);if(s==PN_OK)s=pn_font_size(font,22);if(s==PN_OK)s=pn_w_text(font,frame,value,x+width-100,y+292,60,PN_ALIGN_RIGHT);
+    }else{
+        // 三个等重小点表示未知等待，不映射为完成比例。/ Three equally weighted dots denote an unknown wait, never a completion ratio.
+        for(int i=0;i<3;i++)pn_frame_rect(frame,cx-18+i*14,y+284,8,4,PN_UI_STROKE);
+    }
     pn_status_t restored=pn_font_size(font,saved);return s==PN_OK?restored:s;
 }
 pn_status_t pn_w_tabbar_icons(pn_font_t *font,pn_frame_t *frame,const char *const *labels,const pn_icon_t *icons,unsigned count,unsigned active,unsigned disabled,int y,int height){

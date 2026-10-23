@@ -71,6 +71,7 @@ add_library(pn_core STATIC ${ui_font_c} ${reading_font_c} ${harmony_font_c} ${ar
     ${PN_ROOT}/components/pn_library/pn_search_ui.c
     ${PN_ROOT}/components/pn_library/pn_book_actions.c
     ${PN_ROOT}/components/pn_widgets/pn_widgets.c
+    ${PN_ROOT}/components/pn_widgets/pn_loading.c
     ${PN_ROOT}/components/pn_widgets/pn_feedback.c
     ${PN_ROOT}/components/pn_widgets/pn_feedback_idle.c
     ${PN_ROOT}/components/pn_widgets/pn_gfx.c

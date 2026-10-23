@@ -38,8 +38,10 @@ pn_status_t pn_reader_toolbar_render(pn_font_t *ui,pn_frame_t *frame,unsigned un
 /// 命中返回PN_TOOL_*；工具栏以上区域返回PN_TOOL_CLOSE；不可用入口返回-1。
 /// Hit test returning PN_TOOL_*; the area above the toolbar returns PN_TOOL_CLOSE; unavailable entries return -1.
 int pn_reader_toolbar_hit(int x,int y,unsigned unavailable);
-/// 静态开书反馈，不画假百分比；只绘制，由控制层管理输入门和显示回执。/ Paint static opening feedback without a fake percentage; controllers own input gating and display receipts.
+/// 居中熊猫开书反馈，不画假百分比；只绘制，由控制层管理输入门和显示回执。/ Paint centered panda opening feedback without a fake percentage; controllers own input gating and display receipts.
 pn_status_t pn_reader_loading_render(pn_font_t *ui,pn_frame_t *frame,const char *title);
+/// 选择吃竹子姿态；只用于控制层允许的低频等待刷新。/ Select a bamboo-eating pose, only for controller-admitted slow waiting updates.
+pn_status_t pn_reader_loading_render_phase(pn_font_t *ui,pn_frame_t *frame,const char *title,unsigned phase);
 /// 小TXT直接呈现正文，省掉一次面板刷新；大文件保留开书反馈。 / Present small TXT directly to avoid an extra panel update; keep opening feedback for larger files.
 bool pn_reader_loading_needed(bool text_format,uint64_t source_bytes);
 /// 在正文视口的一行绘制虚线/点线，shade 0浅/1中/2深/3黑；0样式关闭，越界跳过，不分配或改变排版。 / Draw a dashed/dotted row in a text viewport with shade light/medium/dark/black; style zero disables, out-of-bounds rows are skipped, without allocation or layout changes.

@@ -14,4 +14,6 @@ void pn_device_test_console_start(pn_device_async_t *port,pn_test_console_shown_
 /// 锁屏等待中消费一次控制台电源指令，作为唤醒按键；输入任务暂停时由睡眠适配器调用。
 /// Consume one console power command as a wake key during the lock wait; called by the sleep adapter while the input task is paused.
 bool pn_device_test_console_take_power(void);
+/// 产品owner消费一次待绘姿态；控制台线程不访问模型、画布或硬件。/ Product owner consumes one pending pose; the console thread never accesses models, canvases or hardware.
+bool pn_device_test_console_take_loading(unsigned *phase);
 #endif

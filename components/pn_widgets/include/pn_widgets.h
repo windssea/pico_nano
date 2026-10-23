@@ -84,8 +84,25 @@ void pn_w_round_outline(pn_frame_t *frame,int x,int y,int width,int height,int r
 /// 画带文字的圆角按钮，文字居中；字号由调用者先设定。
 /// Draw a rounded button with centered text; the caller sets the font size first.
 pn_status_t pn_w_button(pn_font_t *font,pn_frame_t *frame,const char *label,int x,int y,int width,int height,unsigned style);
-/// 统一静态等待卡片，高300；percent为-1时无确定进度，0..100仅用于真实进度；恢复字号。/ Shared static busy card, 300px tall; -1 for unknown progress, 0..100 for measured progress; restores font size.
+/// 熊猫等待画面，高300；y<0时居中，percent仅表示真实进度，恢复字号。/ Panda waiting view, 300px tall; y<0 centers it; percent is measured progress only; restores font size.
 pn_status_t pn_w_loading(pn_font_t *font,pn_frame_t *frame,const char *title,const char *detail,int percent,int y);
+/// 同一画面的四个吃竹子姿态；只绘制，刷新时机由控制层决定。/ Four bamboo-eating poses of the same view; drawing only, controllers schedule presentation.
+pn_status_t pn_w_loading_phase(pn_font_t *font,pn_frame_t *frame,const char *title,const char *detail,int percent,int y,unsigned phase);
+/// 原创64×36像素熊猫竹林，整数4倍绘制为256×144；无解码或堆分配。/ Original 64x36 pixel panda grove drawn at integer 4x scale, 256x144; no decoding or allocation.
+void pn_w_loading_panda(pn_frame_t *frame,int x,int y,unsigned phase);
+/// 仅替换等待插画区域，保留标题/说明/边框；y<0按300px等待区域居中。/ Replace only waiting artwork, retaining text and borders; y<0 centers the 300px waiting region.
+void pn_w_loading_pose(pn_frame_t *frame,int y,unsigned phase);
+/// 低频动画时钟，控制层持有；不触碰画布或硬件。/ Slow animation clock owned by controllers; touches neither canvas nor hardware.
+typedef struct {
+    uint64_t last_ms; ///< 上一次获准刷新时刻 / Last admitted presentation time
+    unsigned phase; ///< 当前姿态0..3 / Current pose 0..3
+    bool active; ///< 本次等待允许动画 / Animation is enabled for this wait
+    bool advanced; ///< 已呈现首次低头 / Has admitted the initial bite
+} pn_loading_motion_t;
+/// 新等待从静止姿态开始，100ms后可尝试首次低头；任务完成不等待动画。/ Start at rest; admit the initial bite after 100ms, without holding completed work for animation.
+void pn_loading_motion_begin(pn_loading_motion_t *motion,uint64_t now_ms);
+/// 首次后以750ms间隔推进一个姿态，不追赶漏帧；失败由控制层关闭active。/ After the initial bite, advance one pose at 750ms intervals without catch-up; controllers disable active on failure.
+bool pn_loading_motion_poll(pn_loading_motion_t *motion,uint64_t now_ms);
 /// 底栏：count个等宽入口，active高亮上沿；disabled位图中为1的入口灰化。
 /// Bottom bar: equal entries with an active top edge; disabled entries are gray.
 pn_status_t pn_w_tabbar(pn_font_t *font,pn_frame_t *frame,const char *const *labels,unsigned count,unsigned active,unsigned disabled,int y,int height);

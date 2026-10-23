@@ -346,7 +346,7 @@ static pn_status_t remove_font(pn_font_manage_t *ui){
 static pn_status_t show_busy(pn_font_manage_t *ui,pn_font_manage_present_fn present,void *ctx,const char *title){
     fm_t *f=ui->impl;f->busy=true;ui->presented=false;pn_frame_clear(&f->canvas,PN_UI_PAPER);
     pn_status_t s=pn_w_header(&f->ui,&f->canvas,"","字体管理",NULL);
-    if(s==PN_OK)s=pn_w_loading(&f->ui,&f->canvas,title,"请稍候，完成后将自动返回",-1,380);
+    if(s==PN_OK)s=pn_w_loading(&f->ui,&f->canvas,title,"请稍候，完成后将自动返回",-1,-1);
     if(s==PN_OK)s=present(ctx,&f->canvas,PN_REFRESH_GL16);
     return s;
 }

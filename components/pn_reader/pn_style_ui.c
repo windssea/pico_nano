@@ -188,7 +188,7 @@ pn_status_t pn_style_ui_open(pn_style_ui_t *u,pn_reader_app_t *reader,pn_reader_
 static pn_status_t busy_paint(void *ctx,pn_font_t *font,pn_font_t *metadata,pn_frame_t *frame){
     (void)ctx;(void)metadata;pn_frame_clear(frame,PN_UI_PAPER);
     pn_status_t s=pn_w_header(font,frame,"","排版设置",NULL);
-    return s==PN_OK?pn_w_loading(font,frame,"正在重新排版","正在准备阅读页面，请稍候",-1,380):s;
+    return s==PN_OK?pn_w_loading(font,frame,"正在重新排版","正在准备阅读页面，请稍候",-1,-1):s;
 }
 pn_status_t pn_style_ui_event(pn_style_ui_t *u,int command,uint64_t now,pn_reader_present_fn present,void *ctx){
     if(!u || !u->active || !live(u))return PN_INVALID;
