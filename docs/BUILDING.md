@@ -101,6 +101,10 @@ SDKCONFIG按环境隔离：CI与板级都有各自build目录/sdkconfig，不能
 
 ## 开发时保持可见模拟器
 
+其他电脑首次拉取源码，不需要私人测试书/完整字库也可运行原创演示库：先`python tools/dev.py sdl-run`构建，再`powershell -NoProfile -ExecutionPolicy Bypass -File tools/run_sim.ps1 -Demo`。依赖Docker Desktop Linux与WSLg；Windows可按上文用`py -V:Astral/CPython3.12.13`代替python。演示输入在忽略的build-dev/demo-library，状态独立保存到Docker卷的/data/demo-samples；不扫描私人目录。已有窗口会保留，重建后先`docker stop pico-sim`再启动。默认不加-Demo仍使用本机tests/testBook与tests/testFont，只操作独立副本。
+
+缓存基础专项为`cache_file`、`page_index`、`wallpaper_cache`、`paper`、`reader_app`和`epub_app`。覆盖缺目录/坏主包有效备份、每个提交步骤中断、失卡后不清理重挂载路径、原生像素，以及索引满盘时真实进度成功保存、正常挂起/恢复；取消不是缓存MISS。主机为真实临时文件/SDK替身，不代表FAT掉电或面板验收。
+
 ```powershell
 python tools/dev.py sdl-run
 powershell -NoProfile -ExecutionPolicy Bypass -File tools/run_sim.ps1

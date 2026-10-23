@@ -806,7 +806,8 @@ pn_status_t pn_epub_app_deferred_flush(pn_epub_app_t *app){
     // 先进度后索引：进度是用户数据，索引可重建。/ Progress first, then the index: progress is user data, the index is rebuildable.
     if(a->persistent && a->save.dirty){pn_status_t s=pn_epub_save_flush(&a->save,a->last_now);if(s!=PN_OK)return s;}
     if(!pn_page_index_pending(&a->page_index))return PN_OK;
-    return pn_page_index_flush(&a->page_index,true);
+    // 索引可重建；其失败/分步未完不冒充用户进度保存失败。/ Indexes are rebuildable; failed/incomplete persistence never masquerades as failed user-progress saving.
+    pn_status_t cached=pn_page_index_flush(&a->page_index,true);return cached==PN_CANCELLED?cached:PN_OK;
 }
 pn_status_t pn_epub_app_resume(pn_epub_app_t *app,uint64_t now,pn_reader_present_fn present,void *ctx){
     if(!app || !app->impl || !present)return PN_INVALID;

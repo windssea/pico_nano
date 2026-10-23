@@ -14,6 +14,7 @@
 #include "pn_image.h"
 #include "pn_profile.h"
 #include "pn_text_file.h"
+#include "pn_cache_file.h"
 #include "pn_widgets.h"
 #include <errno.h>
 #include <stdio.h>

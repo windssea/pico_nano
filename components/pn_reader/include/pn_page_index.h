@@ -26,7 +26,7 @@ pn_status_t pn_page_index_open(pn_page_index_t *,pn_pool_t *,pn_media_t *,const 
 bool pn_page_index_near(pn_page_index_t *,uint32_t,uint64_t,bool,pn_page_index_entry_t *);
 /// 完整解析后记录边界，不写进度；内存最多512项。/ Record after complete parsing without progress writes; at most 512 entries in memory.
 void pn_page_index_add(pn_page_index_t *,const pn_page_index_entry_t *);
-/// 分批同步；force用于关闭，错误仅影响缓存。/ Batch synchronization; force on close, errors affect caches only.
+/// 分批同步；force用于关闭，可选写失败本会话退避，错误仅影响缓存。/ Batch synchronization; force on close, with session backoff after optional write failures affecting caches only.
 pn_status_t pn_page_index_flush(pn_page_index_t *,bool force);
 /// 是否有尚未写出的记录；只读内存状态。/ Whether unwritten records exist; reads in-memory state only.
 bool pn_page_index_pending(const pn_page_index_t *);

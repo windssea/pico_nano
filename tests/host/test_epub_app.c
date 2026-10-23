@@ -5,6 +5,7 @@
 #include "pn_bookmark_ui.h"
 #include "pn_font_preferences.h"
 #include "pn_font_ui.h"
+#include "pn_page_index.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -15,6 +16,7 @@ static pn_status_t present(void *ctx,const pn_frame_t *frame,pn_refresh_t profil
     screen_t *s=ctx;s->profile=profile;s->calls++;s->tag=pn_frame_get(frame,17,17);if(s->fail)return PN_IO;uint64_t hash=1469598103934665603ULL;for(int y=0;y<frame->height;y++)for(int x=0;x<frame->width;x++){hash^=pn_frame_get(frame,x,y);hash*=1099511628211ULL;}s->hash=hash;if(s->save_fault){s->save_fault->fail_at=s->save_fault->attempts+1;s->save_fault=NULL;}return PN_OK;
 }
 static bool same(const pn_epub_progress_t *a,const pn_epub_progress_t *b){return !memcmp(a->book.sha256,b->book.sha256,32) && !strcmp(a->location.path,b->location.path) && a->location.position.element==b->location.position.element && a->location.position.offset==b->location.position.offset && a->location.position.run==b->location.position.run && a->location.position.kind==b->location.position.kind;}
+static pn_status_t no_index_space(void *ctx,uint64_t *bytes){(void)ctx;*bytes=0;return PN_OK;}
 /* 最终目标页使用真实候选字体，并留可观察像素；测试不伪造呈现成功。/ The destination draws the actual candidate font and observable pixels; tests never fake presentation success. */
 static pn_status_t destination(void *ctx,pn_font_t *ui,pn_font_t *body,pn_frame_t *frame){
  (void)ui;if(ctx && *(bool *)ctx)return PN_IO;pn_frame_clear(frame,15);pn_frame_rect(frame,16,16,4,4,9);return pn_font_draw(body,frame,'A',32*64,120,PN_FONT_GRAY);
@@ -29,6 +31,8 @@ int main(int argc,char **argv){
     uint64_t mark_id;assert(pn_epub_app_bookmark_add(&app,"未显示",&mark_id)==PN_EMPTY);
     screen.fail=false;assert(pn_epub_app_step(&app,PN_APP_OPEN,now++,present,&screen)==PN_OK && pn_epub_app_progress(&app,&first)==PN_OK);pn_book_display_t metadata;assert(pn_epub_app_book_display(&app,&metadata)==PN_OK);uint64_t first_hash=screen.hash;assert(pn_epub_app_bookmark_add(&app,"第一页",&mark_id)==PN_OK && mark_id==1);
     assert(pn_epub_app_suspend(&app,now++)==PN_OK && app.impl);
+    // 缓存满盘不改变已保存位置，也不阻止正常唤醒。/ A full optional cache neither changes saved progress nor prevents normal resume.
+    pn_page_index_space_port(no_index_space,NULL);assert(pn_epub_app_deferred_flush(&app)==PN_OK && !pn_epub_app_deferred_pending(&app));pn_page_index_space_port(NULL,NULL);
     assert(pn_epub_app_resume(&app,now++,present,&screen)==PN_OK && screen.hash==first_hash && pn_epub_app_progress(&app,&current)==PN_OK && same(&first,&current));
     assert(pn_epub_app_suspend(&app,now++)==PN_OK);
     screen.fail=true;assert(pn_epub_app_resume(&app,now++,present,&screen)==PN_IO && pn_epub_app_progress(&app,&current)==PN_OK && same(&first,&current));

@@ -4,6 +4,7 @@
 #include "pn_profile.h"
 #include "pn_page_index.h"
 #include "pn_cancel.h"
+#include "pn_cache_file.h"
 #include "pn_reader_chrome.h"
 #include <stdio.h>
 #include <string.h>
@@ -21,6 +22,7 @@ typedef struct {
     pn_pool_t *pool;pn_media_t *media;pn_media_lease_t lease;pn_book_id_t book,key;
     char directory[PN_JOURNAL_PATH_MAX],path[PN_JOURNAL_PATH_MAX];
     size_t count,dirty;pn_page_index_entry_t entries[PN_PAGE_INDEX_MAX];
+    bool blocked,backup_loaded; ///< 可选写失败本会话退避，以及完整验证的备份来源 / Session backoff after optional write failure and fully validated backup provenance
 } index_t;
 static uint64_t get(const uint8_t *p,unsigned n){uint64_t v=0;for(unsigned i=0;i<n;i++)v|=(uint64_t)p[i]<<(8*i);return v;}
 static void put(uint8_t *p,uint64_t v,unsigned n){for(unsigned i=0;i<n;i++)p[i]=(uint8_t)(v>>(8*i));}
@@ -52,6 +54,19 @@ pn_status_t pn_page_index_key_known(const pn_book_id_t *book,const pn_style_t *s
     pn_profile_span_t span;pn_profile_begin(&span,chain?chain->pool:NULL,"font.layout-key");
     pn_status_t status=pn_page_index_key_impl(book,style,primary,chain,format,known_primary,out);pn_profile_end(&span,status);return status;
 }
+static pn_status_t index_read(index_t *i,const char *path,bool publish){
+    FILE *f=fopen(path,"rb");if(!f)return PN_EMPTY;uint8_t data[HEADER];pn_status_t s=PN_OK;size_t count=0;
+    bool valid=fread(data,1,HEADER,f)==HEADER && !memcmp(data,"PNPI",4) && get(data+4,4)==1 && !memcmp(data+8,i->book.sha256,32) && !memcmp(data+40,i->key.sha256,32) && get(data+76,4)==crc(data,76) && get(data+72,4)<=PN_PAGE_INDEX_MAX;
+    if(valid)count=(size_t)get(data+72,4);
+    for(size_t j=0;valid && j<count;j++){s=checked(i);if(s!=PN_OK)break;pn_page_index_entry_t e;valid=fread(data,1,RECORD,f)==RECORD && decode(data,&e);if(valid && publish)i->entries[j]=e;}
+    if(valid && s==PN_OK)valid=fgetc(f)==EOF && !ferror(f);
+    if(fclose(f))valid=false;
+    if(s==PN_OK)s=checked(i);
+    if(s==PN_OK && !valid)s=PN_CORRUPT;
+    if(publish){i->count=s==PN_OK?count:0;i->backup_loaded=s==PN_OK && strlen(path)>4 && !strcmp(path+strlen(path)-4,".bak");}
+    return s;
+}
+static pn_status_t index_load(void *ctx,const char *path){return index_read(ctx,path,true);}
 pn_status_t pn_page_index_open(pn_page_index_t *h,pn_pool_t *pool,pn_media_t *media,const pn_media_lease_t *lease,const char *root,const pn_book_id_t *book,const pn_book_id_t *key){
     if(!h || h->impl || !pool || !media || !lease || !root || !book || !key)return PN_INVALID;
     if(lease->access!=PN_MEDIA_WRITE)return PN_INVALID;
@@ -60,14 +75,7 @@ pn_status_t pn_page_index_open(pn_page_index_t *h,pn_pool_t *pool,pn_media_t *me
     char hash[65];for(unsigned j=0;j<32;j++)snprintf(hash+2*j,3,"%02x",book->sha256[j]);
     int a=snprintf(i->directory,sizeof i->directory,"%s/indexes",root),b=snprintf(i->path,sizeof i->path,"%s/%s.pni",i->directory,hash);
     if(a<0 || b<0 || (size_t)a>=sizeof i->directory || (size_t)b>=sizeof i->path){pn_free(i);return PN_LIMIT;}
-    FILE *f=fopen(i->path,"rb");uint8_t data[HEADER];bool valid=false;
-    if(f){valid=fread(data,1,HEADER,f)==HEADER && !memcmp(data,"PNPI",4) && get(data+4,4)==1 && !memcmp(data+8,book->sha256,32) && !memcmp(data+40,key->sha256,32) && get(data+76,4)==crc(data,76) && get(data+72,4)<=PN_PAGE_INDEX_MAX;
-        size_t count=valid?(size_t)get(data+72,4):0;
-        for(size_t j=0;valid && j<count;j++){s=checked(i);if(s!=PN_OK)break;valid=fread(data,1,RECORD,f)==RECORD && decode(data,&i->entries[j]);}
-        if(valid && s==PN_OK)valid=fgetc(f)==EOF && !ferror(f);
-        if(fclose(f))valid=false;
-        if(valid && s==PN_OK)i->count=count;
-    }
+    s=pn_cache_file_load(media,lease,i->path,index_load,i);if(pn_cache_file_miss(s))s=PN_OK;
     if(s==PN_OK)s=checked(i);
     if(s!=PN_OK){pn_free(i);return s;}
     h->impl=i;return PN_OK;
@@ -92,7 +100,7 @@ static pn_status_t quota(index_t *i,size_t incoming){
     else{struct statvfs fs;if(statvfs(i->directory,&fs))return PN_IO;available=(uint64_t)fs.f_bavail*fs.f_frsize;}
     if(available<incoming+65536u)return PN_NO_MEMORY;
     for(;;){DIR *dir=opendir(i->directory);if(!dir)return PN_IO;size_t total=0;time_t oldest=0;char victim[PN_JOURNAL_PATH_MAX]={0};
-        struct dirent *entry;while((entry=readdir(dir))){pn_status_t s=checked(i);if(s!=PN_OK){closedir(dir);return s;}size_t n=strlen(entry->d_name);if((n!=68 || strcmp(entry->d_name+64,".pni")) && (n!=72 || strcmp(entry->d_name+64,".pni.tmp")))continue;
+        struct dirent *entry;while((entry=readdir(dir))){pn_status_t s=checked(i);if(s!=PN_OK){closedir(dir);return s;}size_t n=strlen(entry->d_name);bool temporary=n==72 && !strcmp(entry->d_name+64,".pni.tmp"),backup=n==72 && !strcmp(entry->d_name+64,".pni.bak");if((n!=68 || strcmp(entry->d_name+64,".pni")) && !temporary && !backup)continue;
             bool owned=true;for(unsigned j=0;j<64;j++)if(!strchr("0123456789abcdef",entry->d_name[j]))owned=false;if(!owned)continue;
             char p[PN_JOURNAL_PATH_MAX];int k=snprintf(p,sizeof p,"%s/%s",i->directory,entry->d_name);if(k<0 || (size_t)k>=sizeof p || !strcmp(p,i->path))continue;
             struct stat st;
@@ -102,14 +110,15 @@ static pn_status_t quota(index_t *i,size_t incoming){
             int ok=lstat(p,&st);
 #endif
             if(ok || !S_ISREG(st.st_mode) || st.st_size<0)continue;
-            if(n==72){(void)remove(p);continue;}
+            if(temporary){(void)remove(p);continue;}
+            if(backup && i->backup_loaded && !strncmp(p,i->path,strlen(i->path)))continue;
             total+=(size_t)st.st_size;if(!*victim || st.st_mtime<oldest){oldest=st.st_mtime;strcpy(victim,p);}}
         closedir(dir);if(total+incoming<=QUOTA)return PN_OK;if(!*victim || remove(victim))return PN_IO;
     }
 }
 static pn_status_t index_flush(pn_page_index_t *h,bool force){
     if(!h || !h->impl)return PN_EMPTY;
-    index_t *i=h->impl;if(!i->dirty || (!force && i->dirty<16))return PN_EMPTY;
+    index_t *i=h->impl;if(i->blocked || !i->dirty || (!force && i->dirty<16))return PN_EMPTY;
     pn_status_t s=checked(i);if(s!=PN_OK)return s;if(mkdir(i->directory,0700) && errno!=EEXIST)return PN_IO;
     s=quota(i,HEADER+RECORD*i->count);if(s!=PN_OK)return s;
     char temporary[PN_JOURNAL_PATH_MAX];int n=snprintf(temporary,sizeof temporary,"%s.tmp",i->path);if(n<0 || (size_t)n>=sizeof temporary)return PN_LIMIT;
@@ -119,12 +128,15 @@ static pn_status_t index_flush(pn_page_index_t *h,bool force){
     if(s==PN_OK && (fflush(f) || fsync(fileno(f))))s=PN_IO;
     if(fclose(f) && s==PN_OK)s=PN_IO;
     if(s==PN_OK)s=checked(i);
-    if(s==PN_OK && rename(temporary,i->path))s=PN_IO;
-    if(s!=PN_OK)(void)remove(temporary);else i->dirty=0;return s;
+    if(s==PN_OK)s=index_read(i,temporary,false);
+    char backup[PN_JOURNAL_PATH_MAX+4];snprintf(backup,sizeof backup,"%s.bak",i->path);pn_cache_commit_t commit={0};
+    if(s==PN_OK){s=pn_cache_commit_begin(&commit,i->media,&i->lease,i->path,temporary,backup);commit.preserve_backup=i->backup_loaded;}
+    if(s==PN_OK){do{s=pn_cache_commit_step(&commit);}while(s==PN_BUSY);}
+    if(s!=PN_OK){pn_cache_commit_abort(&commit);if(pn_media_validate(i->media,&i->lease)==PN_OK)(void)remove(temporary);}else{i->dirty=0;i->backup_loaded=false;}return s;
 }
 pn_status_t pn_page_index_flush(pn_page_index_t *h,bool force){
     pn_profile_span_t span;pn_profile_begin(&span,h && h->impl?((index_t *)h->impl)->pool:NULL,"storage.page-index");
-    pn_status_t status=index_flush(h,force);pn_profile_end(&span,status);return status;
+    pn_status_t status=index_flush(h,force);if(h && h->impl && status!=PN_EMPTY && pn_cache_file_miss(status))((index_t *)h->impl)->blocked=true;pn_profile_end(&span,status);return status;
 }
-bool pn_page_index_pending(const pn_page_index_t *h){return h && h->impl && ((const index_t *)h->impl)->dirty;}
+bool pn_page_index_pending(const pn_page_index_t *h){return h && h->impl && !((const index_t *)h->impl)->blocked && ((const index_t *)h->impl)->dirty;}
 void pn_page_index_close(pn_page_index_t *h){if(h){pn_free(h->impl);h->impl=NULL;}}

@@ -30,25 +30,21 @@ static pn_status_t preview_read(pn_media_t *media,const pn_media_lease_t *lease,
     if(fclose(file) && status==PN_OK)status=PN_IO;
     return status==PN_OK?pn_media_validate(media,lease):status;
 }
+typedef struct {pn_media_t *media;const pn_media_lease_t *lease;const uint8_t *header;pn_frame_t *gray,*alpha;} preview_candidate_t;
+static pn_status_t preview_candidate(void *ctx,const char *path){preview_candidate_t *p=ctx;return preview_read(p->media,p->lease,path,p->header,p->gray,p->alpha);}
 static pn_status_t preview_load(pn_media_t *media,const pn_media_lease_t *lease,const char *dir,const char *source,const pn_wallpaper_transform_t *t,unsigned kind,const pn_book_id_t *id,pn_frame_t *gray,pn_frame_t *alpha){
     pn_status_t valid=pn_media_validate(media,lease);if(valid!=PN_OK)return valid;
     static char path[PN_WALLPAPER_PATH_MAX+96];uint8_t header[PREVIEW_HEADER];
     if(!preview_path(dir,source,kind,path,sizeof path) || !preview_header(header,source,t,kind,gray,id))return PN_EMPTY;
-    pn_status_t status=preview_read(media,lease,path,header,gray,alpha);
-    if(status==PN_EMPTY && strlen(path)+4<sizeof path){strcat(path,".bak");status=preview_read(media,lease,path,header,gray,alpha);}return status;
-}
-static bool preview_directory(const char *directory,char *path,size_t capacity){
-    size_t n=strlen(directory);if(n>=capacity)return false;memcpy(path,directory,n+1);
-    for(size_t i=1;i<=n;i++)if(path[i]=='/' || !path[i]){char c=path[i];path[i]=0;struct stat info;bool ok=(!stat(path,&info) && S_ISDIR(info.st_mode)) || !mkdir(path,0700);path[i]=c;if(!ok)return false;}
-    return true;
+    preview_candidate_t candidate={media,lease,header,gray,alpha};return pn_cache_file_load(media,lease,path,preview_candidate,&candidate);
 }
 static pn_status_t preview_store(pn_media_t *media,const char *dir,const char *source,const pn_wallpaper_transform_t *t,unsigned kind,const pn_book_id_t *id,const pn_frame_t *gray,const pn_frame_t *alpha){
     static char path[PN_WALLPAPER_PATH_MAX+96],tmp[sizeof path+4],bak[sizeof path+4];uint8_t header[PREVIEW_HEADER];
     if(!preview_path(dir,source,kind,path,sizeof path))return PN_EMPTY;
     pn_media_lease_t lease;pn_status_t status=pn_media_acquire(media,PN_MEDIA_CACHE_WRITE,&lease);if(status!=PN_OK)return status;
     if(!preview_header(header,source,t,kind,gray,id)){(void)pn_media_release(media,&lease);return PN_EMPTY;}
-    // 目录检查借用暂存路径，避免在固件输入栈再放1KiB数组。/ Reuse the temporary-path buffer for directory checks, keeping another 1 KiB array off the firmware input stack.
-    if(!preview_directory(dir,tmp,sizeof tmp))status=PN_IO;
+    // 目录与替换沿用共用缓存协议，原图始终只读。/ Use the shared cache directory/publication protocol, keeping originals read-only.
+    status=pn_cache_file_directory(media,&lease,dir);
     snprintf(tmp,sizeof tmp,"%s.tmp",path);snprintf(bak,sizeof bak,"%s.bak",path);
     FILE *file=status==PN_OK?fopen(tmp,"wb"):NULL;if(status==PN_OK && !file)status=PN_IO;
     // 工作块只由串行owner使用，避免4KiB块占输入任务栈。/ The serialized owner alone uses this block, keeping 4 KiB off the input-task stack.
@@ -60,9 +56,10 @@ static pn_status_t preview_store(pn_media_t *media,const char *dir,const char *s
         if(fclose(file) && status==PN_OK)status=PN_IO;
     }
     if(status==PN_OK)status=preview_read(media,&lease,tmp,header,NULL,NULL);
-    if(status==PN_OK){bool moved=false;struct stat info;if(!stat(path,&info)){(void)remove(bak);if(rename(path,bak))status=PN_IO;else moved=true;}
-        if(status==PN_OK && rename(tmp,path)){status=PN_IO;if(moved)(void)rename(bak,path);}if(status==PN_OK && moved)(void)remove(bak);}
-    if(status!=PN_OK)(void)remove(tmp);
+    pn_cache_commit_t commit={0};
+    if(status==PN_OK)status=pn_cache_commit_begin(&commit,media,&lease,path,tmp,bak);
+    if(status==PN_OK){do{status=pn_cache_commit_step(&commit);}while(status==PN_BUSY);}
+    if(status!=PN_OK){pn_cache_commit_abort(&commit);if(pn_media_validate(media,&lease)==PN_OK)(void)remove(tmp);}
     (void)pn_media_release(media,&lease);return status;
 }
 pn_status_t pn_wallpaper_thumbnail_load(pn_media_t *media,const pn_media_lease_t *lease,const char *dir,const char *source,pn_frame_t *thumb){
