@@ -1,0 +1,3534 @@
+{
+  "schema": 1,
+  "date": "2026-10-24",
+  "firmware": {
+    "source_head": "ddfb7dea0d43ccd4a0beefa706a0f9a2b7b6f20e",
+    "bin_bytes": 5797376,
+    "bin_sha256": "ab14fe52bd25a1f451be287ff94530ec536cc7361180f90fe1a1bd3f33f10b06",
+    "elf_sha256": "3171f7fe1503ddc3e5a8b36eb26a555c7f11220a625a0cec17f4a049c9ae91a8",
+    "app_partition": "ota1",
+    "offset": "0x620000"
+  },
+  "app": "1.0.6-diag",
+  "final_reading_acceptance": "FAILED",
+  "scope": "Four existing books/state; same stepped-turn protocol as prior matrix; Sudoku non-editing UI smoke only",
+  "index_wait_setting": "OFF, confirmed after reading tests; not changed",
+  "settings": {
+    "local_path": "build-dev/hardware/20261024-reading-ddfb7de/settings.png",
+    "sha256": "679cb85dc8b35f90b79e224feb0f1485bc5a58cd02d092d7bd1935dd9d543ea9",
+    "bytes": 27373
+  },
+  "books": [
+    {
+      "id": "shaosong",
+      "title": "绍宋",
+      "format": "EPUB",
+      "metrics": {
+        "id": "shaosong",
+        "open": {
+          "first_display_ms": 821,
+          "last_display_ms": 11941
+        },
+        "paced_next": [
+          879,
+          1408,
+          1415
+        ],
+        "paced_prev": [
+          1766,
+          1019,
+          1421
+        ],
+        "rapid_next": [
+          944,
+          797,
+          889,
+          5109,
+          5820,
+          4144,
+          1003,
+          1061,
+          2883,
+          4145,
+          915,
+          894,
+          836,
+          962,
+          3758
+        ],
+        "recovery": null,
+        "return_steps": 15,
+        "warm_open": {
+          "first_display_ms": 670,
+          "last_display_ms": 670
+        }
+      },
+      "pixel_roundtrip": {
+        "paced-roundtrip": true,
+        "restored": true,
+        "warm": true
+      },
+      "same_start_pixels_as_399cce7": true,
+      "baseline_gray_sha256": "32fde14a28518f9e6305c8702e950be72f89e8c1d272b84ef76d91e1e065d094",
+      "frames": [
+        {
+          "local_path": "build-dev/hardware/20261024-reading-ddfb7de/shaosong/baseline.png",
+          "sha256": "30b3e4f5ef20b9a09a80c5119bba63ceeaf597851dde820af3b98d8fda951b5f",
+          "bytes": 60926
+        },
+        {
+          "local_path": "build-dev/hardware/20261024-reading-ddfb7de/shaosong/paced-roundtrip.png",
+          "sha256": "30b3e4f5ef20b9a09a80c5119bba63ceeaf597851dde820af3b98d8fda951b5f",
+          "bytes": 60926
+        },
+        {
+          "local_path": "build-dev/hardware/20261024-reading-ddfb7de/shaosong/restored.png",
+          "sha256": "a8a196daa51e5df01215e13e60df63dc7132037490e233b27a207f4250140eca",
+          "bytes": 60943
+        },
+        {
+          "local_path": "build-dev/hardware/20261024-reading-ddfb7de/shaosong/warm.png",
+          "sha256": "a8a196daa51e5df01215e13e60df63dc7132037490e233b27a207f4250140eca",
+          "bytes": 60943
+        }
+      ],
+      "requests": [
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/shaosong/exit.json",
+            "sha256": "c588c2bf6b6005ed69f4f69ad13f354f506c3fcf01fd776049c0ba3e1be78e9b",
+            "bytes": 6090
+          },
+          "command": "key middle",
+          "seq": 482920,
+          "reply": "ok queued t=625541",
+          "finish": "done start=625557 end=625683",
+          "start": 625557,
+          "release": 625683,
+          "first_display_ms": 1859,
+          "last_display_ms": 1859,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 626843,
+              "end": 627416,
+              "ms": 573,
+              "status": 0
+            }
+          ],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/shaosong/heap.json",
+            "sha256": "eaaecbb86d15733ef9ae2d1a99bb6ae82560f4391a4aaacd1fa6f5203092eb4b",
+            "bytes": 74
+          },
+          "command": "heap",
+          "seq": 482924,
+          "reply": "ok heap-pending",
+          "finish": null,
+          "start": null,
+          "release": null,
+          "first_display_ms": null,
+          "last_display_ms": null,
+          "displays": null,
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/shaosong/initial-status.json",
+            "sha256": "6900593f8f1f993e4eb81b81204d5b3080f8d1aab5bb5b10d053414833cea53f",
+            "bytes": 170
+          },
+          "command": "status",
+          "seq": 482879,
+          "reply": "status t=532220 view=000f000f body=1 paused=0 events=371 touch_reads=15729 touch_errors=0 gesture=0 dropped=0",
+          "finish": null,
+          "start": null,
+          "release": null,
+          "first_display_ms": null,
+          "last_display_ms": null,
+          "displays": null,
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/shaosong/open.json",
+            "sha256": "a2586bfe23e0e867de2b49d79ced43d87b6234019113d08e6384f2032ea9446b",
+            "bytes": 723058
+          },
+          "command": "tap 560 620",
+          "seq": 482878,
+          "reply": "ok queued t=508080",
+          "finish": "done start=508093 end=508218",
+          "start": 508093,
+          "release": 508218,
+          "first_display_ms": 821,
+          "last_display_ms": 11941,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 508232,
+              "end": 508914,
+              "ms": 682,
+              "status": 0
+            },
+            {
+              "kind": "frame",
+              "start": 509715,
+              "end": 510216,
+              "ms": 501,
+              "status": 0
+            },
+            {
+              "kind": "frame",
+              "start": 519307,
+              "end": 520034,
+              "ms": 727,
+              "status": 0
+            }
+          ],
+          "reader_logs": [
+            "I (521391) pico_nano: Reader action=0 status=0 elapsed=9383 ms"
+          ]
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/shaosong/paced-next-1.json",
+            "sha256": "08e6122308f26c27644b5ccfe1a53fe8b18c977bd14ba4b2deaba7dc25587215",
+            "bytes": 16370
+          },
+          "command": "key right",
+          "seq": 482881,
+          "reply": "ok queued t=537296",
+          "finish": "done start=537302 end=537428",
+          "start": 537302,
+          "release": 537428,
+          "first_display_ms": 879,
+          "last_display_ms": 879,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 537412,
+              "end": 538181,
+              "ms": 769,
+              "status": 0
+            }
+          ],
+          "reader_logs": [
+            "I (539538) pico_nano: Reader action=1 status=0 elapsed=792 ms"
+          ]
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/shaosong/paced-next-2.json",
+            "sha256": "820ce1b809a51ad2b1a828520dbd09096268bac3a197a94cac029db64f522641",
+            "bytes": 17460
+          },
+          "command": "key right",
+          "seq": 482882,
+          "reply": "ok queued t=539775",
+          "finish": "done start=539801 end=539930",
+          "start": 539801,
+          "release": 539930,
+          "first_display_ms": 1408,
+          "last_display_ms": 1408,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 540525,
+              "end": 541209,
+              "ms": 684,
+              "status": 0
+            }
+          ],
+          "reader_logs": [
+            "I (542567) pico_nano: Reader action=1 status=0 elapsed=709 ms"
+          ]
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/shaosong/paced-next-3.json",
+            "sha256": "845367aa96d505269836e86977589a93d93c2be84f2c2acaeded7b0742dddd7e",
+            "bytes": 17093
+          },
+          "command": "key right",
+          "seq": 482883,
+          "reply": "ok queued t=542836",
+          "finish": "done start=542848 end=542977",
+          "start": 542848,
+          "release": 542977,
+          "first_display_ms": 1415,
+          "last_display_ms": 1415,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 543581,
+              "end": 544263,
+              "ms": 682,
+              "status": 0
+            }
+          ],
+          "reader_logs": [
+            "I (545620) pico_nano: Reader action=1 status=0 elapsed=707 ms"
+          ]
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/shaosong/paced-prev-1.json",
+            "sha256": "9432715960839afa64a8cafc0ec4059e72b1590652e9547880e59181d01848bd",
+            "bytes": 61430
+          },
+          "command": "key left",
+          "seq": 482884,
+          "reply": "ok queued t=545910",
+          "finish": "done start=545931 end=546057",
+          "start": 545931,
+          "release": 546057,
+          "first_display_ms": 1766,
+          "last_display_ms": 1766,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 546918,
+              "end": 547697,
+              "ms": 779,
+              "status": 0
+            }
+          ],
+          "reader_logs": [
+            "I (549054) pico_nano: Reader action=2 status=0 elapsed=1140 ms"
+          ]
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/shaosong/paced-prev-2.json",
+            "sha256": "09da0651d6e2aec9fc6ef8a0fb926e50a4998487cec801c4c86c86c540633c16",
+            "bytes": 88588
+          },
+          "command": "key left",
+          "seq": 482885,
+          "reply": "ok queued t=549226",
+          "finish": "done start=549236 end=549361",
+          "start": 549236,
+          "release": 549361,
+          "first_display_ms": 1019,
+          "last_display_ms": 1019,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 549551,
+              "end": 550255,
+              "ms": 704,
+              "status": 0
+            }
+          ],
+          "reader_logs": [
+            "I (551642) pico_nano: Reader action=2 status=0 elapsed=964 ms"
+          ]
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/shaosong/paced-prev-3.json",
+            "sha256": "2ccb99b7b21481dc3312b5df7a88af0402fa7b85cf5f55c2cc5614806ed62814",
+            "bytes": 76591
+          },
+          "command": "key left",
+          "seq": 482886,
+          "reply": "ok queued t=551962",
+          "finish": "done start=551986 end=552112",
+          "start": 551986,
+          "release": 552112,
+          "first_display_ms": 1421,
+          "last_display_ms": 1421,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 552698,
+              "end": 553407,
+              "ms": 709,
+              "status": 0
+            }
+          ],
+          "reader_logs": [
+            "I (554764) pico_nano: Reader action=2 status=0 elapsed=1216 ms"
+          ]
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/shaosong/rapid-next-01.json",
+            "sha256": "2e26013a62c2d9c30be99ec12d15a24db8f7a877c4bd3f937943ecf1f89de25b",
+            "bytes": 2829
+          },
+          "command": "key right",
+          "seq": 482888,
+          "reply": "ok queued t=558051",
+          "finish": "done start=558029 end=558164",
+          "start": 558029,
+          "release": 558164,
+          "first_display_ms": 944,
+          "last_display_ms": 944,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 558285,
+              "end": 558973,
+              "ms": 688,
+              "status": 0
+            }
+          ],
+          "reader_logs": [
+            "I (560330) pico_nano: Reader action=1 status=0 elapsed=712 ms"
+          ]
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/shaosong/rapid-next-02.json",
+            "sha256": "d199072bc8b2f3c82910d7fd8fc0fff0822b7077bf114feb473104872ba72053",
+            "bytes": 4574
+          },
+          "command": "key right",
+          "seq": 482889,
+          "reply": "ok queued t=559056",
+          "finish": "done start=559086 end=559212",
+          "start": 559086,
+          "release": 559212,
+          "first_display_ms": 797,
+          "last_display_ms": 797,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 559200,
+              "end": 559883,
+              "ms": 683,
+              "status": 0
+            }
+          ],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/shaosong/rapid-next-03.json",
+            "sha256": "9c4c26c04784e09007a571fecb3d0b9e0c393dd4038f0b2578fce2cde2eed401",
+            "bytes": 4573
+          },
+          "command": "key right",
+          "seq": 482890,
+          "reply": "ok queued t=559985",
+          "finish": "done start=560000 end=560126",
+          "start": 560000,
+          "release": 560126,
+          "first_display_ms": 889,
+          "last_display_ms": 889,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 560207,
+              "end": 560889,
+              "ms": 682,
+              "status": 0
+            }
+          ],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/shaosong/rapid-next-04.json",
+            "sha256": "8c2554acad778b4d25ddbe0c685114e1e1aff0a3832cad3d11d3164d1ed921e9",
+            "bytes": 8124
+          },
+          "command": "key right",
+          "seq": 482891,
+          "reply": "ok queued t=561000",
+          "finish": "done start=560982 end=561110",
+          "start": 560982,
+          "release": 561110,
+          "first_display_ms": 5109,
+          "last_display_ms": 5109,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 565410,
+              "end": 566091,
+              "ms": 681,
+              "status": 0
+            }
+          ],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/shaosong/rapid-next-05.json",
+            "sha256": "28102dccffe3db06eeb9c6eb8e31902ff9dfc618001445d1a69de0ebe3a7a834",
+            "bytes": 9109
+          },
+          "command": "key right",
+          "seq": 482892,
+          "reply": "ok queued t=566161",
+          "finish": "done start=566182 end=566311",
+          "start": 566182,
+          "release": 566311,
+          "first_display_ms": 5820,
+          "last_display_ms": 5820,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 571315,
+              "end": 572002,
+              "ms": 687,
+              "status": 0
+            }
+          ],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/shaosong/rapid-next-06.json",
+            "sha256": "4da258eb0ed23c6c439ae8d6845923a6365dd6b1b912bc7d86bf8040e37e1318",
+            "bytes": 6763
+          },
+          "command": "key right",
+          "seq": 482893,
+          "reply": "ok queued t=572088",
+          "finish": "done start=572114 end=572240",
+          "start": 572114,
+          "release": 572240,
+          "first_display_ms": 4144,
+          "last_display_ms": 4144,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 575570,
+              "end": 576258,
+              "ms": 688,
+              "status": 0
+            }
+          ],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/shaosong/rapid-next-07.json",
+            "sha256": "2cd2746b9cf04406903efc5693e21a0fbdf4ae0a83d8b378e3d4ef49ada3c928",
+            "bytes": 4376
+          },
+          "command": "key right",
+          "seq": 482894,
+          "reply": "ok queued t=576356",
+          "finish": "done start=576370 end=576496",
+          "start": 576370,
+          "release": 576496,
+          "first_display_ms": 1003,
+          "last_display_ms": 1003,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 576689,
+              "end": 577373,
+              "ms": 684,
+              "status": 0
+            }
+          ],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/shaosong/rapid-next-08.json",
+            "sha256": "2b8e6eec8a39d87024c46435addededfefed59eaf76e50967149b37131d40bd8",
+            "bytes": 10620
+          },
+          "command": "key right",
+          "seq": 482895,
+          "reply": "ok queued t=577461",
+          "finish": "done start=577470 end=577596",
+          "start": 577470,
+          "release": 577596,
+          "first_display_ms": 1061,
+          "last_display_ms": 1061,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 577765,
+              "end": 578531,
+              "ms": 766,
+              "status": 0
+            }
+          ],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/shaosong/rapid-next-09.json",
+            "sha256": "536ffaa1958a2128f8cd8786997cd533185806231b7c6442991431f9f4132e7a",
+            "bytes": 2043
+          },
+          "command": "key right",
+          "seq": 482896,
+          "reply": "ok queued t=578726",
+          "finish": "done start=578747 end=578872",
+          "start": 578747,
+          "release": 578872,
+          "first_display_ms": 2883,
+          "last_display_ms": 2883,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 580849,
+              "end": 581630,
+              "ms": 781,
+              "status": 0
+            }
+          ],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/shaosong/rapid-next-10.json",
+            "sha256": "829d5cad1b4faf1c996d4b1060627802430868bb8e89de4c839a7bfdd1d4a4e0",
+            "bytes": 7776
+          },
+          "command": "key right",
+          "seq": 482897,
+          "reply": "ok queued t=581773",
+          "finish": "done start=581779 end=581905",
+          "start": 581779,
+          "release": 581905,
+          "first_display_ms": 4145,
+          "last_display_ms": 4145,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 585150,
+              "end": 585924,
+              "ms": 774,
+              "status": 0
+            }
+          ],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/shaosong/rapid-next-11.json",
+            "sha256": "d27ec8121676bc61a48d36cfe05befbdcb01a486befe6e7a82388c155bf67052",
+            "bytes": 3128
+          },
+          "command": "key right",
+          "seq": 482898,
+          "reply": "ok queued t=585971",
+          "finish": "done start=585978 end=586104",
+          "start": 585978,
+          "release": 586104,
+          "first_display_ms": 915,
+          "last_display_ms": 915,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 586118,
+              "end": 586893,
+              "ms": 775,
+              "status": 0
+            }
+          ],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/shaosong/rapid-next-12.json",
+            "sha256": "339d770b818ddd67b808492be60deec6ba0a89b49531d5b0649266baac99e11b",
+            "bytes": 5919
+          },
+          "command": "key right",
+          "seq": 482899,
+          "reply": "ok queued t=586984",
+          "finish": "done start=587013 end=587139",
+          "start": 587013,
+          "release": 587139,
+          "first_display_ms": 894,
+          "last_display_ms": 894,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 587126,
+              "end": 587907,
+              "ms": 781,
+              "status": 0
+            }
+          ],
+          "reader_logs": [
+            "I (589266) pico_nano: Reader action=1 status=0 elapsed=808 ms"
+          ]
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/shaosong/rapid-next-13.json",
+            "sha256": "0d21935d0253d00093897ff84fcd5e76214e0021c5d736055fe2ff9a19c4adad",
+            "bytes": 5117
+          },
+          "command": "key right",
+          "seq": 482900,
+          "reply": "ok queued t=587952",
+          "finish": "done start=587971 end=588097",
+          "start": 587971,
+          "release": 588097,
+          "first_display_ms": 836,
+          "last_display_ms": 836,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 588089,
+              "end": 588807,
+              "ms": 718,
+              "status": 0
+            }
+          ],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/shaosong/rapid-next-14.json",
+            "sha256": "a2eb1508c5db967d033ecf8b4ceaf310b5651074a1e2d2d00d0c19bd425cfa6d",
+            "bytes": 4899
+          },
+          "command": "key right",
+          "seq": 482901,
+          "reply": "ok queued t=588905",
+          "finish": "done start=588912 end=589038",
+          "start": 588912,
+          "release": 589038,
+          "first_display_ms": 962,
+          "last_display_ms": 962,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 589189,
+              "end": 589874,
+              "ms": 685,
+              "status": 0
+            }
+          ],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/shaosong/rapid-next-15.json",
+            "sha256": "1e83ef0ed1011136f751c81a888d88121ccb41a2a4a74ff99c60bfe43d69c74a",
+            "bytes": 6571
+          },
+          "command": "key right",
+          "seq": 482902,
+          "reply": "ok queued t=589982",
+          "finish": "done start=589991 end=590117",
+          "start": 589991,
+          "release": 590117,
+          "first_display_ms": 3758,
+          "last_display_ms": 3758,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 593065,
+              "end": 593749,
+              "ms": 684,
+              "status": 0
+            }
+          ],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/shaosong/restore-prev-01.json",
+            "sha256": "f7f33cfdb2346ad67d5d256e80869f495ae6f83e9416b727c3efd5f811b2b03a",
+            "bytes": 8244
+          },
+          "command": "key left",
+          "seq": 482903,
+          "reply": "ok queued t=593851",
+          "finish": "done start=593871 end=593997",
+          "start": 593871,
+          "release": 593997,
+          "first_display_ms": 1066,
+          "last_display_ms": 1066,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 594162,
+              "end": 594937,
+              "ms": 775,
+              "status": 0
+            }
+          ],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/shaosong/restore-prev-02.json",
+            "sha256": "78694494d2a62f70ec9d9ded222a193ea863cb8056012c0badd051f478809372",
+            "bytes": 6976
+          },
+          "command": "key left",
+          "seq": 482904,
+          "reply": "ok queued t=595134",
+          "finish": "done start=595160 end=595286",
+          "start": 595160,
+          "release": 595286,
+          "first_display_ms": 1550,
+          "last_display_ms": 1550,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 595949,
+              "end": 596710,
+              "ms": 761,
+              "status": 0
+            }
+          ],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/shaosong/restore-prev-03.json",
+            "sha256": "e4f779037d3efd711f5f26115628387266fed36eb205b52dfab9595ffac97275",
+            "bytes": 7508
+          },
+          "command": "key left",
+          "seq": 482905,
+          "reply": "ok queued t=596787",
+          "finish": "done start=596815 end=596941",
+          "start": 596815,
+          "release": 596941,
+          "first_display_ms": 1592,
+          "last_display_ms": 1592,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 597695,
+              "end": 598407,
+              "ms": 712,
+              "status": 0
+            }
+          ],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/shaosong/restore-prev-04.json",
+            "sha256": "901fa60f97185e1bc0e02021da68fdc30f5fe3159b57ed45e9685dbd1e904dcd",
+            "bytes": 8057
+          },
+          "command": "key left",
+          "seq": 482906,
+          "reply": "ok queued t=598572",
+          "finish": "done start=598586 end=598711",
+          "start": 598586,
+          "release": 598711,
+          "first_display_ms": 1505,
+          "last_display_ms": 1505,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 599383,
+              "end": 600091,
+              "ms": 708,
+              "status": 0
+            }
+          ],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/shaosong/restore-prev-05.json",
+            "sha256": "6649d55a984c8bfc855785542c72ecf17094ef5eacc1a407e8197d233bff407c",
+            "bytes": 7220
+          },
+          "command": "key left",
+          "seq": 482907,
+          "reply": "ok queued t=600263",
+          "finish": "done start=600271 end=600397",
+          "start": 600271,
+          "release": 600397,
+          "first_display_ms": 1555,
+          "last_display_ms": 1555,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 601127,
+              "end": 601826,
+              "ms": 699,
+              "status": 0
+            }
+          ],
+          "reader_logs": [
+            "I (603182) pico_nano: Reader action=2 status=0 elapsed=774 ms"
+          ]
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/shaosong/restore-prev-06.json",
+            "sha256": "f4d049a29a7beab15c8d8bf7563988db777a4ebedf0f3a50b136cf1e7b7de33b",
+            "bytes": 2803
+          },
+          "command": "key left",
+          "seq": 482908,
+          "reply": "ok queued t=601991",
+          "finish": "done start=602000 end=602129",
+          "start": 602000,
+          "release": 602129,
+          "first_display_ms": 3556,
+          "last_display_ms": 3556,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 604781,
+              "end": 605556,
+              "ms": 775,
+              "status": 0
+            }
+          ],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/shaosong/restore-prev-07.json",
+            "sha256": "33a39cbdcd1d009c93d5331d807382a9fd0e4acd9e36ec46c3c196225f373f9b",
+            "bytes": 4593
+          },
+          "command": "key left",
+          "seq": 482909,
+          "reply": "ok queued t=605643",
+          "finish": "done start=605665 end=605790",
+          "start": 605665,
+          "release": 605790,
+          "first_display_ms": 1329,
+          "last_display_ms": 1329,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 606347,
+              "end": 606994,
+              "ms": 647,
+              "status": 0
+            }
+          ],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/shaosong/restore-prev-08.json",
+            "sha256": "7501974965d69719c16b6b569a5848fb412ce565b8d468e212f8766907921bf6",
+            "bytes": 6256
+          },
+          "command": "key left",
+          "seq": 482910,
+          "reply": "ok queued t=607048",
+          "finish": "done start=607054 end=607179",
+          "start": 607054,
+          "release": 607179,
+          "first_display_ms": 1197,
+          "last_display_ms": 1197,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 607554,
+              "end": 608251,
+              "ms": 697,
+              "status": 0
+            }
+          ],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/shaosong/restore-prev-09.json",
+            "sha256": "bacc2947485f35435a2c8855f2bd4dcffe02ae41becf9db95ea99ebe4bbf1040",
+            "bytes": 7280
+          },
+          "command": "key left",
+          "seq": 482911,
+          "reply": "ok queued t=608430",
+          "finish": "done start=608429 end=608555",
+          "start": 608429,
+          "release": 608555,
+          "first_display_ms": 1902,
+          "last_display_ms": 1902,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 609631,
+              "end": 610331,
+              "ms": 700,
+              "status": 0
+            }
+          ],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/shaosong/restore-prev-10.json",
+            "sha256": "2242316f66c605d4958ae4cab881fc0cb055d697c68c26d45f5bea79409846d9",
+            "bytes": 7344
+          },
+          "command": "key left",
+          "seq": 482912,
+          "reply": "ok queued t=610512",
+          "finish": "done start=610523 end=610649",
+          "start": 610523,
+          "release": 610649,
+          "first_display_ms": 1927,
+          "last_display_ms": 1927,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 611746,
+              "end": 612450,
+              "ms": 704,
+              "status": 0
+            }
+          ],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/shaosong/restore-prev-11.json",
+            "sha256": "42fe9fc26c73bb0f8bd15a927f153fccac8344667b91d10ace5ee2720dfe2ca3",
+            "bytes": 7538
+          },
+          "command": "key left",
+          "seq": 482913,
+          "reply": "ok queued t=612630",
+          "finish": "done start=612644 end=612770",
+          "start": 612644,
+          "release": 612770,
+          "first_display_ms": 1875,
+          "last_display_ms": 1875,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 613762,
+              "end": 614519,
+              "ms": 757,
+              "status": 0
+            }
+          ],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/shaosong/restore-prev-12.json",
+            "sha256": "fa2080d814fcd3ab48b3cca3714592eaa43f5add19a2589f1f4820c6b943e7eb",
+            "bytes": 6813
+          },
+          "command": "key left",
+          "seq": 482914,
+          "reply": "ok queued t=614607",
+          "finish": "done start=614612 end=614738",
+          "start": 614612,
+          "release": 614738,
+          "first_display_ms": 1928,
+          "last_display_ms": 1928,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 615781,
+              "end": 616540,
+              "ms": 759,
+              "status": 0
+            }
+          ],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/shaosong/restore-prev-13.json",
+            "sha256": "3fada507152a5112abf420e48af33069bd7019ac2236d19a06d70e2b590f5057",
+            "bytes": 6818
+          },
+          "command": "key left",
+          "seq": 482915,
+          "reply": "ok queued t=616754",
+          "finish": "done start=616775 end=616901",
+          "start": 616775,
+          "release": 616901,
+          "first_display_ms": 1795,
+          "last_display_ms": 1795,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 617811,
+              "end": 618570,
+              "ms": 759,
+              "status": 0
+            }
+          ],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/shaosong/restore-prev-14.json",
+            "sha256": "6c72a0a8a924df8f0978c8c283982db37d9ba2561f8b65564d8256ecfce08634",
+            "bytes": 6811
+          },
+          "command": "key left",
+          "seq": 482916,
+          "reply": "ok queued t=618673",
+          "finish": "done start=618684 end=618812",
+          "start": 618684,
+          "release": 618812,
+          "first_display_ms": 1904,
+          "last_display_ms": 1904,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 619824,
+              "end": 620588,
+              "ms": 764,
+              "status": 0
+            }
+          ],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/shaosong/restore-prev-15.json",
+            "sha256": "da16b4ddde12b1610ef682c56915f042a5847137abd38353b13e55682678b882",
+            "bytes": 7575
+          },
+          "command": "key left",
+          "seq": 482917,
+          "reply": "ok queued t=620646",
+          "finish": "done start=620729 end=620857",
+          "start": 620729,
+          "release": 620857,
+          "first_display_ms": 1249,
+          "last_display_ms": 1249,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 621214,
+              "end": 621978,
+              "ms": 764,
+              "status": 0
+            }
+          ],
+          "reader_logs": [
+            "I (622116) pico_nano: Reader action=2 status=0 elapsed=1265 ms"
+          ]
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/shaosong/restored-status.json",
+            "sha256": "ede51f9d0e8ed6bd279430b1772e60ac0207d1ece0ab90bb02504a9907d1c7de",
+            "bytes": 170
+          },
+          "command": "status",
+          "seq": 482919,
+          "reply": "status t=625401 view=000f000f body=1 paused=0 events=479 touch_reads=18457 touch_errors=0 gesture=0 dropped=0",
+          "finish": null,
+          "start": null,
+          "release": null,
+          "first_display_ms": null,
+          "last_display_ms": null,
+          "displays": null,
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/shaosong/warm-open.json",
+            "sha256": "6acc583945f7ae28317344fa0cb606747b6dad428cf33d6ac61c30c1225afb0c",
+            "bytes": 1328
+          },
+          "command": "tap 350 520",
+          "seq": 482921,
+          "reply": "ok queued t=629103",
+          "finish": "done start=629106 end=629231",
+          "start": 629106,
+          "release": 629231,
+          "first_display_ms": 670,
+          "last_display_ms": 670,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 629203,
+              "end": 629776,
+              "ms": 573,
+              "status": 0
+            }
+          ],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/shaosong/warm-status.json",
+            "sha256": "483845c7cbd785b4a14f9b6d46fc5cc3cbf74a8c7345c1c7228a80c319d0b62d",
+            "bytes": 170
+          },
+          "command": "status",
+          "seq": 482922,
+          "reply": "status t=641854 view=000f000f body=1 paused=0 events=489 touch_reads=18956 touch_errors=0 gesture=0 dropped=0",
+          "finish": null,
+          "start": null,
+          "release": null,
+          "first_display_ms": null,
+          "last_display_ms": null,
+          "displays": null,
+          "reader_logs": []
+        }
+      ]
+    },
+    {
+      "id": "sapiens",
+      "title": "人类简史：从动物到上帝",
+      "format": "EPUB",
+      "metrics": {
+        "id": "sapiens",
+        "open": {
+          "first_display_ms": 954,
+          "last_display_ms": 3595
+        },
+        "paced_next": [
+          886,
+          800,
+          796
+        ],
+        "paced_prev": [
+          870,
+          972,
+          1036
+        ],
+        "rapid_next": [
+          834,
+          null
+        ],
+        "recovery": 934,
+        "return_steps": 0,
+        "failed_request": 2,
+        "late_displays_in_tail": [],
+        "warm_open": {
+          "first_display_ms": 671,
+          "last_display_ms": 671
+        }
+      },
+      "pixel_roundtrip": {
+        "paced-roundtrip": true,
+        "restored": true,
+        "warm": true
+      },
+      "same_start_pixels_as_399cce7": true,
+      "baseline_gray_sha256": "c835025c53ef3dd71482abe4e284ffdc9ed383adc6fa4a373fd8d14611431ff0",
+      "frames": [
+        {
+          "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sapiens/baseline.png",
+          "sha256": "ca6e140416aa16affe59fa8abd431f1b65c5ad7cc4d9257efc0e8a5d1c5e0d5d",
+          "bytes": 74315
+        },
+        {
+          "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sapiens/paced-roundtrip.png",
+          "sha256": "10297297fe9dbe9ddcaa6445b6322ce3a1859282aa0a4953c5fb7eb8a30e76a5",
+          "bytes": 74317
+        },
+        {
+          "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sapiens/restored.png",
+          "sha256": "10297297fe9dbe9ddcaa6445b6322ce3a1859282aa0a4953c5fb7eb8a30e76a5",
+          "bytes": 74317
+        },
+        {
+          "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sapiens/warm.png",
+          "sha256": "81605f5a9b648d1ee98020c0e63d4c6e656523836697f5443d175acb7b639ea8",
+          "bytes": 74323
+        }
+      ],
+      "requests": [
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sapiens/exit.json",
+            "sha256": "19b0fb3bd3e6597ac7f6497cf90c749802b549420ec992619ff3ce7f5c9d128b",
+            "bytes": 7704
+          },
+          "command": "key middle",
+          "seq": 482817,
+          "reply": "ok queued t=261286",
+          "finish": "done start=261282 end=261408",
+          "start": 261282,
+          "release": 261408,
+          "first_display_ms": 1263,
+          "last_display_ms": 1263,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 261974,
+              "end": 262545,
+              "ms": 571,
+              "status": 0
+            }
+          ],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sapiens/heap.json",
+            "sha256": "9ec2ab468c2d8b6d5c9815b25917fbbe43e4c5626af06436bc2a805a34a548b3",
+            "bytes": 74
+          },
+          "command": "heap",
+          "seq": 482821,
+          "reply": "ok heap-pending",
+          "finish": null,
+          "start": null,
+          "release": null,
+          "first_display_ms": null,
+          "last_display_ms": null,
+          "displays": null,
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sapiens/initial-status.json",
+            "sha256": "45d3df96c2b7e3a8699d49781acee287ffff0175178111cda63eb0cdc372bd9d",
+            "bytes": 169
+          },
+          "command": "status",
+          "seq": 482801,
+          "reply": "status t=199859 view=0009000f body=1 paused=0 events=107 touch_reads=5786 touch_errors=0 gesture=0 dropped=0",
+          "finish": null,
+          "start": null,
+          "release": null,
+          "first_display_ms": null,
+          "last_display_ms": null,
+          "displays": null,
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sapiens/open.json",
+            "sha256": "38169868d3d871e69c3fc95d1208dd69b67f6e9dbad23a382e2837caa6e19464",
+            "bytes": 356468
+          },
+          "command": "tap 110 620",
+          "seq": 482800,
+          "reply": "ok queued t=184053",
+          "finish": "done start=184032 end=184160",
+          "start": 184032,
+          "release": 184160,
+          "first_display_ms": 954,
+          "last_display_ms": 3595,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 184288,
+              "end": 184986,
+              "ms": 698,
+              "status": 0
+            },
+            {
+              "kind": "frame",
+              "start": 185744,
+              "end": 186266,
+              "ms": 522,
+              "status": 0
+            },
+            {
+              "kind": "frame",
+              "start": 187058,
+              "end": 187627,
+              "ms": 569,
+              "status": 0
+            }
+          ],
+          "reader_logs": [
+            "I (188983) pico_nano: Reader action=0 status=0 elapsed=1352 ms"
+          ]
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sapiens/paced-next-1.json",
+            "sha256": "d67004c51dd4c5d3ecbf47d96fff680ad0198acb26215c3c39fbc30f46707e61",
+            "bytes": 24026
+          },
+          "command": "key right",
+          "seq": 482803,
+          "reply": "ok queued t=204711",
+          "finish": "done start=204721 end=204847",
+          "start": 204721,
+          "release": 204847,
+          "first_display_ms": 886,
+          "last_display_ms": 886,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 204833,
+              "end": 205607,
+              "ms": 774,
+              "status": 0
+            }
+          ],
+          "reader_logs": [
+            "I (206964) pico_nano: Reader action=1 status=0 elapsed=799 ms"
+          ]
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sapiens/paced-next-2.json",
+            "sha256": "498e87a04780c8e689dc3f332036f29564dd41f85b9cfe3ec3cd819ccc85b936",
+            "bytes": 48025
+          },
+          "command": "key right",
+          "seq": 482804,
+          "reply": "ok queued t=207192",
+          "finish": "done start=207210 end=207335",
+          "start": 207210,
+          "release": 207335,
+          "first_display_ms": 800,
+          "last_display_ms": 800,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 207326,
+              "end": 208010,
+              "ms": 684,
+              "status": 0
+            }
+          ],
+          "reader_logs": [
+            "I (209367) pico_nano: Reader action=1 status=0 elapsed=708 ms"
+          ]
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sapiens/paced-next-3.json",
+            "sha256": "d23705b79c8aa3e8c8a6a08a03d8c85a3844e64c344171406a508d6d04dafdfb",
+            "bytes": 39151
+          },
+          "command": "key right",
+          "seq": 482805,
+          "reply": "ok queued t=209634",
+          "finish": "done start=209646 end=209771",
+          "start": 209646,
+          "release": 209771,
+          "first_display_ms": 796,
+          "last_display_ms": 796,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 209758,
+              "end": 210442,
+              "ms": 684,
+              "status": 0
+            }
+          ],
+          "reader_logs": [
+            "I (211798) pico_nano: Reader action=1 status=0 elapsed=707 ms"
+          ]
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sapiens/paced-prev-1.json",
+            "sha256": "3ae980ba618dcd9d3550b13937a58d6b5ad2a53394b10f07cdfa6fe813cae8ae",
+            "bytes": 96318
+          },
+          "command": "key left",
+          "seq": 482806,
+          "reply": "ok queued t=212066",
+          "finish": "done start=212093 end=212241",
+          "start": 212093,
+          "release": 212241,
+          "first_display_ms": 870,
+          "last_display_ms": 870,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 212260,
+              "end": 212963,
+              "ms": 703,
+              "status": 0
+            }
+          ],
+          "reader_logs": [
+            "I (214320) pico_nano: Reader action=2 status=0 elapsed=757 ms"
+          ]
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sapiens/paced-prev-2.json",
+            "sha256": "398bf890f1181b3001978ab81818a2017d67e149dedf834bb410aeb21c356a71",
+            "bytes": 77955
+          },
+          "command": "key left",
+          "seq": 482807,
+          "reply": "ok queued t=214667",
+          "finish": "done start=214676 end=214802",
+          "start": 214676,
+          "release": 214802,
+          "first_display_ms": 972,
+          "last_display_ms": 972,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 214944,
+              "end": 215648,
+              "ms": 704,
+              "status": 0
+            }
+          ],
+          "reader_logs": [
+            "I (217057) pico_nano: Reader action=2 status=0 elapsed=842 ms"
+          ]
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sapiens/paced-prev-3.json",
+            "sha256": "977d980208486232bfd51ba1838d29f3e3c559d065783a82b9d5af36c503b242",
+            "bytes": 85680
+          },
+          "command": "key left",
+          "seq": 482808,
+          "reply": "ok queued t=217350",
+          "finish": "done start=217352 end=217479",
+          "start": 217352,
+          "release": 217479,
+          "first_display_ms": 1036,
+          "last_display_ms": 1036,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 217681,
+              "end": 218388,
+              "ms": 707,
+              "status": 0
+            }
+          ],
+          "reader_logs": [
+            "I (219745) pico_nano: Reader action=2 status=0 elapsed=787 ms"
+          ]
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sapiens/rapid-next-01.json",
+            "sha256": "99b5e0fe65fa66675556c3c6a3e425fcc5464a3e389e8fce9bcdeb55b0cacbf4",
+            "bytes": 3646
+          },
+          "command": "key right",
+          "seq": 482810,
+          "reply": "ok queued t=223081",
+          "finish": "done start=223093 end=223219",
+          "start": 223093,
+          "release": 223219,
+          "first_display_ms": 834,
+          "last_display_ms": 834,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 223244,
+              "end": 223927,
+              "ms": 683,
+              "status": 0
+            }
+          ],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sapiens/rapid-next-02.json",
+            "sha256": "c4a410efa2181b773c39f288b76247b79ce010788bce2fd36453d4449b237ec2",
+            "bytes": 20317
+          },
+          "command": "key right",
+          "seq": 482811,
+          "reply": "ok queued t=224017",
+          "finish": "done start=224044 end=224169",
+          "start": 224044,
+          "release": 224169,
+          "first_display_ms": null,
+          "last_display_ms": null,
+          "displays": [],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sapiens/recovery-prev.json",
+            "sha256": "f2396aeb93cbea75277068eee6500ae13a744072d1d562d4214c9d5d9a5baf56",
+            "bytes": 73630
+          },
+          "command": "key left",
+          "seq": 482814,
+          "reply": "ok queued t=255772",
+          "finish": "done start=255766 end=255894",
+          "start": 255766,
+          "release": 255894,
+          "first_display_ms": 934,
+          "last_display_ms": 934,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 255911,
+              "end": 256700,
+              "ms": 789,
+              "status": 0
+            }
+          ],
+          "reader_logs": [
+            "I (257211) pico_nano: Reader action=1 status=8 elapsed=31725 ms",
+            "I (258057) pico_nano: Reader action=2 status=0 elapsed=845 ms"
+          ]
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sapiens/restored-status.json",
+            "sha256": "e704dcb3d57f7f51bd61560275a7e9e7747112c06fce2ca69e85b7d4c6aeef2e",
+            "bytes": 169
+          },
+          "command": "status",
+          "seq": 482816,
+          "reply": "status t=261145 view=0009000f body=1 paused=0 events=134 touch_reads=7608 touch_errors=0 gesture=0 dropped=0",
+          "finish": null,
+          "start": null,
+          "release": null,
+          "first_display_ms": null,
+          "last_display_ms": null,
+          "displays": null,
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sapiens/stall-status.json",
+            "sha256": "3cd842f1cdb568c83fafb1bc73dea2f299b2e90a4e78dee0885b71e8f76e98f2",
+            "bytes": 169
+          },
+          "command": "status",
+          "seq": 482813,
+          "reply": "status t=235620 view=0009000f body=1 paused=0 events=131 touch_reads=6854 touch_errors=0 gesture=0 dropped=0",
+          "finish": null,
+          "start": null,
+          "release": null,
+          "first_display_ms": null,
+          "last_display_ms": null,
+          "displays": null,
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sapiens/warm-open.json",
+            "sha256": "4635053b7ad433fc919c48960bfd844c5ee5c82dc4d15b680542f157f81fbc8c",
+            "bytes": 1328
+          },
+          "command": "tap 350 520",
+          "seq": 482818,
+          "reply": "ok queued t=264239",
+          "finish": "done start=264254 end=264379",
+          "start": 264254,
+          "release": 264379,
+          "first_display_ms": 671,
+          "last_display_ms": 671,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 264353,
+              "end": 264925,
+              "ms": 572,
+              "status": 0
+            }
+          ],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sapiens/warm-status.json",
+            "sha256": "1501db9106801d4971499756b172096af57e64e4a8921d02fdcfa551ca38a769",
+            "bytes": 169
+          },
+          "command": "status",
+          "seq": 482819,
+          "reply": "status t=277191 view=0009000f body=1 paused=0 events=144 touch_reads=8104 touch_errors=0 gesture=0 dropped=0",
+          "finish": null,
+          "start": null,
+          "release": null,
+          "first_display_ms": null,
+          "last_display_ms": null,
+          "displays": null,
+          "reader_logs": []
+        }
+      ],
+      "stall": {
+        "waiting_excerpt": [
+          "I (246003) pico_nano: Reader NEXT waiting status=2 elapsed=20517 ms used=2957386 limit=6217360",
+          "I (251028) pico_nano: Reader NEXT waiting status=2 elapsed=25542 ms used=2957386 limit=6217360",
+          "I (256051) pico_nano: Reader NEXT waiting status=2 elapsed=30564 ms used=2957386 limit=6217360"
+        ],
+        "max_wait_ms": 30564,
+        "late_frames": [],
+        "tail": {
+          "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sapiens/stall-tail.json",
+          "sha256": "e9afbb44ad46678cb2c4acd27e1ce1b948fc0789959bedd1545e9bb42edbd23a",
+          "bytes": 263692
+        }
+      }
+    },
+    {
+      "id": "byakuyako",
+      "title": "白夜行",
+      "format": "EPUB",
+      "metrics": {
+        "id": "byakuyako",
+        "open": {
+          "first_display_ms": 1013,
+          "last_display_ms": 3042
+        },
+        "paced_next": [
+          1073,
+          799,
+          797
+        ],
+        "paced_prev": [
+          1030,
+          1155,
+          1025
+        ],
+        "rapid_next": [
+          795,
+          null
+        ],
+        "recovery": 1009,
+        "return_steps": 0,
+        "failed_request": 2,
+        "late_displays_in_tail": [],
+        "warm_open": {
+          "first_display_ms": 739,
+          "last_display_ms": 739
+        }
+      },
+      "pixel_roundtrip": {
+        "paced-roundtrip": true,
+        "restored": true,
+        "warm": true
+      },
+      "same_start_pixels_as_399cce7": true,
+      "baseline_gray_sha256": "fad74519ad305133b968f28a559eeb12baa2b0d70fff8c30a86dd4ff3f3959fe",
+      "frames": [
+        {
+          "local_path": "build-dev/hardware/20261024-reading-ddfb7de/byakuyako/baseline.png",
+          "sha256": "2ddb4c6449496d190086ef2cec07a1b678920367671883d447e2954caa9c1888",
+          "bytes": 47703
+        },
+        {
+          "local_path": "build-dev/hardware/20261024-reading-ddfb7de/byakuyako/paced-roundtrip.png",
+          "sha256": "341c4f644328fcc0d6606baeaa6b6da5856fa51017c4a72e4a762e4a7fffa719",
+          "bytes": 47686
+        },
+        {
+          "local_path": "build-dev/hardware/20261024-reading-ddfb7de/byakuyako/restored.png",
+          "sha256": "341c4f644328fcc0d6606baeaa6b6da5856fa51017c4a72e4a762e4a7fffa719",
+          "bytes": 47686
+        },
+        {
+          "local_path": "build-dev/hardware/20261024-reading-ddfb7de/byakuyako/warm.png",
+          "sha256": "341c4f644328fcc0d6606baeaa6b6da5856fa51017c4a72e4a762e4a7fffa719",
+          "bytes": 47686
+        }
+      ],
+      "requests": [
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/byakuyako/exit.json",
+            "sha256": "61411f253f55566f797ae29fcf829f901984ed93aaf4350628a439e64b7e0cc6",
+            "bytes": 30335
+          },
+          "command": "key middle",
+          "seq": 482792,
+          "reply": "ok queued t=125529",
+          "finish": "done start=125531 end=125657",
+          "start": 125531,
+          "release": 125657,
+          "first_display_ms": 1306,
+          "last_display_ms": 1306,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 126268,
+              "end": 126837,
+              "ms": 569,
+              "status": 0
+            }
+          ],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/byakuyako/heap.json",
+            "sha256": "f44d89c8a9573a323e27c2bcf52561d6abbf1eaa9f48c47bf20de4318cca47b9",
+            "bytes": 74
+          },
+          "command": "heap",
+          "seq": 482796,
+          "reply": "ok heap-pending",
+          "finish": null,
+          "start": null,
+          "release": null,
+          "first_display_ms": null,
+          "last_display_ms": null,
+          "displays": null,
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/byakuyako/initial-status.json",
+            "sha256": "78f3f27ff9a0d11fc3fbc6e3d337f35e0c9ad039b51c6d69e37f6447b161455a",
+            "bytes": 167
+          },
+          "command": "status",
+          "seq": 482776,
+          "reply": "status t=65553 view=0005000f body=1 paused=0 events=16 touch_reads=1761 touch_errors=0 gesture=0 dropped=0",
+          "finish": null,
+          "start": null,
+          "release": null,
+          "first_display_ms": null,
+          "last_display_ms": null,
+          "displays": null,
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/byakuyako/open.json",
+            "sha256": "5df9661ac8ef64613a0a9fc8f8030b929f1846d577d9b2c1dc41a7aa465247fc",
+            "bytes": 802449
+          },
+          "command": "tap 350 370",
+          "seq": 482775,
+          "reply": "ok queued t=50229",
+          "finish": "done start=50252 end=50377",
+          "start": 50252,
+          "release": 50377,
+          "first_display_ms": 1013,
+          "last_display_ms": 3042,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 50458,
+              "end": 51265,
+              "ms": 807,
+              "status": 0
+            },
+            {
+              "kind": "frame",
+              "start": 52729,
+              "end": 53294,
+              "ms": 565,
+              "status": 0
+            }
+          ],
+          "reader_logs": [
+            "I (54651) pico_nano: Reader action=0 status=0 elapsed=1226 ms"
+          ]
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/byakuyako/paced-next-1.json",
+            "sha256": "842e52a5a5003f967ac5470382a794b959d880422691f5e48d6e3829415f8638",
+            "bytes": 27269
+          },
+          "command": "key right",
+          "seq": 482778,
+          "reply": "ok queued t=68528",
+          "finish": "done start=68549 end=68675",
+          "start": 68549,
+          "release": 68675,
+          "first_display_ms": 1073,
+          "last_display_ms": 1073,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 68660,
+              "end": 69622,
+              "ms": 962,
+              "status": 0
+            }
+          ],
+          "reader_logs": [
+            "I (70979) pico_nano: Reader action=1 status=0 elapsed=986 ms"
+          ]
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/byakuyako/paced-next-2.json",
+            "sha256": "0b41d4239fe57f4ed3500b81bf45bf6ac378ee243c6c6952228d154cc127a4cb",
+            "bytes": 50932
+          },
+          "command": "key right",
+          "seq": 482779,
+          "reply": "ok queued t=71192",
+          "finish": "done start=71208 end=71333",
+          "start": 71208,
+          "release": 71333,
+          "first_display_ms": 799,
+          "last_display_ms": 799,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 71322,
+              "end": 72007,
+              "ms": 685,
+              "status": 0
+            }
+          ],
+          "reader_logs": [
+            "I (73363) pico_nano: Reader action=1 status=0 elapsed=709 ms"
+          ]
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/byakuyako/paced-next-3.json",
+            "sha256": "3ee9431762fed238cc915e0bc9f8b15aff76e1751ac4524df9be0ef0f00fb030",
+            "bytes": 38212
+          },
+          "command": "key right",
+          "seq": 482780,
+          "reply": "ok queued t=73640",
+          "finish": "done start=73665 end=73790",
+          "start": 73665,
+          "release": 73790,
+          "first_display_ms": 797,
+          "last_display_ms": 797,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 73779,
+              "end": 74462,
+              "ms": 683,
+              "status": 0
+            }
+          ],
+          "reader_logs": [
+            "I (75819) pico_nano: Reader action=1 status=0 elapsed=707 ms"
+          ]
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/byakuyako/paced-prev-1.json",
+            "sha256": "4e8dbc46e346fcb14b40f7948102bc963731334bdcfad8ca43b686ee7cd0a021",
+            "bytes": 95543
+          },
+          "command": "key left",
+          "seq": 482781,
+          "reply": "ok queued t=76060",
+          "finish": "done start=76085 end=76211",
+          "start": 76085,
+          "release": 76211,
+          "first_display_ms": 1030,
+          "last_display_ms": 1030,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 76222,
+              "end": 77115,
+              "ms": 893,
+              "status": 0
+            }
+          ],
+          "reader_logs": [
+            "I (78472) pico_nano: Reader action=2 status=0 elapsed=940 ms"
+          ]
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/byakuyako/paced-prev-2.json",
+            "sha256": "c4b3b2f25cdd54298877367886d41cdcb83fd7ff398ce3f3276934ca02121b97",
+            "bytes": 74140
+          },
+          "command": "key left",
+          "seq": 482782,
+          "reply": "ok queued t=78878",
+          "finish": "done start=78876 end=79002",
+          "start": 78876,
+          "release": 79002,
+          "first_display_ms": 1155,
+          "last_display_ms": 1155,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 79329,
+              "end": 80031,
+              "ms": 702,
+              "status": 0
+            }
+          ],
+          "reader_logs": [
+            "I (81456) pico_nano: Reader action=2 status=0 elapsed=854 ms"
+          ]
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/byakuyako/paced-prev-3.json",
+            "sha256": "4092b23ac84e1b4cd1ac5823c1e580b98acaadca8ab295acfe041e9c3c4a33c7",
+            "bytes": 88461
+          },
+          "command": "key left",
+          "seq": 482783,
+          "reply": "ok queued t=81691",
+          "finish": "done start=81708 end=81834",
+          "start": 81708,
+          "release": 81834,
+          "first_display_ms": 1025,
+          "last_display_ms": 1025,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 82029,
+              "end": 82733,
+              "ms": 704,
+              "status": 0
+            }
+          ],
+          "reader_logs": [
+            "I (84089) pico_nano: Reader action=2 status=0 elapsed=770 ms"
+          ]
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/byakuyako/rapid-next-01.json",
+            "sha256": "6aa4836e55ca2c0d56283ab02f9a9da3e07ce003f59c48d8ecc49c8df8e699aa",
+            "bytes": 7527
+          },
+          "command": "key right",
+          "seq": 482785,
+          "reply": "ok queued t=87347",
+          "finish": "done start=87368 end=87494",
+          "start": 87368,
+          "release": 87494,
+          "first_display_ms": 795,
+          "last_display_ms": 795,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 87478,
+              "end": 88163,
+              "ms": 685,
+              "status": 0
+            }
+          ],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/byakuyako/rapid-next-02.json",
+            "sha256": "fcf1fe76e648b53935446e64c5ea1b847f450c6b26eb88e007fa580cef885169",
+            "bytes": 20187
+          },
+          "command": "key right",
+          "seq": 482786,
+          "reply": "ok queued t=88256",
+          "finish": "done start=88286 end=88412",
+          "start": 88286,
+          "release": 88412,
+          "first_display_ms": null,
+          "last_display_ms": null,
+          "displays": [],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/byakuyako/recovery-prev.json",
+            "sha256": "8a1ef587bd1047422c5de3bf606719b67b1882cc7dbf9d9f0fbc8ea465e50920",
+            "bytes": 56058
+          },
+          "command": "key left",
+          "seq": 482789,
+          "reply": "ok queued t=119836",
+          "finish": "done start=119837 end=119963",
+          "start": 119837,
+          "release": 119963,
+          "first_display_ms": 1009,
+          "last_display_ms": 1009,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 120060,
+              "end": 120846,
+              "ms": 786,
+              "status": 0
+            }
+          ],
+          "reader_logs": [
+            "I (121375) pico_nano: Reader action=1 status=8 elapsed=31645 ms",
+            "I (122203) pico_nano: Reader action=2 status=0 elapsed=827 ms"
+          ]
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/byakuyako/restored-status.json",
+            "sha256": "4304a6c67d67043ae64802973e516d3367d0d51890b63dd6713c7b3c8f33209e",
+            "bytes": 168
+          },
+          "command": "status",
+          "seq": 482791,
+          "reply": "status t=125340 view=0005000f body=1 paused=0 events=43 touch_reads=3543 touch_errors=0 gesture=0 dropped=0",
+          "finish": null,
+          "start": null,
+          "release": null,
+          "first_display_ms": null,
+          "last_display_ms": null,
+          "displays": null,
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/byakuyako/stall-status.json",
+            "sha256": "24ca501899ca64063bba3b9fdc16295317fa3579f46520dccb3a8a0fd86dfc26",
+            "bytes": 167
+          },
+          "command": "status",
+          "seq": 482788,
+          "reply": "status t=99719 view=0005000f body=1 paused=0 events=40 touch_reads=2788 touch_errors=0 gesture=0 dropped=0",
+          "finish": null,
+          "start": null,
+          "release": null,
+          "first_display_ms": null,
+          "last_display_ms": null,
+          "displays": null,
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/byakuyako/warm-open.json",
+            "sha256": "a1aaf0719fa949412452d8ad4edc33d58cc19e6c3691cd5274b08569b11253f3",
+            "bytes": 262215
+          },
+          "command": "tap 350 520",
+          "seq": 482793,
+          "reply": "ok queued t=128537",
+          "finish": "done start=128543 end=128672",
+          "start": 128543,
+          "release": 128672,
+          "first_display_ms": 739,
+          "last_display_ms": 739,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 128713,
+              "end": 129282,
+              "ms": 569,
+              "status": 0
+            }
+          ],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/byakuyako/warm-status.json",
+            "sha256": "cc1f3a5cfa44ed7e840ef691c7d664dbfae5009403699b485e7492b61aa64049",
+            "bytes": 168
+          },
+          "command": "status",
+          "seq": 482794,
+          "reply": "status t=141534 view=0005000f body=1 paused=0 events=53 touch_reads=4037 touch_errors=0 gesture=0 dropped=0",
+          "finish": null,
+          "start": null,
+          "release": null,
+          "first_display_ms": null,
+          "last_display_ms": null,
+          "displays": null,
+          "reader_logs": []
+        }
+      ],
+      "stall": {
+        "waiting_excerpt": [
+          "I (110180) pico_nano: Reader NEXT waiting status=2 elapsed=20450 ms used=3267608 limit=6217360",
+          "I (115309) pico_nano: Reader NEXT waiting status=2 elapsed=25579 ms used=3267608 limit=6217360",
+          "I (120389) pico_nano: Reader NEXT waiting status=2 elapsed=30659 ms used=3267608 limit=6217360"
+        ],
+        "max_wait_ms": 30659,
+        "late_frames": [],
+        "tail": {
+          "local_path": "build-dev/hardware/20261024-reading-ddfb7de/byakuyako/stall-tail.json",
+          "sha256": "327749383c66620286a8008d95a725f1c58edccf2453c1c9d475d2564ef51191",
+          "bytes": 264591
+        }
+      }
+    },
+    {
+      "id": "sao-txt",
+      "title": "刀剑神域+01[lunarora.com]",
+      "format": "TXT",
+      "metrics": {
+        "id": "sao-txt",
+        "open": {
+          "first_display_ms": 885,
+          "last_display_ms": 15709
+        },
+        "paced_next": [
+          962,
+          872,
+          877
+        ],
+        "paced_prev": [
+          870,
+          1216,
+          1088
+        ],
+        "rapid_next": [
+          819,
+          1471,
+          894,
+          882,
+          1284,
+          890,
+          935,
+          889,
+          950,
+          948,
+          905,
+          940,
+          879,
+          947,
+          956
+        ],
+        "recovery": null,
+        "return_steps": 15,
+        "warm_open": {
+          "first_display_ms": 820,
+          "last_display_ms": 820
+        }
+      },
+      "pixel_roundtrip": {
+        "paced-roundtrip": true,
+        "restored": true,
+        "warm": true
+      },
+      "same_start_pixels_as_399cce7": true,
+      "baseline_gray_sha256": "c20fc96d21853f90ff242c0968973b69148c2f19a196ec98c0e0442c6225ed1f",
+      "frames": [
+        {
+          "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sao-txt/baseline.png",
+          "sha256": "efb54f2f7f17b35d874a8eb33d52f21996f8cb086b5de13c75ab6eb6918bfba3",
+          "bytes": 62417
+        },
+        {
+          "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sao-txt/paced-roundtrip.png",
+          "sha256": "6c65f620fe06799943694d5502b6c9f560ab0593e0567bec1f64289c368a9157",
+          "bytes": 62422
+        },
+        {
+          "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sao-txt/restored.png",
+          "sha256": "51e8a4688e194bb9f94f9ca08abb29496e6d48ac6e1d48162ba8f670666f7f03",
+          "bytes": 62423
+        },
+        {
+          "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sao-txt/warm.png",
+          "sha256": "51e8a4688e194bb9f94f9ca08abb29496e6d48ac6e1d48162ba8f670666f7f03",
+          "bytes": 62423
+        }
+      ],
+      "requests": [
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sao-txt/exit.json",
+            "sha256": "95837c88030b8154d4081f5d67a6f7c292ed5d510bf11fab6bcba24b0a5ecaaf",
+            "bytes": 33604
+          },
+          "command": "key middle",
+          "seq": 482870,
+          "reply": "ok queued t=462073",
+          "finish": "done start=462097 end=462224",
+          "start": 462097,
+          "release": 462224,
+          "first_display_ms": 1349,
+          "last_display_ms": 1349,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 462858,
+              "end": 463446,
+              "ms": 588,
+              "status": 0
+            }
+          ],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sao-txt/heap.json",
+            "sha256": "228ee2441e601dc493b2de7df8c084150fefa05a799a39c5413520104083e126",
+            "bytes": 74
+          },
+          "command": "heap",
+          "seq": 482874,
+          "reply": "ok heap-pending",
+          "finish": null,
+          "start": null,
+          "release": null,
+          "first_display_ms": null,
+          "last_display_ms": null,
+          "displays": null,
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sao-txt/initial-status.json",
+            "sha256": "e929c98cce7f978ae7175d30b70a70405a6f3876de8235970a30270361dc28e5",
+            "bytes": 170
+          },
+          "command": "status",
+          "seq": 482829,
+          "reply": "status t=399434 view=000b000f body=1 paused=0 events=194 touch_reads=11803 touch_errors=0 gesture=0 dropped=0",
+          "finish": null,
+          "start": null,
+          "release": null,
+          "first_display_ms": null,
+          "last_display_ms": null,
+          "displays": null,
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sao-txt/paced-next-1.json",
+            "sha256": "54774e79d6f11c3ecd13fdcd19f4921f05feb8cb9f3b16f3534000970790e38a",
+            "bytes": 60236
+          },
+          "command": "key right",
+          "seq": 482831,
+          "reply": "ok queued t=402163",
+          "finish": "done start=402167 end=402293",
+          "start": 402167,
+          "release": 402293,
+          "first_display_ms": 962,
+          "last_display_ms": 962,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 402279,
+              "end": 403129,
+              "ms": 850,
+              "status": 0
+            }
+          ],
+          "reader_logs": [
+            "I (404487) pico_nano: Reader action=1 status=0 elapsed=876 ms"
+          ]
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sao-txt/paced-next-2.json",
+            "sha256": "d8516acc4f2dce97c4e716c1cb64fe179c8761971d27c10677ff4b4e21322bff",
+            "bytes": 65838
+          },
+          "command": "key right",
+          "seq": 482832,
+          "reply": "ok queued t=404708",
+          "finish": "done start=404726 end=404851",
+          "start": 404726,
+          "release": 404851,
+          "first_display_ms": 872,
+          "last_display_ms": 872,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 404835,
+              "end": 405598,
+              "ms": 763,
+              "status": 0
+            }
+          ],
+          "reader_logs": [
+            "I (406967) pico_nano: Reader action=1 status=0 elapsed=799 ms"
+          ]
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sao-txt/paced-next-3.json",
+            "sha256": "8e872c9976762a2b5dbf001fdbaa868cdf902989855af22e1662cee239cb9265",
+            "bytes": 67627
+          },
+          "command": "key right",
+          "seq": 482833,
+          "reply": "ok queued t=407143",
+          "finish": "done start=407152 end=407278",
+          "start": 407152,
+          "release": 407278,
+          "first_display_ms": 877,
+          "last_display_ms": 877,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 407262,
+              "end": 408029,
+              "ms": 767,
+              "status": 0
+            }
+          ],
+          "reader_logs": [
+            "I (409403) pico_nano: Reader action=1 status=0 elapsed=807 ms"
+          ]
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sao-txt/paced-prev-1.json",
+            "sha256": "64e15520dd7ce4bc113234abad33ac1c936ee5517d9d16d070feb553506502b6",
+            "bytes": 90908
+          },
+          "command": "key left",
+          "seq": 482834,
+          "reply": "ok queued t=409645",
+          "finish": "done start=409674 end=409800",
+          "start": 409674,
+          "release": 409800,
+          "first_display_ms": 870,
+          "last_display_ms": 870,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 409840,
+              "end": 410544,
+              "ms": 704,
+              "status": 0
+            }
+          ],
+          "reader_logs": [
+            "I (411900) pico_nano: Reader action=2 status=0 elapsed=781 ms"
+          ]
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sao-txt/paced-prev-2.json",
+            "sha256": "0f1625ba472d5d5bacb0b1ee32ec46e5aebcff01adc185ae525aff881cea775a",
+            "bytes": 74888
+          },
+          "command": "key left",
+          "seq": 482835,
+          "reply": "ok queued t=412244",
+          "finish": "done start=412243 end=412372",
+          "start": 412243,
+          "release": 412372,
+          "first_display_ms": 1216,
+          "last_display_ms": 1216,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 412755,
+              "end": 413459,
+              "ms": 704,
+              "status": 0
+            }
+          ],
+          "reader_logs": [
+            "I (414933) pico_nano: Reader action=2 status=0 elapsed=915 ms"
+          ]
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sao-txt/paced-prev-3.json",
+            "sha256": "92ad7356825d3605770c1cc875af72c4cad2808f24448222870feb533f8da5d9",
+            "bytes": 95399
+          },
+          "command": "key left",
+          "seq": 482836,
+          "reply": "ok queued t=415209",
+          "finish": "done start=415228 end=415354",
+          "start": 415228,
+          "release": 415354,
+          "first_display_ms": 1088,
+          "last_display_ms": 1088,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 415609,
+              "end": 416316,
+              "ms": 707,
+              "status": 0
+            }
+          ],
+          "reader_logs": [
+            "I (417673) pico_nano: Reader action=2 status=0 elapsed=1002 ms"
+          ]
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sao-txt/rapid-next-01.json",
+            "sha256": "946f136d47e18d89b71487016f33118627671b1ef915ec9b33246df0f0a24d8f",
+            "bytes": 10320
+          },
+          "command": "key right",
+          "seq": 482838,
+          "reply": "ok queued t=421110",
+          "finish": "done start=421138 end=421263",
+          "start": 421138,
+          "release": 421263,
+          "first_display_ms": 819,
+          "last_display_ms": 819,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 421249,
+              "end": 421957,
+              "ms": 708,
+              "status": 0
+            }
+          ],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sao-txt/rapid-next-02.json",
+            "sha256": "229a4a83acd35f6e377a37e6cde59c2bcd176ae2ceef3373dc05566bffb29d69",
+            "bytes": 5981
+          },
+          "command": "key right",
+          "seq": 482839,
+          "reply": "ok queued t=422161",
+          "finish": "done start=422162 end=422288",
+          "start": 422162,
+          "release": 422288,
+          "first_display_ms": 1471,
+          "last_display_ms": 1471,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 422927,
+              "end": 423633,
+              "ms": 706,
+              "status": 0
+            }
+          ],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sao-txt/rapid-next-03.json",
+            "sha256": "e2f2882681d921d568aa4544b2e86e55a5f4d9de2aea5c20f0fa07b87e82c7cd",
+            "bytes": 7251
+          },
+          "command": "key right",
+          "seq": 482840,
+          "reply": "ok queued t=423789",
+          "finish": "done start=423799 end=423925",
+          "start": 423799,
+          "release": 423925,
+          "first_display_ms": 894,
+          "last_display_ms": 894,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 423949,
+              "end": 424693,
+              "ms": 744,
+              "status": 0
+            }
+          ],
+          "reader_logs": [
+            "I (426049) pico_nano: Reader action=1 status=0 elapsed=767 ms"
+          ]
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sao-txt/rapid-next-04.json",
+            "sha256": "65f290035e6736329560dd08214410e0ba96c5debd7df51a2ffe049cf90b46fd",
+            "bytes": 7098
+          },
+          "command": "key right",
+          "seq": 482841,
+          "reply": "ok queued t=424724",
+          "finish": "done start=424744 end=424870",
+          "start": 424744,
+          "release": 424870,
+          "first_display_ms": 882,
+          "last_display_ms": 882,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 424858,
+              "end": 425626,
+              "ms": 768,
+              "status": 0
+            }
+          ],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sao-txt/rapid-next-05.json",
+            "sha256": "6b414649c542be398b8b443859aa63f9698788f86939c1b5f203de6d9b357bce",
+            "bytes": 6617
+          },
+          "command": "key right",
+          "seq": 482842,
+          "reply": "ok queued t=425660",
+          "finish": "done start=425669 end=425846",
+          "start": 425669,
+          "release": 425846,
+          "first_display_ms": 1284,
+          "last_display_ms": 1284,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 426199,
+              "end": 426953,
+              "ms": 754,
+              "status": 0
+            }
+          ],
+          "reader_logs": [
+            "I (427275) pico_nano: Reader action=1 status=0 elapsed=1085 ms",
+            "I (428309) pico_nano: Reader action=1 status=0 elapsed=1033 ms"
+          ]
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sao-txt/rapid-next-06.json",
+            "sha256": "a5d7f4c069da637666fc7936006a307c7282f990fe20e0246a071302d5475056",
+            "bytes": 4756
+          },
+          "command": "key right",
+          "seq": 482843,
+          "reply": "ok queued t=427004",
+          "finish": "done start=427007 end=427133",
+          "start": 427007,
+          "release": 427133,
+          "first_display_ms": 890,
+          "last_display_ms": 890,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 427135,
+              "end": 427897,
+              "ms": 762,
+              "status": 0
+            }
+          ],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sao-txt/rapid-next-07.json",
+            "sha256": "1329c409c91a828d96eafabd41d75a93a43b3ca2c20ea51df1925d6e63319742",
+            "bytes": 8555
+          },
+          "command": "key right",
+          "seq": 482844,
+          "reply": "ok queued t=427993",
+          "finish": "done start=428018 end=428144",
+          "start": 428018,
+          "release": 428144,
+          "first_display_ms": 935,
+          "last_display_ms": 935,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 428188,
+              "end": 428953,
+              "ms": 765,
+              "status": 0
+            }
+          ],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sao-txt/rapid-next-08.json",
+            "sha256": "dd6c478fb4459e901f10ef56053ebef6dda30a36fad65bd69a492342f948b970",
+            "bytes": 7527
+          },
+          "command": "key right",
+          "seq": 482845,
+          "reply": "ok queued t=429017",
+          "finish": "done start=429033 end=429159",
+          "start": 429033,
+          "release": 429159,
+          "first_display_ms": 889,
+          "last_display_ms": 889,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 429204,
+              "end": 429922,
+              "ms": 718,
+              "status": 0
+            }
+          ],
+          "reader_logs": [
+            "I (431282) pico_nano: Reader action=1 status=0 elapsed=746 ms"
+          ]
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sao-txt/rapid-next-09.json",
+            "sha256": "3d8f68bcad19f31945aaa1d9ec9c38f1f0330a82a59cc82e6ba09707812b7cb1",
+            "bytes": 8718
+          },
+          "command": "key right",
+          "seq": 482846,
+          "reply": "ok queued t=430001",
+          "finish": "done start=430014 end=430140",
+          "start": 430014,
+          "release": 430140,
+          "first_display_ms": 950,
+          "last_display_ms": 950,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 430199,
+              "end": 430964,
+              "ms": 765,
+              "status": 0
+            }
+          ],
+          "reader_logs": [
+            "I (432434) pico_nano: Reader action=1 status=0 elapsed=903 ms"
+          ]
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sao-txt/rapid-next-10.json",
+            "sha256": "889f9bbdc0c320c42344ebc6f531ace8298dbc04a2a02f6f3b5fa0d26dd976d2",
+            "bytes": 9260
+          },
+          "command": "key right",
+          "seq": 482847,
+          "reply": "ok queued t=431121",
+          "finish": "done start=431140 end=431289",
+          "start": 431140,
+          "release": 431289,
+          "first_display_ms": 948,
+          "last_display_ms": 948,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 431326,
+              "end": 432088,
+              "ms": 762,
+              "status": 0
+            }
+          ],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sao-txt/rapid-next-11.json",
+            "sha256": "5ea933a856e5301fd052995bf30a4f68e9ea26e6d4462b4e5f08aeb9c44eee4e",
+            "bytes": 5114
+          },
+          "command": "key right",
+          "seq": 482848,
+          "reply": "ok queued t=432140",
+          "finish": "done start=432143 end=432269",
+          "start": 432143,
+          "release": 432269,
+          "first_display_ms": 905,
+          "last_display_ms": 905,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 432280,
+              "end": 433048,
+              "ms": 768,
+              "status": 0
+            }
+          ],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sao-txt/rapid-next-12.json",
+            "sha256": "c76c5fade8fe8b1f801ce8063e7632748987fee79d58ff9941d976205c5f9392",
+            "bytes": 7524
+          },
+          "command": "key right",
+          "seq": 482849,
+          "reply": "ok queued t=433087",
+          "finish": "done start=433090 end=433218",
+          "start": 433090,
+          "release": 433218,
+          "first_display_ms": 940,
+          "last_display_ms": 940,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 433266,
+              "end": 434030,
+              "ms": 764,
+              "status": 0
+            }
+          ],
+          "reader_logs": [
+            "I (435390) pico_nano: Reader action=1 status=0 elapsed=792 ms"
+          ]
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sao-txt/rapid-next-13.json",
+            "sha256": "d50c7d13cccb299802f81b93d76dc9953d75075ef5dfa834bb0a366c3561c1cd",
+            "bytes": 6006
+          },
+          "command": "key right",
+          "seq": 482850,
+          "reply": "ok queued t=434105",
+          "finish": "done start=434111 end=434237",
+          "start": 434111,
+          "release": 434237,
+          "first_display_ms": 879,
+          "last_display_ms": 879,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 434230,
+              "end": 434990,
+              "ms": 760,
+              "status": 0
+            }
+          ],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sao-txt/rapid-next-14.json",
+            "sha256": "44b8a91abf8bccc9b31c26abf6abb3d99a4b7d2d4244bfe74c7c6aee468c18e5",
+            "bytes": 8180
+          },
+          "command": "key right",
+          "seq": 482851,
+          "reply": "ok queued t=435087",
+          "finish": "done start=435105 end=435231",
+          "start": 435105,
+          "release": 435231,
+          "first_display_ms": 947,
+          "last_display_ms": 947,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 435291,
+              "end": 436052,
+              "ms": 761,
+              "status": 0
+            }
+          ],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sao-txt/rapid-next-15.json",
+            "sha256": "098af9b0afbb6ae01737fa468ec41300404316b604279c05053e2f72282c2141",
+            "bytes": 7299
+          },
+          "command": "key right",
+          "seq": 482852,
+          "reply": "ok queued t=436129",
+          "finish": "done start=436131 end=436257",
+          "start": 436131,
+          "release": 436257,
+          "first_display_ms": 956,
+          "last_display_ms": 956,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 436321,
+              "end": 437087,
+              "ms": 766,
+              "status": 0
+            }
+          ],
+          "reader_logs": [
+            "I (437519) pico_nano: Reader action=1 status=0 elapsed=895 ms"
+          ]
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sao-txt/restore-prev-01.json",
+            "sha256": "51710e812ed6f831004ade7ef8b83b3670d2cf3e3ed0e68629d48c44652abeaf",
+            "bytes": 6593
+          },
+          "command": "key left",
+          "seq": 482853,
+          "reply": "ok queued t=437141",
+          "finish": "done start=437153 end=437301",
+          "start": 437153,
+          "release": 437301,
+          "first_display_ms": 1324,
+          "last_display_ms": 1324,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 437714,
+              "end": 438477,
+              "ms": 763,
+              "status": 0
+            }
+          ],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sao-txt/restore-prev-02.json",
+            "sha256": "f34a6a9981c2985cb499b2eab645f1fc92f70687ba2a0b090fe763b2bd61e502",
+            "bytes": 5414
+          },
+          "command": "key left",
+          "seq": 482854,
+          "reply": "ok queued t=438497",
+          "finish": "done start=438521 end=438647",
+          "start": 438521,
+          "release": 438647,
+          "first_display_ms": 1197,
+          "last_display_ms": 1197,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 438958,
+              "end": 439718,
+              "ms": 760,
+              "status": 0
+            }
+          ],
+          "reader_logs": [
+            "I (439838) pico_nano: Reader action=2 status=0 elapsed=1192 ms"
+          ]
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sao-txt/restore-prev-03.json",
+            "sha256": "f7f54f68d87b051a3f05266fa83328deb47d3091be77d0370363ef66eea0b1e5",
+            "bytes": 6249
+          },
+          "command": "key left",
+          "seq": 482855,
+          "reply": "ok queued t=439825",
+          "finish": "done start=439838 end=439964",
+          "start": 439838,
+          "release": 439964,
+          "first_display_ms": 1258,
+          "last_display_ms": 1258,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 440337,
+              "end": 441096,
+              "ms": 759,
+              "status": 0
+            }
+          ],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sao-txt/restore-prev-04.json",
+            "sha256": "691b40667b06002eb2176d3f2d56b79dc3d4719b8398a16b37fd26cfc4155bad",
+            "bytes": 5870
+          },
+          "command": "key left",
+          "seq": 482856,
+          "reply": "ok queued t=441179",
+          "finish": "done start=441204 end=441332",
+          "start": 441204,
+          "release": 441332,
+          "first_display_ms": 1165,
+          "last_display_ms": 1165,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 441606,
+              "end": 442369,
+              "ms": 763,
+              "status": 0
+            }
+          ],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sao-txt/restore-prev-05.json",
+            "sha256": "7cdf594b0ab1d82f4304351fe93a37f3b636280d229d62b322c10b5f994ec648",
+            "bytes": 7486
+          },
+          "command": "key left",
+          "seq": 482857,
+          "reply": "ok queued t=442545",
+          "finish": "done start=442553 end=442681",
+          "start": 442553,
+          "release": 442681,
+          "first_display_ms": 1256,
+          "last_display_ms": 1256,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 443050,
+              "end": 443809,
+              "ms": 759,
+              "status": 0
+            }
+          ],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sao-txt/restore-prev-06.json",
+            "sha256": "b3283407642976efbfca7328e75e875de36a3700b19a2878698a52bca72c71a4",
+            "bytes": 4796
+          },
+          "command": "key left",
+          "seq": 482858,
+          "reply": "ok queued t=443893",
+          "finish": "done start=443921 end=444047",
+          "start": 443921,
+          "release": 444047,
+          "first_display_ms": 1957,
+          "last_display_ms": 1957,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 445116,
+              "end": 445878,
+              "ms": 762,
+              "status": 0
+            }
+          ],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sao-txt/restore-prev-07.json",
+            "sha256": "1d3f85d3c4ef8696d7bd8223f87a7a8dd87cc83f7598f7f2023eae1c078bfe22",
+            "bytes": 8656
+          },
+          "command": "key left",
+          "seq": 482859,
+          "reply": "ok queued t=445919",
+          "finish": "done start=445945 end=446074",
+          "start": 445945,
+          "release": 446074,
+          "first_display_ms": 1266,
+          "last_display_ms": 1266,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 446492,
+              "end": 447211,
+              "ms": 719,
+              "status": 0
+            }
+          ],
+          "reader_logs": [
+            "I (448579) pico_nano: Reader action=2 status=0 elapsed=1116 ms"
+          ]
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sao-txt/restore-prev-08.json",
+            "sha256": "24b65bcc1ed0d55185503f7484c0b73559cbc8837f10dd77c40749f138ac03b2",
+            "bytes": 7154
+          },
+          "command": "key left",
+          "seq": 482860,
+          "reply": "ok queued t=447290",
+          "finish": "done start=447292 end=447417",
+          "start": 447292,
+          "release": 447417,
+          "first_display_ms": 1335,
+          "last_display_ms": 1335,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 447862,
+              "end": 448627,
+              "ms": 765,
+              "status": 0
+            }
+          ],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sao-txt/restore-prev-09.json",
+            "sha256": "37d4a3b6676bbd2c118ca1bba9df195a3679b12ae605f144bdd690bc632172ef",
+            "bytes": 5520
+          },
+          "command": "key left",
+          "seq": 482861,
+          "reply": "ok queued t=448710",
+          "finish": "done start=448712 end=448838",
+          "start": 448712,
+          "release": 448838,
+          "first_display_ms": 1125,
+          "last_display_ms": 1125,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 449076,
+              "end": 449837,
+              "ms": 761,
+              "status": 0
+            }
+          ],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sao-txt/restore-prev-10.json",
+            "sha256": "6767163e6138d326fb188f1cebf431b800f4055b7e30d785cc7141993ea9266f",
+            "bytes": 8853
+          },
+          "command": "key left",
+          "seq": 482862,
+          "reply": "ok queued t=449922",
+          "finish": "done start=449946 end=450072",
+          "start": 449946,
+          "release": 450072,
+          "first_display_ms": 1120,
+          "last_display_ms": 1120,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 450316,
+              "end": 451066,
+              "ms": 750,
+              "status": 0
+            }
+          ],
+          "reader_logs": [
+            "I (451305) pico_nano: Reader action=2 status=0 elapsed=1105 ms",
+            "I (452423) pico_nano: Reader action=2 status=0 elapsed=1032 ms"
+          ]
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sao-txt/restore-prev-11.json",
+            "sha256": "e5d250833f909de3f7542fbce2af7518df628aa5272df491813e88e9cf895519",
+            "bytes": 5880
+          },
+          "command": "key left",
+          "seq": 482863,
+          "reply": "ok queued t=451143",
+          "finish": "done start=451171 end=451297",
+          "start": 451171,
+          "release": 451297,
+          "first_display_ms": 1759,
+          "last_display_ms": 1759,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 452166,
+              "end": 452930,
+              "ms": 764,
+              "status": 0
+            }
+          ],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sao-txt/restore-prev-12.json",
+            "sha256": "c54a6170f2432d67c44c7dc07766da112b1590a4b472cdb27c5dd80b4dc15507",
+            "bytes": 7881
+          },
+          "command": "key left",
+          "seq": 482864,
+          "reply": "ok queued t=452950",
+          "finish": "done start=452971 end=453098",
+          "start": 452971,
+          "release": 453098,
+          "first_display_ms": 907,
+          "last_display_ms": 907,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 453138,
+              "end": 453878,
+              "ms": 740,
+              "status": 0
+            }
+          ],
+          "reader_logs": [
+            "I (454291) pico_nano: Reader action=2 status=0 elapsed=930 ms"
+          ]
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sao-txt/restore-prev-13.json",
+            "sha256": "83a0277b1c25e289cad67da8d3510ac62e00e6c26e960ef8c6e93c7c2809bcef",
+            "bytes": 5832
+          },
+          "command": "key left",
+          "seq": 482865,
+          "reply": "ok queued t=453961",
+          "finish": "done start=453988 end=454116",
+          "start": 453988,
+          "release": 454116,
+          "first_display_ms": 1609,
+          "last_display_ms": 1609,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 454893,
+              "end": 455597,
+              "ms": 704,
+              "status": 0
+            }
+          ],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sao-txt/restore-prev-14.json",
+            "sha256": "d82b1e169d59493b4b3c8bc9dfc62cb12246a86e816a1ca9a2ae090cdb201e55",
+            "bytes": 5836
+          },
+          "command": "key left",
+          "seq": 482866,
+          "reply": "ok queued t=455802",
+          "finish": "done start=455802 end=455931",
+          "start": 455802,
+          "release": 455931,
+          "first_display_ms": 1555,
+          "last_display_ms": 1555,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 456653,
+              "end": 457357,
+              "ms": 704,
+              "status": 0
+            }
+          ],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sao-txt/restore-prev-15.json",
+            "sha256": "58dabf2e57cde71a8aca4ab2b34669bdc79271b63486c640e403744038193fc5",
+            "bytes": 6923
+          },
+          "command": "key left",
+          "seq": 482867,
+          "reply": "ok queued t=457581",
+          "finish": "done start=457579 end=457705",
+          "start": 457579,
+          "release": 457705,
+          "first_display_ms": 1090,
+          "last_display_ms": 1090,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 457962,
+              "end": 458669,
+              "ms": 707,
+              "status": 0
+            }
+          ],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sao-txt/restored-status.json",
+            "sha256": "cb1c75859d29a68792b51af27ab3cd539008fd4e6f11f54c7c894238ddf84f67",
+            "bytes": 170
+          },
+          "command": "status",
+          "seq": 482869,
+          "reply": "status t=461947 view=000b000f body=1 paused=0 events=302 touch_reads=13627 touch_errors=0 gesture=0 dropped=0",
+          "finish": null,
+          "start": null,
+          "release": null,
+          "first_display_ms": null,
+          "last_display_ms": null,
+          "displays": null,
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sao-txt/warm-open.json",
+            "sha256": "06d919e84e0b43454d4a6b226d29c8843b170e1f6ab8cbfb0aa553be6bf069ee",
+            "bytes": 259355
+          },
+          "command": "tap 350 520",
+          "seq": 482871,
+          "reply": "ok queued t=465039",
+          "finish": "done start=465054 end=465181",
+          "start": 465054,
+          "release": 465181,
+          "first_display_ms": 820,
+          "last_display_ms": 820,
+          "displays": [
+            {
+              "kind": "frame",
+              "start": 465285,
+              "end": 465874,
+              "ms": 589,
+              "status": 0
+            }
+          ],
+          "reader_logs": []
+        },
+        {
+          "artifact": {
+            "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sao-txt/warm-status.json",
+            "sha256": "ded7bf813723f1b2c4b035682504c196f54e4935b4a4efdd5b6482ebb2b7e580",
+            "bytes": 170
+          },
+          "command": "status",
+          "seq": 482872,
+          "reply": "status t=478050 view=000b000f body=1 paused=0 events=312 touch_reads=14104 touch_errors=0 gesture=0 dropped=0",
+          "finish": null,
+          "start": null,
+          "release": null,
+          "first_display_ms": null,
+          "last_display_ms": null,
+          "displays": null,
+          "reader_logs": []
+        }
+      ],
+      "initial_open_observation": {
+        "first_display_ms": 885,
+        "last_display_ms": 15709,
+        "body_display_line": "1792848603.358 PNT 0 display kind=frame start=330916 end=331685 ms=769 status=0",
+        "source_request": "sao-txt-initial-open/open.json",
+        "note": "Original request returned on loading quiet gap; body completion separately established from serial display and later status/screenshot"
+      },
+      "initial_open_sources": [
+        {
+          "local_path": "build-dev/hardware/20261024-reading-ddfb7de/txt-initial-open-observed.json",
+          "sha256": "0bb00f23ff91a28b4064d841818765c83db0959fd95cfbbfa4dbafae12ecc574",
+          "bytes": 371
+        },
+        {
+          "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sao-txt-initial-open/open.json",
+          "sha256": "72748e6c605353947f1342a566eb523f7bf84a3b8e262bbfd8f3fc6bea20c10a",
+          "bytes": 577456
+        },
+        {
+          "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sao-txt-initial-open/initial-status.json",
+          "sha256": "040a32f1a644b844f689c64313711f699b0d5870fbcaa0b25e717f595c492d10",
+          "bytes": 169
+        }
+      ]
+    }
+  ],
+  "sudoku": {
+    "metrics": {
+      "original_cell": 26,
+      "selected_cell": 25,
+      "repeat_original_displays": 0,
+      "selection_display_ms": 798,
+      "repeat_selected_displays": 0,
+      "idle_observed_s": 32.0,
+      "idle_display_lines": [],
+      "idle_sudoku_render_lines": [],
+      "restore_display_ms": 795,
+      "digits_notes_hints_undo_not_changed": true,
+      "board_restored_equal": true,
+      "selection_board_diff_bbox_relative_to_board": [
+        449,
+        129,
+        576,
+        192
+      ],
+      "panda_unchanged": true
+    },
+    "requests": [
+      {
+        "artifact": {
+          "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sudoku/repeat-original.json",
+          "sha256": "bf404ead96aaf3dd738cfdedf5b8da14befcf0752c078a0a64cc3e682a1ba1f2",
+          "bytes": 205
+        },
+        "command": "tap 598 412",
+        "seq": 482934,
+        "reply": "ok queued t=753971",
+        "finish": "done start=753988 end=754113",
+        "start": 753988,
+        "release": 754113,
+        "first_display_ms": null,
+        "last_display_ms": null,
+        "displays": [],
+        "reader_logs": []
+      },
+      {
+        "artifact": {
+          "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sudoku/repeat-selected.json",
+          "sha256": "d9674b94e02df08c3fb3b3483347c525d663865dbdb179808b5625f2e7f4df23",
+          "bytes": 205
+        },
+        "command": "tap 534 412",
+        "seq": 482937,
+        "reply": "ok queued t=760846",
+        "finish": "done start=760847 end=760972",
+        "start": 760847,
+        "release": 760972,
+        "first_display_ms": null,
+        "last_display_ms": null,
+        "displays": [],
+        "reader_logs": []
+      },
+      {
+        "artifact": {
+          "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sudoku/restore-original.json",
+          "sha256": "3d94902432d8a49fb3fe5f1f568d8f96c159c36c85bcabd3301d8cfe13ecbbc4",
+          "bytes": 1647
+        },
+        "command": "tap 598 412",
+        "seq": 482938,
+        "reply": "ok queued t=795492",
+        "finish": "done start=795506 end=795631",
+        "start": 795506,
+        "release": 795631,
+        "first_display_ms": 795,
+        "last_display_ms": 795,
+        "displays": [
+          {
+            "kind": "frame",
+            "start": 795648,
+            "end": 796301,
+            "ms": 653,
+            "status": 0
+          }
+        ],
+        "reader_logs": []
+      },
+      {
+        "artifact": {
+          "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sudoku/select-other.json",
+          "sha256": "b9415c5758a8c5ffe63a2242d890cf9938bf53f09718964dc295aec7e10b0d13",
+          "bytes": 1809
+        },
+        "command": "tap 534 412",
+        "seq": 482935,
+        "reply": "ok queued t=756626",
+        "finish": "done start=756621 end=756746",
+        "start": 756621,
+        "release": 756746,
+        "first_display_ms": 798,
+        "last_display_ms": 798,
+        "displays": [
+          {
+            "kind": "frame",
+            "start": 756763,
+            "end": 757419,
+            "ms": 656,
+            "status": 0
+          }
+        ],
+        "reader_logs": []
+      }
+    ],
+    "idle_log": {
+      "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sudoku/idle.log",
+      "sha256": "d60df7e183757e925efccc309d369af00330456a3ff083c754f2ebc89baf1f22",
+      "bytes": 825
+    },
+    "frames": [
+      {
+        "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sudoku-before.png",
+        "sha256": "1aee8229f1946d298c6338330855905e996ce85813ade0de5532fec96aa55908",
+        "bytes": 21456
+      },
+      {
+        "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sudoku/selected.png",
+        "sha256": "12a1333562bf21c634214ca6975f3de8ab89d3c6b3b33de6c51d7f8f3d80e00d",
+        "bytes": 21702
+      },
+      {
+        "local_path": "build-dev/hardware/20261024-reading-ddfb7de/sudoku/restored.png",
+        "sha256": "46a9faf8956594699ac39d0eb2ded81e7b85d57743c0b03bdeb2631af3da4f6a",
+        "bytes": 21510
+      }
+    ]
+  },
+  "resume_after_sudoku": {
+    "artifact": {
+      "local_path": "build-dev/hardware/20261024-reading-ddfb7de/resume-shaosong.json",
+      "sha256": "371aebeedff3b839c1821f7be2f3694dad5d10fdc5a6a23c114cb9202d3176ae",
+      "bytes": 1170454
+    },
+    "command": "tap 350 520",
+    "seq": 482942,
+    "reply": "ok queued t=867295",
+    "finish": "done start=867323 end=867448",
+    "start": 867323,
+    "release": 867448,
+    "first_display_ms": 691,
+    "last_display_ms": 17523,
+    "displays": [
+      {
+        "kind": "frame",
+        "start": 867435,
+        "end": 868014,
+        "ms": 579,
+        "status": 0
+      },
+      {
+        "kind": "frame",
+        "start": 868804,
+        "end": 869303,
+        "ms": 499,
+        "status": 0
+      },
+      {
+        "kind": "frame",
+        "start": 870091,
+        "end": 870613,
+        "ms": 522,
+        "status": 0
+      },
+      {
+        "kind": "frame",
+        "start": 871404,
+        "end": 871904,
+        "ms": 500,
+        "status": 0
+      },
+      {
+        "kind": "frame",
+        "start": 872692,
+        "end": 873197,
+        "ms": 505,
+        "status": 0
+      },
+      {
+        "kind": "frame",
+        "start": 873985,
+        "end": 874508,
+        "ms": 523,
+        "status": 0
+      },
+      {
+        "kind": "frame",
+        "start": 875297,
+        "end": 875838,
+        "ms": 541,
+        "status": 0
+      },
+      {
+        "kind": "frame",
+        "start": 876628,
+        "end": 877129,
+        "ms": 501,
+        "status": 0
+      },
+      {
+        "kind": "frame",
+        "start": 877919,
+        "end": 878421,
+        "ms": 502,
+        "status": 0
+      },
+      {
+        "kind": "frame",
+        "start": 879209,
+        "end": 879734,
+        "ms": 525,
+        "status": 0
+      },
+      {
+        "kind": "frame",
+        "start": 880523,
+        "end": 881046,
+        "ms": 523,
+        "status": 0
+      },
+      {
+        "kind": "frame",
+        "start": 884198,
+        "end": 884846,
+        "ms": 648,
+        "status": 0
+      }
+    ],
+    "reader_logs": [
+      "I (886202) pico_nano: Reader action=0 status=0 elapsed=3357 ms"
+    ]
+  },
+  "final_status": "status t=897069 view=0025000f body=1 paused=0 events=581 touch_reads=26683 touch_errors=0 gesture=0 dropped=0",
+  "final_version": "ok version product=1.0.6 app=1.0.6-diag idf=v6.1 elf=3171f7fe1",
+  "final_reader_matches_before_flash": true
+}

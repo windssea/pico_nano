@@ -11,7 +11,7 @@
 | [INSTALLATION](INSTALLATION.md) | 网页/异机升级步骤、写入边界、复位原因、发布流程及故障处理 |
 | [SD_CARD_LAYOUT](SD_CARD_LAYOUT.md) | TF 资源路径和全部导入通道必须遵守的安装契约 |
 | [CHANGELOG](CHANGELOG.md) | 简短变化记录；详细方案写架构或开发指南 |
-| [READING_DEVICE_TEST_REPORT](READING_DEVICE_TEST_REPORT.md) | 399cce7诊断镜像多书开书/翻页实测、失败证据链、对照及验证边界 |
+| [READING_DEVICE_TEST_REPORT](READING_DEVICE_TEST_REPORT.md) | 399cce7与ddfb7de诊断镜像多书开书/翻页实测、失败证据链、对照及验证边界 |
 
 ## 阅读顺序与事实等级
 
