@@ -37,6 +37,10 @@ pn_status_t pn_epub_reader_prepare(pn_epub_reader_t *,pn_read_intent_t,const pn_
 pn_status_t pn_epub_reader_prepare_step(pn_epub_reader_t *,pn_read_intent_t,const pn_epub_location_t *,pn_epub_reader_receipt_t *);
 /// 读取当前完整候选回执，不解析或确认页面；EMPTY时输出保持。/ Copy the complete pending receipt without parsing or confirming a page; preserve output on EMPTY.
 pn_status_t pn_epub_reader_prepared(const pn_epub_reader_t *,pn_epub_reader_receipt_t *);
+/// 仅供完整验证的续读位图：原锚点产生待显示回执，不伪造页节点，不提前提交位置。/ Fully verified resume bitmaps only: prepare a receipt from original anchors without fabricated nodes or early position commits.
+pn_status_t pn_epub_reader_prepare_resume(pn_epub_reader_t *,pn_read_intent_t,const pn_epub_reader_anchor_t *,pn_epub_reader_receipt_t *);
+/// 已确认页面的前后语义边界，查询不解析。/ Query confirmed page boundaries without parsing.
+pn_status_t pn_epub_reader_visible(const pn_epub_reader_t *,pn_epub_reader_anchor_t *);
 /// 仅完整图片/正文/显示成功后success=true；匹配回执提交，不接受重复或过期确认。
 /// Set success only after complete images/body/display; commit matching receipts, rejecting repeated or stale completion.
 pn_status_t pn_epub_reader_complete(pn_epub_reader_t *,const pn_epub_reader_receipt_t *,bool,uint64_t);

@@ -72,6 +72,7 @@ typedef struct {
     bool reader_turn_pending; ///< NEXT准备跨事件轮继续 / Continue NEXT preparation across event ticks
     pn_hot_session_t hot; ///< 单个已保存会话，写入前释放 / One saved session, released before writes
     pn_epub_open_job_t foreground_open;pn_catalog_item_t *opening_book; ///< 私有开书任务及唯一请求快照，不提前覆盖last_read / Private opening job and sole request snapshot, never overwriting last_read early
+    uint64_t open_measure_us,turn_measure_us; ///< 完整操作含让出等待，仅主机观察 / Whole operation including yield gaps, host observation only
     pn_loading_motion_t opening_motion; ///< 同源低频开书动画时钟，不驻留画布 / Shared slow opening-animation clock, without a resident canvas
     pn_toc_ui_t toc;
     bool toc_pointer,pointer_down;
@@ -173,6 +174,7 @@ static void stats_snapshot(library_t *s,pn_bookmark_lock_t *snapshot){
         snapshot->reading.known=s->bookmark_lock_item.identified && s->reading_stats.has_book && !memcmp(s->bookmark_lock_item.expected.sha256,s->reading_stats.book.id.sha256,32);}
 }
 static pn_status_t active_step(library_t *s,pn_reader_action_t action,uint64_t now,pn_reader_present_fn present,void *ctx){
+    if(action==PN_APP_NEXT && !s->reader_turn_pending)s->turn_measure_us=pn_profile_time();
     stats_pause(s);
     pn_reader_app_refresh_period(&s->reader,pn_settings_refresh_pages(s->input_flags));
     pn_epub_app_refresh_period(&s->epub,pn_settings_refresh_pages(s->input_flags));
@@ -182,6 +184,7 @@ static pn_status_t active_step(library_t *s,pn_reader_action_t action,uint64_t n
     pn_status_t status;uint64_t batch_started=SDL_GetTicks64();unsigned batch_steps=0;
     do{status=s->epub.impl?pn_epub_app_step_yield(&s->epub,action,now,pn_turn_present,&effect):pn_reader_app_step(&s->reader,action,now,pn_turn_present,&effect);}
     while(s->epub.impl && action==PN_APP_NEXT && status==PN_BUSY && ++batch_steps<32u && SDL_GetTicks64()-batch_started<8u);
+    if(action==PN_APP_NEXT && status!=PN_BUSY && s->turn_measure_us){uint64_t end=pn_profile_time();pn_profile_observe(s->pool,"sim.next.request",status,end-s->turn_measure_us,NULL);s->turn_measure_us=0;}
     s->reader_turn_pending=s->epub.impl && action==PN_APP_NEXT && status==PN_BUSY;
     s->async.defer_ack=s->reader_turn_pending;
     if((action==PN_APP_NEXT || action==PN_APP_PREVIOUS) && (s->epub.impl?pn_epub_app_last_confirmed(&s->epub):pn_reader_app_last_confirmed(&s->reader))){stats_poll(s,true);stats_pause(s);uint64_t utc=0;bool dated=stats_clock(&utc);pn_book_id_t id;
@@ -527,6 +530,7 @@ static pn_status_t finish_open(library_t *s,const pn_catalog_item_t *book,uint64
         }
     }
     if(status==PN_OK)status=active_step(s,PN_APP_OPEN,now,present,s);
+    if(s->open_measure_us){uint64_t end=pn_profile_time();pn_profile_observe(s->pool,"sim.open.request",status,end-s->open_measure_us,NULL);s->open_measure_us=0;}
     fprintf(stderr,"library_open first-page name=%s status=%d\n",book->name,(int)status);
     if(status==PN_OK){pn_txt_progress_t progress;s->last_read=*book;
         s->last_read.identified=(s->epub.impl?pn_epub_app_identity(&s->epub,&s->last_read.expected):pn_reader_app_identity(&s->reader,&s->last_read.expected))==PN_OK;s->last_read_known=s->last_read.identified;
@@ -578,11 +582,13 @@ first_page:
 }
 static pn_status_t open_item(library_t *s,const pn_catalog_item_t *book,uint64_t now){
     if((s->foreground_open.impl || s->index_gate))return PN_BUSY;
+    s->open_measure_us=pn_profile_time();
     pn_async_block_controls(&s->async.input,true);pn_sdl_async_title(&s->async,PN_BRAND_NAME " - 正在打开书籍");
     s->async.context=18;pn_async_set_view(&s->async.input,18u|(s->async.revision<<16),false);
     s->opening_motion.active=false;printf("opening begin name=%s\n",book->name);pn_status_t status=open_item_impl(s,book,now);
     if(status==PN_BUSY && (s->foreground_open.impl || s->index_gate)){s->async.defer_ack=true;return status;}
     pn_async_block_controls(&s->async.input,false);pn_sdl_async_title(&s->async,PN_BRAND_NAME);
+    if(s->open_measure_us){uint64_t end=pn_profile_time();pn_profile_observe(s->pool,"sim.open.request",status,end-s->open_measure_us,NULL);s->open_measure_us=0;}
     printf("opening end status=%d\n",(int)status);return status;
 }
 static void tick_opening(library_t *s,uint64_t now){
@@ -989,9 +995,13 @@ static int library_worker(void *ctx){
                 uint64_t batch_started=SDL_GetTicks64();unsigned steps=0;
                 do{status=s->epub.impl?pn_epub_app_prefetch(&s->epub):pn_reader_app_prefetch(&s->reader);}
                 while(s->epub.impl && status==PN_OK && ++steps<32u && SDL_GetTicks64()-batch_started<8u);
-                prefetch_work=status==PN_OK;if(status==PN_OK)printf("neighbor prefetch work\n");pn_status_t cached=s->epub.impl && (pn_epub_app_cache_pending(&s->epub) || !pn_epub_app_prefetch_pending(&s->epub))?pn_epub_app_cache_idle(&s->epub,now):PN_EMPTY;if(cached==PN_OK)printf("semantic cache stored\n");
+                prefetch_work=status==PN_OK;if(status==PN_OK)printf("neighbor prefetch work\n");
+                pn_status_t resumed;steps=0;batch_started=SDL_GetTicks64();
+                do{resumed=s->epub.impl?pn_epub_app_resume_cache_idle(&s->epub):pn_reader_app_resume_cache_idle(&s->reader);}
+                while(resumed==PN_BUSY && ++steps<32u && SDL_GetTicks64()-batch_started<8u);
+                prefetch_work=prefetch_work || resumed==PN_BUSY;pn_status_t cached=resumed==PN_EMPTY && s->epub.impl && (pn_epub_app_cache_pending(&s->epub) || !pn_epub_app_prefetch_pending(&s->epub))?pn_epub_app_cache_idle(&s->epub,now):PN_EMPTY;if(cached==PN_OK)printf("semantic cache stored\n");
                 if(now>=font_activity && now-font_activity>=1500u){pn_status_t recent=s->epub.impl?pn_epub_app_recent_idle(&s->epub,now):pn_reader_app_recent_idle(&s->reader,now);if(recent==PN_OK)printf("recent record stored when idle\n");
-                    if(!(s->epub.impl?pn_epub_app_prefetch_pending(&s->epub):pn_reader_app_warm_pending(&s->reader)) && (s->epub.impl?pn_epub_app_index_pending(&s->epub):pn_reader_app_index_pending(&s->reader))){pn_book_index_state_t progress;pn_status_t indexed;unsigned steps=0;uint64_t began=SDL_GetTicks64();do{indexed=s->epub.impl?pn_epub_app_index_step(&s->epub,&progress):pn_reader_app_index_step(&s->reader,&progress);}while(indexed==PN_BUSY && ++steps<PN_BOOK_INDEX_STEP_MAX && SDL_GetTicks64()-began<8);prefetch_work=prefetch_work || indexed==PN_BUSY;if(indexed==PN_OK){profile_index_flush();printf("book_index background complete pages=%u\n",progress.pages);}}
+                    if(!(s->epub.impl?pn_epub_app_resume_cache_pending(&s->epub):pn_reader_app_resume_cache_pending(&s->reader)) && !(s->epub.impl?pn_epub_app_prefetch_pending(&s->epub):pn_reader_app_warm_pending(&s->reader)) && (s->epub.impl?pn_epub_app_index_pending(&s->epub):pn_reader_app_index_pending(&s->reader))){pn_book_index_state_t progress;pn_status_t indexed;unsigned steps=0;uint64_t began=SDL_GetTicks64();do{indexed=s->epub.impl?pn_epub_app_index_step(&s->epub,&progress):pn_reader_app_index_step(&s->reader,&progress);}while(indexed==PN_BUSY && ++steps<PN_BOOK_INDEX_STEP_MAX && SDL_GetTicks64()-began<8);prefetch_work=prefetch_work || indexed==PN_BUSY;if(indexed==PN_OK){profile_index_flush();printf("book_index background complete pages=%u\n",progress.pages);}}
 }}
             if(!s->locked && s->styles.active && !s->pointer_down && atomic_load(&s->async.mouse)==0)(void)pn_style_ui_tick(&s->styles,present,s);
             if(!s->locked && s->wallpaper.impl && !s->pointer_down && atomic_load(&s->async.mouse)==0)(void)pn_wallpaper_ui_tick(&s->wallpaper,present,s);

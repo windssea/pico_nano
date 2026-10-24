@@ -17,6 +17,7 @@
 | `/piconano/.readpico/covers/` | 可重建缩略图 | 不与封面原图混放 |
 | `/piconano/.readpico/indexes/library.pni` | 可重建书库索引 | 介质/目录变动失效，打开书仍完整核对SHA |
 | `/piconano/.readpico/reading/pages/` | 开发中的TF分页表及整书编译游标 | 按完整书籍/实际字体布局键保存，最多65536项/表（含一条编译状态），全局32MiB；仅已提交完成标记表示整书覆盖，缺失/损坏回原书 |
+| `/piconano/.readpico/reading/resume/` | 当前页与下一页无损原生续读包 | 每书两槽，完整身份/设置/位置/SHA/CRC匹配才复用；全局16MiB，缺失回正常排版，可删除重建 |
 | `/piconano/.readpico/masks/` | 可重建透明锁屏灰度/透明平面 | 原图路径/大小/mtime/变换为键，CRC 损坏即重建，可整目录删除 |
 | `/piconano/.readpico/wallpapers/` | 可重建壁纸缩略图及原生预览 | 缩略图144×256/16灰阶；原生预览核对完整源SHA及CRC，可整目录删除 |
 | `/piconano/.readpico/uploads/` | 暂存、分块记录、安装日志及备份 | 未完成文件不入书架，不手动清理活动事务 |

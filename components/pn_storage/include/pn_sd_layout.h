@@ -21,6 +21,8 @@
 #define PN_SD_COVER_CACHE PN_SD_PRIVATE "/covers" ///< 可重建缩略图缓存 / Rebuildable thumbnail cache
 #define PN_SD_INDEX_CACHE PN_SD_PRIVATE "/indexes" ///< 可重建书库索引 / Rebuildable catalog indexes
 #define PN_SD_READING_CACHE PN_SD_PRIVATE "/reading" ///< 可重建阅读派生数据，页表位于pages子目录 / Rebuildable reading data, with page tables in the pages subdirectory
+#define PN_SD_RESUME_LEAF "resume" ///< 续读帧子目录 / Resume-frame subdirectory
+#define PN_SD_RESUME_CACHE PN_SD_READING_CACHE "/" PN_SD_RESUME_LEAF ///< 可重建当前页与邻页原生帧 / Rebuildable native current/neighbor frames
 #define PN_SD_MASK_CACHE PN_SD_PRIVATE "/masks" ///< 可重建透明锁屏平面 / Rebuildable transparent lock-screen planes
 #define PN_SD_WALLPAPER_CACHE PN_SD_PRIVATE "/wallpapers" ///< 可重建壁纸缩略图/原生预览，不含用户原件 / Rebuildable wallpaper thumbnails/native previews, never originals
 #define PN_SD_BACKGROUND_CACHE PN_SD_PRIVATE "/backgrounds" ///< 可重建阅读背景缓存 / Rebuildable reading-paper caches

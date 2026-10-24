@@ -18,6 +18,7 @@
 #include "pn_turn_transition.h"
 #include "pn_epub_app.h"
 #include "pn_semantic_file.h"
+#include "pn_resume.h"
 #include "pn_hot_session.h"
 #include "pn_identity_cache.h"
 #include "pn_toc_ui.h"
@@ -1717,7 +1718,12 @@ static bool tick_reader_background(uint64_t now){
             reader_prefetch_batch=false;
         }
         // 已开始的落盘须能收口，避免其借用与预排优先级互等。/ Let an existing write finish so its borrow cannot deadlock with prefetch priority.
-        else if(slot==1 && epub.impl && (pn_epub_app_cache_pending(&epub) || !pn_epub_app_prefetch_pending(&epub)))s=pn_epub_app_cache_idle(&epub,now);
+        else if(slot==1){
+            unsigned steps=0;int64_t began=esp_timer_get_time();
+            do{s=epub.impl?pn_epub_app_resume_cache_idle(&epub):pn_reader_app_resume_cache_idle(&reader);}
+            while(s==PN_BUSY && ++steps<32u && esp_timer_get_time()-began<8000);
+            if(s==PN_EMPTY && epub.impl && (pn_epub_app_cache_pending(&epub) || !pn_epub_app_prefetch_pending(&epub)))s=pn_epub_app_cache_idle(&epub,now);
+        }
         else if(slot==2 && now>=last_input && now-last_input>=300 && ((reader.impl && pn_reader_app_verify_pending(&reader)) || (epub.impl && (pn_epub_app_verify_pending(&epub) || pn_epub_app_font_recovery_pending(&epub))))){
             s=epub.impl?pn_epub_app_verify_step(&epub):pn_reader_app_verify_step(&reader);
             if(epub.impl && pn_epub_app_font_recovery_pending(&epub)){
@@ -1728,7 +1734,7 @@ static bool tick_reader_background(uint64_t now){
                 snprintf(trust_failed_path,sizeof trust_failed_path,"%s",selected_path);pn_identity_cache_forget(&identity_cache,selected_path);if(stop_reader())start_reader();
             }else if(s!=PN_BUSY && s!=PN_CANCELLED)ESP_LOGW(TAG,"Fast-open verification stopped: %d",(int)s);
         }
-        if(slot==4 && now>=last_input && now-last_input>=1500 && !(epub.impl?pn_epub_app_prefetch_pending(&epub):pn_reader_app_warm_pending(&reader)) && (epub.impl?pn_epub_app_index_pending(&epub):pn_reader_app_index_pending(&reader))){
+        if(slot==4 && !(epub.impl?pn_epub_app_resume_cache_pending(&epub):pn_reader_app_resume_cache_pending(&reader)) && now>=last_input && now-last_input>=1500 && !(epub.impl?pn_epub_app_prefetch_pending(&epub):pn_reader_app_warm_pending(&reader)) && (epub.impl?pn_epub_app_index_pending(&epub):pn_reader_app_index_pending(&reader))){
             pn_book_index_state_t progress;unsigned steps=0;int64_t began=esp_timer_get_time();do{s=epub.impl?pn_epub_app_index_step(&epub,&progress):pn_reader_app_index_step(&reader,&progress);}while(s==PN_BUSY && ++steps<PN_BOOK_INDEX_STEP_MAX && esp_timer_get_time()-began<8000);if(s==PN_OK)ESP_LOGI(TAG,"Whole-book index complete: %u pages",(unsigned)progress.pages);
 #if PN_DEVICE_TEST_CONSOLE
             if(s!=PN_BUSY && s!=PN_CANCELLED)index_profile_flush();
@@ -2606,6 +2612,7 @@ static void device_task(void *arg){
     pn_page_index_space_port(index_space,NULL);
     pn_page_index_tf_space_port(tf_index_space,NULL);
     pn_semantic_file_space_port(semantic_space,NULL);
+    pn_resume_space_ports(tf_index_space,semantic_space,NULL);
     (void)pn_catalog_index_init(&catalog_index,&pool,&sd_media,book_directory,PN_SD_MOUNT "/" PN_SD_INDEX_CACHE);
     start_reader();pn_reader_input_t input={0};pn_tap_t tap={0};int hold_hit=-1;uint64_t hold_start=0,hold_last=0;bool hold_fired=false;uint64_t last_card=0,last_key=0,last_ui_retry=0,boot=now_ms();
     pn_async_scope_t scope;bool scope_active=false;pn_tap_press_t navigation_press={0};pn_shelf_gesture_t shelf_gesture={0};

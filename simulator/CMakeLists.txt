@@ -119,6 +119,8 @@ add_test(NAME font_scroll_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_S
 add_test(NAME toc_scroll_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_toc_scroll_window.py $<TARGET_FILE:pn_sim> ${PN_ROOT}/assets/fonts/read-pico-ui.ttf)
 add_test(NAME shelf_focus_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_shelf_focus_window.py $<TARGET_FILE:pn_sim> ${PN_ROOT}/assets/fonts/read-pico-ui.ttf)
 add_test(NAME semantic_cache_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_semantic_cache_window.py $<TARGET_FILE:pn_sim> ${PN_ROOT}/assets/fonts/read-pico-ui.ttf)
+add_test(NAME resume_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_resume_window.py $<TARGET_FILE:pn_sim> ${PN_ROOT}/assets/fonts/HarmonyOS_Sans_SC_Regular.ttf)
+set_tests_properties(resume_window PROPERTIES TIMEOUT 240 LABELS "reader;storage")
 add_test(NAME async_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_async_window.py $<TARGET_FILE:pn_sim>)
 add_test(NAME opening_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_opening_window.py $<TARGET_FILE:pn_sim>)
 add_test(NAME persistent_index_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_persistent_index_window.py $<TARGET_FILE:pn_sim>)

@@ -224,3 +224,8 @@ pn_status_t pn_reader_app_index_step(pn_reader_app_t *,pn_book_index_state_t *);
 
 /// 只读调度资格，不读取文件或推进编译。/ Query scheduling eligibility without file I/O or compilation.
 bool pn_reader_app_index_pending(const pn_reader_app_t *);
+
+/// 邻页预热后分步保存当前页/下一页续读包，失败不影响阅读。/ After neighbor warming, incrementally persist current/next resume frames; failure leaves reading intact.
+pn_status_t pn_reader_app_resume_cache_idle(pn_reader_app_t *);
+/// 可选续读写入仍借用帧；不等于整书索引完成。/ Optional resume writing still borrows a frame, independently of whole-book completion.
+bool pn_reader_app_resume_cache_pending(const pn_reader_app_t *);

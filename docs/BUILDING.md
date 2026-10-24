@@ -2,6 +2,12 @@
 
 更新：2026-10-14。这里只记录现有可复跑入口；当前实现/未完工作分别见[架构](ARCHITECTURE.md)和[开发指南](DEVELOPMENT_PLAN.md)。固件构建、串口写入与真机验收是不同阶段，默认工具命令不烧录。
 
+续读包回归为`resume_app`（独立进程重启、A/B换书、缺包/根、损坏/截断、显示失败重试、时间/字号/字重/背景变化及图片完整帧）和`resume_file`（三类无损像素、全部提交边界中断、可信SHA、空间不足、同步失败、取消/失卡与自有配额清理）。`resume_window`驱动真实SDL事件循环，核对开书/NEXT/PREV完整画面、跨进程命中和删包回退；自动回归使用dummy，开发仍须重建并保留可见窗口。三者分别随`python tools/dev.py host`/`sdl`运行。
+
+独立旧/新对照：先冻结旧提交源码并用相同`pn_resume_capture.c`编译观察器（旧目标不定义`PN_RESUME_NEW`），再运行`python tools/test_local_resume.py --before <旧观察器> --after <新观察器> --font <完整TTF> --out <报告.json>`。输入与状态复制到临时卷，三轮交替、固定可用CPU，TXT及480章/单章288万字逐帧一致才汇总开书/首次NEXT中位数、池峰和包体积。只有同源软件时间，不模拟TF或面板。
+
+SDL独立对照为`python simulator/test_resume_window.py <新pn_sim> <完整TTF> <旧pn_sim>`；设置`PN_RESUME_EVIDENCE`保留原始日志/PGM，设置`SDL_VIDEODRIVER=x11`并提供WSLg挂载可走可见窗口。两版须加入相同只读计时点：`sim.open.request`从开书请求到首屏回执，`sim.next.request`包含异步NEXT让出等待。截图写盘及窗口呈现包含在该端到端软件时间内；控制器观察器另排除捕获写盘。不可将局部阶段相加或用一次忙碌主机测量宣称真机比例。
+
 `catalog_index`与`catalog_mount`增加stdio定位计数及逐次故障注入：首屏不探读页外记录、同页/搜索顺序读，仍用独立目录扫描核对首屏、倒序、字母与搜索；三次定位任一步失败不得发布半页，之后可重建且原READ租约有效。定位次数是软件端口计数，不代表TF事务或耗时。
 
 ## 整书索引的软件回归

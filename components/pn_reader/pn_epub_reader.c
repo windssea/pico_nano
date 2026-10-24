@@ -285,6 +285,15 @@ pn_status_t pn_epub_reader_progress(pn_epub_reader_t *handle,pn_epub_progress_t 
     reader_t *r=handle->impl;if(!r->has_visible)return PN_EMPTY;size_t index;pn_status_t status=check_location(r,&r->visible.begin,&index);if(status!=PN_OK)return status;
     *out=(pn_epub_progress_t){r->book,r->visible.begin};return PN_OK;
 }
+pn_status_t pn_epub_reader_visible(const pn_epub_reader_t *h,pn_epub_reader_anchor_t *out){if(!h || !h->impl || !out)return PN_INVALID;reader_t *r=h->impl;if(!r->has_visible)return PN_EMPTY;*out=r->visible;return PN_OK;}
+pn_status_t pn_epub_reader_prepare_resume(pn_epub_reader_t *h,pn_read_intent_t intent,const pn_epub_reader_anchor_t *a,pn_epub_reader_receipt_t *out){
+    if(!h || !h->impl || !a || !out || (intent!=PN_READ_JUMP && intent!=PN_READ_NEXT))return PN_INVALID;
+    reader_t *r=h->impl;if(!r->next_ticket)return PN_LIMIT;
+    if(r->preparing || (intent==PN_READ_JUMP && r->has_visible) || (intent==PN_READ_NEXT && (!r->has_visible || !r->visible.has_next || !same_location(&a->begin,&r->visible.next))))return PN_EMPTY;
+    size_t index;pn_status_t s=check_location(r,&a->begin,&index);if(s==PN_OK && a->has_next)s=check_location(r,&a->next,&index);if(s!=PN_OK)return s;
+    prefetch_abort(r);r->page->valid=false;r->page->count=r->page->image_count=0;
+    r->pending=(pn_epub_reader_receipt_t){h,r->token,r->next_ticket++,intent,*a};r->preparing=true;*out=r->pending;return PN_OK;
+}
 static pn_status_t complete_impl(pn_epub_reader_t *handle,const pn_epub_reader_receipt_t *receipt,bool success,uint64_t now){
     if(!handle || !handle->impl || !receipt || receipt->owner!=handle)return PN_INVALID;
     reader_t *r=handle->impl;if(receipt->token.session!=r->token.session || receipt->token.generation!=r->token.generation)return PN_STALE_JOB;

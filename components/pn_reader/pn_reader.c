@@ -164,6 +164,12 @@ pn_status_t pn_reader_progress(const pn_reader_t *r,pn_txt_progress_t *progress)
     if(!r->has_visible)return PN_EMPTY;
     *progress=(pn_txt_progress_t){r->book,r->decoder.source.size,r->visible.begin,r->decoder.encoding,1};return PN_OK;
 }
+pn_status_t pn_reader_prepare_resume(pn_reader_t *r,pn_read_intent_t intent,pn_reader_anchor_t a,pn_reader_receipt_t *out){
+    if(!r || !out || !r->next_ticket || a.begin>=a.end || a.end>r->decoder.source.size || (intent!=PN_READ_JUMP && intent!=PN_READ_NEXT))return PN_INVALID;
+    if(r->preparing || (intent==PN_READ_JUMP && r->has_visible) || (intent==PN_READ_NEXT && (!r->has_visible || a.begin!=r->visible.end)))return PN_EMPTY;
+    pn_status_t s=pn_cancel_checkpoint();if(s==PN_OK && r->decoder.source.validate)s=r->decoder.source.validate(r->decoder.source.ctx);if(s!=PN_OK)return s;
+    r->page.valid=false;r->page.count=0;r->pending=(pn_reader_receipt_t){r,r->token,r->next_ticket++,intent,a};r->preparing=true;*out=r->pending;return PN_OK;
+}
 static pn_status_t complete_impl(pn_reader_t *r,const pn_reader_receipt_t *receipt,bool success,uint64_t now){
     if(!r || !receipt || receipt->owner!=r)return PN_INVALID;
     if(receipt->token.session!=r->token.session || receipt->token.generation!=r->token.generation)return PN_STALE_JOB;
