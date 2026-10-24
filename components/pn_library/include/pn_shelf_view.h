@@ -10,6 +10,9 @@
 #define PN_SHELF_NEXT 41
 #define PN_SHELF_TOGGLE 43
 #define PN_SHELF_READING_HOME 42 ///< 独立阅读首页 / Independent reading home
+#define PN_SHELF_TAB_ENTERTAINMENT 45 ///< 娱乐分类 / Entertainment category
+#define PN_SHELF_SUDOKU 46 ///< 数独入口 / Sudoku entry
+#define PN_SHELF_ENTERTAINMENT_BACK 47 ///< 返回娱乐 / Return to entertainment
 #define PN_SHELF_CONTINUE 44 ///< 点继续阅读卡 / Tap the continue-reading card
 /// 绘制六行文字/无封面卡，纯绘制，不打开书籍或修改状态。
 /// Draw six text/cover-fallback rows only, without opening books or changing state.
@@ -56,6 +59,8 @@ typedef struct {
     uint8_t style; ///< pn_shelf_style_t静态风格 / Static pn_shelf_style_t appearance
     const pn_book_actions_t *actions; ///< 非NULL时在书架上叠画书籍操作面板（借用同一补字字体）/ When non-NULL, the book actions sheet is drawn over the shelf (sharing the fallback font)
     const pn_favorites_t *favorite_items; ///< 已验证的收藏快照，NULL不画标识 / Validated favorites snapshot; NULL hides markers
+    bool entertainment_tab; ///< 显示娱乐分类 / Show the entertainment category
+    uint8_t entertainment; ///< 0书籍、1娱乐、2数独介绍；不含游戏状态 / 0 books, 1 entertainment, 2 Sudoku introduction; no game state
     bool favorites_tab; ///< 分类里显示“收藏” / Show Favorites among the categories
     bool favorites; ///< 当前为收藏视图 / Showing the favorites view
     bool import_tile; ///< 最后一页空格放“导入图书”卡、空书架给“导入图书”按钮 / An import tile in a free last-page slot and an import button on an empty shelf

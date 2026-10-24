@@ -10,6 +10,12 @@ SDL独立对照为`python simulator/test_resume_window.py <新pn_sim> <完整TTF
 
 `catalog_index`与`catalog_mount`增加stdio定位计数及逐次故障注入：首屏不探读页外记录、同页/搜索顺序读，仍用独立目录扫描核对首屏、倒序、字母与搜索；三次定位任一步失败不得发布半页，之后可重建且原READ租约有效。定位次数是软件端口计数，不代表TF事务或耗时。
 
+## 娱乐入口的软件回归
+
+`shelf_view`检查娱乐/数独介绍的命中、旧书槽隔离与重复绘制不增长；`device_management`通过实际产品路由验证无TF、实体键映射及菜单帧键隔离。`entertainment_window`通过SDL真实事件循环检查分类、介绍/返回、键盘、空书库、2MiB预算及关闭归零，随`python tools/dev.py sdl`运行。当前只有入口和规则介绍，并非可玩数独。
+
+可见模拟器从书库点“娱乐”（原生坐标约460,190）再点数独（100,400）；介绍页“返回娱乐”约300,1000。自动脚本可用`library,tap:460:190,tap:100:400,tap:300:1000,window-close`，最后的`window-close`关闭窗口，`back`/`quit`都映射Esc并仅返回上层。开发窗口保持显示时省略关闭命令。固件静态占用用`python tools/dev.py firmware-board`的size及实际bin长度，不能拿CI配置或PNG压缩大小替代板级运行内存。
+
 ## 整书索引的软件回归
 
 连续编译回归：`index_replay`用独立出版物的原4事件分页逐页比较连续任务的文字/图片节点、全部位置、度量和坐标，并在接续期间注入取消与失卡；`index_large_resume`生成原创单章100万字，检查中断续建与一次完成的全部页边界/首屏、池归零及工作步数，防旧窗口占满额度后的逐页小块解析退化。正常主机入口包含两项。

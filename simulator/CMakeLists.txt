@@ -78,6 +78,8 @@ add_test(NAME actions_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURC
 set_tests_properties(actions_window PROPERTIES LABELS "library;ui;storage")
 add_test(NAME settings_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_settings_window.py $<TARGET_FILE:pn_sim>)
 add_test(NAME shelf_appearance_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_shelf_appearance_window.py $<TARGET_FILE:pn_sim>)
+add_test(NAME entertainment_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_entertainment_window.py $<TARGET_FILE:pn_sim>)
+set_tests_properties(entertainment_window PROPERTIES LABELS "library;ui")
 add_test(NAME reading_home_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_reading_home_window.py $<TARGET_FILE:pn_sim>)
 set_tests_properties(reading_home_window PROPERTIES LABELS "library;reader;ui;storage")
 set_tests_properties(shelf_appearance_window PROPERTIES LABELS "library;ui;storage")

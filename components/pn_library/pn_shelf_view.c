@@ -366,25 +366,67 @@ static void dashed_frame(pn_frame_t *frame,int x,int y,int w,int h,int radius){
     for(int px=x+radius+8;px<x+w-radius-8;px+=20){pn_frame_rect(frame,px,y-1,8,4,PN_UI_PAPER);pn_frame_rect(frame,px,y+h-3,8,4,PN_UI_PAPER);}
     for(int py=y+radius+8;py<y+h-radius-8;py+=20){pn_frame_rect(frame,x-1,py,4,8,PN_UI_PAPER);pn_frame_rect(frame,x+w-3,py,4,8,PN_UI_PAPER);}
 }
+/// 九宫与数字逐像素绘制，直接借画布，无字体/位图工作区。/ Draw the grid and digits directly, without font or bitmap scratch space.
+static void sudoku_icon(pn_frame_t *frame,int x,int y,int size){
+    static const uint16_t digits[]={0x2497,0x73e7,0x73cf,0x5bc9,0x79cf,0x7bcf};
+    static const uint8_t cells[]={0,2,4,5,6,8};
+    int cell=size/3,unit=cell/8;
+    pn_w_round_stroke(frame,x,y,cell*3,cell*3,8,3,PN_UI_INK);
+    for(int i=1;i<3;i++){pn_frame_rect(frame,x+i*cell,y,2,cell*3,PN_UI_INK);pn_frame_rect(frame,x,y+i*cell,cell*3,2,PN_UI_INK);}
+    for(unsigned i=0;i<sizeof cells;i++){
+        int cx=(cells[i]%3)*cell,cy=((cells[i]/3)%3)*cell;
+        for(int r=0;r<5;r++)for(int col=0;col<3;col++)if(digits[i]&(1u<<(14-r*3-col)))pn_frame_rect(frame,x+cx+(cell-3*unit)/2+col*unit,y+cy+(cell-5*unit)/2+r*unit,unit,unit,PN_UI_INK);
+    }
+}
+/// 娱乐只消费UI状态；不查询书籍、题库或图片。/ Entertainment consumes only UI state, never books, puzzle banks or images.
+static pn_status_t entertainment_body(pn_font_t *font,pn_frame_t *frame,bool detail){
+    pn_status_t s=pn_font_size(font,24);
+    if(!detail){
+        if(s==PN_OK)s=pn_w_text_ex(font,frame,"阅读之外，换一种思考。",32,266,620,PN_ALIGN_LEFT,PN_UI_MUTED,false);
+        pn_w_round_stroke(frame,36,314,184,228,20,1,PN_UI_RULE);
+        sudoku_icon(frame,68,340,120);
+        if(s==PN_OK)s=pn_font_size(font,30);
+        if(s==PN_OK)s=pn_w_text_ex(font,frame,"数独",36,506,184,PN_ALIGN_CENTER,PN_UI_INK,true);
+        if(s==PN_OK)s=pn_font_size(font,22);
+        if(s==PN_OK)s=pn_w_text_ex(font,frame,"即将开放",36,578,184,PN_ALIGN_CENTER,PN_UI_MUTED,false);
+        pn_w_loading_panda(frame,214,704,0);
+        if(s==PN_OK)s=pn_font_size(font,28);
+        if(s==PN_OK)s=pn_w_text_ex(font,frame,"来一局，慢慢想。",32,906,620,PN_ALIGN_CENTER,PN_UI_MUTED,false);
+    }else{
+        sudoku_icon(frame,252,294,180);
+        if(s==PN_OK)s=pn_font_size(font,40);
+        if(s==PN_OK)s=pn_w_text_ex(font,frame,"数独",32,550,620,PN_ALIGN_CENTER,PN_UI_INK,true);
+        if(s==PN_OK)s=pn_font_size(font,26);
+        if(s==PN_OK)s=pn_w_text_ex(font,frame,"每行、每列、每宫，填入 1–9。",32,612,620,PN_ALIGN_CENTER,PN_UI_MUTED,false);
+        if(s==PN_OK)s=pn_w_text_ex(font,frame,"简单 · 中等 · 困难 · 极难",32,662,620,PN_ALIGN_CENTER,PN_UI_MUTED,false);
+        pn_w_loading_panda(frame,214,716,0);
+        if(s==PN_OK)s=pn_w_text_ex(font,frame,"即将开放",32,914,620,PN_ALIGN_CENTER,PN_UI_MUTED,false);
+        if(s==PN_OK)s=pn_w_button(font,frame,"返回娱乐",182,966,320,88,0);
+    }
+    if(s==PN_OK)s=pn_w_navigation(font,frame,PN_NAV_LIBRARY);
+    return s;
+}
 pn_status_t pn_shelf_render_ex(const pn_catalog_page_t *page,pn_font_t *font,pn_frame_t *frame,int selected,bool recent,bool transfer,const pn_shelf_covers_t *covers,const pn_shelf_options_t *options){
     if(!page || page->count>PN_CATALOG_PAGE_MAX || !font || !font->impl || !frame || !frame->pixels || frame->width!=684 || frame->height!=1216 || frame->stride<342)return PN_INVALID;
     if(!options)options=&default_options;
     if(options->home)return home_render(page,font,frame,covers,options,selected);
     bool list=options->list_mode;size_t visible=pn_shelf_capacity(options);
     int original=font->pixels;pn_frame_clear(frame,PN_UI_PAPER);
+    if(options->entertainment)home_ornament(frame);
     pn_status_t s=pn_w_status(font,frame);
     // 标题行只保留书库标题。/ Keep only the library heading in the title row.
     if(s==PN_OK)s=pn_font_size(font,40);
-    if(s==PN_OK)s=pn_w_text_ex(font,frame,options->query?"搜索结果":"书库",32,120,420,PN_ALIGN_LEFT,PN_UI_INK,true);
+    if(s==PN_OK)s=pn_w_text_ex(font,frame,options->query && !options->entertainment?"搜索结果":"书库",32,120,420,PN_ALIGN_LEFT,PN_UI_INK,true);
 
 
-    // 分类：全部/最近/收藏，深色胶囊为当前；右侧网格/列表切换。/ Categories: All/Recent/Favorites with a dark capsule for the current one; the grid/list toggle on the right.
-    {static const char *const chips[]={"全部","最近","收藏"};int active=options->favorites?2:recent?1:0;unsigned count=options->favorites_tab?3u:2u;
+    // 分类含可选娱乐，深色胶囊为当前；书籍右侧保留布局切换。/ Categories include optional entertainment; a dark capsule marks the active one and books retain the layout toggle.
+    {static const char *const chips[]={"全部","最近","收藏","娱乐"};unsigned books=options->favorites_tab?3u:2u;int active=options->entertainment?(int)books:options->favorites?2:recent?1:0;unsigned count=books+(options->entertainment_tab?1u:0u);
         pn_w_round_fill(frame,32,CHIP_Y,(int)count*CHIP_W+12,CHIP_H,CHIP_H/2,PN_UI_SURFACE);
         for(unsigned i=0;i<count && s==PN_OK;i++){int x=38+(int)i*CHIP_W;s=pn_font_size(font,28);
-            if(s==PN_OK)s=pn_w_text_ex(font,frame,chips[i],x,CHIP_Y+39,CHIP_W,PN_ALIGN_CENTER,PN_UI_INK,(int)i==active);
+            if(s==PN_OK)s=pn_w_text_ex(font,frame,chips[i==books?3u:i],x,CHIP_Y+39,CHIP_W,PN_ALIGN_CENTER,PN_UI_INK,(int)i==active);
             if((int)i==active)pn_w_invert_round(frame,x,CHIP_Y+5,CHIP_W,CHIP_H-10,(CHIP_H-10)/2);}
     }
+    if(options->entertainment){if(s==PN_OK)s=entertainment_body(font,frame,options->entertainment==2);pn_status_t restored=pn_font_size(font,original);return s==PN_OK?restored:s;}
     if(options->layout_toggle){pn_w_glass(frame,LAYOUT_X+28,CHIP_Y,64,CHIP_H,18);if(list)pn_w_icon_grid(frame,LAYOUT_X+44,CHIP_Y+13,32);else pn_w_icon_list(frame,LAYOUT_X+44,CHIP_Y+13,32);}
     // 排序说明与总数。/ Sort note and total.
     if(s==PN_OK)s=pn_font_size(font,24);
@@ -433,7 +475,7 @@ pn_status_t pn_shelf_render_covers(const pn_catalog_page_t *page,pn_font_t *font
 pn_status_t pn_shelf_render_focus(const pn_catalog_page_t *page,pn_font_t *font,pn_frame_t *frame,int before,int after,const pn_shelf_covers_t *covers,const pn_shelf_options_t *options){
     if(!page || page->count>PN_CATALOG_PAGE_MAX || !font || !font->impl || !frame || !frame->pixels || frame->width!=684 || frame->height!=1216 || frame->stride<342 || before< -1 || after< -1)return PN_INVALID;
     if(!options)options=&default_options;
-    if(options->actions)return PN_UNSUPPORTED;
+    if(options->actions || options->entertainment)return PN_UNSUPPORTED;
     size_t visible=options->home?3u:pn_shelf_capacity(options);if(visible>page->count)visible=page->count;
     if(before>=(int)visible || (options->home && before==0))before=-1;
     if(after>=(int)visible || (options->home && after==0))after=-1;
@@ -469,12 +511,17 @@ int pn_shelf_hit_ex(const pn_catalog_page_t *page,int x,int y,const pn_shelf_opt
         return -1;
     }
     if(y<56)return -1;
-    if(y<CHIP_Y-10){return x>=32 && x<300?PN_SHELF_INDEX:-1;}
+    if(y<CHIP_Y-10){return !options->entertainment && x>=32 && x<300?PN_SHELF_INDEX:-1;}
     if(y<LIST_Y-16){
         if(y<CHIP_Y-10)return -1;
-        if(options->layout_toggle && x>=LAYOUT_X && x<664)return PN_SHELF_LAYOUT;
-        int chip=(x-38)/CHIP_W;unsigned count=options->favorites_tab?3u:2u;
-        if(x>=32 && chip>=0 && chip<(int)count)return chip==0?PN_SHELF_TAB_ALL:chip==1?PN_SHELF_TAB_RECENT:PN_SHELF_TAB_FAVORITES;
+        if(!options->entertainment && options->layout_toggle && x>=LAYOUT_X && x<664)return PN_SHELF_LAYOUT;
+        int chip=(x-38)/CHIP_W;unsigned books=options->favorites_tab?3u:2u,count=books+(options->entertainment_tab?1u:0u);
+        if(x>=32 && x<38+(int)count*CHIP_W && chip>=0 && chip<(int)count)return chip==(int)books?PN_SHELF_TAB_ENTERTAINMENT:chip==0?PN_SHELF_TAB_ALL:chip==1?PN_SHELF_TAB_RECENT:PN_SHELF_TAB_FAVORITES;
+        return -1;
+    }
+    if(options->entertainment){
+        if(options->entertainment==1 && x>=36 && x<220 && y>=314 && y<542)return PN_SHELF_SUDOKU;
+        if(options->entertainment==2 && x>=182 && x<502 && y>=966 && y<1054)return PN_SHELF_ENTERTAINMENT_BACK;
         return -1;
     }
     if(!page->count && y>=776 && y<864 && x>=212 && x<472){if(options->query)return PN_SHELF_SEARCH;if(options->import_tile && !options->list_mode && !options->favorites)return PN_SHELF_IMPORT;}
@@ -530,7 +577,7 @@ static pn_status_t with_font_file(const pn_catalog_page_t *page,pn_font_t *font,
     pn_text_file_t file={0};pn_media_lease_t lease;pn_font_t extra={0};pn_text_source_t source={0};bool leased=false,file_open=false,font_open=false;
     // 动态书名先用系统中文补字；借阅读字体作为末级补字。只开字体、不做全量字形校验；外置字体失败仍可使用系统字库。
     // Dynamic titles use system CJK first and the borrowed reading font last. Only open the font without full glyph validation; an external-font failure still allows system glyphs.
-    if(font_path && *font_path && pool && media && media->available){
+    if(!(options && options->entertainment) && font_path && *font_path && pool && media && media->available){
         leased=pn_media_acquire(media,PN_MEDIA_READ,&lease)==PN_OK;
         file_open=leased && pn_text_file_open(&file,media,&lease,font_path,&source)==PN_OK;
         font_open=file_open && pn_font_open(&extra,pool,&source,28)==PN_OK;

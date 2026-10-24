@@ -364,6 +364,15 @@ int main(void){
     assert(shelf_page);memset(shelf_page,0,sizeof *shelf_page);shelf_page->count=6;shelf_page->total=18;shelf_page->more=true;
     for(size_t i=0;i<6;i++){snprintf(shelf_page->items[i].name,sizeof shelf_page->items[i].name,"Book %zu.txt",i);snprintf(shelf_page->items[i].path,sizeof shelf_page->items[i].path,"/books/%zu.txt",i);shelf_page->items[i].format=PN_BOOK_TXT;}
     pn_shelf_covers_reset(shelf_covers,shelf_page);shelf_mode=true;home_mode=false;status_page=false;actions_mode=false;recent_mode=false;fav_mode=false;covers_dirty=false;shelf_focus=-1;
+    /* 无TF仍走实际娱乐路由；三键/返回不误开书，缓存键隔离介绍页。/ Real entertainment routing works without SD; keys/back never open books and menu keys isolate the introduction. */
+    bool card_available=sd_media.available;sd_media.available=false;
+    apply_selection(PN_SHELF_TAB_ENTERTAINMENT);assert(entertainment==1 && shelf_mode && !status_page && active_hit(100,400)==PN_SHELF_SUDOKU);
+    uint64_t entertainment_key=shelf_render_key();assert(!tick_shelf_background(now_ms()));
+    handle_key(PN_KEY_2,PN_KEY_SHORT);assert(entertainment==2 && shelf_mode && !reader_active() && shelf_render_key()!=entertainment_key);
+    assert(active_hit(300,1000)==PN_SHELF_ENTERTAINMENT_BACK && active_hit(100,400)==-1);
+    handle_key(PN_KEY_1,PN_KEY_SHORT);assert(entertainment==1 && shelf_mode && !reader_active());
+    printf("entertainment device used=%zu peak=%zu state=%zu\n",pool.used,pool.peak,sizeof entertainment);
+    sd_media.available=card_available;entertainment=0;covers_inactive=false;
     assert(draw_shelf(PN_REFRESH_GL16)==PN_OK && shelf_draw_valid);unsigned shown=presents;handle_key(PN_KEY_2,PN_KEY_SHORT);assert(shelf_focus==0 && shelf_draw_valid && presents==shown+1);
     pn_frame_t expected;assert(pn_frame_bind(&expected,logical,415872,684,1216));pn_font_t face={0};assert(management_font_begin(&face,24)==PN_OK);pn_shelf_options_t options=shelf_options();if(favorites_valid)options.favorite_items=favorites;
     assert(pn_shelf_render_with_font_file_ex(shelf_page,&face,&expected,0,false,true,shelf_covers,&pool,&sd_media,NULL,&options)==PN_OK && pn_device_frame_copy(&expected,original,415872)==PN_OK && !memcmp(stub_back,original,415872));management_font_end(&face);

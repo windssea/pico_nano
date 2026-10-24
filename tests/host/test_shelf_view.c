@@ -42,6 +42,26 @@ int main(void){
         assert(pn_shelf_hit_ex(p,50,190,&o)==PN_SHELF_TAB_ALL && pn_shelf_hit_ex(p,200,190,&o)==PN_SHELF_TAB_RECENT && pn_shelf_hit_ex(p,300,190,&o)==PN_SHELF_TAB_FAVORITES);
         assert(pn_shelf_hit_ex(p,600,1080,&o)==-1 && pn_shelf_hit_ex(p,100,1080,&o)==-1);
     }
+    /* 娱乐不把旧书籍槽当游戏，纯像素绘制复用原帧；连续进入不增长。/ Entertainment never treats old book slots as games; pixel drawing reuses the frame without repeated growth. */
+    {
+        pn_shelf_options_t o={.entertainment_tab=true,.favorites_tab=true,.entertainment=1,.layout_toggle=true};
+        assert(pn_shelf_hit_ex(p,460,190,&o)==PN_SHELF_TAB_ENTERTAINMENT);
+        assert(pn_shelf_hit_ex(p,100,400,&o)==PN_SHELF_SUDOKU);
+        assert(pn_shelf_hit_ex(p,300,400,&o)==-1 && pn_shelf_hit_ex(p,600,190,&o)==-1 && pn_shelf_hit_ex(p,100,100,&o)==-1);
+        size_t base=pool.used;
+        for(unsigned pass=0;pass<4;pass++){
+            o.entertainment=1;assert(pn_shelf_render_ex(p,&font,&frame,-1,false,true,NULL,&o)==PN_OK && font.pixels==24);
+            o.entertainment=2;assert(pn_shelf_render_ex(p,&font,&frame,-1,false,true,NULL,&o)==PN_OK && font.pixels==24);
+        }
+        size_t warmed=pool.used;
+        assert(pn_shelf_hit_ex(p,300,1000,&o)==PN_SHELF_ENTERTAINMENT_BACK && pn_shelf_hit_ex(p,100,400,&o)==-1);
+        for(unsigned pass=0;pass<20;pass++){
+            o.entertainment=1;assert(pn_shelf_render_ex(p,&font,&frame,-1,false,true,NULL,&o)==PN_OK);
+            o.entertainment=2;assert(pn_shelf_render_ex(p,&font,&frame,-1,false,true,NULL,&o)==PN_OK);
+        }
+        assert(pool.used==warmed && pn_shelf_render_focus(p,&font,&frame,0,1,NULL,&o)==PN_UNSUPPORTED);
+        printf("entertainment render pool before=%zu warm=%zu repeated=%zu peak=%zu options=%zu\n",base,warmed,pool.used,pool.peak,sizeof o);
+    }
     /* 四栏不与书籍序号或翻页命令冲突。/ Four tabs cannot collide with book or paging commands. */
     assert(pn_shelf_hit(p,85,1150)==PN_SHELF_READING_HOME && pn_shelf_hit(p,256,1150)==PN_SHELF_HOME && pn_shelf_hit(p,427,1150)==PN_SHELF_TRANSFER && pn_shelf_hit(p,598,1150)==PN_SHELF_MENU);
     for(int tab=0;tab<4;tab++){assert(pn_w_navigation_hit(85+171*tab,1150)==tab);assert(pn_w_navigation(&font,&frame,(pn_navigation_t)tab)==PN_OK && font.pixels==24);}
