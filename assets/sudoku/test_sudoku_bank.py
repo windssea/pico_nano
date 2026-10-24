@@ -2,6 +2,7 @@
 English: verify uniqueness checks and logical grading boundaries.
 """
 import unittest
+import json
 import sudoku_bank as bank
 from verify_delivery import exact_cover_solutions
 
@@ -30,6 +31,28 @@ class BankTests(unittest.TestCase):
         self.assertEqual(result['solution'], SOLUTION)
         self.assertEqual(result['difficulty'], 'easy')
         self.assertTrue(bank.verify_trace(CLASSIC, result['trace'], SOLUTION))
+        # 单数可解不再等于入门；经典题线索仍少于中等下限。/ Singles-solvable no longer means beginner; this classic has too few clues even for medium.
+        self.assertIsNone(bank.product_tier(CLASSIC, result))
+
+    def test_delivered_difficulty_curve(self):
+        records = json.loads((bank.ROOT/'bank/puzzles.json').read_text(encoding='utf-8'))['records']
+        for record in records:
+            grid = record['grid']
+            result = bank.logical_solve(grid)
+            self.assertEqual(bank.product_tier(grid, result), record['difficulty'], record['id'])
+            if record['difficulty'] == 'easy':
+                self.assertTrue(44 <= record['clues'] <= 50)
+                self.assertTrue(all(s['technique'] == 'naked_single' for s in result['trace']))
+                metrics = bank.entry_metrics(grid)
+                self.assertGreaterEqual(metrics['initial_singles'], 8)
+                self.assertGreaterEqual(metrics['min_singles_until_last_seven'], 3)
+                self.assertGreaterEqual(metrics['min_unit_clues'], 3)
+            elif record['difficulty'] == 'medium':
+                self.assertTrue(34 <= record['clues'] <= 40)
+                self.assertTrue(all(bank.RANK[s['technique']] == 0 for s in result['trace']))
+
+    def test_full_grid_is_not_a_beginner_puzzle(self):
+        self.assertIsNone(bank.product_tier(SOLUTION, bank.logical_solve(SOLUTION)))
 
     def test_trace_tampering_is_rejected(self):
         result = bank.logical_solve(CLASSIC)

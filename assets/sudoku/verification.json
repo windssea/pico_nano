@@ -8,12 +8,13 @@
     "hard": 300,
     "expert": 300
   },
+  "rating_profile": 2,
   "independent_solver": "Algorithm X exact cover, limit 2",
-  "proof_steps_replayed": 69024,
+  "proof_steps_replayed": 59064,
   "techniques": {
-    "naked_single": 51191,
-    "hidden_single": 13957,
-    "locked_candidate": 2786,
+    "naked_single": 48298,
+    "hidden_single": 7625,
+    "locked_candidate": 2051,
     "naked_pair": 503,
     "hidden_pair": 246,
     "naked_triple": 177,

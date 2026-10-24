@@ -15,5 +15,25 @@
   },
   "image_generation": "built-in image_gen; prompts and generated originals in sources/",
   "postprocessing": "user-requested PNG extraction, pixel dimensions, 16-gray quantization and deterministic UI composition",
-  "scope": "design assets and host bank tool, not firmware support or panel acceptance"
+  "scope": "design assets and host bank tool, not firmware support or panel acceptance",
+  "entry_profile_v2": {
+    "date": "2026-10-25",
+    "base_commit": "63db113938817bd36cd5250d20c4530416aa99a2",
+    "replaced": {
+      "easy": 300,
+      "medium": 300
+    },
+    "unchanged": {
+      "hard": 300,
+      "expert": 300
+    },
+    "generation": "seed 20261024, four ordered host workers; retain eligible existing records, fill rejected tiers using v2 filters",
+    "verification": "1200 independent exact-cover uniqueness proofs, logical trace replay and binary roundtrip",
+    "tool_sha256": {
+      "sudoku_bank.py": "84bea97f1ff1a1aad904116eff595b843aedd623d13ef5442dbb2755a27f33fa",
+      "verify_delivery.py": "3c6c1247d2b60a8329be2a8eeb15b8285fa91ba4a71968efb1af4d75b74dbaa5",
+      "test_sudoku_bank.py": "65263d7f868b3a89e5285e3dd9af3e9fbac79b0f88e02b7e2f307773c3cdc657"
+    },
+    "binary_sha256": "6a0312f3191921732e3237a8fc31292b6576cec2e20edb25c1db1059456ee741"
+  }
 }

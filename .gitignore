@@ -33,6 +33,7 @@
 /tests/testFont/
 /docs/local/
 /docs/HANDOFF.local.md
+/assets/sudoku/bank/checkpoint.jsonl
 
 # Python缓存、编辑器与本机环境。/ Python caches, editors and local environment.
 __pycache__/

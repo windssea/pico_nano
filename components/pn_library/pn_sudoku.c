@@ -49,16 +49,19 @@ static bool valid(const pn_sudoku_state_t *s){
     return true;
 }
 static void encode(const pn_sudoku_state_t *s,uint8_t p[SAVE_SIZE]){
-    memset(p,0,SAVE_SIZE);memcpy(p,"PNSG",4);put(p+4,1,2);p[6]=s->tier;p[7]=s->selected;p[8]=s->note_mode;p[9]=s->complete;p[10]=s->undo_count;put(p+12,s->hints,2);put(p+16,s->id,4);put(p+20,s->rng,4);put(p+24,(uint32_t)s->elapsed_ms,4);put(p+28,(uint32_t)(s->elapsed_ms>>32),4);
+    memset(p,0,SAVE_SIZE);memcpy(p,"PNSG",4);put(p+4,2,2);p[6]=s->tier;p[7]=s->selected;p[8]=s->note_mode;p[9]=s->complete;p[10]=s->undo_count;put(p+12,s->hints,2);put(p+16,s->id,4);put(p+20,s->rng,4);put(p+24,(uint32_t)s->elapsed_ms,4);put(p+28,(uint32_t)(s->elapsed_ms>>32),4);
+    // 复用保留字节，载荷仍为764B；仅用于新局历史归属，不替代完整校验。/ Reuse reserved bytes, keeping 764B; scope new-game history only, never replace full validation.
+    put(p+14,s->bank_crc,2);put(p+506,s->bank_crc>>16,2);
     memcpy(p+32,s->clues,81);memcpy(p+113,s->values,81);for(unsigned i=0;i<81;i++)put(p+194+i*2,s->notes[i],2);memcpy(p+356,s->played,150);
     for(unsigned i=0;i<s->undo_count;i++){size_t at=508+i*4;p[at]=s->undo[i].cell;p[at+1]=s->undo[i].value;put(p+at+2,s->undo[i].notes,2);}
 }
 static pn_status_t decode(pn_sudoku_state_t *s,const uint8_t *p,size_t n){
     if(n!=SAVE_SIZE || memcmp(p,"PNSG",4))return PN_CORRUPT;
-    if(get(p+4,2)!=1)return PN_UNSUPPORTED;
-    if(p[8]>1 || p[9]>1 || p[11] || get(p+14,2) || get(p+506,2))return PN_CORRUPT;
+    unsigned version=get(p+4,2);if(version!=1 && version!=2)return PN_UNSUPPORTED;
+    if(p[8]>1 || p[9]>1 || p[11] || (version==1 && (get(p+14,2) || get(p+506,2))))return PN_CORRUPT;
     memset(s,0,sizeof *s);s->tier=p[6];s->selected=p[7];s->note_mode=p[8]!=0;s->complete=p[9]!=0;s->undo_count=p[10];s->hints=(uint16_t)get(p+12,2);s->id=get(p+16,4);s->rng=get(p+20,4);s->elapsed_ms=(uint64_t)get(p+24,4)|((uint64_t)get(p+28,4)<<32);
     memcpy(s->clues,p+32,81);memcpy(s->values,p+113,81);for(unsigned i=0;i<81;i++)s->notes[i]=(uint16_t)get(p+194+i*2,2);memcpy(s->played,p+356,150);
+    if(version==2)s->bank_crc=get(p+14,2)|(get(p+506,2)<<16);
     if(s->undo_count>PN_SUDOKU_UNDO)return PN_CORRUPT;
     for(unsigned i=0;i<s->undo_count;i++){size_t at=508+i*4;s->undo[i]=(pn_sudoku_undo_t){p[at],p[at+1],(uint16_t)get(p+at+2,2)};}
     for(size_t i=508+s->undo_count*4;i<n;i++)if(p[i])return PN_CORRUPT;
@@ -85,7 +88,7 @@ static pn_status_t bank_start(su_t *g){
     g->bank_at=32;g->bank_crc=UINT32_MAX;g->bank_check=true;return PN_OK;
 }
 static pn_status_t choose(su_t *g,uint64_t now){
-    pn_sudoku_state_t *s=&g->candidate;memset(s,0,sizeof *s);if(g->has)memcpy(s->played,g->state.played,150);s->rng=random_next(g->has?g->state.rng:(uint32_t)now^0x504e5355u);
+    pn_sudoku_state_t *s=&g->candidate;memset(s,0,sizeof *s);s->bank_crc=get(g->bank+16,4);if(g->has && g->state.bank_crc==s->bank_crc)memcpy(s->played,g->state.played,150);s->rng=random_next(g->has?g->state.rng:(uint32_t)now^0x504e5355u);
     unsigned chosen=BANK_COUNT,seen=0;
     for(unsigned pass=0;pass<2 && chosen==BANK_COUNT;pass++){
         for(unsigned i=0;i<BANK_COUNT;i++){const uint8_t *p=g->bank+32+i*48;if(p[41]!=g->tier || (s->played[i/8]&(1u<<(i%8))))continue;s->rng=random_next(s->rng);if(s->rng%++seen==0 && (!g->has || get(p+44,4)!=g->state.id))chosen=i;}

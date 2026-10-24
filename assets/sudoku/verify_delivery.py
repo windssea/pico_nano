@@ -104,7 +104,7 @@ def main():
         assert hashlib.sha256(key.encode()).hexdigest() == record['canonical_sha256']
         assert bank.verify_trace(grid, record['trace'], solution)
         rerated = bank.logical_solve(grid)
-        assert rerated['difficulty'] == record['difficulty']
+        assert bank.product_tier(grid, rerated) == record['difficulty']
         assert rerated['solution'] == solution
         trace_count += len(record['trace'])
         techniques.update(step['technique'] for step in record['trace'])
@@ -122,9 +122,12 @@ def main():
         assert (difficulty, clues, flags, number) == (bank.TIERS.index(record['difficulty']), record['clues'], 0,
                                                      int(record['canonical_sha256'][:8], 16))
     example = json.loads((ROOT/'screen_puzzle.json').read_text(encoding='utf-8'))
-    assert next(r for r in records if r['id'] == example['id'])['grid'] == example['grid']
+    # v1设计稿保留原题，更新产品题库无需重绘历史PNG。/ Keep the original v1 design puzzle; bank updates need not redraw historical PNGs.
+    assert exact_cover_solutions(example['grid']) == [example['solution']]
+    assert example['id'] == 'PN-SDK-1-' + hashlib.sha256(bank.canonical(example['grid']).encode()).hexdigest()[:8]
     summary = {'png_exports_verified': png_count, 'native_screens': 4, 'puzzles_verified': len(records),
                'difficulty_counts': dict(Counter(r['difficulty'] for r in records)),
+               'rating_profile': 2,
                'independent_solver': 'Algorithm X exact cover, limit 2',
                'proof_steps_replayed': trace_count, 'techniques': dict(techniques),
                'binary_bytes': len(payload), 'binary_roundtrip': True,

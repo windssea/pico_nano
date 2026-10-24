@@ -76,7 +76,7 @@ pn_status_t pn_sudoku_render(const pn_sudoku_t *u,pn_font_t *f,pn_frame_t *p){
         }
     }else if(g->screen==PN_SU_SELECT){
         panda(p,190,228,4);DRAW(label(f,p,"静下心，填满九宫格",458,32));
-        static const char *const detail[]={"简单 · 从容入门","中等 · 多想一步","困难 · 耐心推演","极难 · 挑战自己"};
+        static const char *const detail[]={"简单 · 直接排除","中等 · 寻找唯一","困难 · 组合推演","极难 · 进阶技巧"};
         DRAW(pn_font_size(f,30));for(unsigned i=0;i<4;i++)DRAW(pn_w_button(f,p,detail[i],36,484+(int)i*110,612,94,g->tier==i?PN_W_SELECTED:0));
         DRAW(button(f,p,"开始游戏",1006,PN_W_SELECTED));if(g->has)DRAW(button(f,p,"继续当前棋局",1090,PN_W_PLAIN));
     }else if(g->screen==PN_SU_MENU){

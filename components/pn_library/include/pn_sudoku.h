@@ -14,6 +14,7 @@ typedef struct {
     bool note_mode,complete; ///< 笔记模式与完成状态 / Note mode and completion state
     uint16_t hints; ///< 提示使用数 / Used hints
     uint32_t id,rng; ///< 稳定题号及下次随机状态 / Stable puzzle ID and next random state
+    uint32_t bank_crc; ///< 已玩位图所属题库；旧档为0，下一局再重置历史 / Bank owning the played bitmap; legacy saves use 0 and reset history on the next game
     uint64_t elapsed_ms; ///< 实际活动用时 / Active elapsed time
     uint8_t played[150]; ///< 当前1200题轮次历史；不依赖TF / Current 1200-puzzle round history, independent of SD
     pn_sudoku_undo_t undo[PN_SUDOKU_UNDO]; ///< 有界撤销，最近在尾部 / Bounded undo, newest at the end

@@ -18,6 +18,10 @@ SDL独立对照为`python simulator/test_resume_window.py <新pn_sim> <完整TTF
 
 ## 娱乐与数独的软件回归
 
+题库入门分级v2复跑：`python -m unittest discover -s assets/sudoku -p test_sudoku_bank.py`及`python assets/sudoku/verify_delivery.py`（Python需Pillow）。检查全部1200题产品分档、独立精确覆盖唯一解、每步证明与二进制往返；简单档还核对44–50已知数、纯裸单、开局至少8个入口及每行/列/宫至少3个已知数。`python assets/sudoku/sudoku_bank.py --per-tier 300 --seed 20261024 --workers 4`重新筛选已有题库/检查点，再补齐，不自动接受旧简单题。
+
+`sudoku_window`另构造旧schema1棋局和题库归属不匹配的schema2棋局，验证跨进程恢复的填写、笔记、撤销、题面和用时不丢；明确新开简单题后才清旧已玩位图，按新档位选题。升级后继续旧简单局不会自动变容易，需要选择新棋局。
+
 `resume_turns`覆盖续读后继续越过两张持久帧、分步NEXT与扫描重叠，`product_open_loop`从实际设备邮箱投递点击和右键NEXT，`epub_long_chapter`将分步路径与同步流式基线逐帧比较。真机卡页需采集固件构建号及`Reader action=`、`Reader result=`、`Reader NEXT waiting`日志；主机通过不能作为该故障已修复的结论。
 
 `sudoku`验证无周期动画、存档与故障恢复；`sudoku_render`逐像素比较变化格更新与完整重画，覆盖选格、填数、笔记、撤销、连续事件累计和显示失败失效。`sudoku_window`静置32秒跨过原动画与自动保存期限，确认只有一张成功游戏帧。`device_management`检查重复输入不呈现、成功自动保存不重画和失败锁屏屏障。`ui.sudoku.render`记录绘制阶段，不包含面板扫描，不能称为真机输入响应耗时。

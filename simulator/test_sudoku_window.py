@@ -64,3 +64,47 @@ with tempfile.TemporaryDirectory() as folder:
     used = [int(n) for n in re.findall(r"sudoku screen=1 status=0 used=(\d+)", out)]
     assert len(used) == 15 and max(used[3:]) - min(used[3:]) < 4096, used
     print(f"sudoku window: reboot, notes/undo, lock timing, cancellations, drag, 2 MiB and 15 entries passed; used range={min(used)}..{max(used)}")
+
+    # 旧schema1题面已不在新简单库：升级仍恢复原局，开始新题才清旧历史。/ A retired schema1 puzzle must survive upgrade; clear old history only on a new game.
+    classic = '530070000600195000098000060800060003400803001700020006060000280000419005000080079'
+    payload = bytearray(764)
+    payload[:4] = b'PNSG'
+    payload[4:6] = (1).to_bytes(2, 'little')
+    payload[7:11] = bytes([2, 1, 0, 1])
+    payload[12:14] = (2).to_bytes(2, 'little')
+    payload[16:20] = (0x10203040).to_bytes(4, 'little')
+    payload[20:24] = (1234).to_bytes(4, 'little')
+    payload[24:32] = (1234567).to_bytes(8, 'little')
+    payload[32:113] = payload[113:194] = bytes(map(int, classic))
+    payload[116] = 6
+    payload[198:200] = (9).to_bytes(2, 'little')
+    payload[356:506] = bytes([255])*150
+    payload[508] = 2
+
+    def inject(body):
+        template = max((p.read_bytes() for p in state.glob('sudoku.[ab]')),
+                       key=lambda data: int.from_bytes(data[12:20], 'little'))
+        header = bytearray(template[:20])
+        header[12:20] = (int.from_bytes(header[12:20], 'little')+1).to_bytes(8, 'little')
+        data = header+body
+        (state/'sudoku.a').write_bytes(data+zlib.crc32(data).to_bytes(4, 'little'))
+
+    inject(payload)
+    run(enter+'back,window-close')
+    migrated = snapshot(state)
+    assert migrated[4:6] == b'\x02\x00'
+    assert migrated[7:24] == payload[7:24] and migrated[32:] == payload[32:]
+    assert int.from_bytes(migrated[24:32], 'little') >= 1234567
+    # 验证schema2题库换版也只丢弃新局去重历史，笔记/撤销保持。/ A schema2 bank change also rebases only new-game history, preserving notes/undo.
+    changed = bytearray(migrated)
+    changed[14:16], changed[506:508] = b'\x12\x34', b'\x56\x78'
+    inject(changed)
+    run(enter+'back,window-close')
+    resumed = snapshot(state)
+    assert resumed[7:24] == changed[7:24] and resumed[32:] == changed[32:]
+    run(enter+'tap:570:880,tap:340:842,tap:340:1040,tap:340:748,wait:1000,window-close')
+    fresh = snapshot(state)
+    assert sum(byte.bit_count() for byte in fresh[356:506]) == 1, fresh[356:506]
+    assert 44 <= sum(bool(v) for v in fresh[32:113]) <= 50
+    assert fresh[16:20] != payload[16:20] and fresh[10] == 0 and not any(fresh[194:356])
+    print('sudoku upgrade: schema1 retired puzzle and schema2 changed bank retain progress; new easy game rebases history')

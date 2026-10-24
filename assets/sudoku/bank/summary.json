@@ -7,6 +7,7 @@
     "hard": 300,
     "expert": 300
   },
+  "rating_profile": 2,
   "total": 1200,
   "record_bytes": 48,
   "header_bytes": 32,
@@ -14,12 +15,12 @@
   "max_logical_steps": 75,
   "clue_ranges": {
     "easy": [
-      23,
-      36
+      44,
+      50
     ],
     "medium": [
-      23,
-      33
+      34,
+      40
     ],
     "hard": [
       23,
@@ -30,5 +31,35 @@
       33
     ]
   },
-  "binary_sha256": "834ead2ae28d7e76f0657ba085c68019d02c2d78b57b2a2f3e2b08296710e547"
+  "binary_sha256": "6a0312f3191921732e3237a8fc31292b6576cec2e20edb25c1db1059456ee741",
+  "entry_metrics": {
+    "easy": {
+      "initial_singles": [
+        8,
+        24
+      ],
+      "min_singles_until_last_seven": [
+        3,
+        8
+      ],
+      "min_unit_clues": [
+        3,
+        4
+      ]
+    },
+    "medium": {
+      "initial_singles": [
+        2,
+        17
+      ],
+      "min_singles_until_last_seven": [
+        0,
+        8
+      ],
+      "min_unit_clues": [
+        2,
+        3
+      ]
+    }
+  }
 }

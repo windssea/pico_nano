@@ -295,12 +295,61 @@ def canonical(grid):
     return min(variants)
 
 
+def entry_metrics(grid):
+    """中文：只用直接排除，量化入门题可见入口和最窄进展。
+    English: measure visible openings and the narrowest progress using naked singles only.
+    """
+    board = parse(grid)
+    counts = [sum(bool(board[i]) for i in unit) for unit in UNITS]
+    openings, bottlenecks = [], []
+    while True:
+        candidates = initial_candidates(board)
+        if not candidates:
+            break
+        singles = [i for i, values in candidates.items() if len(values) == 1]
+        openings.append(len(singles))
+        if len(candidates) >= 8:
+            bottlenecks.append(len(singles))
+        if not singles:
+            break
+        i = singles[0]
+        board[i] = next(iter(candidates[i]))
+    return {'initial_singles': openings[0] if openings else 0,
+            'min_singles_until_last_seven': min(bottlenecks, default=0),
+            'min_unit_clues': min(counts), 'naked_only_complete': all(board)}
+
+
+def product_tier(grid, result):
+    """中文：产品分档同时约束线索、技巧和入门搜索负担；不改变解题证明。
+    English: product tiers bound clues, techniques and beginner search effort without changing proofs.
+    """
+    if result['difficulty'] is None:
+        return None
+    clues = 81-grid.count('0')
+    rank = max((RANK[s['technique']] for s in result['trace']), default=0)
+    if rank == 0 and 44 <= clues <= 50:
+        metrics = entry_metrics(grid)
+        if (metrics['naked_only_complete'] and metrics['initial_singles'] >= 8
+                and metrics['min_singles_until_last_seven'] >= 3
+                and metrics['min_unit_clues'] >= 3):
+            return 'easy'
+    if rank == 0 and 34 <= clues <= 40:
+        metrics = entry_metrics(grid)
+        if metrics['initial_singles'] >= 2 and metrics['min_unit_clues'] >= 2:
+            return 'medium'
+    if rank in (1, 2):
+        return 'hard'
+    if rank == 3:
+        return 'expert'
+    return None
+
+
 def make_puzzle(rng):
     _, solution = count_solutions('0'*81, rng)
     grid = list(solution)
     order = list(range(81))
     rng.shuffle(order)
-    target = rng.choice([23, 24, 25, 26, 27, 28, 30, 33, 36])
+    target = rng.choice([23, 24, 25, 26, 27, 28, 30, 33, 34, 36, 38, 40, 44, 46, 48, 50])
     remaining = 81
     for i in order:
         old, grid[i] = grid[i], '0'
@@ -343,15 +392,18 @@ def generate(per_tier, seed, workers=8):
     seen = set()
     counts = Counter()
     prior_records = []
-    if checkpoint.exists():
-        prior_records = [json.loads(line) for line in checkpoint.read_text(encoding='utf-8').splitlines()]
-    elif (output/'puzzles.json').exists():
+    if (output/'puzzles.json').exists():
         prior_records = json.loads((output/'puzzles.json').read_text(encoding='utf-8'))['records']
+    if checkpoint.exists():
+        prior_records += [json.loads(line) for line in checkpoint.read_text(encoding='utf-8').splitlines()]
     if prior_records:
         for record in prior_records:
             if record['seed'] != seed:
                 raise ValueError('checkpoint seed differs; use a separate output directory')
-            if counts[record['difficulty']] < per_tier:
+            # 旧检查点必须重新分级，不能把旧简单题直接带回。/ Regrade old checkpoints; never silently restore old easy puzzles.
+            if product_tier(record['grid'], logical_solve(record['grid'])) != record['difficulty']:
+                continue
+            if canonical(record['grid']) not in seen and counts[record['difficulty']] < per_tier:
                 records.append(record)
                 seen.add(canonical(record['grid']))
                 counts[record['difficulty']] += 1
@@ -364,7 +416,7 @@ def generate(per_tier, seed, workers=8):
             key = canonical(grid)
             if key in seen:
                 continue
-            tier = result['difficulty']
+            tier = product_tier(grid, result)
             if tier is not None and counts[tier] < per_tier:
                 assert result['solution'] == solution
                 verify_trace(grid, result['trace'], solution)
@@ -385,7 +437,7 @@ def generate(per_tier, seed, workers=8):
         record['id'] = f"PN-SDK-1-{record['canonical_sha256'][:8]}"
     assert len({r['id'] for r in records}) == len(records), 'record-id collision requires a new bank schema'
     (output/'puzzles.json').write_text(json.dumps({'schema': 1, 'seed': seed, 'per_tier': per_tier,
-        'rating': 'PicoNano logical profile v1, not a universal rating', 'records': records}, indent=2), encoding='utf-8')
+        'rating': 'PicoNano entry profile v2: clues, techniques and visible singles; not a universal rating', 'records': records}, indent=2), encoding='utf-8')
     with (output/'puzzles.csv').open('w', newline='', encoding='utf-8-sig') as f:
         writer = csv.DictWriter(f, fieldnames=['id', 'difficulty', 'clues', 'grid', 'solution'])
         writer.writeheader()
@@ -399,11 +451,17 @@ def generate(per_tier, seed, workers=8):
     header = struct.pack('<4sHHIIIIII', b'PNSD', 1, 48, len(records), seed, zlib.crc32(body), 0, 0, 0)
     (output/'puzzles.pnsd').write_bytes(header+body)
     summary = {'schema': 1, 'seed': seed, 'counts': dict(Counter(r['difficulty'] for r in records)),
+               'rating_profile': 2,
                'total': len(records), 'record_bytes': 48, 'header_bytes': 32,
                'device_bank_bytes': len(header+body), 'max_logical_steps': max(len(r['trace']) for r in records),
                'clue_ranges': {t: [min(r['clues'] for r in records if r['difficulty']==t),
                                    max(r['clues'] for r in records if r['difficulty']==t)] for t in TIERS},
                'binary_sha256': hashlib.sha256(header+body).hexdigest()}
+    summary['entry_metrics'] = {}
+    for tier in TIERS[:2]:
+        metrics = [entry_metrics(r['grid']) for r in records if r['difficulty'] == tier]
+        summary['entry_metrics'][tier] = {key: [min(m[key] for m in metrics), max(m[key] for m in metrics)]
+            for key in ('initial_singles', 'min_singles_until_last_seven', 'min_unit_clues')}
     (output/'summary.json').write_text(json.dumps(summary, indent=2), encoding='utf-8')
     print(json.dumps(summary), flush=True)
 
