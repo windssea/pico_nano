@@ -24,8 +24,11 @@ with tempfile.TemporaryDirectory() as folder:
     books.mkdir()
     state.mkdir()
 
-    def run(script, budget=6291456):
+    def run(script, budget=6291456, frames=None):
         env = dict(os.environ, SDL_VIDEODRIVER="dummy", PN_SIM_CLOCK="12:00", PN_SIM_LIBRARY_SCRIPT=script)
+        if frames:
+            frames.mkdir()
+            env['PN_SIM_FRAME_DIR'] = str(frames)
         r = subprocess.run([sys.argv[1], "--library", str(books), "--state-dir", str(state), "--budget", str(budget)], env=env, capture_output=True, text=True, timeout=90)
         assert r.returncode == 0 and "used=0 live=0" in r.stdout, (r.stdout, r.stderr)
         assert "sudoku screen=" in r.stdout, r.stdout
@@ -36,9 +39,9 @@ with tempfile.TemporaryDirectory() as folder:
     assert "sudoku screen=1 status=0" in out, out
     first = snapshot(state)
     cell = next(i for i, clue in enumerate(first[32:113]) if not clue)
-    tap = f"tap:{70+cell%9*68}:{250+cell//9*68}"
+    tap = f"tap:{86+cell%9*64}:{284+cell//9*64}"
     # 候选1和9后撤销9，退出重开保持1与笔记模式。/ Notes 1/9 then undo 9; reopen preserving note 1 and note mode.
-    out = run(enter + tap + ",tap:418:880,tap:130:980,tap:550:1130,tap:110:880,back,window-close", 2097152)
+    out = run(enter + tap + ",tap:418:880,tap:90:980,tap:520:1100,tap:110:880,back,window-close", 2097152)
     notes = snapshot(state)
     assert notes[8] == 1 and notes[7] == cell and int.from_bytes(notes[194+cell*2:196+cell*2], "little") == 1
     assert notes[16:20] == first[16:20] and notes[32:113] == first[32:113]
@@ -51,6 +54,18 @@ with tempfile.TemporaryDirectory() as folder:
     out = run(enter + "tap:570:880,tap:340:802,tap:340:1040,tap:340:844,tap:340:1120,tap:570:880,tap:340:682,tap:340:844,back,press:130:980,move:675:940,release:675:940,window-close")
     same = snapshot(state)
     assert same[16:24] == notes[16:24] and same[32:] == notes[32:]
+    # 完整四姿态循环：棋盘与按钮逐像素不变，第五帧回到首姿态，存档棋局不变。/ Complete a four-pose cycle: board/buttons stay identical, the fifth frame repeats the first pose, saved puzzle stays intact.
+    frames = root / 'animation'
+    run(enter + 'wait:21000,window-close', frames=frames)
+    images = [p.read_bytes().split(b'\n255\n', 1)[1] for p in sorted(frames.glob('*.pgm'))]
+    assert len(images) >= 5
+    cycle = images[-5:]
+    def region(image, x, y, w, h):
+        return b''.join(image[row*684+x:row*684+x+w] for row in range(y, y+h))
+    assert len({region(p, 0, 252, 684, 914) for p in cycle}) == 1
+    poses = [region(p, 488, 136, 160, 104) for p in cycle]
+    assert len(set(poses[:4])) == 4 and poses[0] == poses[4]
+    assert snapshot(state)[32:] == same[32:]
     # 来回进出观察工作集，退出应归零。/ Repeated entry/exit bounds the working set, with zero allocations after exit.
     out = run("library,tap:460:190," + "enter,wait:250,back," * 15 + "window-close")
     used = [int(n) for n in re.findall(r"sudoku screen=1 status=0 used=(\d+)", out)]

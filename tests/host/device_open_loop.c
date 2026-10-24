@@ -17,6 +17,14 @@ static const char *book_path,*scenario;
 static unsigned rounds,phase,opening_frames;
 static void *retained_reader;
 static unsigned idle_warms,idle_checks,warms_since_check,max_warms_between_checks;
+static pn_epub_progress_t turn_before;
+static unsigned turn_phase;
+/// 通过真实异步邮箱投递，依次覆盖点击动作和右键，不直接调用翻页函数。/ Deliver through the real async mailbox, covering tap actions and Right without directly calling navigation.
+static void queue_turn(bool key){
+    pn_device_input_event_t input={.kind=key?PN_DASYNC_KEY:PN_DASYNC_ACTION,.at=now_ms(),.action=PN_APP_NEXT,.key=PN_KEY_3,.key_event=PN_KEY_SHORT};
+    pn_async_event_t event={.navigation=true,.bytes=sizeof input,.view=atomic_load(&async_port.input.view)};
+    memcpy(event.payload,&input,sizeof input);assert(pn_async_send(&async_port.input,&event)==PN_OK);
+}
 static uint64_t idle_clock(void *ctx){(void)ctx;return (uint64_t)clock_us;}
 static void idle_observe(void *ctx,const pn_profile_event_t *e){
     (void)ctx;
@@ -64,6 +72,13 @@ static void loop_delay(unsigned n){
     if(!opening){
         assert(reader_active() && !status_page && !identity_takeover_active && !foreground_open.impl && !async_port.input.controls_blocked);
         assert(!pn_menu_cache_bytes(&menu_cache));
+        if(!strcmp(scenario,"turn")){
+            pn_epub_progress_t at;assert(pn_epub_app_progress(&epub,&at)==PN_OK);
+            if(!turn_phase){async_port.input_active=true;turn_before=at;turn_phase=1;queue_turn(false);return;}
+            if(!memcmp(&at.location,&turn_before.location,sizeof at.location))return;
+            if(turn_phase==1){turn_before=at;turn_phase=2;queue_turn(true);return;}
+            assert(turn_phase==2 && !reader_turn_pending);printf("product NEXT tap and key both confirmed\n");
+        }
         if(!strcmp(scenario,"success"))assert(presents==opening_frames+2u);
         if(!strcmp(scenario,"font")){
             // 推进模拟安静时钟，让复核与未完预热同时具备资格。/ Advance the fake quiet clock so verification competes with unfinished warming.

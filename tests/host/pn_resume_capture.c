@@ -49,9 +49,24 @@ static pn_status_t present(void *ctx, const pn_frame_t *f, pn_refresh_t refresh)
     if (fclose(file))
         ok = false;
     dump_ns += stamp() - start;
+    if (getenv("PN_RESUME_OVERLAP"))
+        for (unsigned i = 0; i < 64; i++) {
+            pn_status_t s = is_epub ? pn_epub_app_overlap(&epub) : pn_reader_app_overlap(&txt);
+            if (s != PN_OK) break;
+        }
     return ok ? PN_OK : PN_IO;
 }
 static pn_status_t step(pn_reader_action_t action, uint64_t now) {
+    // 设备NEXT跨轮让出；上限用于抓住永远BUSY的回归。/ Device NEXT yields across ticks; bound retries to catch livelocks.
+    if (is_epub && getenv("PN_RESUME_YIELD")) {
+        pn_status_t status;
+        unsigned ticks = 0;
+        do {
+            status = pn_epub_app_step_yield(&epub, action, now, present, NULL);
+        } while (status == PN_BUSY && ++ticks < 4096);
+        if (status == PN_BUSY) fprintf(stderr, "NEXT stalled after %u ticks\n", ticks);
+        return status;
+    }
     return is_epub ? pn_epub_app_step(&epub, action, now, present, NULL) : pn_reader_app_step(&txt, action, now, present, NULL);
 }
 int main(int argc, char **argv) {
@@ -100,6 +115,12 @@ int main(int argc, char **argv) {
             }
         }
 #endif
+        if (s == PN_OK && is_epub && getenv("PN_RESUME_SEMANTIC")) {
+            unsigned n = 0;
+            pn_status_t saved;
+            do { saved = pn_epub_app_cache_idle(&epub, 5000); } while (saved == PN_BUSY && ++n < 4096);
+            if (saved != PN_OK && saved != PN_EMPTY) s = saved;
+        }
     } else if (s == PN_OK && (!strcmp(argv[6], "style") || !strcmp(argv[6], "visual"))) {
         pn_style_t style;
         if (is_epub)
@@ -127,6 +148,8 @@ int main(int argc, char **argv) {
         turned = stamp() - begin - (dump_ns - before);
         if (s == PN_OK)
             s = step(PN_APP_PREVIOUS, 4);
+        if (s == PN_OK && getenv("PN_RESUME_CONTINUE"))
+            for (unsigned i = 0; i < 6 && s == PN_OK; i++) s = step(PN_APP_NEXT, 5);
     }
     pn_status_t closed = is_epub ? pn_epub_app_close(&epub, 5) : pn_reader_app_close(&txt, 5);
     if (s == PN_OK)

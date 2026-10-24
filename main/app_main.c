@@ -820,6 +820,7 @@ static pn_status_t first_reader_present(void *ctx,const pn_frame_t *frame,pn_ref
     return present(ctx,frame,profile);
 }
 static pn_status_t active_step(pn_reader_action_t action,uint64_t now){
+    static uint64_t waiting_reported; ///< BUSY诊断节流，不改变调度期限 / Throttle BUSY diagnostics without changing scheduling deadlines
     reading_stats_pause();
     uint64_t started=reader_turn_pending?reader_turn_started:now_ms();(void)started;
     pn_reader_app_refresh_period(&reader,pn_settings_refresh_pages(input_flags));
@@ -841,7 +842,16 @@ static pn_status_t active_step(pn_reader_action_t action,uint64_t now){
     pn_profile_end(&batch_timing,status);
     atomic_store(&reading_presentation,false);
     reader_turn_pending=epub.impl && action==PN_APP_NEXT && status==PN_BUSY;
-    if(reader_turn_pending){reader_turn_started=started;return status;}
+    if(reader_turn_pending){
+        reader_turn_started=started;uint64_t tick=now_ms();
+        // 未完成翻页也留下证据；否则连续BUSY没有原有的action完成日志。/ Record unfinished turns too: repeated BUSY otherwise has no action-completion log.
+        if(!waiting_reported || (tick>=waiting_reported && tick-waiting_reported>=5000u)){
+            ESP_LOGI(TAG,"Reader NEXT waiting status=%d elapsed=%llu ms used=%zu limit=%zu",(int)status,(unsigned long long)(tick-started),pool.used,pool.limit);
+            waiting_reported=tick?tick:1;
+        }
+        return status;
+    }
+    waiting_reported=0;
     if((action==PN_APP_NEXT || action==PN_APP_PREVIOUS) && (epub.impl?pn_epub_app_last_confirmed(&epub):pn_reader_app_last_confirmed(&reader)))reading_stats_turn();
     ESP_LOGI(TAG,"Reader action=%u status=%d elapsed=%llu ms",(unsigned)action,(int)status,(unsigned long long)(now_ms()-started));
 #if PN_DEVICE_TEST_CONSOLE

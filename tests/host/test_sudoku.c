@@ -19,7 +19,18 @@ static void solution_valid(const su_t *g){for(unsigned i=0;i<9;i++){unsigned row
 int main(void){
     char root[]="/tmp/pn-sudoku-XXXXXX";assert(mkdtemp(root));pn_pool_t pool;assert(!pn_pool_init(&pool,64*1024,NULL,NULL,NULL));pn_media_t media;pn_media_init(&media);assert(pn_media_attach(&media,1)==PN_OK);pn_sudoku_t u={0};
     assert(pn_sudoku_open(&u,&pool,&media,root,NULL,0,clock_ms)==PN_OK && pn_sudoku_screen(&u)==PN_SU_SELECT);
+    // 真实5秒间隔、失败重画与暂停不追帧；动画不改存档或分配。/ Real five-second cadence, failed redraw and pause never catch up; animation neither saves nor allocates.
+    su_t *preview=u.impl;size_t preview_used=pool.used;
+    pn_sudoku_displayed(&u,true,100);assert(pn_sudoku_tick(&u,5099)==PN_EMPTY && u.presented && !preview->animation_phase);
+    assert(pn_sudoku_tick(&u,5100)==PN_EMPTY && !u.presented && preview->animation_phase==1 && !pn_sudoku_dirty(&u));
+    assert(pn_sudoku_tick(&u,20000)==PN_EMPTY && preview->animation_phase==1);
+    pn_sudoku_displayed(&u,false,20000);assert(pn_sudoku_tick(&u,30000)==PN_EMPTY && preview->animation_phase==1);
+    pn_sudoku_displayed(&u,true,30000);assert(pn_sudoku_pause(&u,30001)==PN_OK);
+    assert(pn_sudoku_tick(&u,40000)==PN_EMPTY && preview->animation_phase==1 && pool.used==preview_used);
+    pn_sudoku_close(&u);assert(pn_sudoku_open(&u,&pool,&media,root,NULL,0,clock_ms)==PN_OK);
     event(&u,PN_SU_START);finish(&u);assert(pn_sudoku_screen(&u)==PN_SU_PLAY);su_t *g=u.impl;solution_valid(g);
+    for(int i=0;i<9;i++){int x=(i<5?36:98)+(i<5?i:i-5)*124,y=i<5?936:1052;assert(pn_sudoku_hit(&u,x,y)==PN_SU_DIGIT+i+1 && pn_sudoku_hit(&u,x+111,y+103)==PN_SU_DIGIT+i+1 && !pn_sudoku_hit(&u,x+112,y+20));}
+    assert(!pn_sudoku_hit(&u,182,880) && pn_sudoku_hit(&u,54,252)==PN_SU_CELL && pn_sudoku_hit(&u,629,827)==PN_SU_CELL+80);
     unsigned cell=blank(&g->state);event(&u,PN_SU_CELL+(int)cell);event(&u,PN_SU_NOTES);event(&u,PN_SU_DIGIT+1);event(&u,PN_SU_DIGIT+9);assert(g->state.notes[cell]==257);event(&u,PN_SU_UNDO);assert(g->state.notes[cell]==1);event(&u,PN_SU_NOTES);
     // 撤销窗口写满后存读，ASan覆盖序列化边界。/ Fill the undo window and round-trip it under ASan.
     for(unsigned i=0;i<70;i++){event(&u,PN_SU_DIGIT+1+(i%2));}

@@ -104,6 +104,10 @@ static void push(pn_sudoku_state_t *s,unsigned cell){if(s->undo_count==PN_SUDOKU
 pn_status_t pn_sudoku_tick(pn_sudoku_t *u,uint64_t now){
     if(!u || !u->impl || !u->active)return PN_EMPTY;
     su_t *g=u->impl;account(g,now);
+    // 每次成功呈现后满5秒才换姿态，延迟不追帧、不使存档变脏。/ Change pose five seconds after presentation; never catch up or dirty saves.
+    if(u->presented && g->animation_visible && now>=g->animation_at && now-g->animation_at>=5000u){
+        g->animation_phase=(g->animation_phase+1u)%4u;u->presented=false;
+    }
     if(g->screen==PN_SU_LOADING){
         pn_status_t r=PN_BUSY;
         if(g->bank_check){size_t end=g->bank_at+4096;if(end>g->bank_size)end=g->bank_size;for(;g->bank_at<end;g->bank_at++){g->bank_crc^=g->bank[g->bank_at];for(unsigned i=0;i<8;i++)g->bank_crc=(g->bank_crc>>1)^(0xedb88320u&(0u-(g->bank_crc&1)));}
@@ -119,8 +123,8 @@ pn_status_t pn_sudoku_tick(pn_sudoku_t *u,uint64_t now){
     if(g->dirty && now>=g->changed && now-g->changed>=750 && now>=g->retry)return save(u,now);
     return PN_EMPTY;
 }
-pn_status_t pn_sudoku_pause(pn_sudoku_t *u,uint64_t now){if(!u || !u->impl)return PN_OK;su_t *g=u->impl;account(g,now);g->running=false;if(g->screen==PN_SU_COMMIT_ERROR)return PN_BUSY;if(g->has && g->state.elapsed_ms!=g->saved_elapsed)g->dirty=true;return save(u,now);}
-void pn_sudoku_displayed(pn_sudoku_t *u,bool success,uint64_t now){if(!u || !u->impl)return;su_t *g=u->impl;account(g,now);u->presented=success;g->running=success && u->active && g->screen==PN_SU_PLAY && g->has && !g->state.complete;}
+pn_status_t pn_sudoku_pause(pn_sudoku_t *u,uint64_t now){if(!u || !u->impl)return PN_OK;su_t *g=u->impl;account(g,now);g->running=false;g->animation_visible=false;if(g->screen==PN_SU_COMMIT_ERROR)return PN_BUSY;if(g->has && g->state.elapsed_ms!=g->saved_elapsed)g->dirty=true;return save(u,now);}
+void pn_sudoku_displayed(pn_sudoku_t *u,bool success,uint64_t now){if(!u || !u->impl)return;su_t *g=u->impl;account(g,now);u->presented=success;g->running=success && u->active && g->screen==PN_SU_PLAY && g->has && !g->state.complete;g->animation_visible=success && u->active && (g->screen==PN_SU_PLAY || g->screen==PN_SU_SELECT || g->screen==PN_SU_COMPLETE);if(success)g->animation_at=now;}
 pn_status_t pn_sudoku_event(pn_sudoku_t *u,int cmd,uint64_t now){
     if(!u || !u->impl || !u->active)return PN_INVALID;
     su_t *g=u->impl;account(g,now);g->running=false;u->presented=false;

@@ -12,6 +12,10 @@ SDL独立对照为`python simulator/test_resume_window.py <新pn_sim> <完整TTF
 
 ## 娱乐与数独的软件回归
 
+`resume_turns`覆盖续读后继续越过两张持久帧、分步NEXT与扫描重叠，`product_open_loop`从实际设备邮箱投递点击和右键NEXT，`epub_long_chapter`将分步路径与同步流式基线逐帧比较。真机卡页需采集固件构建号及`Reader action=`、`Reader result=`、`Reader NEXT waiting`日志；主机通过不能作为该故障已修复的结论。
+
+`sudoku`另验证5000ms姿态期限、暂停和呈现失败不追帧；`sudoku_window`等待两次换姿态并比较棋盘/按钮区域逐像素一致和存档内容不变。
+
 `python tools/dev.py host`包含`sudoku`（全部1200题唯一解、题库循环、存档恢复、撤销满载、同步失败/分配失败及坏档保护）与`device_management`（产品路由无TF、输入、锁屏保存屏障、恢复）。`python tools/dev.py sdl`包含`entertainment_window`、`sudoku_window`，覆盖分类、空书库、2MiB预算、跨进程笔记/撤销恢复、锁屏计时、确认取消、拖出取消和15轮进出归零。自动回归用dummy，开发仍须重建并保留可见窗口。
 
 可见模拟器从书库点“娱乐”（460,190）再点数独（100,400）；初次选择难度后点“开始游戏”（340,1040），之后自动恢复存档。棋盘选格再点数字，工具行提供撤销/擦除/笔记/菜单。PC方向键选格，1–9填数，N笔记，Z撤销，Backspace擦除，Enter菜单/开始，Esc返回，L锁屏/唤醒；设备左键返回、中间键菜单/开始、右键下格，主要游戏输入使用触摸。
