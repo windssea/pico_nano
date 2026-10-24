@@ -388,7 +388,7 @@ static pn_status_t entertainment_body(pn_font_t *font,pn_frame_t *frame,bool det
         if(s==PN_OK)s=pn_font_size(font,30);
         if(s==PN_OK)s=pn_w_text_ex(font,frame,"数独",36,506,184,PN_ALIGN_CENTER,PN_UI_INK,true);
         if(s==PN_OK)s=pn_font_size(font,22);
-        if(s==PN_OK)s=pn_w_text_ex(font,frame,"即将开放",36,578,184,PN_ALIGN_CENTER,PN_UI_MUTED,false);
+        if(s==PN_OK)s=pn_w_text_ex(font,frame,"随时续玩",36,578,184,PN_ALIGN_CENTER,PN_UI_MUTED,false);
         pn_w_loading_panda(frame,214,704,0);
         if(s==PN_OK)s=pn_font_size(font,28);
         if(s==PN_OK)s=pn_w_text_ex(font,frame,"来一局，慢慢想。",32,906,620,PN_ALIGN_CENTER,PN_UI_MUTED,false);
@@ -400,7 +400,7 @@ static pn_status_t entertainment_body(pn_font_t *font,pn_frame_t *frame,bool det
         if(s==PN_OK)s=pn_w_text_ex(font,frame,"每行、每列、每宫，填入 1–9。",32,612,620,PN_ALIGN_CENTER,PN_UI_MUTED,false);
         if(s==PN_OK)s=pn_w_text_ex(font,frame,"简单 · 中等 · 困难 · 极难",32,662,620,PN_ALIGN_CENTER,PN_UI_MUTED,false);
         pn_w_loading_panda(frame,214,716,0);
-        if(s==PN_OK)s=pn_w_text_ex(font,frame,"即将开放",32,914,620,PN_ALIGN_CENTER,PN_UI_MUTED,false);
+        if(s==PN_OK)s=pn_w_text_ex(font,frame,"随时续玩",32,914,620,PN_ALIGN_CENTER,PN_UI_MUTED,false);
         if(s==PN_OK)s=pn_w_button(font,frame,"返回娱乐",182,966,320,88,0);
     }
     if(s==PN_OK)s=pn_w_navigation(font,frame,PN_NAV_LIBRARY);

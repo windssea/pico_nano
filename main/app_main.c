@@ -36,6 +36,7 @@
 #include "pn_focus.h"
 #include "pn_sd_layout.h"
 #include "pn_shelf_view.h"
+#include "pn_sudoku.h"
 #include "pn_menu_cache.h"
 #include "pn_wallpaper.h"
 #include "pn_wallpaper_ui.h"
@@ -157,7 +158,9 @@ static bool shelf_prefs_loaded;
 static pn_key_t keys={.key=-1};
 static bool home_mode=true; ///< 默认阅读首页，阅读返回保留来源 / Default reading home, preserving the reading return origin
 static bool index_mode; ///< 字母跳转页 / Letter-index page
-static uint8_t entertainment; ///< 0书籍、1娱乐、2数独介绍 / 0 books, 1 entertainment, 2 Sudoku introduction
+static pn_sudoku_t sudoku; ///< 按需数独控制器 / On-demand Sudoku controller
+static uint64_t sudoku_retry; ///< 呈现重试节流 / Display retry throttle
+static uint8_t entertainment; ///< 0书籍、1娱乐；棋局由独立控制器拥有 / 0 books, 1 entertainment; a separate controller owns the game
 static int shelf_focus=-1; ///< 三键书架焦点（-1无）/ Three-key shelf focus (-1 none)
 static uint32_t shelf_draw_revision; ///< 已确认底图所属页面代次 / View revision of the confirmed base
 static pn_w_status_snapshot_t shelf_draw_status; ///< 确认时的状态带 / Status band at confirmation
@@ -1317,6 +1320,27 @@ static void show_shelf_profile(const char *cursor,bool previous,pn_refresh_t pro
     status_page=false;shelf_mode=true;locked=false;
 }
 static void show_shelf(const char *cursor,bool previous){show_shelf_profile(cursor,previous,PN_REFRESH_GL16);}
+/// 借用原池画布；不常驻第二张屏幕。/ Borrow a canvas from the existing pool; retain no second screen.
+static pn_status_t sudoku_draw(void){
+    uint8_t *pixels=pn_alloc_tagged(&pool,PN_MEM_FRAME,342u*1216u);pn_frame_t frame;pn_font_t font={0};
+    pn_status_t r=pixels && pn_frame_bind(&frame,pixels,342u*1216u,684,1216)?management_font_begin(&font,28):PN_NO_MEMORY;
+    if(r==PN_OK)r=pn_sudoku_render(&sudoku,&font,&frame);
+    if(r==PN_OK)r=present(NULL,&frame,PN_REFRESH_GL16);
+    management_font_end(&font);pn_free(pixels);sudoku_retry=now_ms();pn_sudoku_displayed(&sudoku,r==PN_OK,sudoku_retry);
+    ESP_LOGI(TAG,"Sudoku screen=%d status=%d used=%u peak=%u",pn_sudoku_screen(&sudoku),r,(unsigned)pool.used,(unsigned)pool.peak);return r;
+}
+static void sudoku_open(void){
+    pn_cover_work_abort(&cover_work);pn_status_t r=pn_hot_session_drop(&hot_session);
+    if(r==PN_OK)r=pn_sudoku_open(&sudoku,&pool,&data_media,data_ready?"/data/progress":NULL,NULL,0,now_ms());
+    if(r==PN_OK){shelf_mode=false;status_page=false;shelf_draw_valid=false;(void)sudoku_draw();}
+    else message("数独暂不可用","内部存储未就绪，请重试");
+}
+static void sudoku_command(int command){
+    pn_status_t r=pn_sudoku_event(&sudoku,command,now_ms());
+    if(!sudoku.active){pn_sudoku_close(&sudoku);entertainment=1;home_mode=false;show_shelf("",false);}
+    else (void)sudoku_draw();
+    if(r!=PN_OK && r!=PN_EMPTY && r!=PN_BUSY)ESP_LOGW(TAG,"Sudoku command=%d status=%d",command,r);
+}
 /// 缓存预算查询由设备port提供，不用TF大小推断内部状态容量。/ The device port reports cache capacity without inferring internal-state space from TF size.
 static pn_status_t index_space(void *ctx,uint64_t *available){(void)ctx;size_t total=0,used=0;if(esp_littlefs_info("data",&total,&used)!=ESP_OK || used>total)return PN_IO;*available=total-used;return PN_OK;}
 /// TF容量来自实际挂载卷，不能用内部LittleFS容量替代。/ Obtain TF capacity from its actual mounted volume, never internal LittleFS.
@@ -2032,6 +2056,7 @@ static void tick_transfer(uint64_t now){
 }
 /// 锁屏后浅睡，电源键唤醒即解锁回原书；唤醒源不可用时保持锁屏等待轮询。/ Light-sleep after locking and unlock back to the book on a power-key wake; if the wake source is unavailable stay locked and keep polling.
 static bool prepare_lock(void){
+    if(sudoku.active){pn_status_t r=pn_sudoku_pause(&sudoku,now_ms());if(r!=PN_OK)(void)sudoku_draw();return r==PN_OK;}
     reading_stats_pause();reading_stats_flush();
     if(reader_active())bookmark_lock_capture();
     pn_cover_work_abort(&cover_work);
@@ -2050,6 +2075,7 @@ static bool prepare_lock(void){
 static bool lock_slept; ///< 最近一次锁屏确实进入了睡眠等待 / The latest lock actually entered the sleep wait
 static uint64_t unlocked_at; ///< 最近一次解锁时间：随后1.5秒内的电源短按不再锁屏，避免连按来回切换 / Latest unlock time: power shorts within the next 1.5 s never relock, preventing toggling from repeated presses
 static void resume_reader(void){
+    if(sudoku.active){locked=false;if(sudoku_draw()!=PN_OK)locked=true;return;}
     clock_tick(now_ms());pn_w_set_battery(battery_percent());
     if(reader_suspended){
         read_pico_sd_info_t card={0};esp_err_t checked=read_pico_sd_get_info(&card);
@@ -2283,6 +2309,7 @@ static void open_shelf_item(int index){
     else message("格式尚未接入","书籍仍保留，选择TXT或EPUB");
 }
 static void handle_key(int key,pn_key_event_t event){
+    if(sudoku.active){if(event==PN_KEY_SHORT)sudoku_command(key==PN_KEY_1?PN_SU_BACK:key==PN_KEY_2?(pn_sudoku_screen(&sudoku)==PN_SU_SELECT?PN_SU_START:PN_SU_MENU_OPEN):PN_SU_NEXT_CELL);return;}
     reading_stats_pause();
 #if PN_DEVICE_TEST_CONSOLE
     if(loading_preview_active){if(event==PN_KEY_SHORT && key==PN_KEY_2){loading_preview_active=false;home_mode=true;show_shelf("",false);}return;}
@@ -2340,7 +2367,7 @@ static void handle_key(int key,pn_key_event_t event){
     if(shelf_mode && shelf_page){
         if(event!=PN_KEY_SHORT)return;
         if(entertainment && !home_mode){
-            if(key==PN_KEY_2){entertainment=entertainment==1?2:1;show_shelf("",false);}
+            if(key==PN_KEY_2){sudoku_open();}
             else if(key==PN_KEY_1){entertainment=entertainment==2?1:0;show_shelf("",false);}
             return;
         }
@@ -2372,6 +2399,7 @@ static void handle_key(int key,pn_key_event_t event){
 }
 /// 按当前活动页面扫描命中码（触摸与三键焦点共用）。/ Hit code of the active page at a point (shared by touch and three-key focus).
 static int active_hit(int x,int y){
+    if(sudoku.active){int h=pn_sudoku_hit(&sudoku,x,y);return h>0?h:-1;}
     int hit=-1;
     if(usb.open)hit=pn_usb_view_hit(x,y);
     else if(transfer.impl)hit=pn_transfer_view_hit(&transfer_view,x,y);
@@ -2397,6 +2425,7 @@ static int active_hit(int x,int y){
 }
 /// 只有显示固定底栏的四个一级页允许按下切页；子页、模态和活动传输沿原确认规则。/ Only the four roots with fixed navigation switch on press; subpages, modals and active transfers retain normal confirmation.
 static int root_navigation_hit(int x,int y){
+    if(sudoku.active)return -1;
     if(opening)return -1;
     if(locked || usb.open || transfer.impl || time_sync.impl || ota.impl || wallpaper_ui.impl || font_manage.impl || reading_menu || fonts.active || toc.active || jump_ui.active || styles.active || bookmarks.mode!=PN_BUI_CLOSED || actions_mode || index_mode || search_mode || toolbar_open)return -1;
     if(settings_ui.impl){if(pn_settings_ui_screen(&settings_ui)!=0)return -1;}
@@ -2427,6 +2456,7 @@ static void feedback_begin(int x,int y){
 #endif
 /// 执行一次已确认的选择（点击或KEY2确认）。/ Perform one confirmed selection (a tap or a KEY2 confirmation).
 static void apply_selection(int selection){
+    if(sudoku.active){sudoku_command(selection);return;}
     reading_stats_pause();
     if(ota.impl && (selection<PN_SETUI_UPDATE_CHECK || selection>PN_SETUI_UPDATE_CANCEL)){if(selection==PN_SETUI_BACK)update_command(PN_SETUI_UPDATE_CANCEL);return;}
     if(usb.open){if(selection==PN_USB_VIEW_STOP){usb_return=true;pn_device_usb_request_stop(&usb);}}
@@ -2494,7 +2524,7 @@ static void apply_selection(int selection){
     }
     else if(reading_menu){if(selection==PN_READING_MENU_LAN)begin_transfer(true);else if(selection==PN_READING_MENU_SETTINGS)begin_settings();else if(selection==PN_READING_MENU_TRANSFER)begin_transfer(false);else if(selection==PN_READING_MENU_SHELF){home_mode=false;recent_mode=false;fav_mode=false;search_query[0]=0;reading_menu=false;if(leave_reader()){selected_path[0]=0;show_shelf_profile("",false,PN_REFRESH_EXIT_GC16);}}else if(selection==PN_READING_MENU_RESUME){reading_menu=false;if(reader_active()){if(active_step(PN_APP_OPEN,now_ms())==PN_OK){status_page=false;shelf_mode=false;}}else start_reader();}}
     else if(shelf_mode && (selection==PN_SHELF_TAB_ENTERTAINMENT || selection==PN_SHELF_ENTERTAINMENT_BACK || selection==PN_SHELF_SUDOKU)){
-        home_mode=false;entertainment=selection==PN_SHELF_SUDOKU?2:1;show_shelf("",false);
+        home_mode=false;entertainment=1;if(selection==PN_SHELF_SUDOKU)sudoku_open();else show_shelf("",false);
     }
     else if(shelf_mode && selection==PN_SHELF_READING_HOME){if(!home_mode){home_mode=true;show_shelf("",false);}}
     else if(shelf_mode && selection==PN_SHELF_LAYOUT){list_mode=!list_mode;shelf_focus=-1;show_shelf("",false);}
@@ -2640,9 +2670,9 @@ static void device_task(void *arg){
     for(;;){uint64_t now=now_ms();
         (void)pn_hot_session_expire(&hot_session,now);
         if(scope_active)pn_async_end(&scope);
-        bool body=reader_active() && !locked && !focus_page() && !status_page && !reading_menu && !shelf_mode && !toolbar_open;
+        bool body=!sudoku.active && reader_active() && !locked && !focus_page() && !status_page && !reading_menu && !shelf_mode && !toolbar_open;
         reading_stats_poll(body && !opening && !reader_turn_pending);
-        uint32_t view=locked?1:opening?18:fonts.active?2:toc.active?3:styles.active?4:jump_ui.active?5:bookmarks.mode!=PN_BUI_CLOSED?6:actions_mode?7:settings_ui.impl?8:wallpaper_ui.impl?9:font_manage.impl?10:hub_mode?11:index_mode?12:search_mode?13:toolbar_open?14:body?15:home_mode?16:17;
+        uint32_t view=locked?1:sudoku.active?19:opening?18:fonts.active?2:toc.active?3:styles.active?4:jump_ui.active?5:bookmarks.mode!=PN_BUI_CLOSED?6:actions_mode?7:settings_ui.impl?8:wallpaper_ui.impl?9:font_manage.impl?10:hub_mode?11:index_mode?12:search_mode?13:toolbar_open?14:body?15:home_mode?16:17;
         if(!opening && shelf_mode && !home_mode && shelf_page)view+=(uint32_t)shelf_page->index*32u;
         pn_device_async_root_view(&async_port,view,body,input_flags,root_navigation_hit(80,1150)>=0);
         pn_device_input_event_t queued={0};pn_status_t available=async_port.input_active?pn_device_async_take(&async_port,&queued):PN_EMPTY;
@@ -2803,11 +2833,15 @@ static void device_task(void *arg){
             if(!tap.down)feedback_restore();
 #endif
             {if(!async_port.input_active){int key=-1;pn_key_event_t event=pn_key_feed(&keys,touch.count,touch.x,touch.y,read==ESP_OK,now_ms(),&key);if(event!=PN_KEY_NONE && !locked){pn_reader_input_cancel(&input);handle_key(key,event);}}}
-            if(!transfer.impl && !usb.open && !wallpaper_ui.impl && !font_manage.impl && !settings_ui.impl && !reading_menu && !shelf_mode && !status_page && bookmarks.mode==PN_BUI_CLOSED && !styles.active && !jump_ui.active && !fonts.active && !toc.active && !toolbar_open && !async_port.input_active && pn_reader_input_feed(&input,touch.count,touch.x,touch.y,read==ESP_OK,&action) && !locked){
+            if(!sudoku.active && !transfer.impl && !usb.open && !wallpaper_ui.impl && !font_manage.impl && !settings_ui.impl && !reading_menu && !shelf_mode && !status_page && bookmarks.mode==PN_BUI_CLOSED && !styles.active && !jump_ui.active && !fonts.active && !toc.active && !toolbar_open && !async_port.input_active && pn_reader_input_feed(&input,touch.count,touch.x,touch.y,read==ESP_OK,&action) && !locked){
                 if(action==PN_APP_TOOLS)toolbar_show();
                 else if(reader_active() && !status_page){pn_status_t status=active_step(action,now_ms());report_reader_result(status);}
                 else start_reader();}}}
         bool background=false;
+        if(!locked && sudoku.active && available==PN_EMPTY && !touch_held && !tap.down){
+            (void)pn_sudoku_tick(&sudoku,now_ms());background=pn_sudoku_pending(&sudoku);
+            if(!sudoku.presented && now_ms()-sudoku_retry>=1000)(void)sudoku_draw();
+        }
         if(available==PN_EMPTY && !locked && styles.active && !touch_held && !tap.down){pn_status_t sampled=pn_style_ui_tick(&styles,present,NULL);background=sampled==PN_BUSY;}
         if(available==PN_EMPTY && !locked && wallpaper_ui.impl && !touch_held && !tap.down){
             pn_status_t sampled=pn_wallpaper_ui_tick(&wallpaper_ui,present,NULL);background=sampled==PN_BUSY;

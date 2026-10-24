@@ -364,14 +364,23 @@ int main(void){
     assert(shelf_page);memset(shelf_page,0,sizeof *shelf_page);shelf_page->count=6;shelf_page->total=18;shelf_page->more=true;
     for(size_t i=0;i<6;i++){snprintf(shelf_page->items[i].name,sizeof shelf_page->items[i].name,"Book %zu.txt",i);snprintf(shelf_page->items[i].path,sizeof shelf_page->items[i].path,"/books/%zu.txt",i);shelf_page->items[i].format=PN_BOOK_TXT;}
     pn_shelf_covers_reset(shelf_covers,shelf_page);shelf_mode=true;home_mode=false;status_page=false;actions_mode=false;recent_mode=false;fav_mode=false;covers_dirty=false;shelf_focus=-1;
-    /* 无TF仍走实际娱乐路由；三键/返回不误开书，缓存键隔离介绍页。/ Real entertainment routing works without SD; keys/back never open books and menu keys isolate the introduction. */
+    /* 无TF的真实入口与游戏输入、锁屏、返回；内部状态故障不能丢局。/ Real entry, game input, lock and return without SD; internal-state failure must retain the game. */
     bool card_available=sd_media.available;sd_media.available=false;
     apply_selection(PN_SHELF_TAB_ENTERTAINMENT);assert(entertainment==1 && shelf_mode && !status_page && active_hit(100,400)==PN_SHELF_SUDOKU);
-    uint64_t entertainment_key=shelf_render_key();assert(!tick_shelf_background(now_ms()));
-    handle_key(PN_KEY_2,PN_KEY_SHORT);assert(entertainment==2 && shelf_mode && !reader_active() && shelf_render_key()!=entertainment_key);
-    assert(active_hit(300,1000)==PN_SHELF_ENTERTAINMENT_BACK && active_hit(100,400)==-1);
-    handle_key(PN_KEY_1,PN_KEY_SHORT);assert(entertainment==1 && shelf_mode && !reader_active());
-    printf("entertainment device used=%zu peak=%zu state=%zu\n",pool.used,pool.peak,sizeof entertainment);
+    assert(!tick_shelf_background(now_ms()));
+    bool old_data_ready=data_ready;data_ready=false;handle_key(PN_KEY_2,PN_KEY_SHORT);assert(!sudoku.active && !reader_active());data_ready=old_data_ready;
+    char game_root[]="/tmp/pn-device-sudoku-XXXXXX";assert(mkdtemp(game_root));
+    assert(pn_sudoku_open(&sudoku,&pool,&data_media,game_root,NULL,0,now_ms())==PN_OK);shelf_mode=false;status_page=false;assert(sudoku_draw()==PN_OK);
+    assert(active_hit(340,1040)==PN_SU_START && root_navigation_hit(80,1150)<0);
+    handle_key(PN_KEY_2,PN_KEY_SHORT);for(unsigned i=0;pn_sudoku_pending(&sudoku);i++){assert(i<10000);(void)pn_sudoku_tick(&sudoku,now_ms());}
+    assert(pn_sudoku_screen(&sudoku)==PN_SU_PLAY && sudoku_draw()==PN_OK);
+    unsigned game_cell=0;while(pn_sudoku_state(&sudoku)->clues[game_cell])game_cell++;
+    apply_selection(PN_SU_CELL+(int)game_cell);apply_selection(PN_SU_DIGIT+4);assert(pn_sudoku_state(&sudoku)->values[game_cell]==4);
+    pn_media_lease_t game_busy;assert(pn_media_acquire(&data_media,PN_MEDIA_READ,&game_busy)==PN_OK);assert(!prepare_lock() && sudoku.active);assert(pn_media_release(&data_media,&game_busy)==PN_OK);assert(prepare_lock());
+    locked=true;resume_reader();assert(!locked && sudoku.presented && pn_sudoku_state(&sudoku)->values[game_cell]==4 && !reader_active());
+    handle_key(PN_KEY_1,PN_KEY_SHORT);assert(!sudoku.active && entertainment==1 && shelf_mode && !reader_active());
+    char game_file[512];for(unsigned i=0;i<2;i++){snprintf(game_file,sizeof game_file,"%s/sudoku.%c",game_root,'a'+i);(void)unlink(game_file);}assert(!rmdir(game_root));
+    printf("sudoku device routing used=%zu peak=%zu\n",pool.used,pool.peak);
     sd_media.available=card_available;entertainment=0;covers_inactive=false;
     assert(draw_shelf(PN_REFRESH_GL16)==PN_OK && shelf_draw_valid);unsigned shown=presents;handle_key(PN_KEY_2,PN_KEY_SHORT);assert(shelf_focus==0 && shelf_draw_valid && presents==shown+1);
     pn_frame_t expected;assert(pn_frame_bind(&expected,logical,415872,684,1216));pn_font_t face={0};assert(management_font_begin(&face,24)==PN_OK);pn_shelf_options_t options=shelf_options();if(favorites_valid)options.favorite_items=favorites;
