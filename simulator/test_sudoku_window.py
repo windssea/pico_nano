@@ -54,17 +54,10 @@ with tempfile.TemporaryDirectory() as folder:
     out = run(enter + "tap:570:880,tap:340:802,tap:340:1040,tap:340:844,tap:340:1120,tap:570:880,tap:340:682,tap:340:844,back,press:130:980,move:675:940,release:675:940,window-close")
     same = snapshot(state)
     assert same[16:24] == notes[16:24] and same[32:] == notes[32:]
-    # 完整四姿态循环：棋盘与按钮逐像素不变，第五帧回到首姿态，存档棋局不变。/ Complete a four-pose cycle: board/buttons stay identical, the fifth frame repeats the first pose, saved puzzle stays intact.
-    frames = root / 'animation'
-    run(enter + 'wait:21000,window-close', frames=frames)
-    images = [p.read_bytes().split(b'\n255\n', 1)[1] for p in sorted(frames.glob('*.pgm'))]
-    assert len(images) >= 5
-    cycle = images[-5:]
-    def region(image, x, y, w, h):
-        return b''.join(image[row*684+x:row*684+x+w] for row in range(y, y+h))
-    assert len({region(p, 0, 252, 684, 914) for p in cycle}) == 1
-    poses = [region(p, 488, 136, 160, 104) for p in cycle]
-    assert len(set(poses[:4])) == 4 and poses[0] == poses[4]
+    # 空闲跨过旧动画期限和30秒自动保存，不能产生额外帧。/ Cross former animation deadlines and the 30-second autosave without extra frames.
+    frames = root / 'idle'
+    out = run(enter + 'wait:32000,window-close', frames=frames)
+    assert len(re.findall(r'sudoku screen=1 status=0', out)) == 1, out
     assert snapshot(state)[32:] == same[32:]
     # 来回进出观察工作集，退出应归零。/ Repeated entry/exit bounds the working set, with zero allocations after exit.
     out = run("library,tap:460:190," + "enter,wait:250,back," * 15 + "window-close")

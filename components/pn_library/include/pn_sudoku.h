@@ -46,5 +46,7 @@ bool pn_sudoku_pending(const pn_sudoku_t *);
 bool pn_sudoku_dirty(const pn_sudoku_t *);
 /// 纯绘制及同几何命中，借用原画布/字体。/ Pure painting and matching hit geometry, borrowing the original canvas/font.
 pn_status_t pn_sudoku_render(const pn_sudoku_t *,pn_font_t *,pn_frame_t *);
+/// 在上一成功游戏帧上绘制变化；无可靠基准返回PN_UNSUPPORTED，调用方须整绘。/ Paint changes over the last confirmed game frame; PN_UNSUPPORTED requires a full redraw.
+pn_status_t pn_sudoku_render_update(const pn_sudoku_t *,pn_font_t *,pn_frame_t *);
 /// 命中返回命令，空白返回0。/ Return a command for a hit, or zero for empty space.
 int pn_sudoku_hit(const pn_sudoku_t *,int,int);

@@ -12,21 +12,18 @@ int __real_fsync(int);
 int __wrap_fsync(int fd){if(fail_sync)return -1;return __real_fsync(fd);}
 static uint64_t clock_ms=100;
 static void finish(pn_sudoku_t *u){unsigned ticks=0;while(pn_sudoku_pending(u)){(void)pn_sudoku_tick(u,++clock_ms);assert(++ticks<10000);}assert(!pn_sudoku_pending(u));}
-static void event(pn_sudoku_t *u,int cmd){assert(pn_sudoku_event(u,cmd,++clock_ms)==PN_OK);}
+static void event(pn_sudoku_t *u,int cmd){pn_status_t r=pn_sudoku_event(u,cmd,++clock_ms);assert(r==PN_OK || (r==PN_EMPTY && cmd>=PN_SU_CELL && cmd<PN_SU_CELL+81 && pn_sudoku_state(u)->selected==cmd-PN_SU_CELL));}
 static unsigned blank(const pn_sudoku_state_t *s){for(unsigned i=0;i<81;i++)if(!s->clues[i])return i;abort();}
 static void remove_saves(const char *root){char name[512];snprintf(name,sizeof name,"%s/sudoku.a",root);(void)unlink(name);snprintf(name,sizeof name,"%s/sudoku.b",root);(void)unlink(name);}
 static void solution_valid(const su_t *g){for(unsigned i=0;i<9;i++){unsigned row=0,col=0,box=0;for(unsigned j=0;j<9;j++){unsigned a=g->solution[i*9+j],b=g->solution[j*9+i],c=g->solution[i/3*27+i%3*3+j/3*9+j%3];assert(a>=1 && a<=9 && b>=1 && b<=9 && c>=1 && c<=9);row|=1u<<(a-1);col|=1u<<(b-1);box|=1u<<(c-1);}assert(row==511 && col==511 && box==511);}for(unsigned i=0;i<81;i++)assert(!g->state.clues[i] || g->state.clues[i]==g->solution[i]);assert(g->solver.solutions==1);}
 int main(void){
     char root[]="/tmp/pn-sudoku-XXXXXX";assert(mkdtemp(root));pn_pool_t pool;assert(!pn_pool_init(&pool,64*1024,NULL,NULL,NULL));pn_media_t media;pn_media_init(&media);assert(pn_media_attach(&media,1)==PN_OK);pn_sudoku_t u={0};
     assert(pn_sudoku_open(&u,&pool,&media,root,NULL,0,clock_ms)==PN_OK && pn_sudoku_screen(&u)==PN_SU_SELECT);
-    // 真实5秒间隔、失败重画与暂停不追帧；动画不改存档或分配。/ Real five-second cadence, failed redraw and pause never catch up; animation neither saves nor allocates.
-    su_t *preview=u.impl;size_t preview_used=pool.used;
-    pn_sudoku_displayed(&u,true,100);assert(pn_sudoku_tick(&u,5099)==PN_EMPTY && u.presented && !preview->animation_phase);
-    assert(pn_sudoku_tick(&u,5100)==PN_EMPTY && !u.presented && preview->animation_phase==1 && !pn_sudoku_dirty(&u));
-    assert(pn_sudoku_tick(&u,20000)==PN_EMPTY && preview->animation_phase==1);
-    pn_sudoku_displayed(&u,false,20000);assert(pn_sudoku_tick(&u,30000)==PN_EMPTY && preview->animation_phase==1);
-    pn_sudoku_displayed(&u,true,30000);assert(pn_sudoku_pause(&u,30001)==PN_OK);
-    assert(pn_sudoku_tick(&u,40000)==PN_EMPTY && preview->animation_phase==1 && pool.used==preview_used);
+    // 空闲不再有动画或显示请求；暂停仍停止计时。/ Idle has no animation or display requests; pause still stops time accounting.
+    size_t preview_used=pool.used;pn_sudoku_displayed(&u,true,100);
+    assert(pn_sudoku_tick(&u,5100)==PN_EMPTY && u.presented && !pn_sudoku_dirty(&u));
+    assert(pn_sudoku_tick(&u,30000)==PN_EMPTY && u.presented && pool.used==preview_used);
+    assert(pn_sudoku_pause(&u,30001)==PN_OK);
     pn_sudoku_close(&u);assert(pn_sudoku_open(&u,&pool,&media,root,NULL,0,clock_ms)==PN_OK);
     event(&u,PN_SU_START);finish(&u);assert(pn_sudoku_screen(&u)==PN_SU_PLAY);su_t *g=u.impl;solution_valid(g);
     for(int i=0;i<9;i++){int x=(i<5?36:98)+(i<5?i:i-5)*124,y=i<5?936:1052;assert(pn_sudoku_hit(&u,x,y)==PN_SU_DIGIT+i+1 && pn_sudoku_hit(&u,x+111,y+103)==PN_SU_DIGIT+i+1 && !pn_sudoku_hit(&u,x+112,y+20));}

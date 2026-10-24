@@ -160,6 +160,7 @@ static bool home_mode=true; ///< 默认阅读首页，阅读返回保留来源 /
 static bool index_mode; ///< 字母跳转页 / Letter-index page
 static pn_sudoku_t sudoku; ///< 按需数独控制器 / On-demand Sudoku controller
 static uint64_t sudoku_retry; ///< 呈现重试节流 / Display retry throttle
+static uint32_t sudoku_draw_revision; ///< 最近游戏回执的屏幕代次 / Screen revision of the latest game receipt
 static uint8_t entertainment; ///< 0书籍、1娱乐；棋局由独立控制器拥有 / 0 books, 1 entertainment; a separate controller owns the game
 static int shelf_focus=-1; ///< 三键书架焦点（-1无）/ Three-key shelf focus (-1 none)
 static uint32_t shelf_draw_revision; ///< 已确认底图所属页面代次 / View revision of the confirmed base
@@ -1332,10 +1333,17 @@ static void show_shelf_profile(const char *cursor,bool previous,pn_refresh_t pro
 static void show_shelf(const char *cursor,bool previous){show_shelf_profile(cursor,previous,PN_REFRESH_GL16);}
 /// 借用原池画布；不常驻第二张屏幕。/ Borrow a canvas from the existing pool; retain no second screen.
 static pn_status_t sudoku_draw(void){
+    pn_profile_span_t timing;pn_profile_begin(&timing,&pool,"ui.sudoku.render");
     uint8_t *pixels=pn_alloc_tagged(&pool,PN_MEM_FRAME,342u*1216u);pn_frame_t frame;pn_font_t font={0};
     pn_status_t r=pixels && pn_frame_bind(&frame,pixels,342u*1216u,684,1216)?management_font_begin(&font,28):PN_NO_MEMORY;
-    if(r==PN_OK)r=pn_sudoku_render(&sudoku,&font,&frame);
+    if(r==PN_OK){
+        pn_status_t patch=panel_known && sudoku_draw_revision==async_port.revision?pn_device_frame_restore(hardware.hl.back_fb,415872,&frame):PN_UNSUPPORTED;
+        if(patch==PN_OK)patch=pn_sudoku_render_update(&sudoku,&font,&frame);
+        r=patch==PN_UNSUPPORTED?pn_sudoku_render(&sudoku,&font,&frame):patch;
+    }
+    pn_profile_end(&timing,r);
     if(r==PN_OK)r=present(NULL,&frame,PN_REFRESH_GL16);
+    if(r==PN_OK)sudoku_draw_revision=async_port.revision;
     management_font_end(&font);pn_free(pixels);sudoku_retry=now_ms();pn_sudoku_displayed(&sudoku,r==PN_OK,sudoku_retry);
     ESP_LOGI(TAG,"Sudoku screen=%d status=%d used=%u peak=%u",pn_sudoku_screen(&sudoku),r,(unsigned)pool.used,(unsigned)pool.peak);return r;
 }
@@ -1348,7 +1356,7 @@ static void sudoku_open(void){
 static void sudoku_command(int command){
     pn_status_t r=pn_sudoku_event(&sudoku,command,now_ms());
     if(!sudoku.active){pn_sudoku_close(&sudoku);entertainment=1;home_mode=false;show_shelf("",false);}
-    else (void)sudoku_draw();
+    else if(!sudoku.presented)(void)sudoku_draw();
     if(r!=PN_OK && r!=PN_EMPTY && r!=PN_BUSY)ESP_LOGW(TAG,"Sudoku command=%d status=%d",command,r);
 }
 /// 缓存预算查询由设备port提供，不用TF大小推断内部状态容量。/ The device port reports cache capacity without inferring internal-state space from TF size.

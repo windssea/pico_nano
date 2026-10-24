@@ -22,8 +22,7 @@ typedef struct {
     unsigned tier;
     bool has,dirty,running,new_job,bank_ok,bank_check,errors[81];
     uint64_t last,changed,retry,saved_elapsed;
-    uint64_t animation_at; ///< 最近成功呈现时间，不写存档 / Last successful presentation time, never persisted
-    unsigned animation_phase; ///< 四个离散姿态，无帧缓存 / Four discrete poses without a frame cache
-    bool animation_visible; ///< 暂停与锁屏停止动画 / Pause and lock stop animation
+    uint8_t changed_cells[11]; ///< 自上次成功呈现后的变格位图 / Changed cells since the last successful presentation
+    bool patch_ready,full_dirty; ///< 基准必须已确认；换页或失败后整绘 / Require a confirmed base; redraw fully after transitions or failures
     const char *notice;
 } su_t;

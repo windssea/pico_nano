@@ -389,7 +389,10 @@ static pn_status_t draw(library_t *s){
 }
 /// 游戏借用原窗口画布和字体；呈现成功后开始计时。/ The game borrows the existing canvas/font; timing starts after presentation.
 static pn_status_t sudoku_draw(library_t *s){
-    pn_status_t r=pn_sudoku_render(&s->sudoku,&s->font,&s->frame);
+    pn_profile_span_t timing;pn_profile_begin(&timing,s->pool,"ui.sudoku.render");
+    pn_status_t r=pn_sudoku_render_update(&s->sudoku,&s->font,&s->frame);
+    if(r==PN_UNSUPPORTED)r=pn_sudoku_render(&s->sudoku,&s->font,&s->frame);
+    pn_profile_end(&timing,r);
     if(r==PN_OK)r=present(s,&s->frame,PN_REFRESH_GL16);
     pn_sudoku_displayed(&s->sudoku,r==PN_OK,SDL_GetTicks64());
     s->ui_retry=SDL_GetTicks64();s->shelf_draw_valid=false;
@@ -1074,7 +1077,7 @@ static int library_worker(void *ctx){
                 if(event.type==SDL_MOUSEBUTTONDOWN)s->pointer_down=true;
                 if(s->pointer_down){int target=pn_sudoku_hit(&s->sudoku,x,y);(void)pn_tap_feed(&tap,1,target>0?target:-1,true,&command);if(up){(void)pn_tap_feed(&tap,0,-1,true,&command);(void)pn_tap_feed(&tap,0,-1,true,&command);s->pointer_down=false;}}
             }else if(event.type==SDL_WINDOWEVENT && event.window.event==SDL_WINDOWEVENT_FOCUS_LOST){cancel_pointer(&input,&tap,true);s->pointer_down=false;}
-            if(command>0){status=pn_sudoku_event(&s->sudoku,command,now);printf("sudoku command=%d status=%d dirty=%d\n",command,status,pn_sudoku_dirty(&s->sudoku));if(!s->sudoku.active){pn_sudoku_close(&s->sudoku);s->entertainment=1;status=page(s,false,true);}else status=sudoku_draw(s);}
+            if(command>0){status=pn_sudoku_event(&s->sudoku,command,now);printf("sudoku command=%d status=%d dirty=%d\n",command,status,pn_sudoku_dirty(&s->sudoku));if(!s->sudoku.active){pn_sudoku_close(&s->sudoku);s->entertainment=1;status=page(s,false,true);}else if(!s->sudoku.presented)status=sudoku_draw(s);}
             continue;
         }
         if(font_modal(&s->fonts,&event,now,present,s,&tap,&s->font_pointer,atomic_load(&s->async.mouse))){if(!s->fonts.active){bool returned=s->fonts.return_presented;pn_font_ui_close(&s->fonts);if(s->styles.active){if(returned){s->styles.presented=true;s->styles.preview=false;}else (void)pn_style_ui_present(&s->styles,present,s);}}continue;}

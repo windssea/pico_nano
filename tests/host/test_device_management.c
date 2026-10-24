@@ -376,6 +376,11 @@ int main(void){
     assert(pn_sudoku_screen(&sudoku)==PN_SU_PLAY && sudoku_draw()==PN_OK);
     unsigned game_cell=0;while(pn_sudoku_state(&sudoku)->clues[game_cell])game_cell++;
     apply_selection(PN_SU_CELL+(int)game_cell);apply_selection(PN_SU_DIGIT+4);assert(pn_sudoku_state(&sudoku)->values[game_cell]==4);
+    unsigned game_shown=presents;
+    apply_selection(PN_SU_CELL+(int)game_cell);apply_selection(PN_SU_DIGIT+4);
+    assert(presents==game_shown && sudoku.presented);
+    assert(pn_sudoku_tick(&sudoku,now_ms()+1000)==PN_OK && sudoku.presented && !pn_sudoku_dirty(&sudoku));
+    apply_selection(PN_SU_DIGIT+5);apply_selection(PN_SU_DIGIT+4);
     pn_media_lease_t game_busy;assert(pn_media_acquire(&data_media,PN_MEDIA_READ,&game_busy)==PN_OK);assert(!prepare_lock() && sudoku.active);assert(pn_media_release(&data_media,&game_busy)==PN_OK);assert(prepare_lock());
     locked=true;resume_reader();assert(!locked && sudoku.presented && pn_sudoku_state(&sudoku)->values[game_cell]==4 && !reader_active());
     handle_key(PN_KEY_1,PN_KEY_SHORT);assert(!sudoku.active && entertainment==1 && shelf_mode && !reader_active());

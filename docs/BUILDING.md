@@ -14,7 +14,7 @@ SDL独立对照为`python simulator/test_resume_window.py <新pn_sim> <完整TTF
 
 `resume_turns`覆盖续读后继续越过两张持久帧、分步NEXT与扫描重叠，`product_open_loop`从实际设备邮箱投递点击和右键NEXT，`epub_long_chapter`将分步路径与同步流式基线逐帧比较。真机卡页需采集固件构建号及`Reader action=`、`Reader result=`、`Reader NEXT waiting`日志；主机通过不能作为该故障已修复的结论。
 
-`sudoku`另验证5000ms姿态期限、暂停和呈现失败不追帧；`sudoku_window`等待两次换姿态并比较棋盘/按钮区域逐像素一致和存档内容不变。
+`sudoku`验证无周期动画、存档与故障恢复；`sudoku_render`逐像素比较变化格更新与完整重画，覆盖选格、填数、笔记、撤销、连续事件累计和显示失败失效。`sudoku_window`静置32秒跨过原动画与自动保存期限，确认只有一张成功游戏帧。`device_management`检查重复输入不呈现、成功自动保存不重画和失败锁屏屏障。`ui.sudoku.render`记录绘制阶段，不包含面板扫描，不能称为真机输入响应耗时。
 
 `python tools/dev.py host`包含`sudoku`（全部1200题唯一解、题库循环、存档恢复、撤销满载、同步失败/分配失败及坏档保护）与`device_management`（产品路由无TF、输入、锁屏保存屏障、恢复）。`python tools/dev.py sdl`包含`entertainment_window`、`sudoku_window`，覆盖分类、空书库、2MiB预算、跨进程笔记/撤销恢复、锁屏计时、确认取消、拖出取消和15轮进出归零。自动回归用dummy，开发仍须重建并保留可见窗口。
 

@@ -74,7 +74,7 @@ static pn_status_t storage(su_t *g,pn_sudoku_state_t *state,bool write){
     if(lease.ticket)(void)pn_media_release(g->media,&lease);
     pn_free(data);return r;
 }
-static pn_status_t save(pn_sudoku_t *u,uint64_t now){su_t *g=u->impl;if(!g->has || !g->dirty)return PN_OK;pn_status_t r=storage(g,&g->state,true);g->retry=r==PN_OK?0:now+3000;g->notice=r==PN_OK?NULL:"保存失败，点此重试";if(r==PN_OK){g->dirty=false;g->saved_elapsed=g->state.elapsed_ms;}u->presented=false;return r;}
+static pn_status_t save(pn_sudoku_t *u,uint64_t now){su_t *g=u->impl;if(!g->has || !g->dirty)return PN_OK;const char *notice=g->notice;pn_status_t r=storage(g,&g->state,true);g->retry=r==PN_OK?0:now+3000;g->notice=r==PN_OK?NULL:"保存失败，点此重试";if(r==PN_OK){g->dirty=false;g->saved_elapsed=g->state.elapsed_ms;}if(g->notice!=notice){u->presented=false;g->full_dirty=true;}return r;}
 static pn_status_t load(su_t *g){pn_status_t r=storage(g,&g->candidate,false);if(r==PN_EMPTY){g->screen=PN_SU_SELECT;return PN_OK;}if(r==PN_OK)r=solver_begin(&g->solver,g->candidate.clues);if(r==PN_OK){g->new_job=false;g->screen=PN_SU_LOADING;}else{g->screen=PN_SU_LOAD_ERROR;g->notice="棋局读取失败，原记录保留";}return r;}
 pn_status_t pn_sudoku_open(pn_sudoku_t *u,pn_pool_t *pool,pn_media_t *media,const char *root,const uint8_t *bank,size_t size,uint64_t now){
     if(!u || u->impl || !pool || !media || !root || !*root || strlen(root)>=PN_JOURNAL_PATH_MAX-12)return PN_INVALID;
@@ -104,10 +104,6 @@ static void push(pn_sudoku_state_t *s,unsigned cell){if(s->undo_count==PN_SUDOKU
 pn_status_t pn_sudoku_tick(pn_sudoku_t *u,uint64_t now){
     if(!u || !u->impl || !u->active)return PN_EMPTY;
     su_t *g=u->impl;account(g,now);
-    // 每次成功呈现后满5秒才换姿态，延迟不追帧、不使存档变脏。/ Change pose five seconds after presentation; never catch up or dirty saves.
-    if(u->presented && g->animation_visible && now>=g->animation_at && now-g->animation_at>=5000u){
-        g->animation_phase=(g->animation_phase+1u)%4u;u->presented=false;
-    }
     if(g->screen==PN_SU_LOADING){
         pn_status_t r=PN_BUSY;
         if(g->bank_check){size_t end=g->bank_at+4096;if(end>g->bank_size)end=g->bank_size;for(;g->bank_at<end;g->bank_at++){g->bank_crc^=g->bank[g->bank_at];for(unsigned i=0;i<8;i++)g->bank_crc=(g->bank_crc>>1)^(0xedb88320u&(0u-(g->bank_crc&1)));}
@@ -123,9 +119,10 @@ pn_status_t pn_sudoku_tick(pn_sudoku_t *u,uint64_t now){
     if(g->dirty && now>=g->changed && now-g->changed>=750 && now>=g->retry)return save(u,now);
     return PN_EMPTY;
 }
-pn_status_t pn_sudoku_pause(pn_sudoku_t *u,uint64_t now){if(!u || !u->impl)return PN_OK;su_t *g=u->impl;account(g,now);g->running=false;g->animation_visible=false;if(g->screen==PN_SU_COMMIT_ERROR)return PN_BUSY;if(g->has && g->state.elapsed_ms!=g->saved_elapsed)g->dirty=true;return save(u,now);}
-void pn_sudoku_displayed(pn_sudoku_t *u,bool success,uint64_t now){if(!u || !u->impl)return;su_t *g=u->impl;account(g,now);u->presented=success;g->running=success && u->active && g->screen==PN_SU_PLAY && g->has && !g->state.complete;g->animation_visible=success && u->active && (g->screen==PN_SU_PLAY || g->screen==PN_SU_SELECT || g->screen==PN_SU_COMPLETE);if(success)g->animation_at=now;}
-pn_status_t pn_sudoku_event(pn_sudoku_t *u,int cmd,uint64_t now){
+pn_status_t pn_sudoku_pause(pn_sudoku_t *u,uint64_t now){if(!u || !u->impl)return PN_OK;su_t *g=u->impl;account(g,now);g->running=false;g->patch_ready=false;g->full_dirty=true;if(g->screen==PN_SU_COMMIT_ERROR)return PN_BUSY;if(g->has && g->state.elapsed_ms!=g->saved_elapsed)g->dirty=true;return save(u,now);}
+void pn_sudoku_displayed(pn_sudoku_t *u,bool success,uint64_t now){if(!u || !u->impl)return;su_t *g=u->impl;account(g,now);u->presented=success;g->running=success && u->active && g->screen==PN_SU_PLAY && g->has && !g->state.complete;g->patch_ready=success && g->screen==PN_SU_PLAY;g->full_dirty=!success;if(success)memset(g->changed_cells,0,sizeof g->changed_cells);}
+
+static pn_status_t event_impl(pn_sudoku_t *u,int cmd,uint64_t now){
     if(!u || !u->impl || !u->active)return PN_INVALID;
     su_t *g=u->impl;account(g,now);g->running=false;u->presented=false;
     if(g->screen==PN_SU_COMMIT_ERROR){if(cmd==PN_SU_RETRY){pn_status_t r=storage(g,&g->candidate,true);if(r!=PN_OK)return r;g->state=g->candidate;memset(g->errors,0,sizeof g->errors);memcpy(g->solution,g->solver.solution,81);g->has=true;g->dirty=false;g->saved_elapsed=0;g->screen=PN_SU_PLAY;g->notice=NULL;return PN_OK;}if(cmd==PN_SU_BACK || cmd==PN_SU_CANCEL){if(g->has){pn_status_t r=storage(g,&g->state,true);if(r!=PN_OK)return r;}else{u->active=false;return PN_OK;}g->screen=PN_SU_SELECT;return PN_OK;}return PN_EMPTY;}
@@ -151,7 +148,7 @@ pn_status_t pn_sudoku_event(pn_sudoku_t *u,int cmd,uint64_t now){
     if(cmd==PN_SU_CHECK){unsigned errors=0;for(unsigned i=0;i<81;i++){g->errors[i]=s->values[i] && s->values[i]!=g->solution[i];errors+=g->errors[i];}g->notice=errors?"已标记需要检查的格子":"当前已填数字正确";g->screen=PN_SU_PLAY;return PN_OK;}
     if(cmd==PN_SU_HINT){unsigned c=s->selected;if(s->clues[c] || s->values[c]==g->solution[c]){for(c=0;c<81;c++)if(s->values[c]!=g->solution[c])break;}if(c==81)return PN_EMPTY;
         push(s,c);s->values[c]=g->solution[c];s->notes[c]=0;s->selected=(uint8_t)c;if(s->hints<UINT16_MAX)s->hints++;g->screen=PN_SU_PLAY;}
-    else if(cmd>=PN_SU_CELL && cmd<PN_SU_CELL+81){s->selected=(uint8_t)(cmd-PN_SU_CELL);changed(u,now);return PN_OK;}
+    else if(cmd>=PN_SU_CELL && cmd<PN_SU_CELL+81){if(s->selected==(uint8_t)(cmd-PN_SU_CELL))return PN_EMPTY;s->selected=(uint8_t)(cmd-PN_SU_CELL);changed(u,now);return PN_OK;}
     else if(cmd==PN_SU_NEXT_CELL){s->selected=(s->selected+1)%81;changed(u,now);return PN_OK;}
     else if(cmd==PN_SU_NOTES){s->note_mode=!s->note_mode;changed(u,now);return PN_OK;}
     else if(cmd==PN_SU_UNDO){if(!s->undo_count)return PN_EMPTY;pn_sudoku_undo_t *v=&s->undo[--s->undo_count];s->selected=v->cell;s->values[v->cell]=v->value;s->notes[v->cell]=v->notes;}
@@ -162,6 +159,21 @@ pn_status_t pn_sudoku_event(pn_sudoku_t *u,int cmd,uint64_t now){
         if(v && s->note_mode){s->values[c]=0;s->notes[c]^=1u<<(v-1);}else{s->values[c]=(uint8_t)v;s->notes[c]=0;}
     }else return PN_EMPTY;
     memset(g->errors,0,sizeof g->errors);changed(u,now);if(solved(s,g->solution)){s->complete=true;g->screen=PN_SU_COMPLETE;return save(u,now);}return PN_OK;
+}
+/// 无效输入保持回执；普通选格/填数只标记受影响格，保存成功不触发显示。/ No-op input preserves receipt; cell edits mark only affected cells, successful saves do not redraw.
+pn_status_t pn_sudoku_event(pn_sudoku_t *u,int cmd,uint64_t now){
+    if(!u || !u->impl || !u->active)return PN_INVALID;
+    su_t *g=u->impl;bool shown=u->presented,running=g->running;unsigned selected=g->state.selected;
+    pn_sudoku_screen_t screen=g->screen;const char *notice=g->notice;uint8_t errors[11]={0};
+    for(unsigned i=0;i<81;i++)if(g->errors[i])errors[i/8]|=1u<<(i%8);
+    pn_status_t r=event_impl(u,cmd,now);
+    if(r==PN_EMPTY){u->presented=shown;g->running=running;return r;}
+    bool edit=(cmd>=PN_SU_CELL && cmd<PN_SU_CELL+81) || (cmd>PN_SU_DIGIT && cmd<=PN_SU_DIGIT+9) || cmd==PN_SU_NEXT_CELL || cmd==PN_SU_ERASE || cmd==PN_SU_UNDO;
+    if(r==PN_OK && edit && screen==PN_SU_PLAY && g->screen==PN_SU_PLAY && notice==g->notice && g->patch_ready && !g->full_dirty){
+        g->changed_cells[selected/8]|=1u<<(selected%8);selected=g->state.selected;g->changed_cells[selected/8]|=1u<<(selected%8);
+        for(unsigned i=0;i<11;i++)g->changed_cells[i]|=errors[i];
+    }else g->full_dirty=true;
+    return r;
 }
 const pn_sudoku_state_t *pn_sudoku_state(const pn_sudoku_t *u){su_t *g=u?u->impl:NULL;return g && g->has?&g->state:NULL;}
 pn_sudoku_screen_t pn_sudoku_screen(const pn_sudoku_t *u){su_t *g=u?u->impl:NULL;return g?g->screen:PN_SU_LOAD_ERROR;}
