@@ -29,6 +29,7 @@ struct page_index {
     pn_pool_t *pool;pn_media_t *media;pn_media_lease_t lease;pn_book_id_t book,key;
     char directory[PN_JOURNAL_PATH_MAX],path[PN_JOURNAL_PATH_MAX];
     size_t count,dirty;pn_page_index_entry_t entries[PN_PAGE_INDEX_MAX];
+    uint8_t changed[PN_PAGE_INDEX_MAX]; ///< 每槽未提交标记，随窗口移动，不重复写已保存页 / Per-slot dirty flags follow the window, avoiding rewrites of saved pages
     size_t build_slot;bool build_slot_known; ///< 游标槽位缓存，避免每个排版小步骤扫描PSRAM窗口 / Cached cursor slot avoids scanning the PSRAM window on every layout step
     pn_page_index_entry_t build_saved;bool build_saved_valid; ///< 最后已提交编译游标，窗口压力时保守回退 / Last committed build cursor for conservative pressure recovery
     bool blocked,backup_loaded; ///< 可选写失败本会话退避，以及完整验证的备份来源 / Session backoff after optional write failure and fully validated backup provenance
@@ -61,8 +62,8 @@ static void build_remember(index_t *i){pn_page_index_entry_t *e=build_entry(i);i
 /// 未提交窗口可能被淘汰时撤回编译声明，不能把已丢页边界的前缀宣称完成。/ Rewind build claims when an uncommitted window may be evicted; dropped boundaries cannot count as a completed prefix.
 static void build_rewind(index_t *i){
     pn_page_index_entry_t *e=build_entry(i);if(!e)return;
-    if(i->build_saved_valid)*e=i->build_saved;
-    else{size_t at=(size_t)(e-i->entries);memmove(e,e+1,(i->count-at-1)*sizeof *e);i->count--;i->build_slot=SIZE_MAX;i->build_slot_known=true;}
+    if(i->build_saved_valid){*e=i->build_saved;i->changed[e-i->entries]=1;}
+    else{size_t at=(size_t)(e-i->entries);memmove(e,e+1,(i->count-at-1)*sizeof *e);memmove(i->changed+at,i->changed+at+1,i->count-at-1);i->count--;i->build_slot=SIZE_MAX;i->build_slot_known=true;}
 }
 static pn_status_t checked(index_t *i){pn_status_t s=pn_cancel_checkpoint();return s==PN_OK?pn_media_validate(i->media,&i->lease):s;}
 static pn_status_t pn_page_index_key_impl(const pn_book_id_t *book,const pn_style_t *style,const pn_text_source_t *primary,const pn_font_chain_t *chain,unsigned format,const pn_book_id_t *known_primary,pn_book_id_t *out){
@@ -123,12 +124,12 @@ bool pn_page_index_near(pn_page_index_t *h,uint32_t section,uint64_t before,bool
 void pn_page_index_add(pn_page_index_t *h,const pn_page_index_entry_t *e){
     if(!h || !h->impl || !e || e->begin>=e->end)return;
     index_t *i=h->impl;
-    for(size_t j=0;j<i->count;j++)if(i->entries[j].section==e->section && i->entries[j].begin==e->begin){uint8_t old[RECORD],next[RECORD];encode(old,&i->entries[j]);encode(next,e);if(memcmp(old,next,RECORD)){if(i->tf)tf_abort(i);i->entries[j]=*e;i->dirty++;}return;}
+    for(size_t j=0;j<i->count;j++)if(i->entries[j].section==e->section && i->entries[j].begin==e->begin){uint8_t old[RECORD],next[RECORD];encode(old,&i->entries[j]);encode(next,e);if(memcmp(old,next,RECORD)){if(i->tf)tf_abort(i);i->entries[j]=*e;i->changed[j]=1;i->dirty++;}return;}
     if(i->tf)tf_abort(i);
     if(i->tf && i->count==PN_PAGE_INDEX_MAX && i->dirty>=PN_PAGE_INDEX_MAX)build_rewind(i);
-    if(i->count==PN_PAGE_INDEX_MAX){if(i->tf)tf_window_drop(i,&i->entries[0]);memmove(i->entries,i->entries+1,(PN_PAGE_INDEX_MAX-1)*sizeof *e);i->count--;if(i->build_slot_known && i->build_slot!=SIZE_MAX)i->build_slot=i->build_slot?i->build_slot-1:SIZE_MAX;}
+    if(i->count==PN_PAGE_INDEX_MAX){if(i->tf)tf_window_drop(i,&i->entries[0]);memmove(i->entries,i->entries+1,(PN_PAGE_INDEX_MAX-1)*sizeof *e);memmove(i->changed,i->changed+1,PN_PAGE_INDEX_MAX-1);i->count--;if(i->build_slot_known && i->build_slot!=SIZE_MAX)i->build_slot=i->build_slot?i->build_slot-1:SIZE_MAX;}
     if(e->section==BUILD_SECTION && !e->begin){i->build_slot=i->count;i->build_slot_known=true;}
-    i->entries[i->count++]=*e;i->dirty++;
+    i->changed[i->count]=1;i->entries[i->count++]=*e;i->dirty++;
 }
 // 仅清理固定扩展名缓存，预留64KiB给独立状态。/ Evict only owned cache extensions, reserving 64 KiB for independent state.
 static pn_status_t quota(index_t *i,size_t incoming){
@@ -176,7 +177,7 @@ pn_status_t pn_page_index_flush(pn_page_index_t *h,bool force){
     pn_profile_span_t span;pn_profile_begin(&span,h && h->impl?((index_t *)h->impl)->pool:NULL,"storage.page-index");
     pn_status_t status=index_flush(h,force);if(h && h->impl && !((index_t *)h->impl)->tf && status!=PN_EMPTY && pn_cache_file_miss(status))((index_t *)h->impl)->blocked=true;pn_profile_end(&span,status);return status;
 }
-bool pn_page_index_pending(const pn_page_index_t *h){return h && h->impl && !((const index_t *)h->impl)->blocked && (((const index_t *)h->impl)->dirty || ((const index_t *)h->impl)->writer);}
+bool pn_page_index_pending(const pn_page_index_t *h){if(!h || !h->impl)return false;index_t *i=h->impl;return !i->blocked && (i->dirty || i->writer || (i->tf && tf_compact_due(i)));}
 void pn_page_index_close(pn_page_index_t *h){if(h){if(h->impl){index_t *i=h->impl;if(i->tf){tf_abort(i);tf_unlink(i);}pn_free(i->ranges);}pn_free(h->impl);h->impl=NULL;}}
 void pn_page_index_abort(pn_page_index_t *h){if(h && h->impl && ((index_t *)h->impl)->tf)tf_abort(h->impl);}
 bool pn_page_index_is_tf(const pn_page_index_t *h){return h && h->impl && ((const index_t *)h->impl)->tf;}

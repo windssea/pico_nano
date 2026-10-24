@@ -37,10 +37,13 @@ static pn_status_t present(void *ctx,const pn_frame_t *frame,pn_refresh_t refres
 }
 int main(int argc,char **argv){
     if(argc!=5 && argc!=6)return 2;
-    if(mkdir(argv[3],0700) && (errno!=EEXIST || argc!=6 || strcmp(argv[5],"resume")))return 2;
+    bool maintain=argc==6 && !strcmp(argv[5],"maintain");
+    if(mkdir(argv[3],0700) && (errno!=EEXIST || argc!=6 || (strcmp(argv[5],"resume") && !maintain)))return 2;
     char cache[1024],image[1024];snprintf(cache,sizeof cache,"%s/reading",argv[3]);snprintf(image,sizeof image,"%s/first.pgm",argv[3]);if(setenv("PN_READING_CACHE",cache,1))return 2;
     pn_pool_t pool;pn_pool_init(&pool,6u*1024u*1024u,NULL,NULL,NULL);pn_epub_app_t app={0};pn_status_t s=pn_epub_app_open(&app,&pool,argv[1],argv[2],argv[3],44,0);pn_book_index_state_t state={0};unsigned last=0,limit=argc==6?(unsigned)strtoul(argv[5],NULL,10):0;uint64_t began=stamp();
     while(s==PN_OK || s==PN_BUSY){s=pn_epub_app_index_step(&app,&state);steps++;if(state.pages/256!=last){last=state.pages/256;fprintf(stderr,"index pages=%u section=%u steps=%llu\n",state.pages,state.section,(unsigned long long)steps);}if(s!=PN_BUSY || (limit && state.pages>=limit) || steps>100000000u)break;}
+    // 可选维护复用真实空闲入口，另测旧缓存迁移，不混入冷建对照。/ Optional maintenance uses the real idle entry to measure old-cache migration separately from cold builds.
+    if(maintain && s==PN_OK){unsigned count=0;while(pn_epub_app_deferred_pending(&app) && s==PN_OK){s=pn_epub_app_deferred_flush(&app);if(++count>1000000u)s=PN_LIMIT;}}
     uint64_t elapsed=stamp()-began;bool completed=s==PN_OK && state.complete;uint32_t pages=state.pages;
     if(completed)s=pn_epub_app_step(&app,PN_APP_OPEN,1,present,image);
     pn_status_t closed=pn_epub_app_close(&app,2);if(closed!=PN_OK)s=closed;

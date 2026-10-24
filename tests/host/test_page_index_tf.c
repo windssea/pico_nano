@@ -79,15 +79,17 @@ int main(void){
     assert(pn_page_index_open(&index,&pool,&state,&write,root,&book,&key)==PN_OK && pn_page_index_use_tf(&index,&sd,&read,tf)==PN_OK && !pn_page_index_near(&index,0,1,false,&e));
     char unrelated[768],victim[768],leaf[134];snprintf(unrelated,sizeof unrelated,"%s/user.keep",folder);f=fopen(unrelated,"wb");assert(f && fputs("keep",f)>=0 && !fclose(f));
     memset(leaf,'0',129);leaf[64]='-';memcpy(leaf+129,".pni",5);snprintf(victim,sizeof victim,"%s/%s",folder,leaf);f=fopen(victim,"wb");assert(f && fputs("old",f)>=0 && !fclose(f));
+    // 清理闲置自有空.tmp，但不删除未知文件或活动会话的暂存。/ Clean inactive owned empty .tmp files, preserving unknown files and active-session staging.
+    char stale[780],unknown[780];snprintf(stale,sizeof stale,"%s.tmp",victim);f=fopen(stale,"wb");assert(f && !fclose(f));snprintf(unknown,sizeof unknown,"%s/user.tmp",folder);f=fopen(unknown,"wb");assert(f && !fclose(f));
     added=entry(0);pn_page_index_add(&index,&added);free_bytes=0;unsigned steps=0;pn_status_t s;do{s=pn_page_index_flush(&index,true);assert(++steps<1000);}while(s==PN_BUSY);assert(s==PN_EMPTY && !pn_page_index_pending(&index) && pn_page_index_near(&index,0,1,false,&e));
-    assert(access(victim,F_OK) && !access(path,F_OK) && !access(unrelated,F_OK));
+    assert(access(victim,F_OK) && access(stale,F_OK) && !access(unknown,F_OK) && !access(path,F_OK) && !access(unrelated,F_OK));
     // 写失败不反复忙等；介质失效后关闭仍归还全部资源。/ Failed writes do not spin; closing after media expiry still returns every resource.
     assert(pn_page_index_flush(&index,true)==PN_EMPTY);pn_page_index_close(&index);
     // 可信根本身也有独立磁盘硬顶，只回收未被活动会话pin的自有元数据。/ Trusted roots have their own disk cap, evicting only owned metadata unpinned by active sessions.
     for(unsigned j=1000;j<1120;j++){char p[768];snprintf(p,sizeof p,"%s/%064x.pnrt",state_indexes,j);f=fopen(p,"wb");uint8_t zero[140]={0};assert(f && fwrite(zero,1,140,f)==140 && !fclose(f));}
     free_bytes=64u*1024u*1024u;pn_book_id_t other_book={{43}},other_key={{11}};
     assert(pn_page_index_open(&index,&pool,&state,&write,root,&other_book,&other_key)==PN_OK && pn_page_index_use_tf(&index,&sd,&read,tf)==PN_OK);pn_page_index_add(&index,&added);drain(&index);
-    uint64_t total=0;d=opendir(state_indexes);assert(d);while((de=readdir(d)))if(strlen(de->d_name)==69 || strlen(de->d_name)==73){char p[768];struct stat st;snprintf(p,sizeof p,"%s/%s",state_indexes,de->d_name);assert(!stat(p,&st));total+=(uint64_t)st.st_size;}closedir(d);assert(total<=16u*1024u);
+    uint64_t total=0;d=opendir(state_indexes);assert(d);while((de=readdir(d)))if(strlen(de->d_name)==69 || strlen(de->d_name)==73){char p[768];struct stat st;snprintf(p,sizeof p,"%s/%s",state_indexes,de->d_name);assert(!stat(p,&st));total+=(uint64_t)st.st_size;}closedir(d);assert(total<=12u*1024u);
     // 内部仅余64KiB时拒绝新根，重开仍读最后已提交TF表。/ Reject a new root with only 64 KiB internal free; reopening still reads the last committed TF table.
     internal_free=64u*1024u;added.begin=100;added.end=101;pn_page_index_add(&index,&added);steps=0;do{s=pn_page_index_flush(&index,true);assert(++steps<10000);}while(s==PN_BUSY);assert(s==PN_EMPTY && !pn_page_index_pending(&index));pn_page_index_close(&index);
     assert(pn_page_index_open(&index,&pool,&state,&write,root,&other_book,&other_key)==PN_OK && pn_page_index_use_tf(&index,&sd,&read,tf)==PN_OK && pn_page_index_near(&index,0,UINT64_MAX,false,&e) && e.begin==0);

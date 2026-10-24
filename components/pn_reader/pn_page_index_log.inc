@@ -4,6 +4,7 @@
 #define LOG_HEADER 128u
 #define LOG_TAIL 48u
 #define LOG_MAX_BLOCKS 1024u
+#define LOG_COMPACT_BLOCKS 1000u ///< 在格式硬顶前留24块维护余量 / Leave 24 blocks of maintenance headroom below the format cap
 typedef struct {
     uint64_t end,base,start;uint32_t blocks,count;pn_book_id_t hash; ///< 已确认前缀及最后窗口 / Confirmed prefix and final window
     pn_page_index_entry_t build;bool have_build; ///< 链上最后确认的连续游标 / Last confirmed contiguous cursor in the chain
@@ -32,8 +33,8 @@ static bool log_header(index_t *i,const uint8_t *h,uint64_t offset,uint32_t sequ
     *count=(uint32_t)get(h+72,4);return *count>0 && *count<=PN_PAGE_INDEX_MAX;
 }
 static uint32_t log_sequence(const index_t *i){return i->disk_valid?i->log_blocks+1:1;}
-static void log_header_write(index_t *i,uint8_t *h){
-    memset(h,0,LOG_HEADER);memcpy(h,"PNPL",4);put(h+4,3,4);memcpy(h+8,i->book.sha256,32);memcpy(h+40,i->key.sha256,32);put(h+72,i->count,4);put(h+76,log_sequence(i),4);
+static void log_header_write(index_t *i,uint8_t *h,uint32_t count){
+    memset(h,0,LOG_HEADER);memcpy(h,"PNPL",4);put(h+4,3,4);memcpy(h+8,i->book.sha256,32);memcpy(h+40,i->key.sha256,32);put(h+72,count,4);put(h+76,log_sequence(i),4);
     if(i->disk_valid){memcpy(h+80,i->selected_hash.sha256,32);put(h+112,i->log_mode?i->log_end:HEADER+(uint64_t)i->disk_count*RECORD,8);}put(h+124,crc(h,124),4);
 }
 static bool log_tail(const uint8_t *tail,uint64_t length,uint32_t sequence,const pn_book_id_t *digest){
@@ -85,7 +86,7 @@ static pn_status_t tf_load_candidate(void *ctx,const char *path){
         size_t keep=view.count<PN_PAGE_INDEX_MAX?view.count:PN_PAGE_INDEX_MAX;uint64_t start=view.start+(view.blocks?LOG_HEADER:HEADER)+(view.count-keep)*RECORD;
         if(fseek(f,(long)start,SEEK_SET))s=PN_IO;
         for(size_t n=0;s==PN_OK && n<keep;n++){touched=true;if(fread(header,1,RECORD,f)!=RECORD || !decode(header,&i->entries[n]))s=PN_CORRUPT;}
-        if(s==PN_OK){i->count=keep;i->dirty=0;i->build_slot_known=false;i->build_saved_valid=view.have_build;i->build_saved=view.build;i->disk_count=view.count;i->disk_valid=true;i->disk_backup=strlen(path)>4 && !strcmp(path+strlen(path)-4,".bak");i->selected_hash=view.hash;i->log_mode=true;i->log_end=view.end;i->log_base_end=view.base;i->log_blocks=view.blocks;i->have_floor=false;}
+        if(s==PN_OK){i->count=keep;i->dirty=0;memset(i->changed,0,sizeof i->changed);i->build_slot_known=false;i->build_saved_valid=view.have_build;i->build_saved=view.build;i->disk_count=view.count;i->disk_valid=true;i->disk_backup=strlen(path)>4 && !strcmp(path+strlen(path)-4,".bak");i->selected_hash=view.hash;i->log_mode=true;i->log_end=view.end;i->log_base_end=view.base;i->log_blocks=view.blocks;i->have_floor=false;}
     }
     if(fclose(f) && s==PN_OK)s=PN_IO;
     if(s!=PN_OK)log_ranges_clear(i);
@@ -97,7 +98,7 @@ static bool log_record(FILE *f,uint64_t start,uint32_t position,pn_page_index_en
 }
 /// 丢失已确认前缀就撤回整书完成声明；仅保留可重新生成的RAM边界。/ Losing the committed prefix revokes whole-book completion, retaining only regenerable RAM boundaries.
 static void log_forget(index_t *i){
-    tf_abort(i);log_ranges_clear(i);i->disk_valid=false;i->log_mode=false;i->log_end=i->log_base_end=0;i->log_blocks=0;i->disk_count=0;i->have_floor=false;i->build_saved_valid=false;build_rewind(i);i->dirty=i->count;
+    tf_abort(i);log_ranges_clear(i);i->disk_valid=false;i->log_mode=false;i->log_end=i->log_base_end=0;i->log_blocks=0;i->disk_count=0;i->have_floor=false;i->build_saved_valid=false;build_rewind(i);i->dirty=i->count;memset(i->changed,1,i->count);
 }
 static bool log_near(index_t *i,uint32_t section,uint64_t before,bool strict,pn_page_index_entry_t *out){
     if(!i->disk_valid || checked(i)!=PN_OK)return false;

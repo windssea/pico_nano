@@ -84,7 +84,7 @@ static pn_status_t tf_load_legacy(void *ctx,const char *path){
         size_t keep=count<PN_PAGE_INDEX_MAX?count:PN_PAGE_INDEX_MAX;
         if(fseek(f,(long)(HEADER+(uint64_t)(count-keep)*RECORD),SEEK_SET))s=PN_IO;
         for(size_t n=0;s==PN_OK && n<keep;n++)if(fread(h,1,RECORD,f)!=RECORD || !decode(h,&i->entries[n]))s=PN_CORRUPT;
-        if(s==PN_OK){i->count=keep;i->disk_count=count;i->disk_valid=true;i->disk_backup=strlen(path)>4 && !strcmp(path+strlen(path)-4,".bak");i->dirty=0;i->selected_hash=digest;
+        if(s==PN_OK){i->count=keep;i->disk_count=count;i->disk_valid=true;i->disk_backup=strlen(path)>4 && !strcmp(path+strlen(path)-4,".bak");i->dirty=0;memset(i->changed,0,sizeof i->changed);i->selected_hash=digest;
             build_remember(i);
             if(keep){i->floor_section=i->entries[0].section;i->floor_begin=i->entries[0].begin;i->floor_exclusive=false;i->have_floor=true;}}
     }
@@ -107,7 +107,7 @@ pn_status_t pn_page_index_use_tf(pn_page_index_t *h,pn_media_t *media,const pn_m
     s=pn_cache_file_load(i->trust_media,&i->trust_lease,i->trust_path,tf_trust_candidate,i);if(s!=PN_OK && !pn_cache_file_miss(s))return s;
     strcpy(i->directory,directory);strcpy(i->path,path);i->media=media;i->lease=*lease;i->tf=true;i->tf_next=tf_live;tf_live=i;
     s=pn_cache_file_load(media,lease,i->path,tf_load_candidate,i);
-    if(pn_cache_file_miss(s)){i->dirty=i->count;return PN_OK;}return s;
+    if(pn_cache_file_miss(s)){i->dirty=i->count;memset(i->changed,1,i->count);return PN_OK;}return s;
 }
 static bool tf_near(index_t *i,uint32_t section,uint64_t before,bool strict,pn_page_index_entry_t *out){
     if(i->log_mode)return log_near(i,section,before,strict,out);
@@ -128,20 +128,26 @@ static bool tf_near(index_t *i,uint32_t section,uint64_t before,bool strict,pn_p
     if(!ok && pn_cancel_checkpoint()!=PN_CANCELLED)i->disk_valid=false;
     if(found && ok && checked(i)==PN_OK){*out=entry;return true;}return false;
 }
-typedef enum {TF_DIRECTORY,TF_STALE,TF_SCAN_OPEN,TF_SCAN,TF_SPACE,TF_EVICT,TF_OPEN,TF_MERGE,TF_DRAIN,TF_HEADER,TF_OLD_HASH_BEGIN,TF_OLD_HASH,TF_FLUSH,TF_SYNC,TF_CLOSE,TF_VERIFY_OPEN,TF_VERIFY,TF_HASH_BEGIN,TF_HASH,TF_VERIFY_CLOSE,TF_TRUST_DIRECTORY,TF_TRUST_STALE,TF_TRUST_OPEN,TF_TRUST_DATA,TF_TRUST_SYNC,TF_TRUST_CLOSE,TF_TRUST_VERIFY,TF_TRUST_PUBLISH,TF_FINAL_SPACE,TF_PUBLISH,TF_LOG_OPEN,TF_LOG_DATA,TF_LOG_DRAIN,TF_LOG_SYNC,TF_LOG_VERIFY,TF_LOG_HASH_BEGIN,TF_LOG_HASH,TF_LOG_TAIL,TF_LOG_SEAL,TF_LOG_CLOSE,TF_LOG_READ_HASH_BEGIN,TF_LOG_READ_HASH} tf_phase_t;
+typedef enum {TF_DIRECTORY,TF_STALE,TF_SCAN_OPEN,TF_SCAN,TF_SPACE,TF_EVICT,TF_OPEN,TF_MERGE,TF_DRAIN,TF_HEADER,TF_OLD_HASH_BEGIN,TF_OLD_HASH,TF_FLUSH,TF_SYNC,TF_CLOSE,TF_VERIFY_OPEN,TF_VERIFY,TF_HASH_BEGIN,TF_HASH,TF_VERIFY_CLOSE,TF_TRUST_DIRECTORY,TF_TRUST_STALE,TF_TRUST_OPEN,TF_TRUST_DATA,TF_TRUST_SYNC,TF_TRUST_CLOSE,TF_TRUST_VERIFY,TF_TRUST_PUBLISH,TF_FINAL_SPACE,TF_PUBLISH,TF_LOG_OPEN,TF_LOG_DATA,TF_LOG_DRAIN,TF_LOG_SYNC,TF_LOG_VERIFY,TF_LOG_HASH_BEGIN,TF_LOG_HASH,TF_LOG_TAIL,TF_LOG_SEAL,TF_LOG_CLOSE,TF_LOG_READ_HASH_BEGIN,TF_LOG_READ_HASH,TF_COMPACT_OPEN,TF_COMPACT_HEADER,TF_COMPACT_HASH,TF_COMPACT_TAIL,TF_COMPACT_MERGE} tf_phase_t;
+typedef struct {
+    uint64_t begin;uint32_t section,offset,left,ordinal; ///< 最小堆中的来源头，页正文只保留一条 / Source head in the min-heap; only one full page record is retained
+} compact_node_t;
 typedef struct {
     pn_media_lease_t lease; ///< 当前写任务自己取得并归还CACHE_WRITE / CACHE_WRITE acquired and released by this job
     FILE *old,*file;DIR *scan; ///< 有界文件与目录句柄 / Bounded file and directory handles
     pn_cache_commit_t commit; ///< 共用发布协议 / Shared publication protocol
     pn_cache_commit_t trust_commit;pn_identity_job_t hash;tf_hash_t hash_source;pn_book_id_t digest; ///< 内部可信根先于TF发布，摘要计入原池 / Internal trust precedes TF publication; hashing is charged to the existing pool
     char temporary[PN_JOURNAL_PATH_MAX+4],backup[PN_JOURNAL_PATH_MAX+4]; ///< 固定兄弟路径 / Fixed sibling paths
-    char victim[PN_JOURNAL_PATH_MAX+8];time_t oldest;unsigned evictions; ///< 仅闲置自有缓存的有界回收 / Bounded eviction of inactive owned caches only
+    char victim[PN_JOURNAL_PATH_MAX+8];time_t oldest;unsigned evictions;bool reclaim; ///< 仅闲置自有缓存的有界回收及低水位 / Bounded eviction of inactive owned caches and a low watermark
     char trust_directory[PN_JOURNAL_PATH_MAX],trust_temporary[PN_JOURNAL_PATH_MAX+4],trust_backup[PN_JOURNAL_PATH_MAX+4]; ///< 内部根的固定同目录路径 / Fixed sibling paths for internal roots
     uint16_t order[PN_PAGE_INDEX_MAX]; ///< 排列引用，不复制512条记录 / Permutation references without copying 512 records
     uint8_t output[4096],input[4096]; ///< 已计入原INDEX硬顶的有限工作块 / Bounded work blocks charged to the unchanged INDEX cap
     size_t used,at,input_used,input_at,captured,old_skip;uint32_t old_at,old_count,count,verified;uint64_t total;bool old_verified; ///< 合并/校验游标与配额，旧表摘要与记录共享同次读取 / Merge/validation cursors and quota; old-table hashing and records share each read
     pn_page_index_entry_t previous,old_entry;bool have_old,temporary_owned,source_backup,trust_stage,trust_temporary_owned;tf_phase_t phase; ///< 唯一旧记录与步骤 / Sole old record and current phase
     log_hash_t log_source;uint64_t log_start,log_end;bool append,inplace; ///< 新块摘要与已提交前缀分离，不重写旧页 / Hash the new block separately from the committed prefix, without rewriting old pages
+    compact_node_t *heap;size_t heap_count,selected; ///< 原INDEX预算内的可选归并头和冻结窗口长度 / Optional merge heads and frozen window length in the original INDEX budget
+    uint64_t compact_at,compact_bytes,cache_start[2];size_t cache_used[2];unsigned cache_next;uint32_t compact_sequence,compact_runs,compact_count; ///< 分步整链校验及共用4KiB双路读窗 / Incremental chain verification and a shared 4 KiB two-way read window
+    pn_book_id_t compact_hash;bool compact,compact_legacy,compact_check; ///< 首遍生成、次遍逐记录对照，完成后才发布 / Generate first, compare every record on the second pass, then publish
 } tf_write_t;
 static void tf_abort(index_t *i){
     tf_write_t *w=i->writer;if(!w)return;
@@ -153,7 +159,7 @@ static void tf_abort(index_t *i){
     if(w->trust_commit.active)pn_cache_commit_abort(&w->trust_commit);
     if(w->trust_temporary_owned && !w->trust_commit.committed && pn_media_validate(i->trust_media,&i->trust_lease)==PN_OK)(void)remove(w->trust_temporary);
     if(w->temporary_owned && !w->commit.committed && pn_media_validate(i->media,&w->lease)==PN_OK)(void)remove(w->temporary);
-    (void)pn_media_release(i->media,&w->lease);i->writer=NULL;pn_free(w);
+    (void)pn_media_release(i->media,&w->lease);i->writer=NULL;pn_free(w->heap);pn_free(w);
 }
 static pn_status_t tf_available(index_t *i,uint64_t *available){
     if(tf_capacity_port)return tf_capacity_port(tf_capacity_ctx,i->directory,available);
@@ -172,15 +178,30 @@ static bool tf_trust_owned(const char *name){
     size_t n=strlen(name);if(n!=69 && n!=73)return false;for(unsigned j=0;j<64;j++)if(!strchr("0123456789abcdef",name[j]))return false;
     return !strcmp(name+64,".pnrt") || !strcmp(name+64,".pnrt.tmp") || !strcmp(name+64,".pnrt.bak");
 }
+/// 主代已完整验证且不是从备份恢复时，回收发布后中断留下的旧备份。/ Reclaim a backup left by interrupted post-publication cleanup only when the primary was fully verified and is the actual source.
+static pn_status_t tf_prune_backup(const char *path,bool confirmed_primary){
+    if(!confirmed_primary)return PN_OK;
+    struct stat info;if(tf_stat(path,&info))return errno==ENOENT?PN_OK:PN_IO;
+    if(!S_ISREG(info.st_mode))return PN_IO;
+    return remove(path)?PN_IO:PN_OK;
+}
+/// 完成索引增长至平表的1.5倍或逼近块/体积上限才压实；首次增量建书不额外重写。/ Compact completed indexes at 1.5 times the flat size or near block/size caps; fresh delta builds avoid an extra rewrite.
+static bool tf_compact_due(index_t *i){
+    if(!i->disk_valid || !i->log_mode)return false;
+    pn_page_index_entry_t *e=build_entry(i);if(!e && i->build_saved_valid)e=&i->build_saved;
+    uint64_t flat=e?HEADER+((uint64_t)e->first.run+1)*RECORD:0;
+    return i->log_blocks>=LOG_COMPACT_BLOCKS || i->log_end>=TF_QUOTA/2 || (e && (e->flags&1u) && i->log_blocks>=8 && i->log_end>=flat+flat/2 && (!i->log_base_end || i->log_blocks>=64));
+}
 static pn_status_t tf_begin(index_t *i){
     pn_media_lease_t lease;pn_status_t s=pn_media_acquire(i->media,PN_MEDIA_CACHE_WRITE,&lease);if(s!=PN_OK)return s;
     tf_write_t *w=pn_alloc_optional(i->pool,PN_MEM_INDEX,sizeof *w);if(!w){(void)pn_media_release(i->media,&lease);return PN_NO_MEMORY;}*w=(tf_write_t){.lease=lease};
     snprintf(w->temporary,sizeof w->temporary,"%s.tmp",i->path);snprintf(w->backup,sizeof w->backup,"%s.bak",i->path);
     snprintf(w->trust_temporary,sizeof w->trust_temporary,"%s.tmp",i->trust_path);snprintf(w->trust_backup,sizeof w->trust_backup,"%s.bak",i->trust_path);
     strcpy(w->trust_directory,i->trust_path);char *slash=strrchr(w->trust_directory,'/');if(!slash){pn_media_release(i->media,&w->lease);pn_free(w);return PN_INVALID;}*slash=0;
-    w->append=i->log_mode || build_entry(i) || i->build_saved_valid;w->inplace=w->append && i->disk_valid;
-    if(w->append){w->log_start=i->disk_valid?(i->log_mode?i->log_end:HEADER+(uint64_t)i->disk_count*RECORD):0;w->log_end=w->log_start+LOG_HEADER+(uint64_t)i->count*RECORD+LOG_TAIL;}
-    for(size_t n=0;n<i->count;n++){size_t at=n;while(at && tf_compare(&i->entries[w->order[at-1]],&i->entries[n])>0){w->order[at]=w->order[at-1];at--;}w->order[at]=(uint16_t)n;}
+    w->compact=tf_compact_due(i);w->append=!w->compact && (i->log_mode || build_entry(i) || i->build_saved_valid);w->inplace=w->append && i->disk_valid;
+    if(w->append){w->log_start=i->disk_valid?(i->log_mode?i->log_end:HEADER+(uint64_t)i->disk_count*RECORD):0;w->log_end=w->log_start+LOG_HEADER+LOG_TAIL;}
+    for(size_t n=0;n<i->count;n++){if(w->append && i->disk_valid && !i->changed[n])continue;size_t at=w->selected++;while(at && tf_compare(&i->entries[w->order[at-1]],&i->entries[n])>0){w->order[at]=w->order[at-1];at--;}w->order[at]=(uint16_t)n;}
+    if(w->append)w->log_end+=(uint64_t)w->selected*RECORD;
     w->source_backup=i->disk_backup;i->writer=w;return PN_OK;
 }
 static pn_status_t tf_emit(tf_write_t *w,const uint8_t *bytes,size_t size){
@@ -200,12 +221,13 @@ static pn_status_t log_expected_read(void *ctx,uint64_t offset,uint8_t *out,size
     index_t *i=ctx;tf_write_t *w=i->writer;pn_status_t s=checked(i);if(s!=PN_OK)return s;
     if(cap>2048)cap=2048;
     size_t done=0;uint8_t bytes[LOG_HEADER];
-    while(done<cap){size_t at,size;if(offset<LOG_HEADER){log_header_write(i,bytes);at=(size_t)offset;size=LOG_HEADER;}
+    while(done<cap){size_t at,size;if(offset<LOG_HEADER){log_header_write(i,bytes,(uint32_t)w->selected);at=(size_t)offset;size=LOG_HEADER;}
         else{uint64_t record=(offset-LOG_HEADER)/RECORD;if(record>=w->count)return PN_CORRUPT;encode(bytes,&i->entries[w->order[record]]);at=(size_t)((offset-LOG_HEADER)%RECORD);size=RECORD;}
         size_t take=size-at;if(take>cap-done)take=cap-done;memcpy(out+done,bytes+at,take);done+=take;offset+=take;
     }
     s=checked(i);if(s==PN_OK)*got=done;return s;
 }
+#include "pn_page_index_compact.inc"
 static pn_status_t tf_step(index_t *i){
     tf_write_t *w=i->writer;pn_status_t s=checked(i);if(s!=PN_OK)return s;
     s=pn_media_validate(i->media,&w->lease);if(s!=PN_OK)return s;
@@ -214,6 +236,7 @@ static pn_status_t tf_step(index_t *i){
     switch(w->phase){
     case TF_DIRECTORY:s=pn_cache_file_directory(i->media,&w->lease,i->directory);if(s==PN_OK)w->phase=TF_STALE;break;
     case TF_STALE:
+        s=tf_prune_backup(w->backup,i->disk_valid && !w->source_backup);if(s!=PN_OK)break;
         // CACHE_WRITE唯一且尚未打开暂存；先清本目标遗留，避免它被配额和新写入重复计费。/ CACHE_WRITE is unique and staging is unopened; clear this target's orphan before quota double-counts it with the incoming packet.
         if(!tf_stat(w->temporary,&info) && !S_ISREG(info.st_mode))s=PN_IO;
         else if(remove(w->temporary) && errno!=ENOENT)s=PN_IO;
@@ -231,12 +254,16 @@ static pn_status_t tf_step(index_t *i){
         if(!(w->trust_stage?tf_trust_owned(e->d_name):tf_owned(e->d_name)))break;
         char path[PN_JOURNAL_PATH_MAX+8];int n=snprintf(path,sizeof path,"%s/%s",w->trust_stage?w->trust_directory:i->directory,e->d_name);
         if(n<0 || (size_t)n>=sizeof path){s=PN_LIMIT;break;}
-        if(!tf_stat(path,&info) && S_ISREG(info.st_mode) && info.st_size>0){uint64_t bytes=(uint64_t)info.st_size;w->total=bytes>UINT64_MAX-w->total?UINT64_MAX:w->total+bytes;
+        if(!tf_stat(path,&info) && S_ISREG(info.st_mode) && info.st_size>=0){
+            // 唯一写租约下只清闲置自有.tmp，保留备份直到正常事务或配额回收。/ With the unique write lease, remove only inactive owned .tmp files; retain backups until normal publication or quota eviction.
+            size_t length=strlen(path);if(length>4 && !strcmp(path+length-4,".tmp") && !tf_pinned(path,w->trust_stage) && w->evictions<128){if(remove(path))s=PN_IO;else w->evictions++;break;}
+            uint64_t bytes=(uint64_t)info.st_size;w->total=bytes>UINT64_MAX-w->total?UINT64_MAX:w->total+bytes;
             if(!tf_pinned(path,w->trust_stage) && (!*w->victim || info.st_mtime<w->oldest)){strcpy(w->victim,path);w->oldest=info.st_mtime;}}
         break;
     }
     case TF_SPACE:{
         uint64_t available=0,records=(uint64_t)i->disk_count+i->count;if(records>TF_MAX_RECORDS)records=TF_MAX_RECORDS;
+        if(w->compact){records=(i->log_end/RECORD)+i->count;if(records>TF_MAX_RECORDS)records=TF_MAX_RECORDS;}
         uint64_t incoming=w->trust_stage?TF_TRUST_BYTES:w->append?w->log_end-w->log_start:HEADER+records*RECORD,quota=w->trust_stage?TF_TRUST_QUOTA:TF_QUOTA;
         if(!w->trust_stage && w->append && ((i->disk_valid && i->log_blocks>=LOG_MAX_BLOCKS) || w->log_end>TF_QUOTA)){s=PN_LIMIT;break;}
         if(w->trust_stage){if(capacity_port)s=capacity_port(capacity_ctx,&available);
@@ -247,7 +274,9 @@ static pn_status_t tf_step(index_t *i){
 #endif
         }else s=tf_available(i,&available);
         uint64_t reserve=w->trust_stage?TF_TRUST_RESERVE:TF_RESERVE;
-        if(s==PN_OK){if(w->total<=quota && incoming<=quota-w->total && available>=incoming+reserve)w->phase=w->trust_stage?TF_TRUST_OPEN:w->append?TF_LOG_OPEN:TF_OPEN;
+        if(w->total>quota || incoming>quota-w->total)w->reclaim=true;
+        uint64_t target=w->reclaim && *w->victim && w->evictions<128?quota*3/4:quota;
+        if(s==PN_OK){if(w->total<=target && incoming<=target-w->total && available>=incoming+reserve)w->phase=w->trust_stage?TF_TRUST_OPEN:w->append?TF_LOG_OPEN:w->compact?TF_COMPACT_OPEN:TF_OPEN;
             else if(*w->victim && w->evictions<128)w->phase=TF_EVICT;else s=PN_EMPTY;}break;
     }
     case TF_EVICT:if(remove(w->victim))s=PN_IO;else{w->evictions++;w->phase=TF_SCAN_OPEN;}break;
@@ -293,10 +322,12 @@ static pn_status_t tf_step(index_t *i){
     case TF_CLOSE:
         if(fclose(w->file))s=PN_IO;
         w->file=NULL;if(w->old){if(fclose(w->old) && s==PN_OK)s=PN_IO;w->old=NULL;}w->phase=TF_VERIFY_OPEN;break;
+    case TF_COMPACT_OPEN:case TF_COMPACT_HEADER:case TF_COMPACT_HASH:case TF_COMPACT_TAIL:case TF_COMPACT_MERGE:
+        s=compact_step(i,w);break;
     case TF_VERIFY_OPEN:{
         w->file=fopen(w->temporary,"rb");uint32_t count=0;
-        if(!w->file || setvbuf(w->file,(char *)w->input,_IOFBF,sizeof w->input) || fstat(fileno(w->file),&info) || info.st_size!=(off_t)(HEADER+(uint64_t)w->count*RECORD) || fread(bytes,1,HEADER,w->file)!=HEADER || !tf_header(i,bytes,&count) || count!=w->count)s=PN_CORRUPT;
-        else w->phase=TF_VERIFY;
+        if(!w->file || setvbuf(w->file,w->compact?NULL:(char *)w->input,w->compact?_IONBF:_IOFBF,w->compact?0:sizeof w->input) || fstat(fileno(w->file),&info) || info.st_size!=(off_t)(HEADER+(uint64_t)w->count*RECORD) || fread(bytes,1,HEADER,w->file)!=HEADER || !tf_header(i,bytes,&count) || count!=w->count)s=PN_CORRUPT;
+        else if(w->compact){w->compact_check=true;w->compact_at=0;w->compact_sequence=0;w->compact_runs=0;w->compact_hash=(pn_book_id_t){0};w->heap_count=0;w->input_used=0;w->phase=TF_COMPACT_OPEN;}else w->phase=TF_VERIFY;
         break;
     }
     case TF_VERIFY:
@@ -312,8 +343,9 @@ static pn_status_t tf_step(index_t *i){
         if(fclose(w->file))s=PN_IO;
         w->file=NULL;if(s==PN_OK)w->phase=TF_TRUST_DIRECTORY;break;
     case TF_TRUST_DIRECTORY:
-        s=pn_cache_file_directory(i->trust_media,&i->trust_lease,w->trust_directory);if(s==PN_OK){w->trust_stage=true;w->evictions=0;w->phase=TF_TRUST_STALE;}break;
+        s=pn_cache_file_directory(i->trust_media,&i->trust_lease,w->trust_directory);if(s==PN_OK){w->trust_stage=true;w->evictions=0;w->reclaim=false;w->phase=TF_TRUST_STALE;}break;
     case TF_TRUST_STALE:
+        s=tf_prune_backup(w->trust_backup,i->trust_known && !i->trust_backup);if(s!=PN_OK)break;
         if(!tf_stat(w->trust_temporary,&info) && !S_ISREG(info.st_mode))s=PN_IO;
         else if(remove(w->trust_temporary) && errno!=ENOENT)s=PN_IO;else w->phase=TF_SCAN_OPEN;
         break;
@@ -339,7 +371,7 @@ static pn_status_t tf_step(index_t *i){
         if(w->trust_commit.committed){memcpy(i->trust_hash[0].sha256,w->output+72,32);memcpy(i->trust_hash[1].sha256,w->output+104,32);i->trust_known=true;i->trust_backup=false;w->trust_temporary_owned=false;}
         if(s==PN_OK && w->inplace){
             log_range_commit(i,w->log_start,w->count,w->order);
-            i->log_base_end=i->log_mode?i->log_base_end:w->log_start;i->log_mode=true;i->log_end=w->log_end;i->log_blocks++;i->disk_count=(uint32_t)i->count;i->selected_hash=w->digest;i->dirty=0;i->have_floor=false;build_remember(i);tf_abort(i);return PN_OK;
+            i->log_base_end=i->log_mode?i->log_base_end:w->log_start;i->log_mode=true;i->log_end=w->log_end;i->log_blocks++;i->disk_count=w->count;i->selected_hash=w->digest;i->dirty=0;memset(i->changed,0,sizeof i->changed);i->have_floor=false;build_remember(i);tf_abort(i);return PN_OK;
         }
         if(s==PN_OK)w->phase=TF_FINAL_SPACE;
         break;
@@ -351,22 +383,22 @@ static pn_status_t tf_step(index_t *i){
     case TF_PUBLISH:
         s=pn_cache_commit_step(&w->commit);
         if(w->commit.moved && !w->commit.committed)i->disk_backup=true;
-        if(w->commit.committed){if(w->append && w->temporary_owned)log_range_commit(i,w->log_start,w->count,w->order);i->disk_count=w->count;i->disk_valid=true;i->disk_backup=false;i->dirty=0;i->selected_hash=w->digest;build_remember(i);w->temporary_owned=false;if(w->append){i->log_mode=true;i->log_end=w->log_end;i->log_base_end=0;i->log_blocks=1;i->have_floor=false;}}
+        if(w->commit.committed){if(w->append && w->temporary_owned)log_range_commit(i,w->log_start,w->count,w->order);i->disk_count=w->count;i->disk_valid=true;i->disk_backup=false;i->dirty=0;memset(i->changed,0,sizeof i->changed);i->selected_hash=w->digest;build_remember(i);w->temporary_owned=false;if(w->compact){log_ranges_clear(i);i->log_mode=false;i->log_end=i->log_base_end=0;i->log_blocks=0;i->have_floor=false;}if(w->append){i->log_mode=true;i->log_end=w->log_end;i->log_base_end=0;i->log_blocks=1;i->have_floor=false;}}
         if(s==PN_OK){tf_abort(i);return PN_OK;}break;
     case TF_LOG_OPEN:
         w->file=fopen(w->inplace?(w->source_backup?w->backup:i->path):w->temporary,w->inplace?"r+b":"w+b");
-        if(!w->file){s=PN_IO;break;}w->temporary_owned=!w->inplace;w->count=(uint32_t)i->count;
+        if(!w->file){s=PN_IO;break;}w->temporary_owned=!w->inplace;w->count=(uint32_t)w->selected;
         if(setvbuf(w->file,(char *)w->input,_IOFBF,sizeof w->input) || fseek(w->file,(long)w->log_start,SEEK_SET)){s=PN_IO;break;}
-        log_header_write(i,bytes);s=tf_emit(w,bytes,LOG_HEADER);if(s==PN_OK)w->phase=TF_LOG_DATA;break;
+        log_header_write(i,bytes,(uint32_t)w->selected);s=tf_emit(w,bytes,LOG_HEADER);if(s==PN_OK)w->phase=TF_LOG_DATA;break;
     case TF_LOG_DATA:
-        for(unsigned step=0;s==PN_OK && step<32 && w->at<i->count;step++){encode(bytes,&i->entries[w->order[w->at++]]);s=tf_emit(w,bytes,RECORD);}
-        if(s==PN_OK && w->at==i->count)w->phase=TF_LOG_DRAIN;
+        for(unsigned step=0;s==PN_OK && step<32 && w->at<w->selected;step++){encode(bytes,&i->entries[w->order[w->at++]]);s=tf_emit(w,bytes,RECORD);}
+        if(s==PN_OK && w->at==w->selected)w->phase=TF_LOG_DRAIN;
         break;
     case TF_LOG_DRAIN:
         if(w->used && fwrite(w->output,1,w->used,w->file)!=w->used)s=PN_IO;else{w->used=0;w->phase=TF_LOG_HASH_BEGIN;}break;
     case TF_LOG_SYNC:
         if(fflush(w->file) || fsync(fileno(w->file)) || fseek(w->file,(long)w->log_start,SEEK_SET) || fread(bytes,1,LOG_HEADER,w->file)!=LOG_HEADER)s=PN_IO;
-        else{uint8_t expected[LOG_HEADER];log_header_write(i,expected);if(memcmp(bytes,expected,LOG_HEADER))s=PN_CORRUPT;else w->phase=TF_LOG_VERIFY;}break;
+        else{uint8_t expected[LOG_HEADER];log_header_write(i,expected,(uint32_t)w->selected);if(memcmp(bytes,expected,LOG_HEADER))s=PN_CORRUPT;else w->phase=TF_LOG_VERIFY;}break;
     case TF_LOG_VERIFY:
         for(unsigned step=0;s==PN_OK && step<32 && w->verified<w->count;step++){
             pn_page_index_entry_t entry;uint8_t expected[RECORD];encode(expected,&i->entries[w->order[w->verified]]);
@@ -396,7 +428,7 @@ static pn_status_t tf_step(index_t *i){
 }
 static pn_status_t tf_flush(index_t *i,bool force){
     if(i->blocked && i->blocked_writes==i->media->writes)return PN_EMPTY;
-    i->blocked=false;if(!i->writer && (!i->dirty || (!force && i->dirty<64)))return PN_EMPTY;
+    i->blocked=false;if(!i->writer && ((!i->dirty && !tf_compact_due(i)) || (!force && i->dirty<64 && !tf_compact_due(i))))return PN_EMPTY;
     pn_status_t s=checked(i);if(s!=PN_OK){tf_abort(i);return s;}
     if(!i->writer){s=tf_begin(i);if(s!=PN_OK){if(s!=PN_BUSY && s!=PN_CANCELLED){i->blocked=true;i->blocked_writes=i->media->writes;}return s;}}
     s=tf_step(i);if(s!=PN_OK && s!=PN_BUSY && s!=PN_CANCELLED){tf_abort(i);i->blocked=true;i->blocked_writes=i->media->writes;}

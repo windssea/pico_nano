@@ -76,6 +76,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary', required=True, type=pathlib.Path)
     parser.add_argument('--baseline', type=pathlib.Path)
+    parser.add_argument('--migrate-baseline', action='store_true', help='Also maintain the old binary cache with the new binary and verify identical logical records and frame')
     parser.add_argument('--book', type=pathlib.Path)
     parser.add_argument('--font', required=True, type=pathlib.Path)
     parser.add_argument('--output', required=True, type=pathlib.Path)
@@ -116,6 +117,22 @@ def main():
         if args.baseline:
             first, last = report['runs']['before'], report['runs']['after']
             assert all(first[key] == last[key] for key in ('pages', 'table_sha', 'frame_sha'))
+        if args.migrate_baseline:
+            assert args.baseline
+            state, out = root / 'before', args.output / 'migration'
+            out.mkdir()
+            with (out / 'maintain.log').open('w', encoding='utf-8') as log:
+                result = subprocess.run([str(args.binary.resolve()), str(book), str(font), str(state), str((out / 'stats.json').resolve()), 'maintain'], stdout=log, stderr=log, timeout=900)
+            assert result.returncode == 0
+            values = json.loads((out / 'stats.json').read_text())
+            table, = (state / 'reading/pages').glob('*.pni')
+            assert values['complete'] and values['used'] == values['live'] == 0
+            assert hashlib.sha256(canonical_table(table, state)).hexdigest() == first['table_sha'] and identity(state / 'first.pgm') == first['frame_sha']
+            values.update(storage_bytes=table.stat().st_size, storage_sha=identity(table), table_frame_equal=True)
+            assert values['storage_bytes'] <= first['storage_bytes']
+            shutil.copy2(table, out / 'pages.pni')
+            report['migration'] = values
+            print('migration', json.dumps(values), flush=True)
         if args.resume_after:
             assert 0 < args.resume_after < report['runs']['after']['pages']
             state = root / 'resumed'
