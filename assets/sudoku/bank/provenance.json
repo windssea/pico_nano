@@ -1,0 +1,19 @@
+{
+  "created_local_date": "2026-10-24",
+  "brand": "PicoNano",
+  "seed": 20261024,
+  "generator": "project-authored host Python tool, no external puzzle corpus",
+  "generation_session": "initial serial sampler interrupted; accepted checkpoint continued with deterministic seeded host worker batches",
+  "reproducibility": "exact delivered grids/solutions/proofs retained; fresh single-phase regeneration is not claimed byte-identical to this resumed session",
+  "stable_ids": "canonical SHA256 first 32 bits; collision check required; full canonical SHA256 retained in host JSON",
+  "unique_solution_strings": 1200,
+  "tool_sha256": {
+    "sudoku_bank.py": "bd5ac9bbc007d419a72126c032c9557d9914f4363a01502ad55a6fba4ad80066",
+    "build_design.py": "d7c76b17a1659cbb7f80648ec38eaee56008fc24f0edd4a7519d7f7a2d1baaac",
+    "verify_delivery.py": "1705d51b9d91528650ef4b5b7979f35a66e10d9f7c4cb3294c6b52d0a3937a83",
+    "test_sudoku_bank.py": "67b3d9ee7dce2643022c0d605fd3a2006d1e8aee5b2802b0ccaba6745888d868"
+  },
+  "image_generation": "built-in image_gen; prompts and generated originals in sources/",
+  "postprocessing": "user-requested PNG extraction, pixel dimensions, 16-gray quantization and deterministic UI composition",
+  "scope": "design assets and host bank tool, not firmware support or panel acceptance"
+}

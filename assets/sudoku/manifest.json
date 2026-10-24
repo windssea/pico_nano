@@ -1,0 +1,234 @@
+{
+  "gray_levels": [
+    0,
+    17,
+    34,
+    51,
+    68,
+    85,
+    102,
+    119,
+    136,
+    153,
+    170,
+    187,
+    204,
+    221,
+    238,
+    255
+  ],
+  "black_index": 0,
+  "white_index": 15,
+  "opaque_png": "indexed palette, 4-bit, 16 fixed grays",
+  "transparent_png": "RGBA, 16 gray RGB values, binary alpha",
+  "assets": [
+    {
+      "file": "assets/mountains_header_684x160.png",
+      "width": 684,
+      "height": 160,
+      "role": "shared header artwork",
+      "bytes": 3709,
+      "sha256": "9e5aa6928dd81668dcc0efda59f34030a02125063e9d5fd72c14d16df98f186f"
+    },
+    {
+      "file": "assets/paper_684x1216.png",
+      "width": 684,
+      "height": 1216,
+      "role": "plain white reference; render fill in firmware",
+      "bytes": 1615,
+      "sha256": "ec31f016bbb17a046d488f4ba8ae65a6bf13d87a7de32a8c086335ed6bf094a5"
+    },
+    {
+      "file": "assets/wordmark_180x58.png",
+      "width": 180,
+      "height": 58,
+      "role": "approved PicoNano wordmark crop",
+      "bytes": 1746,
+      "sha256": "afd6d71dd112ce57f578afbb395a135fc91159aa4a8cd312fd4fa527fb86ef66"
+    },
+    {
+      "file": "assets/icon_undo_48.png",
+      "width": 48,
+      "height": 48,
+      "role": "approved concept icon crop",
+      "bytes": 465,
+      "sha256": "55d115ad9cb95d314e8d910d971fcc496d91c0f801ee728d17b0d7447316f7c5"
+    },
+    {
+      "file": "assets/icon_erase_48.png",
+      "width": 48,
+      "height": 48,
+      "role": "approved concept icon crop",
+      "bytes": 570,
+      "sha256": "78e1699a81973e5273a861ffa888b2a4a7742e8df551ee942dfc970a8c0d1a6b"
+    },
+    {
+      "file": "assets/icon_notes_48.png",
+      "width": 48,
+      "height": 48,
+      "role": "approved concept icon crop",
+      "bytes": 547,
+      "sha256": "9f0db7bc60f4be8f9159e6a6ef10f91853ad6b49cf3771d116e06fac778d3107"
+    },
+    {
+      "file": "assets/icon_menu_48.png",
+      "width": 48,
+      "height": 48,
+      "role": "approved concept icon crop",
+      "bytes": 330,
+      "sha256": "865ce8a1ed37f31457f1d4e1ce8e5a52baec6b2db42adc8aae14706ee928e969"
+    },
+    {
+      "file": "assets/panda_reading_96.png",
+      "width": 96,
+      "height": 96,
+      "role": "aligned pixel panda animation pose",
+      "bytes": 1372,
+      "sha256": "6de57c7cceba27154ef906c1dc91756ec397353816d21f3bb3a075f52cf07aff"
+    },
+    {
+      "file": "assets/panda_reading_144.png",
+      "width": 144,
+      "height": 144,
+      "role": "aligned pixel panda animation pose",
+      "bytes": 1629,
+      "sha256": "9ddebaef6196bcba7d59735c2467ec563147628f7ec731cd8aed3affe398d5e2"
+    },
+    {
+      "file": "assets/panda_blink_96.png",
+      "width": 96,
+      "height": 96,
+      "role": "aligned pixel panda animation pose",
+      "bytes": 1329,
+      "sha256": "6d09aea5eb20bc3f94a57785f96e82d710538aae56ba4ef421156af5d0cc4182"
+    },
+    {
+      "file": "assets/panda_blink_144.png",
+      "width": 144,
+      "height": 144,
+      "role": "aligned pixel panda animation pose",
+      "bytes": 1599,
+      "sha256": "edcbf90494e1515c053eaf9a7ae229528e2f02538b98bcad72bf77a84ad59a6e"
+    },
+    {
+      "file": "assets/panda_look_up_96.png",
+      "width": 96,
+      "height": 96,
+      "role": "aligned pixel panda animation pose",
+      "bytes": 1403,
+      "sha256": "ac7e380a1abf6b65a4aee735d02c31f0b66b0c2b78a72306bc9c46e0ccef48ee"
+    },
+    {
+      "file": "assets/panda_look_up_144.png",
+      "width": 144,
+      "height": 144,
+      "role": "aligned pixel panda animation pose",
+      "bytes": 1668,
+      "sha256": "c8e9f4c84f434401d1c35f553b41586bcdbf48fbff73b82cc4cd4941a52b21e7"
+    },
+    {
+      "file": "assets/panda_thinking_96.png",
+      "width": 96,
+      "height": 96,
+      "role": "aligned pixel panda animation pose",
+      "bytes": 1400,
+      "sha256": "415adf4da5b8df97043ff6160ab88b955affa3aa680ff25389d4dd92f81aac62"
+    },
+    {
+      "file": "assets/panda_thinking_144.png",
+      "width": 144,
+      "height": 144,
+      "role": "aligned pixel panda animation pose",
+      "bytes": 1680,
+      "sha256": "5a58cb45d16989cf71c225f1cf82df23c2a44235f905c69de99ab373fc507376"
+    },
+    {
+      "file": "assets/panda_wave_low_96.png",
+      "width": 96,
+      "height": 96,
+      "role": "aligned pixel panda animation pose",
+      "bytes": 1385,
+      "sha256": "6734baf3496de7c1dc125a7f77dcb74c1f9b57b68d7665ee09211c310a004ef2"
+    },
+    {
+      "file": "assets/panda_wave_low_144.png",
+      "width": 144,
+      "height": 144,
+      "role": "aligned pixel panda animation pose",
+      "bytes": 1657,
+      "sha256": "d74408793a1edc1eebab3a4a9d0c87c0ededa55d64c581226b90ad6acd909ed2"
+    },
+    {
+      "file": "assets/panda_wave_high_96.png",
+      "width": 96,
+      "height": 96,
+      "role": "aligned pixel panda animation pose",
+      "bytes": 1365,
+      "sha256": "027f502d471566aad632ae24fa5d490aee6a583c58f4d5dba6d2091c92d1760c"
+    },
+    {
+      "file": "assets/panda_wave_high_144.png",
+      "width": 144,
+      "height": 144,
+      "role": "aligned pixel panda animation pose",
+      "bytes": 1630,
+      "sha256": "bdcbae0497d3e74e61a8cedd561676456e0cb6205b49c63945c086e8c1bb1b48"
+    },
+    {
+      "file": "assets/panda_atlas_576x96.png",
+      "width": 576,
+      "height": 96,
+      "role": "six aligned frames in NAMES order",
+      "bytes": 6203,
+      "sha256": "93ce5c3b495c5ef8deb6fcf020b34833f3c747a11f84b65504b98ab8cd947db8"
+    },
+    {
+      "file": "screens/02_playing_684x1216.png",
+      "width": 684,
+      "height": 1216,
+      "role": "native gameplay design; fixed valid example puzzle",
+      "bytes": 21761,
+      "sha256": "db11fec6f0e001fd6dab62788de3e973eb8f871382b725e323156e8243a8e650"
+    },
+    {
+      "file": "screens/01_new_game_684x1216.png",
+      "width": 684,
+      "height": 1216,
+      "role": "difficulty selector while a game exists; selecting alone does not reset",
+      "bytes": 26062,
+      "sha256": "47aa2c75a83582d58f2e8094d605eeca414a65571051eb4f13da63064fabd40b"
+    },
+    {
+      "file": "screens/03_completed_684x1216.png",
+      "width": 684,
+      "height": 1216,
+      "role": "completed puzzle retained until user explicitly starts a next game",
+      "bytes": 26563,
+      "sha256": "8a1ce1fc4d7907aefc8345c67e86bb33a8bebbd7a8cb5fe8937f39145996efb6"
+    },
+    {
+      "file": "screens/04_confirm_new_game_684x1216.png",
+      "width": 684,
+      "height": 1216,
+      "role": "supplemental confirmation; no dimming full-screen refresh implied",
+      "bytes": 25464,
+      "sha256": "c33997017fdbb448347b94e11a261833328b7100af6f7a61f3a07803ca6f7f4f"
+    },
+    {
+      "file": "previews/three_screens.png",
+      "width": 2100,
+      "height": 1280,
+      "role": "three native screens side by side; not a device framebuffer",
+      "bytes": 65653,
+      "sha256": "bdfd455ff4166dcc7e485e68b24c7ddc33ea9eea158d55475f15b6e77efda213"
+    },
+    {
+      "file": "previews/panda_poses.png",
+      "width": 960,
+      "height": 210,
+      "role": "pose contact sheet; not a device framebuffer",
+      "bytes": 6545,
+      "sha256": "ab697ec148821725d715bc6e49a8777ee62932982f304b17f733a7c26e0dc4a6"
+    }
+  ]
+}

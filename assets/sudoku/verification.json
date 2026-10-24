@@ -1,0 +1,26 @@
+{
+  "png_exports_verified": 26,
+  "native_screens": 4,
+  "puzzles_verified": 1200,
+  "difficulty_counts": {
+    "easy": 300,
+    "medium": 300,
+    "hard": 300,
+    "expert": 300
+  },
+  "independent_solver": "Algorithm X exact cover, limit 2",
+  "proof_steps_replayed": 69024,
+  "techniques": {
+    "naked_single": 51191,
+    "hidden_single": 13957,
+    "locked_candidate": 2786,
+    "naked_pair": 503,
+    "hidden_pair": 246,
+    "naked_triple": 177,
+    "x_wing": 164
+  },
+  "binary_bytes": 57632,
+  "binary_roundtrip": true,
+  "palette": "16 fixed gray levels 0,17,...,255; binary sprite alpha",
+  "validation_scope": "host artifacts only; no firmware or panel validation"
+}

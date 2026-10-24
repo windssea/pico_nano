@@ -1,0 +1,39 @@
+{
+  "frame_order": [
+    "reading",
+    "blink",
+    "look_up",
+    "thinking",
+    "wave_low",
+    "wave_high"
+  ],
+  "logical_canvas": [
+    48,
+    48
+  ],
+  "baseline_y": 46,
+  "exports": [
+    96,
+    144
+  ],
+  "enter": [
+    "reading",
+    "look_up",
+    "reading"
+  ],
+  "hint": [
+    "reading",
+    "thinking",
+    "reading"
+  ],
+  "complete": [
+    "reading",
+    "wave_low",
+    "wave_high",
+    "wave_low",
+    "reading"
+  ],
+  "policy": "event-only, play once, then static; skip if input or display is busy",
+  "draft_frame_ms": 1000,
+  "timing_status": "design value, requires real-panel validation"
+}

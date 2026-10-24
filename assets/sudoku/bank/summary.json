@@ -1,0 +1,34 @@
+{
+  "schema": 1,
+  "seed": 20261024,
+  "counts": {
+    "easy": 300,
+    "medium": 300,
+    "hard": 300,
+    "expert": 300
+  },
+  "total": 1200,
+  "record_bytes": 48,
+  "header_bytes": 32,
+  "device_bank_bytes": 57632,
+  "max_logical_steps": 75,
+  "clue_ranges": {
+    "easy": [
+      23,
+      36
+    ],
+    "medium": [
+      23,
+      33
+    ],
+    "hard": [
+      23,
+      33
+    ],
+    "expert": [
+      23,
+      33
+    ]
+  },
+  "binary_sha256": "834ead2ae28d7e76f0657ba085c68019d02c2d78b57b2a2f3e2b08296710e547"
+}
