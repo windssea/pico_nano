@@ -4,6 +4,7 @@
 #include "pn_profile.h"
 #include "pn_page_index.h"
 #include "pn_cancel.h"
+#include "pn_crc32.h"
 #include "pn_cache_file.h"
 #include "pn_sd_layout.h"
 #include "pn_reader_chrome.h"
@@ -36,7 +37,7 @@ struct page_index {
 };
 static uint64_t get(const uint8_t *p,unsigned n){uint64_t v=0;for(unsigned i=0;i<n;i++)v|=(uint64_t)p[i]<<(8*i);return v;}
 static void put(uint8_t *p,uint64_t v,unsigned n){for(unsigned i=0;i<n;i++)p[i]=(uint8_t)(v>>(8*i));}
-static uint32_t crc(const uint8_t *p,size_t n){uint32_t c=~0u;while(n--){c^=*p++;for(unsigned j=0;j<8;j++)c=(c>>1)^(0xedb88320u&(0u-(c&1u)));}return ~c;}
+static uint32_t crc(const uint8_t *p,size_t n){return pn_crc32_update(0,p,n);}
 static void position_put(uint8_t *p,pn_xhtml_position_t v){put(p,v.element,8);put(p+8,v.offset,8);put(p+16,v.run,4);put(p+20,v.kind,4);}
 static pn_xhtml_position_t position_get(const uint8_t *p){return (pn_xhtml_position_t){get(p,8),get(p+8,8),(uint32_t)get(p+16,4),(pn_xhtml_position_kind_t)get(p+20,4)};}
 static void encode(uint8_t *p,const pn_page_index_entry_t *e){memset(p,0,RECORD);put(p,e->section,4);put(p+4,e->flags,4);put(p+8,e->begin,8);put(p+16,e->end,8);position_put(p+24,e->first);position_put(p+48,e->next);put(p+76,crc(p,76),4);}

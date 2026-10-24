@@ -136,7 +136,7 @@ typedef struct {
     char trust_directory[PN_JOURNAL_PATH_MAX],trust_temporary[PN_JOURNAL_PATH_MAX+4],trust_backup[PN_JOURNAL_PATH_MAX+4]; ///< 内部根的固定同目录路径 / Fixed sibling paths for internal roots
     uint16_t order[PN_PAGE_INDEX_MAX]; ///< 排列引用，不复制512条记录 / Permutation references without copying 512 records
     uint8_t output[4096],input[4096]; ///< 已计入原INDEX硬顶的有限工作块 / Bounded work blocks charged to the unchanged INDEX cap
-    size_t used,at;uint32_t old_at,old_count,count,verified;uint64_t total; ///< 合并/校验游标与配额 / Merge/validation cursors and quota
+    size_t used,at,input_used,input_at,captured,old_skip;uint32_t old_at,old_count,count,verified;uint64_t total;bool old_verified; ///< 合并/校验游标与配额，旧表摘要与记录共享同次读取 / Merge/validation cursors and quota; old-table hashing and records share each read
     pn_page_index_entry_t previous,old_entry;bool have_old,temporary_owned,source_backup,trust_stage,trust_temporary_owned;tf_phase_t phase; ///< 唯一旧记录与步骤 / Sole old record and current phase
 } tf_write_t;
 static void tf_abort(index_t *i){
@@ -182,6 +182,13 @@ static pn_status_t tf_emit(tf_write_t *w,const uint8_t *bytes,size_t size){
     if(w->used==sizeof w->output){if(fwrite(w->output,1,w->used,w->file)!=w->used)return PN_IO;w->used=0;}
     if(first<size){memcpy(w->output,bytes+first,size-first);w->used=size-first;}return PN_OK;
 }
+/// 摘要成功接管该块后合并器才消费，取消重读不会重复输出；短读保留不足一条的尾部。/ Merge only after the hash accepts the chunk, avoiding duplicate output on cancelled rereads; retain partial records across short reads.
+static pn_status_t tf_merge_hash_read(void *ctx,uint64_t offset,uint8_t *out,size_t cap,size_t *got){
+    tf_write_t *w=ctx;if(cap>sizeof w->input-w->input_used)cap=sizeof w->input-w->input_used;
+    pn_status_t s=tf_hash_read(&w->hash_source,offset,out,cap,got);
+    if(s==PN_OK){memcpy(w->input+w->input_used,out,*got);w->captured=*got;}
+    return s;
+}
 static pn_status_t tf_step(index_t *i){
     tf_write_t *w=i->writer;pn_status_t s=checked(i);if(s!=PN_OK)return s;
     s=pn_media_validate(i->media,&w->lease);if(s!=PN_OK)return s;
@@ -221,17 +228,21 @@ static pn_status_t tf_step(index_t *i){
     case TF_EVICT:if(remove(w->victim))s=PN_IO;else{w->evictions++;w->phase=TF_SCAN_OPEN;}break;
     case TF_OPEN:{
         if(i->disk_valid){w->old=fopen(i->disk_backup?w->backup:i->path,"rb");if(!w->old){s=PN_IO;break;}
-            if(setvbuf(w->old,(char *)w->input,_IOFBF,sizeof w->input) || fread(bytes,1,HEADER,w->old)!=HEADER || !tf_header(i,bytes,&w->old_count) || w->old_count!=i->disk_count){s=PN_CORRUPT;break;}}
+            if(setvbuf(w->old,NULL,_IONBF,0) || fread(bytes,1,HEADER,w->old)!=HEADER || !tf_header(i,bytes,&w->old_count) || w->old_count!=i->disk_count){s=PN_CORRUPT;break;}}
         if(!tf_stat(w->temporary,&info) && !S_ISREG(info.st_mode)){s=PN_IO;break;}
         w->file=fopen(w->temporary,"wb");if(!w->file){s=PN_IO;break;}w->temporary_owned=true;
-        if(setvbuf(w->file,NULL,_IONBF,0)){s=PN_IO;break;}tf_header_write(i,bytes,0);s=tf_emit(w,bytes,HEADER);if(s==PN_OK)w->phase=TF_MERGE;break;
+        if(setvbuf(w->file,NULL,_IONBF,0)){s=PN_IO;break;}tf_header_write(i,bytes,0);s=tf_emit(w,bytes,HEADER);if(s==PN_OK)w->phase=w->old?TF_OLD_HASH_BEGIN:TF_MERGE;break;
     }
     case TF_MERGE:
         for(unsigned step=0;s==PN_OK && step<32;step++){
             if(!w->have_old && w->old_at<w->old_count){
-                if(fread(bytes,1,RECORD,w->old)!=RECORD || !decode(bytes,&w->old_entry) || (w->old_at && tf_compare(&w->previous,&w->old_entry)>=0)){s=PN_CORRUPT;break;}
+                size_t skip=w->old_skip<w->input_used-w->input_at?w->old_skip:w->input_used-w->input_at;w->input_at+=skip;w->old_skip-=skip;
+                if(w->input_used-w->input_at<RECORD){size_t left=w->input_used-w->input_at;memmove(w->input,w->input+w->input_at,left);w->input_used=left;w->input_at=0;w->phase=TF_OLD_HASH;break;}
+                memcpy(bytes,w->input+w->input_at,RECORD);w->input_at+=RECORD;
+                if(!decode(bytes,&w->old_entry) || (w->old_at && tf_compare(&w->previous,&w->old_entry)>=0)){s=PN_CORRUPT;break;}
                 w->previous=w->old_entry;w->old_at++;w->have_old=true;
             }
+            if(w->old && !w->have_old && w->old_at==w->old_count && !w->old_verified){w->input_used=w->input_at=0;w->phase=TF_OLD_HASH;break;}
             if(!w->have_old && w->at==i->count){if(w->old && (fgetc(w->old)!=EOF || ferror(w->old)))s=PN_CORRUPT;w->phase=TF_DRAIN;break;}
             const pn_page_index_entry_t *next=w->at<i->count?&i->entries[w->order[w->at]]:NULL;
             int compare=w->have_old && next?tf_compare(&w->old_entry,next):w->have_old?-1:1;
@@ -241,12 +252,17 @@ static pn_status_t tf_step(index_t *i){
         }
         break;
     case TF_DRAIN:if(w->used && fwrite(w->output,1,w->used,w->file)!=w->used)s=PN_IO;else{w->used=0;w->phase=TF_HEADER;}break;
-    case TF_HEADER:tf_header_write(i,bytes,w->count);if(fseek(w->file,0,SEEK_SET) || fwrite(bytes,1,HEADER,w->file)!=HEADER)s=PN_IO;else w->phase=w->old?TF_OLD_HASH_BEGIN:TF_FLUSH;break;
+    case TF_HEADER:tf_header_write(i,bytes,w->count);if(fseek(w->file,0,SEEK_SET) || fwrite(bytes,1,HEADER,w->file)!=HEADER)s=PN_IO;else w->phase=TF_FLUSH;break;
     case TF_OLD_HASH_BEGIN:
         // 合并不能把后来被改写且重算CRC的旧表洗成新可信根。/ Merging must never launder a subsequently modified, CRC-recomputed old table into a new trusted root.
-        w->hash_source=(tf_hash_t){i,w->old,UINT64_MAX};s=pn_identity_job_begin(&w->hash,i->pool,&w->hash_source,HEADER+(uint64_t)w->old_count*RECORD,tf_hash_read);if(s==PN_OK)w->phase=TF_OLD_HASH;break;
-    case TF_OLD_HASH:
-        s=pn_identity_job_step(&w->hash,&w->digest);if(s==PN_OK){pn_identity_job_close(&w->hash);if(memcmp(w->digest.sha256,i->selected_hash.sha256,32))s=PN_CORRUPT;else w->phase=TF_FLUSH;}break;
+        w->old_skip=HEADER;w->hash_source=(tf_hash_t){i,w->old,UINT64_MAX};s=pn_identity_job_begin(&w->hash,i->pool,w,HEADER+(uint64_t)w->old_count*RECORD,tf_merge_hash_read);if(s==PN_OK)w->phase=TF_OLD_HASH;break;
+    case TF_OLD_HASH:{
+        uint64_t before=0,after=0,size=0;w->captured=0;(void)pn_identity_job_progress(&w->hash,&before,&size);
+        s=pn_identity_job_step(&w->hash,&w->digest);(void)pn_identity_job_progress(&w->hash,&after,&size);
+        if(s==PN_OK){pn_identity_job_close(&w->hash);if(memcmp(w->digest.sha256,i->selected_hash.sha256,32))s=PN_CORRUPT;else{w->old_verified=true;w->phase=TF_MERGE;}}
+        else if(s==PN_BUSY && after>before){if(after-before!=w->captured)s=PN_IO;else{w->input_used+=w->captured;w->phase=TF_MERGE;}}
+        break;
+    }
     case TF_FLUSH:if(fflush(w->file))s=PN_IO;else w->phase=TF_SYNC;break;
     case TF_SYNC:if(fsync(fileno(w->file)))s=PN_IO;else w->phase=TF_CLOSE;break;
     case TF_CLOSE:

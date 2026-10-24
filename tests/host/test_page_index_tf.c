@@ -13,9 +13,9 @@
 #include <unistd.h>
 #include <dirent.h>
 #include <sys/stat.h>
-static bool cancel_after_read,arm_read;
+static bool cancel_after_read,arm_read,short_hash_read;
 size_t __real_fread(void *,size_t,size_t,FILE *);
-size_t __wrap_fread(void *out,size_t size,size_t count,FILE *file){size_t n=__real_fread(out,size,count,file);if(arm_read && size*count==4096 && n){arm_read=false;cancel_after_read=true;}return n;}
+size_t __wrap_fread(void *out,size_t size,size_t count,FILE *file){size_t n=__real_fread(out,size,short_hash_read && size==1 && count==4096?17:count,file);if(arm_read && size*count==4096 && n){arm_read=false;cancel_after_read=true;}return n;}
 static bool cancelled(void *ctx){(void)ctx;return cancel_after_read;}
 static pn_status_t capacity(void *ctx,const char *path,uint64_t *out){(void)path;*out=*(uint64_t *)ctx;return PN_OK;}
 static pn_status_t internal_capacity(void *ctx,uint64_t *out){*out=*(uint64_t *)ctx;return PN_OK;}
@@ -40,7 +40,7 @@ int main(void){
     // 摘要read已经消耗字节后才取消；续建必须重新读同一偏移，而非漏掉4KiB。/ Cancel after a hash read consumed bytes; resuming must reread that offset instead of losing 4 KiB.
     added.begin=2;added.end=3;pn_page_index_add(&index,&added);pn_cancel_scope_t scope;pn_cancel_enter(&scope,cancelled,NULL);arm_read=true;pn_status_t paused;unsigned tries=0;
     do{paused=pn_page_index_flush(&index,true);assert(++tries<10000);}while(paused==PN_BUSY);
-    assert(paused==PN_CANCELLED && cancel_after_read && pn_page_index_pending(&index));cancel_after_read=false;pn_cancel_leave(&scope);drain(&index);pn_page_index_close(&index);
+    assert(paused==PN_CANCELLED && cancel_after_read && pn_page_index_pending(&index));cancel_after_read=false;pn_cancel_leave(&scope);short_hash_read=true;drain(&index);short_hash_read=false;pn_page_index_close(&index);
     char folder[320];snprintf(folder,sizeof folder,"%s/pages",tf);DIR *d=opendir(folder);assert(d);struct dirent *de;char path[768]={0},backup[776];
     while((de=readdir(d)))if(strlen(de->d_name)==133)snprintf(path,sizeof path,"%s/%s",folder,de->d_name);
     closedir(d);assert(*path);snprintf(backup,sizeof backup,"%s.bak",path);
@@ -64,6 +64,11 @@ int main(void){
     FILE *f=fopen(path,"r+b");uint8_t record[80],original[80];assert(f && !fseek(f,80,SEEK_SET) && fread(record,1,80,f)==80);memcpy(original,record,80);record[24]^=1;
     uint32_t crc=pn_crc32_update(0,record,76);for(unsigned j=0;j<4;j++)record[76+j]=(uint8_t)(crc>>(8*j));assert(!fseek(f,80,SEEK_SET) && fwrite(record,1,80,f)==80 && !fclose(f));
     assert(pn_page_index_open(&index,&pool,&state,&write,root,&book,&key)==PN_OK && pn_page_index_use_tf(&index,&sd,&read,tf)==PN_OK && !pn_page_index_near(&index,0,1,false,&e));pn_page_index_close(&index);
+    f=fopen(path,"r+b");assert(f && !fseek(f,80,SEEK_SET) && fwrite(original,1,80,f)==80 && !fclose(f));
+    // 已载入后篡改且重算CRC，流式合并仍须拒绝授予新可信根。/ Modification with recomputed CRC after loading must still fail to gain a new trusted root through streaming merge.
+    assert(pn_page_index_open(&index,&pool,&state,&write,root,&book,&key)==PN_OK && pn_page_index_use_tf(&index,&sd,&read,tf)==PN_OK);
+    f=fopen(path,"r+b");assert(f && !fseek(f,80,SEEK_SET) && fwrite(record,1,80,f)==80 && !fclose(f));pn_page_index_add(&index,&added);
+    pn_status_t forged;unsigned merge_steps=0;do{forged=pn_page_index_flush(&index,true);assert(++merge_steps<10000);}while(forged==PN_BUSY);assert(forged==PN_CORRUPT);pn_page_index_close(&index);
     f=fopen(path,"r+b");assert(f && !fseek(f,80,SEEK_SET) && fwrite(original,1,80,f)==80 && !fclose(f));
     assert(!rename(path,backup));f=fopen(path,"wb");assert(f && fputs("bad",f)>=0 && !fclose(f));
     assert(pn_page_index_open(&index,&pool,&state,&write,root,&book,&key)==PN_OK && pn_page_index_use_tf(&index,&sd,&read,tf)==PN_OK && pn_page_index_near(&index,0,1,false,&e));

@@ -209,12 +209,14 @@ pn_status_t pn_epub_page_job_begin(pn_epub_page_job_t *job,pn_pool_t *pool,pn_ep
     if(s!=PN_OK)pn_epub_page_job_close(job);
     return s;
 }
-pn_status_t pn_epub_page_job_step(pn_epub_page_job_t *job){
+static pn_status_t page_job_step(pn_epub_page_job_t *job,bool compiler){
     if(!job || !job->impl)return PN_EMPTY;
-    page_job_t *j=job->impl;pn_xhtml_stats_t stats;pn_status_t s=pn_xhtml_job_step(&j->source,&stats);
+    page_job_t *j=job->impl;pn_xhtml_stats_t stats;pn_status_t s=compiler?pn_xhtml_job_index_step(&j->source,&stats):pn_xhtml_job_step(&j->source,&stats);
     if(s!=PN_BUSY){pn_xhtml_job_close(&j->source);s=finish(j->layout,s);j->layout=NULL;pn_epub_page_job_close(job);}
     return s;
 }
+pn_status_t pn_epub_page_job_step(pn_epub_page_job_t *job){return page_job_step(job,false);}
+pn_status_t pn_epub_page_job_index_step(pn_epub_page_job_t *job){return page_job_step(job,true);}
 pn_status_t pn_epub_page_input(pn_pool_t *pool,const pn_xml_input_t *input,const char *base,const uint8_t salt[16],const pn_xhtml_position_t *start,const pn_layout_t *layout,const pn_epub_measure_t *measure,pn_epub_page_t *page){
     layout_t *l;pn_status_t status=init(pool,start,NULL,layout,measure,page,&l);if(status!=PN_OK)return status;
     pn_xhtml_stats_t stats;status=pn_xhtml_parse_input(pool,input,base,salt,consume,l,&stats);return finish(l,status);

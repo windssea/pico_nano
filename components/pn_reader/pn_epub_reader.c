@@ -332,7 +332,7 @@ pn_status_t pn_epub_reader_index_step(pn_epub_reader_t *handle,pn_book_index_sta
         if(s==PN_OK)s=pn_epub_page_job_begin(&r->index_job,r->pool,r->epub,item.path,r->salt,state->position.element?&r->index_at.position:NULL,&r->layout,&r->measure,&r->index_page);
         if(s!=PN_OK){pn_epub_reader_index_abort(handle);return s;}
     }
-    s=pn_epub_page_job_step(&r->index_job);if(s==PN_BUSY)return s;
+    s=pn_epub_page_job_index_step(&r->index_job);if(s==PN_BUSY)return s;
     // 已验证窗口尾部不足一页时沿原同步分页退路重放；真实OOM仍向外返回。/ Replay through the original synchronous pagination fallback when a verified window ends mid-page; genuine OOM still propagates.
     if(s==PN_NO_MEMORY){pn_epub_item_t item;s=pn_epub_spine(r->epub,state->section,&item);if(s==PN_OK)s=pn_epub_page_prepare(r->pool,r->epub,item.path,r->salt,state->position.element?&r->index_at.position:NULL,&r->layout,&r->measure,&r->index_page);}
     if(s==PN_OK){

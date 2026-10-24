@@ -6,6 +6,12 @@
 
 ## 整书索引的软件回归
 
+`index_replay`将原4事件小步作为逐页oracle，核对混排/图片/实体/长段落的节点、源位置、事件序号、度量与段落坐标，并检查取消、坏源尾部和失卡。索引可单独调用32事件小步，普通翻页预算不变；TF专项另覆盖17字节摘要短读、读后取消重试，以及载入后篡改且重算CRC仍不得经合并变成可信表。
+
+性能观察器`pn_index_bench`随host构建生成。在同一Linux/Docker环境可运行`python3 tools/test_local_book_index.py --binary build-host/pn_index_bench --font assets/fonts/read-pico-ui.ttf --output build-dev/index-bench`：默认生成原创480章、288万字压力书；可传`--book`换成实际EPUB、`--font`换实际字体、`--baseline`指定独立冻结的旧观察器。工具复制原件到临时目录，独立冷建，要求整表及首屏SHA、总页数一致、原件SHA保持、池归零。记录核心耗时、逻辑读写/seek、路径检查及小步数，均非设备TF/面板/产品让出耗时；正式性能对照应先以单独Release目录仅构建`pn_index_bench`，关闭sanitizer，不能将ASan与Release时间混比。
+
+诊断固件的`Whole-book index batches/steps/work_us/max_batch_us`汇总开书等待模式的批次工作，和既有`elapsed_ms`配合区分批次内外成本；批次外还含UI/推屏/输入职责，不能全称睡眠。后台索引另使用`idle.index`标签。此处只提供观测点，不代表本轮已构建刷入或测得真机结果。
+
 `book_index`覆盖TXT超过512项的连续编译、256页提交后重开续建、EPUB跨资源、完成表复用、预览取消及确认排版的新旧变体，核对首屏完整像素与释放归零。`font_cache`检查大字宽工作集的度量一致、重复轮廓加载下降及申请失败保留小表；`index_cursor`检查小/满窗口游标查询成本不随边界数线性增长、满窗口256页连续候选、持久游标保留、未提交窗口淘汰后的游标回退和拒绝陈旧完成提交；`device_index_background`/`device_index_wait`使用真实产品控制层检查先正文/先索引顺序。`settings_ui`检查开关持久与忙时拒写，SDL的`book_index_window`检查可取消等待、暖开复用及后台顺序。运行入口仍为`python tools/dev.py host`与`sdl`。`page_index_tf`另以内部512KiB/TF64MiB复现大小文件保留阈值混用，并检查内部仅64KiB时拒写、重开保留已提交表；不删除用户数据。软件回归不代表TF实际掉电、面板响应或真实提速验收。
 
 ## 退出阅读的软件回归

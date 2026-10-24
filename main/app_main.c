@@ -207,6 +207,7 @@ static bool index_wait,index_wait_loaded,index_gate; ///< 首次开书等待模�
 static pn_book_index_state_t opening_index;
 #if PN_DEVICE_TEST_CONSOLE
 static uint64_t index_started_at;static bool index_seen; ///< 诊断等待阶段与首次有效游标 / Diagnostic waiting stage and first effective cursor
+static uint64_t index_work_us,index_max_batch_us,index_steps,index_batches; ///< 索引批次总耗时与让出外开销分开，非TF总线计数 / Separate compiler batch cost from time outside batches; never TF bus counts
 #endif
 static uint64_t index_progress_at; ///< 限制索引等待页重绘频率 / Throttle index-loader redraws
 static bool opening; ///< 开书控制门，产品owner串行管理 / Opening gate owned by the serial product owner
@@ -1455,7 +1456,7 @@ static pn_status_t first_page_or_index(void){
         if(built==PN_CANCELLED || built==PN_STALE_MEDIA)return built;
         if(built==PN_BUSY){
 #if PN_DEVICE_TEST_CONSOLE
-            index_started_at=began;index_seen=opening_index.pages!=0;ESP_LOGI(TAG,"Whole-book index wait begin t=%llu first_pages=%u path=%s",(unsigned long long)began,(unsigned)opening_index.pages,selected_path);
+            index_started_at=began;index_work_us=index_max_batch_us=index_steps=index_batches=0;index_seen=opening_index.pages!=0;ESP_LOGI(TAG,"Whole-book index wait begin t=%llu first_pages=%u path=%s",(unsigned long long)began,(unsigned)opening_index.pages,selected_path);
 #endif
             index_gate=true;opening_controls(true);pn_status_t shown=show_loading(selected_path);loading_shown=shown==PN_OK;index_progress_at=now_ms();return shown==PN_CANCELLED?shown:PN_BUSY;}
     }
@@ -1601,10 +1602,15 @@ static bool tick_opening(void){
 #if PN_DEVICE_TEST_CONSOLE
             if(!index_seen && progress.pages){index_seen=true;ESP_LOGI(TAG,"Whole-book index first-cursor t=%llu pages=%u section=%u",(unsigned long long)now_ms(),(unsigned)progress.pages,(unsigned)progress.section);}
 #endif
-        }while(built==PN_BUSY && ++steps<PN_BOOK_INDEX_STEP_MAX && esp_timer_get_time()-began<8000);
+            steps++;
+        }while(built==PN_BUSY && steps<PN_BOOK_INDEX_STEP_MAX && esp_timer_get_time()-began<8000);
+#if PN_DEVICE_TEST_CONSOLE
+        uint64_t cost=(uint64_t)(esp_timer_get_time()-began);index_work_us+=cost;index_steps+=steps;index_batches++;if(cost>index_max_batch_us)index_max_batch_us=cost;
+#endif
         if(built==PN_BUSY || built==PN_CANCELLED){if(progress.pages/PN_BOOK_INDEX_BATCH_PAGES!=opening_index.pages/PN_BOOK_INDEX_BATCH_PAGES && now_ms()>=index_progress_at && now_ms()-index_progress_at>=2000){opening_index=progress;index_progress_at=now_ms();(void)show_loading_phase(selected_path,0);}return true;}
 #if PN_DEVICE_TEST_CONSOLE
         ESP_LOGI(TAG,"Whole-book index wait end t=%llu elapsed_ms=%llu status=%d pages=%u complete=%d",(unsigned long long)now_ms(),(unsigned long long)(now_ms()-index_started_at),(int)built,(unsigned)progress.pages,(int)progress.complete);
+        ESP_LOGI(TAG,"Whole-book index batches=%llu steps=%llu work_us=%llu max_batch_us=%llu",(unsigned long long)index_batches,(unsigned long long)index_steps,(unsigned long long)index_work_us,(unsigned long long)index_max_batch_us);
 #endif
         index_gate=false;if(built!=PN_OK)ESP_LOGW(TAG,"Whole-book index unavailable: %d; normal reading fallback",(int)built);
         reader_open_result(built==PN_STALE_MEDIA?built:active_step(PN_APP_OPEN,now_ms()));start_reader_finish();return true;
@@ -1678,7 +1684,7 @@ static bool tick_reader_background(uint64_t now){
     for(unsigned probe=0;probe<5;probe++){
         if(pn_cancel_checkpoint()!=PN_OK)return false;
         unsigned slot=cursor++%5u;pn_status_t s=PN_EMPTY;pn_profile_span_t timing;
-        pn_profile_begin(&timing,&pool,slot==0?"idle.prefetch":slot==1?"idle.semantic":slot==2?"idle.verify":"idle.recent");
+        pn_profile_begin(&timing,&pool,slot==0?"idle.prefetch":slot==1?"idle.semantic":slot==2?"idle.verify":slot==3?"idle.recent":"idle.index");
         if(slot==0){
             // 空闲预排也合并廉价小步，验证/近期任务仍按原轮转；不改变扫描期预算。/ Batch cheap idle steps while preserving verification/recent rotation and the scan-time budget.
             uint64_t batch_started=now_ms();unsigned steps=0;reader_prefetch_batch=true;

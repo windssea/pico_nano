@@ -10,6 +10,7 @@ typedef struct {
     xj_sheet_t css[16];unsigned css_count;size_t css_bytes,css_size,css_capacity;char *css_buffer;
     char needed[PN_ZIP_PATH_MAX];bool want_compat,body_only,building,completed,has_focus,model_only;
     model_record_t *record;unsigned item;pn_status_t status;
+    model_record_t *seek_record;uint64_t seek_order;pn_xhtml_event_kind_t seek_kind;pn_xhtml_block_t seek_block;bool seek_started,seek_done,seek_context; ///< 只借用已pin模型的精确索引定位游标 / Exact compiler seek cursor borrowing the pinned verified model only
     pn_xhtml_store_t load_store;snapshot_read_t snapshot;void *load_handle;bool loading,loaded; ///< 分步包只在完整校验后交付 / Staged packets publish only after full validation
 } xhtml_job_t;
 static pn_status_t xj_source(void *ctx,uint8_t *out,size_t cap,size_t *n){
@@ -163,14 +164,43 @@ static pn_status_t xj_load_step(xhtml_job_t *j){
     if(s==PN_CANCELLED || s==PN_STALE_MEDIA || s==PN_STALE_JOB)return s;
     pn_profile_observe(j->pool,"epub.prefetch.load-fallback",s,0,NULL);s=xj_build_begin(j);return s==PN_OK?PN_BUSY:s;
 }
-pn_status_t pn_xhtml_job_step(pn_xhtml_job_t *job,pn_xhtml_stats_t *stats){
+/// 按完整事件数跳过记录；保留页首段落上下文，不按locator大小猜顺序。/ Skip whole records by exact event counts, preserving paragraph context without ordering locator tuples.
+static pn_status_t xj_seek_focus(xhtml_job_t *j){
+    if(!j->seek_started){j->seek_started=true;j->seek_record=j->record;j->seek_order=j->model->base;j->seek_context=j->model->has_context;j->seek_kind=j->model->context.kind;j->seek_block=j->model->context.block;}
+    for(unsigned count=0;j->seek_record && count<32;count++){
+        pn_status_t s=pn_cancel_checkpoint();if(s!=PN_OK)return s;
+        model_record_t *r=j->seek_record;unsigned item=0;bool found=false;
+        if(r->element==j->focus.element){
+            if(j->focus.kind==PN_XHTML_ELEMENT)found=true;
+            else if(r->position_kind==j->focus.kind && r->run==j->focus.run){
+                if(r->kind==PN_XHTML_TEXT){for(;item<r->count;item++)if(r->offset+model_delta(r,item)==j->focus.offset){found=true;break;}}
+                else found=r->offset==j->focus.offset;
+            }
+        }
+        if(found){
+            if(j->seek_order>UINT64_MAX-item)return PN_LIMIT;
+            if(item){j->seek_context=true;j->seek_kind=PN_XHTML_TEXT;}
+            pn_xhtml_event_t context={.kind=j->seek_kind,.block=j->seek_block};
+            j->proxy.restart(j->proxy.ctx,j->seek_order+item,j->seek_context?&context:NULL);
+            j->record=r;j->item=item;j->seek_done=true;return PN_OK;
+        }
+        uint64_t events=r->kind==PN_XHTML_TEXT?r->count:1u;if(j->seek_order>UINT64_MAX-events)return PN_LIMIT;j->seek_order+=events;
+        if(r->kind==PN_XHTML_TEXT || r->kind==PN_XHTML_IMAGE || (r->kind==PN_XHTML_BLOCK_OPEN && r->block!=PN_XHTML_CONTAINER)){j->seek_kind=(pn_xhtml_event_kind_t)r->kind;j->seek_block=(pn_xhtml_block_t)r->block;j->seek_context=true;}
+        j->seek_record=r->next;
+    }
+    // 没有精确命中保留旧复放/错误语义，不把“接近”位置当页首。/ No exact match retains legacy replay/error semantics, never a nearby guessed page start.
+    if(!j->seek_record){j->seek_done=true;return PN_OK;}
+    return PN_BUSY;
+}
+static pn_status_t xj_step(pn_xhtml_job_t *job,pn_xhtml_stats_t *stats,bool compiler){
     if(!job || !job->impl || !stats)return PN_INVALID;
     xhtml_job_t *j=job->impl;if(j->status!=PN_BUSY)return j->status;
     size_t ordinal;pn_status_t s=pn_cancel_checkpoint();if(s==PN_OK)s=pn_epub_spine_find(j->epub,j->path,&ordinal);if(s!=PN_OK)return s;
     if(j->loading)return xj_load_step(j);
     if(!j->building){
+        if(compiler && j->has_focus && !j->seek_done){s=xj_seek_focus(j);if(s!=PN_OK)return s;}
         // 量宽同时预热位图后每字工作更多，四事件即让出，控制输入/回执等待。/ Metric work now also warms rasters; yield after four events to bound input/receipt waiting.
-        for(unsigned events=0;events<4 && j->record && !j->proxy.done(j->proxy.ctx);events++){
+        for(unsigned events=0;events<(compiler?32u:4u) && j->record && !j->proxy.done(j->proxy.ctx);events++){
             s=pn_cancel_checkpoint();if(s!=PN_OK)break;
             model_record_t *r=j->record;unsigned i=j->item;
             pn_xhtml_event_t e={.kind=(pn_xhtml_event_kind_t)r->kind,.position={.element=r->element,.offset=r->offset,.run=r->run,.kind=(pn_xhtml_position_kind_t)r->position_kind},.style=j->model->styles[r->style],.block=(pn_xhtml_block_t)r->block};
@@ -209,3 +239,5 @@ pn_status_t pn_xhtml_job_step(pn_xhtml_job_t *job,pn_xhtml_stats_t *stats){
     if(s!=PN_BUSY){j->status=s;j->completed=s==PN_OK;}
     return s;
 }
+pn_status_t pn_xhtml_job_step(pn_xhtml_job_t *job,pn_xhtml_stats_t *stats){return xj_step(job,stats,false);}
+pn_status_t pn_xhtml_job_index_step(pn_xhtml_job_t *job,pn_xhtml_stats_t *stats){return xj_step(job,stats,true);}

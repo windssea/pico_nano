@@ -55,6 +55,8 @@ void pn_epub_page_release(pn_epub_page_t *);
 pn_status_t pn_epub_page_job_begin(pn_epub_page_job_t *,pn_pool_t *,pn_epub_t *,const char *,const uint8_t[16],const pn_xhtml_position_t *,const pn_layout_t *,const pn_epub_measure_t *,pn_epub_page_t *);
 /// 推进一步，BUSY待续；成功/失败自动释放job，页面仅成功时有效。/ Advance one step; BUSY continues, terminal states release the job and only success validates the page.
 pn_status_t pn_epub_page_job_step(pn_epub_page_job_t *);
+/// 整书编译专用，使用相同分页/校验与32事件预算，普通翻页仍为原小步。/ Whole-book compilation with identical layout/validation and a 32-event budget; ordinary paging keeps its original small steps.
+pn_status_t pn_epub_page_job_index_step(pn_epub_page_job_t *);
 /// 取消暂定页面，无源读取；调用者仍拥有页面缓冲。/ Cancel the provisional page without source reads; caller retains page buffers.
 void pn_epub_page_job_close(pn_epub_page_job_t *);
 /// 输入流分页，start NULL为资源首；精确TEXT匹配或ELEMENT事件开启，错误清valid/count。
