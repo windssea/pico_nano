@@ -13,7 +13,7 @@
 static pn_reader_app_t txt;
 static pn_epub_app_t epub;
 static bool is_epub, fail;
-static unsigned hits, stored, shown;
+static unsigned hits, stored, shown, loads;
 static uint64_t dump_ns;
 static const char *output;
 static uint64_t stamp(void) {
@@ -31,6 +31,8 @@ static void observe(void *ctx, const pn_profile_event_t *e) {
         hits++;
     if (!strcmp(e->phase, "resume.stored"))
         stored++;
+    if (!strcmp(e->phase, "resume.load"))
+        loads++;
 }
 static pn_status_t present(void *ctx, const pn_frame_t *f, pn_refresh_t refresh) {
     (void)ctx;
@@ -50,7 +52,7 @@ static pn_status_t present(void *ctx, const pn_frame_t *f, pn_refresh_t refresh)
         ok = false;
     dump_ns += stamp() - start;
     if (getenv("PN_RESUME_OVERLAP"))
-        for (unsigned i = 0; i < 64; i++) {
+        for (unsigned i = 0; i < (getenv("PN_RESUME_OVERLAP_STEPS") ? (unsigned)atoi(getenv("PN_RESUME_OVERLAP_STEPS")) : 64u); i++) {
             pn_status_t s = is_epub ? pn_epub_app_overlap(&epub) : pn_reader_app_overlap(&txt);
             if (s != PN_OK) break;
         }
@@ -93,9 +95,8 @@ int main(int argc, char **argv) {
     uint64_t opened = stamp() - begin - dump_ns, turned = 0;
     if (s == PN_OK && !strncmp(argv[6], "seed", 4)) {
         if (!strcmp(argv[6], "seed")) {
-            s = step(PN_APP_NEXT, 2);
-            if (s == PN_OK)
-                s = step(PN_APP_NEXT, 3);
+            unsigned turns = getenv("PN_RESUME_SEED_TURNS") ? (unsigned)atoi(getenv("PN_RESUME_SEED_TURNS")) : 2u;
+            for (unsigned i = 0; i < turns && s == PN_OK; i++) s = step(PN_APP_NEXT, 3);
         }
         for (unsigned n = 0;
              s == PN_OK && n < 100000 && (is_epub ? pn_epub_app_verify_pending(&epub) : pn_reader_app_verify_pending(&txt));
@@ -135,6 +136,15 @@ int main(int argc, char **argv) {
         s = is_epub ? pn_epub_app_style_apply(&epub, &style, 2, present, NULL)
                     : pn_reader_app_style_apply(&txt, &style, 2, present, NULL);
     } else if (s == PN_OK) {
+        // 留下部分后台编译，再由前台NEXT接管；不提交未完成的索引。/ Leave partial background compilation for foreground NEXT to take over without committing unfinished indexes.
+        if (is_epub && getenv("PN_RESUME_INDEX_STEPS")) {
+            pn_book_index_state_t index;
+            unsigned count = (unsigned)atoi(getenv("PN_RESUME_INDEX_STEPS"));
+            for (unsigned i = 0; i < count; i++) {
+                pn_status_t v = pn_epub_app_index_step(&epub, &index);
+                if (v != PN_OK && v != PN_BUSY && v != PN_EMPTY) { s = v; break; }
+            }
+        }
         if (!strcmp(argv[6], "fail")) {
             fail = true;
             pn_status_t v = step(PN_APP_NEXT, 2);
@@ -146,7 +156,7 @@ int main(int argc, char **argv) {
         if (s == PN_OK)
             s = step(PN_APP_NEXT, 3);
         turned = stamp() - begin - (dump_ns - before);
-        if (s == PN_OK)
+        if (s == PN_OK && strcmp(argv[6], "rapid"))
             s = step(PN_APP_PREVIOUS, 4);
         if (s == PN_OK && getenv("PN_RESUME_CONTINUE"))
             for (unsigned i = 0; i < 6 && s == PN_OK; i++) s = step(PN_APP_NEXT, 5);
@@ -154,8 +164,8 @@ int main(int argc, char **argv) {
     pn_status_t closed = is_epub ? pn_epub_app_close(&epub, 5) : pn_reader_app_close(&txt, 5);
     if (s == PN_OK)
         s = closed;
-    printf("{\"status\":%d,\"open_ns\":%llu,\"next_ns\":%llu,\"hits\":%u,\"stored\":%u,\"peak\":%zu,\"limit\":%zu,\"used\":%zu,"
+    printf("{\"status\":%d,\"open_ns\":%llu,\"next_ns\":%llu,\"hits\":%u,\"stored\":%u,\"peak\":%zu,\"limit\":%zu,\"used\":%zu,\"loads\":%u,"
            "\"live\":%zu}\n",
-           s, (unsigned long long)opened, (unsigned long long)turned, hits, stored, pool.peak, pool.limit, pool.used, pool.live);
+           s, (unsigned long long)opened, (unsigned long long)turned, hits, stored, pool.peak, pool.limit, pool.used, loads, pool.live);
     return s == PN_OK && !pool.used && !pool.live ? 0 : 1;
 }

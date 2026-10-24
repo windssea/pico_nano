@@ -100,8 +100,8 @@ pn_status_t pn_xhtml_job_begin(pn_xhtml_job_t *job,pn_pool_t *pool,pn_epub_t *ep
         j->model->busy=true;pn_cache_pin(&j->model->owner);j->record=j->model->first;
         restart(ctx,j->model->base,j->model->has_context?&j->model->context:NULL);return PN_OK;
     }
-    if(alt && (alt->busy || alt->pool!=pool)){pn_xhtml_job_close(job);return PN_BUSY;}
-    if(m && m->busy){pn_xhtml_job_close(job);return PN_BUSY;}
+    if(alt && (alt->busy || alt->pool!=pool)){pn_xhtml_job_close(job);pn_profile_observe(pool,"epub.prefetch.model-busy",PN_BUSY,0,NULL);return PN_BUSY;}
+    if(m && m->busy){pn_xhtml_job_close(job);pn_profile_observe(pool,"epub.prefetch.model-busy",PN_BUSY,0,NULL);return PN_BUSY;}
     if(m){j->hold=m;pn_cache_pin(&m->owner);}
     if(!alt){
         alt=pn_cache_alloc(pool,PN_CACHE_CHAPTER,PN_MEM_DOCUMENT,sizeof *alt);
@@ -206,7 +206,8 @@ static pn_status_t xj_step(pn_xhtml_job_t *job,pn_xhtml_stats_t *stats,bool comp
     size_t ordinal;pn_status_t s=pn_cancel_checkpoint();if(s==PN_OK)s=pn_epub_spine_find(j->epub,j->path,&ordinal);if(s!=PN_OK)return s;
     if(j->loading){pn_profile_span_t span;if(compiler)pn_profile_begin(&span,j->pool,"index.load");s=xj_load_step(j);if(compiler)pn_profile_end(&span,s);return s;}
     if(!j->building){
-        if(compiler && j->has_focus && !j->seek_done){pn_profile_span_t span;pn_profile_begin(&span,j->pool,"index.seek");s=xj_seek_focus(j);pn_profile_end(&span,s);if(s!=PN_OK)return s;}
+        // 前台NEXT也按精确记录跳过已验证前文，不能每轮四个事件从章首追赶。/ Foreground NEXT also skips verified prefixes by exact records instead of chasing from chapter start four events per tick.
+        if(j->has_focus && !j->seek_done){pn_profile_span_t span;pn_profile_begin(&span,j->pool,compiler?"index.seek":"epub.prefetch.seek");s=xj_seek_focus(j);pn_profile_end(&span,s);if(s!=PN_OK)return s;}
         // 量宽同时预热位图后每字工作更多，四事件即让出，控制输入/回执等待。/ Metric work now also warms rasters; yield after four events to bound input/receipt waiting.
         pn_profile_span_t replay;if(compiler)pn_profile_begin(&replay,j->pool,"index.layout");
         for(unsigned events=0;events<(compiler?32u:4u) && j->record && !j->proxy.done(j->proxy.ctx);events++){
@@ -220,7 +221,7 @@ static pn_status_t xj_step(pn_xhtml_job_t *job,pn_xhtml_stats_t *stats,bool comp
         if(compiler)pn_profile_end(&replay,s);
         if(s==PN_OK)s=pn_cancel_checkpoint();
         if(s==PN_OK)s=pn_epub_spine_find(j->epub,j->path,&ordinal);
-        if(s==PN_OK && j->record && !j->proxy.done(j->proxy.ctx))return PN_BUSY;
+        if(s==PN_OK && j->record && !j->proxy.done(j->proxy.ctx)){if(!compiler)pn_profile_observe(j->pool,"epub.prefetch.layout",PN_BUSY,0,NULL);return PN_BUSY;}
         if(s==PN_BUSY)s=PN_INVALID;
         if(s==PN_OK && j->model->truncated && !j->proxy.done(j->proxy.ctx))s=PN_NO_MEMORY;
         if(s==PN_OK)*stats=j->model->stats;

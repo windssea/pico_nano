@@ -229,6 +229,8 @@ static bool loading_layout_ready; ///< 只在本次加载扫描中准备一次�
 static uint64_t opening_requested_us; ///< 产品请求到首屏回执的诊断起点，含身份接管 / Diagnostic origin from product request to first-frame receipt, including identity takeover
 static bool opening_request_timed; ///< 活动的跨轮诊断，无栈scope / Active cross-tick observation without a stack scope
 static bool reader_turn_pending; ///< NEXT准备跨输入轮继续，不提交部分页 / Continue NEXT preparation across input ticks without committing partial pages
+static uint64_t reader_turn_steps; ///< 当前NEXT实际推进次数，用于区分慢进展与资源等待 / Actual steps for this NEXT, distinguishing slow progress from resource waits
+static const char *reader_turn_phase="prepare"; ///< 仅借静态诊断标签，不持有解析对象 / Borrow only a static diagnostic label, never a parser object
 static bool reader_prefetch_batch; ///< 空闲预排批次中的诊断归并 / Diagnostic aggregation during an idle prefetch batch
 static uint64_t reader_turn_started; ///< 原请求的单调计时 / Monotonic time of the original request
 static atomic_bool reading_presentation; ///< 此次显示的用途，独立于输入页面状态 / Purpose of this presentation, independent of input view state
@@ -344,6 +346,7 @@ static void profile_io_flush(void){
 #endif
 static void profile_emit(void *ctx,const pn_profile_event_t *e){
     (void)ctx;
+    if(atomic_load(&reading_presentation) && (!strncmp(e->phase,"epub.prefetch.",14) || !strcmp(e->phase,"resume.load")))reader_turn_phase=e->phase;
     if(!strncmp(e->phase,"index.",6)){
 #if PN_DEVICE_TEST_CONSOLE
         index_profile_collect(e);
@@ -824,6 +827,7 @@ static pn_status_t active_step(pn_reader_action_t action,uint64_t now){
     static uint64_t waiting_reported; ///< BUSY诊断节流，不改变调度期限 / Throttle BUSY diagnostics without changing scheduling deadlines
     reading_stats_pause();
     uint64_t started=reader_turn_pending?reader_turn_started:now_ms();(void)started;
+    if(!reader_turn_pending){reader_turn_steps=0;reader_turn_phase="prepare";}
     pn_reader_app_refresh_period(&reader,pn_settings_refresh_pages(input_flags));
     pn_epub_app_refresh_period(&epub,pn_settings_refresh_pages(input_flags));
     if(atomic_exchange(&full_clean_completed,false)){pn_reader_app_refresh_reset(&reader);pn_epub_app_refresh_reset(&epub);}
@@ -838,7 +842,7 @@ static pn_status_t active_step(pn_reader_action_t action,uint64_t now){
     // 短批次摊薄让出开销；单次库调用仍可能超过软预算。/ Short batches amortize yield overhead; an individual library call can exceed the soft budget.
     pn_profile_span_t batch_timing={0};if(epub.impl && action==PN_APP_NEXT)pn_profile_begin(&batch_timing,&pool,"epub.next.batch");
     pn_status_t status;uint64_t batch_started=now_ms();unsigned batch_steps=0;
-    do{status=epub.impl?pn_epub_app_step_yield(&epub,action,now,pn_turn_present,&effect):pn_reader_app_step(&reader,action,now,pn_turn_present,&effect);}
+    do{reader_turn_steps++;status=epub.impl?pn_epub_app_step_yield(&epub,action,now,pn_turn_present,&effect):pn_reader_app_step(&reader,action,now,pn_turn_present,&effect);}
     while(epub.impl && action==PN_APP_NEXT && status==PN_BUSY && ++batch_steps<32u && now_ms()-batch_started<8u);
     pn_profile_end(&batch_timing,status);
     atomic_store(&reading_presentation,false);
@@ -847,7 +851,7 @@ static pn_status_t active_step(pn_reader_action_t action,uint64_t now){
         reader_turn_started=started;uint64_t tick=now_ms();
         // 未完成翻页也留下证据；否则连续BUSY没有原有的action完成日志。/ Record unfinished turns too: repeated BUSY otherwise has no action-completion log.
         if(!waiting_reported || (tick>=waiting_reported && tick-waiting_reported>=5000u)){
-            ESP_LOGI(TAG,"Reader NEXT waiting status=%d elapsed=%llu ms used=%zu limit=%zu",(int)status,(unsigned long long)(tick-started),pool.used,pool.limit);
+            ESP_LOGI(TAG,"Reader NEXT waiting status=%d elapsed=%llu ms used=%zu limit=%zu steps=%llu phase=%s",(int)status,(unsigned long long)(tick-started),pool.used,pool.limit,(unsigned long long)reader_turn_steps,reader_turn_phase);
             waiting_reported=tick?tick:1;
         }
         return status;

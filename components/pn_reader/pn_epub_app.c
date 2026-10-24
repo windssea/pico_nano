@@ -37,6 +37,7 @@ typedef struct {
     pn_book_id_t resume_key;pn_style_t resume_style; ///< 布局与完整绘制身份 / Layout and complete visual identity
     bool resume_key_valid,resume_bound,resume_dirty,resume_next_dirty; ///< 绑定与待写槽 / Binding and pending slots
     bool resume_pixels_ready,resume_good; ///< 本次恢复候选及完整绘制资格 / Restored candidate and complete-render eligibility
+    bool next_continuing; ///< 同一次NEXT已开始分步排版，不逐步重读续读包 / This NEXT has started stepped layout; do not reread resume files on each step
     unsigned resume_missing,resume_pixels; ///< 页脚复画所需字形状态 / Glyph state needed to repaint chrome
     pn_w_status_snapshot_t status; ///< 当前帧的状态带，热恢复未变时不重画 / Status band in the current frame; unchanged warm restores never redraw it
     pn_page_index_t page_index;uint32_t index_generation;uint32_t build_flushed;bool build_flushing,build_failed,build_complete,build_metrics; ///< 分批编译收口及本代失败退避 / Batched compiler draining and per-layout failure backoff
@@ -672,6 +673,8 @@ static pn_status_t navigate(pn_epub_app_t *app,pn_reader_action_t action,const p
     if(app && app->impl)((app_t *)app->impl)->last_confirmed=false;
     if(!app || !app->impl || !present || action<PN_APP_OPEN || action>PN_APP_BEGINNING)return PN_INVALID;
     app_t *a=app->impl;a->last_confirmed=false;a->resume_pixels_ready=false;
+    bool continuing=a->next_continuing && yielding && action==PN_APP_NEXT && !jump;
+    a->next_continuing=false;
     if(a->lost)return PN_STALE_MEDIA;
     if(a->suspended)return PN_BUSY;
     if(now<a->last_now)return PN_INVALID;
@@ -694,8 +697,12 @@ static pn_status_t navigate(pn_epub_app_t *app,pn_reader_action_t action,const p
         status=pn_zip_validate(&a->zip);
         if(status!=PN_OK)(void)pn_epub_reader_complete(&a->reader,&receipt,false,now);
     }else{
-        status=(!jump && action!=PN_APP_BEGINNING)?resume_prepare(a,intent,&receipt):PN_EMPTY;
-        if(status==PN_EMPTY)status=yielding?pn_epub_reader_prepare_step(&a->reader,intent,intent==PN_READ_JUMP?(jump?jump:&a->restored.location):NULL,&receipt):pn_epub_reader_prepare(&a->reader,intent,intent==PN_READ_JUMP?(jump?jump:&a->restored.location):NULL,&receipt);
+        // 首次查包失败后接续同一解析任务；新页、其他动作、取消或错误重新允许探测。/ After the first packet miss continue the same parser; a new page, another action, cancellation or error permits a fresh probe.
+        status=(!continuing && !jump && action!=PN_APP_BEGINNING)?resume_prepare(a,intent,&receipt):PN_EMPTY;
+        if(status==PN_EMPTY){
+            status=yielding?pn_epub_reader_prepare_step(&a->reader,intent,intent==PN_READ_JUMP?(jump?jump:&a->restored.location):NULL,&receipt):pn_epub_reader_prepare(&a->reader,intent,intent==PN_READ_JUMP?(jump?jump:&a->restored.location):NULL,&receipt);
+            a->next_continuing=yielding && intent==PN_READ_NEXT && status==PN_BUSY;
+        }
     }
     if(status!=PN_OK)return status;
     // 新页隐藏返回提示，只有呈现确认后才清除返回状态。/ Hide the return hint on the new page; clear its state only after presentation is confirmed.

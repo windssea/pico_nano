@@ -19,6 +19,7 @@ static void *retained_reader;
 static unsigned idle_warms,idle_checks,warms_since_check,max_warms_between_checks;
 static pn_epub_progress_t turn_before;
 static unsigned turn_phase;
+static uint64_t rapid_start;
 /// 通过真实异步邮箱投递，依次覆盖点击动作和右键，不直接调用翻页函数。/ Deliver through the real async mailbox, covering tap actions and Right without directly calling navigation.
 static void queue_turn(bool key){
     pn_device_input_event_t input={.kind=key?PN_DASYNC_KEY:PN_DASYNC_ACTION,.at=now_ms(),.action=PN_APP_NEXT,.key=PN_KEY_3,.key_event=PN_KEY_SHORT};
@@ -35,7 +36,7 @@ static void idle_observe(void *ctx,const pn_profile_event_t *e){
 }
 void __wrap_pn_device_async_wait(pn_device_async_t *port,unsigned n){(void)port;loop_delay(n);}
 static void loop_delay(unsigned n){
-    clock_us+=(int64_t)n*1000;assert(++rounds<2000);
+    clock_us+=(int64_t)n*1000;assert(++rounds<(!strcmp(scenario,"rapid")?20000u:2000u));
     if(!phase){
         assert(stop_reader());strcpy(selected_path,book_path);selected_format=PN_BOOK_EPUB;selected_identified=false;selected_size=0;
         if(!strcmp(scenario,"font")){
@@ -72,6 +73,14 @@ static void loop_delay(unsigned n){
     if(!opening){
         assert(reader_active() && !status_page && !identity_takeover_active && !foreground_open.impl && !async_port.input.controls_blocked);
         assert(!pn_menu_cache_bytes(&menu_cache));
+        if(!strcmp(scenario,"rapid")){
+            pn_epub_progress_t at;assert(pn_epub_app_progress(&epub,&at)==PN_OK);
+            if(!rapid_start){rapid_start=now_ms();clock_us+=2000000;return;}
+            if(!turn_phase && now_ms()-rapid_start<4000)return;
+            if(turn_phase && !memcmp(&at.location,&turn_before.location,sizeof at.location))return;
+            if(turn_phase<15){async_port.input_active=true;turn_before=at;turn_phase++;queue_turn(turn_phase%2==0);return;}
+            assert(!reader_turn_pending);printf("product rapid NEXT confirmed=%u\n",turn_phase);
+        }
         if(!strcmp(scenario,"turn")){
             pn_epub_progress_t at;assert(pn_epub_app_progress(&epub,&at)==PN_OK);
             if(!turn_phase){async_port.input_active=true;turn_before=at;turn_phase=1;queue_turn(false);return;}

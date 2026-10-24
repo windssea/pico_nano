@@ -10,6 +10,12 @@ SDL独立对照为`python simulator/test_resume_window.py <新pn_sim> <完整TTF
 
 `catalog_index`与`catalog_mount`增加stdio定位计数及逐次故障注入：首屏不探读页外记录、同页/搜索顺序读，仍用独立目录扫描核对首屏、倒序、字母与搜索；三次定位任一步失败不得发布半页，之后可重建且原READ租约有效。定位次数是软件端口计数，不代表TF事务或耗时。
 
+## EPUB连续NEXT工作量回归
+
+`epub_long_chapter`核对120次NEXT、40次PREV的全部161帧与同步流式基线一致，并限制单页小步数，防止已验证缓存前文逐字重扫。`resume_turns`覆盖0/1/16/64步扫描重叠、一次导航最多一次续读包探测，以及原创大章第80页热开后连续NEXT；后台索引分别停在0/1/32/500步后由NEXT接管，直接连翻8帧、回翻再连翻9帧逐字节比较，关闭池归零。`product_open_loop`另从真实异步邮箱交替投递15次点击/右键NEXT。
+
+真机复测沿用失败书籍和原续读位置，不清缓存；保留每5秒`Reader NEXT waiting`的`steps`与`phase`，并记录首次/第二次NEXT显示回执、PREV及重开归位画面。主机有界工作量通过不能代替原失败真机验收。
+
 ## 娱乐与数独的软件回归
 
 `resume_turns`覆盖续读后继续越过两张持久帧、分步NEXT与扫描重叠，`product_open_loop`从实际设备邮箱投递点击和右键NEXT，`epub_long_chapter`将分步路径与同步流式基线逐帧比较。真机卡页需采集固件构建号及`Reader action=`、`Reader result=`、`Reader NEXT waiting`日志；主机通过不能作为该故障已修复的结论。
