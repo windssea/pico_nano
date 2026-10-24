@@ -22,6 +22,9 @@
 static pn_page_index_space_fn capacity_port;static void *capacity_ctx;
 void pn_page_index_space_port(pn_page_index_space_fn fn,void *ctx){capacity_port=fn;capacity_ctx=ctx;}
 typedef struct page_index index_t;
+typedef struct {
+    uint32_t records,count;uint64_t first,last;uint32_t first_section,last_section; ///< 已验证块的范围与偏移，不含正文 / Verified block range and offset, without body content
+} index_range_t;
 struct page_index {
     pn_pool_t *pool;pn_media_t *media;pn_media_lease_t lease;pn_book_id_t book,key;
     char directory[PN_JOURNAL_PATH_MAX],path[PN_JOURNAL_PATH_MAX];
@@ -31,6 +34,8 @@ struct page_index {
     bool blocked,backup_loaded; ///< 可选写失败本会话退避，以及完整验证的备份来源 / Session backoff after optional write failure and fully validated backup provenance
     bool tf,disk_valid,disk_backup,trust_known,trust_backup; ///< 后端、整表验证和可信根来源 / Backend, whole-table validation and trusted-root provenance
     uint32_t disk_count;uint64_t blocked_writes;void *writer;index_t *tf_next; ///< 磁盘页数、有界写任务与活动pin链 / Disk pages, bounded writer and active pin chain
+    uint64_t log_end,log_base_end;uint32_t log_blocks;bool log_mode; ///< 追加链的已确认前缀，尾部不属于有效索引 / Committed append-chain prefix; trailing bytes are not valid index data
+    index_range_t *ranges;size_t range_count,range_capacity; ///< 原池内可选块目录，申请失败走有界磁盘回扫 / Optional block directory in the original pool; allocation failure falls back to bounded disk scanning
     pn_media_t *trust_media;pn_media_lease_t trust_lease; ///< 内部可信根沿用原状态WRITE资格 / Internal trusted roots reuse the original state WRITE permission
     char trust_path[PN_JOURNAL_PATH_MAX];pn_book_id_t trust_hash[2],selected_hash; ///< 有界内部身份及当前实际读代 / Bounded internal identities and the actually consumed generation
     uint32_t floor_section;uint64_t floor_begin;bool floor_exclusive,have_floor; ///< RAM仍完整覆盖的磁盘后缀 / Disk suffix still completely covered by RAM
@@ -172,7 +177,7 @@ pn_status_t pn_page_index_flush(pn_page_index_t *h,bool force){
     pn_status_t status=index_flush(h,force);if(h && h->impl && !((index_t *)h->impl)->tf && status!=PN_EMPTY && pn_cache_file_miss(status))((index_t *)h->impl)->blocked=true;pn_profile_end(&span,status);return status;
 }
 bool pn_page_index_pending(const pn_page_index_t *h){return h && h->impl && !((const index_t *)h->impl)->blocked && (((const index_t *)h->impl)->dirty || ((const index_t *)h->impl)->writer);}
-void pn_page_index_close(pn_page_index_t *h){if(h){if(h->impl && ((index_t *)h->impl)->tf){tf_abort(h->impl);tf_unlink(h->impl);}pn_free(h->impl);h->impl=NULL;}}
+void pn_page_index_close(pn_page_index_t *h){if(h){if(h->impl){index_t *i=h->impl;if(i->tf){tf_abort(i);tf_unlink(i);}pn_free(i->ranges);}pn_free(h->impl);h->impl=NULL;}}
 void pn_page_index_abort(pn_page_index_t *h){if(h && h->impl && ((index_t *)h->impl)->tf)tf_abort(h->impl);}
 bool pn_page_index_is_tf(const pn_page_index_t *h){return h && h->impl && ((const index_t *)h->impl)->tf;}
 

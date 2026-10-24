@@ -6,6 +6,10 @@
 
 ## 整书索引的软件回归
 
+`page_index_log`检查新链首次创建及v2续写的逐阶段中断、同步失败、4KiB读后取消/17B短读、未确认尾部、跨块历史/同键覆盖、篡改旧块并重算CRC、低空间、缺文件/缺可信根重建；128KiB测试池不变。可选块目录分配失败时继续查询，并比较目录与回扫的seek次数。这些是文件端口故障检查，不是FAT物理掉电结果。
+
+观察器支持PNPL v3：Python独立验证块CRC、链SHA与内部根，再导出规范化v2逻辑表，逐字节对照全部边界及完成游标；存储文件SHA另列，不能把不同存储格式称作原始文件相同。`--resume-after 3000`追加未显示候选中断/重开检查；将`--chapters 480`改为`960`可观察书长翻倍的IO增长。完整字形覆盖对照可用仓库`assets/fonts/HarmonyOS_Sans_SC_Regular.ttf`；默认压力文本的4096个字均在该字体中。
+
 `index_replay`将原4事件小步作为逐页oracle，核对混排/图片/实体/长段落的节点、源位置、事件序号、度量与段落坐标，并检查取消、坏源尾部和失卡。索引可单独调用32事件小步，普通翻页预算不变；TF专项另覆盖17字节摘要短读、读后取消重试，以及载入后篡改且重算CRC仍不得经合并变成可信表。
 
 性能观察器`pn_index_bench`随host构建生成。在同一Linux/Docker环境可运行`python3 tools/test_local_book_index.py --binary build-host/pn_index_bench --font assets/fonts/read-pico-ui.ttf --output build-dev/index-bench`：默认生成原创480章、288万字压力书；可传`--book`换成实际EPUB、`--font`换实际字体、`--baseline`指定独立冻结的旧观察器。工具复制原件到临时目录，独立冷建，要求整表及首屏SHA、总页数一致、原件SHA保持、池归零。记录核心耗时、逻辑读写/seek、路径检查及小步数，均非设备TF/面板/产品让出耗时；正式性能对照应先以单独Release目录仅构建`pn_index_bench`，关闭sanitizer，不能将ASan与Release时间混比。

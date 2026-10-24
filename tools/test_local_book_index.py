@@ -7,6 +7,50 @@ import shutil
 import subprocess
 import tempfile
 import zipfile
+import struct
+import zlib
+
+
+def canonical_table(path, state):
+    """独立验证追加链，再导出与v2逐字节可比的有序逻辑表。 / Independently validate the chain and export a byte-comparable v2 logical table."""
+    data = path.read_bytes()
+    if data[:8] == b'PNPI\x02\0\0\0' and len(data) == 80 + int.from_bytes(data[72:76], 'little') * 80:
+        return data
+    roots, = (state / 'indexes').glob('*.pnrt')
+    root = roots.read_bytes()
+    assert len(root) == 140 and root[:8] == b'PNTR\x01\0\0\0' and zlib.crc32(root[:136]) == int.from_bytes(root[136:], 'little')
+    entries, at, sequence, previous = {}, 0, 0, bytes(32)
+    identity = data[8:72]
+    assert root[8:72] == identity
+    while at < len(data):
+        legacy = at == 0 and data[:8] == b'PNPI\x02\0\0\0'
+        size = 80 if legacy else 128
+        header = data[at:at + size]
+        assert header[8:72] == identity and zlib.crc32(header[:-4]) == int.from_bytes(header[-4:], 'little')
+        count = int.from_bytes(header[72:76], 'little')
+        if not legacy:
+            sequence += 1
+            assert header[:8] == b'PNPL\x03\0\0\0' and 0 < count <= 512
+            assert int.from_bytes(header[76:80], 'little') == sequence and header[80:112] == previous
+            assert int.from_bytes(header[112:120], 'little') == at and header[120:124] == bytes(4)
+        end = at + size + count * 80
+        last = None
+        for pos in range(at + size, end, 80):
+            record = data[pos:pos + 80]
+            assert len(record) == 80 and zlib.crc32(record[:76]) == int.from_bytes(record[76:], 'little')
+            key = (int.from_bytes(record[:4], 'little'), int.from_bytes(record[8:16], 'little'))
+            assert last is None or key > last
+            last, entries[key] = key, record
+        previous = hashlib.sha256(data[at:end]).digest()
+        if not legacy:
+            tail = data[end:end + 48]
+            assert tail[:32] == previous and tail[32:36] == b'PNLE' and int.from_bytes(tail[36:40], 'little') == end + 48 - at
+            assert int.from_bytes(tail[40:44], 'little') == sequence and zlib.crc32(tail[:44]) == int.from_bytes(tail[44:], 'little')
+            end += 48
+        at = end
+    assert at == len(data) and previous in (root[72:104], root[104:136])
+    header = b'PNPI\x02\0\0\0' + identity + struct.pack('<I', len(entries))
+    return header + struct.pack('<I', zlib.crc32(header)) + b''.join(entries[k] for k in sorted(entries))
 
 
 def identity(path):
@@ -63,8 +107,10 @@ def main():
             assert values['complete'] and values['status'] == 0 and values['used'] == values['live'] == 0 and values['pool_peak'] <= 6 * 1024 * 1024
             table, = (state / 'reading/pages').glob('*.pni')
             shutil.copy2(table, out / 'pages.pni')
+            logical = canonical_table(table, state)
+            (out / 'logical.pni').write_bytes(logical)
             shutil.copy2(state / 'first.pgm', out / 'first.pgm')
-            values.update(table_sha=identity(table), frame_sha=identity(state / 'first.pgm'), binary_sha=identity(binary))
+            values.update(table_sha=hashlib.sha256(logical).hexdigest(), storage_sha=identity(table), storage_bytes=table.stat().st_size, frame_sha=identity(state / 'first.pgm'), binary_sha=identity(binary))
             report['runs'][name] = values
             print(name, json.dumps(values), flush=True)
         if args.baseline:
@@ -87,7 +133,7 @@ def main():
                 else:
                     table, = (state / 'reading/pages').glob('*.pni')
                     assert values['complete'] and values['pages'] == report['runs']['after']['pages']
-                    assert identity(table) == report['runs']['after']['table_sha'] and identity(state / 'first.pgm') == report['runs']['after']['frame_sha']
+                    assert hashlib.sha256(canonical_table(table, state)).hexdigest() == report['runs']['after']['table_sha'] and identity(state / 'first.pgm') == report['runs']['after']['frame_sha']
                     shutil.copy2(table, out / 'pages.pni')
                     shutil.copy2(state / 'first.pgm', out / 'first.pgm')
             report['resume_table_frame_equal'] = True
