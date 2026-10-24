@@ -1255,7 +1255,7 @@ pn_status_t pn_epub_app_index_step(pn_epub_app_t *app,pn_book_index_state_t *out
     if(pn_page_index_build_saved(&a->page_index)){a->build_flushed=before.pages;a->build_flushing=false;if(before.complete){a->build_complete=true;return PN_OK;}}
     if(before.complete || before.pages-a->build_flushed>=PN_BOOK_INDEX_BATCH_PAGES)a->build_flushing=true;
     if(a->build_flushing){
-        s=pn_page_index_flush(&a->page_index,true);
+        pn_profile_span_t span;pn_profile_begin(&span,a->pool,"index.store");s=pn_page_index_flush(&a->page_index,true);pn_profile_end(&span,s);
         if(s==PN_OK){a->build_flushing=false;a->build_flushed=before.pages;a->build_complete=before.complete;return before.complete?PN_OK:PN_BUSY;}
         if(s==PN_BUSY || s==PN_CANCELLED)return s;
         a->build_failed=true;return s==PN_EMPTY?PN_IO:s;

@@ -3,6 +3,7 @@
  * English: observe the real whole-book compiler; counts are not physical TF traffic. */
 #define _POSIX_C_SOURCE 200809L
 #include "pn_epub_app.h"
+#include "pn_profile.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -29,6 +30,12 @@ int __wrap_fseek(FILE *f,long offset,int whence){seeks[kind(f)]++;return __real_
 int __wrap_fsync(int fd){syncs++;return __real_fsync(fd);}
 pn_status_t __wrap_pn_epub_spine_find(pn_epub_t *e,const char *p,size_t *n){path_checks++;return __real_pn_epub_spine_find(e,p,n);}
 static uint64_t stamp(void){struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return (uint64_t)t.tv_sec*1000000000u+t.tv_nsec;}
+/// 固定槽聚合，嵌套阶段不可相加；不逐事件打印。/ Fixed-slot aggregation; nested phases are not additive, with no per-event printing.
+static struct {const char *name;uint64_t calls,us,maximum;} phases[64];
+static uint64_t clock_us(void *ctx){(void)ctx;return stamp()/1000u;}
+static void observe(void *ctx,const pn_profile_event_t *e){
+    (void)ctx;for(unsigned i=0;i<64;i++)if(!phases[i].name || !strcmp(phases[i].name,e->phase)){phases[i].name=e->phase;phases[i].calls++;phases[i].us+=e->elapsed_us;if(e->elapsed_us>phases[i].maximum)phases[i].maximum=e->elapsed_us;return;}
+}
 static pn_status_t present(void *ctx,const pn_frame_t *frame,pn_refresh_t refresh){
     (void)refresh;FILE *f=fopen(ctx,"wb");if(!f)return PN_IO;
     fprintf(f,"P5\n%d %d\n255\n",frame->width,frame->height);
@@ -41,10 +48,12 @@ int main(int argc,char **argv){
     if(mkdir(argv[3],0700) && (errno!=EEXIST || argc!=6 || (strcmp(argv[5],"resume") && !maintain)))return 2;
     char cache[1024],image[1024];snprintf(cache,sizeof cache,"%s/reading",argv[3]);snprintf(image,sizeof image,"%s/first.pgm",argv[3]);if(setenv("PN_READING_CACHE",cache,1))return 2;
     pn_pool_t pool;pn_pool_init(&pool,6u*1024u*1024u,NULL,NULL,NULL);pn_epub_app_t app={0};pn_status_t s=pn_epub_app_open(&app,&pool,argv[1],argv[2],argv[3],44,0);pn_book_index_state_t state={0};unsigned last=0,limit=argc==6?(unsigned)strtoul(argv[5],NULL,10):0;uint64_t began=stamp();
+    if(getenv("PN_INDEX_PROFILE"))pn_profile_port(clock_us,observe,NULL);
     while(s==PN_OK || s==PN_BUSY){s=pn_epub_app_index_step(&app,&state);steps++;if(state.pages/256!=last){last=state.pages/256;fprintf(stderr,"index pages=%u section=%u steps=%llu\n",state.pages,state.section,(unsigned long long)steps);}if(s!=PN_BUSY || (limit && state.pages>=limit) || steps>100000000u)break;}
     // 可选维护复用真实空闲入口，另测旧缓存迁移，不混入冷建对照。/ Optional maintenance uses the real idle entry to measure old-cache migration separately from cold builds.
     if(maintain && s==PN_OK){unsigned count=0;while(pn_epub_app_deferred_pending(&app) && s==PN_OK){s=pn_epub_app_deferred_flush(&app);if(++count>1000000u)s=PN_LIMIT;}}
-    uint64_t elapsed=stamp()-began;bool completed=s==PN_OK && state.complete;uint32_t pages=state.pages;
+    uint64_t elapsed=stamp()-began;pn_profile_port(NULL,NULL,NULL);bool completed=s==PN_OK && state.complete;uint32_t pages=state.pages;
+    for(unsigned i=0;i<64 && phases[i].name;i++)fprintf(stderr,"phase=%s calls=%llu us=%llu max_us=%llu\n",phases[i].name,(unsigned long long)phases[i].calls,(unsigned long long)phases[i].us,(unsigned long long)phases[i].maximum);
     if(completed)s=pn_epub_app_step(&app,PN_APP_OPEN,1,present,image);
     pn_status_t closed=pn_epub_app_close(&app,2);if(closed!=PN_OK)s=closed;
     FILE *f=fopen(argv[4],"w");if(!f)return 2;

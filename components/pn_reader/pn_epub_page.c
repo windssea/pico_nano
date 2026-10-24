@@ -177,12 +177,13 @@ static pn_status_t init(pn_pool_t *pool,const pn_xhtml_position_t *start,const p
     layout_t *l=pn_alloc_tagged(pool,PN_MEM_LAYOUT,sizeof *l);if(!l)return PN_NO_MEMORY;
     *l=(layout_t){.page=page,.layout=layout,.measure=measure,.start=start,.stop=stop,.last_space=SIZE_MAX,.active=start==NULL,.matched=start==NULL,.paragraph=true};*owner=l;return PN_OK;
 }
-static pn_status_t finish(layout_t *l,pn_status_t status){
+static pn_status_t finish_page(layout_t *l,pn_status_t status){
     pn_epub_page_t *page=l->page;
     if(status==PN_OK){if(!l->full)line_end(l,false,0);if(!l->matched || (l->stop && !l->stop_seen) || (!page->count && !page->has_next) || (l->stop && l->full && !l->has_begin))status=PN_EMPTY;}
     if(status==PN_OK)page->valid=true;else{page->count=0;page->image_count=0;page->has_next=false;page->valid=false;}
-    pn_free(l);return status;
+    return status;
 }
+static pn_status_t finish(layout_t *l,pn_status_t status){status=finish_page(l,status);pn_free(l);return status;}
 /// 冷章仍验证尾部；已验证章只复放到页面及必要stop锚点完成。 / Cold chapters still validate their tails; verified chapters replay only through the page and required stop anchor.
 static bool page_done(void *ctx){const layout_t *l=ctx;return l->full && (!l->stop || l->stop_seen);}
 /// 窗口复放前回到起点前状态：序号接续，段落标志按最后跳过的流事件推出。/ Before window replay, reset to the pre-start state: continue the order and derive the paragraph flag from the last skipped flow event.
@@ -196,7 +197,7 @@ typedef struct {layout_t *layout;pn_layout_t geometry;pn_epub_measure_t measure;
 void pn_epub_page_job_close(pn_epub_page_job_t *job){
     if(!job || !job->impl)return;
     page_job_t *j=job->impl;job->impl=NULL;pn_xhtml_job_close(&j->source);
-    if(j->layout)(void)finish(j->layout,PN_CANCELLED);
+    if(j->layout){if(j->layout->page->valid)pn_free(j->layout);else (void)finish(j->layout,PN_CANCELLED);}
     pn_free(j);
 }
 pn_status_t pn_epub_page_job_begin(pn_epub_page_job_t *job,pn_pool_t *pool,pn_epub_t *epub,const char *path,const uint8_t salt[16],const pn_xhtml_position_t *start,const pn_layout_t *layout,const pn_epub_measure_t *measure,pn_epub_page_t *page){
@@ -212,11 +213,23 @@ pn_status_t pn_epub_page_job_begin(pn_epub_page_job_t *job,pn_pool_t *pool,pn_ep
 static pn_status_t page_job_step(pn_epub_page_job_t *job,bool compiler){
     if(!job || !job->impl)return PN_EMPTY;
     page_job_t *j=job->impl;pn_xhtml_stats_t stats;pn_status_t s=compiler?pn_xhtml_job_index_step(&j->source,&stats):pn_xhtml_job_step(&j->source,&stats);
-    if(s!=PN_BUSY){pn_xhtml_job_close(&j->source);s=finish(j->layout,s);j->layout=NULL;pn_epub_page_job_close(job);}
+    if(s!=PN_BUSY){
+        if(compiler && s==PN_OK){s=finish_page(j->layout,s);if(s==PN_OK)return s;}
+        pn_xhtml_job_close(&j->source);s=finish(j->layout,s);j->layout=NULL;pn_epub_page_job_close(job);
+    }
     return s;
 }
 pn_status_t pn_epub_page_job_step(pn_epub_page_job_t *job){return page_job_step(job,false);}
 pn_status_t pn_epub_page_job_index_step(pn_epub_page_job_t *job){return page_job_step(job,true);}
+pn_status_t pn_epub_page_job_index_continue(pn_epub_page_job_t *job){
+    if(!job || !job->impl)return PN_EMPTY;
+    page_job_t *j=job->impl;pn_epub_page_t *p=j->layout->page;
+    if(!p->valid || !p->has_next)return PN_EMPTY;
+    pn_status_t s=pn_xhtml_job_index_continue(&j->source,&p->next);if(s!=PN_OK)return s;
+    j->start=p->next;j->layout->start=&j->start;p->valid=false;p->begin=p->next=(pn_xhtml_position_t){0};
+    // 新页重置几何，语义层按保留的精确记录恢复段落上下文。/ Reset page geometry; semantic replay restores paragraph context from the retained exact record.
+    page_restart(j->layout,0,NULL);return PN_OK;
+}
 pn_status_t pn_epub_page_input(pn_pool_t *pool,const pn_xml_input_t *input,const char *base,const uint8_t salt[16],const pn_xhtml_position_t *start,const pn_layout_t *layout,const pn_epub_measure_t *measure,pn_epub_page_t *page){
     layout_t *l;pn_status_t status=init(pool,start,NULL,layout,measure,page,&l);if(status!=PN_OK)return status;
     pn_xhtml_stats_t stats;status=pn_xhtml_parse_input(pool,input,base,salt,consume,l,&stats);return finish(l,status);

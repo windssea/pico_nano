@@ -66,6 +66,8 @@ pn_status_t pn_xhtml_job_begin(pn_xhtml_job_t *,pn_pool_t *,pn_epub_t *,const ch
 pn_status_t pn_xhtml_job_step(pn_xhtml_job_t *,pn_xhtml_stats_t *);
 /// 索引专用：已验证模型按精确焦点跳过前缀，每步各至多32条定位记录和32个事件；逐条检查取消，不改变冷源完整验证，同一job不混用两种step。/ Compiler only: seek the exact focus in verified models, at most 32 seek records and 32 events per step, checking cancellation per item and preserving full cold-source validation; never mix step modes on one job.
 pn_status_t pn_xhtml_job_index_step(pn_xhtml_job_t *,pn_xhtml_stats_t *);
+/// 已验证编译页接续同一模型，借用/pin保持到close；仅接受本页产生的下一页焦点，EMPTY须重建任务。/ Continue a verified compiler page on the same pinned model until close; accept only its next-page focus, and rebuild on EMPTY.
+pn_status_t pn_xhtml_job_index_continue(pn_xhtml_job_t *,const pn_xhtml_position_t *);
 /// 释放候选/暂定页及只读包句柄；已完成的验证缓存保持，不能在回调中重入，文件关闭仍可能阻塞。/ Release candidates/provisional pages and read-only packet handles, preserving verified caches; no callback reentry, and file close may block.
 void pn_xhtml_job_close(pn_xhtml_job_t *);
 /// 释放本出版物语义缓存，借用期间不释放；close使用同一入口。/ Release publication semantics unless borrowed; close uses the same entry point.

@@ -95,6 +95,10 @@ int main(int argc,char **argv){
         assert(pn_epub_reader_prefetch(&owned_reader)==PN_BUSY);
         assert(!pn_epub_reader_prepare(&owned_reader,PN_READ_NEXT,NULL,&owned_receipt) && owned.nodes[0].codepoint=='C');assert(!pn_epub_reader_complete(&owned_reader,&owned_receipt,true,1));
         assert(!pn_epub_reader_prepare(&owned_reader,PN_READ_PREVIOUS,NULL,&owned_receipt) && !pn_epub_reader_complete(&owned_reader,&owned_receipt,true,1));pn_epub_reader_trim(&owned_reader);first=owned.nodes;
+        // 连续编译持有模型时邻页仍可抢先，不改变已显示的位置。/ Neighbor work preempts a retained compiler model without changing the displayed position.
+        pn_book_index_state_t compiling={0};pn_status_t built;unsigned compiler_steps=0;
+        do{built=pn_epub_reader_index_step(&owned_reader,&compiling);assert(++compiler_steps<10000);}while(built==PN_BUSY);
+        assert(built==PN_OK && compiling.pages==1 && !compiling.complete && owned.valid && owned.nodes==first);
         assert(!prefetch_done(&owned_reader));size_t before=pool.attempts;
         assert(!pn_epub_reader_prepare(&owned_reader,PN_READ_NEXT,NULL,&owned_receipt) && owned.nodes!=first && owned.nodes[0].codepoint=='C' && pool.attempts==before);assert(!pn_epub_reader_complete(&owned_reader,&owned_receipt,true,2));
         assert(!pn_epub_reader_prepare(&owned_reader,PN_READ_PREVIOUS,NULL,&owned_receipt) && owned.nodes==first && owned.nodes[0].codepoint=='A' && pool.attempts==before);assert(!pn_epub_reader_complete(&owned_reader,&owned_receipt,true,3));

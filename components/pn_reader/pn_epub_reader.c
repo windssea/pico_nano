@@ -156,6 +156,8 @@ static pn_status_t pn_epub_reader_prefetch_impl(pn_epub_reader_t *handle){
     if(r->ahead.valid && same_location(&r->ahead_target,&base->next))return PN_EMPTY;
     if(!same_location(&r->candidate_target,&base->next)){prefetch_abort(r);r->prefetch_failed=false;r->candidate_target=base->next;r->candidate_at=base->next;}
     if(r->prefetch_failed)return PN_EMPTY;
+    // 邻页优先；连续编译可能仍pin同一模型，开始实际预排前先归还，避免互等。/ Neighbors take priority: release a continuous compiler's model pin before actual prefetch work to avoid mutual waiting.
+    pn_epub_reader_index_abort(handle);
     pn_status_t status;
     if(r->candidate.valid)status=PN_OK;
     else{
@@ -329,15 +331,16 @@ pn_status_t pn_epub_reader_index_step(pn_epub_reader_t *handle,pn_book_index_sta
         pn_epub_item_t item;s=pn_epub_spine(r->epub,state->section,&item);if(s!=PN_OK)return s;
         if(!item.linear){state->section++;state->position=(pn_xhtml_position_t){0};return PN_OK;}
         r->index_at=*state;s=pn_epub_page_reserve(&r->index_page,r->pool,64,2);
-        if(s==PN_OK)s=pn_epub_page_job_begin(&r->index_job,r->pool,r->epub,item.path,r->salt,state->position.element?&r->index_at.position:NULL,&r->layout,&r->measure,&r->index_page);
+        if(s==PN_OK){pn_profile_span_t span;pn_profile_begin(&span,r->pool,"index.begin");s=pn_epub_page_job_begin(&r->index_job,r->pool,r->epub,item.path,r->salt,state->position.element?&r->index_at.position:NULL,&r->layout,&r->measure,&r->index_page);pn_profile_end(&span,s);}
         if(s!=PN_OK){pn_epub_reader_index_abort(handle);return s;}
     }
     s=pn_epub_page_job_index_step(&r->index_job);if(s==PN_BUSY)return s;
     // 已验证窗口尾部不足一页时沿原同步分页退路重放；真实OOM仍向外返回。/ Replay through the original synchronous pagination fallback when a verified window ends mid-page; genuine OOM still propagates.
-    if(s==PN_NO_MEMORY){pn_epub_item_t item;s=pn_epub_spine(r->epub,state->section,&item);if(s==PN_OK)s=pn_epub_page_prepare(r->pool,r->epub,item.path,r->salt,state->position.element?&r->index_at.position:NULL,&r->layout,&r->measure,&r->index_page);}
+    if(s==PN_NO_MEMORY){pn_profile_span_t span;pn_profile_begin(&span,r->pool,"index.fallback");pn_epub_item_t item;s=pn_epub_spine(r->epub,state->section,&item);if(s==PN_OK)s=pn_epub_page_prepare(r->pool,r->epub,item.path,r->salt,state->position.element?&r->index_at.position:NULL,&r->layout,&r->measure,&r->index_page);pn_profile_end(&span,s);}
     if(s==PN_OK){
         pn_epub_page_t *p=&r->index_page;if(!p->valid || (p->has_next && p->next_order<=p->begin_order))s=PN_CORRUPT;
         else{pn_page_index_entry_t e={.section=state->section,.begin=p->begin_order,.end=p->has_next?p->next_order:UINT64_MAX,.first=p->begin,.next=p->next,.flags=p->has_next?1u:0u};pn_page_index_add(r->index,&e);state->pages++;if(p->has_next)state->position=p->next;else{state->section++;state->position=(pn_xhtml_position_t){0};}}
     }else if(s==PN_EMPTY){state->section++;state->position=(pn_xhtml_position_t){0};s=PN_OK;}
+    if(s==PN_OK && state->section==r->index_at.section && pn_epub_page_job_index_continue(&r->index_job)==PN_OK){r->index_at=*state;return PN_OK;}
     pn_epub_reader_index_abort(handle);if(s==PN_OK && state->section>=r->spine_count)state->complete=true;return s;
 }

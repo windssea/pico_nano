@@ -84,7 +84,7 @@ def main():
     parser.add_argument('--chars', type=int, default=6000)
     parser.add_argument('--resume-after', type=int, help='Additionally close an unshown candidate at this page, then reopen and compare the completed table/frame')
     args = parser.parse_args()
-    assert args.font.is_file() and 1 <= args.chapters <= 1024 and 300 <= args.chars <= 100000
+    assert args.font.is_file() and 1 <= args.chapters <= 1024 and 300 <= args.chars <= 3000000
     args.output.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='pn-full-index-') as directory:
         root = pathlib.Path(directory)
@@ -105,6 +105,13 @@ def main():
                 result = subprocess.run([str(binary.resolve()), str(book), str(font), str(state), str(stats.resolve())], stdout=log, stderr=log, timeout=900)
             assert result.returncode == 0, (name, result.returncode, out / 'compile.log')
             values = json.loads(stats.read_text())
+            # 嵌套阶段单列，不求和冒充总耗时。/ Keep nested phases separate; their sum is not total elapsed time.
+            values['phases'] = {}
+            for line in (out / 'compile.log').read_text(encoding='utf-8').splitlines():
+                if line.startswith('phase='):
+                    fields = dict(part.split('=', 1) for part in line.split())
+                    phase = fields.pop('phase')
+                    values['phases'][phase] = {key: int(value) for key, value in fields.items()}
             assert values['complete'] and values['status'] == 0 and values['used'] == values['live'] == 0 and values['pool_peak'] <= 6 * 1024 * 1024
             table, = (state / 'reading/pages').glob('*.pni')
             shutil.copy2(table, out / 'pages.pni')

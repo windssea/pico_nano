@@ -206,7 +206,23 @@ static pn_status_t active_close(library_t *s,uint64_t now){stats_flush(s);bookma
 static pn_status_t catalog_build_idle(library_t *s){return pn_catalog_index_build(&s->catalog_index);}
 static bool timing_on(void){static int on=-1;if(on<0){const char *v=getenv("PN_SIM_TIMING");on=v && *v=='1';}return on;}
 static uint64_t profile_clock(void *ctx){(void)ctx;uint64_t c=SDL_GetPerformanceCounter(),f=SDL_GetPerformanceFrequency();return (c/f)*1000000u+(c%f)*1000000u/f;}
+/// 索引诊断只聚合，避免每个32事件小步打印多行；嵌套阶段不可相加。/ Aggregate index diagnostics instead of printing each 32-event step; nested stages are not additive.
+static struct {const char *phase;uint64_t calls,total,maximum;} index_profile[12];
+static void profile_index_flush(void){
+    for(unsigned i=0;i<12;i++)if(index_profile[i].calls){
+        fprintf(stderr,"index_phase phase=%s calls=%llu total_us=%llu max_us=%llu backend=host\n",index_profile[i].phase,(unsigned long long)index_profile[i].calls,(unsigned long long)index_profile[i].total,(unsigned long long)index_profile[i].maximum);
+        index_profile[i].calls=index_profile[i].total=index_profile[i].maximum=0;
+    }
+}
 static void profile_emit(void *ctx,const pn_profile_event_t *e){
+    if(!strncmp(e->phase,"index.",6)){
+        for(unsigned i=0;i<12;i++)if(!index_profile[i].phase || !strcmp(index_profile[i].phase,e->phase)){
+            index_profile[i].phase=e->phase;index_profile[i].calls++;index_profile[i].total+=e->elapsed_us;
+            if(e->elapsed_us>index_profile[i].maximum)index_profile[i].maximum=e->elapsed_us;
+            break;
+        }
+        return;
+    }
     (void)ctx;fprintf(stderr,"profile phase=%s elapsed_us=%llu status=%d begin=%zu end=%zu peak=%zu attempts=%zu backend=host\n",e->phase,(unsigned long long)e->elapsed_us,(int)e->status,e->begin_bytes,e->end_bytes,e->peak_bytes,e->attempts);
     if(e->pool){fprintf(stderr,"memory phase=%s",e->phase);for(unsigned j=0;j<PN_MEM_COUNT;j++){const pn_memory_stats_t *m=&e->pool->memory[j];fprintf(stderr," %s=%zu/%zu/%zu/%zu",pn_memory_tag_name((pn_memory_tag_t)j),m->used,m->peak,m->allocations,m->failures);}fprintf(stderr," heap=unavailable stack=unavailable\n");}
     if(e->pool)for(unsigned k=0;k<PN_CACHE_COUNT;k++){const pn_cache_stats_t *c=&e->pool->cache_stats[k];fprintf(stderr,"cache phase=%s kind=%u bytes=%zu peak=%zu hits=%zu misses=%zu denied=%zu evictions=%zu reclaimed=%zu backend=host\n",e->phase,k,c->bytes,c->peak,c->hits,c->misses,c->denied,c->evictions,c->reclaimed);}
@@ -575,7 +591,7 @@ static void tick_opening(library_t *s,uint64_t now){
         do{built=s->epub.impl?pn_epub_app_index_step(&s->epub,&progress):pn_reader_app_index_step(&s->reader,&progress);}while(built==PN_BUSY && ++steps<PN_BOOK_INDEX_STEP_MAX && SDL_GetTicks64()-began<8);
         if(built==PN_BUSY || built==PN_CANCELLED){if(progress.pages/PN_BOOK_INDEX_BATCH_PAGES!=s->opening_index.pages/PN_BOOK_INDEX_BATCH_PAGES && now>=s->index_progress_at && now-s->index_progress_at>=2000){s->opening_index=progress;s->index_progress_at=now;index_loading(s);}return;}
         s->index_gate=false;s->index_finishing=true;pn_catalog_item_t *book=s->opening_book;s->opening_book=NULL;
-        printf("book_index wait end status=%d pages=%u\n",built,progress.pages);(void)finish_open(s,book,now,built==PN_STALE_MEDIA?built:PN_OK);pn_free(book);s->index_finishing=false;
+        profile_index_flush();printf("book_index wait end status=%d pages=%u\n",built,progress.pages);(void)finish_open(s,book,now,built==PN_STALE_MEDIA?built:PN_OK);pn_free(book);s->index_finishing=false;
         s->async.defer_ack=false;pn_async_block_controls(&s->async.input,false);pn_sdl_async_title(&s->async,PN_BRAND_NAME);return;
     }
 
@@ -975,7 +991,7 @@ static int library_worker(void *ctx){
                 while(s->epub.impl && status==PN_OK && ++steps<32u && SDL_GetTicks64()-batch_started<8u);
                 prefetch_work=status==PN_OK;if(status==PN_OK)printf("neighbor prefetch work\n");pn_status_t cached=s->epub.impl && (pn_epub_app_cache_pending(&s->epub) || !pn_epub_app_prefetch_pending(&s->epub))?pn_epub_app_cache_idle(&s->epub,now):PN_EMPTY;if(cached==PN_OK)printf("semantic cache stored\n");
                 if(now>=font_activity && now-font_activity>=1500u){pn_status_t recent=s->epub.impl?pn_epub_app_recent_idle(&s->epub,now):pn_reader_app_recent_idle(&s->reader,now);if(recent==PN_OK)printf("recent record stored when idle\n");
-                    if(!(s->epub.impl?pn_epub_app_prefetch_pending(&s->epub):pn_reader_app_warm_pending(&s->reader)) && (s->epub.impl?pn_epub_app_index_pending(&s->epub):pn_reader_app_index_pending(&s->reader))){pn_book_index_state_t progress;pn_status_t indexed;unsigned steps=0;uint64_t began=SDL_GetTicks64();do{indexed=s->epub.impl?pn_epub_app_index_step(&s->epub,&progress):pn_reader_app_index_step(&s->reader,&progress);}while(indexed==PN_BUSY && ++steps<PN_BOOK_INDEX_STEP_MAX && SDL_GetTicks64()-began<8);prefetch_work=prefetch_work || indexed==PN_BUSY;if(indexed==PN_OK)printf("book_index background complete pages=%u\n",progress.pages);}
+                    if(!(s->epub.impl?pn_epub_app_prefetch_pending(&s->epub):pn_reader_app_warm_pending(&s->reader)) && (s->epub.impl?pn_epub_app_index_pending(&s->epub):pn_reader_app_index_pending(&s->reader))){pn_book_index_state_t progress;pn_status_t indexed;unsigned steps=0;uint64_t began=SDL_GetTicks64();do{indexed=s->epub.impl?pn_epub_app_index_step(&s->epub,&progress):pn_reader_app_index_step(&s->reader,&progress);}while(indexed==PN_BUSY && ++steps<PN_BOOK_INDEX_STEP_MAX && SDL_GetTicks64()-began<8);prefetch_work=prefetch_work || indexed==PN_BUSY;if(indexed==PN_OK){profile_index_flush();printf("book_index background complete pages=%u\n",progress.pages);}}
 }}
             if(!s->locked && s->styles.active && !s->pointer_down && atomic_load(&s->async.mouse)==0)(void)pn_style_ui_tick(&s->styles,present,s);
             if(!s->locked && s->wallpaper.impl && !s->pointer_down && atomic_load(&s->async.mouse)==0)(void)pn_wallpaper_ui_tick(&s->wallpaper,present,s);
@@ -1259,7 +1275,7 @@ cleanup:;
     pn_font_ui_close(&s->fonts);
     pn_cover_work_abort(&s->cover_work);pn_w_font_scope_end(&s->ui_scope);pn_cache_detach(&s->cover_cache);pn_font_close(&s->font);pn_free(s->frame.pixels);pn_free(s->page_px);pn_free(s->favorites);pn_free(s->page);pn_free(s->recent);pn_free(s->covers);
     (void)pn_font_system_close();
-    free(s->argb);s->argb=NULL;pn_cancel_leave(&shield);return result;
+    profile_index_flush();free(s->argb);s->argb=NULL;pn_cancel_leave(&shield);return result;
 }
 
 int pn_sim_library_window(pn_pool_t *pool,const char *directory,const char *font_path,const char *fallback_path,const char *state_dir,const char *cover_cache,const char *wallpaper_dir,const char *wallpaper_store,const char *font_dir){

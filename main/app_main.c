@@ -299,6 +299,23 @@ static uint64_t now_ms(void){return (uint64_t)(esp_timer_get_time()/1000);}
 static void profile_task_stacks(const char *);
 static uint64_t profile_clock(void *ctx){(void)ctx;return (uint64_t)esp_timer_get_time();}
 #if PN_DEVICE_TEST_CONSOLE
+/// 索引小步仅聚合，完成/进度边界输出；阶段含嵌套IO与字体耗时，不可相加。/ Aggregate index steps until completion/progress boundaries; stages include nested I/O and font time and are not additive.
+static struct {const char *phase;uint64_t calls,total,maximum;} index_profile[]={
+    {.phase="index.begin"},{.phase="index.seek"},{.phase="index.layout"},{.phase="index.xml"},
+    {.phase="index.css"},{.phase="index.load"},{.phase="index.fallback"},{.phase="index.store"},{.phase="index.reclaim"}};
+static void index_profile_collect(const pn_profile_event_t *e){
+    for(unsigned i=0;i<sizeof index_profile/sizeof index_profile[0];i++)if(!strcmp(e->phase,index_profile[i].phase)){
+        index_profile[i].calls++;index_profile[i].total+=e->elapsed_us;
+        if(e->elapsed_us>index_profile[i].maximum)index_profile[i].maximum=e->elapsed_us;
+        return;
+    }
+}
+static void index_profile_flush(void){
+    for(unsigned i=0;i<sizeof index_profile/sizeof index_profile[0];i++)if(index_profile[i].calls){
+        ESP_LOGI(TAG,"index_phase phase=%s calls=%llu total_us=%llu max_us=%llu",index_profile[i].phase,(unsigned long long)index_profile[i].calls,(unsigned long long)index_profile[i].total,(unsigned long long)index_profile[i].maximum);
+        index_profile[i].calls=index_profile[i].total=index_profile[i].maximum=0;
+    }
+}
 /// 串口逐次IO输出会改变字体/摘要耗时；只在阶段边界汇总。/ Per-IO serial output distorts font/hash timing; aggregate at phase boundaries.
 static struct {const char *phase;uint64_t calls,total,maximum,failed;} profile_io[]={
     {.phase="storage.file-read"},{.phase="storage.file-seek"},{.phase="content.sha-read"},{.phase="content.sha-update"},
@@ -321,6 +338,12 @@ static void profile_io_flush(void){
 #endif
 static void profile_emit(void *ctx,const pn_profile_event_t *e){
     (void)ctx;
+    if(!strncmp(e->phase,"index.",6)){
+#if PN_DEVICE_TEST_CONSOLE
+        index_profile_collect(e);
+#endif
+        return;
+    }
 #if !PN_DEVICE_TEST_CONSOLE
     // 字形细计时仅供诊断聚合，产品路径不增加逐字日志。/ Fine glyph timings are diagnostic aggregates only; product paths add no per-glyph logs.
     if(!strcmp(e->phase,"font.measure-load") || !strcmp(e->phase,"font.raster-load"))return;
@@ -1611,6 +1634,7 @@ static bool tick_opening(void){
 #if PN_DEVICE_TEST_CONSOLE
         ESP_LOGI(TAG,"Whole-book index wait end t=%llu elapsed_ms=%llu status=%d pages=%u complete=%d",(unsigned long long)now_ms(),(unsigned long long)(now_ms()-index_started_at),(int)built,(unsigned)progress.pages,(int)progress.complete);
         ESP_LOGI(TAG,"Whole-book index batches=%llu steps=%llu work_us=%llu max_batch_us=%llu",(unsigned long long)index_batches,(unsigned long long)index_steps,(unsigned long long)index_work_us,(unsigned long long)index_max_batch_us);
+        index_profile_flush();profile_io_flush();
 #endif
         index_gate=false;if(built!=PN_OK)ESP_LOGW(TAG,"Whole-book index unavailable: %d; normal reading fallback",(int)built);
         reader_open_result(built==PN_STALE_MEDIA?built:active_step(PN_APP_OPEN,now_ms()));start_reader_finish();return true;
@@ -1706,6 +1730,9 @@ static bool tick_reader_background(uint64_t now){
         }
         if(slot==4 && now>=last_input && now-last_input>=1500 && !(epub.impl?pn_epub_app_prefetch_pending(&epub):pn_reader_app_warm_pending(&reader)) && (epub.impl?pn_epub_app_index_pending(&epub):pn_reader_app_index_pending(&reader))){
             pn_book_index_state_t progress;unsigned steps=0;int64_t began=esp_timer_get_time();do{s=epub.impl?pn_epub_app_index_step(&epub,&progress):pn_reader_app_index_step(&reader,&progress);}while(s==PN_BUSY && ++steps<PN_BOOK_INDEX_STEP_MAX && esp_timer_get_time()-began<8000);if(s==PN_OK)ESP_LOGI(TAG,"Whole-book index complete: %u pages",(unsigned)progress.pages);
+#if PN_DEVICE_TEST_CONSOLE
+            if(s!=PN_BUSY && s!=PN_CANCELLED)index_profile_flush();
+#endif
         }
         if(slot==3 && now>=last_input && now-last_input>=1500)s=epub.impl?pn_epub_app_recent_idle(&epub,now_ms()):pn_reader_app_recent_idle(&reader,now_ms());
         pn_profile_end(&timing,s);

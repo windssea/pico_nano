@@ -189,17 +189,26 @@ static pn_status_t xj_seek_focus(xhtml_job_t *j){
         j->seek_record=r->next;
     }
     // 没有精确命中保留旧复放/错误语义，不把“接近”位置当页首。/ No exact match retains legacy replay/error semantics, never a nearby guessed page start.
-    if(!j->seek_record){j->seek_done=true;return PN_OK;}
+    if(!j->seek_record){j->seek_done=true;return j->completed?PN_NO_MEMORY:PN_OK;}
     return PN_BUSY;
 }
 static pn_status_t xj_step(pn_xhtml_job_t *job,pn_xhtml_stats_t *stats,bool compiler){
     if(!job || !job->impl || !stats)return PN_INVALID;
     xhtml_job_t *j=job->impl;if(j->status!=PN_BUSY)return j->status;
+    // 编译无显示回执；旧窗口挤满分项额度时只回收本任务独占借用的旧模型，避免新窗口反复准入失败。/ Compilation has no display receipt: reclaim only this job's exclusively borrowed old model when it crowds the class cap, avoiding repeated new-window admission failure.
+    if(compiler && j->hold){
+        if(!j->pool->speculative && !j->hold->busy && j->hold->owner.pins==1 && !pn_cache_allow(j->pool,PN_CACHE_CHAPTER,64u*1024u)){
+            size_t old=j->pool->used;model_drop(j->hold);j->pool->cache_stats[PN_CACHE_CHAPTER].evictions++;j->pool->cache_stats[PN_CACHE_CHAPTER].reclaimed+=old-j->pool->used;
+            pn_profile_observe(j->pool,"index.reclaim",PN_OK,0,NULL);
+        }
+        pn_cache_unpin(&j->hold->owner);j->hold=NULL;
+    }
     size_t ordinal;pn_status_t s=pn_cancel_checkpoint();if(s==PN_OK)s=pn_epub_spine_find(j->epub,j->path,&ordinal);if(s!=PN_OK)return s;
-    if(j->loading)return xj_load_step(j);
+    if(j->loading){pn_profile_span_t span;if(compiler)pn_profile_begin(&span,j->pool,"index.load");s=xj_load_step(j);if(compiler)pn_profile_end(&span,s);return s;}
     if(!j->building){
-        if(compiler && j->has_focus && !j->seek_done){s=xj_seek_focus(j);if(s!=PN_OK)return s;}
+        if(compiler && j->has_focus && !j->seek_done){pn_profile_span_t span;pn_profile_begin(&span,j->pool,"index.seek");s=xj_seek_focus(j);pn_profile_end(&span,s);if(s!=PN_OK)return s;}
         // 量宽同时预热位图后每字工作更多，四事件即让出，控制输入/回执等待。/ Metric work now also warms rasters; yield after four events to bound input/receipt waiting.
+        pn_profile_span_t replay;if(compiler)pn_profile_begin(&replay,j->pool,"index.layout");
         for(unsigned events=0;events<(compiler?32u:4u) && j->record && !j->proxy.done(j->proxy.ctx);events++){
             s=pn_cancel_checkpoint();if(s!=PN_OK)break;
             model_record_t *r=j->record;unsigned i=j->item;
@@ -208,15 +217,16 @@ static pn_status_t xj_step(pn_xhtml_job_t *job,pn_xhtml_stats_t *stats,bool comp
             s=j->proxy.sink(j->proxy.ctx,&e);if(s!=PN_OK)break;
             if(++j->item>=(r->kind==PN_XHTML_TEXT?r->count:1u)){j->record=r->next;j->item=0;}
         }
+        if(compiler)pn_profile_end(&replay,s);
         if(s==PN_OK)s=pn_cancel_checkpoint();
         if(s==PN_OK)s=pn_epub_spine_find(j->epub,j->path,&ordinal);
         if(s==PN_OK && j->record && !j->proxy.done(j->proxy.ctx))return PN_BUSY;
         if(s==PN_BUSY)s=PN_INVALID;
         if(s==PN_OK && j->model->truncated && !j->proxy.done(j->proxy.ctx))s=PN_NO_MEMORY;
         if(s==PN_OK)*stats=j->model->stats;
-    }else if(*j->needed)s=xj_css_step(j);
+    }else if(*j->needed){pn_profile_span_t span;if(compiler)pn_profile_begin(&span,j->pool,"index.css");s=xj_css_step(j);if(compiler)pn_profile_end(&span,s);}
     else{
-        bool syntax=false;pn_profile_span_t span;pn_profile_begin(&span,j->pool,"epub.prefetch.xml");s=pn_xml_job_step_diagnostic(&j->xml,&syntax);pn_profile_end(&span,s);
+        bool syntax=false;pn_profile_span_t span;pn_profile_begin(&span,j->pool,compiler?"index.xml":"epub.prefetch.xml");s=pn_xml_job_step_diagnostic(&j->xml,&syntax);pn_profile_end(&span,s);
         // 可用模型先按4KiB验证，再小步排版；可选记录失败才回到原流式分页，不以半模型冒充成功。/ Validate a usable model in 4 KiB chunks before staged layout; optional-record failure falls back to streaming, never publishing a partial model.
         if((s==PN_BUSY || s==PN_OK) && j->model_only && j->model->abandoned){j->model_only=false;j->proxy.model=NULL;s=xj_parse_begin(j,false);return s==PN_OK?PN_BUSY:s;}
         if(s==PN_BUSY){if(j->xml.impl || *j->needed)return PN_BUSY;s=PN_INVALID;}
@@ -241,3 +251,12 @@ static pn_status_t xj_step(pn_xhtml_job_t *job,pn_xhtml_stats_t *stats,bool comp
 }
 pn_status_t pn_xhtml_job_step(pn_xhtml_job_t *job,pn_xhtml_stats_t *stats){return xj_step(job,stats,false);}
 pn_status_t pn_xhtml_job_index_step(pn_xhtml_job_t *job,pn_xhtml_stats_t *stats){return xj_step(job,stats,true);}
+pn_status_t pn_xhtml_job_index_continue(pn_xhtml_job_t *job,const pn_xhtml_position_t *focus){
+    if(!job || !job->impl || !focus || !focus->element)return PN_INVALID;
+    xhtml_job_t *j=job->impl;
+    if(j->status!=PN_OK || j->building || !j->model || !j->model->valid)return PN_EMPTY;
+    // 保留上一页起点所在记录及其真实前序上下文，覆盖行尾回退；不从章首重复查找。/ Retain the previous page's start record and exact preceding context to cover line rollback without searching from chapter start.
+    if(!j->seek_started){j->seek_started=true;j->seek_record=j->model->first;j->seek_order=j->model->base;j->seek_context=j->model->has_context;j->seek_kind=j->model->context.kind;j->seek_block=j->model->context.block;}
+    if(!j->seek_record)return PN_EMPTY;
+    j->focus=*focus;j->has_focus=true;j->seek_done=false;j->status=PN_BUSY;return PN_OK;
+}
