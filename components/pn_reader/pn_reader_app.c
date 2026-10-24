@@ -50,7 +50,7 @@ typedef struct {
     pn_page_glyph_t *glyphs;
     pn_display_t display;
     pn_reader_t reader;
-    pn_page_index_t page_index;uint32_t index_generation;
+    pn_page_index_t page_index;uint32_t index_generation;uint32_t build_flushed;bool build_flushing,build_failed,build_complete,build_metrics; ///< 分批编译收口及本代失败退避 / Batched compiler draining and per-layout failure backoff
     pn_reader_anchor_t checkpoints[512];size_t checkpoint_count;
     /// 快开后的后台完整复核：先字体后正文，完成前身份暂用最近记录 / Background full verification after fast opening: font first, then body text, using the recent-record identity meanwhile
     pn_text_file_verify_t verify;bool verify_font,verify_book;void *verify_font_handle;pn_book_id_t font_expected;
@@ -69,6 +69,7 @@ typedef struct {
     char state_directory[301];
     char book_path[PN_RECENT_PATH_MAX];
     pn_status_t recent_status;
+    pn_recent_observer_fn recent_observer;void *recent_observer_ctx; ///< 借用已保存快照的同步接收者 / Synchronous receiver of a borrowed saved snapshot
     bool recent_recorded;
     bool recent_pending;uint64_t recent_due; ///< 首屏只标记近期记录，空闲或安全出口写入 / First display only marks recents dirty; write when idle or at safe exits
     pn_txt_progress_t bookmark_origin;
@@ -318,7 +319,7 @@ static pn_status_t record_recent(app_t *a){
     pn_recent_item_t item={.book=a->book,.source_size=position.source_size,.format=1,.progress=(uint16_t)progress_basis(a,a->reader.visible)};
     strcpy(item.path,a->book_path);pn_journal_files_t files;pn_journal_io_t io;
     status=pn_recent_files(&files,&a->state_media,&a->state_lease,a->state_directory,&io);
-    if(status==PN_OK)status=pn_recent_touch(&io,a->pool,&item);
+    if(status==PN_OK)status=pn_recent_touch_notify(&io,a->pool,&item,a->recent_observer,a->recent_observer_ctx);
     a->recent_status=status;if(status==PN_OK){a->recent_recorded=true;a->recent_pending=false;}return status;
 }
 /// 复用前台选择和精确亚像素偏移，只生成可回收字形，不画正文或页脚。 / Reuse foreground face selection and exact subpixel offsets, generating only reclaimable glyphs without painting body/footer.
@@ -379,7 +380,7 @@ pn_status_t pn_reader_app_prefetch(pn_reader_app_t *app){
 // 布局改变后换key，缓存故障不阻止阅读；取消可重试。/ Switch keys after reflow; cache failures never block reading, cancellation can retry.
 static pn_status_t index_layout(app_t *a){
     if(!a->persistent || a->index_generation==a->reader.token.generation)return PN_OK;
-    a->reader.index=NULL;pn_page_index_close(&a->page_index);
+    a->reader.index=NULL;pn_page_index_close(&a->page_index);a->build_flushed=0;a->build_flushing=a->build_failed=a->build_complete=a->build_metrics=false;
     pn_text_source_t source;pn_book_id_t key;pn_status_t s=body_source(a,&source);
     // TXT冷回翻修正独立换键，旧解码检查点产生的短页不能导入新表；EPUB键不变。/ Version the TXT cold-reverse correction so old decoder-checkpoint fragments cannot enter new tables; EPUB keys stay unchanged.
     if(s==PN_OK)s=pn_page_index_key(&a->book,&a->style,&source,chain(a),(unsigned)a->reader.decoder.encoding|0x200u,&key);
@@ -896,3 +897,35 @@ void pn_reader_app_refresh_reset(pn_reader_app_t *app){if(app && app->impl)((app
 pn_status_t pn_reader_app_paper_context(pn_reader_app_t *app,pn_pool_t **pool,pn_media_t **media){if(!app || !app->impl || !pool || !media)return PN_INVALID;app_t *a=app->impl;*pool=a->pool;*media=a->book_media;return PN_OK;}
 
 void pn_reader_app_cache_activity(pn_reader_app_t *app,uint64_t now){if(app && app->impl){app_t *a=app->impl;if(now>=a->last_now)pn_page_index_abort(&a->page_index);}}
+
+void pn_reader_app_recent_observer(pn_reader_app_t *app,pn_recent_observer_fn observer,void *ctx){
+    if(!app || !app->impl)return;
+    app_t *a=app->impl;a->recent_observer=observer;a->recent_observer_ctx=ctx;
+}
+
+pn_status_t pn_reader_app_index_step(pn_reader_app_t *app,pn_book_index_state_t *out){
+    if(!app || !app->impl || !out)return PN_INVALID;
+    app_t *a=app->impl;if(a->suspended || a->media_lost || a->style_preview || a->font_preview || a->style_pending || a->font_pending || a->global_pending)return PN_EMPTY;
+    if(pn_reader_app_verify_pending(app)){pn_status_t verified=pn_reader_app_verify_step(app);return verified==PN_OK?PN_BUSY:verified;}
+    pn_status_t s=index_layout(a);if(s!=PN_OK)return s;if(!pn_page_index_is_tf(&a->page_index) || a->build_failed)return PN_EMPTY;
+    pn_book_index_state_t before;s=pn_page_index_build_state(&a->page_index,&before);if(s!=PN_OK)return s;*out=before;
+    if(pn_page_index_build_saved(&a->page_index)){a->build_flushed=before.pages;a->build_flushing=false;if(before.complete){a->build_complete=true;return PN_OK;}}
+    if(before.complete || before.pages-a->build_flushed>=PN_BOOK_INDEX_BATCH_PAGES)a->build_flushing=true;
+    if(a->build_flushing){
+        s=pn_page_index_flush(&a->page_index,true);
+        if(s==PN_OK){a->build_flushing=false;a->build_flushed=before.pages;a->build_complete=before.complete;return before.complete?PN_OK:PN_BUSY;}
+        if(s==PN_BUSY || s==PN_CANCELLED)return s;
+        a->build_failed=true;return s==PN_EMPTY?PN_IO:s;
+    }
+    if(!a->build_metrics){(void)pn_font_index_metrics(body(a));a->build_metrics=true;}
+    pn_book_index_state_t next=before;
+    s=pn_reader_index_step(&a->reader,&next);
+    if(s==PN_OK){s=pn_page_index_build_advance(&a->page_index,&before,&next);if(s==PN_STALE_JOB){a->build_flushed=0;s=PN_BUSY;}else if(s==PN_OK){*out=next;s=PN_BUSY;}}
+    if(s!=PN_BUSY && s!=PN_CANCELLED)a->build_failed=true;
+    return s;
+}
+
+bool pn_reader_app_index_pending(const pn_reader_app_t *app){
+    if(!app || !app->impl)return false;
+    const app_t *a=app->impl;return a->persistent && pn_page_index_tf_directory() && !a->suspended && !a->style_preview && !a->font_preview && !a->style_pending && !a->font_pending && (a->index_generation!=a->reader.token.generation || (!a->build_complete && !a->build_failed));
+}

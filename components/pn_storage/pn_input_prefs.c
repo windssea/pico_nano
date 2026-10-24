@@ -30,3 +30,22 @@ pn_status_t pn_input_prefs_save(const pn_journal_io_t *io,uint8_t flags){
     uint8_t version=(flags&PN_INPUT_TURN_MASK)==PN_INPUT_TURN_MASK?3:2;
     uint8_t payload[6]={'P','N','I','P',version,flags};return pn_journal_save(io,payload,sizeof payload);
 }
+
+pn_status_t pn_index_prefs_files(pn_journal_files_t *files,pn_media_t *media,const pn_media_lease_t *lease,const char *root,pn_journal_io_t *io){
+    if(!root || !*root)return PN_INVALID;
+    char a[PN_JOURNAL_PATH_MAX],b[PN_JOURNAL_PATH_MAX];int n=snprintf(a,sizeof a,"%s/indexing.a",root),m=snprintf(b,sizeof b,"%s/indexing.b",root);
+    if(n<0 || m<0 || (size_t)n>=sizeof a || (size_t)m>=sizeof b)return PN_LIMIT;
+    return pn_journal_files_init(files,media,lease,a,b,io);
+}
+pn_status_t pn_index_prefs_load(const pn_journal_io_t *io,bool *wait){
+    if(!io || !wait)return PN_INVALID;
+    pn_record_t r;pn_status_t s=pn_journal_load(io,&r);if(s!=PN_OK)return s;
+    if(r.size!=6 || memcmp(r.payload,"PNIX",4))return PN_CORRUPT;
+    if(r.payload[4]!=1)return PN_UNSUPPORTED;
+    if(r.payload[5]>1)return PN_CORRUPT;
+    *wait=r.payload[5]!=0;return PN_OK;
+}
+pn_status_t pn_index_prefs_save(const pn_journal_io_t *io,bool wait){
+    bool previous;pn_status_t s=pn_index_prefs_load(io,&previous);if(s!=PN_OK && s!=PN_EMPTY)return s;
+    const uint8_t payload[6]={'P','N','I','X',1,wait?1:0};return pn_journal_save(io,payload,sizeof payload);
+}

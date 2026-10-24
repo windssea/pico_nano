@@ -21,6 +21,7 @@ enum {SCREEN_MAIN=0,SCREEN_KEYS,SCREEN_REFRESH,SCREEN_ABOUT,SCREEN_APPEARANCE,SC
 typedef struct {pn_pool_t *pool;pn_media_t *state;char dir[PN_JOURNAL_PATH_MAX];pn_font_t font;uint8_t *pixels;pn_frame_t canvas;char message[96];char lan[40];int screen;pn_settings_about_t about;pn_settings_time_t time;
     pn_settings_update_t update; ///< 控制层升级快照 / Controller update snapshot
     pn_font_t *return_font; ///< 单owner移交的空槽，close归还或正常释放 / Empty slot transferred by the single owner, returned on close or normally released
+    bool index_known; ///< 索引偏好可读才允许修改 / Permit changes only when the index preference is readable
     bool snapshot_dirty; ///< 外部快照更新后先完整重画 / Repaint completely after external snapshot changes
     pn_w_status_snapshot_t status; ///< 最近成功画布的实时状态带 / Live status band of the last successful canvas
     pn_keyboard_t kb; ///< WiFi输入键盘 / WiFi entry keyboard
@@ -154,14 +155,15 @@ static pn_status_t draw_refresh(pn_settings_ui_t *ui,su_t *u){
     if(s==PN_OK && *u->message)s=note(u,u->message,TURN_Y+TURN_H+150);
     return s;
 }
-static pn_status_t draw_about(su_t *u){
+static pn_status_t draw_about(pn_settings_ui_t *ui,su_t *u){
     pn_font_t *font=&u->font;pn_frame_t *f=&u->canvas;
     pn_status_t s=pn_w_header(font,f,"< 设置","存储与关于",NULL);
     const char *rows[4][2]={{PN_BRAND_NAME,*u->about.version?u->about.version:"版本未知"},{"屏幕",*u->about.screen?u->about.screen:"4.7 英寸墨水屏 · 16 级灰阶"},
         {"存储卡",*u->about.storage?u->about.storage:"未读取到存储卡"},{"内部存储",*u->about.internal?u->about.internal:(u->state?"可用":"不可用")}};
     pn_w_card(f,ABOUT_Y,4);
     for(int i=0;i<4 && s==PN_OK;i++)s=pn_w_card_row(font,f,rows[i][0],rows[i][1],NULL,-1,0u,ABOUT_Y+i*ROW_H,i==3);
-    if(s==PN_OK)s=note(u,"本固件使用 HarmonyOS Sans 字体。阅读记录、书签与设置只保存在本机。设备信息按实际读取显示。",ABOUT_Y+4*ROW_H+52);
+    if(s==PN_OK)s=note(u,"HarmonyOS Sans 字体 · 数据仅保存在本机",ABOUT_Y+4*ROW_H+52);
+    pn_w_card(f,710,1);if(s==PN_OK)s=pn_w_card_row(font,f,"首次开书建立索引",*u->message?u->message:"开启等待完成，关闭后台建立",NULL,-1,ui->index_wait?PN_ROW_ON:PN_ROW_OFF,710,true);
     pn_w_card(f,840,1);if(s==PN_OK)s=pn_w_card_row(font,f,"日期与时间",*u->time.datetime?u->time.datetime:"时钟尚未校准",NULL,PN_ICON_SETTINGS,PN_ROW_CHEVRON,840,true);
     pn_w_card(f,960,1);if(s==PN_OK)s=pn_w_card_row(font,f,"系统更新","通过家庭 WiFi 获取 Gitee 更新",NULL,PN_ICON_SETTINGS,PN_ROW_CHEVRON,960,true);
     return s;
@@ -273,7 +275,7 @@ static pn_status_t show_profile(pn_settings_ui_t *ui,pn_settings_present_fn pres
     // 只计时清屏与绘制，供真机拆分菜单准备耗时。/ Time clearing and drawing only, to split menu preparation on hardware.
     pn_profile_span_t span;pn_profile_begin(&span,NULL,"ui.settings.clear");pn_frame_clear(&u->canvas,15);pn_profile_end(&span,PN_OK);
     pn_profile_begin(&span,NULL,"ui.settings.draw");
-    pn_status_t s=u->screen==SCREEN_KEYS?draw_keys(ui,u):u->screen==SCREEN_REFRESH?draw_refresh(ui,u):u->screen==SCREEN_ABOUT?draw_about(u):u->screen==SCREEN_TIME?draw_time(u):u->screen==SCREEN_UPDATE?draw_update(u):u->screen==SCREEN_WIFI?draw_wifi(u):u->screen==SCREEN_WIFI_EDIT?draw_wifi_edit(u):u->screen==SCREEN_APPEARANCE?draw_appearance(ui,u):draw_main(ui,u);
+    pn_status_t s=u->screen==SCREEN_KEYS?draw_keys(ui,u):u->screen==SCREEN_REFRESH?draw_refresh(ui,u):u->screen==SCREEN_ABOUT?draw_about(ui,u):u->screen==SCREEN_TIME?draw_time(u):u->screen==SCREEN_UPDATE?draw_update(u):u->screen==SCREEN_WIFI?draw_wifi(u):u->screen==SCREEN_WIFI_EDIT?draw_wifi_edit(u):u->screen==SCREEN_APPEARANCE?draw_appearance(ui,u):draw_main(ui,u);
     pn_profile_end(&span,s);
     if(s==PN_OK)s=present(ctx,&u->canvas,profile);
     if(s==PN_OK){ui->presented=true;u->snapshot_dirty=false;u->status=snapshot;}
@@ -427,10 +429,19 @@ pn_status_t pn_settings_ui_open_cached(pn_settings_ui_t *ui,pn_pool_t *pool,pn_m
     pn_shelf_prefs_t shelf=pn_shelf_prefs_default();
     if(state && pn_settings_load_shelf(state,dir,&shelf)!=PN_OK)snprintf(u->message,sizeof u->message,"书架设置不可读，显示默认值");
     reload_lan(u);
-    *ui=(pn_settings_ui_t){.impl=u,.active=true,.flags=flags,.shelf=shelf};
+    bool index_wait=false;u->index_known=!state || pn_settings_load_index(state,dir,&index_wait)==PN_OK;
+    *ui=(pn_settings_ui_t){.impl=u,.active=true,.flags=flags,.shelf=shelf,.index_wait=index_wait};
     (void)show(ui,present,ctx);return PN_OK;
 }
 pn_status_t pn_settings_ui_open(pn_settings_ui_t *ui,pn_pool_t *pool,pn_media_t *state,const char *dir,pn_settings_present_fn present,void *ctx){return pn_settings_ui_open_cached(ui,pool,state,dir,NULL,present,ctx);}
+pn_status_t pn_settings_load_index(pn_media_t *state,const char *dir,bool *wait){
+    if(!state || !dir || !wait)return PN_INVALID;
+    pn_media_lease_t lease;pn_status_t s=pn_media_acquire(state,PN_MEDIA_READ,&lease);if(s!=PN_OK)return s;
+    pn_journal_files_t files;pn_journal_io_t io;bool value=false;s=pn_index_prefs_files(&files,state,&lease,dir,&io);if(s==PN_OK)s=pn_index_prefs_load(&io,&value);(void)pn_media_release(state,&lease);
+    if(s==PN_EMPTY)s=PN_OK;
+    if(s==PN_OK)*wait=value;
+    return s;
+}
 static pn_status_t save(su_t *u,uint8_t flags){
     if(!u->state)return PN_UNSUPPORTED;
     pn_media_lease_t lease;pn_status_t status=pn_media_acquire(u->state,PN_MEDIA_WRITE,&lease);
@@ -468,6 +479,12 @@ pn_status_t pn_settings_ui_event(pn_settings_ui_t *ui,int command,pn_settings_pr
     if(u->testing && command!=PN_SETUI_WIFI_TEST_CANCEL){if(command==PN_SETUI_BACK){ui->request=PN_SETUI_WIFI_TEST_CANCEL;snprintf(u->message,sizeof u->message,"正在取消测试…");pn_status_t shown=show(ui,present,ctx);return shown==PN_OK?PN_BUSY:shown;}return PN_BUSY;}
     // 输入页返回先回到名称步，再回网络页；离开即清零输入。/ Back on the entry page returns to the name step, then the network page, wiping input on leaving.
     if(command==PN_SETUI_BACK && u->screen==SCREEN_WIFI_EDIT){u->test_failed=false;if(u->password_step){volatile char *p=u->password;for(size_t i=0;i<sizeof u->password;i++)p[i]=0;u->password_step=false;pn_keyboard_reset(&u->kb);}else{wipe_edit(u);u->screen=SCREEN_WIFI;}return show(ui,present,ctx);}
+    if(command==PN_SETUI_INDEX_WAIT && u->screen==SCREEN_ABOUT){
+        pn_status_t status=PN_UNSUPPORTED;pn_media_lease_t lease={0};bool next=!ui->index_wait;
+        if(u->state && u->index_known){status=pn_media_acquire(u->state,PN_MEDIA_WRITE,&lease);if(status==PN_OK){pn_journal_files_t files;pn_journal_io_t io;status=pn_index_prefs_files(&files,u->state,&lease,u->dir,&io);if(status==PN_OK)status=pn_index_prefs_save(&io,next);(void)pn_media_release(u->state,&lease);}}
+        if(status==PN_OK){ui->index_wait=next;u->message[0]=0;}else{bool saved;if(u->state && pn_settings_load_index(u->state,u->dir,&saved)==PN_OK)ui->index_wait=saved;snprintf(u->message,sizeof u->message,"设置未保存，请重试");}
+        pn_status_t shown=show(ui,present,ctx);return status==PN_OK?shown:status;
+    }
     if(command==PN_SETUI_BACK){if(u->screen!=SCREEN_MAIN){u->forget_armed=false;u->screen=u->screen==SCREEN_TIME || u->screen==SCREEN_UPDATE?SCREEN_ABOUT:SCREEN_MAIN;return show(ui,present,ctx);}ui->active=false;return PN_OK;}
     if(command==PN_SETUI_WIFI){u->forget_armed=false;u->screen=SCREEN_WIFI;return show(ui,present,ctx);}
     if(u->screen==SCREEN_WIFI || u->screen==SCREEN_WIFI_EDIT){pn_status_t s=wifi_event(ui,u,command,present,ctx);if(s!=PN_EMPTY || u->screen==SCREEN_WIFI_EDIT)return s;}
@@ -535,6 +552,7 @@ int pn_settings_ui_hit(const pn_settings_ui_t *ui,int x,int y){
     }
     if(x<32 || x>=652)return -1;
     if(u->screen==SCREEN_WIFI){if(y>=WIFI_EDIT_Y && y<WIFI_EDIT_Y+88)return PN_SETUI_WIFI_EDIT;if(*u->lan && y>=WIFI_FORGET_Y && y<WIFI_FORGET_Y+88)return PN_SETUI_WIFI_FORGET;return -1;}
+    if(u->screen==SCREEN_ABOUT && y>=710 && y<710+ROW_H)return PN_SETUI_INDEX_WAIT;
     if(u->screen==SCREEN_ABOUT && y>=840 && y<840+ROW_H)return PN_SETUI_TIME;
     if(u->screen==SCREEN_ABOUT && y>=960 && y<960+ROW_H)return PN_SETUI_UPDATE;
     if(u->screen==SCREEN_UPDATE){if(y>=810 && y<898 && (u->update.running || u->update.install || u->update.reboot))return PN_SETUI_UPDATE_CANCEL;if(y>=700 && y<788 && !u->update.running)return u->update.reboot?PN_SETUI_UPDATE_REBOOT:u->update.install?PN_SETUI_UPDATE_INSTALL:u->update.available?PN_SETUI_UPDATE_CHECK:-1;return -1;}

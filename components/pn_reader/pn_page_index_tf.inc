@@ -6,6 +6,7 @@
 #define TF_RESERVE (512u*1024u)
 #define TF_TRUST_BYTES 140u
 #define TF_TRUST_QUOTA (16u*1024u)
+#define TF_TRUST_RESERVE (64u*1024u) ///< 内部小根沿状态卷保留64KiB，TF大表另留512KiB / Small internal roots reserve 64 KiB for state; large TF tables reserve 512 KiB separately
 #ifndef ESP_PLATFORM
 #define tf_stat lstat
 #else
@@ -79,11 +80,12 @@ static pn_status_t tf_load_candidate(void *ctx,const char *path){
     if(s==PN_OK){tf_hash_t hash={i,f,UINT64_MAX};s=pn_identity_stream(&hash,HEADER+(uint64_t)count*RECORD,tf_hash_read,&digest);}
     if(s==PN_OK && memcmp(digest.sha256,i->trust_hash[0].sha256,32) && memcmp(digest.sha256,i->trust_hash[1].sha256,32))s=PN_CORRUPT;
     if(s==PN_OK){
-        touched=true;
+        touched=true;i->build_slot_known=false;
         size_t keep=count<PN_PAGE_INDEX_MAX?count:PN_PAGE_INDEX_MAX;
         if(fseek(f,(long)(HEADER+(uint64_t)(count-keep)*RECORD),SEEK_SET))s=PN_IO;
         for(size_t n=0;s==PN_OK && n<keep;n++)if(fread(h,1,RECORD,f)!=RECORD || !decode(h,&i->entries[n]))s=PN_CORRUPT;
         if(s==PN_OK){i->count=keep;i->disk_count=count;i->disk_valid=true;i->disk_backup=strlen(path)>4 && !strcmp(path+strlen(path)-4,".bak");i->dirty=0;i->selected_hash=digest;
+            build_remember(i);
             if(keep){i->floor_section=i->entries[0].section;i->floor_begin=i->entries[0].begin;i->floor_exclusive=false;i->have_floor=true;}}
     }
     if(fclose(f) && s==PN_OK)s=PN_IO;
@@ -212,7 +214,8 @@ static pn_status_t tf_step(index_t *i){
             else s=PN_UNSUPPORTED;
 #endif
         }else s=tf_available(i,&available);
-        if(s==PN_OK){if(w->total<=quota && incoming<=quota-w->total && available>=incoming+TF_RESERVE)w->phase=w->trust_stage?TF_TRUST_OPEN:TF_OPEN;
+        uint64_t reserve=w->trust_stage?TF_TRUST_RESERVE:TF_RESERVE;
+        if(s==PN_OK){if(w->total<=quota && incoming<=quota-w->total && available>=incoming+reserve)w->phase=w->trust_stage?TF_TRUST_OPEN:TF_OPEN;
             else if(*w->victim && w->evictions<128)w->phase=TF_EVICT;else s=PN_EMPTY;}break;
     }
     case TF_EVICT:if(remove(w->victim))s=PN_IO;else{w->evictions++;w->phase=TF_SCAN_OPEN;}break;
@@ -303,7 +306,7 @@ static pn_status_t tf_step(index_t *i){
     case TF_PUBLISH:
         s=pn_cache_commit_step(&w->commit);
         if(w->commit.moved && !w->commit.committed)i->disk_backup=true;
-        if(w->commit.committed){i->disk_count=w->count;i->disk_valid=true;i->disk_backup=false;i->dirty=0;i->selected_hash=w->digest;w->temporary_owned=false;}
+        if(w->commit.committed){i->disk_count=w->count;i->disk_valid=true;i->disk_backup=false;i->dirty=0;i->selected_hash=w->digest;build_remember(i);w->temporary_owned=false;}
         if(s==PN_OK){tf_abort(i);return PN_OK;}break;
     }
     return s==PN_OK?PN_BUSY:s;

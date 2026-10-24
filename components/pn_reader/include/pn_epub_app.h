@@ -219,3 +219,12 @@ pn_status_t pn_epub_app_book_display(pn_epub_app_t *app,pn_book_display_t *displ
 
 /// 借用当前资源owner，不取得所有权或访问文件。/ Borrow the current resource owner without taking ownership or accessing files.
 pn_status_t pn_epub_app_paper_context(pn_epub_app_t *,pn_pool_t **,pn_media_t **);
+
+/// owner同步接收成功最近记录快照，接收者须活过会话或显式解除；不转移所有权。/ Owner synchronously observes successful recents; receiver must outlive the session or be detached, without ownership transfer.
+void pn_epub_app_recent_observer(pn_epub_app_t *,pn_recent_observer_fn,void *);
+
+/// 同源整书索引步：BUSY接续、OK为已完整提交；EMPTY为当前不能构建，失败不改变阅读位置。/ Shared whole-book index step: BUSY continues, OK means fully committed; EMPTY means unavailable, and failures preserve reading position.
+pn_status_t pn_epub_app_index_step(pn_epub_app_t *,pn_book_index_state_t *);
+
+/// 只读调度资格，不读取文件或推进编译。/ Query scheduling eligibility without file I/O or compilation.
+bool pn_epub_app_index_pending(const pn_epub_app_t *);

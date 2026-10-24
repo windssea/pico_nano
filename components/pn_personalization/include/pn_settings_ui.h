@@ -48,6 +48,7 @@
 #define PN_SETUI_WIFI_TEST 46 ///< 请求控制层用候选凭据测试连接 / Ask the controller to test the candidate credentials
 #define PN_SETUI_WIFI_TEST_CANCEL 47 ///< 取消测试（请求或命令）/ Cancel the test (request or command)
 #define PN_SETUI_WIFI_FORCE 48 ///< 测试失败后仍然保存 / Save anyway after a failed test
+#define PN_SETUI_INDEX_WAIT 49 ///< 首次开书等待整书索引 / Wait for whole-book indexing before the first open
 #define PN_SETUI_CHAR 128 ///< 加可打印ASCII（32–126）输入一个字符 / Plus printable ASCII (32–126) types one character
 typedef struct {
     char message[160]; ///< 端口提供的真实阶段/错误 / Actual phase/error supplied by the port
@@ -70,6 +71,7 @@ typedef struct {
     bool active; ///< 返回后false / False after Back
     bool presented; ///< 最近绘制已呈现 / Latest drawing was presented
     int request; ///< 0或导航/对时请求，调用方处理后清零 / Zero or a navigation/time request; callers clear it after handling
+    bool index_wait; ///< 开启等待完整索引，关闭首屏后后台构建 / Wait for a full index when on, build after the first frame when off
     uint8_t flags; ///< 当前已保存翻页标志 / Saved page-turn flags
     pn_shelf_prefs_t shelf; ///< 当前已保存书架外观 / Saved shelf appearance
     bool network_changed; ///< 本页保存或忘记了WiFi，调用方刷新网络名后清零 / WiFi was saved or forgotten here; callers refresh the network name and clear it
@@ -111,3 +113,6 @@ unsigned pn_settings_refresh_pages(uint8_t flags);
 
 /// 将2024..2099的UTC秒格式化为北京时间，不改变任务字段，错误保持输出。 / Format UTC seconds in 2024..2099 as China time without changing operation fields; errors preserve output.
 pn_status_t pn_settings_time_format(pn_settings_time_t *,uint32_t utc);
+
+/// 无记录默认后台，失败保持输出，不修复未知记录。/ Default to background if absent, preserving output on failure without repairing unknown records.
+pn_status_t pn_settings_load_index(pn_media_t *,const char *,bool *);

@@ -36,6 +36,11 @@ int main(int argc,char **argv){
     uint64_t retained=reading_stats.book.ms;reading_stats_flush();pn_reading_stats_t loaded;assert(pn_reading_stats_init(&loaded,&data_media,argv[2])==PN_OK);
     pn_book_id_t id;assert((publication?pn_epub_app_identity(&epub,&id):pn_reader_app_identity(&reader,&id))==PN_OK && pn_reading_stats_select(&loaded,&id)==PN_OK);
     assert(loaded.book.ms==retained && loaded.book.turns==3);pn_reading_summary_t summary=pn_reading_stats_summary(&loaded,true,UINT64_C(1792339200000));assert(summary.today_ms==retained && summary.today_turns==3 && summary.week_ms[0]==retained);
-    assert(stop_reader());pn_free(page_copy);page_copy=NULL;assert(!pool.used && !pool.live && !pn_media_active(&data_media) && !pn_media_active(&sd_media));
+    // 真正关闭TXT/EPUB后借用保存快照，首页不再读同一日志；换卡仍拒绝缓存。/ Reuse saved TXT/EPUB snapshots after real close without rereading the journal; card changes still invalidate them.
+    recent_snapshot=pn_alloc_tagged(&pool,PN_MEM_UI,sizeof *recent_snapshot);assert(recent_snapshot);recent_loaded=false;
+    assert(stop_reader() && recent_loaded && recent_epoch==sd_media.epoch);
+    bool available=data_media.available;data_media.available=false;assert(load_recent()==PN_OK);
+    sd_media.epoch++;assert(load_recent()!=PN_OK);data_media.available=available;
+    pn_free(recent_snapshot);recent_snapshot=NULL;pn_free(page_copy);page_copy=NULL;assert(!pool.used && !pool.live && !pn_media_active(&data_media) && !pn_media_active(&sd_media));
     printf("device reading stats: %s, first screen no stats I/O, body dwell, exclusions, confirmed turns, failed scan, redraw and reload passed\n",publication?"EPUB":"TXT");return 0;
 }

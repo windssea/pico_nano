@@ -85,7 +85,16 @@ static void reading_exit_refresh_checks(void){
     clears=clear_calls;shown=presents;assert(present(NULL,&frame,PN_REFRESH_EXIT_GC16)==PN_OK && clear_calls==clears+1 && presents==shown+1 && panel_known && hardware.hl.waveform==&E0470_FOLLOW_WAVEFORM);
     pn_free(pixels);hardware.hl.waveform=wave;maintenance=saved;panel_known=known;atomic_store(&full_clean_completed,clean);
 }
+static void home_reading_key_checks(void){
+    pn_reading_summary_t a={.known=true,.dated=true,.weekday=2,.total_ms=40000,.week_ms={50000,0,1000}};
+    uint64_t before=home_reading_key(1,&a);a.total_ms+=1000;a.week_ms[2]+=1000;assert(home_reading_key(1,&a)==before);
+    a.week_ms[2]=11000;assert(home_reading_key(1,&a)!=before);
+    a.week_ms[2]=59000;before=home_reading_key(1,&a);a.week_ms[2]=60000;assert(home_reading_key(1,&a)!=before);
+    before=home_reading_key(1,&a);a.total_ms=60000;assert(home_reading_key(1,&a)!=before);
+    a.dated=false;before=home_reading_key(1,&a);a.week_ms[0]+=70000;assert(home_reading_key(1,&a)==before);
+}
 int main(void){
+    home_reading_key_checks();
     assert(!pn_pool_init(&pool,6u*1024u*1024u,NULL,NULL,NULL));
     assert(read_pico_init(&hardware)==ESP_OK);pn_media_init(&sd_media);pn_media_init(&data_media);pn_media_init(&wallpaper_media);
     int vcom;assert(read_pico_pmu_vcom_get(&vcom)==ESP_OK);epd_set_vcom((uint16_t)vcom);

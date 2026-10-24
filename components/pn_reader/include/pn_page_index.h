@@ -5,6 +5,8 @@
 #include "pn_style.h"
 #include "pn_semantic.h"
 #define PN_PAGE_INDEX_MAX 512
+#define PN_BOOK_INDEX_BATCH_PAGES 256u ///< 连续编译可靠提交批次 / Durable contiguous compilation batch
+#define PN_BOOK_INDEX_STEP_MAX 1024u ///< 8ms软预算内的小步硬顶 / Hard step cap within the 8ms soft budget
 typedef struct {
     uint32_t section; ///< TXT为0，EPUB为spine序号 / Zero for TXT, spine ordinal for EPUB
     uint64_t begin,end; ///< 字节或本版解析器的派生事件顺序，仅缓存 / Byte offsets or derived parser event order, cache only
@@ -43,3 +45,17 @@ void pn_page_index_close(pn_page_index_t *);
 void pn_page_index_abort(pn_page_index_t *);
 /// 只读后端类型，关闭TF时不启动立即要放弃的新任务。/ Query backend type without I/O so TF close never starts work it will immediately abandon.
 bool pn_page_index_is_tf(const pn_page_index_t *);
+
+/// 连续编译的下一页位置，仅派生数据；不等于用户阅读位置。/ Next position in a contiguous build; derived data, never the user's reading position.
+typedef struct {
+    uint32_t section,pages; ///< 下一spine及已完成页数 / Next spine and completed page count
+    uint64_t offset; ///< TXT下一字节 / Next TXT byte
+    pn_xhtml_position_t position; ///< EPUB下一语义位置，element零为章首 / Next EPUB position; zero element denotes chapter start
+    bool paragraph,complete; ///< TXT段首与整书完成 / TXT paragraph start and whole-book completion
+} pn_book_index_state_t;
+/// 读取当前布局连续编译游标，无记录输出零；仅TF后端可用。/ Read this layout's contiguous cursor, zero if absent; available only for TF.
+pn_status_t pn_page_index_build_state(pn_page_index_t *,pn_book_index_state_t *);
+/// 仅旧游标仍匹配时推进，窗口淘汰导致回退则STALE_JOB；不写用户记录。/ Advance only if the previous cursor still matches; STALE_JOB after eviction rewind, never writing user records.
+pn_status_t pn_page_index_build_advance(pn_page_index_t *,const pn_book_index_state_t *,const pn_book_index_state_t *);
+/// 当前游标已随完整表发布，非仅RAM中的完成标志。/ Current cursor has been published with a complete verified table, beyond an in-RAM completion flag.
+bool pn_page_index_build_saved(pn_page_index_t *);

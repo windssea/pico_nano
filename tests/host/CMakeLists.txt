@@ -666,3 +666,18 @@ add_executable(test_overlap test_overlap.c)
 target_link_libraries(test_overlap PRIVATE pn_core)
 target_link_options(test_overlap PRIVATE -Wl,--wrap=FT_Load_Glyph)
 add_test(NAME overlap COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_overlap.py $<TARGET_FILE:test_overlap>)
+
+add_executable(test_book_index test_book_index.c)
+target_link_libraries(test_book_index PRIVATE pn_core)
+add_test(NAME book_index COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_epub_app.py $<TARGET_FILE:test_book_index> ${PN_ROOT}/assets/fonts/read-pico-ui.ttf)
+
+add_executable(test_device_index test_device_index.c ${PN_ROOT}/main/device_async.c ${PN_ROOT}/main/device_power.c ${PN_ROOT}/main/device_frame.c ${PN_ROOT}/main/device_refresh.c ${PN_ROOT}/main/device_usb.c ${PN_ROOT}/main/device_usb_board.c ${PN_ROOT}/main/device_text.c ${PN_ROOT}/main/device_sd.c ${PN_ROOT}/main/device_card_presence.c)
+target_include_directories(test_device_index BEFORE PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/device_stubs ${PN_ROOT}/main)
+target_link_libraries(test_device_index PRIVATE pn_core)
+add_test(NAME device_index_background COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_epub_app.py $<TARGET_FILE:test_device_index> ${PN_ROOT}/assets/fonts/read-pico-ui.ttf)
+add_test(NAME device_index_wait COMMAND ${CMAKE_COMMAND} -E env PN_TEST_WAIT_INDEX=1 ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_epub_app.py $<TARGET_FILE:test_device_index> ${PN_ROOT}/assets/fonts/read-pico-ui.ttf)
+
+add_executable(test_index_cursor test_index_cursor.c)
+target_link_libraries(test_index_cursor PRIVATE pn_core)
+target_link_options(test_index_cursor PRIVATE -Wl,--wrap=fread)
+add_test(NAME index_cursor COMMAND test_index_cursor)

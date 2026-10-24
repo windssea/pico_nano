@@ -18,6 +18,7 @@ size_t __real_fread(void *,size_t,size_t,FILE *);
 size_t __wrap_fread(void *out,size_t size,size_t count,FILE *file){size_t n=__real_fread(out,size,count,file);if(arm_read && size*count==4096 && n){arm_read=false;cancel_after_read=true;}return n;}
 static bool cancelled(void *ctx){(void)ctx;return cancel_after_read;}
 static pn_status_t capacity(void *ctx,const char *path,uint64_t *out){(void)path;*out=*(uint64_t *)ctx;return PN_OK;}
+static pn_status_t internal_capacity(void *ctx,uint64_t *out){*out=*(uint64_t *)ctx;return PN_OK;}
 static void drain(pn_page_index_t *index){unsigned steps=0;pn_status_t s;do{s=pn_page_index_flush(index,true);assert(++steps<100000);}while(s==PN_BUSY);assert(s==PN_OK || s==PN_EMPTY);}
 static pn_page_index_entry_t entry(unsigned page){return (pn_page_index_entry_t){.section=page/600,.begin=(page%600)*100u,.end=(page%600)*100u+100,.first={.element=page+1,.kind=PN_XHTML_ELEMENT},.next={.element=page+2,.kind=PN_XHTML_ELEMENT}};}
 static void clear(const char *path){DIR *d=opendir(path);assert(d);struct dirent *e;while((e=readdir(d))){if(!strcmp(e->d_name,".") || !strcmp(e->d_name,".."))continue;char p[768];snprintf(p,sizeof p,"%s/%s",path,e->d_name);struct stat st;assert(!lstat(p,&st));if(S_ISDIR(st.st_mode))clear(p);else assert(!unlink(p));}closedir(d);assert(!rmdir(path));}
@@ -25,7 +26,8 @@ int main(void){
     char root[]="/tmp/pn-tf-index-XXXXXX";assert(mkdtemp(root));char tf[256];snprintf(tf,sizeof tf,"%s/private/reading",root);
     pn_pool_t pool;assert(pn_pool_init(&pool,128u*1024u,NULL,NULL,NULL)==PN_OK);pn_media_t state,sd;pn_media_init(&state);pn_media_init(&sd);assert(pn_media_attach(&state,1)==PN_OK && pn_media_attach(&sd,2)==PN_OK);
     pn_media_lease_t write,read;assert(pn_media_acquire(&state,PN_MEDIA_WRITE,&write)==PN_OK && pn_media_acquire(&sd,PN_MEDIA_READ,&read)==PN_OK);
-    pn_book_id_t book={{42}},key={{9}};pn_page_index_t index={0};uint64_t free_bytes=64u*1024u*1024u;pn_page_index_tf_space_port(capacity,&free_bytes);
+    // 内部仅余512KiB仍可提交140B可信根，TF大表保留空间独立。/ A 140-byte trusted root fits with 512 KiB internal free; the large TF table has its own reserve.
+    pn_book_id_t book={{42}},key={{9}};pn_page_index_t index={0};uint64_t free_bytes=64u*1024u*1024u,internal_free=512u*1024u;pn_page_index_tf_space_port(capacity,&free_bytes);pn_page_index_space_port(internal_capacity,&internal_free);
     assert(pn_page_index_open(&index,&pool,&state,&write,root,&book,&key)==PN_OK && pn_page_index_use_tf(&index,&sd,&read,tf)==PN_OK && access(tf,F_OK));
     for(unsigned page=0;page<1800;page++){pn_page_index_entry_t e=entry(page);pn_page_index_add(&index,&e);if(page%200==199)drain(&index);}
     pn_page_index_entry_t e;assert(pn_page_index_near(&index,0,0,false,&e) && e.begin==0 && e.first.element==1);assert(pn_page_index_near(&index,1,100,true,&e) && e.begin==0 && e.first.element==601);
@@ -81,7 +83,10 @@ int main(void){
     free_bytes=64u*1024u*1024u;pn_book_id_t other_book={{43}},other_key={{11}};
     assert(pn_page_index_open(&index,&pool,&state,&write,root,&other_book,&other_key)==PN_OK && pn_page_index_use_tf(&index,&sd,&read,tf)==PN_OK);pn_page_index_add(&index,&added);drain(&index);
     uint64_t total=0;d=opendir(state_indexes);assert(d);while((de=readdir(d)))if(strlen(de->d_name)==69 || strlen(de->d_name)==73){char p[768];struct stat st;snprintf(p,sizeof p,"%s/%s",state_indexes,de->d_name);assert(!stat(p,&st));total+=(uint64_t)st.st_size;}closedir(d);assert(total<=16u*1024u);
-    added.begin=100;added.end=101;pn_page_index_add(&index,&added);assert(pn_page_index_flush(&index,true)==PN_BUSY && pn_media_detach(&sd)==PN_OK);pn_page_index_close(&index);assert(!pool.used && !pool.live);
-    assert(pn_media_release(&sd,&read)==PN_OK && pn_media_release(&state,&write)==PN_OK);pn_page_index_tf_space_port(NULL,NULL);clear(root);
+    // 内部仅余64KiB时拒绝新根，重开仍读最后已提交TF表。/ Reject a new root with only 64 KiB internal free; reopening still reads the last committed TF table.
+    internal_free=64u*1024u;added.begin=100;added.end=101;pn_page_index_add(&index,&added);steps=0;do{s=pn_page_index_flush(&index,true);assert(++steps<10000);}while(s==PN_BUSY);assert(s==PN_EMPTY && !pn_page_index_pending(&index));pn_page_index_close(&index);
+    assert(pn_page_index_open(&index,&pool,&state,&write,root,&other_book,&other_key)==PN_OK && pn_page_index_use_tf(&index,&sd,&read,tf)==PN_OK && pn_page_index_near(&index,0,UINT64_MAX,false,&e) && e.begin==0);
+    internal_free=512u*1024u;pn_page_index_add(&index,&added);assert(pn_page_index_flush(&index,true)==PN_BUSY && pn_media_detach(&sd)==PN_OK);pn_page_index_close(&index);assert(!pool.used && !pool.live);
+    assert(pn_media_release(&sd,&read)==PN_OK && pn_media_release(&state,&write)==PN_OK);pn_page_index_tf_space_port(NULL,NULL);pn_page_index_space_port(NULL,NULL);clear(root);
     printf("TF page index: 1800 retained pages, 512-entry RAM window, whole-table trusted SHA/CRC, forged CRC rejection, mid-read hash cancellation and low-space fallback; pool_peak=%zu limit=%zu\n",pool.peak,pool.limit);return 0;
 }

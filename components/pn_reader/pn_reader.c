@@ -190,3 +190,16 @@ pn_status_t pn_reader_complete(pn_reader_t *r,const pn_reader_receipt_t *receipt
     pn_cancel_scope_t shield;pn_cancel_enter(&shield,NULL,NULL);
     pn_status_t status=complete_impl(r,receipt,success,now);pn_cancel_leave(&shield);return status;
 }
+
+pn_status_t pn_reader_index_step(pn_reader_t *r,pn_book_index_state_t *state){
+    if(!r || !r->neighbor_pool || !state)return PN_INVALID;
+    if(state->complete)return PN_OK;
+    if(state->pages && state->offset>=r->decoder.source.size){state->complete=true;return PN_OK;}
+    pn_page_glyph_t *nodes=pn_alloc_optional(r->neighbor_pool,PN_MEM_LAYOUT,r->page.capacity*sizeof *nodes);if(!nodes)return PN_NO_MEMORY;
+    pn_reader_t copy=*r;copy.neighbor_pool=NULL;copy.cache=(pn_cache_owner_t){0};copy.page=(pn_text_page_t){.glyphs=nodes,.capacity=r->page.capacity};copy.preparing=false;copy.save=NULL;copy.ahead.valid=copy.behind.valid=false;copy.history_count=0;
+    copy.has_visible=state->pages!=0;copy.visible=(pn_reader_anchor_t){.end=state->offset,.next_paragraph=state->paragraph};
+    pn_reader_receipt_t receipt;pn_status_t s=pn_reader_prepare_impl(&copy,state->pages?PN_READ_NEXT:PN_READ_FIRST,0,&receipt);
+    if(s==PN_OK){if(receipt.anchor.end<=receipt.anchor.begin)s=PN_CORRUPT;else{state->offset=receipt.anchor.end;state->paragraph=receipt.anchor.next_paragraph;state->pages++;state->complete=state->offset>=r->decoder.source.size;}}
+    else if(s==PN_EMPTY){state->complete=true;s=PN_OK;}
+    pn_free(nodes);return s;
+}

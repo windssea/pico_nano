@@ -62,6 +62,7 @@ static pn_status_t builtin_read(void *,uint64_t,uint8_t *,size_t,size_t *);
  * Glyph cache: layout measuring and drawing each loaded the same outline, and every load costs a cmap binary search plus several small loca/glyf reads, which is slow on SD or network drives.
  * It remembers advances/missing results by (code point, pixel height) and rendered gray bitmaps by (code point, pixel height, subpixel offset). Hits still validate the font source first, so lost media is reported as before. */
 #define ADV_SLOTS 1024u
+#define INDEX_ADV_SLOTS 8192u
 // 菜单多字号使用八路组相联，减少空槽仍多时的互相覆盖；槽数和预算保持。/ Eight-way sets reduce mixed-size menu collisions while retaining the slot count and budget.
 #define ADV_WAYS 8u
 // 真机44px中文字形约1.7KB，384KiB/512槽只容约220字，不足一页，预热下一页会自我驱逐；扩到约两页。
@@ -85,6 +86,7 @@ typedef struct {
     bool resident_ui; ///< 仅常驻界面源启用中文回退，外置字体仍报告真实缺字 / Only the resident UI source uses CJK fallback; external faces report real missing glyphs
     bool allocation_failed;
     adv_t *adv; ///< 按需分配的字宽表 / Advance table, allocated on demand
+    unsigned adv_slots; ///< 实际字宽槽数，普通1024或整书可选8192 / Actual metric slots, normally 1024 or optionally 8192 for indexing
     bmp_t **bmp; ///< 按需分配的位图指针表 / Bitmap pointer table, allocated on demand
     size_t cache_bytes; ///< 含头字形计费快照，查询无需扫描槽 / Charged glyph snapshot including headers, queried without scanning slots
     size_t bmp_bytes;
@@ -148,7 +150,7 @@ static pn_status_t result(engine_t *e,FT_Error error) {
 /// 仅回收本face的可重建字形；回退引擎独立注册。/ Reclaim only this face's rebuildable glyphs; fallback engines register independently.
 static size_t glyph_bytes(void *ctx){return ((engine_t *)ctx)->cache_bytes;}
 static void *glyph_alloc(engine_t *e,size_t bytes){void *p=pn_cache_alloc(e->pool,PN_CACHE_GLYPH,PN_MEM_FONT,bytes);e->cache_bytes+=pn_alloc_size(p);return p;}
-static void glyph_drop(void *ctx){engine_t *e=ctx;if(e->bmp){for(unsigned i=0;i<BMP_SLOTS;i++)pn_free(e->bmp[i]);pn_free(e->bmp);e->bmp=NULL;}pn_free(e->adv);e->adv=NULL;e->bmp_bytes=0;e->cache_bytes=0;}
+static void glyph_drop(void *ctx){engine_t *e=ctx;if(e->bmp){for(unsigned i=0;i<BMP_SLOTS;i++)pn_free(e->bmp[i]);pn_free(e->bmp);e->bmp=NULL;}pn_free(e->adv);e->adv=NULL;e->adv_slots=0;e->bmp_bytes=0;e->cache_bytes=0;}
 /// 四路共用原512槽，避免相撞字形每次交替重新光栅化。 / Four ways share the original 512 slots, avoiding alternating rerasterization of colliding glyphs.
 static uint32_t bitmap_stamp(engine_t *e){if(++e->bmp_clock)return e->bmp_clock;if(e->bmp)for(unsigned i=0;i<BMP_SLOTS;i++)if(e->bmp[i])e->bmp[i]->age=0;return ++e->bmp_clock;}
 void pn_font_trim(pn_font_t *font){
@@ -251,7 +253,7 @@ static pn_status_t load(pn_font_t *font,uint32_t cp,bool render){
     uint64_t begin=pn_profile_time();pn_status_t s=load_impl(font,cp,render);uint64_t end=pn_profile_time();
     engine_t *e=font?font->impl:NULL;
     // 渲染沿用相同hinting与原advance，合成字重/位移不改字宽；复用已有表，不增加缓存。/ Rendering keeps the same hinting and original advance; weight/delta do not change width. Reuse the existing table without adding cache.
-    if(s==PN_OK && render && e->adv){FT_Pos value=e->face->glyph->advance.x;if(value>=0 && value<=INT32_MAX){adv_t *set=e->adv+hash_key(cp,font->pixels,0)%(ADV_SLOTS/ADV_WAYS)*ADV_WAYS;unsigned i=0;for(;i<ADV_WAYS;i++)if(set[i].state && set[i].cp==cp && set[i].pixels==(uint16_t)font->pixels)break;advance_promote(set,i<ADV_WAYS?i:ADV_WAYS-1,(adv_t){cp,(uint16_t)font->pixels,1,(int32_t)value});}}
+    if(s==PN_OK && render && e->adv){FT_Pos value=e->face->glyph->advance.x;if(value>=0 && value<=INT32_MAX){adv_t *set=e->adv+hash_key(cp,font->pixels,0)%(e->adv_slots/ADV_WAYS)*ADV_WAYS;unsigned i=0;for(;i<ADV_WAYS;i++)if(set[i].state && set[i].cp==cp && set[i].pixels==(uint16_t)font->pixels)break;advance_promote(set,i<ADV_WAYS?i:ADV_WAYS-1,(adv_t){cp,(uint16_t)font->pixels,1,(int32_t)value});}}
     pn_profile_observe(e?e->pool:NULL,render?"font.raster-load":"font.measure-load",s,end>=begin?end-begin:0,NULL);return s;
 }
 /// 墨水屏清晰度曲线：去掉覆盖率低于约6%的浅灰晕，部分覆盖的细笔画（楷体、宋体横画）按1-(1-t)²为主加深，满覆盖不变；只作用于新光栅，缓存保存曲线后的值。
@@ -279,8 +281,8 @@ static pn_status_t advance_impl(void *ctx,uint32_t cp,int32_t *advance) {
     pn_font_t *font=ctx;if(!advance)return PN_INVALID;
     if(!font || !font->impl || cp>0x10ffff || (cp>=0xd800 && cp<=0xdfff))return PN_INVALID;
     engine_t *e=font->impl;
-    if(!e->adv && cache_allowed(e,sizeof(adv_t)*ADV_SLOTS)){e->adv=glyph_alloc(e,sizeof(adv_t)*ADV_SLOTS);if(e->adv)memset(e->adv,0,sizeof(adv_t)*ADV_SLOTS);}
-    adv_t *set=e->adv?&e->adv[hash_key(cp,font->pixels,0)%(ADV_SLOTS/ADV_WAYS)*ADV_WAYS]:NULL;
+    if(!e->adv && cache_allowed(e,sizeof(adv_t)*ADV_SLOTS)){e->adv=glyph_alloc(e,sizeof(adv_t)*ADV_SLOTS);if(e->adv){memset(e->adv,0,sizeof(adv_t)*ADV_SLOTS);e->adv_slots=ADV_SLOTS;}}
+    adv_t *set=e->adv?&e->adv[hash_key(cp,font->pixels,0)%(e->adv_slots/ADV_WAYS)*ADV_WAYS]:NULL;
     unsigned hit=0;if(set)for(;hit<ADV_WAYS;hit++)if(set[hit].state && set[hit].cp==cp && set[hit].pixels==(uint16_t)font->pixels)break;
     if(set && hit<ADV_WAYS){
         pn_status_t checked=ready(e);if(checked!=PN_OK)return checked;
@@ -375,6 +377,18 @@ static pn_status_t draw_impl(pn_font_t *font,pn_frame_t *frame,uint32_t cp,int32
         for(unsigned y=0;y<b->rows;y++){size_t row=b->pitch>=0?y:b->rows-1-y;composite(frame,left,top+y,b->width,1,b->buffer+row*(size_t)pitch,(size_t)pitch,mode,font->ink>15?15u:font->ink);}
     }
     return PN_OK;
+}
+bool pn_font_index_metrics(pn_font_t *font){
+    if(!font || !font->impl)return false;
+    engine_t *e=font->impl;if(e->adv && e->adv_slots>=INDEX_ADV_SLOTS)return true;
+    if(!cache_allowed(e,sizeof(adv_t)*INDEX_ADV_SLOTS))return false;
+    pn_cache_pin(&e->cache);adv_t *next=glyph_alloc(e,sizeof(adv_t)*INDEX_ADV_SLOTS);
+    if(next){
+        memset(next,0,sizeof(adv_t)*INDEX_ADV_SLOTS);
+        for(unsigned i=0;e->adv && i<e->adv_slots;i++){adv_t value=e->adv[i];if(value.state){adv_t *set=next+hash_key(value.cp,value.pixels,0)%(INDEX_ADV_SLOTS/ADV_WAYS)*ADV_WAYS;advance_promote(set,ADV_WAYS-1,value);}}
+        size_t old=pn_alloc_size(e->adv);pn_free(e->adv);e->cache_bytes-=old;e->adv=next;e->adv_slots=INDEX_ADV_SLOTS;
+    }
+    pn_cache_unpin(&e->cache);return next!=NULL;
 }
 pn_status_t pn_font_advance(void *ctx,uint32_t cp,int32_t *advance){
     pn_font_t *font=ctx;engine_t *e=font?font->impl:NULL;if(e)pn_cache_pin(&e->cache);

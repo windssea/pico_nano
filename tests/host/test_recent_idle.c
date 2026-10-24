@@ -11,6 +11,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 typedef struct {bool epub,fail;pn_reader_app_t txt;pn_epub_app_t ep;} app_t;
+static unsigned notifications;
+static void recent_observer(void *ctx,const pn_recent_snapshot_t *snapshot){assert(ctx==&notifications && snapshot->count && snapshot->items[0].format>=1);notifications++;}
 static pn_status_t paint(void *ctx,const pn_frame_t *frame,pn_refresh_t profile){(void)profile;assert(frame && frame->pixels);return ((app_t *)ctx)->fail?PN_IO:PN_OK;}
 static pn_status_t open_app(app_t *a,pn_pool_t *pool,const char *book,const char *state,const char *font){return a->epub?pn_epub_app_open(&a->ep,pool,book,font,state,44,0):pn_reader_app_open(&a->txt,pool,book,font,state,44,0);}
 static pn_status_t step(app_t *a,pn_reader_action_t action,uint64_t now){return a->epub?pn_epub_app_step(&a->ep,action,now,paint,a):pn_reader_app_step(&a->txt,action,now,paint,a);}
@@ -21,17 +23,18 @@ static bool exists(const char *path){struct stat s;return !stat(path,&s) && S_IS
 static bool cancelled(void *ctx){(void)ctx;return true;}
 static void run(bool epub,const char *book,const char *state,const char *font,bool force_exit){
  pn_pool_t pool;assert(!pn_pool_init(&pool,4u*1024u*1024u,NULL,NULL,NULL));app_t a={.epub=epub,.fail=true};assert(open_app(&a,&pool,book,state,font)==PN_OK);
+ notifications=0;if(epub)pn_epub_app_recent_observer(&a.ep,recent_observer,&notifications);else pn_reader_app_recent_observer(&a.txt,recent_observer,&notifications);
  char first[1024],second[1024];snprintf(first,sizeof first,"%s/recent.a",state);snprintf(second,sizeof second,"%s/recent.b",state);
  assert(step(&a,PN_APP_OPEN,1)==PN_IO && !exists(first) && !exists(second));assert(idle(&a,5000)==PN_EMPTY);
  a.fail=false;assert(step(&a,PN_APP_OPEN,2)==PN_OK && !exists(first) && !exists(second));assert(step(&a,PN_APP_NEXT,10)==PN_OK && !exists(first) && !exists(second));
  if(force_exit){
-  assert(!mkdir(first,0700));assert(close_app(&a,11)==PN_IO && live(&a));assert(!rmdir(first));assert(close_app(&a,12)==PN_OK && !live(&a) && exists(first));
+  assert(!mkdir(first,0700));assert(close_app(&a,11)==PN_IO && live(&a) && notifications==0);assert(!rmdir(first));assert(close_app(&a,12)==PN_OK && !live(&a) && exists(first));
  }else{
   assert(idle(&a,1509)==PN_EMPTY && !exists(first) && !exists(second));assert(!mkdir(first,0700));assert(idle(&a,1510)==PN_IO);
-  assert(idle(&a,1600)==PN_EMPTY);assert(!rmdir(first));pn_cancel_scope_t cancel;pn_cancel_enter(&cancel,cancelled,NULL);assert(idle(&a,2510)==PN_CANCELLED);pn_cancel_leave(&cancel);
+  assert(idle(&a,1600)==PN_EMPTY);assert(!rmdir(first));pn_cancel_scope_t cancel;pn_cancel_enter(&cancel,cancelled,NULL);assert(idle(&a,2510)==PN_CANCELLED && notifications==0);pn_cancel_leave(&cancel);
   assert(idle(&a,2510)==PN_OK && exists(first));assert(idle(&a,2511)==PN_EMPTY);assert(close_app(&a,2512)==PN_OK && !live(&a));
  }
- assert(!pool.used && !pool.live);
+ assert(notifications>0);assert(!pool.used && !pool.live);
 }
 int main(int argc,char **argv){
  assert(argc==4);assert(!mkdir(argv[2],0700));char book[1024],state[1024];snprintf(book,sizeof book,"%s/read.txt",argv[2]);FILE *f=fopen(book,"wb");assert(f);for(unsigned i=0;i<1000;i++)assert(fputs("A reader keeps every confirmed turn.\n",f)>=0);assert(!fclose(f));

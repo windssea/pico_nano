@@ -6,6 +6,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+static unsigned observed;
+static pn_recent_snapshot_t published;
+static void observe(void *ctx,const pn_recent_snapshot_t *snapshot){assert(ctx==&published);published=*snapshot;observed++;}
+static pn_status_t fail_read(void *ctx,unsigned slot,uint8_t *bytes,size_t cap,size_t *size){(void)ctx;(void)slot;(void)bytes;(void)cap;(void)size;return PN_IO;}
+static pn_status_t fail_write(void *ctx,unsigned slot,const uint8_t *bytes,size_t size){(void)ctx;(void)slot;(void)bytes;(void)size;return PN_IO;}
 int main(void){
     char root[]="/tmp/pn-recent-XXXXXX";assert(mkdtemp(root));char a[384],b[384];snprintf(a,sizeof a,"%s/a",root);snprintf(b,sizeof b,"%s/b",root);
     pn_media_t media;pn_media_init(&media);assert(pn_media_attach(&media,1)==PN_OK);pn_media_lease_t lease;assert(pn_media_acquire(&media,PN_MEDIA_WRITE,&lease)==PN_OK);
@@ -17,8 +22,16 @@ int main(void){
     pn_recent_item_t alias=s->items[19];memset(alias.path,'a',1023);alias.path[0]='/';alias.path[1023]=0;
     assert(pn_recent_touch(&io,&pool,&alias)==PN_OK);assert(pn_recent_load(&io,&pool,s)==PN_OK && s->items[0].book.sha256[0]==5 && strlen(s->items[0].path)==1023);
     pn_journal_files_t reopened;pn_journal_io_t read;assert(pn_journal_files_init(&reopened,&media,&lease,a,b,&read)==PN_OK);assert(pn_recent_load(&read,&pool,s)==PN_OK && s->count==20 && s->items[0].progress==500);
+    // 成功后发布，写失败不通知。/ Publish after success, never after a failed write.
+    assert(pn_recent_touch_notify(&io,&pool,&alias,observe,&published)==PN_OK && observed==1);
+    assert(!memcmp(&published,s,sizeof published));
+    alias.progress++;pn_journal_io_t failed=io;failed.write_sync=fail_write;
+    assert(pn_recent_touch_notify(&failed,&pool,&alias,observe,&published)==PN_IO && observed==1);
+    assert(pn_recent_touch_notify(&io,&pool,&alias,observe,&published)==PN_OK && observed==2 && published.items[0].progress==alias.progress);
+    assert(pn_recent_load(&io,&pool,s)==PN_OK && !memcmp(s,&published,sizeof published));
+    failed=io;failed.read=fail_read;assert(pn_recent_touch_notify(&failed,&pool,&alias,observe,&published)!=PN_OK && observed==2);
     alias.path[0]=(char)0xc0;assert(pn_recent_touch(&io,&pool,&alias)==PN_INVALID);
-    assert(pn_media_detach(&media)==PN_OK);assert(pn_recent_load(&read,&pool,s)==PN_STALE_MEDIA && s->count==20);
+    assert(pn_media_detach(&media)==PN_OK);assert(pn_recent_load(&read,&pool,s)==PN_STALE_MEDIA && s->count==20);alias.path[0]='/';assert(pn_recent_touch_notify(&read,&pool,&alias,observe,&published)==PN_STALE_MEDIA && observed==2);
     assert(pn_media_release(&media,&lease)==PN_OK);assert(unlink(a)==0 && unlink(b)==0 && rmdir(root)==0);free(s);assert(pool.live==0 && pool.used==0);
     puts("recent: 20 retained, SHA deduplication, 1023-byte paths, reopen and expired media passed");return 0;
 }

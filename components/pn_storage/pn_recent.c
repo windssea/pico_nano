@@ -54,14 +54,14 @@ pn_status_t pn_recent_load(const pn_journal_io_t *io,pn_pool_t *pool,pn_recent_s
 done:
     pn_free(bytes);pn_free(next);return status;
 }
-pn_status_t pn_recent_touch(const pn_journal_io_t *io,pn_pool_t *pool,const pn_recent_item_t *item){
+pn_status_t pn_recent_touch_notify(const pn_journal_io_t *io,pn_pool_t *pool,const pn_recent_item_t *item,pn_recent_observer_fn observer,void *ctx){
     if(!pool)return PN_INVALID;
     size_t length;pn_status_t status=valid(item,&length);if(status!=PN_OK)return status;
     pn_recent_snapshot_t *s=pn_alloc(pool,sizeof *s);if(!s)return PN_NO_MEMORY;
     status=pn_recent_load(io,pool,s);if(status==PN_EMPTY){memset(s,0,sizeof *s);status=PN_OK;}
     if(status!=PN_OK){pn_free(s);return status;}
     size_t found=0;while(found<s->count && memcmp(s->items[found].book.sha256,item->book.sha256,32))found++;
-    if(found==0 && s->count && s->items[0].source_size==item->source_size && s->items[0].format==item->format && s->items[0].progress==item->progress && !strcmp(s->items[0].path,item->path)){pn_free(s);return PN_OK;}
+    if(found==0 && s->count && s->items[0].source_size==item->source_size && s->items[0].format==item->format && s->items[0].progress==item->progress && !strcmp(s->items[0].path,item->path)){if(observer)observer(ctx,s);pn_free(s);return PN_OK;}
     size_t end=found<s->count?found:s->count<PN_RECENT_MAX?s->count:PN_RECENT_MAX-1;
     for(size_t i=end;i>0;i--)s->items[i]=s->items[i-1];
     if(found==s->count && s->count<PN_RECENT_MAX)s->count++;
@@ -71,7 +71,10 @@ pn_status_t pn_recent_touch(const pn_journal_io_t *io,pn_pool_t *pool,const pn_r
     for(size_t i=0;i<s->count;i++){uint8_t *p=bytes+8+i*ENTRY_SIZE;const pn_recent_item_t *e=&s->items[i];
         memcpy(p,e->book.sha256,32);put(p+32,e->source_size,8);put(p+40,e->format,2);put(p+42,e->progress,2);size_t n=strlen(e->path);put(p+44,n,2);memcpy(p+48,e->path,n);
     }
-    status=pn_blob_save(io,pool,bytes,size);pn_free(bytes);pn_free(s);return status;
+    status=pn_blob_save(io,pool,bytes,size);if(status==PN_OK && observer)observer(ctx,s);pn_free(bytes);pn_free(s);return status;
+}
+pn_status_t pn_recent_touch(const pn_journal_io_t *io,pn_pool_t *pool,const pn_recent_item_t *item){
+    return pn_recent_touch_notify(io,pool,item,NULL,NULL);
 }
 pn_status_t pn_recent_files(pn_journal_files_t *files,pn_media_t *media,const pn_media_lease_t *lease,const char *root,pn_journal_io_t *io){
     if(!root || !*root)return PN_INVALID;

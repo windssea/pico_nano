@@ -215,3 +215,12 @@ pn_status_t pn_reader_app_paper_context(pn_reader_app_t *,pn_pool_t **,pn_media_
 
 /// 新输入归还可选TF写任务，不提交缓存或改变阅读位置。/ New input returns optional TF writer resources without committing caches or changing reading position.
 void pn_reader_app_cache_activity(pn_reader_app_t *,uint64_t now);
+
+/// owner同步接收成功最近记录快照，接收者须活过会话或显式解除；不转移所有权。/ Owner synchronously observes successful recents; receiver must outlive the session or be detached, without ownership transfer.
+void pn_reader_app_recent_observer(pn_reader_app_t *,pn_recent_observer_fn,void *);
+
+/// 同源整书索引步：BUSY接续、OK为已完整提交；EMPTY为当前不能构建，失败不改变阅读位置。/ Shared whole-book index step: BUSY continues, OK means fully committed; EMPTY means unavailable, and failures preserve reading position.
+pn_status_t pn_reader_app_index_step(pn_reader_app_t *,pn_book_index_state_t *);
+
+/// 只读调度资格，不读取文件或推进编译。/ Query scheduling eligibility without file I/O or compilation.
+bool pn_reader_app_index_pending(const pn_reader_app_t *);

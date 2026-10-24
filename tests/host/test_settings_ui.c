@@ -52,6 +52,16 @@ int main(int argc,char **argv){
     /* 设置页。/ Settings page. */
     pn_pool_t pool;assert(!pn_pool_init(&pool,2u*1024u*1024u,NULL,NULL,NULL));pn_settings_ui_t ui={0};
     assert(pn_settings_ui_open(&ui,&pool,&media,root,present,NULL)==PN_OK && ui.active && ui.presented && ui.flags==0);
+    assert(!ui.index_wait && pn_settings_ui_event(&ui,PN_SETUI_ABOUT,present,NULL)==PN_OK);
+    assert(pn_settings_ui_hit(&ui,400,750)==PN_SETUI_INDEX_WAIT);
+    assert(pn_settings_ui_event(&ui,PN_SETUI_INDEX_WAIT,present,NULL)==PN_OK && ui.index_wait);
+    bool wait=false;assert(pn_settings_load_index(&media,root,&wait)==PN_OK && wait);
+    assert(pn_settings_ui_event(&ui,PN_SETUI_INDEX_WAIT,present,NULL)==PN_OK && !ui.index_wait);
+    assert(pn_media_acquire(&media,PN_MEDIA_READ,&lease)==PN_OK);
+    assert(pn_settings_ui_event(&ui,PN_SETUI_INDEX_WAIT,present,NULL)==PN_BUSY && !ui.index_wait);
+    assert(pn_media_release(&media,&lease)==PN_OK);
+    assert(pn_settings_ui_event(&ui,PN_SETUI_BACK,present,NULL)==PN_OK);
+
     /* 一级页：字体、壁纸、按键与手势、刷新与屏幕、存储与关于；底栏书架/传书交给调用方，标题区无返回。/ Root page: fonts, wallpaper, keys, refresh, about; the bottom-bar shelf/transfer go to the caller and the title has no back. */
     assert(pn_settings_ui_hit(&ui,100,220)==PN_SETUI_FONTS && pn_settings_ui_hit(&ui,100,380)==PN_SETUI_WALLPAPER && pn_settings_ui_hit(&ui,100,450)==PN_SETUI_APPEARANCE && pn_settings_ui_hit(&ui,100,600)==PN_SETUI_KEYS && pn_settings_ui_hit(&ui,100,700)==PN_SETUI_REFRESH && pn_settings_ui_hit(&ui,100,850)==PN_SETUI_WIFI && pn_settings_ui_hit(&ui,100,950)==PN_SETUI_ABOUT && pn_settings_ui_hit(&ui,100,1050)==-1 && pn_settings_ui_hit(&ui,100,60)==-1);
     assert(pn_settings_ui_hit(&ui,100,1150)==PN_SETUI_HOME && pn_settings_ui_hit(&ui,260,1150)==PN_SETUI_SHELF && pn_settings_ui_hit(&ui,430,1150)==PN_SETUI_TRANSFER && pn_settings_ui_hit(&ui,600,1150)==-1);

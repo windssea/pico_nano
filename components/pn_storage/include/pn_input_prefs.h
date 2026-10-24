@@ -21,3 +21,9 @@ pn_status_t pn_input_prefs_files(pn_journal_files_t *files,pn_media_t *media,con
 pn_status_t pn_input_prefs_load(const pn_journal_io_t *io,uint8_t *flags);
 /// 保存标志，失败可能已提交。/ Save flags; failures may still have committed.
 pn_status_t pn_input_prefs_save(const pn_journal_io_t *io,uint8_t flags);
+
+/// 独立整书索引偏好A/B，不占用翻页标志；无记录默认后台。/ Separate whole-book indexing preference, without consuming turn flags; absent records default to background.
+pn_status_t pn_index_prefs_files(pn_journal_files_t *,pn_media_t *,const pn_media_lease_t *,const char *,pn_journal_io_t *);
+pn_status_t pn_index_prefs_load(const pn_journal_io_t *,bool *);
+/// 同步保存，未知或损坏旧记录拒绝覆盖。/ Save synchronously, refusing to overwrite unsupported or corrupt existing records.
+pn_status_t pn_index_prefs_save(const pn_journal_io_t *,bool);

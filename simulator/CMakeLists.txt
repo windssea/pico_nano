@@ -131,3 +131,8 @@ if(PN_SIM_SDL)
     add_test(NAME tf_index_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_tf_index_window.py $<TARGET_FILE:pn_sim>)
     set_tests_properties(tf_index_window PROPERTIES LABELS "reader;storage" TIMEOUT 300)
 endif()
+
+if(PN_SIM_SDL)
+    add_test(NAME book_index_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_book_index_window.py $<TARGET_FILE:pn_sim>)
+    set_tests_properties(book_index_window PROPERTIES LABELS "reader;storage;ui" TIMEOUT 300)
+endif()

@@ -25,6 +25,8 @@ struct page_index {
     pn_pool_t *pool;pn_media_t *media;pn_media_lease_t lease;pn_book_id_t book,key;
     char directory[PN_JOURNAL_PATH_MAX],path[PN_JOURNAL_PATH_MAX];
     size_t count,dirty;pn_page_index_entry_t entries[PN_PAGE_INDEX_MAX];
+    size_t build_slot;bool build_slot_known; ///< 游标槽位缓存，避免每个排版小步骤扫描PSRAM窗口 / Cached cursor slot avoids scanning the PSRAM window on every layout step
+    pn_page_index_entry_t build_saved;bool build_saved_valid; ///< 最后已提交编译游标，窗口压力时保守回退 / Last committed build cursor for conservative pressure recovery
     bool blocked,backup_loaded; ///< 可选写失败本会话退避，以及完整验证的备份来源 / Session backoff after optional write failure and fully validated backup provenance
     bool tf,disk_valid,disk_backup,trust_known,trust_backup; ///< 后端、整表验证和可信根来源 / Backend, whole-table validation and trusted-root provenance
     uint32_t disk_count;uint64_t blocked_writes;void *writer;index_t *tf_next; ///< 磁盘页数、有界写任务与活动pin链 / Disk pages, bounded writer and active pin chain
@@ -42,6 +44,19 @@ static bool decode(const uint8_t *p,pn_page_index_entry_t *e){
     if(get(p+76,4)!=crc(p,76))return false;
     *e=(pn_page_index_entry_t){.section=(uint32_t)get(p,4),.flags=(unsigned)get(p+4,4),.begin=get(p+8,8),.end=get(p+16,8),.first=position_get(p+24),.next=position_get(p+48)};
     return e->begin<e->end && e->flags<=3 && (e->first.kind==PN_XHTML_ELEMENT || e->first.kind==PN_XHTML_TEXT_POSITION) && (e->next.kind==PN_XHTML_ELEMENT || e->next.kind==PN_XHTML_TEXT_POSITION);
+}
+#define BUILD_SECTION UINT32_MAX
+static pn_page_index_entry_t *build_entry(index_t *i){
+    if(!i->build_slot_known){i->build_slot=SIZE_MAX;for(size_t n=0;n<i->count;n++)if(i->entries[n].section==BUILD_SECTION && !i->entries[n].begin){i->build_slot=n;break;}i->build_slot_known=true;}
+    return i->build_slot<i->count?&i->entries[i->build_slot]:NULL;
+}
+/// 合并会保留磁盘游标；RAM窗口没有该条不能清掉最后持久前缀。/ Merging retains the disk cursor; its absence from the RAM window must not erase the durable prefix.
+static void build_remember(index_t *i){pn_page_index_entry_t *e=build_entry(i);if(e){i->build_saved_valid=true;i->build_saved=*e;}}
+/// 未提交窗口可能被淘汰时撤回编译声明，不能把已丢页边界的前缀宣称完成。/ Rewind build claims when an uncommitted window may be evicted; dropped boundaries cannot count as a completed prefix.
+static void build_rewind(index_t *i){
+    pn_page_index_entry_t *e=build_entry(i);if(!e)return;
+    if(i->build_saved_valid)*e=i->build_saved;
+    else{size_t at=(size_t)(e-i->entries);memmove(e,e+1,(i->count-at-1)*sizeof *e);i->count--;i->build_slot=SIZE_MAX;i->build_slot_known=true;}
 }
 static pn_status_t checked(index_t *i){pn_status_t s=pn_cancel_checkpoint();return s==PN_OK?pn_media_validate(i->media,&i->lease):s;}
 static pn_status_t pn_page_index_key_impl(const pn_book_id_t *book,const pn_style_t *style,const pn_text_source_t *primary,const pn_font_chain_t *chain,unsigned format,const pn_book_id_t *known_primary,pn_book_id_t *out){
@@ -63,6 +78,7 @@ pn_status_t pn_page_index_key_known(const pn_book_id_t *book,const pn_style_t *s
     pn_status_t status=pn_page_index_key_impl(book,style,primary,chain,format,known_primary,out);pn_profile_end(&span,status);return status;
 }
 static pn_status_t index_read(index_t *i,const char *path,bool publish){
+    if(publish)i->build_slot_known=false;
     FILE *f=fopen(path,"rb");if(!f)return PN_EMPTY;uint8_t data[HEADER];pn_status_t s=PN_OK;size_t count=0;
     bool valid=fread(data,1,HEADER,f)==HEADER && !memcmp(data,"PNPI",4) && get(data+4,4)==1 && !memcmp(data+8,i->book.sha256,32) && !memcmp(data+40,i->key.sha256,32) && get(data+76,4)==crc(data,76) && get(data+72,4)<=PN_PAGE_INDEX_MAX;
     if(valid)count=(size_t)get(data+72,4);
@@ -103,7 +119,9 @@ void pn_page_index_add(pn_page_index_t *h,const pn_page_index_entry_t *e){
     index_t *i=h->impl;
     for(size_t j=0;j<i->count;j++)if(i->entries[j].section==e->section && i->entries[j].begin==e->begin){uint8_t old[RECORD],next[RECORD];encode(old,&i->entries[j]);encode(next,e);if(memcmp(old,next,RECORD)){if(i->tf)tf_abort(i);i->entries[j]=*e;i->dirty++;}return;}
     if(i->tf)tf_abort(i);
-    if(i->count==PN_PAGE_INDEX_MAX){if(i->tf)tf_window_drop(i,&i->entries[0]);memmove(i->entries,i->entries+1,(PN_PAGE_INDEX_MAX-1)*sizeof *e);i->count--;}
+    if(i->tf && i->count==PN_PAGE_INDEX_MAX && i->dirty>=PN_PAGE_INDEX_MAX)build_rewind(i);
+    if(i->count==PN_PAGE_INDEX_MAX){if(i->tf)tf_window_drop(i,&i->entries[0]);memmove(i->entries,i->entries+1,(PN_PAGE_INDEX_MAX-1)*sizeof *e);i->count--;if(i->build_slot_known && i->build_slot!=SIZE_MAX)i->build_slot=i->build_slot?i->build_slot-1:SIZE_MAX;}
+    if(e->section==BUILD_SECTION && !e->begin){i->build_slot=i->count;i->build_slot_known=true;}
     i->entries[i->count++]=*e;i->dirty++;
 }
 // 仅清理固定扩展名缓存，预留64KiB给独立状态。/ Evict only owned cache extensions, reserving 64 KiB for independent state.
@@ -156,3 +174,25 @@ bool pn_page_index_pending(const pn_page_index_t *h){return h && h->impl && !((c
 void pn_page_index_close(pn_page_index_t *h){if(h){if(h->impl && ((index_t *)h->impl)->tf){tf_abort(h->impl);tf_unlink(h->impl);}pn_free(h->impl);h->impl=NULL;}}
 void pn_page_index_abort(pn_page_index_t *h){if(h && h->impl && ((index_t *)h->impl)->tf)tf_abort(h->impl);}
 bool pn_page_index_is_tf(const pn_page_index_t *h){return h && h->impl && ((const index_t *)h->impl)->tf;}
+
+static void build_decode(const pn_page_index_entry_t *e,pn_book_index_state_t *out){
+    *out=(pn_book_index_state_t){0};if(!e || !e->first.element)return;
+    out->section=(uint32_t)(e->first.element-1);out->pages=e->first.run;out->offset=e->first.offset;out->position=e->next;out->complete=(e->flags&1u)!=0;out->paragraph=(e->flags&2u)!=0;
+}
+static bool build_same(const pn_book_index_state_t *a,const pn_book_index_state_t *b){return a->section==b->section && a->pages==b->pages && a->offset==b->offset && a->paragraph==b->paragraph && a->complete==b->complete && a->position.element==b->position.element && a->position.run==b->position.run && a->position.offset==b->position.offset && a->position.kind==b->position.kind;}
+pn_status_t pn_page_index_build_state(pn_page_index_t *h,pn_book_index_state_t *out){
+    if(!h || !h->impl || !out)return PN_INVALID;
+    index_t *i=h->impl;if(!i->tf)return PN_EMPTY;pn_status_t s=checked(i);if(s!=PN_OK)return s;
+    pn_page_index_entry_t *e=build_entry(i);build_decode(e?e:i->build_saved_valid?&i->build_saved:NULL,out);return PN_OK;
+}
+pn_status_t pn_page_index_build_advance(pn_page_index_t *h,const pn_book_index_state_t *before,const pn_book_index_state_t *next){
+    if(!before || !next || next->pages>65535 || next->section>65535)return PN_LIMIT;
+    pn_book_index_state_t current;pn_status_t s=pn_page_index_build_state(h,&current);if(s!=PN_OK)return s;if(!build_same(before,&current))return PN_STALE_JOB;
+    pn_page_index_entry_t e={.section=BUILD_SECTION,.begin=0,.end=1,.first={.element=(uint64_t)next->section+1,.offset=next->offset,.run=next->pages,.kind=PN_XHTML_ELEMENT},.next=next->position,.flags=(next->complete?1u:0u)|(next->paragraph?2u:0u)};
+    pn_page_index_add(h,&e);return PN_OK;
+}
+bool pn_page_index_build_saved(pn_page_index_t *h){
+    if(!h || !h->impl)return false;
+    index_t *i=h->impl;if(!i->build_saved_valid)return false;
+    pn_page_index_entry_t *e=build_entry(i);pn_book_index_state_t now,saved;build_decode(e?e:&i->build_saved,&now);build_decode(&i->build_saved,&saved);return build_same(&now,&saved);
+}

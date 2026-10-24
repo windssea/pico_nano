@@ -95,6 +95,8 @@ pn_status_t pn_font_validate(pn_font_t *);
 
 /// 完整系统源是否仍有效；仅查询，不重新打开。/ Whether the complete system source remains valid; query without reopening.
 bool pn_font_system_available(void);
+/// 整书编译可选预留8192项字宽表，受原字形预算约束；失败保留旧缓存，不进行IO或改变度量。/ Optionally reserve 8192 metric slots for whole-book compilation within the existing glyph budget; failure preserves the old cache, with no I/O or changed metrics.
+bool pn_font_index_metrics(pn_font_t *);
 /// 仅报告需先关闭消费者的保留外置源；不校验取消/介质，不是可读取证明。
 /// Report only a retained external source whose consumers must close first; this does not validate cancellation/media or prove readability.
 bool pn_font_system_retained(void);

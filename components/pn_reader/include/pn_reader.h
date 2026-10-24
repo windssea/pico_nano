@@ -95,3 +95,6 @@ typedef pn_status_t (*pn_reader_warm_fn)(void *,const pn_page_glyph_t *); ///< �
 pn_status_t pn_reader_warm_next(pn_reader_t *,pn_reader_warm_fn,void *,size_t budget);
 /// 已排好的下一页还有未预热字形。/ The prepared next page still has unwarmed glyphs.
 bool pn_reader_warm_pending(const pn_reader_t *);
+
+/// 推进一步整书排版，不绘制/确认或修改用户位置；游标由外层可信页表持久化。/ Advance whole-book layout without drawing, confirming or changing reading position; outer trusted tables persist the cursor.
+pn_status_t pn_reader_index_step(pn_reader_t *,pn_book_index_state_t *);

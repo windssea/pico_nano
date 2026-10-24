@@ -69,6 +69,11 @@ int main(void){
     assert(!memcmp(before+1104*342,bytes+1104*342,(1216-1104)*342));
     memcpy(before,bytes,684*1216/2);home.reading.today_ms=0;
     assert(pn_shelf_render_ex(p,&font,&frame,-1,true,false,covers,&home)==PN_OK && !memcmp(before,bytes,684*1216/2));
+    // 分钟内变化不改像素；周余数进位和每日分钟变化必须可见。/ Sub-minute changes preserve pixels; weekly carry and daily-minute boundaries remain visible.
+    memcpy(before,bytes,684*1216/2);home.reading.total_ms+=1000;home.reading.week_ms[1]+=1000;
+    assert(pn_shelf_render_ex(p,&font,&frame,-1,true,false,covers,&home)==PN_OK && !memcmp(before,bytes,684*1216/2));
+    home.reading.week_ms[1]+=20000;
+    assert(pn_shelf_render_ex(p,&font,&frame,-1,true,false,covers,&home)==PN_OK && memcmp(before,bytes,684*1216/2));
     home.reading=(pn_reading_summary_t){0};home.home_date[0]=0;
     p->count=0;pn_shelf_covers_set_last(covers,NULL);
     assert(pn_shelf_render_ex(p,&font,&frame,-1,true,false,covers,&home)==PN_OK);

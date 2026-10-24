@@ -29,6 +29,10 @@ pn_status_t pn_recent_load(const pn_journal_io_t *io,pn_pool_t *pool,pn_recent_s
 /// 内容SHA去重，新实例路径替换旧路径；新条目排首，超过20移除最旧条目。
 /// Deduplicate by content SHA, replace old instance paths, prepend and evict oldest beyond 20.
 pn_status_t pn_recent_touch(const pn_journal_io_t *io,pn_pool_t *pool,const pn_recent_item_t *item);
+/// 完整成功后的临时只读快照；回调返回后指针失效，不重入记录写入。/ Borrowed verified snapshot after full success; expires on return, without reentering record writes.
+typedef void (*pn_recent_observer_fn)(void *ctx,const pn_recent_snapshot_t *snapshot);
+/// 成功保存或确认未变化后同步通知，失败不通知；复用原暂存，不常驻副本。/ Notify after durable save or verified no-change; never on failure, reusing existing scratch without a resident copy.
+pn_status_t pn_recent_touch_notify(const pn_journal_io_t *io,pn_pool_t *pool,const pn_recent_item_t *item,pn_recent_observer_fn observer,void *ctx);
 /// 绑定既有root的recent.a/b；不创建目录或挂载。
 /// Bind recent.a/b under an existing root without creating directories or mounting.
 pn_status_t pn_recent_files(pn_journal_files_t *files,pn_media_t *media,const pn_media_lease_t *lease,const char *root,pn_journal_io_t *io);

@@ -67,3 +67,8 @@ bool pn_epub_reader_warm_pending(const pn_epub_reader_t *);
 void pn_epub_reader_trim(pn_epub_reader_t *reader);
 /// 绑定同布局的可删除窗口；reflow自动解除，不拥有对象。/ Bind a disposable window for this layout; reflow unbinds it, without taking ownership.
 void pn_epub_reader_index(pn_epub_reader_t *,pn_page_index_t *);
+
+/// 推进一步整书排版，不绘制/确认或修改用户位置；游标由外层可信页表持久化。/ Advance whole-book layout without drawing, confirming or changing reading position; outer trusted tables persist the cursor.
+pn_status_t pn_epub_reader_index_step(pn_epub_reader_t *,pn_book_index_state_t *);
+/// 归还整书编译候选，保留已提交游标和正文。/ Release the compiler candidate, retaining committed cursors and body.
+void pn_epub_reader_index_abort(pn_epub_reader_t *);

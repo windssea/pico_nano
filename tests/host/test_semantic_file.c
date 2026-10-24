@@ -13,6 +13,8 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <time.h>
 static pn_status_t space(void *ctx,const char *path,uint64_t *n){(void)path;*n=*(uint64_t *)ctx;return PN_OK;}
 static void put32(uint8_t *p,uint32_t v){for(unsigned i=0;i<4;i++)p[i]=(uint8_t)(v>>(8*i));}
 static bool cancel_now(void *ctx){(void)ctx;return true;}
@@ -20,12 +22,18 @@ static pn_status_t save_file(pn_semantic_file_t *f,pn_pool_t *pool,const uint8_t
     uint8_t *packet=pn_alloc_tagged(pool,PN_MEM_INDEX,n);assert(packet);memcpy(packet,bytes,n);pn_status_t s=f->store.take(f,pool,packet,n);
     if(s!=PN_OK){pn_free(packet);return s;}unsigned steps=0;do{s=pn_semantic_file_step(f);assert(++steps<4096);}while(s==PN_BUSY);return s;
 }
+/// 夹具按秒明确排序，不依赖同秒创建文件的readdir顺序。/ Give fixtures distinct second-level ages instead of relying on readdir order for same-second files.
+static void fixture_age(const char *path,unsigned generation){
+    struct timespec times[2]={{.tv_sec=1000000000+(time_t)generation},{.tv_sec=1000000000+(time_t)generation}};
+    assert(utimensat(AT_FDCWD,path,times,0)==0);
+}
 int main(void){
     char root[]="/tmp/pn-semantic-files-XXXXXX";assert(mkdtemp(root));pn_media_t media;pn_media_init(&media);assert(pn_media_attach(&media,1)==PN_OK);pn_media_lease_t lease={0};assert(pn_media_acquire(&media,PN_MEDIA_READ,&lease)==PN_OK);pn_book_id_t book={{1}};pn_semantic_file_t file={0};assert(pn_semantic_file_bind(&file,&media,&lease,root,&book)==PN_INVALID && pn_media_release(&media,&lease)==PN_OK && pn_media_acquire(&media,PN_MEDIA_WRITE,&lease)==PN_OK);
     pn_pool_t pool;assert(pn_pool_init(&pool,2u*1024u*1024u,NULL,NULL,NULL)==PN_OK);
     assert(pn_semantic_file_bind(&file,&media,&lease,root,&book)==PN_OK && access(file.directory,F_OK)!=0);uint64_t free_bytes=4u*1024u*1024u;pn_semantic_file_space_port(space,&free_bytes);uint8_t *data=malloc(PN_XHTML_SNAPSHOT_MAX);assert(data);memset(data,0x55,PN_XHTML_SNAPSHOT_MAX);assert(save_file(&file,&pool,data,PN_XHTML_SNAPSHOT_MAX)==PN_OK);
+    fixture_age(file.path,1);
     char original[PN_JOURNAL_PATH_MAX],temporary[512];strcpy(original,file.path);snprintf(temporary,sizeof temporary,"%s.tmp",original);FILE *f=fopen(temporary,"wb");assert(f && fputs("abandoned",f)>=0 && !fclose(f));char unrelated[512];snprintf(unrelated,sizeof unrelated,"%s/favorites.a",file.directory);f=fopen(unrelated,"wb");assert(f && fputs("keep",f)>=0 && !fclose(f));
-    for(unsigned i=2;i<=5;i++){book.sha256[0]=(uint8_t)i;assert(pn_semantic_file_bind(&file,&media,&lease,root,&book)==PN_OK && save_file(&file,&pool,data,PN_XHTML_SNAPSHOT_MAX)==PN_OK);}
+    for(unsigned i=2;i<=5;i++){book.sha256[0]=(uint8_t)i;assert(pn_semantic_file_bind(&file,&media,&lease,root,&book)==PN_OK && save_file(&file,&pool,data,PN_XHTML_SNAPSHOT_MAX)==PN_OK);fixture_age(file.path,i);}
     assert(access(original,F_OK)!=0 && access(temporary,F_OK)!=0 && access(unrelated,F_OK)==0);
     uint8_t *loaded=NULL;size_t n=0;assert(file.store.load(&file,&pool,&loaded,&n)==PN_OK && n==PN_XHTML_SNAPSHOT_MAX && !memcmp(loaded,data,n));pn_free(loaded);
     free_bytes=0;assert(save_file(&file,&pool,data,152)==PN_EMPTY && access(file.path,F_OK)==0);free_bytes=4u*1024u*1024u;

@@ -7,8 +7,9 @@
 #include <ft2build.h>
 #include FT_FREETYPE_H
 static size_t outline_loads;
+static size_t index_outline_loads;static FT_Face index_face;static bool index_track;
 FT_Error __real_FT_Load_Glyph(FT_Face,FT_UInt,FT_Int32);
-FT_Error __wrap_FT_Load_Glyph(FT_Face face,FT_UInt index,FT_Int32 flags){outline_loads++;return __real_FT_Load_Glyph(face,index,flags);}
+FT_Error __wrap_FT_Load_Glyph(FT_Face face,FT_UInt index,FT_Int32 flags){outline_loads++;if(index_track){if(!index_face)index_face=face;if(index_face==face)index_outline_loads++;}return __real_FT_Load_Glyph(face,index,flags);}
 /// 不同字号的菜单字符反复交替，不应互相驱逐字宽。/ Alternating menu characters at different sizes must not evict each other's advances.
 static void mixed_sizes(pn_font_t *font){
     const uint32_t characters[]={'3','I','Z','H','>'};const int sizes[]={24,26,30,36,52};int32_t advances[5];
@@ -36,6 +37,18 @@ static void measured_warm(pn_pool_t *pool,pn_font_t *font){
         assert(s==PN_OK && actual_width==expected_width);pn_frame_clear(&frame,15);assert(pn_font_draw(font,&frame,'A',10*64,60,PN_FONT_GRAY)==PN_OK && !memcmp(expected,pixels,sizeof pixels));
     }
 }
+/// 整书字宽工作集超过普通窗口，扩大后应避免重复轮廓加载且保持度量。/ Whole-book metrics exceed the ordinary window; reservation avoids repeat outline loads without changing advances.
+static void index_metrics(pn_pool_t *pool,pn_font_t *font){
+    int32_t widths[1700]={0};pn_status_t statuses[1700];pn_font_trim(font);
+    index_track=true;index_face=NULL;assert(pn_font_size(font,44)==PN_OK);int32_t known;assert(pn_font_advance(font,'W',&known)==PN_OK);
+    pool->fail_at=pool->attempts+1;assert(!pn_font_index_metrics(font));pool->fail_at=0;int32_t again;assert(pn_font_advance(font,'W',&again)==PN_OK && again==known);
+    assert(pn_font_index_metrics(font));
+    size_t before=index_outline_loads;
+    for(unsigned i=0;i<1700;i++){statuses[i]=pn_font_advance(font,0x4e00+i,&widths[i]);assert(statuses[i]==PN_OK || statuses[i]==PN_EMPTY);}
+    size_t first=index_outline_loads-before;before=index_outline_loads;
+    for(unsigned i=0;i<1700;i++){int32_t got=0;assert(pn_font_advance(font,0x4e00+i,&got)==statuses[i]);if(statuses[i]==PN_OK)assert(got==widths[i]);}
+    assert(index_outline_loads-before<first/20+1);index_track=false;pn_cache_snapshot(pool);assert(pool->cache_stats[PN_CACHE_GLYPH].bytes<=pool->cache_caps[PN_CACHE_GLYPH]);
+}
 int main(void){
     pn_pool_t pool;assert(!pn_pool_init(&pool,4u*1024u*1024u,NULL,NULL,NULL));
     pn_font_t font={0};pn_text_source_t source=pn_font_builtin_source();assert(!pn_font_open(&font,&pool,&source,44));
@@ -53,6 +66,6 @@ int main(void){
     pool.limit=4u*1024u*1024u;assert(!pn_font_advance(&font,'W',&again));pn_frame_clear(&frame,15);assert(!pn_font_draw(&font,&frame,'W',10*64,60,PN_FONT_GRAY));
     // 在已有缓存时逐项注入绘制分配失败，借用槽不得被重试回收。/ Inject rendering allocation failures with warm caches; retry must never reclaim borrowed slots.
     for(unsigned i=1;i<=12;i++){pool.fail_at=pool.attempts+i;pn_status_t s=pn_font_draw(&font,&frame,0x4e2d,10*64,60,PN_FONT_GRAY);assert(s==PN_OK || s==PN_NO_MEMORY);pool.fail_at=0;assert(!pn_font_draw(&font,&frame,'W',10*64,60,PN_FONT_GRAY));}
-    measured_warm(&pool,&font);pn_font_close(&font);pn_cache_snapshot(&pool);assert(!pool.used && !pool.live && !pool.caches && !pool.cache_stats[PN_CACHE_GLYPH].bytes);
+    measured_warm(&pool,&font);index_metrics(&pool,&font);pn_font_close(&font);pn_cache_snapshot(&pool);assert(!pool.used && !pool.live && !pool.caches && !pool.cache_stats[PN_CACHE_GLYPH].bytes);
     puts("glyph cache: eviction preserves face/metrics/pixels, low-budget direct rendering, warm-cache faults and release passed");return 0;
 }

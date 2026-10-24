@@ -33,7 +33,7 @@
 #endif
 typedef struct {
     pn_w_status_snapshot_t status; ///< 当前帧的状态带，热恢复未变时不重画 / Status band in the current frame; unchanged warm restores never redraw it
-    pn_page_index_t page_index;uint32_t index_generation;
+    pn_page_index_t page_index;uint32_t index_generation;uint32_t build_flushed;bool build_flushing,build_failed,build_complete,build_metrics; ///< 分批编译收口及本代失败退避 / Batched compiler draining and per-layout failure backoff
     pn_pool_t *pool;pn_media_t local,state;pn_media_t *media;pn_media_lease_t book_lease,font_lease,fallback_lease,state_lease;
     pn_text_file_t book_file,font_file,fallback_file;pn_text_source_t font_source,fallback_source;pn_book_id_t book;pn_zip_t zip;pn_epub_t epub;pn_toc_t toc;pn_epub_info_t info;
     pn_text_file_verify_t verify;bool verify_book;pn_text_source_t book_source; ///< 快开后的整书SHA后台复核 / Background whole-book SHA verification after fast opening
@@ -47,6 +47,7 @@ typedef struct {
     pn_font_preferences_t draft_fonts,pending_fonts,pending_record,before_fonts,global_fonts;pn_epub_location_t font_origin;pn_epub_reader_t reader;pn_epub_page_t page;pn_layout_t layout;pn_job_token_t token;pn_display_t display;pn_frame_t frame;uint8_t *pixels;
     pn_journal_files_t progress_files,style_files;pn_journal_io_t progress_io,style_io;pn_epub_save_t save;pn_epub_progress_t restored,visible;
     char book_path[PN_RECENT_PATH_MAX],state_directory[PN_JOURNAL_PATH_MAX];bool recent_recorded;size_t recent_section; ///< 最近记录对应的章节序号，换章才更新记录 / Section index of the latest recent record; the record is refreshed only when the section changes
+    pn_recent_observer_fn recent_observer;void *recent_observer_ctx; ///< 借用已保存快照的同步接收者 / Synchronous receiver of a borrowed saved snapshot
     bool recent_pending;uint64_t recent_due; ///< 首屏与换章只置待写标记，空闲或安全出口写近期记录 / First display and section changes only mark pending recents, written at idle or safe exits
     
     pn_epub_progress_t bookmark_origin;bool has_bookmark_origin,bookmark_navigation,bookmark_returning;
@@ -69,7 +70,7 @@ typedef struct {
     pn_font_reference_t probed;bool probed_valid;uint64_t probed_ticket; ///< 本会话同一READ租约下刚由探查完整校验的字体引用，应用时免重复整文件SHA / Font reference fully verified by this session's probe under the same READ lease, letting apply skip a second whole-file SHA
 } app_t;
 /// 前台腾出可选包，当前已验证模型允许下一次安静时重试。/ Free optional staging for foreground work, allowing the verified model to retry when quiet.
-static void cache_abort(app_t *a){pn_page_index_abort(&a->page_index);bool file=pn_semantic_file_pending(&a->semantic_file);pn_semantic_file_abort(&a->semantic_file);pn_xhtml_cache_abort(&a->epub);if(file)pn_xhtml_cache_retry(&a->epub);}
+static void cache_abort(app_t *a){pn_epub_reader_index_abort(&a->reader);pn_page_index_abort(&a->page_index);bool file=pn_semantic_file_pending(&a->semantic_file);pn_semantic_file_abort(&a->semantic_file);pn_xhtml_cache_abort(&a->epub);if(file)pn_xhtml_cache_retry(&a->epub);}
 static pn_font_set_t *font_set(app_t *a){return a->font_use_draft?&a->font_draft:a->font_live.impl?&a->font_live:NULL;}
 static pn_font_t *body(app_t *a){return font_set(a)?a->managed_body:&a->body;}
 static pn_font_chain_t *chain(app_t *a){return font_set(a)?a->managed_chain:&a->chain;}
@@ -133,7 +134,7 @@ static pn_status_t recent_impl(app_t *a,const char *path){
     pn_recent_item_t item={.book=a->book,.source_size=a->book_file.size,.format=2,.progress=PN_RECENT_UNKNOWN_PROGRESS};strcpy(item.path,a->book_path);
     size_t index=0;unsigned basis=0;if(section_progress(a,path,&index,&basis)){item.progress=(uint16_t)basis;a->recent_section=index;}
     pn_journal_files_t files;pn_journal_io_t io;pn_status_t status=pn_recent_files(&files,&a->state,&a->state_lease,a->state_directory,&io);
-    if(status==PN_OK)status=pn_recent_touch(&io,a->pool,&item);
+    if(status==PN_OK)status=pn_recent_touch_notify(&io,a->pool,&item,a->recent_observer,a->recent_observer_ctx);
     if(status==PN_OK){a->recent_recorded=true;a->recent_pending=false;}
     return status;
 }
@@ -642,7 +643,7 @@ static pn_status_t paint_font_view(app_t *a,pn_frame_t *frame){
 }
 static pn_status_t index_layout(app_t *a){
     if(!a->persistent || a->index_generation==a->token.generation)return PN_OK;
-    pn_epub_reader_index(&a->reader,NULL);pn_page_index_close(&a->page_index);
+    pn_epub_reader_index(&a->reader,NULL);pn_page_index_close(&a->page_index);a->build_flushed=0;a->build_flushing=a->build_failed=a->build_complete=a->build_metrics=false;
     pn_text_source_t source=a->font_source;pn_book_id_t key;pn_status_t s=PN_OK;
     if(font_set(a))s=pn_font_set_source(font_set(a),&source);
     if(s==PN_OK)s=pn_page_index_key_known(&a->book,&a->style,&source,chain(a),0x100u,a->verify_font?&a->font_expected:NULL,&key);
@@ -1239,3 +1240,35 @@ pn_status_t pn_epub_app_book_display(pn_epub_app_t *app,pn_book_display_t *displ
 }
 
 pn_status_t pn_epub_app_paper_context(pn_epub_app_t *app,pn_pool_t **pool,pn_media_t **media){if(!app || !app->impl || !pool || !media)return PN_INVALID;app_t *a=app->impl;*pool=a->pool;*media=a->media;return PN_OK;}
+
+void pn_epub_app_recent_observer(pn_epub_app_t *app,pn_recent_observer_fn observer,void *ctx){
+    if(!app || !app->impl)return;
+    app_t *a=app->impl;a->recent_observer=observer;a->recent_observer_ctx=ctx;
+}
+
+pn_status_t pn_epub_app_index_step(pn_epub_app_t *app,pn_book_index_state_t *out){
+    if(!app || !app->impl || !out)return PN_INVALID;
+    app_t *a=app->impl;if(a->suspended || a->lost || a->style_preview || a->font_preview || a->style_pending || a->font_pending || a->global_pending)return PN_EMPTY;
+    if(pn_epub_app_verify_pending(app)){pn_status_t verified=pn_epub_app_verify_step(app);return verified==PN_OK?PN_BUSY:verified;}
+    pn_status_t s=index_layout(a);if(s!=PN_OK)return s;if(!pn_page_index_is_tf(&a->page_index) || a->build_failed)return PN_EMPTY;
+    pn_book_index_state_t before;s=pn_page_index_build_state(&a->page_index,&before);if(s!=PN_OK)return s;*out=before;
+    if(pn_page_index_build_saved(&a->page_index)){a->build_flushed=before.pages;a->build_flushing=false;if(before.complete){a->build_complete=true;return PN_OK;}}
+    if(before.complete || before.pages-a->build_flushed>=PN_BOOK_INDEX_BATCH_PAGES)a->build_flushing=true;
+    if(a->build_flushing){
+        s=pn_page_index_flush(&a->page_index,true);
+        if(s==PN_OK){a->build_flushing=false;a->build_flushed=before.pages;a->build_complete=before.complete;return before.complete?PN_OK:PN_BUSY;}
+        if(s==PN_BUSY || s==PN_CANCELLED)return s;
+        a->build_failed=true;return s==PN_EMPTY?PN_IO:s;
+    }
+    if(!a->build_metrics){(void)pn_font_index_metrics(body(a));a->build_metrics=true;}
+    pn_book_index_state_t next=before;
+    s=pn_epub_reader_index_step(&a->reader,&next);
+    if(s==PN_OK){s=pn_page_index_build_advance(&a->page_index,&before,&next);if(s==PN_STALE_JOB){a->build_flushed=0;s=PN_BUSY;}else if(s==PN_OK){*out=next;s=PN_BUSY;}}
+    if(s!=PN_BUSY && s!=PN_CANCELLED)a->build_failed=true;
+    return s;
+}
+
+bool pn_epub_app_index_pending(const pn_epub_app_t *app){
+    if(!app || !app->impl)return false;
+    const app_t *a=app->impl;return a->persistent && pn_page_index_tf_directory() && !a->suspended && !a->style_preview && !a->font_preview && !a->style_pending && !a->font_pending && (a->index_generation!=a->token.generation || (!a->build_complete && !a->build_failed));
+}
