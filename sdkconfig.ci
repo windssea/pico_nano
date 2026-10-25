@@ -22,7 +22,9 @@ CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 # Use SDK USB/WiFi coexistence like the product without manual pad switching; keep CI timing isolated.
 CONFIG_ESP_PHY_ENABLE_USB=y
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
-CONFIG_COMPILER_OPTIMIZATION_PERF=y
+# 编译策略与板级一致，时钟保持隔离。/ Match board compilation while keeping clocks isolated.
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y
+CONFIG_LOG_DEFAULT_LEVEL_WARN=y
 CONFIG_FREERTOS_HZ=1000
 CONFIG_COMPILER_WARN_WRITE_STRINGS=y
 # 长文件名 API 与产品配置一致，保证中文路径按 UTF-8 往返。

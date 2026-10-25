@@ -1,6 +1,8 @@
 # 诊断镜像：在sdkconfig.defaults之上启用串口测试控制台。只供真机自动测试，禁止用于发布包。
 # Diagnostic image: enable the serial test console on top of sdkconfig.defaults. Hardware automation only; never for release packages.
 CONFIG_PN_TEST_CONSOLE=y
+# 保留诊断INFO及阶段日志，不继承正式版WARN门槛。/ Retain diagnostic INFO and phase logs instead of the release WARN threshold.
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 # 开启真实开书分段计时，仅供诊断；产品配置保持关闭。/ Enable real opening phase timings for diagnostics only; product configurations stay disabled.
 CONFIG_PN_PROFILE=y
 # 长时间串口测试不自动锁屏睡眠，电源键锁屏仍可测。/ No idle auto-lock during long serial runs; power-key locking stays testable.

@@ -1,6 +1,8 @@
 # PicoNano 构建、运行与验证
 
-更新：2026-10-14。这里只记录现有可复跑入口；当前实现/未完工作分别见[架构](ARCHITECTURE.md)和[开发指南](DEVELOPMENT_PLAN.md)。固件构建、串口写入与真机验收是不同阶段，默认工具命令不烧录。
+更新：2026-10-25。这里只记录现有可复跑入口；当前实现/未完工作分别见[架构](ARCHITECTURE.md)和[开发指南](DEVELOPMENT_PLAN.md)。固件构建、串口写入与真机验收是不同阶段，默认工具命令不烧录。
+
+固件采用混合优化：SDKCONFIG默认`CONFIG_COMPILER_OPTIMIZATION_SIZE=y`（`-Os`），根CMake在阅读、字体/排版、XML与图片解码、存储、主控制层及显示/TF热路径上追加`-O2`。以生成的`compile_commands.json`中最后一个优化参数为准，不通过删字体、图片、功能或放宽6MiB槽的10% OTA余量门槛缩包。正式板级与CI均保留WARN/ERROR日志；`sdkconfig.diag`明确恢复INFO及原有测试/计时能力。已有本地SDKCONFIG不会自动被defaults覆盖，切换策略时应同步对应优化和日志choice，随后重建并核对生成配置；板级120MHz与CI80MHz仍隔离。
 
 续读包回归为`resume_app`（独立进程重启、A/B换书、缺包/根、损坏/截断、显示失败重试、时间/字号/字重/背景变化及图片完整帧）和`resume_file`（三类无损像素、全部提交边界中断、可信SHA、空间不足、同步失败、取消/失卡与自有配额清理）。`resume_window`驱动真实SDL事件循环，核对开书/NEXT/PREV完整画面、跨进程命中和删包回退；自动回归使用dummy，开发仍须重建并保留可见窗口。三者分别随`python tools/dev.py host`/`sdl`运行。
 

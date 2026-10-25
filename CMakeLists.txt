@@ -19,3 +19,12 @@ project(pico_nano VERSION ${PN_PRODUCT_VERSION})
 if(NOT IDF_VERSION_MAJOR EQUAL 6 OR NOT IDF_VERSION_MINOR EQUAL 1)
     message(FATAL_ERROR "pico_nano requires ESP-IDF v6.1")
 endif()
+
+# 默认以体积优化留出旧设备OTA余量；阅读、解码、显示与TF热路径仍使用O2。
+# Optimize size by default for existing-device OTA headroom; keep reading, decoding, display and TF hot paths at O2.
+foreach(pn_hot_component IN ITEMS main pn_core pn_display pn_expat pn_font pn_format
+        pn_freetype pn_image pn_jpeg pn_littlefs pn_reader pn_spng pn_storage pn_text
+        pn_ui pn_zlib epdiy fatfs sdmmc esp_driver_sdmmc read_pico)
+    idf_component_get_property(pn_hot_library ${pn_hot_component} COMPONENT_LIB)
+    target_compile_options(${pn_hot_library} PRIVATE -O2)
+endforeach()

@@ -36,7 +36,10 @@ CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 # Let the SDK manage USB/WiFi coexistence, avoiding failed host re-enumeration after manual pad switching; charging is unchanged.
 CONFIG_ESP_PHY_ENABLE_USB=y
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
-CONFIG_COMPILER_OPTIMIZATION_PERF=y
+# 非热路径节省Flash；阅读热路径由根CMake显式保留O2。/ Save flash outside hot paths; root CMake explicitly retains O2 for reading.
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y
+# 正式版保留警告/错误，诊断配置恢复INFO。/ Retain release warnings/errors; diagnostics restore INFO.
+CONFIG_LOG_DEFAULT_LEVEL_WARN=y
 # 1ms tick：EPD 上电流程里按毫秒轮询 PGOOD，100Hz 的 tick 会把每次等待放大到 10ms
 CONFIG_FREERTOS_HZ=1000
 # 长文件名以 UTF-8 交给界面与 fopen；磁盘 LFN 保持 UTF-16，不需要增加 CP936 表。
