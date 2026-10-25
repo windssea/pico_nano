@@ -22,6 +22,8 @@
 
 功能源码259项主机ASan/UBSan与50项SDL回归通过；本批47项工具、18项Python安装器和既有25项Node安装器/15项网页回归通过。三个ZIP完整性/清单、签名OTA及离线HTTP九镜像校验通过；公开附件、Pages与Gitee的发布后匿名核验单独记录，不把本地打包校验视作公开下载成功。
 
+发布后，GitHub与Gitee的六个公开附件已分别完整下载并核对SHA-256；在线安装器仅列本版两种模式，九个镜像逐项下载摘要一致，硬件验证标记保持false。旧版发行记录保留。
+
 本批正式镜像未刷入设备或执行OTA安装；现有设备仍运行此前的1.0.6诊断镜像。历史真机失败及后续修复范围见[阅读测试报告](READING_DEVICE_TEST_REPORT.md)，不能用本批构建替代正式版的睡眠、断电、实体键、面板光学或功耗验收。精确源码与镜像摘要以发布包清单为准。
 
 下载：[Gitee 1.0.6](https://gitee.com/windssea/pico_nano/releases/tag/v1.0.6)、[GitHub 1.0.6](https://github.com/windssea/pico_nano/releases/tag/v1.0.6)。
