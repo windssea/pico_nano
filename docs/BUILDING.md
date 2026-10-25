@@ -18,6 +18,8 @@ SDL独立对照为`python simulator/test_resume_window.py <新pn_sim> <完整TTF
 
 ## 娱乐与数独的软件回归
 
+开书长标题由`loading`覆盖：逐行居中、36/32px与三行上限、可选作者重排、完整封面像素、内置缺图退路、超长中文/无空格英文/中英混排、元数据UTF8截半及845B文件名。`PN_LOADING_PREVIEW=<已存在目录>`额外导出loading-4..7的长标题PGM；仅显示副本裁切，原名/元数据保持。
+
 2026-10-25游戏页紧凑布局：棋盘(36,144)，68px单格；常用工具两排（撤销/擦除/笔记、检查/提示/新局），坐标中心分别(134/342/550,802/874)；数字键3×3，中心(134/342/550,960/1052/1144)，196×84px。顶部(588,72)重玩，(80,72)返回。检查/提示不进入菜单，原题与填写同时显示，用字重/大小和填写下划线区分，无切换标签。新局和重玩保留清空确认。
 
 `device_management`覆盖64次填写跨越旧区域/整屏维护阈值而不触发GC16，保存失败不退出，成功退出一次完整原表GC16；这是驱动桩回执，不是面板残影测试。`sudoku_render`仍逐像素比较局部与整绘，另检查填写标记；`sudoku_window`按新坐标覆盖恢复、取消与直接检查/提示。开书静态页由`loading`验证封面原生像素、缺图/长标题和phase兼容调用的静态一致，`cover`/`cover_work`覆盖新preview接口的常驻/PNCV、分配失败和缺失回退。
@@ -32,9 +34,9 @@ SDL独立对照为`python simulator/test_resume_window.py <新pn_sim> <完整TTF
 
 `python tools/dev.py host`包含`sudoku`（全部1200题唯一解、题库循环、存档恢复、撤销满载、同步失败/分配失败及坏档保护）与`device_management`（产品路由无TF、输入、锁屏保存屏障、恢复）。`python tools/dev.py sdl`包含`entertainment_window`、`sudoku_window`，覆盖分类、空书库、2MiB预算、跨进程笔记/撤销恢复、锁屏计时、确认取消、拖出取消和15轮进出归零。自动回归用dummy，开发仍须重建并保留可见窗口。
 
-可见模拟器从书库点“娱乐”（460,190）再点数独（100,400）；初次选择难度后点“开始游戏”（340,1040），之后自动恢复存档。棋盘选格再点数字，工具行提供撤销/擦除/笔记/菜单。PC方向键选格，1–9填数，N笔记，Z撤销，Backspace擦除，Enter菜单/开始，Esc返回，L锁屏/唤醒；设备左键返回、中间键菜单/开始、右键下格，主要游戏输入使用触摸。
+可见模拟器从书库点“娱乐”（460,190）再点数独（100,400）；初次选择难度后点“开始游戏”（340,1040），之后自动恢复存档。游戏操作均有直接触摸入口。PC方向键选格，1–9填数，N笔记，Z撤销，Backspace擦除，Enter保存后退出到娱乐页，Esc返回，L锁屏/唤醒；设备左键返回、中键保存后直接退出、右键下格，开始/换局使用触摸按钮。提交失败不能用中键绕过保存屏障。
 
-首次演示脚本`library,tap:460:190,tap:100:400,enter,wait:1000`；恢复演示省略`enter`。`window-close`正常保存后关闭，`back`/`quit`均为Esc只返回上层。主机存档位于`--state-dir/sudoku.a/b`，设备位于内部`/data/progress`，不放TF缓存目录。固件静态占用用`python tools/dev.py firmware-board`的size及实际bin长度评估；不以PC池、PNG大小或CI配置替代真机水位。原始本机测量保留忽略的`build-dev/sudoku/`。
+首次演示脚本`library,tap:460:190,tap:100:400,tap:340:1040,wait:1000`；恢复演示省略开始按钮点击。`window-close`正常保存后关闭，`back`/`quit`均为Esc只返回上层。主机存档位于`--state-dir/sudoku.a/b`，设备位于内部`/data/progress`，不放TF缓存目录。固件静态占用用`python tools/dev.py firmware-board`的size及实际bin长度评估；不以PC池、PNG大小或CI配置替代真机水位。原始本机测量保留忽略的`build-dev/sudoku/`。
 
 ## 整书索引的软件回归
 

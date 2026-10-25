@@ -2311,7 +2311,7 @@ static void open_shelf_item(int index){
     else message("格式尚未接入","书籍仍保留，选择TXT或EPUB");
 }
 static void handle_key(int key,pn_key_event_t event){
-    if(sudoku.active){if(event==PN_KEY_SHORT)sudoku_command(key==PN_KEY_1?PN_SU_BACK:key==PN_KEY_2?(pn_sudoku_screen(&sudoku)==PN_SU_SELECT?PN_SU_START:PN_SU_MENU_OPEN):PN_SU_NEXT_CELL);return;}
+    if(sudoku.active){if(event==PN_KEY_SHORT)sudoku_command(key==PN_KEY_1?PN_SU_BACK:key==PN_KEY_2?PN_SU_EXIT:PN_SU_NEXT_CELL);return;}
     reading_stats_pause();
 #if PN_DEVICE_TEST_CONSOLE
     if(loading_preview_active){if(event==PN_KEY_SHORT && key==PN_KEY_2){loading_preview_active=false;home_mode=true;show_shelf("",false);}return;}

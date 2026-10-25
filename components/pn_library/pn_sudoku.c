@@ -128,9 +128,9 @@ void pn_sudoku_displayed(pn_sudoku_t *u,bool success,uint64_t now){if(!u || !u->
 static pn_status_t event_impl(pn_sudoku_t *u,int cmd,uint64_t now){
     if(!u || !u->impl || !u->active)return PN_INVALID;
     su_t *g=u->impl;account(g,now);g->running=false;u->presented=false;
-    if(g->screen==PN_SU_COMMIT_ERROR){if(cmd==PN_SU_RETRY){pn_status_t r=storage(g,&g->candidate,true);if(r!=PN_OK)return r;g->state=g->candidate;memset(g->errors,0,sizeof g->errors);memcpy(g->solution,g->solver.solution,81);g->has=true;g->dirty=false;g->saved_elapsed=0;g->screen=PN_SU_PLAY;g->notice=NULL;return PN_OK;}if(cmd==PN_SU_BACK || cmd==PN_SU_CANCEL){if(g->has){pn_status_t r=storage(g,&g->state,true);if(r!=PN_OK)return r;}else{u->active=false;return PN_OK;}g->screen=PN_SU_SELECT;return PN_OK;}return PN_EMPTY;}
-    if(g->screen==PN_SU_LOAD_ERROR){if(cmd==PN_SU_RETRY)return load(g);if(cmd==PN_SU_BACK){u->active=false;return PN_OK;}return PN_EMPTY;}
-    if(g->screen==PN_SU_LOADING){if(cmd==PN_SU_BACK){if(!g->new_job){u->active=false;return PN_OK;}g->bank_check=false;g->screen=g->has?(g->state.complete?PN_SU_COMPLETE:PN_SU_PLAY):PN_SU_SELECT;return PN_OK;}return PN_BUSY;}
+    if(g->screen==PN_SU_COMMIT_ERROR){if(cmd==PN_SU_RETRY){pn_status_t r=storage(g,&g->candidate,true);if(r!=PN_OK)return r;g->state=g->candidate;memset(g->errors,0,sizeof g->errors);memcpy(g->solution,g->solver.solution,81);g->has=true;g->dirty=false;g->saved_elapsed=0;g->screen=PN_SU_PLAY;g->notice=NULL;return PN_OK;}if(cmd==PN_SU_BACK || cmd==PN_SU_CANCEL || cmd==PN_SU_EXIT){if(g->has){pn_status_t r=storage(g,&g->state,true);if(r!=PN_OK)return r;}else{u->active=false;return PN_OK;}if(cmd==PN_SU_EXIT)u->active=false;else g->screen=PN_SU_SELECT;return PN_OK;}return PN_EMPTY;}
+    if(g->screen==PN_SU_LOAD_ERROR){if(cmd==PN_SU_RETRY)return load(g);if(cmd==PN_SU_BACK || cmd==PN_SU_EXIT){u->active=false;return PN_OK;}return PN_EMPTY;}
+    if(g->screen==PN_SU_LOADING){if(cmd==PN_SU_EXIT){pn_status_t r=pn_sudoku_pause(u,now);if(r==PN_OK){g->bank_check=false;u->active=false;}return r;}if(cmd==PN_SU_BACK){if(!g->new_job){u->active=false;return PN_OK;}g->bank_check=false;g->screen=g->has?(g->state.complete?PN_SU_COMPLETE:PN_SU_PLAY):PN_SU_SELECT;return PN_OK;}return PN_BUSY;}
     if(cmd==PN_SU_RETRY)return save(u,now);
     if(cmd==PN_SU_EXIT){pn_status_t r=pn_sudoku_pause(u,now);if(r==PN_OK)u->active=false;return r;}
     if(cmd==PN_SU_BACK || cmd==PN_SU_CANCEL){

@@ -372,7 +372,9 @@ int main(void){
     char game_root[]="/tmp/pn-device-sudoku-XXXXXX";assert(mkdtemp(game_root));
     assert(pn_sudoku_open(&sudoku,&pool,&data_media,game_root,NULL,0,now_ms())==PN_OK);shelf_mode=false;status_page=false;assert(sudoku_draw()==PN_OK);
     assert(active_hit(340,1040)==PN_SU_START && root_navigation_hit(80,1150)<0);
-    handle_key(PN_KEY_2,PN_KEY_SHORT);for(unsigned i=0;pn_sudoku_pending(&sudoku);i++){assert(i<10000);(void)pn_sudoku_tick(&sudoku,now_ms());}
+    handle_key(PN_KEY_2,PN_KEY_SHORT);assert(!sudoku.active && entertainment==1 && shelf_mode);
+    assert(pn_sudoku_open(&sudoku,&pool,&data_media,game_root,NULL,0,now_ms())==PN_OK);shelf_mode=false;status_page=false;assert(sudoku_draw()==PN_OK);
+    apply_selection(PN_SU_START);for(unsigned i=0;pn_sudoku_pending(&sudoku);i++){assert(i<10000);(void)pn_sudoku_tick(&sudoku,now_ms());}
     assert(pn_sudoku_screen(&sudoku)==PN_SU_PLAY && sudoku_draw()==PN_OK);
     unsigned game_cell=0;while(pn_sudoku_state(&sudoku)->clues[game_cell])game_cell++;
     // 跨越旧管理维护阈值，连续填数只扫描局部；退出才完整GC16。/ Cross former management thresholds; repeated entries scan locally and exit alone requests full GC16.
@@ -386,10 +388,10 @@ int main(void){
     assert(pn_sudoku_tick(&sudoku,now_ms()+1000)==PN_OK && sudoku.presented && !pn_sudoku_dirty(&sudoku));
     apply_selection(PN_SU_DIGIT+5);apply_selection(PN_SU_DIGIT+4);
     pn_media_lease_t game_busy;assert(pn_media_acquire(&data_media,PN_MEDIA_READ,&game_busy)==PN_OK);assert(!prepare_lock() && sudoku.active);
-    game_gc=gc_updates;handle_key(PN_KEY_1,PN_KEY_SHORT);assert(sudoku.active && gc_updates==game_gc);
+    game_gc=gc_updates;handle_key(PN_KEY_2,PN_KEY_SHORT);assert(sudoku.active && gc_updates==game_gc);
     assert(pn_media_release(&data_media,&game_busy)==PN_OK);assert(prepare_lock());
     locked=true;resume_reader();assert(!locked && sudoku.presented && pn_sudoku_state(&sudoku)->values[game_cell]==4 && !reader_active());
-    game_gc=gc_updates;game_full=screen_full_calls;handle_key(PN_KEY_1,PN_KEY_SHORT);assert(!sudoku.active && entertainment==1 && shelf_mode && !reader_active());
+    game_gc=gc_updates;game_full=screen_full_calls;handle_key(PN_KEY_2,PN_KEY_SHORT);assert(!sudoku.active && entertainment==1 && shelf_mode && !reader_active());
     assert(gc_updates==game_gc+1 && screen_full_calls==game_full+1 && last_screen_mode==MODE_GC16 && last_screen_wave==&E0470_WAVEFORM);
     char game_file[512];for(unsigned i=0;i<2;i++){snprintf(game_file,sizeof game_file,"%s/sudoku.%c",game_root,'a'+i);(void)unlink(game_file);}assert(!rmdir(game_root));
     printf("sudoku device routing used=%zu peak=%zu\n",pool.used,pool.peak);

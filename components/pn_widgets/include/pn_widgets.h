@@ -69,6 +69,10 @@ pn_status_t pn_w_text(pn_font_t *font,pn_frame_t *frame,const char *utf8,int x,i
 pn_status_t pn_w_text_ex(pn_font_t *font,pn_frame_t *frame,const char *utf8,int x,int baseline,int max_width,pn_align_t align,uint8_t ink,bool bold);
 /// 带样式的折行文字。/ Styled wrapped text.
 pn_status_t pn_w_text_lines_ex(pn_font_t *font,pn_frame_t *frame,const char *utf8,int x,int baseline,int width,unsigned max_lines,int pitch,uint8_t ink,bool bold);
+/// 带样式的逐行居中折行，used可为NULL；复用同一UTF8断行与省略规则。/ Styled wrapping centered per line, with optional used count; shares UTF-8 wrapping and ellipsis rules.
+pn_status_t pn_w_text_lines_centered_ex(pn_font_t *,pn_frame_t *,const char *,int,int,int,unsigned,int,uint8_t,bool,unsigned *used);
+/// 按同一断行规则量实际行数，不生成字形像素或分配画布。/ Measure actual wrapped lines with identical rules, without rasterizing glyphs or allocating a canvas.
+pn_status_t pn_w_text_lines_measure_ex(pn_font_t *,const char *,int width,unsigned max_lines,bool bold,unsigned *used);
 /// 按是否加粗量宽度。/ Measure width for regular or bold text.
 pn_status_t pn_w_text_width_ex(pn_font_t *font,const char *utf8,bool bold,int *width);
 /// 按字符折行最多max_lines行，行距pitch；放不下时末行以“...”截断。used可为NULL，返回实际行数。

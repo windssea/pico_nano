@@ -105,29 +105,45 @@ pn_status_t pn_reader_loading_render(pn_font_t *ui,pn_frame_t *frame,const char 
 pn_status_t pn_reader_loading_render_phase(pn_font_t *ui,pn_frame_t *frame,const char *title,unsigned phase){
     (void)phase;return pn_reader_opening_render(ui,frame,title,NULL,NULL);
 }
+/// 仅裁剪显示副本，UTF8字符不截半；原文件名/书籍元数据不变。/ Trim display copies only, preserving UTF-8 boundaries and original names/metadata.
+static void opening_title(const char *source,char out[512],bool filename){
+    size_t n=strlen(source);if(filename){const char *dot=strrchr(source,'.');if(dot && (!strcasecmp(dot,".epub") || !strcasecmp(dot,".txt")))n=(size_t)(dot-source);}
+    bool cut=n>=512;if(cut){n=508;while(n && ((unsigned char)source[n]&0xc0)==0x80)n--;}
+    if(n){size_t start=n-1;while(start && ((unsigned char)source[start]&0xc0)==0x80)start--;
+        unsigned lead=(unsigned char)source[start],bytes=lead>=0xf0?4:lead>=0xe0?3:lead>=0xc0?2:1;
+        if(start+bytes>n){n=start;cut=true;}}
+    if(cut && n>508){n=508;while(n && ((unsigned char)source[n]&0xc0)==0x80)n--;}
+    if(!n){snprintf(out,512,"未命名书籍");return;}memcpy(out,source,n);if(cut){memcpy(out+n,"...",3);n+=3;}out[n]=0;
+}
 pn_status_t pn_reader_opening_render(pn_font_t *ui,pn_frame_t *frame,const char *title,const pn_book_preview_t *preview,const char *note){
     if(!ui || !ui->impl || !frame || !frame->pixels || !title)return PN_INVALID;
     int original=ui->pixels;pn_frame_clear(frame,PN_UI_PAPER);
-    char fallback[512];snprintf(fallback,sizeof fallback,"%s",title);char *dot=strrchr(fallback,'.');
-    if(dot && (!strcasecmp(dot,".epub") || !strcasecmp(dot,".txt")))*dot=0;
-    const char *name=preview && *preview->display.title?preview->display.title:fallback;
-    const char *author=preview && *preview->display.author?preview->display.author:"作者信息暂无";
-    pn_status_t status=pn_font_size(ui,24);
+    char name[512];bool metadata=preview && *preview->display.title;opening_title(metadata?preview->display.title:title,name,!metadata);
+    const char *author=preview && *preview->display.author?preview->display.author:NULL;
+    pn_status_t status=pn_font_size(ui,36);
 #define OPEN_DRAW(expr) do{if(status==PN_OK)status=(expr);}while(0)
-    OPEN_DRAW(pn_w_text(ui,frame,PN_BRAND_NAME,48,78,588,PN_ALIGN_LEFT));pn_frame_rect(frame,48,107,588,1,11);
-    // 原生缩略图保持184×256，不拉伸、不重新解码。/ Keep native thumbnails at 184x256, without stretching or decoding again.
-    pn_frame_rect(frame,202,230,280,336,14);pn_frame_rect(frame,224,250,4,296,0);pn_frame_rect(frame,258,278,184,256,12);
-    if(preview && preview->ready){pn_frame_t cover;(void)pn_frame_bind(&cover,(uint8_t *)preview->pixels,PN_COVER_BYTES,PN_COVER_WIDTH,PN_COVER_HEIGHT);
-        for(int y=0;y<PN_COVER_HEIGHT;y++)for(int x=0;x<PN_COVER_WIDTH;x++)pn_frame_pixel(frame,250+x,270+y,pn_frame_get(&cover,x,y));
-    }else{pn_frame_rect(frame,250,270,184,256,15);pn_w_outline(frame,250,270,184,256,1,0);pn_frame_rect(frame,266,286,3,224,0);pn_frame_rect(frame,284,314,118,2,0);pn_frame_rect(frame,284,328,82,1,9);pn_frame_rect(frame,284,474,38,3,0);}
-    OPEN_DRAW(pn_font_size(ui,42));int title_width=0;OPEN_DRAW(pn_w_text_width_ex(ui,name,true,&title_width));
-    // 略长一行的书名轻微缩字，避免只剩一个字落到第二行。/ Slightly shrink near-single-line titles to avoid an orphan character on the second line.
-    if(status==PN_OK && title_width>556 && title_width<=648)OPEN_DRAW(pn_font_size(ui,36));
-    OPEN_DRAW(pn_w_text_lines_ex(ui,frame,name,64,638,556,2,56,0,true));
-    OPEN_DRAW(pn_font_size(ui,27));OPEN_DRAW(pn_w_text_lines_ex(ui,frame,author,64,774,556,2,38,3,false));
-    pn_frame_rect(frame,64,862,556,1,11);pn_frame_rect(frame,64,951,5,28,0);
-    OPEN_DRAW(pn_font_size(ui,28));OPEN_DRAW(pn_w_text(ui,frame,note?note:"正在打开书籍",84,976,536,PN_ALIGN_LEFT));
-    OPEN_DRAW(pn_font_size(ui,21));OPEN_DRAW(pn_w_text_ex(ui,frame,"准备好，继续你的阅读",64,1030,556,PN_ALIGN_LEFT,5,false));
+    int title_width=0;OPEN_DRAW(pn_w_text_width_ex(ui,name,true,&title_width));
+    if(status==PN_OK && ((title_width>556 && title_width<=620) || title_width>1112))OPEN_DRAW(pn_font_size(ui,32));
+    unsigned lines=1;OPEN_DRAW(pn_w_text_lines_measure_ex(ui,name,556,3,true,&lines));if(!lines)lines=1;
+    int cover_y=(frame->height-(PN_COVER_HEIGHT+12+56+(int)(lines-1)*48+(author?98:54)))/2;
+    int cover_x=(frame->width-PN_COVER_WIDTH)/2;pn_frame_t cover={0};
+    if(preview && preview->ready)(void)pn_frame_bind(&cover,(uint8_t *)preview->pixels,PN_COVER_BYTES,PN_COVER_WIDTH,PN_COVER_HEIGHT);
+    else OPEN_DRAW(pn_builtin_cover_frame(name,&cover));
+    // 拟物厚度只画在封面外，真实缩略图像素保持；不用贴图或额外画布。/ Draw book depth outside the cover, preserving thumbnail pixels without textures or another canvas.
+    pn_w_round_fill(frame,cover_x-2,cover_y+7,PN_COVER_WIDTH+12,PN_COVER_HEIGHT+5,3,12);
+    pn_frame_rect(frame,cover_x+2,cover_y+PN_COVER_HEIGHT,PN_COVER_WIDTH+4,6,14);
+    pn_frame_rect(frame,cover_x+PN_COVER_WIDTH,cover_y+3,6,PN_COVER_HEIGHT-1,14);
+    pn_frame_rect(frame,cover_x+PN_COVER_WIDTH+3,cover_y+6,1,PN_COVER_HEIGHT-6,10);
+    pn_frame_rect(frame,cover_x+5,cover_y+PN_COVER_HEIGHT+3,PN_COVER_WIDTH-2,1,10);
+    pn_frame_rect(frame,cover_x-4,cover_y,3,PN_COVER_HEIGHT,6);
+    pn_w_outline(frame,cover_x-1,cover_y-1,PN_COVER_WIDTH+2,PN_COVER_HEIGHT+2,1,9);
+    // 缺图沿用书库内置封面；真实缩略图原样拷贝，不新增解码或图片。/ Missing art uses library built-ins; real thumbnails copy exactly, without another decoder or image.
+    if(status==PN_OK)for(int y=0;y<PN_COVER_HEIGHT;y++)for(int x=0;x<PN_COVER_WIDTH;x++)pn_frame_pixel(frame,cover_x+x,cover_y+y,pn_frame_get(&cover,x*cover.width/PN_COVER_WIDTH,y*cover.height/PN_COVER_HEIGHT));
+    int title_y=cover_y+PN_COVER_HEIGHT+12+56;unsigned used=0;
+    OPEN_DRAW(pn_w_text_lines_centered_ex(ui,frame,name,64,title_y,556,3,48,0,true,&used));
+    int last_title=title_y+(int)(used?used-1:0)*48;
+    if(author){OPEN_DRAW(pn_font_size(ui,24));OPEN_DRAW(pn_w_text_ex(ui,frame,author,64,last_title+44,556,PN_ALIGN_CENTER,5,false));}
+    OPEN_DRAW(pn_font_size(ui,26));OPEN_DRAW(pn_w_text_ex(ui,frame,note?note:"正在打开书籍",64,last_title+(author?98:54),556,PN_ALIGN_CENTER,4,false));
 #undef OPEN_DRAW
     pn_status_t restored=pn_font_size(ui,original);return status==PN_OK?restored:status;
 }

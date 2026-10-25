@@ -43,7 +43,7 @@ int pn_reader_toolbar_hit(int x,int y,unsigned unavailable);
 pn_status_t pn_reader_loading_render(pn_font_t *ui,pn_frame_t *frame,const char *title);
 /// 旧调用兼容，phase不再改变开书画面。/ Legacy compatibility; phase no longer changes the opening screen.
 pn_status_t pn_reader_loading_render_phase(pn_font_t *ui,pn_frame_t *frame,const char *title,unsigned phase);
-/// 借已验证缩略快照绘制书名/作者；note为真实状态，不访问存储。/ Paint title/author using a verified thumbnail snapshot; note is real status, with no storage access.
+/// 居中绘制立体封面、书名、可选作者与状态；note为真实状态。/ Center a dimensional cover, title, optional author and real status.
 pn_status_t pn_reader_opening_render(pn_font_t *,pn_frame_t *,const char *,const pn_book_preview_t *,const char *note);
 /// 小TXT直接呈现正文，省掉一次面板刷新；大文件保留开书反馈。 / Present small TXT directly to avoid an extra panel update; keep opening feedback for larger files.
 bool pn_reader_loading_needed(bool text_format,uint64_t source_bytes);

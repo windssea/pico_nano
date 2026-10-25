@@ -1059,7 +1059,7 @@ static int library_worker(void *ctx){
                 else if(key==SDLK_BACKSPACE || key==SDLK_DELETE)command=PN_SU_ERASE;
                 else if(key==SDLK_n)command=PN_SU_NOTES;
                 else if(key==SDLK_z)command=PN_SU_UNDO;
-                else if(key==SDLK_RETURN)command=pn_sudoku_screen(&s->sudoku)==PN_SU_SELECT?PN_SU_START:PN_SU_MENU_OPEN;
+                else if(key==SDLK_RETURN)command=PN_SU_EXIT;
                 else if(key==SDLK_LEFT || key==SDLK_RIGHT || key==SDLK_UP || key==SDLK_DOWN){const pn_sudoku_state_t *q=pn_sudoku_state(&s->sudoku);if(q)command=PN_SU_CELL+(q->selected+81+(key==SDLK_LEFT?-1:key==SDLK_RIGHT?1:key==SDLK_UP?-9:9))%81;}
             }else if(event.type==SDL_MOUSEBUTTONDOWN || event.type==SDL_MOUSEBUTTONUP || event.type==SDL_MOUSEMOTION){
                 bool motion=event.type==SDL_MOUSEMOTION,up=event.type==SDL_MOUSEBUTTONUP;int x=motion?event.motion.x:event.button.x,y=motion?event.motion.y:event.button.y;

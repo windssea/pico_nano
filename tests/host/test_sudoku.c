@@ -25,6 +25,9 @@ int main(void){
     assert(pn_sudoku_tick(&u,30000)==PN_EMPTY && u.presented && pool.used==preview_used);
     assert(pn_sudoku_pause(&u,30001)==PN_OK);
     pn_sudoku_close(&u);assert(pn_sudoku_open(&u,&pool,&media,root,NULL,0,clock_ms)==PN_OK);
+    // 准备中退出不提交候选；重进仍是无存档选择页。/ Exiting preparation never commits a candidate; reopening remains an empty selection screen.
+    event(&u,PN_SU_START);assert(pn_sudoku_pending(&u));event(&u,PN_SU_EXIT);assert(!u.active);pn_sudoku_close(&u);assert(!pool.used);
+    assert(pn_sudoku_open(&u,&pool,&media,root,NULL,0,clock_ms)==PN_OK && pn_sudoku_screen(&u)==PN_SU_SELECT);
     event(&u,PN_SU_START);finish(&u);assert(pn_sudoku_screen(&u)==PN_SU_PLAY);su_t *g=u.impl;solution_valid(g);
     event(&u,PN_SU_RESTART);event(&u,PN_SU_CANCEL);assert(pn_sudoku_screen(&u)==PN_SU_PLAY);
     event(&u,PN_SU_MENU_OPEN);event(&u,PN_SU_RESTART);event(&u,PN_SU_CANCEL);assert(pn_sudoku_screen(&u)==PN_SU_MENU);event(&u,PN_SU_RESUME);
@@ -44,7 +47,7 @@ int main(void){
     event(&u,PN_SU_NEW);event(&u,PN_SU_START);event(&u,PN_SU_CONFIRM);for(int i=0;i<15 && pn_sudoku_pending(&u);i++)(void)pn_sudoku_tick(&u,++clock_ms);if(pn_sudoku_pending(&u))event(&u,PN_SU_BACK);
     if(g->state.id==old_id){assert(!memcmp(old_solution,g->solution,81));event(&u,PN_SU_HINT);assert(g->state.values[g->state.selected]==old_solution[g->state.selected]);}
     assert(pn_sudoku_pause(&u,++clock_ms)==PN_OK);old_id=g->state.id;memcpy(old_solution,g->solution,81);
-    event(&u,PN_SU_NEW);event(&u,PN_SU_START);event(&u,PN_SU_CONFIRM);fail_sync=true;finish(&u);assert(pn_sudoku_screen(&u)==PN_SU_COMMIT_ERROR && g->state.id==old_id);assert(pn_sudoku_pause(&u,++clock_ms)==PN_BUSY);assert(pn_sudoku_event(&u,PN_SU_CANCEL,++clock_ms)!=PN_OK && u.active);fail_sync=false;event(&u,PN_SU_CANCEL);assert(!memcmp(old_solution,g->solution,81));event(&u,PN_SU_RESUME);
+    event(&u,PN_SU_NEW);event(&u,PN_SU_START);event(&u,PN_SU_CONFIRM);fail_sync=true;finish(&u);assert(pn_sudoku_screen(&u)==PN_SU_COMMIT_ERROR && g->state.id==old_id);assert(pn_sudoku_pause(&u,++clock_ms)==PN_BUSY);assert(pn_sudoku_event(&u,PN_SU_EXIT,++clock_ms)!=PN_OK && u.active);assert(pn_sudoku_event(&u,PN_SU_CANCEL,++clock_ms)!=PN_OK && u.active);fail_sync=false;event(&u,PN_SU_CANCEL);assert(!memcmp(old_solution,g->solution,81));event(&u,PN_SU_RESUME);
     // 写失败不能退出；原局保持可编辑，重试后才能离开。/ Failed saves cannot exit; retain the editable game until a successful retry.
     event(&u,PN_SU_CELL+(int)blank(&g->state));event(&u,PN_SU_ERASE);event(&u,PN_SU_DIGIT+3);fail_sync=true;assert(pn_sudoku_event(&u,PN_SU_EXIT,++clock_ms)!=PN_OK && u.active);fail_sync=false;event(&u,PN_SU_EXIT);pn_sudoku_close(&u);
     assert(pn_sudoku_open(&u,&pool,&media,root,NULL,0,++clock_ms)==PN_OK);finish(&u);g=u.impl;assert(g->state.values[g->state.selected]==3);

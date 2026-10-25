@@ -106,7 +106,7 @@ static pn_status_t text_impl(pn_font_t *font,pn_frame_t *frame,const char *utf8,
     return PN_OK;
 }
 static pn_status_t text_lines_impl(pn_font_t *font,pn_frame_t *frame,const char *utf8,int x,int baseline,int width,unsigned max_lines,int pitch,int first_indent,int tracking_64,bool centered,unsigned *used){
-    if(!font || !font->impl || !frame || !frame->pixels || !utf8 || width<=0 || !max_lines || pitch<=0)return PN_INVALID;
+    if(!font || !font->impl || (frame && !frame->pixels) || !utf8 || width<=0 || !max_lines || pitch<=0)return PN_INVALID;
     uint32_t cp[MAX_CHARS];int32_t adv[MAX_CHARS];uint8_t miss[MAX_CHARS];size_t n=0;
     pn_status_t status=decode(font,utf8,cp,adv,miss,&n);if(status!=PN_OK)return status;
     for(size_t i=0;i<n;i++)adv[i]+=tracking_64;
@@ -120,18 +120,18 @@ static pn_status_t text_lines_impl(pn_font_t *font,pn_frame_t *frame,const char 
         int32_t sum=0;size_t end=at;bool last=line+1==max_lines;
         while(end<n && sum+adv[end]<=room){sum+=adv[end];end++;}
         if(end==at)end=at+1,sum=adv[at]; // 单字比整行还宽也至少画一个。/ Draw at least one character even if it is wider than the line.
-        // 拉丁单词不在中间折断：退回到最近的空格之后。/ Do not split a Latin word: back up to just after the nearest space.
+        // 拉丁单词不在中间折断，中文/标点相邻时也找真实词首。/ Preserve Latin words by finding their actual start, including after CJK or punctuation.
         if(end<n && end>at+1 && is_word(cp[end]) && is_word(cp[end-1])){
             size_t back=end;
-            while(back>at+1 && cp[back-1]!=' ')back--;
-            if(back>at+1)end=back;
+            while(back>at && is_word(cp[back-1]))back--;
+            if(back>at)end=back;
         }
         bool cut=last && end<n;
         if(cut){sum=0;end=at;while(end<n && sum+adv[end]+3*period<=room){sum+=adv[end];end++;}}
         int32_t pen=(int32_t)x*64+(line==0?first_indent*64:0);
         if(centered){int32_t actual=cut?3*period:0;for(size_t i=at;i<end;i++)actual+=adv[i];if(actual<room)pen+=(room-actual)/2;}
-        for(size_t i=at;i<end;i++){status=glyph(font,frame,cp[i],miss[i],pen,baseline+(int)line*pitch);if(status!=PN_OK)return status;pen+=adv[i];}
-        for(int i=0;cut && i<3;i++){status=ellipsis_dot(font,frame,pen,baseline+(int)line*pitch,period);if(status!=PN_OK)return status;pen+=period;}
+        if(frame){for(size_t i=at;i<end;i++){status=glyph(font,frame,cp[i],miss[i],pen,baseline+(int)line*pitch);if(status!=PN_OK)return status;pen+=adv[i];}
+            for(int i=0;cut && i<3;i++){status=ellipsis_dot(font,frame,pen,baseline+(int)line*pitch,period);if(status!=PN_OK)return status;pen+=period;}}
         at=end;line++;
     }
     if(used)*used=line;
@@ -156,13 +156,24 @@ pn_status_t pn_w_text_lines_ex(pn_font_t *font,pn_frame_t *frame,const char *utf
     pn_status_t status=pn_w_text_lines(font,frame,utf8,x,baseline,width,max_lines,pitch,NULL);
     text_ink=ink_saved;text_bold=bold_saved;return status;
 }
+pn_status_t pn_w_text_lines_centered_ex(pn_font_t *font,pn_frame_t *frame,const char *utf8,int x,int baseline,int width,unsigned max_lines,int pitch,uint8_t ink,bool bold,unsigned *used){
+    if(!frame)return PN_INVALID;
+    uint8_t ink_saved=text_ink;bool bold_saved=text_bold;text_ink=ink>15?15:ink;text_bold=bold;
+    fallback_sizes_t saved=fallback_saved();pn_status_t status=fallback_restore(saved,text_lines_impl(font,frame,utf8,x,baseline,width,max_lines,pitch,0,0,true,used));
+    text_ink=ink_saved;text_bold=bold_saved;return status;
+}
+pn_status_t pn_w_text_lines_measure_ex(pn_font_t *font,const char *utf8,int width,unsigned max_lines,bool bold,unsigned *used){
+    if(!used)return PN_INVALID;
+    bool bold_saved=text_bold;text_bold=bold;fallback_sizes_t saved=fallback_saved();
+    pn_status_t status=fallback_restore(saved,text_lines_impl(font,NULL,utf8,0,0,width,max_lines,1,0,0,false,used));text_bold=bold_saved;return status;
+}
 pn_status_t pn_w_text_width_ex(pn_font_t *font,const char *utf8,bool bold,int *width){
     bool bold_saved=text_bold;text_bold=bold;pn_status_t status=pn_w_text_width(font,utf8,width);text_bold=bold_saved;return status;
 }
 pn_status_t pn_w_text_width(pn_font_t *font,const char *utf8,int *width){fallback_sizes_t saved=fallback_saved();return fallback_restore(saved,text_width_impl(font,utf8,width));}
 pn_status_t pn_w_text(pn_font_t *font,pn_frame_t *frame,const char *utf8,int x,int baseline,int max_width,pn_align_t align){fallback_sizes_t saved=fallback_saved();return fallback_restore(saved,text_impl(font,frame,utf8,x,baseline,max_width,align));}
-pn_status_t pn_w_text_lines(pn_font_t *font,pn_frame_t *frame,const char *utf8,int x,int baseline,int width,unsigned max_lines,int pitch,unsigned *used){fallback_sizes_t saved=fallback_saved();return fallback_restore(saved,text_lines_impl(font,frame,utf8,x,baseline,width,max_lines,pitch,0,0,false,used));}
-pn_status_t pn_w_text_flow(pn_font_t *font,pn_frame_t *frame,const char *utf8,int x,int baseline,int width,unsigned max_lines,int pitch,int first_indent,int tracking_64,unsigned *used){fallback_sizes_t saved=fallback_saved();return fallback_restore(saved,text_lines_impl(font,frame,utf8,x,baseline,width,max_lines,pitch,first_indent,tracking_64,false,used));}
+pn_status_t pn_w_text_lines(pn_font_t *font,pn_frame_t *frame,const char *utf8,int x,int baseline,int width,unsigned max_lines,int pitch,unsigned *used){if(!frame)return PN_INVALID;fallback_sizes_t saved=fallback_saved();return fallback_restore(saved,text_lines_impl(font,frame,utf8,x,baseline,width,max_lines,pitch,0,0,false,used));}
+pn_status_t pn_w_text_flow(pn_font_t *font,pn_frame_t *frame,const char *utf8,int x,int baseline,int width,unsigned max_lines,int pitch,int first_indent,int tracking_64,unsigned *used){if(!frame)return PN_INVALID;fallback_sizes_t saved=fallback_saved();return fallback_restore(saved,text_lines_impl(font,frame,utf8,x,baseline,width,max_lines,pitch,first_indent,tracking_64,false,used));}
 void pn_w_outline(pn_frame_t *frame,int x,int y,int width,int height,int thickness,uint8_t shade){
     if(!frame || width<=0 || height<=0 || thickness<=0)return;
     if(thickness*2>width)thickness=width/2;

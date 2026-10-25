@@ -35,7 +35,9 @@ with tempfile.TemporaryDirectory() as folder:
         return r.stdout
 
     enter = "library,tap:460:190,tap:100:400,wait:400,"
-    out = run(enter + "enter,wait:1000,window-close")
+    out = run(enter + "enter,window-close")
+    assert not list(state.glob('sudoku.[ab]')) and out.count('entertainment page=1 status=0') >= 2, out
+    out = run(enter + "tap:340:1040,wait:1000,window-close")
     assert "sudoku screen=1 status=0" in out, out
     first = snapshot(state)
     cell = next(i for i, clue in enumerate(first[32:113]) if not clue)
@@ -45,6 +47,9 @@ with tempfile.TemporaryDirectory() as folder:
     notes = snapshot(state)
     assert notes[8] == 1 and notes[7] == cell and int.from_bytes(notes[194+cell*2:196+cell*2], "little") == 1
     assert notes[16:20] == first[16:20] and notes[32:113] == first[32:113]
+    out = run(enter+'tap:588:72,enter,window-close')
+    assert out.count('entertainment page=1 status=0') >= 2 and 'sudoku screen=2 status=0' not in out, out
+    assert snapshot(state)[32:] == notes[32:]
     out = run(enter + "lock,wait:1500,enter,wait:400,window-close")
     locked = snapshot(state)
     assert "lock_preview status=0" in out and "lock_preview wake status=0" in out, out

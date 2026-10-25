@@ -5,8 +5,17 @@
 #include <stdio.h>
 static const char *const tiers[]={"简单","中等","困难","极难"};
 static bool inside(int x,int y,int a,int b,int w,int h){return x>=a && y>=b && x<a+w && y<b+h;}
+/// 静态键帽用底沿/高光表达厚度，启用状态内凹；不增加按压动画或画布。/ Static keycaps use a base/highlight for depth and inset active faces, without press animations or another canvas.
+static void keycap(pn_frame_t *p,int x,int y,int w,int h,bool active){
+    int radius=h<80?8:10;
+    pn_w_round_fill(p,x+1,y+4,w-2,h-4,radius,7);
+    pn_w_round_fill(p,x,y,w,h-4,radius,active?0:11);
+    pn_w_round_fill(p,x+2,y+2,w-4,h-12,radius-2,active?2:15);
+    pn_w_round_outline(p,x,y,w,h-4,radius,1,active?0:6);
+    pn_frame_rect(p,x+radius,y+2,w-radius*2,1,active?6:15);
+}
 static pn_status_t label(pn_font_t *f,pn_frame_t *p,const char *s,int y,int size){pn_status_t r=pn_font_size(f,size);return r==PN_OK?pn_w_text(f,p,s,36,y,612,PN_ALIGN_CENTER):r;}
-static pn_status_t button(pn_font_t *f,pn_frame_t *p,const char *s,int y,unsigned flags){pn_status_t r=pn_font_size(f,28);return r==PN_OK?pn_w_button(f,p,s,36,y,612,80,flags):r;}
+static pn_status_t button(pn_font_t *f,pn_frame_t *p,const char *s,int y,unsigned flags){bool active=(flags&PN_W_SELECTED)!=0;keycap(p,36,y,612,80,active);pn_status_t r=pn_font_size(f,28);return r==PN_OK?pn_w_text_ex(f,p,s,36,y+50,612,PN_ALIGN_CENTER,active?15:0,false):r;}
 /// 静态九宫几何，无素材、动画或额外画布。/ Static nine-cell geometry without assets, animation or another canvas.
 static void geometry(pn_frame_t *p,int x,int y,int size){
     int gap=size/10,cell=(size-gap*2)/3;
@@ -68,13 +77,13 @@ pn_status_t pn_sudoku_render(const pn_sudoku_t *u,pn_font_t *f,pn_frame_t *p){
         if(g->screen==PN_SU_COMPLETE){DRAW(label(f,p,"完成了！留住这一刻",888,32));DRAW(button(f,p,"同难度再来一局",928,PN_W_SELECTED));DRAW(button(f,p,"选择其他难度",1012,0));DRAW(button(f,p,"返回娱乐",1096,PN_W_PLAIN));}
         else{
             static const char *const names[]={"撤销","擦除","笔记","检查","提示","新局"};DRAW(pn_font_size(f,24));
-            for(int i=0;i<6;i++){int x=36+i%3*208,y=770+i/3*72;bool note=i==2 && g->state.note_mode;pn_w_round_fill(p,x,y,196,64,8,note?0:15);pn_w_round_outline(p,x,y,196,64,8,1,note?0:10);DRAW(pn_w_text_ex(f,p,note?"笔记中":names[i],x,y+41,196,PN_ALIGN_CENTER,note?15:0,false));}
-            for(int i=0;i<9;i++){int x,y;digit_rect(i,&x,&y);char n[2]={(char)('1'+i),0};pn_w_round_outline(p,x,y,196,84,10,1,9);DRAW(pn_font_size(f,40));DRAW(pn_w_text(f,p,n,x,y+56,196,PN_ALIGN_CENTER));}
+            for(int i=0;i<6;i++){int x=36+i%3*208,y=770+i/3*72;bool note=i==2 && g->state.note_mode;keycap(p,x,y,196,64,note);DRAW(pn_w_text_ex(f,p,note?"笔记中":names[i],x,y+39,196,PN_ALIGN_CENTER,note?15:0,false));}
+            for(int i=0;i<9;i++){int x,y;digit_rect(i,&x,&y);char n[2]={(char)('1'+i),0};keycap(p,x,y,196,84,false);DRAW(pn_font_size(f,40));DRAW(pn_w_text(f,p,n,x,y+53,196,PN_ALIGN_CENTER));}
         }
     }else if(g->screen==PN_SU_SELECT){
         geometry(p,252,228,180);DRAW(label(f,p,"一格一数，从容推演",458,32));
         static const char *const detail[]={"简单 · 直接排除","中等 · 寻找唯一","困难 · 组合推演","极难 · 进阶技巧"};
-        DRAW(pn_font_size(f,30));for(unsigned i=0;i<4;i++)DRAW(pn_w_button(f,p,detail[i],36,484+(int)i*110,612,94,g->tier==i?PN_W_SELECTED:0));
+        DRAW(pn_font_size(f,30));for(unsigned i=0;i<4;i++){int y=484+(int)i*110;keycap(p,36,y,612,94,g->tier==i);DRAW(pn_w_text_ex(f,p,detail[i],36,y+59,612,PN_ALIGN_CENTER,g->tier==i?15:0,false));}
         DRAW(button(f,p,"开始游戏",1006,PN_W_SELECTED));if(g->has)DRAW(button(f,p,"继续当前棋局",1090,PN_W_PLAIN));
     }else if(g->screen==PN_SU_MENU){
         DRAW(label(f,p,"棋局已暂停",242,34));
