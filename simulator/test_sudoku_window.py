@@ -39,9 +39,9 @@ with tempfile.TemporaryDirectory() as folder:
     assert "sudoku screen=1 status=0" in out, out
     first = snapshot(state)
     cell = next(i for i, clue in enumerate(first[32:113]) if not clue)
-    tap = f"tap:{86+cell%9*64}:{284+cell//9*64}"
+    tap = f"tap:{70+cell%9*68}:{178+cell//9*68}"
     # 候选1和9后撤销9，退出重开保持1与笔记模式。/ Notes 1/9 then undo 9; reopen preserving note 1 and note mode.
-    out = run(enter + tap + ",tap:418:880,tap:90:980,tap:520:1100,tap:110:880,back,window-close", 2097152)
+    out = run(enter + tap + ",tap:550:802,tap:134:960,tap:550:1144,tap:134:802,back,window-close", 2097152)
     notes = snapshot(state)
     assert notes[8] == 1 and notes[7] == cell and int.from_bytes(notes[194+cell*2:196+cell*2], "little") == 1
     assert notes[16:20] == first[16:20] and notes[32:113] == first[32:113]
@@ -51,7 +51,8 @@ with tempfile.TemporaryDirectory() as folder:
     assert locked[32:] == notes[32:] and locked[7:14] == notes[7:14]
     assert int.from_bytes(locked[24:32], "little") - int.from_bytes(notes[24:32], "little") < 1500
     # 取消换题与重玩确认均不修改局；拖出数字键不输入。/ Cancel both new/restart confirmations; dragging off a digit must not enter it.
-    out = run(enter + "tap:570:880,tap:340:802,tap:340:1040,tap:340:844,tap:340:1120,tap:570:880,tap:340:682,tap:340:844,back,press:130:980,move:675:940,release:675:940,window-close")
+    out = run(enter + "tap:550:874,tap:340:1040,tap:340:844,tap:340:1120,tap:588:72,tap:340:844,press:134:960,move:675:940,release:675:940,window-close")
+    assert 'sudoku screen=2 status=0' not in out, out
     same = snapshot(state)
     assert same[16:24] == notes[16:24] and same[32:] == notes[32:]
     # 空闲跨过旧动画期限和30秒自动保存，不能产生额外帧。/ Cross former animation deadlines and the 30-second autosave without extra frames.
@@ -102,9 +103,14 @@ with tempfile.TemporaryDirectory() as folder:
     run(enter+'back,window-close')
     resumed = snapshot(state)
     assert resumed[7:24] == changed[7:24] and resumed[32:] == changed[32:]
-    run(enter+'tap:570:880,tap:340:842,tap:340:1040,tap:340:748,wait:1000,window-close')
+    run(enter+'tap:550:874,tap:340:1040,tap:340:748,wait:1000,window-close')
     fresh = snapshot(state)
     assert sum(byte.bit_count() for byte in fresh[356:506]) == 1, fresh[356:506]
     assert 44 <= sum(bool(v) for v in fresh[32:113]) <= 50
     assert fresh[16:20] != payload[16:20] and fresh[10] == 0 and not any(fresh[194:356])
+    out = run(enter+'tap:134:874,tap:342:874,back,window-close')
+    hinted = snapshot(state)
+    assert int.from_bytes(hinted[12:14], 'little') == 1
+    assert sum(a != b for a,b in zip(fresh[113:194], hinted[113:194])) == 1
+    assert 'sudoku screen=2 status=0' not in out, out
     print('sudoku upgrade: schema1 retired puzzle and schema2 changed bank retain progress; new easy game rebases history')

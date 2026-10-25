@@ -377,6 +377,31 @@ pn_status_t pn_shelf_covers_cached(pn_shelf_covers_t *covers,const pn_catalog_pa
 static bool resident_match(const pn_shelf_covers_t *c,size_t slot,const pn_catalog_item_t *item,const uint8_t key[KEY_BYTES],const pn_book_id_t *path){
     return (c->resident_valid&(1u<<slot)) && c->state[slot]!=PN_COVER_PENDING && c->resident_format[slot]==item->format && !memcmp(c->resident_path_hash[slot],path->sha256,sizeof path->sha256) && !memcmp(c->cache_key[slot],key,KEY_BYTES);
 }
+pn_status_t pn_cover_preview(pn_pool_t *pool,pn_media_t *media,const char *directory,const pn_catalog_item_t *item,const pn_shelf_covers_t *covers,pn_book_preview_t *out){
+    if(!out)return PN_INVALID;
+    memset(out,0,sizeof *out);if(!pool || !media || !item)return PN_INVALID;
+    pn_media_lease_t lease;pn_status_t s=pn_media_acquire(media,PN_MEDIA_READ,&lease);if(s!=PN_OK)return s;
+    cover_key_t key,after;uint8_t encoded[KEY_BYTES],checked[KEY_BYTES];pn_book_id_t path;
+    s=cover_key(media,item,&key);if(s==PN_OK){encode_key(encoded,&key);s=pn_identity_bytes((const uint8_t *)item->path,strlen(item->path),&path);}
+    bool found=false;
+    if(s==PN_OK && covers && covers->resident_media==media && covers->resident_epoch==media->epoch && covers->resident_media_id==media->media_id){
+        for(size_t i=0;i<=PN_COVER_SLOT_LAST;i++)if(resident_match(covers,i,item,encoded,&path)){
+            out->ready=covers->state[i]==PN_COVER_READY;out->display=covers->display[i];
+            if(out->ready)memcpy(out->pixels,covers->pixels[i],PN_COVER_BYTES);
+            found=true;break;
+        }
+    }
+    if(s==PN_OK && !found){
+        if(directory && *directory){pn_cover_state_t state=PN_COVER_PENDING;pn_status_t reason=PN_EMPTY;
+            s=cache_load(pool,media,&lease,directory,item,&key,&state,&reason,out->pixels,&out->display,0);out->ready=s==PN_OK && state==PN_COVER_READY;
+        }else s=PN_EMPTY;
+    }
+    if(s==PN_OK)s=cover_key(media,item,&after);
+    if(s==PN_OK){encode_key(checked,&after);if(memcmp(encoded,checked,KEY_BYTES))s=PN_STALE_MEDIA;}
+    if(s==PN_OK)s=pn_media_validate(media,&lease);
+    if(s!=PN_OK)memset(out,0,sizeof *out);
+    (void)pn_media_release(media,&lease);return s;
+}
 /// 用不显示且无有效像素的槽保留即将被覆盖的旧源，不增加缓存容量。/ Keep a displaced source in an undisplayed invalid slot without enlarging the cache.
 static void resident_preserve(pn_shelf_covers_t *c,const pn_catalog_item_t *const *items,size_t slot){
     if(!(c->resident_valid&(1u<<slot)))return;

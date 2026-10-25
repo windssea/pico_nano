@@ -75,6 +75,14 @@ static int queue(const char *directory,const char *output,const char *cache){
             if(covers->state[i]==PN_COVER_FAILED && covers->reason[i]==PN_NO_MEMORY){assert(again->state[i]==PN_COVER_PENDING);continue;}
             assert(again->state[i]==covers->state[i] && again->reason[i]==covers->reason[i] && !memcmp(&again->display[i],&covers->display[i],sizeof again->display[i]));if(again->state[i]==PN_COVER_READY)assert(!memcmp(again->pixels[i],covers->pixels[i],PN_COVER_BYTES));
             if(again->state[i]==PN_COVER_READY){uint8_t one[PN_COVER_BYTES];pn_frame_t f;pn_book_display_t metadata;
+                pn_book_preview_t *preview=calloc(1,sizeof *preview);assert(preview);
+                assert(pn_cover_preview(&pool,&media,NULL,&page->items[i],covers,preview)==PN_OK && preview->ready);
+                assert(!memcmp(preview->pixels,covers->pixels[i],PN_COVER_BYTES) && !memcmp(&preview->display,&covers->display[i],sizeof preview->display));
+                assert(pn_cover_preview(&pool,&media,dir,&page->items[i],NULL,preview)==PN_OK && preview->ready);
+                assert(!memcmp(preview->pixels,covers->pixels[i],PN_COVER_BYTES));
+                pool.fail_at=pool.attempts+1;assert(pn_cover_preview(&pool,&media,dir,&page->items[i],NULL,preview)==PN_NO_MEMORY && !preview->ready && !*preview->display.title);pool.fail_at=0;
+                assert(pn_cover_preview(&pool,&media,NULL,&page->items[i],NULL,preview)==PN_EMPTY && !preview->ready && !*preview->display.title);
+                free(preview);assert(!pool.used && !pool.live);
                 assert(pn_frame_bind(&f,one,sizeof one,PN_COVER_WIDTH,PN_COVER_HEIGHT));
                 assert(pn_cover_cached_one(&pool,&media,dir,&page->items[i],&f,&metadata)==PN_OK);
                 assert(!memcmp(one,covers->pixels[i],sizeof one) && !memcmp(&metadata,&covers->display[i],sizeof metadata));

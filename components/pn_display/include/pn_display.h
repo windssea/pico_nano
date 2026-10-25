@@ -21,7 +21,7 @@ typedef enum {
     PN_REFRESH_RIPPLE_REVERSE, ///< 上一页水波纹（镜像）/ Previous-page ripple (mirrored)
     PN_REFRESH_RIPPLE_CLEAN, ///< 定期清残影的下一页：原GC16按弧形错峰 / Next page on a cleaning turn: original GC16 staggered by arc
     PN_REFRESH_RIPPLE_CLEAN_REVERSE, ///< 定期清残影的上一页 / Previous page on a cleaning turn
-    PN_REFRESH_EXIT_GC16 ///< 退出阅读时完整整屏GC16；控制层专用，不进入通用调度队列 / Full-screen original GC16 on reading exit; control-layer only, never queued by the generic scheduler
+    PN_REFRESH_EXIT_GC16 ///< 退出阅读/游戏时完整整屏GC16；控制层专用 / Full-screen original GC16 on reading/game exit; control-layer only
 } pn_refresh_t;
 typedef enum {
     PN_BUFFER_FREE=0, ///< 空闲 / Free

@@ -26,8 +26,11 @@ int main(void){
     assert(pn_sudoku_pause(&u,30001)==PN_OK);
     pn_sudoku_close(&u);assert(pn_sudoku_open(&u,&pool,&media,root,NULL,0,clock_ms)==PN_OK);
     event(&u,PN_SU_START);finish(&u);assert(pn_sudoku_screen(&u)==PN_SU_PLAY);su_t *g=u.impl;solution_valid(g);
-    for(int i=0;i<9;i++){int x=(i<5?36:98)+(i<5?i:i-5)*124,y=i<5?936:1052;assert(pn_sudoku_hit(&u,x,y)==PN_SU_DIGIT+i+1 && pn_sudoku_hit(&u,x+111,y+103)==PN_SU_DIGIT+i+1 && !pn_sudoku_hit(&u,x+112,y+20));}
-    assert(!pn_sudoku_hit(&u,182,880) && pn_sudoku_hit(&u,54,252)==PN_SU_CELL && pn_sudoku_hit(&u,629,827)==PN_SU_CELL+80);
+    event(&u,PN_SU_RESTART);event(&u,PN_SU_CANCEL);assert(pn_sudoku_screen(&u)==PN_SU_PLAY);
+    event(&u,PN_SU_MENU_OPEN);event(&u,PN_SU_RESTART);event(&u,PN_SU_CANCEL);assert(pn_sudoku_screen(&u)==PN_SU_MENU);event(&u,PN_SU_RESUME);
+    for(int i=0;i<9;i++){int x=36+i%3*208,y=918+i/3*92;assert(pn_sudoku_hit(&u,x,y)==PN_SU_DIGIT+i+1 && pn_sudoku_hit(&u,x+195,y+83)==PN_SU_DIGIT+i+1 && !pn_sudoku_hit(&u,x+196,y+20));}
+    assert(!pn_sudoku_hit(&u,238,800) && pn_sudoku_hit(&u,36,144)==PN_SU_CELL && pn_sudoku_hit(&u,647,755)==PN_SU_CELL+80);
+    assert(pn_sudoku_hit(&u,134,874)==PN_SU_CHECK && pn_sudoku_hit(&u,342,874)==PN_SU_HINT && pn_sudoku_hit(&u,550,874)==PN_SU_NEW && pn_sudoku_hit(&u,588,72)==PN_SU_RESTART);
     unsigned cell=blank(&g->state);event(&u,PN_SU_CELL+(int)cell);event(&u,PN_SU_NOTES);event(&u,PN_SU_DIGIT+1);event(&u,PN_SU_DIGIT+9);assert(g->state.notes[cell]==257);event(&u,PN_SU_UNDO);assert(g->state.notes[cell]==1);event(&u,PN_SU_NOTES);
     // 撤销窗口写满后存读，ASan覆盖序列化边界。/ Fill the undo window and round-trip it under ASan.
     for(unsigned i=0;i<70;i++){event(&u,PN_SU_DIGIT+1+(i%2));}

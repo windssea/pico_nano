@@ -134,7 +134,7 @@ static pn_status_t event_impl(pn_sudoku_t *u,int cmd,uint64_t now){
     if(cmd==PN_SU_RETRY)return save(u,now);
     if(cmd==PN_SU_EXIT){pn_status_t r=pn_sudoku_pause(u,now);if(r==PN_OK)u->active=false;return r;}
     if(cmd==PN_SU_BACK || cmd==PN_SU_CANCEL){
-        if(g->screen==PN_SU_CONFIRM_NEW || g->screen==PN_SU_CONFIRM_RESTART){g->screen=g->screen==PN_SU_CONFIRM_NEW?PN_SU_SELECT:PN_SU_MENU;return PN_OK;}
+        if(g->screen==PN_SU_CONFIRM_NEW || g->screen==PN_SU_CONFIRM_RESTART){g->screen=g->screen==PN_SU_CONFIRM_NEW?PN_SU_SELECT:g->restart_from_play?PN_SU_PLAY:PN_SU_MENU;return PN_OK;}
         if(g->screen==PN_SU_MENU || (g->screen==PN_SU_SELECT && g->has)){g->screen=g->state.complete?PN_SU_COMPLETE:PN_SU_PLAY;return PN_OK;}
         pn_status_t r=pn_sudoku_pause(u,now);if(r==PN_OK)u->active=false;return r;
     }
@@ -144,7 +144,7 @@ static pn_status_t event_impl(pn_sudoku_t *u,int cmd,uint64_t now){
     if(g->screen==PN_SU_CONFIRM_RESTART && cmd==PN_SU_CONFIRM){memcpy(g->solver.solution,g->solution,81);g->candidate=g->state;memcpy(g->candidate.values,g->candidate.clues,81);memset(g->candidate.notes,0,sizeof g->candidate.notes);g->candidate.undo_count=0;g->candidate.elapsed_ms=0;g->candidate.hints=0;g->candidate.complete=false;pn_status_t r=storage(g,&g->candidate,true);if(r==PN_OK){g->state=g->candidate;memset(g->errors,0,sizeof g->errors);g->dirty=false;g->saved_elapsed=0;g->screen=PN_SU_PLAY;}else{g->screen=PN_SU_COMMIT_ERROR;g->notice="棋局保存失败，请重试";}return r;}
     if(cmd==PN_SU_NEW || cmd==PN_SU_CHOOSE){g->screen=PN_SU_SELECT;g->tier=g->state.tier;return PN_OK;}
     if(cmd==PN_SU_AGAIN && g->screen==PN_SU_COMPLETE){g->tier=g->state.tier;return begin_new(u,now);}
-    if(cmd==PN_SU_RESTART && g->has){g->screen=PN_SU_CONFIRM_RESTART;return PN_OK;}
+    if(cmd==PN_SU_RESTART && g->has){g->restart_from_play=g->screen==PN_SU_PLAY;g->screen=PN_SU_CONFIRM_RESTART;return PN_OK;}
     if(cmd==PN_SU_MENU_OPEN && g->has){g->screen=PN_SU_MENU;return PN_OK;}
     if(g->screen!=PN_SU_PLAY && g->screen!=PN_SU_MENU)return PN_EMPTY;
     pn_sudoku_state_t *s=&g->state;

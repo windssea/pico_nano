@@ -57,6 +57,16 @@ int main(void){
     for(int y=0;y<1216;y++)for(int x=0;x<684;x++)if(y<top || y>=top+300 || x<32 || x>=652)assert(pn_frame_get(&frame,x,y)==15);
     assert(pn_w_loading(&font,&frame,"Working",detail,0,600)==PN_OK);assert(pn_w_loading(&font,&frame,"Working",detail,100,600)==PN_OK);
     assert(pn_w_loading(&font,&frame,"Working",detail,101,600)==PN_INVALID);
+    // 开书反馈静态，原生封面逐像素一致，缺封面与长元数据也可绘制。/ Opening feedback is static; native covers match every pixel, with missing-cover and long-metadata fallbacks.
+    pn_book_preview_t *preview=calloc(1,sizeof *preview);assert(preview);preview->ready=true;
+    strcpy(preview->display.title,"A book with a deliberately long title to wrap across two lines");strcpy(preview->display.author,"A verified author");
+    pn_frame_t thumb;assert(pn_frame_bind(&thumb,preview->pixels,PN_COVER_BYTES,PN_COVER_WIDTH,PN_COVER_HEIGHT));
+    for(int y=0;y<PN_COVER_HEIGHT;y++)for(int x=0;x<PN_COVER_WIDTH;x++)pn_frame_pixel(&thumb,x,y,(unsigned)(x+y)%16);
+    assert(pn_reader_opening_render(&font,&frame,"fallback.epub",preview,NULL)==PN_OK && font.pixels==28);
+    for(int y=0;y<PN_COVER_HEIGHT;y++)for(int x=0;x<PN_COVER_WIDTH;x++)assert(pn_frame_get(&frame,250+x,270+y)==pn_frame_get(&thumb,x,y));
+    uint8_t *static_frame=malloc(415872);assert(static_frame);assert(pn_reader_loading_render_phase(&font,&frame,"fallback.epub",0)==PN_OK);memcpy(static_frame,bytes,415872);
+    for(unsigned phase=1;phase<4;phase++){assert(pn_reader_loading_render_phase(&font,&frame,"fallback.epub",phase)==PN_OK);assert(!memcmp(static_frame,bytes,415872));}
+    free(static_frame);free(preview);
     const char *directory=getenv("PN_LOADING_PREVIEW");
     pn_w_font_scope_t scope={0};
     if(directory){

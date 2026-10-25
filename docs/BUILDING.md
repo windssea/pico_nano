@@ -18,6 +18,10 @@ SDL独立对照为`python simulator/test_resume_window.py <新pn_sim> <完整TTF
 
 ## 娱乐与数独的软件回归
 
+2026-10-25游戏页紧凑布局：棋盘(36,144)，68px单格；常用工具两排（撤销/擦除/笔记、检查/提示/新局），坐标中心分别(134/342/550,802/874)；数字键3×3，中心(134/342/550,960/1052/1144)，196×84px。顶部(588,72)重玩，(80,72)返回。检查/提示不进入菜单，原题与填写同时显示，用字重/大小和填写下划线区分，无切换标签。新局和重玩保留清空确认。
+
+`device_management`覆盖64次填写跨越旧区域/整屏维护阈值而不触发GC16，保存失败不退出，成功退出一次完整原表GC16；这是驱动桩回执，不是面板残影测试。`sudoku_render`仍逐像素比较局部与整绘，另检查填写标记；`sudoku_window`按新坐标覆盖恢复、取消与直接检查/提示。开书静态页由`loading`验证封面原生像素、缺图/长标题和phase兼容调用的静态一致，`cover`/`cover_work`覆盖新preview接口的常驻/PNCV、分配失败和缺失回退。
+
 题库入门分级v2复跑：`python -m unittest discover -s assets/sudoku -p test_sudoku_bank.py`及`python assets/sudoku/verify_delivery.py`（Python需Pillow）。检查全部1200题产品分档、独立精确覆盖唯一解、每步证明与二进制往返；简单档还核对44–50已知数、纯裸单、开局至少8个入口及每行/列/宫至少3个已知数。`python assets/sudoku/sudoku_bank.py --per-tier 300 --seed 20261024 --workers 4`重新筛选已有题库/检查点，再补齐，不自动接受旧简单题。
 
 `sudoku_window`另构造旧schema1棋局和题库归属不匹配的schema2棋局，验证跨进程恢复的填写、笔记、撤销、题面和用时不丢；明确新开简单题后才清旧已玩位图，按新档位选题。升级后继续旧简单局不会自动变容易，需要选择新棋局。
@@ -62,7 +66,7 @@ SDL独立对照为`python simulator/test_resume_window.py <新pn_sim> <完整TTF
 
 ## Windows 环境
 
-熊猫画面真机观察使用诊断专用指令：先回首页，经既有`device_test.py serve`会话执行`python tools/device_test.py cmd "loading 0"`，随后可发送`loading 1`、`loading 2`、`loading 3`，每帧成功后至少间隔750ms（实际扫描时间另计）；真实开书在首帧成功后100ms即可尝试首次低头，不等待演示完成；中间键返回。只投递给产品owner，不在控制台线程推屏，不开书或改进度；正式镜像不提供该设备入口。原生PNG/串口参考帧用于像素核对，动画观感和残影必须目视观察。正常书籍可能不到动画阈值就已打开，不为演示延长真实开书。
+旧熊猫姿态仅保留诊断专用演示：先回首页，经既有`device_test.py serve`会话执行`python tools/device_test.py cmd "loading 0"`，另可发送`loading 1`、`loading 2`、`loading 3`，中间键返回。只投递给产品owner，不在控制台线程推屏，不开书或改进度；正式镜像不提供该设备入口。真实开书已改为静态封面卡，不触发这些姿态或动画扫描；不要用旧演示代表当前开书行为。
 
 当前仓库 `D:\dev\windssea\pico_nano`，需要真实 Python3、Docker Desktop Linux 引擎；主机 Node 用于工具/安装器测试。Windows 的 python/python3 可能是应用商店别名，先用 `py -0p` 查解释器，本机已验证入口：
 

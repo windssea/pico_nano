@@ -3,6 +3,9 @@
 #include "pn_blob.h"
 #include "pn_font.h"
 #define PN_SUDOKU_UNDO 64
+#define PN_SU_BOARD_X 36 ///< 棋盘左边界 / Board left edge
+#define PN_SU_BOARD_Y 144 ///< 棋盘上边界 / Board top edge
+#define PN_SU_CELL_SIZE 68 ///< 同源绘制及命中尺寸 / Shared drawing and hit size
 typedef struct {
     uint8_t cell,value; ///< 修改前的格与数字 / Cell and value before an edit
     uint16_t notes; ///< 修改前笔记 / Notes before an edit

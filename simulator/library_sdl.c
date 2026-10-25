@@ -76,7 +76,6 @@ typedef struct {
     pn_hot_session_t hot; ///< 单个已保存会话，写入前释放 / One saved session, released before writes
     pn_epub_open_job_t foreground_open;pn_catalog_item_t *opening_book; ///< 私有开书任务及唯一请求快照，不提前覆盖last_read / Private opening job and sole request snapshot, never overwriting last_read early
     uint64_t open_measure_us,turn_measure_us; ///< 完整操作含让出等待，仅主机观察 / Whole operation including yield gaps, host observation only
-    pn_loading_motion_t opening_motion; ///< 同源低频开书动画时钟，不驻留画布 / Shared slow opening-animation clock, without a resident canvas
     pn_toc_ui_t toc;
     bool toc_pointer,pointer_down;
     pn_feedback_t feedback; ///< 独立原图/按下局部像素 / Independent original/pressed local pixels
@@ -196,7 +195,7 @@ static pn_status_t active_step(library_t *s,pn_reader_action_t action,uint64_t n
 }
 static pn_status_t opening_abort(library_t *s){
     if(s->index_gate){s->index_gate=false;if(s->epub.impl)(void)pn_epub_app_discard_unshown(&s->epub);if(s->reader.impl)(void)pn_reader_app_discard_unshown(&s->reader);}
-    s->opening_motion.active=false;pn_status_t status=pn_epub_app_open_job_close(&s->foreground_open);if(s->opening_book){pn_free(s->opening_book);s->opening_book=NULL;s->async.defer_ack=false;pn_async_block_controls(&s->async.input,false);pn_sdl_async_title(&s->async,PN_BRAND_NAME);}return status;}
+    pn_status_t status=pn_epub_app_open_job_close(&s->foreground_open);if(s->opening_book){pn_free(s->opening_book);s->opening_book=NULL;s->async.defer_ack=false;pn_async_block_controls(&s->async.input,false);pn_sdl_async_title(&s->async,PN_BRAND_NAME);}return status;}
 /// 在关闭或挂起前捕获已确认进度，不解析书籍。/ Capture confirmed progress before closing or suspending, without parsing books.
 static void bookmark_lock_capture(library_t *s){
     pn_bookmark_lock_t next={.battery=-1};unsigned basis=0;size_t section=0,count=0;
@@ -537,10 +536,16 @@ static pn_status_t page(library_t *s,bool previous,bool first){
     }else if(status==PN_OK)status=PN_EMPTY;
     pn_free(next);return status;
 }
+/// 复用已验证封面，不因开场反馈重新解析书籍。/ Reuse verified covers without reparsing books for opening feedback.
+static pn_status_t opening_paint(library_t *s,pn_font_t *font,pn_frame_t *frame,const pn_catalog_item_t *book,const char *note){
+    pn_catalog_item_t item=*book;pn_book_preview_t *preview=pn_alloc_optional(s->pool,PN_MEM_UI,sizeof *preview);
+    if(preview)(void)pn_cover_preview(s->pool,&s->media,s->cover_dir,&item,s->covers,preview);
+    pn_status_t status=pn_reader_opening_render(font,frame,item.name,preview,note);pn_free(preview);return status;
+}
 static void index_loading(library_t *s){
     uint8_t *pixels=pn_alloc_optional(s->pool,PN_MEM_FRAME,415872);pn_frame_t frame;pn_font_t font={0};pn_text_source_t source=pn_font_builtin_source();char detail[128];snprintf(detail,sizeof detail,"已建立 %u 页 · 中间键取消",s->opening_index.pages);
     pn_status_t shown=pn_frame_bind(&frame,pixels,415872,684,1216)?pn_font_open(&font,s->pool,&source,28):PN_NO_MEMORY;
-    if(shown==PN_OK){pn_frame_clear(&frame,PN_UI_PAPER);shown=pn_w_loading_phase(&font,&frame,"书籍索引建立中",detail,-1,-1,0);}
+    if(shown==PN_OK)shown=opening_paint(s,&font,&frame,s->opening_book,detail);
     if(shown==PN_OK)(void)present(s,&frame,PN_REFRESH_GL16);
     pn_font_close(&font);pn_free(pixels);
 }
@@ -578,8 +583,7 @@ static pn_status_t open_item_impl(library_t *s,const pn_catalog_item_t *book,uin
     s->open_failed=false;pn_free(s->page_px);s->page_px=NULL;
     pn_wallpaper_mask_close(&s->lock_mask);
     if(s->font.impl && s->frame.pixels && pn_hot_session_source_selected(&s->hot,&s->media,book->path,book->format,book->identified?&book->expected:NULL,1,now)){
-        status=pn_reader_loading_render(&s->font,&s->frame,book->name);if(status==PN_OK)status=present(s,&s->frame,PN_REFRESH_GL16);if(status==PN_CANCELLED)return status;
-        if(status==PN_OK)pn_loading_motion_begin(&s->opening_motion,SDL_GetTicks64());
+        status=opening_paint(s,&s->font,&s->frame,book,NULL);if(status==PN_OK)status=present(s,&s->frame,PN_REFRESH_GL16);if(status==PN_CANCELLED)return status;
         s->opening_book=pn_alloc_tagged(s->pool,PN_MEM_DOCUMENT,sizeof *s->opening_book);if(!s->opening_book)return PN_NO_MEMORY;*s->opening_book=*book;
         status=pn_hot_session_take_opening(&s->hot,&s->media,book->path,book->identified?&book->expected:NULL,1,now,&s->foreground_open);
         if(status==PN_OK){pn_font_close(&s->font);pn_free(s->frame.pixels);s->frame.pixels=NULL;return PN_BUSY;}
@@ -595,7 +599,7 @@ static pn_status_t open_item_impl(library_t *s,const pn_catalog_item_t *book,uin
         return PN_OK;}
     if(status==PN_IO || status==PN_CANCELLED)return status;
     status=pn_hot_session_drop(&s->hot);if(status!=PN_OK)return status;
-    if(pn_reader_loading_needed(book->format==PN_BOOK_TXT,book->size) && s->font.impl && s->frame.pixels){status=pn_reader_loading_render(&s->font,&s->frame,book->name);if(status==PN_OK)status=present(s,&s->frame,PN_REFRESH_GL16);if(status==PN_OK)pn_loading_motion_begin(&s->opening_motion,SDL_GetTicks64());if(status==PN_CANCELLED)return status;}
+    if(pn_reader_loading_needed(book->format==PN_BOOK_TXT,book->size) && s->font.impl && s->frame.pixels){status=opening_paint(s,&s->font,&s->frame,book,NULL);if(status==PN_OK)status=present(s,&s->frame,PN_REFRESH_GL16);if(status==PN_CANCELLED)return status;}
     if(book->format==PN_BOOK_EPUB){
         s->opening_book=pn_alloc_tagged(s->pool,PN_MEM_DOCUMENT,sizeof *s->opening_book);if(!s->opening_book)return PN_NO_MEMORY;*s->opening_book=*book;
         pn_font_close(&s->font);pn_free(s->frame.pixels);s->frame.pixels=NULL;
@@ -612,7 +616,7 @@ static pn_status_t open_item(library_t *s,const pn_catalog_item_t *book,uint64_t
     s->open_measure_us=pn_profile_time();
     pn_async_block_controls(&s->async.input,true);pn_sdl_async_title(&s->async,PN_BRAND_NAME " - 正在打开书籍");
     s->async.context=18;pn_async_set_view(&s->async.input,18u|(s->async.revision<<16),false);
-    s->opening_motion.active=false;printf("opening begin name=%s\n",book->name);pn_status_t status=open_item_impl(s,book,now);
+    printf("opening begin name=%s\n",book->name);pn_status_t status=open_item_impl(s,book,now);
     if(status==PN_BUSY && (s->foreground_open.impl || s->index_gate)){s->async.defer_ack=true;return status;}
     pn_async_block_controls(&s->async.input,false);pn_sdl_async_title(&s->async,PN_BRAND_NAME);
     if(s->open_measure_us){uint64_t end=pn_profile_time();pn_profile_observe(s->pool,"sim.open.request",status,end-s->open_measure_us,NULL);s->open_measure_us=0;}
@@ -629,22 +633,7 @@ static void tick_opening(library_t *s,uint64_t now){
     }
 
     pn_status_t status=pn_epub_app_open_job_step(&s->foreground_open,&s->epub);
-    if(status==PN_BUSY || (status==PN_CANCELLED && pn_epub_app_open_job_pending(&s->foreground_open))){
-        if(status==PN_BUSY && pn_cancel_checkpoint()==PN_OK && pn_loading_motion_poll(&s->opening_motion,now)){
-            if(s->pool->used>s->pool->limit || s->pool->limit-s->pool->used<512u*1024u)s->opening_motion.active=false;
-            else{
-                // 临时借用原池；不为动画保留整屏帧或字体，失败只停止装饰。/ Borrow the original pool temporarily; keep no animation frame or font, and stop only decoration on failure.
-                uint8_t *pixels=pn_alloc_tagged(s->pool,PN_MEM_FRAME,342u*1216u);pn_frame_t view;pn_font_t ui={0};pn_text_source_t source=pn_font_builtin_source();
-                pn_status_t visual=pn_frame_bind(&view,pixels,342u*1216u,684,1216)?pn_font_open(&ui,s->pool,&source,28):PN_NO_MEMORY;
-                if(visual==PN_OK)visual=pn_reader_loading_render_phase(&ui,&view,s->opening_book->name,s->opening_motion.phase);
-                if(visual==PN_OK)visual=present(s,&view,PN_REFRESH_GL16);
-                pn_font_close(&ui);pn_free(pixels);
-                if(visual!=PN_OK)s->opening_motion.active=false;else s->opening_motion.last_ms=SDL_GetTicks64();
-            }
-        }
-        return;
-    }
-    s->opening_motion.active=false;
+    if(status==PN_BUSY || (status==PN_CANCELLED && pn_epub_app_open_job_pending(&s->foreground_open)))return;
     pn_catalog_item_t *book=s->opening_book;s->opening_book=NULL;
     if((s->foreground_open.impl || s->index_gate))(void)pn_epub_app_open_job_close(&s->foreground_open);
     (void)finish_open(s,book,now,status);pn_free(book);

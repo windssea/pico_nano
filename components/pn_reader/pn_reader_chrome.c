@@ -10,6 +10,7 @@
 #include "pn_builtin_art.h"
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
 #define TOOL_COUNT 6
 #define SHEET_PADDING 32
 #define BUTTON_W 196
@@ -102,10 +103,31 @@ pn_status_t pn_reader_loading_render(pn_font_t *ui,pn_frame_t *frame,const char 
     return pn_reader_loading_render_phase(ui,frame,title,0);
 }
 pn_status_t pn_reader_loading_render_phase(pn_font_t *ui,pn_frame_t *frame,const char *title,unsigned phase){
+    (void)phase;return pn_reader_opening_render(ui,frame,title,NULL,NULL);
+}
+pn_status_t pn_reader_opening_render(pn_font_t *ui,pn_frame_t *frame,const char *title,const pn_book_preview_t *preview,const char *note){
     if(!ui || !ui->impl || !frame || !frame->pixels || !title)return PN_INVALID;
     int original=ui->pixels;pn_frame_clear(frame,PN_UI_PAPER);
-    pn_status_t status=pn_font_size(ui,28);
-    if(status==PN_OK)status=pn_w_text(ui,frame,PN_BRAND_NAME,32,72,frame->width-64,PN_ALIGN_CENTER);
-    if(status==PN_OK)status=pn_w_loading_phase(ui,frame,"正在打开书籍",title,-1,-1,phase);
+    char fallback[512];snprintf(fallback,sizeof fallback,"%s",title);char *dot=strrchr(fallback,'.');
+    if(dot && (!strcasecmp(dot,".epub") || !strcasecmp(dot,".txt")))*dot=0;
+    const char *name=preview && *preview->display.title?preview->display.title:fallback;
+    const char *author=preview && *preview->display.author?preview->display.author:"作者信息暂无";
+    pn_status_t status=pn_font_size(ui,24);
+#define OPEN_DRAW(expr) do{if(status==PN_OK)status=(expr);}while(0)
+    OPEN_DRAW(pn_w_text(ui,frame,PN_BRAND_NAME,48,78,588,PN_ALIGN_LEFT));pn_frame_rect(frame,48,107,588,1,11);
+    // 原生缩略图保持184×256，不拉伸、不重新解码。/ Keep native thumbnails at 184x256, without stretching or decoding again.
+    pn_frame_rect(frame,202,230,280,336,14);pn_frame_rect(frame,224,250,4,296,0);pn_frame_rect(frame,258,278,184,256,12);
+    if(preview && preview->ready){pn_frame_t cover;(void)pn_frame_bind(&cover,(uint8_t *)preview->pixels,PN_COVER_BYTES,PN_COVER_WIDTH,PN_COVER_HEIGHT);
+        for(int y=0;y<PN_COVER_HEIGHT;y++)for(int x=0;x<PN_COVER_WIDTH;x++)pn_frame_pixel(frame,250+x,270+y,pn_frame_get(&cover,x,y));
+    }else{pn_frame_rect(frame,250,270,184,256,15);pn_w_outline(frame,250,270,184,256,1,0);pn_frame_rect(frame,266,286,3,224,0);pn_frame_rect(frame,284,314,118,2,0);pn_frame_rect(frame,284,328,82,1,9);pn_frame_rect(frame,284,474,38,3,0);}
+    OPEN_DRAW(pn_font_size(ui,42));int title_width=0;OPEN_DRAW(pn_w_text_width_ex(ui,name,true,&title_width));
+    // 略长一行的书名轻微缩字，避免只剩一个字落到第二行。/ Slightly shrink near-single-line titles to avoid an orphan character on the second line.
+    if(status==PN_OK && title_width>556 && title_width<=648)OPEN_DRAW(pn_font_size(ui,36));
+    OPEN_DRAW(pn_w_text_lines_ex(ui,frame,name,64,638,556,2,56,0,true));
+    OPEN_DRAW(pn_font_size(ui,27));OPEN_DRAW(pn_w_text_lines_ex(ui,frame,author,64,774,556,2,38,3,false));
+    pn_frame_rect(frame,64,862,556,1,11);pn_frame_rect(frame,64,951,5,28,0);
+    OPEN_DRAW(pn_font_size(ui,28));OPEN_DRAW(pn_w_text(ui,frame,note?note:"正在打开书籍",84,976,536,PN_ALIGN_LEFT));
+    OPEN_DRAW(pn_font_size(ui,21));OPEN_DRAW(pn_w_text_ex(ui,frame,"准备好，继续你的阅读",64,1030,556,PN_ALIGN_LEFT,5,false));
+#undef OPEN_DRAW
     pn_status_t restored=pn_font_size(ui,original);return status==PN_OK?restored:status;
 }

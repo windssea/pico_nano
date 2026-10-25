@@ -218,13 +218,11 @@ static uint64_t index_work_us,index_max_batch_us,index_steps,index_batches; ///<
 static uint64_t index_progress_at; ///< 限制索引等待页重绘频率 / Throttle index-loader redraws
 static bool opening; ///< 开书控制门，产品owner串行管理 / Opening gate owned by the serial product owner
 static bool loading_shown; ///< 当前开书已显示加载反馈 / Loading feedback already shown for this opening
-static pn_loading_motion_t opening_motion; ///< 长开书低频姿态，不保留额外画布 / Slow poses for long openings, retaining no extra canvas
 #if PN_DEVICE_TEST_CONSOLE
 static bool loading_preview_active; ///< 诊断专用画面演示，不创建阅读对象或记录 / Diagnostic-only visual rehearsal without reading objects or records
 #endif
 static pn_epub_open_job_t foreground_open; ///< 跨输入轮保留的私有开书任务，不是可阅读对象 / Private opening job across input ticks, never a readable object
 static bool opening_overlap; ///< 加载页扫描期间推进前台开书任务 / Advance the foreground opening job while the loading page scans
-static bool opening_motion_scan; ///< 动画扫描不启动重排版，只接续已有绘制 / Animation scans never start heavy layout, only continue prepared painting
 static bool loading_layout_ready; ///< 只在本次加载扫描中准备一次真实首屏 / Prepare the real first-page layout once during this loading scan
 static uint64_t opening_requested_us; ///< 产品请求到首屏回执的诊断起点，含身份接管 / Diagnostic origin from product request to first-frame receipt, including identity takeover
 static bool opening_request_timed; ///< 活动的跨轮诊断，无栈scope / Active cross-tick observation without a stack scope
@@ -234,6 +232,7 @@ static const char *reader_turn_phase="prepare"; ///< 仅借静态诊断标签，
 static bool reader_prefetch_batch; ///< 空闲预排批次中的诊断归并 / Diagnostic aggregation during an idle prefetch batch
 static uint64_t reader_turn_started; ///< 原请求的单调计时 / Monotonic time of the original request
 static atomic_bool reading_presentation; ///< 此次显示的用途，独立于输入页面状态 / Purpose of this presentation, independent of input view state
+static atomic_bool sudoku_presentation; ///< 已知游戏帧只更新变化像素，退出另走整屏清理 / Known game frames update changed pixels; exit cleans the full screen separately
 static pn_status_t opening_overlap_result=PN_BUSY; ///< 扫描中已结束的开书步骤结果，tick_opening消费 / Result of an opening step that finished during the scan, consumed by tick_opening
 static atomic_bool deep_clean_pending; ///< 显式清屏意图，由显示owner消费 / Explicit cleaning intent consumed by the display owner
 static pn_catalog_index_t catalog_index;
@@ -448,7 +447,7 @@ static pn_status_t opening_abort(void){
 #endif
     index_gate=false;
     if(identity_takeover_active)identity_job_stop();
-    identity_takeover_active=false;identity_takeover_path[0]=0;opening_overlap_result=PN_BUSY;loading_shown=false;opening_motion.active=false;
+    identity_takeover_active=false;identity_takeover_path[0]=0;opening_overlap_result=PN_BUSY;loading_shown=false;
     pn_status_t s=pn_epub_app_open_job_close(&foreground_open);opening_controls(false);return s;
 }
 static pn_feedback_t press_feedback; ///< 独立、可撤销的按下区域，不借用UI对象 / Independent reversible press region without borrowing UI objects
@@ -512,11 +511,11 @@ static pn_status_t present_panel(void *ctx,const pn_frame_t *frame,pn_refresh_t 
     enum EpdDrawMode mode=(reading_exit || profile==PN_REFRESH_GC16)?MODE_GC16:MODE_GL16;
     // 风险或累计满额时在本次提交选择现有GC16，保持目标帧。/ Select existing GC16 within this submission for risk or accumulated limits, preserving the target frame.
     // 阅读页数设置不能让管理页每次点击都清屏；管理页独立使用较长保洁间隔。/ Reading-page preferences must not clear management pages on every tap; use a separate maintenance interval.
-    bool body_refresh=atomic_load(&reading_presentation);
+    bool body_refresh=atomic_load(&reading_presentation),game_refresh=atomic_load(&sudoku_presentation);
     // 退出阅读已有完整整屏GC16，GC16/深清/到期维护也已指定整屏路径，均不再做内容风险与局部区域分类。
     // Reading exit already selects full-screen original GC16; GC16/deep clean/due maintenance also select a full path, so skip content-risk and regional classification.
-    bool full_clean=reading_exit || profile==PN_REFRESH_GC16 || atomic_load(&deep_clean_pending) || (!body_refresh && maintenance.management+1u>=24u);
-    pn_device_refresh_plan_t maintenance_plan=(!known || full_clean)?(pn_device_refresh_plan_t){.area=dirty}:pn_device_refresh_plan_masked(&maintenance,hardware.framebuffer,hardware.hl.back_fb,body_refresh,dirty,dirty_rows,sizeof dirty_rows);
+    bool full_clean=reading_exit || profile==PN_REFRESH_GC16 || atomic_load(&deep_clean_pending) || (!body_refresh && !game_refresh && maintenance.management+1u>=24u);
+    pn_device_refresh_plan_t maintenance_plan=(!known || full_clean || game_refresh)?(pn_device_refresh_plan_t){.area=dirty}:pn_device_refresh_plan_masked(&maintenance,hardware.framebuffer,hardware.hl.back_fb,body_refresh,dirty,dirty_rows,sizeof dirty_rows);
     const char *reason=mode==MODE_GC16?"requested":body_refresh?"reading":"management";
     (void)reason;
     // 已知参考的管理页（菜单切换、设置进出、书籍菜单开合、书库翻页）都只局部替换变化像素，不因内容风险整屏闪；需要区域整理时仍走原全驱动。
@@ -524,7 +523,7 @@ static pn_status_t present_panel(void *ctx,const pn_frame_t *frame,pn_refresh_t 
     bool flip=known && !reading_exit && !body_refresh && mode!=MODE_GC16 && !maintenance_plan.regional;(void)atomic_load(&shelf_flip);
     if(mode!=MODE_GC16 && maintenance_plan.content_clean && !flip){mode=MODE_GC16;reason="content-transition";}
     bool flat_white=false; ///< 菜单维护改为平铺白推，不整屏闪黑 / Menu maintenance as a flat white push instead of a full dark flash
-    if(!reading_exit && !body_refresh && mode!=MODE_GC16 && maintenance.management+1>=24u){
+    if(!reading_exit && !body_refresh && !game_refresh && mode!=MODE_GC16 && maintenance.management+1>=24u){
 #if defined(ESP_PLATFORM)
         // 账本完整时四次维护里三次只白推变过色、现为纯白的像素，第四次才用原GC16整屏清理（均衡直流、清深色残影）。
         // With a complete ledger, three of four maintenances only white-push pixels that changed and are now pure white; the fourth uses the original full GC16 (DC balance, dark ghosts).
@@ -642,7 +641,7 @@ static pn_status_t present_panel(void *ctx,const pn_frame_t *frame,pn_refresh_t 
         if(!reading_exit && !body_refresh && maintenance.management+1u>=24u)menu_cleans++;
 #endif
         // 白推同样算一次清理：重置翻页/维护计数，避免下一次立即再触发。/ A white push also counts as a clean, resetting turn/maintenance counters so it does not retrigger at once.
-        pn_device_refresh_commit(&maintenance,body_refresh,mode==MODE_GC16 || white_cleaned,management_full,maintenance_plan);
+        pn_device_refresh_commit(&maintenance,body_refresh || game_refresh,mode==MODE_GC16 || white_cleaned,management_full,maintenance_plan);
         if(mode==MODE_GC16 || white_cleaned)atomic_store(&full_clean_completed,true);
     }else if(deep_clean)atomic_store(&deep_clean_pending,true);
     // epdiy已把前缓冲写入后缓冲；失败时panel_known=false，下次从白场整屏重建。/ epdiy already copied the front buffer into the back buffer; on failure panel_known=false forces a full rebuild from white next time.
@@ -807,7 +806,6 @@ static pn_status_t reader_overlap(void *ctx){(void)ctx;
         if(step!=PN_CANCELLED)opening_overlap_result=step;
         return step==PN_OK?PN_OK:PN_EMPTY;}
     if(opening_overlap && opening_overlap_result==PN_OK && epub.impl && !atomic_load(&overlap_disabled)){
-        if(opening_motion_scan && !loading_layout_ready)return PN_EMPTY;
         if(!loading_layout_ready){
             pn_profile_span_t timing;pn_profile_begin(&timing,&pool,"epub.open.first-layout");
             pn_status_t s=pn_epub_app_prepare_unshown(&epub);pn_profile_end(&timing,s);loading_layout_ready=s==PN_OK;
@@ -1346,7 +1344,7 @@ static pn_status_t sudoku_draw(void){
         r=patch==PN_UNSUPPORTED?pn_sudoku_render(&sudoku,&font,&frame):patch;
     }
     pn_profile_end(&timing,r);
-    if(r==PN_OK)r=present(NULL,&frame,PN_REFRESH_GL16);
+    if(r==PN_OK){atomic_store(&sudoku_presentation,pn_sudoku_screen(&sudoku)==PN_SU_PLAY);r=present(NULL,&frame,PN_REFRESH_GL16);atomic_store(&sudoku_presentation,false);}
     if(r==PN_OK)sudoku_draw_revision=async_port.revision;
     management_font_end(&font);pn_free(pixels);sudoku_retry=now_ms();pn_sudoku_displayed(&sudoku,r==PN_OK,sudoku_retry);
     ESP_LOGI(TAG,"Sudoku screen=%d status=%d used=%u peak=%u",pn_sudoku_screen(&sudoku),r,(unsigned)pool.used,(unsigned)pool.peak);return r;
@@ -1359,7 +1357,7 @@ static void sudoku_open(void){
 }
 static void sudoku_command(int command){
     pn_status_t r=pn_sudoku_event(&sudoku,command,now_ms());
-    if(!sudoku.active){pn_sudoku_close(&sudoku);entertainment=1;home_mode=false;show_shelf("",false);}
+    if(!sudoku.active){pn_sudoku_close(&sudoku);entertainment=1;home_mode=false;show_shelf_profile("",false,PN_REFRESH_EXIT_GC16);}
     else if(!sudoku.presented)(void)sudoku_draw();
     if(r!=PN_OK && r!=PN_EMPTY && r!=PN_BUSY)ESP_LOGW(TAG,"Sudoku command=%d status=%d",command,r);
 }
@@ -1369,6 +1367,7 @@ static pn_status_t index_space(void *ctx,uint64_t *available){(void)ctx;size_t t
 static pn_status_t tf_index_space(void *ctx,const char *path,uint64_t *available){(void)ctx;(void)path;uint64_t total=0;return esp_vfs_fat_info(PN_SD_MOUNT,&total,available)==ESP_OK?PN_OK:PN_IO;}
 static pn_status_t semantic_space(void *ctx,const char *path,uint64_t *available){(void)path;return index_space(ctx,available);}
 static pn_status_t show_loading_phase(const char *path,unsigned phase){
+    (void)phase;
     pn_profile_span_t timing;pn_profile_begin(&timing,&pool,"epub.open.loading");
     uint8_t *pixels=pn_alloc_tagged(&pool,PN_MEM_FRAME,342u*1216u);pn_frame_t frame;pn_font_t font={0};
     pn_status_t status=pn_frame_bind(&frame,pixels,342u*1216u,684,1216)?management_font_begin(&font,28):PN_NO_MEMORY;
@@ -1378,17 +1377,23 @@ static pn_status_t show_loading_phase(const char *path,unsigned phase){
         if(loading_preview_active){pn_frame_clear(&frame,PN_UI_PAPER);status=pn_w_loading_phase(&font,&frame,"熊猫吃竹子","画面演示 · 中间键返回",-1,-1,phase);}
         else
 #endif
-        if(index_gate){char detail[128];snprintf(detail,sizeof detail,"已建立 %u 页 · 中间键取消",(unsigned)opening_index.pages);pn_frame_clear(&frame,PN_UI_PAPER);status=pn_w_loading_phase(&font,&frame,"书籍索引建立中",detail,-1,-1,phase);}
-        else status=pn_reader_loading_render_phase(&font,&frame,title,phase);
+        {
+            pn_catalog_item_t item={.format=selected_format};size_t path_length=strlen(path);
+            bool path_fits=path_length<sizeof item.path;if(path_fits)memcpy(item.path,path,path_length+1);
+            pn_book_preview_t *preview=pn_alloc_optional(&pool,PN_MEM_UI,sizeof *preview);
+            if(preview){memset(preview,0,sizeof *preview);if(path_fits)(void)pn_cover_preview(&pool,&sd_media,cover_cache,&item,shelf_covers,preview);}
+            char detail[128];if(index_gate)snprintf(detail,sizeof detail,"已建立 %u 页 · 中间键取消",(unsigned)opening_index.pages);
+            status=pn_reader_opening_render(&font,&frame,title,preview,index_gate?detail:NULL);pn_free(preview);
+        }
     }
     if(status==PN_OK)status=present(NULL,&frame,panel_known?PN_REFRESH_GL16:PN_REFRESH_GC16);
     management_font_end(&font);pn_free(pixels);pn_profile_end(&timing,status);return status;
 }
 static pn_status_t show_loading(const char *path){
     pn_status_t status=show_loading_phase(path,0);
-    if(status==PN_OK)pn_loading_motion_begin(&opening_motion,now_ms());else opening_motion.active=false;
     return status;
 }
+#if PN_DEVICE_TEST_CONSOLE
 /// 从已确认设备帧恢复，只换插画；不重新打开UI字体或重画书名。/ Restore the confirmed device frame and replace only artwork, without reopening UI fonts or redrawing the book name.
 static pn_status_t show_loading_motion(unsigned phase){
     if(!panel_known)return PN_EMPTY;
@@ -1398,6 +1403,7 @@ static pn_status_t show_loading_motion(unsigned phase){
     if(status==PN_OK){pn_w_loading_pose(&frame,-1,phase);status=present(NULL,&frame,PN_REFRESH_GL16);}
     pn_free(pixels);pn_profile_end(&timing,status);return status;
 }
+#endif
 static void reader_open_result(pn_status_t status){
     if(index_gate && status==PN_BUSY)return;
     if(opening_request_timed){uint64_t end=pn_profile_time();pn_profile_observe(&pool,"epub.open.request",status,end>=opening_requested_us?end-opening_requested_us:0,NULL);opening_request_timed=false;}
@@ -1700,34 +1706,8 @@ static bool tick_opening(void){
     // A job finished during scan overlap has closed itself, leaving only its result; it must still be consumed here or the opening gate never releases (stuck loading page).
     if(!foreground_open.impl && opening_overlap_result==PN_BUSY)return false;
     pn_status_t s=opening_overlap_result!=PN_BUSY?opening_overlap_result:pn_epub_app_open_job_step(&foreground_open,&epub);opening_overlap_result=PN_BUSY;
-    if(s==PN_BUSY || (s==PN_CANCELLED && pn_epub_app_open_job_pending(&foreground_open))){
-        // 先做真实任务，只在无取消且有原池余量时装饰等待；扫描仍重叠推进任务。/ Advance real work first; decorate only without cancellation and with existing pool headroom; scanning still advances the job in overlap.
-        uint64_t motion_now=now_ms();
-        bool long_wait=motion_now>=opening_motion.last_ms && motion_now-opening_motion.last_ms>=750u;
-        if(s==PN_BUSY && (opening_motion.advanced || long_wait) && pn_cancel_checkpoint()==PN_OK && pn_loading_motion_poll(&opening_motion,motion_now)){
-            if(pool.used>pool.limit || pool.limit-pool.used<512u*1024u)opening_motion.active=false;
-            else{
-#if PN_DEVICE_TEST_CONSOLE
-                ESP_LOGI(TAG,"Opening panda pose=%u",opening_motion.phase);
-#endif
-                opening_overlap=true;opening_motion_scan=true;pn_status_t visual=show_loading_motion(opening_motion.phase);opening_motion_scan=false;opening_overlap=false;
-                if(visual!=PN_OK)opening_motion.active=false;else opening_motion.last_ms=now_ms();}
-        }
-        return true;
-    }
+    if(s==PN_BUSY || (s==PN_CANCELLED && pn_epub_app_open_job_pending(&foreground_open)))return true;
     if(s==PN_OK && selected_identified){pn_book_id_t actual;s=pn_epub_app_identity(&epub,&actual);if(s==PN_OK && memcmp(actual.sha256,selected_expected.sha256,32))s=PN_STALE_JOB;}
-    if(s==PN_OK && epub.impl && opening_motion.active && !opening_motion.advanced && pn_cancel_checkpoint()==PN_OK){
-        // 先做必要首屏排版，再用动画扫描重叠正文绘制，避免扫描与重排版争用PSRAM。/ Complete required first-page layout before overlapping animation with body painting, avoiding scan/layout PSRAM contention.
-        if(!loading_layout_ready){pn_profile_span_t timing;pn_profile_begin(&timing,&pool,"epub.open.first-layout");pn_status_t prepared=pn_epub_app_prepare_unshown(&epub);pn_profile_end(&timing,prepared);loading_layout_ready=prepared==PN_OK;}
-        if(loading_layout_ready && pn_epub_app_unshown_paint_pending(&epub) && pool.used<=pool.limit && pool.limit-pool.used>=512u*1024u && pn_loading_motion_poll(&opening_motion,now_ms())){
-#if PN_DEVICE_TEST_CONSOLE
-            ESP_LOGI(TAG,"Opening panda pose=%u after-layout",opening_motion.phase);
-#endif
-            opening_overlap_result=PN_OK;opening_overlap=true;opening_motion_scan=true;
-            (void)show_loading_motion(opening_motion.phase);opening_motion_scan=false;opening_overlap=false;opening_overlap_result=PN_BUSY;
-        }
-    }
-    opening_motion.active=false;
     if(s==PN_OK){pn_profile_span_t timing;pn_profile_begin(&timing,&pool,"epub.open.first-frame");s=first_page_or_index();pn_profile_end(&timing,s);}
     if(foreground_open.impl)(void)pn_epub_app_open_job_close(&foreground_open);
     reader_open_result(s);if(!index_gate)opening_controls(false);return true;

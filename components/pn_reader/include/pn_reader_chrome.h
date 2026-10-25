@@ -7,6 +7,7 @@
  * Frozen: text area x=32,y=32,w=620,h=1112; footer y=1144..1215; the toolbar covers the bottom 320 px with a white sheet and thin rules, no dimming.
  */
 #pragma once
+#include "pn_cover.h"
 #include "pn_widgets.h"
 #define PN_READER_TOP 32 ///< 正文区顶部y / Top y of the text area
 #define PN_READER_HEIGHT 1112 ///< 正文区高度 / Text area height
@@ -38,10 +39,12 @@ pn_status_t pn_reader_toolbar_render(pn_font_t *ui,pn_frame_t *frame,unsigned un
 /// 命中返回PN_TOOL_*；工具栏以上区域返回PN_TOOL_CLOSE；不可用入口返回-1。
 /// Hit test returning PN_TOOL_*; the area above the toolbar returns PN_TOOL_CLOSE; unavailable entries return -1.
 int pn_reader_toolbar_hit(int x,int y,unsigned unavailable);
-/// 居中熊猫开书反馈，不画假百分比；只绘制，由控制层管理输入门和显示回执。/ Paint centered panda opening feedback without a fake percentage; controllers own input gating and display receipts.
+/// 静态书籍开场，缺元数据时使用文件名；无动画或假进度。/ Static book opening with filename fallback, without animation or false progress.
 pn_status_t pn_reader_loading_render(pn_font_t *ui,pn_frame_t *frame,const char *title);
-/// 选择吃竹子姿态；只用于控制层允许的低频等待刷新。/ Select a bamboo-eating pose, only for controller-admitted slow waiting updates.
+/// 旧调用兼容，phase不再改变开书画面。/ Legacy compatibility; phase no longer changes the opening screen.
 pn_status_t pn_reader_loading_render_phase(pn_font_t *ui,pn_frame_t *frame,const char *title,unsigned phase);
+/// 借已验证缩略快照绘制书名/作者；note为真实状态，不访问存储。/ Paint title/author using a verified thumbnail snapshot; note is real status, with no storage access.
+pn_status_t pn_reader_opening_render(pn_font_t *,pn_frame_t *,const char *,const pn_book_preview_t *,const char *note);
 /// 小TXT直接呈现正文，省掉一次面板刷新；大文件保留开书反馈。 / Present small TXT directly to avoid an extra panel update; keep opening feedback for larger files.
 bool pn_reader_loading_needed(bool text_format,uint64_t source_bytes);
 /// 在正文视口的一行绘制虚线/点线，shade 0浅/1中/2深/3黑；0样式关闭，越界跳过，不分配或改变排版。 / Draw a dashed/dotted row in a text viewport with shade light/medium/dark/black; style zero disables, out-of-bounds rows are skipped, without allocation or layout changes.

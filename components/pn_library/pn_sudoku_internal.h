@@ -21,6 +21,7 @@ typedef struct {
     pn_sudoku_screen_t screen;
     unsigned tier;
     bool has,dirty,running,new_job,bank_ok,bank_check,errors[81];
+    bool restart_from_play; ///< 直接重玩取消回棋盘，菜单入口取消回菜单 / Direct restart cancellation returns to play; menu entry returns to menu
     uint64_t last,changed,retry,saved_elapsed;
     uint8_t changed_cells[11]; ///< 自上次成功呈现后的变格位图 / Changed cells since the last successful presentation
     bool patch_ready,full_dirty; ///< 基准必须已确认；换页或失败后整绘 / Require a confirmed base; redraw fully after transitions or failures

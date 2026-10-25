@@ -375,15 +375,22 @@ int main(void){
     handle_key(PN_KEY_2,PN_KEY_SHORT);for(unsigned i=0;pn_sudoku_pending(&sudoku);i++){assert(i<10000);(void)pn_sudoku_tick(&sudoku,now_ms());}
     assert(pn_sudoku_screen(&sudoku)==PN_SU_PLAY && sudoku_draw()==PN_OK);
     unsigned game_cell=0;while(pn_sudoku_state(&sudoku)->clues[game_cell])game_cell++;
+    // 跨越旧管理维护阈值，连续填数只扫描局部；退出才完整GC16。/ Cross former management thresholds; repeated entries scan locally and exit alone requests full GC16.
+    unsigned game_gc=gc_updates,game_clear=clear_calls,game_full=screen_full_calls;
+    for(unsigned i=0;i<64;i++){apply_selection(PN_SU_CELL+(int)game_cell);apply_selection(PN_SU_DIGIT+4+(int)(i%2));}
+    assert(gc_updates==game_gc && clear_calls==game_clear && screen_full_calls==game_full && !atomic_load(&sudoku_presentation));
     apply_selection(PN_SU_CELL+(int)game_cell);apply_selection(PN_SU_DIGIT+4);assert(pn_sudoku_state(&sudoku)->values[game_cell]==4);
     unsigned game_shown=presents;
     apply_selection(PN_SU_CELL+(int)game_cell);apply_selection(PN_SU_DIGIT+4);
     assert(presents==game_shown && sudoku.presented);
     assert(pn_sudoku_tick(&sudoku,now_ms()+1000)==PN_OK && sudoku.presented && !pn_sudoku_dirty(&sudoku));
     apply_selection(PN_SU_DIGIT+5);apply_selection(PN_SU_DIGIT+4);
-    pn_media_lease_t game_busy;assert(pn_media_acquire(&data_media,PN_MEDIA_READ,&game_busy)==PN_OK);assert(!prepare_lock() && sudoku.active);assert(pn_media_release(&data_media,&game_busy)==PN_OK);assert(prepare_lock());
+    pn_media_lease_t game_busy;assert(pn_media_acquire(&data_media,PN_MEDIA_READ,&game_busy)==PN_OK);assert(!prepare_lock() && sudoku.active);
+    game_gc=gc_updates;handle_key(PN_KEY_1,PN_KEY_SHORT);assert(sudoku.active && gc_updates==game_gc);
+    assert(pn_media_release(&data_media,&game_busy)==PN_OK);assert(prepare_lock());
     locked=true;resume_reader();assert(!locked && sudoku.presented && pn_sudoku_state(&sudoku)->values[game_cell]==4 && !reader_active());
-    handle_key(PN_KEY_1,PN_KEY_SHORT);assert(!sudoku.active && entertainment==1 && shelf_mode && !reader_active());
+    game_gc=gc_updates;game_full=screen_full_calls;handle_key(PN_KEY_1,PN_KEY_SHORT);assert(!sudoku.active && entertainment==1 && shelf_mode && !reader_active());
+    assert(gc_updates==game_gc+1 && screen_full_calls==game_full+1 && last_screen_mode==MODE_GC16 && last_screen_wave==&E0470_WAVEFORM);
     char game_file[512];for(unsigned i=0;i<2;i++){snprintf(game_file,sizeof game_file,"%s/sudoku.%c",game_root,'a'+i);(void)unlink(game_file);}assert(!rmdir(game_root));
     printf("sudoku device routing used=%zu peak=%zu\n",pool.used,pool.peak);
     sd_media.available=card_available;entertainment=0;covers_inactive=false;

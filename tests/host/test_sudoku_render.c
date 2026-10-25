@@ -16,6 +16,10 @@ int main(void){
     uint8_t *base=malloc(415872),*expected=malloc(415872);assert(base && expected);pn_frame_t a,b;
     assert(pn_frame_bind(&a,base,415872,684,1216) && pn_frame_bind(&b,expected,415872,684,1216));
     assert(pn_sudoku_render_update(&u,&font,&a)==PN_UNSUPPORTED);
+    g.state.values[1]=g.state.clues[0];g.state.selected=80;
+    assert(pn_sudoku_render(&u,&font,&a)==PN_OK);
+    // 同一数字依然有独立形状标记，不能只依赖灰度差。/ Identical digits retain an independent shape marker, without relying on gray contrast alone.
+    assert(pn_frame_get(&a,PN_SU_BOARD_X+25,PN_SU_BOARD_Y+56)==15 && pn_frame_get(&a,PN_SU_BOARD_X+PN_SU_CELL_SIZE+25,PN_SU_BOARD_Y+56)==2);
     assert(pn_sudoku_render(&u,&font,&a)==PN_OK);pn_sudoku_displayed(&u,true,1);
     int commands[]={PN_SU_CELL+1,PN_SU_DIGIT+2,PN_SU_CELL+80,PN_SU_DIGIT+9,PN_SU_UNDO,PN_SU_ERASE,PN_SU_NOTES,PN_SU_DIGIT+1,PN_SU_DIGIT+9,PN_SU_CELL+2,PN_SU_CHECK,PN_SU_DIGIT+8};
     double full=0,patch=0;unsigned patches=0;uint64_t now=1;

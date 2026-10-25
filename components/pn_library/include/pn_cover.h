@@ -54,6 +54,14 @@ typedef struct {
     uint16_t resident_deferred; ///< 离页暂停的待写资格，重绑回来再写 / Pending persistence paused off-page, resumed when rebound
 } pn_shelf_covers_t;
 
+typedef struct {
+    pn_book_display_t display; ///< 完整来源复核后的标题/作者 / Title and author after complete source checks
+    uint8_t pixels[PN_COVER_BYTES]; ///< 原生缩略图副本，不借用可回收槽 / Native thumbnail copy, never borrowing an evictable slot
+    bool ready; ///< 像素可用；仅元数据时为false / Pixels are ready; false for metadata-only previews
+} pn_book_preview_t;
+/// 只复用已验证常驻/PNCV，不解析书或解码；失败清空out，输出不借用槽。/ Reuse verified resident/PNCV data without parsing books or decoding; failure clears out and outputs never borrow slots.
+pn_status_t pn_cover_preview(pn_pool_t *,pn_media_t *,const char *,const pn_catalog_item_t *,const pn_shelf_covers_t *,pn_book_preview_t *out);
+
 /// 产品owner持有的可暂停缓存写入；零初始化，释放池/介质前abort。/ Resumable cache writer owned by the product owner; zero-initialize and abort before releasing pool/media.
 typedef struct {
     void *impl; ///< 自有暂存与租约，不借用封面槽 / Owned staging and lease without borrowing cover slots
