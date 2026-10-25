@@ -10,7 +10,7 @@ from unittest.mock import patch
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools"))
 import installer_site
-from package_upgrade import full_payload, validate_build_version, validate_build_config
+from package_upgrade import full_payload, validate_build_version, validate_build_config, load_qualified_bootloader
 
 
 class FullPackages(unittest.TestCase):
@@ -60,6 +60,45 @@ class FullPackages(unittest.TestCase):
                               for name, data in payload.items()}}
         (folder / "manifest.json").write_text(json.dumps(metadata), encoding="utf-8")
         return folder
+
+    def test_qualified_boot_preserves_published_ota_identity(self):
+        """新机器完整安装沿用签名链引导，不覆盖本机编译产物。 / Fresh-machine full installs retain the signed boot identity without replacing local build output."""
+        from cryptography.hazmat.primitives import serialization
+        from package_ota import verify_manifest
+        release = ROOT / "releases/pico_nano-1.0.5-3c63c46-full"
+        ota = ROOT / "releases/pico_nano-1.0.5-3c63c46-upgrade/ota"
+        key = serialization.load_pem_public_key((ota / "release-public.pem").read_bytes())
+        signed = verify_manifest((ota / "PicoNano-ota-manifest.bin").read_bytes(), key)
+        built = (self.board / "bootloader/bootloader.bin").read_bytes()
+        boot, source = load_qualified_bootloader(release)
+        self.assertNotEqual(boot, built)
+        payload = full_payload(self.board, self.factory, self.app, self.table, boot)
+        self.assertEqual(hashlib.sha256(payload["bootloader.bin"]).digest(), signed[144:176])
+        self.assertEqual((self.board / "bootloader/bootloader.bin").read_bytes(), built)
+        self.assertEqual(source, json.loads((release / "manifest.json").read_text())["source_commit"])
+
+    def test_qualified_boot_rejects_corruption_and_wrong_target(self):
+        """清单完整性或芯片身份不符时拒绝复用。 / Reject reuse when manifest integrity or chip identity differs."""
+        release = ROOT / "releases/pico_nano-1.0.5-3c63c46-full"
+        original = json.loads((release / "manifest.json").read_text())
+        boot = (release / "bootloader.bin").read_bytes()
+        for kind in ("digest", "target", "header", "truncated"):
+            with self.subTest(kind=kind):
+                folder = self.root / kind
+                folder.mkdir()
+                info = json.loads(json.dumps(original))
+                data = boot
+                if kind == "digest":
+                    data = boot[:-1] + bytes([boot[-1] ^ 1])
+                elif kind == "target":
+                    info["target"] = "esp32"
+                else:
+                    data = boot[:12] + b"\x00\x00" + boot[14:] if kind == "header" else boot[:12]
+                    info["files"]["bootloader.bin"] = {"bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+                (folder / "manifest.json").write_text(json.dumps(info))
+                (folder / "bootloader.bin").write_bytes(data)
+                with self.assertRaises(ValueError):
+                    load_qualified_bootloader(folder)
 
     def upgrade(self, app=None):
         """独立升级包只固定旧表，额外表须站点从同源完整包核验。 / An independent upgrade pins the old table; the site must verify any extra table against the matching full package."""

@@ -16,6 +16,8 @@
 
 正式版采用混合编译优化，阅读/字体/排版/解码/显示/TF热路径保留O2，其余默认Os；保留WARN/ERROR，诊断版仍有INFO。字库、图片、功能、内存硬顶和既有OTA体积门槛保持。原生灰阶、完整SHA/CRC及签名校验不变。
 
+完整USB包显式沿用1.0.5发布包中已资格的引导程序，保持老设备的OTA签名链；不采用另一台机器新编译、摘要不同的引导。新应用与分区仍取自本批板级构建，引导来源单独记入包清单。
+
 本批正式镜像未刷入设备或执行OTA安装；现有设备仍运行此前的1.0.6诊断镜像。历史真机失败及后续修复范围见[阅读测试报告](READING_DEVICE_TEST_REPORT.md)，不能用本批构建替代正式版的睡眠、断电、实体键、面板光学或功耗验收。精确源码与镜像摘要以发布包清单为准。
 
 下载：[Gitee 1.0.6](https://gitee.com/windssea/pico_nano/releases/tag/v1.0.6)、[GitHub 1.0.6](https://github.com/windssea/pico_nano/releases/tag/v1.0.6)。

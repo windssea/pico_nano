@@ -28,11 +28,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--reference", type=pathlib.Path, help="Verified existing device partition table, 3072 bytes (app-only)")
     parser.add_argument("--full", action="store_true", help="Package board bootloader/table/OTA/app and empty storage images for full installation")
+    parser.add_argument("--qualified-bootloader", type=pathlib.Path, help="Reuse bootloader.bin from a known compatible full-release directory, verified against its manifest")
     args = parser.parse_args()
     if not args.full and not args.reference:
         parser.error("app-only packaging requires --reference")
     if args.full and args.reference:
         parser.error("full packaging uses the board build table, not --reference")
+    if args.qualified_bootloader and not args.full:
+        parser.error("--qualified-bootloader requires --full")
     commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
     dirty = subprocess.check_output(["git", "status", "--porcelain", "--untracked-files=no"], cwd=ROOT, text=True)
     if dirty:
@@ -57,8 +60,12 @@ def main():
                "flash_upgrade.py": (ROOT / "tools/flash_upgrade.py").read_text(encoding="utf-8").encode(),
                "README.md": installation_readme(commit),
                "requirements.txt": b"esptool==5.3.1\n"}
+    bootloader_source = commit
     if args.full:
-        payload = full_payload(ROOT / "build-board", ROOT / "build-dev", application, table)
+        qualified = None
+        if args.qualified_bootloader:
+            qualified, bootloader_source = load_qualified_bootloader(args.qualified_bootloader)
+        payload = full_payload(ROOT / "build-board", ROOT / "build-dev", application, table, qualified)
         payload["README.md"] = installation_readme(commit)
     metadata = {"brand": "PicoNano", "source_commit": commit, "version": version, "idf": "v6.1", "target": "esp32s3",
                 "board": "RDP-G01-W", "built_at": datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))).isoformat(),
@@ -67,6 +74,8 @@ def main():
                 "files": {name: {"bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()} for name, data in payload.items()}}
     if args.full:
         metadata["mode"] = "full"
+        metadata["bootloader_reference_commit"] = bootloader_source
+        metadata["bootloader_origin"] = "qualified-release" if args.qualified_bootloader else "board-build"
         metadata["write_files"] = ["bootloader.bin", "partition-table.bin", "ota_data_initial.bin", "pico_nano.bin"]
         metadata["storage_initialization"] = "blank complete partitions or explicit user choice only"
     folder.mkdir(exist_ok=False)
@@ -93,8 +102,22 @@ def validate_build_config(config):
         raise ValueError("Expected product board 120 MHz, SDK USB coexistence, PSRAM TLS and diagnostics disabled")
 
 
-def full_payload(build, factory, application, table):
-    """从同一板级构建收集完整镜像，校验地址和空文件系统尺寸。 / Collect one board build's complete images and check addresses/storage sizes."""
+def load_qualified_bootloader(folder):
+    """按旧正式清单复核已资格引导，调用者另核对设备OTA签名链。 / Verify a qualified bootloader against its prior release; callers also check the device OTA signature chain."""
+    info = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
+    entry = info.get("files", {}).get("bootloader.bin", {})
+    data = (folder / "bootloader.bin").read_bytes()
+    if (info.get("brand") != "PicoNano" or info.get("mode") != "full" or
+            info.get("target") != "esp32s3" or info.get("board") != "RDP-G01-W" or
+            info.get("idf") != "v6.1" or not re.fullmatch(r"[0-9a-f]{40}", info.get("source_commit", "")) or
+            not 24 <= len(data) <= 0x8000 or data[0] != 0xe9 or data[12:14] != b"\x09\x00" or
+            entry.get("bytes") != len(data) or entry.get("sha256") != hashlib.sha256(data).hexdigest()):
+        raise ValueError("Qualified bootloader release identity, header or digest mismatch")
+    return data, info["source_commit"]
+
+
+def full_payload(build, factory, application, table, qualified_bootloader=None):
+    """收集板级应用和布局，可显式沿用已资格引导并保留来源。 / Collect board app/layout, optionally retaining an explicitly qualified bootloader with provenance."""
     expected = {"partition_table/partition-table.bin": 0x8000, "bootloader/bootloader.bin": 0,
                 "ota_data_initial.bin": 0xf000, "pico_nano.bin": 0x20000}
     lines = (build / "flash_args").read_text(encoding="utf-8").splitlines()
@@ -102,7 +125,8 @@ def full_payload(build, factory, application, table):
     if listed != expected:
         raise ValueError("Unexpected board flash addresses")
     payload = {"pico_nano.bin": application, "partition-table.bin": table,
-               "bootloader.bin": (build / "bootloader/bootloader.bin").read_bytes(),
+               "bootloader.bin": ((build / "bootloader/bootloader.bin").read_bytes()
+                                  if qualified_bootloader is None else qualified_bootloader),
                "ota_data_initial.bin": (build / "ota_data_initial.bin").read_bytes(),
                "first-install/factory-data.bin": (factory / "factory-data.bin").read_bytes(),
                "first-install/factory-wallpaper.bin": (factory / "factory-wallpaper.bin").read_bytes(),
