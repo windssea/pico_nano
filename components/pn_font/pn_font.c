@@ -8,6 +8,7 @@
  */
 #include "pn_profile.h"
 #include "pn_font.h"
+#include "pn_font_blob.h"
 #include "pn_font_composite.h"
 #include "pn_cancel.h"
 #include "pn_identity.h"
@@ -21,7 +22,7 @@
 #include FT_OUTLINE_H
 #include <limits.h>
 #include <string.h>
-extern const uint8_t pn_ui_font_bytes[];
+extern const pn_font_blob_t pn_ui_font_blob;
 extern const size_t pn_ui_font_size;
 extern const uint8_t pn_reading_font_bytes[];
 extern const size_t pn_reading_font_size;
@@ -412,9 +413,7 @@ pn_status_t pn_font_warm(pn_font_t *font,uint32_t cp,int32_t x_64){
     e->warming=false;e->pool->speculative_kind=kind;pn_cache_speculate(e->pool,false);pn_cache_unpin(&e->cache);return status;
 }
 static pn_status_t builtin_read(void *ctx,uint64_t offset,uint8_t *out,size_t cap,size_t *n) {
-    (void)ctx;if(!out || !n || offset>pn_ui_font_size)return PN_INVALID;
-    size_t count=pn_ui_font_size-(size_t)offset;if(count>cap)count=cap;
-    memcpy(out,pn_ui_font_bytes+offset,count);*n=count;return PN_OK;
+    (void)ctx;return pn_font_blob_read(&pn_ui_font_blob,offset,out,cap,n);
 }
 static pn_status_t harmony_read(void *ctx,uint64_t offset,uint8_t *out,size_t cap,size_t *n){
     (void)ctx;if(!out || !n || offset>pn_harmony_font_size)return PN_INVALID;
