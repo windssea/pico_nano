@@ -18,6 +18,8 @@ SDL独立对照为`python simulator/test_resume_window.py <新pn_sim> <完整TTF
 
 ## EPUB连续NEXT工作量回归
 
+锁屏变慢诊断：`device_sleep_long_timer`以假时钟推进4小时的500ms定时复核，时间本身不使介质连续性失效；原非电源IRQ仍拒绝热恢复并保留首次原因。`device_lock_validate`的16轮覆盖2秒/5分钟/4小时同一阅读对象、完整帧/位置及显示失败重试，另外保留疑似换卡时的冷重开。它替换硬件端口，不是实际等待、SD或功耗测试。产品WARN日志`Reader wake cold fallback`区分无挂起页与连续性/挂载条件，`reason`是失去证明的原因而非确认拔卡；INFO热恢复日志带回执耗时。用户故障仍需真机日志对应，不能把来源保护直接移除。
+
 字体去重使用主机/固件同一`embed_font_view.py`生成视图，构建目录的`pn_font_view.json`记录原始SHA、私有字节、片段数及数据节省。`font_storage_generator`验证原TTF完整重建、确定性和坏输入拒绝；`font_blob`验证跨库读取、EOF及坏段边界；`font_storage_validate <原UI.ttf>`验证全字节、10万次随机读取、多字号绘制哈希及池峰。旧提交加入同一观察器并以`PN_FONT_STORAGE_BASELINE`编译后先冻结旧可执行文件，当前版本默认走共享视图；该旧观察模式只用于旧源码，不能用新源码假冒旧基线。端到端旧新对照可复用`test_resume_window.py`第三参数传入冻结的旧SDL，原TTF与全部字体许可证清单不变。
 
 1.0.6后的小范围缓存交接回归：`cover_preview_host`/`cover_preview_immutable`用实际PNG/PNCV核对像素及元数据、来源替换、CACHE_WRITE、换卡、USB、取消与缺文件；常规PC仍stat，设备不可变源契约下常驻命中零stat、零新分配。`page_bitmap`覆盖原生整帧、带填充行和取消不写当前帧；`pn_reading_copy_bench`只计连续缓存拷贝，不含解析/TF/面板。旧新对比应先用同一观察器冻结旧可执行文件，再交替固定CPU多轮测量；微阶段比例不能称为整次开书/NEXT提升。

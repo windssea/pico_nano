@@ -2077,7 +2077,9 @@ static bool prepare_lock(void){
 static bool lock_slept; ///< 最近一次锁屏确实进入了睡眠等待 / The latest lock actually entered the sleep wait
 static uint64_t unlocked_at; ///< 最近一次解锁时间：随后1.5秒内的电源短按不再锁屏，避免连按来回切换 / Latest unlock time: power shorts within the next 1.5 s never relock, preventing toggling from repeated presses
 static void resume_reader(void){
+    uint64_t resume_at=now_ms();(void)resume_at;
     if(sudoku.active){locked=false;if(sudoku_draw()!=PN_OK)locked=true;return;}
+    if(!reader_suspended && *selected_path)ESP_LOGW(TAG,"Reader wake cold fallback: reason=no-suspended-page");
     clock_tick(now_ms());pn_w_set_battery(battery_percent());
     if(reader_suspended){
         read_pico_sd_info_t card={0};esp_err_t checked=read_pico_sd_get_info(&card);
@@ -2086,12 +2088,14 @@ static void resume_reader(void){
         bool unchanged=!lock_slept || pn_device_sleep_media_unchanged();
         if(checked==ESP_OK && card.mounted && unchanged){
             pn_status_t status=epub.impl?pn_epub_app_resume(&epub,now_ms(),present,NULL):pn_reader_app_resume(&reader,now_ms(),present,NULL);
-            if(status==PN_OK){reader_suspended=false;locked=false;status_page=false;shelf_mode=false;ESP_LOGI(TAG,"Warm reader resumed without reopening book");return;}
+            if(status==PN_OK){reader_suspended=false;locked=false;status_page=false;shelf_mode=false;ESP_LOGI(TAG,"Warm reader resumed without reopening book elapsed_ms=%llu",(unsigned long long)(now_ms()-resume_at));return;}
             if(status!=PN_STALE_MEDIA && status!=PN_STALE_JOB){
                 locked=true;ESP_LOGW(TAG,"Warm display restore failed: %d; power key retries retained page",(int)status);return;
             }
+            ESP_LOGW(TAG,"Reader wake retained source unavailable: status=%d elapsed_ms=%llu",(int)status,(unsigned long long)(now_ms()-resume_at));
         }
         if(checked!=ESP_OK || !card.mounted || !unchanged){
+            ESP_LOGW(TAG,"Reader wake cold fallback: slept=%u continuity=%u reason=%s sd=%d present=%u mounted=%u check_ms=%llu",(unsigned)lock_slept,(unsigned)unchanged,lock_slept?pn_device_sleep_media_reason():"not-slept",(int)checked,(unsigned)card.present,(unsigned)card.mounted,(unsigned long long)(now_ms()-resume_at));
             // 与拔卡相同：关闭书并释放系统字库的TF租约，start_reader才能重新挂载并完整校验后重开；否则旧租约令挂载BUSY、所有界面STALE而卡死在锁屏。
             // Same as card removal: close the book and release the system font's TF leases so start_reader can remount and reopen with full verification; otherwise stale leases make the mount BUSY and every screen STALE, freezing on the lock page.
             if(epub.impl)(void)pn_epub_app_media_lost(&epub);else (void)pn_reader_app_media_lost(&reader);

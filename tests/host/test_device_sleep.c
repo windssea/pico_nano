@@ -14,13 +14,13 @@ static int64_t clock_ms=1000,release_at;
 static bool waking,short_pending,release_sent,key_pending,line_low,timer_armed,gpio_armed;
 static unsigned polls;
 static unsigned sleeps,clears,drains,timer_off,gpio_off;
-static enum {NORMAL,NONKEY,BEFORE_SLEEP,MISSED_EDGE,TIMER_FAILURE,SLEEP_FAILURE,HELD_ENTRY,EARLY_KEY,LEVEL_ONLY,PMU_FAILURE,SHARED_IRQ} scenario;
+static enum {NORMAL,NONKEY,BEFORE_SLEEP,MISSED_EDGE,TIMER_FAILURE,SLEEP_FAILURE,HELD_ENTRY,EARLY_KEY,LEVEL_ONLY,PMU_FAILURE,SHARED_IRQ,LONG_TIMER} scenario;
 static esp_sleep_wakeup_cause_t cause;
 static pmu_snapshot_t snapshot;
 static void update(void){if(waking && clock_ms>=release_at && !release_sent){short_pending=true;release_sent=true;}snapshot.key_state=scenario==HELD_ENTRY || (waking && clock_ms<release_at);}
 static void press(void){waking=key_pending=line_low=true;release_at=clock_ms+200;}
 int64_t esp_timer_get_time(void){return clock_ms*1000;}
-void vTaskDelay(unsigned ms){clock_ms+=ms;if(scenario==EARLY_KEY && !waking && clock_ms>=1040)press();update();assert(clock_ms<10000);}
+void vTaskDelay(unsigned ms){clock_ms+=ms;if(scenario==EARLY_KEY && !waking && clock_ms>=1040)press();update();assert(clock_ms<(scenario==LONG_TIMER?15000000:10000));}
 void read_pico_clear_ioe_int(void){clears++;line_low=scenario==SHARED_IRQ && waking;}
 void read_pico_pmu_drain_events(void){drains++;update();short_pending=key_pending=false;}
 // 正常场景在准备睡眠时插入一次读错；无效快照不能冒充新按键。/ Inject a transient entry read failure in the normal case; an invalid snapshot must never impersonate a new key.
@@ -39,10 +39,12 @@ esp_err_t esp_sleep_enable_timer_wakeup(uint64_t us){assert(us==500000);if(scena
 esp_err_t esp_sleep_disable_wakeup_source(esp_sleep_wakeup_cause_t source){assert(source==ESP_SLEEP_WAKEUP_TIMER || source==ESP_SLEEP_WAKEUP_GPIO);if(source==ESP_SLEEP_WAKEUP_TIMER){timer_armed=false;timer_off++;}return ESP_OK;}
 esp_sleep_wakeup_cause_t esp_sleep_get_wakeup_cause(void){return cause;}
 esp_err_t esp_light_sleep_start(void){
-    assert(++sleeps<=6);assert(scenario!=BEFORE_SLEEP && scenario!=HELD_ENTRY && scenario!=TIMER_FAILURE);
+    assert(++sleeps<=(scenario==LONG_TIMER?28800u:6u));assert(scenario!=BEFORE_SLEEP && scenario!=HELD_ENTRY && scenario!=TIMER_FAILURE);
     if(scenario==SLEEP_FAILURE)return ESP_FAIL;
     if(scenario==PMU_FAILURE){clock_ms+=500;cause=ESP_SLEEP_WAKEUP_TIMER;return ESP_OK;}
     clock_ms+=500;
+    // 四小时仅定时复核：时间本身不应使介质证明过期。/ Four hours of timer checks: elapsed time alone must not expire media continuity.
+    if(scenario==LONG_TIMER && sleeps<28800){cause=ESP_SLEEP_WAKEUP_TIMER;return ESP_OK;}
     if(scenario==NONKEY && sleeps==1){line_low=true;cause=ESP_SLEEP_WAKEUP_GPIO;return ESP_OK;}
     if(scenario==MISSED_EDGE){
         // 丢GPIO通知时，定时读取仍须找到已松开的短按。/ If the GPIO notification is lost, timer checks must still find a completed short press.
@@ -54,7 +56,7 @@ esp_err_t esp_light_sleep_start(void){
 }
 int main(int argc,char **argv){
     assert(argc==2);
-    const char *names[]={"normal","nonkey","before_sleep","missed_edge","timer_failure","sleep_failure","held_entry","early_key","level_only","pmu_failure","shared_irq"};
+    const char *names[]={"normal","nonkey","before_sleep","missed_edge","timer_failure","sleep_failure","held_entry","early_key","level_only","pmu_failure","shared_irq","long_timer"};
     bool found=false;for(unsigned i=0;i<sizeof names/sizeof *names;i++)if(!strcmp(argv[1],names[i])){scenario=i;found=true;}assert(found);
     bool ok=pn_device_sleep_until_key();
     if(scenario==HELD_ENTRY){assert(!ok && !sleeps && !gpio_armed && !timer_armed);return 0;}
@@ -62,6 +64,7 @@ int main(int argc,char **argv){
     assert(ok && release_sent && !short_pending && !key_pending && clock_ms>=release_at+150);
     assert(!timer_armed && !gpio_armed && gpio_off==(scenario==EARLY_KEY?0u:1u) && timer_off==(scenario==EARLY_KEY?0u:1u) && clears);
     assert(pn_device_sleep_media_unchanged()==(scenario!=NONKEY));
-    assert(sleeps==(scenario==BEFORE_SLEEP || scenario==EARLY_KEY?0:scenario==NONKEY?2:scenario==MISSED_EDGE?3:1));
+    assert(!strcmp(pn_device_sleep_media_reason(),scenario==NONKEY?"nonkey-wake":"unchanged"));
+    assert(sleeps==(scenario==BEFORE_SLEEP || scenario==EARLY_KEY?0:scenario==NONKEY?2:scenario==MISSED_EDGE?3:scenario==LONG_TIMER?28800:1));
     return 0;
 }

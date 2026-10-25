@@ -356,7 +356,7 @@ endforeach()
 
 add_executable(test_device_sleep test_device_sleep.c ${PN_ROOT}/main/device_sleep.c)
 target_include_directories(test_device_sleep BEFORE PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/device_stubs ${PN_ROOT}/main)
-foreach(case normal nonkey before_sleep missed_edge timer_failure sleep_failure held_entry early_key level_only pmu_failure shared_irq)
+foreach(case normal nonkey before_sleep missed_edge timer_failure sleep_failure held_entry early_key level_only pmu_failure shared_irq long_timer)
     add_test(NAME device_sleep_${case} COMMAND test_device_sleep ${case})
     set_tests_properties(device_sleep_${case} PROPERTIES TIMEOUT 5)
 endforeach()

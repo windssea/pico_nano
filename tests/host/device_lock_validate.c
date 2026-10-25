@@ -13,6 +13,7 @@
 #include "device_async.h"
 static pn_device_async_t *lock_port;
 static bool inject_power,fresh_power;
+static int64_t sleep_gap_us=2000000; ///< 仅假时钟推进，不做真实等待 / Advance the fake clock without real waits
 enum EpdDrawError epd_hl_update_screen_full(EpdiyHighlevelState *h,enum EpdDrawMode m,int t){
     enum EpdDrawError result=boot_fixture_full(h,m,t);
     if(inject_power){
@@ -24,7 +25,7 @@ enum EpdDrawError epd_hl_update_screen_full(EpdiyHighlevelState *h,enum EpdDrawM
 }
 bool pn_device_sleep_until_key(void){
     assert(lock_port && atomic_load(&lock_port->paused));pn_device_input_event_t input;
-    assert(pn_device_async_take(lock_port,&input)==PN_EMPTY);sleep_calls++;clock_us+=2000000;return true;
+    assert(pn_device_async_take(lock_port,&input)==PN_EMPTY);sleep_calls++;clock_us+=sleep_gap_us;return true;
 }
 esp_err_t read_pico_sd_get_info(read_pico_sd_info_t *info){*info=(read_pico_sd_info_t){.mounted=true,.present=true};return ESP_OK;}
 #include "../../main/app_main.c"
@@ -48,6 +49,7 @@ int main(int argc,char **argv){
     assert((is_epub?pn_epub_app_progress(&epub,&publication):pn_reader_app_progress(&reader,&text))==PN_OK);
     void *original=is_epub?epub.impl:reader.impl;uint8_t confirmed[sizeof stub_back];memcpy(confirmed,stub_back,sizeof confirmed);
     for(unsigned round=0;round<16;round++){
+        sleep_gap_us=round<8?2000000:round<12?300000000:14400000000LL;
         clock_us+=100000;assert(prepare_lock() && reader_suspended);inject_power=true;fresh_power=round%2!=0;
         lock_and_sleep("按电源键继续阅读");
         assert(!inject_power && !locked && !reader_suspended && !status_page && !shelf_mode && !atomic_load(&async_port.paused));

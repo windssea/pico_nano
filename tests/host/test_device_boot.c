@@ -42,6 +42,7 @@ static unsigned sd_remounts,sd_polls;
 bool pn_device_sleep_until_key(void){assert(wake_idle);sleep_calls++;clock_us+=1000000;return true;}
 static bool stub_media_unchanged=true; ///< 睡眠适配器的介质结论，锁屏用例可改 / Sleep-adapter media verdict, adjustable by lock cases
 bool pn_device_sleep_media_unchanged(void){return stub_media_unchanged;}
+const char *pn_device_sleep_media_reason(void){return stub_media_unchanged?"unchanged":"stub-uncertain";}
 pn_status_t pn_device_transfer_take_network(pn_device_transfer_t *s,pn_network_credentials_t *c,bool *f){(void)s;(void)c;(void)f;assert(false);return PN_UNSUPPORTED;}
 pn_status_t pn_device_transfer_take_install(pn_device_transfer_t *s,pn_upload_kind_t *k,char *n,size_t c,pn_book_id_t *d){(void)s;(void)k;(void)n;(void)c;(void)d;return PN_EMPTY;}
 pn_status_t pn_device_transfer_network_result(pn_device_transfer_t *s,pn_status_t r,const char *n){(void)s;(void)r;(void)n;assert(false);return PN_UNSUPPORTED;}
