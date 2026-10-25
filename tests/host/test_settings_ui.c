@@ -53,7 +53,9 @@ int main(int argc,char **argv){
     pn_pool_t pool;assert(!pn_pool_init(&pool,2u*1024u*1024u,NULL,NULL,NULL));pn_settings_ui_t ui={0};
     assert(pn_settings_ui_open(&ui,&pool,&media,root,present,NULL)==PN_OK && ui.active && ui.presented && ui.flags==0);
     assert(!ui.index_wait && pn_settings_ui_event(&ui,PN_SETUI_ABOUT,present,NULL)==PN_OK);
-    assert(pn_settings_ui_hit(&ui,400,750)==PN_SETUI_INDEX_WAIT);
+    assert(pn_settings_ui_hit(&ui,400,750)==PN_SETUI_TIME && pn_settings_ui_hit(&ui,400,870)==PN_SETUI_UPDATE);
+    for(int y=0;y<1216;y++)assert(pn_settings_ui_hit(&ui,400,y)!=PN_SETUI_INDEX_WAIT);
+    /* 隐藏入口后保留旧存档及内部命令兼容，不静默重写偏好。/ Preserve old preferences and internal commands after hiding the entry, without silently rewriting settings. */
     assert(pn_settings_ui_event(&ui,PN_SETUI_INDEX_WAIT,present,NULL)==PN_OK && ui.index_wait);
     bool wait=false;assert(pn_settings_load_index(&media,root,&wait)==PN_OK && wait);
     assert(pn_settings_ui_event(&ui,PN_SETUI_INDEX_WAIT,present,NULL)==PN_OK && !ui.index_wait);
@@ -86,7 +88,7 @@ int main(int argc,char **argv){
     {pn_settings_time_t clock={0};strcpy(clock.datetime,"unchanged");assert(pn_settings_time_format(&clock,123)==PN_INVALID && !strcmp(clock.datetime,"unchanged"));
      assert(pn_settings_time_format(&clock,1709222400u)==PN_OK && !strcmp(clock.datetime,"2024-03-01 00:00"));
      assert(pn_settings_time_format(&clock,4102444799u)==PN_OK && !strcmp(clock.datetime,"2100-01-01 07:59"));
-     assert(pn_settings_ui_event(&ui,PN_SETUI_ABOUT,present,NULL)==PN_OK && pn_settings_ui_hit(&ui,100,870)==PN_SETUI_TIME);
+     assert(pn_settings_ui_event(&ui,PN_SETUI_ABOUT,present,NULL)==PN_OK && pn_settings_ui_hit(&ui,100,750)==PN_SETUI_TIME);
      pn_settings_ui_set_time(&ui,&clock);assert(pn_settings_ui_event(&ui,PN_SETUI_TIME,present,NULL)==PN_OK && pn_settings_ui_screen(&ui)==5);
      assert(pn_settings_ui_hit(&ui,100,740)==-1 && pn_settings_ui_event(&ui,PN_SETUI_TIME_SYNC,present,NULL)==PN_EMPTY);
      clock.available=true;pn_settings_ui_set_time(&ui,&clock);assert(pn_settings_ui_hit(&ui,100,740)==PN_SETUI_TIME_SYNC);

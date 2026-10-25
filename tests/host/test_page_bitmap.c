@@ -22,6 +22,13 @@ int main(void){
     for(unsigned i=0;i<3;i++){assert(pn_page_bitmap_step(&cache,paint,&ctx,7)==PN_OK);for(size_t j=0;j<684u*1216u/2u;j++)assert(pixels[j]==0xbb);if(i<2)assert(pn_page_bitmap_copy(&cache,&shown,&missing)==PN_EMPTY && missing==99);}
     assert(ctx.largest==7 && cache.ready && cache.cursor==17 && pn_page_bitmap_copy(&cache,&shown,&missing)==PN_OK && missing==3);
     for(int i=0;i<17;i++)assert(pn_frame_get(&shown,i*2,40)==i%16);
+    /* 带填充行不可覆盖尾部；取消拷贝不改当前帧或缺字计数。/ Padded rows keep their tails; cancelled copies preserve the current frame and missing count. */
+    uint8_t *padded=pn_alloc_tagged(&pool,PN_MEM_FRAME,350u*1216u);assert(padded);memset(padded,0xa5,350u*1216u);
+    pn_frame_t padded_frame=shown;padded_frame.pixels=padded;padded_frame.stride=350;
+    assert(pn_page_bitmap_copy(&cache,&padded_frame,&missing)==PN_OK && missing==3);
+    for(size_t y=0;y<1216;y++){assert(!memcmp(padded+y*350,pixels+y*342,342));for(size_t x=342;x<350;x++)assert(padded[y*350+x]==0xa5);}
+    pn_free(padded);bool copy_cancelled=true;pn_cancel_scope_t copy_scope;pn_cancel_enter(&copy_scope,stop,&copy_cancelled);missing=99;memset(pixels,0x66,415872);
+    assert(pn_page_bitmap_copy(&cache,&shown,&missing)==PN_CANCELLED && missing==99);for(size_t i=0;i<415872;i++)assert(pixels[i]==0x66);pn_cancel_leave(&copy_scope);
     assert(pn_page_bitmap_begin(&cache,17)==PN_OK);ctx.fail=true;assert(pn_page_bitmap_step(&cache,paint,&ctx,7)==PN_IO && !cache.ready && !cache.working);ctx.fail=false;
     assert(pn_page_bitmap_begin(&cache,17)==PN_OK);bool cancelled=true;pn_cancel_scope_t scope;pn_cancel_enter(&scope,stop,&cancelled);assert(pn_page_bitmap_step(&cache,paint,&ctx,7)==PN_CANCELLED && !cache.ready);pn_cancel_leave(&scope);
     assert(pn_page_bitmap_begin(&cache,17)==PN_OK);cancelled=false;ctx.cancel=&cancelled;pn_cancel_enter(&scope,stop,&cancelled);assert(pn_page_bitmap_step(&cache,paint,&ctx,7)==PN_CANCELLED && !cache.ready && pn_page_bitmap_copy(&cache,&shown,&missing)==PN_EMPTY);pn_cancel_leave(&scope);ctx.cancel=NULL;

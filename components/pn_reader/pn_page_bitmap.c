@@ -30,7 +30,10 @@ pn_status_t pn_page_bitmap_copy(pn_page_bitmap_t *b,pn_frame_t *to,unsigned *mis
     if(!b || !to || !missing || !to->pixels || to->width!=684 || to->height!=1216 || to->stride<342)return PN_INVALID;
     if(!b->ready || !b->frame.pixels)return PN_EMPTY;
     pn_status_t s=pn_cancel_checkpoint();if(s!=PN_OK)return s;
-    pn_cache_pin(&b->owner);for(int y=0;y<1216;y++)memcpy(to->pixels+(size_t)y*to->stride,b->frame.pixels+(size_t)y*b->frame.stride,342);
+    pn_cache_pin(&b->owner);
+    // 原生画布连续拷贝，带行尾填充的端口保持逐行复制。/ Copy native canvases contiguously; preserve row-wise copying for padded ports.
+    if(to->stride==342)memcpy(to->pixels,b->frame.pixels,PAGE_BYTES);
+    else for(int y=0;y<1216;y++)memcpy(to->pixels+(size_t)y*to->stride,b->frame.pixels+(size_t)y*b->frame.stride,342);
     *missing=b->missing;b->stats.hits++;pn_cache_unpin(&b->owner);return PN_OK;
 }
 void pn_page_bitmap_close(pn_page_bitmap_t *b){if(b){pn_cache_detach(&b->owner);drop(b);}}

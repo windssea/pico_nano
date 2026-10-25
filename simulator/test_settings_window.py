@@ -14,7 +14,7 @@ with tempfile.TemporaryDirectory() as folder:
     assert 'settings closed request=0' in out and (state/'input.a').exists() or (state/'input.b').exists()
     out=run('settings,back,quit');assert 'settings open status=0 flags=195' in out,out
     # 日期页在关于页内，PC联网按钮禁用，返回层级不跳回书架。 / The date page is inside About; PC network action is disabled and Back preserves hierarchy.
-    out=run('settings,tap:100:950,tap:100:870,tap:100:740,back,back,back,quit')
+    out=run('settings,tap:100:950,tap:100:750,tap:100:740,back,back,back,quit')
     assert 'settings command=29 status=0' in out and 'settings command=30' not in out and 'settings command=31' not in out,out
     assert out.count('settings command=1 status=0')==3,out
     # WiFi网络：屏幕键盘输入名称ab与密码12345678；PC不能测试连接，选择仍然保存后写入状态目录。/ WiFi: type the name ab and password 12345678; the PC cannot test the connection, so saving anyway writes the state directory.

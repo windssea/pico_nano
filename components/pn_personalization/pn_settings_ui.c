@@ -156,6 +156,7 @@ static pn_status_t draw_refresh(pn_settings_ui_t *ui,su_t *u){
     return s;
 }
 static pn_status_t draw_about(pn_settings_ui_t *ui,su_t *u){
+    (void)ui;
     pn_font_t *font=&u->font;pn_frame_t *f=&u->canvas;
     pn_status_t s=pn_w_header(font,f,"< 设置","存储与关于",NULL);
     const char *rows[4][2]={{PN_BRAND_NAME,*u->about.version?u->about.version:"版本未知"},{"屏幕",*u->about.screen?u->about.screen:"4.7 英寸墨水屏 · 16 级灰阶"},
@@ -163,9 +164,8 @@ static pn_status_t draw_about(pn_settings_ui_t *ui,su_t *u){
     pn_w_card(f,ABOUT_Y,4);
     for(int i=0;i<4 && s==PN_OK;i++)s=pn_w_card_row(font,f,rows[i][0],rows[i][1],NULL,-1,0u,ABOUT_Y+i*ROW_H,i==3);
     if(s==PN_OK)s=note(u,"HarmonyOS Sans 字体 · 数据仅保存在本机",ABOUT_Y+4*ROW_H+52);
-    pn_w_card(f,710,1);if(s==PN_OK)s=pn_w_card_row(font,f,"首次开书建立索引",*u->message?u->message:"开启等待完成，关闭后台建立",NULL,-1,ui->index_wait?PN_ROW_ON:PN_ROW_OFF,710,true);
-    pn_w_card(f,840,1);if(s==PN_OK)s=pn_w_card_row(font,f,"日期与时间",*u->time.datetime?u->time.datetime:"时钟尚未校准",NULL,PN_ICON_SETTINGS,PN_ROW_CHEVRON,840,true);
-    pn_w_card(f,960,1);if(s==PN_OK)s=pn_w_card_row(font,f,"系统更新","通过家庭 WiFi 获取 Gitee 更新",NULL,PN_ICON_SETTINGS,PN_ROW_CHEVRON,960,true);
+    pn_w_card(f,710,1);if(s==PN_OK)s=pn_w_card_row(font,f,"日期与时间",*u->time.datetime?u->time.datetime:"时钟尚未校准",NULL,PN_ICON_SETTINGS,PN_ROW_CHEVRON,710,true);
+    pn_w_card(f,840,1);if(s==PN_OK)s=pn_w_card_row(font,f,"系统更新","通过家庭 WiFi 获取 Gitee 更新",NULL,PN_ICON_SETTINGS,PN_ROW_CHEVRON,840,true);
     return s;
 }
 static pn_status_t draw_update(su_t *u){
@@ -552,9 +552,8 @@ int pn_settings_ui_hit(const pn_settings_ui_t *ui,int x,int y){
     }
     if(x<32 || x>=652)return -1;
     if(u->screen==SCREEN_WIFI){if(y>=WIFI_EDIT_Y && y<WIFI_EDIT_Y+88)return PN_SETUI_WIFI_EDIT;if(*u->lan && y>=WIFI_FORGET_Y && y<WIFI_FORGET_Y+88)return PN_SETUI_WIFI_FORGET;return -1;}
-    if(u->screen==SCREEN_ABOUT && y>=710 && y<710+ROW_H)return PN_SETUI_INDEX_WAIT;
-    if(u->screen==SCREEN_ABOUT && y>=840 && y<840+ROW_H)return PN_SETUI_TIME;
-    if(u->screen==SCREEN_ABOUT && y>=960 && y<960+ROW_H)return PN_SETUI_UPDATE;
+    if(u->screen==SCREEN_ABOUT && y>=710 && y<710+ROW_H)return PN_SETUI_TIME;
+    if(u->screen==SCREEN_ABOUT && y>=840 && y<840+ROW_H)return PN_SETUI_UPDATE;
     if(u->screen==SCREEN_UPDATE){if(y>=810 && y<898 && (u->update.running || u->update.install || u->update.reboot))return PN_SETUI_UPDATE_CANCEL;if(y>=700 && y<788 && !u->update.running)return u->update.reboot?PN_SETUI_UPDATE_REBOOT:u->update.install?PN_SETUI_UPDATE_INSTALL:u->update.available?PN_SETUI_UPDATE_CHECK:-1;return -1;}
     if(u->screen==SCREEN_TIME){if(y>=700 && y<788)return u->time.running?PN_SETUI_TIME_CANCEL:u->time.available?PN_SETUI_TIME_SYNC:-1;return -1;}
     if(u->screen==SCREEN_APPEARANCE){int cell=pn_w_segments_hit(2,190,108,x,y);if(cell>=0)return PN_SETUI_COLUMNS+cell;

@@ -381,6 +381,19 @@ pn_status_t pn_cover_preview(pn_pool_t *pool,pn_media_t *media,const char *direc
     if(!out)return PN_INVALID;
     memset(out,0,sizeof *out);if(!pool || !media || !item)return PN_INVALID;
     pn_media_lease_t lease;pn_status_t s=pn_media_acquire(media,PN_MEDIA_READ,&lease);if(s!=PN_OK)return s;
+    // 与书库重绑使用相同的不可变源契约；PC外部写入不受租约约束，仍走下面的stat复核。
+    // Use the shelf's immutable-source contract; external PC writers ignore leases, so hosts still recheck stats below.
+#if defined(ESP_PLATFORM) || defined(PN_TEST_IMMUTABLE_FILE)
+    if(covers && covers->resident_media==media && covers->resident_epoch==media->epoch && covers->resident_media_id==media->media_id && covers->resident_valid){
+        pn_book_id_t resident_path;
+        if(pn_identity_bytes((const uint8_t *)item->path,strlen(item->path),&resident_path)==PN_OK)
+            for(size_t i=0;i<=PN_COVER_SLOT_LAST;i++)if((covers->resident_valid&(1u<<i)) && covers->state[i]!=PN_COVER_PENDING && covers->resident_writes[i]==media->writes && covers->resident_format[i]==item->format && !memcmp(covers->resident_path_hash[i],resident_path.sha256,sizeof resident_path.sha256)){
+                s=pn_cancel_checkpoint();if(s==PN_OK){out->ready=covers->state[i]==PN_COVER_READY;out->display=covers->display[i];if(out->ready)memcpy(out->pixels,covers->pixels[i],PN_COVER_BYTES);s=pn_media_validate(media,&lease);}
+                if(s!=PN_OK)memset(out,0,sizeof *out);
+                (void)pn_media_release(media,&lease);return s;
+            }
+    }
+#endif
     cover_key_t key,after;uint8_t encoded[KEY_BYTES],checked[KEY_BYTES];pn_book_id_t path;
     s=cover_key(media,item,&key);if(s==PN_OK){encode_key(encoded,&key);s=pn_identity_bytes((const uint8_t *)item->path,strlen(item->path),&path);}
     bool found=false;

@@ -16,6 +16,8 @@ SDL独立对照为`python simulator/test_resume_window.py <新pn_sim> <完整TTF
 
 ## EPUB连续NEXT工作量回归
 
+1.0.6后的小范围缓存交接回归：`cover_preview_host`/`cover_preview_immutable`用实际PNG/PNCV核对像素及元数据、来源替换、CACHE_WRITE、换卡、USB、取消与缺文件；常规PC仍stat，设备不可变源契约下常驻命中零stat、零新分配。`page_bitmap`覆盖原生整帧、带填充行和取消不写当前帧；`pn_reading_copy_bench`只计连续缓存拷贝，不含解析/TF/面板。旧新对比应先用同一观察器冻结旧可执行文件，再交替固定CPU多轮测量；微阶段比例不能称为整次开书/NEXT提升。
+
 `epub_long_chapter`核对120次NEXT、40次PREV的全部161帧与同步流式基线一致，并限制单页小步数，防止已验证缓存前文逐字重扫。`resume_turns`覆盖0/1/16/64步扫描重叠、一次导航最多一次续读包探测，以及原创大章第80页热开后连续NEXT；后台索引分别停在0/1/32/500步后由NEXT接管，直接连翻8帧、回翻再连翻9帧逐字节比较，关闭池归零。`product_open_loop`另从真实异步邮箱交替投递15次点击/右键NEXT。
 
 真机复测沿用失败书籍和原续读位置，不清缓存；保留每5秒`Reader NEXT waiting`的`steps`与`phase`，并记录首次/第二次NEXT显示回执、PREV及重开归位画面。主机有界工作量通过不能代替原失败真机验收。
