@@ -44,16 +44,19 @@ class Bundle:
     assets: tuple
 
 
-def read_bundle(root, tag):
+def read_bundle(root, tag, archived_source=None):
     """仅接收唯一、同源且摘要完整的已发布包。 / Accept only unique, same-source packages with complete digests."""
     match = TAG.fullmatch(tag)
     if not match:
         raise ValueError("Expected a product release tag such as v0.8.0")
     version = match[1]
+    if archived_source is not None and not re.fullmatch(r"[0-9a-f]{40}", archived_source):
+        raise ValueError("Archived source must be an exact 40-character commit")
+    base = root / "releases" / "archive" if archived_source else root / "releases"
     folders = {}
     metadata = {}
     for mode in ("upgrade", "full"):
-        candidates = sorted((root / "releases").glob(f"pico_nano-{version}-*-{mode}"))
+        candidates = sorted(base.glob(f"pico_nano-{version}-{archived_source[:7] if archived_source else '*'}-{mode}"))
         if len(candidates) != 1:
             raise ValueError(f"Expected exactly one {mode} package for {tag}")
         folder = candidates[0]
@@ -61,7 +64,7 @@ def read_bundle(root, tag):
         commit = info.get("source_commit", "")
         if (info.get("brand") != "PicoNano" or info.get("version") != version or
                 info.get("target") != "esp32s3" or info.get("board") != "RDP-G01-W" or
-                not re.fullmatch(r"[0-9a-f]{40}", commit) or
+                not re.fullmatch(r"[0-9a-f]{40}", commit) or (archived_source and commit != archived_source) or
                 folder.name != f"pico_nano-{version}-{commit[:7]}-{mode}" or
                 (mode == "full" and info.get("mode") != "full")):
             raise ValueError(f"Invalid release identity: {folder.name}")
@@ -185,6 +188,8 @@ class API:
         try:
             req = urllib.request.Request(self.origin + path, data=data, headers=headers, method=method)
             with self.opener.open(req, timeout=120) as response:
+                if response.status == 204:
+                    return None
                 return json.load(response)
         except urllib.error.HTTPError as exc:
             if method == "GET" and exc.code == 404:
@@ -303,8 +308,39 @@ def release_body(bundle, github):
             "软件验证、固件构建与真机验收分别记录，以原始发布的验收边界为准。\n")
 
 
-def sync(bundle, repository, github, api, verify_only=False):
+def stable_replacements(root, bundle, previous_source):
+    """仅从同版本已归档包授权替换两个稳定文件名，保持OTA公钥连续。 / Authorize only two stable-name replacements from an archived same-version bundle, retaining the OTA trust key."""
+    previous = read_bundle(root, bundle.tag, previous_source)
+    if previous.source_commit == bundle.source_commit:
+        raise ValueError("Replacement must identify a different previous build")
+    from cryptography.hazmat.primitives import serialization
+    from package_ota import verify_manifest
+    version = bundle.tag[1:]
+    key_path = root / "releases/archive" / f"pico_nano-{version}-{previous_source[:7]}-upgrade/ota/release-public.pem"
+    public = serialization.load_pem_public_key(key_path.read_bytes())
+    old = {a.name:a for a in previous.assets}
+    new = {a.name:a for a in bundle.assets}
+    names = {"PicoNano-ota-manifest.bin": f"PicoNano-{previous_source[:7]}-ota-manifest.bin",
+             "SHA256SUMS": f"SHA256SUMS-{previous_source[:7]}"}
+    if not names.keys() <= old.keys() or not names.keys() <= new.keys():
+        raise ValueError("Stable replacement requires signed OTA bundles")
+    try:
+        verify_manifest(new["PicoNano-ota-manifest.bin"].content, public)
+    except Exception:
+        raise ValueError("Replacement OTA signing key differs from the archived build") from None
+    return {name:(old[name],Asset(backup,old[name].content)) for name,backup in names.items()}
+
+
+def sync(bundle, repository, github, api, verify_only=False, replacements=None):
     """幂等上传，冲突停止，完成后匿名下载核验。 / Upload idempotently, stop on conflicts, then verify anonymous downloads."""
+    replacements = replacements or {}
+    if verify_only and replacements:
+        raise ValueError("Read-only verification cannot replace attachments")
+    if not replacements.keys() <= {"PicoNano-ota-manifest.bin", "SHA256SUMS"}:
+        raise ValueError("Only stable OTA manifest/checksum names may be replaced")
+    for name,(old,backup) in replacements.items():
+        if old.name != name or backup.name == name or backup.content != old.content:
+            raise ValueError("Invalid stable attachment backup")
     prefix = f"/repos/{repository}"
     repo = api.request(prefix)
     if not repo or repo.get("private") or not repo.get("default_branch"):
@@ -332,13 +368,27 @@ def sync(bundle, repository, github, api, verify_only=False):
     report = {"tag": bundle.tag, "source_commit": bundle.source_commit,
               "url": f"https://gitee.com/{repository}/releases/tag/{bundle.tag}", "assets": []}
     # 先检查全部已存在附件，避免发现冲突之前上传其他包。 / Check all existing attachments before uploading any missing package.
-    missing = []
+    missing, conflicts = [], []
     for asset in bundle.assets:
         matches = [x for x in remote if x["name"] == asset.name]
         if len(matches) > 1:
             raise ValueError(f"Duplicate Gitee attachment: {asset.name}")
         if matches:
-            verify_asset(asset, matches[0])
+            try:
+                verify_asset(asset, matches[0])
+            except ValueError:
+                if asset.name not in replacements:
+                    raise
+                old, backup = replacements[asset.name]
+                verify_asset(old, matches[0])
+                if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", str(matches[0].get("id", ""))):
+                    raise ValueError("Stable attachment has an invalid scoped ID")
+                saved = [x for x in remote if x["name"] == backup.name]
+                if len(saved)>1:
+                    raise ValueError("Duplicate stable attachment backup")
+                if saved:
+                    verify_asset(backup,saved[0])
+                conflicts.append((asset,matches[0],backup,bool(saved)))
         else:
             missing.append(asset)
     if verify_only and missing:
@@ -347,6 +397,18 @@ def sync(bundle, repository, github, api, verify_only=False):
         print(f"Upload Gitee: {asset.name}", flush=True)
         result = api.request(endpoint, "POST", attachment=asset)
         verify_asset(asset, result)
+    # 不可变新包先就绪；旧稳定文件归档并匿名读回成功后，才替换原名。
+    # New immutable packages are ready first; replace a stable name only after its old bytes are archived and read back anonymously.
+    for asset,old,backup,saved in conflicts:
+        if not saved:
+            verify_asset(backup,api.request(endpoint,"POST",attachment=backup))
+        api.request(f"{endpoint}/{old['id']}","DELETE")
+        verify_asset(asset,api.request(endpoint,"POST",attachment=asset))
+    if replacements:
+        body=release_body(bundle,github)+f"\n当前重构建后缀：`{bundle.source_commit[:7]}`；已安装同版本旧构建时请使用USB更新。旧提交后缀附件保留。\n"
+        if release.get("body") != body:
+            api.request(f"{prefix}/releases/{release['id']}","PATCH",{"name":f"PicoNano {bundle.tag[1:]}","body":body})
+        report["archived_stable_assets"]=[backup.name for _,_,backup,_ in conflicts]
     for asset in bundle.assets:
         report["assets"].append({"name": asset.name, "bytes": len(asset.content), "sha256": asset.sha256})
     return report
@@ -431,12 +493,15 @@ def main():
     mode.add_argument("--apply", action="store_true", help="Upload verified packages; requires GITEE_TOKEN")
     mode.add_argument("--verify-only", action="store_true", help="Verify existing public Gitee downloads without writing")
     parser.add_argument("--initialize-guides", action="store_true", help="With --apply, replace Gitee README.md/README.en.md with download guides once")
+    parser.add_argument("--replace-stable-from", help="With --apply only: archived same-version source SHA; preserve old stable bytes before replacing manifest/checksums")
     parser.add_argument("--wait-for-assets", type=int, default=0, help="Wait 0-300 seconds in 10-second intervals for GitHub asset uploads")
     parser.add_argument("--report", type=pathlib.Path, help="Write a non-secret JSON verification report")
     args = parser.parse_args()
     try:
         if args.initialize_guides and not args.apply:
             raise ValueError("Guide initialization requires --apply")
+        if args.replace_stable_from and not args.apply:
+            raise ValueError("Stable replacement requires --apply")
         if not 0 <= args.wait_for_assets <= 300 or args.wait_for_assets % 10:
             raise ValueError("Asset wait must be 0-300 seconds in 10-second intervals")
         if any(not REPOSITORY.fullmatch(x) for x in (args.gitee_repo, args.github_repo)):
@@ -450,7 +515,8 @@ def main():
                 raise ValueError("Set GITEE_TOKEN in the environment; never pass tokens on the command line")
             github = github_release(bundle, args.github_repo, args.wait_for_assets)
             api = API("https://gitee.com/api/v5", token)
-            report = sync(bundle, args.gitee_repo, github, api, args.verify_only)
+            replacement = stable_replacements(ROOT,bundle,args.replace_stable_from) if args.replace_stable_from else None
+            report = sync(bundle, args.gitee_repo, github, api, args.verify_only,replacement)
             if args.initialize_guides:
                 report["guides"] = initialize_guides(api, args.gitee_repo, args.github_repo)
             report["mode"] = "verified"

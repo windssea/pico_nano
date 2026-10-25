@@ -13,6 +13,11 @@ on:
         required: false
         default: false
         type: boolean
+      previous_source:
+        description: Same-version rebuild only; exact archived prior source SHA (stable files are backed up first)
+        required: false
+        default: ''
+        type: string
 permissions:
   contents: read
 concurrency:
@@ -41,9 +46,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
           INITIALIZE_GUIDES: ${{ inputs.initialize_guides }}
+          PREVIOUS_SOURCE: ${{ inputs.previous_source }}
         run: |
           args=()
           if [[ "$INITIALIZE_GUIDES" == "true" ]]; then args+=(--initialize-guides); fi
+          if [[ -n "$PREVIOUS_SOURCE" ]]; then args+=(--replace-stable-from "$PREVIOUS_SOURCE"); fi
           for attempt in 1 2 3; do
             if python3 tools/sync_gitee_release.py --tag "$RELEASE_TAG" --apply --wait-for-assets 180 "${args[@]}" --report build-dev/gitee-mirror.json; then
               exit 0

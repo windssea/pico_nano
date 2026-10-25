@@ -1,5 +1,5 @@
-"""整书索引开关、等待首屏顺序、后台与重开。 / Whole-book mode, first-frame ordering, background and reopening."""
-import os,pathlib,subprocess,sys,tempfile,shutil,zipfile
+"""旧整书索引偏好兼容、等待首屏顺序、后台与重开。 / Legacy whole-book preference compatibility, first-frame ordering, background and reopening."""
+import os,pathlib,subprocess,sys,tempfile,shutil,zipfile,struct,zlib
 with tempfile.TemporaryDirectory(prefix="pn-book-index-window-") as folder:
  root=pathlib.Path(folder);books=root/'books';books.mkdir();(books/'a.txt').write_text('Whole book indexing preserves the visible page and exact typography.\n'*400,encoding='utf-8')
  def run(name,script,state=None,delay=0):
@@ -15,8 +15,14 @@ with tempfile.TemporaryDirectory(prefix="pn-book-index-window-") as folder:
    pixels=frame.read_bytes().split(b'\n',3)[3]
    assert pixels[0]==255 and pixels[683]==255,(frame,pixels[0],pixels[683])
   return r.stdout,state
- out,state=run('wait','library,settings,tap:100:950,tap:400:750,back,back,enter,wait:1500,home,quit')
- assert 'settings command=49 status=0' in out and 'book_index wait begin' in out and 'book_index wait end status=0' in out,out
+ # 入口已隐藏；独立旧PNJR夹具验证既有开启偏好，不再点击已移走的UI。/ The entry is hidden; an independent legacy PNJR fixture verifies persisted ON without clicking the removed UI.
+ legacy=struct.pack('<4sHHQ',b'PNJR',1,6,1)+b'PNIX\x01\x01'
+ legacy+=struct.pack('<I',zlib.crc32(legacy)&0xffffffff)
+ def seed_legacy(state):
+  state.mkdir(exist_ok=True);(state/'indexing.a').write_bytes(legacy);return state
+ out,state=run('wait','library,enter,wait:1500,home,quit',seed_legacy(root/'wait'))
+ assert 'book_index wait begin' in out and 'book_index wait end status=0' in out,out
+ assert (state/'indexing.a').read_bytes()==legacy
  assert out.index('book_index wait end status=0')<out.index('library_open name=a.txt'),out
  assert list((root/'tf'/'pages').glob('*.pni')) and list((state/'indexes').glob('*.pnrt')),out
  out,_=run('warm','library,enter,home,quit',state)
@@ -40,6 +46,6 @@ with tempfile.TemporaryDirectory(prefix="pn-book-index-window-") as folder:
   z.writestr('META-INF/container.xml','<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OPS/book.opf" media-type="application/oebps-package+xml"/></rootfiles></container>')
   z.writestr('OPS/book.opf','<package xmlns="http://www.idpf.org/2007/opf" xmlns:d="http://purl.org/dc/elements/1.1/" version="2.0" unique-identifier="uid"><metadata><d:title>Index</d:title><d:identifier id="uid">index</d:identifier></metadata><manifest><item id="a" href="a.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="a"/></spine></package>')
   z.writestr('OPS/a.xhtml','<html xmlns="http://www.w3.org/1999/xhtml"><body>'+''.join('<p>Continuous page boundaries retain exact layout.</p>' for i in range(200))+'</body></html>')
- out,_=run('epub-wait','library,settings,tap:100:950,tap:400:750,back,back,enter,home,quit')
+ out,_=run('epub-wait','library,enter,home,quit',seed_legacy(root/'epub-wait'))
  assert 'book_index wait end status=0' in out and out.index('book_index wait end status=0')<out.index('library_open name=a.epub'),out
  print('book index window: saved option, first-frame waiting gate, trusted warm reuse, background order and no leaks passed')

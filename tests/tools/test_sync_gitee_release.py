@@ -9,7 +9,7 @@ import unittest
 import struct
 import zipfile
 import subprocess
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "tools"))
 import sync_gitee_release as mirror
@@ -22,18 +22,27 @@ class FakeAPI:
         self.exists = exists
         self.writes = []
         self.page_calls = []
+        self.body = ""
 
     def request(self, path, method="GET", payload=None, attachment=None):
+        if method == "DELETE":
+            self.writes.append((path, payload, attachment))
+            self.attachments = [x for x in self.attachments if str(x.get("id")) != path.rsplit("/",1)[1]]
+            return None
+        if method == "PATCH":
+            self.writes.append((path, payload, attachment))
+            self.body = payload.get("body",self.body)
+            return {"id":123}
         if method == "POST":
             self.writes.append((path, payload, attachment))
             if attachment:
-                result = {"name": attachment.name, "browser_download_url": f"https://gitee.com/files/{attachment.name}"}
+                result = {"id":1000+len(self.writes),"name": attachment.name, "browser_download_url": f"https://gitee.com/files/{attachment.name}", "data":attachment.content}
                 self.attachments.append(result)
                 return result
             self.exists = True
             return {"id": 123}
         if path.endswith("/releases/tags/v0.8.0"):
-            return {"id": 123} if self.exists else None
+            return {"id": 123,"body":self.body} if self.exists else None
         if "/attach_files?" in path:
             self.page_calls.append(path)
             return self.attachments
@@ -116,6 +125,23 @@ class MirrorTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "same source/application"):
                 mirror.read_bundle(root, "v0.8.0")
 
+    def test_archived_bundle_selection_is_exact_and_isolated(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=pathlib.Path(tmp);self.fixture(root);archive=root/'releases/archive';archive.mkdir()
+            for folder in list((root/'releases').glob('pico_nano-*')):folder.rename(archive/folder.name)
+            self.fixture(root)
+            (next((root/'releases').glob('*-upgrade'))/'pico_nano.bin').write_bytes(b'corrupt current')
+            self.assertEqual(mirror.read_bundle(root,'v0.8.0','a'*40).source_commit,'a'*40)
+            with self.assertRaises(ValueError):mirror.read_bundle(root,'v0.8.0','a'*39+'b')
+            with self.assertRaises(ValueError):mirror.read_bundle(root,'v0.8.0','../bad')
+
+    def test_delete_accepts_empty_success_without_parsing_json(self):
+        api=mirror.API('https://gitee.com/api/v5','private-token')
+        response=MagicMock();response.status=204
+        api.opener=MagicMock();api.opener.open.return_value.__enter__.return_value=response
+        self.assertIsNone(api.request('/scoped-release/attachment','DELETE'))
+        response.read.assert_not_called()
+
     def test_diagnostic_tags_and_path_injection_rejected(self):
         for tag in ("v0.8.0-diag", "../v0.8.0", "v0.8.0;echo secret", "0.8.0"):
             with self.assertRaises(ValueError):
@@ -156,6 +182,43 @@ class MirrorTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 mirror.sync(self.bundle, "owner/repo", self.github, api, verify_only=True)
             self.assertEqual(api.writes, [])
+
+    def test_rebuild_preserves_known_stable_bytes_before_replacement(self):
+        """同版本替换先归档并读回，旧不可变附件保持。 / Same-version replacement archives and reads back first, retaining immutable old attachments."""
+        old = mirror.Asset("SHA256SUMS",b"old sums")
+        backup = mirror.Asset("SHA256SUMS-1111111",old.content)
+        api=FakeAPI([{"id":1,"name":old.name,"data":old.content},{"id":2,"name":"PicoNano-old-ota.bin","data":b"old image"}])
+        def verify(asset,remote):
+            if remote.get("name")!=asset.name or remote.get("data")!=asset.content:raise ValueError("digest mismatch")
+        with patch.object(mirror,"verify_asset",side_effect=verify):
+            mirror.sync(self.bundle,"owner/repo",self.github,api,replacements={old.name:(old,backup)})
+            deleted=next(i for i,x in enumerate(api.writes) if x[0].endswith('/attach_files/1'))
+            archived=next(i for i,x in enumerate(api.writes) if x[2] and x[2].name==backup.name)
+            self.assertLess(archived,deleted)
+            self.assertTrue(any(x['name']=="PicoNano-old-ota.bin" for x in api.attachments))
+            self.assertTrue(any(x['name']==backup.name and x['data']==old.content for x in api.attachments))
+            writes=len(api.writes)
+            mirror.sync(self.bundle,"owner/repo",self.github,api,replacements={old.name:(old,backup)})
+            self.assertEqual(len(api.writes),writes)
+
+    def test_rebuild_unknown_conflict_and_read_only_never_write(self):
+        old=mirror.Asset("SHA256SUMS",b"old sums");backup=mirror.Asset("SHA256SUMS-1111111",old.content)
+        api=FakeAPI([{"id":1,"name":old.name,"data":b"unknown"}])
+        with patch.object(mirror,"verify_asset",side_effect=ValueError("digest mismatch")):
+            with self.assertRaises(ValueError):mirror.sync(self.bundle,"owner/repo",self.github,api,replacements={old.name:(old,backup)})
+        self.assertEqual(api.writes,[])
+        with self.assertRaises(ValueError):mirror.sync(self.bundle,"owner/repo",self.github,api,verify_only=True,replacements={old.name:(old,backup)})
+        self.assertEqual(api.writes,[])
+
+    def test_rebuild_failed_archive_verification_keeps_original(self):
+        old=mirror.Asset("SHA256SUMS",b"old sums");backup=mirror.Asset("SHA256SUMS-1111111",old.content)
+        api=FakeAPI([{"id":1,"name":old.name,"data":old.content}])
+        def verify(asset,remote):
+            if asset.name==backup.name or remote.get('data')!=asset.content:raise ValueError('digest mismatch')
+        with patch.object(mirror,'verify_asset',side_effect=verify),self.assertRaises(ValueError):
+            mirror.sync(self.bundle,"owner/repo",self.github,api,replacements={old.name:(old,backup)})
+        self.assertFalse(any(x[0].endswith('/attach_files/1') for x in api.writes))
+        self.assertTrue(any(x.get('id')==1 for x in api.attachments))
 
     def test_github_draft_or_different_packages_stop(self):
         with patch.object(mirror.API, "request", return_value={"draft": True}):
@@ -269,6 +332,31 @@ class MirrorTests(unittest.TestCase):
             changed=bytearray(envelope);changed[450]^=1;save(bytes(changed))
             with self.assertRaisesRegex(ValueError,"signature verification"):
                 mirror.read_bundle(root,"v0.8.0")
+
+    def test_replacement_authority_requires_archived_bundle_and_same_signing_key(self):
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import ec
+        from package_ota import make_manifest
+        with tempfile.TemporaryDirectory() as tmp:
+            root=pathlib.Path(tmp);self.fixture(root);upgrade=next((root/'releases').glob('*-upgrade'))
+            ota=upgrade/'ota';ota.mkdir();key=ec.generate_private_key(ec.SECP256R1())
+            image=(upgrade/'pico_nano.bin').read_bytes();boot=b'\xe9'+b'\0'*99
+            old=make_manifest(image,boot,'0.8.0','a'*40,key)
+            (ota/'release-public.pem').write_bytes(key.public_key().public_bytes(serialization.Encoding.PEM,serialization.PublicFormat.SubjectPublicKeyInfo))
+            for name,data in {'PicoNano-aaaaaaa-ota.bin':image,'PicoNano-ota-manifest.bin':old}.items():(ota/name).write_bytes(data)
+            (ota/'SHA256SUMS').write_text(''.join(f'{hashlib.sha256(data).hexdigest()}  {name}\n' for name,data in {'PicoNano-aaaaaaa-ota.bin':image,'PicoNano-ota-manifest.bin':old}.items()))
+            previous=mirror.read_bundle(root,'v0.8.0');archive=root/'releases/archive';archive.mkdir()
+            for folder in list((root/'releases').glob('pico_nano-*')):folder.rename(archive/folder.name)
+            current=make_manifest(image,boot,'0.8.0','b'*40,key)
+            bundle=mirror.Bundle('v0.8.0','b'*40,(mirror.Asset('PicoNano-ota-manifest.bin',current),mirror.Asset('SHA256SUMS',b'new sums')))
+            authority=mirror.stable_replacements(root,bundle,'a'*40)
+            self.assertEqual(authority['PicoNano-ota-manifest.bin'][0].content,old)
+            self.assertEqual(authority['SHA256SUMS'][0].content,previous.assets[-1].content)
+            wrong=make_manifest(image,boot,'0.8.0','b'*40,ec.generate_private_key(ec.SECP256R1()))
+            with self.assertRaisesRegex(ValueError,'signing key'):
+                mirror.stable_replacements(root,mirror.Bundle('v0.8.0','b'*40,(mirror.Asset('PicoNano-ota-manifest.bin',wrong),mirror.Asset('SHA256SUMS',b'new sums'))),'a'*40)
+            with self.assertRaisesRegex(ValueError,'different previous'):
+                mirror.stable_replacements(root,previous,'a'*40)
 
 
 if __name__ == "__main__":

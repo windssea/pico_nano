@@ -6,6 +6,8 @@
 
 跨机器重新编译可能改变引导程序字节。继续兼容既有签名OTA链时，完整包使用`python tools/package_upgrade.py --full --qualified-bootloader releases/pico_nano-1.0.5-3c63c46-full`显式复用已资格引导；工具检查旧正式清单的产品/板型/SDK、芯片头、长度及SHA，不覆盖本地编译产物，并在新清单记录引导来源。发布前还须独立验签旧OTA清单，并核对其引导摘要、新完整包引导及新OTA清单三者一致。不能仅凭文件名宣称引导已通过设备资格验证；若要变更引导，必须另做迁移资格测试。
 
+用户明确要求同版本重构建时，将该版本旧包目录保存在`releases/archive/`，当前目录只保留新源码对应的一组包。公开服务保留旧提交后缀的不可变附件；仅稳定名称`PicoNano-ota-manifest.bin`与`SHA256SUMS`需更新。Gitee手动同步可指定`previous_source`（完整旧源码SHA，对应工具`--replace-stable-from`）：先完整校验同版本归档包及OTA公钥连续性，上传新不可变包，旧稳定文件先另名归档并匿名读回，再替换原名；未知冲突、重复名称或归档校验失败仍停止。默认同步与只读核验不允许替换，也不删除其他版本。已安装同版本旧构建的设备不会因版本相等获得OTA升级，需使用USB更新。
+
 续读包回归为`resume_app`（独立进程重启、A/B换书、缺包/根、损坏/截断、显示失败重试、时间/字号/字重/背景变化及图片完整帧）和`resume_file`（三类无损像素、全部提交边界中断、可信SHA、空间不足、同步失败、取消/失卡与自有配额清理）。`resume_window`驱动真实SDL事件循环，核对开书/NEXT/PREV完整画面、跨进程命中和删包回退；自动回归使用dummy，开发仍须重建并保留可见窗口。三者分别随`python tools/dev.py host`/`sdl`运行。
 
 独立旧/新对照：先冻结旧提交源码并用相同`pn_resume_capture.c`编译观察器（旧目标不定义`PN_RESUME_NEW`），再运行`python tools/test_local_resume.py --before <旧观察器> --after <新观察器> --font <完整TTF> --out <报告.json>`。输入与状态复制到临时卷，三轮交替、固定可用CPU，TXT及480章/单章288万字逐帧一致才汇总开书/首次NEXT中位数、池峰和包体积。只有同源软件时间，不模拟TF或面板。

@@ -17,7 +17,8 @@ int main(void){
  pn_pool_t pool;assert(!pn_pool_init(&pool,6u*1024u*1024u,NULL,NULL,NULL));pn_settings_ui_t ui={0};
  assert(pn_settings_ui_open(&ui,&pool,NULL,NULL,present,NULL)==PN_OK);
  assert(pn_settings_ui_event(&ui,PN_SETUI_ABOUT,present,NULL)==PN_OK);
- assert(pn_settings_ui_hit(&ui,300,1010)==PN_SETUI_UPDATE);
+ // 隐藏索引行后更新入口上移，旧位置不应再响应。/ Hiding the index row moves Update upward; its former position must stay inactive.
+ assert(pn_settings_ui_hit(&ui,300,880)==PN_SETUI_UPDATE && pn_settings_ui_hit(&ui,300,1010)==-1);
  assert(pn_settings_ui_event(&ui,PN_SETUI_UPDATE,present,NULL)==PN_OK && pn_settings_ui_screen(&ui)==6);
  assert(pn_settings_ui_hit(&ui,300,740)==-1 && pn_settings_ui_event(&ui,PN_SETUI_UPDATE_REBOOT,present,NULL)==PN_EMPTY);
  pn_settings_update_t state={.available=true};pn_settings_ui_set_update(&ui,&state);assert(pn_settings_ui_present(&ui,present,NULL)==PN_OK);
