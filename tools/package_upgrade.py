@@ -97,7 +97,8 @@ def validate_build_config(config):
     """拒绝旧无线/TLS策略、CI时钟及诊断包冒充正式板级包。 / Reject stale radio/TLS policy, CI clocks and diagnostics in product board packages."""
     options = dict(re.findall(r"^(CONFIG_[A-Z0-9_]+)=(.*)$", config, re.MULTILINE))
     required = ("CONFIG_SPIRAM_SPEED_120M", "CONFIG_ESP_PHY_ENABLE_USB", "CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC")
-    forbidden = ("CONFIG_PN_PROFILE", "CONFIG_PN_TEST_CONSOLE")
+    forbidden = ("CONFIG_PN_PROFILE", "CONFIG_PN_TEST_CONSOLE", "CONFIG_PN_WAKE_TRACE",
+                 "CONFIG_PN_DIAG_NO_AUTO_LOCK", "CONFIG_PN_DIAG_NO_LOCK_SLEEP")
     if any(options.get(key) != "y" for key in required) or any(options.get(key) == "y" for key in forbidden):
         raise ValueError("Expected product board 120 MHz, SDK USB coexistence, PSRAM TLS and diagnostics disabled")
 

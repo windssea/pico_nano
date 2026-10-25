@@ -2076,18 +2076,50 @@ static bool prepare_lock(void){
 }
 static bool lock_slept; ///< 最近一次锁屏确实进入了睡眠等待 / The latest lock actually entered the sleep wait
 static uint64_t unlocked_at; ///< 最近一次解锁时间：随后1.5秒内的电源短按不再锁屏，避免连按来回切换 / Latest unlock time: power shorts within the next 1.5 s never relock, preventing toggling from repeated presses
+#if defined(CONFIG_PN_WAKE_TRACE) && CONFIG_PN_WAKE_TRACE
+static struct {
+    uint64_t lock_at,locked_ms,due; ///< 仅诊断的锁屏间隔与延后日志时点 / Diagnostic lock interval and deferred-log deadline
+    const char *reason; ///< 不可变原因字面量的快照 / Snapshot of an immutable reason literal
+    int sd,warm; ///< 挂载查询与热恢复结果，-1表示未执行 / Mount query and warm result; -1 means not attempted
+    uint64_t warm_ms; ///< 恢复入口到显示回执耗时，不含延后日志等待 / Restore entry to display receipt, excluding deferred-log waits
+    unsigned left; ///< 有界重播次数，最多5条 / Bounded replay count, at most five lines
+    bool slept,retained,continuity,present,mounted; ///< 同一product owner采集/输出，不跨任务读取 / Captured/emitted by one product owner, never read across tasks
+} wake_trace;
+/// USB浅睡会断连：最早2秒后每3秒重播固定快照，最多5条，繁忙时后延。/ USB disconnects in light sleep: replay a fixed snapshot after at least 2 s, then every 3 s, at most five lines, deferred while busy.
+static void wake_trace_capture(uint64_t now){
+    wake_trace.locked_ms=wake_trace.lock_at && now>=wake_trace.lock_at?now-wake_trace.lock_at:0;
+    wake_trace.reason=lock_slept?pn_device_sleep_media_reason():"not-slept";
+    wake_trace.slept=lock_slept;wake_trace.retained=reader_suspended;wake_trace.continuity=!lock_slept || pn_device_sleep_media_unchanged();
+    wake_trace.sd=wake_trace.warm=-1;wake_trace.warm_ms=0;wake_trace.present=wake_trace.mounted=false;
+    wake_trace.due=now+2000;wake_trace.left=5;
+}
+static void wake_trace_poll(uint64_t now){
+    if(!wake_trace.left || now<wake_trace.due)return;
+    ESP_LOGI(TAG,"Reader wake trace locked_ms=%llu slept=%u retained=%u continuity=%u reason=%s sd=%d present=%u mounted=%u warm=%d warm_ms=%llu",(unsigned long long)wake_trace.locked_ms,(unsigned)wake_trace.slept,(unsigned)wake_trace.retained,(unsigned)wake_trace.continuity,wake_trace.reason,wake_trace.sd,(unsigned)wake_trace.present,(unsigned)wake_trace.mounted,wake_trace.warm,(unsigned long long)wake_trace.warm_ms);
+    wake_trace.left--;wake_trace.due=now+3000;
+}
+#endif
 static void resume_reader(void){
     uint64_t resume_at=now_ms();(void)resume_at;
+#if defined(CONFIG_PN_WAKE_TRACE) && CONFIG_PN_WAKE_TRACE
+    wake_trace_capture(resume_at);
+#endif
     if(sudoku.active){locked=false;if(sudoku_draw()!=PN_OK)locked=true;return;}
     if(!reader_suspended && *selected_path)ESP_LOGW(TAG,"Reader wake cold fallback: reason=no-suspended-page");
     clock_tick(now_ms());pn_w_set_battery(battery_percent());
     if(reader_suspended){
         read_pico_sd_info_t card={0};esp_err_t checked=read_pico_sd_get_info(&card);
+#if defined(CONFIG_PN_WAKE_TRACE) && CONFIG_PN_WAKE_TRACE
+        wake_trace.sd=(int)checked;wake_trace.present=card.present;wake_trace.mounted=card.mounted;
+#endif
         // 锁页绘制中再按电源键会跳过睡眠，介质不可能变化；不能读取上一次（或初始false）的睡眠结论。
         // A power press while the lock page is drawing skips sleep, so the media cannot have changed; never reuse the previous (or initial false) sleep verdict.
         bool unchanged=!lock_slept || pn_device_sleep_media_unchanged();
         if(checked==ESP_OK && card.mounted && unchanged){
             pn_status_t status=epub.impl?pn_epub_app_resume(&epub,now_ms(),present,NULL):pn_reader_app_resume(&reader,now_ms(),present,NULL);
+#if defined(CONFIG_PN_WAKE_TRACE) && CONFIG_PN_WAKE_TRACE
+            wake_trace.warm=(int)status;wake_trace.warm_ms=now_ms()-resume_at;
+#endif
             if(status==PN_OK){reader_suspended=false;locked=false;status_page=false;shelf_mode=false;ESP_LOGI(TAG,"Warm reader resumed without reopening book elapsed_ms=%llu",(unsigned long long)(now_ms()-resume_at));return;}
             if(status!=PN_STALE_MEDIA && status!=PN_STALE_JOB){
                 locked=true;ESP_LOGW(TAG,"Warm display restore failed: %d; power key retries retained page",(int)status);return;
@@ -2112,6 +2144,9 @@ static void resume_reader(void){
 static void lock_and_sleep_impl(const char *hint){
     resource_previews_close();
     uint64_t lock_at=now_ms();bool wake_pending=false;
+#if defined(CONFIG_PN_WAKE_TRACE) && CONFIG_PN_WAKE_TRACE
+    wake_trace.lock_at=lock_at;wake_trace.left=0;
+#endif
     ESP_LOGI(TAG,"Locking; idle at %llu ms",(unsigned long long)last_input);
     locked=true;show_lock(hint);if(!reader_suspended)pn_wallpaper_mask_close(&lock_mask);
     if(!pn_device_async_off(&async_port)){ESP_LOGW(TAG,"Display off barrier failed; staying awake");return;} // 显示owner断轨后再交出PMU/触摸。/ Display owner drops rails before handing off PMU/touch.
@@ -2121,7 +2156,7 @@ static void lock_and_sleep_impl(const char *hint){
     pn_device_input_event_t stale;while(pn_device_async_take(&async_port,&stale)!=PN_EMPTY)if(stale.kind==PN_DASYNC_POWER && stale.at>lock_at)wake_pending=true;
     // 锁页扫描期间的新短按仍表示解锁，不与触发锁屏的旧事件一起丢弃。/ A new short press during lock-page scanning still requests unlock, unlike stale lock-trigger events.
     lock_slept=!wake_pending;
-    if(wake_pending || pn_device_sleep_until_key()){last_input=now_ms();ESP_LOGI(TAG,"Wake key accepted at %llu ms",(unsigned long long)last_input);resume_reader();}
+    if(wake_pending || pn_device_sleep_until_key()){last_input=now_ms();ESP_LOGI(TAG,"Wake key accepted at %llu ms locked_ms=%llu slept=%u retained=%u continuity=%u reason=%s",(unsigned long long)last_input,(unsigned long long)(last_input-lock_at),(unsigned)lock_slept,(unsigned)reader_suspended,(unsigned)(!lock_slept || pn_device_sleep_media_unchanged()),lock_slept?pn_device_sleep_media_reason():"not-slept");resume_reader();}
     if(!pn_device_async_pause(&async_port,false))ESP_LOGW(TAG,"Input resume acknowledgement timed out");
 }
 static void lock_and_sleep(const char *hint){
@@ -2674,6 +2709,9 @@ static void device_task(void *arg){
     unsigned power_idle=0; ///< 连续无输入轮数（每轮约10ms）/ Consecutive rounds without input (about 10 ms each)
     unsigned background_rounds=0; ///< 连续1ms让出的预热轮数 / Consecutive warming rounds using 1 ms yields
     for(;;){uint64_t now=now_ms();
+#if defined(CONFIG_PN_WAKE_TRACE) && CONFIG_PN_WAKE_TRACE
+        wake_trace_poll(now);
+#endif
         (void)pn_hot_session_expire(&hot_session,now);
         if(scope_active)pn_async_end(&scope);
         bool body=!sudoku.active && reader_active() && !locked && !focus_page() && !status_page && !reading_menu && !shelf_mode && !toolbar_open;

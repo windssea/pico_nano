@@ -35,7 +35,7 @@ def run(command, docker, log, container_image=IDF_IMAGE):
 def main():
     prepare_console()
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["host", "sim", "firmware-ci", "firmware-board", "factory-data", "sdl", "docs", "epub-sample", "sdl-run", "installer", "local-samples", "profile", "firmware-diag"])
+    parser.add_argument("action", choices=["host", "sim", "firmware-ci", "firmware-board", "factory-data", "sdl", "docs", "epub-sample", "sdl-run", "installer", "local-samples", "profile", "firmware-diag", "firmware-wake-diag"])
     parser.add_argument("--native", action="store_true", help="Use installed tools instead of the pinned IDF container")
     parser.add_argument("--archive", type=pathlib.Path, help="Local EPUB inside the workspace for epub-sample")
     parser.add_argument("--all-resources", action="store_true", help="Compare every ZIP resource for epub-sample")
@@ -167,16 +167,21 @@ def main():
                     ["./build-sim-idf/pn_sim", "--headless", "--capture", "build-sim/artifacts/pattern.pgm"]]
     else:
         profile = "ci" if args.action == "firmware-ci" else "defaults"
-        build = {"firmware-ci": "build-ci-s3", "firmware-diag": "build-diag"}.get(args.action, "build-board")
+        build = {"firmware-ci": "build-ci-s3", "firmware-diag": "build-diag", "firmware-wake-diag": "build-wake-diag"}.get(args.action, "build-board")
         sdkconfig = f"/work/{build}/sdkconfig" if docker else (ROOT / build / "sdkconfig").as_posix()
         # 诊断镜像在板级默认上叠加串口测试控制台，独立目录，不污染发布构建。
         # The diagnostic image layers the serial test console over board defaults in its own directory, never touching release builds.
         defaults = "sdkconfig.defaults;sdkconfig.diag" if args.action == "firmware-diag" else f"sdkconfig.{profile}"
+        if args.action == "firmware-wake-diag":
+            defaults = "sdkconfig.defaults;sdkconfig.wake-diag"
         base = ["idf.py", "-B", build, "-DIDF_TARGET=esp32s3", f"-DSDKCONFIG={sdkconfig}",
                 f"-DSDKCONFIG_DEFAULTS={defaults}"]
-        if args.action == "firmware-diag":
+        if args.action in ("firmware-diag", "firmware-wake-diag"):
             base.append("-DPN_DIAG_IMAGE=ON")
         commands = [base + ["build"], base + ["size"]]
+        if args.action == "firmware-wake-diag":
+            # 显式重配专用目录，更新诊断开关时不沿用旧生成头。/ Reconfigure the isolated directory explicitly so changed trace options never retain stale generated headers.
+            commands.insert(0, base + ["reconfigure"])
     profile_status = 0
     local_status = 0
     for index, command in enumerate(commands):

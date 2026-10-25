@@ -1,0 +1,8 @@
+# 唤醒诊断：保留产品真实浅睡与自动锁屏，只提高日志等级；不启动测试控制台。
+# Wake diagnostics retain real product sleep and idle locking, raise logs only, and never start the test console.
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+CONFIG_PN_PROFILE=n
+CONFIG_PN_TEST_CONSOLE=n
+CONFIG_PN_DIAG_NO_AUTO_LOCK=n
+CONFIG_PN_DIAG_NO_LOCK_SLEEP=n
+CONFIG_PN_WAKE_TRACE=y

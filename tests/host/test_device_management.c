@@ -94,6 +94,12 @@ static void home_reading_key_checks(void){
     a.dated=false;before=home_reading_key(1,&a);a.week_ms[0]+=70000;assert(home_reading_key(1,&a)==before);
 }
 int main(void){
+    /* 延后日志只重播唤醒快照，不改变输入/显示，也不跟随之后变化的介质标记。/ Deferred logs replay the wake snapshot without input/display effects or following later media-verdict changes. */
+    wake_trace.lock_at=100;lock_slept=true;stub_media_unchanged=false;reader_suspended=true;wake_trace_capture(300);
+    assert(wake_trace.locked_ms==200 && wake_trace.retained && !wake_trace.continuity && !strcmp(wake_trace.reason,"stub-uncertain") && wake_trace.left==5);
+    stub_media_unchanged=true;wake_trace_poll(2299);assert(wake_trace.left==5);
+    for(unsigned i=0;i<5;i++){wake_trace_poll(2300+i*3000);assert(wake_trace.left==4-i && !wake_trace.continuity);}
+    wake_trace_poll(999999);assert(!wake_trace.left);memset(&wake_trace,0,sizeof wake_trace);lock_slept=false;reader_suspended=false;
     home_reading_key_checks();
     assert(!pn_pool_init(&pool,6u*1024u*1024u,NULL,NULL,NULL));
     assert(read_pico_init(&hardware)==ESP_OK);pn_media_init(&sd_media);pn_media_init(&data_media);pn_media_init(&wallpaper_media);

@@ -20,6 +20,10 @@ SDL独立对照为`python simulator/test_resume_window.py <新pn_sim> <完整TTF
 
 锁屏变慢诊断：`device_sleep_long_timer`以假时钟推进4小时的500ms定时复核，时间本身不使介质连续性失效；原非电源IRQ仍拒绝热恢复并保留首次原因。`device_lock_validate`的16轮覆盖2秒/5分钟/4小时同一阅读对象、完整帧/位置及显示失败重试，另外保留疑似换卡时的冷重开。它替换硬件端口，不是实际等待、SD或功耗测试。产品WARN日志`Reader wake cold fallback`区分无挂起页与连续性/挂载条件，`reason`是失去证明的原因而非确认拔卡；INFO热恢复日志带回执耗时。用户故障仍需真机日志对应，不能把来源保护直接移除。
 
+用户已确认“解锁后出现封面加载，再恢复正文”，说明确实进入重新开书分支。另一台电脑可用`python tools/dev.py firmware-wake-diag`构建`build-wake-diag/pico_nano.bin`（`1.0.6-diag`），独立SDKCONFIG叠加`sdkconfig.wake-diag`：保留真实锁屏浅睡及5分钟自动锁屏，INFO日志开启，逐字阶段计时/串口控制台关闭。普通`firmware-diag`仍用于串口自动化，会用轮询代替锁屏浅睡，不能混作这项故障的硬件复测。
+
+唤醒诊断的`PN_WAKE_TRACE`只在专用配置启用：product owner保存少量固定标量，恢复入口最早2秒后每3秒重播一次`Reader wake trace`，最多5条，繁忙时后延；方便USB浅睡断连后的重新采集。快照不分配、不访问TF，也不主动等待串口重连；串口输出本身仍可能扰动时序，不能把诊断耗时当产品性能。记录`locked_ms`、`retained`、`continuity`、`reason`、`sd/present/mounted`、`warm/warm_ms`；`warm=-1`表示未执行热恢复，`0`表示成功，其余为原状态码。`retained=0`排查锁屏前菜单/关闭路径；`continuity=0`及reason排查保守介质失效；`sd`非零或mounted=0排查底层挂载。先在串口终端开始采集，再按原方式锁屏/等待/按物理电源键解锁；USB断连须重新打开端口，保留从锁屏前到正文后15秒的日志。该入口只编译，不刷写；部署另获授权，先核对设备分区并备份，不使用固定偏移盲写，也不覆盖正式版或自动发布。
+
 字体去重使用主机/固件同一`embed_font_view.py`生成视图，构建目录的`pn_font_view.json`记录原始SHA、私有字节、片段数及数据节省。`font_storage_generator`验证原TTF完整重建、确定性和坏输入拒绝；`font_blob`验证跨库读取、EOF及坏段边界；`font_storage_validate <原UI.ttf>`验证全字节、10万次随机读取、多字号绘制哈希及池峰。旧提交加入同一观察器并以`PN_FONT_STORAGE_BASELINE`编译后先冻结旧可执行文件，当前版本默认走共享视图；该旧观察模式只用于旧源码，不能用新源码假冒旧基线。端到端旧新对照可复用`test_resume_window.py`第三参数传入冻结的旧SDL，原TTF与全部字体许可证清单不变。
 
 1.0.6后的小范围缓存交接回归：`cover_preview_host`/`cover_preview_immutable`用实际PNG/PNCV核对像素及元数据、来源替换、CACHE_WRITE、换卡、USB、取消与缺文件；常规PC仍stat，设备不可变源契约下常驻命中零stat、零新分配。`page_bitmap`覆盖原生整帧、带填充行和取消不写当前帧；`pn_reading_copy_bench`只计连续缓存拷贝，不含解析/TF/面板。旧新对比应先用同一观察器冻结旧可执行文件，再交替固定CPU多轮测量；微阶段比例不能称为整次开书/NEXT提升。

@@ -29,6 +29,12 @@ config PN_TEST_CONSOLE
         a power short press, status queries and shown-frame screenshots, and report
         every display job. Anyone with USB access can drive the device, and logging
         changes timing, so never enable this in a product or release image.
+config PN_WAKE_TRACE
+    bool "Deferred wake trace (diagnostic images only)"
+    default n
+    help
+        Retain a small owner-only wake snapshot and repeat it after USB reconnects.
+        Does not change sleep or media validation; never enable in release images.
 config PN_DIAG_NO_AUTO_LOCK
     bool "Disable idle auto-lock (diagnostic images only)"
     default n
