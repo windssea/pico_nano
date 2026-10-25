@@ -18,6 +18,10 @@
 
 完整USB包显式沿用1.0.5发布包中已资格的引导程序，保持老设备的OTA签名链；不采用另一台机器新编译、摘要不同的引导。新应用与分区仍取自本批板级构建，引导来源单独记入包清单。
 
+正式源码`3cb2d8a4bd56c10ea15705954114dd5316b14343`；板级应用5646656B，槽余644800B（10.25%），SHA-256 `c1b0e0b1c0de770dbf7707bfb6c2c409a76ada41159b2a9e921603bee931fd1b`；CI应用5643376B，槽余10.30%。两套ESP-IDF6.1构建/size、版本/ELF/checksum/validation、逐文件生效优化参数及非诊断开关核验通过；诊断构建确认INFO/PROFILE与控制台保留。资格引导SHA-256仍为`80193053e7c398d196e87db7b63a1eaf008ea5f368d35f918c094d5b804652e1`，旧/新签名清单与完整包三者一致。
+
+功能源码259项主机ASan/UBSan与50项SDL回归通过；本批47项工具、18项Python安装器和既有25项Node安装器/15项网页回归通过。三个ZIP完整性/清单、签名OTA及离线HTTP九镜像校验通过；公开附件、Pages与Gitee的发布后匿名核验单独记录，不把本地打包校验视作公开下载成功。
+
 本批正式镜像未刷入设备或执行OTA安装；现有设备仍运行此前的1.0.6诊断镜像。历史真机失败及后续修复范围见[阅读测试报告](READING_DEVICE_TEST_REPORT.md)，不能用本批构建替代正式版的睡眠、断电、实体键、面板光学或功耗验收。精确源码与镜像摘要以发布包清单为准。
 
 下载：[Gitee 1.0.6](https://gitee.com/windssea/pico_nano/releases/tag/v1.0.6)、[GitHub 1.0.6](https://github.com/windssea/pico_nano/releases/tag/v1.0.6)。
