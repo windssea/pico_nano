@@ -44,6 +44,7 @@ typedef struct {
     size_t decoded_size;
     uint8_t previous[ROW];
     bool owned, root_owned;
+    uint8_t write_slot; ///< 取消时还原对应待写资格，不改变磁盘格式 / Restore the matching dirty flag on cancellation, without changing disk format
 } resume_t;
 static pn_resume_space_fn tf_space, state_space;
 static void *space_ctx;
@@ -505,6 +506,7 @@ void pn_resume_close(pn_resume_t *h) {
     }
 }
 bool pn_resume_pending(const pn_resume_t *h) { return h && h->impl && ((resume_t *)h->impl)->phase != 0; }
+int pn_resume_pending_slot(const pn_resume_t *h) { return pn_resume_pending(h)?((const resume_t *)h->impl)->write_slot:-1; }
 pn_status_t pn_resume_begin(pn_resume_t *h, unsigned slot, const pn_resume_page_t *page, const pn_frame_t *frame,
                             pn_cache_owner_t *borrow) {
     if (!h || !page || slot > 1 || !frame_valid(frame) || (page->format != 1 && page->format != 2))
@@ -548,6 +550,7 @@ pn_status_t pn_resume_begin(pn_resume_t *h, unsigned slot, const pn_resume_page_
     r->size = RH;
     r->crc = 0;
     r->phase = 1;
+    r->write_slot = (uint8_t)slot;
     r->old = (pn_book_id_t){0};
     pn_book_id_t roots[2];
     if (trust_read(r, r->root, roots) || trust_read(r, r->rbak, roots))

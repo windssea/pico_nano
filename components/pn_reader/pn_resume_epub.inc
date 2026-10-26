@@ -80,13 +80,15 @@ pn_status_t pn_epub_app_resume_cache_idle(pn_epub_app_t *app) {
     if (pn_resume_pending(&a->resume)) {
         pn_profile_span_t span;
         pn_profile_begin(&span, a->pool, "resume.write");
+        int slot=pn_resume_pending_slot(&a->resume);
         pn_status_t s = pn_resume_step(&a->resume);
+        if(s==PN_CANCELLED)resume_retry_slot(a,slot);
         pn_profile_end(&span, s);
         return s;
     }
     if (pn_epub_app_verify_pending(app) || (!a->resume_dirty && !a->resume_next_dirty))
         return PN_EMPTY;
-    if (pn_epub_app_prefetch_pending(app) || pn_semantic_file_pending(&a->semantic_file))
+    if ((!a->resume_dirty && pn_epub_app_prefetch_pending(app)) || pn_semantic_file_pending(&a->semantic_file))
         return PN_EMPTY;
     if (resume_bind(a) != PN_OK)
         return PN_EMPTY;

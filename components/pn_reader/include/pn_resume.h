@@ -32,6 +32,8 @@ pn_status_t pn_resume_begin(pn_resume_t *, unsigned, const pn_resume_page_t *, c
 /// hashing/sync/commit phases; cache errors permit the original path.
 pn_status_t pn_resume_step(pn_resume_t *);
 bool pn_resume_pending(const pn_resume_t *); ///< 是否借用帧 / Whether a frame is borrowed
+/// 当前未提交写入槽：0当前页、1下一页、-1无任务；不改状态或访问文件。/ Uncommitted slot: 0 current, 1 next, -1 idle; no state change or file I/O.
+int pn_resume_pending_slot(const pn_resume_t *);
 void pn_resume_abort(pn_resume_t *);         ///< 归还借用，失卡后不触碰路径 / Return borrows, never touch paths after media loss
 void pn_resume_close(pn_resume_t *);         ///< 放弃任务并释放全部池内存 / Abort and release all pooled memory
 /// 显示回执使用的规范位置比较，不比较填充字节。/ Canonical location equality for display receipts, excluding padding bytes.

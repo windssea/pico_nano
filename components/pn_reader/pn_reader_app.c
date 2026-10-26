@@ -90,6 +90,9 @@ typedef struct {
     pn_refresh_policy_t refresh;pn_paper_t paper;
     pn_font_reference_t probed;bool probed_valid;uint64_t probed_ticket; ///< 本会话同一READ租约下刚由探查完整校验的字体引用，应用时免重复整文件SHA / Font reference fully verified by this session's probe under the same READ lease, letting apply skip a second whole-file SHA
 } app_t;
+/// 输入/挂起放弃未提交包后，原页有效时只重试对应槽。/ After input/suspend cancels an uncommitted package, retry only its slot while the page remains valid.
+static void resume_retry_slot(app_t *a,int slot){if(slot==0)a->resume_dirty=true;else if(slot==1)a->resume_next_dirty=true;}
+static void resume_abort_retry(app_t *a){resume_retry_slot(a,pn_resume_pending_slot(&a->resume));pn_resume_abort(&a->resume);}
 static pn_font_set_t *font_set(app_t *a){return a->font_use_draft?&a->font_draft:a->font_live.impl?&a->font_live:NULL;}
 static pn_font_t *body(app_t *a){return font_set(a)?a->managed_body:&a->body;}
 static pn_font_chain_t *chain(app_t *a){return font_set(a)?a->managed_chain:&a->chain;}
@@ -355,7 +358,7 @@ static pn_status_t bitmap_prepare(app_t *a,size_t budget){
     if(s==PN_EMPTY && a->bitmap.working)pn_page_bitmap_invalidate(&a->bitmap);
     if(s==PN_NO_MEMORY){pn_page_bitmap_enable(&a->bitmap,false);pn_page_bitmap_enable(&a->bitmap,true);return PN_EMPTY;}return s;
 }
-pn_status_t pn_reader_app_prerender(pn_reader_app_t *app,bool enable){if(!app || !app->impl)return PN_INVALID;pn_resume_abort(&((app_t *)app->impl)->resume);pn_page_bitmap_enable(&((app_t *)app->impl)->bitmap,enable);return PN_OK;}
+pn_status_t pn_reader_app_prerender(pn_reader_app_t *app,bool enable){if(!app || !app->impl)return PN_INVALID;resume_abort_retry(app->impl);pn_page_bitmap_enable(&((app_t *)app->impl)->bitmap,enable);return PN_OK;}
 pn_page_bitmap_stats_t pn_reader_app_prerender_stats(const pn_reader_app_t *app){return pn_page_bitmap_stats(app && app->impl?&((app_t *)app->impl)->bitmap:NULL);}
 bool pn_reader_app_warm_pending(const pn_reader_app_t *app){
     const app_t *a=app?app->impl:NULL;return a && bitmap_allowed(a) && (a->bitmap.working || (!a->bitmap.ready && pn_reader_warm_pending(&a->reader)));
@@ -424,7 +427,7 @@ static pn_status_t step_location(pn_reader_app_t *app,pn_reader_action_t action,
     if(app && app->impl)((app_t *)app->impl)->last_confirmed=false;
     if(!app || !app->impl || !present || action<PN_APP_OPEN || action>PN_APP_BEGINNING)return PN_INVALID;
     app_t *a=app->impl;if(now<a->last_now)return PN_INVALID;a->last_now=now;a->resume_pixels_ready=false;
-    pn_resume_abort(&a->resume);pn_page_index_abort(&a->page_index);
+    resume_abort_retry(a);pn_page_index_abort(&a->page_index);
     if(a->media_lost)return PN_STALE_MEDIA;
     if(a->suspended)return PN_BUSY;
     pn_read_intent_t intent=PN_READ_CURRENT;uint64_t offset=0;
@@ -501,7 +504,7 @@ pn_status_t pn_reader_app_percent(const pn_reader_app_t *app,unsigned *basis){
 pn_status_t pn_reader_app_suspend(pn_reader_app_t *app,uint64_t now){
     if(!app || !app->impl)return PN_INVALID;
     app_t *a=app->impl;if(now<a->last_now)return PN_INVALID;
-    pn_resume_abort(&a->resume);pn_page_index_abort(&a->page_index);
+    resume_abort_retry(a);pn_page_index_abort(&a->page_index);
     if(a->media_lost)return PN_STALE_MEDIA;
     if(!a->reader.has_visible || a->force_full || a->style_preview || a->font_preview || a->font_pending || a->global_pending || a->style_pending)return PN_BUSY;
     pn_status_t status=pn_media_validate(a->book_media,&a->book_lease);if(status!=PN_OK)return status;
@@ -525,7 +528,7 @@ pn_status_t pn_reader_app_deferred_flush(pn_reader_app_t *app){
 pn_status_t pn_reader_app_resume(pn_reader_app_t *app,uint64_t now,pn_reader_present_fn present,void *ctx){
     if(!app || !app->impl || !present)return PN_INVALID;
     app_t *a=app->impl;if(now<a->last_now)return PN_INVALID;
-    pn_resume_abort(&a->resume);pn_page_index_abort(&a->page_index);
+    resume_abort_retry(a);pn_page_index_abort(&a->page_index);
     if(!a->suspended)return PN_BUSY;
     pn_status_t status=a->media_lost?PN_STALE_MEDIA:pn_media_validate(a->book_media,&a->book_lease);if(status!=PN_OK)return status;
     pn_w_status_snapshot_t current=pn_w_status_snapshot();
@@ -694,12 +697,12 @@ pn_status_t pn_reader_app_bookmark_return(pn_reader_app_t *app,uint64_t now,pn_r
 
 pn_status_t pn_reader_app_body_layer(pn_reader_app_t *app,const pn_reader_body_layer_t *layer){
     if(!app || !app->impl || (layer && !layer->paint))return PN_INVALID;
-    pn_resume_abort(&((app_t *)app->impl)->resume);((app_t *)app->impl)->body_layer=layer?*layer:(pn_reader_body_layer_t){0};return PN_OK;
+    resume_abort_retry(app->impl);((app_t *)app->impl)->body_layer=layer?*layer:(pn_reader_body_layer_t){0};return PN_OK;
 }
 pn_status_t pn_reader_app_overlay(pn_reader_app_t *app,pn_reader_overlay_fn paint,void *paint_ctx,pn_reader_present_fn present,void *ctx,pn_refresh_t profile){
     if(!app || !app->impl || !paint || !present)return PN_INVALID;
     if(profile!=PN_REFRESH_GC16 && profile!=PN_REFRESH_GL16)return PN_UNSUPPORTED;
-    app_t *a=app->impl;if(a->reader.preparing)return PN_BUSY;pn_resume_abort(&a->resume);
+    app_t *a=app->impl;if(a->reader.preparing)return PN_BUSY;resume_abort_retry(a);
     if((a->external_font || font_set(a)) && !a->metadata_tried && !a->media_lost){
         a->metadata_tried=true;pn_text_source_t source;if(body_source(a,&source)==PN_OK)(void)pn_font_open(&a->metadata,a->pool,&source,36);
     }
@@ -917,7 +920,7 @@ void pn_reader_app_refresh_reset(pn_reader_app_t *app){if(app && app->impl)((app
 
 pn_status_t pn_reader_app_paper_context(pn_reader_app_t *app,pn_pool_t **pool,pn_media_t **media){if(!app || !app->impl || !pool || !media)return PN_INVALID;app_t *a=app->impl;*pool=a->pool;*media=a->book_media;return PN_OK;}
 
-void pn_reader_app_cache_activity(pn_reader_app_t *app,uint64_t now){if(app && app->impl){app_t *a=app->impl;if(now>=a->last_now){pn_resume_abort(&a->resume);pn_page_index_abort(&a->page_index);}}}
+void pn_reader_app_cache_activity(pn_reader_app_t *app,uint64_t now){if(app && app->impl){app_t *a=app->impl;if(now>=a->last_now){resume_abort_retry(a);pn_page_index_abort(&a->page_index);}}}
 
 void pn_reader_app_recent_observer(pn_reader_app_t *app,pn_recent_observer_fn observer,void *ctx){
     if(!app || !app->impl)return;

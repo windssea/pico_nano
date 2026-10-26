@@ -10,6 +10,8 @@
 
 续读包回归为`resume_app`（独立进程重启、A/B换书、缺包/根、损坏/截断、显示失败重试、时间/字号/字重/背景变化及图片完整帧）和`resume_file`（三类无损像素、全部提交边界中断、可信SHA、空间不足、同步失败、取消/失卡与自有配额清理）。`resume_window`驱动真实SDL事件循环，核对开书/NEXT/PREV完整画面、跨进程命中和删包回退；自动回归使用dummy，开发仍须重建并保留可见窗口。三者分别随`python tools/dev.py host`/`sdl`运行。
 
+`resume_switch`与`resume_switch_large`在同一进程、同一个6MiB池和介质中执行A→B→A→B，实际park/drop单个热会话；分别使用原创小书与48章/超大单章各57.6万字的书，不能称作真实《绍宋》《明颂》。覆盖完整保存、当前包写出部分行后取消、下一包取消、下一页未预热时先存当前包，核对重开命中、退出/恢复完整像素和位置、首次NEXT及释放归零。`PN_SWITCH_EVIDENCE`可保存原始计时/帧摘要；时间排除截图写盘，但仍是主机软件观察，不包含TF/面板。真实睡眠诊断另输出`resume.stored/hit/load`事件，不逐行打印写包，正式配置不增加这些日志。
+
 独立旧/新对照：先冻结旧提交源码并用相同`pn_resume_capture.c`编译观察器（旧目标不定义`PN_RESUME_NEW`），再运行`python tools/test_local_resume.py --before <旧观察器> --after <新观察器> --font <完整TTF> --out <报告.json>`。输入与状态复制到临时卷，三轮交替、固定可用CPU，TXT及480章/单章288万字逐帧一致才汇总开书/首次NEXT中位数、池峰和包体积。只有同源软件时间，不模拟TF或面板。
 
 SDL独立对照为`python simulator/test_resume_window.py <新pn_sim> <完整TTF> <旧pn_sim>`；设置`PN_RESUME_EVIDENCE`保留原始日志/PGM，设置`SDL_VIDEODRIVER=x11`并提供WSLg挂载可走可见窗口。两版须加入相同只读计时点：`sim.open.request`从开书请求到首屏回执，`sim.next.request`包含异步NEXT让出等待。截图写盘及窗口呈现包含在该端到端软件时间内；控制器观察器另排除捕获写盘。不可将局部阶段相加或用一次忙碌主机测量宣称真机比例。

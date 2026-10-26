@@ -374,6 +374,10 @@ static void profile_emit(void *ctx,const pn_profile_event_t *e){
     if(detailed)return;
 #endif
     bool timing=!strcmp(e->phase,"cover.extract") || !strcmp(e->phase,"cover.cache-snapshot") || !strncmp(e->phase,"epub.model-",11) || !strncmp(e->phase,"epub.raster",11) || !strncmp(e->phase,"epub.layout",11) || !strcmp(e->phase,"epub.zip") || !strcmp(e->phase,"epub.publication") || !strncmp(e->phase,"storage.",8) || !strncmp(e->phase,"display.",8);
+#ifdef CONFIG_PN_WAKE_TRACE
+    // 续读只记提交/命中/载入，不逐行打印写包，避免串口主导保存时间。/ Log resume commits/hits/loads, never per-row writes that would dominate storage timing.
+    timing=timing || !strcmp(e->phase,"resume.stored") || !strcmp(e->phase,"resume.hit") || !strcmp(e->phase,"resume.load");
+#endif
 #if PN_DEVICE_TEST_CONSOLE
     // 界面绘制分段只在诊断镜像输出，产品镜像不增加菜单日志。/ UI drawing splits log only in diagnostic images; product images add no menu logs.
     timing=timing || !strncmp(e->phase,"ui.",3);
