@@ -86,6 +86,8 @@ pn_status_t pn_identity_cache_job_step(pn_identity_cache_job_t *job,pn_identity_
     pn_book_id_t id;s=pn_identity_job_step(&j->hash,&id);if(s!=PN_OK)return s;
     // 计算期间文件被改写则不记：大小/修改时间须与开始时一致。/ Skip the record if the file changed meanwhile: size/mtime must equal those at the start.
     uint64_t size;int64_t mtime;if(!pn_identity_cache_stat(j->path,&size,&mtime) || size!=j->size || mtime!=j->mtime)return PN_STALE_JOB;
+    // 已扫描整本源后发布同代证明，避免前台再次计算同一份摘要。/ Publish same-generation proof only after hashing the whole source, avoiding a duplicate foreground digest.
+    s=pn_text_file_identity_complete(&j->source,&id);if(s!=PN_OK)return s;
     pn_identity_cache_put(cache,j->path,j->size,j->mtime,&id);return PN_OK;
 }
 const char *pn_identity_cache_job_path(const pn_identity_cache_job_t *job){

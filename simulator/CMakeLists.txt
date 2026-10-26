@@ -147,3 +147,8 @@ if(PN_SIM_SDL)
     add_test(NAME sokoban_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_sokoban_window.py $<TARGET_FILE:pn_sim>)
     set_tests_properties(sokoban_window PROPERTIES TIMEOUT 180)
 endif()
+
+if(PN_SIM_SDL)
+  add_test(NAME snapshot_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_snapshot_window.py $<TARGET_FILE:pn_sim>)
+  set_tests_properties(snapshot_window PROPERTIES LABELS "reader;storage;ui" TIMEOUT 240)
+endif()

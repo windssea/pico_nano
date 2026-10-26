@@ -3,6 +3,8 @@
  * caches never own user progress. */
 #define _POSIX_C_SOURCE 200809L
 #include "pn_resume.h"
+#include "pn_epub_progress.h"
+#include "pn_progress.h"
 #include "pn_cache_file.h"
 #include "pn_cancel.h"
 #include "pn_crc32.h"
@@ -314,8 +316,8 @@ static pn_status_t decode(resume_t *r, pn_frame_t *out, uint32_t *checksum) {
     *checksum = r->decoded_crc;
     return checked(r);
 }
-pn_status_t pn_resume_load(pn_resume_t *h, unsigned slot, const pn_resume_page_t *wanted, pn_frame_t *out, pn_resume_page_t *page,
-                           pn_status_t (*verify)(void *), void *ctx) {
+static pn_status_t packet_load(pn_resume_t *h, unsigned slot, const pn_resume_page_t *wanted, pn_frame_t *out, pn_resume_page_t *page,
+                           pn_status_t (*verify)(void *), void *ctx, bool snapshot) {
     if (!h || !wanted || !page || slot > 1 || !frame_valid(out))
         return PN_INVALID;
     resume_t *r = h->impl;
@@ -352,7 +354,7 @@ pn_status_t pn_resume_load(pn_resume_t *h, unsigned slot, const pn_resume_page_t
         r->offset = SIZE_MAX;
         pn_resume_page_t candidate;
         bool valid = fread(r->header, 1, RH, r->file) == RH && !memcmp(r->header, "PNRS", 4) && get(r->header + 4, 4) == 1 &&
-                     !memcmp(r->header + 8, r->book.sha256, 32) && !memcmp(r->header + 40, r->key.sha256, 32) &&
+                     !memcmp(r->header + 8, r->book.sha256, 32) && (snapshot || !memcmp(r->header + 40, r->key.sha256, 32)) &&
                      get(r->header + RH - 4, 4) == pn_crc32_update(0, r->header, RH - 4) && page_get(r, &candidate) &&
                      candidate.format == wanted->format;
         if (valid)
@@ -394,7 +396,7 @@ pn_status_t pn_resume_load(pn_resume_t *h, unsigned slot, const pn_resume_page_t
                 s = decode(r, out, &crc);
             } while (s == PN_BUSY);
             valid = s == PN_OK && crc == get(r->header + RH - 8, 4);
-            pn_profile_observe(r->pool, "resume.decode", valid ? PN_OK : s == PN_OK ? PN_CORRUPT : s, pn_profile_time() - began, NULL);
+            pn_profile_observe(r->pool, snapshot?"resume.preview.decode":"resume.decode", valid ? PN_OK : s == PN_OK ? PN_CORRUPT : s, pn_profile_time() - began, NULL);
         }
         if (fclose(r->file))
             valid = false;
@@ -404,12 +406,79 @@ pn_status_t pn_resume_load(pn_resume_t *h, unsigned slot, const pn_resume_page_t
             return s;
         if (valid) {
             *page = candidate;
-            pn_profile_observe(r->pool, "resume.hit", PN_OK, 0, NULL);
+            pn_profile_observe(r->pool, snapshot?"resume.preview.hit":"resume.hit", PN_OK, 0, NULL);
             return PN_OK;
         }
     }
     return PN_EMPTY;
 }
+
+pn_status_t pn_resume_load(pn_resume_t *h, unsigned slot, const pn_resume_page_t *wanted, pn_frame_t *out,
+                           pn_resume_page_t *page, pn_status_t (*verify)(void *), void *ctx) {
+    return packet_load(h, slot, wanted, out, page, verify, ctx, false);
+}
+/// 只读临时工作区走原池，避免EPUB位置与路径叠加到产品栈。/ Read-only scratch uses the original pool, keeping EPUB
+/// anchors and paths off the product stack.
+typedef struct {
+    resume_t packet;
+    pn_resume_page_t wanted, decoded;
+    pn_journal_files_t files;
+    pn_journal_io_t io;
+    pn_epub_progress_t epub;
+    pn_txt_progress_t text;
+    char first[384], second[384];
+} preview_t;
+pn_status_t pn_resume_preview(pn_pool_t *pool, pn_media_t *media, const pn_media_lease_t *guard, pn_media_t *state,
+                              const pn_media_lease_t *trust, const char *tf, const char *root, const pn_book_id_t *book,
+                              unsigned format, pn_frame_t *out) {
+    if (!pool || !media || !guard || !state || !trust || !root || !book || !frame_valid(out) ||
+        (format != 1 && format != 2))
+        return PN_INVALID;
+    if (!tf || !*tf || pool->used > pool->limit || sizeof(preview_t) + KEEP > pool->limit - pool->used)
+        return PN_EMPTY;
+    preview_t *p = pn_alloc_optional(pool, PN_MEM_INDEX, sizeof *p);
+    if (!p)
+        return PN_EMPTY;
+    memset(p, 0, sizeof *p);
+    resume_t *r = &p->packet;
+    r->pool = pool;
+    r->media = media;
+    r->state = state;
+    r->guard = *guard;
+    r->trust = *trust;
+    r->book = *book;
+    pn_status_t status = checked(r);
+    char hash[65];
+    for (unsigned i = 0; i < 32; i++)
+        snprintf(hash + 2 * i, 3, "%02x", book->sha256[i]);
+    int a = snprintf(r->directory, sizeof r->directory, "%s/" PN_SD_RESUME_LEAF, tf),
+        b = snprintf(r->roots, sizeof r->roots, "%s/resume", root);
+    int c = snprintf(p->first, sizeof p->first, "%s/%s%s.a", root, hash, format == 2 ? ".epub" : ""),
+        d = snprintf(p->second, sizeof p->second, "%s/%s%s.b", root, hash, format == 2 ? ".epub" : "");
+    if (a < 0 || b < 0 || c < 0 || d < 0 || (size_t)a >= sizeof r->directory || (size_t)b >= sizeof r->roots ||
+        (size_t)c >= sizeof p->first || (size_t)d >= sizeof p->second)
+        status = PN_LIMIT;
+    if (status == PN_OK)
+        status = pn_journal_files_init(&p->files, state, trust, p->first, p->second, &p->io);
+    p->wanted.format = format;
+    if (status == PN_OK && format == 2) {
+        status = pn_epub_progress_load(&p->io, pool, book, &p->epub);
+        p->wanted.epub.begin = p->epub.location;
+    } else if (status == PN_OK) {
+        status = pn_txt_progress_load(&p->io, book, &p->text);
+        p->wanted.text.begin = p->text.source_offset;
+    }
+    // 冻结上次画面的布局，不给阅读器返回锚点或来源证明；整包SHA/CRC和已保存位置仍须完全匹配。
+    // Freeze the previous rendering without returning anchors or source proof; full packet SHA/CRC and durable position
+    // must still match.
+    pn_resume_t h = {r};
+    if (status == PN_OK)
+        status = packet_load(&h, 0, &p->wanted, out, &p->decoded, NULL, NULL, true);
+    pn_resume_abort(&h);
+    pn_free(p);
+    return status;
+}
+
 void pn_resume_abort(pn_resume_t *h) {
     if (!h || !h->impl)
         return;
@@ -469,8 +538,9 @@ pn_status_t pn_resume_begin(pn_resume_t *h, unsigned slot, const pn_resume_page_
     if (!paths(r, slot))
         return PN_EMPTY;
     s = pn_media_acquire(r->media, PN_MEDIA_CACHE_WRITE, &r->writer);
+    // 临时写冲突仍可重试，不能误记为当前页已处理。/ A transient writer conflict remains retryable, never a completed current-page attempt.
     if (s != PN_OK)
-        return PN_EMPTY;
+        return s==PN_BUSY?PN_BUSY:PN_EMPTY;
     memset(r->header, 0, RH);
     memcpy(r->header, "PNRS", 4);
     put(r->header + 4, 1, 4);

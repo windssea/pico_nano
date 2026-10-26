@@ -14,6 +14,7 @@
 #include "pn_reader_app.h"
 #include "pn_epub_app.h"
 #include "pn_hot_session.h"
+#include "pn_resume.h"
 #include "pn_opening_view.h"
 #include "pn_reader_input.h"
 #include "pn_shelf_view.h"
@@ -79,6 +80,8 @@ typedef struct {
     pn_hot_session_t hot; ///< 单个已保存会话，写入前释放 / One saved session, released before writes
     pn_opening_view_t opening_view; ///< 开书重试共用固定展示，不参与原书校验 / Fixed presentation across opening retries, never source validation
     pn_epub_open_job_t foreground_open;pn_catalog_item_t *opening_book; ///< 私有开书任务及唯一请求快照，不提前覆盖last_read / Private opening job and sole request snapshot, never overwriting last_read early
+    bool opening_snapshot_probed; ///< 每请求最多读取一次快照 / Probe at most one snapshot per request
+    bool opening_snapshot; ///< 本请求已显示非交互快照 / An inert snapshot is visible for this request
     bool opening_feedback_shown; ///< 本请求最多一次普通加载页，快速恢复可省略 / At most one regular loader for this request; fast recovery may omit it
     uint64_t open_measure_us,turn_measure_us; ///< 完整操作含让出等待，仅主机观察 / Whole operation including yield gaps, host observation only
     pn_toc_ui_t toc;
@@ -555,16 +558,60 @@ static pn_status_t page(library_t *s,bool previous,bool first){
     pn_free(next);return status;
 }
 /// 复用已验证封面，不因开场反馈重新解析书籍。/ Reuse verified covers without reparsing books for opening feedback.
-static pn_status_t opening_paint(library_t *s,pn_font_t *font,pn_frame_t *frame,const pn_catalog_item_t *book,const char *note){
-    pn_status_t status=pn_opening_view_resolve(&s->opening_view,s->pool,&s->media,s->cover_dir,book,s->covers);
-    return status==PN_OK?pn_reader_opening_render(font,frame,book->name,s->opening_view.preview,note):status;
+static pn_status_t opening_paint(library_t *s, pn_font_t *font, pn_frame_t *frame, const pn_catalog_item_t *book,
+                                 const char *note) {
+
+    if (book->identified && !s->index_gate && !s->opening_snapshot_probed) {
+        s->opening_snapshot_probed = true;
+        pn_media_lease_t guard = {0}, trust = {0};
+        pn_status_t preview = pn_media_acquire(&s->media, PN_MEDIA_READ, &guard);
+        if (preview == PN_OK)
+            preview = pn_media_acquire(&s->state_media, PN_MEDIA_READ, &trust);
+        if (preview == PN_OK)
+            preview =
+                pn_resume_preview(s->pool, &s->media, &guard, &s->state_media, &trust, pn_page_index_tf_directory(),
+                                  s->state_dir, &book->expected, book->format == PN_BOOK_EPUB ? 2u : 1u, frame);
+        if (trust.ticket) {
+            (void)pn_media_release(&s->state_media, &trust);
+        }
+        if (guard.ticket)
+            (void)pn_media_release(&s->media, &guard);
+        if (preview == PN_OK) {
+            pn_font_t face = {0};
+            pn_text_source_t resident = pn_font_reading_source();
+            preview = pn_font_open(&face, s->pool, &resident, 21);
+            if (preview == PN_OK)
+                preview = pn_reader_snapshot_render(&face, frame);
+            pn_font_close(&face);
+        }
+        if (preview == PN_OK) {
+            s->opening_snapshot = true;
+            printf("reading_snapshot inert=1 verified_source=0\n");
+            return PN_OK;
+        }
+        if (preview == PN_CANCELLED)
+            return preview;
+    }
+    pn_status_t status = pn_opening_view_resolve(&s->opening_view, s->pool, &s->media, s->cover_dir, book, s->covers);
+    return status == PN_OK ? pn_reader_opening_render(font, frame, book->name, s->opening_view.preview, note) : status;
 }
-static void opening_loading(library_t *s,const pn_catalog_item_t *book){
-    uint8_t *pixels=pn_alloc_optional(s->pool,PN_MEM_FRAME,415872);pn_frame_t frame;pn_font_t font={0};pn_text_source_t source=pn_font_builtin_source();char detail[128];snprintf(detail,sizeof detail,"已建立 %u 页 · 中间键取消",s->opening_index.pages);
-    pn_status_t shown=pn_frame_bind(&frame,pixels,415872,684,1216)?pn_font_open(&font,s->pool,&source,28):PN_NO_MEMORY;
-    if(shown==PN_OK)shown=opening_paint(s,&font,&frame,book,s->index_gate?detail:NULL);
-    if(shown==PN_OK)(void)present(s,&frame,PN_REFRESH_GL16);
-    pn_font_close(&font);pn_free(pixels);
+static void opening_loading(library_t *s, const pn_catalog_item_t *book) {
+    if (s->opening_snapshot && !s->index_gate)
+        return;
+    uint8_t *pixels = pn_alloc_optional(s->pool, PN_MEM_FRAME, 415872);
+    pn_frame_t frame;
+    pn_font_t font = {0};
+    pn_text_source_t source = pn_font_builtin_source();
+    char detail[128];
+    snprintf(detail, sizeof detail, "已建立 %u 页 · 中间键取消", s->opening_index.pages);
+    pn_status_t shown =
+        pn_frame_bind(&frame, pixels, 415872, 684, 1216) ? pn_font_open(&font, s->pool, &source, 28) : PN_NO_MEMORY;
+    if (shown == PN_OK)
+        shown = opening_paint(s, &font, &frame, book, s->index_gate ? detail : NULL);
+    if (shown == PN_OK)shown=present(s, &frame, PN_REFRESH_GL16);
+    if(shown!=PN_OK)s->opening_snapshot=false;
+    pn_font_close(&font);
+    pn_free(pixels);
 }
 static pn_status_t finish_open(library_t *s,const pn_catalog_item_t *book,uint64_t now,pn_status_t status){
     fprintf(stderr,"library_open prepare name=%s status=%d pool=%zu/%zu\n",book->name,(int)status,s->pool->used,s->pool->limit);
@@ -638,7 +685,7 @@ first_page:
 static pn_status_t open_item(library_t *s,const pn_catalog_item_t *book,uint64_t now){
     if((s->foreground_open.impl || s->index_gate))return PN_BUSY;
     pn_opening_view_close(&s->opening_view);
-    s->opening_feedback_shown=false;
+    s->opening_feedback_shown=false;s->opening_snapshot=false;s->opening_snapshot_probed=false;
     s->open_measure_us=pn_profile_time();
     pn_async_block_controls(&s->async.input,true);pn_sdl_async_title(&s->async,PN_BRAND_NAME " - 正在打开书籍");
     s->async.context=18;pn_async_set_view(&s->async.input,18u|(s->async.revision<<16),false);
@@ -1067,7 +1114,7 @@ static int library_worker(void *ctx){
                 if(s->home && !s->reading_stats.loaded && s->reading_stats.media && !s->covers_dirty && s->covers && !pn_shelf_covers_pending(s->covers,s->page) && now-font_activity>=1500u && now>=s->home_stats_retry){s->home_stats_retry=now+3000u;
                     if(pn_reading_stats_load(&s->reading_stats)==PN_OK){if(draw(s)!=PN_OK)s->covers_dirty=true;printf("home statistics ready\n");}}
                 if(now-font_activity>=800){
-                    if(pn_hot_session_deferred_pending(&s->hot)){pn_status_t saved=pn_hot_session_deferred_flush(&s->hot);if(saved!=PN_OK && saved!=PN_EMPTY && saved!=PN_CANCELLED)printf("deferred save status=%d\n",(int)saved);}
+                    if(pn_hot_session_deferred_pending(&s->hot)){pn_status_t saved=pn_hot_session_deferred_flush(&s->hot);if(saved!=PN_OK && saved!=PN_BUSY && saved!=PN_EMPTY && saved!=PN_CANCELLED)printf("deferred save status=%d\n",(int)saved);}
                     else if(!s->entertainment){pn_status_t indexed=catalog_build_idle(s);if(indexed==PN_OK)printf("catalog index built\n");}
                 }
                 if(!s->entertainment){covers_tick(s,now-font_activity>=800);if(!pn_hot_session_deferred_pending(&s->hot))prepare_continue(s,now,font_activity);}}

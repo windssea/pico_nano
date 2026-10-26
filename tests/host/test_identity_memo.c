@@ -3,6 +3,7 @@
  * English: verified-identity memo hits only for the same instance/generation without replacing leases; write leases, new generations, size changes and host external writes fall back to full verification. */
 #define _POSIX_C_SOURCE 200809L
 #include "pn_text_file.h"
+#include "pn_identity_cache.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -53,6 +54,18 @@ int main(void){
     assert(pn_text_file_verify_begin(&verify,&pool,&source,&expected,false,NULL,NULL)==PN_OK);
     pn_status_t s;do{s=pn_text_file_verify_step(&verify,NULL);}while(s==PN_BUSY);assert(s==PN_OK);pn_text_file_verify_close(&verify);
     assert(pn_text_file_close(&file)==PN_OK && pn_media_release(&media,&lease)==PN_OK);
+    assert(pn_media_acquire(&media,PN_MEDIA_READ,&lease)==PN_OK && pn_text_file_open(&file,&media,&lease,path,&source)==PN_OK);
+#ifdef PN_TEST_IMMUTABLE_FILE
+    assert(pn_text_file_identity_cached(&source,&cached)==PN_OK && !memcmp(&cached,&expected,sizeof cached) && !file.io_bytes);
+#else
+    assert(pn_text_file_identity_cached(&source,&cached)==PN_EMPTY && !file.io_bytes);
+#endif
+    assert(pn_text_file_close(&file)==PN_OK && pn_media_release(&media,&lease)==PN_OK && !pool.used && !pool.live);
+    // 后台身份扫描完成也应交出同代证明，主机仍不建立可复用备忘。/ Background identity scans must publish same-generation proof; host builds still never memoize it.
+    assert(pn_media_acquire(&media,PN_MEDIA_WRITE,&lease)==PN_OK && pn_media_release(&media,&lease)==PN_OK);
+    pn_identity_cache_t background_cache={0};pn_identity_cache_job_t job={0};
+    assert(pn_identity_cache_job_begin(&job,&pool,&media,path)==PN_OK);
+    do{s=pn_identity_cache_job_step(&job,&background_cache);}while(s==PN_BUSY);assert(s==PN_OK);pn_identity_cache_job_close(&job);
     assert(pn_media_acquire(&media,PN_MEDIA_READ,&lease)==PN_OK && pn_text_file_open(&file,&media,&lease,path,&source)==PN_OK);
 #ifdef PN_TEST_IMMUTABLE_FILE
     assert(pn_text_file_identity_cached(&source,&cached)==PN_OK && !memcmp(&cached,&expected,sizeof cached) && !file.io_bytes);

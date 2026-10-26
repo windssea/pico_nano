@@ -3,11 +3,19 @@
  * English: retain the same verified source and displayed location without creating reading commits. */
 #include "pn_hot_session.h"
 #include "pn_cancel.h"
+#include "pn_profile.h"
 #include <string.h>
 #include <sys/stat.h>
 static void clear(pn_hot_session_t *h){h->path[0]=0;h->media=NULL;h->epoch=h->policy=h->at=0;h->prepared=false;h->prepare_pool=NULL;h->layout_pending=false;h->deferred_failed=false;}
 pn_status_t pn_hot_session_drop(pn_hot_session_t *h){
     if(!h)return PN_INVALID;
+    // 释放冻结帧前尽力收口当前页；不新增画布，失败仍由原进度保存屏障处理。/ Best-effort current-page checkpoint before freeing the frozen frame; no new canvas, with the original progress barrier retaining authority.
+    if(!h->prepared && (h->epub.impl || h->txt.impl)){
+        uint64_t began=pn_profile_time();unsigned steps=0;
+        while(pn_hot_session_deferred_pending(h) && steps++<512u && pn_profile_time()-began<180000u){
+            pn_status_t checkpoint=pn_hot_session_deferred_flush(h);if(checkpoint!=PN_OK && checkpoint!=PN_BUSY)break;
+        }
+    }
     pn_status_t opening=pn_epub_app_open_job_close(&h->opening);
     pn_status_t s=h->prepared?(h->epub.impl?pn_epub_app_discard_unshown(&h->epub):pn_reader_app_discard_unshown(&h->txt)):(h->epub.impl?pn_epub_app_release_retained(&h->epub):pn_reader_app_release_retained(&h->txt));
     if(!h->epub.impl && !h->txt.impl)clear(h);
@@ -148,10 +156,15 @@ pn_status_t pn_hot_session_park(pn_hot_session_t *h,pn_pool_t *pool,pn_media_t *
     h->txt.impl=txt->impl;txt->impl=NULL;h->epub.impl=epub->impl;epub->impl=NULL;
     strcpy(h->path,path);h->book=id;h->media=media;h->epoch=media->epoch;h->policy=policy;h->at=now;h->parks++;h->deferred_failed=false;return PN_OK;
 }
-bool pn_hot_session_deferred_pending(const pn_hot_session_t *h){return h && !h->deferred_failed && (h->epub.impl?pn_epub_app_deferred_pending(&h->epub):pn_reader_app_deferred_pending(&h->txt));}
+bool pn_hot_session_deferred_pending(const pn_hot_session_t *h){return h && !h->prepared && !h->deferred_failed && (h->epub.impl?(pn_epub_app_deferred_pending(&h->epub) || pn_epub_app_resume_checkpoint_pending(&h->epub)):(pn_reader_app_deferred_pending(&h->txt) || pn_reader_app_resume_checkpoint_pending(&h->txt)));}
 pn_status_t pn_hot_session_deferred_flush(pn_hot_session_t *h){
     if(!pn_hot_session_deferred_pending(h))return PN_EMPTY;
-    pn_status_t s=h->epub.impl?pn_epub_app_deferred_flush(&h->epub):pn_reader_app_deferred_flush(&h->txt);if(s!=PN_OK && s!=PN_CANCELLED)h->deferred_failed=true;return s;
+    pn_status_t s=h->epub.impl?pn_epub_app_deferred_flush(&h->epub):pn_reader_app_deferred_flush(&h->txt);
+    if(s!=PN_OK && s!=PN_EMPTY && s!=PN_CANCELLED){h->deferred_failed=true;return s;}
+    if(s==PN_CANCELLED)return s;
+    bool checkpoint=h->epub.impl?pn_epub_app_resume_checkpoint_pending(&h->epub):pn_reader_app_resume_checkpoint_pending(&h->txt);
+    if(checkpoint){s=h->epub.impl?pn_epub_app_resume_checkpoint_step(&h->epub):pn_reader_app_resume_checkpoint_step(&h->txt);if(s!=PN_OK && s!=PN_BUSY && s!=PN_EMPTY && s!=PN_CANCELLED)h->deferred_failed=true;}
+    return s;
 }
 pn_status_t pn_hot_session_resume(pn_hot_session_t *h,pn_media_t *media,const char *path,pn_book_format_t kind,const pn_book_id_t *expected,uint64_t policy,uint64_t now,pn_reader_app_t *txt,pn_epub_app_t *epub,pn_reader_present_fn present,void *ctx){
     if(!h || !media || !path || !txt || !epub || !present)return PN_INVALID;

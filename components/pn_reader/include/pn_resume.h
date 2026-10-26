@@ -27,6 +27,7 @@ pn_status_t pn_resume_load(pn_resume_t *, unsigned, const pn_resume_page_t *, pn
                            pn_status_t (*)(void *), void *);
 /// 借用完整帧直到收口/abort；改变或回收帧之前必须abort。/ Borrow a complete frame until completion/abort; abort before changing
 /// or reclaiming it.
+/// 临时写冲突返回BUSY，调用方保留待写资格并重试。/ Return BUSY on transient writer contention; callers retain dirty eligibility and retry.
 pn_status_t pn_resume_begin(pn_resume_t *, unsigned, const pn_resume_page_t *, const pn_frame_t *, pn_cache_owner_t *);
 /// 每步最多8行编码，摘要/同步/提交分阶段；缓存错误可回退原路径。/ Encode at most eight rows per step, separate
 /// hashing/sync/commit phases; cache errors permit the original path.
@@ -38,3 +39,7 @@ void pn_resume_abort(pn_resume_t *);         ///< 归还借用，失卡后不触
 void pn_resume_close(pn_resume_t *);         ///< 放弃任务并释放全部池内存 / Abort and release all pooled memory
 /// 显示回执使用的规范位置比较，不比较填充字节。/ Canonical location equality for display receipts, excluding padding bytes.
 bool pn_resume_location_equal(const pn_epub_location_t *, const pn_epub_location_t *);
+
+/// 仅返回非交互的上次快照像素：完整包/可信根与持久位置匹配，不验证当前原书，不返回阅读锚点或证明。
+/// Return inert last-snapshot pixels only: require full packet/trusted-root and durable-position matches; never validate the current book or return reader anchors/proof.
+pn_status_t pn_resume_preview(pn_pool_t *,pn_media_t *,const pn_media_lease_t *,pn_media_t *,const pn_media_lease_t *,const char *,const char *,const pn_book_id_t *,unsigned,pn_frame_t *);

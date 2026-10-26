@@ -147,3 +147,12 @@ pn_status_t pn_reader_opening_render(pn_font_t *ui,pn_frame_t *frame,const char 
 #undef OPEN_DRAW
     pn_status_t restored=pn_font_size(ui,original);return status==PN_OK?restored:status;
 }
+
+/// 快照仅换顶部状态条，不改正文像素；绘制没有硬件或存储副作用。/ Replace only the snapshot status band, preserving body pixels without hardware or storage effects.
+pn_status_t pn_reader_snapshot_render(pn_font_t *font,pn_frame_t *frame){
+    if(!font || !font->impl || !frame || !frame->pixels)return PN_INVALID;
+    int original=font->pixels;pn_frame_rect(frame,0,0,684,42,15);
+    pn_status_t s=pn_font_size(font,21);
+    if(s==PN_OK)s=pn_w_text(font,frame,"上次阅读快照 · 正在校验，暂不可翻页",16,29,652,PN_ALIGN_CENTER);
+    pn_status_t restored=pn_font_size(font,original);return s==PN_OK?restored:s;
+}

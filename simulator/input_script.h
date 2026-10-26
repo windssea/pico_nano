@@ -6,7 +6,7 @@
 #include <string.h>
 #include "pn_test_console.h"
 #include "pn_key.h"
-typedef struct {char copy[512];char *next;bool pending;unsigned pointer;int x,y;uint64_t resume;SDL_Event future;uint64_t future_at;Uint32 expected_type;SDL_Keycode expected_key;bool future_tap;int future_x,future_y;
+typedef struct {char copy[512];char *next;bool pending;unsigned pointer;int x,y;uint64_t resume;SDL_Event future;uint64_t future_at;Uint32 expected_type;SDL_Keycode expected_key;bool future_tap,future_unacked;int future_x,future_y;
     unsigned future_roots,root_targets[3]; ///< 同一扫描中的独立根页点击 / Independent root clicks during one scan
     bool future_focus; ///< 失焦后持续持有，最后才松手 / Hold through focus loss and release only at the end
 } sim_script_t;
@@ -24,6 +24,8 @@ static inline void script_queue(sim_script_t *script){
         // 同一次扫描内松开旧触点、按下新目标；仅最后松手带脚本回执，不能提前推进后续命令。
         // Release the old contact and press a new target within one scan; only the final release acknowledges the script, preventing later commands from advancing early.
         if(script->future_tap){SDL_Event first=script->future;first.button.windowID=UINT32_MAX-1;(void)SDL_PushEvent(&first);first.type=SDL_MOUSEBUTTONDOWN;first.button.type=SDL_MOUSEBUTTONDOWN;first.button.x=script->future_x;first.button.y=script->future_y;(void)SDL_PushEvent(&first);script->future.button.x=script->future_x;script->future.button.y=script->future_y;script->future_tap=false;}
+        // 忙碌期NEXT可能在生产者被丢弃，注入不等待不存在的消费回执；后续命令仍等开书本身的回执。/ A busy NEXT may be dropped by the producer; do not wait for its absent receipt, while later commands still wait for the opening receipt.
+        if(script->future_unacked){script->future.key.windowID=UINT32_MAX-1;(void)SDL_PushEvent(&script->future);script->future_unacked=false;script->future_at=0;return;}
         script_expect(script,&script->future);script->pending=SDL_PushEvent(&script->future)==1;script->future_at=0;return;}
     if(script->pending)return;
     if(script->resume){if(SDL_GetTicks64()<script->resume)return;script->resume=0;}
@@ -40,6 +42,7 @@ static inline void script_queue(sim_script_t *script){
         if(sscanf(part,"race-next-home:%u",&wait)==1 && wait<=5000){event.key.keysym.sym=SDLK_RIGHT;script->future=event;script->future.key.keysym.sym=SDLK_h;script->future_at=SDL_GetTicks64()+wait;script_expect(script,&event);script->pending=SDL_PushEvent(&event)==1;return;}
         if(sscanf(part,"race-open-home:%u",&wait)==1 && wait<=5000){event.key.keysym.sym=SDLK_RETURN;script->future=event;script->future.key.keysym.sym=SDLK_h;script->future_at=SDL_GetTicks64()+wait;script_expect(script,&event);script->pending=SDL_PushEvent(&event)==1;return;}
         if(sscanf(part,"race-open-duplicate:%u",&wait)==1 && wait<=5000){event.key.keysym.sym=SDLK_RETURN;script->future=event;script->future_at=SDL_GetTicks64()+wait;script_expect(script,&event);script->pending=SDL_PushEvent(&event)==1;return;}
+        if(sscanf(part,"race-open-next:%u",&wait)==1 && wait<=5000){event.key.keysym.sym=SDLK_RETURN;script->future=event;script->future.key.keysym.sym=SDLK_RIGHT;script->future_at=SDL_GetTicks64()+wait;script->future_unacked=true;script_expect(script,&event);script->pending=SDL_PushEvent(&event)==1;return;}
         if(sscanf(part,"race-next-tools:%u",&wait)==1 && wait<=5000){event.key.keysym.sym=SDLK_RIGHT;script->future=event;script->future.key.keysym.sym=SDLK_k;script->future_at=SDL_GetTicks64()+wait;script_expect(script,&event);script->pending=SDL_PushEvent(&event)==1;return;}
         // pnt:<指令>沿用设备诊断控制台语法；三键映射模拟器按键，长按坐标映射右键，滑动按真实事件序列投递，仅最后松手带回执。
         // pnt:<command> reuses the device diagnostic-console grammar; keys map to simulator keys, coordinate long presses to right clicks, and swipes queue a real event sequence acknowledged only by the final release.

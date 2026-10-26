@@ -46,6 +46,14 @@ SDL独立对照为`python simulator/test_resume_window.py <新pn_sim> <完整TTF
 
 真机复测沿用失败书籍和原续读位置，不清缓存；保留每5秒`Reader NEXT waiting`的`steps`与`phase`，并记录首次/第二次NEXT显示回执、PREV及重开归位画面。主机有界工作量通过不能代替原失败真机验收。
 
+## 冷恢复快照与退出收口回归
+
+`resume_preview`验证TXT/EPUB完整像素、已保存位置匹配、可信根/完整SHA、损坏、缺根、取消、低内存、失卡及不写入媒体；标记只改变top42。`exit_checkpoint`使用真实应用在无正文空闲等待的情况下验证保留后分步写出、立即释放收口和挂起收口，只有当前页0槽，退出归零；另覆盖CACHE_WRITE争用保留资格，以及写到一半又恢复正文时先取消借帧。`identity_memo_host/immutable`核查后台完整扫描后的证明发布与原失效规则。
+
+`python tools/dev.py sdl`新增`snapshot_window`：独立进程续读、快照与真正正文像素相等、校验期间NEXT不推进位置、缺包/坏包回封面、原书改变不能作为正文成功打开。`race-open-next:<ms>`是模拟器竞争注入：按下开书后延后投递一个不要求消费回执的NEXT，再等待开书本身的回执，避免正确丢弃的输入把脚本挂住。该用例使用内置字体隔离退出收口；外置字体完整验证仍由原`resume_window`等覆盖，未验证完的字体不强行生成新包。
+
+用`PN_SNAPSHOT_EVIDENCE=<新目录>`运行`python simulator/test_snapshot_window.py <pn_sim>`可保留原创夹具、日志及PGM。自动用例的200ms模拟扫描延时只为复现输入竞争，不是面板计时。开发可见窗口仍须先`sdl-run`重建后重启；本批原始证据位于忽略的`build-dev/cold-opening/`。设备测试继续暂停，不能自动刷写或连接串口。
+
 ## 推箱子的软件回归
 
 `python tools/dev.py host`包含 `sokoban`（90关完整解法、128步撤销、溢出/无效触摸、保存/重开、实际同步后返错的提交不确定性、坏槽回退与未知版本保护）、`sokoban_render`（每次走路/推箱/撤销/重做的局部与全绘逐像素核对）、`sokoban_bank`（90关重新求最优推数）和 `blob_bounded`（1305个逐字节断写位置、完整CRC、超长槽/I/O/分配失败）。`device_management`覆盖无TF路由、64次走路不触发管理清屏、锁屏屏障与中键退出的一次原表GC16回执。面板接口在此为桩，不能作为光学验收。

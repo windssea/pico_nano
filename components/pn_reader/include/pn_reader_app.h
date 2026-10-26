@@ -229,3 +229,9 @@ bool pn_reader_app_index_pending(const pn_reader_app_t *);
 pn_status_t pn_reader_app_resume_cache_idle(pn_reader_app_t *);
 /// 可选续读写入仍借用帧；不等于整书索引完成。/ Optional resume writing still borrows a frame, independently of whole-book completion.
 bool pn_reader_app_resume_cache_pending(const pn_reader_app_t *);
+
+/// 离开阅读后可用同一冻结帧分步收口当前页，不生成邻页；可选缓存失败不等于进度保存失败。
+/// Incrementally checkpoint the frozen current page after leaving reading; never generate neighbors or confuse optional-cache failure with progress failure.
+pn_status_t pn_reader_app_resume_checkpoint_step(pn_reader_app_t *);
+/// 当前页可选收口待办，不读文件。/ Query optional current-page checkpoint work without file I/O.
+bool pn_reader_app_resume_checkpoint_pending(const pn_reader_app_t *);

@@ -75,11 +75,13 @@ static pn_status_t resume_prepare(app_t *a, pn_read_intent_t intent, pn_epub_rea
     }
     return s;
 }
-pn_status_t pn_epub_app_resume_cache_idle(pn_epub_app_t *app) {
+static pn_status_t resume_cache_step(pn_epub_app_t *app, bool current_only) {
     app_t *a = app ? app->impl : NULL;
-    if (!a || a->lost || a->suspended || a->force_full || !a->has_visible || a->style_preview || a->font_preview ||
-        a->font_pending || a->style_pending || a->body_layer.paint || a->pool->speculative)
+    if (!a || a->lost || (a->suspended && !current_only) || a->force_full || !a->has_visible || a->style_preview || a->font_preview ||
+        a->font_pending || a->style_pending || a->global_pending || a->font_view || a->body_layer.paint || a->pool->speculative)
         return PN_EMPTY;
+    // 离开阅读只收口当前页，不为下一页做预热或落盘。/ Leaving reading checkpoints only the current page, never warming or persisting a next page.
+    if(current_only && pn_resume_pending_slot(&a->resume)==1)resume_abort_retry(a);
     if (pn_resume_pending(&a->resume)) {
         pn_profile_span_t span;
         pn_profile_begin(&span, a->pool, "resume.write");
@@ -89,15 +91,14 @@ pn_status_t pn_epub_app_resume_cache_idle(pn_epub_app_t *app) {
         pn_profile_end(&span, s);
         return s;
     }
-    if (pn_epub_app_verify_pending(app) || (!a->resume_dirty && !a->resume_next_dirty))
+    if (pn_epub_app_verify_pending(app) || (!a->resume_dirty && (current_only || !a->resume_next_dirty)))
         return PN_EMPTY;
     if ((!a->resume_dirty && pn_epub_app_prefetch_pending(app)) || pn_semantic_file_pending(&a->semantic_file))
         return PN_EMPTY;
-    if (resume_bind(a) != PN_OK)
-        return PN_EMPTY;
+    if (resume_bind(a) != PN_OK){if(current_only)a->resume_dirty=false;return PN_EMPTY;}
     pn_page_index_abort(&a->page_index);
     pn_resume_page_t page = {.format = 2, .pixels = a->resume_pixels, .missing = a->resume_missing};
-    pn_status_t s;
+    pn_status_t s;bool current=a->resume_dirty;
     if (a->resume_dirty) {
         a->resume_dirty = false;
         if (!a->resume_good)
@@ -114,9 +115,17 @@ pn_status_t pn_epub_app_resume_cache_idle(pn_epub_app_t *app) {
         page.missing = a->bitmap.missing;
         s = pn_resume_begin(&a->resume, 1, &page, &a->bitmap.frame, &a->bitmap.owner);
     }
+    if(s==PN_BUSY || s==PN_CANCELLED || (current_only && s!=PN_OK)){if(current)a->resume_dirty=true;else a->resume_next_dirty=true;}
     return s == PN_OK ? PN_BUSY : s;
 }
 
 bool pn_epub_app_resume_cache_pending(const pn_epub_app_t *app) {
     return app && app->impl && pn_resume_pending(&((const app_t *)app->impl)->resume);
+}
+
+pn_status_t pn_epub_app_resume_cache_idle(pn_epub_app_t *app){return resume_cache_step(app,false);}
+pn_status_t pn_epub_app_resume_checkpoint_step(pn_epub_app_t *app){return resume_cache_step(app,true);}
+bool pn_epub_app_resume_checkpoint_pending(const pn_epub_app_t *app){
+    const app_t *a=app?app->impl:NULL;
+    return a && a->resume_key_valid && pn_page_index_tf_directory() && !pn_epub_app_verify_pending(app) && !a->lost && a->persistent && a->resume_good && !a->force_full && !a->style_preview && !a->font_preview && !a->font_pending && !a->global_pending && !a->style_pending && !a->font_view && !a->body_layer.paint && (a->resume_dirty || pn_resume_pending_slot(&a->resume)==0);
 }
