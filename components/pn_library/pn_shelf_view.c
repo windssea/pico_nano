@@ -379,16 +379,28 @@ static void sudoku_icon(pn_frame_t *frame,int x,int y,int size){
     }
 }
 /// 娱乐只消费UI状态；不查询书籍、题库或图片。/ Entertainment consumes only UI state, never books, puzzle banks or images.
+static void sokoban_icon(pn_frame_t *p,int x,int y,int size){
+    pn_w_round_fill(p,x+6,y+8,size-6,size-8,8,9);
+    pn_w_round_fill(p,x,y,size-6,size-8,8,15);
+    pn_w_round_stroke(p,x,y,size-6,size-8,8,4,0);
+    for(int i=12;i<size-18;i++){pn_frame_rect(p,x+i,y+i,3,3,0);pn_frame_rect(p,x+size-i-10,y+i,3,3,0);}
+}
 static pn_status_t entertainment_body(pn_font_t *font,pn_frame_t *frame,bool detail){
     pn_status_t s=pn_font_size(font,24);
     if(!detail){
         if(s==PN_OK)s=pn_w_text_ex(font,frame,"阅读之外，换一种思考。",32,266,620,PN_ALIGN_LEFT,PN_UI_MUTED,false);
-        pn_w_round_stroke(frame,36,314,184,228,20,1,PN_UI_RULE);
-        sudoku_icon(frame,68,340,120);
+        pn_w_round_stroke(frame,36,314,292,228,20,1,PN_UI_RULE);
+        pn_w_round_stroke(frame,356,314,292,228,20,1,PN_UI_RULE);
+        sokoban_icon(frame,442,340,120);
+        sudoku_icon(frame,122,340,120);
         if(s==PN_OK)s=pn_font_size(font,30);
-        if(s==PN_OK)s=pn_w_text_ex(font,frame,"数独",36,506,184,PN_ALIGN_CENTER,PN_UI_INK,true);
+        if(s==PN_OK)s=pn_w_text_ex(font,frame,"数独",36,506,292,PN_ALIGN_CENTER,PN_UI_INK,true);
         if(s==PN_OK)s=pn_font_size(font,22);
-        if(s==PN_OK)s=pn_w_text_ex(font,frame,"随时续玩",36,578,184,PN_ALIGN_CENTER,PN_UI_MUTED,false);
+        if(s==PN_OK)s=pn_w_text_ex(font,frame,"随时续玩",36,578,292,PN_ALIGN_CENTER,PN_UI_MUTED,false);
+        if(s==PN_OK)s=pn_font_size(font,30);
+        if(s==PN_OK)s=pn_w_text_ex(font,frame,"推箱子",356,506,292,PN_ALIGN_CENTER,PN_UI_INK,true);
+        if(s==PN_OK)s=pn_font_size(font,22);
+        if(s==PN_OK)s=pn_w_text_ex(font,frame,"三档闯关",356,578,292,PN_ALIGN_CENTER,PN_UI_MUTED,false);
         pn_w_loading_panda(frame,214,704,0);
         if(s==PN_OK)s=pn_font_size(font,28);
         if(s==PN_OK)s=pn_w_text_ex(font,frame,"来一局，慢慢想。",32,906,620,PN_ALIGN_CENTER,PN_UI_MUTED,false);
@@ -520,7 +532,7 @@ int pn_shelf_hit_ex(const pn_catalog_page_t *page,int x,int y,const pn_shelf_opt
         return -1;
     }
     if(options->entertainment){
-        if(options->entertainment==1 && x>=36 && x<220 && y>=314 && y<542)return PN_SHELF_SUDOKU;
+        if(options->entertainment==1 && y>=314 && y<542){if(x>=36 && x<328)return PN_SHELF_SUDOKU;if(x>=356 && x<648)return PN_SHELF_SOKOBAN;}
         if(options->entertainment==2 && x>=182 && x<502 && y>=966 && y<1054)return PN_SHELF_ENTERTAINMENT_BACK;
         return -1;
     }

@@ -46,6 +46,14 @@ SDL独立对照为`python simulator/test_resume_window.py <新pn_sim> <完整TTF
 
 真机复测沿用失败书籍和原续读位置，不清缓存；保留每5秒`Reader NEXT waiting`的`steps`与`phase`，并记录首次/第二次NEXT显示回执、PREV及重开归位画面。主机有界工作量通过不能代替原失败真机验收。
 
+## 推箱子的软件回归
+
+`python tools/dev.py host`包含 `sokoban`（90关完整解法、128步撤销、溢出/无效触摸、保存/重开、实际同步后返错的提交不确定性、坏槽回退与未知版本保护）、`sokoban_render`（每次走路/推箱/撤销/重做的局部与全绘逐像素核对）、`sokoban_bank`（90关重新求最优推数）和 `blob_bounded`（1305个逐字节断写位置、完整CRC、超长槽/I/O/分配失败）。`device_management`覆盖无TF路由、64次走路不触发管理清屏、锁屏屏障与中键退出的一次原表GC16回执。面板接口在此为桩，不能作为光学验收。
+
+`python tools/dev.py sdl`包含 `sokoban_window`：2MiB池、触摸走路/推箱/撤销、跨进程恢复、锁屏、取消确认、手动清屏与空闲不重绘。先运行 `python tools/dev.py sdl-run`，再用可见模拟器从娱乐（460,190）点推箱子（500,400），首次在选择页点开始（340,952）。方向键移动，Z/Backspace撤销，R重玩确认，P选关确认，C清屏，L锁屏，Esc或游戏中的Enter可靠保存并退出；选择页Enter开始。设备娱乐页右键进入推箱子，游戏左键/中键保存退出、右键撤销，移动主要用触摸/滑动。存档位于 `--state-dir/sokoban.a|b`，不修改数独文件。直接演示脚本 `library,tap:460:190,tap:500:400,tap:340:952`；恢复已有局时省略开始点击。
+
+原始测量在忽略的 `build-dev/sokoban/`。板级编译仅核对链接/体积，不刷机或自动发布；固件增量应与冻结的同配置1.0.7正式构建比较。题库离线重建入口见[题库说明](../assets/sokoban/README.md)。
+
 ## 娱乐与数独的软件回归
 
 开书长标题由`loading`覆盖：逐行居中、36/32px与三行上限、可选作者重排、完整封面像素、内置缺图退路、超长中文/无空格英文/中英混排、元数据UTF8截半及845B文件名。`PN_LOADING_PREVIEW=<已存在目录>`额外导出loading-4..7的长标题PGM；仅显示副本裁切，原名/元数据保持。

@@ -417,6 +417,30 @@ int main(void){
     assert(gc_updates==game_gc+1 && screen_full_calls==game_full+1 && last_screen_mode==MODE_GC16 && last_screen_wave==&E0470_WAVEFORM);
     char game_file[512];for(unsigned i=0;i<2;i++){snprintf(game_file,sizeof game_file,"%s/sudoku.%c",game_root,'a'+i);(void)unlink(game_file);}assert(!rmdir(game_root));
     printf("sudoku device routing used=%zu peak=%zu\n",pool.used,pool.peak);
+
+    // 推箱使用同一面板适配：连续走路不触发管理清屏，退出清理且中键回娱乐。/ Sokoban shares the panel adapter: walking never triggers management cleaning; exit cleans and the middle key returns to Entertainment.
+    assert(active_hit(500,400)==PN_SHELF_SOKOBAN);
+    old_data_ready=data_ready;data_ready=false;handle_key(PN_KEY_3,PN_KEY_SHORT);assert(!sokoban.active);data_ready=old_data_ready;
+    char so_root[]="/tmp/pn-device-sokoban-XXXXXX";assert(mkdtemp(so_root));
+    assert(pn_sokoban_open(&sokoban,&pool,&data_media,so_root,now_ms())==PN_OK);shelf_mode=false;status_page=false;
+    assert(sokoban_draw(false)==PN_OK && active_hit(340,952)==PN_SO_START && root_navigation_hit(80,1150)<0);
+    apply_selection(PN_SO_START);assert(sokoban.presented && pn_sokoban_screen(&sokoban)==PN_SO_PLAY);
+    const pn_so_state_t *so_state=pn_sokoban_state(&sokoban);unsigned sa=so_state->player,sb=128;
+    for(unsigned c=0;c<so_state->level.width*so_state->level.height;c++){
+        pn_so_state_t trial=*so_state;if(pn_sokoban_walk(&trial,c)==PN_OK){sb=c;break;}}
+    assert(sb<128);game_gc=gc_updates;game_clear=clear_calls;game_full=screen_full_calls;
+    for(unsigned i=0;i<64;i++)apply_selection(PN_SO_CELL+(int)(i%2?sa:sb));
+    assert(sokoban.presented && gc_updates==game_gc && clear_calls==game_clear && screen_full_calls==game_full);
+    game_shown=presents;assert(pn_sokoban_tick(&sokoban,now_ms()+2000)==PN_OK && sokoban.presented && presents==game_shown);
+    assert(pn_sokoban_tick(&sokoban,now_ms()+60000)==PN_EMPTY && presents==game_shown);
+    apply_selection(PN_SO_CELL+(int)sb);assert(pn_media_acquire(&data_media,PN_MEDIA_READ,&game_busy)==PN_OK);
+    assert(!prepare_lock());handle_key(PN_KEY_2,PN_KEY_SHORT);assert(sokoban.active);
+    assert(pn_media_release(&data_media,&game_busy)==PN_OK && prepare_lock());
+    locked=true;resume_reader();assert(!locked && sokoban.presented && !reader_active());
+    game_gc=gc_updates;game_full=screen_full_calls;handle_key(PN_KEY_2,PN_KEY_SHORT);
+    assert(!sokoban.active && shelf_mode && entertainment==1 && gc_updates==game_gc+1 && screen_full_calls==game_full+1 && last_screen_mode==MODE_GC16);
+    for(unsigned i=0;i<2;i++){snprintf(game_file,sizeof game_file,"%s/sokoban.%c",so_root,'a'+i);(void)unlink(game_file);}assert(!rmdir(so_root));
+    printf("sokoban device routing used=%zu peak=%zu\n",pool.used,pool.peak);
     sd_media.available=card_available;entertainment=0;covers_inactive=false;
     assert(draw_shelf(PN_REFRESH_GL16)==PN_OK && shelf_draw_valid);unsigned shown=presents;handle_key(PN_KEY_2,PN_KEY_SHORT);assert(shelf_focus==0 && shelf_draw_valid && presents==shown+1);
     pn_frame_t expected;assert(pn_frame_bind(&expected,logical,415872,684,1216));pn_font_t face={0};assert(management_font_begin(&face,24)==PN_OK);pn_shelf_options_t options=shelf_options();if(favorites_valid)options.favorite_items=favorites;

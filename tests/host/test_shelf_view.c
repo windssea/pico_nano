@@ -47,7 +47,8 @@ int main(void){
         pn_shelf_options_t o={.entertainment_tab=true,.favorites_tab=true,.entertainment=1,.layout_toggle=true};
         assert(pn_shelf_hit_ex(p,460,190,&o)==PN_SHELF_TAB_ENTERTAINMENT);
         assert(pn_shelf_hit_ex(p,100,400,&o)==PN_SHELF_SUDOKU);
-        assert(pn_shelf_hit_ex(p,300,400,&o)==-1 && pn_shelf_hit_ex(p,600,190,&o)==-1 && pn_shelf_hit_ex(p,100,100,&o)==-1);
+        assert(pn_shelf_hit_ex(p,300,400,&o)==PN_SHELF_SUDOKU && pn_shelf_hit_ex(p,500,400,&o)==PN_SHELF_SOKOBAN);
+        assert(pn_shelf_hit_ex(p,342,400,&o)==-1 && pn_shelf_hit_ex(p,648,400,&o)==-1 && pn_shelf_hit_ex(p,600,190,&o)==-1 && pn_shelf_hit_ex(p,100,100,&o)==-1);
         size_t base=pool.used;
         for(unsigned pass=0;pass<4;pass++){
             o.entertainment=1;assert(pn_shelf_render_ex(p,&font,&frame,-1,false,true,NULL,&o)==PN_OK && font.pixels==24);

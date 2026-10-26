@@ -39,6 +39,7 @@
 #include "pn_sd_layout.h"
 #include "pn_shelf_view.h"
 #include "pn_sudoku.h"
+#include "pn_sokoban.h"
 #include "pn_menu_cache.h"
 #include "pn_wallpaper.h"
 #include "pn_wallpaper_ui.h"
@@ -160,6 +161,9 @@ static bool shelf_prefs_loaded;
 static pn_key_t keys={.key=-1};
 static bool home_mode=true; ///< 默认阅读首页，阅读返回保留来源 / Default reading home, preserving the reading return origin
 static bool index_mode; ///< 字母跳转页 / Letter-index page
+static pn_sokoban_t sokoban; ///< 按需推箱子控制器 / On-demand Sokoban controller
+static uint64_t sokoban_retry;
+static uint32_t sokoban_draw_revision;
 static pn_sudoku_t sudoku; ///< 按需数独控制器 / On-demand Sudoku controller
 static uint64_t sudoku_retry; ///< 呈现重试节流 / Display retry throttle
 static uint32_t sudoku_draw_revision; ///< 最近游戏回执的屏幕代次 / Screen revision of the latest game receipt
@@ -1374,6 +1378,29 @@ static void sudoku_command(int command){
     else if(!sudoku.presented)(void)sudoku_draw();
     if(r!=PN_OK && r!=PN_EMPTY && r!=PN_BUSY)ESP_LOGW(TAG,"Sudoku command=%d status=%d",command,r);
 }
+/// 推箱子借用原管理画布，成功回执后才更新变格基准。/ Sokoban borrows the management canvas and updates its patch baseline only after acknowledgment.
+static pn_status_t sokoban_draw(bool clean){
+    uint8_t *pixels=pn_alloc_tagged(&pool,PN_MEM_FRAME,415872);pn_frame_t frame;pn_font_t font={0};
+    pn_status_t r=pixels && pn_frame_bind(&frame,pixels,415872,684,1216)?management_font_begin(&font,28):PN_NO_MEMORY;
+    if(r==PN_OK){pn_status_t patch=panel_known && sokoban_draw_revision==async_port.revision?pn_device_frame_restore(hardware.hl.back_fb,415872,&frame):PN_UNSUPPORTED;
+        if(patch==PN_OK)patch=pn_sokoban_render_update(&sokoban,&font,&frame);
+        r=patch==PN_UNSUPPORTED?pn_sokoban_render(&sokoban,&font,&frame):patch;}
+    if(r==PN_OK){atomic_store(&sudoku_presentation,pn_sokoban_screen(&sokoban)==PN_SO_PLAY);r=present(NULL,&frame,clean?PN_REFRESH_GC16:PN_REFRESH_GL16);atomic_store(&sudoku_presentation,false);}
+    if(r==PN_OK)sokoban_draw_revision=async_port.revision;
+    management_font_end(&font);pn_free(pixels);sokoban_retry=now_ms();pn_sokoban_displayed(&sokoban,r==PN_OK);
+    ESP_LOGI(TAG,"Sokoban screen=%d status=%d used=%u peak=%u",pn_sokoban_screen(&sokoban),r,(unsigned)pool.used,(unsigned)pool.peak);return r;
+}
+static void sokoban_open(void){
+    pn_cover_work_abort(&cover_work);pn_status_t r=pn_hot_session_drop(&hot_session);
+    if(r==PN_OK)r=pn_sokoban_open(&sokoban,&pool,&data_media,data_ready?"/data/progress":NULL,now_ms());
+    if(r==PN_OK){shelf_mode=false;status_page=false;shelf_draw_valid=false;(void)sokoban_draw(false);}else message("推箱子暂不可用","内部存储未就绪，请重试");
+}
+static void sokoban_finish(int command,pn_status_t r){
+    if(!sokoban.active){pn_sokoban_close(&sokoban);entertainment=1;home_mode=false;show_shelf_profile("",false,PN_REFRESH_EXIT_GC16);}
+    else if(!sokoban.presented)(void)sokoban_draw(command==PN_SO_CLEAN);
+    if(r!=PN_OK && r!=PN_EMPTY && r!=PN_BUSY)ESP_LOGW(TAG,"Sokoban command=%d status=%d",command,r);
+}
+static void sokoban_command(int command){sokoban_finish(command,pn_sokoban_event(&sokoban,command,now_ms()));}
 /// 缓存预算查询由设备port提供，不用TF大小推断内部状态容量。/ The device port reports cache capacity without inferring internal-state space from TF size.
 static pn_status_t index_space(void *ctx,uint64_t *available){(void)ctx;size_t total=0,used=0;if(esp_littlefs_info("data",&total,&used)!=ESP_OK || used>total)return PN_IO;*available=total-used;return PN_OK;}
 /// TF容量来自实际挂载卷，不能用内部LittleFS容量替代。/ Obtain TF capacity from its actual mounted volume, never internal LittleFS.
@@ -2088,6 +2115,7 @@ static void tick_transfer(uint64_t now){
 }
 /// 锁屏后浅睡，电源键唤醒即解锁回原书；唤醒源不可用时保持锁屏等待轮询。/ Light-sleep after locking and unlock back to the book on a power-key wake; if the wake source is unavailable stay locked and keep polling.
 static bool prepare_lock(void){
+    if(sokoban.active){pn_status_t r=pn_sokoban_pause(&sokoban,now_ms());if(r!=PN_OK)(void)sokoban_draw(false);return r==PN_OK;}
     if(sudoku.active){pn_status_t r=pn_sudoku_pause(&sudoku,now_ms());if(r!=PN_OK)(void)sudoku_draw();return r==PN_OK;}
     reading_stats_pause();reading_stats_flush();
     if(reader_active())bookmark_lock_capture();
@@ -2169,6 +2197,7 @@ static void resume_reader(void){
 #if defined(CONFIG_PN_WAKE_TRACE) && CONFIG_PN_WAKE_TRACE
     wake_trace_capture(resume_at);
 #endif
+    if(sokoban.active){locked=false;if(sokoban_draw(false)!=PN_OK)locked=true;return;}
     if(sudoku.active){locked=false;if(sudoku_draw()!=PN_OK)locked=true;return;}
     if(!reader_suspended && *selected_path)ESP_LOGW(TAG,"Reader wake cold fallback: reason=no-suspended-page");
     clock_tick(now_ms());pn_w_set_battery(battery_percent());
@@ -2427,6 +2456,7 @@ static void open_shelf_item(int index){
     else message("格式尚未接入","书籍仍保留，选择TXT或EPUB");
 }
 static void handle_key(int key,pn_key_event_t event){
+    if(sokoban.active){if(event==PN_KEY_SHORT)sokoban_command(key==PN_KEY_1?PN_SO_BACK:key==PN_KEY_2?PN_SO_EXIT:PN_SO_UNDO_MOVE);return;}
     if(sudoku.active){if(event==PN_KEY_SHORT)sudoku_command(key==PN_KEY_1?PN_SU_BACK:key==PN_KEY_2?PN_SU_EXIT:PN_SU_NEXT_CELL);return;}
     reading_stats_pause();
 #if PN_DEVICE_TEST_CONSOLE
@@ -2486,6 +2516,7 @@ static void handle_key(int key,pn_key_event_t event){
         if(event!=PN_KEY_SHORT)return;
         if(entertainment && !home_mode){
             if(key==PN_KEY_2){sudoku_open();}
+            else if(key==PN_KEY_3){sokoban_open();}
             else if(key==PN_KEY_1){entertainment=entertainment==2?1:0;show_shelf("",false);}
             return;
         }
@@ -2517,6 +2548,7 @@ static void handle_key(int key,pn_key_event_t event){
 }
 /// 按当前活动页面扫描命中码（触摸与三键焦点共用）。/ Hit code of the active page at a point (shared by touch and three-key focus).
 static int active_hit(int x,int y){
+    if(sokoban.active){int h=pn_sokoban_hit(&sokoban,x,y);return h>0?h:-1;}
     if(sudoku.active){int h=pn_sudoku_hit(&sudoku,x,y);return h>0?h:-1;}
     int hit=-1;
     if(usb.open)hit=pn_usb_view_hit(x,y);
@@ -2543,7 +2575,7 @@ static int active_hit(int x,int y){
 }
 /// 只有显示固定底栏的四个一级页允许按下切页；子页、模态和活动传输沿原确认规则。/ Only the four roots with fixed navigation switch on press; subpages, modals and active transfers retain normal confirmation.
 static int root_navigation_hit(int x,int y){
-    if(sudoku.active)return -1;
+    if(sokoban.active || sudoku.active)return -1;
     if(opening)return -1;
     if(locked || usb.open || transfer.impl || time_sync.impl || ota.impl || wallpaper_ui.impl || font_manage.impl || reading_menu || fonts.active || toc.active || jump_ui.active || styles.active || bookmarks.mode!=PN_BUI_CLOSED || actions_mode || index_mode || search_mode || toolbar_open)return -1;
     if(settings_ui.impl){if(pn_settings_ui_screen(&settings_ui)!=0)return -1;}
@@ -2574,6 +2606,7 @@ static void feedback_begin(int x,int y){
 #endif
 /// 执行一次已确认的选择（点击或KEY2确认）。/ Perform one confirmed selection (a tap or a KEY2 confirmation).
 static void apply_selection(int selection){
+    if(sokoban.active){sokoban_command(selection);return;}
     if(sudoku.active){sudoku_command(selection);return;}
     reading_stats_pause();
     if(ota.impl && (selection<PN_SETUI_UPDATE_CHECK || selection>PN_SETUI_UPDATE_CANCEL)){if(selection==PN_SETUI_BACK)update_command(PN_SETUI_UPDATE_CANCEL);return;}
@@ -2641,8 +2674,8 @@ static void apply_selection(int selection){
         else if(selection==PN_TOOL_SHELF){toolbar_open=false;if(leave_reader()){selected_path[0]=0;show_shelf_profile("",false,PN_REFRESH_EXIT_GC16);}}
     }
     else if(reading_menu){if(selection==PN_READING_MENU_LAN)begin_transfer(true);else if(selection==PN_READING_MENU_SETTINGS)begin_settings();else if(selection==PN_READING_MENU_TRANSFER)begin_transfer(false);else if(selection==PN_READING_MENU_SHELF){home_mode=false;recent_mode=false;fav_mode=false;search_query[0]=0;reading_menu=false;if(leave_reader()){selected_path[0]=0;show_shelf_profile("",false,PN_REFRESH_EXIT_GC16);}}else if(selection==PN_READING_MENU_RESUME){reading_menu=false;if(reader_active()){if(active_step(PN_APP_OPEN,now_ms())==PN_OK){status_page=false;shelf_mode=false;}}else start_reader();}}
-    else if(shelf_mode && (selection==PN_SHELF_TAB_ENTERTAINMENT || selection==PN_SHELF_ENTERTAINMENT_BACK || selection==PN_SHELF_SUDOKU)){
-        home_mode=false;entertainment=1;if(selection==PN_SHELF_SUDOKU)sudoku_open();else show_shelf("",false);
+    else if(shelf_mode && (selection==PN_SHELF_TAB_ENTERTAINMENT || selection==PN_SHELF_ENTERTAINMENT_BACK || selection==PN_SHELF_SUDOKU || selection==PN_SHELF_SOKOBAN)){
+        home_mode=false;entertainment=1;if(selection==PN_SHELF_SUDOKU)sudoku_open();else if(selection==PN_SHELF_SOKOBAN)sokoban_open();else show_shelf("",false);
     }
     else if(shelf_mode && selection==PN_SHELF_READING_HOME){if(!home_mode){home_mode=true;show_shelf("",false);}}
     else if(shelf_mode && selection==PN_SHELF_LAYOUT){list_mode=!list_mode;shelf_focus=-1;show_shelf("",false);}
@@ -2791,9 +2824,9 @@ static void device_task(void *arg){
 #endif
         (void)pn_hot_session_expire(&hot_session,now);
         if(scope_active)pn_async_end(&scope);
-        bool body=!sudoku.active && reader_active() && !locked && !focus_page() && !status_page && !reading_menu && !shelf_mode && !toolbar_open;
+        bool body=!sokoban.active && !sudoku.active && reader_active() && !locked && !focus_page() && !status_page && !reading_menu && !shelf_mode && !toolbar_open;
         reading_stats_poll(body && !opening && !reader_turn_pending);
-        uint32_t view=locked?1:sudoku.active?19:opening?18:fonts.active?2:toc.active?3:styles.active?4:jump_ui.active?5:bookmarks.mode!=PN_BUI_CLOSED?6:actions_mode?7:settings_ui.impl?8:wallpaper_ui.impl?9:font_manage.impl?10:hub_mode?11:index_mode?12:search_mode?13:toolbar_open?14:body?15:home_mode?16:17;
+        uint32_t view=locked?1:sokoban.active?20:sudoku.active?19:opening?18:fonts.active?2:toc.active?3:styles.active?4:jump_ui.active?5:bookmarks.mode!=PN_BUI_CLOSED?6:actions_mode?7:settings_ui.impl?8:wallpaper_ui.impl?9:font_manage.impl?10:hub_mode?11:index_mode?12:search_mode?13:toolbar_open?14:body?15:home_mode?16:17;
         if(!opening && shelf_mode && !home_mode && shelf_page)view+=(uint32_t)shelf_page->index*32u;
         pn_device_async_root_view(&async_port,view,body,input_flags,root_navigation_hit(80,1150)>=0);
         pn_device_input_event_t queued={0};pn_status_t available=async_port.input_active?pn_device_async_take(&async_port,&queued):PN_EMPTY;
@@ -2937,6 +2970,12 @@ static void device_task(void *arg){
                     if(motion!=PN_OK && motion!=PN_EMPTY && motion!=PN_CANCELLED && motion!=PN_BUSY)ESP_LOGW(TAG,"TOC motion input status=%d",(int)motion);
                 }}
 #endif
+            if(!locked && sokoban.active){
+                int command=pn_sokoban_touch(&sokoban,touch.count,touch.x,touch.y,read==ESP_OK);
+                if(command>0)sokoban_command(command);
+                list_consumed=true;pn_reader_input_cancel(&input);tap=(pn_tap_t){0};
+                if(!async_port.input_active){int key=-1;pn_key_event_t event=pn_key_feed(&keys,touch.count,touch.x,touch.y,read==ESP_OK,now_ms(),&key);if(event!=PN_KEY_NONE)handle_key(key,event);}
+            }
             if(!list_consumed){
             int hit=active_hit(touch.x,touch.y),selection=-1;
             // 步进键长按：按住满600 ms后每180 ms再走一档；松手时不再多走一档（docs/ARCHITECTURE.md“三键与步进输入”）。
@@ -2958,11 +2997,15 @@ static void device_task(void *arg){
             if(!tap.down)feedback_restore();
 #endif
             {if(!async_port.input_active){int key=-1;pn_key_event_t event=pn_key_feed(&keys,touch.count,touch.x,touch.y,read==ESP_OK,now_ms(),&key);if(event!=PN_KEY_NONE && !locked){pn_reader_input_cancel(&input);handle_key(key,event);}}}
-            if(!sudoku.active && !transfer.impl && !usb.open && !wallpaper_ui.impl && !font_manage.impl && !settings_ui.impl && !reading_menu && !shelf_mode && !status_page && bookmarks.mode==PN_BUI_CLOSED && !styles.active && !jump_ui.active && !fonts.active && !toc.active && !toolbar_open && !async_port.input_active && pn_reader_input_feed(&input,touch.count,touch.x,touch.y,read==ESP_OK,&action) && !locked){
+            if(!sokoban.active && !sudoku.active && !transfer.impl && !usb.open && !wallpaper_ui.impl && !font_manage.impl && !settings_ui.impl && !reading_menu && !shelf_mode && !status_page && bookmarks.mode==PN_BUI_CLOSED && !styles.active && !jump_ui.active && !fonts.active && !toc.active && !toolbar_open && !async_port.input_active && pn_reader_input_feed(&input,touch.count,touch.x,touch.y,read==ESP_OK,&action) && !locked){
                 if(action==PN_APP_TOOLS)toolbar_show();
                 else if(reader_active() && !status_page){pn_status_t status=active_step(action,now_ms());report_reader_result(status);}
                 else start_reader();}}}
         bool background=false;
+        if(!locked && sokoban.active && available==PN_EMPTY && !touch_held && !tap.down){
+            (void)pn_sokoban_tick(&sokoban,now_ms());
+            if(!sokoban.presented && now_ms()-sokoban_retry>=1000)(void)sokoban_draw(false);
+        }
         if(!locked && sudoku.active && available==PN_EMPTY && !touch_held && !tap.down){
             (void)pn_sudoku_tick(&sudoku,now_ms());background=pn_sudoku_pending(&sudoku);
             if(!sudoku.presented && now_ms()-sudoku_retry>=1000)(void)sudoku_draw();

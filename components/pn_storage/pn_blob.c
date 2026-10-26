@@ -20,13 +20,13 @@ static pn_status_t decode(const uint8_t *p,size_t n,generation_t *g){
     if(size>PN_BLOB_MAX || n!=size+24 || !sequence || get(p+20+size,4)!=crc(p,20+size))return PN_CORRUPT;
     g->size=size;g->sequence=sequence;return PN_OK;
 }
-static pn_status_t latest(const pn_journal_io_t *io,pn_pool_t *pool,generation_t *out){
-    if(!io || !io->read || !pool || !out)return PN_INVALID;
+static pn_status_t latest(const pn_journal_io_t *io,pn_pool_t *pool,generation_t *out,size_t limit){
+    if(!io || !io->read || !pool || !out || !limit || limit>PN_BLOB_MAX)return PN_INVALID;
     generation_t g[2]={{0},{0}};pn_status_t state[2];pn_status_t status=PN_OK;
     for(unsigned i=0;i<2;i++){
-        g[i].frame=pn_alloc(pool,FRAME_MAX);if(!g[i].frame){status=PN_NO_MEMORY;goto done;}
-        g[i].slot=i;size_t n=0;state[i]=io->read(io->ctx,i,g[i].frame,FRAME_MAX,&n);
-        if(state[i]==PN_OK)state[i]=decode(g[i].frame,n,&g[i]);
+        g[i].frame=pn_alloc(pool,limit+24);if(!g[i].frame){status=PN_NO_MEMORY;goto done;}
+        g[i].slot=i;size_t n=0;state[i]=io->read(io->ctx,i,g[i].frame,limit+24,&n);
+        if(state[i]==PN_OK)state[i]=n>limit+24?PN_CORRUPT:decode(g[i].frame,n,&g[i]);
         if(state[i]!=PN_OK && state[i]!=PN_EMPTY && state[i]!=PN_CORRUPT){status=state[i];goto done;}
     }
     if(state[0]!=PN_OK && state[1]!=PN_OK){status=state[0]==PN_EMPTY && state[1]==PN_EMPTY?PN_EMPTY:PN_CORRUPT;goto done;}
@@ -39,16 +39,16 @@ static pn_status_t latest(const pn_journal_io_t *io,pn_pool_t *pool,generation_t
 done:
     pn_free(g[0].frame);pn_free(g[1].frame);return status;
 }
-pn_status_t pn_blob_load(const pn_journal_io_t *io,pn_pool_t *pool,uint8_t *payload,size_t capacity,size_t *size){
+pn_status_t pn_blob_load_bounded(const pn_journal_io_t *io,pn_pool_t *pool,uint8_t *payload,size_t capacity,size_t *size){
     if(!payload || !size)return PN_INVALID;
-    generation_t g={0};pn_status_t status=latest(io,pool,&g);
+    generation_t g={0};pn_status_t status=latest(io,pool,&g,capacity);
     if(status==PN_OK){if(g.size>capacity)status=PN_LIMIT;else{memcpy(payload,g.frame+20,g.size);*size=g.size;}}
     pn_free(g.frame);return status;
 }
-pn_status_t pn_blob_save(const pn_journal_io_t *io,pn_pool_t *pool,const uint8_t *payload,size_t size){
+pn_status_t pn_blob_save_bounded(const pn_journal_io_t *io,pn_pool_t *pool,const uint8_t *payload,size_t size,size_t limit){
     if(!io || !io->read || !io->write_sync || !pool || (!payload && size))return PN_INVALID;
-    if(size>PN_BLOB_MAX)return PN_LIMIT;
-    generation_t previous={0};pn_status_t status=latest(io,pool,&previous);
+    if(size>limit || limit>PN_BLOB_MAX)return PN_LIMIT;
+    generation_t previous={0};pn_status_t status=latest(io,pool,&previous,limit);
     if(status!=PN_OK && status!=PN_EMPTY)return status;
     if(status==PN_OK && previous.sequence==UINT64_MAX){pn_free(previous.frame);return PN_LIMIT;}
     uint64_t sequence=status==PN_EMPTY?1:previous.sequence+1;unsigned target=status==PN_EMPTY?0:1-previous.slot;
@@ -62,3 +62,10 @@ pn_status_t pn_blob_save(const pn_journal_io_t *io,pn_pool_t *pool,const uint8_t
     if(status==PN_OK){size_t n=0;status=io->read(io->ctx,target,check,size+24,&n);if(status==PN_OK && (n!=size+24 || memcmp(frame,check,n)))status=PN_CORRUPT;}
     pn_free(frame);pn_free(check);return status;
 }
+pn_status_t pn_blob_load(const pn_journal_io_t *io,pn_pool_t *pool,uint8_t *payload,size_t capacity,size_t *size){
+    if(!payload || !size)return PN_INVALID;
+    generation_t g={0};pn_status_t s=latest(io,pool,&g,PN_BLOB_MAX);
+    if(s==PN_OK){if(g.size>capacity)s=PN_LIMIT;else{memcpy(payload,g.frame+20,g.size);*size=g.size;}}
+    pn_free(g.frame);return s;
+}
+pn_status_t pn_blob_save(const pn_journal_io_t *io,pn_pool_t *pool,const uint8_t *payload,size_t size){return pn_blob_save_bounded(io,pool,payload,size,PN_BLOB_MAX);}

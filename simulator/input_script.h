@@ -64,6 +64,8 @@ static inline void script_queue(sim_script_t *script){
         else if(sscanf(part,"release:%d:%d",&script->x,&script->y)==2){event.type=SDL_MOUSEBUTTONUP;event.button.windowID=UINT32_MAX;event.button.button=SDL_BUTTON_LEFT;event.button.x=script->x;event.button.y=script->y;}
         else if(!strcmp(part,"window-close")){event.type=SDL_QUIT;}
         else if(!strncmp(part,"text:",5)){event.type=SDL_TEXTINPUT;event.text.windowID=UINT32_MAX;snprintf(event.text.text,sizeof event.text.text,"%s",part+5);}
+        // 通用键名供游戏/可访问性回归，不改变真实输入。/ Generic key names for game/accessibility tests without changing real input.
+        else if(!strncmp(part,"key:",4)){event.key.keysym.sym=SDL_GetKeyFromName(part+4);if(event.key.keysym.sym==SDLK_UNKNOWN)continue;}
         else if(!strcmp(part,"enter") || !strcmp(part,"mark-select") || !strcmp(part,"mark-confirm"))event.key.keysym.sym=SDLK_RETURN;
         else if(!strcmp(part,"home"))event.key.keysym.sym=SDLK_h;
         else if(!strcmp(part,"library"))event.key.keysym.sym=SDLK_b;

@@ -18,6 +18,7 @@
 #include "pn_reader_input.h"
 #include "pn_shelf_view.h"
 #include "pn_sudoku.h"
+#include "pn_sokoban.h"
 #include "pn_reader_chrome.h"
 #include "pn_reader_toolbar.h"
 #include "pn_wallpaper_ui.h"
@@ -60,6 +61,7 @@ typedef struct {
     bool recent_mode;
     size_t recent_start;
     pn_shelf_prefs_t shelf_prefs; ///< 已保存书架外观 / Saved shelf appearance
+    pn_sokoban_t sokoban; ///< 同源推箱子 / Shared Sokoban
     pn_sudoku_t sudoku; ///< 同源数独状态 / Shared Sudoku state
     uint8_t entertainment; ///< 0书籍、1娱乐；棋局由独立控制器拥有 / 0 books, 1 entertainment; a separate controller owns the game
     bool list_mode; ///< 列表模式（每页5本）/ List mode (five per page)
@@ -409,6 +411,18 @@ static pn_status_t sudoku_open(library_t *s){
     if(r==PN_OK)r=sudoku_draw(s);
     return r;
 }
+/// 无定时重绘，借用同一窗口画布。/ No periodic repaint; borrow the same window canvas.
+static pn_status_t sokoban_draw(library_t *s,bool clean){
+    pn_status_t r=pn_sokoban_render_update(&s->sokoban,&s->font,&s->frame);
+    if(r==PN_UNSUPPORTED)r=pn_sokoban_render(&s->sokoban,&s->font,&s->frame);
+    if(r==PN_OK)r=present(s,&s->frame,clean?PN_REFRESH_GC16:PN_REFRESH_GL16);
+    pn_sokoban_displayed(&s->sokoban,r==PN_OK);s->ui_retry=SDL_GetTicks64();s->shelf_draw_valid=false;
+    printf("sokoban screen=%d status=%d used=%zu peak=%zu\n",pn_sokoban_screen(&s->sokoban),r,s->pool->used,s->pool->peak);return r;
+}
+static pn_status_t sokoban_open(library_t *s){
+    pn_cover_work_abort(&s->cover_work);s->covers_inactive=true;pn_status_t r=pn_hot_session_drop(&s->hot);if(r!=PN_OK)return r;
+    r=pn_sokoban_open(&s->sokoban,s->pool,&s->state_media,s->state_dir,SDL_GetTicks64());if(r==PN_OK)r=sokoban_draw(s,false);return r;
+}
 /// 仅键盘焦点变动复用已确认画布，失败/叠层/封面或状态更新完整恢复。/ Reuse confirmed pixels only for keyboard focus; failures, overlays, cover/status changes restore fully.
 static pn_status_t draw_focus(library_t *s,int before){
     feedback_restore(s);pn_w_status_snapshot_t state=pn_w_status_snapshot();
@@ -729,7 +743,7 @@ static int management_hit(void *ctx,int x,int y){
 /// 只把一级页真实底栏交给按下路由，内容区、子页与模态保留原点击语义。/ Route only real root navigation on press; content, subpages and modals retain their click semantics.
 static int root_navigation_hit(library_t *s,int x,int y){
     if((s->foreground_open.impl || s->index_gate) || s->opening_book)return -1;
-    if(s->sudoku.active || s->locked || s->fonts.active || s->toc.active || s->jumpui.active || s->styles.active || s->bookmarks.mode!=PN_BUI_CLOSED || s->actions_mode || s->font_manage.impl || s->wallpaper.impl || s->search_open || s->index || s->toolbar || pn_w_navigation_hit(x,y)<0)return -1;
+    if(s->sokoban.active || s->sudoku.active || s->locked || s->fonts.active || s->toc.active || s->jumpui.active || s->styles.active || s->bookmarks.mode!=PN_BUI_CLOSED || s->actions_mode || s->font_manage.impl || s->wallpaper.impl || s->search_open || s->index || s->toolbar || pn_w_navigation_hit(x,y)<0)return -1;
     if(s->settings.impl)return pn_settings_ui_screen(&s->settings)==0?pn_settings_ui_hit(&s->settings,x,y):-1;
     if(s->hub){pn_transfer_hub_info_t info=hub_info(s);return pn_transfer_hub_hit(&info,x,y);}
     return reading(s) || !s->page?-1:shelf_hit(s,x,y);
@@ -866,6 +880,7 @@ static pn_status_t wallpaper_open(library_t *s){
 }
 /// PC电源边界：保存关闭正文后，用共用锁屏记录/绘制预览；不模拟硬件睡眠或功耗。/ PC power boundary: save/close the reader and preview shared lock records/rendering; no hardware sleep or power simulation.
 static pn_status_t lock_preview(library_t *s,uint64_t now){
+    if(s->sokoban.active){pn_status_t saved=pn_sokoban_pause(&s->sokoban,now);if(saved!=PN_OK){(void)sokoban_draw(s,false);return saved;}}
     if(s->sudoku.active){pn_status_t saved=pn_sudoku_pause(&s->sudoku,now);if(saved!=PN_OK){(void)sudoku_draw(s);return saved;}}
     stats_flush(s);
     bookmark_lock_capture(s);
@@ -944,9 +959,9 @@ static int library_worker(void *ctx){
         if(s->feedback_release){feedback_restore(s);s->feedback_release=false;}
         {static time_t last;const char *fixed=getenv("PN_SIM_CLOCK");time_t t=time(NULL);if(fixed)pn_w_set_clock(fixed);else if(t!=last){last=t;struct tm local;char text[8];if(localtime_r(&t,&local) && strftime(text,sizeof text,"%H:%M",&local))pn_w_set_clock(text);}} // 本机时钟；固定值仅用于可复跑测试 / Host clock; a fixed value is only for reproducible tests
         (void)pn_hot_session_expire(&s->hot,SDL_GetTicks64());
-        uint32_t view=s->locked?1:s->sudoku.active?19:(s->foreground_open.impl || s->index_gate)?18:s->fonts.active?2:s->toc.active?3:s->styles.active?4:s->jumpui.active?5:s->bookmarks.mode!=PN_BUI_CLOSED?6:s->actions_mode?7:s->settings.impl?8:s->wallpaper.impl?9:s->font_manage.impl?10:s->hub?11:s->index?12:s->search_open?13:s->toolbar?14:reading(s)?15:s->home?16:17;
+        uint32_t view=s->locked?1:s->sokoban.active?20:s->sudoku.active?19:(s->foreground_open.impl || s->index_gate)?18:s->fonts.active?2:s->toc.active?3:s->styles.active?4:s->jumpui.active?5:s->bookmarks.mode!=PN_BUI_CLOSED?6:s->actions_mode?7:s->settings.impl?8:s->wallpaper.impl?9:s->font_manage.impl?10:s->hub?11:s->index?12:s->search_open?13:s->toolbar?14:reading(s)?15:s->home?16:17;
         stats_poll(s,view==15);
-        if(!s->sudoku.active && !(s->foreground_open.impl || s->index_gate) && !reading(s) && !s->home && s->page)view+=(uint32_t)s->page->index*32u;
+        if(!s->sokoban.active && !s->sudoku.active && !(s->foreground_open.impl || s->index_gate) && !reading(s) && !s->home && s->page)view+=(uint32_t)s->page->index*32u;
         pn_list_motion_stats_t moving=s->toc.active?pn_toc_ui_motion_stats(&s->toc):pn_font_manage_motion_stats(&s->font_manage);
         uint64_t paint_now=SDL_GetTicks64();bool paint_work=view==16 && !s->pointer_down && atomic_load(&s->async.mouse)==0 && paint_now>=font_activity && paint_now-font_activity>=1500 && (pn_hot_session_source_pending(&s->hot) || pn_hot_session_layout_pending(&s->hot) || pn_hot_session_paint_pending(&s->hot));
         bool deferred_work=(view%32u==16u || view%32u==17u) && !s->pointer_down && atomic_load(&s->async.mouse)==0 && paint_now>=font_activity && paint_now-font_activity>=800 && pn_hot_session_deferred_pending(&s->hot);
@@ -1016,6 +1031,11 @@ static int library_worker(void *ctx){
         if(s->bookmarks.mode!=PN_BUI_CLOSED && !s->bookmarks.presented && now-s->ui_retry>=1000){s->ui_retry=now;status=pn_bookmark_ui_present(&s->bookmarks,present,s);}
         // 页面请求不等待下一次输入，空闲轮询也完成导航。/ Navigation requests complete during idle polling without waiting for another input.
         if(!s->locked && s->styles.request_fonts){s->styles.request_fonts=false;status=pn_font_ui_open(&s->fonts,s->pool,s->epub.impl?NULL:&s->reader,s->epub.impl?&s->epub:NULL,s->font_dir,present,s);pn_font_ui_return_to(&s->fonts,pn_style_ui_render,&s->styles);printf("font_ui open status=%d active=%d\n",status,s->fonts.active);}
+        if(!s->locked && s->sokoban.active){
+            (void)pn_sokoban_tick(&s->sokoban,now);
+            if(!s->sokoban.presented && now-s->ui_retry>=100)(void)sokoban_draw(s,false);
+            if(!got)continue;
+        }
         if(!s->locked && s->sudoku.active){
             (void)pn_sudoku_tick(&s->sudoku,now);
             if(!s->sudoku.presented && now-s->ui_retry>=100)(void)sudoku_draw(s);
@@ -1053,15 +1073,36 @@ static int library_worker(void *ctx){
                 if(!s->entertainment){covers_tick(s,now-font_activity>=800);if(!pn_hot_session_deferred_pending(&s->hot))prepare_continue(s,now,font_activity);}}
             continue;}
 
-        if(!s->sudoku.active && !s->locked && management_event(s,&event,now)){cancel_pointer(&input,&tap,true);continue;}
+        if(!s->sokoban.active && !s->sudoku.active && !s->locked && management_event(s,&event,now)){cancel_pointer(&input,&tap,true);continue;}
         if(s->locked){
             if(event.type==SDL_QUIT){running=false;continue;}
             if(event.type==SDL_KEYDOWN && !event.key.repeat && (event.key.keysym.sym==SDLK_l || event.key.keysym.sym==SDLK_RETURN || event.key.keysym.sym==SDLK_ESCAPE)){
                 s->locked=false;
-                if(s->sudoku.active)status=sudoku_draw(s);
+                if(s->sokoban.active)status=sokoban_draw(s,false);
+                else if(s->sudoku.active)status=sudoku_draw(s);
                 else if(reading(s))status=s->epub.impl?pn_epub_app_resume(&s->epub,now,present,s):pn_reader_app_resume(&s->reader,now,present,s);
                 else status=s->last_read_known?open_item(s,&s->last_read,now):draw(s);
                 printf("lock_preview wake status=%d\n",(int)status);}
+            continue;
+        }
+        if(s->sokoban.active){
+            int command=0;
+            if(event.type==SDL_QUIT){status=pn_sokoban_pause(&s->sokoban,now);if(status==PN_OK)running=false;else (void)sokoban_draw(s,false);continue;}
+            if(event.type==SDL_KEYDOWN && !event.key.repeat){
+                SDL_Keycode key=event.key.keysym.sym;
+                if(key==SDLK_l){status=lock_preview(s,now);continue;}
+                if(key==SDLK_ESCAPE)command=PN_SO_BACK;
+                else if(key==SDLK_RETURN)command=pn_sokoban_screen(&s->sokoban)==PN_SO_SELECT?PN_SO_START:PN_SO_EXIT;
+                else if(key==SDLK_UP)command=PN_SO_UP;else if(key==SDLK_RIGHT)command=PN_SO_RIGHT;else if(key==SDLK_DOWN)command=PN_SO_DOWN;else if(key==SDLK_LEFT)command=PN_SO_LEFT;
+                else if(key==SDLK_z || key==SDLK_BACKSPACE)command=PN_SO_UNDO_MOVE;
+                else if(key==SDLK_r)command=PN_SO_RESTART;else if(key==SDLK_c)command=PN_SO_CLEAN;else if(key==SDLK_p)command=PN_SO_CHOOSE;
+                else if(key>=SDLK_1 && key<=SDLK_3)command=PN_SO_TIER+(int)(key-SDLK_1);
+            }else if(event.type==SDL_MOUSEBUTTONDOWN || event.type==SDL_MOUSEBUTTONUP || event.type==SDL_MOUSEMOTION){
+                bool motion=event.type==SDL_MOUSEMOTION,up=event.type==SDL_MOUSEBUTTONUP;int x=motion?event.motion.x:event.button.x,y=motion?event.motion.y:event.button.y;
+                if(event.type==SDL_MOUSEBUTTONDOWN)s->pointer_down=true;
+                if(s->pointer_down){(void)pn_sokoban_touch(&s->sokoban,1,x,y,true);if(up){command=pn_sokoban_touch(&s->sokoban,0,x,y,true);s->pointer_down=false;}}
+            }else if(event.type==SDL_WINDOWEVENT && event.window.event==SDL_WINDOWEVENT_FOCUS_LOST){(void)pn_sokoban_touch(&s->sokoban,0,0,0,false);(void)pn_sokoban_touch(&s->sokoban,0,0,0,true);s->pointer_down=false;}
+            if(command>0){status=pn_sokoban_event(&s->sokoban,command,now);printf("sokoban command=%d status=%d\n",command,status);if(!s->sokoban.active){pn_sokoban_close(&s->sokoban);s->entertainment=1;status=page(s,false,true);}else if(!s->sokoban.presented)status=sokoban_draw(s,command==PN_SO_CLEAN);}
             continue;
         }
         if(s->sudoku.active){
@@ -1270,6 +1311,7 @@ static int library_worker(void *ctx){
                 if(key==SDLK_h || key==SDLK_b){s->entertainment=0;s->home=key==SDLK_h;status=page(s,false,true);printf("navigation root=%s status=%d\n",s->home?"home":"library",(int)status);continue;}
                 if(s->entertainment){
                     if(key==SDLK_RETURN || key==SDLK_2){status=sudoku_open(s);}
+                    else if(key==SDLK_3){status=sokoban_open(s);}
                     else if(key==SDLK_1){s->entertainment=s->entertainment==2?1:0;status=page(s,false,true);}
                     continue;
                 }
@@ -1317,7 +1359,7 @@ static int library_worker(void *ctx){
             else if(reading(s) && hit==13 && s->epub.impl){status=open_toc(s);toc_report(&s->toc,0,status);turn=false;}
             else if(reading(s) && hit==8){status=return_to_shelf(s,now);turn=false;}
             else if(!reading(s)){
-                if(hit==PN_SHELF_TAB_ENTERTAINMENT || hit==PN_SHELF_ENTERTAINMENT_BACK || hit==PN_SHELF_SUDOKU){s->home=false;s->entertainment=1;status=hit==PN_SHELF_SUDOKU?sudoku_open(s):page(s,false,true);}
+                if(hit==PN_SHELF_TAB_ENTERTAINMENT || hit==PN_SHELF_ENTERTAINMENT_BACK || hit==PN_SHELF_SUDOKU || hit==PN_SHELF_SOKOBAN){s->home=false;s->entertainment=1;status=hit==PN_SHELF_SUDOKU?sudoku_open(s):hit==PN_SHELF_SOKOBAN?sokoban_open(s):page(s,false,true);}
                 else if(hit==PN_SHELF_READING_HOME){s->home=true;status=page(s,false,true);}
                 else if(hit==PN_SHELF_LAYOUT){s->list_mode=!s->list_mode;status=page(s,false,true);}
                 else if(hit==PN_SHELF_TOGGLE){s->recent_mode=!s->recent_mode;*s->query=0;status=page(s,false,true);}
@@ -1346,6 +1388,7 @@ cleanup:;
     pn_cancel_scope_t shield;pn_cancel_enter(&shield,NULL,NULL);
     (void)pn_feedback_discard(&s->feedback);
     (void)active_close(s,SDL_GetTicks64());
+    pn_sokoban_close(&s->sokoban);
     pn_sudoku_close(&s->sudoku);
     pn_catalog_index_close(&s->catalog_index);
     pn_wallpaper_mask_close(&s->lock_mask);
