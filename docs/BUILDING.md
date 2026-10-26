@@ -20,9 +20,7 @@
 
 快速入口回归另以链接器观察真实`pn_page_index_open`次数，续读首屏命中须为0；`resume_app`通过`PN_RESUME_ENTRY=1`覆盖显式未显示候选、缺包/坏包、设置变化和失败重试。`reopen_entry_host/immutable`用原创实际书源核对完整SHA证明复用、错误expected拒绝及换代后重新完整复核，PC仍不复用证明。诊断`epub.open.source-memo`只表示本次命中原完整证明；`resume.sources/decode`分出来源复核与包解码时间，父子阶段有嵌套，不能相加当总耗时。
 
-独立旧/新对照：先冻结旧提交源码并用相同`pn_resume_capture.c`编译观察器（旧目标不定义`PN_RESUME_NEW`），再运行`python tools/test_local_resume.py --before <旧观察器> --after <新观察器> --font <完整TTF> --out <报告.json>`。输入与状态复制到临时卷，三轮交替、固定可用CPU，TXT及480章/单章288万字逐帧一致才汇总开书/首次NEXT中位数、池峰和包体积。只有同源软件时间，不模拟TF或面板。
-
-SDL独立对照为`python simulator/test_resume_window.py <新pn_sim> <完整TTF> <旧pn_sim>`；设置`PN_RESUME_EVIDENCE`保留原始日志/PGM，设置`SDL_VIDEODRIVER=x11`并提供WSLg挂载可走可见窗口。两版须加入相同只读计时点：`sim.open.request`从开书请求到首屏回执，`sim.next.request`包含异步NEXT让出等待。截图写盘及窗口呈现包含在该端到端软件时间内；控制器观察器另排除捕获写盘。不可将局部阶段相加或用一次忙碌主机测量宣称真机比例。
+最终性能对照使用独立冻结的当前正式版本与最终候选，保持同配置、同输入和状态；报告只汇总可操作开书、首次NEXT、完整帧和池峰。现有`test_local_resume.py`、`test_resume_window.py`为可选历史观察器，不在每次开发默认执行，也不把不同旧提交逐一拿来A/B。两种观察器分别包含/排除截图写盘，必须标明计时边界，软件结果不代表TF或面板。
 
 `catalog_index`与`catalog_mount`增加stdio定位计数及逐次故障注入：首屏不探读页外记录、同页/搜索顺序读，仍用独立目录扫描核对首屏、倒序、字母与搜索；三次定位任一步失败不得发布半页，之后可重建且原READ租约有效。定位次数是软件端口计数，不代表TF事务或耗时。
 
@@ -46,13 +44,13 @@ SDL独立对照为`python simulator/test_resume_window.py <新pn_sim> <完整TTF
 
 真机复测沿用失败书籍和原续读位置，不清缓存；保留每5秒`Reader NEXT waiting`的`steps`与`phase`，并记录首次/第二次NEXT显示回执、PREV及重开归位画面。主机有界工作量通过不能代替原失败真机验收。
 
-## 冷恢复快照与退出收口回归
+## 冷恢复与退出收口回归
 
-`resume_preview`验证TXT/EPUB完整像素、已保存位置匹配、可信根/完整SHA、损坏、缺根、取消、低内存、失卡及不写入媒体；标记只改变top42。`exit_checkpoint`使用真实应用在无正文空闲等待的情况下验证保留后分步写出、立即释放收口和挂起收口，只有当前页0槽，退出归零；另覆盖CACHE_WRITE争用保留资格，以及写到一半又恢复正文时先取消借帧。`identity_memo_host/immutable`核查后台完整扫描后的证明发布与原失效规则。
+`exit_checkpoint`使用真实TXT/EPUB应用检查无正文空闲等待时的冻结收口、立即释放及挂起收口，只有当前页0槽，重开完整像素一致、退出归零；覆盖CACHE_WRITE争用和恢复正文前取消借帧。`identity_memo_host/immutable`检查后台完整扫描才发布证明、部分扫描不授予证明、最近两书调度去重、WRITE/换代失效及相同元数据不重复落盘。`identity_takeover`编译真实设备main，覆盖已知最近书仍启动完整复核、同任务接管和介质换代重试。`device_identity`检查32KiB/4KiB路径完整SHA一致、4ms软预算、外部栈、批次中途取消后游标准确及错误释放；PSA/DMA是显式替身，不能当硬件SHA测速。
 
-`python tools/dev.py sdl`新增`snapshot_window`：独立进程续读、快照与真正正文像素相等、校验期间NEXT不推进位置、缺包/坏包回封面、原书改变不能作为正文成功打开。`race-open-next:<ms>`是模拟器竞争注入：按下开书后延后投递一个不要求消费回执的NEXT，再等待开书本身的回执，避免正确丢弃的输入把脚本挂住。该用例使用内置字体隔离退出收口；外置字体完整验证仍由原`resume_window`等覆盖，未验证完的字体不强行生成新包。
+SDL `cold_open_window`检查独立进程正常封面开书、续读完整帧、校验中NEXT不推进、缺包/坏包回退和原书改变拒绝；不再有非交互快照。`race-open-next:<ms>`只为输入竞争注入，不等待被正确丢弃的NEXT回执。用`PN_COLD_OPEN_EVIDENCE=<新目录>`运行`python simulator/test_cold_open_window.py <pn_sim>`保留夹具/日志/PGM；200ms模拟呈现延时不是面板计时。外置字体验证由原`resume_window`覆盖。
 
-用`PN_SNAPSHOT_EVIDENCE=<新目录>`运行`python simulator/test_snapshot_window.py <pn_sim>`可保留原创夹具、日志及PGM。自动用例的200ms模拟扫描延时只为复现输入竞争，不是面板计时。开发可见窗口仍须先`sdl-run`重建后重启；本批原始证据位于忽略的`build-dev/cold-opening/`。设备测试继续暂停，不能自动刷写或连接串口。
+性能只保留最终代码对当前正式1.0.7源码f9e8c388e06ad25a90fb46b33d8259b8af670d75的对照；不把中间开发提交当基线或重复跑大矩阵。最终原始资料存忽略的`build-dev/ready-open-final/`，汇总见现有真机报告中的软件部分。开发仍须重建并保留可见窗口；硬件测试暂停，不自动刷写或连接串口。
 
 ## 推箱子的软件回归
 

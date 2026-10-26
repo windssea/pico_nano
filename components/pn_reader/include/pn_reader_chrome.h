@@ -52,6 +52,3 @@ void pn_reader_guide_row(pn_frame_t *viewport,unsigned style,unsigned shade,int 
 
 /// 只画状态文字，底图由控制层准备。/ Draw status text only over a controller-prepared underlay.
 pn_status_t pn_reader_status_text(pn_font_t *,pn_frame_t *);
-
-/// 给非交互快照加醒目标记，不使其成为阅读提交。/ Mark an inert snapshot clearly without turning it into a reader commit.
-pn_status_t pn_reader_snapshot_render(pn_font_t *,pn_frame_t *);

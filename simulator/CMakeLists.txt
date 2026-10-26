@@ -149,6 +149,6 @@ if(PN_SIM_SDL)
 endif()
 
 if(PN_SIM_SDL)
-  add_test(NAME snapshot_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_snapshot_window.py $<TARGET_FILE:pn_sim>)
-  set_tests_properties(snapshot_window PROPERTIES LABELS "reader;storage;ui" TIMEOUT 240)
+  add_test(NAME cold_open_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_cold_open_window.py $<TARGET_FILE:pn_sim>)
+  set_tests_properties(cold_open_window PROPERTIES LABELS "reader;storage;ui" TIMEOUT 240)
 endif()

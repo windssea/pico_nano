@@ -19,11 +19,10 @@
 #include "pn_epub_app.h"
 #include "pn_bootstrap.h"
 #include "pn_semantic_file.h"
-#include "pn_resume.h"
 #include "pn_hot_session.h"
-#include "pn_resume.h"
 #include "pn_opening_view.h"
 #include "pn_identity_cache.h"
+#include "pn_resume.h"
 #include "pn_toc_ui.h"
 #include "pn_reader_input.h"
 #include "pn_reader_chrome.h"
@@ -228,8 +227,6 @@ static uint64_t index_work_us,index_max_batch_us,index_steps,index_batches; ///<
 #endif
 static uint64_t index_progress_at; ///< 限制索引等待页重绘频率 / Throttle index-loader redraws
 static bool opening; ///< 开书控制门，产品owner串行管理 / Opening gate owned by the serial product owner
-static bool loading_snapshot_probed; ///< 每请求最多读取一次快照 / Probe at most one snapshot per request
-static bool loading_snapshot; ///< 本请求已显示非交互快照 / An inert snapshot is visible for this request
 static bool loading_shown; ///< 当前开书已显示加载反馈 / Loading feedback already shown for this opening
 #if PN_DEVICE_TEST_CONSOLE
 static bool loading_preview_active; ///< 诊断专用画面演示，不创建阅读对象或记录 / Diagnostic-only visual rehearsal without reading objects or records
@@ -465,7 +462,7 @@ static pn_status_t opening_abort(void){
 #endif
     index_gate=false;
     if(identity_takeover_active)identity_job_stop();
-    identity_takeover_active=false;identity_takeover_path[0]=0;opening_overlap_result=PN_BUSY;loading_shown=false;loading_snapshot=false;loading_snapshot_probed=false;
+    identity_takeover_active=false;identity_takeover_path[0]=0;opening_overlap_result=PN_BUSY;loading_shown=false;
     pn_status_t s=pn_epub_app_open_job_close(&foreground_open);opening_controls(false);return s;
 }
 static pn_feedback_t press_feedback; ///< 独立、可撤销的按下区域，不借用UI对象 / Independent reversible press region without borrowing UI objects
@@ -1411,125 +1408,28 @@ static pn_status_t index_space(void *ctx,uint64_t *available){(void)ctx;size_t t
 static pn_status_t tf_index_space(void *ctx,const char *path,uint64_t *available){(void)ctx;(void)path;uint64_t total=0;return esp_vfs_fat_info(PN_SD_MOUNT,&total,available)==ESP_OK?PN_OK:PN_IO;}
 static pn_status_t semantic_space(void *ctx,const char *path,uint64_t *available){(void)path;return index_space(ctx,available);}
 
-/// 只借加载画布与内置字体，快照不授予任何阅读输入/来源资格。/ Borrow the loading canvas and resident font; snapshots grant no reader input or source qualification.
-static pn_status_t show_snapshot(pn_frame_t *frame) {
-    if (index_gate || loading_snapshot_probed || !selected_identified || !sd_media.available || !data_ready)
-        return PN_EMPTY;
-    loading_snapshot_probed = true;
-    pn_media_lease_t guard = {0}, trust = {0};
-    pn_status_t s = pn_media_acquire(&sd_media, PN_MEDIA_READ, &guard);
-    if (s == PN_OK)
-        s = pn_media_acquire(&data_media, PN_MEDIA_READ, &trust);
-    if (s == PN_OK)
-        s = pn_resume_preview(&pool, &sd_media, &guard, &data_media, &trust, pn_page_index_tf_directory(),
-                              "/data/progress", &selected_expected, selected_format == PN_BOOK_EPUB ? 2u : 1u, frame);
-    if (trust.ticket) {
-        (void)pn_media_release(&data_media, &trust);
-    }
-    if (guard.ticket)
-        (void)pn_media_release(&sd_media, &guard);
-    if (s == PN_OK) {
-        pn_font_t font = {0};
-        pn_text_source_t resident = pn_font_reading_source();
-        s = pn_font_open(&font, &pool, &resident, 21);
-        if (s == PN_OK)
-            s = pn_reader_snapshot_render(&font, frame);
-        pn_font_close(&font);
-    }
-    if (s == PN_OK)
-        s = present(NULL, frame, panel_known ? PN_REFRESH_GL16 : PN_REFRESH_GC16);
-    if (s == PN_OK) {
-        loading_snapshot = true;
-        ESP_LOGI(TAG, "Reader snapshot displayed; source verification pending");
-    }
-    return s;
-}
-
-static bool selected_source_cold(void) {
-    if (!selected_identified || !sd_media.available)
-        return false;
-    pn_text_file_t *file = pn_alloc_optional(&pool, PN_MEM_DOCUMENT, sizeof *file);
-    if (!file)
-        return false;
-    memset(file, 0, sizeof *file);
-    pn_text_source_t source = {0};
-    pn_book_id_t id;
-    pn_media_lease_t lease = {0};
-    pn_status_t status = pn_media_acquire(&sd_media, PN_MEDIA_READ, &lease);
-    if (status == PN_OK)
-        status = pn_text_file_open(file, &sd_media, &lease, selected_path, &source);
-    if (status == PN_OK)
-        status = pn_text_file_identity_cached(&source, &id);
-    if (file->handle)
-        (void)pn_text_file_close(file);
-    if (lease.ticket) {
-        (void)pn_media_release(&sd_media, &lease);
-    }
-    pn_free(file);
-    return status != PN_OK;
-}
-static void try_snapshot_loading(void) {
-    if (loading_shown || loading_snapshot_probed || index_wait || !selected_source_cold())
-        return;
-    uint8_t *pixels = pn_alloc_optional(&pool, PN_MEM_FRAME, 415872);
-    pn_frame_t frame;
-    if (pn_frame_bind(&frame, pixels, 415872, 684, 1216) && show_snapshot(&frame) == PN_OK)
-        loading_shown = true;
-    pn_free(pixels);
-}
-
-static pn_status_t show_loading_phase(const char *path, unsigned phase) {
+static pn_status_t show_loading_phase(const char *path,unsigned phase){
     (void)phase;
-    if (loading_snapshot && !index_gate)
-        return PN_OK;
-    pn_profile_span_t timing;
-    pn_profile_begin(&timing, &pool, "epub.open.loading");
-    uint8_t *pixels = pn_alloc_tagged(&pool, PN_MEM_FRAME, 342u * 1216u);
-    pn_frame_t frame;
-    pn_font_t font = {0};
-    pn_status_t status = pn_frame_bind(&frame, pixels, 342u * 1216u, 684, 1216) ? PN_OK : PN_NO_MEMORY;
-    if (status == PN_OK) {
-        pn_status_t snapshot = show_snapshot(&frame);
-        if (snapshot == PN_OK || snapshot == PN_CANCELLED) {
-            pn_free(pixels);
-            pn_profile_end(&timing, snapshot);
-            return snapshot;
-        }
-        status = management_font_begin(&font, 28);
-    }
-    const char *title = strrchr(path, '/');
-    title = title ? title + 1 : path;
-    if (status == PN_OK) {
+    pn_profile_span_t timing;pn_profile_begin(&timing,&pool,"epub.open.loading");
+    uint8_t *pixels=pn_alloc_tagged(&pool,PN_MEM_FRAME,342u*1216u);pn_frame_t frame;pn_font_t font={0};
+    pn_status_t status=pn_frame_bind(&frame,pixels,342u*1216u,684,1216)?management_font_begin(&font,28):PN_NO_MEMORY;
+    const char *title=strrchr(path,'/');title=title?title+1:path;
+    if(status==PN_OK){
 #if PN_DEVICE_TEST_CONSOLE
-        if (loading_preview_active) {
-            pn_frame_clear(&frame, PN_UI_PAPER);
-            status = pn_w_loading_phase(&font, &frame, "熊猫吃竹子", "画面演示 · 中间键返回", -1, -1, phase);
-        } else
+        if(loading_preview_active){pn_frame_clear(&frame,PN_UI_PAPER);status=pn_w_loading_phase(&font,&frame,"熊猫吃竹子","画面演示 · 中间键返回",-1,-1,phase);}
+        else
 #endif
         {
-            pn_catalog_item_t item = {.format = selected_format};
-            size_t path_length = strlen(path);
-            bool path_fits = path_length < sizeof item.path;
-            if (path_fits)
-                memcpy(item.path, path, path_length + 1);
-            if (path_fits)
-                status = pn_opening_view_resolve(&opening_view, &pool, &sd_media, cover_cache, &item, shelf_covers);
-            else
-                status = PN_INVALID;
-            char detail[128];
-            if (index_gate)
-                snprintf(detail, sizeof detail, "已建立 %u 页 · 中间键取消", (unsigned)opening_index.pages);
-            if (status == PN_OK)
-                status =
-                    pn_reader_opening_render(&font, &frame, title, opening_view.preview, index_gate ? detail : NULL);
+            pn_catalog_item_t item={.format=selected_format};size_t path_length=strlen(path);
+            bool path_fits=path_length<sizeof item.path;if(path_fits)memcpy(item.path,path,path_length+1);
+            if(path_fits)status=pn_opening_view_resolve(&opening_view,&pool,&sd_media,cover_cache,&item,shelf_covers);
+            else status=PN_INVALID;
+            char detail[128];if(index_gate)snprintf(detail,sizeof detail,"已建立 %u 页 · 中间键取消",(unsigned)opening_index.pages);
+            if(status==PN_OK)status=pn_reader_opening_render(&font,&frame,title,opening_view.preview,index_gate?detail:NULL);
         }
     }
-    if (status == PN_OK)
-        status = present(NULL, &frame, panel_known ? PN_REFRESH_GL16 : PN_REFRESH_GC16);
-    management_font_end(&font);
-    pn_free(pixels);
-    pn_profile_end(&timing, status);
-    return status;
+    if(status==PN_OK)status=present(NULL,&frame,panel_known?PN_REFRESH_GL16:PN_REFRESH_GC16);
+    management_font_end(&font);pn_free(pixels);pn_profile_end(&timing,status);return status;
 }
 static pn_status_t show_loading(const char *path){
     pn_status_t status=show_loading_phase(path,0);
@@ -1548,7 +1448,7 @@ static pn_status_t show_loading_motion(unsigned phase){
 #endif
 static void reader_open_result(pn_status_t status){
     if(index_gate && status==PN_BUSY)return;
-    loading_shown=false;loading_snapshot=false;loading_snapshot_probed=false;
+    loading_shown=false;
     pn_opening_view_close(&opening_view);
     if(opening_request_timed){uint64_t end=pn_profile_time();pn_profile_observe(&pool,"epub.open.request",status,end>=opening_requested_us?end-opening_requested_us:0,NULL);opening_request_timed=false;}
     if(status==PN_CANCELLED){pn_cancel_scope_t shield;pn_cancel_enter(&shield,NULL,NULL);if(stop_reader())show_shelf("",false);pn_cancel_leave(&shield);return;}
@@ -1561,8 +1461,8 @@ static void reader_open_result(pn_status_t status){
     wake_trace_ready(now_ms());
 #endif
 }
-/* 书籍身份预计算：书库空闲时为未读过的书分步算整书SHA并按路径/大小/修改时间缓存，点开即走可信快开（后台仍完整复核）。
- * Book-identity precompute: while the library idles, hash not-yet-read books step by step and cache by path/size/mtime so opening takes the trusted fast path (still fully verified in the background). */
+/* 书籍身份预计算：先完整复核最近两书，再为未知身份建表；持久元数据不充当同代完整证明。
+ * Book-identity precompute: fully reverify the two recent books, then index unknown identities; persisted metadata is never same-generation full proof. */
 #define IDENTITY_CACHE_FILE "/data/progress/book-identities.bin"
 #if defined(ESP_PLATFORM)
 static pn_identity_cache_t identity_cache EXT_RAM_BSS_ATTR;
@@ -1570,6 +1470,7 @@ static pn_identity_cache_t identity_cache EXT_RAM_BSS_ATTR;
 static pn_identity_cache_t identity_cache;
 #endif
 static bool identity_cache_loaded;
+static pn_identity_warm_t identity_warm; ///< 最近两书的非证明调度状态 / Non-proof scheduling state for two recent books
 static pn_identity_cache_job_t identity_job;
 static uint64_t identity_next_scan;
 static char identity_failed_path[PN_CATALOG_PATH_MAX]; ///< 计算失败过的书，本次开机不再重试 / A book whose computation failed, not retried this boot
@@ -1628,20 +1529,34 @@ static bool identity_precompute_start(const char *path,pn_book_format_t format){
     if(s!=PN_OK){snprintf(identity_failed_path,sizeof identity_failed_path,"%s",path);return false;}
     pn_device_power_busy(PN_POWER_PRODUCT,true);return true;
 }
-/// 焦点/最近阅读安静300ms后可预计算，整页批量扫描仍等2秒；由后台轮转保证份额。
-/// Focus/recent precomputation starts after 300 quiet ms; bulk page scans still wait two seconds, with a share guaranteed by background rotation.
+/// 不被磁盘身份缓存挡住的整书预验证；来源证明仍由完整SHA产生。/ Preverify whole books even when disk metadata exists; only a complete SHA creates source proof.
+static bool identity_warm_start(const char *path,pn_book_format_t format){
+    if(format!=PN_BOOK_TXT && format!=PN_BOOK_EPUB)return false;
+    pn_status_t s=pn_identity_cache_warm_begin(&identity_warm,&identity_job,&pool,&sd_media,path,last_input);
+    if(s==PN_OK){pn_device_power_busy(PN_POWER_PRODUCT,true);ESP_LOGI(TAG,"Recent book full verification started");return true;}
+    return false;
+}
+/// 最近两书在首页安静800ms后复核；原未知书焦点300ms、整页2秒的轮转门保留。
+/// Reverify two recent home books after 800 quiet ms; keep the unknown-book focus 300 ms/bulk two-second rotation gates.
 static bool tick_identity(uint64_t now){
     if(!data_ready || !sd_media.available || !shelf_page || now<last_input || now-last_input<300)return false;
     identity_cache_ready();if(!identity_cache_loaded)return false;
     if(identity_job.impl){
         pn_device_power_busy(PN_POWER_PRODUCT,true);
-        pn_status_t s=pn_identity_cache_job_step(&identity_job,&identity_cache);if(s==PN_BUSY || s==PN_CANCELLED)return true;
+        uint64_t began=now_ms();unsigned steps=0;pn_status_t s;
+        do{s=pn_identity_cache_job_step(&identity_job,&identity_cache);}while(s==PN_BUSY && ++steps<32u && now_ms()-began<8u);
+        if(s==PN_BUSY || s==PN_CANCELLED)return true;
         identity_job_stop();
         if(s==PN_OK)identity_cache_store();else ESP_LOGW(TAG,"Identity precompute stopped: %d",(int)s);
         return true;
     }
     if(now<identity_next_scan)return false;
     identity_next_scan=now+250;
+    if(home_mode && shelf_draw_valid && panel_known && now-last_input>=800u){
+        if(recent_snapshot){size_t n=recent_snapshot->count<2u?recent_snapshot->count:2u;for(size_t i=0;i<n;i++)if(identity_warm_start(recent_snapshot->items[i].path,(pn_book_format_t)recent_snapshot->items[i].format))return true;}
+        else if(last_read_known && identity_warm_start(last_read_book.path,last_read_book.format))return true;
+    }
+
     if(!home_mode && shelf_focus>=0 && (size_t)shelf_focus<shelf_page->count){
         const pn_catalog_item_t *focus=&shelf_page->items[shelf_focus];
         if(!focus->identified && identity_precompute_start(focus->path,focus->format))return true;
@@ -1731,9 +1646,9 @@ static void start_reader_impl(void){
         if(resumed==PN_CANCELLED)return;
         if(resumed==PN_IO){message("显示失败","保留阅读会话\n请重试打开");return;}
     }
-    bool had_loading=loading_shown,had_snapshot=loading_snapshot,had_snapshot_probed=loading_snapshot_probed;
+    bool had_loading=loading_shown;
     if(!stop_reader())return;
-    loading_shown=had_loading;loading_snapshot=had_snapshot;loading_snapshot_probed=had_snapshot_probed;
+    loading_shown=had_loading;
     // 旧任务清理已归还控制门；同一次新开书请求重新持有，直到完成或取消。/ Cleanup returned the old gate; the new opening request owns it again until completion or cancellation.
     if(*selected_path)opening_controls(true);
     pn_wallpaper_mask_close(&lock_mask);
@@ -1749,14 +1664,13 @@ static void start_reader_impl(void){
         return;
     }
     if(!sd_media.available){pn_status_t s=pn_media_attach(&sd_media,card_instance++);if(s!=PN_OK){message("卡仍被占用","等待旧文件关闭后重试");return;}}
+    system_font_ready();
     if(!*selected_path){show_shelf("",false);return;}
     // 缺失或旧目录的书只退回可操作书库，不反复进入重试错误页；持久记录保留。/ Missing books or legacy paths return to a usable library without an error loop; durable records stay intact.
     const char *prefix=PN_SD_MOUNT "/" PN_SD_BOOKS "/";struct stat selected_info;
     if(strncmp(selected_path,prefix,strlen(prefix)) || stat(selected_path,&selected_info) || !S_ISREG(selected_info.st_mode)){
         ESP_LOGW(TAG,"Selected book unavailable; returning to canonical library");selected_path[0]=0;selected_identified=false;home_mode=false;show_shelf("",false);return;
     }
-    try_snapshot_loading();
-    system_font_ready();
     const char *font=NULL;
     covers_inactive=true;
     bool need_loading=!loading_shown && pn_reader_loading_needed(selected_format==PN_BOOK_TXT,(uint64_t)selected_info.st_size);
@@ -1817,7 +1731,7 @@ static bool tick_opening(void);
 static void start_reader_finish(void){
     if(identity_takeover_active || index_gate)return;
     if(foreground_open.impl)return;
-    loading_shown=false;loading_snapshot=false;loading_snapshot_probed=false;
+    loading_shown=false;
     if(opening && !foreground_open.impl){if(opening_overlap_result!=PN_BUSY)(void)tick_opening();else opening_controls(false);}
 }
 static void start_reader(void){
@@ -2366,7 +2280,7 @@ static void resume_reader(void){
 #if defined(CONFIG_PN_WAKE_TRACE) && CONFIG_PN_WAKE_TRACE
     wake_trace_store("cold-begin");
 #endif
-    start_reader();loading_shown=false;loading_snapshot=false;loading_snapshot_probed=false;
+    start_reader();loading_shown=false;
 }
 static void lock_and_sleep_impl(const char *hint){
     resource_previews_close();

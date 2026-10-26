@@ -73,5 +73,33 @@ int main(void){
     assert(pn_text_file_identity_cached(&source,&cached)==PN_EMPTY && !file.io_bytes);
 #endif
     assert(pn_text_file_close(&file)==PN_OK && pn_media_release(&media,&lease)==PN_OK && !pool.used && !pool.live);
+    // 最近书预校验不受持久身份命中阻挡；部分读取和调度去重都不能充当来源证明。
+    // Recent-book preverification ignores persisted metadata hits; partial reads and scheduling deduplication are never source proof.
+    assert(pn_media_acquire(&media,PN_MEDIA_WRITE,&lease)==PN_OK && pn_media_release(&media,&lease)==PN_OK);
+    pn_identity_warm_t warm={0};
+    assert(pn_identity_cache_warm_begin(&warm,&job,&pool,&media,path,10)==PN_OK);
+    assert(pn_identity_cache_warm_begin(&warm,&job,&pool,&media,path,10)==PN_BUSY && warm.count==1);
+    assert(pn_identity_cache_job_step(&job,&background_cache)==PN_BUSY);pn_identity_cache_job_close(&job);
+    assert(pn_identity_cache_warm_begin(&warm,&job,&pool,&media,path,10)==PN_EMPTY && !job.impl);
+    assert(pn_media_acquire(&media,PN_MEDIA_READ,&lease)==PN_OK && pn_text_file_open(&file,&media,&lease,path,&source)==PN_OK);
+    assert(pn_text_file_identity_cached(&source,&cached)==PN_EMPTY && !file.io_bytes);
+    assert(pn_text_file_close(&file)==PN_OK && pn_media_release(&media,&lease)==PN_OK);
+    background_cache.dirty=false;assert(pn_identity_cache_warm_begin(&warm,&job,&pool,&media,path,11)==PN_OK);
+    do{s=pn_identity_cache_job_step(&job,&background_cache);}while(s==PN_BUSY);assert(s==PN_OK && !background_cache.dirty);pn_identity_cache_job_close(&job);
+    assert(pn_identity_cache_warm_begin(&warm,&job,&pool,&media,path,11)==PN_EMPTY);
+    s=pn_identity_cache_warm_begin(&warm,&job,&pool,&media,path,12);
+#ifdef PN_TEST_IMMUTABLE_FILE
+    assert(s==PN_EMPTY && !job.impl);
+#else
+    assert(s==PN_OK);pn_identity_cache_job_close(&job);
+#endif
+    assert(pn_media_acquire(&media,PN_MEDIA_WRITE,&lease)==PN_OK && pn_media_release(&media,&lease)==PN_OK);
+    assert(pn_identity_cache_warm_begin(&warm,&job,&pool,&media,path,12)==PN_OK);pn_identity_cache_job_close(&job);
+    assert(pn_media_detach(&media)==PN_OK && pn_media_attach(&media,3)==PN_OK);
+    assert(pn_identity_cache_warm_begin(&warm,&job,&pool,&media,path,12)==PN_OK);pn_identity_cache_job_close(&job);
+    assert(pn_identity_cache_warm_begin(&warm,&job,&pool,&media,"/missing/pn-second-book",12)==PN_IO && warm.count==2);
+    assert(pn_identity_cache_warm_begin(&warm,&job,&pool,&media,"/missing/pn-third-book",12)==PN_EMPTY && !job.impl);
+    assert(!pool.used && !pool.live && !pn_media_active(&media));
+    puts("recent verification: metadata never proves content, cancelled prefix unverified, two-candidate cap, WRITE/epoch reset");
     unlink(path);return 0;
 }

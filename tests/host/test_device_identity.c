@@ -15,6 +15,9 @@
 #include <unistd.h>
 #include <sys/stat.h>
 static uintptr_t blocked_begin,blocked_end;static bool fail_hash,external_stack,fail_internal;static unsigned operations,calls;static size_t maximum;static uintptr_t internal_begin,internal_end;
+static int64_t elapsed_us,read_us;
+static unsigned failed_read;
+int64_t esp_timer_get_time(void){return elapsed_us;}
 bool esp_ptr_dma_capable(const void *p){uintptr_t at=(uintptr_t)p;if(at>=internal_begin && at<internal_end)return true;return !external_stack && (at<blocked_begin || at>=blocked_end);}
 static void *allocate(void *ctx,size_t n){(void)ctx;void *p=malloc(n);blocked_begin=(uintptr_t)p;blocked_end=blocked_begin+n;return p;}
 static void release(void *ctx,void *p){(void)ctx;free(p);blocked_begin=blocked_end=0;}
@@ -36,6 +39,7 @@ psa_status_t psa_hash_finish(psa_hash_operation_t *op,uint8_t *out,size_t cap,si
 psa_status_t psa_hash_abort(psa_hash_operation_t *op){free(op->data);*op=(psa_hash_operation_t){0};operations--;return PSA_SUCCESS;}
 static pn_status_t source(void *ctx,uint64_t at,uint8_t *out,size_t cap,size_t *n){
     (void)ctx;assert(esp_ptr_dma_capable(out));calls++;if(cap>maximum)maximum=cap;
+    elapsed_us+=read_us;if(failed_read && calls==failed_read)return PN_IO;
     for(size_t i=0;i<cap;i++)out[i]=(uint8_t)((at+i)*37u);
     *n=cap;return PN_OK;
 }
@@ -43,18 +47,32 @@ typedef struct {void *data;unsigned drops;} menu_t;
 static size_t menu_bytes(void *ctx){return pn_alloc_size(((menu_t *)ctx)->data);}
 static void menu_drop(void *ctx){menu_t *m=ctx;pn_free(m->data);m->data=NULL;m->drops++;}
 static bool cancelled(void *ctx){return *(bool *)ctx;}
+static bool cancelled_after_read(void *ctx){return calls>=*(unsigned *)ctx;}
 typedef struct {FILE *file;pn_media_t *media;pn_media_lease_t *lease;uint64_t offset;} file_source_t;
 static pn_status_t file_read(void *ctx,uint64_t at,uint8_t *out,size_t cap,size_t *got){file_source_t *f=ctx;pn_status_t s=pn_media_validate(f->media,f->lease);if(s!=PN_OK)return s;assert(at==f->offset);*got=fread(out,1,cap,f->file);f->offset+=*got;return ferror(f->file)?PN_IO:PN_OK;}
 static void jobs(void){
     pn_pool_t pool;assert(!pn_pool_init(&pool,65536,allocate,release,NULL));uint8_t bytes[65549];for(size_t i=0;i<sizeof bytes;i++)bytes[i]=(uint8_t)(i*37u);
     pn_book_id_t expected,actual;assert(!pn_identity_bytes(bytes,sizeof bytes,&expected));
-    for(unsigned slow=0;slow<2;slow++){
+    for(unsigned slow=0;slow<3;slow++){
+        read_us=slow==2?2000:0;
         largest=slow?0:80u*1024u;free_bytes=127u*1024u;pn_identity_job_t job={0};assert(!pn_identity_job_begin(&job,&pool,NULL,sizeof bytes,source) && operations==1);
-        calls=0;maximum=0;assert(pn_identity_job_step(&job,&actual)==PN_BUSY);uint64_t offset,size;assert(!pn_identity_job_progress(&job,&offset,&size) && offset==(slow?4096u:32768u));
+        calls=0;maximum=0;assert(pn_identity_job_step(&job,&actual)==PN_BUSY);uint64_t offset,size;assert(!pn_identity_job_progress(&job,&offset,&size) && offset==(slow==2?8192u:32768u));
         bool cancel=true;pn_cancel_scope_t scope;pn_cancel_enter(&scope,cancelled,&cancel);unsigned count=calls;assert(pn_identity_job_step(&job,&actual)==PN_CANCELLED && calls==count && !borrowed);pn_cancel_leave(&scope);
-        pn_status_t s;do{count=calls;s=pn_identity_job_step(&job,&actual);assert(calls-count<=1 && !borrowed);}while(s==PN_BUSY);
+        pn_status_t s;do{count=calls;s=pn_identity_job_step(&job,&actual);assert(calls-count<=(slow==2?2u:slow?8u:1u) && !borrowed);}while(s==PN_BUSY);
         assert(s==PN_OK && !operations && !memcmp(&actual,&expected,sizeof actual) && calls==(slow?17u:3u));pn_identity_job_close(&job);assert(!pool.used && !pool.live);
     }
+    read_us=0;
+    // 小块批次中途取消不得重复哈希前缀；外部栈仍只借4KiB，归还后可接续。/ Mid-batch cancellation must not hash a prefix twice; an external stack still borrows just 4 KiB and resumes after release.
+    largest=0;external_stack=true;pn_identity_job_t partial={0};assert(!pn_identity_job_begin(&partial,&pool,NULL,sizeof bytes,source));
+    calls=0;unsigned after=1;pn_cancel_scope_t batch_scope;pn_cancel_enter(&batch_scope,cancelled_after_read,&after);
+    assert(pn_identity_job_step(&partial,&actual)==PN_BUSY && calls==1 && !borrowed);uint64_t offset,total;
+    assert(!pn_identity_job_progress(&partial,&offset,&total) && offset==4096);
+    assert(pn_identity_job_step(&partial,&actual)==PN_CANCELLED && calls==1 && !borrowed);pn_cancel_leave(&batch_scope);
+    pn_status_t status;do{status=pn_identity_job_step(&partial,&actual);}while(status==PN_BUSY);
+    assert(status==PN_OK && !memcmp(&actual,&expected,sizeof actual) && calls==17 && !borrowed && !operations);pn_identity_job_close(&partial);external_stack=false;
+    // 批次已有前缀也不能掩盖真实读错误，输出保持原值并释放哈希上下文。/ A hashed prefix must not hide a real read error; preserve output and release the hash context.
+    calls=0;failed_read=2;actual=expected;assert(!pn_identity_job_begin(&partial,&pool,NULL,sizeof bytes,source));
+    assert(pn_identity_job_step(&partial,&actual)==PN_IO && !operations && !borrowed && !memcmp(&actual,&expected,sizeof actual));pn_identity_job_close(&partial);failed_read=0;
     largest=80u*1024u;pn_identity_job_t job={0};assert(!pn_identity_job_begin(&job,&pool,NULL,sizeof bytes,source));fail_hash=true;actual=expected;
     assert(pn_identity_job_step(&job,&actual)==PN_IO && !operations && !borrowed && !memcmp(&actual,&expected,sizeof actual));fail_hash=false;pn_identity_job_close(&job);
     largest=0;external_stack=true;assert(!pn_identity_job_begin(&job,&pool,NULL,sizeof bytes,source));fail_internal=true;

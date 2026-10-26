@@ -34,7 +34,7 @@ void pn_identity_cache_forget(pn_identity_cache_t *cache,const char *path);
 typedef struct {void *impl;} pn_identity_cache_job_t;
 /// 打开书并开始计算，记下开始时的大小与修改时间。/ Open the book and start computing, noting its size and modification time at the start.
 pn_status_t pn_identity_cache_job_begin(pn_identity_cache_job_t *job,pn_pool_t *pool,pn_media_t *media,const char *path);
-/// 推进一块（32KiB）；BUSY未完，OK时已写入cache，其余为错误。/ Advance one 32 KiB block; BUSY means unfinished, OK means the entry is in the cache, anything else is an error.
+/// 推进至多32KiB；硬件小块软预算可提前让出。BUSY未完，OK时已写入cache。/ Advance at most 32 KiB; the hardware small-buffer soft budget may yield earlier. BUSY means unfinished; OK means the entry is in the cache.
 pn_status_t pn_identity_cache_job_step(pn_identity_cache_job_t *job,pn_identity_cache_t *cache);
 /// 当前任务路径；无任务或关闭后为NULL。/ Current job path; NULL without a job or after close.
 const char *pn_identity_cache_job_path(const pn_identity_cache_job_t *job);
@@ -42,3 +42,12 @@ const char *pn_identity_cache_job_path(const pn_identity_cache_job_t *job);
 void pn_identity_cache_job_close(pn_identity_cache_job_t *job);
 /// 文件修改时间（stat），失败返回false。/ File modification time via stat; false on failure.
 bool pn_identity_cache_stat(const char *path,uint64_t *size,int64_t *mtime);
+
+/// 最近两书的调度去重，不是来源证明，也不持久化。/ Scheduling deduplication for two recent books, never source proof or persistent state.
+typedef struct {
+    const pn_media_t *media; ///< 当前介质对象 / Current media object
+    uint64_t instance,epoch,writes,activity,paths[2]; ///< 失效代次与本输入周期候选 / Invalidation generations and candidates in this input cycle
+    unsigned count; ///< 本周期最多两条 / At most two per cycle
+} pn_identity_warm_t;
+/// 已有弱身份记录也可完整预校验；同代强证明命中或本周期已尝试返回EMPTY。/ Fully preverify even books with weak metadata; return EMPTY for a strong same-generation proof or an attempted candidate this cycle.
+pn_status_t pn_identity_cache_warm_begin(pn_identity_warm_t *warm,pn_identity_cache_job_t *job,pn_pool_t *pool,pn_media_t *media,const char *path,uint64_t activity);

@@ -111,15 +111,11 @@ int main(int argc, char **argv) {
                 assert((epub ? pn_epub_app_close(&e, 4) : pn_reader_app_close(&t, 4)) == PN_OK);
             }
             assert(!pool.used && !pool.live && packets(dir) == 1);
-            pn_media_lease_t guard = {0}, lease = {0};
-            assert(pn_media_acquire(&media, PN_MEDIA_READ, &guard) == PN_OK &&
-                   pn_media_acquire(&trust, PN_MEDIA_READ, &lease) == PN_OK);
-            pn_frame_t frame;
-            assert(pn_frame_bind(&frame, pixels, sizeof pixels, 684, 1216));
-            assert(pn_resume_preview(&pool, &media, &guard, &trust, &lease, tf, state, &id, kind, &frame) == PN_OK &&
-                   !memcmp(screen, pixels, sizeof pixels));
-            assert(pn_media_release(&media, &guard) == PN_OK && pn_media_release(&trust, &lease) == PN_OK &&
-                   !pool.used && !pool.live);
+            memcpy(pixels,screen,sizeof pixels);
+            assert((epub?pn_epub_app_open_on_media(&e,&pool,&media,book,NULL,state,32,10):pn_reader_app_open_on_media(&t,&pool,&media,book,NULL,state,32,10))==PN_OK);
+            assert((epub?pn_epub_app_step(&e,PN_APP_OPEN,11,present,NULL):pn_reader_app_step(&t,PN_APP_OPEN,11,present,NULL))==PN_OK);
+            assert(!memcmp(screen,pixels,sizeof pixels));
+            assert((epub?pn_epub_app_close(&e,12):pn_reader_app_close(&t,12))==PN_OK && !pool.used && !pool.live);
             printf("exit checkpoint: format=%u mode=%u current-only=1 pixels=identical peak=%zu limit=%zu\n", kind,
                    mode, pool.peak, pool.limit);
         }

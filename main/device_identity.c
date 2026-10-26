@@ -7,9 +7,9 @@
 #include "psa/crypto.h"
 #include "esp_memory_utils.h"
 #include "esp_heap_caps.h"
+#include "esp_timer.h"
 #include <string.h>
 #if defined(CONFIG_PN_PROFILE) && CONFIG_PN_PROFILE
-#include "esp_timer.h"
 #include "esp_log.h"
 static const char *TAG="pn.identity";
 #endif
@@ -92,12 +92,24 @@ static pn_status_t job_read(void *state,void *ctx,uint64_t offset,size_t cap,pn_
     s=psa_hash_update(state,buffer,n)==PSA_SUCCESS?PN_OK:PN_IO;pn_profile_end(&timing,s);if(s!=PN_OK)return s;
     *got=n;return PN_OK;
 }
+/// 小块复用原4KiB工作区，每轮最多32KiB或4ms软预算；已哈希的前缀在取消时仍交还游标。
+/// Reuse the original 4 KiB scratch for at most 32 KiB or a soft 4 ms slice; return a hashed prefix before honoring cancellation.
+static pn_status_t job_batch(void *state,void *ctx,uint64_t offset,size_t cap,pn_identity_read_fn read,uint8_t *buffer,size_t *got){
+    const int64_t began=esp_timer_get_time();size_t done=0;if(cap>DMA_STREAM_BYTES)cap=DMA_STREAM_BYTES;
+    do{
+        pn_status_t s=pn_cancel_checkpoint();size_t n=0;
+        if(s==PN_OK)s=job_read(state,ctx,offset+done,cap-done,read,buffer,4096,&n);
+        if(s!=PN_OK){if(s==PN_CANCELLED && done)break;return s;}
+        done+=n;
+    }while(done<cap && esp_timer_get_time()-began<4000);
+    *got=done;return PN_OK;
+}
 /// 每步归还DMA工作区，不在界面输入轮之间占用内部大块。/ Return DMA scratch every step instead of retaining a large internal block between input ticks.
 __attribute__((noinline)) static pn_status_t job_small(void *state,void *ctx,uint64_t offset,size_t cap,pn_identity_read_fn read,size_t *got){
     _Alignas(16) uint8_t buffer[4096]={0};
-    if(esp_ptr_dma_capable(buffer))return job_read(state,ctx,offset,cap,read,buffer,sizeof buffer,got);
+    if(esp_ptr_dma_capable(buffer))return job_batch(state,ctx,offset,cap,read,buffer,got);
     uint8_t *block=heap_caps_aligned_alloc(16,sizeof buffer,MALLOC_CAP_DMA|MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);if(!block)return PN_NO_MEMORY;
-    pn_status_t s=job_read(state,ctx,offset,cap,read,block,sizeof buffer,got);heap_caps_free(block);return s;
+    pn_status_t s=job_batch(state,ctx,offset,cap,read,block,got);heap_caps_free(block);return s;
 }
 static pn_status_t job_step(void *state,void *ctx,uint64_t offset,size_t cap,pn_identity_read_fn read,size_t *got){
     const uint32_t caps=MALLOC_CAP_DMA|MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT;

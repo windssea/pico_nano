@@ -39,7 +39,3 @@ void pn_resume_abort(pn_resume_t *);         ///< 归还借用，失卡后不触
 void pn_resume_close(pn_resume_t *);         ///< 放弃任务并释放全部池内存 / Abort and release all pooled memory
 /// 显示回执使用的规范位置比较，不比较填充字节。/ Canonical location equality for display receipts, excluding padding bytes.
 bool pn_resume_location_equal(const pn_epub_location_t *, const pn_epub_location_t *);
-
-/// 仅返回非交互的上次快照像素：完整包/可信根与持久位置匹配，不验证当前原书，不返回阅读锚点或证明。
-/// Return inert last-snapshot pixels only: require full packet/trusted-root and durable-position matches; never validate the current book or return reader anchors/proof.
-pn_status_t pn_resume_preview(pn_pool_t *,pn_media_t *,const pn_media_lease_t *,pn_media_t *,const pn_media_lease_t *,const char *,const char *,const pn_book_id_t *,unsigned,pn_frame_t *);

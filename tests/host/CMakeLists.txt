@@ -818,12 +818,6 @@ add_test(NAME blob_bounded COMMAND test_blob_bounded)
 set_tests_properties(blob_bounded PROPERTIES LABELS "storage")
 add_test(NAME sokoban_bank COMMAND ${Python3_EXECUTABLE} ${PN_ROOT}/assets/sokoban/test_bank.py)
 
-add_executable(test_resume_preview test_resume_preview.c)
-target_link_libraries(test_resume_preview PRIVATE pn_core)
-target_compile_options(test_resume_preview PRIVATE -UNDEBUG)
-add_test(NAME resume_preview COMMAND test_resume_preview)
-set_tests_properties(resume_preview PROPERTIES LABELS "reader;storage;ui")
-
 add_executable(test_exit_checkpoint test_exit_checkpoint.c)
 target_link_libraries(test_exit_checkpoint PRIVATE pn_core)
 target_compile_options(test_exit_checkpoint PRIVATE -UNDEBUG)

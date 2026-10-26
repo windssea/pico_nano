@@ -1,15 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
-"""跨进程只读快照、校验期间NEXT隔离和完整正文交接。 / Cross-process inert snapshots, NEXT isolation during verification and complete body handoff."""
+"""缓存冷开正文与缺包基线一致，校验期间NEXT不进入正文。 / Cached cold opens match missing-cache bodies; NEXT during verification never reaches the reader."""
 import os,pathlib,shutil,subprocess,sys,tempfile,zipfile,random
 sys.path.insert(0,str(pathlib.Path(__file__).resolve().parents[1]/'tests/host'))
 from test_resume import fixture
 with tempfile.TemporaryDirectory() as tmp:
- root=pathlib.Path(os.environ.get('PN_SNAPSHOT_EVIDENCE',tmp));root.mkdir(parents=True,exist_ok=True)
+ root=pathlib.Path(os.environ.get('PN_COLD_OPEN_EVIDENCE',tmp));root.mkdir(parents=True,exist_ok=True)
  fixtures=root/'fixtures';fixtures.mkdir();fixture(fixtures)
  for kind in ('txt','epub'):
   books=root/(kind+'-books');books.mkdir();shutil.copyfile(fixtures/('book.'+kind),books/('book.'+kind))
   if kind=='epub':
-   # 大资源属于原包摘要，不能因只预览一页就跳过。/ A large resource belongs to the source digest and cannot be skipped because only one page is previewed.
+   # 大资源仍属于完整原包摘要，即使只恢复一页也不可跳过。/ A large resource still belongs to the full source digest even when restoring just one page.
    with zipfile.ZipFile(books/'book.epub','a') as z:z.writestr('bulk-verification.dat',random.Random(20261026).randbytes(8*1024*1024),compress_type=zipfile.ZIP_STORED)
   def run(label,state,script):
    frames=root/(kind+'-'+label);frames.mkdir()
@@ -32,8 +32,7 @@ with tempfile.TemporaryDirectory() as tmp:
    result,frames=run(label,state,'library,tap:200:190,'+action+',window-close')
    hit='reading_snapshot inert=1 verified_source=0' in result.stdout
    if label in ('hit','race'):
-    assert hit,(kind,label,result.stdout,result.stderr)
-    assert any(p[684*42:]==expected[684*42:] and p[:684*42]!=expected[:684*42] for p in frames),(kind,label,'missing inert snapshot pixels')
+    assert not hit,(kind,label,result.stdout,result.stderr)
     assert frames[-2]==expected,(kind,label,'body changed or queued NEXT escaped verification gate')
     assert result.stdout.count('library_open name=book.')==1,result.stdout
    elif label in ('missing','corrupt'):
@@ -41,4 +40,4 @@ with tempfile.TemporaryDirectory() as tmp:
    else:
     source.write_bytes(original)
     assert 'library_open name=book.' not in result.stdout,(kind,label,result.stdout)
-  print(kind,'snapshot/handoff, in-flight NEXT dropped, missing/corrupt fallback and changed source rejection passed',flush=True)
+  print(kind,'normal opening, in-flight NEXT dropped, missing/corrupt fallback and changed source rejection passed',flush=True)

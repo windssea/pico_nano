@@ -67,7 +67,7 @@ typedef struct {
 } job_t;
 /// 身份任务按偏移读取，直接转给已打开的文件源。/ The identity job reads by offset, forwarded to the opened file source.
 static pn_status_t read_book(void *ctx,uint64_t offset,uint8_t *out,size_t cap,size_t *n){job_t *j=ctx;return j->source.read_at(j->source.ctx,offset,out,cap,n);}
-pn_status_t pn_identity_cache_job_begin(pn_identity_cache_job_t *out,pn_pool_t *pool,pn_media_t *media,const char *path){
+static pn_status_t job_begin(pn_identity_cache_job_t *out,pn_pool_t *pool,pn_media_t *media,const char *path,bool cold_only){
     if(!out || !pool || !media || !path || strlen(path)>=1024)return PN_INVALID;
     if(out->impl)return PN_BUSY;
     job_t *j=pn_alloc_tagged(pool,PN_MEM_DOCUMENT,sizeof *j);if(!j)return PN_NO_MEMORY;memset(j,0,sizeof *j);
@@ -76,9 +76,22 @@ pn_status_t pn_identity_cache_job_begin(pn_identity_cache_job_t *out,pn_pool_t *
     if(s==PN_OK)s=pn_media_acquire(media,PN_MEDIA_READ,&j->lease);
     if(s==PN_OK)s=pn_text_file_open(&j->file,media,&j->lease,path,&j->source);
     if(s==PN_OK && j->source.size!=j->size)s=PN_STALE_JOB;
+    if(s==PN_OK && cold_only){pn_book_id_t verified;pn_status_t memo=pn_text_file_identity_cached(&j->source,&verified);if(memo==PN_OK)s=PN_EMPTY;else if(memo!=PN_EMPTY)s=memo;}
+
     if(s==PN_OK)s=pn_identity_job_begin(&j->hash,pool,j,j->size,read_book);
     out->impl=j;if(s!=PN_OK)pn_identity_cache_job_close(out);
     return s;
+}
+pn_status_t pn_identity_cache_job_begin(pn_identity_cache_job_t *out,pn_pool_t *pool,pn_media_t *media,const char *path){return job_begin(out,pool,media,path,false);}
+pn_status_t pn_identity_cache_warm_begin(pn_identity_warm_t *warm,pn_identity_cache_job_t *job,pn_pool_t *pool,pn_media_t *media,const char *path,uint64_t activity){
+    if(!warm || !job || !pool || !media || !path || !*path)return PN_INVALID;
+    if(job->impl)return PN_BUSY;
+    if(warm->media!=media || warm->instance!=media->media_id || warm->epoch!=media->epoch || warm->writes!=media->writes || warm->activity!=activity)
+        *warm=(pn_identity_warm_t){.media=media,.instance=media->media_id,.epoch=media->epoch,.writes=media->writes,.activity=activity};
+    uint64_t key=key_of(path);for(unsigned i=0;i<warm->count;i++)if(warm->paths[i]==key)return PN_EMPTY;
+    if(warm->count>=2)return PN_EMPTY;
+    warm->paths[warm->count++]=key;
+    return job_begin(job,pool,media,path,true);
 }
 pn_status_t pn_identity_cache_job_step(pn_identity_cache_job_t *job,pn_identity_cache_t *cache){
     if(!job || !job->impl || !cache)return PN_INVALID;
@@ -88,7 +101,10 @@ pn_status_t pn_identity_cache_job_step(pn_identity_cache_job_t *job,pn_identity_
     uint64_t size;int64_t mtime;if(!pn_identity_cache_stat(j->path,&size,&mtime) || size!=j->size || mtime!=j->mtime)return PN_STALE_JOB;
     // 已扫描整本源后发布同代证明，避免前台再次计算同一份摘要。/ Publish same-generation proof only after hashing the whole source, avoiding a duplicate foreground digest.
     s=pn_text_file_identity_complete(&j->source,&id);if(s!=PN_OK)return s;
-    pn_identity_cache_put(cache,j->path,j->size,j->mtime,&id);return PN_OK;
+    // 重启复核相同书不重写内部表；完整证明仍只在RAM中本代生效。/ Revalidating an unchanged book after boot does not rewrite the internal table; proof remains RAM-only for this generation.
+    pn_book_id_t previous;
+    if(!pn_identity_cache_find(cache,j->path,j->size,j->mtime,&previous) || memcmp(&previous,&id,sizeof id))pn_identity_cache_put(cache,j->path,j->size,j->mtime,&id);
+    return PN_OK;
 }
 const char *pn_identity_cache_job_path(const pn_identity_cache_job_t *job){
     return job && job->impl?((const job_t *)job->impl)->path:NULL;

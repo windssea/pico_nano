@@ -247,6 +247,19 @@ static void priority_probe(void){
     identity_next_scan=0;home_mode=false;shelf_focus=0;last_input=3000000;
     assert(!tick_identity(last_input+299) && !identity_job.impl);
     assert(tick_identity(last_input+300) && !strcmp(pn_identity_cache_job_path(&identity_job),shelf_page->items[0].path));identity_job_stop();shelf_focus=-1;
+    // 首页最近书即便已有弱缓存也要完整复核；重复轮次不再重开，换代后可重试。
+    // Recent home books need full verification despite a weak cached identity; idle rounds deduplicate and a new generation retries.
+    const pn_catalog_item_t *item=&shelf_page->items[0];pn_book_id_t expected;pn_media_lease_t lease={0};
+    assert(pn_media_acquire(&sd_media,PN_MEDIA_READ,&lease)==PN_OK && pn_identity_file(&sd_media,&lease,item->path,PN_TEXT_FILE_MAX_BYTES,&expected)==PN_OK && pn_media_release(&sd_media,&lease)==PN_OK);
+    uint64_t size;int64_t modified;assert(pn_identity_cache_stat(item->path,&size,&modified));
+    pn_identity_cache_put(&identity_cache,item->path,size,modified,&expected);
+    assert(recent_snapshot);recent_snapshot->count=1;strcpy(recent_snapshot->items[0].path,item->path);recent_snapshot->items[0].format=item->format;
+    home_mode=true;shelf_draw_valid=panel_known=true;selected_path[0]=0;last_read_known=false;identity_next_scan=0;last_input=0;
+    assert(tick_identity(1000) && identity_job.impl && !strcmp(pn_identity_cache_job_path(&identity_job),item->path));
+    unsigned rounds=0;while(identity_job.impl){assert(++rounds<1024);assert(tick_identity(1000));}
+    assert(!tick_identity(1500) && !identity_job.impl);
+    assert(pn_media_detach(&sd_media)==PN_OK && pn_media_attach(&sd_media,2)==PN_OK);identity_next_scan=0;
+    assert(tick_identity(1500) && identity_job.impl);identity_job_stop();
     printf("priority_probe ok\n");
 }
 #endif
