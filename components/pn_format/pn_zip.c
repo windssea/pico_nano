@@ -312,3 +312,4 @@ pn_status_t pn_zip_stream_read(pn_zip_stream_t *stream,uint8_t *out,size_t capac
 }
 bool pn_zip_stream_verified(const pn_zip_stream_t *stream){return stream && stream->impl && ((stream_t *)stream->impl)->verified && ((stream_t *)stream->impl)->failed==PN_OK;}
 void pn_zip_stream_close(pn_zip_stream_t *stream){if(!stream || !stream->impl)return;stream_t *s=stream->impl;if(s->initialized)(void)inflateEnd(&s->inflate);s->archive->streams--;pn_free(s);stream->impl=NULL;}
+#include "pn_zip_snapshot.inc"

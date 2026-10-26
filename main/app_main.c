@@ -17,6 +17,7 @@
 #include "pn_reader_app.h"
 #include "pn_turn_transition.h"
 #include "pn_epub_app.h"
+#include "pn_bootstrap.h"
 #include "pn_semantic_file.h"
 #include "pn_resume.h"
 #include "pn_hot_session.h"
@@ -376,11 +377,11 @@ static void profile_emit(void *ctx,const pn_profile_event_t *e){
     bool timing=!strcmp(e->phase,"cover.extract") || !strcmp(e->phase,"cover.cache-snapshot") || !strncmp(e->phase,"epub.model-",11) || !strncmp(e->phase,"epub.raster",11) || !strncmp(e->phase,"epub.layout",11) || !strcmp(e->phase,"epub.zip") || !strcmp(e->phase,"epub.publication") || !strncmp(e->phase,"storage.",8) || !strncmp(e->phase,"display.",8);
 #ifdef CONFIG_PN_WAKE_TRACE
     // 续读只记提交/命中/载入，不逐行打印写包，避免串口主导保存时间。/ Log resume commits/hits/loads, never per-row writes that would dominate storage timing.
-    timing=timing || !strcmp(e->phase,"resume.stored") || !strcmp(e->phase,"resume.hit") || !strcmp(e->phase,"resume.load");
+    timing=timing || !strcmp(e->phase,"resume.stored") || !strcmp(e->phase,"resume.hit") || !strcmp(e->phase,"resume.load") || !strncmp(e->phase,"bootstrap.",10);
 #endif
 #if PN_DEVICE_TEST_CONSOLE
     // 界面绘制分段只在诊断镜像输出，产品镜像不增加菜单日志。/ UI drawing splits log only in diagnostic images; product images add no menu logs.
-    timing=timing || !strncmp(e->phase,"ui.",3);
+    timing=timing || !strncmp(e->phase,"ui.",3) || !strncmp(e->phase,"bootstrap.",10);
 #else
     if(!strncmp(e->phase,"ui.",3))return;
 #endif
@@ -1787,7 +1788,7 @@ static bool tick_reader_background(uint64_t now){
             unsigned steps=0;int64_t began=esp_timer_get_time();
             do{s=epub.impl?pn_epub_app_resume_cache_idle(&epub):pn_reader_app_resume_cache_idle(&reader);}
             while(s==PN_BUSY && ++steps<32u && esp_timer_get_time()-began<8000);
-            if(s==PN_EMPTY && epub.impl && (pn_epub_app_cache_pending(&epub) || !pn_epub_app_prefetch_pending(&epub)))s=pn_epub_app_cache_idle(&epub,now);
+            if(s==PN_EMPTY && epub.impl && (pn_epub_app_cache_pending(&epub) || !pn_epub_app_prefetch_pending(&epub)))s=pn_epub_app_cache_idle(&epub,now_ms());
         }
         else if(slot==2 && now>=last_input && now-last_input>=300 && ((reader.impl && pn_reader_app_verify_pending(&reader)) || (epub.impl && (pn_epub_app_verify_pending(&epub) || pn_epub_app_font_recovery_pending(&epub))))){
             s=epub.impl?pn_epub_app_verify_step(&epub):pn_reader_app_verify_step(&reader);
@@ -1799,7 +1800,7 @@ static bool tick_reader_background(uint64_t now){
                 snprintf(trust_failed_path,sizeof trust_failed_path,"%s",selected_path);pn_identity_cache_forget(&identity_cache,selected_path);if(stop_reader())start_reader();
             }else if(s!=PN_BUSY && s!=PN_CANCELLED)ESP_LOGW(TAG,"Fast-open verification stopped: %d",(int)s);
         }
-        if(slot==4 && !(epub.impl?pn_epub_app_resume_cache_pending(&epub):pn_reader_app_resume_cache_pending(&reader)) && now>=last_input && now-last_input>=1500 && !(epub.impl?pn_epub_app_prefetch_pending(&epub):pn_reader_app_warm_pending(&reader)) && (epub.impl?pn_epub_app_index_pending(&epub):pn_reader_app_index_pending(&reader))){
+        if(slot==4 && !(epub.impl && pn_epub_app_bootstrap_pending(&epub)) && !(epub.impl?pn_epub_app_resume_cache_pending(&epub):pn_reader_app_resume_cache_pending(&reader)) && now>=last_input && now-last_input>=1500 && !(epub.impl?pn_epub_app_prefetch_pending(&epub):pn_reader_app_warm_pending(&reader)) && (epub.impl?pn_epub_app_index_pending(&epub):pn_reader_app_index_pending(&reader))){
             pn_book_index_state_t progress;unsigned steps=0;int64_t began=esp_timer_get_time();do{s=epub.impl?pn_epub_app_index_step(&epub,&progress):pn_reader_app_index_step(&reader,&progress);}while(s==PN_BUSY && ++steps<PN_BOOK_INDEX_STEP_MAX && esp_timer_get_time()-began<8000);if(s==PN_OK)ESP_LOGI(TAG,"Whole-book index complete: %u pages",(unsigned)progress.pages);
 #if PN_DEVICE_TEST_CONSOLE
             if(s!=PN_BUSY && s!=PN_CANCELLED)index_profile_flush();
@@ -2871,6 +2872,10 @@ static void device_task(void *arg){
         if(PN_AUTO_LOCK && !locked && !transfer.impl && !usb.open && !time_sync.impl && !ota_busy() && !wifi_probe.impl && !ota_lock_pending && now>=last_input && now-last_input>=AUTO_LOCK_MS && now-boot>=AUTO_LOCK_MS){pn_reader_input_cancel(&input);
             if(ota.impl){ota_lock_pending=true;update_command(PN_SETUI_UPDATE_CANCEL);}else if(prepare_lock())lock_and_sleep("");else last_input=now;}
         #if PN_DEVICE_TEST_CONSOLE
+        {unsigned mode;if(pn_device_test_console_take_cache(&mode)){
+            if(locked || opening || reader_active())ESP_LOGW(TAG,"Bootstrap test rejected: return to idle home first");
+            else{pn_bootstrap_diag_fault(mode);ESP_LOGI(TAG,"Bootstrap test fault=%u (read-only injection)",mode);}
+        }}
         if(locked)loading_preview_active=false;
         {unsigned pose;
          if(pn_device_test_console_take_loading(&pose)){

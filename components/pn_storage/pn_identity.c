@@ -15,12 +15,7 @@
 #include <unistd.h>
 #include <string.h>
 
-typedef struct {
-    uint32_t h[8];
-    uint64_t bytes;
-    uint8_t block[64];
-    size_t used;
-} sha_t;
+typedef pn_identity_accumulator_t sha_t;
 static uint32_t rotate(uint32_t x, unsigned n) { return (x>>n)|(x<<(32-n)); }
 static void compress(sha_t *s, const uint8_t *data) {
     static const uint32_t k[64]={
@@ -63,6 +58,9 @@ static void finish(sha_t *s, pn_book_id_t *id) {
     for (unsigned i=0;i<32;i++) id->sha256[i]=(uint8_t)(s->h[i/4]>>(24-8*(i%4)));
 }
 typedef struct {FILE *file;pn_media_t *media;const pn_media_lease_t *lease;uint64_t offset;} file_hash_t;
+void pn_identity_accumulator_init(pn_identity_accumulator_t *s){*s=(sha_t){.h={0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19}};}
+void pn_identity_accumulator_update(pn_identity_accumulator_t *s,const void *p,size_t n){update(s,p,n);}
+void pn_identity_accumulator_finish(pn_identity_accumulator_t *s,pn_book_id_t *id){finish(s,id);memset(s,0,sizeof *s);}
 static pn_status_t file_hash_read(void *ctx,uint64_t offset,uint8_t *bytes,size_t capacity,size_t *got){
     file_hash_t *source=ctx;pn_status_t status=pn_cancel_checkpoint();
     if(status==PN_OK)status=pn_media_validate(source->media,source->lease);

@@ -2,6 +2,10 @@
 
 更新：2026-10-25。这里只记录现有可复跑入口；当前实现/未完工作分别见[架构](ARCHITECTURE.md)和[开发指南](DEVELOPMENT_PLAN.md)。固件构建、串口写入与真机验收是不同阶段，默认工具命令不烧录。
 
+启动结构缓存回归：`bootstrap_app`使用原创小书、48章/超大单章各57.6万字及图片页，跨进程比较正常解析全帧，覆盖实际缺包/根、损坏/截断、版本、备份及同大小同mtime源替换；Python独立核对完整包SHA。`bootstrap_entry_host/immutable`观察真实ZIP任务次数，命中须为0，换代/普通主机须完整复核原书；换代成功后关闭再重开，immutable端不得重复全书摘要，普通主机仍完整校验；缺包/坏包须重新建立ZIP任务。`bootstrap_file`逐个中断提交边界，检查全部spine资源字节与CRC、共享配额仅删除自有闲置包、同步失败、取消、拒分配及失卡后不刷新/删除新代暂存；原池归零。它们不是TF或面板实测。
+
+诊断镜像可在首页发`cache 0/1/2`切换正常/缺失/损坏读端注入，以`Bootstrap test fault=`owner回执为准；`bootstrap.hit/load/stored/fault`与`resume.hit`分开计数。此入口不写坏或删除真实缓存，正式镜像编译掉故障端口。主机实际文件故障、真机读端注入、真正重启后的完整来源复核须分开报告；冷开、同代命中、首次NEXT及加载/正文job计时不能混合。
+
 固件采用混合优化：SDKCONFIG默认`CONFIG_COMPILER_OPTIMIZATION_SIZE=y`（`-Os`），根CMake在阅读、字体/排版、XML与图片解码、存储、主控制层及显示/TF热路径上追加`-O2`。以生成的`compile_commands.json`中最后一个优化参数为准，不通过删字体、图片、功能或放宽6MiB槽的10% OTA余量门槛缩包。正式板级与CI均保留WARN/ERROR日志；`sdkconfig.diag`明确恢复INFO及原有测试/计时能力。已有本地SDKCONFIG不会自动被defaults覆盖，切换策略时应同步对应优化和日志choice，随后重建并核对生成配置；板级120MHz与CI80MHz仍隔离。
 
 跨机器重新编译可能改变引导程序字节。继续兼容既有签名OTA链时，完整包使用`python tools/package_upgrade.py --full --qualified-bootloader releases/pico_nano-1.0.5-3c63c46-full`显式复用已资格引导；工具检查旧正式清单的产品/板型/SDK、芯片头、长度及SHA，不覆盖本地编译产物，并在新清单记录引导来源。发布前还须独立验签旧OTA清单，并核对其引导摘要、新完整包引导及新OTA清单三者一致。不能仅凭文件名宣称引导已通过设备资格验证；若要变更引导，必须另做迁移资格测试。

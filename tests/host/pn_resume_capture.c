@@ -14,6 +14,12 @@ static pn_reader_app_t txt;
 static pn_epub_app_t epub;
 static bool is_epub, fail;
 static unsigned hits, stored, shown, loads;
+static unsigned boot_hits,boot_stored; ///< 启动结构与续读帧独立计数 / Startup structures counted separately from resume frames
+static unsigned directory_begins,identity_steps,reopen_identity_steps;
+#ifdef PN_BOOTSTRAP_OBSERVER
+pn_status_t __real_pn_zip_scan_job_begin(pn_zip_job_t *,pn_pool_t *,const pn_text_source_t *);
+pn_status_t __wrap_pn_zip_scan_job_begin(pn_zip_job_t *j,pn_pool_t *p,const pn_text_source_t *s){directory_begins++;return __real_pn_zip_scan_job_begin(j,p,s);}
+#endif
 static uint64_t dump_ns;
 static const char *output;
 static uint64_t stamp(void) {
@@ -33,6 +39,9 @@ static void observe(void *ctx, const pn_profile_event_t *e) {
         stored++;
     if (!strcmp(e->phase, "resume.load"))
         loads++;
+    if(!strcmp(e->phase,"bootstrap.hit"))boot_hits++;
+    if(!strcmp(e->phase,"bootstrap.stored"))boot_stored++;
+    if(!strcmp(e->phase,"epub.open.identity"))identity_steps++;
 }
 static pn_status_t present(void *ctx, const pn_frame_t *f, pn_refresh_t refresh) {
     (void)ctx;
@@ -91,8 +100,24 @@ int main(int argc, char **argv) {
     pn_pool_init(&pool, 6u * 1024u * 1024u, NULL, NULL, NULL);
     pn_profile_port(clock_us, observe, NULL);
     uint64_t begin = stamp();
-    pn_status_t s = is_epub ? pn_epub_app_open(&epub, &pool, argv[2], argv[3], argv[4], 44, 0)
-                            : pn_reader_app_open(&txt, &pool, argv[2], argv[3], argv[4], 44, 0);
+    pn_status_t s;pn_media_t proof_media;pn_media_init(&proof_media);
+    if(is_epub && getenv("PN_BOOTSTRAP_TRUSTED")){
+        pn_media_lease_t proof={0};pn_text_file_t original={0};pn_text_source_t input={0};pn_book_id_t id;
+        s=pn_media_attach(&proof_media,1);if(s==PN_OK)s=pn_media_acquire(&proof_media,PN_MEDIA_READ,&proof);
+        if(s==PN_OK)s=pn_text_file_open(&original,&proof_media,&proof,argv[2],&input);
+        if(s==PN_OK)s=pn_text_file_identity_pooled(&pool,&input,&id);
+        uint64_t size=input.size;if(original.handle)(void)pn_text_file_close(&original);if(proof.ticket)(void)pn_media_release(&proof_media,&proof);
+        if(s==PN_OK && getenv("PN_BOOTSTRAP_EPOCH")){s=pn_media_detach(&proof_media);if(s==PN_OK)s=pn_media_attach(&proof_media,2);}
+        pn_epub_open_job_t job={0};if(s==PN_OK)s=pn_epub_app_open_job_begin_trusted(&job,&pool,&proof_media,argv[2],argv[3],argv[4],44,0,&id,size);
+        if(s==PN_OK){unsigned count=0;do{s=pn_epub_app_open_job_advance(&job,&epub);}while(s==PN_BUSY && ++count<20000);}
+        (void)pn_epub_app_open_job_close(&job);
+        if(s==PN_OK && getenv("PN_BOOTSTRAP_REOPEN")){
+            s=pn_epub_app_close(&epub,0);unsigned before=identity_steps;
+            if(s==PN_OK)s=pn_epub_app_open_job_begin_trusted(&job,&pool,&proof_media,argv[2],argv[3],argv[4],44,0,&id,size);
+            if(s==PN_OK){unsigned count=0;do{s=pn_epub_app_open_job_advance(&job,&epub);}while(s==PN_BUSY && ++count<20000);}
+            (void)pn_epub_app_open_job_close(&job);reopen_identity_steps=identity_steps-before;
+        }
+    }else s=is_epub?pn_epub_app_open(&epub,&pool,argv[2],argv[3],argv[4],44,0):pn_reader_app_open(&txt,&pool,argv[2],argv[3],argv[4],44,0);
     if (s == PN_OK)
         s = step(PN_APP_OPEN, 1);
     uint64_t opened = stamp() - begin - dump_ns, turned = 0;
@@ -122,8 +147,16 @@ int main(int argc, char **argv) {
         if (s == PN_OK && is_epub && getenv("PN_RESUME_SEMANTIC")) {
             unsigned n = 0;
             pn_status_t saved;
-            do { saved = pn_epub_app_cache_idle(&epub, 5000); } while (saved == PN_BUSY && ++n < 4096);
+            // 多种可选缓存共用idle，必须排空到EMPTY，不能把另一个包完成当作语义提交。/ Several optional caches share idle; drain to EMPTY instead of mistaking another packet's completion for a semantic commit.
+            do { saved = pn_epub_app_cache_idle(&epub, 5000); } while ((saved == PN_BUSY || saved == PN_OK) && ++n < 20000);
             if (saved != PN_OK && saved != PN_EMPTY) s = saved;
+        }
+        if(s==PN_OK && is_epub && getenv("PN_BOOTSTRAP_SEED")){
+            for(unsigned i=0;i<100000 && !boot_stored;i++){
+                pn_status_t v=pn_epub_app_cache_idle(&epub,5000);
+                if(v!=PN_OK && v!=PN_BUSY && v!=PN_EMPTY){s=v;break;}
+            }
+            if(!boot_stored && s==PN_OK)s=PN_LIMIT;
         }
     } else if (s == PN_OK && (!strcmp(argv[6], "style") || !strcmp(argv[6], "visual"))) {
         pn_style_t style;
@@ -167,8 +200,8 @@ int main(int argc, char **argv) {
     pn_status_t closed = is_epub ? pn_epub_app_close(&epub, 5) : pn_reader_app_close(&txt, 5);
     if (s == PN_OK)
         s = closed;
-    printf("{\"status\":%d,\"open_ns\":%llu,\"next_ns\":%llu,\"hits\":%u,\"stored\":%u,\"peak\":%zu,\"limit\":%zu,\"used\":%zu,\"loads\":%u,"
+    printf("{\"status\":%d,\"open_ns\":%llu,\"next_ns\":%llu,\"hits\":%u,\"stored\":%u,\"boot_hits\":%u,\"boot_stored\":%u,\"directory_begins\":%u,\"identity_steps\":%u,\"reopen_identity_steps\":%u,\"peak\":%zu,\"limit\":%zu,\"used\":%zu,\"loads\":%u,"
            "\"live\":%zu}\n",
-           s, (unsigned long long)opened, (unsigned long long)turned, hits, stored, pool.peak, pool.limit, pool.used, loads, pool.live);
+           s, (unsigned long long)opened, (unsigned long long)turned, hits, stored, boot_hits,boot_stored,directory_begins,identity_steps,reopen_identity_steps,pool.peak, pool.limit, pool.used, loads, pool.live);
     return s == PN_OK && !pool.used && !pool.live ? 0 : 1;
 }

@@ -13,6 +13,8 @@
 #define PN_TEXT_FILE_PATH_MAX 512 ///< 保留源的路径上限 / Retained-source path limit
 /// 仅查询完整校验备忘，不读内容；同介质/代次/WRITE计数/路径/大小才命中，PC禁用，EMPTY须继续校验。/ Query a full-verification memo without content reads; require matching media/generation/WRITE counter/path/size, disable on PC, and continue verification on EMPTY.
 pn_status_t pn_text_file_identity_cached(const pn_text_source_t *,pn_book_id_t *);
+/// 完整分步SHA成功后发布证明；调用方必须覆盖原源全部字节，仍验证租约，主机不建立跨句柄备忘。/ Publish proof only after a successful whole-source stepped SHA; validate the lease and keep cross-handle memos disabled on hosts.
+pn_status_t pn_text_file_identity_complete(const pn_text_source_t *,const pn_book_id_t *);
 
 typedef struct {
     FILE *handle; ///< 首次使用前置零；port独占stdio读/定位，外部不得操作 / Zero before use; the port exclusively owns stdio reads/seeks

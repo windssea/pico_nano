@@ -9,6 +9,7 @@
 #pragma once
 #include "pn_text.h"
 #include "pn_alloc.h"
+#include "pn_format_io.h"
 #define PN_ZIP_PATH_MAX 1024
 #define PN_ZIP_ENTRIES_MAX 32768
 typedef struct {void *impl;} pn_zip_t; ///< 初始NULL，不可移动 / Initially NULL, never move
@@ -71,3 +72,7 @@ pn_status_t pn_zip_stream_read(pn_zip_stream_t *stream,uint8_t *out,size_t capac
 bool pn_zip_stream_verified(const pn_zip_stream_t *stream);
 /// 释放流与借用引用；幂等。/ Release stream and borrowed reference idempotently.
 void pn_zip_stream_close(pn_zip_stream_t *stream);
+/// 完整验证模型逐条导出；游标初始0，每步最多一条，BUSY继续。/ Export a fully validated model one record per step; cursor starts at zero, BUSY continues.
+pn_status_t pn_zip_snapshot_write(pn_zip_t *,pn_format_io_t *,uint32_t *);
+/// 仅可信完整包控制层可调用；源完整SHA先验证，包完整SHA未确认前不得使用输出。失败保持空ZIP。/ Trusted packet controllers only: verify full source SHA first and never use output before the full packet SHA; failure leaves ZIP empty.
+pn_status_t pn_zip_snapshot_read(pn_zip_t *,pn_pool_t *,const pn_text_source_t *,pn_format_io_t *);

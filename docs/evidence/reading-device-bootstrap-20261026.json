@@ -1,0 +1,1644 @@
+{
+  "scope": "ESP32-S3 diagnostic display-job receipts; 3 paired steady samples per book; no optical, power or P95 claim",
+  "date": "2026-10-26",
+  "baseline_image": {
+    "base": "f2ff6fa",
+    "source_files": {
+      "components/pn_reader/include/pn_epub_app.h": "20ff28b2d4bd1c92d99886145353f348e77ec531cf03a23bbe588a2345bf66d9",
+      "components/pn_reader/include/pn_epub_reader.h": "59cadeba86f9e6a655b50a21db8e7417ccd9d32c8613e95363a3863cad6cda01",
+      "components/pn_reader/pn_epub_app.c": "aeddbb665c2ec409e959a2bb91bbb3e0def357e0f6acabfa18222bb2aeb00980",
+      "components/pn_reader/pn_epub_reader.c": "b894d5211b53b69bcee87acd0388a9732cb62a7273e94c6cfa746502d15fc21d",
+      "components/pn_reader/pn_resume.c": "37259f8463af75863910ce1a2cca97be75805b9acf2fdf3702f019cc32e127d3",
+      "components/pn_reader/pn_resume_epub.inc": "801b854bda998061f77d6ce65ea717771ff4ba90c0b867be6127a99e38991ac9",
+      "main/app_main.c": "7b0db3fa105b99f5370bb4b8ca2671d6e90b4984622bf831a219aa65bbd04cd4",
+      "simulator/library_sdl.c": "fb3b6ab9998e3e60fa9b20e200c0835081fc0aef180d2d23d1d5d4fbf6c21d69",
+      "tests/host/pn_resume_capture.c": "1095e18a6228e9ab4cbcb74cc06f3f45707c50b0fd120834bb39f8d4a88c72aa",
+      "tests/host/pn_switch_capture.c": "224d7af3d93909a3d9c24a81d6ee16ea91bf8f09f6780a84723c080cb95915fd",
+      "tests/host/test_epub_reader.c": "42dda42a8def9d751a7512bca99a73f1ff320021da58bd9bc807c12f57c29bb6"
+    },
+    "bytes": 5490336,
+    "sha256": "76b12ef3fecf3597c234d32af57bf42fb0945f2add7df6c510d93361b31f0c97",
+    "md5": "7da1d7d760d5bed1c7b8e9c03e4bbf03",
+    "slot": 0,
+    "offset": "0x20000",
+    "selector": 9,
+    "preserved_slot": 1,
+    "preserved_valid_sequence": 2,
+    "flashed": true,
+    "boot_console_elf": "efefa9129",
+    "selector_state": "VALID",
+    "preserved_selector_state": "VALID",
+    "source": "f4618625d0aa348d3e4206b211c1d8b5454742c8"
+  },
+  "candidate_image": {
+    "base": "f4618625d0aa348d3e4206b211c1d8b5454742c8",
+    "bytes": 5501312,
+    "sha256": "2ebf594085cd7071b27c8c89349ba3609658638ed98a5ce3119ae49337d76007",
+    "source_files": {
+      "cmake/pn_host.cmake": "b04bf87e6533a07069008895ff40eacca2926c7d5a0f23e2f95886e633b8726e",
+      "components/pn_format/include/pn_epub.h": "411a9d02a089e7e932f278ff82ea7a7bdc810da10e8ef3dbcc5e6f41bbb0a320",
+      "components/pn_format/include/pn_format_io.h": "0189d6379e4138b08f3946e90b149d4fcdcb171ef2ac130af507a4c19b9d313a",
+      "components/pn_format/include/pn_zip.h": "dae0c0e3a37cdded630764cba2d88c89fe7062dcdad7f411ef9c579efc0fe6ea",
+      "components/pn_format/pn_epub.c": "cb5dcf6a2952daaf9c9c8c28e6ae6a251a3978b536857f036ca013d785a6c165",
+      "components/pn_format/pn_epub_snapshot.inc": "17ac1c407189a8ba141d4f47976f6b634915506de7f89dc69042f06aab5793d3",
+      "components/pn_format/pn_zip.c": "dce3bda697edc752d3347155bdabce92d544994259ecefc8397df5162fe3951d",
+      "components/pn_format/pn_zip_snapshot.inc": "ede9bd1678023fea50e252ddd947d1894a88de6b268bcf92e0f2e2cb414eb3ec",
+      "components/pn_reader/CMakeLists.txt": "6ecfb3b958c95d52047999a61003666eafd6ebb7bcaa44b7b6f32867ea9384d5",
+      "components/pn_reader/include/pn_bootstrap.h": "b67a5aebbd06cef957562e62edd5fae59dfa99a5e84a3c5c65654cc79efbc017",
+      "components/pn_reader/include/pn_epub_app.h": "2ca4fab7eec6bf845ca7f3fc092ff0bdc1b0c45af9a41de17c3e7e52388d1872",
+      "components/pn_reader/include/pn_reading_store.h": "cf7bf153795c058491c769f1e56d5f9b55bdb9df097a7f07ad47b49958dc7687",
+      "components/pn_reader/pn_bootstrap.c": "26cafce2ff664e8d780605a3ab65924d5972ddcaf7f79d5910ca16d8d230f7a9",
+      "components/pn_reader/pn_epub_app.c": "2b4627a7caf398e8c0663e9ca507432cea00422ae077eb3dc7d378aa699d3fca",
+      "components/pn_reader/pn_reading_store.c": "9a6d5acb622b689a52ffea998196ad200b36bffe4fcc34667574530d5666f9d9",
+      "components/pn_reader/pn_resume.c": "aba721ba5079b9edc9e084c1e765185d952bf55d7a13e9774e328c4fc5868bd2",
+      "components/pn_storage/include/pn_identity.h": "61f55a98bc1a4f3f1afd0a70e60c879ad0049ebbdf5a07f579d577a3ed18455b",
+      "components/pn_storage/pn_identity.c": "a034bb331d5d874ca7695538de3d8bf9a31f870ebea6c42f7759a41443bf96eb",
+      "components/pn_text/include/pn_text_file.h": "c0e74c35cb59cb2535dd69689bee44ea7c90f91791c243753fc9704bc799da5f",
+      "components/pn_text/pn_text_file.c": "43edc45b181a0b6fe9cf82f0dfacf08bf7f10a77e0e2aa2a5bd97668cd16ef0c",
+      "components/pn_ui/include/pn_test_console.h": "d2b2a3ef72845e8958bc24e45fbe53496929698933746c212fee47a899c6c839",
+      "components/pn_ui/pn_test_console.c": "986b1c3b6190c12c30c3acfc1cceef054795aba7b9eb3e99fcdb155b3e533d3e",
+      "main/app_main.c": "8dfa73a012a3a8abb6e919f1f7ccf89e98bc406a14bfc4d9ba914cf6ebdc16fe",
+      "main/device_test_console.c": "9da7980c4028f99ff267669eb9393261c75e687efe66d89d255a2a83946adffd",
+      "main/device_test_console.h": "5011a7a8644a64e85d63f0ee33fe26a4f1ed491e2b472613fed8442227cb56d3",
+      "simulator/library_sdl.c": "42784ff893658397560b53173d603fa75f1d5fcf7a2dc59493ca34817e5000c6",
+      "tests/host/CMakeLists.txt": "0e5046af81013fef3bc638ed68b6356236b392a8333949b7542353509abc542f",
+      "tests/host/pn_resume_capture.c": "e5f561937393cc60f2dbff4c3db4a5d747c80e4143244af46f6d3b5e18b7a4fe",
+      "tests/host/test_bootstrap_app.py": "ab5eee186a087066ad3a2432b423b4e390df4c76d8e1a8457fcf826eca5a8f39",
+      "tests/host/test_bootstrap_entry.py": "0dd64c0471c046d2ca6567d25163975503516983381c7319fd445a7f8ab88c00",
+      "tests/host/test_bootstrap_file.c": "3096027eafdf716855342abbbf7b4cb54d3f49fb4d6349e6ec530c60aedb5f43",
+      "tests/host/test_bootstrap_file.py": "bfa93f71aaa270d30c42351e68371ba38bcc6add02afe95a9f8aab2c91e0ce89",
+      "tests/host/test_test_console.c": "9185ce1d701b029defb813f2b097d5c03d32ed97e49f349e5e264bdfa74fed18"
+    },
+    "elf_sha256": "44cd98f003f7b35e40e27dd10889824678a94c17c41d019a5e7bd1dd98cecde8",
+    "flashed": true,
+    "boot_console_elf": "44cd98f00",
+    "slot": 0,
+    "offset": "0x20000",
+    "selector": 15,
+    "preserved_slot": 1,
+    "preserved_valid_sequence": 2,
+    "selector_state": "VALID",
+    "preserved_selector_state": "VALID"
+  },
+  "protocol": {
+    "screen": [
+      684,
+      1216
+    ],
+    "gray_levels": 16,
+    "native_frame_bytes": 415872,
+    "pool_limit_bytes": 6291456,
+    "steady_wait_after_body_seconds": 15,
+    "book_identity": "same original files, reading positions/font/settings and native footer matched to qualified baseline",
+    "baseline_label_correction": "Initial script labels were reversed. Canonical baseline mappings preserve raw sample names; rejected overlapping-input run is excluded from paired samples.",
+    "timing": "Device gesture start to last body display-job completion, not SDK log timestamp or host round trip",
+    "hash_after_reboot": "A new boot must obtain a whole-source proof again, possibly during home metadata preparation. The packet alone cannot supply it. Completed proof seeds the existing same-generation memo."
+  },
+  "steady_medians": {
+    "shao": {
+      "open_body_ms": {
+        "baseline": [
+          2991,
+          3001,
+          2985
+        ],
+        "candidate": [
+          2443,
+          2399,
+          2401
+        ],
+        "baseline_median": 2991,
+        "candidate_median": 2401,
+        "change_percent": -19.73
+      },
+      "next_ms": {
+        "baseline": [
+          990,
+          993,
+          993
+        ],
+        "candidate": [
+          988,
+          991,
+          991
+        ],
+        "baseline_median": 993,
+        "candidate_median": 991,
+        "change_percent": -0.2
+      },
+      "prev_ms": {
+        "baseline": [
+          1210,
+          1210,
+          1213
+        ],
+        "candidate": [
+          1212,
+          1217,
+          1206
+        ],
+        "baseline_median": 1210,
+        "candidate_median": 1212,
+        "change_percent": 0.17
+      }
+    },
+    "ming": {
+      "open_body_ms": {
+        "baseline": [
+          6129,
+          6143,
+          6162
+        ],
+        "candidate": [
+          2915,
+          2935,
+          2970
+        ],
+        "baseline_median": 6143,
+        "candidate_median": 2935,
+        "change_percent": -52.22
+      },
+      "next_ms": {
+        "baseline": [
+          988,
+          1010,
+          984
+        ],
+        "candidate": [
+          986,
+          987,
+          986
+        ],
+        "baseline_median": 988,
+        "candidate_median": 986,
+        "change_percent": -0.2
+      },
+      "prev_ms": {
+        "baseline": [
+          1183,
+          1179,
+          1174
+        ],
+        "candidate": [
+          1179,
+          1194,
+          1189
+        ],
+        "baseline_median": 1179,
+        "candidate_median": 1189,
+        "change_percent": 0.85
+      }
+    }
+  },
+  "samples": {
+    "shao": {
+      "baseline": [
+        {
+          "sample": "shao-1",
+          "raw_sample": "ming-1",
+          "book_verified_by": "native body/footer and ZIP source I/O signature; initial script labels were reversed",
+          "open_body_ms": 2991,
+          "ready_ms": 3006,
+          "opening_jobs": 2,
+          "resume_hits": 1,
+          "bootstrap_hits": 0,
+          "bootstrap_stored": 0,
+          "next_ms": 990,
+          "prev_ms": 1210,
+          "next_after_ready_ms": 16601,
+          "critical_logs": [
+            "1792996805.702 I (2637438) pico_nano: profile phase=epub.open.trusted-wall elapsed_us=1760540 status=0 begin=1656443 end=1656443 peak=1656443 attempts=0 bytes=405779 reads=537 seeks=501 hits=1008 backend=device"
+          ]
+        },
+        {
+          "sample": "shao-2",
+          "raw_sample": "ming-2",
+          "book_verified_by": "native body/footer and ZIP source I/O signature; initial script labels were reversed",
+          "open_body_ms": 3001,
+          "ready_ms": 3021,
+          "opening_jobs": 2,
+          "resume_hits": 1,
+          "bootstrap_hits": 0,
+          "bootstrap_stored": 0,
+          "next_ms": 993,
+          "prev_ms": 1210,
+          "next_after_ready_ms": 16525,
+          "critical_logs": [
+            "1792996866.572 I (2698156) pico_nano: profile phase=epub.open.trusted-wall elapsed_us=1766641 status=0 begin=1657887 end=1657887 peak=1657887 attempts=0 bytes=405779 reads=537 seeks=501 hits=1008 backend=device"
+          ]
+        },
+        {
+          "sample": "shao-3",
+          "raw_sample": "ming-3",
+          "book_verified_by": "native body/footer and ZIP source I/O signature; initial script labels were reversed",
+          "open_body_ms": 2985,
+          "ready_ms": 2999,
+          "opening_jobs": 2,
+          "resume_hits": 1,
+          "bootstrap_hits": 0,
+          "bootstrap_stored": 0,
+          "next_ms": 993,
+          "prev_ms": 1213,
+          "next_after_ready_ms": 16461,
+          "critical_logs": [
+            "1792996926.897 I (2758493) pico_nano: profile phase=epub.open.trusted-wall elapsed_us=1755680 status=0 begin=1659688 end=1659688 peak=1659688 attempts=0 bytes=405779 reads=537 seeks=501 hits=1008 backend=device"
+          ]
+        }
+      ],
+      "candidate": [
+        {
+          "sample": "shao-1",
+          "raw_sample": "shao-1",
+          "book_verified_by": "fixed Ming/Shao alternation from home Continue=Shao; identical native body/footer",
+          "open_body_ms": 2443,
+          "ready_ms": 2462,
+          "opening_jobs": 2,
+          "resume_hits": 1,
+          "bootstrap_hits": 1,
+          "bootstrap_stored": 0,
+          "next_ms": 988,
+          "prev_ms": 1212,
+          "next_after_ready_ms": 16525,
+          "critical_logs": [
+            "1793002855.150 I (121857) pico_nano: profile phase=bootstrap.hit elapsed_us=0 status=0 begin=953367 end=953367 peak=953367 attempts=0 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+            "1793002855.150 I (121857) pico_nano: profile phase=bootstrap.load elapsed_us=333235 status=0 begin=864993 end=945591 peak=953367 attempts=504 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+            "1793002855.350 I (122032) pico_nano: profile phase=epub.open.trusted-wall elapsed_us=617984 status=0 begin=2066690 end=2066690 peak=2066690 attempts=0 bytes=0 reads=0 seeks=0 hits=0 backend=device"
+          ]
+        },
+        {
+          "sample": "shao-2",
+          "raw_sample": "shao-2",
+          "book_verified_by": "fixed Ming/Shao alternation from home Continue=Shao; identical native body/footer",
+          "open_body_ms": 2399,
+          "ready_ms": 2418,
+          "opening_jobs": 2,
+          "resume_hits": 1,
+          "bootstrap_hits": 1,
+          "bootstrap_stored": 0,
+          "next_ms": 991,
+          "prev_ms": 1217,
+          "next_after_ready_ms": 16543,
+          "critical_logs": [
+            "1793002911.518 I (178261) pico_nano: profile phase=bootstrap.hit elapsed_us=0 status=0 begin=956128 end=956128 peak=956128 attempts=0 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+            "1793002911.518 I (178261) pico_nano: profile phase=bootstrap.load elapsed_us=344273 status=0 begin=867754 end=948352 peak=956128 attempts=504 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+            "1793002911.734 I (178441) pico_nano: profile phase=epub.open.trusted-wall elapsed_us=645155 status=0 begin=2069451 end=2069451 peak=2069451 attempts=0 bytes=0 reads=0 seeks=0 hits=0 backend=device"
+          ]
+        },
+        {
+          "sample": "shao-3",
+          "raw_sample": "shao-3",
+          "book_verified_by": "fixed Ming/Shao alternation from home Continue=Shao; identical native body/footer",
+          "open_body_ms": 2401,
+          "ready_ms": 2421,
+          "opening_jobs": 2,
+          "resume_hits": 1,
+          "bootstrap_hits": 1,
+          "bootstrap_stored": 0,
+          "next_ms": 991,
+          "prev_ms": 1206,
+          "next_after_ready_ms": 16659,
+          "critical_logs": [
+            "1793002968.284 I (234847) pico_nano: profile phase=bootstrap.hit elapsed_us=0 status=0 begin=957715 end=957715 peak=957715 attempts=0 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+            "1793002968.284 I (234848) pico_nano: profile phase=bootstrap.load elapsed_us=341503 status=0 begin=869341 end=949939 peak=957715 attempts=504 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+            "1793002968.284 I (235035) pico_nano: profile phase=epub.open.trusted-wall elapsed_us=645712 status=0 begin=2071038 end=2071038 peak=2071038 attempts=0 bytes=0 reads=0 seeks=0 hits=0 backend=device"
+          ]
+        }
+      ],
+      "first_after_flash": {
+        "sample": "shao-0",
+        "raw_sample": "shao-0",
+        "book_verified_by": "fixed Ming/Shao alternation from home Continue=Shao; identical native body/footer",
+        "open_body_ms": 2421,
+        "ready_ms": 2447,
+        "opening_jobs": 2,
+        "resume_hits": 1,
+        "bootstrap_hits": 1,
+        "bootstrap_stored": 0,
+        "next_ms": 991,
+        "prev_ms": 1146,
+        "next_after_ready_ms": 16447,
+        "critical_logs": [
+          "1793002798.694 I (65390) pico_nano: profile phase=bootstrap.hit elapsed_us=0 status=0 begin=971307 end=971307 peak=971307 attempts=0 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+          "1793002798.694 I (65391) pico_nano: profile phase=bootstrap.load elapsed_us=342916 status=0 begin=882933 end=963531 peak=971307 attempts=504 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+          "1793002798.912 I (65569) pico_nano: profile phase=epub.open.trusted-wall elapsed_us=640124 status=0 begin=2067374 end=2067374 peak=2067374 attempts=0 bytes=0 reads=0 seeks=0 hits=0 backend=device"
+        ]
+      },
+      "reboot_again": {
+        "sample": "shao-reboot",
+        "raw_sample": "shao-reboot",
+        "book_verified_by": "fixed Ming/Shao alternation from home Continue=Shao; identical native body/footer",
+        "open_body_ms": 2462,
+        "ready_ms": 2486,
+        "opening_jobs": 2,
+        "resume_hits": 1,
+        "bootstrap_hits": 1,
+        "bootstrap_stored": 0,
+        "next_ms": 997,
+        "prev_ms": 1209,
+        "next_after_ready_ms": 16511,
+        "critical_logs": [
+          "1793003414.261 I (114787) pico_nano: profile phase=bootstrap.hit elapsed_us=0 status=0 begin=969694 end=969694 peak=969694 attempts=0 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+          "1793003414.261 I (114787) pico_nano: profile phase=bootstrap.load elapsed_us=338943 status=0 begin=881320 end=961918 peak=969694 attempts=504 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+          "1793003414.476 I (114946) pico_nano: profile phase=epub.open.trusted-wall elapsed_us=612581 status=0 begin=2065761 end=2065761 peak=2065761 attempts=0 bytes=0 reads=0 seeks=0 hits=0 backend=device"
+        ]
+      },
+      "immediate_after_reboot_reopen": {
+        "sample": "shao-immediate",
+        "raw_sample": "shao-immediate",
+        "book_verified_by": "fixed Ming/Shao alternation from home Continue=Shao; identical native body/footer",
+        "open_body_ms": 2438,
+        "ready_ms": 2453,
+        "opening_jobs": 2,
+        "resume_hits": 1,
+        "bootstrap_hits": 1,
+        "bootstrap_stored": 0,
+        "next_ms": 1258,
+        "prev_ms": 1224,
+        "next_after_ready_ms": 334,
+        "critical_logs": [
+          "1793003462.583 I (162936) pico_nano: profile phase=bootstrap.hit elapsed_us=0 status=0 begin=954255 end=954255 peak=954255 attempts=0 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+          "1793003462.583 I (162936) pico_nano: profile phase=bootstrap.load elapsed_us=338538 status=0 begin=865881 end=946479 peak=954255 attempts=504 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+          "1793003462.583 I (163092) pico_nano: profile phase=epub.open.trusted-wall elapsed_us=609341 status=0 begin=2067578 end=2067578 peak=2067578 attempts=0 bytes=0 reads=0 seeks=0 hits=0 backend=device"
+        ]
+      },
+      "faults_read_side_injection": [
+        {
+          "sample": "shao-missing",
+          "raw_sample": "shao-missing",
+          "book_verified_by": "fixed Ming/Shao alternation from home Continue=Shao; identical native body/footer",
+          "open_body_ms": 3071,
+          "ready_ms": 3089,
+          "opening_jobs": 2,
+          "resume_hits": 1,
+          "bootstrap_hits": 0,
+          "bootstrap_stored": 1,
+          "next_ms": 994,
+          "prev_ms": 1205,
+          "next_after_ready_ms": 16422,
+          "critical_logs": [
+            "1793003032.309 I (299039) pico_nano: profile phase=epub.open.trusted-wall elapsed_us=1833801 status=0 begin=1656697 end=1656697 peak=1656697 attempts=0 bytes=405779 reads=537 seeks=501 hits=1008 backend=device",
+            "1793003041.788 I (308544) pico_nano: profile phase=bootstrap.begin elapsed_us=0 status=0 begin=2897335 end=2897335 peak=2897335 attempts=0 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+            "1793003044.700 I (311289) pico_nano: profile phase=bootstrap.stored elapsed_us=0 status=0 begin=2897335 end=2897335 peak=2897335 attempts=0 bytes=0 reads=0 seeks=0 hits=0 backend=device"
+          ]
+        },
+        {
+          "sample": "shao-corrupt",
+          "raw_sample": "shao-corrupt",
+          "book_verified_by": "fixed Ming/Shao alternation from home Continue=Shao; identical native body/footer",
+          "open_body_ms": 3415,
+          "ready_ms": 3429,
+          "opening_jobs": 2,
+          "resume_hits": 1,
+          "bootstrap_hits": 0,
+          "bootstrap_stored": 1,
+          "next_ms": 992,
+          "prev_ms": 1229,
+          "next_after_ready_ms": 16346,
+          "critical_logs": [
+            "1793003091.917 I (358590) pico_nano: profile phase=bootstrap.fault elapsed_us=0 status=10 begin=882820 end=882820 peak=882820 attempts=0 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+            "1793003093.868 I (360508) pico_nano: profile phase=epub.open.trusted-wall elapsed_us=2169524 status=0 begin=1658661 end=1658661 peak=1658661 attempts=0 bytes=405779 reads=537 seeks=501 hits=1008 backend=device",
+            "1793003103.386 I (369974) pico_nano: profile phase=bootstrap.begin elapsed_us=0 status=0 begin=2899299 end=2899299 peak=2899299 attempts=0 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+            "1793003106.153 I (372740) pico_nano: profile phase=bootstrap.stored elapsed_us=0 status=0 begin=2899299 end=2899299 peak=2899299 attempts=0 bytes=0 reads=0 seeks=0 hits=0 backend=device"
+          ]
+        },
+        {
+          "sample": "shao-recovered",
+          "raw_sample": "shao-recovered",
+          "book_verified_by": "fixed Ming/Shao alternation from home Continue=Shao; identical native body/footer",
+          "open_body_ms": 2402,
+          "ready_ms": 2423,
+          "opening_jobs": 2,
+          "resume_hits": 1,
+          "bootstrap_hits": 1,
+          "bootstrap_stored": 0,
+          "next_ms": 993,
+          "prev_ms": 1211,
+          "next_after_ready_ms": 16330,
+          "critical_logs": [
+            "1793003149.849 I (416501) pico_nano: profile phase=bootstrap.hit elapsed_us=0 status=0 begin=944861 end=944861 peak=944861 attempts=0 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+            "1793003149.849 I (416502) pico_nano: profile phase=bootstrap.load elapsed_us=335783 status=0 begin=856487 end=937085 peak=944861 attempts=504 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+            "1793003150.064 I (416697) pico_nano: profile phase=epub.open.trusted-wall elapsed_us=642097 status=0 begin=2058184 end=2058184 peak=2058184 attempts=0 bytes=0 reads=0 seeks=0 hits=0 backend=device"
+          ]
+        }
+      ]
+    },
+    "ming": {
+      "baseline": [
+        {
+          "sample": "ming-1",
+          "raw_sample": "shao-1",
+          "book_verified_by": "native body/footer and ZIP source I/O signature; initial script labels were reversed",
+          "open_body_ms": 6129,
+          "ready_ms": 6144,
+          "opening_jobs": 2,
+          "resume_hits": 1,
+          "bootstrap_hits": 0,
+          "bootstrap_stored": 0,
+          "next_ms": 988,
+          "prev_ms": 1183,
+          "next_after_ready_ms": 16459,
+          "critical_logs": [
+            "1792996777.298 I (2608880) pico_nano: profile phase=epub.open.trusted-wall elapsed_us=4933383 status=0 begin=1854747 end=1854747 peak=1854747 attempts=0 bytes=1269072 reads=1904 seeks=1853 hits=3660 backend=device"
+          ]
+        },
+        {
+          "sample": "ming-2",
+          "raw_sample": "shao-2",
+          "book_verified_by": "native body/footer and ZIP source I/O signature; initial script labels were reversed",
+          "open_body_ms": 6143,
+          "ready_ms": 6157,
+          "opening_jobs": 2,
+          "resume_hits": 1,
+          "bootstrap_hits": 0,
+          "bootstrap_stored": 0,
+          "next_ms": 1010,
+          "prev_ms": 1179,
+          "next_after_ready_ms": 16502,
+          "critical_logs": [
+            "1792996837.875 I (2669467) pico_nano: profile phase=epub.open.trusted-wall elapsed_us=4939502 status=0 begin=1856191 end=1856191 peak=1856191 attempts=0 bytes=1269072 reads=1904 seeks=1853 hits=3660 backend=device"
+          ]
+        },
+        {
+          "sample": "ming-3",
+          "raw_sample": "shao-3",
+          "book_verified_by": "native body/footer and ZIP source I/O signature; initial script labels were reversed",
+          "open_body_ms": 6162,
+          "ready_ms": 6177,
+          "opening_jobs": 2,
+          "resume_hits": 1,
+          "bootstrap_hits": 0,
+          "bootstrap_stored": 0,
+          "next_ms": 984,
+          "prev_ms": 1174,
+          "next_after_ready_ms": 16466,
+          "critical_logs": [
+            "1792996898.548 I (2730167) pico_nano: profile phase=epub.open.trusted-wall elapsed_us=4947300 status=0 begin=1856191 end=1856191 peak=1856191 attempts=0 bytes=1269072 reads=1904 seeks=1853 hits=3660 backend=device"
+          ]
+        }
+      ],
+      "candidate": [
+        {
+          "sample": "ming-1",
+          "raw_sample": "ming-1",
+          "book_verified_by": "fixed Ming/Shao alternation from home Continue=Shao; identical native body/footer",
+          "open_body_ms": 2915,
+          "ready_ms": 2927,
+          "opening_jobs": 2,
+          "resume_hits": 1,
+          "bootstrap_hits": 1,
+          "bootstrap_stored": 0,
+          "next_ms": 986,
+          "prev_ms": 1179,
+          "next_after_ready_ms": 16573,
+          "critical_logs": [
+            "1793002827.301 I (93913) pico_nano: profile phase=bootstrap.hit elapsed_us=0 status=0 begin=1158967 end=1158967 peak=1158967 attempts=0 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+            "1793002827.301 I (93914) pico_nano: profile phase=bootstrap.load elapsed_us=838864 status=0 begin=886237 end=1151191 peak=1158967 attempts=1826 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+            "1793002827.509 I (94240) pico_nano: profile phase=epub.open.trusted-wall elapsed_us=1279489 status=0 begin=2262410 end=2262410 peak=2262410 attempts=0 bytes=0 reads=0 seeks=0 hits=0 backend=device"
+          ]
+        },
+        {
+          "sample": "ming-2",
+          "raw_sample": "ming-2",
+          "book_verified_by": "fixed Ming/Shao alternation from home Continue=Shao; identical native body/footer",
+          "open_body_ms": 2935,
+          "ready_ms": 2952,
+          "opening_jobs": 2,
+          "resume_hits": 1,
+          "bootstrap_hits": 1,
+          "bootstrap_stored": 0,
+          "next_ms": 987,
+          "prev_ms": 1194,
+          "next_after_ready_ms": 16319,
+          "critical_logs": [
+            "1793002883.624 I (150380) pico_nano: profile phase=bootstrap.hit elapsed_us=0 status=0 begin=1140736 end=1140736 peak=1140736 attempts=0 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+            "1793002883.624 I (150380) pico_nano: profile phase=bootstrap.load elapsed_us=840995 status=0 begin=868006 end=1132960 peak=1140736 attempts=1826 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+            "1793002884.055 I (150712) pico_nano: profile phase=epub.open.trusted-wall elapsed_us=1288499 status=0 begin=2264739 end=2264739 peak=2264739 attempts=0 bytes=0 reads=0 seeks=0 hits=0 backend=device"
+          ]
+        },
+        {
+          "sample": "ming-3",
+          "raw_sample": "ming-3",
+          "book_verified_by": "fixed Ming/Shao alternation from home Continue=Shao; identical native body/footer",
+          "open_body_ms": 2970,
+          "ready_ms": 2983,
+          "opening_jobs": 2,
+          "resume_hits": 1,
+          "bootstrap_hits": 1,
+          "bootstrap_stored": 0,
+          "next_ms": 986,
+          "prev_ms": 1189,
+          "next_after_ready_ms": 16462,
+          "critical_logs": [
+            "1793002940.228 I (206883) pico_nano: profile phase=bootstrap.hit elapsed_us=0 status=0 begin=1140484 end=1140484 peak=1140484 attempts=0 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+            "1793002940.228 I (206883) pico_nano: profile phase=bootstrap.load elapsed_us=855072 status=0 begin=867754 end=1132708 peak=1140484 attempts=1826 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+            "1793002940.629 I (207218) pico_nano: profile phase=epub.open.trusted-wall elapsed_us=1316881 status=0 begin=2264487 end=2264487 peak=2264487 attempts=0 bytes=0 reads=0 seeks=0 hits=0 backend=device"
+          ]
+        }
+      ],
+      "first_after_flash": {
+        "sample": "ming-0",
+        "raw_sample": "ming-0",
+        "book_verified_by": "fixed Ming/Shao alternation from home Continue=Shao; identical native body/footer",
+        "open_body_ms": 10086,
+        "ready_ms": 10106,
+        "opening_jobs": 2,
+        "resume_hits": 1,
+        "bootstrap_hits": 1,
+        "bootstrap_stored": 0,
+        "next_ms": 1275,
+        "prev_ms": 1479,
+        "next_after_ready_ms": 16574,
+        "critical_logs": [
+          "1793002769.808 I (36387) pico_nano: profile phase=bootstrap.hit elapsed_us=0 status=0 begin=1172235 end=1172235 peak=1172235 attempts=0 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+          "1793002769.808 I (36387) pico_nano: profile phase=bootstrap.load elapsed_us=845253 status=0 begin=899505 end=1164459 peak=1172235 attempts=1826 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+          "1793002770.023 I (36672) pico_nano: profile phase=epub.open.trusted-wall elapsed_us=8874729 status=0 begin=1835197 end=1835197 peak=1835197 attempts=0 bytes=9507504 reads=2322 seeks=0 hits=0 backend=device"
+        ]
+      },
+      "reboot_again": {
+        "sample": "ming-reboot",
+        "raw_sample": "ming-reboot",
+        "book_verified_by": "fixed Ming/Shao alternation from home Continue=Shao; identical native body/footer",
+        "open_body_ms": 10066,
+        "ready_ms": 10086,
+        "opening_jobs": 2,
+        "resume_hits": 1,
+        "bootstrap_hits": 1,
+        "bootstrap_stored": 0,
+        "next_ms": 1276,
+        "prev_ms": 1475,
+        "next_after_ready_ms": 16502,
+        "critical_logs": [
+          "1793003386.369 I (86727) pico_nano: profile phase=bootstrap.hit elapsed_us=0 status=0 begin=1172382 end=1172382 peak=1172382 attempts=0 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+          "1793003386.369 I (86727) pico_nano: profile phase=bootstrap.load elapsed_us=844725 status=0 begin=899652 end=1164606 peak=1172382 attempts=1826 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+          "1793003386.584 I (87006) pico_nano: profile phase=epub.open.trusted-wall elapsed_us=8861651 status=0 begin=1835344 end=1835344 peak=1835344 attempts=0 bytes=9507504 reads=2322 seeks=0 hits=0 backend=device"
+        ]
+      },
+      "immediate_after_reboot_reopen": {
+        "sample": "ming-immediate",
+        "raw_sample": "ming-immediate",
+        "book_verified_by": "fixed Ming/Shao alternation from home Continue=Shao; identical native body/footer",
+        "open_body_ms": 3007,
+        "ready_ms": 3021,
+        "opening_jobs": 2,
+        "resume_hits": 1,
+        "bootstrap_hits": 1,
+        "bootstrap_stored": 0,
+        "next_ms": 1190,
+        "prev_ms": 1186,
+        "next_after_ready_ms": 380,
+        "critical_logs": [
+          "1793003449.662 I (150082) pico_nano: profile phase=bootstrap.hit elapsed_us=0 status=0 begin=1159171 end=1159171 peak=1159171 attempts=0 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+          "1793003449.662 I (150082) pico_nano: profile phase=bootstrap.load elapsed_us=844375 status=0 begin=886441 end=1151395 peak=1159171 attempts=1826 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+          "1793003449.877 I (150404) pico_nano: profile phase=epub.open.trusted-wall elapsed_us=1285179 status=0 begin=2262614 end=2262614 peak=2262614 attempts=0 bytes=0 reads=0 seeks=0 hits=0 backend=device"
+        ]
+      },
+      "faults_read_side_injection": [
+        {
+          "sample": "ming-missing",
+          "raw_sample": "ming-missing",
+          "book_verified_by": "fixed Ming/Shao alternation from home Continue=Shao; identical native body/footer",
+          "open_body_ms": 8217,
+          "ready_ms": 8231,
+          "opening_jobs": 2,
+          "resume_hits": 1,
+          "bootstrap_hits": 0,
+          "bootstrap_stored": 1,
+          "next_ms": 986,
+          "prev_ms": 1188,
+          "next_after_ready_ms": 16438,
+          "critical_logs": [
+            "1793003003.817 I (270585) pico_nano: profile phase=epub.open.trusted-wall elapsed_us=7014296 status=0 begin=1854934 end=1854934 peak=1854934 attempts=0 bytes=1269072 reads=1904 seeks=1853 hits=3660 backend=device",
+            "1793003012.664 I (279356) pico_nano: profile phase=bootstrap.begin elapsed_us=0 status=0 begin=3040423 end=3040423 peak=3040423 attempts=0 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+            "1793003016.462 I (283142) pico_nano: profile phase=bootstrap.stored elapsed_us=0 status=0 begin=3040423 end=3040423 peak=3040423 attempts=0 bytes=0 reads=0 seeks=0 hits=0 backend=device"
+          ]
+        },
+        {
+          "sample": "ming-corrupt",
+          "raw_sample": "ming-corrupt",
+          "book_verified_by": "fixed Ming/Shao alternation from home Continue=Shao; identical native body/footer",
+          "open_body_ms": 6861,
+          "ready_ms": 6873,
+          "opening_jobs": 2,
+          "resume_hits": 1,
+          "bootstrap_hits": 0,
+          "bootstrap_stored": 1,
+          "next_ms": 985,
+          "prev_ms": 1127,
+          "next_after_ready_ms": 16434,
+          "critical_logs": [
+            "1793003059.637 I (326309) pico_nano: profile phase=bootstrap.fault elapsed_us=0 status=10 begin=935780 end=935780 peak=935780 attempts=0 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+            "1793003065.004 I (331690) pico_nano: profile phase=epub.open.trusted-wall elapsed_us=5644465 status=0 begin=1856965 end=1856965 peak=1856965 attempts=0 bytes=1269072 reads=1904 seeks=1853 hits=3660 backend=device",
+            "1793003073.941 I (340630) pico_nano: profile phase=bootstrap.begin elapsed_us=0 status=0 begin=3042275 end=3042275 peak=3042275 attempts=0 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+            "1793003077.955 I (344696) pico_nano: profile phase=bootstrap.stored elapsed_us=0 status=0 begin=3042275 end=3042275 peak=3042275 attempts=0 bytes=0 reads=0 seeks=0 hits=0 backend=device"
+          ]
+        },
+        {
+          "sample": "ming-recovered",
+          "raw_sample": "ming-recovered",
+          "book_verified_by": "fixed Ming/Shao alternation from home Continue=Shao; identical native body/footer",
+          "open_body_ms": 2934,
+          "ready_ms": 2947,
+          "opening_jobs": 2,
+          "resume_hits": 1,
+          "bootstrap_hits": 1,
+          "bootstrap_stored": 0,
+          "next_ms": 989,
+          "prev_ms": 1188,
+          "next_after_ready_ms": 16551,
+          "critical_logs": [
+            "1793003121.750 I (388438) pico_nano: profile phase=bootstrap.hit elapsed_us=0 status=0 begin=1127654 end=1127654 peak=1127654 attempts=0 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+            "1793003121.750 I (388438) pico_nano: profile phase=bootstrap.load elapsed_us=844025 status=0 begin=854924 end=1119878 peak=1127654 attempts=1826 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+            "1793003122.179 I (388763) pico_nano: profile phase=epub.open.trusted-wall elapsed_us=1286628 status=0 begin=2251657 end=2251657 peak=2251657 attempts=0 bytes=0 reads=0 seeks=0 hits=0 backend=device"
+          ]
+        }
+      ]
+    }
+  },
+  "immediate_strategy_control": {
+    "shao": {
+      "hit": [
+        {
+          "sample": "shao-immediate",
+          "raw_sample": "shao-immediate",
+          "book_verified_by": "fixed Ming/Shao alternation from home Continue=Shao; identical native body/footer",
+          "open_body_ms": 2438,
+          "ready_ms": 2453,
+          "opening_jobs": 2,
+          "resume_hits": 1,
+          "bootstrap_hits": 1,
+          "bootstrap_stored": 0,
+          "next_ms": 1258,
+          "prev_ms": 1224,
+          "next_after_ready_ms": 334,
+          "critical_logs": [
+            "1793003462.583 I (162936) pico_nano: profile phase=bootstrap.hit elapsed_us=0 status=0 begin=954255 end=954255 peak=954255 attempts=0 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+            "1793003462.583 I (162936) pico_nano: profile phase=bootstrap.load elapsed_us=338538 status=0 begin=865881 end=946479 peak=954255 attempts=504 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+            "1793003462.583 I (163092) pico_nano: profile phase=epub.open.trusted-wall elapsed_us=609341 status=0 begin=2067578 end=2067578 peak=2067578 attempts=0 bytes=0 reads=0 seeks=0 hits=0 backend=device"
+          ]
+        },
+        {
+          "sample": "shao-immediate-hit-1",
+          "raw_sample": "shao-immediate-hit-1",
+          "book_verified_by": "fixed Ming/Shao alternation from home Continue=Shao; identical native body/footer",
+          "open_body_ms": 2448,
+          "ready_ms": 2470,
+          "opening_jobs": 2,
+          "resume_hits": 1,
+          "bootstrap_hits": 1,
+          "bootstrap_stored": 0,
+          "next_ms": 1260,
+          "prev_ms": 1222,
+          "next_after_ready_ms": 350,
+          "critical_logs": [
+            "1793003518.159 I (218616) pico_nano: profile phase=bootstrap.hit elapsed_us=0 status=0 begin=937511 end=937511 peak=937511 attempts=0 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+            "1793003518.159 I (218617) pico_nano: profile phase=bootstrap.load elapsed_us=340009 status=0 begin=849137 end=929735 peak=937511 attempts=504 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+            "1793003518.360 I (218780) pico_nano: profile phase=epub.open.trusted-wall elapsed_us=618839 status=0 begin=2050834 end=2050834 peak=2050834 attempts=0 bytes=0 reads=0 seeks=0 hits=0 backend=device"
+          ]
+        }
+      ],
+      "read_miss": [
+        {
+          "sample": "shao-immediate-missing-0",
+          "raw_sample": "shao-immediate-missing-0",
+          "book_verified_by": "fixed Ming/Shao alternation from home Continue=Shao; identical native body/footer",
+          "open_body_ms": 3057,
+          "ready_ms": 3074,
+          "opening_jobs": 2,
+          "resume_hits": 1,
+          "bootstrap_hits": 0,
+          "bootstrap_stored": 0,
+          "next_ms": 1218,
+          "prev_ms": 1217,
+          "next_after_ready_ms": 400,
+          "critical_logs": [
+            "1793003493.155 I (193551) pico_nano: profile phase=epub.open.trusted-wall elapsed_us=1821291 status=0 begin=1652874 end=1652874 peak=1652874 attempts=0 bytes=405779 reads=537 seeks=501 hits=1008 backend=device"
+          ]
+        },
+        {
+          "sample": "shao-immediate-missing-1",
+          "raw_sample": "shao-immediate-missing-1",
+          "book_verified_by": "fixed Ming/Shao alternation from home Continue=Shao; identical native body/footer",
+          "open_body_ms": 3070,
+          "ready_ms": 3088,
+          "opening_jobs": 2,
+          "resume_hits": 1,
+          "bootstrap_hits": 0,
+          "bootstrap_stored": 0,
+          "next_ms": 1292,
+          "prev_ms": 1276,
+          "next_after_ready_ms": 313,
+          "critical_logs": [
+            "1793003548.664 I (249069) pico_nano: profile phase=epub.open.trusted-wall elapsed_us=1830284 status=0 begin=1653118 end=1653118 peak=1653118 attempts=0 bytes=405779 reads=537 seeks=501 hits=1008 backend=device"
+          ]
+        }
+      ],
+      "hit_next_median_ms": 1259.0,
+      "miss_next_median_ms": 1255.0
+    },
+    "ming": {
+      "hit": [
+        {
+          "sample": "ming-immediate",
+          "raw_sample": "ming-immediate",
+          "book_verified_by": "fixed Ming/Shao alternation from home Continue=Shao; identical native body/footer",
+          "open_body_ms": 3007,
+          "ready_ms": 3021,
+          "opening_jobs": 2,
+          "resume_hits": 1,
+          "bootstrap_hits": 1,
+          "bootstrap_stored": 0,
+          "next_ms": 1190,
+          "prev_ms": 1186,
+          "next_after_ready_ms": 380,
+          "critical_logs": [
+            "1793003449.662 I (150082) pico_nano: profile phase=bootstrap.hit elapsed_us=0 status=0 begin=1159171 end=1159171 peak=1159171 attempts=0 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+            "1793003449.662 I (150082) pico_nano: profile phase=bootstrap.load elapsed_us=844375 status=0 begin=886441 end=1151395 peak=1159171 attempts=1826 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+            "1793003449.877 I (150404) pico_nano: profile phase=epub.open.trusted-wall elapsed_us=1285179 status=0 begin=2262614 end=2262614 peak=2262614 attempts=0 bytes=0 reads=0 seeks=0 hits=0 backend=device"
+          ]
+        },
+        {
+          "sample": "ming-immediate-hit-1",
+          "raw_sample": "ming-immediate-hit-1",
+          "book_verified_by": "fixed Ming/Shao alternation from home Continue=Shao; identical native body/footer",
+          "open_body_ms": 2940,
+          "ready_ms": 2952,
+          "opening_jobs": 2,
+          "resume_hits": 1,
+          "bootstrap_hits": 1,
+          "bootstrap_stored": 0,
+          "next_ms": 1233,
+          "prev_ms": 1190,
+          "next_after_ready_ms": 294,
+          "critical_logs": [
+            "1793003505.766 I (206306) pico_nano: profile phase=bootstrap.hit elapsed_us=0 status=0 begin=1121867 end=1121867 peak=1121867 attempts=0 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+            "1793003505.766 I (206306) pico_nano: profile phase=bootstrap.load elapsed_us=846415 status=0 begin=849137 end=1114091 peak=1121867 attempts=1826 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+            "1793003506.195 I (206637) pico_nano: profile phase=epub.open.trusted-wall elapsed_us=1298221 status=0 begin=2245870 end=2245870 peak=2245870 attempts=0 bytes=0 reads=0 seeks=0 hits=0 backend=device"
+          ]
+        }
+      ],
+      "read_miss": [
+        {
+          "sample": "ming-immediate-missing-0",
+          "raw_sample": "ming-immediate-missing-0",
+          "book_verified_by": "fixed Ming/Shao alternation from home Continue=Shao; identical native body/footer",
+          "open_body_ms": 6065,
+          "ready_ms": 6082,
+          "opening_jobs": 2,
+          "resume_hits": 1,
+          "bootstrap_hits": 0,
+          "bootstrap_stored": 0,
+          "next_ms": 1236,
+          "prev_ms": 1197,
+          "next_after_ready_ms": 289,
+          "critical_logs": [
+            "1793003480.063 I (180442) pico_nano: profile phase=epub.open.trusted-wall elapsed_us=4849586 status=0 begin=1851474 end=1851474 peak=1851474 attempts=0 bytes=1269072 reads=1904 seeks=1853 hits=3660 backend=device"
+          ]
+        },
+        {
+          "sample": "ming-immediate-missing-1",
+          "raw_sample": "ming-immediate-missing-1",
+          "book_verified_by": "fixed Ming/Shao alternation from home Continue=Shao; identical native body/footer",
+          "open_body_ms": 6075,
+          "ready_ms": 6088,
+          "opening_jobs": 2,
+          "resume_hits": 1,
+          "bootstrap_hits": 0,
+          "bootstrap_stored": 0,
+          "next_ms": 1201,
+          "prev_ms": 1245,
+          "next_after_ready_ms": 336,
+          "critical_logs": [
+            "1793003535.651 I (236031) pico_nano: profile phase=epub.open.trusted-wall elapsed_us=4861457 status=0 begin=1851178 end=1851178 peak=1851178 attempts=0 bytes=1269072 reads=1904 seeks=1853 hits=3660 backend=device"
+          ]
+        }
+      ],
+      "hit_next_median_ms": 1211.5,
+      "miss_next_median_ms": 1218.5
+    }
+  },
+  "pixels": [
+    {
+      "sample": "ming-0-next",
+      "baseline": "ming-3-next.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "3a18148eb0e2600ace4d0ce83d1bb0716c3c3028175aefe44e496e61a49cde0a"
+    },
+    {
+      "sample": "ming-0-prev",
+      "baseline": "ming-3-prev.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "e4034595445289ffcb952da3811de9bdb7bff62be5e6d213416575991809efba"
+    },
+    {
+      "sample": "ming-0",
+      "baseline": "ming-3.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "e4034595445289ffcb952da3811de9bdb7bff62be5e6d213416575991809efba"
+    },
+    {
+      "sample": "ming-1-next",
+      "baseline": "ming-3-next.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "3a18148eb0e2600ace4d0ce83d1bb0716c3c3028175aefe44e496e61a49cde0a"
+    },
+    {
+      "sample": "ming-1-prev",
+      "baseline": "ming-3-prev.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "e4034595445289ffcb952da3811de9bdb7bff62be5e6d213416575991809efba"
+    },
+    {
+      "sample": "ming-1",
+      "baseline": "ming-3.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "e4034595445289ffcb952da3811de9bdb7bff62be5e6d213416575991809efba"
+    },
+    {
+      "sample": "ming-2-next",
+      "baseline": "ming-3-next.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "3a18148eb0e2600ace4d0ce83d1bb0716c3c3028175aefe44e496e61a49cde0a"
+    },
+    {
+      "sample": "ming-2-prev",
+      "baseline": "ming-3-prev.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "e4034595445289ffcb952da3811de9bdb7bff62be5e6d213416575991809efba"
+    },
+    {
+      "sample": "ming-2",
+      "baseline": "ming-3.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "e4034595445289ffcb952da3811de9bdb7bff62be5e6d213416575991809efba"
+    },
+    {
+      "sample": "ming-3-next",
+      "baseline": "ming-3-next.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "3a18148eb0e2600ace4d0ce83d1bb0716c3c3028175aefe44e496e61a49cde0a"
+    },
+    {
+      "sample": "ming-3-prev",
+      "baseline": "ming-3-prev.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "e4034595445289ffcb952da3811de9bdb7bff62be5e6d213416575991809efba"
+    },
+    {
+      "sample": "ming-3",
+      "baseline": "ming-3.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "e4034595445289ffcb952da3811de9bdb7bff62be5e6d213416575991809efba"
+    },
+    {
+      "sample": "ming-corrupt-next",
+      "baseline": "ming-3-next.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "3a18148eb0e2600ace4d0ce83d1bb0716c3c3028175aefe44e496e61a49cde0a"
+    },
+    {
+      "sample": "ming-corrupt-prev",
+      "baseline": "ming-3-prev.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "e4034595445289ffcb952da3811de9bdb7bff62be5e6d213416575991809efba"
+    },
+    {
+      "sample": "ming-corrupt",
+      "baseline": "ming-3.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "e4034595445289ffcb952da3811de9bdb7bff62be5e6d213416575991809efba"
+    },
+    {
+      "sample": "ming-missing-next",
+      "baseline": "ming-3-next.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "3a18148eb0e2600ace4d0ce83d1bb0716c3c3028175aefe44e496e61a49cde0a"
+    },
+    {
+      "sample": "ming-missing-prev",
+      "baseline": "ming-3-prev.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "e4034595445289ffcb952da3811de9bdb7bff62be5e6d213416575991809efba"
+    },
+    {
+      "sample": "ming-missing",
+      "baseline": "ming-3.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "e4034595445289ffcb952da3811de9bdb7bff62be5e6d213416575991809efba"
+    },
+    {
+      "sample": "ming-recovered-next",
+      "baseline": "ming-3-next.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "3a18148eb0e2600ace4d0ce83d1bb0716c3c3028175aefe44e496e61a49cde0a"
+    },
+    {
+      "sample": "ming-recovered-prev",
+      "baseline": "ming-3-prev.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "e4034595445289ffcb952da3811de9bdb7bff62be5e6d213416575991809efba"
+    },
+    {
+      "sample": "ming-recovered",
+      "baseline": "ming-3.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "e4034595445289ffcb952da3811de9bdb7bff62be5e6d213416575991809efba"
+    },
+    {
+      "sample": "shao-0-next",
+      "baseline": "shao-3-next.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "813a19fcbd57ac37500e8cfa58c6675b27478abdc279bf2a2c6d583f9d240ff8"
+    },
+    {
+      "sample": "shao-0-prev",
+      "baseline": "shao-3-prev.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "9fec2834d2e48895af72869dc866fa7332f3ef0ac1305f986849435b7b7b81b4"
+    },
+    {
+      "sample": "shao-0",
+      "baseline": "shao-3.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "9fec2834d2e48895af72869dc866fa7332f3ef0ac1305f986849435b7b7b81b4"
+    },
+    {
+      "sample": "shao-1-next",
+      "baseline": "shao-3-next.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "813a19fcbd57ac37500e8cfa58c6675b27478abdc279bf2a2c6d583f9d240ff8"
+    },
+    {
+      "sample": "shao-1-prev",
+      "baseline": "shao-3-prev.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "9fec2834d2e48895af72869dc866fa7332f3ef0ac1305f986849435b7b7b81b4"
+    },
+    {
+      "sample": "shao-1",
+      "baseline": "shao-3.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "9fec2834d2e48895af72869dc866fa7332f3ef0ac1305f986849435b7b7b81b4"
+    },
+    {
+      "sample": "shao-2-next",
+      "baseline": "shao-3-next.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "813a19fcbd57ac37500e8cfa58c6675b27478abdc279bf2a2c6d583f9d240ff8"
+    },
+    {
+      "sample": "shao-2-prev",
+      "baseline": "shao-3-prev.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "9fec2834d2e48895af72869dc866fa7332f3ef0ac1305f986849435b7b7b81b4"
+    },
+    {
+      "sample": "shao-2",
+      "baseline": "shao-3.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "9fec2834d2e48895af72869dc866fa7332f3ef0ac1305f986849435b7b7b81b4"
+    },
+    {
+      "sample": "shao-3-next",
+      "baseline": "shao-3-next.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "813a19fcbd57ac37500e8cfa58c6675b27478abdc279bf2a2c6d583f9d240ff8"
+    },
+    {
+      "sample": "shao-3-prev",
+      "baseline": "shao-3-prev.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "9fec2834d2e48895af72869dc866fa7332f3ef0ac1305f986849435b7b7b81b4"
+    },
+    {
+      "sample": "shao-3",
+      "baseline": "shao-3.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "9fec2834d2e48895af72869dc866fa7332f3ef0ac1305f986849435b7b7b81b4"
+    },
+    {
+      "sample": "shao-corrupt-next",
+      "baseline": "shao-3-next.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "813a19fcbd57ac37500e8cfa58c6675b27478abdc279bf2a2c6d583f9d240ff8"
+    },
+    {
+      "sample": "shao-corrupt-prev",
+      "baseline": "shao-3-prev.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "9fec2834d2e48895af72869dc866fa7332f3ef0ac1305f986849435b7b7b81b4"
+    },
+    {
+      "sample": "shao-corrupt",
+      "baseline": "shao-3.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "9fec2834d2e48895af72869dc866fa7332f3ef0ac1305f986849435b7b7b81b4"
+    },
+    {
+      "sample": "shao-missing-next",
+      "baseline": "shao-3-next.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "813a19fcbd57ac37500e8cfa58c6675b27478abdc279bf2a2c6d583f9d240ff8"
+    },
+    {
+      "sample": "shao-missing-prev",
+      "baseline": "shao-3-prev.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "9fec2834d2e48895af72869dc866fa7332f3ef0ac1305f986849435b7b7b81b4"
+    },
+    {
+      "sample": "shao-missing",
+      "baseline": "shao-3.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "9fec2834d2e48895af72869dc866fa7332f3ef0ac1305f986849435b7b7b81b4"
+    },
+    {
+      "sample": "shao-recovered-next",
+      "baseline": "shao-3-next.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "813a19fcbd57ac37500e8cfa58c6675b27478abdc279bf2a2c6d583f9d240ff8"
+    },
+    {
+      "sample": "shao-recovered-prev",
+      "baseline": "shao-3-prev.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "9fec2834d2e48895af72869dc866fa7332f3ef0ac1305f986849435b7b7b81b4"
+    },
+    {
+      "sample": "shao-recovered",
+      "baseline": "shao-3.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "9fec2834d2e48895af72869dc866fa7332f3ef0ac1305f986849435b7b7b81b4"
+    },
+    {
+      "sample": "ming-immediate-hit-1-next",
+      "baseline": "ming-3-next.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "3a18148eb0e2600ace4d0ce83d1bb0716c3c3028175aefe44e496e61a49cde0a"
+    },
+    {
+      "sample": "ming-immediate-hit-1-prev",
+      "baseline": "ming-3-prev.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "e4034595445289ffcb952da3811de9bdb7bff62be5e6d213416575991809efba"
+    },
+    {
+      "sample": "ming-immediate-missing-0-next",
+      "baseline": "ming-3-next.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "3a18148eb0e2600ace4d0ce83d1bb0716c3c3028175aefe44e496e61a49cde0a"
+    },
+    {
+      "sample": "ming-immediate-missing-0-prev",
+      "baseline": "ming-3-prev.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "e4034595445289ffcb952da3811de9bdb7bff62be5e6d213416575991809efba"
+    },
+    {
+      "sample": "ming-immediate-missing-1-next",
+      "baseline": "ming-3-next.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "3a18148eb0e2600ace4d0ce83d1bb0716c3c3028175aefe44e496e61a49cde0a"
+    },
+    {
+      "sample": "ming-immediate-missing-1-prev",
+      "baseline": "ming-3-prev.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "e4034595445289ffcb952da3811de9bdb7bff62be5e6d213416575991809efba"
+    },
+    {
+      "sample": "ming-immediate-next",
+      "baseline": "ming-3-next.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "3a18148eb0e2600ace4d0ce83d1bb0716c3c3028175aefe44e496e61a49cde0a"
+    },
+    {
+      "sample": "ming-immediate-prev",
+      "baseline": "ming-3-prev.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "e4034595445289ffcb952da3811de9bdb7bff62be5e6d213416575991809efba"
+    },
+    {
+      "sample": "ming-reboot-next",
+      "baseline": "ming-3-next.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "3a18148eb0e2600ace4d0ce83d1bb0716c3c3028175aefe44e496e61a49cde0a"
+    },
+    {
+      "sample": "ming-reboot-prev",
+      "baseline": "ming-3-prev.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "e4034595445289ffcb952da3811de9bdb7bff62be5e6d213416575991809efba"
+    },
+    {
+      "sample": "ming-reboot",
+      "baseline": "ming-3.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "e4034595445289ffcb952da3811de9bdb7bff62be5e6d213416575991809efba"
+    },
+    {
+      "sample": "shao-immediate-hit-1-next",
+      "baseline": "shao-3-next.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "813a19fcbd57ac37500e8cfa58c6675b27478abdc279bf2a2c6d583f9d240ff8"
+    },
+    {
+      "sample": "shao-immediate-hit-1-prev",
+      "baseline": "shao-3-prev.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "9fec2834d2e48895af72869dc866fa7332f3ef0ac1305f986849435b7b7b81b4"
+    },
+    {
+      "sample": "shao-immediate-missing-0-next",
+      "baseline": "shao-3-next.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "813a19fcbd57ac37500e8cfa58c6675b27478abdc279bf2a2c6d583f9d240ff8"
+    },
+    {
+      "sample": "shao-immediate-missing-0-prev",
+      "baseline": "shao-3-prev.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "9fec2834d2e48895af72869dc866fa7332f3ef0ac1305f986849435b7b7b81b4"
+    },
+    {
+      "sample": "shao-immediate-missing-1-next",
+      "baseline": "shao-3-next.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "813a19fcbd57ac37500e8cfa58c6675b27478abdc279bf2a2c6d583f9d240ff8"
+    },
+    {
+      "sample": "shao-immediate-missing-1-prev",
+      "baseline": "shao-3-prev.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "9fec2834d2e48895af72869dc866fa7332f3ef0ac1305f986849435b7b7b81b4"
+    },
+    {
+      "sample": "shao-immediate-next",
+      "baseline": "shao-3-next.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "813a19fcbd57ac37500e8cfa58c6675b27478abdc279bf2a2c6d583f9d240ff8"
+    },
+    {
+      "sample": "shao-immediate-prev",
+      "baseline": "shao-3-prev.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "9fec2834d2e48895af72869dc866fa7332f3ef0ac1305f986849435b7b7b81b4"
+    },
+    {
+      "sample": "shao-reboot-next",
+      "baseline": "shao-3-next.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "813a19fcbd57ac37500e8cfa58c6675b27478abdc279bf2a2c6d583f9d240ff8"
+    },
+    {
+      "sample": "shao-reboot-prev",
+      "baseline": "shao-3-prev.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "9fec2834d2e48895af72869dc866fa7332f3ef0ac1305f986849435b7b7b81b4"
+    },
+    {
+      "sample": "shao-reboot",
+      "baseline": "shao-3.png",
+      "crop": [
+        0,
+        32,
+        684,
+        1216
+      ],
+      "pixel_sha256": "9fec2834d2e48895af72869dc866fa7332f3ef0ac1305f986849435b7b7b81b4"
+    }
+  ],
+  "health": {
+    "baseline": {
+      "pool_peak_observed": 3921735,
+      "heap": [
+        {
+          "internal": 79171,
+          "internal_largest": 34816,
+          "internal_min": 37316,
+          "psram": 5169576,
+          "psram_largest": 2883584,
+          "psram_min": 2435592
+        }
+      ],
+      "stack": [
+        {
+          "input": 2216,
+          "display": 6092
+        }
+      ],
+      "error_lines": [],
+      "log_sha256": "07b1c9d1c6ac573e742a0aeb9c2f77f82f752a6dd06fad990a024b2a5107bfa4"
+    },
+    "candidate-v3": {
+      "pool_peak_observed": 3111452,
+      "heap": [
+        {
+          "internal": 78699,
+          "internal_largest": 34816,
+          "internal_min": 37264,
+          "psram": 3862300,
+          "psram_largest": 2883584,
+          "psram_min": 3254996
+        }
+      ],
+      "stack": [
+        {
+          "input": 2264,
+          "display": 6092
+        }
+      ],
+      "error_lines": [],
+      "log_sha256": "70a9b7b9d7afb9d043b5ded15398a562eba4add569ce2cceeeba3258ae8c4f93"
+    },
+    "reboot-v3": {
+      "pool_peak_observed": 3109865,
+      "heap": [
+        {
+          "internal": 78555,
+          "internal_largest": 34816,
+          "internal_min": 37300,
+          "psram": 4149128,
+          "psram_largest": 2883584,
+          "psram_min": 3256600
+        }
+      ],
+      "stack": [
+        {
+          "input": 2328,
+          "display": 6092
+        }
+      ],
+      "error_lines": [],
+      "log_sha256": "4bc70c9889a38bb97399889652a6344fca838447167697b50ea257b05d8534bc"
+    }
+  },
+  "ota_selectors": [
+    {
+      "sequence": 15,
+      "state": "VALID",
+      "crc32": "a79cefa9"
+    },
+    {
+      "sequence": 2,
+      "state": "VALID",
+      "crc32": "55f63774"
+    }
+  ],
+  "board_compile_only": {
+    "bytes": 5347744,
+    "sha256": "8f0c59465e157fad7e0e93f63c112d6b86545195dc2dc57ef5faaf9fc28fba4d",
+    "slot_bytes": 6291456,
+    "free_bytes": 943712,
+    "free_percent": 14.9999
+  },
+  "diagnostic_free_percent": 12.559,
+  "user_optical_feedback": "Current final diagnostic firmware: switching normal, no obvious anomalies, 2026-10-26; not an instrumented optical/ghosting measurement",
+  "software_validation": {
+    "host_asan_ubsan": 23,
+    "sdl": 6,
+    "tools_dev_and_device_png": 8,
+    "real_file_faults_host": [
+      "missing packet",
+      "missing root",
+      "SHA corruption",
+      "truncation",
+      "version mismatch",
+      "corrupt root",
+      "backup recovery",
+      "same-size/same-mtime source replacement",
+      "epoch plus missing/corrupt",
+      "epoch full proof then close and same-epoch reopen",
+      "fsync failure",
+      "cancel",
+      "pool denial",
+      "detached media staging remains untouched",
+      "shared quota cleanup"
+    ],
+    "visible_simulator": "Rebuilt and restarted with final source, original demo fixtures; not a physical panel measurement"
+  },
+  "limitations": [
+    "Device faults use read-side diagnostic injection; host tests delete and tamper actual cache files. Neither proves TF electrical faults or FAT power-cut atomicity.",
+    "Reboot-first opens and NEXT values are listed separately; no matched cold-reboot baseline was collected in this batch.",
+    "Immediate NEXT control alternates hit/miss twice per book in the same candidate image using read-side missing injection (hit, miss, hit, miss); this isolates startup-cache read policy, not a flashed f461862 baseline. Paired old/new first NEXT uses the identical 15-second protocol.",
+    "Still two display jobs (loading plus body) on these books; no claim that loading is removed.",
+    "No whole-flash host backup; preserved formal ota_1 and seq2 VALID. No bootloader, NVS or assets written.",
+    "Diagnostic console disables true locking sleep; prior sleep cold-reopen problem and power/optical acceptance remain separate.",
+    "Pool peaks are entire unequal-length sessions, not paired peak reductions. No limits or image precision increased.",
+    "No formal firmware release; device keeps final 1.0.6-diag."
+  ]
+}

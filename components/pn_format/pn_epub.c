@@ -360,6 +360,7 @@ static pn_status_t validate(pn_epub_t *epub,epub_t **book){
     if(status==PN_OK)*book=b;
     return status;
 }
+#include "pn_epub_snapshot.inc"
 pn_status_t pn_epub_info(pn_epub_t *epub,pn_epub_info_t *out){
     if(!out)return PN_INVALID;
     epub_t *b;pn_status_t status=validate(epub,&b);if(status==PN_OK)*out=b->info;return status;

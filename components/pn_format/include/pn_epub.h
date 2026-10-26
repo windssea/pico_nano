@@ -75,3 +75,7 @@ pn_status_t pn_epub_chapter_open(pn_epub_t *epub,const char *path,pn_epub_chapte
 pn_status_t pn_epub_chapter_read(void *ctx,uint8_t *out,size_t capacity,size_t *size);
 /// 释放借用/流，幂等，不释放出版物持有的缓存。/ Release borrow/stream idempotently, keeping the publication-owned cache.
 void pn_epub_chapter_close(pn_epub_chapter_input_t *input);
+/// 逐条导出完整出版物，含元信息、manifest及spine，不保存章节/排版。游标初始0。/ Export complete metadata, manifest and spine one record per step, without chapters/layout; cursor starts at zero.
+pn_status_t pn_epub_snapshot_write(pn_epub_t *,pn_format_io_t *,uint32_t *);
+/// 仅内部可信包加载器调用，沿原预算重建模型；整包SHA成功前不得使用。/ Internal trusted-packet loaders only; rebuild under original budgets and never use before whole-packet SHA succeeds.
+pn_status_t pn_epub_snapshot_read(pn_epub_t *,pn_pool_t *,pn_zip_t *,pn_format_io_t *);

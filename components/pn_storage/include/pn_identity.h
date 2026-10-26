@@ -12,6 +12,18 @@
 typedef struct {
     uint8_t sha256[32]; ///< 完整原文件摘要 / Full original-file digest
 } pn_book_id_t;
+typedef struct {
+    uint32_t h[8]; ///< SHA状态 / SHA state
+    uint64_t bytes; ///< 已消费字节 / Consumed bytes
+    uint8_t block[64]; ///< 原算法分块 / Original algorithm block
+    size_t used; ///< 块内用量 / Block usage
+} pn_identity_accumulator_t;
+/// 借调用方有界状态按原软件算法累计完整流，不分配；finish后须重新init。/ Accumulate a whole stream with the original software algorithm in bounded caller state, without allocation; reinitialize after finish.
+void pn_identity_accumulator_init(pn_identity_accumulator_t *);
+/// 消费真实成功读写的字节；调用方保证有效指针和总长度不溢出。/ Consume bytes actually read/written; caller guarantees valid pointers and a nonoverflowing total length.
+void pn_identity_accumulator_update(pn_identity_accumulator_t *,const void *,size_t);
+/// 输出完整SHA并清理工作状态。/ Produce the full SHA and clear working state.
+void pn_identity_accumulator_finish(pn_identity_accumulator_t *,pn_book_id_t *);
 /// 流式读取，不按路径或大小猜身份；失败不改输出。调用方禁止文件并发变更。
 /// Stream content without guessing identity from path or size; errors preserve output. Caller prevents concurrent file mutation.
 pn_status_t pn_identity_file(pn_media_t *media, const pn_media_lease_t *lease,

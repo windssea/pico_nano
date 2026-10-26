@@ -239,6 +239,13 @@ static void memo_store(const pn_text_file_t *f,const pn_book_id_t *id){
     memo_t *m=memo_find(f,false);if(!m){m=&memo[memo_next];memo_next=(memo_next+1u)%MEMO_SLOTS;}
     *m=(memo_t){.media=f->media,.media_id=f->media->media_id,.epoch=f->lease.epoch,.writes=f->media->writes,.size=f->size,.id=*id,.used=true};strcpy(m->path,f->path);
 }
+pn_status_t pn_text_file_identity_complete(const pn_text_source_t *source,const pn_book_id_t *digest){
+    if(!source || !digest)return PN_INVALID;
+    if(source->read_at!=read_at || source->validate!=validate || !source->ctx)return PN_UNSUPPORTED;
+    pn_text_file_t *file=source->ctx;pn_status_t s=validate(file);if(s!=PN_OK)return s;
+    if(source->size!=file->size)return PN_INVALID;
+    file->identity=*digest;file->identity_known=true;memo_store(file,digest);return PN_OK;
+}
 pn_status_t pn_text_file_identity_cached(const pn_text_source_t *source,pn_book_id_t *out){
     if(!source || !out)return PN_INVALID;
     if(source->read_at!=read_at || source->validate!=validate || !source->ctx)return PN_EMPTY;

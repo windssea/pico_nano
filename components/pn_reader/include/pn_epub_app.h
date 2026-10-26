@@ -49,6 +49,8 @@ pn_status_t pn_epub_app_cache_idle(pn_epub_app_t *,uint64_t);
 void pn_epub_app_cache_activity(pn_epub_app_t *,uint64_t);
 /// 只查询未提交包，用于空闲调度；菜单/按压期间仍不可推进。/ Query uncommitted staging for idle scheduling only; menus/presses must still pause it.
 bool pn_epub_app_cache_pending(const pn_epub_app_t *);
+/// 仅供空闲调度：启动包正写入或已可准入，后台整书编译应让出；不表示页表完成。/ Idle scheduling only: a startup packet is active or ready for admission, so whole-book compilation should yield; never means index completion.
+bool pn_epub_app_bootstrap_pending(const pn_epub_app_t *);
 /// 下一页仍有字形待预热，调用方可缩短空闲间隔。/ Next-page glyphs remain to warm, so callers may shorten idle gaps.
 bool pn_epub_app_warm_pending(const pn_epub_app_t *app);
 /// 面板扫描（呈现回调阻塞）期间调用的一小步，为待确认页准备下一页；OK表示做了工作，EMPTY表示无事可做或应停止。

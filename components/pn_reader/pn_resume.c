@@ -8,6 +8,7 @@
 #include "pn_crc32.h"
 #include "pn_profile.h"
 #include "pn_sd_layout.h"
+#include "pn_reading_store.h"
 #include <dirent.h>
 #include <errno.h>
 #include <stdio.h>
@@ -46,12 +47,8 @@ typedef struct {
     bool owned, root_owned;
     uint8_t write_slot; ///< 取消时还原对应待写资格，不改变磁盘格式 / Restore the matching dirty flag on cancellation, without changing disk format
 } resume_t;
-static pn_resume_space_fn tf_space, state_space;
-static void *space_ctx;
-void pn_resume_space_ports(pn_resume_space_fn tf, pn_resume_space_fn state, void *ctx) {
-    tf_space = tf;
-    state_space = state;
-    space_ctx = ctx;
+void pn_resume_space_ports(pn_resume_space_fn tf,pn_resume_space_fn state,void *ctx) {
+    pn_reading_store_space_ports(tf,state,ctx);
 }
 static uint64_t get(const uint8_t *p, unsigned n) {
     uint64_t v = 0;
@@ -146,83 +143,9 @@ static bool paths(resume_t *r, unsigned slot) {
     strcat(r->rbak, ".bak");
     return true;
 }
-static pn_status_t capacity(const char *dir, bool state, uint64_t *n) {
-    pn_resume_space_fn f = state ? state_space : tf_space;
-    if (f)
-        return f(space_ctx, dir, n);
-#ifdef ESP_PLATFORM
-    (void)dir;
-    (void)n;
-    return PN_UNSUPPORTED;
-#else
-    struct statvfs fs;
-    if (statvfs(dir, &fs))
-        return PN_IO;
-    *n = (uint64_t)fs.f_bavail * fs.f_frsize;
-    return PN_OK;
-#endif
-}
-// 只回收本格式的闲置文件；所有任务同一产品owner串行，活动目标和根始终排除。/ Reclaim only this format's idle files; product tasks
-// are serialized and active targets/roots are excluded.
-static pn_status_t room(resume_t *r, const char *dir, bool state) {
-    uint64_t quota = state ? 16384u : 16u * 1024u * 1024u, reserve = state ? 65536u : 512u * 1024u, need = state ? 152u : LIMIT;
-    const char *target = state ? r->root : r->path;
-    for (unsigned pass = 0; pass < 128; pass++) {
-        pn_status_t s = checked(r);
-        if (s != PN_OK)
-            return s;
-        uint64_t total = 0, free_bytes;
-        char victim[384] = "";
-        time_t oldest = 0;
-        DIR *d = opendir(dir);
-        if (!d)
-            return PN_IO;
-        struct dirent *e;
-        unsigned entries = 0;
-        while ((e = readdir(d))) {
-            if (++entries > 8192) {
-                closedir(d);
-                return PN_LIMIT;
-            }
-            size_t n = strlen(e->d_name), base = state ? 71u : 70u;
-            if (n != base && n != base + 4)
-                continue;
-            bool own = true;
-            for (unsigned j = 0; j < 64; j++)
-                if (!strchr("0123456789abcdef", e->d_name[j]))
-                    own = false;
-            if (!own || e->d_name[64] != '.' || e->d_name[65] < '0' || e->d_name[65] > '1' ||
-                strncmp(e->d_name + 66, state ? ".pnrt" : ".pnr", base - 66) ||
-                (n > base && strcmp(e->d_name + base, ".tmp") && strcmp(e->d_name + base, ".bak")))
-                continue;
-            char path[384];
-            int k = snprintf(path, sizeof path, "%s/%s", dir, e->d_name);
-            struct stat info;
-            if (k < 0 || (size_t)k >= sizeof path || rstat(path, &info) || !S_ISREG(info.st_mode) || info.st_size < 0)
-                continue;
-            total += (uint64_t)info.st_size;
-            if (!strncmp(path, target, strlen(target)))
-                continue;
-            if (!*victim || info.st_mtime < oldest) {
-                strcpy(victim, path);
-                oldest = info.st_mtime;
-            }
-        }
-        closedir(d);
-        s = capacity(dir, state, &free_bytes);
-        if (s != PN_OK)
-            return s;
-        if (total + need <= quota && free_bytes >= need + reserve)
-            return PN_OK;
-        if (!*victim)
-            return PN_EMPTY;
-        s = checked(r);
-        if (s != PN_OK)
-            return s;
-        if (remove(victim))
-            return PN_IO;
-    }
-    return PN_EMPTY;
+static pn_status_t room(resume_t *r,const char *dir,bool state) {
+    pn_status_t s=checked(r);if(s!=PN_OK)return s;
+    return pn_reading_store_room(state?r->state:r->media,state?&r->trust:&r->writer,dir,state?r->root:r->path,state,state?152u:LIMIT);
 }
 pn_status_t pn_resume_bind(pn_resume_t *h, pn_pool_t *pool, pn_media_t *media, const pn_media_lease_t *guard, pn_media_t *state,
                            const pn_media_lease_t *trust, const char *tf, const char *root, const pn_book_id_t *book,
