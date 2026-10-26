@@ -16,5 +16,7 @@ typedef struct {
 /// 首次复制已有的已校验预览；同一目标的重试不重查TF。失败只固定展示回退，取消不提交；不授权正文访问。
 /// Copy an already-checked preview once; retries for the same target never requery TF. Failures freeze visual fallback, cancellation never commits, and no body access is authorized.
 pn_status_t pn_opening_view_resolve(pn_opening_view_t *,pn_pool_t *,pn_media_t *,const char *cache_dir,const pn_catalog_item_t *,const pn_shelf_covers_t *);
+/// 仅复制路径匹配的既有内存展示，不读TF/取得租约；可显示旧封面，但绝不授予正文来源资格。/ Copy only matching existing RAM artwork without TF reads or leases; old cover art never grants body-source authority.
+pn_status_t pn_opening_view_resolve_resident(pn_opening_view_t *,pn_pool_t *,const pn_catalog_item_t *,const pn_shelf_covers_t *);
 /// 成功首屏、取消、离开或新请求时释放；不改原书、进度、租约或缓存文件。/ Release on confirmed first page, cancellation, departure or a new request; never modify source, progress, leases or cache files.
 void pn_opening_view_close(pn_opening_view_t *);

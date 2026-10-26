@@ -50,6 +50,7 @@ void app_main(void);
 static jmp_buf end;
 static void (*worker)(void *);
 static unsigned vcom_reads,presents,board_calls,mounts,poweroffs,pclk_calls,clear_calls,gc_updates;
+static void (*present_observer)(void); ///< 可选成功呈现计时，不改变硬件桩行为 / Optional successful-presentation observer without altering the hardware double
 static unsigned area_full_calls,area_diff_calls;static EpdRect last_full_area,last_diff_area;static bool footer_fault;
 static int last_pclk;
 static bool underrun,panel_fault;
@@ -74,7 +75,7 @@ void epd_poweroff(void){poweroffs++;}
 void read_pico_epd_set_pclk(int mhz){pclk_calls++;last_pclk=mhz;}
 void epd_clear(void){clear_calls++;}
 // epdiy无论结果都把前缓冲回写后缓冲。/ epdiy copies the front buffer into the back buffer regardless of the result.
-enum EpdDrawError epd_hl_update_screen_from_white(EpdiyHighlevelState *h,enum EpdDrawMode m,int t){(void)m;(void)t;presents++;if(h && h->back_fb)memcpy(h->back_fb,stub_front,sizeof stub_front);if(panel_fault)return EPD_DRAW_FAILURE;if(underrun && presents==1)return EPD_DRAW_EMPTY_LINE_QUEUE;return EPD_DRAW_SUCCESS;}
+enum EpdDrawError epd_hl_update_screen_from_white(EpdiyHighlevelState *h,enum EpdDrawMode m,int t){(void)m;(void)t;presents++;if(h && h->back_fb)memcpy(h->back_fb,stub_front,sizeof stub_front);if(panel_fault)return EPD_DRAW_FAILURE;if(underrun && presents==1)return EPD_DRAW_EMPTY_LINE_QUEUE;if(present_observer)present_observer();return EPD_DRAW_SUCCESS;}
 static const void *last_screen_wave; ///< 整屏提交时实际使用的波形身份 / Waveform identity used at a full-screen submission
 static enum EpdDrawMode last_screen_mode; ///< 整屏提交实际模式 / Mode used at a full-screen submission
 static unsigned screen_full_calls; ///< 整屏提交次数，不包含白场恢复 / Full-screen submissions excluding from-white recovery

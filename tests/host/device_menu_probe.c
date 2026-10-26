@@ -7,7 +7,8 @@
 #include "test_device_boot.c"
 #undef read_pico_sd_get_info
 #undef main
-esp_err_t read_pico_sd_get_info(read_pico_sd_info_t *info){if(getenv("PN_MENU_COLD_BOOK") || getenv("PN_SWITCH_A") || getenv("PN_TAKEOVER_BOOK") || getenv("PN_IDENTITY_PRIORITY")){memset(info,0,sizeof *info);info->present=info->mounted=true;return ESP_OK;}return fixture_sd_get_info(info);}
+static bool feedback_async_mount;
+esp_err_t read_pico_sd_get_info(read_pico_sd_info_t *info){if(feedback_async_mount)return fixture_sd_get_info(info);if(getenv("PN_MENU_COLD_BOOK") || getenv("PN_SWITCH_A") || getenv("PN_TAKEOVER_BOOK") || getenv("PN_IDENTITY_PRIORITY") || getenv("PN_FEEDBACK_BOOK")){memset(info,0,sizeof *info);info->present=info->mounted=true;return ESP_OK;}return fixture_sd_get_info(info);}
 #ifndef PN_DEVICE_MAIN_SOURCE
 #define PN_DEVICE_MAIN_SOURCE "../../main/app_main.c"
 #endif
@@ -24,6 +25,10 @@ static struct {FILE *file;unsigned kind;} tracked[128];
 static size_t face_opens,glyph_loads,glyph_advances,glyph_renders,stats;
 static uint64_t glyph_us;
 static bool fail_font_stat;
+static bool feedback_observe;
+static uint64_t feedback_started,feedback_first;
+static uint64_t feedback_open_us,feedback_next_us;
+static size_t feedback_font_bytes;
 static uint64_t monotonic_us(void){struct timespec t;assert(!clock_gettime(CLOCK_MONOTONIC,&t));return (uint64_t)t.tv_sec*1000000u+(uint64_t)t.tv_nsec/1000u;}
 static uint64_t open_profile_clock(void *ctx){(void)ctx;return monotonic_us();}
 static void open_profile_emit(void *ctx,const pn_profile_event_t *e){
@@ -39,7 +44,7 @@ FILE *__wrap_fopen(const char *path,const char *mode){
 }
 static unsigned kind_of(FILE *file){for(size_t i=0;i<128;i++)if(tracked[i].file==file)return tracked[i].kind;assert(false);return OTHER_IO;}
 size_t __real_fread(void *,size_t,size_t,FILE *);
-size_t __wrap_fread(void *out,size_t size,size_t count,FILE *file){size_t n=__real_fread(out,size,count,file);if(watching){unsigned k=kind_of(file);counts[k].reads++;counts[k].bytes+=n*size;}return n;}
+size_t __wrap_fread(void *out,size_t size,size_t count,FILE *file){size_t n=__real_fread(out,size,count,file);if(watching){unsigned k=kind_of(file);counts[k].reads++;counts[k].bytes+=n*size;if(feedback_observe && !feedback_first && k==FONT_IO)feedback_font_bytes+=n*size;}return n;}
 int __real_fseek(FILE *,long,int);
 int __wrap_fseek(FILE *file,long offset,int origin){if(watching)counts[kind_of(file)].seeks++;return __real_fseek(file,offset,origin);}
 int __real_fclose(FILE *);
@@ -179,7 +184,10 @@ static void cold_book_probe(const char *path){
     watching=false;if(!reader_active() || status_page || shelf_mode || presents!=before+2)fprintf(stderr,"cold result reader=%d status=%d shelf=%d shown=%u expected=%u\n",reader_active(),status_page,shelf_mode,presents,before+2);
     assert(reader_active() && !status_page && !shelf_mode && presents==before+2);
     assert(pn_epub_app_last_confirmed(&epub));opening_frame(0);
-    assert(fixture_reader_step(PN_APP_NEXT,now_ms())==PN_OK);opening_frame(1);
+    if(feedback_observe)feedback_open_us=monotonic_us()-feedback_started;
+    uint64_t next_started=monotonic_us();assert(fixture_reader_step(PN_APP_NEXT,now_ms())==PN_OK);
+    if(feedback_observe)feedback_next_us=monotonic_us()-next_started;
+    opening_frame(1);
     assert(fixture_reader_step(PN_APP_PREVIOUS,now_ms())==PN_OK);opening_frame(2);
     assert(stop_reader());printf("cold_open polls=%u body_once=1 loader_once=1 status=0 used=%zu peak=%zu\n",polls,pool.used,pool.peak);
 }
@@ -263,6 +271,57 @@ static void priority_probe(void){
     printf("priority_probe ok\n");
 }
 #endif
+/// 真实设备控制层的冷开首反馈、热/冷唤醒和挂载收口；计时只代表主机端口。/ Real device-controller cold feedback, warm/cold wake and mount barriers; timings describe host ports only.
+static void feedback_present(void){if(feedback_observe && !feedback_first)feedback_first=monotonic_us();}
+static void feedback_probe(const char *path){
+    library();system_font_release();feedback_observe=true;feedback_started=monotonic_us();feedback_first=feedback_font_bytes=0;present_observer=feedback_present;
+    cold_book_probe(path);assert(feedback_first>=feedback_started);
+    printf("feedback_open first_us=%llu open_us=%llu next_us=%llu font_before=%zu peak=%zu limit=%zu\n",(unsigned long long)(feedback_first-feedback_started),(unsigned long long)feedback_open_us,(unsigned long long)feedback_next_us,feedback_font_bytes,pool.peak,pool.limit);
+#ifdef PN_FEEDBACK_OPTIMIZED
+    assert(!feedback_font_bytes);
+    feedback_observe=false;present_observer=NULL;
+    // 扫描期先完成来源阶段，不绑定应急字体；取消保留任务，原系统字体就绪后正常接管。
+    // Scan-time source preparation never binds emergency fonts; cancellation retains the job and normal setup follows the original system face.
+    system_font_release();memset(counts,0,sizeof counts);face_opens=0;watching=true;
+    assert(pn_epub_app_open_job_begin(&foreground_open,&pool,&sd_media,path,NULL,"/data/progress",PN_STYLE_DEFAULT_PIXELS,now_ms())==PN_OK);
+    opening_overlap=opening_sources_only=true;opening_overlap_result=PN_BUSY;unsigned source_ticks=0;
+    while(reader_overlap(NULL)==PN_OK)assert(++source_ticks<100000);
+    assert(foreground_open.impl && !epub.impl && !face_opens && !counts[FONT_IO].bytes && pn_epub_app_open_job_source_step(&foreground_open)==PN_EMPTY);
+    pn_cancel_scope_t cancelled;pn_cancel_enter(&cancelled,cancelled_probe,NULL);assert(pn_epub_app_open_job_source_step(&foreground_open)==PN_CANCELLED);pn_cancel_leave(&cancelled);
+    opening_overlap=opening_sources_only=false;system_font_ready();pn_status_t advanced;
+    do{advanced=pn_epub_app_open_job_advance(&foreground_open,&epub);}while(advanced==PN_BUSY);
+    assert(advanced==PN_OK && pn_epub_app_discard_unshown(&epub)==PN_OK);watching=false;
+    switch_open(path,false,NULL,0);assert(pn_epub_app_suspend(&epub,now_ms())==PN_OK);
+    void *retained=epub.impl;reader_suspended=locked=lock_slept=true;stub_media_unchanged=true;unsigned before=presents;
+    resume_reader();assert(epub.impl==retained && reader_active() && !locked && !opening && presents==before+1);
+    assert(pn_epub_app_suspend(&epub,now_ms())==PN_OK);reader_suspended=locked=lock_slept=true;stub_media_unchanged=false;
+    before=presents;feedback_observe=true;feedback_first=feedback_font_bytes=0;feedback_started=monotonic_us();present_observer=feedback_present;watching=true;
+    resume_reader();assert(opening && loading_shown && presents==before+1 && !feedback_font_bytes);
+    unsigned ticks=0;while(opening){assert(++ticks<100000);assert(tick_opening());}
+    assert(reader_active() && !locked && presents==before+2);watching=feedback_observe=false;present_observer=NULL;
+    assert(stop_reader());system_font_release();stub_media_unchanged=true;lock_slept=false;
+    // 首次挂载尚未完成时取消，再重试接续同一个BSP探测，不多次发起挂载。
+    // Cancel while the initial mount is pending, then retry the same BSP probe without restarting the mount.
+    feedback_async_mount=sd_async=true;sd_probing=false;sd_polls=0;strcpy(selected_path,path);selected_format=PN_BOOK_EPUB;
+    before=presents;start_reader();assert(opening && opening_mount && sd_recovery.pending && loading_shown && presents==before+1 && !tick_opening());
+    unsigned mounts_before=sd_remounts;opening_cancel(PN_KEY_2);assert(!opening && !opening_mount && !sd_recovery.pending && !*selected_path);
+    before=presents;tick_sd_recovery(now_ms()+1000);assert(presents==before && !reader_active());
+    strcpy(selected_path,path);start_reader();assert(opening && opening_mount && sd_recovery.pending && sd_remounts==mounts_before);
+    unsigned mounted_ticks=0;while(opening_mount){assert(++mounted_ticks<8);tick_sd_recovery(now_ms()+1000+mounted_ticks*100);}
+    if(opening_mount || !foreground_open.impl)fprintf(stderr,"mount retry pending=%u opening=%u mount=%u fg=%u reader=%u polls=%u probing=%u available=%u status=%u\n",sd_recovery.pending,opening,opening_mount,foreground_open.impl!=NULL,reader_active(),sd_polls,sd_probing,sd_media.available,status_page);
+    assert(!opening_mount && foreground_open.impl);
+    ticks=0;while(opening){assert(++ticks<100000);assert(tick_opening());}assert(reader_active() && sd_remounts==mounts_before);
+    assert(stop_reader());system_font_release();
+    // 挂载失败清除输入门，显示可重试错误，不伪造正文或后台继续开书。
+    // Mount failure clears the input gate and shows a retryable error, without publishing a body or continuing the cancelled open.
+    sd_probing=false;sd_polls=0;start_reader();assert(opening && opening_mount && sd_recovery.pending);
+    sd_probing=false;tick_sd_recovery(now_ms()+1000);assert(!opening && !opening_mount && !sd_recovery.pending && !reader_active() && status_page && !opening_view.resolved);
+    feedback_async_mount=sd_async=false;assert(stop_reader());pn_opening_view_close(&opening_view);system_font_release();
+    puts("feedback_boundaries warm_direct=1 cold_one_loader=1 mount_cancel_retry=1 mount_fail_released=1");
+#else
+    feedback_observe=false;present_observer=NULL;
+#endif
+}
 int main(void){
     if(getenv("PN_OPEN_PROFILE"))pn_profile_port(open_profile_clock,open_profile_emit,NULL);
     assert(pn_pool_init(&pool,6u*1024u*1024u,NULL,NULL,NULL)==PN_OK);assert(read_pico_init(&hardware)==ESP_OK);
@@ -272,6 +331,7 @@ int main(void){
     assert(pn_catalog_index_init(&catalog_index,&pool,&sd_media,book_directory,PN_SD_MOUNT "/" PN_SD_INDEX_CACHE)==PN_OK);
     pn_status_t built=pn_catalog_index_build(&catalog_index);assert(built==PN_OK || built==PN_EMPTY);
     shelf_prefs.columns=3;
+    const char *feedback=getenv("PN_FEEDBACK_BOOK");if(feedback){feedback_probe(feedback);goto closed;}
     const char *cold=getenv("PN_MENU_COLD_BOOK");if(cold){library();cold_book_probe(cold);goto closed;}
 #if PN_TEST_FOREGROUND_OPEN
     {const char *sa=getenv("PN_SWITCH_A"),*sb=getenv("PN_SWITCH_B");if(sa && sb){switch_probe(sa,sb);goto closed;}

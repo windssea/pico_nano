@@ -714,6 +714,14 @@ pn_status_t pn_epub_app_open_job_step(pn_epub_open_job_t *job,pn_epub_app_t *out
     if(s==PN_OK){open_job_report(r,s);r->app=NULL;return pn_epub_app_open_job_close(job);}
     return s;
 }
+pn_status_t pn_epub_app_open_job_source_step(pn_epub_open_job_t *job){
+    if(!job || !job->impl)return PN_INVALID;
+    open_job_t *r=job->impl;pn_status_t s=pn_cancel_checkpoint();if(s!=PN_OK)return s;
+    s=pn_media_validate(r->app->media,&r->app->book_lease);if(s!=PN_OK)return s;
+    if(r->status!=PN_BUSY)return r->status;
+    if(r->stage>=5)return PN_EMPTY;
+    pn_epub_app_t unpublished={0};return pn_epub_app_open_job_step(job,&unpublished);
+}
 pn_status_t pn_epub_app_open_job_advance(pn_epub_open_job_t *job,pn_epub_app_t *out){
     uint64_t began=pn_profile_time();pn_status_t s=PN_BUSY;
     for(unsigned step=0;step<32u;step++){

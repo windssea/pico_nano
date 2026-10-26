@@ -45,7 +45,7 @@ static const char *media_reason="not-entered";
 bool pn_device_sleep_media_unchanged(void){return media_reason==NULL;}
 const char *pn_device_sleep_media_reason(void){return media_reason?media_reason:"unchanged";}
 /// 保留首次原因，不把后续共享中断覆盖成另一种误导原因。/ Retain the first reason rather than overwrite it with a later shared interrupt.
-static void media_uncertain(const char *reason){if(!media_reason)media_reason=reason;}
+static void media_uncertain(const char *reason){if(!media_reason){media_reason=reason;ESP_LOGW(TAG,"Sleep continuity lost reason=%s at_ms=%lld",reason,(long long)now_ms());}}
 /// 退出时归还本适配器的显式唤醒源，不能污染之后的自动浅睡。/ Release this adapter's explicit wake sources without leaking them into later automatic light sleep.
 static void wake_sources_close(void){
     (void)gpio_wakeup_disable((gpio_num_t)READ_PICO_IOE_INT_GPIO);
@@ -64,7 +64,7 @@ bool pn_device_sleep_until_key(void){
     // 不能仅依赖读清式扩展器中断：500ms复核PMU队列，不刷新屏幕，也不访问TF。
     // A read-cleared expander IRQ cannot be the only wake path: check the PMU queue every 500 ms without drawing or accessing TF.
     if(esp_sleep_enable_timer_wakeup(500000)!=ESP_OK){media_uncertain("timer-setup");wake_sources_close();ESP_LOGW(TAG,"Wake timer unavailable; staying awake");return false;}
-    unsigned poll_failures=0;
+    unsigned poll_failures=0,timers=0,gpios=0,other=0,pending=0,held=0;
     for(;;){
         // 先读PMU再清扩展器；清中断不代表PMU队列为空，首次入睡前的新按键也有效。
         // Read the PMU before clearing the expander: clearing an IRQ does not empty the PMU queue, and a new key before the first sleep is valid too.
@@ -77,11 +77,11 @@ bool pn_device_sleep_until_key(void){
         if(key || (valid && (read_pico_pmu_get()->key_state&1u)))break;
         poll_failures=valid?0:poll_failures+1;
         if(poll_failures>=3){media_uncertain("pmu-status");wake_sources_close();ESP_LOGW(TAG,"PMU status unavailable; returning to awake key polling");return false;}
-        if(low)media_uncertain("pending-irq");
+        if(low){pending++;media_uncertain("pending-irq");}
         read_pico_clear_ioe_int();
         // 入睡前中断线仍为低：先处理积压事件，不带着挂起唤醒入睡。/ Line still low before sleeping: drain pending events instead of sleeping with a pending wake.
         if(gpio_get_level((gpio_num_t)READ_PICO_IOE_INT_GPIO)==0){
-            media_uncertain("held-irq");vTaskDelay(pdMS_TO_TICKS(20));continue;
+            held++;media_uncertain("held-irq");vTaskDelay(pdMS_TO_TICKS(20));continue;
         }
 #if PN_LOCK_SLEEP
         if(esp_light_sleep_start()!=ESP_OK){media_uncertain("sleep-failed");wake_sources_close();ESP_LOGW(TAG,"Light sleep failed; staying awake");return false;}
@@ -90,6 +90,7 @@ bool pn_device_sleep_until_key(void){
         // 诊断：以同周期延时代替浅睡，保留PMU复核与按键空闲判定。/ Diagnostic: a delay of the same period replaces light sleep, keeping PMU checks and key-idle rules.
         vTaskDelay(pdMS_TO_TICKS(500));esp_sleep_wakeup_cause_t cause=ESP_SLEEP_WAKEUP_TIMER;
 #endif
+        if(cause==ESP_SLEEP_WAKEUP_TIMER)timers++;else if(cause==ESP_SLEEP_WAKEUP_GPIO)gpios++;else other++;
         key=read_pico_pmu_take_key_wakeup();valid=read_pico_pmu_poll()==ESP_OK && read_pico_pmu_get()->status_ok;
         if(key || (valid && (read_pico_pmu_get()->key_state&1u)))break;
         poll_failures=valid?0:poll_failures+1;
@@ -100,5 +101,7 @@ bool pn_device_sleep_until_key(void){
     // KEY_DOWN可先唤醒，松开后才产生KEY_SHORT；完整消费这一按键周期，避免同一次按键再次锁屏。
     // KEY_DOWN can wake before KEY_SHORT arrives on release; consume the whole press so it cannot lock again.
     if(!wait_key_idle(800,false,NULL)){ESP_LOGW(TAG,"Wake key not idle; staying locked until release");return false;}
-    ESP_LOGI(TAG,"Woken by power key");return true;
+    // 汇总只在退出睡眠时输出，不在500ms复核中增加日志或磁盘写入。/ Summarize only on leaving sleep, without logging or disk writes on the 500 ms checks.
+    (void)timers;(void)gpios;(void)other;(void)pending;(void)held;
+    ESP_LOGI(TAG,"Woken by power key light_sleep=%u timer=%u gpio=%u other=%u pending=%u held=%u continuity=%s",(unsigned)PN_LOCK_SLEEP,timers,gpios,other,pending,held,pn_device_sleep_media_reason());return true;
 }

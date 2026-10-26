@@ -63,6 +63,8 @@ pn_status_t pn_font_prerender(pn_font_t *,pn_frame_t *,uint32_t,int32_t,int,pn_f
 /// 常驻子集源，不分配、不访问卡；没有完整中文fallback承诺。
 /// Resident HarmonyOS UI primary with a separate resident CJK subset fallback; no card access.
 pn_text_source_t pn_font_builtin_source(void);
+/// 固定Flash界面主字体，忽略已配置的外置系统字体；应急反馈不等待TF。/ Fixed Flash UI primary, ignoring configured external system fonts so emergency feedback never waits for TF.
+pn_text_source_t pn_font_resident_ui_source(void);
 /// 内置HarmonyOS默认主字体；汉字由独立回退链绘制，不访问存储卡。/ Resident HarmonyOS primary; CJK uses a separate fallback chain, without card access.
 pn_text_source_t pn_font_reading_source(void);
 /// 校验引擎实际捕获的保留源；仅接受已验证文件或固件内置源，不画字形。/ Verify the engine's captured retained source; accept only verified files or firmware-resident sources, without drawing glyphs.

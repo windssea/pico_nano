@@ -52,6 +52,13 @@ int main(int argc,char **argv){
     }
 #ifdef PN_OPENING_FIXED
     assert(!swaps);size_t held=pool.used;pn_opening_view_close(&view);assert(pool.used<held);baseline=pool.used;
+    // 介质已失效仍可复制旧的展示卡，不取来源资格；原普通查询继续冻结同次展示。
+    // Expired media still permits copying old presentation art without source authority; ordinary resolution keeps the same frozen display.
+    assert(pn_media_detach(&media)==PN_OK);
+    assert(pn_opening_view_resolve_resident(&view,&pool,&page->items[0],covers)==PN_OK && view.preview && view.preview->ready && !pn_media_active(&media));
+    assert(!strcmp(view.preview->display.title,"Publication title"));pn_book_preview_t *resident=view.preview;
+    assert(pn_opening_view_resolve(&view,&pool,&media,argv[1],&page->items[0],covers)==PN_OK && view.preview==resident);
+    pn_opening_view_close(&view);assert(pn_media_attach(&media,3)==PN_OK && pool.used==baseline);
     // 换书不能借前一本快照；内存不足后的回退也不在同次重试中升级为真封面。
     // A new book never borrows the previous snapshot; low-memory fallback cannot upgrade artwork mid-attempt either.
     pn_catalog_item_t other=page->items[0];strcat(other.path,".missing");assert(pn_opening_view_resolve(&view,&pool,&media,argv[1],&other,covers)==PN_OK && !view.preview);

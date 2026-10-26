@@ -85,6 +85,9 @@ bool pn_epub_app_font_recovery_pending(const pn_epub_app_t *);
 pn_status_t pn_epub_app_verify_step(pn_epub_app_t *);
 /// 目录/本地头逐步4096B/8读，SHA最多32KiB，出版物XML每步4KiB；状态/字体分阶段。全部成功才交出app；错误须close。/ Directory/local-header steps allow 4096 bytes/eight reads, SHA at most 32 KiB and publication XML 4 KiB; state/fonts are separate stages. Transfer only on full success; close after errors.
 pn_status_t pn_epub_app_open_job_step(pn_epub_open_job_t *,pn_epub_app_t *);
+/// 只推进原书验证和出版物结构，禁止绑定字体或移交正文；EMPTY表示可交回正常步骤，BUSY可继续。/ Advance only source verification/publication structures without binding fonts or handing off a body; EMPTY resumes normal steps, BUSY continues.
+/// EMPTY仅为调度边界，不授予来源证明；原任务的完整验证与缓存准入规则仍须执行。/ EMPTY is only a scheduling boundary, never source proof; retain the original full-verification and cache-admission rules.
+pn_status_t pn_epub_app_open_job_source_step(pn_epub_open_job_t *job);
 /// 前台合并最多32步/8ms软预算，每步仍检查取消；不在面板扫描中调用。/ Batch at most 32 steps under an 8 ms foreground soft budget, retaining per-step cancellation; never call during panel scans.
 pn_status_t pn_epub_app_open_job_advance(pn_epub_open_job_t *,pn_epub_app_t *);
 /// 已识别重开有500ms机会窗口，快完成时省去加载页；冷开立即反馈；无时钟时立即反馈。/ Identified reopens get a 500 ms opportunity to finish without a loader; cold opens and unavailable clocks request immediate feedback.

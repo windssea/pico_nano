@@ -421,9 +421,10 @@ static pn_status_t harmony_read(void *ctx,uint64_t offset,uint8_t *out,size_t ca
     memcpy(out,pn_harmony_font_bytes+offset,count);*n=count;return PN_OK;
 }
 static pn_status_t harmony_ui_read(void *ctx,uint64_t off,uint8_t *out,size_t cap,size_t *n){return harmony_read(ctx,off,out,cap,n);}
+pn_text_source_t pn_font_resident_ui_source(void){return (pn_text_source_t){NULL,pn_harmony_font_size,harmony_ui_read,NULL};}
 pn_text_source_t pn_font_builtin_source(void){
     if(system_source.read_at && system_source.validate && system_source.validate(system_source.ctx)==PN_OK)return system_source;
-    return (pn_text_source_t){NULL,pn_harmony_font_size,harmony_ui_read,NULL};
+    return pn_font_resident_ui_source();
 }
 
 static pn_status_t reading_read(void *ctx,uint64_t offset,uint8_t *out,size_t cap,size_t *n){
