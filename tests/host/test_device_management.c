@@ -36,6 +36,21 @@ pn_status_t pn_device_transfer_close(pn_device_transfer_t *s){assert(s->impl);s-
 pn_status_t pn_device_transfer_take_network(pn_device_transfer_t *s,pn_network_credentials_t *c,bool *f){(void)s;(void)c;(void)f;return PN_EMPTY;}
 #include "../../main/app_main.c"
 #include "device_reader_step.h"
+/// 跨介质实例重读诊断A/B日志；破损最新槽退回前一完整阶段，不改变书籍状态。/ Reopen diagnostic A/B records across media instances; a torn latest slot retains the previous complete stage without book changes.
+static void wake_record_checks(void){
+    char root[]="/tmp/pn-wake-record-XXXXXX";assert(mkdtemp(root));pn_media_t media;pn_media_init(&media);assert(pn_media_attach(&media,1)==PN_OK);
+    assert(wake_trace_journal(&media,root,"wake-v1 stage=sleep-entry",NULL)==PN_OK);
+    const char *latest="wake-v1 stage=cold-begin reason=nonkey-wake";
+    assert(wake_trace_journal(&media,root,latest,NULL)==PN_OK);
+    assert(!pn_media_active(&media) && pn_media_detach(&media)==PN_OK && pn_media_attach(&media,2)==PN_OK);
+    pn_record_t record;assert(wake_trace_journal(&media,root,NULL,&record)==PN_OK && record.sequence==2 && record.size==strlen(latest) && !memcmp(record.payload,latest,record.size));
+    char a[256],b[256];snprintf(a,sizeof a,"%s/wake-diag.a",root);snprintf(b,sizeof b,"%s/wake-diag.b",root);
+    // 两槽最多552字节；只损坏序号2的槽，不删除旧记录。/ Two slots total at most 552 bytes; damage sequence two only, retaining the old record.
+    FILE *file=fopen(b,"r+b");assert(file);assert(fseek(file,20,SEEK_SET)==0);int byte=fgetc(file);assert(byte!=EOF && fseek(file,20,SEEK_SET)==0 && fputc(byte^1,file)!=EOF && fclose(file)==0);
+    assert(wake_trace_journal(&media,root,NULL,&record)==PN_OK && record.sequence==1 && record.size==strlen("wake-v1 stage=sleep-entry") && !memcmp(record.payload,"wake-v1 stage=sleep-entry",record.size));
+    assert(pn_media_detach(&media)==PN_OK && wake_trace_journal(&media,root,"wake-v1 stage=forbidden",NULL)==PN_STALE_MEDIA);
+    assert(!unlink(a) && !unlink(b) && !rmdir(root));
+}
 static bool feedback_cancelled(void *ctx){(void)ctx;return true;}
 typedef struct {unsigned calls,limit;} font_cancel_t;
 static bool font_cancel_after(void *ctx){font_cancel_t *c=ctx;return ++c->calls>=c->limit;}
@@ -94,6 +109,7 @@ static void home_reading_key_checks(void){
     a.dated=false;before=home_reading_key(1,&a);a.week_ms[0]+=70000;assert(home_reading_key(1,&a)==before);
 }
 int main(void){
+    wake_record_checks();
     /* 延后日志只重播唤醒快照，不改变输入/显示，也不跟随之后变化的介质标记。/ Deferred logs replay the wake snapshot without input/display effects or following later media-verdict changes. */
     wake_trace.lock_at=100;lock_slept=true;stub_media_unchanged=false;reader_suspended=true;wake_trace_capture(300);
     assert(wake_trace.locked_ms==200 && wake_trace.retained && !wake_trace.continuity && !strcmp(wake_trace.reason,"stub-uncertain") && wake_trace.left==5);

@@ -33,7 +33,7 @@ config PN_WAKE_TRACE
     bool "Deferred wake trace (diagnostic images only)"
     default n
     help
-        Retain a small owner-only wake snapshot and repeat it after USB reconnects.
+        Retain an owner-only wake snapshot and small internal A/B checkpoints for replay after restart.
         Does not change sleep or media validation; never enable in release images.
 config PN_DIAG_NO_AUTO_LOCK
     bool "Disable idle auto-lock (diagnostic images only)"

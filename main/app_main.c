@@ -20,6 +20,7 @@
 #include "pn_semantic_file.h"
 #include "pn_resume.h"
 #include "pn_hot_session.h"
+#include "pn_opening_view.h"
 #include "pn_identity_cache.h"
 #include "pn_toc_ui.h"
 #include "pn_reader_input.h"
@@ -205,6 +206,9 @@ static pn_style_ui_t styles;
 static pn_jump_ui_t jump_ui; ///< 进度跳转面板 / Progress jump panel
 static pn_font_ui_t fonts;
 static bool panel_known,data_ready,locked,status_page,shelf_mode;
+#if defined(CONFIG_PN_WAKE_TRACE) && CONFIG_PN_WAKE_TRACE
+static void wake_trace_ready(uint64_t now);
+#endif
 #if PN_DEVICE_TEST_CONSOLE
 // 仅显示任务调用：panel_known与后缓冲都由显示owner维护。/ Display task only: both panel_known and the back buffer are maintained by the display owner.
 static bool test_console_shown(const uint8_t **buffer,size_t *bytes){*buffer=hardware.hl.back_fb;*bytes=hardware.hl.back_fb?684u*1216u/2u:0;return panel_known;}
@@ -248,6 +252,7 @@ static bool list_mode; ///< 书架列表模式（每页5本）/ Shelf list mode 
 static size_t shelf_per_page(void){return home_mode?3u:list_mode || (!recent_mode && !fav_mode && *search_query)?5u:(size_t)shelf_prefs.columns*3u;}
 static pn_book_id_t selected_expected;
 static char selected_path[PN_CATALOG_PATH_MAX];
+static pn_opening_view_t opening_view; ///< 同一次开书/解锁的自有展示快照，不作来源凭据 / Owned presentation snapshot for one opening/unlock, never source credentials
 static bool identity_takeover_active; ///< 点击正在预计算的书，异步接续后再快开 / Clicked a book already being precomputed; continue it asynchronously before fast open
 static char identity_takeover_path[PN_CATALOG_PATH_MAX];
 static void identity_job_stop(void);
@@ -1281,6 +1286,7 @@ static void system_font_ready(void){
     }
 }
 static void show_shelf_profile(const char *cursor,bool previous,pn_refresh_t profile){
+    pn_opening_view_close(&opening_view);
     pn_cover_work_abort(&cover_work);
     system_font_ready();
     pn_wallpaper_mask_close(&lock_mask);
@@ -1380,10 +1386,10 @@ static pn_status_t show_loading_phase(const char *path,unsigned phase){
         {
             pn_catalog_item_t item={.format=selected_format};size_t path_length=strlen(path);
             bool path_fits=path_length<sizeof item.path;if(path_fits)memcpy(item.path,path,path_length+1);
-            pn_book_preview_t *preview=pn_alloc_optional(&pool,PN_MEM_UI,sizeof *preview);
-            if(preview){memset(preview,0,sizeof *preview);if(path_fits)(void)pn_cover_preview(&pool,&sd_media,cover_cache,&item,shelf_covers,preview);}
+            if(path_fits)status=pn_opening_view_resolve(&opening_view,&pool,&sd_media,cover_cache,&item,shelf_covers);
+            else status=PN_INVALID;
             char detail[128];if(index_gate)snprintf(detail,sizeof detail,"已建立 %u 页 · 中间键取消",(unsigned)opening_index.pages);
-            status=pn_reader_opening_render(&font,&frame,title,preview,index_gate?detail:NULL);pn_free(preview);
+            if(status==PN_OK)status=pn_reader_opening_render(&font,&frame,title,opening_view.preview,index_gate?detail:NULL);
         }
     }
     if(status==PN_OK)status=present(NULL,&frame,panel_known?PN_REFRESH_GL16:PN_REFRESH_GC16);
@@ -1406,6 +1412,7 @@ static pn_status_t show_loading_motion(unsigned phase){
 #endif
 static void reader_open_result(pn_status_t status){
     if(index_gate && status==PN_BUSY)return;
+    pn_opening_view_close(&opening_view);
     if(opening_request_timed){uint64_t end=pn_profile_time();pn_profile_observe(&pool,"epub.open.request",status,end>=opening_requested_us?end-opening_requested_us:0,NULL);opening_request_timed=false;}
     if(status==PN_CANCELLED){pn_cancel_scope_t shield;pn_cancel_enter(&shield,NULL,NULL);if(stop_reader())show_shelf("",false);pn_cancel_leave(&shield);return;}
     if(status==PN_STALE_JOB){if(stop_reader()){recent_mode=false;selected_identified=false;selected_path[0]=0;message("书籍内容已改变","从全部书架重新选择\n历史记录仍保留");}return;}
@@ -1413,6 +1420,9 @@ static void reader_open_result(pn_status_t status){
     locked=false;status_page=false;shelf_mode=false;
     // 首屏及模型均已确认；输入不再等待下轮主循环或近期记录IO。 / Both first screen and model are confirmed; input no longer waits for another loop or recent-record IO.
     if(opening){pn_device_async_first_complete(&async_port,true);opening=false;pn_device_async_view(&async_port,15,true,input_flags);last_input=now_ms();ESP_LOGI(TAG,"Reader input ready t=%llu",(unsigned long long)last_input);}
+#if defined(CONFIG_PN_WAKE_TRACE) && CONFIG_PN_WAKE_TRACE
+    wake_trace_ready(now_ms());
+#endif
 }
 /* 书籍身份预计算：书库空闲时为未读过的书分步算整书SHA并按路径/大小/修改时间缓存，点开即走可信快开（后台仍完整复核）。
  * Book-identity precompute: while the library idles, hash not-yet-read books step by step and cache by path/size/mtime so opening takes the trusted fast path (still fully verified in the background). */
@@ -2070,6 +2080,9 @@ static bool prepare_lock(void){
         // 用户进度已先同步；可丢缓存不持有写租约跨入睡眠。/ User progress was synchronized first; disposable caches must not carry a write lease into sleep.
         pn_epub_app_cache_activity(&epub,now_ms());pn_reader_app_cache_activity(&reader,now_ms());
         if(saved!=PN_OK && saved!=PN_EMPTY){ESP_LOGE(TAG,"Warm save barrier failed: %d",(int)saved);message("保存失败","当前位置仍保留，稍后重试");return false;}
+        // 仍有有效介质时保存纯展示快照，冷恢复释放/重挂载不再把真封面切成默认封面。
+        // Snapshot presentation while media is valid, so cold release/remount never replaces artwork with a default.
+        if(*selected_path){pn_catalog_item_t item={.format=selected_format};snprintf(item.path,sizeof item.path,"%s",selected_path);(void)pn_opening_view_resolve(&opening_view,&pool,&sd_media,cover_cache,&item,shelf_covers);}
         reader_suspended=true;return true;}
     if(status==PN_BUSY || status==PN_EMPTY)return stop_reader();
     ESP_LOGE(TAG,"Warm save barrier failed: %d",(int)status);message("保存失败","当前位置仍保留，稍后重试");return false;
@@ -2079,23 +2092,55 @@ static uint64_t unlocked_at; ///< 最近一次解锁时间：随后1.5秒内的�
 #if defined(CONFIG_PN_WAKE_TRACE) && CONFIG_PN_WAKE_TRACE
 static struct {
     uint64_t lock_at,locked_ms,due; ///< 仅诊断的锁屏间隔与延后日志时点 / Diagnostic lock interval and deferred-log deadline
+    uint64_t start,ready; ///< 本轮恢复入口与正文回执的设备时间 / Device timestamps of restore entry and body receipt
     const char *reason; ///< 不可变原因字面量的快照 / Snapshot of an immutable reason literal
     int sd,warm; ///< 挂载查询与热恢复结果，-1表示未执行 / Mount query and warm result; -1 means not attempted
     uint64_t warm_ms; ///< 恢复入口到显示回执耗时，不含延后日志等待 / Restore entry to display receipt, excluding deferred-log waits
     unsigned left; ///< 有界重播次数，最多5条 / Bounded replay count, at most five lines
     bool slept,retained,continuity,present,mounted; ///< 同一product owner采集/输出，不跨任务读取 / Captured/emitted by one product owner, never read across tasks
 } wake_trace;
+static pn_record_t wake_previous; ///< 启动时读出的完整上轮记录，不随本轮写入改变 / Complete previous-boot record, unchanged by this boot's writes
+static bool wake_previous_loaded,wake_write_warned; ///< 单次启动读取与限频故障提示 / Once-per-boot read and rate-limited failure notice
+static unsigned wake_previous_left; ///< 启动记录最多重播五次 / Replay a boot record at most five times
+static uint64_t wake_previous_due; ///< 上轮记录延后输出时点 / Deferred previous-record deadline
+/// 只访问诊断专用A/B小记录，复用原CRC/同步/读回；不创建目录或擦除数据。/ Only access diagnostic A/B records using existing CRC/sync/readback; never create directories or erase data.
+static pn_status_t wake_trace_journal(pn_media_t *media,const char *root,const char *payload,pn_record_t *record){
+    char a[PN_JOURNAL_PATH_MAX],b[PN_JOURNAL_PATH_MAX];if(!root)return PN_INVALID;
+    if(snprintf(a,sizeof a,"%s/wake-diag.a",root)>=(int)sizeof a || snprintf(b,sizeof b,"%s/wake-diag.b",root)>=(int)sizeof b)return PN_INVALID;
+    pn_media_lease_t lease;pn_status_t status=pn_media_acquire(media,payload?PN_MEDIA_WRITE:PN_MEDIA_READ,&lease);
+    if(status!=PN_OK)return status;
+    pn_journal_files_t files;pn_journal_io_t io;status=pn_journal_files_init(&files,media,&lease,a,b,&io);
+    if(status==PN_OK)status=payload?pn_journal_save(&io,(const uint8_t *)payload,strlen(payload)):pn_journal_load(&io,record);
+    (void)pn_media_release(media,&lease);return status;
+}
+/// 每次锁屏仅在少数阶段写入，绝不在500ms浅睡复核中写盘；失败不改变原恢复结果。/ Write only a few stages per lock, never the 500 ms sleep polls; failures never change restore results.
+static void wake_trace_store(const char *stage){
+    if(!data_ready)return;
+    uint64_t free_bytes=0;pn_status_t status=index_space(NULL,&free_bytes);
+    if(status==PN_OK && free_bytes<64u*1024u)status=PN_NO_MEMORY;
+    if(status==PN_OK){char payload[PN_JOURNAL_PAYLOAD_MAX];unsigned flags=(unsigned)wake_trace.slept|((unsigned)wake_trace.retained<<1)|((unsigned)wake_trace.continuity<<2)|((unsigned)wake_trace.present<<3)|((unsigned)wake_trace.mounted<<4);
+        int n=snprintf(payload,sizeof payload,"wake-v1 stage=%s at=%llu start=%llu ready=%llu wait=%llu reason=%s sd=%d warm=%d flags=%u",stage,(unsigned long long)now_ms(),(unsigned long long)wake_trace.start,(unsigned long long)wake_trace.ready,(unsigned long long)wake_trace.locked_ms,wake_trace.reason?wake_trace.reason:"not-entered",wake_trace.sd,wake_trace.warm,flags);
+        status=n>0 && n<(int)sizeof payload?wake_trace_journal(&data_media,"/data/progress",payload,NULL):PN_INVALID;
+    }
+    if(status!=PN_OK && !wake_write_warned){wake_write_warned=true;ESP_LOGW(TAG,"Wake diagnostic persistence unavailable: %d; reader policy unchanged",(int)status);}
+}
+static void wake_trace_ready(uint64_t now){if(wake_trace.start && !wake_trace.ready){wake_trace.ready=now;wake_trace_store("body-ready");}}
 /// USB浅睡会断连：最早2秒后每3秒重播固定快照，最多5条，繁忙时后延。/ USB disconnects in light sleep: replay a fixed snapshot after at least 2 s, then every 3 s, at most five lines, deferred while busy.
 static void wake_trace_capture(uint64_t now){
     wake_trace.locked_ms=wake_trace.lock_at && now>=wake_trace.lock_at?now-wake_trace.lock_at:0;
     wake_trace.reason=lock_slept?pn_device_sleep_media_reason():"not-slept";
     wake_trace.slept=lock_slept;wake_trace.retained=reader_suspended;wake_trace.continuity=!lock_slept || pn_device_sleep_media_unchanged();
     wake_trace.sd=wake_trace.warm=-1;wake_trace.warm_ms=0;wake_trace.present=wake_trace.mounted=false;
+    wake_trace.start=now;wake_trace.ready=0;
     wake_trace.due=now+2000;wake_trace.left=5;
+    wake_trace_store("resume");
 }
 static void wake_trace_poll(uint64_t now){
+    if(data_ready && !wake_previous_loaded){wake_previous_loaded=true;pn_status_t s=wake_trace_journal(&data_media,"/data/progress",NULL,&wake_previous);
+        if(s==PN_OK && wake_previous.size>=8 && !memcmp(wake_previous.payload,"wake-v1 ",8)){wake_previous_left=5;wake_previous_due=now;}}
+    if(wake_previous_left && now>=wake_previous_due){ESP_LOGW(TAG,"Reader wake saved: %.*s",(int)wake_previous.size,(const char *)wake_previous.payload);wake_previous_left--;wake_previous_due=now+3000;}
     if(!wake_trace.left || now<wake_trace.due)return;
-    ESP_LOGI(TAG,"Reader wake trace locked_ms=%llu slept=%u retained=%u continuity=%u reason=%s sd=%d present=%u mounted=%u warm=%d warm_ms=%llu",(unsigned long long)wake_trace.locked_ms,(unsigned)wake_trace.slept,(unsigned)wake_trace.retained,(unsigned)wake_trace.continuity,wake_trace.reason,wake_trace.sd,(unsigned)wake_trace.present,(unsigned)wake_trace.mounted,wake_trace.warm,(unsigned long long)wake_trace.warm_ms);
+    ESP_LOGI(TAG,"Reader wake trace locked_ms=%llu slept=%u retained=%u continuity=%u reason=%s sd=%d present=%u mounted=%u warm=%d warm_ms=%llu start_ms=%llu ready_ms=%llu",(unsigned long long)wake_trace.locked_ms,(unsigned)wake_trace.slept,(unsigned)wake_trace.retained,(unsigned)wake_trace.continuity,wake_trace.reason,wake_trace.sd,(unsigned)wake_trace.present,(unsigned)wake_trace.mounted,wake_trace.warm,(unsigned long long)wake_trace.warm_ms,(unsigned long long)wake_trace.start,(unsigned long long)wake_trace.ready);
     wake_trace.left--;wake_trace.due=now+3000;
 }
 #endif
@@ -2111,16 +2156,22 @@ static void resume_reader(void){
         read_pico_sd_info_t card={0};esp_err_t checked=read_pico_sd_get_info(&card);
 #if defined(CONFIG_PN_WAKE_TRACE) && CONFIG_PN_WAKE_TRACE
         wake_trace.sd=(int)checked;wake_trace.present=card.present;wake_trace.mounted=card.mounted;
+        wake_trace_store("media");
 #endif
         // 锁页绘制中再按电源键会跳过睡眠，介质不可能变化；不能读取上一次（或初始false）的睡眠结论。
         // A power press while the lock page is drawing skips sleep, so the media cannot have changed; never reuse the previous (or initial false) sleep verdict.
         bool unchanged=!lock_slept || pn_device_sleep_media_unchanged();
         if(checked==ESP_OK && card.mounted && unchanged){
+#if defined(CONFIG_PN_WAKE_TRACE) && CONFIG_PN_WAKE_TRACE
+            wake_trace_store("warm-begin");
+#endif
             pn_status_t status=epub.impl?pn_epub_app_resume(&epub,now_ms(),present,NULL):pn_reader_app_resume(&reader,now_ms(),present,NULL);
 #if defined(CONFIG_PN_WAKE_TRACE) && CONFIG_PN_WAKE_TRACE
             wake_trace.warm=(int)status;wake_trace.warm_ms=now_ms()-resume_at;
+            if(status==PN_OK)wake_trace.ready=now_ms();
+            wake_trace_store(status==PN_OK?"warm-ready":"warm-failed");
 #endif
-            if(status==PN_OK){reader_suspended=false;locked=false;status_page=false;shelf_mode=false;ESP_LOGI(TAG,"Warm reader resumed without reopening book elapsed_ms=%llu",(unsigned long long)(now_ms()-resume_at));return;}
+            if(status==PN_OK){pn_opening_view_close(&opening_view);reader_suspended=false;locked=false;status_page=false;shelf_mode=false;ESP_LOGI(TAG,"Warm reader resumed without reopening book elapsed_ms=%llu",(unsigned long long)(now_ms()-resume_at));return;}
             if(status!=PN_STALE_MEDIA && status!=PN_STALE_JOB){
                 locked=true;ESP_LOGW(TAG,"Warm display restore failed: %d; power key retries retained page",(int)status);return;
             }
@@ -2138,6 +2189,9 @@ static void resume_reader(void){
     // 不能热恢复时先立即显示加载页，让解锁马上有反馈，再在后台完成开书；不留在锁屏上让人以为没解锁。
     // When warm resume is impossible, show the loading page at once so unlocking responds immediately, then finish opening; never linger on the lock page as if still locked.
     locked=false;
+#if defined(CONFIG_PN_WAKE_TRACE) && CONFIG_PN_WAKE_TRACE
+    wake_trace_store("cold-begin");
+#endif
     if(*selected_path && show_loading(selected_path)==PN_OK)loading_shown=true;
     start_reader();loading_shown=false;
 }
@@ -2145,7 +2199,7 @@ static void lock_and_sleep_impl(const char *hint){
     resource_previews_close();
     uint64_t lock_at=now_ms();bool wake_pending=false;
 #if defined(CONFIG_PN_WAKE_TRACE) && CONFIG_PN_WAKE_TRACE
-    wake_trace.lock_at=lock_at;wake_trace.left=0;
+    memset(&wake_trace,0,sizeof wake_trace);wake_trace.lock_at=lock_at;wake_trace.reason="not-entered";wake_trace.sd=wake_trace.warm=-1;
 #endif
     ESP_LOGI(TAG,"Locking; idle at %llu ms",(unsigned long long)last_input);
     locked=true;show_lock(hint);if(!reader_suspended)pn_wallpaper_mask_close(&lock_mask);
@@ -2156,6 +2210,9 @@ static void lock_and_sleep_impl(const char *hint){
     pn_device_input_event_t stale;while(pn_device_async_take(&async_port,&stale)!=PN_EMPTY)if(stale.kind==PN_DASYNC_POWER && stale.at>lock_at)wake_pending=true;
     // 锁页扫描期间的新短按仍表示解锁，不与触发锁屏的旧事件一起丢弃。/ A new short press during lock-page scanning still requests unlock, unlike stale lock-trigger events.
     lock_slept=!wake_pending;
+#if defined(CONFIG_PN_WAKE_TRACE) && CONFIG_PN_WAKE_TRACE
+    wake_trace.slept=lock_slept;wake_trace.retained=reader_suspended;wake_trace_store(wake_pending?"wake-pending":"sleep-entry");
+#endif
     if(wake_pending || pn_device_sleep_until_key()){last_input=now_ms();ESP_LOGI(TAG,"Wake key accepted at %llu ms locked_ms=%llu slept=%u retained=%u continuity=%u reason=%s",(unsigned long long)last_input,(unsigned long long)(last_input-lock_at),(unsigned)lock_slept,(unsigned)reader_suspended,(unsigned)(!lock_slept || pn_device_sleep_media_unchanged()),lock_slept?pn_device_sleep_media_reason():"not-slept");resume_reader();}
     if(!pn_device_async_pause(&async_port,false))ESP_LOGW(TAG,"Input resume acknowledgement timed out");
 }

@@ -14,6 +14,7 @@
 #include "pn_reader_app.h"
 #include "pn_epub_app.h"
 #include "pn_hot_session.h"
+#include "pn_opening_view.h"
 #include "pn_reader_input.h"
 #include "pn_shelf_view.h"
 #include "pn_sudoku.h"
@@ -74,6 +75,7 @@ typedef struct {
     bool index_wait,index_gate,index_finishing;uint64_t index_progress_at;pn_book_index_state_t opening_index; ///< 开书等待/后台共用编译游标 / Shared compile progress for waiting/background opening
     bool reader_turn_pending; ///< NEXT准备跨事件轮继续 / Continue NEXT preparation across event ticks
     pn_hot_session_t hot; ///< 单个已保存会话，写入前释放 / One saved session, released before writes
+    pn_opening_view_t opening_view; ///< 开书重试共用固定展示，不参与原书校验 / Fixed presentation across opening retries, never source validation
     pn_epub_open_job_t foreground_open;pn_catalog_item_t *opening_book; ///< 私有开书任务及唯一请求快照，不提前覆盖last_read / Private opening job and sole request snapshot, never overwriting last_read early
     uint64_t open_measure_us,turn_measure_us; ///< 完整操作含让出等待，仅主机观察 / Whole operation including yield gaps, host observation only
     pn_toc_ui_t toc;
@@ -194,6 +196,7 @@ static pn_status_t active_step(library_t *s,pn_reader_action_t action,uint64_t n
     return status;
 }
 static pn_status_t opening_abort(library_t *s){
+    pn_opening_view_close(&s->opening_view);
     if(s->index_gate){s->index_gate=false;if(s->epub.impl)(void)pn_epub_app_discard_unshown(&s->epub);if(s->reader.impl)(void)pn_reader_app_discard_unshown(&s->reader);}
     pn_status_t status=pn_epub_app_open_job_close(&s->foreground_open);if(s->opening_book){pn_free(s->opening_book);s->opening_book=NULL;s->async.defer_ack=false;pn_async_block_controls(&s->async.input,false);pn_sdl_async_title(&s->async,PN_BRAND_NAME);}return status;}
 /// 在关闭或挂起前捕获已确认进度，不解析书籍。/ Capture confirmed progress before closing or suspending, without parsing books.
@@ -538,9 +541,8 @@ static pn_status_t page(library_t *s,bool previous,bool first){
 }
 /// 复用已验证封面，不因开场反馈重新解析书籍。/ Reuse verified covers without reparsing books for opening feedback.
 static pn_status_t opening_paint(library_t *s,pn_font_t *font,pn_frame_t *frame,const pn_catalog_item_t *book,const char *note){
-    pn_catalog_item_t item=*book;pn_book_preview_t *preview=pn_alloc_optional(s->pool,PN_MEM_UI,sizeof *preview);
-    if(preview)(void)pn_cover_preview(s->pool,&s->media,s->cover_dir,&item,s->covers,preview);
-    pn_status_t status=pn_reader_opening_render(font,frame,item.name,preview,note);pn_free(preview);return status;
+    pn_status_t status=pn_opening_view_resolve(&s->opening_view,s->pool,&s->media,s->cover_dir,book,s->covers);
+    return status==PN_OK?pn_reader_opening_render(font,frame,book->name,s->opening_view.preview,note):status;
 }
 static void index_loading(library_t *s){
     uint8_t *pixels=pn_alloc_optional(s->pool,PN_MEM_FRAME,415872);pn_frame_t frame;pn_font_t font={0};pn_text_source_t source=pn_font_builtin_source();char detail[128];snprintf(detail,sizeof detail,"已建立 %u 页 · 中间键取消",s->opening_index.pages);
@@ -613,11 +615,13 @@ first_page:
 }
 static pn_status_t open_item(library_t *s,const pn_catalog_item_t *book,uint64_t now){
     if((s->foreground_open.impl || s->index_gate))return PN_BUSY;
+    pn_opening_view_close(&s->opening_view);
     s->open_measure_us=pn_profile_time();
     pn_async_block_controls(&s->async.input,true);pn_sdl_async_title(&s->async,PN_BRAND_NAME " - 正在打开书籍");
     s->async.context=18;pn_async_set_view(&s->async.input,18u|(s->async.revision<<16),false);
     printf("opening begin name=%s\n",book->name);pn_status_t status=open_item_impl(s,book,now);
     if(status==PN_BUSY && (s->foreground_open.impl || s->index_gate)){s->async.defer_ack=true;return status;}
+    pn_opening_view_close(&s->opening_view);
     pn_async_block_controls(&s->async.input,false);pn_sdl_async_title(&s->async,PN_BRAND_NAME);
     if(s->open_measure_us){uint64_t end=pn_profile_time();pn_profile_observe(s->pool,"sim.open.request",status,end-s->open_measure_us,NULL);s->open_measure_us=0;}
     printf("opening end status=%d\n",(int)status);return status;
@@ -629,7 +633,7 @@ static void tick_opening(library_t *s,uint64_t now){
         if(built==PN_BUSY || built==PN_CANCELLED){if(progress.pages/PN_BOOK_INDEX_BATCH_PAGES!=s->opening_index.pages/PN_BOOK_INDEX_BATCH_PAGES && now>=s->index_progress_at && now-s->index_progress_at>=2000){s->opening_index=progress;s->index_progress_at=now;index_loading(s);}return;}
         s->index_gate=false;s->index_finishing=true;pn_catalog_item_t *book=s->opening_book;s->opening_book=NULL;
         profile_index_flush();printf("book_index wait end status=%d pages=%u\n",built,progress.pages);(void)finish_open(s,book,now,built==PN_STALE_MEDIA?built:PN_OK);pn_free(book);s->index_finishing=false;
-        s->async.defer_ack=false;pn_async_block_controls(&s->async.input,false);pn_sdl_async_title(&s->async,PN_BRAND_NAME);return;
+        pn_opening_view_close(&s->opening_view);s->async.defer_ack=false;pn_async_block_controls(&s->async.input,false);pn_sdl_async_title(&s->async,PN_BRAND_NAME);return;
     }
 
     pn_status_t status=pn_epub_app_open_job_step(&s->foreground_open,&s->epub);
@@ -637,7 +641,7 @@ static void tick_opening(library_t *s,uint64_t now){
     pn_catalog_item_t *book=s->opening_book;s->opening_book=NULL;
     if((s->foreground_open.impl || s->index_gate))(void)pn_epub_app_open_job_close(&s->foreground_open);
     (void)finish_open(s,book,now,status);pn_free(book);
-    if(!s->index_gate){s->async.defer_ack=false;pn_async_block_controls(&s->async.input,false);pn_sdl_async_title(&s->async,PN_BRAND_NAME);printf("opening end status=%d\n",(int)status);}
+    if(!s->index_gate){pn_opening_view_close(&s->opening_view);s->async.defer_ack=false;pn_async_block_controls(&s->async.input,false);pn_sdl_async_title(&s->async,PN_BRAND_NAME);printf("opening end status=%d\n",(int)status);}
 }
 static pn_status_t open_book(library_t *s,int selected,uint64_t now){
     if(selected<0 || (size_t)selected>=s->page->count)return PN_EMPTY;
