@@ -38,7 +38,9 @@ with tempfile.TemporaryDirectory() as folder:
         assert result.returncode == 0, (result.stdout, result.stderr)
         assert "used=0 live=0" in result.stdout, result.stdout
         assert result.stdout.count("library_open name=") == 2, (result.stdout, result.stderr)
-        assert re.findall(r"library_turn pointer=\d status=(\d+)", result.stdout) == ["0", "0", "0"], result.stdout
+        # 异步NEXT可先BUSY再成功；仍要求三次完整完成且没有错误或额外提交。/ Async NEXT may yield BUSY before success; require exactly three completions with no errors or extra commits.
+        turns = re.findall(r"library_turn pointer=\d status=(\d+)", result.stdout)
+        assert turns.count("0") == 3 and all(status in ("0", "2") for status in turns), result.stdout
         assert result.stdout.count("library_return status=0") == 2, result.stdout
         assert hashlib.sha256(source.read_bytes()).digest() == digest
         if fmt == "txt":
