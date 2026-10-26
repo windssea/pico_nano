@@ -83,6 +83,14 @@ bool pn_epub_app_font_recovery_pending(const pn_epub_app_t *);
 pn_status_t pn_epub_app_verify_step(pn_epub_app_t *);
 /// 目录/本地头逐步4096B/8读，SHA最多32KiB，出版物XML每步4KiB；状态/字体分阶段。全部成功才交出app；错误须close。/ Directory/local-header steps allow 4096 bytes/eight reads, SHA at most 32 KiB and publication XML 4 KiB; state/fonts are separate stages. Transfer only on full success; close after errors.
 pn_status_t pn_epub_app_open_job_step(pn_epub_open_job_t *,pn_epub_app_t *);
+/// 前台合并最多32步/8ms软预算，每步仍检查取消；不在面板扫描中调用。/ Batch at most 32 steps under an 8 ms foreground soft budget, retaining per-step cancellation; never call during panel scans.
+pn_status_t pn_epub_app_open_job_advance(pn_epub_open_job_t *,pn_epub_app_t *);
+/// 已识别重开有500ms机会窗口，快完成时省去加载页；冷开立即反馈；无时钟时立即反馈。/ Identified reopens get a 500 ms opportunity to finish without a loader; cold opens and unavailable clocks request immediate feedback.
+bool pn_epub_app_open_job_feedback_due(const pn_epub_open_job_t *);
+/// 仅查询待恢复位置，供控制层避免在加载扫描中抢先排版；不是缓存命中或来源资格。/ Query a pending restore position so controllers avoid eager layout during loading scans; never cache-hit/source authority.
+bool pn_epub_app_restore_pending(const pn_epub_app_t *);
+/// 前台先完整查当前续读包；OK保留唯一未显示候选，EMPTY让控制层显示加载页并走原排版；不推屏或提交进度，不在扫描中调用。/ Fully probe the current resume packet in the foreground; OK retains one unshown candidate, EMPTY lets controllers show feedback and use normal layout; no display/progress commit and never call during scans.
+pn_status_t pn_epub_app_prepare_resume_unshown(pn_epub_app_t *);
 /// 边界/目录/摘要/XML取消可继续；状态/字体构造内取消须close；纯查询。/ Boundary/directory/hash/XML cancellation is resumable; cancellation inside state/font construction requires close; pure query.
 bool pn_epub_app_open_job_pending(const pn_epub_open_job_t *);
 /// 只查询完整摘要进度，不表示出版物已验证或可以显示。/ Query full-hash progress, never publication validation or permission to display.

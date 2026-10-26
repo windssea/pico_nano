@@ -35,12 +35,16 @@ void pn_epub_reader_close(pn_epub_reader_t *);
 pn_status_t pn_epub_reader_prepare(pn_epub_reader_t *,pn_read_intent_t,const pn_epub_location_t *,pn_epub_reader_receipt_t *);
 /// NEXT每次只推进一个预排步骤，BUSY保留候选；其余意图沿原契约。/ Advance one NEXT prefetch step per call, retaining candidates on BUSY; other intents keep their existing contract.
 pn_status_t pn_epub_reader_prepare_step(pn_epub_reader_t *,pn_read_intent_t,const pn_epub_location_t *,pn_epub_reader_receipt_t *);
-/// 读取当前完整候选回执，不解析或确认页面；EMPTY时输出保持。/ Copy the complete pending receipt without parsing or confirming a page; preserve output on EMPTY.
+/// 读取完整排版或完整验证续读锚点的候选回执，不解析或确认；续读不伪造页节点，EMPTY时输出保持。/ Copy a complete layout or fully verified resume-anchor receipt without parsing/confirmation; resume never fabricates nodes, and EMPTY preserves output.
 pn_status_t pn_epub_reader_prepared(const pn_epub_reader_t *,pn_epub_reader_receipt_t *);
 /// 仅供完整验证的续读位图：原锚点产生待显示回执，不伪造页节点，不提前提交位置。/ Fully verified resume bitmaps only: prepare a receipt from original anchors without fabricated nodes or early position commits.
 pn_status_t pn_epub_reader_prepare_resume(pn_epub_reader_t *,pn_read_intent_t,const pn_epub_reader_anchor_t *,pn_epub_reader_receipt_t *);
 /// 已确认页面的前后语义边界，查询不解析。/ Query confirmed page boundaries without parsing.
 pn_status_t pn_epub_reader_visible(const pn_epub_reader_t *,pn_epub_reader_anchor_t *);
+/// 查询已确认历史的上一页目标，不解析/分配；没有历史返回EMPTY且保持输出。/ Query the previous confirmed history target without parsing/allocation; EMPTY preserves output when history is absent.
+pn_status_t pn_epub_reader_previous_target(const pn_epub_reader_t *,pn_epub_location_t *);
+/// 仅查询与当前历史精确匹配的上一页模型，不访问文件。/ Query a previous-page model exactly matching current history without file I/O.
+bool pn_epub_reader_previous_ready(const pn_epub_reader_t *);
 /// 仅完整图片/正文/显示成功后success=true；匹配回执提交，不接受重复或过期确认。
 /// Set success only after complete images/body/display; commit matching receipts, rejecting repeated or stale completion.
 pn_status_t pn_epub_reader_complete(pn_epub_reader_t *,const pn_epub_reader_receipt_t *,bool,uint64_t);

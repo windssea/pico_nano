@@ -1,0 +1,627 @@
+{
+  "scope": "ESP32-S3 native USB diagnostic firmware, physical display-job receipts; optical/power/true sleep are separate; no P95 claim from 3 steady samples",
+  "date": "2026-10-26",
+  "baseline_image": {
+    "source": "f2ff6faeba4e4bafbfb2cab56ead0934e3d4b1ec",
+    "image_bytes": 5488128,
+    "sha256": "f32c902b781ea63164f0a4b8aff08441fc259b9611f97721ee61186faed41fcc",
+    "md5": "961fcc8401ea627f803c54484891762b",
+    "target_slot": 0,
+    "target_offset": "0x20000",
+    "selector_sequence_after_verification": 5,
+    "preserved_formal_slot": 1,
+    "preserved_formal_selector_sequence": 2,
+    "whole_flash_backup": false,
+    "test_scope": "Console diagnostics; real light sleep excluded; before/after use same config."
+  },
+  "candidate_image": {
+    "base": "f2ff6fa",
+    "source_files": {
+      "components/pn_reader/include/pn_epub_app.h": "20ff28b2d4bd1c92d99886145353f348e77ec531cf03a23bbe588a2345bf66d9",
+      "components/pn_reader/include/pn_epub_reader.h": "59cadeba86f9e6a655b50a21db8e7417ccd9d32c8613e95363a3863cad6cda01",
+      "components/pn_reader/pn_epub_app.c": "aeddbb665c2ec409e959a2bb91bbb3e0def357e0f6acabfa18222bb2aeb00980",
+      "components/pn_reader/pn_epub_reader.c": "b894d5211b53b69bcee87acd0388a9732cb62a7273e94c6cfa746502d15fc21d",
+      "components/pn_reader/pn_resume.c": "37259f8463af75863910ce1a2cca97be75805b9acf2fdf3702f019cc32e127d3",
+      "components/pn_reader/pn_resume_epub.inc": "801b854bda998061f77d6ce65ea717771ff4ba90c0b867be6127a99e38991ac9",
+      "main/app_main.c": "7b0db3fa105b99f5370bb4b8ca2671d6e90b4984622bf831a219aa65bbd04cd4",
+      "simulator/library_sdl.c": "fb3b6ab9998e3e60fa9b20e200c0835081fc0aef180d2d23d1d5d4fbf6c21d69",
+      "tests/host/pn_resume_capture.c": "1095e18a6228e9ab4cbcb74cc06f3f45707c50b0fd120834bb39f8d4a88c72aa",
+      "tests/host/pn_switch_capture.c": "224d7af3d93909a3d9c24a81d6ee16ea91bf8f09f6780a84723c080cb95915fd",
+      "tests/host/test_epub_reader.c": "42dda42a8def9d751a7512bca99a73f1ff320021da58bd9bc807c12f57c29bb6"
+    },
+    "bytes": 5490336,
+    "sha256": "76b12ef3fecf3597c234d32af57bf42fb0945f2add7df6c510d93361b31f0c97",
+    "md5": "7da1d7d760d5bed1c7b8e9c03e4bbf03",
+    "slot": 0,
+    "offset": "0x20000",
+    "selector": 9,
+    "preserved_slot": 1,
+    "preserved_valid_sequence": 2,
+    "flashed": true,
+    "boot_console_elf": "efefa9129",
+    "selector_state": "VALID",
+    "preserved_selector_state": "VALID"
+  },
+  "baseline": {
+    "shao": [
+      {
+        "sample": "shao-0",
+        "input_ready_ms": 6568,
+        "body_receipt_ms": 6552,
+        "frame_jobs": 2,
+        "resume_hits": 0,
+        "stored": 0,
+        "turns": []
+      },
+      {
+        "sample": "shao-1",
+        "input_ready_ms": 6512,
+        "body_receipt_ms": 6498,
+        "frame_jobs": 2,
+        "resume_hits": 0,
+        "stored": 2,
+        "turns": []
+      },
+      {
+        "sample": "shao-2",
+        "input_ready_ms": 11925,
+        "body_receipt_ms": 11904,
+        "frame_jobs": 2,
+        "resume_hits": 1,
+        "stored": 2,
+        "turns": []
+      },
+      {
+        "sample": "shao-3",
+        "input_ready_ms": 11900,
+        "body_receipt_ms": 11885,
+        "frame_jobs": 2,
+        "resume_hits": 1,
+        "stored": 2,
+        "turns": []
+      },
+      {
+        "sample": "shao-4",
+        "input_ready_ms": 11935,
+        "body_receipt_ms": 11917,
+        "frame_jobs": 2,
+        "resume_hits": 1,
+        "stored": 2,
+        "turns": [
+          {
+            "command": "key right",
+            "last_display_ms": 989,
+            "scan_ms_total": 877
+          },
+          {
+            "command": "key left",
+            "last_display_ms": 1678,
+            "scan_ms_total": 785
+          }
+        ]
+      }
+    ],
+    "ming": [
+      {
+        "sample": "ming-0",
+        "input_ready_ms": 16229,
+        "body_receipt_ms": 16215,
+        "frame_jobs": 2,
+        "resume_hits": 1,
+        "stored": 2,
+        "turns": []
+      },
+      {
+        "sample": "ming-1",
+        "input_ready_ms": 16165,
+        "body_receipt_ms": 16149,
+        "frame_jobs": 2,
+        "resume_hits": 1,
+        "stored": 2,
+        "turns": []
+      },
+      {
+        "sample": "ming-2",
+        "input_ready_ms": 16128,
+        "body_receipt_ms": 16110,
+        "frame_jobs": 2,
+        "resume_hits": 1,
+        "stored": 2,
+        "turns": []
+      },
+      {
+        "sample": "ming-3",
+        "input_ready_ms": 16202,
+        "body_receipt_ms": 16187,
+        "frame_jobs": 2,
+        "resume_hits": 1,
+        "stored": 2,
+        "turns": [
+          {
+            "command": "key right",
+            "last_display_ms": 1283,
+            "scan_ms_total": 1168
+          },
+          {
+            "command": "key left",
+            "last_display_ms": 1503,
+            "scan_ms_total": 905
+          }
+        ]
+      },
+      {
+        "sample": "ming-4",
+        "input_ready_ms": 16156,
+        "body_receipt_ms": 16136,
+        "frame_jobs": 2,
+        "resume_hits": 1,
+        "stored": 2,
+        "turns": [
+          {
+            "command": "key right",
+            "last_display_ms": 1027,
+            "scan_ms_total": 912
+          },
+          {
+            "command": "key left",
+            "last_display_ms": 1271,
+            "scan_ms_total": 705
+          }
+        ]
+      }
+    ]
+  },
+  "candidate": {
+    "shao": [
+      {
+        "sample": "shao-0",
+        "body_receipt_ms": 9172,
+        "input_ready_ms": 9185,
+        "frame_jobs": 2,
+        "resume_hits": 1,
+        "stored": 2,
+        "turns": [
+          {
+            "intent": "key right",
+            "total_ms": 1274,
+            "scan_ms": 1163,
+            "frames": 1
+          },
+          {
+            "intent": "key left",
+            "total_ms": 1494,
+            "scan_ms": 1079,
+            "frames": 1
+          }
+        ]
+      },
+      {
+        "sample": "shao-1",
+        "body_receipt_ms": 3063,
+        "input_ready_ms": 3084,
+        "frame_jobs": 2,
+        "resume_hits": 1,
+        "stored": 2,
+        "turns": [
+          {
+            "intent": "key right",
+            "total_ms": 988,
+            "scan_ms": 878,
+            "frames": 1
+          },
+          {
+            "intent": "key left",
+            "total_ms": 1208,
+            "scan_ms": 793,
+            "frames": 1
+          }
+        ]
+      },
+      {
+        "sample": "shao-2",
+        "body_receipt_ms": 3011,
+        "input_ready_ms": 3024,
+        "frame_jobs": 2,
+        "resume_hits": 1,
+        "stored": 2,
+        "turns": [
+          {
+            "intent": "key right",
+            "total_ms": 987,
+            "scan_ms": 877,
+            "frames": 1
+          },
+          {
+            "intent": "key left",
+            "total_ms": 1208,
+            "scan_ms": 794,
+            "frames": 1
+          }
+        ]
+      },
+      {
+        "sample": "shao-3",
+        "body_receipt_ms": 3184,
+        "input_ready_ms": 3206,
+        "frame_jobs": 2,
+        "resume_hits": 1,
+        "stored": 2,
+        "turns": [
+          {
+            "intent": "key right",
+            "total_ms": 991,
+            "scan_ms": 878,
+            "frames": 1
+          },
+          {
+            "intent": "key left",
+            "total_ms": 1222,
+            "scan_ms": 793,
+            "frames": 1
+          }
+        ]
+      },
+      {
+        "sample": "shao-immediate",
+        "body_receipt_ms": 3039,
+        "next_after_body_ms": 136,
+        "turns": [
+          {
+            "intent": "key right",
+            "total_ms": 1363,
+            "scan_ms": 794,
+            "frames": 1
+          },
+          {
+            "intent": "key left",
+            "total_ms": 1755,
+            "scan_ms": 791,
+            "frames": 1
+          }
+        ]
+      }
+    ],
+    "ming": [
+      {
+        "sample": "ming-0",
+        "body_receipt_ms": 12142,
+        "input_ready_ms": 12156,
+        "frame_jobs": 2,
+        "resume_hits": 1,
+        "stored": 2,
+        "turns": [
+          {
+            "intent": "key right",
+            "total_ms": 1030,
+            "scan_ms": 911,
+            "frames": 1
+          },
+          {
+            "intent": "key left",
+            "total_ms": 1259,
+            "scan_ms": 716,
+            "frames": 1
+          }
+        ]
+      },
+      {
+        "sample": "ming-1",
+        "body_receipt_ms": 6129,
+        "input_ready_ms": 6144,
+        "frame_jobs": 2,
+        "resume_hits": 1,
+        "stored": 2,
+        "turns": [
+          {
+            "intent": "key right",
+            "total_ms": 1032,
+            "scan_ms": 912,
+            "frames": 1
+          },
+          {
+            "intent": "key left",
+            "total_ms": 1351,
+            "scan_ms": 713,
+            "frames": 1
+          }
+        ]
+      },
+      {
+        "sample": "ming-2",
+        "body_receipt_ms": 6156,
+        "input_ready_ms": 6168,
+        "frame_jobs": 2,
+        "resume_hits": 1,
+        "stored": 2,
+        "turns": [
+          {
+            "intent": "key right",
+            "total_ms": 1036,
+            "scan_ms": 915,
+            "frames": 1
+          },
+          {
+            "intent": "key left",
+            "total_ms": 1107,
+            "scan_ms": 715,
+            "frames": 1
+          }
+        ]
+      },
+      {
+        "sample": "ming-3",
+        "body_receipt_ms": 6115,
+        "input_ready_ms": 6135,
+        "frame_jobs": 2,
+        "resume_hits": 1,
+        "stored": 2,
+        "turns": [
+          {
+            "intent": "key right",
+            "total_ms": 1031,
+            "scan_ms": 912,
+            "frames": 1
+          },
+          {
+            "intent": "key left",
+            "total_ms": 1100,
+            "scan_ms": 714,
+            "frames": 1
+          }
+        ]
+      },
+      {
+        "sample": "ming-immediate",
+        "body_receipt_ms": 6133,
+        "next_after_body_ms": 167,
+        "turns": [
+          {
+            "intent": "key right",
+            "total_ms": 1238,
+            "scan_ms": 784,
+            "frames": 1
+          },
+          {
+            "intent": "key left",
+            "total_ms": 1733,
+            "scan_ms": 786,
+            "frames": 1
+          }
+        ]
+      }
+    ]
+  },
+  "steady_medians": {
+    "shao": {
+      "baseline_ms": 11904,
+      "candidate_ms": 3063,
+      "reduction_percent": 74.27
+    },
+    "ming": {
+      "baseline_ms": 16136,
+      "candidate_ms": 6129,
+      "reduction_percent": 62.02
+    }
+  },
+  "pixels": {
+    "ming-0-next": {
+      "sha256": "ae6758eab7df30a851d38228d991e277c7b53146d058fcb94a6534c4e8cecb9a",
+      "same_as": "ming-4-next.png",
+      "native_16_gray": true
+    },
+    "ming-0-prev": {
+      "sha256": "3a18148eb0e2600ace4d0ce83d1bb0716c3c3028175aefe44e496e61a49cde0a",
+      "same_as": "ming-4-prev.png",
+      "native_16_gray": true
+    },
+    "ming-0": {
+      "sha256": "3a18148eb0e2600ace4d0ce83d1bb0716c3c3028175aefe44e496e61a49cde0a",
+      "same_as": "ming-4.png",
+      "native_16_gray": true
+    },
+    "ming-1-next": {
+      "sha256": "ae6758eab7df30a851d38228d991e277c7b53146d058fcb94a6534c4e8cecb9a",
+      "same_as": "ming-4-next.png",
+      "native_16_gray": true
+    },
+    "ming-1-prev": {
+      "sha256": "3a18148eb0e2600ace4d0ce83d1bb0716c3c3028175aefe44e496e61a49cde0a",
+      "same_as": "ming-4-prev.png",
+      "native_16_gray": true
+    },
+    "ming-1": {
+      "sha256": "3a18148eb0e2600ace4d0ce83d1bb0716c3c3028175aefe44e496e61a49cde0a",
+      "same_as": "ming-4.png",
+      "native_16_gray": true
+    },
+    "ming-2-next": {
+      "sha256": "ae6758eab7df30a851d38228d991e277c7b53146d058fcb94a6534c4e8cecb9a",
+      "same_as": "ming-4-next.png",
+      "native_16_gray": true
+    },
+    "ming-2-prev": {
+      "sha256": "3a18148eb0e2600ace4d0ce83d1bb0716c3c3028175aefe44e496e61a49cde0a",
+      "same_as": "ming-4-prev.png",
+      "native_16_gray": true
+    },
+    "ming-2": {
+      "sha256": "3a18148eb0e2600ace4d0ce83d1bb0716c3c3028175aefe44e496e61a49cde0a",
+      "same_as": "ming-4.png",
+      "native_16_gray": true
+    },
+    "ming-3-next": {
+      "sha256": "ae6758eab7df30a851d38228d991e277c7b53146d058fcb94a6534c4e8cecb9a",
+      "same_as": "ming-4-next.png",
+      "native_16_gray": true
+    },
+    "ming-3-prev": {
+      "sha256": "3a18148eb0e2600ace4d0ce83d1bb0716c3c3028175aefe44e496e61a49cde0a",
+      "same_as": "ming-4-prev.png",
+      "native_16_gray": true
+    },
+    "ming-3": {
+      "sha256": "3a18148eb0e2600ace4d0ce83d1bb0716c3c3028175aefe44e496e61a49cde0a",
+      "same_as": "ming-4.png",
+      "native_16_gray": true
+    },
+    "ming-immediate-next": {
+      "sha256": "ae6758eab7df30a851d38228d991e277c7b53146d058fcb94a6534c4e8cecb9a",
+      "same_as": "ming-4-next.png",
+      "native_16_gray": true
+    },
+    "ming-immediate-prev": {
+      "sha256": "3a18148eb0e2600ace4d0ce83d1bb0716c3c3028175aefe44e496e61a49cde0a",
+      "same_as": "ming-4-prev.png",
+      "native_16_gray": true
+    },
+    "shao-0-next": {
+      "sha256": "a7fe3b75117342d3edf0009f49f9bd2307eb8cb74b6437ccf87d423c2cff9074",
+      "same_as": "shao-4-next.png",
+      "native_16_gray": true
+    },
+    "shao-0-prev": {
+      "sha256": "813a19fcbd57ac37500e8cfa58c6675b27478abdc279bf2a2c6d583f9d240ff8",
+      "same_as": "shao-4-prev.png",
+      "native_16_gray": true
+    },
+    "shao-0": {
+      "sha256": "813a19fcbd57ac37500e8cfa58c6675b27478abdc279bf2a2c6d583f9d240ff8",
+      "same_as": "shao-4.png",
+      "native_16_gray": true
+    },
+    "shao-1-next": {
+      "sha256": "a7fe3b75117342d3edf0009f49f9bd2307eb8cb74b6437ccf87d423c2cff9074",
+      "same_as": "shao-4-next.png",
+      "native_16_gray": true
+    },
+    "shao-1-prev": {
+      "sha256": "813a19fcbd57ac37500e8cfa58c6675b27478abdc279bf2a2c6d583f9d240ff8",
+      "same_as": "shao-4-prev.png",
+      "native_16_gray": true
+    },
+    "shao-1": {
+      "sha256": "813a19fcbd57ac37500e8cfa58c6675b27478abdc279bf2a2c6d583f9d240ff8",
+      "same_as": "shao-4.png",
+      "native_16_gray": true
+    },
+    "shao-2-next": {
+      "sha256": "a7fe3b75117342d3edf0009f49f9bd2307eb8cb74b6437ccf87d423c2cff9074",
+      "same_as": "shao-4-next.png",
+      "native_16_gray": true
+    },
+    "shao-2-prev": {
+      "sha256": "813a19fcbd57ac37500e8cfa58c6675b27478abdc279bf2a2c6d583f9d240ff8",
+      "same_as": "shao-4-prev.png",
+      "native_16_gray": true
+    },
+    "shao-2": {
+      "sha256": "813a19fcbd57ac37500e8cfa58c6675b27478abdc279bf2a2c6d583f9d240ff8",
+      "same_as": "shao-4.png",
+      "native_16_gray": true
+    },
+    "shao-3-next": {
+      "sha256": "a7fe3b75117342d3edf0009f49f9bd2307eb8cb74b6437ccf87d423c2cff9074",
+      "same_as": "shao-4-next.png",
+      "native_16_gray": true
+    },
+    "shao-3-prev": {
+      "sha256": "813a19fcbd57ac37500e8cfa58c6675b27478abdc279bf2a2c6d583f9d240ff8",
+      "same_as": "shao-4-prev.png",
+      "native_16_gray": true
+    },
+    "shao-3": {
+      "sha256": "813a19fcbd57ac37500e8cfa58c6675b27478abdc279bf2a2c6d583f9d240ff8",
+      "same_as": "shao-4.png",
+      "native_16_gray": true
+    },
+    "shao-immediate-next": {
+      "sha256": "a7fe3b75117342d3edf0009f49f9bd2307eb8cb74b6437ccf87d423c2cff9074",
+      "same_as": "shao-4-next.png",
+      "native_16_gray": true
+    },
+    "shao-immediate-prev": {
+      "sha256": "813a19fcbd57ac37500e8cfa58c6675b27478abdc279bf2a2c6d583f9d240ff8",
+      "same_as": "shao-4-prev.png",
+      "native_16_gray": true
+    }
+  },
+  "pixel_region": {
+    "x": 0,
+    "y": 32,
+    "width": 684,
+    "height": 1184,
+    "excluded": "dynamic clock/battery status strip only; footer included"
+  },
+  "board_compile_only": {
+    "bytes": 5337280,
+    "sha256": "6f9ccf808d1716c2ae7fca72bf144c87b62f8a10b2a0b0094545c48ba3546eb9",
+    "ota_slot_bytes": 6291456,
+    "free_percent": 15.166,
+    "flashed": false,
+    "released": false
+  },
+  "health": {
+    "baseline_observed_pool_peak": 3805080,
+    "candidate_observed_pool_peak": 3689897,
+    "peak_scope": "whole captured diagnostic sessions; sample counts differ, not a claim of lower matched peak",
+    "baseline_minima": {
+      "internal_min": 37280,
+      "psram_min": 2555220,
+      "stack_input": 2280,
+      "stack_display": 6044
+    },
+    "candidate_heap": {
+      "internal": 78583,
+      "internal_largest": 34816,
+      "internal_min": 37280,
+      "psram": 3928144,
+      "psram_largest": 3080192,
+      "psram_min": 2671768
+    },
+    "candidate_stack": {
+      "input": 2280,
+      "display": 6092
+    },
+    "candidate_status": {
+      "t": 314862,
+      "view": 0,
+      "body": 0,
+      "paused": 0,
+      "events": 204,
+      "touch_reads": 9096,
+      "touch_errors": 0,
+      "gesture": 0,
+      "dropped": 0
+    },
+    "underruns_panics_asserts_or_fastseek_fallbacks": 0,
+    "failed_display_jobs": 0
+  },
+  "ota_selectors": {
+    "candidate": {
+      "sequence": 9,
+      "state": "VALID",
+      "crc_verified": true
+    },
+    "preserved_formal": {
+      "sequence": 2,
+      "state": "VALID",
+      "crc_verified": true
+    }
+  },
+  "software_validation": {
+    "host_unique_tests": 16,
+    "sdl_tests": 5,
+    "profile_tool_tests": 6,
+    "asan_ubsan": true,
+    "docs_vendor_font_licenses": true,
+    "first_run_test_failure": "resume_app expected two hits; updated exact assertion to include the new EPUB PREV hit, then passed without changing pixel comparisons"
+  },
+  "limitations": [
+    "Diagnostic console mode disables actual lock sleep; true sleep fault remains open.",
+    "Three steady samples per book do not establish P95 or a maximum latency.",
+    "First open after reset retains full source verification.",
+    "Each measured large-book opening still has loader plus body (2 frame jobs).",
+    "28 digital frames agree below the dynamic top 32 pixels; optical feedback was on the prior candidate, not a new v2 optical acceptance.",
+    "Original book contents and raw PNG/serial logs remain private ignored artifacts."
+  ]
+}

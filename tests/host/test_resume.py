@@ -62,7 +62,9 @@ def main():
                         dst.writestr(name, content, compress_type=zipfile.ZIP_STORED if name == 'mimetype' else zipfile.ZIP_DEFLATED)
             run(exe, kind, other, font, switched, folder / (kind + '-other-frames'), 'seed')
             result, actual = run(exe, kind, book, font, switched, folder / (kind + '-switch-frames'))
-            assert result['hits'] == 2 and actual == frames, (kind, 'switch', result)
+            # EPUB回翻可复用原当前包；TXT仍使用原RAM邻页。/ EPUB reverse turns can reuse the original current packet; TXT keeps its RAM neighbor path.
+            reverse_hit = 1 if kind == 'epub' else 0
+            assert result['hits'] == 2 + reverse_hit and actual == frames, (kind, 'switch', result)
             for case in ('warm', 'missing', 'next-missing', 'root-missing', 'corrupt', 'truncated', 'failed-display', 'clock'):
                 state = folder / (kind + '-' + case)
                 shutil.copytree(seed, state)
@@ -92,7 +94,7 @@ def main():
                     assert actual == clock_frames, (kind, case, 'changed clock differs')
                 else:
                     assert actual == frames, (kind, case, [hashlib.sha256(f).hexdigest() for f in actual], [hashlib.sha256(f).hexdigest() for f in frames])
-                expected = 2 if case in ('warm', 'clock') else 3 if case == 'failed-display' else 1 if case == 'next-missing' else 0
+                expected = 2 + reverse_hit if case in ('warm', 'clock') else 3 + reverse_hit if case == 'failed-display' else 1 + reverse_hit if case == 'next-missing' else 0
                 assert result['hits'] == expected, (kind, case, result)
                 print(kind, case, json.dumps(result), flush=True)
             for setting in ('style', 'visual'):

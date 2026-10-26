@@ -164,10 +164,18 @@ int main(int argc,char **argv){
     other=receipt;other.anchor.begin.position.offset++;assert(pn_epub_reader_complete(&reader,&other,true,time)==PN_INVALID && !save.calls);
     assert(pn_epub_reader_complete(&reader,&receipt,false,time++)==PN_IO && pn_epub_reader_progress(&reader,&progress)==PN_EMPTY && !save.calls);
     show(&reader,PN_READ_FIRST,NULL,"AB",&time);assert(save.calls==1 && !save.turns);assert(pn_epub_reader_progress(&reader,&progress)==PN_OK);pn_epub_location_t a=progress.location;
+    pn_epub_reader_anchor_t cached_first;assert(pn_epub_reader_visible(&reader,&cached_first)==PN_OK);
+    assert(pn_epub_reader_prepare_resume(&reader,PN_READ_PREVIOUS,&cached_first,&receipt)==PN_EMPTY);
     assert(pn_epub_reader_prepare(&reader,PN_READ_NEXT,NULL,&receipt)==PN_OK);expect(&reader,"CD");assert(nodes[0].position.element<b.element && nodes[0].source_order>b_order);
     assert(pn_epub_reader_progress(&reader,&progress)==PN_OK && same(progress.location,a));
     assert(pn_epub_reader_complete(&reader,&receipt,true,time++)==PN_OK && save.turns==1);
     assert(pn_epub_reader_complete(&reader,&receipt,true,time)==PN_INVALID);pn_epub_location_t c=receipt.anchor.begin;
+    // 即使完整包有可信锚点，也不能越过已确认历史或把不相邻的页当上一页。/ Even trusted packet anchors cannot skip confirmed history or substitute a nonadjacent previous page.
+    pn_epub_location_t previous_target;assert(pn_epub_reader_previous_target(&reader,&previous_target)==PN_OK && same(previous_target,a));
+    pn_epub_reader_anchor_t wrong=cached_first;wrong.begin=c;assert(pn_epub_reader_prepare_resume(&reader,PN_READ_PREVIOUS,&wrong,&receipt)==PN_EMPTY);
+    wrong=cached_first;wrong.next=cached_first.begin;assert(pn_epub_reader_prepare_resume(&reader,PN_READ_PREVIOUS,&wrong,&receipt)==PN_EMPTY);
+    assert(pn_epub_reader_prepare_resume(&reader,PN_READ_PREVIOUS,&cached_first,&receipt)==PN_OK);
+    assert(pn_epub_reader_complete(&reader,&receipt,false,time++)==PN_IO && pn_epub_reader_progress(&reader,&progress)==PN_OK && same(progress.location,c));
     show(&reader,PN_READ_PREVIOUS,NULL,"AB",&time);show(&reader,PN_READ_NEXT,NULL,"CD",&time);
     assert(pn_epub_reader_prepare(&reader,PN_READ_CURRENT,NULL,&receipt)==PN_OK);layout.width=30;assert(pn_epub_reader_reflow(&reader,&layout)==PN_OK);
     assert(pn_epub_reader_complete(&reader,&receipt,true,time)==PN_STALE_JOB);assert(pn_epub_reader_progress(&reader,&progress)==PN_OK && same(progress.location,c));

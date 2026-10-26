@@ -34,7 +34,7 @@ with tempfile.TemporaryDirectory() as tmp:
             result, actual = run(sys.argv[1], kind, book, str(font), state, root / f'{kind}-actual-{overlap}', env=case_env)
             assert actual == expected and len(actual) == 9, (kind, overlap, result)
             if kind == 'epub':
-                assert result['loads'] <= 8, ('one probe per navigation', overlap, result)
+                assert result['loads'] <= len(actual), ('one probe per displayed navigation including OPEN/PREV', overlap, result)
             print(kind, 'overlap', overlap, result, flush=True)
 
     # 深位置热开首NEXT命中包，第二次立即NEXT不能持续逐字追赶。/ Deep warm opening hits the first NEXT packet; the immediate second NEXT must not chase the prefix scalar by scalar.
@@ -63,5 +63,5 @@ with tempfile.TemporaryDirectory() as tmp:
             result, actual = run(sys.argv[1], 'epub', book, str(font), state, root / f'deep-{sequence}-frames-{index_steps}', sequence,
                                  dict(os.environ, PN_RESUME_CONTINUE='1', PN_RESUME_YIELD='1', PN_RESUME_INDEX_STEPS=str(index_steps)))
             assert len(actual) == (8 if sequence == 'rapid' else 9) and actual == expected, (sequence, index_steps, result)
-            assert result['loads'] <= 8, result
+            assert result['loads'] <= len(actual), ('one probe per displayed navigation including OPEN/PREV', result)
             print('deep', sequence, 'index steps', index_steps, result, flush=True)

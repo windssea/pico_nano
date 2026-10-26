@@ -12,6 +12,10 @@
 
 `resume_switch`与`resume_switch_large`在同一进程、同一个6MiB池和介质中执行A→B→A→B，实际park/drop单个热会话；分别使用原创小书与48章/超大单章各57.6万字的书，不能称作真实《绍宋》《明颂》。覆盖完整保存、当前包写出部分行后取消、下一包取消、下一页未预热时先存当前包，核对重开命中、退出/恢复完整像素和位置、首次NEXT及释放归零。`PN_SWITCH_EVIDENCE`可保存原始计时/帧摘要；时间排除截图写盘，但仍是主机软件观察，不包含TF/面板。真实睡眠诊断另输出`resume.stored/hit/load`事件，不逐行打印写包，正式配置不增加这些日志。
 
+续读快速入口回归增加NEXT后的立即PREV，核对原当前包回翻全帧及真实索引绑定次数；完整命中时不以延后到PREV绑定索引冒充优化。`epub_reader_session`验证回翻仅接受精确已确认历史及相邻下一页锚点，失败回执保持位置/历史。`resume_app`的EPUB完整序列现在包括OPEN、NEXT、PREV三次包命中，TXT保持原RAM回翻；坏包、缺文件与设置变化仍逐完整帧对照。
+
+快速入口回归另以链接器观察真实`pn_page_index_open`次数，续读首屏命中须为0；`resume_app`通过`PN_RESUME_ENTRY=1`覆盖显式未显示候选、缺包/坏包、设置变化和失败重试。`reopen_entry_host/immutable`用原创实际书源核对完整SHA证明复用、错误expected拒绝及换代后重新完整复核，PC仍不复用证明。诊断`epub.open.source-memo`只表示本次命中原完整证明；`resume.sources/decode`分出来源复核与包解码时间，父子阶段有嵌套，不能相加当总耗时。
+
 独立旧/新对照：先冻结旧提交源码并用相同`pn_resume_capture.c`编译观察器（旧目标不定义`PN_RESUME_NEW`），再运行`python tools/test_local_resume.py --before <旧观察器> --after <新观察器> --font <完整TTF> --out <报告.json>`。输入与状态复制到临时卷，三轮交替、固定可用CPU，TXT及480章/单章288万字逐帧一致才汇总开书/首次NEXT中位数、池峰和包体积。只有同源软件时间，不模拟TF或面板。
 
 SDL独立对照为`python simulator/test_resume_window.py <新pn_sim> <完整TTF> <旧pn_sim>`；设置`PN_RESUME_EVIDENCE`保留原始日志/PGM，设置`SDL_VIDEODRIVER=x11`并提供WSLg挂载可走可见窗口。两版须加入相同只读计时点：`sim.open.request`从开书请求到首屏回执，`sim.next.request`包含异步NEXT让出等待。截图写盘及窗口呈现包含在该端到端软件时间内；控制器观察器另排除捕获写盘。不可将局部阶段相加或用一次忙碌主机测量宣称真机比例。

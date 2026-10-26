@@ -59,6 +59,9 @@ static pn_status_t present(void *ctx, const pn_frame_t *f, pn_refresh_t refresh)
     return ok ? PN_OK : PN_IO;
 }
 static pn_status_t step(pn_reader_action_t action, uint64_t now) {
+    if(is_epub && action==PN_APP_OPEN && getenv("PN_RESUME_ENTRY")){
+        pn_status_t s=pn_epub_app_prepare_resume_unshown(&epub);if(s!=PN_OK && s!=PN_EMPTY)return s;
+    }
     // 设备NEXT跨轮让出；上限用于抓住永远BUSY的回归。/ Device NEXT yields across ticks; bound retries to catch livelocks.
     if (is_epub && getenv("PN_RESUME_YIELD")) {
         pn_status_t status;

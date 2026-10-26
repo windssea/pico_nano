@@ -419,6 +419,12 @@ pn_status_t pn_resume_load(pn_resume_t *h, unsigned slot, const pn_resume_page_t
         r->file = fopen(files[attempt], "rb");
         if (!r->file)
             continue;
+        // 两字节行头与短行共享可选4KiB缓冲，避免TF逐行小读；失败保留原stdio路径，仍完整SHA/解码CRC。/ Share an optional 4 KiB buffer across short row headers/data, avoiding tiny TF reads; denial keeps stdio fallback with full SHA/decoded CRC.
+        uint8_t *read_buffer = pn_alloc_optional(r->pool, PN_MEM_INDEX, 4096);
+        if (read_buffer && setvbuf(r->file, (char *)read_buffer, _IOFBF, 4096)) {
+            pn_free(read_buffer);
+            read_buffer = NULL;
+        }
         r->size = (size_t)st.st_size;
         r->offset = SIZE_MAX;
         pn_resume_page_t candidate;
@@ -447,24 +453,30 @@ pn_status_t pn_resume_load(pn_resume_t *h, unsigned slot, const pn_resume_page_t
             valid = valid && found;
         }
         if (valid && verify) {
+            uint64_t began = pn_profile_time();
             s = verify(ctx);
+            pn_profile_observe(r->pool, "resume.sources", s, pn_profile_time() - began, NULL);
             if (s != PN_OK) {
                 fclose(r->file);
                 r->file = NULL;
+                pn_free(read_buffer);
                 return s;
             }
         }
         uint32_t crc = 0;
         if (valid) {
+            uint64_t began = pn_profile_time();
             r->decoded = 0;
             do {
                 s = decode(r, out, &crc);
             } while (s == PN_BUSY);
             valid = s == PN_OK && crc == get(r->header + RH - 8, 4);
+            pn_profile_observe(r->pool, "resume.decode", valid ? PN_OK : s == PN_OK ? PN_CORRUPT : s, pn_profile_time() - began, NULL);
         }
         if (fclose(r->file))
             valid = false;
         r->file = NULL;
+        pn_free(read_buffer);
         if (s == PN_CANCELLED || s == PN_STALE_MEDIA)
             return s;
         if (valid) {

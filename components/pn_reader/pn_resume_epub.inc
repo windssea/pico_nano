@@ -32,13 +32,16 @@ static pn_status_t resume_verify(void *ctx) {
 }
 static pn_status_t resume_prepare(app_t *a, pn_read_intent_t intent, pn_epub_reader_receipt_t *receipt) {
     if (a->unshown_layout || a->style_preview || a->font_preview || a->font_view || a->body_layer.paint ||
-        (intent != PN_READ_JUMP && intent != PN_READ_NEXT))
+        (intent != PN_READ_JUMP && intent != PN_READ_NEXT && intent != PN_READ_PREVIOUS))
         return PN_EMPTY;
     pn_resume_page_t wanted = {.format = 2}, page;
     if (intent == PN_READ_JUMP) {
         if (a->has_visible || !a->has_restore)
             return PN_EMPTY;
         wanted.epub.begin = a->restored.location;
+    } else if (intent == PN_READ_PREVIOUS) {
+        if(pn_epub_reader_previous_ready(&a->reader) || pn_epub_reader_previous_target(&a->reader,&wanted.epub.begin)!=PN_OK)
+            return PN_EMPTY;
     } else {
         pn_epub_reader_anchor_t visible;
         if (pn_epub_reader_visible(&a->reader, &visible) != PN_OK || !visible.has_next || pn_epub_reader_next_ready(&a->reader))

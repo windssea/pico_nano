@@ -38,6 +38,8 @@ typedef struct {
     bool resume_key_valid,resume_bound,resume_dirty,resume_next_dirty; ///< 绑定与待写槽 / Binding and pending slots
     bool resume_pixels_ready,resume_good; ///< 本次恢复候选及完整绘制资格 / Restored candidate and complete-render eligibility
     bool next_continuing; ///< 同一次NEXT已开始分步排版，不逐步重读续读包 / This NEXT has started stepped layout; do not reread resume files on each step
+    bool index_attempted; ///< 本布局是否已尝试绑定可选页表；续读命中不提前载入 / Whether optional page-index binding was attempted for this layout; resume hits do not load it eagerly
+    bool unshown_resume,resume_open_probed; ///< 未显示的完整续读候选与本次查包资格 / Complete unshown resume candidate and one-shot opening probe
     unsigned resume_missing,resume_pixels; ///< 页脚复画所需字形状态 / Glyph state needed to repaint chrome
     pn_w_status_snapshot_t status; ///< 当前帧的状态带，热恢复未变时不重画 / Status band in the current frame; unchanged warm restores never redraw it
     pn_page_index_t page_index;uint32_t index_generation;uint32_t build_flushed;bool build_flushing,build_failed,build_complete,build_metrics; ///< 分批编译收口及本代失败退避 / Batched compiler draining and per-layout failure backoff
@@ -504,6 +506,12 @@ pn_status_t pn_epub_app_open_job_begin_trusted(pn_epub_open_job_t *job,pn_pool_t
     return PN_OK;
 }
 bool pn_epub_app_open_job_pending(const pn_epub_open_job_t *job){return job && job->impl && ((const open_job_t *)job->impl)->status==PN_BUSY;}
+bool pn_epub_app_open_job_feedback_due(const pn_epub_open_job_t *job){
+    if(!job || !job->impl)return false;
+    const open_job_t *r=job->impl;uint64_t now=pn_profile_time();
+    return !r->fast || !now || now<r->started || now-r->started>=500000u;
+}
+bool pn_epub_app_restore_pending(const pn_epub_app_t *app){const app_t *a=app?app->impl:NULL;return a && !a->has_visible && a->has_restore && !a->unshown_layout;}
 pn_status_t pn_epub_app_open_job_progress(const pn_epub_open_job_t *job,uint64_t *bytes,uint64_t *size){
     if(!job || !bytes || !size)return PN_INVALID;
     if(!job->impl)return PN_EMPTY;
@@ -596,7 +604,13 @@ static pn_status_t open_job_step(pn_epub_open_job_t *job,pn_epub_app_t *out){
     if(r->stage==1 && r->fast){
         // 快开：身份暂用最近记录，ZIP本地头改由finish逐条随机读校验，整书SHA开书后后台复核。
         // Fast open: use the recent-record identity for now, let finish validate local headers with per-entry random reads, and verify the whole-book SHA in the background after opening.
-        r->app->book=r->expected;r->app->verify_book=true;r->app->book_source=r->source;r->stage=3;return PN_BUSY;
+        // 只复用原不可变文件port的完整SHA证明；最近记录本身仍无此资格，PC/失配代次继续完整复核。/ Reuse only the original immutable-file port's full-SHA proof; recents alone never qualify, and host/epoch misses retain full verification.
+        pn_book_id_t verified;pn_status_t known=pn_text_file_identity_cached(&r->source,&verified);
+        if(known==PN_OK){pn_profile_io_t io={.hits=1};pn_profile_observe(r->app->pool,"epub.open.source-memo",known,0,&io);}
+        if(known==PN_CANCELLED)return known;
+        if(known!=PN_OK && known!=PN_EMPTY){r->status=known;return known;}
+        if(known==PN_OK && memcmp(verified.sha256,r->expected.sha256,32)){r->status=PN_STALE_JOB;return r->status;}
+        r->app->book=r->expected;r->app->verify_book=known!=PN_OK;r->app->book_source=r->source;r->stage=3;return PN_BUSY;
     }
     if(r->stage==1){
         r->tap=(tap_t){r->source.ctx,r->source.read_at,r->scanned==PN_OK?&r->scan:NULL};
@@ -611,9 +625,12 @@ static pn_status_t open_job_step(pn_epub_open_job_t *job,pn_epub_app_t *out){
         }
     }else if(r->stage==3){
         s=r->scanned;
+        // 本地ZIP头通常很短，避免每条随机定位都搬入4KiB；大扩展区仍完整读取，缓存总额度不变。/ Local ZIP headers are usually short: avoid a 4 KiB fill per random seek; large extras remain fully read under the same cache cap.
+        if(s==PN_OK && !r->directory.impl)s=pn_text_file_cache_window(&r->source,512);
         if(s==PN_OK && !r->directory.impl)s=pn_zip_scan_finish_job_begin(&r->directory,&r->scan);
         if(s==PN_OK)s=pn_zip_job_step(&r->directory,&r->app->zip);
         if(s==PN_BUSY || s==PN_CANCELLED)return s;
+        if(s==PN_OK)s=pn_text_file_cache_window(&r->source,4096);
         if(s==PN_OK)s=open_entropy(r->app);
         if(s==PN_OK){r->stage++;return PN_BUSY;}
     }else if(r->stage==4){
@@ -646,6 +663,14 @@ pn_status_t pn_epub_app_open_job_step(pn_epub_open_job_t *job,pn_epub_app_t *out
     if(s==PN_OK){open_job_report(r,s);r->app=NULL;return pn_epub_app_open_job_close(job);}
     return s;
 }
+pn_status_t pn_epub_app_open_job_advance(pn_epub_open_job_t *job,pn_epub_app_t *out){
+    uint64_t began=pn_profile_time();pn_status_t s=PN_BUSY;
+    for(unsigned step=0;step<32u;step++){
+        s=pn_epub_app_open_job_step(job,out);if(s!=PN_BUSY)return s;
+        uint64_t now=pn_profile_time();if(now>=began && now-began>=8000u)break;
+    }
+    return s;
+}
 /* 字体事务直接画最终目标页，使用候选正文字体；不递归推屏。/ Font transactions paint their final destination with the candidate body font, without recursive presentation. */
 static pn_status_t paint_font_view(app_t *a,pn_frame_t *frame){
     pn_status_t status=ensure_body(a,a->style.pixels);
@@ -658,24 +683,44 @@ static pn_status_t paint_font_view(app_t *a,pn_frame_t *frame){
     return status;
 }
 #include "pn_resume_epub.inc"
-static pn_status_t index_layout(app_t *a){
+static pn_status_t resume_layout(app_t *a){
     if(!a->persistent || a->index_generation==a->token.generation)return PN_OK;
     // 新键失败时不得继续使用上一字体/布局的身份。/ A failed new key must never retain the previous font/layout identity.
     pn_resume_close(&a->resume);a->resume_bound=false;a->resume_key_valid=false;
-    pn_epub_reader_index(&a->reader,NULL);pn_page_index_close(&a->page_index);a->build_flushed=0;a->build_flushing=a->build_failed=a->build_complete=a->build_metrics=false;
+    pn_epub_reader_index(&a->reader,NULL);pn_page_index_close(&a->page_index);a->index_attempted=false;a->build_flushed=0;a->build_flushing=a->build_failed=a->build_complete=a->build_metrics=false;
     pn_text_source_t source=a->font_source;pn_book_id_t key;pn_status_t s=PN_OK;
     if(font_set(a))s=pn_font_set_source(font_set(a),&source);
     if(s==PN_OK)s=pn_page_index_key_known(&a->book,&a->style,&source,chain(a),0x100u,a->verify_font?&a->font_expected:NULL,&key);
     if(s==PN_OK){a->resume_key=key;a->resume_key_valid=true;}
-    if(s==PN_OK)s=pn_page_index_open(&a->page_index,a->pool,&a->state,&a->state_lease,a->state_directory,&a->book,&key);
-    if(s==PN_OK && pn_page_index_tf_directory())s=pn_page_index_use_tf(&a->page_index,a->media,&a->book_lease,pn_page_index_tf_directory());
     if(s==PN_CANCELLED || s==PN_STALE_MEDIA)return s;
-    a->index_generation=a->token.generation;if(s==PN_OK)pn_epub_reader_index(&a->reader,&a->page_index);return PN_OK;
+    a->index_generation=a->token.generation;return PN_OK;
+}
+/// 续读包未命中或显式索引工作才绑定页表；绑定时沿原完整读回与摘要校验。/ Bind page indexes only after a resume miss or explicit index work, retaining full readback/digest validation at binding.
+static pn_status_t index_layout(app_t *a){
+    pn_status_t s=resume_layout(a);if(s!=PN_OK || !a->persistent || !a->resume_key_valid || a->index_attempted)return s;
+    pn_profile_span_t span;pn_profile_begin(&span,a->pool,"epub.index-bind");
+    s=pn_page_index_open(&a->page_index,a->pool,&a->state,&a->state_lease,a->state_directory,&a->book,&a->resume_key);
+    if(s==PN_OK && pn_page_index_tf_directory())s=pn_page_index_use_tf(&a->page_index,a->media,&a->book_lease,pn_page_index_tf_directory());
+    pn_profile_end(&span,s);
+    if(s==PN_CANCELLED || s==PN_STALE_MEDIA){a->index_generation=0;return s;}
+    a->index_attempted=true;if(s==PN_OK)pn_epub_reader_index(&a->reader,&a->page_index);return PN_OK;
+}
+pn_status_t pn_epub_app_prepare_resume_unshown(pn_epub_app_t *app){
+    app_t *a=app?app->impl:NULL;if(!a)return PN_INVALID;
+    if(a->has_visible || !a->has_restore || a->unshown_layout || a->resume_open_probed || a->suspended || a->style_preview || a->font_preview || a->font_pending || a->style_pending || a->global_pending || a->body_layer.paint || a->display.active>=0 || a->display.queued>=0 || a->pool->speculative)return PN_EMPTY;
+    pn_status_t s=resume_layout(a);if(s!=PN_OK)return s;
+    pn_epub_reader_receipt_t receipt;s=resume_prepare(a,PN_READ_JUMP,&receipt);
+    if(s==PN_OK){a->unshown_layout=true;a->unshown_resume=true;}
+    else if(s==PN_EMPTY)a->resume_open_probed=true;
+    return s;
 }
 static pn_status_t navigate(pn_epub_app_t *app,pn_reader_action_t action,const pn_epub_location_t *jump,uint64_t now,pn_reader_present_fn present,void *ctx,bool yielding){
     if(app && app->impl)((app_t *)app->impl)->last_confirmed=false;
     if(!app || !app->impl || !present || action<PN_APP_OPEN || action>PN_APP_BEGINNING)return PN_INVALID;
-    app_t *a=app->impl;a->last_confirmed=false;a->resume_pixels_ready=false;
+    app_t *a=app->impl;a->last_confirmed=false;
+    bool restored_candidate=a->unshown_layout && a->unshown_resume && action==PN_APP_OPEN && !jump;
+    bool probed=a->resume_open_probed && action==PN_APP_OPEN && !jump;
+    a->resume_pixels_ready=restored_candidate;a->unshown_resume=false;a->resume_open_probed=false;
     bool continuing=a->next_continuing && yielding && action==PN_APP_NEXT && !jump;
     a->next_continuing=false;
     if(a->lost)return PN_STALE_MEDIA;
@@ -694,16 +739,20 @@ static pn_status_t navigate(pn_epub_app_t *app,pn_reader_action_t action,const p
         }
         a->unshown_layout=false;
     }
-    status=index_layout(a);
+    if(!prepared){restored_candidate=false;a->resume_pixels_ready=false;}
+    status=resume_layout(a);
     if(status!=PN_OK){if(prepared)(void)pn_epub_reader_complete(&a->reader,&receipt,false,now);return status;}
     if(prepared){
-        status=pn_zip_validate(&a->zip);
+        status=restored_candidate?PN_OK:index_layout(a);if(status==PN_OK)status=pn_zip_validate(&a->zip);
         if(status!=PN_OK)(void)pn_epub_reader_complete(&a->reader,&receipt,false,now);
     }else{
         // 首次查包失败后接续同一解析任务；新页、其他动作、取消或错误重新允许探测。/ After the first packet miss continue the same parser; a new page, another action, cancellation or error permits a fresh probe.
-        status=(!continuing && !jump && action!=PN_APP_BEGINNING)?resume_prepare(a,intent,&receipt):PN_EMPTY;
+        status=(!probed && !continuing && !jump && action!=PN_APP_BEGINNING)?resume_prepare(a,intent,&receipt):PN_EMPTY;
         if(status==PN_EMPTY){
-            status=yielding?pn_epub_reader_prepare_step(&a->reader,intent,intent==PN_READ_JUMP?(jump?jump:&a->restored.location):NULL,&receipt):pn_epub_reader_prepare(&a->reader,intent,intent==PN_READ_JUMP?(jump?jump:&a->restored.location):NULL,&receipt);
+            // 已有精确相邻页模型时也不为可选页表付初始化成本。/ Exact resident neighbor models also avoid optional page-index initialization.
+            bool neighbor=(intent==PN_READ_NEXT && pn_epub_reader_next_ready(&a->reader)) || (intent==PN_READ_PREVIOUS && pn_epub_reader_previous_ready(&a->reader));
+            status=neighbor?PN_OK:index_layout(a);
+            if(status==PN_OK)status=yielding?pn_epub_reader_prepare_step(&a->reader,intent,intent==PN_READ_JUMP?(jump?jump:&a->restored.location):NULL,&receipt):pn_epub_reader_prepare(&a->reader,intent,intent==PN_READ_JUMP?(jump?jump:&a->restored.location):NULL,&receipt);
             a->next_continuing=yielding && intent==PN_READ_NEXT && status==PN_BUSY;
         }
     }
