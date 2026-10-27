@@ -1,0 +1,393 @@
+{
+  "schema": 1,
+  "date": "2026-10-27",
+  "kind": "Missing root diagnosis, generation after exit and priority retention; final single cold sample after normal cache preparation",
+  "base_source": "502837a4966aa8192fc239a7fd0215afa3684e7a",
+  "baseline_evidence": "reading-device-txt-switch-20261027.json",
+  "device": {
+    "board": "RDP-G01-W / E0470A01",
+    "chip": "ESP32-S3 rev0.2",
+    "idf": "v6.1"
+  },
+  "image": {
+    "base_source": "502837a4966aa8192fc239a7fd0215afa3684e7a",
+    "version": "1.0.7-diag",
+    "elf_sha256": "b0cc2d23e3d50c8732ac4536a464fbbc1fceeff7c41a2ed8e9eede3d7e731a94",
+    "bytes": 5546080,
+    "sha256": "6c0c5a19a61171ceeb5ada8366309449b0c2b52b0cf213310336a4c685b522ee",
+    "slot_free": 745376,
+    "slot_free_percent": 11.847432454427082
+  },
+  "result": {
+    "samples": [
+      {
+        "role": "baseline",
+        "input_to_body_ms": 6160,
+        "input_to_ready_ms": 6175,
+        "loading_complete_ms": 953,
+        "next_ms": 890,
+        "previous_ms": 848,
+        "exit_ms": 1215,
+        "source_memo_hits": 1,
+        "bootstrap_hits": 0,
+        "resume_hits": 0
+      },
+      {
+        "role": "final",
+        "input_to_body_ms": 4999,
+        "input_to_ready_ms": 5011,
+        "loading_complete_ms": 1096,
+        "next_ms": 1182,
+        "previous_ms": 1507,
+        "exit_ms": 1022,
+        "source_memo_hits": 0,
+        "bootstrap_hits": 1,
+        "resume_hits": 2
+      }
+    ],
+    "final_request_ms": 4914.206,
+    "saved_baseline_request_ms": 6078.589,
+    "generation_request_ms": 9205.04,
+    "generation": {
+      "book_sha256": "81d846a065f9b8331b96a924efbc3850d98d602aa7247c6f0d3b7dbb4611a9c0",
+      "initial_root_events": [
+        "1793087109.816 I (55014) pico_nano: Cache file phase=source.blocks.root.missing status=3 name=81d846a065f9b8331b96a924efbc3850d98d602aa7247c6f0d3b7dbb4611a9c0.pnst",
+        "1793087109.816 I (55042) pico_nano: Cache file phase=source.blocks.root.missing status=3 name=81d846a065f9b8331b96a924efbc3850d98d602aa7247c6f0d3b7dbb4611a9c0.pnst.bak",
+        "1793087117.061 I (62338) pico_nano: Cache file phase=bootstrap.root.missing status=3 name=81d846a065f9b8331b96a924efbc3850d98d602aa7247c6f0d3b7dbb4611a9c0.pnbt",
+        "1793087117.061 I (62366) pico_nano: Cache file phase=bootstrap.root.missing status=3 name=81d846a065f9b8331b96a924efbc3850d98d602aa7247c6f0d3b7dbb4611a9c0.pnbt.bak",
+        "1793087117.781 I (63036) pico_nano: Cache file phase=resume.root.valid status=0 name=81d846a065f9b8331b96a924efbc3850d98d602aa7247c6f0d3b7dbb4611a9c0.0.pnrt",
+        "1793087117.781 I (63063) pico_nano: Cache file phase=resume.root.missing status=3 name=81d846a065f9b8331b96a924efbc3850d98d602aa7247c6f0d3b7dbb4611a9c0.0.pnrt.bak"
+      ],
+      "lifecycle_events": [
+        "1793087109.816 I (55014) pico_nano: Cache file phase=source.blocks.root.missing status=3 name=81d846a065f9b8331b96a924efbc3850d98d602aa7247c6f0d3b7dbb4611a9c0.pnst",
+        "1793087109.816 I (55042) pico_nano: Cache file phase=source.blocks.root.missing status=3 name=81d846a065f9b8331b96a924efbc3850d98d602aa7247c6f0d3b7dbb4611a9c0.pnst.bak",
+        "1793087117.061 I (62338) pico_nano: Cache file phase=bootstrap.root.missing status=3 name=81d846a065f9b8331b96a924efbc3850d98d602aa7247c6f0d3b7dbb4611a9c0.pnbt",
+        "1793087117.061 I (62366) pico_nano: Cache file phase=bootstrap.root.missing status=3 name=81d846a065f9b8331b96a924efbc3850d98d602aa7247c6f0d3b7dbb4611a9c0.pnbt.bak",
+        "1793087117.781 I (63036) pico_nano: Cache file phase=resume.root.valid status=0 name=81d846a065f9b8331b96a924efbc3850d98d602aa7247c6f0d3b7dbb4611a9c0.0.pnrt",
+        "1793087117.781 I (63063) pico_nano: Cache file phase=resume.root.missing status=3 name=81d846a065f9b8331b96a924efbc3850d98d602aa7247c6f0d3b7dbb4611a9c0.0.pnrt.bak",
+        "1793087122.019 I (67270) pico_nano: Cache file phase=bootstrap.prepare status=0 name=81d846a065f9b8331b96a924efbc3850d98d602aa7247c6f0d3b7dbb4611a9c0.pnbt",
+        "1793087126.512 I (71743) pico_nano: Cache file phase=bootstrap.stored status=0 name=81d846a065f9b8331b96a924efbc3850d98d602aa7247c6f0d3b7dbb4611a9c0.pnbt"
+      ],
+      "source_blocks_stored": 1,
+      "bootstrap_stored": true,
+      "resume_stored": true
+    },
+    "final_root_events": [
+      "1793087267.519 I (12269) pico_nano: Cache file phase=source.blocks.root.valid status=0 name=81d846a065f9b8331b96a924efbc3850d98d602aa7247c6f0d3b7dbb4611a9c0.pnst",
+      "1793087267.719 I (12301) pico_nano: Cache file phase=source.blocks.root.missing status=3 name=81d846a065f9b8331b96a924efbc3850d98d602aa7247c6f0d3b7dbb4611a9c0.pnst.bak",
+      "1793087267.719 I (12452) pico_nano: Cache file phase=bootstrap.root.valid status=0 name=81d846a065f9b8331b96a924efbc3850d98d602aa7247c6f0d3b7dbb4611a9c0.pnbt",
+      "1793087267.719 I (12482) pico_nano: Cache file phase=bootstrap.root.missing status=3 name=81d846a065f9b8331b96a924efbc3850d98d602aa7247c6f0d3b7dbb4611a9c0.pnbt.bak",
+      "1793087271.218 I (15924) pico_nano: Cache file phase=resume.root.valid status=0 name=81d846a065f9b8331b96a924efbc3850d98d602aa7247c6f0d3b7dbb4611a9c0.0.pnrt",
+      "1793087271.218 I (15953) pico_nano: Cache file phase=resume.root.missing status=3 name=81d846a065f9b8331b96a924efbc3850d98d602aa7247c6f0d3b7dbb4611a9c0.0.pnrt.bak"
+    ],
+    "opening_phases_nested": {
+      "content.stream-sha": {
+        "count": 16,
+        "elapsed_us": 3250536
+      },
+      "device.board-init": {
+        "count": 1,
+        "elapsed_us": 234150
+      },
+      "display.queue": {
+        "count": 5,
+        "elapsed_us": 87
+      },
+      "display.wait": {
+        "count": 5,
+        "elapsed_us": 4386146
+      },
+      "display.receipt": {
+        "count": 5,
+        "elapsed_us": 4398561
+      },
+      "storage.read": {
+        "count": 17,
+        "elapsed_us": 658503
+      },
+      "font.open": {
+        "count": 5,
+        "elapsed_us": 188468
+      },
+      "ui.shelf.catalog": {
+        "count": 2,
+        "elapsed_us": 198271
+      },
+      "ui.shelf.bind": {
+        "count": 2,
+        "elapsed_us": 182295
+      },
+      "ui.cover.shade": {
+        "count": 3,
+        "elapsed_us": 1405
+      },
+      "ui.cover.blit": {
+        "count": 3,
+        "elapsed_us": 20978
+      },
+      "ui.cover.frame": {
+        "count": 3,
+        "elapsed_us": 9445
+      },
+      "ui.cover.badge": {
+        "count": 3,
+        "elapsed_us": 18981
+      },
+      "ui.shelf.render": {
+        "count": 2,
+        "elapsed_us": 1413214
+      },
+      "ui.grid.blit": {
+        "count": 9,
+        "elapsed_us": 88037
+      },
+      "ui.grid.frame": {
+        "count": 9,
+        "elapsed_us": 60129
+      },
+      "idle.catalog": {
+        "count": 1,
+        "elapsed_us": 175851
+      },
+      "epub.open.begin": {
+        "count": 1,
+        "elapsed_us": 5129
+      },
+      "source.blocks.hit": {
+        "count": 1,
+        "elapsed_us": 0
+      },
+      "source.blocks.load": {
+        "count": 1,
+        "elapsed_us": 178102
+      },
+      "bootstrap.hit": {
+        "count": 1,
+        "elapsed_us": 0
+      },
+      "bootstrap.load": {
+        "count": 1,
+        "elapsed_us": 689633
+      },
+      "epub.open.directory": {
+        "count": 1,
+        "elapsed_us": 868304
+      },
+      "epub.open.loading": {
+        "count": 1,
+        "elapsed_us": 1021446
+      },
+      "source.blocks.verify": {
+        "count": 14,
+        "elapsed_us": 106102
+      },
+      "epub.open.metadata": {
+        "count": 1,
+        "elapsed_us": 41246
+      },
+      "epub.open.state": {
+        "count": 1,
+        "elapsed_us": 79263
+      },
+      "epub.open.fonts": {
+        "count": 1,
+        "elapsed_us": 142410
+      },
+      "source.blocks.dependencies": {
+        "count": 1,
+        "elapsed_us": 689355
+      },
+      "epub.compat": {
+        "count": 1,
+        "elapsed_us": 1376848
+      },
+      "epub.model-build": {
+        "count": 1,
+        "elapsed_us": 1690961
+      },
+      "epub.model": {
+        "count": 1,
+        "elapsed_us": 2516570
+      },
+      "resume.blocks": {
+        "count": 1,
+        "elapsed_us": 2516701
+      },
+      "epub.open.sources": {
+        "count": 1,
+        "elapsed_us": 2517033
+      },
+      "epub.open.trusted-wall": {
+        "count": 1,
+        "elapsed_us": 3812382
+      },
+      "epub.open.wait": {
+        "count": 1,
+        "elapsed_us": 158960
+      },
+      "epub.open.max-step": {
+        "count": 1,
+        "elapsed_us": 2517040
+      },
+      "epub.open.font-io": {
+        "count": 1,
+        "elapsed_us": 0
+      },
+      "font.layout-key": {
+        "count": 1,
+        "elapsed_us": 254
+      },
+      "content.sha-step": {
+        "count": 10,
+        "elapsed_us": 46435
+      },
+      "resume.sources": {
+        "count": 1,
+        "elapsed_us": 52
+      },
+      "resume.decode": {
+        "count": 1,
+        "elapsed_us": 113223
+      },
+      "resume.hit": {
+        "count": 1,
+        "elapsed_us": 0
+      },
+      "resume.load": {
+        "count": 1,
+        "elapsed_us": 329774
+      },
+      "epub.raster.body": {
+        "count": 1,
+        "elapsed_us": 318
+      },
+      "epub.raster.footer": {
+        "count": 1,
+        "elapsed_us": 88477
+      },
+      "epub.raster": {
+        "count": 1,
+        "elapsed_us": 89741
+      },
+      "epub.prefetch.compat-known": {
+        "count": 1,
+        "elapsed_us": 0
+      },
+      "epub.prefetch.xml": {
+        "count": 20,
+        "elapsed_us": 550991
+      },
+      "epub.open.first-frame": {
+        "count": 1,
+        "elapsed_us": 762366
+      },
+      "epub.open.request": {
+        "count": 1,
+        "elapsed_us": 4914206
+      }
+    },
+    "digital_frames": {
+      "baseline_equal": true,
+      "generation_equal": true,
+      "excluded_top_rows": 32,
+      "size": [
+        684,
+        1216
+      ],
+      "pixel_sha256": "8768381b3b9991f829baf4651d055b2e830a2636f03dedfeebf45baa409e5e9b"
+    },
+    "health": {
+      "observed_session_pool_peak": 3926191,
+      "pool_limits": [
+        6217360
+      ],
+      "heap": [
+        "PNT 870838 heap internal=77927 internal_largest=32768 internal_min=37188 psram=2805072 psram_largest=2686976 psram_min=2426372"
+      ],
+      "errors": [],
+      "eviction_events": [],
+      "final_state": "Body visible following later non-script UI actions; serial server stopped.",
+      "later_non_benchmark_open_requests": 2
+    }
+  },
+  "memory": {
+    "diram_bytes": 200323,
+    "external_bss_bytes": 156540,
+    "pool_and_class_caps_changed": false,
+    "persistent_buffer_added": false
+  },
+  "flash": {
+    "active_application": {
+      "version": "1.0.7-diag",
+      "elf_sha256": "b0cc2d23e3d50c8732ac4536a464fbbc1fceeff7c41a2ed8e9eede3d7e731a94"
+    },
+    "original_ota0_full_partition_md5": "d0606f9671b5df4d60574c9cdf436fed",
+    "selectors": [
+      {
+        "offset": "0xf000",
+        "sequence": 17,
+        "state": 2,
+        "slot": 0
+      },
+      {
+        "offset": "0x10000",
+        "sequence": 20,
+        "state": 2,
+        "slot": 1
+      }
+    ],
+    "unchanged_protection": {
+      "boot": true,
+      "partition": true,
+      "nvs": true,
+      "phy_and_gap": true
+    }
+  },
+  "validation": {
+    "first_matrix": "21 tests: 17 passed; 2 switch assertions assumed one call drained all caches, and 2 hot tests found a disabled-cache pending bug. Preserved failure logs.",
+    "corrected_group": "6 passed including all four former failures plus root/exit regressions",
+    "final_quota_guard_group": "5 passed: root diagnostics, bootstrap transaction, exit cancellation/quota-stop and two control tests",
+    "retention_group": "1 passed: frame-first eviction, same-book critical-proof protection and unchanged quota ceilings",
+    "visible_simulator": "rebuilt and restarted; not hardware performance evidence"
+  },
+  "user_visual_feedback": {
+    "date": "2026-10-27",
+    "response": "画面正常，无明显异常",
+    "scope": "This final diagnostic run; user observation, not instrumented optical or power measurement"
+  },
+  "limitations": [
+    "Missing primary and backup roots were observed directly; no corruption/IO/eviction event occurred for the target during this capture. Deletion before captured history cannot be excluded.",
+    "Generation preparation was one ordinary short opening/exit; it is recorded separately and is not a final performance sample. Final timing was one RTS-reset opening; no baseline reflashing or repeated final timing.",
+    "Baseline had source memo hit and missing bootstrap/resume; final uses authenticated block table, bootstrap and page caches, with source memo zero. Background and cache conditions differ; no strict matched P95 or isolated micro-optimization claim.",
+    "Final NEXT +292ms concentrated in display scan 649->939ms with preparation 131->134ms. PREV also has about331ms authenticated packet load/decode. No claim that all turns improved; waveform source and settings unchanged.",
+    "After the formal script returned home, two further UI opens not issued by the test script were recorded passively and excluded from timing. Device was left in reading state rather than interrupting these actions. Session heap peak is not strictly paired.",
+    "No physical power cut, long-lock, optical instrument or power qualification.",
+    "Intermediate b61 image was written/verified but not booted or measured; final quota-stop correction b0 was then written and fully audited. Intermediate artifacts are preserved locally."
+  ],
+  "local_root": "build-dev/root-retention-20261027",
+  "local_sha256": {
+    "image.json": "027f63a39d023a18fecb35703f0c233f9c39e3f60bb0bfff31b48524715cb4d4",
+    "source-files.json": "02df62dfda93a8bb079c008e49cbaf1bc08cb7731cd0bca61532b88b4f8aca62",
+    "source.patch": "63aa65aa1058c6da31e24ca82ae8fc63106b45d23dc643946049019883fb52e6",
+    "verified.log": "226f7078fd20a32eb7caa339ec00ce43593d6582d8b01add2e2f5c8a93dc1a71",
+    "verified-fixed.log": "70fd9b0ccddea3efc40ee6b0a55454d481e4bb264daaaaa84f73416fe366edfb",
+    "control-final.log": "437a2e15aeeba53174d4e289a7a93c69ca0c271e6077b372d718be84f981acbf",
+    "quota-qualified.log": "e0d586c088e1a93d99a057f54258a0bd4f0aa8b863884a46e93b0147c78a372d",
+    "retention-qualified.log": "70544348a9a9dfb0e830d9e25f7c9ff6e416430b77485d6220d5680539ed9094",
+    "analysis.json": "db19f47ed7de81161999b02323a619731e220c376eec8c3abcbf7ae083e300c0",
+    "after/generation.json": "65f64c839f0f4d3d0a7d2d57a1edf095bd30fd0feaac90403531fdf89b81905d",
+    "after/final-reset.json": "c65eb7cc9c4a12c0f8ac966263e360624e495f9da2cbbd42675e9f424b7ad63a",
+    "after/sao-epub-final.json": "7eb34beb5de10e122af22030aba606fa626369a79e42d338d9b1897c8c57c773",
+    "after/serial.log": "d2566e9c37a1bcaa699b72487899b74afc2100203eddae839a62fcb51c5b8719",
+    "flash/after-audit.json": "3fa0ec385899680ed5b207658a5dc5fe4373697ff6a68a35df5cf47660fc3412",
+    "flash/verify-whole-app.log": "b78be752fea5b7c66c436a4d5ef90ad8fdb4e2947ff3d54e9bd6a38fe5a20907",
+    "final-source.patch": "e600bd4bb6ef346ba96d4c7bba5acb0588db0481297cffde5f22809ec2b3b77d"
+  },
+  "validation_source_sha256": {
+    "tests/host/test_reading_store.c": "e1e52bdd1890784e0cc2b0561fc8a6334eed6472db63d6a7f7b1bfbc0e3720c2",
+    "tests/host/test_reading_store.py": "c8376c8f9e3a652fd67dd74ea7b7b201c40603307e8d9e26bed28ac850b970bb",
+    "tests/host/test_exit_checkpoint.c": "10042dc80153a588c43c8abcf28ec9e2e0c8df35c3093129cb5640137909add5",
+    "tests/host/pn_switch_capture.c": "6ff79bbd293ffaf76262609ba5c2868f7c92bf0db70d5c2dd32c87c6dffc2918"
+  },
+  "release": false
+}

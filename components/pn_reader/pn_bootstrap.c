@@ -43,8 +43,7 @@ typedef struct {
     uint8_t buffer[4096];
     bool owned,root_owned,comparing;
 } boot_t;
-static uint32_t get32(const uint8_t *p){return (uint32_t)p[0]|(uint32_t)p[1]<<8|(uint32_t)p[2]<<16|(uint32_t)p[3]<<24;
-}
+
 static void put32(uint8_t *p,uint32_t v){for(unsigned i=0;i<4;i++)p[i]=(uint8_t)(v>>(8*i));
 }
 static pn_status_t checked(boot_t *b){
@@ -54,17 +53,7 @@ static pn_status_t checked(boot_t *b){
     return s==PN_OK?pn_media_validate(b->state,&b->trust):s;
 }
 static bool root_read(const char *path,pn_book_id_t hashes[2]){
-    struct stat st;
-    if(boot_stat(path,&st) || !S_ISREG(st.st_mode) || st.st_size!=76)return false;
-    uint8_t data[76];
-    FILE *f=fopen(path,"rb");
-    if(!f)return false;
-    bool ok=fread(data,1,76,f)==76 && fgetc(f)==EOF && !ferror(f);
-    if(fclose(f))ok=false;
-    if(!ok || memcmp(data,"PNBR",4) || get32(data+4)!=1 || get32(data+72)!=pn_crc32_update(0,data,72))return false;
-    memcpy(hashes[0].sha256,data+8,32);
-    memcpy(hashes[1].sha256,data+40,32);
-    return true;
+    return pn_reading_root_load(path,"PNBR",hashes,NULL,NULL)==PN_OK;
 }
 static bool paths(boot_t *b,const char *tf,const char *state,const pn_book_id_t *book){
     if(!tf || !*tf || !state || !*state)return false;
@@ -189,8 +178,8 @@ pn_status_t pn_bootstrap_load(pn_pool_t *pool,pn_media_t *media,const pn_media_l
     if(s==PN_OK)s=pn_media_acquire(&state,PN_MEDIA_READ,&b->trust);
     const char *miss="bootstrap.miss.binding";
     if(s==PN_OK && !paths(b,tf,root,book))s=PN_EMPTY;
-    if(s==PN_OK){miss="bootstrap.miss.root-unavailable";if(root_read(b->root,b->roots))b->root_count=2;
-    if(root_read(b->rbak,b->roots+b->root_count))b->root_count+=2;
+    if(s==PN_OK){miss="bootstrap.miss.root-unavailable";if(pn_reading_root_load(b->root,"PNBR",b->roots,pool,"bootstrap.root")==PN_OK)b->root_count=2;
+    if(pn_reading_root_load(b->rbak,"PNBR",b->roots+b->root_count,pool,"bootstrap.root")==PN_OK)b->root_count+=2;
     if(!b->root_count)s=PN_EMPTY;
     }
     if(s==PN_OK){miss="bootstrap.miss.packet-unusable";s=pn_cache_file_load(media,guard,b->path,load_one,b);}
@@ -206,6 +195,7 @@ void pn_bootstrap_abort(pn_bootstrap_t *h){
     if(!h || !h->impl)return;
     boot_t *b=h->impl;
     if(b->owned || b->root_owned){pn_profile_io_t io={.bytes=b->bytes,.reads=b->cursor,.seeks=b->phase};pn_profile_observe(b->pool,"bootstrap.aborted",PN_CANCELLED,0,&io);}
+    if(b->phase!=11 || !b->commit.committed)pn_profile_file(b->pool,"bootstrap.abandoned",PN_CANCELLED,b->root);
     if(b->file)fclose(b->file);
     pn_cache_commit_abort(&b->commit);
     if(pn_media_validate(b->media,&b->writer)==PN_OK && b->owned)(void)remove(b->tmp);
@@ -229,6 +219,7 @@ pn_status_t pn_bootstrap_begin(pn_bootstrap_t *h,pn_pool_t *pool,pn_media_t *med
     return pn_cache_file_miss(s)||s==PN_BUSY?PN_EMPTY:s;
     }
     h->impl=b;
+    pn_profile_file(pool,"bootstrap.prepare",PN_OK,b->root);
     b->io=(pn_format_io_t){.ctx=b,.write=write_exact};
     uint8_t bytes[BOOT_HEAD];
     header(b,bytes);
@@ -239,7 +230,7 @@ pn_status_t pn_bootstrap_begin(pn_bootstrap_t *h,pn_pool_t *pool,pn_media_t *med
     b->cursor=0;
     if(s==PN_OK)do{s=pn_epub_snapshot_write(epub,&b->io,&b->cursor);
     }while(s==PN_BUSY);
-    if(s!=PN_OK){pn_bootstrap_abort(h);
+    if(s!=PN_OK){pn_profile_file(b->pool,"bootstrap.failed",s,b->root);pn_bootstrap_abort(h);
     return s;
     }b->size=b->bytes;
     b->bytes=0;
@@ -251,7 +242,7 @@ pn_status_t pn_bootstrap_step(pn_bootstrap_t *h){
     boot_t *b=h->impl;
     pn_status_t s=checked(b);
     if(s==PN_OK)s=pn_media_validate(b->media,&b->writer);
-    if(s!=PN_OK){pn_bootstrap_abort(h);
+    if(s!=PN_OK){pn_profile_file(b->pool,"bootstrap.failed",s,b->root);pn_bootstrap_abort(h);
     return s;
     }
     switch(b->phase){
@@ -353,14 +344,14 @@ pn_status_t pn_bootstrap_step(pn_bootstrap_t *h){
         s=pn_cache_commit_step(&b->commit);
         if(s==PN_BUSY)return s;
         if(s==PN_OK){b->owned=false;
-        pn_profile_observe(b->pool,"bootstrap.stored",PN_OK,0,NULL);
+        pn_profile_file(b->pool,"bootstrap.stored",PN_OK,b->root);
         pn_bootstrap_abort(h);
         return PN_OK;
         }break;
     default:s=PN_INVALID;
     break;
     }
-    if(s!=PN_OK){pn_bootstrap_abort(h);
+    if(s!=PN_OK){pn_profile_file(b->pool,"bootstrap.failed",s,b->root);pn_bootstrap_abort(h);
     return s;
     }return PN_BUSY;
 }

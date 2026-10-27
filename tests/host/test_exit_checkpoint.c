@@ -5,6 +5,7 @@
 #include "pn_cancel.h"
 #include "pn_hot_session.h"
 #include "pn_resume.h"
+#include "pn_bootstrap.h"
 #include "pn_widgets.h"
 #include <assert.h>
 #include <dirent.h>
@@ -26,6 +27,7 @@ static bool cancel(void *ctx) {
     (void)ctx;
     return true;
 }
+static pn_status_t full_volume(void *ctx,const char *path,uint64_t *bytes){(void)ctx;(void)path;*bytes=0;return PN_OK;}
 static unsigned packets(const char *dir) {
     unsigned n = 0;
     DIR *d = opendir(dir);
@@ -43,7 +45,8 @@ static unsigned packets(const char *dir) {
 int main(int argc, char **argv) {
     assert(argc == 4);
     for (unsigned kind = 1; kind <= 2; kind++)
-        for (unsigned mode = 0; mode < 5; mode++) {
+        for (unsigned mode = 0; mode < 8; mode++) {
+            if(kind==1 && mode>=5)continue;
             char base[384], state[512], tf[512], dir[600];
             snprintf(base, sizeof base, "%s/%u-%u", argv[3], kind, mode);
             assert(!mkdir(base, 0700));
@@ -97,12 +100,20 @@ int main(int argc, char **argv) {
                     assert(pn_hot_session_deferred_flush(&hot) == PN_CANCELLED);
                     pn_cancel_leave(&scope);
                     unsigned steps = 0;
+                    if(epub){
+                        // 人为占住TF写租约，结构准入失败不能丢失后续生成意图。/ Hold the TF write lease; failed structure admission must retain generation intent.
+                        assert(pn_epub_app_bootstrap_checkpoint_pending(&hot.epub) && !pn_bootstrap_hint(state,&id));
+                        pn_media_lease_t held={0};assert(pn_media_acquire(&media,PN_MEDIA_CACHE_WRITE,&held)==PN_OK);
+                        pn_status_t blocked=pn_hot_session_deferred_flush(&hot);assert(blocked==PN_OK || blocked==PN_BUSY || blocked==PN_EMPTY);
+                        assert(pn_epub_app_bootstrap_checkpoint_pending(&hot.epub) && !hot.deferred_failed && pn_media_release(&media,&held)==PN_OK);
+                    }
                     while (pn_hot_session_deferred_pending(&hot)) {
                         pn_status_t s = pn_hot_session_deferred_flush(&hot);
                         assert(s == PN_OK || s == PN_BUSY);
                         assert(++steps < 512);
                     }
                     assert(!hot.deferred_failed);
+                    if(epub)assert(pn_bootstrap_hint(state,&id));
                 }
                 if(mode==1 || mode==3){
                     // 近期日志不可写时，释放必须保留会话和待办；恢复路径后再可靠提交。/ If recents cannot be written, release must retain the session and pending work; save reliably after restoring the paths.
@@ -118,7 +129,19 @@ int main(int argc, char **argv) {
                         pn_status_t s=pn_hot_session_deferred_flush(&hot);assert(s==PN_OK || s==PN_BUSY);assert(++steps<128);
                     }
                 }
-                assert((mode>=3?pn_hot_session_drop_for_switch(&hot):pn_hot_session_drop(&hot)) == PN_OK);
+                if(mode>=5){
+                    // 已开始的启动写入不能让切书/普通释放继续推进它；普通释放仍保存当前帧。/ An active startup writer must not be advanced by switching/default release; default release still checkpoints the current frame.
+                    if(mode==7)pn_resume_space_ports(full_volume,full_volume,NULL);
+                    assert(pn_hot_session_deferred_flush(&hot)==PN_BUSY && pn_epub_app_cache_pending(&hot.epub) && !pn_bootstrap_hint(state,&id));
+                    if(mode==7){
+                        // 容量拒绝是本轮稳定失败，不得像临时租约争用那样反复启动重写。/ Capacity refusal is stable for this round, unlike temporary lease contention; never restart it in a write loop.
+                        pn_status_t s=pn_hot_session_deferred_flush(&hot);assert(s==PN_OK || s==PN_BUSY || s==PN_EMPTY);
+                        assert(!pn_epub_app_bootstrap_checkpoint_pending(&hot.epub) && pn_epub_app_bootstrap_checkpoint_step(&hot.epub)==PN_EMPTY);
+                    }
+                }
+                assert((mode>=3 && mode!=6?pn_hot_session_drop_for_switch(&hot):pn_hot_session_drop(&hot)) == PN_OK);
+                if(mode>=5)assert(!pn_bootstrap_hint(state,&id));
+                if(mode==7)pn_resume_space_ports(NULL,NULL,NULL);
                 pn_media_lease_t writable={0};assert(pn_media_acquire(&media,PN_MEDIA_CACHE_WRITE,&writable)==PN_OK && pn_media_release(&media,&writable)==PN_OK);
             } else {
                 assert((epub ? pn_epub_app_suspend(&e, 3) : pn_reader_app_suspend(&t, 3)) == PN_OK);
@@ -135,7 +158,7 @@ int main(int argc, char **argv) {
                 }
                 assert((epub ? pn_epub_app_close(&e, 4) : pn_reader_app_close(&t, 4)) == PN_OK);
             }
-            assert(!pool.used && !pool.live && packets(dir) == (mode>=3?0u:1u) && recent_commits>0);
+            assert(!pool.used && !pool.live && packets(dir) == (mode>=3 && mode!=6?0u:1u) && recent_commits>0);
             memcpy(pixels,screen,sizeof pixels);
             assert((epub?pn_epub_app_open_on_media(&e,&pool,&media,book,NULL,state,32,10):pn_reader_app_open_on_media(&t,&pool,&media,book,NULL,state,32,10))==PN_OK);
             assert((epub?pn_epub_app_step(&e,PN_APP_OPEN,11,present,NULL):pn_reader_app_step(&t,PN_APP_OPEN,11,present,NULL))==PN_OK);

@@ -25,7 +25,7 @@ WIDTH, HEIGHT, BOARD_ROW = 684, 1216, 608
 FRAME_BYTES = WIDTH * HEIGHT // 2
 GESTURES = ("tap", "long", "swipe", "key")
 # 产品日志里与时延/异常相关的行一并返回，便于对照。/ Product log lines about timing or faults are returned alongside.
-PRODUCT_LOG = re.compile(r"Whole-book index|Present |Display stages|Book prepare|Prepared book|Reader action|System font open|Actions |underrun|Wake key|Locking|Input first|profile phase|stack phase|rst:|Guru|abort|panic|assert", re.I)
+PRODUCT_LOG = re.compile(r"Whole-book index|Present |Display stages|Book prepare|Prepared book|Reader action|Cache file|System font open|Actions |underrun|Wake key|Locking|Input first|profile phase|stack phase|rst:|Guru|abort|panic|assert", re.I)
 PNT = re.compile(r"PNT (\d+) (.*)$")
 
 

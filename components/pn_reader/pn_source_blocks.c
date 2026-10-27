@@ -38,7 +38,7 @@ typedef struct {
     pn_cache_commit_t commit;
     char directory[384],rootdir[384],path[384],tmp[384],bak[384],root[384],rtmp[384],rbak[384];
 } blocks_t;
-static uint64_t get(const uint8_t *p,unsigned n){uint64_t v=0;for(unsigned i=0;i<n;i++)v|=(uint64_t)p[i]<<(8*i);return v;}
+
 static void put(uint8_t *p,uint64_t v,unsigned n){for(unsigned i=0;i<n;i++)p[i]=(uint8_t)(v>>(8*i));}
 static pn_status_t valid(void *ctx){
     blocks_t *b=ctx;if(!b || b->failed)return PN_STALE_JOB;
@@ -68,11 +68,7 @@ static void header(const blocks_t *b,uint8_t h[HEAD]){
     put(h+40,b->raw.size,8);put(h+48,BLOCK,4);put(h+52,b->count,4);put(h+60,pn_crc32_update(0,h,60),4);
 }
 static bool root_read(const char *path,pn_book_id_t ids[2]){
-    struct stat st;if(block_stat(path,&st) || !S_ISREG(st.st_mode) || st.st_size!=76)return false;
-    uint8_t data[76];FILE *f=fopen(path,"rb");if(!f)return false;
-    bool ok=fread(data,1,sizeof data,f)==sizeof data && fgetc(f)==EOF && !ferror(f);if(fclose(f))ok=false;
-    if(!ok || memcmp(data,"PNSR",4) || get(data+4,4)!=1 || get(data+72,4)!=pn_crc32_update(0,data,72))return false;
-    memcpy(ids[0].sha256,data+8,32);memcpy(ids[1].sha256,data+40,32);return true;
+    return pn_reading_root_load(path,"PNSR",ids,NULL,NULL)==PN_OK;
 }
 static pn_status_t load_one(void *ctx,const char *path){
     blocks_t *b=ctx;pn_status_t s=valid(b);if(s!=PN_OK)return s;
@@ -136,7 +132,7 @@ pn_status_t pn_source_blocks_open(pn_source_blocks_t *h,pn_pool_t *pool,pn_media
     blocks_t *b=create(pool,media,guard,raw);if(!b){pn_profile_observe(pool,"source.blocks.miss.admission",PN_EMPTY,0,NULL);return PN_EMPTY;}b->book=*book;
     const char *miss="source.blocks.miss.binding";
     pn_status_t s=paths(b,tf,state)?valid(b):PN_EMPTY;
-    if(s==PN_OK){miss="source.blocks.miss.root-unavailable";if(root_read(b->root,b->roots))b->root_count=2;if(root_read(b->rbak,b->roots+b->root_count))b->root_count+=2;if(!b->root_count)s=PN_EMPTY;}
+    if(s==PN_OK){miss="source.blocks.miss.root-unavailable";if(pn_reading_root_load(b->root,"PNSR",b->roots,pool,"source.blocks.root")==PN_OK)b->root_count=2;if(pn_reading_root_load(b->rbak,"PNSR",b->roots+b->root_count,pool,"source.blocks.root")==PN_OK)b->root_count+=2;if(!b->root_count)s=PN_EMPTY;}
     if(s==PN_OK){miss="source.blocks.miss.packet-unusable";s=pn_cache_file_load(media,guard,b->path,load_one,b);}
     if(s!=PN_OK){pn_profile_observe(pool,miss,s,0,NULL);pn_free(b->hashes);pn_free(b);return pn_cache_file_miss(s)?PN_EMPTY:s;}
     b->ready=b->partial=true;h->impl=b;*out=wrapped(b);pn_profile_observe(pool,"source.blocks.hit",PN_OK,0,NULL);return PN_OK;

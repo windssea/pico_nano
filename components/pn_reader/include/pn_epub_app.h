@@ -53,6 +53,12 @@ void pn_epub_app_cache_activity(pn_epub_app_t *,uint64_t);
 bool pn_epub_app_cache_pending(const pn_epub_app_t *);
 /// 仅供空闲调度：启动包正写入或已可准入，后台整书编译应让出；不表示页表完成。/ Idle scheduling only: a startup packet is active or ready for admission, so whole-book compilation should yield; never means index completion.
 bool pn_epub_app_bootstrap_pending(const pn_epub_app_t *);
+/// 首页冻结会话的已验证结构待保存；不包含未来页预排，不读文件。/ Verified structures awaiting persistence in a frozen home session, without future-page preparation or file reads.
+bool pn_epub_app_bootstrap_checkpoint_pending(const pn_epub_app_t *);
+/// 空闲保存冻结结构，优先于新建帧包但不打断已开始的帧事务；不能由前台切书调用。/ At idle persist frozen structures before new page packets, without interrupting existing page transactions or running during foreground switches.
+pn_status_t pn_epub_app_bootstrap_checkpoint_step(pn_epub_app_t *);
+/// 放弃未提交结构事务并保留重试标记，不影响已提交包或正在写的帧。/ Abort uncommitted structure work and retain retry intent, preserving committed packets and active page writers.
+void pn_epub_app_bootstrap_checkpoint_cancel(pn_epub_app_t *);
 /// 下一页仍有字形待预热，调用方可缩短空闲间隔。/ Next-page glyphs remain to warm, so callers may shorten idle gaps.
 bool pn_epub_app_warm_pending(const pn_epub_app_t *app);
 /// 面板扫描（呈现回调阻塞）期间调用的一小步，为待确认页准备下一页；OK表示做了工作，EMPTY表示无事可做或应停止。

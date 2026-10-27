@@ -206,23 +206,8 @@ static pn_status_t hash_read(void *ctx, uint64_t offset, uint8_t *out, size_t ca
         *got = n;
     return s;
 }
-static bool trust_read(resume_t *r, const char *path, pn_book_id_t hashes[2]) {
-    (void)r;
-    struct stat st;
-    if (rstat(path, &st) || !S_ISREG(st.st_mode) || st.st_size != 76)
-        return false;
-    FILE *f = fopen(path, "rb");
-    if (!f)
-        return false;
-    uint8_t b[76];
-    bool ok = fread(b, 1, sizeof b, f) == sizeof b && fgetc(f) == EOF && !ferror(f);
-    if (fclose(f))
-        ok = false;
-    if (!ok || memcmp(b, "PNRR", 4) || get(b + 4, 4) != 1 || get(b + 72, 4) != pn_crc32_update(0, b, 72))
-        return false;
-    memcpy(hashes[0].sha256, b + 8, 32);
-    memcpy(hashes[1].sha256, b + 40, 32);
-    return true;
+static bool trust_read(resume_t *r,const char *path,pn_book_id_t hashes[2]){
+    (void)r;return pn_reading_root_load(path,"PNRR",hashes,NULL,NULL)==PN_OK;
 }
 static size_t pack(const uint8_t *in, uint8_t *out) {
     size_t i = 0, n = 0;
@@ -331,9 +316,9 @@ pn_status_t pn_resume_load(pn_resume_t *h, unsigned slot, const pn_resume_page_t
         return PN_EMPTY;
     pn_book_id_t roots[4];
     unsigned count = 0;
-    if (trust_read(r, r->root, roots))
+    if (pn_reading_root_load(r->root,"PNRR",roots,r->pool,"resume.root")==PN_OK)
         count = 2;
-    if (trust_read(r, r->rbak, roots + count))
+    if (pn_reading_root_load(r->rbak,"PNRR",roots+count,r->pool,"resume.root")==PN_OK)
         count += 2;
     if (!count) {
         pn_profile_observe(r->pool,"resume.miss.root-unavailable",PN_EMPTY,0,NULL);

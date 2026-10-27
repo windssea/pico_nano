@@ -372,6 +372,8 @@ static void profile_emit(void *ctx,const pn_profile_event_t *e){
     if(!strcmp(e->phase,"font.measure-load") || !strcmp(e->phase,"font.raster-load"))return;
 #endif
 #if PN_DEVICE_TEST_CONSOLE
+    // 生命周期沿实际读写记录同一文件标识，不能把缺历史的missing猜成清理或未生成。/ Correlate lifecycle events by actual file identity; missing history never proves eviction or non-generation.
+    if(e->resource){const char *name=strrchr(e->resource,'/');ESP_LOGI(TAG,"Cache file phase=%s status=%d name=%s",e->phase,(int)e->status,name?name+1:e->resource);return;}
     if(profile_io_collect(e))return;
     // 前台短批次的外层scope保留耗时/池峰，避免每小步重复串口日志拖慢NEXT。/ The foreground batch scope retains timing/pool peaks without duplicate per-step serial traffic delaying NEXT.
     if(e->status==PN_BUSY && ((!strcmp(e->phase,"epub.next") && atomic_load(&reading_presentation)) || (!strcmp(e->phase,"epub.prefetch") && (atomic_load(&reading_presentation) || reader_prefetch_batch))))return;

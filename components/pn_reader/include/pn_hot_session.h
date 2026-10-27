@@ -56,7 +56,7 @@ pn_status_t pn_hot_session_drop(pn_hot_session_t *);
 pn_status_t pn_hot_session_drop_for_switch(pn_hot_session_t *);
 /// 到期后释放；无任务EMPTY。/ Release when expired; EMPTY without work.
 pn_status_t pn_hot_session_expire(pn_hot_session_t *,uint64_t);
-/// 保留对象有延后的进度/页码索引/当前页快照待写且本次未失败 / The retained object has deferred progress/index/current-snapshot work without a latched failure.
+/// 保留对象有延后日志/当前页/已验证启动结构待写且本次未失败 / Retained journals/current pages/verified startup structures await persistence without a latched failure.
 bool pn_hot_session_deferred_pending(const pn_hot_session_t *);
-/// 空闲先写进度/索引，再分步收口当前页；BUSY可续，取消待重试，缓存故障不改变进度保存语义。/ Flush progress/index first, then checkpoint the current page; resume BUSY/cancelled work without changing progress guarantees on cache faults.
+/// 空闲先提交必要日志，再分步收口当前页和已验证结构；切书释放不推进结构。/ At idle commit mandatory journals before current-page/verified-structure checkpoints; switch release never advances structure writes.
 pn_status_t pn_hot_session_deferred_flush(pn_hot_session_t *);

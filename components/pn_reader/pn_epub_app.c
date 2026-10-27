@@ -992,6 +992,36 @@ pn_status_t pn_epub_app_recent_idle(pn_epub_app_t *app,uint64_t now){
     pn_status_t s=pn_cancel_checkpoint();if(s!=PN_OK)return s;
     s=recent(a,a->visible.location.path);if(s!=PN_OK)a->recent_due=now>UINT64_MAX-1000?UINT64_MAX:now+1000;return s;
 }
+static pn_status_t bootstrap_step(app_t *a,bool parked){
+    if(!pn_page_index_tf_directory())return PN_EMPTY;
+    if(pn_bootstrap_pending(&a->bootstrap)){
+        uint64_t began=pn_profile_time();unsigned steps=0;pn_status_t s;
+        do{s=pn_bootstrap_step(&a->bootstrap);}while(s==PN_BUSY && ++steps<32u && pn_profile_time()-began<8000u);
+        // 已开始事务的EMPTY是配额/容量拒绝，停止本轮，避免安静期反复遍历/写入。/ EMPTY from an active transaction is quota/capacity refusal: stop this round rather than repeatedly scanning/writing at idle.
+        if(s==PN_CANCELLED || s==PN_NO_MEMORY)a->bootstrap_dirty=true;
+        return s;
+    }
+    // 冻结会话不预排未来页，先保存低成本已验证结构；已开始的帧事务仍先收口。/ Frozen sessions prioritize cheap verified structures over new page writes, while finishing already-started frame transactions first.
+    if(a->bootstrap_dirty && !a->verify_book && !pn_resume_pending(&a->resume) && (parked || (!a->resume_dirty && !pn_epub_app_prefetch_pending(&(pn_epub_app_t){a})))){
+        pn_status_t s=pn_bootstrap_begin(&a->bootstrap,a->pool,a->media,&a->book_lease,&a->state,&a->state_lease,&a->book_source,&a->book,pn_page_index_tf_directory(),a->state_directory,&a->zip,&a->epub);
+        pn_profile_observe(a->pool,"bootstrap.begin",s,0,NULL);
+        // EMPTY/BUSY/OOM仅是临时准入拒绝，不能永久丢掉待生成标记。/ EMPTY/BUSY/OOM are temporary admission refusals, never grounds to lose generation intent permanently.
+        if(s==PN_OK || s==PN_LIMIT || s==PN_UNSUPPORTED || s==PN_INVALID || s==PN_CORRUPT)a->bootstrap_dirty=false;
+        return s==PN_OK?PN_BUSY:s;
+    }
+    return PN_EMPTY;
+}
+bool pn_epub_app_bootstrap_checkpoint_pending(const pn_epub_app_t *app){
+    const app_t *a=app?app->impl:NULL;
+    return a && pn_page_index_tf_directory() && a->suspended && a->persistent && a->has_visible && !a->lost && !a->force_full && !a->style_preview && !a->font_preview && !a->pool->speculative && (pn_bootstrap_pending(&a->bootstrap) || (a->bootstrap_dirty && !a->verify_book && !pn_resume_pending(&a->resume)));
+}
+void pn_epub_app_bootstrap_checkpoint_cancel(pn_epub_app_t *app){
+    app_t *a=app?app->impl:NULL;if(a && pn_bootstrap_pending(&a->bootstrap)){pn_bootstrap_abort(&a->bootstrap);a->bootstrap_dirty=true;}
+}
+pn_status_t pn_epub_app_bootstrap_checkpoint_step(pn_epub_app_t *app){
+    if(!pn_epub_app_bootstrap_checkpoint_pending(app))return PN_EMPTY;
+    return bootstrap_step(app->impl,true);
+}
 pn_status_t pn_epub_app_cache_idle(pn_epub_app_t *app,uint64_t now){
     if(!app || !app->impl)return PN_EMPTY;
     app_t *a=app->impl;if(a->lost || a->suspended || a->pool->speculative || !a->has_visible || a->force_full || a->style_preview || a->font_preview || !a->persistent || now<a->last_now)return PN_EMPTY;
@@ -1000,20 +1030,8 @@ pn_status_t pn_epub_app_cache_idle(pn_epub_app_t *app,uint64_t now){
         if(stored==PN_OK || stored==PN_BUSY || stored==PN_CANCELLED || stored==PN_STALE_MEDIA)return stored;
     }
     if(pn_semantic_file_pending(&a->semantic_file))return pn_semantic_file_step(&a->semantic_file);
-    if(pn_bootstrap_pending(&a->bootstrap)){
-        uint64_t began=pn_profile_time();unsigned steps=0;pn_status_t s;
-        do{s=pn_bootstrap_step(&a->bootstrap);}while(s==PN_BUSY && ++steps<32u && pn_profile_time()-began<8000u);
-        if(s==PN_CANCELLED)a->bootstrap_dirty=true;
-        return s;
-    }
-    // 控制层先尝试当前/可写邻页包；不可预绘的图片邻页不阻止结构缓存。/ The controller tries current/writable neighbor packets first; image neighbors without prerendering never block structure caching.
-    if(a->bootstrap_dirty && !a->verify_book && !a->resume_dirty && !pn_resume_pending(&a->resume) && !pn_epub_app_prefetch_pending(app)){
-        pn_status_t s=pn_bootstrap_begin(&a->bootstrap,a->pool,a->media,&a->book_lease,&a->state,&a->state_lease,&a->book_source,&a->book,pn_page_index_tf_directory(),a->state_directory,&a->zip,&a->epub);
-        pn_profile_observe(a->pool,"bootstrap.begin",s,0,NULL);
-        if(s!=PN_CANCELLED && s!=PN_STALE_MEDIA)a->bootstrap_dirty=false;
-        if(s==PN_OK)return PN_BUSY;
-        if(s!=PN_EMPTY)return s;
-    }
+    pn_status_t boot=bootstrap_step(a,false);
+    if(boot!=PN_EMPTY)return boot;
     if(!a->epub.semantic_store)return PN_EMPTY;
     // 扫描期间可能仍在借用备用模型，空闲时重试已显示章的无IO提升。/ A scan may still borrow the alternate model; retry the displayed chapter's IO-free promotion when idle.
     (void)pn_xhtml_cache_select(&a->epub,a->visible.location.path,a->salt);
@@ -1029,7 +1047,7 @@ void pn_epub_app_cache_activity(pn_epub_app_t *app,uint64_t now){
 bool pn_epub_app_cache_pending(const pn_epub_app_t *app){if(!app || !app->impl)return false;const app_t *a=app->impl;return pn_source_blocks_pending(&a->blocks) || pn_bootstrap_pending(&a->bootstrap) || pn_semantic_file_pending(&a->semantic_file) || pn_xhtml_cache_pending(&a->epub);}
 bool pn_epub_app_bootstrap_pending(const pn_epub_app_t *app){
     const app_t *a=app?app->impl:NULL;
-    return a && (pn_bootstrap_pending(&a->bootstrap) || (a->persistent && a->has_visible && !a->lost && !a->suspended && !a->force_full && !a->style_preview && !a->font_preview && !a->pool->speculative && a->bootstrap_dirty && !a->verify_book && !a->resume_dirty && !pn_resume_pending(&a->resume) && !pn_epub_app_prefetch_pending(app)));
+    return a && pn_page_index_tf_directory() && (pn_bootstrap_pending(&a->bootstrap) || (a->persistent && a->has_visible && !a->lost && !a->suspended && !a->force_full && !a->style_preview && !a->font_preview && !a->pool->speculative && a->bootstrap_dirty && !a->verify_book && !a->resume_dirty && !pn_resume_pending(&a->resume) && !pn_epub_app_prefetch_pending(app)));
 }
 pn_status_t pn_epub_app_progress(const pn_epub_app_t *app,pn_epub_progress_t *out){if(!app || !app->impl || !out)return PN_INVALID;
     app_t *a=app->impl;if(!a->has_visible)return PN_EMPTY;*out=a->visible;return PN_OK;}

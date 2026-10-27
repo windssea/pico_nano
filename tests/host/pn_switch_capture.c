@@ -69,7 +69,8 @@ int main(int argc,char **argv){
         settle_resume(early);unsigned saved=stored;
         if(round<2 && !getenv("PN_SWITCH_BASELINE"))assert(saved==(early?1u:2u));
         assert(pn_hot_session_park(&hot,&pool,&media,book,1,now+6000,&txt,&epub)==PN_OK);
-        pn_status_t flushed=pn_hot_session_deferred_flush(&hot);assert(flushed==PN_OK || flushed==PN_EMPTY);
+        // 必要日志已保存，新的后台结构事务可继续；下一次切书须安全取消它。/ Mandatory journals are saved while new background structure work may continue; the next switch must cancel it safely.
+        pn_status_t flushed=pn_hot_session_deferred_flush(&hot);assert(flushed==PN_OK || flushed==PN_EMPTY || flushed==PN_BUSY);
         printf("switch round=%u book=%c mode=%s open_hits=%u open_indexes=%u stored=%u open_ns=%llu next_hits=%u next_ns=%llu prev_hits=%u prev_ns=%llu used=%zu peak=%zu\n",round,'A'+which,argv[6],open_hits,open_indexes,saved,(unsigned long long)opened,next_hits,(unsigned long long)next_ns,prev_hits,(unsigned long long)prev_ns,pool.used,pool.peak);fflush(stdout);
     }
     assert(pn_hot_session_drop(&hot)==PN_OK && !pn_media_active(&media) && !pool.used && !pool.live);free(pixels[0]);free(pixels[1]);return 0;
