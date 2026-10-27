@@ -1,0 +1,732 @@
+{
+  "schema": 1,
+  "date": "2026-10-27",
+  "kind": "device one-pass final versus official-source diagnostic baseline",
+  "device": {
+    "board": "RDP-G01-W / E0470A01",
+    "chip": "ESP32-S3 rev0.2",
+    "port": "COM3",
+    "idf": "v6.1",
+    "native_pixels": [
+      684,
+      1216
+    ],
+    "gray_levels": 16
+  },
+  "authorization": "User chose same-source 1.0.7 diagnostic baseline for automatic measurement; no formal release.",
+  "initial_device_application": {
+    "version": "1.0.7",
+    "compile_time": "14:21:10",
+    "compile_date": "Oct 26 2026",
+    "elf_sha256": "17e83205df125a77326a9c568db68a3181ab73253def943a5a3bdc2b8643876b",
+    "note": "Not byte-identical to published official image; preserved in ota_0, not used as timing baseline."
+  },
+  "firmware": [
+    {
+      "role": "baseline",
+      "source": "f9e8c388e06ad25a90fb46b33d8259b8af670d75",
+      "bytes": 5501312,
+      "sha256": "eec63513e2b286cdce29009bb0f73025dcf11864cc1b9dcaad51b5a0bd4756f5",
+      "version": "1.0.7-diag",
+      "elf_sha256": "ea9de3acfe9eb67a3aaf81eb4f8e42c6b6c81a0a6580d2647bf387f4139c83f7",
+      "slot_free": 790144
+    },
+    {
+      "role": "candidate",
+      "source": "2fb61578f85390de7cdb1b25ee4fe075e779a860",
+      "bytes": 5533712,
+      "sha256": "78ddefee08dbe01085f997c430a9e3893d6250414b92060fae8aa11860f8ba31",
+      "version": "1.0.7-diag",
+      "elf_sha256": "1325ff78103cd832f791fa62cfaa64c34c18e216d9fdc70a452de7d7154e23a5",
+      "slot_free": 757744
+    }
+  ],
+  "sdkconfig": {
+    "identical": true,
+    "sha256": "16a7dd843aee2fb70f3aa4d8db12139b0069fb79715d5f16428fbc6b6bc8b522",
+    "profile": true,
+    "test_console": true,
+    "no_auto_lock": true,
+    "no_real_lock_sleep": true
+  },
+  "protocol": {
+    "samples_per_book_per_firmware": 1,
+    "order_each_side": [
+      "shao",
+      "ming"
+    ],
+    "reset": "Host RTS hard reset before each measured book, after OTA VALID qualification. Not physical power cycling.",
+    "home": "Wait successful home display/status, blank-area taps 10,10 separated by 400ms; wait 200ms; tap second recent 300,890.",
+    "next": "First right key at reader-ready receipt plus 3 host seconds.",
+    "prev": "Left key one second after NEXT request/display wait completes.",
+    "screenshot": "Capture panel-reference digital image only after NEXT/PREV; compare returned original page.",
+    "timing": "Device synthetic-input start to successful display job completion; ready receipt separately reported. Not optical, physical touch, or host roundtrip.",
+    "cache": "Existing TF caches retained, no injection or deletion. Source proof lost at reset; all four opens have source_memo_hits=0. Each matched pair has equal observed bootstrap/resume hit counts. No claim of byte-identical cache directories across firmware."
+  },
+  "book_mapping": {
+    "shao": "绍宋，第11/481节，0%",
+    "ming": "明颂，第1320/1816节，72%"
+  },
+  "samples": [
+    {
+      "phase": "before",
+      "book_expected": "shao",
+      "protocol": "reset; home-ready blank taps; second recent; NEXT at ready+3s; PREV after 1s; screenshot after measurements",
+      "open_body_frame_ms": 12593,
+      "open_ready_ms": 12613,
+      "first_feedback_ms": 1358,
+      "opening_frames": [
+        {
+          "start": 10012,
+          "end": 10688,
+          "ms": 676,
+          "status": 0
+        },
+        {
+          "start": 21185,
+          "end": 21923,
+          "ms": 738,
+          "status": 0
+        }
+      ],
+      "bootstrap_hits": 1,
+      "resume_hits": 0,
+      "source_memo_hits": 0,
+      "next_ms": 1103,
+      "prev_ms": 1046,
+      "status": "status t=28791 view=0003000f body=1 paused=0 events=23 touch_reads=643 touch_errors=0 gesture=0 dropped=0",
+      "command_start": 9330,
+      "ready_t": 21943
+    },
+    {
+      "phase": "after",
+      "book_expected": "shao",
+      "protocol": "reset; home-ready blank taps; second recent; NEXT at ready+3s; PREV after 1s; screenshot after measurements",
+      "open_body_frame_ms": 10575,
+      "open_ready_ms": 10586,
+      "first_feedback_ms": 1358,
+      "opening_frames": [
+        {
+          "start": 10028,
+          "end": 10701,
+          "ms": 673,
+          "status": 0
+        },
+        {
+          "start": 19203,
+          "end": 19918,
+          "ms": 715,
+          "status": 0
+        }
+      ],
+      "bootstrap_hits": 1,
+      "resume_hits": 0,
+      "source_memo_hits": 0,
+      "next_ms": 1098,
+      "prev_ms": 1040,
+      "status": "status t=26941 view=0003000f body=1 paused=0 events=23 touch_reads=588 touch_errors=0 gesture=0 dropped=0",
+      "command_start": 9343,
+      "ready_t": 19929
+    },
+    {
+      "phase": "before",
+      "book_expected": "ming",
+      "protocol": "reset; home-ready blank taps; second recent; NEXT at ready+3s; PREV after 1s; screenshot after measurements",
+      "open_body_frame_ms": 10105,
+      "open_ready_ms": 10121,
+      "first_feedback_ms": 1417,
+      "opening_frames": [
+        {
+          "start": 10011,
+          "end": 10684,
+          "ms": 673,
+          "status": 0
+        },
+        {
+          "start": 18659,
+          "end": 19372,
+          "ms": 713,
+          "status": 0
+        }
+      ],
+      "bootstrap_hits": 1,
+      "resume_hits": 3,
+      "source_memo_hits": 0,
+      "next_ms": 1668,
+      "prev_ms": 1481,
+      "status": "status t=27551 view=0003000f body=1 paused=0 events=23 touch_reads=606 touch_errors=0 gesture=0 dropped=0",
+      "command_start": 9267,
+      "ready_t": 19388
+    },
+    {
+      "phase": "after",
+      "book_expected": "ming",
+      "protocol": "reset; home-ready blank taps; second recent; NEXT at ready+3s; PREV after 1s; screenshot after measurements",
+      "open_body_frame_ms": 8101,
+      "open_ready_ms": 8113,
+      "first_feedback_ms": 1371,
+      "opening_frames": [
+        {
+          "start": 10083,
+          "end": 10760,
+          "ms": 677,
+          "status": 0
+        },
+        {
+          "start": 16779,
+          "end": 17490,
+          "ms": 711,
+          "status": 0
+        }
+      ],
+      "bootstrap_hits": 1,
+      "resume_hits": 3,
+      "source_memo_hits": 0,
+      "next_ms": 1480,
+      "prev_ms": 1555,
+      "status": "status t=25200 view=0003000f body=1 paused=0 events=23 touch_reads=527 touch_errors=0 gesture=0 dropped=0",
+      "command_start": 9389,
+      "ready_t": 17502
+    }
+  ],
+  "returned_page_pixels": [
+    {
+      "book": "shao",
+      "excluded_top_rows": 32,
+      "equal": true,
+      "changed_pixels": 0,
+      "baseline_pixel_sha256": "9ed0e37a65e95e8ce60b5e06ec5d4652bef52a6b85c0b1b07aea2455cf1b1e09",
+      "candidate_pixel_sha256": "9ed0e37a65e95e8ce60b5e06ec5d4652bef52a6b85c0b1b07aea2455cf1b1e09"
+    },
+    {
+      "book": "ming",
+      "excluded_top_rows": 32,
+      "equal": true,
+      "changed_pixels": 0,
+      "baseline_pixel_sha256": "e4034595445289ffcb952da3811de9bdb7bff62be5e6d213416575991809efba",
+      "candidate_pixel_sha256": "e4034595445289ffcb952da3811de9bdb7bff62be5e6d213416575991809efba"
+    }
+  ],
+  "session_observations": {
+    "before": {
+      "observed_pool_peak": 3543705,
+      "pool_present_limits": [
+        6217360
+      ],
+      "panic_assert_lines": [],
+      "sd_init_failure_lines": [],
+      "heap_lines": [],
+      "version_lines": [
+        "1793064400.726 PNT 643941 ok version product=1.0.7 app=1.0.7-diag idf=v6.1 elf=ea9de3acf"
+      ]
+    },
+    "after": {
+      "observed_pool_peak": 3543446,
+      "pool_present_limits": [
+        6217360,
+        6220532
+      ],
+      "panic_assert_lines": [],
+      "sd_init_failure_lines": [
+        "1793065473.963 E (2399) vfs_fat_sdmmc: sdmmc_card_init failed (0x107)."
+      ],
+      "heap_lines": [
+        "1793065523.665 PNT 654169 heap internal=78431 internal_largest=32768 internal_min=37356 psram=3896740 psram_largest=3407872 psram_min=3478572"
+      ],
+      "version_lines": [
+        "1793065422.423 PNT 654141 ok version product=1.0.7 app=1.0.7-diag idf=v6.1 elf=1325ff781",
+        "1793065426.976 PNT 654145 ok version product=1.0.7 app=1.0.7-diag idf=v6.1 elf=1325ff781",
+        "1793065523.236 PNT 654167 ok version product=1.0.7 app=1.0.7-diag idf=v6.1 elf=1325ff781"
+      ]
+    }
+  },
+  "flash_audit": {
+    "write_scope": [
+      "ota_1 application at 0x620000",
+      "second OTA selector sector at 0x10000"
+    ],
+    "original_bank": "ota_0 at 0x20000, full 0x600000-byte partition MD5 unchanged",
+    "before_candidate": {
+      "original_ota0_full_partition_md5": "d0606f9671b5df4d60574c9cdf436fed",
+      "selectors": [
+        {
+          "offset": "0xf000",
+          "sequence": 17,
+          "state": 2,
+          "slot": 0
+        },
+        {
+          "offset": "0x10000",
+          "sequence": 18,
+          "state": 2,
+          "slot": 1
+        }
+      ],
+      "unchanged_protection": {
+        "boot": true,
+        "partition": true,
+        "nvs": true,
+        "phy_and_gap": true
+      }
+    },
+    "after_candidate": {
+      "original_ota0_full_partition_md5": "d0606f9671b5df4d60574c9cdf436fed",
+      "selectors": [
+        {
+          "offset": "0xf000",
+          "sequence": 17,
+          "state": 2,
+          "slot": 0
+        },
+        {
+          "offset": "0x10000",
+          "sequence": 20,
+          "state": 2,
+          "slot": 1
+        }
+      ],
+      "unchanged_protection": {
+        "boot": true,
+        "partition": true,
+        "nvs": true,
+        "phy_and_gap": true
+      }
+    },
+    "verification": "Each bounded app chunk plus complete app digest verified before writing selector. Both diagnostic images confirmed booted.",
+    "backup_limit": "Protected first 128KiB backed up. Full original app host read failed due USB transfer interruption; no full-flash/host-app-backup claim. Original app retained on device.",
+    "storage_limit": "Normal application progress/cache writes allowed; LittleFS/TF whole-volume identity not claimed."
+  },
+  "final_health": [
+    {
+      "command": "version",
+      "seq": 656111,
+      "reply": "ok version product=1.0.7 app=1.0.7-diag idf=v6.1 elf=1325ff781"
+    },
+    {
+      "command": "status",
+      "seq": 656112,
+      "reply": "status t=50722 view=00030010 body=0 paused=0 events=4 touch_reads=1326 touch_errors=0 gesture=0 dropped=0"
+    }
+  ],
+  "limitations": [
+    "Single samples show observations, not medians, P95 or stable worst-case bounds.",
+    "Ming cold startup had one SDMMC 0x107 initialization failure then existing retry succeeded before home; outside measured open interval, not concealed as error-free startup.",
+    "Only two returned-page digital frames compared, excluding dynamic top 32 pixels; no optical ghosting or NEXT-page pixel acceptance.",
+    "Full source verification, native quality, original 6MiB maximum/adaptive pool limits and class caps remain; log peaks are session observations, not whole-chip simultaneous memory peaks.",
+    "No true sleep/wake, physical power-cut, durability, power or all-book acceptance.",
+    "No performance retries or code tuning during this measured pair; final device keeps candidate debug firmware, COM3 released."
+  ],
+  "local_evidence_root": "build-dev/device-open-20261027",
+  "local_artifacts": [
+    {
+      "path": "after/final-health.json",
+      "bytes": 409,
+      "sha256": "480237ddb2c401554a8d6dc2e6575ef0aadce9802e879a1c16caa2e578f1c877"
+    },
+    {
+      "path": "after/ming-returned.png",
+      "bytes": 47466,
+      "sha256": "9c9ef9b8526641ba356417247db8f5c3edb45e02459187aa99ab05b6346545a1"
+    },
+    {
+      "path": "after/ming-run.log",
+      "bytes": 205,
+      "sha256": "75b00cb5d80ae18b29e77640a448526bcc8d559e8c164f546725b9a8ed6a753b"
+    },
+    {
+      "path": "after/ming.json",
+      "bytes": 270835,
+      "sha256": "b512f23e17c9228da8c6dd502c2777a602ffe8bd3e8c539a916300b403f082f6"
+    },
+    {
+      "path": "after/serial.log",
+      "bytes": 4242187,
+      "sha256": "559f3900c5c5112a88eb80e860787eb8682ecbd19a391652515ceca98593c593"
+    },
+    {
+      "path": "after/serve.log",
+      "bytes": 75,
+      "sha256": "4a345bcb2603464514a767136e92951c4f7cae9295ca757817f3ea38e2e7c9fc"
+    },
+    {
+      "path": "after/shao-returned.png",
+      "bytes": 55712,
+      "sha256": "fe143ad2524160a0e808658dd2f5e41b1b401049d1186a4b665458a40d4df156"
+    },
+    {
+      "path": "after/shao-run.log",
+      "bytes": 206,
+      "sha256": "5f0a2e5ddc168002c7377f9557463d8b78f3f9e90b8c74c42f5f2d87d5d23454"
+    },
+    {
+      "path": "after/shao.json",
+      "bytes": 275120,
+      "sha256": "05eaea24bc4bbb07fa0b3e19b01194eab7173fa3deaa2fadfe80b15c76c1ec84"
+    },
+    {
+      "path": "analyze.py",
+      "bytes": 2522,
+      "sha256": "fae014f7627d5ab2da25e538a4a841bca1afcec0c29aba678748fd2e9b26600e"
+    },
+    {
+      "path": "audit_read.py",
+      "bytes": 1457,
+      "sha256": "8b9b826b925091ca4d467019cc6513f187789e0e7399e98b472393fb674308e4"
+    },
+    {
+      "path": "baseline-artifacts/pico_nano.bin",
+      "bytes": 5501312,
+      "sha256": "eec63513e2b286cdce29009bb0f73025dcf11864cc1b9dcaad51b5a0bd4756f5"
+    },
+    {
+      "path": "before/home-inventory.png",
+      "bytes": 34482,
+      "sha256": "c60d691fa089db3490c8cbde1afaa996248b8c4443beb988d22ccd578b2d0bde"
+    },
+    {
+      "path": "before/ming-returned.png",
+      "bytes": 47630,
+      "sha256": "eff6201c19b07de020fd1869531170ac132d9675dab602b74a5cb85124d86043"
+    },
+    {
+      "path": "before/ming-run.log",
+      "bytes": 207,
+      "sha256": "6576b11178110b928ac849becc49d3e344d262efe7966c07f8d1ba6a3ed31009"
+    },
+    {
+      "path": "before/ming.json",
+      "bytes": 636395,
+      "sha256": "dac90235248f7e844549a542423e02f3305cf65ea222811d50fb1a149d15012b"
+    },
+    {
+      "path": "before/serial.log",
+      "bytes": 11496166,
+      "sha256": "6cbd31b0b9d989f40a06e432ba2018ab1bf2a157f116cf3b293d984d88e7b8a6"
+    },
+    {
+      "path": "before/serve.log",
+      "bytes": 76,
+      "sha256": "71391ea89b82907a58f9277cb21d99116bfb94d21c440efccc9b912eadf19c6b"
+    },
+    {
+      "path": "before/shao-returned.png",
+      "bytes": 55672,
+      "sha256": "de735f0fef0e5db4f1baf64eb68a3079acb0ba096171862fcebd05b8e1bbddae"
+    },
+    {
+      "path": "before/shao-run.log",
+      "bytes": 207,
+      "sha256": "880c6b387e82d985dbf515beee0893a894a81c8b9d6dbb7cca0b11048a2931ed"
+    },
+    {
+      "path": "before/shao.json",
+      "bytes": 671770,
+      "sha256": "a3bb31009a5cf4045fe47c9a014307be3bc9ce493ee0205bdc5b9de66fafee0d"
+    },
+    {
+      "path": "candidate-artifacts/pico_nano.bin",
+      "bytes": 5533712,
+      "sha256": "78ddefee08dbe01085f997c430a9e3893d6250414b92060fae8aa11860f8ba31"
+    },
+    {
+      "path": "final/health.json",
+      "bytes": 321,
+      "sha256": "b22976096aa93cd3c9d77e6190cfaf5d9c5310b25535efad873ebe2194784b9d"
+    },
+    {
+      "path": "final/serial.log",
+      "bytes": 257,
+      "sha256": "754e38570963a4238083227cd9ebc2559e6658f0db8faa70c722ab1f0c32093b"
+    },
+    {
+      "path": "final/serve.log",
+      "bytes": 75,
+      "sha256": "d2ac6bf395a923e306a1ab6c0fe8e0eafcaaa26cfada3263a0b1f90c13c80018"
+    },
+    {
+      "path": "firmware-diag.log",
+      "bytes": 4657,
+      "sha256": "83d8bee33559647ccb5b9630dd9c58a2ca824766b4cd0870bbbc74d0e3cefde4"
+    },
+    {
+      "path": "flash/active-header-before.bin",
+      "bytes": 512,
+      "sha256": "aa63743b95e67776ad660eb1860024de532597c9a15ee376c29240ec0f0ce59f"
+    },
+    {
+      "path": "flash/after-audit.json",
+      "bytes": 427,
+      "sha256": "238f5e15c9256282d53ddcb89985dd5768a2be925032045e299fe6443f801089"
+    },
+    {
+      "path": "flash/after-protected.bin",
+      "bytes": 131072,
+      "sha256": "cb10acb4e97d2472960ffc1206a2a3533241ebc47fe1697a971d6ea7b4f82b6a"
+    },
+    {
+      "path": "flash/audit-after.log",
+      "bytes": 581,
+      "sha256": "841c9c3bef3f7b85ac6c2ff0787887c7dd42ff04e467595ee06ba7c871c25b3a"
+    },
+    {
+      "path": "flash/audit-before.log",
+      "bytes": 550,
+      "sha256": "44f3517bfde5189105f78ccf5bbd20848beb01c8dd4138206a47e026c1875b7d"
+    },
+    {
+      "path": "flash/backup-original.log",
+      "bytes": 95863,
+      "sha256": "81476c9284218b3f8ef718fecceac78c06764974f45e109698dd69e9984cf60b"
+    },
+    {
+      "path": "flash/baseline/app-0.log",
+      "bytes": 3986,
+      "sha256": "ece9307ff8755a8363797b4e0f33e7a5ed9b761a0c6143f1d2032d211dc51cac"
+    },
+    {
+      "path": "flash/baseline/app-1.log",
+      "bytes": 4514,
+      "sha256": "cf462b79de0a41dec51cfdff6b4027d4456f452fbd985422dd2a3a84f336b321"
+    },
+    {
+      "path": "flash/baseline/app-2.log",
+      "bytes": 4075,
+      "sha256": "50e5a2a5020f491e77cbfd309db4b48abc99182ccd9ae54e21a46a5ad524a4a2"
+    },
+    {
+      "path": "flash/baseline/app-3.log",
+      "bytes": 4778,
+      "sha256": "da84efc60a743373cd85412fd5b98672882381cc6e5d350edb26dc2d4783be14"
+    },
+    {
+      "path": "flash/baseline/app-4.log",
+      "bytes": 5042,
+      "sha256": "133f5c6290eff681c2a28031d1f217354e094f23a91d4d07ef881b81c604b26c"
+    },
+    {
+      "path": "flash/baseline/app-5.log",
+      "bytes": 1872,
+      "sha256": "578b843713d45f4bffdd8e015115c115c6cca29bd321ea223f28eb057c7cc4a3"
+    },
+    {
+      "path": "flash/baseline/chunk-0.bin",
+      "bytes": 1048576,
+      "sha256": "e10d4b9981b25cf7060cc64d386d8a60ca49c2934fb10789676699e1423d4b6e"
+    },
+    {
+      "path": "flash/baseline/chunk-1.bin",
+      "bytes": 1048576,
+      "sha256": "d85fd40c519e5fcaa5c21abb7a7e4d4d981c4082ebe8bf8f4013792e63403f04"
+    },
+    {
+      "path": "flash/baseline/chunk-2.bin",
+      "bytes": 1048576,
+      "sha256": "d0bf7f4de6fe539aa5408aab0f44b610afa8107bbb9df815993bf5bbdfbb87d4"
+    },
+    {
+      "path": "flash/baseline/chunk-3.bin",
+      "bytes": 1048576,
+      "sha256": "d48ae862ef51173021e4ba8441ad9de54738f2ab9f7d82e41379c1994e04db9e"
+    },
+    {
+      "path": "flash/baseline/chunk-4.bin",
+      "bytes": 1048576,
+      "sha256": "a7d78d5426ba21ec08b7e887a2cce6ed6f728d78535d831addca68f865762f69"
+    },
+    {
+      "path": "flash/baseline/chunk-5.bin",
+      "bytes": 258432,
+      "sha256": "980c564bf079e2a4c1d1d8f817c9ab2fa16e0cb7a7db49b792b9d81e7a8b892c"
+    },
+    {
+      "path": "flash/baseline/selector.log",
+      "bytes": 893,
+      "sha256": "d970a34cce0be451f2eb46c1d147d6fcfc883df47ec9c117a88f32f8310b2d37"
+    },
+    {
+      "path": "flash/baseline/verify-whole-app.log",
+      "bytes": 689,
+      "sha256": "746022cf302bb2d2b165c9e1c33d155e258186dd692fd73eb36ca568c262cb28"
+    },
+    {
+      "path": "flash/before-audit.json",
+      "bytes": 427,
+      "sha256": "f28d2533973519b593e7a99593e60a4770ad72512e3bed14e49aa9f523cc0f5c"
+    },
+    {
+      "path": "flash/before-protected.bin",
+      "bytes": 131072,
+      "sha256": "344f89c7db22a44c8bad2f46b2ae8886e2bc6572f53b102a7dbb934bd05ff62f"
+    },
+    {
+      "path": "flash/candidate/app-0.log",
+      "bytes": 3986,
+      "sha256": "10a38b2fc707351621c7aeba2524f20810c8f86166eedf67583000ef3abed919"
+    },
+    {
+      "path": "flash/candidate/app-1.log",
+      "bytes": 4514,
+      "sha256": "474173b86ec31ec66e9bc58dd4d194e989bcd48bbf200fa5e9aca1fa261568cd"
+    },
+    {
+      "path": "flash/candidate/app-2.log",
+      "bytes": 4163,
+      "sha256": "a47b2c21082941b66165dd547e802cff580728c81dbec7049b91a9a8621e6f6e"
+    },
+    {
+      "path": "flash/candidate/app-3.log",
+      "bytes": 4778,
+      "sha256": "2317e7337fec5ebc916ae6ed029cbd2eb668f8bab366a329eb27d7644e50d8c4"
+    },
+    {
+      "path": "flash/candidate/app-4.log",
+      "bytes": 5042,
+      "sha256": "2e593cd48c5e36d89db6591891754971f2430030194471f7bb6780fb2ea443e0"
+    },
+    {
+      "path": "flash/candidate/app-5.log",
+      "bytes": 1960,
+      "sha256": "f444b1f12243360cbc453dc5d75873f779ea048851c49e84a946b6519effedb7"
+    },
+    {
+      "path": "flash/candidate/chunk-0.bin",
+      "bytes": 1048576,
+      "sha256": "b58b9348aae56072dd0ba735bdddccc517dd22acf88483961b66dbe705f1a790"
+    },
+    {
+      "path": "flash/candidate/chunk-1.bin",
+      "bytes": 1048576,
+      "sha256": "a568fa661437f51048e70c3fe6d845302cced0ec4dd5dc4c7f3b5999eee854b3"
+    },
+    {
+      "path": "flash/candidate/chunk-2.bin",
+      "bytes": 1048576,
+      "sha256": "eb0a97d084e20e9ebb0b0512cc5a19ca0f4265c0230f5f7085fa5d87cecaaef0"
+    },
+    {
+      "path": "flash/candidate/chunk-3.bin",
+      "bytes": 1048576,
+      "sha256": "d50b1574d1bc6e637d0e6e512b1cebd4be4eef8c1b96529fe25830dfaae59566"
+    },
+    {
+      "path": "flash/candidate/chunk-4.bin",
+      "bytes": 1048576,
+      "sha256": "95e5b36e82c90ea47db394a2421bd79b5383d273c617eaf005dfb05da8ed5098"
+    },
+    {
+      "path": "flash/candidate/chunk-5.bin",
+      "bytes": 290832,
+      "sha256": "303d86657ab08015957a8edeb18734d6fb555ec4969fa961f82864801bc30442"
+    },
+    {
+      "path": "flash/candidate/selector.log",
+      "bytes": 893,
+      "sha256": "b7858a266c9567e29ccb6b748776114d1a6e859e58db381e06f397a9361f0a68"
+    },
+    {
+      "path": "flash/candidate/verify-whole-app.log",
+      "bytes": 690,
+      "sha256": "2750730703f615f010970b1fdea54638f73ce501583ff44c0dc101486c929de9"
+    },
+    {
+      "path": "flash/layout-before.bin",
+      "bytes": 36864,
+      "sha256": "ba7864c02b8153d79685b926310baba3ecf99a556be342dbfb6267d2fbbbb543"
+    },
+    {
+      "path": "flash/preflight-read.log",
+      "bytes": 3815,
+      "sha256": "29b97df45c4fad6cc9b211b2d3b630849f0658f28a24d026bb115565a963668b"
+    },
+    {
+      "path": "flash/protected-before.bin",
+      "bytes": 131072,
+      "sha256": "01df2d235a1a8e836bb4b901c67ff4fee2a088f0035b3b87bd7d1f58666d569e"
+    },
+    {
+      "path": "flash/protected-read.log",
+      "bytes": 3526,
+      "sha256": "fddbca1efdf69aaf43d04142c79e5ecfdc87486712fe0d6393863f1ba80ec5de"
+    },
+    {
+      "path": "flash/read-active-header.log",
+      "bytes": 709,
+      "sha256": "cc3e583f2c7641fe560abaf341a5f50099ba107ecebf485a055c311c8893ddb3"
+    },
+    {
+      "path": "flash/read-selectors-baseline.log",
+      "bytes": 818,
+      "sha256": "0adeaf612bb228e4ca241d18e4d964d9f52fd570a29f14c53b6585685700b87e"
+    },
+    {
+      "path": "flash/selector-18.bin",
+      "bytes": 4096,
+      "sha256": "d339d902ee1a708ce6975e5883be4eccc64e12f710fcf353fc998329da93eff2"
+    },
+    {
+      "path": "flash/selector-20.bin",
+      "bytes": 4096,
+      "sha256": "ad6ecb118ee79e7a155998a3b06c80d14817dd05ac4bf75bf92dd842fa0664a3"
+    },
+    {
+      "path": "flash/selectors-baseline-done.bin",
+      "bytes": 8192,
+      "sha256": "03c3802e1c9b34ef78886187a829b7cbd7a3915362e09d944bed762a5a7dcc8f"
+    },
+    {
+      "path": "flash/selectors-before.json",
+      "bytes": 325,
+      "sha256": "50be13c7f4ea8094b7faf817211f2932e129b8d4ed5baa563682c2322d464018"
+    },
+    {
+      "path": "flash/verify-current-formal.log",
+      "bytes": 711,
+      "sha256": "ed56a5f461702361459d10f16d895490371d41d65c27e93d5e17259d63af2fe6"
+    },
+    {
+      "path": "flash-baseline.log",
+      "bytes": 242,
+      "sha256": "883636c868c2d9908572be7119d502918eda9419c0133abf3f9ea958dd40e05a"
+    },
+    {
+      "path": "flash-candidate.log",
+      "bytes": 243,
+      "sha256": "07d7875dbac9b5304bee5b2af7306e9821ee264e155ac256f8cae6dbaad20bb7"
+    },
+    {
+      "path": "flash_app.py",
+      "bytes": 1858,
+      "sha256": "f0f541320a185057d7665e82d99ebc018df57ff1a149eabbfa5057e3dc177330"
+    },
+    {
+      "path": "freeze.py",
+      "bytes": 1001,
+      "sha256": "b816b153628e7db412a27a85d78e2b395561eefa4d9ecf47ea5a09188a382cae"
+    },
+    {
+      "path": "images.json",
+      "bytes": 659,
+      "sha256": "1d0f118be5eddc238f24abb7082ec4abfb0aba27baa80f35a8d7097c59450caf"
+    },
+    {
+      "path": "inspect_layout.py",
+      "bytes": 742,
+      "sha256": "dd197878fec806b690c67d700228cb60ea5a16dfcad2af02589b08a4c2b3d2d8"
+    },
+    {
+      "path": "measure_once.py",
+      "bytes": 4672,
+      "sha256": "bc8dd2efde58676510f6355f17584b0d005811a633dd27b50f40b92c6c04ce41"
+    },
+    {
+      "path": "publish_evidence.py",
+      "bytes": 4770,
+      "sha256": "35fa9197a5e67862fb3ea10b0c2543e49ddd6190346fddb6a4126ae1ef66cd1d"
+    },
+    {
+      "path": "serve.py",
+      "bytes": 515,
+      "sha256": "a448b4a50d21b616f5eba58c72ce9e6222ddf933483de41ba20d00e4517e5a6c"
+    }
+  ]
+}
