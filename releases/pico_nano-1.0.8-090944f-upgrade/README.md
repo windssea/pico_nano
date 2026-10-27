@@ -1,10 +1,18 @@
 # PicoNano 安装、异机升级与发布
 
-更新：2026-10-26。当前版本为 **1.0.7**。提供保留数据升级、完整安装和离线网页三个USB包，以及设备OTA原始应用和签名清单。电脑安装入口为[网页安装器](https://windssea.github.io/pico_nano/)，精确源码以包内`source_commit`为准。
+更新：2026-10-27。当前版本为 **1.0.8**。提供保留数据升级、完整安装和离线网页三个USB包，以及设备OTA原始应用和签名清单。电脑安装入口为[网页安装器](https://windssea.github.io/pico_nano/)，精确固件源码以包内`source_commit`为准；若说明文档随后收口，`documentation_commit`另标说明来源，不改固件身份。
+
+## 1.0.8（2026-10-27）
+
+优化大书来源分块校验、当前页续读与启动结构生成/保留，以及退出、点击开书的首反馈；缺失或损坏仍自动回退。新增低刷新推箱子，软件已验证棋局/保存与局部绘制，实际设备游戏手感和长期残影待用户试玩。原16灰阶、完整校验、内存与缓存上限保持。
+
+固件精确源码`090944f4eb92de1b7fec24796125267a917b2680`。板级正式应用5390224B，SHA-256 `bfdf7508da34769d421add4d7b32bd91965da61cdee29ae4b8be81ed453dbbda`，6MiB OTA槽余901232B（14.33%）；CI槽余12.62%，均通过10%门槛。完整安装和签名OTA沿用下节同一已资格引导、公钥及原分区，正式镜像关闭诊断入口。
+
+同源码诊断设备的开书/翻页、像素与目视证据见[真机报告](https://github.com/windssea/pico_nano/blob/c3d07dfb5f434089c02a16a1ebef67c9affd8136/docs/READING_DEVICE_TEST_REPORT.md)，各项实测差异分别列出；新正式镜像不继承为已通过长锁屏、功耗或光学仪器验收。开发真机继续保留1.0.7-diag，本次发布不追加刷写。软件/分发校验收口见[开发指南](https://github.com/windssea/pico_nano/blob/c3d07dfb5f434089c02a16a1ebef67c9affd8136/docs/DEVELOPMENT_PLAN.md)。
 
 ## 1.0.7（2026-10-26）
 
-整合续读快速入口、完整校验的ZIP/OPF启动结构包、分步SHA同代证明交接和字体存储去重。缺包、坏包、换代及设置变化沿原退路，原生灰阶、分页和内存硬顶保持；启动包与续读包共用原事务、配额及清理。此前两书诊断对照及重启验证范围见[真机报告](https://github.com/windssea/pico_nano/blob/090944f4eb92de1b7fec24796125267a917b2680/docs/READING_DEVICE_TEST_REPORT.md)，不将该结果当成新正式镜像的睡眠或功耗验收。正式包关闭控制台/PROFILE，完整包继续使用已资格引导及原签名公钥；镜像与具体源码以本版包内清单为准。
+整合续读快速入口、完整校验的ZIP/OPF启动结构包、分步SHA同代证明交接和字体存储去重。缺包、坏包、换代及设置变化沿原退路，原生灰阶、分页和内存硬顶保持；启动包与续读包共用原事务、配额及清理。此前两书诊断对照及重启验证范围见[真机报告](https://github.com/windssea/pico_nano/blob/c3d07dfb5f434089c02a16a1ebef67c9affd8136/docs/READING_DEVICE_TEST_REPORT.md)，不将该结果当成新正式镜像的睡眠或功耗验收。正式包关闭控制台/PROFILE，完整包继续使用已资格引导及原签名公钥；镜像与具体源码以本版包内清单为准。
 
 本版冻结固件源码`f9e8c388e06ad25a90fb46b33d8259b8af670d75`，正式应用5347744B，SHA-256 `aa5c59c5585e041d159424bb4734a60c96cf87b88d0a4eb1281f89dbfdf00051`，6MiB槽余943712B（约15.00%）。CI配置应用5454192B、槽余13.308%；两套镜像版本、checksum/hash、原分区及非诊断策略通过核验。完整包显式采用1.0.5已资格引导`80193053e7c398d196e87db7b63a1eaf008ea5f368d35f918c094d5b804652e1`，与签名清单一致，不用本机新编译而摘要不同的引导替换旧设备签名链。
 
@@ -46,7 +54,7 @@
 
 发布后，GitHub与Gitee的六个公开附件已分别完整下载并核对SHA-256；在线安装器仅列本版两种模式，九个镜像逐项下载摘要一致，硬件验证标记保持false。旧版发行记录保留。
 
-本批正式镜像未刷入设备或执行OTA安装；现有设备仍运行此前的1.0.6诊断镜像。历史真机失败及后续修复范围见[阅读测试报告](https://github.com/windssea/pico_nano/blob/090944f4eb92de1b7fec24796125267a917b2680/docs/READING_DEVICE_TEST_REPORT.md)，不能用本批构建替代正式版的睡眠、断电、实体键、面板光学或功耗验收。精确源码与镜像摘要以发布包清单为准。
+本批正式镜像未刷入设备或执行OTA安装；现有设备仍运行此前的1.0.6诊断镜像。历史真机失败及后续修复范围见[阅读测试报告](https://github.com/windssea/pico_nano/blob/c3d07dfb5f434089c02a16a1ebef67c9affd8136/docs/READING_DEVICE_TEST_REPORT.md)，不能用本批构建替代正式版的睡眠、断电、实体键、面板光学或功耗验收。精确源码与镜像摘要以发布包清单为准。
 
 下载：[Gitee 1.0.6](https://gitee.com/windssea/pico_nano/releases/tag/v1.0.6)、[GitHub 1.0.6](https://github.com/windssea/pico_nano/releases/tag/v1.0.6)。
 
@@ -106,7 +114,7 @@ OTA适用于实读引导和分区匹配的设备。本版完整包引导与实�
 
 ### 发布后的真机验证登记
 
-安装器从[真机验证记录](https://github.com/windssea/pico_nano/blob/090944f4eb92de1b7fec24796125267a917b2680/releases/hardware-verification.json)读取维护者确认，以版本、完整源码提交和应用SHA-256同时匹配。1.0.1的保留布局升级和完整刷入共用已验证应用，均显示“正式版·已真机验证”。生成站点仍先逐文件校验镜像，状态登记不改变固件或安装写入计划。早期包内manifest保留打包时的记录；当前验证状态以该登记和在线安装器为准。
+安装器从[真机验证记录](https://github.com/windssea/pico_nano/blob/c3d07dfb5f434089c02a16a1ebef67c9affd8136/releases/hardware-verification.json)读取维护者确认，以版本、完整源码提交和应用SHA-256同时匹配。1.0.1的保留布局升级和完整刷入共用已验证应用，均显示“正式版·已真机验证”。生成站点仍先逐文件校验镜像，状态登记不改变固件或安装写入计划。早期包内manifest保留打包时的记录；当前验证状态以该登记和在线安装器为准。
 
 ## 历史发行证据（1.0.0及0.x）
 
@@ -203,7 +211,7 @@ OTA适用于实读引导和分区匹配的设备。本版完整包引导与实�
 
 0.9开发树额外读取完整8KiB OTA选择区：全FF时只写`ota_0`；设备用过OTA时先写`ota_0`，再清空OTA选择区，使其从新写入的固件启动，不必完整刷入；短读停止。使用过设备OTA后，不可再使用旧离线包/CLI的固定`0x20000`升级方式。现有发布包保持原始字节，该保护尚未随新的安装站点发布。
 
-当前专用升级以[已知旧设备表](https://github.com/windssea/pico_nano/blob/090944f4eb92de1b7fec24796125267a917b2680/releases/pico_nano-0.0.57-6840523-upgrade/expected-partition-table.bin)为基准：从 `0x8000` 只读3072字节并严格比较，匹配后只写 `0x20000` 应用，不写bootloader、分区表、otadata、NVS、内部数据/壁纸或TF。清除/初始化选项禁用。适用前提是该已知布局、当前ota_0路径，不能推广到其他板型/布局/ota_1运行设备。
+当前专用升级以[已知旧设备表](https://github.com/windssea/pico_nano/blob/c3d07dfb5f434089c02a16a1ebef67c9affd8136/releases/pico_nano-0.0.57-6840523-upgrade/expected-partition-table.bin)为基准：从 `0x8000` 只读3072字节并严格比较，匹配后只写 `0x20000` 应用，不写bootloader、分区表、otadata、NVS、内部数据/壁纸或TF。清除/初始化选项禁用。适用前提是该已知布局、当前ota_0路径，不能推广到其他板型/布局/ota_1运行设备。
 
 0.6.10网页安装器兼容修正：站点生成器还会从同版本、完整源码提交相同且应用长度/SHA-256一致的已校验完整包，加入其分区表作为第二项精确白名单。设备只要逐字节匹配其中一张完整3072B表，仍仅写应用；短读、未知或任意一字节变化仍停止。这解决本项目完整刷入0.6.8后，升级0.6.9被旧表白名单误拦截的问题。已发布固件及ZIP不修改，历史离线安装器和命令行升级脚本仍只接受其包内固定旧表；不能据网页修正宣称旧包也已兼容。
 
@@ -241,7 +249,7 @@ py -3.12 -m venv .venv
 
 ## 自动复位原因与处理
 
-旧 esptool-js0.5.7 的 `after("hard_reset")` 只走RTS策略，缺少原生S3 USB退出强制下载模式的RTC/watchdog序列。自有 [installer/reset.js](https://github.com/windssea/pico_nano/blob/090944f4eb92de1b7fec24796125267a917b2680/installer/reset.js) 先清RTC `FORCE_DOWNLOAD_BOOT`位；识别Espressif原生USB303A:1001后使用RTC watchdog复位，其他串口走RTS。不修改vendor、不写Flash/eFuse/PMU。
+旧 esptool-js0.5.7 的 `after("hard_reset")` 只走RTS策略，缺少原生S3 USB退出强制下载模式的RTC/watchdog序列。自有 [installer/reset.js](https://github.com/windssea/pico_nano/blob/c3d07dfb5f434089c02a16a1ebef67c9affd8136/installer/reset.js) 先清RTC `FORCE_DOWNLOAD_BOOT`位；识别Espressif原生USB303A:1001后使用RTC watchdog复位，其他串口走RTS。不修改vendor、不写Flash/eFuse/PMU。
 
 watchdog触发后USB可能在返回响应前断开，Windows端口号也可能变化；界面区分“写入校验成功”和“自动复位未完成”。这条原因来自代码路径，复位适配已有软件回归，真实网页复位/新电脑重新枚举/正常启动仍待用户复验。触发前失败明确提示，不能把超时直接当作已正常开机。
 
@@ -251,7 +259,7 @@ watchdog触发后USB可能在返回响应前断开，Windows端口号也可能�
 
 旧完整首装包仍在历史发布目录，但不作为当前已安装设备的默认升级。它会写应用/otadata/bootloader和分区表，可能初始化新的NVS扇区/空内部镜像；用户明确选择清除或初始化会丢失对应记录。LittleFS头部识别不代表FS健康，头部全FF也不代表整分区为空。无独立型号/备份/布局确认不使用此路径。
 
-旧完整方案的详细写入矩阵保留在[安装器归档](https://github.com/windssea/pico_nano/blob/090944f4eb92de1b7fec24796125267a917b2680/docs/archive/2026-10-14/WEB_INSTALLER.md)，作为历史说明；当前新工作应先评估分区迁移及恢复，不直接覆盖旧设备。现有默认应用升级不执行上述首装路径。
+旧完整方案的详细写入矩阵保留在[安装器归档](https://github.com/windssea/pico_nano/blob/c3d07dfb5f434089c02a16a1ebef67c9affd8136/docs/archive/2026-10-14/WEB_INSTALLER.md)，作为历史说明；当前新工作应先评估分区迁移及恢复，不直接覆盖旧设备。现有默认应用升级不执行上述首装路径。
 
 ## 开发者发布流程
 
@@ -269,7 +277,7 @@ python tools/package_ota.py --release releases/pico_nano-0.9.0-<源码短提交>
 
 国内入口为 [Gitee 发行版](https://gitee.com/windssea/pico_nano/releases)，该仓库用于安装包分发；Gitee 标签标记分发版本，固件精确源码提交以包内 `manifest.json` 的 `source_commit` 为准。推荐国内用户下载 `PicoNano-web-installer-<提交>.zip`，按前文运行本地安装站点，不需要克隆仓库；完整包、命令行升级包与离线网页包保持 GitHub 原始字节，另附 `SHA256SUMS`。
 
-[gitee-release.yml](https://github.com/windssea/pico_nano/blob/090944f4eb92de1b7fec24796125267a917b2680/.github/workflows/gitee-release.yml) 在 GitHub Release 的 `published` 事件后自动调用 [sync_gitee_release.py](https://github.com/windssea/pico_nano/blob/090944f4eb92de1b7fec24796125267a917b2680/tools/sync_gitee_release.py)，也可从 Actions 的 `Mirror release packages to Gitee` 手动输入已发布标签补同步。它从主分支选出该版本唯一、同源的升级/完整包，核对包内文件和三个 ZIP 摘要，下载 GitHub 已发布附件逐字节复核，再上传到 Gitee；已有同名附件须匿名下载摘要相同，否则停止，不自动删除或覆盖。它不重建固件，不修改既有 ZIP，也不推送源码历史到 Gitee。
+[gitee-release.yml](https://github.com/windssea/pico_nano/blob/c3d07dfb5f434089c02a16a1ebef67c9affd8136/.github/workflows/gitee-release.yml) 在 GitHub Release 的 `published` 事件后自动调用 [sync_gitee_release.py](https://github.com/windssea/pico_nano/blob/c3d07dfb5f434089c02a16a1ebef67c9affd8136/tools/sync_gitee_release.py)，也可从 Actions 的 `Mirror release packages to Gitee` 手动输入已发布标签补同步。它从主分支选出该版本唯一、同源的升级/完整包，核对包内文件和三个 ZIP 摘要，下载 GitHub 已发布附件逐字节复核，再上传到 Gitee；已有同名附件须匿名下载摘要相同，否则停止，不自动删除或覆盖。它不重建固件，不修改既有 ZIP，也不推送源码历史到 Gitee。
 
 首次使用需要由账号所有者在 Gitee 创建仅限目标仓库、含 `projects` 权限的仓库级私人令牌，在 GitHub 仓库 `Settings → Secrets and variables → Actions` 保存为 `GITEE_TOKEN`；浏览器登录状态不能替代后台凭据。令牌只经环境变量读取，不放入代码、URL、命令行或校验报告。失效/权限不足时工作流失败，需要更新 secret 后补跑；附件配额由 Gitee 当前账号规则决定，不为释放配额自动删除旧版本。首次手动补同步可勾选 `initialize_guides`，会替换Gitee的中英文README为下载指南并读回确认；普通发布不修改README，已手工定制后不要再勾选。
 
@@ -304,11 +312,11 @@ python tools/package_upgrade.py --full
 python tools/dev.py installer
 ```
 
-[package_upgrade.py](https://github.com/windssea/pico_nano/blob/090944f4eb92de1b7fec24796125267a917b2680/tools/package_upgrade.py) 要求已登记源码干净，按 `pn_brand.h` 的 `PN_PRODUCT_VERSION` 生成 `releases/pico_nano-<版本>-<源码提交>-upgrade/` 的应用、已知分区样本、脚本、README、manifest/SHA及命令行ZIP。`tools/dev.py installer`测试并生成本地站点；[installer_site.py](https://github.com/windssea/pico_nano/blob/090944f4eb92de1b7fec24796125267a917b2680/tools/installer_site.py) 支持 `--serve 8765`。现有离线网页ZIP是另行封装站点并附serve.py的发布产物，没有独立自动打包入口，后续需补齐可复跑工具；构建文件和参考表摘要必须匹配包清单。
+[package_upgrade.py](https://github.com/windssea/pico_nano/blob/c3d07dfb5f434089c02a16a1ebef67c9affd8136/tools/package_upgrade.py) 要求已登记源码干净，按 `pn_brand.h` 的 `PN_PRODUCT_VERSION` 生成 `releases/pico_nano-<版本>-<源码提交>-upgrade/` 的应用、已知分区样本、脚本、README、manifest/SHA及命令行ZIP。`tools/dev.py installer`测试并生成本地站点；[installer_site.py](https://github.com/windssea/pico_nano/blob/c3d07dfb5f434089c02a16a1ebef67c9affd8136/tools/installer_site.py) 支持 `--serve 8765`。现有离线网页ZIP是另行封装站点并附serve.py的发布产物，没有独立自动打包入口，后续需补齐可复跑工具；构建文件和参考表摘要必须匹配包清单。
 
 同一板级构建再用`--full`生成`releases/pico_nano-<版本>-<源码提交>-full/`：包含该构建的bootloader、分区表、OTA初始数据、应用和`factory-data`生成的两个空文件系统镜像，不混用旧包引导/表。生成器核对flash_args固定地址、镜像尺寸与板级应用内版本，站点验证六个镜像清单摘要/身份；完整与专用升级包使用独立URL，网页按模式筛选，默认专用升级。当前软件回归为22项Node与5项完整包Python；完整迁移、备份读回及启动仍需设备验证。
 
-提交并推送发布目录后，现有 [installer-pages.yml](https://github.com/windssea/pico_nano/blob/090944f4eb92de1b7fec24796125267a917b2680/.github/workflows/installer-pages.yml) 通过用户已启用的GitHub Pages重建。核对工作流成功、在线默认源码后缀、应用/分区样本摘要和复位脚本，再给用户刷入。源码提交和发布提交区分，文件名版本相同不表示二进制相同。离线网页ZIP由生成的站点加原 `serve.py` 打包，并在 `PACKAGE_SHA256.txt` 记录两个ZIP摘要。
+提交并推送发布目录后，现有 [installer-pages.yml](https://github.com/windssea/pico_nano/blob/c3d07dfb5f434089c02a16a1ebef67c9affd8136/.github/workflows/installer-pages.yml) 通过用户已启用的GitHub Pages重建。核对工作流成功、在线默认源码后缀、应用/分区样本摘要和复位脚本，再给用户刷入。源码提交和发布提交区分，文件名版本相同不表示二进制相同。离线网页ZIP由生成的站点加原 `serve.py` 打包，并在 `PACKAGE_SHA256.txt` 记录两个ZIP摘要。
 
 ## USB直接复制（0.6.6开发预览）
 

@@ -28,12 +28,13 @@
       "sha256": "5e85174c5f82b0df6522dd353b5de9d33a88f509872b62eea3012be26e68969f"
     },
     "README.md": {
-      "bytes": 63597,
-      "sha256": "cf22db4a1793c4a8be902863c59186c4acc0c14de7299f2def8a95ee4b2cfbff"
+      "bytes": 64963,
+      "sha256": "e3f7e2a4989395631f2097c8b842b9f913e9ab92e0afd01cda434b056fee7825"
     },
     "requirements.txt": {
       "bytes": 15,
       "sha256": "c4f640d88c87e6d02201862dc58a106c956ecf8df504c0897287057fb66bc0e7"
     }
-  }
+  },
+  "documentation_commit": "c3d07dfb5f434089c02a16a1ebef67c9affd8136"
 }
