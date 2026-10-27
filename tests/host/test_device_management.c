@@ -322,7 +322,13 @@ int main(void){
     assert(pn_reader_app_open_on_media(&reader,&pool,&sd_media,book,NULL,NULL,44,0)==PN_OK);
     assert(fixture_reader_step(PN_APP_OPEN,now_ms())==PN_OK && fixture_reader_step(PN_APP_NEXT,now_ms())==PN_OK);
     void *retained=reader.impl;pn_txt_progress_t location;assert(pn_reader_app_progress(&reader,&location)==PN_OK);
-    recent_loaded=true;assert(leave_reader() && !reader_active() && hot_session.txt.impl==retained && !recent_loaded);
+    // 同代RAM预览用于退出首屏，不再强制重读日志；仍核对原书、进度与热对象。/ Reuse the same-epoch RAM preview for the exit frame without rereading the journal; still verify book, progress and retained ownership.
+    assert(recent_snapshot);memset(recent_snapshot,0,sizeof *recent_snapshot);recent_epoch=sd_media.epoch;recent_loaded=true;
+    pn_recent_item_t exit_preview;assert(pn_reader_app_recent_item(&reader,&exit_preview)==PN_OK);
+    assert(leave_reader() && !reader_active() && hot_session.txt.impl==retained && recent_loaded && recent_epoch==sd_media.epoch);
+    assert(recent_snapshot->count==1 && !strcmp(recent_snapshot->items[0].path,exit_preview.path));
+    assert(!memcmp(&recent_snapshot->items[0].book,&exit_preview.book,sizeof exit_preview.book));
+    assert(recent_snapshot->items[0].progress==exit_preview.progress && recent_snapshot->items[0].source_size==exit_preview.source_size);
     start_reader_impl();assert(reader.impl==retained && hot_session.hits==1 && !hot_session.media);
     pn_txt_progress_t reopened;assert(pn_reader_app_progress(&reader,&reopened)==PN_OK && reopened.source_offset==location.source_offset);
     assert(leave_reader() && hot_session.media && stop_reader() && !hot_session.media);
