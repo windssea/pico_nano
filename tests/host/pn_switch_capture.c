@@ -19,9 +19,10 @@ static void settle_sources(bool warm){
     for(unsigned n=0;pn_epub_app_verify_pending(&epub);n++){assert(n<100000);pn_status_t s=pn_epub_app_verify_step(&epub);assert(s==PN_OK || s==PN_BUSY);}
     for(unsigned n=0;warm && pn_epub_app_prefetch_pending(&epub);n++){assert(n<20000);pn_status_t s=pn_epub_app_prefetch(&epub);assert(s==PN_OK || s==PN_BUSY || s==PN_EMPTY);}
 }
-static void settle_resume(void){
+static void settle_resume(bool checkpoint){
     for(unsigned n=0;n<20000;n++){
-        pn_status_t s=pn_epub_app_resume_cache_idle(&epub);assert(s==PN_OK || s==PN_BUSY || s==PN_EMPTY);
+        // 提前退出使用产品检查点入口，阅读空闲允许优先预热邻页。/ Early exit uses the product checkpoint entry; reading idle may prioritize the neighbor.
+        pn_status_t s=checkpoint?pn_epub_app_resume_checkpoint_step(&epub):pn_epub_app_resume_cache_idle(&epub);assert(s==PN_OK || s==PN_BUSY || s==PN_EMPTY);
         if(s==PN_EMPTY && !pn_epub_app_resume_cache_pending(&epub))return;
     }
     assert(!"resume writer did not settle");
@@ -65,7 +66,7 @@ int main(int argc,char **argv){
             for(unsigned n=0;!stored;n++){assert(n<20000);pn_status_t v=pn_epub_app_resume_cache_idle(&epub);assert(v==PN_BUSY || v==PN_OK);}
             interrupt_resume(now+5000);
         }
-        settle_resume();unsigned saved=stored;
+        settle_resume(early);unsigned saved=stored;
         if(round<2 && !getenv("PN_SWITCH_BASELINE"))assert(saved==(early?1u:2u));
         assert(pn_hot_session_park(&hot,&pool,&media,book,1,now+6000,&txt,&epub)==PN_OK);
         pn_status_t flushed=pn_hot_session_deferred_flush(&hot);assert(flushed==PN_OK || flushed==PN_EMPTY);

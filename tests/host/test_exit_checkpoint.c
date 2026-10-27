@@ -72,7 +72,8 @@ int main(int argc, char **argv) {
             assert(!packets(dir));
             if(mode==0){
                 pn_media_lease_t busy={0};assert(pn_media_acquire(&media,PN_MEDIA_CACHE_WRITE,&busy)==PN_OK);
-                assert((epub?pn_epub_app_resume_cache_idle(&e):pn_reader_app_resume_cache_idle(&t))==PN_BUSY);
+                // 显式退出检查点尝试必须保留BUSY待写；阅读idle可先让给邻页。/ An explicit exit checkpoint must retain a BUSY write; reading idle may first yield to the neighbor.
+                assert((epub?pn_epub_app_resume_checkpoint_step(&e):pn_reader_app_resume_checkpoint_step(&t))==PN_BUSY);
                 assert(epub?pn_epub_app_resume_checkpoint_pending(&e):pn_reader_app_resume_checkpoint_pending(&t));
                 assert(pn_media_release(&media,&busy)==PN_OK);
             }

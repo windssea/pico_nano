@@ -268,7 +268,7 @@ void pn_epub_close(pn_epub_t *epub){
     epub_t *b=epub->impl;
     for(size_t i=0;i<b->info.manifest_count;i++)pn_free(b->items[i]);
     for(size_t i=0;i<b->info.spine_count;i++)pn_free(b->spine[i].idref);
-    pn_free(b->chapter);pn_free(b->items);pn_free(b->spine);pn_free(b->spine_by_path);pn_free(b);epub->impl=NULL;epub->semantic_store=NULL;
+    pn_free(b->chapter);pn_free(b->items);pn_free(b->spine);pn_free(b->spine_by_path);pn_free(b);epub->impl=NULL;epub->semantic_store=NULL;epub->source_guard=NULL;epub->source_guard_ctx=NULL;
 }
 static pn_status_t pn_epub_open_impl(pn_epub_t *epub,pn_pool_t *pool,pn_zip_t *zip,const uint8_t salt[16]){
     if(!epub || epub->impl || !pool || !zip || !zip->impl || !salt)return PN_INVALID;
@@ -370,6 +370,12 @@ pn_status_t pn_epub_spine(pn_epub_t *epub,size_t index,pn_epub_item_t *out){
     epub_t *b;pn_status_t status=validate(epub,&b);if(status!=PN_OK)return status;
     if(index>=b->info.spine_count)return PN_EMPTY;
     spine_t *spine=&b->spine[index];item_t *item=spine->item;pn_epub_item_t result={.zip_index=item->index,.unpacked=item->unpacked,.media=item->media,.linear=spine->linear};
+    strcpy(result.id,item->id);strcpy(result.path,item->path);*out=result;return PN_OK;
+}
+pn_status_t pn_epub_manifest(pn_epub_t *epub,size_t index,pn_epub_item_t *out){
+    if(!out)return PN_INVALID;
+    epub_t *b;pn_status_t s=validate(epub,&b);if(s!=PN_OK)return s;if(index>=b->info.manifest_count)return PN_EMPTY;
+    item_t *item=b->items[index];pn_epub_item_t result={.zip_index=item->index,.unpacked=item->unpacked,.media=item->media};
     strcpy(result.id,item->id);strcpy(result.path,item->path);*out=result;return PN_OK;
 }
 pn_status_t pn_epub_spine_find(pn_epub_t *epub,const char *path,size_t *index){

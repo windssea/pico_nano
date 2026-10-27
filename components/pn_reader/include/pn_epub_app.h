@@ -73,8 +73,8 @@ typedef struct {void *impl;} pn_epub_open_job_t; ///< 活动任务只能显式mo
 pn_status_t pn_epub_app_open_job_move(pn_epub_open_job_t *,pn_epub_open_job_t *);
 /// 建立私有原书句柄和只读租约；复制参数，不排版/显示/提交记录。/ Establish a private book handle/READ lease and copy arguments, without layout, presentation or record commits.
 pn_status_t pn_epub_app_open_job_begin(pn_epub_open_job_t *,pn_pool_t *,pn_media_t *,const char *,const char *,const char *,int,uint64_t);
-/// 快开：最近记录身份且文件大小等于expected_size时跳过首屏前整书SHA（ZIP本地头逐条随机读校验），开书后用verify_step后台复核；否则同begin。
-/// Fast open: with a recent-record identity and a file size equal to expected_size, skip the whole-book SHA before the first screen (local headers validated by per-entry random reads) and verify afterwards with verify_step; otherwise identical to begin.
+/// 快开：同代完整证明或内部可信根认证的分块表命中才跳过整书扫描；使用内容先完整校验所在块，缺失/损坏回退完整SHA，源变化按新书导入。
+/// Fast open requires a same-generation complete proof or a block table authenticated by an internal root; fully verify each used block first, fall back to complete SHA on missing/corrupt proof, and import changed sources as new books.
 pn_status_t pn_epub_app_open_job_begin_trusted(pn_epub_open_job_t *,pn_pool_t *,pn_media_t *,const char *,const char *,const char *,int,uint64_t,const pn_book_id_t *expected,uint64_t expected_size);
 /// 是否仍有快开后的整书复核。/ Whether whole-book verification after fast opening remains.
 bool pn_epub_app_verify_pending(const pn_epub_app_t *);
@@ -140,6 +140,8 @@ pn_status_t pn_epub_app_toc_jump(pn_epub_app_t *,size_t,uint64_t,pn_reader_prese
 
 /// 原字节内容身份；错误输出不变。/ Original-byte content identity, preserving output on errors.
 pn_status_t pn_epub_app_identity(const pn_epub_app_t *,pn_book_id_t *);
+/// 仅变化后完成整源SHA的新版本返回true，供控制层更新旧选择身份。/ True only after a changed version completes whole-source SHA, allowing the controller to update its old selection identity.
+bool pn_epub_app_source_reimported(const pn_epub_app_t *);
 /// 打开时所选字体缺失/被替换而暂用启动默认字体；记录未改。/ The saved font was missing or replaced at open, so the startup default is in use; the record is unchanged.
 bool pn_epub_app_font_unavailable(const pn_epub_app_t *);
 

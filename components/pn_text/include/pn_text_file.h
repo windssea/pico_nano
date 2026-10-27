@@ -45,6 +45,10 @@ pn_status_t pn_text_file_identity(const pn_text_source_t *,pn_book_id_t *);
 pn_status_t pn_text_file_identity_pooled(pn_pool_t *,const pn_text_source_t *,pn_book_id_t *);
 /// 仅设备不可变文件port可从同路径/介质/代次且仍持READ的已验证源复制摘要；PC/不匹配返回EMPTY，原有完整校验继续，错误不改目标。/ Only the device immutable-file port may copy a digest from a verified same-path/media/generation source with live READ leases; host/mismatch returns EMPTY for full verification, preserving target on error.
 pn_status_t pn_text_file_identity_reuse(const pn_text_source_t *target,const pn_text_source_t *verified);
+/// 只询问端口是否由设备同代READ租约排除外部修改；不是内容身份或摘要证明。/ Query whether a device same-generation READ lease excludes external writes; never content identity or digest proof.
+bool pn_text_file_immutable(const pn_text_source_t *);
+/// 校验读绕过小块缓存；未知port返回UNSUPPORTED，原source保持有效。/ Verification reads bypass small-block caches; unknown ports return UNSUPPORTED and leave the source valid.
+pn_status_t pn_text_file_read_uncached(const pn_text_source_t *,uint64_t,uint8_t *,size_t,size_t *);
 /// 摘要读块同时严格探测编码/检查点，常见UTF编码只扫一次；GBK保持完整重试。/ Strictly probe encoding/checkpoints while reading digest blocks, scanning common UTF encodings once; GBK retains a complete retry.
 pn_status_t pn_text_file_inspect(pn_pool_t *,const pn_text_source_t *,pn_book_id_t *,pn_text_encoding_t *,void (*)(void *,uint64_t,bool),void *);
 /// 快开：只严格探测前limit字节确定编码并发出前段检查点，不计算身份；无BOM且UTF前段无效时按GBK探测。完整核对交给verify。

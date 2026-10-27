@@ -17,6 +17,7 @@
 #include "pn_reader_app.h"
 #include "pn_turn_transition.h"
 #include "pn_epub_app.h"
+#include "pn_source_blocks.h"
 #include "pn_bootstrap.h"
 #include "pn_semantic_file.h"
 #include "pn_hot_session.h"
@@ -1557,6 +1558,11 @@ static bool identity_precompute_start(const char *path,pn_book_format_t format){
 /// 不被磁盘身份缓存挡住的整书预验证；来源证明仍由完整SHA产生。/ Preverify whole books even when disk metadata exists; only a complete SHA creates source proof.
 static bool identity_warm_start(const char *path,pn_book_format_t format){
     if(format!=PN_BOOK_TXT && format!=PN_BOOK_EPUB)return false;
+    if(format==PN_BOOK_EPUB){
+        uint64_t size;int64_t mtime;pn_book_id_t id;
+        // 仅选择调度入口；点击后仍完整验证表及实际依赖块，坏提示沿原整书扫描。/ Choose only the scheduling entry; opening still authenticates the table and all used blocks, with full-scan fallback for bad hints.
+        if(pn_identity_cache_stat(path,&size,&mtime) && pn_identity_cache_find(&identity_cache,path,size,mtime,&id) && pn_source_blocks_hint(pn_page_index_tf_directory(),"/data/progress",&id))return false;
+    }
     pn_status_t s=pn_identity_cache_warm_begin(&identity_warm,&identity_job,&pool,&sd_media,path,last_input);
     if(s==PN_OK){pn_device_power_busy(PN_POWER_PRODUCT,true);ESP_LOGI(TAG,"Recent book full verification started");return true;}
     return false;
@@ -1642,7 +1648,8 @@ static void start_reader_impl(void){
     // 点击正在预计算的书：保留任务、先显示加载页，由后台轮次接续；不在此同步读完整书。
     // Clicking a book already being precomputed: keep the job and show the loader; later ticks continue it instead of hashing the whole book synchronously here.
     const char *running_identity=pn_identity_cache_job_path(&identity_job);
-    if(running_identity && *selected_path && !strcmp(running_identity,selected_path)){
+    bool block_candidate=selected_format==PN_BOOK_EPUB && selected_identified && pn_source_blocks_hint(pn_page_index_tf_directory(),"/data/progress",&selected_expected);
+    if(running_identity && *selected_path && !strcmp(running_identity,selected_path) && !block_candidate){
         if(!loading_shown){
             pn_status_t loading=show_loading(selected_path);
             if(loading==PN_CANCELLED){identity_job_stop();return;}
@@ -1822,7 +1829,14 @@ static bool tick_opening(void){
         }
         return true;
     }
-    if(s==PN_OK && selected_identified){pn_book_id_t actual;s=pn_epub_app_identity(&epub,&actual);if(s==PN_OK && memcmp(actual.sha256,selected_expected.sha256,32))s=PN_STALE_JOB;}
+    if(s==PN_OK && selected_identified){
+        pn_book_id_t actual;s=pn_epub_app_identity(&epub,&actual);
+        if(s==PN_OK && memcmp(actual.sha256,selected_expected.sha256,32)){
+            // 只接受已完成整源校验的显式重新导入；旧身份仍保留自己的阅读记录。/ Accept only explicit reimports with completed whole-source verification; old identities keep their own reading records.
+            if(pn_epub_app_source_reimported(&epub)){selected_expected=actual;selected_size=0;}
+            else s=PN_STALE_JOB;
+        }
+    }
     if(s==PN_OK && !index_wait){
         // 完整来源复核可能较慢，先反馈；已验证快路先查包，真正未命中才补加载页。/ Give feedback before potentially slow source verification; otherwise probe the verified fast path first and show a loader on a real miss.
         if(!loading_shown && pn_epub_app_verify_pending(&epub)){loading_shown=true;s=show_loading(selected_path);}
@@ -1858,10 +1872,11 @@ static bool tick_shelf_background(uint64_t now){
     }
     return false;
 }
-/// 预热、语义写入、完整复核及近期记录轮转，近期记录只在安静1.5秒后写。 / Rotate warming, semantic writes, full verification and recents, writing recents only after 1.5 quiet seconds.
+/// 预热/校验立即轮转；可选落盘等5秒安静，避免卷容量遍历和同步阻塞连续翻页；退出保存另有屏障。/ Rotate warming/verification immediately; wait five quiet seconds before optional writes so volume scans/sync do not block rapid turns; exit saves use a separate barrier.
 static bool tick_reader_background(uint64_t now){
     if(reader_turn_pending){pn_status_t status=active_step(PN_APP_NEXT,now);if(status!=PN_BUSY)report_reader_result(status);return true;}
     static unsigned cursor;int64_t started=esp_timer_get_time();
+    bool quiet=now>=last_input && now-last_input>=5000u;
     for(unsigned probe=0;probe<5;probe++){
         if(pn_cancel_checkpoint()!=PN_OK)return false;
         unsigned slot=cursor++%5u;pn_status_t s=PN_EMPTY;pn_profile_span_t timing;
@@ -1874,7 +1889,7 @@ static bool tick_reader_background(uint64_t now){
             reader_prefetch_batch=false;
         }
         // 已开始的落盘须能收口，避免其借用与预排优先级互等。/ Let an existing write finish so its borrow cannot deadlock with prefetch priority.
-        else if(slot==1){
+        else if(slot==1 && (quiet || (epub.impl?pn_epub_app_resume_cache_pending(&epub):pn_reader_app_resume_cache_pending(&reader)) || (epub.impl && pn_epub_app_cache_pending(&epub)))){
             unsigned steps=0;int64_t began=esp_timer_get_time();
             do{s=epub.impl?pn_epub_app_resume_cache_idle(&epub):pn_reader_app_resume_cache_idle(&reader);}
             while(s==PN_BUSY && ++steps<32u && esp_timer_get_time()-began<8000);
@@ -1890,13 +1905,13 @@ static bool tick_reader_background(uint64_t now){
                 snprintf(trust_failed_path,sizeof trust_failed_path,"%s",selected_path);pn_identity_cache_forget(&identity_cache,selected_path);if(stop_reader())start_reader();
             }else if(s!=PN_BUSY && s!=PN_CANCELLED)ESP_LOGW(TAG,"Fast-open verification stopped: %d",(int)s);
         }
-        if(slot==4 && !(epub.impl && pn_epub_app_bootstrap_pending(&epub)) && !(epub.impl?pn_epub_app_resume_cache_pending(&epub):pn_reader_app_resume_cache_pending(&reader)) && now>=last_input && now-last_input>=1500 && !(epub.impl?pn_epub_app_prefetch_pending(&epub):pn_reader_app_warm_pending(&reader)) && (epub.impl?pn_epub_app_index_pending(&epub):pn_reader_app_index_pending(&reader))){
+        if(slot==4 && quiet && !(epub.impl && pn_epub_app_bootstrap_pending(&epub)) && !(epub.impl?pn_epub_app_resume_cache_pending(&epub):pn_reader_app_resume_cache_pending(&reader)) && !(epub.impl?pn_epub_app_prefetch_pending(&epub):pn_reader_app_warm_pending(&reader)) && (epub.impl?pn_epub_app_index_pending(&epub):pn_reader_app_index_pending(&reader))){
             pn_book_index_state_t progress;unsigned steps=0;int64_t began=esp_timer_get_time();do{s=epub.impl?pn_epub_app_index_step(&epub,&progress):pn_reader_app_index_step(&reader,&progress);}while(s==PN_BUSY && ++steps<PN_BOOK_INDEX_STEP_MAX && esp_timer_get_time()-began<8000);if(s==PN_OK)ESP_LOGI(TAG,"Whole-book index complete: %u pages",(unsigned)progress.pages);
 #if PN_DEVICE_TEST_CONSOLE
             if(s!=PN_BUSY && s!=PN_CANCELLED)index_profile_flush();
 #endif
         }
-        if(slot==3 && now>=last_input && now-last_input>=1500)s=epub.impl?pn_epub_app_recent_idle(&epub,now_ms()):pn_reader_app_recent_idle(&reader,now_ms());
+        if(slot==3 && quiet && !(epub.impl?pn_epub_app_prefetch_pending(&epub):pn_reader_app_warm_pending(&reader)))s=epub.impl?pn_epub_app_recent_idle(&epub,now_ms()):pn_reader_app_recent_idle(&reader,now_ms());
         pn_profile_end(&timing,s);
         if(opening || s==PN_OK || s==PN_BUSY || s==PN_CANCELLED || esp_timer_get_time()-started>=8000)return true;
     }

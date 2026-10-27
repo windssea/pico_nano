@@ -25,6 +25,6 @@ with tempfile.TemporaryDirectory() as tmp:
         assert actual==expected,(case,result)
         hit=case in ('memo','epoch','epoch-reopen');assert result['boot_hits']==(2 if case=='epoch-reopen' else int(hit)),result
         assert result['directory_begins']==(0 if hit else 1),result
-        if hit:assert (result['identity_steps']>0)==(port=='host' or case.startswith('epoch')),result
-        if case=='epoch-reopen':assert (result['reopen_identity_steps']>0)==(port=='host'),result
+        assert result['identity_steps']==0 and result['reopen_identity_steps']==0,result
+        assert result['block_hits']==(2 if case=='epoch-reopen' else 1 if port=='host' or case.startswith('epoch') else 0),result
         print(port,case,result,flush=True)

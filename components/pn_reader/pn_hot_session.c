@@ -164,6 +164,8 @@ pn_status_t pn_hot_session_deferred_flush(pn_hot_session_t *h){
     if(s==PN_CANCELLED)return s;
     bool checkpoint=h->epub.impl?pn_epub_app_resume_checkpoint_pending(&h->epub):pn_reader_app_resume_checkpoint_pending(&h->txt);
     if(checkpoint){s=h->epub.impl?pn_epub_app_resume_checkpoint_step(&h->epub):pn_reader_app_resume_checkpoint_step(&h->txt);if(s!=PN_OK && s!=PN_BUSY && s!=PN_EMPTY && s!=PN_CANCELLED)h->deferred_failed=true;}
+    // 可选写任务仍在推进时，检查点让出不代表全部完成；释放屏障须继续收口。/ A checkpoint yielding to an active optional writer does not mean all work finished; the release barrier must continue.
+    if(s==PN_EMPTY && pn_hot_session_deferred_pending(h))return PN_BUSY;
     return s;
 }
 pn_status_t pn_hot_session_resume(pn_hot_session_t *h,pn_media_t *media,const char *path,pn_book_format_t kind,const pn_book_id_t *expected,uint64_t policy,uint64_t now,pn_reader_app_t *txt,pn_epub_app_t *epub,pn_reader_present_fn present,void *ctx){

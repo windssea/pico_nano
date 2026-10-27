@@ -14,5 +14,7 @@ void pn_epub_image_cache_init(pn_epub_image_cache_t *,pn_pool_t *);
 void pn_epub_image_cache_close(pn_epub_image_cache_t *);
 /// 完整键匹配且原已验证源仍有效才复用；EMPTY沿原解码，其他错误传播。/ Reuse only a full key match with a still-valid verified source; decode normally on EMPTY and propagate other errors.
 pn_status_t pn_epub_image_cache_restore(pn_epub_image_cache_t *,pn_text_file_t *,const char *,const pn_style_t *,pn_frame_t *);
+/// 分块版本由调用方验证完整图片资源；不伪造原书完整摘要资格。/ A block-version caller verifies the complete image resource without fabricating whole-book digest authority.
+pn_status_t pn_epub_image_cache_restore_guarded(pn_epub_image_cache_t *,pn_text_file_t *,const char *,const pn_style_t *,pn_frame_t *,pn_status_t (*)(void *,const char *),void *);
 /// 仅完整资源EOF/CRC成功的独页正文可存；可选失败不驱逐资源或影响原帧。/ Store only a standalone body after complete resource EOF/CRC; optional failure never evicts resources or changes the original frame.
 void pn_epub_image_cache_store(pn_epub_image_cache_t *,pn_text_file_t *,const char *,const pn_style_t *,const pn_frame_t *);

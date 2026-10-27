@@ -60,6 +60,7 @@ static pn_status_t resume_prepare(app_t *a, pn_read_intent_t intent, pn_epub_rea
         s = pn_resume_load(&a->resume, intent == PN_READ_NEXT ? 1u : 0u, &wanted, frame, &page, resume_verify, a);
         pn_profile_end(&span, s);
     }
+    if(s==PN_OK)s=source_resume(a,&page.epub);
     if (lease.ticket) {
         pn_status_t released = pn_display_discard(&a->display, &lease);
         if (s == PN_OK)
@@ -82,6 +83,8 @@ static pn_status_t resume_cache_step(pn_epub_app_t *app, bool current_only) {
         return PN_EMPTY;
     // 离开阅读只收口当前页，不为下一页做预热或落盘。/ Leaving reading checkpoints only the current page, never warming or persisting a next page.
     if(current_only && pn_resume_pending_slot(&a->resume)==1)resume_abort_retry(a);
+    // 锁屏/退出的当前页优先于可重建来源表；不能等待一个该路径不会推进的writer。/ Lock/exit current-page checkpoints outrank rebuildable source tables; never wait for a writer this path does not advance.
+    if(current_only && pn_source_blocks_pending(&a->blocks))pn_source_blocks_abort(&a->blocks);
     if (pn_resume_pending(&a->resume)) {
         pn_profile_span_t span;
         pn_profile_begin(&span, a->pool, "resume.write");
@@ -93,7 +96,8 @@ static pn_status_t resume_cache_step(pn_epub_app_t *app, bool current_only) {
     }
     if (pn_epub_app_verify_pending(app) || (!a->resume_dirty && (current_only || !a->resume_next_dirty)))
         return PN_EMPTY;
-    if ((!a->resume_dirty && pn_epub_app_prefetch_pending(app)) || pn_semantic_file_pending(&a->semantic_file))
+    // 阅读空闲先完成邻页；退出/锁屏仍立即收口当前页，已开始的事务由上方完成。/ Finish the neighbor before starting idle writes; exit/lock still checkpoints the current page immediately, and existing transactions finish above.
+    if ((!current_only && pn_epub_app_prefetch_pending(app)) || pn_semantic_file_pending(&a->semantic_file) || pn_source_blocks_pending(&a->blocks))
         return PN_EMPTY;
     if (resume_bind(a) != PN_OK){if(current_only)a->resume_dirty=false;return PN_EMPTY;}
     pn_page_index_abort(&a->page_index);

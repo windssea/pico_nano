@@ -62,6 +62,8 @@ pn_status_t pn_zip_validate(pn_zip_t *zip);
 pn_status_t pn_zip_find(pn_zip_t *zip,const char *path,uint32_t *index);
 /// 返回当前代条目，错误不改输出。/ Get current-generation entry, preserving output on errors.
 pn_status_t pn_zip_info(pn_zip_t *zip,uint32_t index,pn_zip_info_t *info);
+/// 可信模型对应的原字节范围；UINT32_MAX选择中央目录至EOF，其他索引包含本地头/数据/描述符。/ Original byte range from the trusted model; UINT32_MAX selects central directory through EOF, other indexes include header/data/descriptor.
+pn_status_t pn_zip_source_range(pn_zip_t *,uint32_t,uint64_t *,uint64_t *);
 /// owner串行使用，同一源读取可交错；每流约40KiB，不整条资源分配。
 /// Serialized owner calls may interleave source reads; about 40 KiB per stream, without whole-resource allocation.
 pn_status_t pn_zip_stream_open(pn_zip_t *zip,uint32_t index,pn_zip_stream_t *stream);
@@ -74,5 +76,5 @@ bool pn_zip_stream_verified(const pn_zip_stream_t *stream);
 void pn_zip_stream_close(pn_zip_stream_t *stream);
 /// 完整验证模型逐条导出；游标初始0，每步最多一条，BUSY继续。/ Export a fully validated model one record per step; cursor starts at zero, BUSY continues.
 pn_status_t pn_zip_snapshot_write(pn_zip_t *,pn_format_io_t *,uint32_t *);
-/// 仅可信完整包控制层可调用；源完整SHA先验证，包完整SHA未确认前不得使用输出。失败保持空ZIP。/ Trusted packet controllers only: verify full source SHA first and never use output before the full packet SHA; failure leaves ZIP empty.
+/// 仅可信完整包控制层可调用；先验证整源SHA或覆盖实际依赖的可信分块证明，包完整SHA未确认前不得使用输出。失败保持空ZIP。/ Trusted packet controllers only: verify full source SHA or authenticated block proofs covering actual dependencies first; never use output before full packet SHA; failure leaves ZIP empty.
 pn_status_t pn_zip_snapshot_read(pn_zip_t *,pn_pool_t *,const pn_text_source_t *,pn_format_io_t *);

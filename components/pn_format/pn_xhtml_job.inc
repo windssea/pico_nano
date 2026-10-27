@@ -89,6 +89,7 @@ static bool xj_compatible(const model_t *m,pn_pool_t *pool,const char *path,cons
 pn_status_t pn_xhtml_job_begin(pn_xhtml_job_t *job,pn_pool_t *pool,pn_epub_t *epub,const char *path,const uint8_t salt[16],const pn_xhtml_position_t *focus,pn_xhtml_sink_t sink,pn_xhtml_done_t done,pn_xhtml_restart_t restart,void *ctx){
     if(!job || !pool || !epub || !path || !*path || strlen(path)>=PN_ZIP_PATH_MAX || !salt || !sink || !done || !restart)return PN_INVALID;
     if(job->impl)return PN_BUSY;
+    if(epub->source_guard){pn_status_t guarded=epub->source_guard(epub->source_guard_ctx,path);if(guarded!=PN_OK)return guarded;}
     size_t ordinal;pn_status_t s=pn_cancel_checkpoint();if(s==PN_OK)s=pn_epub_spine_find(epub,path,&ordinal);if(s!=PN_OK)return s;
     xhtml_job_t *j=pn_alloc_tagged(pool,PN_MEM_DOCUMENT,sizeof *j);if(!j)return PN_NO_MEMORY;
     *j=(xhtml_job_t){.pool=pool,.epub=epub,.status=PN_BUSY,.has_focus=focus!=NULL,.proxy={.sink=sink,.done=done,.restart=restart,.ctx=ctx}};

@@ -2,6 +2,8 @@
 
 更新：2026-10-14。本页是所有上传通道的长期路径规范，目录常量以 [pn_sd_layout.h](../components/pn_storage/include/pn_sd_layout.h) 为准，安装映射由 [pn_upload_directory](../components/pn_transfer/pn_upload.c) 共用。界面类别中文，跨平台路径名固定，不自动移动/删除旧文件。
 
+开发树增加来源块表`.pnsv`及内部`progress/resume/*.pnst`可信根，复用原配额、事务与清理，不是用户上传类别。首次完整扫描生成，以后认证整表并完整校验使用的原书块；未读区变化在后续读取时发现，缺件回整书验证。来源边界以[架构](ARCHITECTURE.md)为准。
+
 ## TF 公开和内部目录
 
 设备内部挂载点 `/sdcard`，下列路径相对卡根：
@@ -17,7 +19,7 @@
 | `/piconano/.readpico/covers/` | 可重建缩略图 | 不与封面原图混放 |
 | `/piconano/.readpico/indexes/library.pni` | 可重建书库索引 | 介质/目录变动失效，打开书仍完整核对SHA |
 | `/piconano/.readpico/reading/pages/` | 开发中的TF分页表及整书编译游标 | 按完整书籍/实际字体布局键保存，最多65536项/表（含一条编译状态），全局32MiB；仅已提交完成标记表示整书覆盖，缺失/损坏回原书 |
-| `/piconano/.readpico/reading/resume/` | 当前/下一页无损续读包与书籍启动结构包 | 续读每书两槽`.pnr`，启动每书一份`.pnbs`；完整来源及包校验后复用，共用原全局16MiB，缺失/损坏回原书，可删除重建 |
+| `/piconano/.readpico/reading/resume/` | 无损续读包、启动结构及来源块摘要表 | 续读每书两槽`.pnr`，每书一份`.pnbs`及`.pnsv`；来源块及派生包完整校验后复用，共用原全局16MiB，缺失/损坏回原书，可删除重建 |
 | `/piconano/.readpico/masks/` | 可重建透明锁屏灰度/透明平面 | 原图路径/大小/mtime/变换为键，CRC 损坏即重建，可整目录删除 |
 | `/piconano/.readpico/wallpapers/` | 可重建壁纸缩略图及原生预览 | 缩略图144×256/16灰阶；原生预览核对完整源SHA及CRC，可整目录删除 |
 | `/piconano/.readpico/uploads/` | 暂存、分块记录、安装日志及备份 | 未完成文件不入书架，不手动清理活动事务 |

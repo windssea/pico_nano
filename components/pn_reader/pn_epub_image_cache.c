@@ -29,10 +29,10 @@ static size_t pack(const pn_frame_t *f,uint8_t *out){
         }
     }return n;
 }
-pn_status_t pn_epub_image_cache_restore(pn_epub_image_cache_t *c,pn_text_file_t *source,const char *path,const pn_style_t *style,pn_frame_t *f){
+pn_status_t pn_epub_image_cache_restore_guarded(pn_epub_image_cache_t *c,pn_text_file_t *source,const char *path,const pn_style_t *style,pn_frame_t *f,pn_status_t (*guard)(void *,const char *),void *ctx){
     if(!c || !source || !path || !style || !valid_frame(f))return PN_INVALID;
-    entry_t *e=c->entry;if(!e || !source->identity_known || e->source!=source || strcmp(e->path,path) || memcmp(&e->style,style,sizeof *style) || e->width!=f->width || e->height!=f->height)return PN_EMPTY;
-    pn_cache_pin(&c->owner);pn_status_t s=pn_text_file_verify_handle(c->owner.pool,source);size_t at=0,width=((size_t)f->width+1u)/2u;
+    entry_t *e=c->entry;if(!e || (!source->identity_known && !guard) || e->source!=source || strcmp(e->path,path) || memcmp(&e->style,style,sizeof *style) || e->width!=f->width || e->height!=f->height)return PN_EMPTY;
+    pn_cache_pin(&c->owner);pn_status_t s=guard?guard(ctx,path):pn_text_file_verify_handle(c->owner.pool,source);size_t at=0,width=((size_t)f->width+1u)/2u;
     /// 先验证整个私有编码再写帧，损坏退路不遗留半张缓存。/ Validate the entire private encoding before writing pixels so corruption leaves no partial cache in the fallback frame.
     for(int y=0;s==PN_OK && y<f->height;y++){size_t x=0;while(x<width){if(at>=e->size){s=PN_CORRUPT;break;}unsigned tag=e->data[at++];size_t count=tag<128?tag+1u:257u-tag,bytes=tag<128?count:1u;if(tag==128 || count>width-x || bytes>e->size-at){s=PN_CORRUPT;break;}at+=bytes;x+=count;}}
     if(s==PN_OK && at!=e->size)s=PN_CORRUPT;
@@ -47,6 +47,7 @@ pn_status_t pn_epub_image_cache_restore(pn_epub_image_cache_t *c,pn_text_file_t 
     if(s==PN_OK && at!=e->size)s=PN_CORRUPT;
     pn_cache_unpin(&c->owner);if(s==PN_CORRUPT){drop(c);return PN_EMPTY;}if(s==PN_OK)pn_cache_observe(c->owner.pool,PN_CACHE_COVER,true);return s;
 }
+pn_status_t pn_epub_image_cache_restore(pn_epub_image_cache_t *c,pn_text_file_t *source,const char *path,const pn_style_t *style,pn_frame_t *f){return pn_epub_image_cache_restore_guarded(c,source,path,style,f,NULL,NULL);}
 void pn_epub_image_cache_store(pn_epub_image_cache_t *c,pn_text_file_t *source,const char *path,const pn_style_t *style,const pn_frame_t *f){
     if(!c || !c->owner.pool || !source || !path || strlen(path)>=PN_ZIP_PATH_MAX || !style || !valid_frame(f) || pn_cancel_checkpoint()!=PN_OK)return;
     size_t size=pack(f,NULL);if(size>96u*1024u-sizeof(entry_t)-pn_alloc_overhead())return;

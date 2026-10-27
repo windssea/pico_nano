@@ -18,6 +18,8 @@ typedef struct {
     void *semantic_cache; ///< 本会话可选语义缓存，初始NULL，由close释放 / Optional session semantic cache, initially NULL, released by close
     void *semantic_cache_alt; ///< 可选预排的下一章模型，不替换当前章 / Optional next-chapter model for speculative prefetch; never replaces the current chapter
     const struct pn_xhtml_store *semantic_store; ///< 控制层可选持久缓存端口，寿命覆盖出版物 / Optional controller persistence port, outliving the publication
+    pn_status_t (*source_guard)(void *,const char *); ///< 消费语义缓存前完整验证当前资源块，NULL沿原整书证明 / Verify current resource blocks before semantic-cache consumption; NULL uses the original whole-source proof
+    void *source_guard_ctx; ///< 控制层来源验证上下文 / Controller source-verification context
 } pn_epub_t;
 typedef enum {PN_EPUB_OTHER=0,PN_EPUB_XHTML,PN_EPUB_NCX,PN_EPUB_IMAGE,PN_EPUB_CSS,PN_EPUB_FONT} pn_epub_media_t;
 typedef struct {
@@ -55,6 +57,8 @@ void pn_epub_close(pn_epub_t *epub);
 pn_status_t pn_epub_info(pn_epub_t *epub,pn_epub_info_t *out);
 /// 按OPF章节顺序复制资源身份，保留linear=no，越界EMPTY。/ Copy resource identity in OPF spine order, retaining linear=no; EMPTY beyond the end.
 pn_status_t pn_epub_spine(pn_epub_t *epub,size_t index,pn_epub_item_t *out);
+/// 只复制可信manifest条目，不触发资源加载。/ Copy a trusted manifest entry without loading its resource.
+pn_status_t pn_epub_manifest(pn_epub_t *,size_t,pn_epub_item_t *);
 /// 精确资源路径定位首个对应章节，非章节资源返回EMPTY，错误输出不变。
 /// Locate the first corresponding spine entry by exact resource path; EMPTY for non-spine resources, preserving output on errors.
 /// 命中复用完整验证后的内存路径索引，每次仍验证源；不增加索引数组或跳过原始ZIP/OPF/资源校验。/ Hits reuse the fully verified in-memory path index and still validate the source each time; no extra index array or skipped ZIP/OPF/resource checks.

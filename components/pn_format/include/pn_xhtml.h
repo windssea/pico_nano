@@ -118,3 +118,5 @@ pn_status_t pn_xhtml_anchor(pn_pool_t *pool,pn_epub_t *epub,const char *path,con
 pn_status_t pn_xhtml_order(pn_pool_t *,pn_epub_t *,const char *,const pn_xhtml_position_t *,const uint8_t salt[16],uint64_t *);
 /// 完整校验后选择目标（NULL为章末）前约8192可见事件的检查点；element为0表示章首，不排序locator。/ After full validation choose a checkpoint about 8192 visible events before target (NULL means chapter end); element zero means chapter start, never sort locators.
 pn_status_t pn_xhtml_window_start(pn_pool_t *,pn_epub_t *,const char *,const pn_xhtml_position_t *,const uint8_t salt[16],uint64_t *,uint64_t *,pn_xhtml_position_t *);
+/// 沿原XML/兼容路径核对章节实际链接的样式资源（包括manifest漏列项），不排版；完成EOF/CRC后成功。/ Check actually linked styles (including undeclared manifest entries) through the original XML/compatibility path, without layout; require complete EOF/CRC.
+pn_status_t pn_xhtml_source_dependencies(pn_pool_t *,pn_epub_t *,const char *,const uint8_t salt[16],pn_status_t (*check)(void *,const char *),void *);

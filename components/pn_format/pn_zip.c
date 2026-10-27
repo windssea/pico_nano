@@ -45,6 +45,13 @@ static uint16_t u16(const uint8_t *p){return (uint16_t)(p[0]|((uint16_t)p[1]<<8)
 static uint32_t u32(const uint8_t *p){return (uint32_t)u16(p)|((uint32_t)u16(p+2)<<16);}
 static pn_status_t current(archive_t *a){pn_status_t status=pn_cancel_checkpoint();return status!=PN_OK?status:a->source.validate?a->source.validate(a->source.ctx):PN_OK;}
 pn_status_t pn_zip_validate(pn_zip_t *zip){return !zip || !zip->impl?PN_INVALID:current(zip->impl);}
+pn_status_t pn_zip_source_range(pn_zip_t *zip,uint32_t index,uint64_t *offset,uint64_t *length){
+    if(!zip || !zip->impl || !offset || !length)return PN_INVALID;
+    archive_t *a=zip->impl;pn_status_t s=current(a);if(s!=PN_OK)return s;
+    if(index==UINT32_MAX){*offset=a->directory;*length=a->source.size-a->directory;return PN_OK;}
+    if(index>=a->count)return PN_EMPTY;
+    *offset=a->entries[index].local;*length=(uint64_t)a->entries[index].end-*offset;return PN_OK;
+}
 static pn_status_t read_at(archive_t *a,uint64_t off,uint8_t *out,size_t size){
     pn_status_t status=current(a);if(status!=PN_OK)return status;
     if(off>a->source.size || size>a->source.size-off)return PN_CORRUPT;

@@ -16,6 +16,8 @@ static bool is_epub, fail;
 static unsigned hits, stored, shown, loads;
 static unsigned boot_hits,boot_stored; ///< 启动结构与续读帧独立计数 / Startup structures counted separately from resume frames
 static unsigned directory_begins,identity_steps,reopen_identity_steps;
+static unsigned block_hits,block_stored,block_rebuilds;
+static unsigned index_binds,next_index_binds; ///< 首次NEXT不能额外载入整张页表 / First NEXT must not load a whole page index
 #ifdef PN_BOOTSTRAP_OBSERVER
 pn_status_t __real_pn_zip_scan_job_begin(pn_zip_job_t *,pn_pool_t *,const pn_text_source_t *);
 pn_status_t __wrap_pn_zip_scan_job_begin(pn_zip_job_t *j,pn_pool_t *p,const pn_text_source_t *s){directory_begins++;return __real_pn_zip_scan_job_begin(j,p,s);}
@@ -42,6 +44,10 @@ static void observe(void *ctx, const pn_profile_event_t *e) {
     if(!strcmp(e->phase,"bootstrap.hit"))boot_hits++;
     if(!strcmp(e->phase,"bootstrap.stored"))boot_stored++;
     if(!strcmp(e->phase,"epub.open.identity"))identity_steps++;
+    if(!strcmp(e->phase,"source.blocks.hit"))block_hits++;
+    if(!strcmp(e->phase,"source.blocks.stored"))block_stored++;
+    if(!strcmp(e->phase,"source.blocks.rebuild"))block_rebuilds++;
+    if(!strcmp(e->phase,"epub.index-bind"))index_binds++;
 }
 static pn_status_t present(void *ctx, const pn_frame_t *f, pn_refresh_t refresh) {
     (void)ctx;
@@ -105,7 +111,11 @@ int main(int argc, char **argv) {
         pn_media_lease_t proof={0};pn_text_file_t original={0};pn_text_source_t input={0};pn_book_id_t id;
         s=pn_media_attach(&proof_media,1);if(s==PN_OK)s=pn_media_acquire(&proof_media,PN_MEDIA_READ,&proof);
         if(s==PN_OK)s=pn_text_file_open(&original,&proof_media,&proof,argv[2],&input);
-        if(s==PN_OK)s=pn_text_file_identity_pooled(&pool,&input,&id);
+        const char *expected=getenv("PN_BLOCK_EXPECTED");
+        if(s==PN_OK && expected){
+            if(strlen(expected)!=64)s=PN_INVALID;
+            for(unsigned i=0;s==PN_OK && i<32;i++){unsigned v;if(sscanf(expected+2*i,"%2x",&v)!=1)s=PN_INVALID;else id.sha256[i]=(uint8_t)v;}
+        }else if(s==PN_OK)s=pn_text_file_identity_pooled(&pool,&input,&id);
         uint64_t size=input.size;if(original.handle)(void)pn_text_file_close(&original);if(proof.ticket)(void)pn_media_release(&proof_media,&proof);
         if(s==PN_OK && getenv("PN_BOOTSTRAP_EPOCH")){s=pn_media_detach(&proof_media);if(s==PN_OK)s=pn_media_attach(&proof_media,2);}
         pn_epub_open_job_t job={0};if(s==PN_OK)s=pn_epub_app_open_job_begin_trusted(&job,&pool,&proof_media,argv[2],argv[3],argv[4],44,0,&id,size);
@@ -120,6 +130,17 @@ int main(int argc, char **argv) {
     }else s=is_epub?pn_epub_app_open(&epub,&pool,argv[2],argv[3],argv[4],44,0):pn_reader_app_open(&txt,&pool,argv[2],argv[3],argv[4],44,0);
     if (s == PN_OK)
         s = step(PN_APP_OPEN, 1);
+    if(s==PN_OK && is_epub && getenv("PN_BLOCK_INTERLEAVE")){
+        // 先占分块表写资格，再让续读/预排轮转，抓住互等造成的永久BUSY。/ Start the block writer before resume/prefetch turns to catch writer-contention livelocks.
+        if(pn_epub_app_cache_idle(&epub,1)!=PN_BUSY || !pn_epub_app_cache_pending(&epub))s=PN_INVALID;
+        for(unsigned i=0;s==PN_OK && i<1000 && !block_stored;i++){
+            pn_status_t v=pn_epub_app_resume_cache_idle(&epub);
+            if(v==PN_EMPTY)v=pn_epub_app_cache_idle(&epub,1);
+            if(v!=PN_OK && v!=PN_BUSY && v!=PN_EMPTY){s=v;break;}
+            (void)pn_epub_app_prefetch(&epub);
+        }
+        if(!block_stored && s==PN_OK)s=PN_LIMIT;
+    }
     uint64_t opened = stamp() - begin - dump_ns, turned = 0;
     if (s == PN_OK && !strncmp(argv[6], "seed", 4)) {
         if (!strcmp(argv[6], "seed")) {
@@ -172,6 +193,10 @@ int main(int argc, char **argv) {
         s = is_epub ? pn_epub_app_style_apply(&epub, &style, 2, present, NULL)
                     : pn_reader_app_style_apply(&txt, &style, 2, present, NULL);
     } else if (s == PN_OK) {
+        if(is_epub && getenv("PN_RESUME_NEXT_PRIORITY")){
+            // 模拟正文刚恢复且邻页未排好；新写入不得占住其工作窗口。/ Model a just-restored page with an unfinished neighbor: a new write must not take its work window.
+            if(!pn_epub_app_prefetch_pending(&epub) || pn_epub_app_resume_cache_idle(&epub)!=PN_EMPTY || pn_epub_app_resume_cache_pending(&epub))s=PN_INVALID;
+        }
         // 留下部分后台编译，再由前台NEXT接管；不提交未完成的索引。/ Leave partial background compilation for foreground NEXT to take over without committing unfinished indexes.
         if (is_epub && getenv("PN_RESUME_INDEX_STEPS")) {
             pn_book_index_state_t index;
@@ -189,19 +214,22 @@ int main(int argc, char **argv) {
         }
         uint64_t before = dump_ns;
         begin = stamp();
+        unsigned binds_before=index_binds;
         if (s == PN_OK)
             s = step(PN_APP_NEXT, 3);
+        next_index_binds=index_binds-binds_before;
         turned = stamp() - begin - (dump_ns - before);
         if (s == PN_OK && strcmp(argv[6], "rapid"))
             s = step(PN_APP_PREVIOUS, 4);
         if (s == PN_OK && getenv("PN_RESUME_CONTINUE"))
             for (unsigned i = 0; i < 6 && s == PN_OK; i++) s = step(PN_APP_NEXT, 5);
     }
+    bool reimported=is_epub && pn_epub_app_source_reimported(&epub);
     pn_status_t closed = is_epub ? pn_epub_app_close(&epub, 5) : pn_reader_app_close(&txt, 5);
     if (s == PN_OK)
         s = closed;
     printf("{\"status\":%d,\"open_ns\":%llu,\"next_ns\":%llu,\"hits\":%u,\"stored\":%u,\"boot_hits\":%u,\"boot_stored\":%u,\"directory_begins\":%u,\"identity_steps\":%u,\"reopen_identity_steps\":%u,\"peak\":%zu,\"limit\":%zu,\"used\":%zu,\"loads\":%u,"
-           "\"live\":%zu}\n",
-           s, (unsigned long long)opened, (unsigned long long)turned, hits, stored, boot_hits,boot_stored,directory_begins,identity_steps,reopen_identity_steps,pool.peak, pool.limit, pool.used, loads, pool.live);
+           "\"live\":%zu,\"block_hits\":%u,\"block_stored\":%u,\"block_rebuilds\":%u,\"reimported\":%d,\"next_index_binds\":%u}\n",
+           s, (unsigned long long)opened, (unsigned long long)turned, hits, stored, boot_hits,boot_stored,directory_begins,identity_steps,reopen_identity_steps,pool.peak, pool.limit, pool.used, loads, pool.live,block_hits,block_stored,block_rebuilds,(int)reimported,next_index_binds);
     return s == PN_OK && !pool.used && !pool.live ? 0 : 1;
 }

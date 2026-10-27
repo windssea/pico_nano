@@ -411,6 +411,13 @@ static pn_status_t collect_sheets(sheet_t *sheet,const char *path,const uint8_t 
     if(status==PN_OK){pn_xml_input_t input={&stream,pn_epub_chapter_read};pn_xml_hooks_t hooks={collect_start,collect_end,collect_text};status=body_xml(sheet,sheet->pool,&input,&hooks,c,salt);}
     pn_free(c->buffer);pn_free(c);pn_epub_chapter_close(&stream);return status;
 }
+pn_status_t pn_xhtml_source_dependencies(pn_pool_t *pool,pn_epub_t *epub,const char *path,const uint8_t salt[16],pn_status_t (*check)(void *,const char *),void *ctx){
+    if(!pool || !epub || !path || !salt || !check)return PN_INVALID;
+    sheet_t sheet={.pool=pool,.epub=epub,.load=check,.load_ctx=ctx};
+    pn_status_t s=collect_sheets(&sheet,path,salt);bool retry=s==PN_CORRUPT && sheet.syntax;sheet_close(&sheet);
+    if(retry){sheet=(sheet_t){.pool=pool,.epub=epub,.load=check,.load_ctx=ctx,.compat=true};s=collect_sheets(&sheet,path,salt);sheet_close(&sheet);}
+    return s;
+}
 typedef struct {
     parser_t *body;collect_t *collect;pn_status_t body_status;bool body_seen,late_head; ///< 暂定正文与样式收集共享XML；后置head须重放 / Provisional body and styles share XML; late heads require replay
 } combined_t;
@@ -689,6 +696,7 @@ static pn_status_t model_build(pn_pool_t *pool,pn_epub_t *epub,model_t *m,const 
 }
 static pn_status_t pn_xhtml_parse_impl(pn_pool_t *pool,pn_epub_t *epub,const char *path,const uint8_t salt[16],const pn_xhtml_position_t *focus,pn_xhtml_sink_t sink,pn_xhtml_done_t done,pn_xhtml_restart_t restart,void *ctx,pn_xhtml_stats_t *stats){
     if(!pool || !epub || !path || !*path || strlen(path)>=PN_ZIP_PATH_MAX || !salt || !stats)return PN_INVALID;
+    if(epub->source_guard){pn_status_t guarded=epub->source_guard(epub->source_guard_ctx,path);if(guarded!=PN_OK)return guarded;}
     size_t ordinal;pn_status_t status=pn_epub_spine_find(epub,path,&ordinal);if(status!=PN_OK)return status;
     // 前台语义消费优先，不因后台编码的busy标志退回完整解析。/ Foreground semantic consumption wins instead of falling back to a full parse due to background encoding's busy flag.
     pn_xhtml_cache_abort(epub);

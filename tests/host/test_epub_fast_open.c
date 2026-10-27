@@ -1,8 +1,8 @@
 /*
  * SPDX-FileCopyrightText: 2026 pico_nano contributors
  * SPDX-License-Identifier: Apache-2.0
- * 中文：EPUB快开：跳过首屏前整书摘要后首屏与完整打开逐字节一致（含插图），后台复核通过；身份不符报告内容已变，大小不符走完整路径。
- * English: EPUB fast open: skipping the pre-screen whole-book hash yields a first screen identical to a full open (including images) and background verification passes; a wrong identity reports changed content and a size mismatch takes the complete path.
+ * 中文：无可信块表时开书完成整源校验，首屏与完整打开逐字节一致；旧身份不符须完整导入，字体后台检查保持。
+ * English: without an authenticated block table, opening completes full-source verification with identical pixels; stale identities require complete import and font background checks remain.
  */
 #define _POSIX_C_SOURCE 200809L
 #include "pn_epub_app.h"
@@ -42,14 +42,14 @@ int main(int argc,char **argv){
     FILE *f=fopen(book,"rb");assert(f && !fseek(f,0,SEEK_END));long size=ftell(f);fclose(f);
     assert(pn_epub_app_open_job_begin(&job,&pool,NULL,book,NULL,state,44,now++)==PN_OK && finish(&job,&app)==PN_OK && !pn_epub_app_verify_pending(&app));
     assert(pn_epub_app_step(&app,PN_APP_OPEN,now++,capture,full)==PN_OK && pn_epub_app_identity(&app,&id)==PN_OK && pn_epub_app_close(&app,now++)==PN_OK);
-    assert(pn_epub_app_open_job_begin_trusted(&job,&pool,NULL,book,NULL,state,44,now++,&id,(uint64_t)size)==PN_OK && finish(&job,&app)==PN_OK && pn_epub_app_verify_pending(&app));
+    assert(pn_epub_app_open_job_begin_trusted(&job,&pool,NULL,book,NULL,state,44,now++,&id,(uint64_t)size)==PN_OK && finish(&job,&app)==PN_OK && !pn_epub_app_verify_pending(&app));
     assert(pn_epub_app_step(&app,PN_APP_OPEN,now++,capture,fast)==PN_OK && !memcmp(full,fast,sizeof full));
     pn_status_t s;unsigned steps=0;while((s=pn_epub_app_verify_step(&app))==PN_BUSY)steps++;
-    assert(s==PN_OK && !pn_epub_app_verify_pending(&app) && pn_epub_app_verify_step(&app)==PN_EMPTY && pn_epub_app_close(&app,now++)==PN_OK);
+    assert(s==PN_EMPTY && !pn_epub_app_verify_pending(&app) && pn_epub_app_close(&app,now++)==PN_OK);
     pn_book_id_t wrong=id;wrong.sha256[31]^=0x80;
     assert(pn_epub_app_open_job_begin_trusted(&job,&pool,NULL,book,NULL,state,44,now++,&wrong,(uint64_t)size)==PN_OK && finish(&job,&app)==PN_OK);
     while((s=pn_epub_app_verify_step(&app))==PN_BUSY){}
-    assert(s==PN_STALE_JOB && pn_epub_app_close(&app,now++)==PN_OK);
+    pn_book_id_t actual;assert(s==PN_EMPTY && pn_epub_app_source_reimported(&app) && pn_epub_app_identity(&app,&actual)==PN_OK && !memcmp(actual.sha256,id.sha256,32) && pn_epub_app_close(&app,now++)==PN_OK);
     assert(pn_epub_app_open_job_begin_trusted(&job,&pool,NULL,book,NULL,state,44,now++,&id,(uint64_t)size+1)==PN_OK && finish(&job,&app)==PN_OK && !pn_epub_app_verify_pending(&app));
     assert(pn_epub_app_close(&app,now++)==PN_OK && pool.used==0 && pool.live==0);
     // 全局外置阅读字体：快开不在首屏前整读字体（故意错的字体摘要也能打开），后台先复核字体并报告不符；完整打开仍校验并拒用该字体。

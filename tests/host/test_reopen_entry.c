@@ -30,18 +30,20 @@ int main(int argc,char **argv){
 #ifdef PN_TEST_IMMUTABLE_FILE
     assert(memo_hits==1 && !pn_epub_app_verify_pending(&app));
 #else
-    assert(!memo_hits && pn_epub_app_verify_pending(&app));
+    assert(!memo_hits && !pn_epub_app_verify_pending(&app));
 #endif
     for(unsigned n=0;pn_epub_app_verify_pending(&app);n++){assert(n<10000);pn_status_t s=pn_epub_app_verify_step(&app);assert(s==PN_OK || s==PN_BUSY);}
     assert(pn_epub_app_discard_unshown(&app)==PN_OK && !pool.used && !pn_media_active(&media));
 #ifdef PN_TEST_IMMUTABLE_FILE
     pn_book_id_t wrong=id;wrong.sha256[0]^=1;
-    assert(open_trusted(&job,&app,&pool,&media,argv,&wrong,size)==PN_STALE_JOB && !app.impl);
+    assert(open_trusted(&job,&app,&pool,&media,argv,&wrong,size)==PN_OK && pn_epub_app_source_reimported(&app));
+    pn_book_id_t actual;assert(pn_epub_app_identity(&app,&actual)==PN_OK && !memcmp(actual.sha256,id.sha256,32));
+    assert(pn_epub_app_discard_unshown(&app)==PN_OK);
     assert(pn_epub_app_open_job_close(&job)==PN_OK && !pool.used && !pn_media_active(&media));
 #endif
     // 换代后即使路径、长度、expected完全相同也必须重新完整复核。/ A new epoch requires full verification even with identical path, size and expected digest.
     assert(pn_media_detach(&media)==PN_OK && pn_media_attach(&media,2)==PN_OK);unsigned before=memo_hits;
-    assert(open_trusted(&job,&app,&pool,&media,argv,&id,size)==PN_OK && memo_hits==before && pn_epub_app_verify_pending(&app));
+    assert(open_trusted(&job,&app,&pool,&media,argv,&id,size)==PN_OK && memo_hits==before && !pn_epub_app_verify_pending(&app));
     for(unsigned n=0;pn_epub_app_verify_pending(&app);n++){assert(n<10000);pn_status_t s=pn_epub_app_verify_step(&app);assert(s==PN_OK || s==PN_BUSY);}
     assert(pn_epub_app_discard_unshown(&app)==PN_OK && !pool.used && !pool.live && !pn_media_active(&media));
     puts("reopen source proof, epoch invalidation and cleanup passed");return 0;

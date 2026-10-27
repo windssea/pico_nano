@@ -124,6 +124,26 @@ static pn_status_t read_pooled(pn_text_file_t *file,uint64_t offset,uint8_t *out
     }
     pn_cache_unpin(&file->cache_owner);return status;
 }
+static pn_status_t read_at(void *ctx,uint64_t offset,uint8_t *out,size_t cap,size_t *n);
+pn_status_t pn_text_file_read_uncached(const pn_text_source_t *source,uint64_t offset,uint8_t *out,size_t cap,size_t *n){
+    if(!source || !out || !n)return PN_INVALID;
+    if(source->read_at!=read_at || source->validate!=validate || !source->ctx)return PN_UNSUPPORTED;
+    pn_text_file_t *file=source->ctx;pn_status_t s=validate(file);if(s!=PN_OK)return s;
+    if(offset>file->size)return PN_INVALID;
+    if(cap>file->size-offset)cap=(size_t)(file->size-offset);
+#if !defined(ESP_PLATFORM) && !defined(PN_TEST_IMMUTABLE_FILE)
+    // 主机允许两次调用之间改文件，连stdio预读也不能作为校验依据。/ Hosts allow changes between calls; even stdio read-ahead cannot serve as verification evidence.
+    struct stat handle,path;
+    if(fstat(fileno(file->handle),&handle) || stat(file->path,&path) || handle.st_size<0 || (uint64_t)handle.st_size!=file->size || path.st_size!=handle.st_size || path.st_dev!=handle.st_dev || path.st_ino!=handle.st_ino)return PN_STALE_JOB;
+    if(fflush(file->handle))return PN_IO;
+    file->read_position_known=false;
+#endif
+    size_t got=0;s=read_direct(file,offset,out,cap,&got);
+    if(s==PN_OK)s=validate(file);
+    if(s==PN_OK && cap && !got)s=PN_IO;
+    if(s==PN_OK)*n=got;
+    return s;
+}
 static pn_status_t read_at(void *ctx,uint64_t offset,uint8_t *out,size_t cap,size_t *n) {
     pn_status_t cancelled=pn_cancel_checkpoint();if(cancelled!=PN_OK)return cancelled;
     pn_text_file_t *file=ctx;
@@ -233,6 +253,9 @@ static memo_t *memo_find(const pn_text_file_t *f,bool exact){
         if(!m->used || m->media!=f->media || strcmp(m->path,f->path))continue;
         if(!exact || (m->media_id==f->media->media_id && m->epoch==f->lease.epoch && m->writes==f->media->writes && m->size==f->size))return m;}
     return NULL;
+}
+bool pn_text_file_immutable(const pn_text_source_t *source){
+    return source && source->read_at==read_at && source->validate==validate && source->ctx && memo_usable(source->ctx);
 }
 static void memo_store(const pn_text_file_t *f,const pn_book_id_t *id){
     if(!memo_usable(f) || strlen(f->path)>=PN_TEXT_FILE_PATH_MAX)return;

@@ -1,0 +1,448 @@
+{
+  "schema": 1,
+  "date": "2026-10-27",
+  "kind": "authenticated source blocks; final device sample versus saved official-source diagnostic baseline",
+  "device": {
+    "board": "RDP-G01-W / E0470A01",
+    "chip": "ESP32-S3 rev0.2",
+    "port": "COM3",
+    "idf": "v6.1",
+    "native_pixels": [
+      684,
+      1216
+    ],
+    "gray_levels": 16
+  },
+  "baseline_evidence": "reading-device-official107-20261027.json",
+  "baseline_firmware": {
+    "role": "baseline",
+    "source": "f9e8c388e06ad25a90fb46b33d8259b8af670d75",
+    "bytes": 5501312,
+    "sha256": "eec63513e2b286cdce29009bb0f73025dcf11864cc1b9dcaad51b5a0bd4756f5",
+    "version": "1.0.7-diag",
+    "elf_sha256": "ea9de3acfe9eb67a3aaf81eb4f8e42c6b6c81a0a6580d2647bf387f4139c83f7",
+    "slot_free": 790144
+  },
+  "final_firmware": {
+    "base_source": "1f38b1de05e48d78cdf7c7db04b785656c751e57",
+    "version": "1.0.7-diag",
+    "elf_sha256": "a30b816e153e71b6bf4aa8038f17a4996a935c6cbc37b28e2f606046c093ba9c",
+    "bytes": 5542288,
+    "sha256": "a702b0308a6d8d46a3cecf40dcc1c9bc4c1f7175b9ed1ab0e65b956de8ee47ff",
+    "slot_free": 749168,
+    "slot_free_percent": 11.907704671223957
+  },
+  "source_snapshot": {
+    "base": "1f38b1de05e48d78cdf7c7db04b785656c751e57",
+    "manifest_sha256": "9b484bc072a557d30d1f51e4bc122a6addc7c062c5b30cbd804ff8fb4bc6c56f",
+    "changed_product_files_sha256": {
+      "cmake/pn_host.cmake": "b04790dcce104029add10f4e6b5aac81e54fd4b6cbf33a4ebe64fca9c7c7f065",
+      "components/pn_format/include/pn_epub.h": "fddc81a240f4344d02ae460e8a9c2d7b594528d63a8464110d0fb30faeafa837",
+      "components/pn_format/include/pn_xhtml.h": "2943cbc64277fe5598054d2f55bdcc65b8e443877845acd16a2dc0586ee85c53",
+      "components/pn_format/include/pn_zip.h": "fe0fab88f980e79545f92821ee5355560374b8475ba12716a6757a157cc19684",
+      "components/pn_format/pn_epub.c": "080d39b7cecdccc87e6d79842e0ae9f7ae074b586899061bec575b9c3f253067",
+      "components/pn_format/pn_xhtml.c": "b56f02681bc2d9229c624c27f0e1edc8eb5d31f0012539ecbed1332abfaf9f8c",
+      "components/pn_format/pn_xhtml_job.inc": "7274ed0b5cd914273f1fe8696c95bd561e46a311f155f89b0ca360b48dc19a04",
+      "components/pn_format/pn_zip.c": "38a47cdac61baf3d82fa4db883616e0f1070c5d2bff60290626c94ef11c861d2",
+      "components/pn_reader/CMakeLists.txt": "befb8304bf6c821c5ce1066e4ea51bfa761ed3398d5515cb51409dbf6113ad20",
+      "components/pn_reader/include/pn_epub_app.h": "45fddfd6dbfcc5f24fc4e83b0bc1ff8de774c754cd0f364f13025e627ef2cc57",
+      "components/pn_reader/include/pn_epub_image_cache.h": "48251e6881dde2b654a6f125912257cac79a922e87aad762b4f30b6d7bb0b0de",
+      "components/pn_reader/pn_epub_app.c": "ed4169b1f1ea928b10f23fdb4d09115d5b5f82eeadb4ccbf95196c6d94629fbf",
+      "components/pn_reader/pn_epub_image_cache.c": "492a496610a4c62da77218e8a5b74cde078cdaebbd6f9b78274fd8ab91d9bcff",
+      "components/pn_reader/pn_hot_session.c": "5085c8b3f4cd6f78f5edf75ffa861531923a184d42b5cedc19ea6c824380d652",
+      "components/pn_reader/pn_reading_store.c": "aad5036bb3bc739121ff115366b82cffc49ac35066e50e76190b48720b13d32e",
+      "components/pn_reader/pn_resume_epub.inc": "141e98b0da0f0e9333f28da1d29052ef3e485a69b434451fb021dc86706dd26a",
+      "components/pn_text/include/pn_text_file.h": "bc254fd48cd7f5386b0f0d54c834936e29635a94a83c84814f6f6a6b3dd7c073",
+      "components/pn_text/pn_text_file.c": "b142d000477c2d42cc19d20b08676c0a17e616b646435c571bf9f5bf234281e5",
+      "main/app_main.c": "6f2dd7dc68bf9a5cf0632eec773d5018858b716fe766655a9cde4d264831e378",
+      "components/pn_reader/include/pn_source_blocks.h": "664cd82e8d61c5b88e7fa7643b2bed20cc1a4db595d439554ce8bcc1e1315a38",
+      "components/pn_reader/pn_source_blocks.c": "7acbb612f666ab350399fd064fcec6e03a8995729564a7eeca11f89b0c66df21"
+    }
+  },
+  "sdkconfig": {
+    "identical": true,
+    "sha256": "16a7dd843aee2fb70f3aa4d8db12139b0069fb79715d5f16428fbc6b6bc8b522",
+    "profile": true,
+    "test_console": true,
+    "no_auto_lock": true,
+    "no_real_lock_sleep": true
+  },
+  "authorization": "Implement imported-book block verification and flash/debug hardware; reuse saved baseline, no formal release.",
+  "protocol": {
+    "samples_per_book_per_firmware": 1,
+    "order_each_side": [
+      "shao",
+      "ming"
+    ],
+    "reset": "Host RTS hard reset before each measured book, after OTA VALID qualification. Not physical power cycling.",
+    "home": "Wait successful home display/status, blank-area taps 10,10 separated by 400ms; wait 200ms; tap second recent 300,890.",
+    "next": "First right key at reader-ready receipt plus 3 host seconds.",
+    "prev": "Left key one second after NEXT request/display wait completes.",
+    "screenshot": "Capture panel-reference digital image only after NEXT/PREV; compare returned original page.",
+    "timing": "Device synthetic-input start to successful display job completion; ready receipt separately reported. Not optical, physical touch, or host roundtrip.",
+    "cache": "Final books have authenticated block tables established by one initial full-source import. Baseline has no block tables. Shao baseline resume_hits=0, final OPEN/PREV hits=2; Ming baseline OPEN/NEXT/PREV hits=3, final OPEN/PREV hits=2 with NEXT served by warmed RAM. Existing caches retained, not restored to byte-identical snapshots.",
+    "earlier_failed_checks": "One Shao check exposed synchronous optional index binding; one Ming check exposed optional writer admission blocking input. Both were rejected and preserved. No baseline repeats. Final a30b816e1 sampled once per book, Shao then Ming."
+  },
+  "verification_model": {
+    "block_bytes": 16384,
+    "max_blocks": 4096,
+    "first_import": "Full original-file SHA, capturing every block hash from the same sequential read; no second source scan.",
+    "later_open": "Authenticate the complete table against the internal root, then fully hash used blocks and cache dependency resources before consumption. Never register a whole-file proof.",
+    "unread_corruption": "May be detected only when the corresponding block is read; not a new whole-file verification before first body.",
+    "fallback": "Missing/corrupt table or root, over-size source, or optional OOM falls back to complete original-source verification. Opening detects changed used bytes and reimports completely before accepting a new identity."
+  },
+  "samples": [
+    {
+      "role": "baseline",
+      "book_expected": "shao",
+      "open_body_frame_ms": 12593,
+      "open_ready_ms": 12613,
+      "first_feedback_ms": 1358,
+      "opening_frames": [
+        {
+          "start": 10012,
+          "end": 10688,
+          "ms": 676,
+          "status": 0
+        },
+        {
+          "start": 21185,
+          "end": 21923,
+          "ms": 738,
+          "status": 0
+        }
+      ],
+      "bootstrap_hits": 1,
+      "resume_hits": 0,
+      "source_memo_hits": 0,
+      "next_ms": 1103,
+      "prev_ms": 1046,
+      "status": "status t=28791 view=0003000f body=1 paused=0 events=23 touch_reads=643 touch_errors=0 gesture=0 dropped=0"
+    },
+    {
+      "role": "final",
+      "book_expected": "shao",
+      "open_body_frame_ms": 2894,
+      "open_ready_ms": 2925,
+      "first_feedback_ms": 1595,
+      "opening_frames": [
+        {
+          "start": 9972,
+          "end": 10756,
+          "ms": 784,
+          "status": 0
+        },
+        {
+          "start": 11400,
+          "end": 12055,
+          "ms": 655,
+          "status": 0
+        }
+      ],
+      "bootstrap_hits": 1,
+      "resume_hits": 2,
+      "source_memo_hits": 0,
+      "next_ms": 1178,
+      "prev_ms": 1437,
+      "status": "status t=19431 view=0003000f body=1 paused=0 events=23 touch_reads=371 touch_errors=0 gesture=0 dropped=0"
+    },
+    {
+      "role": "baseline",
+      "book_expected": "ming",
+      "open_body_frame_ms": 10105,
+      "open_ready_ms": 10121,
+      "first_feedback_ms": 1417,
+      "opening_frames": [
+        {
+          "start": 10011,
+          "end": 10684,
+          "ms": 673,
+          "status": 0
+        },
+        {
+          "start": 18659,
+          "end": 19372,
+          "ms": 713,
+          "status": 0
+        }
+      ],
+      "bootstrap_hits": 1,
+      "resume_hits": 3,
+      "source_memo_hits": 0,
+      "next_ms": 1668,
+      "prev_ms": 1481,
+      "status": "status t=27551 view=0003000f body=1 paused=0 events=23 touch_reads=606 touch_errors=0 gesture=0 dropped=0"
+    },
+    {
+      "role": "final",
+      "book_expected": "ming",
+      "open_body_frame_ms": 3306,
+      "open_ready_ms": 3319,
+      "first_feedback_ms": 2093,
+      "opening_frames": [
+        {
+          "start": 10637,
+          "end": 11382,
+          "ms": 745,
+          "status": 0
+        },
+        {
+          "start": 11939,
+          "end": 12595,
+          "ms": 656,
+          "status": 0
+        }
+      ],
+      "bootstrap_hits": 1,
+      "resume_hits": 2,
+      "source_memo_hits": 0,
+      "next_ms": 1175,
+      "prev_ms": 1434,
+      "status": "status t=20077 view=0003000f body=1 paused=0 events=23 touch_reads=387 touch_errors=0 gesture=0 dropped=0"
+    }
+  ],
+  "images": [
+    {
+      "book": "shao",
+      "excluded_top_rows": 32,
+      "equal": true,
+      "changed_pixels": 0,
+      "baseline_pixel_sha256": "9ed0e37a65e95e8ce60b5e06ec5d4652bef52a6b85c0b1b07aea2455cf1b1e09",
+      "final_pixel_sha256": "9ed0e37a65e95e8ce60b5e06ec5d4652bef52a6b85c0b1b07aea2455cf1b1e09"
+    },
+    {
+      "book": "ming",
+      "excluded_top_rows": 32,
+      "equal": true,
+      "changed_pixels": 0,
+      "baseline_pixel_sha256": "e4034595445289ffcb952da3811de9bdb7bff62be5e6d213416575991809efba",
+      "final_pixel_sha256": "e4034595445289ffcb952da3811de9bdb7bff62be5e6d213416575991809efba"
+    }
+  ],
+  "serial": {
+    "observed_pool_peak": 3580835,
+    "pool_present_limits": [
+      6217360
+    ],
+    "panic_assert_lines": [],
+    "sd_init_failure_lines": [],
+    "heap_lines": [
+      "1793074264.533 PNT 741383 heap internal=78459 internal_largest=34816 internal_min=37384 psram=3201828 psram_largest=2359296 psram_min=2783668"
+    ],
+    "version_lines": [
+      "1793074145.839 PNT 741361 ok version product=1.0.7 app=1.0.7-diag idf=v6.1 elf=a30b816e1",
+      "1793074264.949 PNT 741385 ok version product=1.0.7 app=1.0.7-diag idf=v6.1 elf=a30b816e1"
+    ],
+    "display_error_lines": []
+  },
+  "source_profiles": {
+    "shao": {
+      "opening_lines": [
+        "1793074157.147 I (10798) pico_nano: profile phase=source.blocks.hit elapsed_us=0 status=0 begin=880395 end=880395 peak=880395 attempts=0 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+        "1793074157.147 I (10798) pico_nano: profile phase=source.blocks.load elapsed_us=140069 status=0 begin=856963 end=880395 peak=880395 attempts=2 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+        "1793074157.348 I (11134) pico_nano: profile phase=epub.open.directory elapsed_us=475655 status=2 begin=856963 end=960993 peak=968769 attempts=506 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+        "1793074157.565 I (11189) pico_nano: profile phase=epub.open.metadata elapsed_us=54408 status=2 begin=960993 end=965913 peak=965913 attempts=2 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+        "1793074157.767 I (11439) pico_nano: profile phase=source.blocks.dependencies elapsed_us=15187 status=0 begin=2072978 end=2083763 peak=2127915 attempts=46 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+        "1793074158.644 I (12333) pico_nano: profile phase=resume.blocks elapsed_us=920149 status=0 begin=2072978 end=2104124 peak=2127915 attempts=240 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+        "1793074158.644 I (12333) pico_nano: profile phase=epub.open.sources elapsed_us=920496 status=0 begin=2072978 end=2104124 peak=2127915 attempts=240 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+        "1793074158.644 I (12333) pico_nano: profile phase=epub.open.trusted-wall elapsed_us=1680166 status=0 begin=2104124 end=2104124 peak=2104124 attempts=0 bytes=938359 reads=230 seeks=9 hits=15 backend=device",
+        "1793074158.644 I (12333) pico_nano: profile phase=epub.open.wait elapsed_us=76460 status=0 begin=2104124 end=2104124 peak=2104124 attempts=0 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+        "1793074158.644 I (12333) pico_nano: profile phase=epub.open.max-step elapsed_us=920501 status=0 begin=2104124 end=2104124 peak=2104124 attempts=0 bytes=0 reads=0 seeks=0 hits=0 backend=device"
+      ],
+      "identity_steps": 0,
+      "verified_block_count": 57,
+      "block_verify_total_us": 786841
+    },
+    "ming": {
+      "opening_lines": [
+        "1793074208.446 I (10946) pico_nano: profile phase=source.blocks.hit elapsed_us=0 status=0 begin=879144 end=879144 peak=879144 attempts=0 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+        "1793074208.446 I (10946) pico_nano: profile phase=source.blocks.load elapsed_us=149706 status=0 begin=856384 end=879144 peak=879144 attempts=2 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+        "1793074209.304 I (11837) pico_nano: profile phase=epub.open.directory elapsed_us=1040604 status=2 begin=856384 end=1144098 peak=1151874 attempts=1828 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+        "1793074209.585 I (12073) pico_nano: profile phase=epub.open.metadata elapsed_us=144241 status=2 begin=1598014 end=1613614 peak=1613614 attempts=2 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+        "1793074210.233 I (12721) pico_nano: profile phase=source.blocks.dependencies elapsed_us=16278 status=0 begin=1853912 end=1866470 peak=1910622 attempts=47 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+        "1793074210.415 I (12867) pico_nano: profile phase=resume.blocks elapsed_us=172418 status=0 begin=1853912 end=1896496 peak=1914882 attempts=412 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+        "1793074210.415 I (12867) pico_nano: profile phase=epub.open.sources elapsed_us=172759 status=0 begin=1853912 end=1896496 peak=1914882 attempts=412 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+        "1793074210.415 I (12867) pico_nano: profile phase=epub.open.trusted-wall elapsed_us=2077724 status=0 begin=1896496 end=1896496 peak=1896496 attempts=0 bytes=234848 reads=59 seeks=10 hits=9 backend=device",
+        "1793074210.415 I (12867) pico_nano: profile phase=epub.open.wait elapsed_us=95557 status=0 begin=1896496 end=1896496 peak=1896496 attempts=0 bytes=0 reads=0 seeks=0 hits=0 backend=device",
+        "1793074210.415 I (12867) pico_nano: profile phase=epub.open.max-step elapsed_us=1040612 status=0 begin=1896496 end=1896496 peak=1896496 attempts=0 bytes=0 reads=0 seeks=0 hits=0 backend=device"
+      ],
+      "identity_steps": 0,
+      "verified_block_count": 14,
+      "block_verify_total_us": 108794
+    }
+  },
+  "limits": {
+    "application_pool_hard_max_bytes": 6291456,
+    "class_limits_changed": false,
+    "gray_levels_changed": false,
+    "tf_resume_directory_quota_bytes": 16777216,
+    "internal_roots_quota_bytes": 16384,
+    "observed_peak_is_matched_comparison": false
+  },
+  "flash": {
+    "application_slot": "ota_1",
+    "application_offset": "0x620000",
+    "write_chunks_and_whole_digest_verified": true,
+    "before": {
+      "original_ota0_full_partition_md5": "d0606f9671b5df4d60574c9cdf436fed",
+      "selectors": [
+        {
+          "offset": "0xf000",
+          "sequence": 17,
+          "state": 2,
+          "slot": 0
+        },
+        {
+          "offset": "0x10000",
+          "sequence": 20,
+          "state": 2,
+          "slot": 1
+        }
+      ],
+      "unchanged_protection": {
+        "boot": true,
+        "partition": true,
+        "nvs": true,
+        "phy_and_gap": true
+      }
+    },
+    "after": {
+      "original_ota0_full_partition_md5": "d0606f9671b5df4d60574c9cdf436fed",
+      "selectors": [
+        {
+          "offset": "0xf000",
+          "sequence": 17,
+          "state": 2,
+          "slot": 0
+        },
+        {
+          "offset": "0x10000",
+          "sequence": 20,
+          "state": 2,
+          "slot": 1
+        }
+      ],
+      "unchanged_protection": {
+        "boot": true,
+        "partition": true,
+        "nvs": true,
+        "phy_and_gap": true
+      }
+    },
+    "no_writes_to": [
+      "ota_0",
+      "bootloader",
+      "partition table",
+      "NVS",
+      "PHY",
+      "OTA selector"
+    ],
+    "whole_flash_backup": false
+  },
+  "final_status": {
+    "heap": "ok heap-pending",
+    "status": "status t=65872 view=00030010 body=0 paused=0 events=28 touch_reads=1736 touch_errors=0 gesture=0 dropped=0",
+    "version": "ok version product=1.0.7 app=1.0.7-diag idf=v6.1 elf=a30b816e1"
+  },
+  "software": {
+    "sanitizers": "ASan/UBSan, strict build",
+    "related_tests": "15 relevant cases passed, with three old idle-write assumptions corrected to exercise explicit exit checkpoints and rerun; final quota/cancel change passed five related cases.",
+    "coverage": [
+      "full table/root authentication and arbitrary byte corruption",
+      "missing/truncated/backup/tmp recovery",
+      "same-size same-mtime replacement and undeclared CSS change",
+      "multi-chapter and large single-chapter exact frames",
+      "next packet missing with incomplete prefetch, no optional whole-index bind on NEXT",
+      "current/next writer interleaving and immediate exit/lock checkpoint",
+      "OOM/space/sync/cancel/media loss and zero retained allocations"
+    ],
+    "simulator": "Visible SDL rebuilt and restarted with final shared core; not panel evidence"
+  },
+  "limitations": [
+    "Single device sample, no P95/worst-case claim.",
+    "RTS reset with a known TF and cached books, not first-ever opening or physical power loss.",
+    "Diagnostic configuration disables real lock sleep; no long-sleep or power validation.",
+    "Digital returned-page equality excludes top 32 rows; no new optical ghosting confirmation and no NEXT screenshot in this protocol.",
+    "Shao first NEXT is 75 ms slower end-to-end; its display job grew 78 ms while pre-display latency fell 3 ms. Shao PREV is 391 ms slower, including resume-packet reading and longer display job.",
+    "First loading feedback is slower in both final samples.",
+    "Five-second quiet admission reduces rapid-navigation collisions with optional writes, but cannot preempt an individual filesystem capacity/sync call."
+  ],
+  "raw_local_roots": [
+    "build-dev/device-open-20261027",
+    "build-dev/source-blocks-20261027",
+    "build-dev/source-blocks-final-20261027",
+    "build-dev/source-blocks-device-20261027"
+  ],
+  "raw_artifacts": [
+    {
+      "local_path": "build-dev/source-blocks-device-20261027/image.json",
+      "bytes": 350,
+      "sha256": "22d4e02b4a5b18f421b447b0b4fe6d71530a8aa5b6fed868552d082efebb93f5"
+    },
+    {
+      "local_path": "build-dev/source-blocks-device-20261027/source-files.json",
+      "bytes": 329567,
+      "sha256": "9b484bc072a557d30d1f51e4bc122a6addc7c062c5b30cbd804ff8fb4bc6c56f"
+    },
+    {
+      "local_path": "build-dev/source-blocks-device-20261027/source.patch",
+      "bytes": 104219,
+      "sha256": "fed5277e874241a2de0f668f46b24e2dbe139e18a7be7a10f3e4a7c1430da9b6"
+    },
+    {
+      "local_path": "build-dev/source-blocks-device-20261027/analysis.json",
+      "bytes": 8543,
+      "sha256": "a86bf90c18458a5aa162261a67c79119647d98fde026beedbf797cdb239fdbce"
+    },
+    {
+      "local_path": "build-dev/source-blocks-device-20261027/final-health.json",
+      "bytes": 438,
+      "sha256": "ec0eb6a7a24487a60f63b043e6178812071ee0e048e56b7958d925459c5a2549"
+    },
+    {
+      "local_path": "build-dev/source-blocks-device-20261027/after/serial.log",
+      "bytes": 1992808,
+      "sha256": "c19c6847b34225678ae4f60656f2d5e8f1f6cd3ad975d7b6bcf068add45655d5"
+    },
+    {
+      "local_path": "build-dev/source-blocks-device-20261027/after/shao.json",
+      "bytes": 53512,
+      "sha256": "2d1f583d2d4511a885fbc5246d2aca0df190970196431e56b2a16b8addd71c50"
+    },
+    {
+      "local_path": "build-dev/source-blocks-device-20261027/after/ming.json",
+      "bytes": 42861,
+      "sha256": "927d59eb9112b6250e7414d52a2f1f9a04496c6789c7b69037b51498a56b0713"
+    },
+    {
+      "local_path": "build-dev/source-blocks-device-20261027/after/shao-returned.png",
+      "bytes": 55649,
+      "sha256": "acbd8f1da344eac19b50dc615bdc721de6a6990a6c7168e1658c28dcbc7f4eab"
+    },
+    {
+      "local_path": "build-dev/source-blocks-device-20261027/after/ming-returned.png",
+      "bytes": 47617,
+      "sha256": "9b5cdc78cffa2fcba82a199f5c4da2df02d31d325abb74f553a6f255378f4e33"
+    },
+    {
+      "local_path": "build-dev/source-blocks-device-20261027/flash/verify-whole-app.log",
+      "bytes": 689,
+      "sha256": "b3be3144270d0f4d27ed6324e85678f40553bb65d0e153bd1548fbf519d6b154"
+    },
+    {
+      "local_path": "build-dev/source-blocks-device-20261027/flash/before-audit.json",
+      "bytes": 427,
+      "sha256": "238f5e15c9256282d53ddcb89985dd5768a2be925032045e299fe6443f801089"
+    },
+    {
+      "local_path": "build-dev/source-blocks-device-20261027/flash/after-audit.json",
+      "bytes": 427,
+      "sha256": "238f5e15c9256282d53ddcb89985dd5768a2be925032045e299fe6443f801089"
+    },
+    {
+      "local_path": "build-dev/source-blocks-device-20261027/quiet-regression.log",
+      "bytes": 711,
+      "sha256": "47e729af330990b1f9232ea137bca3161488d55ed96b5aeb819f8b9c1843d0fc"
+    }
+  ]
+}
