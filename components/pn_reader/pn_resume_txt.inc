@@ -18,11 +18,9 @@ static pn_status_t resume_verify(void *ctx) {
     if (!a->verify.impl && a->verify_font && a->font_file.identity_known &&
         !memcmp(a->font_file.identity.sha256, a->font_expected.sha256, 32))
         a->verify_font = false;
-    while (pn_reader_app_verify_pending(&app)) {
-        pn_status_t s = pn_reader_app_verify_step(&app);
-        if (s != PN_OK && s != PN_BUSY)
-            return s;
-    }
+    // 未完成来源复核不能接管派生帧，也不能在输入owner内同步耗尽整书；原排版入口及后台完整复核继续。/ Never accept derived pixels before source verification, or drain a whole book in the input owner; keep normal parsing and complete background verification.
+    if (pn_reader_app_verify_pending(&app))
+        return PN_EMPTY;
     return a->reader.decoder.source.validate ? a->reader.decoder.source.validate(a->reader.decoder.source.ctx) : PN_OK;
 }
 static pn_status_t resume_prepare(app_t *a, pn_read_intent_t intent, pn_reader_receipt_t *receipt) {
@@ -39,8 +37,17 @@ static pn_status_t resume_prepare(app_t *a, pn_read_intent_t intent, pn_reader_r
             return PN_EMPTY;
         wanted.text.begin = a->reader.visible.end;
     }
-    if (resume_bind(a) != PN_OK)
+    pn_status_t verified = resume_verify(a);
+    if (verified != PN_OK) {
+        if (verified == PN_EMPTY)
+            pn_profile_observe(a->pool,"resume.miss.source-pending",PN_EMPTY,0,NULL);
+        return verified;
+    }
+    pn_status_t bound=resume_bind(a);
+    if (bound != PN_OK) {
+        pn_profile_observe(a->pool,"resume.miss.binding",bound,0,NULL);
         return PN_EMPTY;
+    }
     pn_draw_lease_t lease = {0};
     pn_frame_t *frame = NULL;
     pn_status_t s = pn_display_begin_draw(&a->display, a->reader.token, &lease, &frame);

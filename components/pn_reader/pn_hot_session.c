@@ -7,12 +7,12 @@
 #include <string.h>
 #include <sys/stat.h>
 static void clear(pn_hot_session_t *h){h->path[0]=0;h->media=NULL;h->epoch=h->policy=h->at=0;h->prepared=false;h->prepare_pool=NULL;h->layout_pending=false;h->deferred_failed=false;}
-pn_status_t pn_hot_session_drop(pn_hot_session_t *h){
+static pn_status_t drop(pn_hot_session_t *h,bool checkpoint){
     if(!h)return PN_INVALID;
     // 显式释放是新的保存尝试，须重试曾失败的日志和当前页；空闲仍保留失败限流。/ Explicit release starts a new saving attempt for failed journals/current pages; idle failure throttling remains intact.
     h->deferred_failed=false;
     // 释放冻结帧前尽力收口当前页；不新增画布，失败仍由原进度保存屏障处理。/ Best-effort current-page checkpoint before freeing the frozen frame; no new canvas, with the original progress barrier retaining authority.
-    if(!h->prepared && (h->epub.impl || h->txt.impl)){
+    if(checkpoint && !h->prepared && (h->epub.impl || h->txt.impl)){
         uint64_t began=pn_profile_time();unsigned steps=0;
         while(pn_hot_session_deferred_pending(h) && steps++<512u && pn_profile_time()-began<180000u){
             pn_status_t checkpoint=pn_hot_session_deferred_flush(h);if(checkpoint!=PN_OK && checkpoint!=PN_BUSY)break;
@@ -23,6 +23,8 @@ pn_status_t pn_hot_session_drop(pn_hot_session_t *h){
     if(!h->epub.impl && !h->txt.impl)clear(h);
     return s==PN_OK?opening:s;
 }
+pn_status_t pn_hot_session_drop(pn_hot_session_t *h){return drop(h,true);}
+pn_status_t pn_hot_session_drop_for_switch(pn_hot_session_t *h){return drop(h,false);}
 static pn_status_t prepare(pn_hot_session_t *h,pn_pool_t *pool,pn_media_t *media,const pn_catalog_item_t *item,const char *font,const char *state,int pixels,uint64_t policy,uint64_t now,uint64_t activity,bool sources){
     if(!h || !pool || !media || !item || !policy || !*item->path)return PN_INVALID;
     if(!item->identified || (item->format!=PN_BOOK_TXT && item->format!=PN_BOOK_EPUB))return PN_EMPTY;

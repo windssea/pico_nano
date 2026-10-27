@@ -43,7 +43,7 @@ static unsigned packets(const char *dir) {
 int main(int argc, char **argv) {
     assert(argc == 4);
     for (unsigned kind = 1; kind <= 2; kind++)
-        for (unsigned mode = 0; mode < 3; mode++) {
+        for (unsigned mode = 0; mode < 5; mode++) {
             char base[384], state[512], tf[512], dir[600];
             snprintf(base, sizeof base, "%s/%u-%u", argv[3], kind, mode);
             assert(!mkdir(base, 0700));
@@ -82,7 +82,7 @@ int main(int argc, char **argv) {
                 assert(epub?pn_epub_app_resume_checkpoint_pending(&e):pn_reader_app_resume_checkpoint_pending(&t));
                 assert(pn_media_release(&media,&busy)==PN_OK);
             }
-            if (mode < 2) {
+            if (mode < 2 || mode>=3) {
                 assert(pn_hot_session_park(&hot, &pool, &media, book, 1, 3, &t, &e) == PN_OK);
                 assert(recent_commits==0);
                 if (mode == 0) {
@@ -104,14 +104,22 @@ int main(int argc, char **argv) {
                     }
                     assert(!hot.deferred_failed);
                 }
-                if(mode==1){
+                if(mode==1 || mode==3){
                     // 近期日志不可写时，释放必须保留会话和待办；恢复路径后再可靠提交。/ If recents cannot be written, release must retain the session and pending work; save reliably after restoring the paths.
                     char first[600],second[600];snprintf(first,sizeof first,"%s/recent.a",state);snprintf(second,sizeof second,"%s/recent.b",state);
                     assert(!mkdir(first,0700) && !mkdir(second,0700));
-                    assert(pn_hot_session_drop(&hot)!=PN_OK && (hot.epub.impl || hot.txt.impl) && !recent_commits);
+                    assert((mode==3?pn_hot_session_drop_for_switch(&hot):pn_hot_session_drop(&hot))!=PN_OK && (hot.epub.impl || hot.txt.impl) && !recent_commits);
                     assert(!rmdir(first) && !rmdir(second));
                 }
-                assert(pn_hot_session_drop(&hot) == PN_OK);
+                if(mode==4){
+                    // 已开始的可丢事务也须安全放弃借帧/租约，不能把部分包提交或泄漏资源。/ An already-started disposable transaction must release frame/lease without committing partial bytes or leaking resources.
+                    unsigned steps=0;
+                    while(!(epub?pn_epub_app_resume_cache_pending(&hot.epub):pn_reader_app_resume_cache_pending(&hot.txt))){
+                        pn_status_t s=pn_hot_session_deferred_flush(&hot);assert(s==PN_OK || s==PN_BUSY);assert(++steps<128);
+                    }
+                }
+                assert((mode>=3?pn_hot_session_drop_for_switch(&hot):pn_hot_session_drop(&hot)) == PN_OK);
+                pn_media_lease_t writable={0};assert(pn_media_acquire(&media,PN_MEDIA_CACHE_WRITE,&writable)==PN_OK && pn_media_release(&media,&writable)==PN_OK);
             } else {
                 assert((epub ? pn_epub_app_suspend(&e, 3) : pn_reader_app_suspend(&t, 3)) == PN_OK);
                 assert(recent_commits==0);
@@ -127,7 +135,7 @@ int main(int argc, char **argv) {
                 }
                 assert((epub ? pn_epub_app_close(&e, 4) : pn_reader_app_close(&t, 4)) == PN_OK);
             }
-            assert(!pool.used && !pool.live && packets(dir) == 1 && recent_commits>0);
+            assert(!pool.used && !pool.live && packets(dir) == (mode>=3?0u:1u) && recent_commits>0);
             memcpy(pixels,screen,sizeof pixels);
             assert((epub?pn_epub_app_open_on_media(&e,&pool,&media,book,NULL,state,32,10):pn_reader_app_open_on_media(&t,&pool,&media,book,NULL,state,32,10))==PN_OK);
             assert((epub?pn_epub_app_step(&e,PN_APP_OPEN,11,present,NULL):pn_reader_app_step(&t,PN_APP_OPEN,11,present,NULL))==PN_OK);

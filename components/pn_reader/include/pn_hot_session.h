@@ -52,6 +52,8 @@ pn_status_t pn_hot_session_park(pn_hot_session_t *,pn_pool_t *,pn_media_t *,cons
 pn_status_t pn_hot_session_resume(pn_hot_session_t *,pn_media_t *,const char *,pn_book_format_t,const pn_book_id_t *,uint64_t,uint64_t,pn_reader_app_t *,pn_epub_app_t *,pn_reader_present_fn,void *);
 /// 释放已保存对象或丢弃未显示准备，后者不保存记录；写/USB/换卡/系统字体关闭前必须调用，幂等。/ Release saved objects or discard never-displayed preparation without saving its records; required before writes/USB/card changes/system-font closure, idempotently.
 pn_status_t pn_hot_session_drop(pn_hot_session_t *);
+/// 切书不新建/推进可重建检查点，仍提交必要进度/近期日志；失败保留会话，已提交缓存保持。/ Switching never starts/advances rebuildable checkpoints; commit mandatory progress/recents, retaining the session on failure and keeping committed caches.
+pn_status_t pn_hot_session_drop_for_switch(pn_hot_session_t *);
 /// 到期后释放；无任务EMPTY。/ Release when expired; EMPTY without work.
 pn_status_t pn_hot_session_expire(pn_hot_session_t *,uint64_t);
 /// 保留对象有延后的进度/页码索引/当前页快照待写且本次未失败 / The retained object has deferred progress/index/current-snapshot work without a latched failure.

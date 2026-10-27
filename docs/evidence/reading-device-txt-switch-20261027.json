@@ -1,0 +1,1897 @@
+{
+  "schema": 1,
+  "date": "2026-10-27",
+  "kind": "TXT verified-cache deferral, foreground switch checkpoint policy, actual cache rejection diagnosis; final single sample per book versus saved evidence",
+  "device": {
+    "board": "RDP-G01-W / E0470A01",
+    "chip": "ESP32-S3 rev0.2",
+    "idf": "v6.1",
+    "pixels": [
+      684,
+      1216
+    ],
+    "gray_levels": 16
+  },
+  "image": {
+    "base_source": "53194529daec468e32c4510e1241b5df62caa858",
+    "version": "1.0.7-diag",
+    "elf_sha256": "d65ba909f5dfd4a5e736f792b3836e7c9e6d82588846030e5f2cf484de30fc82",
+    "bytes": 5544848,
+    "sha256": "251abbb1cab850c63be167373bcf5fd13b76160d98e413ac2a388f3ea09eb394",
+    "slot_free": 746608,
+    "slot_free_percent": 11.867014567057293
+  },
+  "baseline": {
+    "source": "53194529daec468e32c4510e1241b5df62caa858",
+    "elf": "b59cca89b9f1c8cf86fab4bd1f7bfb5e93073f4cf29b271da0626adc973ecc50",
+    "manual_root": "build-dev/manual-reading-monitor-20261027",
+    "manual_raw_sha256": "26703d82475b71035724297bd01d46ef85ace347554a4e3fb4ea905da516c3b7",
+    "manual_cycle_2_user_confirmed_title": "刀剑神域 TXT",
+    "manual_cycle_2_open_lower_bound_ms": 15321,
+    "manual_cycle_2_next_ms": [
+      1409,
+      1141
+    ],
+    "manual_cycle_2_resume_sources_ms": 11520.734,
+    "paired_saved_controlled_root": "build-dev/exit-feedback-takeover-20261027/after",
+    "shao": {
+      "open_ms": 3413,
+      "next_ms": 1187,
+      "exit_ms": 1047
+    },
+    "ming": {
+      "open_ms": 3381,
+      "next_ms": 1181,
+      "exit_ms": 1230
+    },
+    "limitations": [
+      "Manual cycle has no input timestamp or baseline screenshot.",
+      "Books may have advanced since saved measurements; do not claim paired same-page frames without checking.",
+      "Do not rerun baseline."
+    ]
+  },
+  "result": {
+    "samples": [
+      {
+        "book": "sao-txt",
+        "request_ms": 3793.914,
+        "input_to_body_ms": 3565,
+        "input_to_ready_ms": 3890,
+        "loading_complete_ms": 958,
+        "next_input_to_display_ms": 1228,
+        "previous_input_to_display_ms": 1062,
+        "exit_input_to_display_ms": 1128,
+        "next_after_ready_ms": 471,
+        "miss_reasons": [
+          "resume.miss.source-pending"
+        ],
+        "foreground_resume_write_calls": 0,
+        "opening_phases_nested": {
+          "display.queue": {
+            "count": 2,
+            "elapsed_us": 67,
+            "status": [
+              0,
+              0
+            ]
+          },
+          "display.wait": {
+            "count": 2,
+            "elapsed_us": 1686605,
+            "status": [
+              0,
+              0
+            ]
+          },
+          "display.receipt": {
+            "count": 2,
+            "elapsed_us": 1697495,
+            "status": [
+              0,
+              0
+            ]
+          },
+          "epub.open.loading": {
+            "count": 1,
+            "elapsed_us": 840237,
+            "status": [
+              0
+            ]
+          },
+          "storage.read": {
+            "count": 5,
+            "elapsed_us": 158351,
+            "status": [
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "font.open": {
+            "count": 3,
+            "elapsed_us": 112072,
+            "status": [
+              0,
+              0,
+              0
+            ]
+          },
+          "txt.open-fast": {
+            "count": 1,
+            "elapsed_us": 490603,
+            "status": [
+              0
+            ]
+          },
+          "font.layout-key": {
+            "count": 1,
+            "elapsed_us": 367,
+            "status": [
+              0
+            ]
+          },
+          "content.stream-sha": {
+            "count": 14,
+            "elapsed_us": 117677,
+            "status": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "resume.miss.source-pending": {
+            "count": 1,
+            "elapsed_us": 0,
+            "status": [
+              3
+            ]
+          },
+          "txt.jump": {
+            "count": 1,
+            "elapsed_us": 315791,
+            "status": [
+              0
+            ]
+          },
+          "txt.raster": {
+            "count": 1,
+            "elapsed_us": 571887,
+            "status": [
+              0
+            ]
+          },
+          "txt.next": {
+            "count": 1,
+            "elapsed_us": 934420,
+            "status": [
+              0
+            ]
+          },
+          "txt.prefetch": {
+            "count": 1,
+            "elapsed_us": 935526,
+            "status": [
+              0
+            ]
+          },
+          "txt.bitmap.step": {
+            "count": 1,
+            "elapsed_us": 51475,
+            "status": [
+              0
+            ]
+          },
+          "txt.open.request": {
+            "count": 1,
+            "elapsed_us": 3793914,
+            "status": [
+              0
+            ]
+          }
+        }
+      },
+      {
+        "book": "sao-epub",
+        "request_ms": 6078.589,
+        "input_to_body_ms": 6160,
+        "input_to_ready_ms": 6175,
+        "loading_complete_ms": 953,
+        "next_input_to_display_ms": 890,
+        "previous_input_to_display_ms": 848,
+        "exit_input_to_display_ms": 1215,
+        "next_after_ready_ms": 3241,
+        "miss_reasons": [
+          "bootstrap.miss.root-unavailable",
+          "resume.miss.root-unavailable"
+        ],
+        "foreground_resume_write_calls": 0,
+        "opening_phases_nested": {
+          "display.queue": {
+            "count": 2,
+            "elapsed_us": 56,
+            "status": [
+              0,
+              0
+            ]
+          },
+          "display.wait": {
+            "count": 2,
+            "elapsed_us": 1351471,
+            "status": [
+              0,
+              0
+            ]
+          },
+          "display.receipt": {
+            "count": 2,
+            "elapsed_us": 1363247,
+            "status": [
+              0,
+              0
+            ]
+          },
+          "epub.open.loading": {
+            "count": 1,
+            "elapsed_us": 802868,
+            "status": [
+              0
+            ]
+          },
+          "epub.open.begin": {
+            "count": 1,
+            "elapsed_us": 5367,
+            "status": [
+              0
+            ]
+          },
+          "epub.open.source-memo": {
+            "count": 1,
+            "elapsed_us": 0,
+            "status": [
+              0
+            ]
+          },
+          "bootstrap.miss.root-unavailable": {
+            "count": 1,
+            "elapsed_us": 0,
+            "status": [
+              3
+            ]
+          },
+          "epub.zip-scan-step": {
+            "count": 103,
+            "elapsed_us": 67770,
+            "status": [
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              0
+            ]
+          },
+          "epub.open.directory": {
+            "count": 103,
+            "elapsed_us": 147498,
+            "status": [
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2
+            ]
+          },
+          "epub.zip-step": {
+            "count": 116,
+            "elapsed_us": 365331,
+            "status": [
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              0
+            ]
+          },
+          "epub.open.zip-finish": {
+            "count": 116,
+            "elapsed_us": 403467,
+            "status": [
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2
+            ]
+          },
+          "epub.open.publication": {
+            "count": 21,
+            "elapsed_us": 271995,
+            "status": [
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2
+            ]
+          },
+          "epub.open.metadata": {
+            "count": 1,
+            "elapsed_us": 3391,
+            "status": [
+              2
+            ]
+          },
+          "storage.read": {
+            "count": 5,
+            "elapsed_us": 108825,
+            "status": [
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "epub.open.state": {
+            "count": 1,
+            "elapsed_us": 77340,
+            "status": [
+              2
+            ]
+          },
+          "font.open": {
+            "count": 2,
+            "elapsed_us": 106363,
+            "status": [
+              0,
+              0
+            ]
+          },
+          "epub.open.fonts": {
+            "count": 1,
+            "elapsed_us": 141454,
+            "status": [
+              2
+            ]
+          },
+          "epub.open.sources": {
+            "count": 1,
+            "elapsed_us": 120,
+            "status": [
+              0
+            ]
+          },
+          "epub.open.trusted-wall": {
+            "count": 1,
+            "elapsed_us": 1165989,
+            "status": [
+              0
+            ]
+          },
+          "epub.open.wait": {
+            "count": 1,
+            "elapsed_us": 115319,
+            "status": [
+              0
+            ]
+          },
+          "epub.open.max-step": {
+            "count": 1,
+            "elapsed_us": 141456,
+            "status": [
+              0
+            ]
+          },
+          "epub.open.font-io": {
+            "count": 1,
+            "elapsed_us": 0,
+            "status": [
+              0
+            ]
+          },
+          "font.layout-key": {
+            "count": 1,
+            "elapsed_us": 223,
+            "status": [
+              0
+            ]
+          },
+          "resume.miss.root-unavailable": {
+            "count": 1,
+            "elapsed_us": 0,
+            "status": [
+              3
+            ]
+          },
+          "content.stream-sha": {
+            "count": 1,
+            "elapsed_us": 426,
+            "status": [
+              0
+            ]
+          },
+          "epub.index-bind": {
+            "count": 1,
+            "elapsed_us": 131998,
+            "status": [
+              0
+            ]
+          },
+          "epub.compat": {
+            "count": 1,
+            "elapsed_us": 1039164,
+            "status": [
+              0
+            ]
+          },
+          "epub.model-build": {
+            "count": 1,
+            "elapsed_us": 2021289,
+            "status": [
+              0
+            ]
+          },
+          "epub.model-window": {
+            "count": 2,
+            "elapsed_us": 2491758,
+            "status": [
+              0,
+              0
+            ]
+          },
+          "epub.model-replay": {
+            "count": 1,
+            "elapsed_us": 413864,
+            "status": [
+              0
+            ]
+          },
+          "epub.layout": {
+            "count": 1,
+            "elapsed_us": 414783,
+            "status": [
+              0
+            ]
+          },
+          "epub.jump": {
+            "count": 1,
+            "elapsed_us": 2492740,
+            "status": [
+              0
+            ]
+          },
+          "epub.raster.body": {
+            "count": 1,
+            "elapsed_us": 607224,
+            "status": [
+              0
+            ]
+          },
+          "epub.raster.footer": {
+            "count": 1,
+            "elapsed_us": 91777,
+            "status": [
+              0
+            ]
+          },
+          "epub.raster": {
+            "count": 1,
+            "elapsed_us": 700124,
+            "status": [
+              0
+            ]
+          },
+          "epub.prefetch.seek": {
+            "count": 3,
+            "elapsed_us": 207,
+            "status": [
+              2,
+              2,
+              0
+            ]
+          },
+          "epub.prefetch.layout": {
+            "count": 39,
+            "elapsed_us": 0,
+            "status": [
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2
+            ]
+          },
+          "epub.open.first-frame": {
+            "count": 1,
+            "elapsed_us": 3990541,
+            "status": [
+              0
+            ]
+          },
+          "epub.open.request": {
+            "count": 1,
+            "elapsed_us": 6078589,
+            "status": [
+              0
+            ]
+          }
+        }
+      },
+      {
+        "book": "shao",
+        "request_ms": 2760.583,
+        "input_to_body_ms": 2843,
+        "input_to_ready_ms": 2857,
+        "loading_complete_ms": 1007,
+        "next_input_to_display_ms": 902,
+        "previous_input_to_display_ms": 1213,
+        "exit_input_to_display_ms": 1013,
+        "next_after_ready_ms": 3215,
+        "miss_reasons": [],
+        "foreground_resume_write_calls": 0,
+        "opening_phases_nested": {
+          "epub.open.begin": {
+            "count": 1,
+            "elapsed_us": 4591,
+            "status": [
+              0
+            ]
+          },
+          "display.queue": {
+            "count": 2,
+            "elapsed_us": 54,
+            "status": [
+              0,
+              0
+            ]
+          },
+          "source.blocks.hit": {
+            "count": 1,
+            "elapsed_us": 0,
+            "status": [
+              0
+            ]
+          },
+          "source.blocks.load": {
+            "count": 1,
+            "elapsed_us": 172293,
+            "status": [
+              0
+            ]
+          },
+          "bootstrap.hit": {
+            "count": 1,
+            "elapsed_us": 0,
+            "status": [
+              0
+            ]
+          },
+          "bootstrap.load": {
+            "count": 1,
+            "elapsed_us": 739540,
+            "status": [
+              0
+            ]
+          },
+          "epub.open.directory": {
+            "count": 1,
+            "elapsed_us": 912443,
+            "status": [
+              2
+            ]
+          },
+          "display.wait": {
+            "count": 2,
+            "elapsed_us": 1582382,
+            "status": [
+              0,
+              0
+            ]
+          },
+          "display.receipt": {
+            "count": 2,
+            "elapsed_us": 1593039,
+            "status": [
+              0,
+              0
+            ]
+          },
+          "epub.open.loading": {
+            "count": 1,
+            "elapsed_us": 950767,
+            "status": [
+              0
+            ]
+          },
+          "content.stream-sha": {
+            "count": 58,
+            "elapsed_us": 413051,
+            "status": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "source.blocks.verify": {
+            "count": 58,
+            "elapsed_us": 435606,
+            "status": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "epub.open.metadata": {
+            "count": 1,
+            "elapsed_us": 55912,
+            "status": [
+              2
+            ]
+          },
+          "storage.read": {
+            "count": 6,
+            "elapsed_us": 53955,
+            "status": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "epub.open.state": {
+            "count": 1,
+            "elapsed_us": 36883,
+            "status": [
+              2
+            ]
+          },
+          "font.open": {
+            "count": 2,
+            "elapsed_us": 105744,
+            "status": [
+              0,
+              0
+            ]
+          },
+          "epub.open.fonts": {
+            "count": 1,
+            "elapsed_us": 94528,
+            "status": [
+              2
+            ]
+          },
+          "source.blocks.dependencies": {
+            "count": 1,
+            "elapsed_us": 14264,
+            "status": [
+              0
+            ]
+          },
+          "epub.model-build": {
+            "count": 1,
+            "elapsed_us": 441731,
+            "status": [
+              0
+            ]
+          },
+          "epub.model": {
+            "count": 1,
+            "elapsed_us": 526050,
+            "status": [
+              0
+            ]
+          },
+          "resume.blocks": {
+            "count": 1,
+            "elapsed_us": 526209,
+            "status": [
+              0
+            ]
+          },
+          "epub.open.sources": {
+            "count": 1,
+            "elapsed_us": 526525,
+            "status": [
+              0
+            ]
+          },
+          "epub.open.trusted-wall": {
+            "count": 1,
+            "elapsed_us": 1674020,
+            "status": [
+              0
+            ]
+          },
+          "epub.open.wait": {
+            "count": 1,
+            "elapsed_us": 43118,
+            "status": [
+              0
+            ]
+          },
+          "epub.open.max-step": {
+            "count": 1,
+            "elapsed_us": 912449,
+            "status": [
+              0
+            ]
+          },
+          "epub.open.font-io": {
+            "count": 1,
+            "elapsed_us": 0,
+            "status": [
+              0
+            ]
+          },
+          "font.layout-key": {
+            "count": 1,
+            "elapsed_us": 265,
+            "status": [
+              0
+            ]
+          },
+          "content.sha-step": {
+            "count": 10,
+            "elapsed_us": 44860,
+            "status": [
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              0
+            ]
+          },
+          "resume.sources": {
+            "count": 1,
+            "elapsed_us": 36,
+            "status": [
+              0
+            ]
+          },
+          "resume.decode": {
+            "count": 1,
+            "elapsed_us": 112075,
+            "status": [
+              0
+            ]
+          },
+          "resume.hit": {
+            "count": 1,
+            "elapsed_us": 0,
+            "status": [
+              0
+            ]
+          },
+          "resume.load": {
+            "count": 1,
+            "elapsed_us": 311045,
+            "status": [
+              0
+            ]
+          },
+          "epub.raster.body": {
+            "count": 1,
+            "elapsed_us": 337,
+            "status": [
+              0
+            ]
+          },
+          "epub.raster.footer": {
+            "count": 1,
+            "elapsed_us": 83266,
+            "status": [
+              0
+            ]
+          },
+          "epub.raster": {
+            "count": 1,
+            "elapsed_us": 84471,
+            "status": [
+              0
+            ]
+          },
+          "epub.prefetch.seek": {
+            "count": 2,
+            "elapsed_us": 182,
+            "status": [
+              2,
+              0
+            ]
+          },
+          "epub.prefetch.layout": {
+            "count": 16,
+            "elapsed_us": 0,
+            "status": [
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2
+            ]
+          },
+          "epub.open.first-frame": {
+            "count": 1,
+            "elapsed_us": 765438,
+            "status": [
+              0
+            ]
+          },
+          "epub.open.request": {
+            "count": 1,
+            "elapsed_us": 2760583,
+            "status": [
+              0
+            ]
+          }
+        }
+      },
+      {
+        "book": "ming",
+        "request_ms": 3471.825,
+        "input_to_body_ms": 3553,
+        "input_to_ready_ms": 3568,
+        "loading_complete_ms": 794,
+        "next_input_to_display_ms": 903,
+        "previous_input_to_display_ms": 1185,
+        "exit_input_to_display_ms": 1060,
+        "next_after_ready_ms": 3058,
+        "miss_reasons": [],
+        "foreground_resume_write_calls": 0,
+        "opening_phases_nested": {
+          "display.queue": {
+            "count": 2,
+            "elapsed_us": 76,
+            "status": [
+              0,
+              0
+            ]
+          },
+          "display.wait": {
+            "count": 2,
+            "elapsed_us": 1284553,
+            "status": [
+              0,
+              0
+            ]
+          },
+          "display.receipt": {
+            "count": 2,
+            "elapsed_us": 1295630,
+            "status": [
+              0,
+              0
+            ]
+          },
+          "epub.open.loading": {
+            "count": 1,
+            "elapsed_us": 694052,
+            "status": [
+              0
+            ]
+          },
+          "epub.open.begin": {
+            "count": 1,
+            "elapsed_us": 7166,
+            "status": [
+              0
+            ]
+          },
+          "source.blocks.hit": {
+            "count": 1,
+            "elapsed_us": 0,
+            "status": [
+              0
+            ]
+          },
+          "source.blocks.load": {
+            "count": 1,
+            "elapsed_us": 174826,
+            "status": [
+              0
+            ]
+          },
+          "bootstrap.hit": {
+            "count": 1,
+            "elapsed_us": 0,
+            "status": [
+              0
+            ]
+          },
+          "bootstrap.load": {
+            "count": 1,
+            "elapsed_us": 910913,
+            "status": [
+              0
+            ]
+          },
+          "epub.open.directory": {
+            "count": 1,
+            "elapsed_us": 1086282,
+            "status": [
+              2
+            ]
+          },
+          "content.stream-sha": {
+            "count": 14,
+            "elapsed_us": 94416,
+            "status": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "source.blocks.verify": {
+            "count": 14,
+            "elapsed_us": 100059,
+            "status": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "epub.open.metadata": {
+            "count": 1,
+            "elapsed_us": 133220,
+            "status": [
+              2
+            ]
+          },
+          "storage.read": {
+            "count": 4,
+            "elapsed_us": 135850,
+            "status": [
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "epub.open.state": {
+            "count": 1,
+            "elapsed_us": 119809,
+            "status": [
+              2
+            ]
+          },
+          "font.open": {
+            "count": 2,
+            "elapsed_us": 105934,
+            "status": [
+              0,
+              0
+            ]
+          },
+          "epub.open.fonts": {
+            "count": 1,
+            "elapsed_us": 155732,
+            "status": [
+              2
+            ]
+          },
+          "source.blocks.dependencies": {
+            "count": 1,
+            "elapsed_us": 16163,
+            "status": [
+              0
+            ]
+          },
+          "epub.model-build": {
+            "count": 1,
+            "elapsed_us": 104519,
+            "status": [
+              0
+            ]
+          },
+          "epub.model": {
+            "count": 1,
+            "elapsed_us": 187069,
+            "status": [
+              0
+            ]
+          },
+          "resume.blocks": {
+            "count": 1,
+            "elapsed_us": 187208,
+            "status": [
+              0
+            ]
+          },
+          "epub.open.sources": {
+            "count": 1,
+            "elapsed_us": 187544,
+            "status": [
+              0
+            ]
+          },
+          "epub.open.trusted-wall": {
+            "count": 1,
+            "elapsed_us": 1697205,
+            "status": [
+              0
+            ]
+          },
+          "epub.open.wait": {
+            "count": 1,
+            "elapsed_us": 7428,
+            "status": [
+              0
+            ]
+          },
+          "epub.open.max-step": {
+            "count": 1,
+            "elapsed_us": 1086290,
+            "status": [
+              0
+            ]
+          },
+          "epub.open.font-io": {
+            "count": 1,
+            "elapsed_us": 0,
+            "status": [
+              0
+            ]
+          },
+          "font.layout-key": {
+            "count": 1,
+            "elapsed_us": 260,
+            "status": [
+              0
+            ]
+          },
+          "content.sha-step": {
+            "count": 8,
+            "elapsed_us": 31948,
+            "status": [
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              0
+            ]
+          },
+          "resume.sources": {
+            "count": 1,
+            "elapsed_us": 34,
+            "status": [
+              0
+            ]
+          },
+          "resume.decode": {
+            "count": 1,
+            "elapsed_us": 97882,
+            "status": [
+              0
+            ]
+          },
+          "resume.hit": {
+            "count": 1,
+            "elapsed_us": 0,
+            "status": [
+              0
+            ]
+          },
+          "resume.load": {
+            "count": 1,
+            "elapsed_us": 294322,
+            "status": [
+              0
+            ]
+          },
+          "epub.raster.body": {
+            "count": 1,
+            "elapsed_us": 333,
+            "status": [
+              0
+            ]
+          },
+          "epub.raster.footer": {
+            "count": 1,
+            "elapsed_us": 92423,
+            "status": [
+              0
+            ]
+          },
+          "epub.raster": {
+            "count": 1,
+            "elapsed_us": 93624,
+            "status": [
+              0
+            ]
+          },
+          "epub.prefetch.seek": {
+            "count": 1,
+            "elapsed_us": 85,
+            "status": [
+              0
+            ]
+          },
+          "epub.prefetch.layout": {
+            "count": 17,
+            "elapsed_us": 0,
+            "status": [
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2
+            ]
+          },
+          "epub.open.first-frame": {
+            "count": 1,
+            "elapsed_us": 768404,
+            "status": [
+              0
+            ]
+          },
+          "epub.open.request": {
+            "count": 1,
+            "elapsed_us": 3471825,
+            "status": [
+              0
+            ]
+          }
+        }
+      }
+    ],
+    "frames": [
+      {
+        "book": "shao",
+        "excluded_top_rows": 32,
+        "native_pixels": [
+          684,
+          1216
+        ],
+        "equal": true,
+        "pixel_sha256": "b7afeee4fbda8fe643f4c41b5037500887313c52ea0f65f06910267b2ca07f39"
+      },
+      {
+        "book": "ming",
+        "excluded_top_rows": 32,
+        "native_pixels": [
+          684,
+          1216
+        ],
+        "equal": true,
+        "pixel_sha256": "e4034595445289ffcb952da3811de9bdb7bff62be5e6d213416575991809efba"
+      }
+    ],
+    "health": {
+      "observed_pool_peak": 4027194,
+      "pool_limits": [
+        6217360
+      ],
+      "heap_lines": [
+        "PNT 828283 heap internal=77235 internal_largest=32768 internal_min=32968 psram=3047436 psram_largest=2162688 psram_min=2324028"
+      ],
+      "error_lines": [],
+      "version_lines": [
+        "1793082830.801 PNT 828241 ok version product=1.0.7 app=1.0.7-diag idf=v6.1 elf=d65ba909f",
+        "1793083427.181 PNT 828284 ok version product=1.0.7 app=1.0.7-diag idf=v6.1 elf=d65ba909f"
+      ],
+      "resumed_packets_stored": 3
+    }
+  },
+  "flash": {
+    "active_application": {
+      "version": "1.0.7-diag",
+      "elf_sha256": "d65ba909f5dfd4a5e736f792b3836e7c9e6d82588846030e5f2cf484de30fc82"
+    },
+    "original_ota0_full_partition_md5": "d0606f9671b5df4d60574c9cdf436fed",
+    "selectors": [
+      {
+        "offset": "0xf000",
+        "sequence": 17,
+        "state": 2,
+        "slot": 0
+      },
+      {
+        "offset": "0x10000",
+        "sequence": 20,
+        "state": 2,
+        "slot": 1
+      }
+    ],
+    "unchanged_protection": {
+      "boot": true,
+      "partition": true,
+      "nvs": true,
+      "phy_and_gap": true
+    }
+  },
+  "static_memory": {
+    "diram_bytes": 200323,
+    "diram_delta_bytes": 16,
+    "external_bss_bytes": 156540,
+    "new_persistent_frames": 0,
+    "pool_and_class_limits_changed": false
+  },
+  "validation": {
+    "related_host_tests": 20,
+    "final_control_tests": 2,
+    "partial_switch_abort_tests": 1,
+    "pixel_tests": "UTF8 pending-source fallback equal; verified packet hit; full tail mutation rejected. GBK original conservative rejection followed by equal full-parser reopening. Shao/Ming device frames equal saved baseline.",
+    "firmware_build": "tools/dev.py firmware-diag build and size passed; same SDKCONFIG and partition bytes.",
+    "visible_simulator": "rebuilt and restarted with tools/run_sim.ps1 -Demo"
+  },
+  "limitations": [
+    "Final books were opened sequentially after one flash/boot and library navigation; saved Shao/Ming controlled samples reset per book. Source memo was zero and block/bootstrap/resume hits match for both, but not a byte-identical TF snapshot or strictly identical background history.",
+    "Manual TXT baseline has only a lower bound and advanced since; final request is measured completely and current input-to-body is separately listed. No baseline TXT pixel capture.",
+    "Manual SAO EPUB cycle10 is associated using the retained last-read title, matching parser characteristics and user-selected file; its baseline is full request timing, distinct from device touch timing.",
+    "NEXT sampled at ready+0.35s for TXT (actual input at +471ms) and +3s for EPUB; manual immediate NEXT delays vary. Ripple/display conditions may differ; do not attribute all turn gains to this change.",
+    "No firmware remeasurement or baseline reflashing; each final book opened once.",
+    "No panic/display errors, but no independent optical, long-sleep, power or physical power-loss qualification.",
+    "Root-unavailable means missing or invalid root, not proof of a deleted packet. Lookup stopped before checking downstream packet layout/decode.",
+    "Foreground optional checkpoint writes absent in these samples; synthetic quick-release tests prove skipped generation and partial abort with mandatory save barriers. This does not establish an arbitrary-time input bound."
+  ],
+  "local_evidence_root": "build-dev/txt-switch-20261027",
+  "local_file_sha256": {
+    "image.json": "ae4b08b91e909a832804d284944870bb30cb739333c4a96df87746de829e8e3c",
+    "source-files.json": "556b323f2a851db0864d074a89730008cf4e942bc61a79d484053f0f710f05d5",
+    "source.patch": "5122ea122701c7dcdd8a15ab45f18cf0655dcad654220ca010db3b1a49e0ffee",
+    "analysis.json": "51994b613d725a273b8d5558545d3a8253c3121fef222095d17db449f2e5f660",
+    "baseline-reference.json": "c0cb1a17181ab55a7f933d76bf5d380e0adb9cb01e6376fa42074a544e631532",
+    "verified.log": "4415966157ccbb08bbd0f8e7eb3c206d15826bf803e582a5fdd87b720afd0100",
+    "final-control.log": "9680b89b23f55f5e6ee830df406b26dd6c463ad19f7d974eaa9bf493ca88f251",
+    "partial-switch.log": "c51c3e5d157dc3060407ff691f36e24f74dc83370d5e897d962f2832378c934a",
+    "flash/after-audit.json": "dbaa58d16d82a92ad705e1a0c012c01a895b4ccbd9b033307b8f3b0bc34f7f4f",
+    "flash/verify-whole-app.log": "0500665317439bef9938ae430522d4ee6f6e94ac95833188a66b2379c1bf9115",
+    "after/serial.log": "c4e9022961e022539859d775b5add5c4de03024ce5a8776a1da7bceb5a3ba16d",
+    "after/sao-txt.json": "d19ca60985f91feb2caffa747dc5d764bc63a20d53c5269883c34782dc0aaa7e",
+    "after/sao-epub.json": "f9bca1e6a9f69d48b6708fe455d79dfd70d7a2b0c6fd5a6feda44e0e5c32fac0",
+    "after/shao.json": "63a7fdf10478fbdb80c92992054ab7c54a2a129cfbf181197440d92035e6891c",
+    "after/ming.json": "bf99484f375beafe998eb9f0f0a82fc4032384bb9d0da993d1c9d6fe2e7efa37",
+    "final-source.patch": "7cbee9d362375eb31ed39625929793ad59c3043ab9c651eba2d684eb7f515251"
+  },
+  "release": false,
+  "validation_source_sha256": {
+    "tests/host/test_txt_resume_pending.c": "1347630318e471142579b52ee7bf2cf1d61d66e78a169262999c53ab42ddc950",
+    "tests/host/test_txt_resume_pending.py": "0e2d2c510aa77a6b057d439a911241725a4856ef3d094af99d0b3e0df045774f",
+    "tests/host/test_exit_checkpoint.c": "f76361d22ac2621a99f094fea1602ae4412c9eea76bea3bb6573a0cfa98dae60",
+    "tests/host/CMakeLists.txt": "0e4c2af035598e510cbaeb418237660e8f28f6c326dbbd5eb14cc1bee7702e10"
+  }
+}

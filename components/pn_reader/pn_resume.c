@@ -320,8 +320,10 @@ pn_status_t pn_resume_load(pn_resume_t *h, unsigned slot, const pn_resume_page_t
     if (!h || !wanted || !page || slot > 1 || !frame_valid(out))
         return PN_INVALID;
     resume_t *r = h->impl;
-    if (!r || r->phase)
+    if (!r || r->phase) {
+        pn_profile_observe(r?r->pool:NULL,r?"resume.miss.writing":"resume.miss.unbound",PN_EMPTY,0,NULL);
         return PN_EMPTY;
+    }
     pn_status_t s = checked(r);
     if (s != PN_OK)
         return s;
@@ -333,16 +335,22 @@ pn_status_t pn_resume_load(pn_resume_t *h, unsigned slot, const pn_resume_page_t
         count = 2;
     if (trust_read(r, r->rbak, roots + count))
         count += 2;
-    if (!count)
+    if (!count) {
+        pn_profile_observe(r->pool,"resume.miss.root-unavailable",PN_EMPTY,0,NULL);
         return PN_EMPTY;
+    }
+    // 复用实际校验的分支记录原因，不为诊断额外读取目录/文件。/ Record the actual validation branch without additional diagnostic directory/file reads.
+    const char *miss="resume.miss.packet-unavailable";
     const char *files[] = {r->path, r->bak};
     for (unsigned attempt = 0; attempt < 2; attempt++) {
         struct stat st;
         if (rstat(files[attempt], &st) || !S_ISREG(st.st_mode) || st.st_size < RH || st.st_size > LIMIT)
             continue;
         r->file = fopen(files[attempt], "rb");
-        if (!r->file)
+        if (!r->file) {
+            miss="resume.miss.packet-io";
             continue;
+        }
         // 两字节行头与短行共享可选4KiB缓冲，避免TF逐行小读；失败保留原stdio路径，仍完整SHA/解码CRC。/ Share an optional 4 KiB buffer across short row headers/data, avoiding tiny TF reads; denial keeps stdio fallback with full SHA/decoded CRC.
         uint8_t *read_buffer = pn_alloc_optional(r->pool, PN_MEM_INDEX, 4096);
         if (read_buffer && setvbuf(r->file, (char *)read_buffer, _IOFBF, 4096)) {
@@ -353,13 +361,16 @@ pn_status_t pn_resume_load(pn_resume_t *h, unsigned slot, const pn_resume_page_t
         r->offset = SIZE_MAX;
         pn_resume_page_t candidate;
         bool valid = fread(r->header, 1, RH, r->file) == RH && !memcmp(r->header, "PNRS", 4) && get(r->header + 4, 4) == 1 &&
-                     !memcmp(r->header + 8, r->book.sha256, 32) && !memcmp(r->header + 40, r->key.sha256, 32) &&
-                     get(r->header + RH - 4, 4) == pn_crc32_update(0, r->header, RH - 4) && page_get(r, &candidate) &&
-                     candidate.format == wanted->format;
-        if (valid)
+                     get(r->header + RH - 4, 4) == pn_crc32_update(0, r->header, RH - 4) && page_get(r, &candidate);
+        miss="resume.miss.header";
+        if(valid){miss="resume.miss.layout";valid=!memcmp(r->header+8,r->book.sha256,32) && !memcmp(r->header+40,r->key.sha256,32) && candidate.format==wanted->format;}
+        if (valid) {
+            miss="resume.miss.position";
             valid = candidate.format == 1 ? candidate.text.begin == wanted->text.begin
                                           : pn_resume_location_equal(&candidate.epub.begin, &wanted->epub.begin);
+        }
         if (valid) {
+            miss="resume.miss.integrity";
             pn_book_id_t hash = {0};
             // EPUB双锚点调用链较深，摘要工作区留在原池，申请失败只作未命中。/ Keep SHA workspace in the existing pool on the deep
             // EPUB-anchor call chain; allocation failure is a cache miss.
@@ -384,11 +395,13 @@ pn_status_t pn_resume_load(pn_resume_t *h, unsigned slot, const pn_resume_page_t
                 fclose(r->file);
                 r->file = NULL;
                 pn_free(read_buffer);
+                pn_profile_observe(r->pool,"resume.miss.source",s,0,NULL);
                 return s;
             }
         }
         uint32_t crc = 0;
         if (valid) {
+            miss="resume.miss.decode";
             uint64_t began = pn_profile_time();
             r->decoded = 0;
             do {
@@ -405,10 +418,12 @@ pn_status_t pn_resume_load(pn_resume_t *h, unsigned slot, const pn_resume_page_t
             return s;
         if (valid) {
             *page = candidate;
+            if(attempt)pn_profile_observe(r->pool,"resume.hit.backup",PN_OK,0,NULL);
             pn_profile_observe(r->pool, "resume.hit", PN_OK, 0, NULL);
             return PN_OK;
         }
     }
+    pn_profile_observe(r->pool,miss,PN_EMPTY,0,NULL);
     return PN_EMPTY;
 }
 void pn_resume_abort(pn_resume_t *h) {

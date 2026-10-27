@@ -49,8 +49,10 @@ static pn_status_t resume_prepare(app_t *a, pn_read_intent_t intent, pn_epub_rea
         wanted.epub.begin = visible.next;
     }
     pn_status_t s = resume_bind(a);
-    if (s != PN_OK)
+    if (s != PN_OK) {
+        pn_profile_observe(a->pool,"resume.miss.binding",s,0,NULL);
         return PN_EMPTY;
+    }
     pn_draw_lease_t lease = {0};
     pn_frame_t *frame = NULL;
     s = pn_display_begin_draw(&a->display, a->token, &lease, &frame);

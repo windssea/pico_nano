@@ -180,20 +180,22 @@ pn_status_t pn_bootstrap_load(pn_pool_t *pool,pn_media_t *media,const pn_media_l
     if(diagnostic_fault==1){pn_profile_observe(pool,"bootstrap.fault",PN_EMPTY,0,NULL);return PN_EMPTY;}
 #endif
     boot_t *b=pn_alloc_optional(pool,PN_MEM_INDEX,sizeof *b);
-    if(!b)return PN_EMPTY;
+    if(!b){pn_profile_observe(pool,"bootstrap.miss.admission",PN_EMPTY,0,NULL);return PN_EMPTY;}
     *b=(boot_t){.pool=pool,.media=media,.guard=*guard,.source=*source,.book=*book,.zip=zip,.epub=epub};
     pn_media_t state;
     pn_media_init(&state);
     pn_status_t s=pn_media_attach(&state,1);
     b->state=&state;
     if(s==PN_OK)s=pn_media_acquire(&state,PN_MEDIA_READ,&b->trust);
+    const char *miss="bootstrap.miss.binding";
     if(s==PN_OK && !paths(b,tf,root,book))s=PN_EMPTY;
-    if(s==PN_OK){if(root_read(b->root,b->roots))b->root_count=2;
+    if(s==PN_OK){miss="bootstrap.miss.root-unavailable";if(root_read(b->root,b->roots))b->root_count=2;
     if(root_read(b->rbak,b->roots+b->root_count))b->root_count+=2;
     if(!b->root_count)s=PN_EMPTY;
     }
-    if(s==PN_OK)s=pn_cache_file_load(media,guard,b->path,load_one,b);
+    if(s==PN_OK){miss="bootstrap.miss.packet-unusable";s=pn_cache_file_load(media,guard,b->path,load_one,b);}
     if(s==PN_OK)pn_profile_observe(pool,"bootstrap.hit",PN_OK,0,NULL);
+    else pn_profile_observe(pool,miss,s,0,NULL);
     if(b->trust.ticket)(void)pn_media_release(&state,&b->trust);
     pn_free(b);
     return pn_cache_file_miss(s)?PN_EMPTY:s;

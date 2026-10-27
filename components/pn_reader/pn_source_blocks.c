@@ -133,11 +133,12 @@ static pn_status_t read_blocks(void *ctx,uint64_t off,uint8_t *out,size_t cap,si
 static pn_text_source_t wrapped(blocks_t *b){return (pn_text_source_t){b,b->raw.size,read_blocks,valid};}
 pn_status_t pn_source_blocks_open(pn_source_blocks_t *h,pn_pool_t *pool,pn_media_t *media,const pn_media_lease_t *guard,const pn_text_source_t *raw,const pn_book_id_t *book,const char *tf,const char *state,pn_text_source_t *out){
     if(!h || h->impl || !pool || !media || !guard || !raw || !book || !out)return PN_INVALID;
-    blocks_t *b=create(pool,media,guard,raw);if(!b)return PN_EMPTY;b->book=*book;
+    blocks_t *b=create(pool,media,guard,raw);if(!b){pn_profile_observe(pool,"source.blocks.miss.admission",PN_EMPTY,0,NULL);return PN_EMPTY;}b->book=*book;
+    const char *miss="source.blocks.miss.binding";
     pn_status_t s=paths(b,tf,state)?valid(b):PN_EMPTY;
-    if(s==PN_OK){if(root_read(b->root,b->roots))b->root_count=2;if(root_read(b->rbak,b->roots+b->root_count))b->root_count+=2;if(!b->root_count)s=PN_EMPTY;}
-    if(s==PN_OK)s=pn_cache_file_load(media,guard,b->path,load_one,b);
-    if(s!=PN_OK){pn_free(b->hashes);pn_free(b);return pn_cache_file_miss(s)?PN_EMPTY:s;}
+    if(s==PN_OK){miss="source.blocks.miss.root-unavailable";if(root_read(b->root,b->roots))b->root_count=2;if(root_read(b->rbak,b->roots+b->root_count))b->root_count+=2;if(!b->root_count)s=PN_EMPTY;}
+    if(s==PN_OK){miss="source.blocks.miss.packet-unusable";s=pn_cache_file_load(media,guard,b->path,load_one,b);}
+    if(s!=PN_OK){pn_profile_observe(pool,miss,s,0,NULL);pn_free(b->hashes);pn_free(b);return pn_cache_file_miss(s)?PN_EMPTY:s;}
     b->ready=b->partial=true;h->impl=b;*out=wrapped(b);pn_profile_observe(pool,"source.blocks.hit",PN_OK,0,NULL);return PN_OK;
 }
 pn_status_t pn_source_blocks_capture(pn_source_blocks_t *h,pn_pool_t *pool,pn_media_t *media,const pn_media_lease_t *guard,const pn_text_source_t *raw,pn_text_source_t *out){
