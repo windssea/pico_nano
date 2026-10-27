@@ -1893,5 +1893,13 @@
     "tests/host/test_txt_resume_pending.py": "0e2d2c510aa77a6b057d439a911241725a4856ef3d094af99d0b3e0df045774f",
     "tests/host/test_exit_checkpoint.c": "f76361d22ac2621a99f094fea1602ae4412c9eea76bea3bb6573a0cfa98dae60",
     "tests/host/CMakeLists.txt": "0e4c2af035598e510cbaeb418237660e8f28f6c326dbbd5eb14cc1bee7702e10"
+  },
+  "user_visual_feedback": {
+    "date": "2026-10-27",
+    "firmware_elf_prefix": "d65ba909f",
+    "scope": "Final diagnostic firmware: text body, page turns and return to home; observed misalignment, obvious ghosting or abnormal flicker.",
+    "response": "画面正常，无明显异常",
+    "source": "Direct human reply to the final device observation question",
+    "instrumented_optical_measurement": false
   }
 }
