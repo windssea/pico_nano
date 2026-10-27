@@ -362,7 +362,7 @@
     "Single device sample, no P95/worst-case claim.",
     "RTS reset with a known TF and cached books, not first-ever opening or physical power loss.",
     "Diagnostic configuration disables real lock sleep; no long-sleep or power validation.",
-    "Digital returned-page equality excludes top 32 rows; no new optical ghosting confirmation and no NEXT screenshot in this protocol.",
+    "Digital returned-page equality excludes top 32 rows; the user subsequently reported normal transitions with no obvious abnormalities for this batch. No instrumented optical measurement or separate NEXT screenshot.",
     "Shao first NEXT is 75 ms slower end-to-end; its display job grew 78 ms while pre-display latency fell 3 ms. Shao PREV is 391 ms slower, including resume-packet reading and longer display job.",
     "First loading feedback is slower in both final samples.",
     "Five-second quiet admission reduces rapid-navigation collisions with optional writes, but cannot preempt an individual filesystem capacity/sync call."
@@ -444,5 +444,10 @@
       "bytes": 711,
       "sha256": "47e729af330990b1f9232ea137bca3161488d55ed96b5aeb819f8b9c1843d0fc"
     }
-  ]
+  ],
+  "user_observation": {
+    "feedback": "切换正常，没有明显异常",
+    "scope": "Book loading-to-body and page-turn transitions in this hardware test batch. The reply did not separately identify each run or binary.",
+    "method": "User visual observation, not instrumented optical measurement."
+  }
 }
