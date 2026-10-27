@@ -714,11 +714,14 @@ static pn_status_t toolbar_close(library_t *s,bool refresh){
 static pn_status_t return_to_shelf(library_t *s,uint64_t now){
     stats_flush(s);
     bookmark_lock_capture(s);
+    // 与设备一致，退出首帧合并已验证RAM预览；后台日志提交不授予额外来源信任。/ Match the device by merging a verified RAM preview for the exit frame; deferred journal commits grant no extra source trust.
+    pn_recent_item_t preview;bool has_preview=s->recent_loaded && s->recent &&
+        (s->epub.impl?pn_epub_app_recent_item(&s->epub,&preview):pn_reader_app_recent_item(&s->reader,&preview))==PN_OK;
     pn_status_t status=PN_EMPTY;
     if(reading(s) && s->last_read_known && !s->toc.active && !s->fonts.active && !s->styles.active && !s->jumpui.active && s->bookmarks.mode==PN_BUI_CLOSED)
         status=pn_hot_session_park(&s->hot,s->pool,&s->media,s->last_read.path,1,now,&s->reader,&s->epub);
     if(status==PN_EMPTY || status==PN_BUSY)status=active_close(s,now);
-    s->recent_loaded=false;
+    s->recent_loaded=status==PN_OK && has_preview && pn_recent_preview(s->recent,&preview,NULL)==PN_OK;
     printf("library_hot park=%zu retained=%d status=%d\n",s->hot.parks,s->hot.media!=NULL,(int)status);
     if(status==PN_OK){pn_toc_ui_close(&s->toc);pn_bookmark_ui_cancel(&s->bookmarks);pn_style_ui_close(&s->styles);pn_jump_ui_close(&s->jumpui);pn_font_ui_close(&s->fonts);pn_sdl_async_text(&s->async,false);if(s->home)status=page(s,false,true);else{covers_reset(s);status=draw(s);}printf("library_return status=%d\n",(int)status);}return status;
 }
