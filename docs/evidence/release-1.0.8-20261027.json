@@ -1,0 +1,128 @@
+{
+  "version": "1.0.8",
+  "source_commit": "090944f4eb92de1b7fec24796125267a917b2680",
+  "documentation_commit": "c3d07dfb5f434089c02a16a1ebef67c9affd8136",
+  "formal_release": "https://github.com/windssea/pico_nano/releases/tag/v1.0.8",
+  "latest_stable": true,
+  "assets": [
+    {
+      "name": "PicoNano-090944f-upgrade.zip",
+      "bytes": 3530972,
+      "sha256": "2e48b656f2a9464ee87427d9606f363381d183fcb20cda59850829a472a0d7f8"
+    },
+    {
+      "name": "PicoNano-090944f-full.zip",
+      "bytes": 3545378,
+      "sha256": "ad56434d4e98840ecba2c9a3c3d769cddfb6faa76a82eef9d4af26f473467fee"
+    },
+    {
+      "name": "PicoNano-web-installer-090944f.zip",
+      "bytes": 7405295,
+      "sha256": "6fcb5a31927a58f3ad5729cffcdf902a825296d4df505ecd2aff1276933b9fa6"
+    },
+    {
+      "name": "PicoNano-090944f-ota.bin",
+      "bytes": 5390224,
+      "sha256": "bfdf7508da34769d421add4d7b32bd91965da61cdee29ae4b8be81ed453dbbda"
+    },
+    {
+      "name": "PicoNano-ota-manifest.bin",
+      "bytes": 576,
+      "sha256": "10307f593709beb1d9b110e81770066608a4a3648ee5efe059413e9c8d1dcd6a"
+    },
+    {
+      "name": "SHA256SUMS",
+      "bytes": 471,
+      "sha256": "1c98e4cca4bb58b605b7340f15025dc989c1c9f087a26a96ffeecf4a8376058f"
+    }
+  ],
+  "builds": {
+    "build-board": {
+      "app_bytes": 5390224,
+      "app_sha256": "bfdf7508da34769d421add4d7b32bd91965da61cdee29ae4b8be81ed453dbbda",
+      "elf_sha256": "bf6e63f88c878a5ae1123962ec8ed4dd0174fb8075467b96eddde10fbfc7aa51",
+      "bootloader_bytes": 21232,
+      "bootloader_sha256": "eea61fc4d56ccd8f3e534839e41b50135b834f058b53aed3c6cbcbd432979373",
+      "slot_free_bytes": 901232,
+      "slot_free_percent": 14.325,
+      "spiram_mhz": 120
+    },
+    "build-ci-s3": {
+      "app_bytes": 5497632,
+      "app_sha256": "ca496e43f4cc29806094408c401178eaef279b42bb4a6fdb85705cb73a4f24ab",
+      "elf_sha256": "11928b681137b02b520dc7e61c02744d836be39cb322eb53a1ff871f45f8fa53",
+      "bootloader_bytes": 21232,
+      "bootloader_sha256": "20a5c919206f547b6c5d9966c5fd9e34358bb81a9a775a721428016f07cc2e1f",
+      "slot_free_bytes": 793824,
+      "slot_free_percent": 12.617,
+      "spiram_mhz": 80
+    }
+  },
+  "qualified_bootloader": {
+    "old_signed_manifest_verified": true,
+    "qualified_bootloader_commit": "3c63c464f79479c209cd11ea8d8c0ff6c17bf414",
+    "bootloader_sha256": "80193053e7c398d196e87db7b63a1eaf008ea5f368d35f918c094d5b804652e1",
+    "public_key_unchanged": true
+  },
+  "firmware_inputs_unchanged_after_build": true,
+  "software": {
+    "host": 286,
+    "headless": 2,
+    "tools_python": 58,
+    "installer_python": 18,
+    "installer_node": 25,
+    "transfer_node": 15,
+    "sdl_first": {
+      "passed": 47,
+      "total": 52
+    },
+    "sdl_followup": {
+      "passed": 8,
+      "affected_failures": 5
+    },
+    "sdl_single_full_green_run": false,
+    "remote_host_run": 40475457360,
+    "remote_sdl": "dependency install stalled; superseded run cancelled; local complete coverage retained"
+  },
+  "distribution": {
+    "github_anonymous_downloads": 6,
+    "pages_images": 9,
+    "pages_scripts": 4,
+    "pages_url": "https://windssea.github.io/pico_nano/",
+    "gitee_workflow": 40475524438,
+    "gitee_url": "https://gitee.com/windssea/pico_nano/releases/tag/v1.0.8",
+    "gitee_assets_anonymously_verified": 6
+  },
+  "hardware": {
+    "new_flashes": 0,
+    "new_performance_rounds": 0,
+    "retained_version": "1.0.7-diag",
+    "retained_elf_sha256": "b0cc2d23e3d50c8732ac4536a464fbbc1fceeff7c41a2ed8e9eede3d7e731a94",
+    "formal_image_hardware_acceptance": false
+  },
+  "corrections": [
+    "Old forced-recent-invalidation test replaced with identity/progress/ownership checks.",
+    "Simulator exit now merges the same RAM preview already used by the device; five failures recovered.",
+    "Missing cryptography in initial Python interpreter resolved by existing signing environment.",
+    "Unpublished package documentation finalized and Windows CRLF normalized; app/OTA bytes unchanged."
+  ],
+  "limits": [
+    "Per-open used-block/dependency validation retains the documented source contract.",
+    "Known NEXT/PREV timing increases remain in device evidence; no new performance claim.",
+    "No new deep-sleep, optical-instrument, power-loss, power or game hardware acceptance."
+  ],
+  "local_evidence_sha256": {
+    "build-verified.json": "b26a6c4260c93a6c3eeb03eba70f2544e8c152739ac635eda414687fae47ea45",
+    "packages-verified.json": "f627a41850c2d2825030d63d8441ebd3d901e3625e66715301479a0c78fbe4fd",
+    "chain-verified.json": "6e7f865e5291764be7cca4e0de24d429955ef2c7e7caecbfe0107b57d1799fa8",
+    "source-verified.json": "2a3b02c867dc4febcf0861b54449ff02d89dc8fefc86eb6d28ff7ce10329a975",
+    "github-verified.json": "72e7ee449f8625853e817c735b1930f6c13e8b754efcbe1ae1ef8dcc0ca02734",
+    "pages-verified.json": "c1eacb9f162508b2f82c4b7581940903aa82ea570c3f7948da487c9ba5082a54",
+    "sdl-first.log": "5d6c84bb44a9a2c4bdadce3a4be381e0c05735e71be50af32d3a9d5829d48b17",
+    "sdl-fixed.log": "e397ccfd0230c9f80e0a05d29d06ed6933e31c5833355420417a1894c68e3cb1",
+    "sdl-recent-fixed.log": "a0a7b52a895ae933f857358323d68c7855e9dcc3017ac8ede22a1f1fda225a89",
+    "host-qualified-ci.log": "2b8859bfbdbc9fb5ba19de0b45acf034cf56a8918cded0ca7ab114739c644a9f",
+    "final-main-host-ci.log": "cb1fb9d89285b6b4acf95319dc7281b3e2c9af976e13a3d2920deed329f1af9b",
+    "gitee-mirror-artifact/gitee-mirror.json": "2ba26441df48ec15cca75febd9e2034ead0572eee0fef0a106c5f207833c79d1"
+  }
+}
