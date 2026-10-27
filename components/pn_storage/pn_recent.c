@@ -54,18 +54,24 @@ pn_status_t pn_recent_load(const pn_journal_io_t *io,pn_pool_t *pool,pn_recent_s
 done:
     pn_free(bytes);pn_free(next);return status;
 }
+pn_status_t pn_recent_preview(pn_recent_snapshot_t *s,const pn_recent_item_t *item,bool *changed){
+    if(!s || s->count>PN_RECENT_MAX)return PN_INVALID;
+    size_t length;pn_status_t status=valid(item,&length);if(status!=PN_OK)return status;
+    size_t found=0;while(found<s->count && memcmp(s->items[found].book.sha256,item->book.sha256,32))found++;
+    if(found==0 && s->count && s->items[0].source_size==item->source_size && s->items[0].format==item->format && s->items[0].progress==item->progress && !strcmp(s->items[0].path,item->path)){if(changed)*changed=false;return PN_OK;}
+    size_t end=found<s->count?found:s->count<PN_RECENT_MAX?s->count:PN_RECENT_MAX-1;
+    for(size_t i=end;i>0;i--)s->items[i]=s->items[i-1];
+    if(found==s->count && s->count<PN_RECENT_MAX)s->count++;
+    s->items[0]=*item;if(changed)*changed=true;return PN_OK;
+}
 pn_status_t pn_recent_touch_notify(const pn_journal_io_t *io,pn_pool_t *pool,const pn_recent_item_t *item,pn_recent_observer_fn observer,void *ctx){
     if(!pool)return PN_INVALID;
     size_t length;pn_status_t status=valid(item,&length);if(status!=PN_OK)return status;
     pn_recent_snapshot_t *s=pn_alloc(pool,sizeof *s);if(!s)return PN_NO_MEMORY;
     status=pn_recent_load(io,pool,s);if(status==PN_EMPTY){memset(s,0,sizeof *s);status=PN_OK;}
     if(status!=PN_OK){pn_free(s);return status;}
-    size_t found=0;while(found<s->count && memcmp(s->items[found].book.sha256,item->book.sha256,32))found++;
-    if(found==0 && s->count && s->items[0].source_size==item->source_size && s->items[0].format==item->format && s->items[0].progress==item->progress && !strcmp(s->items[0].path,item->path)){if(observer)observer(ctx,s);pn_free(s);return PN_OK;}
-    size_t end=found<s->count?found:s->count<PN_RECENT_MAX?s->count:PN_RECENT_MAX-1;
-    for(size_t i=end;i>0;i--)s->items[i]=s->items[i-1];
-    if(found==s->count && s->count<PN_RECENT_MAX)s->count++;
-    s->items[0]=*item;
+    bool changed=false;status=pn_recent_preview(s,item,&changed);
+    if(status!=PN_OK || !changed){if(status==PN_OK && observer)observer(ctx,s);pn_free(s);return status;}
     size_t size=8+s->count*ENTRY_SIZE;uint8_t *bytes=pn_alloc(pool,size);if(!bytes){pn_free(s);return PN_NO_MEMORY;}
     memset(bytes,0,size);memcpy(bytes,"PNRH",4);put(bytes+4,1,2);put(bytes+6,s->count,2);
     for(size_t i=0;i<s->count;i++){uint8_t *p=bytes+8+i*ENTRY_SIZE;const pn_recent_item_t *e=&s->items[i];

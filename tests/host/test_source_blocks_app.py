@@ -52,11 +52,11 @@ with tempfile.TemporaryDirectory() as tmp:
     shutil.rmtree(reference / 'reading/resume')
     _, expected = run(binary, 'epub', book, font, reference, root / 'reference-frames')
     env = dict(os.environ, PN_BOOTSTRAP_TRUSTED='1', PN_BLOCK_EXPECTED=hashlib.sha256(original).hexdigest(), PN_RESUME_ENTRY='1')
-    for case in ('restart', 'missing', 'root-missing', 'corrupt', 'root-corrupt', 'truncated', 'backup', 'stale-temp', 'no-bootstrap'):
+    for case in ('restart', 'idle-takeover', 'idle-missing', 'missing', 'root-missing', 'corrupt', 'root-corrupt', 'truncated', 'backup', 'stale-temp', 'no-bootstrap'):
         state = root / case
         shutil.copytree(seed, state)
         p, t = state / packet.relative_to(seed), state / trusted.relative_to(seed)
-        if case == 'missing': p.unlink()
+        if case in ('missing', 'idle-missing'): p.unlink()
         elif case == 'root-missing': t.unlink()
         elif case == 'corrupt': p.write_bytes(payload[:-1] + bytes([payload[-1] ^ 1]))
         elif case == 'root-corrupt': t.write_bytes(proof[:-1] + bytes([proof[-1] ^ 1]))
@@ -69,8 +69,9 @@ with tempfile.TemporaryDirectory() as tmp:
             t.with_suffix('.pnst.tmp').write_bytes(b'incomplete')
         elif case == 'no-bootstrap':
             for f in state.rglob('*.pnb*'): f.unlink()
-        result, frames = run(binary, 'epub', book, font, state, root / (case + '-frames'), env=env)
-        hit = case in ('restart', 'backup', 'stale-temp', 'no-bootstrap')
+        case_env=dict(env,PN_BLOCK_IDLE='1') if case.startswith('idle-') else env
+        result, frames = run(binary, 'epub', book, font, state, root / (case + '-frames'), env=case_env)
+        hit = case in ('restart', 'idle-takeover', 'backup', 'stale-temp', 'no-bootstrap')
         assert result['block_hits'] == int(hit) and (result['identity_steps'] == 0) == hit, (case, result)
         assert frames == expected, (case, result)
         print(case, result, flush=True)

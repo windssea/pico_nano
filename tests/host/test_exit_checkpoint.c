@@ -14,6 +14,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 static uint8_t screen[415872], pixels[415872];
+static unsigned recent_commits; ///< 挂起不提交近期日志，释放后必须提交 / Suspend never commits recents; release must commit them
+static void recent_saved(void *ctx,const pn_recent_snapshot_t *s){(void)ctx;assert(s->count>0);recent_commits++;}
 static pn_status_t present(void *ctx, const pn_frame_t *f, pn_refresh_t profile) {
     (void)ctx;
     (void)profile;
@@ -70,6 +72,9 @@ int main(int argc, char **argv) {
             assert((epub ? pn_epub_app_identity(&e, &id) : pn_reader_app_identity(&t, &id)) == PN_OK);
             snprintf(dir, sizeof dir, "%s/resume", tf);
             assert(!packets(dir));
+            pn_recent_item_t recent_item;assert((epub?pn_epub_app_recent_item(&e,&recent_item):pn_reader_app_recent_item(&t,&recent_item))==PN_OK);
+            assert(!memcmp(&recent_item.book,&id,sizeof id) && !strcmp(recent_item.path,book));recent_commits=0;
+            if(epub)pn_epub_app_recent_observer(&e,recent_saved,NULL);else pn_reader_app_recent_observer(&t,recent_saved,NULL);
             if(mode==0){
                 pn_media_lease_t busy={0};assert(pn_media_acquire(&media,PN_MEDIA_CACHE_WRITE,&busy)==PN_OK);
                 // 显式退出检查点尝试必须保留BUSY待写；阅读idle可先让给邻页。/ An explicit exit checkpoint must retain a BUSY write; reading idle may first yield to the neighbor.
@@ -79,6 +84,7 @@ int main(int argc, char **argv) {
             }
             if (mode < 2) {
                 assert(pn_hot_session_park(&hot, &pool, &media, book, 1, 3, &t, &e) == PN_OK);
+                assert(recent_commits==0);
                 if (mode == 0) {
                     assert(pn_hot_session_deferred_flush(&hot)==PN_BUSY);
                     pn_w_set_clock("12:35");
@@ -98,11 +104,21 @@ int main(int argc, char **argv) {
                     }
                     assert(!hot.deferred_failed);
                 }
+                if(mode==1){
+                    // 近期日志不可写时，释放必须保留会话和待办；恢复路径后再可靠提交。/ If recents cannot be written, release must retain the session and pending work; save reliably after restoring the paths.
+                    char first[600],second[600];snprintf(first,sizeof first,"%s/recent.a",state);snprintf(second,sizeof second,"%s/recent.b",state);
+                    assert(!mkdir(first,0700) && !mkdir(second,0700));
+                    assert(pn_hot_session_drop(&hot)!=PN_OK && (hot.epub.impl || hot.txt.impl) && !recent_commits);
+                    assert(!rmdir(first) && !rmdir(second));
+                }
                 assert(pn_hot_session_drop(&hot) == PN_OK);
             } else {
                 assert((epub ? pn_epub_app_suspend(&e, 3) : pn_reader_app_suspend(&t, 3)) == PN_OK);
+                assert(recent_commits==0);
                 pn_status_t s = epub ? pn_epub_app_deferred_flush(&e) : pn_reader_app_deferred_flush(&t);
                 assert(s == PN_OK || s == PN_EMPTY);
+                // 锁屏的一次必要保存屏障必须同时提交进度和近期日志。/ A lock's single mandatory save barrier must commit both progress and recents.
+                assert(recent_commits>0);
                 unsigned steps = 0;
                 while (epub ? pn_epub_app_resume_checkpoint_pending(&e) : pn_reader_app_resume_checkpoint_pending(&t)) {
                     s = epub ? pn_epub_app_resume_checkpoint_step(&e) : pn_reader_app_resume_checkpoint_step(&t);
@@ -111,7 +127,7 @@ int main(int argc, char **argv) {
                 }
                 assert((epub ? pn_epub_app_close(&e, 4) : pn_reader_app_close(&t, 4)) == PN_OK);
             }
-            assert(!pool.used && !pool.live && packets(dir) == 1);
+            assert(!pool.used && !pool.live && packets(dir) == 1 && recent_commits>0);
             memcpy(pixels,screen,sizeof pixels);
             assert((epub?pn_epub_app_open_on_media(&e,&pool,&media,book,NULL,state,32,10):pn_reader_app_open_on_media(&t,&pool,&media,book,NULL,state,32,10))==PN_OK);
             assert((epub?pn_epub_app_step(&e,PN_APP_OPEN,11,present,NULL):pn_reader_app_step(&t,PN_APP_OPEN,11,present,NULL))==PN_OK);

@@ -3,6 +3,7 @@
  * English: cross-process resume pixels and timing; presentation does not simulate panel latency. */
 #define _POSIX_C_SOURCE 200809L
 #include "pn_epub_app.h"
+#include "pn_hot_session.h"
 #include "pn_profile.h"
 #include "pn_widgets.h"
 #include <stdio.h>
@@ -118,7 +119,15 @@ int main(int argc, char **argv) {
         }else if(s==PN_OK)s=pn_text_file_identity_pooled(&pool,&input,&id);
         uint64_t size=input.size;if(original.handle)(void)pn_text_file_close(&original);if(proof.ticket)(void)pn_media_release(&proof_media,&proof);
         if(s==PN_OK && getenv("PN_BOOTSTRAP_EPOCH")){s=pn_media_detach(&proof_media);if(s==PN_OK)s=pn_media_attach(&proof_media,2);}
-        pn_epub_open_job_t job={0};if(s==PN_OK)s=pn_epub_app_open_job_begin_trusted(&job,&pool,&proof_media,argv[2],argv[3],argv[4],44,0,&id,size);
+        pn_epub_open_job_t job={0};
+        if(s==PN_OK && getenv("PN_BLOCK_IDLE")){
+            // 首页已推进一轮后点击，必须接管同一个有证明的任务，而非重新全读原书。/ Click after one home-idle step: take over the same proven job without rereading the entire source.
+            pn_hot_session_t warm={0};pn_catalog_item_t item={.format=PN_BOOK_EPUB,.identified=true,.expected=id,.size=size};snprintf(item.path,sizeof item.path,"%s",argv[2]);
+            s=pn_hot_session_prepare_step(&warm,&pool,&proof_media,&item,argv[3],argv[4],44,1,0,1);
+            if(s==PN_BUSY)s=pn_hot_session_source_step(&warm,0);
+            if(s==PN_BUSY)s=pn_hot_session_take_opening(&warm,&proof_media,argv[2],&id,1,0,&job);else if(s==PN_OK)s=PN_INVALID;
+            pn_status_t dropped=pn_hot_session_drop(&warm);if(s==PN_OK)s=dropped;
+        }else if(s==PN_OK)s=pn_epub_app_open_job_begin_trusted(&job,&pool,&proof_media,argv[2],argv[3],argv[4],44,0,&id,size);
         if(s==PN_OK){unsigned count=0;do{s=pn_epub_app_open_job_advance(&job,&epub);}while(s==PN_BUSY && ++count<20000);}
         (void)pn_epub_app_open_job_close(&job);
         if(s==PN_OK && getenv("PN_BOOTSTRAP_REOPEN")){

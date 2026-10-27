@@ -45,7 +45,8 @@ int main(void){
     assert(pn_reader_app_progress(&app,&progress)==PN_OK && progress.source_offset>0);uint64_t second=progress.source_offset;
     // 进度可靠保存后，满盘索引不能阻止挂起/恢复或触发循环重试。/ After durable progress saving, a full cache cannot block suspend/resume or cause retry loops.
     assert(pn_reader_app_suspend(&app,3)==PN_OK);pn_page_index_space_port(no_index_space,NULL);
-    assert(pn_reader_app_deferred_flush(&app)==PN_OK && !pn_reader_app_deferred_pending(&app));pn_page_index_space_port(NULL,NULL);
+    for(unsigned n=0;pn_reader_app_deferred_pending(&app);n++){assert(n<512);assert(pn_reader_app_deferred_flush(&app)==PN_OK);}
+    pn_page_index_space_port(NULL,NULL);
     assert(pn_reader_app_resume(&app,3,present,&screen)==PN_OK && pn_reader_app_progress(&app,&progress)==PN_OK && progress.source_offset==second);
     assert(pn_reader_app_step(&app,PN_APP_LARGER,4,present,&screen)==PN_OK);
     assert(pn_reader_app_progress(&app,&progress)==PN_OK && progress.source_offset==second);

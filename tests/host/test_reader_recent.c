@@ -21,6 +21,9 @@ int main(void){
     assert(pn_recent_load(&io,&pool,s)==PN_EMPTY && pn_reader_app_recent_idle(&app,2)==PN_EMPTY);
     pn_txt_progress_t warm_before,warm_after;
     assert(pn_reader_app_progress(&app,&warm_before)==PN_OK && pn_reader_app_suspend(&app,2)==PN_OK);
+    // 挂起只保留待写记录，磁盘仍为空；后台完整提交后才更新持久状态。/ Suspend retains pending recents while disk stays empty; durability changes only after a complete background commit.
+    assert(pn_reader_app_recent_status(&app)==PN_EMPTY && pn_recent_load(&io,&pool,s)==PN_EMPTY);
+    for(unsigned n=0;pn_reader_app_deferred_pending(&app);n++){assert(n<512);assert(pn_reader_app_deferred_flush(&app)==PN_OK);}
     assert(pn_reader_app_recent_status(&app)==PN_OK && pn_recent_load(&io,&pool,s)==PN_OK && s->count==1 && !strcmp(s->items[0].path,book) && s->items[0].progress==0);
     assert(pn_reader_app_resume(&app,2,present,&fail)==PN_OK && pn_reader_app_progress(&app,&warm_after)==PN_OK && warm_before.source_offset==warm_after.source_offset);
     assert(pn_reader_app_step(&app,PN_APP_NEXT,3,present,&fail)==PN_OK);assert(pn_reader_app_close(&app,4)==PN_OK && !app.impl);

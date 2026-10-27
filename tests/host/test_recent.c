@@ -29,6 +29,13 @@ int main(void){
     assert(pn_recent_touch_notify(&failed,&pool,&alias,observe,&published)==PN_IO && observed==1);
     assert(pn_recent_touch_notify(&io,&pool,&alias,observe,&published)==PN_OK && observed==2 && published.items[0].progress==alias.progress);
     assert(pn_recent_load(&io,&pool,s)==PN_OK && !memcmp(s,&published,sizeof published));
+    // 展示合并立即生效，磁盘仍保留旧提交；后续日志保存使用相同排序/去重。/ Display merges take effect immediately while disk retains the old commit; later saves use the same ordering/deduplication.
+    pn_recent_item_t preview=alias;preview.book.sha256[0]=99;preview.progress=4321;bool changed=false;
+    assert(pn_recent_preview(s,&preview,&changed)==PN_OK && changed && s->items[0].progress==4321 && s->count==PN_RECENT_MAX);
+    assert(pn_recent_preview(s,&preview,&changed)==PN_OK && !changed);
+    assert(pn_recent_load(&io,&pool,s)==PN_OK && s->items[0].book.sha256[0]==alias.book.sha256[0]);
+    assert(pn_recent_preview(s,&preview,&changed)==PN_OK && pn_recent_touch(&io,&pool,&preview)==PN_OK);
+    assert(pn_recent_load(&io,&pool,&published)==PN_OK && !memcmp(s,&published,sizeof published));
     failed=io;failed.read=fail_read;assert(pn_recent_touch_notify(&failed,&pool,&alias,observe,&published)!=PN_OK && observed==2);
     alias.path[0]=(char)0xc0;assert(pn_recent_touch(&io,&pool,&alias)==PN_INVALID);
     assert(pn_media_detach(&media)==PN_OK);assert(pn_recent_load(&read,&pool,s)==PN_STALE_MEDIA && s->count==20);alias.path[0]='/';assert(pn_recent_touch_notify(&read,&pool,&alias,observe,&published)==PN_STALE_MEDIA && observed==2);

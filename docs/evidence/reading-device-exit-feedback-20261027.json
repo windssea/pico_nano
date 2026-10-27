@@ -1,0 +1,212 @@
+{
+  "schema": 1,
+  "date": "2026-10-27",
+  "kind": "exit first frame / opening feedback / identified idle EPUB takeover; saved baseline, final samples and single targeted regression check",
+  "baseline_evidence": "reading-device-source-blocks-20261027.json",
+  "device": {
+    "board": "RDP-G01-W / E0470A01",
+    "chip": "ESP32-S3 rev0.2",
+    "idf": "v6.1",
+    "native_pixels": [
+      684,
+      1216
+    ],
+    "gray_levels": 16
+  },
+  "final_image": {
+    "base_source": "be0fb118f1319b060d9fcff8ec221fd43d62513c",
+    "version": "1.0.7-diag",
+    "elf_sha256": "b59cca89b9f1c8cf86fab4bd1f7bfb5e93073f4cf29b271da0626adc973ecc50",
+    "bytes": 5543552,
+    "sha256": "206bc8d70a6ee24a3fcee3e4fd467a1ab30aa60978cd2a376a5e8e8986a084e7",
+    "slot_free": 747904,
+    "slot_free_percent": 11.887613932291668
+  },
+  "samples": [
+    {
+      "role": "baseline",
+      "book": "shao",
+      "loader_begin_ms": 811,
+      "loader_complete_ms": 1595,
+      "open_body_ms": 2894,
+      "open_ready_ms": 2925,
+      "next_ms": 1178,
+      "prev_ms": 1437,
+      "exit_ms": 1974,
+      "exit_before_display_ms": 1403,
+      "exit_display_ms": 571,
+      "opening_jobs": 2,
+      "bootstrap_hits": 1,
+      "resume_hits": 2,
+      "source_memo_hits": 0,
+      "status": "status t=19431 view=0003000f body=1 paused=0 events=23 touch_reads=371 touch_errors=0 gesture=0 dropped=0"
+    },
+    {
+      "role": "final",
+      "book": "shao",
+      "loader_begin_ms": 288,
+      "loader_complete_ms": 1090,
+      "open_body_ms": 3413,
+      "open_ready_ms": 3448,
+      "next_ms": 1187,
+      "prev_ms": 1478,
+      "exit_ms": 1047,
+      "exit_before_display_ms": 475,
+      "exit_display_ms": 572,
+      "opening_jobs": 2,
+      "bootstrap_hits": 1,
+      "resume_hits": 2,
+      "source_memo_hits": 0,
+      "status": "status t=20165 view=0003000f body=1 paused=0 events=23 touch_reads=385 touch_errors=0 gesture=0 dropped=0"
+    },
+    {
+      "role": "baseline",
+      "book": "ming",
+      "loader_begin_ms": 1348,
+      "loader_complete_ms": 2093,
+      "open_body_ms": 3306,
+      "open_ready_ms": 3319,
+      "next_ms": 1175,
+      "prev_ms": 1434,
+      "exit_ms": 2020,
+      "exit_before_display_ms": 1452,
+      "exit_display_ms": 568,
+      "opening_jobs": 2,
+      "bootstrap_hits": 1,
+      "resume_hits": 2,
+      "source_memo_hits": 0,
+      "status": "status t=20077 view=0003000f body=1 paused=0 events=23 touch_reads=387 touch_errors=0 gesture=0 dropped=0"
+    },
+    {
+      "role": "final",
+      "book": "ming",
+      "loader_begin_ms": 318,
+      "loader_complete_ms": 1128,
+      "open_body_ms": 3381,
+      "open_ready_ms": 3397,
+      "next_ms": 1181,
+      "prev_ms": 1456,
+      "exit_ms": 1230,
+      "exit_before_display_ms": 661,
+      "exit_display_ms": 569,
+      "opening_jobs": 2,
+      "bootstrap_hits": 1,
+      "resume_hits": 2,
+      "source_memo_hits": 0,
+      "status": "status t=19975 view=0003000f body=1 paused=0 events=23 touch_reads=381 touch_errors=0 gesture=0 dropped=0"
+    }
+  ],
+  "frames": [
+    {
+      "book": "shao",
+      "excluded_top_rows": 32,
+      "equal": false,
+      "changed_pixels": 171199,
+      "baseline_pixel_sha256": "9ed0e37a65e95e8ce60b5e06ec5d4652bef52a6b85c0b1b07aea2455cf1b1e09",
+      "final_pixel_sha256": "b7afeee4fbda8fe643f4c41b5037500887313c52ea0f65f06910267b2ca07f39"
+    },
+    {
+      "book": "ming",
+      "excluded_top_rows": 32,
+      "equal": true,
+      "changed_pixels": 0,
+      "baseline_pixel_sha256": "e4034595445289ffcb952da3811de9bdb7bff62be5e6d213416575991809efba",
+      "final_pixel_sha256": "e4034595445289ffcb952da3811de9bdb7bff62be5e6d213416575991809efba"
+    }
+  ],
+  "frame_limitations": [
+    "Shao baseline is section 11; final is section 12; not same-page evidence.",
+    "Final Shao exactly matches saved intermediate section-12 digital frame.",
+    "Final Ming matches saved primary baseline and targeted idle-takeover frame; only top 32 clock/battery rows excluded."
+  ],
+  "manual_slow_open": {
+    "kind": "User-reported slow Ming opening, passive existing-log evidence",
+    "request_ms": 12893.153,
+    "background_job_wall_ms": 23818.593,
+    "source_bytes": 9695903,
+    "diagnosis": "pn_hot_session_prepare_step used untrusted open_job_begin despite an identified book; clicking took over the full-file verification job."
+  },
+  "targeted_idle_takeover": {
+    "protocol": "reset; wait home and actual idle-prepare start; tap Continue Reading; no NEXT/PREV performance sample",
+    "open_ready_ms": 3603,
+    "identity_steps": 0,
+    "block_hits": 1,
+    "source_memo_hits": 0
+  },
+  "health": {
+    "observed_pool_peak": 3583011,
+    "pool_limits": [
+      6217360
+    ],
+    "panic_assert_lines": [],
+    "sd_init_failure_lines": [],
+    "display_errors": [],
+    "heap_lines": [
+      "1793079787.870 PNT 794212 heap internal=77355 internal_largest=32768 internal_min=37384 psram=3377252 psram_largest=2949120 psram_min=2959972"
+    ],
+    "version_lines": [
+      "1793079423.353 PNT 794181 ok version product=1.0.7 app=1.0.7-diag idf=v6.1 elf=b59cca89b",
+      "1793079787.654 PNT 794211 ok version product=1.0.7 app=1.0.7-diag idf=v6.1 elf=b59cca89b"
+    ]
+  },
+  "flash_audit": {
+    "active_application": {
+      "version": "1.0.7-diag",
+      "elf_sha256": "b59cca89b9f1c8cf86fab4bd1f7bfb5e93073f4cf29b271da0626adc973ecc50"
+    },
+    "original_ota0_full_partition_md5": "d0606f9671b5df4d60574c9cdf436fed",
+    "selectors": [
+      {
+        "offset": "0xf000",
+        "sequence": 17,
+        "state": 2,
+        "slot": 0
+      },
+      {
+        "offset": "0x10000",
+        "sequence": 20,
+        "state": 2,
+        "slot": 1
+      }
+    ],
+    "unchanged_protection": {
+      "boot": true,
+      "partition": true,
+      "nvs": true,
+      "phy_and_gap": true
+    }
+  },
+  "memory_limits_changed": false,
+  "validation": {
+    "storage_and_save_barriers": "9 related tests passed before final idle change",
+    "idle_trusted_entry": "6 tests passed including authenticated source blocks with immutable/normal policies and idle takeover/missing-table fallback",
+    "final_control": "opening_feedback and identity_takeover passed",
+    "firmware": "ESP-IDF v6.1 project diagnostic build and OTA size check passed",
+    "simulator": "visible SDL rebuilt/restarted; not panel evidence"
+  },
+  "limitations": [
+    "Single samples; no P95, power or physical power-cycle claim.",
+    "No byte-identical TF snapshot restored; necessary fallback/software fault injection separate from timing.",
+    "Shao final open +519 ms versus saved baseline; read/decode/footer stages slower, stable regression versus TF/filesystem variance unresolved; not declared universally faster.",
+    "Visual user feedback predates final idle-entry fix; final digital frames and successful display receipts are separate evidence.",
+    "Debug console inhibits real light sleep; long-lock behavior still requires separate validation."
+  ],
+  "local_evidence_root": "build-dev/exit-feedback-takeover-20261027",
+  "local_file_sha256": {
+    "image.json": "32f800472d44cda43012caefc768348e74e9f01753c4f07b417d0f3a269e9101",
+    "source-files.json": "abc300d2418a7a8c30c1eab336807b3f89455993c62ebeb2cf157285eb37c7e0",
+    "source.patch": "c7ace7fdc47a570210e12679a62b2b9c77443ed08a7d10af28ffc0ddbaf27b8f",
+    "analysis.json": "39ac56fd7a036143f9c220357a3336494bdf6bc13d27ea39f8d6d231a3ee5ff2",
+    "after/serial.log": "f8d6d13a5283634a0b59c3116f521e649102e46241841a9527248d41fed9a465",
+    "after/shao.json": "bcb6fb74b6053319877710ae15eb8c402fcd838472f6c8f891bae241298720c8",
+    "after/ming.json": "ad1a5808a21ec850eb402bd3e9429d75fcbc3e12148dd9ea27cb780876916e67",
+    "idle-ming.json": "94625968e9a85985735e96c89ea977e0f6c8debde2d5f5ee5a04998e0dd9ccab",
+    "flash/after-audit.json": "cff083b4a2c49be532de718695ea4ca65987627d300eded6310cea52dd44cbfc",
+    "flash/verify-whole-app.log": "e6a36448cbfa651c54a0aedd97858c9a9193c04b79f42b5873c28fcc7cbac185",
+    "verified.log": "861cd405a325f7b1c05063d244d8b76e4007c8c7972a483727c08080d624df91",
+    "control-verified.log": "ba550b48156e05d193d75d70f04dc0b4ae1fbaf778b7d213056aad5b64477450",
+    "identity-control.log": "9fc04d6993cf7d418b6b025c84da7c310613b07eba37387c1c0d4f4a9cccb2f2"
+  },
+  "release": false,
+  "device_final_state": "Home, diagnostic image b59cca89b, serial server stopped; no release."
+}

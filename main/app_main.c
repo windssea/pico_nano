@@ -303,14 +303,14 @@ static void filter_recent_available(pn_recent_snapshot_t *snapshot){
     }
     snapshot->count=kept;
 }
-/// 同一退出范围只复用已成功保存的快照，失效介质或分配失败沿原重载退路。/ Reuse only saved snapshots within this exit scope; stale media or allocation failure keeps the reload fallback.
+/// 复用同代展示快照并合并已确认条目；日志提交仍独立，失效沿原重载退路。/ Reuse same-epoch display snapshots and merge confirmed items; journal commits stay separate and stale state reloads.
 static uint64_t recent_observer_epoch;
 static void recent_saved(void *ctx,const pn_recent_snapshot_t *snapshot){
     (void)ctx;if(!recent_snapshot || !sd_media.available || sd_media.epoch!=recent_observer_epoch)return;
     *recent_snapshot=*snapshot;filter_recent_available(recent_snapshot);recent_epoch=sd_media.epoch;recent_loaded=true;
 }
 static void reader_recent_observe(void){
-    recent_loaded=false;recent_observer_epoch=sd_media.epoch;
+    recent_observer_epoch=sd_media.epoch;
     if(epub.impl)pn_epub_app_recent_observer(&epub,recent_saved,NULL);else pn_reader_app_recent_observer(&reader,recent_saved,NULL);
 }
 static void *psram_alloc(void *ctx,size_t size){(void)ctx;return heap_caps_malloc(size,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);}
@@ -1002,12 +1002,15 @@ static bool stop_reader_impl(bool retain){
     if(!reader_active()){pn_toc_ui_close(&toc);pn_bookmark_ui_cancel(&bookmarks);pn_style_ui_close(&styles);pn_jump_ui_close(&jump_ui);pn_font_ui_close(&fonts);return true;}
     reader_recent_observe();
     pn_book_id_t id;bool identified=(epub.impl?pn_epub_app_identity(&epub,&id):pn_reader_app_identity(&reader,&id))==PN_OK;
+    pn_recent_item_t preview;bool has_preview=retain && recent_loaded && recent_snapshot && recent_epoch==sd_media.epoch && (epub.impl?pn_epub_app_recent_item(&epub,&preview):pn_reader_app_recent_item(&reader,&preview))==PN_OK;
     pn_status_t status=PN_EMPTY;
     if(retain && !toolbar_open && !toc.active && !fonts.active && !styles.active && !jump_ui.active && bookmarks.mode==PN_BUI_CLOSED)
         status=pn_hot_session_park(&hot_session,&pool,&sd_media,selected_path,1,now_ms(),&reader,&epub);
     if(status==PN_EMPTY || status==PN_BUSY){reader_checkpoint_current();status=active_close(now_ms());}
     if(status!=PN_OK && reader_active()){ESP_LOGE(TAG,"Save barrier failed: %d; session retained",(int)status);message("保存失败","仍保留当前位置\n修复内部存储后重试");return false;}
     if(status!=PN_OK)recent_loaded=false; // 保存未确认则沿原读取路径。/ Reload when saving was not confirmed.
+    // 只提前更新展示，不能将RAM合并当作日志已提交。/ Update display only; a RAM merge never means the journal committed.
+    if(status==PN_OK && has_preview && pn_recent_preview(recent_snapshot,&preview,NULL)==PN_OK){recent_epoch=sd_media.epoch;recent_loaded=true;}
     if(status==PN_OK && identified){memset(&last_read_book,0,sizeof last_read_book);last_read_book.format=selected_format;last_read_book.expected=id;last_read_book.identified=true;
         snprintf(last_read_book.path,sizeof last_read_book.path,"%s",selected_path);const char *name=strrchr(selected_path,'/');name=name?name+1:selected_path;
         size_t length=strlen(name);if(length<sizeof last_read_book.name)memcpy(last_read_book.name,name,length+1); // 超长名保留完整路径/身份，不切断UTF8。/ Keep full path/identity for overlong names without splitting UTF-8.
@@ -1664,6 +1667,7 @@ static void start_reader_impl(void){
     if(!reader_active() && *selected_path){
         if(pn_hot_session_source_selected(&hot_session,&sd_media,selected_path,selected_format,selected_identified?&selected_expected:NULL,1,now_ms())){
             pn_status_t loading=show_loading(selected_path);if(loading==PN_CANCELLED)return;
+            if(loading==PN_OK)loading_shown=true;
             if(loading!=PN_OK)ESP_LOGW(TAG,"Opening feedback unavailable: %d",(int)loading);
             pn_status_t moved=pn_hot_session_take_opening(&hot_session,&sd_media,selected_path,selected_identified?&selected_expected:NULL,1,now_ms(),&foreground_open);
             if(moved==PN_OK)return;
@@ -1680,6 +1684,10 @@ static void start_reader_impl(void){
     }
     if(*selected_path && !loading_shown && !sd_media.available){
         pn_status_t feedback=show_loading_resident();if(feedback==PN_CANCELLED)return;
+    }
+    // 另一册保留对象可能需同步收口；先显示新选择的固定封面，不在反馈前释放冻结页。/ Another retained book may need synchronous saving: show the newly selected fixed cover before releasing its frozen page.
+    if(*selected_path && selected_format==PN_BOOK_EPUB && !loading_shown && !hot_session.prepared && (hot_session.epub.impl || hot_session.txt.impl)){
+        pn_status_t feedback=show_loading(selected_path);if(feedback==PN_CANCELLED)return;if(feedback==PN_OK)loading_shown=true;
     }
     bool had_loading=loading_shown;
     if(!stop_reader())return;
@@ -1724,12 +1732,14 @@ static void start_reader_impl(void){
         pn_status_t status=fast?pn_epub_app_open_job_begin_trusted(&foreground_open,&pool,&sd_media,selected_path,font,"/data/progress",PN_STYLE_DEFAULT_PIXELS,now_ms(),&selected_expected,selected_size)
             :pn_epub_app_open_job_begin(&foreground_open,&pool,&sd_media,selected_path,font,"/data/progress",PN_STYLE_DEFAULT_PIXELS,now_ms());if(status!=PN_OK){reader_open_result(status);return;}
         opening_overlap_result=PN_BUSY;loading_layout_ready=false;
-        if(need_loading && !pn_font_system_available()){
-            opening_overlap=opening_sources_only=true;pn_status_t loading=show_loading_resident();opening_overlap=opening_sources_only=false;
+        // 第一轮耗时步骤之前提交反馈；字体已就绪时复用完整扫描重叠，否则只推进来源。/ Submit feedback before expensive steps; reuse full scan overlap when fonts are ready, otherwise advance sources only.
+        if(need_loading){
+            bool ready=pn_font_system_available();opening_overlap=true;opening_sources_only=!ready;pn_status_t loading=ready?show_loading(selected_path):show_loading_resident();opening_overlap=opening_sources_only=false;
             if(loading==PN_CANCELLED){reader_open_result(loading);return;}
+            if(loading==PN_OK)loading_shown=true;
         }
         system_font_ready();
-        if(opening_overlap_result!=PN_BUSY){reader_open_result(opening_overlap_result);return;}
+        if(opening_overlap_result!=PN_BUSY){if(opening_overlap_result!=PN_OK)reader_open_result(opening_overlap_result);return;}
         if(need_loading && !loading_shown && pn_epub_app_open_job_feedback_due(&foreground_open)){loading_shown=true;opening_overlap=true;pn_status_t loading=show_loading(selected_path);opening_overlap=false;if(loading!=PN_OK && loading!=PN_CANCELLED)ESP_LOGW(TAG,"Opening feedback unavailable: %d",(int)loading);}
         return;}
     if(need_loading && !pn_font_system_available()){pn_status_t feedback=show_loading_resident();if(feedback==PN_CANCELLED){reader_open_result(feedback);return;}}
@@ -1783,7 +1793,7 @@ static void start_reader_finish(void){
     if(opening_mount && sd_recovery.pending)return;
     if(identity_takeover_active || index_gate)return;
     if(foreground_open.impl)return;
-    loading_shown=false;
+    if(!opening)loading_shown=false;
     if(opening && !foreground_open.impl){if(opening_overlap_result!=PN_BUSY)(void)tick_opening();else opening_controls(false);}
 }
 static void start_reader(void){

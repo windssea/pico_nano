@@ -32,14 +32,16 @@ pn_status_t pn_reader_app_verify_unshown(pn_reader_app_t *);
 pn_status_t pn_reader_app_discard_unshown(pn_reader_app_t *);
 /// 只接受已保存挂起会话，校验原书/字体源，不绘制或推进位置。/ Accept only a saved suspended session and verify original book/font sources without drawing or advancing position.
 pn_status_t pn_reader_app_retained_ready(pn_reader_app_t *);
-/// 挂起后有延后的进度或页码索引待写 / Deferred progress or page-index records await writing after suspend
+/// 挂起后有延后的进度、近期记录或可重建缓存待写 / Deferred progress, recents or rebuildable caches await writing after suspend
 bool pn_reader_app_deferred_pending(const pn_reader_app_t *);
-/// 先写延后的阅读进度再写页码索引；挂起后也可调用。失败保留待写，释放/关闭仍强制写出。
-/// Write deferred reading progress, then the page index; callable while suspended. Failures stay pending and release/close still force the writes.
+/// 导出已确认页的近期展示条目，不读写文件，不替代逐书位置。/ Export the confirmed page's recent display item without I/O or replacing per-book progress.
+pn_status_t pn_reader_app_recent_item(const pn_reader_app_t *,pn_recent_item_t *);
+/// 先提交必要的进度及近期日志，再推进缓存；挂起后可调用。失败保留待写，释放/关闭强制写出。
+/// Commit mandatory progress and recents before advancing caches, also while suspended; failures stay pending and release/close force saving.
 pn_status_t pn_reader_app_deferred_flush(pn_reader_app_t *);
 /// 验证选择的路径/介质就是当前会话的源，不读文件内容。/ Verify the selected path/media are this session's source, without content reads.
 pn_status_t pn_reader_app_retained_source(const pn_reader_app_t *,pn_media_t *,const char *);
-/// 仅释放已保存挂起会话，不重写进度/最近记录；失败候选返回BUSY。/ Release only a saved suspended session without rewriting progress/recents; uncommitted candidates return BUSY.
+/// 释放前提交未完成的进度/近期记录；失败保留对象，未确认候选返回BUSY。/ Commit pending progress/recents before release; failures retain the object and unconfirmed candidates return BUSY.
 pn_status_t pn_reader_app_release_retained(pn_reader_app_t *);
 /// 空闲预排下一页，不呈现/写进度；候选设置和睡眠时跳过。/ Idle next-page preparation without display/progress writes; skip draft settings and sleep.
 pn_status_t pn_reader_app_prefetch(pn_reader_app_t *app);

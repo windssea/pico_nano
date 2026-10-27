@@ -32,7 +32,9 @@ int main(int argc,char **argv){
     screen.fail=false;assert(pn_epub_app_step(&app,PN_APP_OPEN,now++,present,&screen)==PN_OK && pn_epub_app_progress(&app,&first)==PN_OK);pn_book_display_t metadata;assert(pn_epub_app_book_display(&app,&metadata)==PN_OK);uint64_t first_hash=screen.hash;assert(pn_epub_app_bookmark_add(&app,"第一页",&mark_id)==PN_OK && mark_id==1);
     assert(pn_epub_app_suspend(&app,now++)==PN_OK && app.impl);
     // 缓存满盘不改变已保存位置，也不阻止正常唤醒。/ A full optional cache neither changes saved progress nor prevents normal resume.
-    pn_page_index_space_port(no_index_space,NULL);assert(pn_epub_app_deferred_flush(&app)==PN_OK && !pn_epub_app_deferred_pending(&app));pn_page_index_space_port(NULL,NULL);
+    pn_page_index_space_port(no_index_space,NULL);
+    for(unsigned n=0;pn_epub_app_deferred_pending(&app);n++){assert(n<512);assert(pn_epub_app_deferred_flush(&app)==PN_OK);}
+    pn_page_index_space_port(NULL,NULL);
     assert(pn_epub_app_resume(&app,now++,present,&screen)==PN_OK && screen.hash==first_hash && pn_epub_app_progress(&app,&current)==PN_OK && same(&first,&current));
     assert(pn_epub_app_suspend(&app,now++)==PN_OK);
     screen.fail=true;assert(pn_epub_app_resume(&app,now++,present,&screen)==PN_IO && pn_epub_app_progress(&app,&current)==PN_OK && same(&first,&current));

@@ -9,6 +9,8 @@
 static void clear(pn_hot_session_t *h){h->path[0]=0;h->media=NULL;h->epoch=h->policy=h->at=0;h->prepared=false;h->prepare_pool=NULL;h->layout_pending=false;h->deferred_failed=false;}
 pn_status_t pn_hot_session_drop(pn_hot_session_t *h){
     if(!h)return PN_INVALID;
+    // 显式释放是新的保存尝试，须重试曾失败的日志和当前页；空闲仍保留失败限流。/ Explicit release starts a new saving attempt for failed journals/current pages; idle failure throttling remains intact.
+    h->deferred_failed=false;
     // 释放冻结帧前尽力收口当前页；不新增画布，失败仍由原进度保存屏障处理。/ Best-effort current-page checkpoint before freeing the frozen frame; no new canvas, with the original progress barrier retaining authority.
     if(!h->prepared && (h->epub.impl || h->txt.impl)){
         uint64_t began=pn_profile_time();unsigned steps=0;
@@ -60,7 +62,8 @@ pn_status_t pn_hot_session_prepare_step(pn_hot_session_t *h,pn_pool_t *pool,pn_m
     pn_status_t s=pn_cancel_checkpoint();if(s!=PN_OK)return s;
     struct stat directory;if(state && (stat(state,&directory) || !S_ISDIR(directory.st_mode)))return PN_EMPTY;
     pn_cache_owner_t *held=pool->caches;for(pn_cache_owner_t *p=held;p;p=p->next)pn_cache_pin(p);
-    s=pn_epub_app_open_job_begin(&h->opening,pool,media,item->path,font,state,pixels,now);
+    // 预热与点击共用已知版本入口；须认证块表/所用块，缺证明仍完整复核，不能让接管退回整书扫描。/ Warmup shares the known-version entry with clicks: authenticate the table/used blocks, fall back to full verification without proof, and never force takeover into an avoidable whole-book scan.
+    s=pn_epub_app_open_job_begin_trusted(&h->opening,pool,media,item->path,font,state,pixels,now,&item->expected,item->size);
     for(pn_cache_owner_t *p=held;p;p=p->next)pn_cache_unpin(p);
     if(s!=PN_OK)return s;
     strcpy(h->path,item->path);h->book=item->expected;h->media=media;h->epoch=media->epoch;h->policy=policy;h->at=now;h->prepare_pool=pool;

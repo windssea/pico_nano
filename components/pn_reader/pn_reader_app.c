@@ -337,6 +337,10 @@ static pn_status_t record_recent(app_t *a){
     if(status==PN_OK)status=pn_recent_touch_notify(&io,a->pool,&item,a->recent_observer,a->recent_observer_ctx);
     a->recent_status=status;if(status==PN_OK){a->recent_recorded=true;a->recent_pending=false;}return status;
 }
+pn_status_t pn_reader_app_recent_item(const pn_reader_app_t *app,pn_recent_item_t *out){
+    const app_t *a=app?app->impl:NULL;if(!a || !out)return PN_INVALID;if(!a->reader.has_visible)return PN_EMPTY;
+    *out=(pn_recent_item_t){.book=a->book,.source_size=a->book_file.size,.format=1,.progress=(uint16_t)progress_basis(a,a->reader.visible)};strcpy(out->path,a->book_path);return PN_OK;
+}
 /// 复用前台选择和精确亚像素偏移，只生成可回收字形，不画正文或页脚。 / Reuse foreground face selection and exact subpixel offsets, generating only reclaimable glyphs without painting body/footer.
 static pn_status_t warm_glyph(void *ctx,const pn_page_glyph_t *g){app_t *a=ctx;if(g->source.codepoint==9 || g->source.codepoint==10)return PN_EMPTY;pn_font_choice_t choice;pn_status_t s=pn_font_chain_choose(chain(a),g->source.codepoint,&choice);return s==PN_OK?pn_font_warm(choice.font,g->source.codepoint,g->x_64):s;}
 typedef struct {app_t *app;const pn_text_page_t *page;size_t budget;} bitmap_work_t; ///< 回调期借用，不保存邻页指针 / Callback-only borrowing, never retaining neighbor pointers
@@ -508,19 +512,20 @@ pn_status_t pn_reader_app_suspend(pn_reader_app_t *app,uint64_t now){
     if(a->media_lost)return PN_STALE_MEDIA;
     if(!a->reader.has_visible || a->force_full || a->style_preview || a->font_preview || a->font_pending || a->global_pending || a->style_pending)return PN_BUSY;
     pn_status_t status=pn_media_validate(a->book_media,&a->book_lease);if(status!=PN_OK)return status;
-    // 最近记录首页要读，同步写；进度日志首页不读，留待首页首显后空闲写（关闭/释放仍强制写）。
-    // Recents feed the home screen and are written now; the progress journal is not read by home and is written when idle after the home display (close/release still force it).
-    if(a->persistent)status=record_recent(a);
+    // 首页可直接合并已确认条目；近期日志在首显后提交，释放/关闭仍强制保存。/ Home can merge the confirmed item directly; commit recents after first display, with mandatory saving before release/close.
+    if(a->persistent)a->recent_pending=true;
     // 页码索引只是可重建缓存，不再挡在离开阅读后的首显之前；由调用者空闲写出，关闭仍强制写出。
     // The page index is a rebuildable cache and no longer precedes the first display after leaving the reader; callers write it when idle and close still forces it.
     if(status==PN_OK){a->last_now=now;a->suspended=true;}return status;
 }
-bool pn_reader_app_deferred_pending(const pn_reader_app_t *app){if(!app || !app->impl)return false;const app_t *a=app->impl;return (a->persistent && a->save.dirty) || pn_page_index_pending(&a->page_index);}
+bool pn_reader_app_deferred_pending(const pn_reader_app_t *app){if(!app || !app->impl)return false;const app_t *a=app->impl;return (a->persistent && (a->save.dirty || a->recent_pending)) || pn_page_index_pending(&a->page_index);}
 pn_status_t pn_reader_app_deferred_flush(pn_reader_app_t *app){
     if(!pn_reader_app_deferred_pending(app))return PN_EMPTY;
     app_t *a=app->impl;
+    pn_status_t cancelled=pn_cancel_checkpoint();if(cancelled!=PN_OK)return cancelled;
     // 先进度后索引：进度是用户数据，索引可重建。/ Progress first, then the index: progress is user data, the index is rebuildable.
-    if(a->persistent && a->save.dirty){pn_status_t s=pn_save_policy_flush(&a->save,a->last_now);if(s!=PN_OK)return s;}
+    if(a->persistent && a->save.dirty){pn_status_t saved=pn_save_policy_flush(&a->save,a->last_now);if(saved!=PN_OK)return saved;}
+    if(a->persistent && a->recent_pending){cancelled=pn_cancel_checkpoint();if(cancelled!=PN_OK)return cancelled;return record_recent(a);}
     if(!pn_page_index_pending(&a->page_index))return PN_OK;
     // 索引可重建；其失败/分步未完不冒充用户进度保存失败。/ Indexes are rebuildable; failed/incomplete persistence never masquerades as failed user-progress saving.
     pn_status_t cached=pn_page_index_flush(&a->page_index,true);return cached==PN_CANCELLED?cached:PN_OK;
@@ -611,6 +616,7 @@ pn_status_t pn_reader_app_release_retained(pn_reader_app_t *app){
     app_t *a=app->impl;if(!a->suspended || a->style_pending || a->font_pending || a->global_pending)return PN_BUSY;
     // 延后的进度在释放前必须落盘；失败保留会话，不丢阅读位置。/ Deferred progress must be durable before release; failures keep the session so no position is lost.
     if(a->persistent && a->save.dirty){pn_status_t saved=pn_save_policy_flush(&a->save,a->last_now);if(saved!=PN_OK)return saved;}
+    if(a->persistent && a->recent_pending){pn_status_t saved=record_recent(a);if(saved!=PN_OK)return saved;}
     pn_status_t s=release_app(a);app->impl=NULL;return s;
 }
 pn_status_t pn_reader_app_close(pn_reader_app_t *app,uint64_t now){

@@ -91,7 +91,10 @@ static void run(const char *path,bool is_epub){
     pn_cancel_scope_t interrupted;pn_cancel_enter(&interrupted,always_cancelled,NULL);
     assert(pn_hot_session_deferred_flush(&h)==PN_CANCELLED);pn_cancel_leave(&interrupted);
     assert(pn_hot_session_deferred_pending(&h) && !h.deferred_failed);
-    assert(pn_hot_session_deferred_pending(&h) && pn_hot_session_deferred_flush(&h)==PN_OK && !pn_hot_session_deferred_pending(&h) && pn_hot_session_deferred_flush(&h)==PN_EMPTY);
+    assert(pn_hot_session_deferred_pending(&h));
+    // 延后保存仍须完整排空；不能因一项成功丢弃其余记录。/ Drain deferred saving completely instead of dropping remaining records after one success.
+    for(unsigned n=0;pn_hot_session_deferred_pending(&h);n++){assert(n<512);pn_status_t saved=pn_hot_session_deferred_flush(&h);assert(saved==PN_OK || saved==PN_BUSY);}
+    assert(pn_hot_session_deferred_flush(&h)==PN_EMPTY);
     assert(count_index(state)>=indexes_before && count_index(state)>0 && !h.deferred_failed);
     assert(pn_hot_session_expire(&h,8+PN_HOT_SESSION_MS-1)==PN_EMPTY && h.media);
     assert(pn_hot_session_expire(&h,8+PN_HOT_SESSION_MS)==PN_OK && !h.media && pool.used==0 && pool.live==0);

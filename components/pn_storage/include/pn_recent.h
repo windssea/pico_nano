@@ -26,6 +26,8 @@ typedef struct {
 /// 输出仅在完整有效时改变；不存在返回EMPTY，不擦除损坏。
 /// Change output only for complete valid snapshots; EMPTY if absent, preserving corruption.
 pn_status_t pn_recent_load(const pn_journal_io_t *io,pn_pool_t *pool,pn_recent_snapshot_t *snapshot);
+/// 仅更新展示快照，不读写文件或授予来源信任；changed可为空。/ Update display RAM only, without file I/O or source authority; changed may be NULL.
+pn_status_t pn_recent_preview(pn_recent_snapshot_t *,const pn_recent_item_t *,bool *changed);
 /// 内容SHA去重，新实例路径替换旧路径；新条目排首，超过20移除最旧条目。
 /// Deduplicate by content SHA, replace old instance paths, prepend and evict oldest beyond 20.
 pn_status_t pn_recent_touch(const pn_journal_io_t *io,pn_pool_t *pool,const pn_recent_item_t *item);
