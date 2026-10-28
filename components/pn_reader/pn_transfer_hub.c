@@ -7,10 +7,7 @@
 #include "pn_transfer_hub.h"
 #include <stdio.h>
 #include "pn_widgets.h"
-/// LocalSend入口暂时隐藏：电脑端发现受防火墙/网络类别/虚拟网卡影响无法在设备侧保证；协议与服务代码保留，改为1即恢复。
-/// LocalSend entry temporarily hidden: PC discovery depends on firewall/network profile/virtual adapters that the device cannot guarantee; protocol and service code remain, set to 1 to restore.
-#define PN_HUB_LOCALSEND_VISIBLE 0
-#define USB_ROW (PN_HUB_LOCALSEND_VISIBLE?3:2) ///< USB行序 / USB row index
+#define USB_ROW 2 ///< USB行序 / USB row index
 #define CHANNEL_Y 230
 #define ROW_H PN_W_CARD_ROW_H
 #define STORAGE_Y 710
@@ -26,7 +23,7 @@ pn_status_t pn_transfer_hub_render(pn_font_t *font,pn_frame_t *frame,const pn_tr
     if(s==PN_OK)s=pn_font_size(font,24);
     if(s==PN_OK)s=pn_w_text_ex(font,frame,"把手机或电脑上的书、字体与图片传到设备。",PN_UI_MARGIN,166,620,PN_ALIGN_LEFT,PN_UI_MUTED,false);
     if(s==PN_OK)s=pn_w_group(font,frame,"传输方式",CHANNEL_Y-14);
-    pn_w_card(frame,CHANNEL_Y,PN_HUB_LOCALSEND_VISIBLE?4:3);
+    pn_w_card(frame,CHANNEL_Y,3);
     // 可用通道带箭头；不可用的只写原因（规范T01：不展示虚假地址或入口）。/ Available channels get a chevron; unavailable ones only state the reason (spec T01: no fake addresses or entries).
     const char *wireless_off=info->unavailable?info->unavailable:"当前设备暂不支持无线传书";
     if(s==PN_OK)s=pn_w_card_row(font,frame,"热点传书",info->hotspot?"手机连设备热点，扫码打开传书网页":wireless_off,NULL,PN_ICON_WIFI,info->hotspot?PN_ROW_CHEVRON:0u,CHANNEL_Y,false);
@@ -34,7 +31,6 @@ pn_status_t pn_transfer_hub_render(pn_font_t *font,pn_frame_t *frame,const pn_tr
     if(info->lan)snprintf(lan,sizeof lan,"通过家里的网络「%s」",info->lan_name && *info->lan_name?info->lan_name:"已保存网络");
     else snprintf(lan,sizeof lan,"%s",info->hotspot?"先在热点传书网页里保存家庭网络":wireless_off);
     if(s==PN_OK)s=pn_w_card_row(font,frame,"局域网传书",lan,NULL,PN_ICON_TRANSFER,info->lan?PN_ROW_CHEVRON:0u,CHANNEL_Y+ROW_H,false);
-    if(s==PN_OK && PN_HUB_LOCALSEND_VISIBLE)s=pn_w_card_row(font,frame,"LocalSend",info->localsend?"自动接收书籍、字体；图片请在网页选择类别":"此运行环境未接入 LocalSend 网络接收",NULL,PN_ICON_TRANSFER,info->localsend?PN_ROW_CHEVRON:0u,CHANNEL_Y+2*ROW_H,false);
     if(s==PN_OK)s=pn_w_card_row(font,frame,"USB 传输",info->usb?"连接电脑直接复制，期间暂停阅读":"此运行环境未接入 USB 读卡",NULL,PN_ICON_IMPORT,info->usb?PN_ROW_CHEVRON:0u,CHANNEL_Y+USB_ROW*ROW_H,true);
     if(s==PN_OK)s=pn_w_group(font,frame,"存储",STORAGE_Y-14);
     pn_w_card(frame,STORAGE_Y,1);
@@ -51,7 +47,6 @@ int pn_transfer_hub_hit(const pn_transfer_hub_info_t *info,int x,int y){
     if(x<PN_UI_MARGIN || x>=PN_UI_WIDTH-PN_UI_MARGIN)return -1;
     if(y>=CHANNEL_Y && y<CHANNEL_Y+ROW_H)return info->hotspot?PN_HUB_HOTSPOT:-1;
     if(y>=CHANNEL_Y+ROW_H && y<CHANNEL_Y+2*ROW_H)return info->lan?PN_HUB_LAN:-1;
-    if(PN_HUB_LOCALSEND_VISIBLE && y>=CHANNEL_Y+2*ROW_H && y<CHANNEL_Y+3*ROW_H)return info->localsend?PN_HUB_LOCALSEND:-1;
     if(y>=CHANNEL_Y+USB_ROW*ROW_H && y<CHANNEL_Y+(USB_ROW+1)*ROW_H)return info->usb?PN_HUB_USB:-1;
     return -1;
 }

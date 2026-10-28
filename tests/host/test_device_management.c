@@ -369,7 +369,16 @@ int main(void){
     assert(recent_snapshot->items[0].progress==exit_preview.progress && recent_snapshot->items[0].source_size==exit_preview.source_size);
     start_reader_impl();assert(reader.impl==retained && hot_session.hits==1 && !hot_session.media);
     pn_txt_progress_t reopened;assert(pn_reader_app_progress(&reader,&reopened)==PN_OK && reopened.source_offset==location.source_offset);
-    assert(leave_reader() && hot_session.media && stop_reader() && !hot_session.media);
+    assert(leave_reader() && hot_session.media);
+    // 输入、触点、安静期和取消门都先于到期释放；只在真正空闲后释放，不能改写正文。/ Input, contacts, quiet time and cancellation gate expiry; release only when truly idle without changing body pixels.
+    uint64_t expire_at=hot_session.at+PN_HOT_SESSION_MS,old_activity=last_input;bool was_home=home_mode,was_shelf=shelf_mode;
+    home_mode=shelf_mode=true;last_input=expire_at-1500u;
+    assert(expire_hot_idle(expire_at,false)==PN_EMPTY && hot_session.media);
+    touch_held=true;assert(expire_hot_idle(expire_at,true)==PN_EMPTY && hot_session.media);touch_held=false;
+    last_input=expire_at-1499u;assert(expire_hot_idle(expire_at,true)==PN_EMPTY && hot_session.media);last_input--;
+    pn_cancel_scope_t expiry_scope;pn_cancel_enter(&expiry_scope,feedback_cancelled,NULL);assert(expire_hot_idle(expire_at,true)==PN_CANCELLED && hot_session.media);pn_cancel_leave(&expiry_scope);
+    assert(expire_hot_idle(expire_at,true)==PN_OK && !hot_session.media);home_mode=was_home;shelf_mode=was_shelf;last_input=old_activity;
+    assert(stop_reader());
     // 索引只写自身缓存，构建和取消都不能驱逐热源或完整系统字库。
     // Index writes touch only its own cache; building/cancellation must not evict warm sources or the complete system face.
     tf_file=fopen(tf_path,"wb");assert(tf_file);tf_source=pn_font_builtin_source();

@@ -40,7 +40,7 @@
 | [cJSON](https://github.com/DaveGamble/cJSON) / [Nayuki QR-Code-generator](https://github.com/nayuki/QR-Code-generator) | JSON解析与二维码生成；[JSON来源](LICENSES/cjson-manifest.json)、[QR来源](LICENSES/qr-manifest.json)。 |
 | [TinyUSB](https://github.com/hathach/tinyusb) / [esp_tinyusb](https://components.espressif.com/components/espressif/esp_tinyusb) | USB设备栈与ESP-IDF适配；[组件与许可清单](LICENSES/usb-manifest.json)。 |
 | [esptool](https://github.com/espressif/esptool) / [esptool-js](https://github.com/espressif/esptool-js) / [pako](https://github.com/nodeca/pako) | USB安装工具、网页串口安装及其随包解压依赖；[网页工具来源](LICENSES/esptool-js-manifest.json)。 |
-| [LocalSend protocol](https://github.com/localsend/protocol) / [ZXing载荷说明](https://github.com/zxing/zxing/wiki/Barcode-Contents) | 局域网传输协议与Wi-Fi二维码内容格式参考；本项目接收端独立实现。 |
+| [ZXing载荷说明](https://github.com/zxing/zxing/wiki/Barcode-Contents) | Wi-Fi二维码内容格式参考。 |
 | [lunar-javascript](https://github.com/6tail/lunar-javascript) | 离线中式黄历数据的生成来源；[固定提交与MIT许可](LICENSES/calendar-manifest.json)。 |
 | [Noto Sans SC / Google Fonts](https://github.com/google/fonts/tree/main/ofl/notosanssc) | 内置中文与应急字库的OFL源字体；[UI字库清单](LICENSES/ui-font-manifest.json)、[正文字库清单](LICENSES/reading-font-manifest.json)。 |
 | [HarmonyOS Sans / 华为](https://developer.huawei.com/consumer/cn/design/resource) | 原始字体资源；使用范围、摘要及原许可见[字体来源清单](LICENSES/harmony-font-manifest.json)。 |

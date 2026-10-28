@@ -151,8 +151,7 @@ static void run(transfer_t *s){
   }
   pn_transfer_worker_state_t work={0};if(s->worker.impl)(void)pn_transfer_worker_state(&s->worker,&work);
   if(s->http.impl)(void)pn_device_transfer_http_diagnostics(&s->http,&network);
-  bool localsend=s->http.impl && pn_device_transfer_http_localsend(&s->http);
-  lock(s);s->state.network=network;s->state.work=work;s->state.localsend=localsend;
+  lock(s);s->state.network=network;s->state.work=work;
   if(!s->stop){s->state.phase=s->http.impl && network.phase==PN_WIFI_READY?PN_DTRANSFER_READY:PN_DTRANSFER_STARTING;}
   unlock(s);pause_task();
  }

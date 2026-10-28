@@ -575,3 +575,5 @@ bool pn_shelf_cover_frame(const pn_shelf_covers_t *covers,size_t index,pn_frame_
     if(!covers || !frame || index>PN_COVER_SLOT_LAST || covers->state[index]!=PN_COVER_READY)return false;
     return pn_frame_bind(frame,(uint8_t *)covers->pixels[index],PN_COVER_BYTES,PN_COVER_WIDTH,PN_COVER_HEIGHT);
 }
+
+bool pn_cover_refresh_due(bool dirty,uint64_t now,uint64_t last_shown){return dirty && (!last_shown || (now>=last_shown && now-last_shown>=1000u));}

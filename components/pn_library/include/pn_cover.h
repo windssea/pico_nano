@@ -134,3 +134,7 @@ pn_status_t pn_shelf_covers_idle(pn_cover_write_t *write,pn_shelf_covers_t *cove
 pn_status_t pn_shelf_covers_work(pn_cover_work_t *,pn_shelf_covers_t *,const pn_catalog_page_t *,pn_pool_t *,pn_media_t *,const char *,const uint8_t[16],size_t,bool *);
 /// 槽位已就绪时绑定只读帧视图，否则false。/ Bind a read-only frame view for a ready slot, otherwise false.
 bool pn_shelf_cover_frame(const pn_shelf_covers_t *covers,size_t index,pn_frame_t *frame);
+
+/// 已验证封面首次立即呈现，后续每秒合并刷新；不依赖整页提取完成。
+/// Present the first verified cover immediately, then coalesce redraws once per second without waiting for the whole page.
+bool pn_cover_refresh_due(bool dirty,uint64_t now,uint64_t last_shown);

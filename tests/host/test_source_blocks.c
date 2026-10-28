@@ -73,7 +73,7 @@ int main(void){
     flip(rootfile,10);assert(!pn_source_blocks_hint(tf,state_path,&book));assert(pn_source_blocks_open(&loaded,&pool,&media,&guard,&raw,&book,tf,state_path,&source)==PN_EMPTY);flip(rootfile,10);
     size_t limit=pool.limit;pool.limit=pool.used;assert(pn_source_blocks_open(&loaded,&pool,&media,&guard,&raw,&book,tf,state_path,&source)==PN_EMPTY);pool.limit=limit;
     assert(pn_source_blocks_capture(&capture,&pool,&media,&guard,&raw,&source)==PN_OK);tap.blocks=&capture;assert(pn_identity_stream_pooled(&pool,&tap,raw.size,capture_read,&book)==PN_OK);pn_source_blocks_finish(&capture,&book);
-    full=false;assert(pn_source_blocks_store(&capture,&state,&trust,tf,state_path)==PN_EMPTY);full=true;pn_source_blocks_close(&capture);
+    full=false;do{s=pn_source_blocks_store(&capture,&state,&trust,tf,state_path);}while(s==PN_BUSY);assert(s==PN_EMPTY);full=true;pn_source_blocks_close(&capture);
     assert(pn_source_blocks_capture(&capture,&pool,&media,&guard,&raw,&source)==PN_OK);tap.blocks=&capture;assert(pn_identity_stream_pooled(&pool,&tap,raw.size,capture_read,&book)==PN_OK);pn_source_blocks_finish(&capture,&book);
     assert(pn_source_blocks_store(&capture,&state,&trust,tf,state_path)==PN_BUSY);fail_sync=true;do{s=pn_source_blocks_store(&capture,&state,&trust,tf,state_path);}while(s==PN_BUSY);assert(s==PN_IO && !fail_sync);pn_source_blocks_close(&capture);
     assert(pn_source_blocks_open(&loaded,&pool,&media,&guard,&raw,&book,tf,state_path,&source)==PN_OK);

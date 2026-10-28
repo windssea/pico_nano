@@ -195,6 +195,8 @@ static bool prepare_lock(void);
 static void reader_checkpoint_current(void);
 static void resume_reader(void);
 static bool reader_active(void);
+static bool focus_page(void);
+static bool ota_busy(void);
 static void reading_stats_pause(void);
 static void reading_stats_poll(bool body);
 static void reading_stats_turn(void);
@@ -285,6 +287,7 @@ static pn_cache_owner_t cover_cache_owner; ///< 封面预算owner / Cover-budget
 static bool covers_inactive; ///< 非活动且不再借用时可回收 / Reclaim only when inactive and no longer borrowed
 static pn_shelf_covers_t *shelf_covers;
 static bool covers_dirty,covers_cache_done,touch_held;
+static uint64_t covers_shown_at; ///< 最近一次封面补绘 / Last incremental cover presentation
 static size_t cover_bytes(void *ctx){(void)ctx;return pn_alloc_size(shelf_covers);}
 static void cover_drop(void *ctx){(void)ctx;if(covers_inactive){pn_free(shelf_covers);shelf_covers=NULL;covers_dirty=false;pn_menu_cache_invalidate(&menu_cache);}}
 
@@ -1002,7 +1005,6 @@ static void show_lock(const char *hint){
     if(status!=PN_OK){ESP_LOGE(TAG,"Lock screen unavailable: %d",(int)status);message("已锁屏",hint);}
 }
 static bool stop_reader_impl(bool retain){
-    bool switching=opening && !retain;
     reader_turn_pending=false;
     reading_stats_pause();reading_stats_flush();
     if(reader_active())bookmark_lock_capture();
@@ -1011,8 +1013,8 @@ static bool stop_reader_impl(bool retain){
     if(pn_font_manage_motion_abort(&font_manage)!=PN_OK)return false;
     if(pn_toc_ui_motion_abort(&toc)!=PN_OK)return false;
 #endif
-    // 前台切书不为上一册新做可丢缓存；必要保存仍由release_retained强制完成。/ Foreground switching never builds disposable caches for the old book; release_retained still forces mandatory saving.
-    if((switching?pn_hot_session_drop_for_switch(&hot_session):pn_hot_session_drop(&hot_session))!=PN_OK)return false;
+    // 所有前台交接不为旧册新做可丢缓存；必要保存仍由release_retained强制完成。/ No foreground handoff builds disposable caches for the old book; release_retained still forces mandatory saving.
+    if(pn_hot_session_drop_for_switch(&hot_session)!=PN_OK)return false;
     if(!reader_active()){pn_toc_ui_close(&toc);pn_bookmark_ui_cancel(&bookmarks);pn_style_ui_close(&styles);pn_jump_ui_close(&jump_ui);pn_font_ui_close(&fonts);return true;}
     reader_recent_observe();
     pn_book_id_t id;bool identified=(epub.impl?pn_epub_app_identity(&epub,&id):pn_reader_app_identity(&reader,&id))==PN_OK;
@@ -1236,7 +1238,7 @@ static pn_status_t draw_shelf_focus(int before){
     if(s!=PN_OK && s!=PN_EMPTY)shelf_draw_valid=false;
     return s==PN_EMPTY?PN_OK:s;
 }
-/// 空闲补齐封面后一次GL16重绘，随后再写缓存，不逐本闪屏。/ Fill covers while idle, redraw once with GL16, then persist caches without per-book flashes.
+/// 首张验证封面立即补绘，后续限频合并；落盘不挡住可见结果。/ Present the first verified cover immediately, coalesce later redraws, and keep persistence behind visible results.
 /// 返回本轮是否做了封面/重画工作。/ Return whether this round did cover or redraw work.
 static bool tick_covers(void){
     if(!covers_cache_done){
@@ -1245,12 +1247,16 @@ static bool tick_covers(void){
         if(s==PN_EMPTY){covers_cache_done=true;if(covers_dirty && draw_shelf(PN_REFRESH_GL16)==PN_OK)covers_dirty=false;}
         return s==PN_OK || changed;
     }
-    if(now_ms()<last_input || now_ms()-last_input<800)return false;
+    if(now_ms()<last_input || now_ms()-last_input<250)return false;
     // 邻页/字形/章节缓存可按需回收，计入封面解码预算；封面缓存本身不计。/ Neighbor/glyph/chapter caches are reclaimable on demand and count toward the cover budget; the cover cache itself does not.
     size_t free_bytes=(pool.limit>pool.used?pool.limit-pool.used:0)+pn_cache_reclaimable(&pool,(1u<<PN_CACHE_BITMAP)|(1u<<PN_CACHE_SOURCE)|(1u<<PN_CACHE_NEIGHBOR)|(1u<<PN_CACHE_GLYPH)|(1u<<PN_CACHE_CHAPTER)),reserve=128u*1024u;bool changed=false;
-    pn_status_t status=pn_shelf_covers_work(&cover_work,shelf_covers,shelf_page,&pool,&sd_media,cover_cache,cover_salt,free_bytes>reserve?free_bytes-reserve:1,&changed);
+    // 最多32个廉价步骤/8ms软预算；单次I/O不声称硬实时。/ Batch at most 32 cheap steps within a soft 8 ms budget; individual IO is not hard real time.
+    pn_status_t status=PN_BUSY;unsigned steps=0;int64_t began=esp_timer_get_time();
+    if(covers_dirty && !pn_shelf_covers_pending(shelf_covers,shelf_page))status=PN_EMPTY;
+    else do{status=pn_shelf_covers_work(&cover_work,shelf_covers,shelf_page,&pool,&sd_media,cover_cache,cover_salt,free_bytes>reserve?free_bytes-reserve:1,&changed);}
+    while(status==PN_BUSY && !changed && pn_shelf_covers_pending(shelf_covers,shelf_page) && ++steps<32u && esp_timer_get_time()-began<8000);
     if(changed){covers_dirty=true;pn_menu_cache_invalidate(&menu_cache);}
-    if((status==PN_OK || status==PN_EMPTY || status==PN_BUSY) && covers_dirty && !pn_shelf_covers_pending(shelf_covers,shelf_page)){pn_status_t shown=draw_shelf(PN_REFRESH_GL16);if(shown==PN_OK)covers_dirty=false;else if(shown!=PN_CANCELLED)ESP_LOGW(TAG,"Cover redraw failed");}
+    if((status==PN_OK || status==PN_EMPTY || status==PN_BUSY) && pn_cover_refresh_due(covers_dirty,now_ms(),covers_shown_at)){pn_status_t shown=draw_shelf(PN_REFRESH_GL16);if(shown==PN_OK){covers_dirty=false;covers_shown_at=now_ms();}else if(shown!=PN_CANCELLED)ESP_LOGW(TAG,"Cover redraw failed");}
     else if(status!=PN_OK && status!=PN_EMPTY && status!=PN_BUSY && status!=PN_CANCELLED){ESP_LOGW(TAG,"Cover queue stopped: %d",(int)status);pn_shelf_covers_reset(shelf_covers,NULL);covers_dirty=false;}
     // 首页首帧后才读内部统计日志；与封面完成共用原空闲调度，不阻塞开书。/ Read internal statistics only after the home first frame, within existing idle cover scheduling, never on the opening path.
     static uint64_t stats_at;
@@ -1362,7 +1368,7 @@ static void show_shelf_profile(const char *cursor,bool previous,pn_refresh_t pro
     // Read cached PNCV synchronously before the first paint so the library appears complete without a second cover refresh; uncached books still decode after input settles.
     covers_inactive=false;
     if(status==PN_OK && !shelf_covers){shelf_covers=pn_cache_alloc(&pool,PN_CACHE_COVER,PN_MEM_UI,sizeof *shelf_covers);if(shelf_covers)pn_shelf_covers_reset(shelf_covers,NULL);}
-    if(status==PN_OK && shelf_covers){bool changed;pn_catalog_item_t last;bool has_last=refresh_last(&last);covers_dirty=false;covers_cache_done=true;
+    if(status==PN_OK && shelf_covers){bool changed;pn_catalog_item_t last;bool has_last=refresh_last(&last);covers_dirty=false;covers_cache_done=true;covers_shown_at=0;
         if(pn_shelf_covers_bind(shelf_covers,shelf_page,has_last?&last:NULL,&pool,&sd_media,cover_cache,&changed)!=PN_OK)pn_shelf_covers_reset(shelf_covers,NULL);}
     pn_profile_end(&span,status);
     // 同一书库内翻页只局部替换列表；首次进入、换栏仍整页显示。/ Paging within the library replaces the list locally; first entry and tab switches still show the whole page.
@@ -1805,6 +1811,14 @@ static bool tick_hot_deferred(uint64_t now){
     if(s!=PN_OK && s!=PN_BUSY && s!=PN_EMPTY && s!=PN_CANCELLED)ESP_LOGW(TAG,"Deferred progress/index write: %d",(int)s);
     return true;
 }
+/// 输入先消费，空闲到期只释放已保留会话；单次必要文件系统调用仍可能阻塞。/ Consume input first; idle expiry releases retained sessions only, while an individual mandatory filesystem call may still block.
+static pn_status_t expire_hot_idle(uint64_t now,bool idle){
+    if(!idle || touch_held || reader_active() || locked || opening || sokoban.active || sudoku.active || !shelf_mode || focus_page() || transfer.impl || usb.open || time_sync.impl || ota_busy() || wifi_probe.impl || now<last_input || now-last_input<1500u)return PN_EMPTY;
+    if(!hot_session.media || hot_session.expire_failed || now<hot_session.at || now-hot_session.at<PN_HOT_SESSION_MS)return PN_EMPTY;
+    pn_status_t s=pn_cancel_checkpoint();if(s!=PN_OK)return s;
+    pn_device_power_busy(PN_POWER_PRODUCT,true);pn_profile_span_t span;pn_profile_begin(&span,&pool,"hot.expire");
+    s=pn_hot_session_expire(&hot_session,now);pn_profile_end(&span,s);return s;
+}
 static bool tick_opening(void);
 /// 普通打开和身份接管共用完成回执，包含加载扫描中已完成的任务。/ Normal opening and identity takeover share completion handling, including jobs completed during loading scans.
 static void start_reader_finish(void){
@@ -2204,7 +2218,7 @@ static void tick_transfer(uint64_t now){
     pn_device_transfer_state_t state;if(pn_device_transfer_state(&transfer,&state)!=PN_OK)return;
     handle_network_request();
     memset(&transfer_view,0,sizeof transfer_view);transfer_view.released=state.released;transfer_view.busy=state.work.busy;transfer_view.station=state.network.mode==PN_WIFI_STA;
-    transfer_view.localsend=state.localsend;transfer_view.phase=state.phase==PN_DTRANSFER_READY?PN_TVIEW_READY:state.phase==PN_DTRANSFER_STOPPING?PN_TVIEW_STOPPING:state.phase==PN_DTRANSFER_STARTING?PN_TVIEW_STARTING:PN_TVIEW_FAILED;
+    transfer_view.phase=state.phase==PN_DTRANSFER_READY?PN_TVIEW_READY:state.phase==PN_DTRANSFER_STOPPING?PN_TVIEW_STOPPING:state.phase==PN_DTRANSFER_STARTING?PN_TVIEW_STARTING:PN_TVIEW_FAILED;
     transfer_view.failed_stage=state.stage;transfer_view.error=state.error;transfer_view.native_error=state.network.error;
     memcpy(transfer_view.ssid,state.network.ssid,sizeof transfer_view.ssid);memcpy(transfer_view.password,state.network.ap_password,sizeof transfer_view.password);
     if(state.network.address[0])snprintf(transfer_view.address,sizeof transfer_view.address,"http://%s",state.network.address);
@@ -2444,7 +2458,7 @@ static void show_hub(void){
     if(transfer.impl || usb.open)return;
     refresh_network_name();storage_note(hub_storage,sizeof hub_storage);
     pn_device_usb_port_t usb_port=pn_device_usb_board_port();
-    hub_info=(pn_transfer_hub_info_t){.hotspot=true,.lan=*saved_network!=0,.localsend=true,.usb=usb_port.start!=NULL,.lan_name=saved_network,.storage=hub_storage};
+    hub_info=(pn_transfer_hub_info_t){.hotspot=true,.lan=*saved_network!=0,.usb=usb_port.start!=NULL,.lan_name=saved_network,.storage=hub_storage};
     uint8_t *pixels=pn_alloc_tagged(&pool,PN_MEM_FRAME,684u*1216u/2u);pn_frame_t frame;pn_font_t font={0};
     pn_status_t status=pn_frame_bind(&frame,pixels,684u*1216u/2u,684,1216)?PN_OK:PN_NO_MEMORY;
     if(status==PN_OK)status=management_font_begin(&font,28);
@@ -2784,7 +2798,6 @@ static void apply_selection(int selection){
         if(selection==PN_HUB_USB){begin_usb();}
         else if(selection==PN_HUB_HOTSPOT){hub_mode=false;begin_transfer(false);}
         else if(selection==PN_HUB_LAN){hub_mode=false;begin_transfer(true);}
-        else if(selection==PN_HUB_LOCALSEND){hub_mode=false;begin_transfer(*saved_network!=0);}
         else if(selection==PN_HUB_SHELF || selection==PN_HUB_HOME){hub_mode=false;home_mode=selection==PN_HUB_HOME;show_shelf("",false);}
         else if(selection==PN_HUB_SETTINGS){hub_mode=false;begin_settings();}
     }
@@ -2964,7 +2977,6 @@ static void device_task(void *arg){
 #if defined(CONFIG_PN_WAKE_TRACE) && CONFIG_PN_WAKE_TRACE
         wake_trace_poll(now);
 #endif
-        (void)pn_hot_session_expire(&hot_session,now);
         if(scope_active)pn_async_end(&scope);
         bool body=!sokoban.active && !sudoku.active && reader_active() && !locked && !focus_page() && !status_page && !reading_menu && !shelf_mode && !toolbar_open;
         reading_stats_poll(body && !opening && !reader_turn_pending);
@@ -2973,7 +2985,6 @@ static void device_task(void *arg){
         pn_device_async_root_view(&async_port,view,body,input_flags,root_navigation_hit(80,1150)>=0);
         pn_device_input_event_t queued={0};pn_status_t available=async_port.input_active?pn_device_async_take(&async_port,&queued):PN_EMPTY;
         if(available!=PN_EMPTY){reading_stats_pause();resource_previews_close();}
-        if(available==PN_EMPTY && reading_stats.media && now>=last_input && now-last_input>=1500u)(void)pn_reading_stats_save(&reading_stats,now,false);
         // 有输入立即回到最高频；连续空闲约1秒才放锁，交互中不反复切频。/ Input returns to maximum at once; release only after about one second idle so interaction does not toggle frequency.
         if(available==PN_OK){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);pn_feedback_idle_activity(&feedback_idle,now);}
         // 输入健康：首个事件立即记录，之后计数变化时最多每分钟一行。/ Input health: log the first event at once, then at most one line a minute when counters change.
@@ -3159,6 +3170,8 @@ static void device_task(void *arg){
         if(available==PN_EMPTY && !locked && !transfer.impl && !usb.open && font_manage.impl && !touch_held && !tap.down && now_ms()>=last_input && now_ms()-last_input>=800){
             pn_status_t sampled=pn_font_manage_samples_idle(&font_manage,now_ms(),present,NULL);background=sampled==PN_BUSY;
             if(sampled==PN_OK || sampled==PN_BUSY){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);}}
+        if(available==PN_EMPTY && !touch_held && !tap.down && !locked && !opening && reading_stats.media && now>=last_input && now-last_input>=1500u && pn_cancel_checkpoint()==PN_OK)(void)pn_reading_stats_save(&reading_stats,now,false);
+        {pn_status_t expired=expire_hot_idle(now_ms(),available==PN_EMPTY && !tap.down);if(expired!=PN_EMPTY && expired!=PN_CANCELLED)background=true;}
         if(available==PN_EMPTY && shelf_mode && shelf_covers && shelf_page && !actions_mode && !transfer.impl && !usb.open && !wallpaper_ui.impl && !font_manage.impl && !settings_ui.impl && !locked && !status_page && !reading_menu && !touch_held && !tap.down && now_ms()>=last_input && now_ms()-last_input>=80){
             // 后台确有工作时回到最高频，封面/索引不在降频下变慢。/ Real background work returns to maximum so covers and indexing are not slowed by DFS.
             bool worked=tick_shelf_background(now_ms());background=worked || pn_cover_work_pending(&cover_work) || pn_shelf_covers_pending(shelf_covers,shelf_page) || (home_mode && now_ms()-last_input>=1500 && (pn_hot_session_source_pending(&hot_session) || pn_hot_session_layout_pending(&hot_session) || pn_hot_session_paint_pending(&hot_session)));if(worked){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);}}

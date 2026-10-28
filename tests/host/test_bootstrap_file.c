@@ -42,7 +42,7 @@ int main(int argc,char **argv){
         for(unsigned i=0;i<cut && pn_bootstrap_pending(&writer);i++){s=pn_bootstrap_step(&writer);assert(s==PN_BUSY || s==PN_OK);}
         pn_bootstrap_abort(&writer);pn_zip_t loaded={0};pn_epub_t model={0};assert(pn_bootstrap_load(&pool,&media,&guard,&source,&book,tf,root,&loaded,&model)==PN_OK);same(&epub,&model);pn_epub_close(&model);assert(pn_zip_close(&loaded)==PN_OK);
     }
-    full=false;assert(pn_bootstrap_begin(&writer,&pool,&media,&guard,&state,&trust,&source,&book,tf,root,&zip,&epub)==PN_OK && pn_bootstrap_step(&writer)==PN_EMPTY);full=true;
+    full=false;assert(pn_bootstrap_begin(&writer,&pool,&media,&guard,&state,&trust,&source,&book,tf,root,&zip,&epub)==PN_OK);do{s=pn_bootstrap_step(&writer);}while(s==PN_BUSY);if(s!=PN_EMPTY)fprintf(stderr,"bootstrap quota result=%d\n",(int)s);assert(s==PN_EMPTY);full=true;
     fail_sync=true;assert(pn_bootstrap_begin(&writer,&pool,&media,&guard,&state,&trust,&source,&book,tf,root,&zip,&epub)==PN_OK);do{s=pn_bootstrap_step(&writer);}while(s==PN_BUSY);assert(s==PN_IO && !fail_sync);
     assert(pn_bootstrap_begin(&writer,&pool,&media,&guard,&state,&trust,&source,&book,tf,root,&zip,&epub)==PN_OK && pn_bootstrap_step(&writer)==PN_BUSY);
     bool stop=true;pn_cancel_scope_t scope;pn_cancel_enter(&scope,cancel,&stop);assert(pn_bootstrap_step(&writer)==PN_CANCELLED);pn_cancel_leave(&scope);assert(!pn_bootstrap_pending(&writer));

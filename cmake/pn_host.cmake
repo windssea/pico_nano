@@ -28,14 +28,11 @@ add_library(pn_core STATIC ${ui_font_c} ${reading_font_c} ${harmony_font_c} ${ar
     ${PN_ROOT}/components/pn_qr/pn_qr.c
     ${PN_ROOT}/components/pn_qr/vendor/qrcodegen.c
     ${PN_ROOT}/components/pn_reader/pn_transfer_view.c
-    ${PN_ROOT}/components/pn_reader/pn_localsend_view.c
     ${PN_ROOT}/components/pn_reader/pn_transfer_hub.c
     ${PN_ROOT}/components/pn_reader/pn_usb_view.c
     ${PN_ROOT}/components/pn_transfer/pn_transfer_worker.c
     ${PN_ROOT}/components/pn_transfer/pn_transfer_service.c
     ${PN_ROOT}/components/pn_transfer/pn_transfer_receive.c
-    ${PN_ROOT}/components/pn_transfer/pn_localsend_session.c
-    ${PN_ROOT}/components/pn_transfer/pn_localsend_json.c
     ${PN_ROOT}/components/pn_transfer/pn_upload.c
     ${PN_ROOT}/components/pn_transfer/pn_upload_files.c
     ${PN_ROOT}/components/pn_transfer/pn_upload_validate.c

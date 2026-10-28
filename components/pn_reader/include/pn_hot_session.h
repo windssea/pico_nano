@@ -19,6 +19,7 @@ typedef struct {
     bool layout_pending; ///< 书源/字体已完整校验，首屏可在下一轮准备或由点击接续 / Sources/fonts fully verified; first layout may run next tick or on click
     pn_epub_open_job_t opening; ///< 私有部分EPUB准备，不能呈现或当已验证源 / Private partial EPUB preparation, never presentable or a verified source
     bool deferred_failed; ///< 本次保留期内空闲写页索引已失败，不再重试，关闭兜底 / Idle page-index write failed during this retention; no retry, close still writes
+    bool expire_failed; ///< 到期必要保存失败后等待显式重试，不反复阻塞空闲轮 / After a failed mandatory expiry save, await explicit retry without blocking every idle tick
 } pn_hot_session_t;
 /// 首页空闲只读准备已识别的继续阅读书；不显示/写记录，旧缓存pin保护，不足退EMPTY；同activity/epoch仅一次。/ Read-only idle preparation for an identified continue book; no display/record writes, pin existing caches, EMPTY on admission refusal, once per activity/epoch.
 pn_status_t pn_hot_session_prepare(pn_hot_session_t *,pn_pool_t *,pn_media_t *,const pn_catalog_item_t *,const char *font,const char *state,int pixels,uint64_t policy,uint64_t now,uint64_t activity);
@@ -54,7 +55,7 @@ pn_status_t pn_hot_session_resume(pn_hot_session_t *,pn_media_t *,const char *,p
 pn_status_t pn_hot_session_drop(pn_hot_session_t *);
 /// 切书不新建/推进可重建检查点，仍提交必要进度/近期日志；失败保留会话，已提交缓存保持。/ Switching never starts/advances rebuildable checkpoints; commit mandatory progress/recents, retaining the session on failure and keeping committed caches.
 pn_status_t pn_hot_session_drop_for_switch(pn_hot_session_t *);
-/// 到期后释放；无任务EMPTY。/ Release when expired; EMPTY without work.
+/// 由空闲调度到期释放，只保存必要日志；失败保留对象等待显式drop重试，无任务EMPTY。/ Idle-scheduled expiry saves mandatory journals only; failure retains the object until explicit drop retries, EMPTY without work.
 pn_status_t pn_hot_session_expire(pn_hot_session_t *,uint64_t);
 /// 保留对象有延后日志/当前页/已验证启动结构待写且本次未失败 / Retained journals/current pages/verified startup structures await persistence without a latched failure.
 bool pn_hot_session_deferred_pending(const pn_hot_session_t *);

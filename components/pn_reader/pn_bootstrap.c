@@ -35,6 +35,7 @@ typedef struct {
     FILE *file;
     pn_identity_accumulator_t sha;
     pn_cache_commit_t commit;
+    pn_reading_admission_t admission; ///< 沿原池完成分步准入 / Stepped admission within the original pool
     pn_format_io_t io;
     uint32_t cursor;
     unsigned phase;
@@ -194,6 +195,7 @@ bool pn_bootstrap_pending(const pn_bootstrap_t *h){return h && h->impl;
 void pn_bootstrap_abort(pn_bootstrap_t *h){
     if(!h || !h->impl)return;
     boot_t *b=h->impl;
+    pn_reading_store_admit_abort(&b->admission);
     if(b->owned || b->root_owned){pn_profile_io_t io={.bytes=b->bytes,.reads=b->cursor,.seeks=b->phase};pn_profile_observe(b->pool,"bootstrap.aborted",PN_CANCELLED,0,&io);}
     if(b->phase!=11 || !b->commit.committed)pn_profile_file(b->pool,"bootstrap.abandoned",PN_CANCELLED,b->root);
     if(b->file)fclose(b->file);
@@ -246,12 +248,12 @@ pn_status_t pn_bootstrap_step(pn_bootstrap_t *h){
     return s;
     }
     switch(b->phase){
-    case 1:
-        s=pn_cache_file_directory(b->media,&b->writer,b->directory);
-        if(s==PN_OK)s=pn_cache_file_directory(b->state,&b->trust,b->rootdir);
-        if(s==PN_OK)s=pn_reading_store_room(b->media,&b->writer,b->directory,b->path,false,b->size);
-        if(s==PN_OK)s=pn_reading_store_room(b->state,&b->trust,b->rootdir,b->root,true,152);
-        if(s==PN_OK){struct stat st;
+    case 1:{
+        const pn_reading_store_request_t requests[2]={{b->media,&b->writer,b->directory,b->path,b->size,false},{b->state,&b->trust,b->rootdir,b->root,152,true}};
+        s=pn_reading_store_admit(&b->admission,b->pool,requests,2);
+        if(s==PN_BUSY)return s;
+        if(s!=PN_OK)break;
+        struct stat st;
         if(!boot_stat(b->tmp,&st) && !S_ISREG(st.st_mode)){s=PN_IO;
         break;
         }
@@ -266,8 +268,8 @@ pn_status_t pn_bootstrap_step(pn_bootstrap_t *h){
             header(b,bytes);
             s=write_exact(b,bytes,sizeof bytes);
             if(s==PN_OK)b->phase=2;
-            }
         break;
+    }
     case 2:case 3:case 6:case 7:
         s=(b->phase==2 || b->phase==6)?pn_zip_snapshot_write(b->zip,&b->io,&b->cursor):pn_epub_snapshot_write(b->epub,&b->io,&b->cursor);
         if(s==PN_BUSY)return s;

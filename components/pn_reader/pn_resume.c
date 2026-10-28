@@ -36,6 +36,7 @@ typedef struct {
     FILE *file;
     pn_identity_job_t digest;
     pn_cache_commit_t commit;
+    pn_reading_admission_t admission; ///< 分步计费与清理，提交前必须完成 / Stepped accounting and cleanup required before writing
     pn_frame_t frame;
     pn_cache_owner_t *borrow;
     uint8_t header[RH];
@@ -143,10 +144,6 @@ static bool paths(resume_t *r, unsigned slot) {
     strcpy(r->rbak, r->root);
     strcat(r->rbak, ".bak");
     return true;
-}
-static pn_status_t room(resume_t *r,const char *dir,bool state) {
-    pn_status_t s=checked(r);if(s!=PN_OK)return s;
-    return pn_reading_store_room(state?r->state:r->media,state?&r->trust:&r->writer,dir,state?r->root:r->path,state,state?152u:LIMIT);
 }
 pn_status_t pn_resume_bind(pn_resume_t *h, pn_pool_t *pool, pn_media_t *media, const pn_media_lease_t *guard, pn_media_t *state,
                            const pn_media_lease_t *trust, const char *tf, const char *root, const pn_book_id_t *book,
@@ -415,6 +412,7 @@ void pn_resume_abort(pn_resume_t *h) {
     if (!h || !h->impl)
         return;
     resume_t *r = h->impl;
+    pn_reading_store_admit_abort(&r->admission);
     pn_identity_job_close(&r->digest);
     if (r->file)
         fclose(r->file);
@@ -506,17 +504,14 @@ pn_status_t pn_resume_step(pn_resume_t *h) {
         return s;
     }
     switch (r->phase) {
-    case 1:
-        s = pn_cache_file_directory(r->media, &r->writer, r->directory);
-        if (s == PN_OK)
-            s = pn_cache_file_directory(r->state, &r->trust, r->roots);
-        if (s == PN_OK)
-            s = room(r, r->directory, false);
-        if (s == PN_OK)
-            s = room(r, r->roots, true);
+    case 1:{
+        const pn_reading_store_request_t requests[2]={{r->media,&r->writer,r->directory,r->path,LIMIT,false},{r->state,&r->trust,r->roots,r->root,152,true}};
+        s=pn_reading_store_admit(&r->admission,r->pool,requests,2);
+        if(s==PN_BUSY)return s;
         if (s == PN_OK)
             r->phase++;
         break;
+    }
     case 2: {
         struct stat st;
         if (!rstat(r->tmp, &st) && !S_ISREG(st.st_mode)) {

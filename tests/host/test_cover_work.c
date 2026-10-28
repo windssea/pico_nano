@@ -18,6 +18,8 @@ static bool cancel(void *ctx){(void)ctx;return true;}
 static pn_status_t step(pn_cover_work_t *w,pn_shelf_covers_t *covers,pn_catalog_page_t *page,pn_pool_t *pool,pn_media_t *media,bool *changed){current++;return pn_shelf_covers_work(w,covers,page,pool,media,NULL,salt,2u*1024u*1024u,changed);}
 static void reset(pn_shelf_covers_t *covers,pn_catalog_page_t *page){pn_shelf_covers_reset(covers,page);memset(covers->pixels[0],0x5a,PN_COVER_BYTES);}
 int main(int argc,char **argv){
+    assert(!pn_cover_refresh_due(false,1000,0) && pn_cover_refresh_due(true,1000,0));
+    assert(!pn_cover_refresh_due(true,1999,1000) && pn_cover_refresh_due(true,2000,1000) && !pn_cover_refresh_due(true,999,1000));
     assert(argc==3);pn_pool_t pool;assert(!pn_pool_init(&pool,6u*1024u*1024u,NULL,NULL,NULL));pn_media_t media;pn_media_init(&media);assert(pn_media_attach(&media,1)==PN_OK);
     pn_catalog_page_t *page=calloc(1,sizeof *page);pn_shelf_covers_t *covers=calloc(1,sizeof *covers);uint8_t *oracle=malloc(PN_COVER_BYTES),*marker=malloc(PN_COVER_BYTES);assert(page && covers && oracle && marker);memset(marker,0x5a,PN_COVER_BYTES);
     for(unsigned book=1;book<3;book++){
@@ -41,6 +43,12 @@ int main(int argc,char **argv){
             assert(step(&work,covers,page,&pool,&media,&changed)==PN_STALE_JOB && !changed && !memcmp(marker,covers->pixels[0],PN_COVER_BYTES) && !pool.used && !pn_media_active(&media));
             file=fopen(argv[book],"r+b");assert(file && !ftruncate(fileno(file),size) && !fclose(file));
         }
+        // 第一张已完整验证即可呈现，后一本仍待提取；像素保持与原同步路径一致。/ Present the first fully verified cover while a second book is pending, with pixels identical to the synchronous oracle.
+        page->count=page->total=2;page->items[1]=page->items[0];reset(covers,page);current=0;
+        do{s=step(&work,covers,page,&pool,&media,&changed);assert(current<8192);}while(s==PN_BUSY);
+        assert(s==PN_OK && changed && covers->state[0]==PN_COVER_READY && covers->state[1]==PN_COVER_PENDING && pn_shelf_covers_pending(covers,page));
+        assert(pn_cover_refresh_due(changed,1000,0) && !memcmp(oracle,covers->pixels[0],PN_COVER_BYTES));
+        pn_cover_work_abort(&work);page->count=page->total=1;
         reset(covers,page);assert(step(&work,covers,page,&pool,&media,&changed)==PN_BUSY);snprintf(page->items[0].path,sizeof page->items[0].path,"/tmp/different-cover-item");
         assert(step(&work,covers,page,&pool,&media,&changed)==PN_BUSY && !pn_cover_work_pending(&work) && !pool.used && !pn_media_active(&media) && !memcmp(marker,covers->pixels[0],PN_COVER_BYTES));snprintf(page->items[0].path,sizeof page->items[0].path,"%s",argv[book]);
         // 介质代次改变不能发布半帧；任务可以交错正常读租约，关闭不替别人释放。/ A media epoch change cannot publish partial frames; ordinary read leases may coexist and must not be released by the job.

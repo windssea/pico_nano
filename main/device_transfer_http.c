@@ -8,8 +8,6 @@
 #define _POSIX_C_SOURCE 200809L
 #include "pn_brand.h"
 #include "device_transfer_http.h"
-#include "pn_localsend_json.h"
-#include "device_ls_discovery.h"
 #include "transfer_assets.h"
 #include "esp_http_server.h"
 #include "esp_httpd_priv.h"
@@ -32,18 +30,13 @@
 typedef struct {
  pn_transfer_worker_t *worker;
  httpd_handle_t server;
- httpd_handle_t ls_server; ///< LocalSend标准端口53317的独立监听，客户端子网扫描只找这个端口 / Separate listener on LocalSend's standard port 53317, the only port client subnet scans probe
  SemaphoreHandle_t auth;
- SemaphoreHandle_t serial; ///< 两个监听任务共享会话与缓冲，请求串行处理 / Both listener tasks share sessions and buffers, so requests run serially
+ SemaphoreHandle_t serial; ///< 请求缓冲串行使用 / Serialize access to request buffers
  char authority[64],origin[80],token[33];
  bool closing;
  struct {bool ready,rssi_known;int rssi;unsigned disconnects,reconnects,reason;} diagnostics; ///< 无口令快照 / Credential-free snapshot
  const pn_device_network_sink_t *network;
  const pn_device_transfer_install_sink_t *install; ///< 已提交书籍身份出口 / Committed-book identity outlet
- pn_pool_t ls_pool;pn_ls_session_t ls;char fingerprint[33];uint16_t port; ///< 单HTTP owner的LocalSend会话 / LocalSend session owned by the single HTTP task
- pn_device_ls_discovery_t discovery; ///< 生命周期先于HTTP上下文结束 / Ends before the HTTP context is released
- bool discovery_ready;uint64_t discovery_retry; ///< 发现故障不关闭网页，限频重试 / Discovery failures keep the web service alive with bounded retries
- pn_ls_request_t ls_request;pn_ls_snapshot_t ls_snapshot;pn_ls_grants_t ls_grants; ///< 串行复用PSRAM模型，避免撑满HTTP任务栈 / Serially reused PSRAM models avoid exhausting the HTTP task stack
  uint8_t bytes[PN_UPLOAD_CHUNK+1];
 } http_t;
 static const char *const messages[]={"成功","输入参数无效","资源正在使用或同名文件已存在","没有找到该文件或上传会话","空间、配额或大小超过限制","内存不足，请稍后重试","存储介质已失效","文件身份已经变化","上传已取消","暂不支持此格式","摘要或文件格式校验失败","读写失败，请重新查询后续传"};
@@ -192,98 +185,12 @@ static bool query_parse(const char *query,const char *const *keys,size_t n,char 
  }
  return true;
 }
-static pn_status_t ls_entropy(void *ctx,uint8_t *out,size_t n){(void)ctx;esp_fill_random(out,n);return PN_OK;}
-static void *ls_allocate(void *ctx,size_t n){(void)ctx;return heap_caps_malloc(n,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);}
-static void ls_release(void *ctx,void *p){(void)ctx;heap_caps_free(p);}
-static bool ls_peer(httpd_req_t *r,pn_ls_peer_t *peer){
- struct sockaddr_storage address;socklen_t length=sizeof address;memset(peer,0,sizeof *peer);
- if(getpeername(httpd_req_to_sockfd(r),(struct sockaddr *)&address,&length))return false;
- if(address.ss_family==AF_INET){peer->family=4;memcpy(peer->address,&((struct sockaddr_in *)&address)->sin_addr,4);return true;}
- if(address.ss_family==AF_INET6){peer->family=6;memcpy(peer->address,&((struct sockaddr_in6 *)&address)->sin6_addr,16);return true;}return false;
-}
-static esp_err_t ls_info(http_t *s,httpd_req_t *r){
- cJSON *json=cJSON_CreateObject();bool valid=string(json,"alias",PN_BRAND_NAME);valid&=string(json,"version","2.1");valid&=string(json,"deviceModel",PN_BRAND_NAME);valid&=string(json,"deviceType","headless");
- valid&=string(json,"fingerprint",s->fingerprint);valid&=string(json,"protocol","http");valid&=number(json,"port",s->ls_server?PN_DEVICE_LS_PORT:s->port);valid&=boolean(json,"download",false);return json_send(r,200,json,valid);
-}
-typedef struct {http_t *server;httpd_req_t *request;uint64_t received,started;} ls_stream_t;
-static pn_status_t ls_execute(void *ctx,const pn_transfer_command_t *command,pn_transfer_reply_t *reply){return pn_transfer_worker_execute(((http_t *)ctx)->worker,command,reply);}
-static pn_status_t ls_read(void *ctx,uint8_t *out,size_t cap,size_t *n){
- ls_stream_t *stream=ctx;http_t *s=stream->server;*n=0;
- if(is_closing(s))return PN_CANCELLED;
- if(stream->received==stream->request->content_len){pn_status_t done=pn_ls_body_done(&s->ls,now_ms());return done==PN_OK?PN_EMPTY:done;}
- uint64_t now=now_ms();if(now<stream->started || now-stream->started>=PN_LS_TRANSFER_MS)return PN_CANCELLED;
- size_t remaining=stream->request->content_len-(size_t)stream->received;if(cap>remaining)cap=remaining;
- int got=httpd_req_recv(stream->request,(char *)out,cap);if(got<=0 || (size_t)got>cap)return PN_IO;
- stream->received+=(size_t)got;*n=(size_t)got;return pn_ls_progress(&s->ls,stream->received,now_ms());
-}
-/// uri为规范化后的v2路由（v3客户端路径映射到同一处理）。/ uri is the normalized v2 route (v3 client paths map to the same handlers).
-static esp_err_t ls_dispatch(http_t *s,httpd_req_t *r,unsigned presence,const char *uri){
- // Native LocalSend uses peer/session grants; browser requests retain their separate pairing contract.
- // 原生LocalSend使用连接来源与会话授权；浏览器仍走独立配对契约。
- if(is_closing(s))return error(r,503,"传输服务已停止");
- if(presence&2u)return error(r,403,"LocalSend仅接受原生客户端");
- pn_ls_peer_t peer;if(!ls_peer(r,&peer))return error(r,403,"无法确认连接来源");
- (void)pn_ls_poll(&s->ls,now_ms());
- bool info=r->method==HTTP_GET && !strcmp(uri,"/api/localsend/v2/info");
- bool registration=r->method==HTTP_POST && !strcmp(uri,"/api/localsend/v2/register");
- bool prepare=r->method==HTTP_POST && !strcmp(uri,"/api/localsend/v2/prepare-upload");
- if(info){if(r->content_len)return error(r,400,"无效正文");return ls_info(s,r);}
- if(registration || prepare){
-  char length[32],type[64];uint64_t parsed;
-  if(!header(r,"Content-Length",length,sizeof length) || !decimal(length,PN_LS_JSON_MAX,&parsed) || parsed!=r->content_len || !parsed || !header(r,"Content-Type",type,sizeof type) || (strcasecmp(type,"application/json") && strcasecmp(type,"application/json; charset=utf-8")))return error(r,400,"无效元数据");
-  uint64_t started=now_ms();size_t at=0;
-  while(at<r->content_len){if(is_closing(s) || now_ms()-started>=PN_LS_IDLE_MS)return error(r,408,"元数据接收超时");int got=httpd_req_recv(r,(char *)s->bytes+at,r->content_len-at);if(got<=0 || (size_t)got>r->content_len-at)return error(r,400,"元数据不完整");at+=(size_t)got;}
-  if(registration){s->bytes[at]=0;if(!json_guard(s->bytes,at))return error(r,400,"无效元数据");cJSON *j=cJSON_ParseWithLengthOpts((char *)s->bytes,at+1,NULL,true);bool valid=cJSON_IsObject(j) && get_string(j,"fingerprint") && get_string(j,"version");cJSON_Delete(j);return valid?ls_info(s,r):error(r,400,"无效设备信息");}
-  pn_ls_request_t *request=&s->ls_request;pn_status_t status=pn_ls_parse_prepare(&s->ls_pool,s->bytes,at,request);
-  if(status==PN_OK)status=pn_ls_prepare(&s->ls,&peer,request,now_ms());
-  if(status!=PN_OK)return error(r,status==PN_BUSY?409:400,"接收请求未能建立");
-  pn_ls_snapshot_t *snapshot=&s->ls_snapshot;status=pn_ls_snapshot(&s->ls,snapshot);pn_ls_choice_t choices[PN_LS_FILES_MAX]={0};size_t accepted=0;
-  if(status==PN_OK)for(size_t i=0;i<request->count;i++){
-   // 用户开启接收模式即授权书籍/字体自动接收；图片须通过网页明确指定封面或壁纸。
-   // Entering receive mode authorizes book/font auto-acceptance; images require an explicit cover/wallpaper category on the web page.
-   choices[i].accept=snapshot->request.files[i].kind==PN_UPLOAD_BOOK || snapshot->request.files[i].kind==PN_UPLOAD_FONT;accepted+=choices[i].accept;
-  }
-  if(status==PN_OK)status=pn_ls_decide(&s->ls,snapshot->generation,choices,now_ms());
-  if(status!=PN_OK || !accepted)return error(r,403,"图片请在网页选择封面或壁纸");
-  char reply[PN_LS_REPLY_MAX];size_t written=0;
-  status=pn_ls_grants(&s->ls,&s->ls_grants,now_ms());if(status==PN_OK)status=pn_ls_encode_grants(&s->ls_pool,&s->ls_grants,reply,sizeof reply,&written);
-  return status==PN_OK?send_data(r,200,"application/json",reply,written):error(r,503,"接收授权不可用");
- }
- if(r->method!=HTTP_POST)return error(r,404,"未知LocalSend操作");
- const char *query=strchr(uri,'?');size_t route_len=query?(size_t)(query-uri):strlen(uri);char values[3][PN_UPLOAD_NAME_MAX];unsigned seen=0;
- const char *keys[]={"sessionId","fileId","token"};
- if(!query_parse(query,keys,3,values,&seen))return error(r,400,"无效会话参数");
- if(route_len==strlen("/api/localsend/v2/cancel") && !strncmp(uri,"/api/localsend/v2/cancel",route_len)){
-  if(seen!=1u || r->content_len)return error(r,400,"无效取消请求");
-  pn_status_t status=pn_ls_cancel_peer(&s->ls,&peer,values[0],now_ms());return status==PN_OK?send_data(r,200,"text/plain","",0):error(r,403,"无效会话来源");
- }
- if(route_len!=strlen("/api/localsend/v2/upload") || strncmp(uri,"/api/localsend/v2/upload",route_len))return error(r,404,"未知LocalSend操作");
- if(seen!=7u)return error(r,400,"缺少会话参数");
- pn_upload_request_t request;pn_status_t status=pn_ls_authorize(&s->ls,&peer,values[0],values[1],values[2],now_ms(),&request);
- if(status!=PN_OK)return error(r,status==PN_BUSY?409:403,"无效文件授权");
- char length[32];uint64_t parsed;
- if(!header(r,"Content-Length",length,sizeof length) || !decimal(length,512u*1024u*1024u,&parsed) || parsed!=request.size || parsed!=r->content_len){(void)pn_ls_cancel(&s->ls,now_ms());return error(r,400,"文件长度不匹配");}
- ls_stream_t stream={s,r,0,now_ms()};pn_transfer_receive_result_t receipt;
- status=pn_transfer_receive(&s->ls_pool,ls_execute,s,&request,ls_read,&stream,&receipt);pn_status_t finished=pn_ls_finish(&s->ls,&receipt,now_ms());
- if(status==PN_OK && finished==PN_OK && receipt.committed){
-  const pn_device_transfer_install_sink_t *sink=NULL;lock(s);sink=s->install;unlock(s);
-  if(sink && sink->installed)sink->installed(sink->ctx,request.kind,request.name,&receipt.digest);
-  return send_data(r,200,"text/plain","",0);
- }
- return error(r,status==PN_CORRUPT?422:status==PN_BUSY?409:503,"文件未确认安装，请重试或关闭传输");
-}
 static esp_err_t dispatch_serial(httpd_req_t *r){
  http_t *s=r->user_ctx;char host[64],origin[80],authorization[64];
  if(strlen(r->uri)>1024)return error(r,400,"请求地址过长");
  unsigned presence=0;
  if(!unique_headers(r,&presence))return error(r,400,"请求头重复或无效");
- // 新版LocalSend客户端先请求v3路径；其注册/准备/上传与v2同形，映射到同一处理，避免被网页路由拒绝。
- // Newer LocalSend clients request v3 paths first; register/prepare/upload keep the v2 shape, so map them onto the same handlers instead of letting web routing reject them.
- bool localsend=!strncmp(r->uri,"/api/localsend/v2/",18) || !strncmp(r->uri,"/api/localsend/v3/",18);
- char ls_route[1032];if(localsend){snprintf(ls_route,sizeof ls_route,"%s",r->uri);ls_route[16]='2';}char host_port[72];snprintf(host_port,sizeof host_port,"%s:%u",s->authority,s->port);
- char ls_host[72];snprintf(ls_host,sizeof ls_host,"%s:%u",s->authority,(unsigned)PN_DEVICE_LS_PORT);
- if(!header(r,"Host",host,sizeof host) || (strcmp(host,s->authority) && (!localsend || (strcmp(host,host_port) && strcmp(host,ls_host)))))return error(r,403,"传输地址不匹配");
- if(localsend)return ls_dispatch(s,r,presence,ls_route);
+ if(!header(r,"Host",host,sizeof host) || strcmp(host,s->authority))return error(r,403,"传输地址不匹配");
  bool has_origin=(presence&2u)!=0;bool valid_origin=header(r,"Origin",origin,sizeof origin);
  if((has_origin && (!valid_origin || strcmp(origin,s->origin))) || (r->method!=HTTP_GET && !has_origin))return error(r,403,"请求来源不匹配");
  lock(s);bool closing=s->closing;bool authorized=false;
@@ -378,8 +285,7 @@ pn_status_t pn_device_transfer_http_install(pn_device_transfer_http_t *http,cons
  if(!http || !http->impl || (sink && !sink->installed))return PN_INVALID;
  http_t *s=http->impl;lock(s);s->install=sink;unlock(s);return PN_OK;
 }
-/// 网页(80)与LocalSend(53317)两个监听共用一个会话：串行处理，长上传时另一端短暂返回503而不是争用缓冲。
-/// Web (80) and LocalSend (53317) listeners share one session: serialize requests so the other side briefly gets 503 during long uploads instead of racing buffers.
+/// 串行借用请求缓冲；停止后再释放上下文。/ Borrow request buffers serially; release context only after stopping.
 static esp_err_t dispatch(httpd_req_t *r){
  http_t *s=r->user_ctx;
  if(xSemaphoreTake(s->serial,pdMS_TO_TICKS(3000))!=pdTRUE)return error(r,503,"正在接收其他传输，请稍后重试");
@@ -392,8 +298,6 @@ pn_status_t pn_device_transfer_http_open(pn_device_transfer_http_t *out,pn_trans
  pn_transfer_worker_state_t state;if(pn_transfer_worker_state(worker,&state)!=PN_OK || state.phase!=PN_TWORK_ACTIVE)return PN_BUSY;
  http_t *s=heap_caps_malloc(sizeof *s,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);if(!s)return PN_NO_MEMORY;memset(s,0,sizeof *s);s->worker=worker;strcpy(s->authority,authority);snprintf(s->origin,sizeof s->origin,"http://%s",authority);
  s->auth=xSemaphoreCreateMutex();s->serial=xSemaphoreCreateMutex();if(!s->auth || !s->serial){if(s->auth)vSemaphoreDelete(s->auth);if(s->serial)vSemaphoreDelete(s->serial);heap_caps_free(s);return PN_NO_MEMORY;}
- s->port=port;uint8_t fingerprint[16];esp_fill_random(fingerprint,sizeof fingerprint);encode(fingerprint,16,s->fingerprint);
- if(pn_pool_init(&s->ls_pool,128u*1024u,ls_allocate,ls_release,NULL)!=0 || pn_ls_session_open(&s->ls,&s->ls_pool,ls_entropy,NULL)!=PN_OK){vSemaphoreDelete(s->auth);vSemaphoreDelete(s->serial);heap_caps_free(s);return PN_NO_MEMORY;}
  uint8_t token[16];esp_fill_random(token,16);encode(token,16,s->token);
  // 接收owner串行处理文件；浏览器上传与状态轮询会并行开连接，两条上限加LRU回收会掐断进行中的上传，放宽到四条。
  // The receiving owner serializes files; browsers open parallel connections for uploads and status polls, and a two-socket cap with LRU purging cut in-flight uploads, so allow four.
@@ -404,28 +308,9 @@ pn_status_t pn_device_transfer_http_open(pn_device_transfer_http_t *out,pn_trans
  cfg.global_user_ctx=s;cfg.global_user_ctx_free_fn=keep_context;cfg.open_fn=opened;
  esp_err_t result=httpd_start(&s->server,&cfg);out->impl=s;
  if(result==ESP_OK){const int methods[]={HTTP_GET,HTTP_POST,HTTP_PUT,HTTP_DELETE};for(unsigned i=0;i<4;i++){httpd_uri_t uri={.uri="/*",.method=methods[i],.handler=dispatch,.user_ctx=s};result=httpd_register_uri_handler(s->server,&uri);if(result!=ESP_OK)break;}}
- if(result!=ESP_OK){(void)pn_device_transfer_http_request_stop(out);if(s->server && httpd_stop(s->server)!=ESP_OK)return PN_IO;(void)pn_ls_stop_after_join(&s->ls);(void)pn_ls_session_close(&s->ls);vSemaphoreDelete(s->auth);vSemaphoreDelete(s->serial);heap_caps_free(s);out->impl=NULL;return PN_IO;}
- // LocalSend标准端口另开监听，栈放PSRAM不占内部RAM；失败时仍可在80端口按原公告工作。
- // Open LocalSend's standard port as a second listener with its stack in PSRAM; on failure LocalSend keeps working on port 80 with the original announcement.
- if(port!=PN_DEVICE_LS_PORT){httpd_config_t ls=cfg;ls.server_port=PN_DEVICE_LS_PORT;ls.ctrl_port=32769;ls.max_open_sockets=2;ls.task_caps=MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT;
-  esp_err_t opened_ls=httpd_start(&s->ls_server,&ls);
-  if(opened_ls==ESP_OK){const int methods[]={HTTP_GET,HTTP_POST};for(unsigned i=0;i<2 && opened_ls==ESP_OK;i++){httpd_uri_t uri={.uri="/*",.method=methods[i],.handler=dispatch,.user_ctx=s};opened_ls=httpd_register_uri_handler(s->ls_server,&uri);}}
-  if(opened_ls!=ESP_OK){
-#ifdef ESP_PLATFORM
-   ESP_LOGW("pn_transfer","LocalSend port %u unavailable: %s",(unsigned)PN_DEVICE_LS_PORT,esp_err_to_name(opened_ls));
-#endif
-   if(s->ls_server)(void)httpd_stop(s->ls_server);
-   s->ls_server=NULL;}}
- char address[64];snprintf(address,sizeof address,"%s",authority);char *colon=strchr(address,':');if(colon)*colon=0;
- pn_status_t discovery=pn_device_ls_discovery_open(&s->discovery,address,s->ls_server?PN_DEVICE_LS_PORT:port,s->fingerprint);s->discovery_ready=discovery==PN_OK;s->discovery_retry=now_ms()+2000;
+ if(result!=ESP_OK){(void)pn_device_transfer_http_request_stop(out);if(s->server && httpd_stop(s->server)!=ESP_OK)return PN_IO;vSemaphoreDelete(s->auth);vSemaphoreDelete(s->serial);heap_caps_free(s);out->impl=NULL;return PN_IO;}
  return PN_OK;
-}
-bool pn_device_transfer_http_localsend(pn_device_transfer_http_t *out){
- if(!out || !out->impl)return false;
- http_t *s=out->impl;
- if(!s->discovery_ready && !is_closing(s) && now_ms()>=s->discovery_retry){char address[64];strcpy(address,s->authority);char *colon=strchr(address,':');if(colon)*colon=0;s->discovery_ready=pn_device_ls_discovery_open(&s->discovery,address,s->ls_server?PN_DEVICE_LS_PORT:s->port,s->fingerprint)==PN_OK;s->discovery_retry=now_ms()+2000;}
- return s->discovery_ready;
 }
 pn_status_t pn_device_transfer_http_request_stop(pn_device_transfer_http_t *out){if(!out || !out->impl)return PN_INVALID;http_t *s=out->impl;lock(s);s->closing=true;memset(s->token,0,sizeof s->token);unlock(s);return pn_transfer_worker_request_stop(s->worker);}
 pn_status_t pn_device_transfer_http_diagnostics(pn_device_transfer_http_t *out,const pn_device_wifi_state_t *state){if(!out || !out->impl || !state)return PN_INVALID;http_t *s=out->impl;lock(s);s->diagnostics.ready=state->phase==PN_WIFI_READY;s->diagnostics.rssi_known=state->rssi_known;s->diagnostics.rssi=state->rssi;s->diagnostics.disconnects=state->disconnects;s->diagnostics.reconnects=state->reconnects;s->diagnostics.reason=state->last_disconnect_reason;unlock(s);return PN_OK;}
-pn_status_t pn_device_transfer_http_close(pn_device_transfer_http_t *out){if(!out)return PN_INVALID;if(!out->impl)return PN_OK;http_t *s=out->impl;(void)pn_device_transfer_http_request_stop(out);pn_status_t discovery=pn_device_ls_discovery_close(&s->discovery);if(discovery!=PN_OK)return discovery;if(s->ls_server){if(httpd_stop(s->ls_server)!=ESP_OK)return PN_IO;s->ls_server=NULL;}if(s->server && httpd_stop(s->server)!=ESP_OK)return PN_IO;(void)pn_ls_stop_after_join(&s->ls);(void)pn_ls_session_close(&s->ls);vSemaphoreDelete(s->auth);vSemaphoreDelete(s->serial);heap_caps_free(s);out->impl=NULL;return PN_OK;}
+pn_status_t pn_device_transfer_http_close(pn_device_transfer_http_t *out){if(!out)return PN_INVALID;if(!out->impl)return PN_OK;http_t *s=out->impl;(void)pn_device_transfer_http_request_stop(out);if(s->server && httpd_stop(s->server)!=ESP_OK)return PN_IO;vSemaphoreDelete(s->auth);vSemaphoreDelete(s->serial);heap_caps_free(s);out->impl=NULL;return PN_OK;}

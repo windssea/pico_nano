@@ -110,7 +110,9 @@ int main(void) {
     save(&r, &page, &f);
     assert(access(victim, F_OK) && !access(unrelated, F_OK));
     available = 0;
-    assert(pn_resume_begin(&r, 0, &page, &f, NULL) == PN_OK && pn_resume_step(&r) == PN_EMPTY && !pn_resume_pending(&r));
+    assert(pn_resume_begin(&r, 0, &page, &f, NULL) == PN_OK);
+    pn_status_t refused;do{refused=pn_resume_step(&r);}while(refused==PN_BUSY);
+    assert(refused==PN_EMPTY && !pn_resume_pending(&r));
     available = 32u * 1024u * 1024u;
     fail_sync = true;
     assert(pn_resume_begin(&r, 0, &page, &f, NULL) == PN_OK);

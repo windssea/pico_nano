@@ -45,8 +45,8 @@ static unsigned packets(const char *dir) {
 int main(int argc, char **argv) {
     assert(argc == 4);
     for (unsigned kind = 1; kind <= 2; kind++)
-        for (unsigned mode = 0; mode < 8; mode++) {
-            if(kind==1 && mode>=5)continue;
+        for (unsigned mode = 0; mode < 9; mode++) {
+            if(kind==1 && mode>=5 && mode!=8)continue;
             char base[384], state[512], tf[512], dir[600];
             snprintf(base, sizeof base, "%s/%u-%u", argv[3], kind, mode);
             assert(!mkdir(base, 0700));
@@ -85,7 +85,14 @@ int main(int argc, char **argv) {
                 assert(epub?pn_epub_app_resume_checkpoint_pending(&e):pn_reader_app_resume_checkpoint_pending(&t));
                 assert(pn_media_release(&media,&busy)==PN_OK);
             }
-            if (mode < 2 || mode>=3) {
+            if(mode==8){
+                // 到期不生成可重建包；必要保存失败保留对象，不空闲重试轰炸，显式释放可重试。/ Expiry never builds disposable packets; failed mandatory saving retains the object without idle retry storms, and explicit release can retry.
+                assert(pn_hot_session_park(&hot,&pool,&media,book,1,3,&t,&e)==PN_OK);
+                char held[600];snprintf(held,sizeof held,"%s.hold",state);assert(!rename(state,held));
+                assert(pn_hot_session_expire(&hot,3+PN_HOT_SESSION_MS)==PN_IO && hot.media && hot.expire_failed);
+                assert(!rename(held,state));assert(pn_hot_session_expire(&hot,4+PN_HOT_SESSION_MS)==PN_EMPTY && hot.media && !recent_commits);
+                assert(pn_hot_session_drop_for_switch(&hot)==PN_OK && !hot.media && recent_commits>0);
+            }else if (mode < 2 || mode>=3) {
                 assert(pn_hot_session_park(&hot, &pool, &media, book, 1, 3, &t, &e) == PN_OK);
                 assert(recent_commits==0);
                 if (mode == 0) {
@@ -135,7 +142,8 @@ int main(int argc, char **argv) {
                     assert(pn_hot_session_deferred_flush(&hot)==PN_BUSY && pn_epub_app_cache_pending(&hot.epub) && !pn_bootstrap_hint(state,&id));
                     if(mode==7){
                         // 容量拒绝是本轮稳定失败，不得像临时租约争用那样反复启动重写。/ Capacity refusal is stable for this round, unlike temporary lease contention; never restart it in a write loop.
-                        pn_status_t s=pn_hot_session_deferred_flush(&hot);assert(s==PN_OK || s==PN_BUSY || s==PN_EMPTY);
+                        pn_status_t s;unsigned admission_steps=0;
+                        do{s=pn_hot_session_deferred_flush(&hot);if(s!=PN_OK && s!=PN_BUSY && s!=PN_EMPTY)fprintf(stderr,"checkpoint quota result=%d\n",(int)s);assert(s==PN_OK || s==PN_BUSY || s==PN_EMPTY);assert(++admission_steps<512);}while(pn_epub_app_bootstrap_checkpoint_pending(&hot.epub));
                         assert(!pn_epub_app_bootstrap_checkpoint_pending(&hot.epub) && pn_epub_app_bootstrap_checkpoint_step(&hot.epub)==PN_EMPTY);
                     }
                 }

@@ -75,8 +75,8 @@ CONFIG_PN_DEVICE_OTA=y
 CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
 CONFIG_PN_OTA_PUBLIC_KEY_HEX="04f2ce42405655dfa24054164f286172ec8c6bef48bd17a31b5b375f786f1ad586f52164ec09d0326d144d8277febd70f930a39b7225db7fbec0d7a133307085cd"
 
-# 传书网络：WiFi/lwIP动态缓冲优先放PSRAM，放大TCP窗口与套接字上限（网页80与LocalSend53317两个监听）。
-# Transfer networking: prefer PSRAM for WiFi/lwIP dynamic buffers, widen TCP windows and the socket limit (web 80 plus LocalSend 53317 listeners).
+# 传书网络：WiFi/lwIP动态缓冲优先放PSRAM，放大TCP窗口与套接字上限（网页80端口）。
+# Transfer networking: prefer PSRAM for WiFi/lwIP dynamic buffers, widen TCP windows and the socket limit (web listener on port 80).
 CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
 CONFIG_LWIP_MAX_SOCKETS=16
 CONFIG_LWIP_TCP_WND_DEFAULT=17280

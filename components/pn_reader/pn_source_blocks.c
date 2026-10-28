@@ -36,6 +36,7 @@ typedef struct {
     bool ready,partial,dirty,failed,immutable,owned,root_owned;
     FILE *file;
     pn_cache_commit_t commit;
+    pn_reading_admission_t admission; ///< 原配额的分步扫描与清理 / Stepped scanning and cleanup under the original quotas
     char directory[384],rootdir[384],path[384],tmp[384],bak[384],root[384],rtmp[384],rbak[384];
 } blocks_t;
 
@@ -160,6 +161,7 @@ bool pn_source_blocks_dirty(const pn_source_blocks_t *h){const blocks_t *b=h?h->
 bool pn_source_blocks_pending(const pn_source_blocks_t *h){const blocks_t *b=h?h->impl:NULL;return b && b->phase!=0;}
 void pn_source_blocks_abort(pn_source_blocks_t *h){
     blocks_t *b=h?h->impl:NULL;if(!b)return;
+    pn_reading_store_admit_abort(&b->admission);
     if(b->file){fclose(b->file);b->file=NULL;}pn_cache_commit_abort(&b->commit);
     if(b->owned && pn_media_validate(b->media,&b->writer)==PN_OK)(void)remove(b->tmp);
     if(b->root_owned && b->state && pn_media_validate(b->state,&b->trust)==PN_OK)(void)remove(b->rtmp);
@@ -180,15 +182,15 @@ pn_status_t pn_source_blocks_store(pn_source_blocks_t *h,pn_media_t *state,const
     s=pn_media_validate(b->media,&b->writer);if(s!=PN_OK)return s;
     uint8_t head[HEAD];header(b,head);size_t bytes=(size_t)b->count*32;
     switch(b->phase){
-    case 1:
-        s=pn_cache_file_directory(b->media,&b->writer,b->directory);
-        if(s==PN_OK)s=pn_cache_file_directory(state,trust,b->rootdir);
-        if(s==PN_OK)s=pn_reading_store_room(b->media,&b->writer,b->directory,b->path,false,HEAD+bytes);
-        if(s==PN_OK)s=pn_reading_store_room(state,trust,b->rootdir,b->root,true,152);
+    case 1:{
+        const pn_reading_store_request_t requests[2]={{b->media,&b->writer,b->directory,b->path,HEAD+bytes,false},{state,trust,b->rootdir,b->root,152,true}};
+        s=pn_reading_store_admit(&b->admission,b->pool,requests,2);
+        if(s==PN_BUSY)return s;
         if(s==PN_OK){struct stat st;if(!block_stat(b->tmp,&st) && !S_ISREG(st.st_mode)){s=PN_IO;break;}
             b->file=fopen(b->tmp,"wb");if(!b->file){s=PN_IO;break;}b->owned=true;
             if(fwrite(head,1,HEAD,b->file)!=HEAD)s=PN_IO;else b->phase=2;}
         break;
+    }
     case 2:{size_t n=bytes-b->written;if(n>4096)n=4096;
         if(fwrite(b->hashes+b->written,1,n,b->file)!=n)s=PN_IO;else {b->written+=n;if(b->written==bytes)b->phase=3;}break;}
     case 3:

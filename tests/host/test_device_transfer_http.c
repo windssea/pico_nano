@@ -1,7 +1,6 @@
 /* 中文：真实设备handler、JSON和上传worker；SDK传输API显式stub。/ English: real device handler, JSON and upload worker with explicitly stubbed SDK transport APIs. */
 #define _POSIX_C_SOURCE 200809L
 #include "device_transfer_http.h"
-#include "device_ls_discovery.h"
 #include "esp_http_server.h"
 #include "esp_httpd_priv.h"
 #include "cJSON.h"
@@ -17,24 +16,17 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <errno.h>
-static httpd_uri_t route,ls_route; ///< 网页80与LocalSend53317两个监听 / Web 80 and LocalSend 53317 listeners
-static unsigned ls_routes;
+static httpd_uri_t route;
+static unsigned starts;
 static char scratch[2048],response[4096];
 static unsigned code,headers;
 static const uint8_t *body;
 static size_t body_at;
 static uint64_t receive_delay;
 static bool incomplete;
-static bool wrong_peer;
-int httpd_req_to_sockfd(httpd_req_t *r){(void)r;return 50;}
-int getpeername(int fd,struct sockaddr *address,socklen_t *length){assert(fd==50 && *length>=sizeof(struct sockaddr_in));struct sockaddr_in peer={.sin_family=AF_INET};uint8_t *ip=(uint8_t *)&peer.sin_addr;ip[0]=192;ip[1]=168;ip[2]=4;ip[3]=wrong_peer?3:2;memcpy(address,&peer,sizeof peer);*length=sizeof peer;return 0;}
 static _Atomic uint64_t now=1000;
 static size_t native_allocations;
 static _Atomic bool http_stop_fails;
-static _Atomic bool discovery_fails;
-static _Atomic unsigned discovery_attempts;
-pn_status_t __real_pn_device_ls_discovery_open(pn_device_ls_discovery_t *,const char *,uint16_t,const char *);
-pn_status_t __wrap_pn_device_ls_discovery_open(pn_device_ls_discovery_t *out,const char *address,uint16_t port,const char *fingerprint){discovery_attempts++;return discovery_fails?PN_IO:__real_pn_device_ls_discovery_open(out,address,port,fingerprint);}
 static void *global_context;
 static httpd_recv_func_t receive;
 static esp_err_t (*open_socket)(httpd_handle_t,int);
@@ -49,13 +41,11 @@ int xSemaphoreGive(void *p){return pthread_mutex_unlock(p)==0;}
 void vSemaphoreDelete(void *p){pthread_mutex_destroy(p);free(p);}
 esp_err_t httpd_start(httpd_handle_t *h,const httpd_config_t *cfg){
     assert(cfg->max_uri_handlers>=4 && cfg->lru_purge_enable && cfg->global_user_ctx);
-    // LocalSend监听在独立控制端口、栈放PSRAM，连接上限不挤占网页。/ The LocalSend listener uses its own control port and a PSRAM stack, with a socket cap separate from the web page.
-    if(cfg->server_port==53317){assert(cfg->ctrl_port!=32768 && cfg->max_open_sockets==2 && cfg->task_caps && global_context==cfg->global_user_ctx);*h=&ls_route;ls_routes=0;return ESP_OK;}
-    assert(cfg->max_open_sockets==4);*h=&route;global_context=cfg->global_user_ctx;open_socket=cfg->open_fn;return ESP_OK;}
-void *httpd_get_global_user_ctx(httpd_handle_t h){assert(h==&route || h==&ls_route);return global_context;}
-esp_err_t httpd_sess_set_recv_override(httpd_handle_t h,int fd,httpd_recv_func_t callback){(void)fd;assert(h==&route || h==&ls_route);receive=callback;return ESP_OK;}
-esp_err_t httpd_stop(httpd_handle_t h){assert(h==&route || h==&ls_route);return http_stop_fails?ESP_FAIL:ESP_OK;}
-esp_err_t httpd_register_uri_handler(httpd_handle_t h,const httpd_uri_t *r){assert(h==&route || h==&ls_route);if(h==&ls_route){ls_route=*r;ls_routes++;}else route=*r;return ESP_OK;}
+    assert(cfg->max_open_sockets==4 && cfg->server_port==80 && cfg->ctrl_port==32768);starts++;*h=&route;global_context=cfg->global_user_ctx;open_socket=cfg->open_fn;return ESP_OK;}
+void *httpd_get_global_user_ctx(httpd_handle_t h){assert(h==&route);return global_context;}
+esp_err_t httpd_sess_set_recv_override(httpd_handle_t h,int fd,httpd_recv_func_t callback){(void)fd;assert(h==&route);receive=callback;return ESP_OK;}
+esp_err_t httpd_stop(httpd_handle_t h){assert(h==&route);return http_stop_fails?ESP_FAIL:ESP_OK;}
+esp_err_t httpd_register_uri_handler(httpd_handle_t h,const httpd_uri_t *r){assert(h==&route);route=*r;return ESP_OK;}
 static const char *header(const char *name){const char *at=scratch;for(unsigned i=0;i<headers;i++){const char *colon=strchr(at,':');if(colon && (size_t)(colon-at)==strlen(name) && !strncasecmp(at,name,strlen(name))){while(*++colon==' ');return colon;}if(i+1<headers){at+=strlen(at)+1;while(!*at)at++;}}return NULL;}
 size_t httpd_req_get_hdr_value_len(httpd_req_t *r,const char *name){(void)r;const char *value=header(name);return value?strlen(value):0;}
 esp_err_t httpd_req_get_hdr_value_str(httpd_req_t *r,const char *name,char *out,size_t cap){(void)r;const char *value=header(name);if(!value || strlen(value)>=cap)return ESP_FAIL;strcpy(out,value);return ESP_OK;}
@@ -66,7 +56,7 @@ esp_err_t httpd_resp_set_hdr(httpd_req_t *r,const char *key,const char *value){(
 esp_err_t httpd_resp_send(httpd_req_t *r,const char *data,int n){(void)r;if(n<0)n=(int)strlen(data);if(n<(int)sizeof response){memcpy(response,data,(size_t)n);response[n]=0;}return ESP_OK;}
 static void add(const char *line){size_t at=0;for(unsigned i=0;i<headers;i++)at+=strlen(scratch+at)+1;strcpy(scratch+at,line);headers++;}
 static cJSON *request(int method,const char *uri,const void *bytes,size_t n,const char *token,const char *extra){
- memset(scratch,0,sizeof scratch);headers=0;add("Host: 192.168.4.1");if(strncmp(uri,"/api/localsend/",15))add("Origin: http://192.168.4.1");
+ memset(scratch,0,sizeof scratch);headers=0;add("Host: 192.168.4.1");add("Origin: http://192.168.4.1");
  char line[256];if(token){snprintf(line,sizeof line,"Authorization: Bearer %s",token);add(line);}
  if(method==HTTP_POST || method==HTTP_PUT){snprintf(line,sizeof line,"Content-Length: %zu",n);add(line);if(method==HTTP_POST)add("Content-Type: application/json");}
  if(method==HTTP_PUT)add("X-Offset: 0");
@@ -85,8 +75,7 @@ static const pn_device_transfer_install_sink_t install_sink={NULL,install_note};
 int main(void){
  char root[]="/tmp/pn-device-http-XXXXXX";assert(mkdtemp(root));pn_media_t media;pn_media_init(&media);assert(pn_media_attach(&media,123)==PN_OK);
  pn_upload_files_options_t options={.root=root};pn_transfer_worker_t worker={0};assert(pn_transfer_worker_open(&worker,&media,&options,6u*1024u*1024u,NULL,NULL,NULL)==PN_OK);
- pn_device_transfer_http_t server={0};discovery_fails=true;discovery_attempts=0;assert(pn_device_transfer_http_open(&server,&worker,"192.168.4.1",80)==PN_OK && server.impl);assert(pn_device_transfer_http_install(&server,&install_sink)==PN_OK);
- assert(discovery_attempts==1 && !pn_device_transfer_http_localsend(&server) && discovery_attempts==1);now+=2000;assert(!pn_device_transfer_http_localsend(&server) && discovery_attempts==2);discovery_fails=false;now+=2000;assert(pn_device_transfer_http_localsend(&server) && discovery_attempts==3);
+ pn_device_transfer_http_t server={0};assert(pn_device_transfer_http_open(&server,&worker,"192.168.4.1",80)==PN_OK && server.impl && starts==1);assert(pn_device_transfer_http_install(&server,&install_sink)==PN_OK);
  int sockets[2];assert(socketpair(AF_UNIX,SOCK_STREAM,0,sockets)==0);assert(open_socket(&route,sockets[0])==ESP_OK);assert(write(sockets[1],"a",1)==1);char received;assert(receive(&route,sockets[0],&received,1,0)==1 && received=='a');
  cJSON *json=request(HTTP_GET,"/api/v1/status",NULL,0,NULL,NULL);assert(code==200 && json && !strcmp(cJSON_GetObjectItemCaseSensitive(json,"name")->valuestring,"PicoNano"));cJSON_Delete(json);
  pn_device_wifi_state_t radio={.phase=PN_WIFI_READY,.rssi_known=true,.rssi=-61,.disconnects=2,.reconnects=1,.last_disconnect_reason=201};strcpy(radio.ap_password,"private");
@@ -98,27 +87,7 @@ int main(void){
  json=request(HTTP_GET,"/api/v1/session",NULL,0,NULL,NULL);assert(code==200 && cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(json,"ready")));char token[33];strcpy(token,cJSON_GetObjectItemCaseSensitive(json,"token")->valuestring);cJSON_Delete(json);
  const char *request_body="{\"ssid\":\"test\",\"password\":\"\"}";
  const uint8_t text[]="device HTTP\n";pn_book_id_t digest;assert(pn_identity_bytes(text,sizeof text-1,&digest)==PN_OK);char sha[65];for(unsigned i=0;i<32;i++)sprintf(sha+i*2,"%02x",digest.sha256[i]);
- /* LocalSend自动书籍接收使用真实共享安装器，连接来源和一次性令牌必须匹配。/ LocalSend book auto-reception uses the real shared installer with matching connection origin and single-use grants. */
- json=request(HTTP_GET,"/api/localsend/v2/info",NULL,0,NULL,NULL);assert(code==200 && cJSON_IsString(cJSON_GetObjectItemCaseSensitive(json,"fingerprint")) && cJSON_GetObjectItemCaseSensitive(json,"port")->valueint==53317 && ls_routes==2 && ls_route.handler==route.handler && ls_route.user_ctx==route.user_ctx);cJSON_Delete(json);
- // 新版客户端的v3路径映射到同一处理。/ Newer clients' v3 paths map to the same handlers.
- json=request(HTTP_GET,"/api/localsend/v3/info",NULL,0,NULL,NULL);assert(code==200 && cJSON_IsString(cJSON_GetObjectItemCaseSensitive(json,"fingerprint")));cJSON_Delete(json);
- json=request(HTTP_GET,"/api/localsend/v2/info",NULL,0,NULL,"Origin: http://192.168.4.1");assert(code==403);cJSON_Delete(json);
- char metadata[1200];snprintf(metadata,sizeof metadata,"{\"info\":{\"alias\":\"Sender\",\"version\":\"2.2\",\"fingerprint\":\"sender\"},\"files\":{\"native\":{\"id\":\"native\",\"fileName\":\"native.txt\",\"size\":%zu,\"fileType\":\"text/plain\",\"sha256\":\"%s\"}}}",sizeof text-1,sha);
- json=request(HTTP_POST,"/api/localsend/v2/prepare-upload",metadata,strlen(metadata),NULL,NULL);assert(code==200 && json);char ls_id[33],ls_token[33];strcpy(ls_id,cJSON_GetObjectItemCaseSensitive(json,"sessionId")->valuestring);strcpy(ls_token,cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(json,"files"),"native")->valuestring);cJSON_Delete(json);
- json=request(HTTP_POST,"/api/localsend/v2/prepare-upload",metadata,strlen(metadata),NULL,NULL);assert(code==409);cJSON_Delete(json);
- char ls_uri[300];snprintf(ls_uri,sizeof ls_uri,"/api/localsend/v2/upload?sessionId=%s&fileId=native&token=%s",ls_id,ls_token);
- wrong_peer=true;json=request(HTTP_POST,ls_uri,text,sizeof text-1,NULL,NULL);assert(code==403);cJSON_Delete(json);wrong_peer=false;
- json=request(HTTP_POST,ls_uri,text,sizeof text-1,NULL,NULL);assert(code==200 && !json);
- char native_path[512];snprintf(native_path,sizeof native_path,"%s/piconano/books/native.txt",root);FILE *native=fopen(native_path,"rb");assert(native);uint8_t native_bytes[64];assert(fread(native_bytes,1,sizeof native_bytes,native)==sizeof text-1 && !memcmp(native_bytes,text,sizeof text-1));assert(!fclose(native));
- assert(install_calls==1 && install_kind==PN_UPLOAD_BOOK && !strcmp(install_name,"native.txt") && !memcmp(install_digest.sha256,digest.sha256,32));install_calls=0;
- json=request(HTTP_POST,ls_uri,text,sizeof text-1,NULL,NULL);assert(code==409);cJSON_Delete(json);
- const char *image_meta="{\"info\":{\"alias\":\"Sender\",\"version\":\"2.2\",\"fingerprint\":\"sender\"},\"files\":{\"image\":{\"id\":\"image\",\"fileName\":\"image.png\",\"size\":100,\"fileType\":\"image/png\"}}}";
- json=request(HTTP_POST,"/api/localsend/v2/prepare-upload",image_meta,strlen(image_meta),NULL,NULL);assert(code==403);cJSON_Delete(json);
- char bad_sha[65];memset(bad_sha,'0',64);bad_sha[64]=0;
- snprintf(metadata,sizeof metadata,"{\"info\":{\"alias\":\"Sender\",\"version\":\"2.2\",\"fingerprint\":\"sender\"},\"files\":{\"native\":{\"id\":\"native\",\"fileName\":\"bad-native.txt\",\"size\":%zu,\"sha256\":\"%s\"}}}",sizeof text-1,bad_sha);
- json=request(HTTP_POST,"/api/localsend/v2/prepare-upload",metadata,strlen(metadata),NULL,NULL);assert(code==200 && json);strcpy(ls_id,cJSON_GetObjectItemCaseSensitive(json,"sessionId")->valuestring);strcpy(ls_token,cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(json,"files"),"native")->valuestring);cJSON_Delete(json);
- snprintf(ls_uri,sizeof ls_uri,"/api/localsend/v2/upload?sessionId=%s&fileId=native&token=%s",ls_id,ls_token);json=request(HTTP_POST,ls_uri,text,sizeof text-1,NULL,NULL);assert(code==422);cJSON_Delete(json);
- snprintf(native_path,sizeof native_path,"%s/piconano/books/bad-native.txt",root);assert(access(native_path,F_OK)!=0);
+ for(unsigned v=2;v<=3;v++){char removed[64];snprintf(removed,sizeof removed,"/api/localsend/v%u/info",v);json=request(HTTP_GET,removed,NULL,0,token,NULL);assert(code==400);cJSON_Delete(json);}
  char begin[512];snprintf(begin,sizeof begin,"{\"kind\":\"book\",\"name\":\"测试.txt\",\"size\":%zu,\"sha256\":\"%s\"}",sizeof text-1,sha);
  json=request(HTTP_POST,"/api/v1/uploads",begin,strlen(begin),token,NULL);assert(code==201);char id[33],uri[100];strcpy(id,cJSON_GetObjectItemCaseSensitive(json,"upload_id")->valuestring);cJSON_Delete(json);
  snprintf(uri,sizeof uri,"/api/v1/uploads/%s/chunks",id);

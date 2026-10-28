@@ -6,13 +6,13 @@
 #include "pn_profile.h"
 #include <string.h>
 #include <sys/stat.h>
-static void clear(pn_hot_session_t *h){h->path[0]=0;h->media=NULL;h->epoch=h->policy=h->at=0;h->prepared=false;h->prepare_pool=NULL;h->layout_pending=false;h->deferred_failed=false;}
+static void clear(pn_hot_session_t *h){h->path[0]=0;h->media=NULL;h->epoch=h->policy=h->at=0;h->prepared=false;h->prepare_pool=NULL;h->layout_pending=false;h->deferred_failed=h->expire_failed=false;}
 static bool deferred_pending(const pn_hot_session_t *,bool);
 static pn_status_t deferred_flush(pn_hot_session_t *,bool);
 static pn_status_t drop(pn_hot_session_t *h,bool checkpoint){
     if(!h)return PN_INVALID;
     // 显式释放是新的保存尝试，须重试曾失败的日志和当前页；空闲仍保留失败限流。/ Explicit release starts a new saving attempt for failed journals/current pages; idle failure throttling remains intact.
-    h->deferred_failed=false;
+    h->deferred_failed=h->expire_failed=false;
     // 释放冻结帧前尽力收口当前页；不新增画布，失败仍由原进度保存屏障处理。/ Best-effort current-page checkpoint before freeing the frozen frame; no new canvas, with the original progress barrier retaining authority.
     if(checkpoint && !h->prepared && (h->epub.impl || h->txt.impl)){
         // 默认释放仍只收口原当前页，不能被新结构任务占住写租约。/ Default release checkpoints only the original current page, without a new structure task holding its write lease.
@@ -149,8 +149,9 @@ pn_status_t pn_hot_session_take_prepared(pn_hot_session_t *h,pn_media_t *media,c
 }
 pn_status_t pn_hot_session_expire(pn_hot_session_t *h,uint64_t now){
     if(!h)return PN_INVALID;
-    if(!h->media || now<h->at || now-h->at<PN_HOT_SESSION_MS)return PN_EMPTY;
-    return pn_hot_session_drop(h);
+    if(!h->media || h->expire_failed || now<h->at || now-h->at<PN_HOT_SESSION_MS)return PN_EMPTY;
+    // 到期只做必要保存，不为释放新建可重建包；失败保持对象并等待显式重试。/ Expiry saves mandatory records only, without building disposable packets; failure retains the object until explicit retry.
+    pn_status_t s=drop(h,false);if(s!=PN_OK && s!=PN_EMPTY && s!=PN_CANCELLED && s!=PN_BUSY)h->expire_failed=true;return s;
 }
 pn_status_t pn_hot_session_park(pn_hot_session_t *h,pn_pool_t *pool,pn_media_t *media,const char *path,uint64_t policy,uint64_t now,pn_reader_app_t *txt,pn_epub_app_t *epub){
     if(!h || !pool || !media || !path || !*path || !policy || !txt || !epub || (!!txt->impl==!!epub->impl))return PN_INVALID;

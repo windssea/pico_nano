@@ -13,13 +13,11 @@
 #define PN_HUB_SHELF 3 ///< 底栏书架 / Bottom-bar Shelf
 #define PN_HUB_HOME 5 ///< 底栏首页 / Bottom-bar Home
 #define PN_HUB_SETTINGS 4 ///< 底栏设置 / Bottom-bar Settings
-#define PN_HUB_LOCALSEND 6 ///< 开启原生自动接收 / Start native auto-reception
 #define PN_HUB_USB 7 ///< 手动开始USB独占传书 / Manually start exclusive USB transfer
 /// 页面上显示的能力与信息，由调用方按实际状态填写。/ Capabilities and information shown on the page, filled by the caller from actual state.
 typedef struct {
     bool hotspot; ///< 热点传书可用 / Hotspot transfer available
     bool lan; ///< 已保存家庭网络，局域网传书可用 / A home network is saved so LAN transfer is available
-    bool localsend; ///< 原生LocalSend接收适配已接入 / Native LocalSend receive adapter is wired
     bool usb; ///< 当前端口支持独占MSC / Current port supports exclusive MSC
     const char *lan_name; ///< 已保存网络名，可NULL / Saved network name, may be NULL
     const char *storage; ///< 存储卡容量说明，NULL则显示未读取到 / Card capacity note; NULL shows "not read"

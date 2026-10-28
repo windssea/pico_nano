@@ -16,7 +16,6 @@ typedef struct {
  bool released; ///< 所有后台资源已停止，media已归还 / All background resources stopped, media returned
  pn_status_t error; ///< 最初失败或清理错误 / Initial failure or cleanup error
  unsigned stage; ///< 0存储/1文件任务/2无线/3连接/4服务 / 0 storage, 1 file worker, 2 radio, 3 connection, 4 server
- bool localsend; ///< 发现广播已启动 / Discovery announcements are active
  pn_device_wifi_state_t network; ///< 无STA秘密的网络快照 / Network snapshot without STA secrets
  pn_transfer_worker_state_t work; ///< 任务快照 / Worker snapshot
 } pn_device_transfer_state_t;

@@ -21,14 +21,10 @@ typedef struct {
  void *ctx; ///< 控制层上下文 / Controller context
  void (*installed)(void *ctx,pn_upload_kind_t kind,const char *name,const pn_book_id_t *digest); ///< 完整安装已确认 / Complete install confirmed
 } pn_device_transfer_install_sink_t;
-/// LocalSend标准端口；客户端组播失败后的子网HTTP扫描只探测此端口。/ LocalSend standard port; client subnet HTTP scans after multicast failure probe only this port.
-#define PN_DEVICE_LS_PORT 53317
 typedef struct {void *impl;} pn_device_transfer_http_t; ///< 活动对象不可复制 / Never copy a live object
 /// WiFi启动后调用，authority为固定IP[:port]；先准备活动worker，平台随机数须有熵。
 /// Call after WiFi starts with a fixed IP[:port] authority and active worker; platform randomness requires entropy.
 pn_status_t pn_device_transfer_http_open(pn_device_transfer_http_t *,pn_transfer_worker_t *,const char *,uint16_t);
-/// 监督owner查询/限频重试发现服务，失败不关闭已就绪网页。/ Supervisor queries/retries discovery at a bounded rate; failure keeps the ready web service alive.
-bool pn_device_transfer_http_localsend(pn_device_transfer_http_t *);
 /// 启用/network接口；sink须活到close之后，NULL关闭接口。/ Enable the /network endpoints; sink must outlive close, NULL disables them.
 pn_status_t pn_device_transfer_http_network(pn_device_transfer_http_t *,const pn_device_network_sink_t *);
 /// 启用/关闭安装完成出口；sink须活到close之后，NULL关闭。/ Enable or disable the installed-book outlet; sink must outlive close, NULL disables it.
