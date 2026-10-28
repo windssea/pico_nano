@@ -1,0 +1,39 @@
+{
+  "brand": "PicoNano",
+  "source_commit": "33e7667546bbb9d4ab103903c5d55b9e8eb9daa3",
+  "version": "1.0.9",
+  "idf": "v6.1",
+  "target": "esp32s3",
+  "board": "RDP-G01-W",
+  "built_at": "2026-10-28T22:57:22.697163+08:00",
+  "config": "board defaults; SDK USB/radio coexistence; TLS PSRAM; diagnostics disabled",
+  "application_offset": "0x20000",
+  "slot_bytes": 6291456,
+  "write_files": [
+    "pico_nano.bin"
+  ],
+  "write_executed": false,
+  "hardware_acceptance": false,
+  "files": {
+    "pico_nano.bin": {
+      "bytes": 5376240,
+      "sha256": "5a934486ab1659481f2105f88c4d7349a8e0baa95fb03ce4d863848d9fed229d"
+    },
+    "expected-partition-table.bin": {
+      "bytes": 3072,
+      "sha256": "da7fd4effb2d8deb4ae1af6053b8abbf53227f56a850cb03ec32067bdf3cf7bb"
+    },
+    "flash_upgrade.py": {
+      "bytes": 5950,
+      "sha256": "5e85174c5f82b0df6522dd353b5de9d33a88f509872b62eea3012be26e68969f"
+    },
+    "README.md": {
+      "bytes": 65753,
+      "sha256": "d9d0832629cea09f5a04fb5e77fec72f159b06d1b0b0d25e029917132989d38c"
+    },
+    "requirements.txt": {
+      "bytes": 15,
+      "sha256": "c4f640d88c87e6d02201862dc58a106c956ecf8df504c0897287057fb66bc0e7"
+    }
+  }
+}
