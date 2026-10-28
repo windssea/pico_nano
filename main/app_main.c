@@ -563,6 +563,10 @@ static pn_status_t present_panel(void *ctx,const pn_frame_t *frame,pn_refresh_t 
     (void)panel_at;
     bool deep_clean=atomic_exchange(&deep_clean_pending,false);
     content_area=(pn_feedback_box_t){0,0,684,1216};
+    // 阅读清理直接借用现成48相GC16，普通GL16保留当前表；本次扫描结束总是归还指针。/ Borrow the existing 48-phase GC16 for reading cleans, retain the current table for ordinary GL16, and always return the pointer after this scan.
+    const void *reading_waveform=hardware.hl.waveform;
+    bool reading_full_gc16=body_refresh && !reading_exit && (mode==MODE_GC16 || !panel_known || deep_clean);
+    if(reading_full_gc16)hardware.hl.waveform=&E0470_FULL_WAVEFORM;
 #if defined(ESP_PLATFORM)
     const EpdWaveform *ripple_wave=NULL;
     // 清理页（到期或内容风险）：账本完整时四次里三次用柔和GL16波纹并白推账上纯白像素（无黑闪），第四次才用原GC16波纹。
@@ -648,10 +652,12 @@ static pn_status_t present_panel(void *ctx,const pn_frame_t *frame,pn_refresh_t 
         // 供数不足：退回安全时钟，白场重建参考帧，目标帧保留在framebuffer。/ Underrun: fall back to the safe clock and rebuild the reference frame from white; the target stays in the framebuffer.
         ESP_LOGW(TAG,"Line queue underrun, pclk back to %d MHz",PCLK_SAFE_MHZ);
         read_pico_epd_set_pclk(PCLK_SAFE_MHZ);read_pico_epd_use_scan(READ_PICO_EPD_SCAN_FULL);
+        if(body_refresh && !reading_exit){hardware.hl.waveform=&E0470_FULL_WAVEFORM;reading_full_gc16=true;}
         epd_clear();result=epd_hl_update_screen_from_white(&hardware.hl,MODE_GC16,25);mode=MODE_GC16;reason="underrun";atomic_store(&overlap_disabled,true);
         content_area=(pn_feedback_box_t){0,0,684,1216};
     }
     uint64_t scanned_at=now_ms();(void)scanned_at;
+    hardware.hl.waveform=reading_waveform;
     panel_known=result==EPD_DRAW_SUCCESS;
 #if defined(ESP_PLATFORM)
     // 水波纹自行记账；整屏GC16清空账本，其余显示无法逐像素记账，下一次清残影退回整页。
@@ -671,6 +677,7 @@ static pn_status_t present_panel(void *ctx,const pn_frame_t *frame,pn_refresh_t 
     // 成功则保活到空闲期满；失败立即断电。/ Keep the rails up until idle expiry on success; drop them at once on failure.
     rails_deadline_ms=now_ms()+RAILS_IDLE_MS;pn_device_power_busy(PN_POWER_RAILS,true);if(!panel_known)rails_release();
     if(!panel_known)ESP_LOGE(TAG,"Panel present failed: %u",(unsigned)result);
+    if(reading_full_gc16)ESP_LOGI(TAG,"Reading clean waveform=full-gc16 phases=48 status=%u",(unsigned)result);
     ESP_LOGI(TAG,"Present mode=%u reason=%s body=%d prepare=%llu ms panel=%llu ms pool=%u/%u",(unsigned)mode,reason,body_refresh,(unsigned long long)(panel_at-prepared_at),(unsigned long long)(now_ms()-panel_at),(unsigned)pool.used,(unsigned)pool.limit);
     ESP_LOGI(TAG,"Display stages dirty=%llu convert=%llu maintenance=%llu power=%llu scan=%llu remember=%llu ms",(unsigned long long)(dirty_at-converted_at),(unsigned long long)(converted_at-prepared_at),(unsigned long long)(maintenance_at-dirty_at),(unsigned long long)(panel_at-maintenance_at),(unsigned long long)(scanned_at-panel_at),(unsigned long long)(now_ms()-scanned_at));
     return panel_known?PN_OK:PN_IO;
@@ -2511,7 +2518,10 @@ static void toolbar_show(void){
 /// 关闭工具栏并恢复原页面；强刷传PN_REFRESH_GC16。/ Close the toolbar and restore the page; pass PN_REFRESH_GC16 for a full refresh.
 static void toolbar_close(pn_refresh_t profile){
     toolbar_open=false;if(!page_copy)return;
+    // 工具栏清屏在旧视图用途下恢复正文，显式借用阅读用途直至显示回执；普通关闭仍沿原路径。/ A toolbar clean restores the body before the view purpose updates; borrow the reading purpose through receipt, leaving ordinary closure unchanged.
+    bool restore_reading=profile==PN_REFRESH_GC16 && !atomic_exchange(&reading_presentation,true);
     pn_frame_t frame;if(pn_frame_bind(&frame,page_copy,342u*1216u,684,1216) && present(NULL,&frame,profile)!=PN_OK)ESP_LOGW(TAG,"Toolbar close failed");
+    if(restore_reading)atomic_store(&reading_presentation,false);
 }
 /// 翻页错误也在异步输入路径可见；已显示页与保存故障分别反馈。/ Surface errors for asynchronous input, distinguishing shown pages from save failures.
 static void report_reader_result(pn_status_t status){

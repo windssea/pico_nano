@@ -100,6 +100,31 @@ static void reading_exit_refresh_checks(void){
     clears=clear_calls;shown=presents;assert(present(NULL,&frame,PN_REFRESH_EXIT_GC16)==PN_OK && clear_calls==clears+1 && presents==shown+1 && panel_known && hardware.hl.waveform==&E0470_FOLLOW_WAVEFORM);
     pn_free(pixels);hardware.hl.waveform=wave;maintenance=saved;panel_known=known;atomic_store(&full_clean_completed,clean);
 }
+/// 阅读GC16借完整表，GL16不变；失败、深清与未知参考也必须归还波形。/ Reading GC16 borrows the full table while GL16 stays unchanged; failure, deep clean and unknown references must also restore ownership.
+static void reading_full_gc16_checks(void){
+    pn_device_refresh_t saved=maintenance;bool known=panel_known,clean=atomic_exchange(&full_clean_completed,false);
+    bool reading=atomic_exchange(&reading_presentation,true);const void *wave=hardware.hl.waveform;
+    uint8_t *pixels=pn_alloc(&pool,415872);pn_frame_t frame;assert(pixels && pn_frame_bind(&frame,pixels,415872,684,1216));
+    pn_frame_clear(&frame,15);for(int gray=0;gray<16;gray++)pn_frame_rect(&frame,20+gray*40,200,40,320,(uint8_t)gray);
+    hardware.hl.waveform=&E0470_WAVEFORM;panel_known=true;
+    unsigned calls=screen_full_calls,clears=clear_calls;size_t used=pool.used,live=pool.live;
+    assert(present(NULL,&frame,PN_REFRESH_GC16)==PN_OK && screen_full_calls==calls+1 && clear_calls==clears);
+    assert(last_update_wave==&E0470_FULL_WAVEFORM && last_update_mode==MODE_GC16 && hardware.hl.waveform==&E0470_WAVEFORM);
+    assert(pool.used==used && pool.live==live && !memcmp(stub_front,stub_back,sizeof stub_front));
+    // 普通翻页仍用原GL16，包含所有16级输入，不引入二值化或额外画布。/ Ordinary turns retain original GL16 and all 16 input grays without binarization or another canvas.
+    pn_frame_rect(&frame,24,600,80,40,7);assert(present(NULL,&frame,PN_REFRESH_GL16)==PN_OK);
+    assert(last_update_wave==&E0470_WAVEFORM && last_update_mode==MODE_GL16 && hardware.hl.waveform==&E0470_WAVEFORM);
+    panel_fault=true;assert(present(NULL,&frame,PN_REFRESH_GC16)==PN_IO && !panel_known);
+    assert(last_update_wave==&E0470_FULL_WAVEFORM && hardware.hl.waveform==&E0470_WAVEFORM);panel_fault=false;
+    assert(present(NULL,&frame,PN_REFRESH_GL16)==PN_OK && panel_known);
+    assert(last_update_wave==&E0470_FULL_WAVEFORM && last_update_mode==MODE_GC16 && hardware.hl.waveform==&E0470_WAVEFORM);
+    atomic_store(&deep_clean_pending,true);assert(present(NULL,&frame,PN_REFRESH_GL16)==PN_OK);
+    assert(last_update_wave==&E0470_FULL_WAVEFORM && last_update_mode==MODE_GC16 && hardware.hl.waveform==&E0470_WAVEFORM);
+    // 新输入灰阶值仍在源帧中，且测试结束池回到原额度。/ Input gray values remain in the source frame, and the test returns its pool allocation.
+    for(int gray=0;gray<16;gray++)assert(pn_frame_get(&frame,24+gray*40,220)==gray);
+    pn_free(pixels);hardware.hl.waveform=wave;maintenance=saved;panel_known=known;
+    atomic_store(&reading_presentation,reading);atomic_store(&full_clean_completed,clean);
+}
 static void home_reading_key_checks(void){
     pn_reading_summary_t a={.known=true,.dated=true,.weekday=2,.total_ms=40000,.week_ms={50000,0,1000}};
     uint64_t before=home_reading_key(1,&a);a.total_ms+=1000;a.week_ms[2]+=1000;assert(home_reading_key(1,&a)==before);
@@ -122,6 +147,7 @@ int main(void){
     int vcom;assert(read_pico_pmu_vcom_get(&vcom)==ESP_OK);epd_set_vcom((uint16_t)vcom);
     assert(pn_media_attach(&sd_media,1)==PN_OK);
     reading_exit_refresh_checks();
+    reading_full_gc16_checks();
     assert(pn_settings_ui_open(&settings_ui,&pool,NULL,NULL,present,NULL)==PN_OK);
     // 网络结束时若绘制被取消，空闲重试遵守节流、取消与锁屏门控。 / Retry cancelled network-terminal draws subject to idle throttling, cancellation and lock gates.
     uint64_t retry_at=0;settings_ui.presented=false;unsigned retry_frames=presents;
@@ -302,6 +328,18 @@ int main(void){
     // Long opens reading settings only, short closes tools into the body, and a subsequent body short goes Home.
     void *key_reader=reader.impl;handle_key(PN_KEY_2,PN_KEY_LONG);assert(toolbar_open && reader.impl==key_reader && !home_mode && !shelf_mode);
     handle_key(PN_KEY_2,PN_KEY_SHORT);assert(!toolbar_open && reader.impl==key_reader && !home_mode);
+    // 真正工具栏入口尚带管理用途；用活动阅读对象验证清屏与失败后用途、波形和画布归还。/ The toolbar still carries a management purpose; use a live reader to verify clean/failure restore the purpose, waveform and canvas.
+    const void *toolbar_wave=hardware.hl.waveform;uint8_t *toolbar_page=page_copy;size_t toolbar_used=pool.used,toolbar_live=pool.live;
+    bool toolbar_reading=atomic_exchange(&reading_presentation,false);
+    for(unsigned attempt=0;attempt<3;attempt++){
+        toolbar_open=true;panel_known=true;panel_fault=attempt==1;unsigned clears=clear_calls;
+        apply_selection(PN_TOOL_REFRESH);
+        assert(!toolbar_open && !atomic_load(&reading_presentation) && atomic_load(&deep_clean_pending)==panel_fault);
+        assert(last_update_wave==&E0470_FULL_WAVEFORM && last_update_mode==MODE_GC16 && hardware.hl.waveform==toolbar_wave);
+        assert(clear_calls==clears+1 && panel_known==!panel_fault && page_copy==toolbar_page && reader.impl==key_reader);
+        assert(pool.used==toolbar_used && pool.live==toolbar_live);
+    }
+    panel_fault=false;atomic_store(&reading_presentation,toolbar_reading);
     assert(pn_style_ui_open(&styles,&reader,present,NULL)==PN_OK);styles.draft.pixels=46;
     panel_fault=true;handle_key(PN_KEY_2,PN_KEY_SHORT);assert(styles.active && reader.impl==key_reader && !home_mode);panel_fault=false;
     assert(pn_style_ui_present(&styles,present,NULL)==PN_OK);

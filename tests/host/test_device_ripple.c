@@ -146,6 +146,12 @@ int main(void){
      for(int tick=0;tick<gl->phases;tick+=4){build(lut,flat,tick);for(unsigned row=0;row<H;row+=97){lookup((const uint32_t *)(diff+(size_t)row*W),out+1,lut,W);
       for(int c=0;c<W;c++){uint8_t d=diff[(size_t)row*W+c];int expected=(d>>4)==(d&15)?0:e0470_phase_action(gl,tick,d>>4,d&15);assert(((out[1+c/4]>>((c&3)*2))&3)==expected);checked++;}}}
      assert(pn_device_ripple_end());free(front);free(back);free(diff);}
+    // 阅读清理的48相原表可原样交给波纹载体；不截断、改色或增加工作区。/ Pass the 48-phase reading clean table unchanged into the ripple carrier without truncation, recoloring or a larger workspace.
+    {const EpdWaveformPhases *full=e0470_waveform_phases(&E0470_FULL_WAVEFORM,2);assert(full && full->phases==48);
+     pn_device_ripple_ghost_forget();assert(pn_device_ripple_begin(&memory,&E0470_FULL_WAVEFORM,2,false,difference,&wave));
+     const EpdWaveformPhases *carrier=e0470_waveform_phases(wave,2);assert(carrier && carrier->phases>=full->phases);
+     assert(!memcmp(carrier->luts,full->luts,(size_t)full->phases*64u));build=reference_build;lookup=reference_lookup;
+     assert(pn_device_ripple_select(0x100|2,&build,&lookup));build(lut,carrier,0);lookup((const uint32_t *)difference,out,lut,W);assert(pn_device_ripple_end());}
     printf("device_ripple checks=%u max_runs=%u ticks=%d\n",checked,max_runs,gc->phases+7*PN_DEVICE_RIPPLE_STEP);
     free(difference);free(out);free(lut);free(memory.tables);free(memory.rows[0]);free(memory.rows[1]);return 0;
 }

@@ -7,4 +7,5 @@
 #else
 extern const int E0470_FOLLOW_WAVEFORM;
 extern const int E0470_WAVEFORM;
+extern const int E0470_FULL_WAVEFORM;
 #endif

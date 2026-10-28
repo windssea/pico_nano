@@ -11,6 +11,9 @@ int main(void){
     e0470_waveform_init();
     const EpdWaveformPhases *gl=e0470_waveform_phases(&E0470_WAVEFORM,5),*gc=e0470_waveform_phases(&E0470_WAVEFORM,2),*du=e0470_waveform_phases(&E0470_WAVEFORM,1);
     assert(gl && gl->phases==E0470_GL16_FRAMES);memcpy(saved,gl->luts,sizeof saved);
+    // 阅读清理可借用现成48相原表，普通对齐表仍独立。/ Reading cleans may borrow the existing 48-phase table while the ordinary aligned table remains independent.
+    const EpdWaveformPhases *full_gc=e0470_waveform_phases(&E0470_FULL_WAVEFORM,2);
+    assert(full_gc && full_gc->phases==48 && full_gc!=gc && !full_gc->phase_times);
     assert(!pn_device_wave_aligned());
     assert(!pn_device_wave_init(NULL,3,NULL) && !pn_device_wave_init(&E0470_WAVEFORM,-1,NULL) && !pn_device_wave_aligned());
     pn_device_wave_info_t info;assert(pn_device_wave_init(&E0470_WAVEFORM,E0470_TRIM_HOLD,&info));

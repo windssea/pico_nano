@@ -62,7 +62,10 @@ static uint8_t stub_front[684u*1216u/2u],stub_back[684u*1216u/2u];
 #ifndef PN_TEST_REAL_WAVEFORM
 const int E0470_FOLLOW_WAVEFORM=1;
 const int E0470_WAVEFORM=2;
+const int E0470_FULL_WAVEFORM=3;
 #endif
+static const void *last_update_wave; ///< 实际驱动所借波形 / Waveform borrowed by the actual update
+static enum EpdDrawMode last_update_mode; ///< 实际驱动模式，含白场恢复 / Actual update mode, including from-white recovery
 static int last_scan;
 esp_err_t read_pico_init(read_pico_handle_t *h){board_calls++;memset(h,0,sizeof *h);h->pmu_ready=true;h->framebuffer=stub_front;memset(stub_front,0xff,sizeof stub_front);memset(stub_back,0xff,sizeof stub_back);h->hl.back_fb=stub_back;return ESP_OK;}
 void read_pico_deinit(read_pico_handle_t *h){(void)h;}
@@ -75,7 +78,7 @@ void epd_poweroff(void){poweroffs++;}
 void read_pico_epd_set_pclk(int mhz){pclk_calls++;last_pclk=mhz;}
 void epd_clear(void){clear_calls++;}
 // epdiy无论结果都把前缓冲回写后缓冲。/ epdiy copies the front buffer into the back buffer regardless of the result.
-enum EpdDrawError epd_hl_update_screen_from_white(EpdiyHighlevelState *h,enum EpdDrawMode m,int t){(void)m;(void)t;presents++;if(h && h->back_fb)memcpy(h->back_fb,stub_front,sizeof stub_front);if(panel_fault)return EPD_DRAW_FAILURE;if(underrun && presents==1)return EPD_DRAW_EMPTY_LINE_QUEUE;if(present_observer)present_observer();return EPD_DRAW_SUCCESS;}
+enum EpdDrawError epd_hl_update_screen_from_white(EpdiyHighlevelState *h,enum EpdDrawMode m,int t){(void)t;last_update_wave=h?h->waveform:NULL;last_update_mode=m;presents++;if(h && h->back_fb)memcpy(h->back_fb,stub_front,sizeof stub_front);if(panel_fault)return EPD_DRAW_FAILURE;if(underrun && presents==1)return EPD_DRAW_EMPTY_LINE_QUEUE;if(present_observer)present_observer();return EPD_DRAW_SUCCESS;}
 static const void *last_screen_wave; ///< 整屏提交时实际使用的波形身份 / Waveform identity used at a full-screen submission
 static enum EpdDrawMode last_screen_mode; ///< 整屏提交实际模式 / Mode used at a full-screen submission
 static unsigned screen_full_calls; ///< 整屏提交次数，不包含白场恢复 / Full-screen submissions excluding from-white recovery
