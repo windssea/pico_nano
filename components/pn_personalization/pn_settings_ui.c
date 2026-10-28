@@ -290,7 +290,7 @@ static pn_status_t show_controls(pn_settings_ui_t *ui,su_t *u,uint8_t old_flags,
     if(u->screen==SCREEN_KEYS && command>=PN_SETUI_TOGGLE && command<PN_SETUI_TOGGLE+4){
         unsigned i=(unsigned)(command-PN_SETUI_TOGGLE);changed=old_flags!=ui->flags;
         if(changed){int x=PN_UI_WIDTH-PN_UI_MARGIN-16-64,y=TOGGLE_Y+(int)i*ROW_H+32;
-            pn_frame_rect(&u->canvas,x,y,64,36,PN_UI_SURFACE);pn_w_toggle(&u->canvas,x,y,on(ui->flags,i));}
+            pn_frame_rect(&u->canvas,x,y,64,36,PN_UI_PAPER);pn_w_toggle(&u->canvas,x,y,on(ui->flags,i));}
     }else if(u->screen==SCREEN_REFRESH && (command==PN_SETUI_TURN || command==PN_SETUI_TURN+1)){
         // 说明文字随样式改变，整页重画。/ The note changes with the style, so repaint the page.
         return show(ui,present,ctx);

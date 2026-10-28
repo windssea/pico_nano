@@ -19,10 +19,12 @@
 #define PN_UI_CHIP_RADIUS 28 ///< 分段与抽屉圆角（16u）/ Segment and sheet radius (16u)
 #define PN_UI_INK 0 ///< 前景黑 / Foreground black
 #define PN_UI_RULE 11 ///< 分隔线灰阶（G11）/ Rule shade (G11)
-#define PN_UI_STROKE 11 ///< 描边（G11 #BBBBBB）/ Stroke (G11)
-#define PN_UI_SELECT 13 ///< 选中灰底与细分隔（G13 #DDDDDD）/ Selection base and fine dividers (G13)
+#define PN_UI_STROKE 5 ///< 普通描边（G05 #555555）/ General stroke (G05)
+#define PN_UI_CARD_STROKE 4 ///< 分组卡片边框（G04）/ Group card border (G04)
+#define PN_UI_SELECT 13 ///< 浅灰阴影与细分隔（G13 #DDDDDD）/ Light shade and fine dividers (G13)
+#define PN_UI_ACTIVE 10 ///< 选中状态底色（G10 #AAAAAA）/ Active-state background (G10)
 #define PN_UI_SURFACE 14 ///< 雾面卡片（G14 #EEEEEE）/ Fog card surface (G14)
-#define PN_UI_MUTED 5 ///< 次要文字（G05 #555555）/ Secondary text (G05)
+#define PN_UI_MUTED 2 ///< 次要文字（G02 #222222）/ Secondary text (G02)
 #define PN_UI_DISABLED 9 ///< 禁用文字与图标 / Disabled text and icons
 #define PN_UI_PAPER 15 ///< 背景白 / Background white
 
@@ -65,7 +67,7 @@ pn_status_t pn_w_text_width(pn_font_t *font,const char *utf8,int *width);
 /// 画一行文字。baseline为基线y；max_width>0且放不下时以“...”截断；对齐相对[x,x+max_width]（max_width为0时相对x）。
 /// Draw one line. baseline is the y of the baseline; with max_width>0 overflowing text is cut with "..."; alignment is within [x,x+max_width] (relative to x when max_width is 0).
 pn_status_t pn_w_text(pn_font_t *font,pn_frame_t *frame,const char *utf8,int x,int baseline,int max_width,pn_align_t align);
-/// 带样式的单行文字：ink为墨色灰阶（0黑，5为次要说明），bold为加粗。/ Styled single line: ink is the gray level (0 black, 5 for secondary notes) and bold thickens strokes.
+/// 带样式的单行文字：ink为墨色灰阶（0黑，2为次要说明），bold为加粗。/ Styled single line: ink is the gray level (0 black, 2 for secondary notes) and bold thickens strokes.
 pn_status_t pn_w_text_ex(pn_font_t *font,pn_frame_t *frame,const char *utf8,int x,int baseline,int max_width,pn_align_t align,uint8_t ink,bool bold);
 /// 带样式的折行文字。/ Styled wrapped text.
 pn_status_t pn_w_text_lines_ex(pn_font_t *font,pn_frame_t *frame,const char *utf8,int x,int baseline,int width,unsigned max_lines,int pitch,uint8_t ink,bool bold);
@@ -182,8 +184,8 @@ void pn_w_icon_list(pn_frame_t *frame,int x,int y,int size); ///< 列表 / List 
 #define PN_W_CARD_ROW_H 100 ///< 卡片行高度 / Card row height
 /// 分组标题（卡片上方的小字）。/ Group title, small text above a card.
 pn_status_t pn_w_group(pn_font_t *font,pn_frame_t *frame,const char *title,int baseline);
-/// 画rows行高的圆角卡片底（浅灰面加细边），y为卡片上沿；再逐行调用pn_w_card_row。
-/// Draw a rounded card background for rows rows (light-gray fill with a hairline); y is its top; follow with pn_w_card_row per row.
+/// 画rows行高的白底圆角卡片和清晰边框，y为卡片上沿；再逐行调用pn_w_card_row。
+/// Draw a white rounded card with a clear border for rows rows; y is its top; follow with pn_w_card_row per row.
 void pn_w_card(pn_frame_t *frame,int y,int rows);
 /// 卡片内的一行：可选图标方块、标题、副标题、右值，行尾箭头或开关；last为真时不画分隔线。
 /// One row inside a card: optional icon tile, title, subtitle, value and a trailing chevron or toggle; no divider when last.

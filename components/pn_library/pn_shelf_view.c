@@ -272,9 +272,10 @@ static pn_status_t home_reading(const pn_shelf_options_t *o,pn_font_t *font,pn_f
 /// 首页只消费最近、封面及统计快照，不读取文件。/ Home consumes recent, cover and reading snapshots without file I/O.
 static pn_status_t home_row(const pn_catalog_page_t *page,pn_font_t *font,pn_frame_t *frame,const pn_shelf_covers_t *covers,size_t i,int selected){
     int y=HOME_BOOKS_Y+(int)(i-1)*HOME_ROW_PITCH;char title[PN_CATALOG_NAME_MAX],meta[64];const pn_catalog_item_t *item=&page->items[i];title_of(item,covers,i,title,sizeof title);meta_of(item,meta,sizeof meta);
+    if(selected==(int)i)pn_w_round_fill(frame,18,y+8,6,84,3,PN_UI_INK);
     pn_status_t s=cover_or_placeholder(font,frame,covers,i,item,32,y,72,100,false,3);
     if(s==PN_OK)s=pn_font_size(font,28);
-    if(s==PN_OK)s=pn_w_text_ex(font,frame,title,128,y+30,478,PN_ALIGN_LEFT,PN_UI_INK,selected==(int)i);
+    if(s==PN_OK)s=pn_w_text_ex(font,frame,title,128,y+30,478,PN_ALIGN_LEFT,PN_UI_INK,true);
     if(s==PN_OK && covers && *covers->display[i].author){s=pn_font_size(font,22);if(s==PN_OK)s=pn_w_text_ex(font,frame,pn_brand_label(covers->display[i].author),128,y+66,478,PN_ALIGN_LEFT,PN_UI_MUTED,false);}
     if(s==PN_OK)s=pn_font_size(font,20);
     if(s==PN_OK)s=pn_w_text_ex(font,frame,meta,128,y+100,478,PN_ALIGN_LEFT,PN_UI_MUTED,false);
@@ -336,7 +337,7 @@ static pn_status_t grid_item(const pn_catalog_item_t *item,const pn_shelf_covers
     if(started && item->progress<=10000){pn_frame_rect(frame,x+8,y+h-9,w-16,4,PN_UI_PAPER);pn_frame_rect(frame,x+8,y+h-9,(int)((unsigned)(w-16)*item->progress/10000u),4,PN_UI_INK);}
     int inset=style==PN_SHELF_WOOD?4:0,cx=x-inset,cw=w+inset*2,baseline=y+h+(inset?46:34);
     if(s==PN_OK)s=pn_font_size(font,columns_of(o)==4?22:24);
-    if(s==PN_OK)s=pn_w_text_ex(font,frame,title,cx,baseline,cw,PN_ALIGN_CENTER,PN_UI_INK,selected);
+    if(s==PN_OK)s=pn_w_text_ex(font,frame,title,cx,baseline,cw,PN_ALIGN_CENTER,PN_UI_INK,true);
     if(selected)pn_frame_rect(frame,cx+24,baseline+5,cw-48,2,PN_UI_MUTED);
     return s;
 }

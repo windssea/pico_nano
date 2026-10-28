@@ -52,8 +52,8 @@ static pn_status_t label(pn_font_t *font,pn_frame_t *frame,const char *text,int 
  pn_status_t restored=pn_font_size(font,original);return status==PN_OK?restored:status;
 }
 static pn_status_t font_card(pn_font_t *font,pn_frame_t *frame,const char *name,const char *note,int y,int height,bool active,bool focus,bool details){
- pn_w_round_fill(frame,32,y,620,height,18,active?PN_UI_SELECT:PN_UI_SURFACE);
- if(focus)pn_w_round_stroke(frame,32,y,620,height,18,2,PN_UI_MUTED);
+ pn_w_round_fill(frame,32,y,620,height,18,active?PN_UI_ACTIVE:PN_UI_SURFACE);
+ if(active || focus)pn_w_round_stroke(frame,32,y,620,height,18,focus?4:2,PN_UI_INK);
  pn_w_round_fill(frame,48,y+(height-46)/2,46,46,12,PN_UI_PAPER);
  pn_w_icon(frame,PN_ICON_FONT,57,y+(height-28)/2,28,PN_UI_MUTED);
  int top=y+(height-70)/2;

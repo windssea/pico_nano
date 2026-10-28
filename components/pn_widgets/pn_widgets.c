@@ -231,9 +231,9 @@ pn_status_t pn_w_tabbar_icons(pn_font_t *font,pn_frame_t *frame,const char *cons
     for(unsigned i=0;i<count && status==PN_OK;i++){
         int x0=(int)(PN_UI_WIDTH*i/count),x1=(int)(PN_UI_WIDTH*(i+1)/count),cx=(x0+x1)/2;
         if(icons){
-            // 所在Tab：浅灰圆角底座＋深色图标＋加粗标签（规范2.2）。/ The current tab: a light rounded base, dark icon and bold label (spec 2.2).
+            // 当前项加深边框；标签可超出胶囊，仍保持黑字。/ Outline the active item; its label may extend beyond the pill and stays dark.
             bool off=(disabled&(1u<<i))!=0,on=i==active && !off;
-            if(on)pn_w_round_fill(frame,x0+20,y+10,x1-x0-40,height-18,22,PN_UI_SELECT);
+            if(on){pn_w_round_fill(frame,x0+20,y+10,x1-x0-40,height-18,22,PN_UI_ACTIVE);pn_w_round_stroke(frame,x0+20,y+10,x1-x0-40,height-18,22,2.0f,PN_UI_INK);}
             pn_w_icon(frame,icons[i],cx-18,y+18,36,off?PN_UI_DISABLED:PN_UI_INK);
             status=pn_w_text_ex(font,frame,labels[i],x0,y+92,x1-x0,PN_ALIGN_CENTER,off?PN_UI_DISABLED:on?PN_UI_INK:PN_UI_MUTED,on);
         }else{
@@ -363,7 +363,8 @@ void pn_w_glass(pn_frame_t *frame,int x,int y,int width,int height,int radius){
 }
 void pn_w_card(pn_frame_t *frame,int y,int rows){
     if(!frame || rows<=0)return;
-    pn_w_glass(frame,PN_UI_MARGIN,y,PN_UI_WIDTH-2*PN_UI_MARGIN,rows*PN_W_CARD_ROW_H,PN_UI_CARD_RADIUS);
+    pn_w_round_fill(frame,PN_UI_MARGIN,y,PN_UI_WIDTH-2*PN_UI_MARGIN,rows*PN_W_CARD_ROW_H,PN_UI_CARD_RADIUS,PN_UI_PAPER);
+    pn_w_round_stroke(frame,PN_UI_MARGIN,y,PN_UI_WIDTH-2*PN_UI_MARGIN,rows*PN_W_CARD_ROW_H,PN_UI_CARD_RADIUS,2.0f,PN_UI_CARD_STROKE);
 }
 pn_status_t pn_w_card_row(pn_font_t *font,pn_frame_t *frame,const char *label,const char *subtitle,const char *value,int icon,unsigned flags,int y,bool last){
     if(!font || !font->impl || !frame || !label)return PN_INVALID;
@@ -393,8 +394,8 @@ pn_status_t pn_w_navigation(pn_font_t *font,pn_frame_t *frame,pn_navigation_t ac
     pn_frame_rect(frame,0,1104,PN_UI_WIDTH,2,PN_UI_STROKE);
     for(unsigned i=0;i<4;i++){
         int cx=(int)(PN_UI_WIDTH*(2*i+1)/8);
-        if(i==(unsigned)active)pn_w_round_fill(frame,cx-66,1122,132,76,22,PN_UI_SELECT);
-        pn_w_icon(frame,icons[i],cx-21,1139,42,PN_UI_INK);
+        if(i==(unsigned)active)pn_w_round_fill(frame,cx-66,1122,132,76,22,PN_UI_INK);
+        pn_w_icon(frame,icons[i],cx-21,1139,42,i==(unsigned)active?PN_UI_PAPER:PN_UI_INK);
     }
     return PN_OK;
 }

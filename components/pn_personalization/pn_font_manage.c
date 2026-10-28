@@ -135,7 +135,7 @@ static pn_status_t cached_row(fm_t *f,size_t index,row_t **out){
     row_t *slot=&f->rows[0];for(unsigned i=0;i<ROW_CACHE_SLOTS;i++){row_t *r=&f->rows[i];if(r->valid && r->index==index){r->age=++f->row_age;*out=r;return PN_OK;}if(!r->valid || (slot->valid && r->age<slot->age))slot=r;}
     pn_catalog_item_t *item=pn_alloc_tagged(f->pool,PN_MEM_UI,sizeof *item);if(!item)return PN_NO_MEMORY;
     pn_status_t status=item_at(f,index,item);if(status!=PN_OK){pn_free(item);return status;}slot->valid=false;slot->sample_checked=false;pn_frame_t row;
-    (void)pn_frame_bind(&row,slot->pixels,sizeof slot->pixels,684,PN_W_CARD_ROW_H);pn_frame_clear(&row,15);pn_frame_rect(&row,32,0,620,PN_W_CARD_ROW_H,PN_UI_SURFACE);
+    (void)pn_frame_bind(&row,slot->pixels,sizeof slot->pixels,684,PN_W_CARD_ROW_H);pn_frame_clear(&row,PN_UI_PAPER);
     char line[96];if(status==PN_OK){snprintf(line,sizeof line,"%llu KB%s",(unsigned long long)((item->size+1023)/1024),is_global(f,item->path)?" · 阅读默认":"");status=pn_w_card_row(&f->ui,&row,pn_brand_label(item->name),line,NULL,PN_ICON_FONT,PN_ROW_CHEVRON,0,false);if(status==PN_OK && is_global(f,item->path))pn_w_icon(&row,PN_ICON_CHECK,552,34,32,PN_UI_INK);}
     pn_free(item);if(status!=PN_OK)return status;slot->index=index;slot->valid=true;slot->sample_checked=false;slot->age=++f->row_age;*out=slot;return PN_OK;
 }
@@ -169,7 +169,7 @@ static pn_status_t scroll_rows(fm_t *f){
     }
     // 容器边框固定在viewport，不能把分页末行的圆角当作行内容一起移动。
     // Keep container borders fixed to the viewport; paging-page bottom corners must never move with a row.
-    pn_w_round_stroke(&f->canvas,32,334,620,6*PN_W_CARD_ROW_H,PN_UI_CARD_RADIUS,2.0f,PN_UI_STROKE);
+    pn_w_round_stroke(&f->canvas,32,334,620,6*PN_W_CARD_ROW_H,PN_UI_CARD_RADIUS,2.0f,PN_UI_CARD_STROKE);
     pn_cache_unpin(&f->row_owner);return status;
 }
 /* 版式：列表行高使用共享控件常量，底部上一页/下一页；详情页下半部为名称与两个按钮；确认页为说明与取消/确认。
