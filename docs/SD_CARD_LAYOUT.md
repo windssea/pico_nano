@@ -1,6 +1,8 @@
 # PicoNano 存储卡目录与安装契约
 
-更新：2026-10-14。本页是所有上传通道的长期路径规范，目录常量以 [pn_sd_layout.h](../components/pn_storage/include/pn_sd_layout.h) 为准，安装映射由 [pn_upload_directory](../components/pn_transfer/pn_upload.c) 共用。界面类别中文，跨平台路径名固定，不自动移动/删除旧文件。
+更新：2026-10-28。本页是所有上传通道的长期路径规范，目录常量以 [pn_sd_layout.h](../components/pn_storage/include/pn_sd_layout.h) 为准，安装映射由 [pn_upload_directory](../components/pn_transfer/pn_upload.c) 共用。界面类别中文，跨平台路径名固定，不自动移动/删除旧文件。
+
+系统审查保持全部公开/私有目录及上传分类不变。阅读派生包共享16MiB配额、内部可信根共享16KiB配额，原512KiB/64KiB卷余量和当前书证明保留策略保持。缓存目录读错、自有候选stat失败、路径/大小越界或容量查询后失卡，拒绝本次缓存准入；不能跳过未知占用后继续计费，也不删除报错文件或用户文件。缺失/坏包仍回原解析/绘制；可信根不是客户端可上传的类别。清理分步化与批量候选仍是[后续工作](DEVELOPMENT_PLAN.md#2026-10-28系统级代码审查与优化顺序)，没有新增长期索引数据库或改变文件格式。
 
 开发树增加来源块表`.pnsv`及内部`progress/resume/*.pnst`可信根，复用原配额、事务与清理，不是用户上传类别。首次完整扫描生成，以后认证整表并完整校验使用的原书块；未读区变化在后续读取时发现，缺件回整书验证。来源边界以[架构](ARCHITECTURE.md)为准。
 

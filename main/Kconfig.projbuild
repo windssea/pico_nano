@@ -71,7 +71,8 @@ config PN_POWER_DFS
     default y
     help
         Product, display and wireless-session owners hold a max-frequency lock while working;
-        idle drops to PN_POWER_MIN_MHZ. Automatic light sleep stays disabled until measured on hardware.
+        idle drops to PN_POWER_MIN_MHZ. Automatic light sleep follows PN_POWER_LIGHT_SLEEP
+        and the peripheral/session locks; enabling it is not a power or wakeup measurement.
 config PN_POWER_MIN_MHZ
     int "Idle CPU frequency (MHz)"
     depends on PN_POWER_DFS

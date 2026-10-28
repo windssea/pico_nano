@@ -51,8 +51,8 @@ CONFIG_FATFS_API_ENCODING_UTF_8=y
 # SHA书目文件名与书签ID须完整保留。/ Preserve SHA filenames and bookmark IDs.
 CONFIG_LITTLEFS_OBJ_NAME_LEN=96
 
-# 动态调频：空闲降到80MHz（仍为PLL时钟，不切MSPI低速），工作时由owner锁保持最高频；自动浅睡未启用。
-# DFS: idle drops to 80 MHz (still PLL, no MSPI low-speed switch); owners hold max while working; automatic light sleep stays off.
+# 动态调频：空闲降到80MHz（仍为PLL时钟，不切MSPI低速），工作时由owner锁保持最高频；自动浅睡由配置及会话/外设锁控制。
+# DFS: idle drops to 80 MHz (still PLL, no MSPI low-speed switch); owners hold max while working; configured light sleep also depends on session/peripheral locks.
 CONFIG_PM_ENABLE=y
 # 自动浅睡：tickless空闲在无锁时进入浅睡；插电脑USB时保持唤醒，日志与网页刷写可用。
 # Automatic light sleep: tickless idle sleeps when no lock is held; stay awake while a USB host is connected for logs and web flashing.

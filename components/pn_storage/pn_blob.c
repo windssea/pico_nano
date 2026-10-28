@@ -45,6 +45,15 @@ pn_status_t pn_blob_load_bounded(const pn_journal_io_t *io,pn_pool_t *pool,uint8
     if(status==PN_OK){if(g.size>capacity)status=PN_LIMIT;else{memcpy(payload,g.frame+20,g.size);*size=g.size;}}
     pn_free(g.frame);return status;
 }
+/// 借用已有帧完成原提交协议，仍完整读回比较；不保留调用方缓冲。/ Borrow an existing frame for the original commit protocol, retaining complete readback comparison and no caller buffer.
+static pn_status_t commit_frame(const pn_journal_io_t *io,pn_pool_t *pool,uint8_t *frame,size_t size,uint64_t sequence,unsigned target){
+    uint8_t *check=pn_alloc(pool,size+24);if(!check)return PN_NO_MEMORY;
+    memcpy(frame,"PNBL",4);put(frame+4,1,2);put(frame+6,0,2);put(frame+8,size,4);put(frame+12,sequence,8);
+    put(frame+20+size,crc(frame,20+size),4);
+    pn_status_t status=io->write_sync(io->ctx,target,frame,size+24);
+    if(status==PN_OK){size_t n=0;status=io->read(io->ctx,target,check,size+24,&n);if(status==PN_OK && (n!=size+24 || memcmp(frame,check,n)))status=PN_CORRUPT;}
+    pn_free(check);return status;
+}
 pn_status_t pn_blob_save_bounded(const pn_journal_io_t *io,pn_pool_t *pool,const uint8_t *payload,size_t size,size_t limit){
     if(!io || !io->read || !io->write_sync || !pool || (!payload && size))return PN_INVALID;
     if(size>limit || limit>PN_BLOB_MAX)return PN_LIMIT;
@@ -53,14 +62,25 @@ pn_status_t pn_blob_save_bounded(const pn_journal_io_t *io,pn_pool_t *pool,const
     if(status==PN_OK && previous.sequence==UINT64_MAX){pn_free(previous.frame);return PN_LIMIT;}
     uint64_t sequence=status==PN_EMPTY?1:previous.sequence+1;unsigned target=status==PN_EMPTY?0:1-previous.slot;
     pn_free(previous.frame);
-    uint8_t *frame=pn_alloc(pool,size+24),*check=pn_alloc(pool,size+24);
-    if(!frame || !check){pn_free(frame);pn_free(check);return PN_NO_MEMORY;}
-    memcpy(frame,"PNBL",4);put(frame+4,1,2);put(frame+6,0,2);put(frame+8,size,4);put(frame+12,sequence,8);
+    uint8_t *frame=pn_alloc(pool,size+24);if(!frame)return PN_NO_MEMORY;
     if(size)memcpy(frame+20,payload,size);
-    put(frame+20+size,crc(frame,20+size),4);
-    status=io->write_sync(io->ctx,target,frame,size+24);
-    if(status==PN_OK){size_t n=0;status=io->read(io->ctx,target,check,size+24,&n);if(status==PN_OK && (n!=size+24 || memcmp(frame,check,n)))status=PN_CORRUPT;}
-    pn_free(frame);pn_free(check);return status;
+    status=commit_frame(io,pool,frame,size,sequence,target);pn_free(frame);return status;
+}
+pn_status_t pn_blob_update(const pn_journal_io_t *io,pn_pool_t *pool,pn_blob_update_fn update,void *ctx){
+    if(!io || !io->read || !pool || !update)return PN_INVALID;
+    generation_t previous={0};pn_status_t status=latest(io,pool,&previous,PN_BLOB_MAX);
+    if(status!=PN_OK && status!=PN_EMPTY)return status;
+    bool present=status==PN_OK,changed=false;size_t size=present?previous.size:0;
+    if(!previous.frame)previous.frame=pn_alloc(pool,FRAME_MAX);
+    if(!previous.frame)return PN_NO_MEMORY;
+    status=update(ctx,present,previous.frame+20,PN_BLOB_MAX,&size,&changed);
+    if(status==PN_OK && size>PN_BLOB_MAX)status=PN_LIMIT;
+    if(status==PN_OK && changed){
+        if(!io->write_sync)status=PN_INVALID;
+        else if(present && previous.sequence==UINT64_MAX)status=PN_LIMIT;
+        else status=commit_frame(io,pool,previous.frame,size,present?previous.sequence+1:1,present?1-previous.slot:0);
+    }
+    pn_free(previous.frame);return status;
 }
 pn_status_t pn_blob_load(const pn_journal_io_t *io,pn_pool_t *pool,uint8_t *payload,size_t capacity,size_t *size){
     if(!payload || !size)return PN_INVALID;

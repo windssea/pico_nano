@@ -30,28 +30,33 @@ static pn_status_t valid(const pn_recent_item_t *item,size_t *length){
     if(!item || item->format<1 || item->format>5 || (item->progress>10000 && item->progress!=PN_RECENT_UNKNOWN_PROGRESS))return PN_INVALID;
     return path_size(item->path,length);
 }
-pn_status_t pn_recent_load(const pn_journal_io_t *io,pn_pool_t *pool,pn_recent_snapshot_t *snapshot){
-    if(!snapshot || !pool)return PN_INVALID;
-    uint8_t *bytes=pn_alloc(pool,PAYLOAD_MAX);pn_recent_snapshot_t *next=pn_alloc(pool,sizeof *next);
-    if(!bytes || !next){pn_free(bytes);pn_free(next);return PN_NO_MEMORY;}
-    size_t size=0;pn_status_t status=pn_blob_load(io,pool,bytes,PAYLOAD_MAX,&size);if(status!=PN_OK)goto done;
-    if(size<8 || memcmp(bytes,"PNRH",4)){status=PN_CORRUPT;goto done;}
-    if(get(bytes+4,2)!=1){status=PN_UNSUPPORTED;goto done;}
-    size_t count=(size_t)get(bytes+6,2);if(count>PN_RECENT_MAX || size!=8+count*ENTRY_SIZE){status=PN_CORRUPT;goto done;}
+/// 只解码到私有候选，全部字段与路径校验成功才交给调用者。/ Decode only into a private candidate, publishing after every field and path passes validation.
+static pn_status_t decode_snapshot(const uint8_t *bytes,size_t size,pn_recent_snapshot_t *next){
+    if(size>PAYLOAD_MAX)return PN_LIMIT;
+    if(size<8 || memcmp(bytes,"PNRH",4))return PN_CORRUPT;
+    if(get(bytes+4,2)!=1)return PN_UNSUPPORTED;
+    size_t count=(size_t)get(bytes+6,2);if(count>PN_RECENT_MAX || size!=8+count*ENTRY_SIZE)return PN_CORRUPT;
     memset(next,0,sizeof *next);next->count=count;
     for(size_t i=0;i<count;i++){
         const uint8_t *p=bytes+8+i*ENTRY_SIZE;pn_recent_item_t *item=&next->items[i];
         memcpy(item->book.sha256,p,32);item->source_size=get(p+32,8);item->format=(uint16_t)get(p+40,2);item->progress=(uint16_t)get(p+42,2);
         size_t n=(size_t)get(p+44,2),actual=0;
-        if(get(p+46,2)!=0){status=PN_UNSUPPORTED;goto done;}
-        if(!n || n>=PN_RECENT_PATH_MAX){status=PN_CORRUPT;goto done;}
+        if(get(p+46,2)!=0)return PN_UNSUPPORTED;
+        if(!n || n>=PN_RECENT_PATH_MAX)return PN_CORRUPT;
         memcpy(item->path,p+48,n);
-        if(valid(item,&actual)!=PN_OK || actual!=n){status=PN_CORRUPT;goto done;}
-        for(size_t k=n;k<PN_RECENT_PATH_MAX;k++)if(p[48+k]){status=PN_CORRUPT;goto done;}
-        for(size_t j=0;j<i;j++)if(!memcmp(next->items[j].book.sha256,item->book.sha256,32)){status=PN_CORRUPT;goto done;}
+        if(valid(item,&actual)!=PN_OK || actual!=n)return PN_CORRUPT;
+        for(size_t k=n;k<PN_RECENT_PATH_MAX;k++)if(p[48+k])return PN_CORRUPT;
+        for(size_t j=0;j<i;j++)if(!memcmp(next->items[j].book.sha256,item->book.sha256,32))return PN_CORRUPT;
     }
-    *snapshot=*next;
-done:
+    return PN_OK;
+}
+pn_status_t pn_recent_load(const pn_journal_io_t *io,pn_pool_t *pool,pn_recent_snapshot_t *snapshot){
+    if(!snapshot || !pool)return PN_INVALID;
+    uint8_t *bytes=pn_alloc(pool,PAYLOAD_MAX);pn_recent_snapshot_t *next=pn_alloc(pool,sizeof *next);
+    if(!bytes || !next){pn_free(bytes);pn_free(next);return PN_NO_MEMORY;}
+    size_t size=0;pn_status_t status=pn_blob_load(io,pool,bytes,PAYLOAD_MAX,&size);
+    if(status==PN_OK)status=decode_snapshot(bytes,size,next);
+    if(status==PN_OK)*snapshot=*next;
     pn_free(bytes);pn_free(next);return status;
 }
 pn_status_t pn_recent_preview(pn_recent_snapshot_t *s,const pn_recent_item_t *item,bool *changed){
@@ -64,20 +69,30 @@ pn_status_t pn_recent_preview(pn_recent_snapshot_t *s,const pn_recent_item_t *it
     if(found==s->count && s->count<PN_RECENT_MAX)s->count++;
     s->items[0]=*item;if(changed)*changed=true;return PN_OK;
 }
-pn_status_t pn_recent_touch_notify(const pn_journal_io_t *io,pn_pool_t *pool,const pn_recent_item_t *item,pn_recent_observer_fn observer,void *ctx){
-    if(!pool)return PN_INVALID;
-    size_t length;pn_status_t status=valid(item,&length);if(status!=PN_OK)return status;
-    pn_recent_snapshot_t *s=pn_alloc(pool,sizeof *s);if(!s)return PN_NO_MEMORY;
-    status=pn_recent_load(io,pool,s);if(status==PN_EMPTY){memset(s,0,sizeof *s);status=PN_OK;}
-    if(status!=PN_OK){pn_free(s);return status;}
-    bool changed=false;status=pn_recent_preview(s,item,&changed);
-    if(status!=PN_OK || !changed){if(status==PN_OK && observer)observer(ctx,s);pn_free(s);return status;}
-    size_t size=8+s->count*ENTRY_SIZE;uint8_t *bytes=pn_alloc(pool,size);if(!bytes){pn_free(s);return PN_NO_MEMORY;}
+typedef struct {
+    const pn_recent_item_t *item; ///< 本次条目，只同步借用 / Item borrowed only for this synchronous call
+    pn_recent_snapshot_t *snapshot; ///< 未提交前不发布的候选 / Candidate unpublished until commit
+} recent_update_t;
+/// 在已验证双槽的同一事务内去重和编码，不再次加载存储。/ Deduplicate and encode within the verified two-slot transaction without loading storage again.
+static pn_status_t update_snapshot(void *ctx,bool present,uint8_t *bytes,size_t capacity,size_t *next_size,bool *changed){
+    recent_update_t *update=ctx;pn_recent_snapshot_t *s=update->snapshot;
+    pn_status_t status=PN_OK;if(present)status=decode_snapshot(bytes,*next_size,s);else memset(s,0,sizeof *s);
+    if(status==PN_OK)status=pn_recent_preview(s,update->item,changed);
+    if(status!=PN_OK || !*changed)return status;
+    size_t size=8+s->count*ENTRY_SIZE;if(size>capacity)return PN_LIMIT;
     memset(bytes,0,size);memcpy(bytes,"PNRH",4);put(bytes+4,1,2);put(bytes+6,s->count,2);
     for(size_t i=0;i<s->count;i++){uint8_t *p=bytes+8+i*ENTRY_SIZE;const pn_recent_item_t *e=&s->items[i];
         memcpy(p,e->book.sha256,32);put(p+32,e->source_size,8);put(p+40,e->format,2);put(p+42,e->progress,2);size_t n=strlen(e->path);put(p+44,n,2);memcpy(p+48,e->path,n);
     }
-    status=pn_blob_save(io,pool,bytes,size);if(status==PN_OK && observer)observer(ctx,s);pn_free(bytes);pn_free(s);return status;
+    *next_size=size;return PN_OK;
+}
+pn_status_t pn_recent_touch_notify(const pn_journal_io_t *io,pn_pool_t *pool,const pn_recent_item_t *item,pn_recent_observer_fn observer,void *ctx){
+    if(!pool)return PN_INVALID;
+    size_t length;pn_status_t status=valid(item,&length);if(status!=PN_OK)return status;
+    pn_recent_snapshot_t *s=pn_alloc(pool,sizeof *s);if(!s)return PN_NO_MEMORY;
+    recent_update_t update={item,s};status=pn_blob_update(io,pool,update_snapshot,&update);
+    if(status==PN_OK && observer)observer(ctx,s);
+    pn_free(s);return status;
 }
 pn_status_t pn_recent_touch(const pn_journal_io_t *io,pn_pool_t *pool,const pn_recent_item_t *item){
     return pn_recent_touch_notify(io,pool,item,NULL,NULL);

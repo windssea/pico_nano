@@ -11,19 +11,24 @@ static pn_recent_snapshot_t published;
 static void observe(void *ctx,const pn_recent_snapshot_t *snapshot){assert(ctx==&published);published=*snapshot;observed++;}
 static pn_status_t fail_read(void *ctx,unsigned slot,uint8_t *bytes,size_t cap,size_t *size){(void)ctx;(void)slot;(void)bytes;(void)cap;(void)size;return PN_IO;}
 static pn_status_t fail_write(void *ctx,unsigned slot,const uint8_t *bytes,size_t size){(void)ctx;(void)slot;(void)bytes;(void)size;return PN_IO;}
+/// 统计真实文件端口的完整读写，不以模拟时间推断实卡收益。/ Count full real-file port operations without inferring TF latency from host time.
+typedef struct {pn_journal_io_t io;unsigned reads,writes;} counted_t;
+static pn_status_t count_read(void *ctx,unsigned slot,uint8_t *bytes,size_t cap,size_t *size){counted_t *c=ctx;c->reads++;return c->io.read(c->io.ctx,slot,bytes,cap,size);}
+static pn_status_t count_write(void *ctx,unsigned slot,const uint8_t *bytes,size_t size){counted_t *c=ctx;c->writes++;return c->io.write_sync(c->io.ctx,slot,bytes,size);}
 int main(void){
     char root[]="/tmp/pn-recent-XXXXXX";assert(mkdtemp(root));char a[384],b[384];snprintf(a,sizeof a,"%s/a",root);snprintf(b,sizeof b,"%s/b",root);
     pn_media_t media;pn_media_init(&media);assert(pn_media_attach(&media,1)==PN_OK);pn_media_lease_t lease;assert(pn_media_acquire(&media,PN_MEDIA_WRITE,&lease)==PN_OK);
     pn_journal_files_t files;pn_journal_io_t io;assert(pn_journal_files_init(&files,&media,&lease,a,b,&io)==PN_OK);
     pn_pool_t pool;assert(pn_pool_init(&pool,256*1024,NULL,NULL,NULL)==0);pn_recent_snapshot_t *s=malloc(sizeof *s);assert(s);
     s->count=7;assert(pn_recent_load(&io,&pool,s)==PN_EMPTY && s->count==7);
-    for(unsigned i=0;i<25;i++){pn_recent_item_t item={.source_size=10000,.format=1,.progress=(uint16_t)(i*100)};item.book.sha256[0]=(uint8_t)i;snprintf(item.path,sizeof item.path,"/books/book%02u.txt",i);assert(pn_recent_touch(&io,&pool,&item)==PN_OK);}
+    counted_t counter={.io=io};pn_journal_io_t counted={&counter,count_read,count_write};
+    for(unsigned i=0;i<25;i++){pn_recent_item_t item={.source_size=10000,.format=1,.progress=(uint16_t)(i*100)};item.book.sha256[0]=(uint8_t)i;snprintf(item.path,sizeof item.path,"/books/book%02u.txt",i);counter.reads=counter.writes=0;assert(pn_recent_touch(&counted,&pool,&item)==PN_OK && counter.reads==3 && counter.writes==1);}
     assert(pn_recent_load(&io,&pool,s)==PN_OK && s->count==20);for(unsigned i=0;i<20;i++)assert(s->items[i].book.sha256[0]==24-i);
     pn_recent_item_t alias=s->items[19];memset(alias.path,'a',1023);alias.path[0]='/';alias.path[1023]=0;
     assert(pn_recent_touch(&io,&pool,&alias)==PN_OK);assert(pn_recent_load(&io,&pool,s)==PN_OK && s->items[0].book.sha256[0]==5 && strlen(s->items[0].path)==1023);
     pn_journal_files_t reopened;pn_journal_io_t read;assert(pn_journal_files_init(&reopened,&media,&lease,a,b,&read)==PN_OK);assert(pn_recent_load(&read,&pool,s)==PN_OK && s->count==20 && s->items[0].progress==500);
     // 成功后发布，写失败不通知。/ Publish after success, never after a failed write.
-    assert(pn_recent_touch_notify(&io,&pool,&alias,observe,&published)==PN_OK && observed==1);
+    counter.reads=counter.writes=0;assert(pn_recent_touch_notify(&counted,&pool,&alias,observe,&published)==PN_OK && observed==1 && counter.reads==2 && !counter.writes);
     assert(!memcmp(&published,s,sizeof published));
     alias.progress++;pn_journal_io_t failed=io;failed.write_sync=fail_write;
     assert(pn_recent_touch_notify(&failed,&pool,&alias,observe,&published)==PN_IO && observed==1);

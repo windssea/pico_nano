@@ -73,12 +73,17 @@ pn_status_t pn_reading_store_room(pn_media_t *media,const pn_media_lease_t *leas
         pn_status_t s=pn_cancel_checkpoint();if(s==PN_OK)s=pn_media_validate(media,lease);if(s!=PN_OK)return s;
         uint64_t total=0,free_bytes;char victim[384]="";time_t oldest=0;unsigned priority=0;DIR *d=opendir(dir);if(!d)return PN_IO;
         struct dirent *entry;unsigned count=0;
-        while((entry=readdir(d))){
+        for(;;){
+            // EOF与目录错误必须分开；不完整扫描不能授予配额。/ Distinguish EOF from directory failure: incomplete scans must never grant quota.
+            errno=0;entry=readdir(d);if(!entry){if(errno)s=PN_IO;break;}
             // 扫描可能覆盖数千个文件，输入/失卡须在条目间让出；取消不据不完整总量授予配额。/ A scan may cover thousands of files: yield to input/media loss between entries and never admit quota from an incomplete total.
             s=pn_cancel_checkpoint();if(s==PN_OK)s=pn_media_validate(media,lease);if(s!=PN_OK){closedir(d);return s;}
             if(++count>8192){closedir(d);return PN_LIMIT;}if(!owned(entry->d_name,state))continue;
             char path[384];int n=snprintf(path,sizeof path,"%s/%s",dir,entry->d_name);struct stat st;
-            if(n<0 || (size_t)n>=sizeof path || store_stat(path,&st) || !S_ISREG(st.st_mode) || st.st_size<0)continue;
+            if(n<0 || (size_t)n>=sizeof path){s=PN_LIMIT;break;}
+            if(store_stat(path,&st)){s=PN_IO;break;}
+            if(!S_ISREG(st.st_mode))continue;
+            if(st.st_size<0 || (uint64_t)st.st_size>UINT64_MAX-total){s=PN_LIMIT;break;}
             total+=(uint64_t)st.st_size;if(!strncmp(path,target,strlen(target)))continue;
             // 同书的来源/启动证明是当前事务的依赖；旧邻页帧仍可回收，不扩大配额。/ Same-book source/bootstrap proofs are transaction dependencies; old neighbor frames remain reclaimable without raising quotas.
             const char *base=strrchr(target,'/');base=base?base+1:target;
@@ -86,7 +91,12 @@ pn_status_t pn_reading_store_room(pn_media_t *media,const pn_media_lease_t *leas
             if(rank>=5 && owned(base,state) && !memcmp(entry->d_name,base,64))continue;
             if(!*victim || rank<priority || (rank==priority && st.st_mtime<oldest)){strcpy(victim,path);oldest=st.st_mtime;priority=rank;}
         }
-        closedir(d);s=pn_cancel_checkpoint();if(s==PN_OK)s=capacity(dir,state,&free_bytes);if(s==PN_OK)s=pn_cancel_checkpoint();if(s!=PN_OK)return s;
+        if(closedir(d) && s==PN_OK)s=PN_IO;
+        if(s==PN_OK)s=pn_cancel_checkpoint();
+        if(s==PN_OK)s=capacity(dir,state,&free_bytes);
+        if(s==PN_OK)s=pn_cancel_checkpoint();
+        if(s==PN_OK)s=pn_media_validate(media,lease);
+        if(s!=PN_OK)return s;
         if(total<=quota-need && free_bytes>=need+reserve)return PN_OK;
         if(!*victim)return PN_EMPTY;
         s=pn_cancel_checkpoint();if(s==PN_OK)s=pn_media_validate(media,lease);if(s!=PN_OK)return s;
