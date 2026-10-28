@@ -54,6 +54,36 @@ static pn_status_t tf_hash_read(void *ctx,uint64_t offset,uint8_t *out,size_t ca
     size_t n=fread(out,1,cap,h->file);if(ferror(h->file))return PN_IO;
     h->offset=offset+n;s=checked(h->index);if(s==PN_OK)*got=n;return s;
 }
+/// 同一顺序字节同时做记录CRC/排序与完整SHA，不另扫一次表；暂定记录不写入活动窗口。
+/// Check record CRC/order and full SHA over the same sequential bytes, without a second table scan or publishing provisional records.
+typedef struct {
+    tf_hash_t source;uint64_t base,processed;size_t header,carried;uint32_t count,seen;
+    uint8_t record[RECORD];pn_page_index_entry_t previous,first,last,build;bool have_build;
+} tf_audit_t;
+static pn_status_t tf_audit_read(void *ctx,uint64_t offset,uint8_t *out,size_t cap,size_t *got){
+    tf_audit_t *a=ctx;if(offset!=a->processed)return PN_STALE_JOB;
+    size_t n=0;pn_status_t s=tf_hash_read(&a->source,a->base+offset,out,cap,&n);if(s!=PN_OK)return s;
+    size_t at=offset<a->header?(size_t)(a->header-offset):0;if(at>n)at=n;
+    while(at<n){
+        size_t take=RECORD-a->carried;if(take>n-at)take=n-at;
+        memcpy(a->record+a->carried,out+at,take);at+=take;a->carried+=take;
+        if(a->carried!=RECORD)continue;
+        if(!(a->seen%32u)){s=checked(a->source.index);if(s!=PN_OK)return s;}
+        pn_page_index_entry_t e;
+        if(a->seen>=a->count || !decode(a->record,&e) || (a->seen && tf_compare(&a->previous,&e)>=0))return PN_CORRUPT;
+        a->previous=e;a->seen++;a->carried=0;
+        if(e.section==BUILD_SECTION && !e.begin){a->build=e;a->have_build=true;}
+        if(e.section!=BUILD_SECTION){if(a->first.section==BUILD_SECTION)a->first=e;a->last=e;}
+    }
+    a->processed+=n;*got=n;return PN_OK;
+}
+static pn_status_t tf_audit(index_t *i,FILE *f,uint64_t base,size_t header,uint32_t count,tf_audit_t *a,pn_book_id_t *digest){
+    *a=(tf_audit_t){.source={i,f,UINT64_MAX},.base=base,.header=header,.count=count,.first={.section=BUILD_SECTION},.last={.section=BUILD_SECTION}};
+    pn_profile_span_t span;pn_profile_begin(&span,i->pool,"page-index.verify");
+    pn_status_t s=pn_identity_stream(a,header+(uint64_t)count*RECORD,tf_audit_read,digest);
+    if(s==PN_OK && (a->seen!=count || a->carried))s=PN_CORRUPT;
+    pn_profile_end(&span,s);return s;
+}
 static bool tf_header(const index_t *i,const uint8_t *h,uint32_t *count){
     if(memcmp(h,"PNPI",4) || get(h+4,4)!=2 || memcmp(h+8,i->book.sha256,32) || memcmp(h+40,i->key.sha256,32) || get(h+76,4)!=crc(h,76) || get(h+72,4)>TF_MAX_RECORDS)return false;
     *count=(uint32_t)get(h+72,4);return true;
@@ -66,18 +96,14 @@ static bool tf_record(FILE *file,uint32_t position,pn_page_index_entry_t *entry)
 }
 static pn_status_t tf_load_legacy(void *ctx,const char *path){
     index_t *i=ctx;if(!i->trust_known)return PN_EMPTY;FILE *f=fopen(path,"rb");if(!f)return PN_EMPTY;
-    uint8_t h[HEADER];uint32_t count=0;struct stat info;pn_status_t s=PN_OK;pn_page_index_entry_t previous={0},entry;bool touched=false;
+    uint8_t h[HEADER];uint32_t count=0;struct stat info;pn_status_t s=PN_OK;bool touched=false;
     if(fstat(fileno(f),&info) || !S_ISREG(info.st_mode) || fread(h,1,sizeof h,f)!=sizeof h || !tf_header(i,h,&count) || info.st_size!=(off_t)(HEADER+(uint64_t)count*RECORD))s=PN_CORRUPT;
-    // 先完整验证，再装入尾部窗口；坏包不能污染已有内部退路。/ Fully validate before loading the trailing window so corrupt packets cannot poison the internal fallback.
-    for(uint32_t n=0;s==PN_OK && n<count;n++){
-        if(!(n%32))s=checked(i);
-        if(s!=PN_OK)break;
-        if(fread(h,1,RECORD,f)!=RECORD || !decode(h,&entry) || (n && tf_compare(&previous,&entry)>=0))s=PN_CORRUPT;else previous=entry;
-    }
+    // 完整验证后才装入窗口；记录检查与SHA共享一遍读取，坏包不污染内部退路。
+    // Load the window only after complete validation; CRC/order and SHA share one read, preserving the internal fallback on corrupt packets.
+    tf_audit_t audit;pn_book_id_t digest={0};
+    if(s==PN_OK)s=tf_audit(i,f,0,HEADER,count,&audit,&digest);
     if(s==PN_OK && (fgetc(f)!=EOF || ferror(f)))s=PN_CORRUPT;
     if(s==PN_OK)s=checked(i);
-    pn_book_id_t digest={0};
-    if(s==PN_OK){tf_hash_t hash={i,f,UINT64_MAX};s=pn_identity_stream(&hash,HEADER+(uint64_t)count*RECORD,tf_hash_read,&digest);}
     if(s==PN_OK && memcmp(digest.sha256,i->trust_hash[0].sha256,32) && memcmp(digest.sha256,i->trust_hash[1].sha256,32))s=PN_CORRUPT;
     if(s==PN_OK){
         touched=true;i->build_slot_known=false;

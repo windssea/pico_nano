@@ -12,12 +12,13 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/stat.h>
+static bool counting;static uint64_t read_bytes;
 static bool arm,cancel,short_reads,corrupt_sync;static unsigned fail_sync,sync_calls,seeks;
 size_t __real_fread(void *,size_t,size_t,FILE *);
 int __real_fsync(int);
 int __real_fseek(FILE *,long,int);
 int __wrap_fseek(FILE *f,long offset,int whence){seeks++;return __real_fseek(f,offset,whence);}
-size_t __wrap_fread(void *p,size_t n,size_t count,FILE *f){size_t got=__real_fread(p,n,short_reads && n==1 && count==4096?17:count,f);if(arm && n==1 && count==4096 && got){arm=false;cancel=true;}return got;}
+size_t __wrap_fread(void *p,size_t n,size_t count,FILE *f){size_t got=__real_fread(p,n,short_reads && n==1 && count==4096?17:count,f);if(counting)read_bytes+=n*got;if(arm && n==1 && count==4096 && got){arm=false;cancel=true;}return got;}
 int __wrap_fsync(int fd){
     if(fail_sync && ++sync_calls==fail_sync)return -1;
     if(corrupt_sync){
@@ -103,6 +104,12 @@ static void compact_run(void){
     // 冷建只存新增页和游标；不再随512窗口产生约两倍体积。/ Cold builds store only new pages and cursors, avoiding the old doubled 512-entry snapshots.
     assert(length(path)==(off_t)(768*80+3*(176+80)));
     OPEN();for(unsigned pass=0;pass<6;pass++){for(unsigned n=0;n<256;n++){pn_page_index_entry_t e=page(n);e.first.element+=pass==5?10000:pass+1;pn_page_index_add(&h,&e);}assert(drain(&h)==PN_OK);}pn_page_index_close(&h);
+    // 一次完整读表加末尾窗口，不能退回“记录复核+SHA整表重读”；所有原CRC/根校验仍执行。
+    // One complete table read plus its trailing window, never a separate record scan and full SHA reread; all original CRC/root checks still apply.
+    read_bytes=0;counting=true;OPEN();counting=false;
+    assert(read_bytes<=(uint64_t)length(path)+PN_PAGE_INDEX_MAX*80u+4096u);
+    printf("index open: file=%lld read=%llu bytes, full CRC/order/SHA verified\n",(long long)length(path),(unsigned long long)read_bytes);
+    pn_page_index_close(&h);
     snprintf(saved,sizeof saved,"%s/table.saved",root);snprintf(saved_root,sizeof saved_root,"%s/root.saved",root);copy(path,saved);copy(trust,saved_root);off_t before=length(path);
     unsigned cuts=0;
     for(unsigned cut=0;cut<2000;cut++){

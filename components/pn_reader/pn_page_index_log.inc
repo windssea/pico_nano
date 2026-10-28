@@ -53,19 +53,13 @@ static pn_status_t log_validate(index_t *i,FILE *f,log_view_t *out,bool cache){
         else if(fread(header+HEADER,1,LOG_HEADER-HEADER,f)!=LOG_HEADER-HEADER || !log_header(i,header,offset,sequence+1,&previous,&count)){s=PN_CORRUPT;break;}
         uint64_t bytes=(legacy?HEADER:LOG_HEADER)+(uint64_t)count*RECORD,end=offset+bytes+(legacy?0:LOG_TAIL);
         if(end>(uint64_t)info.st_size){s=PN_CORRUPT;break;}
-        pn_page_index_entry_t last={0},entry,first_page={.section=BUILD_SECTION},last_page={.section=BUILD_SECTION};
-        for(uint32_t n=0;n<count;n++){
-            if(!(n%32)){s=checked(i);if(s!=PN_OK)return s;}
-            if(fread(header,1,RECORD,f)!=RECORD || !decode(header,&entry) || (n && tf_compare(&last,&entry)>=0)){s=PN_CORRUPT;break;}last=entry;
-            if(entry.section==BUILD_SECTION && !entry.begin){build=entry;have_build=true;}
-            if(entry.section!=BUILD_SECTION){if(first_page.section==BUILD_SECTION)first_page=entry;last_page=entry;}
-        }
-        if(s!=PN_OK)break;
-        log_hash_t hash={{i,f,UINT64_MAX},offset};pn_book_id_t digest;
-        s=pn_identity_stream(&hash,bytes,log_hash_read,&digest);if(s!=PN_OK){if(s==PN_CANCELLED || s==PN_STALE_JOB)return s;break;}
+        tf_audit_t audit;pn_book_id_t digest;
+        s=tf_audit(i,f,offset,legacy?HEADER:LOG_HEADER,count,&audit,&digest);
+        if(s!=PN_OK){if(s==PN_CANCELLED || s==PN_STALE_JOB || s==PN_STALE_MEDIA)return s;break;}
+        if(audit.have_build){build=audit.build;have_build=true;}
         if(!legacy){uint8_t tail[LOG_TAIL];if(fseek(f,(long)(offset+bytes),SEEK_SET) || fread(tail,1,LOG_TAIL,f)!=LOG_TAIL || !log_tail(tail,bytes+LOG_TAIL,sequence+1,&digest)){s=PN_CORRUPT;break;}sequence++;}
         else base=end;
-        if(cache)log_range_offer(i,sequence+(base!=0)-1,offset+(legacy?HEADER:LOG_HEADER),count,&first_page,&last_page);
+        if(cache)log_range_offer(i,sequence+(base!=0)-1,offset+(legacy?HEADER:LOG_HEADER),count,&audit.first,&audit.last);
         if(!memcmp(digest.sha256,i->trust_hash[0].sha256,32) || !memcmp(digest.sha256,i->trust_hash[1].sha256,32)){
             accepted=(log_view_t){.end=end,.base=base,.start=offset,.blocks=sequence,.count=count,.hash=digest,.build=build,.have_build=have_build};
             if(!memcmp(digest.sha256,i->trust_hash[0].sha256,32))break;

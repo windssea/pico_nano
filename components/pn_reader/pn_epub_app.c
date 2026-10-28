@@ -398,6 +398,9 @@ static pn_status_t source_image(void *ctx,const pn_xhtml_event_t *event){
     if(event->kind!=PN_XHTML_IMAGE || !event->value)return PN_OK;
     pn_status_t s=source_guard(ctx,event->value);return s==PN_EMPTY?PN_OK:s;
 }
+/// 依赖核对没有绘制/位置副作用，可重放检查；仅完整成功后记住闭包。
+/// Dependency checks have no drawing/location side effects and may replay; memoize the closure only after complete success.
+static void source_resume_restart(void *ctx,uint64_t base,const pn_xhtml_event_t *context){(void)ctx;(void)base;(void)context;}
 /// 续读像素仍验证正文/样式/图片来源；语义重放不量宽、不重画，不增加帧。/ Resume pixels still verify prose/styles/images; semantic replay neither measures nor redraws and adds no frame.
 static pn_status_t source_resume(app_t *a,const pn_epub_reader_anchor_t *anchor){
     if(!pn_source_blocks_partial(&a->blocks))return PN_OK;
@@ -405,7 +408,7 @@ static pn_status_t source_resume(app_t *a,const pn_epub_reader_anchor_t *anchor)
     bool immutable=pn_text_file_immutable(&a->raw_book_source);
     if(immutable && a->source_resume_checked && a->source_resume_section==section)return PN_OK;
     pn_xhtml_stats_t stats;pn_profile_span_t span;pn_profile_begin(&span,a->pool,"resume.blocks");
-    pn_status_t s=pn_xhtml_parse(a->pool,&a->epub,anchor->begin.path,a->salt,source_image,a,&stats);
+    pn_status_t s=pn_xhtml_parse_window(a->pool,&a->epub,anchor->begin.path,a->salt,NULL,source_image,NULL,source_resume_restart,a,&stats);
     if(s==PN_OK && immutable){a->source_resume_section=section;a->source_resume_checked=true;}
     pn_profile_end(&span,s);return s;
 }
