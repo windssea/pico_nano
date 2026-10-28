@@ -20,10 +20,13 @@ pn_status_t pn_page_bitmap_step(pn_page_bitmap_t *b,pn_page_bitmap_paint_fn pain
     if(!b || !paint || !budget || budget>64)return PN_INVALID;
     if(!b->enabled || !b->working || !b->frame.pixels || b->ready)return PN_EMPTY;
     pn_cache_pin(&b->owner);pn_status_t s=pn_cancel_checkpoint();size_t count=b->total-b->cursor;if(count>budget)count=budget;
-    if(s==PN_OK)s=paint(ctx,&b->frame,b->cursor,count,&b->missing);
-    if(s==PN_OK)s=pn_cancel_checkpoint();
-    if(s==PN_OK){b->cursor+=count;b->stats.steps++;if(b->cursor==b->total){b->ready=true;b->working=false;b->stats.completed++;}}
-    else pn_page_bitmap_invalidate(b);
+    // 绘制前取消没有改变像素；成功小步先提交游标，再响应到来的输入。回调内失败仍废弃未知部分。
+    // Cancellation before painting changes no pixels; commit successful steps before yielding to input. Callback failures still discard uncertain pixels.
+    if(s==PN_OK){
+        s=paint(ctx,&b->frame,b->cursor,count,&b->missing);
+        if(s==PN_OK){b->cursor+=count;b->stats.steps++;if(b->cursor==b->total){b->ready=true;b->working=false;b->stats.completed++;}s=pn_cancel_checkpoint();}
+        else pn_page_bitmap_invalidate(b);
+    }
     pn_cache_unpin(&b->owner);return s;
 }
 pn_status_t pn_page_bitmap_copy(pn_page_bitmap_t *b,pn_frame_t *to,unsigned *missing){

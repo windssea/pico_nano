@@ -6,13 +6,13 @@
 #include <assert.h>
 #include <string.h>
 #include <stdio.h>
-typedef struct {pn_pool_t *pool;bool fail;size_t largest;bool *cancel;} paint_t;
+typedef struct {pn_pool_t *pool;bool fail;size_t largest;bool *cancel;bool fail_cancel;unsigned seen[17];} paint_t;
 static bool stop(void *ctx){return *(bool *)ctx;}
 static pn_status_t paint(void *ctx,pn_frame_t *frame,size_t first,size_t count,unsigned *missing){
     paint_t *p=ctx;if(count>p->largest)p->largest=count;
     assert(!pn_cache_reclaim(p->pool,SIZE_MAX));
-    for(size_t i=first;i<first+count;i++)pn_frame_rect(frame,(int)i*2,40,2,2,(uint8_t)(i%16));
-    (*missing)++;if(p->cancel)*p->cancel=true;return p->fail?PN_IO:PN_OK;
+    for(size_t i=first;i<first+count;i++){p->seen[i]++;pn_frame_rect(frame,(int)i*2,40,2,2,(uint8_t)(i%16));}
+    (*missing)++;if(p->cancel)*p->cancel=true;return p->fail?PN_IO:p->fail_cancel?PN_CANCELLED:PN_OK;
 }
 int main(void){
     pn_pool_t pool;assert(!pn_pool_init(&pool,2u*1024u*1024u,NULL,NULL,NULL));pn_page_bitmap_t cache={0};pn_page_bitmap_init(&cache,&pool);
@@ -30,8 +30,18 @@ int main(void){
     pn_free(padded);bool copy_cancelled=true;pn_cancel_scope_t copy_scope;pn_cancel_enter(&copy_scope,stop,&copy_cancelled);missing=99;memset(pixels,0x66,415872);
     assert(pn_page_bitmap_copy(&cache,&shown,&missing)==PN_CANCELLED && missing==99);for(size_t i=0;i<415872;i++)assert(pixels[i]==0x66);pn_cancel_leave(&copy_scope);
     assert(pn_page_bitmap_begin(&cache,17)==PN_OK);ctx.fail=true;assert(pn_page_bitmap_step(&cache,paint,&ctx,7)==PN_IO && !cache.ready && !cache.working);ctx.fail=false;
-    assert(pn_page_bitmap_begin(&cache,17)==PN_OK);bool cancelled=true;pn_cancel_scope_t scope;pn_cancel_enter(&scope,stop,&cancelled);assert(pn_page_bitmap_step(&cache,paint,&ctx,7)==PN_CANCELLED && !cache.ready);pn_cancel_leave(&scope);
-    assert(pn_page_bitmap_begin(&cache,17)==PN_OK);cancelled=false;ctx.cancel=&cancelled;pn_cancel_enter(&scope,stop,&cancelled);assert(pn_page_bitmap_step(&cache,paint,&ctx,7)==PN_CANCELLED && !cache.ready && pn_page_bitmap_copy(&cache,&shown,&missing)==PN_EMPTY);pn_cancel_leave(&scope);ctx.cancel=NULL;
+    // 已提交前缀在绘制前取消时保留，恢复不能重画；半页不可复制。/ Keep a committed prefix on pre-paint cancellation, never redraw it after resuming, and never copy a partial page.
+    assert(pn_page_bitmap_begin(&cache,17)==PN_OK);memset(ctx.seen,0,sizeof ctx.seen);assert(pn_page_bitmap_step(&cache,paint,&ctx,7)==PN_OK);
+    bool cancelled=true;pn_cancel_scope_t scope;pn_cancel_enter(&scope,stop,&cancelled);assert(pn_page_bitmap_step(&cache,paint,&ctx,7)==PN_CANCELLED && cache.cursor==7 && cache.working && !cache.ready);pn_cancel_leave(&scope);
+    assert(pn_page_bitmap_step(&cache,paint,&ctx,7)==PN_OK && pn_page_bitmap_step(&cache,paint,&ctx,7)==PN_OK && cache.ready);
+    for(unsigned n=0;n<17;n++)assert(ctx.seen[n]==1);
+    // 完整小步之后到来的输入同样保留进度；未知回调内取消仍使整张候选无效。/ Input after a successful step also preserves progress; uncertain cancellation inside a callback still invalidates the candidate.
+    assert(pn_page_bitmap_begin(&cache,17)==PN_OK);memset(ctx.seen,0,sizeof ctx.seen);cancelled=false;ctx.cancel=&cancelled;pn_cancel_enter(&scope,stop,&cancelled);
+    assert(pn_page_bitmap_step(&cache,paint,&ctx,7)==PN_CANCELLED && !cache.ready && cache.cursor==7 && cache.working && pn_page_bitmap_copy(&cache,&shown,&missing)==PN_EMPTY);
+    pn_cancel_leave(&scope);ctx.cancel=NULL;assert(pn_page_bitmap_copy(&cache,&shown,&missing)==PN_EMPTY);
+    assert(pn_page_bitmap_step(&cache,paint,&ctx,7)==PN_OK && pn_page_bitmap_step(&cache,paint,&ctx,7)==PN_OK && cache.ready);
+    for(unsigned n=0;n<17;n++)assert(ctx.seen[n]==1);
+    assert(pn_page_bitmap_begin(&cache,17)==PN_OK);ctx.fail_cancel=true;assert(pn_page_bitmap_step(&cache,paint,&ctx,7)==PN_CANCELLED && !cache.working && !cache.ready && !cache.cursor);ctx.fail_cancel=false;
     pn_cache_reclaim(&pool,SIZE_MAX);assert(!cache.frame.pixels && !cache.ready);
     pool.cache_caps[PN_CACHE_BITMAP]=0;assert(pn_page_bitmap_begin(&cache,17)==PN_EMPTY);pool.cache_caps[PN_CACHE_BITMAP]=416u*1024u;
     pool.fail_at=pool.attempts+1;assert(pn_page_bitmap_begin(&cache,17)==PN_EMPTY);pool.fail_at=0;assert(pn_page_bitmap_begin(&cache,17)==PN_OK);

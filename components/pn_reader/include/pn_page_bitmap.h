@@ -25,7 +25,8 @@ void pn_page_bitmap_enable(pn_page_bitmap_t *,bool);
 void pn_page_bitmap_invalidate(pn_page_bitmap_t *);
 /// 新目标清空独立帧，准入/分配失败返回EMPTY，保留原前台路径。/ Clear an independent frame for a new target; admission/allocation failures return EMPTY, preserving foreground fallback.
 pn_status_t pn_page_bitmap_begin(pn_page_bitmap_t *,size_t);
-/// 最多budget节点，保护借用，错误废弃部分结果，不等待其他任务。/ Paint at most budget nodes under borrow protection, discarding partial results on errors without waiting on tasks.
+/// 最多budget节点；绘制前/完整小步后取消保留游标，回调失败废弃未知像素；不等待其他任务。
+/// Paint at most budget nodes; preserve progress on cancellation before/after a complete step, discard uncertain callback failures, and never wait for other tasks.
 pn_status_t pn_page_bitmap_step(pn_page_bitmap_t *,pn_page_bitmap_paint_fn,void *,size_t);
 /// 完整结果才复制，外层先验证语义键和源；不修改进度。/ Copy only complete results after callers validate semantic keys/sources, without changing progress.
 pn_status_t pn_page_bitmap_copy(pn_page_bitmap_t *,pn_frame_t *,unsigned *);

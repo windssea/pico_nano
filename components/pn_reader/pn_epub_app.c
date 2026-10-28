@@ -267,9 +267,10 @@ static pn_status_t paint_footer(app_t *a,pn_frame_t *frame,unsigned missing,unsi
 static bool bitmap_location(const pn_epub_location_t *a,const pn_epub_location_t *b){return !strcmp(a->path,b->path) && a->version==b->version && a->chapter_start==b->chapter_start && a->position.element==b->position.element && a->position.run==b->position.run && a->position.offset==b->position.offset && a->position.kind==b->position.kind;}
 static bool bitmap_key(app_t *a,pn_job_token_t token,const pn_epub_reader_anchor_t *anchor){return a->bitmap_token.session==token.session && a->bitmap_token.generation==token.generation && a->bitmap_anchor.has_next==anchor->has_next && bitmap_location(&a->bitmap_anchor.begin,&anchor->begin) && (!anchor->has_next || bitmap_location(&a->bitmap_anchor.next,&anchor->next));}
 static bool bitmap_allowed(const app_t *a){return !a->suspended && !a->lost && !a->style_preview && !a->style_pending && !a->font_preview && !a->font_pending && !a->font_view && !a->draft_render;}
+static pn_status_t bitmap_finish(app_t *);
 static pn_status_t bitmap_copy(app_t *a,pn_frame_t *frame,const pn_epub_reader_receipt_t *receipt,unsigned *missing){
-    if(!bitmap_allowed(a) || receipt->intent!=PN_READ_NEXT || a->page.image_count || !a->bitmap.ready || !bitmap_key(a,receipt->token,&receipt->anchor))return PN_EMPTY;
-    pn_cache_pin(&a->bitmap.owner);pn_status_t s=font_size(a,a->bitmap_last_pixels);if(s==PN_OK)s=pn_font_chain_validate(chain(a));if(s==PN_OK)s=pn_page_bitmap_copy(&a->bitmap,frame,missing);pn_cache_unpin(&a->bitmap.owner);
+    if(!bitmap_allowed(a) || receipt->intent!=PN_READ_NEXT || a->page.image_count || (!a->bitmap.ready && (!a->bitmap.working || !a->bitmap.cursor || a->bitmap.total!=a->page.count)) || !bitmap_key(a,receipt->token,&receipt->anchor))return PN_EMPTY;
+    pn_cache_pin(&a->bitmap.owner);pn_status_t s=a->bitmap.ready?PN_OK:bitmap_finish(a);if(s==PN_OK)s=font_size(a,a->bitmap_last_pixels);if(s==PN_OK)s=pn_font_chain_validate(chain(a));if(s==PN_OK)s=pn_page_bitmap_copy(&a->bitmap,frame,missing);pn_cache_unpin(&a->bitmap.owner);
     if(s==PN_NO_MEMORY){pn_page_bitmap_enable(&a->bitmap,false);pn_page_bitmap_enable(&a->bitmap,true);return PN_EMPTY;}return s;
 }
 static pn_status_t paint_impl(app_t *a,pn_frame_t *frame,const pn_epub_reader_receipt_t *receipt){
@@ -919,13 +920,31 @@ pn_status_t pn_epub_app_step(pn_epub_app_t *app,pn_reader_action_t action,uint64
 pn_status_t pn_epub_app_step_yield(pn_epub_app_t *app,pn_reader_action_t action,uint64_t now,pn_reader_present_fn present,void *ctx){return navigate(app,action,NULL,now,present,ctx,true);}
 /// 图片页不预热；文本使用前台同一字号/回退/亚像素缓存键。 / Skip image-page warming; text uses the foreground size, fallback and subpixel cache key.
 static pn_status_t warm_glyph(void *ctx,const pn_epub_page_node_t *n){app_t *a=ctx;if(n->image_index!=UINT_MAX || n->codepoint==9 || n->codepoint==10)return PN_EMPTY;pn_status_t s=font_size(a,n->metrics.pixels);pn_font_choice_t choice;if(s==PN_OK)s=pn_font_chain_choose(chain(a),n->codepoint,&choice);return s==PN_OK?pn_font_warm(choice.font,n->codepoint,n->x_64):s;}
-typedef struct {app_t *app;const pn_epub_page_t *page;size_t budget;} bitmap_work_t; ///< 仅回调期借用邻页 / Neighbor borrowing lasts only for a callback
+typedef struct {app_t *app;const pn_epub_page_t *page;size_t budget;bool prepared;} bitmap_work_t; ///< 仅回调期借用邻页 / Neighbor borrowing lasts only for a callback
+/// 一个字形是可保留的最小绘制单元；仍在前后检查输入，介质/字体验证不屏蔽。
+/// One glyph is the smallest retained painting unit; check input before/after it without suppressing media/font validation.
 static pn_status_t bitmap_paint(void *ctx,pn_frame_t *frame,size_t first,size_t count,unsigned *missing){
-    bitmap_work_t *work=ctx;app_t *a=work->app;if(!first)paint_guides(a,frame,work->page);
-    pn_status_t initial=font_size(a,a->bitmap_last_pixels);if(initial!=PN_OK)return initial;
+    bitmap_work_t *work=ctx;app_t *a=work->app;if(count!=1)return PN_INVALID;
+    pn_cancel_scope_t atomic;pn_cancel_enter(&atomic,NULL,NULL);
+    if(!first)paint_guides(a,frame,work->page);
+    pn_status_t s=font_size(a,a->bitmap_last_pixels);
     pn_frame_t viewport={frame->pixels+PN_READER_TOP*frame->stride+a->style.margin/2,a->layout.width,PN_READER_HEIGHT,frame->stride};
-    for(size_t i=first;i<first+count;i++){pn_status_t s=paint_text_node(a,&viewport,&work->page->nodes[i],missing,true);if(s!=PN_OK)return s;}
-    a->bitmap_last_pixels=body(a)->pixels;return PN_OK;
+    if(s==PN_OK)s=paint_text_node(a,&viewport,&work->page->nodes[first],missing,work->prepared);
+    if(s==PN_OK)a->bitmap_last_pixels=body(a)->pixels;
+    pn_cancel_leave(&atomic);return s;
+}
+static pn_status_t bitmap_advance(app_t *a,const pn_epub_page_t *page,size_t budget,bool prepared){
+    bitmap_work_t work={.app=a,.page=page,.prepared=prepared};pn_status_t s=PN_EMPTY;
+    for(size_t n=0;n<budget && a->bitmap.working;n++){s=pn_page_bitmap_step(&a->bitmap,bitmap_paint,&work,1);if(s!=PN_OK)break;}
+    return s;
+}
+/// NEXT已接管同一完整排版页后，只补齐缓存后缀；整页完成前不复制，不新增画布。
+/// Once NEXT owns the same complete layout, finish only its cached suffix; copy only a complete page without another canvas.
+static pn_status_t bitmap_finish(app_t *a){
+    pn_profile_span_t span;pn_profile_begin(&span,a->pool,"epub.bitmap.finish");pn_status_t s=PN_OK;
+    while(a->bitmap.working && s==PN_OK)s=bitmap_advance(a,&a->page,64,false);
+    if(s==PN_OK && !a->bitmap.ready)s=PN_EMPTY;
+    pn_profile_end(&span,s);return s;
 }
 static pn_status_t bitmap_visit(void *ctx,const pn_epub_page_t *page,const pn_epub_reader_anchor_t *anchor,pn_job_token_t token){
     bitmap_work_t *work=ctx;app_t *a=work->app;if(!a->bitmap.enabled)return PN_EMPTY;
@@ -938,7 +957,7 @@ static pn_status_t bitmap_visit(void *ctx,const pn_epub_page_t *page,const pn_ep
     if(a->bitmap.ready)return PN_EMPTY;
     work->page=page;int pixels=body(a)->impl?body(a)->pixels:a->style.pixels;
     pn_cache_class_t kind=a->pool->speculative_kind;pn_cache_speculate(a->pool,true);a->pool->speculative_kind=PN_CACHE_NEIGHBOR;
-    pn_status_t s=pn_page_bitmap_step(&a->bitmap,bitmap_paint,work,work->budget);
+    pn_status_t s=bitmap_advance(a,page,work->budget,true);
     if(body(a)->impl && body(a)->pixels!=pixels){pn_status_t restored=font_size(a,pixels);if(s==PN_OK && restored!=PN_OK){pn_page_bitmap_invalidate(&a->bitmap);s=restored;}}
     a->pool->speculative_kind=kind;pn_cache_speculate(a->pool,false);return s;
 }
