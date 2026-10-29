@@ -65,6 +65,26 @@ def main():
             # EPUB回翻可复用原当前包；TXT仍使用原RAM邻页。/ EPUB reverse turns can reuse the original current packet; TXT keeps its RAM neighbor path.
             reverse_hit = 1 if kind == 'epub' else 0
             assert result['hits'] == 2 + reverse_hit and actual == frames, (kind, 'switch', result)
+            for case in ('valid','corrupt','root-missing','wrong-position','failed-display'):
+                state=folder/(kind+'-locked-'+case)
+                shutil.copytree(seed,state)
+                advanced,_=run(exe,kind,book,font,state,folder/(kind+'-advance-'+case),'advance-lock')
+                assert advanced['stored']==0,advanced
+                if case=='wrong-position':
+                    run(exe,kind,book,font,state,folder/(kind+'-advance-again'),'advance-lock')
+                elif case=='corrupt':
+                    for packet in (state/'reading'/'resume').glob('*.1.pnr*'):
+                        data=bytearray(packet.read_bytes());data[-1]^=1;packet.write_bytes(data)
+                elif case=='root-missing':
+                    for root in (state/'resume').glob('*.1.pnrt*'):root.unlink()
+                reference_locked=folder/(kind+'-locked-reference-'+case)
+                shutil.copytree(state,reference_locked)
+                shutil.rmtree(reference_locked/'reading'/'resume')
+                _,expected_locked=run(baseline,kind,book,font,reference_locked,folder/(kind+'-locked-reference-frames-'+case))
+                result,actual=run(exe,kind,book,font,state,folder/(kind+'-locked-frames-'+case),'fail' if case=='failed-display' else 'read')
+                assert actual==expected_locked,(kind,case,'locked full frames differ',result)
+                assert result['neighbor_hits']==(1 if case in ('valid','failed-display') else 0),(kind,case,result)
+                print(kind,'locked',case,json.dumps(result),flush=True)
             for case in ('warm', 'missing', 'next-missing', 'root-missing', 'corrupt', 'truncated', 'failed-display', 'clock'):
                 state = folder / (kind + '-' + case)
                 shutil.copytree(seed, state)

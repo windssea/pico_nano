@@ -258,6 +258,7 @@ pn_status_t pn_epub_app_resume_cache_idle(pn_epub_app_t *);
 bool pn_epub_app_resume_cache_pending(const pn_epub_app_t *);
 
 /// 离开阅读后可用同一冻结帧分步收口当前页，不生成邻页；可选缓存失败不等于进度保存失败。
+/// 校验未完时逐步继续完整校验，通过后才借帧写包。/ Advance unfinished full verification before borrowing the frame for writing.
 /// Incrementally checkpoint the frozen current page after leaving reading; never generate neighbors or confuse optional-cache failure with progress failure.
 pn_status_t pn_epub_app_resume_checkpoint_step(pn_epub_app_t *);
 /// 当前页可选收口待办，不读文件。/ Query optional current-page checkpoint work without file I/O.

@@ -76,6 +76,8 @@ add_library(pn_core STATIC ${ui_font_c} ${reading_font_c} ${harmony_font_c} ${ar
     ${PN_ROOT}/components/pn_library/pn_sudoku_ui.c
     ${PN_ROOT}/components/pn_library/pn_sokoban.c
     ${PN_ROOT}/components/pn_library/pn_sokoban_ui.c
+    ${PN_ROOT}/components/pn_library/pn_minesweeper.c
+    ${PN_ROOT}/components/pn_library/pn_minesweeper_ui.c
     ${PN_ROOT}/components/pn_library/pn_shelf_view.c
     ${PN_ROOT}/components/pn_library/pn_menu_cache.c
     ${PN_ROOT}/components/pn_library/pn_search_ui.c

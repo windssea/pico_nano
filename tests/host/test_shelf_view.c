@@ -47,8 +47,13 @@ int main(void){
         pn_shelf_options_t o={.entertainment_tab=true,.favorites_tab=true,.entertainment=1,.layout_toggle=true};
         assert(pn_shelf_hit_ex(p,460,190,&o)==PN_SHELF_TAB_ENTERTAINMENT);
         assert(pn_shelf_hit_ex(p,100,400,&o)==PN_SHELF_SUDOKU);
-        assert(pn_shelf_hit_ex(p,300,400,&o)==PN_SHELF_SUDOKU && pn_shelf_hit_ex(p,500,400,&o)==PN_SHELF_SOKOBAN);
-        assert(pn_shelf_hit_ex(p,342,400,&o)==-1 && pn_shelf_hit_ex(p,648,400,&o)==-1 && pn_shelf_hit_ex(p,600,190,&o)==-1 && pn_shelf_hit_ex(p,100,100,&o)==-1);
+        assert(pn_shelf_hit_ex(p,342,408,&o)==PN_SHELF_SUDOKU && pn_shelf_hit_ex(p,342,648,&o)==PN_SHELF_SOKOBAN && pn_shelf_hit_ex(p,342,888,&o)==PN_SHELF_MINESWEEPER);
+        assert(pn_shelf_hit_ex(p,500,400,&o)==PN_SHELF_SUDOKU);
+        // 整张可见卡片归属一致，卡间空隙和卡外不命中；旧推箱子坐标现在属于数独。/ Each visible card has one identity; gaps and outer margins are inert, and the old Sokoban point now belongs to Sudoku.
+        static const int games[]={PN_SHELF_SUDOKU,PN_SHELF_SOKOBAN,PN_SHELF_MINESWEEPER};
+        for(int i=0;i<3;i++){int y=304+i*240;assert(pn_shelf_hit_ex(p,36,y,&o)==games[i] && pn_shelf_hit_ex(p,647,y+207,&o)==games[i]);assert(pn_shelf_hit_ex(p,35,y+104,&o)==-1 && pn_shelf_hit_ex(p,648,y+104,&o)==-1);assert(pn_shelf_hit_ex(p,342,y-1,&o)==-1 && pn_shelf_hit_ex(p,342,y+208,&o)==-1);}
+        assert(pn_shelf_hit_ex(p,342,528,&o)==-1 && pn_shelf_hit_ex(p,342,768,&o)==-1 && pn_shelf_hit_ex(p,342,1008,&o)==-1);
+        assert(pn_shelf_hit_ex(p,648,400,&o)==-1 && pn_shelf_hit_ex(p,600,190,&o)==-1 && pn_shelf_hit_ex(p,100,100,&o)==-1);
         size_t base=pool.used;
         for(unsigned pass=0;pass<4;pass++){
             o.entertainment=1;assert(pn_shelf_render_ex(p,&font,&frame,-1,false,true,NULL,&o)==PN_OK && font.pixels==24);

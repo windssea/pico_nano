@@ -62,6 +62,13 @@ static void put(uint8_t *p, uint64_t v, unsigned n) {
     for (unsigned i = 0; i < n; i++)
         p[i] = (uint8_t)(v >> (8 * i));
 }
+static void trace_write(resume_t *r,const char *phase,pn_status_t status){
+    if(r->header[72]!=2)return;
+    // 写任务头已由原页构建，直接借用字段，避免在深调用链复制双锚点大对象。/ The writer header came from the original page; borrow its fields instead of copying a large double-anchor object on deep stacks.
+    const uint8_t *p=r->header+88;
+    const pn_profile_position_t position={.book=r->book.sha256,.path=(const char *)p,.element=get(p+1024,8),.offset=get(p+1032,8),.run=(uint32_t)get(p+1040,4),.version=p[1045],.kind=p[1044],.chapter_start=p[1046]!=0,.slot=r->write_slot,.copy=-1};
+    pn_profile_position(r->pool,phase,status,&position);
+}
 static pn_status_t checked(resume_t *r) {
     pn_status_t s = pn_cancel_checkpoint();
     if (s == PN_OK)
@@ -311,6 +318,7 @@ pn_status_t pn_resume_load(pn_resume_t *h, unsigned slot, const pn_resume_page_t
         return s;
     if (!paths(r, slot))
         return PN_EMPTY;
+    if(wanted->format==2)pn_epub_progress_trace(r->pool,"resume.position.wanted",PN_OK,&r->book,&wanted->epub.begin,(int)slot,-1);
     pn_book_id_t roots[4];
     unsigned count = 0;
     if (pn_reading_root_load(r->root,"PNRR",roots,r->pool,"resume.root")==PN_OK)
@@ -350,6 +358,8 @@ pn_status_t pn_resume_load(pn_resume_t *h, unsigned slot, const pn_resume_page_t
             miss="resume.miss.position";
             valid = candidate.format == 1 ? candidate.text.begin == wanted->text.begin
                                           : pn_resume_location_equal(&candidate.epub.begin, &wanted->epub.begin);
+            // 这里只证明头部/布局及位置比较结果，不冒充整包SHA或像素校验成功。/ This reports header/layout and position comparison only, never successful full-packet SHA or pixel verification.
+            if(candidate.format==2)pn_epub_progress_trace(r->pool,"resume.position.candidate",valid?PN_OK:PN_EMPTY,&r->book,&candidate.epub.begin,(int)slot,(int)attempt);
         }
         if (valid) {
             miss="resume.miss.integrity";
@@ -412,6 +422,7 @@ void pn_resume_abort(pn_resume_t *h) {
     if (!h || !h->impl)
         return;
     resume_t *r = h->impl;
+    if(r->phase)trace_write(r,"resume.write.aborted",PN_EMPTY);
     pn_reading_store_admit_abort(&r->admission);
     pn_identity_job_close(&r->digest);
     if (r->file)
@@ -486,6 +497,7 @@ pn_status_t pn_resume_begin(pn_resume_t *h, unsigned slot, const pn_resume_page_
     r->crc = 0;
     r->phase = 1;
     r->write_slot = (uint8_t)slot;
+    if(page->format==2)pn_epub_progress_trace(r->pool,"resume.write.begin",PN_OK,&r->book,&page->epub.begin,(int)slot,-1);
     r->old = (pn_book_id_t){0};
     pn_book_id_t roots[2];
     if (trust_read(r, r->root, roots) || trust_read(r, r->rbak, roots))
@@ -665,6 +677,7 @@ pn_status_t pn_resume_step(pn_resume_t *h) {
             return s;
         if (s == PN_OK) {
             r->root_owned = false;
+            trace_write(r,"resume.write.root-committed",PN_OK);
             r->commit = (pn_cache_commit_t){0};
             s = pn_cache_commit_begin(&r->commit, r->media, &r->writer, r->path, r->tmp, r->bak);
             if (s == PN_OK)
@@ -677,7 +690,9 @@ pn_status_t pn_resume_step(pn_resume_t *h) {
             return s;
         if (s == PN_OK) {
             r->owned = false;
+            trace_write(r,"resume.write.committed",PN_OK);
             pn_profile_observe(r->pool, "resume.stored", PN_OK, 0, NULL);
+            r->phase=0;
             pn_resume_abort(h);
             return PN_OK;
         }

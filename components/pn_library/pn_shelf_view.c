@@ -14,6 +14,8 @@
 #include "pn_widgets.h"
 #include "pn_builtin_art.h"
 #include "pn_profile.h"
+#include "pn_game_entry_icons.inc"
+_Static_assert(sizeof pn_game_entry_icon_data<=3u*1024u,"Game entry icons exceed 3 KiB");
 bool pn_shelf_gesture_feed(pn_shelf_gesture_t *g,bool active,bool swipe,unsigned count,int x,int y,bool valid,int book,uint64_t now,int *command){
     if(!g || !command)return false;
     bool owned=g->claimed;
@@ -367,46 +369,67 @@ static void dashed_frame(pn_frame_t *frame,int x,int y,int w,int h,int radius){
     for(int px=x+radius+8;px<x+w-radius-8;px+=20){pn_frame_rect(frame,px,y-1,8,4,PN_UI_PAPER);pn_frame_rect(frame,px,y+h-3,8,4,PN_UI_PAPER);}
     for(int py=y+radius+8;py<y+h-radius-8;py+=20){pn_frame_rect(frame,x-1,py,4,8,PN_UI_PAPER);pn_frame_rect(frame,x+w-3,py,4,8,PN_UI_PAPER);}
 }
-/// 九宫与数字逐像素绘制，直接借画布，无字体/位图工作区。/ Draw the grid and digits directly, without font or bitmap scratch space.
-static void sudoku_icon(pn_frame_t *frame,int x,int y,int size){
-    static const uint16_t digits[]={0x2497,0x73e7,0x73cf,0x5bc9,0x79cf,0x7bcf};
-    static const uint8_t cells[]={0,2,4,5,6,8};
-    int cell=size/3,unit=cell/8;
-    pn_w_round_stroke(frame,x,y,cell*3,cell*3,8,3,PN_UI_INK);
-    for(int i=1;i<3;i++){pn_frame_rect(frame,x+i*cell,y,2,cell*3,PN_UI_INK);pn_frame_rect(frame,x,y+i*cell,cell*3,2,PN_UI_INK);}
-    for(unsigned i=0;i<sizeof cells;i++){
-        int cx=(cells[i]%3)*cell,cy=((cells[i]/3)%3)*cell;
-        for(int r=0;r<5;r++)for(int col=0;col<3;col++)if(digits[i]&(1u<<(14-r*3-col)))pn_frame_rect(frame,x+cx+(cell-3*unit)/2+col*unit,y+cy+(cell-5*unit)/2+r*unit,unit,unit,PN_UI_INK);
+/// 三款游戏共用卡片几何，绘制和命中始终一致。/ All three games share card geometry for matching drawing and hit testing.
+static grid_box_t game_entry_box(unsigned i){
+    return (grid_box_t){36,304+(int)i*240,612,208};
+}
+static const int game_entry_commands[]={PN_SHELF_SUDOKU,PN_SHELF_SOKOBAN,PN_SHELF_MINESWEEPER};
+/// 阶梯切角由矩形构成，不需要额外画布。/ Rectangle bands form stepped corners without another canvas.
+static void game_entry_step_fill(pn_frame_t *p,int x,int y,int w,int h,int cut,uint8_t color){
+    pn_frame_rect(p,x+cut,y,w-cut*2,h,color);
+    pn_frame_rect(p,x+cut/2,y+cut/2,w-cut,h-cut,color);
+    pn_frame_rect(p,x,y+cut,w,h-cut*2,color);
+}
+/// 四灰阶2bpp源逐行合并同色段，以整数两倍绘入原画布。/ Merge equal-color runs from four-gray 2bpp sources and paint at integer 2x into the original canvas.
+static void game_entry_icon(pn_frame_t *p,unsigned icon,int x,int y){
+    static const uint8_t palette[]={0,5,10,15};
+    const uint8_t *data=pn_game_entry_icon_data[icon];
+    for(unsigned row=0;row<64;row++){
+        unsigned begin=0;
+        while(begin<64){
+            unsigned pos=row*64+begin;
+            uint8_t shade=(uint8_t)((data[pos/4]>>(6-(pos%4)*2))&3u);
+            unsigned end=begin+1;
+            while(end<64){
+                pos=row*64+end;
+                if(((data[pos/4]>>(6-(pos%4)*2))&3u)!=shade)break;
+                end++;
+            }
+            pn_frame_rect(p,x+(int)begin*2,y+(int)row*2,(int)(end-begin)*2,2,palette[shade]);
+            begin=end;
+        }
     }
 }
-/// 娱乐只消费UI状态；不查询书籍、题库或图片。/ Entertainment consumes only UI state, never books, puzzle banks or images.
-static void sokoban_icon(pn_frame_t *p,int x,int y,int size){
-    pn_w_round_fill(p,x+6,y+8,size-6,size-8,8,9);
-    pn_w_round_fill(p,x,y,size-6,size-8,8,15);
-    pn_w_round_stroke(p,x,y,size-6,size-8,8,4,0);
-    for(int i=12;i<size-18;i++){pn_frame_rect(p,x+i,y+i,3,3,0);pn_frame_rect(p,x+size-i-10,y+i,3,3,0);}
+/// 卡片白面、薄黑边和短灰底沿保持相同层级。/ Cards share white faces, thin ink edges and short gray base edges.
+static void game_entry_card(pn_frame_t *p,grid_box_t b){
+    game_entry_step_fill(p,b.x+2,b.y+3,b.w-2,b.h-3,8,11);
+    game_entry_step_fill(p,b.x,b.y,b.w,b.h-4,8,0);
+    game_entry_step_fill(p,b.x+2,b.y+2,b.w-4,b.h-8,6,15);
+    for(int step=0;step<6;step++){
+        pn_frame_rect(p,600+step*2,b.y+92+step*2,3,3,PN_UI_INK);
+        pn_frame_rect(p,600+step*2,b.y+114-step*2,3,3,PN_UI_INK);
+    }
 }
+/// 娱乐只消费UI状态与内置小图，不打开书籍、题库或图片文件。/ Entertainment consumes only UI state and small built-in art, without opening books, banks or image files.
 static pn_status_t entertainment_body(pn_font_t *font,pn_frame_t *frame,bool detail){
     pn_status_t s=pn_font_size(font,24);
     if(!detail){
+        static const char *const titles[]={"数独","推箱子","扫雷"};
+        static const char *const subtitles[]={"四档难度 · 随时续玩","三档关卡 · 步步推演","首步安全 · 三档挑战"};
         if(s==PN_OK)s=pn_w_text_ex(font,frame,"阅读之外，换一种思考。",32,266,620,PN_ALIGN_LEFT,PN_UI_MUTED,false);
-        pn_w_round_stroke(frame,36,314,292,228,20,1,PN_UI_RULE);
-        pn_w_round_stroke(frame,356,314,292,228,20,1,PN_UI_RULE);
-        sokoban_icon(frame,442,340,120);
-        sudoku_icon(frame,122,340,120);
-        if(s==PN_OK)s=pn_font_size(font,30);
-        if(s==PN_OK)s=pn_w_text_ex(font,frame,"数独",36,506,292,PN_ALIGN_CENTER,PN_UI_INK,true);
+        for(unsigned i=0;i<3;i++){
+            grid_box_t b=game_entry_box(i);
+            game_entry_card(frame,b);
+            game_entry_icon(frame,i,b.x+32,b.y+40);
+            if(s==PN_OK)s=pn_font_size(font,34);
+            if(s==PN_OK)s=pn_w_text_ex(font,frame,titles[i],236,b.y+84,340,PN_ALIGN_LEFT,PN_UI_INK,true);
+            if(s==PN_OK)s=pn_font_size(font,23);
+            if(s==PN_OK)s=pn_w_text_ex(font,frame,subtitles[i],236,b.y+130,340,PN_ALIGN_LEFT,PN_UI_MUTED,false);
+        }
         if(s==PN_OK)s=pn_font_size(font,22);
-        if(s==PN_OK)s=pn_w_text_ex(font,frame,"随时续玩",36,578,292,PN_ALIGN_CENTER,PN_UI_MUTED,false);
-        if(s==PN_OK)s=pn_font_size(font,30);
-        if(s==PN_OK)s=pn_w_text_ex(font,frame,"推箱子",356,506,292,PN_ALIGN_CENTER,PN_UI_INK,true);
-        if(s==PN_OK)s=pn_font_size(font,22);
-        if(s==PN_OK)s=pn_w_text_ex(font,frame,"三档闯关",356,578,292,PN_ALIGN_CENTER,PN_UI_MUTED,false);
-        pn_w_loading_panda(frame,214,704,0);
-        if(s==PN_OK)s=pn_font_size(font,28);
-        if(s==PN_OK)s=pn_w_text_ex(font,frame,"来一局，慢慢想。",32,906,620,PN_ALIGN_CENTER,PN_UI_MUTED,false);
+        if(s==PN_OK)s=pn_w_text_ex(font,frame,"选一个游戏，慢慢想。",32,1048,620,PN_ALIGN_CENTER,PN_UI_MUTED,false);
     }else{
-        sudoku_icon(frame,252,294,180);
+        game_entry_icon(frame,0,278,320);
         if(s==PN_OK)s=pn_font_size(font,40);
         if(s==PN_OK)s=pn_w_text_ex(font,frame,"数独",32,550,620,PN_ALIGN_CENTER,PN_UI_INK,true);
         if(s==PN_OK)s=pn_font_size(font,26);
@@ -419,6 +442,8 @@ static pn_status_t entertainment_body(pn_font_t *font,pn_frame_t *frame,bool det
     if(s==PN_OK)s=pn_w_navigation(font,frame,PN_NAV_LIBRARY);
     return s;
 }
+
+
 pn_status_t pn_shelf_render_ex(const pn_catalog_page_t *page,pn_font_t *font,pn_frame_t *frame,int selected,bool recent,bool transfer,const pn_shelf_covers_t *covers,const pn_shelf_options_t *options){
     if(!page || page->count>PN_CATALOG_PAGE_MAX || !font || !font->impl || !frame || !frame->pixels || frame->width!=684 || frame->height!=1216 || frame->stride<342)return PN_INVALID;
     if(!options)options=&default_options;
@@ -533,7 +558,7 @@ int pn_shelf_hit_ex(const pn_catalog_page_t *page,int x,int y,const pn_shelf_opt
         return -1;
     }
     if(options->entertainment){
-        if(options->entertainment==1 && y>=314 && y<542){if(x>=36 && x<328)return PN_SHELF_SUDOKU;if(x>=356 && x<648)return PN_SHELF_SOKOBAN;}
+        if(options->entertainment==1)for(unsigned i=0;i<3;i++){grid_box_t b=game_entry_box(i);if(x>=b.x && x<b.x+b.w && y>=b.y && y<b.y+b.h)return game_entry_commands[i];}
         if(options->entertainment==2 && x>=182 && x<502 && y>=966 && y<1054)return PN_SHELF_ENTERTAINMENT_BACK;
         return -1;
     }

@@ -60,6 +60,11 @@ static pn_status_t resume_prepare(app_t *a, pn_read_intent_t intent, pn_epub_rea
         pn_profile_span_t span;
         pn_profile_begin(&span, a->pool, "resume.load");
         s = pn_resume_load(&a->resume, intent == PN_READ_NEXT ? 1u : 0u, &wanted, frame, &page, resume_verify, a);
+        // 下一页已确认但当前槽尚未写完时，预取槽可能就是重开的精确位置；仍完整验证位置、来源、布局与像素。/ If the next page was confirmed before the current slot finished writing, the prefetched slot may match reopening exactly; retain full position/source/layout/pixel checks.
+        if(s==PN_EMPTY && intent==PN_READ_JUMP){
+            s=pn_resume_load(&a->resume,1u,&wanted,frame,&page,resume_verify,a);
+            if(s==PN_OK)pn_profile_observe(a->pool,"resume.open.neighbor-hit",PN_OK,0,NULL);
+        }
         pn_profile_end(&span, s);
     }
     if(s==PN_OK)s=source_resume(a,&page.epub);
@@ -87,6 +92,11 @@ static pn_status_t resume_cache_step(pn_epub_app_t *app, bool current_only) {
     if(current_only && pn_resume_pending_slot(&a->resume)==1)resume_abort_retry(a);
     // 锁屏/退出的当前页优先于可重建来源表；不能等待一个该路径不会推进的writer。/ Lock/exit current-page checkpoints outrank rebuildable source tables; never wait for a writer this path does not advance.
     if(current_only && pn_source_blocks_pending(&a->blocks))pn_source_blocks_abort(&a->blocks);
+    // 冻结会话没有阅读校验轮转，检查点必须逐步完成原完整校验；未通过前仍不写帧。/ Frozen sessions have no reader verification ticks; checkpoints advance the original full verification without writing an unverified frame.
+    if(current_only && a->resume_dirty && pn_epub_app_verify_pending(app)){
+        pn_status_t verified=pn_epub_app_verify_step(app);
+        return verified==PN_OK?PN_BUSY:verified;
+    }
     if (pn_resume_pending(&a->resume)) {
         pn_profile_span_t span;
         pn_profile_begin(&span, a->pool, "resume.write");
@@ -133,5 +143,5 @@ pn_status_t pn_epub_app_resume_cache_idle(pn_epub_app_t *app){return resume_cach
 pn_status_t pn_epub_app_resume_checkpoint_step(pn_epub_app_t *app){return resume_cache_step(app,true);}
 bool pn_epub_app_resume_checkpoint_pending(const pn_epub_app_t *app){
     const app_t *a=app?app->impl:NULL;
-    return a && a->resume_key_valid && pn_page_index_tf_directory() && !pn_epub_app_verify_pending(app) && !a->lost && a->persistent && a->resume_good && !a->force_full && !a->style_preview && !a->font_preview && !a->font_pending && !a->global_pending && !a->style_pending && !a->font_view && !a->body_layer.paint && (a->resume_dirty || pn_resume_pending_slot(&a->resume)==0);
+    return a && a->resume_key_valid && pn_page_index_tf_directory() && !a->lost && a->persistent && a->resume_good && !a->force_full && !a->style_preview && !a->font_preview && !a->font_pending && !a->global_pending && !a->style_pending && !a->font_view && !a->body_layer.paint && (a->resume_dirty || pn_resume_pending_slot(&a->resume)==0);
 }

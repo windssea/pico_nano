@@ -34,7 +34,7 @@ with tempfile.TemporaryDirectory() as folder:
         assert "sudoku screen=" in r.stdout, r.stdout
         return r.stdout
 
-    enter = "library,tap:460:190,tap:100:400,wait:400,"
+    enter = "library,tap:460:190,tap:342:408,wait:400,"
     out = run(enter + "enter,window-close")
     assert not list(state.glob('sudoku.[ab]')) and out.count('entertainment page=1 status=0') >= 2, out
     out = run(enter + "tap:340:1040,wait:1000,window-close")

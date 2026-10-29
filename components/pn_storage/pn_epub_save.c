@@ -23,7 +23,8 @@ pn_status_t pn_epub_save_presented(pn_epub_save_t *p,const pn_epub_progress_t *p
     if(memcmp(progress->book.sha256,p->expected.sha256,32))return PN_STALE_JOB;
     p->last_now=now;if(p->has_location && same(&p->current,progress))return PN_OK;
     if(!p->dirty)p->dirty_since=now;
-    p->current=*progress;p->has_location=true;p->dirty=true;if(turn && p->turns<5)p->turns++;return PN_OK;
+    p->current=*progress;p->has_location=true;p->dirty=true;if(turn && p->turns<5)p->turns++;
+    pn_epub_progress_trace(p->pool,"epub.progress.confirmed",PN_OK,&p->current.book,&p->current.location,-1,-1);return PN_OK;
 }
 pn_status_t pn_epub_save_flush(pn_epub_save_t *p,uint64_t now){
     if(!ready(p) || now<p->last_now)return PN_INVALID;
@@ -33,7 +34,8 @@ pn_status_t pn_epub_save_flush(pn_epub_save_t *p,uint64_t now){
     if(status!=PN_OK){pn_epub_progress_t loaded;if(pn_epub_progress_load(&p->io,p->pool,&p->expected,&loaded)==PN_OK && same(&loaded,&p->current))status=PN_OK;}
     if(status==PN_OK){p->dirty=false;p->retry_pending=false;p->turns=0;p->dirty_since=0;}
     else{p->retry_pending=true;p->last_failed=now;}
-    pn_profile_end(&span,status);return status;
+    pn_profile_end(&span,status);
+    pn_epub_progress_trace(p->pool,"epub.progress.commit",status,&p->current.book,&p->current.location,-1,-1);return status;
 }
 pn_status_t pn_epub_save_tick(pn_epub_save_t *p,uint64_t now){
     if(!ready(p) || now<p->last_now)return PN_INVALID;

@@ -1,0 +1,51 @@
+{
+  "generator": "OpenAI image_gen; deterministic grid normalization by build_game_entry_icons.py",
+  "usage": "Original game-launcher artwork; no external source artwork",
+  "palette_4bpp": [
+    0,
+    5,
+    10,
+    15
+  ],
+  "pixel_order": "High two bits first, row-major",
+  "display_scale": 2,
+  "total_packed_bytes": 3072,
+  "icons": [
+    {
+      "name": "sudoku",
+      "file": "sudoku.png",
+      "width": 64,
+      "height": 64,
+      "levels": 4,
+      "png_bytes": 295,
+      "packed_bytes": 1024,
+      "png_sha256": "4e601ff89971af4fcc46180c8b10f77080539c54b77f2f30215147947cd8262b",
+      "packed_sha256": "1d4acc2f2c80e914fd73f74e43e8ffc7c1acb455ba006ab467d5c9129314076b",
+      "imagegen_source_sha256": "d9c9a749f9010feccf7c44adf2242aa6fbd24024720eafd27c8a486afaf9e984"
+    },
+    {
+      "name": "sokoban",
+      "file": "sokoban.png",
+      "width": 64,
+      "height": 64,
+      "levels": 4,
+      "png_bytes": 397,
+      "packed_bytes": 1024,
+      "png_sha256": "1ca964b7ac2b750809fcdf73e91b411270ce7c444da2e9503e38bb3a41ffb112",
+      "packed_sha256": "65f56ec3e22fb34cbab63136d0f8fec2ac18462a1008d71bfb07a35e85eabf9a",
+      "imagegen_source_sha256": "902e35691c58f8c07a7e399fd5791198f2337bd1e0d42de1bc214040c38618ba"
+    },
+    {
+      "name": "minesweeper",
+      "file": "minesweeper.png",
+      "width": 64,
+      "height": 64,
+      "levels": 4,
+      "png_bytes": 309,
+      "packed_bytes": 1024,
+      "png_sha256": "3b93897fef542af7ece368a2583e8563ae09f53270823b8628e8128c37dc443f",
+      "packed_sha256": "deb3ea2da1d7ed6bd34fe069bb54ebca69e304ceedb60bbe198fa06ac085fadc",
+      "imagegen_source_sha256": "2ad5f0d64b1b022683169d74da20a7d6796ac27f5cb6c35f4f1eb276a940ee1f"
+    }
+  ]
+}

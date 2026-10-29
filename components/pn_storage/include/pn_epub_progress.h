@@ -21,3 +21,5 @@ pn_status_t pn_epub_progress_save(const pn_journal_io_t *,pn_pool_t *,const pn_e
 /// 错误保持输出，EMPTY仅表示双槽不存在；SHA不符STALE_JOB。
 /// Preserve outputs on errors; EMPTY only when both slots are absent; SHA mismatch is STALE_JOB.
 pn_status_t pn_epub_progress_load(const pn_journal_io_t *,pn_pool_t *,const pn_book_id_t *,pn_epub_progress_t *);
+/// 诊断已有位置，不读写文件或赋予可信资格；slot/copy=-1表示不适用。/ Observe an existing position without file I/O or trust authority; slot/copy -1 means inapplicable.
+void pn_epub_progress_trace(pn_pool_t *,const char *,pn_status_t,const pn_book_id_t *,const pn_epub_location_t *,int slot,int copy);

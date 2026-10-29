@@ -1,5 +1,53 @@
 # PicoNano 构建、运行与验证
 
+## 2026-10-29 娱乐入口与退出清屏源码批次
+
+娱乐页统一为三张612×208横卡，x36、顶部304/544/784，卡隙不触发。新中心坐标为数独(342,408)、推箱子(342,648)、扫雷(342,888)；从书库先点娱乐(460,190)，再点对应卡片。示例推箱子为`library,tap:460:190,tap:342:648,tap:340:952`，扫雷为`library,tap:460:190,tap:342:888,tap:340:980`。游戏退出及实体中键在可靠保存后共用一次`epd_clear()`加from-white手动深度清屏；保存失败不得退出或清屏。
+
+三枚imagegen入口图标在`assets/games/entry-icons/`，均为64×64四灰阶PNG，分别295/397/309B。安装Pillow后运行`python tools/build_game_entry_icons.py`，从已规范化资源重建共3072B的高位先存2bpp表；不需要重新生成图片。`assets/games/design/`的342×608四灰阶参考图各约7–14KB，不链接固件。实际128px图标由原画布整数放大，无图像解码缓冲。
+
+用户本轮仅要求提交并推送main，硬件暂缺，无新刷机或设备实测；下面56480c8f1/45402e6da记录属于此前独立诊断批次，不用于证明新入口或退出清屏效果。
+
+最终隔离候选host全量313/313、工具Python58/58及网页Node15/15通过。SDL原52项中51项通过，娱乐脚本误把书籍点击改成游戏入口坐标，纠正后该项定向通过；新增game_exit_window单独通过，不相加宣称一次完整53项运行。卡片边界/空隙、三游戏中键/返回的一次清屏、保存失败不清、显示失败重试均有软件断言；PC不测物理残影。 SDK6.1 `firmware-diag` build/size、esptool离线image-info及文档/复用摘要检查通过；本轮软件原始证据保存在忽略目录`build-dev/entertainment-hub-20261029/`。
+
+## 2026-10-29 像素游戏与扫雷软件入口
+
+图标二轮另补扫雷游戏页三档页签的真实SDL点击、同档无刷新、异档取消/确认退出保留原局；核心测试覆盖保存失败和确认暂停计时。数独/推箱子继续逐动作比完整与局部帧，新增人物、工具、箱和方向键的形状检查。审图须启用已有系统字体目录（`--font-dir assets/fonts`，6MiB常规预算），避免用最小内置UI字库的缺字方框评价图标；`--font`只指定正文，不等同界面补字源。二轮同源渲染/日志在忽略的`build-dev/game-icons-20261029/`根下；本轮已刷56480c8f1后的设备帧另放`device-shots/`，汇总`completion.json`。共享目录并行修改时刷入仍检查冻结源与镜像摘要，保留现场改动，不能用新工作树重建覆盖已验证镜像身份。
+
+`host`新增`minesweeper`和`minesweeper_render`：三档共4200组seed/首格组合、精确雷数/首邻域安全、胜负/chord误旗、A/B恢复/同步后报错、坏schema/雷图及位边界拒绝、10小时假时钟锁屏、纯绘制和命中边缘。`sdl`新增`minesweeper_window`，使用真实SDL事件和2MiB池验证三档、跨进程恢复、翻开/插旗模式、取消、锁屏、空闲不重绘与资源归零。旧`sudoku_render`/`sokoban_render`仍逐像素比较局部与完整帧，后者包含新步数/推数。
+
+可见开发先`python tools/dev.py sdl-run`，重建后`docker stop pico-sim`再运行`tools/run_sim.ps1`。娱乐页新扫雷卡命中(342,888)，初次选择档位后点开始(340,980)；脚本为`library,tap:460:190,tap:342:888,tap:340:980`。PC F切换翻开/插旗，R新局确认，1/2/3选择难度，C主动清屏，L锁屏，Enter在选档页开始、游戏中保存退出，Esc保存退出；设备左键返回、中键保存退出、右键切换翻开/插旗。按显示模式直接点棋格，翻开模式点数字执行chord；从娱乐页进入扫雷用触摸卡，原两款三键入口保留。
+
+本机esptool为`build-dev/flash-tools/Scripts/python.exe -m esptool`，5.3.1。用户本批随后授权直接设备触发/截图，最终SDK6.1诊断build/size与image-info通过，45402e6da已写备用ota_0；整片备份/分区与保护区在启动前核对。esptool负责镜像/写入核验，触摸与截图走已有`tools/device_test.py`和固件诊断串口，不使用Computer Use。设备已显示参考的三款游戏截图、三档扫雷与锁屏/退出重开证据在忽略的`build-dev/games-20261029/`，汇总`completion.json`；`device-shots/`为684×1216设备帧。当时保留COM3监控，未做正式构建/发布；后续新批授权仍重新确认。
+
+## 2026-10-29 冻结提交批次与优先级回归
+
+`frozen_idle`用真实TXT/EPUB挂起会话、原缓存事务与完整帧检查后台入口：写租约争用时有步骤上限；批次内新输入立即在下一原步骤取消，后续仍可完成；注入每个原写步2ms时最多推进4步，单步20ms时仅执行该步便让出。关闭诊断后通过独立调度时钟仍按8ms让出，缺少时钟拒绝调用。完成后再次冷开须完整验证并命中，像素逐字节相同，池/租约释放归零。这里的时钟负载只验证调度边界，不是TF耗时；设备与SDL调用相同的批次API。
+
+`device_frozen_schedule`从实际main源码抽取并编译首页/冻结调度分支，检查冻结页先于260ms模拟提示IO、保留800ms安静门/锁定/阅读/输入取消，以及完成后普通轮转恢复。用已刷5cdf源副本运行同一判据会失败；模拟IO不证明268ms全部来自该函数。后台`pn_hot_session_deferred_idle`最多32个原步骤/8ms，退出/切书/锁屏原入口保持；不把可重建索引升级为当前页优先级。新诊断记录慢EMPTY idle及hot.checkpoint.idle以量化实卡差异，旧5cdf的112秒不是本修正的提交耗时。
+
+本批最终定向host13/13、SDL3/3通过，非系统整轮；可见Release模拟器已用最终同源批次代码重建重启。原包完整性、损坏/缺根/错位置、取消、保存与热会话回归保留。原始测试及前后源码见忽略的build-dev/frozen-submit-20261029/，不将重复运行相加计数。
+
+经本批用户明确授权，SDK6.1诊断build/size及镜像checksum/hash通过，实际5531888B、OTA余759568B/12.0730%、ELF732f7c9ec，DIRAM200355/外BSS156540与上批一致。当前16MiB备份逐块/整片核对后只写备用ota_1及0x10000选择扇区seq26，原运行5cdf整ota_0和启动前保护区/数据分区/目标未用尾部保持。启动日志、version/status已确认732f7c9ec，COM3监控继续，未发布。正常首页启动记录42个>=100ms的EMPTY idle.identity样本，中位265.923ms；这是实卡身份空轮证据，冻结提交总时间和命中仍待用户操作。烧录/启动/统计在同目录flash-completion.json，不能把启动当产品验收。
+
+## 2026-10-29 EPUB冻结续读提交回归
+
+`resume_frozen`使用真实全局外置字体偏好触发首显后完整校验，保留旧`.0/.1.pnr`，跨进程推进已保存进度到两个槽之外，再显示两页后立即park。直接解码PNBL进度及两槽包头比较完整原生位置；首页空闲须推进完整校验、写出与最新进度一致的当前槽，保持下一槽原字节不变。检查进度提交、写包开始、内部根提交、TF最终提交顺序及根SHA，随后OPEN/NEXT/PREV完整帧与无续读包解析一致。输入取消后继续成功；预期字体SHA失配时仍保存用户进度，但禁止新帧包并保持旧包不变。夹具是原创书，不是实卡《绍宋》的锚点证据。
+
+诊断镜像的`Position id=...`分组事件显示完整书SHA、槽/主备、章路径、element/offset/run/kind/version/chapter_start；`epub.progress.loaded/confirmed/commit`和`resume.position.wanted/candidate`对应保存/请求/实际候选，`resume.write.begin/root-committed/committed/aborted`对应提交阶段。设备原日志行限制200B，阶段、坐标及UTF-8路径短块共用id，路径带path_offset/path_bytes，不能只读第一行。抽取真实C分支的边界检查验证长路径与最大坐标/计数、id回绕，最长行179B且路径重组一致。candidate仅是头部/布局与位置比较，root-committed也不等于TF包提交完成。软件修正保持原完整来源、包SHA/CRC、逐像素读回及锁屏软预算，不新增画布、缓存额度或面板配置。
+
+本批18项不同的相关host测试最终通过，含冻结提交、来源/完整性/保存、两种文件port的热会话、退出检查点与字体偏好；3项SDL回归通过，可见Release窗口重建重启，非全系统矩阵。冻结的修复前探针对同夹具stored0，修正后stored1，三张完整原始帧SHA一致；耗时只作软件观察。证据在忽略的build-dev/shaosong-resume-20261029/。
+
+经本批用户授权，SDK6.1诊断build/size、镜像checksum/hash通过，最终5531600B、OTA余759856B/12.0776%、ELF5cdf61c44，DIRAM200355/外BSS156540保持。当前16MiB备份逐块及整片MD5核对后，只写备用ota_0/0x20000和0xf000选择扇区seq25；原运行a164630da整ota_1、启动前保护区/数据分区/目标未用尾部保持。启动和version/status已确认1.0.9-diag/5cdf61c44，COM3监控保留。正常首页准备已完整记录绍宋保存锚点，但用户退出/续读和两槽命中仍待复测；不是产品验收，未发布。完整审计见该目录flash-completion.json。
+
+## 2026-10-29 长锁屏恢复定向回归
+
+`device_sleep_*`与`device_sleep_diag_*`用同一原始输入/PMU事件夹具分别编译真实睡眠适配和诊断轮询分支。假时钟推进近10小时并插入27次PMU输入变化，另覆盖未知中断、拔卡再插入、PMU与拔卡同时发生、卡检测读错、PGOOD变化及按键同时拔卡；只有PMU变化保留连续性。`card_presence`检查真实板级读取分支的错误传播。SDK端口为桩，不能代替真实浅睡或功耗验收。
+
+`resume_app`新增TXT/EPUB跨进程锁屏场景：预取页成功呈现成为当前页，必要进度同步后开始并中断可丢当前包事务，冷重开探测预取槽。正常候选须命中，损坏、缺根与不符位置须拒绝，显示失败重试仍按原回执；OPEN/NEXT/PREV完整帧与删除续读包后的正常解析逐字节相同。原完整性、重启、来源替换和图片回归保持。
+
+本批最终主机定向58/58、SDL定向3/3（resume_window/root_navigation_window/reading_stats_window）通过，非系统整轮。可见Release模拟器已重建重启。经本批用户授权，SDK6.1诊断build/size通过，镜像5529984B、OTA余12.1033%，ELF为a164630da6ea9161eeab347aa2755984a3b729f2b5dd5cd9ec7c7ab42b78c7d5。完整16MiB备份分块及整片MD5通过后，只写ota_1及0x10000选择扇区，原运行ota_0与保护区在启动前核对一致；启动及串口version/status已确认1.0.9-diag，COM3持续监控。长锁屏/真实浅睡和功耗仍待验收，不发布。文档、分区及原组件/字体摘要检查通过；原始证据在忽略的build-dev/long-lock-monitor-20261029/。
+
 ## 2026-10-28 预绘前缀回归
 
 `page_bitmap`检查绘制前及成功小步后取消保留游标、每个已提交节点只绘制一次；回调自身取消/失败仍废弃候选，半页copy仍为EMPTY且不修改当前帧。`prerender`保留TXT/EPUB模式0–5，新增EPUB模式6/7/8：强制部分预绘、完整字形后输入取消、部分接管后显示失败重试，均对照关闭预绘的完整帧和位置；原低预算、重排/反向、背景/阅读线、失卡覆盖保持。EPUBsteps统计变为逐节点提交，不用于与旧版本直接比较调度耗时。
@@ -80,7 +128,7 @@ SDL `cold_open_window`检查独立进程正常封面开书、续读完整帧、�
 
 `python tools/dev.py host`包含 `sokoban`（90关完整解法、128步撤销、溢出/无效触摸、保存/重开、实际同步后返错的提交不确定性、坏槽回退与未知版本保护）、`sokoban_render`（每次走路/推箱/撤销/重做的局部与全绘逐像素核对）、`sokoban_bank`（90关重新求最优推数）和 `blob_bounded`（1305个逐字节断写位置、完整CRC、超长槽/I/O/分配失败）。`device_management`覆盖无TF路由、64次走路不触发管理清屏、锁屏屏障与中键退出的一次原表GC16回执。面板接口在此为桩，不能作为光学验收。
 
-`python tools/dev.py sdl`包含 `sokoban_window`：2MiB池、触摸走路/推箱/撤销、跨进程恢复、锁屏、取消确认、手动清屏与空闲不重绘。先运行 `python tools/dev.py sdl-run`，再用可见模拟器从娱乐（460,190）点推箱子（500,400），首次在选择页点开始（340,952）。方向键移动，Z/Backspace撤销，R重玩确认，P选关确认，C清屏，L锁屏，Esc或游戏中的Enter可靠保存并退出；选择页Enter开始。设备娱乐页右键进入推箱子，游戏左键/中键保存退出、右键撤销，移动主要用触摸/滑动。存档位于 `--state-dir/sokoban.a|b`，不修改数独文件。直接演示脚本 `library,tap:460:190,tap:500:400,tap:340:952`；恢复已有局时省略开始点击。
+`python tools/dev.py sdl`包含 `sokoban_window`：2MiB池、触摸走路/推箱/撤销、跨进程恢复、锁屏、取消确认、手动清屏与空闲不重绘。先运行 `python tools/dev.py sdl-run`，再用可见模拟器从娱乐（460,190）点推箱子（342,648），首次在选择页点开始（340,952）。方向键移动，Z/Backspace撤销，R重玩确认，P选关确认，C清屏，L锁屏，Esc或游戏中的Enter可靠保存并退出；选择页Enter开始。设备娱乐页右键进入推箱子，游戏左键/中键保存退出、右键撤销，移动主要用触摸/滑动。存档位于 `--state-dir/sokoban.a|b`，不修改数独文件。直接演示脚本 `library,tap:460:190,tap:342:648,tap:340:952`；恢复已有局时省略开始点击。
 
 原始测量在忽略的 `build-dev/sokoban/`。板级编译仅核对链接/体积，不刷机或自动发布；固件增量应与冻结的同配置1.0.7正式构建比较。题库离线重建入口见[题库说明](../assets/sokoban/README.md)。
 
@@ -102,9 +150,9 @@ SDL `cold_open_window`检查独立进程正常封面开书、续读完整帧、�
 
 `python tools/dev.py host`包含`sudoku`（全部1200题唯一解、题库循环、存档恢复、撤销满载、同步失败/分配失败及坏档保护）与`device_management`（产品路由无TF、输入、锁屏保存屏障、恢复）。`python tools/dev.py sdl`包含`entertainment_window`、`sudoku_window`，覆盖分类、空书库、2MiB预算、跨进程笔记/撤销恢复、锁屏计时、确认取消、拖出取消和15轮进出归零。自动回归用dummy，开发仍须重建并保留可见窗口。
 
-可见模拟器从书库点“娱乐”（460,190）再点数独（100,400）；初次选择难度后点“开始游戏”（340,1040），之后自动恢复存档。游戏操作均有直接触摸入口。PC方向键选格，1–9填数，N笔记，Z撤销，Backspace擦除，Enter保存后退出到娱乐页，Esc返回，L锁屏/唤醒；设备左键返回、中键保存后直接退出、右键下格，开始/换局使用触摸按钮。提交失败不能用中键绕过保存屏障。
+可见模拟器从书库点“娱乐”（460,190）再点数独（342,408）；初次选择难度后点“开始游戏”（340,1040），之后自动恢复存档。游戏操作均有直接触摸入口。PC方向键选格，1–9填数，N笔记，Z撤销，Backspace擦除，Enter保存后退出到娱乐页，Esc返回，L锁屏/唤醒；设备左键返回、中键保存后直接退出、右键下格，开始/换局使用触摸按钮。提交失败不能用中键绕过保存屏障。
 
-首次演示脚本`library,tap:460:190,tap:100:400,tap:340:1040,wait:1000`；恢复演示省略开始按钮点击。`window-close`正常保存后关闭，`back`/`quit`均为Esc只返回上层。主机存档位于`--state-dir/sudoku.a/b`，设备位于内部`/data/progress`，不放TF缓存目录。固件静态占用用`python tools/dev.py firmware-board`的size及实际bin长度评估；不以PC池、PNG大小或CI配置替代真机水位。原始本机测量保留忽略的`build-dev/sudoku/`。
+首次演示脚本`library,tap:460:190,tap:342:408,tap:340:1040,wait:1000`；恢复演示省略开始按钮点击。`window-close`正常保存后关闭，`back`/`quit`均为Esc只返回上层。主机存档位于`--state-dir/sudoku.a/b`，设备位于内部`/data/progress`，不放TF缓存目录。固件静态占用用`python tools/dev.py firmware-board`的size及实际bin长度评估；不以PC池、PNG大小或CI配置替代真机水位。原始本机测量保留忽略的`build-dev/sudoku/`。
 
 ## 整书索引的软件回归
 

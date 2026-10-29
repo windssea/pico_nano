@@ -4,7 +4,7 @@
 #include "pn_sokoban_internal.h"
 #include "pn_widgets.h"
 #include <stdio.h>
-static const char *const tiers[] = {"低难度", "中难度", "高难度"};
+static const char *const tiers[] = {"简单", "中等", "困难"};
 
 #define DRAW(x)                                                                                                        \
     do {                                                                                                               \
@@ -30,6 +30,30 @@ static void stroke(pn_frame_t *p, int x, int y, int w, int h, int n, uint8_t col
     pn_frame_rect(p, x, y, n, h, color);
     pn_frame_rect(p, x + w - n, y, n, h, color);
 }
+/// 阶梯切角保持像素边缘，不依赖新增素材。/ Stepped corners retain pixel edges without additional assets.
+static void pixel_fill(pn_frame_t *p, int x, int y, int w, int h, int cut, uint8_t color) {
+    pn_frame_rect(p, x + cut, y, w - cut * 2, h, color);
+    pn_frame_rect(p, x + cut / 2, y + cut / 2, w - cut, h - cut, color);
+    pn_frame_rect(p, x, y + cut, w, h - cut * 2, color);
+}
+/// 三态像素将白脸和双眼从黑帽、工装中分开，垂臂与并立双腿保持站姿。/ Three-state pixels separate a white face and eyes from the black hat and workwear; lowered arms and parallel legs form a standing pose.
+static void worker(pn_frame_t *p, int x, int y, int c) {
+    static const char person[20][17] = {
+        "......####......", "....########....", "....########....", "...##########...",
+        "..############..", "....WWWWWWWW....", "....W#WWWW#W....", "....WWWWWWWW....",
+        ".....WWWWWW.....", "....########....", "...##########...", "...##.####.##...",
+        "...##.####.##...", "...WW.####.WW...", "......####......", ".....######.....",
+        ".....##..##.....", ".....##..##.....", ".....##..##.....", "....###..###...."
+    };
+    int unit = c / 22;
+    if (unit < 1)
+        unit = 1;
+    int left = x + (c - 16 * unit) / 2, top = y + (c - 20 * unit) / 2;
+    for (int row = 0; row < 20; row++)
+        for (int col = 0; col < 16; col++)
+            if (person[row][col] != '.')
+                pn_frame_rect(p, left + col * unit, top + row * unit, unit, unit, person[row][col] == '#' ? 0 : 15);
+}
 static void cell(pn_frame_t *p, const pn_so_state_t *s, unsigned pos) {
     int x, y, c;
     geometry(&s->level, &x, &y, &c);
@@ -39,50 +63,91 @@ static void cell(pn_frame_t *p, const pn_so_state_t *s, unsigned pos) {
     pn_frame_rect(p, x, y, c, c, 15);
 
     if (so_bit(s->level.walls, pos)) {
-        pn_frame_rect(p, x + 1, y + 1, c - 2, c - 2, 12);
-        pn_frame_rect(p, x + 2, y + c - 4, c - 4, 3, 8);
-        stroke(p, x + 1, y + 1, c - 2, c - 2, 1, 7);
-
-        pn_frame_rect(p, x + c / 2, y + 3, 1, c / 2 - 3, 10);
-        pn_frame_rect(p, x + 3, y + c / 2, c - 6, 1, 10);
+        pn_frame_rect(p, x, y, c, c, 0);
+        // 暗砖保留亮顶沿和黑灰错缝，不以大块浅灰或白缝代替砖墙。/ Dark masonry retains bright top edges and staggered black/gray joints instead of broad pale fills or white mortar.
+        for (int row = 0; row < 3; row++) {
+            int top = y + 2 + row * (c - 4) / 3;
+            int bottom = y + 2 + (row + 1) * (c - 4) / 3;
+            pn_frame_rect(p, x + 3, top, c - 6, bottom - top - 2, 5);
+            pn_frame_rect(p, x + 3, top, c - 6, 2, 11);
+            pn_frame_rect(p, x + 3, bottom - 3, c - 6, 3, 0);
+            int seam = x + (row == 1 ? c / 3 : c * 2 / 3);
+            pn_frame_rect(p, seam, top + 2, 3, bottom - top - 5, 0);
+            pn_frame_rect(p, seam + 3, top + 2, 1, bottom - top - 5, 9);
+        }
         return;
     }
+    stroke(p, x, y, c, c, 1, 12);
+    pn_frame_rect(p, x + c / 2 - 1, y + c / 2 - 1, 2, 2, 10);
     if (so_bit(s->level.goals, pos)) {
-        int a = c / 5;
-        pn_w_round_stroke(p, x + c / 2 - a, y + c / 2 - a, a * 2, a * 2, a, 2, 3);
+        int a = c / 4, ring = c / 20;
+        if (ring < 3)
+            ring = 3;
+        pixel_fill(p, x + c / 2 - a, y + c / 2 - a, a * 2, a * 2, a / 2, 0);
+        pixel_fill(p, x + c / 2 - a + ring, y + c / 2 - a + ring, a * 2 - ring * 2,
+                   a * 2 - ring * 2, a / 2 - ring / 2, 15);
+        pn_frame_rect(p, x + c / 2 - 2, y + c / 2 - 2, 4, 4, 0);
     }
     if (so_bit(s->boxes, pos)) {
-        int a = c / 7, w = c - 2 * a;
+        int a = c / 7, w = c - 2 * a, beam = c / 24;
+        bool goal = so_bit(s->level.goals, pos);
+        if (beam < 3)
+            beam = 3;
         pn_frame_rect(p, x + a + 2, y + a + 3, w, w, 8);
-        pn_frame_rect(p, x + a, y + a, w, w, 15);
+        pn_frame_rect(p, x + a, y + a, w, w, goal ? 0 : 10);
         stroke(p, x + a, y + a, w, w, 3, 0);
-
-        for (int i = 5; i < w - 5; i++) {
-            pn_frame_rect(p, x + a + i, y + a + i, 2, 2, 3);
-            pn_frame_rect(p, x + a + w - i - 2, y + a + i, 2, 2, 3);
+        stroke(p, x + a + 5, y + a + 5, w - 10, w - 10, 2, goal ? 15 : 0);
+        // 双框与粗X撑木识别木箱；落靶改用反白框/X，不只增加小角标。/ A double frame and thick X braces identify crates; a crate on a goal uses a white frame/X rather than a tiny corner badge alone.
+        for (int i = 8; i < w - 8 - beam; i++) {
+            pn_frame_rect(p, x + a + i, y + a + i, beam, beam, goal ? 15 : 0);
+            pn_frame_rect(p, x + a + w - i - beam, y + a + i, beam, beam, goal ? 15 : 0);
         }
-        if (so_bit(s->level.goals, pos))
-            pn_frame_rect(p, x + a + 5, y + a + 5, c / 7, c / 7, 0);
     }
-    if (s->player == pos) {
-        int head = c / 8;
-        pn_w_round_fill(p, x + c / 2 - head, y + c / 5, head * 2, head * 2, head, 0);
-        pn_w_round_fill(p, x + c / 3, y + c / 2, c / 3, c / 4, 4, 0);
-        pn_frame_rect(p, x + c / 3, y + c * 3 / 4, c / 9, c / 10, 0);
-        pn_frame_rect(p, x + c * 5 / 9, y + c * 3 / 4, c / 9, c / 10, 0);
-    }
+    if (s->player == pos)
+        worker(p, x, y, c);
+}
+/// 短灰底沿保留按键层次，黑描边不延伸成厚重阴影。/ A short gray bottom lip gives keys depth without extending their black outlines into heavy shadows.
+static void keycap(pn_frame_t *p, int x, int y, int w, int h, bool selected) {
+    pixel_fill(p, x + 3, y + 4, w - 3, h - 4, 6, 8);
+    pixel_fill(p, x, y, w - 3, h - 5, 6, 0);
+    pixel_fill(p, x + 3, y + 3, w - 9, h - 11, 4, selected ? 0 : 15);
+    pn_frame_rect(p, x + 8, y + h - 12, w - 19, 3, selected ? 8 : 12);
 }
 static pn_status_t button(pn_font_t *f, pn_frame_t *p, const char *text, int x, int y, int w, int h, bool selected) {
-    pn_w_round_fill(p, x + 1, y + 4, w - 2, h - 4, 9, 7);
-    pn_w_round_fill(p, x, y, w, h - 4, 9, selected ? 0 : 15);
-    pn_w_round_outline(p, x, y, w, h - 4, 9, 1, selected ? 0 : 8);
-
+    keycap(p, x, y, w, h, selected);
     DRAW(pn_font_size(f, 26));
-    return pn_w_text_ex(f, p, text, x, y + h / 2 + 8, w, PN_ALIGN_CENTER, selected ? 15 : 0, false);
+    return pn_w_text_ex(f, p, text, x, y + h / 2 + 8, w, PN_ALIGN_CENTER, selected ? 15 : 0, true);
+}
+/// 方向键共用整数像素三角，只旋转格点，不依赖字体箭头或额外素材。/ Direction keys share an integer-pixel triangle rotated on its grid, without font arrows or external assets.
+static void direction(pn_frame_t *p, int x, int y, unsigned turn) {
+    const int w = 196, h = 72, unit = 3;
+    keycap(p, x, y, w, h, false);
+    int left = x + (w - 3 - 15 * unit) / 2, top = y + (h - 5 - 15 * unit) / 2;
+    for (int row = 0; row < 8; row++)
+        for (int col = 7 - row; col <= 7 + row; col++) {
+            int a = col, b = row + 4;
+            for (unsigned i = 0; i < turn; i++) {
+                int old = a;
+                a = 14 - b;
+                b = old;
+            }
+            pn_frame_rect(p, left + a * unit, top + b * unit, unit, unit, 0);
+        }
 }
 static pn_status_t label(pn_font_t *f, pn_frame_t *p, const char *text, int y, int size) {
     DRAW(pn_font_size(f, size));
     return pn_w_text(f, p, text, 32, y, 620, PN_ALIGN_CENTER);
+}
+/// 计数随动作更新；局部与整绘使用同一条元信息路径。/ Counters update with actions; partial and full draws share the same metadata path.
+static pn_status_t metadata(const so_t *g, pn_font_t *f, pn_frame_t *p) {
+    char text[96];
+    pn_frame_rect(p, 32, 140, 620, 40, 15);
+    snprintf(text, sizeof text, "%s / 第 %u 关", tiers[g->state.level.tier], g->state.level.id % 30 + 1);
+    DRAW(pn_font_size(f, 21));
+    DRAW(pn_w_text(f, p, text, 36, 166, 292, PN_ALIGN_LEFT));
+    snprintf(text, sizeof text, "步 %lu / 推 %lu", (unsigned long)g->state.moves, (unsigned long)g->state.pushes);
+    DRAW(pn_font_size(f, 19));
+    return pn_w_text(f, p, text, 340, 166, 308, PN_ALIGN_RIGHT);
 }
 pn_status_t pn_sokoban_render_update(const pn_sokoban_t *u, pn_font_t *f, pn_frame_t *p) {
     if (!u || !u->impl || !f || !p)
@@ -91,6 +156,8 @@ pn_status_t pn_sokoban_render_update(const pn_sokoban_t *u, pn_font_t *f, pn_fra
     const so_t *g = u->impl;
     if (!g->patch || g->full || g->screen != PN_SO_PLAY)
         return PN_UNSUPPORTED;
+
+    DRAW(metadata(g, f, p));
 
     for (unsigned c = 0; c < g->state.level.width * g->state.level.height; c++)
         if (c == g->shown_player || c == g->state.player || so_bit(g->shown_boxes, c) != so_bit(g->state.boxes, c))
@@ -108,8 +175,7 @@ pn_status_t pn_sokoban_render(const pn_sokoban_t *u, pn_font_t *f, pn_frame_t *p
     DRAW(pn_w_header(f, p, g->pending_start ? NULL : "返回", "推箱子", NULL));
 
     if (g->screen == PN_SO_PLAY || g->screen == PN_SO_COMPLETE) {
-        snprintf(text, sizeof text, "%s  /  第 %u 关", tiers[g->state.level.tier], g->state.level.id % 30 + 1);
-        DRAW(label(f, p, text, 166, 23));
+        DRAW(metadata(g, f, p));
 
         for (unsigned c = 0; c < g->state.level.width * g->state.level.height; c++)
             cell(p, &g->state, c);
@@ -129,10 +195,10 @@ pn_status_t pn_sokoban_render(const pn_sokoban_t *u, pn_font_t *f, pn_frame_t *p
             for (int i = 0; i < 4; i++)
                 DRAW(button(f, p, names[i], 36 + i * 156, 880, 144, 64, false));
 
-            DRAW(button(f, p, "上", 244, 960, 196, 72, false));
-            DRAW(button(f, p, "左", 36, 1040, 196, 72, false));
-            DRAW(button(f, p, "右", 452, 1040, 196, 72, false));
-            DRAW(button(f, p, "下", 244, 1120, 196, 72, false));
+            direction(p, 244, 960, 0);
+            direction(p, 36, 1040, 3);
+            direction(p, 452, 1040, 1);
+            direction(p, 244, 1120, 2);
 
             DRAW(pn_font_size(f, 19));
             DRAW(pn_w_text(f, p, "点空地走路", 244, 1065, 196, PN_ALIGN_CENTER));

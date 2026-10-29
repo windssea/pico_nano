@@ -168,6 +168,7 @@ pn_status_t pn_hot_session_park(pn_hot_session_t *h,pn_pool_t *pool,pn_media_t *
 }
 static bool deferred_pending(const pn_hot_session_t *h,bool structure){return h && !h->prepared && !h->deferred_failed && (h->epub.impl?(pn_epub_app_deferred_pending(&h->epub) || pn_epub_app_resume_checkpoint_pending(&h->epub) || (structure && pn_epub_app_bootstrap_checkpoint_pending(&h->epub))):(pn_reader_app_deferred_pending(&h->txt) || pn_reader_app_resume_checkpoint_pending(&h->txt)));}
 bool pn_hot_session_deferred_pending(const pn_hot_session_t *h){return deferred_pending(h,true);}
+bool pn_hot_session_checkpoint_pending(const pn_hot_session_t *h){return h && !h->prepared && !h->deferred_failed && (h->epub.impl?pn_epub_app_resume_checkpoint_pending(&h->epub):pn_reader_app_resume_checkpoint_pending(&h->txt));}
 static pn_status_t deferred_flush(pn_hot_session_t *h,bool structure){
     if(!deferred_pending(h,structure))return PN_EMPTY;
     pn_status_t s=h->epub.impl?pn_epub_app_deferred_flush(&h->epub):pn_reader_app_deferred_flush(&h->txt);
@@ -184,6 +185,17 @@ static pn_status_t deferred_flush(pn_hot_session_t *h,bool structure){
     return s;
 }
 pn_status_t pn_hot_session_deferred_flush(pn_hot_session_t *h){return deferred_flush(h,true);}
+pn_status_t pn_hot_session_deferred_idle(pn_hot_session_t *h,pn_hot_idle_clock_fn clock,void *ctx){
+    if(!clock)return PN_INVALID;
+    pn_profile_span_t span;pn_profile_begin(&span,NULL,"hot.checkpoint.idle");
+    uint64_t began=clock(ctx);pn_status_t s;unsigned steps=0;
+    do{
+        s=deferred_flush(h,true);
+        // 沿原取消/失败/保存顺序推进，不能在输入到来或当前页已完成后继续扫其他缓存。/ Keep the original cancellation/failure/save order; stop on input or current-page completion instead of draining unrelated caches.
+        if((s!=PN_OK && s!=PN_BUSY) || !pn_hot_session_checkpoint_pending(h))break;
+    }while(++steps<32u && clock(ctx)-began<8000u);
+    pn_profile_end(&span,s);return s;
+}
 pn_status_t pn_hot_session_resume(pn_hot_session_t *h,pn_media_t *media,const char *path,pn_book_format_t kind,const pn_book_id_t *expected,uint64_t policy,uint64_t now,pn_reader_app_t *txt,pn_epub_app_t *epub,pn_reader_present_fn present,void *ctx){
     if(!h || !media || !path || !txt || !epub || !present)return PN_INVALID;
     if(txt->impl || epub->impl)return PN_BUSY;

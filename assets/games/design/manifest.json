@@ -1,0 +1,32 @@
+[
+  {
+    "name": "minesweeper-concept.png",
+    "size": [
+      342,
+      608
+    ],
+    "levels": 4,
+    "bytes": 8779,
+    "usage": "Design reference only; not linked into firmware"
+  },
+  {
+    "name": "sokoban-concept.png",
+    "size": [
+      342,
+      608
+    ],
+    "levels": 4,
+    "bytes": 7291,
+    "usage": "Design reference only; not linked into firmware"
+  },
+  {
+    "name": "sudoku-concept.png",
+    "size": [
+      342,
+      608
+    ],
+    "levels": 4,
+    "bytes": 13739,
+    "usage": "Design reference only; not linked into firmware"
+  }
+]

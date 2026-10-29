@@ -41,6 +41,7 @@
 #include "pn_shelf_view.h"
 #include "pn_sudoku.h"
 #include "pn_sokoban.h"
+#include "pn_minesweeper.h"
 #include "pn_menu_cache.h"
 #include "pn_wallpaper.h"
 #include "pn_wallpaper_ui.h"
@@ -165,6 +166,9 @@ static bool index_mode; ///< 字母跳转页 / Letter-index page
 static pn_sokoban_t sokoban; ///< 按需推箱子控制器 / On-demand Sokoban controller
 static uint64_t sokoban_retry;
 static uint32_t sokoban_draw_revision;
+static pn_minesweeper_t minesweeper; ///< 按需扫雷控制器 / On-demand Minesweeper controller
+static uint64_t minesweeper_retry; ///< 呈现重试节流 / Display retry throttle
+static uint32_t minesweeper_draw_revision; ///< 游戏回执的屏幕代次 / Screen revision of the game receipt
 static pn_sudoku_t sudoku; ///< 按需数独控制器 / On-demand Sudoku controller
 static uint64_t sudoku_retry; ///< 呈现重试节流 / Display retry throttle
 static uint32_t sudoku_draw_revision; ///< 最近游戏回执的屏幕代次 / Screen revision of the latest game receipt
@@ -320,9 +324,10 @@ static void reader_recent_observe(void){
 static void *psram_alloc(void *ctx,size_t size){(void)ctx;return heap_caps_malloc(size,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);}
 static void psram_free(void *ctx,void *ptr){(void)ctx;heap_caps_free(ptr);}
 static uint64_t now_ms(void){return (uint64_t)(esp_timer_get_time()/1000);}
+/// 调度时钟也供主机设备替身使用，不依赖诊断编译。/ Scheduling clock also serves host device fixtures, independently of diagnostic compilation.
+static uint64_t profile_clock(void *ctx){(void)ctx;return (uint64_t)esp_timer_get_time();}
 #if defined(ESP_PLATFORM)
 static void profile_task_stacks(const char *);
-static uint64_t profile_clock(void *ctx){(void)ctx;return (uint64_t)esp_timer_get_time();}
 #if PN_DEVICE_TEST_CONSOLE
 /// 索引小步仅聚合，完成/进度边界输出；阶段含嵌套IO与字体耗时，不可相加。/ Aggregate index steps until completion/progress boundaries; stages include nested I/O and font time and are not additive.
 static struct {const char *phase;uint64_t calls,total,maximum;} index_profile[]={
@@ -376,12 +381,20 @@ static void profile_emit(void *ctx,const pn_profile_event_t *e){
 #endif
 #if PN_DEVICE_TEST_CONSOLE
     // 生命周期沿实际读写记录同一文件标识，不能把缺历史的missing猜成清理或未生成。/ Correlate lifecycle events by actual file identity; missing history never proves eviction or non-generation.
+    if(e->position){const pn_profile_position_t *p=e->position;char book[65];for(unsigned i=0;i<32;i++)snprintf(book+i*2,3,"%02x",p->book[i]);
+        // 控制台每行仅200字节；分组短行保留完整位置，路径块不切断UTF-8，不增加日志缓冲或深栈副本。/ The console keeps only 200 bytes per line; grouped short records preserve the full position with UTF-8-safe path chunks, without larger log buffers or deep-stack copies.
+        static uint32_t position_sequence;uint32_t id=++position_sequence;
+        ESP_LOGI(TAG,"Position id=%lu phase=%s status=%d book=%s slot=%d copy=%d",(unsigned long)id,e->phase,(int)e->status,book,p->slot,p->copy);
+        ESP_LOGI(TAG,"Position id=%lu element=%llu offset=%llu run=%lu kind=%u version=%u chapter_start=%u",(unsigned long)id,(unsigned long long)p->element,(unsigned long long)p->offset,(unsigned long)p->run,p->kind,p->version,(unsigned)p->chapter_start);
+        size_t bytes=strlen(p->path);for(size_t at=0;at<bytes;){size_t end=at+84u;if(end>bytes)end=bytes;while(end<bytes && ((unsigned char)p->path[end]&0xc0u)==0x80u)end--;
+            ESP_LOGI(TAG,"Position id=%lu path_offset=%zu path_bytes=%zu text=%.*s",(unsigned long)id,at,bytes,(int)(end-at),p->path+at);at=end;}
+        return;}
     if(e->resource){const char *name=strrchr(e->resource,'/');ESP_LOGI(TAG,"Cache file phase=%s status=%d name=%s",e->phase,(int)e->status,name?name+1:e->resource);return;}
     if(profile_io_collect(e))return;
     // 前台短批次的外层scope保留耗时/池峰，避免每小步重复串口日志拖慢NEXT。/ The foreground batch scope retains timing/pool peaks without duplicate per-step serial traffic delaying NEXT.
     if(e->status==PN_BUSY && ((!strcmp(e->phase,"epub.next") && atomic_load(&reading_presentation)) || (!strcmp(e->phase,"epub.prefetch") && (atomic_load(&reading_presentation) || reader_prefetch_batch))))return;
     // 空轮次不输出；完整计数仍在独立heap命令中，避免诊断自身主导响应。/ Skip empty ticks; explicit heap commands retain snapshots without diagnostics dominating responsiveness.
-    if(e->status==PN_EMPTY && strncmp(e->phase,"resume.miss.",12) && strncmp(e->phase,"bootstrap.miss.",15) && strncmp(e->phase,"source.blocks.miss.",19))return;
+    if(e->status==PN_EMPTY && strncmp(e->phase,"resume.miss.",12) && strncmp(e->phase,"bootstrap.miss.",15) && strncmp(e->phase,"source.blocks.miss.",19) && (strncmp(e->phase,"idle.",5) || e->elapsed_us<8000u))return;
     profile_io_flush();
 #endif
     bool detailed=!strncmp(e->phase,"epub.open.",10) || !strncmp(e->phase,"content.sha-",12) || !strncmp(e->phase,"idle.",5) || !strncmp(e->phase,"storage.file-",13);
@@ -587,7 +600,12 @@ static pn_status_t present_panel(void *ctx,const pn_frame_t *frame,pn_refresh_t 
 #else
     (void)ripple_reverse;(void)ripple_turn;(void)flat_white;bool white_cleaned=false;
 #endif
-    if(!panel_known || deep_clean){reason=deep_clean?"manual":"unknown-reference";mode=MODE_GC16;epd_clear();result=epd_hl_update_screen_from_white(&hardware.hl,MODE_GC16,25);}
+    if(!panel_known || deep_clean){
+        reason=deep_clean?(reading_exit?"game-exit-clear":"manual"):"unknown-reference";mode=MODE_GC16;
+        // 游戏退出的清屏与目标帧共用此分支，只清一次再从白场显示，不追加退出GC16扫描。/ Game exit clears once in this branch, then displays the target from white without another exit-GC16 scan.
+        const void *saved=hardware.hl.waveform;if(reading_exit && deep_clean)hardware.hl.waveform=&E0470_WAVEFORM;
+        epd_clear();result=epd_hl_update_screen_from_white(&hardware.hl,MODE_GC16,25);hardware.hl.waveform=saved;
+    }
     else if(reading_exit){
         // 退出正文直接用完整原表GC16显示目标首页/书库；不先清白、不借局部或同色清零表，失败也归还阅读波形。
         // Present the target home/library with full-screen original GC16 on exit; no white pre-pass, partial or same-color-suppressed table, restoring the reading waveform even on failure.
@@ -1402,9 +1420,14 @@ static void sudoku_open(void){
     if(r==PN_OK){shelf_mode=false;status_page=false;shelf_draw_valid=false;(void)sudoku_draw();}
     else message("数独暂不可用","内部存储未就绪，请重试");
 }
+/// 只在游戏已确认保存并退出后请求一次完整清屏，目标娱乐页仍只呈现一次。/ Request one complete clear only after a saved game exits; present the destination Entertainment page once.
+static void game_return_to_entertainment(void){
+    entertainment=1;home_mode=false;atomic_store(&deep_clean_pending,true);
+    show_shelf_profile("",false,PN_REFRESH_EXIT_GC16);
+}
 static void sudoku_command(int command){
     pn_status_t r=pn_sudoku_event(&sudoku,command,now_ms());
-    if(!sudoku.active){pn_sudoku_close(&sudoku);entertainment=1;home_mode=false;show_shelf_profile("",false,PN_REFRESH_EXIT_GC16);}
+    if(!sudoku.active){pn_sudoku_close(&sudoku);game_return_to_entertainment();}
     else if(!sudoku.presented)(void)sudoku_draw();
     if(r!=PN_OK && r!=PN_EMPTY && r!=PN_BUSY)ESP_LOGW(TAG,"Sudoku command=%d status=%d",command,r);
 }
@@ -1426,11 +1449,34 @@ static void sokoban_open(void){
     if(r==PN_OK){shelf_mode=false;status_page=false;shelf_draw_valid=false;(void)sokoban_draw(false);}else message("推箱子暂不可用","内部存储未就绪，请重试");
 }
 static void sokoban_finish(int command,pn_status_t r){
-    if(!sokoban.active){pn_sokoban_close(&sokoban);entertainment=1;home_mode=false;show_shelf_profile("",false,PN_REFRESH_EXIT_GC16);}
+    if(!sokoban.active){pn_sokoban_close(&sokoban);game_return_to_entertainment();}
     else if(!sokoban.presented)(void)sokoban_draw(command==PN_SO_CLEAN);
     if(r!=PN_OK && r!=PN_EMPTY && r!=PN_BUSY)ESP_LOGW(TAG,"Sokoban command=%d status=%d",command,r);
 }
 static void sokoban_command(int command){sokoban_finish(command,pn_sokoban_event(&sokoban,command,now_ms()));}
+/// 扫雷借用原画布与游戏差分通路，不改变面板刷新算法。/ Minesweeper borrows the existing canvas and game-diff path without changing panel refresh algorithms.
+static pn_status_t minesweeper_draw(bool clean){
+    uint8_t *pixels=pn_alloc_tagged(&pool,PN_MEM_FRAME,415872);pn_frame_t frame;pn_font_t font={0};
+    pn_status_t r=pixels && pn_frame_bind(&frame,pixels,415872,684,1216)?management_font_begin(&font,28):PN_NO_MEMORY;
+    if(r==PN_OK){pn_status_t patch=panel_known && minesweeper_draw_revision==async_port.revision?pn_device_frame_restore(hardware.hl.back_fb,415872,&frame):PN_UNSUPPORTED;
+        if(patch==PN_OK)patch=pn_minesweeper_render_update(&minesweeper,&font,&frame);
+        r=patch==PN_UNSUPPORTED?pn_minesweeper_render(&minesweeper,&font,&frame):patch;}
+    if(r==PN_OK){atomic_store(&sudoku_presentation,pn_minesweeper_screen(&minesweeper)==PN_MI_PLAY);r=present(NULL,&frame,clean?PN_REFRESH_GC16:PN_REFRESH_GL16);atomic_store(&sudoku_presentation,false);}
+    if(r==PN_OK)minesweeper_draw_revision=async_port.revision;
+    management_font_end(&font);pn_free(pixels);minesweeper_retry=now_ms();pn_minesweeper_displayed(&minesweeper,r==PN_OK);
+    ESP_LOGI(TAG,"Minesweeper screen=%d status=%d used=%u peak=%u",pn_minesweeper_screen(&minesweeper),r,(unsigned)pool.used,(unsigned)pool.peak);return r;
+}
+static void minesweeper_open(void){
+    pn_cover_work_abort(&cover_work);pn_status_t r=pn_hot_session_drop(&hot_session);
+    if(r==PN_OK)r=pn_minesweeper_open(&minesweeper,&pool,&data_media,data_ready?"/data/progress":NULL,now_ms());
+    if(r==PN_OK){shelf_mode=false;status_page=false;shelf_draw_valid=false;(void)minesweeper_draw(false);}else message("扫雷暂不可用","内部存储未就绪，请重试");
+}
+static void minesweeper_command(int command){
+    pn_status_t r=pn_minesweeper_event(&minesweeper,command,now_ms());
+    if(!minesweeper.active){pn_minesweeper_close(&minesweeper);game_return_to_entertainment();}
+    else if(!minesweeper.presented)(void)minesweeper_draw(command==PN_MI_CLEAN);
+    if(r!=PN_OK && r!=PN_EMPTY && r!=PN_BUSY)ESP_LOGW(TAG,"Minesweeper command=%d status=%d",command,r);
+}
 /// 缓存预算查询由设备port提供，不用TF大小推断内部状态容量。/ The device port reports cache capacity without inferring internal-state space from TF size.
 static pn_status_t index_space(void *ctx,uint64_t *available){(void)ctx;size_t total=0,used=0;if(esp_littlefs_info("data",&total,&used)!=ESP_OK || used>total)return PN_IO;*available=total-used;return PN_OK;}
 /// TF容量来自实际挂载卷，不能用内部LittleFS容量替代。/ Obtain TF capacity from its actual mounted volume, never internal LittleFS.
@@ -1807,13 +1853,13 @@ static bool tick_prepare_book(uint64_t now){
 /// 离开阅读后的进度与页码索引在首页首显之后、输入安静800ms才写出，不挡退出反馈。/ Write the progress and page index left by the reader only after the home display and 800 ms of quiet input, never delaying exit feedback.
 static bool tick_hot_deferred(uint64_t now){
     if(reader_active() || locked || now<last_input || now-last_input<800 || !pn_hot_session_deferred_pending(&hot_session))return false;
-    pn_device_power_busy(PN_POWER_PRODUCT,true);pn_status_t s=pn_hot_session_deferred_flush(&hot_session);
+    pn_device_power_busy(PN_POWER_PRODUCT,true);pn_status_t s=pn_hot_session_deferred_idle(&hot_session,profile_clock,NULL);
     if(s!=PN_OK && s!=PN_BUSY && s!=PN_EMPTY && s!=PN_CANCELLED)ESP_LOGW(TAG,"Deferred progress/index write: %d",(int)s);
     return true;
 }
 /// 输入先消费，空闲到期只释放已保留会话；单次必要文件系统调用仍可能阻塞。/ Consume input first; idle expiry releases retained sessions only, while an individual mandatory filesystem call may still block.
 static pn_status_t expire_hot_idle(uint64_t now,bool idle){
-    if(!idle || touch_held || reader_active() || locked || opening || sokoban.active || sudoku.active || !shelf_mode || focus_page() || transfer.impl || usb.open || time_sync.impl || ota_busy() || wifi_probe.impl || now<last_input || now-last_input<1500u)return PN_EMPTY;
+    if(!idle || touch_held || reader_active() || locked || opening || minesweeper.active || sokoban.active || sudoku.active || !shelf_mode || focus_page() || transfer.impl || usb.open || time_sync.impl || ota_busy() || wifi_probe.impl || now<last_input || now-last_input<1500u)return PN_EMPTY;
     if(!hot_session.media || hot_session.expire_failed || now<hot_session.at || now-hot_session.at<PN_HOT_SESSION_MS)return PN_EMPTY;
     pn_status_t s=pn_cancel_checkpoint();if(s!=PN_OK)return s;
     pn_device_power_busy(PN_POWER_PRODUCT,true);pn_profile_span_t span;pn_profile_begin(&span,&pool,"hot.expire");
@@ -1899,6 +1945,8 @@ static void opening_cancel(int key){
 /// Advance one working category per owner tick; probe empty categories only within a soft 8 ms budget, measuring any over-budget underlying I/O separately.
 static bool tick_shelf_background(uint64_t now){
     if(entertainment && !home_mode)return tick_hot_deferred(now);
+    // 已显示页先于未来书籍/封面的提示IO；保持原800ms安静门及输入取消，不在退出/切书入口等待落盘。/ Give the displayed page priority over hint I/O for future books/covers; keep the original 800 ms quiet gate and input cancellation, without waiting in exit/switch entry points.
+    if(pn_hot_session_checkpoint_pending(&hot_session) && tick_hot_deferred(now))return true;
     static unsigned cursor;int64_t started=esp_timer_get_time();
     for(unsigned probe=0;probe<4;probe++){
         if(pn_cancel_checkpoint()!=PN_OK)return false;
@@ -2256,14 +2304,18 @@ static void reader_checkpoint_current(void) {
         if (status != PN_OK && status != PN_BUSY)
             break;
     }
+    bool unfinished=epub.impl?pn_epub_app_resume_checkpoint_pending(&epub):pn_reader_app_resume_checkpoint_pending(&reader);
+    if(unfinished && (status==PN_OK || status==PN_BUSY))status=PN_BUSY;
     // 没完成也必须归还CACHE_WRITE与借帧，不把可丢缓存事务带进睡眠。/ Always return CACHE_WRITE and frame borrows,
     // including unfinished disposable transactions, before sleeping.
     pn_epub_app_cache_activity(&epub, now_ms());
     pn_reader_app_cache_activity(&reader, now_ms());
     pn_profile_observe(&pool, "resume.exit-checkpoint", status, (now_ms() - began) * 1000u, NULL);
+    if(unfinished)pn_profile_observe(&pool,"resume.exit-checkpoint.incomplete",PN_BUSY,0,NULL);
 }
 
 static bool prepare_lock(void){
+    if(minesweeper.active){pn_status_t r=pn_minesweeper_pause(&minesweeper,now_ms());if(r!=PN_OK)(void)minesweeper_draw(false);return r==PN_OK;}
     if(sokoban.active){pn_status_t r=pn_sokoban_pause(&sokoban,now_ms());if(r!=PN_OK)(void)sokoban_draw(false);return r==PN_OK;}
     if(sudoku.active){pn_status_t r=pn_sudoku_pause(&sudoku,now_ms());if(r!=PN_OK)(void)sudoku_draw();return r==PN_OK;}
     reading_stats_pause();reading_stats_flush();
@@ -2346,6 +2398,7 @@ static void resume_reader(void){
 #if defined(CONFIG_PN_WAKE_TRACE) && CONFIG_PN_WAKE_TRACE
     wake_trace_capture(resume_at);
 #endif
+    if(minesweeper.active){locked=false;if(minesweeper_draw(false)!=PN_OK)locked=true;return;}
     if(sokoban.active){locked=false;if(sokoban_draw(false)!=PN_OK)locked=true;return;}
     if(sudoku.active){locked=false;if(sudoku_draw()!=PN_OK)locked=true;return;}
     if(!reader_suspended && *selected_path)ESP_LOGW(TAG,"Reader wake cold fallback: reason=no-suspended-page");
@@ -2612,6 +2665,7 @@ static void open_shelf_item(int index){
     else message("格式尚未接入","书籍仍保留，选择TXT或EPUB");
 }
 static void handle_key(int key,pn_key_event_t event){
+    if(minesweeper.active){if(event==PN_KEY_SHORT){const pn_mi_state_t *state=pn_minesweeper_state(&minesweeper);minesweeper_command(key==PN_KEY_1?PN_MI_BACK:key==PN_KEY_2?PN_MI_EXIT:state && state->flag_mode?PN_MI_REVEAL_MODE:PN_MI_FLAG_MODE);}return;}
     if(sokoban.active){if(event==PN_KEY_SHORT)sokoban_command(key==PN_KEY_1?PN_SO_BACK:key==PN_KEY_2?PN_SO_EXIT:PN_SO_UNDO_MOVE);return;}
     if(sudoku.active){if(event==PN_KEY_SHORT)sudoku_command(key==PN_KEY_1?PN_SU_BACK:key==PN_KEY_2?PN_SU_EXIT:PN_SU_NEXT_CELL);return;}
     reading_stats_pause();
@@ -2704,6 +2758,7 @@ static void handle_key(int key,pn_key_event_t event){
 }
 /// 按当前活动页面扫描命中码（触摸与三键焦点共用）。/ Hit code of the active page at a point (shared by touch and three-key focus).
 static int active_hit(int x,int y){
+    if(minesweeper.active){int h=pn_minesweeper_hit(&minesweeper,x,y);return h>0?h:-1;}
     if(sokoban.active){int h=pn_sokoban_hit(&sokoban,x,y);return h>0?h:-1;}
     if(sudoku.active){int h=pn_sudoku_hit(&sudoku,x,y);return h>0?h:-1;}
     int hit=-1;
@@ -2731,7 +2786,7 @@ static int active_hit(int x,int y){
 }
 /// 只有显示固定底栏的四个一级页允许按下切页；子页、模态和活动传输沿原确认规则。/ Only the four roots with fixed navigation switch on press; subpages, modals and active transfers retain normal confirmation.
 static int root_navigation_hit(int x,int y){
-    if(sokoban.active || sudoku.active)return -1;
+    if(minesweeper.active || sokoban.active || sudoku.active)return -1;
     if(opening)return -1;
     if(locked || usb.open || transfer.impl || time_sync.impl || ota.impl || wallpaper_ui.impl || font_manage.impl || reading_menu || fonts.active || toc.active || jump_ui.active || styles.active || bookmarks.mode!=PN_BUI_CLOSED || actions_mode || index_mode || search_mode || toolbar_open)return -1;
     if(settings_ui.impl){if(pn_settings_ui_screen(&settings_ui)!=0)return -1;}
@@ -2762,6 +2817,7 @@ static void feedback_begin(int x,int y){
 #endif
 /// 执行一次已确认的选择（点击或KEY2确认）。/ Perform one confirmed selection (a tap or a KEY2 confirmation).
 static void apply_selection(int selection){
+    if(minesweeper.active){minesweeper_command(selection);return;}
     if(sokoban.active){sokoban_command(selection);return;}
     if(sudoku.active){sudoku_command(selection);return;}
     reading_stats_pause();
@@ -2829,8 +2885,8 @@ static void apply_selection(int selection){
         else if(selection==PN_TOOL_SHELF){toolbar_open=false;if(leave_reader()){selected_path[0]=0;show_shelf_profile("",false,PN_REFRESH_EXIT_GC16);}}
     }
     else if(reading_menu){if(selection==PN_READING_MENU_LAN)begin_transfer(true);else if(selection==PN_READING_MENU_SETTINGS)begin_settings();else if(selection==PN_READING_MENU_TRANSFER)begin_transfer(false);else if(selection==PN_READING_MENU_SHELF){home_mode=false;recent_mode=false;fav_mode=false;search_query[0]=0;reading_menu=false;if(leave_reader()){selected_path[0]=0;show_shelf_profile("",false,PN_REFRESH_EXIT_GC16);}}else if(selection==PN_READING_MENU_RESUME){reading_menu=false;if(reader_active()){if(active_step(PN_APP_OPEN,now_ms())==PN_OK){status_page=false;shelf_mode=false;}}else start_reader();}}
-    else if(shelf_mode && (selection==PN_SHELF_TAB_ENTERTAINMENT || selection==PN_SHELF_ENTERTAINMENT_BACK || selection==PN_SHELF_SUDOKU || selection==PN_SHELF_SOKOBAN)){
-        home_mode=false;entertainment=1;if(selection==PN_SHELF_SUDOKU)sudoku_open();else if(selection==PN_SHELF_SOKOBAN)sokoban_open();else show_shelf("",false);
+    else if(shelf_mode && (selection==PN_SHELF_TAB_ENTERTAINMENT || selection==PN_SHELF_ENTERTAINMENT_BACK || selection==PN_SHELF_SUDOKU || selection==PN_SHELF_SOKOBAN || selection==PN_SHELF_MINESWEEPER)){
+        home_mode=false;entertainment=1;if(selection==PN_SHELF_SUDOKU)sudoku_open();else if(selection==PN_SHELF_SOKOBAN)sokoban_open();else if(selection==PN_SHELF_MINESWEEPER)minesweeper_open();else show_shelf("",false);
     }
     else if(shelf_mode && selection==PN_SHELF_READING_HOME){if(!home_mode){home_mode=true;show_shelf("",false);}}
     else if(shelf_mode && selection==PN_SHELF_LAYOUT){list_mode=!list_mode;shelf_focus=-1;show_shelf("",false);}
@@ -2978,9 +3034,9 @@ static void device_task(void *arg){
         wake_trace_poll(now);
 #endif
         if(scope_active)pn_async_end(&scope);
-        bool body=!sokoban.active && !sudoku.active && reader_active() && !locked && !focus_page() && !status_page && !reading_menu && !shelf_mode && !toolbar_open;
+        bool body=!minesweeper.active && !sokoban.active && !sudoku.active && reader_active() && !locked && !focus_page() && !status_page && !reading_menu && !shelf_mode && !toolbar_open;
         reading_stats_poll(body && !opening && !reader_turn_pending);
-        uint32_t view=locked?1:sokoban.active?20:sudoku.active?19:opening?18:fonts.active?2:toc.active?3:styles.active?4:jump_ui.active?5:bookmarks.mode!=PN_BUI_CLOSED?6:actions_mode?7:settings_ui.impl?8:wallpaper_ui.impl?9:font_manage.impl?10:hub_mode?11:index_mode?12:search_mode?13:toolbar_open?14:body?15:home_mode?16:17;
+        uint32_t view=locked?1:minesweeper.active?21:sokoban.active?20:sudoku.active?19:opening?18:fonts.active?2:toc.active?3:styles.active?4:jump_ui.active?5:bookmarks.mode!=PN_BUI_CLOSED?6:actions_mode?7:settings_ui.impl?8:wallpaper_ui.impl?9:font_manage.impl?10:hub_mode?11:index_mode?12:search_mode?13:toolbar_open?14:body?15:home_mode?16:17;
         if(!opening && shelf_mode && !home_mode && shelf_page)view+=(uint32_t)shelf_page->index*32u;
         pn_device_async_root_view(&async_port,view,body,input_flags,root_navigation_hit(80,1150)>=0);
         pn_device_input_event_t queued={0};pn_status_t available=async_port.input_active?pn_device_async_take(&async_port,&queued):PN_EMPTY;
@@ -3150,11 +3206,15 @@ static void device_task(void *arg){
             if(!tap.down)feedback_restore();
 #endif
             {if(!async_port.input_active){int key=-1;pn_key_event_t event=pn_key_feed(&keys,touch.count,touch.x,touch.y,read==ESP_OK,now_ms(),&key);if(event!=PN_KEY_NONE && !locked){pn_reader_input_cancel(&input);handle_key(key,event);}}}
-            if(!sokoban.active && !sudoku.active && !transfer.impl && !usb.open && !wallpaper_ui.impl && !font_manage.impl && !settings_ui.impl && !reading_menu && !shelf_mode && !status_page && bookmarks.mode==PN_BUI_CLOSED && !styles.active && !jump_ui.active && !fonts.active && !toc.active && !toolbar_open && !async_port.input_active && pn_reader_input_feed(&input,touch.count,touch.x,touch.y,read==ESP_OK,&action) && !locked){
+            if(!minesweeper.active && !sokoban.active && !sudoku.active && !transfer.impl && !usb.open && !wallpaper_ui.impl && !font_manage.impl && !settings_ui.impl && !reading_menu && !shelf_mode && !status_page && bookmarks.mode==PN_BUI_CLOSED && !styles.active && !jump_ui.active && !fonts.active && !toc.active && !toolbar_open && !async_port.input_active && pn_reader_input_feed(&input,touch.count,touch.x,touch.y,read==ESP_OK,&action) && !locked){
                 if(action==PN_APP_TOOLS)toolbar_show();
                 else if(reader_active() && !status_page){pn_status_t status=active_step(action,now_ms());report_reader_result(status);}
                 else start_reader();}}}
         bool background=false;
+        if(!locked && minesweeper.active && available==PN_EMPTY && !touch_held && !tap.down){
+            (void)pn_minesweeper_tick(&minesweeper,now_ms());
+            if(!minesweeper.presented && now_ms()-minesweeper_retry>=1000)(void)minesweeper_draw(false);
+        }
         if(!locked && sokoban.active && available==PN_EMPTY && !touch_held && !tap.down){
             (void)pn_sokoban_tick(&sokoban,now_ms());
             if(!sokoban.presented && now_ms()-sokoban_retry>=1000)(void)sokoban_draw(false);

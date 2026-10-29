@@ -68,7 +68,7 @@ static void root_merge_checks(void){
         assert(pn_tap_press_feed(&press,1,PN_SETUI_HOME,true,&selected) && selected==PN_SETUI_HOME);
         if(mode!=1)queued_root_release();
         if(mode==2){queued_root_pointer(2,420,1150);queued_root_pointer(1,420,1150);queued_root_release();}
-        if(mode==3){queued_root_pointer(1,100,700);queued_root_pointer(1,420,1150);queued_root_release();}
+        if(mode==3){queued_root_pointer(1,342,888);queued_root_pointer(1,420,1150);queued_root_release();}
         queued_root_pointer(1,250,1150);
         if(mode!=1){queued_root_release();queued_root_pointer(1,420,1150);queued_root_release();}
         if(mode==4){pn_async_set_root(&async_port.input,false);pn_async_set_root(&async_port.input,true);}
@@ -98,6 +98,27 @@ static void reading_exit_refresh_checks(void){
     shown=presents;assert(present(NULL,&frame,PN_REFRESH_GL16)==PN_OK && presents==shown);
     panel_fault=true;calls=screen_full_calls;assert(present(NULL,&frame,PN_REFRESH_EXIT_GC16)==PN_IO && screen_full_calls==calls+1 && !panel_known && hardware.hl.waveform==&E0470_FOLLOW_WAVEFORM);panel_fault=false;
     clears=clear_calls;shown=presents;assert(present(NULL,&frame,PN_REFRESH_EXIT_GC16)==PN_OK && clear_calls==clears+1 && presents==shown+1 && panel_known && hardware.hl.waveform==&E0470_FOLLOW_WAVEFORM);
+    pn_free(pixels);hardware.hl.waveform=wave;maintenance=saved;panel_known=known;atomic_store(&full_clean_completed,clean);
+}
+typedef struct {unsigned clears,shown,full,areas,gc;const void *wave;} game_clear_probe_t;
+static game_clear_probe_t game_clear_before(void){return (game_clear_probe_t){clear_calls,presents,screen_full_calls,area_full_calls+area_diff_calls,gc_updates,hardware.hl.waveform};}
+/// 一次完整清屏加一次目标白场呈现，不再额外扫描退出GC16。/ One complete clear and one destination-from-white presentation, without an extra exit-GC16 scan.
+static void game_clear_after(game_clear_probe_t before){
+    assert(clear_calls==before.clears+1 && presents==before.shown+1 && screen_full_calls==before.full && area_full_calls+area_diff_calls==before.areas && gc_updates==before.gc);
+    assert(last_update_mode==MODE_GC16 && last_update_wave==&E0470_WAVEFORM && hardware.hl.waveform==before.wave && panel_known);
+    assert(!atomic_load(&deep_clean_pending) && atomic_load(&full_clean_completed));
+}
+static void game_exit_refresh_checks(void){
+    pn_device_refresh_t saved=maintenance;bool known=panel_known,clean=atomic_exchange(&full_clean_completed,false);const void *wave=hardware.hl.waveform;
+    uint8_t *pixels=pn_alloc(&pool,415872);pn_frame_t frame;assert(pixels && pn_frame_bind(&frame,pixels,415872,684,1216));pn_frame_clear(&frame,15);
+    hardware.hl.waveform=&E0470_FOLLOW_WAVEFORM;panel_known=true;
+    game_clear_probe_t before=game_clear_before();atomic_store(&deep_clean_pending,true);
+    assert(present(NULL,&frame,PN_REFRESH_EXIT_GC16)==PN_OK);game_clear_after(before);
+    unsigned shown=presents,clears=clear_calls;assert(present(NULL,&frame,PN_REFRESH_GL16)==PN_OK && presents==shown && clear_calls==clears);
+    // 显示失败保留清屏意图；成功重试仍走单个分支并归还波形。/ A failed display retains its clear intent; a successful retry still uses one branch and restores the waveform.
+    before=game_clear_before();atomic_store(&deep_clean_pending,true);panel_fault=true;
+    assert(present(NULL,&frame,PN_REFRESH_EXIT_GC16)==PN_IO && clear_calls==before.clears+1 && presents==before.shown+1 && screen_full_calls==before.full && !panel_known && atomic_load(&deep_clean_pending) && hardware.hl.waveform==before.wave);
+    panel_fault=false;before=game_clear_before();assert(present(NULL,&frame,PN_REFRESH_EXIT_GC16)==PN_OK);game_clear_after(before);
     pn_free(pixels);hardware.hl.waveform=wave;maintenance=saved;panel_known=known;atomic_store(&full_clean_completed,clean);
 }
 /// 阅读GC16借完整表，GL16不变；失败、深清与未知参考也必须归还波形。/ Reading GC16 borrows the full table while GL16 stays unchanged; failure, deep clean and unknown references must also restore ownership.
@@ -147,6 +168,7 @@ int main(void){
     int vcom;assert(read_pico_pmu_vcom_get(&vcom)==ESP_OK);epd_set_vcom((uint16_t)vcom);
     assert(pn_media_attach(&sd_media,1)==PN_OK);
     reading_exit_refresh_checks();
+    game_exit_refresh_checks();
     reading_full_gc16_checks();
     assert(pn_settings_ui_open(&settings_ui,&pool,NULL,NULL,present,NULL)==PN_OK);
     // 网络结束时若绘制被取消，空闲重试遵守节流、取消与锁屏门控。 / Retry cancelled network-terminal draws subject to idle throttling, cancellation and lock gates.
@@ -166,7 +188,7 @@ int main(void){
     ota_state_result=PN_IO;assert(ota_display_frozen());ota_state_result=PN_OK;
     ota_result.radio_released=true;assert(!ota_display_frozen());update_ota_ui(false);retry_settings_ui(5000,&retry_at);assert(settings_ui.presented && presents==retry_frames+1);ota.impl=NULL;
     assert(pn_settings_ui_event(&settings_ui,PN_SETUI_BACK,present,NULL)==PN_OK && pn_settings_ui_event(&settings_ui,PN_SETUI_BACK,present,NULL)==PN_OK);
-    assert(root_navigation_hit(80,1150)==PN_SETUI_HOME && root_navigation_hit(100,700)==-1);
+    assert(root_navigation_hit(80,1150)==PN_SETUI_HOME && root_navigation_hit(342,888)==-1);
     root_merge_checks();
     assert(pn_settings_ui_event(&settings_ui,PN_SETUI_REFRESH,present,NULL)==PN_OK && pn_settings_ui_screen(&settings_ui)==2);
     assert(root_navigation_hit(80,1150)==-1);
@@ -198,7 +220,7 @@ int main(void){
     root_navigation_cancel(&nav_press,&stale_release);assert(nav_press.claimed);
     root_navigation_cancel(&nav_press,&stale_release);
     assert(!nav_press.down && !nav_press.claimed && settings_ui.impl && presents==nav_shown);
-    assert(!root_navigation_touch(&nav_press,1,100,700,true,NULL));
+    assert(!root_navigation_touch(&nav_press,1,342,888,true,NULL));
     assert(root_navigation_touch(&nav_press,1,80,1150,true,NULL) && presents==nav_shown);
     assert(root_navigation_touch(&nav_press,0,0,0,true,NULL) && root_navigation_touch(&nav_press,0,0,0,true,NULL));
     locked=true;assert(root_navigation_hit(80,1150)==-1);locked=false;
@@ -447,7 +469,9 @@ int main(void){
     char game_root[]="/tmp/pn-device-sudoku-XXXXXX";assert(mkdtemp(game_root));
     assert(pn_sudoku_open(&sudoku,&pool,&data_media,game_root,NULL,0,now_ms())==PN_OK);shelf_mode=false;status_page=false;assert(sudoku_draw()==PN_OK);
     assert(active_hit(340,1040)==PN_SU_START && root_navigation_hit(80,1150)<0);
-    handle_key(PN_KEY_2,PN_KEY_SHORT);assert(!sudoku.active && entertainment==1 && shelf_mode);
+    game_clear_probe_t game_exit=game_clear_before();handle_key(PN_KEY_2,PN_KEY_SHORT);assert(!sudoku.active && entertainment==1 && shelf_mode);game_clear_after(game_exit);
+    assert(pn_sudoku_open(&sudoku,&pool,&data_media,game_root,NULL,0,now_ms())==PN_OK);shelf_mode=false;status_page=false;assert(sudoku_draw()==PN_OK);
+    game_exit=game_clear_before();apply_selection(PN_SU_BACK);assert(!sudoku.active && entertainment==1 && shelf_mode);game_clear_after(game_exit);
     assert(pn_sudoku_open(&sudoku,&pool,&data_media,game_root,NULL,0,now_ms())==PN_OK);shelf_mode=false;status_page=false;assert(sudoku_draw()==PN_OK);
     apply_selection(PN_SU_START);for(unsigned i=0;pn_sudoku_pending(&sudoku);i++){assert(i<10000);(void)pn_sudoku_tick(&sudoku,now_ms());}
     assert(pn_sudoku_screen(&sudoku)==PN_SU_PLAY && sudoku_draw()==PN_OK);
@@ -463,20 +487,21 @@ int main(void){
     assert(pn_sudoku_tick(&sudoku,now_ms()+1000)==PN_OK && sudoku.presented && !pn_sudoku_dirty(&sudoku));
     apply_selection(PN_SU_DIGIT+5);apply_selection(PN_SU_DIGIT+4);
     pn_media_lease_t game_busy;assert(pn_media_acquire(&data_media,PN_MEDIA_READ,&game_busy)==PN_OK);assert(!prepare_lock() && sudoku.active);
-    game_gc=gc_updates;handle_key(PN_KEY_2,PN_KEY_SHORT);assert(sudoku.active && gc_updates==game_gc);
+    game_gc=gc_updates;game_clear=clear_calls;handle_key(PN_KEY_2,PN_KEY_SHORT);assert(sudoku.active && gc_updates==game_gc && clear_calls==game_clear && !atomic_load(&deep_clean_pending));
     assert(pn_media_release(&data_media,&game_busy)==PN_OK);assert(prepare_lock());
     locked=true;resume_reader();assert(!locked && sudoku.presented && pn_sudoku_state(&sudoku)->values[game_cell]==4 && !reader_active());
-    game_gc=gc_updates;game_full=screen_full_calls;handle_key(PN_KEY_2,PN_KEY_SHORT);assert(!sudoku.active && entertainment==1 && shelf_mode && !reader_active());
-    assert(gc_updates==game_gc+1 && screen_full_calls==game_full+1 && last_screen_mode==MODE_GC16 && last_screen_wave==&E0470_WAVEFORM);
+    game_exit=game_clear_before();handle_key(PN_KEY_2,PN_KEY_SHORT);assert(!sudoku.active && entertainment==1 && shelf_mode && !reader_active());game_clear_after(game_exit);
     char game_file[512];for(unsigned i=0;i<2;i++){snprintf(game_file,sizeof game_file,"%s/sudoku.%c",game_root,'a'+i);(void)unlink(game_file);}assert(!rmdir(game_root));
     printf("sudoku device routing used=%zu peak=%zu\n",pool.used,pool.peak);
 
     // 推箱使用同一面板适配：连续走路不触发管理清屏，退出清理且中键回娱乐。/ Sokoban shares the panel adapter: walking never triggers management cleaning; exit cleans and the middle key returns to Entertainment.
-    assert(active_hit(500,400)==PN_SHELF_SOKOBAN);
+    assert(active_hit(342,648)==PN_SHELF_SOKOBAN);
     old_data_ready=data_ready;data_ready=false;handle_key(PN_KEY_3,PN_KEY_SHORT);assert(!sokoban.active);data_ready=old_data_ready;
     char so_root[]="/tmp/pn-device-sokoban-XXXXXX";assert(mkdtemp(so_root));
     assert(pn_sokoban_open(&sokoban,&pool,&data_media,so_root,now_ms())==PN_OK);shelf_mode=false;status_page=false;
     assert(sokoban_draw(false)==PN_OK && active_hit(340,952)==PN_SO_START && root_navigation_hit(80,1150)<0);
+    game_exit=game_clear_before();apply_selection(PN_SO_BACK);assert(!sokoban.active && entertainment==1 && shelf_mode);game_clear_after(game_exit);
+    assert(pn_sokoban_open(&sokoban,&pool,&data_media,so_root,now_ms())==PN_OK);shelf_mode=false;status_page=false;assert(sokoban_draw(false)==PN_OK);
     apply_selection(PN_SO_START);assert(sokoban.presented && pn_sokoban_screen(&sokoban)==PN_SO_PLAY);
     const pn_so_state_t *so_state=pn_sokoban_state(&sokoban);unsigned sa=so_state->player,sb=128;
     for(unsigned c=0;c<so_state->level.width*so_state->level.height;c++){
@@ -487,13 +512,57 @@ int main(void){
     game_shown=presents;assert(pn_sokoban_tick(&sokoban,now_ms()+2000)==PN_OK && sokoban.presented && presents==game_shown);
     assert(pn_sokoban_tick(&sokoban,now_ms()+60000)==PN_EMPTY && presents==game_shown);
     apply_selection(PN_SO_CELL+(int)sb);assert(pn_media_acquire(&data_media,PN_MEDIA_READ,&game_busy)==PN_OK);
-    assert(!prepare_lock());handle_key(PN_KEY_2,PN_KEY_SHORT);assert(sokoban.active);
+    assert(!prepare_lock());game_clear=clear_calls;handle_key(PN_KEY_2,PN_KEY_SHORT);assert(sokoban.active && clear_calls==game_clear && !atomic_load(&deep_clean_pending));
     assert(pn_media_release(&data_media,&game_busy)==PN_OK && prepare_lock());
     locked=true;resume_reader();assert(!locked && sokoban.presented && !reader_active());
-    game_gc=gc_updates;game_full=screen_full_calls;handle_key(PN_KEY_2,PN_KEY_SHORT);
-    assert(!sokoban.active && shelf_mode && entertainment==1 && gc_updates==game_gc+1 && screen_full_calls==game_full+1 && last_screen_mode==MODE_GC16);
+    game_exit=game_clear_before();handle_key(PN_KEY_2,PN_KEY_SHORT);
+    assert(!sokoban.active && shelf_mode && entertainment==1);game_clear_after(game_exit);
     for(unsigned i=0;i<2;i++){snprintf(game_file,sizeof game_file,"%s/sokoban.%c",so_root,'a'+i);(void)unlink(game_file);}assert(!rmdir(so_root));
     printf("sokoban device routing used=%zu peak=%zu\n",pool.used,pool.peak);
+    // 无TF时扫雷仍从娱乐入口路由；内部状态不可用只显示失败，不创建半个控制器。
+    // Minesweeper remains routed from Entertainment without SD; unavailable internal state never leaves a half-open controller.
+    assert(!sd_media.available && active_hit(342,888)==PN_SHELF_MINESWEEPER);
+    old_data_ready=data_ready;data_ready=false;apply_selection(PN_SHELF_MINESWEEPER);assert(!minesweeper.active && !minesweeper.impl && !reader_active());data_ready=old_data_ready;
+    char mi_root[]="/tmp/pn-device-minesweeper-XXXXXX";assert(mkdtemp(mi_root));
+    assert(pn_minesweeper_open(&minesweeper,&pool,&data_media,mi_root,now_ms())==PN_OK);shelf_mode=false;status_page=false;
+    assert(minesweeper_draw(false)==PN_OK && active_hit(340,980)==PN_MI_START && root_navigation_hit(80,1150)<0);
+    game_exit=game_clear_before();apply_selection(PN_MI_BACK);assert(!minesweeper.active && entertainment==1 && shelf_mode);game_clear_after(game_exit);
+    assert(pn_minesweeper_open(&minesweeper,&pool,&data_media,mi_root,now_ms())==PN_OK);shelf_mode=false;status_page=false;assert(minesweeper_draw(false)==PN_OK);
+    apply_selection(PN_MI_START);assert(minesweeper.presented && pn_minesweeper_screen(&minesweeper)==PN_MI_PLAY && !reader_active());
+    assert(active_hit(100,1080)==PN_MI_REVEAL_MODE && active_hit(500,1080)==PN_MI_FLAG_MODE && root_navigation_hit(80,1150)<0);
+    game_gc=gc_updates;game_clear=clear_calls;game_full=screen_full_calls;
+    handle_key(PN_KEY_3,PN_KEY_SHORT);assert(pn_minesweeper_state(&minesweeper)->flag_mode);
+    apply_selection(PN_MI_CELL+80);assert(pn_minesweeper_flags(pn_minesweeper_state(&minesweeper))==1);
+    handle_key(PN_KEY_3,PN_KEY_SHORT);assert(!pn_minesweeper_state(&minesweeper)->flag_mode);
+    // 80在首步70的安全邻域内；保留这面旗使洪泛后至少还有一个安全格未开。
+    // Cell 80 is in first move 70's safe neighborhood; its flag leaves at least one safe cell unopened after flooding.
+    apply_selection(PN_MI_CELL+70);assert(pn_minesweeper_state(&minesweeper)->result==PN_MI_RUNNING && pn_minesweeper_opened(pn_minesweeper_state(&minesweeper))>0);
+    // 洪泛与远格选中可扩大脏区到45%门槛之外；整屏GL16扫描仍不等于GC16清屏。
+    // Flooding or a distant selection can exceed the 45% dirty-area threshold; a full GL16 scan is not a GC16 clean.
+    assert(gc_updates==game_gc && clear_calls==game_clear && !atomic_load(&sudoku_presentation));
+    if(screen_full_calls>game_full)assert(last_screen_mode==MODE_GL16);
+    game_shown=presents;apply_selection(PN_MI_REVEAL_MODE);assert(presents==game_shown && minesweeper.presented);
+    // 未确认画面的输入不可改变棋局；面板故障解除后重绘，右键才可切换模式。
+    // Input against an unacknowledged frame cannot change the game; repaint after panel recovery before allowing a mode switch.
+    assert(pn_minesweeper_event(&minesweeper,PN_MI_FLAG_MODE,now_ms())==PN_OK);
+    panel_fault=true;assert(minesweeper_draw(false)==PN_IO && !minesweeper.presented);
+    pn_mi_state_t mi_before=*pn_minesweeper_state(&minesweeper);handle_key(PN_KEY_3,PN_KEY_SHORT);
+    assert(!minesweeper.presented && !memcmp(&mi_before,pn_minesweeper_state(&minesweeper),sizeof mi_before));
+    panel_fault=false;assert(minesweeper_draw(false)==PN_OK && minesweeper.presented);
+    handle_key(PN_KEY_3,PN_KEY_SHORT);assert(!pn_minesweeper_state(&minesweeper)->flag_mode);
+    assert(pn_media_acquire(&data_media,PN_MEDIA_READ,&game_busy)==PN_OK);
+    assert(!prepare_lock() && minesweeper.active);game_gc=gc_updates;
+    game_clear=clear_calls;handle_key(PN_KEY_2,PN_KEY_SHORT);assert(minesweeper.active && gc_updates==game_gc && clear_calls==game_clear && !atomic_load(&deep_clean_pending) && !reader_active());
+    assert(pn_media_release(&data_media,&game_busy)==PN_OK && prepare_lock());
+    mi_before=*pn_minesweeper_state(&minesweeper);locked=true;resume_reader();
+    assert(!locked && minesweeper.presented && !memcmp(&mi_before,pn_minesweeper_state(&minesweeper),sizeof mi_before) && !reader_active());
+    game_exit=game_clear_before();handle_key(PN_KEY_2,PN_KEY_SHORT);
+    assert(!minesweeper.active && !minesweeper.impl && shelf_mode && entertainment==1 && !reader_active());
+    game_clear_after(game_exit);
+    assert(pn_minesweeper_open(&minesweeper,&pool,&data_media,mi_root,now_ms())==PN_OK && pn_minesweeper_screen(&minesweeper)==PN_MI_PLAY);
+    assert(!memcmp(&mi_before,pn_minesweeper_state(&minesweeper),sizeof mi_before));pn_minesweeper_close(&minesweeper);
+    for(unsigned i=0;i<2;i++){snprintf(game_file,sizeof game_file,"%s/minesweeper.%c",mi_root,'a'+i);(void)unlink(game_file);}assert(!rmdir(mi_root));
+    printf("minesweeper device routing used=%zu peak=%zu\n",pool.used,pool.peak);
     sd_media.available=card_available;entertainment=0;covers_inactive=false;
     assert(draw_shelf(PN_REFRESH_GL16)==PN_OK && shelf_draw_valid);unsigned shown=presents;handle_key(PN_KEY_2,PN_KEY_SHORT);assert(shelf_focus==0 && shelf_draw_valid && presents==shown+1);
     pn_frame_t expected;assert(pn_frame_bind(&expected,logical,415872,684,1216));pn_font_t face={0};assert(management_font_begin(&face,24)==PN_OK);pn_shelf_options_t options=shelf_options();if(favorites_valid)options.favorite_items=favorites;

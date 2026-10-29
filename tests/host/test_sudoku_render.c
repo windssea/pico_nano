@@ -18,6 +18,19 @@ int main(void){
     assert(pn_sudoku_render_update(&u,&font,&a)==PN_UNSUPPORTED);
     g.state.values[1]=g.state.clues[0];g.state.selected=80;
     assert(pn_sudoku_render(&u,&font,&a)==PN_OK);
+    // 阶梯键角留白，外沿黑色；小图标不依赖字体或灰度。/ Stepped key corners stay white, edges stay black; small icons do not depend on fonts or grayscale.
+    assert(pn_frame_get(&a,36,918)==15 && pn_frame_get(&a,42,918)==0 && pn_frame_get(&a,36,924)==0);
+    // 放大图标保留可辨认的空心、箭头和笔尖，不回退成九点乱码。/ Enlarged icons retain distinct hollows, arrows and tips instead of tiny nine-dot marks.
+    assert(pn_frame_get(&a,58,790)==0 && pn_frame_get(&a,68,780)==0);
+    assert(pn_frame_get(&a,274,804)==15 && pn_frame_get(&a,268,804)==0);
+    assert(pn_frame_get(&a,488,804)==0 && pn_frame_get(&a,486,804)==15);
+    assert(pn_frame_get(&a,70,866)==15 && pn_frame_get(&a,56,866)==0);
+    assert(pn_frame_get(&a,43+1,59+9)==0 && pn_frame_get(&a,538+1,59+9)==0);
+    // 阴影为浅灰，底沿不再成为厚黑条。/ Shadows stay light gray and no longer form a thick black base.
+    assert(pn_frame_get(&a,100,1000)==11);
+    // 选格双框在不读取底色的情况下仍可识别。/ The selection has two identifiable outlines without relying on its background shade.
+    assert(pn_frame_get(&a,PN_SU_BOARD_X+8*68+2,PN_SU_BOARD_Y+8*68+20)==0);
+    assert(pn_frame_get(&a,PN_SU_BOARD_X+8*68+6,PN_SU_BOARD_Y+8*68+20)==0);
     // 同一数字依然有独立形状标记，不能只依赖灰度差。/ Identical digits retain an independent shape marker, without relying on gray contrast alone.
     assert(pn_frame_get(&a,PN_SU_BOARD_X+25,PN_SU_BOARD_Y+56)==15 && pn_frame_get(&a,PN_SU_BOARD_X+PN_SU_CELL_SIZE+25,PN_SU_BOARD_Y+56)==2);
     assert(pn_sudoku_render(&u,&font,&a)==PN_OK);pn_sudoku_displayed(&u,true,1);

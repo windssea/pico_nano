@@ -19,6 +19,7 @@
 #include "pn_shelf_view.h"
 #include "pn_sudoku.h"
 #include "pn_sokoban.h"
+#include "pn_minesweeper.h"
 #include "pn_reader_chrome.h"
 #include "pn_reader_toolbar.h"
 #include "pn_wallpaper_ui.h"
@@ -61,9 +62,11 @@ typedef struct {
     bool recent_mode;
     size_t recent_start;
     pn_shelf_prefs_t shelf_prefs; ///< 已保存书架外观 / Saved shelf appearance
+    pn_minesweeper_t minesweeper; ///< 按需扫雷会话 / On-demand Minesweeper session
     pn_sokoban_t sokoban; ///< 同源推箱子 / Shared Sokoban
     pn_sudoku_t sudoku; ///< 同源数独状态 / Shared Sudoku state
     uint8_t entertainment; ///< 0书籍、1娱乐；棋局由独立控制器拥有 / 0 books, 1 entertainment; a separate controller owns the game
+    bool game_exit_clean_pending; ///< 一次游戏退出清屏意图，成功目标回执后消费；PC不仿真面板相位 / One game-exit clear intent, consumed by a successful destination receipt; PC does not simulate panel phases
     bool list_mode; ///< 列表模式（每页5本）/ List mode (five per page)
     bool home; ///< 阅读首页与书库共用快照，不改阅读来源 / Home and library share snapshots, preserving reading origin
     bool shelf_focus_visible; ///< 仅主动键盘导航显示轻量焦点 / Show subtle focus only during deliberate keyboard navigation
@@ -284,12 +287,15 @@ static pn_status_t ripple_demo(library_t *s,const pn_frame_t *next,bool reverse,
 }
 static pn_status_t present_impl(void *ctx,const pn_frame_t *frame,pn_refresh_t profile){
     library_t *s=ctx;
+    bool game_exit_clean=s->game_exit_clean_pending;
+    if(game_exit_clean)profile=PN_REFRESH_EXIT_GC16;
     if(profile>=PN_REFRESH_RIPPLE && profile<=PN_REFRESH_RIPPLE_CLEAN_REVERSE){bool clean=profile>=PN_REFRESH_RIPPLE_CLEAN;pn_status_t shown=ripple_demo(s,frame,profile==PN_REFRESH_RIPPLE_REVERSE || profile==PN_REFRESH_RIPPLE_CLEAN_REVERSE,clean);if(shown!=PN_OK)return shown;profile=clean?PN_REFRESH_GC16:PN_REFRESH_GL16;}
     pn_status_t stopped=pn_font_manage_motion_abort(&s->font_manage);if(stopped!=PN_OK)return stopped;stopped=pn_toc_ui_motion_abort(&s->toc);if(stopped!=PN_OK)return stopped;
     if(!reading(s)){pn_free(s->page_px);s->page_px=NULL;}
     // 备份只供阅读工具栏关闭时恢复；书架/设置不需要，避免挤占封面解码预算。/ Only reading needs the backup for toolbar restoration; shelf/settings copies waste the cover decode budget.
     pn_status_t status=present_raw(s,frame);
-    if(status==PN_OK){s->feedback_known=true;(void)pn_feedback_discard(&s->feedback);pn_feedback_idle_cover(&s->feedback_idle,profile==PN_REFRESH_GC16?(pn_feedback_box_t){0,0,684,1216}:s->content_area);}
+    if(status==PN_OK){s->feedback_known=true;(void)pn_feedback_discard(&s->feedback);pn_feedback_idle_cover(&s->feedback_idle,(profile==PN_REFRESH_GC16 || profile==PN_REFRESH_EXIT_GC16)?(pn_feedback_box_t){0,0,684,1216}:s->content_area);
+        if(game_exit_clean){s->game_exit_clean_pending=false;printf("game_exit_clean destination=entertainment presentations=1 status=0\n");}}
     else if(status!=PN_CANCELLED && status!=PN_BUSY){s->feedback_known=false;(void)pn_feedback_discard(&s->feedback);}
     if(status==PN_OK && reading(s) && !s->toolbar && frame->width==684 && frame->height==1216 && frame->stride>=342){
         if(!s->page_px)s->page_px=pn_alloc_tagged(s->pool,PN_MEM_FRAME,342u*1216u);
@@ -424,6 +430,18 @@ static pn_status_t sokoban_open(library_t *s){
     pn_cover_work_abort(&s->cover_work);s->covers_inactive=true;pn_status_t r=pn_hot_session_drop_for_switch(&s->hot);if(r!=PN_OK)return r;
     r=pn_sokoban_open(&s->sokoban,s->pool,&s->state_media,s->state_dir,SDL_GetTicks64());if(r==PN_OK)r=sokoban_draw(s,false);return r;
 }
+/// 扫雷复用原画布和呈现回执，无周期绘制。/ Minesweeper reuses the canvas and acknowledgment, without periodic painting.
+static pn_status_t minesweeper_draw(library_t *s,bool clean){
+    pn_status_t r=pn_minesweeper_render(&s->minesweeper,&s->font,&s->frame);
+    if(r==PN_OK)r=present(s,&s->frame,clean?PN_REFRESH_GC16:PN_REFRESH_GL16);
+    pn_minesweeper_displayed(&s->minesweeper,r==PN_OK);s->ui_retry=SDL_GetTicks64();s->shelf_draw_valid=false;
+    printf("minesweeper screen=%d status=%d used=%zu peak=%zu\n",pn_minesweeper_screen(&s->minesweeper),r,s->pool->used,s->pool->peak);return r;
+}
+static pn_status_t minesweeper_open(library_t *s){
+    pn_cover_work_abort(&s->cover_work);s->covers_inactive=true;pn_status_t r=pn_hot_session_drop_for_switch(&s->hot);if(r!=PN_OK)return r;
+    r=pn_minesweeper_open(&s->minesweeper,s->pool,&s->state_media,s->state_dir,SDL_GetTicks64());if(r==PN_OK)r=minesweeper_draw(s,false);return r;
+}
+
 /// 仅键盘焦点变动复用已确认画布，失败/叠层/封面或状态更新完整恢复。/ Reuse confirmed pixels only for keyboard focus; failures, overlays, cover/status changes restore fully.
 static pn_status_t draw_focus(library_t *s,int before){
     feedback_restore(s);pn_w_status_snapshot_t state=pn_w_status_snapshot();
@@ -556,6 +574,10 @@ static pn_status_t page(library_t *s,bool previous,bool first){
         if(status==PN_OK)printf("library_page first=%s count=%zu\n",next->count?next->items[0].name:"",next->count);
     }else if(status==PN_OK)status=PN_EMPTY;
     pn_free(next);return status;
+}
+/// 保存成功的游戏退出只提交一次娱乐目标帧，清屏意图由端口消费。/ A saved game exit submits the Entertainment destination once; its port consumes the clear intent.
+static pn_status_t game_return_to_entertainment(library_t *s){
+    s->entertainment=1;s->home=false;s->game_exit_clean_pending=true;return page(s,false,true);
 }
 /// 复用已验证封面，不因开场反馈重新解析书籍。/ Reuse verified covers without reparsing books for opening feedback.
 static pn_status_t opening_paint(library_t *s,pn_font_t *font,pn_frame_t *frame,const pn_catalog_item_t *book,const char *note){
@@ -749,7 +771,7 @@ static int management_hit(void *ctx,int x,int y){
 /// 只把一级页真实底栏交给按下路由，内容区、子页与模态保留原点击语义。/ Route only real root navigation on press; content, subpages and modals retain their click semantics.
 static int root_navigation_hit(library_t *s,int x,int y){
     if((s->foreground_open.impl || s->index_gate) || s->opening_book)return -1;
-    if(s->sokoban.active || s->sudoku.active || s->locked || s->fonts.active || s->toc.active || s->jumpui.active || s->styles.active || s->bookmarks.mode!=PN_BUI_CLOSED || s->actions_mode || s->font_manage.impl || s->wallpaper.impl || s->search_open || s->index || s->toolbar || pn_w_navigation_hit(x,y)<0)return -1;
+    if(s->minesweeper.active || s->sokoban.active || s->sudoku.active || s->locked || s->fonts.active || s->toc.active || s->jumpui.active || s->styles.active || s->bookmarks.mode!=PN_BUI_CLOSED || s->actions_mode || s->font_manage.impl || s->wallpaper.impl || s->search_open || s->index || s->toolbar || pn_w_navigation_hit(x,y)<0)return -1;
     if(s->settings.impl)return pn_settings_ui_screen(&s->settings)==0?pn_settings_ui_hit(&s->settings,x,y):-1;
     if(s->hub){pn_transfer_hub_info_t info=hub_info(s);return pn_transfer_hub_hit(&info,x,y);}
     return reading(s) || !s->page?-1:shelf_hit(s,x,y);
@@ -886,6 +908,7 @@ static pn_status_t wallpaper_open(library_t *s){
 }
 /// PC电源边界：保存关闭正文后，用共用锁屏记录/绘制预览；不模拟硬件睡眠或功耗。/ PC power boundary: save/close the reader and preview shared lock records/rendering; no hardware sleep or power simulation.
 static pn_status_t lock_preview(library_t *s,uint64_t now){
+    if(s->minesweeper.active){pn_status_t saved=pn_minesweeper_pause(&s->minesweeper,now);if(saved!=PN_OK){(void)minesweeper_draw(s,false);return saved;}}
     if(s->sokoban.active){pn_status_t saved=pn_sokoban_pause(&s->sokoban,now);if(saved!=PN_OK){(void)sokoban_draw(s,false);return saved;}}
     if(s->sudoku.active){pn_status_t saved=pn_sudoku_pause(&s->sudoku,now);if(saved!=PN_OK){(void)sudoku_draw(s);return saved;}}
     stats_flush(s);
@@ -964,9 +987,9 @@ static int library_worker(void *ctx){
     while(running){
         if(s->feedback_release){feedback_restore(s);s->feedback_release=false;}
         {static time_t last;const char *fixed=getenv("PN_SIM_CLOCK");time_t t=time(NULL);if(fixed)pn_w_set_clock(fixed);else if(t!=last){last=t;struct tm local;char text[8];if(localtime_r(&t,&local) && strftime(text,sizeof text,"%H:%M",&local))pn_w_set_clock(text);}} // 本机时钟；固定值仅用于可复跑测试 / Host clock; a fixed value is only for reproducible tests
-        uint32_t view=s->locked?1:s->sokoban.active?20:s->sudoku.active?19:(s->foreground_open.impl || s->index_gate)?18:s->fonts.active?2:s->toc.active?3:s->styles.active?4:s->jumpui.active?5:s->bookmarks.mode!=PN_BUI_CLOSED?6:s->actions_mode?7:s->settings.impl?8:s->wallpaper.impl?9:s->font_manage.impl?10:s->hub?11:s->index?12:s->search_open?13:s->toolbar?14:reading(s)?15:s->home?16:17;
+        uint32_t view=s->locked?1:s->minesweeper.active?21:s->sokoban.active?20:s->sudoku.active?19:(s->foreground_open.impl || s->index_gate)?18:s->fonts.active?2:s->toc.active?3:s->styles.active?4:s->jumpui.active?5:s->bookmarks.mode!=PN_BUI_CLOSED?6:s->actions_mode?7:s->settings.impl?8:s->wallpaper.impl?9:s->font_manage.impl?10:s->hub?11:s->index?12:s->search_open?13:s->toolbar?14:reading(s)?15:s->home?16:17;
         stats_poll(s,view==15);
-        if(!s->sokoban.active && !s->sudoku.active && !(s->foreground_open.impl || s->index_gate) && !reading(s) && !s->home && s->page)view+=(uint32_t)s->page->index*32u;
+        if(!s->minesweeper.active && !s->sokoban.active && !s->sudoku.active && !(s->foreground_open.impl || s->index_gate) && !reading(s) && !s->home && s->page)view+=(uint32_t)s->page->index*32u;
         pn_list_motion_stats_t moving=s->toc.active?pn_toc_ui_motion_stats(&s->toc):pn_font_manage_motion_stats(&s->font_manage);
         uint64_t paint_now=SDL_GetTicks64();bool paint_work=view==16 && !s->pointer_down && atomic_load(&s->async.mouse)==0 && paint_now>=font_activity && paint_now-font_activity>=1500 && (pn_hot_session_source_pending(&s->hot) || pn_hot_session_layout_pending(&s->hot) || pn_hot_session_paint_pending(&s->hot));
         bool deferred_work=(view%32u==16u || view%32u==17u) && !s->pointer_down && atomic_load(&s->async.mouse)==0 && paint_now>=font_activity && paint_now-font_activity>=800 && pn_hot_session_deferred_pending(&s->hot);
@@ -1036,6 +1059,11 @@ static int library_worker(void *ctx){
         if(s->bookmarks.mode!=PN_BUI_CLOSED && !s->bookmarks.presented && now-s->ui_retry>=1000){s->ui_retry=now;status=pn_bookmark_ui_present(&s->bookmarks,present,s);}
         // 页面请求不等待下一次输入，空闲轮询也完成导航。/ Navigation requests complete during idle polling without waiting for another input.
         if(!s->locked && s->styles.request_fonts){s->styles.request_fonts=false;status=pn_font_ui_open(&s->fonts,s->pool,s->epub.impl?NULL:&s->reader,s->epub.impl?&s->epub:NULL,s->font_dir,present,s);pn_font_ui_return_to(&s->fonts,pn_style_ui_render,&s->styles);printf("font_ui open status=%d active=%d\n",status,s->fonts.active);}
+        if(!s->locked && s->minesweeper.active){
+            (void)pn_minesweeper_tick(&s->minesweeper,now);
+            if(!s->minesweeper.presented && now-s->ui_retry>=100)(void)minesweeper_draw(s,false);
+            if(!got)continue;
+        }
         if(!s->locked && s->sokoban.active){
             (void)pn_sokoban_tick(&s->sokoban,now);
             if(!s->sokoban.presented && now-s->ui_retry>=100)(void)sokoban_draw(s,false);
@@ -1074,22 +1102,43 @@ static int library_worker(void *ctx){
                 if(s->home && !s->reading_stats.loaded && s->reading_stats.media && !s->covers_dirty && s->covers && !pn_shelf_covers_pending(s->covers,s->page) && now-font_activity>=1500u && now>=s->home_stats_retry){s->home_stats_retry=now+3000u;
                     if(pn_reading_stats_load(&s->reading_stats)==PN_OK){if(draw(s)!=PN_OK)s->covers_dirty=true;printf("home statistics ready\n");}}
                 if(now-font_activity>=800){
-                    if(pn_hot_session_deferred_pending(&s->hot)){pn_status_t saved=pn_hot_session_deferred_flush(&s->hot);if(saved!=PN_OK && saved!=PN_BUSY && saved!=PN_EMPTY && saved!=PN_CANCELLED)printf("deferred save status=%d\n",(int)saved);}
+                    if(pn_hot_session_deferred_pending(&s->hot)){pn_status_t saved=pn_hot_session_deferred_idle(&s->hot,profile_clock,NULL);if(saved!=PN_OK && saved!=PN_BUSY && saved!=PN_EMPTY && saved!=PN_CANCELLED)printf("deferred save status=%d\n",(int)saved);}
                     else if(!s->entertainment){pn_status_t indexed=catalog_build_idle(s);if(indexed==PN_OK)printf("catalog index built\n");}
                 }
-                if(!s->entertainment){covers_tick(s,now-font_activity>=250);if(!pn_hot_session_deferred_pending(&s->hot))prepare_continue(s,now,font_activity);}}
+                if(!s->entertainment && !pn_hot_session_checkpoint_pending(&s->hot)){covers_tick(s,now-font_activity>=250);if(!pn_hot_session_deferred_pending(&s->hot))prepare_continue(s,now,font_activity);}}
             continue;}
 
-        if(!s->sokoban.active && !s->sudoku.active && !s->locked && management_event(s,&event,now)){cancel_pointer(&input,&tap,true);continue;}
+        if(!s->minesweeper.active && !s->sokoban.active && !s->sudoku.active && !s->locked && management_event(s,&event,now)){cancel_pointer(&input,&tap,true);continue;}
         if(s->locked){
             if(event.type==SDL_QUIT){running=false;continue;}
             if(event.type==SDL_KEYDOWN && !event.key.repeat && (event.key.keysym.sym==SDLK_l || event.key.keysym.sym==SDLK_RETURN || event.key.keysym.sym==SDLK_ESCAPE)){
                 s->locked=false;
-                if(s->sokoban.active)status=sokoban_draw(s,false);
+                if(s->minesweeper.active)status=minesweeper_draw(s,false);
+                else if(s->sokoban.active)status=sokoban_draw(s,false);
                 else if(s->sudoku.active)status=sudoku_draw(s);
                 else if(reading(s))status=s->epub.impl?pn_epub_app_resume(&s->epub,now,present,s):pn_reader_app_resume(&s->reader,now,present,s);
                 else status=s->last_read_known?open_item(s,&s->last_read,now):draw(s);
                 printf("lock_preview wake status=%d\n",(int)status);}
+            continue;
+        }
+        if(s->minesweeper.active){
+            int command=0;
+            if(event.type==SDL_QUIT){status=pn_minesweeper_pause(&s->minesweeper,now);if(status==PN_OK)running=false;else (void)minesweeper_draw(s,false);continue;}
+            if(event.type==SDL_KEYDOWN && !event.key.repeat){
+                SDL_Keycode key=event.key.keysym.sym;
+                if(key==SDLK_l){status=lock_preview(s,now);continue;}
+                if(key==SDLK_ESCAPE)command=PN_MI_BACK;
+                else if(key==SDLK_RETURN)command=pn_minesweeper_screen(&s->minesweeper)==PN_MI_SELECT?PN_MI_START:PN_MI_EXIT;
+                else if(key==SDLK_f){const pn_mi_state_t *q=pn_minesweeper_state(&s->minesweeper);command=q && q->flag_mode?PN_MI_REVEAL_MODE:PN_MI_FLAG_MODE;}
+                else if(key==SDLK_r)command=PN_MI_NEW;
+                else if(key==SDLK_c)command=PN_MI_CLEAN;
+                else if(key>=SDLK_1 && key<=SDLK_3)command=PN_MI_TIER+(int)(key-SDLK_1);
+            }else if(event.type==SDL_MOUSEBUTTONDOWN || event.type==SDL_MOUSEBUTTONUP || event.type==SDL_MOUSEMOTION){
+                bool motion=event.type==SDL_MOUSEMOTION,up=event.type==SDL_MOUSEBUTTONUP;int x=motion?event.motion.x:event.button.x,y=motion?event.motion.y:event.button.y;
+                if(event.type==SDL_MOUSEBUTTONDOWN)s->pointer_down=true;
+                if(s->pointer_down){int target=pn_minesweeper_hit(&s->minesweeper,x,y);(void)pn_tap_feed(&tap,1,target>0?target:-1,true,&command);if(up){(void)pn_tap_feed(&tap,0,-1,true,&command);(void)pn_tap_feed(&tap,0,-1,true,&command);s->pointer_down=false;}}
+            }else if(event.type==SDL_WINDOWEVENT && event.window.event==SDL_WINDOWEVENT_FOCUS_LOST){cancel_pointer(&input,&tap,true);s->pointer_down=false;}
+            if(command>0){status=pn_minesweeper_event(&s->minesweeper,command,now);printf("minesweeper command=%d status=%d\n",command,status);if(!s->minesweeper.active){pn_minesweeper_close(&s->minesweeper);status=game_return_to_entertainment(s);}else if(!s->minesweeper.presented)status=minesweeper_draw(s,command==PN_MI_CLEAN);}
             continue;
         }
         if(s->sokoban.active){
@@ -1109,7 +1158,7 @@ static int library_worker(void *ctx){
                 if(event.type==SDL_MOUSEBUTTONDOWN)s->pointer_down=true;
                 if(s->pointer_down){(void)pn_sokoban_touch(&s->sokoban,1,x,y,true);if(up){command=pn_sokoban_touch(&s->sokoban,0,x,y,true);s->pointer_down=false;}}
             }else if(event.type==SDL_WINDOWEVENT && event.window.event==SDL_WINDOWEVENT_FOCUS_LOST){(void)pn_sokoban_touch(&s->sokoban,0,0,0,false);(void)pn_sokoban_touch(&s->sokoban,0,0,0,true);s->pointer_down=false;}
-            if(command>0){status=pn_sokoban_event(&s->sokoban,command,now);printf("sokoban command=%d status=%d\n",command,status);if(!s->sokoban.active){pn_sokoban_close(&s->sokoban);s->entertainment=1;status=page(s,false,true);}else if(!s->sokoban.presented)status=sokoban_draw(s,command==PN_SO_CLEAN);}
+            if(command>0){status=pn_sokoban_event(&s->sokoban,command,now);printf("sokoban command=%d status=%d\n",command,status);if(!s->sokoban.active){pn_sokoban_close(&s->sokoban);status=game_return_to_entertainment(s);}else if(!s->sokoban.presented)status=sokoban_draw(s,command==PN_SO_CLEAN);}
             continue;
         }
         if(s->sudoku.active){
@@ -1130,7 +1179,7 @@ static int library_worker(void *ctx){
                 if(event.type==SDL_MOUSEBUTTONDOWN)s->pointer_down=true;
                 if(s->pointer_down){int target=pn_sudoku_hit(&s->sudoku,x,y);(void)pn_tap_feed(&tap,1,target>0?target:-1,true,&command);if(up){(void)pn_tap_feed(&tap,0,-1,true,&command);(void)pn_tap_feed(&tap,0,-1,true,&command);s->pointer_down=false;}}
             }else if(event.type==SDL_WINDOWEVENT && event.window.event==SDL_WINDOWEVENT_FOCUS_LOST){cancel_pointer(&input,&tap,true);s->pointer_down=false;}
-            if(command>0){status=pn_sudoku_event(&s->sudoku,command,now);printf("sudoku command=%d status=%d dirty=%d\n",command,status,pn_sudoku_dirty(&s->sudoku));if(!s->sudoku.active){pn_sudoku_close(&s->sudoku);s->entertainment=1;status=page(s,false,true);}else if(!s->sudoku.presented)status=sudoku_draw(s);}
+            if(command>0){status=pn_sudoku_event(&s->sudoku,command,now);printf("sudoku command=%d status=%d dirty=%d\n",command,status,pn_sudoku_dirty(&s->sudoku));if(!s->sudoku.active){pn_sudoku_close(&s->sudoku);status=game_return_to_entertainment(s);}else if(!s->sudoku.presented)status=sudoku_draw(s);}
             continue;
         }
         if(font_modal(&s->fonts,&event,now,present,s,&tap,&s->font_pointer,atomic_load(&s->async.mouse))){if(!s->fonts.active){bool returned=s->fonts.return_presented;pn_font_ui_close(&s->fonts);if(s->styles.active){if(returned){s->styles.presented=true;s->styles.preview=false;}else (void)pn_style_ui_present(&s->styles,present,s);}}continue;}
@@ -1319,6 +1368,7 @@ static int library_worker(void *ctx){
                 if(s->entertainment){
                     if(key==SDLK_RETURN || key==SDLK_2){status=sudoku_open(s);}
                     else if(key==SDLK_3){status=sokoban_open(s);}
+                    else if(key==SDLK_4){status=minesweeper_open(s);}
                     else if(key==SDLK_1){s->entertainment=s->entertainment==2?1:0;status=page(s,false,true);}
                     continue;
                 }
@@ -1366,7 +1416,7 @@ static int library_worker(void *ctx){
             else if(reading(s) && hit==13 && s->epub.impl){status=open_toc(s);toc_report(&s->toc,0,status);turn=false;}
             else if(reading(s) && hit==8){status=return_to_shelf(s,now);turn=false;}
             else if(!reading(s)){
-                if(hit==PN_SHELF_TAB_ENTERTAINMENT || hit==PN_SHELF_ENTERTAINMENT_BACK || hit==PN_SHELF_SUDOKU || hit==PN_SHELF_SOKOBAN){s->home=false;s->entertainment=1;status=hit==PN_SHELF_SUDOKU?sudoku_open(s):hit==PN_SHELF_SOKOBAN?sokoban_open(s):page(s,false,true);}
+                if(hit==PN_SHELF_TAB_ENTERTAINMENT || hit==PN_SHELF_ENTERTAINMENT_BACK || hit==PN_SHELF_SUDOKU || hit==PN_SHELF_SOKOBAN || hit==PN_SHELF_MINESWEEPER){s->home=false;s->entertainment=1;status=hit==PN_SHELF_SUDOKU?sudoku_open(s):hit==PN_SHELF_SOKOBAN?sokoban_open(s):hit==PN_SHELF_MINESWEEPER?minesweeper_open(s):page(s,false,true);}
                 else if(hit==PN_SHELF_READING_HOME){s->home=true;status=page(s,false,true);}
                 else if(hit==PN_SHELF_LAYOUT){s->list_mode=!s->list_mode;status=page(s,false,true);}
                 else if(hit==PN_SHELF_TOGGLE){s->recent_mode=!s->recent_mode;*s->query=0;status=page(s,false,true);}
@@ -1397,6 +1447,7 @@ cleanup:;
     (void)pn_hot_session_drop(&s->hot);
     (void)pn_feedback_discard(&s->feedback);
     (void)active_close(s,SDL_GetTicks64());
+    pn_minesweeper_close(&s->minesweeper);
     pn_sokoban_close(&s->sokoban);
     pn_sudoku_close(&s->sudoku);
     pn_catalog_index_close(&s->catalog_index);

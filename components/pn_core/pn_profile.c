@@ -19,6 +19,11 @@ void pn_profile_file(pn_pool_t *pool,const char *phase,pn_status_t status,const 
     if(pool)event.begin_bytes=event.end_bytes=event.peak_bytes=pool->used;
     emit_port(port_ctx,&event);
 }
+void pn_profile_position(pn_pool_t *pool,const char *phase,pn_status_t status,const pn_profile_position_t *position){
+    if(!clock_port || !emit_port)return;
+    pn_profile_event_t event={.phase=phase,.status=status,.pool=pool,.position=position};
+    emit_port(port_ctx,&event);
+}
 void pn_profile_begin(pn_profile_span_t *s,pn_pool_t *pool,const char *phase){
     *s=(pn_profile_span_t){0};if(!clock_port || !emit_port)return;
     s->previous=current;s->pool=pool;s->phase=phase;s->started=clock_port(port_ctx);s->begin_bytes=pool?pool->used:0;s->peak_bytes=s->begin_bytes;s->attempts=pool?pool->attempts:0;s->active=true;current=s;

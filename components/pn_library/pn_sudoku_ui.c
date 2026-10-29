@@ -3,16 +3,25 @@
 #include "pn_sudoku_internal.h"
 #include "pn_widgets.h"
 #include <stdio.h>
+#include "pn_sudoku_pixels.inc"
 static const char *const tiers[]={"简单","中等","困难","极难"};
 static bool inside(int x,int y,int a,int b,int w,int h){return x>=a && y>=b && x<a+w && y<b+h;}
-/// 静态键帽用底沿/高光表达厚度，启用状态内凹；不增加按压动画或画布。/ Static keycaps use a base/highlight for depth and inset active faces, without press animations or another canvas.
+/// 三段矩形组成阶梯切角，不引入位图或抗锯齿。/ Three rectangle bands form stepped corners without bitmaps or antialiasing.
+static void pixel_fill(pn_frame_t *p,int x,int y,int w,int h,int cut,uint8_t color){
+    pn_frame_rect(p,x+cut,y,w-cut*2,h,color);
+    pn_frame_rect(p,x+cut/2,y+cut/2,w-cut,h-cut,color);
+    pn_frame_rect(p,x,y+cut,w,h-cut*2,color);
+}
+/// 两像素黑边配浅灰短阴影，避免大块黑底沿。/ Two-pixel ink edges use short light-gray shadows instead of heavy black bases.
 static void keycap(pn_frame_t *p,int x,int y,int w,int h,bool active){
-    int radius=h<80?8:10;
-    pn_w_round_fill(p,x+1,y+4,w-2,h-4,radius,7);
-    pn_w_round_fill(p,x,y,w,h-4,radius,active?0:11);
-    pn_w_round_fill(p,x+2,y+2,w-4,h-12,radius-2,active?2:15);
-    pn_w_round_outline(p,x,y,w,h-4,radius,1,active?0:6);
-    pn_frame_rect(p,x+radius,y+2,w-radius*2,1,active?6:15);
+    pixel_fill(p,x+2,y+3,w-2,h-3,6,11);
+    pixel_fill(p,x,y,w,h-5,6,0);
+    pixel_fill(p,x+2,y+2,w-4,h-9,4,active?0:15);
+    pn_frame_rect(p,x+6,y+h-9,w-12,2,active?8:12);
+}
+/// 工具图标用四十像素轮廓；标题用同源二十像素图形。/ Tools use forty-pixel outlines; headings use shared twenty-pixel shapes.
+static void pixel_icon(pn_frame_t *p,int x,int y,unsigned kind,int unit,uint8_t color){
+    for(int r=0;r<20;r++)for(int c=0;c<20;c++)if(su_pixel_icons[kind][r]&(1u<<(19-c)))pn_frame_rect(p,x+c*unit,y+r*unit,unit,unit,color);
 }
 static pn_status_t label(pn_font_t *f,pn_frame_t *p,const char *s,int y,int size){pn_status_t r=pn_font_size(f,size);return r==PN_OK?pn_w_text(f,p,s,36,y,612,PN_ALIGN_CENTER):r;}
 static pn_status_t button(pn_font_t *f,pn_frame_t *p,const char *s,int y,unsigned flags){bool active=(flags&PN_W_SELECTED)!=0;keycap(p,36,y,612,80,active);pn_status_t r=pn_font_size(f,28);return r==PN_OK?pn_w_text_ex(f,p,s,36,y+50,612,PN_ALIGN_CENTER,active?15:0,false):r;}
@@ -40,7 +49,7 @@ static pn_status_t board(const su_t *g,pn_font_t *f,pn_frame_t *p,bool patch){
         if(g->errors[c])pn_w_outline(p,x+6,y+6,56,56,2,0);
     }
     for(int i=0;i<=9;i++){int w=i%3?1:3;pn_frame_rect(p,PN_SU_BOARD_X+i*PN_SU_CELL_SIZE,PN_SU_BOARD_Y,w,615,i%3?9:0);pn_frame_rect(p,PN_SU_BOARD_X,PN_SU_BOARD_Y+i*PN_SU_CELL_SIZE,615,w,i%3?9:0);}
-    if(!s->complete)pn_w_outline(p,PN_SU_BOARD_X+2+(s->selected%9)*PN_SU_CELL_SIZE,PN_SU_BOARD_Y+2+(s->selected/9)*PN_SU_CELL_SIZE,65,65,3,0);
+    if(!s->complete){int x=PN_SU_BOARD_X+(s->selected%9)*PN_SU_CELL_SIZE,y=PN_SU_BOARD_Y+(s->selected/9)*PN_SU_CELL_SIZE;pn_w_outline(p,x+2,y+2,65,65,2,0);pn_w_outline(p,x+6,y+6,57,57,1,0);}
     return PN_OK;
 }
 #define DRAW(expr) do{pn_status_t result=(expr);if(result!=PN_OK)return result;}while(0)
@@ -55,9 +64,10 @@ static pn_status_t metadata(const su_t *g,pn_font_t *f,pn_frame_t *p){
 }
 /// 压缩游戏页标题，常用重玩直接可达；无标志或切换标签。/ Compact game heading with direct restart access and no logo or switch labels.
 static pn_status_t heading(const su_t *g,pn_font_t *f,pn_frame_t *p){
-    DRAW(pn_font_size(f,28));DRAW(pn_w_text(f,p,"返回",36,80,140,PN_ALIGN_LEFT));
+    pixel_fill(p,32,48,144,44,6,0);pixel_fill(p,34,50,140,40,4,15);
+    pixel_icon(p,43,59,6,1,0);DRAW(pn_font_size(f,28));DRAW(pn_w_text_ex(f,p,"返回",72,80,96,PN_ALIGN_CENTER,0,true));
     DRAW(pn_font_size(f,32));DRAW(pn_w_text_ex(f,p,"数独",220,80,244,PN_ALIGN_CENTER,0,true));
-    if(g->screen==PN_SU_PLAY){DRAW(pn_font_size(f,24));DRAW(pn_w_text(f,p,"重玩",528,80,120,PN_ALIGN_RIGHT));}
+    if(g->screen==PN_SU_PLAY){pixel_fill(p,528,48,120,44,6,0);pixel_fill(p,530,50,116,40,4,15);pixel_icon(p,538,59,7,1,0);DRAW(pn_font_size(f,24));DRAW(pn_w_text_ex(f,p,"重玩",566,80,74,PN_ALIGN_CENTER,0,true));}
     return PN_OK;
 }
 /// 只接受上一成功游戏帧，调用方负责恢复该基准。/ Accept only the last successful game frame, restored by the caller.
@@ -77,7 +87,7 @@ pn_status_t pn_sudoku_render(const pn_sudoku_t *u,pn_font_t *f,pn_frame_t *p){
         if(g->screen==PN_SU_COMPLETE){DRAW(label(f,p,"完成了！留住这一刻",888,32));DRAW(button(f,p,"同难度再来一局",928,PN_W_SELECTED));DRAW(button(f,p,"选择其他难度",1012,0));DRAW(button(f,p,"返回娱乐",1096,PN_W_PLAIN));}
         else{
             static const char *const names[]={"撤销","擦除","笔记","检查","提示","新局"};DRAW(pn_font_size(f,24));
-            for(int i=0;i<6;i++){int x=36+i%3*208,y=770+i/3*72;bool note=i==2 && g->state.note_mode;keycap(p,x,y,196,64,note);DRAW(pn_w_text_ex(f,p,note?"笔记中":names[i],x,y+39,196,PN_ALIGN_CENTER,note?15:0,false));}
+            for(int i=0;i<6;i++){int x=36+i%3*208,y=770+i/3*72;bool note=i==2 && g->state.note_mode;keycap(p,x,y,196,64,note);pixel_icon(p,x+20,y+8,(unsigned)i,2,note?15:0);DRAW(pn_w_text_ex(f,p,note?"笔记中":names[i],x+72,y+39,112,PN_ALIGN_CENTER,note?15:0,true));}
             for(int i=0;i<9;i++){int x,y;digit_rect(i,&x,&y);char n[2]={(char)('1'+i),0};keycap(p,x,y,196,84,false);DRAW(pn_font_size(f,40));DRAW(pn_w_text(f,p,n,x,y+53,196,PN_ALIGN_CENTER));}
         }
     }else if(g->screen==PN_SU_SELECT){

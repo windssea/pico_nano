@@ -8,6 +8,15 @@ typedef struct {
     uint64_t bytes,reads,seeks,hits; ///< 累计实际文件IO，不含推测工作 / Actual cumulative file I/O, excluding speculative estimates
 } pn_profile_io_t;
 typedef struct {
+    const uint8_t *book; ///< 借用32字节书籍SHA，不提供来源验证资格 / Borrowed 32-byte book SHA, never source verification authority
+    const char *path; ///< 借用规范章路径 / Borrowed canonical chapter path
+    uint64_t element,offset; ///< 语义元素及文本偏移 / Semantic element and text offset
+    uint32_t run; ///< 文本段序号 / Text run index
+    unsigned version,kind; ///< 原生定位版本与类型 / Native locator version and kind
+    bool chapter_start; ///< 是否章起点请求 / Whether this is a chapter-start request
+    int slot,copy; ///< -1用户进度，否则续读槽0/1；copy为主0/备1或不适用-1 / -1 user progress, otherwise resume slot 0/1; copy main 0, backup 1, or -1 inapplicable
+} pn_profile_position_t;
+typedef struct {
     const char *phase; ///< 阶段名称仅在同步回调期间借用 / Phase name borrowed only during the synchronous callback
     uint64_t elapsed_us; ///< 单调时钟耗时，包含嵌套阶段 / Monotonic elapsed time including nested phases
     pn_status_t status; ///< 操作真实结果，失败样本不隐藏 / Actual operation result, including failures
@@ -15,6 +24,7 @@ typedef struct {
     const pn_pool_t *pool; ///< 仅回调期间借用，由当前owner独占 / Borrowed only during callback, exclusively owned by the caller
     pn_profile_io_t io; ///< 可选IO快照，普通scope为零 / Optional I/O snapshot, zero for ordinary scopes
     const char *resource; ///< 仅同步回调期间借用的诊断路径，不授予文件访问权 / Diagnostic path borrowed only during the synchronous callback, never file authority
+    const pn_profile_position_t *position; ///< 仅同步回调借用的原生位置，不授予缓存命中资格 / Native position borrowed only during callback, never cache-hit authority
 } pn_profile_event_t;
 typedef uint64_t (*pn_profile_clock_fn)(void *); ///< 单调微秒时钟 / Monotonic microsecond clock
 typedef void (*pn_profile_emit_fn)(void *,const pn_profile_event_t *); ///< 同步只读回调，不得递归产品操作 / Synchronous read-only callback without recursive product operations
@@ -34,6 +44,8 @@ uint64_t pn_profile_time(void);
 void pn_profile_observe(pn_pool_t *,const char *,pn_status_t,uint64_t,const pn_profile_io_t *);
 /// 无分配记录文件生命周期，不额外读写文件，路径只在回调中有效。/ Record file lifecycle without allocation or extra I/O; the path is valid only during the callback.
 void pn_profile_file(pn_pool_t *,const char *,pn_status_t,const char *);
+/// 记录已有原生位置，不分配、不访问文件；所有指针只在同步回调期间有效。/ Observe an existing native position without allocation or file access; all pointers are valid only during the synchronous callback.
+void pn_profile_position(pn_pool_t *,const char *,pn_status_t,const pn_profile_position_t *);
 /// 开始栈scope，必须在同线程逆序end；禁用时不读时钟。/ Begin a stack scope; end in reverse order on the same thread; disabled scopes do not read the clock.
 void pn_profile_begin(pn_profile_span_t *,pn_pool_t *,const char *);
 /// 结束并同步输出；回调耗时不计入本阶段。/ End and emit synchronously; callback time is excluded from this phase.

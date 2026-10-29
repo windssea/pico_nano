@@ -55,6 +55,11 @@ static pn_status_t resume_prepare(app_t *a, pn_read_intent_t intent, pn_reader_r
         pn_profile_span_t span;
         pn_profile_begin(&span, a->pool, "resume.load");
         s = pn_resume_load(&a->resume, intent == PN_READ_NEXT ? 1u : 0u, &wanted, frame, &page, resume_verify, a);
+        // 冷重开也探测已确认位置对应的预取槽；槽名不提供信任，原完整校验保持。/ Cold reopen also probes the prefetched slot for the confirmed position; slot names confer no trust and full validation remains.
+        if(s==PN_EMPTY && intent==PN_READ_JUMP){
+            s=pn_resume_load(&a->resume,1u,&wanted,frame,&page,resume_verify,a);
+            if(s==PN_OK)pn_profile_observe(a->pool,"resume.open.neighbor-hit",PN_OK,0,NULL);
+        }
         pn_profile_end(&span, s);
     }
     if (lease.ticket) {

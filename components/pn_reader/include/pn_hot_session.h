@@ -59,5 +59,10 @@ pn_status_t pn_hot_session_drop_for_switch(pn_hot_session_t *);
 pn_status_t pn_hot_session_expire(pn_hot_session_t *,uint64_t);
 /// 保留对象有延后日志/当前页/已验证启动结构待写且本次未失败 / Retained journals/current pages/verified startup structures await persistence without a latched failure.
 bool pn_hot_session_deferred_pending(const pn_hot_session_t *);
+/// 查询已显示当前页的冻结检查点（含待完成校验），不做IO；不把其他索引任务升级为高优先级。/ Query a frozen displayed-page checkpoint, including unfinished verification, without I/O or promoting unrelated indexes.
+bool pn_hot_session_checkpoint_pending(const pn_hot_session_t *);
 /// 空闲先提交必要日志，再分步收口当前页和已验证结构；切书释放不推进结构。/ At idle commit mandatory journals before current-page/verified-structure checkpoints; switch release never advances structure writes.
 pn_status_t pn_hot_session_deferred_flush(pn_hot_session_t *);
+typedef uint64_t (*pn_hot_idle_clock_fn)(void *); ///< 端口提供的单调微秒钟，独立于诊断开关 / Port monotonic microsecond clock, independent of diagnostics
+/// 仅后台空闲使用：至多32个原步骤/8ms软预算，当前页完成即停；不从切书/退出显示屏障调用，单次IO仍可超预算。/ Background idle only: at most 32 original steps/8 ms soft budget, stopping when the current page completes; never call from switch/exit display barriers, and one I/O may exceed the budget.
+pn_status_t pn_hot_session_deferred_idle(pn_hot_session_t *,pn_hot_idle_clock_fn,void *);

@@ -5,8 +5,13 @@
  * 冻结：不读正文，不存临时事件顺序。/ Frozen: no body reads or transient event-order storage.
  */
 #include "pn_epub_progress.h"
+#include "pn_profile.h"
 #include <string.h>
 #define HEADER 68
+void pn_epub_progress_trace(pn_pool_t *pool,const char *phase,pn_status_t status,const pn_book_id_t *book,const pn_epub_location_t *location,int slot,int copy){
+    const pn_profile_position_t position={.book=book->sha256,.path=location->path,.element=location->position.element,.offset=location->position.offset,.run=location->position.run,.version=location->version,.kind=(unsigned)location->position.kind,.chapter_start=location->chapter_start,.slot=slot,.copy=copy};
+    pn_profile_position(pool,phase,status,&position);
+}
 static void put16(uint8_t *p,uint16_t v){p[0]=(uint8_t)v;p[1]=(uint8_t)(v>>8);}
 static unsigned get16(const uint8_t *p){return p[0]|((unsigned)p[1]<<8);}
 static void put64(uint8_t *p,uint64_t v){for(unsigned i=0;i<8;i++)p[i]=(uint8_t)(v>>(i*8));}
@@ -61,6 +66,6 @@ pn_status_t pn_epub_progress_load(const pn_journal_io_t *io,pn_pool_t *pool,cons
             }
         }
     }
-    if(status==PN_OK)*out=value;
+    if(status==PN_OK){*out=value;pn_epub_progress_trace(pool,"epub.progress.loaded",status,book,&value.location,-1,-1);}
     pn_free(bytes);return status;
 }
