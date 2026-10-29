@@ -163,6 +163,8 @@ pn_status_t pn_resume_bind(pn_resume_t *h, pn_pool_t *pool, pn_media_t *media, c
     uint8_t key[320] = {0};
     memcpy(key, layout->sha256, 32);
     memcpy(key + 32, "PN-resume-render-1", 18);
+    // 默认0保留旧绘制键；隐藏图片与完整图片包不能互用。/ Zero preserves the original render key; hidden-image and full-image packets never mix.
+    put(key + 50, style->hide_images, 2);
     const int values[] = {
         style->pixels,           style->line_percent, style->gap_percent,         style->indent_em,          style->margin,
         style->tracking_percent, style->reading_line, style->reading_line_offset, style->reading_line_shade, style->weight,

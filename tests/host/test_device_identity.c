@@ -29,7 +29,7 @@ size_t __wrap_fread(void *p,size_t size,size_t count,FILE *f){size_t n=__real_fr
 static size_t free_bytes=200u*1024u;
 size_t heap_caps_get_largest_free_block(uint32_t caps){assert(caps&MALLOC_CAP_INTERNAL);return largest;}
 size_t heap_caps_get_free_size(uint32_t caps){assert(caps&MALLOC_CAP_INTERNAL);return free_bytes;}
-void *heap_caps_aligned_alloc(size_t alignment,size_t size,uint32_t caps){assert(alignment==16 && (caps&MALLOC_CAP_DMA) && (size==48u*1024u || size==32u*1024u || size==4096));if(fail_internal)return NULL;void *p=aligned_alloc(alignment,size);assert(p);borrowed++;internal_begin=(uintptr_t)p;internal_end=internal_begin+size;return p;}
+void *heap_caps_aligned_alloc(size_t alignment,size_t size,uint32_t caps){assert(alignment==16 && (caps&MALLOC_CAP_DMA) && (size==48u*1024u || size==32u*1024u || size==16u*1024u || size==8u*1024u || size==4096));if(fail_internal)return NULL;void *p=aligned_alloc(alignment,size);assert(p);borrowed++;internal_begin=(uintptr_t)p;internal_end=internal_begin+size;return p;}
 void *heap_caps_malloc(size_t size,uint32_t caps){assert(caps&MALLOC_CAP_SPIRAM);void *p=malloc(size);blocked_begin=(uintptr_t)p;blocked_end=blocked_begin+size;spiram++;return p;}
 void heap_caps_free(void *ptr){if((uintptr_t)ptr==blocked_begin){blocked_begin=blocked_end=0;spiram--;}else{borrowed--;internal_begin=internal_end=0;}free(ptr);}
 psa_status_t psa_crypto_init(void){return PSA_SUCCESS;}
@@ -62,6 +62,15 @@ static void jobs(void){
         assert(s==PN_OK && !operations && !memcmp(&actual,&expected,sizeof actual) && calls==(slow?17u:3u));pn_identity_job_close(&job);assert(!pool.used && !pool.live);
     }
     read_us=0;
+    // 中等内部余量使用16/8KiB而非退到4KiB；单步后立即归还，完整摘要保持。/ Moderate headroom uses 16/8 KiB instead of 4 KiB; release after each step and preserve the complete digest.
+    for(unsigned tier=0;tier<2;tier++){
+        size_t block=tier?8192u:16384u;largest=block+32u*1024u;free_bytes=block+64u*1024u;
+        pn_identity_job_t middle={0};assert(!pn_identity_job_begin(&middle,&pool,NULL,sizeof bytes,source));calls=0;maximum=0;
+        assert(pn_identity_job_step(&middle,&actual)==PN_BUSY && maximum==block && calls==1 && !borrowed);
+        pn_status_t s;do{s=pn_identity_job_step(&middle,&actual);}while(s==PN_BUSY);
+        assert(s==PN_OK && !memcmp(&actual,&expected,sizeof actual) && !borrowed && !operations);pn_identity_job_close(&middle);
+    }
+    free_bytes=200u*1024u;
     // 小块批次中途取消不得重复哈希前缀；外部栈仍只借4KiB，归还后可接续。/ Mid-batch cancellation must not hash a prefix twice; an external stack still borrows just 4 KiB and resumes after release.
     largest=0;external_stack=true;pn_identity_job_t partial={0};assert(!pn_identity_job_begin(&partial,&pool,NULL,sizeof bytes,source));
     calls=0;unsigned after=1;pn_cancel_scope_t batch_scope;pn_cancel_enter(&batch_scope,cancelled_after_read,&after);
@@ -136,5 +145,17 @@ int main(int argc,char **argv){
     assert(!pn_identity_stream_pooled(&pool,NULL,sizeof bytes,source,&actual) && !memcmp(&actual,&expected,sizeof actual) && menu.data && !menu.drops && pool.used==used && pool.attempts==attempts && ((uint8_t *)menu.data)[0]==0x5a);
     pn_identity_pooled_port(NULL);
     assert(!pn_identity_stream_pooled(&pool,NULL,sizeof bytes,source,&actual) && !memcmp(&actual,&expected,sizeof actual) && menu.drops==1 && !menu.data && !pool.used && !pool.live);
-    pn_cache_detach(&owner);jobs();pn_identity_stream_port(NULL);return 0;
+    pn_cache_detach(&owner);jobs();
+    // 可选块摘要上下文不能为自己驱逐前台缓存；拒绝后调用方仍可沿软件退路。/ Optional block-digest state must not evict foreground caches; callers may fall back to software on admission denial.
+    {menu_t foreground={0};foreground.data=pn_cache_alloc(&pool,PN_CACHE_GLYPH,PN_MEM_UI,512);assert(foreground.data);pn_cache_owner_t guard={0};pn_cache_attach(&pool,&guard,PN_CACHE_GLYPH,&foreground,menu_bytes,menu_drop);
+     size_t limit=pool.limit;pool.limit=pool.used;pn_identity_digest_t denied={0};assert(pn_identity_digest_begin(&denied,&pool)==PN_NO_MEMORY && !denied.impl && foreground.data && !foreground.drops && !operations);pool.limit=limit;pn_cache_detach(&guard);menu_drop(&foreground);}
+    // 与整书任务交错的块SHA不串上下文，完成后复用状态；错误保留输出，关闭无残留。/ Interleaved block/whole-file hashes retain separate states, reuse completed storage, preserve outputs on error and leave no resources.
+    {pn_identity_digest_t digest={0};pn_identity_job_t whole={0};assert(!pn_identity_digest_begin(&digest,&pool));assert(!pn_identity_job_begin(&whole,&pool,NULL,sizeof bytes,source));
+     size_t at=0;pn_status_t status=PN_BUSY;while(at<sizeof bytes){size_t n=sizeof bytes-at;if(n>997)n=997;assert(!pn_identity_digest_update(&digest,bytes+at,n));at+=n;if(status==PN_BUSY)status=pn_identity_job_step(&whole,&actual);}
+     while(status==PN_BUSY)status=pn_identity_job_step(&whole,&actual);
+     assert(status==PN_OK && !memcmp(&actual,&expected,sizeof actual));pn_identity_job_close(&whole);
+     assert(!pn_identity_digest_finish(&digest,&actual) && !memcmp(&actual,&expected,sizeof actual) && !operations);size_t count=pool.attempts;
+     assert(!pn_identity_digest_begin(&digest,&pool) && pool.attempts==count);fail_hash=true;actual=expected;assert(pn_identity_digest_update(&digest,bytes,1)==PN_IO);fail_hash=false;
+     assert(pn_identity_digest_finish(&digest,&actual)==PN_INVALID && !memcmp(&actual,&expected,sizeof actual));pn_identity_digest_close(&digest);pn_identity_digest_close(&digest);assert(!pool.used && !pool.live && !operations);}
+    pn_identity_stream_port(NULL);return 0;
 }

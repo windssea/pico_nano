@@ -71,6 +71,8 @@ typedef pn_status_t (*pn_epub_warm_fn)(void *,const pn_epub_page_node_t *); ///<
 pn_status_t pn_epub_reader_warm_next(pn_epub_reader_t *,pn_epub_warm_fn,void *,size_t budget);
 /// 已排好的下一页还有未预热字形（含图页不预热）。/ The prepared next page still has unwarmed glyphs (pages with images are never warmed).
 bool pn_epub_reader_warm_pending(const pn_epub_reader_t *);
+/// 只查询已完整排好的下一页是否有图片，不读取/呈现/提交。/ Query images in the fully laid-out next page without reads, presentation or commits.
+bool pn_epub_reader_next_has_images(const pn_epub_reader_t *);
 /// 图片解码前释放可选邻页节点，不改变已确认位置。/ Release optional neighbor nodes before image decoding without changing confirmed progress.
 void pn_epub_reader_trim(pn_epub_reader_t *reader);
 /// 绑定同布局的可删除窗口；reflow自动解除，不拥有对象。/ Bind a disposable window for this layout; reflow unbinds it, without taking ownership.

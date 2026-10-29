@@ -349,6 +349,7 @@ static void index_profile_flush(void){
 /// 串口逐次IO输出会改变字体/摘要耗时；只在阶段边界汇总。/ Per-IO serial output distorts font/hash timing; aggregate at phase boundaries.
 static struct {const char *phase;uint64_t calls,total,maximum,failed;} profile_io[]={
     {.phase="storage.file-read"},{.phase="storage.file-seek"},{.phase="content.sha-read"},{.phase="content.sha-update"},
+    {.phase="source.blocks.capture-hash"},
     {.phase="font.measure-load"},{.phase="font.raster-load"}};
 static bool profile_io_collect(const pn_profile_event_t *e){
     for(unsigned i=0;i<sizeof profile_io/sizeof profile_io[0];i++)if(!strcmp(e->phase,profile_io[i].phase)){
@@ -1947,6 +1948,8 @@ static bool tick_shelf_background(uint64_t now){
     if(entertainment && !home_mode)return tick_hot_deferred(now);
     // 已显示页先于未来书籍/封面的提示IO；保持原800ms安静门及输入取消，不在退出/切书入口等待落盘。/ Give the displayed page priority over hint I/O for future books/covers; keep the original 800 ms quiet gate and input cancellation, without waiting in exit/switch entry points.
     if(pn_hot_session_checkpoint_pending(&hot_session) && tick_hot_deferred(now))return true;
+    // 可见封面先于未来书的身份/续读预热；保留封面自己的输入安静门。/ Visible covers precede future-book verification/warming, retaining their input quiet gate.
+    if(shelf_covers && shelf_page && pn_shelf_covers_pending(shelf_covers,shelf_page) && tick_covers())return true;
     static unsigned cursor;int64_t started=esp_timer_get_time();
     for(unsigned probe=0;probe<4;probe++){
         if(pn_cancel_checkpoint()!=PN_OK)return false;
@@ -3052,8 +3055,8 @@ static void device_task(void *arg){
         pn_device_power_busy(PN_POWER_SESSION,transfer.impl!=NULL || time_sync.impl!=NULL || ota_busy() || wifi_probe.impl!=NULL || usb.open || opening);
         pn_async_begin(&async_port.input,&scope,available==PN_EMPTY);scope_active=true;
         if(available==PN_OK || available==PN_CANCELLED){
-            // 书架三键焦点只暂停解码；真正开书/换页入口仍先abort，低余量不保活。/ Shelf key focus only pauses decoding; opening/page-change entries still abort, and low headroom never retains it.
-            bool keep_cover=available==PN_OK && queued.kind==PN_DASYNC_KEY && shelf_mode && !focus_page() && !actions_mode && !locked && !status_page && !reading_menu && pool.used<=pool.limit && pool.limit-pool.used>=512u*1024u;
+            // 同页触摸/按键只暂停；真正开书/换页/锁屏入口仍释放，低余量不保活。/ Same-page touch/keys pause; opening/paging/locking still release work, with no retention under low headroom.
+            bool keep_cover=(queued.kind==PN_DASYNC_TOUCH || queued.kind==PN_DASYNC_KEY) && shelf_mode && !covers_inactive && !actions_mode && !locked && !status_page && !reading_menu && pool.used<=pool.limit && pool.limit-pool.used>=512u*1024u;
             if(keep_cover)pn_cover_write_abort(&cover_work.writer);else pn_cover_work_abort(&cover_work);
             pn_epub_app_cache_activity(&epub,now_ms());pn_reader_app_cache_activity(&reader,now_ms());}
         if(available==PN_CANCELLED){pn_reader_input_cancel(&input);pn_key_cancel(&keys);int ignored;(void)pn_tap_feed(&tap,1,-1,false,&ignored);
@@ -3150,7 +3153,9 @@ static void device_task(void *arg){
         if(styles.request_fonts && !locked){styles.request_fonts=false;(void)pn_font_ui_open(&fonts,&pool,epub.impl?NULL:&reader,epub.impl?&epub:NULL,PN_SD_MOUNT "/" PN_SD_FONTS,present,NULL);pn_font_ui_return_to(&fonts,pn_style_ui_render,&styles);}
         if(fonts.active && !fonts.presented && !locked && now-last_ui_retry>=1000){last_ui_retry=now;(void)pn_font_ui_present(&fonts,present,NULL);}
         if(hardware.touch_ready && (!async_port.input_active || (available==PN_OK && queued.kind==PN_DASYNC_TOUCH))){cst836u_touch_t touch={0};esp_err_t read;bool ending=false;uint64_t touch_at=now_ms();if(async_port.input_active){touch.count=queued.count;touch.x=queued.x;touch.y=queued.y;read=queued.valid?ESP_OK:ESP_FAIL;ending=queued.ending;touch_at=queued.at;}else{read=cst836u_read(hardware.touch,&touch);if(read==ESP_OK && pn_device_touch_normalize(&touch,&ending)!=PN_OK)read=ESP_FAIL;}pn_reader_action_t action;touch_held=read==ESP_OK && touch.count>0;if(touch_held)last_input=now_ms();
-            if(!async_port.input_active && (read!=ESP_OK || touch.count)){pn_cover_work_abort(&cover_work);pn_epub_app_cache_activity(&epub,now_ms());pn_reader_app_cache_activity(&reader,now_ms());}
+            if(!async_port.input_active && (read!=ESP_OK || touch.count)){
+                if(shelf_mode && !covers_inactive && pool.used<=pool.limit && pool.limit-pool.used>=512u*1024u)pn_cover_write_abort(&cover_work.writer);else pn_cover_work_abort(&cover_work);
+                pn_epub_app_cache_activity(&epub,now_ms());pn_reader_app_cache_activity(&reader,now_ms());}
             bool list_consumed=root_navigation_touch(&navigation_press,touch.count,touch.x,touch.y,read==ESP_OK,&scope);
             if(list_consumed)shelf_gesture=(pn_shelf_gesture_t){0};
             else list_consumed=shelf_content_touch(&shelf_gesture,touch.count,touch.x,touch.y,read==ESP_OK,ending,touch_at);

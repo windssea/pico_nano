@@ -54,6 +54,10 @@ int main(void){char root[]="/tmp/pn-style-ui-XXXXXX";assert(mkdtemp(root));char 
     assert(pn_style_ui_event(&ui,PN_SUI_RESET,2,present,&screen)==PN_OK && ui.draft.pixels==44 && ui.draft.line_percent==145 && ui.draft.gap_percent==40 && ui.draft.indent_em==2 && ui.draft.margin==32 && !ui.draft.background);
     {pn_style_t reset=ui.draft;assert(pn_style_ui_event(&ui,PN_SUI_PRESET,2,present,&screen)==PN_OK && !memcmp(&reset,&ui.draft,sizeof reset));}
     assert(pn_style_ui_hit(&ui,300,250)==PN_SUI_PREVIEW && pn_style_ui_hit(&ui,300,1100)==-1);
+    assert(pn_style_ui_hit(&ui,300,1050)==PN_SUI_FIELD+24 && !ui.draft.hide_images);
+    assert(pn_style_ui_event(&ui,PN_SUI_FIELD+24,2,present,&screen)==PN_OK && ui.draft.hide_images);
+    {pn_style_t current;assert(pn_reader_app_style_get(&app,&current)==PN_OK && !current.hide_images);}
+    assert(pn_style_ui_event(&ui,PN_SUI_FIELD+25,2,present,&screen)==PN_OK && !ui.draft.hide_images);
     screen.capture=false;const char *preview_path=getenv("PN_STYLE_PREVIEW_CAPTURE");if(preview_path){assert(setenv("PN_STYLE_CAPTURE",preview_path,1)==0);screen.capture=true;}
     assert(pn_style_ui_event(&ui,PN_SUI_PREVIEW,3,present,&screen)==PN_OK && ui.preview);assert(pn_style_ui_hit(&ui,300,400)==PN_SUI_FORM);screen.capture=false;
     assert(pn_style_ui_event(&ui,PN_SUI_FORM,3,present,&screen)==PN_OK && !ui.preview);assert(pn_style_ui_event(&ui,PN_SUI_CANCEL,4,present,&screen)==PN_OK && !ui.active);

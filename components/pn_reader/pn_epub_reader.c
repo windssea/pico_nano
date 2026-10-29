@@ -194,6 +194,10 @@ bool pn_epub_reader_warm_pending(const pn_epub_reader_t *handle){
     const pn_epub_reader_anchor_t *base=r?neighbor_base(r):NULL;
     return base && r->ahead.valid && base->has_next && same_location(&r->ahead_target,&base->next) && r->ahead_warm<r->ahead.count && !r->ahead.image_count;
 }
+bool pn_epub_reader_next_has_images(const pn_epub_reader_t *handle){
+    const reader_t *r=handle?handle->impl:NULL;const pn_epub_reader_anchor_t *base=r?neighbor_base(r):NULL;
+    return base && base->has_next && r->ahead.valid && r->ahead.image_count && same_location(&r->ahead_target,&base->next);
+}
 pn_status_t pn_epub_reader_warm_next(pn_epub_reader_t *handle,pn_epub_warm_fn warm,void *ctx,size_t budget){
     if(!handle || !handle->impl || !warm || !budget || budget>64)return PN_INVALID;
     reader_t *r=handle->impl;

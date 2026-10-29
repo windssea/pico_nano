@@ -72,7 +72,7 @@ static pn_status_t pn_page_index_key_impl(const pn_book_id_t *book,const pn_styl
     const uint16_t values[]={style->pixels,style->line_percent,style->gap_percent,style->indent_em,style->margin,style->tracking_percent};
     for(unsigned j=0;j<6;j++)put(bytes+72+2*j,values[j],2);
     put(bytes+84,format,4);put(bytes+88,684,2);put(bytes+90,1216,2);put(bytes+92,chain->count,4);
-    put(bytes+192,PN_READER_TOP,4);put(bytes+196,PN_READER_HEIGHT,4);put(bytes+200,1,4);put(bytes+204,1,4); // 页脚及可选图片策略版本 / Footer and optional-image policy versions
+    put(bytes+192,PN_READER_TOP,4);put(bytes+196,PN_READER_HEIGHT,4);put(bytes+200,1,4);put(bytes+204,style->hide_images?2u:1u,4); // 页脚及图片策略键；默认键不变 / Footer and image-policy keys; default keys stay unchanged
     pn_book_id_t digest;pn_status_t s=PN_OK;if(known_primary)digest=*known_primary;else s=pn_font_source_identity(primary,&digest);if(s!=PN_OK)return s;memcpy(bytes+96,digest.sha256,32);
     for(unsigned j=0;j<chain->count;j++){const pn_text_source_t *source=&chain->sources[j];s=pn_font_source_identity(source,&digest);if(s!=PN_OK)return s;memcpy(bytes+128+32*j,digest.sha256,32);}
     return pn_identity_bytes(bytes,sizeof bytes,out);

@@ -27,9 +27,10 @@ typedef struct {
     uint16_t background; ///< 持久背景ID：0无、4竹影、7纯色中；旧1..8读取时仅移除款回退无，不改变分页 / Persistent paper ID: None 0, bamboo 4, texture 7; retired legacy IDs 1..8 load as None without changing pagination
     char background_name[PN_BACKGROUND_NAME_MAX]; ///< 外部背景单文件名，内置时全零 / External paper basename, all zero for built-ins
     pn_book_id_t background_identity; ///< 外部背景完整源摘要，内置时全零 / Full external-source digest, all zero for built-ins
+    uint16_t hide_images; ///< 0默认显示书内图片，1仅保留占位，不解码图片 / Zero shows book images by default; one keeps placeholders without image decoding
 } pn_style_t;
-/// 只比较背景之前的排版字段，背景替换不丢语义邻页。/ Compare typesetting fields preceding the paper reference; replacing paper preserves semantic neighbors.
-static inline bool pn_style_same_typesetting(const pn_style_t *a,const pn_style_t *b){return a && b && !memcmp(a,b,offsetof(pn_style_t,background));}
+/// 比较原排版字段及图片策略，背景替换不丢语义邻页。/ Compare original typesetting fields and image policy; replacing paper preserves semantic neighbors.
+static inline bool pn_style_same_typesetting(const pn_style_t *a,const pn_style_t *b){return a && b && a->hide_images==b->hide_images && !memcmp(a,b,offsetof(pn_style_t,background));}
 /// 产品默认舒适模式字号。/ Product default comfortable-mode body size.
 enum { PN_STYLE_DEFAULT_PIXELS = 44 };
 /// 舒适模式间距：145%行距、40%段距、缩进2字、32px边距；调用方可指定字号。
@@ -39,6 +40,8 @@ pn_style_t pn_style_default(int pixels);
 pn_status_t pn_style_validate(const pn_style_t *style);
 /// 按内容身份保存64byte配置：标准字重写schema4（58..59为阅读线深浅），非标准字重写schema5（60..61为字重），非标准清晰度写schema6（62..63为清晰度），背景非0写schema7（6..7为背景编号）；旧固件不能解析schema7，回退前需选“无”并应用以写回旧schema。
 /// Save a 64-byte configuration by content identity: regular weight writes schema4 (bytes 58..59 guide darkness), other weights schema5 (bytes 60..61 weight), non-standard sharpness schema6 (bytes 62..63), nonzero backgrounds use schema7 (bytes 6..7); older firmware cannot parse schema7; select None and apply before downgrading to restore a legacy schema.
+/// 隐藏图片使用schema9（内置背景64byte）或10（外部背景完整载荷）；重新显示时写回原schema4..8，其他字段保持。
+/// Hidden images use schema 9 (64-byte built-in paper) or 10 (full external-paper payload); showing images writes the original schema 4..8 again, retaining other fields.
 pn_status_t pn_style_save(const pn_journal_io_t *io,const pn_book_id_t *book,const pn_style_t *style);
 /// 错误不改输出；EMPTY由调用方选择默认。
 /// Preserve output on errors; caller chooses defaults for EMPTY only.

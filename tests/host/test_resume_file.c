@@ -87,6 +87,10 @@ int main(void) {
         assert(pn_resume_load(&r, 0, &page, &o, &got, verify, NULL) == PN_OK && !memcmp(pixels, output, 684u * 1216u / 2u) &&
                got.text.end == 200);
     }
+    // 即使调用方布局摘要相同，图片开关也隔离已提交像素；恢复默认仍命中原包。/ Even with the same caller layout digest, image policy isolates committed pixels; restoring the default still hits the original packet.
+    pn_style_t hidden=style;hidden.hide_images=1;pn_resume_close(&r);
+    assert(pn_resume_bind(&r,&pool,&media,&guard,&trust,&writer,tf,state,&book,&key,&hidden)==PN_OK && pn_resume_load(&r,0,&page,&o,&got,verify,NULL)==PN_EMPTY);pn_resume_close(&r);
+    assert(pn_resume_bind(&r,&pool,&media,&guard,&trust,&writer,tf,state,&book,&key,&style)==PN_OK && pn_resume_load(&r,0,&page,&o,&got,verify,NULL)==PN_OK);
     // 每一提交边界中断后重开，旧包或完整新包都必须可读。/ Reopen after every transaction boundary; either old or fully committed
     // new data must remain readable.
     for (unsigned stop = 0; stop <= calls; stop++) {

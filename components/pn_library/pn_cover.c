@@ -39,6 +39,7 @@
 typedef struct {const pn_text_source_t *source;uint64_t offset;} file_input_t;
 typedef struct {
     pn_epub_t *epub;const char *path; ///< EPUB资源 / EPUB resource
+    pn_zip_t *zip; ///< 已验证归档供图片取消后重新开流，不保留OPF模型 / Verified archive for reopening cancelled image streams without retaining the OPF model
     const pn_text_source_t *file; ///< 或侧车文件 / Or sidecar file
     pn_zip_stream_t stream;file_input_t at;
 } cover_source_t;
@@ -65,10 +66,15 @@ static pn_status_t zip_read(void *ctx,uint8_t *out,size_t cap,size_t *n){
     return status==PN_EMPTY && !pn_zip_stream_verified(s)?PN_CORRUPT:status;
 }
 static pn_status_t source_open(cover_source_t *c,pn_image_input_t *input){
-    if(c->epub){c->stream=(pn_zip_stream_t){0};pn_status_t status=pn_epub_resource_open(c->epub,c->path,&c->stream);if(status==PN_EMPTY)status=PN_CORRUPT;if(status!=PN_OK)return status;*input=(pn_image_input_t){&c->stream,zip_read};return PN_OK;}
+    if(c->epub || c->zip){c->stream=(pn_zip_stream_t){0};pn_status_t status;
+        if(c->zip){uint32_t index;status=pn_zip_find(c->zip,c->path,&index);if(status==PN_OK)status=pn_zip_stream_open(c->zip,index,&c->stream);}
+        else status=pn_epub_resource_open(c->epub,c->path,&c->stream);
+        if(status==PN_EMPTY)status=PN_CORRUPT;
+        if(status!=PN_OK)return status;
+        *input=(pn_image_input_t){&c->stream,zip_read};return PN_OK;}
     c->at=(file_input_t){c->file,0};*input=(pn_image_input_t){&c->at,file_read};return PN_OK;
 }
-static void source_close(cover_source_t *c){if(c->epub)pn_zip_stream_close(&c->stream);}
+static void source_close(cover_source_t *c){if(c->epub || c->zip)pn_zip_stream_close(&c->stream);}
 /* 探测尺寸→contain区域→超采样绘制→均值缩到out。/ Probe size → contain area → supersampled draw → box-average into out. */
 static pn_status_t decode(pn_pool_t *pool,cover_source_t *c,pn_frame_t *out){
     pn_image_input_t input;pn_image_info_t info;
@@ -537,9 +543,11 @@ static pn_status_t covers_idle(pn_cover_write_t *write,pn_cover_work_t *work,pn_
         if(!item || strcmp(item->path,j->item.path) || item->format!=j->item.format || j->allocator.parent!=pool || j->allocator.sub!=&j->sub || j->sub.ctx!=&j->allocator || j->media!=media){cover_extract_close(work);return PN_BUSY;}
         static const char *const names[]={"cover.pick","cover.meta-file","cover.meta-zip","cover.meta-epub","cover.meta-info","cover.image-file","cover.probe","cover.image-setup","cover.image-decode","cover.image-down","cover.finish","cover.done"};
         pn_profile_span_t span;pn_profile_begin(&span,pool,names[j->phase]);pn_status_t s=cover_extract_step(j);pn_profile_end(&span,j->phase==CEX_DONE?j->result:s);
+        if(s==PN_CANCELLED){pn_profile_file(pool,"cover.job.paused",s,j->item.path);return s;}
         if(s!=PN_BUSY){cover_extract_close(work);return s;}
         if(j->phase!=CEX_DONE)return PN_BUSY;
         s=j->result;if(s==PN_STALE_MEDIA || s==PN_CANCELLED || s==PN_STALE_JOB || s==PN_INVALID){cover_extract_close(work);return s;}
+        pn_profile_file(pool,"cover.job.result",s,j->item.path);
         if(s==PN_OK)memcpy(covers->pixels[j->slot],j->pixels,PN_COVER_BYTES);
         covers->display[j->slot]=j->display;cover_publish(write,covers,pool,media,cache_dir,&j->item,&j->key,j->keyed,j->slot,j->budget,s,true,changed);
         cover_extract_close(work);return PN_OK;

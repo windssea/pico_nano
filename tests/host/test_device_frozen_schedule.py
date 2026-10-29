@@ -22,6 +22,8 @@ typedef struct {uint64_t start;} pn_profile_span_t;
 static bool entertainment,home_mode=true,locked,reading,pending=true,cancelled;
 static uint64_t last_input,us;static unsigned identity_calls,checkpoint_calls,advances;
 static pn_hot_session_t hot_session;static int pool;
+static int *shelf_covers,*shelf_page;static bool visible;static unsigned cover_calls;
+static bool pn_shelf_covers_pending(int *c,int *p){(void)c;(void)p;return visible;}
 #define PN_POWER_PRODUCT 0
 #define ESP_LOGW(...) ((void)0)
 static bool reader_active(void){return reading;}
@@ -36,7 +38,7 @@ static pn_status_t pn_cancel_checkpoint(void){return cancelled?PN_CANCELLED:PN_O
 static void pn_profile_begin(pn_profile_span_t *p,void *ignored,const char *name){(void)ignored;(void)name;p->start=us;}
 static void pn_profile_end(pn_profile_span_t *p,pn_status_t s){(void)p;(void)s;}
 static bool tick_identity(uint64_t now){(void)now;identity_calls++;us+=260000;return false;}
-static bool tick_covers(void){return false;}
+static bool tick_covers(void){cover_calls++;us+=2000;visible=false;return true;}
 static bool tick_prepare_book(uint64_t now){(void)now;return false;}
 static pn_status_t catalog_build_idle(void){return PN_EMPTY;}
 @FUNCTIONS@
@@ -52,6 +54,11 @@ int main(void){
     locked=true;(void)tick_shelf_background(2000);assert(advances==before);locked=false;
     cancelled=true;(void)tick_shelf_background(2000);assert(advances==before && pending);
     cancelled=false;assert(tick_shelf_background(2000) && advances==before+1 && !pending);
+    // 冻结帧完成后，可见封面先于慢预热，封面完成后身份轮转仍恢复。/ After the frozen frame, visible covers precede slow warming, then identity rotation resumes.
+    shelf_covers=&pool;shelf_page=&pool;visible=true;unsigned identities=identity_calls,covers=cover_calls;
+    assert(tick_shelf_background(3000) && !visible && cover_calls==covers+1 && identity_calls==identities);
+    for(unsigned i=0;i<4;i++)(void)tick_shelf_background(3100+i);
+    assert(identity_calls>identities);
     puts("device frozen scheduler: current page before 260ms hint, original quiet/input gates, normal rotation resumes");return 0;
 }
 '''.replace('@FUNCTIONS@', function('tick_hot_deferred') + '\n' + function('tick_shelf_background'))

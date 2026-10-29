@@ -24,6 +24,25 @@ void pn_identity_accumulator_init(pn_identity_accumulator_t *);
 void pn_identity_accumulator_update(pn_identity_accumulator_t *,const void *,size_t);
 /// 输出完整SHA并清理工作状态。/ Produce the full SHA and clear working state.
 void pn_identity_accumulator_finish(pn_identity_accumulator_t *,pn_book_id_t *);
+
+typedef struct {void *impl;} pn_identity_digest_t; ///< 可复用的池内摘要上下文，不保留输入指针 / Reusable pool-owned digest context without retained input pointers
+typedef struct {
+    size_t bytes; ///< 端口状态大小 / Port-state size
+    pn_status_t (*begin)(void *); ///< 初始化 / Initialize
+    pn_status_t (*update)(void *,const void *,size_t); ///< 同步消费全部字节 / Consume all bytes synchronously
+    pn_status_t (*finish)(void *,pn_book_id_t *); ///< 完整摘要 / Complete digest
+    void (*abort)(void *); ///< 释放端口状态 / Release port state
+} pn_identity_digest_port_t;
+/// 可选完整SHA端口，启动时设置，活动摘要期间不更改。/ Optional full-SHA port, installed at startup and unchanged during active digests.
+void pn_identity_digest_port(const pn_identity_digest_port_t *);
+/// 首次分配、完成后复用同一池状态；无端口EMPTY，调用方可回退原软件累加器。/ Allocate once, reuse completed state in the same pool; EMPTY without a port permits the original software accumulator fallback.
+pn_status_t pn_identity_digest_begin(pn_identity_digest_t *,pn_pool_t *);
+/// 无IO且不借指针；调用方维持来源有效，每次限于自己的有界已读块。/ No IO or retained pointer; callers validate the source and supply bounded blocks already read.
+pn_status_t pn_identity_digest_update(pn_identity_digest_t *,const void *,size_t);
+/// 完成或失败均结束本次摘要，失败不改out；上下文留待复用/close。/ End on success or error, preserving out on error; retain context for reuse/close.
+pn_status_t pn_identity_digest_finish(pn_identity_digest_t *,pn_book_id_t *);
+/// 幂等释放池状态；不访问原书。/ Idempotently release pool state without source access.
+void pn_identity_digest_close(pn_identity_digest_t *);
 /// 流式读取，不按路径或大小猜身份；失败不改输出。调用方禁止文件并发变更。
 /// Stream content without guessing identity from path or size; errors preserve output. Caller prevents concurrent file mutation.
 pn_status_t pn_identity_file(pn_media_t *media, const pn_media_lease_t *lease,

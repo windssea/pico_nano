@@ -36,13 +36,13 @@ static pn_status_t cancel(pn_style_ui_t *u,uint64_t now,pn_reader_present_fn pre
 #define APPLY_Y 1112
 #define APPLY_H 88
 // 按用途分组：间距两行、字形外观一行（字重/清晰度）、阅读线两行。/ Grouped by purpose: two spacing rows, one glyph-appearance row (weight/sharpness), two reading-guide rows.
-static const unsigned fields[PN_SUI_FIELDS]={0,1,2,5,3,4,9,10,6,8,7,11};
-static const char *const names[PN_SUI_FIELDS]={"字号","行距","段距","首行缩进","字间距","边距","阅读线","上下位置","阅读线深浅","字重","清晰度","背景"};
+static const unsigned fields[PN_SUI_FIELDS]={0,1,2,5,3,4,9,10,6,8,7,11,12};
+static const char *const names[PN_SUI_FIELDS]={"字号","行距","段距","首行缩进","字间距","边距","阅读线","上下位置","阅读线深浅","字重","清晰度","背景","书内图片"};
 typedef struct {unsigned pixels,line,gap,indent,margin;} preset_t;
 static const preset_t presets[3]={{PN_STYLE_DEFAULT_PIXELS,145,40,2,32},{36,125,20,2,24},{56,160,40,2,32}};
 static const char *const preset_names[3]={"舒适","紧凑","大字"};
-static unsigned field_value(const pn_style_t *s,unsigned i){switch(i){case 0:return s->pixels;case 1:return s->line_percent;case 2:return s->gap_percent;case 3:return s->indent_em;case 4:return s->tracking_percent;case 5:return s->margin;case 6:return s->reading_line;case 8:return s->reading_line_shade;case 9:return (unsigned)(s->weight+1);case 10:return s->clarity;case 11:return s->background;default:return (unsigned)(s->reading_line_offset+8);}}
-static void field_set(pn_style_t *s,unsigned i,unsigned v){switch(i){case 0:s->pixels=(uint16_t)v;break;case 1:s->line_percent=(uint16_t)v;break;case 2:s->gap_percent=(uint16_t)v;break;case 3:s->indent_em=(uint16_t)v;break;case 4:s->tracking_percent=(uint16_t)v;break;case 5:s->margin=(uint16_t)v;break;case 6:s->reading_line=(uint16_t)v;break;case 8:s->reading_line_shade=(uint16_t)v;break;case 9:s->weight=(int16_t)((int)v-1);break;case 10:s->clarity=(uint16_t)v;break;case 11:s->background=(uint16_t)v;memset(s->background_name,0,sizeof s->background_name);memset(&s->background_identity,0,sizeof s->background_identity);break;default:s->reading_line_offset=(int16_t)((int)v-8);break;}}
+static unsigned field_value(const pn_style_t *s,unsigned i){switch(i){case 0:return s->pixels;case 1:return s->line_percent;case 2:return s->gap_percent;case 3:return s->indent_em;case 4:return s->tracking_percent;case 5:return s->margin;case 6:return s->reading_line;case 8:return s->reading_line_shade;case 9:return (unsigned)(s->weight+1);case 10:return s->clarity;case 11:return s->background;case 12:return s->hide_images;default:return (unsigned)(s->reading_line_offset+8);}}
+static void field_set(pn_style_t *s,unsigned i,unsigned v){switch(i){case 0:s->pixels=(uint16_t)v;break;case 1:s->line_percent=(uint16_t)v;break;case 2:s->gap_percent=(uint16_t)v;break;case 3:s->indent_em=(uint16_t)v;break;case 4:s->tracking_percent=(uint16_t)v;break;case 5:s->margin=(uint16_t)v;break;case 6:s->reading_line=(uint16_t)v;break;case 8:s->reading_line_shade=(uint16_t)v;break;case 9:s->weight=(int16_t)((int)v-1);break;case 10:s->clarity=(uint16_t)v;break;case 11:s->background=(uint16_t)v;memset(s->background_name,0,sizeof s->background_name);memset(&s->background_identity,0,sizeof s->background_identity);break;case 12:s->hide_images=(uint16_t)v;break;default:s->reading_line_offset=(int16_t)((int)v-8);break;}}
 static void field_text(const pn_style_t *s,unsigned i,char *out,size_t cap){
     unsigned v=field_value(s,i);
     if(i==1 || i==2)snprintf(out,cap,"%u.%02u",v/100,v%100);
@@ -141,7 +141,14 @@ static pn_status_t paint_main(pn_style_ui_t *u,pn_font_t *font,pn_frame_t *frame
     if(s==PN_OK)s=pn_w_text_ex(font,frame,pn_brand_label(name),176,FONT_ROW_Y+44,420,PN_ALIGN_RIGHT,PN_UI_MUTED,false);
     pn_w_set_fallback(NULL);pn_w_icon(frame,PN_ICON_CHEVRON,624,FONT_ROW_Y+21,28,PN_UI_INK);
     pn_frame_rect(frame,32,FONT_ROW_Y+72,620,1,PN_UI_SELECT);
-    for(unsigned i=0;i<PN_SUI_FIELDS && s==PN_OK;i++)s=stepper(font,frame,&u->draft,fields[i],32+(int)(i%2)*CELL_PITCH,STEP_Y0+(int)(i/2)*STEP_PITCH,u->selected==fields[i]);
+    for(unsigned i=0;i<PN_SUI_FIELDS-1 && s==PN_OK;i++)s=stepper(font,frame,&u->draft,fields[i],32+(int)(i%2)*CELL_PITCH,STEP_Y0+(int)(i/2)*STEP_PITCH,u->selected==fields[i]);
+    // 图片开关只改草稿，默认显示；与应用/取消及键盘字段共用同一状态。/ The image toggle changes only the draft, defaults to shown, and shares apply/cancel and keyboard state.
+    pn_w_round_stroke(frame,32,1028,620,72,10,u->selected==12?2:1,u->selected==12?PN_UI_INK:8);
+    if(s==PN_OK)s=pn_font_size(font,24);
+    if(s==PN_OK)s=pn_w_text(font,frame,"书内图片",48,1057,400,PN_ALIGN_LEFT);
+    if(s==PN_OK)s=pn_w_text(font,frame,u->draft.hide_images?"不显示":"显示",48,1074,580,PN_ALIGN_RIGHT);
+    if(s==PN_OK)s=pn_font_size(font,18);
+    if(s==PN_OK)s=pn_w_text_ex(font,frame,"关闭后保留占位",48,1084,400,PN_ALIGN_LEFT,PN_UI_MUTED,false);
     return s;
 }
 static pn_status_t paint_backgrounds(pn_style_ui_t *u,pn_font_t *font,pn_frame_t *frame){
@@ -220,14 +227,14 @@ pn_status_t pn_style_ui_event(pn_style_ui_t *u,int command,uint64_t now,pn_reade
     }
     if(command==PN_SUI_FONTS){if(u->application_failed){u->notice="请先应用或取消排版";(void)pn_style_ui_present(u,present,ctx);return PN_BUSY;}if(u->did_preview){status=cancel(u,now,present,ctx);if(status!=PN_OK)return status;u->did_preview=false;}u->request_fonts=true;return PN_OK;}
     if(command>=PN_SUI_FIELD && command<PN_SUI_FIELD+PN_SUI_FIELDS*2){
-        static const unsigned steps[]={2,5,5,1,5,2,1,2,1,1,1,1},minimum[]={28,100,0,0,0,16,0,0,0,0,0,0},maximum[]={72,220,100,2,50,80,2,16,3,4,3,8};
+        static const unsigned steps[]={2,5,5,1,5,2,1,2,1,1,1,1,1},minimum[]={28,100,0,0,0,16,0,0,0,0,0,0,0},maximum[]={72,220,100,2,50,80,2,16,3,4,3,8,1};
         unsigned field=(unsigned)(command-PN_SUI_FIELD)/2;bool up=(command-PN_SUI_FIELD)&1;unsigned v=field_value(&u->draft,field);u->selected=field;u->more=false;
         // 页边距只有窄/中/宽三档。/ Margins have just three levels: narrow, medium and wide.
         // 左右切换的档位项（边距、阅读线、深浅、字重、清晰度）首尾循环，不在两端卡住；数值项仍在上下限停住。
         // Option fields switched with left/right (margin, reading line, shade, weight, sharpness) wrap around instead of sticking at either end; numeric fields still stop at their limits.
         if(field==5){unsigned level=v<=20?0u:v<=32?1u:2u;static const unsigned margins[3]={20,32,48};level=up?(level+1u)%3u:(level+2u)%3u;field_set(&u->draft,5,margins[level]);}
         else if(field==11){unsigned slot=0;while(slot<PN_READING_BACKGROUND_COUNT && pn_reading_background_id(slot)!=pn_reading_background_resolve(v))slot++;slot=up?(slot+1u)%(PN_READING_BACKGROUND_COUNT+1u):(slot+PN_READING_BACKGROUND_COUNT)%(PN_READING_BACKGROUND_COUNT+1u);field_set(&u->draft,field,pn_reading_background_id(slot));}
-        else if(field==6 || field==8 || field==9 || field==10){unsigned span=maximum[field]-minimum[field]+1u,offset=v-minimum[field];offset=up?(offset+1u)%span:(offset+span-1u)%span;field_set(&u->draft,field,minimum[field]+offset);}
+        else if(field==6 || field==8 || field==9 || field==10 || field==12){unsigned span=maximum[field]-minimum[field]+1u,offset=v-minimum[field];offset=up?(offset+1u)%span:(offset+span-1u)%span;field_set(&u->draft,field,minimum[field]+offset);}
         else{
         if(up && v+steps[field]<=maximum[field])v+=steps[field];else if(!up && v>=minimum[field]+steps[field])v-=steps[field];else status=PN_EMPTY;
         field_set(&u->draft,field,v);}
@@ -262,7 +269,8 @@ int pn_style_ui_hit(const pn_style_ui_t *u,int x,int y){
     if(y>=APPLY_Y && y<APPLY_Y+APPLY_H)return x>=32 && x<652?PN_SUI_APPLY:-1;
     if(y>=PREVIEW_Y && y<PREVIEW_Y+PREVIEW_H && x>=32 && x<652)return PN_SUI_PREVIEW;
     if(y>=FONT_ROW_Y && y<FONT_ROW_Y+74 && x>=32 && x<652)return PN_SUI_FONTS;
-    for(unsigned i=0;i<PN_SUI_FIELDS;i++){
+    if(y>=1028 && y<1100 && x>=32 && x<652)return PN_SUI_FIELD+24;
+    for(unsigned i=0;i<PN_SUI_FIELDS-1;i++){
         int left=32+(int)(i%2)*CELL_PITCH,top=STEP_Y0+(int)(i/2)*STEP_PITCH;
         if(fields[i]==11 && x>=left && x<left+CELL_W && y>=top && y<top+CELL_H)return PN_SUI_BACKGROUND;
         if(y>=top+26 && y<top+CELL_H){if(x>=left && x<left+68)return PN_SUI_FIELD+(int)fields[i]*2;if(x>=left+CELL_W-68 && x<left+CELL_W)return PN_SUI_FIELD+(int)fields[i]*2+1;}

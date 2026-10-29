@@ -10,7 +10,7 @@ int main(void){char root[]="/tmp/pn-style-XXXXXX";assert(mkdtemp(root));char a[3
     pn_media_t media;pn_media_init(&media);assert(pn_media_attach(&media,1)==PN_OK);pn_media_lease_t lease;assert(pn_media_acquire(&media,PN_MEDIA_WRITE,&lease)==PN_OK);pn_journal_files_t files;pn_journal_io_t io;assert(pn_journal_files_init(&files,&media,&lease,a,b,&io)==PN_OK);
     pn_book_id_t book={{42}};pn_style_t s=pn_style_default(PN_STYLE_DEFAULT_PIXELS),loaded;assert(pn_style_validate(&s)==PN_OK);
     assert(s.pixels==44 && s.line_percent==145 && s.gap_percent==40 && s.indent_em==2 && s.margin==32);
-    assert(pn_style_load(&io,&book,&loaded)==PN_EMPTY);s=(pn_style_t){56,180,50,2,64,0,15,2,-8,3,-1,0,0,{0},{{0}}};assert(pn_style_save(&io,&book,&s)==PN_OK);assert(pn_style_load(&io,&book,&loaded)==PN_OK && !memcmp(&s,&loaded,sizeof s));
+    assert(pn_style_load(&io,&book,&loaded)==PN_EMPTY);s=(pn_style_t){56,180,50,2,64,0,15,2,-8,3,-1,0,0,{0},{{0}},0};assert(pn_style_save(&io,&book,&s)==PN_OK);assert(pn_style_load(&io,&book,&loaded)==PN_OK && !memcmp(&s,&loaded,sizeof s));
     // schema4深浅往返；schema3同载荷按浅读取，越界深浅拒绝保存。/ Schema 4 darkness round-trips; the same payload as schema 3 loads light, and out-of-range darkness is rejected.
     // 非标准字重写schema5（60..61），标准字重仍写schema4；schema5标准字重或越界字重拒绝。/ Non-regular weights write schema 5 (60..61) while regular stays schema 4; schema 5 with regular or out-of-range weights is refused.
     {pn_record_t v5;assert(pn_journal_load(&io,&v5)==PN_OK && v5.payload[4]==5 && (int16_t)(v5.payload[60]|v5.payload[61]<<8)==-1);v5.payload[60]=v5.payload[61]=0;assert(pn_journal_save(&io,v5.payload,v5.size)==PN_OK && pn_style_load(&io,&book,&loaded)==PN_UNSUPPORTED);
@@ -58,6 +58,15 @@ int main(void){char root[]="/tmp/pn-style-XXXXXX";assert(mkdtemp(root));char a[3
     pn_style_t bad=s;bad.tracking_percent=51;assert(pn_style_validate(&bad)==PN_INVALID);
     bad=s;bad.reading_line=3;assert(pn_style_validate(&bad)==PN_INVALID);bad=s;bad.reading_line_offset=9;assert(pn_style_validate(&bad)==PN_INVALID);bad.reading_line_offset=1;assert(pn_style_validate(&bad)==PN_INVALID);
     s.margin=63;assert(pn_style_save(&io,&book,&s)==PN_INVALID);s.margin=64;s.pixels=73;assert(pn_style_validate(&s)==PN_INVALID);
+    // 图片默认显示；新schema只在隐藏时使用，草稿/坏标志/外部背景完整往返。/ Images default to shown; use new schemas only when hidden and round-trip drafts, bad flags and external paper.
+    {pn_style_t visible=pn_style_default(44),hidden=visible;assert(!visible.hide_images);hidden.hide_images=1;hidden.background=7;
+     assert(!pn_style_same_typesetting(&visible,&hidden));assert(pn_style_save(&io,&book,&hidden)==PN_OK && pn_style_load(&io,&book,&loaded)==PN_OK && !memcmp(&hidden,&loaded,sizeof hidden));
+     pn_record_t record;assert(pn_journal_load(&io,&record)==PN_OK && record.payload[4]==9 && record.payload[7]==1);
+     record.payload[7]|=2;assert(pn_journal_save(&io,record.payload,record.size)==PN_OK && pn_style_load(&io,&book,&loaded)==PN_UNSUPPORTED);
+     hidden.background=PN_READING_BACKGROUND_EXTERNAL;strcpy(hidden.background_name,"original.png");hidden.background_identity.sha256[0]=1;
+     assert(pn_style_save(&io,&book,&hidden)==PN_OK && pn_style_load(&io,&book,&loaded)==PN_OK && !memcmp(&hidden,&loaded,sizeof hidden));assert(pn_journal_load(&io,&record)==PN_OK && record.payload[4]==10);
+     hidden.hide_images=2;assert(pn_style_validate(&hidden)==PN_INVALID && pn_style_save(&io,&book,&hidden)==PN_INVALID);
+     assert(pn_style_save(&io,&book,&visible)==PN_OK && pn_journal_load(&io,&record)==PN_OK && record.payload[4]==4 && pn_style_load(&io,&book,&loaded)==PN_OK && !loaded.hide_images);}
     pn_book_id_t other=book;other.sha256[1]=1;loaded=pn_style_default(30);assert(pn_style_load(&io,&other,&loaded)==PN_STALE_JOB && loaded.pixels==30);
     assert(pn_media_release(&media,&lease)==PN_OK);assert(unlink(a)==0 && unlink(b)==0 && rmdir(root)==0);puts("style: ranges, true journal reopen and book identity passed");return 0;
 }

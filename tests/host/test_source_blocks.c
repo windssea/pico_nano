@@ -17,6 +17,12 @@ int __wrap_fsync(int fd){if(fail_sync){fail_sync=false;return -1;}return __real_
 static pn_status_t space(void *ctx,const char *path,uint64_t *out){(void)ctx;(void)path;*out=full?64u*1024u*1024u:0;return PN_OK;}
 static bool cancel(void *ctx){return *(bool *)ctx;}
 static bool cancel_scan(void *ctx){return ++*(unsigned *)ctx>=3;}
+static unsigned digest_finishes;
+static pn_status_t digest_begin(void *ctx){pn_identity_accumulator_init(ctx);return PN_OK;}
+static pn_status_t digest_update(void *ctx,const void *bytes,size_t size){pn_identity_accumulator_update(ctx,bytes,size);return PN_OK;}
+static pn_status_t digest_finish(void *ctx,pn_book_id_t *out){pn_identity_accumulator_finish(ctx,out);digest_finishes++;return PN_OK;}
+static void digest_abort(void *ctx){(void)ctx;}
+static const pn_identity_digest_port_t digest_port={sizeof(pn_identity_accumulator_t),digest_begin,digest_update,digest_finish,digest_abort};
 typedef struct {pn_text_source_t source;pn_source_blocks_t *blocks;} capture_t;
 static pn_status_t capture_read(void *ctx,uint64_t off,uint8_t *out,size_t cap,size_t *n){
     capture_t *c=ctx;pn_status_t s=c->source.read_at(c->source.ctx,off,out,cap,n);
@@ -25,6 +31,7 @@ static pn_status_t capture_read(void *ctx,uint64_t off,uint8_t *out,size_t cap,s
 }
 static void flip(const char *path,long offset){FILE *f=fopen(path,"r+b");assert(f && !fseek(f,offset,SEEK_SET));int c=fgetc(f);assert(c!=EOF && !fseek(f,offset,SEEK_SET) && fputc(c^1,f)!=EOF && !fclose(f));}
 int main(void){
+    if(getenv("PN_SOURCE_DIGEST_PORT"))pn_identity_digest_port(&digest_port);
     char root[]="/tmp/pn-source-blocks-XXXXXX";assert(mkdtemp(root));
     char file_path[384],tf[384],state_path[384];snprintf(file_path,sizeof file_path,"%s/book.epub",root);snprintf(tf,sizeof tf,"%s/reading",root);snprintf(state_path,sizeof state_path,"%s/state",root);assert(!mkdir(state_path,0700));
     FILE *f=fopen(file_path,"wb");assert(f);for(unsigned i=0;i<16384u*11u+137u;i++)assert(fputc((int)((i*37u+i/257u)&255u),f)!=EOF);assert(!fclose(f));
@@ -81,5 +88,7 @@ int main(void){
     assert(pn_media_detach(&media)==PN_OK && source.validate(source.ctx)==PN_STALE_MEDIA);pn_source_blocks_close(&loaded);
     assert(pn_text_file_close(&file)==PN_OK && pn_media_release(&media,&guard)==PN_OK && pn_media_release(&state,&trust)==PN_OK);
     assert(!pool.used && !pool.live);pn_reading_store_space_ports(NULL,NULL,NULL);
+    if(getenv("PN_SOURCE_DIGEST_PORT"))assert(digest_finishes>=12);
+    pn_identity_digest_port(NULL);
     printf("source blocks: %u transaction boundaries, lazy corruption rejection, full table/root checks, OOM, space, sync, cancellation and media loss passed\n",steps);return 0;
 }

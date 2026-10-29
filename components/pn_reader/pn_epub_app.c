@@ -45,6 +45,7 @@ typedef struct {
     bool resume_key_valid,resume_bound,resume_dirty,resume_next_dirty; ///< 绑定与待写槽 / Binding and pending slots
     bool resume_pixels_ready,resume_good; ///< 本次恢复候选及完整绘制资格 / Restored candidate and complete-render eligibility
     bool next_continuing; ///< 同一次NEXT已开始分步排版，不逐步重读续读包 / This NEXT has started stepped layout; do not reread resume files on each step
+    bool bitmap_image_failed; ///< 本目标图片预绘失败后退回前台，避免空闲反复重解码 / Fall back to foreground after image prerender failure instead of repeated idle decoding
     bool index_attempted; ///< 本布局是否已尝试绑定可选页表；续读命中不提前载入 / Whether optional page-index binding was attempted for this layout; resume hits do not load it eagerly
     bool unshown_resume,resume_open_probed; ///< 未显示的完整续读候选与本次查包资格 / Complete unshown resume candidate and one-shot opening probe
     unsigned resume_missing,resume_pixels; ///< 页脚复画所需字形状态 / Glyph state needed to repaint chrome
@@ -119,7 +120,9 @@ static bool optional_image_error(pn_status_t s){return s==PN_EMPTY || s==PN_LIMI
 /// 最近一次插图失败原因，页脚附上数字便于定位（4超限/5内存/9格式/10损坏）。/ Latest illustration failure, appended to the footer as a number for diagnosis (4 limit, 5 memory, 9 format, 10 corrupt).
 static pn_status_t last_image_error;
 static pn_status_t image_size(void *ctx,const char *path,int maxw,int maxh,int *outw,int *outh){
-    app_t *a=ctx;pn_image_info_t info;pn_status_t status=pn_epub_image_probe(a->pool,&a->epub,path,&info);
+    app_t *a=ctx;
+    if(a->style.hide_images){*outw=maxw<256?maxw:256;*outh=maxh<160?maxh:160;return PN_OK;}
+    pn_image_info_t info;pn_status_t status=pn_epub_image_probe(a->pool,&a->epub,path,&info);
     if(status!=PN_OK){if(!optional_image_error(status))return status;*outw=maxw<256?maxw:256;*outh=maxh<160?maxh:160;return PN_OK;}
     uint64_t w=info.width,h=info.height;if(w>(unsigned)maxw){h=h*maxw/w;w=maxw;}if(h>(unsigned)maxh){w=w*maxh/h;h=maxh;}
     *outw=w?(int)w:1;*outh=h?(int)h:1;return PN_OK;
@@ -212,30 +215,40 @@ static pn_status_t paint_text_node(app_t *a,pn_frame_t *viewport,const pn_epub_p
     if(status==PN_EMPTY){int x=n->x_64/64,y=n->baseline-n->metrics.pixels,size=n->metrics.pixels-4;pn_frame_rect(viewport,x,y,size,1,0);pn_frame_rect(viewport,x,y+size,size,1,0);pn_frame_rect(viewport,x,y,1,size,0);pn_frame_rect(viewport,x+size,y,1,size,0);(*missing)++;return PN_OK;}
     return status;
 }
+/// 前台和空闲预绘共用原图片采样；空闲不回收前台缓存，取消始终有效。/ Foreground and idle prerender share original image sampling; idle never reclaims foreground caches and cancellation stays active.
+static pn_status_t paint_image_node(app_t *a,const pn_epub_page_t *page,const pn_epub_page_node_t *n,pn_frame_t *viewport,bool reclaim,pn_image_rect_t *rect){
+    const pn_epub_page_image_t *image=&page->images[n->image_index];pn_image_info_t info;
+    int x=n->x_64/64,y=n->baseline-image->height,w=image->width,h=image->height;
+    *rect=(pn_image_rect_t){x,y,w,h};
+    if(a->style.hide_images){pn_frame_rect(viewport,x,y,w,1,8);pn_frame_rect(viewport,x,y+h-1,w,1,8);pn_frame_rect(viewport,x,y,1,h,8);pn_frame_rect(viewport,x+w-1,y,1,h,8);return PN_OK;}
+    pn_status_t status=PN_OK;
+            if(page->count==1 && page->image_count==1 && !strcmp(image->path,a->info.cover_path)){
+                // 独页封面按原图比例居中适配正文区，不沿用段首缩进或源CSS的小尺寸；正文插图仍沿原排版。
+                // Fit a standalone declared cover centrally in the body using its native aspect ratio, ignoring paragraph indent/small CSS sizes; inline illustrations retain layout geometry.
+                status=pn_epub_image_probe(a->pool,&a->epub,image->path,&info);
+                if(status==PN_OK){uint64_t width=(unsigned)viewport->width,height=(uint64_t)info.height*width/info.width;
+                    if(height>(unsigned)viewport->height){height=(unsigned)viewport->height;width=(uint64_t)info.width*height/info.height;}
+                    w=width?(int)width:1;h=height?(int)height:1;x=(viewport->width-w)/2;y=(viewport->height-h)/2;}
+            }
+            if(status==PN_OK)status=pn_epub_image_draw(a->pool,&a->epub,image->path,viewport,(pn_image_rect_t){x,y,w,h},&info);
+            // 大图解码内存不足时先归还全部可重建缓存再试一次，封面插图不因邻页/字形缓存占用而缺失。
+            // When a large image runs out of memory, return every rebuildable cache and try once more so covers are not lost to neighbor/glyph caches.
+            if(status==PN_NO_MEMORY && reclaim){(void)pn_cache_reclaim(a->pool,SIZE_MAX);status=pn_epub_image_draw(a->pool,&a->epub,image->path,viewport,(pn_image_rect_t){x,y,w,h},&info);}
+    *rect=(pn_image_rect_t){x,y,w,h};return status;
+}
 static pn_status_t paint_body(app_t *a,pn_frame_t *frame,unsigned *missing,unsigned *missing_images){
     // 图片前压缩一次；普通文本页保留有界容量，失败时仍使用原缓冲。/ Compact once before images; text pages reuse bounded capacity and failures retain the original buffers.
     if(a->page.image_count)(void)compact(a);
     pn_status_t paper=pn_paper_draw(&a->paper,a->style.background,frame);if(paper!=PN_OK)return paper;paint_guides(a,frame,&a->page);
     pn_frame_t viewport={frame->pixels+PN_READER_TOP*frame->stride+a->style.margin/2,a->layout.width,PN_READER_HEIGHT,frame->stride};
-    bool standalone=a->page.count==1 && a->page.image_count==1;
+    bool standalone=!a->style.hide_images && a->page.count==1 && a->page.image_count==1;
     if(standalone){pn_profile_span_t image_timing;pn_profile_begin(&image_timing,a->pool,"epub.raster.image-cache");pn_status_t cached=pn_epub_image_cache_restore_guarded(&a->image_cache,&a->book_file,a->page.images[0].path,&a->style,&viewport,pn_source_blocks_partial(&a->blocks)?source_guard:NULL,a);pn_profile_end(&image_timing,cached);
         if(cached==PN_OK){pn_epub_reader_trim(&a->reader);suspend_fonts(a);pn_font_close(&a->ui);return PN_OK;}if(cached!=PN_EMPTY)return cached;}
     for(size_t i=0;i<a->page.count;i++){pn_epub_page_node_t *n=&a->page.nodes[i];pn_status_t status;
-        if(n->image_index!=UINT_MAX){pn_epub_reader_trim(&a->reader);suspend_fonts(a);pn_font_close(&a->ui);pn_epub_page_image_t *image=&a->page.images[n->image_index];pn_image_info_t info;
+        if(n->image_index!=UINT_MAX){pn_epub_reader_trim(&a->reader);suspend_fonts(a);pn_font_close(&a->ui);pn_epub_page_image_t *image=&a->page.images[n->image_index];
             int x=n->x_64/64,y=n->baseline-image->height,w=image->width,h=image->height;
-            status=PN_OK;
-            if(a->page.count==1 && a->page.image_count==1 && !strcmp(image->path,a->info.cover_path)){
-                // 独页封面按原图比例居中适配正文区，不沿用段首缩进或源CSS的小尺寸；正文插图仍沿原排版。
-                // Fit a standalone declared cover centrally in the body using its native aspect ratio, ignoring paragraph indent/small CSS sizes; inline illustrations retain layout geometry.
-                status=pn_epub_image_probe(a->pool,&a->epub,image->path,&info);
-                if(status==PN_OK){uint64_t width=(unsigned)viewport.width,height=(uint64_t)info.height*width/info.width;
-                    if(height>(unsigned)viewport.height){height=(unsigned)viewport.height;width=(uint64_t)info.width*height/info.height;}
-                    w=width?(int)width:1;h=height?(int)height:1;x=(viewport.width-w)/2;y=(viewport.height-h)/2;}
-            }
-            if(status==PN_OK)status=pn_epub_image_draw(a->pool,&a->epub,image->path,&viewport,(pn_image_rect_t){x,y,w,h},&info);
-            // 大图解码内存不足时先归还全部可重建缓存再试一次，封面插图不因邻页/字形缓存占用而缺失。
-            // When a large image runs out of memory, return every rebuildable cache and try once more so covers are not lost to neighbor/glyph caches.
-            if(status==PN_NO_MEMORY){(void)pn_cache_reclaim(a->pool,SIZE_MAX);status=pn_epub_image_draw(a->pool,&a->epub,image->path,&viewport,(pn_image_rect_t){x,y,w,h},&info);}
+            if(a->style.hide_images){pn_frame_rect(&viewport,x,y,w,1,8);pn_frame_rect(&viewport,x,y+h-1,w,1,8);pn_frame_rect(&viewport,x,y,1,h,8);pn_frame_rect(&viewport,x+w-1,y,1,h,8);continue;}
+            pn_image_rect_t rect;status=paint_image_node(a,&a->page,n,&viewport,true,&rect);x=rect.x;y=rect.y;w=rect.width;h=rect.height;
             if(status!=PN_OK){if(!optional_image_error(status))return status;last_image_error=status;
                 pn_frame_rect(&viewport,x,y,w,h,15);pn_frame_rect(&viewport,x,y,w,1,8);pn_frame_rect(&viewport,x,y+h-1,w,1,8);pn_frame_rect(&viewport,x,y,1,h,8);pn_frame_rect(&viewport,x+w-1,y,1,h,8);(*missing_images)++;}
             continue;}
@@ -269,8 +282,18 @@ static bool bitmap_key(app_t *a,pn_job_token_t token,const pn_epub_reader_anchor
 static bool bitmap_allowed(const app_t *a){return !a->suspended && !a->lost && !a->style_preview && !a->style_pending && !a->font_preview && !a->font_pending && !a->font_view && !a->draft_render;}
 static pn_status_t bitmap_finish(app_t *);
 static pn_status_t bitmap_copy(app_t *a,pn_frame_t *frame,const pn_epub_reader_receipt_t *receipt,unsigned *missing){
-    if(!bitmap_allowed(a) || receipt->intent!=PN_READ_NEXT || a->page.image_count || (!a->bitmap.ready && (!a->bitmap.working || !a->bitmap.cursor || a->bitmap.total!=a->page.count)) || !bitmap_key(a,receipt->token,&receipt->anchor))return PN_EMPTY;
-    pn_cache_pin(&a->bitmap.owner);pn_status_t s=a->bitmap.ready?PN_OK:bitmap_finish(a);if(s==PN_OK)s=font_size(a,a->bitmap_last_pixels);if(s==PN_OK)s=pn_font_chain_validate(chain(a));if(s==PN_OK)s=pn_page_bitmap_copy(&a->bitmap,frame,missing);pn_cache_unpin(&a->bitmap.owner);
+    if(!bitmap_allowed(a) || receipt->intent!=PN_READ_NEXT || (a->page.image_count && !a->bitmap.ready) || (!a->bitmap.ready && (!a->bitmap.working || !a->bitmap.cursor || a->bitmap.total!=a->page.count)) || !bitmap_key(a,receipt->token,&receipt->anchor))return PN_EMPTY;
+    pn_cache_pin(&a->bitmap.owner);pn_status_t s=PN_OK;
+    // 图片缓存也先复核来源；不把完整像素当作来源证明。/ Revalidate image sources before cached pixels; complete pixels are never source proof.
+    if(a->page.image_count && !a->style.hide_images){
+        if(!pn_source_blocks_partial(&a->blocks))s=pn_text_file_verify_handle(a->pool,&a->book_file);
+        for(size_t i=0;s==PN_OK && i<a->page.image_count;i++)s=source_guard(a,a->page.images[i].path);
+    }
+    if(s==PN_OK && !a->bitmap.ready)s=bitmap_finish(a);
+    if(s==PN_OK)s=font_size(a,a->bitmap_last_pixels);
+    if(s==PN_OK)s=pn_font_chain_validate(chain(a));
+    if(s==PN_OK)s=pn_page_bitmap_copy(&a->bitmap,frame,missing);
+    pn_cache_unpin(&a->bitmap.owner);
     if(s==PN_NO_MEMORY){pn_page_bitmap_enable(&a->bitmap,false);pn_page_bitmap_enable(&a->bitmap,true);return PN_EMPTY;}return s;
 }
 static pn_status_t paint_impl(app_t *a,pn_frame_t *frame,const pn_epub_reader_receipt_t *receipt){
@@ -918,15 +941,21 @@ static pn_status_t navigate(pn_epub_app_t *app,pn_reader_action_t action,const p
 }
 pn_status_t pn_epub_app_step(pn_epub_app_t *app,pn_reader_action_t action,uint64_t now,pn_reader_present_fn present,void *ctx){return navigate(app,action,NULL,now,present,ctx,false);}
 pn_status_t pn_epub_app_step_yield(pn_epub_app_t *app,pn_reader_action_t action,uint64_t now,pn_reader_present_fn present,void *ctx){return navigate(app,action,NULL,now,present,ctx,true);}
-/// 图片页不预热；文本使用前台同一字号/回退/亚像素缓存键。 / Skip image-page warming; text uses the foreground size, fallback and subpixel cache key.
+/// 此字形入口跳过图片节点；图片在正常空闲的整页预绘中处理。/ This glyph entry skips image nodes, which normal-idle full-page prerender handles separately.
 static pn_status_t warm_glyph(void *ctx,const pn_epub_page_node_t *n){app_t *a=ctx;if(n->image_index!=UINT_MAX || n->codepoint==9 || n->codepoint==10)return PN_EMPTY;pn_status_t s=font_size(a,n->metrics.pixels);pn_font_choice_t choice;if(s==PN_OK)s=pn_font_chain_choose(chain(a),n->codepoint,&choice);return s==PN_OK?pn_font_warm(choice.font,n->codepoint,n->x_64):s;}
-typedef struct {app_t *app;const pn_epub_page_t *page;size_t budget;bool prepared;} bitmap_work_t; ///< 仅回调期借用邻页 / Neighbor borrowing lasts only for a callback
+typedef struct {app_t *app;const pn_epub_page_t *page;size_t budget;bool prepared,images;} bitmap_work_t; ///< 仅回调期借用邻页 / Neighbor borrowing lasts only for a callback
 /// 一个字形是可保留的最小绘制单元；仍在前后检查输入，介质/字体验证不屏蔽。
 /// One glyph is the smallest retained painting unit; check input before/after it without suppressing media/font validation.
 static pn_status_t bitmap_paint(void *ctx,pn_frame_t *frame,size_t first,size_t count,unsigned *missing){
     bitmap_work_t *work=ctx;app_t *a=work->app;if(count!=1)return PN_INVALID;
-    pn_cancel_scope_t atomic;pn_cancel_enter(&atomic,NULL,NULL);
     if(!first)paint_guides(a,frame,work->page);
+    const pn_epub_page_node_t *node=&work->page->nodes[first];
+    if(node->image_index!=UINT_MAX){
+        pn_frame_t viewport={frame->pixels+PN_READER_TOP*frame->stride+a->style.margin/2,a->layout.width,PN_READER_HEIGHT,frame->stride};pn_image_rect_t rect;
+        pn_profile_span_t timing;pn_profile_begin(&timing,a->pool,"epub.bitmap.image");
+        pn_status_t s=paint_image_node(a,work->page,node,&viewport,false,&rect);pn_profile_end(&timing,s);return s;
+    }
+    pn_cancel_scope_t atomic;pn_cancel_enter(&atomic,NULL,NULL);
     pn_status_t s=font_size(a,a->bitmap_last_pixels);
     pn_frame_t viewport={frame->pixels+PN_READER_TOP*frame->stride+a->style.margin/2,a->layout.width,PN_READER_HEIGHT,frame->stride};
     if(s==PN_OK)s=paint_text_node(a,&viewport,&work->page->nodes[first],missing,work->prepared);
@@ -948,21 +977,24 @@ static pn_status_t bitmap_finish(app_t *a){
 }
 static pn_status_t bitmap_visit(void *ctx,const pn_epub_page_t *page,const pn_epub_reader_anchor_t *anchor,pn_job_token_t token){
     bitmap_work_t *work=ctx;app_t *a=work->app;if(!a->bitmap.enabled)return PN_EMPTY;
-    if(a->page.image_count || page->image_count){pn_page_bitmap_enable(&a->bitmap,false);pn_page_bitmap_enable(&a->bitmap,true);return PN_EMPTY;}
+    // 图片只在正常空闲预绘；面板扫描重叠不做图片解码。/ Decode images only during normal idle prerender, never during panel-scan overlap.
+    if(page->image_count && !work->images){if(!bitmap_key(a,token,anchor))pn_page_bitmap_invalidate(&a->bitmap);return PN_EMPTY;}
+    if(page->image_count && a->bitmap_image_failed && bitmap_key(a,token,anchor))return PN_EMPTY;
     if(!bitmap_key(a,token,anchor) || (!a->bitmap.working && !a->bitmap.ready)){
         pn_status_t s=pn_page_bitmap_begin(&a->bitmap,page->count);if(s!=PN_OK)return s;
         if(a->style.background){pn_cache_pin(&a->bitmap.owner);s=pn_paper_draw(&a->paper,a->style.background,&a->bitmap.frame);pn_cache_unpin(&a->bitmap.owner);if(s!=PN_OK){pn_page_bitmap_invalidate(&a->bitmap);return s;}}
-        a->bitmap_token=token;a->bitmap_anchor=*anchor;a->bitmap_last_pixels=a->style.pixels;
+        a->bitmap_token=token;a->bitmap_anchor=*anchor;a->bitmap_last_pixels=a->style.pixels;a->bitmap_image_failed=false;
     }
     if(a->bitmap.ready)return PN_EMPTY;
     work->page=page;int pixels=body(a)->impl?body(a)->pixels:a->style.pixels;
     pn_cache_class_t kind=a->pool->speculative_kind;pn_cache_speculate(a->pool,true);a->pool->speculative_kind=PN_CACHE_NEIGHBOR;
     pn_status_t s=bitmap_advance(a,page,work->budget,true);
+    if(page->image_count && s!=PN_OK && s!=PN_CANCELLED)a->bitmap_image_failed=true;
     if(body(a)->impl && body(a)->pixels!=pixels){pn_status_t restored=font_size(a,pixels);if(s==PN_OK && restored!=PN_OK){pn_page_bitmap_invalidate(&a->bitmap);s=restored;}}
     a->pool->speculative_kind=kind;pn_cache_speculate(a->pool,false);return s;
 }
-static pn_status_t bitmap_prepare(app_t *a,size_t budget){
-    bitmap_work_t work={.app=a,.budget=budget};pn_profile_span_t span;pn_profile_begin(&span,a->pool,"epub.bitmap.step");pn_status_t s=pn_epub_reader_visit_next(&a->reader,bitmap_visit,&work);pn_profile_end(&span,s);
+static pn_status_t bitmap_prepare(app_t *a,size_t budget,bool images){
+    bitmap_work_t work={.app=a,.budget=budget,.images=images};pn_profile_span_t span;pn_profile_begin(&span,a->pool,"epub.bitmap.step");pn_status_t s=pn_epub_reader_visit_next(&a->reader,bitmap_visit,&work);pn_profile_end(&span,s);
     if(s==PN_EMPTY && a->bitmap.working)pn_page_bitmap_invalidate(&a->bitmap);
     if(s==PN_NO_MEMORY){pn_page_bitmap_enable(&a->bitmap,false);pn_page_bitmap_enable(&a->bitmap,true);return PN_EMPTY;}return s;
 }
@@ -971,7 +1003,7 @@ pn_status_t pn_epub_app_trim_bitmap(pn_epub_app_t *app){if(!app || !app->impl)re
 pn_page_bitmap_stats_t pn_epub_app_prerender_stats(const pn_epub_app_t *app){return pn_page_bitmap_stats(app && app->impl?&((app_t *)app->impl)->bitmap:NULL);}
 bool pn_epub_app_prefetch_pending(const pn_epub_app_t *app){const app_t *a=app?app->impl:NULL;return a && bitmap_allowed(a) && (pn_epub_reader_next_pending(&a->reader) || pn_epub_app_warm_pending(app));}
 bool pn_epub_app_warm_pending(const pn_epub_app_t *app){
-    const app_t *a=app?app->impl:NULL;return a && bitmap_allowed(a) && (a->bitmap.working || (!a->bitmap.ready && pn_epub_reader_warm_pending(&a->reader)));
+    const app_t *a=app?app->impl:NULL;return a && bitmap_allowed(a) && (a->bitmap.working || (!a->bitmap.ready && (pn_epub_reader_warm_pending(&a->reader) || (a->bitmap.enabled && !a->bitmap_image_failed && pn_epub_reader_next_has_images(&a->reader)))));
 }
 /// 面板扫描期间的一小步：先为待确认页排下一页，再每次预热8个字形；不呈现、不改提交状态，失败只停止重叠。
 /// One small step during a panel scan: lay out the page after the pending one, then warm 8 glyphs per call; never presents or changes committed state, and failures only stop overlapping.
@@ -981,7 +1013,7 @@ pn_status_t pn_epub_app_overlap(pn_epub_app_t *app){
     if(!a || a->suspended || a->lost || a->style_preview || a->style_pending || a->font_preview || a->font_pending || a->font_view)return PN_EMPTY;
     if(a->bitmap.frame.pixels && !pn_epub_reader_next_ready(&a->reader)){bool enabled=a->bitmap.enabled;pn_page_bitmap_enable(&a->bitmap,false);pn_page_bitmap_enable(&a->bitmap,enabled);}
     pn_status_t status=pn_epub_reader_prefetch(&a->reader);if(status==PN_BUSY)return PN_OK;if(status!=PN_OK && status!=PN_EMPTY)return PN_EMPTY;
-    pn_status_t painted=bitmap_prepare(a,8);if(painted==PN_OK)return PN_OK;if(painted!=PN_EMPTY || a->bitmap.ready || !pn_epub_reader_warm_pending(&a->reader))return status==PN_OK?PN_OK:PN_EMPTY;
+    pn_status_t painted=bitmap_prepare(a,8,false);if(painted==PN_OK)return PN_OK;if(painted!=PN_EMPTY || a->bitmap.ready || !pn_epub_reader_warm_pending(&a->reader))return status==PN_OK?PN_OK:PN_EMPTY;
     int pixels=body(a)->pixels;pn_cache_class_t kind=a->pool->speculative_kind;pn_cache_speculate(a->pool,true);a->pool->speculative_kind=PN_CACHE_GLYPH;
     pn_status_t warmed=pn_epub_reader_warm_next(&a->reader,warm_glyph,a,8);if(body(a)->impl && body(a)->pixels!=pixels)(void)font_size(a,pixels);
     a->pool->speculative_kind=kind;pn_cache_speculate(a->pool,false);return warmed==PN_OK?PN_OK:PN_EMPTY;
@@ -998,7 +1030,7 @@ pn_status_t pn_epub_app_prefetch(pn_epub_app_t *app){
     if(a->bitmap.frame.pixels && !pn_epub_reader_next_ready(&a->reader)){bool enabled=a->bitmap.enabled;pn_page_bitmap_enable(&a->bitmap,false);pn_page_bitmap_enable(&a->bitmap,enabled);}
     pn_status_t status=pn_epub_reader_prefetch(&a->reader);if(status==PN_BUSY)return PN_OK;
     // 空闲每步16节点，缩短位图就绪所需轮数；扫描期仍为8，不增加扫描争用。/ Process 16 nodes per idle step to finish sooner; scan-time steps remain 8 to preserve scan contention limits.
-    if(status==PN_OK || status==PN_EMPTY){pn_status_t painted=bitmap_prepare(a,16);if(painted==PN_OK)return PN_OK;if(painted!=PN_EMPTY)return painted;if(a->bitmap.ready)return index_idle(a,status);}
+    if(status==PN_OK || status==PN_EMPTY){pn_status_t painted=bitmap_prepare(a,16,true);if(painted==PN_OK)return PN_OK;if(painted!=PN_EMPTY)return painted;if(a->bitmap.ready)return index_idle(a,status);}
     if(status==PN_OK || status==PN_EMPTY){pn_profile_span_t span;pn_profile_begin(&span,a->pool,"epub.glyph-warm");int pixels=body(a)->pixels;pn_cache_class_t kind=a->pool->speculative_kind;pn_cache_speculate(a->pool,true);a->pool->speculative_kind=PN_CACHE_GLYPH;
         pn_status_t warmed=pn_epub_reader_warm_next(&a->reader,warm_glyph,a,24);if(body(a)->impl && body(a)->pixels!=pixels)(void)font_size(a,pixels);
         a->pool->speculative_kind=kind;pn_cache_speculate(a->pool,false);pn_profile_end(&span,warmed);if(warmed!=PN_OK && warmed!=PN_EMPTY && warmed!=PN_NO_MEMORY)return warmed;}

@@ -27,14 +27,27 @@ static pn_status_t cover_extract_begin(pn_cover_work_t *work,pn_pool_t *pool,pn_
     cover_extract_t *j=pn_alloc_tagged(pool,PN_MEM_IMAGE,sizeof *j);if(!j)return PN_NO_MEMORY;
     *j=(cover_extract_t){.media=media,.lease=*lease,.item=*item,.slot=slot,.budget=budget,.keyed=keyed,.result=PN_EMPTY};if(keyed){j->key=*key;j->key_known=true;}else j->key_known=cover_key(NULL,item,&j->key)==PN_OK;memcpy(j->salt,salt,16);
     if(cover_pool_init(&j->sub,pool,budget-pn_alloc_size(j),&j->allocator)!=PN_OK){pn_free(j);return PN_INVALID;}
-    work->extract=j;return PN_BUSY;
+    work->extract=j;pn_profile_file(pool,"cover.job.begin",PN_BUSY,item->path);return PN_BUSY;
 }
 static void cover_extract_image_done(cover_extract_t *j,pn_status_t s){
+    if(s==PN_CANCELLED){
+        // 解码器可能已因取消关闭；仅重开图片，保留已校验ZIP与作品信息。/ A decoder may have closed on cancellation: restart only the image, retaining verified ZIP and publication metadata.
+        pn_image_job_close(&j->image);source_close(&j->source);pn_free(j->scratch_pixels);j->scratch_pixels=NULL;pn_free(j->pixels);j->pixels=NULL;j->row=0;
+        if(j->phase==CEX_IMAGE_FILE){(void)pn_text_file_close(&j->image_file);return;}
+        if(j->phase!=CEX_PROBE)j->phase=CEX_SETUP;
+        return;
+    }
     pn_image_job_close(&j->image);source_close(&j->source);pn_free(j->scratch_pixels);j->scratch_pixels=NULL;
     pn_status_t closed=pn_text_file_close(&j->image_file);if(s==PN_OK)s=closed;j->result=s;
     j->phase=j->external && j->item.format==PN_BOOK_EPUB?CEX_META_FILE:CEX_FINISH;
 }
 static void cover_extract_metadata_error(cover_extract_t *j,pn_status_t s){
+    if(s==PN_CANCELLED){
+        // ZIP任务自身可续；XML资源流中断时只重建出版物，不重新扫描归档。/ ZIP jobs resume themselves; interrupted XML streams rebuild only the publication, never the archive.
+        if(j->phase==CEX_META_FILE)(void)pn_text_file_close(&j->book_file);
+        if(j->phase==CEX_META_EPUB)pn_epub_job_close(&j->publication);
+        return;
+    }
     if(!j->external || s==PN_CANCELLED || s==PN_STALE_MEDIA)j->result=s;
     j->phase=CEX_FINISH;
 }
@@ -58,7 +71,7 @@ static pn_status_t cover_extract_step(cover_extract_t *j){
         s=pn_epub_info(&j->epub,&j->info);if(s!=PN_OK){cover_extract_metadata_error(j,s);break;}
         snprintf(j->display.title,sizeof j->display.title,"%s",j->info.title);snprintf(j->display.author,sizeof j->display.author,"%s",j->info.creator);
         if(j->external || !*j->info.cover_path)j->phase=CEX_FINISH;
-        else{j->source=(cover_source_t){.epub=&j->epub,.path=j->info.cover_path};j->phase=CEX_PROBE;}break;
+        else{j->source=(cover_source_t){.zip=&j->zip,.path=j->info.cover_path};j->phase=CEX_PROBE;}break;
     case CEX_IMAGE_FILE:
         s=pn_text_file_open(&j->image_file,j->media,&j->lease,j->external_path,&j->image_source);
         if(s==PN_OK)s=pn_text_file_cache_bind(&j->image_source,&j->sub);
@@ -79,7 +92,7 @@ static pn_status_t cover_extract_step(cover_extract_t *j){
         if(s==PN_OK)s=pn_image_job_begin(&j->image,&j->sub,&j->input,&j->scratch,(pn_image_rect_t){0,0,sw,sh});
         if(s==PN_OK){
             // 元数据已复制，资源流只借ZIP；解码前释放OPF模型给大JPEG系数让位。/ Metadata is copied and the resource stream borrows only ZIP; release the OPF model before decoding to leave room for large JPEG coefficients.
-            if(j->source.epub)pn_epub_close(&j->epub);
+            if(j->source.zip)pn_epub_close(&j->epub);
             // 顺序图片流无需保留元信息读取块；避免JPEG误走被禁止的磁盘后备。/ Sequential image streams need no metadata read blocks; avoid forcing JPEG into forbidden disk backing.
             (void)pn_cache_reclaim(&j->sub,SIZE_MAX);
             j->phase=CEX_DRAW;
@@ -87,7 +100,7 @@ static pn_status_t cover_extract_step(cover_extract_t *j){
     }
     case CEX_DRAW:
         s=pn_image_job_step(&j->image,&j->image_info);
-        if(s==PN_OK && j->source.epub && !pn_zip_stream_verified(&j->source.stream))s=PN_CORRUPT;
+        if(s==PN_OK && j->source.zip && !pn_zip_stream_verified(&j->source.stream))s=PN_CORRUPT;
         if(s==PN_OK){source_close(&j->source);j->phase=CEX_DOWN;}else if(s!=PN_BUSY)cover_extract_image_done(j,s);break;
     case CEX_DOWN:{
         unsigned last=j->row+4;if(last>j->height)last=j->height;int ox=(PN_COVER_WIDTH-(int)j->width)/2,oy=(PN_COVER_HEIGHT-(int)j->height)/2;unsigned area=j->scale*j->scale;

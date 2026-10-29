@@ -41,6 +41,7 @@ add_test(NAME cache_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_
 add_test(NAME bookmark_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_bookmark_window.py $<TARGET_FILE:pn_sim>)
 add_test(NAME recent_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_recent_window.py $<TARGET_FILE:pn_sim>)
 add_test(NAME style_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_style_window.py $<TARGET_FILE:pn_sim>)
+add_test(NAME image_options_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_image_options_window.py $<TARGET_FILE:pn_sim>)
 endif()
 
 if(PN_SIM_SDL)

@@ -1,5 +1,13 @@
 # PicoNano 构建、运行与验证
 
+## 2026-10-29 封面与图片阅读定向回归
+
+本批主机定向22/22、SDL4/4通过；可选摘要准入收口后另补测6/6，非全系统矩阵；没有新SDK固件构建、刷机或发布。过程及源码证据在忽略的`build-dev/cover-open-20261029/`。主机隔离目录`host/`，SDL隔离目录`sdl/`，沿`tools/dev.py host/sdl`同一CMake/ASan/UBSan流程，构建并行2避免资源争用。原始结果`test-final-2.log`、`sdl-test-final.log`。
+
+新增`source_blocks_digest`以独立软件SHA端口oracle验证相同来源表及原损坏/事务边界；`device_identity`覆盖真实设备端口的16/8KiB余量、交错摘要、失败不改输出与释放（PSA/堆为显式主机替身）。`epub_image_options`用原创PNG和渐进JPEG检查正常/预绘整帧相同、扫描重叠不解码、解码中取消、预绘后原书变化拒绝、图片关闭零探测/解码、逐书重开及恢复；`image_options_window`走真实SDL触摸和跨进程配置。`cover_work_lifecycle`增加阶段内部取消后续跑及完整像素oracle；实际设备调度提取测试保留冻结优先，再检查可见封面优先，修正前源码在新增判据失败。
+
+`pixels/comparison.json`另记录旧`build-host/epub_app_capture`与新捕获器对同一原创PNG/渐进JPEG图片页的831760B完整PGM逐字节一致；这不是实卡或光学验收。`style-options.png`为新设置页的主机帧。可见Release模拟器仍按`tools/run_sim.ps1 -Demo -Script 'library,enter,styles'`入口重建后重启；新固件须按本仓库AGENTS的新批次规则另行确认构建/刷入。
+
 ## 2026-10-29 娱乐入口与退出清屏源码批次
 
 娱乐页统一为三张612×208横卡，x36、顶部304/544/784，卡隙不触发。新中心坐标为数独(342,408)、推箱子(342,648)、扫雷(342,888)；从书库先点娱乐(460,190)，再点对应卡片。示例推箱子为`library,tap:460:190,tap:342:648,tap:340:952`，扫雷为`library,tap:460:190,tap:342:888,tap:340:980`。游戏退出及实体中键在可靠保存后共用一次`epd_clear()`加from-white手动深度清屏；保存失败不得退出或清屏。

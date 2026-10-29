@@ -113,14 +113,19 @@ __attribute__((noinline)) static pn_status_t job_small(void *state,void *ctx,uin
 }
 static pn_status_t job_step(void *state,void *ctx,uint64_t offset,size_t cap,pn_identity_read_fn read,size_t *got){
     const uint32_t caps=MALLOC_CAP_DMA|MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT;
-    if(cap>4096 && heap_caps_get_largest_free_block(caps)>=DMA_STREAM_BYTES+DMA_LARGEST_RESERVE && heap_caps_get_free_size(caps)>=DMA_STREAM_BYTES+DMA_INTERNAL_RESERVE){
-        uint8_t *block=heap_caps_aligned_alloc(16,DMA_STREAM_BYTES,caps);
-        if(block){pn_status_t s=job_read(state,ctx,offset,cap,read,block,DMA_STREAM_BYTES,got);heap_caps_free(block);return s;}
+    // 大块不足时逐级降到16/8KiB，保留相同内部余量，不长期占用DMA内存。/ Fall back through 16/8 KiB while preserving the same internal reserves and no retained DMA scratch.
+    const size_t sizes[]={DMA_STREAM_BYTES,16u*1024u,8u*1024u};
+    for(unsigned i=0;cap>4096 && i<sizeof sizes/sizeof sizes[0];i++)if(stream_headroom(sizes[i],caps)){
+        uint8_t *block=heap_caps_aligned_alloc(16,sizes[i],caps);
+        if(block){pn_status_t s=job_read(state,ctx,offset,cap,read,block,sizes[i],got);heap_caps_free(block);return s;}
     }
     return job_small(state,ctx,offset,cap,read,got);
 }
 static pn_status_t job_finish(void *state,pn_book_id_t *out){size_t n=0;return psa_hash_finish(state,out->sha256,sizeof out->sha256,&n)==PSA_SUCCESS && n==sizeof out->sha256?PN_OK:PN_IO;}
 static void job_abort(void *state){(void)psa_hash_abort(state);}
+/// 源块摘要复用SDK增量SHA，不重复读取或改变分块身份。/ Source-block digests reuse incremental SDK SHA without rereads or changed block identities.
+static pn_status_t digest_update(void *state,const void *bytes,size_t size){return psa_hash_update(state,bytes,size)==PSA_SUCCESS?PN_OK:PN_IO;}
+static const pn_identity_digest_port_t captured={sizeof(psa_hash_operation_t),job_begin,digest_update,job_finish,job_abort};
 static const pn_identity_job_port_t incremental={sizeof(psa_hash_operation_t),job_begin,job_step,job_finish,job_abort};
 static pn_status_t probe(void *ctx,uint64_t at,uint8_t *out,size_t cap,size_t *n){
     (void)ctx;if(at>=3 || !cap)return PN_IO;*n=3-(size_t)at;if(*n>cap)*n=cap;memcpy(out,"abc"+at,*n);return PN_OK;
@@ -154,6 +159,6 @@ pn_status_t pn_device_identity_init(void){
         job_abort(&operation);
     }
     if(status==PN_OK && memcmp(&expected,&actual,sizeof actual))status=PN_CORRUPT;
-    if(status==PN_OK){pn_identity_stream_port(stream);pn_identity_pooled_port(pooled_stream);pn_identity_job_port(&incremental);}
+    if(status==PN_OK){pn_identity_stream_port(stream);pn_identity_pooled_port(pooled_stream);pn_identity_job_port(&incremental);pn_identity_digest_port(&captured);}
     return status;
 }

@@ -30,6 +30,8 @@ typedef struct {
     uint8_t *hashes;
     uint8_t checked[MAX_BLOCKS/8];
     pn_identity_accumulator_t capture;
+    pn_identity_digest_t capture_digest; ///< 同一完整块SHA的可选硬件端口，状态计入原池 / Optional hardware port for the same complete-block SHA, charged to the existing pool
+    bool capture_hardware; ///< 当前块使用硬件上下文 / Current block uses the hardware context
     uint64_t fed;
     unsigned count,filled,root_count,phase;
     size_t written;
@@ -147,12 +149,20 @@ void pn_source_blocks_feed(pn_source_blocks_t *h,uint64_t offset,const uint8_t *
     blocks_t *b=h?h->impl:NULL;if(!b || b->ready || b->failed)return;
     if(offset!=b->fed || size>b->raw.size-b->fed){b->failed=true;return;}
     while(size){size_t n=BLOCK-(size_t)(b->fed%BLOCK);if(n>size)n=size;
-        pn_identity_accumulator_update(&b->capture,data,n);b->fed+=n;data+=n;size-=n;
-        if(!(b->fed%BLOCK) || b->fed==b->raw.size){pn_book_id_t id;pn_identity_accumulator_finish(&b->capture,&id);memcpy(b->hashes+32u*b->filled++,id.sha256,32);pn_identity_accumulator_init(&b->capture);}
+        if(!(b->fed%BLOCK))b->capture_hardware=pn_identity_digest_begin(&b->capture_digest,b->pool)==PN_OK;
+        pn_profile_span_t span;pn_profile_begin(&span,b->pool,"source.blocks.capture-hash");
+        pn_status_t s=PN_OK;if(b->capture_hardware)s=pn_identity_digest_update(&b->capture_digest,data,n);else pn_identity_accumulator_update(&b->capture,data,n);
+        if(s!=PN_OK){b->failed=true;pn_profile_end(&span,s);return;}
+        b->fed+=n;data+=n;size-=n;
+        if(!(b->fed%BLOCK) || b->fed==b->raw.size){pn_book_id_t id;
+            if(b->capture_hardware)s=pn_identity_digest_finish(&b->capture_digest,&id);else pn_identity_accumulator_finish(&b->capture,&id);
+            if(s==PN_OK){memcpy(b->hashes+32u*b->filled++,id.sha256,32);pn_identity_accumulator_init(&b->capture);}else b->failed=true;
+        }
+        pn_profile_end(&span,s);if(s!=PN_OK)return;
     }
 }
 void pn_source_blocks_finish(pn_source_blocks_t *h,const pn_book_id_t *book){
-    blocks_t *b=h?h->impl:NULL;if(!b || b->ready || b->failed || b->fed!=b->raw.size || b->filled!=b->count)return;
+    blocks_t *b=h?h->impl:NULL;if(!b)return;pn_identity_digest_close(&b->capture_digest);if(b->ready || b->failed || b->fed!=b->raw.size || b->filled!=b->count)return;
     b->book=*book;b->ready=b->dirty=true;if(b->immutable)memset(b->checked,255,sizeof b->checked);
 }
 bool pn_source_blocks_ready(const pn_source_blocks_t *h){const blocks_t *b=h?h->impl:NULL;return b && b->ready && !b->failed;}
@@ -168,7 +178,7 @@ void pn_source_blocks_abort(pn_source_blocks_t *h){
     if(b->writer.ticket)(void)pn_media_release(b->media,&b->writer);
     b->owned=b->root_owned=false;b->phase=0;b->written=0;b->commit=(pn_cache_commit_t){0};
 }
-void pn_source_blocks_close(pn_source_blocks_t *h){if(h && h->impl){blocks_t *b=h->impl;pn_source_blocks_abort(h);pn_free(b->hashes);pn_free(b);h->impl=NULL;}}
+void pn_source_blocks_close(pn_source_blocks_t *h){if(h && h->impl){blocks_t *b=h->impl;pn_source_blocks_abort(h);pn_identity_digest_close(&b->capture_digest);pn_free(b->hashes);pn_free(b);h->impl=NULL;}}
 pn_status_t pn_source_blocks_store(pn_source_blocks_t *h,pn_media_t *state,const pn_media_lease_t *trust,const char *tf,const char *root){
     blocks_t *b=h?h->impl:NULL;if(!pn_source_blocks_dirty(h))return PN_EMPTY;
     pn_status_t s=valid(b);if(s!=PN_OK)return s;

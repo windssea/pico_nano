@@ -1010,7 +1010,7 @@ static int library_worker(void *ctx){
             }
             cancel_pointer(&input,&tap,true);navigation_press=(pn_tap_press_t){0};shelf_gesture=(pn_shelf_gesture_t){0};continue;
         }
-        if(got){bool cover_focus=(view%32u==16u || view%32u==17u) && event.type==SDL_KEYDOWN && (event.key.keysym.sym==SDLK_UP || event.key.keysym.sym==SDLK_DOWN) && s->pool->used<=s->pool->limit && s->pool->limit-s->pool->used>=512u*1024u;
+        if(got){bool cover_focus=(view%32u==16u || view%32u==17u) && !s->covers_inactive && s->pool->used<=s->pool->limit && s->pool->limit-s->pool->used>=512u*1024u;
             if(cover_focus)pn_cover_write_abort(&s->cover_work.writer);else pn_cover_work_abort(&s->cover_work);pn_feedback_idle_activity(&s->feedback_idle,now);}
         if(got && event.type==SDL_WINDOWEVENT && event.window.event==SDL_WINDOWEVENT_FOCUS_LOST){s->pointer_down=false;s->toc_pointer=false;s->font_pointer=false;cancel_pointer(&input,&tap,true);}
         int navigation=-1;bool navigation_consumed=false,navigation_selected=false;

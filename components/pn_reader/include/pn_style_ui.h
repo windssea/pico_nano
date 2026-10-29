@@ -28,7 +28,7 @@
 #define PN_SUI_BACKGROUND_EXTERNAL 96 ///< 96..101为当前六张外部背景 / 96..101 select the six current external papers
 #define PN_SUI_INDENT 14 ///< 切换首行缩进（0或2字）/ Toggle the first-line indent (0 or 2 characters)
 #define PN_SUI_FIELD 16
-#define PN_SUI_FIELDS 12 ///< 0字号…10清晰度、11背景 / 0 size ... 10 sharpness, 11 paper
+#define PN_SUI_FIELDS 13 ///< 0字号…11背景、12书内图片 / 0 size ... 11 paper, 12 book images
 typedef struct {
     pn_epub_app_t *epub; ///< 可选EPUB会话，与reader互斥 / Optional EPUB session, exclusive with reader
     pn_reader_app_t *reader; ///< 借用会话 / Borrowed session
@@ -38,7 +38,7 @@ typedef struct {
     bool backgrounds; ///< 正显示背景选择页，仅修改草稿 / Background picker is showing, modifying the draft only
     pn_background_gallery_t gallery; ///< 图库所有权仅在选择页 / Gallery ownership lives only in the picker
     bool more; ///< 正显示“更多排版”页 / The more-options page is showing
-    unsigned selected; ///< 键盘选中字段0..11 / Keyboard-selected field zero through eleven
+    unsigned selected; ///< 键盘选中字段0..12 / Keyboard-selected field zero through twelve
     const char *notice; ///< 静态反馈 / Static feedback
 } pn_style_ui_t;
 /// 打开排版草稿，不修改设置。/ Open a typesetting draft without changing settings.

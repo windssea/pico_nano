@@ -15,6 +15,7 @@ static const char *phases[32];static size_t first[32],phase_count,current;
 static uint64_t clock_us(void *ctx){(void)ctx;return 1;}
 static void emit(void *ctx,const pn_profile_event_t *e){(void)ctx;if(strncmp(e->phase,"cover.",6))return;for(size_t i=0;i<phase_count;i++)if(!strcmp(phases[i],e->phase))return;assert(phase_count<32);phases[phase_count]=e->phase;first[phase_count++]=current;}
 static bool cancel(void *ctx){(void)ctx;return true;}
+static bool cancel_during(void *ctx){return ++*(unsigned *)ctx>=6;}
 static pn_status_t step(pn_cover_work_t *w,pn_shelf_covers_t *covers,pn_catalog_page_t *page,pn_pool_t *pool,pn_media_t *media,bool *changed){current++;return pn_shelf_covers_work(w,covers,page,pool,media,NULL,salt,2u*1024u*1024u,changed);}
 static void reset(pn_shelf_covers_t *covers,pn_catalog_page_t *page){pn_shelf_covers_reset(covers,page);memset(covers->pixels[0],0x5a,PN_COVER_BYTES);}
 int main(int argc,char **argv){
@@ -37,6 +38,14 @@ int main(int argc,char **argv){
             assert(pn_media_acquire(&media,PN_MEDIA_USB,&lease)==PN_OK && pn_media_release(&media,&lease)==PN_OK && pn_media_cancel_usb(&media)==PN_OK);
         }
         // 缓存关闭也要拒绝处理中换来源；已完成解码不能绕过最后复核。/ Reject changed sources even with caching disabled; completed decoding cannot bypass final revalidation.
+        // 同页输入保留提取任务；阶段内部取消后完整接续，像素仍与同步完整解码一致。/ Same-page input retains the extraction job; resume after cancellation inside each phase and match the complete synchronous decode.
+        for(size_t p=0;p<count;p++){
+            reset(covers,page);current=0;for(size_t k=0;k<stop[p]-1;k++)assert(step(&work,covers,page,&pool,&media,&changed)==PN_BUSY);
+            void *retained=work.extract;unsigned checks=0;pn_cancel_scope_t scope;pn_cancel_enter(&scope,cancel_during,&checks);s=step(&work,covers,page,&pool,&media,&changed);pn_cancel_leave(&scope);
+            if(s==PN_CANCELLED)assert(work.extract==retained && !changed && !memcmp(marker,covers->pixels[0],PN_COVER_BYTES));
+            for(size_t k=0;s==PN_BUSY || s==PN_CANCELLED;k++){assert(k<8192);s=step(&work,covers,page,&pool,&media,&changed);}
+            assert(s==PN_OK && !memcmp(oracle,covers->pixels[0],PN_COVER_BYTES) && !pool.used && !pool.live && !pn_media_active(&media));
+        }
         for(size_t p=0;p<count;p++)if(!strcmp(phases[p],"cover.finish")){
             reset(covers,page);for(size_t k=0;k<stop[p]-1;k++)assert(step(&work,covers,page,&pool,&media,&changed)==PN_BUSY);
             FILE *file=fopen(argv[book],"ab");assert(file);long size=ftell(file);assert(size>=0 && fputc('X',file)!=EOF && !fclose(file));

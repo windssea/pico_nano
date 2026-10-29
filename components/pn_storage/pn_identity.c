@@ -103,7 +103,32 @@ pn_status_t pn_identity_bytes(const uint8_t *bytes,size_t n,pn_book_id_t *out){
 static pn_identity_stream_port_fn stream_port;
 static pn_identity_pooled_port_fn pooled_port;
 static const pn_identity_job_port_t *job_port;
-void pn_identity_stream_port(pn_identity_stream_port_fn port){stream_port=port;pooled_port=NULL;job_port=NULL;}
+static const pn_identity_digest_port_t *digest_port;
+typedef struct {pn_identity_digest_port_t port;pn_pool_t *pool;uint64_t bytes;bool active;max_align_t state[];} digest_t;
+void pn_identity_digest_port(const pn_identity_digest_port_t *port){digest_port=port;}
+void pn_identity_digest_close(pn_identity_digest_t *d){if(d && d->impl){digest_t *s=d->impl;if(s->active)s->port.abort(s->state);pn_free(s);d->impl=NULL;}}
+pn_status_t pn_identity_digest_begin(pn_identity_digest_t *d,pn_pool_t *pool){
+    if(!d || !pool)return PN_INVALID;
+    digest_t *s=d->impl;
+    if(s){if(s->pool!=pool)return PN_INVALID;if(s->active)return PN_BUSY;}
+    else{
+        const pn_identity_digest_port_t *p=digest_port;if(!p)return PN_EMPTY;
+        if(!p->bytes || p->bytes>SIZE_MAX-sizeof *s || !p->begin || !p->update || !p->finish || !p->abort)return PN_INVALID;
+        s=pn_alloc_optional(pool,PN_MEM_DOCUMENT,sizeof *s+p->bytes);if(!s)return PN_NO_MEMORY;
+        memset(s,0,sizeof *s+p->bytes);s->port=*p;s->pool=pool;d->impl=s;
+    }
+    s->bytes=0;pn_status_t status=s->port.begin(s->state);s->active=status==PN_OK;if(!s->active)s->port.abort(s->state);return status;
+}
+pn_status_t pn_identity_digest_update(pn_identity_digest_t *d,const void *bytes,size_t n){
+    digest_t *s=d?d->impl:NULL;if(!s || !s->active || (!bytes && n))return PN_INVALID;
+    pn_status_t status=n>UINT64_MAX/8-s->bytes?PN_LIMIT:s->port.update(s->state,bytes,n);
+    if(status==PN_OK)s->bytes+=n;else{s->port.abort(s->state);s->active=false;}return status;
+}
+pn_status_t pn_identity_digest_finish(pn_identity_digest_t *d,pn_book_id_t *out){
+    digest_t *s=d?d->impl:NULL;if(!s || !s->active || !out)return PN_INVALID;
+    pn_book_id_t result;pn_status_t status=s->port.finish(s->state,&result);s->port.abort(s->state);s->active=false;if(status==PN_OK)*out=result;return status;
+}
+void pn_identity_stream_port(pn_identity_stream_port_fn port){stream_port=port;pooled_port=NULL;job_port=NULL;digest_port=NULL;}
 void pn_identity_pooled_port(pn_identity_pooled_port_fn port){pooled_port=port;}
 static pn_status_t software_stream(void *ctx,uint64_t size,pn_identity_read_fn read,uint8_t *buffer,size_t capacity,pn_book_id_t *out){
     sha_t hash={.h={0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19}};
