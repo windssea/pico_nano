@@ -31,7 +31,7 @@ with tempfile.TemporaryDirectory() as folder:
         assert not re.search(r"minesweeper screen=\d+ status=[1-9]", result.stdout), result.stdout
         return result.stdout
 
-    enter = "library,tap:460:190,tap:342:888,wait:300,"
+    enter = "library,tap:460:190,tap:556:408,wait:300,"
     run(enter + "window-close")
     assert not list(state.glob("minesweeper.[ab]"))
     for tier, width, height in ((0, 9, 9), (1, 12, 16), (2, 14, 18)):

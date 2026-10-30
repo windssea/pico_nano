@@ -64,6 +64,28 @@ int main(void){
                 pn_cache_snapshot(&pool);assert(pool.cache_stats[PN_CACHE_SOURCE].bytes<=pool.cache_caps[PN_CACHE_SOURCE]);
             }
             assert(pn_text_file_cache_window(&source,0)==PN_INVALID && file.cache_fill_bytes==4096);
+            // 字体1KiB窗口交错访问12个4KiB区；相邻窗合并后第二遍不能再读卡，逆序覆盖前插路径。
+            // Interleave font-sized 1 KiB windows across twelve 4 KiB regions; merged windows need no second-pass I/O, and reverse order exercises prepending.
+            for(unsigned reverse=0;reverse<2;reverse++){
+                pn_cache_reclaim(&pool,SIZE_MAX);assert(pn_text_file_cache_window(&source,1024)==PN_OK);
+                for(unsigned q=0;q<4;q++)for(unsigned region=0;region<12;region++)check(&source,(uint64_t)region*8192+(reverse?3-q:q)*1024+17,23);
+                physical=file.io_reads;uint64_t physical_bytes=file.io_bytes;
+                for(unsigned q=0;q<4;q++)for(unsigned region=0;region<12;region++)check(&source,(uint64_t)region*8192+q*1024+17,23);
+                printf("Adjacent font windows reverse=%u: rereads=%llu bytes=%llu\n",reverse,(unsigned long long)(file.io_reads-physical),(unsigned long long)(file.io_bytes-physical_bytes));
+                fflush(stdout);
+                assert(file.io_reads==physical && file.io_bytes==physical_bytes);
+                pn_cache_snapshot(&pool);assert(pool.cache_stats[PN_CACHE_SOURCE].bytes<=12u*4200u+2048u);
+            }
+            // 合并后的跨段请求仍逐字节相同；不填尚未请求的间隙。/ Merged cross-segment requests remain byte exact, without filling unrequested gaps.
+            physical=file.io_reads;check(&source,1001,80);assert(file.io_reads==physical);
+            pn_cache_reclaim(&pool,SIZE_MAX);physical=file.io_reads;check(&source,17,23);check(&source,3*1024+17,23);assert(file.io_reads==physical+2);
+            // 可重放混合轨迹覆盖重叠/跨界/改窗与EOF，所有返回字节独立核对。/ A replayable mixed trace covers overlap, crossing, window changes and EOF with independent byte checks.
+            uint32_t random=0x27182818u;
+            for(unsigned i=0;i<2048;i++){
+                random=random*1664525u+1013904223u;
+                if(i%31u==0)assert(pn_text_file_cache_window(&source,512u<<(i%4u))==PN_OK);
+                uint64_t at=(random>>4)%(source.size+1);size_t cap=(random>>21)%4097u;check(&source,at,cap);
+            }
             pn_cache_reclaim(&pool,SIZE_MAX);pool.fail_at=pool.attempts+1;check(&source,21,13);pool.fail_at=0;
             check(&source,4096+21,13);pn_cache_reclaim(&pool,SIZE_MAX);
             pool.cache_caps[PN_CACHE_SOURCE]=0;check(&source,9*4096+21,13);assert(!pool.used);pool.cache_caps[PN_CACHE_SOURCE]=132u*1024u;

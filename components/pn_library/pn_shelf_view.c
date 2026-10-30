@@ -369,9 +369,9 @@ static void dashed_frame(pn_frame_t *frame,int x,int y,int w,int h,int radius){
     for(int px=x+radius+8;px<x+w-radius-8;px+=20){pn_frame_rect(frame,px,y-1,8,4,PN_UI_PAPER);pn_frame_rect(frame,px,y+h-3,8,4,PN_UI_PAPER);}
     for(int py=y+radius+8;py<y+h-radius-8;py+=20){pn_frame_rect(frame,x-1,py,4,8,PN_UI_PAPER);pn_frame_rect(frame,x+w-3,py,4,8,PN_UI_PAPER);}
 }
-/// 三款游戏共用卡片几何，绘制和命中始终一致。/ All three games share card geometry for matching drawing and hit testing.
+/// 三列三行网格按行放置已安装游戏，空位不生成入口。/ Place installed games by row in a three-column, three-row grid; empty slots have no entry.
 static grid_box_t game_entry_box(unsigned i){
-    return (grid_box_t){36,304+(int)i*240,612,208};
+    return (grid_box_t){36+(int)(i%3)*214,304+(int)(i/3)*240,184,208};
 }
 static const int game_entry_commands[]={PN_SHELF_SUDOKU,PN_SHELF_SOKOBAN,PN_SHELF_MINESWEEPER};
 /// 阶梯切角由矩形构成，不需要额外画布。/ Rectangle bands form stepped corners without another canvas.
@@ -405,26 +405,19 @@ static void game_entry_card(pn_frame_t *p,grid_box_t b){
     game_entry_step_fill(p,b.x+2,b.y+3,b.w-2,b.h-3,8,11);
     game_entry_step_fill(p,b.x,b.y,b.w,b.h-4,8,0);
     game_entry_step_fill(p,b.x+2,b.y+2,b.w-4,b.h-8,6,15);
-    for(int step=0;step<6;step++){
-        pn_frame_rect(p,600+step*2,b.y+92+step*2,3,3,PN_UI_INK);
-        pn_frame_rect(p,600+step*2,b.y+114-step*2,3,3,PN_UI_INK);
-    }
 }
 /// 娱乐只消费UI状态与内置小图，不打开书籍、题库或图片文件。/ Entertainment consumes only UI state and small built-in art, without opening books, banks or image files.
 static pn_status_t entertainment_body(pn_font_t *font,pn_frame_t *frame,bool detail){
     pn_status_t s=pn_font_size(font,24);
     if(!detail){
         static const char *const titles[]={"数独","推箱子","扫雷"};
-        static const char *const subtitles[]={"四档难度 · 随时续玩","三档关卡 · 步步推演","首步安全 · 三档挑战"};
         if(s==PN_OK)s=pn_w_text_ex(font,frame,"阅读之外，换一种思考。",32,266,620,PN_ALIGN_LEFT,PN_UI_MUTED,false);
         for(unsigned i=0;i<3;i++){
             grid_box_t b=game_entry_box(i);
             game_entry_card(frame,b);
-            game_entry_icon(frame,i,b.x+32,b.y+40);
-            if(s==PN_OK)s=pn_font_size(font,34);
-            if(s==PN_OK)s=pn_w_text_ex(font,frame,titles[i],236,b.y+84,340,PN_ALIGN_LEFT,PN_UI_INK,true);
-            if(s==PN_OK)s=pn_font_size(font,23);
-            if(s==PN_OK)s=pn_w_text_ex(font,frame,subtitles[i],236,b.y+130,340,PN_ALIGN_LEFT,PN_UI_MUTED,false);
+            game_entry_icon(frame,i,b.x+28,b.y+16);
+            if(s==PN_OK)s=pn_font_size(font,28);
+            if(s==PN_OK)s=pn_w_text_ex(font,frame,titles[i],b.x+8,b.y+184,b.w-16,PN_ALIGN_CENTER,PN_UI_INK,true);
         }
         if(s==PN_OK)s=pn_font_size(font,22);
         if(s==PN_OK)s=pn_w_text_ex(font,frame,"选一个游戏，慢慢想。",32,1048,620,PN_ALIGN_CENTER,PN_UI_MUTED,false);

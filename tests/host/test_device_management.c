@@ -495,7 +495,7 @@ int main(void){
     printf("sudoku device routing used=%zu peak=%zu\n",pool.used,pool.peak);
 
     // 推箱使用同一面板适配：连续走路不触发管理清屏，退出清理且中键回娱乐。/ Sokoban shares the panel adapter: walking never triggers management cleaning; exit cleans and the middle key returns to Entertainment.
-    assert(active_hit(342,648)==PN_SHELF_SOKOBAN);
+    assert(active_hit(342,408)==PN_SHELF_SOKOBAN);
     old_data_ready=data_ready;data_ready=false;handle_key(PN_KEY_3,PN_KEY_SHORT);assert(!sokoban.active);data_ready=old_data_ready;
     char so_root[]="/tmp/pn-device-sokoban-XXXXXX";assert(mkdtemp(so_root));
     assert(pn_sokoban_open(&sokoban,&pool,&data_media,so_root,now_ms())==PN_OK);shelf_mode=false;status_page=false;
@@ -521,7 +521,7 @@ int main(void){
     printf("sokoban device routing used=%zu peak=%zu\n",pool.used,pool.peak);
     // 无TF时扫雷仍从娱乐入口路由；内部状态不可用只显示失败，不创建半个控制器。
     // Minesweeper remains routed from Entertainment without SD; unavailable internal state never leaves a half-open controller.
-    assert(!sd_media.available && active_hit(342,888)==PN_SHELF_MINESWEEPER);
+    assert(!sd_media.available && active_hit(556,408)==PN_SHELF_MINESWEEPER);
     old_data_ready=data_ready;data_ready=false;apply_selection(PN_SHELF_MINESWEEPER);assert(!minesweeper.active && !minesweeper.impl && !reader_active());data_ready=old_data_ready;
     char mi_root[]="/tmp/pn-device-minesweeper-XXXXXX";assert(mkdtemp(mi_root));
     assert(pn_minesweeper_open(&minesweeper,&pool,&data_media,mi_root,now_ms())==PN_OK);shelf_mode=false;status_page=false;

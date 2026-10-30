@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: Apache-2.0
- * 中文：单张独页插图的无损可回收正文缓存。/ English: one lossless reclaimable body cache for a standalone illustration. */
+ * 中文：单张图片区域或独页正文的无损可回收缓存。/ English: one lossless reclaimable image-region or standalone-body cache. */
 #pragma once
 #include "pn_epub_image.h"
 #include "pn_text_file.h"
@@ -18,3 +18,9 @@ pn_status_t pn_epub_image_cache_restore(pn_epub_image_cache_t *,pn_text_file_t *
 pn_status_t pn_epub_image_cache_restore_guarded(pn_epub_image_cache_t *,pn_text_file_t *,const char *,const pn_style_t *,pn_frame_t *,pn_status_t (*)(void *,const char *),void *);
 /// 仅完整资源EOF/CRC成功的独页正文可存；可选失败不驱逐资源或影响原帧。/ Store only a standalone body after complete resource EOF/CRC; optional failure never evicts resources or changes the original frame.
 void pn_epub_image_cache_store(pn_epub_image_cache_t *,pn_text_file_t *,const char *,const pn_style_t *,const pn_frame_t *);
+/// 混排区域键包含原矩形、完整视口和绘制前底图SHA；源复核、取消和原96KiB额度与独页共用。/ Mixed-page keys include the original rectangle, full viewport and prepaint underlay SHA; share source checks, cancellation and the original 96 KiB cap with standalone pages.
+pn_status_t pn_epub_image_cache_restore_region_guarded(pn_epub_image_cache_t *,pn_text_file_t *,const char *,const pn_style_t *,pn_frame_t *,pn_image_rect_t,const pn_book_id_t *,pn_status_t (*)(void *,const char *),void *);
+/// 只存完整EOF/CRC解码后的区域，混排传入绘图前underlay，不读写框外、不新增画布。/ Store a region only after complete EOF/CRC decoding, supplying its prepaint underlay for mixed pages, without touching outside pixels or adding a canvas.
+void pn_epub_image_cache_store_region(pn_epub_image_cache_t *,pn_text_file_t *,const char *,const pn_style_t *,const pn_frame_t *,pn_image_rect_t,const pn_book_id_t *);
+/// 绘图前按实际区域像素计算底图SHA，透明合成只复用相同底图；逐行响应取消，无堆分配。/ Hash actual underlay pixels before drawing; transparent composites require the same underlay, with row cancellation and no heap allocation.
+pn_status_t pn_epub_image_cache_underlay(const pn_frame_t *,pn_image_rect_t,pn_book_id_t *);

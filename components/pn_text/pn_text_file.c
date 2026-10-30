@@ -90,15 +90,22 @@ static pn_status_t read_pooled(pn_text_file_t *file,uint64_t offset,uint8_t *out
     while(*copied<cap){
         unsigned window=file->cache_fill_bytes?file->cache_fill_bytes:BLOCK_BYTES;
         size_t remaining=cap-*copied;while(window<remaining && window<BLOCK_BYTES)window*=2;
-        read_cache_t *cache=file->read_cache;uint64_t position=offset+*copied,start=position&~(uint64_t)(window-1u);read_slot_t *slot=NULL,*victim=NULL;
+        read_cache_t *cache=file->read_cache;uint64_t position=offset+*copied,start=position&~(uint64_t)(window-1u);read_slot_t *slot=NULL,*victim=NULL,*extend=NULL;
+        if(remaining>window-(position-start))start=position;
+        size_t want=file->size-start<window?(size_t)(file->size-start):window;
         if(cache)for(unsigned i=0;i<CACHE_SLOTS;i++){
             read_slot_t *candidate=&cache->slots[i];
             if(candidate->length && position>=candidate->start && position-candidate->start<candidate->length){slot=candidate;break;}
             if(!victim || (!candidate->data && victim->data) || (candidate->data && victim->data && candidate->age<victim->age))victim=candidate;
+            // 相邻小窗合并到原4KiB分配，不增加读取范围、不挤占另一槽。/ Merge adjacent small windows in the original 4 KiB allocation, without extending reads or consuming another slot.
+            uint64_t end=start+want,old_end=candidate->start+candidate->length;
+            uint64_t low=start<candidate->start?start:candidate->start,high=end>old_end?end:old_end;
+            if(candidate->length && start<=old_end && end>=candidate->start && high-low<=BLOCK_BYTES && !(start<candidate->start && end>old_end))extend=candidate;
         }
         pn_cache_observe(pool,PN_CACHE_SOURCE,slot!=NULL);
         if(slot)file->cache_hits++;
         else if(victim){
+            if(extend)victim=extend;
             if(!victim->data){
                 victim->data=pn_cache_alloc(pool,PN_CACHE_SOURCE,PN_MEM_FONT,BLOCK_BYTES);
                 if(!victim->data && !pn_cache_allow(pool,PN_CACHE_SOURCE,BLOCK_BYTES))victim->data=cache_take_block(file);
@@ -109,12 +116,22 @@ static pn_status_t read_pooled(pn_text_file_t *file,uint64_t offset,uint8_t *out
             else slot=victim;
             if(slot){
                 // 跨对齐边界的小请求从请求起点填窗，字形不因边界强制拆成两次读；总块数/字节额度保持。/ Fill a crossing small request from its own start so glyphs do not require two reads just for alignment; block counts and byte caps stay unchanged.
-                if(cap-*copied>window-(position-start))start=position;
-                size_t want=file->size-start<window?(size_t)(file->size-start):window,got=0;slot->length=0;
-                // 正常短读继续填块，零进展/错误不发布半块；完整扫描直通仍允许调用方累加短读。/ Fill normal short reads without publishing partial blocks; zero progress/errors fail, while direct scans still let callers accumulate short reads.
-                while(got<want){size_t n=0;status=read_direct(file,start+got,slot->data+got,want-got,&n);if(status!=PN_OK || !n){status=PN_IO;break;}got+=n;}
+                uint64_t old_start=slot->start,old_end=old_start+slot->length,end=start+want;
+                bool merge=slot==extend;
+                uint64_t low=merge && old_start<start?old_start:start,high=merge && old_end>end?old_end:end;
+                size_t prefix=merge && start<old_start?(size_t)(old_start-start):0;
+                size_t suffix=merge && end>old_end?(size_t)(end-old_end):0;
+                if(prefix)memmove(slot->data+prefix,slot->data,slot->length);
+                slot->length=0;
+                // 错误或零进展撤回整个合并窗，短读只填缺失部分；不发布部分字节。/ Errors or zero progress revoke the whole merged window; short reads fill only missing bytes, never publishing partial content.
+                for(unsigned part=0;part<2;part++){
+                    uint64_t offset=merge?(part?old_end:start):start;
+                    size_t need=merge?(part?suffix:prefix):(part?0:want),got=0;
+                    while(got<need){size_t n=0;status=read_direct(file,offset+got,slot->data+(size_t)(offset-low)+got,need-got,&n);if(status!=PN_OK || !n){status=PN_IO;break;}got+=n;}
+                    if(status!=PN_OK)break;
+                }
                 if(status!=PN_OK)break;
-                slot->start=start;slot->length=got;
+                slot->start=low;slot->length=(size_t)(high-low);
             }
         }
         if(!slot){size_t got=0;status=read_direct(file,position,out+*copied,cap-*copied,&got);*copied+=got;break;}

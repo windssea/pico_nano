@@ -40,24 +40,78 @@ static void log_header_write(index_t *i,uint8_t *h,uint32_t count){
 static bool log_tail(const uint8_t *tail,uint64_t length,uint32_t sequence,const pn_book_id_t *digest){
     return !memcmp(tail,digest->sha256,32) && !memcmp(tail+32,"PNLE",4) && get(tail+36,4)==length && get(tail+40,4)==sequence && get(tail+44,4)==crc(tail,44);
 }
+typedef struct {
+    uint64_t read,seek,begin,update,finish,records; ///< 互斥累计，不含日志回调；记录项含CRC/排序/取消检查 / Exclusive totals excluding log callbacks; records include CRC/order/cancellation checks
+    pn_profile_io_t io; ///< 顺读实际字节/调用与定位次数，含提前读到的后缀 / Actual sequential bytes/calls and seeks, including prefetched suffix bytes
+} log_cost_t;
+static void log_cost_add(uint64_t *cost,uint64_t began){uint64_t end=pn_profile_time();if(end>=began)*cost+=end-began;}
+typedef struct {
+    index_t *index;FILE *file;pn_identity_digest_t *digest;uint64_t left;size_t at,count; ///< 同一顺读源、可复用摘要及未读长度 / One sequential source, reusable digest and remaining length
+    log_cost_t *cost; ///< 仅本次验证栈内账本，不跨会话或授予信任 / Per-validation stack ledger, never cross-session state or trust
+    uint8_t data[4096]; ///< 替代原摘要调用的4KiB栈缓冲，不新增常驻/堆额度 / Replaces the digest call's 4 KiB stack buffer without adding resident or heap capacity
+} log_stream_t;
+/// 一次顺读跨块消费；短读保留游标，逐块和记录边界仍检查取消/介质。/ Consume across blocks in one sequential pass; short reads retain cursors and chunk/record boundaries still check cancellation and media.
+static pn_status_t log_span(log_stream_t *r,const uint8_t **data,size_t *count,size_t need){
+    pn_status_t s=checked(r->index);if(s!=PN_OK)return s;
+    if(r->at==r->count){
+        size_t cap=r->left<sizeof r->data?(size_t)r->left:sizeof r->data;if(!cap)return PN_CORRUPT;
+        uint64_t began=pn_profile_time();r->count=fread(r->data,1,cap,r->file);log_cost_add(&r->cost->read,began);r->at=0;
+        r->cost->io.reads++;r->cost->io.bytes+=r->count;
+        if(ferror(r->file))return PN_IO;
+        if(!r->count)return PN_CORRUPT;
+        r->left-=r->count;s=checked(r->index);if(s!=PN_OK)return s;
+    }
+    size_t n=r->count-r->at;if(n>need)n=need;*data=r->data+r->at;*count=n;r->at+=n;return PN_OK;
+}
+static pn_status_t log_read(log_stream_t *r,uint8_t *out,size_t need){
+    while(need){const uint8_t *data;size_t n;pn_status_t s=log_span(r,&data,&n,need);if(s!=PN_OK)return s;memcpy(out,data,n);out+=n;need-=n;}return PN_OK;
+}
+/// 原头字节与每条记录仅消费一次，仍独立计算每块完整SHA并校验CRC/排序。/ Consume original header bytes and records once, still computing each block's full SHA and checking CRC/order independently.
+static pn_status_t log_audit(log_stream_t *r,const uint8_t *header,size_t bytes,uint32_t count,tf_audit_t *audit,pn_book_id_t *digest){
+    *audit=(tf_audit_t){.source={r->index,r->file,UINT64_MAX},.count=count,.first={.section=BUILD_SECTION},.last={.section=BUILD_SECTION}};
+    // SDK摘要状态跨块复用，计原池；无端口/可选分配不足时完整软件SHA退路，端口运行错误不降级。
+    // Reuse SDK digest state across blocks within the original pool; absent ports/admission failures retain full software SHA, while runtime port errors never downgrade.
+    uint64_t began=pn_profile_time();pn_identity_accumulator_t hash;pn_status_t s=pn_identity_digest_begin(r->digest,r->index->pool);bool accelerated=s==PN_OK;
+    if(!accelerated)pn_identity_accumulator_init(&hash);
+    log_cost_add(&r->cost->begin,began);
+    if(s!=PN_OK && s!=PN_EMPTY && s!=PN_NO_MEMORY)return s;
+    s=PN_OK;
+    began=pn_profile_time();
+    if(accelerated)s=pn_identity_digest_update(r->digest,header,bytes);else pn_identity_accumulator_update(&hash,header,bytes);
+    log_cost_add(&r->cost->update,began);if(s!=PN_OK && accelerated)return s;
+    size_t left=(size_t)count*RECORD;
+    while(left){
+        const uint8_t *data;size_t n;s=log_span(r,&data,&n,left);if(s!=PN_OK)return s;
+        began=pn_profile_time();
+        if(accelerated)s=pn_identity_digest_update(r->digest,data,n);else pn_identity_accumulator_update(&hash,data,n);
+        log_cost_add(&r->cost->update,began);if(s!=PN_OK)return s;
+        began=pn_profile_time();s=tf_audit_records(audit,data,n);log_cost_add(&r->cost->records,began);if(s!=PN_OK)return s;left-=n;
+    }
+    if(audit->seen!=count || audit->carried)return PN_CORRUPT;
+    began=pn_profile_time();
+    if(accelerated)s=pn_identity_digest_finish(r->digest,digest);else pn_identity_accumulator_finish(&hash,digest);
+    log_cost_add(&r->cost->finish,began);return s;
+}
 /// 每个前缀块均重算SHA及记录CRC；坏后缀只能退回内部根明确保留的前代。/ Rehash every prefix block and record CRC; a broken suffix can only fall back to the prior internally retained root.
-static pn_status_t log_validate(index_t *i,FILE *f,log_view_t *out,bool cache){
+static pn_status_t log_validate_impl(index_t *i,FILE *f,log_view_t *out,bool cache,pn_identity_digest_t *hash_state,log_cost_t *cost){
     if(cache)log_ranges_clear(i);
     struct stat info;if(fstat(fileno(f),&info) || !S_ISREG(info.st_mode) || info.st_size<0 || (uint64_t)info.st_size>TF_QUOTA)return PN_CORRUPT;
+    uint64_t began=pn_profile_time();int positioned=fseek(f,0,SEEK_SET);log_cost_add(&cost->seek,began);cost->io.seeks++;if(positioned)return PN_IO;
+    log_stream_t stream={.index=i,.file=f,.digest=hash_state,.left=(uint64_t)info.st_size,.cost=cost};
     uint64_t offset=0,base=0;uint32_t sequence=0;pn_book_id_t previous={0};log_view_t accepted={0};pn_status_t s=PN_OK;
     pn_page_index_entry_t build={0};bool have_build=false;
     while(offset<(uint64_t)info.st_size && sequence<LOG_MAX_BLOCKS){
         s=checked(i);if(s!=PN_OK)return s;uint8_t header[LOG_HEADER];uint32_t count=0;bool legacy=false;
-        if(fseek(f,(long)offset,SEEK_SET) || fread(header,1,HEADER,f)!=HEADER){s=PN_CORRUPT;break;}
+        s=log_read(&stream,header,HEADER);if(s!=PN_OK)break;
         if(!offset && !memcmp(header,"PNPI",4)){legacy=true;if(!tf_header(i,header,&count)){s=PN_CORRUPT;break;}}
-        else if(fread(header+HEADER,1,LOG_HEADER-HEADER,f)!=LOG_HEADER-HEADER || !log_header(i,header,offset,sequence+1,&previous,&count)){s=PN_CORRUPT;break;}
+        else{ s=log_read(&stream,header+HEADER,LOG_HEADER-HEADER);if(s!=PN_OK)break;if(!log_header(i,header,offset,sequence+1,&previous,&count)){s=PN_CORRUPT;break;} }
         uint64_t bytes=(legacy?HEADER:LOG_HEADER)+(uint64_t)count*RECORD,end=offset+bytes+(legacy?0:LOG_TAIL);
         if(end>(uint64_t)info.st_size){s=PN_CORRUPT;break;}
         tf_audit_t audit;pn_book_id_t digest;
-        s=tf_audit(i,f,offset,legacy?HEADER:LOG_HEADER,count,&audit,&digest);
+        s=log_audit(&stream,header,legacy?HEADER:LOG_HEADER,count,&audit,&digest);
         if(s!=PN_OK){if(s==PN_CANCELLED || s==PN_STALE_JOB || s==PN_STALE_MEDIA)return s;break;}
         if(audit.have_build){build=audit.build;have_build=true;}
-        if(!legacy){uint8_t tail[LOG_TAIL];if(fseek(f,(long)(offset+bytes),SEEK_SET) || fread(tail,1,LOG_TAIL,f)!=LOG_TAIL || !log_tail(tail,bytes+LOG_TAIL,sequence+1,&digest)){s=PN_CORRUPT;break;}sequence++;}
+        if(!legacy){uint8_t tail[LOG_TAIL];s=log_read(&stream,tail,LOG_TAIL);if(s!=PN_OK)break;if(!log_tail(tail,bytes+LOG_TAIL,sequence+1,&digest)){s=PN_CORRUPT;break;}sequence++;}
         else base=end;
         if(cache)log_range_offer(i,sequence+(base!=0)-1,offset+(legacy?HEADER:LOG_HEADER),count,&audit.first,&audit.last);
         if(!memcmp(digest.sha256,i->trust_hash[0].sha256,32) || !memcmp(digest.sha256,i->trust_hash[1].sha256,32)){
@@ -66,9 +120,27 @@ static pn_status_t log_validate(index_t *i,FILE *f,log_view_t *out,bool cache){
         }
         previous=digest;offset=end;
     }
+    if(s==PN_CANCELLED || s==PN_STALE_JOB || s==PN_STALE_MEDIA)return s;
     s=checked(i);if(s!=PN_OK)return s;if(!accepted.end)return PN_CORRUPT;
     if(cache && i->range_count>accepted.blocks+(accepted.base!=0))i->range_count=accepted.blocks+(accepted.base!=0);
     *out=accepted;return PN_OK;
+}
+static pn_status_t log_validate(index_t *i,FILE *f,log_view_t *out,bool cache){
+    pn_profile_span_t span;pn_profile_begin(&span,i->pool,"page-index.chain-verify");
+    uint64_t began=pn_profile_time();log_cost_t cost={0};pn_identity_digest_t digest={0};pn_status_t s=log_validate_impl(i,f,out,cache,&digest,&cost);
+    uint64_t closing=pn_profile_time();pn_identity_digest_close(&digest);log_cost_add(&cost.finish,closing);
+    uint64_t end=pn_profile_time(),total=end>=began?end-began:0,accounted=cost.read+cost.seek+cost.begin+cost.update+cost.finish+cost.records;
+    // 先结束父scope再输出账本，串口输出不叠入完整链耗时；失败与软件退路同样计时。/ End the parent before emitting the ledger so serial output is excluded; failures and software fallback are measured too.
+    pn_profile_end(&span,s);
+    // 退出撤销及失效路径只保留原父事件，不在让出前额外打印七条诊断。/ Cancellation and stale paths keep only the original parent event, avoiding seven extra diagnostic lines before yielding.
+    if(s==PN_CANCELLED || s==PN_STALE_JOB || s==PN_STALE_MEDIA)return s;
+    pn_profile_observe(i->pool,"page-index.chain-read",s,cost.read,&cost.io);
+    pn_profile_observe(i->pool,"page-index.chain-seek",s,cost.seek,NULL);
+    pn_profile_observe(i->pool,"page-index.chain-sha-begin",s,cost.begin,NULL);
+    pn_profile_observe(i->pool,"page-index.chain-sha-update",s,cost.update,NULL);
+    pn_profile_observe(i->pool,"page-index.chain-sha-finish",s,cost.finish,NULL);
+    pn_profile_observe(i->pool,"page-index.chain-records",s,cost.records,NULL);
+    pn_profile_observe(i->pool,"page-index.chain-other",s,total>=accounted?total-accounted:0,NULL);return s;
 }
 static pn_status_t tf_load_candidate(void *ctx,const char *path){
     index_t *i=ctx;if(!i->trust_known)return PN_EMPTY;FILE *f=fopen(path,"rb");if(!f)return PN_EMPTY;

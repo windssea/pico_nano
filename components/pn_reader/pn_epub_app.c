@@ -79,7 +79,7 @@ typedef struct {
     pn_reader_overlay_fn font_view;void *font_view_ctx; ///< 仅本次字体事务借用的目标页 / Destination page borrowed only during this font transaction
     pn_reader_body_layer_t body_layer; ///< 控制层借用的常驻正文叠层 / Persistent body decoration borrowed from the controller
     pn_page_bitmap_t bitmap; ///< 独立可回收正文帧，扫描期间只修改此帧 / Independent reclaimable body frame, the only pixels modified during overlapping
-    pn_epub_image_cache_t image_cache; ///< 原封面分项内单张独页插图缓存 / One standalone illustration cache within the original cover class
+    pn_epub_image_cache_t image_cache; ///< 原封面分项内单张图片区域/独页缓存 / One image-region or standalone-page cache within the original cover class
     pn_semantic_file_t semantic_file;uint64_t semantic_due; ///< 内部可重建缓存与安静截止，不持有额外文件 / Internal rebuildable cache and quiet deadline, with no additional open file
     pn_epub_reader_anchor_t bitmap_anchor; ///< 像素对应的语义页边界 / Semantic page boundaries represented by the pixels
     pn_job_token_t bitmap_token; ///< 像素的会话/排版代次 / Pixel session/layout generation
@@ -230,25 +230,40 @@ static pn_status_t paint_image_node(app_t *a,const pn_epub_page_t *page,const pn
                     if(height>(unsigned)viewport->height){height=(unsigned)viewport->height;width=(uint64_t)info.width*height/info.height;}
                     w=width?(int)width:1;h=height?(int)height:1;x=(viewport->width-w)/2;y=(viewport->height-h)/2;}
             }
-            if(status==PN_OK)status=pn_epub_image_draw(a->pool,&a->epub,image->path,viewport,(pn_image_rect_t){x,y,w,h},&info);
-            // 大图解码内存不足时先归还全部可重建缓存再试一次，封面插图不因邻页/字形缓存占用而缺失。
-            // When a large image runs out of memory, return every rebuildable cache and try once more so covers are not lost to neighbor/glyph caches.
-            if(status==PN_NO_MEMORY && reclaim){(void)pn_cache_reclaim(a->pool,SIZE_MAX);status=pn_epub_image_draw(a->pool,&a->epub,image->path,viewport,(pn_image_rect_t){x,y,w,h},&info);}
-    *rect=(pn_image_rect_t){x,y,w,h};return status;
+    *rect=(pn_image_rect_t){x,y,w,h};bool mixed=page->count!=1 || page->image_count!=1;pn_book_id_t underlay;bool cacheable=false;
+    if(status==PN_OK && mixed){pn_profile_span_t keyed;pn_profile_begin(&keyed,a->pool,"epub.raster.underlay");pn_status_t key=pn_epub_image_cache_underlay(viewport,*rect,&underlay);pn_profile_end(&keyed,key);if(key!=PN_OK && key!=PN_EMPTY)return key;cacheable=key==PN_OK;}
+    if(status==PN_OK && cacheable){
+        pn_profile_span_t cached;pn_profile_begin(&cached,a->pool,"epub.raster.image-cache");
+        status=pn_epub_image_cache_restore_region_guarded(&a->image_cache,&a->book_file,image->path,&a->style,viewport,*rect,&underlay,pn_source_blocks_partial(&a->blocks)?source_guard:NULL,a);
+        pn_profile_end(&cached,status);if(status==PN_OK)return status;if(status!=PN_EMPTY && status!=PN_NO_MEMORY)return status;
+        status=PN_OK;
+    }
+    if(status==PN_OK){pn_profile_span_t decoded;pn_profile_begin(&decoded,a->pool,"epub.raster.image");
+        status=pn_epub_image_draw(a->pool,&a->epub,image->path,viewport,*rect,&info);pn_profile_end(&decoded,status);}
+    if(status==PN_OK && cacheable && reclaim)pn_epub_image_cache_store_region(&a->image_cache,&a->book_file,image->path,&a->style,viewport,*rect,&underlay);
+    return status;
 }
 static pn_status_t paint_body(app_t *a,pn_frame_t *frame,unsigned *missing,unsigned *missing_images){
     // 图片前压缩一次；普通文本页保留有界容量，失败时仍使用原缓冲。/ Compact once before images; text pages reuse bounded capacity and failures retain the original buffers.
     if(a->page.image_count)(void)compact(a);
+    size_t retry_image=SIZE_MAX;
+repaint:;
     pn_status_t paper=pn_paper_draw(&a->paper,a->style.background,frame);if(paper!=PN_OK)return paper;paint_guides(a,frame,&a->page);
     pn_frame_t viewport={frame->pixels+PN_READER_TOP*frame->stride+a->style.margin/2,a->layout.width,PN_READER_HEIGHT,frame->stride};
     bool standalone=!a->style.hide_images && a->page.count==1 && a->page.image_count==1;
     if(standalone){pn_profile_span_t image_timing;pn_profile_begin(&image_timing,a->pool,"epub.raster.image-cache");pn_status_t cached=pn_epub_image_cache_restore_guarded(&a->image_cache,&a->book_file,a->page.images[0].path,&a->style,&viewport,pn_source_blocks_partial(&a->blocks)?source_guard:NULL,a);pn_profile_end(&image_timing,cached);
-        if(cached==PN_OK){pn_epub_reader_trim(&a->reader);suspend_fonts(a);pn_font_close(&a->ui);return PN_OK;}if(cached!=PN_EMPTY)return cached;}
+        if(cached==PN_OK)return PN_OK;
+        if(cached!=PN_EMPTY)return cached;}
     for(size_t i=0;i<a->page.count;i++){pn_epub_page_node_t *n=&a->page.nodes[i];pn_status_t status;
-        if(n->image_index!=UINT_MAX){pn_epub_reader_trim(&a->reader);suspend_fonts(a);pn_font_close(&a->ui);pn_epub_page_image_t *image=&a->page.images[n->image_index];
+        if(n->image_index!=UINT_MAX){pn_epub_page_image_t *image=&a->page.images[n->image_index];
             int x=n->x_64/64,y=n->baseline-image->height,w=image->width,h=image->height;
             if(a->style.hide_images){pn_frame_rect(&viewport,x,y,w,1,8);pn_frame_rect(&viewport,x,y+h-1,w,1,8);pn_frame_rect(&viewport,x,y,1,h,8);pn_frame_rect(&viewport,x+w-1,y,1,h,8);continue;}
-            pn_image_rect_t rect;status=paint_image_node(a,&a->page,n,&viewport,true,&rect);x=rect.x;y=rect.y;w=rect.width;h=rect.height;
+            // 实际OOM才关闭字体；从纸面重画后完整重试，透明图不在失败的半成品上重复合成。
+            // Close fonts only after an actual OOM; repaint from paper before a full retry so transparent images never blend over failed partial pixels.
+            if(i==retry_image){pn_epub_reader_trim(&a->reader);suspend_fonts(a);pn_font_close(&a->ui);(void)pn_cache_reclaim(a->pool,SIZE_MAX);}
+            pn_image_rect_t rect;pn_profile_span_t retry;if(i==retry_image)pn_profile_begin(&retry,a->pool,"epub.raster.image-retry");
+            status=paint_image_node(a,&a->page,n,&viewport,true,&rect);if(i==retry_image)pn_profile_end(&retry,status);x=rect.x;y=rect.y;w=rect.width;h=rect.height;
+            if(status==PN_NO_MEMORY && retry_image==SIZE_MAX){retry_image=i;*missing=0;*missing_images=0;goto repaint;}
             if(status!=PN_OK){if(!optional_image_error(status))return status;last_image_error=status;
                 pn_frame_rect(&viewport,x,y,w,h,15);pn_frame_rect(&viewport,x,y,w,1,8);pn_frame_rect(&viewport,x,y+h-1,w,1,8);pn_frame_rect(&viewport,x,y,1,h,8);pn_frame_rect(&viewport,x+w-1,y,1,h,8);(*missing_images)++;}
             continue;}
@@ -283,16 +298,23 @@ static bool bitmap_allowed(const app_t *a){return !a->suspended && !a->lost && !
 static pn_status_t bitmap_finish(app_t *);
 static pn_status_t bitmap_copy(app_t *a,pn_frame_t *frame,const pn_epub_reader_receipt_t *receipt,unsigned *missing){
     if(!bitmap_allowed(a) || receipt->intent!=PN_READ_NEXT || (a->page.image_count && !a->bitmap.ready) || (!a->bitmap.ready && (!a->bitmap.working || !a->bitmap.cursor || a->bitmap.total!=a->page.count)) || !bitmap_key(a,receipt->token,&receipt->anchor))return PN_EMPTY;
+    // 命中计数同时包含接管半成品后的复制，单列就绪/待补绘，避免将命中误当成零光栅工作。
+    // Hit counts also include copies after completing partial work; separate ready and partial use instead of interpreting every hit as zero raster work.
+    pn_profile_observe(a->pool,a->bitmap.ready?"epub.bitmap.use-ready":"epub.bitmap.use-partial",PN_OK,0,NULL);
     pn_cache_pin(&a->bitmap.owner);pn_status_t s=PN_OK;
     // 图片缓存也先复核来源；不把完整像素当作来源证明。/ Revalidate image sources before cached pixels; complete pixels are never source proof.
+    pn_profile_span_t checked;
     if(a->page.image_count && !a->style.hide_images){
+        pn_profile_begin(&checked,a->pool,"epub.bitmap.source-check");
         if(!pn_source_blocks_partial(&a->blocks))s=pn_text_file_verify_handle(a->pool,&a->book_file);
         for(size_t i=0;s==PN_OK && i<a->page.image_count;i++)s=source_guard(a,a->page.images[i].path);
+        pn_profile_end(&checked,s);
     }
     if(s==PN_OK && !a->bitmap.ready)s=bitmap_finish(a);
-    if(s==PN_OK)s=font_size(a,a->bitmap_last_pixels);
-    if(s==PN_OK)s=pn_font_chain_validate(chain(a));
-    if(s==PN_OK)s=pn_page_bitmap_copy(&a->bitmap,frame,missing);
+    if(s==PN_OK){pn_profile_begin(&checked,a->pool,"epub.bitmap.font-check");s=font_size(a,a->bitmap_last_pixels);
+        if(s==PN_OK)s=pn_font_chain_validate(chain(a));
+        pn_profile_end(&checked,s);}
+    if(s==PN_OK){pn_profile_begin(&checked,a->pool,"epub.bitmap.copy");s=pn_page_bitmap_copy(&a->bitmap,frame,missing);pn_profile_end(&checked,s);}
     pn_cache_unpin(&a->bitmap.owner);
     if(s==PN_NO_MEMORY){pn_page_bitmap_enable(&a->bitmap,false);pn_page_bitmap_enable(&a->bitmap,true);return PN_EMPTY;}return s;
 }

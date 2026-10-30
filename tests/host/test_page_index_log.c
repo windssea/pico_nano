@@ -5,6 +5,7 @@
 #include "pn_page_index.h"
 #include "pn_cancel.h"
 #include "pn_crc32.h"
+#include "pn_profile.h"
 #include <assert.h>
 #include <dirent.h>
 #include <stdio.h>
@@ -13,12 +14,26 @@
 #include <unistd.h>
 #include <sys/stat.h>
 static bool counting;static uint64_t read_bytes;
+static bool ledger;static uint64_t ticks;static pn_profile_event_t costs[8];static unsigned cost_count;
+static uint64_t clock_us(void *ctx){(void)ctx;return ticks;}
+static void observe(void *ctx,const pn_profile_event_t *event){
+    (void)ctx;if(!strncmp(event->phase,"page-index.chain-",17)){assert(cost_count<8);costs[cost_count++]=*event;}
+    ticks+=10000; // 故意昂贵的输出不应混入已完成账本。/ Deliberately expensive output must not enter the completed ledger.
+}
+static unsigned digest_begins,digest_finishes;
+static pn_status_t digest_start_status=PN_OK;static bool digest_update_error;
+static pn_status_t digest_begin(void *ctx){digest_begins++;if(ledger)ticks+=300;pn_identity_accumulator_init(ctx);return digest_start_status;}
+static unsigned digest_updates;
+static pn_status_t digest_update(void *ctx,const void *p,size_t n){digest_updates++;if(ledger)ticks+=400;if(digest_update_error)return PN_IO;pn_identity_accumulator_update(ctx,p,n);return PN_OK;}
+static pn_status_t digest_finish(void *ctx,pn_book_id_t *out){digest_finishes++;if(ledger)ticks+=500;pn_identity_accumulator_finish(ctx,out);return PN_OK;}
+static void digest_abort(void *ctx){(void)ctx;}
+static const pn_identity_digest_port_t digest_port={sizeof(pn_identity_accumulator_t),digest_begin,digest_update,digest_finish,digest_abort};
 static bool arm,cancel,short_reads,corrupt_sync;static unsigned fail_sync,sync_calls,seeks;
 size_t __real_fread(void *,size_t,size_t,FILE *);
 int __real_fsync(int);
 int __real_fseek(FILE *,long,int);
-int __wrap_fseek(FILE *f,long offset,int whence){seeks++;return __real_fseek(f,offset,whence);}
-size_t __wrap_fread(void *p,size_t n,size_t count,FILE *f){size_t got=__real_fread(p,n,short_reads && n==1 && count==4096?17:count,f);if(counting)read_bytes+=n*got;if(arm && n==1 && count==4096 && got){arm=false;cancel=true;}return got;}
+int __wrap_fseek(FILE *f,long offset,int whence){seeks++;if(ledger)ticks+=200;return __real_fseek(f,offset,whence);}
+size_t __wrap_fread(void *p,size_t n,size_t count,FILE *f){if(ledger)ticks+=100;size_t got=__real_fread(p,n,short_reads && n==1 && count==4096?17:count,f);if(counting)read_bytes+=n*got;if(arm && n==1 && count==4096 && got){arm=false;cancel=true;}return got;}
 int __wrap_fsync(int fd){
     if(fail_sync && ++sync_calls==fail_sync)return -1;
     if(corrupt_sync){
@@ -106,10 +121,28 @@ static void compact_run(void){
     OPEN();for(unsigned pass=0;pass<6;pass++){for(unsigned n=0;n<256;n++){pn_page_index_entry_t e=page(n);e.first.element+=pass==5?10000:pass+1;pn_page_index_add(&h,&e);}assert(drain(&h)==PN_OK);}pn_page_index_close(&h);
     // 一次完整读表加末尾窗口，不能退回“记录复核+SHA整表重读”；所有原CRC/根校验仍执行。
     // One complete table read plus its trailing window, never a separate record scan and full SHA reread; all original CRC/root checks still apply.
-    read_bytes=0;counting=true;OPEN();counting=false;
+    read_bytes=0;seeks=0;counting=true;digest_begins=digest_finishes=digest_updates=0;
+    ledger=true;cost_count=0;ticks=0;pn_profile_port(clock_us,observe,NULL);
+    pn_identity_digest_port(&digest_port);OPEN();pn_identity_digest_port(NULL);counting=false;ledger=false;pn_profile_port(NULL,NULL,NULL);unsigned open_seeks=seeks;
+    assert(cost_count==8 && !strcmp(costs[0].phase,"page-index.chain-verify"));
+    uint64_t ledger_total=0;for(unsigned n=1;n<8;n++){assert(costs[n].status==PN_OK);ledger_total+=costs[n].elapsed_us;}
+    assert(ledger_total==costs[0].elapsed_us && costs[1].io.bytes>0 && costs[1].io.bytes<=(uint64_t)length(path));
+    assert(costs[1].elapsed_us==costs[1].io.reads*100 && costs[1].io.seeks==1 && costs[2].elapsed_us==200);
+    assert(costs[3].elapsed_us==digest_begins*300u && costs[4].elapsed_us==digest_updates*400u && costs[5].elapsed_us==digest_finishes*500u);
+    printf("Exclusive ledger: reads=%llu bytes=%llu SHA begin/update/finish=%u/%u/%u; costly output excluded\n",(unsigned long long)costs[1].io.reads,(unsigned long long)costs[1].io.bytes,digest_begins,digest_updates,digest_finishes);
     assert(read_bytes<=(uint64_t)length(path)+PN_PAGE_INDEX_MAX*80u+4096u);
+    // 完整追加链顺读校验，不能每块重新定位/重读头部。/ Verify the full append chain sequentially rather than seeking back and rereading each header.
+    printf("index open seeks=%u\n",open_seeks);fflush(stdout);assert(open_seeks<=4);assert(digest_begins>1 && digest_finishes==digest_begins);
     printf("index open: file=%lld read=%llu bytes, full CRC/order/SHA verified\n",(long long)length(path),(unsigned long long)read_bytes);
     pn_page_index_close(&h);
+    // 首次顺读内取消必须传回原状态，且退出前不输出完整分项账本。/ Cancellation inside the first read must preserve its status and avoid emitting the detailed ledger before exit.
+    assert(pn_page_index_open(&h,&pool,&state,&wr,root,&book,&key)==PN_OK);
+    pn_cancel_scope_t log_cancel;pn_cancel_enter(&log_cancel,cancelled,NULL);arm=true;cost_count=0;ledger=true;pn_profile_port(clock_us,observe,NULL);
+    assert(pn_page_index_use_tf(&h,&sd,&rd,tf)==PN_CANCELLED && cancel && cost_count==1 && costs[0].status==PN_CANCELLED);
+    ledger=false;pn_profile_port(NULL,NULL,NULL);cancel=false;pn_cancel_leave(&log_cancel);pn_page_index_close(&h);
+    // 可选摘要状态拒绝时完整软件退路；运行中端口错误不能发布未验证窗口。/ Optional digest denial retains full software verification; runtime port errors must not publish an unverified window.
+    digest_start_status=PN_NO_MEMORY;pn_identity_digest_port(&digest_port);OPEN();pn_identity_digest_port(NULL);pn_book_index_state_t fallback;assert(!pn_page_index_build_state(&h,&fallback) && fallback.pages==768);pn_page_index_close(&h);digest_start_status=PN_OK;
+    digest_update_error=true;pn_identity_digest_port(&digest_port);OPEN();pn_identity_digest_port(NULL);assert(!pn_page_index_build_state(&h,&fallback) && !fallback.pages);pn_page_index_close(&h);digest_update_error=false;OPEN();pn_page_index_close(&h);
     snprintf(saved,sizeof saved,"%s/table.saved",root);snprintf(saved_root,sizeof saved_root,"%s/root.saved",root);copy(path,saved);copy(trust,saved_root);off_t before=length(path);
     unsigned cuts=0;
     for(unsigned cut=0;cut<2000;cut++){

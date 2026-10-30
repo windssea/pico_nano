@@ -3,15 +3,21 @@
 #include "pn_reader_app.h"
 #include "pn_epub_app.h"
 #include "pn_cancel.h"
+#include "pn_profile.h"
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
-static unsigned renders;
+static unsigned renders,measures;
+static uint64_t ticks,layout_us;static unsigned layout_batches;
+static uint64_t clock_us(void *ctx){(void)ctx;return ++ticks;}
+static void observe(void *ctx,const pn_profile_event_t *event){
+ (void)ctx;if(!strcmp(event->phase,"epub.prefetch.layout")){assert(event->elapsed_us>0);layout_us+=event->elapsed_us;layout_batches++;}
+}
 FT_Error __real_FT_Load_Glyph(FT_Face,FT_UInt,FT_Int32);
-FT_Error __wrap_FT_Load_Glyph(FT_Face f,FT_UInt i,FT_Int32 flags){if(flags&FT_LOAD_RENDER)renders++;return __real_FT_Load_Glyph(f,i,flags);}
+FT_Error __wrap_FT_Load_Glyph(FT_Face f,FT_UInt i,FT_Int32 flags){if(flags&FT_LOAD_RENDER)renders++;else measures++;return __real_FT_Load_Glyph(f,i,flags);}
 static uint64_t image;
 static unsigned presentations;
 static uint8_t expected_pixels[684u*1216u/2u];
@@ -21,13 +27,30 @@ static pn_status_t present(void *ctx,const pn_frame_t *frame,pn_refresh_t mode){
 static bool stop(void *ctx){(void)ctx;return true;}
 static pn_status_t lost(void *ctx){(void)ctx;return PN_STALE_MEDIA;}
 static pn_status_t validate(void *ctx){(void)ctx;return stale?PN_STALE_MEDIA:pn_cancel_checkpoint();}
-int main(int argc,char **argv){assert(argc==3);
+static void cold_metrics(void){
+ pn_pool_t pool;assert(!pn_pool_init(&pool,2u*1024u*1024u,NULL,NULL,NULL));pn_text_source_t source=pn_font_reading_source();source.validate=validate;
+ uint8_t expected[5000],actual[5000];pn_frame_t a,b;assert(pn_frame_bind(&a,expected,sizeof expected,100,100) && pn_frame_bind(&b,actual,sizeof actual,100,100));pn_frame_clear(&a,15);pn_frame_clear(&b,15);
+ pn_font_t font={0};assert(!pn_font_open(&font,&pool,&source,44));assert(!pn_font_draw(&font,&a,'W',10*64,60,PN_FONT_GRAY));pn_font_close(&font);
+ assert(!pn_font_open(&font,&pool,&source,44));renders=measures=0;int32_t advance=0,again=0;
+ pn_cache_speculate(&pool,true);pn_cache_class_t kind=pool.speculative_kind;
+ for(unsigned n=0;n<3;n++){assert(!pn_font_advance(&font,'W',&again));if(n)assert(advance==again);advance=again;assert(pool.speculative==1 && pool.speculative_kind==kind);}
+ pn_cache_speculate(&pool,false);printf("cold metric loads: measure=%u render=%u\n",measures,renders);fflush(stdout);assert(renders==1 && measures==0);
+ renders=measures=0;assert(!pn_font_draw(&font,&b,'W',10*64,60,PN_FONT_GRAY) && !renders && !measures && !memcmp(expected,actual,sizeof actual));
+ stale=true;assert(pn_font_advance(&font,'W',&again)==PN_STALE_MEDIA);stale=false;pn_font_close(&font);
+ // 额度拒绝时沿原度量且不驱逐；同一字宽、取消和来源校验仍成立。/ Denied admission retains original measurement without eviction; advances, cancellation and source validation remain identical.
+ assert(!pn_font_open(&font,&pool,&source,44));pool.cache_caps[PN_CACHE_GLYPH]=0;renders=measures=0;pn_cache_speculate(&pool,true);
+ assert(!pn_font_advance(&font,'W',&again) && again==advance);pn_cache_speculate(&pool,false);assert(!renders && measures==1);pn_cache_snapshot(&pool);assert(!pool.cache_stats[PN_CACHE_GLYPH].bytes && !pool.cache_stats[PN_CACHE_GLYPH].evictions);
+ pn_cancel_scope_t scope;pn_cancel_enter(&scope,stop,NULL);assert(pn_font_advance(&font,'X',&again)==PN_CANCELLED);pn_cancel_leave(&scope);assert(!pool.speculative);
+ pn_font_close(&font);assert(!pool.used && !pool.live);puts("cold speculative metrics: one load, exact pixels, capped fallback and source checks");
+}
+int main(int argc,char **argv){assert(argc==3);cold_metrics();
  for(unsigned kind=0;kind<2;kind++){unsigned before=0,after=0;uint64_t expected=0;
  for(unsigned warm=0;warm<2;warm++){capture_pixels=compare_pixels=false;pn_pool_t p;assert(!pn_pool_init(&p,6u*1024u*1024u,NULL,NULL,NULL));pn_reader_app_t app={0};pn_epub_app_t epub={0};
   assert((kind?pn_epub_app_open(&epub,&p,argv[2],NULL,NULL,44,0):pn_reader_app_open(&app,&p,argv[1],NULL,NULL,44,0))==PN_OK);
   assert((kind?pn_epub_app_step(&epub,PN_APP_OPEN,1,present,NULL):pn_reader_app_step(&app,PN_APP_OPEN,1,present,NULL))==PN_OK);
   pn_txt_progress_t current={0},next={0};pn_epub_progress_t ecurrent={0},enext={0};assert((kind?pn_epub_app_progress(&epub,&ecurrent):pn_reader_app_progress(&app,&current))==PN_OK);
-  uint64_t shown=image;unsigned count=presentations;if(warm){bool pending=false,finished=false;unsigned ticks=0;for(;ticks<4000;ticks++){pn_status_t s=kind?pn_epub_app_prefetch(&epub):pn_reader_app_prefetch(&app);assert(s==PN_OK || s==PN_EMPTY);bool active=kind?pn_epub_app_warm_pending(&epub):pn_reader_app_warm_pending(&app);pending|=active;if(s==PN_EMPTY && !active){finished=true;break;}}
+  uint64_t shown=image;unsigned count=presentations;if(warm){bool pending=false,finished=false;unsigned ticks=0;if(kind)pn_profile_port(clock_us,observe,NULL);for(;ticks<4000;ticks++){pn_status_t s=kind?pn_epub_app_prefetch(&epub):pn_reader_app_prefetch(&app);assert(s==PN_OK || s==PN_EMPTY);bool active=kind?pn_epub_app_warm_pending(&epub):pn_reader_app_warm_pending(&app);pending|=active;if(s==PN_EMPTY && !active){finished=true;break;}}
+   if(kind){pn_profile_port(NULL,NULL,NULL);assert(layout_batches && layout_us);printf("Measured preparation: batches=%u elapsed=%llu fake us, no zero-time markers\n",layout_batches,(unsigned long long)layout_us);}
    // 等到真实任务静止，不假定更小工作片仍在固定200轮内结束；上限只作卡死保护。/ Wait for real quiescence rather than assuming smaller slices finish in 200 ticks; the limit is only a hang guard.
    printf("Warm completion %s: ticks=%u pending_seen=%u finished=%u\n",kind?"EPUB":"TXT",ticks,pending,finished);assert(pending && finished);assert(presentations==count && image==shown);
    assert((kind?pn_epub_app_progress(&epub,&enext):pn_reader_app_progress(&app,&next))==PN_OK && (kind?!memcmp(&ecurrent,&enext,sizeof enext):!memcmp(&current,&next,sizeof next)));}

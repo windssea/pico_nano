@@ -52,6 +52,13 @@ int main(void){
     pn_cache_reclaim(&pool,SIZE_MAX);fail_seek=true;memset(out,0x5a,sizeof out);n=123;
     assert(source.read_at(source.ctx,8190,out,17,&n)==PN_IO && n==123 && out[0]==0x5a);
     short_reads=true;check(&source,bytes,8190,17);cached_reads=reads;check(&source,bytes,8191,17);assert(reads==cached_reads);
+    // 相邻窗口的前插/追加同样覆盖短读与失败撤回，失败不污染调用方或发布旧半窗。
+    // Prepended/appended adjacent windows also handle short reads and revoke on failure without modifying caller output or publishing an old partial window.
+    pn_cache_reclaim(&pool,SIZE_MAX);assert(pn_text_file_cache_window(&source,1024)==PN_OK);
+    check(&source,bytes,1024+17,17);fail_seek=true;n=123;memset(out,0x5a,sizeof out);
+    assert(source.read_at(source.ctx,17,out,17,&n)==PN_IO && n==123 && out[0]==0x5a);
+    short_reads=true;check(&source,bytes,17,17);check(&source,bytes,1024+17,17);cached_reads=reads;check(&source,bytes,1000,80);assert(reads==cached_reads);
+    short_reads=true;check(&source,bytes,2048+17,17);cached_reads=reads;check(&source,bytes,2020,80);assert(reads==cached_reads);
     pn_cancel_scope_t scope;pn_cancel_enter(&scope,cancelled,NULL);unsigned before=reads;n=123;
     assert(source.read_at(source.ctx,0,out,sizeof out,&n)==PN_CANCELLED && n==123 && reads==before);pn_cancel_leave(&scope);
     assert(pn_media_detach(&media)==PN_OK);n=123;

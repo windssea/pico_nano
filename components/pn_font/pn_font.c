@@ -282,7 +282,14 @@ static pn_status_t advance_impl(void *ctx,uint32_t cp,int32_t *advance) {
     pn_font_t *font=ctx;if(!advance)return PN_INVALID;
     if(!font || !font->impl || cp>0x10ffff || (cp>=0xd800 && cp<=0xdfff))return PN_INVALID;
     engine_t *e=font->impl;
-    if(!e->adv && cache_allowed(e,sizeof(adv_t)*ADV_SLOTS)){e->adv=glyph_alloc(e,sizeof(adv_t)*ADV_SLOTS);if(e->adv){memset(e->adv,0,sizeof(adv_t)*ADV_SLOTS);e->adv_slots=ADV_SLOTS;}}
+    if(!e->adv){
+        // 像素续读后可能没有字宽表；预取也可在原字形额度内可选建表，失败不回收前台资源。
+        // Pixel resume may leave metrics cold; prefetch may optionally create the original table within the glyph cap, without reclaiming foreground resources on failure.
+        bool warming=e->warming;pn_cache_class_t kind=e->pool->speculative_kind;e->warming=true;
+        if(e->pool->speculative)e->pool->speculative_kind=PN_CACHE_GLYPH;
+        if(cache_allowed(e,sizeof(adv_t)*ADV_SLOTS)){e->adv=glyph_alloc(e,sizeof(adv_t)*ADV_SLOTS);if(e->adv){memset(e->adv,0,sizeof(adv_t)*ADV_SLOTS);e->adv_slots=ADV_SLOTS;}}
+        e->pool->speculative_kind=kind;e->warming=warming;
+    }
     adv_t *set=e->adv?&e->adv[hash_key(cp,font->pixels,0)%(e->adv_slots/ADV_WAYS)*ADV_WAYS]:NULL;
     unsigned hit=0;if(set)for(;hit<ADV_WAYS;hit++)if(set[hit].state && set[hit].cp==cp && set[hit].pixels==(uint16_t)font->pixels)break;
     if(set && hit<ADV_WAYS){

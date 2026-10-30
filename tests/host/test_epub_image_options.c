@@ -11,7 +11,11 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
-static unsigned probes,draws;
+static unsigned probes,draws,font_opens;
+static bool inject_oom,retry_released;
+static size_t oom_used;
+pn_status_t __real_pn_font_open(pn_font_t *,pn_pool_t *,const pn_text_source_t *,int);
+pn_status_t __wrap_pn_font_open(pn_font_t *font,pn_pool_t *pool,const pn_text_source_t *source,int pixels){font_opens++;return __real_pn_font_open(font,pool,source,pixels);}
 static bool inject_cancel;
 static unsigned checks;
 static bool cancel_image(void *ctx){(void)ctx;return ++checks>=6;}
@@ -19,17 +23,19 @@ pn_status_t __real_pn_epub_image_probe(pn_pool_t *,pn_epub_t *,const char *,pn_i
 pn_status_t __wrap_pn_epub_image_probe(pn_pool_t *p,pn_epub_t *e,const char *path,pn_image_info_t *i){probes++;return __real_pn_epub_image_probe(p,e,path,i);}
 pn_status_t __real_pn_epub_image_draw(pn_pool_t *,pn_epub_t *,const char *,pn_frame_t *,pn_image_rect_t,pn_image_info_t *);
 pn_status_t __wrap_pn_epub_image_draw(pn_pool_t *p,pn_epub_t *e,const char *path,pn_frame_t *f,pn_image_rect_t r,pn_image_info_t *i){
-    draws++;if(!inject_cancel)return __real_pn_epub_image_draw(p,e,path,f,r,i);
+    draws++;if(inject_oom){inject_oom=false;oom_used=p->used;assert(__real_pn_epub_image_draw(p,e,path,f,r,i)==PN_OK);return PN_NO_MEMORY;}
+    if(oom_used){retry_released=p->used<oom_used;oom_used=0;}
+    if(!inject_cancel)return __real_pn_epub_image_draw(p,e,path,f,r,i);
     inject_cancel=false;checks=0;pn_cancel_scope_t scope;pn_cancel_enter(&scope,cancel_image,NULL);pn_status_t s=__real_pn_epub_image_draw(p,e,path,f,r,i);pn_cancel_leave(&scope);assert(s==PN_CANCELLED);return s;
 }
 static pn_status_t present(void *ctx,const pn_frame_t *frame,pn_refresh_t mode){(void)mode;uint8_t *out=ctx;assert(frame->width==684 && frame->height==1216 && frame->stride==342);memcpy(out,frame->pixels,415872);return PN_OK;}
 static void warm(pn_epub_app_t *app){for(unsigned i=0;i<8192;i++){pn_status_t s=pn_epub_app_prefetch(app);assert(s==PN_OK || s==PN_EMPTY || s==PN_CANCELLED);if(pn_epub_app_prerender_stats(app).completed)return;}assert(!"image prerender never completed");}
 int main(int argc,char **argv){
     assert(argc==3);uint8_t *oracle=malloc(415872),*frame=malloc(415872);assert(oracle && frame);
-    for(unsigned mode=0;mode<4;mode++){
+    for(unsigned mode=0;mode<5;mode++){
         pn_pool_t pool;assert(!pn_pool_init(&pool,6u*1024u*1024u,NULL,NULL,NULL));pn_epub_app_t app={0};
         assert(pn_epub_app_open(&app,&pool,argv[1],argv[2],NULL,44,0)==PN_OK && pn_epub_app_step(&app,PN_APP_OPEN,1,present,frame)==PN_OK);
-        if(mode){assert(!pn_epub_app_prerender(&app,true));
+        if(mode && mode<4){assert(!pn_epub_app_prerender(&app,true));
             if(mode==1){unsigned before=draws;for(unsigned i=0;i<512;i++){pn_status_t s=pn_epub_app_overlap(&app);assert(s==PN_OK || s==PN_EMPTY);}assert(draws==before);}
             inject_cancel=mode==2;warm(&app);assert(!inject_cancel);}
         if(mode==3){
@@ -38,9 +44,20 @@ int main(int argc,char **argv){
             pn_status_t s=pn_epub_app_step(&app,PN_APP_NEXT,2,present,frame);assert((s==PN_STALE_JOB || s==PN_CORRUPT) && !memcmp(prior,frame,415872));free(prior);
             file=fopen(argv[1],"r+b");assert(file && !fseek(file,at,SEEK_SET) && fputc(byte,file)!=EOF && !fclose(file));assert(!pn_epub_app_close(&app,3) && !pool.used && !pool.live);continue;
         }
-        unsigned before=draws;assert(pn_epub_app_step(&app,PN_APP_NEXT,2,present,frame)==PN_OK);
-        if(!mode){assert(draws>before);memcpy(oracle,frame,415872);}else{assert(draws==before && pn_epub_app_prerender_stats(&app).hits==1 && !memcmp(oracle,frame,415872));}
-        assert(pn_epub_app_close(&app,3)==PN_OK && !pool.used && !pool.live);
+        inject_oom=mode==4;unsigned before=draws;assert(pn_epub_app_step(&app,PN_APP_NEXT,2,present,frame)==PN_OK);
+        if(!mode){assert(draws>before);memcpy(oracle,frame,415872);}else if(mode<4){assert(draws==before && pn_epub_app_prerender_stats(&app).hits==1 && !memcmp(oracle,frame,415872));}
+        else{assert(!inject_oom && retry_released && draws==before+2 && !memcmp(oracle,frame,415872));}
+        if(!mode || mode==4){
+            // 同一混排图回翻/再前翻复用96KiB内无损区域；字体不为小图冷重开。/ Revisit a mixed image using the existing 96 KiB lossless region; small images never force cold font reopen.
+            before=draws;unsigned fonts=font_opens;
+            assert(!pn_epub_app_step(&app,PN_APP_PREVIOUS,3,present,frame));
+            assert(!pn_epub_app_step(&app,PN_APP_NEXT,4,present,frame));
+            assert(draws==before && font_opens==fonts && !memcmp(oracle,frame,415872));
+            assert(!pn_epub_app_step(&app,PN_APP_NEXT,5,present,frame));
+            assert(!pn_epub_app_step(&app,PN_APP_PREVIOUS,6,present,frame));
+            assert(draws==before && font_opens==fonts && !memcmp(oracle,frame,415872));
+        }
+        assert(pn_epub_app_close(&app,7)==PN_OK && !pool.used && !pool.live);
     }
     char state[]="/tmp/pn-image-options-XXXXXX";assert(mkdtemp(state));pn_pool_t pool;assert(!pn_pool_init(&pool,6u*1024u*1024u,NULL,NULL,NULL));pn_epub_app_t app={0};
     assert(!pn_epub_app_open(&app,&pool,argv[1],argv[2],state,44,0) && !pn_epub_app_step(&app,PN_APP_OPEN,1,present,frame));

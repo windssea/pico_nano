@@ -17,7 +17,7 @@ with tempfile.TemporaryDirectory() as folder:
   assert 'sokoban screen=' in p.stdout,p.stdout
   assert not re.search(r'sokoban screen=\d+ status=[1-9]',p.stdout),p.stdout
   return p.stdout
- enter='library,tap:460:190,tap:342:648,wait:400,'
+ enter='library,tap:460:190,tap:342:408,wait:400,'
  out=run(enter+'window-close');assert not list(state.glob('sokoban.[ab]'))
  out=run(enter+'tap:340:952,window-close');initial=snapshot();assert initial[:4]==b'PNSV' and initial[20]==levels[0]['player']
  level=levels[0];w,h=level['w'],level['h'];cell=min(96,612//w,684//h)//2*2;x=(684-w*cell)//2;y=184+(684-h*cell)//2

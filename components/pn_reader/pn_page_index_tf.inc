@@ -60,21 +60,31 @@ typedef struct {
     tf_hash_t source;uint64_t base,processed;size_t header,carried;uint32_t count,seen;
     uint8_t record[RECORD];pn_page_index_entry_t previous,first,last,build;bool have_build;
 } tf_audit_t;
-static pn_status_t tf_audit_read(void *ctx,uint64_t offset,uint8_t *out,size_t cap,size_t *got){
-    tf_audit_t *a=ctx;if(offset!=a->processed)return PN_STALE_JOB;
-    size_t n=0;pn_status_t s=tf_hash_read(&a->source,a->base+offset,out,cap,&n);if(s!=PN_OK)return s;
-    size_t at=offset<a->header?(size_t)(a->header-offset):0;if(at>n)at=n;
+static pn_status_t tf_audit_records(tf_audit_t *a,const uint8_t *data,size_t n){
+    size_t at=0;pn_status_t s=PN_OK;
     while(at<n){
-        size_t take=RECORD-a->carried;if(take>n-at)take=n-at;
-        memcpy(a->record+a->carried,out+at,take);at+=take;a->carried+=take;
-        if(a->carried!=RECORD)continue;
+        // 完整记录直接读原缓冲；仅跨块记录拼接，CRC/排序仍逐条执行。/ Decode whole records in place; assemble only split records, still checking every CRC and ordering rule.
+        const uint8_t *record;
+        if(!a->carried && n-at>=RECORD){record=data+at;at+=RECORD;}
+        else{size_t take=RECORD-a->carried;if(take>n-at)take=n-at;
+            memcpy(a->record+a->carried,data+at,take);at+=take;a->carried+=take;
+            if(a->carried!=RECORD)continue;
+            record=a->record;
+        }
         if(!(a->seen%32u)){s=checked(a->source.index);if(s!=PN_OK)return s;}
         pn_page_index_entry_t e;
-        if(a->seen>=a->count || !decode(a->record,&e) || (a->seen && tf_compare(&a->previous,&e)>=0))return PN_CORRUPT;
+        if(a->seen>=a->count || !decode(record,&e) || (a->seen && tf_compare(&a->previous,&e)>=0))return PN_CORRUPT;
         a->previous=e;a->seen++;a->carried=0;
         if(e.section==BUILD_SECTION && !e.begin){a->build=e;a->have_build=true;}
         if(e.section!=BUILD_SECTION){if(a->first.section==BUILD_SECTION)a->first=e;a->last=e;}
     }
+    return PN_OK;
+}
+static pn_status_t tf_audit_read(void *ctx,uint64_t offset,uint8_t *out,size_t cap,size_t *got){
+    tf_audit_t *a=ctx;if(offset!=a->processed)return PN_STALE_JOB;
+    size_t n=0;pn_status_t s=tf_hash_read(&a->source,a->base+offset,out,cap,&n);if(s!=PN_OK)return s;
+    size_t at=offset<a->header?(size_t)(a->header-offset):0;if(at>n)at=n;
+    s=tf_audit_records(a,out+at,n-at);if(s!=PN_OK)return s;
     a->processed+=n;*got=n;return PN_OK;
 }
 static pn_status_t tf_audit(index_t *i,FILE *f,uint64_t base,size_t header,uint32_t count,tf_audit_t *a,pn_book_id_t *digest){

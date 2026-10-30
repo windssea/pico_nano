@@ -210,7 +210,7 @@ static pn_status_t xj_step(pn_xhtml_job_t *job,pn_xhtml_stats_t *stats,bool comp
         // 前台NEXT也按精确记录跳过已验证前文，不能每轮四个事件从章首追赶。/ Foreground NEXT also skips verified prefixes by exact records instead of chasing from chapter start four events per tick.
         if(j->has_focus && !j->seek_done){pn_profile_span_t span;pn_profile_begin(&span,j->pool,compiler?"index.seek":"epub.prefetch.seek");s=xj_seek_focus(j);pn_profile_end(&span,s);if(s!=PN_OK)return s;}
         // 量宽同时预热位图后每字工作更多，四事件即让出，控制输入/回执等待。/ Metric work now also warms rasters; yield after four events to bound input/receipt waiting.
-        pn_profile_span_t replay;if(compiler)pn_profile_begin(&replay,j->pool,"index.layout");
+        uint64_t replay_begin=compiler?0:pn_profile_time();pn_profile_span_t replay;if(compiler)pn_profile_begin(&replay,j->pool,"index.layout");
         for(unsigned events=0;events<(compiler?32u:4u) && j->record && !j->proxy.done(j->proxy.ctx);events++){
             s=pn_cancel_checkpoint();if(s!=PN_OK)break;
             model_record_t *r=j->record;unsigned i=j->item;
@@ -220,9 +220,14 @@ static pn_status_t xj_step(pn_xhtml_job_t *job,pn_xhtml_stats_t *stats,bool comp
             if(++j->item>=(r->kind==PN_XHTML_TEXT?r->count:1u)){j->record=r->next;j->item=0;}
         }
         if(compiler)pn_profile_end(&replay,s);
+        else{
+            // 实测每个四事件批次，不再以0微秒占位；字体载入是子阶段，不能重复相加。/ Measure each four-event batch instead of a zero-time marker; font loads are children and must not be added twice.
+            uint64_t end=pn_profile_time();pn_status_t observed=s==PN_OK && j->record && !j->proxy.done(j->proxy.ctx)?PN_BUSY:s;
+            pn_profile_observe(j->pool,"epub.prefetch.layout",observed,end>=replay_begin?end-replay_begin:0,NULL);
+        }
         if(s==PN_OK)s=pn_cancel_checkpoint();
         if(s==PN_OK)s=pn_epub_spine_find(j->epub,j->path,&ordinal);
-        if(s==PN_OK && j->record && !j->proxy.done(j->proxy.ctx)){if(!compiler)pn_profile_observe(j->pool,"epub.prefetch.layout",PN_BUSY,0,NULL);return PN_BUSY;}
+        if(s==PN_OK && j->record && !j->proxy.done(j->proxy.ctx))return PN_BUSY;
         if(s==PN_BUSY)s=PN_INVALID;
         if(s==PN_OK && j->model->truncated && !j->proxy.done(j->proxy.ctx))s=PN_NO_MEMORY;
         if(s==PN_OK)*stats=j->model->stats;

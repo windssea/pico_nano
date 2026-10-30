@@ -2,7 +2,7 @@
 
 基于 ESP32-S3 的独立墨水屏阅读器固件。核心、解析、字体、排版与界面在设备和 PC 模拟器中共用源码，固定目标为 RDP-G01-W/E0470A01、684×1216、16 灰阶、8MiB PSRAM、16MiB Flash。对外品牌在所有语言中统一为 **PicoNano**。
 
-当前正式版本为 **1.0.9**（[GitHub 发布页](https://github.com/windssea/pico_nano/releases/tag/v1.0.9)）。本版改进界面对比度、近期保存与缓存调度，继续优化开书校验和首次翻页预绘，并移除LocalSend；网页与USB传书保留。界面采用更清晰的卡片、文字、描边和选中态，封面原图及其灰阶转换保持。原生16灰阶、完整来源校验及内存上限保持；相关诊断设备观察与未验收范围见[真机报告](docs/READING_DEVICE_TEST_REPORT.md)和[开发指南](docs/DEVELOPMENT_PLAN.md)。正式发布及下载身份以发行清单为准。
+当前正式版本为 **1.0.10**（[GitHub 发布页](https://github.com/windssea/pico_nano/releases/tag/v1.0.10)）。本版新增扫雷与3×3娱乐图标入口，优化可见封面调度、书内图片与翻页缓存，并提供默认开启的书内图片显示开关。完整来源校验、原画质和保存屏障保持；首次未就绪翻页及退出同步仍有长尾。网页与USB传书保留。界面采用更清晰的卡片、文字、描边和选中态，封面原图及其灰阶转换保持。原生16灰阶、完整来源校验及内存上限保持；相关诊断设备观察与未验收范围见[真机报告](docs/READING_DEVICE_TEST_REPORT.md)和[开发指南](docs/DEVELOPMENT_PLAN.md)。正式发布及下载身份以发行清单为准。
 
 开发与模拟器入口见[构建文档](docs/BUILDING.md#开发时保持可见模拟器)，可运行`tools/run_sim.ps1 -Demo`使用原创演示资源，无需私人书籍或完整字库。
 

@@ -41,7 +41,9 @@ struct page_index {
     char trust_path[PN_JOURNAL_PATH_MAX];pn_book_id_t trust_hash[2],selected_hash; ///< 有界内部身份及当前实际读代 / Bounded internal identities and the actually consumed generation
     uint32_t floor_section;uint64_t floor_begin;bool floor_exclusive,have_floor; ///< RAM仍完整覆盖的磁盘后缀 / Disk suffix still completely covered by RAM
 };
-static uint64_t get(const uint8_t *p,unsigned n){uint64_t v=0;for(unsigned i=0;i<n;i++)v|=(uint64_t)p[i]<<(8*i);return v;}
+/// 固定宽度小端解码，不要求记录对齐；避免热循环逐字段做64位移位。/ Fixed-width little-endian decoding requires no record alignment and avoids per-field 64-bit shift loops.
+static uint32_t get32(const uint8_t *p){return (uint32_t)p[0]|((uint32_t)p[1]<<8)|((uint32_t)p[2]<<16)|((uint32_t)p[3]<<24);}
+static uint64_t get(const uint8_t *p,unsigned n){return n==8?get32(p)|((uint64_t)get32(p+4)<<32):get32(p);}
 static void put(uint8_t *p,uint64_t v,unsigned n){for(unsigned i=0;i<n;i++)p[i]=(uint8_t)(v>>(8*i));}
 static uint32_t crc(const uint8_t *p,size_t n){return pn_crc32_update(0,p,n);}
 static void position_put(uint8_t *p,pn_xhtml_position_t v){put(p,v.element,8);put(p+8,v.offset,8);put(p+16,v.run,4);put(p+20,v.kind,4);}
