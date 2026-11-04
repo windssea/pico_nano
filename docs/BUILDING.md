@@ -1,5 +1,11 @@
 # PicoNano 构建、运行与验证
 
+## 1.0.11正式构建（2026-11-04）
+
+正式构建源码`36cb3066e075b8270796fd24ac5806af339acd97`，板级应用5406432B、SHA-256 `bc6a2e3a223a77eb48d9fa5c1782ce2e6c0cbca5943c62d3baf982e9aface873`，6MiB槽余14.067%；CI应用5403200B、槽余14.118%。两套SDK6.1构建、size、版本/ELF/checksum/hash与诊断关闭核验通过；完整包和签名OTA沿用1.0.5已资格引导`80193053e7c398d196e87db7b63a1eaf008ea5f368d35f918c094d5b804652e1`及原公钥。
+
+同源软件回归与源码CI全部通过，计数与范围见[安装文档](INSTALLATION.md)。完整安装/升级/离线网页三ZIP及两个OTA文件和总摘要已本地核验，公开分发另查本批完成记录。设备继续保留b9e4诊断镜像及被动日志监控，本次发布不自动刷入；待机电量由用户自行观察，不追加短测或过夜自动任务。证据build-dev/release-1.0.11/。
+
 ## 2026-11-04 外围低功耗b9e4有限真机验证完成，功耗待测
 
 自有锁屏外围事务新增`device_sleep_peripherals`主机用例；`device_async`验证睡眠引脚、暂停确认与显示owner交接，`device_lock_retry`验证外围失败退避及已接受按键，`device_sleep_restore_*`覆盖触摸恢复等待窗口的卡/PGOOD/未知IRQ。统一入口仍为`python tools/dev.py host`；定向可用`ctest --test-dir build-host -R 'device_sleep|device_async|device_lock_retry' --output-on-failure`。真实控制器的TXT/EPUB各16轮检查帧、位置和池释放，硬件由软件port替代。用户本批已授权并完成SDK6.1/defaults+wake-diag/SIZE reconfigure/build/size及配置/源码核对；验证镜像b9e4c7ae/1.0.10-diag，5439120B，OTA余13.5475%，已写ota_0/0x20000并实际启动。16MiB备份、应用整体验证、选择前后保护区/NVS/原403完整ota_1/内部存储/目标尾部核验通过。29个睡眠GPIO配置返回成功，PMU/触摸/TF/内部挂载和首页呈现通过；电池手动锁屏285次与USB自动锁屏370次睡眠均成功，held/失败/重试0；用户确认原页、单键与触摸恢复正常。实际电流与过夜续航待测，自动轮热恢复时延未捕获。证据build-dev/peripheral-sleep-20261104/；旧403监控已核身份停止，设备只在刷入后启动复位一次；当前改由无复位monitor_reopen.py持有COM3（owner64676/wrapper57000），保持被动记录，不并开串口或发送PNT。USB日志停流需实体拔插恢复，不重启设备。下节403是已保留旧槽的历史验证。

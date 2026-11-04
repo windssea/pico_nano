@@ -1,0 +1,2 @@
+55bc8ee35386fc3fc4f0c20bea256df7a86650db7779ed8e25d9a71a070605df  PicoNano-36cb306-upgrade.zip
+4e22add907a0ab377c22c3c76f58052b1a46e794d33dd178197aa00742d79250  PicoNano-web-installer-36cb306.zip
