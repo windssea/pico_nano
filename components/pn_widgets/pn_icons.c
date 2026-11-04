@@ -101,6 +101,9 @@ void pn_w_icon(pn_frame_t *frame,pn_icon_t icon,int x,int y,int size,uint8_t sha
     }
 }
 void pn_w_battery(pn_frame_t *frame,int x,int y,int width,int height,int percent,uint8_t shade){
+    pn_w_battery_status(frame,x,y,width,height,percent,false,shade);
+}
+void pn_w_battery_status(pn_frame_t *frame,int x,int y,int width,int height,int percent,bool charging,uint8_t shade){
     if(!frame || !frame->pixels || width<16 || height<8)return;
     if(percent<0)percent=0;
     if(percent>100)percent=100;
@@ -108,5 +111,9 @@ void pn_w_battery(pn_frame_t *frame,int x,int y,int width,int height,int percent
     pn_w_round_stroke(frame,x,y,body,height,height/4,2.0f,shade);
     pn_w_round_fill(frame,x+body,y+height/4,3,height/2,1,shade);
     int inner=body-8;int fill=inner*percent/100;
-    if(fill>0)pn_w_round_fill(frame,x+4,y+4,fill,height-8,1,shade);
+    if(charging && height>=16){
+        // 闪电直接画在电池内部；百分比由旁边数字表达，不叠在电量条上降低对比度。/ Draw the bolt inside the battery; adjacent digits carry the level so the fill cannot obscure the mark.
+        float size=(float)(height-6);ctx_t c={frame,(float)x+((float)body-size)*0.5f,(float)y+3.0f,size,2.0f,shade};
+        line(&c,0.68f,0.08f,0.25f,0.56f);line(&c,0.25f,0.56f,0.70f,0.56f);line(&c,0.70f,0.56f,0.31f,0.94f);
+    }else if(fill>0)pn_w_round_fill(frame,x+4,y+4,fill,height-8,1,shade);
 }

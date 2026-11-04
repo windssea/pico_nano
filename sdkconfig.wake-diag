@@ -6,3 +6,5 @@ CONFIG_PN_TEST_CONSOLE=n
 CONFIG_PN_DIAG_NO_AUTO_LOCK=n
 CONFIG_PN_DIAG_NO_LOCK_SLEEP=n
 CONFIG_PN_WAKE_TRACE=y
+# 仅唤醒诊断记录SDK频率驻留时间，区分任务运行与真正空闲。/ Wake diagnostics count SDK frequency residency to distinguish running tasks from true idle.
+CONFIG_PM_PROFILING=y

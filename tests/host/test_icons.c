@@ -7,6 +7,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "pn_widgets.h"
 #include "pn_wallpaper.h"
 static unsigned dark(const pn_frame_t *f,int x,int y,int w,int h){unsigned n=0;for(int j=y;j<y+h;j++)for(int i=x;i<x+w;i++)if(pn_frame_get(f,i,j)<15)n++;return n;}
@@ -46,6 +47,14 @@ int main(void){
     pn_frame_clear(&frame,0);pn_w_mask_corners(&frame,100,100,100,100,12,PN_UI_PAPER);
     assert(pn_frame_get(&frame,100,100)==15 && pn_frame_get(&frame,150,150)==0 && pn_frame_get(&frame,150,100)==0);
     pn_frame_clear(&frame,PN_UI_PAPER);pn_w_battery(&frame,100,100,44,22,60,0);assert(dark(&frame,100,100,50,22)>60);
+    // 同一外框/电量的充电态只能改变内部像素，拔线后恢复原电量条。/ With identical bounds/level, charging changes only interior pixels; unplug restores the original level bar.
+    uint8_t *battery_copy=pn_alloc(&pool,684*1216/2);assert(battery_copy);memcpy(battery_copy,bytes,684*1216/2);
+    pn_frame_t reference;assert(pn_frame_bind(&reference,battery_copy,684*1216/2,684,1216));
+    pn_frame_clear(&frame,PN_UI_PAPER);pn_w_battery_status(&frame,100,100,44,22,60,true,0);
+    bool different=false;for(int y=0;y<1216;y++)for(int x=0;x<684;x++){
+        uint8_t original=pn_frame_get(&reference,x,y);
+        if(pn_frame_get(&frame,x,y)!=original){assert(x>=102 && x<138 && y>=102 && y<120);different=true;}}
+    assert(different);pn_frame_clear(&frame,PN_UI_PAPER);pn_w_battery_status(&frame,100,100,44,22,60,false,0);assert(!memcmp(bytes,battery_copy,684*1216/2));pn_free(battery_copy);
     const char *path=getenv("PN_ICON_SHEET");
     if(path){
         pn_frame_clear(&frame,PN_UI_PAPER);

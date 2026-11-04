@@ -252,12 +252,13 @@ int pn_w_tabbar_hit(unsigned count,int y,int height,int x,int hit_y){
     return (int)((unsigned)x*count/PN_UI_WIDTH);
 }
 /* 状态带共享的电量、时间与无线状态：由设备/模拟器写入，绘制只读取。/ Battery, clock and wireless state shared by every status band: written by the device or simulator, only read while drawing. */
-static int status_battery=-1;static char status_clock[8];static bool status_wifi;
+static int status_battery=-1;static char status_clock[8];static bool status_wifi,status_charging;
 void pn_w_set_battery(int percent){status_battery=percent<0?-1:percent>100?100:percent;}
 int pn_w_battery_level(void){return status_battery;}
+void pn_w_set_charging(bool charging){status_charging=charging;}
 void pn_w_set_clock(const char *hhmm){size_t n=0;if(hhmm)while(hhmm[n] && n<sizeof status_clock-1){status_clock[n]=hhmm[n];n++;}status_clock[n]=0;}
 void pn_w_set_wifi(bool connected){status_wifi=connected;}
-pn_w_status_snapshot_t pn_w_status_snapshot(void){pn_w_status_snapshot_t view={.battery=status_battery,.wifi=status_wifi};strcpy(view.clock,status_clock);return view;}
+pn_w_status_snapshot_t pn_w_status_snapshot(void){pn_w_status_snapshot_t view={.battery=status_battery,.wifi=status_wifi,.charging=status_charging};strcpy(view.clock,status_clock);return view;}
 pn_status_t pn_w_status(pn_font_t *font,pn_frame_t *frame){
     if(!font || !font->impl || !frame)return PN_INVALID;
     int original=font->pixels;pn_status_t status=pn_font_size(font,24);
@@ -266,7 +267,7 @@ pn_status_t pn_w_status(pn_font_t *font,pn_frame_t *frame){
     int right=PN_UI_WIDTH-PN_UI_MARGIN;
     if(status==PN_OK && status_battery>=0){
         char text[8];int n=status_battery;char *p=text;if(n>=100){*p++='1';*p++='0';*p++='0';}else{if(n>=10)*p++=(char)('0'+n/10);*p++=(char)('0'+n%10);}*p++='%';*p=0;
-        pn_w_battery(frame,right-44,12,44,22,status_battery,PN_UI_INK);right-=54;
+        pn_w_battery_status(frame,right-44,12,44,22,status_battery,status_charging,PN_UI_INK);right-=54;
         int w=0;if(pn_w_text_width(font,text,&w)!=PN_OK)w=60;
         status=pn_w_text(font,frame,text,right-w,30,w+2,PN_ALIGN_RIGHT);right-=w+16;
     }

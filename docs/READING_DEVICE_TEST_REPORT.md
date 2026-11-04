@@ -1,5 +1,78 @@
 # PicoNano 真机开书与翻页测试报告
 
+## 2026-11-04 外围低功耗b9e4c7ae：手动电池与USB自动待机有限验证通过
+
+用户本批授权后，SDK6.1/defaults+wake-diag/SIZE验证镜像5439120B已写ota_0，选择seq41；原403完整保留ota_1。16MiB备份、应用整体验证及切换前后保护区/NVS/原槽/内部存储/目标尾部检查通过。实际启动ELF前缀b9e4c7aee，DFS240/80MHz及浅睡启用，29个睡眠GPIO配置全部返回成功，PMU1.0.9/触摸/TF/内部挂载与首页呈现通过。测试控制台关闭，自动锁屏/真实浅睡保留，无正式发布。
+
+手动电池锁屏149629ms，285/285次成功，平均493.898ms，热恢复2526ms；用户体感4–5秒并确认原页和触摸往返正常。自动轮在闲置300396ms后触发，USB保持连接，370/370次成功，平均494.232ms，睡眠等待191697694us；用户确认一次短按恢复原页、触摸正常，重连后下一页/上一页均status=0。两轮held/timer_only/失败/重试/IRQ冷却均0，共655次成功。
+
+手动轮continuity1/warm0；自动轮完整wake trace在USB停流期间已播完，不能补造其热/冷恢复时延或连续性字段。自动入睡的触摸DEEPSLEEP/外围Suspend=0/29脚配置成功有直接日志。USB连接的阅读稳定段270993ms、80MHz驻留76.97%，产品锁0、空轮100，身份stat15/hint6/候选5不变；不是电流换算。体感4–5秒与2526ms的边界不同，后者从resume_reader入口到正文回执，不含此前按键/松手和触摸复位。
+
+USB浅睡后日志可能停流，本轮主机无复位重开串口未恢复，用户拔插后恢复；不把日志断流当作设备卡死。当前COM3/TCP47821 owner64676/wrapper57000，monitor_reopen.py不含复位，旧66884/52072已核身份停止；设备本批仍只有刷入后一次启动复位，未重刷或新增代码。 当前电流、过夜电压/电量及长期偶发故障率未验收，不能把短测扩大为每天掉20%已解决。启动读出的旧Reader wake saved记录排除，不以串口接收时刻或日志前缀推算睡眠时长；只使用同一轮RAM起点/计数。原始日志、用户确认、解析和SHA在忽略的build-dev/peripheral-sleep-20261104/。
+
+
+## 2026-11-04 held-irq修复403：两轮真实睡眠与热恢复，自动锁屏/单次按键原页确认
+
+held-irq读回修复已构建刷入403be168ce23726c24c9e1edb5473318f8cee13defbd84ee150ebb7a0d670200，1.0.10-diag、5436400B、bin SHA546220c4a3069cacf365a434e4f4ac89c28ae21e763234e8df5c2258b1ec6e0a，OTA余13.59075%。16MiB备份SHA8d9f640d9ebc610cb2eaaae628601d362b9845bfd705839377c7cfef3e7e136f；只写ota_1/0x620000和selector0x10000/seq40，选择前后整应用、原ota_0、保护区/NVS、内部存储和目标尾部核对，实际启动/PMU RUNNING/VCOM=-1600mV/首页确认。260完整保留ota_0，b999字节在备份。初次下载握手失败未写入，拔插后成功。SDK6.1与主机109/109沿同一冻结源，不重复累计。
+
+| 403电池供电场景 | 锁屏间隔 | 成功/尝试 | 平均成功调用 | 正文恢复 |
+| --- | --- | --- | --- | --- |
+| 首轮按要求短按锁屏 | 105830ms | 199/199 | 495.892ms | 2879ms |
+| 自动锁屏后单次短按 | 424099ms | 815/815 | 495.640ms | 2717ms |
+
+首轮RAM start60291，call_us98682559/wait_us103434053，timer194/gpio5；wake start166121/ready169000。自动轮start470031，call_us403946743/wait_us422008596，timer800/gpio15；wake start894130/ready896847。每轮wake start减locked_ms与Lock power start精确匹配，两轮held/timer_only/失败/first_error/retry/irq_cooldowns均0，retained1/continuity1/reasonunchanged/warm0。合计1014次成功，锁屏529929ms（8分49.929秒）。自动轮用户明确确认“自动锁屏，单次短按恢复原页，无异常”；首轮只回复按要求操作，其单独视觉补问尚未答复，不扩大为两轮都获独立视觉确认。
+
+原始device/first-offline.log的SHAd4a54ab5bd08ae3085a3f25281ea8bd89c91195f1a8d1e28f3395871ba8f60a6；device/second-offline.log的SHAcc52a1c7850f184f83c4fc57fd88b80fb5bbb5d3e33dd07dbe4e958d9bfb938a。first/second-observation.json、用户原答复与完整配置/备份/源在忽略的build-dev/held-irq-20261104/。一次USB重连wake行截断被排除，随后完整trace与重复汇总吻合，原件未修改；历史Reader wake saved不计新故障。捕获一个预期boot、未捕获panic，离线空窗不构成完整故障率证明。
+
+本次普通PMU中断误判导致的冷路径未再出现，旧260约9.8秒冷恢复变为403约2.7–2.9秒热恢复。这是恢复入口至正文回执，不含按键检测/松手等待；不是受控性能分布。SDK调用含进出开销，约95.4%/95.7%的等待内调用时间不等于电气睡眠比例。没有电流、起止电量或过夜对照，不能宣布每日约20%掉电已解决；真正卡变、读错和未知IRQ仍保守冷恢复。
+
+### 260修复前基线（历史）
+
+用户报告近两天基本锁屏、没有阅读，每天约掉电20%。被动COM3读取与备份应用头确认此前仍b999，260未刷；旧版最新锁屏累计wait_us=9196643534、success=61948/attempts=61951、failures=3、first_error=259，成功调用平均131.268ms。此前9.357ms仅为早期另一轮，不代表两天每次调用。
+
+11月4日沿原授权刷入26011ce65005e7e5d39d952b7319250ee945554ade811ca228850b65c15bed7b；5436304B，bin SHA d63db7a547ba09bcd3369ec881f15f0103f8346315413a8e8d0c1267afd9eb79。16MiB备份SHA f3522b097f4463f3628fbdff6769d9d42a5ec7951b91bcb7abb6ec27cfb24a79。只写ota_0/0x20000及selector0xf000/seq39，选择前后原ota_1/保护区/NVS/内部存储/目标尾部均保持；实际启动、PMU RUNNING、VCOM=-1600mV及首页回执通过。b999留ota_1，d77字节在历史备份。70/70和SDK构建沿相同冻结源，不重复累计。
+
+用户确认首轮自行锁屏、USB重连前恢复正文，恢复后94%；未单独报告秒数。完整RAM汇总start=1499115，与wake start_ms=2650676减locked_ms=1151561精确匹配：attempts/success=2221/2221，timer2182/gpio39，call_us=1103662074，wait_us=1149504056，held40/timer_only40，failures/first_error/retry/irq_cooldowns均0。平均成功调用496.921ms，成功调用占适配器等待96.012%，含SDK进出开销，不能解释为电气睡眠占比或电流。ready_ms=2660505，正文恢复9829ms；连续性0/reason=held-irq，走冷恢复，快速恢复仍有缺口。
+
+冻结first-offline-cycle-20261104.log的SHA为d1ce7ba7e0277b572afa00d6ab422b096753324e59b0eaa2193b2daa63c33a55。USB断开期间未持续覆盖，第一次重连wake行被截断，解析器排除，随后两条完整trace与重复Lock power一致；历史Reader wake saved不当本轮故障。捕获一个预期boot、未捕获panic，不能据日志空窗排除所有离线故障。证据guard/device及standby-audit-20261104/first-cycle-verification.json、first-user-confirmation.json。第二轮用户明确确认一次电源短按即恢复正文并接回USB。第二轮完整RAM锁屏2477277ms（41分17.277秒），start2960942匹配5438219-2477277；attempts/success=4785/4785、timer4699/gpio86、call_us2377645216/wait_us2474894800，平均496.896ms，占等待96.071%（含过渡），held85/timer_only85，failures/first_error/retry/irq_cooldowns均0。ready5448004，正文恢复9785ms；continuity0/held-irq，再次冷恢复。第二轮原始冻结second-offline-cycle-20261104.log的SHA为8b19531d2ae2645f22633011de19deab8985929039c7384de77d1e458d28f1d3，JSON/原答复在standby-audit-20261104/second-cycle-verification.json、second-user-confirmation.json。第二次重连首条wake同样截断，排除后完整trace与重复汇总匹配。
+
+两轮合计7006次成功/0失败、锁屏3628838ms（60分28.838秒）；两次恢复不是长期偶发故障率证明。第二轮lock_start距前次正文ready为300437ms，与自动门限相符，未单独取得手动锁屏触发回执，不据测试请求宣称实际为手动锁屏。SDK全局自动浅睡light_sleep_counts=8915、SLEEP时间238925620us在这轮未增长，而显式适配器记录了新4785次调用；不能用该全局SLEEP百分比替代显式调用核验或实际电流。没有起始电量、电流或过夜对照，不能宣布每天20%掉电已解决。
+
+## 2026-11-02 自动锁屏后入睡失败（原镜像实测，修复尚未刷入）
+
+当前d77ee9925真机日志确认：自动锁屏后保存及屏幕断轨成功，用户拔USB静置约2分钟、短按电源键并重插后恢复阅读；但延后汇总为`locked_ms=2289593 slept=1 retained=1 continuity=0 reason=sleep-failed`。这里的38分9.593秒是整次锁定到恢复的区间，包含之前USB连接阶段，不是纯拔线测试时长或实际睡眠时间。`slept=1`原本只表示进入适配器；`sleep-failed`则证明至少一次真实浅睡API返回错误。旧镜像没有错误码/成功次数/耗时，不能推定失败发生时刻或整段全醒。恢复走冷路径，入口至正文回执10047ms，用户确认回到阅读页；不据此宣称睡眠通过。
+
+最终主机ASan/UBSan定向59/59；一个原创演示TXT和一个用户EPUB各16轮真实控制器锁屏/恢复，检查完整帧、位置和池关闭归零，共32轮，原件摘要保持。冻住的旧睡眠适配器在持续低及快速GPIO唤醒反例失败，新适配器通过；旧控制器缺少失败重试入口。假时钟和硬件替身只是逻辑验证，不是设备低功耗测量。原始日志、旧源/最终源及completion.json在忽略的`build-dev/sleep-power-20261102/`。本批未SDK构建、刷机、复位或发布，设备仍d77、COM3 owner8040保持。
+
+本批没有复位、刷写或远程输入；原监控在USB重插后自动恢复串口。旧`pn_sleep`即时汇总可能在USB断开时丢失，后续同一开机的Reader wake trace保留了sleep-failed；不能用串口断开或屏幕保留锁页判定低功耗。新增统计随下一次验证固件记录，实际电流和过夜续航仍未测。
+
+## 2026-11-02 后台空检查与实际空闲降频验证
+
+用户授权本批构建刷入。同源主机17/17（ASan/UBSan，诊断增加后的同一集合重跑通过，不累加）、Release SDL4/4保持。初次SDK6.1/defaults+wake-diag/SIZE镜像a47563754写ota_1/0x620000、selector0x10000/seq36；16MiB备份SHA`17aa7554e0501e3fc4c7ecafd75aff13c7755e1eae4d082ef315c2e871cef424`，写后镜像、原运行槽、保护区/NVS、内部存储与目标未写尾部核对通过。
+
+初次首页100空轮后释放产品锁，日志随后暂停；主机无复位重连仍无输出，用户能进入正文。实体拔插USB后同一开机日志恢复，随后正文stat/hint=20/8连续130450ms、首页30/12连续130245ms，均14个快照、product_lock=0、idle_rounds=100。输入后计数允许重新探测，不能跨输入要求累计值不变。两次瞬时240MHz并不能否定DFS：SDK对运行任务持有rtos0/rtos1满频锁。
+
+补充SDK PM_PROFILING的模式驻留账本后再次构建并刷入备用ota_0，只有诊断观测变化，原产品策略保留。最终1.0.10-diag/ELF`d77ee99251ded8e4336190f395f33a32d33c789cbef3b229466652ca62eb8c88`，bin SHA`9290db6f85e8790b20cea1cf31199aac37976bb5138016da97c752d41043e32f`，5433504B、槽余13.6368%。第二次16MiB备份SHA`e11337809eabfbbfa0ca9e14f66780801acbf14ce0443bea15abfd1482631192`；selector0xf000/seq37、整镜像与选择前后保护区/原ota_1/内部存储/尾部检查通过。a475保留ota_1，7203及更早字节在完整备份。最终启动0x20000、版本/ELF、PMU RUNNING、VCOM=-1600mV及首页确认。
+
+以下仅合计相邻两端均无输入切换、计数相同、产品锁0、空轮100的模式驻留区间差；频率取SDK模式配置与累计时间，不取普通任务运行时的瞬时字段。t为同一esp_timer毫秒载荷，不与SDK前缀相减。
+
+| 页面 | t区间（ms） | 累计稳定采样（s） | stat/hint保持 | 80MHz驻留比例 |
+| --- | --- | --- | --- | --- |
+| 首页 | 17897–308691 | 290.794 | 15/6 | 76.512% |
+| 阅读 | 1113994–1214367 | 100.373 | 40/16 | 75.918% |
+
+两个页面均确认重复身份探测停止、产品满频锁释放和实际80MHz驻留；余下时间主要为240MHz运行任务，不能解释为电流比例。本次保持USB连接，清醒观测时usb_serial_jtag禁自动浅睡锁活动；显式锁屏路径另出现有限SLEEP累计，不纳入清醒80MHz时间，也不单独作为完整睡眠唤醒验收。无新增panic/assert/brownout日志；SDK统计和输出本身有开销。未测实际电流、拔线续航、完整睡眠唤醒、低电关机或光学，没有发布。原始及冻结记录在忽略的`build-dev/idle-power-20261102/pm-profile/`，COM3/TCP47821保留单一monitor_idle.py，勿重跑其HardReset或发不存在的PNT命令。
+
+## 2026-11-02 充电图标唤醒验证版：构建、刷入、启动与自动锁屏
+
+本批用户明确授权构建刷入，产品源沿源码阶段主机13/13及Release SDL4/4，不相加重复测试。SDK6.1/defaults+wake-diag/SIZE reconfigure/build/size、生成配置及镜像校验通过；1.0.10-diag/ELF7203d6d2d，5431296B，OTA余860160B/13.671875%。测试控制台及禁锁屏/禁睡眠关闭，保留自动锁屏、真实浅睡与唤醒记录。未发布正式镜像。
+
+旧97d9先完成保存/锁屏，再核对16MiB备份的逐块/整片MD5。仅写备用ota_0与0xf000选择记录seq35；整应用读后校验、切换前后原ota_1/保护区/NVS/内部存储和目标槽未写尾部核对保持，旧0917完整字节在本次全备份。新启动从0x20000加载，版本/ELF、PMU RUNNING、VCOM=-1600mV及三次成功display.receipt确认；无panic/断轨错误。证据在忽略的`build-dev/charging-20261102/`及其flash、device目录。
+
+无新输入约5分钟后自动锁屏：日志有Locking，锁页成功回执后屏幕轨关闭。SDK前缀与应用esp_timer载荷不相减为精确空闲毫秒；该观察不等于睡眠电流或实体唤醒验收。已请求用户拔线约10秒/重插约10秒确认电池内部闪电与普通条切换，满电无闪电属预期；用户随后明确回复“插拔后图标变化正常”，本次实体插拔对应的图标切换记为通过（用户现场观察，不是相机或数字帧捕获）；充满过程、实体唤醒汇总、光学、电流和长期续航仍未计为通过。当前COM3由本批monitor_wake.py单独持有（无PNT控制台），进入睡眠后USB可能暂停。
+
+
+
 ## 1.0.10正式包的软件与分发校验范围（2026-10-30）
 
 用户已授权推送发布，固件源`6a8ed35d15a1d91be730ad6107e08a3a3197a5ed`，板级正式应用5399440B、SHA `8747fab12322bb5d091f5e5ca5e9da311ba06295d14095a2457d33a92408eb6a`，两套SDK6.1构建及镜像/配置检查通过，关闭诊断控制台/PROFILE及免锁屏开关。同源主机315/315、SDL54/54及工具/网页/安装器回归通过，源码远程CI四项通过；签名、三ZIP及离线HTTP九镜像核验完成。对应原始软件日志在`build-dev/release-1.0.10/`。以下诊断批次“未发布”指当时阶段，代码现整合到1.0.10，诊断.bin仍不公开作正式固件。

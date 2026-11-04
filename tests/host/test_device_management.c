@@ -11,7 +11,18 @@
 #define pn_device_time_commit boot_time_commit
 #define pn_device_ota_state boot_ota_state
 #include "device_ota.h"
+#define read_pico_pmu_ready boot_pmu_ready
+#define read_pico_pmu_poll boot_pmu_poll
+#define read_pico_pmu_get boot_pmu_get
 #include "test_device_boot.c"
+#undef read_pico_pmu_ready
+#undef read_pico_pmu_poll
+#undef read_pico_pmu_get
+static pmu_snapshot_t charge_snapshot={.qb_soc=873,.qb_flags=2,.status_ok=true};
+static bool charge_ready=true;static esp_err_t charge_error=ESP_OK;
+bool read_pico_pmu_ready(void){return charge_ready;}
+esp_err_t read_pico_pmu_poll(void){return charge_error;}
+const pmu_snapshot_t *read_pico_pmu_get(void){return &charge_snapshot;}
 #undef main
 #undef pn_device_transfer_state
 #undef pn_device_transfer_close
@@ -155,6 +166,12 @@ static void home_reading_key_checks(void){
     a.dated=false;before=home_reading_key(1,&a);a.week_ms[0]+=70000;assert(home_reading_key(1,&a)==before);
 }
 int main(void){
+    // 真实PMU状态映射：正在充电才显示闪电，满电/未知/错误不得沿用旧标记。/ Actual PMU mapping: only active charging gets a bolt; full/unknown/errors never retain it.
+    for(unsigned state=0;state<=4;state++){charge_snapshot.charge_state=(uint8_t)state;assert(battery_percent()==87 && pn_w_status_snapshot().charging==(state==2));}
+    charge_snapshot.charge_state=2;charge_snapshot.status_ok=false;assert(battery_percent()==87 && !pn_w_status_snapshot().charging);
+    charge_snapshot.status_ok=true;assert(battery_percent()==87 && pn_w_status_snapshot().charging);
+    charge_error=ESP_FAIL;assert(battery_percent()==-1 && !pn_w_status_snapshot().charging);charge_error=ESP_OK;
+    charge_ready=false;assert(battery_percent()==-1 && !pn_w_status_snapshot().charging);charge_ready=true;charge_snapshot.charge_state=1;
     wake_record_checks();
     /* 延后日志只重播唤醒快照，不改变输入/显示，也不跟随之后变化的介质标记。/ Deferred logs replay the wake snapshot without input/display effects or following later media-verdict changes. */
     wake_trace.lock_at=100;lock_slept=true;stub_media_unchanged=false;reader_suspended=true;wake_trace_capture(300);

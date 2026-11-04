@@ -248,7 +248,7 @@ static void takeover_probe(const char *path){
 static void priority_probe(void){
     assert(shelf_page && shelf_page->count>=3);
     identity_job_stop();memset(&identity_cache,0,sizeof identity_cache);identity_cache_loaded=true;
-    identity_failed_path[0]=0;identity_next_scan=0;last_read_known=true;last_read_book=shelf_page->items[2];last_read_book.identified=false;
+    memset(&identity_idle_probe,0,sizeof identity_idle_probe);identity_next_scan=0;last_read_known=true;last_read_book=shelf_page->items[2];last_read_book.identified=false;
     strcpy(selected_path,shelf_page->items[1].path);selected_format=shelf_page->items[1].format;selected_identified=false;
     last_input=0;assert(tick_identity(1000000));assert(pn_identity_cache_job_path(&identity_job) && !strcmp(pn_identity_cache_job_path(&identity_job),shelf_page->items[2].path));identity_job_stop();
     last_read_known=false;identity_next_scan=0;assert(tick_identity(2000000));assert(pn_identity_cache_job_path(&identity_job) && !strcmp(pn_identity_cache_job_path(&identity_job),shelf_page->items[1].path));identity_job_stop();

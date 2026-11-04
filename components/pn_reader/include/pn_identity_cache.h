@@ -43,6 +43,19 @@ void pn_identity_cache_job_close(pn_identity_cache_job_t *job);
 /// 文件修改时间（stat），失败返回false。/ File modification time via stat; false on failure.
 bool pn_identity_cache_stat(const char *path,uint64_t *size,int64_t *mtime);
 
+#define PN_IDENTITY_IDLE_PROBE_MAX 24 ///< 当前页十二条、近期/焦点/选书及两条预热的有界调度额度 / Bounded allowance for twelve visible books, recents/focus/selection and two warm probes
+/// 文件访问前的调度去重；只跳过可选后台探测，不充当内容身份或持久信任。/ Deduplicate before file access; skip optional background probes only, never establish identity or persistent trust.
+typedef struct {
+    const pn_media_t *media; ///< 当前介质对象 / Current media object
+    uint64_t instance,epoch,writes,activity; ///< 换卡、源写入或输入周期变化后失效 / Invalidate on card, source-write or input-cycle changes
+    uint64_t paths[PN_IDENTITY_IDLE_PROBE_MAX]; ///< 路径及探测类别的调度键，不是摘要 / Path/category scheduling keys, never digests
+    unsigned count; ///< 本周期已尝试的有界候选 / Bounded candidates attempted this cycle
+} pn_identity_idle_probe_t;
+/// 首次候选返回true并占一槽；重复、额度满或介质未就绪返回false，全程不读文件。/ Claim a new candidate; return false for duplicates, full allowance or unavailable media, without file I/O.
+bool pn_identity_idle_probe(pn_identity_idle_probe_t *,const pn_media_t *,const char *,uint64_t activity,bool warm);
+/// BUSY/取消时归还本候选，使原周期可在条件恢复后重试；其他候选保持。/ Release a BUSY/cancelled candidate for same-cycle retry, preserving other candidates.
+void pn_identity_idle_probe_retry(pn_identity_idle_probe_t *,const char *,bool warm);
+
 /// 最近两书的调度去重，不是来源证明，也不持久化。/ Scheduling deduplication for two recent books, never source proof or persistent state.
 typedef struct {
     const pn_media_t *media; ///< 当前介质对象 / Current media object

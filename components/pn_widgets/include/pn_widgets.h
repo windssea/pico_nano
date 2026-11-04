@@ -131,6 +131,7 @@ typedef struct {
     int battery; ///< 实际显示的百分比，负数未知 / Displayed percentage, negative when unknown
     char clock[8]; ///< 实际显示的短时间字符串 / Displayed short clock string
     bool wifi; ///< 当前连接图标 / Current connection icon
+    bool charging; ///< PMU确认正在充电，充满/未知为false / PMU-confirmed active charging; false for full or unknown
 } pn_w_status_snapshot_t;
 /// 不读硬件、不修改状态，返回控制层已提供的显示值。/ Return controller-supplied display values without hardware reads or state changes.
 pn_w_status_snapshot_t pn_w_status_snapshot(void);
@@ -141,6 +142,8 @@ pn_status_t pn_w_status(pn_font_t *font,pn_frame_t *frame);
 /// 设置/读取状态带电量（0–100，<0表示未知不显示）。/ Set or read the status-band battery (0–100, negative means unknown and hidden).
 void pn_w_set_battery(int percent);
 int pn_w_battery_level(void);
+/// 设置已确认的充电状态；只更新绘制快照，不读硬件。/ Set confirmed charging state in the draw snapshot without hardware reads.
+void pn_w_set_charging(bool charging);
 /// 分段控件：count个等宽格，selected为黑底白字，notes可为NULL（每格第二行说明）。/ Segmented control with count equal cells, selected drawn white on black; notes may be NULL (a second line per cell).
 pn_status_t pn_w_segments(pn_font_t *font,pn_frame_t *frame,const char *const *labels,const char *const *notes,unsigned count,int selected,int y,int height);
 /// 分段命中：格序号，空白-1。/ Segment hit: cell index, or -1.
@@ -177,6 +180,8 @@ void pn_w_mask_corners(pn_frame_t *frame,int x,int y,int width,int height,int ra
 void pn_w_icon(pn_frame_t *frame,pn_icon_t icon,int x,int y,int size,uint8_t shade);
 /// 电池：圆角外框加电量条，percent为0–100。/ Battery: rounded body plus a level bar, percent 0–100.
 void pn_w_battery(pn_frame_t *frame,int x,int y,int width,int height,int percent,uint8_t shade);
+/// 充电时电池内部显示静态闪电，否则显示原电量条；百分比由调用方在外侧绘制。/ Show a static bolt inside the charging battery, otherwise its level bar; callers draw percentage outside.
+void pn_w_battery_status(pn_frame_t *frame,int x,int y,int width,int height,int percent,bool charging,uint8_t shade);
 void pn_w_icon_search(pn_frame_t *frame,int x,int y,int size); ///< 放大镜 / Magnifier
 void pn_w_icon_grid(pn_frame_t *frame,int x,int y,int size); ///< 宫格 / Grid squares
 void pn_w_icon_list(pn_frame_t *frame,int x,int y,int size); ///< 列表 / List lines

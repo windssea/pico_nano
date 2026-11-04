@@ -11,6 +11,15 @@
 #include "esp_sleep.h"
 #include "read_pico.h"
 #include "read_pico_pmu.h"
+#if defined(CONFIG_PM_ENABLE) && CONFIG_PM_ENABLE
+#include "esp_pm.h"
+static bool guard_held;
+static int guard_token;
+esp_err_t esp_pm_lock_create(esp_pm_lock_type_t type,int arg,const char *name,esp_pm_lock_handle_t *out){assert(type==ESP_PM_NO_LIGHT_SLEEP && !arg && !strcmp(name,"pn-lock-wait"));*out=&guard_token;return ESP_OK;}
+esp_err_t esp_pm_lock_acquire(esp_pm_lock_handle_t lock){assert(lock==&guard_token && !guard_held);guard_held=true;return ESP_OK;}
+esp_err_t esp_pm_lock_release(esp_pm_lock_handle_t lock){assert(lock==&guard_token && guard_held);guard_held=false;return ESP_OK;}
+#endif
+static uint64_t armed_timer_us;
 static int64_t clock_ms=1000,release_at;
 static bool waking,short_pending,release_sent,key_pending,line_low,timer_armed,gpio_armed;
 static unsigned polls;
@@ -18,7 +27,7 @@ static unsigned sleeps,clears,drains,timer_off,gpio_off;
 static uint8_t inputs=1u<<2;
 static unsigned pmu_edges;
 static bool sample_failed;
-static enum {NORMAL,NONKEY,BEFORE_SLEEP,MISSED_EDGE,TIMER_FAILURE,SLEEP_FAILURE,HELD_ENTRY,EARLY_KEY,LEVEL_ONLY,PMU_FAILURE,SHARED_IRQ,LONG_TIMER,PMU_PENDING,PMU_GPIO,PMU_LONG,CARD_SWAP,PMU_CARD,IOE_FAILURE,UNKNOWN_PENDING,PGOOD_CHANGE,KEY_CARD} scenario;
+static enum {NORMAL,NONKEY,BEFORE_SLEEP,MISSED_EDGE,TIMER_FAILURE,SLEEP_FAILURE,HELD_ENTRY,EARLY_KEY,LEVEL_ONLY,PMU_FAILURE,SHARED_IRQ,LONG_TIMER,PMU_PENDING,PMU_GPIO,PMU_LONG,CARD_SWAP,PMU_CARD,IOE_FAILURE,UNKNOWN_PENDING,PGOOD_CHANGE,KEY_CARD,STUCK_IRQ,IRQ_CLEARS,IRQ_STORM,AUTO_TIMER} scenario;
 static esp_sleep_wakeup_cause_t cause;
 static pmu_snapshot_t snapshot;
 static void update(void){if(waking && clock_ms>=release_at && !release_sent){short_pending=true;release_sent=true;}snapshot.key_state=scenario==HELD_ENTRY || (waking && clock_ms<release_at);}
@@ -27,14 +36,14 @@ int64_t esp_timer_get_time(void){return clock_ms*1000;}
 void vTaskDelay(unsigned ms){
 #ifdef PN_SLEEP_POLL_TEST
     // 诊断轮询的500ms延时复用同一假时钟事件，不调用真实SDK睡眠。/ Feed identical fake-clock events into diagnostic polling's 500 ms delay, without real SDK sleep.
-    if(ms==500 && gpio_armed){assert(esp_light_sleep_start()==ESP_OK);update();return;}
+    if(ms==500 && timer_armed){assert(esp_light_sleep_start()==ESP_OK);update();return;}
 #endif
     clock_ms+=ms;if(scenario==EARLY_KEY && !waking && clock_ms>=1040)press();update();assert(clock_ms<(scenario==PMU_LONG?40000000:scenario==LONG_TIMER?15000000:10000));
 }
 #ifdef PN_SLEEP_POLL_TEST
 bool pn_device_test_console_take_power(void){return false;}
 #endif
-void read_pico_clear_ioe_int(void){clears++;line_low=scenario==SHARED_IRQ && waking;}
+void read_pico_clear_ioe_int(void){clears++;line_low=(scenario==SHARED_IRQ && waking) || (!waking && sleeps>=1 && (scenario==STUCK_IRQ || (scenario==IRQ_CLEARS && sleeps<2)));}
 pn_status_t pn_device_card_inputs(uint8_t *out){
     // 读原始输入同时清INT；在PMU应答前保留卡位与PMU位的独立变化。/ Reading raw inputs also clears INT; preserve independent card/PMU changes before PMU ACK.
     if(scenario==IOE_FAILURE && sleeps==1 && !sample_failed){sample_failed=true;return PN_IO;}
@@ -53,14 +62,33 @@ int gpio_get_level(gpio_num_t pin){(void)pin;return line_low?0:1;}
 esp_err_t gpio_wakeup_enable(gpio_num_t pin,int level){(void)pin;assert(level==GPIO_INTR_LOW_LEVEL);gpio_armed=true;return ESP_OK;}
 esp_err_t gpio_wakeup_disable(gpio_num_t pin){(void)pin;gpio_armed=false;gpio_off++;return ESP_OK;}
 esp_err_t esp_sleep_enable_gpio_wakeup(void){return ESP_OK;}
-esp_err_t esp_sleep_enable_timer_wakeup(uint64_t us){assert(us==500000);if(scenario==TIMER_FAILURE)return ESP_FAIL;timer_armed=true;return ESP_OK;}
+esp_err_t esp_sleep_enable_timer_wakeup(uint64_t us){assert(us==500000);if(scenario==TIMER_FAILURE)return ESP_FAIL;timer_armed=true;armed_timer_us=us;return ESP_OK;}
 esp_err_t esp_sleep_disable_wakeup_source(esp_sleep_wakeup_cause_t source){assert(source==ESP_SLEEP_WAKEUP_TIMER || source==ESP_SLEEP_WAKEUP_GPIO);if(source==ESP_SLEEP_WAKEUP_TIMER){timer_armed=false;timer_off++;}return ESP_OK;}
 esp_sleep_wakeup_cause_t esp_sleep_get_wakeup_cause(void){return cause;}
 esp_err_t esp_light_sleep_start(void){
-    assert(++sleeps<=(scenario==PMU_LONG?70000u:scenario==LONG_TIMER?28800u:6u));assert(scenario!=BEFORE_SLEEP && scenario!=HELD_ENTRY && scenario!=TIMER_FAILURE);
+#if defined(CONFIG_PM_ENABLE) && CONFIG_PM_ENABLE
+    assert(guard_held);
+#endif
+    assert(++sleeps<=(scenario==PMU_LONG?70000u:scenario==LONG_TIMER?28800u:scenario==IRQ_STORM?7u:6u));assert(scenario!=BEFORE_SLEEP && scenario!=HELD_ENTRY && scenario!=TIMER_FAILURE);
     if(scenario==SLEEP_FAILURE)return ESP_FAIL;
     if(scenario==PMU_FAILURE){clock_ms+=500;cause=ESP_SLEEP_WAKEUP_TIMER;return ESP_OK;}
+    if(scenario==AUTO_TIMER){
+        // 模拟其他睡眠路径留下9ms全局定时器；下一轮必须重新设为500ms。/ Model another sleep path leaving a 9 ms global timer; the next round must rearm 500 ms.
+        assert(armed_timer_us==500000);clock_ms+=500;armed_timer_us=9000;
+        if(sleeps==3){press();cause=ESP_SLEEP_WAKEUP_GPIO;}else cause=ESP_SLEEP_WAKEUP_TIMER;
+        return ESP_OK;
+    }
+    if(scenario==IRQ_STORM){
+        if(sleeps<=4){assert(gpio_armed);clock_ms++;cause=ESP_SLEEP_WAKEUP_GPIO;return ESP_OK;}
+        if(sleeps<=6){assert(!gpio_armed && timer_armed);clock_ms+=500;cause=ESP_SLEEP_WAKEUP_TIMER;return ESP_OK;}
+        assert(gpio_armed);clock_ms+=500;press();cause=ESP_SLEEP_WAKEUP_GPIO;return ESP_OK;
+    }
     clock_ms+=500;
+    if(scenario==STUCK_IRQ || scenario==IRQ_CLEARS){
+        if(sleeps==1){line_low=true;cause=ESP_SLEEP_WAKEUP_GPIO;return ESP_OK;}
+        if(sleeps==2){assert(!gpio_armed && timer_armed);line_low=scenario==STUCK_IRQ;cause=ESP_SLEEP_WAKEUP_TIMER;return ESP_OK;}
+        assert(gpio_armed==(scenario==IRQ_CLEARS));press();cause=gpio_armed?ESP_SLEEP_WAKEUP_GPIO:ESP_SLEEP_WAKEUP_TIMER;return ESP_OK;
+    }
     // 四小时仅定时复核：时间本身不应使介质证明过期。/ Four hours of timer checks: elapsed time alone must not expire media continuity.
     if(scenario==LONG_TIMER && sleeps<28800){cause=ESP_SLEEP_WAKEUP_TIMER;return ESP_OK;}
     if(scenario==PMU_LONG && sleeps<70000){
@@ -84,17 +112,33 @@ esp_err_t esp_light_sleep_start(void){
         if(sleeps==3){waking=true;release_sent=true;release_at=clock_ms-100;short_pending=true;}
         return ESP_OK;
     }
-    press();cause=ESP_SLEEP_WAKEUP_GPIO;return ESP_OK;
+    press();cause=gpio_armed?ESP_SLEEP_WAKEUP_GPIO:ESP_SLEEP_WAKEUP_TIMER;return ESP_OK;
 }
 int main(int argc,char **argv){
     assert(argc==2);
-    const char *names[]={"normal","nonkey","before_sleep","missed_edge","timer_failure","sleep_failure","held_entry","early_key","level_only","pmu_failure","shared_irq","long_timer","pmu_pending","pmu_gpio","pmu_long","card_swap","pmu_card","ioe_failure","unknown_pending","pgood_change","key_card"};
+    const char *names[]={"normal","nonkey","before_sleep","missed_edge","timer_failure","sleep_failure","held_entry","early_key","level_only","pmu_failure","shared_irq","long_timer","pmu_pending","pmu_gpio","pmu_long","card_swap","pmu_card","ioe_failure","unknown_pending","pgood_change","key_card","stuck_irq","irq_clears","irq_storm","auto_timer"};
     bool found=false;for(unsigned i=0;i<sizeof names/sizeof *names;i++)if(!strcmp(argv[1],names[i])){scenario=i;found=true;}assert(found);
     bool ok=pn_device_sleep_until_key();
+#if defined(CONFIG_PM_ENABLE) && CONFIG_PM_ENABLE
+    assert(!guard_held);
+#endif
+    pn_device_sleep_stats_t stats=pn_device_sleep_stats();
+#ifdef PN_SLEEP_POLL_TEST
+    assert(stats.attempts==0 && stats.successes==0 && stats.sleep_call_us==0);
+#else
+    assert(stats.attempts==sleeps && stats.successes==sleeps-(scenario==SLEEP_FAILURE));
+    uint64_t call_us=scenario==IRQ_STORM?4u*1000u+3u*500000u:(uint64_t)stats.successes*500000u;
+    assert(stats.sleep_call_us==call_us && stats.elapsed_us>=stats.sleep_call_us);
+    if(scenario==STUCK_IRQ || scenario==IRQ_CLEARS)assert(stats.timer_only==(scenario==STUCK_IRQ?2u:1u));
+#endif
+    if(scenario==SLEEP_FAILURE || scenario==TIMER_FAILURE)assert(stats.error==ESP_FAIL && !strcmp(stats.outcome,scenario==SLEEP_FAILURE?"sleep-failed":"timer-setup"));
+    if(scenario==STUCK_IRQ || scenario==IRQ_CLEARS){assert(ok && !timer_armed && !gpio_armed && sleeps==3 && !pn_device_sleep_media_unchanged());assert(stats.held==(scenario==STUCK_IRQ?2u:1u));return 0;}
+    if(scenario==IRQ_STORM){assert(ok && sleeps==7 && stats.irq_cooldowns==1 && stats.timer_only==2 && !gpio_armed && !timer_armed && !pn_device_sleep_media_unchanged());return 0;}
+    if(scenario==AUTO_TIMER){assert(ok && sleeps==3 && stats.timer==2 && stats.gpio==1 && !gpio_armed && !timer_armed && pn_device_sleep_media_unchanged());return 0;}
     if(scenario==HELD_ENTRY){assert(!ok && !sleeps && !gpio_armed && !timer_armed);return 0;}
     if(scenario==TIMER_FAILURE || scenario==SLEEP_FAILURE || scenario==PMU_FAILURE){assert(!ok && !timer_armed && !gpio_armed && gpio_off && !pn_device_sleep_media_unchanged());return 0;}
     assert(ok && release_sent && !short_pending && !key_pending && clock_ms>=release_at+150);
-    assert(!timer_armed && !gpio_armed && gpio_off==(scenario==EARLY_KEY?0u:1u) && timer_off==(scenario==EARLY_KEY?0u:1u) && clears);
+    assert(!timer_armed && !gpio_armed && gpio_off==(scenario==EARLY_KEY?0u:scenario==IOE_FAILURE?2u:1u) && timer_off==(scenario==EARLY_KEY?0u:1u) && clears);
     bool cold=scenario==NONKEY || scenario>=CARD_SWAP;
     assert(pn_device_sleep_media_unchanged()==!cold);
     const char *nonkey_reason="nonkey-wake";

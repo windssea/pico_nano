@@ -26,7 +26,9 @@ pn_status_t pn_reader_status_text(pn_font_t *ui,pn_frame_t *frame){
     if(state.battery>=0)snprintf(text,sizeof text,"%s   %d%%",*state.clock?state.clock:"--:--",state.battery);
     else snprintf(text,sizeof text,"%s   --%%",*state.clock?state.clock:"--:--");
     int original=ui->pixels;
-    pn_status_t s=pn_font_size(ui,20);if(s==PN_OK)s=pn_w_text_ex(ui,frame,text,410,24,242,PN_ALIGN_RIGHT,PN_UI_MUTED,false);
+    pn_status_t s=pn_font_size(ui,20);
+    if(s==PN_OK)pn_w_battery_status(frame,620,6,32,18,state.battery,state.charging,PN_UI_MUTED);
+    if(s==PN_OK)s=pn_w_text_ex(ui,frame,text,410,24,202,PN_ALIGN_RIGHT,PN_UI_MUTED,false);
     pn_status_t restored=pn_font_size(ui,original);return s==PN_OK?restored:s;
 }
 pn_status_t pn_reader_status_render(pn_font_t *ui,pn_frame_t *frame,unsigned background){

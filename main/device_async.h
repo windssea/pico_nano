@@ -84,3 +84,5 @@ void pn_device_async_bind_product(pn_device_async_t *port);
 void pn_device_async_wait(pn_device_async_t *port,unsigned timeout_ms);
 /// 显示owner断轨屏障。/ Display-owner rail-off barrier.
 bool pn_device_async_off(pn_device_async_t *port);
+/// 输入已暂停时，由显示owner停车/恢复锁屏外设；失败由控制层退避重试。/ With input paused, park/restore lock peripherals on the display owner; the controller retries failures with backoff.
+pn_status_t pn_device_async_peripherals(pn_device_async_t *port,bool suspended);

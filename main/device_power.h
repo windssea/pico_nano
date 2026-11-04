@@ -21,6 +21,7 @@ bool pn_device_power_held(pn_device_power_owner_t owner);
 bool pn_device_power_active(void);
 /// 自动浅睡是否已生效（空闲输入改用较短定时采样）。/ Whether automatic light sleep is active (idle input then uses shorter timed sampling).
 bool pn_device_power_light_sleep(void);
-/// 板级驱动初始化后调用：IDF浅睡隔离全部GPIO（ESD勘误规避），给需要确定电平的引脚设睡眠上/下拉。
-/// Call after board drivers start: IDF isolates every GPIO in light sleep (ESD erratum workaround), so give pins that need a defined level a sleep pull.
-void pn_device_power_sleep_pins(void);
+/// 板级初始化后配置睡眠输入与上/下拉：屏幕/SD时钟下拉、总线/中断上拉；唤醒自动恢复清醒寄存器。
+/// After board init, configure sleep inputs/pulls: panel/SD clock down, buses/IRQs up; wake automatically restores active registers.
+/// 只有全部配置成功才返回true；锁屏停车前重试，失败不显式入睡。/ Return true only when all settings succeed; retry before lock parking and avoid explicit sleep on failure.
+bool pn_device_power_sleep_pins(void);

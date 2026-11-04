@@ -12,6 +12,7 @@
 #include "pn_font_preferences.h"
 #include "pn_font_set.h"
 #include "pn_font_ui.h"
+#include "pn_widgets.h"
 #include "pn_page_index.h"
 #include <assert.h>
 #include <stdio.h>
@@ -19,8 +20,9 @@
 #include <string.h>
 #include <unistd.h>
 #include <dirent.h>
-typedef struct {bool fail;unsigned calls;unsigned ink;unsigned tag;pn_refresh_t profile;} screen_t;
-static pn_status_t present(void *ctx,const pn_frame_t *f,pn_refresh_t profile){screen_t *s=ctx;s->profile=profile;s->calls++;s->ink=0;s->tag=pn_frame_get(f,17,17);for(int y=0;y<f->height;y++)for(int x=0;x<f->width;x++)s->ink+=pn_frame_get(f,x,y)<15;return s->fail?PN_IO:PN_OK;}
+typedef struct {bool fail;unsigned calls;unsigned ink;unsigned tag;pn_refresh_t profile;uint64_t body_hash;} screen_t;
+static pn_status_t present(void *ctx,const pn_frame_t *f,pn_refresh_t profile){screen_t *s=ctx;s->profile=profile;s->calls++;s->ink=0;s->tag=pn_frame_get(f,17,17);for(int y=0;y<f->height;y++)for(int x=0;x<f->width;x++)s->ink+=pn_frame_get(f,x,y)<15;
+    s->body_hash=1469598103934665603ULL;for(int y=32;y<f->height;y++)for(int x=0;x<f->width;x++){s->body_hash^=pn_frame_get(f,x,y);s->body_hash*=1099511628211ULL;}return s->fail?PN_IO:PN_OK;}
 /* 最终目标页使用真实候选字体，并留可观察像素；测试不伪造呈现成功。/ The destination draws the actual candidate font and observable pixels; tests never fake presentation success. */
 static pn_status_t destination(void *ctx,pn_font_t *ui,pn_font_t *body,pn_frame_t *frame){
  (void)ui;if(ctx && *(bool *)ctx)return PN_IO;pn_frame_clear(frame,15);pn_frame_rect(frame,16,16,4,4,9);return pn_font_draw(body,frame,'A',32*64,120,PN_FONT_GRAY);
@@ -39,6 +41,14 @@ int main(void){
     assert(pn_reader_app_fallback_font(&app,fallback_path)==PN_BUSY);
     assert(pn_reader_app_font_inherit(&app,1,present,&screen)==PN_OK && pn_reader_app_font_is_inherited(&app));
     assert(pn_reader_app_progress(&app,&progress)==PN_OK && progress.source_offset==0);
+    // 充电状态补画保持正文/位置，未变化不显示，失败可重试。/ Charge patches preserve body/location, skip unchanged state and retry failures.
+    {uint64_t body_hash=screen.body_hash;unsigned calls=screen.calls;pn_w_set_charging(true);
+     assert(pn_reader_app_status_refresh(&app,present,&screen)==PN_OK && screen.calls==calls+1 && screen.profile==PN_REFRESH_GL16 && screen.body_hash==body_hash);
+     assert(pn_reader_app_progress(&app,&progress)==PN_OK && progress.source_offset==0);
+     assert(pn_reader_app_status_refresh(&app,present,&screen)==PN_EMPTY && screen.calls==calls+1);
+     pn_w_set_charging(false);screen.fail=true;assert(pn_reader_app_status_refresh(&app,present,&screen)==PN_IO);screen.fail=false;
+     assert(pn_reader_app_status_refresh(&app,present,&screen)==PN_OK && screen.body_hash==body_hash);}
+
     screen.fail=true;assert(pn_reader_app_step(&app,PN_APP_NEXT,2,present,&screen)==PN_IO && screen.profile==PN_REFRESH_GL16);
     assert(pn_reader_app_progress(&app,&progress)==PN_OK && progress.source_offset==0);
     screen.fail=false;assert(pn_reader_app_step(&app,PN_APP_NEXT,3,present,&screen)==PN_OK && screen.profile==PN_REFRESH_GC16);

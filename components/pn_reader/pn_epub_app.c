@@ -1157,6 +1157,23 @@ pn_status_t pn_epub_app_deferred_flush(pn_epub_app_t *app){
     // 索引可重建；其失败/分步未完不冒充用户进度保存失败。/ Indexes are rebuildable; failed/incomplete persistence never masquerades as failed user-progress saving.
     pn_status_t cached=pn_page_index_flush(&a->page_index,true);return cached==PN_CANCELLED?cached:PN_OK;
 }
+/// 只更新已确认正文的顶部状态，不翻页、不提交位置或刷新策略计数。/ Update only the confirmed page's status, without navigation, position commits or refresh-policy counts.
+pn_status_t pn_epub_app_status_refresh(pn_epub_app_t *app,pn_reader_present_fn present,void *ctx){
+    if(!app || !app->impl || !present)return PN_INVALID;
+    app_t *a=app->impl;if(a->suspended || !a->has_visible || !a->ui.impl)return PN_EMPTY;
+    if(a->display.active>=0 || a->display.queued>=0)return PN_BUSY;
+    if(a->lost)return PN_STALE_MEDIA;
+    pn_status_t status=pn_zip_validate(&a->zip);if(status!=PN_OK)return status;
+    pn_w_status_snapshot_t current=pn_w_status_snapshot();
+    if(current.battery==a->status.battery && current.charging==a->status.charging && !strcmp(current.clock,a->status.clock))return PN_EMPTY;
+    // 可选续读包可能借用正文帧，重绘前先撤回；不写进度。/ Revoke a disposable resume writer's frame borrow before repainting; no progress writes.
+    resume_abort_retry(a);
+    status=pn_paper_region(&a->paper,a->style.background,&a->frame,0,PN_READER_TOP);
+    if(status==PN_OK)status=pn_reader_status_text(&a->ui,&a->frame);
+    if(status==PN_OK)status=present(ctx,&a->frame,PN_REFRESH_GL16);
+    if(status==PN_OK)a->status=current;
+    return status;
+}
 pn_status_t pn_epub_app_resume(pn_epub_app_t *app,uint64_t now,pn_reader_present_fn present,void *ctx){
     if(!app || !app->impl || !present)return PN_INVALID;
     app_t *a=app->impl;if(now<a->last_now)return PN_INVALID;
@@ -1165,7 +1182,7 @@ pn_status_t pn_epub_app_resume(pn_epub_app_t *app,uint64_t now,pn_reader_present
     cache_abort(a);
     pn_status_t status=a->lost?PN_STALE_MEDIA:pn_zip_validate(&a->zip);if(status!=PN_OK)return status;
     pn_w_status_snapshot_t current=pn_w_status_snapshot();
-    if(a->ui.impl && (current.battery!=a->status.battery || strcmp(current.clock,a->status.clock)) && pn_paper_region(&a->paper,a->style.background,&a->frame,0,PN_READER_TOP)==PN_OK && pn_reader_status_text(&a->ui,&a->frame)==PN_OK)a->status=current;
+    if(a->ui.impl && (current.battery!=a->status.battery || current.charging!=a->status.charging || strcmp(current.clock,a->status.clock)) && pn_paper_region(&a->paper,a->style.background,&a->frame,0,PN_READER_TOP)==PN_OK && pn_reader_status_text(&a->ui,&a->frame)==PN_OK)a->status=current;
     status=present(ctx,&a->frame,PN_REFRESH_GC16);a->last_now=now;
     if(status==PN_OK){a->suspended=false;a->force_full=false;a->refresh.turns=0;a->semantic_due=now>UINT64_MAX-1500?UINT64_MAX:now+1500;}return status;
 }

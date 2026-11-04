@@ -154,6 +154,7 @@ typedef struct {
 static int sim_battery(void){const char *v=getenv("PN_SIM_BATTERY");if(!v || !*v)return 85;int n=atoi(v);return n<0?-1:n>100?100:n;}
 static bool stats_clock(uint64_t *utc);
 static pn_shelf_options_t shelf_options(const library_t *s){
+    const char *charging=getenv("PN_SIM_CHARGING");pn_w_set_charging(charging && !strcmp(charging,"1"));
     pn_w_set_battery(sim_battery());bool query=!s->recent_mode && !s->fav_mode && *s->query;
     pn_shelf_options_t o={.home=s->home,.entertainment_tab=true,.entertainment=s->home?0:s->entertainment,.battery_percent=-1,.columns=s->shelf_prefs.columns,.style=s->shelf_prefs.style,.actions=s->actions_mode?&s->actions:NULL,.search=false,.layout_toggle=true,.favorites_tab=true,.favorites=s->fav_mode,.list_mode=s->list_mode || query,.query=query};
     if(o.home){uint64_t utc=0;bool dated=stats_clock(&utc);o.reading=pn_reading_stats_summary(&s->reading_stats,dated,utc);
@@ -445,7 +446,7 @@ static pn_status_t minesweeper_open(library_t *s){
 /// 仅键盘焦点变动复用已确认画布，失败/叠层/封面或状态更新完整恢复。/ Reuse confirmed pixels only for keyboard focus; failures, overlays, cover/status changes restore fully.
 static pn_status_t draw_focus(library_t *s,int before){
     feedback_restore(s);pn_w_status_snapshot_t state=pn_w_status_snapshot();
-    if(!s->shelf_draw_valid || !s->feedback_known || s->shelf_draw_revision!=s->async.revision || s->covers_dirty || s->actions_mode || s->open_failed || state.battery!=s->shelf_draw_status.battery || state.wifi!=s->shelf_draw_status.wifi || strcmp(state.clock,s->shelf_draw_status.clock))return draw(s);
+    if(!s->shelf_draw_valid || !s->feedback_known || s->shelf_draw_revision!=s->async.revision || s->covers_dirty || s->actions_mode || s->open_failed || state.battery!=s->shelf_draw_status.battery || state.charging!=s->shelf_draw_status.charging || state.wifi!=s->shelf_draw_status.wifi || strcmp(state.clock,s->shelf_draw_status.clock))return draw(s);
     pn_shelf_options_t options=shelf_options(s);if(s->favorites_valid)options.favorite_items=s->favorites;pn_status_t status=pn_shelf_focus_with_font_file(s->page,&s->font,&s->frame,before,s->selected,s->covers,s->pool,&s->media,*s->font_real?s->font_real:NULL,&options);
     if(status==PN_UNSUPPORTED)return draw(s);
     if(status==PN_OK){status=present(s,&s->frame,PN_REFRESH_GL16);if(status==PN_OK)s->shelf_draw_revision=s->async.revision;}

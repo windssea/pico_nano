@@ -12,3 +12,9 @@ esp_err_t gpio_config(const gpio_config_t *);
 int gpio_get_level(gpio_num_t);
 esp_err_t gpio_wakeup_enable(gpio_num_t,int);
 esp_err_t gpio_wakeup_disable(gpio_num_t);
+typedef int gpio_pull_mode_t;
+#define GPIO_PULLUP_ONLY 1
+#define GPIO_PULLDOWN_ONLY 2
+esp_err_t gpio_sleep_set_direction(gpio_num_t,int);
+esp_err_t gpio_sleep_set_pull_mode(gpio_num_t,gpio_pull_mode_t);
+esp_err_t gpio_sleep_sel_en(gpio_num_t);

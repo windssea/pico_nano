@@ -18,6 +18,7 @@
 #include "device_transfer.h"
 #include "device_time.h"
 #include "device_wifi_probe.h"
+#include "device_sleep.h"
 // 启动保护场景不能开启网络；调用这些桩即为回归。/ Boot-gate scenarios must never start networking; reaching these stubs is a regression.
 pn_status_t pn_device_transfer_open(pn_device_transfer_t *s,pn_media_t *m,const char *r,const pn_device_wifi_config_t *c){(void)s;(void)m;(void)r;(void)c;assert(false);return PN_UNSUPPORTED;}
 pn_status_t pn_device_transfer_request_stop(pn_device_transfer_t *s){(void)s;assert(false);return PN_UNSUPPORTED;}
@@ -39,7 +40,10 @@ static unsigned sleep_calls,loop_delays;
 static int64_t clock_us=1000000;
 static bool sd_async,sd_probing;
 static unsigned sd_remounts,sd_polls;
+bool pn_device_sleep_handoff_begin(void){return true;}
+void pn_device_sleep_handoff_end(void){}
 bool pn_device_sleep_until_key(void){assert(wake_idle);sleep_calls++;clock_us+=1000000;return true;}
+pn_device_sleep_stats_t pn_device_sleep_stats(void){return (pn_device_sleep_stats_t){.elapsed_us=1000000,.sleep_call_us=1000000,.attempts=1,.successes=1};}
 static bool stub_media_unchanged=true; ///< 睡眠适配器的介质结论，锁屏用例可改 / Sleep-adapter media verdict, adjustable by lock cases
 bool pn_device_sleep_media_unchanged(void){return stub_media_unchanged;}
 const char *pn_device_sleep_media_reason(void){return stub_media_unchanged?"unchanged":"stub-uncertain";}

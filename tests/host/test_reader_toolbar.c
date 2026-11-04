@@ -32,6 +32,10 @@ int main(void){
     assert(!memcmp(pixels+PN_READER_TOP*342u,copy+PN_READER_TOP*342u,PN_HW_FRAME_BYTES-PN_READER_TOP*342u));
     memcpy(copy,pixels,PN_HW_FRAME_BYTES);pn_w_set_clock("12:35");pn_w_set_battery(86);assert(pn_reader_status_render(&font,&frame,0)==PN_OK);
     assert(memcmp(pixels,copy,PN_READER_TOP*342u) && !memcmp(pixels+PN_READER_TOP*342u,copy+PN_READER_TOP*342u,PN_HW_FRAME_BYTES-PN_READER_TOP*342u));
+    // 相同时间/电量切换充电态也改变顶部，带外保持逐字节相同。/ Toggling charge with identical time/level changes only the top; exterior bytes remain identical.
+    memcpy(copy,pixels,PN_HW_FRAME_BYTES);pn_w_set_charging(true);assert(pn_reader_status_render(&font,&frame,0)==PN_OK);
+    assert(memcmp(pixels,copy,PN_READER_TOP*342u) && !memcmp(pixels+PN_READER_TOP*342u,copy+PN_READER_TOP*342u,PN_HW_FRAME_BYTES-PN_READER_TOP*342u));
+    pn_w_set_charging(false);assert(pn_reader_status_render(&font,&frame,0)==PN_OK && !memcmp(pixels,copy,PN_HW_FRAME_BYTES));
     pn_w_set_clock(NULL);pn_w_set_battery(-1);assert(pn_reader_status_render(&font,&frame,0)==PN_OK && font.pixels==34);
     // 时钟重画恢复相同背景，来回更新不积墨，带外像素保持。/ Clock redraws restore the same paper without accumulated ink or changes outside the band.
     for(unsigned paper=1;paper<=8;paper++){

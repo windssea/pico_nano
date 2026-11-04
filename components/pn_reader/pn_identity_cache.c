@@ -13,6 +13,21 @@
 static const char MAGIC[8]={'P','N','I','D','C','1',0,0};
 /// FNV-1a 64位路径哈希。/ FNV-1a 64-bit path hash.
 static uint64_t key_of(const char *path){uint64_t h=1469598103934665603ull;for(const unsigned char *p=(const unsigned char *)path;*p;p++){h^=*p;h*=1099511628211ull;}return h;}
+/// 类别仅分隔可选预热和身份建表；冲突至多少做一次后台任务，不会放行书源。/ Separate optional warm/identity lanes; collisions can only skip background work, never authorize a source.
+static uint64_t probe_key(const char *path,bool warm){return key_of(path)^(warm?0x5741524d50524f42ull:0);}
+bool pn_identity_idle_probe(pn_identity_idle_probe_t *probe,const pn_media_t *media,const char *path,uint64_t activity,bool warm){
+    if(!probe || !media || !path || !*path || !media->available || media->usb_pending || media->exhausted)return false;
+    if(probe->media!=media || probe->instance!=media->media_id || probe->epoch!=media->epoch || probe->writes!=media->writes || probe->activity!=activity)
+        *probe=(pn_identity_idle_probe_t){.media=media,.instance=media->media_id,.epoch=media->epoch,.writes=media->writes,.activity=activity};
+    uint64_t key=probe_key(path,warm);for(unsigned i=0;i<probe->count;i++)if(probe->paths[i]==key)return false;
+    if(probe->count>=PN_IDENTITY_IDLE_PROBE_MAX)return false;
+    probe->paths[probe->count++]=key;return true;
+}
+void pn_identity_idle_probe_retry(pn_identity_idle_probe_t *probe,const char *path,bool warm){
+    if(!probe || !path)return;
+    uint64_t key=probe_key(path,warm);for(unsigned i=0;i<probe->count;i++)if(probe->paths[i]==key){
+        memmove(probe->paths+i,probe->paths+i+1,(probe->count-i-1)*sizeof *probe->paths);probe->count--;return;}
+}
 pn_status_t pn_identity_cache_load(pn_identity_cache_t *cache,const char *file){
     if(!cache || !file)return PN_INVALID;
     memset(cache,0,sizeof *cache);
@@ -91,7 +106,10 @@ pn_status_t pn_identity_cache_warm_begin(pn_identity_warm_t *warm,pn_identity_ca
     uint64_t key=key_of(path);for(unsigned i=0;i<warm->count;i++)if(warm->paths[i]==key)return PN_EMPTY;
     if(warm->count>=2)return PN_EMPTY;
     warm->paths[warm->count++]=key;
-    return job_begin(job,pool,media,path,true);
+    pn_status_t status=job_begin(job,pool,media,path,true);
+    // 暂时的租约冲突或取消不是已完成探测，不能耗尽本周期重试资格。/ A transient lease conflict or cancellation is not a completed probe and must not consume retry eligibility.
+    if(status==PN_BUSY || status==PN_CANCELLED)warm->count--;
+    return status;
 }
 pn_status_t pn_identity_cache_job_step(pn_identity_cache_job_t *job,pn_identity_cache_t *cache){
     if(!job || !job->impl || !cache)return PN_INVALID;

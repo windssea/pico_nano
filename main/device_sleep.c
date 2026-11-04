@@ -6,6 +6,13 @@
  * 冻结：不支持拿起唤醒；不改变PMU设置。/ Frozen: no pickup wake; PMU settings untouched.
  */
 #include "device_sleep.h"
+#ifdef ESP_PLATFORM
+#include "sdkconfig.h"
+#endif
+#if defined(CONFIG_PM_ENABLE) && CONFIG_PM_ENABLE
+#include "esp_pm.h"
+static esp_pm_lock_handle_t sleep_guard;
+#endif
 #include "device_card_presence.h"
 #include <stddef.h>
 #include "driver/gpio.h"
@@ -23,6 +30,8 @@
 #define PN_LOCK_SLEEP 1 ///< 产品镜像锁屏浅睡 / Product images light-sleep while locked
 #endif
 static const char *TAG="pn_sleep";
+static pn_device_sleep_stats_t last;
+pn_device_sleep_stats_t pn_device_sleep_stats(void){return last;}
 static int64_t now_ms(void){return esp_timer_get_time()/1000;}
 static const char *media_reason="not-entered";
 bool pn_device_sleep_media_unchanged(void){return media_reason==NULL;}
@@ -76,26 +85,49 @@ static void wake_sources_close(void){
     (void)esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_GPIO);
     (void)esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_TIMER);
 }
-bool pn_device_sleep_until_key(void){
-    media_reason=NULL;
-    sleep_inputs_t inputs={0};
+static sleep_inputs_t handoff_inputs;
+static bool handoff_started;
+bool pn_device_sleep_handoff_begin(void){
+    media_reason=NULL;handoff_inputs=(sleep_inputs_t){0};handoff_started=true;
+    (void)sample_inputs(&handoff_inputs);
+    if(handoff_inputs.known && (handoff_inputs.previous&SY_PGOOD))media_uncertain("rails-pgood");
+    return handoff_inputs.known && !(handoff_inputs.previous&SY_PGOOD);
+}
+void pn_device_sleep_handoff_end(void){
+    bool low=gpio_get_level((gpio_num_t)READ_PICO_IOE_INT_GPIO)==0;
+    uint8_t changed=sample_inputs(&handoff_inputs);
+    if(low && changed!=CW_INT)inputs_uncertain(&handoff_inputs,"restore-irq",handoff_inputs.before,handoff_inputs.previous);
+    handoff_started=false;
+}
+static bool sleep_until_key(void){
+    if(!handoff_started)pn_device_sleep_handoff_begin();
+    handoff_started=false;
     bool early_key=false;
-    if(!wait_key_idle(800,true,&early_key,&inputs)){media_uncertain("entry-key-busy");ESP_LOGW(TAG,"Lock key not idle; staying awake");return false;}
+    if(!wait_key_idle(800,true,&early_key,&handoff_inputs)){media_uncertain("entry-key-busy");ESP_LOGW(TAG,"Lock key not idle; staying awake");return false;}
     if(early_key){ESP_LOGI(TAG,"Wake key received while preparing sleep");return true;}
     gpio_config_t io={.pin_bit_mask=1ULL<<READ_PICO_IOE_INT_GPIO,.mode=GPIO_MODE_INPUT,.pull_up_en=GPIO_PULLUP_ENABLE,.pull_down_en=GPIO_PULLDOWN_DISABLE,.intr_type=GPIO_INTR_DISABLE};
-    if(gpio_config(&io)!=ESP_OK){media_uncertain("gpio-config");ESP_LOGW(TAG,"IOE_INT config failed; staying awake");return false;}
-    if(gpio_wakeup_enable((gpio_num_t)READ_PICO_IOE_INT_GPIO,GPIO_INTR_LOW_LEVEL)!=ESP_OK || esp_sleep_enable_gpio_wakeup()!=ESP_OK){
+    esp_err_t error=gpio_config(&io);
+    if(error!=ESP_OK){last.error=error;media_uncertain("gpio-config");ESP_LOGW(TAG,"IOE_INT config failed; staying awake");return false;}
+    error=gpio_wakeup_enable((gpio_num_t)READ_PICO_IOE_INT_GPIO,GPIO_INTR_LOW_LEVEL);
+    if(error==ESP_OK)error=esp_sleep_enable_gpio_wakeup();
+    if(error!=ESP_OK){last.error=error;
         media_uncertain("gpio-wake-setup");(void)gpio_wakeup_disable((gpio_num_t)READ_PICO_IOE_INT_GPIO);ESP_LOGW(TAG,"Wake source unavailable; staying awake");return false;}
     // 不能仅依赖读清式扩展器中断：500ms复核PMU队列，不刷新屏幕，也不访问TF。
     // A read-cleared expander IRQ cannot be the only wake path: check the PMU queue every 500 ms without drawing or accessing TF.
-    if(esp_sleep_enable_timer_wakeup(500000)!=ESP_OK){media_uncertain("timer-setup");wake_sources_close();ESP_LOGW(TAG,"Wake timer unavailable; staying awake");return false;}
+    error=esp_sleep_enable_timer_wakeup(500000);
+    if(error!=ESP_OK){last.error=error;media_uncertain("timer-setup");wake_sources_close();ESP_LOGW(TAG,"Wake timer unavailable; staying awake");return false;}
     unsigned poll_failures=0,timers=0,gpios=0,other=0,pending=0,held=0;
     bool woke=false;esp_sleep_wakeup_cause_t cause=ESP_SLEEP_WAKEUP_TIMER;
+    bool gpio_enabled=true;
+    int64_t gpio_retry_at=0;
+#if PN_LOCK_SLEEP
+    unsigned short_wakes=0;
+#endif
     for(;;){
         // 先保留原始输入再消费PMU；读清扩展器不代表PMU队列为空，首次入睡前的新按键也有效。
-        // Capture raw inputs before draining the PMU: reading the expander does not empty the PMU queue, and a new key before the first sleep is valid too.
+        // Capture raw handoff_inputs before draining the PMU: reading the expander does not empty the PMU queue, and a new key before the first sleep is valid too.
         bool low=gpio_get_level((gpio_num_t)READ_PICO_IOE_INT_GPIO)==0;
-        uint8_t changed=sample_inputs(&inputs);
+        uint8_t changed=sample_inputs(&handoff_inputs);
         bool key=read_pico_pmu_take_key_wakeup();
 #if !PN_LOCK_SLEEP
         key=key || pn_device_test_console_take_power();
@@ -107,30 +139,76 @@ bool pn_device_sleep_until_key(void){
         if(low)pending++;
         // 只有原始输入证明仅PMU线变化才归因；单看“有卡”或PMU快照有效不够。/ Attribute only a raw PMU-only transition; present-card or valid-PMU snapshots alone are insufficient.
         if(low || (woke && cause==ESP_SLEEP_WAKEUP_GPIO)){
-            if(changed==CW_INT)inputs.pmu_irqs++;
-            else inputs_uncertain(&inputs,woke && cause!=ESP_SLEEP_WAKEUP_TIMER?"nonkey-wake":"pending-irq",inputs.before,inputs.previous);
-        }else if(woke && cause!=ESP_SLEEP_WAKEUP_TIMER)inputs_uncertain(&inputs,"nonkey-wake",inputs.before,inputs.previous);
+            if(changed==CW_INT)handoff_inputs.pmu_irqs++;
+            else inputs_uncertain(&handoff_inputs,woke && cause!=ESP_SLEEP_WAKEUP_TIMER?"nonkey-wake":"pending-irq",handoff_inputs.before,handoff_inputs.previous);
+        }else if(woke && cause!=ESP_SLEEP_WAKEUP_TIMER)inputs_uncertain(&handoff_inputs,"nonkey-wake",handoff_inputs.before,handoff_inputs.previous);
         woke=false;
-        // 入睡前中断线仍为低：先处理积压事件，不带着挂起唤醒入睡。/ Line still low before sleeping: drain pending events instead of sleeping with a pending wake.
-        if(gpio_get_level((gpio_num_t)READ_PICO_IOE_INT_GPIO)==0){
-            // PMU应答可能刚改变CW_INT，再读一轮归因；持续低且无输入变化仍拒绝热恢复。/ PMU ACK may just have changed CW_INT: sample again; a persistent low without an input change still rejects warm restore.
-            held++;vTaskDelay(pdMS_TO_TICKS(20));continue;
+        // 持续低电平改用500ms定时浅睡，避免20ms清醒轮询；仍复核PMU按键。/ A held-low IRQ uses 500 ms timer-only sleep instead of awake 20 ms polling; PMU keys remain checked.
+        bool held_low=gpio_get_level((gpio_num_t)READ_PICO_IOE_INT_GPIO)==0;
+        // 已观测到仅CW_INT变化时，PMU确认事件可再次触发扩展器；仅低电平时重读一次，仍检查卡位/PGOOD与读错。
+        // After an observed CW_INT-only change, PMU ACK can reassert the expander IRQ; reread once if low, preserving card/PGOOD/error checks.
+        if(held_low && changed==CW_INT){(void)sample_inputs(&handoff_inputs);held_low=gpio_get_level((gpio_num_t)READ_PICO_IOE_INT_GPIO)==0;}
+        if(held_low){held++;inputs_uncertain(&handoff_inputs,"held-irq",handoff_inputs.before,handoff_inputs.previous);}
+        last.pending=pending;last.held=held;
+        bool timer_only=held_low || now_ms()<gpio_retry_at;
+        if(timer_only && gpio_enabled){
+            error=gpio_wakeup_disable((gpio_num_t)READ_PICO_IOE_INT_GPIO);
+            if(error==ESP_OK)error=esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_GPIO);
+            if(error!=ESP_OK){last.error=error;media_uncertain("gpio-disable");wake_sources_close();return false;}
+            gpio_enabled=false;
+        }else if(!timer_only && !gpio_enabled){
+            error=gpio_wakeup_enable((gpio_num_t)READ_PICO_IOE_INT_GPIO,GPIO_INTR_LOW_LEVEL);
+            if(error==ESP_OK)error=esp_sleep_enable_gpio_wakeup();
+            if(error!=ESP_OK){last.error=error;media_uncertain("gpio-wake-setup");wake_sources_close();return false;}
+            gpio_enabled=true;
         }
 #if PN_LOCK_SLEEP
-        if(esp_light_sleep_start()!=ESP_OK){media_uncertain("sleep-failed");wake_sources_close();ESP_LOGW(TAG,"Light sleep failed; staying awake");return false;}
+        if(!gpio_enabled)last.timer_only++;
+        // 自动浅睡也使用全局唤醒定时器；每次显式睡眠前重新声明500ms。/ Automatic sleep shares the global wake timer; rearm 500 ms before each explicit sleep.
+        error=esp_sleep_enable_timer_wakeup(500000);
+        if(error!=ESP_OK){last.error=error;media_uncertain("timer-setup");wake_sources_close();return false;}
+        int64_t sleep_at=esp_timer_get_time();last.attempts++;
+        error=esp_light_sleep_start();
+        if(error!=ESP_OK){last.error=error;media_uncertain("sleep-failed");wake_sources_close();ESP_LOGW(TAG,"Light sleep failed code=%d; caller retries while locked",(int)error);return false;}
+        int64_t returned_at=esp_timer_get_time();last.successes++;
+        if(returned_at>=sleep_at)last.sleep_call_us+=(uint64_t)(returned_at-sleep_at);
         cause=esp_sleep_get_wakeup_cause();
+        // 连续4次不足20ms的GPIO唤醒，冷却1秒；电源键仍每500ms复核。/ Four GPIO wakes shorter than 20 ms trigger a one-second cooldown; power keys remain checked every 500 ms.
+        if(cause==ESP_SLEEP_WAKEUP_GPIO && returned_at>=sleep_at && returned_at-sleep_at<20000){
+            if(++short_wakes>=4){short_wakes=0;gpio_retry_at=now_ms()+1000;last.irq_cooldowns++;media_uncertain("irq-storm");}
+        }else short_wakes=0;
 #else
         // 诊断：以同周期延时代替浅睡，保留PMU复核与按键空闲判定。/ Diagnostic: a delay of the same period replaces light sleep, keeping PMU checks and key-idle rules.
         vTaskDelay(pdMS_TO_TICKS(500));cause=ESP_SLEEP_WAKEUP_TIMER;
 #endif
         if(cause==ESP_SLEEP_WAKEUP_TIMER)timers++;else if(cause==ESP_SLEEP_WAKEUP_GPIO)gpios++;else other++;
+        last.timer=timers;last.gpio=gpios;last.other=other;last.pending=pending;last.held=held;
         woke=true;
     }
     wake_sources_close();
     // KEY_DOWN可先唤醒，松开后才产生KEY_SHORT；完整消费这一按键周期，避免同一次按键再次锁屏。
     // KEY_DOWN can wake before KEY_SHORT arrives on release; consume the whole press so it cannot lock again.
-    if(!wait_key_idle(800,false,NULL,&inputs)){ESP_LOGW(TAG,"Wake key not idle; staying locked until release");return false;}
+    if(!wait_key_idle(800,false,NULL,&handoff_inputs)){ESP_LOGW(TAG,"Wake key not idle; staying locked until release");return false;}
     // 汇总只在退出睡眠时输出，不在500ms复核中增加日志或磁盘写入。/ Summarize only on leaving sleep, without logging or disk writes on the 500 ms checks.
     (void)timers;(void)gpios;(void)other;(void)pending;(void)held;
-    ESP_LOGI(TAG,"Woken by power key light_sleep=%u timer=%u gpio=%u other=%u pending=%u held=%u pmu_irq=%u continuity=%s ioe_sample=%u ioe_before=%02x ioe_after=%02x",(unsigned)PN_LOCK_SLEEP,timers,gpios,other,pending,held,inputs.pmu_irqs,pn_device_sleep_media_reason(),(unsigned)inputs.failure_sample,(unsigned)inputs.failed_before,(unsigned)inputs.failed_after);return true;
+    ESP_LOGI(TAG,"Woken by power key light_sleep=%u timer=%u gpio=%u other=%u pending=%u held=%u pmu_irq=%u continuity=%s ioe_sample=%u ioe_before=%02x ioe_after=%02x",(unsigned)PN_LOCK_SLEEP,timers,gpios,other,pending,held,handoff_inputs.pmu_irqs,pn_device_sleep_media_reason(),(unsigned)handoff_inputs.failure_sample,(unsigned)handoff_inputs.failed_before,(unsigned)handoff_inputs.failed_after);return true;
+}
+bool pn_device_sleep_until_key(void){
+    last=(pn_device_sleep_stats_t){0};int64_t start=esp_timer_get_time();
+#if defined(CONFIG_PM_ENABLE) && CONFIG_PM_ENABLE
+    // 此锁只禁止SDK自动浅睡；显式esp_light_sleep_start仍可睡，避免两个owner覆盖同一唤醒源。/ This lock blocks only automatic sleep; explicit sleep remains available, preventing two owners from rewriting shared wake sources.
+    esp_err_t guard_error=ESP_OK;
+    if(!sleep_guard)guard_error=esp_pm_lock_create(ESP_PM_NO_LIGHT_SLEEP,0,"pn-lock-wait",&sleep_guard);
+    if(guard_error==ESP_OK)guard_error=esp_pm_lock_acquire(sleep_guard);
+    if(guard_error!=ESP_OK){last.error=guard_error;last.outcome="sleep-guard";media_reason="sleep-guard";return false;}
+#endif
+    bool key=sleep_until_key();int64_t end=esp_timer_get_time();
+#if defined(CONFIG_PM_ENABLE) && CONFIG_PM_ENABLE
+    guard_error=esp_pm_lock_release(sleep_guard);
+    if(guard_error!=ESP_OK){last.error=guard_error;ESP_LOGE(TAG,"Sleep guard release failed code=%d",(int)guard_error);}
+#endif
+    if(end>=start)last.elapsed_us=(uint64_t)(end-start);
+    last.outcome=key?(last.successes?"key-after-sleep":"key-without-sleep"):pn_device_sleep_media_reason();
+    ESP_LOGI(TAG,"Sleep result key=%u attempts=%u success=%u call_us=%llu elapsed_us=%llu timer_only=%u irq_cooldowns=%u error=%d outcome=%s",(unsigned)key,last.attempts,last.successes,(unsigned long long)last.sleep_call_us,(unsigned long long)last.elapsed_us,last.timer_only,last.irq_cooldowns,last.error,last.outcome);
+    return key;
 }

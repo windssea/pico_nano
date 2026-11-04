@@ -1,6 +1,8 @@
 /* SPDX-License-Identifier: Apache-2.0
  * 中文：运行实际IDF端口分支，用线程替身验证显示借用、独立输入与停止屏障。/ English: run the actual IDF port branch with thread stand-ins to verify frame borrowing, independent input and stop barriers. */
 #include "device_power.h"
+#include "driver/gpio.h"
+#include "device_sleep_peripherals.h"
 #include "device_async.h"
 #include "freertos/task.h"
 #include "pn_input_prefs.h"
@@ -18,6 +20,14 @@ static task_t tasks[2];static unsigned task_count,objects;
 static atomic_bool stop,reject,entered,release_panel;
 static atomic_uint count,x,y,touch_reads,off_calls;
 static atomic_bool touch_ending;
+static unsigned sleep_direction[49],sleep_pull[49],sleep_select[49];
+static int sleep_pin_failure=-1;
+static atomic_uint peripheral_parks,peripheral_restores;
+esp_err_t gpio_sleep_set_direction(gpio_num_t pin,int mode){assert(pin>=0 && pin<49 && mode==GPIO_MODE_INPUT);sleep_direction[pin]++;return pin==sleep_pin_failure?ESP_FAIL:ESP_OK;}
+esp_err_t gpio_sleep_set_pull_mode(gpio_num_t pin,gpio_pull_mode_t mode){assert(pin>=0 && pin<49);sleep_pull[pin]=mode;return ESP_OK;}
+esp_err_t gpio_sleep_sel_en(gpio_num_t pin){assert(pin>=0 && pin<49);sleep_select[pin]++;return ESP_OK;}
+pn_status_t pn_device_sleep_peripherals_suspend(void *touch){(void)touch;assert(pn_device_power_held(PN_POWER_DISPLAY));atomic_fetch_add(&peripheral_parks,1);return PN_OK;}
+pn_status_t pn_device_sleep_peripherals_resume(void){assert(pn_device_power_held(PN_POWER_DISPLAY));atomic_fetch_add(&peripheral_restores,1);return PN_OK;}
 int64_t esp_timer_get_time(void){struct timespec t;timespec_get(&t,TIME_UTC);return (int64_t)t.tv_sec*1000000+t.tv_nsec/1000;}
 static uint64_t ms(void){return (uint64_t)esp_timer_get_time()/1000;}
 void vTaskDelay(unsigned ticks){if(atomic_load(&stop))thrd_exit(0);struct timespec t={.tv_sec=ticks/1000,.tv_nsec=(long)(ticks%1000)*1000000};thrd_sleep(&t,NULL);}
@@ -104,7 +114,16 @@ int main(void){
  pn_device_async_view(&p,15,true,PN_INPUT_NO_KEYS);atomic_store(&x,240);atomic_store(&y,1300);atomic_store(&count,1);vTaskDelay(35);atomic_store(&count,0);bool middle=false;end=ms()+1000;
  while(ms()<end && !middle){if(pn_device_async_take(&p,&e)==PN_OK && e.kind==PN_DASYNC_KEY){assert(e.key==PN_KEY_2 && e.key_event==PN_KEY_SHORT);middle=true;}else vTaskDelay(1);}assert(middle);
  atomic_store(&x,80);atomic_store(&count,1);vTaskDelay(35);atomic_store(&count,0);vTaskDelay(40);while(pn_device_async_take(&p,&e)!=PN_EMPTY)assert(e.kind!=PN_DASYNC_KEY || e.key!=PN_KEY_1);
- assert(pn_device_async_pause(&p,true));unsigned reads=atomic_load(&touch_reads);vTaskDelay(25);assert(atomic_load(&touch_reads)==reads);assert(pn_device_async_pause(&p,false));vTaskDelay(25);assert(atomic_load(&touch_reads)>reads);
+ assert(pn_device_async_peripherals(&p,true)==PN_BUSY);
+ assert(pn_device_async_pause(&p,true));unsigned reads=atomic_load(&touch_reads);vTaskDelay(25);assert(atomic_load(&touch_reads)==reads);
+ assert(pn_device_async_peripherals(&p,true)==PN_OK && atomic_load(&peripheral_parks)==1);
+ assert(pn_device_async_peripherals(&p,false)==PN_OK && atomic_load(&peripheral_restores)==1 && atomic_load(&touch_reads)==reads);
+ const unsigned down[]={2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,21,38,45,46,47,48},up[]={39,40,41,42,43,44};
+ for(unsigned i=0;i<sizeof down/sizeof *down;i++)assert(sleep_direction[down[i]] && sleep_select[down[i]] && sleep_pull[down[i]]==GPIO_PULLDOWN_ONLY);
+ for(unsigned i=0;i<sizeof up/sizeof *up;i++)assert(sleep_direction[up[i]] && sleep_select[up[i]] && sleep_pull[up[i]]==GPIO_PULLUP_ONLY);
+ for(unsigned pin=0;pin<49;pin++)if(!sleep_pull[pin])assert(!sleep_direction[pin] && !sleep_select[pin]);
+ sleep_pin_failure=38;assert(pn_device_async_peripherals(&p,true)==PN_IO && atomic_load(&peripheral_parks)==1);sleep_pin_failure=-1;
+ assert(pn_device_async_pause(&p,false));vTaskDelay(25);assert(atomic_load(&touch_reads)>reads);
  // 不留恢复间隔地反复交接，旧代次确认不能充当新暂停成功。/ Repeat handoffs without a resume gap; old acknowledgements cannot satisfy a new pause.
  for(unsigned i=0;i<64;i++){assert(pn_device_async_pause(&p,true));assert(atomic_load(&p.pause_ack)==atomic_load(&p.pause_request));reads=atomic_load(&touch_reads);vTaskDelay(2);assert(atomic_load(&touch_reads)==reads);assert(pn_device_async_pause(&p,false));assert(atomic_load(&p.pause_ack)==atomic_load(&p.pause_request));}
  pn_device_async_t stale_port={.input_active=true};atomic_init(&stale_port.pause_ack,1);assert(!pn_device_async_pause(&stale_port,true));

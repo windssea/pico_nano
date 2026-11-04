@@ -10,6 +10,21 @@ static void write_file(const char *path,size_t bytes,unsigned seed){FILE *f=fope
 int main(int argc,char **argv){
     assert(argc==2);const char *dir=argv[1];
     pn_pool_t pool;assert(!pn_pool_init(&pool,1024*1024,NULL,NULL,NULL));pn_media_t media;pn_media_init(&media);assert(pn_media_attach(&media,1)==PN_OK);
+    // 去重只消耗固定调度槽，不打开文件；类别、介质、输入及写代次相互隔离。/ Deduplication consumes fixed scheduling slots without opening files, separating lanes/media/input/write generations.
+    pn_identity_idle_probe_t probe={0};size_t used=pool.used;
+    assert(pn_identity_idle_probe(&probe,&media,"/not-opened",1,false));
+    assert(!pn_identity_idle_probe(&probe,&media,"/not-opened",1,false));
+    assert(pn_identity_idle_probe(&probe,&media,"/not-opened",1,true));
+    pn_identity_idle_probe_retry(&probe,"/not-opened",false);assert(probe.count==1);
+    assert(pn_identity_idle_probe(&probe,&media,"/not-opened",1,false));
+    for(unsigned i=2;i<PN_IDENTITY_IDLE_PROBE_MAX;i++){char path[40];snprintf(path,sizeof path,"/not-opened/%u",i);assert(pn_identity_idle_probe(&probe,&media,path,1,false));}
+    assert(!pn_identity_idle_probe(&probe,&media,"/over-capacity",1,false) && probe.count==PN_IDENTITY_IDLE_PROBE_MAX && pool.used==used);
+    assert(pn_identity_idle_probe(&probe,&media,"/not-opened",2,false) && probe.count==1);
+    media.usb_pending=true;assert(!pn_identity_idle_probe(&probe,&media,"/no-usb-access",2,false));media.usb_pending=false;
+    pn_media_lease_t change={0};assert(pn_media_acquire(&media,PN_MEDIA_WRITE,&change)==PN_OK && pn_media_release(&media,&change)==PN_OK);
+    assert(pn_identity_idle_probe(&probe,&media,"/not-opened",2,false));
+    assert(pn_media_detach(&media)==PN_OK && !pn_identity_idle_probe(&probe,&media,"/detached",2,false) && pn_media_attach(&media,2)==PN_OK);
+    assert(pn_identity_idle_probe(&probe,&media,"/not-opened",2,false) && probe.count==1);
     char book[512],cache_file[512];snprintf(book,sizeof book,"%s/book.txt",dir);snprintf(cache_file,sizeof cache_file,"%s/identities.bin",dir);
     write_file(book,200000,13u);
     // 期望身份：常规完整检查。/ Expected identity: the ordinary complete inspection.

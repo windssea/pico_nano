@@ -1,5 +1,45 @@
 # PicoNano 构建、运行与验证
 
+## 2026-11-04 外围低功耗b9e4有限真机验证完成，功耗待测
+
+自有锁屏外围事务新增`device_sleep_peripherals`主机用例；`device_async`验证睡眠引脚、暂停确认与显示owner交接，`device_lock_retry`验证外围失败退避及已接受按键，`device_sleep_restore_*`覆盖触摸恢复等待窗口的卡/PGOOD/未知IRQ。统一入口仍为`python tools/dev.py host`；定向可用`ctest --test-dir build-host -R 'device_sleep|device_async|device_lock_retry' --output-on-failure`。真实控制器的TXT/EPUB各16轮检查帧、位置和池释放，硬件由软件port替代。用户本批已授权并完成SDK6.1/defaults+wake-diag/SIZE reconfigure/build/size及配置/源码核对；验证镜像b9e4c7ae/1.0.10-diag，5439120B，OTA余13.5475%，已写ota_0/0x20000并实际启动。16MiB备份、应用整体验证、选择前后保护区/NVS/原403完整ota_1/内部存储/目标尾部核验通过。29个睡眠GPIO配置返回成功，PMU/触摸/TF/内部挂载和首页呈现通过；电池手动锁屏285次与USB自动锁屏370次睡眠均成功，held/失败/重试0；用户确认原页、单键与触摸恢复正常。实际电流与过夜续航待测，自动轮热恢复时延未捕获。证据build-dev/peripheral-sleep-20261104/；旧403监控已核身份停止，设备只在刷入后启动复位一次；当前改由无复位monitor_reopen.py持有COM3（owner64676/wrapper57000），保持被动记录，不并开串口或发送PNT。USB日志停流需实体拔插恢复，不重启设备。下节403是已保留旧槽的历史验证。
+
+## 2026-11-04 held-irq修复403已构建刷入，两轮真实睡眠/热恢复确认
+
+本批用户授权构建刷入的403be168ce/1.0.10-diag已完成SDK6.1/defaults+wake-diag/SIZE构建、配置/镜像检查、16MiB备份、备用ota_1写入与整应用/保护区/旧ota_0/内部存储核验，以及实际启动/PMU/VCOM/首页确认。5436400B、OTA余13.59075%，原260完整留ota_0。真实自动锁屏/浅睡保留，测试控制台、禁自动锁屏与禁浅睡关闭；同源主机109/109不重复累计，已有SDK睡眠API弃用警告保持。
+
+403两轮电池验证：199/815次调用均全成功，平均495.892/495.640ms；held/timer_only/失败/重试均0，continuity1/warm0，正文热恢复2879/2717ms。自动轮用户确认单次短按恢复原页、无异常。一次重连trace损坏，解析器排除后用完整重复记录匹配，原始日志不修补。证据build-dev/held-irq-20261104/的completion.json、first/second-observation.json与device/冻结日志。COM3本批monitor_idle.py保持被动记录，启动含复位，勿重跑/并开或发PNT。实际电流、过夜续航与长期按键可靠性仍待验；下面260数据是修复前历史基线。
+
+### 260修复前基线（历史）
+
+11月2日冻结的SDK6.1/defaults+wake-diag/SIZE镜像26011ce65于11月4日沿原授权刷入。没有新改产品源或重建同一镜像；源摘要、既有ASan/UBSan70/70及配置一致。真实自动锁屏/浅睡开启，测试控制台与禁自动锁屏/禁真实浅睡关闭；5436304B、OTA余13.5923%。16MiB备份、整应用、保护区/NVS/原槽/内部存储核验与ota_0实际启动通过，b999完整保留ota_1。
+
+首轮电池供电观察由用户确认自行锁屏、接USB前恢复正文，电量94%；日志锁屏19分11.561秒，2221次成功、0失败，平均496.921ms，成功调用占适配器等待96.012%（含进出开销），正文冷恢复9829ms/held-irq。第二轮实际锁屏41分17.277秒，4785次成功/0失败，平均496.896ms、等待占比96.071%，正文冷恢复9785ms/held-irq，用户确认一次电源短按恢复。第二轮锁屏触发方式未单独确认；电流、过夜掉电、快速恢复与长期按键可靠性未验收。USB重连有一条损坏的wake trace，解析器排除并使用随后完整记录，不修补原始日志。
+
+刷写与冻结实测在忽略的build-dev/sleep-power-20261102/guard/，本次审查/首轮确认在build-dev/standby-audit-20261104/；后续缺口见[开发指南](DEVELOPMENT_PLAN.md)。当时COM3由guard/monitor_idle.py持有，现已按身份停止并切换到403监控；不要重跑旧脚本。PC模拟器重开曾遇Docker API500，本轮没有共享源码变化，不以PC结果当功耗证据。
+
+## 2026-11-02 睡眠失败重试源码验证
+
+最终主机ASan/UBSan定向59/59；一个原创演示TXT和一个用户EPUB各16轮真实控制器锁屏/恢复，检查完整帧、位置和池关闭归零，共32轮，原件摘要保持。冻住的旧睡眠适配器在持续低及快速GPIO唤醒反例失败，新适配器通过；旧控制器缺少失败重试入口。假时钟和硬件替身只是逻辑验证，不是设备低功耗测量。原始日志、旧源/最终源及completion.json在忽略的`build-dev/sleep-power-20261102/`。本批未SDK构建、刷机、复位或发布，设备仍d77、COM3 owner8040保持。
+
+新增`device_lock_retry`执行实际控制函数，覆盖退避期限、输入优先、屏障失败、产品/会话锁、恢复前持锁及失败连续性锁存。睡眠适配器增加stuck_irq/irq_clears/irq_storm；前两者同测真实睡眠调用与诊断轮询，irq_storm只测真实调用。重建主机不等于SDK构建；新固件需用户本批确认后执行`tools/dev.py firmware-wake-diag`同一SDK6.1流程，并检查新增Lock power/Sleep result记录。
+
+## 2026-11-02 后台空检查与频率驻留验证版
+
+同源主机沿`tools/dev.py host`的CMake+ASan/UBSan流程，最终定向17/17；增加诊断计数、SDK驻留输出后分别复跑同一17项通过，不累加。Release SDL4/4及可见窗口检查保持，冻结旧控制器被重复IO、首页/阅读锁门三类回归拒绝。受控20/260ms只是逻辑判据；模拟器不代表面板或电流。
+
+用户授权本批构建刷入，SDK6.1/defaults+wake-diag/SIZE的reconfigure/build/size及实际配置核验通过。初次a475镜像完成首页/阅读各约130秒的固定探测计数和产品锁释放观察；普通任务瞬时240MHz受RTOS活动锁影响，随后启用wake-diag专用`PM_PROFILING`，按SDK模式驻留累计值的区间差确认实际80MHz。最终1.0.10-diag/ELF`d77ee9925`，5433504B，OTA余857952B（13.6368%），写入ota_0/0x20000。
+
+最终镜像USB连接下稳定区间：首页290.8秒、80MHz占76.5%；阅读100.4秒、80MHz占75.9%。对应区间身份stat/hint保持不变，产品锁0、空轮100；剩余240MHz包含运行任务与诊断开销。此为调频及调度实测，不是电流或续航测量。两次16MiB备份、整镜像和选择前后保护区/原活动槽/内部存储检查通过；a475保留ota_1，7203及更早镜像字节在备份。未发布。
+
+证据在忽略的`build-dev/idle-power-20261102/`，最终SDK/镜像/PM原始记录在`pm-profile/`。COM3/TCP47821由该子目录monitor_idle.py单独持有，无PNT控制台；启动含HardReset，勿重跑或并开串口。主机重连未修复初次日志暂停，实体USB拔插后已恢复；用户确认阅读交互正常，后续日志连续。可见Release模拟器已重新打开供观察，共享源未再变。
+
+## 2026-11-02 充电图标唤醒验证版
+
+用户本批已授权构建刷入。沿`tools/dev.py firmware-wake-diag`同一SDK6.1/defaults+wake-diag/SIZE流程复用build-wake-diag，明确reconfigure并核验实际配置和生成头；测试控制台/禁自动锁屏/禁锁屏浅睡关闭，真实自动锁屏与浅睡保留。1.0.10-diag/ELF7203d6d2d，5431296B、OTA余860160B（13.671875%）。16MiB备份与备用ota_0写入/整应用/保护区/旧ota_1及内部存储核验通过，启动、PMU/VCOM和首页确认；用户确认插拔后图标变化正常；充满、电流和长期续航未验，未发布。
+
+证据`build-dev/charging-20261102/`；COM3/TCP47821当前由本批monitor_wake.py持有，启动含一次HardReset，勿重跑或并开串口。无PNT控制台，不能用version/status/shot轮询；只读tail/wait可采集日志。睡眠会使USB暂不可用，实体键唤醒；串口与主机结果不代表电流或续航。可见Release模拟器保持最终内部闪电样式。
+
 ## 1.0.10正式发布构建（2026-10-30）
 
 用户已授权推送发布，正式固件源`6a8ed35d15a1d91be730ad6107e08a3a3197a5ed`；build-board与build-ci-s3分别从sdkconfig.defaults/ci重新生成配置，PN_DIAG_IMAGE=OFF、SIZE+热路径O2、产品自动锁屏/睡眠、原公钥、USB共存及TLS PSRAM策略核验通过，诊断/控制台/PROFILE关闭。板级5399440B/SHA `8747fab12322bb5d091f5e5ca5e9da311ba06295d14095a2457d33a92408eb6a`、槽余14.178%；CI5396256B/余14.229%。完整安装显式复用1.0.5已资格引导，不以本机新编译引导替代签名链。
@@ -334,6 +374,8 @@ POSIX的`cover_window`持久化场景等待三条实际`cover.cache-clean`回执
 SDKCONFIG按环境隔离：CI与板级都有各自build目录/sdkconfig，不能拷贝CI配置覆盖板级或把本机生成sdkconfig提交成基线。120MHz只适用于核对器件。当前无线适配要求 `CONFIG_ESP_PHY_ENABLE_USB=y`；检查defaults及实际build配置，不据缓存旧构建宣布新源码已编译。
 
 ## 开发时保持可见模拟器
+
+充电图标演示可加`-Charging`，例如`tools/run_sim.ps1 -Demo -Charging -Script home`；不加时为非充电演示。它将`PN_SIM_CHARGING=1`交给同源界面，电量仍是PC演示值，不能作为PMU/功耗实测。
 
 其他电脑首次拉取源码，不需要私人测试书/完整字库也可运行原创演示库：先`python tools/dev.py sdl-run`构建，再`powershell -NoProfile -ExecutionPolicy Bypass -File tools/run_sim.ps1 -Demo`。依赖Docker Desktop Linux与WSLg；Windows可按上文用`py -V:Astral/CPython3.12.13`代替python。演示输入在忽略的build-dev/demo-library，状态独立保存到Docker卷的/data/demo-samples；不扫描私人目录。已有窗口会保留，重建后先`docker stop pico-sim`再启动。默认不加-Demo仍使用本机tests/testBook与tests/testFont，只操作独立副本。
 

@@ -99,6 +99,11 @@ int main(void){
     assert(pn_identity_cache_warm_begin(&warm,&job,&pool,&media,path,12)==PN_OK);pn_identity_cache_job_close(&job);
     assert(pn_identity_cache_warm_begin(&warm,&job,&pool,&media,"/missing/pn-second-book",12)==PN_IO && warm.count==2);
     assert(pn_identity_cache_warm_begin(&warm,&job,&pool,&media,"/missing/pn-third-book",12)==PN_EMPTY && !job.impl);
+    // 写租约BUSY不能消耗预热的两条候选额度，归还租约后本周期即可重试。/ A write-lease BUSY must not consume warm slots; retry in this cycle after returning the lease.
+    assert(pn_media_acquire(&media,PN_MEDIA_WRITE,&lease)==PN_OK);
+    assert(pn_identity_cache_warm_begin(&warm,&job,&pool,&media,path,13)==PN_BUSY && !warm.count && !job.impl);
+    assert(pn_media_release(&media,&lease)==PN_OK);
+    assert(pn_identity_cache_warm_begin(&warm,&job,&pool,&media,path,13)==PN_OK && warm.count==1);pn_identity_cache_job_close(&job);
     assert(!pool.used && !pool.live && !pn_media_active(&media));
     puts("recent verification: metadata never proves content, cancelled prefix unverified, two-candidate cap, WRITE/epoch reset");
     unlink(path);return 0;

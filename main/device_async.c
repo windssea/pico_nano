@@ -34,6 +34,7 @@ pn_status_t pn_device_touch_normalize(cst836u_touch_t *touch,bool *ending){
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "esp_timer.h"
+#include "device_sleep_peripherals.h"
 typedef struct {const pn_frame_t *frame;pn_refresh_t profile;bool off;const pn_feedback_patch_t *patch;pn_status_t (*native)(void *);void *native_ctx;} display_t;
 static uint64_t now_ms(void){return (uint64_t)(esp_timer_get_time()/1000);}
 // 空闲只需检查断轨期限（秒级），100ms足够且减少唤醒。/ Idle only checks the rail deadline (seconds), so 100 ms suffices with fewer wakeups.
@@ -171,6 +172,18 @@ bool pn_device_async_off(pn_device_async_t *p){
 #endif
     if(p->off)p->off();
     return true;
+}
+#ifdef ESP_PLATFORM
+static pn_status_t peripherals_suspend(void *ctx){pn_device_async_t *p=ctx;if(!pn_device_power_sleep_pins())return PN_IO;return pn_device_sleep_peripherals_suspend(p->hardware->touch_ready?p->hardware->touch:NULL);}
+static pn_status_t peripherals_resume(void *ctx){(void)ctx;return pn_device_sleep_peripherals_resume();}
+#endif
+pn_status_t pn_device_async_peripherals(pn_device_async_t *p,bool suspended){
+    if(!p || !atomic_load(&p->paused) || atomic_load(&p->pause_ack)!=atomic_load(&p->pause_request))return PN_BUSY;
+#ifdef ESP_PLATFORM
+    return pn_device_async_native(p,suspended?peripherals_suspend:peripherals_resume,p);
+#else
+    (void)suspended;return PN_OK;
+#endif
 }
 void pn_device_async_bind_product(pn_device_async_t *p){
 #ifdef ESP_PLATFORM

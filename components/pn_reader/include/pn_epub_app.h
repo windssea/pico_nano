@@ -126,6 +126,8 @@ pn_status_t pn_epub_app_close(pn_epub_app_t *,uint64_t);
 pn_status_t pn_epub_app_suspend(pn_epub_app_t *,uint64_t);
 /// 验证介质后呈现已确认正文，不解析、不推进位置。/ Validate media and redisplay confirmed body without parsing or advancing position.
 pn_status_t pn_epub_app_resume(pn_epub_app_t *,uint64_t,pn_reader_present_fn,void *);
+/// 更新顶部时间/电量/充电状态；不翻页或保存位置，未变化返回EMPTY。/ Refresh time/battery/charging only; no navigation or position saves; EMPTY if unchanged.
+pn_status_t pn_epub_app_status_refresh(pn_epub_app_t *,pn_reader_present_fn,void *);
 /// 返回最后真实显示的位置，拔卡后仍保留。/ Return the last displayed location, retained after media loss.
 pn_status_t pn_epub_app_progress(const pn_epub_app_t *,pn_epub_progress_t *);
 /// 失效源/pending而不画屏、重挂载或丢已显示位置。/ Expire source/pending without drawing, remounting or discarding displayed position.
