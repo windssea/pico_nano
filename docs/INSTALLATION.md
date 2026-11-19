@@ -1,6 +1,12 @@
 # PicoNano 安装、异机升级与发布
 
-更新：2026-11-04。当前正式版本为 **1.0.11**；下载见[GitHub 发布页](https://github.com/windssea/pico_nano/releases/tag/v1.0.11)。提供保留数据升级、完整安装和离线网页三个USB包，以及设备OTA原始应用和签名清单。电脑安装入口为[网页安装器](https://windssea.github.io/pico_nano/)，精确固件源码以包内`source_commit`为准；若说明文档随后收口，`documentation_commit`另标说明来源，不改固件身份。
+更新：2026-11-19。当前正式版本为 **1.1.0**；下载见[GitHub 发布页](https://github.com/windssea/pico_nano/releases/tag/v1.1.0)。提供保留数据升级、完整安装和离线网页三个USB包，以及设备OTA原始应用和签名清单。电脑安装入口为[网页安装器](https://windssea.github.io/pico_nano/)，精确固件源码以包内`source_commit`为准；若说明文档随后收口，`documentation_commit`另标说明来源，不改固件身份。
+
+## 1.1.0（2026-11-19）
+
+书库“娱乐”网格新增数织（90关纯逻辑唯一解像素谜题）与中国象棋残局（60局红先连杀），共用局部增量绘制、独立`PNBL` A/B事务存档与退出全刷清屏屏障；常驻中文阅读字库改为构建期 32 KiB 分块原始 DEFLATE 压缩与运行期 PSRAM 4 槽 LRU 按需解压，同时关闭 FreeType `FT_CONFIG_OPTION_ADOBE_GLYPH_LIST`，保持原字体与完整 SHA-256 不变并净省约 863 KiB Flash。正式配置关闭诊断，保留完整 TLS 根证书包、原保存/来源校验与 OTA 签名链，沿用 1.0.5 已资格引导与原公钥。
+
+提供保留布局升级和完整安装两种模式，默认升级保留NVS/内部存储/TF内容；完整安装的初始化与清除继续要求用户明确选择。正式镜像与具体源码、摘要以附件清单为准。
 
 ## 1.0.11（2026-11-04）
 

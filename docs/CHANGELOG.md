@@ -1,5 +1,11 @@
 # PicoNano 变更记录
 
+## 1.1.0（2026-11-19）
+
+- 书库“娱乐”网格新增数织（90关纯逻辑唯一解像素谜题，支持直线拖涂与满行淡化）与中国象棋残局（60局红先连杀，含完整棋规、顽强应着AI、中文记谱提示与败局悔棋），共用局部增量绘制、独立`PNBL` A/B事务存档与退出清屏屏障。
+- 构建期将常驻中文阅读字库（`read-pico-reading.ttf`）按 32 KiB 独立原始 DEFLATE 分块压缩打包并逐块验真（原 TTF 与完整 SHA-256 不变），运行期通过 `pn_font_zbank` 4 槽 32 KiB LRU 块缓存按需解压（板级放 PSRAM，零内部 RAM 与开机阻塞），同步兼容 `pn_ui_font_blob` 共享视图；关闭 FreeType `FT_CONFIG_OPTION_ADOBE_GLYPH_LIST`，保留完整 TLS 根证书包确保 Gitee OTA 兼容。
+- 正式配置关闭诊断，保持原保存/来源校验与 OTA 签名链，沿用已资格引导与原公钥；6 MiB OTA 分区余量提升至约 27.3%，净省约 863 KiB Flash。
+
 ## 2026-11-19：Flash 空间优化（常驻字体分块压缩与 FreeType 裁剪）
 
 - 构建期将常驻中文阅读字库（`read-pico-reading.ttf`）按 32 KiB 独立原始 DEFLATE 分块压缩打包并逐块验真（原 TTF 与完整 SHA-256 不变），运行期通过 `pn_font_zbank` 4 槽 32 KiB LRU 块缓存按需解压（板级放 PSRAM，零内部 RAM 与开机阻塞），同步兼容 `pn_ui_font_blob` 共享视图。

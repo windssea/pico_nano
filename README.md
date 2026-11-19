@@ -2,7 +2,7 @@
 
 基于 ESP32-S3 的独立墨水屏阅读器固件。核心、解析、字体、排版与界面在设备和 PC 模拟器中共用源码，固定目标为 RDP-G01-W/E0470A01、684×1216、16 灰阶、8MiB PSRAM、16MiB Flash。对外品牌在所有语言中统一为 **PicoNano**。
 
-当前正式版本为 **1.0.11**（[GitHub 发布页](https://github.com/windssea/pico_nano/releases/tag/v1.0.11)）。本版修复充电图标状态、后台重复空检查与睡眠唤醒问题，补齐触摸深睡/复位恢复、IO扩展器和屏幕引脚的低功耗配置，保留原电源键保护、阅读进度保存和原页恢复。诊断固件已完成有限的手动/自动锁屏与触摸恢复检查；实际待机电流及过夜掉电仍待观察，不承诺续航改善幅度。原生16灰阶、完整来源校验、内存上限、网页与USB传书保持，范围见[真机报告](docs/READING_DEVICE_TEST_REPORT.md)与[开发指南](docs/DEVELOPMENT_PLAN.md)。正式发布及下载身份以发行清单为准。
+当前正式版本为 **1.1.0**（[GitHub 发布页](https://github.com/windssea/pico_nano/releases/tag/v1.1.0)）。本版在书库“娱乐”网格新增数织（90关唯一解像素谜题）与中国象棋残局（60局红先连杀），并对常驻中文阅读字库实施构建期 32 KiB 分块 DEFLATE 压缩与运行期 PSRAM 按需 LRU 解压，同时关闭 FreeType 未使用的 Adobe 字形名反推表，在保持原字体文件与完整 SHA-256 不变的前提下净省约 863 KiB Flash（6 MiB OTA 分区余量提升至约 27.3%）。原生 16 灰阶、完整来源校验、内存上限、网页与 USB 传书及 OTA 签名链保持，范围见[真机报告](docs/READING_DEVICE_TEST_REPORT.md)与[开发指南](docs/DEVELOPMENT_PLAN.md)。正式发布及下载身份以发行清单为准。
 
 开发与模拟器入口见[构建文档](docs/BUILDING.md#开发时保持可见模拟器)，可运行`tools/run_sim.ps1 -Demo`使用原创演示资源，无需私人书籍或完整字库。
 
