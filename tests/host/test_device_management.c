@@ -612,6 +612,37 @@ int main(void){
      game_exit=game_clear_before();handle_key(PN_KEY_2,PN_KEY_SHORT);
      assert(!xiangqi.active && !xiangqi.impl && shelf_mode && entertainment==1);game_clear_after(game_exit);
      for(unsigned i=0;i<2;i++){snprintf(game_file,sizeof game_file,"%s/xiangqi.%c",xq_root,'a'+i);(void)unlink(game_file);}assert(!rmdir(xq_root));}
+    // 华容道与围棋死活从娱乐网格6/7槽进入，验证无内部存储拒绝、存档屏障、锁屏恢复与单次清屏退出。
+    // Klotski and Tsumego enter from slots 6/7 without SD, honoring storage refusal, save barriers, lock resume and single-clear exits.
+    assert(!sd_media.available && active_hit(556,648)==PN_SHELF_KLOTSKI && active_hit(128,888)==PN_SHELF_TSUMEGO);
+    old_data_ready=data_ready;data_ready=false;
+    apply_selection(PN_SHELF_KLOTSKI);assert(!klotski.active && !klotski.impl && !reader_active());
+    apply_selection(PN_SHELF_TSUMEGO);assert(!tsumego.active && !tsumego.impl && !reader_active());
+    data_ready=old_data_ready;
+    {char kl_root[]="/tmp/pn-device-klotski-XXXXXX";assert(mkdtemp(kl_root));
+     assert(pn_klotski_open(&klotski,&pool,&data_media,kl_root,now_ms())==PN_OK);shelf_mode=false;status_page=false;
+     assert(klotski_draw(false)==PN_OK && active_hit(340,880)==PN_KL_START && root_navigation_hit(80,1150)<0);
+     apply_selection(PN_KL_START);assert(klotski.presented && pn_klotski_screen(&klotski)==PN_KL_PLAY);
+     apply_selection(PN_KL_HINT);assert(klotski.presented && pn_klotski_state(&klotski)->hints==1);
+     assert(pn_media_acquire(&data_media,PN_MEDIA_READ,&game_busy)==PN_OK);
+     assert(!prepare_lock() && klotski.active);handle_key(PN_KEY_2,PN_KEY_SHORT);assert(klotski.active);
+     assert(pn_media_release(&data_media,&game_busy)==PN_OK && prepare_lock());
+     locked=true;resume_reader();assert(!locked && klotski.presented && !reader_active());
+     game_exit=game_clear_before();handle_key(PN_KEY_2,PN_KEY_SHORT);
+     assert(!klotski.active && !klotski.impl && shelf_mode && entertainment==1);game_clear_after(game_exit);
+     for(unsigned i=0;i<2;i++){snprintf(game_file,sizeof game_file,"%s/klotski.%c",kl_root,'a'+i);(void)unlink(game_file);}assert(!rmdir(kl_root));}
+    {char tg_root[]="/tmp/pn-device-tsumego-XXXXXX";assert(mkdtemp(tg_root));
+     assert(pn_tsumego_open(&tsumego,&pool,&data_media,tg_root,now_ms())==PN_OK);shelf_mode=false;status_page=false;
+     assert(tsumego_draw(false)==PN_OK && active_hit(340,880)==PN_TG_START && root_navigation_hit(80,1150)<0);
+     apply_selection(PN_TG_START);assert(tsumego.presented && pn_tsumego_screen(&tsumego)==PN_TG_PLAY);
+     apply_selection(PN_TG_HINT);assert(tsumego.presented && pn_tsumego_state(&tsumego)->hints==1);
+     assert(pn_media_acquire(&data_media,PN_MEDIA_READ,&game_busy)==PN_OK);
+     assert(!prepare_lock() && tsumego.active);handle_key(PN_KEY_2,PN_KEY_SHORT);assert(tsumego.active);
+     assert(pn_media_release(&data_media,&game_busy)==PN_OK && prepare_lock());
+     locked=true;resume_reader();assert(!locked && tsumego.presented && !reader_active());
+     game_exit=game_clear_before();handle_key(PN_KEY_2,PN_KEY_SHORT);
+     assert(!tsumego.active && !tsumego.impl && shelf_mode && entertainment==1);game_clear_after(game_exit);
+     for(unsigned i=0;i<2;i++){snprintf(game_file,sizeof game_file,"%s/tsumego.%c",tg_root,'a'+i);(void)unlink(game_file);}assert(!rmdir(tg_root));}
     sd_media.available=card_available;entertainment=0;covers_inactive=false;
     assert(draw_shelf(PN_REFRESH_GL16)==PN_OK && shelf_draw_valid);unsigned shown=presents;handle_key(PN_KEY_2,PN_KEY_SHORT);assert(shelf_focus==0 && shelf_draw_valid && presents==shown+1);
     pn_frame_t expected;assert(pn_frame_bind(&expected,logical,415872,684,1216));pn_font_t face={0};assert(management_font_begin(&face,24)==PN_OK);pn_shelf_options_t options=shelf_options();if(favorites_valid)options.favorite_items=favorites;

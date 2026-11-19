@@ -14,6 +14,8 @@ with tempfile.TemporaryDirectory() as folder:
         ("minesweeper", 556, 408, 980),
         ("nonogram", 128, 648, 890),
         ("xiangqi", 342, 648, 890),
+        ("klotski", 556, 648, 880),
+        ("tsumego", 128, 888, 880),
     ):
         books, state = root / name / "books", root / name / "state"
         books.mkdir(parents=True)

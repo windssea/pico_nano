@@ -9,7 +9,7 @@
   ],
   "pixel_order": "High two bits first, row-major",
   "display_scale": 2,
-  "total_packed_bytes": 5120,
+  "total_packed_bytes": 7168,
   "icons": [
     {
       "name": "sudoku",
@@ -68,6 +68,28 @@
       "packed_bytes": 1024,
       "png_sha256": "8cc858f0c8a1ef786bb936d7fbd98c6e944e9cf244fb768af8c5a2a7ed398452",
       "packed_sha256": "01c4fb16cc68048e3219b84e3be41d841672ddbd5a74f43c83e99ccec245d3ad"
+    },
+    {
+      "name": "klotski",
+      "file": "klotski.png",
+      "width": 64,
+      "height": 64,
+      "levels": 4,
+      "png_bytes": 250,
+      "packed_bytes": 1024,
+      "png_sha256": "42098922ad6887f24822a4799b3b7729c381704be125acc66c2de69eada4f25e",
+      "packed_sha256": "c4c00241c6d2ab77e806dd35e5b5ec78eb51c962df3251b93802a19e6ff7366b"
+    },
+    {
+      "name": "tsumego",
+      "file": "tsumego.png",
+      "width": 64,
+      "height": 64,
+      "levels": 4,
+      "png_bytes": 269,
+      "packed_bytes": 1024,
+      "png_sha256": "042f77e12aeb78df0d2e1144dc92077013c462e5204a9eedab158583a555321c",
+      "packed_sha256": "281dfc46ceb9a945d250edd23c03cadd765cf178887727cdd80202d6da2e4fce"
     }
   ]
 }

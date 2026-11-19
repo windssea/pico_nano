@@ -22,10 +22,14 @@ set(nonogram_c ${CMAKE_CURRENT_BINARY_DIR}/pn_nonogram_bank.c)
 add_custom_command(OUTPUT ${nonogram_c} COMMAND ${Python3_EXECUTABLE} ${PN_ROOT}/tools/embed_binary.py ${PN_ROOT}/assets/nonogram/puzzles.pnng ${nonogram_c} pn_nonogram_bank DEPENDS ${PN_ROOT}/tools/embed_binary.py ${PN_ROOT}/assets/nonogram/puzzles.pnng VERBATIM)
 set(xiangqi_c ${CMAKE_CURRENT_BINARY_DIR}/pn_xiangqi_bank.c)
 add_custom_command(OUTPUT ${xiangqi_c} COMMAND ${Python3_EXECUTABLE} ${PN_ROOT}/tools/embed_binary.py ${PN_ROOT}/assets/xiangqi/endgames.pnxq ${xiangqi_c} pn_xiangqi_bank DEPENDS ${PN_ROOT}/tools/embed_binary.py ${PN_ROOT}/assets/xiangqi/endgames.pnxq VERBATIM)
+set(klotski_c ${CMAKE_CURRENT_BINARY_DIR}/pn_klotski_bank.c)
+add_custom_command(OUTPUT ${klotski_c} COMMAND ${Python3_EXECUTABLE} ${PN_ROOT}/tools/embed_binary.py ${PN_ROOT}/assets/klotski/puzzles.pnkl ${klotski_c} pn_klotski_bank DEPENDS ${PN_ROOT}/tools/embed_binary.py ${PN_ROOT}/assets/klotski/puzzles.pnkl VERBATIM)
+set(tsumego_c ${CMAKE_CURRENT_BINARY_DIR}/pn_tsumego_bank.c)
+add_custom_command(OUTPUT ${tsumego_c} COMMAND ${Python3_EXECUTABLE} ${PN_ROOT}/tools/embed_binary.py ${PN_ROOT}/assets/tsumego/puzzles.pntg ${tsumego_c} pn_tsumego_bank DEPENDS ${PN_ROOT}/tools/embed_binary.py ${PN_ROOT}/assets/tsumego/puzzles.pntg VERBATIM)
 set(art_c ${CMAKE_CURRENT_BINARY_DIR}/pn_firmware_art.c)
 file(GLOB art_cover_sources CONFIGURE_DEPENDS "${PN_ROOT}/assets/image/bookPic/*.png" "${PN_ROOT}/assets/image/bg/*.png")
 add_custom_command(OUTPUT ${art_c} COMMAND ${Python3_EXECUTABLE} ${PN_ROOT}/tools/build_firmware_art.py "${PN_ROOT}/assets/image/水墨熊猫阅读时光.png" ${PN_ROOT}/assets/image/bookPic "${PN_ROOT}/assets/image/书签背景.png" ${art_c} ${CMAKE_CURRENT_BINARY_DIR}/pn_firmware_art.json DEPENDS ${PN_ROOT}/tools/build_firmware_art.py ${PN_ROOT}/tools/build_brand_image.py "${PN_ROOT}/assets/image/水墨熊猫阅读时光.png" "${PN_ROOT}/assets/image/书签背景.png" ${art_cover_sources} VERBATIM)
-add_library(pn_core STATIC ${ui_font_c} ${reading_font_c} ${harmony_font_c} ${art_c} ${sudoku_c} ${sokoban_c} ${nonogram_c} ${xiangqi_c}
+add_library(pn_core STATIC ${ui_font_c} ${reading_font_c} ${harmony_font_c} ${art_c} ${sudoku_c} ${sokoban_c} ${nonogram_c} ${xiangqi_c} ${klotski_c} ${tsumego_c}
     ${PN_ROOT}/components/pn_image/pn_builtin_art.c
     ${PN_ROOT}/components/pn_update/pn_update.c
     ${PN_ROOT}/components/pn_personalization/pn_brand_image.c
@@ -86,6 +90,10 @@ add_library(pn_core STATIC ${ui_font_c} ${reading_font_c} ${harmony_font_c} ${ar
     ${PN_ROOT}/components/pn_library/pn_nonogram_ui.c
     ${PN_ROOT}/components/pn_library/pn_xiangqi.c
     ${PN_ROOT}/components/pn_library/pn_xiangqi_ui.c
+    ${PN_ROOT}/components/pn_library/pn_klotski.c
+    ${PN_ROOT}/components/pn_library/pn_klotski_ui.c
+    ${PN_ROOT}/components/pn_library/pn_tsumego.c
+    ${PN_ROOT}/components/pn_library/pn_tsumego_ui.c
     ${PN_ROOT}/components/pn_library/pn_shelf_view.c
     ${PN_ROOT}/components/pn_library/pn_menu_cache.c
     ${PN_ROOT}/components/pn_library/pn_search_ui.c

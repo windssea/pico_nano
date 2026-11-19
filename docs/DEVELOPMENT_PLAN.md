@@ -1,5 +1,11 @@
 # PicoNano 后续开发指南
 
+## 2026-11-19 三国华容道与围棋死活题接入（源码、主机与模拟器验证通过，待真机验证）
+
+书库“娱乐”3×3网格第6、7格已接入三国华容道（`pn_klotski`，60关精确BFS最优解，`puzzles.pnkl` 5375B，支持单向一键直滑、多向点选、拖拽滑行、BFS最优与1步纠偏提示及`klotski.a|b` A/B事务存档）与围棋死活题（`pn_tsumego`，60道9×9角/边经典死活题，`puzzles.pntg` 4712B，完整围棋气/提子/禁自杀/单劫规则、变化树判题与败局直接悔棋及`tsumego.a|b` A/B事务存档），共用局部增量绘制（与整绘逐像素一致）与退出单次清屏屏障。
+
+主机ASan/UBSan专项8/8（`klotski`、`klotski_render`、`tsumego`、`tsumego_render`、`shelf_view`、`device_management`、`klotski_bank`、`tsumego_bank`）及SDL游戏窗口9/9（含2MiB内存池与全7款游戏单次清屏退出）全部通过；ESP-IDF v6.1 `firmware-board`编译通过，`pico_nano.bin`为4,609,200B（4.40MiB，较1.1.0仅净增37.0KiB），6MiB OTA槽余1,682,256B（26.74%，距10%门限仍余1.00MiB），PSRAM静态BSS不变。真机触控拖滑与落子手感待烧录实测，当前未刷机、未发布。
+
 ## 2026-11-18 数织与中国象棋残局接入（软件与模拟器验证通过，待真机验证）
 
 书库“娱乐”3×3网格第二行已接入数织（Nonogram）与中国象棋残局（Xiangqi Endgame），与固件/SDL同源共享规则、局部增量绘制及`PNBL`有界A/B事务存档（`nonogram.a|b`、`xiangqi.a|b`）。数织内置90道纯行列逻辑唯一可解像素谜题（`puzzles.pnng` 5792B），支持同行/列直线拖涂、反向标记保护与满段自动变淡；象棋残局内置60局红先强制连杀残局（`endgames.pnxq` 5792B），完整实现塞象眼、蹩马腿、炮架、过河兵、白脸将及禁送将，配双色刻纹棋子、有界极大极小顽强应着、中文记谱提示与败局一步悔棋。

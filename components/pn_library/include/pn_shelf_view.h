@@ -15,6 +15,8 @@
 #define PN_SHELF_MINESWEEPER 49 ///< 扫雷入口 / Minesweeper entry
 #define PN_SHELF_NONOGRAM 50 ///< 数织入口 / Nonogram entry
 #define PN_SHELF_XIANGQI 51 ///< 象棋残局入口 / Chinese Chess endgame entry
+#define PN_SHELF_KLOTSKI 52 ///< 华容道入口 / Klotski entry
+#define PN_SHELF_TSUMEGO 53 ///< 围棋死活入口 / Go Tsumego entry
 #define PN_SHELF_SUDOKU 46 ///< 数独入口 / Sudoku entry
 #define PN_SHELF_ENTERTAINMENT_BACK 47 ///< 返回娱乐 / Return to entertainment
 #define PN_SHELF_CONTINUE 44 ///< 点继续阅读卡 / Tap the continue-reading card

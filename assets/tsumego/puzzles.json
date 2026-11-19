@@ -1,0 +1,542 @@
+[
+  {
+    "id": 0,
+    "tier": 0,
+    "goal": 0,
+    "edge_mask": 1,
+    "title": "直三点眼",
+    "main_moves": 1,
+    "node_count": 4
+  },
+  {
+    "id": 1,
+    "tier": 0,
+    "goal": 1,
+    "edge_mask": 1,
+    "title": "直三做活",
+    "main_moves": 1,
+    "node_count": 4
+  },
+  {
+    "id": 2,
+    "tier": 0,
+    "goal": 0,
+    "edge_mask": 3,
+    "title": "曲三点眼",
+    "main_moves": 1,
+    "node_count": 4
+  },
+  {
+    "id": 3,
+    "tier": 0,
+    "goal": 1,
+    "edge_mask": 3,
+    "title": "曲三做活",
+    "main_moves": 1,
+    "node_count": 4
+  },
+  {
+    "id": 4,
+    "tier": 0,
+    "goal": 0,
+    "edge_mask": 1,
+    "title": "丁四点眼",
+    "main_moves": 1,
+    "node_count": 5
+  },
+  {
+    "id": 5,
+    "tier": 0,
+    "goal": 1,
+    "edge_mask": 1,
+    "title": "丁四做活",
+    "main_moves": 1,
+    "node_count": 5
+  },
+  {
+    "id": 6,
+    "tier": 0,
+    "goal": 0,
+    "edge_mask": 3,
+    "title": "刀把五杀白",
+    "main_moves": 1,
+    "node_count": 6
+  },
+  {
+    "id": 7,
+    "tier": 0,
+    "goal": 1,
+    "edge_mask": 3,
+    "title": "刀把五做活",
+    "main_moves": 1,
+    "node_count": 6
+  },
+  {
+    "id": 8,
+    "tier": 0,
+    "goal": 0,
+    "edge_mask": 1,
+    "title": "梅花五点眼",
+    "main_moves": 1,
+    "node_count": 6
+  },
+  {
+    "id": 9,
+    "tier": 0,
+    "goal": 1,
+    "edge_mask": 1,
+    "title": "梅花五做活",
+    "main_moves": 1,
+    "node_count": 6
+  },
+  {
+    "id": 10,
+    "tier": 0,
+    "goal": 0,
+    "edge_mask": 1,
+    "title": "葡萄六点眼",
+    "main_moves": 1,
+    "node_count": 6
+  },
+  {
+    "id": 11,
+    "tier": 0,
+    "goal": 1,
+    "edge_mask": 1,
+    "title": "葡萄六做活",
+    "main_moves": 1,
+    "node_count": 6
+  },
+  {
+    "id": 12,
+    "tier": 0,
+    "goal": 2,
+    "edge_mask": 1,
+    "title": "经典倒扑",
+    "main_moves": 2,
+    "node_count": 4
+  },
+  {
+    "id": 13,
+    "tier": 0,
+    "goal": 2,
+    "edge_mask": 3,
+    "title": "角部倒扑",
+    "main_moves": 2,
+    "node_count": 4
+  },
+  {
+    "id": 14,
+    "tier": 0,
+    "goal": 2,
+    "edge_mask": 1,
+    "title": "一线接不归",
+    "main_moves": 2,
+    "node_count": 5
+  },
+  {
+    "id": 15,
+    "tier": 0,
+    "goal": 2,
+    "edge_mask": 1,
+    "title": "双打吃筋",
+    "main_moves": 2,
+    "node_count": 5
+  },
+  {
+    "id": 16,
+    "tier": 0,
+    "goal": 1,
+    "edge_mask": 1,
+    "title": "曲四做活",
+    "main_moves": 1,
+    "node_count": 5
+  },
+  {
+    "id": 17,
+    "tier": 0,
+    "goal": 0,
+    "edge_mask": 3,
+    "title": "破眼妙手",
+    "main_moves": 1,
+    "node_count": 2
+  },
+  {
+    "id": 18,
+    "tier": 0,
+    "goal": 0,
+    "edge_mask": 3,
+    "title": "一路立杀",
+    "main_moves": 1,
+    "node_count": 3
+  },
+  {
+    "id": 19,
+    "tier": 0,
+    "goal": 1,
+    "edge_mask": 3,
+    "title": "一路立活",
+    "main_moves": 1,
+    "node_count": 4
+  },
+  {
+    "id": 20,
+    "tier": 1,
+    "goal": 0,
+    "edge_mask": 3,
+    "title": "角部方四",
+    "main_moves": 2,
+    "node_count": 7
+  },
+  {
+    "id": 21,
+    "tier": 1,
+    "goal": 1,
+    "edge_mask": 3,
+    "title": "虎口做活",
+    "main_moves": 2,
+    "node_count": 6
+  },
+  {
+    "id": 22,
+    "tier": 1,
+    "goal": 0,
+    "edge_mask": 3,
+    "title": "角部托杀",
+    "main_moves": 2,
+    "node_count": 6
+  },
+  {
+    "id": 23,
+    "tier": 1,
+    "goal": 1,
+    "edge_mask": 3,
+    "title": "角部急所活",
+    "main_moves": 1,
+    "node_count": 5
+  },
+  {
+    "id": 24,
+    "tier": 1,
+    "goal": 0,
+    "edge_mask": 1,
+    "title": "边上胀牯牛",
+    "main_moves": 2,
+    "node_count": 6
+  },
+  {
+    "id": 25,
+    "tier": 1,
+    "goal": 1,
+    "edge_mask": 1,
+    "title": "破围做活",
+    "main_moves": 2,
+    "node_count": 6
+  },
+  {
+    "id": 26,
+    "tier": 1,
+    "goal": 2,
+    "edge_mask": 1,
+    "title": "滚打包收",
+    "main_moves": 2,
+    "node_count": 4
+  },
+  {
+    "id": 27,
+    "tier": 1,
+    "goal": 0,
+    "edge_mask": 3,
+    "title": "角部五目杀",
+    "main_moves": 2,
+    "node_count": 7
+  },
+  {
+    "id": 28,
+    "tier": 1,
+    "goal": 1,
+    "edge_mask": 3,
+    "title": "角部五目活",
+    "main_moves": 1,
+    "node_count": 6
+  },
+  {
+    "id": 29,
+    "tier": 1,
+    "goal": 0,
+    "edge_mask": 3,
+    "title": "大猪嘴破眼",
+    "main_moves": 2,
+    "node_count": 6
+  },
+  {
+    "id": 30,
+    "tier": 1,
+    "goal": 1,
+    "edge_mask": 3,
+    "title": "大猪嘴做活",
+    "main_moves": 1,
+    "node_count": 5
+  },
+  {
+    "id": 31,
+    "tier": 1,
+    "goal": 1,
+    "edge_mask": 1,
+    "title": "一路虎活",
+    "main_moves": 2,
+    "node_count": 5
+  },
+  {
+    "id": 32,
+    "tier": 1,
+    "goal": 0,
+    "edge_mask": 1,
+    "title": "破虎杀白",
+    "main_moves": 2,
+    "node_count": 5
+  },
+  {
+    "id": 33,
+    "tier": 1,
+    "goal": 4,
+    "edge_mask": 3,
+    "title": "一路劫活",
+    "main_moves": 1,
+    "node_count": 4
+  },
+  {
+    "id": 34,
+    "tier": 1,
+    "goal": 0,
+    "edge_mask": 1,
+    "title": "二路夹杀",
+    "main_moves": 2,
+    "node_count": 6
+  },
+  {
+    "id": 35,
+    "tier": 1,
+    "goal": 1,
+    "edge_mask": 1,
+    "title": "二路夹活",
+    "main_moves": 1,
+    "node_count": 5
+  },
+  {
+    "id": 36,
+    "tier": 1,
+    "goal": 0,
+    "edge_mask": 9,
+    "title": "左角点杀",
+    "main_moves": 2,
+    "node_count": 6
+  },
+  {
+    "id": 37,
+    "tier": 1,
+    "goal": 1,
+    "edge_mask": 9,
+    "title": "左角做活",
+    "main_moves": 1,
+    "node_count": 5
+  },
+  {
+    "id": 38,
+    "tier": 1,
+    "goal": 2,
+    "edge_mask": 9,
+    "title": "左角倒扑",
+    "main_moves": 2,
+    "node_count": 4
+  },
+  {
+    "id": 39,
+    "tier": 1,
+    "goal": 2,
+    "edge_mask": 9,
+    "title": "左角接不归",
+    "main_moves": 2,
+    "node_count": 5
+  },
+  {
+    "id": 40,
+    "tier": 2,
+    "goal": 2,
+    "edge_mask": 1,
+    "title": "纵列倒扑",
+    "main_moves": 2,
+    "node_count": 4
+  },
+  {
+    "id": 41,
+    "tier": 2,
+    "goal": 1,
+    "edge_mask": 1,
+    "title": "梅花做活",
+    "main_moves": 2,
+    "node_count": 7
+  },
+  {
+    "id": 42,
+    "tier": 2,
+    "goal": 0,
+    "edge_mask": 3,
+    "title": "角部透点杀",
+    "main_moves": 3,
+    "node_count": 9
+  },
+  {
+    "id": 43,
+    "tier": 2,
+    "goal": 1,
+    "edge_mask": 3,
+    "title": "角部透点活",
+    "main_moves": 3,
+    "node_count": 9
+  },
+  {
+    "id": 44,
+    "tier": 2,
+    "goal": 2,
+    "edge_mask": 1,
+    "title": "三手连环吃",
+    "main_moves": 3,
+    "node_count": 7
+  },
+  {
+    "id": 45,
+    "tier": 2,
+    "goal": 2,
+    "edge_mask": 3,
+    "title": "扑后连环吃",
+    "main_moves": 2,
+    "node_count": 5
+  },
+  {
+    "id": 46,
+    "tier": 2,
+    "goal": 0,
+    "edge_mask": 1,
+    "title": "弃三点杀",
+    "main_moves": 3,
+    "node_count": 8
+  },
+  {
+    "id": 47,
+    "tier": 2,
+    "goal": 1,
+    "edge_mask": 1,
+    "title": "破围净活",
+    "main_moves": 2,
+    "node_count": 7
+  },
+  {
+    "id": 48,
+    "tier": 2,
+    "goal": 2,
+    "edge_mask": 1,
+    "title": "封口倒扑",
+    "main_moves": 2,
+    "node_count": 6
+  },
+  {
+    "id": 49,
+    "tier": 2,
+    "goal": 2,
+    "edge_mask": 1,
+    "title": "三手征子",
+    "main_moves": 3,
+    "node_count": 7
+  },
+  {
+    "id": 50,
+    "tier": 2,
+    "goal": 2,
+    "edge_mask": 1,
+    "title": "四手边征",
+    "main_moves": 4,
+    "node_count": 8
+  },
+  {
+    "id": 51,
+    "tier": 2,
+    "goal": 3,
+    "edge_mask": 1,
+    "title": "双活妙手",
+    "main_moves": 1,
+    "node_count": 4
+  },
+  {
+    "id": 52,
+    "tier": 2,
+    "goal": 0,
+    "edge_mask": 1,
+    "title": "破双活杀",
+    "main_moves": 2,
+    "node_count": 5
+  },
+  {
+    "id": 53,
+    "tier": 2,
+    "goal": 4,
+    "edge_mask": 9,
+    "title": "左角劫活",
+    "main_moves": 1,
+    "node_count": 4
+  },
+  {
+    "id": 54,
+    "tier": 2,
+    "goal": 2,
+    "edge_mask": 1,
+    "title": "枷吃二子",
+    "main_moves": 2,
+    "node_count": 6
+  },
+  {
+    "id": 55,
+    "tier": 2,
+    "goal": 2,
+    "edge_mask": 1,
+    "title": "大龙紧气吃",
+    "main_moves": 2,
+    "node_count": 6
+  },
+  {
+    "id": 56,
+    "tier": 2,
+    "goal": 0,
+    "edge_mask": 9,
+    "title": "左角五目杀",
+    "main_moves": 2,
+    "node_count": 7
+  },
+  {
+    "id": 57,
+    "tier": 2,
+    "goal": 0,
+    "edge_mask": 9,
+    "title": "左角丁四杀",
+    "main_moves": 2,
+    "node_count": 6
+  },
+  {
+    "id": 58,
+    "tier": 2,
+    "goal": 0,
+    "edge_mask": 9,
+    "title": "左角透点杀",
+    "main_moves": 3,
+    "node_count": 9
+  },
+  {
+    "id": 59,
+    "tier": 2,
+    "goal": 0,
+    "edge_mask": 1,
+    "title": "曲五点杀",
+    "main_moves": 2,
+    "node_count": 7
+  }
+]
