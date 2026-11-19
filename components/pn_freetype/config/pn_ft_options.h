@@ -13,3 +13,6 @@
 #undef FT_CONFIG_OPTION_USE_HARFBUZZ_DYNAMIC
 #undef FT_CONFIG_OPTION_SVG
 #undef FT_CONFIG_OPTION_ENVIRONMENT_PROPERTIES
+/* 现代TTF/OTF均通过cmap映射码点，关闭55KiB的PostScript字形名反推表，不改vendor源码。
+ * Modern TTF/OTF faces map code points via cmap; drop the 55 KiB Adobe glyph name table without editing vendor sources. */
+#undef FT_CONFIG_OPTION_ADOBE_GLYPH_LIST

@@ -1,5 +1,11 @@
 # PicoNano 变更记录
 
+## 2026-11-19：Flash 空间优化（常驻字体分块压缩与 FreeType 裁剪）
+
+- 构建期将常驻中文阅读字库（`read-pico-reading.ttf`）按 32 KiB 独立原始 DEFLATE 分块压缩打包并逐块验真（原 TTF 与完整 SHA-256 不变），运行期通过 `pn_font_zbank` 4 槽 32 KiB LRU 块缓存按需解压（板级放 PSRAM，零内部 RAM 与开机阻塞），同步兼容 `pn_ui_font_blob` 共享视图。
+- 在项目自有 [pn_ft_options.h](../components/pn_freetype/config/pn_ft_options.h) 关闭 FreeType `FT_CONFIG_OPTION_ADOBE_GLYPH_LIST`（不改 vendor 源码）；实查 `gitee.com` 证书链依赖 `Certum Trusted Network CA`（不在 IDF `CMN` 列表内），故保留完整根证书包确保 OTA 兼容。
+- 实测 ESP32-S3 板级镜像 `pico_nano.bin` 由 `5,454,736 B`（`5.20 MiB`，余 `13.30%`）降至 `4,571,264 B`（`4.36 MiB`，余 `27.34%`），净省 **`862.8 KiB`**，距 10% OTA 门限安全余量提升至 **`1.04 MiB`**；主机 ASan/UBSan 398/398、工具 58/58、Web 15/15、`tools/check_docs.py` 与 `firmware-board` 通过，待真机验证，未发布。
+
 ## 2026-11-18：数织与中国象棋残局（源码与模拟器完成，待真机验证）
 
 - 书库“娱乐”网格新增数织（90关纯逻辑唯一解像素谜题，支持直线拖涂与满行淡化）与中国象棋残局（60局红先连杀，含完整棋规、顽强应着AI、中文记谱提示与败局悔棋），共用局部增量绘制、独立`PNBL` A/B事务存档与退出清屏屏障。

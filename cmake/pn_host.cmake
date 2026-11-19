@@ -11,7 +11,7 @@ add_subdirectory(${PN_ROOT}/components/pn_cjson ${CMAKE_CURRENT_BINARY_DIR}/pn-c
 set(ui_font_c ${CMAKE_CURRENT_BINARY_DIR}/pn_ui_font.c)
 add_custom_command(OUTPUT ${ui_font_c} COMMAND ${Python3_EXECUTABLE} ${PN_ROOT}/tools/embed_font_view.py ${PN_ROOT}/assets/fonts/read-pico-ui.ttf ${PN_ROOT}/assets/fonts/read-pico-reading.ttf ${ui_font_c} --report ${CMAKE_CURRENT_BINARY_DIR}/pn_font_view.json DEPENDS ${PN_ROOT}/tools/embed_font_view.py ${PN_ROOT}/assets/fonts/read-pico-ui.ttf ${PN_ROOT}/assets/fonts/read-pico-reading.ttf VERBATIM)
 set(reading_font_c ${CMAKE_CURRENT_BINARY_DIR}/pn_reading_font.c)
-add_custom_command(OUTPUT ${reading_font_c} COMMAND ${Python3_EXECUTABLE} ${PN_ROOT}/tools/embed_binary.py ${PN_ROOT}/assets/fonts/read-pico-reading.ttf ${reading_font_c} pn_reading_font DEPENDS ${PN_ROOT}/tools/embed_binary.py ${PN_ROOT}/assets/fonts/read-pico-reading.ttf VERBATIM)
+add_custom_command(OUTPUT ${reading_font_c} COMMAND ${Python3_EXECUTABLE} ${PN_ROOT}/tools/embed_binary.py ${PN_ROOT}/assets/fonts/read-pico-reading.ttf ${reading_font_c} pn_reading_font --deflate-blocks 32768 DEPENDS ${PN_ROOT}/tools/embed_binary.py ${PN_ROOT}/assets/fonts/read-pico-reading.ttf VERBATIM)
 set(harmony_font_c ${CMAKE_CURRENT_BINARY_DIR}/pn_harmony_font.c)
 add_custom_command(OUTPUT ${harmony_font_c} COMMAND ${Python3_EXECUTABLE} ${PN_ROOT}/tools/embed_binary.py ${PN_ROOT}/assets/fonts/HarmonyOS_Sans_Regular.ttf ${harmony_font_c} pn_harmony_font DEPENDS ${PN_ROOT}/tools/embed_binary.py ${PN_ROOT}/assets/fonts/HarmonyOS_Sans_Regular.ttf VERBATIM)
 set(sudoku_c ${CMAKE_CURRENT_BINARY_DIR}/pn_sudoku_bank.c)
@@ -101,6 +101,7 @@ add_library(pn_core STATIC ${ui_font_c} ${reading_font_c} ${harmony_font_c} ${ar
     ${PN_ROOT}/components/pn_library/pn_font_preview.c
     ${PN_ROOT}/components/pn_font/pn_font.c
     ${PN_ROOT}/components/pn_font/pn_font_blob.c
+    ${PN_ROOT}/components/pn_font/pn_font_zbank.c
     ${PN_ROOT}/components/pn_font/pn_font_chain.c
     ${PN_ROOT}/components/pn_font/pn_font_asset.c
     ${PN_ROOT}/components/pn_font/pn_font_set.c

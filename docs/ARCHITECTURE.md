@@ -164,7 +164,7 @@ TXT恢复包不再同步耗尽后台整书复核。原书/字体校验尚未完�
 
 构建时`embed_font_view.py`验证两份固定TrueType的SFNT/loca/glyf边界，按完整原始字节匹配UI与正文库的字形，只共享完全相同的片段；原TTF、字形号、cmap、度量、提示信息、完整源SHA与许可证均保持。UI视图保留32320B私有原始字节及875条8B只读索引，复用原本已链接的正文库，生成后完整重建并逐字节/SHA核对。生成数据仅放构建目录，不手改固定fallback表，不依赖TF或新缓存文件。
 
-`pn_font_blob_read`二分定位后跨段复制，向FreeType提供与原352584B文件完全相同的随机读取/EOF语义；段边界与源库范围验证保留。没有压缩、解码、堆分配、全字体展开或新增可变全局缓存；正文大字库和HarmonyOS仍原样直接读取。共享索引与描述放Flash，原6MiB总池、字体分类硬顶及引擎生命周期不变。排版身份不变，已有完整校验通过的阅读缓存不因物理存储去重而换代。
+`pn_font_blob_read`二分定位后跨段复制，向FreeType提供与原352584B文件完全相同的随机读取/EOF语义；段边界与源库范围验证保留。常驻中文阅读库（`read-pico-reading.ttf`）在构建期经`embed_binary.py --deflate-blocks 32768`按32KiB独立原始DEFLATE分块打包并逐块验真，原TTF文件与完整SHA-256保持不变；运行期经`pn_font_zbank_read`使用4槽32KiB LRU缓存（128KiB）与48KiB静态解压暂存区（板级均放`EXT_RAM_BSS_ATTR` PSRAM，零内部RAM、零堆分配、无开机整库解压阻塞）按需解压供`reading_read`与`pn_ui_font_blob`复用；HarmonyOS仍原样直接读取。FreeType配置[pn_ft_options.h](../components/pn_freetype/config/pn_ft_options.h)关闭`FT_CONFIG_OPTION_ADOBE_GLYPH_LIST`（不改vendor源码）。原6MiB总池、字体分类硬顶及引擎生命周期不变；排版身份不变，已有完整校验通过的阅读缓存不因物理存储压缩而换代。
 
 基线d757216同配置板级镜像5646960B，去重后5333984B，净减少312976B（305.6KiB）；DIRAM188213B、外部静态BSS156524B保持，6MiB槽余15.22%。主机完整字节/随机读取与多字号像素对照、原字体来源清单核验和板级构建分别记录；主机计时不代表真实Flash缓存或面板性能，真机仍需复测。
 

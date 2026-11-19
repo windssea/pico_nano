@@ -3,13 +3,13 @@
  * English: Actual FreeType file reads and pixel comparison for one TTF, beyond synthetic block traces. */
 #define _POSIX_C_SOURCE 200809L
 #include "pn_font.h"
+#include "pn_font_zbank.h"
 #include "pn_text_file.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
-extern const uint8_t pn_reading_font_bytes[];
 extern const size_t pn_reading_font_size;
 typedef struct {uint64_t reads,seeks,bytes,hash;size_t peak,cache;} result_t;
 static pn_status_t proxy_read(void *ctx,uint64_t off,uint8_t *out,size_t cap,size_t *n){pn_text_source_t *s=ctx;return s->read_at(s->ctx,off,out,cap,n);}
@@ -42,7 +42,7 @@ static result_t run(const char *path,bool pooled,FILE *oracle){
 }
 int main(int argc,char **argv){
     char fixture[]="/tmp/pn-font-io-XXXXXX";const char *path;
-    if(argc==2)path=argv[1];else{int fd=mkstemp(fixture);assert(fd>=0);assert(write(fd,pn_reading_font_bytes,pn_reading_font_size)==(ssize_t)pn_reading_font_size);assert(close(fd)==0);path=fixture;}
+    if(argc==2)path=argv[1];else{int fd=mkstemp(fixture);assert(fd>=0);uint8_t buf[32768];for(size_t off=0;off<pn_reading_font_size;){size_t n=0;assert(pn_reading_font_read(off,buf,sizeof buf,&n)==PN_OK && n>0);assert(write(fd,buf,n)==(ssize_t)n);off+=n;}assert(close(fd)==0);path=fixture;}
     FILE *oracle=tmpfile();assert(oracle);result_t control=run(path,false,oracle);assert(!fflush(oracle) && !fseek(oracle,0,SEEK_SET));result_t pooled=run(path,true,oracle);assert(fgetc(oracle)==EOF && !fclose(oracle));
     printf("TTF 720 mixed-size/subpixel glyph requests: single reads=%llu seeks=%llu bytes=%llu; pooled reads=%llu seeks=%llu bytes=%llu cache=%zu peak=%zu/%zu hash=%016llx/%016llx\n",(unsigned long long)control.reads,(unsigned long long)control.seeks,(unsigned long long)control.bytes,(unsigned long long)pooled.reads,(unsigned long long)pooled.seeks,(unsigned long long)pooled.bytes,pooled.cache,control.peak,pooled.peak,(unsigned long long)control.hash,(unsigned long long)pooled.hash);
     assert(control.hash==pooled.hash && pooled.reads<control.reads && pooled.seeks<control.seeks);

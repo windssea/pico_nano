@@ -9,6 +9,7 @@
 #include "pn_profile.h"
 #include "pn_font.h"
 #include "pn_font_blob.h"
+#include "pn_font_zbank.h"
 #include "pn_font_composite.h"
 #include "pn_cancel.h"
 #include "pn_identity.h"
@@ -24,7 +25,6 @@
 #include <string.h>
 extern const pn_font_blob_t pn_ui_font_blob;
 extern const size_t pn_ui_font_size;
-extern const uint8_t pn_reading_font_bytes[];
 extern const size_t pn_reading_font_size;
 extern const uint8_t pn_harmony_font_bytes[];
 extern const size_t pn_harmony_font_size;
@@ -435,9 +435,7 @@ pn_text_source_t pn_font_builtin_source(void){
 }
 
 static pn_status_t reading_read(void *ctx,uint64_t offset,uint8_t *out,size_t cap,size_t *n){
-    (void)ctx;if(!out || !n || offset>pn_reading_font_size)return PN_INVALID;
-    size_t count=pn_reading_font_size-(size_t)offset;if(count>cap)count=cap;
-    memcpy(out,pn_reading_font_bytes+offset,count);*n=count;return PN_OK;
+    (void)ctx;return pn_reading_font_read(offset,out,cap,n);
 }
 pn_text_source_t pn_font_reading_source(void){
     // 默认正文与系统UI共用已核验完整字库；显式用户字体仍由阅读偏好选择。/ Default body text shares the verified complete system face; explicit user faces remain controlled by reading preferences.
