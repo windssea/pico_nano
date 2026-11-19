@@ -1,5 +1,5 @@
 {
-  "generator": "OpenAI image_gen; deterministic grid normalization by build_game_entry_icons.py",
+  "generator": "Original pixel-art & OpenAI image_gen; deterministic grid normalization by build_game_entry_icons.py",
   "usage": "Original game-launcher artwork; no external source artwork",
   "palette_4bpp": [
     0,
@@ -9,7 +9,7 @@
   ],
   "pixel_order": "High two bits first, row-major",
   "display_scale": 2,
-  "total_packed_bytes": 3072,
+  "total_packed_bytes": 5120,
   "icons": [
     {
       "name": "sudoku",
@@ -46,6 +46,28 @@
       "png_sha256": "3b93897fef542af7ece368a2583e8563ae09f53270823b8628e8128c37dc443f",
       "packed_sha256": "deb3ea2da1d7ed6bd34fe069bb54ebca69e304ceedb60bbe198fa06ac085fadc",
       "imagegen_source_sha256": "2ad5f0d64b1b022683169d74da20a7d6796ac27f5cb6c35f4f1eb276a940ee1f"
+    },
+    {
+      "name": "nonogram",
+      "file": "nonogram.png",
+      "width": 64,
+      "height": 64,
+      "levels": 4,
+      "png_bytes": 310,
+      "packed_bytes": 1024,
+      "png_sha256": "5ccbbd998b8c5581acc297a89cfdb5a2db5555f553636771d71ba2ffd63c0c65",
+      "packed_sha256": "9d6daa6792dd3cc1b8c7813ce1664f32d09e062212ba43eb911464b601af32a4"
+    },
+    {
+      "name": "xiangqi",
+      "file": "xiangqi.png",
+      "width": 64,
+      "height": 64,
+      "levels": 4,
+      "png_bytes": 436,
+      "packed_bytes": 1024,
+      "png_sha256": "8cc858f0c8a1ef786bb936d7fbd98c6e944e9cf244fb768af8c5a2a7ed398452",
+      "packed_sha256": "01c4fb16cc68048e3219b84e3be41d841672ddbd5a74f43c83e99ccec245d3ad"
     }
   ]
 }

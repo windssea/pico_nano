@@ -580,6 +580,38 @@ int main(void){
     assert(!memcmp(&mi_before,pn_minesweeper_state(&minesweeper),sizeof mi_before));pn_minesweeper_close(&minesweeper);
     for(unsigned i=0;i<2;i++){snprintf(game_file,sizeof game_file,"%s/minesweeper.%c",mi_root,'a'+i);(void)unlink(game_file);}assert(!rmdir(mi_root));
     printf("minesweeper device routing used=%zu peak=%zu\n",pool.used,pool.peak);
+    // 数织与象棋残局同样在无TF时从娱乐网格第二行进入，遵守内部存档屏障、锁屏恢复与单次清屏退出。
+    // Nonogram and Xiangqi also enter from row 2 of Entertainment without SD, honoring save barriers, lock resume and single-clear exits.
+    assert(!sd_media.available && active_hit(128,648)==PN_SHELF_NONOGRAM && active_hit(342,648)==PN_SHELF_XIANGQI);
+    old_data_ready=data_ready;data_ready=false;
+    apply_selection(PN_SHELF_NONOGRAM);assert(!nonogram.active && !nonogram.impl && !reader_active());
+    apply_selection(PN_SHELF_XIANGQI);assert(!xiangqi.active && !xiangqi.impl && !reader_active());
+    data_ready=old_data_ready;
+    {char no_root[]="/tmp/pn-device-nonogram-XXXXXX";assert(mkdtemp(no_root));
+     assert(pn_nonogram_open(&nonogram,&pool,&data_media,no_root,now_ms())==PN_OK);shelf_mode=false;status_page=false;
+     assert(nonogram_draw(false)==PN_OK && active_hit(340,890)==PN_NO_START && root_navigation_hit(80,1150)<0);
+     apply_selection(PN_NO_START);assert(nonogram.presented && pn_nonogram_screen(&nonogram)==PN_NO_PLAY);
+     handle_key(PN_KEY_3,PN_KEY_SHORT);assert(pn_nonogram_state(&nonogram)->cross_mode);
+     apply_selection(PN_NO_CELL);assert(pn_nonogram_cell(pn_nonogram_state(&nonogram),0)==PN_NO_MARK);
+     assert(pn_media_acquire(&data_media,PN_MEDIA_READ,&game_busy)==PN_OK);
+     assert(!prepare_lock() && nonogram.active);handle_key(PN_KEY_2,PN_KEY_SHORT);assert(nonogram.active);
+     assert(pn_media_release(&data_media,&game_busy)==PN_OK && prepare_lock());
+     locked=true;resume_reader();assert(!locked && nonogram.presented && !reader_active());
+     game_exit=game_clear_before();handle_key(PN_KEY_2,PN_KEY_SHORT);
+     assert(!nonogram.active && !nonogram.impl && shelf_mode && entertainment==1);game_clear_after(game_exit);
+     for(unsigned i=0;i<2;i++){snprintf(game_file,sizeof game_file,"%s/nonogram.%c",no_root,'a'+i);(void)unlink(game_file);}assert(!rmdir(no_root));}
+    {char xq_root[]="/tmp/pn-device-xiangqi-XXXXXX";assert(mkdtemp(xq_root));
+     assert(pn_xiangqi_open(&xiangqi,&pool,&data_media,xq_root,now_ms())==PN_OK);shelf_mode=false;status_page=false;
+     assert(xiangqi_draw(false)==PN_OK && active_hit(340,890)==PN_XQ_START && root_navigation_hit(80,1150)<0);
+     apply_selection(PN_XQ_START);assert(xiangqi.presented && pn_xiangqi_screen(&xiangqi)==PN_XQ_PLAY);
+     apply_selection(PN_XQ_HINT);assert(xiangqi.presented && pn_xiangqi_state(&xiangqi)->hints==1);
+     assert(pn_media_acquire(&data_media,PN_MEDIA_READ,&game_busy)==PN_OK);
+     assert(!prepare_lock() && xiangqi.active);handle_key(PN_KEY_2,PN_KEY_SHORT);assert(xiangqi.active);
+     assert(pn_media_release(&data_media,&game_busy)==PN_OK && prepare_lock());
+     locked=true;resume_reader();assert(!locked && xiangqi.presented && !reader_active());
+     game_exit=game_clear_before();handle_key(PN_KEY_2,PN_KEY_SHORT);
+     assert(!xiangqi.active && !xiangqi.impl && shelf_mode && entertainment==1);game_clear_after(game_exit);
+     for(unsigned i=0;i<2;i++){snprintf(game_file,sizeof game_file,"%s/xiangqi.%c",xq_root,'a'+i);(void)unlink(game_file);}assert(!rmdir(xq_root));}
     sd_media.available=card_available;entertainment=0;covers_inactive=false;
     assert(draw_shelf(PN_REFRESH_GL16)==PN_OK && shelf_draw_valid);unsigned shown=presents;handle_key(PN_KEY_2,PN_KEY_SHORT);assert(shelf_focus==0 && shelf_draw_valid && presents==shown+1);
     pn_frame_t expected;assert(pn_frame_bind(&expected,logical,415872,684,1216));pn_font_t face={0};assert(management_font_begin(&face,24)==PN_OK);pn_shelf_options_t options=shelf_options();if(favorites_valid)options.favorite_items=favorites;

@@ -46,6 +46,8 @@
 #include "pn_sudoku.h"
 #include "pn_sokoban.h"
 #include "pn_minesweeper.h"
+#include "pn_nonogram.h"
+#include "pn_xiangqi.h"
 #include "pn_menu_cache.h"
 #include "pn_wallpaper.h"
 #include "pn_wallpaper_ui.h"
@@ -173,6 +175,12 @@ static uint32_t sokoban_draw_revision;
 static pn_minesweeper_t minesweeper; ///< 按需扫雷控制器 / On-demand Minesweeper controller
 static uint64_t minesweeper_retry; ///< 呈现重试节流 / Display retry throttle
 static uint32_t minesweeper_draw_revision; ///< 游戏回执的屏幕代次 / Screen revision of the game receipt
+static pn_nonogram_t nonogram; ///< 按需数织控制器 / On-demand Nonogram controller
+static uint64_t nonogram_retry; ///< 呈现重试节流 / Display retry throttle
+static uint32_t nonogram_draw_revision; ///< 游戏回执的屏幕代次 / Screen revision of the game receipt
+static pn_xiangqi_t xiangqi; ///< 按需象棋残局控制器 / On-demand Xiangqi controller
+static uint64_t xiangqi_retry; ///< 呈现重试节流 / Display retry throttle
+static uint32_t xiangqi_draw_revision; ///< 游戏回执的屏幕代次 / Screen revision of the game receipt
 static pn_sudoku_t sudoku; ///< 按需数独控制器 / On-demand Sudoku controller
 static uint64_t sudoku_retry; ///< 呈现重试节流 / Display retry throttle
 static uint32_t sudoku_draw_revision; ///< 最近游戏回执的屏幕代次 / Screen revision of the latest game receipt
@@ -1487,6 +1495,56 @@ static void minesweeper_command(int command){
     else if(!minesweeper.presented)(void)minesweeper_draw(command==PN_MI_CLEAN);
     if(r!=PN_OK && r!=PN_EMPTY && r!=PN_BUSY)ESP_LOGW(TAG,"Minesweeper command=%d status=%d",command,r);
 }
+/// 数织借用原画布与局部差分通路。/ Nonogram borrows the shared canvas and game-diff path.
+static pn_status_t nonogram_draw(bool clean){
+    uint8_t *pixels=pn_alloc_tagged(&pool,PN_MEM_FRAME,415872);pn_frame_t frame;pn_font_t font={0};pn_w_font_scope_t scope={0};
+    pn_status_t r=pixels && pn_frame_bind(&frame,pixels,415872,684,1216)?management_font_begin(&font,28):PN_NO_MEMORY;
+    if(r==PN_OK){(void)pn_w_font_scope_begin(&scope,&pool,NULL);
+        pn_status_t patch=panel_known && nonogram_draw_revision==async_port.revision?pn_device_frame_restore(hardware.hl.back_fb,415872,&frame):PN_UNSUPPORTED;
+        if(patch==PN_OK)patch=pn_nonogram_render_update(&nonogram,&font,&frame);
+        r=patch==PN_UNSUPPORTED?pn_nonogram_render(&nonogram,&font,&frame):patch;
+        pn_w_font_scope_end(&scope);}
+    if(r==PN_OK){atomic_store(&sudoku_presentation,pn_nonogram_screen(&nonogram)==PN_NO_PLAY);r=present(NULL,&frame,clean?PN_REFRESH_GC16:PN_REFRESH_GL16);atomic_store(&sudoku_presentation,false);}
+    if(r==PN_OK)nonogram_draw_revision=async_port.revision;
+    management_font_end(&font);pn_free(pixels);nonogram_retry=now_ms();pn_nonogram_displayed(&nonogram,r==PN_OK);
+    ESP_LOGI(TAG,"Nonogram screen=%d status=%d used=%u peak=%u",pn_nonogram_screen(&nonogram),r,(unsigned)pool.used,(unsigned)pool.peak);return r;
+}
+static void nonogram_open(void){
+    pn_cover_work_abort(&cover_work);pn_status_t r=pn_hot_session_drop(&hot_session);
+    if(r==PN_OK)r=pn_nonogram_open(&nonogram,&pool,&data_media,data_ready?"/data/progress":NULL,now_ms());
+    if(r==PN_OK){shelf_mode=false;status_page=false;shelf_draw_valid=false;(void)nonogram_draw(false);}else message("数织暂不可用","内部存储未就绪，请重试");
+}
+static void nonogram_command(int command){
+    pn_status_t r=pn_nonogram_event(&nonogram,command,now_ms());
+    if(!nonogram.active){pn_nonogram_close(&nonogram);game_return_to_entertainment();}
+    else if(!nonogram.presented)(void)nonogram_draw(command==PN_NO_CLEAN);
+    if(r!=PN_OK && r!=PN_EMPTY && r!=PN_BUSY)ESP_LOGW(TAG,"Nonogram command=%d status=%d",command,r);
+}
+/// 象棋残局借用原画布与交叉点增量差分通路。/ Xiangqi borrows the shared canvas and intersection-diff path.
+static pn_status_t xiangqi_draw(bool clean){
+    uint8_t *pixels=pn_alloc_tagged(&pool,PN_MEM_FRAME,415872);pn_frame_t frame;pn_font_t font={0};pn_w_font_scope_t scope={0};
+    pn_status_t r=pixels && pn_frame_bind(&frame,pixels,415872,684,1216)?management_font_begin(&font,28):PN_NO_MEMORY;
+    if(r==PN_OK){(void)pn_w_font_scope_begin(&scope,&pool,NULL);
+        pn_status_t patch=panel_known && xiangqi_draw_revision==async_port.revision?pn_device_frame_restore(hardware.hl.back_fb,415872,&frame):PN_UNSUPPORTED;
+        if(patch==PN_OK)patch=pn_xiangqi_render_update(&xiangqi,&font,&frame);
+        r=patch==PN_UNSUPPORTED?pn_xiangqi_render(&xiangqi,&font,&frame):patch;
+        pn_w_font_scope_end(&scope);}
+    if(r==PN_OK){atomic_store(&sudoku_presentation,pn_xiangqi_screen(&xiangqi)==PN_XQ_PLAY);r=present(NULL,&frame,clean?PN_REFRESH_GC16:PN_REFRESH_GL16);atomic_store(&sudoku_presentation,false);}
+    if(r==PN_OK)xiangqi_draw_revision=async_port.revision;
+    management_font_end(&font);pn_free(pixels);xiangqi_retry=now_ms();pn_xiangqi_displayed(&xiangqi,r==PN_OK);
+    ESP_LOGI(TAG,"Xiangqi screen=%d status=%d used=%u peak=%u",pn_xiangqi_screen(&xiangqi),r,(unsigned)pool.used,(unsigned)pool.peak);return r;
+}
+static void xiangqi_open(void){
+    pn_cover_work_abort(&cover_work);pn_status_t r=pn_hot_session_drop(&hot_session);
+    if(r==PN_OK)r=pn_xiangqi_open(&xiangqi,&pool,&data_media,data_ready?"/data/progress":NULL,now_ms());
+    if(r==PN_OK){shelf_mode=false;status_page=false;shelf_draw_valid=false;(void)xiangqi_draw(false);}else message("象棋残局暂不可用","内部存储未就绪，请重试");
+}
+static void xiangqi_command(int command){
+    pn_status_t r=pn_xiangqi_event(&xiangqi,command,now_ms());
+    if(!xiangqi.active){pn_xiangqi_close(&xiangqi);game_return_to_entertainment();}
+    else if(!xiangqi.presented)(void)xiangqi_draw(command==PN_XQ_CLEAN);
+    if(r!=PN_OK && r!=PN_EMPTY && r!=PN_BUSY)ESP_LOGW(TAG,"Xiangqi command=%d status=%d",command,r);
+}
 /// 缓存预算查询由设备port提供，不用TF大小推断内部状态容量。/ The device port reports cache capacity without inferring internal-state space from TF size.
 static pn_status_t index_space(void *ctx,uint64_t *available){(void)ctx;size_t total=0,used=0;if(esp_littlefs_info("data",&total,&used)!=ESP_OK || used>total)return PN_IO;*available=total-used;return PN_OK;}
 /// TF容量来自实际挂载卷，不能用内部LittleFS容量替代。/ Obtain TF capacity from its actual mounted volume, never internal LittleFS.
@@ -1908,7 +1966,7 @@ static bool tick_hot_deferred(uint64_t now){
 }
 /// 输入先消费，空闲到期只释放已保留会话；单次必要文件系统调用仍可能阻塞。/ Consume input first; idle expiry releases retained sessions only, while an individual mandatory filesystem call may still block.
 static pn_status_t expire_hot_idle(uint64_t now,bool idle){
-    if(!idle || touch_held || reader_active() || locked || opening || minesweeper.active || sokoban.active || sudoku.active || !shelf_mode || focus_page() || transfer.impl || usb.open || time_sync.impl || ota_busy() || wifi_probe.impl || now<last_input || now-last_input<1500u)return PN_EMPTY;
+    if(!idle || touch_held || reader_active() || locked || opening || xiangqi.active || nonogram.active || minesweeper.active || sokoban.active || sudoku.active || !shelf_mode || focus_page() || transfer.impl || usb.open || time_sync.impl || ota_busy() || wifi_probe.impl || now<last_input || now-last_input<1500u)return PN_EMPTY;
     if(!hot_session.media || hot_session.expire_failed || now<hot_session.at || now-hot_session.at<PN_HOT_SESSION_MS)return PN_EMPTY;
     pn_status_t s=pn_cancel_checkpoint();if(s!=PN_OK)return s;
     pn_device_power_busy(PN_POWER_PRODUCT,true);pn_profile_span_t span;pn_profile_begin(&span,&pool,"hot.expire");
@@ -2369,6 +2427,8 @@ static void reader_checkpoint_current(void) {
 }
 
 static bool prepare_lock(void){
+    if(xiangqi.active){pn_status_t r=pn_xiangqi_pause(&xiangqi,now_ms());if(r!=PN_OK)(void)xiangqi_draw(false);return r==PN_OK;}
+    if(nonogram.active){pn_status_t r=pn_nonogram_pause(&nonogram,now_ms());if(r!=PN_OK)(void)nonogram_draw(false);return r==PN_OK;}
     if(minesweeper.active){pn_status_t r=pn_minesweeper_pause(&minesweeper,now_ms());if(r!=PN_OK)(void)minesweeper_draw(false);return r==PN_OK;}
     if(sokoban.active){pn_status_t r=pn_sokoban_pause(&sokoban,now_ms());if(r!=PN_OK)(void)sokoban_draw(false);return r==PN_OK;}
     if(sudoku.active){pn_status_t r=pn_sudoku_pause(&sudoku,now_ms());if(r!=PN_OK)(void)sudoku_draw();return r==PN_OK;}
@@ -2461,6 +2521,8 @@ static void resume_reader(void){
 #if defined(CONFIG_PN_WAKE_TRACE) && CONFIG_PN_WAKE_TRACE
     wake_trace_capture(resume_at);
 #endif
+    if(xiangqi.active){locked=false;if(xiangqi_draw(false)!=PN_OK)locked=true;return;}
+    if(nonogram.active){locked=false;if(nonogram_draw(false)!=PN_OK)locked=true;return;}
     if(minesweeper.active){locked=false;if(minesweeper_draw(false)!=PN_OK)locked=true;return;}
     if(sokoban.active){locked=false;if(sokoban_draw(false)!=PN_OK)locked=true;return;}
     if(sudoku.active){locked=false;if(sudoku_draw()!=PN_OK)locked=true;return;}
@@ -2800,6 +2862,8 @@ static void open_shelf_item(int index){
     else message("格式尚未接入","书籍仍保留，选择TXT或EPUB");
 }
 static void handle_key(int key,pn_key_event_t event){
+    if(xiangqi.active){if(event==PN_KEY_SHORT)xiangqi_command(key==PN_KEY_1?PN_XQ_BACK:key==PN_KEY_2?PN_XQ_EXIT:PN_XQ_UNDO_MOVE);return;}
+    if(nonogram.active){if(event==PN_KEY_SHORT){const pn_no_state_t *state=pn_nonogram_state(&nonogram);nonogram_command(key==PN_KEY_1?PN_NO_BACK:key==PN_KEY_2?PN_NO_EXIT:state && state->cross_mode?PN_NO_FILL_MODE:PN_NO_CROSS_MODE);}return;}
     if(minesweeper.active){if(event==PN_KEY_SHORT){const pn_mi_state_t *state=pn_minesweeper_state(&minesweeper);minesweeper_command(key==PN_KEY_1?PN_MI_BACK:key==PN_KEY_2?PN_MI_EXIT:state && state->flag_mode?PN_MI_REVEAL_MODE:PN_MI_FLAG_MODE);}return;}
     if(sokoban.active){if(event==PN_KEY_SHORT)sokoban_command(key==PN_KEY_1?PN_SO_BACK:key==PN_KEY_2?PN_SO_EXIT:PN_SO_UNDO_MOVE);return;}
     if(sudoku.active){if(event==PN_KEY_SHORT)sudoku_command(key==PN_KEY_1?PN_SU_BACK:key==PN_KEY_2?PN_SU_EXIT:PN_SU_NEXT_CELL);return;}
@@ -2893,6 +2957,8 @@ static void handle_key(int key,pn_key_event_t event){
 }
 /// 按当前活动页面扫描命中码（触摸与三键焦点共用）。/ Hit code of the active page at a point (shared by touch and three-key focus).
 static int active_hit(int x,int y){
+    if(xiangqi.active){int h=pn_xiangqi_hit(&xiangqi,x,y);return h>0?h:-1;}
+    if(nonogram.active){int h=pn_nonogram_hit(&nonogram,x,y);return h>0?h:-1;}
     if(minesweeper.active){int h=pn_minesweeper_hit(&minesweeper,x,y);return h>0?h:-1;}
     if(sokoban.active){int h=pn_sokoban_hit(&sokoban,x,y);return h>0?h:-1;}
     if(sudoku.active){int h=pn_sudoku_hit(&sudoku,x,y);return h>0?h:-1;}
@@ -2921,7 +2987,7 @@ static int active_hit(int x,int y){
 }
 /// 只有显示固定底栏的四个一级页允许按下切页；子页、模态和活动传输沿原确认规则。/ Only the four roots with fixed navigation switch on press; subpages, modals and active transfers retain normal confirmation.
 static int root_navigation_hit(int x,int y){
-    if(minesweeper.active || sokoban.active || sudoku.active)return -1;
+    if(xiangqi.active || nonogram.active || minesweeper.active || sokoban.active || sudoku.active)return -1;
     if(opening)return -1;
     if(locked || usb.open || transfer.impl || time_sync.impl || ota.impl || wallpaper_ui.impl || font_manage.impl || reading_menu || fonts.active || toc.active || jump_ui.active || styles.active || bookmarks.mode!=PN_BUI_CLOSED || actions_mode || index_mode || search_mode || toolbar_open)return -1;
     if(settings_ui.impl){if(pn_settings_ui_screen(&settings_ui)!=0)return -1;}
@@ -2952,6 +3018,8 @@ static void feedback_begin(int x,int y){
 #endif
 /// 执行一次已确认的选择（点击或KEY2确认）。/ Perform one confirmed selection (a tap or a KEY2 confirmation).
 static void apply_selection(int selection){
+    if(xiangqi.active){xiangqi_command(selection);return;}
+    if(nonogram.active){nonogram_command(selection);return;}
     if(minesweeper.active){minesweeper_command(selection);return;}
     if(sokoban.active){sokoban_command(selection);return;}
     if(sudoku.active){sudoku_command(selection);return;}
@@ -3020,8 +3088,8 @@ static void apply_selection(int selection){
         else if(selection==PN_TOOL_SHELF){toolbar_open=false;if(leave_reader()){selected_path[0]=0;show_shelf_profile("",false,PN_REFRESH_EXIT_GC16);}}
     }
     else if(reading_menu){if(selection==PN_READING_MENU_LAN)begin_transfer(true);else if(selection==PN_READING_MENU_SETTINGS)begin_settings();else if(selection==PN_READING_MENU_TRANSFER)begin_transfer(false);else if(selection==PN_READING_MENU_SHELF){home_mode=false;recent_mode=false;fav_mode=false;search_query[0]=0;reading_menu=false;if(leave_reader()){selected_path[0]=0;show_shelf_profile("",false,PN_REFRESH_EXIT_GC16);}}else if(selection==PN_READING_MENU_RESUME){reading_menu=false;if(reader_active()){if(active_step(PN_APP_OPEN,now_ms())==PN_OK){status_page=false;shelf_mode=false;}}else start_reader();}}
-    else if(shelf_mode && (selection==PN_SHELF_TAB_ENTERTAINMENT || selection==PN_SHELF_ENTERTAINMENT_BACK || selection==PN_SHELF_SUDOKU || selection==PN_SHELF_SOKOBAN || selection==PN_SHELF_MINESWEEPER)){
-        home_mode=false;entertainment=1;if(selection==PN_SHELF_SUDOKU)sudoku_open();else if(selection==PN_SHELF_SOKOBAN)sokoban_open();else if(selection==PN_SHELF_MINESWEEPER)minesweeper_open();else show_shelf("",false);
+    else if(shelf_mode && (selection==PN_SHELF_TAB_ENTERTAINMENT || selection==PN_SHELF_ENTERTAINMENT_BACK || selection==PN_SHELF_SUDOKU || selection==PN_SHELF_SOKOBAN || selection==PN_SHELF_MINESWEEPER || selection==PN_SHELF_NONOGRAM || selection==PN_SHELF_XIANGQI)){
+        home_mode=false;entertainment=1;if(selection==PN_SHELF_SUDOKU)sudoku_open();else if(selection==PN_SHELF_SOKOBAN)sokoban_open();else if(selection==PN_SHELF_MINESWEEPER)minesweeper_open();else if(selection==PN_SHELF_NONOGRAM)nonogram_open();else if(selection==PN_SHELF_XIANGQI)xiangqi_open();else show_shelf("",false);
     }
     else if(shelf_mode && selection==PN_SHELF_READING_HOME){if(!home_mode){home_mode=true;show_shelf("",false);}}
     else if(shelf_mode && selection==PN_SHELF_LAYOUT){list_mode=!list_mode;shelf_focus=-1;show_shelf("",false);}
@@ -3170,9 +3238,9 @@ static void device_task(void *arg){
         wake_trace_poll(now);
 #endif
         if(scope_active)pn_async_end(&scope);
-        bool body=!minesweeper.active && !sokoban.active && !sudoku.active && reader_active() && !locked && !focus_page() && !status_page && !reading_menu && !shelf_mode && !toolbar_open;
+        bool body=!xiangqi.active && !nonogram.active && !minesweeper.active && !sokoban.active && !sudoku.active && reader_active() && !locked && !focus_page() && !status_page && !reading_menu && !shelf_mode && !toolbar_open;
         reading_stats_poll(body && !opening && !reader_turn_pending);
-        uint32_t view=locked?1:minesweeper.active?21:sokoban.active?20:sudoku.active?19:opening?18:fonts.active?2:toc.active?3:styles.active?4:jump_ui.active?5:bookmarks.mode!=PN_BUI_CLOSED?6:actions_mode?7:settings_ui.impl?8:wallpaper_ui.impl?9:font_manage.impl?10:hub_mode?11:index_mode?12:search_mode?13:toolbar_open?14:body?15:home_mode?16:17;
+        uint32_t view=locked?1:xiangqi.active?23:nonogram.active?22:minesweeper.active?21:sokoban.active?20:sudoku.active?19:opening?18:fonts.active?2:toc.active?3:styles.active?4:jump_ui.active?5:bookmarks.mode!=PN_BUI_CLOSED?6:actions_mode?7:settings_ui.impl?8:wallpaper_ui.impl?9:font_manage.impl?10:hub_mode?11:index_mode?12:search_mode?13:toolbar_open?14:body?15:home_mode?16:17;
         if(!opening && shelf_mode && !home_mode && shelf_page)view+=(uint32_t)shelf_page->index*32u;
         pn_device_async_root_view(&async_port,view,body,input_flags,root_navigation_hit(80,1150)>=0);
         pn_device_input_event_t queued={0};pn_status_t available=async_port.input_active?pn_device_async_take(&async_port,&queued):PN_EMPTY;
@@ -3318,6 +3386,12 @@ static void device_task(void *arg){
                     if(motion!=PN_OK && motion!=PN_EMPTY && motion!=PN_CANCELLED && motion!=PN_BUSY)ESP_LOGW(TAG,"TOC motion input status=%d",(int)motion);
                 }}
 #endif
+            if(!locked && nonogram.active){
+                int command=pn_nonogram_touch(&nonogram,touch.count,touch.x,touch.y,read==ESP_OK);
+                if(command>0)nonogram_command(command);
+                list_consumed=true;pn_reader_input_cancel(&input);tap=(pn_tap_t){0};
+                if(!async_port.input_active){int key=-1;pn_key_event_t event=pn_key_feed(&keys,touch.count,touch.x,touch.y,read==ESP_OK,now_ms(),&key);if(event!=PN_KEY_NONE)handle_key(key,event);}
+            }
             if(!locked && sokoban.active){
                 int command=pn_sokoban_touch(&sokoban,touch.count,touch.x,touch.y,read==ESP_OK);
                 if(command>0)sokoban_command(command);
@@ -3345,11 +3419,19 @@ static void device_task(void *arg){
             if(!tap.down)feedback_restore();
 #endif
             {if(!async_port.input_active){int key=-1;pn_key_event_t event=pn_key_feed(&keys,touch.count,touch.x,touch.y,read==ESP_OK,now_ms(),&key);if(event!=PN_KEY_NONE && !locked){pn_reader_input_cancel(&input);handle_key(key,event);}}}
-            if(!minesweeper.active && !sokoban.active && !sudoku.active && !transfer.impl && !usb.open && !wallpaper_ui.impl && !font_manage.impl && !settings_ui.impl && !reading_menu && !shelf_mode && !status_page && bookmarks.mode==PN_BUI_CLOSED && !styles.active && !jump_ui.active && !fonts.active && !toc.active && !toolbar_open && !async_port.input_active && pn_reader_input_feed(&input,touch.count,touch.x,touch.y,read==ESP_OK,&action) && !locked){
+            if(!xiangqi.active && !nonogram.active && !minesweeper.active && !sokoban.active && !sudoku.active && !transfer.impl && !usb.open && !wallpaper_ui.impl && !font_manage.impl && !settings_ui.impl && !reading_menu && !shelf_mode && !status_page && bookmarks.mode==PN_BUI_CLOSED && !styles.active && !jump_ui.active && !fonts.active && !toc.active && !toolbar_open && !async_port.input_active && pn_reader_input_feed(&input,touch.count,touch.x,touch.y,read==ESP_OK,&action) && !locked){
                 if(action==PN_APP_TOOLS)toolbar_show();
                 else if(reader_active() && !status_page){pn_status_t status=active_step(action,now_ms());report_reader_result(status);}
                 else start_reader();}}}
         bool background=false;
+        if(!locked && xiangqi.active && available==PN_EMPTY && !touch_held && !tap.down){
+            (void)pn_xiangqi_tick(&xiangqi,now_ms());
+            if(!xiangqi.presented && now_ms()-xiangqi_retry>=1000)(void)xiangqi_draw(false);
+        }
+        if(!locked && nonogram.active && available==PN_EMPTY && !touch_held && !tap.down){
+            (void)pn_nonogram_tick(&nonogram,now_ms());
+            if(!nonogram.presented && now_ms()-nonogram_retry>=1000)(void)nonogram_draw(false);
+        }
         if(!locked && minesweeper.active && available==PN_EMPTY && !touch_held && !tap.down){
             (void)pn_minesweeper_tick(&minesweeper,now_ms());
             if(!minesweeper.presented && now_ms()-minesweeper_retry>=1000)(void)minesweeper_draw(false);

@@ -13,6 +13,8 @@
 #define PN_SHELF_TAB_ENTERTAINMENT 45 ///< 娱乐分类 / Entertainment category
 #define PN_SHELF_SOKOBAN 48 ///< 推箱子入口 / Sokoban entry
 #define PN_SHELF_MINESWEEPER 49 ///< 扫雷入口 / Minesweeper entry
+#define PN_SHELF_NONOGRAM 50 ///< 数织入口 / Nonogram entry
+#define PN_SHELF_XIANGQI 51 ///< 象棋残局入口 / Chinese Chess endgame entry
 #define PN_SHELF_SUDOKU 46 ///< 数独入口 / Sudoku entry
 #define PN_SHELF_ENTERTAINMENT_BACK 47 ///< 返回娱乐 / Return to entertainment
 #define PN_SHELF_CONTINUE 44 ///< 点继续阅读卡 / Tap the continue-reading card

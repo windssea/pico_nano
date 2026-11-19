@@ -8,11 +8,17 @@ import tempfile
 
 with tempfile.TemporaryDirectory() as folder:
     root = pathlib.Path(folder)
-    for name, entry_x, start_y in (("sudoku", 128, 1040), ("sokoban", 342, 952), ("minesweeper", 556, 980)):
+    for name, entry_x, entry_y, start_y in (
+        ("sudoku", 128, 408, 1040),
+        ("sokoban", 342, 408, 952),
+        ("minesweeper", 556, 408, 980),
+        ("nonogram", 128, 648, 890),
+        ("xiangqi", 342, 648, 890),
+    ):
         books, state = root / name / "books", root / name / "state"
         books.mkdir(parents=True)
         state.mkdir()
-        enter = f"library,tap:460:190,tap:{entry_x}:408,wait:400,"
+        enter = f"library,tap:460:190,tap:{entry_x}:{entry_y},wait:400,"
 
         def run(script, expected):
             env = dict(os.environ, SDL_VIDEODRIVER="dummy", PN_SIM_CLOCK="12:00", PN_SIM_LIBRARY_SCRIPT=script)

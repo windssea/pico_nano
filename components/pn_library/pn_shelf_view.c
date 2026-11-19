@@ -15,7 +15,7 @@
 #include "pn_builtin_art.h"
 #include "pn_profile.h"
 #include "pn_game_entry_icons.inc"
-_Static_assert(sizeof pn_game_entry_icon_data<=3u*1024u,"Game entry icons exceed 3 KiB");
+_Static_assert(sizeof pn_game_entry_icon_data<=5u*1024u,"Game entry icons exceed 5 KiB");
 bool pn_shelf_gesture_feed(pn_shelf_gesture_t *g,bool active,bool swipe,unsigned count,int x,int y,bool valid,int book,uint64_t now,int *command){
     if(!g || !command)return false;
     bool owned=g->claimed;
@@ -373,7 +373,7 @@ static void dashed_frame(pn_frame_t *frame,int x,int y,int w,int h,int radius){
 static grid_box_t game_entry_box(unsigned i){
     return (grid_box_t){36+(int)(i%3)*214,304+(int)(i/3)*240,184,208};
 }
-static const int game_entry_commands[]={PN_SHELF_SUDOKU,PN_SHELF_SOKOBAN,PN_SHELF_MINESWEEPER};
+static const int game_entry_commands[]={PN_SHELF_SUDOKU,PN_SHELF_SOKOBAN,PN_SHELF_MINESWEEPER,PN_SHELF_NONOGRAM,PN_SHELF_XIANGQI};
 /// 阶梯切角由矩形构成，不需要额外画布。/ Rectangle bands form stepped corners without another canvas.
 static void game_entry_step_fill(pn_frame_t *p,int x,int y,int w,int h,int cut,uint8_t color){
     pn_frame_rect(p,x+cut,y,w-cut*2,h,color);
@@ -410,9 +410,9 @@ static void game_entry_card(pn_frame_t *p,grid_box_t b){
 static pn_status_t entertainment_body(pn_font_t *font,pn_frame_t *frame,bool detail){
     pn_status_t s=pn_font_size(font,24);
     if(!detail){
-        static const char *const titles[]={"数独","推箱子","扫雷"};
+        static const char *const titles[]={"数独","推箱子","扫雷","数织","象棋残局"};
         if(s==PN_OK)s=pn_w_text_ex(font,frame,"阅读之外，换一种思考。",32,266,620,PN_ALIGN_LEFT,PN_UI_MUTED,false);
-        for(unsigned i=0;i<3;i++){
+        for(unsigned i=0;i<5;i++){
             grid_box_t b=game_entry_box(i);
             game_entry_card(frame,b);
             game_entry_icon(frame,i,b.x+28,b.y+16);
@@ -551,7 +551,7 @@ int pn_shelf_hit_ex(const pn_catalog_page_t *page,int x,int y,const pn_shelf_opt
         return -1;
     }
     if(options->entertainment){
-        if(options->entertainment==1)for(unsigned i=0;i<3;i++){grid_box_t b=game_entry_box(i);if(x>=b.x && x<b.x+b.w && y>=b.y && y<b.y+b.h)return game_entry_commands[i];}
+        if(options->entertainment==1)for(unsigned i=0;i<5;i++){grid_box_t b=game_entry_box(i);if(x>=b.x && x<b.x+b.w && y>=b.y && y<b.y+b.h)return game_entry_commands[i];}
         if(options->entertainment==2 && x>=182 && x<502 && y>=966 && y<1054)return PN_SHELF_ENTERTAINMENT_BACK;
         return -1;
     }

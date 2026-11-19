@@ -48,10 +48,12 @@ int main(void){
         assert(pn_shelf_hit_ex(p,460,190,&o)==PN_SHELF_TAB_ENTERTAINMENT);
         assert(pn_shelf_hit_ex(p,100,400,&o)==PN_SHELF_SUDOKU);
         assert(pn_shelf_hit_ex(p,128,408,&o)==PN_SHELF_SUDOKU && pn_shelf_hit_ex(p,342,408,&o)==PN_SHELF_SOKOBAN && pn_shelf_hit_ex(p,556,408,&o)==PN_SHELF_MINESWEEPER);
+        assert(pn_shelf_hit_ex(p,128,648,&o)==PN_SHELF_NONOGRAM && pn_shelf_hit_ex(p,342,648,&o)==PN_SHELF_XIANGQI);
         assert(pn_shelf_hit_ex(p,500,400,&o)==PN_SHELF_MINESWEEPER);
-        // 三列共用绘制边界，列缝、行缝及未安装的六个空位不可点击。/ Three columns share drawing bounds; column/row gaps and the six uninstalled slots are inert.
-        static const int games[]={PN_SHELF_SUDOKU,PN_SHELF_SOKOBAN,PN_SHELF_MINESWEEPER};
-        for(int i=0;i<3;i++){int x=36+i*214;assert(pn_shelf_hit_ex(p,x,304,&o)==games[i] && pn_shelf_hit_ex(p,x+183,511,&o)==games[i]);assert(pn_shelf_hit_ex(p,x-1,408,&o)==-1 && pn_shelf_hit_ex(p,x+184,408,&o)==-1);assert(pn_shelf_hit_ex(p,x+92,303,&o)==-1 && pn_shelf_hit_ex(p,x+92,512,&o)==-1);for(int row=1;row<3;row++)assert(pn_shelf_hit_ex(p,x+92,408+row*240,&o)==-1);}
+        // 三列共用绘制边界，列缝、行缝及未安装的四个空位不可点击。/ Three columns share drawing bounds; column/row gaps and the four uninstalled slots are inert.
+        static const int games[]={PN_SHELF_SUDOKU,PN_SHELF_SOKOBAN,PN_SHELF_MINESWEEPER,PN_SHELF_NONOGRAM,PN_SHELF_XIANGQI};
+        for(int i=0;i<5;i++){int x=36+(i%3)*214,y=304+(i/3)*240;assert(pn_shelf_hit_ex(p,x,y,&o)==games[i] && pn_shelf_hit_ex(p,x+183,y+207,&o)==games[i]);assert(pn_shelf_hit_ex(p,x-1,y+104,&o)==-1 && pn_shelf_hit_ex(p,x+184,y+104,&o)==-1);assert(pn_shelf_hit_ex(p,x+92,y-1,&o)==-1 && pn_shelf_hit_ex(p,x+92,y+208,&o)==-1);}
+        for(int i=5;i<9;i++){int x=36+(i%3)*214,y=304+(i/3)*240;assert(pn_shelf_hit_ex(p,x+92,y+104,&o)==-1);}
         assert(pn_shelf_hit_ex(p,342,528,&o)==-1 && pn_shelf_hit_ex(p,342,768,&o)==-1 && pn_shelf_hit_ex(p,342,1008,&o)==-1);
         assert(pn_shelf_hit_ex(p,648,400,&o)==-1 && pn_shelf_hit_ex(p,600,190,&o)==-1 && pn_shelf_hit_ex(p,100,100,&o)==-1);
         size_t base=pool.used;
