@@ -2,7 +2,7 @@
 
 基于 ESP32-S3 的独立墨水屏阅读器固件。核心、解析、字体、排版与界面在设备和 PC 模拟器中共用源码，固定目标为 RDP-G01-W/E0470A01、684×1216、16 灰阶、8MiB PSRAM、16MiB Flash。对外品牌在所有语言中统一为 **PicoNano**。
 
-当前正式版本为 **1.1.0**（[GitHub 发布页](https://github.com/windssea/pico_nano/releases/tag/v1.1.0)）。本版在书库“娱乐”网格新增数织（90关唯一解像素谜题）与中国象棋残局（60局红先连杀），并对常驻中文阅读字库实施构建期 32 KiB 分块 DEFLATE 压缩与运行期 PSRAM 按需 LRU 解压，同时关闭 FreeType 未使用的 Adobe 字形名反推表，在保持原字体文件与完整 SHA-256 不变的前提下净省约 863 KiB Flash（6 MiB OTA 分区余量提升至约 27.3%）。原生 16 灰阶、完整来源校验、内存上限、网页与 USB 传书及 OTA 签名链保持，范围见[真机报告](docs/READING_DEVICE_TEST_REPORT.md)与[开发指南](docs/DEVELOPMENT_PLAN.md)。正式发布及下载身份以发行清单为准。
+当前正式版本为 **1.1.1**（[GitHub 发布页](https://github.com/windssea/pico_nano/releases/tag/v1.1.1)）。本版在书库“娱乐”网格新增三国华容道（60关精确BFS最优解，含横刀立马等20经典名局，支持拖拽/单向直滑/点选箭头滑动、最优路径与1步纠偏提示、128步悔棋）与围棋死活题（60道9×9角/边死活，含完整提子/禁自杀/单劫规则、变化树应手与败局悔棋），娱乐页 3×3 宫格扩展至 7 款游戏；两款游戏加 120 题离线题库合计仅净增约 37 KiB Flash（6 MiB OTA 分区余量约 26.7%）。原生 16 灰阶、完整来源校验、内存上限、网页与 USB 传书及 OTA 签名链保持，范围见[真机报告](docs/READING_DEVICE_TEST_REPORT.md)与[开发指南](docs/DEVELOPMENT_PLAN.md)。正式发布及下载身份以发行清单为准。
 
 开发与模拟器入口见[构建文档](docs/BUILDING.md#开发时保持可见模拟器)，可运行`tools/run_sim.ps1 -Demo`使用原创演示资源，无需私人书籍或完整字库。
 
