@@ -32,6 +32,10 @@ class FullPackages(unittest.TestCase):
         self.factory = self.root / "factory"
         self.board.mkdir()
         self.factory.mkdir()
+        (self.root / "installer/assets").mkdir(parents=True)
+        wallpaper_zip = self.root / "assets/wall/PicoNano.zip"
+        wallpaper_zip.parent.mkdir(parents=True)
+        wallpaper_zip.write_bytes((ROOT / "assets/wall/PicoNano.zip").read_bytes())
         shipped = ROOT / "releases/pico_nano-0.0.57-esp32s3"
         for source, target in (("bootloader.bin", "bootloader/bootloader.bin"),
                                ("ota_data_initial.bin", "ota_data_initial.bin")):
@@ -116,7 +120,6 @@ class FullPackages(unittest.TestCase):
     def test_preserving_site_adds_only_verified_same_source_full_table(self):
         self.package()
         self.upgrade()
-        (self.root / "installer").mkdir()
         with patch.object(installer_site, "ROOT", self.root):
             installer_site.build(self.root / "site")
         release = json.loads((self.root / "site/firmware/manifest.json").read_text())["releases"][0]
@@ -130,7 +133,6 @@ class FullPackages(unittest.TestCase):
     def test_hardware_confirmation_matches_both_modes_by_exact_image_identity(self):
         self.package()
         self.upgrade()
-        (self.root / "installer").mkdir()
         registry = {"schema": 1, "releases": [{"version": "0.6.7", "source_commit": "abcdef0" + "0" * 33,
                     "application_sha256": hashlib.sha256(self.app).hexdigest(), "verified_on_hardware": True}]}
         path = self.root / "releases/hardware-verification.json"
@@ -150,7 +152,6 @@ class FullPackages(unittest.TestCase):
 
     def test_invalid_hardware_confirmation_does_not_publish_a_site(self):
         self.upgrade()
-        (self.root / "installer").mkdir()
         good = {"version": "0.6.7", "source_commit": "abcdef0" + "0" * 33,
                 "application_sha256": hashlib.sha256(self.app).hexdigest(), "verified_on_hardware": True}
         for records in ([{**good, "verified_on_hardware": "true"}], [{**good, "source_commit": "abcdef0"}], [good, good]):
@@ -163,7 +164,6 @@ class FullPackages(unittest.TestCase):
 
     def test_preserving_site_without_matching_full_has_no_extra_allowlist(self):
         self.upgrade()
-        (self.root / "installer").mkdir()
         with patch.object(installer_site, "ROOT", self.root):
             installer_site.build(self.root / "site")
         release = json.loads((self.root / "site/firmware/manifest.json").read_text())["releases"][0]
@@ -172,7 +172,6 @@ class FullPackages(unittest.TestCase):
     def test_different_full_application_blocks_preserving_allowlist(self):
         self.package()
         self.upgrade(app=b"different app")
-        (self.root / "installer").mkdir()
         with patch.object(installer_site, "ROOT", self.root), self.assertRaisesRegex(SystemExit, "application mismatch"):
             installer_site.build(self.root / "site")
 
@@ -183,7 +182,6 @@ class FullPackages(unittest.TestCase):
         (full / "manifest.json").write_text(json.dumps(metadata), encoding="utf-8")
         full.rename(full.with_name("pico_nano-0.6.7-1234567-full"))
         self.upgrade()
-        (self.root / "installer").mkdir()
         with patch.object(installer_site, "ROOT", self.root):
             installer_site.build(self.root / "site")
         release = next(r for r in json.loads((self.root / "site/firmware/manifest.json").read_text())["releases"] if r["mode"] == "app-only")
@@ -206,7 +204,6 @@ class FullPackages(unittest.TestCase):
         (upgrade_folder / "manifest.json").write_text(json.dumps(metadata), encoding="utf-8")
         preserving = installer_site.read_upgrade(upgrade_folder)
         self.assertNotEqual(full["path"], preserving["path"])
-        (self.root / "installer").mkdir()
         with patch.object(installer_site, "ROOT", self.root):
             installer_site.build(self.root / "site")
         manifest = json.loads((self.root / "site/firmware/manifest.json").read_text(encoding="utf-8"))

@@ -2,7 +2,13 @@
 from collections import Counter
 from html.parser import HTMLParser
 from pathlib import Path
+from shutil import copytree
+from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
+from zipfile import ZipFile
+
+from tools import installer_site
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -10,16 +16,27 @@ ROOT = Path(__file__).resolve().parents[2]
 class Page(HTMLParser):
     """只解析静态标签和属性，不执行安装逻辑。 / Parse static tags and attributes without running installer logic."""
 
-    def __init__(self):
+    def __init__(self, root=ROOT / "installer"):
         super().__init__()
         self.elements = []
-        self.feed((ROOT / "installer/index.html").read_text(encoding="utf-8"))
+        self.feed((root / "index.html").read_text(encoding="utf-8"))
 
     def handle_starttag(self, tag, attrs):
         self.elements.append((tag, dict(attrs)))
 
 
 class InstallerPage(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        temporary = TemporaryDirectory()
+        cls.addClassCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        for path in ("installer", "assets/wall", "releases/pico_nano-0.0.57-esp32s3"):
+            copytree(ROOT / path, root / path)
+        cls.site = root / "site"
+        with patch.object(installer_site, "ROOT", root):
+            installer_site.build(cls.site, latest_only=True)
+
     def test_ids_are_unique_so_runtime_controls_cannot_be_shadowed(self):
         counts = Counter(attrs["id"] for _, attrs in Page().elements if "id" in attrs)
         self.assertEqual({key: count for key, count in counts.items() if count != 1}, {})
@@ -45,13 +62,26 @@ class InstallerPage(unittest.TestCase):
                             for tag, attrs in Page().elements))
 
     def test_offline_scripts_styles_and_previews_are_packaged_locally(self):
-        for tag, attrs in Page().elements:
+        for tag, attrs in Page(self.site).elements:
             for key in ("src", "href"):
                 value = attrs.get(key, "")
                 if not value or value.startswith(("#", "https://")):
                     continue
                 with self.subTest(tag=tag, asset=value):
-                    self.assertTrue((ROOT / "installer" / value).is_file())
+                    self.assertTrue((self.site / value).is_file())
+
+    def test_default_mask_wallpapers_are_downloadable_from_the_built_site(self):
+        downloads = [(attrs.get("href"), attrs["download"])
+                     for tag, attrs in Page(self.site).elements if tag == "a" and "download" in attrs]
+        self.assertIn(("assets/PicoNano.zip", "PicoNano.zip"), downloads)
+        source = ROOT / "assets/wall"
+        served_zip = self.site / "assets/PicoNano.zip"
+        self.assertEqual(served_zip.read_bytes(), (source / "PicoNano.zip").read_bytes())
+        wallpapers = {f"PicoNano/{path.name}": path.read_bytes() for path in (source / "PicoNano").glob("*.png")}
+        self.assertTrue(wallpapers)
+        with ZipFile(served_zip) as archive:
+            self.assertEqual({entry.filename: archive.read(entry) for entry in archive.infolist()
+                              if not entry.is_dir()}, wallpapers)
 
 
 if __name__ == "__main__":

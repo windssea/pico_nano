@@ -1,5 +1,5 @@
-"""生成网页安装器静态站点：复制 installer/ 与 releases/ 中的固件并写入清单。
-Build the web-installer static site: copy installer/ and the releases/ firmware, then write the manifest."""
+"""生成网页安装器静态站点，包含壁纸下载、固件和清单。
+Build the web-installer static site with the wallpaper download, firmware and manifest."""
 import argparse
 import functools
 import hashlib
@@ -173,6 +173,7 @@ def build(out, latest_only=False):
     if out.exists():
         shutil.rmtree(out)
     shutil.copytree(ROOT / "installer", out)
+    shutil.copyfile(ROOT / "assets/wall/PicoNano.zip", out / "assets/PicoNano.zip")
     for release in releases:
         target = out / release["path"]
         for key, entry in release["files"].items():
