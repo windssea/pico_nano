@@ -20,5 +20,8 @@ void pn_paper_fallback(pn_paper_t *,const pn_style_t *);
 /// 纯绘制整帧或逻辑行带；缺失外部资源用白底。/ Pure full-frame or logical-band painting; unavailable external resources use white paper.
 pn_status_t pn_paper_draw(const pn_paper_t *,unsigned,pn_frame_t *);
 pn_status_t pn_paper_region(const pn_paper_t *,unsigned,pn_frame_t *,int,int);
+/// 按完整排版配置（含背景四周边距）纯绘制整帧或行带。/ Pure full-frame or band painting honoring four-side background margins in the style.
+pn_status_t pn_paper_draw_style(const pn_paper_t *,const pn_style_t *,pn_frame_t *);
+pn_status_t pn_paper_region_style(const pn_paper_t *,const pn_style_t *,pn_frame_t *,int,int);
 /// 释放控制层所有资源，可重复。/ Release controller-owned resources, idempotently.
 void pn_paper_close(pn_paper_t *);

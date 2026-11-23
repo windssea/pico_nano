@@ -10,7 +10,7 @@ int main(void){char root[]="/tmp/pn-style-XXXXXX";assert(mkdtemp(root));char a[3
     pn_media_t media;pn_media_init(&media);assert(pn_media_attach(&media,1)==PN_OK);pn_media_lease_t lease;assert(pn_media_acquire(&media,PN_MEDIA_WRITE,&lease)==PN_OK);pn_journal_files_t files;pn_journal_io_t io;assert(pn_journal_files_init(&files,&media,&lease,a,b,&io)==PN_OK);
     pn_book_id_t book={{42}};pn_style_t s=pn_style_default(PN_STYLE_DEFAULT_PIXELS),loaded;assert(pn_style_validate(&s)==PN_OK);
     assert(s.pixels==44 && s.line_percent==145 && s.gap_percent==40 && s.indent_em==2 && s.margin==32);
-    assert(pn_style_load(&io,&book,&loaded)==PN_EMPTY);s=(pn_style_t){56,180,50,2,64,0,15,2,-8,3,-1,0,0,{0},{{0}},0};assert(pn_style_save(&io,&book,&s)==PN_OK);assert(pn_style_load(&io,&book,&loaded)==PN_OK && !memcmp(&s,&loaded,sizeof s));
+    assert(pn_style_load(&io,&book,&loaded)==PN_EMPTY);s=(pn_style_t){.pixels=56,.line_percent=180,.gap_percent=50,.indent_em=2,.margin=64,.gl_before_clear=0,.tracking_percent=15,.reading_line=2,.reading_line_offset=-8,.reading_line_shade=3,.weight=-1};assert(pn_style_save(&io,&book,&s)==PN_OK);assert(pn_style_load(&io,&book,&loaded)==PN_OK && !memcmp(&s,&loaded,sizeof s));
     // schema4深浅往返；schema3同载荷按浅读取，越界深浅拒绝保存。/ Schema 4 darkness round-trips; the same payload as schema 3 loads light, and out-of-range darkness is rejected.
     // 非标准字重写schema5（60..61），标准字重仍写schema4；schema5标准字重或越界字重拒绝。/ Non-regular weights write schema 5 (60..61) while regular stays schema 4; schema 5 with regular or out-of-range weights is refused.
     {pn_record_t v5;assert(pn_journal_load(&io,&v5)==PN_OK && v5.payload[4]==5 && (int16_t)(v5.payload[60]|v5.payload[61]<<8)==-1);v5.payload[60]=v5.payload[61]=0;assert(pn_journal_save(&io,v5.payload,v5.size)==PN_OK && pn_style_load(&io,&book,&loaded)==PN_UNSUPPORTED);
@@ -67,6 +67,24 @@ int main(void){char root[]="/tmp/pn-style-XXXXXX";assert(mkdtemp(root));char a[3
      assert(pn_style_save(&io,&book,&hidden)==PN_OK && pn_style_load(&io,&book,&loaded)==PN_OK && !memcmp(&hidden,&loaded,sizeof hidden));assert(pn_journal_load(&io,&record)==PN_OK && record.payload[4]==10);
      hidden.hide_images=2;assert(pn_style_validate(&hidden)==PN_INVALID && pn_style_save(&io,&book,&hidden)==PN_INVALID);
      assert(pn_style_save(&io,&book,&visible)==PN_OK && pn_journal_load(&io,&record)==PN_OK && record.payload[4]==4 && pn_style_load(&io,&book,&loaded)==PN_OK && !loaded.hide_images);}
+    // schema 11/12：去上下栏、四向正文边距与四向阅读背景边距往返、边界拒绝与回退旧schema。
+    // Schemas 11/12: hide-bars, 4-side body margins and 4-side background margins round-trip, bounds checks and fallback to legacy schemas.
+    {pn_style_t ext=pn_style_default(44);ext.hide_bars=1;ext.margin_top=24;ext.margin_bottom=36;pn_style_set_margin_left(&ext,40);pn_style_set_margin_right(&ext,56);ext.bg_margin_top=12;ext.bg_margin_bottom=16;ext.bg_margin_left=20;ext.bg_margin_right=28;ext.background=7;
+     assert(pn_style_margin_left(&ext)==40 && pn_style_margin_right(&ext)==56 && pn_style_body_top(&ext)==24 && pn_style_body_height(&ext)==1216-24-36 && pn_style_body_width(&ext)==684-40-56);
+     assert(pn_style_has_extended_layout(&ext) && pn_style_has_bg_margins(&ext) && !pn_style_same_typesetting(&s,&ext));
+     assert(pn_style_save(&io,&book,&ext)==PN_OK && pn_style_load(&io,&book,&loaded)==PN_OK && !memcmp(&ext,&loaded,sizeof ext));
+     pn_record_t v11;assert(pn_journal_load(&io,&v11)==PN_OK && v11.size==72 && v11.payload[4]==11 && (v11.payload[7]&2)!=0);
+     v11.payload[7]|=4;assert(pn_journal_save(&io,v11.payload,v11.size)==PN_OK && pn_style_load(&io,&book,&loaded)==PN_UNSUPPORTED);
+     ext.background=PN_READING_BACKGROUND_EXTERNAL;strcpy(ext.background_name,"margin-bg.png");ext.background_identity.sha256[0]=77;
+     assert(pn_style_save(&io,&book,&ext)==PN_OK && pn_style_load(&io,&book,&loaded)==PN_OK && !memcmp(&ext,&loaded,sizeof ext));
+     pn_record_t v12;assert(pn_journal_load(&io,&v12)==PN_OK && v12.size==256 && v12.payload[4]==12);
+     pn_style_t bad_ext=ext;bad_ext.hide_bars=2;assert(pn_style_validate(&bad_ext)==PN_INVALID);
+     bad_ext=ext;bad_ext.margin_top=202;assert(pn_style_validate(&bad_ext)==PN_INVALID);
+     bad_ext=ext;bad_ext.margin_bottom=15;assert(pn_style_validate(&bad_ext)==PN_INVALID);
+     bad_ext=ext;bad_ext.bg_margin_left=162;assert(pn_style_validate(&bad_ext)==PN_INVALID);
+     bad_ext=ext;bad_ext.bg_margin_top=202;assert(pn_style_validate(&bad_ext)==PN_INVALID);
+     pn_style_t plain=pn_style_default(44);assert(!pn_style_has_extended_layout(&plain) && pn_style_save(&io,&book,&plain)==PN_OK);
+     pn_record_t fallback;assert(pn_journal_load(&io,&fallback)==PN_OK && fallback.size==64 && fallback.payload[4]==4);}
     pn_book_id_t other=book;other.sha256[1]=1;loaded=pn_style_default(30);assert(pn_style_load(&io,&other,&loaded)==PN_STALE_JOB && loaded.pixels==30);
     assert(pn_media_release(&media,&lease)==PN_OK);assert(unlink(a)==0 && unlink(b)==0 && rmdir(root)==0);puts("style: ranges, true journal reopen and book identity passed");return 0;
 }

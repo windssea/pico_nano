@@ -49,3 +49,22 @@ pn_status_t pn_index_prefs_save(const pn_journal_io_t *io,bool wait){
     bool previous;pn_status_t s=pn_index_prefs_load(io,&previous);if(s!=PN_OK && s!=PN_EMPTY)return s;
     const uint8_t payload[6]={'P','N','I','X',1,wait?1:0};return pn_journal_save(io,payload,sizeof payload);
 }
+
+pn_status_t pn_turn_dir_prefs_files(pn_journal_files_t *files,pn_media_t *media,const pn_media_lease_t *lease,const char *root,pn_journal_io_t *io){
+    if(!root || !*root)return PN_INVALID;
+    char a[PN_JOURNAL_PATH_MAX],b[PN_JOURNAL_PATH_MAX];int n=snprintf(a,sizeof a,"%s/turn_dir.a",root),m=snprintf(b,sizeof b,"%s/turn_dir.b",root);
+    if(n<0 || m<0 || (size_t)n>=sizeof a || (size_t)m>=sizeof b)return PN_LIMIT;
+    return pn_journal_files_init(files,media,lease,a,b,io);
+}
+pn_status_t pn_turn_dir_prefs_load(const pn_journal_io_t *io,bool *vertical){
+    if(!io || !vertical)return PN_INVALID;
+    pn_record_t r;pn_status_t s=pn_journal_load(io,&r);if(s!=PN_OK)return s;
+    if(r.size!=6 || memcmp(r.payload,"PNTD",4))return PN_CORRUPT;
+    if(r.payload[4]!=1)return PN_UNSUPPORTED;
+    if(r.payload[5]>1)return PN_CORRUPT;
+    *vertical=r.payload[5]!=0;return PN_OK;
+}
+pn_status_t pn_turn_dir_prefs_save(const pn_journal_io_t *io,bool vertical){
+    bool previous;pn_status_t s=pn_turn_dir_prefs_load(io,&previous);if(s!=PN_OK && s!=PN_EMPTY)return s;
+    const uint8_t payload[6]={'P','N','T','D',1,vertical?1:0};return pn_journal_save(io,payload,sizeof payload);
+}

@@ -8,12 +8,14 @@
  */
 #pragma once
 #include "pn_reader_app.h"
-/// 翻页偏好；全零为默认（右手、滑动与边缘点按开启）。/ Page-turn preferences; all zero is the default (right hand, swipe and edge taps on).
+/// 翻页偏好；全零为默认（右手、左右翻页、滑动与边缘点按开启、含上下栏）。/ Page-turn preferences; all zero is the default (right hand, horizontal turns, swipe and edge taps on, bars shown).
 typedef struct {
-    bool left_hand; ///< 左手：左边缘下一页、右边缘上一页 / Left hand: left edge next, right edge previous
-    bool no_swipe; ///< 关闭横向滑动翻页 / Disable horizontal swipe turns
-    bool no_edge_tap; ///< 关闭边缘点按翻页 / Disable edge-tap turns
+    bool left_hand; ///< 左手：左边缘下一页、右边缘上一页（左右翻页模式）/ Left hand: left edge next, right edge previous (horizontal mode)
+    bool no_swipe; ///< 关闭滑动翻页 / Disable swipe turns
+    bool no_edge_tap; ///< 关闭点按翻页 / Disable tap turns
     bool no_keys; ///< 关闭三键翻页（调用方使用）/ Disable key turns (used by callers)
+    bool vertical_turn; ///< 上下翻页模式：上滑/点下半屏下一页，下滑/点上半屏上一页 / Vertical turn mode: swipe up or tap bottom half for next, swipe down or tap top half for previous
+    bool full_screen; ///< 去上下栏全屏模式：整屏0..1215均响应翻页 / Bar-less full-screen mode: entire 0..1215 height accepts page turns
 } pn_reader_input_config_t;
 typedef struct {
     pn_reader_input_config_t config; ///< 当前偏好，可随时替换 / Current preferences, replaceable at any time

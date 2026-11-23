@@ -29,5 +29,23 @@ int main(void){
     assert(!pn_reader_input_feed(&i,1,600,500,true,&a));pn_reader_input_cancel(&i);assert(!release(&i,&a));
     assert(!pn_reader_input_feed(&i,1,600,500,true,&a));assert(!pn_reader_input_feed(&i,1,600,500,false,&a));assert(!release(&i,&a));
     assert(!pn_reader_input_feed(&i,1,-1,500,true,&a));assert(!release(&i,&a));
-    puts("reader input: release once, middle opens the toolbar, edges turn, footer ignored, swipe, multitouch and cancellation passed");return 0;
+    /* 上下翻页模式：上滑/点下半屏下一页，下滑/点上半屏上一页，遵守禁用开关。
+     * Vertical page-turn mode: swipe up / tap bottom half = next, swipe down / tap top half = previous, respecting disable switches. */
+    i=(pn_reader_input_t){.config={.vertical_turn=true}};
+    assert(!pn_reader_input_feed(&i,1,340,700,true,&a));assert(!pn_reader_input_feed(&i,1,345,580,true,&a));assert(release(&i,&a) && a==PN_APP_NEXT);
+    assert(!pn_reader_input_feed(&i,1,340,500,true,&a));assert(!pn_reader_input_feed(&i,1,345,620,true,&a));assert(release(&i,&a) && a==PN_APP_PREVIOUS);
+    assert(!pn_reader_input_feed(&i,1,500,300,true,&a));assert(release(&i,&a) && a==PN_APP_PREVIOUS);
+    assert(!pn_reader_input_feed(&i,1,100,900,true,&a));assert(release(&i,&a) && a==PN_APP_NEXT);
+    i.config.no_swipe=true;
+    assert(!pn_reader_input_feed(&i,1,340,700,true,&a));assert(!pn_reader_input_feed(&i,1,345,580,true,&a));assert(!release(&i,&a));
+    i.config.no_swipe=false;i.config.no_edge_tap=true;
+    assert(!pn_reader_input_feed(&i,1,340,900,true,&a));assert(!release(&i,&a));
+    /* 去上下栏全屏热区：顶部 y<32 与底部 y>=1144 都可翻页。/ Bar-less full-screen hit zones accept top y<32 and bottom y>=1144. */
+    i=(pn_reader_input_t){.config={.full_screen=true}};
+    assert(!pn_reader_input_feed(&i,1,600,10,true,&a));assert(release(&i,&a) && a==PN_APP_NEXT);
+    assert(!pn_reader_input_feed(&i,1,100,1180,true,&a));assert(release(&i,&a) && a==PN_APP_PREVIOUS);
+    i.config.vertical_turn=true;
+    assert(!pn_reader_input_feed(&i,1,600,10,true,&a));assert(release(&i,&a) && a==PN_APP_PREVIOUS);
+    assert(!pn_reader_input_feed(&i,1,100,1180,true,&a));assert(release(&i,&a) && a==PN_APP_NEXT);
+    puts("reader input: release once, vertical turn, full screen, edges turn, footer ignored, swipe, multitouch and cancellation passed");return 0;
 }

@@ -7,7 +7,7 @@ static int style_key(pn_style_ui_t *u,SDL_Keycode key){
     if(key==SDLK_f && !u->preview)return PN_SUI_FONTS;
     if(key==SDLK_F5)return PN_SUI_RETRY;
     if(u->preview)return key==SDLK_ESCAPE || key==SDLK_RETURN || key==SDLK_s?PN_SUI_FORM:-1;
-    if(key==SDLK_ESCAPE)return PN_SUI_CANCEL;
+    if(key==SDLK_ESCAPE)return u->margins?PN_SUI_MARGINS_BACK:u->backgrounds?PN_SUI_BACKGROUND_BACK:u->more?PN_SUI_BACK_MAIN:PN_SUI_CANCEL;
     if(key==SDLK_RETURN)return PN_SUI_APPLY;
     if(key==SDLK_p)return PN_SUI_PREVIEW;
     if(key==SDLK_LEFT)return PN_SUI_FIELD+(int)u->selected*2;

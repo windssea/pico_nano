@@ -134,6 +134,7 @@ typedef struct {
     const char *font_dir; ///< --font-dir，NULL禁用 / --font-dir, NULL disables the page
     pn_settings_ui_t settings; ///< 设置页 / Settings page
     uint8_t input_flags; ///< 已保存翻页标志 / Saved page-turn flags
+    bool vertical_turn; ///< 上下翻页模式 / Vertical page-turn mode
     bool index; ///< 字母跳转页 / Letter-index page
     bool toolbar; ///< 阅读工具栏正显示 / The reading toolbar is showing
     uint8_t *page_px; ///< 最近一次呈现帧的副本，关闭工具栏时恢复 / Copy of the latest presented frame, restored when the toolbar closes
@@ -945,7 +946,7 @@ static bool management_event(library_t *s,SDL_Event *event,uint64_t now){
         event->key.keysym.sym=SDLK_RETURN;return false;
     }
     if(key==PN_KEY_1 && ((s->fonts.active && s->fonts.preview) || (s->styles.active && s->styles.preview))){event->key.keysym.sym=SDLK_ESCAPE;return false;}
-    int back=s->fonts.active?PN_FUI_BACK:s->toc.active?PN_TOC_UI_BACK:s->jumpui.active?PN_JUI_CANCEL:s->styles.active?(s->styles.more?PN_SUI_BACK_MAIN:PN_SUI_CANCEL):s->bookmarks.mode!=PN_BUI_CLOSED?PN_BUI_BACK:s->actions_mode?PN_BA_CANCEL:s->settings.impl?PN_SETUI_BACK:s->font_manage.impl?PN_FMU_BACK:s->wallpaper.impl?(s->wallpaper.screen==PN_WUI_LIST?PN_WUI_BACK:PN_WUI_CANCEL):s->hub?PN_HUB_SHELF:s->search_open?PN_SEARCH_BACK:s->index?'<':PN_TOOL_CLOSE;
+    int back=s->fonts.active?PN_FUI_BACK:s->toc.active?PN_TOC_UI_BACK:s->jumpui.active?PN_JUI_CANCEL:s->styles.active?(s->styles.margins?PN_SUI_MARGINS_BACK:s->styles.backgrounds?PN_SUI_BACKGROUND_BACK:s->styles.more?PN_SUI_BACK_MAIN:PN_SUI_CANCEL):s->bookmarks.mode!=PN_BUI_CLOSED?PN_BUI_BACK:s->actions_mode?PN_BA_CANCEL:s->settings.impl?PN_SETUI_BACK:s->font_manage.impl?PN_FMU_BACK:s->wallpaper.impl?(s->wallpaper.screen==PN_WUI_LIST?PN_WUI_BACK:PN_WUI_CANCEL):s->hub?PN_HUB_SHELF:s->search_open?PN_SEARCH_BACK:s->index?'<':PN_TOOL_CLOSE;
     pn_focus_scan(&s->management_focus,management_hit,s,NULL,0);
     int confirm=-1;
     if(s->actions_mode && s->actions.confirming)confirm=PN_BA_CONFIRM;
@@ -1051,6 +1052,7 @@ static int library_worker(void *ctx){
     (void)pn_settings_load_shelf(&s->state_media,s->state_dir,&s->shelf_prefs);
     s->home=true;status=page(s,false,true);if(status!=PN_OK)goto cleanup;
     if(pn_settings_load_flags(&s->state_media,s->state_dir,&s->input_flags)!=PN_OK)s->input_flags=PN_INPUT_FLAGS_DEFAULT;
+    (void)pn_settings_load_vertical_turn(&s->state_media,s->state_dir,&s->vertical_turn);
     (void)pn_settings_load_index(&s->state_media,s->state_dir,&s->index_wait);
     result=0;bool running=true,prefetch_work=false;pn_tap_t tap={0};pn_tap_press_t navigation_press={0};pn_shelf_gesture_t shelf_gesture={0};pn_reader_input_t input={0};uint64_t font_activity=SDL_GetTicks64();
     while(running){
@@ -1408,7 +1410,8 @@ static int library_worker(void *ctx){
             int command=event.type==SDL_KEYDOWN && !event.key.repeat?bookmark_key(&s->bookmarks,event.key.keysym.sym):event.type==SDL_TEXTINPUT && s->bookmarks.mode==PN_BUI_RENAME?PN_BUI_TEXT:-1;
             if(command>=0){status=pn_bookmark_ui_event(&s->bookmarks,command,event.type==SDL_TEXTINPUT?event.text.text:NULL,now,present,s);bookmark_report(&s->bookmarks,command,status);cancel_pointer(&input,&tap,(atomic_load(&s->async.mouse)&SDL_BUTTON_LMASK)==0);continue;}
         }
-        input.config=(pn_reader_input_config_t){.left_hand=(s->input_flags&PN_INPUT_LEFT_HAND)!=0,.no_swipe=(s->input_flags&PN_INPUT_NO_SWIPE)!=0,.no_edge_tap=(s->input_flags&PN_INPUT_NO_EDGE_TAP)!=0,.no_keys=(s->input_flags&PN_INPUT_NO_KEYS)!=0};
+        bool bars_hidden=reading(s) && (s->epub.impl?pn_epub_app_bars_hidden(&s->epub):s->reader.impl?pn_reader_app_bars_hidden(&s->reader):false);
+        input.config=(pn_reader_input_config_t){.left_hand=(s->input_flags&PN_INPUT_LEFT_HAND)!=0,.no_swipe=(s->input_flags&PN_INPUT_NO_SWIPE)!=0,.no_edge_tap=(s->input_flags&PN_INPUT_NO_EDGE_TAP)!=0,.no_keys=(s->input_flags&PN_INPUT_NO_KEYS)!=0,.vertical_turn=s->vertical_turn,.full_screen=bars_hidden};
         if(s->actions_mode){
             // 书籍操作面板：鼠标松开命中，Esc取消。/ Book actions sheet: mouse release hits, Esc cancels.
             int hit=-1;
@@ -1426,8 +1429,14 @@ static int library_worker(void *ctx){
                 s->actions.notice=status==PN_OK?(now?"已加入收藏":"已取消收藏"):status==PN_LIMIT?"收藏最多 50 本":"保存失败，请重试";(void)draw(s);
             }
             else if(hit==PN_BA_CONFIRM){
-                pn_media_lease_t lease;status=pn_hot_session_drop_for_switch(&s->hot);if(status==PN_OK)status=pn_media_acquire(&s->media,PN_MEDIA_WRITE,&lease);
-                if(status==PN_OK){if(remove(s->actions.item.path)!=0)status=PN_IO;else{pn_catalog_index_invalidate(&s->catalog_index);s->recent_loaded=false;}(void)pn_media_release(&s->media,&lease);}
+                // 删除前归还TF/媒体只读消费者（封面任务、热会话与系统字体），避免WRITE租约返回BUSY。
+                // Release media read consumers (cover work, warm session and system font) before deleting so WRITE does not fail with BUSY.
+                pn_cover_work_abort(&s->cover_work);
+                pn_media_lease_t lease={0};status=pn_hot_session_drop_for_switch(&s->hot);
+                if(status==PN_OK){pn_font_close(&s->font);(void)pn_font_system_close();status=pn_media_acquire(&s->media,PN_MEDIA_WRITE,&lease);}
+                if(status==PN_OK){if(remove(s->actions.item.path)!=0)status=PN_IO;else{pn_catalog_index_invalidate(&s->catalog_index);s->recent_loaded=false;if(s->covers)s->covers->has_last=false;}(void)pn_media_release(&s->media,&lease);}
+                system_font_ready(s);
+                if(!s->font.impl){pn_text_source_t source=pn_font_builtin_source();(void)pn_font_open(&s->font,s->pool,&source,24);}
                 if(status==PN_OK){s->actions_mode=false;status=page(s,false,true);}else{s->actions.notice="删除失败，文件仍保留";(void)draw(s);}
             }
             else if(hit==PN_BA_OPEN){pn_catalog_item_t *book=pn_alloc_tagged(s->pool,PN_MEM_UI,sizeof *book);s->actions_mode=false;if(book){*book=s->actions.item;status=open_item(s,book,now);pn_free(book);}}
@@ -1476,7 +1485,7 @@ static int library_worker(void *ctx){
             if(event.type==SDL_QUIT){pn_settings_ui_close(&s->settings);running=false;continue;}
             if(event.type==SDL_KEYDOWN && !event.key.repeat && event.key.keysym.sym==SDLK_ESCAPE)command=PN_SETUI_BACK;
             else if(event.type==SDL_MOUSEBUTTONUP && event.button.button==SDL_BUTTON_LEFT)command=pn_settings_ui_hit(&s->settings,event.button.x,event.button.y);
-            if(command>=0){status=pn_settings_ui_event(&s->settings,command,present,s);if(command==PN_SETUI_FULL_REFRESH && status==PN_OK){pn_reader_app_refresh_reset(&s->reader);pn_epub_app_refresh_reset(&s->epub);}s->input_flags=s->settings.flags;s->index_wait=s->settings.index_wait;s->shelf_prefs=s->settings.shelf;printf("settings command=%d status=%d flags=%u active=%d\n",command,(int)status,(unsigned)s->settings.flags,(int)s->settings.active);
+            if(command>=0){status=pn_settings_ui_event(&s->settings,command,present,s);if(command==PN_SETUI_FULL_REFRESH && status==PN_OK){pn_reader_app_refresh_reset(&s->reader);pn_epub_app_refresh_reset(&s->epub);}s->input_flags=s->settings.flags;s->vertical_turn=s->settings.vertical_turn;s->index_wait=s->settings.index_wait;s->shelf_prefs=s->settings.shelf;printf("settings command=%d status=%d flags=%u active=%d vertical=%d\n",command,(int)status,(unsigned)s->settings.flags,(int)s->settings.active,(int)s->settings.vertical_turn);
                 // PC没有无线：连接测试回报不能测试，用户可选择仍然保存。/ The PC has no radio: report the test as unsupported so the user may save anyway.
                 if(s->settings.request==PN_SETUI_WIFI_TEST || s->settings.request==PN_SETUI_WIFI_TEST_CANCEL){int test=s->settings.request;s->settings.request=0;status=pn_settings_ui_wifi_result(&s->settings,test==PN_SETUI_WIFI_TEST?PN_UNSUPPORTED:PN_CANCELLED,present,s);printf("settings wifi_test status=%d\n",(int)status);}
                 int request=s->settings.request;
@@ -1552,8 +1561,8 @@ static int library_worker(void *ctx){
                 if(key==SDLK_s){status=s->epub.impl?pn_style_ui_open_epub(&s->styles,&s->epub,present,s):pn_style_ui_open(&s->styles,&s->reader,present,s);printf("style_ui open status=%d pixels=%u\n",(int)status,s->styles.draft.pixels);continue;}
                 if(key==SDLK_k){status=toolbar_show(s);continue;}
                 if(key==SDLK_u){status=s->epub.impl?pn_epub_app_bookmark_return(&s->epub,now,present,s):pn_reader_app_bookmark_return(&s->reader,now,present,s);printf("bookmark_return status=%d\n",(int)status);continue;}
-                if(key==SDLK_RIGHT || key==SDLK_PAGEDOWN || key==SDLK_SPACE){action=PN_APP_NEXT;turn=true;}
-                else if(key==SDLK_LEFT || key==SDLK_PAGEUP){action=PN_APP_PREVIOUS;turn=true;}
+                if(key==SDLK_RIGHT || key==SDLK_DOWN || key==SDLK_PAGEDOWN || key==SDLK_SPACE){action=PN_APP_NEXT;turn=true;}
+                else if(key==SDLK_LEFT || key==SDLK_UP || key==SDLK_PAGEUP){action=PN_APP_PREVIOUS;turn=true;}
                 else if(key==SDLK_PLUS || key==SDLK_EQUALS){action=PN_APP_LARGER;turn=true;}
                 else if(key==SDLK_MINUS){action=PN_APP_SMALLER;turn=true;}
             }else{
@@ -1590,7 +1599,7 @@ static int library_worker(void *ctx){
             if(!s->pointer_down && !navigation_selected)continue;
             int x=motion?event.motion.x:event.button.x,y=motion?event.motion.y:event.button.y;
 
-            int target=s->styles.active?pn_style_ui_hit(&s->styles,x,y):s->bookmarks.mode!=PN_BUI_CLOSED?pn_bookmark_ui_hit(&s->bookmarks,x,y):reading(s)?(y>=1144 && x<420 && (s->epub.impl?pn_epub_app_bookmark_can_return(&s->epub):pn_reader_app_bookmark_can_return(&s->reader))?11:y>=1144 && x>=420?14:-1):shelf_hit(s,x,y);
+            int target=s->styles.active?pn_style_ui_hit(&s->styles,x,y):s->bookmarks.mode!=PN_BUI_CLOSED?pn_bookmark_ui_hit(&s->bookmarks,x,y):reading(s)?(!bars_hidden && y>=1144 && x<420 && (s->epub.impl?pn_epub_app_bookmark_can_return(&s->epub):pn_reader_app_bookmark_can_return(&s->reader))?11:!bars_hidden && y>=1144 && x>=420?14:-1):shelf_hit(s,x,y);
             (void)pn_tap_feed(&tap,1,target,true,&hit);
             if(reading(s) && s->bookmarks.mode==PN_BUI_CLOSED && !s->styles.active)(void)pn_reader_input_feed(&input,1,x,y,true,&action);
             if(event.type==SDL_MOUSEBUTTONUP){

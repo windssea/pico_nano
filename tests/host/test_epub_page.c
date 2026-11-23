@@ -58,5 +58,15 @@ int main(void){
     assert(run(&pool,later_bad,NULL,&page,20)==PN_CORRUPT && !page.valid && !page.count);
     pn_pool_t baseline;assert(!pn_pool_init(&baseline,1024*1024,NULL,NULL,NULL));assert(run(&baseline,xml,NULL,&page,40)==PN_OK);size_t attempts=baseline.attempts;
     for(size_t i=1;i<=attempts;i++){pn_pool_t p;assert(!pn_pool_init(&p,1024*1024,NULL,NULL,NULL));p.fail_at=i;(void)run(&p,xml,NULL,&page,40);assert(!p.used && !p.live && !page.valid && !page.count);}
-    assert(!pool.used && !pool.live);puts("epub_page: page continuity, exact semantic resume and image capability errors passed");return 0;
+    // 两端对齐：自动折行中文行贴齐右边距，段末/居中/标题/预格式化行不拉伸。
+    // Full justification: wrapped CJK rows align flush right; last/centered/heading/preformatted rows stay unstretched.
+    {const char *jxml="<html xmlns='http://www.w3.org/1999/xhtml'><body><p>\xe4\xb8\xad\xe6\x96\x87\xe6\x8e\x92\xe7\x89\x88\xe6\xb5\x8b\xe8\xaf\x95</p></body></html>";
+     input_data=(input_t){jxml,0};measures.glyph=glyph;layout=(pn_layout_t){54,60,20,12,0,0,0,false};
+     assert(pn_epub_page_input(&pool,&input,"OPS/a.xhtml",salt,NULL,&layout,&measures,&page)==PN_OK && page.count==6);
+     assert(nodes[0].x_64==0 && nodes[4].x_64+10*64==54*64 && nodes[5].x_64==0);
+     const char *cxml="<html xmlns='http://www.w3.org/1999/xhtml'><body><p style='text-align:center'>\xe4\xb8\xad\xe6\x96\x87\xe6\x8e\x92\xe7\x89\x88\xe6\xb5\x8b\xe8\xaf\x95</p></body></html>";
+     input_data=(input_t){cxml,0};
+     assert(pn_epub_page_input(&pool,&input,"OPS/a.xhtml",salt,NULL,&layout,&measures,&page)==PN_OK && page.count==6);
+     assert(nodes[0].x_64==2*64 && nodes[4].x_64==42*64);}
+    assert(!pool.used && !pool.live);puts("epub_page: page continuity, justification, exact semantic resume and image capability errors passed");return 0;
 }

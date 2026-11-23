@@ -48,7 +48,10 @@ static void field_text(const pn_style_t *s,unsigned i,char *out,size_t cap){
     if(i==1 || i==2)snprintf(out,cap,"%u.%02u",v/100,v%100);
     else if(i==3)snprintf(out,cap,"%u 字",v);
     else if(i==4)snprintf(out,cap,"%u%%",v);
-    else if(i==5)snprintf(out,cap,v<=20?"窄":v<=32?"中":"宽");
+    else if(i==5){
+        if(s->margin_top || s->margin_bottom || s->margin_right_delta || s->margin<16 || s->margin>80)snprintf(out,cap,"自定义");
+        else snprintf(out,cap,v<=20?"窄":v<=32?"中":"宽");
+    }
     else if(i==6)snprintf(out,cap,"%s",v==1?"虚线":v==2?"点线":"关闭");
     else if(i==7)snprintf(out,cap,"%+d px",s->reading_line_offset);
     else if(i==8){static const char *const shades[4]={"浅","中","深","黑"};snprintf(out,cap,"%s",shades[v<4?v:0]);}
@@ -93,6 +96,7 @@ static pn_status_t stepper(pn_font_t *font,pn_frame_t *frame,const pn_style_t *d
     pn_w_round_stroke(frame,x,y,CELL_W,CELL_H,10,selected?2:1,selected?PN_UI_INK:8);
     pn_status_t s=pn_font_size(font,22);
     if(s==PN_OK)s=pn_w_text_ex(font,frame,names[field],x+12,y+26,CELL_W-24,PN_ALIGN_LEFT,PN_UI_MUTED,false);
+    if(s==PN_OK && field==5)s=pn_w_text_ex(font,frame,"详调 >",x+12,y+26,CELL_W-24,PN_ALIGN_RIGHT,PN_UI_MUTED,false);
     // 档位选择（边距、阅读线、深浅、字重）用左右切换符号，数值项（字号、行距等）保留减加号。
     // Option fields (margin, reading line, shade, weight) use left/right switch arrows; numeric fields (size, spacing...) keep minus/plus.
     bool choice=field==5 || field==6 || field==8 || field==9 || field==10;
@@ -142,13 +146,84 @@ static pn_status_t paint_main(pn_style_ui_t *u,pn_font_t *font,pn_frame_t *frame
     pn_w_set_fallback(NULL);pn_w_icon(frame,PN_ICON_CHEVRON,624,FONT_ROW_Y+21,28,PN_UI_INK);
     pn_frame_rect(frame,32,FONT_ROW_Y+72,620,1,PN_UI_SELECT);
     for(unsigned i=0;i<PN_SUI_FIELDS-1 && s==PN_OK;i++)s=stepper(font,frame,&u->draft,fields[i],32+(int)(i%2)*CELL_PITCH,STEP_Y0+(int)(i/2)*STEP_PITCH,u->selected==fields[i]);
-    // 图片开关只改草稿，默认显示；与应用/取消及键盘字段共用同一状态。/ The image toggle changes only the draft, defaults to shown, and shares apply/cancel and keyboard state.
-    pn_w_round_stroke(frame,32,1028,620,72,10,u->selected==12?2:1,u->selected==12?PN_UI_INK:8);
+    // 图片与去上下栏开关并排置于底行，均只改草稿；与应用/取消及键盘字段共用同一状态。
+    // Image and bar-hiding toggles share the bottom row, modifying only the draft alongside apply/cancel and keyboard state.
+    pn_w_round_stroke(frame,32,1028,CELL_W,72,10,u->selected==12?2:1,u->selected==12?PN_UI_INK:8);
     if(s==PN_OK)s=pn_font_size(font,24);
-    if(s==PN_OK)s=pn_w_text(font,frame,"书内图片",48,1057,400,PN_ALIGN_LEFT);
-    if(s==PN_OK)s=pn_w_text(font,frame,u->draft.hide_images?"不显示":"显示",48,1074,580,PN_ALIGN_RIGHT);
+    if(s==PN_OK)s=pn_w_text(font,frame,"书内图片",44,1057,170,PN_ALIGN_LEFT);
+    if(s==PN_OK)s=pn_w_text(font,frame,u->draft.hide_images?"不显示":"显示",44,1070,CELL_W-24,PN_ALIGN_RIGHT);
     if(s==PN_OK)s=pn_font_size(font,18);
-    if(s==PN_OK)s=pn_w_text_ex(font,frame,"关闭后保留占位",48,1084,400,PN_ALIGN_LEFT,PN_UI_MUTED,false);
+    if(s==PN_OK)s=pn_w_text_ex(font,frame,"关闭后保留占位",44,1084,180,PN_ALIGN_LEFT,PN_UI_MUTED,false);
+    pn_w_round_stroke(frame,352,1028,CELL_W,72,10,1,8);
+    if(s==PN_OK)s=pn_font_size(font,24);
+    if(s==PN_OK)s=pn_w_text(font,frame,"上下栏",364,1057,170,PN_ALIGN_LEFT);
+    if(s==PN_OK)s=pn_w_text(font,frame,u->draft.hide_bars?"隐藏":"显示",364,1070,CELL_W-24,PN_ALIGN_RIGHT);
+    if(s==PN_OK)s=pn_font_size(font,18);
+    if(s==PN_OK)s=pn_w_text_ex(font,frame,"状态栏与页脚",364,1084,180,PN_ALIGN_LEFT,PN_UI_MUTED,false);
+    return s;
+}
+/* 边距步进格：标签在上、减/像素值/加在下。/ Margin stepper cell: label above minus/px-value/plus. */
+static pn_status_t margin_stepper(pn_font_t *font,pn_frame_t *frame,const char *label,int px,int x,int y){
+    char value[24];snprintf(value,sizeof value,"%d px",px);
+    pn_w_round_stroke(frame,x,y,CELL_W,CELL_H,10,1,8);
+    pn_status_t s=pn_font_size(font,22);
+    if(s==PN_OK)s=pn_w_text_ex(font,frame,label,x+12,y+26,CELL_W-24,PN_ALIGN_LEFT,PN_UI_MUTED,false);
+    pn_w_icon(frame,PN_ICON_MINUS,x+22,y+46,24,PN_UI_INK);
+    pn_w_icon(frame,PN_ICON_PLUS,x+CELL_W-46,y+46,24,PN_UI_INK);
+    if(s==PN_OK)s=pn_font_size(font,26);
+    if(s==PN_OK)s=pn_w_text(font,frame,value,x+68,y+69,CELL_W-136,PN_ALIGN_CENTER);
+    return s;
+}
+static pn_status_t paint_margins(pn_style_ui_t *u,pn_font_t *font,pn_frame_t *frame){
+    pn_status_t s=pn_w_header(font,frame,"< 返回","边距与栏位",NULL);
+    if(s==PN_OK){s=pn_font_size(font,26);if(s==PN_OK)s=pn_w_text_ex(font,frame,"重置边距",480,100,172,PN_ALIGN_RIGHT,PN_UI_MUTED,false);}
+    // 顶部示意框：实时按比例展示上下栏、背景区域和正文区域。/ Top diagram: live scaled preview of bars, background box and body box.
+    const int px=48,py=142,pw=156,ph=276;
+    pn_w_round_fill(frame,px,py,pw,ph,8,PN_UI_PAPER);
+    pn_w_round_stroke(frame,px,py,pw,ph,8,2.0f,PN_UI_INK);
+    if(u->draft.background){
+        int bx=px+u->draft.bg_margin_left*pw/684,by=py+u->draft.bg_margin_top*ph/1216;
+        int bw=(684-(int)u->draft.bg_margin_left-(int)u->draft.bg_margin_right)*pw/684;
+        int bh=(1216-(int)u->draft.bg_margin_top-(int)u->draft.bg_margin_bottom)*ph/1216;
+        if(bw>2 && bh>2){pn_frame_rect(frame,bx,by,bw,bh,13);pn_w_outline(frame,bx,by,bw,bh,1,8);}
+    }
+    if(!u->draft.hide_bars){
+        pn_frame_rect(frame,px+4,py+4,pw-8,6,9);
+        pn_frame_rect(frame,px+4,py+ph-16,pw-8,12,9);
+    }
+    int tx=px+pn_style_margin_left(&u->draft)*pw/684,ty=py+pn_style_body_top(&u->draft)*ph/1216;
+    int tw=pn_style_body_width(&u->draft)*pw/684,th=pn_style_body_height(&u->draft)*ph/1216;
+    if(tw>4 && th>4){
+        pn_w_outline(frame,tx,ty,tw,th,1,PN_UI_INK);
+        for(int r=0;r<6;r++){int ly=ty+10+r*(th-20)/6;if(ly<ty+th-6)pn_frame_rect(frame,tx+6,ly,tw>12?tw-12:2,2,4);}
+    }
+    char info[64];
+    if(s==PN_OK)s=pn_font_size(font,26);
+    if(s==PN_OK){snprintf(info,sizeof info,"正文宽 %d × 高 %d px",pn_style_body_width(&u->draft),pn_style_body_height(&u->draft));s=pn_w_text_ex(font,frame,info,232,192,420,PN_ALIGN_LEFT,PN_UI_INK,true);}
+    if(s==PN_OK)s=pn_font_size(font,22);
+    if(s==PN_OK){snprintf(info,sizeof info,"上下栏：%s",u->draft.hide_bars?"已隐藏（全屏正文）":"显示状态栏与页脚");s=pn_w_text_ex(font,frame,info,232,238,420,PN_ALIGN_LEFT,PN_UI_MUTED,false);}
+    if(s==PN_OK){snprintf(info,sizeof info,"正文边距：上%d 下%d 左%d 右%d",pn_style_margin_top(&u->draft),pn_style_margin_bottom(&u->draft),pn_style_margin_left(&u->draft),pn_style_margin_right(&u->draft));s=pn_w_text_ex(font,frame,info,232,280,420,PN_ALIGN_LEFT,PN_UI_MUTED,false);}
+    if(s==PN_OK){snprintf(info,sizeof info,"阅读背景：%s",u->draft.background==PN_READING_BACKGROUND_EXTERNAL?"自定义":pn_reading_background_name(u->draft.background));s=pn_w_text_ex(font,frame,info,232,324,420,PN_ALIGN_LEFT,PN_UI_MUTED,false);}
+    if(s==PN_OK){snprintf(info,sizeof info,"背景边距：上%u 下%u 左%u 右%u",u->draft.bg_margin_top,u->draft.bg_margin_bottom,u->draft.bg_margin_left,u->draft.bg_margin_right);s=pn_w_text_ex(font,frame,info,232,366,420,PN_ALIGN_LEFT,PN_UI_MUTED,false);}
+    if(s==PN_OK)s=pn_w_group(font,frame,"正文与上下栏",452);
+    pn_w_round_stroke(frame,32,464,620,72,10,1,8);
+    if(s==PN_OK)s=pn_font_size(font,24);
+    if(s==PN_OK)s=pn_w_text(font,frame,"去上下栏（隐藏状态栏与页脚）",48,509,430,PN_ALIGN_LEFT);
+    if(s==PN_OK)s=pn_w_text_ex(font,frame,u->draft.hide_bars?"已开启":"已关闭",48,509,580,PN_ALIGN_RIGHT,PN_UI_INK,u->draft.hide_bars!=0);
+    if(s==PN_OK)s=margin_stepper(font,frame,"正文上边距",pn_style_margin_top(&u->draft),32,548);
+    if(s==PN_OK)s=margin_stepper(font,frame,"正文下边距",pn_style_margin_bottom(&u->draft),352,548);
+    if(s==PN_OK)s=margin_stepper(font,frame,"正文左边距",pn_style_margin_left(&u->draft),32,636);
+    if(s==PN_OK)s=margin_stepper(font,frame,"正文右边距",pn_style_margin_right(&u->draft),352,636);
+    if(s==PN_OK)s=pn_w_group(font,frame,"阅读背景边距",758);
+    if(s==PN_OK)s=margin_stepper(font,frame,"背景上边距",u->draft.bg_margin_top,32,770);
+    if(s==PN_OK)s=margin_stepper(font,frame,"背景下边距",u->draft.bg_margin_bottom,352,770);
+    if(s==PN_OK)s=margin_stepper(font,frame,"背景左边距",u->draft.bg_margin_left,32,858);
+    if(s==PN_OK)s=margin_stepper(font,frame,"背景右边距",u->draft.bg_margin_right,352,858);
+    if(s==PN_OK){s=pn_font_size(font,22);if(s==PN_OK)s=pn_w_text_ex(font,frame,"调整步进 4px；可先点整页预览查看效果",32,980,620,PN_ALIGN_CENTER,PN_UI_MUTED,false);}
+    if(s==PN_OK && u->notice){s=pn_font_size(font,24);if(s==PN_OK)s=pn_w_text_ex(font,frame,u->notice,32,APPLY_Y-14,620,PN_ALIGN_CENTER,PN_UI_INK,true);}
+    if(s==PN_OK)s=pn_font_size(font,30);
+    if(s==PN_OK)s=pn_w_button(font,frame,"整页预览",32,APPLY_Y,300,APPLY_H,0u);
+    if(s==PN_OK)s=pn_w_button(font,frame,"应用",352,APPLY_Y,300,APPLY_H,PN_W_SELECTED);
     return s;
 }
 static pn_status_t paint_backgrounds(pn_style_ui_t *u,pn_font_t *font,pn_frame_t *frame){
@@ -167,12 +242,14 @@ static pn_status_t paint_backgrounds(pn_style_ui_t *u,pn_font_t *font,pn_frame_t
     if(s==PN_OK)s=pn_font_size(font,24);
     if(s==PN_OK && !pn_background_gallery_count(&u->gallery))s=pn_w_text_ex(font,frame,"上传的阅读背景会显示在这里",32,556,620,PN_ALIGN_CENTER,PN_UI_MUTED,false);
     if(s==PN_OK)s=pn_w_button(font,frame,"上一页",32,1104,196,80,pn_background_gallery_can_page(&u->gallery,true)?0:PN_W_DISABLED);
+    if(s==PN_OK)s=pn_w_button(font,frame,"背景边距",244,1104,196,80,0u);
     if(s==PN_OK)s=pn_w_button(font,frame,"下一页",456,1104,196,80,pn_background_gallery_can_page(&u->gallery,false)?0:PN_W_DISABLED);
     return s;
 }
 pn_status_t pn_style_ui_render(void *ctx,pn_font_t *font,pn_font_t *metadata,pn_frame_t *frame){
     (void)metadata;pn_style_ui_t *u=ctx;if(!live(u) || !u->active || !font || !font->impl || !frame || !frame->pixels)return PN_INVALID;pn_frame_clear(frame,PN_UI_PAPER);
     int original=font->pixels;
+    if(u->margins){pn_status_t s=paint_margins(u,font,frame);pn_status_t restored=pn_font_size(font,original);return s==PN_OK?restored:s;}
     if(u->backgrounds){pn_status_t s=paint_backgrounds(u,font,frame);pn_status_t restored=pn_font_size(font,original);return s==PN_OK?restored:s;}
     pn_status_t s=pn_w_header(font,frame,"< 返回","排版设置",NULL);
     if(s==PN_OK && !u->more){s=pn_font_size(font,26);if(s==PN_OK)s=pn_w_text_ex(font,frame,"恢复默认",480,100,172,PN_ALIGN_RIGHT,PN_UI_MUTED,false);}
@@ -203,11 +280,56 @@ pn_status_t pn_style_ui_event(pn_style_ui_t *u,int command,uint64_t now,pn_reade
     if(command==PN_SUI_FORM)u->more=false;
     if(command==PN_SUI_RETRY || command==PN_SUI_FORM)return pn_style_ui_present(u,present,ctx);
     pn_status_t status=PN_OK;u->notice=NULL;
-    if(!u->backgrounds && (command==PN_SUI_PREVIEW || command==PN_SUI_APPLY || (command==PN_SUI_CANCEL && u->did_preview))){
+    if(!u->backgrounds && !u->margins && (command==PN_SUI_PREVIEW || command==PN_SUI_APPLY || (command==PN_SUI_CANCEL && u->did_preview))){
         u->presented=false;status=overlay(u,busy_paint,present,ctx);
         if(status!=PN_OK){(void)pn_style_ui_present(u,present,ctx);return status;}
     }
+    if(u->margins){
+        if(command==PN_SUI_MARGINS_BACK || command==PN_SUI_CANCEL){
+            u->margins=false;
+            if(!u->margins_from_bg){u->backgrounds=false;pn_background_gallery_close(&u->gallery);}
+            u->margins_from_bg=false;
+            return pn_style_ui_present(u,present,ctx);
+        }
+        if(command==PN_SUI_MARGINS_RESET){
+            u->draft.hide_bars=0;u->draft.margin_top=0;u->draft.margin_bottom=0;pn_style_set_margins_lr(&u->draft,32);
+            u->draft.bg_margin_top=0;u->draft.bg_margin_bottom=0;u->draft.bg_margin_left=0;u->draft.bg_margin_right=0;
+            return pn_style_ui_present(u,present,ctx);
+        }
+        if(command==PN_SUI_TOGGLE_BARS){
+            pn_style_t next=u->draft;next.hide_bars=next.hide_bars?0:1;
+            if(pn_style_validate(&next)==PN_OK)u->draft=next;else status=PN_EMPTY;
+            return pn_style_ui_present(u,present,ctx);
+        }
+        if(command>=PN_SUI_MARGIN_ADJ && command<PN_SUI_MARGIN_ADJ+16){
+            unsigned item=(unsigned)(command-PN_SUI_MARGIN_ADJ)/2;bool up=((command-PN_SUI_MARGIN_ADJ)&1)!=0;
+            int delta=up?4:-4;pn_style_t next=u->draft;
+            int val=0;
+            switch(item){
+                case 0:val=pn_style_margin_top(&next)+delta;if(val<0 || val>200)status=PN_EMPTY;else next.margin_top=(uint16_t)val;break;
+                case 1:val=pn_style_margin_bottom(&next)+delta;if(val<0 || val>200)status=PN_EMPTY;else next.margin_bottom=(uint16_t)val;break;
+                case 2:val=pn_style_margin_left(&next)+delta;if(val<0 || val>160)status=PN_EMPTY;else pn_style_set_margin_left(&next,val);break;
+                case 3:val=pn_style_margin_right(&next)+delta;if(val<0 || val>160)status=PN_EMPTY;else pn_style_set_margin_right(&next,val);break;
+                case 4:val=(int)next.bg_margin_top+delta;if(val<0 || val>200)status=PN_EMPTY;else next.bg_margin_top=(uint16_t)val;break;
+                case 5:val=(int)next.bg_margin_bottom+delta;if(val<0 || val>200)status=PN_EMPTY;else next.bg_margin_bottom=(uint16_t)val;break;
+                case 6:val=(int)next.bg_margin_left+delta;if(val<0 || val>160)status=PN_EMPTY;else next.bg_margin_left=(uint16_t)val;break;
+                default:val=(int)next.bg_margin_right+delta;if(val<0 || val>160)status=PN_EMPTY;else next.bg_margin_right=(uint16_t)val;break;
+            }
+            if(status==PN_OK && pn_style_validate(&next)==PN_OK)u->draft=next;else status=PN_EMPTY;
+            pn_status_t drawn=pn_style_ui_present(u,present,ctx);return drawn!=PN_OK?drawn:status;
+        }
+        if(command==PN_SUI_PREVIEW || command==PN_SUI_APPLY){
+            u->presented=false;status=overlay(u,busy_paint,present,ctx);
+            if(status!=PN_OK){(void)pn_style_ui_present(u,present,ctx);return status;}
+            if(command==PN_SUI_PREVIEW){status=preview(u,now,present,ctx);if(confirmed(u)){u->preview=true;u->did_preview=true;u->presented=true;return status;}}
+            else{status=apply(u,now,present,ctx);u->application_failed=status!=PN_OK && confirmed(u);if(status==PN_OK){pn_background_gallery_close(&u->gallery);u->active=false;return status;}}
+            if(status!=PN_OK && status!=PN_EMPTY)u->notice="操作失败，草稿保留";
+            pn_status_t drawn=pn_style_ui_present(u,present,ctx);return drawn!=PN_OK?drawn:status;
+        }
+        return PN_EMPTY;
+    }
     if(u->backgrounds){
+        if(command==PN_SUI_MARGINS){u->margins=true;u->margins_from_bg=true;return pn_style_ui_present(u,present,ctx);}
         if(command==PN_SUI_BACKGROUND_BACK || command==PN_SUI_CANCEL)u->backgrounds=false;
         else if(command>=PN_SUI_BACKGROUND_ITEM && command<=PN_SUI_BACKGROUND_ITEM+PN_READING_BACKGROUND_LEGACY_MAX && pn_reading_background_resolve((unsigned)(command-PN_SUI_BACKGROUND_ITEM))==(unsigned)(command-PN_SUI_BACKGROUND_ITEM)){field_set(&u->draft,11,(unsigned)(command-PN_SUI_BACKGROUND_ITEM));u->backgrounds=false;u->selected=11;}
         else if(command==PN_SUI_BACKGROUND_PREVIOUS || command==PN_SUI_BACKGROUND_NEXT){bool previous=command==PN_SUI_BACKGROUND_PREVIOUS;if(!pn_background_gallery_can_page(&u->gallery,previous))return PN_EMPTY;status=pn_background_gallery_page(&u->gallery,previous);}
@@ -218,6 +340,12 @@ pn_status_t pn_style_ui_event(pn_style_ui_t *u,int command,uint64_t now,pn_reade
         }else return PN_EMPTY;
         if(!u->backgrounds)pn_background_gallery_close(&u->gallery);
         return pn_style_ui_present(u,present,ctx);
+    }
+    if(command==PN_SUI_MARGINS){u->margins=true;u->margins_from_bg=false;return pn_style_ui_present(u,present,ctx);}
+    if(command==PN_SUI_TOGGLE_BARS){
+        pn_style_t next=u->draft;next.hide_bars=next.hide_bars?0:1;
+        if(pn_style_validate(&next)==PN_OK)u->draft=next;else status=PN_EMPTY;
+        pn_status_t drawn=pn_style_ui_present(u,present,ctx);return drawn!=PN_OK?drawn:status;
     }
     if(command==PN_SUI_BACKGROUND){
         pn_pool_t *pool=NULL;pn_media_t *media=NULL;status=u->epub?pn_epub_app_paper_context(u->epub,&pool,&media):pn_reader_app_paper_context(u->reader,&pool,&media);
@@ -232,7 +360,7 @@ pn_status_t pn_style_ui_event(pn_style_ui_t *u,int command,uint64_t now,pn_reade
         // 页边距只有窄/中/宽三档。/ Margins have just three levels: narrow, medium and wide.
         // 左右切换的档位项（边距、阅读线、深浅、字重、清晰度）首尾循环，不在两端卡住；数值项仍在上下限停住。
         // Option fields switched with left/right (margin, reading line, shade, weight, sharpness) wrap around instead of sticking at either end; numeric fields still stop at their limits.
-        if(field==5){unsigned level=v<=20?0u:v<=32?1u:2u;static const unsigned margins[3]={20,32,48};level=up?(level+1u)%3u:(level+2u)%3u;field_set(&u->draft,5,margins[level]);}
+        if(field==5){unsigned level=v<=20?0u:v<=32?1u:2u;static const unsigned margins[3]={20,32,48};level=up?(level+1u)%3u:(level+2u)%3u;pn_style_set_margins_lr(&u->draft,(int)margins[level]);}
         else if(field==11){unsigned slot=0;while(slot<PN_READING_BACKGROUND_COUNT && pn_reading_background_id(slot)!=pn_reading_background_resolve(v))slot++;slot=up?(slot+1u)%(PN_READING_BACKGROUND_COUNT+1u):(slot+PN_READING_BACKGROUND_COUNT)%(PN_READING_BACKGROUND_COUNT+1u);field_set(&u->draft,field,pn_reading_background_id(slot));}
         else if(field==6 || field==8 || field==9 || field==10 || field==12){unsigned span=maximum[field]-minimum[field]+1u,offset=v-minimum[field];offset=up?(offset+1u)%span:(offset+span-1u)%span;field_set(&u->draft,field,minimum[field]+offset);}
         else{
@@ -244,7 +372,7 @@ pn_status_t pn_style_ui_event(pn_style_ui_t *u,int command,uint64_t now,pn_reade
     }else if(command==PN_SUI_RESET){u->draft=pn_style_default(PN_STYLE_DEFAULT_PIXELS);
     }else if(command>=PN_SUI_PRESET && command<PN_SUI_PRESET+3){
         const preset_t *chosen=&presets[command-PN_SUI_PRESET];
-        u->draft.pixels=(uint16_t)chosen->pixels;u->draft.line_percent=(uint16_t)chosen->line;u->draft.gap_percent=(uint16_t)chosen->gap;u->draft.indent_em=(uint16_t)chosen->indent;u->draft.margin=(uint16_t)chosen->margin;u->draft.tracking_percent=0;
+        u->draft.pixels=(uint16_t)chosen->pixels;u->draft.line_percent=(uint16_t)chosen->line;u->draft.gap_percent=(uint16_t)chosen->gap;u->draft.indent_em=(uint16_t)chosen->indent;pn_style_set_margins_lr(&u->draft,(int)chosen->margin);u->draft.tracking_percent=0;
     }else if(command==PN_SUI_PREVIEW){status=preview(u,now,present,ctx);if(confirmed(u)){u->preview=true;u->did_preview=true;u->presented=true;return status;}}
     else if(command==PN_SUI_APPLY){status=apply(u,now,present,ctx);u->application_failed=status!=PN_OK && confirmed(u);if(status==PN_OK){u->active=false;return status;}}
     else if(command==PN_SUI_CANCEL){status=cancel(u,now,present,ctx);if(status==PN_OK){u->active=false;return status;}}
@@ -254,9 +382,32 @@ pn_status_t pn_style_ui_event(pn_style_ui_t *u,int command,uint64_t now,pn_reade
 }
 int pn_style_ui_hit(const pn_style_ui_t *u,int x,int y){
     if(!u || !u->active || x<0 || x>=684 || y<0 || y>=1216)return -1;
+    if(u->preview)return PN_SUI_FORM;
+    if(u->margins){
+        if(y<PN_W_HEADER_H){if(pn_w_header_hit(x,y,false)==1)return PN_SUI_MARGINS_BACK;return x>=480 && y>=44?PN_SUI_MARGINS_RESET:-1;}
+        if(y>=464 && y<536 && x>=32 && x<652)return PN_SUI_TOGGLE_BARS;
+        if(y>=APPLY_Y && y<APPLY_Y+APPLY_H){if(x>=32 && x<332)return PN_SUI_PREVIEW;if(x>=352 && x<652)return PN_SUI_APPLY;return -1;}
+        static const int tops[4]={548,636,770,858};
+        for(unsigned row=0;row<4;row++){
+            int top=tops[row];
+            if(y>=top+26 && y<top+CELL_H){
+                for(unsigned col=0;col<2;col++){
+                    int left=32+(int)col*CELL_PITCH;unsigned item=row*2+col;
+                    if(x>=left && x<left+68)return PN_SUI_MARGIN_ADJ+(int)item*2;
+                    if(x>=left+CELL_W-68 && x<left+CELL_W)return PN_SUI_MARGIN_ADJ+(int)item*2+1;
+                }
+            }
+        }
+        return -1;
+    }
     if(u->backgrounds){
         if(pn_w_header_hit(x,y,false)==1)return PN_SUI_BACKGROUND_BACK;
-        if(x>=32 && x<652 && y>=1104 && y<1184){bool previous=x<228;if((previous || x>=456) && pn_background_gallery_can_page(&u->gallery,previous))return previous?PN_SUI_BACKGROUND_PREVIOUS:PN_SUI_BACKGROUND_NEXT;return -1;}
+        if(x>=32 && x<652 && y>=1104 && y<1184){
+            if(x<228)return pn_background_gallery_can_page(&u->gallery,true)?PN_SUI_BACKGROUND_PREVIOUS:-1;
+            if(x>=244 && x<440)return PN_SUI_MARGINS;
+            if(x>=456)return pn_background_gallery_can_page(&u->gallery,false)?PN_SUI_BACKGROUND_NEXT:-1;
+            return -1;
+        }
         if(x<32 || x>=652 || y<190 || y>=190+3*286)return -1;
         int col=(x-32)/212,row=(y-190)/286;
         if((x-32)%212>=196 || (y-190)%286>=266)return -1;
@@ -264,16 +415,16 @@ int pn_style_ui_hit(const pn_style_ui_t *u,int x,int y){
         if(slot<=PN_READING_BACKGROUND_COUNT)return PN_SUI_BACKGROUND_ITEM+(int)pn_reading_background_id(slot);
         return slot-3<pn_background_gallery_count(&u->gallery)?PN_SUI_BACKGROUND_EXTERNAL+(int)slot-3:-1;
     }
-    if(u->preview)return PN_SUI_FORM;
     if(y<PN_W_HEADER_H){if(pn_w_header_hit(x,y,false)==1)return PN_SUI_CANCEL;return x>=480 && y>=44?PN_SUI_RESET:-1;}
     if(y>=APPLY_Y && y<APPLY_Y+APPLY_H)return x>=32 && x<652?PN_SUI_APPLY:-1;
     if(y>=PREVIEW_Y && y<PREVIEW_Y+PREVIEW_H && x>=32 && x<652)return PN_SUI_PREVIEW;
     if(y>=FONT_ROW_Y && y<FONT_ROW_Y+74 && x>=32 && x<652)return PN_SUI_FONTS;
-    if(y>=1028 && y<1100 && x>=32 && x<652)return PN_SUI_FIELD+24;
+    if(y>=1028 && y<1100){if(x>=32 && x<332)return PN_SUI_FIELD+24;if(x>=352 && x<652)return PN_SUI_TOGGLE_BARS;return -1;}
     for(unsigned i=0;i<PN_SUI_FIELDS-1;i++){
         int left=32+(int)(i%2)*CELL_PITCH,top=STEP_Y0+(int)(i/2)*STEP_PITCH;
         if(fields[i]==11 && x>=left && x<left+CELL_W && y>=top && y<top+CELL_H)return PN_SUI_BACKGROUND;
         if(y>=top+26 && y<top+CELL_H){if(x>=left && x<left+68)return PN_SUI_FIELD+(int)fields[i]*2;if(x>=left+CELL_W-68 && x<left+CELL_W)return PN_SUI_FIELD+(int)fields[i]*2+1;}
+        if(fields[i]==5 && x>=left && x<left+CELL_W && y>=top && y<top+CELL_H)return PN_SUI_MARGINS;
     }
     int preset=pn_w_segments_hit(3,PRESET_Y,PRESET_H,x,y);return preset>=0?PN_SUI_PRESET+preset:-1;
 }

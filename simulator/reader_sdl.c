@@ -68,8 +68,8 @@ int pn_sim_reader_window(pn_reader_app_t *app,pn_pool_t *pool){
             if(key==SDLK_m){pn_status_t status=pn_bookmark_ui_open(&bookmarks,app,present,&s);printf("bookmark_ui open status=%d mode=%d count=%zu\n",(int)status,(int)bookmarks.mode,bookmarks.count);cancel_pointer(&input,&tap,(SDL_GetMouseState(NULL,NULL)&SDL_BUTTON_LMASK)==0);continue;}
             if(key==SDLK_s){pn_status_t status=pn_style_ui_open(&styles,app,present,&s);printf("style_ui open status=%d pixels=%u\n",(int)status,styles.draft.pixels);cancel_pointer(&input,&tap,(SDL_GetMouseState(NULL,NULL)&SDL_BUTTON_LMASK)==0);continue;}
             if(key==SDLK_u){pn_status_t status=pn_reader_app_bookmark_return(app,now,present,&s);printf("bookmark_return status=%d\n",(int)status);continue;}
-            if(key==SDLK_RIGHT || key==SDLK_PAGEDOWN || key==SDLK_SPACE){action=PN_APP_NEXT;name="next";}
-            else if(key==SDLK_LEFT || key==SDLK_PAGEUP){action=PN_APP_PREVIOUS;name="previous";}
+            if(key==SDLK_RIGHT || key==SDLK_DOWN || key==SDLK_PAGEDOWN || key==SDLK_SPACE){action=PN_APP_NEXT;name="next";}
+            else if(key==SDLK_LEFT || key==SDLK_UP || key==SDLK_PAGEUP){action=PN_APP_PREVIOUS;name="previous";}
             else if(key==SDLK_PLUS || key==SDLK_EQUALS || key==SDLK_KP_PLUS){action=PN_APP_LARGER;name="larger";}
             else if(key==SDLK_MINUS || key==SDLK_KP_MINUS){action=PN_APP_SMALLER;name="smaller";}
             else if(key==SDLK_HOME){action=PN_APP_BEGINNING;name="beginning";}
@@ -77,6 +77,7 @@ int pn_sim_reader_window(pn_reader_app_t *app,pn_pool_t *pool){
             bool motion=event.type==SDL_MOUSEMOTION;
             if((motion && !(event.motion.state&SDL_BUTTON_LMASK)) || (!motion && event.button.button!=SDL_BUTTON_LEFT))continue;
             int x=motion?event.motion.x:event.button.x,y=motion?event.motion.y:event.button.y;
+            input.config.full_screen=pn_reader_app_bars_hidden(app);
             int hit=styles.active?pn_style_ui_hit(&styles,x,y):bookmarks.mode!=PN_BUI_CLOSED?pn_bookmark_ui_hit(&bookmarks,x,y):y<80 && x>=250 && x<380?10:y<80 && x>=390 && x<510 && pn_reader_app_bookmark_can_return(app)?11:y<80 && x>=520 && x<652?12:-1;
             int command=-1;(void)pn_tap_feed(&tap,1,hit,true,&command);
             if(bookmarks.mode==PN_BUI_CLOSED && !styles.active)(void)pn_reader_input_feed(&input,1,x,y,true,&action);

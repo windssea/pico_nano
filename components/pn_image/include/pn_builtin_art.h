@@ -18,3 +18,7 @@ pn_status_t pn_reading_background_rect(unsigned index,pn_frame_t *frame,int x,in
 pn_status_t pn_reading_background_draw(unsigned index,pn_frame_t *frame);
 /// 恢复原生背景的行带，带外像素不变；用于时钟更新，无分配。/ Restore a native background band, preserving pixels outside it; allocation-free clock updates.
 pn_status_t pn_reading_background_region(unsigned index,pn_frame_t *frame,int y,int height);
+/// 带四周边距的原生背景绘制（边距外留白，无分配）。/ Native reading background with four-side margins (white outside margins, allocation-free).
+pn_status_t pn_reading_background_draw_margins(unsigned index,pn_frame_t *frame,int top,int bottom,int left,int right);
+/// 带四周边距的原生背景行带恢复（带外像素不变，无分配）。/ Restore a band of a native background with four-side margins, preserving pixels outside the band.
+pn_status_t pn_reading_background_region_margins(unsigned index,pn_frame_t *frame,int y,int height,int top,int bottom,int left,int right);

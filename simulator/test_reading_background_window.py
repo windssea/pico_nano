@@ -43,4 +43,11 @@ with tempfile.TemporaryDirectory() as folder:
    before=legacy_record(identifier);restored,_=run('legacy-'+str(identifier),'');assert all(p.read_bytes()==v for p,v in before.items())
    if identifier not in (4,7):assert body(restored)==body(styled_plain),(kind,identifier)
   run('final-none','styles,tap:500:970,tap:100:220,style-apply,')
-  print(kind,'paper: IDs 4/7, preview/apply/reopen/turns; all eight legacy IDs preserve nondefault typesetting and original journal bytes')
+  # 去上下栏、四向正文边距与阅读背景四向边距：从背景页进入“边距与栏位”调大背景四向边距并隐藏上下栏，验证白边、重开保持及复位。
+  # Bar-less mode, 4-side body margins and 4-side background margins: open from background gallery, verify outer white border, persistence and reset.
+  margined,out=run('bg-margins','styles,tap:500:970,tap:312:220,tap:500:970,tap:340:1140,tap:300:500,tap:300:600,tap:300:820,tap:620:820,tap:300:910,tap:620:910,tap:500:1150,')
+  assert 'style_ui command=2 status=0 active=0' in out,out
+  assert all(b==255 for b in margined[:4*684]) and all(b==255 for b in margined[1212*684:]) and all(margined[y*684]==255 and margined[y*684+683]==255 for y in range(1216)),kind
+  assert run('bg-margins-reopen','')[0]==margined,kind
+  run('bg-margins-reset','styles,tap:490:646,tap:600:90,tap:500:1150,')
+  print(kind,'paper: IDs 4/7, preview/apply/reopen/turns, bar-less & 4-side body/bg margins; all eight legacy IDs preserve nondefault typesetting and original journal bytes')

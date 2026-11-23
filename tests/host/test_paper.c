@@ -49,6 +49,17 @@ int main(int argc,char **argv){
     pn_frame_t frame={shown,684,1216,342};assert(pn_paper_draw(&paper,style.background,&frame)==PN_OK);memcpy(saved,shown,sizeof saved);
     // 独立源图为16条原生灰带；检查每个像素及左右边缘，防止缩放/留白。/ The independent source contains 16 native gray bands: verify every pixel and both edges against scaling/margin regressions.
     for(int y=0;y<1216;y++)for(int x=0;x<684;x++)assert(pn_frame_get(&frame,x,y)==(uint8_t)((x/43)%16));
+    // 阅读背景四向留白：外部边缘保持纯白（15），中间缩放显示底图，局部刷新与整帧逐像素一致。
+    // Four-side reading background margins: outer border stays pure white (15), inner rect scales artwork, partial region matches full draw pixel-for-pixel.
+    {pn_style_t margined=style;margined.bg_margin_top=24;margined.bg_margin_bottom=32;margined.bg_margin_left=20;margined.bg_margin_right=28;
+     assert(pn_paper_draw_style(&paper,&margined,&frame)==PN_OK);
+     for(int x=0;x<684;x++){assert(pn_frame_get(&frame,x,0)==15 && pn_frame_get(&frame,x,23)==15 && pn_frame_get(&frame,x,1215)==15);}
+     for(int y=0;y<1216;y++){assert(pn_frame_get(&frame,0,y)==15 && pn_frame_get(&frame,19,y)==15 && pn_frame_get(&frame,683,y)==15);}
+     assert(pn_frame_get(&frame,20,24)==0 && pn_frame_get(&frame,400,600)==9);
+     uint8_t full_copy[PN_WALLPAPER_BYTES];memcpy(full_copy,shown,sizeof full_copy);
+     memset(shown,0,sizeof shown);assert(pn_paper_region_style(&paper,&margined,&frame,20,40)==PN_OK);
+     assert(!memcmp(shown+20*342,full_copy+20*342,40*342));}
+    assert(pn_paper_draw(&paper,style.background,&frame)==PN_OK);
     char hidden[512];snprintf(hidden,sizeof hidden,"%s.hidden",argv[1]);assert(!rename(argv[1],hidden));size_t attempts=pool.attempts;
     memset(shown,0,sizeof shown);assert(pn_paper_draw(&paper,style.background,&frame)==PN_OK && !memcmp(shown,saved,sizeof saved));assert(pn_paper_region(&paper,style.background,&frame,0,32)==PN_OK && pool.attempts==attempts);assert(!rename(hidden,argv[1]));
     size_t used=pool.used;pool.fail_at=pool.attempts+1;pn_paper_t failed={0};assert(pn_paper_open(&failed,&pool,&media,&lease,&style)==PN_NO_MEMORY && !failed.frame.pixels && pool.used==used);pool.fail_at=0;

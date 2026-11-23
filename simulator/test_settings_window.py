@@ -31,4 +31,13 @@ with tempfile.TemporaryDirectory() as folder:
     assert 'settings command=13 status=0 flags=215' in out and 'settings command=27' not in out and 'lock_preview wake status=0' in out,out
     out=run('settings,tap:100:700,tap:560:240,tap:560:940,back,back,enter,next,previous,quit,quit')
     assert 'settings open status=0 flags=215' in out and 'settings command=14 status=0 flags=231' in out and 'settings command=28' not in out,out
-print('settings window: switches and global refresh periods persist, legacy animation row inert, warm restore, not-all-off refusal and sub-page jump passed')
+    # 上下翻页模式：独立持久化，不改既有翻页标志；开启后点下半屏下一页、上半屏上一页。
+    # Vertical page-turn mode persists separately without altering legacy flags; tapping bottom turns next and tapping top turns previous.
+    out=run('settings,tap:100:600,tap:100:1100,tap:100:880,back,back,quit')
+    assert 'settings command=50 status=0' in out and 'vertical=1' in out,out
+    assert (state/'turn_dir.a').exists() or (state/'turn_dir.b').exists(),out
+    out=run('enter,tap:340:900,tap:340:200,back,quit')
+    assert out.count('library_turn pointer=1 status=0')==2 and 'library_confirmed offset=0' in out.split('library_turn pointer=1 status=0')[2] and 'library_confirmed offset=0' not in out.split('library_turn pointer=1 status=0')[1],out
+    out=run('settings,tap:100:600,tap:100:1100,back,back,quit')
+    assert 'settings command=50 status=0' in out and 'vertical=0' in out,out
+print('settings window: switches, vertical turn and global refresh periods persist, legacy animation row inert, warm restore, not-all-off refusal and sub-page jump passed')

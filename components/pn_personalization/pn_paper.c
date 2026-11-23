@@ -41,3 +41,27 @@ pn_status_t pn_paper_region(const pn_paper_t *p,unsigned id,pn_frame_t *f,int y,
     return PN_OK;
 }
 pn_status_t pn_paper_draw(const pn_paper_t *p,unsigned id,pn_frame_t *f){return id==PN_READING_BACKGROUND_EXTERNAL?pn_paper_region(p,id,f,0,1216):pn_reading_background_draw(id,f);}
+pn_status_t pn_paper_region_style(const pn_paper_t *p,const pn_style_t *s,pn_frame_t *f,int y,int height){
+    if(!s)return PN_INVALID;
+    if(!pn_style_has_bg_margins(s))return pn_paper_region(p,s->background,f,y,height);
+    if(s->background!=PN_READING_BACKGROUND_EXTERNAL)return pn_reading_background_region_margins(s->background,f,y,height,s->bg_margin_top,s->bg_margin_bottom,s->bg_margin_left,s->bg_margin_right);
+    if(!f || !f->pixels || f->width!=684 || f->height!=1216 || f->stride<342 || y<0 || height<1 || y>1216-height)return PN_INVALID;
+    pn_frame_rect(f,0,y,684,height,15);
+    if(!p || !p->frame.pixels)return PN_OK;
+    int bx=(int)s->bg_margin_left,by=(int)s->bg_margin_top,bw=684-bx-(int)s->bg_margin_right,bh=1216-by-(int)s->bg_margin_bottom;
+    if(bw<1 || bh<1)return PN_INVALID;
+    int cy0=y>by?y:by,cy1=(y+height)<(by+bh)?(y+height):(by+bh);
+    for(int dy=cy0;dy<cy1;dy++){
+        int sy=(int)((uint64_t)(dy-by)*1216u/(unsigned)bh);
+        for(int dx=0;dx<bw;dx++){
+            int sx=(int)((uint64_t)dx*684u/(unsigned)bw);
+            pn_frame_pixel(f,bx+dx,dy,pn_frame_get(&p->frame,sx,sy));
+        }
+    }
+    return PN_OK;
+}
+pn_status_t pn_paper_draw_style(const pn_paper_t *p,const pn_style_t *s,pn_frame_t *f){
+    if(!s)return PN_INVALID;
+    if(!pn_style_has_bg_margins(s))return pn_paper_draw(p,s->background,f);
+    return pn_paper_region_style(p,s,f,0,1216);
+}

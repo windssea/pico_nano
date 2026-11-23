@@ -98,13 +98,20 @@ int main(int argc,char **argv){
      assert(pn_settings_ui_event(&ui,PN_SETUI_TIME_CANCEL,present,NULL)==PN_OK && ui.request==PN_SETUI_TIME_CANCEL);ui.request=0;
      assert(pn_settings_ui_event(&ui,PN_SETUI_BACK,present,NULL)==PN_OK && pn_settings_ui_screen(&ui)==3);
      assert(pn_settings_ui_event(&ui,PN_SETUI_BACK,present,NULL)==PN_OK && pn_settings_ui_screen(&ui)==0);}
-    /* 按键与手势：四个翻页开关。/ Keys and gestures: the four page-turn switches. */
-    assert(pn_settings_ui_event(&ui,PN_SETUI_KEYS,present,NULL)==PN_OK && pn_settings_ui_screen(&ui)==1 && pn_settings_ui_hit(&ui,100,680)==PN_SETUI_TOGGLE && pn_settings_ui_hit(&ui,100,1000)==PN_SETUI_TOGGLE+3 && pn_settings_ui_hit(&ui,100,1100)==-1);
+    /* 按键与手势：四个翻页开关与上下翻页模式。/ Keys and gestures: the four page-turn switches and vertical page-turn mode. */
+    assert(pn_settings_ui_event(&ui,PN_SETUI_KEYS,present,NULL)==PN_OK && pn_settings_ui_screen(&ui)==1 && pn_settings_ui_hit(&ui,100,680)==PN_SETUI_TOGGLE && pn_settings_ui_hit(&ui,100,1000)==PN_SETUI_TOGGLE+3 && pn_settings_ui_hit(&ui,100,1100)==PN_SETUI_VERTICAL_TURN && pn_settings_ui_hit(&ui,100,1160)==-1);
+    assert(!ui.vertical_turn && pn_settings_ui_event(&ui,PN_SETUI_VERTICAL_TURN,present,NULL)==PN_OK && ui.vertical_turn);
+    {bool v=false;assert(pn_settings_load_vertical_turn(&media,root,&v)==PN_OK && v);}
     assert(pn_settings_ui_event(&ui,PN_SETUI_TOGGLE,present,NULL)==PN_OK && ui.flags==PN_INPUT_LEFT_HAND && pn_settings_load_flags(&media,root,&flags)==PN_OK && flags==PN_INPUT_LEFT_HAND);
     assert(pn_settings_ui_event(&ui,PN_SETUI_TOGGLE+1,present,NULL)==PN_OK && pn_settings_ui_event(&ui,PN_SETUI_TOGGLE+2,present,NULL)==PN_OK);
     assert(pn_settings_ui_event(&ui,PN_SETUI_TOGGLE+3,present,NULL)==PN_LIMIT && !(ui.flags&PN_INPUT_NO_KEYS));
     pn_media_lease_t writer;assert(pn_media_acquire(&media,PN_MEDIA_WRITE,&writer)==PN_OK);uint8_t before=ui.flags;
-    assert(pn_settings_ui_event(&ui,PN_SETUI_TOGGLE+2,present,NULL)==PN_BUSY && ui.flags==before);assert(pn_media_release(&media,&writer)==PN_OK);
+    assert(pn_settings_ui_event(&ui,PN_SETUI_TOGGLE+2,present,NULL)==PN_BUSY && ui.flags==before);
+    assert(pn_settings_ui_event(&ui,PN_SETUI_VERTICAL_TURN,present,NULL)==PN_BUSY && ui.vertical_turn);
+    assert(pn_media_release(&media,&writer)==PN_OK);
+    assert(pn_settings_ui_event(&ui,PN_SETUI_VERTICAL_TURN,present,NULL)==PN_OK && !ui.vertical_turn);
+    {bool v=true;assert(pn_settings_load_vertical_turn(&media,root,&v)==PN_OK && !v);}
+    assert(pn_settings_ui_event(&ui,PN_SETUI_VERTICAL_TURN,present,NULL)==PN_OK && ui.vertical_turn);
     assert(pn_settings_ui_event(&ui,PN_SETUI_BACK,present,NULL)==PN_OK && ui.active && pn_settings_ui_screen(&ui)==0);
     assert(pn_settings_ui_event(&ui,PN_SETUI_FONTS,present,NULL)==PN_OK && ui.request==PN_SETUI_FONTS && ui.active);ui.request=0;
     /* 设置页不再有局域网传书行：保存网络后仍只有“存储与关于”，传书只从底栏进入。/ No LAN transfer row: even with a saved network only "Storage & about" remains; transfer starts from the bottom bar. */
@@ -126,7 +133,7 @@ int main(int argc,char **argv){
     assert(pn_media_release(&media,&writer)==PN_OK);
     assert(pn_settings_ui_event(&ui,PN_SETUI_BACK,present,NULL)==PN_OK && ui.active);
     assert(pn_settings_ui_event(&ui,PN_SETUI_BACK,present,NULL)==PN_OK && !ui.active);pn_settings_ui_close(&ui);pn_settings_ui_close(&ui);assert(!pool.used && !pool.live);
-    assert(pn_settings_ui_open(&ui,&pool,&media,root,present,NULL)==PN_OK && ui.shelf.columns==4 && ui.shelf.style==PN_SHELF_PAPER);pn_settings_ui_close(&ui);
+    assert(pn_settings_ui_open(&ui,&pool,&media,root,present,NULL)==PN_OK && ui.shelf.columns==4 && ui.shelf.style==PN_SHELF_PAPER && ui.vertical_turn);pn_settings_ui_close(&ui);
     assert(pn_settings_load_flags(&media,root,&flags)==PN_OK && flags==(PN_INPUT_LEFT_HAND|PN_INPUT_NO_SWIPE|PN_INPUT_NO_EDGE_TAP));
     /* 无存储：显示默认、不能保存。/ No storage: defaults shown, nothing saved. */
     assert(pn_settings_ui_open(&ui,&pool,NULL,NULL,present,NULL)==PN_OK && ui.flags==0 && pn_settings_ui_event(&ui,PN_SETUI_TOGGLE,present,NULL)==PN_UNSUPPORTED && ui.flags==0);pn_settings_ui_close(&ui);

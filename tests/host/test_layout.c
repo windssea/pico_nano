@@ -54,5 +54,22 @@ int main(void){
     assert(pn_text_paginate(&reader,&layout,&metrics,true,&page)==PN_OK && page.count==sizeof compact-1 && page.end==sizeof compact-1 && glyphs[5].baseline==21);
     uint8_t blank[5000];memset(blank,10,sizeof blank);m=(memory_t){blank,sizeof blank};source.size=m.size;assert(pn_text_open(&reader,&source,PN_TEXT_UTF8)==PN_OK);size_t consumed=0;
     for(;;){pn_status_t s=pn_text_paginate(&reader,&layout,&metrics,true,&page);if(s==PN_EMPTY)break;assert(s==PN_OK && page.count && page.end>page.begin);consumed+=page.count;}assert(consumed==sizeof blank);
-    puts("layout: page source continuity, word wrap, compact blank paragraphs, capacity and oversized glyph passed");return 0;
+    // 两端对齐：自动折行的中文/混排/多词英文行贴齐右边距，段末与硬换行不拉伸，英文单词不被拆散。
+    // Full justification: wrapped CJK/mixed/multi-word Latin lines flush right, paragraph/hard-break lines stay left-aligned, Latin words stay intact.
+    {const uint8_t j_cjk[]="\xe4\xb8\xad\xe6\x96\x87\xe6\x8e\x92\xe7\x89\x88"; // 4 CJK chars = 40px, width 34px -> 3 on line 1 (30px -> +4px), 1 on line 2
+     m=(memory_t){j_cjk,sizeof j_cjk-1};source.size=m.size;assert(pn_text_open(&reader,&source,PN_TEXT_UTF8)==PN_OK);
+     layout=(pn_layout_t){.width=34,.height=30,.line_height=10,.ascent=8};
+     assert(pn_text_paginate(&reader,&layout,&metrics,true,&page)==PN_OK && page.count==4);
+     assert(glyphs[0].x_64==0 && glyphs[2].x_64+10*64==34*64 && glyphs[3].x_64==0 && glyphs[3].baseline==18);
+     const uint8_t j_mix[]="\xe4\xb8\xad" "ab" "\xe6\x96\x87\xe6\x8e\x92"; // 中(10) a(5) b(5) 文(10) = 30px; width 33px -> 中 a b 文 on line 1, 排 on line 2; "ab" stays contiguous (b.x - a.x == 5*64)
+     m=(memory_t){j_mix,sizeof j_mix-1};source.size=m.size;assert(pn_text_open(&reader,&source,PN_TEXT_UTF8)==PN_OK);
+     layout=(pn_layout_t){.width=33,.height=30,.line_height=10,.ascent=8};
+     assert(pn_text_paginate(&reader,&layout,&metrics,true,&page)==PN_OK && page.count==5);
+     assert(glyphs[2].x_64-glyphs[1].x_64==5*64 && glyphs[3].x_64+10*64==33*64 && glyphs[4].x_64==0);
+     const uint8_t j_en[]="aa bb cc dd"; // width 35 -> "aa bb " or "aa bb" wraps before cc/dd; "aa bb" (25px) justifies space to flush 35px
+     m=(memory_t){j_en,sizeof j_en-1};source.size=m.size;assert(pn_text_open(&reader,&source,PN_TEXT_UTF8)==PN_OK);
+     layout=(pn_layout_t){.width=35,.height=30,.line_height=10,.ascent=8};
+     assert(pn_text_paginate(&reader,&layout,&metrics,true,&page)==PN_OK && page.count==sizeof j_en-1);
+     assert(glyphs[1].x_64-glyphs[0].x_64==5*64 && glyphs[4].x_64+5*64==35*64);}
+    puts("layout: page source continuity, word wrap, justification, compact blank paragraphs, capacity and oversized glyph passed");return 0;
 }

@@ -31,8 +31,10 @@ typedef struct {
 static bool same(const pn_xhtml_position_t *a,const pn_xhtml_position_t *b){
     return a->kind==b->kind && a->element==b->element && a->run==b->run && a->offset==b->offset;
 }
-static bool opening(uint32_t c){return c=='(' || c=='[' || c=='{' || c==0x2018 || c==0x201c || c==0x3008 || c==0x300a || c==0x300c || c==0x300e || c==0xff08;}
-static bool closing(uint32_t c){return c==')' || c==']' || c=='}' || c==',' || c=='.' || c=='!' || c=='?' || c==':' || c==';' || c==0x2019 || c==0x201d || c==0x3001 || c==0x3002 || c==0x3009 || c==0x300b || c==0x300d || c==0x300f || c==0xff09 || c==0xff0c || c==0xff01 || c==0xff1f;}
+static bool opening(uint32_t c){return c=='(' || c=='[' || c=='{' || c==0x2018 || c==0x201c || c==0x3008 || c==0x300a || c==0x300c || c==0x300e || c==0x3010 || c==0x3014 || c==0xff08;}
+static bool closing(uint32_t c){return c==')' || c==']' || c=='}' || c==',' || c=='.' || c=='!' || c=='?' || c==':' || c==';' || c==0x2019 || c==0x201d || c==0x2026 || c==0x3001 || c==0x3002 || c==0x3009 || c==0x300b || c==0x300d || c==0x300f || c==0x3011 || c==0x3015 || c==0xff09 || c==0xff0c || c==0xff01 || c==0xff1a || c==0xff1b || c==0xff1f;}
+static bool wide_glyph(uint32_t c){return (c>=0x2e80 && c<=0x9fff) || (c>=0xf900 && c<=0xfaff) || (c>=0xfe30 && c<=0xfe6f) || (c>=0xff00 && c<=0xffef) || (c>=0x20000 && c<=0x2fa1f) || (c>=0x2010 && c<=0x203f);}
+static bool latin_word(uint32_t c){return (c>='0' && c<='9') || (c>='A' && c<='Z') || (c>='a' && c<='z') || c=='_' || c=='-';}
 static int height(layout_t *l,const pn_epub_metrics_t *m){
     int h=m->line_height?m->line_height:l->layout->line_height;
     if(h<m->ascent+m->descent)h=m->ascent+m->descent;
@@ -51,8 +53,41 @@ static void recompute(layout_t *l,size_t end,bool reposition){
     }
     if(l->row_height<l->row_ascent+descent)l->row_height=l->row_ascent+descent;
 }
-static void baselines(layout_t *l,size_t end){
+/// 自动折行的普通正文行两端对齐，排除居中/右对齐/预格式化/标题与含图行。
+/// Full-justify automatically wrapped body lines, excluding centered/right/preformatted/heading/illustrated rows.
+static void justify_row(layout_t *l,size_t end){
+    pn_epub_page_node_t *nodes=l->page->nodes;
+    if(end<=l->row+1)return;
+    pn_xhtml_align_t align=nodes[l->row].style.align;
+    if(align==PN_XHTML_ALIGN_CENTER || align==PN_XHTML_ALIGN_RIGHT || nodes[l->row].style.pre || nodes[l->row].style.heading)return;
+    for(size_t i=l->row;i<end;i++)if(nodes[i].image_index!=UINT_MAX || nodes[i].style.pre)return;
+    size_t vis_end=end;
+    while(vis_end>l->row && (nodes[vis_end-1].codepoint==' ' || nodes[vis_end-1].codepoint==9 || nodes[vis_end-1].codepoint==10))vis_end--;
+    if(vis_end<=l->row+1)return;
+    size_t first=l->row,last=vis_end-1;
+    while(first<last && (nodes[first].codepoint==' ' || nodes[first].codepoint==9 || nodes[first].codepoint==0x3000))first++;
+    if(first>=last)return;
+    int32_t line_right=nodes[last].x_64+nodes[last].metrics.advance_64;
+    int32_t extra=l->layout->width*64-line_right;
+    if(extra<=0 || extra>l->layout->width*32)return;
+    bool has_wide=false;
+    for(size_t i=first;i<=last;i++)if(wide_glyph(nodes[i].codepoint)){has_wide=true;break;}
+    size_t gaps=0;
+    for(size_t i=first+1;i<=last;i++){
+        uint32_t prev=nodes[i-1].codepoint,curr=nodes[i].codepoint;
+        if(has_wide?!(latin_word(prev) && latin_word(curr)):(prev==' ' || prev==9))gaps++;
+    }
+    if(!gaps)return;
+    size_t seen=0;
+    for(size_t i=first+1;i<=last;i++){
+        uint32_t prev=nodes[i-1].codepoint,curr=nodes[i].codepoint;
+        if(has_wide?!(latin_word(prev) && latin_word(curr)):(prev==' ' || prev==9))seen++;
+        if(seen)nodes[i].x_64+=(int32_t)(((int64_t)extra*(int64_t)seen+(int64_t)gaps/2)/(int64_t)gaps);
+    }
+}
+static void baselines(layout_t *l,size_t end,bool wrapped){
     if(end==l->row)return;
+    if(wrapped)justify_row(l,end);
     pn_epub_page_node_t *nodes=l->page->nodes;int32_t edge=0;
     for(size_t i=l->row;i<end;i++){int32_t right=nodes[i].x_64+nodes[i].metrics.advance_64;if(right>edge)edge=right;}
     int32_t shift=l->layout->width*64-edge;
@@ -70,16 +105,17 @@ static pn_status_t wrap(layout_t *l,const pn_epub_page_node_t *incoming){
     if(count==l->row)return PN_LIMIT;
     if(l->last_space!=SIZE_MAX && l->last_space+1<count)cut=l->last_space+1;
     else if(count-l->row>=2 && (opening(l->page->nodes[count-1].codepoint) || closing(incoming->codepoint)))cut=count-1;
-    recompute(l,cut,false);baselines(l,cut);l->y+=l->row_height;l->row=cut;
+    recompute(l,cut,false);baselines(l,cut,true);l->y+=l->row_height;l->row=cut;
     recompute(l,count,true);
     if(l->row_height && l->y+l->row_height>l->layout->height){pn_xhtml_position_t at=l->page->nodes[cut].position;next(l,&at,cut,l->page->nodes[cut].source_order);}
     return PN_OK;
 }
-static void line_end(layout_t *l,bool blank,int gap){
-    if(l->page->count>l->row){recompute(l,l->page->count,false);baselines(l,l->page->count);l->y+=l->row_height+gap;}
+static void line_end_ex(layout_t *l,bool blank,int gap,bool wrapped){
+    if(l->page->count>l->row){recompute(l,l->page->count,false);baselines(l,l->page->count,wrapped);l->y+=l->row_height+gap;}
     else if(blank)l->y+=l->layout->line_height;
     l->row=l->page->count;l->x=0;l->row_height=0;l->row_ascent=0;l->last_space=SIZE_MAX;
 }
+static void line_end(layout_t *l,bool blank,int gap){line_end_ex(l,blank,gap,false);}
 static pn_status_t metric_valid(layout_t *l,const pn_epub_metrics_t *m){
     if(m->advance_64<0 || m->ascent<0 || m->descent<0 || m->ascent>4096 || m->descent>4096 || m->line_height<0 || m->line_height>4096 || m->pixels<0 || m->pixels>128)return PN_INVALID;
     if(m->advance_64>l->layout->width*64 || height(l,m)>l->layout->height)return PN_LIMIT;
@@ -152,7 +188,7 @@ static pn_status_t consume(void *ctx,const pn_xhtml_event_t *event){
     if(l->stop && !l->stop_seen && same(l->stop,&event->position)){
         if(!l->active)return PN_INVALID;
         l->stop_seen=true;
-        if(l->active && !l->full){line_end(l,false,0);next(l,&event->position,l->page->count,l->order);}
+        if(l->active && !l->full){line_end_ex(l,false,0,event->kind==PN_XHTML_TEXT || event->kind==PN_XHTML_IMAGE);next(l,&event->position,l->page->count,l->order);}
         return PN_OK;
     }
     bool paragraph=l->paragraph;

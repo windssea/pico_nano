@@ -138,6 +138,18 @@ pn_status_t pn_reader_prepare_impl(pn_reader_t *r,pn_read_intent_t intent,uint64
             if(indexed)first=(entry.flags&1)!=0;
             while(work.cursor<work.source.size){previous.begin=work.cursor;previous.paragraph=first;status=pn_text_paginate(&work,&r->layout,&r->metrics,first,&r->page);if(status!=PN_OK)return status;previous.end=r->page.end;previous.next_paragraph=r->page.next_paragraph_start;first=previous.next_paragraph;
                 pn_page_index_entry_t recorded={.begin=previous.begin,.end=previous.end,.flags=(previous.paragraph?1u:0u)|(previous.next_paragraph?2u:0u)};pn_page_index_add(r->index,&recorded);}
+            // 冷回翻末行若非段落结尾，按完整文件重排最后一页，保证与正翻两端对齐逐像素一致。
+            // When cold reverse ends mid-paragraph, re-paginate that final page against the full file so right justification matches forward turns pixel-for-pixel.
+            if(r->visible.begin<r->decoder.source.size && !previous.next_paragraph){
+                work=r->decoder;work.cursor=previous.begin;
+                status=pn_text_paginate(&work,&r->layout,&r->metrics,previous.paragraph,&r->page);
+                if(status!=PN_OK)return status;
+                if(r->page.end!=r->visible.begin){
+                    work=r->decoder;work.cursor=previous.begin;work.source.size=r->visible.begin;
+                    status=pn_text_paginate(&work,&r->layout,&r->metrics,previous.paragraph,&r->page);
+                    if(status!=PN_OK)return status;
+                }
+            }
             r->pending=(pn_reader_receipt_t){r,r->token,r->next_ticket++,intent,previous};r->preparing=true;*receipt=r->pending;return PN_OK;
         }
     }

@@ -8,8 +8,37 @@
  */
 #include "pn_layout.h"
 static pn_status_t failure(pn_text_page_t *page,pn_status_t status){page->valid=false;page->count=0;return status;}
-static bool opening(uint32_t c){return c=='(' || c=='[' || c=='{' || c==0x2018 || c==0x201c || c==0x3008 || c==0x300a || c==0x300c || c==0x300e || c==0xff08;}
-static bool closing(uint32_t c){return c==')' || c==']' || c=='}' || c==',' || c=='.' || c=='!' || c=='?' || c==':' || c==';' || c==0x2019 || c==0x201d || c==0x3001 || c==0x3002 || c==0x3009 || c==0x300b || c==0x300d || c==0x300f || c==0xff09 || c==0xff0c || c==0xff01 || c==0xff1f;}
+static bool opening(uint32_t c){return c=='(' || c=='[' || c=='{' || c==0x2018 || c==0x201c || c==0x3008 || c==0x300a || c==0x300c || c==0x300e || c==0x3010 || c==0x3014 || c==0xff08;}
+static bool closing(uint32_t c){return c==')' || c==']' || c=='}' || c==',' || c=='.' || c=='!' || c=='?' || c==':' || c==';' || c==0x2019 || c==0x201d || c==0x2026 || c==0x3001 || c==0x3002 || c==0x3009 || c==0x300b || c==0x300d || c==0x300f || c==0x3011 || c==0x3015 || c==0xff09 || c==0xff0c || c==0xff01 || c==0xff1a || c==0xff1b || c==0xff1f;}
+static bool wide_glyph(uint32_t c){return (c>=0x2e80 && c<=0x9fff) || (c>=0xf900 && c<=0xfaff) || (c>=0xfe30 && c<=0xfe6f) || (c>=0xff00 && c<=0xffef) || (c>=0x20000 && c<=0x2fa1f) || (c>=0x2010 && c<=0x203f);}
+static bool latin_word(uint32_t c){return (c>='0' && c<='9') || (c>='A' && c<='Z') || (c>='a' && c<='z') || c=='_' || c=='-';}
+/// 自动折行两端对齐：保持英文单词完整，均分右侧余量使各行右沿齐平。
+/// Full-justify wrapped lines: keep Latin words intact and distribute right slack so every wrapped line ends flush.
+static void justify_line(pn_page_glyph_t *glyphs,size_t line_start,size_t cut,int width){
+    size_t vis_end=cut;
+    while(vis_end>line_start && (glyphs[vis_end-1].source.codepoint==' ' || glyphs[vis_end-1].source.codepoint==9 || glyphs[vis_end-1].source.codepoint==10))vis_end--;
+    if(vis_end<=line_start+1)return;
+    size_t first=line_start,last=vis_end-1;
+    while(first<last && (glyphs[first].source.codepoint==' ' || glyphs[first].source.codepoint==9 || glyphs[first].source.codepoint==0x3000))first++;
+    if(first>=last)return;
+    int32_t line_right=glyphs[last].x_64+glyphs[last].advance_64;
+    int32_t extra=width*64-line_right;
+    if(extra<=0 || extra>width*32)return;
+    bool has_wide=false;
+    for(size_t i=first;i<=last;i++)if(wide_glyph(glyphs[i].source.codepoint)){has_wide=true;break;}
+    size_t gaps=0;
+    for(size_t i=first+1;i<=last;i++){
+        uint32_t prev=glyphs[i-1].source.codepoint,curr=glyphs[i].source.codepoint;
+        if(has_wide?!(latin_word(prev) && latin_word(curr)):(prev==' ' || prev==9))gaps++;
+    }
+    if(!gaps)return;
+    size_t seen=0;
+    for(size_t i=first+1;i<=last;i++){
+        uint32_t prev=glyphs[i-1].source.codepoint,curr=glyphs[i].source.codepoint;
+        if(has_wide?!(latin_word(prev) && latin_word(curr)):(prev==' ' || prev==9))seen++;
+        if(seen)glyphs[i].x_64+=(int32_t)(((int64_t)extra*(int64_t)seen+(int64_t)gaps/2)/(int64_t)gaps);
+    }
+}
 pn_status_t pn_text_paginate(pn_text_reader_t *reader,const pn_layout_t *layout,
     const pn_font_metrics_t *metrics,bool paragraph,pn_text_page_t *page) {
     if(!page)return PN_INVALID;
@@ -36,6 +65,7 @@ pn_status_t pn_text_paginate(pn_text_reader_t *reader,const pn_layout_t *layout,
             if(last_space!=SIZE_MAX && last_space+1<page->count)cut=last_space+1;
             else if(page->count-line_start>=2 && (opening(page->glyphs[page->count-1].source.codepoint) || closing(character.codepoint)))cut=page->count-1;
             work.cursor=cut<page->count?page->glyphs[cut].source.begin:character.begin;
+            justify_line(page->glyphs,line_start,cut,layout->width);
             page->count=cut;y+=layout->line_height;x=0;line_start=page->count;last_space=SIZE_MAX;next_paragraph=false;
             continue;
         }

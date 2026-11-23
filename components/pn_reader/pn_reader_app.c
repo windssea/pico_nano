@@ -109,7 +109,7 @@ static pn_status_t global_write(app_t *,const pn_font_preferences_t *);
 /// prepared借用同一app内已完整校验的稳定文件，不重新打开或猜身份。/ prepared borrows the same app's fully verified stable file, without reopening or inferring identity.
 static pn_status_t configure_fallback(app_t *,const char *,const pn_text_source_t *prepared);
 static pn_status_t advance(void *ctx,uint32_t cp,int32_t *width){app_t *a=ctx;pn_status_t s=pn_font_chain_advance(chain(a),cp,width);if(s==PN_EMPTY){*width=body(a)->pixels*64;return PN_OK;}return s;}
-static pn_status_t layout(app_t *a,pn_layout_t *out){int ascent,descent;pn_status_t s=pn_font_chain_vertical(chain(a),&ascent,&descent);if(s!=PN_OK)return s;int line=(body(a)->pixels*a->style.line_percent+99)/100;if(line<ascent+descent)line=ascent+descent;*out=(pn_layout_t){684-2*a->style.margin,PN_READER_HEIGHT,line,ascent,body(a)->pixels*a->style.indent_em,body(a)->pixels*a->style.gap_percent/100,body(a)->pixels*64*a->style.tracking_percent/100,true};return PN_OK;}
+static pn_status_t layout(app_t *a,pn_layout_t *out){int ascent,descent;pn_status_t s=pn_font_chain_vertical(chain(a),&ascent,&descent);if(s!=PN_OK)return s;int line=(body(a)->pixels*a->style.line_percent+99)/100;if(line<ascent+descent)line=ascent+descent;*out=(pn_layout_t){pn_style_body_width(&a->style),pn_style_body_height(&a->style),line,ascent,body(a)->pixels*a->style.indent_em,body(a)->pixels*a->style.gap_percent/100,body(a)->pixels*64*a->style.tracking_percent/100,true};return PN_OK;}
 /// 展示进度与持久锚点分开：末页显示100%，其余按页首字节估算。/ Display progress is separate from the durable anchor: 100% on the final page, otherwise estimated from its first byte.
 static unsigned progress_basis(const app_t *a,pn_reader_anchor_t anchor){
     uint64_t size=a->reader.decoder.source.size;
@@ -119,7 +119,7 @@ static unsigned progress_basis(const app_t *a,pn_reader_anchor_t anchor){
 }
 static pn_status_t paint_text(app_t *a,pn_frame_t *frame,const pn_page_glyph_t *glyphs,size_t first,size_t count,int *guide_baseline,unsigned *missing,bool prepared){
     // 偶数边距保持4bpp半字节对齐，仅裁切正文区域。/ Even margin preserves 4bpp nibble alignment and clips the content area.
-    pn_frame_t viewport={frame->pixels+PN_READER_TOP*frame->stride+a->style.margin/2,684-2*a->style.margin,PN_READER_HEIGHT,frame->stride};
+    pn_frame_t viewport={frame->pixels+pn_style_body_top(&a->style)*frame->stride+pn_style_margin_left(&a->style)/2,pn_style_body_width(&a->style),pn_style_body_height(&a->style),frame->stride};
     int guide_below=0;
     if(a->style.reading_line){int ascent,descent;pn_status_t s=pn_font_chain_vertical(chain(a),&ascent,&descent);if(s!=PN_OK)return s;
         int gap=a->reader.layout.line_height-ascent-descent;if(gap<0)gap=0;guide_below=descent+gap/2+a->style.reading_line_offset;}
@@ -133,6 +133,7 @@ static pn_status_t paint_text(app_t *a,pn_frame_t *frame,const pn_page_glyph_t *
     return PN_OK;
 }
 static pn_status_t paint_footer(app_t *a,pn_frame_t *frame,const pn_reader_receipt_t *receipt,bool show_return,unsigned missing){
+    if(a->style.hide_bars){a->status=pn_w_status_snapshot();return PN_OK;}
     // 页脚：书名与百分比；预览态改为提示。无顶栏与底部按钮，工具由点正文中央打开的工具栏提供。
     // Footer: book title and percentage; previews show a hint instead. There is no top bar or bottom buttons; tools come from the toolbar opened by tapping the middle of the text.
     char left[PN_RECENT_PATH_MAX],right[48]="";
@@ -158,13 +159,13 @@ static pn_status_t render_impl(app_t *a,pn_frame_t *frame,const pn_reader_receip
     unsigned missing=0;pn_status_t s;
     if(a->resume_pixels_ready){
         a->resume_pixels_ready=false;missing=a->resume_missing;s=ensure_body(a,a->style.pixels);
-        if(s==PN_OK)s=pn_paper_region(&a->paper,a->style.background,frame,0,PN_READER_TOP);
-        if(s==PN_OK)s=pn_paper_region(&a->paper,a->style.background,frame,PN_READER_TOP+PN_READER_HEIGHT,1216-PN_READER_TOP-PN_READER_HEIGHT);
+        if(s==PN_OK && !a->style.hide_bars)s=pn_paper_region_style(&a->paper,&a->style,frame,0,PN_READER_TOP);
+        if(s==PN_OK && !a->style.hide_bars)s=pn_paper_region_style(&a->paper,&a->style,frame,PN_READER_TOP+PN_READER_HEIGHT,1216-PN_READER_TOP-PN_READER_HEIGHT);
     }else if(a->first_paint.ready && frame->pixels==a->frame.pixels && pn_first_paint_matches(&a->first_paint,receipt->token,receipt->ticket)){
         pn_profile_span_t span;pn_profile_begin(&span,a->pool,"txt.first.use");
         s=pn_font_chain_validate(chain(a));missing=a->first_paint.missing;a->first_paint.ready=false;pn_profile_end(&span,s);
     }else s=bitmap_copy(a,frame,receipt,&missing);
-    if(s==PN_EMPTY){s=pn_paper_draw(&a->paper,a->style.background,frame);if(s!=PN_OK)return s;int guide=INT_MIN;s=paint_text(a,frame,a->reader.page.glyphs,0,a->reader.page.count,&guide,&missing,false);}
+    if(s==PN_EMPTY){s=pn_paper_draw_style(&a->paper,&a->style,frame);if(s!=PN_OK)return s;int guide=INT_MIN;s=paint_text(a,frame,a->reader.page.glyphs,0,a->reader.page.count,&guide,&missing,false);}
     a->resume_missing=missing;a->resume_pixels=a->style.pixels;a->resume_good=s==PN_OK;
     return s==PN_OK?paint_footer(a,frame,receipt,show_return,missing):s;
 }
@@ -349,7 +350,7 @@ static pn_status_t bitmap_visit(void *ctx,const pn_text_page_t *page,pn_reader_a
     bitmap_work_t *work=ctx;app_t *a=work->app;if(!a->bitmap.enabled)return PN_EMPTY;
     if(!bitmap_key(a,token,anchor) || (!a->bitmap.working && !a->bitmap.ready)){
         pn_status_t s=pn_page_bitmap_begin(&a->bitmap,page->count);if(s!=PN_OK)return s;
-        if(a->style.background){pn_cache_pin(&a->bitmap.owner);s=pn_paper_draw(&a->paper,a->style.background,&a->bitmap.frame);pn_cache_unpin(&a->bitmap.owner);if(s!=PN_OK){pn_page_bitmap_invalidate(&a->bitmap);return s;}}
+        if(a->style.background){pn_cache_pin(&a->bitmap.owner);s=pn_paper_draw_style(&a->paper,&a->style,&a->bitmap.frame);pn_cache_unpin(&a->bitmap.owner);if(s!=PN_OK){pn_page_bitmap_invalidate(&a->bitmap);return s;}}
         a->bitmap_token=token;a->bitmap_anchor=anchor;a->bitmap_guide=INT_MIN;
     }
     if(a->bitmap.ready)return PN_EMPTY;
@@ -533,7 +534,7 @@ pn_status_t pn_reader_app_deferred_flush(pn_reader_app_t *app){
 /// 只更新已确认正文的顶部状态，不翻页、不提交位置或刷新策略计数。/ Update only the confirmed page's status, without navigation, position commits or refresh-policy counts.
 pn_status_t pn_reader_app_status_refresh(pn_reader_app_t *app,pn_reader_present_fn present,void *ctx){
     if(!app || !app->impl || !present)return PN_INVALID;
-    app_t *a=app->impl;if(a->suspended || !a->reader.has_visible || !a->ui.impl)return PN_EMPTY;
+    app_t *a=app->impl;if(a->suspended || !a->reader.has_visible || !a->ui.impl || a->style.hide_bars)return PN_EMPTY;
     if(a->reader.preparing || a->display.active>=0 || a->display.queued>=0)return PN_BUSY;
     if(a->media_lost)return PN_STALE_MEDIA;
     pn_status_t status=pn_media_validate(a->book_media,&a->book_lease);if(status!=PN_OK)return status;
@@ -541,7 +542,7 @@ pn_status_t pn_reader_app_status_refresh(pn_reader_app_t *app,pn_reader_present_
     if(current.battery==a->status.battery && current.charging==a->status.charging && !strcmp(current.clock,a->status.clock))return PN_EMPTY;
     // 可选续读包可能借用正文帧，重绘前先撤回；不写进度。/ Revoke a disposable resume writer's frame borrow before repainting; no progress writes.
     resume_abort_retry(a);
-    status=pn_paper_region(&a->paper,a->style.background,&a->frame,0,PN_READER_TOP);
+    status=pn_paper_region_style(&a->paper,&a->style,&a->frame,0,PN_READER_TOP);
     if(status==PN_OK)status=pn_reader_status_text(&a->ui,&a->frame);
     if(status==PN_OK)status=present(ctx,&a->frame,PN_REFRESH_GL16);
     if(status==PN_OK)a->status=current;
@@ -554,7 +555,7 @@ pn_status_t pn_reader_app_resume(pn_reader_app_t *app,uint64_t now,pn_reader_pre
     if(!a->suspended)return PN_BUSY;
     pn_status_t status=a->media_lost?PN_STALE_MEDIA:pn_media_validate(a->book_media,&a->book_lease);if(status!=PN_OK)return status;
     pn_w_status_snapshot_t current=pn_w_status_snapshot();
-    if(a->ui.impl && (current.battery!=a->status.battery || current.charging!=a->status.charging || strcmp(current.clock,a->status.clock)) && pn_paper_region(&a->paper,a->style.background,&a->frame,0,PN_READER_TOP)==PN_OK && pn_reader_status_text(&a->ui,&a->frame)==PN_OK)a->status=current;
+    if(!a->style.hide_bars && a->ui.impl && (current.battery!=a->status.battery || current.charging!=a->status.charging || strcmp(current.clock,a->status.clock)) && pn_paper_region_style(&a->paper,&a->style,&a->frame,0,PN_READER_TOP)==PN_OK && pn_reader_status_text(&a->ui,&a->frame)==PN_OK)a->status=current;
     status=present(ctx,&a->frame,PN_REFRESH_GC16);a->last_now=now;
     if(status==PN_OK){a->suspended=false;a->force_full=false;a->refresh.turns=0;}return status;
 }
@@ -606,7 +607,7 @@ pn_status_t pn_reader_app_paint_unshown(pn_reader_app_t *app,size_t budget,size_
     pn_draw_lease_t lease={0};pn_frame_t *frame=NULL;if(s==PN_OK)s=pn_display_begin_draw(&a->display,a->reader.token,&lease,&frame);
     pn_first_scope_t scope=pn_first_scope_enter(a->pool,reserve);
     if(s==PN_OK && !pn_first_paint_matches(&a->first_paint,receipt.token,receipt.ticket)){
-        a->first_paint=(pn_first_paint_t){.token=receipt.token,.ticket=receipt.ticket,.guide=INT_MIN};s=pn_paper_draw(&a->paper,a->style.background,frame);
+        a->first_paint=(pn_first_paint_t){.token=receipt.token,.ticket=receipt.ticket,.guide=INT_MIN};s=pn_paper_draw_style(&a->paper,&a->style,frame);
     }
     size_t count=s==PN_OK?a->reader.page.count-a->first_paint.cursor:0;if(count>budget)count=budget;if(count>8)count=8;
     if(s==PN_OK)s=paint_text(a,frame,a->reader.page.glyphs,a->first_paint.cursor,count,&a->first_paint.guide,&a->first_paint.missing,true);
@@ -742,6 +743,7 @@ bool pn_reader_app_font_unavailable(const pn_reader_app_t *app){return app && ap
 pn_status_t pn_reader_app_identity(const pn_reader_app_t *app,pn_book_id_t *book){if(!app || !app->impl || !book)return PN_INVALID;*book=((app_t *)app->impl)->book;return PN_OK;}
 pn_status_t pn_reader_app_recent_status(const pn_reader_app_t *app){return app && app->impl?((app_t *)app->impl)->recent_status:PN_INVALID;}
 pn_status_t pn_reader_app_style_get(const pn_reader_app_t *app,pn_style_t *style){if(!app || !app->impl || !style)return PN_INVALID;*style=((app_t *)app->impl)->style;return PN_OK;}
+bool pn_reader_app_bars_hidden(const pn_reader_app_t *app){return app && app->impl && ((const app_t *)app->impl)->style.hide_bars!=0;}
 static pn_status_t change_layout(app_t *a,const pn_style_t *style){
     // 先换入新样式再同步正文字体：字重/清晰度取自a->style，顺序颠倒会让字形沿用上一次的设置。
     // Swap in the new style before syncing the body font: weight/sharpness come from a->style, and the reverse order leaves glyphs on the previous settings.

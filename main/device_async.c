@@ -87,7 +87,7 @@ static void input_task(void *ctx){
                 else if(ke==PN_KEY_SHORT && key==PN_KEY_3 && key_first && !(flags&PN_INPUT_NO_KEYS)){pn_device_input_event_t e={.kind=PN_DASYNC_ACTION,.at=now,.action=PN_APP_NEXT};send(p,&e,true,false);}
             }else if(ke!=PN_KEY_NONE && (!body || !(flags&PN_INPUT_NO_KEYS) || key==PN_KEY_2)){pn_device_input_event_t e={.kind=PN_DASYNC_KEY,.at=now,.key=key,.key_event=ke};send(p,&e,body || key==PN_KEY_1 || key==PN_KEY_2,key==PN_KEY_2 || (!body && key==PN_KEY_1));}
             if(!keys.down){key_opening=false;key_first=false;}
-            reader.config=(pn_reader_input_config_t){.left_hand=(flags&PN_INPUT_LEFT_HAND)!=0,.no_swipe=(flags&PN_INPUT_NO_SWIPE)!=0,.no_edge_tap=(flags&PN_INPUT_NO_EDGE_TAP)!=0,.no_keys=true};
+            reader.config=(pn_reader_input_config_t){.left_hand=(flags&PN_INPUT_LEFT_HAND)!=0,.no_swipe=(flags&PN_INPUT_NO_SWIPE)!=0,.no_edge_tap=(flags&PN_INPUT_NO_EDGE_TAP)!=0,.no_keys=true,.vertical_turn=atomic_load(&p->vertical_turn),.full_screen=atomic_load(&p->full_screen)};
             pn_reader_action_t action;if(atomic_load(&p->body) && pn_reader_input_feed(&reader,touch.count,touch.x,touch.y,valid,&action)){pn_device_input_event_t e={.kind=PN_DASYNC_ACTION,.at=now,.action=action};send(p,&e,true,action==PN_APP_TOOLS);}
             // 两个空边沿保证抬起识别；持有每100ms保留一次，避免邮箱被10ms采样淹没。/ Two empty edges detect release; held samples are capped at 100 ms to avoid flooding the mailbox.
             bool post=!valid || (touch.count && (empty || last_x<0 || abs(touch.x-last_x)>=8 || abs(touch.y-last_y)>=8 || now-last_hold>=100)) || (!touch.count && empty<2);
@@ -104,7 +104,7 @@ static void input_task(void *ctx){
 }
 #endif
 void pn_device_async_start(pn_device_async_t *p,read_pico_handle_t *hardware,pn_reader_present_fn panel,void (*idle)(uint64_t),void (*off)(void)){
-    memset(p,0,sizeof *p);pn_async_init(&p->input);atomic_init(&p->paused,false);atomic_init(&p->pause_request,0);atomic_init(&p->pause_ack,0);atomic_init(&p->body,false);atomic_init(&p->flags,0);atomic_init(&p->first_reader,false);p->hardware=hardware;p->panel=panel;p->idle=idle;p->off=off;
+    memset(p,0,sizeof *p);pn_async_init(&p->input);atomic_init(&p->paused,false);atomic_init(&p->pause_request,0);atomic_init(&p->pause_ack,0);atomic_init(&p->body,false);atomic_init(&p->vertical_turn,false);atomic_init(&p->full_screen,false);atomic_init(&p->flags,0);atomic_init(&p->first_reader,false);p->hardware=hardware;p->panel=panel;p->idle=idle;p->off=off;
 #ifdef ESP_PLATFORM
     p->display_queue=xQueueCreate(1,sizeof(display_t));p->display_done=xSemaphoreCreateBinary();
     TaskHandle_t display_handle=NULL;
@@ -138,6 +138,7 @@ pn_status_t pn_device_async_feedback(pn_device_async_t *p,const pn_feedback_patc
 pn_status_t pn_device_async_native(pn_device_async_t *p,pn_status_t (*native)(void *),void *ctx){if(!native)return PN_INVALID;return submit(p,NULL,PN_REFRESH_GL16,NULL,native,ctx);}
 void pn_device_async_root_view(pn_device_async_t *p,uint32_t view,bool body,uint8_t flags,bool root){atomic_store(&p->flags,flags);atomic_store(&p->body,body);pn_async_set_view(&p->input,(view&0xffffu)|(p->revision<<16),root);}
 void pn_device_async_view(pn_device_async_t *p,uint32_t view,bool body,uint8_t flags){pn_device_async_root_view(p,view,body,flags,false);}
+void pn_device_async_reader_mode(pn_device_async_t *p,bool vertical_turn,bool full_screen){if(!p)return;atomic_store(&p->vertical_turn,vertical_turn);atomic_store(&p->full_screen,full_screen);}
 pn_status_t pn_device_async_first_begin(pn_device_async_t *p,uint8_t flags){
     if(!p)return PN_INVALID;
     if(atomic_exchange(&p->first_reader,true))return PN_BUSY;

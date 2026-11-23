@@ -265,3 +265,5 @@ bool pn_epub_app_resume_cache_pending(const pn_epub_app_t *);
 pn_status_t pn_epub_app_resume_checkpoint_step(pn_epub_app_t *);
 /// 当前页可选收口待办，不读文件。/ Query optional current-page checkpoint work without file I/O.
 bool pn_epub_app_resume_checkpoint_pending(const pn_epub_app_t *);
+/// 当前排版是否隐藏上下栏（状态栏与页脚）。/ Whether the active style hides top/bottom bars (status bar and footer).
+bool pn_epub_app_bars_hidden(const pn_epub_app_t *);

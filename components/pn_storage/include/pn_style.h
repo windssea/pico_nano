@@ -16,7 +16,7 @@ typedef struct {
     uint16_t line_percent; ///< 行距100..220百分比 / Line spacing 100..220 percent
     uint16_t gap_percent; ///< 段距0..100字号百分比 / Paragraph gap 0..100 percent of size
     uint16_t indent_em; ///< 首行0..2个em / First-line zero through two em
-    uint16_t margin; ///< 左右16..80偶数像素 / Even horizontal margins 16..80 px
+    uint16_t margin; ///< 左边距（旧记录同时作为右边距），0..160偶数像素 / Left margin (also right margin in legacy records), even 0..160 px
     uint16_t gl_before_clear; ///< 历史字段仅兼容读写，不控制刷新 / Legacy field retained for record compatibility, never controls refresh
     uint16_t tracking_percent; ///< 字间距0..50字号百分比 / Tracking zero through 50 percent of body size
     uint16_t reading_line; ///< 阅读线：0关闭、1虚线、2点线 / Reading guide: off, dashed or dotted
@@ -28,9 +28,31 @@ typedef struct {
     char background_name[PN_BACKGROUND_NAME_MAX]; ///< 外部背景单文件名，内置时全零 / External paper basename, all zero for built-ins
     pn_book_id_t background_identity; ///< 外部背景完整源摘要，内置时全零 / Full external-source digest, all zero for built-ins
     uint16_t hide_images; ///< 0默认显示书内图片，1仅保留占位，不解码图片 / Zero shows book images by default; one keeps placeholders without image decoding
+    uint16_t hide_bars; ///< 0默认显示上下栏，1隐藏状态栏与页脚 / Zero shows top/bottom bars by default; one hides status bar and footer
+    uint16_t margin_top; ///< 正文上边距0..200偶数像素 / Even body top margin 0..200 px
+    uint16_t margin_bottom; ///< 正文下边距0..200偶数像素 / Even body bottom margin 0..200 px
+    int16_t margin_right_delta; ///< 正文右边距相对左边距偏移（偶数，0表示与左边距相同）/ Even right-margin delta relative to left margin (zero means symmetric)
+    uint16_t bg_margin_top; ///< 阅读背景上边距0..200偶数像素 / Even reading-background top margin 0..200 px
+    uint16_t bg_margin_bottom; ///< 阅读背景下边距0..200偶数像素 / Even reading-background bottom margin 0..200 px
+    uint16_t bg_margin_left; ///< 阅读背景左边距0..160偶数像素 / Even reading-background left margin 0..160 px
+    uint16_t bg_margin_right; ///< 阅读背景右边距0..160偶数像素 / Even reading-background right margin 0..160 px
 } pn_style_t;
-/// 比较原排版字段及图片策略，背景替换不丢语义邻页。/ Compare original typesetting fields and image policy; replacing paper preserves semantic neighbors.
-static inline bool pn_style_same_typesetting(const pn_style_t *a,const pn_style_t *b){return a && b && a->hide_images==b->hide_images && !memcmp(a,b,offsetof(pn_style_t,background));}
+/// 有效四周边距与正文区域几何辅助。/ Helpers for effective four-side margins and body viewport geometry.
+static inline int pn_style_margin_left(const pn_style_t *s){return s?(int)s->margin:32;}
+static inline int pn_style_margin_right(const pn_style_t *s){return s?(int)s->margin+(int)s->margin_right_delta:32;}
+static inline int pn_style_margin_top(const pn_style_t *s){return s?(int)s->margin_top:0;}
+static inline int pn_style_margin_bottom(const pn_style_t *s){return s?(int)s->margin_bottom:0;}
+static inline void pn_style_set_margin_left(pn_style_t *s,int left){if(!s)return;int right=pn_style_margin_right(s);s->margin=(uint16_t)left;s->margin_right_delta=(int16_t)(right-left);}
+static inline void pn_style_set_margin_right(pn_style_t *s,int right){if(!s)return;s->margin_right_delta=(int16_t)(right-(int)s->margin);}
+static inline void pn_style_set_margins_lr(pn_style_t *s,int lr){if(!s)return;s->margin=(uint16_t)lr;s->margin_right_delta=0;}
+static inline int pn_style_body_top(const pn_style_t *s){return (s && s->hide_bars?0:32)+pn_style_margin_top(s);}
+static inline int pn_style_body_height(const pn_style_t *s){return (s && s->hide_bars?1216:1144)-pn_style_margin_bottom(s)-pn_style_body_top(s);}
+static inline int pn_style_body_width(const pn_style_t *s){return 684-pn_style_margin_left(s)-pn_style_margin_right(s);}
+static inline bool pn_style_has_bg_margins(const pn_style_t *s){return s && (s->bg_margin_top || s->bg_margin_bottom || s->bg_margin_left || s->bg_margin_right);}
+static inline bool pn_style_has_extended_layout(const pn_style_t *s){return s && (s->hide_bars || s->margin_top || s->margin_bottom || s->margin_right_delta || s->margin<16 || s->margin>80 || pn_style_has_bg_margins(s));}
+/// 比较排版字段、去上下栏、四周边距及图片策略；仅改背景或背景边距不丢语义邻页。
+/// Compare typesetting, bar visibility, four-side body margins and image policy; changing paper or paper margins preserves semantic neighbors.
+static inline bool pn_style_same_typesetting(const pn_style_t *a,const pn_style_t *b){return a && b && a->hide_images==b->hide_images && a->hide_bars==b->hide_bars && a->margin_top==b->margin_top && a->margin_bottom==b->margin_bottom && a->margin_right_delta==b->margin_right_delta && !memcmp(a,b,offsetof(pn_style_t,background));}
 /// 产品默认舒适模式字号。/ Product default comfortable-mode body size.
 enum { PN_STYLE_DEFAULT_PIXELS = 44 };
 /// 舒适模式间距：145%行距、40%段距、缩进2字、32px边距；调用方可指定字号。

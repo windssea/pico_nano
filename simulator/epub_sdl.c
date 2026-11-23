@@ -107,8 +107,8 @@ int pn_sim_epub_window(pn_epub_app_t *app,pn_pool_t *pool){
         int command=-1;const char *name=NULL;
         if(event.type==SDL_KEYDOWN && !event.key.repeat){
             SDL_Keycode key=event.key.keysym.sym;
-            if(key==SDLK_RIGHT || key==SDLK_PAGEDOWN || key==SDLK_SPACE){command=PN_APP_NEXT;name="next";}
-            else if(key==SDLK_LEFT || key==SDLK_PAGEUP){command=PN_APP_PREVIOUS;name="previous";}
+            if(key==SDLK_RIGHT || key==SDLK_DOWN || key==SDLK_PAGEDOWN || key==SDLK_SPACE){command=PN_APP_NEXT;name="next";}
+            else if(key==SDLK_LEFT || key==SDLK_UP || key==SDLK_PAGEUP){command=PN_APP_PREVIOUS;name="previous";}
             else if(key==SDLK_PLUS || key==SDLK_EQUALS || key==SDLK_KP_PLUS){command=PN_APP_LARGER;name="larger";}
             else if(key==SDLK_MINUS || key==SDLK_KP_MINUS){command=PN_APP_SMALLER;name="smaller";}
             else if(key==SDLK_HOME){command=PN_APP_BEGINNING;name="beginning";}

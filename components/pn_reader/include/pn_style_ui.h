@@ -29,6 +29,11 @@
 #define PN_SUI_INDENT 14 ///< 切换首行缩进（0或2字）/ Toggle the first-line indent (0 or 2 characters)
 #define PN_SUI_FIELD 16
 #define PN_SUI_FIELDS 13 ///< 0字号…11背景、12书内图片 / 0 size ... 11 paper, 12 book images
+#define PN_SUI_TOGGLE_BARS 44 ///< 切换隐藏上下栏（状态栏与页脚）/ Toggle hiding top/bottom bars (status bar and footer)
+#define PN_SUI_MARGINS 45 ///< 打开正文与背景四周边距设置页 / Open four-side body and background margins page
+#define PN_SUI_MARGINS_BACK 46 ///< 从边距设置页返回 / Return from the margins page
+#define PN_SUI_MARGINS_RESET 47 ///< 重置正文与背景四周边距 / Reset body and background margins to defaults
+#define PN_SUI_MARGIN_ADJ 112 ///< 112..127：8项四周边距减/加（0..3正文上下左右，4..7背景上下左右）/ 112..127: dec/inc for 8 margin controls (0..3 body TBLR, 4..7 paper TBLR)
 typedef struct {
     pn_epub_app_t *epub; ///< 可选EPUB会话，与reader互斥 / Optional EPUB session, exclusive with reader
     pn_reader_app_t *reader; ///< 借用会话 / Borrowed session
@@ -36,6 +41,8 @@ typedef struct {
     bool request_fonts,did_preview,application_failed; ///< 字体请求及预览/失败应用状态 / Font request, preview and failed-apply states
     bool active,preview,presented; ///< 活动、正文预览与呈现确认 / Active, body preview and presentation confirmation
     bool backgrounds; ///< 正显示背景选择页，仅修改草稿 / Background picker is showing, modifying the draft only
+    bool margins; ///< 正显示正文与背景四周边距页，仅修改草稿 / Body and background margins page is showing, modifying the draft only
+    bool margins_from_bg; ///< 从阅读背景页进入边距页，返回时回阅读背景 / Entered margins from the background picker, so Back returns there
     pn_background_gallery_t gallery; ///< 图库所有权仅在选择页 / Gallery ownership lives only in the picker
     bool more; ///< 正显示“更多排版”页 / The more-options page is showing
     unsigned selected; ///< 键盘选中字段0..12 / Keyboard-selected field zero through twelve

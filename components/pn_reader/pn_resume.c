@@ -162,9 +162,9 @@ pn_status_t pn_resume_bind(pn_resume_t *h, pn_pool_t *pool, pn_media_t *media, c
         return PN_EMPTY;
     uint8_t key[320] = {0};
     memcpy(key, layout->sha256, 32);
-    memcpy(key + 32, "PN-resume-render-1", 18);
-    // 默认0保留旧绘制键；隐藏图片与完整图片包不能互用。/ Zero preserves the original render key; hidden-image and full-image packets never mix.
-    put(key + 50, style->hide_images, 2);
+    memcpy(key + 32, "PN-resume-render-2", 18);
+    // 含图片策略、去上下栏及四周边距/背景边距的完整绘制键。/ Complete render key covering image policy, bar visibility and body/background margins.
+    put(key + 50, (uint64_t)(style->hide_images | (style->hide_bars ? 2u : 0u)), 2);
     const int values[] = {
         style->pixels,           style->line_percent, style->gap_percent,         style->indent_em,          style->margin,
         style->tracking_percent, style->reading_line, style->reading_line_offset, style->reading_line_shade, style->weight,
@@ -173,9 +173,16 @@ pn_status_t pn_resume_bind(pn_resume_t *h, pn_pool_t *pool, pn_media_t *media, c
         put(key + 52 + i * 4, (uint32_t)values[i], 4);
     memcpy(key + 100, style->background_identity.sha256, 32);
     size_t name = strlen(style->background_name);
-    if (name > sizeof key - 132)
+    if (name > 160u)
         return PN_LIMIT;
     memcpy(key + 132, style->background_name, name);
+    put(key + 292, style->margin_top, 2);
+    put(key + 294, style->margin_bottom, 2);
+    put(key + 296, (uint16_t)style->margin_right_delta, 2);
+    put(key + 298, style->bg_margin_top, 2);
+    put(key + 300, style->bg_margin_bottom, 2);
+    put(key + 302, style->bg_margin_left, 2);
+    put(key + 304, style->bg_margin_right, 2);
     resume_t *r = pn_alloc_optional(pool, PN_MEM_INDEX, sizeof *r);
     if (!r)
         return PN_EMPTY;

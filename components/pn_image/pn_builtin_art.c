@@ -81,3 +81,18 @@ pn_status_t pn_reading_background_draw(unsigned index,pn_frame_t *frame){
     if(!index){pn_frame_clear(frame,15);return PN_OK;}
     return pn_reading_background_rect(index,frame,0,0,684,1216);
 }
+pn_status_t pn_reading_background_region_margins(unsigned index,pn_frame_t *frame,int y,int height,int top,int bottom,int left,int right){
+    if(!frame || !frame->pixels || frame->width!=684 || frame->height!=1216 || frame->stride!=342 || y<0 || height<1 || y>1216-height)return PN_INVALID;
+    if(top<0 || bottom<0 || left<0 || right<0 || left+right>=684 || top+bottom>=1216)return PN_INVALID;
+    if(!top && !bottom && !left && !right)return pn_reading_background_region(index,frame,y,height);
+    pn_frame_rect(frame,0,y,684,height,15);
+    if(!pn_reading_background_resolve(index))return PN_OK;
+    int bw=684-left-right,bh=1216-top-bottom;
+    int cy0=y>top?y:top,cy1=(y+height)<(top+bh)?(y+height):(top+bh);
+    if(cy1<=cy0)return PN_OK;
+    return reading_rect(index,frame,left,top,bw,bh,cy0,cy1-cy0);
+}
+pn_status_t pn_reading_background_draw_margins(unsigned index,pn_frame_t *frame,int top,int bottom,int left,int right){
+    if(!top && !bottom && !left && !right)return pn_reading_background_draw(index,frame);
+    return pn_reading_background_region_margins(index,frame,0,1216,top,bottom,left,right);
+}

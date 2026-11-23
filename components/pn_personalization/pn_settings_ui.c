@@ -22,6 +22,7 @@ typedef struct {pn_pool_t *pool;pn_media_t *state;char dir[PN_JOURNAL_PATH_MAX];
     pn_settings_update_t update; ///< 控制层升级快照 / Controller update snapshot
     pn_font_t *return_font; ///< 单owner移交的空槽，close归还或正常释放 / Empty slot transferred by the single owner, returned on close or normally released
     bool index_known; ///< 索引偏好可读才允许修改 / Permit changes only when the index preference is readable
+    bool vertical_known; ///< 翻页方向偏好可读才允许修改 / Permit changes only when the turn-direction preference is readable
     bool snapshot_dirty; ///< 外部快照更新后先完整重画 / Repaint completely after external snapshot changes
     pn_w_status_snapshot_t status; ///< 最近成功画布的实时状态带 / Live status band of the last successful canvas
     pn_keyboard_t kb; ///< WiFi输入键盘 / WiFi entry keyboard
@@ -114,16 +115,22 @@ static pn_status_t draw_keys(pn_settings_ui_t *ui,su_t *u){
     if(s==PN_OK)s=pn_font_size(font,22);
     if(s==PN_OK)s=pn_w_text_ex(font,f,"1    2    3",dx,dy+dh+30,dw,PN_ALIGN_CENTER,PN_UI_MUTED,true);
     if(s==PN_OK)s=pn_w_text_ex(font,f,"电源键",dx+dw+12,dy+4,110,PN_ALIGN_LEFT,PN_UI_MUTED,false);
-    static const char *const legend[4][2]={{"KEY1","上一页 · 上一项 · 弹窗里取消"},{"KEY2","阅读中打开工具栏 · 确认；长按回书架"},{"KEY3","下一页 · 下一项 · 弹窗里切换焦点"},{"电源键","锁屏并保存，再按回到原处"}};
+    static const char *const legend[4][2]={{"KEY1","上一页 · 返回 · 弹窗里取消"},{"KEY2","单击返回书架 · 长按打开工具栏"},{"KEY3","下一页 · 确认 · 弹窗里确认"},{"电源键","锁屏并保存，再按回到原处"}};
     for(int i=0;i<4 && s==PN_OK;i++){
         int base=476+i*36;s=pn_font_size(font,24);
         if(s==PN_OK)s=pn_w_text_ex(font,f,legend[i][0],PN_UI_MARGIN+8,base,110,PN_ALIGN_LEFT,PN_UI_INK,true);
         if(s==PN_OK)s=pn_w_text_ex(font,f,legend[i][1],PN_UI_MARGIN+128,base,484,PN_ALIGN_LEFT,PN_UI_MUTED,false);
     }
     if(s==PN_OK)s=pn_w_group(font,f,"触控与翻页",TOGGLE_Y-14);
-    pn_w_card(f,TOGGLE_Y,4);
-    for(unsigned i=0;i<4 && s==PN_OK;i++)s=pn_w_card_row(font,f,names[i],hints[i],NULL,-1,on(ui->flags,i)?PN_ROW_ON:PN_ROW_OFF,TOGGLE_Y+(int)i*ROW_H,i==3);
-    if(s==PN_OK && *u->message)s=note(u,u->message,TOGGLE_Y+4*ROW_H+48);
+    pn_w_card(f,TOGGLE_Y,5);
+    for(unsigned i=0;i<4 && s==PN_OK;i++){
+        const char *hint=hints[i];
+        if(ui->vertical_turn && i==1)hint="上下滑动翻页";
+        else if(ui->vertical_turn && i==2)hint="点屏幕上半或下半翻页";
+        s=pn_w_card_row(font,f,names[i],hint,NULL,-1,on(ui->flags,i)?PN_ROW_ON:PN_ROW_OFF,TOGGLE_Y+(int)i*ROW_H,false);
+    }
+    if(s==PN_OK)s=pn_w_card_row(font,f,"上下翻页","开启后改为上下滑动与上下点按翻页",NULL,-1,ui->vertical_turn?PN_ROW_ON:PN_ROW_OFF,TOGGLE_Y+4*ROW_H,true);
+    if(s==PN_OK && *u->message)s=note(u,u->message,TOGGLE_Y+5*ROW_H+42);
     return s;
 }
 static pn_status_t draw_levels(pn_settings_ui_t *ui,su_t *u){
@@ -430,7 +437,8 @@ pn_status_t pn_settings_ui_open_cached(pn_settings_ui_t *ui,pn_pool_t *pool,pn_m
     if(state && pn_settings_load_shelf(state,dir,&shelf)!=PN_OK)snprintf(u->message,sizeof u->message,"书架设置不可读，显示默认值");
     reload_lan(u);
     bool index_wait=false;u->index_known=!state || pn_settings_load_index(state,dir,&index_wait)==PN_OK;
-    *ui=(pn_settings_ui_t){.impl=u,.active=true,.flags=flags,.shelf=shelf,.index_wait=index_wait};
+    bool vertical_turn=false;u->vertical_known=!state || pn_settings_load_vertical_turn(state,dir,&vertical_turn)==PN_OK;
+    *ui=(pn_settings_ui_t){.impl=u,.active=true,.flags=flags,.shelf=shelf,.index_wait=index_wait,.vertical_turn=vertical_turn};
     (void)show(ui,present,ctx);return PN_OK;
 }
 pn_status_t pn_settings_ui_open(pn_settings_ui_t *ui,pn_pool_t *pool,pn_media_t *state,const char *dir,pn_settings_present_fn present,void *ctx){return pn_settings_ui_open_cached(ui,pool,state,dir,NULL,present,ctx);}
@@ -440,6 +448,14 @@ pn_status_t pn_settings_load_index(pn_media_t *state,const char *dir,bool *wait)
     pn_journal_files_t files;pn_journal_io_t io;bool value=false;s=pn_index_prefs_files(&files,state,&lease,dir,&io);if(s==PN_OK)s=pn_index_prefs_load(&io,&value);(void)pn_media_release(state,&lease);
     if(s==PN_EMPTY)s=PN_OK;
     if(s==PN_OK)*wait=value;
+    return s;
+}
+pn_status_t pn_settings_load_vertical_turn(pn_media_t *state,const char *dir,bool *vertical){
+    if(!state || !dir || !vertical)return PN_INVALID;
+    pn_media_lease_t lease;pn_status_t s=pn_media_acquire(state,PN_MEDIA_READ,&lease);if(s!=PN_OK)return s;
+    pn_journal_files_t files;pn_journal_io_t io;bool value=false;s=pn_turn_dir_prefs_files(&files,state,&lease,dir,&io);if(s==PN_OK)s=pn_turn_dir_prefs_load(&io,&value);(void)pn_media_release(state,&lease);
+    if(s==PN_EMPTY)s=PN_OK;
+    if(s==PN_OK)*vertical=value;
     return s;
 }
 static pn_status_t save(su_t *u,uint8_t flags){
@@ -517,6 +533,13 @@ pn_status_t pn_settings_ui_event(pn_settings_ui_t *ui,int command,pn_settings_pr
         if(next!=ui->flags)status=commit(ui,u,next);
         pn_status_t shown=show_controls(ui,u,old_flags,old_shelf,command,local,present,ctx);return status==PN_OK?shown:status;
     }
+    if(command==PN_SETUI_VERTICAL_TURN && u->screen==SCREEN_KEYS){
+        pn_status_t saved_status=PN_UNSUPPORTED;pn_media_lease_t lease={0};bool next=!ui->vertical_turn;
+        if(u->state && u->vertical_known){saved_status=pn_media_acquire(u->state,PN_MEDIA_WRITE,&lease);if(saved_status==PN_OK){pn_journal_files_t files;pn_journal_io_t io;saved_status=pn_turn_dir_prefs_files(&files,u->state,&lease,u->dir,&io);if(saved_status==PN_OK)saved_status=pn_turn_dir_prefs_save(&io,next);(void)pn_media_release(u->state,&lease);}}
+        if(saved_status==PN_OK){ui->vertical_turn=next;u->message[0]=0;}
+        else{bool reread;if(u->state && pn_settings_load_vertical_turn(u->state,u->dir,&reread)==PN_OK)ui->vertical_turn=reread;snprintf(u->message,sizeof u->message,saved_status==PN_UNSUPPORTED?"内部存储不可用，设置不能保存":"保存失败，请重试");}
+        pn_status_t shown=show(ui,present,ctx);return saved_status==PN_OK?shown:saved_status;
+    }
     if(command<PN_SETUI_TOGGLE || command>PN_SETUI_TOGGLE+3)return PN_EMPTY;
     uint8_t next=(uint8_t)(ui->flags^bits[command-PN_SETUI_TOGGLE]);
     // 关闭全部翻页方式会让正文无法翻页，拒绝。/ Turning every page-turn method off would leave no way to turn pages, so refuse it.
@@ -561,7 +584,7 @@ int pn_settings_ui_hit(const pn_settings_ui_t *ui,int x,int y){
             if(row<2 && col<2 && (y-460)%230<210 && (x-32)%318<302)return PN_SETUI_STYLE+row*2+col;}
         return -1;
     }
-    if(u->screen==SCREEN_KEYS){if(y>=TOGGLE_Y && y<TOGGLE_Y+4*ROW_H)return PN_SETUI_TOGGLE+(y-TOGGLE_Y)/ROW_H;return -1;}
+    if(u->screen==SCREEN_KEYS){if(y>=TOGGLE_Y && y<TOGGLE_Y+4*ROW_H)return PN_SETUI_TOGGLE+(y-TOGGLE_Y)/ROW_H;if(y>=TOGGLE_Y+4*ROW_H && y<TOGGLE_Y+5*ROW_H)return PN_SETUI_VERTICAL_TURN;return -1;}
     if(u->screen==SCREEN_REFRESH){
         static const int order[3]={1,0,2};
         int cell=pn_w_segments_hit(3,LEVEL_Y-6,LEVEL_H+12,x,y);if(cell>=0)return PN_SETUI_LEVEL+order[cell];

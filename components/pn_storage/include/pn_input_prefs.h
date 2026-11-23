@@ -27,3 +27,10 @@ pn_status_t pn_index_prefs_files(pn_journal_files_t *,pn_media_t *,const pn_medi
 pn_status_t pn_index_prefs_load(const pn_journal_io_t *,bool *);
 /// 同步保存，未知或损坏旧记录拒绝覆盖。/ Save synchronously, refusing to overwrite unsupported or corrupt existing records.
 pn_status_t pn_index_prefs_save(const pn_journal_io_t *,bool);
+
+/// 独立翻页方向偏好A/B（false左右翻页，true上下翻页），不占用翻页标志；无记录默认左右翻页。
+/// Separate page-turn direction A/B preference (false horizontal, true vertical) without consuming turn flags; absent records default to horizontal.
+pn_status_t pn_turn_dir_prefs_files(pn_journal_files_t *files,pn_media_t *media,const pn_media_lease_t *lease,const char *root,pn_journal_io_t *io);
+pn_status_t pn_turn_dir_prefs_load(const pn_journal_io_t *io,bool *vertical);
+/// 同步保存，未知或损坏旧记录拒绝覆盖。/ Save synchronously, refusing to overwrite unsupported or corrupt existing records.
+pn_status_t pn_turn_dir_prefs_save(const pn_journal_io_t *io,bool vertical);

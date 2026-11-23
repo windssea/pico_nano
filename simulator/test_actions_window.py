@@ -33,4 +33,15 @@ with tempfile.TemporaryDirectory() as folder:
     out=run(','.join((COVER,DELETE,CONFIRM,'quit')));assert not (books/'a.txt').exists() and (books/'b.txt').exists() and 'actions command=5 status=0 active=0' in out,out
     # 原省略号位置恢复为普通开书，长按已另有真实持有旅程。/ The former ellipsis area opens the book normally; actual held contacts are tested separately.
     out=run('tap:180:300,back,quit');assert 'library_open name=b.txt' in out and 'actions open' not in out,out
-print('actions window: long press sheet, favorites toggle and page, confirmed delete and unobstructed cover passed')
+    # 加载系统字体（持有媒体只读租约）时仍可成功删除书籍，避免WRITE租约返回BUSY。
+    # Deleting a book must still succeed when the system font holds a media read lease (preventing WRITE BUSY failures).
+    import shutil
+    fonts=root/'fonts';fonts.mkdir()
+    src_font=pathlib.Path(__file__).resolve().parents[1]/'assets'/'fonts'/'HarmonyOS_Sans_SC_Regular.ttf'
+    assert src_font.is_file(),src_font
+    shutil.copy2(src_font,fonts/'HarmonyOS_Sans_SC_Regular.ttf')
+    (books/'c.txt').write_text('带系统字体删除测试。\n',encoding='utf-8')
+    r=subprocess.run([sys.argv[1],'--library',str(books),'--state-dir',str(state),'--font-dir',str(fonts)],env=dict(os.environ,SDL_VIDEODRIVER='dummy',PN_SIM_LIBRARY_SCRIPT='library,'+','.join((COVER,DELETE,CONFIRM,'quit'))),capture_output=True,text=True,timeout=60)
+    assert r.returncode==0 and 'used=0 live=0' in r.stdout,(r.stdout,r.stderr)
+    assert not (books/'b.txt').exists() and (books/'c.txt').exists() and 'actions command=5 status=0 active=0' in r.stdout,r.stdout
+print('actions window: long press sheet, favorites toggle and page, confirmed delete (with and without system font) and unobstructed cover passed')

@@ -8,10 +8,11 @@
  */
 #include "pn_reader_input.h"
 #include <stdlib.h>
-/* 只有正文区（y=32..1143）接受翻页和点按；页脚与其他位置忽略。工具栏由调用方的专用命中处理。
- * Only the text area (y=32..1143) accepts turns and taps; the footer and elsewhere are ignored. The toolbar uses its own hit test in the caller. */
-static int region(int x,int y){
+/* 默认仅正文区（y=32..1143）接受翻页和点按；去上下栏全屏时整屏（y=0..1215）响应。工具栏由调用方的专用命中处理。
+ * By default only the text area (y=32..1143) accepts turns and taps; in bar-less full-screen mode the whole screen (y=0..1215) responds. The toolbar uses its own hit test in the caller. */
+static int region(int x,int y,bool full_screen){
     if(x<0 || x>=684 || y<0 || y>=1216)return -1;
+    if(full_screen)return 4;
     return y>=32 && y<1144?4:-1;
 }
 void pn_reader_input_cancel(pn_reader_input_t *i){if(i){i->cancelled=true;i->blocked=true;i->empty_samples=0;}}
@@ -24,20 +25,31 @@ bool pn_reader_input_feed(pn_reader_input_t *i,unsigned count,int x,int y,bool v
         bool submit=i->down && !i->cancelled && !i->blocked;pn_reader_action_t action=PN_APP_OPEN;
         if(submit){
             if(i->region==4){int dx=i->last_x-i->start_x,dy=i->last_y-i->start_y;
-                // 横滑：|dx|≥64且≥1.5|dy|；点按：移动≤24，左半0–341、右半342–683翻页。工具栏只由中间实体键打开。
-                // Swipe: |dx|≥64 and ≥1.5|dy|; tap: movement ≤24, left half 0–341 / right half 342–683 turn the page. Only the middle hardware key opens the toolbar.
-                if(abs(dx)>=64 && 2*abs(dx)>=3*abs(dy)){if(i->config.no_swipe)submit=false;else action=dx<0?PN_APP_NEXT:PN_APP_PREVIOUS;}
-                else if(abs(dx)<=24 && abs(dy)<=24){
-                    bool left=i->start_x<342;
-                    if(i->config.no_edge_tap)submit=false;else action=(left!=i->config.left_hand)?PN_APP_PREVIOUS:PN_APP_NEXT;}
-                else submit=false;
+                if(i->config.vertical_turn){
+                    // 上下翻页：纵滑|dy|≥64且≥1.5|dx|（上滑下一页、下滑上一页）；点按移动≤24，上半屏上一页、下半屏下一页。
+                    // Vertical turns: vertical swipe |dy|>=64 and >=1.5|dx| (up=next, down=previous); tap movement <=24, top half previous / bottom half next.
+                    if(abs(dy)>=64 && 2*abs(dy)>=3*abs(dx)){if(i->config.no_swipe)submit=false;else action=dy<0?PN_APP_NEXT:PN_APP_PREVIOUS;}
+                    else if(abs(dx)<=24 && abs(dy)<=24){
+                        int mid_y=i->config.full_screen?608:588;
+                        bool top=i->start_y<mid_y;
+                        if(i->config.no_edge_tap)submit=false;else action=top?PN_APP_PREVIOUS:PN_APP_NEXT;}
+                    else submit=false;
+                }else{
+                    // 横滑：|dx|≥64且≥1.5|dy|；点按：移动≤24，左半0–341、右半342–683翻页。工具栏只由中间实体键打开。
+                    // Swipe: |dx|≥64 and ≥1.5|dy|; tap: movement ≤24, left half 0–341 / right half 342–683 turn the page. Only the middle hardware key opens the toolbar.
+                    if(abs(dx)>=64 && 2*abs(dx)>=3*abs(dy)){if(i->config.no_swipe)submit=false;else action=dx<0?PN_APP_NEXT:PN_APP_PREVIOUS;}
+                    else if(abs(dx)<=24 && abs(dy)<=24){
+                        bool left=i->start_x<342;
+                        if(i->config.no_edge_tap)submit=false;else action=(left!=i->config.left_hand)?PN_APP_PREVIOUS:PN_APP_NEXT;}
+                    else submit=false;
+                }
             }else submit=false;
         }
         i->down=false;i->cancelled=false;i->blocked=false;
         if(submit){*out=action;return true;}return false;
     }
     i->empty_samples=0;if(i->blocked)return false;
-    int hit=region(x,y);
+    int hit=region(x,y,i->config.full_screen);
     if(!i->down){i->down=true;i->cancelled=hit<0;i->region=hit;i->start_x=x;i->start_y=y;}
     else if(hit!=4)i->cancelled=true;
     i->last_x=x;i->last_y=y;return false;

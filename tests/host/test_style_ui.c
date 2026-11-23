@@ -58,6 +58,27 @@ int main(void){char root[]="/tmp/pn-style-ui-XXXXXX";assert(mkdtemp(root));char 
     assert(pn_style_ui_event(&ui,PN_SUI_FIELD+24,2,present,&screen)==PN_OK && ui.draft.hide_images);
     {pn_style_t current;assert(pn_reader_app_style_get(&app,&current)==PN_OK && !current.hide_images);}
     assert(pn_style_ui_event(&ui,PN_SUI_FIELD+25,2,present,&screen)==PN_OK && !ui.draft.hide_images);
+    /* 去上下栏快捷开关、四向正文边距与阅读背景边距子页（可从边距格与阅读背景页双入口进入）。
+     * Bar-less toggle, 4-side body margins and reading-background margins sub-page (reachable from both the Margin cell and Background gallery). */
+    assert(pn_style_ui_hit(&ui,500,1050)==PN_SUI_TOGGLE_BARS && !ui.draft.hide_bars);
+    assert(pn_style_ui_event(&ui,PN_SUI_TOGGLE_BARS,2,present,&screen)==PN_OK && ui.draft.hide_bars==1);
+    assert(pn_style_ui_hit(&ui,490,646)==PN_SUI_MARGINS);
+    assert(pn_style_ui_event(&ui,PN_SUI_MARGINS,2,present,&screen)==PN_OK && ui.margins && !ui.margins_from_bg);
+    assert(pn_style_ui_hit(&ui,100,60)==PN_SUI_MARGINS_BACK && pn_style_ui_hit(&ui,600,90)==PN_SUI_MARGINS_RESET && pn_style_ui_hit(&ui,300,500)==PN_SUI_TOGGLE_BARS);
+    assert(pn_style_ui_event(&ui,PN_SUI_MARGIN_ADJ+1,2,present,&screen)==PN_OK && ui.draft.margin_top==4);
+    assert(pn_style_ui_event(&ui,PN_SUI_MARGIN_ADJ+3,2,present,&screen)==PN_OK && ui.draft.margin_bottom==4);
+    assert(pn_style_ui_event(&ui,PN_SUI_MARGIN_ADJ+5,2,present,&screen)==PN_OK && pn_style_margin_left(&ui.draft)==36 && pn_style_margin_right(&ui.draft)==32);
+    assert(pn_style_ui_event(&ui,PN_SUI_MARGIN_ADJ+7,2,present,&screen)==PN_OK && pn_style_margin_right(&ui.draft)==36);
+    assert(pn_style_ui_event(&ui,PN_SUI_MARGIN_ADJ+9,2,present,&screen)==PN_OK && ui.draft.bg_margin_top==4);
+    assert(pn_style_ui_event(&ui,PN_SUI_MARGIN_ADJ+11,2,present,&screen)==PN_OK && ui.draft.bg_margin_bottom==4);
+    assert(pn_style_ui_event(&ui,PN_SUI_MARGIN_ADJ+13,2,present,&screen)==PN_OK && ui.draft.bg_margin_left==4);
+    assert(pn_style_ui_event(&ui,PN_SUI_MARGIN_ADJ+15,2,present,&screen)==PN_OK && ui.draft.bg_margin_right==4);
+    assert(pn_style_ui_event(&ui,PN_SUI_MARGINS_RESET,2,present,&screen)==PN_OK && !ui.draft.hide_bars && !ui.draft.margin_top && !ui.draft.bg_margin_left && pn_style_margin_left(&ui.draft)==32 && pn_style_margin_right(&ui.draft)==32);
+    assert(pn_style_ui_event(&ui,PN_SUI_MARGINS_BACK,2,present,&screen)==PN_OK && !ui.margins && !ui.backgrounds);
+    assert(pn_style_ui_event(&ui,PN_SUI_BACKGROUND,2,present,&screen)==PN_OK && ui.backgrounds && pn_style_ui_hit(&ui,340,1140)==PN_SUI_MARGINS);
+    assert(pn_style_ui_event(&ui,PN_SUI_MARGINS,2,present,&screen)==PN_OK && ui.margins && ui.margins_from_bg);
+    assert(pn_style_ui_event(&ui,PN_SUI_MARGINS_BACK,2,present,&screen)==PN_OK && !ui.margins && ui.backgrounds);
+    assert(pn_style_ui_event(&ui,PN_SUI_BACKGROUND_BACK,2,present,&screen)==PN_OK && !ui.backgrounds);
     screen.capture=false;const char *preview_path=getenv("PN_STYLE_PREVIEW_CAPTURE");if(preview_path){assert(setenv("PN_STYLE_CAPTURE",preview_path,1)==0);screen.capture=true;}
     assert(pn_style_ui_event(&ui,PN_SUI_PREVIEW,3,present,&screen)==PN_OK && ui.preview);assert(pn_style_ui_hit(&ui,300,400)==PN_SUI_FORM);screen.capture=false;
     assert(pn_style_ui_event(&ui,PN_SUI_FORM,3,present,&screen)==PN_OK && !ui.preview);assert(pn_style_ui_event(&ui,PN_SUI_CANCEL,4,present,&screen)==PN_OK && !ui.active);

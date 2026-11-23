@@ -127,7 +127,7 @@ static pn_status_t image_size(void *ctx,const char *path,int maxw,int maxh,int *
     uint64_t w=info.width,h=info.height;if(w>(unsigned)maxw){h=h*maxw/w;w=maxw;}if(h>(unsigned)maxh){w=w*maxh/h;h=maxh;}
     *outw=w?(int)w:1;*outh=h?(int)h:1;return PN_OK;
 }
-static pn_layout_t layout(const pn_style_t *s){return (pn_layout_t){.width=684-2*s->margin,.height=PN_READER_HEIGHT,.line_height=(s->pixels*s->line_percent+99)/100,.indent=s->pixels*s->indent_em,.paragraph_gap=s->pixels*s->gap_percent/100,.letter_spacing_64=s->pixels*64*s->tracking_percent/100};}
+static pn_layout_t layout(const pn_style_t *s){return (pn_layout_t){.width=pn_style_body_width(s),.height=pn_style_body_height(s),.line_height=(s->pixels*s->line_percent+99)/100,.indent=s->pixels*s->indent_em,.paragraph_gap=s->pixels*s->gap_percent/100,.letter_spacing_64=s->pixels*64*s->tracking_percent/100};}
 /* 章节进度：按各章XHTML原长占全书XHTML总长的比例，章内位置不估计（只算到章首），所以是“读到第几章的约几成”，不是页码或精确位置。
  * Section progress: the share of XHTML bytes before the chapter over all XHTML bytes; the position inside a chapter is not estimated, so this is "roughly how far the reached chapter starts", never a page number or exact position. */
 static bool section_progress(app_t *a,const char *path,size_t *index,unsigned *basis){
@@ -195,7 +195,7 @@ static pn_status_t compact(app_t *a){
     return PN_OK;
 }
 static void paint_guides(app_t *a,pn_frame_t *frame,const pn_epub_page_t *page){
-    pn_frame_t viewport={frame->pixels+PN_READER_TOP*frame->stride+a->style.margin/2,a->layout.width,PN_READER_HEIGHT,frame->stride};
+    pn_frame_t viewport={frame->pixels+pn_style_body_top(&a->style)*frame->stride+pn_style_margin_left(&a->style)/2,a->layout.width,a->layout.height,frame->stride};
     // 合并同一基线的混合字号；有插图的行不画阅读线，文字/图片在其后绘制。 / Combine mixed sizes on each baseline; skip illustrated rows and paint text/images afterward.
     if(a->style.reading_line){int baseline=INT_MIN,descent=0,gap=INT_MAX;bool text=false,illustrated=false;
         for(size_t i=0;i<=page->count;i++){
@@ -248,8 +248,8 @@ static pn_status_t paint_body(app_t *a,pn_frame_t *frame,unsigned *missing,unsig
     if(a->page.image_count)(void)compact(a);
     size_t retry_image=SIZE_MAX;
 repaint:;
-    pn_status_t paper=pn_paper_draw(&a->paper,a->style.background,frame);if(paper!=PN_OK)return paper;paint_guides(a,frame,&a->page);
-    pn_frame_t viewport={frame->pixels+PN_READER_TOP*frame->stride+a->style.margin/2,a->layout.width,PN_READER_HEIGHT,frame->stride};
+    pn_status_t paper=pn_paper_draw_style(&a->paper,&a->style,frame);if(paper!=PN_OK)return paper;paint_guides(a,frame,&a->page);
+    pn_frame_t viewport={frame->pixels+pn_style_body_top(&a->style)*frame->stride+pn_style_margin_left(&a->style)/2,a->layout.width,a->layout.height,frame->stride};
     bool standalone=!a->style.hide_images && a->page.count==1 && a->page.image_count==1;
     if(standalone){pn_profile_span_t image_timing;pn_profile_begin(&image_timing,a->pool,"epub.raster.image-cache");pn_status_t cached=pn_epub_image_cache_restore_guarded(&a->image_cache,&a->book_file,a->page.images[0].path,&a->style,&viewport,pn_source_blocks_partial(&a->blocks)?source_guard:NULL,a);pn_profile_end(&image_timing,cached);
         if(cached==PN_OK)return PN_OK;
@@ -273,6 +273,7 @@ repaint:;
     return PN_OK;
 }
 static pn_status_t paint_footer(app_t *a,pn_frame_t *frame,unsigned missing,unsigned missing_images){
+    if(a->style.hide_bars){a->status=pn_w_status_snapshot();return PN_OK;}
     if(!a->ui.impl){pn_text_source_t built=pn_font_builtin_source();pn_status_t status=pn_font_open(&a->ui,a->pool,&built,24);if(status!=PN_OK)return status;}
     // 页脚：书名与“第N/M节”；预览态改为提示。无顶栏与底部按钮，工具由点正文中央打开的工具栏提供。
     // Footer: title and "section N of M"; previews show a hint instead. There is no top bar or bottom buttons; tools come from the toolbar opened by tapping the middle of the text.
@@ -324,8 +325,8 @@ static pn_status_t paint_impl(app_t *a,pn_frame_t *frame,const pn_epub_reader_re
     pn_status_t status;
     if(a->resume_pixels_ready){
         a->resume_pixels_ready=false;missing=a->resume_missing;status=font_size(a,a->resume_pixels);
-        if(status==PN_OK)status=pn_paper_region(&a->paper,a->style.background,frame,0,PN_READER_TOP);
-        if(status==PN_OK)status=pn_paper_region(&a->paper,a->style.background,frame,PN_READER_TOP+PN_READER_HEIGHT,1216-PN_READER_TOP-PN_READER_HEIGHT);
+        if(status==PN_OK && !a->style.hide_bars)status=pn_paper_region_style(&a->paper,&a->style,frame,0,PN_READER_TOP);
+        if(status==PN_OK && !a->style.hide_bars)status=pn_paper_region_style(&a->paper,&a->style,frame,PN_READER_TOP+PN_READER_HEIGHT,1216-PN_READER_TOP-PN_READER_HEIGHT);
     }else if(a->first_paint.ready && frame->pixels==a->frame.pixels && pn_first_paint_matches(&a->first_paint,receipt->token,receipt->ticket)){
         pn_profile_span_t first;pn_profile_begin(&first,a->pool,"epub.first.use");
         status=font_size(a,a->first_paint.pixels);if(status==PN_OK)status=pn_font_chain_validate(chain(a));missing=a->first_paint.missing;a->first_paint.ready=false;pn_profile_end(&first,status);
@@ -973,13 +974,13 @@ static pn_status_t bitmap_paint(void *ctx,pn_frame_t *frame,size_t first,size_t 
     if(!first)paint_guides(a,frame,work->page);
     const pn_epub_page_node_t *node=&work->page->nodes[first];
     if(node->image_index!=UINT_MAX){
-        pn_frame_t viewport={frame->pixels+PN_READER_TOP*frame->stride+a->style.margin/2,a->layout.width,PN_READER_HEIGHT,frame->stride};pn_image_rect_t rect;
+        pn_frame_t viewport={frame->pixels+pn_style_body_top(&a->style)*frame->stride+pn_style_margin_left(&a->style)/2,a->layout.width,a->layout.height,frame->stride};pn_image_rect_t rect;
         pn_profile_span_t timing;pn_profile_begin(&timing,a->pool,"epub.bitmap.image");
         pn_status_t s=paint_image_node(a,work->page,node,&viewport,false,&rect);pn_profile_end(&timing,s);return s;
     }
     pn_cancel_scope_t atomic;pn_cancel_enter(&atomic,NULL,NULL);
     pn_status_t s=font_size(a,a->bitmap_last_pixels);
-    pn_frame_t viewport={frame->pixels+PN_READER_TOP*frame->stride+a->style.margin/2,a->layout.width,PN_READER_HEIGHT,frame->stride};
+    pn_frame_t viewport={frame->pixels+pn_style_body_top(&a->style)*frame->stride+pn_style_margin_left(&a->style)/2,a->layout.width,a->layout.height,frame->stride};
     if(s==PN_OK)s=paint_text_node(a,&viewport,&work->page->nodes[first],missing,work->prepared);
     if(s==PN_OK)a->bitmap_last_pixels=body(a)->pixels;
     pn_cancel_leave(&atomic);return s;
@@ -1004,7 +1005,7 @@ static pn_status_t bitmap_visit(void *ctx,const pn_epub_page_t *page,const pn_ep
     if(page->image_count && a->bitmap_image_failed && bitmap_key(a,token,anchor))return PN_EMPTY;
     if(!bitmap_key(a,token,anchor) || (!a->bitmap.working && !a->bitmap.ready)){
         pn_status_t s=pn_page_bitmap_begin(&a->bitmap,page->count);if(s!=PN_OK)return s;
-        if(a->style.background){pn_cache_pin(&a->bitmap.owner);s=pn_paper_draw(&a->paper,a->style.background,&a->bitmap.frame);pn_cache_unpin(&a->bitmap.owner);if(s!=PN_OK){pn_page_bitmap_invalidate(&a->bitmap);return s;}}
+        if(a->style.background){pn_cache_pin(&a->bitmap.owner);s=pn_paper_draw_style(&a->paper,&a->style,&a->bitmap.frame);pn_cache_unpin(&a->bitmap.owner);if(s!=PN_OK){pn_page_bitmap_invalidate(&a->bitmap);return s;}}
         a->bitmap_token=token;a->bitmap_anchor=*anchor;a->bitmap_last_pixels=a->style.pixels;a->bitmap_image_failed=false;
     }
     if(a->bitmap.ready)return PN_EMPTY;
@@ -1160,7 +1161,7 @@ pn_status_t pn_epub_app_deferred_flush(pn_epub_app_t *app){
 /// 只更新已确认正文的顶部状态，不翻页、不提交位置或刷新策略计数。/ Update only the confirmed page's status, without navigation, position commits or refresh-policy counts.
 pn_status_t pn_epub_app_status_refresh(pn_epub_app_t *app,pn_reader_present_fn present,void *ctx){
     if(!app || !app->impl || !present)return PN_INVALID;
-    app_t *a=app->impl;if(a->suspended || !a->has_visible || !a->ui.impl)return PN_EMPTY;
+    app_t *a=app->impl;if(a->suspended || !a->has_visible || !a->ui.impl || a->style.hide_bars)return PN_EMPTY;
     if(a->display.active>=0 || a->display.queued>=0)return PN_BUSY;
     if(a->lost)return PN_STALE_MEDIA;
     pn_status_t status=pn_zip_validate(&a->zip);if(status!=PN_OK)return status;
@@ -1168,7 +1169,7 @@ pn_status_t pn_epub_app_status_refresh(pn_epub_app_t *app,pn_reader_present_fn p
     if(current.battery==a->status.battery && current.charging==a->status.charging && !strcmp(current.clock,a->status.clock))return PN_EMPTY;
     // 可选续读包可能借用正文帧，重绘前先撤回；不写进度。/ Revoke a disposable resume writer's frame borrow before repainting; no progress writes.
     resume_abort_retry(a);
-    status=pn_paper_region(&a->paper,a->style.background,&a->frame,0,PN_READER_TOP);
+    status=pn_paper_region_style(&a->paper,&a->style,&a->frame,0,PN_READER_TOP);
     if(status==PN_OK)status=pn_reader_status_text(&a->ui,&a->frame);
     if(status==PN_OK)status=present(ctx,&a->frame,PN_REFRESH_GL16);
     if(status==PN_OK)a->status=current;
@@ -1182,7 +1183,7 @@ pn_status_t pn_epub_app_resume(pn_epub_app_t *app,uint64_t now,pn_reader_present
     cache_abort(a);
     pn_status_t status=a->lost?PN_STALE_MEDIA:pn_zip_validate(&a->zip);if(status!=PN_OK)return status;
     pn_w_status_snapshot_t current=pn_w_status_snapshot();
-    if(a->ui.impl && (current.battery!=a->status.battery || current.charging!=a->status.charging || strcmp(current.clock,a->status.clock)) && pn_paper_region(&a->paper,a->style.background,&a->frame,0,PN_READER_TOP)==PN_OK && pn_reader_status_text(&a->ui,&a->frame)==PN_OK)a->status=current;
+    if(!a->style.hide_bars && a->ui.impl && (current.battery!=a->status.battery || current.charging!=a->status.charging || strcmp(current.clock,a->status.clock)) && pn_paper_region_style(&a->paper,&a->style,&a->frame,0,PN_READER_TOP)==PN_OK && pn_reader_status_text(&a->ui,&a->frame)==PN_OK)a->status=current;
     status=present(ctx,&a->frame,PN_REFRESH_GC16);a->last_now=now;
     if(status==PN_OK){a->suspended=false;a->force_full=false;a->refresh.turns=0;a->semantic_due=now>UINT64_MAX-1500?UINT64_MAX:now+1500;}return status;
 }
@@ -1239,10 +1240,10 @@ pn_status_t pn_epub_app_paint_unshown(pn_epub_app_t *app,size_t budget,size_t re
     pn_draw_lease_t lease={0};pn_frame_t *frame=NULL;if(s==PN_OK)s=pn_display_begin_draw(&a->display,a->token,&lease,&frame);
     pn_first_scope_t scope=pn_first_scope_enter(a->pool,reserve);
     if(s==PN_OK && !pn_first_paint_matches(&a->first_paint,receipt.token,receipt.ticket)){
-        a->first_paint=(pn_first_paint_t){.token=receipt.token,.ticket=receipt.ticket};s=pn_paper_draw(&a->paper,a->style.background,frame);if(s==PN_OK)paint_guides(a,frame,&a->page);
+        a->first_paint=(pn_first_paint_t){.token=receipt.token,.ticket=receipt.ticket};s=pn_paper_draw_style(&a->paper,&a->style,frame);if(s==PN_OK)paint_guides(a,frame,&a->page);
     }
     size_t count=s==PN_OK?a->page.count-a->first_paint.cursor:0;if(count>budget)count=budget;if(count>8)count=8;
-    pn_frame_t viewport={a->frame.pixels+PN_READER_TOP*a->frame.stride+a->style.margin/2,a->layout.width,PN_READER_HEIGHT,a->frame.stride};
+    pn_frame_t viewport={a->frame.pixels+pn_style_body_top(&a->style)*a->frame.stride+pn_style_margin_left(&a->style)/2,a->layout.width,a->layout.height,a->frame.stride};
     for(size_t i=0;s==PN_OK && i<count;i++)s=paint_text_node(a,&viewport,&a->page.nodes[a->first_paint.cursor+i],&a->first_paint.missing,true);
     if(s==PN_OK)s=pn_cancel_checkpoint();
     if(lease.ticket){pn_status_t discarded=pn_display_discard(&a->display,&lease);if(s==PN_OK)s=discarded;}
@@ -1289,6 +1290,7 @@ pn_status_t pn_epub_app_media_lost(pn_epub_app_t *app){
     return status;
 }
 pn_status_t pn_epub_app_style_get(const pn_epub_app_t *app,pn_style_t *out){if(!app || !app->impl || !out)return PN_INVALID;*out=((app_t *)app->impl)->style;return PN_OK;}
+bool pn_epub_app_bars_hidden(const pn_epub_app_t *app){return app && app->impl && ((const app_t *)app->impl)->style.hide_bars!=0;}
 static pn_status_t preview_style(pn_epub_app_t *app,const pn_style_t *style,uint64_t now,pn_reader_present_fn present,void *ctx,bool hint){
     if(app && app->impl)((app_t *)app->impl)->last_confirmed=false;
     if(!app || !app->impl || !present || pn_style_validate(style)!=PN_OK)return PN_INVALID;
