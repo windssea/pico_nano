@@ -124,8 +124,12 @@ int main(void) {
     assert(pn_minesweeper_state(&u)->elapsed_ms == before_lock + 100);
     assert(pn_minesweeper_event(&u, PN_MI_NEW, 36100201) == PN_OK); assert(pn_minesweeper_event(&u, PN_MI_CANCEL, 36100202) == PN_OK && pn_minesweeper_screen(&u) == PN_MI_PLAY);
     pn_minesweeper_displayed(&u, true); assert(pn_minesweeper_event(&u, PN_MI_FLAG_MODE, 36100203) == PN_OK); pn_minesweeper_displayed(&u, true);
-    fail_sync = true; assert(pn_minesweeper_event(&u, PN_MI_EXIT, 36100204) != PN_OK && u.active); fail_sync = false;
-    assert(pn_minesweeper_event(&u, PN_MI_EXIT, 36100205) == PN_OK && !u.active); pn_minesweeper_close(&u);
+    fail_sync = true; assert(pn_minesweeper_event(&u, PN_MI_EXIT, 36100204) != PN_OK && u.active);
+    /* 保存失败后点击底部提示栏可触发 PN_MI_RETRY 重试保存。/ Tapping the bottom notice bar emits PN_MI_RETRY and retries save on PLAY. */
+    assert(pn_minesweeper_hit(&u, 300, 1200) == PN_MI_RETRY);
+    fail_sync = false;
+    assert(pn_minesweeper_event(&u, PN_MI_RETRY, 36100205) == PN_OK && !((mi_t *)u.impl)->dirty && !((mi_t *)u.impl)->notice);
+    assert(pn_minesweeper_event(&u, PN_MI_EXIT, 36100206) == PN_OK && !u.active); pn_minesweeper_close(&u);
     assert(pn_minesweeper_open(&u, &pool, &media, root, 200000) == PN_OK && pn_minesweeper_state(&u)->flag_mode);
     assert(pn_minesweeper_event(&u, PN_MI_NEW, 200001) == PN_OK); assert(pn_minesweeper_event(&u, PN_MI_ACCEPT, 200002) == PN_OK);
     uint32_t old_seed = pn_minesweeper_state(&u)->seed; fail_sync = true; assert(pn_minesweeper_event(&u, PN_MI_START, 200003) != PN_OK); assert(pn_minesweeper_screen(&u) == PN_MI_ERROR && pn_minesweeper_state(&u)->seed == old_seed);

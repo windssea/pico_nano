@@ -1307,6 +1307,8 @@ pn_status_t pn_xiangqi_event(pn_xiangqi_t *u, int cmd, uint64_t now) {
         g->dirty = true;
         g->changed = now;
         u->presented = false;
+        if (g->state.outcome != PN_XQ_ONGOING)
+            (void)xq_save(u, now);
     }
     return r;
 }

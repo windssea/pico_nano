@@ -17,7 +17,7 @@ typedef struct {
     uint8_t shown_hint_piece, shown_hint_dir, shown_hint_steps;
     pn_kl_screen_t screen;
     unsigned tier, selected_level;
-    bool has, dirty, running, fresh_clock, restart, pending_start, patch, full;
+    bool has, dirty, running, fresh_clock, restart, pending_start, load_error, patch, full;
     bool touch_down, touch_cancel;
     int touch_x0, touch_y0, touch_x1, touch_y1;
     uint64_t last, changed, retry;

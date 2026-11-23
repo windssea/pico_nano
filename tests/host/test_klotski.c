@@ -76,6 +76,11 @@ int main(void) {
     assert(pn_klotski_screen(&game) == PN_KL_SELECT);
     assert(pn_klotski_event(&game, PN_KL_START, 200) == PN_OK);
     assert(pn_klotski_screen(&game) == PN_KL_PLAY);
+    /* 开局立即落盘：不经tick/pause直接关闭并重开仍恢复进行中的新局。/ Start persists immediately: reopening without tick/pause restores the started level. */
+    pn_klotski_close(&game);
+    assert(pn_klotski_open(&game, &pool, &media, root, 250) == PN_OK);
+    assert(pn_klotski_screen(&game) == PN_KL_PLAY && pn_klotski_state(&game)->level.id == 0u);
+    pn_klotski_displayed(&game, true);
 
     /* 执行提示走2步再撤销1步 / Play 2 hinted moves then undo 1 */
     assert(pn_klotski_event(&game, PN_KL_HINT, 300) == PN_OK);
@@ -93,19 +98,25 @@ int main(void) {
     assert(pn_klotski_pause(&game, 800) != PN_OK && game.active && pn_klotski_screen(&game) == PN_KL_ERROR);
     fail_fsync = false;
     assert(pn_klotski_event(&game, PN_KL_RETRY, 900) == PN_OK && pn_klotski_screen(&game) == PN_KL_PLAY);
+    pn_klotski_displayed(&game, true);
+    /* 即使未走新步，pause 也会落盘已推进的计时。/ Pause persists elapsed time even when no move was dirty. */
+    assert(pn_klotski_tick(&game, 950) == PN_EMPTY);
     assert(pn_klotski_pause(&game, 1000) == PN_OK);
     pn_kl_state_t snap = *pn_klotski_state(&game);
+    assert(snap.elapsed_ms > 0u);
     pn_klotski_close(&game);
 
-    /* 重新打开验证恢复原局与步数 / Reopen and verify exact state restore */
+    /* 重新打开验证恢复原局与步数、计时，并验证确认页 KEY2(EXIT) 可保存退出 / Reopen and verify restore + confirm-screen EXIT save */
     assert(pn_klotski_open(&game, &pool, &media, root, 2000) == PN_OK);
     assert(pn_klotski_screen(&game) == PN_KL_PLAY);
     assert(pn_klotski_state(&game)->moves == snap.moves &&
+           pn_klotski_state(&game)->elapsed_ms == snap.elapsed_ms &&
            memcmp(pn_klotski_state(&game)->pos, snap.pos, sizeof snap.pos) == 0);
-    assert(pn_klotski_event(&game, PN_KL_BACK, 2100) == PN_OK && !game.active);
+    assert(pn_klotski_event(&game, PN_KL_RESTART, 2050) == PN_OK && pn_klotski_screen(&game) == PN_KL_CONFIRM);
+    assert(pn_klotski_event(&game, PN_KL_EXIT, 2100) == PN_OK && !game.active);
     pn_klotski_close(&game);
 
-    /* 损坏存档必须保留原文件并报ERROR，不静默抹除 / Corrupt save must preserve files and report error */
+    /* 损坏存档必须保留原文件并报ERROR，且点击重试不会绕过读取错误 / Corrupt save preserves files and RETRY reloads instead of bypassing */
     char fa[512], fb[512];
     snprintf(fa, sizeof fa, "%s/klotski.a", root);
     snprintf(fb, sizeof fb, "%s/klotski.b", root);
@@ -115,6 +126,8 @@ int main(void) {
     assert(f && fwrite("BAD!", 1, 4, f) == 4 && fclose(f) == 0);
     assert(pn_klotski_open(&game, &pool, &media, root, 3000) == PN_OK);
     assert(pn_klotski_screen(&game) == PN_KL_ERROR);
+    assert(pn_klotski_event(&game, PN_KL_RETRY, 3100) != PN_OK && pn_klotski_screen(&game) == PN_KL_ERROR);
+    assert(pn_klotski_event(&game, PN_KL_CHOOSE, 3200) == PN_EMPTY && pn_klotski_screen(&game) == PN_KL_ERROR);
     pn_klotski_close(&game);
     f = fopen(fa, "rb");
     char check[4] = {0};

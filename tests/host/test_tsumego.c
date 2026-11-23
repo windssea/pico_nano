@@ -92,6 +92,11 @@ int main(void) {
     /* 选择第13题（倒扑2手）进入答题 / Enter puzzle #12 (2-move snapback) */
     assert(pn_tsumego_event(&game, PN_TG_CELL + 12, 200) == PN_OK);
     assert(pn_tsumego_screen(&game) == PN_TG_PLAY);
+    /* 开题立即落盘：不经tick/pause直接重开仍恢复该题。/ Start persists immediately: reopening restores the started puzzle. */
+    pn_tsumego_close(&game);
+    assert(pn_tsumego_open(&game, &pool, &media, root, 250) == PN_OK);
+    assert(pn_tsumego_screen(&game) == PN_TG_PLAY && pn_tsumego_state(&game)->level.id == 12u);
+    pn_tsumego_displayed(&game, true);
 
     /* 先故意下错一手触发白棋反击PN_TG_FAILED，再悔棋回退 / Play wrong move -> FAILED -> undo */
     assert(pn_tsumego_event(&game, PN_TG_CELL + 80, 300) == PN_OK);
@@ -109,14 +114,24 @@ int main(void) {
     assert(pn_tsumego_pause(&game, 700) != PN_OK && game.active && pn_tsumego_screen(&game) == PN_TG_ERROR);
     fail_fsync = false;
     assert(pn_tsumego_event(&game, PN_TG_RETRY, 800) == PN_OK && pn_tsumego_screen(&game) == PN_TG_PLAY);
+    pn_tsumego_displayed(&game, true);
+    assert(pn_tsumego_tick(&game, 850) == PN_EMPTY);
     assert(pn_tsumego_pause(&game, 900) == PN_OK);
+    uint64_t saved_elapsed = pn_tsumego_state(&game)->elapsed_ms;
+    assert(saved_elapsed > 0u);
     uint8_t saved_board[PN_TG_CELLS];
     memcpy(saved_board, pn_tsumego_state(&game)->board, PN_TG_CELLS);
     pn_tsumego_close(&game);
 
     assert(pn_tsumego_open(&game, &pool, &media, root, 1500) == PN_OK);
     assert(pn_tsumego_screen(&game) == PN_TG_PLAY && pn_tsumego_state(&game)->moves == 1u);
+    assert(pn_tsumego_state(&game)->elapsed_ms == saved_elapsed);
     assert(memcmp(pn_tsumego_state(&game)->board, saved_board, PN_TG_CELLS) == 0);
+    /* 验证确认页按 EXIT 仍可保存退出，不吞按键 / Confirm-screen EXIT saves and exits */
+    assert(pn_tsumego_event(&game, PN_TG_RESTART, 1520) == PN_OK && pn_tsumego_screen(&game) == PN_TG_CONFIRM);
+    assert(pn_tsumego_event(&game, PN_TG_EXIT, 1540) == PN_OK && !game.active);
+    pn_tsumego_close(&game);
+    assert(pn_tsumego_open(&game, &pool, &media, root, 1560) == PN_OK && pn_tsumego_screen(&game) == PN_TG_PLAY);
     /* 走完第2手通关 / Finish 2nd move to solve */
     assert(pn_tsumego_event(&game, PN_TG_HINT, 1600) == PN_OK);
     assert(pn_tsumego_event(&game, PN_TG_CELL + pn_tsumego_state(&game)->hint_pos, 1700) == PN_OK);
@@ -124,7 +139,7 @@ int main(void) {
     assert(pn_tsumego_event(&game, PN_TG_BACK, 1800) == PN_OK && !game.active);
     pn_tsumego_close(&game);
 
-    /* 坏档保留校验 / Corrupt save preservation */
+    /* 坏档保留校验，且重试仍保持读取错误 / Corrupt save preservation and load-error RETRY */
     char fa[512], fb[512];
     snprintf(fa, sizeof fa, "%s/tsumego.a", root);
     snprintf(fb, sizeof fb, "%s/tsumego.b", root);
@@ -134,6 +149,8 @@ int main(void) {
     assert(f && fwrite("CORR", 1, 4, f) == 4 && fclose(f) == 0);
     assert(pn_tsumego_open(&game, &pool, &media, root, 2500) == PN_OK);
     assert(pn_tsumego_screen(&game) == PN_TG_ERROR);
+    assert(pn_tsumego_event(&game, PN_TG_RETRY, 2600) != PN_OK && pn_tsumego_screen(&game) == PN_TG_ERROR);
+    assert(pn_tsumego_event(&game, PN_TG_CHOOSE, 2700) == PN_EMPTY && pn_tsumego_screen(&game) == PN_TG_ERROR);
     pn_tsumego_close(&game);
     f = fopen(fa, "rb");
     char check[4] = {0};

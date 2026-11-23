@@ -459,6 +459,8 @@ static pn_status_t start_level(pn_tsumego_t *u, tg_t *g, unsigned id, uint64_t n
     g->screen = PN_TG_PLAY;
     g->notice = NULL;
     g->pending_start = false;
+    /* 开题/重开立即落盘，避免2秒空闲窗内断电丢局。/ Persist immediately on start/restart so power loss within the idle window keeps the new puzzle. */
+    if (save_now(g, now) != PN_OK) g->notice = "保存失败，退出前将重试";
     mark_full(u, g);
     return PN_OK;
 }
@@ -497,9 +499,11 @@ pn_status_t pn_tsumego_open(pn_tsumego_t *u, pn_pool_t *pool, pn_media_t *media,
                 g->running = (g->state.outcome == PN_TG_ONGOING);
             }
         } else if (s == PN_CORRUPT) {
+            g->load_error = true;
             g->screen = PN_TG_ERROR;
             g->notice = "存档已损坏，已保留原文件";
         } else if (s != PN_EMPTY) {
+            g->load_error = true;
             g->screen = PN_TG_ERROR;
             g->notice = "存档读取失败，请重试";
         }
@@ -529,6 +533,33 @@ pn_status_t pn_tsumego_event(pn_tsumego_t *u, int cmd, uint64_t now) {
             return PN_OK;
         }
         if (cmd == PN_TG_RETRY || cmd == PN_TG_START) {
+            if (g->load_error) {
+                bool has = false;
+                pn_status_t s = tg_storage(g, &g->state, g->played_moves, &has, false);
+                if (s == PN_OK) {
+                    g->load_error = false;
+                    g->has = has;
+                    g->tier = g->state.level.tier;
+                    g->selected_level = g->state.level.id;
+                    g->screen = (has && g->state.outcome != PN_TG_SOLVED) ? PN_TG_PLAY : PN_TG_SELECT;
+                    g->running = (g->screen == PN_TG_PLAY && g->state.outcome == PN_TG_ONGOING);
+                    g->fresh_clock = true;
+                    g->notice = NULL;
+                    mark_full(u, g);
+                    return PN_OK;
+                }
+                if (s == PN_EMPTY) {
+                    g->load_error = false;
+                    g->has = false;
+                    g->screen = PN_TG_SELECT;
+                    g->notice = NULL;
+                    mark_full(u, g);
+                    return PN_OK;
+                }
+                g->notice = (s == PN_CORRUPT) ? "存档已损坏，已保留原文件" : "存档读取失败，请重试";
+                mark_full(u, g);
+                return s;
+            }
             pn_status_t s = save_now(g, now);
             if (s != PN_OK) {
                 g->notice = "存储仍不可用，请重试";
@@ -540,7 +571,7 @@ pn_status_t pn_tsumego_event(pn_tsumego_t *u, int cmd, uint64_t now) {
             mark_full(u, g);
             return PN_OK;
         }
-        if (cmd == PN_TG_CHOOSE) {
+        if (cmd == PN_TG_CHOOSE && !g->load_error) {
             g->screen = PN_TG_SELECT;
             g->notice = NULL;
             mark_full(u, g);
@@ -550,6 +581,19 @@ pn_status_t pn_tsumego_event(pn_tsumego_t *u, int cmd, uint64_t now) {
     }
 
     if (g->screen == PN_TG_CONFIRM) {
+        if (cmd == PN_TG_EXIT) {
+            g->running = false;
+            g->restart = false;
+            pn_status_t s = save_now(g, now);
+            if (s != PN_OK) {
+                g->screen = PN_TG_ERROR;
+                g->notice = "退出前保存失败，请重试";
+                mark_full(u, g);
+                return s;
+            }
+            u->active = false;
+            return PN_OK;
+        }
         if (cmd == PN_TG_CANCEL || cmd == PN_TG_BACK) {
             g->screen = g->has ? PN_TG_PLAY : PN_TG_SELECT;
             g->running = (g->screen == PN_TG_PLAY && g->state.outcome == PN_TG_ONGOING);
@@ -679,7 +723,7 @@ pn_status_t pn_tsumego_event(pn_tsumego_t *u, int cmd, uint64_t now) {
     }
     if (cmd == PN_TG_CHOOSE) {
         g->running = false;
-        (void)save_now(g, now);
+        g->notice = (save_now(g, now) != PN_OK) ? "保存失败，请重试" : NULL;
         g->screen = PN_TG_SELECT;
         g->tier = g->state.level.tier;
         g->selected_level = g->state.level.id;
@@ -758,7 +802,7 @@ pn_status_t pn_tsumego_event(pn_tsumego_t *u, int cmd, uint64_t now) {
         if (g->state.outcome == PN_TG_SOLVED) {
             g->running = false;
             g->screen = PN_TG_COMPLETE;
-            (void)save_now(g, now);
+            if (save_now(g, now) != PN_OK) g->notice = "保存失败，请重试";
             mark_full(u, g);
         } else {
             if (g->state.outcome == PN_TG_FAILED) g->running = false;
@@ -782,7 +826,9 @@ pn_status_t pn_tsumego_tick(pn_tsumego_t *u, uint64_t now) {
 pn_status_t pn_tsumego_pause(pn_tsumego_t *u, uint64_t now) {
     if (!u || !u->impl) return PN_INVALID;
     tg_t *g = u->impl;
+    uint64_t before = g->state.elapsed_ms;
     tick_clock(g, now);
+    if (g->has && g->state.outcome == PN_TG_ONGOING && g->state.elapsed_ms != before) g->dirty = true;
     g->running = false;
     g->fresh_clock = true;
     pn_status_t s = save_now(g, now);
@@ -797,6 +843,9 @@ pn_status_t pn_tsumego_pause(pn_tsumego_t *u, uint64_t now) {
 void pn_tsumego_displayed(pn_tsumego_t *u, bool ok) {
     if (!u || !u->impl) return;
     tg_t *g = u->impl;
+    bool running = ok && g->screen == PN_TG_PLAY && g->state.outcome == PN_TG_ONGOING;
+    if (running && !g->running) g->fresh_clock = true;
+    g->running = running;
     u->presented = ok;
     if (ok) {
         if (g->screen == PN_TG_PLAY) snapshot_shown(g);

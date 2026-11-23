@@ -1429,14 +1429,16 @@ static int library_worker(void *ctx){
                 s->actions.notice=status==PN_OK?(now?"已加入收藏":"已取消收藏"):status==PN_LIMIT?"收藏最多 50 本":"保存失败，请重试";(void)draw(s);
             }
             else if(hit==PN_BA_CONFIRM){
-                // 删除前归还TF/媒体只读消费者（封面任务、热会话与系统字体），避免WRITE租约返回BUSY。
-                // Release media read consumers (cover work, warm session and system font) before deleting so WRITE does not fail with BUSY.
+                // 先绘制loading遮罩，再归还媒体只读消费者并删除文件。
+                // Present the loading overlay before releasing media read consumers and deleting the file.
+                s->actions.deleting=true;s->actions.notice=NULL;(void)draw(s);
                 pn_cover_work_abort(&s->cover_work);
                 pn_media_lease_t lease={0};status=pn_hot_session_drop_for_switch(&s->hot);
                 if(status==PN_OK){pn_font_close(&s->font);(void)pn_font_system_close();status=pn_media_acquire(&s->media,PN_MEDIA_WRITE,&lease);}
                 if(status==PN_OK){if(remove(s->actions.item.path)!=0)status=PN_IO;else{pn_catalog_index_invalidate(&s->catalog_index);s->recent_loaded=false;if(s->covers)s->covers->has_last=false;}(void)pn_media_release(&s->media,&lease);}
                 system_font_ready(s);
                 if(!s->font.impl){pn_text_source_t source=pn_font_builtin_source();(void)pn_font_open(&s->font,s->pool,&source,24);}
+                s->actions.deleting=false;
                 if(status==PN_OK){s->actions_mode=false;status=page(s,false,true);}else{s->actions.notice="删除失败，文件仍保留";(void)draw(s);}
             }
             else if(hit==PN_BA_OPEN){pn_catalog_item_t *book=pn_alloc_tagged(s->pool,PN_MEM_UI,sizeof *book);s->actions_mode=false;if(book){*book=s->actions.item;status=open_item(s,book,now);pn_free(book);}}

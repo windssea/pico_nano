@@ -64,7 +64,9 @@ int main(void){char root[]="/tmp/pn-style-ui-XXXXXX";assert(mkdtemp(root));char 
     assert(pn_style_ui_event(&ui,PN_SUI_TOGGLE_BARS,2,present,&screen)==PN_OK && ui.draft.hide_bars==1);
     assert(pn_style_ui_hit(&ui,490,646)==PN_SUI_MARGINS);
     assert(pn_style_ui_event(&ui,PN_SUI_MARGINS,2,present,&screen)==PN_OK && ui.margins && !ui.margins_from_bg);
-    assert(pn_style_ui_hit(&ui,100,60)==PN_SUI_MARGINS_BACK && pn_style_ui_hit(&ui,600,90)==PN_SUI_MARGINS_RESET && pn_style_ui_hit(&ui,300,500)==PN_SUI_TOGGLE_BARS);
+    assert(pn_style_ui_hit(&ui,100,60)==PN_SUI_MARGINS_BACK && pn_style_ui_hit(&ui,600,90)==PN_SUI_MARGINS_RESET && pn_style_ui_hit(&ui,300,440)==PN_SUI_TOGGLE_BARS);
+    /* 放大后的 108x108 边距详调命中区覆盖卡片全高，便于手指点击。/ Enlarged 108x108 margin stepper hit targets cover the full stepper row height. */
+    assert(pn_style_ui_hit(&ui,130,500)==PN_SUI_MARGIN_ADJ && pn_style_ui_hit(&ui,230,590)==PN_SUI_MARGIN_ADJ+1 && pn_style_ui_hit(&ui,450,890)==PN_SUI_MARGIN_ADJ+14 && pn_style_ui_hit(&ui,550,980)==PN_SUI_MARGIN_ADJ+15);
     assert(pn_style_ui_event(&ui,PN_SUI_MARGIN_ADJ+1,2,present,&screen)==PN_OK && ui.draft.margin_top==4);
     assert(pn_style_ui_event(&ui,PN_SUI_MARGIN_ADJ+3,2,present,&screen)==PN_OK && ui.draft.margin_bottom==4);
     assert(pn_style_ui_event(&ui,PN_SUI_MARGIN_ADJ+5,2,present,&screen)==PN_OK && pn_style_margin_left(&ui.draft)==36 && pn_style_margin_right(&ui.draft)==32);

@@ -147,6 +147,7 @@ int pn_minesweeper_hit(const pn_minesweeper_t *u, int x, int y) {
     if (!u || !u->impl) return 0;
     const mi_t *g = u->impl;
     if (!g->pending_start && inside(x, y, 28, 40, 160, 60)) return PN_MI_BACK;
+    if (g->notice && y >= 1186) return PN_MI_RETRY;
     if (g->screen == PN_MI_PLAY || g->screen == PN_MI_COMPLETE) {
         if (inside(x, y, 508, 40, 160, 60)) return PN_MI_NEW;
         for (int tier = 0; tier < 3; tier++) if (inside(x, y, 36 + tier * 208, 120, 196, 68)) return PN_MI_TIER + tier;

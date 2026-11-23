@@ -162,23 +162,33 @@ static pn_status_t paint_main(pn_style_ui_t *u,pn_font_t *font,pn_frame_t *frame
     if(s==PN_OK)s=pn_w_text_ex(font,frame,"状态栏与页脚",364,1084,180,PN_ALIGN_LEFT,PN_UI_MUTED,false);
     return s;
 }
-/* 边距步进格：标签在上、减/像素值/加在下。/ Margin stepper cell: label above minus/px-value/plus. */
+#define MCELL_H 108
+#define MBTN_W 96
+#define MBTN_H 64
+#define MHIT_W 108
+/* 边距详调步进格：放大左右减/加实体按键与触控热区，便于单手点准。
+ * Enlarged margin stepper cell: bigger visible minus/plus buttons and touch hit zones for reliable tapping. */
 static pn_status_t margin_stepper(pn_font_t *font,pn_frame_t *frame,const char *label,int px,int x,int y){
     char value[24];snprintf(value,sizeof value,"%d px",px);
-    pn_w_round_stroke(frame,x,y,CELL_W,CELL_H,10,1,8);
+    pn_w_round_stroke(frame,x,y,CELL_W,MCELL_H,12,1,8);
     pn_status_t s=pn_font_size(font,22);
-    if(s==PN_OK)s=pn_w_text_ex(font,frame,label,x+12,y+26,CELL_W-24,PN_ALIGN_LEFT,PN_UI_MUTED,false);
-    pn_w_icon(frame,PN_ICON_MINUS,x+22,y+46,24,PN_UI_INK);
-    pn_w_icon(frame,PN_ICON_PLUS,x+CELL_W-46,y+46,24,PN_UI_INK);
+    if(s==PN_OK)s=pn_w_text_ex(font,frame,label,x+14,y+28,CELL_W-28,PN_ALIGN_CENTER,PN_UI_MUTED,false);
+    int by=y+36,lx=x+8,rx=x+CELL_W-8-MBTN_W;
+    pn_w_round_fill(frame,lx,by,MBTN_W,MBTN_H,10,PN_UI_SELECT);
+    pn_w_round_stroke(frame,lx,by,MBTN_W,MBTN_H,10,1.5f,PN_UI_INK);
+    pn_w_icon(frame,PN_ICON_MINUS,lx+(MBTN_W-28)/2,by+(MBTN_H-28)/2,28,PN_UI_INK);
+    pn_w_round_fill(frame,rx,by,MBTN_W,MBTN_H,10,PN_UI_SELECT);
+    pn_w_round_stroke(frame,rx,by,MBTN_W,MBTN_H,10,1.5f,PN_UI_INK);
+    pn_w_icon(frame,PN_ICON_PLUS,rx+(MBTN_W-28)/2,by+(MBTN_H-28)/2,28,PN_UI_INK);
     if(s==PN_OK)s=pn_font_size(font,26);
-    if(s==PN_OK)s=pn_w_text(font,frame,value,x+68,y+69,CELL_W-136,PN_ALIGN_CENTER);
+    if(s==PN_OK)s=pn_w_text_ex(font,frame,value,lx+MBTN_W,by+42,rx-(lx+MBTN_W),PN_ALIGN_CENTER,PN_UI_INK,true);
     return s;
 }
 static pn_status_t paint_margins(pn_style_ui_t *u,pn_font_t *font,pn_frame_t *frame){
     pn_status_t s=pn_w_header(font,frame,"< 返回","边距与栏位",NULL);
     if(s==PN_OK){s=pn_font_size(font,26);if(s==PN_OK)s=pn_w_text_ex(font,frame,"重置边距",480,100,172,PN_ALIGN_RIGHT,PN_UI_MUTED,false);}
-    // 顶部示意框：实时按比例展示上下栏、背景区域和正文区域。/ Top diagram: live scaled preview of bars, background box and body box.
-    const int px=48,py=142,pw=156,ph=276;
+    // 顶部示意框：紧凑高度给下方步进大按钮留足空间。/ Compact top diagram leaves generous space for larger stepper buttons below.
+    const int px=44,py=134,pw=132,ph=226;
     pn_w_round_fill(frame,px,py,pw,ph,8,PN_UI_PAPER);
     pn_w_round_stroke(frame,px,py,pw,ph,8,2.0f,PN_UI_INK);
     if(u->draft.background){
@@ -188,38 +198,38 @@ static pn_status_t paint_margins(pn_style_ui_t *u,pn_font_t *font,pn_frame_t *fr
         if(bw>2 && bh>2){pn_frame_rect(frame,bx,by,bw,bh,13);pn_w_outline(frame,bx,by,bw,bh,1,8);}
     }
     if(!u->draft.hide_bars){
-        pn_frame_rect(frame,px+4,py+4,pw-8,6,9);
-        pn_frame_rect(frame,px+4,py+ph-16,pw-8,12,9);
+        pn_frame_rect(frame,px+4,py+4,pw-8,5,9);
+        pn_frame_rect(frame,px+4,py+ph-14,pw-8,10,9);
     }
     int tx=px+pn_style_margin_left(&u->draft)*pw/684,ty=py+pn_style_body_top(&u->draft)*ph/1216;
     int tw=pn_style_body_width(&u->draft)*pw/684,th=pn_style_body_height(&u->draft)*ph/1216;
     if(tw>4 && th>4){
         pn_w_outline(frame,tx,ty,tw,th,1,PN_UI_INK);
-        for(int r=0;r<6;r++){int ly=ty+10+r*(th-20)/6;if(ly<ty+th-6)pn_frame_rect(frame,tx+6,ly,tw>12?tw-12:2,2,4);}
+        for(int r=0;r<6;r++){int ly=ty+8+r*(th-16)/6;if(ly<ty+th-5)pn_frame_rect(frame,tx+5,ly,tw>10?tw-10:2,2,4);}
     }
     char info[64];
     if(s==PN_OK)s=pn_font_size(font,26);
-    if(s==PN_OK){snprintf(info,sizeof info,"正文宽 %d × 高 %d px",pn_style_body_width(&u->draft),pn_style_body_height(&u->draft));s=pn_w_text_ex(font,frame,info,232,192,420,PN_ALIGN_LEFT,PN_UI_INK,true);}
+    if(s==PN_OK){snprintf(info,sizeof info,"正文宽 %d × 高 %d px",pn_style_body_width(&u->draft),pn_style_body_height(&u->draft));s=pn_w_text_ex(font,frame,info,204,174,448,PN_ALIGN_LEFT,PN_UI_INK,true);}
     if(s==PN_OK)s=pn_font_size(font,22);
-    if(s==PN_OK){snprintf(info,sizeof info,"上下栏：%s",u->draft.hide_bars?"已隐藏（全屏正文）":"显示状态栏与页脚");s=pn_w_text_ex(font,frame,info,232,238,420,PN_ALIGN_LEFT,PN_UI_MUTED,false);}
-    if(s==PN_OK){snprintf(info,sizeof info,"正文边距：上%d 下%d 左%d 右%d",pn_style_margin_top(&u->draft),pn_style_margin_bottom(&u->draft),pn_style_margin_left(&u->draft),pn_style_margin_right(&u->draft));s=pn_w_text_ex(font,frame,info,232,280,420,PN_ALIGN_LEFT,PN_UI_MUTED,false);}
-    if(s==PN_OK){snprintf(info,sizeof info,"阅读背景：%s",u->draft.background==PN_READING_BACKGROUND_EXTERNAL?"自定义":pn_reading_background_name(u->draft.background));s=pn_w_text_ex(font,frame,info,232,324,420,PN_ALIGN_LEFT,PN_UI_MUTED,false);}
-    if(s==PN_OK){snprintf(info,sizeof info,"背景边距：上%u 下%u 左%u 右%u",u->draft.bg_margin_top,u->draft.bg_margin_bottom,u->draft.bg_margin_left,u->draft.bg_margin_right);s=pn_w_text_ex(font,frame,info,232,366,420,PN_ALIGN_LEFT,PN_UI_MUTED,false);}
-    if(s==PN_OK)s=pn_w_group(font,frame,"正文与上下栏",452);
-    pn_w_round_stroke(frame,32,464,620,72,10,1,8);
+    if(s==PN_OK){snprintf(info,sizeof info,"上下栏：%s",u->draft.hide_bars?"已隐藏（全屏正文）":"显示状态栏与页脚");s=pn_w_text_ex(font,frame,info,204,216,448,PN_ALIGN_LEFT,PN_UI_MUTED,false);}
+    if(s==PN_OK){snprintf(info,sizeof info,"正文边距：上%d 下%d 左%d 右%d",pn_style_margin_top(&u->draft),pn_style_margin_bottom(&u->draft),pn_style_margin_left(&u->draft),pn_style_margin_right(&u->draft));s=pn_w_text_ex(font,frame,info,204,254,448,PN_ALIGN_LEFT,PN_UI_MUTED,false);}
+    if(s==PN_OK){snprintf(info,sizeof info,"阅读背景：%s",u->draft.background==PN_READING_BACKGROUND_EXTERNAL?"自定义":pn_reading_background_name(u->draft.background));s=pn_w_text_ex(font,frame,info,204,292,448,PN_ALIGN_LEFT,PN_UI_MUTED,false);}
+    if(s==PN_OK){snprintf(info,sizeof info,"背景边距：上%u 下%u 左%u 右%u",u->draft.bg_margin_top,u->draft.bg_margin_bottom,u->draft.bg_margin_left,u->draft.bg_margin_right);s=pn_w_text_ex(font,frame,info,204,330,448,PN_ALIGN_LEFT,PN_UI_MUTED,false);}
+    if(s==PN_OK)s=pn_w_group(font,frame,"正文与上下栏",392);
+    pn_w_round_stroke(frame,32,404,620,72,10,1,8);
     if(s==PN_OK)s=pn_font_size(font,24);
-    if(s==PN_OK)s=pn_w_text(font,frame,"去上下栏（隐藏状态栏与页脚）",48,509,430,PN_ALIGN_LEFT);
-    if(s==PN_OK)s=pn_w_text_ex(font,frame,u->draft.hide_bars?"已开启":"已关闭",48,509,580,PN_ALIGN_RIGHT,PN_UI_INK,u->draft.hide_bars!=0);
-    if(s==PN_OK)s=margin_stepper(font,frame,"正文上边距",pn_style_margin_top(&u->draft),32,548);
-    if(s==PN_OK)s=margin_stepper(font,frame,"正文下边距",pn_style_margin_bottom(&u->draft),352,548);
-    if(s==PN_OK)s=margin_stepper(font,frame,"正文左边距",pn_style_margin_left(&u->draft),32,636);
-    if(s==PN_OK)s=margin_stepper(font,frame,"正文右边距",pn_style_margin_right(&u->draft),352,636);
-    if(s==PN_OK)s=pn_w_group(font,frame,"阅读背景边距",758);
-    if(s==PN_OK)s=margin_stepper(font,frame,"背景上边距",u->draft.bg_margin_top,32,770);
-    if(s==PN_OK)s=margin_stepper(font,frame,"背景下边距",u->draft.bg_margin_bottom,352,770);
-    if(s==PN_OK)s=margin_stepper(font,frame,"背景左边距",u->draft.bg_margin_left,32,858);
-    if(s==PN_OK)s=margin_stepper(font,frame,"背景右边距",u->draft.bg_margin_right,352,858);
-    if(s==PN_OK){s=pn_font_size(font,22);if(s==PN_OK)s=pn_w_text_ex(font,frame,"调整步进 4px；可先点整页预览查看效果",32,980,620,PN_ALIGN_CENTER,PN_UI_MUTED,false);}
+    if(s==PN_OK)s=pn_w_text(font,frame,"去上下栏（隐藏状态栏与页脚）",48,449,430,PN_ALIGN_LEFT);
+    if(s==PN_OK)s=pn_w_text_ex(font,frame,u->draft.hide_bars?"已开启":"已关闭",48,449,580,PN_ALIGN_RIGHT,PN_UI_INK,u->draft.hide_bars!=0);
+    if(s==PN_OK)s=margin_stepper(font,frame,"正文上边距",pn_style_margin_top(&u->draft),32,488);
+    if(s==PN_OK)s=margin_stepper(font,frame,"正文下边距",pn_style_margin_bottom(&u->draft),352,488);
+    if(s==PN_OK)s=margin_stepper(font,frame,"正文左边距",pn_style_margin_left(&u->draft),32,606);
+    if(s==PN_OK)s=margin_stepper(font,frame,"正文右边距",pn_style_margin_right(&u->draft),352,606);
+    if(s==PN_OK)s=pn_w_group(font,frame,"阅读背景边距",750);
+    if(s==PN_OK)s=margin_stepper(font,frame,"背景上边距",u->draft.bg_margin_top,32,762);
+    if(s==PN_OK)s=margin_stepper(font,frame,"背景下边距",u->draft.bg_margin_bottom,352,762);
+    if(s==PN_OK)s=margin_stepper(font,frame,"背景左边距",u->draft.bg_margin_left,32,880);
+    if(s==PN_OK)s=margin_stepper(font,frame,"背景右边距",u->draft.bg_margin_right,352,880);
+    if(s==PN_OK){s=pn_font_size(font,22);if(s==PN_OK)s=pn_w_text_ex(font,frame,"步进 4px · 长按连调 · 可先点整页预览查看效果",32,1034,620,PN_ALIGN_CENTER,PN_UI_MUTED,false);}
     if(s==PN_OK && u->notice){s=pn_font_size(font,24);if(s==PN_OK)s=pn_w_text_ex(font,frame,u->notice,32,APPLY_Y-14,620,PN_ALIGN_CENTER,PN_UI_INK,true);}
     if(s==PN_OK)s=pn_font_size(font,30);
     if(s==PN_OK)s=pn_w_button(font,frame,"整页预览",32,APPLY_Y,300,APPLY_H,0u);
@@ -385,16 +395,16 @@ int pn_style_ui_hit(const pn_style_ui_t *u,int x,int y){
     if(u->preview)return PN_SUI_FORM;
     if(u->margins){
         if(y<PN_W_HEADER_H){if(pn_w_header_hit(x,y,false)==1)return PN_SUI_MARGINS_BACK;return x>=480 && y>=44?PN_SUI_MARGINS_RESET:-1;}
-        if(y>=464 && y<536 && x>=32 && x<652)return PN_SUI_TOGGLE_BARS;
+        if(y>=404 && y<476 && x>=32 && x<652)return PN_SUI_TOGGLE_BARS;
         if(y>=APPLY_Y && y<APPLY_Y+APPLY_H){if(x>=32 && x<332)return PN_SUI_PREVIEW;if(x>=352 && x<652)return PN_SUI_APPLY;return -1;}
-        static const int tops[4]={548,636,770,858};
+        static const int tops[4]={488,606,762,880};
         for(unsigned row=0;row<4;row++){
             int top=tops[row];
-            if(y>=top+26 && y<top+CELL_H){
+            if(y>=top && y<top+MCELL_H){
                 for(unsigned col=0;col<2;col++){
                     int left=32+(int)col*CELL_PITCH;unsigned item=row*2+col;
-                    if(x>=left && x<left+68)return PN_SUI_MARGIN_ADJ+(int)item*2;
-                    if(x>=left+CELL_W-68 && x<left+CELL_W)return PN_SUI_MARGIN_ADJ+(int)item*2+1;
+                    if(x>=left && x<left+MHIT_W)return PN_SUI_MARGIN_ADJ+(int)item*2;
+                    if(x>=left+CELL_W-MHIT_W && x<left+CELL_W)return PN_SUI_MARGIN_ADJ+(int)item*2+1;
                 }
             }
         }

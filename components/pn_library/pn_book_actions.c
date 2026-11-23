@@ -46,6 +46,13 @@ pn_status_t pn_book_actions_render(const pn_book_actions_t *a,pn_font_t *font,pn
         if(s==PN_OK)s=pn_font_size(font,32);
         if(s==PN_OK)s=pn_w_button(font,frame,"取消",BUTTON_X,CONFIRM_Y,300,BUTTON_H,0u);
         if(s==PN_OK){pn_w_round_stroke(frame,352,CONFIRM_Y,300,BUTTON_H,PN_UI_RADIUS,3.0f,PN_UI_INK);s=pn_w_text_ex(font,frame,"删除",352,CONFIRM_Y+BUTTON_H/2+12,300,PN_ALIGN_CENTER,PN_UI_INK,true);}
+        if(s==PN_OK && a->deleting){
+            // 删除进行中：柔化底层确认页并叠加居中loading卡片遮罩，防止重复点击。
+            // Deleting in progress: softly dim the confirmation backdrop and overlay a centered loading card to prevent duplicate taps.
+            for(int y=0;y<frame->height;y+=2)for(int x=0;x<frame->width;x+=2){uint8_t px=pn_frame_get(frame,x,y);pn_frame_pixel(frame,x,y,px>11u?11u:px);}
+            s=pn_w_loading(font,frame,"正在删除图书","正在移除文件，请稍候",-1,450);
+            pn_w_round_stroke(frame,PN_UI_MARGIN,450,frame->width-2*PN_UI_MARGIN,300,PN_UI_CARD_RADIUS,2.5f,PN_UI_INK);
+        }
     }else{
         // 底部面板：不加遮罩，书名、信息、路径与三个操作。/ Bottom sheet without a mask: title, information, path and three actions.
         pn_w_round_fill(frame,-2,SHEET_Y-4,PN_UI_WIDTH+4,PN_UI_HEIGHT-SHEET_Y+44,PN_UI_CHIP_RADIUS,PN_UI_SELECT);
@@ -69,7 +76,7 @@ pn_status_t pn_book_actions_render(const pn_book_actions_t *a,pn_font_t *font,pn
     pn_status_t restored=pn_font_size(font,original);return s==PN_OK?restored:s;
 }
 int pn_book_actions_hit(const pn_book_actions_t *a,int x,int y){
-    if(!a || x<0 || x>=PN_UI_WIDTH || y<0 || y>=PN_UI_HEIGHT)return -1;
+    if(!a || a->deleting || x<0 || x>=PN_UI_WIDTH || y<0 || y>=PN_UI_HEIGHT)return -1;
     if(a->confirming){
         if(pn_w_header_hit(x,y,false)==1)return PN_BA_CANCEL;
         if(y>=CONFIRM_Y && y<CONFIRM_Y+BUTTON_H){if(x>=BUTTON_X && x<BUTTON_X+300)return PN_BA_CANCEL;if(x>=352 && x<652)return PN_BA_CONFIRM;}

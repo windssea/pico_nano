@@ -42,6 +42,9 @@ int main(void){
     a.favorites_known=false;assert(pn_book_actions_render(&a,&font,&frame)==PN_OK && pn_book_actions_hit(&a,300,960)==-1);
     a.confirming=true;a.notice="删除失败，请重试";assert(pn_book_actions_render(&a,&font,&frame)==PN_OK);
     assert(pn_book_actions_hit(&a,150,940)==PN_BA_CANCEL && pn_book_actions_hit(&a,500,940)==PN_BA_CONFIRM && pn_book_actions_hit(&a,60,90)==PN_BA_CANCEL && pn_book_actions_hit(&a,300,300)==-1);
+    /* 删除中遮罩拦截全部触控并渲染等待卡片。/ Deleting loading overlay blocks all touches and renders the waiting card. */
+    a.deleting=true;assert(pn_book_actions_render(&a,&font,&frame)==PN_OK && font.pixels==24);
+    assert(pn_book_actions_hit(&a,150,940)==-1 && pn_book_actions_hit(&a,500,940)==-1 && pn_book_actions_hit(&a,60,90)==-1 && pn_book_actions_hit(&a,300,300)==-1);
     pn_font_close(&font);pn_free(bytes);free(page);free(list);assert(!pool.live && !pool.used);
     char a_path[400],b_path[400];snprintf(a_path,sizeof a_path,"%s/favorites.a",root);snprintf(b_path,sizeof b_path,"%s/favorites.b",root);
     (void)unlink(a_path);(void)unlink(b_path);assert(unlink(book)==0 && rmdir(root)==0);return 0;

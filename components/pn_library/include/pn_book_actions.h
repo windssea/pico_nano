@@ -22,6 +22,7 @@ typedef struct {
     bool favorite; ///< 当前是否已收藏 / Currently a favorite
     bool favorites_known; ///< 收藏状态可读 / Favorite state is readable
     bool confirming; ///< 正在确认删除 / Confirming deletion
+    bool deleting; ///< 正在执行删除，显示loading遮罩并屏蔽点击 / Deleting in progress: show loading overlay and block taps
     const char *notice; ///< 静态反馈，可NULL / Static feedback, may be NULL
 } pn_book_actions_t;
 /// 在frame下部画操作面板（上方保留原书架作为背景），或整页删除确认。/ Draw the actions sheet over the lower frame (the shelf stays above as context), or the full deletion confirmation.

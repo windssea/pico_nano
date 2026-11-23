@@ -19,7 +19,7 @@ typedef struct {
     uint8_t played_moves[PN_TG_UNDO]; ///< 回放恢复用的黑棋着法序列 / Played Black moves for deterministic save replay
     pn_tg_screen_t screen;
     unsigned tier, selected_level;
-    bool has, dirty, running, fresh_clock, restart, pending_start, patch, full;
+    bool has, dirty, running, fresh_clock, restart, pending_start, load_error, patch, full;
     uint64_t last, changed, retry;
 } tg_t;
 

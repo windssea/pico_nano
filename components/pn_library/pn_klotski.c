@@ -481,6 +481,8 @@ static pn_status_t start_level(pn_klotski_t *u, kl_t *g, unsigned id, uint64_t n
     g->screen = PN_KL_PLAY;
     g->notice = NULL;
     g->pending_start = false;
+    /* 开局/重开立即落盘，避免2秒空闲窗内断电丢局。/ Persist immediately on start/restart so power loss within the idle window keeps the new level. */
+    if (save_now(g, now) != PN_OK) g->notice = "保存失败，退出前将重试";
     mark_full(u, g);
     return PN_OK;
 }
@@ -520,9 +522,11 @@ pn_status_t pn_klotski_open(pn_klotski_t *u, pn_pool_t *pool, pn_media_t *media,
                 g->running = true;
             }
         } else if (s == PN_CORRUPT) {
+            g->load_error = true;
             g->screen = PN_KL_ERROR;
             g->notice = "存档已损坏，已保留原文件";
         } else if (s != PN_EMPTY) {
+            g->load_error = true;
             g->screen = PN_KL_ERROR;
             g->notice = "存档读取失败，请重试";
         }
@@ -563,7 +567,7 @@ static pn_status_t handle_cell_tap(pn_klotski_t *u, kl_t *g, unsigned cell, uint
             if (g->state.solved) {
                 g->running = false;
                 g->screen = PN_KL_COMPLETE;
-                (void)save_now(g, now);
+                if (save_now(g, now) != PN_OK) g->notice = "保存失败，请重试";
                 mark_full(u, g);
             } else {
                 mark_patch(u, g);
@@ -589,7 +593,7 @@ static pn_status_t handle_cell_tap(pn_klotski_t *u, kl_t *g, unsigned cell, uint
         if (g->state.solved) {
             g->running = false;
             g->screen = PN_KL_COMPLETE;
-            (void)save_now(g, now);
+            if (save_now(g, now) != PN_OK) g->notice = "保存失败，请重试";
             mark_full(u, g);
         } else {
             mark_patch(u, g);
@@ -630,6 +634,33 @@ pn_status_t pn_klotski_event(pn_klotski_t *u, int cmd, uint64_t now) {
             return PN_OK;
         }
         if (cmd == PN_KL_RETRY || cmd == PN_KL_START) {
+            if (g->load_error) {
+                bool has = false;
+                pn_status_t s = kl_storage(g, &g->state, &has, false);
+                if (s == PN_OK) {
+                    g->load_error = false;
+                    g->has = has;
+                    g->tier = g->state.level.tier;
+                    g->selected_level = g->state.level.id;
+                    g->screen = (has && !g->state.solved) ? PN_KL_PLAY : PN_KL_SELECT;
+                    g->running = (g->screen == PN_KL_PLAY);
+                    g->fresh_clock = true;
+                    g->notice = NULL;
+                    mark_full(u, g);
+                    return PN_OK;
+                }
+                if (s == PN_EMPTY) {
+                    g->load_error = false;
+                    g->has = false;
+                    g->screen = PN_KL_SELECT;
+                    g->notice = NULL;
+                    mark_full(u, g);
+                    return PN_OK;
+                }
+                g->notice = (s == PN_CORRUPT) ? "存档已损坏，已保留原文件" : "存档读取失败，请重试";
+                mark_full(u, g);
+                return s;
+            }
             pn_status_t s = save_now(g, now);
             if (s != PN_OK) {
                 g->notice = "存储仍不可用，请重试";
@@ -641,7 +672,7 @@ pn_status_t pn_klotski_event(pn_klotski_t *u, int cmd, uint64_t now) {
             mark_full(u, g);
             return PN_OK;
         }
-        if (cmd == PN_KL_CHOOSE) {
+        if (cmd == PN_KL_CHOOSE && !g->load_error) {
             g->screen = PN_KL_SELECT;
             g->notice = NULL;
             mark_full(u, g);
@@ -651,6 +682,19 @@ pn_status_t pn_klotski_event(pn_klotski_t *u, int cmd, uint64_t now) {
     }
 
     if (g->screen == PN_KL_CONFIRM) {
+        if (cmd == PN_KL_EXIT) {
+            g->running = false;
+            g->restart = false;
+            pn_status_t s = save_now(g, now);
+            if (s != PN_OK) {
+                g->screen = PN_KL_ERROR;
+                g->notice = "退出前保存失败，请重试";
+                mark_full(u, g);
+                return s;
+            }
+            u->active = false;
+            return PN_OK;
+        }
         if (cmd == PN_KL_CANCEL || cmd == PN_KL_BACK) {
             g->screen = g->has ? PN_KL_PLAY : PN_KL_SELECT;
             g->running = (g->screen == PN_KL_PLAY && !g->state.solved);
@@ -780,7 +824,7 @@ pn_status_t pn_klotski_event(pn_klotski_t *u, int cmd, uint64_t now) {
     }
     if (cmd == PN_KL_CHOOSE) {
         g->running = false;
-        (void)save_now(g, now);
+        g->notice = (save_now(g, now) != PN_OK) ? "保存失败，请重试" : NULL;
         g->screen = PN_KL_SELECT;
         g->tier = g->state.level.tier;
         g->selected_level = g->state.level.id;
@@ -832,7 +876,7 @@ pn_status_t pn_klotski_event(pn_klotski_t *u, int cmd, uint64_t now) {
         if (g->state.solved) {
             g->running = false;
             g->screen = PN_KL_COMPLETE;
-            (void)save_now(g, now);
+            if (save_now(g, now) != PN_OK) g->notice = "保存失败，请重试";
             mark_full(u, g);
         } else {
             mark_patch(u, g);
@@ -853,7 +897,7 @@ pn_status_t pn_klotski_event(pn_klotski_t *u, int cmd, uint64_t now) {
             if (g->state.solved) {
                 g->running = false;
                 g->screen = PN_KL_COMPLETE;
-                (void)save_now(g, now);
+                if (save_now(g, now) != PN_OK) g->notice = "保存失败，请重试";
                 mark_full(u, g);
             } else {
                 mark_patch(u, g);
@@ -878,7 +922,9 @@ pn_status_t pn_klotski_tick(pn_klotski_t *u, uint64_t now) {
 pn_status_t pn_klotski_pause(pn_klotski_t *u, uint64_t now) {
     if (!u || !u->impl) return PN_INVALID;
     kl_t *g = u->impl;
+    uint64_t before = g->state.elapsed_ms;
     tick_clock(g, now);
+    if (g->has && !g->state.solved && g->state.elapsed_ms != before) g->dirty = true;
     g->running = false;
     g->fresh_clock = true;
     pn_status_t s = save_now(g, now);
@@ -893,6 +939,9 @@ pn_status_t pn_klotski_pause(pn_klotski_t *u, uint64_t now) {
 void pn_klotski_displayed(pn_klotski_t *u, bool ok) {
     if (!u || !u->impl) return;
     kl_t *g = u->impl;
+    bool running = ok && g->screen == PN_KL_PLAY && !g->state.solved;
+    if (running && !g->running) g->fresh_clock = true;
+    g->running = running;
     u->presented = ok;
     if (ok) {
         if (g->screen == PN_KL_PLAY) snapshot_shown(g);

@@ -983,6 +983,8 @@ static bool mount_data(void){
     if(error!=ESP_OK){ESP_LOGE(TAG,"Internal data mount failed: %s; preserving partition",esp_err_to_name(error));return false;}
     size_t total=0,used=0;error=esp_littlefs_info("data",&total,&used);if(error!=ESP_OK){(void)esp_vfs_littlefs_unregister("data");return false;}
     if(!data_media.available && pn_media_attach(&data_media,1)!=PN_OK)return false;
+    // 确保内部进度与游戏存档目录在首次开书前也已存在。/ Ensure the internal progress and game-save directory exists even before opening any book.
+    if(mkdir("/data/progress",0700)!=0 && errno!=EEXIST)ESP_LOGW(TAG,"Internal progress dir init failed: errno=%d",errno);
     ESP_LOGI(TAG,"Internal data mounted: %u/%u bytes",(unsigned)used,(unsigned)total);return true;
 }
 /// 非破坏挂载内部壁纸分区；失败只回退默认锁屏，不格式化。/ Non-destructively mount the internal wallpaper partition; failures only fall back to the default lock screen, never formatting.
@@ -3117,8 +3119,9 @@ static void apply_selection(int selection){
             (void)draw_shelf(PN_REFRESH_GL16);}
         else if(selection==PN_BA_DELETE){actions.confirming=true;actions.notice=NULL;(void)draw_shelf(PN_REFRESH_GL16);}
         else if(selection==PN_BA_CONFIRM){
-            // 删除前确认没有书正打开并归还TF只读消费者（含系统字体、封面任务与预览）；只删用户选中的这一个文件。
-            // Ensure no book is open and release TF read consumers (system font, cover work, previews) before deleting only the selected file.
+            // 先显示loading遮罩，再归还TF只读消费者并删除选中的文件，避免界面看似卡死。
+            // Present the loading overlay before releasing TF read consumers and deleting the selected file so the UI never appears frozen.
+            actions.deleting=true;actions.notice=NULL;(void)draw_shelf(PN_REFRESH_GL16);
             resource_previews_close();
             pn_status_t status=stop_reader()?PN_OK:PN_BUSY;pn_media_lease_t lease={0};
             if(status==PN_OK){system_font_release();status=pn_media_acquire(&sd_media,PN_MEDIA_WRITE,&lease);}
@@ -3127,6 +3130,7 @@ static void apply_selection(int selection){
                 else{pn_catalog_index_invalidate(&catalog_index);recent_loaded=false;if(last_read_known && !strcmp(last_read_book.path,actions.item.path))last_read_known=false;}
             }else ESP_LOGW(TAG,"Delete book media acquire failed status=%d active_leases=%zu",(int)status,pn_media_active(&sd_media));
             if(lease.ticket)(void)pn_media_release(&sd_media,&lease);
+            actions.deleting=false;
             if(status==PN_OK){actions_mode=false;if(!strcmp(selected_path,actions.item.path))selected_path[0]=0;show_shelf("",false);}
             else{system_font_ready();actions.notice="删除失败，文件仍保留";(void)draw_shelf(PN_REFRESH_GL16);}}
     }
@@ -3510,31 +3514,38 @@ static void device_task(void *arg){
                 else start_reader();}}}
         bool background=false;
         if(!locked && tsumego.active && available==PN_EMPTY && !touch_held && !tap.down){
-            (void)pn_tsumego_tick(&tsumego,now_ms());
+            pn_status_t st=pn_tsumego_tick(&tsumego,now_ms());
+            if(st!=PN_OK && st!=PN_EMPTY && st!=PN_BUSY)ESP_LOGW(TAG,"Tsumego background save failed: %d",(int)st);
             if(!tsumego.presented && now_ms()-tsumego_retry>=1000)(void)tsumego_draw(false);
         }
         if(!locked && klotski.active && available==PN_EMPTY && !touch_held && !tap.down){
-            (void)pn_klotski_tick(&klotski,now_ms());
+            pn_status_t st=pn_klotski_tick(&klotski,now_ms());
+            if(st!=PN_OK && st!=PN_EMPTY && st!=PN_BUSY)ESP_LOGW(TAG,"Klotski background save failed: %d",(int)st);
             if(!klotski.presented && now_ms()-klotski_retry>=1000)(void)klotski_draw(false);
         }
         if(!locked && xiangqi.active && available==PN_EMPTY && !touch_held && !tap.down){
-            (void)pn_xiangqi_tick(&xiangqi,now_ms());
+            pn_status_t st=pn_xiangqi_tick(&xiangqi,now_ms());
+            if(st!=PN_OK && st!=PN_EMPTY && st!=PN_BUSY)ESP_LOGW(TAG,"Xiangqi background save failed: %d",(int)st);
             if(!xiangqi.presented && now_ms()-xiangqi_retry>=1000)(void)xiangqi_draw(false);
         }
         if(!locked && nonogram.active && available==PN_EMPTY && !touch_held && !tap.down){
-            (void)pn_nonogram_tick(&nonogram,now_ms());
+            pn_status_t st=pn_nonogram_tick(&nonogram,now_ms());
+            if(st!=PN_OK && st!=PN_EMPTY && st!=PN_BUSY)ESP_LOGW(TAG,"Nonogram background save failed: %d",(int)st);
             if(!nonogram.presented && now_ms()-nonogram_retry>=1000)(void)nonogram_draw(false);
         }
         if(!locked && minesweeper.active && available==PN_EMPTY && !touch_held && !tap.down){
-            (void)pn_minesweeper_tick(&minesweeper,now_ms());
+            pn_status_t st=pn_minesweeper_tick(&minesweeper,now_ms());
+            if(st!=PN_OK && st!=PN_EMPTY && st!=PN_BUSY)ESP_LOGW(TAG,"Minesweeper background save failed: %d",(int)st);
             if(!minesweeper.presented && now_ms()-minesweeper_retry>=1000)(void)minesweeper_draw(false);
         }
         if(!locked && sokoban.active && available==PN_EMPTY && !touch_held && !tap.down){
-            (void)pn_sokoban_tick(&sokoban,now_ms());
+            pn_status_t st=pn_sokoban_tick(&sokoban,now_ms());
+            if(st!=PN_OK && st!=PN_EMPTY && st!=PN_BUSY)ESP_LOGW(TAG,"Sokoban background save failed: %d",(int)st);
             if(!sokoban.presented && now_ms()-sokoban_retry>=1000)(void)sokoban_draw(false);
         }
         if(!locked && sudoku.active && available==PN_EMPTY && !touch_held && !tap.down){
-            (void)pn_sudoku_tick(&sudoku,now_ms());background=pn_sudoku_pending(&sudoku);
+            pn_status_t st=pn_sudoku_tick(&sudoku,now_ms());background=pn_sudoku_pending(&sudoku);
+            if(st!=PN_OK && st!=PN_EMPTY && st!=PN_BUSY)ESP_LOGW(TAG,"Sudoku background save failed: %d",(int)st);
             if(!sudoku.presented && now_ms()-sudoku_retry>=1000)(void)sudoku_draw();
         }
         if(available==PN_EMPTY && !locked && styles.active && !touch_held && !tap.down){pn_status_t sampled=pn_style_ui_tick(&styles,present,NULL);background=sampled==PN_BUSY;}

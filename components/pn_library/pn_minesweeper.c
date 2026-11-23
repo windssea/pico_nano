@@ -201,6 +201,7 @@ pn_status_t pn_minesweeper_event(pn_minesweeper_t *u, int cmd, uint64_t now) {
         else if (r == PN_EMPTY) g->screen = PN_MI_SELECT;
         if (r == PN_OK || r == PN_EMPTY) { g->notice = NULL; u->presented = false; } return r;
     }
+    if (cmd == PN_MI_RETRY) return save(u, now);
     if (g->screen == PN_MI_ERROR) return PN_EMPTY;
     if (cmd == PN_MI_CLEAN) { u->presented = false; return PN_OK; }
     if ((g->screen == PN_MI_PLAY || g->screen == PN_MI_COMPLETE) && cmd >= PN_MI_TIER && cmd < PN_MI_TIER + 3) {
@@ -232,7 +233,7 @@ pn_status_t pn_minesweeper_event(pn_minesweeper_t *u, int cmd, uint64_t now) {
         unsigned c = (unsigned)(cmd - PN_MI_CELL);
         r = g->state.flag_mode ? pn_minesweeper_flag(&g->state, c) : mi_bit(g->state.opened, c) ? pn_minesweeper_chord(&g->state, c) : pn_minesweeper_reveal(&g->state, c);
     }
-    if (r == PN_OK) { g->dirty = true; g->changed = now; u->presented = false; g->screen = g->state.result >= PN_MI_WON ? PN_MI_COMPLETE : PN_MI_PLAY; if (g->state.result >= PN_MI_WON) g->running = false; }
+    if (r == PN_OK) { g->dirty = true; g->changed = now; u->presented = false; g->screen = g->state.result >= PN_MI_WON ? PN_MI_COMPLETE : PN_MI_PLAY; if (g->state.result >= PN_MI_WON) { g->running = false; (void)save(u, now); } }
     return r;
 }
 void pn_minesweeper_displayed(pn_minesweeper_t *u, bool ok) {

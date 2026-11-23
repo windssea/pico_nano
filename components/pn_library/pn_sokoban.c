@@ -620,6 +620,8 @@ pn_status_t pn_sokoban_event(pn_sokoban_t *u, int cmd, uint64_t now) {
         g->notice = so_dead(&g->state) ? "箱子进入角落，可撤销" : NULL;
         if (old != g->notice || was != g->state.complete)
             g->full = true;
+        if (g->state.complete)
+            (void)save(u, now);
     }
     return r;
 }

@@ -904,6 +904,8 @@ pn_status_t pn_nonogram_event(pn_nonogram_t *u, int cmd, uint64_t now) {
         g->dirty = true;
         g->changed = now;
         u->presented = false;
+        if (g->state.complete)
+            (void)save(u, now);
     }
     return r;
 }
