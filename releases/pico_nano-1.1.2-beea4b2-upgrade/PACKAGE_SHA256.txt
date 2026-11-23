@@ -1,0 +1,2 @@
+a526dd9a52e9962197c16e818644420cd35ce19acff6136221985427a95595e9  PicoNano-beea4b2-upgrade.zip
+3537a23d7b90eebe3fcbc9ac282e27d38fef127104cf169926eff06b53d46e65  PicoNano-web-installer-beea4b2.zip
