@@ -91,6 +91,20 @@
         </select>
       </label>
       <p id="mode-note" class="muted"></p>
+      <div id="local-package-box" class="package-box">
+        <div class="package-head">
+          <strong>国内加速：从 Gitee 下载并导入本地固件包</strong>
+          <a id="gitee-release" class="text-link package-link" href="https://gitee.com/windssea/pico_nano/releases" target="_blank" rel="noopener">Gitee 发布页 <span aria-hidden="true">↗</span></a>
+        </div>
+        <p class="muted">若在线下载固件较慢，可先从 Gitee 下载对应 ZIP（支持升级包、完整包或离线网页包），再直接导入或拖放到此处；导入后同样逐文件校验 SHA-256，刷机时不再从 GitHub 拉取固件。</p>
+        <div class="actions package-actions">
+          <a id="gitee-download" class="button secondary" href="https://gitee.com/windssea/pico_nano/releases" target="_blank" rel="noopener">从 Gitee 下载固件包</a>
+          <button type="button" id="import-package" disabled>导入本地固件包（ZIP）</button>
+          <button type="button" id="clear-package" hidden>改回在线下载</button>
+          <input type="file" id="package-file" accept=".zip,application/zip" hidden>
+        </div>
+        <p id="local-package-status" class="package-status muted">当前使用在线固件源；也可以直接将下载好的 ZIP 拖放到此处。</p>
+      </div>
     </section>
     <section id="connection" class="card connection-card">
       <h3><span class="step-number">1</span> 连接你的阅读器</h3>
@@ -139,6 +153,10 @@
     <div class="container">
     <section id="help" class="help section" aria-labelledby="help-title">
       <div class="section-heading"><h2 id="help-title">有疑问？从这里开始。</h2><p>连接、备份与恢复，你可能需要的答案。</p></div>
+      <details>
+        <summary>下载慢或卡在 Stub running... 怎么办？</summary>
+        <p>在“选择固件”卡片中先选好刷入方式，点击“从 Gitee 下载…”获取对应的 ZIP 固件包（升级包、完整包或离线网页包均可），再点“导入本地固件包（ZIP）”或把压缩包直接拖入页面；校验通过后再点击“连接设备”，整个过程无需从 GitHub 拉取大文件，也无需安装 Python。若读取或写入仍超时，请改插电脑主板直连 USB 口并更换数据线。</p>
+      </details>
       <details>
         <summary>找不到设备串口，怎么办？</summary>
         <p>先确认 USB 线能传输数据，尝试换一根线或电脑上的另一个 USB 接口。关闭串口监视器、esptool 和其他占用设备的刷机网页，再点击“连接设备”。如果仍无法连接，按原厂说明进入下载模式后重试。</p>

@@ -1,16 +1,18 @@
-/// 网页安装器界面与串口流程：读取设备现状、按 plan.js 写入并逐段 MD5 校验。
-/// Web-installer UI and serial flow: read the device state, write per plan.js and verify every region by MD5.
+/// 网页安装器界面与串口流程：支持在线与本地 Gitee ZIP 固件包，读取设备现状、按 plan.js 写入并逐段 MD5 校验。
+/// Web-installer UI and serial flow: support online and local Gitee ZIP packages, read the device state, write per plan.js and verify every region by MD5.
 import { ESPLoader, Transport } from "./vendor/esptool-js-0.5.7/bundle.js";
+import { extractReleasePackage, giteeDownloadInfo } from "./package.js";
 import { isLittleFs, layoutOf, preservedLayoutOf, md5, planInstall, TABLE_OFFSET, TABLE_SIZE } from "./plan.js";
-import { resetAfterFlash } from "./reset.js";
+import { disableNativeWatchdogs, resetAfterFlash } from "./reset.js";
 
 const FLASH_BYTES = 16 * 1024 * 1024;
 const BAUD = 115200;
 const HEAD = 0x2000;
+const DOWNLOAD_STALL_MS = 90000;
 const FILE_KEYS = ["bootloader", "partitionTable", "otaData", "app", "factoryData", "factoryWallpaper"];
 
 const $ = (id) => document.getElementById(id);
-const state = { manifest: null, release: null, files: null, loader: null, transport: null, device: null, plan: null, busy: false };
+const state = { manifest: null, release: null, files: null, localPackage: null, loader: null, transport: null, device: null, plan: null, busy: false };
 
 function log(text) {
   const line = document.createElement("div");
@@ -37,21 +39,105 @@ async function sha256(bytes) {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+/// 下载单个固件文件并按清单长度和 SHA-256 校验；支持流式进度与空闲超时。
+/// Fetch a single release file and check its manifest size and SHA-256, with streaming progress and stall timeout.
+async function fetchReleaseFile(release, entry, onProgress) {
+  const url = new URL(entry.name, new URL(release.path, location.href));
+  const useAbort = typeof AbortController === "function" && typeof setTimeout === "function" && typeof clearTimeout === "function";
+  const controller = useAbort ? new AbortController() : null;
+  let timer = null;
+  const arm = () => {
+    if (!controller) return;
+    if (timer !== null) clearTimeout(timer);
+    timer = setTimeout(() => controller.abort(), DOWNLOAD_STALL_MS);
+  };
+  arm();
+  try {
+    const response = await fetch(url, controller ? { cache: "no-cache", signal: controller.signal } : { cache: "no-cache" });
+    if (!response.ok) throw new Error(`下载 ${entry.name} 失败（${response.status}）`);
+    let bytes;
+    if (response.body && typeof response.body.getReader === "function") {
+      const reader = response.body.getReader();
+      const chunks = [];
+      let received = 0;
+      try {
+        for (;;) {
+          arm();
+          const { value, done } = await reader.read();
+          if (done) break;
+          chunks.push(value);
+          received += value.length;
+          if (onProgress) onProgress(received);
+        }
+      } finally {
+        reader.releaseLock();
+      }
+      bytes = new Uint8Array(received);
+      let offset = 0;
+      for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
+    } else {
+      bytes = new Uint8Array(await response.arrayBuffer());
+      if (onProgress) onProgress(bytes.length);
+    }
+    if (bytes.length !== entry.size || (await sha256(bytes)) !== entry.sha256) throw new Error(`${entry.name} 校验失败，请刷新页面重试`);
+    return bytes;
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new Error(`下载 ${entry.name} 超时无响应；请改用“从 Gitee 下载”后导入本地固件包`);
+    }
+    throw error;
+  } finally {
+    if (timer !== null) clearTimeout(timer);
+  }
+}
+
 /// 下载并以清单中的 SHA-256 校验固件文件。/ Download firmware files and check them against the manifest SHA-256.
 async function loadFiles(release) {
   const files = {};
   const preservingKeys = ["partitionTable", ...(release.files.currentPartitionTable ? ["currentPartitionTable"] : []), "app"];
-  for (const key of release.mode === "app-only" ? preservingKeys : FILE_KEYS) {
+  const keys = release.mode === "app-only" ? preservingKeys : FILE_KEYS;
+  const total = keys.reduce((sum, key) => sum + (release.files[key]?.size || 0), 0);
+  let completed = 0;
+  log(`正在在线下载 ${release.version || ""} 固件（共 ${kib(total)}）…`);
+  for (const key of keys) {
     const entry = release.files[key];
-    const response = await fetch(new URL(entry.name, new URL(release.path, location.href)), { cache: "no-cache" });
-    if (!response.ok) throw new Error(`下载 ${entry.name} 失败（${response.status}）`);
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    if (bytes.length !== entry.size || (await sha256(bytes)) !== entry.sha256) throw new Error(`${entry.name} 校验失败，请刷新页面重试`);
-    files[key] = bytes;
+    progress(`下载固件 ${entry.name}（${kib(completed)} / ${kib(total)}）`, completed, total);
+    files[key] = await fetchReleaseFile(release, entry, (received) => {
+      progress(`下载固件 ${entry.name}（${kib(completed + Math.min(received, entry.size))} / ${kib(total)}）`, completed + Math.min(received, entry.size), total);
+    });
+    completed += entry.size;
   }
+  progress("固件下载并校验完成", 1, 1);
+  log("在线固件下载并校验完成。");
   layoutOf(files.partitionTable);
   if (files.currentPartitionTable) layoutOf(files.currentPartitionTable);
   return files;
+}
+
+/// 更新 Gitee 下载直链和本地固件包导入状态。/ Refresh the Gitee download link and local package status.
+function renderLocalPackage() {
+  const info = giteeDownloadInfo(state.release);
+  const download = $("gitee-download");
+  download.href = info.downloadUrl;
+  download.textContent = info.fileName ? `从 Gitee 下载${info.modeLabel}（${info.fileName}）` : "打开 Gitee 发布页下载";
+  $("gitee-release").href = info.releaseUrl;
+  const tip = $("local-package-status");
+  if (state.localPackage) {
+    tip.textContent = `已导入本地固件包：${state.localPackage.fileName}（${state.localPackage.label} · SHA-256 校验通过）`;
+    tip.dataset.tone = "ok";
+    $("clear-package").hidden = false;
+  } else {
+    tip.textContent = "当前使用在线固件源；也可以直接将下载好的 ZIP 拖放到此处。";
+    tip.dataset.tone = "";
+    $("clear-package").hidden = true;
+  }
+}
+
+function clearLocalPackage() {
+  state.localPackage = null;
+  state.files = null;
+  $("package-file").value = "";
+  renderLocalPackage();
 }
 
 function renderRelease() {
@@ -61,6 +147,39 @@ function renderRelease() {
   const preserving = release.mode === "app-only";
   $("mode-note").textContent = preserving ? "支持已知旧布局及本项目完整刷入后的布局，仅更新应用。其他布局仍需完整刷入。"
     : "完整刷入会恢复引导与启动布局。请核对所选版本、备份及清除选项；不会自动切换刷入方式。";
+  renderLocalPackage();
+}
+
+/// 解析并严格校验用户从本地导入的官方固件 ZIP。/ Parse and strictly verify a locally imported official firmware ZIP.
+async function importPackageFile(file) {
+  if (!file || state.busy || !state.release) return;
+  state.busy = true;
+  state.plan = null;
+  $("plan").hidden = true;
+  syncButtons();
+  status(`正在解析并校验本地固件包 ${file.name}…`);
+  log(`正在校验本地固件包：${file.name}（${kib(file.size || 0)}）`);
+  try {
+    const zipBytes = new Uint8Array(await file.arrayBuffer());
+    const extracted = await extractReleasePackage(zipBytes, state.release, sha256, {
+      loadMissingFile: (_key, entry) => fetchReleaseFile(state.release, entry),
+    });
+    state.files = extracted.files;
+    state.localPackage = { fileName: file.name, label: extracted.label, version: state.release.version, mode: state.release.mode || "full" };
+    renderLocalPackage();
+    log(`本地固件包校验通过：${file.name}（${extracted.label}）`);
+    if (state.loader && state.device) {
+      await prepare();
+    } else {
+      state.busy = false;
+      syncButtons();
+      status(`已导入并校验本地固件包：${file.name}。请点击“连接设备”继续。`, "ok");
+    }
+  } catch (error) {
+    fail(error);
+  } finally {
+    $("package-file").value = "";
+  }
 }
 
 /// 按刷入方式列出可用包，不把旧升级包当作完整镜像。/ List packages by mode without treating an app-only package as a complete image.
@@ -76,7 +195,7 @@ function selectMode(preferredCommit) {
     select.append(option);
   }
   state.release = releases.find((r) => r.commit === preferredCommit) || releases[0];
-  state.files = null;
+  clearLocalPackage();
   state.plan = null;
   $("plan").hidden = true;
   for (const id of ["clear-nvs", "initialize-storage", "confirm-full", "confirm-model"]) $(id).checked = false;
@@ -112,7 +231,7 @@ async function init() {
     state.plan = null;
     $("plan").hidden = true;
     state.release = state.manifest.releases.find((r) => r.version === select.value && (r.mode || "full") === $("install-mode").value);
-    state.files = null;
+    clearLocalPackage();
     for (const id of ["confirm-model", "confirm-full", "clear-nvs", "initialize-storage"]) $(id).checked = false;
     renderRelease();
     if (state.device) prepare().catch(fail);
@@ -129,6 +248,7 @@ function fail(error) {
   state.busy = false;
   state.plan = null;
   $("plan").hidden = true;
+  $("progress").hidden = true;
   syncButtons();
 }
 
@@ -141,6 +261,8 @@ function syncButtons() {
   $("connect").textContent = state.loader ? "重新连接" : "连接设备";
   $("release").disabled = state.busy || !state.release;
   $("install-mode").disabled = state.busy || !state.manifest;
+  $("import-package").disabled = state.busy || !state.release;
+  $("clear-package").disabled = state.busy;
   for (const id of ["clear-nvs", "initialize-storage"]) $(id).disabled = state.busy || !full;
   $("confirm-full-label").hidden = !full;
 }
@@ -165,16 +287,31 @@ async function connect() {
   $("confirm-full").checked = false;
   status("请选择设备串口…");
   const port = await navigator.serial.requestPort({});
+  // 选中串口后先就绪固件再进下载会话，避免网络下载慢时设备长时间停在 Stub 等待。
+  // Ready the firmware after port selection and before entering stub download mode so slow networks never stall an active session.
+  if (!state.files) {
+    status(`正在下载并校验 ${state.release.version} 固件（如较慢可先从 Gitee 下载并导入本地包）…`);
+    state.files = await loadFiles(state.release);
+  } else if (state.localPackage) {
+    log(`使用已校验的本地固件包：${state.localPackage.fileName}（跳过在线下载）`);
+  }
   state.transport = new Transport(port, false);
+  // 屏蔽固定 esptool-js 0.5.7 读包时的无条件 trace/hexConvert 风暴，不改 vendor 源码。
+  // Suppress unconditional trace/hexConvert overhead during esptool-js 0.5.7 reads without modifying vendor code.
+  state.transport.trace = () => {};
+  state.transport.hexConvert = () => "";
   state.loader = new ESPLoader({ transport: state.transport, baudrate: BAUD, romBaudrate: 115200, terminal });
   status("正在连接，若一直无响应请让设备进入下载模式后重试…");
   const chip = await state.loader.main();
   if (state.loader.chip.CHIP_NAME !== "ESP32-S3") throw new Error(`检测到 ${chip}，本固件只支持 ESP32-S3`);
+  const portInfo = port.getInfo();
+  if (await disableNativeWatchdogs(state.loader, portInfo)) log("已关闭 ESP32-S3 原生 USB 看门狗。");
   const flashKiB = await state.loader.getFlashSize();
   if (flashKiB * 1024 !== FLASH_BYTES) throw new Error(`闪存容量为 ${flashKiB} KiB，本固件需要 16 MiB`);
   const mac = await state.loader.chip.readMac(state.loader);
-  state.device = { chip, mac, portInfo: port.getInfo() };
+  state.device = { chip, mac, portInfo };
   $("device").textContent = `${chip} · 16 MiB · MAC ${mac}`;
+  log(`已识别设备：${chip} · 16 MiB · MAC ${mac}`);
   await prepare();
 }
 
@@ -185,30 +322,37 @@ async function prepare() {
   $("plan").hidden = true;
   syncButtons();
   if (!state.files) {
-    status(`正在下载并校验 ${state.release.version} 固件…`);
+    status(`正在下载并校验 ${state.release.version} 固件（如较慢可先从 Gitee 下载并导入本地包）…`);
     state.files = await loadFiles(state.release);
   }
   const layout = layoutOf(state.files.partitionTable);
   status("正在读取设备分区表…");
+  log("正在读取设备分区表…");
   const deviceTable = await state.loader.readFlash(TABLE_OFFSET, TABLE_SIZE);
   // 未识别头部时读取完整分区，不能凭空白头部认定全部数据为空。/ Read the full partition for unrecognized headers; a blank header does not prove all data is blank.
-  const readStorage = async (partition) => {
+  const readStorage = async (label, partition) => {
     const head = await state.loader.readFlash(partition.offset, HEAD);
     if (head.length !== HEAD) throw new Error("内部分区读取不完整，停止写入 / incomplete storage read");
     if (isLittleFs(head)) return head;
-    const bytes = await state.loader.readFlash(partition.offset, partition.size);
+    status(`正在读取 ${label} 分区（${kib(partition.size)}）以确认是否为空…`);
+    log(`正在读取 ${label} 分区（${kib(partition.size)}）…`);
+    const bytes = await state.loader.readFlash(partition.offset, partition.size, (_packet, done, total) => {
+      progress(`读取 ${label} 分区 ${kib(done)} / ${kib(total)}`, done, total);
+    });
     if (bytes.length !== partition.size) throw new Error("内部分区读取不完整，停止写入 / incomplete storage read");
     return bytes;
   };
   const preserving = state.release?.mode === "app-only";
   const ota = preserving ? preservedLayoutOf(state.files, deviceTable).otadata : null;
   const otaReadback = preserving ? await state.loader.readFlash(ota.offset, ota.size) : null;
-  const dataHead = preserving ? null : await readStorage(layout.data);
-  const wallpaperHead = preserving ? null : await readStorage(layout.wallpaper);
+  const dataHead = preserving ? null : await readStorage("内部数据", layout.data);
+  const wallpaperHead = preserving ? null : await readStorage("锁屏壁纸", layout.wallpaper);
   state.device.reads = { deviceTable, dataHead, wallpaperHead, otaReadback };
   buildPlan();
+  $("progress").hidden = true;
   state.busy = false;
   syncButtons();
+  log("设备状态读取完成，请核对写入计划。");
   status(state.plan.needsNvsClear || state.plan.needsStorageInitialization
     ? "已读取设备状态：迁移需要明确选择清除／初始化，请核对计划并先备份。" : "已读取设备状态，请核对下方计划。",
     state.plan.needsNvsClear || state.plan.needsStorageInitialization ? "warn" : "ok");
@@ -264,13 +408,16 @@ function saveBlob(bytes, name) {
   setTimeout(() => URL.revokeObjectURL(url), 600000);
 }
 
-/// 整片读出备份；按 1 MiB 分块以便显示进度。/ Read a full-chip backup in 1 MiB chunks for progress.
+/// 整片读出备份；按 1 MiB 分块并实时回报进度。/ Read a full-chip backup in 1 MiB chunks with live progress.
 async function backup() {
   const chunk = 0x100000;
   const image = new Uint8Array(FLASH_BYTES);
+  log("开始备份整片闪存（16 MiB），期间请勿断开设备…");
   for (let at = 0; at < FLASH_BYTES; at += chunk) {
     progress(`备份整片闪存 ${kib(at)} / 16 MiB`, at, FLASH_BYTES);
-    const bytes = await state.loader.readFlash(at, chunk);
+    const bytes = await state.loader.readFlash(at, chunk, (_packet, done) => {
+      progress(`备份整片闪存 ${kib(at + done)} / 16 MiB`, at + done, FLASH_BYTES);
+    });
     if (bytes.length !== chunk) throw new Error("备份读取不完整，停止写入 / incomplete backup read");
     image.set(bytes, at);
   }
@@ -340,6 +487,26 @@ async function install() {
 
 $("connect").addEventListener("click", () => connect().catch(fail));
 $("install").addEventListener("click", () => install());
+$("import-package").addEventListener("click", () => { if (!state.busy && state.release) $("package-file").click?.(); });
+$("package-file").addEventListener("change", (event) => importPackageFile(event?.target?.files?.[0]));
+$("clear-package").addEventListener("click", () => {
+  if (state.busy) return;
+  clearLocalPackage();
+  log("已切换回在线固件源。");
+  if (state.loader && state.device) prepare().catch(fail);
+  else status("已改回在线固件源。", "");
+});
+const dropZone = $("local-package-box");
+dropZone.addEventListener("dragover", (event) => {
+  event?.preventDefault?.();
+  if (!state.busy && state.release) dropZone.classList?.add("is-dragover");
+});
+dropZone.addEventListener("dragleave", () => dropZone.classList?.remove("is-dragover"));
+dropZone.addEventListener("drop", (event) => {
+  event?.preventDefault?.();
+  dropZone.classList?.remove("is-dragover");
+  return importPackageFile(event?.dataTransfer?.files?.[0]);
+});
 $("confirm-model").addEventListener("change", syncButtons);
 $("confirm-full").addEventListener("change", syncButtons);
 $("install-mode").addEventListener("change", () => selectMode(state.release?.commit));

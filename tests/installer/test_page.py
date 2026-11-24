@@ -83,6 +83,21 @@ class InstallerPage(unittest.TestCase):
             self.assertEqual({entry.filename: archive.read(entry) for entry in archive.infolist()
                               if not entry.is_dir()}, wallpapers)
 
+    def test_gitee_download_and_local_zip_import_controls_exist(self):
+        elements = {attrs["id"]: (tag, attrs) for tag, attrs in Page(self.site).elements if "id" in attrs}
+        for key in ("gitee-download", "gitee-release"):
+            tag, attrs = elements[key]
+            self.assertEqual(tag, "a")
+            self.assertTrue(attrs.get("href", "").startswith("https://gitee.com/windssea/pico_nano/releases"))
+            self.assertNotIn("download", attrs)
+        btn_tag, btn_attrs = elements["import-package"]
+        self.assertEqual(btn_tag, "button")
+        self.assertIn("disabled", btn_attrs)
+        inp_tag, inp_attrs = elements["package-file"]
+        self.assertEqual((inp_tag, inp_attrs.get("type")), ("input", "file"))
+        self.assertIn(".zip", inp_attrs.get("accept", ""))
+        self.assertTrue((self.site / "package.js").is_file())
+
 
 if __name__ == "__main__":
     unittest.main()

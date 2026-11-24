@@ -6,7 +6,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import vm from "node:vm";
-import { resetAfterFlash } from "../../installer/reset.js";
+import { crc32, extractReleasePackage, giteeDownloadInfo, parseZip } from "../../installer/package.js";
+import { disableNativeWatchdogs, resetAfterFlash } from "../../installer/reset.js";
 import { isLittleFs, layoutOf, preservedLayoutOf, otaNeedsReset, md5, parseTable, planInstall, TABLE_OFFSET, TABLE_SIZE } from "../../installer/plan.js";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
@@ -317,6 +318,7 @@ test("page keeps connection after mismatch and supports explicit same-source ful
   let writes = 0;
   const loader = { async readFlash(address) { return address === TABLE_OFFSET ? foreign : fsHead; }, async writeFlash() { writes++; } };
   const context = vm.createContext({ document, navigator: { serial: {} }, console: { ...console, error() {} }, files, loader,
+    giteeDownloadInfo, extractReleasePackage, disableNativeWatchdogs,
     isLittleFs, layoutOf, preservedLayoutOf, otaNeedsReset, md5, planInstall, TABLE_OFFSET, TABLE_SIZE });
   const source = readFileSync(join(root, "installer/app.js"), "utf8").replace(/^import .*;\r?$/gm, "").replace("init().then(syncButtons);", "");
   vm.runInContext(source, context);
@@ -372,7 +374,7 @@ test("release picker separates same-version modes, clears destructive choices an
     { version: "1+abc", commit: "abc", mode: "full", files: { app: { size: 100 } } },
     { version: "0.0.57", mode: "full", legacy: true },
   ];
-  const context = vm.createContext({ document, navigator: { serial: {} }, console, fetch: async () => ({ async json() { return { releases }; } }) });
+  const context = vm.createContext({ document, navigator: { serial: {} }, console, giteeDownloadInfo, extractReleasePackage, disableNativeWatchdogs, fetch: async () => ({ async json() { return { releases }; } }) });
   const source = readFileSync(join(root, "installer/app.js"), "utf8").replace(/^import .*;\r?$/gm, "").replace("init().then(syncButtons);", "");
   vm.runInContext(source, context);
   await vm.runInContext("init();", context);
@@ -413,4 +415,283 @@ test("preserving mode blanks used OTA selection after the app and rejects missin
   assert.deepEqual(names(plan), ["write@0x20000", "erase@0xf000"]);
   assert.ok(plan.resetOta && plan.steps[1].data.length === 0x2000 && plan.steps[1].data.every((b) => b === 0xff));
   assert.throws(() => planInstall({ files: preserving, deviceTable: preserving.partitionTable, mode: "app-only", otaReadback: used.slice(0, 4096) }), /OTA/);
+});
+
+/// 构造未压缩 ZIP32 归档（测试损坏、篡改与路径穿越防护）。/ Build a stored ZIP32 archive for tamper/corruption/path-traversal tests.
+function buildStoredZip(items) {
+  const locals = [];
+  const centrals = [];
+  let offset = 0;
+  for (const [name, data] of items) {
+    const nameBytes = Buffer.from(name, "utf8");
+    const payload = Buffer.from(data);
+    const crc = crc32(payload);
+    const local = Buffer.alloc(30 + nameBytes.length);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(20, 4);
+    local.writeUInt16LE(0, 8);
+    local.writeUInt32LE(crc, 14);
+    local.writeUInt32LE(payload.length, 18);
+    local.writeUInt32LE(payload.length, 22);
+    local.writeUInt16LE(nameBytes.length, 26);
+    nameBytes.copy(local, 30);
+    locals.push(local, payload);
+    const cd = Buffer.alloc(46 + nameBytes.length);
+    cd.writeUInt32LE(0x02014b50, 0);
+    cd.writeUInt16LE(20, 4);
+    cd.writeUInt16LE(20, 6);
+    cd.writeUInt16LE(0, 10);
+    cd.writeUInt32LE(crc, 16);
+    cd.writeUInt32LE(payload.length, 20);
+    cd.writeUInt32LE(payload.length, 24);
+    cd.writeUInt16LE(nameBytes.length, 28);
+    cd.writeUInt32LE(offset, 42);
+    nameBytes.copy(cd, 46);
+    centrals.push(cd);
+    offset += local.length + payload.length;
+  }
+  const cdBuf = Buffer.concat(centrals);
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0);
+  eocd.writeUInt16LE(items.length, 8);
+  eocd.writeUInt16LE(items.length, 10);
+  eocd.writeUInt32LE(cdBuf.length, 12);
+  eocd.writeUInt32LE(offset, 16);
+  return new Uint8Array(Buffer.concat([...locals, cdBuf, eocd]));
+}
+
+test("native USB watchdog guard matches esptool S3 register sequence and skips UART bridges", async () => {
+  const ops = [];
+  const loader = {
+    chip: { CHIP_NAME: "ESP32-S3" },
+    async readReg(addr) { ops.push(["read", addr]); return 0x00001234; },
+    async writeReg(addr, value) { ops.push(["write", addr, value]); },
+  };
+  assert.equal(await disableNativeWatchdogs(loader, { usbVendorId: 0x303a, usbProductId: 0x1001 }), true);
+  assert.deepEqual(ops, [
+    ["write", 0x600080b0, 0x50d83aa1],
+    ["write", 0x60008098, 0],
+    ["write", 0x600080b0, 0],
+    ["write", 0x600080b8, 0x8f1d312a],
+    ["read", 0x600080b4],
+    ["write", 0x600080b4, 0x80001234],
+    ["write", 0x600080b8, 0],
+  ]);
+  ops.length = 0;
+  assert.equal(await disableNativeWatchdogs(loader, { usbVendorId: 0x10c4, usbProductId: 0xea60 }), false);
+  assert.deepEqual(ops, []);
+  loader.chip.CHIP_NAME = "ESP32";
+  await assert.rejects(disableNativeWatchdogs(loader, { usbVendorId: 0x303a, usbProductId: 0x1001 }), /不是 ESP32-S3/);
+});
+
+test("giteeDownloadInfo builds exact direct attachment URLs and falls back cleanly", () => {
+  assert.deepEqual(giteeDownloadInfo({ version: "1.1.3+12f9c1c", commit: "12f9c1c430670398f63360f3c78f18ffea3a8cb1", mode: "app-only" }), {
+    releaseUrl: "https://gitee.com/windssea/pico_nano/releases/tag/v1.1.3",
+    downloadUrl: "https://gitee.com/windssea/pico_nano/releases/download/v1.1.3/PicoNano-12f9c1c-upgrade.zip",
+    fileName: "PicoNano-12f9c1c-upgrade.zip",
+    modeLabel: "升级包",
+  });
+  assert.deepEqual(giteeDownloadInfo({ version: "1.1.3+12f9c1c", commit: "12f9c1c430670398f63360f3c78f18ffea3a8cb1", mode: "full" }), {
+    releaseUrl: "https://gitee.com/windssea/pico_nano/releases/tag/v1.1.3",
+    downloadUrl: "https://gitee.com/windssea/pico_nano/releases/download/v1.1.3/PicoNano-12f9c1c-full.zip",
+    fileName: "PicoNano-12f9c1c-full.zip",
+    modeLabel: "完整包",
+  });
+  assert.equal(giteeDownloadInfo({ version: "0.0.57", legacy: true, mode: "full" }).fileName, "");
+  assert.equal(giteeDownloadInfo(null).downloadUrl, "https://gitee.com/windssea/pico_nano/releases");
+});
+
+test("extractReleasePackage verifies shipped upgrade, full and offline web-installer ZIPs and blocks mismatches/tampering", async () => {
+  const sha256Hex = async (bytes) => createHash("sha256").update(bytes).digest("hex");
+  const fullDir = join(root, "releases/pico_nano-1.1.3-12f9c1c-full");
+  const upgDir = join(root, "releases/pico_nano-1.1.3-12f9c1c-upgrade");
+  const fullMeta = JSON.parse(readFileSync(join(fullDir, "manifest.json"), "utf8"));
+  const upgMeta = JSON.parse(readFileSync(join(upgDir, "manifest.json"), "utf8"));
+  const entryOf = (meta, name) => ({ name, size: meta.files[name].bytes, sha256: meta.files[name].sha256 });
+  const appOnlyRelease = {
+    version: "1.1.3+12f9c1c", commit: upgMeta.source_commit, mode: "app-only", path: "firmware/1.1.3+12f9c1c/",
+    files: {
+      partitionTable: entryOf(upgMeta, "expected-partition-table.bin"),
+      currentPartitionTable: { ...entryOf(fullMeta, "partition-table.bin"), name: "current-partition-table.bin" },
+      app: entryOf(upgMeta, "pico_nano.bin"),
+    },
+  };
+  const fullRelease = {
+    version: "1.1.3+12f9c1c", commit: fullMeta.source_commit, mode: "full", path: "firmware/1.1.3+12f9c1c-full/",
+    files: {
+      bootloader: entryOf(fullMeta, "bootloader.bin"),
+      partitionTable: entryOf(fullMeta, "partition-table.bin"),
+      otaData: entryOf(fullMeta, "ota_data_initial.bin"),
+      app: entryOf(fullMeta, "pico_nano.bin"),
+      factoryData: entryOf(fullMeta, "first-install/factory-data.bin"),
+      factoryWallpaper: entryOf(fullMeta, "first-install/factory-wallpaper.bin"),
+    },
+  };
+  const upgZip = new Uint8Array(readFileSync(join(upgDir, "PicoNano-12f9c1c-upgrade.zip")));
+  const fullZip = new Uint8Array(readFileSync(join(fullDir, "PicoNano-12f9c1c-full.zip")));
+  const webZip = new Uint8Array(readFileSync(join(upgDir, "PicoNano-web-installer-12f9c1c.zip")));
+
+  const upgOut = await extractReleasePackage(upgZip, appOnlyRelease, sha256Hex);
+  assert.deepEqual(upgOut.files.app, new Uint8Array(readFileSync(join(upgDir, "pico_nano.bin"))));
+  assert.deepEqual(upgOut.files.currentPartitionTable, new Uint8Array(readFileSync(join(fullDir, "partition-table.bin"))));
+
+  const fullOut = await extractReleasePackage(fullZip, fullRelease, sha256Hex);
+  assert.equal(Object.keys(fullOut.files).length, 6);
+  assert.deepEqual(fullOut.files.bootloader, new Uint8Array(readFileSync(join(fullDir, "bootloader.bin"))));
+
+  const webUpg = await extractReleasePackage(webZip, appOnlyRelease, sha256Hex);
+  assert.deepEqual(webUpg.files.app, upgOut.files.app);
+  const webFull = await extractReleasePackage(webZip, fullRelease, sha256Hex);
+  assert.deepEqual(webFull.files.factoryData, fullOut.files.factoryData);
+
+  // 模式错配不自动切换，版本不符与篡改均拒绝。 / Never auto-switch on mode mismatch; reject wrong version and tampering.
+  await assert.rejects(extractReleasePackage(fullZip, appOnlyRelease, sha256Hex), /完整刷入/);
+  await assert.rejects(extractReleasePackage(upgZip, fullRelease, sha256Hex), /保留布局升级包/);
+  const olderZip = new Uint8Array(readFileSync(join(root, "releases/pico_nano-1.1.2-beea4b2-full/PicoNano-beea4b2-full.zip")));
+  await assert.rejects(extractReleasePackage(olderZip, fullRelease, sha256Hex), /不一致/);
+
+  const badApp = new Uint8Array(readFileSync(join(upgDir, "pico_nano.bin")));
+  badApp[100] ^= 0xff;
+  const tamperedZip = buildStoredZip([
+    ["manifest.json", JSON.stringify(upgMeta)],
+    ["expected-partition-table.bin", readFileSync(join(upgDir, "expected-partition-table.bin"))],
+    ["pico_nano.bin", badApp],
+  ]);
+  await assert.rejects(extractReleasePackage(tamperedZip, appOnlyRelease, sha256Hex), /清单不符|校验失败/);
+  assert.throws(() => parseZip(buildStoredZip([["../evil.bin", Buffer.from("x")]])), /非法相对路径/);
+  await assert.rejects(extractReleasePackage(new Uint8Array([1, 2, 3]), appOnlyRelease, sha256Hex), /ZIP/);
+});
+
+test("page local ZIP import skips network downloads, connects with watchdog guard and clears on mode switch", async () => {
+  const elements = new Map();
+  const element = () => ({ checked: false, hidden: false, disabled: false, value: "", dataset: {}, style: {}, events: {}, children: [],
+    classList: { add() {}, remove() {} },
+    append(child) { this.children.push(child); }, replaceChildren() { this.children = []; }, addEventListener(name, fn) { this.events[name] = fn; } });
+  const document = { createElement: element, getElementById(id) { if (!elements.has(id)) elements.set(id, element()); return elements.get(id); } };
+  const upgDir = join(root, "releases/pico_nano-1.1.3-12f9c1c-upgrade");
+  const fullDir = join(root, "releases/pico_nano-1.1.3-12f9c1c-full");
+  const upgMeta = JSON.parse(readFileSync(join(upgDir, "manifest.json"), "utf8"));
+  const fullMeta = JSON.parse(readFileSync(join(fullDir, "manifest.json"), "utf8"));
+  const entryOf = (meta, name) => ({ name, size: meta.files[name].bytes, sha256: meta.files[name].sha256 });
+  const releases = [
+    { version: "1.1.3+12f9c1c", commit: upgMeta.source_commit, mode: "app-only", path: "firmware/1.1.3+12f9c1c/",
+      files: { partitionTable: entryOf(upgMeta, "expected-partition-table.bin"),
+        currentPartitionTable: { ...entryOf(fullMeta, "partition-table.bin"), name: "current-partition-table.bin" },
+        app: entryOf(upgMeta, "pico_nano.bin") } },
+    { version: "1.1.3+12f9c1c", commit: fullMeta.source_commit, mode: "full", path: "firmware/1.1.3+12f9c1c-full/",
+      files: { bootloader: entryOf(fullMeta, "bootloader.bin"), partitionTable: entryOf(fullMeta, "partition-table.bin"),
+        otaData: entryOf(fullMeta, "ota_data_initial.bin"), app: entryOf(fullMeta, "pico_nano.bin"),
+        factoryData: entryOf(fullMeta, "first-install/factory-data.bin"), factoryWallpaper: entryOf(fullMeta, "first-install/factory-wallpaper.bin") } },
+  ];
+  const fetches = [];
+  const callOrder = [];
+  const upgZipBuf = readFileSync(join(upgDir, "PicoNano-12f9c1c-upgrade.zip"));
+  const tableBytes = new Uint8Array(readFileSync(join(upgDir, "expected-partition-table.bin")));
+  const fakePort = { getInfo: () => ({ usbVendorId: 0x303a, usbProductId: 0x1001 }) };
+  let lastTransport = null;
+  class FakeTransport { constructor() { this.trace = () => "orig"; this.hexConvert = () => "orig"; lastTransport = this; } async disconnect() {} }
+  class FakeLoader {
+    constructor() { this.chip = { CHIP_NAME: "ESP32-S3", async readMac() { return "14:c1:9f:d1:85:98"; } }; }
+    async main() { callOrder.push("main"); return "ESP32-S3"; }
+    async getFlashSize() { callOrder.push("getFlashSize"); return 16384; }
+    async readFlash(offset, size) { return offset === TABLE_OFFSET ? tableBytes : new Uint8Array(size).fill(0xff); }
+  }
+  const context = vm.createContext({
+    document, console, URL, Uint8Array, location: { href: "https://example.test/" },
+    navigator: { serial: { async requestPort() { callOrder.push("requestPort"); return fakePort; } } },
+    crypto: { subtle: { async digest(_alg, bytes) { return createHash("sha256").update(bytes).digest(); } } },
+    Transport: FakeTransport, ESPLoader: FakeLoader,
+    giteeDownloadInfo, extractReleasePackage,
+    disableNativeWatchdogs: async () => { callOrder.push("disableWatchdogs"); return true; },
+    resetAfterFlash, isLittleFs, layoutOf, preservedLayoutOf, otaNeedsReset, md5, planInstall, TABLE_OFFSET, TABLE_SIZE,
+    async fetch(url) {
+      fetches.push(String(url));
+      if (String(url) === "firmware/manifest.json") return { ok: true, async json() { return { releases }; } };
+      throw new Error(`unexpected online fetch: ${url}`);
+    },
+  });
+  const source = readFileSync(join(root, "installer/app.js"), "utf8").replace(/^import .*;\r?$/gm, "").replace("init().then(syncButtons);", "");
+  vm.runInContext(source, context);
+  await vm.runInContext("init();", context);
+  assert.equal(document.getElementById("gitee-download").href, "https://gitee.com/windssea/pico_nano/releases/download/v1.1.3/PicoNano-12f9c1c-upgrade.zip");
+  const fileObj = { name: "PicoNano-12f9c1c-upgrade.zip", size: upgZipBuf.length, async arrayBuffer() { return upgZipBuf.buffer.slice(upgZipBuf.byteOffset, upgZipBuf.byteOffset + upgZipBuf.byteLength); } };
+  await document.getElementById("package-file").events.change({ target: { files: [fileObj] } });
+  assert.equal(document.getElementById("clear-package").hidden, false);
+  assert.match(document.getElementById("local-package-status").textContent, /PicoNano-12f9c1c-upgrade\.zip.*SHA-256 校验通过/);
+  await vm.runInContext("connect();", context);
+  assert.deepEqual(fetches, ["firmware/manifest.json"], "local ZIP import must skip online firmware fetches");
+  assert.deepEqual(callOrder, ["requestPort", "main", "disableWatchdogs", "getFlashSize"]);
+  assert.equal(lastTransport.hexConvert(new Uint8Array(32)), "", "transport trace overhead should be suppressed on instance");
+  assert.equal(vm.runInContext("state.plan.steps.length", context), 1);
+  // 切换刷入方式自动清空旧模式已导入包并更新 Gitee 下载链接。 / Switching mode clears the imported package and updates the Gitee link.
+  document.getElementById("install-mode").value = "full";
+  vm.runInContext("state.loader=null; state.device=null; selectMode();", context);
+  assert.equal(vm.runInContext("state.localPackage", context), null);
+  assert.equal(document.getElementById("clear-package").hidden, true);
+  assert.equal(document.getElementById("gitee-download").href, "https://gitee.com/windssea/pico_nano/releases/download/v1.1.3/PicoNano-12f9c1c-full.zip");
+});
+
+test("connect downloads firmware before entering stub when online and clear-package resets to online source", async () => {
+  const elements = new Map();
+  const element = () => ({ checked: false, hidden: false, disabled: false, value: "", dataset: {}, style: {}, events: {}, children: [],
+    classList: { add() {}, remove() {} },
+    append(child) { this.children.push(child); }, replaceChildren() { this.children = []; }, addEventListener(name, fn) { this.events[name] = fn; } });
+  const document = { createElement: element, getElementById(id) { if (!elements.has(id)) elements.set(id, element()); return elements.get(id); } };
+  const upgDir = join(root, "releases/pico_nano-1.1.3-12f9c1c-upgrade");
+  const upgMeta = JSON.parse(readFileSync(join(upgDir, "manifest.json"), "utf8"));
+  const tableBytes = new Uint8Array(readFileSync(join(upgDir, "expected-partition-table.bin")));
+  const appBytes = new Uint8Array(readFileSync(join(upgDir, "pico_nano.bin")));
+  const releases = [{
+    version: "1.1.3+12f9c1c", commit: upgMeta.source_commit, mode: "app-only", path: "firmware/1.1.3+12f9c1c/",
+    files: {
+      partitionTable: { name: "expected-partition-table.bin", size: tableBytes.length, sha256: upgMeta.files["expected-partition-table.bin"].sha256 },
+      app: { name: "pico_nano.bin", size: appBytes.length, sha256: upgMeta.files["pico_nano.bin"].sha256 },
+    },
+  }];
+  const order = [];
+  const fakePort = { getInfo: () => ({ usbVendorId: 0x303a, usbProductId: 0x1001 }) };
+  class FakeTransport { async disconnect() {} }
+  class FakeLoader {
+    constructor() { this.chip = { CHIP_NAME: "ESP32-S3", async readMac() { return "14:c1:9f:d1:85:98"; } }; }
+    async main() { order.push("main"); return "ESP32-S3"; }
+    async getFlashSize() { order.push("getFlashSize"); return 16384; }
+    async readFlash(offset, size) { return offset === TABLE_OFFSET ? tableBytes : new Uint8Array(size).fill(0xff); }
+  }
+  const byName = { "expected-partition-table.bin": tableBytes, "pico_nano.bin": appBytes };
+  const context = vm.createContext({
+    document, console, URL, Uint8Array, location: { href: "https://example.test/" },
+    navigator: { serial: { async requestPort() { order.push("requestPort"); return fakePort; } } },
+    crypto: { subtle: { async digest(_alg, bytes) { return createHash("sha256").update(bytes).digest(); } } },
+    Transport: FakeTransport, ESPLoader: FakeLoader,
+    giteeDownloadInfo, extractReleasePackage,
+    disableNativeWatchdogs: async () => { order.push("disableWatchdogs"); return true; },
+    resetAfterFlash, isLittleFs, layoutOf, preservedLayoutOf, otaNeedsReset, md5, planInstall, TABLE_OFFSET, TABLE_SIZE,
+    async fetch(url) {
+      const s = String(url);
+      if (s === "firmware/manifest.json") return { ok: true, async json() { return { releases }; } };
+      const name = new URL(s).pathname.split("/").at(-1);
+      order.push(`fetch:${name}`);
+      const bytes = byName[name].slice();
+      return { ok: true, async arrayBuffer() { return bytes.buffer; } };
+    },
+  });
+  const source = readFileSync(join(root, "installer/app.js"), "utf8").replace(/^import .*;\r?$/gm, "").replace("init().then(syncButtons);", "");
+  vm.runInContext(source, context);
+  await vm.runInContext("init();", context);
+  await vm.runInContext("connect();", context);
+  assert.deepEqual(order, ["requestPort", "fetch:expected-partition-table.bin", "fetch:pico_nano.bin", "main", "disableWatchdogs", "getFlashSize"]);
+  // 测试单层嵌套目录 ZIP 兼容与改回在线源。 / Verify single wrapper-folder ZIP and clearing back to online source.
+  const wrappedZip = buildStoredZip([
+    ["PicoNano-12f9c1c-upgrade/manifest.json", JSON.stringify(upgMeta)],
+    ["PicoNano-12f9c1c-upgrade/expected-partition-table.bin", tableBytes],
+    ["PicoNano-12f9c1c-upgrade/pico_nano.bin", appBytes],
+  ]);
+  const wrappedFile = { name: "wrapped.zip", size: wrappedZip.length, async arrayBuffer() { return wrappedZip.buffer.slice(wrappedZip.byteOffset, wrappedZip.byteOffset + wrappedZip.byteLength); } };
+  await document.getElementById("local-package-box").events.drop({ preventDefault() {}, dataTransfer: { files: [wrappedFile] } });
+  assert.equal(vm.runInContext("state.localPackage.fileName", context), "wrapped.zip");
+  vm.runInContext("state.loader=null; state.device=null;", context);
+  document.getElementById("clear-package").events.click();
+  assert.equal(vm.runInContext("state.localPackage", context), null);
+  assert.equal(vm.runInContext("state.files", context), null);
+  assert.equal(document.getElementById("clear-package").hidden, true);
 });
