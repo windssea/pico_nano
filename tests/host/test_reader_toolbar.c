@@ -57,5 +57,13 @@ int main(void){
     assert(pn_reader_toolbar_present(&pool,&font,&frame,1,"保存失败，当前页保留",show,NULL)==PN_OK && calls==1 && !memcmp(copy,pixels,PN_HW_FRAME_BYTES));
     fail=true;assert(pn_reader_toolbar_present(&pool,&font,&frame,1,NULL,show,NULL)==PN_IO && calls==2 && !memcmp(copy,pixels,PN_HW_FRAME_BYTES));
     pool.fail_at=pool.attempts+1;assert(pn_reader_toolbar_present(&pool,&font,&frame,1,NULL,show,NULL)==PN_NO_MEMORY && calls==2 && !memcmp(copy,pixels,PN_HW_FRAME_BYTES));
-    assert(pool.memory[PN_MEM_FRAME].peak<120u*1024u);pool.fail_at=0;pn_font_close(&font);assert(!pool.used && !pool.live);free(pixels);free(copy);return 0;
+    assert(pool.memory[PN_MEM_FRAME].peak<120u*1024u);pool.fail_at=0;
+    // 顶部阅读信息条 + 一键书签命中与原正文逐字节恢复。/ Top reading info bar + quick-bookmark hit and exact body restore.
+    {pn_toolbar_top_t top={.title="测试书籍",.basis=4200,.bookmarked=false,.quick_bookmark=true};
+     assert(pn_reader_toolbar_hit(590,72,0)==PN_TOOL_QUICK_BOOKMARK && pn_reader_toolbar_hit(200,400,0)==PN_TOOL_CLOSE);
+     fail=false;assert(pn_reader_toolbar_present_ex(&pool,&font,&frame,1,"已添加书签",&top,NULL,NULL)==PN_INVALID);
+     assert(pn_reader_toolbar_top_render(&font,&frame,&top)==PN_OK);
+     memcpy(pixels,copy,PN_HW_FRAME_BYTES);
+    }
+    pn_font_close(&font);assert(!pool.used && !pool.live);free(pixels);free(copy);return 0;
 }

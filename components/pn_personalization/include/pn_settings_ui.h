@@ -11,6 +11,8 @@
 #include "pn_input_prefs.h"
 #include "pn_network_store.h"
 #include "pn_shelf_prefs.h"
+#include "pn_home_prefs.h"
+#include "pn_style.h"
 #define PN_SETUI_BACK 1
 #define PN_SETUI_WALLPAPER 2
 #define PN_SETUI_FONTS 3
@@ -50,6 +52,30 @@
 #define PN_SETUI_WIFI_FORCE 48 ///< 测试失败后仍然保存 / Save anyway after a failed test
 #define PN_SETUI_INDEX_WAIT 49 ///< 首次开书等待整书索引 / Wait for whole-book indexing before the first open
 #define PN_SETUI_VERTICAL_TURN 50 ///< 切换上下翻页模式（关闭左右翻页，开启上下翻页）/ Toggle vertical page-turn mode (off horizontal, on vertical)
+#define PN_SETUI_GLOBAL_STYLE 51 ///< 打开“全局排版”子页 / Open the global typesetting sub-page
+#define PN_SETUI_GSTYLE_PRESET 52 ///< 52..54对应舒适/紧凑/大字全局预设 / 52..54 for comfortable/compact/large global presets
+#define PN_SETUI_GSTYLE_BARS 55 ///< 全局去上下栏开关 / Toggle global hide top/bottom bars
+#define PN_SETUI_GSTYLE_RESET 56 ///< 恢复全局默认排版 / Reset global default typesetting
+#define PN_SETUI_GSTYLE_ADJ 60 ///< 60..75对应8项全局排版减/加 / 60..75 for dec/inc of 8 global style controls
+#define PN_SETUI_HOME_MOTTO 76 ///< 打开“主页左上角文案”子页 / Open the Home top-left motto sub-page
+#define PN_SETUI_MOTTO_RESET 77 ///< 恢复默认PicoNano文案 / Reset top-left motto to PicoNano
+#define PN_SETUI_MOTTO_EDIT 78 ///< 打开键盘自定义主页文案 / Open on-screen keyboard to edit motto
+#define PN_SETUI_MOTTO_SAVE 79 ///< 保存键盘输入的主页文案 / Save keyboard-entered motto
+#define PN_SETUI_MOTTO_CLEAR 80 ///< 清空主页文案输入框 / Clear motto entry field
+#define PN_SETUI_MOTTO_PRESET 81 ///< 81..86对应6条中文名言预设 / 81..86 for 6 Chinese reading-motto presets
+#define PN_SETUI_HOME_BANNER 88 ///< 打开“正在阅读上方背景”选图子页 / Open Home top banner picker sub-page
+#define PN_SETUI_BANNER_DEFAULT 89 ///< 恢复默认山水背景 / Restore default Home mountain banner
+#define PN_SETUI_BANNER_PREV 90 ///< 背景图列表上一页 / Previous banner image page
+#define PN_SETUI_BANNER_NEXT 91 ///< 背景图列表下一页 / Next banner image page
+#define PN_SETUI_BANNER_ITEM 92 ///< 92..97对应本页6张可选背景图 / 92..97 for 6 banner image choices on current page
+#define PN_SETUI_GSTYLE_IMAGES 98 ///< 全局书内图片开关 / Toggle global hide book images
+#define PN_SETUI_GSTYLE_MARGINS 99 ///< 打开全局边距详调子页 / Open global 4-side margins sub-page
+#define PN_SETUI_GSTYLE_MARGINS_RESET 100 ///< 重置全局四周边距 / Reset global 4-side margins
+#define PN_SETUI_GSTYLE_BG 101 ///< 打开全局阅读背景选择子页 / Open global reading background sub-page
+#define PN_SETUI_GSTYLE_EXT 102 ///< 102..107对应阅读线/阅读线深浅/上下位置减加 / 102..107 for reading line/shade/offset dec/inc
+#define PN_SETUI_GSTYLE_BG_ITEM 108 ///< 108..119对应内置阅读背景项 / 108..119 for built-in reading background slots
+#define PN_SETUI_GSTYLE_MADJ 260 ///< 260..275对应8项全局四周边距减加（0..3正文上下左右，4..7背景上下左右）/ 260..275 for 8 global margin dec/inc controls
+#define PN_SETUI_KB_IME_BASE 300 ///< 300..360映射全拼中文键盘功能/候选/标点码（300 + (-key)）/ 300..360 map Chinese Pinyin IME function/candidate/punctuation codes (300 + (-key))
 #define PN_SETUI_CHAR 128 ///< 加可打印ASCII（32–126）输入一个字符 / Plus printable ASCII (32–126) types one character
 typedef struct {
     char message[160]; ///< 端口提供的真实阶段/错误 / Actual phase/error supplied by the port
@@ -76,6 +102,7 @@ typedef struct {
     bool vertical_turn; ///< false左右翻页，true上下翻页 / False for horizontal page turns, true for vertical page turns
     uint8_t flags; ///< 当前已保存翻页标志 / Saved page-turn flags
     pn_shelf_prefs_t shelf; ///< 当前已保存书架外观 / Saved shelf appearance
+    pn_home_prefs_t home; ///< 当前已保存主页个性化（左上角文案与顶部背景）/ Saved Home personalization (top-left motto and top banner)
     bool network_changed; ///< 本页保存或忘记了WiFi，调用方刷新网络名后清零 / WiFi was saved or forgotten here; callers refresh the network name and clear it
 } pn_settings_ui_t;
 /// 打开并读取翻页记录；state_media为NULL时只读默认且不能保存。/ Open and read the page-turn record; NULL state_media shows defaults without saving.
@@ -121,3 +148,5 @@ pn_status_t pn_settings_load_index(pn_media_t *,const char *,bool *);
 /// 读取上下翻页偏好；无记录默认左右翻页（false），失败保持输出，不修复未知记录。
 /// Load vertical page-turn preference; absent defaults to horizontal (false), preserving output on failure without repairing unknown records.
 pn_status_t pn_settings_load_vertical_turn(pn_media_t *,const char *,bool *);
+/// 可选注入壁纸介质与目录，用于“正在阅读上方背景”选图列表（不持长期租约）。/ Optionally provide wallpaper media and directory for the Home top banner picker (no long-lived leases).
+void pn_settings_ui_set_wallpaper_dir(pn_settings_ui_t *ui,pn_media_t *media,const char *directory);

@@ -90,6 +90,42 @@ static pn_status_t prepare_file(pn_pool_t *pool,pn_media_t *media,const pn_media
     return status==PN_OK?closed:status;
 }
 pn_status_t pn_wallpaper_prepare(pn_pool_t *pool,pn_media_t *media,const pn_media_lease_t *lease,const char *path,pn_wallpaper_transform_t transform,size_t budget,pn_frame_t *out){return prepare_file(pool,media,lease,path,transform,budget,out,NULL);}
+pn_status_t pn_wallpaper_prepare_banner(pn_pool_t *pool,pn_media_t *media,const pn_media_lease_t *lease,const char *path,size_t budget,pn_frame_t *out){
+    if(!pool || !media || !lease || !path || !*path || !budget || !out || !out->pixels || out->width!=PN_HOME_BANNER_WIDTH || out->height!=PN_HOME_BANNER_HEIGHT || out->stride<PN_HOME_BANNER_WIDTH/2)return PN_INVALID;
+    pn_status_t status=pn_media_validate(media,lease);if(status!=PN_OK)return status;
+    if(lease->access==PN_MEDIA_USB)return PN_INVALID;
+    pn_pool_t sub;if(pn_pool_init(&sub,budget,sub_alloc,sub_free,pool)!=0)return PN_INVALID;
+    pn_text_file_t file={0};pn_text_source_t source;status=pn_text_file_open(&file,media,lease,path,&source);if(status!=PN_OK)return status;
+    file_input_t at={&source,0};pn_image_input_t input={&at,file_read};pn_image_info_t info;
+    status=pn_image_probe(&sub,&input,&info);
+    if(status==PN_OK && (!info.width || !info.height))status=PN_CORRUPT;
+    if(status==PN_OK){
+        uint64_t bw=PN_HOME_BANNER_WIDTH,bh=PN_HOME_BANNER_HEIGHT,dw=bw,dh=bh;
+        if((uint64_t)info.width*bh>(uint64_t)info.height*bw){dh=bh;dw=(uint64_t)info.width*bh/info.height;}
+        else{dw=bw;dh=(uint64_t)info.height*bw/info.width;}
+        if(dw>4096){dh=dh*4096/dw;dw=4096;}
+        if(dh>4096){dw=dw*4096/dh;dh=4096;}
+        if(!dw)dw=1;
+        if(!dh)dh=1;
+        int64_t ox=((int64_t)bw-(int64_t)dw)/2,oy=((int64_t)bh-(int64_t)dh)/2;
+        pn_frame_clear(out,15);at.offset=0;
+        pn_image_rect_t rect={(int)ox,(int)oy,(int)dw,(int)dh};
+        status=pn_image_draw(&sub,&input,out,rect,&info);
+        if(status==PN_OK){
+            // 柔化并从左到右渐变浅化，让主页“读书”标题与日期在任意图片上保持清晰可读。
+            // Gently lighten with a left-to-right fade so the Home title and date stay legible over any photo.
+            for(int y=0;y<out->height;y++)for(int x=0;x<out->width;x++){
+                unsigned px=pn_frame_get(out,x,y);
+                unsigned wash=x<300?11u:x<460?(unsigned)(11-(x-300)*4/160):7u;
+                unsigned blended=(px*(16u-wash)+15u*wash+8u)/16u;
+                if(blended>15u)blended=15u;
+                pn_frame_pixel(out,x,y,(uint8_t)blended);
+            }
+        }
+    }
+    pn_status_t closed=pn_text_file_close(&file);
+    return status==PN_OK?closed:status;
+}
 pn_status_t pn_wallpaper_mask_prepare(pn_pool_t *pool,pn_media_t *media,const pn_media_lease_t *lease,const char *path,pn_wallpaper_transform_t transform,size_t budget,pn_frame_t *gray,pn_frame_t *alpha){
     if(!full_frame(alpha) || !gray || alpha->pixels==gray->pixels)return PN_INVALID;
     return prepare_file(pool,media,lease,path,transform,budget,gray,alpha);
@@ -282,6 +318,16 @@ pn_status_t pn_wallpaper_store_init(pn_wallpaper_store_t *store,pn_media_t *medi
     if(!store || !media || !a || !b || !*a || !*b || !strcmp(a,b))return PN_INVALID;
     if(strlen(a)>=PN_WALLPAPER_PATH_MAX || strlen(b)>=PN_WALLPAPER_PATH_MAX)return PN_LIMIT;
     store->media=media;strcpy(store->slots[0],a);strcpy(store->slots[1],b);return PN_OK;
+}
+pn_status_t pn_wallpaper_mask_store_init(const pn_wallpaper_store_t *lock_store,pn_wallpaper_store_t *mask_store){
+    if(!lock_store || !lock_store->media || !mask_store || !lock_store->slots[0][0])return PN_INVALID;
+    const char *slash=strrchr(lock_store->slots[0],'/');if(!slash || slash==lock_store->slots[0])return PN_INVALID;
+    char a[PN_WALLPAPER_PATH_MAX],b[PN_WALLPAPER_PATH_MAX];
+    int dir_len=(int)(slash-lock_store->slots[0]);
+    int na=snprintf(a,sizeof a,"%.*s/mask.a",dir_len,lock_store->slots[0]);
+    int nb=snprintf(b,sizeof b,"%.*s/mask.b",dir_len,lock_store->slots[0]);
+    if(na<=0 || (size_t)na>=sizeof a || nb<=0 || (size_t)nb>=sizeof b)return PN_LIMIT;
+    return pn_wallpaper_store_init(mask_store,lock_store->media,a,b);
 }
 /* 解析头部；路径另读。/ Parse the fixed header; the path is read separately. */
 static bool decode_header(const uint8_t *h,pn_lock_selection_t *s,size_t *path_length){

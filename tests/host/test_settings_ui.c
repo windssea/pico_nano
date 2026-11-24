@@ -1,6 +1,8 @@
 /* 翻页记录与设置页：默认、开关保存、不能全关、子页请求、占用失败、无存储。/ Page-turn record and settings page: defaults, saved toggles, not all off, sub-page requests, busy failures, no storage. */
 #define _POSIX_C_SOURCE 200809L
 #include "pn_settings_ui.h"
+#include "pn_wallpaper.h"
+#include "pn_widgets.h"
 #include "pn_reader_input.h"
 #include <assert.h>
 #include <stdio.h>
@@ -64,8 +66,30 @@ int main(int argc,char **argv){
     assert(pn_media_release(&media,&lease)==PN_OK);
     assert(pn_settings_ui_event(&ui,PN_SETUI_BACK,present,NULL)==PN_OK);
 
-    /* 一级页：字体、壁纸、按键与手势、刷新与屏幕、存储与关于；底栏书架/传书交给调用方，标题区无返回。/ Root page: fonts, wallpaper, keys, refresh, about; the bottom-bar shelf/transfer go to the caller and the title has no back. */
-    assert(pn_settings_ui_hit(&ui,100,220)==PN_SETUI_FONTS && pn_settings_ui_hit(&ui,100,380)==PN_SETUI_WALLPAPER && pn_settings_ui_hit(&ui,100,450)==PN_SETUI_APPEARANCE && pn_settings_ui_hit(&ui,100,600)==PN_SETUI_KEYS && pn_settings_ui_hit(&ui,100,700)==PN_SETUI_REFRESH && pn_settings_ui_hit(&ui,100,850)==PN_SETUI_WIFI && pn_settings_ui_hit(&ui,100,950)==PN_SETUI_ABOUT && pn_settings_ui_hit(&ui,100,1050)==-1 && pn_settings_ui_hit(&ui,100,60)==-1);
+    /* 一级页：显示与字体（字体、壁纸、书架与主页）、阅读（全局排版、按键与手势、刷新与屏幕）、设备（WiFi、存储与关于）；标题区无按钮。/ Root page groups: display, reading (with Global Typesetting), and device; title area has no button. */
+    assert(pn_settings_ui_hit(&ui,100,220)==PN_SETUI_FONTS && pn_settings_ui_hit(&ui,100,310)==PN_SETUI_WALLPAPER && pn_settings_ui_hit(&ui,100,400)==PN_SETUI_APPEARANCE && pn_settings_ui_hit(&ui,100,550)==PN_SETUI_GLOBAL_STYLE && pn_settings_ui_hit(&ui,100,640)==PN_SETUI_KEYS && pn_settings_ui_hit(&ui,100,730)==PN_SETUI_REFRESH && pn_settings_ui_hit(&ui,100,850)==PN_SETUI_WIFI && pn_settings_ui_hit(&ui,100,950)==PN_SETUI_ABOUT && pn_settings_ui_hit(&ui,100,1050)==-1 && pn_settings_ui_hit(&ui,100,60)==-1 && pn_settings_ui_hit(&ui,560,100)==-1);
+    /* 全局排版与单书排版对齐（含全部12项、边距详调、阅读背景、书内图片/上下栏与重置），以及主页个性化与顶部横幅快速缓存。/ Global typesetting parity with book style (all 12 fields, margins, backgrounds, images/bars & reset) plus Home personalization & fast banner cache. */
+    assert(pn_settings_ui_event(&ui,PN_SETUI_GLOBAL_STYLE,present,NULL)==PN_OK && pn_settings_ui_event(&ui,PN_SETUI_GSTYLE_ADJ+1,present,NULL)==PN_OK && pn_settings_ui_event(&ui,PN_SETUI_GSTYLE_BARS,present,NULL)==PN_OK);
+    assert(pn_settings_ui_event(&ui,PN_SETUI_GSTYLE_IMAGES,present,NULL)==PN_OK && pn_settings_ui_event(&ui,PN_SETUI_GSTYLE_ADJ+15,present,NULL)==PN_OK && pn_settings_ui_event(&ui,PN_SETUI_GSTYLE_EXT+1,present,NULL)==PN_OK);
+    assert(pn_settings_ui_event(&ui,PN_SETUI_GSTYLE_MARGINS,present,NULL)==PN_OK && pn_settings_ui_event(&ui,PN_SETUI_GSTYLE_MADJ+1,present,NULL)==PN_OK && pn_settings_ui_event(&ui,PN_SETUI_BACK,present,NULL)==PN_OK);
+    assert(pn_settings_ui_event(&ui,PN_SETUI_GSTYLE_BG,present,NULL)==PN_OK && pn_settings_ui_event(&ui,PN_SETUI_GSTYLE_BG_ITEM+2,present,NULL)==PN_OK);
+    {pn_style_t gs={0};assert(pn_style_global_load(&media,root,&gs)==PN_OK && gs.pixels==46 && gs.hide_bars==1 && gs.hide_images==1 && gs.clarity==1 && gs.reading_line==1 && gs.margin_top==4 && gs.background==7);}
+    assert(pn_settings_ui_event(&ui,PN_SETUI_GSTYLE_RESET,present,NULL)==PN_OK);
+    {pn_style_t gs={0};assert(pn_style_global_load(&media,root,&gs)==PN_OK && gs.pixels==44 && !gs.hide_bars && !gs.hide_images && !gs.margin_top && !gs.background);}
+    assert(pn_settings_ui_event(&ui,PN_SETUI_BACK,present,NULL)==PN_OK && pn_settings_ui_screen(&ui)==0);
+    {uint8_t *bpx=pn_alloc(&pool,PN_HOME_BANNER_BYTES),*bout=pn_alloc(&pool,PN_HOME_BANNER_BYTES);assert(bpx && bout);memset(bpx,0x5a,PN_HOME_BANNER_BYTES);
+     assert(pn_home_banner_cache_save(&media,root,"demo.png",bpx,PN_HOME_BANNER_BYTES)==PN_OK);
+     assert(pn_home_banner_cache_load(&media,root,"other.png",bout,PN_HOME_BANNER_BYTES)==PN_EMPTY);
+     assert(pn_home_banner_cache_load(&media,root,"demo.png",bout,PN_HOME_BANNER_BYTES)==PN_OK && !memcmp(bpx,bout,PN_HOME_BANNER_BYTES));
+     pn_home_banner_cache_clear(&media,root);
+     assert(pn_home_banner_cache_load(&media,root,"demo.png",bout,PN_HOME_BANNER_BYTES)==PN_EMPTY);
+     pn_free(bpx);pn_free(bout);}
+    assert(pn_settings_ui_event(&ui,PN_SETUI_APPEARANCE,present,NULL)==PN_OK && pn_settings_ui_hit(&ui,200,980)==PN_SETUI_HOME_MOTTO && pn_settings_ui_hit(&ui,200,1080)==PN_SETUI_HOME_BANNER);
+    assert(pn_settings_ui_event(&ui,PN_SETUI_HOME_MOTTO,present,NULL)==PN_OK && pn_settings_ui_event(&ui,PN_SETUI_MOTTO_PRESET+1,present,NULL)==PN_OK && !strcmp(ui.home.header,"开卷有益") && !strcmp(pn_w_brand(),"开卷有益"));
+    {pn_home_prefs_t hp={0};assert(pn_home_prefs_load_dir(&media,root,&hp)==PN_OK && !strcmp(hp.header,"开卷有益"));}
+    assert(pn_settings_ui_event(&ui,PN_SETUI_MOTTO_RESET,present,NULL)==PN_OK && !*ui.home.header && !*pn_w_brand());
+    assert(pn_settings_ui_event(&ui,PN_SETUI_BACK,present,NULL)==PN_OK && pn_settings_ui_event(&ui,PN_SETUI_HOME_BANNER,present,NULL)==PN_OK && pn_settings_ui_event(&ui,PN_SETUI_BANNER_DEFAULT,present,NULL)==PN_OK);
+    assert(pn_settings_ui_event(&ui,PN_SETUI_BACK,present,NULL)==PN_OK && pn_settings_ui_event(&ui,PN_SETUI_BACK,present,NULL)==PN_OK && pn_settings_ui_screen(&ui)==0);
     assert(pn_settings_ui_hit(&ui,100,1150)==PN_SETUI_HOME && pn_settings_ui_hit(&ui,260,1150)==PN_SETUI_SHELF && pn_settings_ui_hit(&ui,430,1150)==PN_SETUI_TRANSFER && pn_settings_ui_hit(&ui,600,1150)==-1);
     assert(pn_settings_ui_event(&ui,PN_SETUI_TRANSFER,present,NULL)==PN_OK && ui.request==PN_SETUI_TRANSFER && ui.active);ui.request=0;
     /* 刷新与屏幕：三档策略立即保存，整屏刷新只重画本页。/ Refresh page: the three policies save at once and a full refresh only repaints this page. */

@@ -137,8 +137,15 @@ typedef struct {
 pn_w_status_snapshot_t pn_w_status_snapshot(void);
 /// 拟玻璃面板：静态下沿灰影＋雾面＋细描边。/ Faux-glass panel: a static under-edge shade, fog surface and hairline.
 void pn_w_glass(pn_frame_t *frame,int x,int y,int width,int height,int radius);
-/// 状态带（y=0..40）：左侧产品名，右侧电量（未设置电量则不画）。/ Status band (y=0..40): product name on the left and the battery on the right (omitted until a level is set).
+#define PN_W_BRAND_MAX 64 ///< 状态带左上角自定义文案上限（含NUL）/ Max length of custom top-left status label (including NUL)
+/// 设置/读取全局状态带左上角文案（NULL或空串回退产品名PicoNano）；所有使用状态带的页面同步生效。
+/// Set or read global top-left status-band label (NULL or empty falls back to PicoNano); applies across every page using the status band.
+void pn_w_set_brand(const char *text);
+const char *pn_w_brand(void);
+/// 状态带（y=0..40）：左侧全局自定义文案或产品名，右侧时间/无线/电量。/ Status band (y=0..40): global custom label or product name on the left, clock/wifi/battery on the right.
 pn_status_t pn_w_status(pn_font_t *font,pn_frame_t *frame);
+/// 带显式左侧文案的状态带（空或NULL时使用全局自定义文案或回退PicoNano）。/ Status band with explicit left text (empty/NULL uses global custom label or falls back to PicoNano).
+pn_status_t pn_w_status_named(pn_font_t *font,pn_frame_t *frame,const char *left_text);
 /// 设置/读取状态带电量（0–100，<0表示未知不显示）。/ Set or read the status-band battery (0–100, negative means unknown and hidden).
 void pn_w_set_battery(int percent);
 int pn_w_battery_level(void);

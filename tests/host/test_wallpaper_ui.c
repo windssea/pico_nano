@@ -84,17 +84,22 @@ int main(int argc,char **argv){
     /* 目录不存在：空列表仍可选内置模式。/ Missing directory: empty list, built-in modes still available. */
     snprintf(path,sizeof path,"%s/absent",images);assert(pn_wallpaper_ui_open(&ui,&pool,&sd,path,&store,present,NULL)==PN_OK && pn_wallpaper_ui_hit(&ui,100,500)==-1);
     assert(pn_wallpaper_ui_event(&ui,PN_WUI_DEFAULT,present,NULL)==PN_OK && pn_wallpaper_ui_current(&ui,&cur) && cur.mode==PN_LOCK_DEFAULT);pn_wallpaper_ui_close(&ui);
-    /* 移除旧入口；PNG遮罩应用及重开继承参数。/ Removed legacy entries; PNG mask apply and reopen preserve parameters. */
+    /* 移除旧入口；PNG遮罩独立存储在 mask.a/b，应用遮罩不覆盖锁屏壁纸，重开继承参数并可单独关闭。
+     * Removed legacy entries; PNG mask lives in mask.a/b independently of the lock wallpaper, preserving wallpaper on apply/reopen and supporting independent disable. */
     assert(pn_wallpaper_ui_open(&ui,&pool,&sd,images,&store,present,NULL)==PN_OK);
     assert(pn_wallpaper_ui_event(&ui,PN_WUI_SIMPLE,present,NULL)==PN_EMPTY && pn_wallpaper_ui_event(&ui,PN_WUI_BOOK,present,NULL)==PN_EMPTY);
+    assert(pn_wallpaper_ui_event(&ui,PN_WUI_WALLPAPER,present,NULL)==PN_OK && pn_wallpaper_ui_event(&ui,PN_WUI_ROW+1,present,NULL)==PN_OK && pn_wallpaper_ui_event(&ui,PN_WUI_APPLY,present,NULL)==PN_OK);
+    assert(pn_wallpaper_ui_current(&ui,&cur) && cur.mode==PN_LOCK_CUSTOM);
     assert(pn_wallpaper_ui_event(&ui,PN_WUI_MASK,present,NULL)==PN_OK && ui.screen==PN_WUI_LIST);
     assert(pn_wallpaper_ui_event(&ui,PN_WUI_ROW+1,present,NULL)==PN_OK && pn_wallpaper_ui_hit(&ui,100,1080)==-1);
     assert(pn_wallpaper_ui_event(&ui,PN_WUI_APPLY,present,NULL)==PN_OK);
-    assert(pn_wallpaper_ui_current(&ui,&cur) && cur.mode==PN_LOCK_MASK);
+    pn_lock_selection_t mcur;
+    assert(pn_wallpaper_ui_current(&ui,&cur) && cur.mode==PN_LOCK_CUSTOM && pn_wallpaper_ui_mask(&ui,&mcur) && mcur.mode==PN_LOCK_MASK);
     char cached[1200];snprintf(cached,sizeof cached,"%s/" PN_WALLPAPER_MASK_CACHE,argv[2]);FILE *cache=fopen(cached,"rb");assert(cache);fclose(cache);
     pn_wallpaper_ui_close(&ui);
-    assert(pn_wallpaper_ui_open(&ui,&pool,&sd,images,&store,present,NULL)==PN_OK && pn_wallpaper_ui_current(&ui,&cur) && cur.mode==PN_LOCK_MASK);
-    assert(pn_wallpaper_ui_event(&ui,PN_WUI_ROW+1,present,NULL)==PN_OK && pn_wallpaper_ui_event(&ui,PN_WUI_CANCEL,present,NULL)==PN_OK && pn_wallpaper_ui_current(&ui,&cur) && cur.mode==PN_LOCK_MASK);pn_wallpaper_ui_close(&ui);
+    assert(pn_wallpaper_ui_open(&ui,&pool,&sd,images,&store,present,NULL)==PN_OK && pn_wallpaper_ui_current(&ui,&cur) && cur.mode==PN_LOCK_CUSTOM && pn_wallpaper_ui_mask(&ui,&mcur) && mcur.mode==PN_LOCK_MASK);
+    assert(pn_wallpaper_ui_event(&ui,PN_WUI_MASK,present,NULL)==PN_OK && pn_wallpaper_ui_event(&ui,PN_WUI_ROW+1,present,NULL)==PN_OK && pn_wallpaper_ui_event(&ui,PN_WUI_CANCEL,present,NULL)==PN_OK && pn_wallpaper_ui_mask(&ui,&mcur) && mcur.mode==PN_LOCK_MASK);
+    assert(pn_wallpaper_ui_event(&ui,PN_WUI_DEFAULT,present,NULL)==PN_OK && pn_wallpaper_ui_mask(&ui,&mcur) && mcur.mode==PN_LOCK_DEFAULT && pn_wallpaper_ui_current(&ui,&cur) && cur.mode==PN_LOCK_CUSTOM);pn_wallpaper_ui_close(&ui);
     /* 新模式应用/重开/取消，仍使用原A/B事务。/ Apply, reopen and cancel the new mode through the existing A/B transaction. */
     assert(pn_wallpaper_ui_open(&ui,&pool,&sd,images,&store,present,NULL)==PN_OK);
     assert(pn_wallpaper_ui_event(&ui,PN_WUI_BOOKMARK,present,NULL)==PN_OK && ui.screen==PN_WUI_PREVIEW);

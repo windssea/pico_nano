@@ -27,3 +27,22 @@ pn_status_t pn_shelf_prefs_save(const pn_journal_io_t *io,const pn_shelf_prefs_t
     if(!io || !valid(p))return PN_INVALID;
     uint8_t data[8]={'P','N','S','H',1,p->columns,p->style,0};return pn_journal_save(io,data,sizeof data);
 }
+pn_status_t pn_shelf_sort_files(pn_journal_files_t *f,pn_media_t *m,const pn_media_lease_t *l,const char *root,pn_journal_io_t *io){
+    if(!root || !*root)return PN_INVALID;
+    char a[PN_JOURNAL_PATH_MAX],b[PN_JOURNAL_PATH_MAX];int n=snprintf(a,sizeof a,"%s/shelf_sort.a",root);
+    if(n<0 || (size_t)n>=sizeof a)return PN_LIMIT;
+    n=snprintf(b,sizeof b,"%s/shelf_sort.b",root);if(n<0 || (size_t)n>=sizeof b)return PN_LIMIT;
+    return pn_journal_files_init(f,m,l,a,b,io);
+}
+pn_status_t pn_shelf_sort_load(const pn_journal_io_t *io,pn_shelf_sort_t *out){
+    if(!io || !out)return PN_INVALID;
+    pn_record_t r;pn_status_t s=pn_journal_load(io,&r);if(s!=PN_OK)return s;
+    if(r.size!=8 || memcmp(r.payload,"PNSS",4))return PN_CORRUPT;
+    if(r.payload[4]!=1 || r.payload[6] || r.payload[7])return PN_UNSUPPORTED;
+    if(r.payload[5]>=PN_SHELF_SORT_COUNT)return PN_CORRUPT;
+    *out=(pn_shelf_sort_t)r.payload[5];return PN_OK;
+}
+pn_status_t pn_shelf_sort_save(const pn_journal_io_t *io,pn_shelf_sort_t sort){
+    if(!io || (unsigned)sort>=PN_SHELF_SORT_COUNT)return PN_INVALID;
+    uint8_t data[8]={'P','N','S','S',1,(uint8_t)sort,0,0};return pn_journal_save(io,data,sizeof data);
+}

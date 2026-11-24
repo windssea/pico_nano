@@ -16,6 +16,9 @@
 #define PN_WALLPAPER_BYTES (PN_WALLPAPER_WIDTH/2*PN_WALLPAPER_HEIGHT)
 #define PN_WALLPAPER_PATH_MAX 1024
 #define PN_WALLPAPER_SHIFT_MAX 4
+#define PN_HOME_BANNER_WIDTH 684
+#define PN_HOME_BANNER_HEIGHT 146
+#define PN_HOME_BANNER_BYTES (PN_HOME_BANNER_WIDTH/2*PN_HOME_BANNER_HEIGHT)
 
 /// 锁屏模式。/ Lock-screen mode.
 typedef enum {
@@ -60,6 +63,9 @@ typedef struct {
 /// 超宽/超高图在铺满时缩放后单边超过4096返回LIMIT。/ Cover scaling past 4096 on one side returns LIMIT.
 pn_status_t pn_wallpaper_prepare(pn_pool_t *pool,pn_media_t *media,const pn_media_lease_t *lease,const char *path,
     pn_wallpaper_transform_t transform,size_t budget,pn_frame_t *out);
+/// 解码JPEG/PNG原图并居中裁剪为主页顶部横幅（684×146，柔化浅化以保证文字清晰）。
+/// Decode a JPEG/PNG image center-cropped into the Home top banner (684x146, softly washed for text legibility).
+pn_status_t pn_wallpaper_prepare_banner(pn_pool_t *pool,pn_media_t *media,const pn_media_lease_t *lease,const char *path,size_t budget,pn_frame_t *out);
 /// 保留PNG灰度与透明度，错误不修改两个输出；不支持JPEG遮罩。
 /// Preserve PNG gray and alpha, leaving both outputs unchanged on errors; JPEG masks are unsupported.
 pn_status_t pn_wallpaper_mask_prepare(pn_pool_t *pool,pn_media_t *media,const pn_media_lease_t *lease,const char *path,
@@ -103,6 +109,9 @@ void pn_wallpaper_mask_close(pn_wallpaper_mask_t *mask);
 
 /// 绑定两槽，路径必须不同。/ Bind two distinct slot paths.
 pn_status_t pn_wallpaper_store_init(pn_wallpaper_store_t *store,pn_media_t *media,const char *a,const char *b);
+/// 从壁纸存储目录派生独立的阅读遮罩 A/B 槽（mask.a/mask.b），使壁纸与遮罩互不覆盖。
+/// Derive independent A/B reading-mask slots (mask.a/mask.b) in the same directory so lock wallpaper and reading mask never overwrite each other.
+pn_status_t pn_wallpaper_mask_store_init(const pn_wallpaper_store_t *lock_store,pn_wallpaper_store_t *mask_store);
 /// 选最高有效序号；自定义/已缓存书封把位图读入frame（整屏、stride 342）。EMPTY无记录；CORRUPT两槽皆坏；错误时frame可能变化不可呈现，选择不变。
 /// Pick the highest valid sequence; custom/cached-book modes read the bitmap into frame (full screen, stride 342). EMPTY without records; CORRUPT when both slots are bad; on error frame may change and must not be shown while selection stays unchanged.
 pn_status_t pn_wallpaper_load(const pn_wallpaper_store_t *store,const pn_media_lease_t *lease,pn_lock_selection_t *selection,pn_frame_t *frame);

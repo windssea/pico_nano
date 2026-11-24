@@ -27,7 +27,7 @@ with tempfile.TemporaryDirectory() as folder:
         return result.stdout
 
     # 保存四列拟物，退出设置后立即重分页。/ Save four-column skeuomorphism and re-page on leaving settings.
-    out = run("settings,tap:100:450,tap:550:240,tap:100:780,back,back,tap:580:650,back,library-next,library-previous,quit")
+    out = run("settings,tap:100:400,tap:550:240,tap:100:780,back,back,tap:580:650,back,library-next,library-previous,quit")
     assert "columns=4 style=2" in out and "library_open name=book07.txt" in out, out
     assert "library_page first=book12.txt" in out and "library_page first=book00.txt" in out, out
     assert (state / "shelf.a").is_file() or (state / "shelf.b").is_file()
@@ -36,7 +36,7 @@ with tempfile.TemporaryDirectory() as folder:
     assert "library_open name=book06.txt" in out and "library_open name=book07.txt" in out, out
     assert "library_page first=book12.txt" in out and "library_page first=book12.txt" in out, out
     # 切回三列纸页，同时检查四列书籍菜单与列表仍使用五项分页。/ Return to three-column paper; also verify the fourth-column menu and five-item list paging.
-    out = run("press:600:650,wait:800,release:600:650,back,settings,tap:100:450,tap:100:240,tap:550:780,back,back,library-next,tap:600:190,library-next,quit")
+    out = run("press:600:650,wait:800,release:600:650,back,settings,tap:100:400,tap:100:240,tap:550:780,back,back,library-next,tap:600:190,library-next,quit")
     assert "actions open index=7" in out and "columns=3 style=3" in out, out
     assert "library_page first=book09.txt" in out and "library_page first=book05.txt" in out, out
     out = run("library-next,quit")

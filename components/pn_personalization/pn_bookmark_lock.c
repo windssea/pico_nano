@@ -23,6 +23,10 @@ bool pn_bookmark_lock_date(uint32_t utc,unsigned *year,unsigned *month,unsigned 
     while(m<12 && days>=pn_bookmark_lock_month_days(y,m)){days-=pn_bookmark_lock_month_days(y,m);m++;}
     *year=y;*month=m;*day=(unsigned)days+1;*weekday=week;return true;
 }
+static void format_hm(char *out,size_t cap,uint64_t ms){
+    uint64_t mins=ms/60000u;
+    snprintf(out,cap,"%" PRIu64 ":%02u",mins/60u,(unsigned)(mins%60u));
+}
 static pn_status_t text(pn_font_t *font,pn_frame_t *frame,const char *value,int size,int x,int y,int width,pn_align_t align,bool bold){
     pn_status_t status=pn_font_size(font,size);return status==PN_OK?pn_w_text_ex(font,frame,value,x,y,width,align,0,bold):status;
 }
@@ -70,10 +74,10 @@ pn_status_t pn_bookmark_lock_render(const pn_bookmark_lock_t *s,const pn_frame_t
     TEXT("翻页",21,314,651,65,PN_ALIGN_LEFT,false);
     if(s->reading.known && s->reading.dated)snprintf(line,sizeof line,"%" PRIu64 "次",s->reading.today_turns);else snprintf(line,sizeof line,"—次");TEXT(line,22,378,651,91,PN_ALIGN_RIGHT,true);
     TEXT("时长",21,314,698,65,PN_ALIGN_LEFT,false);
-    if(s->reading.known && !s->reading.dated)snprintf(line,sizeof line,"待校时");else snprintf(line,sizeof line,"%" PRIu64 "分钟",s->reading.known?s->reading.today_ms/60000u:0);TEXT(line,22,378,698,91,PN_ALIGN_RIGHT,true);
-    TEXT("翻页",21,516,651,65,PN_ALIGN_LEFT,false);
-    if(s->reading.known)snprintf(line,sizeof line,"%" PRIu64 "次",s->reading.total_turns);else snprintf(line,sizeof line,"—次");TEXT(line,22,579,651,67,PN_ALIGN_RIGHT,true);
-    TEXT("时长",21,516,698,65,PN_ALIGN_LEFT,false);snprintf(line,sizeof line,"%" PRIu64 "分钟",s->reading.known?s->reading.total_ms/60000u:0);TEXT(line,22,579,698,67,PN_ALIGN_RIGHT,true);
+    if(s->reading.known && !s->reading.dated)snprintf(line,sizeof line,"待校时");else format_hm(line,sizeof line,s->reading.known?s->reading.today_ms:0);TEXT(line,22,378,698,91,PN_ALIGN_RIGHT,true);
+    TEXT("翻页",21,516,651,48,PN_ALIGN_LEFT,false);
+    if(s->reading.known)snprintf(line,sizeof line,"%" PRIu64 "次",s->reading.total_turns);else snprintf(line,sizeof line,"—次");TEXT(line,22,564,651,82,PN_ALIGN_RIGHT,true);
+    TEXT("时长",21,516,698,48,PN_ALIGN_LEFT,false);format_hm(line,sizeof line,s->reading.known?s->reading.total_ms:0);TEXT(line,22,564,698,82,PN_ALIGN_RIGHT,true);
     uint64_t total=0,peak=0;
     for(unsigned i=0;i<7;i++){uint64_t ms=s->reading.dated?s->reading.week_ms[i]:0;if(UINT64_MAX-total<ms)total=UINT64_MAX;else total+=ms;if(ms>peak)peak=ms;}
     pn_frame_rect(frame,409,762,238,40,15);

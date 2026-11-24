@@ -25,7 +25,7 @@ int main(void){char root[]="/tmp/pn-style-ui-XXXXXX";assert(mkdtemp(root));char 
      for(unsigned i=0;i<11;i++){if(rows[i]==3)continue;int hit=pn_style_ui_hit(&ui,i%2?620:300,558+(int)(i/2)*88);assert(hit==PN_SUI_FIELD+(int)rows[i]*2+1);assert(pn_style_ui_event(&ui,hit,2,present,&screen)==PN_OK && !ui.more);}}
     for(unsigned i=0;i<2;i++){int hit=pn_style_ui_hit(&ui,60,734);assert(hit==PN_SUI_FIELD+6);assert(pn_style_ui_event(&ui,hit,2,present,&screen)==PN_OK);}
     assert(pn_style_ui_hit(&ui,340,610)==-1 && pn_style_ui_hit(&ui,100,560)==-1);
-    assert(pn_style_ui_hit(&ui,300,200)==PN_SUI_PREVIEW && pn_style_ui_hit(&ui,500,1000)==PN_SUI_BACKGROUND && pn_style_ui_hit(&ui,100,480)==PN_SUI_FONTS && pn_style_ui_hit(&ui,100,60)==PN_SUI_CANCEL && pn_style_ui_hit(&ui,600,90)==PN_SUI_RESET && pn_style_ui_hit(&ui,300,1150)==PN_SUI_APPLY);
+    assert(pn_style_ui_hit(&ui,300,200)==PN_SUI_PREVIEW && pn_style_ui_hit(&ui,500,1000)==PN_SUI_BACKGROUND && pn_style_ui_hit(&ui,100,480)==PN_SUI_FONTS && pn_style_ui_hit(&ui,100,60)==PN_SUI_CANCEL && pn_style_ui_hit(&ui,600,90)==PN_SUI_RESET && pn_style_ui_hit(&ui,150,1150)==PN_SUI_USE_GLOBAL && pn_style_ui_hit(&ui,300,1150)==PN_SUI_APPLY);
     assert(pn_style_ui_event(&ui,PN_SUI_MORE,2,present,&screen)==PN_OK && !ui.more && pn_style_ui_hit(&ui,100,60)==PN_SUI_CANCEL);
     assert(pn_style_ui_event(&ui,PN_SUI_BACK_MAIN,2,present,&screen)==PN_OK && !ui.more);
     assert(ui.draft.pixels==46 && ui.draft.line_percent==150 && ui.draft.gap_percent==45 && ui.draft.indent_em==0 && ui.draft.margin==48 && ui.draft.gl_before_clear==12 && ui.draft.tracking_percent==5 && ui.draft.reading_line==1 && ui.draft.reading_line_offset==2 && ui.draft.reading_line_shade==2 && ui.draft.weight==1 && ui.draft.clarity==1);
@@ -85,5 +85,11 @@ int main(void){char root[]="/tmp/pn-style-ui-XXXXXX";assert(mkdtemp(root));char 
     assert(pn_style_ui_event(&ui,PN_SUI_PREVIEW,3,present,&screen)==PN_OK && ui.preview);assert(pn_style_ui_hit(&ui,300,400)==PN_SUI_FORM);screen.capture=false;
     assert(pn_style_ui_event(&ui,PN_SUI_FORM,3,present,&screen)==PN_OK && !ui.preview);assert(pn_style_ui_event(&ui,PN_SUI_CANCEL,4,present,&screen)==PN_OK && !ui.active);
     pn_style_t style;assert(pn_reader_app_style_get(&app,&style)==PN_OK && style.pixels==44);
-    assert(pn_reader_app_close(&app,5)==PN_OK);pn_test_remove_indexes(state);DIR *dir=opendir(state);assert(dir);struct dirent *entry;while((entry=readdir(dir))){if(entry->d_name[0]=='.')continue;char p[1024];int n=snprintf(p,sizeof p,"%s/%s",state,entry->d_name);assert(n>0 && (size_t)n<sizeof p && unlink(p)==0);}assert(closedir(dir)==0 && rmdir(state)==0 && unlink(book)==0 && rmdir(root)==0 && !pool.used && !pool.live);puts("style UI: confirmed controls, typesetting/guide fields, preview return and discarded draft passed");return 0;
+    /* 先应用单书特殊排版，再点击“使用全局”清除单书覆盖并立即采用全局排版。/ Apply per-book override first, then tap "Use Global" to clear override and adopt global style. */
+    {pn_media_t sm;pn_media_init(&sm);assert(pn_media_attach(&sm,1)==PN_OK);pn_style_t gs=pn_style_default(52);assert(pn_style_global_save(&sm,state,&gs)==PN_OK);}
+    assert(pn_style_ui_open(&ui,&app,present,&screen)==PN_OK && pn_style_ui_event(&ui,PN_SUI_FIELD+1,5,present,&screen)==PN_OK && pn_style_ui_event(&ui,PN_SUI_APPLY,5,present,&screen)==PN_OK && !ui.active);
+    assert(pn_reader_app_style_get(&app,&style)==PN_OK && style.pixels==46);
+    assert(pn_style_ui_open(&ui,&app,present,&screen)==PN_OK && pn_style_ui_event(&ui,PN_SUI_USE_GLOBAL,6,present,&screen)==PN_OK && !ui.active);
+    assert(pn_reader_app_style_get(&app,&style)==PN_OK && style.pixels==52);
+    assert(pn_reader_app_close(&app,7)==PN_OK);pn_test_remove_indexes(state);DIR *dir=opendir(state);assert(dir);struct dirent *entry;while((entry=readdir(dir))){if(entry->d_name[0]=='.')continue;char p[1024];int n=snprintf(p,sizeof p,"%s/%s",state,entry->d_name);assert(n>0 && (size_t)n<sizeof p && unlink(p)==0);}assert(closedir(dir)==0 && rmdir(state)==0 && unlink(book)==0 && rmdir(root)==0 && !pool.used && !pool.live);puts("style UI: confirmed controls, typesetting/guide fields, preview return and discarded draft passed");return 0;
 }

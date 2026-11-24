@@ -162,6 +162,10 @@ pn_status_t pn_reader_app_style_preview(pn_reader_app_t *app,const pn_style_t *s
 /// 成功呈现后同步保存；失败保留应用意图供重试。
 /// Save synchronously after successful presentation; retain apply intent on failure for retry.
 pn_status_t pn_reader_app_style_apply(pn_reader_app_t *app,const pn_style_t *style,uint64_t now,pn_reader_present_fn present,void *ctx);
+/// 将指定排版配置保存为全局默认（写入状态目录global_style.a/b，不改当前书状态）。/ Save style as the global default into state_dir/global_style.a/b without altering current book state.
+pn_status_t pn_reader_app_style_save_global(pn_reader_app_t *app,const pn_style_t *style);
+/// 清除本书单独排版覆盖并立即应用全局默认排版（无全局记录时回落出厂默认）。/ Clear per-book style override and apply global default typesetting immediately.
+pn_status_t pn_reader_app_style_use_global(pn_reader_app_t *app,uint64_t now,pn_reader_present_fn present,void *ctx);
 /// 取消未提交草稿，恢复原值和源锚点；不擦损坏配置。
 /// Cancel uncommitted drafts and restore style/source anchor without erasing corrupt configuration.
 pn_status_t pn_reader_app_style_cancel(pn_reader_app_t *app,uint64_t now,pn_reader_present_fn present,void *ctx);

@@ -35,21 +35,27 @@ with tempfile.TemporaryDirectory() as folder:
     # 未给目录时w键无效；选项须配合书库。/ Without the option the w key does nothing; options require the library mode.
     out=run('wallpaper,quit');assert 'wallpaper_ui' not in out,out
     assert subprocess.run([sys.argv[1],'--wallpaper-dir',str(images)],env=dict(os.environ,SDL_VIDEODRIVER='dummy'),capture_output=True).returncode==2
-    # PNG透明遮罩只在锁屏叠加，正文不受影响；缺失原图降级为正文和默认锁屏。/ PNG masks appear only while locked and never alter reading; missing sources fall back to plain text and default locking.
-    out=run('wallpaper,tap:330:240,tap:100:440,enter,back,tap:100:500,lock,next,enter,back,quit',*opts)
+    # PNG透明遮罩独立于锁屏壁纸：阅读中锁屏叠加遮罩，非阅读页锁屏或原图缺失时仍保留已选自定义壁纸。
+    # PNG masks are independent of the lock wallpaper: applied while locking from reading, while non-reading locks or missing mask sources preserve the chosen lock wallpaper.
+    out=run('wallpaper,tap:330:240,tap:100:440,tap:100:800,enter,back,lock,enter,tap:100:500,lock,next,enter,back,quit',*opts)
     assert 'wallpaper_ui command=14 status=0 screen=0 active=1' in out and 'wallpaper_ui command=11 status=0 screen=0 active=1' in out,out
-    assert 'lock_mask status=0' in out and 'lock_preview status=0 mode=4 cached=0' in out and 'lock_preview wake status=0' in out,out
+    assert 'lock_preview status=0 mode=1 cached=0' in out and 'lock_mask status=0' in out and 'lock_preview status=0 mode=4 cached=0' in out and 'lock_preview wake status=0' in out,out
     # 锁前/锁后正文像素必须逐字节相同，只有锁屏帧在左侧叠加不透明遮罩。 / Reading pixels before/after lock must match bytewise; only the lock frame contains the opaque left mask.
     captures=root/'mask-frames';captures.mkdir()
     out=run('tap:100:500,lock,enter,back,quit',*opts,frames=captures)
     pages=[p.read_bytes().split(b'255\n',1)[1] for p in sorted(captures.glob('frame-*.pgm'))]
     probe=10*684+10
     assert any(pages[i-1]==pages[i+1] and pages[i-1][probe]==255 and pages[i][probe]<100 for i in range(1,len(pages)-1)),(len(pages),out)
-    latest=max((p.read_bytes() for p in store.glob('lock.*')),key=lambda b:int.from_bytes(b[12:20],'little'))
-    assert latest[:6]==b'PNWP\x03\x00' and latest[6]==4 and latest[11]==0 and len(latest)<2048
+    latest_mask=max((p.read_bytes() for p in store.glob('mask.[ab]')),key=lambda b:int.from_bytes(b[12:20],'little'))
+    assert latest_mask[:6]==b'PNWP\x03\x00' and latest_mask[6]==4 and latest_mask[11]==0 and len(latest_mask)<2048
+    latest_lock=max((p.read_bytes() for p in store.glob('lock.[ab]')),key=lambda b:int.from_bytes(b[12:20],'little'))
+    assert latest_lock[6]==1
     next(images.glob('*.png')).unlink()
     out=run('tap:100:500,lock,enter,back,quit',*opts)
-    assert 'lock_mask status=11' in out and 'lock_preview status=0 mode=0 cached=0' in out,out
+    assert 'lock_mask status=11' in out and 'lock_preview status=0 mode=1 cached=0' in out,out
+    # 关闭阅读遮罩不影响锁屏壁纸，再应用书签模式仅更新壁纸槽。/ Disabling the mask preserves the wallpaper; applying bookmark updates lock.* only.
+    out=run('wallpaper,tap:330:240,tap:100:320,back,quit',*opts)
+    assert 'wallpaper_ui command=4 status=0 screen=0 active=1' in out,out
     # 书签模式无需图片/联网；应用、跨进程重开与锁解锁逐像素恢复。/ Bookmark needs no image/network: apply, reopen across processes, and restore body pixels exactly.
     captures=root/'bookmark-frames';captures.mkdir()
     out=run('wallpaper,tap:600:240,enter,back,tap:100:500,lock,enter,back,quit',*opts,frames=captures)

@@ -14,6 +14,7 @@
 #define PN_READER_FOOTER_Y 1144 ///< 页脚上沿y / Footer top y
 #define PN_READER_FOOTER_BAND_Y 1152 ///< 覆盖完整正文的32像素对齐刷新边界 / 32-pixel-aligned refresh boundary covering the complete text area
 #define PN_TOOLBAR_Y 896 ///< 工具栏上沿y，高度320 / Toolbar top y, height 320
+#define PN_TOOLBAR_TOP_H 112 ///< 阅读工具栏顶部信息条高度 / Height of the toolbar top info bar
 /// 目录、进度与书签跳转共用的纯绘制等待回调；ctx/metadata不使用。/ Paint-only busy callback shared by TOC, progress and bookmark jumps; ctx/metadata are unused.
 pn_status_t pn_reader_jump_loading_render(void *ctx,pn_font_t *font,pn_font_t *metadata,pn_frame_t *frame);
 /// 工具栏入口，值同时是命中返回值。/ Toolbar entries; the values are also the hit-test results.
@@ -24,8 +25,16 @@ typedef enum {
     PN_TOOL_TYPESET, ///< 排版 / Typesetting
     PN_TOOL_REFRESH, ///< 强刷：整屏GC16重绘当前页 / Full-screen GC16 redraw of the current page
     PN_TOOL_SHELF, ///< 回书架 / Back to the shelf
-    PN_TOOL_CLOSE ///< 点工具栏以外区域关闭 / Tapping outside the toolbar closes it
+    PN_TOOL_CLOSE, ///< 点工具栏以外区域关闭 / Tapping outside the toolbar closes it
+    PN_TOOL_QUICK_BOOKMARK ///< 顶栏右侧一键添加书签 / Top-bar one-tap quick bookmark
 } pn_reader_tool_t;
+/// 工具栏顶部阅读信息条数据；title为书名或章节，basis为0..10000（负值表示未知）。/ Reader toolbar top info bar data: title/chapter and progress 0..10000 (negative when unknown).
+typedef struct {
+    const char *title; ///< 书名 / Book title
+    int basis; ///< 阅读进度0..10000，负值未知 / Progress 0..10000, negative when unknown
+    bool bookmarked; ///< 当前页已标记书签 / Whether the current page is bookmarked
+    bool quick_bookmark; ///< 是否显示右侧一键书签按钮 / Show one-tap bookmark button on the right
+} pn_toolbar_top_t;
 /// 画页脚：y=1144细线，左侧文字（章节/书名）与右侧文字（百分比）；fallback可为NULL，UI字体缺字时用它补。
 /// Draw the footer: a thin rule at y=1144, left text (section/title) and right text (percentage); fallback may be NULL and fills glyphs the UI font lacks.
 pn_status_t pn_reader_footer_render(pn_font_t *ui,pn_font_t *fallback,pn_frame_t *frame,const char *left,const char *right);
@@ -36,6 +45,8 @@ pn_status_t pn_reader_status_render(pn_font_t *ui,pn_frame_t *frame,unsigned bac
 /// 在frame底部画工具栏（白底覆盖原页面）；unavailable按位标记不可用入口（bit0对应PN_TOOL_TOC，依此类推）。
 /// Draw the toolbar over the bottom of the frame (a white sheet over the page); unavailable marks entries bitwise (bit 0 is PN_TOOL_TOC and so on).
 pn_status_t pn_reader_toolbar_render(pn_font_t *ui,pn_frame_t *frame,unsigned unavailable);
+/// 在frame顶部画工具栏信息条（实时状态带、书名、进度百分比与可选一键书签）。/ Draw the toolbar top info bar (status band, title, progress percentage and optional quick bookmark).
+pn_status_t pn_reader_toolbar_top_render(pn_font_t *ui,pn_frame_t *frame,const pn_toolbar_top_t *top);
 /// 命中返回PN_TOOL_*；工具栏以上区域返回PN_TOOL_CLOSE；不可用入口返回-1。
 /// Hit test returning PN_TOOL_*; the area above the toolbar returns PN_TOOL_CLOSE; unavailable entries return -1.
 int pn_reader_toolbar_hit(int x,int y,unsigned unavailable);

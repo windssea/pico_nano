@@ -13,6 +13,7 @@
 #define PN_JUI_CONFIRM 2 ///< 跳转到草稿位置 / Jump to the draft position
 #define PN_JUI_RETRY 3 ///< 重画面板 / Repaint the panel
 #define PN_JUI_STEP 10 ///< 10..13：-大步/-1/+1/+大步 / 10..13: -large/-1/+1/+large
+#define PN_JUI_PERCENT 100 ///< 100..200：点按进度条直接设定草稿百分比0..100 / 100..200: tap the progress bar to set draft percent 0..100 directly
 typedef struct {
     pn_reader_app_t *reader; ///< TXT会话（与epub互斥）/ TXT session (exclusive with epub)
     pn_epub_app_t *epub; ///< EPUB会话 / EPUB session

@@ -4,6 +4,7 @@
 #include "pn_book_actions.h"
 #include "pn_font.h"
 #include "pn_favorites.h"
+#include "pn_read_marks.h"
 #include "pn_shelf_prefs.h"
 #include "pn_reading_stats.h"
 #define PN_SHELF_PREVIOUS 40
@@ -17,6 +18,9 @@
 #define PN_SHELF_XIANGQI 51 ///< 象棋残局入口 / Chinese Chess endgame entry
 #define PN_SHELF_KLOTSKI 52 ///< 华容道入口 / Klotski entry
 #define PN_SHELF_TSUMEGO 53 ///< 围棋死活入口 / Go Tsumego entry
+#define PN_SHELF_SORT 54 ///< 切换书库排列方式 / Cycle library sort order
+#define PN_SHELF_READING_STATS 55 ///< 点击主页阅读节奏进入阅读统计详情 / Tap Home reading rhythm to open statistics details
+#define PN_SHELF_FOLDER 56 ///< 切换书库目录筛选（全部/默认子目录/外部图书目录）/ Cycle library folder filter (All / subfolders / external book dirs)
 #define PN_SHELF_SUDOKU 46 ///< 数独入口 / Sudoku entry
 #define PN_SHELF_ENTERTAINMENT_BACK 47 ///< 返回娱乐 / Return to entertainment
 #define PN_SHELF_CONTINUE 44 ///< 点继续阅读卡 / Tap the continue-reading card
@@ -58,13 +62,18 @@ bool pn_shelf_gesture_feed(pn_shelf_gesture_t *,bool active,bool swipe,unsigned 
 typedef struct {
     bool home; ///< 首页读取实际最近快照，书库不画继续卡 / Home reads actual recent snapshots; library omits the continue card
     char home_date[40]; ///< owner准备的当地日期，空串表示未校时 / Owner-prepared local date; empty when unsynchronized
+    const char *home_header; ///< 主页左上角自定义文案，NULL或空串显示PicoNano / Custom Home top-left text; NULL/empty shows PicoNano
+    const pn_frame_t *home_banner; ///< 正在阅读上方自定义背景帧（684×146），NULL使用默认山水 / Custom Home top banner frame (684x146); NULL uses default mountains
     pn_reading_summary_t reading; ///< 已加载的统计快照；known只对应继续卡同一本书 / Loaded statistics; known applies only to the Continue book
     int battery_percent; ///< 0–100，<0不显示 / 0–100, hidden when negative
     bool list_mode; ///< 列表模式（每页5行）/ List mode, five rows per page
     uint8_t columns; ///< 网格3或4列，0默认3列 / Grid with three or four columns; zero defaults to three
     uint8_t style; ///< pn_shelf_style_t静态风格 / Static pn_shelf_style_t appearance
+    uint8_t sort; ///< pn_shelf_sort_t排列方式 / pn_shelf_sort_t library sort order
+    const char *folder_label; ///< 非NULL时在书库信息栏展示目录筛选胶囊（如“全部”或子目录/外部目录名）/ When non-NULL, shows a folder filter pill in the library info row
     const pn_book_actions_t *actions; ///< 非NULL时在书架上叠画书籍操作面板（借用同一补字字体）/ When non-NULL, the book actions sheet is drawn over the shelf (sharing the fallback font)
     const pn_favorites_t *favorite_items; ///< 已验证的收藏快照，NULL不画标识 / Validated favorites snapshot; NULL hides markers
+    const pn_read_marks_t *read_marks; ///< 已验证的手动已读/未读快照，NULL按进度100%判定 / Validated manual read marks; NULL falls back to 100% progress
     bool entertainment_tab; ///< 显示娱乐分类 / Show the entertainment category
     uint8_t entertainment; ///< 0书籍、1娱乐、2数独介绍；不含游戏状态 / 0 books, 1 entertainment, 2 Sudoku introduction; no game state
     bool favorites_tab; ///< 分类里显示“收藏” / Show Favorites among the categories

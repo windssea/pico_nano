@@ -2,6 +2,7 @@
  * 中文：选中图片只加载一次，缓存压缩落卡，翻页无文件操作。 / English: load selected artwork once, compress persistent caches, and perform no file IO on turns. */
 #include "pn_paper.h"
 #include "pn_builtin_art.h"
+#include "pn_scan_dirs.h"
 #include "pn_sd_layout.h"
 #include <stdlib.h>
 #include <stdio.h>
@@ -24,7 +25,10 @@ void pn_paper_close(pn_paper_t *p){if(p){pn_free(p->frame.pixels);memset(p,0,siz
 pn_status_t pn_paper_open(pn_paper_t *p,pn_pool_t *pool,pn_media_t *media,const pn_media_lease_t *lease,const pn_style_t *s){
     if(!p || p->frame.pixels || !pool || !media || !lease || pn_style_validate(s)!=PN_OK)return PN_INVALID;
     if(s->background!=PN_READING_BACKGROUND_EXTERNAL)return PN_OK;
-    char path[PN_JOURNAL_PATH_MAX];int n=snprintf(path,sizeof path,"%s/%s",pn_paper_directory(),s->background_name);if(n<1 || (size_t)n>=sizeof path)return PN_LIMIT;
+    char path[PN_JOURNAL_PATH_MAX];
+    if(!pn_scan_dirs_find_file(PN_SCAN_CAT_BACKGROUNDS,pn_paper_directory(),s->background_name,path,sizeof path)){
+        int n=snprintf(path,sizeof path,"%s/%s",pn_paper_directory(),s->background_name);if(n<1 || (size_t)n>=sizeof path)return PN_LIMIT;
+    }
     uint8_t *pixels=pn_alloc_tagged(pool,PN_MEM_FRAME,PN_WALLPAPER_BYTES);if(!pixels)return PN_NO_MEMORY;
     pn_frame_t f;(void)pn_frame_bind(&f,pixels,PN_WALLPAPER_BYTES,684,1216);
     size_t free=pool->limit>pool->used?pool->limit-pool->used:0,budget=free>256u*1024u?free-256u*1024u:1;

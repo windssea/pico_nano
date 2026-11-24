@@ -138,6 +138,10 @@ bool pn_epub_app_last_confirmed(const pn_epub_app_t *);
 pn_status_t pn_epub_app_style_get(const pn_epub_app_t *,pn_style_t *);
 /// 实际原锚点重排/显示后保存逐书配置；失败保留会话。/ Reflow/present at the original anchor then persist per-book style; retain on failure.
 pn_status_t pn_epub_app_style_apply(pn_epub_app_t *,const pn_style_t *,uint64_t,pn_reader_present_fn,void *);
+/// 将指定排版配置保存为全局默认（写入状态目录global_style.a/b，不改当前书状态）。/ Save style as the global default into state_dir/global_style.a/b without altering current book state.
+pn_status_t pn_epub_app_style_save_global(pn_epub_app_t *,const pn_style_t *);
+/// 清除本书单独排版覆盖并立即应用全局默认排版（无全局记录时回落出厂默认）。/ Clear per-book style override and apply global default typesetting immediately.
+pn_status_t pn_epub_app_style_use_global(pn_epub_app_t *,uint64_t,pn_reader_present_fn,void *);
 
 /// 语义位置跳转，仍要求实际显示成功才确认。/ Semantic jump requiring actual presentation before confirmation.
 pn_status_t pn_epub_app_jump(pn_epub_app_t *,const pn_epub_location_t *,uint64_t,pn_reader_present_fn,void *);

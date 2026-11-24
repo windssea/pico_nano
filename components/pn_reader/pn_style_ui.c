@@ -90,20 +90,22 @@ static void font_name(pn_style_ui_t *u,char *out,size_t cap){
         memmove(out+lead,out,n);memcpy(out,prefix,lead);out[lead+n]=0;
     }
 }
-/* 每项占半行，标签在上、减值加在下，触控区不互相重叠。/ Each field uses half a row, with its label above minus/value/plus and disjoint touch targets. */
+/* 每项占半行，标签在上、浅雾左右步进按键与居中数值在下，触控边界清晰不重叠。
+ * Each field uses half a row with label on top and fog left/right stepper pads flanking the value for clear touch boundaries. */
 static pn_status_t stepper(pn_font_t *font,pn_frame_t *frame,const pn_style_t *draft,unsigned field,int x,int y,bool selected){
     char value[40];field_text(draft,field,value,sizeof value);
-    pn_w_round_stroke(frame,x,y,CELL_W,CELL_H,10,selected?2:1,selected?PN_UI_INK:8);
-    pn_status_t s=pn_font_size(font,22);
-    if(s==PN_OK)s=pn_w_text_ex(font,frame,names[field],x+12,y+26,CELL_W-24,PN_ALIGN_LEFT,PN_UI_MUTED,false);
-    if(s==PN_OK && field==5)s=pn_w_text_ex(font,frame,"详调 >",x+12,y+26,CELL_W-24,PN_ALIGN_RIGHT,PN_UI_MUTED,false);
-    // 档位选择（边距、阅读线、深浅、字重）用左右切换符号，数值项（字号、行距等）保留减加号。
-    // Option fields (margin, reading line, shade, weight) use left/right switch arrows; numeric fields (size, spacing...) keep minus/plus.
+    pn_w_round_stroke(frame,x,y,CELL_W,CELL_H,12,selected?2.0f:1.5f,selected?PN_UI_INK:9);
+    pn_status_t s=pn_font_size(font,21);
+    if(s==PN_OK)s=pn_w_text_ex(font,frame,names[field],x+12,y+24,CELL_W-24,PN_ALIGN_LEFT,5,false);
+    if(s==PN_OK && field==5)s=pn_w_text_ex(font,frame,"详调 >",x+12,y+24,CELL_W-24,PN_ALIGN_RIGHT,4,true);
     bool choice=field==5 || field==6 || field==8 || field==9 || field==10;
-    if(field==11){pn_w_icon(frame,PN_ICON_CHEVRON,x+CELL_W-40,y+45,24,PN_UI_INK);if(s==PN_OK)s=pn_font_size(font,26);if(s==PN_OK)s=pn_w_text(font,frame,value,x+12,y+69,CELL_W-64,PN_ALIGN_LEFT);return s;}
-    pn_w_icon(frame,choice?PN_ICON_BACK:PN_ICON_MINUS,x+22,y+46,24,PN_UI_INK);pn_w_icon(frame,choice?PN_ICON_CHEVRON:PN_ICON_PLUS,x+CELL_W-46,y+46,24,PN_UI_INK);
-    if(s==PN_OK)s=pn_font_size(font,28);
-    if(s==PN_OK)s=pn_w_text(font,frame,value,x+68,y+69,CELL_W-136,PN_ALIGN_CENTER);
+    if(field==11){pn_w_icon(frame,PN_ICON_CHEVRON,x+CELL_W-38,y+44,24,6);if(s==PN_OK)s=pn_font_size(font,26);if(s==PN_OK)s=pn_w_text_ex(font,frame,value,x+12,y+67,CELL_W-60,PN_ALIGN_LEFT,PN_UI_INK,true);return s;}
+    pn_w_round_fill(frame,x+8,y+32,64,40,8,PN_UI_SURFACE);pn_w_round_stroke(frame,x+8,y+32,64,40,8,1.0f,11);
+    pn_w_round_fill(frame,x+CELL_W-72,y+32,64,40,8,PN_UI_SURFACE);pn_w_round_stroke(frame,x+CELL_W-72,y+32,64,40,8,1.0f,11);
+    pn_w_icon(frame,choice?PN_ICON_BACK:PN_ICON_MINUS,x+29,y+41,22,PN_UI_INK);
+    pn_w_icon(frame,choice?PN_ICON_CHEVRON:PN_ICON_PLUS,x+CELL_W-51,y+41,22,PN_UI_INK);
+    if(s==PN_OK)s=pn_font_size(font,26);
+    if(s==PN_OK)s=pn_w_text_ex(font,frame,value,x+74,y+62,CELL_W-148,PN_ALIGN_CENTER,PN_UI_INK,true);
     return s;
 }
 /* 用草稿的字号/行距/缩进/字距试排一段，让数值变化立刻可见；正文字体不可用时用UI字体。
@@ -264,9 +266,11 @@ pn_status_t pn_style_ui_render(void *ctx,pn_font_t *font,pn_font_t *metadata,pn_
     pn_status_t s=pn_w_header(font,frame,"< 返回","排版设置",NULL);
     if(s==PN_OK && !u->more){s=pn_font_size(font,26);if(s==PN_OK)s=pn_w_text_ex(font,frame,"恢复默认",480,100,172,PN_ALIGN_RIGHT,PN_UI_MUTED,false);}
     if(s==PN_OK)s=paint_main(u,font,frame);
-    // 底部固定的深色“应用”；取消即左上返回，“恢复默认”在右上。/ A fixed dark Apply at the bottom; cancelling is the Back at the top left and Restore defaults sits at the top right.
-    if(s==PN_OK)s=pn_font_size(font,32);
-    if(s==PN_OK)s=pn_w_button(font,frame,"应用",PN_UI_MARGIN,APPLY_Y,620,APPLY_H,PN_W_SELECTED);
+    // 底部：左侧“使用全局”（清除本书特配）、右侧深色主按钮“应用到本书”（x=300仍命中应用以兼容既有测试）。
+    // Bottom bar: left "Use Global" (clear book override), right primary "Apply to Book" (x=300 stays inside Apply).
+    if(s==PN_OK)s=pn_font_size(font,30);
+    if(s==PN_OK)s=pn_w_button(font,frame,"使用全局",PN_UI_MARGIN,APPLY_Y,244,APPLY_H,0u);
+    if(s==PN_OK)s=pn_w_button(font,frame,"应用到本书",292,APPLY_Y,360,APPLY_H,PN_W_SELECTED);
     if(s==PN_OK && u->notice){s=pn_font_size(font,24);if(s==PN_OK)s=pn_w_text_ex(font,frame,u->notice,PN_UI_MARGIN,APPLY_Y-14,620,PN_ALIGN_CENTER,PN_UI_INK,true);}
     pn_status_t restored=pn_font_size(font,original);return s==PN_OK?restored:s;
 }
@@ -290,7 +294,7 @@ pn_status_t pn_style_ui_event(pn_style_ui_t *u,int command,uint64_t now,pn_reade
     if(command==PN_SUI_FORM)u->more=false;
     if(command==PN_SUI_RETRY || command==PN_SUI_FORM)return pn_style_ui_present(u,present,ctx);
     pn_status_t status=PN_OK;u->notice=NULL;
-    if(!u->backgrounds && !u->margins && (command==PN_SUI_PREVIEW || command==PN_SUI_APPLY || (command==PN_SUI_CANCEL && u->did_preview))){
+    if(!u->backgrounds && !u->margins && (command==PN_SUI_PREVIEW || command==PN_SUI_APPLY || command==PN_SUI_USE_GLOBAL || (command==PN_SUI_CANCEL && u->did_preview))){
         u->presented=false;status=overlay(u,busy_paint,present,ctx);
         if(status!=PN_OK){(void)pn_style_ui_present(u,present,ctx);return status;}
     }
@@ -380,6 +384,14 @@ pn_status_t pn_style_ui_event(pn_style_ui_t *u,int command,uint64_t now,pn_reade
     }else if(command==PN_SUI_MORE){u->more=false;u->selected=4;
     }else if(command==PN_SUI_BACK_MAIN){u->more=false;u->selected=0;
     }else if(command==PN_SUI_RESET){u->draft=pn_style_default(PN_STYLE_DEFAULT_PIXELS);
+    }else if(command==PN_SUI_USE_GLOBAL){
+        status=u->epub?pn_epub_app_style_use_global(u->epub,now,present,ctx):pn_reader_app_style_use_global(u->reader,now,present,ctx);
+        if(status==PN_OK){u->active=false;return status;}
+        u->application_failed=confirmed(u);
+    }else if(command==PN_SUI_SAVE_GLOBAL){
+        status=u->epub?pn_epub_app_style_save_global(u->epub,&u->draft):pn_reader_app_style_save_global(u->reader,&u->draft);
+        u->notice=status==PN_OK?"已设为全局默认（新书自动生效）":status==PN_UNSUPPORTED?"无状态目录，无法保存全局默认":"保存全局默认失败，请重试";
+        pn_status_t drawn=pn_style_ui_present(u,present,ctx);return drawn!=PN_OK?drawn:status;
     }else if(command>=PN_SUI_PRESET && command<PN_SUI_PRESET+3){
         const preset_t *chosen=&presets[command-PN_SUI_PRESET];
         u->draft.pixels=(uint16_t)chosen->pixels;u->draft.line_percent=(uint16_t)chosen->line;u->draft.gap_percent=(uint16_t)chosen->gap;u->draft.indent_em=(uint16_t)chosen->indent;pn_style_set_margins_lr(&u->draft,(int)chosen->margin);u->draft.tracking_percent=0;
@@ -426,7 +438,7 @@ int pn_style_ui_hit(const pn_style_ui_t *u,int x,int y){
         return slot-3<pn_background_gallery_count(&u->gallery)?PN_SUI_BACKGROUND_EXTERNAL+(int)slot-3:-1;
     }
     if(y<PN_W_HEADER_H){if(pn_w_header_hit(x,y,false)==1)return PN_SUI_CANCEL;return x>=480 && y>=44?PN_SUI_RESET:-1;}
-    if(y>=APPLY_Y && y<APPLY_Y+APPLY_H)return x>=32 && x<652?PN_SUI_APPLY:-1;
+    if(y>=APPLY_Y && y<APPLY_Y+APPLY_H){if(x>=32 && x<280)return PN_SUI_USE_GLOBAL;if(x>=288 && x<652)return PN_SUI_APPLY;return -1;}
     if(y>=PREVIEW_Y && y<PREVIEW_Y+PREVIEW_H && x>=32 && x<652)return PN_SUI_PREVIEW;
     if(y>=FONT_ROW_Y && y<FONT_ROW_Y+74 && x>=32 && x<652)return PN_SUI_FONTS;
     if(y>=1028 && y<1100){if(x>=32 && x<332)return PN_SUI_FIELD+24;if(x>=352 && x<652)return PN_SUI_TOGGLE_BARS;return -1;}

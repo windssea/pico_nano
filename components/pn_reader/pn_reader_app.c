@@ -204,6 +204,11 @@ static pn_status_t open_state(app_t *a,const char *directory,uint64_t now){
     snprintf(path_a,sizeof path_a,"%s/%s.style.a",directory,hash);snprintf(path_b,sizeof path_b,"%s/%s.style.b",directory,hash);
     s=pn_journal_files_init(&a->style_files,&a->state_media,&a->state_lease,path_a,path_b,&a->style_io);if(s!=PN_OK)return s;
     pn_style_t saved;s=pn_style_load(&a->style_io,&a->book,&saved);if(s!=PN_OK && s!=PN_EMPTY)return s;
+    if(s==PN_EMPTY){
+        // 本书无独立排版记录时，自动继承全局默认排版。/ Inherit global default typesetting when this book has no per-book record.
+        pn_journal_files_t gf;pn_journal_io_t gio;pn_book_id_t gid=pn_style_global_id();
+        if(pn_style_global_files(&gf,&a->state_media,&a->state_lease,directory,&gio)==PN_OK && pn_style_load(&gio,&gid,&saved)==PN_OK)s=PN_OK;
+    }
     if(s==PN_OK)a->style=saved;
     a->saved_style=a->style;a->persistent=true;
     if(s==PN_OK && a->style.background==PN_READING_BACKGROUND_EXTERNAL){pn_status_t paper=pn_paper_open(&a->paper,a->pool,a->book_media,&a->book_lease,&a->style);if(paper==PN_CANCELLED || paper==PN_STALE_MEDIA)return paper;if(paper!=PN_OK)pn_paper_fallback(&a->paper,&a->style);}strcpy(a->state_directory,directory);return PN_OK;
@@ -243,7 +248,7 @@ static pn_status_t pn_reader_app_open_on_media_impl(pn_reader_app_t *app,pn_pool
             // 快开时外置正文字体也只核对大小，完整SHA随后台复核。/ When fast opening, an external body font also checks size only, with the full SHA in background verification.
             pn_status_t (*open_font)(pn_pool_t *,const pn_font_reference_t *,pn_media_t *,const pn_media_lease_t *,pn_text_file_t *,pn_text_source_t *)=fast?pn_font_reference_open_file_fast:pn_font_reference_open_file;
 #ifdef ESP_PLATFORM
-            primary=selected_fonts.primary.kind==PN_FONT_FILE && !pn_sd_resource_path(selected_fonts.primary.path,PN_SD_FONTS)?PN_EMPTY:selected_fonts.primary.kind==PN_FONT_FILE?open_font(pool,&selected_fonts.primary,a->book_media,&a->book_lease,&a->font_file,&font_source):pn_font_reference_verify_pooled(pool,&selected_fonts.primary,a->book_media,&a->book_lease);
+            primary=selected_fonts.primary.kind==PN_FONT_FILE && !pn_sd_resource_path(selected_fonts.primary.path,PN_SD_FONTS) && !pn_scan_dirs_path_allowed(PN_SCAN_CAT_FONTS,selected_fonts.primary.path)?PN_EMPTY:selected_fonts.primary.kind==PN_FONT_FILE?open_font(pool,&selected_fonts.primary,a->book_media,&a->book_lease,&a->font_file,&font_source):pn_font_reference_verify_pooled(pool,&selected_fonts.primary,a->book_media,&a->book_lease);
 #else
             primary=selected_fonts.primary.kind==PN_FONT_FILE?open_font(pool,&selected_fonts.primary,a->book_media,&a->book_lease,&a->font_file,&font_source):pn_font_reference_verify_pooled(pool,&selected_fonts.primary,a->book_media,&a->book_lease);
 #endif
@@ -253,7 +258,7 @@ static pn_status_t pn_reader_app_open_on_media_impl(pn_reader_app_t *app,pn_pool
             else{has_selected_fonts=true;font_path=selected_fonts.primary.kind==PN_FONT_FILE?selected_fonts.primary.path:NULL;
                 pn_status_t backup;
 #ifdef ESP_PLATFORM
-                backup=selected_fonts.fallback.kind==PN_FONT_FILE && !pn_sd_resource_path(selected_fonts.fallback.path,PN_SD_FONTS)?PN_EMPTY:selected_fonts.fallback.kind==PN_FONT_FILE?pn_font_reference_open_file(pool,&selected_fonts.fallback,a->book_media,&a->book_lease,&a->fallback_file,&fallback_source):pn_font_reference_verify_pooled(pool,&selected_fonts.fallback,a->book_media,&a->book_lease);
+                backup=selected_fonts.fallback.kind==PN_FONT_FILE && !pn_sd_resource_path(selected_fonts.fallback.path,PN_SD_FONTS) && !pn_scan_dirs_path_allowed(PN_SCAN_CAT_FONTS,selected_fonts.fallback.path)?PN_EMPTY:selected_fonts.fallback.kind==PN_FONT_FILE?pn_font_reference_open_file(pool,&selected_fonts.fallback,a->book_media,&a->book_lease,&a->fallback_file,&fallback_source):pn_font_reference_verify_pooled(pool,&selected_fonts.fallback,a->book_media,&a->book_lease);
 #else
                 backup=selected_fonts.fallback.kind==PN_FONT_FILE?pn_font_reference_open_file(pool,&selected_fonts.fallback,a->book_media,&a->book_lease,&a->fallback_file,&fallback_source):pn_font_reference_verify_pooled(pool,&selected_fonts.fallback,a->book_media,&a->book_lease);
 #endif
@@ -480,7 +485,7 @@ static pn_status_t step_location(pn_reader_app_t *app,pn_reader_action_t action,
     a->last_confirmed=true;a->resume_dirty=a->resume_next_dirty=true;
     if(dismiss_return)a->has_bookmark_origin=false;
     if(committed)*committed=true;
-    if(a->persistent && !a->recent_recorded)a->recent_pending=true;
+    if(a->persistent && (!a->recent_recorded || progress_basis(a,a->reader.visible)>=10000))a->recent_pending=true;
     if(a->recent_pending)a->recent_due=now>UINT64_MAX-1500?UINT64_MAX:now+1500;
     return a->persistent?pn_save_policy_tick(&a->save,now):PN_OK;
 }
@@ -779,6 +784,32 @@ pn_status_t pn_reader_app_style_apply(pn_reader_app_t *app,const pn_style_t *sty
         if(status!=PN_OK)return status;
     }
     a->saved_style=*style;a->style_preview=false;a->style_pending=false;return PN_OK;
+}
+pn_status_t pn_reader_app_style_save_global(pn_reader_app_t *app,const pn_style_t *style){
+    if(!app || !app->impl || !style)return PN_INVALID;
+    app_t *a=app->impl;if(!a->persistent || !*a->state_directory)return PN_UNSUPPORTED;
+    pn_status_t valid=pn_style_validate(style);if(valid!=PN_OK)return valid;
+    pn_journal_files_t gf;pn_journal_io_t gio;pn_book_id_t gid=pn_style_global_id();
+    pn_status_t status=pn_style_global_files(&gf,&a->state_media,&a->state_lease,a->state_directory,&gio);
+    return status==PN_OK?pn_style_save(&gio,&gid,style):status;
+}
+pn_status_t pn_reader_app_style_use_global(pn_reader_app_t *app,uint64_t now,pn_reader_present_fn present,void *ctx){
+    if(!app || !app->impl || !present)return PN_INVALID;
+    app_t *a=app->impl;
+    pn_style_t global=pn_style_default(PN_STYLE_DEFAULT_PIXELS);
+    if(a->persistent && *a->state_directory){
+        pn_journal_files_t gf;pn_journal_io_t gio;pn_book_id_t gid=pn_style_global_id();
+        if(pn_style_global_files(&gf,&a->state_media,&a->state_lease,a->state_directory,&gio)==PN_OK){
+            pn_style_t loaded;if(pn_style_load(&gio,&gid,&loaded)==PN_OK)global=loaded;
+        }
+    }
+    pn_status_t status=preview_style(app,&global,now,present,ctx,false);
+    if(!pn_reader_app_last_confirmed(app))return status;
+    if(a->persistent){
+        pn_status_t cleared=pn_style_clear_files(&a->style_files);
+        if(cleared!=PN_OK)return cleared;
+    }
+    a->saved_style=global;a->style_preview=false;a->style_pending=false;return PN_OK;
 }
 pn_status_t pn_reader_app_style_cancel(pn_reader_app_t *app,uint64_t now,pn_reader_present_fn present,void *ctx){
     if(app && app->impl)((app_t *)app->impl)->last_confirmed=false;

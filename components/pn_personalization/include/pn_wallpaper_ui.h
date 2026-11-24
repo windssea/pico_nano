@@ -52,8 +52,10 @@ pn_status_t pn_wallpaper_ui_event(pn_wallpaper_ui_t *ui,int command,pn_wallpaper
 pn_status_t pn_wallpaper_ui_present(pn_wallpaper_ui_t *ui,pn_wallpaper_present_fn present,void *ctx);
 /// 逻辑坐标命中，空白-1。/ Logical hit test, -1 for blank space.
 int pn_wallpaper_ui_hit(const pn_wallpaper_ui_t *ui,int x,int y);
-/// 当前已保存选择的副本，失败false。/ Copy of the saved selection, false on failure.
+/// 当前已保存锁屏壁纸选择的副本，失败false。/ Copy of the saved lock-wallpaper selection, false on failure.
 bool pn_wallpaper_ui_current(const pn_wallpaper_ui_t *ui,pn_lock_selection_t *out);
+/// 当前已保存阅读锁屏遮罩选择的副本，失败false。/ Copy of the saved reading lock-mask selection, false on failure.
+bool pn_wallpaper_ui_mask(const pn_wallpaper_ui_t *ui,pn_lock_selection_t *out);
 /// 释放全部页面资源，幂等。/ Release all page resources idempotently.
 void pn_wallpaper_ui_close(pn_wallpaper_ui_t *ui);
 

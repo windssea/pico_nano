@@ -59,28 +59,67 @@ pn_status_t pn_reader_footer_progress(pn_font_t *ui,pn_font_t *fallback,pn_frame
 pn_status_t pn_reader_footer_render(pn_font_t *ui,pn_font_t *fallback,pn_frame_t *frame,const char *left,const char *right){
     return pn_reader_footer_progress(ui,fallback,frame,left,right,-1,0);
 }
+pn_status_t pn_reader_toolbar_top_render(pn_font_t *ui,pn_frame_t *frame,const pn_toolbar_top_t *top){
+    if(!ui || !ui->impl || !frame || !frame->pixels || !top || frame->width!=PN_UI_WIDTH || frame->height!=PN_UI_HEIGHT)return PN_INVALID;
+    int original=ui->pixels;
+    // 顶部信息条：白底＋底边轻影细线，即使在“去上下栏”模式下也能查看时间、电量、书名与进度，并一键加书签。
+    // Top info strip: white sheet with subtle bottom hairline so clock, battery, title, progress and quick bookmark stay accessible even in bar-less mode.
+    pn_frame_rect(frame,0,0,PN_UI_WIDTH,PN_TOOLBAR_TOP_H,PN_UI_PAPER);
+    pn_frame_rect(frame,0,PN_TOOLBAR_TOP_H-2,PN_UI_WIDTH,1,9);
+    pn_frame_rect(frame,0,PN_TOOLBAR_TOP_H-1,PN_UI_WIDTH,3,PN_UI_SELECT);
+    pn_status_t s=pn_w_status(ui,frame);
+    int right_limit=top->quick_bookmark?528:652;
+    if(s==PN_OK && top->basis>=0 && top->basis<=10000){
+        char pct[16];snprintf(pct,sizeof pct,"%d%%",top->basis/100);
+        s=pn_font_size(ui,22);
+        if(s==PN_OK)s=pn_w_text_ex(ui,frame,pct,right_limit-64,84,64,PN_ALIGN_RIGHT,5,true);
+        right_limit-=72;
+    }
+    if(s==PN_OK){
+        const char *title=(top->title && *top->title)?top->title:"正在阅读";
+        s=pn_font_size(ui,26);
+        if(s==PN_OK)s=pn_w_text_ex(ui,frame,title,PN_UI_MARGIN,86,right_limit-PN_UI_MARGIN,PN_ALIGN_LEFT,PN_UI_INK,true);
+    }
+    if(s==PN_OK && top->quick_bookmark){
+        int bx=540,by=48,bw=112,bh=50;
+        if(top->bookmarked){
+            pn_w_round_fill(frame,bx,by,bw,bh,14,PN_UI_INK);
+            pn_w_icon(frame,PN_ICON_BOOKMARK,bx+14,by+12,24,PN_UI_PAPER);
+            s=pn_font_size(ui,22);
+            if(s==PN_OK)s=pn_w_text_ex(ui,frame,"已签",bx+38,by+34,64,PN_ALIGN_CENTER,PN_UI_PAPER,true);
+        }else{
+            pn_w_round_fill(frame,bx,by,bw,bh,14,PN_UI_SURFACE);
+            pn_w_round_stroke(frame,bx,by,bw,bh,14,1.5f,9);
+            pn_w_icon(frame,PN_ICON_BOOKMARK,bx+14,by+12,24,PN_UI_INK);
+            s=pn_font_size(ui,22);
+            if(s==PN_OK)s=pn_w_text_ex(ui,frame,"书签",bx+38,by+34,64,PN_ALIGN_CENTER,PN_UI_INK,false);
+        }
+    }
+    pn_status_t restored=pn_font_size(ui,original);return s==PN_OK?restored:s;
+}
 pn_status_t pn_reader_toolbar_render(pn_font_t *ui,pn_frame_t *frame,unsigned unavailable){
     if(!ui || !ui->impl || !frame || !frame->pixels || frame->width!=PN_UI_WIDTH || frame->height!=PN_UI_HEIGHT)return PN_INVALID;
     int original=ui->pixels;
-    // 底部面板：圆角顶边、细描边与一条抓手；每个入口是图标在上、文字在下的圆角卡片。
-    // Bottom sheet: rounded top edge, a hairline and a grab handle; every entry is a rounded card with the icon above its label.
-    // 不加灰色遮罩：底部面板为不透明雾面，上沿圆角、细描边、抓手（产品决定，减少残影）。/ No gray mask: the bottom sheet is an opaque fog surface with rounded top corners, a hairline and a grab handle (product decision, to limit ghosting).
+    // 底部面板：柔和圆角顶边、细描边与抓手；每个入口采用柔和浅雾底块，减少墨水屏残影与厚重边框感。
+    // Bottom sheet: soft rounded top edge, hairline and grab handle; soft fog tiles reduce ghosting and visual heaviness.
     pn_w_round_fill(frame,-2,PN_TOOLBAR_Y-4,PN_UI_WIDTH+4,PN_UI_HEIGHT-PN_TOOLBAR_Y+44,PN_UI_CHIP_RADIUS,PN_UI_SELECT);
     pn_w_round_fill(frame,0,PN_TOOLBAR_Y,PN_UI_WIDTH,PN_UI_HEIGHT-PN_TOOLBAR_Y+40,PN_UI_CHIP_RADIUS,PN_UI_PAPER);
-    pn_w_round_stroke(frame,-2,PN_TOOLBAR_Y,PN_UI_WIDTH+4,PN_UI_HEIGHT-PN_TOOLBAR_Y+40,PN_UI_CHIP_RADIUS,2.0f,PN_UI_STROKE);
-    pn_w_round_fill(frame,(PN_UI_WIDTH-64)/2,PN_TOOLBAR_Y+12,64,6,3,PN_UI_STROKE);
-    pn_status_t status=pn_font_size(ui,26);
+    pn_w_round_stroke(frame,-2,PN_TOOLBAR_Y,PN_UI_WIDTH+4,PN_UI_HEIGHT-PN_TOOLBAR_Y+40,PN_UI_CHIP_RADIUS,1.5f,9);
+    pn_w_round_fill(frame,(PN_UI_WIDTH-56)/2,PN_TOOLBAR_Y+14,56,5,3,10);
+    pn_status_t status=pn_font_size(ui,25);
     for(unsigned i=0;i<TOOL_COUNT && status==PN_OK;i++){
         int x=SHEET_PADDING+(int)(i%3)*COLUMN_PITCH,y=ROW_Y0+(int)(i/3)*ROW_PITCH;bool off=(unavailable&(1u<<i))!=0;
-        pn_w_glass(frame,x,y,BUTTON_W,BUTTON_H,PN_UI_RADIUS);
-        pn_w_icon(frame,icons[i],x+(BUTTON_W-36)/2,y+10,36,off?PN_UI_DISABLED:PN_UI_INK);
-        status=pn_w_text_ex(ui,frame,labels[i],x+8,y+BUTTON_H-12,BUTTON_W-16,PN_ALIGN_CENTER,off?PN_UI_DISABLED:PN_UI_INK,false);
+        pn_w_round_fill(frame,x,y,BUTTON_W,BUTTON_H,16,off?PN_UI_PAPER:PN_UI_SURFACE);
+        pn_w_round_stroke(frame,x,y,BUTTON_W,BUTTON_H,16,1.5f,off?PN_UI_SELECT:10);
+        pn_w_icon(frame,icons[i],x+(BUTTON_W-34)/2,y+12,34,off?PN_UI_DISABLED:PN_UI_INK);
+        status=pn_w_text_ex(ui,frame,labels[i],x+8,y+BUTTON_H-13,BUTTON_W-16,PN_ALIGN_CENTER,off?PN_UI_DISABLED:PN_UI_INK,false);
     }
-    if(status==PN_OK)status=pn_w_text(ui,frame,"点击空白处或按中间键关闭",PN_UI_MARGIN,PN_UI_HEIGHT-16,PN_UI_WIDTH-2*PN_UI_MARGIN,PN_ALIGN_CENTER);
+    if(status==PN_OK){status=pn_font_size(ui,22);if(status==PN_OK)status=pn_w_text_ex(ui,frame,"点击正文空白处或按中键关闭",PN_UI_MARGIN,PN_UI_HEIGHT-16,PN_UI_WIDTH-2*PN_UI_MARGIN,PN_ALIGN_CENTER,5,false);}
     pn_status_t restored=pn_font_size(ui,original);return status==PN_OK?restored:status;
 }
 int pn_reader_toolbar_hit(int x,int y,unsigned unavailable){
     if(x<0 || x>=PN_UI_WIDTH || y<0 || y>=PN_UI_HEIGHT)return -1;
+    if(y>=40 && y<PN_TOOLBAR_TOP_H && x>=532 && x<664)return PN_TOOL_QUICK_BOOKMARK;
     if(y<PN_TOOLBAR_Y)return PN_TOOL_CLOSE;
     for(unsigned i=0;i<TOOL_COUNT;i++){
         int bx=SHEET_PADDING+(int)(i%3)*COLUMN_PITCH,by=ROW_Y0+(int)(i/3)*ROW_PITCH;

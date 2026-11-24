@@ -210,10 +210,11 @@ int main(void){
     assert(pn_settings_ui_event(&settings_ui,PN_SETUI_REFRESH,present,NULL)==PN_OK && pn_settings_ui_screen(&settings_ui)==2);
     assert(root_navigation_hit(80,1150)==-1);
     handle_key(PN_KEY_1,PN_KEY_LONG);assert(pn_settings_ui_screen(&settings_ui)==2);
-    handle_key(PN_KEY_1,PN_KEY_SHORT);assert(settings_ui.active && pn_settings_ui_screen(&settings_ui)==0);
+    handle_key(PN_KEY_2,PN_KEY_LONG);assert(settings_ui.active && pn_settings_ui_screen(&settings_ui)==0);
     focus_rescan();bool found=false;for(size_t i=0;i<focus_nav.count;i++)found|=focus_nav.items[i].code==PN_SETUI_FONTS;assert(found);
     settings_ui.flags=PN_INPUT_LEFT_HAND;
-    handle_key(PN_KEY_2,PN_KEY_SHORT);assert(!settings_ui.impl && home_mode && input_flags==PN_INPUT_LEFT_HAND);
+    handle_key(PN_KEY_3,PN_KEY_SHORT);assert(settings_ui.active && pn_focus_current(&focus_nav)!=NULL);
+    handle_key(PN_KEY_2,PN_KEY_LONG);assert(!settings_ui.impl && home_mode && input_flags==PN_INPUT_LEFT_HAND);
     // 操作面板只改下半屏；右键明确确认弹窗，左键取消保留面板。/ The sheet preserves the upper frame; dialog Back cancels and keeps the sheet.
     shelf_page= shelf_page?shelf_page:pn_alloc(&pool,sizeof *shelf_page);assert(shelf_page);memset(shelf_page,0,sizeof *shelf_page);shelf_page->count=1;
     strcpy(shelf_page->items[0].name,"Original.txt");strcpy(shelf_page->items[0].path,"/original.txt");shelf_page->items[0].format=PN_BOOK_TXT;
@@ -282,9 +283,14 @@ int main(void){
     // 逻辑前16行是每个板级行的前8字节；面板底图来自后缓冲逆变换。/ The logical top 16 rows are the first 8 bytes of each board row; the sheet base is restored from the back buffer.
     static uint8_t top[684*8];for(int py=0;py<684;py++)memcpy(top+py*8,hardware.hl.back_fb+(size_t)py*608,8);
     open_actions(0);assert(actions_mode);for(int py=0;py<684;py++)assert(!memcmp(top+py*8,hardware.hl.back_fb+(size_t)py*608,8));
-    actions.confirming=true;handle_key(PN_KEY_1,PN_KEY_SHORT);assert(actions_mode && !actions.confirming);
-    actions.confirming=true;actions.notice=NULL;handle_key(PN_KEY_3,PN_KEY_SHORT);
-    assert(actions_mode && actions.confirming && actions.notice); // 不存在的测试文件删除失败，证明右键送达确认而非焦点切换。/ Failed deletion of the nonexistent fixture proves Confirm delivery, rather than focus movement.
+    actions.confirming=true;handle_key(PN_KEY_2,PN_KEY_LONG);assert(actions_mode && !actions.confirming);
+    actions.confirming=true;actions.notice=NULL;focus_nav.index=-1;
+    handle_key(PN_KEY_2,PN_KEY_SHORT);
+    assert(actions_mode && actions.confirming && !actions.notice && pn_focus_current(&focus_nav) && pn_focus_current(&focus_nav)->code==PN_BA_CANCEL);
+    for(unsigned step=0;step<8 && (!pn_focus_current(&focus_nav) || pn_focus_current(&focus_nav)->code!=PN_BA_CONFIRM);step++)handle_key(PN_KEY_3,PN_KEY_SHORT);
+    assert(pn_focus_current(&focus_nav) && pn_focus_current(&focus_nav)->code==PN_BA_CONFIRM);
+    handle_key(PN_KEY_2,PN_KEY_SHORT);
+    assert(actions_mode && actions.confirming && actions.notice); // 先切到确认按钮再按KEY2短按才执行删除。/ Deletion executes only after moving focus to Confirm and pressing KEY2 short.
     actions_mode=false;
     // 管理轻更新不沿用阅读的6页清屏间隔；显式强刷仍生效。/ Management updates ignore the reading six-page cleaning interval; explicit cleaning still works.
     input_flags=(input_flags&~PN_INPUT_REFRESH_MASK)|0x10;
@@ -309,13 +315,16 @@ int main(void){
     assert(present(NULL,&probe_frame,PN_REFRESH_GL16)==PN_OK && area_full_calls==full_before+1 && area_diff_calls==diff_before && last_full_area.height==1216);
     atomic_store(&reading_presentation,true);footer_fault=true;pn_frame_rect(&probe_frame,300,1190,4,4,0);
     assert(present(NULL,&probe_frame,PN_REFRESH_GL16)==PN_IO && !panel_known);footer_fault=false;atomic_store(&reading_presentation,false);
-    // 管理第24次实际更新才GC；不变帧不占预算，周期不插入额外clear。/ GC on management update 24; unchanged frames spend no budget and periodic refresh adds no clear.
+    // 管理页按当前刷新档位周期（默认均衡 8 次）执行完整 GC16；不变帧不占预算，周期不插入额外 clear。
+    // Management updates run full GC16 on the configured management cadence (8 in balanced mode); unchanged frames spend no budget and periodic refresh adds no clear.
+    sync_mgmt_refresh_limit(input_flags);
     assert(present(NULL,&probe_frame,PN_REFRESH_GC16)==PN_OK);gc_before=gc_updates;
     clean_before=clear_calls;
-    for(unsigned i=0;i<24;i++){
+    unsigned limit=atomic_load(&mgmt_refresh_limit);assert(limit==6u);
+    for(unsigned i=0;i<limit*3u;i++){
         for(unsigned repeat=0;repeat<3;repeat++)assert(present(NULL,&probe_frame,PN_REFRESH_GL16)==PN_OK);
         pn_frame_rect(&probe_frame,160+(int)i*4,400,4,4,0);assert(present(NULL,&probe_frame,PN_REFRESH_GL16)==PN_OK);
-        assert(gc_updates==gc_before+(i==23));
+        assert(gc_updates==gc_before+(i+1u)/limit);
     }
     assert(clear_calls==clean_before);
     atomic_store(&deep_clean_pending,true);assert(present(NULL,&probe_frame,PN_REFRESH_GL16)==PN_OK && clear_calls==clean_before+1);
@@ -454,7 +463,7 @@ int main(void){
     assert(feedback_idle.pending && feedback_idle_tick(feedback_idle.due-1,false)==PN_EMPTY && feedback_idle_tick(feedback_idle.due+1,true)==PN_EMPTY);
     maintenance.bands[8]=maintenance.bands[9]=maintenance.bands[10]=3;maintenance.bands[5]=2;size_t attempts=pool.attempts;unsigned areas=area_full_calls;
     clock_us=(int64_t)(feedback_idle.due+1)*1000;assert(feedback_idle_tick(now_ms(),false)==PN_OK && !feedback_idle.pending && feedback_idle.completed==1 && pool.attempts==attempts && area_full_calls==areas+1);
-    assert(last_full_area.y==512 && last_full_area.height==192 && maintenance.management==management_before && !maintenance.bands[8] && !maintenance.bands[9] && !maintenance.bands[10] && maintenance.bands[5]==2 && !memcmp(stub_back,original,sizeof stub_back) && async_port.revision==revision);
+    assert(last_full_area.y==576 && last_full_area.height==128 && maintenance.management==management_before && maintenance.bands[8]==3 && !maintenance.bands[9] && !maintenance.bands[10] && maintenance.bands[5]==2 && !memcmp(stub_back,original,sizeof stub_back) && async_port.revision==revision);
     feedback_begin(100,600);feedback_restore();panel_fault=true;clock_us=(int64_t)(feedback_idle.due+1)*1000;
     assert(feedback_idle_tick(now_ms(),false)==PN_IO && feedback_idle.pending && !panel_known && settle_recoverable);panel_fault=false;
     clock_us=(int64_t)(feedback_idle.due+1)*1000;assert(feedback_idle_tick(now_ms(),false)==PN_OK && !feedback_idle.pending && panel_known && !memcmp(stub_back,original,sizeof stub_back));
@@ -482,7 +491,7 @@ int main(void){
     bool card_available=sd_media.available;sd_media.available=false;
     apply_selection(PN_SHELF_TAB_ENTERTAINMENT);assert(entertainment==1 && shelf_mode && !status_page && active_hit(100,400)==PN_SHELF_SUDOKU);
     assert(!tick_shelf_background(now_ms()));
-    bool old_data_ready=data_ready;data_ready=false;handle_key(PN_KEY_2,PN_KEY_SHORT);assert(!sudoku.active && !reader_active());data_ready=old_data_ready;
+    bool old_data_ready=data_ready;data_ready=false;handle_key(PN_KEY_2,PN_KEY_SHORT);assert(shelf_focus==0);handle_key(PN_KEY_2,PN_KEY_SHORT);assert(!sudoku.active && !reader_active());data_ready=old_data_ready;
     char game_root[]="/tmp/pn-device-sudoku-XXXXXX";assert(mkdtemp(game_root));
     assert(pn_sudoku_open(&sudoku,&pool,&data_media,game_root,NULL,0,now_ms())==PN_OK);shelf_mode=false;status_page=false;assert(sudoku_draw()==PN_OK);
     assert(active_hit(340,1040)==PN_SU_START && root_navigation_hit(80,1150)<0);
@@ -513,7 +522,7 @@ int main(void){
 
     // 推箱使用同一面板适配：连续走路不触发管理清屏，退出清理且中键回娱乐。/ Sokoban shares the panel adapter: walking never triggers management cleaning; exit cleans and the middle key returns to Entertainment.
     assert(active_hit(342,408)==PN_SHELF_SOKOBAN);
-    old_data_ready=data_ready;data_ready=false;handle_key(PN_KEY_3,PN_KEY_SHORT);assert(!sokoban.active);data_ready=old_data_ready;
+    old_data_ready=data_ready;data_ready=false;handle_key(PN_KEY_3,PN_KEY_SHORT);handle_key(PN_KEY_3,PN_KEY_SHORT);assert(shelf_focus==1);handle_key(PN_KEY_2,PN_KEY_SHORT);assert(!sokoban.active);data_ready=old_data_ready;
     char so_root[]="/tmp/pn-device-sokoban-XXXXXX";assert(mkdtemp(so_root));
     assert(pn_sokoban_open(&sokoban,&pool,&data_media,so_root,now_ms())==PN_OK);shelf_mode=false;status_page=false;
     assert(sokoban_draw(false)==PN_OK && active_hit(340,952)==PN_SO_START && root_navigation_hit(80,1150)<0);
@@ -662,6 +671,13 @@ int main(void){
     list_mode=true;shelf_focus=-1;assert(draw_shelf(PN_REFRESH_GL16)==PN_OK);shelf_focus=0;assert(draw_shelf_focus(-1)==PN_OK);assert(management_font_begin(&face,24)==PN_OK);options=shelf_options();if(favorites_valid)options.favorite_items=favorites;
     assert(pn_shelf_render_with_font_file_ex(shelf_page,&face,&expected,0,false,true,shelf_covers,&pool,&sd_media,NULL,&options)==PN_OK && pn_device_frame_copy(&expected,original,415872)==PN_OK && !memcmp(stub_back,original,415872));management_font_end(&face);
     home_mode=true;list_mode=false;shelf_focus=-1;assert(draw_shelf(PN_REFRESH_GL16)==PN_OK);shown=presents;handle_key(PN_KEY_3,PN_KEY_SHORT);assert(shelf_focus==0 && presents==shown);handle_key(PN_KEY_3,PN_KEY_SHORT);assert(shelf_focus==1 && presents==shown+1);
+    // 书库选择态：KEY2进入焦点后，KEY3/KEY1在页内移动焦点而非直接翻页，KEY2长按退出焦点。
+    // Shelf selection mode: after KEY2 enters focus, KEY3/KEY1 move focus instead of flipping pages, and KEY2 long exits focus.
+    home_mode=false;entertainment=0;shelf_mode=true;status_page=false;shelf_focus=-1;assert(draw_shelf(PN_REFRESH_GL16)==PN_OK);
+    handle_key(PN_KEY_2,PN_KEY_SHORT);assert(shelf_focus==0);
+    handle_key(PN_KEY_3,PN_KEY_SHORT);assert(shelf_focus==1);
+    handle_key(PN_KEY_1,PN_KEY_SHORT);assert(shelf_focus==0);
+    handle_key(PN_KEY_2,PN_KEY_LONG);assert(shelf_focus==-1);
     // 四列后两项不被旧阅读书签快捷码10/11截走；不支持格式仍应到达开书提示路由。
     // The last two four-column slots must bypass legacy reader bookmark codes 10/11 and reach the unsupported-format opening notice.
     home_mode=false;shelf_page->count=12;
@@ -670,7 +686,7 @@ int main(void){
         apply_selection(slot);assert(status_page && !shelf_mode && presents>shown && !reader_active());
     }
     free(original);free(logical);
-    pn_free(page_copy);pn_free(shelf_page);pn_free(shelf_covers);pn_free(recent_snapshot);pn_free(favorites);pn_menu_cache_close(&menu_cache);
+    home_banner_release();pn_free(page_copy);pn_free(shelf_page);pn_free(shelf_covers);pn_free(recent_snapshot);pn_free(favorites);pn_free(read_marks);pn_menu_cache_close(&menu_cache);
     pn_font_close(&management_font);pn_w_font_scope_end(&management_scope);
     assert(!pool.used && !pool.live);return 0;
 }

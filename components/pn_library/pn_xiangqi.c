@@ -971,8 +971,10 @@ pn_status_t pn_xq_decode_state(const uint8_t *in, size_t n, uint32_t current_crc
 
     bool blk_has = has_legal_move(sim, 1u);
     bool red_has = has_legal_move(sim, 0u);
+    /* 进行中局面轮到红方行棋：只要求红方有合法着且未超步，不要求此时黑方也能走（残局黑将常处于受困态）。
+     * Ongoing positions are Red to move: only Red needs a legal move within max_moves; Black may already be immobilized. */
     if (s.outcome == PN_XQ_WON && blk_has) return PN_CORRUPT;
-    if (s.outcome == PN_XQ_ONGOING && (!blk_has || !red_has || s.moves >= s.level.max_moves)) return PN_CORRUPT;
+    if (s.outcome == PN_XQ_ONGOING && (!red_has || s.moves >= s.level.max_moves)) return PN_CORRUPT;
     if (s.outcome == PN_XQ_LOST && red_has && s.moves < s.level.max_moves) return PN_CORRUPT;
 
     *out = s;

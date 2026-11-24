@@ -27,9 +27,9 @@
 #define THUMB_BYTES (TW*TH/2)
 typedef struct {
     pn_pool_t *pool;pn_media_t *images;char directory[PN_CATALOG_PATH_MAX],cache_dir[PN_WALLPAPER_PATH_MAX];
-    pn_wallpaper_store_t store;bool has_store,busy;
+    pn_wallpaper_store_t store,mask_store;bool has_store,has_mask_store,busy;
     pn_font_t font;uint8_t *canvas_px,*bitmap_px,*small_px,*alpha_px;pn_frame_t canvas,bitmap,small,alpha;
-    pn_catalog_page_t page;pn_lock_selection_t saved,draft;pn_bookmark_lock_t bookmark;bool saved_known,bitmap_valid;
+    pn_catalog_page_t page;pn_lock_selection_t saved,saved_mask,draft;pn_bookmark_lock_t bookmark;bool saved_known,saved_mask_known,bitmap_valid;
     pn_wallpaper_transform_t prepared;char prepared_path[PN_WALLPAPER_PATH_MAX];
     uint64_t prepared_size;int64_t prepared_mtime;
     pn_lock_mode_t chosen;
@@ -74,13 +74,26 @@ static pn_status_t load_page(ui_t *u,const char *cursor,bool previous){
     pn_free(next);return status;
 }
 static void reload_saved(ui_t *u){
-    // 读不到时保留已知值；只有读到内容才更新。/ Keep known values when unreadable; update only after a real read.
+    // 读不到时保留已知值；壁纸（lock.a/b）与阅读遮罩（mask.a/b）独立读取并兼容旧版单槽遮罩记录。
+    // Keep known values when unreadable; load wallpaper (lock.a/b) and reading mask (mask.a/b) independently while staying compatible with legacy single-slot mask records.
     if(!u->has_store)return;
     pn_media_lease_t lease;
     if(pn_media_acquire(u->store.media,PN_MEDIA_READ,&lease)!=PN_OK)return;
-    pn_lock_selection_t s;pn_status_t status=pn_wallpaper_load(&u->store,&lease,&s,NULL);(void)pn_media_release(u->store.media,&lease);
-    if(status==PN_OK){if(s.mode==PN_LOCK_SIMPLE || s.mode==PN_LOCK_BOOK)s.mode=PN_LOCK_DEFAULT;s.hint=false;u->saved=s;u->saved_known=true;}else if(status==PN_EMPTY){u->saved=(pn_lock_selection_t){.mode=PN_LOCK_DEFAULT,.hint=false};u->saved_known=true;}
+    pn_lock_selection_t s={0},ms={0};
+    pn_status_t status=pn_wallpaper_load(&u->store,&lease,&s,NULL);
+    pn_status_t mstatus=u->has_mask_store?pn_wallpaper_load(&u->mask_store,&lease,&ms,NULL):PN_EMPTY;
+    (void)pn_media_release(u->store.media,&lease);
+    bool legacy_mask=false;
+    if(status==PN_OK){
+        if(s.mode==PN_LOCK_SIMPLE || s.mode==PN_LOCK_BOOK)s.mode=PN_LOCK_DEFAULT;
+        if(s.mode==PN_LOCK_MASK){legacy_mask=true;if(mstatus==PN_EMPTY){ms=s;mstatus=PN_OK;}s=(pn_lock_selection_t){.mode=PN_LOCK_DEFAULT,.hint=false};}
+        s.hint=false;u->saved=s;u->saved_known=true;
+    }else if(status==PN_EMPTY){u->saved=(pn_lock_selection_t){.mode=PN_LOCK_DEFAULT,.hint=false};u->saved_known=true;}
     else if(status==PN_CORRUPT)u->saved_known=false;
+    (void)legacy_mask;
+    if(mstatus==PN_OK){ms.hint=false;if(ms.mode!=PN_LOCK_MASK)ms=(pn_lock_selection_t){.mode=PN_LOCK_DEFAULT,.hint=false};u->saved_mask=ms;u->saved_mask_known=true;}
+    else if(mstatus==PN_EMPTY){u->saved_mask=(pn_lock_selection_t){.mode=PN_LOCK_DEFAULT,.hint=false};u->saved_mask_known=true;}
+    else if(mstatus==PN_CORRUPT)u->saved_mask_known=false;
 }
 /* 按草稿生成预览：自定义时仅在路径/参数变化后重新预处理。/ Build the draft preview; custom sources are re-preprocessed only when path/parameters change. */
 static pn_status_t build_preview(ui_t *u){
@@ -138,10 +151,15 @@ static pn_status_t draw(ui_t *u,pn_wallpaper_screen_t screen){
     pn_frame_clear(&u->canvas,15);pn_status_t s=PN_OK;char line[PN_WALLPAPER_PATH_MAX+64];
     if(screen==PN_WUI_LIST){
         s=pn_w_header(&u->font,&u->canvas,"< 返回","锁屏壁纸",NULL);
-        if(s==PN_OK){if(!u->saved_known)snprintf(line,sizeof line,"当前：系统默认（内部记录不可用）");else snprintf(line,sizeof line,"当前：%s",mode_name(&u->saved));s=line_text(u,line,28,168,PN_ALIGN_LEFT);}
+        if(s==PN_OK){
+            if(!u->saved_known)snprintf(line,sizeof line,"当前：系统默认（内部记录不可用）");
+            else if(u->saved_mask_known && u->saved_mask.mode==PN_LOCK_MASK)snprintf(line,sizeof line,"壁纸：%s · 阅读遮罩：已开启",mode_name(&u->saved));
+            else snprintf(line,sizeof line,"当前：%s",mode_name(&u->saved));
+            s=line_text(u,line,28,168,PN_ALIGN_LEFT);
+        }
         const char *names[]={"壁纸","遮罩","书签"};
         for(int i=0;i<3 && s==PN_OK;i++)s=sized_button(u,names[i],32+i*212,MODE_BUTTON_Y,196,80,u->chosen==(i==0?PN_LOCK_CUSTOM:i==1?PN_LOCK_MASK:PN_LOCK_BOOKMARK)?PN_W_SELECTED:0u);
-        if(s==PN_OK)s=sized_button(u,"重置为系统默认",32,294,620,56,0u);
+        if(s==PN_OK)s=sized_button(u,u->chosen==PN_LOCK_MASK?"关闭阅读遮罩":"重置为系统默认",32,294,620,56,0u);
         bool images=u->chosen!=PN_LOCK_BOOKMARK;
         if(s==PN_OK)s=pn_w_section(&u->font,&u->canvas,images?(u->page.count?(u->thumb_next<u->page.count && u->thumb_next<IMAGE_ROWS?"选择图片 · 预览准备中":"选择图片"):"暂无图片，请先传入 JPEG/PNG"):"书签自动使用本地阅读数据，无需选择图片",IMAGE_SECTION_Y);
         for(size_t i=0;images && i<u->page.count && i<IMAGE_ROWS && s==PN_OK;i++){
@@ -187,14 +205,14 @@ pn_status_t pn_wallpaper_ui_open_cached(pn_wallpaper_ui_t *ui,pn_pool_t *pool,pn
     if(strlen(directory)>=PN_CATALOG_PATH_MAX)return PN_LIMIT;
     if(cache_dir && strlen(cache_dir)>=PN_WALLPAPER_PATH_MAX)return PN_LIMIT;
     ui_t *u=pn_alloc_tagged(pool,PN_MEM_UI,sizeof *u);if(!u)return PN_NO_MEMORY;memset(u,0,sizeof *u);u->pool=pool;u->bookmark.battery=-1;u->images=images_media;strcpy(u->directory,directory);
-    if(store){u->store=*store;u->has_store=true;}
+    if(store){u->store=*store;u->has_store=true;u->has_mask_store=pn_wallpaper_mask_store_init(store,&u->mask_store)==PN_OK;}
     if(cache_dir)strcpy(u->cache_dir,cache_dir);
     u->canvas_px=pn_alloc_tagged(pool,PN_MEM_UI,PN_WALLPAPER_BYTES);u->bitmap_px=pn_alloc_tagged(pool,PN_MEM_UI,PN_WALLPAPER_BYTES);u->small_px=pn_alloc_tagged(pool,PN_MEM_UI,(size_t)PW/2*PH);
     pn_status_t status=u->canvas_px && u->bitmap_px && u->small_px?PN_OK:PN_NO_MEMORY;
     if(status==PN_OK){(void)pn_frame_bind(&u->canvas,u->canvas_px,PN_WALLPAPER_BYTES,W,H);(void)pn_frame_bind(&u->bitmap,u->bitmap_px,PN_WALLPAPER_BYTES,W,H);(void)pn_frame_bind(&u->small,u->small_px,(size_t)PW/2*PH,PW,PH);
         pn_text_source_t builtin=pn_font_builtin_source();status=pn_font_open(&u->font,pool,&builtin,28);}
     if(status!=PN_OK){pn_free(u->canvas_px);pn_free(u->bitmap_px);pn_free(u->small_px);pn_free(u);return status;}
-    reload_saved(u);u->chosen=u->saved.mode==PN_LOCK_BOOKMARK?PN_LOCK_BOOKMARK:u->saved.mode==PN_LOCK_MASK?PN_LOCK_MASK:PN_LOCK_CUSTOM;
+    reload_saved(u);u->chosen=u->saved.mode==PN_LOCK_BOOKMARK?PN_LOCK_BOOKMARK:PN_LOCK_CUSTOM;
     if(load_page(u,"",false)!=PN_OK){memset(&u->page,0,sizeof u->page);}
     *ui=(pn_wallpaper_ui_t){.impl=u,.active=true,.screen=PN_WUI_LIST,.last=PN_EMPTY};
     (void)show(ui,present,ctx);return PN_OK;
@@ -202,9 +220,9 @@ pn_status_t pn_wallpaper_ui_open_cached(pn_wallpaper_ui_t *ui,pn_pool_t *pool,pn
 pn_status_t pn_wallpaper_ui_open(pn_wallpaper_ui_t *ui,pn_pool_t *pool,pn_media_t *images_media,const char *directory,const pn_wallpaper_store_t *store,pn_wallpaper_present_fn present,void *ctx){
     return pn_wallpaper_ui_open_cached(ui,pool,images_media,directory,store,present,ctx,NULL);
 }
-static pn_status_t apply(pn_wallpaper_ui_t *ui){
+static pn_status_t apply(pn_wallpaper_ui_t *ui,bool for_mask){
     ui_t *u=ui->impl;
-    if(!u->has_store){snprintf(u->message,sizeof u->message,"内部壁纸分区不可用，锁屏未更改");return PN_UNSUPPORTED;}
+    if(!u->has_store || (for_mask && !u->has_mask_store)){snprintf(u->message,sizeof u->message,"内部壁纸分区不可用，锁屏未更改");return PN_UNSUPPORTED;}
     if((u->draft.mode==PN_LOCK_CUSTOM || u->draft.mode==PN_LOCK_MASK || u->draft.cached_book) && !u->bitmap_valid){snprintf(u->message,sizeof u->message,"预览尚未生成，锁屏未更改");return PN_INVALID;}
     // 保存预览与缓存使用同一源代；改图后须重新预览，不能将旧像素标为新缓存。 / Save previews/caches from one source generation; changed files require a new preview so stale pixels never get a new cache key.
     pn_media_lease_t source_lease;bool source_held=false;pn_status_t status=PN_OK;
@@ -213,13 +231,16 @@ static pn_status_t apply(pn_wallpaper_ui_t *ui){
         if(status==PN_OK && (stat(u->draft.source,&info) || (uint64_t)info.st_size!=u->prepared_size || (int64_t)info.st_mtime!=u->prepared_mtime))status=PN_STALE_MEDIA;
     }
     pn_media_lease_t lease;pn_lock_selection_t record=u->draft;bool cache_failed=false;
-    if(status==PN_OK)status=pn_media_acquire(u->store.media,PN_MEDIA_WRITE,&lease);
-    if(status==PN_OK){status=pn_wallpaper_save(&u->store,&lease,&record,u->draft.mode==PN_LOCK_CUSTOM || u->draft.cached_book?&u->bitmap:NULL);
-        if(status==PN_OK && record.mode==PN_LOCK_MASK)cache_failed=pn_wallpaper_mask_cache_save(&u->store,&lease,&record,&u->bitmap,&u->alpha)!=PN_OK;
-        (void)pn_media_release(u->store.media,&lease);
+    const pn_wallpaper_store_t *target=for_mask?&u->mask_store:&u->store;
+    if(status==PN_OK)status=pn_media_acquire(target->media,PN_MEDIA_WRITE,&lease);
+    if(status==PN_OK){status=pn_wallpaper_save(target,&lease,&record,(!for_mask && (u->draft.mode==PN_LOCK_CUSTOM || u->draft.cached_book))?&u->bitmap:NULL);
+        if(status==PN_OK && for_mask && record.mode==PN_LOCK_MASK)cache_failed=pn_wallpaper_mask_cache_save(&u->store,&lease,&record,&u->bitmap,&u->alpha)!=PN_OK;
+        (void)pn_media_release(target->media,&lease);
         reload_saved(u);}
     if(source_held)(void)pn_media_release(u->images,&source_lease);
-    if(status==PN_OK){ui->screen=PN_WUI_LIST;snprintf(u->message,sizeof u->message,cache_failed?"已应用：%s（缓存稍后重试）":"已应用：%s",mode_name(&record));}
+    if(status==PN_OK){ui->screen=PN_WUI_LIST;
+        if(for_mask && record.mode==PN_LOCK_DEFAULT)snprintf(u->message,sizeof u->message,"已关闭阅读遮罩（壁纸保留）");
+        else snprintf(u->message,sizeof u->message,cache_failed?"已应用：%s（缓存稍后重试）":"已应用：%s",mode_name(&record));}
     else snprintf(u->message,sizeof u->message,"应用失败（%d），保留原锁屏",(int)status);
     return status;
 }
@@ -231,14 +252,15 @@ pn_status_t pn_wallpaper_ui_event(pn_wallpaper_ui_t *ui,int command,pn_wallpaper
     if(ui->screen==PN_WUI_LIST){
         u->message[0]=0;
         if(command==PN_WUI_BACK){ui->active=false;return PN_OK;}
-        else if(command==PN_WUI_DEFAULT){thumbnail_close(u);begin_preview(u,(pn_lock_selection_t){.mode=PN_LOCK_DEFAULT});status=show_busy(ui,present,ctx,"正在应用锁屏");if(status==PN_OK)status=apply(ui);ui->last=status;if(status==PN_OK)u->chosen=PN_LOCK_CUSTOM;}
+        else if(command==PN_WUI_DEFAULT){bool clearing_mask=u->chosen==PN_LOCK_MASK;thumbnail_close(u);begin_preview(u,(pn_lock_selection_t){.mode=PN_LOCK_DEFAULT});status=show_busy(ui,present,ctx,clearing_mask?"正在关闭阅读遮罩":"正在应用锁屏");if(status==PN_OK)status=apply(ui,clearing_mask);ui->last=status;if(status==PN_OK && !clearing_mask)u->chosen=PN_LOCK_CUSTOM;}
         else if(command==PN_WUI_WALLPAPER || command==PN_WUI_MASK){u->chosen=command==PN_WUI_MASK?PN_LOCK_MASK:PN_LOCK_CUSTOM;}
         else if(command==PN_WUI_BOOKMARK){u->chosen=PN_LOCK_BOOKMARK;thumbnail_close(u);begin_preview(u,(pn_lock_selection_t){.mode=PN_LOCK_BOOKMARK,.hint=false});rebuild=true;}
         else if(u->chosen!=PN_LOCK_BOOKMARK && command>=PN_WUI_ROW && command<PN_WUI_ROW+(int)u->page.count && command<PN_WUI_ROW+IMAGE_ROWS){thumbnail_close(u);const pn_catalog_item_t *item=&u->page.items[command-PN_WUI_ROW];
             if(strlen(item->path)>=PN_WALLPAPER_PATH_MAX)return PN_LIMIT;
             pn_lock_selection_t d={.mode=u->chosen==PN_LOCK_MASK?PN_LOCK_MASK:PN_LOCK_CUSTOM,.hint=false,.transform={PN_WALLPAPER_CONTAIN,0,0},.source_size=item->size};strcpy(d.source,item->path);
             struct stat info;if(stat(item->path,&info)==0)d.source_mtime=(int64_t)info.st_mtime;
-            if(u->saved_known && (u->saved.mode==PN_LOCK_CUSTOM || u->saved.mode==PN_LOCK_MASK) && !strcmp(u->saved.source,d.source)){d.transform=u->saved.transform;}
+            if(d.mode==PN_LOCK_MASK && u->saved_mask_known && u->saved_mask.mode==PN_LOCK_MASK && !strcmp(u->saved_mask.source,d.source)){d.transform=u->saved_mask.transform;}
+            else if(d.mode==PN_LOCK_CUSTOM && u->saved_known && u->saved.mode==PN_LOCK_CUSTOM && !strcmp(u->saved.source,d.source)){d.transform=u->saved.transform;}
             begin_preview(u,d);rebuild=true;}
         else if((command==PN_WUI_NEXT || command==PN_WUI_PREVIOUS) && u->page.count){char cursor[PN_CATALOG_NAME_MAX];strcpy(cursor,u->page.items[command==PN_WUI_NEXT?u->page.count-1:0].name);
             if(command==PN_WUI_PREVIOUS || u->page.more)status=load_page(u,cursor,command==PN_WUI_PREVIOUS);}
@@ -246,7 +268,7 @@ pn_status_t pn_wallpaper_ui_event(pn_wallpaper_ui_t *ui,int command,pn_wallpaper
     }else{
         bool custom=u->draft.mode==PN_LOCK_CUSTOM || u->draft.mode==PN_LOCK_MASK,cover=custom && u->draft.transform.fit==PN_WALLPAPER_COVER;
         if(command==PN_WUI_CANCEL){ui->screen=PN_WUI_LIST;u->message[0]=0;}
-        else if(command==PN_WUI_APPLY){status=show_busy(ui,present,ctx,"正在应用锁屏");if(status==PN_OK)status=apply(ui);ui->last=status;}
+        else if(command==PN_WUI_APPLY){status=show_busy(ui,present,ctx,"正在应用锁屏");if(status==PN_OK)status=apply(ui,u->draft.mode==PN_LOCK_MASK);ui->last=status;}
         else if(command==PN_WUI_FIT && custom){u->draft.transform.fit=cover?PN_WALLPAPER_CONTAIN:PN_WALLPAPER_COVER;u->draft.transform.shift=0;rebuild=true;}
         else if(command==PN_WUI_ROTATE && custom){u->draft.transform.rotation=(uint8_t)((u->draft.transform.rotation+1)&3);rebuild=true;}
         else if((command==PN_WUI_LEFT || command==PN_WUI_RIGHT) && cover){int shift=u->draft.transform.shift+(command==PN_WUI_LEFT?-1:1);
@@ -329,6 +351,7 @@ int pn_wallpaper_ui_hit(const pn_wallpaper_ui_t *ui,int x,int y){
     return -1;
 }
 bool pn_wallpaper_ui_current(const pn_wallpaper_ui_t *ui,pn_lock_selection_t *out){if(!ui || !ui->impl || !out)return false;const ui_t *u=ui->impl;if(!u->saved_known)return false;*out=u->saved;return true;}
+bool pn_wallpaper_ui_mask(const pn_wallpaper_ui_t *ui,pn_lock_selection_t *out){if(!ui || !ui->impl || !out)return false;const ui_t *u=ui->impl;if(!u->saved_mask_known)return false;*out=u->saved_mask;return true;}
 void pn_wallpaper_ui_close(pn_wallpaper_ui_t *ui){
     if(!ui || !ui->impl)return;
     ui_t *u=ui->impl;thumbnail_close(u);pn_font_close(&u->font);pn_free(u->canvas_px);pn_free(u->bitmap_px);pn_free(u->small_px);pn_free(u->alpha_px);pn_free(u);

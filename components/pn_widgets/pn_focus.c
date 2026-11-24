@@ -58,5 +58,11 @@ const pn_focus_item_t *pn_focus_current(const pn_focus_t *focus){
 }
 void pn_focus_draw(pn_frame_t *frame,const pn_focus_item_t *item){
     if(!frame || !item)return;
-    pn_w_round_stroke(frame,item->x-4,item->y-4,item->width+8,item->height+8,16,4.0f,PN_UI_INK);
+    // 安全钳位到画布边界内并收细至3px，减少邻项压边与截断。/ Clamp safely inside frame bounds with a crisp 3px stroke to avoid edge clipping.
+    int x0=item->x-3,y0=item->y-3,x1=item->x+item->width+3,y1=item->y+item->height+3;
+    if(x0<1)x0=1;
+    if(y0<1)y0=1;
+    if(x1>frame->width-1)x1=frame->width-1;
+    if(y1>frame->height-1)y1=frame->height-1;
+    if(x1>x0+4 && y1>y0+4)pn_w_round_stroke(frame,x0,y0,x1-x0,y1-y0,15,3.0f,PN_UI_INK);
 }

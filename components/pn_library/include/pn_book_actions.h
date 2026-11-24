@@ -15,12 +15,15 @@
 #define PN_BA_DELETE 3 ///< 进入删除确认 / Go to delete confirmation
 #define PN_BA_CANCEL 4 ///< 关闭面板或取消删除 / Close the sheet or cancel deletion
 #define PN_BA_CONFIRM 5 ///< 确认删除文件 / Confirm deleting the file
+#define PN_BA_MARK_READ 6 ///< 手动标记已读或取消已读 / Toggle manual read/unread mark
 typedef struct {
     pn_catalog_item_t item; ///< 操作对象 / The book acted on
     char title[512]; ///< 验证作品名，空串回退文件名 / Verified title; empty falls back to filename
     char author[512]; ///< 验证作者，可为空 / Verified author, possibly empty
     bool favorite; ///< 当前是否已收藏 / Currently a favorite
     bool favorites_known; ///< 收藏状态可读 / Favorite state is readable
+    bool read_done; ///< 当前是否显示为已读（含100%自动或手动标记）/ Currently marked read (100% auto or manual)
+    bool read_marks_known; ///< 已读标记存储可读 / Read-marks storage is readable
     bool confirming; ///< 正在确认删除 / Confirming deletion
     bool deleting; ///< 正在执行删除，显示loading遮罩并屏蔽点击 / Deleting in progress: show loading overlay and block taps
     const char *notice; ///< 静态反馈，可NULL / Static feedback, may be NULL

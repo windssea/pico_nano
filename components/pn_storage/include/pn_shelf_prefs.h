@@ -7,6 +7,8 @@
 #include "pn_journal.h"
 /// 静态灰阶书架样式。/ Static grayscale shelf styles.
 typedef enum {PN_SHELF_DEFAULT=0,PN_SHELF_MINIMAL,PN_SHELF_WOOD,PN_SHELF_PAPER,PN_SHELF_STYLE_COUNT} pn_shelf_style_t;
+/// 书库排列方式。/ Library sort order.
+typedef enum {PN_SHELF_SORT_NAME=0,PN_SHELF_SORT_ADDED,PN_SHELF_SORT_RECENT,PN_SHELF_SORT_COUNT} pn_shelf_sort_t;
 typedef struct {
     uint8_t columns; ///< 每行3或4本 / Three or four books per row
     uint8_t style; ///< pn_shelf_style_t样式 / A pn_shelf_style_t style
@@ -19,3 +21,9 @@ pn_status_t pn_shelf_prefs_files(pn_journal_files_t *,pn_media_t *,const pn_medi
 pn_status_t pn_shelf_prefs_load(const pn_journal_io_t *,pn_shelf_prefs_t *);
 /// 保存合法外观；失败可能已提交。/ Save valid appearance; failures may have committed.
 pn_status_t pn_shelf_prefs_save(const pn_journal_io_t *,const pn_shelf_prefs_t *);
+/// 绑定root下shelf_sort.a/b，不建目录（独立于shelf.a/b以保持旧记录兼容）。/ Bind shelf_sort.a/b under root without creating directories (separate from shelf.a/b for legacy compatibility).
+pn_status_t pn_shelf_sort_files(pn_journal_files_t *,pn_media_t *,const pn_media_lease_t *,const char *root,pn_journal_io_t *);
+/// 读取排序方式；无记录EMPTY，错误保留输出。/ Load sort order; EMPTY without a record; errors preserve output.
+pn_status_t pn_shelf_sort_load(const pn_journal_io_t *,pn_shelf_sort_t *);
+/// 保存合法排序方式。/ Save a valid sort order.
+pn_status_t pn_shelf_sort_save(const pn_journal_io_t *,pn_shelf_sort_t);

@@ -8,6 +8,8 @@
  */
 #pragma once
 #include "pn_favorites.h"
+#include "pn_scan_dirs.h"
+#include "pn_shelf_prefs.h"
 #include "pn_storage.h"
 #include "pn_recent.h"
 #define PN_CATALOG_PAGE_MAX 12
@@ -21,6 +23,7 @@ typedef struct {
     char name[PN_CATALOG_NAME_MAX]; ///< 原始UTF8文件名 / Original UTF8 filename
     char path[PN_CATALOG_PATH_MAX]; ///< 原实例路径，不是身份 / Instance path, not identity
     uint64_t size; ///< 源字节数 / Source byte size
+    int64_t mtime; ///< 文件修改时间（秒），仅用于按添加时间排序，不作身份 / File modification time (seconds), used only for added-time sorting, never identity
     pn_book_format_t format; ///< 识别扩展名，不代表解析已支持 / Extension recognition, not implemented decoding
     pn_book_id_t expected; ///< 最近记录的预期身份 / Expected identity for recent records
     uint16_t progress; ///< 最近预览百分比万分数 / Recent preview in basis points
@@ -90,6 +93,22 @@ pn_status_t pn_catalog_recent_page_n(const pn_recent_snapshot_t *snapshot,size_t
 pn_status_t pn_catalog_favorites_page(const pn_favorites_t *favorites,size_t start,size_t limit,pn_catalog_page_t *page);
 /// 校验单个书籍条目，不追随链接、不读取内容；仅元数据不是身份。/ Validate one book entry without links or content reads; metadata is never identity.
 pn_status_t pn_catalog_item(pn_media_t *,const pn_media_lease_t *,const char *,const char *,pn_catalog_item_t *);
+/// 按指定排列方式固定内存分页：NAME按书名，ADDED按文件修改时间降序，RECENT按最近阅读顺序；cursor为空从头，非空按previous向前/向后翻页。
+/// Fixed-memory paging by sort order: NAME by title, ADDED by mtime descending, RECENT by recent-reading rank; NULL cursor starts at page 0, non-NULL pages backward/forward per previous.
+pn_status_t pn_catalog_page_sorted_n(pn_media_t *media,const pn_media_lease_t *lease,const char *directory,const char *query,
+    pn_shelf_sort_t sort,const pn_recent_snapshot_t *recent,const pn_catalog_item_t *cursor,bool previous,size_t limit,pn_catalog_page_t *page);
 
 /// 校验非空UTF8安全文件名，不访问介质。/ Validate a nonempty safe UTF-8 filename without media access.
 bool pn_catalog_name_valid(const char *);
+
+#define PN_CATALOG_FOLDER_MAX 16u ///< 书库目录筛选最大目录数 / Max book folders surfaced in library filter
+/// 书库目录筛选项（默认子目录或外部图书目录）。/ Library folder filter entry (default subfolder or external book directory).
+typedef struct {
+    char label[64]; ///< 展示名称 / Display label
+    char path[PN_SCAN_PATH_MAX]; ///< 完整绝对目录路径 / Full absolute directory path
+    bool is_external; ///< 是否用户外部目录 / True for user-added external directory
+} pn_catalog_folder_t;
+/// 列出书库可用筛选目录（默认 books 下直接子目录 + 已登记外部图书目录）。
+/// List filterable book folders (default books subfolders + active external book directories).
+pn_status_t pn_catalog_list_book_folders(pn_media_t *media,const pn_media_lease_t *lease,const char *default_books_dir,
+    pn_catalog_folder_t *out,size_t cap,size_t *count_out);

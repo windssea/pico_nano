@@ -53,7 +53,7 @@ int main(int argc,char **argv){
         assert(pn_font_manage_open(&font_manage,&pool,&sd_media,directory,NULL,NULL,present,NULL)==PN_OK && pn_font_manage_motion(&font_manage,list_present,NULL)==PN_OK);status_page=true;shelf_mode=false;
         pointer(1,850,100);pointer(1,550,1100);pointer(1,213,2100);assert(pn_font_manage_tick(&font_manage,2110)==PN_OK && pn_font_manage_motion_stats(&font_manage).pending && atomic_load(&list_unknown) && !panel_known);unsigned before=phase_calls;clean=clear_calls;
         if(route==0){assert(pn_font_manage_present(&font_manage,present,NULL)==PN_OK && !pn_font_manage_motion_stats(&font_manage).active);pn_font_manage_close(&font_manage);}
-        else if(route==1){handle_key(PN_KEY_2,PN_KEY_SHORT);assert(!font_manage.impl && home_mode);}
+        else if(route==1){home_mode=true;handle_key(PN_KEY_2,PN_KEY_LONG);assert(!font_manage.impl && home_mode);}
         else if(route==2){assert(pn_media_detach(&sd_media)==PN_OK);message("卡已移除","保留记录");assert(!font_manage.impl);}
         else if(route==3){begin_usb();assert(!font_manage.impl);if(usb.open){pn_device_usb_request_stop(&usb);(void)pn_device_usb_poll(&usb,0);}}
         else if(route==4){assert(prepare_lock() && !pn_font_manage_motion_stats(&font_manage).active);wake_idle=true;show_lock("退出列表");wake_idle=false;assert(!font_manage.impl);}

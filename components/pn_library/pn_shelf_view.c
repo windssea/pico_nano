@@ -39,18 +39,6 @@ bool pn_shelf_gesture_feed(pn_shelf_gesture_t *g,bool active,bool swipe,unsigned
     return g->claimed;
 }
 static pn_status_t rd(void *ctx,uint64_t off,uint8_t *out,size_t cap,size_t *n){const char *s=ctx;size_t size=strlen(s);if(off>size)return PN_INVALID;size_t take=size-(size_t)off;if(take>cap)take=cap;memcpy(out,s+off,take);*n=take;return PN_OK;}
-static pn_status_t label(pn_font_t *font,pn_frame_t *part,const char *s,unsigned lines){
-    pn_text_source_t source={(void *)s,strlen(s),rd,NULL};pn_text_reader_t reader;pn_status_t status=pn_text_open(&reader,&source,PN_TEXT_UTF8);if(status!=PN_OK)return status;pn_text_char_t c;int x=0,y=font->pixels+4;unsigned row=1;
-    while((status=pn_text_next(&reader,&c))==PN_OK){int32_t advance;pn_status_t measured=pn_font_advance(font,c.codepoint,&advance);if(measured==PN_EMPTY)advance=font->pixels*64;else if(measured!=PN_OK)return measured;
-        if(advance<0 || advance>part->width*64)return PN_LIMIT;
-        if(x>part->width*64-advance){row++;if(row>lines){for(int i=0;i<3;i++){pn_status_t dot=pn_font_draw(font,part,'.',(part->width-24+i*6)*64,y,PN_FONT_GRAY);if(dot!=PN_OK)return dot;}return PN_OK;}x=0;y+=font->pixels+12;}
-        if(measured==PN_EMPTY){int px=x/64;pn_frame_rect(part,px,y-font->pixels,font->pixels-4,1,0);pn_frame_rect(part,px,y-4,font->pixels-4,1,0);pn_frame_rect(part,px,y-font->pixels,1,font->pixels-4,0);pn_frame_rect(part,px+font->pixels-5,y-font->pixels,1,font->pixels-4,0);}
-        else {status=pn_font_draw(font,part,c.codepoint,x,y,PN_FONT_GRAY);if(status!=PN_OK)return status;}
-        x+=advance;
-    }
-    return status==PN_EMPTY?PN_OK:status;
-}
-static pn_status_t at(pn_font_t *font,pn_frame_t *frame,const char *s,int x,int y,int w,int h,unsigned lines){pn_frame_t part={frame->pixels+(size_t)y*frame->stride+(size_t)x/2,w,h,frame->stride};return label(font,&part,s,lines);}
 static const char *kind(pn_book_format_t f){switch(f){case PN_BOOK_TXT:return "TXT";case PN_BOOK_EPUB:return "EPUB";case PN_BOOK_FB2:return "FB2";case PN_BOOK_CBZ:return "CBZ";default:return "?";}}
 
 /* 版式常量（Mono Glass V2，1u≈1.9px）：状态带、标题行、继续阅读卡、分类、排序行、3/4列封面网格、分页、固定底栏。
@@ -202,6 +190,15 @@ static void favorite_badge(pn_frame_t *frame,int x,int y,int size){
     pn_w_round_stroke(frame,x,y,size,size,8,1.5f,PN_UI_INK);
     pn_w_icon(frame,PN_ICON_BOOKMARK,x+5,y+5,size-10,PN_UI_INK);
 }
+/// 封面右上角“已读”徽章：黑底白字加白边，深浅封面均清晰可读。/ Top-right "Read" cover badge: white text on ink with a paper halo for contrast on any cover.
+static pn_status_t read_badge(pn_font_t *font,pn_frame_t *frame,int x,int y,int w){
+    int original=font->pixels;pn_status_t s=pn_font_size(font,18);
+    int bw=48,bh=24,bx=x+w-bw-6,by=y+8;
+    pn_w_round_fill(frame,bx-1,by-1,bw+2,bh+2,7,PN_UI_PAPER);
+    pn_w_round_fill(frame,bx,by,bw,bh,6,PN_UI_INK);
+    if(s==PN_OK)s=pn_w_text_ex(font,frame,"已读",bx,by+18,bw,PN_ALIGN_CENTER,PN_UI_PAPER,true);
+    pn_status_t restored=pn_font_size(font,original);return s==PN_OK?restored:s;
+}
 #define HOME_CARD_Y 190
 #define HOME_CARD_H 384
 #define HOME_BOOKS_Y 844
@@ -220,10 +217,20 @@ static void home_ornament(pn_frame_t *frame){
     mountain(frame,far,sizeof far/sizeof *far,180,14);mountain(frame,near,sizeof near/sizeof *near,180,13);
     for(int i=0;i<5;i++)pn_w_line(frame,(float)(574+i*11),214.0f,632.0f,(float)(236+i*4),1.0f,14);
 }
+/// 时长友好格式：不满1小时显示“X 分钟”，满1小时显示“X 小时 Y 分”。/ Friendly duration: "X 分钟" under 1 hour, "X 小时 Y 分" at or above 1 hour.
+static void format_duration_zh(uint64_t mins,char *out,size_t cap){
+    if(mins>=60u){
+        uint64_t h=mins/60u,m=mins%60u;
+        if(m)snprintf(out,cap,"%llu 小时 %llu 分",(unsigned long long)h,(unsigned long long)m);
+        else snprintf(out,cap,"%llu 小时",(unsigned long long)h);
+    }else snprintf(out,cap,"%llu 分钟",(unsigned long long)mins);
+}
 /// 续读主卡保持完整点击区域；时长仅使用与该书匹配的统计。/ Keep the full Continue card tappable; book time uses matching statistics only.
 static pn_status_t continue_card(const pn_shelf_covers_t *covers,const pn_shelf_options_t *options,pn_font_t *font,pn_frame_t *frame){
     pn_status_t s=pn_font_size(font,24);char meta[80];
-    pn_w_round_stroke(frame,32,HOME_CARD_Y,620,HOME_CARD_H,16,1,PN_UI_STROKE);
+    pn_w_round_fill(frame,34,HOME_CARD_Y+2,616,HOME_CARD_H,18,PN_UI_SELECT);
+    pn_w_round_fill(frame,32,HOME_CARD_Y,620,HOME_CARD_H,18,PN_UI_PAPER);
+    pn_w_round_stroke(frame,32,HOME_CARD_Y,620,HOME_CARD_H,18,1.5f,9);
     if(s==PN_OK)s=pn_w_text_ex(font,frame,"正在阅读",56,236,500,PN_ALIGN_LEFT,PN_UI_INK,true);
     if(covers && covers->has_last){
         const pn_catalog_item_t *last=&covers->last;char title[PN_CATALOG_NAME_MAX];title_of(last,covers,PN_COVER_SLOT_LAST,title,sizeof title);
@@ -236,8 +243,9 @@ static pn_status_t continue_card(const pn_shelf_covers_t *covers,const pn_shelf_
         unsigned basis=(last->identified || last->has_progress) && last->progress<=10000?last->progress:0;
         progress_bar(frame,242,420,308,basis);snprintf(meta,sizeof meta,"%u%%",basis/100u);
         if(s==PN_OK){s=pn_font_size(font,25);if(s==PN_OK)s=pn_w_text_ex(font,frame,meta,556,432,68,PN_ALIGN_RIGHT,PN_UI_INK,false);}
-        snprintf(meta,sizeof meta,"本书已读 %llu 分钟",(unsigned long long)(options->reading.known?options->reading.total_ms/60000u:0));
-        if(s==PN_OK){s=pn_font_size(font,22);if(s==PN_OK)s=pn_w_text_ex(font,frame,meta,242,468,382,PN_ALIGN_LEFT,PN_UI_MUTED,false);}
+        char dur[40];format_duration_zh(options->reading.known?options->reading.total_ms/60000u:0u,dur,sizeof dur);
+        snprintf(meta,sizeof meta,"本书已读 %s",dur);
+        if(s==PN_OK){s=pn_font_size(font,22);if(s==PN_OK)s=pn_w_text_ex(font,frame,meta,242,468,382,PN_ALIGN_LEFT,5,false);}
     }else{
         pn_w_icon(frame,PN_ICON_SHELF,60,294,64,PN_UI_MUTED);
         if(s==PN_OK)s=pn_font_size(font,36);
@@ -245,7 +253,7 @@ static pn_status_t continue_card(const pn_shelf_covers_t *covers,const pn_shelf_
         if(s==PN_OK)s=pn_font_size(font,24);
         if(s==PN_OK)s=pn_w_text_lines_ex(font,frame,"在书库挑选一本书，下次从这里继续。",160,380,464,2,36,PN_UI_MUTED,false);
     }
-    pn_w_round_fill(frame,56,490,572,60,8,PN_UI_INK);
+    pn_w_round_fill(frame,56,490,572,60,12,PN_UI_INK);
     if(s==PN_OK)s=pn_font_size(font,28);
     if(s==PN_OK)s=pn_w_text_ex(font,frame,covers && covers->has_last?"继续阅读":"打开书库",80,530,524,PN_ALIGN_CENTER,PN_UI_PAPER,true);
     pn_w_icon(frame,PN_ICON_CHEVRON,592,508,24,PN_UI_PAPER);return s;
@@ -253,12 +261,13 @@ static pn_status_t continue_card(const pn_shelf_covers_t *covers,const pn_shelf_
 /// 今日取全局周槽而非本书today_ms；分钟分桶与菜单缓存键一致。/ Today uses the global weekly bucket, not book today_ms; minute buckets match the menu cache key.
 static pn_status_t home_reading(const pn_shelf_options_t *o,pn_font_t *font,pn_frame_t *frame){
     static const char *const days[]={"一","二","三","四","五","六","日"};
-    uint64_t minutes[7]={0},total=0,remainder=0,maximum=1,today=0;bool dated=o->reading.dated && o->reading.weekday<7;char text[64];
+    uint64_t minutes[7]={0},total=0,remainder=0,maximum=1,today=0;bool dated=o->reading.dated && o->reading.weekday<7;char text[64],dur[40];
     for(unsigned i=0;i<7;i++){minutes[i]=dated?o->reading.week_ms[i]/60000u:0;total+=minutes[i];remainder+=dated?o->reading.week_ms[i]%60000u:0;if(minutes[i]>maximum)maximum=minutes[i];}
     total+=remainder/60000u;if(dated)today=minutes[o->reading.weekday];
     pn_status_t s=pn_font_size(font,27);if(s==PN_OK)s=pn_w_text_ex(font,frame,"阅读节奏",32,632,300,PN_ALIGN_LEFT,PN_UI_INK,true);
-    snprintf(text,sizeof text,"本周 %llu 分钟",(unsigned long long)total);
-    if(s==PN_OK){s=pn_font_size(font,22);if(s==PN_OK)s=pn_w_text_ex(font,frame,text,340,632,312,PN_ALIGN_RIGHT,PN_UI_MUTED,false);}
+    format_duration_zh(total,dur,sizeof dur);snprintf(text,sizeof text,"本周 %s",dur);
+    if(s==PN_OK){s=pn_font_size(font,22);if(s==PN_OK)s=pn_w_text_ex(font,frame,text,340,632,282,PN_ALIGN_RIGHT,5,false);}
+    pn_w_icon(frame,PN_ICON_CHEVRON,626,609,24,6);
     if(s==PN_OK){s=pn_font_size(font,21);if(s==PN_OK)s=pn_w_text_ex(font,frame,"今日阅读",32,674,180,PN_ALIGN_LEFT,PN_UI_MUTED,false);}
     snprintf(text,sizeof text,"%llu",(unsigned long long)today);
     if(s==PN_OK){s=pn_font_size(font,44);if(s==PN_OK)s=pn_w_text_ex(font,frame,text,32,728,126,PN_ALIGN_LEFT,PN_UI_INK,true);}
@@ -285,7 +294,7 @@ static pn_status_t home_row(const pn_catalog_page_t *page,pn_font_t *font,pn_fra
     pn_frame_rect(frame,128,y+116,524,1,13);return s;
 }
 static pn_status_t home_render(const pn_catalog_page_t *page,pn_font_t *font,pn_frame_t *frame,const pn_shelf_covers_t *covers,const pn_shelf_options_t *options,int selected){
-    int original=font->pixels;pn_frame_clear(frame,PN_UI_PAPER);home_ornament(frame);pn_status_t s=pn_w_status(font,frame);
+    int original=font->pixels;pn_frame_clear(frame,PN_UI_PAPER);if(options->home_banner && options->home_banner->pixels && options->home_banner->width==684 && options->home_banner->height==146)blit(frame,options->home_banner,0,40);else home_ornament(frame);pn_status_t s=pn_w_status_named(font,frame,options->home_header);
     if(s==PN_OK)s=pn_font_size(font,46);
     if(s==PN_OK)s=pn_w_text_ex(font,frame,"读书",32,122,300,PN_ALIGN_LEFT,PN_UI_INK,true);
     if(s==PN_OK){s=pn_font_size(font,22);if(s==PN_OK)s=pn_w_text_ex(font,frame,"拾起上次的阅读",32,162,300,PN_ALIGN_LEFT,PN_UI_MUTED,false);}
@@ -333,20 +342,22 @@ static pn_status_t grid_item(const pn_catalog_item_t *item,const pn_shelf_covers
     pn_profile_end(&span,s);pn_profile_begin(&span,NULL,"ui.grid.frame");
     frame_cover(frame,x,y,w,h,radius);style_cover(frame,style,x,y,w,h);pn_profile_end(&span,PN_OK);
     if(s==PN_OK && favorite)favorite_badge(frame,x+10,y+10,28);
+    if(s==PN_OK && pn_read_marks_is_read(o->read_marks,item->path,item->identified || item->has_progress,item->progress))s=read_badge(font,frame,x,y,w);
     // 书籍操作由长按打开，封面保持完整。/ Long press opens book actions, leaving covers unobstructed.
     if(s==PN_OK)s=format_badge(font,frame,item->format,x,y,w,h);
     bool started=item->identified || item->has_progress;
     if(started && item->progress<=10000){pn_frame_rect(frame,x+8,y+h-9,w-16,4,PN_UI_PAPER);pn_frame_rect(frame,x+8,y+h-9,(int)((unsigned)(w-16)*item->progress/10000u),4,PN_UI_INK);}
     int inset=style==PN_SHELF_WOOD?4:0,cx=x-inset,cw=w+inset*2,baseline=y+h+(inset?46:34);
-    if(s==PN_OK)s=pn_font_size(font,columns_of(o)==4?22:24);
-    if(s==PN_OK)s=pn_w_text_ex(font,frame,title,cx,baseline,cw,PN_ALIGN_CENTER,PN_UI_INK,true);
-    if(selected)pn_frame_rect(frame,cx+24,baseline+5,cw-48,2,PN_UI_MUTED);
+    bool show_title=(style!=PN_SHELF_MINIMAL && style!=PN_SHELF_WOOD);
+    if(s==PN_OK && show_title)s=pn_font_size(font,columns_of(o)==4?22:24);
+    if(s==PN_OK && show_title)s=pn_w_text_ex(font,frame,title,cx,baseline,cw,PN_ALIGN_CENTER,PN_UI_INK,true);
+    if(selected)pn_frame_rect(frame,cx+24,show_title?baseline+5:y+h+(inset?20:10),cw-48,show_title?2:3,show_title?PN_UI_MUTED:PN_UI_INK);
     return s;
 }
 /* 列表：80×112封面、全名最多两行、“进度 · 格式 · 大小”，整行可点。/ List: 80×112 cover, full name up to two lines, "progress · format · size"; the whole row is tappable. */
-static pn_status_t list_item(const pn_catalog_item_t *item,const pn_shelf_covers_t *covers,size_t i,pn_font_t *font,pn_frame_t *frame,bool selected,bool favorite){
+static pn_status_t list_item(const pn_catalog_item_t *item,const pn_shelf_covers_t *covers,size_t i,pn_font_t *font,pn_frame_t *frame,bool selected,bool favorite,bool read_done){
     int y=LIST_Y+(int)i*LIST_ROW_PITCH;char title[PN_CATALOG_NAME_MAX],meta[128],base[64];title_of(item,covers,i,title,sizeof title);meta_of(item,base,sizeof base);
-    snprintf(meta,sizeof meta,"%s%s · %llu KB",favorite?"已收藏 · ":"",base,(unsigned long long)(item->size/1024+(item->size%1024!=0)));
+    snprintf(meta,sizeof meta,"%s%s%s · %llu KB",read_done?"已读 · ":"",favorite?"已收藏 · ":"",base,(unsigned long long)(item->size/1024+(item->size%1024!=0)));
     pn_status_t s=cover_or_placeholder(font,frame,covers,i,item,32,y+5,80,112,false,10);
     if(s==PN_OK && favorite)favorite_badge(frame,76,y+11,30);
     if(s==PN_OK)s=pn_font_size(font,28);
@@ -407,7 +418,7 @@ static void game_entry_card(pn_frame_t *p,grid_box_t b){
     game_entry_step_fill(p,b.x+2,b.y+2,b.w-4,b.h-8,6,15);
 }
 /// 娱乐只消费UI状态与内置小图，不打开书籍、题库或图片文件。/ Entertainment consumes only UI state and small built-in art, without opening books, banks or image files.
-static pn_status_t entertainment_body(pn_font_t *font,pn_frame_t *frame,bool detail){
+static pn_status_t entertainment_body(pn_font_t *font,pn_frame_t *frame,bool detail,int selected){
     pn_status_t s=pn_font_size(font,24);
     if(!detail){
         static const char *const titles[]={"数独","推箱子","扫雷","数织","象棋残局","华容道","围棋死活"};
@@ -415,6 +426,7 @@ static pn_status_t entertainment_body(pn_font_t *font,pn_frame_t *frame,bool det
         for(unsigned i=0;i<7;i++){
             grid_box_t b=game_entry_box(i);
             game_entry_card(frame,b);
+            if((int)i==selected)pn_w_round_stroke(frame,b.x-4,b.y-4,b.w+8,b.h+8,12,4.0f,PN_UI_INK);
             game_entry_icon(frame,i,b.x+28,b.y+16);
             if(s==PN_OK)s=pn_font_size(font,28);
             if(s==PN_OK)s=pn_w_text_ex(font,frame,titles[i],b.x+8,b.y+184,b.w-16,PN_ALIGN_CENTER,PN_UI_INK,true);
@@ -445,9 +457,29 @@ pn_status_t pn_shelf_render_ex(const pn_catalog_page_t *page,pn_font_t *font,pn_
     int original=font->pixels;pn_frame_clear(frame,PN_UI_PAPER);
     if(options->entertainment)home_ornament(frame);
     pn_status_t s=pn_w_status(font,frame);
-    // 标题行只保留书库标题。/ Keep only the library heading in the title row.
+    // 标题行：书库标题 + 显性“A–Z”首字母索引徽章 + 快速排序胶囊 + 右侧柔和搜索按钮。
+    // Title row: Library heading + visible "A–Z" index pill + quick-sort pill + soft search button on the right.
     if(s==PN_OK)s=pn_font_size(font,40);
-    if(s==PN_OK)s=pn_w_text_ex(font,frame,options->query && !options->entertainment?"搜索结果":"书库",32,120,420,PN_ALIGN_LEFT,PN_UI_INK,true);
+    if(s==PN_OK)s=pn_w_text_ex(font,frame,options->query && !options->entertainment?"搜索结果":"书库",32,120,260,PN_ALIGN_LEFT,PN_UI_INK,true);
+    if(s==PN_OK && !options->entertainment && !recent && !options->favorites && !options->query){
+        pn_w_round_fill(frame,130,84,84,38,14,PN_UI_SURFACE);
+        pn_w_round_stroke(frame,130,84,84,38,14,1.0f,10);
+        s=pn_font_size(font,20);
+        if(s==PN_OK)s=pn_w_text_ex(font,frame,"A–Z",130,110,84,PN_ALIGN_CENTER,4,true);
+        const char *short_sort=options->sort==PN_SHELF_SORT_ADDED?"按添加":options->sort==PN_SHELF_SORT_RECENT?"按最近":"按书名";
+        pn_w_round_fill(frame,224,84,132,38,14,PN_UI_SURFACE);
+        pn_w_round_stroke(frame,224,84,132,38,14,1.0f,10);
+        if(s==PN_OK)s=pn_w_text_ex(font,frame,short_sort,232,110,94,PN_ALIGN_CENTER,PN_UI_INK,true);
+        // 像素级下拉三角图标，避免字体缺失 ▾ 字符显示方框。/ Pixel-drawn downward caret so missing U+25BE glyphs never show tofu boxes.
+        for(int d=0;d<5;d++)pn_frame_rect(frame,330+d,101+d,10-2*d,1,4);
+    }
+    // 标题行右侧恢复搜索入口（已过滤时显示“清除”）。/ Restore the search button on the right of the title row ("Clear" while filtered).
+    if(s==PN_OK && !options->entertainment && options->search){
+        pn_w_round_fill(frame,520,76,132,52,16,PN_UI_SURFACE);
+        pn_w_round_stroke(frame,520,76,132,52,16,1.5f,9);
+        pn_w_icon(frame,PN_ICON_SEARCH,536,88,28,PN_UI_INK);
+        s=pn_font_size(font,24);if(s==PN_OK)s=pn_w_text_ex(font,frame,options->query?"清除":"搜索",568,111,76,PN_ALIGN_CENTER,PN_UI_INK,true);
+    }
 
 
     // 分类含可选娱乐，深色胶囊为当前；书籍右侧保留布局切换。/ Categories include optional entertainment; a dark capsule marks the active one and books retain the layout toggle.
@@ -457,12 +489,27 @@ pn_status_t pn_shelf_render_ex(const pn_catalog_page_t *page,pn_font_t *font,pn_
             if(s==PN_OK)s=pn_w_text_ex(font,frame,chips[i==books?3u:i],x,CHIP_Y+39,CHIP_W,PN_ALIGN_CENTER,PN_UI_INK,(int)i==active);
             if((int)i==active)pn_w_invert_round(frame,x,CHIP_Y+5,CHIP_W,CHIP_H-10,(CHIP_H-10)/2);}
     }
-    if(options->entertainment){if(s==PN_OK)s=entertainment_body(font,frame,options->entertainment==2);pn_status_t restored=pn_font_size(font,original);return s==PN_OK?restored:s;}
-    if(options->layout_toggle){pn_w_glass(frame,LAYOUT_X+28,CHIP_Y,64,CHIP_H,18);if(list)pn_w_icon_grid(frame,LAYOUT_X+44,CHIP_Y+13,32);else pn_w_icon_list(frame,LAYOUT_X+44,CHIP_Y+13,32);}
-    // 排序说明与总数。/ Sort note and total.
-    if(s==PN_OK)s=pn_font_size(font,24);
-    if(s==PN_OK)s=pn_w_text_ex(font,frame,options->favorites?"按收藏时间":recent?"按最近打开":options->query?"按匹配书名":"按书名排序",32,SORT_BASE,300,PN_ALIGN_LEFT,PN_UI_MUTED,false);
-    if(s==PN_OK && page->total){char total[32];snprintf(total,sizeof total,"共 %zu 本",page->total);s=pn_w_text_ex(font,frame,total,352,SORT_BASE,300,PN_ALIGN_RIGHT,PN_UI_MUTED,false);}
+    if(options->entertainment){if(s==PN_OK)s=entertainment_body(font,frame,options->entertainment==2,selected);pn_status_t restored=pn_font_size(font,original);return s==PN_OK?restored:s;}
+    if(options->layout_toggle){pn_w_round_fill(frame,LAYOUT_X+28,CHIP_Y,64,CHIP_H,16,PN_UI_SURFACE);pn_w_round_stroke(frame,LAYOUT_X+28,CHIP_Y,64,CHIP_H,16,1.5f,9);if(list)pn_w_icon_grid(frame,LAYOUT_X+44,CHIP_Y+13,32);else pn_w_icon_list(frame,LAYOUT_X+44,CHIP_Y+13,32);}
+    // 排序说明与总数（排序快捷切换已置于标题行 A–Z 之后）。/ Sort note and total count (quick sort toggle sits right after A–Z on the title row).
+    if(s==PN_OK)s=pn_font_size(font,22);
+    if(s==PN_OK){
+        const char *sort_label=options->favorites?"按收藏时间":recent?"按最近打开":options->query?"按匹配书名":options->sort==PN_SHELF_SORT_ADDED?"当前：按添加时间":options->sort==PN_SHELF_SORT_RECENT?"当前：按最近阅读":"当前：按书名排序";
+        s=pn_w_text_ex(font,frame,sort_label,32,SORT_BASE,220,PN_ALIGN_LEFT,5,false);
+    }
+    if(s==PN_OK && !options->favorites && !recent && !options->query && options->folder_label && *options->folder_label){
+        int py=SORT_BASE-26;
+        bool filtered=strcmp(options->folder_label,"全部")!=0;
+        pn_w_round_fill(frame,256,py,240,34,12,filtered?PN_UI_INK:PN_UI_SURFACE);
+        pn_w_round_stroke(frame,256,py,240,34,12,1.0f,filtered?PN_UI_INK:10);
+        char flbl[64];snprintf(flbl,sizeof flbl,"目录：%.20s",options->folder_label);
+        s=pn_font_size(font,20);
+        if(s==PN_OK)s=pn_w_text_ex(font,frame,flbl,266,SORT_BASE-2,200,PN_ALIGN_CENTER,filtered?PN_UI_PAPER:PN_UI_INK,filtered);
+        uint8_t caret_ink=filtered?PN_UI_PAPER:4;
+        for(int d=0;d<5;d++)pn_frame_rect(frame,474+d,py+15+d,10-2*d,1,caret_ink);
+        if(s==PN_OK)s=pn_font_size(font,22);
+    }
+    if(s==PN_OK && page->total){char total[32];snprintf(total,sizeof total,"共 %zu 本",page->total);s=pn_w_text_ex(font,frame,total,504,SORT_BASE,148,PN_ALIGN_RIGHT,5,false);}
     // 拟物搁板在书名前留空间；纸页用横线分组。/ Ledges leave room before titles; paper rows use a grouping rule.
     if(!list && page->count){for(size_t row=0;row<3;row++){grid_box_t b=grid_box(row*columns_of(options),options);
         if(options->style==PN_SHELF_WOOD)ledge(frame,24,b.y+b.h+1,636);
@@ -470,7 +517,7 @@ pn_status_t pn_shelf_render_ex(const pn_catalog_page_t *page,pn_font_t *font,pn_
     // 书目：网格或列表。/ Books: grid or list.
     for(size_t i=0;i<page->count && i<visible && s==PN_OK;i++){
         const pn_catalog_item_t *item=&page->items[i];if(strnlen(item->name,sizeof item->name)>=sizeof item->name)return PN_INVALID;
-        s=list?list_item(item,covers,i,font,frame,(int)i==selected,pn_favorites_contains(options->favorite_items,item->path)):grid_item(item,covers,i,font,frame,(int)i==selected,pn_favorites_contains(options->favorite_items,item->path),options);
+        s=list?list_item(item,covers,i,font,frame,(int)i==selected,pn_favorites_contains(options->favorite_items,item->path),pn_read_marks_is_read(options->read_marks,item->path,item->identified || item->has_progress,item->progress)):grid_item(item,covers,i,font,frame,(int)i==selected,pn_favorites_contains(options->favorite_items,item->path),options);
     }
     // 最后一页网格还有空位时放虚线“导入图书”卡（需要传书能力）。/ A dashed "import books" tile fills a free grid slot on the last page (needs transfer).
     if(s==PN_OK && import_slot(page,options,transfer)>=0){
@@ -490,11 +537,21 @@ pn_status_t pn_shelf_render_ex(const pn_catalog_page_t *page,pn_font_t *font,pn_
         if(s==PN_OK && options->query){s=pn_font_size(font,30);if(s==PN_OK)s=pn_w_button(font,frame,"修改搜索词",212,776,260,88,0u);}
         else if(s==PN_OK && !recent && !options->favorites && transfer && options->import_tile){s=pn_font_size(font,30);if(s==PN_OK)s=pn_w_button(font,frame,"导入图书",212,776,260,88,PN_W_SELECTED);}
     }
-    // 页码只读，内容区左右滑动翻页。/ Read-only page number; swipe horizontally over content to turn.
+    // 底部页码与轻触翻页区（<  1 / N  >），不触碰左右边缘空白区。/ Centered page number flanked by compact tap paging arrows (<  1 / N  >), keeping outer margins inert.
     if(s==PN_OK && page->count && page->total){
         char info[48];unsigned per=(unsigned)visible,current=(unsigned)(page->index/per)+1,pages=(unsigned)((page->total+per-1)/per);
-        snprintf(info,sizeof info,"%u / %u",current,pages<current?current:pages);
-        s=pn_font_size(font,22);if(s==PN_OK)s=pn_w_text_ex(font,frame,info,262,INFO_Y+26,160,PN_ALIGN_CENTER,PN_UI_MUTED,false);
+        if(pages<current)pages=current;
+        if(pages>1){
+            bool has_prev=page->index>0,has_next=page->more;
+            pn_w_round_fill(frame,192,INFO_Y+2,64,34,12,has_prev?PN_UI_SURFACE:PN_UI_PAPER);
+            if(has_prev)pn_w_round_stroke(frame,192,INFO_Y+2,64,34,12,1.0f,11);
+            pn_w_icon(frame,PN_ICON_BACK,214,INFO_Y+9,20,has_prev?PN_UI_INK:PN_UI_RULE);
+            pn_w_round_fill(frame,428,INFO_Y+2,64,34,12,has_next?PN_UI_SURFACE:PN_UI_PAPER);
+            if(has_next)pn_w_round_stroke(frame,428,INFO_Y+2,64,34,12,1.0f,11);
+            pn_w_icon(frame,PN_ICON_CHEVRON,450,INFO_Y+9,20,has_next?PN_UI_INK:PN_UI_RULE);
+        }
+        snprintf(info,sizeof info,"%u / %u",current,pages);
+        s=pn_font_size(font,22);if(s==PN_OK)s=pn_w_text_ex(font,frame,info,262,INFO_Y+26,160,PN_ALIGN_CENTER,5,false);
     }
     // 固定底栏：书架 / 传书 / 设置。/ Fixed bottom bar: shelf / transfer / settings.
     if(s==PN_OK){s=pn_font_size(font,24);if(s==PN_OK)s=pn_w_navigation(font,frame,PN_NAV_LIBRARY);}
@@ -536,19 +593,29 @@ int pn_shelf_hit_ex(const pn_catalog_page_t *page,int x,int y,const pn_shelf_opt
     if(y>=TAB_Y){int tab=pn_w_navigation_hit(x,y);return tab==PN_NAV_HOME?PN_SHELF_READING_HOME:tab==PN_NAV_LIBRARY?PN_SHELF_HOME:tab==PN_NAV_TRANSFER?PN_SHELF_TRANSFER:tab==PN_NAV_SETTINGS?PN_SHELF_MENU:-1;}
     if(options->home){
         if(x>=32 && x<652 && y>=HOME_CARD_Y && y<HOME_CARD_Y+HOME_CARD_H)return page->count?PN_SHELF_CONTINUE:PN_SHELF_HOME;
-        if(y>=754 && y<842 && x>=440 && x<652)return PN_SHELF_HOME;
+        if(y>=592 && y<786 && x>=32 && x<652)return PN_SHELF_READING_STATS;
+        if(y>=786 && y<842 && x>=440 && x<652)return PN_SHELF_HOME;
         if(y>=936 && y<1024 && x>=32 && x<652 && !page->count)return PN_SHELF_TRANSFER;
         if(y>=HOME_BOOKS_Y && y<HOME_BOOKS_Y+2*HOME_ROW_PITCH && x>=32 && x<652){int row=(y-HOME_BOOKS_Y)/HOME_ROW_PITCH+1;return row<(int)page->count && row<3?row:-1;}
         return -1;
     }
     if(y<56)return -1;
-    if(y<CHIP_Y-10){return !options->entertainment && x>=32 && x<300?PN_SHELF_INDEX:-1;}
-    if(y<LIST_Y-16){
+    if(y<CHIP_Y-10){
+        if(options->entertainment)return -1;
+        if(options->search && x>=500 && x<664)return PN_SHELF_SEARCH;
+        if(!options->favorites && !options->query && x>=220 && x<380)return PN_SHELF_SORT;
+        return x>=32 && x<220?PN_SHELF_INDEX:-1;
+    }
+    if(y<CHIP_Y+CHIP_H+6){
         if(y<CHIP_Y-10)return -1;
         if(!options->entertainment && options->layout_toggle && x>=LAYOUT_X && x<664)return PN_SHELF_LAYOUT;
         int chip=(x-38)/CHIP_W;unsigned books=options->favorites_tab?3u:2u,count=books+(options->entertainment_tab?1u:0u);
         if(x>=32 && x<38+(int)count*CHIP_W && chip>=0 && chip<(int)count)return chip==(int)books?PN_SHELF_TAB_ENTERTAINMENT:chip==0?PN_SHELF_TAB_ALL:chip==1?PN_SHELF_TAB_RECENT:PN_SHELF_TAB_FAVORITES;
         return -1;
+    }
+    if(y<LIST_Y && !options->entertainment && !options->favorites && !options->query){
+        if(x>=24 && x<240)return PN_SHELF_SORT;
+        if(options->folder_label && *options->folder_label && x>=250 && x<504)return PN_SHELF_FOLDER;
     }
     if(options->entertainment){
         if(options->entertainment==1)for(unsigned i=0;i<7;i++){grid_box_t b=game_entry_box(i);if(x>=b.x && x<b.x+b.w && y>=b.y && y<b.y+b.h)return game_entry_commands[i];}
@@ -572,6 +639,10 @@ int pn_shelf_hit_ex(const pn_catalog_page_t *page,int x,int y,const pn_shelf_opt
         }
         return -1;
     }
+    if(page->count && page->total && y>=INFO_Y-4 && y<TAB_Y){
+        if(page->index>0 && x>=180 && x<264)return PN_SHELF_PREVIOUS;
+        if(page->more && x>=420 && x<504)return PN_SHELF_NEXT;
+    }
     return -1;
 }
 int pn_shelf_hit(const pn_catalog_page_t *page,int x,int y){return pn_shelf_hit_ex(page,x,y,NULL);}
@@ -580,13 +651,18 @@ int pn_shelf_hit(const pn_catalog_page_t *page,int x,int y){return pn_shelf_hit_
 static const char cells[]="abcdefghijklmnopqrstuvwxyz#<";
 pn_status_t pn_shelf_index_render(pn_font_t *font,pn_frame_t *frame){
     if(!font || !font->impl || !frame || !frame->pixels || frame->width!=684 || frame->height!=1216 || frame->stride<342)return PN_INVALID;
-    pn_frame_clear(frame,15);pn_status_t s=at(font,frame,PN_BRAND_NAME,32,20,620,52,1);
-    if(s==PN_OK)s=at(font,frame,"按书名首字母跳转（中文按拼音）",32,90,620,50,1);
+    int original=font->pixels;
+    pn_frame_clear(frame,15);
+    pn_status_t s=pn_w_status(font,frame);
+    if(s==PN_OK)s=pn_font_size(font,34);
+    if(s==PN_OK)s=pn_w_text_ex(font,frame,"按书名首字母跳转（中文按拼音）",32,126,620,PN_ALIGN_LEFT,PN_UI_INK,true);
+    if(s==PN_OK)s=pn_font_size(font,40);
     for(int i=0;i<28 && s==PN_OK;i++){int x=32+(i%4)*157,y=180+(i/4)*125;
-        pn_frame_rect(frame,x,y,150,1,5);pn_frame_rect(frame,x,y+114,150,1,5);pn_frame_rect(frame,x,y,1,115,5);pn_frame_rect(frame,x+149,y,1,115,5);
+        pn_w_round_fill(frame,x,y,150,115,14,cells[i]=='<'?PN_UI_SURFACE:PN_UI_PAPER);
+        pn_w_round_stroke(frame,x,y,150,115,14,1.5f,cells[i]=='<'?PN_UI_INK:9);
         char label[8];if(cells[i]=='<')strcpy(label,"返回");else if(cells[i]=='#')strcpy(label,"#");else{label[0]=(char)(cells[i]-'a'+'A');label[1]=0;}
-        s=at(font,frame,label,x+(cells[i]=='<'?40:62),y+36,100,50,1);}
-    return s;
+        s=pn_w_text_ex(font,frame,label,x,y+72,150,PN_ALIGN_CENTER,PN_UI_INK,cells[i]=='<');}
+    pn_status_t restored=pn_font_size(font,original);return s==PN_OK?restored:s;
 }
 char pn_shelf_index_hit(int x,int y){
     if(x<32 || y<180)return 0;

@@ -108,14 +108,21 @@ static void test_bank_and_gameplay(void) {
         assert(pn_xiangqi_level(id, &lv) == PN_OK);
         assert(lv.id == id && lv.tier == id / 20u && lv.title[0] != '\0');
 
-        /* 实战模拟：每步采用pn_xiangqi_best_red_move对抗黑方顽强应着，必须在mate_moves回合内破阵获胜！
-         * Live combat: playing pn_xiangqi_best_red_move against pn_xiangqi_ai_reply must win within mate_moves! */
+        /* 实战模拟：每步采用pn_xiangqi_best_red_move对抗黑方顽强应着，必须在mate_moves回合内破阵获胜，且每步与开局均能无损存/读回！
+         * Live combat: playing pn_xiangqi_best_red_move against pn_xiangqi_ai_reply must win within mate_moves, and initial + every turn must round-trip encode/decode! */
         pn_xq_state_t s = {0};
         pn_xq_reset_board(&s, &lv, pn_xq_bank_crc());
+        uint8_t enc[PN_XQ_SAVE_BYTES];
+        pn_xq_state_t dec = {0};
+        bool dec_has = false;
+        assert(pn_xq_encode_state(&s, true, enc) == PN_OK);
+        assert(pn_xq_decode_state(enc, sizeof enc, pn_xq_bank_crc(), &dec, &dec_has) == PN_OK && dec_has);
         for (unsigned turn = 0; turn < lv.mate_moves && s.outcome == PN_XQ_ONGOING; turn++) {
             uint8_t rf = PN_XQ_NONE_SQ, rt = PN_XQ_NONE_SQ;
             assert(pn_xiangqi_best_red_move(&s, &rf, &rt));
             assert(pn_xiangqi_step(&s, rf, rt) == PN_OK);
+            assert(pn_xq_encode_state(&s, true, enc) == PN_OK);
+            assert(pn_xq_decode_state(enc, sizeof enc, pn_xq_bank_crc(), &dec, &dec_has) == PN_OK && dec_has);
         }
         assert(s.outcome == PN_XQ_WON && s.moves <= lv.mate_moves);
     }

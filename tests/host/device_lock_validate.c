@@ -72,7 +72,7 @@ int main(int argc,char **argv){
     // 恢复路径重新打开了系统字库，清理时一并释放。/ The recovery path reopened the system font, so release it during cleanup too.
     clock_us+=100000;assert(stop_reader());management_fonts_close();system_font_release();pn_free(page_copy);page_copy=NULL;
     // 恢复后显示书库留下的常驻页/封面状态。/ Resident shelf page/cover state left by showing the library after recovery.
-    pn_free(shelf_page);shelf_page=NULL;pn_free(shelf_covers);shelf_covers=NULL;pn_free(recent_snapshot);recent_snapshot=NULL;pn_free(favorites);favorites=NULL;pn_catalog_index_close(&catalog_index);
+    home_banner_release();pn_free(shelf_page);shelf_page=NULL;pn_free(shelf_covers);shelf_covers=NULL;pn_free(recent_snapshot);recent_snapshot=NULL;pn_free(favorites);favorites=NULL;pn_free(read_marks);read_marks=NULL;pn_catalog_index_close(&catalog_index);
     assert(!pn_media_active(&sd_media) && pool.used==0 && pool.live==0 && sleep_calls==9);
     printf("device_lock kind=%s cycles=16 fresh_power_kept=1 pixels_exact=1 position_exact=1 restore_failure_retry=1 stale_power_drained=1 used=%zu live=%zu peak=%zu\n",argv[1],pool.used,pool.live,pool.peak);
     return 0;

@@ -1,5 +1,6 @@
 /* 原生页面回归：导航、密度、长名、元数据与轻量焦点。/ Native-page regression: navigation, density, long titles, metadata and subtle focus. */
 #include "pn_shelf_view.h"
+#include "pn_stats_view.h"
 #include "pn_widgets.h"
 #include <assert.h>
 #include <stdlib.h>
@@ -38,9 +39,11 @@ int main(void){
         }
         /* 焦点不改变封面像素，避免默认黑框。/ Focus leaves cover pixels untouched, avoiding a default black frame. */
         for(int y=y0;y<y0+h-12;y++)for(int x=40;x<32+w-10;x++)assert(pn_frame_get(&frame,x,y)==((before[y*342+x/2]>>(x%2?4:0))&15));
-        assert(pn_shelf_hit_ex(p,600,190,&o)==PN_SHELF_LAYOUT && pn_shelf_hit_ex(p,560,110,&o)==-1);
+        assert(pn_shelf_hit_ex(p,600,190,&o)==PN_SHELF_LAYOUT && pn_shelf_hit_ex(p,560,110,&o)==PN_SHELF_SEARCH);
+        {pn_shelf_options_t no_search=o;no_search.search=false;assert(pn_shelf_hit_ex(p,560,110,&no_search)==-1);}
         assert(pn_shelf_hit_ex(p,50,190,&o)==PN_SHELF_TAB_ALL && pn_shelf_hit_ex(p,200,190,&o)==PN_SHELF_TAB_RECENT && pn_shelf_hit_ex(p,300,190,&o)==PN_SHELF_TAB_FAVORITES);
-        assert(pn_shelf_hit_ex(p,600,1080,&o)==-1 && pn_shelf_hit_ex(p,100,1080,&o)==-1);
+        assert(pn_shelf_hit_ex(p,600,1080,&o)==-1 && pn_shelf_hit_ex(p,100,1080,&o)==-1 && pn_shelf_hit_ex(p,460,1080,&o)==PN_SHELF_NEXT);
+        assert(pn_shelf_hit_ex(p,170,100,&o)==PN_SHELF_INDEX);
     }
     /* 娱乐不把旧书籍槽当游戏，纯像素绘制复用原帧；连续进入不增长。/ Entertainment never treats old book slots as games; pixel drawing reuses the frame without repeated growth. */
     {
@@ -88,7 +91,20 @@ int main(void){
     pn_shelf_options_t home={.home=true};
     assert(pn_shelf_render_ex(p,&font,&frame,-1,true,false,covers,&home)==PN_OK && font.pixels==24);
     assert(pn_shelf_hit_ex(p,300,540,&home)==PN_SHELF_CONTINUE && pn_shelf_hit_ex(p,580,805,&home)==PN_SHELF_HOME);
-    assert(pn_shelf_hit_ex(p,300,880,&home)==1 && pn_shelf_hit_ex(p,300,1010,&home)==2 && pn_shelf_hit_ex(p,300,730,&home)==-1);
+    assert(pn_shelf_hit_ex(p,300,880,&home)==1 && pn_shelf_hit_ex(p,300,1010,&home)==2 && pn_shelf_hit_ex(p,300,730,&home)==PN_SHELF_READING_STATS);
+    /* 阅读节奏详情页、自定义主页左上角文案与顶部背景、已读标识与排序按钮。/ Reading stats view, custom Home header/banner, read badge and sort button. */
+    {pn_stats_view_t sv={.summary=home.reading};strcpy(sv.date_label,"11月24日 · 周二");strcpy(sv.current_title,"测试书");
+     assert(pn_stats_view_render(&sv,&font,&frame)==PN_OK && pn_stats_view_hit(80,90)==PN_STATS_BACK && pn_stats_view_hit(340,600)==-1);
+     pn_shelf_options_t sorted={.search=true,.layout_toggle=true,.sort=PN_SHELF_SORT_ADDED};
+     assert(pn_shelf_hit_ex(p,290,100,&sorted)==PN_SHELF_SORT && pn_shelf_hit_ex(p,120,245,&sorted)==PN_SHELF_SORT && pn_shelf_render_ex(p,&font,&frame,-1,false,true,covers,&sorted)==PN_OK);
+     pn_read_marks_t *rm=calloc(1,sizeof *rm);assert(rm);rm->count=1;rm->states[0]=PN_READ_MARK_READ;strcpy(rm->paths[0],p->items[0].path);
+     sorted.read_marks=rm;memcpy(before,bytes,684*1216/2);
+     assert(pn_shelf_render_ex(p,&font,&frame,-1,false,true,covers,&sorted)==PN_OK && memcmp(before,bytes,684*1216/2));
+     free(rm);
+     uint8_t *bpx=pn_alloc(&pool,684*146/2);pn_frame_t bframe;assert(bpx && pn_frame_bind(&bframe,bpx,684*146/2,684,146));pn_frame_clear(&bframe,12);
+     pn_shelf_options_t custom_home=home;custom_home.home_header="腹有诗书气自华";custom_home.home_banner=&bframe;
+     assert(pn_shelf_render_ex(p,&font,&frame,-1,true,false,covers,&custom_home)==PN_OK);
+     pn_free(bpx);}
     /* 全局今日/本周不混用本书today_ms；底栏保持原纯图标像素。/ Global today/week never consume book today_ms; retain the existing icon-only navigation pixels. */
     memcpy(before,bytes,684*1216/2);strcpy(home.home_date,"10月20日 · 周二");
     home.reading=(pn_reading_summary_t){.known=true,.dated=true,.weekday=1,.total_ms=36u*60000u,.today_ms=99999u*60000u,.week_ms={74u*60000u+40000u,12u*60000u+40000u}};

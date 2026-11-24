@@ -43,6 +43,8 @@
 #include "pn_focus.h"
 #include "pn_sd_layout.h"
 #include "pn_shelf_view.h"
+#include "pn_stats_view.h"
+#include "pn_file_manager.h"
 #include "pn_sudoku.h"
 #include "pn_sokoban.h"
 #include "pn_minesweeper.h"
@@ -169,6 +171,19 @@ static bool input_flags_loaded;
 static bool vertical_turn; ///< 上下翻页模式 / Vertical page-turn mode
 static bool vertical_turn_loaded;
 static pn_shelf_prefs_t shelf_prefs={3,PN_SHELF_DEFAULT}; ///< 已保存书架外观 / Saved shelf appearance
+static pn_shelf_sort_t shelf_sort=PN_SHELF_SORT_NAME; ///< 已保存书库排序方式 / Saved library sort order
+static bool shelf_sort_loaded; ///< 已尝试加载书库排序偏好 / Whether shelf sort preference has been loaded
+static pn_home_prefs_t home_prefs; ///< 主页左上角文案与顶部背景偏好 / Home top-left motto and top banner preferences
+static bool home_prefs_loaded; ///< 已尝试加载主页个性化偏好 / Whether Home personalization preferences have been loaded
+static pn_scan_dirs_t scan_dirs; ///< 用户外部扫描目录配置 / User external scan directories configuration
+static bool scan_dirs_loaded; ///< 已加载外部扫描目录 / Whether external scan dirs have been loaded
+static pn_catalog_folder_t shelf_folders[PN_CATALOG_FOLDER_MAX]; ///< 书库目录筛选列表 / Filterable book folders
+static size_t shelf_folder_count; ///< 可选筛选目录数 / Number of filterable book folders
+static size_t shelf_folder_index; ///< 0表示全部目录，1..N对应shelf_folders[i-1] / 0=All, 1..N=filtered folder
+static uint8_t *home_banner_pixels; ///< 主页顶部自定义背景缓冲（684×146，仅主页按需加载）/ Home custom top banner buffer (684x146, loaded on demand)
+static pn_frame_t home_banner_frame;
+static char home_banner_loaded[PN_HOME_BANNER_MAX]; ///< 当前已解码到缓冲的文件名 / Basename currently decoded in the banner buffer
+static uint64_t home_banner_epoch; ///< 介质代次 / Media epoch when banner was decoded
 static bool shelf_prefs_loaded;
 static pn_key_t keys={.key=-1};
 static bool home_mode=true; ///< 默认阅读首页，阅读返回保留来源 / Default reading home, preserving the reading return origin
@@ -196,15 +211,20 @@ static uint64_t sudoku_retry; ///< 呈现重试节流 / Display retry throttle
 static uint32_t sudoku_draw_revision; ///< 最近游戏回执的屏幕代次 / Screen revision of the latest game receipt
 static uint8_t entertainment; ///< 0书籍、1娱乐；棋局由独立控制器拥有 / 0 books, 1 entertainment; a separate controller owns the game
 static int shelf_focus=-1; ///< 三键书架焦点（-1无）/ Three-key shelf focus (-1 none)
+static int pending_shelf_focus=-2; ///< 书架选择态跨页翻页后的目标焦点（-2默认清除，-3末项）/ Target shelf focus after selection-mode paging (-2 clear, -3 last item)
 static uint32_t shelf_draw_revision; ///< 已确认底图所属页面代次 / View revision of the confirmed base
 static pn_w_status_snapshot_t shelf_draw_status; ///< 确认时的状态带 / Status band at confirmation
 static bool back_to_settings; ///< 子页从设置页进入，返回时回设置页而不是书架 / The sub-page was opened from Settings, so Back returns there instead of the shelf
 static bool fav_mode; ///< 书架“收藏”分类 / Shelf Favorites category
 static size_t fav_start;static pn_favorites_t *favorites;
+static pn_read_marks_t *read_marks;static bool read_marks_valid; ///< 手动已读/未读标记快照 / Manual read/unread marks snapshot
 static bool actions_mode; ///< 书籍操作面板 / Book actions sheet
+static bool stats_mode; ///< 详细阅读数据页 / Detailed reading statistics page
 static pn_book_actions_t actions;
 static bool hub_mode; ///< 传书一级页 / Transfer root tab
 static pn_transfer_hub_info_t hub_info;static char hub_storage[64];
+static bool files_mode; ///< 存储卡文件管理页 / TF card file manager page
+static pn_file_manager_t *file_manager; ///< 按需分配的文件管理状态 / On-demand file manager state
 static bool search_mode; ///< 搜索输入页 / Search input page
 static pn_search_ui_t search_ui; ///< 搜索页输入状态 / Search page input state
 static char search_query[PN_CATALOG_QUERY_MAX+1]; ///< 生效中的搜索词，空表示不过滤 / Active search query, empty means unfiltered
@@ -324,13 +344,33 @@ static uint8_t cover_salt[16];
 static const char *const cover_cache=PN_SD_MOUNT "/" PN_SD_COVER_CACHE;
 /// 最近记录只作展示过滤；用户自行整理同名书后可关联新路径，原记录不因缺文件被清除。
 /// Filter recent entries only for display; user-organized books can resolve by basename at the new path, without deleting missing-file records.
+static void scan_dirs_ensure(void){
+    if(scan_dirs_loaded)return;
+    if(data_ready){
+        if(pn_scan_dirs_load_all(&data_media,"/data/progress",&scan_dirs)==PN_OK)scan_dirs_loaded=true;
+    }
+    pn_scan_dirs_set_active(&scan_dirs,PN_SD_MOUNT);
+}
+static const char *active_book_directory(void){
+    return (shelf_folder_index>0 && shelf_folder_index<=shelf_folder_count)?shelf_folders[shelf_folder_index-1u].path:book_directory;
+}
 static void filter_recent_available(pn_recent_snapshot_t *snapshot){
+    scan_dirs_ensure();
     size_t kept=0;const char *prefix=PN_SD_MOUNT "/" PN_SD_BOOKS "/";
     for(size_t i=0;i<snapshot->count;i++){
-        pn_recent_item_t *item=&snapshot->items[i];char path[PN_RECENT_PATH_MAX];
-        const char *name=strrchr(item->path,'/');name=name?name+1:item->path;
-        int n=snprintf(path,sizeof path,"%s%s",prefix,name);struct stat info;
-        if(n<0 || (size_t)n>=sizeof path || stat(path,&info) || !S_ISREG(info.st_mode) || info.st_size<0 || (uint64_t)info.st_size!=item->source_size)continue;
+        pn_recent_item_t *item=&snapshot->items[i];char path[PN_RECENT_PATH_MAX];struct stat info;
+        // 优先核对原路径（支持默认子目录与外部图书目录），缺失时尝试按书名回落查找。
+        // Check the recorded path first (supports subfolders & external dirs), falling back to filename lookup if moved.
+        bool ok=false;
+        if(pn_scan_dirs_path_allowed(PN_SCAN_CAT_BOOKS,item->path) && stat(item->path,&info)==0 && S_ISREG(info.st_mode) && info.st_size>=0 && (uint64_t)info.st_size==item->source_size){
+            snprintf(path,sizeof path,"%s",item->path);ok=true;
+        }else{
+            const char *name=strrchr(item->path,'/');name=name?name+1:item->path;
+            int n=snprintf(path,sizeof path,"%s%s",prefix,name);
+            if(n>0 && (size_t)n<sizeof path && stat(path,&info)==0 && S_ISREG(info.st_mode) && info.st_size>=0 && (uint64_t)info.st_size==item->source_size)ok=true;
+            else if(pn_scan_dirs_find_file(PN_SCAN_CAT_BOOKS,book_directory,name,path,sizeof path) && stat(path,&info)==0 && S_ISREG(info.st_mode) && info.st_size>=0 && (uint64_t)info.st_size==item->source_size)ok=true;
+        }
+        if(!ok)continue;
         if(kept!=i)snapshot->items[kept]=*item;
         strcpy(snapshot->items[kept++].path,path);
     }
@@ -547,9 +587,17 @@ static void ripple_memory_ensure(void){
 #endif
 /// 书库翻页：只局部替换变化的列表像素，不升级为内容风险整屏GC16。/ Library paging: replace only the changed list pixels locally, never escalating to a content-risk full GC16.
 static atomic_bool shelf_flip;
-#if defined(ESP_PLATFORM)
-static unsigned menu_cleans; ///< 清理计数：每四次第四次才用原GC16 / Clean counters: only every fourth uses the original GC16
-#endif
+/// 管理页整屏保洁间隔与一级页切换提示（按刷新档位映射，跨线程原子同步）。
+/// Management full-clean interval and root-tab switch hint (mapped from refresh level, atomically synced across tasks).
+static atomic_uint mgmt_refresh_limit=8u;
+static atomic_bool mgmt_root_switch;
+static unsigned mgmt_clean_limit_for_flags(uint8_t flags){
+    unsigned pages=pn_settings_refresh_pages(flags);
+    return pages<=8u?6u:(pages<=14u?8u:12u);
+}
+static void sync_mgmt_refresh_limit(uint8_t flags){
+    atomic_store(&mgmt_refresh_limit,mgmt_clean_limit_for_flags(flags));
+}
 static pn_status_t present_panel(void *ctx,const pn_frame_t *frame,pn_refresh_t profile){
     (void)ctx;
     content_area=(pn_feedback_box_t){0};settle_recoverable=false;
@@ -575,28 +623,27 @@ static pn_status_t present_panel(void *ctx,const pn_frame_t *frame,pn_refresh_t 
     if(profile==PN_REFRESH_GL16 && known && !changed.width && !atomic_load(&deep_clean_pending))return PN_OK;
     enum EpdDrawMode mode=(reading_exit || profile==PN_REFRESH_GC16)?MODE_GC16:MODE_GL16;
     // 风险或累计满额时在本次提交选择现有GC16，保持目标帧。/ Select existing GC16 within this submission for risk or accumulated limits, preserving the target frame.
-    // 阅读页数设置不能让管理页每次点击都清屏；管理页独立使用较长保洁间隔。/ Reading-page preferences must not clear management pages on every tap; use a separate maintenance interval.
+    // 管理页按刷新档位使用独立保洁周期（清晰6/均衡8/省电12），一级页切换或离开设置达到半周期提前清残影，不再降级为GL16白推。
+    // Management pages use a separate clean interval derived from refresh level (6/8/12), cleaning early on root-tab switches at half-interval with real GC16 instead of GL16 white-push.
     bool body_refresh=atomic_load(&reading_presentation),game_refresh=atomic_load(&sudoku_presentation);
+    unsigned mgmt_limit=atomic_load(&mgmt_refresh_limit);if(mgmt_limit<4u || mgmt_limit>24u)mgmt_limit=8u;
+    unsigned tab_limit=mgmt_limit/2u;
+    bool root_switch=atomic_exchange(&mgmt_root_switch,false);
+    bool mgmt_due=!reading_exit && !body_refresh && !game_refresh && (maintenance.management+1u>=mgmt_limit || (root_switch && maintenance.management+1u>=tab_limit));
     // 退出阅读已有完整整屏GC16，GC16/深清/到期维护也已指定整屏路径，均不再做内容风险与局部区域分类。
     // Reading exit already selects full-screen original GC16; GC16/deep clean/due maintenance also select a full path, so skip content-risk and regional classification.
-    bool full_clean=reading_exit || profile==PN_REFRESH_GC16 || atomic_load(&deep_clean_pending) || (!body_refresh && !game_refresh && maintenance.management+1u>=24u);
+    bool full_clean=reading_exit || profile==PN_REFRESH_GC16 || atomic_load(&deep_clean_pending) || mgmt_due;
     pn_device_refresh_plan_t maintenance_plan=(!known || full_clean || game_refresh)?(pn_device_refresh_plan_t){.area=dirty}:pn_device_refresh_plan_masked(&maintenance,hardware.framebuffer,hardware.hl.back_fb,body_refresh,dirty,dirty_rows,sizeof dirty_rows);
     const char *reason=mode==MODE_GC16?"requested":body_refresh?"reading":"management";
     (void)reason;
-    // 已知参考的管理页（菜单切换、设置进出、书籍菜单开合、书库翻页）都只局部替换变化像素，不因内容风险整屏闪；需要区域整理时仍走原全驱动。
-    // Management pages with a known reference (tab switches, entering/leaving settings, book-action sheets, library paging) replace only changed pixels locally without content-risk full flashes; regional settling still uses the original full drive.
-    bool flip=known && !reading_exit && !body_refresh && mode!=MODE_GC16 && !maintenance_plan.regional;(void)atomic_load(&shelf_flip);
-    if(mode!=MODE_GC16 && maintenance_plan.content_clean && !flip){mode=MODE_GC16;reason="content-transition";}
-    bool flat_white=false; ///< 菜单维护改为平铺白推，不整屏闪黑 / Menu maintenance as a flat white push instead of a full dark flash
-    if(!reading_exit && !body_refresh && !game_refresh && mode!=MODE_GC16 && maintenance.management+1>=24u){
-#if defined(ESP_PLATFORM)
-        // 账本完整时四次维护里三次只白推变过色、现为纯白的像素，第四次才用原GC16整屏清理（均衡直流、清深色残影）。
-        // With a complete ledger, three of four maintenances only white-push pixels that changed and are now pure white; the fourth uses the original full GC16 (DC balance, dark ghosts).
-        if(known && pn_device_ripple_ghost_selective() && (menu_cleans%4u)!=3u){flat_white=true;reason="maintenance-white";}
-        else
-#endif
-        {mode=MODE_GC16;reason="maintenance";}
-    }
+    // 大面积灰/深色内容（书库封面、自定义横幅、壁纸缩略图等）切回浅底时，允许管理页升级为完整GC16清残影。
+    // When large gray/dark content (covers, banners, thumbnails) transitions back to white, allow management pages to escalate to full GC16.
+    if(mode!=MODE_GC16 && maintenance_plan.content_clean && !atomic_load(&shelf_flip)){mode=MODE_GC16;reason="content-transition";}
+    if(mgmt_due && mode!=MODE_GC16){mode=MODE_GC16;reason=(maintenance.management+1u>=mgmt_limit)?"maintenance":"tab-clean";}
+    // 已知参考的普通管理操作仍只局部替换变化像素，避免每次点按整屏闪动；需要区域整理或GC16保洁时走完整驱动。
+    // Ordinary management updates with a known reference replace only changed pixels locally to avoid flashing on every tap; regional settling or GC16 cleans run the full drive.
+    bool flip=known && !reading_exit && !body_refresh && mode!=MODE_GC16 && !maintenance_plan.regional;
+    (void)flip;
     uint64_t maintenance_at=now_ms();(void)maintenance_at;
     read_pico_epd_use_scan(READ_PICO_EPD_SCAN_FULL);epd_poweron();
     bool management_full=false;
@@ -605,26 +652,23 @@ static pn_status_t present_panel(void *ctx,const pn_frame_t *frame,pn_refresh_t 
     (void)panel_at;
     bool deep_clean=atomic_exchange(&deep_clean_pending,false);
     content_area=(pn_feedback_box_t){0,0,684,1216};
-    // 阅读清理直接借用现成48相GC16，普通GL16保留当前表；本次扫描结束总是归还指针。/ Borrow the existing 48-phase GC16 for reading cleans, retain the current table for ordinary GL16, and always return the pointer after this scan.
+    // 完整清理借用现成48相GC16，普通GL16保留当前表，退出阅读仍沿用36相原表；本次扫描结束总是归还指针。
+    // Full cleans borrow the existing 48-phase GC16 while GL16 keeps the current table and reading-exit keeps the 36-phase table; always restore the pointer after this scan.
     const void *reading_waveform=hardware.hl.waveform;
-    bool reading_full_gc16=body_refresh && !reading_exit && (mode==MODE_GC16 || !panel_known || deep_clean);
-    if(reading_full_gc16)hardware.hl.waveform=&E0470_FULL_WAVEFORM;
+    bool full_gc16=!reading_exit && (mode==MODE_GC16 || !panel_known || deep_clean);
+    if(full_gc16)hardware.hl.waveform=&E0470_FULL_WAVEFORM;
 #if defined(ESP_PLATFORM)
     const EpdWaveform *ripple_wave=NULL;
-    // 清理页（到期或内容风险）：账本完整时四次里三次用柔和GL16波纹并白推账上纯白像素（无黑闪），第四次才用原GC16波纹。
-    // Cleaning pages (due or content risk): with a complete ledger, three of four use the gentle GL16 ripple plus a white push of ledger pure-white pixels (no dark flash); the fourth uses the original GC16 ripple.
     bool clean_wanted=ripple_clean || mode==MODE_GC16,white_push=false;
     int ripple_mode=clean_wanted?MODE_GC16:MODE_GL16;
     // 正文到期清理必须执行原GC16；白推不能等价清除深色/灰阶残影。/ Due reading cleans must execute original GC16; white pushes cannot equivalently clear dark/grayscale ghosts.
-    if(((ripple_turn && body_refresh) || flat_white) && known && !deep_clean && !ripple_memory.tables)ripple_memory.tables=heap_caps_aligned_alloc(16,PN_RIPPLE_BANDS*1024u,MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
+    if(ripple_turn && body_refresh && known && !deep_clean && !ripple_memory.tables)ripple_memory.tables=heap_caps_aligned_alloc(16,PN_RIPPLE_BANDS*1024u,MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
     bool rippling=ripple_turn && body_refresh && known && !deep_clean && pn_device_ripple_begin_ex(&ripple_memory,hardware.hl.waveform,ripple_mode,ripple_reverse,false,white_push,hardware.hl.difference_fb,&ripple_wave);
-    bool flat_running=!rippling && flat_white && known && !deep_clean && pn_device_ripple_begin_ex(&ripple_memory,hardware.hl.waveform,MODE_GL16,false,true,true,hardware.hl.difference_fb,&ripple_wave);
-    if(flat_white && !flat_running){mode=MODE_GC16;reason="maintenance";} // 白推不可用时退回原GC16 / Fall back to the original GC16 when the white push is unavailable
     bool white_cleaned=false;
     // 非水波纹显示无法逐像素记账，先比较目标帧与已显示参考，把将变化的像素记入账本。/ Non-ripple draws record the pixels about to change by comparing the target with the shown reference.
-    if(known && !rippling && !flat_running)pn_device_ripple_ghost_note(hardware.framebuffer,hardware.hl.back_fb);
+    if(known && !rippling)pn_device_ripple_ghost_note(hardware.framebuffer,hardware.hl.back_fb);
 #else
-    (void)ripple_reverse;(void)ripple_turn;(void)flat_white;bool white_cleaned=false;
+    (void)ripple_reverse;(void)ripple_turn;bool white_cleaned=false;
 #endif
     if(!panel_known || deep_clean){
         reason=deep_clean?(reading_exit?"game-exit-clear":"manual"):"unknown-reference";mode=MODE_GC16;
@@ -651,18 +695,9 @@ static pn_status_t present_panel(void *ctx,const pn_frame_t *frame,pn_refresh_t 
         white_cleaned=white_push && result==EPD_DRAW_SUCCESS;
         heap_caps_free(ripple_memory.tables);ripple_memory.tables=NULL;
     }
-    else if(flat_running){
-        // 菜单维护白推：整屏平铺GL16，只驱动变化像素与账上纯白像素。/ Menu maintenance white push: flat full-screen GL16 driving only changed pixels and ledger pure-white pixels.
-        const EpdWaveform *saved=hardware.hl.waveform;hardware.hl.waveform=ripple_wave;
-        result=epd_hl_update_screen_full(&hardware.hl,MODE_GL16,25);
-        hardware.hl.waveform=saved;
-        if(!pn_device_ripple_end() && result==EPD_DRAW_SUCCESS)result=EPD_DRAW_LOOKUP_NOT_IMPLEMENTED;
-        mode=MODE_GL16;management_full=true;white_cleaned=result==EPD_DRAW_SUCCESS;
-        heap_caps_free(ripple_memory.tables);ripple_memory.tables=NULL;
-    }
 #endif
     // 已知参考帧的周期GC16直接全屏转换；无需先另做一次白场清除。/ Periodic GC16 with a known reference directly updates every pixel without an extra white-field clear.
-    else if(mode==MODE_GC16)result=epd_hl_update_screen_full(&hardware.hl,MODE_GC16,25);
+    else if(mode==MODE_GC16){result=epd_hl_update_screen_full(&hardware.hl,MODE_GC16,25);management_full=!body_refresh;}
 #if defined(ESP_PLATFORM)
     else if(flip && changed.width && pn_device_wave_menu()){
         // 只扫变化外接框，且框内颜色未变的像素（标题、底栏、留白）不驱动，避免整屏闪动；累计仍计入管理带维护。
@@ -699,7 +734,7 @@ static pn_status_t present_panel(void *ctx,const pn_frame_t *frame,pn_refresh_t 
         // 供数不足：退回安全时钟，白场重建参考帧，目标帧保留在framebuffer。/ Underrun: fall back to the safe clock and rebuild the reference frame from white; the target stays in the framebuffer.
         ESP_LOGW(TAG,"Line queue underrun, pclk back to %d MHz",PCLK_SAFE_MHZ);
         read_pico_epd_set_pclk(PCLK_SAFE_MHZ);read_pico_epd_use_scan(READ_PICO_EPD_SCAN_FULL);
-        if(body_refresh && !reading_exit){hardware.hl.waveform=&E0470_FULL_WAVEFORM;reading_full_gc16=true;}
+        if(!reading_exit){hardware.hl.waveform=&E0470_FULL_WAVEFORM;full_gc16=true;}
         epd_clear();result=epd_hl_update_screen_from_white(&hardware.hl,MODE_GC16,25);mode=MODE_GC16;reason="underrun";atomic_store(&overlap_disabled,true);
         content_area=(pn_feedback_box_t){0,0,684,1216};
     }
@@ -710,13 +745,10 @@ static pn_status_t present_panel(void *ctx,const pn_frame_t *frame,pn_refresh_t 
     // 水波纹自行记账；整屏GC16清空账本，其余显示无法逐像素记账，下一次清残影退回整页。
     // Ripples keep their own ledger; a full-screen GC16 empties it, and any other draw cannot be recorded per pixel, so the next clean covers the whole page.
     if(!panel_known)pn_device_ripple_ghost_forget();
-    else if(!rippling && !flat_running && mode==MODE_GC16)pn_device_ripple_ghost_clear();
+    else if(!rippling && mode==MODE_GC16)pn_device_ripple_ghost_clear();
 #endif
     if(panel_known){
-#if defined(ESP_PLATFORM)
-        if(!reading_exit && !body_refresh && maintenance.management+1u>=24u)menu_cleans++;
-#endif
-        // 白推同样算一次清理：重置翻页/维护计数，避免下一次立即再触发。/ A white push also counts as a clean, resetting turn/maintenance counters so it does not retrigger at once.
+        // 完整GC16清零维护计数与全部局部带，防止下次立即再触发。/ Full GC16 resets maintenance counters and all local bands so it does not retrigger at once.
         pn_device_refresh_commit(&maintenance,body_refresh || game_refresh,mode==MODE_GC16 || white_cleaned,management_full,maintenance_plan);
         if(mode==MODE_GC16 || white_cleaned)atomic_store(&full_clean_completed,true);
     }else if(deep_clean)atomic_store(&deep_clean_pending,true);
@@ -724,7 +756,7 @@ static pn_status_t present_panel(void *ctx,const pn_frame_t *frame,pn_refresh_t 
     // 成功则保活到空闲期满；失败立即断电。/ Keep the rails up until idle expiry on success; drop them at once on failure.
     rails_deadline_ms=now_ms()+RAILS_IDLE_MS;pn_device_power_busy(PN_POWER_RAILS,true);if(!panel_known)rails_release();
     if(!panel_known)ESP_LOGE(TAG,"Panel present failed: %u",(unsigned)result);
-    if(reading_full_gc16)ESP_LOGI(TAG,"Reading clean waveform=full-gc16 phases=48 status=%u",(unsigned)result);
+    if(full_gc16)ESP_LOGI(TAG,"%s clean waveform=full-gc16 phases=48 status=%u",body_refresh?"Reading":"Menu",(unsigned)result);
     ESP_LOGI(TAG,"Present mode=%u reason=%s body=%d prepare=%llu ms panel=%llu ms pool=%u/%u",(unsigned)mode,reason,body_refresh,(unsigned long long)(panel_at-prepared_at),(unsigned long long)(now_ms()-panel_at),(unsigned)pool.used,(unsigned)pool.limit);
     ESP_LOGI(TAG,"Display stages dirty=%llu convert=%llu maintenance=%llu power=%llu scan=%llu remember=%llu ms",(unsigned long long)(dirty_at-converted_at),(unsigned long long)(converted_at-prepared_at),(unsigned long long)(maintenance_at-dirty_at),(unsigned long long)(panel_at-maintenance_at),(unsigned long long)(scanned_at-panel_at),(unsigned long long)(now_ms()-scanned_at));
     return panel_known?PN_OK:PN_IO;
@@ -791,7 +823,17 @@ static pn_status_t present_impl(void *ctx,const pn_frame_t *frame,pn_refresh_t p
     if(!reader_active()){pn_free(page_copy);page_copy=NULL;}
     bool backup=reader_active() && !locked && !toolbar_open && frame->width==684 && frame->height==1216 && frame->stride>=342;
     if(backup && !page_copy)page_copy=pn_alloc_tagged(&pool,PN_MEM_FRAME,342u*1216u);
-    pn_status_t status=async_port.panel?pn_device_async_present(&async_port,frame,profile):present_panel(NULL,frame,profile);
+    const pn_frame_t *shown=frame;uint8_t *focus_pixels=NULL;pn_frame_t focus_frame;
+    const pn_focus_item_t *focus_item=focus_page()?pn_focus_current(&focus_nav):NULL;
+    if(focus_item && frame->width==684 && frame->height==1216 && frame->stride>=342){
+        focus_pixels=pn_alloc_tagged(&pool,PN_MEM_FRAME,342u*1216u);
+        if(focus_pixels && pn_frame_bind(&focus_frame,focus_pixels,342u*1216u,684,1216)){
+            for(int y=0;y<1216;y++)memcpy(focus_pixels+(size_t)y*342,frame->pixels+(size_t)y*frame->stride,342);
+            pn_focus_draw(&focus_frame,focus_item);shown=&focus_frame;
+        }else{pn_free(focus_pixels);focus_pixels=NULL;}
+    }
+    pn_status_t status=async_port.panel?pn_device_async_present(&async_port,shown,profile):present_panel(NULL,shown,profile);
+    pn_free(focus_pixels);
     if(status==PN_OK)pn_feedback_idle_cover(&feedback_idle,content_area);
     if(status==PN_OK || !panel_known)(void)pn_feedback_discard(&press_feedback);
     if(status==PN_OK && backup && page_copy && frame->pixels!=page_copy)for(int y=0;y<1216;y++)memcpy(page_copy+(size_t)y*342,frame->pixels+(size_t)y*frame->stride,342);
@@ -959,7 +1001,7 @@ static void message(const char *title,const char *detail){
     pn_toc_ui_close(&toc);
     pn_bookmark_ui_cancel(&bookmarks);
     pn_style_ui_close(&styles);pn_font_ui_close(&fonts);pn_wallpaper_ui_close(&wallpaper_ui);pn_font_manage_close(&font_manage);pn_settings_ui_close(&settings_ui);
-    status_page=true;shelf_mode=false;index_mode=false;search_mode=false;hub_mode=false;actions_mode=false;
+    status_page=true;shelf_mode=false;index_mode=false;search_mode=false;hub_mode=false;actions_mode=false;stats_mode=false;
     uint8_t *pixels=pn_alloc_tagged(&pool,PN_MEM_FRAME,684u*1216u/2u);pn_frame_t frame;pn_font_t font={0};
     pn_status_t status=pn_frame_bind(&frame,pixels,684u*1216u/2u,684,1216)?PN_OK:PN_NO_MEMORY;
     if(status==PN_OK)status=management_font_begin(&font,28);
@@ -1017,27 +1059,28 @@ static void bookmark_lock_capture(void){
 static void bookmark_lock_environment(pn_bookmark_lock_t *snapshot);
 static void show_lock(const char *hint){
     reading_menu=false;pn_toc_ui_close(&toc);pn_bookmark_ui_cancel(&bookmarks);pn_style_ui_close(&styles);pn_font_ui_close(&fonts);pn_wallpaper_ui_close(&wallpaper_ui);pn_font_manage_close(&font_manage);pn_settings_ui_close(&settings_ui);
-    status_page=true;shelf_mode=false;index_mode=false;search_mode=false;hub_mode=false;actions_mode=false;
+    status_page=true;shelf_mode=false;index_mode=false;search_mode=false;hub_mode=false;actions_mode=false;stats_mode=false;
     uint8_t *pixels=pn_alloc_tagged(&pool,PN_MEM_FRAME,PN_WALLPAPER_BYTES);pn_frame_t frame;pn_font_t font={0};
-    pn_lock_selection_t selection={.mode=PN_LOCK_DEFAULT,.hint=false};
+    pn_lock_selection_t selection={.mode=PN_LOCK_DEFAULT,.hint=false},mask_sel={.mode=PN_LOCK_DEFAULT,.hint=false};
     pn_status_t status=pn_frame_bind(&frame,pixels,PN_WALLPAPER_BYTES,PN_WALLPAPER_WIDTH,PN_WALLPAPER_HEIGHT)?PN_OK:PN_NO_MEMORY;
-    if(status==PN_OK && mount_wallpaper()){pn_wallpaper_store_t store;pn_media_lease_t lease;
+    if(status==PN_OK && mount_wallpaper()){pn_wallpaper_store_t store,mask_store;pn_media_lease_t lease;
         if(pn_wallpaper_store_init(&store,&wallpaper_media,"/wallpaper/lock.a","/wallpaper/lock.b")==PN_OK && pn_media_acquire(&wallpaper_media,PN_MEDIA_READ,&lease)==PN_OK){
-            pn_status_t loaded=pn_wallpaper_load(&store,&lease,&selection,&frame);(void)pn_media_release(&wallpaper_media,&lease);
-            if(loaded!=PN_OK){if(loaded!=PN_EMPTY)ESP_LOGW(TAG,"Wallpaper record unusable: %d; default lock screen",(int)loaded);selection=(pn_lock_selection_t){.mode=PN_LOCK_DEFAULT,.hint=false};}}}
-    if(status==PN_OK && selection.mode==PN_LOCK_MASK){
-        // 只在锁屏解码/合成，底图取成功正文副本，绝不修改阅读器帧。 / Decode/composite only while locking, using a confirmed text copy without modifying reader pixels.
-        pn_status_t mask=PN_EMPTY;
-        if(reader_suspended && page_copy && pn_sd_resource_path(selection.source,PN_SD_WALLPAPERS)){
-            // 缓存放内部壁纸分区：锁屏时书仍持TF读租约，TF上的缓存永远写不进（真机每次重解码约3.9s）。
-            // Cache on the internal wallpaper partition: the open book still holds a TF read lease while locking, so a TF cache could never be written (about 3.9 s re-decode per lock on hardware).
-            mask=pn_wallpaper_mask_open_stored(&lock_mask,&pool,&sd_media,&selection,&wallpaper_media,"/wallpaper");
-            if(mask==PN_OK){memcpy(frame.pixels,page_copy,PN_WALLPAPER_BYTES);mask=pn_wallpaper_mask_paint(&lock_mask,&frame);}
-        }
+            pn_status_t loaded=pn_wallpaper_load(&store,&lease,&selection,&frame);
+            pn_status_t mask_loaded=pn_wallpaper_mask_store_init(&store,&mask_store)==PN_OK?pn_wallpaper_load(&mask_store,&lease,&mask_sel,NULL):PN_EMPTY;
+            (void)pn_media_release(&wallpaper_media,&lease);
+            if(loaded!=PN_OK){if(loaded!=PN_EMPTY)ESP_LOGW(TAG,"Wallpaper record unusable: %d; default lock screen",(int)loaded);selection=(pn_lock_selection_t){.mode=PN_LOCK_DEFAULT,.hint=false};}
+            if(mask_loaded!=PN_OK){mask_sel=(pn_lock_selection_t){.mode=PN_LOCK_DEFAULT,.hint=false};
+                if(mask_loaded==PN_EMPTY && selection.mode==PN_LOCK_MASK){mask_sel=selection;selection=(pn_lock_selection_t){.mode=PN_LOCK_DEFAULT,.hint=false};}}
+            else if(selection.mode==PN_LOCK_MASK)selection=(pn_lock_selection_t){.mode=PN_LOCK_DEFAULT,.hint=false};}}
+    if(status==PN_OK && mask_sel.mode==PN_LOCK_MASK && reader_suspended && page_copy && pn_sd_resource_path(mask_sel.source,PN_SD_WALLPAPERS)){
+        // 仅在阅读中锁屏叠加遮罩；失败或非阅读页时自动保留用户锁屏壁纸，不覆盖为默认图。
+        // Apply the mask only while locking from reading; on failure or outside reading, preserve the user's lock wallpaper instead of reverting to default.
+        pn_status_t mask=pn_wallpaper_mask_open_stored(&lock_mask,&pool,&sd_media,&mask_sel,&wallpaper_media,"/wallpaper");
+        if(mask==PN_OK){memcpy(frame.pixels,page_copy,PN_WALLPAPER_BYTES);mask=pn_wallpaper_mask_paint(&lock_mask,&frame);}
         pn_wallpaper_mask_close(&lock_mask);
-        if(mask!=PN_OK)selection=(pn_lock_selection_t){.mode=PN_LOCK_DEFAULT,.hint=false};
+        if(mask==PN_OK)selection=mask_sel;
     }
-    if(selection.mode==PN_LOCK_SIMPLE || selection.mode==PN_LOCK_BOOK)selection=(pn_lock_selection_t){.mode=PN_LOCK_DEFAULT,.hint=false};
+    if(selection.mode==PN_LOCK_SIMPLE || selection.mode==PN_LOCK_BOOK || (selection.mode==PN_LOCK_MASK && !(reader_suspended && page_copy)))selection=(pn_lock_selection_t){.mode=PN_LOCK_DEFAULT,.hint=false};
     if(status==PN_OK)status=management_font_begin(&font,32);
     if(status==PN_OK && selection.mode==PN_LOCK_BOOKMARK){
         pn_bookmark_lock_t snapshot=bookmark_lock;bookmark_lock_environment(&snapshot);
@@ -1047,7 +1090,8 @@ static void show_lock(const char *hint){
         if(ready){if(*display.title)snapshot.book=display;}
         status=pn_bookmark_lock_render(&snapshot,ready?&cover:NULL,&font,selection.hint?hint:"",&frame);pn_free(cover_px);
     }else if(status==PN_OK)status=pn_lock_render(&selection,&font,hint,&frame);
-    if(status==PN_OK)status=present(NULL,&frame,PN_REFRESH_GC16);
+    // 锁屏画面生效前先触发整屏深度清屏，避免阅读正文或界面残影。/ Trigger a full deep clean before presenting the lock screen to eliminate reading/UI ghosting.
+    if(status==PN_OK){atomic_store(&deep_clean_pending,true);status=present(NULL,&frame,PN_REFRESH_GC16);}
     management_font_end(&font);pn_free(pixels);
     if(status!=PN_OK){ESP_LOGE(TAG,"Lock screen unavailable: %d",(int)status);message("已锁屏",hint);}
 }
@@ -1158,9 +1202,61 @@ static void bookmark_lock_environment(pn_bookmark_lock_t *snapshot){
 }
 /// 只按当前页与封面槽绘制书架，不扫描目录。/ Draw the shelf from the current page and cover slots only, without scanning.
 /// 书架选项（绘制与命中共用）。/ Shelf options shared by drawing and hit testing.
+static void shelf_sort_load(void){
+    if(shelf_sort_loaded || !data_ready)return;
+    shelf_sort_loaded=true;
+    pn_media_lease_t lease={0};if(pn_media_acquire(&data_media,PN_MEDIA_READ,&lease)!=PN_OK)return;
+    pn_journal_files_t files;pn_journal_io_t io;pn_shelf_sort_t loaded=PN_SHELF_SORT_NAME;
+    if(pn_shelf_sort_files(&files,&data_media,&lease,"/data/progress",&io)==PN_OK && pn_shelf_sort_load(&io,&loaded)==PN_OK)shelf_sort=loaded;
+    (void)pn_media_release(&data_media,&lease);
+}
+static void shelf_sort_save(void){
+    if(!data_ready)return;
+    pn_media_lease_t lease={0};if(pn_media_acquire(&data_media,PN_MEDIA_WRITE,&lease)!=PN_OK)return;
+    pn_journal_files_t files;pn_journal_io_t io;
+    if(pn_shelf_sort_files(&files,&data_media,&lease,"/data/progress",&io)==PN_OK)(void)pn_shelf_sort_save(&io,shelf_sort);
+    (void)pn_media_release(&data_media,&lease);
+}
+static void home_banner_release(void){
+    pn_free(home_banner_pixels);home_banner_pixels=NULL;home_banner_frame=(pn_frame_t){0};home_banner_loaded[0]=0;home_banner_epoch=0;
+}
+static void home_prefs_ensure(void){
+    if(home_prefs_loaded || !data_ready)return;
+    home_prefs_loaded=true;
+    (void)pn_home_prefs_load_dir(&data_media,"/data/progress",&home_prefs);
+    pn_w_set_brand(home_prefs.header);
+}
+static void home_banner_ensure(void){
+    home_prefs_ensure();
+    if(!*home_prefs.banner || !sd_media.available || usb.open || transfer.impl){home_banner_release();return;}
+    // 不在离开首页时立即释放 49KiB 横幅缓存，避免在书库/设置往返时重复读取和解码。/ Keep the 49 KiB banner buffer warm across Home/Library/Settings switches to avoid repeated I/O and decoding.
+    if(!home_mode)return;
+    if(home_banner_pixels && !strcmp(home_banner_loaded,home_prefs.banner) && home_banner_epoch==sd_media.epoch)return;
+    home_banner_release();
+    uint8_t *px=pn_alloc_optional(&pool,PN_MEM_UI,PN_HOME_BANNER_BYTES);if(!px)return;
+    pn_frame_t f;if(!pn_frame_bind(&f,px,PN_HOME_BANNER_BYTES,PN_HOME_BANNER_WIDTH,PN_HOME_BANNER_HEIGHT)){pn_free(px);return;}
+    // 优先读取内部闪存预解码缓存，未命中时再从存储卡解码并回写缓存。/ Read the pre-decoded internal cache first; fall back to TF decode and populate the cache on miss.
+    pn_status_t st=data_ready?pn_home_banner_cache_load(&data_media,"/data/progress",home_prefs.banner,px,PN_HOME_BANNER_BYTES):PN_EMPTY;
+    if(st!=PN_OK){
+        char path[PN_WALLPAPER_PATH_MAX];
+        bool found=pn_scan_dirs_find_file(PN_SCAN_CAT_WALLPAPERS,PN_SD_MOUNT "/" PN_SD_WALLPAPERS,home_prefs.banner,path,sizeof path);
+        if(!found)found=(size_t)snprintf(path,sizeof path,"%s/%s",PN_SD_MOUNT "/" PN_SD_WALLPAPERS,home_prefs.banner)<sizeof path;
+        if(found){
+            pn_media_lease_t lease={0};st=pn_media_acquire(&sd_media,PN_MEDIA_READ,&lease);
+            if(st==PN_OK){st=pn_wallpaper_prepare_banner(&pool,&sd_media,&lease,path,1024u*1024u,&f);(void)pn_media_release(&sd_media,&lease);}
+            if(st==PN_OK && data_ready)(void)pn_home_banner_cache_save(&data_media,"/data/progress",home_prefs.banner,px,PN_HOME_BANNER_BYTES);
+        }
+    }
+    if(st==PN_OK){home_banner_pixels=px;home_banner_frame=f;strcpy(home_banner_loaded,home_prefs.banner);home_banner_epoch=sd_media.epoch;}
+    else pn_free(px);
+}
 static pn_shelf_options_t shelf_options(void){
+    shelf_sort_load();
+    home_prefs_ensure();
+    scan_dirs_ensure();
     bool query=!recent_mode && !fav_mode && *search_query;
-    pn_shelf_options_t o={.home=home_mode,.entertainment_tab=true,.entertainment=home_mode?0:entertainment,.battery_percent=-1,.columns=shelf_prefs.columns,.style=shelf_prefs.style,.actions=actions_mode?&actions:NULL,.search=false,.import_tile=true,.layout_toggle=true,.favorites_tab=true,.favorites=fav_mode,.list_mode=list_mode || query,.query=query};
+    const char *folder_lbl=(!home_mode && !recent_mode && !fav_mode && !query && shelf_folder_count>0)?(shelf_folder_index==0?"全部":shelf_folders[shelf_folder_index-1u].label):NULL;
+    pn_shelf_options_t o={.home=home_mode,.home_header=home_prefs.header,.home_banner=(home_mode && home_banner_pixels)?&home_banner_frame:NULL,.entertainment_tab=true,.entertainment=home_mode?0:entertainment,.battery_percent=-1,.columns=shelf_prefs.columns,.style=shelf_prefs.style,.sort=(uint8_t)shelf_sort,.folder_label=folder_lbl,.actions=actions_mode?&actions:NULL,.search=true,.import_tile=true,.layout_toggle=true,.favorites_tab=true,.favorites=fav_mode,.list_mode=list_mode || query,.query=query};
     if(o.home){uint64_t utc=0;bool dated=reading_stats_clock(now_ms(),&utc);o.reading=pn_reading_stats_summary(&reading_stats,dated,utc);
         o.reading.known=o.reading.known && shelf_covers && shelf_covers->has_last && shelf_covers->last.identified && !memcmp(shelf_covers->last.expected.sha256,reading_stats.book.id.sha256,32);
         unsigned year,month,day,weekday;if(dated && pn_bookmark_lock_date((uint32_t)(utc/1000u),&year,&month,&day,&weekday)){o.reading.dated=true;o.reading.weekday=weekday;snprintf(o.home_date,sizeof o.home_date,"%u月%u日 · 周%s",month,day,((const char *const[]){"一","二","三","四","五","六","日"})[weekday]);}
@@ -1186,6 +1282,22 @@ static pn_status_t favorites_ensure(void){
     if(favorites_valid)return PN_OK;
     pn_status_t status=favorites_load();favorites_valid=status==PN_OK;return status;
 }
+static pn_status_t read_marks_load(void){
+    if(!data_ready)return PN_UNSUPPORTED;
+    if(!read_marks)read_marks=pn_alloc_tagged(&pool,PN_MEM_UI,sizeof *read_marks);
+    if(!read_marks)return PN_NO_MEMORY;
+    pn_media_lease_t lease={0};pn_status_t status=pn_media_acquire(&data_media,PN_MEDIA_READ,&lease);
+    pn_journal_files_t files;pn_journal_io_t io;
+    if(status==PN_OK)status=pn_read_marks_files(&files,&data_media,&lease,"/data/progress",&io);
+    if(status==PN_OK)status=pn_read_marks_load(&io,&pool,read_marks);
+    if(lease.ticket)(void)pn_media_release(&data_media,&lease);
+    if(status==PN_EMPTY){memset(read_marks,0,sizeof *read_marks);status=PN_OK;}
+    return status;
+}
+static pn_status_t read_marks_ensure(void){
+    if(read_marks_valid)return PN_OK;
+    pn_status_t status=read_marks_load();read_marks_valid=status==PN_OK;return status;
+}
 /// 菜单帧键：所有会改变首页/书库像素的输入都参与；状态带单独补画，因此时间/电量不使整页失效。
 /// Menu-frame key: every input that changes home/library pixels participates; the status band is patched separately, so clock/battery do not invalidate the page.
 static uint64_t menu_hash(uint64_t h,uint64_t value){h^=value+0x9e3779b97f4a7c15ull+(h<<6)+(h>>2);return h;}
@@ -1202,9 +1314,9 @@ static uint64_t home_reading_key(uint64_t h,const pn_reading_summary_t *reading)
 static uint64_t shelf_render_key(void){
     uint64_t h=0x504e4d454e5531ull; // "PNMENU1"
     h=menu_hash(h,home_mode);h=menu_hash(h,entertainment);h=menu_hash(h,recent_mode);h=menu_hash(h,fav_mode);h=menu_hash(h,list_mode);h=menu_hash(h,search_mode);
-    h=menu_hash(h,shelf_prefs.columns);h=menu_hash(h,shelf_prefs.style);h=menu_hash(h,(uint64_t)(shelf_focus+1));
-    h=menu_hash_text(h,search_query);h=menu_hash(h,menu_font_epoch);
-    if(home_mode){pn_shelf_options_t o=shelf_options();h=menu_hash_text(h,o.home_date);h=home_reading_key(h,&o.reading);}
+    h=menu_hash(h,shelf_prefs.columns);h=menu_hash(h,shelf_prefs.style);h=menu_hash(h,(uint64_t)shelf_sort);h=menu_hash(h,(uint64_t)(shelf_focus+1));
+    h=menu_hash_text(h,search_query);h=menu_hash(h,menu_font_epoch);h=menu_hash_text(h,home_prefs.header);
+    if(home_mode){pn_shelf_options_t o=shelf_options();h=menu_hash_text(h,o.home_date);h=menu_hash_text(h,home_banner_pixels?home_banner_loaded:"");h=home_reading_key(h,&o.reading);}
 
     if(shelf_page){
         h=menu_hash(h,shelf_page->count);h=menu_hash(h,shelf_page->index);h=menu_hash(h,shelf_page->total);h=menu_hash(h,shelf_page->per_page);h=menu_hash(h,shelf_page->more);
@@ -1215,6 +1327,7 @@ static uint64_t shelf_render_key(void){
         }
     }
     if(favorites_valid && favorites){h=menu_hash(h,favorites->count);for(size_t i=0;i<favorites->count;i++)h=menu_hash_text(h,favorites->paths[i]);}
+    if(read_marks_valid && read_marks){h=menu_hash(h,read_marks->count);for(size_t i=0;i<read_marks->count;i++){h=menu_hash(h,read_marks->states[i]);h=menu_hash_text(h,read_marks->paths[i]);}}
     return h?h:1;
 }
 /// 动态带摘要：每槽单独保存，避免返回另一页时沿用上一页的时间/电量。/ Dynamic-band digest stored per slot so returning to another page never reuses the previous page's clock/battery.
@@ -1224,6 +1337,7 @@ static uint64_t shelf_status_key(void){
 }
 static pn_status_t draw_shelf(pn_refresh_t profile){
     shelf_draw_valid=false;
+    home_banner_ensure();
     ESP_LOGI(TAG,"Shelf draw profile=%u home=%u covers_dirty=%u",(unsigned)profile,(unsigned)home_mode,(unsigned)covers_dirty);
     if(!menu_cache.pool)(void)pn_menu_cache_init(&menu_cache,&pool);
     // 普通GL16或退出阅读GC16都复用整页，刷新标志随本次提交传递；命中只补状态带，未命中直接画进缓存槽。
@@ -1241,7 +1355,7 @@ static pn_status_t draw_shelf(pn_refresh_t profile){
             }else if(status==PN_OK){
                 status=management_font_begin(&font,24);
                 if(status==PN_OK){
-                    pn_shelf_options_t options=shelf_options();if(!options.entertainment && favorites_ensure()==PN_OK)options.favorite_items=favorites;
+                    pn_shelf_options_t options=shelf_options();if(!options.entertainment && favorites_ensure()==PN_OK)options.favorite_items=favorites;if(!options.entertainment && read_marks_ensure()==PN_OK)options.read_marks=read_marks;
                     pn_profile_span_t span;pn_profile_begin(&span,NULL,"ui.shelf.render");
                     status=pn_shelf_render_with_font_file_ex(shelf_page,&font,&frame,shelf_focus,recent_mode,true,shelf_covers,&pool,&sd_media,NULL,&options);
                     pn_profile_end(&span,status);management_font_end(&font);
@@ -1260,7 +1374,7 @@ static pn_status_t draw_shelf(pn_refresh_t profile){
     pn_status_t status=pn_frame_bind(&frame,pixels,684u*1216u/2u,684,1216)?PN_OK:PN_NO_MEMORY;
     if(status==PN_OK)status=management_font_begin(&font,24);
     pn_profile_span_t span;pn_profile_begin(&span,NULL,"ui.shelf.render");
-    if(status==PN_OK){pn_w_set_battery(battery_percent());pn_shelf_options_t options=shelf_options();if(!options.entertainment && favorites_ensure()==PN_OK)options.favorite_items=favorites;status=pn_shelf_render_with_font_file_ex(shelf_page,&font,&frame,shelf_focus,recent_mode,true,shelf_covers,&pool,&sd_media,NULL,&options);}
+    if(status==PN_OK){pn_w_set_battery(battery_percent());pn_shelf_options_t options=shelf_options();if(!options.entertainment && favorites_ensure()==PN_OK)options.favorite_items=favorites;if(!options.entertainment && read_marks_ensure()==PN_OK)options.read_marks=read_marks;status=pn_shelf_render_with_font_file_ex(shelf_page,&font,&frame,shelf_focus,recent_mode,true,shelf_covers,&pool,&sd_media,NULL,&options);}
     // 书籍操作面板叠在书架上（删除确认为整页）。/ The book actions sheet overlays the shelf (the delete confirmation is a full page).
     pn_profile_end(&span,status);
     if(status==PN_OK)status=present(NULL,&frame,profile);
@@ -1279,7 +1393,7 @@ static pn_status_t draw_shelf_focus(int before){
     if(s==PN_OK)s=pn_device_frame_restore(hardware.hl.back_fb,415872,&frame);
     if(s==PN_OK)s=management_font_begin(&font,24);
     if(s==PN_OK)s=pn_w_font_scope_begin(&scope,&pool,NULL);
-    if(s==PN_OK){pn_shelf_options_t options=shelf_options();if(favorites_valid)options.favorite_items=favorites;s=pn_shelf_render_focus(shelf_page,&font,&frame,before,shelf_focus,shelf_covers,&options);}
+    if(s==PN_OK){pn_shelf_options_t options=shelf_options();if(favorites_valid)options.favorite_items=favorites;if(read_marks_valid)options.read_marks=read_marks;s=pn_shelf_render_focus(shelf_page,&font,&frame,before,shelf_focus,shelf_covers,&options);}
     pn_w_font_scope_end(&scope);
     if(s==PN_OK){s=present(NULL,&frame,PN_REFRESH_GL16);if(s==PN_OK)shelf_draw_revision=async_port.revision;}
     management_font_end(&font);pn_free(pixels);
@@ -1405,13 +1519,34 @@ static void show_shelf_profile(const char *cursor,bool previous,pn_refresh_t pro
         if(status==PN_OK){status=pn_catalog_recent_page_n(recent_snapshot,start,shelf_per_page(),next);if(status==PN_OK)recent_start=start;}
         if(status!=PN_OK){recent_mode=false;pn_free(next);message("历史读取失败","记录保留，点下方回书架");return;}
     }else{
+        shelf_sort_load();
+        scan_dirs_ensure();
+        if(shelf_sort==PN_SHELF_SORT_RECENT)(void)load_recent();
         status=pn_media_acquire(&sd_media,PN_MEDIA_READ,&lease);
-        if(status==PN_OK)status=pn_catalog_index_page(&catalog_index,&lease,cursor,previous,jump_letter,*search_query?search_query:NULL,shelf_per_page(),next);
-        if(status==PN_EMPTY)status=*search_query?(previous?pn_catalog_search_page_before_n(&sd_media,&lease,book_directory,search_query,cursor,shelf_per_page(),next):pn_catalog_search_page_n(&sd_media,&lease,book_directory,search_query,cursor,shelf_per_page(),next)):jump_letter?pn_catalog_page_from_n(&sd_media,&lease,book_directory,jump_letter,shelf_per_page(),next):previous?pn_catalog_page_before_n(&sd_media,&lease,book_directory,cursor,shelf_per_page(),next):pn_catalog_page_n(&sd_media,&lease,book_directory,cursor,shelf_per_page(),next);
-        jump_letter=0;
+        if(status==PN_OK){
+            (void)pn_catalog_list_book_folders(&sd_media,&lease,book_directory,shelf_folders,PN_CATALOG_FOLDER_MAX,&shelf_folder_count);
+            if(shelf_folder_index>shelf_folder_count)shelf_folder_index=0;
+        }
+        const char *scan_dir=active_book_directory();
+        bool multi_or_filtered=shelf_folder_count>0 || shelf_folder_index>0;
+        if(status==PN_OK && ((shelf_sort!=PN_SHELF_SORT_NAME && !jump_letter) || (multi_or_filtered && !jump_letter))){
+            const pn_catalog_item_t *sort_cursor=(*cursor && shelf_page && shelf_page->count)?&shelf_page->items[previous?0:shelf_page->count-1]:NULL;
+            status=pn_catalog_page_sorted_n(&sd_media,&lease,scan_dir,*search_query?search_query:NULL,shelf_sort,recent_snapshot,sort_cursor,previous,shelf_per_page(),next);
+        }else{
+            if(status==PN_OK && !multi_or_filtered)status=pn_catalog_index_page(&catalog_index,&lease,cursor,previous,jump_letter,*search_query?search_query:NULL,shelf_per_page(),next);
+            else if(status==PN_OK)status=PN_EMPTY;
+            if(status==PN_EMPTY)status=*search_query?(previous?pn_catalog_search_page_before_n(&sd_media,&lease,scan_dir,search_query,cursor,shelf_per_page(),next):pn_catalog_search_page_n(&sd_media,&lease,scan_dir,search_query,cursor,shelf_per_page(),next)):jump_letter?pn_catalog_page_from_n(&sd_media,&lease,scan_dir,jump_letter,shelf_per_page(),next):previous?pn_catalog_page_before_n(&sd_media,&lease,scan_dir,cursor,shelf_per_page(),next):pn_catalog_page_n(&sd_media,&lease,scan_dir,cursor,shelf_per_page(),next);
+            jump_letter=0;
+        }
         if(lease.ticket)(void)pn_media_release(&sd_media,&lease);
     }
-    if(status==PN_OK && (next->count || !*cursor)){*shelf_page=*next;shelf_focus=-1;}
+    if(status==PN_OK && (next->count || !*cursor)){
+        *shelf_page=*next;
+        if(pending_shelf_focus==-3)shelf_focus=shelf_page->count?(int)shelf_page->count-1:-1;
+        else if(pending_shelf_focus>=0)shelf_focus=shelf_page->count?(pending_shelf_focus<(int)shelf_page->count?pending_shelf_focus:(int)shelf_page->count-1):-1;
+        else shelf_focus=-1;
+    }
+    pending_shelf_focus=-2;
     pn_free(next);pn_profile_end(&span,status);pn_profile_begin(&span,NULL,"ui.shelf.bind");
     // 首帧前同步读取已缓存PNCV，书库一次成画不再二次刷封面；未缓存的书仍等输入安静后解码。
     // Read cached PNCV synchronously before the first paint so the library appears complete without a second cover refresh; uncached books still decode after input settles.
@@ -1940,7 +2075,7 @@ static void start_reader_impl(void){
     }
     if(!data_ready){data_ready=mount_data();if(!data_ready){message("内部存储不可用","保留数据，未格式化\n请先初始化数据分区");return;}}
     if(!shelf_prefs_loaded && pn_settings_load_shelf(&data_media,"/data/progress",&shelf_prefs)==PN_OK)shelf_prefs_loaded=true;
-    if(!input_flags_loaded && pn_settings_load_flags(&data_media,"/data/progress",&input_flags)==PN_OK)input_flags_loaded=true;
+    if(!input_flags_loaded && pn_settings_load_flags(&data_media,"/data/progress",&input_flags)==PN_OK){input_flags_loaded=true;sync_mgmt_refresh_limit(input_flags);}
     if(!vertical_turn_loaded && pn_settings_load_vertical_turn(&data_media,"/data/progress",&vertical_turn)==PN_OK)vertical_turn_loaded=true;
     if(!index_wait_loaded && pn_settings_load_index(&data_media,"/data/progress",&index_wait)==PN_OK)index_wait_loaded=true;
     bool waiting=sd_recovery.pending;pn_status_t recovered=pn_device_sd_prepare(&sd_recovery,&sd_media,now_ms());
@@ -1958,9 +2093,11 @@ static void start_reader_impl(void){
     }
     if(!sd_media.available){pn_status_t s=pn_media_attach(&sd_media,card_instance++);if(s!=PN_OK){message("卡仍被占用","等待旧文件关闭后重试");return;}}
     if(!*selected_path){system_font_ready();show_shelf("",false);return;}
-    // 缺失或旧目录的书只退回可操作书库，不反复进入重试错误页；持久记录保留。/ Missing books or legacy paths return to a usable library without an error loop; durable records stay intact.
+    scan_dirs_ensure();
+    // 缺失或非法路径的书只退回可操作书库，不反复进入重试错误页；持久记录保留。/ Missing books or disallowed paths return to a usable library without an error loop; durable records stay intact.
     const char *prefix=PN_SD_MOUNT "/" PN_SD_BOOKS "/";struct stat selected_info;
-    if(strncmp(selected_path,prefix,strlen(prefix)) || stat(selected_path,&selected_info) || !S_ISREG(selected_info.st_mode)){
+    bool path_ok=!strncmp(selected_path,prefix,strlen(prefix)) || pn_scan_dirs_path_allowed(PN_SCAN_CAT_BOOKS,selected_path);
+    if(!path_ok || stat(selected_path,&selected_info) || !S_ISREG(selected_info.st_mode)){
         ESP_LOGW(TAG,"Selected book unavailable; returning to canonical library");selected_path[0]=0;selected_identified=false;home_mode=false;show_shelf("",false);return;
     }
     const char *font=NULL;
@@ -2047,6 +2184,7 @@ static void start_reader_finish(void){
 }
 static void start_reader(void){
     if(opening)return;
+    home_banner_release();
     bool gate=*selected_path!=0 && !transfer.impl && !usb.open;
     opening_request_timed=gate && (selected_format==PN_BOOK_EPUB || selected_format==PN_BOOK_TXT);opening_requested_us=pn_profile_time();
     if(gate)opening_controls(true);
@@ -2363,7 +2501,7 @@ static void begin_wallpaper(void){
     pn_status_t status=pn_wallpaper_ui_open_cached(&wallpaper_ui,&pool,&sd_media,PN_SD_MOUNT "/" PN_SD_WALLPAPERS,store_ok?&store:NULL,present,NULL,PN_SD_MOUNT "/" PN_SD_WALLPAPER_CACHE);
     if(status==PN_OK){pn_bookmark_lock_t snapshot=bookmark_lock;bookmark_lock_environment(&snapshot);pn_wallpaper_ui_set_bookmark(&wallpaper_ui,&snapshot);}
     if(status!=PN_OK){message("壁纸设置未打开","保留原锁屏，稍后重试");return;}
-    status_page=true;shelf_mode=false;index_mode=false;search_mode=false;hub_mode=false;actions_mode=false;
+    status_page=true;shelf_mode=false;index_mode=false;search_mode=false;hub_mode=false;actions_mode=false;stats_mode=false;
 }
 /// 进入字体管理：先关闭正文和其字体源，删除/设默认在无消费者时进行。/ Enter font management after closing the book and its font sources, so deletion and defaults happen without consumers.
 static void begin_fonts(void){
@@ -2378,7 +2516,7 @@ static void begin_fonts(void){
 #if defined(CONFIG_PN_UI_FOLLOW) && CONFIG_PN_UI_FOLLOW
     if(list_vcom_valid){pn_status_t motion=pn_font_manage_motion(&font_manage,list_present,NULL);(void)motion;ESP_LOGI(TAG,"Font list qualification status=%d",(int)motion);}
 #endif
-    status_page=true;shelf_mode=false;index_mode=false;search_mode=false;hub_mode=false;actions_mode=false;
+    status_page=true;shelf_mode=false;index_mode=false;search_mode=false;hub_mode=false;actions_mode=false;stats_mode=false;
 }
 /// 设置页：壁纸/字体入口与翻页开关；进入前同样保存并关闭正文。/ Settings: wallpaper/font entries and page-turn switches; the book is saved and closed first as well.
 static void storage_note(char *out,size_t cap);
@@ -2400,9 +2538,10 @@ static void begin_settings(void){
      storage_note(about.storage,sizeof about.storage);snprintf(about.internal,sizeof about.internal,"%s",data_ready?"可用（阅读记录、书签与设置）":"不可用");
      snprintf(about.screen,sizeof about.screen,"4.7 英寸 · 684×1216 · 16 级灰阶");pn_settings_ui_set_about(&settings_ui,&about);}
     refresh_network_name();update_time_ui(false);update_ota_ui(false);if(*saved_network)(void)pn_settings_ui_set_lan(&settings_ui,saved_network,present,NULL);
-    status_page=true;shelf_mode=false;index_mode=false;search_mode=false;hub_mode=false;actions_mode=false;
+    pn_settings_ui_set_wallpaper_dir(&settings_ui,&sd_media,PN_SD_MOUNT "/" PN_SD_WALLPAPERS);
+    status_page=true;shelf_mode=false;index_mode=false;search_mode=false;hub_mode=false;actions_mode=false;stats_mode=false;
 }
-static void end_settings(void){input_flags=settings_ui.flags;vertical_turn=settings_ui.vertical_turn;vertical_turn_loaded=true;index_wait=settings_ui.index_wait;index_wait_loaded=true;shelf_prefs=settings_ui.shelf;pn_settings_ui_close(&settings_ui);if(*selected_path)start_reader();else show_shelf("",false);}
+static void end_settings(void){input_flags=settings_ui.flags;sync_mgmt_refresh_limit(input_flags);vertical_turn=settings_ui.vertical_turn;vertical_turn_loaded=true;index_wait=settings_ui.index_wait;index_wait_loaded=true;shelf_prefs=settings_ui.shelf;home_prefs=settings_ui.home;home_prefs_loaded=true;pn_w_set_brand(home_prefs.header);pn_settings_ui_close(&settings_ui);atomic_store(&mgmt_root_switch,true);if(*selected_path)start_reader();else show_shelf("",false);}
 static void end_fonts(void){pn_font_manage_close(&font_manage);if(back_to_settings){back_to_settings=false;begin_settings();return;}if(*selected_path)start_reader();else show_shelf("",false);}
 static pn_status_t begin_toc(void){
 #if defined(CONFIG_PN_UI_FOLLOW) && CONFIG_PN_UI_FOLLOW
@@ -2754,12 +2893,407 @@ static void tick_time_sync(uint64_t now){
     ESP_LOGI(TAG,"Time sync phase=%d error=%d sdk=%d",(int)state.phase,(int)state.error,state.sdk_error);(void)pn_device_time_close(&time_sync);update_time_ui(true);
     if(time_lock_pending){time_lock_pending=false;if(prepare_lock())lock_and_sleep("");}
 }
+static void file_manager_close(void){
+    files_mode=false;
+    pn_free(file_manager);
+    file_manager=NULL;
+}
+/// 收集当前正在使用的资源路径，供文件管理界面标注“使用中”。/ Collect active resource paths so the file manager can badge in-use items.
+static void file_manager_usage(pn_fm_usage_t *u,char sys_font[PN_FONT_REFERENCE_PATH_MAX],char read_font[PN_FONT_REFERENCE_PATH_MAX],
+    char lock_wp[PN_WALLPAPER_PATH_MAX],char lock_mk[PN_WALLPAPER_PATH_MAX],char reading_bg[PN_BACKGROUND_NAME_MAX]){
+    memset(u,0,sizeof *u);
+    sys_font[0]=read_font[0]=lock_wp[0]=lock_mk[0]=reading_bg[0]=0;
+    if(*selected_path)u->current_book=selected_path;
+    else if(last_read_known && *last_read_book.path)u->current_book=last_read_book.path;
+    home_prefs_ensure();
+    if(*home_prefs.banner)u->home_banner=home_prefs.banner;
+    if(data_ready){
+        pn_media_lease_t lease={0};
+        if(pn_media_acquire(&data_media,PN_MEDIA_READ,&lease)==PN_OK){
+            pn_journal_files_t jf;pn_journal_io_t io;
+            pn_font_preferences_t fp={0};
+            if(pn_font_preferences_system_files(&jf,&data_media,&lease,"/data/progress",&io)==PN_OK && pn_font_preferences_load(&io,&pool,NULL,&fp)==PN_OK && fp.primary.kind==PN_FONT_FILE && *fp.primary.path){
+                snprintf(sys_font,PN_FONT_REFERENCE_PATH_MAX,"%s",fp.primary.path);u->system_font=sys_font;
+            }
+            memset(&fp,0,sizeof fp);
+            if(pn_font_preferences_files(&jf,&data_media,&lease,"/data/progress",NULL,&io)==PN_OK && pn_font_preferences_load(&io,&pool,NULL,&fp)==PN_OK && fp.primary.kind==PN_FONT_FILE && *fp.primary.path){
+                snprintf(read_font,PN_FONT_REFERENCE_PATH_MAX,"%s",fp.primary.path);u->reading_font=read_font;
+            }
+            (void)pn_media_release(&data_media,&lease);
+        }
+        pn_style_t st={0};
+        if(pn_style_global_load(&data_media,"/data/progress",&st)==PN_OK && st.background && *st.background_name){
+            snprintf(reading_bg,PN_BACKGROUND_NAME_MAX,"%s",st.background_name);u->reading_bg=reading_bg;
+        }
+    }
+    if(mount_wallpaper()){
+        pn_wallpaper_store_t store,mask_store;pn_media_lease_t lease={0};
+        if(pn_wallpaper_store_init(&store,&wallpaper_media,"/wallpaper/lock.a","/wallpaper/lock.b")==PN_OK && pn_media_acquire(&wallpaper_media,PN_MEDIA_READ,&lease)==PN_OK){
+            pn_lock_selection_t sel={0};
+            if(pn_wallpaper_load(&store,&lease,&sel,NULL)==PN_OK && sel.mode==PN_LOCK_CUSTOM && *sel.source){snprintf(lock_wp,PN_WALLPAPER_PATH_MAX,"%s",sel.source);u->lock_wallpaper=lock_wp;}
+            memset(&sel,0,sizeof sel);
+            if(pn_wallpaper_mask_store_init(&store,&mask_store)==PN_OK && pn_wallpaper_load(&mask_store,&lease,&sel,NULL)==PN_OK && sel.mode==PN_LOCK_MASK && *sel.source){snprintf(lock_mk,PN_WALLPAPER_PATH_MAX,"%s",sel.source);u->lock_mask=lock_mk;}
+            (void)pn_media_release(&wallpaper_media,&lease);
+        }
+    }
+}
+static pn_status_t file_manager_paint(void){
+    if(!file_manager)return PN_INVALID;
+    uint8_t *pixels=pn_alloc_tagged(&pool,PN_MEM_FRAME,684u*1216u/2u);pn_frame_t frame;pn_font_t font={0};pn_w_font_scope_t scope={0};
+    pn_status_t status=pn_frame_bind(&frame,pixels,684u*1216u/2u,684,1216)?management_font_begin(&font,24):PN_NO_MEMORY;
+    if(status==PN_OK)status=pn_w_font_scope_begin(&scope,&pool,NULL);
+    if(status==PN_OK)status=pn_file_manager_render(file_manager,&font,&frame);
+    pn_w_font_scope_end(&scope);
+    if(status==PN_OK)status=present(NULL,&frame,PN_REFRESH_GL16);
+    management_font_end(&font);pn_free(pixels);
+    return status;
+}
+static void file_manager_refresh(void){
+    if(!file_manager)return;
+    pn_media_lease_t lease={0};pn_status_t st=pn_media_acquire(&sd_media,PN_MEDIA_READ,&lease);
+    if(st==PN_OK){
+        if(file_manager->view==PN_FM_VIEW_ROOT)st=pn_file_manager_scan_roots(file_manager,&sd_media,&lease);
+        else if(file_manager->view==PN_FM_VIEW_MOVE)st=pn_file_manager_scan_move_targets(file_manager,&sd_media,&lease);
+        else if(file_manager->view==PN_FM_VIEW_EXT_BROWSE)st=pn_file_manager_scan_browse(file_manager,&sd_media,&lease);
+        else if(file_manager->view==PN_FM_VIEW_EXT_LIST)st=PN_OK;
+        else if(file_manager->view==PN_FM_VIEW_LIST || file_manager->view==PN_FM_VIEW_ACTIONS){
+            char *bufs=pn_alloc_tagged(&pool,PN_MEM_UI,PN_FONT_REFERENCE_PATH_MAX*2u+PN_WALLPAPER_PATH_MAX*2u+PN_BACKGROUND_NAME_MAX);
+            if(bufs){
+                pn_fm_usage_t u;
+                char *sf=bufs,*rf=sf+PN_FONT_REFERENCE_PATH_MAX,*lw=rf+PN_FONT_REFERENCE_PATH_MAX,*lm=lw+PN_WALLPAPER_PATH_MAX,*rb=lm+PN_WALLPAPER_PATH_MAX;
+                file_manager_usage(&u,sf,rf,lw,lm,rb);
+                st=pn_file_manager_scan(file_manager,&sd_media,&lease,&u);
+                pn_free(bufs);
+            }else st=pn_file_manager_scan(file_manager,&sd_media,&lease,NULL);
+        }
+        (void)pn_media_release(&sd_media,&lease);
+    }
+    if(st!=PN_OK && !*file_manager->notice)snprintf(file_manager->notice,sizeof file_manager->notice,"读取存储卡失败，请重试");
+    (void)file_manager_paint();
+}
+/// 删除文件后的兼容清理：若目标正是当前阅读书籍、字体、锁屏壁纸/遮罩、主页横幅或阅读背景，则安全回退系统默认。
+/// Compatibility cleanup after deletion: safely revert to system defaults if the deleted file was an active book, font, wallpaper/mask, home banner, or reading background.
+static void file_manager_compat_after_delete(unsigned cat,const char *full_path,const char *name){
+    if(cat==PN_FM_CAT_BOOKS){
+        pn_catalog_index_invalidate(&catalog_index);recent_loaded=false;favorites_valid=false;read_marks_valid=false;pn_menu_cache_invalidate(&menu_cache);
+        if(!strcmp(selected_path,full_path))selected_path[0]=0;
+        if(last_read_known && !strcmp(last_read_book.path,full_path))last_read_known=false;
+        if(shelf_covers && shelf_covers->has_last && !strcmp(shelf_covers->last.path,full_path))shelf_covers->has_last=false;
+        if(data_ready){
+            if(favorites_ensure()==PN_OK && pn_favorites_contains(favorites,full_path)){
+                pn_media_lease_t lease={0};
+                if(pn_media_acquire(&data_media,PN_MEDIA_WRITE,&lease)==PN_OK){
+                    pn_journal_files_t jf;pn_journal_io_t io;bool fav=false;
+                    if(pn_favorites_files(&jf,&data_media,&lease,"/data/progress",&io)==PN_OK)(void)pn_favorites_toggle(&io,&pool,full_path,&fav);
+                    (void)pn_media_release(&data_media,&lease);favorites_valid=false;
+                }
+            }
+            if(read_marks_ensure()==PN_OK && pn_read_marks_get(read_marks,full_path)!=PN_READ_MARK_AUTO){
+                pn_media_lease_t lease={0};
+                if(pn_media_acquire(&data_media,PN_MEDIA_WRITE,&lease)==PN_OK){
+                    pn_journal_files_t jf;pn_journal_io_t io;
+                    if(pn_read_marks_files(&jf,&data_media,&lease,"/data/progress",&io)==PN_OK)(void)pn_read_marks_set(&io,&pool,full_path,PN_READ_MARK_AUTO);
+                    (void)pn_media_release(&data_media,&lease);read_marks_valid=false;
+                }
+            }
+        }
+    }else if(cat==PN_FM_CAT_FONTS){
+        if(data_ready){
+            pn_media_lease_t lease={0};
+            if(pn_media_acquire(&data_media,PN_MEDIA_WRITE,&lease)==PN_OK){
+                pn_journal_files_t jf;pn_journal_io_t io;pn_font_preferences_t fp;
+                memset(&fp,0,sizeof fp);
+                if(pn_font_preferences_system_files(&jf,&data_media,&lease,"/data/progress",&io)==PN_OK && pn_font_preferences_load(&io,&pool,NULL,&fp)==PN_OK){
+                    bool ch=false;
+                    if(fp.primary.kind==PN_FONT_FILE && !strcmp(fp.primary.path,full_path)){memset(&fp.primary,0,sizeof fp.primary);ch=true;}
+                    if(fp.fallback.kind==PN_FONT_FILE && !strcmp(fp.fallback.path,full_path)){memset(&fp.fallback,0,sizeof fp.fallback);ch=true;}
+                    if(ch)(void)pn_font_preferences_save(&io,&pool,NULL,&fp);
+                }
+                memset(&fp,0,sizeof fp);
+                if(pn_font_preferences_files(&jf,&data_media,&lease,"/data/progress",NULL,&io)==PN_OK && pn_font_preferences_load(&io,&pool,NULL,&fp)==PN_OK){
+                    bool ch=false;
+                    if(fp.primary.kind==PN_FONT_FILE && !strcmp(fp.primary.path,full_path)){memset(&fp.primary,0,sizeof fp.primary);ch=true;}
+                    if(fp.fallback.kind==PN_FONT_FILE && !strcmp(fp.fallback.path,full_path)){memset(&fp.fallback,0,sizeof fp.fallback);ch=true;}
+                    if(ch)(void)pn_font_preferences_save(&io,&pool,NULL,&fp);
+                }
+                (void)pn_media_release(&data_media,&lease);
+            }
+        }
+        menu_font_epoch++;pn_menu_cache_invalidate(&menu_cache);
+    }else if(cat==PN_FM_CAT_WALLPAPERS){
+        home_prefs_ensure();
+        if(name && *home_prefs.banner && !strcmp(home_prefs.banner,name)){
+            home_prefs.banner[0]=0;
+            if(data_ready){(void)pn_home_prefs_save_dir(&data_media,"/data/progress",&home_prefs);(void)pn_home_banner_cache_clear(&data_media,"/data/progress");}
+            home_banner_release();pn_menu_cache_invalidate(&menu_cache);
+        }
+        if(mount_wallpaper()){
+            pn_wallpaper_store_t store,mask_store;pn_media_lease_t lease={0};
+            if(pn_wallpaper_store_init(&store,&wallpaper_media,"/wallpaper/lock.a","/wallpaper/lock.b")==PN_OK && pn_media_acquire(&wallpaper_media,PN_MEDIA_WRITE,&lease)==PN_OK){
+                pn_lock_selection_t sel={0};
+                if(pn_wallpaper_load(&store,&lease,&sel,NULL)==PN_OK && sel.mode==PN_LOCK_CUSTOM && !strcmp(sel.source,full_path)){
+                    pn_lock_selection_t def={.mode=PN_LOCK_DEFAULT};(void)pn_wallpaper_save(&store,&lease,&def,NULL);
+                }
+                memset(&sel,0,sizeof sel);
+                if(pn_wallpaper_mask_store_init(&store,&mask_store)==PN_OK && pn_wallpaper_load(&mask_store,&lease,&sel,NULL)==PN_OK && sel.mode==PN_LOCK_MASK && !strcmp(sel.source,full_path)){
+                    pn_lock_selection_t def={.mode=PN_LOCK_DEFAULT};(void)pn_wallpaper_save(&mask_store,&lease,&def,NULL);pn_wallpaper_mask_close(&lock_mask);
+                }
+                (void)pn_media_release(&wallpaper_media,&lease);
+            }
+        }
+    }else if(cat==PN_FM_CAT_BACKGROUNDS){
+        if(data_ready && name){
+            pn_style_t st={0};
+            if(pn_style_global_load(&data_media,"/data/progress",&st)==PN_OK && st.background && !strcmp(st.background_name,name)){
+                st.background=0;st.background_name[0]=0;memset(&st.background_identity,0,sizeof st.background_identity);
+                (void)pn_style_global_save(&data_media,"/data/progress",&st);
+            }
+        }
+    }else if(cat==PN_FM_CAT_COVERS){
+        covers_dirty=true;pn_menu_cache_invalidate(&menu_cache);
+    }
+}
+static void file_manager_compat_after_move(const char *old_path,const char *new_path){
+    pn_catalog_index_invalidate(&catalog_index);recent_loaded=false;favorites_valid=false;read_marks_valid=false;pn_menu_cache_invalidate(&menu_cache);
+    if(!strcmp(selected_path,old_path))snprintf(selected_path,sizeof selected_path,"%s",new_path);
+    if(last_read_known && !strcmp(last_read_book.path,old_path))last_read_known=false;
+    if(shelf_covers && shelf_covers->has_last && !strcmp(shelf_covers->last.path,old_path))shelf_covers->has_last=false;
+}
+static void file_manager_open(void){
+    if(!sd_media.available || usb.open || transfer.impl)return;
+    file_manager_close();
+    file_manager=pn_alloc_tagged(&pool,PN_MEM_UI,sizeof *file_manager);
+    if(!file_manager){message("文件管理未打开","内存不足，请稍后重试");return;}
+    storage_note(hub_storage,sizeof hub_storage);
+    scan_dirs_ensure();
+    pn_file_manager_init(file_manager,PN_SD_MOUNT,hub_storage);
+    file_manager->scan_dirs=scan_dirs;
+    hub_mode=false;shelf_mode=false;index_mode=false;search_mode=false;files_mode=true;status_page=true;
+    file_manager_refresh();
+}
+static void file_manager_apply(int selection){
+    if(!file_manager)return;
+    file_manager->notice[0]=0;
+    if(file_manager->view==PN_FM_VIEW_ROOT){
+        if(selection==PN_FM_BACK){file_manager_close();show_hub();return;}
+        if(selection==PN_FM_EXT_OPEN){
+            scan_dirs_ensure();
+            file_manager->scan_dirs=scan_dirs;
+            file_manager->ext_cat=0;
+            file_manager->view=PN_FM_VIEW_EXT_LIST;
+            (void)file_manager_paint();return;
+        }
+        if(selection>=PN_FM_CAT_BASE && selection<PN_FM_CAT_BASE+(int)PN_FM_CAT_COUNT){
+            file_manager->category=(unsigned)(selection-PN_FM_CAT_BASE);
+            file_manager->subpath[0]=0;file_manager->page=0;file_manager->view=PN_FM_VIEW_LIST;
+            file_manager_refresh();
+        }
+        return;
+    }
+    if(file_manager->view==PN_FM_VIEW_EXT_LIST){
+        if(selection==PN_FM_BACK){file_manager->view=PN_FM_VIEW_ROOT;file_manager_refresh();return;}
+        if(selection>=PN_FM_EXT_CAT_BASE && selection<PN_FM_EXT_CAT_BASE+(int)PN_SCAN_CAT_COUNT){
+            file_manager->ext_cat=(unsigned)(selection-PN_FM_EXT_CAT_BASE);
+            (void)file_manager_paint();return;
+        }
+        if(selection==PN_FM_EXT_BROWSE){
+            file_manager->browse_rel[0]=0;file_manager->browse_page=0;
+            file_manager->view=PN_FM_VIEW_EXT_BROWSE;
+            file_manager_refresh();return;
+        }
+        if(selection>=PN_FM_EXT_DEL_BASE && selection<PN_FM_EXT_DEL_BASE+(int)PN_SCAN_DIR_MAX){
+            pn_scan_cat_t cat=(pn_scan_cat_t)file_manager->ext_cat;
+            size_t idx=(size_t)(selection-PN_FM_EXT_DEL_BASE);
+            pn_scan_dirs_t next=scan_dirs;
+            if(pn_scan_dirs_remove(&next,cat,idx)==PN_OK){
+                pn_status_t sv=data_ready?pn_scan_dirs_save_cat(&data_media,"/data/progress",cat,&next):PN_UNSUPPORTED;
+                if(sv==PN_OK){
+                    scan_dirs=next;pn_scan_dirs_set_active(&scan_dirs,PN_SD_MOUNT);
+                    file_manager->scan_dirs=scan_dirs;
+                    pn_catalog_index_invalidate(&catalog_index);pn_menu_cache_invalidate(&menu_cache);recent_loaded=false;
+                    shelf_folder_index=0;
+                    snprintf(file_manager->notice,sizeof file_manager->notice,"已移出外部目录（卡上原文件未删除）");
+                }else snprintf(file_manager->notice,sizeof file_manager->notice,"保存失败，请重试");
+            }
+            (void)file_manager_paint();return;
+        }
+        return;
+    }
+    if(file_manager->view==PN_FM_VIEW_EXT_BROWSE){
+        if(selection==PN_FM_BACK){
+            if(*file_manager->browse_rel){
+                char *slash=strrchr(file_manager->browse_rel,'/');
+                if(slash)*slash=0;else file_manager->browse_rel[0]=0;
+                file_manager->browse_page=0;file_manager_refresh();
+            }else{
+                file_manager->view=PN_FM_VIEW_EXT_LIST;(void)file_manager_paint();
+            }
+            return;
+        }
+        if(selection==PN_FM_PREV && file_manager->browse_page>0){file_manager->browse_page--;file_manager_refresh();return;}
+        if(selection==PN_FM_NEXT){file_manager->browse_page++;file_manager_refresh();return;}
+        if(selection>=PN_FM_BROWSE_BASE && selection<PN_FM_BROWSE_BASE+(int)file_manager->browse_count){
+            const char *leaf=file_manager->browse_items[selection-PN_FM_BROWSE_BASE];
+            char joined[PN_SCAN_REL_MAX];
+            int n=*file_manager->browse_rel?snprintf(joined,sizeof joined,"%s/%s",file_manager->browse_rel,leaf):snprintf(joined,sizeof joined,"%s",leaf);
+            if(n>0 && (size_t)n<sizeof joined){
+                strcpy(file_manager->browse_rel,joined);file_manager->browse_page=0;
+                file_manager_refresh();
+            }else{
+                snprintf(file_manager->notice,sizeof file_manager->notice,"目录路径过长，请选择更浅层级");
+                (void)file_manager_paint();
+            }
+            return;
+        }
+        if(selection==PN_FM_EXT_PICK){
+            pn_scan_cat_t cat=(pn_scan_cat_t)file_manager->ext_cat;
+            pn_scan_dirs_t next=scan_dirs;
+            pn_status_t add_st=pn_scan_dirs_add(&next,cat,file_manager->browse_rel);
+            if(add_st==PN_OK){
+                pn_status_t sv=data_ready?pn_scan_dirs_save_cat(&data_media,"/data/progress",cat,&next):PN_UNSUPPORTED;
+                if(sv==PN_OK){
+                    scan_dirs=next;pn_scan_dirs_set_active(&scan_dirs,PN_SD_MOUNT);
+                    file_manager->scan_dirs=scan_dirs;
+                    pn_catalog_index_invalidate(&catalog_index);pn_menu_cache_invalidate(&menu_cache);recent_loaded=false;
+                    shelf_folder_index=0;
+                    file_manager->view=PN_FM_VIEW_EXT_LIST;
+                    snprintf(file_manager->notice,sizeof file_manager->notice,"已添加外部目录：%.48s",file_manager->browse_rel);
+                }else snprintf(file_manager->notice,sizeof file_manager->notice,"保存失败，请重试");
+            }
+            (void)file_manager_paint();return;
+        }
+        return;
+    }
+    if(file_manager->view==PN_FM_VIEW_LIST){
+        if(selection==PN_FM_BACK){
+            if(*file_manager->subpath){file_manager->subpath[0]=0;file_manager->page=0;file_manager_refresh();}
+            else{file_manager->view=PN_FM_VIEW_ROOT;file_manager_refresh();}
+            return;
+        }
+        if(selection==PN_FM_MKDIR_OPEN){
+            file_manager->input[0]=0;pn_keyboard_set_ime(&file_manager->keyboard,true,true);file_manager->view=PN_FM_VIEW_MKDIR;
+            (void)file_manager_paint();return;
+        }
+        if(selection==PN_FM_PREV && file_manager->page>0){file_manager->page--;file_manager_refresh();return;}
+        if(selection==PN_FM_NEXT){file_manager->page++;file_manager_refresh();return;}
+        if(selection==PN_FM_DELETE_EMPTY_DIR && *file_manager->subpath && file_manager->count==0){
+            file_manager->delete_current_dir=true;file_manager->view=PN_FM_VIEW_CONFIRM;(void)file_manager_paint();return;
+        }
+        if(selection>=PN_FM_ITEM_BASE && selection<PN_FM_ITEM_BASE+(int)file_manager->count){
+            const pn_fm_entry_t *e=&file_manager->items[selection-PN_FM_ITEM_BASE];
+            if(e->is_dir){snprintf(file_manager->subpath,sizeof file_manager->subpath,"%s",e->name);file_manager->page=0;file_manager_refresh();}
+            else{file_manager->selected=*e;file_manager->delete_current_dir=false;file_manager->view=PN_FM_VIEW_ACTIONS;(void)file_manager_paint();}
+        }
+        return;
+    }
+    if(file_manager->view==PN_FM_VIEW_ACTIONS){
+        if(selection==PN_FM_ACT_CANCEL || selection==PN_FM_BACK){file_manager->view=PN_FM_VIEW_LIST;(void)file_manager_paint();return;}
+        if(selection==PN_FM_ACT_OPEN && file_manager->category==PN_FM_CAT_BOOKS && file_manager->selected.readable_book){
+            char full[PN_FM_PATH_MAX];
+            if(pn_file_manager_build_path(file_manager,file_manager->selected.name,full,sizeof full)==PN_OK){
+                const char *dot=strrchr(full,'.');
+                selected_format=(dot && (!strcmp(dot,".epub") || !strcmp(dot,".EPUB")))?PN_BOOK_EPUB:PN_BOOK_TXT;
+                snprintf(selected_path,sizeof selected_path,"%s",full);
+                selected_identified=false;selected_size=0;
+                file_manager_close();start_reader();
+            }
+            return;
+        }
+        if(selection==PN_FM_ACT_MOVE && file_manager->category==PN_FM_CAT_BOOKS){
+            file_manager->move_page=0;file_manager->view=PN_FM_VIEW_MOVE;file_manager_refresh();return;
+        }
+        if(selection==PN_FM_ACT_DELETE && !file_manager->selected.protected_item){
+            file_manager->delete_current_dir=false;file_manager->view=PN_FM_VIEW_CONFIRM;(void)file_manager_paint();return;
+        }
+        return;
+    }
+    if(file_manager->view==PN_FM_VIEW_MOVE){
+        if(selection==PN_FM_BACK){file_manager->view=PN_FM_VIEW_ACTIONS;(void)file_manager_paint();return;}
+        if(selection==PN_FM_PREV && file_manager->move_page>0){file_manager->move_page--;file_manager_refresh();return;}
+        if(selection==PN_FM_NEXT){file_manager->move_page++;file_manager_refresh();return;}
+        if(selection>=PN_FM_MOVE_BASE && selection<PN_FM_MOVE_BASE+(int)file_manager->move_count){
+            char target[PN_FM_SUBPATH_MAX];snprintf(target,sizeof target,"%s",file_manager->move_targets[selection-PN_FM_MOVE_BASE]);
+            file_manager->deleting=true;(void)file_manager_paint();
+            resource_previews_close();
+            pn_status_t st=stop_reader()?PN_OK:PN_BUSY;pn_media_lease_t lease={0};
+            if(st==PN_OK){system_font_release();st=pn_media_acquire(&sd_media,PN_MEDIA_WRITE,&lease);}
+            char old_p[PN_FM_PATH_MAX]={0},new_p[PN_FM_PATH_MAX]={0};
+            if(st==PN_OK){st=pn_file_manager_move(file_manager,&sd_media,&lease,file_manager->selected.name,target,old_p,sizeof old_p,new_p,sizeof new_p);(void)pn_media_release(&sd_media,&lease);}
+            file_manager->deleting=false;
+            if(st==PN_OK){
+                file_manager_compat_after_move(old_p,new_p);
+                system_font_ready();
+                file_manager->view=PN_FM_VIEW_LIST;
+                snprintf(file_manager->notice,sizeof file_manager->notice,"已移动到 %.60s",*target?target:"图书根目录");
+                file_manager_refresh();
+            }else{
+                system_font_ready();
+                snprintf(file_manager->notice,sizeof file_manager->notice,"%s",st==PN_BUSY?"目标目录已有同名文件":"移动失败，原文件未改动");
+                (void)file_manager_paint();
+            }
+        }
+        return;
+    }
+    if(file_manager->view==PN_FM_VIEW_MKDIR){
+        if(selection==PN_FM_BACK){file_manager->view=PN_FM_VIEW_LIST;file_manager_refresh();return;}
+        if(selection==PN_FM_MKDIR_CLEAR){file_manager->input[0]=0;file_manager->keyboard.pinyin[0]=0;file_manager->keyboard.cand_page=0;(void)file_manager_paint();return;}
+        {bool kb_changed=false;if(pn_file_manager_apply_kb(file_manager,selection,&kb_changed)){if(kb_changed)(void)file_manager_paint();return;}}
+        const char *folder=NULL;
+        if(selection==PN_FM_MKDIR_COMMIT){(void)pn_keyboard_flush(&file_manager->keyboard,file_manager->input,sizeof file_manager->input,48u);if(*file_manager->input)folder=file_manager->input;}
+        else if(selection>=PN_FM_PRESET_BASE && selection<PN_FM_PRESET_BASE+(int)PN_FM_PRESET_COUNT)folder=pn_file_manager_preset_name((unsigned)(selection-PN_FM_PRESET_BASE));
+        if(folder){
+            resource_previews_close();
+            pn_status_t st=stop_reader()?PN_OK:PN_BUSY;pn_media_lease_t lease={0};
+            if(st==PN_OK){system_font_release();st=pn_media_acquire(&sd_media,PN_MEDIA_WRITE,&lease);}
+            if(st==PN_OK){st=pn_file_manager_mkdir(file_manager,&sd_media,&lease,folder);(void)pn_media_release(&sd_media,&lease);}
+            system_font_ready();
+            if(st==PN_OK){
+                file_manager->view=PN_FM_VIEW_LIST;
+                snprintf(file_manager->notice,sizeof file_manager->notice,"已创建文件夹「%.48s」",folder);
+                file_manager_refresh();
+            }else{
+                snprintf(file_manager->notice,sizeof file_manager->notice,"%s",st==PN_BUSY?"文件夹已存在":st==PN_INVALID?"名称包含非法字符":"创建失败，请重试");
+                (void)file_manager_paint();
+            }
+        }
+        return;
+    }
+    if(file_manager->view==PN_FM_VIEW_CONFIRM){
+        if(selection==PN_FM_CONFIRM_CANCEL || selection==PN_FM_BACK){file_manager->view=file_manager->delete_current_dir?PN_FM_VIEW_LIST:PN_FM_VIEW_ACTIONS;(void)file_manager_paint();return;}
+        if(selection==PN_FM_CONFIRM_DELETE){
+            file_manager->deleting=true;(void)file_manager_paint();
+            resource_previews_close();
+            pn_status_t st=stop_reader()?PN_OK:PN_BUSY;pn_media_lease_t lease={0};
+            if(st==PN_OK){system_font_release();st=pn_media_acquire(&sd_media,PN_MEDIA_WRITE,&lease);}
+            char del_path[PN_FM_PATH_MAX]={0};
+            bool del_dir=file_manager->delete_current_dir;
+            unsigned cat=file_manager->category;
+            char del_name[PN_FM_NAME_MAX];snprintf(del_name,sizeof del_name,"%s",del_dir?file_manager->subpath:file_manager->selected.name);
+            if(st==PN_OK){st=pn_file_manager_delete(file_manager,&sd_media,&lease,del_dir?NULL:file_manager->selected.name,del_dir,del_path,sizeof del_path);(void)pn_media_release(&sd_media,&lease);}
+            file_manager->deleting=false;
+            if(st==PN_OK){
+                if(!del_dir)file_manager_compat_after_delete(cat,del_path,del_name);
+                system_font_ready();
+                if(del_dir)file_manager->subpath[0]=0;
+                file_manager->delete_current_dir=false;
+                file_manager->view=PN_FM_VIEW_LIST;
+                snprintf(file_manager->notice,sizeof file_manager->notice,"%s",del_dir?"已删除空文件夹":"已删除，如正在使用已回退默认");
+                file_manager_refresh();
+            }else{
+                system_font_ready();
+                snprintf(file_manager->notice,sizeof file_manager->notice,"%s",st==PN_UNSUPPORTED?"系统保留文件不可删除":st==PN_BUSY?"文件夹非空，请先清理内部文件":"删除失败，文件仍保留");
+                (void)file_manager_paint();
+            }
+        }
+    }
+}
 /// 传书一级页：按实际能力列出通道。/ Transfer root tab listing channels by real capability.
 static void show_hub(void){
     if(transfer.impl || usb.open)return;
+    file_manager_close();
     refresh_network_name();storage_note(hub_storage,sizeof hub_storage);
     pn_device_usb_port_t usb_port=pn_device_usb_board_port();
-    hub_info=(pn_transfer_hub_info_t){.hotspot=true,.lan=*saved_network!=0,.usb=usb_port.start!=NULL,.lan_name=saved_network,.storage=hub_storage};
+    hub_info=(pn_transfer_hub_info_t){.hotspot=true,.lan=*saved_network!=0,.usb=usb_port.start!=NULL,.storage_manage=sd_media.available,.lan_name=saved_network,.storage=hub_storage};
     uint8_t *pixels=pn_alloc_tagged(&pool,PN_MEM_FRAME,684u*1216u/2u);pn_frame_t frame;pn_font_t font={0};
     pn_status_t status=pn_frame_bind(&frame,pixels,684u*1216u/2u,684,1216)?PN_OK:PN_NO_MEMORY;
     if(status==PN_OK)status=management_font_begin(&font,28);
@@ -2784,7 +3318,7 @@ static void begin_usb(void){
     resource_previews_close();
     if(usb.open || transfer.impl || time_sync.impl || ota.impl || wifi_probe.impl)return;
     if(!stop_reader())return;
-    pn_wallpaper_mask_close(&lock_mask);pn_wallpaper_ui_close(&wallpaper_ui);pn_font_manage_close(&font_manage);pn_settings_ui_close(&settings_ui);
+    pn_wallpaper_mask_close(&lock_mask);pn_wallpaper_ui_close(&wallpaper_ui);pn_font_manage_close(&font_manage);pn_settings_ui_close(&settings_ui);file_manager_close();
     pn_catalog_index_close(&catalog_index);covers_inactive=true;cover_drop(NULL);
     system_font_release();
     pn_status_t s=pn_device_usb_open(&usb,&sd_media,pn_device_usb_board_port());
@@ -2819,16 +3353,70 @@ static void show_index(void){
     management_font_end(&font);pn_free(pixels);
     if(status==PN_OK){index_mode=true;shelf_mode=false;status_page=true;}
 }
+static void show_stats(void){
+    if(!reading_stats.media && data_ready)(void)pn_reading_stats_init(&reading_stats,&data_media,"/data/progress");
+    if(reading_stats.media)(void)pn_reading_stats_load(&reading_stats);
+    (void)load_recent();(void)read_marks_ensure();
+    pn_stats_view_t view={0};
+    uint64_t utc=0;bool dated=reading_stats_clock(now_ms(),&utc);
+    view.summary=pn_reading_stats_summary(&reading_stats,dated,utc);
+    view.summary.known=view.summary.known && shelf_covers && shelf_covers->has_last && shelf_covers->last.identified && !memcmp(shelf_covers->last.expected.sha256,reading_stats.book.id.sha256,32);
+    unsigned year,month,day,weekday;
+    if(dated && pn_bookmark_lock_date((uint32_t)(utc/1000u),&year,&month,&day,&weekday)){
+        view.summary.dated=true;view.summary.weekday=weekday;
+        snprintf(view.date_label,sizeof view.date_label,"%u年%u月%u日 · 周%s",year,month,day,((const char *const[]){"一","二","三","四","五","六","日"})[weekday]);
+    }
+    if(shelf_covers && shelf_covers->has_last){
+        if(*shelf_covers->display[PN_COVER_SLOT_LAST].title)snprintf(view.current_title,sizeof view.current_title,"%.127s",shelf_covers->display[PN_COVER_SLOT_LAST].title);
+        else snprintf(view.current_title,sizeof view.current_title,"%.127s",shelf_covers->last.name);
+    }
+    view.recent=recent_loaded?recent_snapshot:NULL;
+    view.read_marks=read_marks_valid?read_marks:NULL;
+    uint8_t *pixels=pn_alloc_tagged(&pool,PN_MEM_FRAME,342u*1216u);pn_frame_t frame;pn_font_t font={0};pn_w_font_scope_t scope={0};
+    pn_status_t status=pn_frame_bind(&frame,pixels,342u*1216u,684,1216)?management_font_begin(&font,24):PN_NO_MEMORY;
+    if(status==PN_OK)status=pn_w_font_scope_begin(&scope,&pool,NULL);
+    if(status==PN_OK)status=pn_stats_view_render(&view,&font,&frame);
+    pn_w_font_scope_end(&scope);
+    if(status==PN_OK)status=present(NULL,&frame,PN_REFRESH_GL16);
+    management_font_end(&font);pn_free(pixels);
+    if(status==PN_OK){stats_mode=true;shelf_mode=false;status_page=false;}else message("阅读数据未打开","请重试");
+}
 /// 屏下三键：阅读KEY1/3翻页、KEY2短按回书架主页、长按KEY2开工具栏；书架KEY1/3翻书目页；工具栏KEY2关闭。/ Touch keys: reading KEY1/3 turn pages, short KEY2 returns to the shelf home and long KEY2 opens the toolbar; shelf KEY1/3 page the catalog; toolbar KEY2 closes.
 /// 当前书不可用的工具栏入口：TXT没有目录，搜索尚未实现。/ Toolbar entries unavailable for the current book: TXT has no TOC and search is not implemented.
 static unsigned tool_unavailable(void){return epub.impl?0u:1u;}
+static bool toolbar_bookmarked; ///< 当前工具栏会话是否刚添加书签 / Whether the current toolbar session just added a bookmark
+/// 构建阅读工具栏顶部信息条快照（书名、进度与一键书签状态）。/ Build reader toolbar top-bar snapshot (title, progress and quick-bookmark state).
+static void toolbar_top_info(pn_toolbar_top_t *out,char title_buf[128]){
+    memset(out,0,sizeof *out);title_buf[0]=0;
+    const char *src=selected_path;
+    if(shelf_covers && shelf_covers->has_last && !strcmp(shelf_covers->last.path,selected_path) && *shelf_covers->display[PN_COVER_SLOT_LAST].title)src=shelf_covers->display[PN_COVER_SLOT_LAST].title;
+    else{const char *slash=strrchr(selected_path,'/');if(slash)src=slash+1;}
+    snprintf(title_buf,128,"%.127s",src);
+    char *dot=strrchr(title_buf,'.');
+    if(dot && (!strcmp(dot,".txt") || !strcmp(dot,".TXT") || !strcmp(dot,".epub") || !strcmp(dot,".EPUB")))*dot=0;
+    unsigned basis=0;size_t sec=0,cnt=0;
+    bool has_pct=epub.impl?(pn_epub_app_percent(&epub,&basis,&sec,&cnt)==PN_OK):(pn_reader_app_percent(&reader,&basis)==PN_OK);
+    out->title=title_buf;out->basis=has_pct?(int)basis:-1;out->bookmarked=toolbar_bookmarked;out->quick_bookmark=true;
+}
 /// 在最近一页上叠加工具栏并呈现；失败时保持原页面。/ Overlay the toolbar on the latest page and present it; the page stays on failure.
-static void toolbar_show(void){
-    if(toolbar_open || !reader_active() || status_page || !page_copy)return;
-    pn_frame_t frame;pn_font_t font={0};
+static void toolbar_show_notice(const char *override_notice){
+    if(!reader_active() || status_page || !page_copy)return;
+    pn_frame_t frame;pn_font_t font={0};pn_w_font_scope_t scope={0};
     pn_status_t status=pn_frame_bind(&frame,page_copy,342u*1216u,684,1216)?management_font_begin(&font,34):PN_INVALID;
-    if(status==PN_OK){toolbar_open=true;status=pn_reader_toolbar_present(&pool,&font,&frame,tool_unavailable(),progress_save_failed?"保存失败，当前页保留，稍后重试":reader_notice,present,NULL);if(status!=PN_OK)toolbar_open=false;}
-    management_font_end(&font);if(status!=PN_OK)ESP_LOGW(TAG,"Toolbar: %d",(int)status);
+    if(status==PN_OK)status=pn_w_font_scope_begin(&scope,&pool,NULL);
+    if(status==PN_OK){
+        pn_toolbar_top_t top;char title_buf[128];toolbar_top_info(&top,title_buf);
+        const char *msg=override_notice?override_notice:progress_save_failed?"保存失败，当前页保留，稍后重试":reader_notice;
+        toolbar_open=true;
+        status=pn_reader_toolbar_present_ex(&pool,&font,&frame,tool_unavailable(),msg,&top,present,NULL);
+        if(status!=PN_OK)toolbar_open=false;
+    }
+    pn_w_font_scope_end(&scope);management_font_end(&font);if(status!=PN_OK)ESP_LOGW(TAG,"Toolbar: %d",(int)status);
+}
+static void toolbar_show(void){
+    if(toolbar_open)return;
+    toolbar_bookmarked=false;
+    toolbar_show_notice(NULL);
 }
 /// 关闭工具栏并恢复原页面；强刷传PN_REFRESH_GC16。/ Close the toolbar and restore the page; pass PN_REFRESH_GC16 for a full refresh.
 static void toolbar_close(pn_refresh_t profile){
@@ -2855,7 +3443,7 @@ static int active_hit(int x,int y);
 static void apply_selection(int selection);
 /// 三键焦点导航适用的页面：触摸页与工具栏等（书架和阅读正文各有自己的按键规则）。/ Pages three-key focus navigation applies to: touch pages and the toolbar (the shelf and the reading text have their own key rules).
 static bool focus_page(void){
-    return actions_mode || hub_mode || transfer.impl || usb.open || wallpaper_ui.impl || font_manage.impl || settings_ui.impl || search_mode || index_mode || reading_menu || fonts.active || toc.active || jump_ui.active || styles.active || bookmarks.mode!=PN_BUI_CLOSED || toolbar_open || status_page;
+    return actions_mode || stats_mode || files_mode || hub_mode || transfer.impl || usb.open || wallpaper_ui.impl || font_manage.impl || settings_ui.impl || search_mode || index_mode || reading_menu || fonts.active || toc.active || jump_ui.active || styles.active || bookmarks.mode!=PN_BUI_CLOSED || toolbar_open || status_page;
 }
 /// 充电状态变化只补顶部，失败留待安静时重试；锁屏/传输/模态不被后台画面覆盖。/ Patch only the top on charge changes, retrying when quiet; never cover locks, transfers or modals.
 static pn_status_t battery_status_present(bool reader_body){
@@ -2874,7 +3462,7 @@ static pn_status_t battery_status_present(bool reader_body){
     if(status==PN_OK && shelf_mode && !focus_page() && shelf_draw_valid){shelf_draw_revision=async_port.revision;shelf_draw_status=pn_w_status_snapshot();}
     management_font_end(&font);pn_free(pixels);return status;
 }
-static int focus_hit(void *ctx,int x,int y){(void)ctx;return active_hit(x,y);}
+static int focus_hit(void *ctx,int x,int y){(void)ctx;int c=active_hit(x,y);return (jump_ui.active && c>=PN_JUI_PERCENT)?-1:c;}
 /// 重新扫描当前页的焦点表，尽量保持原焦点。/ Rescan the page's focus table, keeping the focus where possible.
 static void focus_rescan(void){
     int keep=-1;const pn_focus_item_t *current=pn_focus_current(&focus_nav);if(current)keep=current->code;
@@ -2886,14 +3474,45 @@ static bool dialog_codes(int *confirm,int *cancel){
     if(font_manage.impl && font_manage.screen==PN_FMU_CONFIRMING){*confirm=PN_FMU_CONFIRM;*cancel=PN_FMU_CANCEL;return true;}
     if(bookmarks.mode==PN_BUI_DELETE){*confirm=PN_BUI_CONFIRM;*cancel=PN_BUI_CANCEL;return true;}
     if(actions_mode && actions.confirming){*confirm=PN_BA_CONFIRM;*cancel=PN_BA_CANCEL;return true;}
+    if(files_mode && file_manager && file_manager->view==PN_FM_VIEW_CONFIRM){*confirm=PN_FM_CONFIRM_DELETE;*cancel=PN_FM_CONFIRM_CANCEL;return true;}
     return false;
 }
-/// 弹窗左键取消、右键明确确认；中键由首页保存路径处理。
-/// Dialog left cancels, right explicitly confirms; middle uses the saved Home route.
+/// 重绘当前焦点页以刷新三键焦点框。/ Repaint the active focus page to update the three-key focus ring.
+static void focus_repaint(void){
+    if(wallpaper_ui.impl)(void)pn_wallpaper_ui_present(&wallpaper_ui,present,NULL);
+    else if(font_manage.impl)(void)pn_font_manage_present(&font_manage,present,NULL);
+    else if(settings_ui.impl)(void)pn_settings_ui_present(&settings_ui,present,NULL);
+    else if(files_mode)(void)file_manager_paint();
+    else if(hub_mode)show_hub();
+    else if(search_mode)show_search();
+    else if(stats_mode)show_stats();
+    else if(index_mode)show_index();
+    else if(reading_menu)paint_transfer(true);
+    else if(fonts.active)(void)pn_font_ui_present(&fonts,present,NULL);
+    else if(toc.active)(void)pn_toc_ui_present(&toc,present,NULL);
+    else if(jump_ui.active)(void)pn_jump_ui_present(&jump_ui,present,NULL);
+    else if(styles.active)(void)pn_style_ui_present(&styles,present,NULL);
+    else if(bookmarks.mode!=PN_BUI_CLOSED)(void)pn_bookmark_ui_present(&bookmarks,present,NULL);
+    else if(toolbar_open)toolbar_show();
+    else if(actions_mode)(void)draw_shelf(PN_REFRESH_GL16);
+}
+/// 确认弹窗统一三键：KEY1/KEY3切换焦点，KEY2短按确认当前焦点（未选中时先安全落到取消），KEY2长按立即取消。
+/// Unified three-key dialog: KEY1/KEY3 move focus, KEY2 short activates focused button (safely focusing Cancel first when unfocused), KEY2 long cancels.
 static void dialog_key(int key,pn_key_event_t event,int confirm,int cancel){
+    if(key==PN_KEY_2 && event==PN_KEY_LONG){focus_nav.index=-1;apply_selection(cancel);return;}
     if(event!=PN_KEY_SHORT)return;
-    if(key==PN_KEY_1){focus_nav.index=-1;apply_selection(cancel);return;}
-    if(key==PN_KEY_3){focus_nav.index=-1;apply_selection(confirm);return;}
+    if(key==PN_KEY_1 || key==PN_KEY_3){
+        focus_rescan();
+        if(focus_nav.count){(void)pn_focus_move(&focus_nav,key==PN_KEY_3?1:-1);focus_repaint();}
+        return;
+    }
+    if(key==PN_KEY_2){
+        focus_rescan();const pn_focus_item_t *item=pn_focus_current(&focus_nav);
+        if(item && (item->code==confirm || item->code==cancel)){int code=item->code;focus_nav.index=-1;apply_selection(code);return;}
+        focus_nav.index=0;
+        for(size_t i=0;i<focus_nav.count;i++)if(focus_nav.items[i].code==cancel){focus_nav.index=(int)i;break;}
+        if(focus_nav.count)focus_repaint();
+    }
 }
 /// 打开第index本书的操作面板。/ Open the actions sheet for entry index.
 static void open_actions(int index){
@@ -2902,6 +3521,7 @@ static void open_actions(int index){
     if(shelf_covers){snprintf(actions.title,sizeof actions.title,"%s",shelf_covers->display[index].title);snprintf(actions.author,sizeof actions.author,"%s",shelf_covers->display[index].author);}
     uint64_t started=now_ms();(void)started;
     actions.favorites_known=favorites_ensure()==PN_OK;actions.favorite=actions.favorites_known && pn_favorites_contains(favorites,actions.item.path);
+    actions.read_marks_known=read_marks_ensure()==PN_OK;actions.read_done=pn_read_marks_is_read(actions.read_marks_known?read_marks:NULL,actions.item.path,actions.item.identified || actions.item.has_progress,actions.item.progress);
     uint64_t favorites_ms=now_ms()-started,paint_ms=0;(void)favorites_ms;(void)paint_ms;
     actions_mode=true;
     // 成功底图直接叠加面板，按需准备面板文字；不扫描目录或重绘封面。/ Overlay the confirmed shelf with the sheet's glyphs, without directory scans or cover painting.
@@ -2943,68 +3563,97 @@ static void handle_key(int key,pn_key_event_t event){
 #endif
     if(ota.impl){if(event==PN_KEY_SHORT && (key==PN_KEY_1 || key==PN_KEY_2))update_command(PN_SETUI_UPDATE_CANCEL);else if(event==PN_KEY_SHORT && key==PN_KEY_3){pn_device_ota_state_t state={0};(void)pn_device_ota_state(&ota,&state);if(state.phase==PN_DEVICE_OTA_AVAILABLE)update_command(PN_SETUI_UPDATE_INSTALL);else if(state.phase==PN_DEVICE_OTA_READY)update_command(PN_SETUI_UPDATE_REBOOT);}return;}
     if(opening){if(event==PN_KEY_SHORT && (key==PN_KEY_1 || key==PN_KEY_2))opening_cancel(key);return;}
-    if(usb.open){if(event==PN_KEY_SHORT){usb_return=true;usb_home=key==PN_KEY_2;usb_lock=false;pn_device_usb_request_stop(&usb);}return;}
-    // 排版中间键先应用草稿，只有成功才回到当前阅读页。/ Apply the draft first on the typesetting middle key and return to reading only on success.
-    if(fonts.active && key==PN_KEY_2 && event==PN_KEY_SHORT){
-        apply_selection(fonts.mode==1?PN_FUI_APPLY:PN_FUI_BACK);
-        if(!fonts.active && styles.active)apply_selection(PN_SUI_APPLY);
-        return;
-    }
-    if(styles.active && key==PN_KEY_2 && event==PN_KEY_SHORT){apply_selection(PN_SUI_APPLY);return;}
-    // 阅读入口的设置已逐项持久化，中间键返回原书；保存失败的草稿仍由各页保留。/ Reading-entered settings persist each change; the middle key resumes the book, while individual pages retain failed drafts.
-    if(settings_ui.impl && *selected_path && key==PN_KEY_2 && event==PN_KEY_SHORT){end_settings();return;}
-    if(reader_active() && key==PN_KEY_2 && event==PN_KEY_SHORT){
-        if(toolbar_open){toolbar_close(PN_REFRESH_GL16);return;}
-        if(reading_menu){apply_selection(PN_READING_MENU_RESUME);return;}
-    }
-    if(focus_page() && event==PN_KEY_SHORT && key==PN_KEY_2){
-        if(transfer.impl){management_home_pending=true;transfer_return=true;transfer_lock=false;(void)pn_device_transfer_request_stop(&transfer);return;}
-        if(!stop_reader())return;
-        if(settings_ui.impl){input_flags=settings_ui.flags;vertical_turn=settings_ui.vertical_turn;vertical_turn_loaded=true;index_wait=settings_ui.index_wait;index_wait_loaded=true;shelf_prefs=settings_ui.shelf;}
-        pn_wallpaper_ui_close(&wallpaper_ui);pn_font_manage_close(&font_manage);pn_settings_ui_close(&settings_ui);
-        reading_menu=false;toolbar_open=false;actions_mode=false;hub_mode=false;index_mode=false;search_mode=false;back_to_settings=false;
-        focus_nav.index=-1;home_mode=true;selected_path[0]=0;show_shelf("",false);return;
-    }
+    if(usb.open){if(event==PN_KEY_SHORT || (key==PN_KEY_2 && event==PN_KEY_LONG)){usb_return=true;usb_home=key==PN_KEY_2;usb_lock=false;pn_device_usb_request_stop(&usb);}return;}
     {int confirm=0,cancel=0;if(dialog_codes(&confirm,&cancel)){dialog_key(key,event,confirm,cancel);return;}}
+    // 统一方案A三键：KEY1/KEY3移动焦点，KEY2短按确认/进入焦点，KEY2长按返回/关闭（顶层设置与传书返回主页）。
+    // Unified Plan A three-key navigation: KEY1/KEY3 move focus, KEY2 short confirms/enters focus, KEY2 long returns/closes (top-level Settings/Hub return Home).
     if(focus_page()){
+        int back=transfer.impl?PN_TRANSFER_VIEW_STOP:wallpaper_ui.impl?(wallpaper_ui.screen==PN_WUI_LIST?PN_WUI_BACK:PN_WUI_CANCEL):font_manage.impl?PN_FMU_BACK:settings_ui.impl?PN_SETUI_BACK:actions_mode?PN_BA_CANCEL:stats_mode?PN_STATS_BACK:files_mode?(file_manager && file_manager->view==PN_FM_VIEW_ACTIONS?PN_FM_ACT_CANCEL:PN_FM_BACK):hub_mode?PN_HUB_SHELF:search_mode?PN_SEARCH_BACK:index_mode?'<':reading_menu?PN_READING_MENU_RESUME:fonts.active?(fonts.preview?PN_FUI_FORM:PN_FUI_BACK):toc.active?PN_TOC_UI_BACK:jump_ui.active?PN_JUI_CANCEL:styles.active?(styles.preview?PN_SUI_FORM:styles.margins?PN_SUI_MARGINS_BACK:styles.backgrounds?PN_SUI_BACKGROUND_BACK:styles.more?PN_SUI_BACK_MAIN:PN_SUI_CANCEL):bookmarks.mode!=PN_BUI_CLOSED?PN_BUI_BACK:toolbar_open?PN_TOOL_CLOSE:-1;
+        if(key==PN_KEY_2 && event==PN_KEY_LONG){
+            focus_nav.index=-1;
+            if(transfer.impl){management_home_pending=true;transfer_return=true;transfer_lock=false;(void)pn_device_transfer_request_stop(&transfer);return;}
+            if(settings_ui.impl && pn_settings_ui_screen(&settings_ui)==0){
+                if(*selected_path){end_settings();return;}
+                if(!stop_reader())return;
+                input_flags=settings_ui.flags;sync_mgmt_refresh_limit(input_flags);vertical_turn=settings_ui.vertical_turn;vertical_turn_loaded=true;index_wait=settings_ui.index_wait;index_wait_loaded=true;shelf_prefs=settings_ui.shelf;home_prefs=settings_ui.home;home_prefs_loaded=true;pn_w_set_brand(home_prefs.header);
+                pn_settings_ui_close(&settings_ui);back_to_settings=false;home_mode=true;selected_path[0]=0;atomic_store(&mgmt_root_switch,true);show_shelf("",false);return;
+            }
+            if(hub_mode){hub_mode=false;home_mode=true;selected_path[0]=0;atomic_store(&mgmt_root_switch,true);show_shelf("",false);return;}
+            if(back>=0){apply_selection(back);return;}
+            if(status_page){if(!stop_reader())return;home_mode=true;selected_path[0]=0;show_shelf("",false);}
+            return;
+        }
         if(event!=PN_KEY_SHORT)return;
-        if(key==PN_KEY_1 && fonts.active && fonts.preview){apply_selection(PN_FUI_FORM);return;}
-        if(key==PN_KEY_1 && styles.active && styles.preview){apply_selection(PN_SUI_FORM);return;}
-        int back=transfer.impl?PN_TRANSFER_VIEW_STOP:wallpaper_ui.impl?(wallpaper_ui.screen==PN_WUI_LIST?PN_WUI_BACK:PN_WUI_CANCEL):font_manage.impl?PN_FMU_BACK:settings_ui.impl?PN_SETUI_BACK:actions_mode?PN_BA_CANCEL:hub_mode?PN_HUB_SHELF:search_mode?PN_SEARCH_BACK:index_mode?'<':reading_menu?PN_READING_MENU_RESUME:fonts.active?PN_FUI_BACK:toc.active?PN_TOC_UI_BACK:jump_ui.active?PN_JUI_CANCEL:styles.active?(styles.margins?PN_SUI_MARGINS_BACK:styles.backgrounds?PN_SUI_BACKGROUND_BACK:styles.more?PN_SUI_BACK_MAIN:PN_SUI_CANCEL):bookmarks.mode!=PN_BUI_CLOSED?PN_BUI_BACK:toolbar_open?PN_TOOL_CLOSE:-1;
-        if(key==PN_KEY_1){focus_nav.index=-1;int command=pn_key_management_command(key,event,back,-1,-1);if(command>=0)apply_selection(command);return;}
-        if(key==PN_KEY_3){
-            if(fonts.active){apply_selection(fonts.preview?PN_FUI_FORM:fonts.mode?PN_FUI_APPLY:PN_FUI_SELECT);return;}
-            if(styles.active){apply_selection(styles.preview?PN_SUI_FORM:PN_SUI_APPLY);return;}
+        if(key==PN_KEY_1 || key==PN_KEY_3){
+            if(fonts.active && fonts.preview){focus_nav.index=-1;apply_selection(PN_FUI_FORM);return;}
+            if(styles.active && styles.preview){focus_nav.index=-1;apply_selection(PN_SUI_FORM);return;}
+            focus_rescan();
+            if(focus_nav.count){(void)pn_focus_move(&focus_nav,key==PN_KEY_3?1:-1);focus_repaint();}
+            return;
+        }
+        if(key==PN_KEY_2){
+            if(transfer.impl){focus_nav.index=-1;apply_selection(PN_TRANSFER_VIEW_STOP);return;}
+            focus_rescan();const pn_focus_item_t *item=pn_focus_current(&focus_nav);
+            if(item){int code=item->code;focus_nav.index=-1;focus_nav.count=0;apply_selection(code);return;}
+            // 设置二级/三级子页、字体管理、锁屏壁纸、阅读数据与文件管理在未聚焦时，短按中键直接返回上一级页面。
+            // In 2nd/3rd-level settings subpages (and font/wallpaper/stats/file manager) when unfocused, short-pressing KEY2 returns to the previous level.
+            if((settings_ui.impl && pn_settings_ui_screen(&settings_ui)>0) || font_manage.impl || wallpaper_ui.impl || stats_mode || files_mode){
+                if(back>=0){focus_nav.index=-1;focus_nav.count=0;apply_selection(back);return;}
+            }
+            // 未移动焦点时的快捷确认：排版/工具栏/目录/书签/跳转保留直接确认或关闭；其余管理页先进入首个非返回焦点。
+            // Quick confirm when unfocused: typesetting/toolbar/TOC/bookmarks/jump keep direct apply/close; other management pages focus the first non-back item first.
+            if(fonts.active){apply_selection(fonts.mode==1?PN_FUI_APPLY:PN_FUI_BACK);if(!fonts.active && styles.active)apply_selection(PN_SUI_APPLY);return;}
+            if(styles.active){apply_selection(PN_SUI_APPLY);return;}
+            if(toolbar_open){toolbar_close(PN_REFRESH_GL16);return;}
+            if(reading_menu){apply_selection(PN_READING_MENU_RESUME);return;}
             if(jump_ui.active){apply_selection(PN_JUI_CONFIRM);return;}
             if(toc.active){if(toc.selected<toc.count)apply_selection(pn_toc_ui_selected_command(&toc));return;}
             if(bookmarks.mode!=PN_BUI_CLOSED){apply_selection(bookmarks.mode==PN_BUI_RENAME?PN_BUI_SAVE:bookmarks.mode==PN_BUI_ACTIONS?PN_BUI_JUMP:PN_BUI_SELECT);return;}
-            focus_rescan();const pn_focus_item_t *item=pn_focus_current(&focus_nav);
-            if(!item){for(size_t i=0;i<focus_nav.count;i++)if(focus_nav.items[i].code!=back){item=&focus_nav.items[i];break;}}
-            if(item){int code=item->code;focus_nav.index=-1;apply_selection(code);}return;
+            for(size_t i=0;i<focus_nav.count;i++)if(focus_nav.items[i].code!=back){focus_nav.index=(int)i;break;}
+            if(focus_nav.index<0 && focus_nav.count)focus_nav.index=0;
+            if(focus_nav.count)focus_repaint();
+            return;
         }
         return;
     }
     if(transfer.impl || usb.open || wallpaper_ui.impl || font_manage.impl || settings_ui.impl)return;
     if(bookmarks.mode!=PN_BUI_CLOSED || styles.active || fonts.active || toc.active || jump_ui.active)return;
-    if(toolbar_open){if(key==PN_KEY_2 && event==PN_KEY_SHORT)toolbar_close(PN_REFRESH_GL16);return;}
+    if(toolbar_open){if(key==PN_KEY_2 && (event==PN_KEY_SHORT || event==PN_KEY_LONG))toolbar_close(PN_REFRESH_GL16);return;}
     if(reading_menu){
-        if(event==PN_KEY_SHORT && key==PN_KEY_2){reading_menu=false;if(reader_active()){if(active_step(PN_APP_OPEN,now_ms())==PN_OK){status_page=false;shelf_mode=false;}}else start_reader();}
+        if((event==PN_KEY_SHORT || event==PN_KEY_LONG) && key==PN_KEY_2){reading_menu=false;if(reader_active()){if(active_step(PN_APP_OPEN,now_ms())==PN_OK){status_page=false;shelf_mode=false;}}else start_reader();}
         return;
     }
     if(shelf_mode && shelf_page){
-        if(event!=PN_KEY_SHORT)return;
         if(entertainment && !home_mode){
-            if(key==PN_KEY_2){sudoku_open();}
-            else if(key==PN_KEY_3){sokoban_open();}
-            else if(key==PN_KEY_1){entertainment=entertainment==2?1:0;show_shelf("",false);}
+            if(key==PN_KEY_2 && event==PN_KEY_LONG){entertainment=entertainment==2?1:0;shelf_focus=-1;show_shelf("",false);return;}
+            if(event!=PN_KEY_SHORT)return;
+            if(entertainment==2){if(key==PN_KEY_2){entertainment=1;shelf_focus=-1;show_shelf("",false);}return;}
+            if(key==PN_KEY_1 || key==PN_KEY_3){
+                shelf_focus=shelf_focus<0?(key==PN_KEY_3?0:6):(shelf_focus+(key==PN_KEY_3?1:6))%7;
+                (void)draw_shelf(PN_REFRESH_GL16);return;
+            }
+            if(key==PN_KEY_2){
+                if(shelf_focus<0){shelf_focus=0;(void)draw_shelf(PN_REFRESH_GL16);return;}
+                static const int games[7]={PN_SHELF_SUDOKU,PN_SHELF_SOKOBAN,PN_SHELF_MINESWEEPER,PN_SHELF_NONOGRAM,PN_SHELF_XIANGQI,PN_SHELF_KLOTSKI,PN_SHELF_TSUMEGO};
+                int pick=shelf_focus<7?shelf_focus:0;shelf_focus=-1;apply_selection(games[pick]);
+            }
             return;
         }
         if(home_mode){
+            if(key==PN_KEY_2 && event==PN_KEY_LONG){if(shelf_focus>=0){int before=shelf_focus;shelf_focus=-1;(void)draw_shelf_focus(before);}return;}
+            if(event!=PN_KEY_SHORT)return;
             if(key==PN_KEY_2){if(shelf_page->count)open_shelf_item(shelf_focus<0?0:shelf_focus);else{home_mode=false;show_shelf("",false);}}
-            else if(shelf_page->count){int next=shelf_focus<0?0:shelf_focus+(key==PN_KEY_3?1:-1);if(next>=0 && next<(int)shelf_page->count){int before=shelf_focus;shelf_focus=next;(void)draw_shelf_focus(before);}}
+            else if(shelf_page->count){int next=shelf_focus<0?(key==PN_KEY_3?0:(int)shelf_page->count-1):shelf_focus+(key==PN_KEY_3?1:-1);if(next>=0 && next<(int)shelf_page->count){int before=shelf_focus;shelf_focus=next;(void)draw_shelf_focus(before);}}
             return;
         }
-        // KEY2：先把焦点放到当前页第一项，再按一次打开焦点项（docs/ARCHITECTURE.md“三键与步进输入”）；设置从底栏进入。/ KEY2: first focus the page's first entry, press again to open it (docs/ARCHITECTURE.md, key and stepper input); Settings is reached from the bottom bar.
+        // 书库统一方案A：浏览态 KEY1/KEY3 翻页、KEY2短按进入选择态、KEY2长按回主页；选择态 KEY1/KEY3 移动书目焦点（支持跨页）、KEY2短按打开、KEY2长按退出选择态。
+        // Library Plan A: browse mode KEY1/KEY3 turn pages, KEY2 short enters selection, KEY2 long goes Home; selection mode KEY1/KEY3 move focus (across pages), KEY2 short opens, KEY2 long exits selection.
+        if(key==PN_KEY_2 && event==PN_KEY_LONG){
+            if(shelf_focus>=0){int before=shelf_focus;shelf_focus=-1;(void)draw_shelf_focus(before);}
+            else{home_mode=true;show_shelf("",false);}
+            return;
+        }
+        if(event!=PN_KEY_SHORT)return;
         if(key==PN_KEY_2){
             if(!shelf_page->count)return;
             if(shelf_focus<0){int before=shelf_focus;shelf_focus=0;if(draw_shelf_focus(before)!=PN_OK)ESP_LOGW(TAG,"Shelf focus redraw failed");}
@@ -3012,6 +3661,18 @@ static void handle_key(int key,pn_key_event_t event){
             return;
         }
         if(!shelf_page->count)return;
+        if(shelf_focus>=0){
+            if(key==PN_KEY_3){
+                if(shelf_focus+1<(int)shelf_page->count){int before=shelf_focus;shelf_focus++;(void)draw_shelf_focus(before);return;}
+                if(!shelf_page->more)return;
+                char cursor[PN_CATALOG_NAME_MAX];strcpy(cursor,shelf_page->items[shelf_page->count-1].name);
+                pending_shelf_focus=0;show_shelf(cursor,false);return;
+            }
+            if(shelf_focus>0){int before=shelf_focus;shelf_focus--;(void)draw_shelf_focus(before);return;}
+            if(!shelf_page->index)return;
+            char cursor[PN_CATALOG_NAME_MAX];strcpy(cursor,shelf_page->items[0].name);
+            pending_shelf_focus=-3;show_shelf(cursor,true);return;
+        }
         char cursor[PN_CATALOG_NAME_MAX];strcpy(cursor,shelf_page->items[key==PN_KEY_3?shelf_page->count-1:0].name);show_shelf(cursor,key==PN_KEY_1);return;
     }
     if(!reader_active() || status_page)return;
@@ -3040,8 +3701,10 @@ static int active_hit(int x,int y){
     else if(wallpaper_ui.impl)hit=pn_wallpaper_ui_hit(&wallpaper_ui,x,y);
     else if(font_manage.impl)hit=pn_font_manage_hit(&font_manage,x,y);
     else if(settings_ui.impl)hit=pn_settings_ui_hit(&settings_ui,x,y);
+    else if(files_mode && file_manager)hit=pn_file_manager_hit(file_manager,x,y);
     else if(hub_mode)hit=pn_transfer_hub_hit(&hub_info,x,y);
     else if(search_mode)hit=pn_search_ui_hit(x,y);
+    else if(stats_mode)hit=pn_stats_view_hit(x,y);
     else if(index_mode){char letter=pn_shelf_index_hit(x,y);hit=letter?(int)(unsigned char)letter:-1;}
     else if(reading_menu)hit=pn_reading_menu_hit_lan(x,y,*saved_network!=0);
     else if(fonts.active)hit=pn_font_ui_hit(&fonts,x,y);
@@ -3061,7 +3724,7 @@ static int active_hit(int x,int y){
 static int root_navigation_hit(int x,int y){
     if(tsumego.active || klotski.active || xiangqi.active || nonogram.active || minesweeper.active || sokoban.active || sudoku.active)return -1;
     if(opening)return -1;
-    if(locked || usb.open || transfer.impl || time_sync.impl || ota.impl || wallpaper_ui.impl || font_manage.impl || reading_menu || fonts.active || toc.active || jump_ui.active || styles.active || bookmarks.mode!=PN_BUI_CLOSED || actions_mode || index_mode || search_mode || toolbar_open)return -1;
+    if(locked || usb.open || transfer.impl || time_sync.impl || ota.impl || wallpaper_ui.impl || font_manage.impl || reading_menu || fonts.active || toc.active || jump_ui.active || styles.active || bookmarks.mode!=PN_BUI_CLOSED || actions_mode || stats_mode || index_mode || search_mode || toolbar_open)return -1;
     if(settings_ui.impl){if(pn_settings_ui_screen(&settings_ui)!=0)return -1;}
     else if(!hub_mode && !(shelf_mode && shelf_page))return -1;
     return pn_w_navigation_hit(x,y)>=0?active_hit(x,y):-1;
@@ -3090,6 +3753,9 @@ static void feedback_begin(int x,int y){
 #endif
 /// 执行一次已确认的选择（点击或KEY2确认）。/ Perform one confirmed selection (a tap or a KEY2 confirmation).
 static void apply_selection(int selection){
+    // 任意已确认选择执行前清除旧焦点表，避免传书/设置页选择框残留到切换后的页面。
+    // Clear any prior focus selection before executing a confirmed action so focus rings never leak across page switches.
+    focus_nav.index=-1;focus_nav.count=0;
     if(tsumego.active){tsumego_command(selection);return;}
     if(klotski.active){klotski_command(selection);return;}
     if(xiangqi.active){xiangqi_command(selection);return;}
@@ -3117,6 +3783,18 @@ static void apply_selection(int selection){
             if(status==PN_OK)actions.favorite=now;
             favorites_valid=false;
             (void)draw_shelf(PN_REFRESH_GL16);}
+        else if(selection==PN_BA_MARK_READ){
+            pn_media_lease_t lease={0};pn_status_t status=data_ready?pn_media_acquire(&data_media,PN_MEDIA_WRITE,&lease):PN_UNSUPPORTED;pn_journal_files_t files;pn_journal_io_t io;
+            bool auto_done=(actions.item.identified || actions.item.has_progress) && actions.item.progress==10000u;
+            bool want_read=!actions.read_done;
+            pn_read_mark_t next_state=want_read?(auto_done?PN_READ_MARK_AUTO:PN_READ_MARK_READ):(auto_done?PN_READ_MARK_UNREAD:PN_READ_MARK_AUTO);
+            if(status==PN_OK)status=pn_read_marks_files(&files,&data_media,&lease,"/data/progress",&io);
+            if(status==PN_OK)status=pn_read_marks_set(&io,&pool,actions.item.path,next_state);
+            if(lease.ticket)(void)pn_media_release(&data_media,&lease);
+            if(status==PN_OK){actions.read_done=want_read;actions.notice=want_read?"已标记为已读":"已标记为未读";}
+            else actions.notice=status==PN_LIMIT?"手动标记最多 64 本":"保存失败，请重试";
+            read_marks_valid=false;
+            (void)draw_shelf(PN_REFRESH_GL16);}
         else if(selection==PN_BA_DELETE){actions.confirming=true;actions.notice=NULL;(void)draw_shelf(PN_REFRESH_GL16);}
         else if(selection==PN_BA_CONFIRM){
             // 先显示loading遮罩，再归还TF只读消费者并删除选中的文件，避免界面看似卡死。
@@ -3134,12 +3812,14 @@ static void apply_selection(int selection){
             if(status==PN_OK){actions_mode=false;if(!strcmp(selected_path,actions.item.path))selected_path[0]=0;show_shelf("",false);}
             else{system_font_ready();actions.notice="删除失败，文件仍保留";(void)draw_shelf(PN_REFRESH_GL16);}}
     }
+    else if(files_mode){file_manager_apply(selection);}
     else if(hub_mode){
         if(selection==PN_HUB_USB){begin_usb();}
         else if(selection==PN_HUB_HOTSPOT){hub_mode=false;begin_transfer(false);}
         else if(selection==PN_HUB_LAN){hub_mode=false;begin_transfer(true);}
-        else if(selection==PN_HUB_SHELF || selection==PN_HUB_HOME){hub_mode=false;home_mode=selection==PN_HUB_HOME;show_shelf("",false);}
-        else if(selection==PN_HUB_SETTINGS){hub_mode=false;begin_settings();}
+        else if(selection==PN_HUB_STORAGE){file_manager_open();}
+        else if(selection==PN_HUB_SHELF || selection==PN_HUB_HOME){hub_mode=false;home_mode=selection==PN_HUB_HOME;atomic_store(&mgmt_root_switch,true);show_shelf("",false);}
+        else if(selection==PN_HUB_SETTINGS){hub_mode=false;atomic_store(&mgmt_root_switch,true);begin_settings();}
     }
     else if(search_mode){
         if(selection==PN_SEARCH_BACK){search_mode=false;show_shelf("",false);}
@@ -3150,17 +3830,24 @@ static void apply_selection(int selection){
         }
     }
     else if(index_mode){index_mode=false;if(selection!='<'){jump_letter=(char)selection;recent_mode=false;}show_shelf("",false);}
+    else if(stats_mode){if(selection==PN_STATS_BACK){stats_mode=false;home_mode=true;show_shelf("",false);}}
     else if(settings_ui.impl){update_time_ui(false);if(selection==PN_SETUI_FULL_REFRESH)atomic_store(&deep_clean_pending,true);pn_status_t status=pn_settings_ui_event(&settings_ui,selection,present,NULL);if(status!=PN_OK && status!=PN_EMPTY && status!=PN_LIMIT)ESP_LOGW(TAG,"Settings: %d",(int)status);
+        sync_mgmt_refresh_limit(settings_ui.flags);
         // 设置页自行保存/忘记WiFi后，刷新对时、更新与传书使用的网络名快照。/ After settings save or forget WiFi, refresh the network-name snapshot used by time sync, updates and transfer.
         if(settings_ui.network_changed){settings_ui.network_changed=false;refresh_network_name();update_time_ui(false);update_ota_ui(false);}
         if(settings_ui.request==PN_SETUI_WIFI_TEST || settings_ui.request==PN_SETUI_WIFI_TEST_CANCEL){int request=settings_ui.request;settings_ui.request=0;
             if(request==PN_SETUI_WIFI_TEST)begin_wifi_probe();else if(wifi_probe.impl)(void)pn_device_wifi_probe_stop(&wifi_probe);else (void)pn_settings_ui_wifi_result(&settings_ui,PN_CANCELLED,present,NULL);}
         else if(settings_ui.request>=PN_SETUI_UPDATE_CHECK && settings_ui.request<=PN_SETUI_UPDATE_CANCEL){int request=settings_ui.request;settings_ui.request=0;update_command(request);}
         else if(settings_ui.request==PN_SETUI_TIME_SYNC || settings_ui.request==PN_SETUI_TIME_CANCEL){int request=settings_ui.request;settings_ui.request=0;if(request==PN_SETUI_TIME_SYNC)begin_time_sync();else{(void)pn_device_time_request_stop(&time_sync);snprintf(time_notice,sizeof time_notice,"正在结束对时…");update_time_ui(true);}}
-        else if(settings_ui.request){int request=settings_ui.request;input_flags=settings_ui.flags;vertical_turn=settings_ui.vertical_turn;vertical_turn_loaded=true;index_wait=settings_ui.index_wait;index_wait_loaded=true;shelf_prefs=settings_ui.shelf;pn_settings_ui_close(&settings_ui);back_to_settings=request==PN_SETUI_WALLPAPER || request==PN_SETUI_FONTS;if(request==PN_SETUI_WALLPAPER)begin_wallpaper();else if(request==PN_SETUI_LAN)begin_transfer(true);else if(request==PN_SETUI_SHELF || request==PN_SETUI_HOME){home_mode=request==PN_SETUI_HOME;selected_path[0]=0;show_shelf("",false);}else if(request==PN_SETUI_TRANSFER)show_hub();else begin_fonts();}
+        else if(settings_ui.request){int request=settings_ui.request;input_flags=settings_ui.flags;sync_mgmt_refresh_limit(input_flags);vertical_turn=settings_ui.vertical_turn;vertical_turn_loaded=true;index_wait=settings_ui.index_wait;index_wait_loaded=true;shelf_prefs=settings_ui.shelf;home_prefs=settings_ui.home;home_prefs_loaded=true;pn_w_set_brand(home_prefs.header);pn_settings_ui_close(&settings_ui);back_to_settings=request==PN_SETUI_WALLPAPER || request==PN_SETUI_FONTS;if(request==PN_SETUI_WALLPAPER)begin_wallpaper();else if(request==PN_SETUI_LAN)begin_transfer(true);else if(request==PN_SETUI_SHELF || request==PN_SETUI_HOME){home_mode=request==PN_SETUI_HOME;selected_path[0]=0;atomic_store(&mgmt_root_switch,true);show_shelf("",false);}else if(request==PN_SETUI_TRANSFER){atomic_store(&mgmt_root_switch,true);show_hub();}else begin_fonts();}
         else if(!settings_ui.active)end_settings();}
     else if(toolbar_open){
         if(selection==PN_TOOL_CLOSE)toolbar_close(PN_REFRESH_GL16);
+        else if(selection==PN_TOOL_QUICK_BOOKMARK){
+            uint64_t bid=0;pn_status_t bs=epub.impl?pn_epub_app_bookmark_add(&epub,NULL,&bid):pn_reader_app_bookmark_add(&reader,NULL,&bid);
+            if(bs==PN_OK){toolbar_bookmarked=true;toolbar_show_notice("已添加书签");}
+            else toolbar_show_notice(bs==PN_LIMIT?"书签已满，请先管理书签":"书签保存失败，请重试");
+        }
         else if(selection==PN_TOOL_REFRESH){atomic_store(&deep_clean_pending,true);toolbar_close(PN_REFRESH_GC16);}
         else if(selection==PN_TOOL_TOC){toolbar_open=false;if(epub.impl)(void)begin_toc();}
         else if(selection==PN_TOOL_BOOKMARKS){toolbar_open=false;if(epub.impl)(void)pn_bookmark_ui_open_epub(&bookmarks,&epub,present,NULL);else (void)pn_bookmark_ui_open(&bookmarks,&reader,present,NULL);}
@@ -3172,14 +3859,17 @@ static void apply_selection(int selection){
     else if(shelf_mode && (selection==PN_SHELF_TAB_ENTERTAINMENT || selection==PN_SHELF_ENTERTAINMENT_BACK || selection==PN_SHELF_SUDOKU || selection==PN_SHELF_SOKOBAN || selection==PN_SHELF_MINESWEEPER || selection==PN_SHELF_NONOGRAM || selection==PN_SHELF_XIANGQI || selection==PN_SHELF_KLOTSKI || selection==PN_SHELF_TSUMEGO)){
         home_mode=false;entertainment=1;if(selection==PN_SHELF_SUDOKU)sudoku_open();else if(selection==PN_SHELF_SOKOBAN)sokoban_open();else if(selection==PN_SHELF_MINESWEEPER)minesweeper_open();else if(selection==PN_SHELF_NONOGRAM)nonogram_open();else if(selection==PN_SHELF_XIANGQI)xiangqi_open();else if(selection==PN_SHELF_KLOTSKI)klotski_open();else if(selection==PN_SHELF_TSUMEGO)tsumego_open();else show_shelf("",false);
     }
-    else if(shelf_mode && selection==PN_SHELF_READING_HOME){if(!home_mode){home_mode=true;show_shelf("",false);}}
+    else if(shelf_mode && selection==PN_SHELF_READING_HOME){if(!home_mode){home_mode=true;atomic_store(&mgmt_root_switch,true);show_shelf("",false);}}
+    else if(shelf_mode && selection==PN_SHELF_READING_STATS){show_stats();}
     else if(shelf_mode && selection==PN_SHELF_LAYOUT){list_mode=!list_mode;shelf_focus=-1;show_shelf("",false);}
-                else if(shelf_mode && selection==PN_SHELF_IMPORT && !recent_mode)show_hub();
+    else if(shelf_mode && selection==PN_SHELF_SORT && !home_mode && !entertainment && !recent_mode && !fav_mode && !*search_query){shelf_sort=(pn_shelf_sort_t)((shelf_sort+1)%PN_SHELF_SORT_COUNT);shelf_sort_save();shelf_focus=-1;show_shelf("",false);}
+    else if(shelf_mode && selection==PN_SHELF_FOLDER && !home_mode && !entertainment && !recent_mode && !fav_mode && !*search_query && shelf_folder_count>0){shelf_folder_index=(shelf_folder_index+1u)%(shelf_folder_count+1u);shelf_focus=-1;show_shelf("",false);}
+                else if(shelf_mode && selection==PN_SHELF_IMPORT && !recent_mode){atomic_store(&mgmt_root_switch,true);show_hub();}
     else if(shelf_mode && selection>=PN_SHELF_MORE && selection<PN_SHELF_MORE+PN_CATALOG_PAGE_MAX)open_actions(selection-PN_SHELF_MORE);
-    else if(shelf_mode && selection==PN_SHELF_TRANSFER)show_hub();
+    else if(shelf_mode && selection==PN_SHELF_TRANSFER){atomic_store(&mgmt_root_switch,true);show_hub();}
     else if(shelf_mode && selection==PN_SHELF_SEARCH){if(*search_query && !recent_mode){search_query[0]=0;show_shelf("",false);}else{pn_search_ui_open(&search_ui,NULL);show_search();}}
     else if(shelf_mode && selection==PN_SHELF_INDEX && !recent_mode && !*search_query)show_index();
-    else if(shelf_mode && selection==PN_SHELF_MENU)begin_settings();
+    else if(shelf_mode && selection==PN_SHELF_MENU){atomic_store(&mgmt_root_switch,true);begin_settings();}
     else if(jump_ui.active){pn_status_t status=pn_jump_ui_event(&jump_ui,selection,now_ms(),present,NULL);if(status!=PN_OK && status!=PN_EMPTY && status!=PN_BUSY)ESP_LOGW(TAG,"Jump UI: %d",(int)status);}
     else if(fonts.active){(void)pn_font_ui_event(&fonts,selection,now_ms(),present,NULL);if(!fonts.active){bool returned=fonts.return_presented;pn_font_ui_close(&fonts);if(styles.active){if(returned){styles.presented=true;styles.preview=false;}else (void)pn_style_ui_present(&styles,present,NULL);}}}
     else if(toc.active){(void)pn_toc_ui_event(&toc,selection,now_ms(),present,NULL);}
@@ -3190,7 +3880,7 @@ static void apply_selection(int selection){
     else if(bookmarks.mode!=PN_BUI_CLOSED){pn_status_t status=pn_bookmark_ui_event(&bookmarks,selection,NULL,now_ms(),present,NULL);if(status!=PN_OK && status!=PN_EMPTY && status!=PN_BUSY)ESP_LOGW(TAG,"Bookmark UI: %d",(int)status);}
     else if(selection==10 && reader_active() && !shelf_mode && !status_page){if(epub.impl)(void)pn_bookmark_ui_open_epub(&bookmarks,&epub,present,NULL);else (void)pn_bookmark_ui_open(&bookmarks,&reader,present,NULL);}
     else if(selection==11 && reader_active() && !shelf_mode && !status_page){if(epub.impl)(void)pn_epub_app_bookmark_return(&epub,now_ms(),present,NULL);else (void)pn_reader_app_bookmark_return(&reader,now_ms(),present,NULL);}
-    else if(shelf_mode && (selection==PN_SHELF_TAB_ALL || selection==PN_SHELF_TAB_RECENT || selection==PN_SHELF_HOME || selection==PN_SHELF_TAB_FAVORITES)){bool want_recent=selection==PN_SHELF_TAB_RECENT,want_fav=selection==PN_SHELF_TAB_FAVORITES;if(home_mode || entertainment || want_recent!=recent_mode || want_fav!=fav_mode){entertainment=0;home_mode=false;recent_mode=want_recent;fav_mode=want_fav;fav_start=0;search_query[0]=0;show_shelf("",false);}}
+    else if(shelf_mode && (selection==PN_SHELF_TAB_ALL || selection==PN_SHELF_TAB_RECENT || selection==PN_SHELF_HOME || selection==PN_SHELF_TAB_FAVORITES)){bool want_recent=selection==PN_SHELF_TAB_RECENT,want_fav=selection==PN_SHELF_TAB_FAVORITES;if(home_mode || entertainment || want_recent!=recent_mode || want_fav!=fav_mode){if(home_mode)atomic_store(&mgmt_root_switch,true);entertainment=0;home_mode=false;recent_mode=want_recent;fav_mode=want_fav;fav_start=0;search_query[0]=0;show_shelf("",false);}}
     else if(shelf_mode && selection==PN_SHELF_CONTINUE){
         // 继续阅读卡直接打开最近一本，不改变当前书架模式。/ The continue card opens the latest book directly without changing the shelf mode.
         if(shelf_covers && shelf_covers->has_last){const pn_catalog_item_t *last=&shelf_covers->last;
@@ -3233,7 +3923,7 @@ static bool root_navigation_touch(pn_tap_press_t *press,unsigned count,int x,int
 #if defined(CONFIG_PN_UI_FEEDBACK) && CONFIG_PN_UI_FEEDBACK
     feedback_restore();
 #endif
-    if(navigation>=0){ESP_LOGI(TAG,"Root navigation press hit=%d",navigation);apply_selection(navigation);}
+    if(navigation>=0){focus_nav.index=-1;focus_nav.count=0;ESP_LOGI(TAG,"Root navigation press hit=%d",navigation);apply_selection(navigation);}
     return true;
 }
 /// 过期输入只可用有效松手解除所有权；其他过期事件等待重新释放。/ Stale input can end ownership only with a valid release; other stale events wait for release again.
@@ -3376,7 +4066,7 @@ static void device_task(void *arg){
          if(!opening && data_ready && (!shelf_prefs_loaded || !input_flags_loaded || !vertical_turn_loaded) && now>=prefs_retry){
             prefs_retry=now+3000;
             if(!shelf_prefs_loaded && pn_settings_load_shelf(&data_media,"/data/progress",&shelf_prefs)==PN_OK){shelf_prefs_loaded=true;if(shelf_mode)show_shelf("",false);}
-            if(!input_flags_loaded && pn_settings_load_flags(&data_media,"/data/progress",&input_flags)==PN_OK)input_flags_loaded=true;
+            if(!input_flags_loaded && pn_settings_load_flags(&data_media,"/data/progress",&input_flags)==PN_OK){input_flags_loaded=true;sync_mgmt_refresh_limit(input_flags);}
             if(!vertical_turn_loaded && pn_settings_load_vertical_turn(&data_media,"/data/progress",&vertical_turn)==PN_OK)vertical_turn_loaded=true;
     if(!index_wait_loaded && pn_settings_load_index(&data_media,"/data/progress",&index_wait)==PN_OK)index_wait_loaded=true;
          }} // 读取失败限频重试，不能每10ms重复访问存储。/ Rate-limit failed loads instead of repeating storage reads every 10 ms.
@@ -3501,6 +4191,7 @@ static void device_task(void *arg){
             if(!was_down && tap.down && !tap.cancelled && !tap.blocked && !locked && !body)feedback_begin(touch.x,touch.y);
 #endif
             if(commit && !locked){
+                focus_nav.index=-1;
                 if(hold_fired)hold_fired=false;else apply_selection(selection);
                 pn_reader_input_cancel(&input);
             }

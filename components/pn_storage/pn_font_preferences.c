@@ -7,6 +7,7 @@
  */
 #define _POSIX_C_SOURCE 200809L
 #include "pn_font_preferences.h"
+#include "pn_scan_dirs.h"
 #include <string.h>
 #include <stdio.h>
 #include <sys/stat.h>
@@ -93,9 +94,13 @@ pn_status_t pn_font_preferences_system_path(pn_media_t *state,const char *root,p
     status=pn_font_preferences_system_files(&files,state,&lease,root,&io);
     if(status==PN_OK)status=pn_font_preferences_load(&io,pool,NULL,choice);
     (void)pn_media_release(state,&lease);
-    // 只接受字体目录内的文件；内置/已删除都按未选择处理。/ Accept only files inside the fonts directory; resident or deleted choices count as unset.
+    // 接受默认字体目录及已登记外部字体目录（含子目录）内的文件；内置/已删除都按未选择处理。
+    // Accept files in the default fonts directory or registered external font directories (with subfolders); resident or deleted choices count as unset.
     size_t dir=strlen(fonts_dir);struct stat info;
-    if(status==PN_OK && (choice->primary.kind!=PN_FONT_FILE || strncmp(choice->primary.path,fonts_dir,dir) || choice->primary.path[dir]!='/' || strchr(choice->primary.path+dir+1,'/') || stat(choice->primary.path,&info) || !S_ISREG(info.st_mode)))status=PN_EMPTY;
+    bool in_dir=status==PN_OK && choice->primary.kind==PN_FONT_FILE &&
+        ((!strncmp(choice->primary.path,fonts_dir,dir) && choice->primary.path[dir]=='/' && !strchr(choice->primary.path+dir+1,'/')) ||
+         pn_scan_dirs_path_allowed(PN_SCAN_CAT_FONTS,choice->primary.path));
+    if(status==PN_OK && (!in_dir || stat(choice->primary.path,&info) || !S_ISREG(info.st_mode)))status=PN_EMPTY;
     if(status==PN_OK){if(strlen(choice->primary.path)>=cap)status=PN_LIMIT;else strcpy(out,choice->primary.path);}
     pn_free(choice);return status;
 }

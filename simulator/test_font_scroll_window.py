@@ -26,7 +26,7 @@ with tempfile.TemporaryDirectory() as folder:
     journeys={
         'failed':('library,fonts,press:400:820,move:400:520,move:400:350,release:400:350,wait:1800,quit,quit',{'PN_SIM_FOLLOW_FAIL_ONCE':'1'}),
         'focus':('library,fonts,press:400:820,move:400:520,move:400:350,focus-lost,release:400:350,wait:900,quit,quit',{}),
-        'navigate':('library,fonts,press:400:820,move:400:520,move:400:350,key-home,release:400:350,wait:900,quit',{}),
+        'navigate':('library,fonts,press:400:820,move:400:520,move:400:350,key-middle-long,release:400:350,wait:900,quit',{}),
         'low':('library,fonts,press:400:820,move:400:520,move:400:350,release:400:350,wait:900,quit,quit',{}),
     }
     for name,(journey,extra) in journeys.items():

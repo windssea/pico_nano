@@ -34,7 +34,7 @@ pn_status_t pn_transfer_hub_render(pn_font_t *font,pn_frame_t *frame,const pn_tr
     if(s==PN_OK)s=pn_w_card_row(font,frame,"USB 传输",info->usb?"连接电脑直接复制，期间暂停阅读":"此运行环境未接入 USB 读卡",NULL,PN_ICON_IMPORT,info->usb?PN_ROW_CHEVRON:0u,CHANNEL_Y+USB_ROW*ROW_H,true);
     if(s==PN_OK)s=pn_w_group(font,frame,"存储",STORAGE_Y-14);
     pn_w_card(frame,STORAGE_Y,1);
-    if(s==PN_OK)s=pn_w_card_row(font,frame,"存储卡",info->storage && *info->storage?info->storage:"未读取到存储卡",NULL,-1,0u,STORAGE_Y,true);
+    if(s==PN_OK)s=pn_w_card_row(font,frame,"存储卡",info->storage && *info->storage?info->storage:"未读取到存储卡",info->storage_manage?"文件管理":NULL,info->storage_manage?PN_ICON_SHELF:-1,info->storage_manage?PN_ROW_CHEVRON:0u,STORAGE_Y,true);
     if(s==PN_OK)s=pn_w_group(font,frame,"支持的文件",FORMAT_Y-14);
     if(s==PN_OK)s=pn_font_size(font,24);
     if(s==PN_OK)s=pn_w_text_lines_ex(font,frame,"图书 EPUB / TXT · 字体 TTF / OTF · 封面、锁屏与阅读背景 JPG / PNG。",PN_UI_MARGIN+8,FORMAT_Y+22,604,3,34,PN_UI_MUTED,false);
@@ -48,5 +48,6 @@ int pn_transfer_hub_hit(const pn_transfer_hub_info_t *info,int x,int y){
     if(y>=CHANNEL_Y && y<CHANNEL_Y+ROW_H)return info->hotspot?PN_HUB_HOTSPOT:-1;
     if(y>=CHANNEL_Y+ROW_H && y<CHANNEL_Y+2*ROW_H)return info->lan?PN_HUB_LAN:-1;
     if(y>=CHANNEL_Y+USB_ROW*ROW_H && y<CHANNEL_Y+(USB_ROW+1)*ROW_H)return info->usb?PN_HUB_USB:-1;
+    if(y>=STORAGE_Y && y<STORAGE_Y+ROW_H)return info->storage_manage?PN_HUB_STORAGE:-1;
     return -1;
 }

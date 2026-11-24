@@ -356,7 +356,7 @@ int main(void){
     if(getenv("PN_MENU_PREPARE_BOOKS"))prepared_books();
 closed:
     pn_cover_work_abort(&cover_work);management_fonts_close();assert(pn_font_system_close()==PN_OK);pn_catalog_index_close(&catalog_index);
-    pn_free(shelf_page);pn_free(shelf_covers);pn_free(recent_snapshot);pn_free(favorites);pn_free(page_copy);
+    home_banner_release();pn_free(shelf_page);pn_free(shelf_covers);pn_free(recent_snapshot);pn_free(favorites);pn_free(read_marks);pn_free(page_copy);
     assert(!pn_media_active(&sd_media) && !pn_media_active(&data_media) && !pool.used && !pool.live);
     for(size_t i=0;i<128;i++)assert(!tracked[i].file);
     puts("menu_probe closed_pool_zero=1");return 0;

@@ -22,7 +22,9 @@ int main(void){
     pn_txt_progress_t before,after;assert(pn_reader_app_progress(&app,&before)==PN_OK);
     screen.fail=true;assert(pn_jump_ui_open(&ui,&app,present,&screen)==PN_IO && !ui.active);screen.fail=false;
     assert(pn_jump_ui_open(&ui,&app,present,&screen)==PN_OK && ui.active && ui.presented && ui.current==0 && ui.draft==0 && ui.maximum==100 && ui.large==10);
-    /* 命中：四个步进键、跳转、取消；空白无命中。/ Hits: four step keys, Jump and Cancel; blank space is no hit. */
+    /* 命中：进度条直接点按、四个步进键、跳转、取消；空白无命中。/ Hits: progress bar direct tap, four step keys, Jump and Cancel; blank space is no hit. */
+    assert(pn_jump_ui_hit(&ui,32,528)==PN_JUI_PERCENT && pn_jump_ui_hit(&ui,342,528)==PN_JUI_PERCENT+50 && pn_jump_ui_hit(&ui,652,528)==PN_JUI_PERCENT+100);
+    assert(pn_jump_ui_event(&ui,PN_JUI_PERCENT+50,2,present,&screen)==PN_OK && ui.draft==50 && pn_jump_ui_event(&ui,PN_JUI_PERCENT,2,present,&screen)==PN_OK && ui.draft==0);
     assert(pn_jump_ui_hit(&ui,60,690)==PN_JUI_STEP && pn_jump_ui_hit(&ui,220,690)==PN_JUI_STEP+1 && pn_jump_ui_hit(&ui,380,690)==PN_JUI_STEP+2 && pn_jump_ui_hit(&ui,540,690)==PN_JUI_STEP+3);
     assert(pn_jump_ui_hit(&ui,175,690)==-1 && pn_jump_ui_hit(&ui,300,860)==PN_JUI_CONFIRM && pn_jump_ui_hit(&ui,300,980)==PN_JUI_CANCEL && pn_jump_ui_hit(&ui,60,60)==PN_JUI_CANCEL && pn_jump_ui_hit(&ui,300,300)==-1);
     /* 步进只改草稿，位置不动；两端夹紧。/ Stepping edits only the draft and the position stays put; both ends clamp. */

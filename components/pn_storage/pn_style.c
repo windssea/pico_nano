@@ -7,6 +7,8 @@
  * Frozen: no page numbers, progress changes or font-source mutations.
  */
 #include "pn_style.h"
+#include <errno.h>
+#include <stdio.h>
 #include <string.h>
 static unsigned get(const uint8_t *p){return p[0]|((unsigned)p[1]<<8);}
 static void put(uint8_t *p,unsigned v){p[0]=(uint8_t)v;p[1]=(uint8_t)(v>>8);}
@@ -100,4 +102,45 @@ pn_status_t pn_style_load(const pn_journal_io_t *io,const pn_book_id_t *book,pn_
     // 先完整校验旧载荷，只解析被移除的图片；不重置字体/排版或在读取时写盘。 / Validate the full legacy payload before resolving retired artwork; never reset fonts/typesetting or write during reads.
     if(version!=8 && version!=10 && version!=12)value.background=(uint16_t)pn_reading_background_resolve(value.background);
     *s=value;return PN_OK;
+}
+pn_book_id_t pn_style_global_id(void){
+    pn_book_id_t id={0};memcpy(id.sha256,"PN_GLOBAL_TYPESETTING_DEFAULT_V1",32);return id;
+}
+pn_status_t pn_style_global_files(pn_journal_files_t *files,pn_media_t *media,const pn_media_lease_t *lease,const char *root,pn_journal_io_t *io){
+    if(!files || !media || !lease || !root || !*root || !io)return PN_INVALID;
+    char a[PN_JOURNAL_PATH_MAX],b[PN_JOURNAL_PATH_MAX];
+    int n=snprintf(a,sizeof a,"%s/global_style.a",root);if(n<0 || (size_t)n>=sizeof a)return PN_LIMIT;
+    n=snprintf(b,sizeof b,"%s/global_style.b",root);if(n<0 || (size_t)n>=sizeof b)return PN_LIMIT;
+    return pn_journal_files_init(files,media,lease,a,b,io);
+}
+pn_status_t pn_style_global_load(pn_media_t *state_media,const char *state_dir,pn_style_t *style){
+    if(!state_media || !state_dir || !*state_dir || !style)return PN_INVALID;
+    pn_media_lease_t lease={0};pn_status_t status=pn_media_acquire(state_media,PN_MEDIA_READ,&lease);
+    if(status!=PN_OK)return status;
+    pn_journal_files_t files;pn_journal_io_t io;pn_book_id_t id=pn_style_global_id();
+    status=pn_style_global_files(&files,state_media,&lease,state_dir,&io);
+    if(status==PN_OK)status=pn_style_load(&io,&id,style);
+    (void)pn_media_release(state_media,&lease);
+    return status;
+}
+pn_status_t pn_style_global_save(pn_media_t *state_media,const char *state_dir,const pn_style_t *style){
+    if(!state_media || !state_dir || !*state_dir || !style)return PN_INVALID;
+    pn_status_t valid=pn_style_validate(style);if(valid!=PN_OK)return valid;
+    pn_media_lease_t lease={0};pn_status_t status=pn_media_acquire(state_media,PN_MEDIA_WRITE,&lease);
+    if(status!=PN_OK)return status;
+    pn_journal_files_t files;pn_journal_io_t io;pn_book_id_t id=pn_style_global_id();
+    status=pn_style_global_files(&files,state_media,&lease,state_dir,&io);
+    if(status==PN_OK)status=pn_style_save(&io,&id,style);
+    (void)pn_media_release(state_media,&lease);
+    return status;
+}
+pn_status_t pn_style_clear_files(const pn_journal_files_t *files){
+    if(!files || !files->media)return PN_INVALID;
+    pn_status_t status=pn_media_validate(files->media,&files->lease);
+    if(status!=PN_OK)return status;
+    for(int i=0;i<2;i++){
+        if(!files->paths[i][0])continue;
+        if(remove(files->paths[i])!=0 && errno!=ENOENT)return PN_IO;
+    }
+    return PN_OK;
 }

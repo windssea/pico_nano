@@ -33,6 +33,8 @@
 #define PN_SUI_MARGINS 45 ///< 打开正文与背景四周边距设置页 / Open four-side body and background margins page
 #define PN_SUI_MARGINS_BACK 46 ///< 从边距设置页返回 / Return from the margins page
 #define PN_SUI_MARGINS_RESET 47 ///< 重置正文与背景四周边距 / Reset body and background margins to defaults
+#define PN_SUI_SAVE_GLOBAL 48 ///< 将当前草稿保存为全局默认排版（保留兼容）/ Save current draft as global default typesetting (legacy)
+#define PN_SUI_USE_GLOBAL 49 ///< 清除本书单独配置并立即使用全局默认排版 / Clear per-book override and apply global default typesetting
 #define PN_SUI_MARGIN_ADJ 112 ///< 112..127：8项四周边距减/加（0..3正文上下左右，4..7背景上下左右）/ 112..127: dec/inc for 8 margin controls (0..3 body TBLR, 4..7 paper TBLR)
 typedef struct {
     pn_epub_app_t *epub; ///< 可选EPUB会话，与reader互斥 / Optional EPUB session, exclusive with reader

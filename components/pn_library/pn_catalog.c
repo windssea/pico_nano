@@ -63,8 +63,146 @@ bool pn_catalog_match(const char *name,const char *query){
         if((key>='a' && key<='z') || (key>='0' && key<='9'))initials[n++]=(char)key;
     }
     initials[n]=0;plain[m]=0;
-    return strstr(plain,query) || strstr(initials,query);
+    return strstr(name,query) || strstr(plain,query) || strstr(initials,query);
 }
+static int ascii_lower_ch(int c){return (c>='A' && c<='Z')?(c-'A'+'a'):c;}
+static bool is_ignored_subdir(const char *name){
+    if(!name || !*name || name[0]=='.')return true;
+    const char *svi="system volume information";
+    size_t i=0;
+    for(;name[i] && svi[i];i++)if(ascii_lower_ch((unsigned char)name[i])!=svi[i])return false;
+    return !name[i] && !svi[i];
+}
+typedef struct {
+    const char *name;
+    const char *path;
+    pn_book_format_t kind;
+    uint64_t size;
+    int64_t mtime;
+} walked_file_t;
+typedef void (*walk_cb_t)(const walked_file_t *f,void *ctx);
+
+/// 迭代深度受限遍历（最多 PN_SCAN_MAX_DEPTH 层子目录，自动聚合默认目录对应的已登记外部目录）。
+/// Iterative bounded-depth directory walker (up to PN_SCAN_MAX_DEPTH subfolders, automatically merging registered external dirs for default roots).
+static pn_status_t walk_catalog(pn_media_t *media,const pn_media_lease_t *lease,const char *directory,
+    int filter,size_t *skipped_out,walk_cb_t cb,void *ctx){
+    char roots[1u+PN_SCAN_DIR_MAX][PN_SCAN_PATH_MAX];
+    size_t nroots=0;
+    pn_scan_cat_t matched_cat=PN_SCAN_CAT_BOOKS;
+    if(pn_scan_dirs_match_default(directory,&matched_cat)){
+        bool cat_ok=(filter==0 && matched_cat==PN_SCAN_CAT_BOOKS) || (filter==1 && matched_cat==PN_SCAN_CAT_FONTS) || (filter==2 && (matched_cat==PN_SCAN_CAT_WALLPAPERS || matched_cat==PN_SCAN_CAT_BACKGROUNDS));
+        if(cat_ok)nroots=pn_scan_dirs_collect_roots(matched_cat,directory,roots,1u+PN_SCAN_DIR_MAX);
+    }
+    if(!nroots){
+        if(strlen(directory)>=PN_SCAN_PATH_MAX)return PN_LIMIT;
+        strcpy(roots[0],directory);nroots=1u;
+    }
+    pn_status_t status=PN_OK;
+    for(size_t r=0;r<nroots && status==PN_OK;r++){
+        DIR *stack[PN_SCAN_MAX_DEPTH+1u];
+        size_t len_stack[PN_SCAN_MAX_DEPTH+1u];
+        char cur[PN_CATALOG_PATH_MAX];
+        if(strlen(roots[r])>=sizeof cur)continue;
+        strcpy(cur,roots[r]);
+        DIR *d0=opendir(cur);
+        if(!d0){
+            if(errno!=ENOENT){status=PN_IO;break;}
+            status=pn_media_validate(media,lease);
+            continue;
+        }
+        int depth=0;
+        stack[0]=d0;len_stack[0]=strlen(cur);
+        while(depth>=0 && status==PN_OK){
+            status=pn_cancel_checkpoint();if(status==PN_OK)status=pn_media_validate(media,lease);if(status!=PN_OK)break;
+            errno=0;struct dirent *entry=readdir(stack[depth]);
+            if(!entry){
+                if(errno){status=PN_IO;break;}
+                if(closedir(stack[depth])!=0 && status==PN_OK)status=PN_IO;
+                depth--;
+                if(depth>=0)cur[len_stack[depth]]=0;
+                continue;
+            }
+            const char *name=entry->d_name;
+            if(name[0]=='.')continue;
+            size_t base_len=len_stack[depth],nlen=strlen(name);
+            if(base_len+1u+nlen>=sizeof cur){if(skipped_out)(*skipped_out)++;continue;}
+            cur[base_len]='/';memcpy(cur+base_len+1u,name,nlen+1u);
+            struct stat info;
+#ifdef ESP_PLATFORM
+            int sr=stat(cur,&info);
+#else
+            int sr=lstat(cur,&info);
+#endif
+            if(sr!=0){if(skipped_out)(*skipped_out)++;cur[base_len]=0;continue;}
+            if(S_ISDIR(info.st_mode)){
+                if(!is_ignored_subdir(name) && depth<(int)PN_SCAN_MAX_DEPTH){
+                    DIR *sub=opendir(cur);
+                    if(sub){
+                        depth++;
+                        stack[depth]=sub;
+                        len_stack[depth]=base_len+1u+nlen;
+                        continue;
+                    }
+                }
+                cur[base_len]=0;continue;
+            }
+            if(!S_ISREG(info.st_mode) || info.st_size<0){cur[base_len]=0;continue;}
+            const char *ext=strrchr(name,'.');
+            pn_book_format_t kind=filter==1?(ext && (!strcasecmp(ext,".ttf") || !strcasecmp(ext,".otf"))?PN_FILE_TTF:0)
+                :filter==2?(ext && (!strcasecmp(ext,".jpg") || !strcasecmp(ext,".jpeg") || !strcasecmp(ext,".png"))?PN_FILE_IMAGE:0)
+                :format(name);
+            if(!kind){cur[base_len]=0;continue;}
+            if(nlen>=PN_CATALOG_NAME_MAX || !safe_name(name)){if(skipped_out)(*skipped_out)++;cur[base_len]=0;continue;}
+            walked_file_t wf={.name=name,.path=cur,.kind=kind,.size=(uint64_t)info.st_size,.mtime=(int64_t)info.st_mtime};
+            cb(&wf,ctx);
+            cur[base_len]=0;
+        }
+        while(depth>=0){(void)closedir(stack[depth]);depth--;}
+    }
+    pn_status_t current=pn_media_validate(media,lease);
+    if(current!=PN_OK)status=current;
+    return status;
+}
+
+typedef struct {
+    pn_catalog_page_t *page;
+    const char *after;
+    const char *query;
+    bool reverse;
+    char from;
+    size_t limit;
+    char greatest[PN_CATALOG_NAME_MAX];
+    size_t total,at_or_before,before,skipped_by_letter;
+} scan_ctx_t;
+
+static void scan_visit(const walked_file_t *wf,void *vctx){
+    scan_ctx_t *c=vctx;
+    if(c->query && !pn_catalog_match(wf->name,c->query))return;
+    if(!*c->greatest || pn_catalog_compare(wf->name,c->greatest)>0)strcpy(c->greatest,wf->name);
+    c->total++;
+    {int order=pn_catalog_compare(wf->name,c->after);if(order<=0)c->at_or_before++;if(order<0)c->before++;}
+    if(c->reverse?pn_catalog_compare(wf->name,c->after)>=0:pn_catalog_compare(wf->name,c->after)<=0)return;
+    if(c->from){char initial=pn_catalog_initial(wf->name);if(initial=='#' || (initial!='~' && initial<c->from)){c->skipped_by_letter++;return;}}
+    pn_catalog_item_t item={.format=wf->kind,.size=wf->size,.mtime=wf->mtime};
+    strcpy(item.name,wf->name);strcpy(item.path,wf->path);
+    pn_catalog_page_t *page=c->page;
+    if(c->reverse && page->count==c->limit){
+        int ord=pn_catalog_compare(wf->name,page->items[0].name);
+        if(ord<0 || (ord==0 && strcmp(wf->path,page->items[0].path)<=0))return;
+        memmove(page->items,page->items+1,(c->limit-1)*sizeof page->items[0]);page->count--;
+    }
+    size_t index=0;
+    while(index<page->count){
+        int ord=pn_catalog_compare(page->items[index].name,wf->name);
+        if(ord>0 || (ord==0 && strcmp(page->items[index].path,wf->path)>=0))break;
+        index++;
+    }
+    if(index>=c->limit)return;
+    size_t count=page->count<c->limit?page->count+1:c->limit;
+    for(size_t i=count-1;i>index;i--)page->items[i]=page->items[i-1];
+    page->items[index]=item;page->count=count;
+}
+
 static pn_status_t scan(pn_media_t *media,const pn_media_lease_t *lease,const char *directory,
     const char *after,pn_catalog_page_t *page,bool reverse,int filter,char from,const char *query,size_t limit){
     if(!media || !lease || !directory || !*directory || !after || !page)return PN_INVALID;
@@ -72,42 +210,13 @@ static pn_status_t scan(pn_media_t *media,const pn_media_lease_t *lease,const ch
     pn_status_t status=pn_media_validate(media,lease);if(status!=PN_OK)return status;
     if(lease->access==PN_MEDIA_USB)return PN_INVALID;
     if(!limit || limit>PN_CATALOG_PAGE_MAX)limit=PN_CATALOG_PAGE_DEFAULT; // 0表示旧默认6项 / Zero retains the legacy six-item default
-    memset(page,0,sizeof *page);page->per_page=limit;DIR *dir=opendir(directory);
-    // 资源目录尚未创建或被删除时显示空列表；不吞权限/I/O错误或卡失效。/ Missing resource folders show empty lists; preserve permission/I/O failures and media loss.
-    if(!dir){if(errno!=ENOENT)return PN_IO;return pn_media_validate(media,lease);}
-    char greatest[PN_CATALOG_NAME_MAX]={0};size_t total=0,at_or_before=0,before=0,skipped_by_letter=0;
-    for(;;){status=pn_cancel_checkpoint();if(status==PN_OK)status=pn_media_validate(media,lease);if(status!=PN_OK)break;errno=0;struct dirent *entry=readdir(dir);if(!entry){if(errno)status=PN_IO;break;}
-        const char *name=entry->d_name;if(name[0]=='.')continue;const char *ext=strrchr(name,'.');pn_book_format_t kind=filter==1?(ext && (!strcasecmp(ext,".ttf") || !strcasecmp(ext,".otf"))?PN_FILE_TTF:0):filter==2?(ext && (!strcasecmp(ext,".jpg") || !strcasecmp(ext,".jpeg") || !strcasecmp(ext,".png"))?PN_FILE_IMAGE:0):format(name);if(!kind)continue;
-        if(strlen(name)>=PN_CATALOG_NAME_MAX || !safe_name(name)){page->skipped++;continue;}
-        pn_catalog_item_t item={.format=kind};int length=snprintf(item.path,sizeof item.path,"%s/%s",directory,name);
-        if(length<0 || (size_t)length>=sizeof item.path){page->skipped++;continue;}
-        struct stat info;
-#ifdef ESP_PLATFORM
-        int result=stat(item.path,&info);
-#else
-        int result=lstat(item.path,&info);
-#endif
-        if(result!=0){page->skipped++;continue;}if(!S_ISREG(info.st_mode) || info.st_size<0)continue;
-        if(query && !pn_catalog_match(name,query))continue;
-        if(!*greatest || pn_catalog_compare(name,greatest)>0)strcpy(greatest,name);
-        // 同一次扫描顺带数出总数与位置，不另读目录。/ Count totals and position during the same scan instead of reading the directory again.
-        total++;{int order=pn_catalog_compare(name,after);if(order<=0)at_or_before++;if(order<0)before++;}
-        if(reverse?pn_catalog_compare(name,after)>=0:pn_catalog_compare(name,after)<=0)continue;
-        if(from){char initial=pn_catalog_initial(name);if(initial=='#' || (initial!='~' && initial<from)){skipped_by_letter++;continue;}}
-        strcpy(item.name,name);item.size=(uint64_t)info.st_size;
-        if(reverse && page->count==limit){if(pn_catalog_compare(name,page->items[0].name)<=0)continue;memmove(page->items,page->items+1,(limit-1)*sizeof page->items[0]);page->count--;}
-        size_t index=0;while(index<page->count && pn_catalog_compare(page->items[index].name,name)<0)index++;
-        if(index>=limit)continue;
-        size_t count=page->count<limit?page->count+1:limit;
-        for(size_t i=count-1;i>index;i--)page->items[i]=page->items[i-1];
-        page->items[index]=item;page->count=count;
-    }
-    if(closedir(dir)!=0 && status==PN_OK)status=PN_IO;
-    pn_status_t current=pn_media_validate(media,lease);if(current!=PN_OK)status=current;
+    memset(page,0,sizeof *page);page->per_page=limit;
+    scan_ctx_t sctx={.page=page,.after=after,.query=query,.reverse=reverse,.from=from,.limit=limit};
+    status=walk_catalog(media,lease,directory,filter,&page->skipped,scan_visit,&sctx);
     if(status!=PN_OK){page->count=0;page->more=false;return status;}
-    page->more=page->count && pn_catalog_compare(greatest,page->items[page->count-1].name)>0;
-    page->total=total;
-    page->index=reverse?(before>=page->count?before-page->count:0):at_or_before+skipped_by_letter;
+    page->more=page->count && pn_catalog_compare(sctx.greatest,page->items[page->count-1].name)>0;
+    page->total=sctx.total;
+    page->index=reverse?(sctx.before>=page->count?sctx.before-page->count:0):sctx.at_or_before+sctx.skipped_by_letter;
     return PN_OK;
 }
 
@@ -204,7 +313,126 @@ pn_status_t pn_catalog_item(pn_media_t *media,const pn_media_lease_t *lease,cons
 #endif
     if(result)return errno==ENOENT?PN_EMPTY:PN_IO;
     if(!S_ISREG(info.st_mode) || info.st_size<0)return PN_EMPTY;
-    strcpy(item.name,name);item.size=(uint64_t)info.st_size;status=pn_media_validate(media,lease);if(status==PN_OK)*out=item;return status;
+    strcpy(item.name,name);item.size=(uint64_t)info.st_size;item.mtime=(int64_t)info.st_mtime;status=pn_media_validate(media,lease);if(status==PN_OK)*out=item;return status;
+}
+
+static size_t recent_rank(const pn_recent_snapshot_t *recent,const char *path){
+    if(!recent || !path || recent->count>PN_RECENT_MAX)return SIZE_MAX;
+    for(size_t i=0;i<recent->count;i++)if(!strcmp(recent->items[i].path,path))return i;
+    return SIZE_MAX;
+}
+static int compare_sorted(pn_shelf_sort_t sort,const pn_recent_snapshot_t *recent,const pn_catalog_item_t *a,const pn_catalog_item_t *b){
+    if(sort==PN_SHELF_SORT_ADDED){
+        if(a->mtime!=b->mtime)return a->mtime>b->mtime?-1:1;
+    }else if(sort==PN_SHELF_SORT_RECENT){
+        size_t ra=recent_rank(recent,a->path),rb=recent_rank(recent,b->path);
+        if(ra!=rb)return ra<rb?-1:1;
+    }
+    int by_name=pn_catalog_compare(a->name,b->name);
+    if(by_name!=0)return by_name;
+    return strcmp(a->path,b->path);
+}
+typedef struct {
+    pn_catalog_page_t *page;
+    const char *query;
+    pn_shelf_sort_t sort;
+    const pn_recent_snapshot_t *recent;
+    const pn_catalog_item_t *cursor;
+    bool previous;
+    size_t limit;
+    pn_catalog_item_t greatest;
+    bool has_greatest;
+    size_t total,at_or_before,before;
+} sorted_ctx_t;
+
+static void sorted_visit(const walked_file_t *wf,void *vctx){
+    sorted_ctx_t *c=vctx;
+    if(c->query && *c->query && !pn_catalog_match(wf->name,c->query))return;
+    pn_catalog_item_t item={.format=wf->kind,.size=wf->size,.mtime=wf->mtime};
+    strcpy(item.name,wf->name);strcpy(item.path,wf->path);
+    if(!c->has_greatest || compare_sorted(c->sort,c->recent,&item,&c->greatest)>0){c->greatest=item;c->has_greatest=true;}
+    c->total++;
+    if(c->cursor){
+        int order=compare_sorted(c->sort,c->recent,&item,c->cursor);
+        if(order<=0)c->at_or_before++;
+        if(order<0)c->before++;
+        if(c->previous?order>=0:order<=0)return;
+    }
+    pn_catalog_page_t *page=c->page;
+    if(c->previous && page->count==c->limit){
+        if(compare_sorted(c->sort,c->recent,&item,&page->items[0])<=0)return;
+        memmove(page->items,page->items+1,(c->limit-1)*sizeof page->items[0]);page->count--;
+    }
+    size_t index=0;while(index<page->count && compare_sorted(c->sort,c->recent,&page->items[index],&item)<0)index++;
+    if(index>=c->limit)return;
+    size_t count=page->count<c->limit?page->count+1:c->limit;
+    for(size_t i=count-1;i>index;i--)page->items[i]=page->items[i-1];
+    page->items[index]=item;page->count=count;
+}
+
+pn_status_t pn_catalog_page_sorted_n(pn_media_t *media,const pn_media_lease_t *lease,const char *directory,const char *query,
+    pn_shelf_sort_t sort,const pn_recent_snapshot_t *recent,const pn_catalog_item_t *cursor,bool previous,size_t limit,pn_catalog_page_t *page){
+    if(!media || !lease || !directory || !*directory || !page || (unsigned)sort>=PN_SHELF_SORT_COUNT)return PN_INVALID;
+    if(query && strlen(query)>PN_CATALOG_QUERY_MAX)return PN_INVALID;
+    if(strlen(directory)>=PN_CATALOG_PATH_MAX)return PN_LIMIT;
+    pn_status_t status=pn_media_validate(media,lease);if(status!=PN_OK)return status;
+    if(lease->access==PN_MEDIA_USB)return PN_INVALID;
+    if(!limit || limit>PN_CATALOG_PAGE_MAX)limit=PN_CATALOG_PAGE_DEFAULT;
+    memset(page,0,sizeof *page);page->per_page=limit;
+    sorted_ctx_t sctx={.page=page,.query=query,.sort=sort,.recent=recent,.cursor=cursor,.previous=previous,.limit=limit};
+    status=walk_catalog(media,lease,directory,0,&page->skipped,sorted_visit,&sctx);
+    if(status!=PN_OK){page->count=0;page->more=false;return status;}
+    page->more=page->count && sctx.has_greatest && compare_sorted(sort,recent,&sctx.greatest,&page->items[page->count-1])>0;
+    page->total=sctx.total;
+    page->index=!cursor?0:previous?(sctx.before>=page->count?sctx.before-page->count:0):sctx.at_or_before;
+    return PN_OK;
 }
 
 bool pn_catalog_name_valid(const char *name){return name && *name && strlen(name)<PN_CATALOG_NAME_MAX && safe_name(name);}
+
+pn_status_t pn_catalog_list_book_folders(pn_media_t *media,const pn_media_lease_t *lease,const char *default_books_dir,
+    pn_catalog_folder_t *out,size_t cap,size_t *count_out){
+    if(count_out)*count_out=0;
+    if(!media || !lease || !default_books_dir || !*default_books_dir || !out || !cap)return PN_INVALID;
+    pn_status_t status=pn_media_validate(media,lease);if(status!=PN_OK)return status;
+    size_t count=0;
+    // 1. 默认 books 目录下的直接子文件夹（按名称排序）。/ 1. Immediate subfolders under default books dir.
+    DIR *dir=opendir(default_books_dir);
+    if(dir){
+        for(;;){
+            struct dirent *e=readdir(dir);if(!e)break;
+            if(is_ignored_subdir(e->d_name))continue;
+            char full[PN_SCAN_PATH_MAX];
+            int n=snprintf(full,sizeof full,"%s/%s",default_books_dir,e->d_name);
+            if(n<=0 || (size_t)n>=sizeof full)continue;
+            struct stat st;
+            if(stat(full,&st)!=0 || !S_ISDIR(st.st_mode))continue;
+            if(count>=cap)continue;
+            pn_catalog_folder_t f={.is_external=false};
+            snprintf(f.label,sizeof f.label,"%.63s",e->d_name);
+            strcpy(f.path,full);
+            size_t pos=0;while(pos<count && pn_catalog_compare(out[pos].label,f.label)<0)pos++;
+            for(size_t i=count;i>pos;i--)out[i]=out[i-1];
+            out[pos]=f;count++;
+        }
+        (void)closedir(dir);
+    }
+    // 2. 已登记的外部图书目录。/ 2. Registered external book directories.
+    const pn_scan_dirs_t *active=pn_scan_dirs_active();
+    const char *mount=pn_scan_dirs_mount();
+    if(active && mount){
+        for(unsigned i=0;i<active->count[PN_SCAN_CAT_BOOKS] && count<cap;i++){
+            const char *rel=active->dirs[PN_SCAN_CAT_BOOKS][i];
+            char full[PN_SCAN_PATH_MAX];
+            int n=snprintf(full,sizeof full,"%s/%s",mount,rel);
+            if(n<=0 || (size_t)n>=sizeof full)continue;
+            pn_catalog_folder_t f={.is_external=true};
+            const char *leaf=strrchr(rel,'/');
+            snprintf(f.label,sizeof f.label,"%s",leaf?leaf+1:rel);
+            strcpy(f.path,full);
+            out[count++]=f;
+        }
+    }
+    if(count_out)*count_out=count;
+    return pn_media_validate(media,lease);
+}

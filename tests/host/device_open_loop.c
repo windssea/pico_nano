@@ -108,6 +108,6 @@ int main(int argc,char **argv){
     // longjmp结束模拟任务；清理不能再借用该任务栈上的取消scope。/ longjmp ended the simulated task; cleanup must not borrow its stack cancellation scope.
     pn_cancel_scope_t shield;pn_cancel_enter(&shield,NULL,NULL);
     assert(stop_reader());system_font_release();pn_catalog_index_close(&catalog_index);
-    pn_free(shelf_page);pn_free(shelf_covers);pn_free(recent_snapshot);pn_free(favorites);pn_free(page_copy);
+    home_banner_release();pn_free(shelf_page);pn_free(shelf_covers);pn_free(recent_snapshot);pn_free(favorites);pn_free(read_marks);pn_free(page_copy);
     assert(!pn_media_active(&sd_media) && !pn_media_active(&data_media) && !pool.used && !pool.live);return 0;
 }

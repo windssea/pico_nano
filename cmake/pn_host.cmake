@@ -95,9 +95,11 @@ add_library(pn_core STATIC ${ui_font_c} ${reading_font_c} ${harmony_font_c} ${ar
     ${PN_ROOT}/components/pn_library/pn_tsumego.c
     ${PN_ROOT}/components/pn_library/pn_tsumego_ui.c
     ${PN_ROOT}/components/pn_library/pn_shelf_view.c
+    ${PN_ROOT}/components/pn_library/pn_stats_view.c
     ${PN_ROOT}/components/pn_library/pn_menu_cache.c
     ${PN_ROOT}/components/pn_library/pn_search_ui.c
     ${PN_ROOT}/components/pn_library/pn_book_actions.c
+    ${PN_ROOT}/components/pn_library/pn_file_manager.c
     ${PN_ROOT}/components/pn_widgets/pn_widgets.c
     ${PN_ROOT}/components/pn_widgets/pn_loading.c
     ${PN_ROOT}/components/pn_widgets/pn_feedback.c
@@ -106,6 +108,7 @@ add_library(pn_core STATIC ${ui_font_c} ${reading_font_c} ${harmony_font_c} ${ar
     ${PN_ROOT}/components/pn_widgets/pn_icons.c
     ${PN_ROOT}/components/pn_widgets/pn_focus.c
     ${PN_ROOT}/components/pn_widgets/pn_keyboard.c
+    ${PN_ROOT}/components/pn_widgets/pn_pinyin_ime.c
     ${PN_ROOT}/components/pn_library/pn_font_preview.c
     ${PN_ROOT}/components/pn_font/pn_font.c
     ${PN_ROOT}/components/pn_font/pn_font_blob.c
@@ -140,6 +143,9 @@ add_library(pn_core STATIC ${ui_font_c} ${reading_font_c} ${harmony_font_c} ${ar
     ${PN_ROOT}/components/pn_storage/pn_blob.c
     ${PN_ROOT}/components/pn_storage/pn_recent.c
     ${PN_ROOT}/components/pn_storage/pn_favorites.c
+    ${PN_ROOT}/components/pn_storage/pn_read_marks.c
+    ${PN_ROOT}/components/pn_storage/pn_home_prefs.c
+    ${PN_ROOT}/components/pn_storage/pn_scan_dirs.c
     ${PN_ROOT}/components/pn_storage/pn_network_store.c
     ${PN_ROOT}/components/pn_storage/pn_input_prefs.c
     ${PN_ROOT}/components/pn_storage/pn_shelf_prefs.c

@@ -12,12 +12,14 @@
 #include "pn_network_store.h"
 #include "pn_shelf_view.h"
 #include "pn_profile.h"
+#include "pn_builtin_art.h"
+#include "pn_wallpaper.h"
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
 #define W 684
 #define H 1216
-enum {SCREEN_MAIN=0,SCREEN_KEYS,SCREEN_REFRESH,SCREEN_ABOUT,SCREEN_APPEARANCE,SCREEN_TIME,SCREEN_UPDATE,SCREEN_WIFI,SCREEN_WIFI_EDIT};
+enum {SCREEN_MAIN=0,SCREEN_KEYS,SCREEN_REFRESH,SCREEN_ABOUT,SCREEN_APPEARANCE,SCREEN_TIME,SCREEN_UPDATE,SCREEN_WIFI,SCREEN_WIFI_EDIT,SCREEN_GLOBAL_STYLE,SCREEN_GLOBAL_MARGINS,SCREEN_GLOBAL_BG,SCREEN_HOME_MOTTO,SCREEN_HOME_MOTTO_EDIT,SCREEN_HOME_BANNER};
 typedef struct {pn_pool_t *pool;pn_media_t *state;char dir[PN_JOURNAL_PATH_MAX];pn_font_t font;uint8_t *pixels;pn_frame_t canvas;char message[96];char lan[40];int screen;pn_settings_about_t about;pn_settings_time_t time;
     pn_settings_update_t update; ///< 控制层升级快照 / Controller update snapshot
     pn_font_t *return_font; ///< 单owner移交的空槽，close归还或正常释放 / Empty slot transferred by the single owner, returned on close or normally released
@@ -25,11 +27,22 @@ typedef struct {pn_pool_t *pool;pn_media_t *state;char dir[PN_JOURNAL_PATH_MAX];
     bool vertical_known; ///< 翻页方向偏好可读才允许修改 / Permit changes only when the turn-direction preference is readable
     bool snapshot_dirty; ///< 外部快照更新后先完整重画 / Repaint completely after external snapshot changes
     pn_w_status_snapshot_t status; ///< 最近成功画布的实时状态带 / Live status band of the last successful canvas
-    pn_keyboard_t kb; ///< WiFi输入键盘 / WiFi entry keyboard
+    pn_keyboard_t kb; ///< WiFi与主页文案共用输入键盘 / Shared on-screen keyboard for WiFi and Home motto
     char ssid[PN_NETWORK_SSID_MAX+1]; ///< 编辑中的网络名 / Network name being edited
     char password[PN_NETWORK_PASSWORD_MAX+1]; ///< 编辑中的密码，离开即清零 / Password being edited, wiped on leaving
     bool password_step,reveal,forget_armed; ///< 第二步/明文显示/忘记待确认 / Second step, plain display, forget awaiting confirmation
     bool testing,test_failed; ///< 连接测试中/上次测试失败可仍然保存 / Connection test running; last test failed and saving anyway is offered
+    pn_style_t global_style; ///< 全局默认排版配置 / Global default typesetting configuration
+    bool global_style_known; ///< 全局排版存储可读 / Global style storage readable
+    char motto_draft[PN_HOME_HEADER_MAX]; ///< 编辑中的主页左上角文案 / Draft custom Home top-left text
+    pn_media_t *wallpaper_media; ///< 可选壁纸介质，不持长期租约 / Optional wallpaper media without long-lived leases
+    char wallpaper_dir[PN_JOURNAL_PATH_MAX]; ///< 壁纸目录路径 / Wallpaper directory path
+    char banner_names[6][PN_HOME_BANNER_MAX]; ///< 当前页最多6张可选背景文件名 / Up to 6 banner image basenames on current page
+    size_t banner_count; ///< 当前页图片数 / Banner image count on current page
+    bool banner_more,banner_has_prev; ///< 是否有下一页/上一页 / Whether next/previous banner pages exist
+    uint8_t *banner_preview_px; ///< 正在阅读上方背景页的实时预览缓冲（684×146）/ Live banner preview buffer for Home banner picker
+    pn_frame_t banner_preview; ///< 预览画布视图 / Preview frame view
+    char banner_preview_name[PN_HOME_BANNER_MAX]; ///< 当前预览缓冲对应的文件名 / Filename currently loaded in preview buffer
 } su_t;
 static const char *const names[]={"左手模式","滑动翻页","点按翻页","屏下三键翻页"};
 static const char *const hints[]={"点左半屏翻到下一页","左右滑动翻页","点屏幕左半或右半翻页","KEY1 上一页，KEY3 下一页"};
@@ -42,9 +55,10 @@ static const char *const style_names[4]={"默认","极简","拟物书架","纸�
 unsigned pn_settings_refresh_pages(uint8_t flags){static const unsigned pages[3]={14,6,24};return pages[level_of(flags)];}
 /* 版式：一级页大标题与分组卡片，底部固定三栏；子页统一顶栏返回设置。/ Layout: the root page has a large title and grouped cards over the fixed three-tab bar; sub-pages share a header that returns to Settings. */
 #define ROW_H PN_W_CARD_ROW_H
-#define DISPLAY_Y 190
-#define READING_Y 550
-#define DEVICE_Y 806
+#define MAIN_ROW_H 92
+#define DISPLAY_Y 172
+#define READING_Y 504
+#define DEVICE_Y 836
 #define TAB_Y 1104
 #define TAB_H 112
 #define TOGGLE_Y 640
@@ -70,34 +84,61 @@ static pn_status_t note(su_t *u,const char *text,int baseline){
     if(s==PN_OK)s=pn_w_text_lines_ex(&u->font,&u->canvas,text,PN_UI_MARGIN+8,baseline,604,3,34,PN_UI_MUTED,false);
     pn_status_t restored=pn_font_size(&u->font,original);return s==PN_OK?restored:s;
 }
+/* 设置主页分组标题与柔和卡片行：无双重黑框，灰阶层次更舒缓，单行92px保持易点按。
+ * Root settings group titles and soft card rows: avoids double dark borders, softens gray hierarchy, keeps 92px touch height. */
+static pn_status_t draw_main_group(pn_font_t *font,pn_frame_t *f,const char *title,int baseline){
+    int original=font->pixels;pn_status_t s=pn_font_size(font,22);
+    if(s==PN_OK)s=pn_w_text_ex(font,f,title,PN_UI_MARGIN+10,baseline,PN_UI_WIDTH-2*PN_UI_MARGIN-20,PN_ALIGN_LEFT,5,true);
+    pn_status_t restored=pn_font_size(font,original);return s==PN_OK?restored:s;
+}
+static void draw_main_card(pn_frame_t *f,int y,int rows){
+    if(!f || rows<=0)return;
+    int h=rows*MAIN_ROW_H,w=PN_UI_WIDTH-2*PN_UI_MARGIN;
+    pn_w_round_fill(f,PN_UI_MARGIN+2,y+2,w-4,h,20,PN_UI_SELECT);
+    pn_w_round_fill(f,PN_UI_MARGIN,y,w,h,20,PN_UI_PAPER);
+    pn_w_round_stroke(f,PN_UI_MARGIN,y,w,h,20,1.5f,9);
+}
+static pn_status_t draw_main_row(pn_font_t *font,pn_frame_t *f,const char *label,const char *subtitle,pn_icon_t icon,int y,bool last){
+    int original=font->pixels,text_x=112,room=PN_UI_WIDTH-PN_UI_MARGIN-48-text_x;
+    pn_w_round_fill(f,50,y+23,46,46,14,PN_UI_SURFACE);
+    pn_w_icon(f,icon,60,y+33,26,PN_UI_INK);
+    pn_status_t s=pn_font_size(font,30);
+    if(s==PN_OK)s=pn_w_text_ex(font,f,label,text_x,y+42,room,PN_ALIGN_LEFT,PN_UI_INK,false);
+    if(s==PN_OK && subtitle && *subtitle){s=pn_font_size(font,22);if(s==PN_OK)s=pn_w_text_ex(font,f,subtitle,text_x,y+72,room,PN_ALIGN_LEFT,5,false);}
+    pn_w_icon(f,PN_ICON_CHEVRON,PN_UI_WIDTH-PN_UI_MARGIN-18-24,y+34,24,6);
+    if(!last)pn_frame_rect(f,text_x,y+MAIN_ROW_H-1,PN_UI_WIDTH-PN_UI_MARGIN-20-text_x,1,PN_UI_SELECT);
+    pn_status_t restored=pn_font_size(font,original);return s==PN_OK?restored:s;
+}
 static pn_status_t draw_main(pn_settings_ui_t *ui,su_t *u){
     pn_font_t *font=&u->font;pn_frame_t *f=&u->canvas;pn_profile_span_t span;
     pn_profile_begin(&span,NULL,"ui.settings.status");pn_status_t s=pn_w_status(font,f);pn_profile_end(&span,s);
     pn_profile_begin(&span,NULL,"ui.settings.title");
-    if(s==PN_OK)s=pn_font_size(font,50);
-    if(s==PN_OK)s=pn_w_text_ex(font,f,"设置",PN_UI_MARGIN,124,400,PN_ALIGN_LEFT,PN_UI_INK,true);
+    if(s==PN_OK)s=pn_font_size(font,48);
+    if(s==PN_OK)s=pn_w_text_ex(font,f,"设置",PN_UI_MARGIN,108,400,PN_ALIGN_LEFT,PN_UI_INK,true);
     pn_profile_end(&span,s);pn_profile_begin(&span,NULL,"ui.settings.card");
-    if(s==PN_OK)s=pn_w_group(font,f,"显示与字体",DISPLAY_Y-14);
-    pn_w_card(f,DISPLAY_Y,3);pn_profile_end(&span,s);pn_profile_begin(&span,NULL,"ui.settings.rows");
-    if(s==PN_OK)s=pn_w_card_row(font,f,"字体管理","系统字体、全局阅读字体与删除",NULL,PN_ICON_FONT,PN_ROW_CHEVRON,DISPLAY_Y,false);
-    if(s==PN_OK)s=pn_w_card_row(font,f,"锁屏壁纸","系统默认、书签或自定义图片",NULL,PN_ICON_IMAGE,PN_ROW_CHEVRON,DISPLAY_Y+ROW_H,false);
-    char appearance[64];snprintf(appearance,sizeof appearance,"每行 %u 本 · %s",ui->shelf.columns,style_names[ui->shelf.style]);
-    if(s==PN_OK)s=pn_w_card_row(font,f,"书架外观",appearance,NULL,PN_ICON_SHELF,PN_ROW_CHEVRON,DISPLAY_Y+2*ROW_H,true);
-    if(s==PN_OK)s=pn_w_group(font,f,"阅读",READING_Y-14);
-    pn_w_card(f,READING_Y,2);
+    if(s==PN_OK)s=draw_main_group(font,f,"显示与字体",DISPLAY_Y-14);
+    draw_main_card(f,DISPLAY_Y,3);pn_profile_end(&span,s);pn_profile_begin(&span,NULL,"ui.settings.rows");
+    if(s==PN_OK)s=draw_main_row(font,f,"字体管理","系统字体、全局阅读字体与删除",PN_ICON_FONT,DISPLAY_Y,false);
+    if(s==PN_OK)s=draw_main_row(font,f,"锁屏壁纸","系统默认、书签或自定义图片",PN_ICON_IMAGE,DISPLAY_Y+MAIN_ROW_H,false);
+    char appearance[64];snprintf(appearance,sizeof appearance,"每行 %u 本 · %s · 主页个性",ui->shelf.columns,style_names[ui->shelf.style]);
+    if(s==PN_OK)s=draw_main_row(font,f,"书架与主页",appearance,PN_ICON_SHELF,DISPLAY_Y+2*MAIN_ROW_H,true);
+    if(s==PN_OK)s=draw_main_group(font,f,"阅读",READING_Y-14);
+    draw_main_card(f,READING_Y,3);
+    char gstyle[64];snprintf(gstyle,sizeof gstyle,"字号 %u · 行距 %u%% · 边距 %u%s",u->global_style.pixels,u->global_style.line_percent,u->global_style.margin,u->global_style.hide_bars?" · 无栏":"");
     char line[64];snprintf(line,sizeof line,"%s · 每 %u 页整屏刷新",level_names[level_of(ui->flags)],pn_settings_refresh_pages(ui->flags));
-    if(s==PN_OK)s=pn_w_card_row(font,f,"按键与手势","翻页方式、左手模式与屏下三键",NULL,PN_ICON_SETTINGS,PN_ROW_CHEVRON,READING_Y,false);
-    if(s==PN_OK)s=pn_w_card_row(font,f,"刷新与屏幕",line,NULL,PN_ICON_REFRESH,PN_ROW_CHEVRON,READING_Y+ROW_H,true);
-    if(s==PN_OK)s=pn_w_group(font,f,"设备",DEVICE_Y-14);
-    pn_w_card(f,DEVICE_Y,device_rows(u));
+    if(s==PN_OK)s=draw_main_row(font,f,"全局排版",gstyle,PN_ICON_TYPESET,READING_Y,false);
+    if(s==PN_OK)s=draw_main_row(font,f,"按键与手势","翻页方式、左手模式与屏下三键",PN_ICON_SETTINGS,READING_Y+MAIN_ROW_H,false);
+    if(s==PN_OK)s=draw_main_row(font,f,"刷新与屏幕",line,PN_ICON_REFRESH,READING_Y+2*MAIN_ROW_H,true);
+    if(s==PN_OK)s=draw_main_group(font,f,"设备",DEVICE_Y-14);
+    draw_main_card(f,DEVICE_Y,device_rows(u));
     int y=DEVICE_Y;char wifi[64];
     if(*u->lan)snprintf(wifi,sizeof wifi,"已保存：%s",u->lan);else snprintf(wifi,sizeof wifi,"未设置 · 用于传书、对时与更新");
-    if(s==PN_OK)s=pn_w_card_row(font,f,"WiFi 网络",wifi,NULL,PN_ICON_WIFI,PN_ROW_CHEVRON,y,false);
-    y+=ROW_H;
-    if(s==PN_OK)s=pn_w_card_row(font,f,"存储与关于","版本、存储与设备信息",NULL,PN_ICON_LOCK,PN_ROW_CHEVRON,y,true);
+    if(s==PN_OK)s=draw_main_row(font,f,"WiFi 网络",wifi,PN_ICON_WIFI,y,false);
+    y+=MAIN_ROW_H;
+    if(s==PN_OK)s=draw_main_row(font,f,"存储与关于","版本、存储与设备信息",PN_ICON_LOCK,y,true);
     // 正常时不显示内部说明，只在有问题时提示。/ No internal note when all is well; only problems are shown.
     const char *problem=*u->message?u->message:u->state?"":"内部存储不可用，设置不能保存";
-    if(s==PN_OK && *problem)s=note(u,problem,y+ROW_H+52);
+    if(s==PN_OK && *problem)s=note(u,problem,y+MAIN_ROW_H+44);
     pn_profile_end(&span,s);pn_profile_begin(&span,NULL,"ui.settings.nav");
     if(s==PN_OK){
         int original=font->pixels;s=pn_font_size(font,24);if(s==PN_OK)s=pn_w_navigation(font,f,PN_NAV_SETTINGS);pn_status_t restored=pn_font_size(font,original);if(s==PN_OK)s=restored;}
@@ -115,7 +156,7 @@ static pn_status_t draw_keys(pn_settings_ui_t *ui,su_t *u){
     if(s==PN_OK)s=pn_font_size(font,22);
     if(s==PN_OK)s=pn_w_text_ex(font,f,"1    2    3",dx,dy+dh+30,dw,PN_ALIGN_CENTER,PN_UI_MUTED,true);
     if(s==PN_OK)s=pn_w_text_ex(font,f,"电源键",dx+dw+12,dy+4,110,PN_ALIGN_LEFT,PN_UI_MUTED,false);
-    static const char *const legend[4][2]={{"KEY1","上一页 · 返回 · 弹窗里取消"},{"KEY2","单击返回书架 · 长按打开工具栏"},{"KEY3","下一页 · 确认 · 弹窗里确认"},{"电源键","锁屏并保存，再按回到原处"}};
+    static const char *const legend[4][2]={{"KEY1","上一页 · 焦点上移/左移"},{"KEY2","确认/回书架 · 长按返回/工具栏"},{"KEY3","下一页 · 焦点下移/右移"},{"电源键","锁屏并保存，再按回到原处"}};
     for(int i=0;i<4 && s==PN_OK;i++){
         int base=476+i*36;s=pn_font_size(font,24);
         if(s==PN_OK)s=pn_w_text_ex(font,f,legend[i][0],PN_UI_MARGIN+8,base,110,PN_ALIGN_LEFT,PN_UI_INK,true);
@@ -253,7 +294,7 @@ static pn_status_t draw_time(su_t *u){
 }
 /* 设置中直接预览静态样式；无贴图、无动画或额外封面解码。/ Preview static styles in settings without textures, animation or extra cover decoding. */
 static pn_status_t draw_columns(pn_settings_ui_t *ui,su_t *u){
-    static const char *const labels[]={"每行 3 本","每行 4 本"},*const hints[]={"封面更大 · 每页 6 本","浏览更多 · 每页 8 本"};
+    static const char *const labels[]={"每行 3 本","每行 4 本"},*const hints[]={"封面更大 · 每页 9 本","浏览更多 · 每页 12 本"};
     return pn_w_segments(&u->font,&u->canvas,labels,hints,2,ui->shelf.columns==4?1:0,196,96);
 }
 static pn_status_t draw_style(pn_settings_ui_t *ui,su_t *u,unsigned i){
@@ -266,15 +307,292 @@ static pn_status_t draw_style(pn_settings_ui_t *ui,su_t *u,unsigned i){
     if(ui->shelf.style==i)pn_w_icon(f,PN_ICON_CHECK,x+254,y+160,28,PN_UI_INK);
     return s;
 }
+static const char *const motto_presets[6]={"腹有诗书气自华","开卷有益","行万里路，读万卷书","静以修身，俭以养德","且将新火试新茶","山高月小，水落石出"};
 static pn_status_t draw_appearance(pn_settings_ui_t *ui,su_t *u){
-    pn_font_t *font=&u->font;pn_frame_t *f=&u->canvas;pn_status_t s=pn_w_header(font,f,"< 设置","书架外观",NULL);
+    pn_font_t *font=&u->font;pn_frame_t *f=&u->canvas;pn_status_t s=pn_w_header(font,f,"< 设置","书架与主页",NULL);
     if(s==PN_OK)s=pn_w_group(font,f,"书架密度",176);
     if(s==PN_OK)s=draw_columns(ui,u);
     if(s==PN_OK)s=note(u,"选项会自动保存。网格使用此密度，列表与搜索结果仍每页显示 5 本。",342);
     if(s==PN_OK)s=pn_w_group(font,f,"书架样式",432);
     for(unsigned i=0;i<PN_SHELF_STYLE_COUNT && s==PN_OK;i++)s=draw_style(ui,u,i);
-    if(s==PN_OK)s=note(u,"封面角标：空心标记未读，实心点已开始，勾号已读完。细线显示阅读进度；长按封面可查看格式与详情。",958);
-    if(s==PN_OK && *u->message)s=note(u,u->message,1100);
+    if(s==PN_OK)s=pn_w_group(font,f,"主页个性设置",928);
+    pn_w_card(f,944,2);
+    if(s==PN_OK)s=pn_w_card_row(font,f,"左上角文案",*ui->home.header?ui->home.header:"默认：PicoNano",NULL,PN_ICON_FONT,PN_ROW_CHEVRON,944,false);
+    if(s==PN_OK)s=pn_w_card_row(font,f,"正在阅读上方背景",*ui->home.banner?ui->home.banner:"默认山水",NULL,PN_ICON_IMAGE,PN_ROW_CHEVRON,944+ROW_H,true);
+    if(s==PN_OK && *u->message)s=note(u,u->message,1178);
+    return s;
+}
+/* 全局排版：与书内排版完全同源的12格+图片/上下栏开关+实时预览，外加边距详调与内置背景子页。
+ * Global typesetting: full parity with in-book typesetting (12 cells, image/bars toggles, live preview, 4-side margins & built-in backgrounds). */
+static void draw_guide_preview_row(pn_frame_t *frame,unsigned style,unsigned shade,int x0,int width,int y){
+    if(style<1 || style>2 || y<0 || y>=frame->height)return;
+    static const uint8_t inks[4]={10,7,4,0};uint8_t ink=inks[shade<4?shade:0];
+    int dash=style==1?19:2,period=style==1?31:13;
+    for(int x=0;x<width;x+=period){int w=width-x;if(w>dash)w=dash;pn_frame_rect(frame,x0+x,y,w,1,ink);}
+}
+static pn_status_t draw_gstyle_cell(pn_font_t *font,pn_frame_t *f,const char *label,const char *value,const char *extra_right,bool choice,bool chevron_only,int x,int y){
+    pn_w_round_stroke(f,x,y,300,76,12,1.5f,9);
+    pn_status_t s=pn_font_size(font,20);
+    if(s==PN_OK)s=pn_w_text_ex(font,f,label,x+12,y+23,276,PN_ALIGN_LEFT,5,false);
+    if(s==PN_OK && extra_right)s=pn_w_text_ex(font,f,extra_right,x+12,y+23,276,PN_ALIGN_RIGHT,4,true);
+    if(chevron_only){
+        pn_w_icon(f,PN_ICON_CHEVRON,x+262,y+41,22,6);
+        if(s==PN_OK)s=pn_font_size(font,24);
+        if(s==PN_OK)s=pn_w_text_ex(font,f,value,x+12,y+63,244,PN_ALIGN_LEFT,PN_UI_INK,true);
+        return s;
+    }
+    pn_w_round_fill(f,x+8,y+30,62,38,8,PN_UI_SURFACE);pn_w_round_stroke(f,x+8,y+30,62,38,8,1.0f,11);
+    pn_w_round_fill(f,x+230,y+30,62,38,8,PN_UI_SURFACE);pn_w_round_stroke(f,x+230,y+30,62,38,8,1.0f,11);
+    pn_w_icon(f,choice?PN_ICON_BACK:PN_ICON_MINUS,x+28,y+38,22,PN_UI_INK);
+    pn_w_icon(f,choice?PN_ICON_CHEVRON:PN_ICON_PLUS,x+250,y+38,22,PN_UI_INK);
+    if(s==PN_OK)s=pn_font_size(font,24);
+    if(s==PN_OK)s=pn_w_text_ex(font,f,value,x+72,y+58,156,PN_ALIGN_CENTER,PN_UI_INK,true);
+    return s;
+}
+static pn_status_t draw_global_style(su_t *u){
+    static const char *const gpresets[3]={"舒适","紧凑","大字"};
+    static const char *const weights[5]={"细","标准","稍粗","粗","特粗"};
+    static const char *const clarities[4]={"标准","清晰","锐利","黑白"};
+    static const char *const shades[4]={"浅","中","深","黑"};
+    pn_font_t *font=&u->font;pn_frame_t *f=&u->canvas;const pn_style_t *st=&u->global_style;
+    pn_status_t s=pn_w_header(font,f,"< 设置","全局排版",NULL);
+    if(s==PN_OK){s=pn_font_size(font,24);if(s==PN_OK)s=pn_w_text_ex(font,f,"恢复默认",480,100,172,PN_ALIGN_RIGHT,5,false);}
+    // 顶部实时段落预览（含阅读线与左右边距示意）。/ Top live paragraph preview including reading guide lines and margins.
+    pn_w_round_fill(f,34,140,616,154,16,PN_UI_SELECT);
+    pn_w_round_fill(f,32,138,620,154,16,PN_UI_PAPER);
+    pn_w_round_stroke(f,32,138,620,154,16,1.5f,9);
+    if(s==PN_OK){s=pn_font_size(font,20);if(s==PN_OK)s=pn_w_text_ex(font,f,"全局排版实时预览",48,164,300,PN_ALIGN_LEFT,5,true);}
+    if(s==PN_OK)s=pn_w_text_ex(font,f,"未特配书籍自动生效",360,164,276,PN_ALIGN_RIGHT,5,false);
+    if(s==PN_OK){
+        int saved_px=font->pixels,px=(int)st->pixels*2/3;if(px>34)px=34;if(px<22)px=22;
+        int inset=pn_style_margin_left(st)/2;if(inset<14)inset=14;if(inset>52)inset=52;
+        int pitch=px*(int)st->line_percent/100;if(pitch<px+4)pitch=px+4;
+        unsigned room=(unsigned)(112/pitch);if(room<2 && pitch<=56)room=2;if(room<1)room=1;if(room>3)room=3;
+        unsigned used=0;
+        s=pn_font_size(font,px);
+        if(s==PN_OK)s=pn_w_text_flow(font,f,"字与字之间，留出恰好的距离。让阅读回到舒适，把时间留给文字。",32+inset,174+px,620-2*inset,room,pitch,px*(int)st->indent_em,px*64*(int)st->tracking_percent/100,&used);
+        if(s==PN_OK && st->reading_line){
+            int ascent=px*4/5,descent=px/5;(void)pn_font_vertical(font,&ascent,&descent);
+            int gap=pitch-ascent-descent;if(gap<0)gap=0;
+            for(unsigned li=0;li<used;li++){
+                int gy=174+px+(int)li*pitch+descent+gap/2+st->reading_line_offset;
+                if(gy>174 && gy<288)draw_guide_preview_row(f,st->reading_line,st->reading_line_shade,32+inset,620-2*inset,gy);
+            }
+        }
+        pn_status_t restored=pn_font_size(font,saved_px);if(s==PN_OK)s=restored;
+    }
+    int chosen=st->pixels==44 && st->line_percent==145 && st->gap_percent==40 && st->margin==32?0:st->pixels==36 && st->line_percent==125 && st->gap_percent==20 && st->margin==24?1:st->pixels==56 && st->line_percent==160 && st->gap_percent==40 && st->margin==32?2:-1;
+    if(s==PN_OK)s=pn_w_segments(font,f,gpresets,NULL,3,chosen,306,56);
+    // 与书内排版完全一致的12项双列网格。/ Exact 12-cell two-column grid matching in-book typesetting.
+    char vals[12][32];
+    snprintf(vals[0],sizeof vals[0],"%u",(unsigned)st->pixels);
+    snprintf(vals[1],sizeof vals[1],"%u.%02u",(unsigned)(st->line_percent/100u),(unsigned)(st->line_percent%100u));
+    snprintf(vals[2],sizeof vals[2],"%u.%02u",(unsigned)(st->gap_percent/100u),(unsigned)(st->gap_percent%100u));
+    if(st->margin_top || st->margin_bottom || st->margin_right_delta || st->margin<16 || st->margin>80)snprintf(vals[3],sizeof vals[3],"自定义");
+    else snprintf(vals[3],sizeof vals[3],st->margin<=20?"窄":st->margin<=32?"中":"宽");
+    snprintf(vals[4],sizeof vals[4],"%u 字",(unsigned)st->indent_em);
+    snprintf(vals[5],sizeof vals[5],"%u%%",(unsigned)st->tracking_percent);
+    snprintf(vals[6],sizeof vals[6],"%s",weights[(st->weight+1)>=0 && (st->weight+1)<5?st->weight+1:1]);
+    snprintf(vals[7],sizeof vals[7],"%s",clarities[st->clarity<4?st->clarity:0]);
+    snprintf(vals[8],sizeof vals[8],"%s",st->reading_line==1?"虚线":st->reading_line==2?"点线":"关闭");
+    snprintf(vals[9],sizeof vals[9],"%s",shades[st->reading_line_shade<4?st->reading_line_shade:0]);
+    snprintf(vals[10],sizeof vals[10],"%+d px",(int)st->reading_line_offset);
+    snprintf(vals[11],sizeof vals[11],"%s",st->background==PN_READING_BACKGROUND_EXTERNAL?"自定义":pn_reading_background_name(st->background));
+    static const char *const glabels[12]={"字号","行距","段距","边距","首行缩进","字间距","字重","清晰度","阅读线","阅读线深浅","上下位置","背景"};
+    static const bool gchoice[12]={false,false,false,true,false,false,true,true,true,true,false,false};
+    for(unsigned i=0;i<12 && s==PN_OK;i++){
+        s=draw_gstyle_cell(font,f,glabels[i],vals[i],i==3?"详调 >":NULL,gchoice[i],i==11,32+(int)(i%2)*320,378+(int)(i/2)*84);
+    }
+    // 底行并排开关：书内图片 + 上下栏。/ Bottom toggle row: book images + top/bottom bars.
+    pn_w_round_stroke(f,32,892,300,72,12,1.5f,9);
+    if(s==PN_OK){s=pn_font_size(font,24);if(s==PN_OK)s=pn_w_text(font,f,"书内图片",44,921,170,PN_ALIGN_LEFT);}
+    if(s==PN_OK)s=pn_w_text_ex(font,f,st->hide_images?"不显示":"显示",44,934,276,PN_ALIGN_RIGHT,PN_UI_INK,true);
+    if(s==PN_OK){s=pn_font_size(font,18);if(s==PN_OK)s=pn_w_text_ex(font,f,"关闭后保留占位",44,948,180,PN_ALIGN_LEFT,5,false);}
+    pn_w_round_stroke(f,352,892,300,72,12,1.5f,9);
+    if(s==PN_OK){s=pn_font_size(font,24);if(s==PN_OK)s=pn_w_text(font,f,"上下栏",364,921,170,PN_ALIGN_LEFT);}
+    if(s==PN_OK)s=pn_w_text_ex(font,f,st->hide_bars?"隐藏":"显示",364,934,276,PN_ALIGN_RIGHT,PN_UI_INK,true);
+    if(s==PN_OK){s=pn_font_size(font,18);if(s==PN_OK)s=pn_w_text_ex(font,f,"状态栏与页脚",364,948,180,PN_ALIGN_LEFT,5,false);}
+    if(s==PN_OK)s=note(u,"所有更改自动保存为全局默认；未单独排版的书籍开书即生效，单书可在阅读内改回“使用全局”。",1004);
+    if(s==PN_OK && *u->message)s=note(u,u->message,1112);
+    return s;
+}
+static pn_status_t draw_global_margin_cell(pn_font_t *font,pn_frame_t *f,const char *label,int px,int x,int y){
+    char val[24];snprintf(val,sizeof val,"%d px",px);
+    pn_w_round_stroke(f,x,y,300,108,12,1.5f,9);
+    pn_status_t s=pn_font_size(font,22);
+    if(s==PN_OK)s=pn_w_text_ex(font,f,label,x+14,y+28,272,PN_ALIGN_CENTER,5,false);
+    pn_w_round_fill(f,x+8,y+36,96,64,10,PN_UI_SURFACE);pn_w_round_stroke(f,x+8,y+36,96,64,10,1.5f,9);
+    pn_w_icon(f,PN_ICON_MINUS,x+42,y+54,28,PN_UI_INK);
+    pn_w_round_fill(f,x+196,y+36,96,64,10,PN_UI_SURFACE);pn_w_round_stroke(f,x+196,y+36,96,64,10,1.5f,9);
+    pn_w_icon(f,PN_ICON_PLUS,x+230,y+54,28,PN_UI_INK);
+    if(s==PN_OK)s=pn_font_size(font,26);
+    if(s==PN_OK)s=pn_w_text_ex(font,f,val,x+104,y+78,92,PN_ALIGN_CENTER,PN_UI_INK,true);
+    return s;
+}
+static pn_status_t draw_global_margins(su_t *u){
+    pn_font_t *font=&u->font;pn_frame_t *f=&u->canvas;const pn_style_t *st=&u->global_style;
+    pn_status_t s=pn_w_header(font,f,"< 返回","全局边距与栏位",NULL);
+    if(s==PN_OK){s=pn_font_size(font,24);if(s==PN_OK)s=pn_w_text_ex(font,f,"重置边距",480,100,172,PN_ALIGN_RIGHT,5,false);}
+    const int px=44,py=138,pw=132,ph=222;
+    pn_w_round_fill(f,px,py,pw,ph,8,PN_UI_PAPER);pn_w_round_stroke(f,px,py,pw,ph,8,2.0f,PN_UI_INK);
+    if(st->background){
+        int bx=px+st->bg_margin_left*pw/684,by=py+st->bg_margin_top*ph/1216;
+        int bw=(684-(int)st->bg_margin_left-(int)st->bg_margin_right)*pw/684,bh=(1216-(int)st->bg_margin_top-(int)st->bg_margin_bottom)*ph/1216;
+        if(bw>2 && bh>2){pn_frame_rect(f,bx,by,bw,bh,13);pn_w_outline(f,bx,by,bw,bh,1,8);}
+    }
+    int tx=px+pn_style_margin_left(st)*pw/684,ty=py+pn_style_body_top(st)*ph/1216;
+    int tw=pn_style_body_width(st)*pw/684,th=pn_style_body_height(st)*ph/1216;
+    if(tw>4 && th>4){pn_w_outline(f,tx,ty,tw,th,1,PN_UI_INK);for(int ly=ty+12;ly<ty+th-8;ly+=14)pn_frame_rect(f,tx+6,ly,tw-12,2,8);}
+    if(s==PN_OK){s=pn_font_size(font,24);if(s==PN_OK)s=pn_w_text_ex(font,f,"正文与阅读背景四周边距",204,196,448,PN_ALIGN_LEFT,PN_UI_INK,true);}
+    if(s==PN_OK){s=pn_font_size(font,22);if(s==PN_OK)s=pn_w_text_lines_ex(font,f,"支持分别精调正文与背景四向边距，自动保存为全局默认。",204,238,448,3,32,5,false);}
+    if(s==PN_OK)s=pn_w_group(font,f,"正文边距",432);
+    if(s==PN_OK)s=draw_global_margin_cell(font,f,"上边距",pn_style_margin_top(st),32,450);
+    if(s==PN_OK)s=draw_global_margin_cell(font,f,"下边距",pn_style_margin_bottom(st),352,450);
+    if(s==PN_OK)s=draw_global_margin_cell(font,f,"左边距",pn_style_margin_left(st),32,568);
+    if(s==PN_OK)s=draw_global_margin_cell(font,f,"右边距",pn_style_margin_right(st),352,568);
+    if(s==PN_OK)s=pn_w_group(font,f,"背景边距",714);
+    if(s==PN_OK)s=draw_global_margin_cell(font,f,"背景上",st->bg_margin_top,32,732);
+    if(s==PN_OK)s=draw_global_margin_cell(font,f,"背景下",st->bg_margin_bottom,352,732);
+    if(s==PN_OK)s=draw_global_margin_cell(font,f,"背景左",st->bg_margin_left,32,850);
+    if(s==PN_OK)s=draw_global_margin_cell(font,f,"背景右",st->bg_margin_right,352,850);
+    if(s==PN_OK && *u->message)s=note(u,u->message,1020);
+    return s;
+}
+static pn_status_t draw_global_bg(su_t *u){
+    pn_font_t *font=&u->font;pn_frame_t *f=&u->canvas;const pn_style_t *st=&u->global_style;
+    pn_status_t s=pn_w_header(font,f,"< 返回","全局阅读背景",NULL);
+    if(s==PN_OK)s=pn_w_group(font,f,"选择内置阅读底纹（新书自动生效）",174);
+    for(unsigned i=0;i<=PN_READING_BACKGROUND_COUNT && s==PN_OK;i++){
+        unsigned id=pn_reading_background_id(i);
+        bool chosen=st->background==id;
+        int x=32+(int)(i%3)*212,y=194+(int)(i/3)*284;
+        pn_w_round_fill(f,x,y,196,264,14,PN_UI_SURFACE);
+        pn_w_round_stroke(f,x,y,196,264,14,chosen?3.0f:1.5f,chosen?PN_UI_INK:9);
+        pn_frame_rect(f,x+18,y+16,160,196,PN_UI_PAPER);
+        pn_w_outline(f,x+18,y+16,160,196,1,10);
+        if(id){
+            // 迷你预览内置纸纹。/ Miniature preview of built-in reading paper.
+            pn_frame_t sub={f->pixels+(size_t)(y+18)*f->stride+(size_t)(x+20)/2u,156,192,f->stride};
+            (void)pn_reading_background_draw(id,&sub);
+        }
+        s=pn_font_size(font,22);
+        if(s==PN_OK)s=pn_w_text_ex(font,f,pn_reading_background_name(id),x+8,y+244,180,PN_ALIGN_CENTER,PN_UI_INK,chosen);
+    }
+    if(s==PN_OK)s=note(u,"外部自定义背景图片可在单书阅读排版中选用；此处全局底纹适用于所有未特配书籍。",1086);
+    return s;
+}
+static pn_status_t draw_home_motto(pn_settings_ui_t *ui,su_t *u){
+    pn_font_t *font=&u->font;pn_frame_t *f=&u->canvas;
+    pn_status_t s=pn_w_header(font,f,"< 返回","左上角文案",NULL);
+    if(s==PN_OK)s=pn_w_group(font,f,"当前显示",176);
+    pn_w_round_fill(f,32,190,620,96,16,PN_UI_SURFACE);pn_w_round_stroke(f,32,190,620,96,16,2.0f,PN_UI_INK);
+    if(s==PN_OK)s=pn_font_size(font,30);
+    if(s==PN_OK)s=pn_w_text_ex(font,f,*ui->home.header?ui->home.header:PN_BRAND_NAME,52,250,580,PN_ALIGN_CENTER,PN_UI_INK,true);
+    if(s==PN_OK)s=pn_w_group(font,f,"精选名言（轻点即生效）",328);
+    for(unsigned i=0;i<6 && s==PN_OK;i++){
+        int x=32+(int)(i%2)*318,y=344+(int)(i/2)*108;bool active=!strcmp(ui->home.header,motto_presets[i]);
+        pn_w_round_fill(f,x,y,302,92,14,active?PN_UI_INK:PN_UI_SURFACE);
+        pn_w_round_stroke(f,x,y,302,92,14,active?2.0f:1.0f,active?PN_UI_INK:PN_UI_STROKE);
+        s=pn_font_size(font,24);if(s==PN_OK)s=pn_w_text_ex(font,f,motto_presets[i],x+12,y+55,278,PN_ALIGN_CENTER,active?PN_UI_PAPER:PN_UI_INK,active);
+    }
+    if(s==PN_OK)s=pn_font_size(font,30);
+    if(s==PN_OK)s=pn_w_button(font,f,"自定义键盘输入",PN_UI_MARGIN,712,620,88,PN_W_SELECTED);
+    if(s==PN_OK)s=pn_w_button(font,f,"恢复默认（PicoNano）",PN_UI_MARGIN,822,620,88,0u);
+    if(s==PN_OK)s=note(u,"所有页面状态栏左上角同步显示此文案，留空或恢复默认将显示 PicoNano。",956);
+    if(s==PN_OK && *u->message)s=note(u,u->message,1080);
+    return s;
+}
+static pn_status_t draw_home_motto_edit(su_t *u){
+    pn_font_t *font=&u->font;pn_frame_t *f=&u->canvas;
+    pn_status_t s=pn_w_header(font,f,"< 返回","自定义文案",NULL);
+    pn_w_round_fill(f,PN_UI_MARGIN,FIELD_Y,620,FIELD_H,PN_UI_RADIUS,14);pn_w_round_stroke(f,PN_UI_MARGIN,FIELD_Y,620,FIELD_H,PN_UI_RADIUS,2.0f,PN_UI_INK);
+    if(s==PN_OK)s=pn_font_size(font,34);
+    if(s==PN_OK){
+        if(!*u->motto_draft)s=pn_w_text_ex(font,f,"输入自定义座右铭或签名",56,FIELD_Y+60,560,PN_ALIGN_LEFT,PN_UI_MUTED,false);
+        else s=field_text(u,u->motto_draft,56,FIELD_Y+60,560);
+    }
+    if(s==PN_OK)s=note(u,"支持中文全拼、英文、数字与标点，留空保存将恢复默认 PicoNano。",FIELD_Y+FIELD_H+64);
+    if(s==PN_OK && *u->message)s=note(u,u->message,FIELD_Y+FIELD_H+140);
+    if(s==PN_OK)s=pn_font_size(font,30);
+    if(s==PN_OK)s=pn_w_button(font,f,"清空",PN_UI_MARGIN,EDIT_BTN_Y,296,88,(*u->motto_draft || *u->kb.pinyin)?0u:PN_W_DISABLED);
+    if(s==PN_OK)s=pn_w_button(font,f,"保存",356,EDIT_BTN_Y,296,88,PN_W_SELECTED);
+    if(s==PN_OK)s=pn_keyboard_render(&u->kb,font,f,KB_Y);
+    return s;
+}
+static void banner_preview_release(su_t *u){
+    pn_free(u->banner_preview_px);u->banner_preview_px=NULL;u->banner_preview=(pn_frame_t){0};u->banner_preview_name[0]=0;
+}
+/// 为“正在阅读上方背景”准备实时横幅预览，并同步写入内部缓存加速主页加载。
+/// Prepare live top-banner preview and persist the decoded 4bpp cache for lag-free Home visits.
+static void banner_preview_load(su_t *u,const char *name){
+    if(!name || !*name){banner_preview_release(u);return;}
+    if(u->banner_preview_px && !strcmp(u->banner_preview_name,name))return;
+    if(!u->banner_preview_px){
+        u->banner_preview_px=pn_alloc_optional(u->pool,PN_MEM_UI,PN_HOME_BANNER_BYTES);
+        if(!u->banner_preview_px)return;
+        if(!pn_frame_bind(&u->banner_preview,u->banner_preview_px,PN_HOME_BANNER_BYTES,PN_HOME_BANNER_WIDTH,PN_HOME_BANNER_HEIGHT)){banner_preview_release(u);return;}
+    }
+    u->banner_preview_name[0]=0;
+    if(u->state && pn_home_banner_cache_load(u->state,u->dir,name,u->banner_preview_px,PN_HOME_BANNER_BYTES)==PN_OK){
+        strcpy(u->banner_preview_name,name);return;
+    }
+    if(!u->wallpaper_media || !u->wallpaper_media->available || !*u->wallpaper_dir){banner_preview_release(u);return;}
+    char path[PN_WALLPAPER_PATH_MAX];
+    if(!pn_scan_dirs_find_file(PN_SCAN_CAT_WALLPAPERS,u->wallpaper_dir,name,path,sizeof path)){
+        if((size_t)snprintf(path,sizeof path,"%s/%s",u->wallpaper_dir,name)>=sizeof path){banner_preview_release(u);return;}
+    }
+    pn_media_lease_t lease={0};pn_status_t st=pn_media_acquire(u->wallpaper_media,PN_MEDIA_READ,&lease);
+    if(st==PN_OK){st=pn_wallpaper_prepare_banner(u->pool,u->wallpaper_media,&lease,path,1024u*1024u,&u->banner_preview);(void)pn_media_release(u->wallpaper_media,&lease);}
+    if(st==PN_OK){
+        strcpy(u->banner_preview_name,name);
+        if(u->state)(void)pn_home_banner_cache_save(u->state,u->dir,name,u->banner_preview_px,PN_HOME_BANNER_BYTES);
+    }else banner_preview_release(u);
+}
+static pn_status_t draw_home_banner(pn_settings_ui_t *ui,su_t *u){
+    pn_font_t *font=&u->font;pn_frame_t *f=&u->canvas;
+    pn_status_t s=pn_w_header(font,f,"< 返回","正在阅读上方背景",NULL);
+    // 顶部实时效果预览卡（620×132，按原图等比缩放并叠加主页标题效果）。/ Top live preview card (620x132, scaled from decoded banner with Home title overlay).
+    const int px=32,py=140,pw=620,ph=132;
+    pn_w_round_fill(f,px+2,py+2,pw-4,ph,16,PN_UI_SELECT);
+    pn_w_round_fill(f,px,py,pw,ph,16,PN_UI_PAPER);
+    if(*ui->home.banner && u->banner_preview_px && !strcmp(u->banner_preview_name,ui->home.banner)){
+        for(int y=0;y<ph;y++){
+            int sy=y*PN_HOME_BANNER_HEIGHT/ph;
+            for(int x=0;x<pw;x++){int sx=x*PN_HOME_BANNER_WIDTH/pw;pn_frame_pixel(f,px+x,py+y,pn_frame_get(&u->banner_preview,sx,sy));}
+        }
+        pn_w_mask_corners(f,px,py,pw,ph,16,PN_UI_PAPER);
+    }else{
+        // 默认远山预览剪影。/ Default mountain preview silhouette.
+        static const int pts[][2]={{280,130},{360,64},{410,92},{468,36},{530,84},{580,62},{620,104}};
+        for(size_t i=1;i<sizeof pts/sizeof *pts;i++)for(int x=pts[i-1][0];x<pts[i][0];x++){
+            int y=pts[i-1][1]+(pts[i][1]-pts[i-1][1])*(x-pts[i-1][0])/(pts[i][0]-pts[i-1][0]);
+            pn_frame_rect(f,px+x,py+y,1,ph-y,14);
+        }
+        pn_w_mask_corners(f,px,py,pw,ph,16,PN_UI_PAPER);
+    }
+    pn_w_round_stroke(f,px,py,pw,ph,16,1.5f,9);
+    if(s==PN_OK){s=pn_font_size(font,34);if(s==PN_OK)s=pn_w_text_ex(font,f,"读书",px+24,py+74,260,PN_ALIGN_LEFT,PN_UI_INK,true);}
+    if(s==PN_OK){s=pn_font_size(font,20);if(s==PN_OK)s=pn_w_text_ex(font,f,"拾起上次的阅读",px+24,py+108,260,PN_ALIGN_LEFT,5,false);}
+    if(s==PN_OK){s=pn_font_size(font,20);if(s==PN_OK)s=pn_w_text_ex(font,f,*ui->home.banner?ui->home.banner:"默认山水效果",px+280,py+34,316,PN_ALIGN_RIGHT,4,true);}
+    if(s==PN_OK)s=pn_font_size(font,26);
+    if(s==PN_OK)s=pn_w_button(font,f,*ui->home.banner?"恢复默认山水背景":"当前已使用默认山水背景",PN_UI_MARGIN,288,620,68,*ui->home.banner?0u:PN_W_SELECTED);
+    if(s==PN_OK)s=pn_w_group(font,f,"从壁纸目录选择图片（点击即预览并应用）",394);
+    if(!u->banner_count){
+        if(s==PN_OK)s=note(u,"壁纸目录暂无可用图片（支持 PNG/JPG）。通过传书上传锁屏壁纸后即可在此选用。",444);
+    }else{
+        size_t visible=u->banner_count>5?5:u->banner_count;
+        pn_w_card(f,410,(int)visible);
+        for(size_t i=0;i<visible && s==PN_OK;i++){
+            bool active=!strcmp(ui->home.banner,u->banner_names[i]);
+            s=pn_w_card_row(font,f,u->banner_names[i],active?"当前已选用 · 顶部已预览":"轻点预览并设为主页顶部背景",NULL,PN_ICON_IMAGE,active?PN_ROW_ON:0u,410+(int)i*ROW_H,i+1==visible);
+        }
+    }
+    if(s==PN_OK && (u->banner_has_prev || u->banner_more)){
+        s=pn_font_size(font,28);
+        if(s==PN_OK)s=pn_w_button(font,f,"上一页",32,960,296,80,u->banner_has_prev?0u:PN_W_DISABLED);
+        if(s==PN_OK)s=pn_w_button(font,f,"下一页",356,960,296,80,u->banner_more?0u:PN_W_DISABLED);
+    }
+    if(s==PN_OK && *u->message)s=note(u,u->message,1088);
     return s;
 }
 static pn_status_t show_profile(pn_settings_ui_t *ui,pn_settings_present_fn present,void *ctx,pn_refresh_t profile){
@@ -282,7 +600,13 @@ static pn_status_t show_profile(pn_settings_ui_t *ui,pn_settings_present_fn pres
     // 只计时清屏与绘制，供真机拆分菜单准备耗时。/ Time clearing and drawing only, to split menu preparation on hardware.
     pn_profile_span_t span;pn_profile_begin(&span,NULL,"ui.settings.clear");pn_frame_clear(&u->canvas,15);pn_profile_end(&span,PN_OK);
     pn_profile_begin(&span,NULL,"ui.settings.draw");
-    pn_status_t s=u->screen==SCREEN_KEYS?draw_keys(ui,u):u->screen==SCREEN_REFRESH?draw_refresh(ui,u):u->screen==SCREEN_ABOUT?draw_about(ui,u):u->screen==SCREEN_TIME?draw_time(u):u->screen==SCREEN_UPDATE?draw_update(u):u->screen==SCREEN_WIFI?draw_wifi(u):u->screen==SCREEN_WIFI_EDIT?draw_wifi_edit(u):u->screen==SCREEN_APPEARANCE?draw_appearance(ui,u):draw_main(ui,u);
+    // 仅在需要显示任意中文文案/全拼候选/用户文件名时借用常驻中文字体，避免默认设置主页每次重绘重复开闭字库。
+    // Borrow the resident Chinese face only when rendering custom CJK text, Pinyin candidates or user filenames, avoiding redundant font opens on default Settings root.
+    bool need_scope=*pn_w_brand()!=0 || u->screen==SCREEN_HOME_MOTTO || u->screen==SCREEN_HOME_MOTTO_EDIT
+        || u->screen==SCREEN_GLOBAL_STYLE || u->screen==SCREEN_GLOBAL_BG || u->screen==SCREEN_HOME_BANNER;
+    pn_w_font_scope_t scope={0};if(need_scope)(void)pn_w_font_scope_begin(&scope,u->pool,NULL);
+    pn_status_t s=u->screen==SCREEN_KEYS?draw_keys(ui,u):u->screen==SCREEN_REFRESH?draw_refresh(ui,u):u->screen==SCREEN_ABOUT?draw_about(ui,u):u->screen==SCREEN_TIME?draw_time(u):u->screen==SCREEN_UPDATE?draw_update(u):u->screen==SCREEN_WIFI?draw_wifi(u):u->screen==SCREEN_WIFI_EDIT?draw_wifi_edit(u):u->screen==SCREEN_APPEARANCE?draw_appearance(ui,u):u->screen==SCREEN_GLOBAL_STYLE?draw_global_style(u):u->screen==SCREEN_GLOBAL_MARGINS?draw_global_margins(u):u->screen==SCREEN_GLOBAL_BG?draw_global_bg(u):u->screen==SCREEN_HOME_MOTTO?draw_home_motto(ui,u):u->screen==SCREEN_HOME_MOTTO_EDIT?draw_home_motto_edit(u):u->screen==SCREEN_HOME_BANNER?draw_home_banner(ui,u):draw_main(ui,u);
+    if(need_scope)pn_w_font_scope_end(&scope);
     pn_profile_end(&span,s);
     if(s==PN_OK)s=present(ctx,&u->canvas,profile);
     if(s==PN_OK){ui->presented=true;u->snapshot_dirty=false;u->status=snapshot;}
@@ -438,7 +762,13 @@ pn_status_t pn_settings_ui_open_cached(pn_settings_ui_t *ui,pn_pool_t *pool,pn_m
     reload_lan(u);
     bool index_wait=false;u->index_known=!state || pn_settings_load_index(state,dir,&index_wait)==PN_OK;
     bool vertical_turn=false;u->vertical_known=!state || pn_settings_load_vertical_turn(state,dir,&vertical_turn)==PN_OK;
-    *ui=(pn_settings_ui_t){.impl=u,.active=true,.flags=flags,.shelf=shelf,.index_wait=index_wait,.vertical_turn=vertical_turn};
+    pn_home_prefs_t home=pn_home_prefs_default();
+    if(state)(void)pn_home_prefs_load_dir(state,dir,&home);
+    pn_w_set_brand(home.header);
+    u->global_style=pn_style_default(PN_STYLE_DEFAULT_PIXELS);
+    if(state){pn_style_t gs;pn_status_t gstatus=pn_style_global_load(state,dir,&gs);if(gstatus==PN_OK)u->global_style=gs;u->global_style_known=gstatus==PN_OK || gstatus==PN_EMPTY;}
+    else u->global_style_known=false;
+    *ui=(pn_settings_ui_t){.impl=u,.active=true,.flags=flags,.shelf=shelf,.home=home,.index_wait=index_wait,.vertical_turn=vertical_turn};
     (void)show(ui,present,ctx);return PN_OK;
 }
 pn_status_t pn_settings_ui_open(pn_settings_ui_t *ui,pn_pool_t *pool,pn_media_t *state,const char *dir,pn_settings_present_fn present,void *ctx){return pn_settings_ui_open_cached(ui,pool,state,dir,NULL,present,ctx);}
@@ -485,6 +815,38 @@ static pn_status_t commit_shelf(pn_settings_ui_t *ui,su_t *u,pn_shelf_prefs_t ne
         snprintf(u->message,sizeof u->message,s==PN_UNSUPPORTED?"内部存储不可用，设置不能保存":"保存失败，请重试");}
     return s;
 }
+static pn_status_t commit_home(pn_settings_ui_t *ui,su_t *u,const pn_home_prefs_t *next){
+    pn_status_t s=u->state?pn_home_prefs_save_dir(u->state,u->dir,next):PN_UNSUPPORTED;
+    if(s==PN_OK){ui->home=*next;pn_w_set_brand(ui->home.header);}
+    else{pn_home_prefs_t reread;if(u->state && pn_home_prefs_load_dir(u->state,u->dir,&reread)==PN_OK){ui->home=reread;pn_w_set_brand(ui->home.header);}
+        snprintf(u->message,sizeof u->message,s==PN_UNSUPPORTED?"内部存储不可用，设置不能保存":"保存失败，请重试");}
+    return s;
+}
+static pn_status_t commit_global_style(su_t *u,const pn_style_t *next){
+    if(pn_style_validate(next)!=PN_OK)return PN_EMPTY;
+    pn_status_t s=u->state?pn_style_global_save(u->state,u->dir,next):PN_UNSUPPORTED;
+    if(s==PN_OK){u->global_style=*next;u->global_style_known=true;}
+    else{pn_style_t reread;if(u->state && pn_style_global_load(u->state,u->dir,&reread)==PN_OK)u->global_style=reread;
+        snprintf(u->message,sizeof u->message,s==PN_UNSUPPORTED?"内部存储不可用，设置不能保存":"保存失败，请重试");}
+    return s;
+}
+static void banner_load_page(su_t *u,const char *cursor,bool previous){
+    u->banner_count=0;u->banner_more=false;u->banner_has_prev=false;
+    if(!u->wallpaper_media || !u->wallpaper_media->available || !*u->wallpaper_dir)return;
+    pn_catalog_page_t *page=pn_alloc_tagged(u->pool,PN_MEM_UI,sizeof *page);if(!page)return;
+    pn_media_lease_t lease={0};
+    if(pn_media_acquire(u->wallpaper_media,PN_MEDIA_READ,&lease)==PN_OK){
+        pn_status_t s=previous?pn_catalog_image_page_before(u->wallpaper_media,&lease,u->wallpaper_dir,cursor,page):pn_catalog_image_page(u->wallpaper_media,&lease,u->wallpaper_dir,cursor,page);
+        (void)pn_media_release(u->wallpaper_media,&lease);
+        if(s==PN_OK){
+            for(size_t i=0;i<page->count && u->banner_count<6;i++){
+                if(strlen(page->items[i].name)<PN_HOME_BANNER_MAX){strcpy(u->banner_names[u->banner_count++],page->items[i].name);}
+            }
+            u->banner_more=page->more;u->banner_has_prev=page->index>0;
+        }
+    }
+    pn_free(page);
+}
 pn_status_t pn_settings_ui_event(pn_settings_ui_t *ui,int command,pn_settings_present_fn present,void *ctx){
     if(!ui || !ui->impl || !ui->active || !present)return PN_INVALID;
     su_t *u=ui->impl;
@@ -501,7 +863,94 @@ pn_status_t pn_settings_ui_event(pn_settings_ui_t *ui,int command,pn_settings_pr
         if(status==PN_OK){ui->index_wait=next;u->message[0]=0;}else{bool saved;if(u->state && pn_settings_load_index(u->state,u->dir,&saved)==PN_OK)ui->index_wait=saved;snprintf(u->message,sizeof u->message,"设置未保存，请重试");}
         pn_status_t shown=show(ui,present,ctx);return status==PN_OK?shown:status;
     }
-    if(command==PN_SETUI_BACK){if(u->screen!=SCREEN_MAIN){u->forget_armed=false;u->screen=u->screen==SCREEN_TIME || u->screen==SCREEN_UPDATE?SCREEN_ABOUT:SCREEN_MAIN;return show(ui,present,ctx);}ui->active=false;return PN_OK;}
+    if(command==PN_SETUI_BACK){if(u->screen!=SCREEN_MAIN){u->forget_armed=false;u->screen=(u->screen==SCREEN_TIME || u->screen==SCREEN_UPDATE)?SCREEN_ABOUT:(u->screen==SCREEN_GLOBAL_MARGINS || u->screen==SCREEN_GLOBAL_BG)?SCREEN_GLOBAL_STYLE:u->screen==SCREEN_HOME_MOTTO_EDIT?SCREEN_HOME_MOTTO:(u->screen==SCREEN_HOME_MOTTO || u->screen==SCREEN_HOME_BANNER)?SCREEN_APPEARANCE:SCREEN_MAIN;return show(ui,present,ctx);}ui->active=false;return PN_OK;}
+    if(command==PN_SETUI_GLOBAL_STYLE){u->screen=SCREEN_GLOBAL_STYLE;return show(ui,present,ctx);}
+    if(u->screen==SCREEN_GLOBAL_STYLE){
+        if(command==PN_SETUI_GSTYLE_MARGINS){u->screen=SCREEN_GLOBAL_MARGINS;return show(ui,present,ctx);}
+        if(command==PN_SETUI_GSTYLE_BG){u->screen=SCREEN_GLOBAL_BG;return show(ui,present,ctx);}
+        pn_style_t next=u->global_style;bool handled=true;
+        if(command==PN_SETUI_GSTYLE_RESET){next=pn_style_default(PN_STYLE_DEFAULT_PIXELS);}
+        else if(command==PN_SETUI_GSTYLE_BARS){next.hide_bars=next.hide_bars?0:1;}
+        else if(command==PN_SETUI_GSTYLE_IMAGES){next.hide_images=next.hide_images?0:1;}
+        else if(command>=PN_SETUI_GSTYLE_PRESET && command<PN_SETUI_GSTYLE_PRESET+3){
+            static const uint16_t p_px[3]={44,36,56},p_ln[3]={145,125,160},p_gp[3]={40,20,40},p_mg[3]={32,24,32};
+            unsigned idx=(unsigned)(command-PN_SETUI_GSTYLE_PRESET);
+            next.pixels=p_px[idx];next.line_percent=p_ln[idx];next.gap_percent=p_gp[idx];next.indent_em=2;pn_style_set_margins_lr(&next,(int)p_mg[idx]);next.tracking_percent=0;
+        }else if(command>=PN_SETUI_GSTYLE_ADJ && command<PN_SETUI_GSTYLE_ADJ+16){
+            unsigned item=(unsigned)(command-PN_SETUI_GSTYLE_ADJ)/2;bool up=((command-PN_SETUI_GSTYLE_ADJ)&1)!=0;
+            if(item==0){int v=(int)next.pixels+(up?2:-2);if(v>=28 && v<=72)next.pixels=(uint16_t)v;}
+            else if(item==1){int v=(int)next.line_percent+(up?5:-5);if(v>=100 && v<=220)next.line_percent=(uint16_t)v;}
+            else if(item==2){int v=(int)next.gap_percent+(up?5:-5);if(v>=0 && v<=100)next.gap_percent=(uint16_t)v;}
+            else if(item==3){unsigned level=next.margin<=20?0u:next.margin<=32?1u:2u;static const int ms[3]={20,32,48};level=up?(level+1u)%3u:(level+2u)%3u;pn_style_set_margins_lr(&next,ms[level]);}
+            else if(item==4){int v=(int)next.indent_em+(up?1:-1);if(v>=0 && v<=2)next.indent_em=(uint16_t)v;}
+            else if(item==5){int v=(int)next.tracking_percent+(up?5:-5);if(v>=0 && v<=50)next.tracking_percent=(uint16_t)v;}
+            else if(item==6){int v=(int)next.weight+(up?1:-1);if(v<-1)v=3;if(v>3)v=-1;next.weight=(int16_t)v;}
+            else if(item==7){next.clarity=(uint16_t)((next.clarity+(up?1u:3u))%4u);}
+        }else if(command>=PN_SETUI_GSTYLE_EXT && command<PN_SETUI_GSTYLE_EXT+6){
+            unsigned item=(unsigned)(command-PN_SETUI_GSTYLE_EXT)/2;bool up=((command-PN_SETUI_GSTYLE_EXT)&1)!=0;
+            if(item==0)next.reading_line=(uint16_t)((next.reading_line+(up?1u:2u))%3u);
+            else if(item==1)next.reading_line_shade=(uint16_t)((next.reading_line_shade+(up?1u:3u))%4u);
+            else{int v=(int)next.reading_line_offset+(up?2:-2);if(v>=-8 && v<=8)next.reading_line_offset=(int16_t)v;}
+        }else handled=false;
+        if(handled){status=commit_global_style(u,&next);pn_status_t shown=show(ui,present,ctx);return status==PN_OK?shown:status;}
+    }
+    if(u->screen==SCREEN_GLOBAL_MARGINS){
+        pn_style_t next=u->global_style;bool handled=true;
+        if(command==PN_SETUI_GSTYLE_MARGINS_RESET){
+            next.margin_top=0;next.margin_bottom=0;pn_style_set_margins_lr(&next,32);
+            next.bg_margin_top=0;next.bg_margin_bottom=0;next.bg_margin_left=0;next.bg_margin_right=0;
+        }else if(command>=PN_SETUI_GSTYLE_MADJ && command<PN_SETUI_GSTYLE_MADJ+16){
+            unsigned item=(unsigned)(command-PN_SETUI_GSTYLE_MADJ)/2;bool up=((command-PN_SETUI_GSTYLE_MADJ)&1)!=0;
+            int delta=up?4:-4,val=0;
+            switch(item){
+                case 0:val=pn_style_margin_top(&next)+delta;if(val>=0 && val<=200)next.margin_top=(uint16_t)val;break;
+                case 1:val=pn_style_margin_bottom(&next)+delta;if(val>=0 && val<=200)next.margin_bottom=(uint16_t)val;break;
+                case 2:val=pn_style_margin_left(&next)+delta;if(val>=0 && val<=160)pn_style_set_margin_left(&next,val);break;
+                case 3:val=pn_style_margin_right(&next)+delta;if(val>=0 && val<=160)pn_style_set_margin_right(&next,val);break;
+                case 4:val=(int)next.bg_margin_top+delta;if(val>=0 && val<=200)next.bg_margin_top=(uint16_t)val;break;
+                case 5:val=(int)next.bg_margin_bottom+delta;if(val>=0 && val<=200)next.bg_margin_bottom=(uint16_t)val;break;
+                case 6:val=(int)next.bg_margin_left+delta;if(val>=0 && val<=160)next.bg_margin_left=(uint16_t)val;break;
+                default:val=(int)next.bg_margin_right+delta;if(val>=0 && val<=160)next.bg_margin_right=(uint16_t)val;break;
+            }
+        }else handled=false;
+        if(handled){if(pn_style_validate(&next)==PN_OK)status=commit_global_style(u,&next);pn_status_t shown=show(ui,present,ctx);return status==PN_OK?shown:status;}
+    }
+    if(u->screen==SCREEN_GLOBAL_BG){
+        if(command>=PN_SETUI_GSTYLE_BG_ITEM && command<=PN_SETUI_GSTYLE_BG_ITEM+(int)PN_READING_BACKGROUND_COUNT){
+            pn_style_t next=u->global_style;
+            next.background=(uint16_t)pn_reading_background_id((unsigned)(command-PN_SETUI_GSTYLE_BG_ITEM));
+            memset(next.background_name,0,sizeof next.background_name);memset(&next.background_identity,0,sizeof next.background_identity);
+            status=commit_global_style(u,&next);u->screen=SCREEN_GLOBAL_STYLE;
+            pn_status_t shown=show(ui,present,ctx);return status==PN_OK?shown:status;
+        }
+    }
+    if(command==PN_SETUI_HOME_MOTTO){u->screen=SCREEN_HOME_MOTTO;return show(ui,present,ctx);}
+    if(u->screen==SCREEN_HOME_MOTTO){
+        if(command==PN_SETUI_MOTTO_RESET){pn_home_prefs_t next=ui->home;next.header[0]=0;status=commit_home(ui,u,&next);pn_status_t shown=show(ui,present,ctx);return status==PN_OK?shown:status;}
+        if(command>=PN_SETUI_MOTTO_PRESET && command<PN_SETUI_MOTTO_PRESET+6){pn_home_prefs_t next=ui->home;snprintf(next.header,sizeof next.header,"%s",motto_presets[command-PN_SETUI_MOTTO_PRESET]);status=commit_home(ui,u,&next);pn_status_t shown=show(ui,present,ctx);return status==PN_OK?shown:status;}
+        if(command==PN_SETUI_MOTTO_EDIT){snprintf(u->motto_draft,sizeof u->motto_draft,"%s",ui->home.header);pn_keyboard_set_ime(&u->kb,true,true);u->screen=SCREEN_HOME_MOTTO_EDIT;return show(ui,present,ctx);}
+    }
+    if(u->screen==SCREEN_HOME_MOTTO_EDIT){
+        bool changed=false;
+        int kb_code=PN_KB_NONE;
+        if(command>=PN_SETUI_CHAR+32 && command<=PN_SETUI_CHAR+126)kb_code=command-PN_SETUI_CHAR;
+        else if(command==PN_SETUI_KB_DELETE)kb_code=PN_KB_DELETE;
+        else if(command==PN_SETUI_KB_SHIFT)kb_code=PN_KB_SHIFT;
+        else if(command==PN_SETUI_KB_LAYER)kb_code=PN_KB_LAYER;
+        else if(command>PN_SETUI_KB_IME_BASE && command<=PN_SETUI_KB_IME_BASE+60)kb_code=-(command-PN_SETUI_KB_IME_BASE);
+        if(kb_code!=PN_KB_NONE)changed=pn_keyboard_apply(&u->kb,kb_code,u->motto_draft,sizeof u->motto_draft,PN_HOME_HEADER_MAX-1);
+        else if(command==PN_SETUI_MOTTO_CLEAR){changed=*u->motto_draft!=0 || *u->kb.pinyin!=0;u->motto_draft[0]=0;u->kb.pinyin[0]=0;u->kb.cand_page=0;}
+        else if(command==PN_SETUI_MOTTO_SAVE){(void)pn_keyboard_flush(&u->kb,u->motto_draft,sizeof u->motto_draft,PN_HOME_HEADER_MAX-1);pn_home_prefs_t next=ui->home;snprintf(next.header,sizeof next.header,"%s",u->motto_draft);status=commit_home(ui,u,&next);if(status==PN_OK)u->screen=SCREEN_HOME_MOTTO;pn_status_t shown=show(ui,present,ctx);return status==PN_OK?shown:status;}
+        else return PN_EMPTY;
+        return changed?show(ui,present,ctx):PN_OK;
+    }
+    if(command==PN_SETUI_HOME_BANNER){banner_load_page(u,"",false);banner_preview_load(u,ui->home.banner);u->screen=SCREEN_HOME_BANNER;return show(ui,present,ctx);}
+    if(u->screen==SCREEN_HOME_BANNER){
+        if(command==PN_SETUI_BANNER_DEFAULT){pn_home_prefs_t next=ui->home;next.banner[0]=0;status=commit_home(ui,u,&next);if(status==PN_OK){banner_preview_release(u);if(u->state)pn_home_banner_cache_clear(u->state,u->dir);}pn_status_t shown=show(ui,present,ctx);return status==PN_OK?shown:status;}
+        if(command==PN_SETUI_BANNER_PREV && u->banner_has_prev && u->banner_count){char cur[PN_HOME_BANNER_MAX];strcpy(cur,u->banner_names[0]);banner_load_page(u,cur,true);return show(ui,present,ctx);}
+        if(command==PN_SETUI_BANNER_NEXT && u->banner_more && u->banner_count){size_t last_idx=u->banner_count>5?4:u->banner_count-1;char cur[PN_HOME_BANNER_MAX];strcpy(cur,u->banner_names[last_idx]);banner_load_page(u,cur,false);return show(ui,present,ctx);}
+        if(command>=PN_SETUI_BANNER_ITEM && command<PN_SETUI_BANNER_ITEM+(int)u->banner_count){pn_home_prefs_t next=ui->home;snprintf(next.banner,sizeof next.banner,"%s",u->banner_names[command-PN_SETUI_BANNER_ITEM]);status=commit_home(ui,u,&next);if(status==PN_OK)banner_preview_load(u,next.banner);pn_status_t shown=show(ui,present,ctx);return status==PN_OK?shown:status;}
+    }
     if(command==PN_SETUI_WIFI){u->forget_armed=false;u->screen=SCREEN_WIFI;return show(ui,present,ctx);}
     if(u->screen==SCREEN_WIFI || u->screen==SCREEN_WIFI_EDIT){pn_status_t s=wifi_event(ui,u,command,present,ctx);if(s!=PN_EMPTY || u->screen==SCREEN_WIFI_EDIT)return s;}
     if(command==PN_SETUI_UPDATE){u->screen=SCREEN_UPDATE;return show(ui,present,ctx);}
@@ -554,16 +1003,19 @@ int pn_settings_ui_hit(const pn_settings_ui_t *ui,int x,int y){
     if(u->screen==SCREEN_MAIN){
         if(y>=TAB_Y){int tab=pn_w_navigation_hit(x,y);return tab==PN_NAV_HOME?PN_SETUI_HOME:tab==PN_NAV_LIBRARY?PN_SETUI_SHELF:tab==PN_NAV_TRANSFER?PN_SETUI_TRANSFER:-1;}
         if(x<32 || x>=652)return -1;
-        if(y>=DISPLAY_Y && y<DISPLAY_Y+ROW_H)return PN_SETUI_FONTS;
-        if(y>=DISPLAY_Y+ROW_H && y<DISPLAY_Y+2*ROW_H)return PN_SETUI_WALLPAPER;
-        if(y>=DISPLAY_Y+2*ROW_H && y<DISPLAY_Y+3*ROW_H)return PN_SETUI_APPEARANCE;
-        if(y>=READING_Y && y<READING_Y+ROW_H)return PN_SETUI_KEYS;
-        if(y>=READING_Y+ROW_H && y<READING_Y+2*ROW_H)return PN_SETUI_REFRESH;
-        if(y>=DEVICE_Y && y<DEVICE_Y+ROW_H)return PN_SETUI_WIFI;
-        if(y>=DEVICE_Y+ROW_H && y<DEVICE_Y+device_rows(u)*ROW_H)return PN_SETUI_ABOUT;
+        if(y>=DISPLAY_Y && y<DISPLAY_Y+MAIN_ROW_H)return PN_SETUI_FONTS;
+        if(y>=DISPLAY_Y+MAIN_ROW_H && y<DISPLAY_Y+2*MAIN_ROW_H)return PN_SETUI_WALLPAPER;
+        if(y>=DISPLAY_Y+2*MAIN_ROW_H && y<DISPLAY_Y+3*MAIN_ROW_H)return PN_SETUI_APPEARANCE;
+        if(y>=READING_Y && y<READING_Y+MAIN_ROW_H)return PN_SETUI_GLOBAL_STYLE;
+        if(y>=READING_Y+MAIN_ROW_H && y<READING_Y+2*MAIN_ROW_H)return PN_SETUI_KEYS;
+        if(y>=READING_Y+2*MAIN_ROW_H && y<READING_Y+3*MAIN_ROW_H)return PN_SETUI_REFRESH;
+        if(y>=DEVICE_Y && y<DEVICE_Y+MAIN_ROW_H)return PN_SETUI_WIFI;
+        if(y>=DEVICE_Y+MAIN_ROW_H && y<DEVICE_Y+device_rows(u)*MAIN_ROW_H)return PN_SETUI_ABOUT;
         return -1;
     }
     if(pn_w_header_hit(x,y,false)==1)return PN_SETUI_BACK;
+    if(u->screen==SCREEN_GLOBAL_STYLE && y<PN_W_HEADER_H && x>=480 && y>=44)return PN_SETUI_GSTYLE_RESET;
+    if(u->screen==SCREEN_GLOBAL_MARGINS && y<PN_W_HEADER_H && x>=480 && y>=44)return PN_SETUI_GSTYLE_MARGINS_RESET;
     if(u->screen==SCREEN_WIFI_EDIT){
         if(u->testing)return y>=EDIT_BTN_Y && y<EDIT_BTN_Y+88 && x>=240 && x<436?PN_SETUI_WIFI_TEST_CANCEL:-1;
         int key=pn_keyboard_hit(&u->kb,KB_Y,x,y);
@@ -573,7 +1025,71 @@ int pn_settings_ui_hit(const pn_settings_ui_t *ui,int x,int y){
         if(y>=EDIT_BTN_Y && y<EDIT_BTN_Y+88){if(x>=PN_UI_MARGIN && x<228)return PN_SETUI_WIFI_CLEAR;if(x>=240 && x<436 && u->password_step)return PN_SETUI_WIFI_REVEAL;if(x>=448 && x<652)return PN_SETUI_WIFI_NEXT;}
         return -1;
     }
+    if(u->screen==SCREEN_HOME_MOTTO_EDIT){
+        int key=pn_keyboard_hit(&u->kb,KB_Y,x,y);
+        if(key>=32)return PN_SETUI_CHAR+key;
+        if(key==PN_KB_SHIFT)return PN_SETUI_KB_SHIFT;
+        if(key==PN_KB_LAYER)return PN_SETUI_KB_LAYER;
+        if(key==PN_KB_DELETE)return PN_SETUI_KB_DELETE;
+        if(key<=PN_KB_IME_TOGGLE && key>=PN_KB_PUNCT_BASE-PN_KB_PUNCT_COUNT)return PN_SETUI_KB_IME_BASE+(-key);
+        if(y>=EDIT_BTN_Y && y<EDIT_BTN_Y+88){if(x>=PN_UI_MARGIN && x<328)return PN_SETUI_MOTTO_CLEAR;if(x>=356 && x<652)return PN_SETUI_MOTTO_SAVE;}
+        return -1;
+    }
     if(x<32 || x>=652)return -1;
+    if(u->screen==SCREEN_GLOBAL_STYLE){
+        int preset=pn_w_segments_hit(3,306,56,x,y);if(preset>=0)return PN_SETUI_GSTYLE_PRESET+preset;
+        for(unsigned i=0;i<12;i++){
+            int cx=32+(int)(i%2)*320,cy=378+(int)(i/2)*84;
+            if(y>=cy && y<cy+76 && x>=cx && x<cx+300){
+                if(i==11)return PN_SETUI_GSTYLE_BG;
+                if(y>=cy+30){
+                    if(x<cx+82)return i<8?PN_SETUI_GSTYLE_ADJ+(int)i*2:PN_SETUI_GSTYLE_EXT+(int)(i-8)*2;
+                    if(x>=cx+218)return i<8?PN_SETUI_GSTYLE_ADJ+(int)i*2+1:PN_SETUI_GSTYLE_EXT+(int)(i-8)*2+1;
+                }
+                if(i==3)return PN_SETUI_GSTYLE_MARGINS;
+                return -1;
+            }
+        }
+        if(y>=892 && y<964){if(x<332)return PN_SETUI_GSTYLE_IMAGES;if(x>=352)return PN_SETUI_GSTYLE_BARS;}
+        return -1;
+    }
+    if(u->screen==SCREEN_GLOBAL_MARGINS){
+        static const int tops[4]={450,568,732,850};
+        for(unsigned row=0;row<4;row++){
+            if(y>=tops[row] && y<tops[row]+108){
+                for(unsigned col=0;col<2;col++){
+                    int cx=32+(int)col*320;unsigned item=row*2+col;
+                    if(x>=cx && x<cx+108)return PN_SETUI_GSTYLE_MADJ+(int)item*2;
+                    if(x>=cx+192 && x<cx+300)return PN_SETUI_GSTYLE_MADJ+(int)item*2+1;
+                }
+            }
+        }
+        return -1;
+    }
+    if(u->screen==SCREEN_GLOBAL_BG){
+        if(y>=194 && y<194+3*284){
+            int col=(x-32)/212,row=(y-194)/284;
+            if(col>=0 && col<3 && row>=0 && row<3 && (x-32)%212<196 && (y-194)%284<264){
+                unsigned slot=(unsigned)(row*3+col);
+                if(slot<=PN_READING_BACKGROUND_COUNT)return PN_SETUI_GSTYLE_BG_ITEM+(int)slot;
+            }
+        }
+        return -1;
+    }
+    if(u->screen==SCREEN_HOME_MOTTO){
+        for(unsigned i=0;i<6;i++){int px=32+(int)(i%2)*318,py=344+(int)(i/2)*108;
+            if(x>=px && x<px+302 && y>=py && y<py+92)return PN_SETUI_MOTTO_PRESET+(int)i;}
+        if(y>=712 && y<800)return PN_SETUI_MOTTO_EDIT;
+        if(y>=822 && y<910)return PN_SETUI_MOTTO_RESET;
+        return -1;
+    }
+    if(u->screen==SCREEN_HOME_BANNER){
+        size_t visible=u->banner_count>5?5:u->banner_count;
+        if(y>=288 && y<356)return PN_SETUI_BANNER_DEFAULT;
+        if(visible && y>=410 && y<410+(int)visible*ROW_H)return PN_SETUI_BANNER_ITEM+(y-410)/ROW_H;
+        if(y>=960 && y<1040){if(x<328 && u->banner_has_prev)return PN_SETUI_BANNER_PREV;if(x>=356 && u->banner_more)return PN_SETUI_BANNER_NEXT;}
+        return -1;
+    }
     if(u->screen==SCREEN_WIFI){if(y>=WIFI_EDIT_Y && y<WIFI_EDIT_Y+88)return PN_SETUI_WIFI_EDIT;if(*u->lan && y>=WIFI_FORGET_Y && y<WIFI_FORGET_Y+88)return PN_SETUI_WIFI_FORGET;return -1;}
     if(u->screen==SCREEN_ABOUT && y>=710 && y<710+ROW_H)return PN_SETUI_TIME;
     if(u->screen==SCREEN_ABOUT && y>=840 && y<840+ROW_H)return PN_SETUI_UPDATE;
@@ -582,6 +1098,8 @@ int pn_settings_ui_hit(const pn_settings_ui_t *ui,int x,int y){
     if(u->screen==SCREEN_APPEARANCE){int cell=pn_w_segments_hit(2,190,108,x,y);if(cell>=0)return PN_SETUI_COLUMNS+cell;
         if(y>=460 && y<900){int row=(y-460)/230,col=(x-32)/318;
             if(row<2 && col<2 && (y-460)%230<210 && (x-32)%318<302)return PN_SETUI_STYLE+row*2+col;}
+        if(y>=944 && y<944+ROW_H)return PN_SETUI_HOME_MOTTO;
+        if(y>=944+ROW_H && y<944+2*ROW_H)return PN_SETUI_HOME_BANNER;
         return -1;
     }
     if(u->screen==SCREEN_KEYS){if(y>=TOGGLE_Y && y<TOGGLE_Y+4*ROW_H)return PN_SETUI_TOGGLE+(y-TOGGLE_Y)/ROW_H;if(y>=TOGGLE_Y+4*ROW_H && y<TOGGLE_Y+5*ROW_H)return PN_SETUI_VERTICAL_TURN;return -1;}
@@ -600,7 +1118,7 @@ void pn_settings_ui_close(pn_settings_ui_t *ui){
     // 引擎保持地址与缓存owner，归还不读文件、不分配，也不受取消状态阻挡。
     // Keep the engine address and cache owner; returning it neither reads nor allocates and is not blocked by cancellation.
     if(!u->return_font || pn_font_move(u->return_font,&u->font,u->pool)!=PN_OK)pn_font_close(&u->font);
-    wipe_edit(u);pn_free(u->pixels);pn_free(u);*ui=(pn_settings_ui_t){0};
+    banner_preview_release(u);wipe_edit(u);pn_free(u->pixels);pn_free(u);*ui=(pn_settings_ui_t){0};
 }
 pn_status_t pn_settings_ui_set_lan(pn_settings_ui_t *ui,const char *ssid,pn_settings_present_fn present,void *ctx){
     if(!ui || !ui->impl || !present)return PN_INVALID;
@@ -644,4 +1162,9 @@ pn_status_t pn_settings_time_format(pn_settings_time_t *view,uint32_t utc){
     time_t local=(time_t)((uint64_t)utc+8u*3600u);struct tm date;char text[32];
     if(!gmtime_r(&local,&date) || !strftime(text,sizeof text,"%Y-%m-%d %H:%M",&date))return PN_IO;
     memset(view->datetime,0,sizeof view->datetime);memcpy(view->datetime,text,strlen(text)+1);return PN_OK;
+}
+void pn_settings_ui_set_wallpaper_dir(pn_settings_ui_t *ui,pn_media_t *media,const char *directory){
+    if(!ui || !ui->impl)return;
+    su_t *u=ui->impl;u->wallpaper_media=media;u->wallpaper_dir[0]=0;
+    if(directory && *directory && strlen(directory)<sizeof u->wallpaper_dir)strcpy(u->wallpaper_dir,directory);
 }

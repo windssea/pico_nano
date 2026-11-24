@@ -94,23 +94,25 @@ static pn_status_t paint(void *ctx,pn_font_t *font,pn_font_t *metadata,pn_frame_
         // 主按钮“添加当前页为书签”，书签是带图标的圆角卡片行。/ A primary "bookmark this page" button; bookmarks are rounded card rows with an icon.
         status=sized_button(font,frame,"+ 添加当前页为书签",32,32,ADD_Y,620,80,PN_W_SELECTED);
         for(size_t i=0;i<u->count && status==PN_OK;i++){int y=ROW_Y0+(int)i*ROW_PITCH;char label[96];const pn_txt_bookmark_t *mark=&u->items[i];bool on=(int)i==u->selected;
-            pn_w_round_fill(frame,32,y,620,ROW_PITCH-12,PN_UI_RADIUS,14);pn_w_round_stroke(frame,32,y,620,ROW_PITCH-12,PN_UI_RADIUS,on?3.0f:2.0f,on?PN_UI_INK:10);
-            pn_w_icon(frame,PN_ICON_BOOKMARK,48,y+24,32,PN_UI_INK);pn_w_icon(frame,PN_ICON_MORE,604,y+30,28,PN_UI_INK);
+            pn_w_round_fill(frame,32,y,620,ROW_PITCH-12,PN_UI_RADIUS,PN_UI_PAPER);pn_w_round_stroke(frame,32,y,620,ROW_PITCH-12,PN_UI_RADIUS,on?2.5f:1.5f,on?PN_UI_INK:9);
+            pn_w_round_fill(frame,46,y+22,46,46,12,PN_UI_SURFACE);
+            pn_w_icon(frame,PN_ICON_BOOKMARK,55,y+31,28,PN_UI_INK);pn_w_icon(frame,PN_ICON_MORE,604,y+31,26,6);
             if(*mark->label)snprintf(label,sizeof label,"%s",mark->label);else snprintf(label,sizeof label,"书签 #%llu",(unsigned long long)mark->id);
-            status=sized_text(font,frame,label,32,96,y+42,496,PN_ALIGN_LEFT);
+            status=sized_text(font,frame,label,30,108,y+42,484,PN_ALIGN_LEFT);
             if(status==PN_OK){
                 if(u->epub && u->sections[i] && u->section_count)snprintf(label,sizeof label,"第 %d/%d 节",u->sections[i],u->section_count);
                 else if(u->epub)snprintf(label,sizeof label,"书签 #%llu",(unsigned long long)mark->id);
                 else snprintf(label,sizeof label,"已读 %u%%",percent(&mark->position));
-                status=sized_text(font,frame,label,24,96,y+76,496,PN_ALIGN_LEFT);}
+                status=sized_text(font,frame,label,23,108,y+74,484,PN_ALIGN_LEFT);}
         }
         if(status==PN_OK && !u->count){
             pn_w_icon(frame,PN_ICON_BOOKMARK,(684-72)/2,ROW_Y0+80,72,PN_UI_INK);
             status=sized_text(font,frame,failed(u)?"暂时无法读取书签":"还没有书签",34,PN_UI_MARGIN,ROW_Y0+210,620,PN_ALIGN_CENTER);
             if(status==PN_OK)status=sized_text(font,frame,failed(u)?"点右上“重试”再读一次。":"读到喜欢的地方，随时留个记号。",28,PN_UI_MARGIN,ROW_Y0+260,620,PN_ALIGN_CENTER);
         }
-        if(status==PN_OK)status=sized_button(font,frame,"上一页",30,32,PAGER_Y,196,80,0u);
-        if(status==PN_OK)status=sized_button(font,frame,"下一页",30,456,PAGER_Y,196,80,0u);
+        if(status==PN_OK)status=sized_button(font,frame,"上一页",30,32,PAGER_Y,196,80,u->page?0u:PN_W_DISABLED);
+        if(status==PN_OK && (u->count || u->page)){char ptext[24];snprintf(ptext,sizeof ptext,"第 %u 页",u->page+1u);status=sized_text(font,frame,ptext,26,228,PAGER_Y+50,228,PN_ALIGN_CENTER);}
+        if(status==PN_OK)status=sized_button(font,frame,"下一页",30,456,PAGER_Y,196,80,u->more?0u:PN_W_DISABLED);
     }else if(status==PN_OK){
         pn_txt_bookmark_t *mark=selected(u);if(!mark){pn_w_set_fallback(NULL);return PN_INVALID;}
         int original=font->pixels;status=pn_font_size(font,36);

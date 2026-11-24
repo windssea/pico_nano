@@ -11,6 +11,7 @@
 #include <string.h>
 #include <unistd.h>
 #include "pn_book_actions.h"
+#include "pn_read_marks.h"
 int main(void){
     char root[]="/tmp/pn-favorites-XXXXXX";assert(mkdtemp(root));char book[400];snprintf(book,sizeof book,"%s/书.txt",root);
     FILE *f=fopen(book,"wb");assert(f && fputs("内容\n",f)>=0 && fclose(f)==0);
@@ -36,10 +37,20 @@ int main(void){
     /* 操作面板：打开、收藏、删除进入确认；确认页取消与删除。/ Actions sheet: open, favorite and delete into confirmation; the confirmation page has cancel and delete. */
     pn_font_t font={0};pn_text_source_t source=pn_font_builtin_source();assert(pn_font_open(&font,&pool,&source,24)==PN_OK);
     uint8_t *bytes=pn_alloc(&pool,684*1216/2);pn_frame_t frame;assert(pn_frame_bind(&frame,bytes,684*1216/2,684,1216));
-    pn_book_actions_t a={0};a.item=page->items[0];a.favorites_known=true;
+    pn_book_actions_t a={0};a.item=page->items[0];a.favorites_known=true;a.read_marks_known=true;
     assert(pn_book_actions_render(&a,&font,&frame)==PN_OK && font.pixels==24);
-    assert(pn_book_actions_hit(&a,300,300)==PN_BA_CANCEL && pn_book_actions_hit(&a,300,860)==PN_BA_OPEN && pn_book_actions_hit(&a,300,960)==PN_BA_FAVORITE && pn_book_actions_hit(&a,300,1060)==PN_BA_DELETE && pn_book_actions_hit(&a,10,960)==-1);
-    a.favorites_known=false;assert(pn_book_actions_render(&a,&font,&frame)==PN_OK && pn_book_actions_hit(&a,300,960)==-1);
+    assert(pn_book_actions_hit(&a,300,300)==PN_BA_CANCEL && pn_book_actions_hit(&a,300,860)==PN_BA_OPEN && pn_book_actions_hit(&a,300,960)==PN_BA_FAVORITE && pn_book_actions_hit(&a,500,960)==PN_BA_MARK_READ && pn_book_actions_hit(&a,300,1060)==PN_BA_DELETE && pn_book_actions_hit(&a,10,960)==-1);
+    a.favorites_known=false;a.read_marks_known=false;assert(pn_book_actions_render(&a,&font,&frame)==PN_OK && pn_book_actions_hit(&a,300,960)==-1 && pn_book_actions_hit(&a,500,960)==-1);
+    /* 手动已读/未读标记往返与100%自动完读逻辑。/ Manual read/unread marks roundtrip and automatic 100% completion. */
+    {assert(pn_media_acquire(&media,PN_MEDIA_WRITE,&lease)==PN_OK);
+     pn_journal_files_t rf;pn_journal_io_t rio;pn_read_marks_t *rm=calloc(1,sizeof *rm);assert(rm && pn_read_marks_files(&rf,&media,&lease,root,&rio)==PN_OK);
+     assert(pn_read_marks_load(&rio,&pool,rm)==PN_EMPTY);
+     assert(pn_read_marks_is_read(NULL,book,true,10000u) && !pn_read_marks_is_read(NULL,book,true,9900u));
+     assert(pn_read_marks_set(&rio,&pool,book,PN_READ_MARK_READ)==PN_OK && pn_read_marks_load(&rio,&pool,rm)==PN_OK && pn_read_marks_is_read(rm,book,false,0));
+     assert(pn_read_marks_set(&rio,&pool,book,PN_READ_MARK_UNREAD)==PN_OK && pn_read_marks_load(&rio,&pool,rm)==PN_OK && !pn_read_marks_is_read(rm,book,true,10000u));
+     assert(pn_read_marks_set(&rio,&pool,book,PN_READ_MARK_AUTO)==PN_OK && pn_read_marks_load(&rio,&pool,rm)==PN_OK && rm->count==0 && pn_read_marks_is_read(rm,book,true,10000u));
+     free(rm);assert(pn_media_release(&media,&lease)==PN_OK);
+     char rma[400],rmb[400];snprintf(rma,sizeof rma,"%s/read_marks.a",root);snprintf(rmb,sizeof rmb,"%s/read_marks.b",root);(void)unlink(rma);(void)unlink(rmb);}
     a.confirming=true;a.notice="删除失败，请重试";assert(pn_book_actions_render(&a,&font,&frame)==PN_OK);
     assert(pn_book_actions_hit(&a,150,940)==PN_BA_CANCEL && pn_book_actions_hit(&a,500,940)==PN_BA_CONFIRM && pn_book_actions_hit(&a,60,90)==PN_BA_CANCEL && pn_book_actions_hit(&a,300,300)==-1);
     /* 删除中遮罩拦截全部触控并渲染等待卡片。/ Deleting loading overlay blocks all touches and renders the waiting card. */

@@ -40,10 +40,17 @@ static pn_status_t paint(void *ctx,pn_font_t *font,pn_font_t *metadata,pn_frame_
     value_text(u,u->draft,text,sizeof text);
     if(s==PN_OK)s=pn_font_size(font,88);
     if(s==PN_OK)s=pn_w_text(font,frame,text,PN_UI_MARGIN,400,620,PN_ALIGN_CENTER);
-    // 进度条：粗线为目标，竖线标出现在的位置。/ Progress bar: the thick fill is the target, a tick marks where the reader is now.
+    // 进度条：圆角粗轨＋目标圆钮＋刻度点，支持直接点按定位；竖线标出当前位置。
+    // Progress bar: rounded track + draft thumb + quarter ticks supporting direct tap; vertical tick marks current position.
     unsigned span=u->maximum?u->maximum:1;int fill=(int)(620u*u->draft/span),mark=(int)(620u*u->current/span);
-    pn_frame_rect(frame,PN_UI_MARGIN,BAR_Y,620,16,12);pn_frame_rect(frame,PN_UI_MARGIN,BAR_Y,fill,16,PN_UI_INK);
-    pn_frame_rect(frame,PN_UI_MARGIN+(mark>=620?618:mark),BAR_Y-12,2,40,PN_UI_INK);
+    pn_w_round_fill(frame,PN_UI_MARGIN,BAR_Y,620,16,8,13);
+    pn_w_round_stroke(frame,PN_UI_MARGIN,BAR_Y,620,16,8,1.0f,10);
+    if(fill>0)pn_w_round_fill(frame,PN_UI_MARGIN,BAR_Y,fill<12?12:fill,16,8,PN_UI_INK);
+    for(int q=1;q<=3;q++)pn_frame_rect(frame,PN_UI_MARGIN+620*q/4,BAR_Y+22,1,8,10);
+    pn_frame_rect(frame,PN_UI_MARGIN+(mark>=620?618:mark),BAR_Y-14,2,44,5);
+    pn_w_dot(frame,(float)(PN_UI_MARGIN+fill),(float)(BAR_Y+8),15.0f,PN_UI_INK);
+    pn_w_dot(frame,(float)(PN_UI_MARGIN+fill),(float)(BAR_Y+8),7.0f,PN_UI_PAPER);
+    if(s==PN_OK){s=pn_font_size(font,20);if(s==PN_OK)s=pn_w_text_ex(font,frame,"轻点进度条可快速定位，或用下方按键微调",PN_UI_MARGIN,BAR_Y-26,620,PN_ALIGN_CENTER,5,false);}
     // 预览行：说明跳转后的相对位置。/ Preview line describing the relative position after the jump.
     if(s==PN_OK)s=pn_font_size(font,28);
     if(u->draft==u->current)snprintf(text,sizeof text,"与现在相同，不会移动");
@@ -106,6 +113,10 @@ pn_status_t pn_jump_ui_event(pn_jump_ui_t *u,int command,uint64_t now,pn_reader_
         if(confirmed){u->active=false;return status;}
         u->notice="跳转没有完成，请重试";(void)pn_jump_ui_present(u,present,ctx);return status!=PN_OK?status:PN_BUSY;
     }
+    if(command>=PN_JUI_PERCENT && command<=PN_JUI_PERCENT+(int)u->maximum){
+        u->draft=(unsigned)(command-PN_JUI_PERCENT);
+        return pn_jump_ui_present(u,present,ctx);
+    }
     if(command>=PN_JUI_STEP && command<PN_JUI_STEP+4){
         unsigned step=(command==PN_JUI_STEP || command==PN_JUI_STEP+3)?u->large:1u;
         if(command<PN_JUI_STEP+2)u->draft=u->draft>=step?u->draft-step:0u;
@@ -117,6 +128,12 @@ pn_status_t pn_jump_ui_event(pn_jump_ui_t *u,int command,uint64_t now,pn_reader_
 int pn_jump_ui_hit(const pn_jump_ui_t *u,int x,int y){
     if(!u || !u->active || x<0 || x>=684 || y<0 || y>=1216)return -1;
     if(y<PN_W_HEADER_H)return pn_w_header_hit(x,y,false)==1?PN_JUI_CANCEL:-1;
+    if(y>=BAR_Y-36 && y<BAR_Y+52 && x>=PN_UI_MARGIN-16 && x<PN_UI_WIDTH-PN_UI_MARGIN+16){
+        int pos=x<PN_UI_MARGIN?0:x>652?620:x-PN_UI_MARGIN;
+        unsigned pct=(unsigned)((pos*(int)u->maximum+310)/620);
+        if(pct>u->maximum)pct=u->maximum;
+        return PN_JUI_PERCENT+(int)pct;
+    }
     if(y>=STEP_Y && y<STEP_Y+BUTTON_H){
         int slot=(x-PN_UI_MARGIN)/(STEP_W+STEP_GAP);
         if(x>=PN_UI_MARGIN && slot<4 && (x-PN_UI_MARGIN)%(STEP_W+STEP_GAP)<STEP_W)return PN_JUI_STEP+slot;

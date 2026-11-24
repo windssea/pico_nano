@@ -69,3 +69,13 @@ pn_status_t pn_style_save(const pn_journal_io_t *io,const pn_book_id_t *book,con
 /// Preserve output on errors; caller chooses defaults for EMPTY only.
 /// 旧schema7保留ID4/7；其他合法旧ID仅背景回退0，原日志不重写，其他字段不变。 / Legacy schema7 keeps IDs 4/7; other valid old IDs resolve to paper 0 without rewriting the journal or changing other fields.
 pn_status_t pn_style_load(const pn_journal_io_t *io,const pn_book_id_t *book,pn_style_t *style);
+/// 绑定root下global_style.a/b作为全局默认排版日志（不建目录）。/ Bind global_style.a/b under root as the global default typesetting journal (no mkdir).
+pn_status_t pn_style_global_files(pn_journal_files_t *files,pn_media_t *media,const pn_media_lease_t *lease,const char *root,pn_journal_io_t *io);
+/// 全局默认排版的固定虚拟内容身份。/ Fixed sentinel book identity for global default typesetting.
+pn_book_id_t pn_style_global_id(void);
+/// 从状态目录读取全局默认排版；无记录返回PN_EMPTY，错误保留输出。/ Load global default style from state_dir; EMPTY if unset, preserving output on error.
+pn_status_t pn_style_global_load(pn_media_t *state_media,const char *state_dir,pn_style_t *style);
+/// 保存全局默认排版到状态目录。/ Save global default style into state_dir.
+pn_status_t pn_style_global_save(pn_media_t *state_media,const char *state_dir,const pn_style_t *style);
+/// 删除单书排版覆盖文件（style.a/b），使该书恢复继承全局默认排版。/ Remove per-book style override files (style.a/b) so the book inherits global defaults again.
+pn_status_t pn_style_clear_files(const pn_journal_files_t *files);

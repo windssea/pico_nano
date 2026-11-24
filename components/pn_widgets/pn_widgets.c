@@ -256,14 +256,18 @@ static int status_battery=-1;static char status_clock[8];static bool status_wifi
 void pn_w_set_battery(int percent){status_battery=percent<0?-1:percent>100?100:percent;}
 int pn_w_battery_level(void){return status_battery;}
 void pn_w_set_charging(bool charging){status_charging=charging;}
+static char status_brand[PN_W_BRAND_MAX]; ///< 全局状态带左上角自定义文案，空则显示PicoNano / Global custom top-left status label; empty shows PicoNano
 void pn_w_set_clock(const char *hhmm){size_t n=0;if(hhmm)while(hhmm[n] && n<sizeof status_clock-1){status_clock[n]=hhmm[n];n++;}status_clock[n]=0;}
 void pn_w_set_wifi(bool connected){status_wifi=connected;}
+void pn_w_set_brand(const char *text){size_t n=0;if(text)while(text[n] && n<sizeof status_brand-1){status_brand[n]=text[n];n++;}status_brand[n]=0;}
+const char *pn_w_brand(void){return status_brand;}
 pn_w_status_snapshot_t pn_w_status_snapshot(void){pn_w_status_snapshot_t view={.battery=status_battery,.wifi=status_wifi,.charging=status_charging};strcpy(view.clock,status_clock);return view;}
-pn_status_t pn_w_status(pn_font_t *font,pn_frame_t *frame){
+pn_status_t pn_w_status_named(pn_font_t *font,pn_frame_t *frame,const char *left_text){
     if(!font || !font->impl || !frame)return PN_INVALID;
     int original=font->pixels;pn_status_t status=pn_font_size(font,24);
-    // 左：产品名；右：时间（已知时）、无线（已连接时）、电量。都只显示真实读到的值。/ Left: product name; right: clock (when known), wireless (when connected) and battery, all only when actually read.
-    if(status==PN_OK)status=pn_w_text_ex(font,frame,PN_BRAND_NAME,PN_UI_MARGIN,30,300,PN_ALIGN_LEFT,PN_UI_INK,true);
+    const char *brand=(left_text && *left_text)?left_text:(*status_brand?status_brand:PN_BRAND_NAME);
+    // 左：全局自定义文案或产品名；右：时间（已知时）、无线（已连接时）、电量。都只显示真实读到的值。/ Left: global custom label or product name; right: clock (when known), wireless (when connected) and battery, all only when actually read.
+    if(status==PN_OK)status=pn_w_text_ex(font,frame,brand,PN_UI_MARGIN,30,360,PN_ALIGN_LEFT,PN_UI_INK,true);
     int right=PN_UI_WIDTH-PN_UI_MARGIN;
     if(status==PN_OK && status_battery>=0){
         char text[8];int n=status_battery;char *p=text;if(n>=100){*p++='1';*p++='0';*p++='0';}else{if(n>=10)*p++=(char)('0'+n/10);*p++=(char)('0'+n%10);}*p++='%';*p=0;
@@ -275,6 +279,7 @@ pn_status_t pn_w_status(pn_font_t *font,pn_frame_t *frame){
     if(status==PN_OK && status_clock[0])status=pn_w_text(font,frame,status_clock,right-100,30,100,PN_ALIGN_RIGHT);
     pn_status_t restored=pn_font_size(font,original);return status==PN_OK?restored:status;
 }
+pn_status_t pn_w_status(pn_font_t *font,pn_frame_t *frame){return pn_w_status_named(font,frame,NULL);}
 pn_status_t pn_w_header(pn_font_t *font,pn_frame_t *frame,const char *back,const char *title,const char *action){
     if(!font || !font->impl || !frame || !back || !title)return PN_INVALID;
     int original=font->pixels;
@@ -348,11 +353,11 @@ pn_status_t pn_w_row(pn_font_t *font,pn_frame_t *frame,const char *label,const c
 void pn_w_icon_search(pn_frame_t *frame,int x,int y,int size){pn_w_icon(frame,PN_ICON_SEARCH,x,y,size,PN_UI_INK);}
 void pn_w_icon_grid(pn_frame_t *frame,int x,int y,int size){pn_w_icon(frame,PN_ICON_GRID,x,y,size,PN_UI_INK);}
 void pn_w_icon_list(pn_frame_t *frame,int x,int y,int size){pn_w_icon(frame,PN_ICON_LIST,x,y,size,PN_UI_INK);}
-/* 分组标题：小字号、次要墨色、加粗，置于卡片上方。/ Group title: small, secondary ink and bold, above a card. */
+/* 分组标题：柔和次要灰阶、加粗，置于卡片上方。/ Group title: calm muted gray and bold, above a card. */
 pn_status_t pn_w_group(pn_font_t *font,pn_frame_t *frame,const char *title,int baseline){
     if(!font || !font->impl || !frame || !title)return PN_INVALID;
-    int original=font->pixels;pn_status_t status=pn_font_size(font,26);
-    if(status==PN_OK)status=pn_w_text_ex(font,frame,title,PN_UI_MARGIN+8,baseline,PN_UI_WIDTH-2*PN_UI_MARGIN-16,PN_ALIGN_LEFT,PN_UI_MUTED,true);
+    int original=font->pixels;pn_status_t status=pn_font_size(font,24);
+    if(status==PN_OK)status=pn_w_text_ex(font,frame,title,PN_UI_MARGIN+10,baseline,PN_UI_WIDTH-2*PN_UI_MARGIN-20,PN_ALIGN_LEFT,5,true);
     pn_status_t restored=pn_font_size(font,original);return status==PN_OK?restored:status;
 }
 void pn_w_glass(pn_frame_t *frame,int x,int y,int width,int height,int radius){
@@ -364,25 +369,27 @@ void pn_w_glass(pn_frame_t *frame,int x,int y,int width,int height,int radius){
 }
 void pn_w_card(pn_frame_t *frame,int y,int rows){
     if(!frame || rows<=0)return;
-    pn_w_round_fill(frame,PN_UI_MARGIN,y,PN_UI_WIDTH-2*PN_UI_MARGIN,rows*PN_W_CARD_ROW_H,PN_UI_CARD_RADIUS,PN_UI_PAPER);
-    pn_w_round_stroke(frame,PN_UI_MARGIN,y,PN_UI_WIDTH-2*PN_UI_MARGIN,rows*PN_W_CARD_ROW_H,PN_UI_CARD_RADIUS,2.0f,PN_UI_CARD_STROKE);
+    int w=PN_UI_WIDTH-2*PN_UI_MARGIN,h=rows*PN_W_CARD_ROW_H;
+    pn_w_round_fill(frame,PN_UI_MARGIN+2,y+2,w-4,h,20,PN_UI_SELECT);
+    pn_w_round_fill(frame,PN_UI_MARGIN,y,w,h,20,PN_UI_PAPER);
+    pn_w_round_stroke(frame,PN_UI_MARGIN,y,w,h,20,1.5f,9);
 }
 pn_status_t pn_w_card_row(pn_font_t *font,pn_frame_t *frame,const char *label,const char *subtitle,const char *value,int icon,unsigned flags,int y,bool last){
     if(!font || !font->impl || !frame || !label)return PN_INVALID;
     int original=font->pixels,text_x=icon>=0?112:56;
-    // 图标放进圆角方块，视觉上与纯文字行区分。/ The icon sits in a rounded tile so it reads apart from plain text.
-    if(icon>=0){pn_w_round_fill(frame,52,y+26,48,48,14,PN_UI_PAPER);pn_w_round_stroke(frame,52,y+26,48,48,14,2.0f,PN_UI_STROKE);pn_w_icon(frame,(pn_icon_t)icon,62,y+36,28,PN_UI_INK);}
+    // 柔和浅雾圆角图标底块，去除双重黑框压迫感。/ Soft fog rounded icon badge without harsh double dark outlines.
+    if(icon>=0){pn_w_round_fill(frame,50,y+26,48,48,14,PN_UI_SURFACE);pn_w_icon(frame,(pn_icon_t)icon,60,y+36,28,PN_UI_INK);}
     int tail=(flags&PN_ROW_CHEVRON)?44:(flags&(PN_ROW_ON|PN_ROW_OFF))?92:16,value_width=0;
     pn_status_t status=PN_OK;
-    if(value && *value){status=pn_font_size(font,28);if(status==PN_OK)status=pn_w_text_width(font,value,&value_width);}
+    if(value && *value){status=pn_font_size(font,26);if(status==PN_OK)status=pn_w_text_width(font,value,&value_width);}
     int room=PN_UI_WIDTH-PN_UI_MARGIN-tail-text_x-(value_width?value_width+16:0);
-    if(status==PN_OK)status=pn_font_size(font,34);
-    if(status==PN_OK)status=pn_w_text(font,frame,label,text_x,y+(subtitle&&*subtitle?46:62),room,PN_ALIGN_LEFT);
-    if(status==PN_OK && subtitle && *subtitle){status=pn_font_size(font,24);if(status==PN_OK)status=pn_w_text_ex(font,frame,subtitle,text_x,y+80,room,PN_ALIGN_LEFT,PN_UI_MUTED,false);}
-    if(status==PN_OK && value && *value){status=pn_font_size(font,28);if(status==PN_OK)status=pn_w_text(font,frame,value,PN_UI_WIDTH-PN_UI_MARGIN-tail-value_width,y+60,value_width,PN_ALIGN_RIGHT);}
-    if(flags&PN_ROW_CHEVRON)pn_w_icon(frame,PN_ICON_CHEVRON,PN_UI_WIDTH-PN_UI_MARGIN-16-28,y+36,28,PN_UI_INK);
+    if(status==PN_OK)status=pn_font_size(font,32);
+    if(status==PN_OK)status=pn_w_text(font,frame,label,text_x,y+(subtitle&&*subtitle?44:62),room,PN_ALIGN_LEFT);
+    if(status==PN_OK && subtitle && *subtitle){status=pn_font_size(font,23);if(status==PN_OK)status=pn_w_text_ex(font,frame,subtitle,text_x,y+78,room,PN_ALIGN_LEFT,5,false);}
+    if(status==PN_OK && value && *value){status=pn_font_size(font,26);if(status==PN_OK)status=pn_w_text_ex(font,frame,value,PN_UI_WIDTH-PN_UI_MARGIN-tail-value_width,y+60,value_width,PN_ALIGN_RIGHT,4,false);}
+    if(flags&PN_ROW_CHEVRON)pn_w_icon(frame,PN_ICON_CHEVRON,PN_UI_WIDTH-PN_UI_MARGIN-18-24,y+38,24,6);
     if(flags&(PN_ROW_ON|PN_ROW_OFF))pn_w_toggle(frame,PN_UI_WIDTH-PN_UI_MARGIN-16-64,y+32,(flags&PN_ROW_ON)!=0);
-    if(!last)pn_frame_rect(frame,text_x,y+PN_W_CARD_ROW_H-1,PN_UI_WIDTH-PN_UI_MARGIN-16-text_x,1,PN_UI_SELECT);
+    if(!last)pn_frame_rect(frame,text_x,y+PN_W_CARD_ROW_H-1,PN_UI_WIDTH-PN_UI_MARGIN-20-text_x,1,PN_UI_SELECT);
     pn_status_t restored=pn_font_size(font,original);return status==PN_OK?restored:status;
 }
 

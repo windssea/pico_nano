@@ -132,16 +132,22 @@ static bool sidecar(const char *path,size_t index,char out[PN_CATALOG_PATH_MAX])
     const char *slash=strrchr(path,'/'),*dot=strrchr(path,'.');size_t stem=dot && (!slash || dot>slash)?(size_t)(dot-path):strlen(path);
     int length=snprintf(out,PN_CATALOG_PATH_MAX,"%.*s%s",(int)stem,path,suffixes[index]);return length>=0 && (size_t)length<PN_CATALOG_PATH_MAX;
 }
-/* books中的书优先匹配卡根covers；后四项保留旧同目录侧车兼容。/ Books in books prefer card-root covers; the last four candidates preserve legacy sidecars. */
+/* books/外部图书目录中的书均优先匹配卡根covers；后四项保留旧同目录侧车兼容。/ Books in books or external book dirs prefer card-root covers; the last four candidates preserve legacy sidecars. */
 static bool cover_candidate(const char *path,size_t index,char out[PN_CATALOG_PATH_MAX]){
     if(index>=SUFFIXES)return sidecar(path,index-SUFFIXES,out);
     const char *slash=strrchr(path,'/');if(!slash)return false;
-    size_t folder_size=strlen(PN_SD_BOOKS);if((size_t)(slash-path)<folder_size)return false;
-    const char *folder=slash-folder_size;
-    if((folder>path && folder[-1]!='/') || memcmp(folder,PN_SD_BOOKS,folder_size))return false;
     const char *name=slash+1,*dot=strrchr(name,'.');size_t stem=dot?(size_t)(dot-name):strlen(name);
-    int n=snprintf(out,PN_CATALOG_PATH_MAX,"%.*s%s/%.*s%s",(int)(folder-path),path,PN_SD_COVERS,(int)stem,name,suffixes[index]);
-    return n>=0 && n<PN_CATALOG_PATH_MAX;
+    const char *books_marker="/" PN_SD_BOOKS "/";
+    const char *found=strstr(path,books_marker);
+    if(found){
+        int n=snprintf(out,PN_CATALOG_PATH_MAX,"%.*s/%s/%.*s%s",(int)(found-path),path,PN_SD_COVERS,(int)stem,name,suffixes[index]);
+        return n>=0 && n<PN_CATALOG_PATH_MAX;
+    }
+    if(pn_scan_dirs_path_allowed(PN_SCAN_CAT_BOOKS,path)){
+        int n=snprintf(out,PN_CATALOG_PATH_MAX,"%s/%s/%.*s%s",pn_scan_dirs_mount(),PN_SD_COVERS,(int)stem,name,suffixes[index]);
+        return n>=0 && n<PN_CATALOG_PATH_MAX;
+    }
+    return false;
 }
 /* 集中封面优先，旧同目录侧车其次；首个存在者决定结果。/ Centralized covers precede legacy sidecars; the first existing one decides. */
 static pn_status_t external_cover(pn_pool_t *pool,pn_media_t *media,const pn_media_lease_t *lease,const char *path,pn_frame_t *out){

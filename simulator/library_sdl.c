@@ -17,6 +17,7 @@
 #include "pn_opening_view.h"
 #include "pn_reader_input.h"
 #include "pn_shelf_view.h"
+#include "pn_stats_view.h"
 #include "pn_sudoku.h"
 #include "pn_sokoban.h"
 #include "pn_minesweeper.h"
@@ -45,6 +46,7 @@
 #include "pn_jump_ui.h"
 #include "pn_transfer_hub.h"
 #include "pn_book_actions.h"
+#include "pn_file_manager.h"
 #include "pn_catalog_index.h"
 #include <sys/statvfs.h>
 #include "bookmark_sdl.h"
@@ -66,6 +68,16 @@ typedef struct {
     bool recent_mode;
     size_t recent_start;
     pn_shelf_prefs_t shelf_prefs; ///< 已保存书架外观 / Saved shelf appearance
+    pn_shelf_sort_t shelf_sort; ///< 已保存书库排序方式 / Saved library sort order
+    pn_home_prefs_t home_prefs; ///< 主页左上角文案与顶部背景偏好 / Home top-left motto and top banner preferences
+    pn_scan_dirs_t scan_dirs; ///< 用户外部扫描目录配置 / User external scan directories configuration
+    char scan_mount[PN_SCAN_PATH_MAX]; ///< 模拟器存储根路径 / Simulator storage mount root
+    pn_catalog_folder_t shelf_folders[PN_CATALOG_FOLDER_MAX]; ///< 书库目录筛选列表 / Filterable book folders
+    size_t shelf_folder_count;
+    size_t shelf_folder_index;
+    uint8_t *home_banner_pixels; ///< 主页顶部自定义背景缓冲（684×146）/ Home custom top banner buffer (684x146)
+    pn_frame_t home_banner_frame;
+    char home_banner_loaded[PN_HOME_BANNER_MAX];
     pn_tsumego_t tsumego; ///< 同源围棋死活题 / Shared Go Tsumego
     pn_klotski_t klotski; ///< 同源三国华容道 / Shared Three Kingdoms Klotski
     pn_xiangqi_t xiangqi; ///< 同源中国象棋残局 / Shared Xiangqi endgame
@@ -143,15 +155,20 @@ typedef struct {
     size_t fav_start; ///< 收藏页起点 / Favorites page start
     pn_favorites_t *favorites; ///< 收藏夹（按需分配）/ Favorites (allocated on demand)
     bool favorites_valid; ///< 当前收藏快照可复用 / Reusable favorite snapshot
+    pn_read_marks_t *read_marks; ///< 手动已读/未读标记快照 / Manual read/unread marks snapshot
+    bool read_marks_valid; ///< 当前已读标记快照可复用 / Reusable read-marks snapshot
     pn_focus_t management_focus; ///< 管理页确认目标 / Management confirmation target
     bool actions_mode; ///< 书籍操作面板 / Book actions sheet
     pn_book_actions_t actions; ///< 面板状态 / Sheet state
     bool hub; ///< 传书一级页正显示 / The Transfer root tab is showing
+    bool files_open; ///< 存储卡文件管理页正显示 / TF card file manager is showing
+    pn_file_manager_t *file_manager; ///< 按需分配的文件管理状态 / On-demand file manager state
     char storage[64]; ///< 书库所在磁盘容量说明 / Capacity note of the library disk
     bool back_to_settings; ///< 子页从设置页进入，返回时回设置页 / The sub-page was opened from Settings, so Back returns there
     pn_jump_ui_t jumpui; ///< 进度跳转面板 / Progress jump panel
     pn_search_ui_t search; ///< 搜索页输入状态 / Search page input state
     bool search_open; ///< 搜索页正显示 / The search page is showing
+    bool stats_open; ///< 详细阅读数据页正显示 / The detailed reading statistics page is showing
     char query[PN_CATALOG_QUERY_MAX+1]; ///< 当前生效的搜索词，空表示不过滤 / Active search query, empty means unfiltered
     bool open_failed; ///< 打开失败时在书架显示提示 / Show a shelf notice after an open failure
     pn_catalog_item_t last_read;bool last_read_known; ///< 最近成功打开书的快照 / Snapshot of the latest successfully opened book
@@ -165,7 +182,8 @@ static bool stats_clock(uint64_t *utc);
 static pn_shelf_options_t shelf_options(const library_t *s){
     const char *charging=getenv("PN_SIM_CHARGING");pn_w_set_charging(charging && !strcmp(charging,"1"));
     pn_w_set_battery(sim_battery());bool query=!s->recent_mode && !s->fav_mode && *s->query;
-    pn_shelf_options_t o={.home=s->home,.entertainment_tab=true,.entertainment=s->home?0:s->entertainment,.battery_percent=-1,.columns=s->shelf_prefs.columns,.style=s->shelf_prefs.style,.actions=s->actions_mode?&s->actions:NULL,.search=false,.layout_toggle=true,.favorites_tab=true,.favorites=s->fav_mode,.list_mode=s->list_mode || query,.query=query};
+    const char *folder_lbl=(!s->home && !s->recent_mode && !s->fav_mode && !query && s->shelf_folder_count>0)?(s->shelf_folder_index==0?"全部":s->shelf_folders[s->shelf_folder_index-1u].label):NULL;
+    pn_shelf_options_t o={.home=s->home,.home_header=s->home_prefs.header,.home_banner=(s->home && s->home_banner_pixels)?&s->home_banner_frame:NULL,.entertainment_tab=true,.entertainment=s->home?0:s->entertainment,.battery_percent=-1,.columns=s->shelf_prefs.columns,.style=s->shelf_prefs.style,.sort=(uint8_t)s->shelf_sort,.folder_label=folder_lbl,.actions=s->actions_mode?&s->actions:NULL,.search=true,.layout_toggle=true,.favorites_tab=true,.favorites=s->fav_mode,.list_mode=s->list_mode || query,.query=query};
     if(o.home){uint64_t utc=0;bool dated=stats_clock(&utc);o.reading=pn_reading_stats_summary(&s->reading_stats,dated,utc);
         o.reading.known=o.reading.known && s->covers && s->covers->has_last && s->covers->last.identified && !memcmp(s->covers->last.expected.sha256,s->reading_stats.book.id.sha256,32);
         unsigned year,month,day,weekday;if(dated && pn_bookmark_lock_date((uint32_t)(utc/1000u),&year,&month,&day,&weekday)){o.reading.dated=true;o.reading.weekday=weekday;snprintf(o.home_date,sizeof o.home_date,"%u月%u日 · 周%s",month,day,((const char *const[]){"一","二","三","四","五","六","日"})[weekday]);}
@@ -295,6 +313,9 @@ static pn_status_t ripple_demo(library_t *s,const pn_frame_t *next,bool reverse,
     }
     pn_free(pixels);return status;
 }
+static bool management_active(const library_t *s){
+    return s->fonts.active || s->toc.active || s->jumpui.active || s->styles.active || s->bookmarks.mode!=PN_BUI_CLOSED || s->actions_mode || s->stats_open || s->files_open || s->settings.impl || s->font_manage.impl || s->wallpaper.impl || s->hub || s->search_open || s->index || s->toolbar;
+}
 static pn_status_t present_impl(void *ctx,const pn_frame_t *frame,pn_refresh_t profile){
     library_t *s=ctx;
     bool game_exit_clean=s->game_exit_clean_pending;
@@ -303,7 +324,17 @@ static pn_status_t present_impl(void *ctx,const pn_frame_t *frame,pn_refresh_t p
     pn_status_t stopped=pn_font_manage_motion_abort(&s->font_manage);if(stopped!=PN_OK)return stopped;stopped=pn_toc_ui_motion_abort(&s->toc);if(stopped!=PN_OK)return stopped;
     if(!reading(s)){pn_free(s->page_px);s->page_px=NULL;}
     // 备份只供阅读工具栏关闭时恢复；书架/设置不需要，避免挤占封面解码预算。/ Only reading needs the backup for toolbar restoration; shelf/settings copies waste the cover decode budget.
-    pn_status_t status=present_raw(s,frame);
+    const pn_frame_t *shown=frame;uint8_t *focus_pixels=NULL;pn_frame_t focus_frame;
+    const pn_focus_item_t *focus_item=management_active(s)?pn_focus_current(&s->management_focus):NULL;
+    if(focus_item && frame->width==684 && frame->height==1216 && frame->stride>=342){
+        focus_pixels=pn_alloc_tagged(s->pool,PN_MEM_FRAME,342u*1216u);
+        if(focus_pixels && pn_frame_bind(&focus_frame,focus_pixels,342u*1216u,684,1216)){
+            for(int y=0;y<1216;y++)memcpy(focus_pixels+(size_t)y*342,frame->pixels+(size_t)y*frame->stride,342);
+            pn_focus_draw(&focus_frame,focus_item);shown=&focus_frame;
+        }else{pn_free(focus_pixels);focus_pixels=NULL;}
+    }
+    pn_status_t status=present_raw(s,shown);
+    pn_free(focus_pixels);
     if(status==PN_OK){s->feedback_known=true;(void)pn_feedback_discard(&s->feedback);pn_feedback_idle_cover(&s->feedback_idle,(profile==PN_REFRESH_GC16 || profile==PN_REFRESH_EXIT_GC16)?(pn_feedback_box_t){0,0,684,1216}:s->content_area);
         if(game_exit_clean){s->game_exit_clean_pending=false;printf("game_exit_clean destination=entertainment presentations=1 status=0\n");}}
     else if(status!=PN_CANCELLED && status!=PN_BUSY){s->feedback_known=false;(void)pn_feedback_discard(&s->feedback);}
@@ -340,6 +371,19 @@ static pn_status_t favorites_load(library_t *s);
 static pn_status_t favorites_ensure(library_t *s){
     if(s->favorites_valid)return PN_OK;
     pn_status_t status=favorites_load(s);s->favorites_valid=status==PN_OK;return status;
+}
+static pn_status_t read_marks_load(library_t *s){
+    if(!s->state_dir)return PN_UNSUPPORTED;
+    if(!s->read_marks)s->read_marks=pn_alloc_tagged(s->pool,PN_MEM_UI,sizeof *s->read_marks);
+    if(!s->read_marks)return PN_NO_MEMORY;
+    pn_media_lease_t lease;pn_status_t status=pn_media_acquire(&s->state_media,PN_MEDIA_READ,&lease);if(status!=PN_OK)return status;
+    pn_journal_files_t files;pn_journal_io_t io;status=pn_read_marks_files(&files,&s->state_media,&lease,s->state_dir,&io);
+    if(status==PN_OK)status=pn_read_marks_load(&io,s->pool,s->read_marks);
+    (void)pn_media_release(&s->state_media,&lease);if(status==PN_EMPTY){memset(s->read_marks,0,sizeof *s->read_marks);status=PN_OK;}return status;
+}
+static pn_status_t read_marks_ensure(library_t *s){
+    if(s->read_marks_valid)return PN_OK;
+    pn_status_t status=read_marks_load(s);s->read_marks_valid=status==PN_OK;return status;
 }
 static size_t cover_bytes(void *ctx){library_t *s=ctx;return pn_alloc_size(s->covers);}
 static void cover_drop(void *ctx){library_t *s=ctx;if(s->covers_inactive){pn_free(s->covers);s->covers=NULL;s->covers_dirty=false;}}
@@ -387,8 +431,31 @@ static pn_status_t list_motion_present(void *ctx,pn_list_stage_t stage,const pn_
     if(s->follow_trace){bool toc=s->toc.active && s->toc.motion_ctx;pn_list_motion_stats_t state=toc?pn_toc_ui_motion_stats(&s->toc):pn_font_manage_motion_stats(&s->font_manage);printf("%s_motion stage=%u status=%d offset=%d pending=%zu revision=%u\n",toc?"toc":"font",(unsigned)stage,(int)status,state.offset,state.pending,s->async.revision);}
     return status;
 }
+static void home_banner_release(library_t *s){
+    pn_free(s->home_banner_pixels);s->home_banner_pixels=NULL;s->home_banner_frame=(pn_frame_t){0};s->home_banner_loaded[0]=0;
+}
+static void home_banner_ensure(library_t *s){
+    if(!*s->home_prefs.banner || !s->wallpaper_dir || !*s->wallpaper_dir){home_banner_release(s);return;}
+    if(!s->home)return;
+    if(s->home_banner_pixels && !strcmp(s->home_banner_loaded,s->home_prefs.banner))return;
+    home_banner_release(s);
+    uint8_t *px=pn_alloc_optional(s->pool,PN_MEM_UI,PN_HOME_BANNER_BYTES);if(!px)return;
+    pn_frame_t f;if(!pn_frame_bind(&f,px,PN_HOME_BANNER_BYTES,PN_HOME_BANNER_WIDTH,PN_HOME_BANNER_HEIGHT)){pn_free(px);return;}
+    pn_status_t st=s->state_dir?pn_home_banner_cache_load(&s->state_media,s->state_dir,s->home_prefs.banner,px,PN_HOME_BANNER_BYTES):PN_EMPTY;
+    if(st!=PN_OK){
+        char path[PN_WALLPAPER_PATH_MAX];
+        if((size_t)snprintf(path,sizeof path,"%s/%s",s->wallpaper_dir,s->home_prefs.banner)<sizeof path){
+            pn_media_lease_t lease={0};st=pn_media_acquire(&s->media,PN_MEDIA_READ,&lease);
+            if(st==PN_OK){st=pn_wallpaper_prepare_banner(s->pool,&s->media,&lease,path,1024u*1024u,&f);(void)pn_media_release(&s->media,&lease);}
+            if(st==PN_OK && s->state_dir)(void)pn_home_banner_cache_save(&s->state_media,s->state_dir,s->home_prefs.banner,px,PN_HOME_BANNER_BYTES);
+        }
+    }
+    if(st==PN_OK){s->home_banner_pixels=px;s->home_banner_frame=f;strcpy(s->home_banner_loaded,s->home_prefs.banner);}
+    else pn_free(px);
+}
 static pn_status_t draw_impl(library_t *s){
     s->shelf_draw_valid=false;
+    home_banner_ensure(s);
     system_font_ready(s);
     if(!s->entertainment)covers_ensure(s);
     pn_wallpaper_mask_close(&s->lock_mask);
@@ -397,6 +464,7 @@ static pn_status_t draw_impl(library_t *s){
     uint64_t t0=SDL_GetTicks64();
     pn_shelf_options_t options=shelf_options(s);
     if(!options.entertainment && favorites_ensure(s)==PN_OK)options.favorite_items=s->favorites;
+    if(!options.entertainment && read_marks_ensure(s)==PN_OK)options.read_marks=s->read_marks;
     pn_status_t status=pn_shelf_render_with_font_file_ex(s->page,&s->font,&s->frame,s->shelf_focus_visible?s->selected:-1,s->recent_mode,false,s->covers,s->pool,&s->media,*s->font_real?s->font_real:NULL,&options);
     if(status==PN_OK && s->open_failed){pn_frame_rect(&s->frame,32,970,620,64,15);status=pn_font_size(&s->font,28);if(status==PN_OK)status=pn_w_text(&s->font,&s->frame,"打开失败，请重试",48,1012,580,PN_ALIGN_LEFT);}
     if(timing_on())fprintf(stderr,"timing shelf render=%llums\n",(unsigned long long)(SDL_GetTicks64()-t0));
@@ -512,11 +580,12 @@ static pn_status_t tsumego_open(library_t *s){
 static pn_status_t draw_focus(library_t *s,int before){
     feedback_restore(s);pn_w_status_snapshot_t state=pn_w_status_snapshot();
     if(!s->shelf_draw_valid || !s->feedback_known || s->shelf_draw_revision!=s->async.revision || s->covers_dirty || s->actions_mode || s->open_failed || state.battery!=s->shelf_draw_status.battery || state.charging!=s->shelf_draw_status.charging || state.wifi!=s->shelf_draw_status.wifi || strcmp(state.clock,s->shelf_draw_status.clock))return draw(s);
-    pn_shelf_options_t options=shelf_options(s);if(s->favorites_valid)options.favorite_items=s->favorites;pn_status_t status=pn_shelf_focus_with_font_file(s->page,&s->font,&s->frame,before,s->selected,s->covers,s->pool,&s->media,*s->font_real?s->font_real:NULL,&options);
+    int after=s->shelf_focus_visible?s->selected:-1;
+    pn_shelf_options_t options=shelf_options(s);if(s->favorites_valid)options.favorite_items=s->favorites;if(s->read_marks_valid)options.read_marks=s->read_marks;pn_status_t status=pn_shelf_focus_with_font_file(s->page,&s->font,&s->frame,before,after,s->covers,s->pool,&s->media,*s->font_real?s->font_real:NULL,&options);
     if(status==PN_UNSUPPORTED)return draw(s);
     if(status==PN_OK){status=present(s,&s->frame,PN_REFRESH_GL16);if(status==PN_OK)s->shelf_draw_revision=s->async.revision;}
     if(status!=PN_OK && status!=PN_EMPTY)s->shelf_draw_valid=false;
-    printf("shelf_focus before=%d after=%d partial=1 status=%d\n",before,s->selected,(int)status);return status==PN_EMPTY?PN_OK:status;
+    printf("shelf_focus before=%d after=%d partial=1 status=%d\n",before,after,(int)status);return status==PN_EMPTY?PN_OK:status;
 }
 static pn_status_t recent_load(library_t *s);
 /* 最近阅读第一本作为“继续阅读”卡；没有记录时清除。/ The first recent entry becomes the continue-reading card; cleared when there is none. */
@@ -573,6 +642,7 @@ static void open_actions(library_t *s,int index){
     if(s->covers){snprintf(s->actions.title,sizeof s->actions.title,"%s",s->covers->display[index].title);snprintf(s->actions.author,sizeof s->actions.author,"%s",s->covers->display[index].author);}
     uint64_t started=SDL_GetTicks64();
     s->actions.favorites_known=favorites_ensure(s)==PN_OK;s->actions.favorite=s->actions.favorites_known && pn_favorites_contains(s->favorites,s->actions.item.path);
+    s->actions.read_marks_known=read_marks_ensure(s)==PN_OK;s->actions.read_done=pn_read_marks_is_read(s->actions.read_marks_known?s->read_marks:NULL,s->actions.item.path,s->actions.item.identified || s->actions.item.has_progress,s->actions.item.progress);
     pn_w_font_scope_t scope={0};pn_status_t status=pn_w_font_scope_begin(&scope,s->pool,NULL);
     if(status==PN_OK)status=pn_book_actions_render(&s->actions,&s->font,&s->frame);
     pn_w_font_scope_end(&scope);
@@ -588,15 +658,182 @@ static pn_status_t open_settings(library_t *s){
     if(status==PN_OK){pn_settings_about_t about={0};storage_note(s);snprintf(about.version,sizeof about.version,"版本 %s · PC 模拟器",PN_PRODUCT_VERSION);snprintf(about.storage,sizeof about.storage,"%s",s->storage);
         snprintf(about.internal,sizeof about.internal,"%s",s->state_dir?"可用（--state-dir）":"未指定 --state-dir");snprintf(about.screen,sizeof about.screen,"684×1216 · 16 级灰阶（模拟）");pn_settings_ui_set_about(&s->settings,&about);
         pn_settings_time_t clock={0};time_t utc=time(NULL);if(utc>=1704067200 && (uint64_t)utc<=4102444799u)(void)pn_settings_time_format(&clock,(uint32_t)utc);snprintf(clock.message,sizeof clock.message,"模拟器显示本机时间，联网校时需在阅读器验证。");pn_settings_ui_set_time(&s->settings,&clock);
-        pn_settings_update_t update={0};snprintf(update.message,sizeof update.message,"PC 模拟器只展示同源升级界面，不连接 Gitee 或写入设备 Flash。设备 OTA 需完成签名配置与真机回滚验收。");pn_settings_ui_set_update(&s->settings,&update);}
+        pn_settings_update_t update={0};snprintf(update.message,sizeof update.message,"PC 模拟器只展示同源升级界面，不连接 Gitee 或写入设备 Flash。设备 OTA 需完成签名配置与真机回滚验收。");pn_settings_ui_set_update(&s->settings,&update);
+        if(s->wallpaper_dir)pn_settings_ui_set_wallpaper_dir(&s->settings,&s->media,s->wallpaper_dir);}
     return status;
 }
-/* 传书一级页：模拟器没有无线传书，只显示原因。/ Transfer root tab: the simulator has no wireless transfer and only shows the reason. */
-static pn_transfer_hub_info_t hub_info(library_t *s){return (pn_transfer_hub_info_t){.storage=s->storage,.unavailable="PC 模拟器不提供无线传书"};}
+static void file_manager_close(library_t *s){
+    s->files_open=false;pn_free(s->file_manager);s->file_manager=NULL;
+}
+static pn_status_t file_manager_paint(library_t *s){
+    if(!s->file_manager)return PN_INVALID;
+    pn_w_font_scope_t scope={0};pn_status_t status=pn_w_font_scope_begin(&scope,s->pool,NULL);
+    if(status==PN_OK)status=pn_file_manager_render(s->file_manager,&s->font,&s->frame);
+    pn_w_font_scope_end(&scope);
+    if(status==PN_OK)status=present(s,&s->frame,PN_REFRESH_GL16);
+    return status;
+}
+static void file_manager_usage(library_t *s,pn_fm_usage_t *u,char sys_font[PN_FONT_REFERENCE_PATH_MAX],char read_font[PN_FONT_REFERENCE_PATH_MAX],
+    char lock_wp[PN_WALLPAPER_PATH_MAX],char lock_mk[PN_WALLPAPER_PATH_MAX],char reading_bg[PN_BACKGROUND_NAME_MAX]){
+    memset(u,0,sizeof *u);sys_font[0]=read_font[0]=lock_wp[0]=lock_mk[0]=reading_bg[0]=0;
+    if(s->last_read_known && *s->last_read.path)u->current_book=s->last_read.path;
+    if(*s->home_prefs.banner)u->home_banner=s->home_prefs.banner;
+    if(s->state_dir){
+        pn_media_lease_t lease={0};
+        if(pn_media_acquire(&s->state_media,PN_MEDIA_READ,&lease)==PN_OK){
+            pn_journal_files_t jf;pn_journal_io_t io;pn_font_preferences_t fp;
+            memset(&fp,0,sizeof fp);
+            if(pn_font_preferences_system_files(&jf,&s->state_media,&lease,s->state_dir,&io)==PN_OK && pn_font_preferences_load(&io,s->pool,NULL,&fp)==PN_OK && fp.primary.kind==PN_FONT_FILE && *fp.primary.path){snprintf(sys_font,PN_FONT_REFERENCE_PATH_MAX,"%s",fp.primary.path);u->system_font=sys_font;}
+            memset(&fp,0,sizeof fp);
+            if(pn_font_preferences_files(&jf,&s->state_media,&lease,s->state_dir,NULL,&io)==PN_OK && pn_font_preferences_load(&io,s->pool,NULL,&fp)==PN_OK && fp.primary.kind==PN_FONT_FILE && *fp.primary.path){snprintf(read_font,PN_FONT_REFERENCE_PATH_MAX,"%s",fp.primary.path);u->reading_font=read_font;}
+            (void)pn_media_release(&s->state_media,&lease);
+        }
+        pn_style_t st={0};
+        if(pn_style_global_load(&s->state_media,s->state_dir,&st)==PN_OK && st.background && *st.background_name){snprintf(reading_bg,PN_BACKGROUND_NAME_MAX,"%s",st.background_name);u->reading_bg=reading_bg;}
+    }
+    if(s->wallpaper_store_ok){
+        pn_media_lease_t lease={0};pn_wallpaper_store_t mask_store;
+        if(pn_media_acquire(&s->wallpaper_media,PN_MEDIA_READ,&lease)==PN_OK){
+            pn_lock_selection_t sel={0};
+            if(pn_wallpaper_load(&s->wallpaper_store,&lease,&sel,NULL)==PN_OK && sel.mode==PN_LOCK_CUSTOM && *sel.source){snprintf(lock_wp,PN_WALLPAPER_PATH_MAX,"%s",sel.source);u->lock_wallpaper=lock_wp;}
+            memset(&sel,0,sizeof sel);
+            if(pn_wallpaper_mask_store_init(&s->wallpaper_store,&mask_store)==PN_OK && pn_wallpaper_load(&mask_store,&lease,&sel,NULL)==PN_OK && sel.mode==PN_LOCK_MASK && *sel.source){snprintf(lock_mk,PN_WALLPAPER_PATH_MAX,"%s",sel.source);u->lock_mask=lock_mk;}
+            (void)pn_media_release(&s->wallpaper_media,&lease);
+        }
+    }
+}
+static pn_status_t file_manager_refresh(library_t *s){
+    if(!s->file_manager)return PN_INVALID;
+    pn_media_lease_t lease={0};pn_status_t st=pn_media_acquire(&s->media,PN_MEDIA_READ,&lease);
+    if(st==PN_OK){
+        if(s->file_manager->view==PN_FM_VIEW_ROOT)st=pn_file_manager_scan_roots(s->file_manager,&s->media,&lease);
+        else if(s->file_manager->view==PN_FM_VIEW_MOVE)st=pn_file_manager_scan_move_targets(s->file_manager,&s->media,&lease);
+        else if(s->file_manager->view==PN_FM_VIEW_EXT_BROWSE)st=pn_file_manager_scan_browse(s->file_manager,&s->media,&lease);
+        else if(s->file_manager->view==PN_FM_VIEW_EXT_LIST)st=PN_OK;
+        else if(s->file_manager->view==PN_FM_VIEW_LIST || s->file_manager->view==PN_FM_VIEW_ACTIONS){
+            char *bufs=pn_alloc_tagged(s->pool,PN_MEM_UI,PN_FONT_REFERENCE_PATH_MAX*2u+PN_WALLPAPER_PATH_MAX*2u+PN_BACKGROUND_NAME_MAX);
+            if(bufs){
+                pn_fm_usage_t u;
+                char *sf=bufs,*rf=sf+PN_FONT_REFERENCE_PATH_MAX,*lw=rf+PN_FONT_REFERENCE_PATH_MAX,*lm=lw+PN_WALLPAPER_PATH_MAX,*rb=lm+PN_WALLPAPER_PATH_MAX;
+                file_manager_usage(s,&u,sf,rf,lw,lm,rb);
+                st=pn_file_manager_scan(s->file_manager,&s->media,&lease,&u);
+                pn_free(bufs);
+            }else st=pn_file_manager_scan(s->file_manager,&s->media,&lease,NULL);
+        }
+        (void)pn_media_release(&s->media,&lease);
+    }
+    if(st!=PN_OK && !*s->file_manager->notice)snprintf(s->file_manager->notice,sizeof s->file_manager->notice,"读取存储卡失败，请重试");
+    return file_manager_paint(s);
+}
+static void file_manager_compat_after_delete(library_t *s,unsigned cat,const char *full_path,const char *name){
+    if(cat==PN_FM_CAT_BOOKS){
+        pn_catalog_index_invalidate(&s->catalog_index);s->recent_loaded=false;s->favorites_valid=false;s->read_marks_valid=false;
+        if(s->last_read_known && !strcmp(s->last_read.path,full_path))s->last_read_known=false;
+        if(s->covers && s->covers->has_last && !strcmp(s->covers->last.path,full_path))s->covers->has_last=false;
+    }else if(cat==PN_FM_CAT_FONTS && s->state_dir){
+        pn_media_lease_t lease={0};
+        if(pn_media_acquire(&s->state_media,PN_MEDIA_WRITE,&lease)==PN_OK){
+            pn_journal_files_t jf;pn_journal_io_t io;pn_font_preferences_t fp;
+            memset(&fp,0,sizeof fp);
+            if(pn_font_preferences_system_files(&jf,&s->state_media,&lease,s->state_dir,&io)==PN_OK && pn_font_preferences_load(&io,s->pool,NULL,&fp)==PN_OK){
+                bool ch=false;
+                if(fp.primary.kind==PN_FONT_FILE && !strcmp(fp.primary.path,full_path)){memset(&fp.primary,0,sizeof fp.primary);ch=true;}
+                if(fp.fallback.kind==PN_FONT_FILE && !strcmp(fp.fallback.path,full_path)){memset(&fp.fallback,0,sizeof fp.fallback);ch=true;}
+                if(ch)(void)pn_font_preferences_save(&io,s->pool,NULL,&fp);
+            }
+            memset(&fp,0,sizeof fp);
+            if(pn_font_preferences_files(&jf,&s->state_media,&lease,s->state_dir,NULL,&io)==PN_OK && pn_font_preferences_load(&io,s->pool,NULL,&fp)==PN_OK){
+                bool ch=false;
+                if(fp.primary.kind==PN_FONT_FILE && !strcmp(fp.primary.path,full_path)){memset(&fp.primary,0,sizeof fp.primary);ch=true;}
+                if(fp.fallback.kind==PN_FONT_FILE && !strcmp(fp.fallback.path,full_path)){memset(&fp.fallback,0,sizeof fp.fallback);ch=true;}
+                if(ch)(void)pn_font_preferences_save(&io,s->pool,NULL,&fp);
+            }
+            (void)pn_media_release(&s->state_media,&lease);
+        }
+    }else if(cat==PN_FM_CAT_WALLPAPERS){
+        if(name && *s->home_prefs.banner && !strcmp(s->home_prefs.banner,name)){
+            s->home_prefs.banner[0]=0;
+            if(s->state_dir){(void)pn_home_prefs_save_dir(&s->state_media,s->state_dir,&s->home_prefs);(void)pn_home_banner_cache_clear(&s->state_media,s->state_dir);}
+            home_banner_release(s);
+        }
+        if(s->wallpaper_store_ok){
+            pn_media_lease_t lease={0};pn_wallpaper_store_t mask_store;
+            if(pn_media_acquire(&s->wallpaper_media,PN_MEDIA_WRITE,&lease)==PN_OK){
+                pn_lock_selection_t sel={0};
+                if(pn_wallpaper_load(&s->wallpaper_store,&lease,&sel,NULL)==PN_OK && sel.mode==PN_LOCK_CUSTOM && !strcmp(sel.source,full_path)){pn_lock_selection_t def={.mode=PN_LOCK_DEFAULT};(void)pn_wallpaper_save(&s->wallpaper_store,&lease,&def,NULL);}
+                memset(&sel,0,sizeof sel);
+                if(pn_wallpaper_mask_store_init(&s->wallpaper_store,&mask_store)==PN_OK && pn_wallpaper_load(&mask_store,&lease,&sel,NULL)==PN_OK && sel.mode==PN_LOCK_MASK && !strcmp(sel.source,full_path)){pn_lock_selection_t def={.mode=PN_LOCK_DEFAULT};(void)pn_wallpaper_save(&mask_store,&lease,&def,NULL);pn_wallpaper_mask_close(&s->lock_mask);}
+                (void)pn_media_release(&s->wallpaper_media,&lease);
+            }
+        }
+    }else if(cat==PN_FM_CAT_BACKGROUNDS && s->state_dir && name){
+        pn_style_t st={0};
+        if(pn_style_global_load(&s->state_media,s->state_dir,&st)==PN_OK && st.background && !strcmp(st.background_name,name)){
+            st.background=0;st.background_name[0]=0;memset(&st.background_identity,0,sizeof st.background_identity);
+            (void)pn_style_global_save(&s->state_media,s->state_dir,&st);
+        }
+    }else if(cat==PN_FM_CAT_COVERS){
+        s->covers_dirty=true;
+    }
+}
+static pn_status_t open_file_manager(library_t *s){
+    file_manager_close(s);
+    s->file_manager=pn_alloc_tagged(s->pool,PN_MEM_UI,sizeof *s->file_manager);
+    if(!s->file_manager)return PN_NO_MEMORY;
+    storage_note(s);
+    char root_dir[PN_SCAN_PATH_MAX]={0};
+    const char *slash=s->directory?strrchr(s->directory,'/'):NULL;
+    if(slash && slash>s->directory)snprintf(root_dir,sizeof root_dir,"%.*s",(int)(slash-s->directory),s->directory);
+    else snprintf(root_dir,sizeof root_dir,"%s",s->directory?s->directory:".");
+    snprintf(s->scan_mount,sizeof s->scan_mount,"%s",root_dir);
+    if(s->state_dir)(void)pn_scan_dirs_load_all(&s->state_media,s->state_dir,&s->scan_dirs);
+    pn_scan_dirs_set_active(&s->scan_dirs,s->scan_mount);
+    pn_file_manager_init(s->file_manager,root_dir,s->storage);
+    s->file_manager->scan_dirs=s->scan_dirs;
+    pn_file_manager_set_dir(s->file_manager,PN_FM_CAT_BOOKS,s->directory);
+    pn_file_manager_set_dir(s->file_manager,PN_FM_CAT_FONTS,s->font_dir);
+    pn_file_manager_set_dir(s->file_manager,PN_FM_CAT_WALLPAPERS,s->wallpaper_dir);
+    char sibling[PN_FM_PATH_MAX]={0};
+    if(slash && slash>s->directory){
+        snprintf(sibling,sizeof sibling,"%.*s/backgrounds",(int)(slash-s->directory),s->directory);
+        pn_file_manager_set_dir(s->file_manager,PN_FM_CAT_BACKGROUNDS,sibling);
+        snprintf(sibling,sizeof sibling,"%.*s/covers",(int)(slash-s->directory),s->directory);
+        pn_file_manager_set_dir(s->file_manager,PN_FM_CAT_COVERS,sibling);
+    }
+    s->hub=false;s->files_open=true;
+    return file_manager_refresh(s);
+}
+/* 传书一级页：模拟器没有无线传书，只显示原因，支持存储卡文件管理。/ Transfer root tab: the simulator has no wireless transfer, only shows the reason, and enables storage file management. */
+static pn_transfer_hub_info_t hub_info(library_t *s){return (pn_transfer_hub_info_t){.storage_manage=s->directory && *s->directory,.storage=s->storage,.unavailable="PC 模拟器不提供无线传书"};}
 static pn_status_t open_hub(library_t *s){
     storage_note(s);pn_transfer_hub_info_t info=hub_info(s);
     pn_status_t status=pn_transfer_hub_render(&s->font,&s->frame,&info);if(status==PN_OK)status=present(s,&s->frame,PN_REFRESH_GL16);
     s->hub=status==PN_OK;printf("hub open status=%d\n",(int)status);return status;
+}
+static pn_status_t open_stats(library_t *s){
+    if(!s->reading_stats.media && s->state_media.available)(void)pn_reading_stats_init(&s->reading_stats,&s->state_media,s->state_dir);
+    if(s->reading_stats.media)(void)pn_reading_stats_load(&s->reading_stats);
+    (void)recent_load(s);(void)read_marks_ensure(s);
+    pn_stats_view_t view={0};
+    uint64_t utc=0;bool dated=stats_clock(&utc);
+    view.summary=pn_reading_stats_summary(&s->reading_stats,dated,utc);
+    view.summary.known=view.summary.known && s->covers && s->covers->has_last && s->covers->last.identified && !memcmp(s->covers->last.expected.sha256,s->reading_stats.book.id.sha256,32);
+    unsigned year,month,day,weekday;
+    if(dated && pn_bookmark_lock_date((uint32_t)(utc/1000u),&year,&month,&day,&weekday)){
+        view.summary.dated=true;view.summary.weekday=weekday;
+        snprintf(view.date_label,sizeof view.date_label,"%u年%u月%u日 · 周%s",year,month,day,((const char *const[]){"一","二","三","四","五","六","日"})[weekday]);
+    }
+    if(s->covers && s->covers->has_last){
+        if(*s->covers->display[PN_COVER_SLOT_LAST].title)snprintf(view.current_title,sizeof view.current_title,"%.127s",s->covers->display[PN_COVER_SLOT_LAST].title);
+        else snprintf(view.current_title,sizeof view.current_title,"%.127s",s->covers->last.name);
+    }
+    view.recent=s->recent_loaded?s->recent:NULL;
+    view.read_marks=s->read_marks_valid?s->read_marks:NULL;
+    pn_w_font_scope_t scope={0};pn_status_t status=pn_w_font_scope_begin(&scope,s->pool,NULL);
+    if(status==PN_OK)status=pn_stats_view_render(&view,&s->font,&s->frame);
+    pn_w_font_scope_end(&scope);
+    if(status==PN_OK)status=present(s,&s->frame,PN_REFRESH_GL16);
+    s->stats_open=status==PN_OK;printf("stats_view open status=%d\n",(int)status);return status;
 }
 static pn_status_t favorites_load(library_t *s){
     if(!s->state_dir)return PN_UNSUPPORTED;
@@ -626,13 +863,24 @@ static pn_status_t page(library_t *s,bool previous,bool first){
     }
     if(!first && (!s->page->count || (!previous && !s->page->more)))return PN_EMPTY;
     pn_catalog_page_t *next=pn_alloc_tagged(s->pool,PN_MEM_UI,sizeof *next);if(!next)return PN_NO_MEMORY;
+    if(s->shelf_sort==PN_SHELF_SORT_RECENT)(void)recent_load(s);
     pn_media_lease_t lease={0};pn_status_t status=pn_media_acquire(&s->media,PN_MEDIA_READ,&lease);
-    const char *cursor=first?"":s->page->items[previous?0:s->page->count-1].name;
     if(status==PN_OK){
+        (void)pn_catalog_list_book_folders(&s->media,&lease,s->directory,s->shelf_folders,PN_CATALOG_FOLDER_MAX,&s->shelf_folder_count);
+        if(s->shelf_folder_index>s->shelf_folder_count)s->shelf_folder_index=0;
+    }
+    const char *scan_dir=(s->shelf_folder_index>0 && s->shelf_folder_index<=s->shelf_folder_count)?s->shelf_folders[s->shelf_folder_index-1u].path:s->directory;
+    bool multi_or_filtered=s->shelf_folder_count>0 || s->shelf_folder_index>0;
+    const char *cursor=first?"":s->page->items[previous?0:s->page->count-1].name;
+    if(status==PN_OK && ((s->shelf_sort!=PN_SHELF_SORT_NAME && !s->jump) || (multi_or_filtered && !s->jump))){
+        const pn_catalog_item_t *sort_cursor=first?NULL:&s->page->items[previous?0:s->page->count-1];
+        status=pn_catalog_page_sorted_n(&s->media,&lease,scan_dir,*s->query?s->query:NULL,s->shelf_sort,s->recent,sort_cursor,previous,shelf_per_page(s),next);
+        (void)pn_media_release(&s->media,&lease);
+    }else if(status==PN_OK){
         pn_catalog_index_stats_t before,after;pn_catalog_index_stats(&s->catalog_index,&before);
-        status=pn_catalog_index_page(&s->catalog_index,&lease,cursor,previous,s->jump,*s->query?s->query:NULL,shelf_per_page(s),next);
+        status=multi_or_filtered?PN_EMPTY:pn_catalog_index_page(&s->catalog_index,&lease,cursor,previous,s->jump,*s->query?s->query:NULL,shelf_per_page(s),next);
         pn_catalog_index_stats(&s->catalog_index,&after);if(timing_on() && status==PN_OK)fprintf(stderr,"timing catalog index hit records=%llu total=%zu\n",(unsigned long long)(after.records_read-before.records_read),next->total);
-        if(status==PN_EMPTY)status=*s->query?(previous?pn_catalog_search_page_before_n(&s->media,&lease,s->directory,s->query,cursor,shelf_per_page(s),next):pn_catalog_search_page_n(&s->media,&lease,s->directory,s->query,cursor,shelf_per_page(s),next)):s->jump?pn_catalog_page_from_n(&s->media,&lease,s->directory,s->jump,shelf_per_page(s),next):previous?pn_catalog_page_before_n(&s->media,&lease,s->directory,cursor,shelf_per_page(s),next):pn_catalog_page_n(&s->media,&lease,s->directory,cursor,shelf_per_page(s),next);
+        if(status==PN_EMPTY)status=*s->query?(previous?pn_catalog_search_page_before_n(&s->media,&lease,scan_dir,s->query,cursor,shelf_per_page(s),next):pn_catalog_search_page_n(&s->media,&lease,scan_dir,s->query,cursor,shelf_per_page(s),next)):s->jump?pn_catalog_page_from_n(&s->media,&lease,scan_dir,s->jump,shelf_per_page(s),next):previous?pn_catalog_page_before_n(&s->media,&lease,scan_dir,cursor,shelf_per_page(s),next):pn_catalog_page_n(&s->media,&lease,scan_dir,cursor,shelf_per_page(s),next);
         s->jump=0;
         (void)pn_media_release(&s->media,&lease);
     }
@@ -785,15 +1033,28 @@ static void prepare_continue(library_t *s,uint64_t now,uint64_t activity){
 }
 /* 工具栏中当前书不能用的入口：TXT没有目录，搜索尚未实现。/ Entries unavailable for the current book: TXT has no TOC and search is not implemented. */
 static unsigned toolbar_unavailable(library_t *s){return s->epub.impl?0u:1u;}
-/* 在上一帧页面上叠加工具栏并呈现。/ Overlay the toolbar on the last page frame and present it. */
-static pn_status_t toolbar_show(library_t *s){
+/* 在上一帧页面上叠加工具栏与顶部阅读信息条并呈现。/ Overlay the toolbar and top reading info bar on the last page frame and present it. */
+static pn_status_t toolbar_show_ex(library_t *s,const char *notice,bool bookmarked){
     if(!reading(s) || !s->page_px)return PN_EMPTY;
     pn_frame_t frame;if(!pn_frame_bind(&frame,s->page_px,342u*1216u,684,1216))return PN_INVALID;
     pn_font_t ui={0};pn_text_source_t builtin=pn_font_builtin_source();pn_status_t status=pn_font_open(&ui,s->pool,&builtin,34);
-    if(status==PN_OK){s->toolbar=true;status=pn_reader_toolbar_present(s->pool,&ui,&frame,toolbar_unavailable(s),NULL,present,s);if(status!=PN_OK)s->toolbar=false;}
-    pn_font_close(&ui);
+    pn_w_font_scope_t scope={0};if(status==PN_OK)status=pn_w_font_scope_begin(&scope,s->pool,NULL);
+    if(status==PN_OK){
+        char title_buf[128]={0};const char *src=s->last_read_known?s->last_read.name:"";
+        if(s->covers && s->covers->has_last && s->last_read_known && !strcmp(s->covers->last.path,s->last_read.path) && *s->covers->display[PN_COVER_SLOT_LAST].title)src=s->covers->display[PN_COVER_SLOT_LAST].title;
+        snprintf(title_buf,sizeof title_buf,"%.127s",src);
+        char *dot=strrchr(title_buf,'.');if(dot && (!strcasecmp(dot,".txt") || !strcasecmp(dot,".epub")))*dot=0;
+        unsigned basis=0;size_t sec=0,cnt=0;
+        bool has_pct=s->epub.impl?(pn_epub_app_percent(&s->epub,&basis,&sec,&cnt)==PN_OK):(pn_reader_app_percent(&s->reader,&basis)==PN_OK);
+        pn_toolbar_top_t top={.title=title_buf,.basis=has_pct?(int)basis:-1,.bookmarked=bookmarked,.quick_bookmark=true};
+        s->toolbar=true;
+        status=pn_reader_toolbar_present_ex(s->pool,&ui,&frame,toolbar_unavailable(s),notice,&top,present,s);
+        if(status!=PN_OK)s->toolbar=false;
+    }
+    pn_w_font_scope_end(&scope);pn_font_close(&ui);
     printf("toolbar open status=%d\n",(int)status);return status;
 }
+static pn_status_t toolbar_show(library_t *s){return toolbar_show_ex(s,NULL,false);}
 /* 关闭工具栏：恢复原页面；refresh为真时按强刷重画。/ Close the toolbar and restore the page; a full refresh repaint when refresh is true. */
 static pn_status_t toolbar_close(library_t *s,bool refresh){
     s->toolbar=false;
@@ -825,6 +1086,8 @@ static int management_hit(void *ctx,int x,int y){
     if(s->styles.active)return pn_style_ui_hit(&s->styles,x,y);
     if(s->bookmarks.mode!=PN_BUI_CLOSED)return pn_bookmark_ui_hit(&s->bookmarks,x,y);
     if(s->actions_mode)return pn_book_actions_hit(&s->actions,x,y);
+    if(s->stats_open)return pn_stats_view_hit(x,y);
+    if(s->files_open && s->file_manager)return pn_file_manager_hit(s->file_manager,x,y);
     if(s->settings.impl)return pn_settings_ui_hit(&s->settings,x,y);
     if(s->font_manage.impl)return pn_font_manage_hit(&s->font_manage,x,y);
     if(s->wallpaper.impl)return pn_wallpaper_ui_hit(&s->wallpaper,x,y);
@@ -837,7 +1100,7 @@ static int management_hit(void *ctx,int x,int y){
 /// 只把一级页真实底栏交给按下路由，内容区、子页与模态保留原点击语义。/ Route only real root navigation on press; content, subpages and modals retain their click semantics.
 static int root_navigation_hit(library_t *s,int x,int y){
     if((s->foreground_open.impl || s->index_gate) || s->opening_book)return -1;
-    if(s->tsumego.active || s->klotski.active || s->xiangqi.active || s->nonogram.active || s->minesweeper.active || s->sokoban.active || s->sudoku.active || s->locked || s->fonts.active || s->toc.active || s->jumpui.active || s->styles.active || s->bookmarks.mode!=PN_BUI_CLOSED || s->actions_mode || s->font_manage.impl || s->wallpaper.impl || s->search_open || s->index || s->toolbar || pn_w_navigation_hit(x,y)<0)return -1;
+    if(s->tsumego.active || s->klotski.active || s->xiangqi.active || s->nonogram.active || s->minesweeper.active || s->sokoban.active || s->sudoku.active || s->locked || s->fonts.active || s->toc.active || s->jumpui.active || s->styles.active || s->bookmarks.mode!=PN_BUI_CLOSED || s->actions_mode || s->stats_open || s->font_manage.impl || s->wallpaper.impl || s->search_open || s->index || s->toolbar || pn_w_navigation_hit(x,y)<0)return -1;
     if(s->settings.impl)return pn_settings_ui_screen(&s->settings)==0?pn_settings_ui_hit(&s->settings,x,y):-1;
     if(s->hub){pn_transfer_hub_info_t info=hub_info(s);return pn_transfer_hub_hit(&info,x,y);}
     return reading(s) || !s->page?-1:shelf_hit(s,x,y);
@@ -908,7 +1171,7 @@ static bool feedback_event(library_t *s,const SDL_Event *e){
     if(!motion && e->type!=SDL_MOUSEBUTTONDOWN && e->type!=SDL_MOUSEBUTTONUP)return true;
     if((motion && !(e->motion.state&SDL_BUTTON_LMASK)) || (!motion && e->button.button!=SDL_BUTTON_LEFT))return true;
     int x=motion?e->motion.x:e->button.x,y=motion?e->motion.y:e->button.y;
-    int hit=management_hit(s,x,y);bool supported=s->settings.impl || s->font_manage.impl || s->wallpaper.impl || s->hub || s->toolbar || s->actions_mode || s->fonts.active || s->toc.active || s->styles.active || s->jumpui.active || s->bookmarks.mode!=PN_BUI_CLOSED || s->search_open || s->index;
+    int hit=management_hit(s,x,y);bool supported=s->settings.impl || s->font_manage.impl || s->wallpaper.impl || s->files_open || s->hub || s->toolbar || s->actions_mode || s->stats_open || s->fonts.active || s->toc.active || s->styles.active || s->jumpui.active || s->bookmarks.mode!=PN_BUI_CLOSED || s->search_open || s->index;
     if(!supported)return true;
     if(e->type!=SDL_MOUSEBUTTONDOWN && !s->feedback_tap.down)return false;
     int selected=-1;bool was_down=s->feedback_tap.down;
@@ -920,47 +1183,117 @@ static bool feedback_event(library_t *s,const SDL_Event *e){
     if(e->type==SDL_MOUSEBUTTONUP){(void)pn_tap_feed(&s->feedback_tap,0,-1,true,&selected);bool commit=pn_tap_feed(&s->feedback_tap,0,-1,true,&selected);s->feedback_release=true;if(!commit)return false;}
     return true;
 }
-/// 数字1/2/3模拟左/中/右键；方向键仍可选择阅读菜单项。/ Digits 1/2/3 simulate left/middle/right keys; arrows still select reader-menu items.
+static int management_focus_hit(void *ctx,int x,int y){library_t *s=ctx;int c=management_hit(s,x,y);return (s->jumpui.active && c>=PN_JUI_PERCENT)?-1:c;}
+static void management_focus_rescan(library_t *s){
+    int keep=-1;const pn_focus_item_t *current=pn_focus_current(&s->management_focus);if(current)keep=current->code;
+    pn_focus_scan(&s->management_focus,management_focus_hit,s,NULL,0);
+    for(size_t i=0;keep>=0 && i<s->management_focus.count;i++)if(s->management_focus.items[i].code==keep)s->management_focus.index=(int)i;
+}
+static void management_repaint(library_t *s){
+    if(s->wallpaper.impl)(void)pn_wallpaper_ui_present(&s->wallpaper,present,s);
+    else if(s->font_manage.impl)(void)pn_font_manage_present(&s->font_manage,present,s);
+    else if(s->settings.impl)(void)pn_settings_ui_present(&s->settings,present,s);
+    else if(s->files_open)(void)file_manager_paint(s);
+    else if(s->hub){pn_transfer_hub_info_t info=hub_info(s);if(pn_transfer_hub_render(&s->font,&s->frame,&info)==PN_OK)(void)present(s,&s->frame,PN_REFRESH_GL16);}
+    else if(s->search_open){if(pn_search_ui_render(&s->search,&s->font,&s->frame)==PN_OK)(void)present(s,&s->frame,PN_REFRESH_GL16);}
+    else if(s->stats_open)(void)open_stats(s);
+    else if(s->index){if(pn_shelf_index_render(&s->font,&s->frame)==PN_OK)(void)present(s,&s->frame,PN_REFRESH_GL16);}
+    else if(s->fonts.active)(void)pn_font_ui_present(&s->fonts,present,s);
+    else if(s->toc.active)(void)pn_toc_ui_present(&s->toc,present,s);
+    else if(s->jumpui.active)(void)pn_jump_ui_present(&s->jumpui,present,s);
+    else if(s->styles.active)(void)pn_style_ui_present(&s->styles,present,s);
+    else if(s->bookmarks.mode!=PN_BUI_CLOSED)(void)pn_bookmark_ui_present(&s->bookmarks,present,s);
+    else if(s->toolbar)(void)toolbar_show(s);
+    else if(s->actions_mode){
+        pn_w_font_scope_t scope={0};pn_status_t st=pn_w_font_scope_begin(&scope,s->pool,NULL);
+        if(st==PN_OK)st=pn_book_actions_render(&s->actions,&s->font,&s->frame);
+        pn_w_font_scope_end(&scope);
+        if(st==PN_OK)(void)present(s,&s->frame,PN_REFRESH_GL16);
+    }
+}
+static bool management_dispatch_code(library_t *s,SDL_Event *event,int code){
+    for(size_t i=0;i<s->management_focus.count;i++)if(s->management_focus.items[i].code==code){
+        // 同命中码可能有分离区域，外接矩形中心未必可点。/ A code can span disjoint regions; its bounding-box center may not be clickable.
+        for(int y=4;y<1216;y+=8)for(int x=4;x<684;x+=8)if(management_hit(s,x,y)==code){
+            *event=(SDL_Event){.type=SDL_MOUSEBUTTONUP};event->button.button=SDL_BUTTON_LEFT;event->button.x=x;event->button.y=y;
+            s->toc_pointer=true;s->font_pointer=true;return true;
+        }
+    }
+    return false;
+}
+/// 数字1/2/3模拟左/中/右键，F10模拟中键长按（统一方案A）。/ Digits 1/2/3 simulate KEY1/KEY2/KEY3 and F10 simulates KEY2 long press (unified Plan A).
 static bool management_event(library_t *s,SDL_Event *event,uint64_t now){
-    bool active=s->fonts.active || s->toc.active || s->jumpui.active || s->styles.active || s->bookmarks.mode!=PN_BUI_CLOSED || s->actions_mode || s->settings.impl || s->font_manage.impl || s->wallpaper.impl || s->hub || s->search_open || s->index || s->toolbar;
-    if(!active || event->type!=SDL_KEYDOWN || event->key.keysym.sym<SDLK_1 || event->key.keysym.sym>SDLK_3)return false;
+    if(event->type==SDL_MOUSEBUTTONDOWN || event->type==SDL_MOUSEBUTTONUP){s->management_focus.index=-1;}
+    if(!management_active(s) || event->type!=SDL_KEYDOWN)return false;
+    SDL_Keycode sym=event->key.keysym.sym;
+    if(sym!=SDLK_1 && sym!=SDLK_2 && sym!=SDLK_3 && sym!=SDLK_F10)return false;
     if(event->key.repeat)return true;
-    int key=(int)(event->key.keysym.sym-SDLK_1);
-    // 与设备一致：排版中间键保存并留在当前书，预览态也应用草稿。/ Match the device: the typesetting middle key saves within the current book, including preview drafts.
-    if(key==PN_KEY_2 && s->fonts.active){
+    bool long_middle=sym==SDLK_F10;
+    int key=long_middle?PN_KEY_2:(int)(sym-SDLK_1);
+    int back=s->fonts.active?(s->fonts.preview?PN_FUI_FORM:PN_FUI_BACK):s->toc.active?PN_TOC_UI_BACK:s->jumpui.active?PN_JUI_CANCEL:s->styles.active?(s->styles.preview?PN_SUI_FORM:s->styles.margins?PN_SUI_MARGINS_BACK:s->styles.backgrounds?PN_SUI_BACKGROUND_BACK:s->styles.more?PN_SUI_BACK_MAIN:PN_SUI_CANCEL):s->bookmarks.mode!=PN_BUI_CLOSED?PN_BUI_BACK:s->actions_mode?PN_BA_CANCEL:s->stats_open?PN_STATS_BACK:s->files_open?(s->file_manager && s->file_manager->view==PN_FM_VIEW_ACTIONS?PN_FM_ACT_CANCEL:PN_FM_BACK):s->settings.impl?PN_SETUI_BACK:s->font_manage.impl?PN_FMU_BACK:s->wallpaper.impl?(s->wallpaper.screen==PN_WUI_LIST?PN_WUI_BACK:PN_WUI_CANCEL):s->hub?PN_HUB_SHELF:s->search_open?PN_SEARCH_BACK:s->index?'<':PN_TOOL_CLOSE;
+    bool dialog=(s->actions_mode && s->actions.confirming) || (s->files_open && s->file_manager && s->file_manager->view==PN_FM_VIEW_CONFIRM) || (s->font_manage.impl && s->font_manage.screen==PN_FMU_CONFIRMING) || s->bookmarks.mode==PN_BUI_DELETE;
+    int dlg_confirm=s->actions_mode?PN_BA_CONFIRM:s->files_open?PN_FM_CONFIRM_DELETE:s->font_manage.impl?PN_FMU_CONFIRM:PN_BUI_CONFIRM;
+    int dlg_cancel=s->actions_mode?PN_BA_CANCEL:s->files_open?PN_FM_CONFIRM_CANCEL:s->font_manage.impl?PN_FMU_CANCEL:PN_BUI_CANCEL;
+    if(long_middle){
+        s->management_focus.index=-1;
+        if(dialog){
+            management_focus_rescan(s);s->management_focus.index=-1;
+            if(management_dispatch_code(s,event,dlg_cancel))return false;
+            event->key.keysym.sym=SDLK_ESCAPE;return false;
+        }
+        if((s->settings.impl && pn_settings_ui_screen(&s->settings)==0) || s->hub){
+            pn_status_t status=active_close(s,now);
+            if(status!=PN_OK){printf("management home status=%d retained=1\n",(int)status);return true;}
+            pn_settings_ui_close(&s->settings);s->hub=false;s->back_to_settings=false;s->home=true;
+            s->management_focus.index=-1;pn_sdl_async_text(&s->async,false);status=page(s,false,true);printf("management home status=%d\n",(int)status);return true;
+        }
+        if(s->toolbar){pn_status_t status=toolbar_close(s,false);printf("reading settings middle status=%d active=%d\n",(int)status,(int)s->toolbar);return true;}
+        management_focus_rescan(s);s->management_focus.index=-1;
+        if(management_dispatch_code(s,event,back))return false;
+        event->key.keysym.sym=SDLK_ESCAPE;return false;
+    }
+    if(key==PN_KEY_1 || key==PN_KEY_3){
+        if((s->fonts.active && s->fonts.preview) || (s->styles.active && s->styles.preview)){s->management_focus.index=-1;event->key.keysym.sym=SDLK_ESCAPE;return false;}
+        management_focus_rescan(s);
+        if(s->management_focus.count){(void)pn_focus_move(&s->management_focus,key==PN_KEY_3?1:-1);management_repaint(s);}
+        return true;
+    }
+    // KEY2短按：确认当前焦点；未选中时确认弹窗安全落到取消，排版/工具栏保留快捷保存/关闭，其余管理页先落到首个非返回项。
+    // KEY2 short: confirm focused item; when unfocused, dialogs safely focus Cancel, typesetting/toolbar keep quick apply/close, and other management pages focus the first non-back item.
+    management_focus_rescan(s);const pn_focus_item_t *item=pn_focus_current(&s->management_focus);
+    if(dialog){
+        if(item && (item->code==dlg_confirm || item->code==dlg_cancel)){
+            int code=item->code;s->management_focus.index=-1;
+            if(management_dispatch_code(s,event,code))return false;
+            return true;
+        }
+        s->management_focus.index=0;
+        for(size_t i=0;i<s->management_focus.count;i++)if(s->management_focus.items[i].code==dlg_cancel){s->management_focus.index=(int)i;break;}
+        if(s->management_focus.count)management_repaint(s);
+        return true;
+    }
+    if(item){
+        int code=item->code;s->management_focus.index=-1;
+        if(management_dispatch_code(s,event,code))return false;
+        return true;
+    }
+    if((s->settings.impl && pn_settings_ui_screen(&s->settings)>0) || s->font_manage.impl || s->wallpaper.impl || s->stats_open || s->files_open){
+        s->management_focus.index=-1;
+        if(management_dispatch_code(s,event,back))return false;
+        event->key.keysym.sym=SDLK_ESCAPE;return false;
+    }
+    if(s->fonts.active){
         pn_status_t status=pn_font_ui_event(&s->fonts,s->fonts.mode==1?PN_FUI_APPLY:PN_FUI_BACK,now,present,s);
         if(!s->fonts.active){pn_font_ui_close(&s->fonts);if(s->styles.active)status=pn_style_ui_event(&s->styles,PN_SUI_APPLY,now,present,s);}
         printf("reading settings middle status=%d active=%d\n",(int)status,(int)(s->fonts.active || s->styles.active));return true;
     }
-    if(key==PN_KEY_2 && s->styles.active){pn_status_t status=pn_style_ui_event(&s->styles,PN_SUI_APPLY,now,present,s);style_report(&s->styles,PN_SUI_APPLY,status);return true;}
-    if(key==PN_KEY_2 && s->toolbar){pn_status_t status=toolbar_close(s,false);printf("reading settings middle status=%d active=%d\n",(int)status,(int)s->toolbar);return true;}
-    if(key==PN_KEY_2){
-        pn_status_t status=active_close(s,now);
-        if(status!=PN_OK){printf("management home status=%d retained=1\n",(int)status);return true;}
-        pn_toc_ui_close(&s->toc);pn_bookmark_ui_cancel(&s->bookmarks);pn_style_ui_close(&s->styles);pn_jump_ui_close(&s->jumpui);pn_font_ui_close(&s->fonts);
-        pn_wallpaper_ui_close(&s->wallpaper);pn_font_manage_close(&s->font_manage);pn_settings_ui_close(&s->settings);
-        s->toolbar=false;s->hub=false;s->index=false;s->search_open=false;s->actions_mode=false;s->back_to_settings=false;s->home=true;
-        s->management_focus.index=-1;pn_sdl_async_text(&s->async,false);status=page(s,false,true);printf("management home status=%d\n",(int)status);return true;
-    }
-    if(key==PN_KEY_3 && (s->fonts.active || s->toc.active || s->styles.active || s->jumpui.active || s->bookmarks.mode!=PN_BUI_CLOSED)){
-        event->key.keysym.sym=SDLK_RETURN;return false;
-    }
-    if(key==PN_KEY_1 && ((s->fonts.active && s->fonts.preview) || (s->styles.active && s->styles.preview))){event->key.keysym.sym=SDLK_ESCAPE;return false;}
-    int back=s->fonts.active?PN_FUI_BACK:s->toc.active?PN_TOC_UI_BACK:s->jumpui.active?PN_JUI_CANCEL:s->styles.active?(s->styles.margins?PN_SUI_MARGINS_BACK:s->styles.backgrounds?PN_SUI_BACKGROUND_BACK:s->styles.more?PN_SUI_BACK_MAIN:PN_SUI_CANCEL):s->bookmarks.mode!=PN_BUI_CLOSED?PN_BUI_BACK:s->actions_mode?PN_BA_CANCEL:s->settings.impl?PN_SETUI_BACK:s->font_manage.impl?PN_FMU_BACK:s->wallpaper.impl?(s->wallpaper.screen==PN_WUI_LIST?PN_WUI_BACK:PN_WUI_CANCEL):s->hub?PN_HUB_SHELF:s->search_open?PN_SEARCH_BACK:s->index?'<':PN_TOOL_CLOSE;
-    pn_focus_scan(&s->management_focus,management_hit,s,NULL,0);
-    int confirm=-1;
-    if(s->actions_mode && s->actions.confirming)confirm=PN_BA_CONFIRM;
-    else if(s->font_manage.impl && s->font_manage.screen==PN_FMU_CONFIRMING)confirm=PN_FMU_CONFIRM;
-    else for(size_t i=0;i<s->management_focus.count;i++)if(s->management_focus.items[i].code!=back){confirm=s->management_focus.items[i].code;break;}
-    int command=pn_key_management_command(key,PN_KEY_SHORT,back,confirm,-1);
-    for(size_t i=0;i<s->management_focus.count;i++)if(s->management_focus.items[i].code==command){
-        // 同命中码可能有分离区域，外接矩形中心未必可点。/ A code can span disjoint regions; its bounding-box center may not be clickable.
-        for(int y=4;y<1216;y+=8)for(int x=4;x<684;x+=8)if(management_hit(s,x,y)==command){
-            *event=(SDL_Event){.type=SDL_MOUSEBUTTONUP};event->button.button=SDL_BUTTON_LEFT;event->button.x=x;event->button.y=y;
-            s->toc_pointer=true;s->font_pointer=true;return false;
-        }
-    }
-    event->key.keysym.sym=SDLK_ESCAPE;return key==PN_KEY_3;
+    if(s->styles.active){pn_status_t status=pn_style_ui_event(&s->styles,PN_SUI_APPLY,now,present,s);style_report(&s->styles,PN_SUI_APPLY,status);return true;}
+    if(s->toolbar){pn_status_t status=toolbar_close(s,false);printf("reading settings middle status=%d active=%d\n",(int)status,(int)s->toolbar);return true;}
+    if(s->toc.active || s->jumpui.active || s->bookmarks.mode!=PN_BUI_CLOSED){event->key.keysym.sym=SDLK_RETURN;return false;}
+    for(size_t i=0;i<s->management_focus.count;i++)if(s->management_focus.items[i].code!=back){s->management_focus.index=(int)i;break;}
+    if(s->management_focus.index<0 && s->management_focus.count)s->management_focus.index=0;
+    if(s->management_focus.count)management_repaint(s);
+    return true;
 }
 /// 设置页借用在读书快照，正文关闭后仍能预览封面。/ Settings use an in-progress book snapshot, allowing cover preview after the reader closes.
 static pn_status_t wallpaper_open(library_t *s){
@@ -989,22 +1322,27 @@ static pn_status_t lock_preview(library_t *s,uint64_t now){
     s->toolbar=false;
     if(!s->frame.pixels){uint8_t *pixels=pn_alloc_tagged(s->pool,PN_MEM_FRAME,PN_WALLPAPER_BYTES);if(!pixels)return PN_NO_MEMORY;pn_frame_bind(&s->frame,pixels,PN_WALLPAPER_BYTES,684,1216);}
     if(!s->font.impl){pn_text_source_t font=pn_font_builtin_source();status=pn_font_open(&s->font,s->pool,&font,32);}
-    pn_lock_selection_t selection={.mode=PN_LOCK_DEFAULT,.hint=false};
+    pn_lock_selection_t selection={.mode=PN_LOCK_DEFAULT,.hint=false},mask_sel={.mode=PN_LOCK_DEFAULT,.hint=false};
     if(status==PN_OK && s->wallpaper_store_ok){pn_media_lease_t lease;pn_status_t loaded=pn_media_acquire(&s->wallpaper_media,PN_MEDIA_READ,&lease);
-        if(loaded==PN_OK){loaded=pn_wallpaper_load(&s->wallpaper_store,&lease,&selection,&s->frame);(void)pn_media_release(&s->wallpaper_media,&lease);}
-        if(loaded!=PN_OK)selection=(pn_lock_selection_t){.mode=PN_LOCK_DEFAULT,.hint=false};}
+        if(loaded==PN_OK){
+            loaded=pn_wallpaper_load(&s->wallpaper_store,&lease,&selection,&s->frame);
+            pn_wallpaper_store_t mask_store;
+            pn_status_t mask_loaded=pn_wallpaper_mask_store_init(&s->wallpaper_store,&mask_store)==PN_OK?pn_wallpaper_load(&mask_store,&lease,&mask_sel,NULL):PN_EMPTY;
+            (void)pn_media_release(&s->wallpaper_media,&lease);
+            if(loaded!=PN_OK)selection=(pn_lock_selection_t){.mode=PN_LOCK_DEFAULT,.hint=false};
+            if(mask_loaded!=PN_OK){mask_sel=(pn_lock_selection_t){.mode=PN_LOCK_DEFAULT,.hint=false};
+                if(mask_loaded==PN_EMPTY && selection.mode==PN_LOCK_MASK){mask_sel=selection;selection=(pn_lock_selection_t){.mode=PN_LOCK_DEFAULT,.hint=false};}}
+            else if(selection.mode==PN_LOCK_MASK)selection=(pn_lock_selection_t){.mode=PN_LOCK_DEFAULT,.hint=false};
+        }else selection=(pn_lock_selection_t){.mode=PN_LOCK_DEFAULT,.hint=false};}
     if(selection.mode==PN_LOCK_SIMPLE || selection.mode==PN_LOCK_BOOK)selection=(pn_lock_selection_t){.mode=PN_LOCK_DEFAULT,.hint=false};
-    if(selection.mode==PN_LOCK_MASK){
-        pn_status_t mask=PN_EMPTY;
-        if(reading(s) && s->page_px){
-            // 有封面缓存目录时把遮罩平面缓存放在同级masks。/ With a cover cache directory, keep mask planes in the sibling masks directory.
-            char mask_dir[540]={0};const char *slash=*s->cover_dir?strrchr(s->cover_dir,'/'):NULL;
-            if(slash && slash>s->cover_dir && (size_t)snprintf(mask_dir,sizeof mask_dir,"%.*s/masks",(int)(slash-s->cover_dir),s->cover_dir)>=sizeof mask_dir)mask_dir[0]=0;
-            mask=pn_wallpaper_mask_open_cached(&s->lock_mask,s->pool,&s->media,&selection,*mask_dir?mask_dir:NULL);
-            if(mask==PN_OK){memcpy(s->frame.pixels,s->page_px,PN_WALLPAPER_BYTES);mask=pn_wallpaper_mask_paint(&s->lock_mask,&s->frame);}
-        }
+    if(mask_sel.mode==PN_LOCK_MASK && reading(s) && s->page_px){
+        // 有封面缓存目录时把遮罩平面缓存放在同级masks。/ With a cover cache directory, keep mask planes in the sibling masks directory.
+        char mask_dir[540]={0};const char *slash=*s->cover_dir?strrchr(s->cover_dir,'/'):NULL;
+        if(slash && slash>s->cover_dir && (size_t)snprintf(mask_dir,sizeof mask_dir,"%.*s/masks",(int)(slash-s->cover_dir),s->cover_dir)>=sizeof mask_dir)mask_dir[0]=0;
+        pn_status_t mask=pn_wallpaper_mask_open_cached(&s->lock_mask,s->pool,&s->media,&mask_sel,*mask_dir?mask_dir:NULL);
+        if(mask==PN_OK){memcpy(s->frame.pixels,s->page_px,PN_WALLPAPER_BYTES);mask=pn_wallpaper_mask_paint(&s->lock_mask,&s->frame);}
         printf("lock_mask status=%d\n",(int)mask);pn_wallpaper_mask_close(&s->lock_mask);
-        if(mask!=PN_OK)selection=(pn_lock_selection_t){.mode=PN_LOCK_DEFAULT,.hint=false};
+        if(mask==PN_OK)selection=mask_sel;
     }
     if(!reading(s))pn_wallpaper_mask_close(&s->lock_mask);
     if(status==PN_OK && selection.mode==PN_LOCK_BOOKMARK){
@@ -1050,6 +1388,13 @@ static int library_worker(void *ctx){
     pn_media_init(&s->state_media);status=pn_media_attach(&s->state_media,1);if(status!=PN_OK)goto cleanup;
     s->shelf_prefs=pn_shelf_prefs_default();
     (void)pn_settings_load_shelf(&s->state_media,s->state_dir,&s->shelf_prefs);
+    {const char *sl=s->directory?strrchr(s->directory,'/'):NULL;
+     if(sl && sl>s->directory)snprintf(s->scan_mount,sizeof s->scan_mount,"%.*s",(int)(sl-s->directory),s->directory);
+     else snprintf(s->scan_mount,sizeof s->scan_mount,"%s",s->directory?s->directory:".");
+     if(s->state_dir)(void)pn_scan_dirs_load_all(&s->state_media,s->state_dir,&s->scan_dirs);
+     pn_scan_dirs_set_active(&s->scan_dirs,s->scan_mount);}
+    if(s->state_dir){pn_media_lease_t lease={0};if(pn_media_acquire(&s->state_media,PN_MEDIA_READ,&lease)==PN_OK){pn_journal_files_t files;pn_journal_io_t io;if(pn_shelf_sort_files(&files,&s->state_media,&lease,s->state_dir,&io)==PN_OK)(void)pn_shelf_sort_load(&io,&s->shelf_sort);(void)pn_media_release(&s->state_media,&lease);}}
+    if(s->state_dir){(void)pn_home_prefs_load_dir(&s->state_media,s->state_dir,&s->home_prefs);pn_w_set_brand(s->home_prefs.header);}
     s->home=true;status=page(s,false,true);if(status!=PN_OK)goto cleanup;
     if(pn_settings_load_flags(&s->state_media,s->state_dir,&s->input_flags)!=PN_OK)s->input_flags=PN_INPUT_FLAGS_DEFAULT;
     (void)pn_settings_load_vertical_turn(&s->state_media,s->state_dir,&s->vertical_turn);
@@ -1058,7 +1403,7 @@ static int library_worker(void *ctx){
     while(running){
         if(s->feedback_release){feedback_restore(s);s->feedback_release=false;}
         {static time_t last;const char *fixed=getenv("PN_SIM_CLOCK");time_t t=time(NULL);if(fixed)pn_w_set_clock(fixed);else if(t!=last){last=t;struct tm local;char text[8];if(localtime_r(&t,&local) && strftime(text,sizeof text,"%H:%M",&local))pn_w_set_clock(text);}} // 本机时钟；固定值仅用于可复跑测试 / Host clock; a fixed value is only for reproducible tests
-        uint32_t view=s->locked?1:s->xiangqi.active?23:s->nonogram.active?22:s->minesweeper.active?21:s->sokoban.active?20:s->sudoku.active?19:(s->foreground_open.impl || s->index_gate)?18:s->fonts.active?2:s->toc.active?3:s->styles.active?4:s->jumpui.active?5:s->bookmarks.mode!=PN_BUI_CLOSED?6:s->actions_mode?7:s->settings.impl?8:s->wallpaper.impl?9:s->font_manage.impl?10:s->hub?11:s->index?12:s->search_open?13:s->toolbar?14:reading(s)?15:s->home?16:17;
+        uint32_t view=s->locked?1:s->xiangqi.active?23:s->nonogram.active?22:s->minesweeper.active?21:s->sokoban.active?20:s->sudoku.active?19:(s->foreground_open.impl || s->index_gate)?18:s->fonts.active?2:s->toc.active?3:s->styles.active?4:s->jumpui.active?5:s->bookmarks.mode!=PN_BUI_CLOSED?6:s->actions_mode?7:s->stats_open?26:s->settings.impl?8:s->wallpaper.impl?9:s->font_manage.impl?10:s->hub?11:s->index?12:s->search_open?13:s->toolbar?14:reading(s)?15:s->home?16:17;
         stats_poll(s,view==15);
         if(!s->xiangqi.active && !s->nonogram.active && !s->minesweeper.active && !s->sokoban.active && !s->sudoku.active && !(s->foreground_open.impl || s->index_gate) && !reading(s) && !s->home && s->page)view+=(uint32_t)s->page->index*32u;
         pn_list_motion_stats_t moving=s->toc.active?pn_toc_ui_motion_stats(&s->toc):pn_font_manage_motion_stats(&s->font_manage);
@@ -1103,7 +1448,7 @@ static int library_worker(void *ctx){
             (void)pn_tap_press_feed(&navigation_press,0,-1,true,&navigation);(void)pn_tap_press_feed(&navigation_press,0,-1,true,&navigation);}
         if(navigation_consumed)shelf_gesture=(pn_shelf_gesture_t){0};
         if(navigation_consumed && !navigation_selected){feedback_restore(s);s->feedback_tap=(pn_tap_t){0};s->pointer_down=false;tap=(pn_tap_t){0};pn_reader_input_cancel(&input);continue;}
-        {bool active=!s->entertainment && !reading(s) && !s->locked && !s->hub && !s->index && !s->search_open && !s->actions_mode && !s->settings.impl && !s->wallpaper.impl && !s->font_manage.impl;
+        {bool active=!s->entertainment && !reading(s) && !s->locked && !s->hub && !s->files_open && !s->index && !s->search_open && !s->actions_mode && !s->stats_open && !s->settings.impl && !s->wallpaper.impl && !s->font_manage.impl;
          int command=-1;bool consumed=false;
          bool pointer=got && ((event.type==SDL_MOUSEMOTION && (event.motion.state&SDL_BUTTON_LMASK)) || ((event.type==SDL_MOUSEBUTTONDOWN || event.type==SDL_MOUSEBUTTONUP) && event.button.button==SDL_BUTTON_LEFT));
          if(!navigation_selected && pointer){bool motion=event.type==SDL_MOUSEMOTION,up=event.type==SDL_MOUSEBUTTONUP;int x=motion?event.motion.x:event.button.x,y=motion?event.motion.y:event.button.y,book=active?shelf_hit(s,x,y):-1;
@@ -1187,7 +1532,7 @@ static int library_worker(void *ctx){
 }}
             if(!s->locked && s->styles.active && !s->pointer_down && atomic_load(&s->async.mouse)==0)(void)pn_style_ui_tick(&s->styles,present,s);
             if(!s->locked && s->wallpaper.impl && !s->pointer_down && atomic_load(&s->async.mouse)==0)(void)pn_wallpaper_ui_tick(&s->wallpaper,present,s);
-            if(!s->locked && !reading(s) && !s->pointer_down && atomic_load(&s->async.mouse)==0 && !s->hub && !s->index && !s->search_open && !s->actions_mode && !s->wallpaper.impl && !s->font_manage.impl && !s->settings.impl && now>=font_activity && now-font_activity>=80){
+            if(!s->locked && !reading(s) && !s->pointer_down && atomic_load(&s->async.mouse)==0 && !s->hub && !s->files_open && !s->index && !s->search_open && !s->actions_mode && !s->stats_open && !s->wallpaper.impl && !s->font_manage.impl && !s->settings.impl && now>=font_activity && now-font_activity>=80){
                 // 与设备一致：真实输入已处理，安静后才到期释放，不为释放新写缓存。/ Match the device: expire only after real input is handled and quiet, without writing caches just to release them.
                 if(now-font_activity>=1500)(void)pn_hot_session_expire(&s->hot,now);
                 if(s->home && !s->reading_stats.loaded && s->reading_stats.media && !s->covers_dirty && s->covers && !pn_shelf_covers_pending(s->covers,s->page) && now-font_activity>=1500u && now>=s->home_stats_retry){s->home_stats_retry=now+3000u;
@@ -1428,6 +1773,16 @@ static int library_worker(void *ctx){
                 s->favorites_valid=false;
                 s->actions.notice=status==PN_OK?(now?"已加入收藏":"已取消收藏"):status==PN_LIMIT?"收藏最多 50 本":"保存失败，请重试";(void)draw(s);
             }
+            else if(hit==PN_BA_MARK_READ){
+                pn_media_lease_t lease;status=pn_media_acquire(&s->state_media,PN_MEDIA_WRITE,&lease);
+                bool auto_done=(s->actions.item.identified || s->actions.item.has_progress) && s->actions.item.progress==10000u;
+                bool want_read=!s->actions.read_done;
+                pn_read_mark_t next_state=want_read?(auto_done?PN_READ_MARK_AUTO:PN_READ_MARK_READ):(auto_done?PN_READ_MARK_UNREAD:PN_READ_MARK_AUTO);
+                if(status==PN_OK){pn_journal_files_t files;pn_journal_io_t io;status=pn_read_marks_files(&files,&s->state_media,&lease,s->state_dir,&io);if(status==PN_OK)status=pn_read_marks_set(&io,s->pool,s->actions.item.path,next_state);(void)pn_media_release(&s->state_media,&lease);}
+                if(status==PN_OK)s->actions.read_done=want_read;
+                s->read_marks_valid=false;
+                s->actions.notice=status==PN_OK?(want_read?"已标记为已读":"已标记为未读"):status==PN_LIMIT?"手动标记最多 64 本":"保存失败，请重试";(void)draw(s);
+            }
             else if(hit==PN_BA_CONFIRM){
                 // 先绘制loading遮罩，再归还媒体只读消费者并删除文件。
                 // Present the loading overlay before releasing media read consumers and deleting the file.
@@ -1445,13 +1800,161 @@ static int library_worker(void *ctx){
             printf("actions command=%d status=%d active=%d favorite=%d\n",hit,(int)status,(int)s->actions_mode,(int)s->actions.favorite);
             continue;
         }
+        if(s->stats_open){
+            int hit=-1;
+            if(event.type==SDL_QUIT){running=false;continue;}
+            if(event.type==SDL_KEYDOWN && !event.key.repeat && event.key.keysym.sym==SDLK_ESCAPE)hit=PN_STATS_BACK;
+            else if(event.type==SDL_MOUSEBUTTONUP && event.button.button==SDL_BUTTON_LEFT)hit=pn_stats_view_hit(event.button.x,event.button.y);
+            if(hit==PN_STATS_BACK){s->stats_open=false;s->home=true;status=page(s,false,true);printf("stats_view closed status=%d\n",(int)status);}
+            continue;
+        }
+        if(s->files_open && s->file_manager){
+            int hit=-1;
+            if(event.type==SDL_QUIT){running=false;continue;}
+            if(event.type==SDL_KEYDOWN && !event.key.repeat && event.key.keysym.sym==SDLK_ESCAPE)
+                hit=s->file_manager->view==PN_FM_VIEW_CONFIRM?PN_FM_CONFIRM_CANCEL:s->file_manager->view==PN_FM_VIEW_ACTIONS?PN_FM_ACT_CANCEL:PN_FM_BACK;
+            else if(event.type==SDL_MOUSEBUTTONUP && event.button.button==SDL_BUTTON_LEFT)
+                hit=pn_file_manager_hit(s->file_manager,event.button.x,event.button.y);
+            if(hit>=0){
+                pn_file_manager_t *fm=s->file_manager;
+                fm->notice[0]=0;
+                if(fm->view==PN_FM_VIEW_ROOT){
+                    if(hit==PN_FM_BACK){file_manager_close(s);status=open_hub(s);}
+                    else if(hit==PN_FM_EXT_OPEN){fm->scan_dirs=s->scan_dirs;fm->ext_cat=0;fm->view=PN_FM_VIEW_EXT_LIST;status=file_manager_paint(s);}
+                    else if(hit>=PN_FM_CAT_BASE && hit<PN_FM_CAT_BASE+(int)PN_FM_CAT_COUNT){fm->category=(unsigned)(hit-PN_FM_CAT_BASE);fm->subpath[0]=0;fm->page=0;fm->view=PN_FM_VIEW_LIST;status=file_manager_refresh(s);}
+                }else if(fm->view==PN_FM_VIEW_EXT_LIST){
+                    if(hit==PN_FM_BACK){fm->view=PN_FM_VIEW_ROOT;status=file_manager_refresh(s);}
+                    else if(hit>=PN_FM_EXT_CAT_BASE && hit<PN_FM_EXT_CAT_BASE+(int)PN_SCAN_CAT_COUNT){fm->ext_cat=(unsigned)(hit-PN_FM_EXT_CAT_BASE);status=file_manager_paint(s);}
+                    else if(hit==PN_FM_EXT_BROWSE){fm->browse_rel[0]=0;fm->browse_page=0;fm->view=PN_FM_VIEW_EXT_BROWSE;status=file_manager_refresh(s);}
+                    else if(hit>=PN_FM_EXT_DEL_BASE && hit<PN_FM_EXT_DEL_BASE+(int)PN_SCAN_DIR_MAX){
+                        pn_scan_cat_t cat=(pn_scan_cat_t)fm->ext_cat;
+                        pn_scan_dirs_t next=s->scan_dirs;
+                        if(pn_scan_dirs_remove(&next,cat,(size_t)(hit-PN_FM_EXT_DEL_BASE))==PN_OK){
+                            pn_status_t sv=s->state_dir?pn_scan_dirs_save_cat(&s->state_media,s->state_dir,cat,&next):PN_OK;
+                            if(sv==PN_OK){s->scan_dirs=next;pn_scan_dirs_set_active(&s->scan_dirs,s->scan_mount);fm->scan_dirs=s->scan_dirs;pn_catalog_index_invalidate(&s->catalog_index);s->shelf_folder_index=0;snprintf(fm->notice,sizeof fm->notice,"已移出外部目录（原文件未删除）");}
+                        }
+                        status=file_manager_paint(s);
+                    }
+                }else if(fm->view==PN_FM_VIEW_EXT_BROWSE){
+                    if(hit==PN_FM_BACK){
+                        if(*fm->browse_rel){char *sl=strrchr(fm->browse_rel,'/');if(sl)*sl=0;else fm->browse_rel[0]=0;fm->browse_page=0;status=file_manager_refresh(s);}
+                        else{fm->view=PN_FM_VIEW_EXT_LIST;status=file_manager_paint(s);}
+                    }else if(hit==PN_FM_PREV && fm->browse_page>0){fm->browse_page--;status=file_manager_refresh(s);}
+                    else if(hit==PN_FM_NEXT){fm->browse_page++;status=file_manager_refresh(s);}
+                    else if(hit>=PN_FM_BROWSE_BASE && hit<PN_FM_BROWSE_BASE+(int)fm->browse_count){
+                        const char *leaf=fm->browse_items[hit-PN_FM_BROWSE_BASE];char joined[PN_SCAN_REL_MAX];
+                        int n=*fm->browse_rel?snprintf(joined,sizeof joined,"%s/%s",fm->browse_rel,leaf):snprintf(joined,sizeof joined,"%s",leaf);
+                        if(n>0 && (size_t)n<sizeof joined){strcpy(fm->browse_rel,joined);fm->browse_page=0;status=file_manager_refresh(s);}
+                    }else if(hit==PN_FM_EXT_PICK){
+                        pn_scan_cat_t cat=(pn_scan_cat_t)fm->ext_cat;
+                        pn_scan_dirs_t next=s->scan_dirs;
+                        if(pn_scan_dirs_add(&next,cat,fm->browse_rel)==PN_OK){
+                            pn_status_t sv=s->state_dir?pn_scan_dirs_save_cat(&s->state_media,s->state_dir,cat,&next):PN_OK;
+                            if(sv==PN_OK){s->scan_dirs=next;pn_scan_dirs_set_active(&s->scan_dirs,s->scan_mount);fm->scan_dirs=s->scan_dirs;pn_catalog_index_invalidate(&s->catalog_index);s->shelf_folder_index=0;fm->view=PN_FM_VIEW_EXT_LIST;snprintf(fm->notice,sizeof fm->notice,"已添加外部目录：%.48s",fm->browse_rel);}
+                        }
+                        status=file_manager_paint(s);
+                    }
+                }else if(fm->view==PN_FM_VIEW_LIST){
+                    if(hit==PN_FM_BACK){if(*fm->subpath){fm->subpath[0]=0;fm->page=0;status=file_manager_refresh(s);}else{fm->view=PN_FM_VIEW_ROOT;status=file_manager_refresh(s);}}
+                    else if(hit==PN_FM_MKDIR_OPEN){fm->input[0]=0;pn_keyboard_set_ime(&fm->keyboard,true,true);fm->view=PN_FM_VIEW_MKDIR;status=file_manager_paint(s);}
+                    else if(hit==PN_FM_PREV && fm->page>0){fm->page--;status=file_manager_refresh(s);}
+                    else if(hit==PN_FM_NEXT){fm->page++;status=file_manager_refresh(s);}
+                    else if(hit==PN_FM_DELETE_EMPTY_DIR && *fm->subpath && fm->count==0){fm->delete_current_dir=true;fm->view=PN_FM_VIEW_CONFIRM;status=file_manager_paint(s);}
+                    else if(hit>=PN_FM_ITEM_BASE && hit<PN_FM_ITEM_BASE+(int)fm->count){
+                        const pn_fm_entry_t *e=&fm->items[hit-PN_FM_ITEM_BASE];
+                        if(e->is_dir){snprintf(fm->subpath,sizeof fm->subpath,"%s",e->name);fm->page=0;status=file_manager_refresh(s);}
+                        else{fm->selected=*e;fm->delete_current_dir=false;fm->view=PN_FM_VIEW_ACTIONS;status=file_manager_paint(s);}
+                    }
+                }else if(fm->view==PN_FM_VIEW_ACTIONS){
+                    if(hit==PN_FM_ACT_CANCEL || hit==PN_FM_BACK){fm->view=PN_FM_VIEW_LIST;status=file_manager_paint(s);}
+                    else if(hit==PN_FM_ACT_OPEN && fm->category==PN_FM_CAT_BOOKS && fm->selected.readable_book){
+                        char full[PN_FM_PATH_MAX];
+                        if(pn_file_manager_build_path(fm,fm->selected.name,full,sizeof full)==PN_OK){
+                            pn_catalog_item_t *book=pn_alloc_tagged(s->pool,PN_MEM_UI,sizeof *book);
+                            if(book){
+                                memset(book,0,sizeof *book);
+                                snprintf(book->path,sizeof book->path,"%s",full);
+                                snprintf(book->name,sizeof book->name,"%s",fm->selected.name);
+                                book->size=fm->selected.size;
+                                const char *dot=strrchr(full,'.');
+                                book->format=(dot && (!strcmp(dot,".epub") || !strcmp(dot,".EPUB")))?PN_BOOK_EPUB:PN_BOOK_TXT;
+                                file_manager_close(s);status=open_item(s,book,now);pn_free(book);
+                            }
+                        }
+                    }else if(hit==PN_FM_ACT_MOVE && fm->category==PN_FM_CAT_BOOKS){fm->move_page=0;fm->view=PN_FM_VIEW_MOVE;status=file_manager_refresh(s);}
+                    else if(hit==PN_FM_ACT_DELETE && !fm->selected.protected_item){fm->delete_current_dir=false;fm->view=PN_FM_VIEW_CONFIRM;status=file_manager_paint(s);}
+                }else if(fm->view==PN_FM_VIEW_MOVE){
+                    if(hit==PN_FM_BACK){fm->view=PN_FM_VIEW_ACTIONS;status=file_manager_paint(s);}
+                    else if(hit==PN_FM_PREV && fm->move_page>0){fm->move_page--;status=file_manager_refresh(s);}
+                    else if(hit==PN_FM_NEXT){fm->move_page++;status=file_manager_refresh(s);}
+                    else if(hit>=PN_FM_MOVE_BASE && hit<PN_FM_MOVE_BASE+(int)fm->move_count){
+                        char target[PN_FM_SUBPATH_MAX];snprintf(target,sizeof target,"%s",fm->move_targets[hit-PN_FM_MOVE_BASE]);
+                        fm->deleting=true;(void)file_manager_paint(s);
+                        pn_cover_work_abort(&s->cover_work);pn_media_lease_t lease={0};
+                        pn_status_t st=pn_hot_session_drop_for_switch(&s->hot);
+                        if(st==PN_OK){pn_font_close(&s->font);(void)pn_font_system_close();st=pn_media_acquire(&s->media,PN_MEDIA_WRITE,&lease);}
+                        char old_p[PN_FM_PATH_MAX]={0},new_p[PN_FM_PATH_MAX]={0};
+                        if(st==PN_OK){st=pn_file_manager_move(fm,&s->media,&lease,fm->selected.name,target,old_p,sizeof old_p,new_p,sizeof new_p);(void)pn_media_release(&s->media,&lease);}
+                        system_font_ready(s);if(!s->font.impl){pn_text_source_t src=pn_font_builtin_source();(void)pn_font_open(&s->font,s->pool,&src,24);}
+                        fm->deleting=false;
+                        if(st==PN_OK){
+                            pn_catalog_index_invalidate(&s->catalog_index);s->recent_loaded=false;s->favorites_valid=false;s->read_marks_valid=false;
+                            if(s->last_read_known && !strcmp(s->last_read.path,old_p))s->last_read_known=false;
+                            if(s->covers && s->covers->has_last && !strcmp(s->covers->last.path,old_p))s->covers->has_last=false;
+                            fm->view=PN_FM_VIEW_LIST;snprintf(fm->notice,sizeof fm->notice,"已移动到 %.60s",*target?target:"图书根目录");status=file_manager_refresh(s);
+                        }else{snprintf(fm->notice,sizeof fm->notice,"%s",st==PN_BUSY?"目标目录已有同名文件":"移动失败，原文件未改动");status=file_manager_paint(s);}
+                    }
+                }else if(fm->view==PN_FM_VIEW_MKDIR){
+                    bool kb_changed=false;
+                    if(hit==PN_FM_BACK){fm->view=PN_FM_VIEW_LIST;status=file_manager_refresh(s);}
+                    else if(hit==PN_FM_MKDIR_CLEAR){fm->input[0]=0;fm->keyboard.pinyin[0]=0;fm->keyboard.cand_page=0;status=file_manager_paint(s);}
+                    else if(pn_file_manager_apply_kb(fm,hit,&kb_changed)){if(kb_changed)status=file_manager_paint(s);}
+                    else{
+                        if(hit==PN_FM_MKDIR_COMMIT)(void)pn_keyboard_flush(&fm->keyboard,fm->input,sizeof fm->input,48u);
+                        const char *folder=hit==PN_FM_MKDIR_COMMIT && *fm->input?fm->input:(hit>=PN_FM_PRESET_BASE && hit<PN_FM_PRESET_BASE+(int)PN_FM_PRESET_COUNT?pn_file_manager_preset_name((unsigned)(hit-PN_FM_PRESET_BASE)):NULL);
+                        if(folder){
+                            pn_cover_work_abort(&s->cover_work);pn_media_lease_t lease={0};
+                            pn_status_t st=pn_hot_session_drop_for_switch(&s->hot);
+                            if(st==PN_OK){pn_font_close(&s->font);(void)pn_font_system_close();st=pn_media_acquire(&s->media,PN_MEDIA_WRITE,&lease);}
+                            if(st==PN_OK){st=pn_file_manager_mkdir(fm,&s->media,&lease,folder);(void)pn_media_release(&s->media,&lease);}
+                            system_font_ready(s);if(!s->font.impl){pn_text_source_t src=pn_font_builtin_source();(void)pn_font_open(&s->font,s->pool,&src,24);}
+                            if(st==PN_OK){fm->view=PN_FM_VIEW_LIST;snprintf(fm->notice,sizeof fm->notice,"已创建文件夹「%.48s」",folder);status=file_manager_refresh(s);}
+                            else{snprintf(fm->notice,sizeof fm->notice,"%s",st==PN_BUSY?"文件夹已存在":st==PN_INVALID?"名称包含非法字符":"创建失败，请重试");status=file_manager_paint(s);}
+                        }
+                    }
+                }else if(fm->view==PN_FM_VIEW_CONFIRM){
+                    if(hit==PN_FM_CONFIRM_CANCEL || hit==PN_FM_BACK){fm->view=fm->delete_current_dir?PN_FM_VIEW_LIST:PN_FM_VIEW_ACTIONS;status=file_manager_paint(s);}
+                    else if(hit==PN_FM_CONFIRM_DELETE){
+                        fm->deleting=true;(void)file_manager_paint(s);
+                        pn_cover_work_abort(&s->cover_work);pn_media_lease_t lease={0};
+                        pn_status_t st=pn_hot_session_drop_for_switch(&s->hot);
+                        if(st==PN_OK){pn_font_close(&s->font);(void)pn_font_system_close();st=pn_media_acquire(&s->media,PN_MEDIA_WRITE,&lease);}
+                        char del_path[PN_FM_PATH_MAX]={0};bool del_dir=fm->delete_current_dir;unsigned cat=fm->category;
+                        char del_name[PN_FM_NAME_MAX];snprintf(del_name,sizeof del_name,"%s",del_dir?fm->subpath:fm->selected.name);
+                        if(st==PN_OK){st=pn_file_manager_delete(fm,&s->media,&lease,del_dir?NULL:fm->selected.name,del_dir,del_path,sizeof del_path);(void)pn_media_release(&s->media,&lease);}
+                        if(st==PN_OK && !del_dir)file_manager_compat_after_delete(s,cat,del_path,del_name);
+                        system_font_ready(s);if(!s->font.impl){pn_text_source_t src=pn_font_builtin_source();(void)pn_font_open(&s->font,s->pool,&src,24);}
+                        fm->deleting=false;
+                        if(st==PN_OK){
+                            if(del_dir)fm->subpath[0]=0;
+                            fm->delete_current_dir=false;fm->view=PN_FM_VIEW_LIST;
+                            snprintf(fm->notice,sizeof fm->notice,"%s",del_dir?"已删除空文件夹":"已删除，如正在使用已回退默认");
+                            status=file_manager_refresh(s);
+                        }else{snprintf(fm->notice,sizeof fm->notice,"%s",st==PN_UNSUPPORTED?"系统保留文件不可删除":st==PN_BUSY?"文件夹非空，请先清理内部文件":"删除失败，文件仍保留");status=file_manager_paint(s);}
+                    }
+                }
+                printf("file_manager command=%d status=%d\n",hit,(int)status);
+            }
+            continue;
+        }
         if(s->hub){
-            // 传书一级页：底栏切换书架/设置，Esc回书架。/ Transfer root tab: the bottom bar switches to the shelf or Settings; Esc returns to the shelf.
+            // 传书一级页：底栏切换书架/设置，存储卡行进文件管理，Esc回书架。/ Transfer root tab: bottom bar switches tabs, storage row opens File Manager, Esc returns to shelf.
             int hit=-1;
             if(event.type==SDL_QUIT){running=false;continue;}
             if(event.type==SDL_KEYDOWN && !event.key.repeat && event.key.keysym.sym==SDLK_ESCAPE)hit=PN_HUB_SHELF;
             else if(event.type==SDL_MOUSEBUTTONUP && event.button.button==SDL_BUTTON_LEFT){pn_transfer_hub_info_t info=hub_info(s);hit=pn_transfer_hub_hit(&info,event.button.x,event.button.y);}
-            if(hit==PN_HUB_SHELF || hit==PN_HUB_HOME){s->hub=false;s->home=hit==PN_HUB_HOME;status=page(s,false,true);}
+            if(hit==PN_HUB_STORAGE){status=open_file_manager(s);}
+            else if(hit==PN_HUB_SHELF || hit==PN_HUB_HOME){s->hub=false;s->home=hit==PN_HUB_HOME;status=page(s,false,true);}
             else if(hit==PN_HUB_SETTINGS){s->hub=false;status=open_settings(s);}
             if(hit>=0)printf("hub command=%d status=%d\n",hit,(int)status);
             continue;
@@ -1487,7 +1990,7 @@ static int library_worker(void *ctx){
             if(event.type==SDL_QUIT){pn_settings_ui_close(&s->settings);running=false;continue;}
             if(event.type==SDL_KEYDOWN && !event.key.repeat && event.key.keysym.sym==SDLK_ESCAPE)command=PN_SETUI_BACK;
             else if(event.type==SDL_MOUSEBUTTONUP && event.button.button==SDL_BUTTON_LEFT)command=pn_settings_ui_hit(&s->settings,event.button.x,event.button.y);
-            if(command>=0){status=pn_settings_ui_event(&s->settings,command,present,s);if(command==PN_SETUI_FULL_REFRESH && status==PN_OK){pn_reader_app_refresh_reset(&s->reader);pn_epub_app_refresh_reset(&s->epub);}s->input_flags=s->settings.flags;s->vertical_turn=s->settings.vertical_turn;s->index_wait=s->settings.index_wait;s->shelf_prefs=s->settings.shelf;printf("settings command=%d status=%d flags=%u active=%d vertical=%d\n",command,(int)status,(unsigned)s->settings.flags,(int)s->settings.active,(int)s->settings.vertical_turn);
+            if(command>=0){status=pn_settings_ui_event(&s->settings,command,present,s);if(command==PN_SETUI_FULL_REFRESH && status==PN_OK){pn_reader_app_refresh_reset(&s->reader);pn_epub_app_refresh_reset(&s->epub);}s->input_flags=s->settings.flags;s->vertical_turn=s->settings.vertical_turn;s->index_wait=s->settings.index_wait;s->shelf_prefs=s->settings.shelf;s->home_prefs=s->settings.home;pn_w_set_brand(s->home_prefs.header);printf("settings command=%d status=%d flags=%u active=%d vertical=%d\n",command,(int)status,(unsigned)s->settings.flags,(int)s->settings.active,(int)s->settings.vertical_turn);
                 // PC没有无线：连接测试回报不能测试，用户可选择仍然保存。/ The PC has no radio: report the test as unsupported so the user may save anyway.
                 if(s->settings.request==PN_SETUI_WIFI_TEST || s->settings.request==PN_SETUI_WIFI_TEST_CANCEL){int test=s->settings.request;s->settings.request=0;status=pn_settings_ui_wifi_result(&s->settings,test==PN_SETUI_WIFI_TEST?PN_UNSUPPORTED:PN_CANCELLED,present,s);printf("settings wifi_test status=%d\n",(int)status);}
                 int request=s->settings.request;
@@ -1527,6 +2030,11 @@ static int library_worker(void *ctx){
             if(event.type==SDL_KEYDOWN && !event.key.repeat && event.key.keysym.sym==SDLK_ESCAPE)tool=PN_TOOL_CLOSE;
             else if(event.type==SDL_MOUSEBUTTONUP && event.button.button==SDL_BUTTON_LEFT)tool=pn_reader_toolbar_hit(event.button.x,event.button.y,toolbar_unavailable(s));
             if(tool==PN_TOOL_CLOSE)status=toolbar_close(s,false);
+            else if(tool==PN_TOOL_QUICK_BOOKMARK){
+                uint64_t bid=0;pn_status_t bs=s->epub.impl?pn_epub_app_bookmark_add(&s->epub,NULL,&bid):pn_reader_app_bookmark_add(&s->reader,NULL,&bid);
+                status=toolbar_show_ex(s,bs==PN_OK?"已添加书签":bs==PN_LIMIT?"书签已满":"书签保存失败",bs==PN_OK);
+                printf("toolbar quick_bookmark status=%d\n",(int)bs);
+            }
             else if(tool==PN_TOOL_REFRESH)status=toolbar_close(s,true);
             else if(tool==PN_TOOL_TOC){s->toolbar=false;status=open_toc(s);toc_report(&s->toc,0,status);}
             else if(tool==PN_TOOL_BOOKMARKS){s->toolbar=false;status=s->epub.impl?pn_bookmark_ui_open_epub(&s->bookmarks,&s->epub,present,s):pn_bookmark_ui_open(&s->bookmarks,&s->reader,present,s);printf("bookmark_ui open status=%d mode=%d count=%zu\n",(int)status,(int)s->bookmarks.mode,s->bookmarks.count);pn_sdl_async_text(&s->async,false);}
@@ -1570,15 +2078,51 @@ static int library_worker(void *ctx){
             }else{
                 if(key==SDLK_h || key==SDLK_b){s->entertainment=0;s->home=key==SDLK_h;status=page(s,false,true);printf("navigation root=%s status=%d\n",s->home?"home":"library",(int)status);continue;}
                 if(s->entertainment){
-                    if(key==SDLK_RETURN || key==SDLK_2){status=sudoku_open(s);}
-                    else if(key==SDLK_3){status=sokoban_open(s);}
+                    if(key==SDLK_F10){s->entertainment=s->entertainment==2?1:0;s->shelf_focus_visible=false;s->selected=-1;status=page(s,false,true);continue;}
+                    if(s->entertainment==2){if(key==SDLK_2 || key==SDLK_RETURN){s->entertainment=1;s->shelf_focus_visible=false;s->selected=-1;status=page(s,false,true);}continue;}
+                    if(key==SDLK_1 || key==SDLK_3){
+                        s->selected=!s->shelf_focus_visible?(key==SDLK_3?0:6):(s->selected+(key==SDLK_3?1:6))%7;
+                        s->shelf_focus_visible=true;status=draw(s);continue;
+                    }
+                    if(key==SDLK_2){
+                        if(!s->shelf_focus_visible){s->selected=0;s->shelf_focus_visible=true;status=draw(s);continue;}
+                        int pick=s->selected>=0 && s->selected<7?s->selected:0;s->shelf_focus_visible=false;s->selected=-1;
+                        status=pick==0?sudoku_open(s):pick==1?sokoban_open(s):pick==2?minesweeper_open(s):pick==3?nonogram_open(s):pick==4?xiangqi_open(s):pick==5?klotski_open(s):tsumego_open(s);
+                        continue;
+                    }
+                    if(key==SDLK_RETURN){status=sudoku_open(s);}
                     else if(key==SDLK_4){status=minesweeper_open(s);}
                     else if(key==SDLK_5){status=nonogram_open(s);}
                     else if(key==SDLK_6){status=xiangqi_open(s);}
                     else if(key==SDLK_7){status=klotski_open(s);}
                     else if(key==SDLK_8){status=tsumego_open(s);}
-                    else if(key==SDLK_1){s->entertainment=s->entertainment==2?1:0;status=page(s,false,true);}
                     continue;
+                }
+                if(key==SDLK_F10){
+                    if(s->shelf_focus_visible){int before=s->selected;s->shelf_focus_visible=false;status=draw_focus(s,before);}
+                    else if(!s->home){s->home=true;status=page(s,false,true);}
+                    continue;
+                }
+                if(key==SDLK_1 || key==SDLK_2 || key==SDLK_3){
+                    if(s->home){
+                        if(key==SDLK_2){hit=s->page->count?(s->shelf_focus_visible?s->selected:0):PN_SHELF_HOME;commit=true;}
+                        else if(s->page->count){int next=!s->shelf_focus_visible?(key==SDLK_3?0:(int)s->page->count-1):s->selected+(key==SDLK_3?1:-1);if(next>=0 && (size_t)next<s->page->count){int before=s->shelf_focus_visible?s->selected:-1;s->selected=next;s->shelf_focus_visible=true;status=draw_focus(s,before);}}
+                    }else if(key==SDLK_2){
+                        if(!s->page->count)continue;
+                        if(!s->shelf_focus_visible){s->selected=0;s->shelf_focus_visible=true;status=draw_focus(s,-1);}
+                        else{hit=s->selected;commit=true;}
+                    }else if(s->page->count){
+                        if(s->shelf_focus_visible){
+                            if(key==SDLK_3){
+                                if(s->selected+1<(int)s->page->count){int before=s->selected;s->selected++;status=draw_focus(s,before);}
+                                else if(s->page->more){status=page(s,false,false);if(status==PN_OK && s->page->count){s->selected=0;s->shelf_focus_visible=true;status=draw_focus(s,-1);}}
+                            }else{
+                                if(s->selected>0){int before=s->selected;s->selected--;status=draw_focus(s,before);}
+                                else if(s->page->index>0){status=page(s,true,false);if(status==PN_OK && s->page->count){s->selected=(int)s->page->count-1;s->shelf_focus_visible=true;status=draw_focus(s,-1);}}
+                            }
+                        }else{hit=key==SDLK_3?PN_SHELF_NEXT:PN_SHELF_PREVIOUS;commit=true;}
+                    }
+                    if(!commit)continue;
                 }
                 if(key==SDLK_j && !s->recent_mode){status=pn_shelf_index_render(&s->font,&s->frame);if(status==PN_OK)status=present(s,&s->frame,PN_REFRESH_GL16);s->index=status==PN_OK;printf("index open status=%d\n",(int)status);continue;}
                 if(key==SDLK_p){status=open_settings(s);printf("settings open status=%d flags=%u\n",(int)status,(unsigned)s->settings.flags);continue;}
@@ -1626,7 +2170,15 @@ static int library_worker(void *ctx){
             else if(!reading(s)){
                 if(hit==PN_SHELF_TAB_ENTERTAINMENT || hit==PN_SHELF_ENTERTAINMENT_BACK || hit==PN_SHELF_SUDOKU || hit==PN_SHELF_SOKOBAN || hit==PN_SHELF_MINESWEEPER || hit==PN_SHELF_NONOGRAM || hit==PN_SHELF_XIANGQI || hit==PN_SHELF_KLOTSKI || hit==PN_SHELF_TSUMEGO){s->home=false;s->entertainment=1;status=hit==PN_SHELF_SUDOKU?sudoku_open(s):hit==PN_SHELF_SOKOBAN?sokoban_open(s):hit==PN_SHELF_MINESWEEPER?minesweeper_open(s):hit==PN_SHELF_NONOGRAM?nonogram_open(s):hit==PN_SHELF_XIANGQI?xiangqi_open(s):hit==PN_SHELF_KLOTSKI?klotski_open(s):hit==PN_SHELF_TSUMEGO?tsumego_open(s):page(s,false,true);}
                 else if(hit==PN_SHELF_READING_HOME){s->home=true;status=page(s,false,true);}
+                else if(hit==PN_SHELF_READING_STATS){status=open_stats(s);}
                 else if(hit==PN_SHELF_LAYOUT){s->list_mode=!s->list_mode;status=page(s,false,true);}
+                else if(hit==PN_SHELF_SORT && !s->home && !s->entertainment && !s->recent_mode && !s->fav_mode && !*s->query){
+                    s->shelf_sort=(pn_shelf_sort_t)((s->shelf_sort+1)%PN_SHELF_SORT_COUNT);
+                    if(s->state_dir){pn_media_lease_t lease={0};if(pn_media_acquire(&s->state_media,PN_MEDIA_WRITE,&lease)==PN_OK){pn_journal_files_t files;pn_journal_io_t io;if(pn_shelf_sort_files(&files,&s->state_media,&lease,s->state_dir,&io)==PN_OK)(void)pn_shelf_sort_save(&io,s->shelf_sort);(void)pn_media_release(&s->state_media,&lease);}}
+                    status=page(s,false,true);printf("shelf_sort mode=%u status=%d\n",(unsigned)s->shelf_sort,(int)status);}
+                else if(hit==PN_SHELF_FOLDER && !s->home && !s->entertainment && !s->recent_mode && !s->fav_mode && !*s->query && s->shelf_folder_count>0){
+                    s->shelf_folder_index=(s->shelf_folder_index+1u)%(s->shelf_folder_count+1u);
+                    status=page(s,false,true);printf("shelf_folder index=%zu status=%d\n",s->shelf_folder_index,(int)status);}
                 else if(hit==PN_SHELF_TOGGLE){s->recent_mode=!s->recent_mode;*s->query=0;status=page(s,false,true);}
                 else if(hit==PN_SHELF_SEARCH && *s->query && !s->recent_mode){*s->query=0;status=page(s,false,true);}
                 else if(hit==PN_SHELF_SEARCH){pn_search_ui_open(&s->search,NULL);s->search_open=true;status=pn_search_ui_render(&s->search,&s->font,&s->frame);if(status==PN_OK)status=present(s,&s->frame,PN_REFRESH_GL16);}
@@ -1664,9 +2216,9 @@ cleanup:;
     pn_sudoku_close(&s->sudoku);
     pn_catalog_index_close(&s->catalog_index);
     pn_wallpaper_mask_close(&s->lock_mask);
-    pn_wallpaper_ui_close(&s->wallpaper);pn_font_manage_close(&s->font_manage);pn_settings_ui_close(&s->settings);
+    pn_wallpaper_ui_close(&s->wallpaper);pn_font_manage_close(&s->font_manage);pn_settings_ui_close(&s->settings);file_manager_close(s);
     pn_font_ui_close(&s->fonts);
-    pn_cover_work_abort(&s->cover_work);pn_w_font_scope_end(&s->ui_scope);pn_cache_detach(&s->cover_cache);pn_font_close(&s->font);pn_free(s->frame.pixels);pn_free(s->page_px);pn_free(s->favorites);pn_free(s->page);pn_free(s->recent);pn_free(s->covers);
+    home_banner_release(s);pn_cover_work_abort(&s->cover_work);pn_w_font_scope_end(&s->ui_scope);pn_cache_detach(&s->cover_cache);pn_font_close(&s->font);pn_free(s->frame.pixels);pn_free(s->page_px);pn_free(s->favorites);pn_free(s->read_marks);pn_free(s->page);pn_free(s->recent);pn_free(s->covers);
     (void)pn_font_system_close();
     profile_index_flush();free(s->argb);s->argb=NULL;pn_cancel_leave(&shield);return result;
 }

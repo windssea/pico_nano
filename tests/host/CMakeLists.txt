@@ -951,3 +951,21 @@ add_executable(test_device_sleep_peripherals test_device_sleep_peripherals.c ${P
 target_include_directories(test_device_sleep_peripherals BEFORE PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_stubs ${CMAKE_CURRENT_SOURCE_DIR}/device_stubs ${PN_ROOT}/main)
 target_link_libraries(test_device_sleep_peripherals PRIVATE pn_core)
 add_test(NAME device_sleep_peripherals COMMAND test_device_sleep_peripherals)
+
+add_executable(test_file_manager test_file_manager.c)
+target_link_libraries(test_file_manager PRIVATE pn_core)
+target_compile_options(test_file_manager PRIVATE -UNDEBUG)
+add_test(NAME file_manager COMMAND test_file_manager)
+set_tests_properties(file_manager PROPERTIES LABELS "ui;storage" TIMEOUT 60)
+
+add_executable(test_pinyin_ime test_pinyin_ime.c)
+target_link_libraries(test_pinyin_ime PRIVATE pn_core)
+target_compile_options(test_pinyin_ime PRIVATE -UNDEBUG)
+add_test(NAME pinyin_ime COMMAND test_pinyin_ime)
+set_tests_properties(pinyin_ime PROPERTIES LABELS "ui" TIMEOUT 30)
+
+add_executable(test_scan_dirs test_scan_dirs.c)
+target_link_libraries(test_scan_dirs PRIVATE pn_core)
+target_compile_options(test_scan_dirs PRIVATE -UNDEBUG)
+add_test(NAME scan_dirs COMMAND test_scan_dirs)
+set_tests_properties(scan_dirs PROPERTIES LABELS "ui;storage" TIMEOUT 30)
