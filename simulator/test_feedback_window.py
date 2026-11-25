@@ -21,7 +21,7 @@ with tempfile.TemporaryDirectory() as folder:
     assert original!=pressed
     for y in range(1216):
         for x in range(684):
-            if not (32<=x<652 and 550<=y<650):assert original[y*684+x]==pressed[y*684+x]
+            if not (32<=x<652 and 596<=y<688):assert original[y*684+x]==pressed[y*684+x]
     lines=[line for line in out.splitlines() if line.startswith('feedback ')]
     assert lines[0].split('revision=')[1].split()[0]==lines[1].split('revision=')[1].split()[0],out
     out,cap=run('press:100:600,wait:60,release:100:600,tap:100:680,tap:100:680,back,back,quit','commit')

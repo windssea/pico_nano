@@ -107,7 +107,7 @@ static pn_status_t metadata(service_t *s,const pn_upload_request_t *request,pn_t
  return status;
 }
 /// 可管理的资源类别，书籍删除仍留给书库控制层。/ Manageable resource kinds; book deletion remains in the library controller.
-static bool resource_kind(pn_upload_kind_t kind){return kind==PN_UPLOAD_FONT || kind==PN_UPLOAD_COVER || kind==PN_UPLOAD_WALLPAPER || kind==PN_UPLOAD_BACKGROUND;}
+static bool resource_kind(pn_upload_kind_t kind){return kind==PN_UPLOAD_FONT || kind==PN_UPLOAD_COVER || kind==PN_UPLOAD_WALLPAPER || kind==PN_UPLOAD_BACKGROUND || kind==PN_UPLOAD_BANNER || kind==PN_UPLOAD_MASK || kind==PN_UPLOAD_DICT;}
 /// 固定资源目录绝对路径。/ Absolute path of the fixed resource directory.
 static pn_status_t resource_directory(service_t *s,pn_upload_kind_t kind,char *dir){
  if(!resource_kind(kind))return PN_INVALID;

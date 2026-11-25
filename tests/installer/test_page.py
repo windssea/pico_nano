@@ -1,8 +1,9 @@
 """安装页DOM契约，避免展示布局遮蔽安全控件。 / Installer DOM contracts prevent presentation layout from shadowing safety controls."""
+import json
 from collections import Counter
 from html.parser import HTMLParser
 from pathlib import Path
-from shutil import copytree
+from shutil import copyfile, copytree
 from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
@@ -31,8 +32,11 @@ class InstallerPage(unittest.TestCase):
         temporary = TemporaryDirectory()
         cls.addClassCleanup(temporary.cleanup)
         root = Path(temporary.name)
-        for path in ("installer", "assets/wall", "releases/pico_nano-0.0.57-esp32s3"):
+        for path in ("installer", "assets/wall", "assets/dicts", "releases/pico_nano-0.0.57-esp32s3"):
             copytree(ROOT / path, root / path)
+        (root / "docs").mkdir(parents=True, exist_ok=True)
+        for doc in ("docs/CHANGELOG.md", "docs/INSTALLATION.md"):
+            copyfile(ROOT / doc, root / doc)
         cls.site = root / "site"
         with patch.object(installer_site, "ROOT", root):
             installer_site.build(cls.site, latest_only=True)
@@ -97,6 +101,39 @@ class InstallerPage(unittest.TestCase):
         self.assertEqual((inp_tag, inp_attrs.get("type")), ("input", "file"))
         self.assertIn(".zip", inp_attrs.get("accept", ""))
         self.assertTrue((self.site / "package.js").is_file())
+
+    def test_open_source_dictionaries_and_changelog_are_packaged_and_verified(self):
+        downloads = [(attrs.get("href"), attrs["download"])
+                     for tag, attrs in Page(self.site).elements if tag == "a" and "download" in attrs]
+        manifest = json.loads((self.site / "firmware/manifest.json").read_text(encoding="utf-8"))
+        dicts = manifest.get("dictionaries", [])
+        self.assertEqual(len(dicts), 3)
+        for item in dicts:
+            self.assertIn((item["path"], item["fileName"]), downloads)
+            served = self.site / item["path"]
+            self.assertTrue(served.is_file())
+            self.assertEqual(served.stat().st_size, item["size"])
+            with ZipFile(served) as archive:
+                names = [e.filename for e in archive.infolist() if not e.is_dir()]
+                self.assertTrue(any(n.endswith(".ifo") for n in names), names)
+                self.assertTrue(any(n.endswith(".idx") for n in names), names)
+                self.assertTrue(any(n.endswith(".dict.dz") for n in names), names)
+                self.assertTrue(any(n.startswith("LICENSE") for n in names), names)
+        changelog = manifest.get("changelog", [])
+        self.assertGreaterEqual(len(changelog), 3)
+        brand = (ROOT / "components/pn_core/include/pn_brand.h").read_text(encoding="utf-8")
+        current_ver = next(line.split('"')[1] for line in brand.splitlines() if line.startswith('#define PN_PRODUCT_VERSION "'))
+        self.assertEqual(changelog[0]["version"], current_ver)
+        self.assertTrue(changelog[0]["items"])
+        self.assertLessEqual(len(changelog[0]["items"]), 6)
+        self.assertFalse(any("test_shelf_view.c" in item for item in changelog[0]["items"]))
+        for entry in changelog:
+            self.assertRegex(entry["version"], r"^\d+(?:\.\d+)+$")
+            for line in entry["items"]:
+                self.assertNotIn("](../", line)
+        ids = {attrs["id"] for _, attrs in Page(self.site).elements if "id" in attrs}
+        for required_id in ("release-notes-box", "release-notes-list", "changelog-list", "resources"):
+            self.assertIn(required_id, ids)
 
 
 if __name__ == "__main__":

@@ -17,6 +17,7 @@
 #include "pn_recent.h"
 #include "pn_style.h"
 #include "pn_page_bitmap.h"
+#include "pn_stardict.h"
 typedef struct {void *impl;} pn_reader_app_t; ///< 初始impl=NULL / Initially impl=NULL
 /// 补齐未显示对象的字体身份/介质检查，不排版、不显示或写记录。/ Complete font identity/media checks on an unshown object, without layout, presentation or record writes.
 pn_status_t pn_reader_app_prepare_unshown_sources(pn_reader_app_t *);
@@ -62,7 +63,8 @@ typedef enum {
     PN_APP_SMALLER, ///< 字号减2 / Reduce size by two
     PN_APP_LARGER, ///< 字号加2 / Increase size by two
     PN_APP_BEGINNING, ///< 书首 / Beginning
-    PN_APP_TOOLS ///< 点正文中央打开工具栏；只由输入识别器产生，应用不处理 / Center tap opens the toolbar; produced only by the input recognizer and never handled by the apps
+    PN_APP_TOOLS, ///< 点正文中央打开工具栏；只由输入识别器产生，应用不处理 / Center tap opens the toolbar; produced only by the input recognizer and never handled by the apps
+    PN_APP_LOOKUP ///< 长按正文查词；只由定时输入识别器产生，应用不处理 / Long-press body dictionary lookup; produced only by timed input recognizer and never handled by the apps
 } pn_reader_action_t;
 typedef pn_status_t (*pn_reader_present_fn)(void *,const pn_frame_t *,pn_refresh_t);
 /// state_dir可空禁用持久化；非空只创建此目录、按内容SHA独立A/B文件。
@@ -245,3 +247,6 @@ pn_status_t pn_reader_app_resume_checkpoint_step(pn_reader_app_t *);
 bool pn_reader_app_resume_checkpoint_pending(const pn_reader_app_t *);
 /// 当前排版是否隐藏上下栏（状态栏与页脚）。/ Whether the active style hides top/bottom bars (status bar and footer).
 bool pn_reader_app_bars_hidden(const pn_reader_app_t *);
+/// 提取当前可见页屏幕坐标 (x,y) 附近的查词候选词列表；未命中文字时返回 PN_EMPTY。
+/// Extract dictionary lookup candidates near screen coordinate (x,y) on the current visible page; returns PN_EMPTY when no text is hit.
+pn_status_t pn_reader_app_word_at(pn_reader_app_t *app,int x,int y,char out[][PN_DICT_WORD_MAX],size_t max_out,size_t *count_out);

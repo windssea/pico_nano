@@ -3,10 +3,12 @@
 #pragma once
 #include "pn_reader_app.h"
 typedef enum {
-    PN_TURN_NONE=0, ///< 默认直接呈现 / Default direct presentation
-    PN_TURN_SWEEP=1, ///< 历史扫除ID，产品直接显示 / Legacy sweep ID, product presents directly
-    PN_TURN_CURL=2, ///< 历史页折ID，产品直接显示 / Legacy fold ID, product presents directly
-    PN_TURN_RIPPLE=3 ///< 水波纹：真实翻页以弧形错峰呈现，普通页GL16只刷变化像素，清理页GC16 / Ripple: real turns present arc-staggered, ordinary pages as GL16 over changed pixels and cleaning pages as GC16
+    PN_TURN_NONE=0, ///< 默认直接刷新（优化：平铺仅变化像素+静默白推）/ Default direct refresh (optimized: flat changed-only + white-push)
+    PN_TURN_SWEEP=1, ///< 兼容旧名；现为高清无闪（完整48相GL16+静默白推）/ Legacy alias; now crisp flash-free (full 48-phase GL16 + white-push)
+    PN_TURN_CRISP=1, ///< 高清无闪（完整48相GL16+仅变化像素+静默白推）/ Crisp flash-free (full 48-phase GL16 + changed-only + white-push)
+    PN_TURN_CURL=2, ///< 兼容旧名；现为极速二值（20相DU快翻）/ Legacy alias; now fast binary (20-phase DU turn)
+    PN_TURN_FAST=2, ///< 极速翻页（20相DU二值快翻，周期GC16保洁）/ Fast turn (20-phase DU binary, periodic GC16 clean)
+    PN_TURN_RIPPLE=3 ///< 水波纹：弧形错峰+仅变化像素+静默白推，清理页波纹GC16 / Ripple: arc-staggered + changed-only + white-push, GC16 ripple on clean
 } pn_turn_style_t;
 typedef struct {
     pn_pool_t *pool; ///< 保留调用兼容，无动画分配 / Retained for call compatibility, no animation allocation

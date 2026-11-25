@@ -8,6 +8,7 @@
 #include "pn_widgets.h"
 #include <errno.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/stat.h>
 #define N 6u
 #define BYTES (144u*256u/2u)
@@ -67,14 +68,36 @@ pn_status_t pn_background_gallery_tick(pn_background_gallery_t *ui){
 }
 size_t pn_background_gallery_count(const pn_background_gallery_t *ui){const gallery_t *g=ui?ui->impl:NULL;return g?g->page.count:0;}
 bool pn_background_gallery_can_page(const pn_background_gallery_t *ui,bool previous){const gallery_t *g=ui?ui->impl:NULL;return g && (previous?g->page.index!=0:g->page.more);}
-void pn_background_gallery_paint(const pn_background_gallery_t *ui,const pn_style_t *s,pn_frame_t *f){
-    const gallery_t *g=ui?ui->impl:NULL;if(!g)return;
+static void image_display_label(const char *name,char *out,size_t cap){
+    if(!out || !cap)return;
+    out[0]=0;if(!name || !*name)return;
+    size_t n=strlen(name);
+    const char *dot=strrchr(name,'.');
+    if(dot && dot>name){
+        const char *ext=dot+1;
+        if(!strcasecmp(ext,"png") || !strcasecmp(ext,"jpg") || !strcasecmp(ext,"jpeg"))n=(size_t)(dot-name);
+    }
+    if(n>=cap){n=cap-1;while(n>0 && ((unsigned char)name[n]&0xc0u)==0x80u)n--;}
+    memcpy(out,name,n);out[n]=0;
+}
+void pn_background_gallery_paint_labeled(const pn_background_gallery_t *ui,pn_font_t *font,const pn_style_t *s,pn_frame_t *f){
+    const gallery_t *g=ui?ui->impl:NULL;if(!g || !f || !f->pixels)return;
+    int saved_px=(font && font->impl)?font->pixels:0;
     for(size_t i=0;i<g->page.count && i<N;i++){int x=32+(int)(i%3)*212,y=476+(int)(i/3)*286;
         bool selected=s->background==PN_READING_BACKGROUND_EXTERNAL && !strcmp(s->background_name,g->page.items[i].name);
         pn_w_round_stroke(f,x,y,196,266,10,selected?3:1,selected?PN_UI_INK:PN_UI_RULE);
-        if(g->valid[i]){pn_frame_t thumb={(uint8_t *)g->pixels[i],144,256,72};for(int row=0;row<220;row++)for(int col=0;col<124;col++)pn_frame_pixel(f,x+36+col,y+12+row,pn_frame_get(&thumb,col*144/124,row*256/220));}
-        else pn_w_icon(f,PN_ICON_IMAGE,x+78,y+100,40,PN_UI_RULE);
+        int tw=font?118:124,th=font?210:220,tx=x+(196-tw)/2,ty=y+(font?10:12);
+        if(g->valid[i]){pn_frame_t thumb={(uint8_t *)g->pixels[i],144,256,72};for(int row=0;row<th;row++)for(int col=0;col<tw;col++)pn_frame_pixel(f,tx+col,ty+row,pn_frame_get(&thumb,col*144/tw,row*256/th));}
+        else pn_w_icon(f,PN_ICON_IMAGE,x+78,y+96,40,PN_UI_RULE);
+        if(font && font->impl){
+            char label[PN_CATALOG_NAME_MAX];image_display_label(g->page.items[i].name,label,sizeof label);
+            if(pn_font_size(font,20)==PN_OK)(void)pn_w_text_ex(font,f,label,x+8,y+248,180,PN_ALIGN_CENTER,PN_UI_INK,selected);
+        }
     }
+    if(saved_px>0)(void)pn_font_size(font,saved_px);
+}
+void pn_background_gallery_paint(const pn_background_gallery_t *ui,const pn_style_t *s,pn_frame_t *f){
+    pn_background_gallery_paint_labeled(ui,NULL,s,f);
 }
 pn_status_t pn_background_gallery_choose(pn_background_gallery_t *ui,unsigned slot,pn_style_t *s){
     gallery_t *g=ui?ui->impl:NULL;if(!g || !s || slot>=g->page.count || slot>=N)return PN_INVALID;

@@ -183,6 +183,14 @@ pn_status_t pn_resume_bind(pn_resume_t *h, pn_pool_t *pool, pn_media_t *media, c
     put(key + 300, style->bg_margin_bottom, 2);
     put(key + 302, style->bg_margin_left, 2);
     put(key + 304, style->bg_margin_right, 2);
+    key[306] = style->reading_line_thickness_extra;
+    key[307] = style->reading_line_follow;
+    key[308] = style->chapter_scale_percent;
+    key[309] = style->chapter_align;
+    key[310] = style->chapter_bold;
+    key[311] = style->chapter_gap;
+    key[312] = style->footer_title_mode;
+    key[313] = style->footer_font_pixels;
     resume_t *r = pn_alloc_optional(pool, PN_MEM_INDEX, sizeof *r);
     if (!r)
         return PN_EMPTY;

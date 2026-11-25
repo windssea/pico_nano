@@ -26,7 +26,8 @@ typedef enum {
     PN_TOOL_REFRESH, ///< 强刷：整屏GC16重绘当前页 / Full-screen GC16 redraw of the current page
     PN_TOOL_SHELF, ///< 回书架 / Back to the shelf
     PN_TOOL_CLOSE, ///< 点工具栏以外区域关闭 / Tapping outside the toolbar closes it
-    PN_TOOL_QUICK_BOOKMARK ///< 顶栏右侧一键添加书签 / Top-bar one-tap quick bookmark
+    PN_TOOL_QUICK_BOOKMARK, ///< 顶栏右侧一键添加书签 / Top-bar one-tap quick bookmark
+    PN_TOOL_DICT ///< 顶栏查词按钮（打开离线词典）/ Top-bar dictionary lookup button
 } pn_reader_tool_t;
 /// 工具栏顶部阅读信息条数据；title为书名或章节，basis为0..10000（负值表示未知）。/ Reader toolbar top info bar data: title/chapter and progress 0..10000 (negative when unknown).
 typedef struct {
@@ -40,6 +41,8 @@ typedef struct {
 pn_status_t pn_reader_footer_render(pn_font_t *ui,pn_font_t *fallback,pn_frame_t *frame,const char *left,const char *right);
 /// 同上，另画进度轨（basis为0–10000，<0为细线）；非零background要求已铺好原生背景。/ Same as above, plus a progress track (basis 0–10000; negative for hairline); a nonzero background requires freshly painted native paper.
 pn_status_t pn_reader_footer_progress(pn_font_t *ui,pn_font_t *fallback,pn_frame_t *frame,const char *left,const char *right,int basis,unsigned background);
+/// 同上，并支持指定页脚字号（<=0沿用默认26px）。/ Same as above with an optional footer font size (<=0 defaults to 26 px).
+pn_status_t pn_reader_footer_progress_ex(pn_font_t *ui,pn_font_t *fallback,pn_frame_t *frame,const char *left,const char *right,int basis,unsigned background,int font_pixels);
 /// 恢复顶部32px原生背景后画时间/电量，不改变正文或分页。/ Restore native paper then draw time/battery in the top 32 px without changing prose or pagination.
 pn_status_t pn_reader_status_render(pn_font_t *ui,pn_frame_t *frame,unsigned background);
 /// 在frame底部画工具栏（白底覆盖原页面）；unavailable按位标记不可用入口（bit0对应PN_TOOL_TOC，依此类推）。
@@ -60,6 +63,9 @@ pn_status_t pn_reader_opening_render(pn_font_t *,pn_frame_t *,const char *,const
 bool pn_reader_loading_needed(bool text_format,uint64_t source_bytes);
 /// 在正文视口的一行绘制虚线/点线，shade 0浅/1中/2深/3黑；0样式关闭，越界跳过，不分配或改变排版。 / Draw a dashed/dotted row in a text viewport with shade light/medium/dark/black; style zero disables, out-of-bounds rows are skipped, without allocation or layout changes.
 void pn_reader_guide_row(pn_frame_t *viewport,unsigned style,unsigned shade,int y);
+/// 扩展阅读线绘制：支持限定横向起止[x0,x1)、粗细1..3px，以及按字号缩放虚线/点线节距。
+/// Extended guide-row drawing with explicit horizontal span [x0,x1), thickness 1..3 px, and optional font-scaled dash/dot pitch.
+void pn_reader_guide_row_ex(pn_frame_t *viewport,unsigned style,unsigned shade,int x0,int x1,int y,int thickness,int font_pixels,bool follow_font);
 
 /// 只画状态文字，底图由控制层准备。/ Draw status text only over a controller-prepared underlay.
 pn_status_t pn_reader_status_text(pn_font_t *,pn_frame_t *);

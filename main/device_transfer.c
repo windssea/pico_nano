@@ -77,12 +77,15 @@ static pn_status_t sink_submit(void *ctx,const pn_network_credentials_t *c,bool 
 }
 /// HTTP任务只把已提交书籍身份复制进有界环；主任务在停止屏障后写内部缓存，避免跨任务持租约。
 /// The HTTP task only copies committed book identities into a bounded ring; the main task writes the internal cache after the stop barrier, so no lease crosses tasks.
+static unsigned image_change_bit(pn_upload_kind_t kind){
+ return kind==PN_UPLOAD_WALLPAPER?1u:kind==PN_UPLOAD_BACKGROUND?2u:kind==PN_UPLOAD_MASK?4u:kind==PN_UPLOAD_BANNER?8u:0u;
+}
 static void install_note(void *ctx,pn_upload_kind_t kind,const char *name,const pn_book_id_t *digest){
  transfer_t *s=ctx;if(!s || !name || !digest)return;
  lock(s);
- s->image_changes|=kind==PN_UPLOAD_WALLPAPER?1u:kind==PN_UPLOAD_BACKGROUND?2u:0u;
+ s->image_changes|=image_change_bit(kind);
  if(s->install_count==sizeof s->installed/sizeof s->installed[0]){
-  pn_upload_kind_t dropped=s->installed[s->install_first].kind;s->image_overflow|=dropped==PN_UPLOAD_WALLPAPER?1u:dropped==PN_UPLOAD_BACKGROUND?2u:0u;
+  pn_upload_kind_t dropped=s->installed[s->install_first].kind;s->image_overflow|=image_change_bit(dropped);
   s->install_first=(s->install_first+1u)%(unsigned)(sizeof s->installed/sizeof s->installed[0]);s->install_count--;
  }
  unsigned at=(s->install_first+s->install_count)%(unsigned)(sizeof s->installed/sizeof s->installed[0]);

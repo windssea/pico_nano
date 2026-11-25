@@ -16,10 +16,10 @@
 _Static_assert(SCAN_PAYLOAD_SIZE <= PN_JOURNAL_PAYLOAD_MAX, "pn_scan_dirs exceeds journal payload");
 
 static const char *const DEFAULT_RELS[PN_SCAN_CAT_COUNT]={
-    PN_SD_BOOKS,PN_SD_FONTS,PN_SD_WALLPAPERS,PN_SD_BACKGROUNDS
+    PN_SD_BOOKS,PN_SD_FONTS,PN_SD_WALLPAPERS,PN_SD_BACKGROUNDS,PN_SD_BANNERS,PN_SD_MASKS
 };
 static const char *const JOURNAL_NAMES[PN_SCAN_CAT_COUNT]={
-    "scan_books","scan_fonts","scan_wallpapers","scan_backgrounds"
+    "scan_books","scan_fonts","scan_wallpapers","scan_backgrounds","scan_banners","scan_masks"
 };
 
 static pn_scan_dirs_t g_active;

@@ -68,6 +68,7 @@ add_library(pn_core STATIC ${ui_font_c} ${reading_font_c} ${harmony_font_c} ${ar
     ${PN_ROOT}/components/pn_format/pn_epub.c
     ${PN_ROOT}/components/pn_format/pn_toc.c
     ${PN_ROOT}/components/pn_format/pn_xhtml.c
+    ${PN_ROOT}/components/pn_format/pn_stardict.c
     ${PN_ROOT}/components/pn_library/pn_catalog_index.c
     ${PN_ROOT}/components/pn_library/pn_catalog.c
     ${PN_ROOT}/components/pn_library/pn_cover.c
@@ -124,6 +125,7 @@ add_library(pn_core STATIC ${ui_font_c} ${reading_font_c} ${harmony_font_c} ${ar
     ${PN_ROOT}/components/pn_reader/pn_reader_toolbar.c
     ${PN_ROOT}/components/pn_reader/pn_reader_chrome.c
     ${PN_ROOT}/components/pn_reader/pn_bookmark_ui.c
+    ${PN_ROOT}/components/pn_reader/pn_dict_ui.c
     ${PN_ROOT}/components/pn_reader/pn_style_ui.c
     ${PN_ROOT}/components/pn_reader/pn_jump_ui.c
     ${PN_ROOT}/components/pn_reader/pn_font_ui.c

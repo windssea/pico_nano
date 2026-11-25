@@ -71,12 +71,13 @@ static pn_status_t checked(index_t *i){pn_status_t s=pn_cancel_checkpoint();retu
 static pn_status_t pn_page_index_key_impl(const pn_book_id_t *book,const pn_style_t *style,const pn_text_source_t *primary,const pn_font_chain_t *chain,unsigned format,const pn_book_id_t *known_primary,pn_book_id_t *out){
     if(!book || !style || !primary || !chain || !out || chain->count>2)return PN_INVALID;
     uint8_t bytes[208]={0};const char version[]="PN-layout-1/xhtml-1/freetype-2.14.3";memcpy(bytes,version,sizeof version);memcpy(bytes+40,book->sha256,32);
-    const uint16_t values[]={style->pixels,style->line_percent,style->gap_percent,style->indent_em,style->margin,style->tracking_percent};
+    const uint16_t values[]={style->pixels,style->line_percent,style->gap_percent,style->indent_em,style->margin,(uint16_t)style->tracking_percent};
     for(unsigned j=0;j<6;j++)put(bytes+72+2*j,values[j],2);
     put(bytes+84,format,4);put(bytes+88,684,2);put(bytes+90,1216,2);put(bytes+92,chain->count,4);
     put(bytes+192,(uint32_t)pn_style_body_top(style),4);put(bytes+196,(uint32_t)pn_style_body_height(style),4);
     put(bytes+200,1u|((uint32_t)(uint16_t)style->margin_right_delta<<16),4);
-    put(bytes+204,(style->hide_images?2u:1u)|(style->hide_bars?4u:0u),4); // 正文几何、去上下栏及图片策略键；默认键不变 / Body geometry, bar visibility and image-policy keys; default keys stay unchanged
+    uint32_t chapter_key=((uint32_t)style->chapter_scale_percent<<8)|((uint32_t)style->chapter_align<<16)|((uint32_t)style->chapter_gap<<20)|((uint32_t)style->chapter_bold<<24);
+    put(bytes+204,(style->hide_images?2u:1u)|(style->hide_bars?4u:0u)|chapter_key,4); // 正文几何、去上下栏、图片与章节排版键；默认键不变 / Body geometry, bar/image policy and chapter heading keys; default keys stay unchanged
     pn_book_id_t digest;pn_status_t s=PN_OK;if(known_primary)digest=*known_primary;else s=pn_font_source_identity(primary,&digest);if(s!=PN_OK)return s;memcpy(bytes+96,digest.sha256,32);
     for(unsigned j=0;j<chain->count;j++){const pn_text_source_t *source=&chain->sources[j];s=pn_font_source_identity(source,&digest);if(s!=PN_OK)return s;memcpy(bytes+128+32*j,digest.sha256,32);}
     return pn_identity_bytes(bytes,sizeof bytes,out);

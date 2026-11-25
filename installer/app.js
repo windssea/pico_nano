@@ -140,6 +140,96 @@ function clearLocalPackage() {
   renderLocalPackage();
 }
 
+function renderReleaseNotes(release) {
+  const box = $("release-notes-box");
+  if (!box) return;
+  const baseVersion = String(release?.version || "").split("+")[0];
+  const fromList = (state.manifest?.changelog || []).find((entry) => entry.version === baseVersion);
+  const notes = release?.notes || (fromList ? { date: fromList.date, items: fromList.items } : null);
+  if (!notes || !Array.isArray(notes.items) || !notes.items.length) {
+    box.hidden = true;
+    return;
+  }
+  $("release-notes-title").textContent = `v${baseVersion} 更新内容`;
+  $("release-notes-date").textContent = notes.date || "";
+  const list = $("release-notes-list");
+  list.replaceChildren();
+  for (const item of notes.items) {
+    const li = document.createElement("li");
+    li.textContent = item;
+    list.append(li);
+  }
+  box.hidden = false;
+}
+
+/// 渲染随站点自动同步的版本更新日志列表。/ Render the auto-synced release changelog history from manifest.json.
+function renderChangelogHistory() {
+  const container = $("changelog-list");
+  if (!container) return;
+  const entries = state.manifest?.changelog || [];
+  container.replaceChildren();
+  if (!entries.length) {
+    const empty = document.createElement("p");
+    empty.className = "muted";
+    empty.textContent = "暂无版本更新记录。";
+    container.append(empty);
+    return;
+  }
+  entries.forEach((entry, index) => {
+    const card = document.createElement("article");
+    card.className = index === 0 ? "changelog-card is-latest" : "changelog-card";
+    const list = document.createElement("ul");
+    list.className = "changelog-items";
+    for (const text of entry.items || []) {
+      const li = document.createElement("li");
+      li.textContent = text;
+      list.append(li);
+    }
+    if (index === 0) {
+      const head = document.createElement("div");
+      head.className = "changelog-card-head";
+      const title = document.createElement("span");
+      title.className = "changelog-version";
+      title.textContent = `v${entry.version}`;
+      const badge = document.createElement("span");
+      badge.className = "changelog-badge";
+      badge.textContent = "最新版本";
+      title.append(badge);
+      const date = document.createElement("span");
+      date.className = "muted";
+      date.textContent = entry.date || "";
+      head.append(title, date);
+      card.append(head, list);
+    } else {
+      const details = document.createElement("details");
+      const summary = document.createElement("summary");
+      const title = document.createElement("span");
+      title.textContent = `v${entry.version}`;
+      const date = document.createElement("span");
+      date.className = "muted";
+      date.textContent = entry.date || "";
+      summary.append(title, date);
+      details.append(summary, list);
+      card.append(details);
+    }
+    container.append(card);
+  });
+}
+
+/// 使用清单中的实测大小与词条数同步刷新词典卡片展示。/ Sync dictionary card sizes and word counts from manifest.json.
+function renderDictionaryCards() {
+  const dicts = state.manifest?.dictionaries || [];
+  for (const dict of dicts) {
+    const card = document.querySelector(`[data-dict-id="${dict.id}"]`);
+    if (!card) continue;
+    const meta = card.querySelector('[data-field="meta"]');
+    if (meta) {
+      const count = dict.wordcount ? `${Number(dict.wordcount).toLocaleString("en-US")} 词` : "";
+      meta.textContent = [count, kib(dict.size || 0), dict.license].filter(Boolean).join(" · ");
+    }
+  }
+}
+
 function renderRelease() {
   const release = state.release;
   $("version").textContent = release.version;
@@ -147,6 +237,7 @@ function renderRelease() {
   const preserving = release.mode === "app-only";
   $("mode-note").textContent = preserving ? "支持已知旧布局及本项目完整刷入后的布局，仅更新应用。其他布局仍需完整刷入。"
     : "完整刷入会恢复引导与启动布局。请核对所选版本、备份及清除选项；不会自动切换刷入方式。";
+  renderReleaseNotes(release);
   renderLocalPackage();
 }
 
@@ -226,6 +317,8 @@ async function init() {
     $("connect").disabled = true;
     return;
   }
+  renderChangelogHistory();
+  renderDictionaryCards();
   const select = $("release");
   select.addEventListener("change", () => {
     state.plan = null;

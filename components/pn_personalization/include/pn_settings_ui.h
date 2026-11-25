@@ -29,7 +29,9 @@
 #define PN_SETUI_COLUMNS 19 ///< 加0或1选择3或4列 / Plus zero or one for three or four columns
 #define PN_SETUI_HOME 25 ///< 底栏首页请求 / Bottom-bar home request
 #define PN_SETUI_STYLE 21 ///< 加0至3选择书架样式 / Plus zero through three for a shelf style
-#define PN_SETUI_TURN 26 ///< 加0直接、加1水波纹翻页 / Plus zero for direct, plus one for ripple turns
+#define PN_SETUI_TURN 26 ///< 加0直接（优化消残影）、加1水波纹翻页 / Plus 0 direct (anti-ghost), plus 1 ripple turns
+#define PN_SETUI_TURN_CRISP 122 ///< 高清无闪翻页（完整48相GL16+静默白推）/ Flash-free crisp turns (full 48-phase GL16 + white-push)
+#define PN_SETUI_TURN_FAST 123 ///< 极速翻页（20相DU二值快翻）/ Fast binary turns (20-phase DU)
 #define PN_SETUI_TIME 29 ///< 日期与时间子页 / Date and time page
 #define PN_SETUI_TIME_SYNC 30 ///< 请求联网对时，由控制层处理 / Request network synchronization from the controller
 #define PN_SETUI_TIME_CANCEL 31 ///< 请求结束对时 / Request cancellation of synchronization
@@ -74,7 +76,10 @@
 #define PN_SETUI_GSTYLE_BG 101 ///< 打开全局阅读背景选择子页 / Open global reading background sub-page
 #define PN_SETUI_GSTYLE_EXT 102 ///< 102..107对应阅读线/阅读线深浅/上下位置减加 / 102..107 for reading line/shade/offset dec/inc
 #define PN_SETUI_GSTYLE_BG_ITEM 108 ///< 108..119对应内置阅读背景项 / 108..119 for built-in reading background slots
+#define PN_SETUI_GSTYLE_CHAPTER 120 ///< 打开全局“阅读线与章节”详调子页 / Open global reading-guide and chapter sub-page
+#define PN_SETUI_GSTYLE_CHAPTER_RESET 121 ///< 重置全局阅读线扩展与章节/页脚设置 / Reset global extended guide and chapter/footer options
 #define PN_SETUI_GSTYLE_MADJ 260 ///< 260..275对应8项全局四周边距减加（0..3正文上下左右，4..7背景上下左右）/ 260..275 for 8 global margin dec/inc controls
+#define PN_SETUI_GSTYLE_CADJ 280 ///< 280..295对应8项全局阅读线与章节/页脚减加 / 280..295 for 8 global guide/chapter/footer controls
 #define PN_SETUI_KB_IME_BASE 300 ///< 300..360映射全拼中文键盘功能/候选/标点码（300 + (-key)）/ 300..360 map Chinese Pinyin IME function/candidate/punctuation codes (300 + (-key))
 #define PN_SETUI_CHAR 128 ///< 加可打印ASCII（32–126）输入一个字符 / Plus printable ASCII (32–126) types one character
 typedef struct {
@@ -148,5 +153,7 @@ pn_status_t pn_settings_load_index(pn_media_t *,const char *,bool *);
 /// 读取上下翻页偏好；无记录默认左右翻页（false），失败保持输出，不修复未知记录。
 /// Load vertical page-turn preference; absent defaults to horizontal (false), preserving output on failure without repairing unknown records.
 pn_status_t pn_settings_load_vertical_turn(pn_media_t *,const char *,bool *);
-/// 可选注入壁纸介质与目录，用于“正在阅读上方背景”选图列表（不持长期租约）。/ Optionally provide wallpaper media and directory for the Home top banner picker (no long-lived leases).
+/// 可选注入壁纸介质与目录，用于兼容历史回退路径（不持长期租约）。/ Optionally provide wallpaper media and directory for legacy fallback (no long-lived leases).
 void pn_settings_ui_set_wallpaper_dir(pn_settings_ui_t *ui,pn_media_t *media,const char *directory);
+/// 可选注入独立首页横幅介质与目录，用于“正在阅读上方背景”选图列表（不持长期租约）。/ Optionally provide dedicated Home banner media and directory for the banner picker (no long-lived leases).
+void pn_settings_ui_set_banner_dir(pn_settings_ui_t *ui,pn_media_t *media,const char *directory);

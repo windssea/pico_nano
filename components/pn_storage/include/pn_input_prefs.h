@@ -14,7 +14,7 @@
 #define PN_INPUT_REFRESH_MASK 0x30u ///< 刷新策略（位4–5：0均衡、1清晰、2省电）/ Refresh policy (bits 4–5: 0 balanced, 1 crisp, 2 saver)
 #define PN_INPUT_FLAGS_ALL 0x3Fu
 #define PN_INPUT_FLAGS_DEFAULT 0xc0u ///< 无记录时的默认：水波纹翻页，其余开关为原默认 / Default without a record: ripple turns, other switches at their original defaults
-#define PN_INPUT_TURN_MASK 0xc0u ///< 位6–7：0直接；1/2旧扫除/页折按直接显示；3水波纹 / Bits 6–7: 0 direct; legacy 1/2 sweep/fold show directly; 3 ripple
+#define PN_INPUT_TURN_MASK 0xc0u ///< 位6–7：0直接（优化消残影）、1高清无闪（48相GL16）、2极速（DU二值）、3水波纹 / Bits 6–7: 0 direct (anti-ghost), 1 crisp (48-phase GL16), 2 fast (DU binary), 3 ripple
 /// 绑定root下input.a/b，不建目录。/ Bind input.a/b under root without creating directories.
 pn_status_t pn_input_prefs_files(pn_journal_files_t *files,pn_media_t *media,const pn_media_lease_t *lease,const char *root,pn_journal_io_t *io);
 /// 读取标志；无记录EMPTY；错误不改输出。/ Load flags; EMPTY without a record; errors keep the output.

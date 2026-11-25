@@ -90,7 +90,7 @@ static pn_status_t walk_catalog(pn_media_t *media,const pn_media_lease_t *lease,
     size_t nroots=0;
     pn_scan_cat_t matched_cat=PN_SCAN_CAT_BOOKS;
     if(pn_scan_dirs_match_default(directory,&matched_cat)){
-        bool cat_ok=(filter==0 && matched_cat==PN_SCAN_CAT_BOOKS) || (filter==1 && matched_cat==PN_SCAN_CAT_FONTS) || (filter==2 && (matched_cat==PN_SCAN_CAT_WALLPAPERS || matched_cat==PN_SCAN_CAT_BACKGROUNDS));
+        bool cat_ok=(filter==0 && matched_cat==PN_SCAN_CAT_BOOKS) || (filter==1 && matched_cat==PN_SCAN_CAT_FONTS) || (filter==2 && (matched_cat==PN_SCAN_CAT_WALLPAPERS || matched_cat==PN_SCAN_CAT_BACKGROUNDS || matched_cat==PN_SCAN_CAT_BANNERS || matched_cat==PN_SCAN_CAT_MASKS));
         if(cat_ok)nroots=pn_scan_dirs_collect_roots(matched_cat,directory,roots,1u+PN_SCAN_DIR_MAX);
     }
     if(!nroots){

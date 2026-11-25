@@ -18,9 +18,11 @@ extern "C" {
 typedef enum {
     PN_SCAN_CAT_BOOKS=0, ///< 图书 / Books
     PN_SCAN_CAT_FONTS=1, ///< 字体 / Fonts
-    PN_SCAN_CAT_WALLPAPERS=2, ///< 壁纸与主页横幅 / Wallpapers and Home banners
+    PN_SCAN_CAT_WALLPAPERS=2, ///< 锁屏壁纸 / Lock-screen wallpapers
     PN_SCAN_CAT_BACKGROUNDS=3, ///< 阅读背景 / Reading backgrounds
-    PN_SCAN_CAT_COUNT=4
+    PN_SCAN_CAT_BANNERS=4, ///< 首页横幅 / Home banners
+    PN_SCAN_CAT_MASKS=5, ///< 阅读遮罩 / Reading masks
+    PN_SCAN_CAT_COUNT=6
 } pn_scan_cat_t;
 
 #define PN_SCAN_DIR_MAX 4u ///< 每类最多4个外部目录 / Max 4 external directories per category

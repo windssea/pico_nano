@@ -15,3 +15,6 @@
 
 /* 预览来自重新编码后的实际上传文件；不再解码原照片。/ Preview the actual normalized upload instead of decoding the original photograph again. */
 .item-preview{width:50px;height:88px;object-fit:contain;flex-shrink:0;border:1px solid #d8e1d7;border-radius:5px;background:#fff}
+.dict-badge{display:inline-block;margin-left:8px;padding:1px 7px;border-radius:10px;font-size:11px;font-weight:600;vertical-align:middle}
+.dict-badge.ok{background:#e3efe6;color:#275d3b}
+.dict-badge.warn{background:#fff3da;color:#7c520a}

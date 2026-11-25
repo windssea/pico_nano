@@ -17,16 +17,22 @@ typedef struct {
     bool vertical_turn; ///< 上下翻页模式：上滑/点下半屏下一页，下滑/点上半屏上一页 / Vertical turn mode: swipe up or tap bottom half for next, swipe down or tap top half for previous
     bool full_screen; ///< 去上下栏全屏模式：整屏0..1215均响应翻页 / Bar-less full-screen mode: entire 0..1215 height accepts page turns
 } pn_reader_input_config_t;
+#define PN_READER_LONG_PRESS_MS 450u ///< 正文长按查词触发时长（毫秒）/ Long-press duration (ms) for dictionary lookup
 typedef struct {
     pn_reader_input_config_t config; ///< 当前偏好，可随时替换 / Current preferences, replaceable at any time
     int start_x,start_y,last_x,last_y; ///< 手势起止坐标 / Gesture start and last coordinates
     int region; ///< 按钮或正文区域 / Button or content region
     unsigned empty_samples; ///< 稳定空采样 / Stable empty samples
     bool down,cancelled,blocked; ///< 手势与取消状态 / Gesture and cancellation state
+    uint64_t down_ms; ///< 按下时间戳（毫秒）/ Press start timestamp in ms
+    bool long_fired; ///< 本次按压已触发长按查词 / Long-press lookup already fired for this press
 } pn_reader_input_t;
 /// 初始零状态；count为活动触点，invalid或多点必须等全部释放。
 /// Initially zero; count is active contacts; invalid/multitouch requires full release.
 bool pn_reader_input_feed(pn_reader_input_t *input,unsigned count,int x,int y,bool valid,pn_reader_action_t *action);
+/// 带毫秒时间戳的输入投喂：在正文区静止按压满 PN_READER_LONG_PRESS_MS 时立即触发 PN_APP_LOOKUP，并屏蔽随后抬起翻页。
+/// Timestamped input feed: fires PN_APP_LOOKUP after holding still in the body for PN_READER_LONG_PRESS_MS and suppresses the subsequent release turn.
+bool pn_reader_input_feed_timed(pn_reader_input_t *input,unsigned count,int x,int y,bool valid,uint64_t now_ms,pn_reader_action_t *action);
 /// 切页/睡眠/字体重载时取消，不允许同一手指释放误提交。
 /// Cancel on page/sleep/font reload, preventing the same finger's release from committing.
 void pn_reader_input_cancel(pn_reader_input_t *input);

@@ -1,5 +1,5 @@
-"""生成网页安装器静态站点，包含壁纸下载、固件和清单。
-Build the web-installer static site with the wallpaper download, firmware and manifest."""
+"""生成网页安装器静态站点，包含壁纸与开源词典下载、自动同步版本更新日志、固件和清单。
+Build the web-installer static site with wallpaper & open-source dictionary downloads, auto-synced changelog, firmware and manifest."""
 import argparse
 import functools
 import hashlib
@@ -134,6 +134,111 @@ def mark_hardware_verified(releases):
         release["verifiedOnHardware"] = key in verified
 
 
+def clean_markdown_text(text):
+    """去掉 Markdown 链接与反引号标记，保留纯文本供网页安全渲染。
+    Strip Markdown links and inline code ticks into clean plain text for safe textContent rendering."""
+    text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+    text = text.replace("`", "")
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def parse_version_sections(markdown_text, stop_boilerplate=False):
+    """按 ## X.Y.Z（YYYY-MM-DD）提取版本更新说明，忽略内部日期开发日志小节。
+    Extract ## X.Y.Z (YYYY-MM-DD) release sections, ignoring internal dated dev notes."""
+    heading = re.compile(r"^##\s+(\d+(?:\.\d+)+)(?:（([^）]*)）|\s*\(([^)]*)\))?\s*$", re.MULTILINE)
+    any_h2 = re.compile(r"^##\s+", re.MULTILINE)
+    sections = []
+    for m in heading.finditer(markdown_text):
+        ver = m.group(1)
+        date = (m.group(2) or m.group(3) or "").strip()
+        start = m.end()
+        nxt = any_h2.search(markdown_text, start)
+        end = nxt.start() if nxt else len(markdown_text)
+        body = markdown_text[start:end].strip()
+        bullets = []
+        paragraphs = []
+        for raw_line in body.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            if stop_boilerplate and (
+                line.startswith("已有 PicoNano 用户") or line.startswith("正式板级应用")
+                or line.startswith("正式构建源码") or line.startswith("最终同源主机")
+                or line.startswith("提供保留布局升级")
+            ):
+                break
+            if line.startswith("- ") or line.startswith("* "):
+                cleaned = clean_markdown_text(line[2:])
+                if cleaned:
+                    bullets.append(cleaned)
+            elif not line.startswith("#"):
+                cleaned = clean_markdown_text(line)
+                if cleaned:
+                    paragraphs.append(cleaned)
+        items = bullets if bullets else paragraphs[:4]
+        if items:
+            sections.append({"version": ver, "date": date, "items": items})
+    return sections
+
+
+def read_changelogs(root, limit=12):
+    """从 docs/CHANGELOG.md 自动提取版本更新日志（缺省回退 docs/INSTALLATION.md）。
+    Auto-extract version changelogs from docs/CHANGELOG.md (falling back to docs/INSTALLATION.md)."""
+    by_version = {}
+    order = []
+    for rel_path, stop_bp in (("docs/CHANGELOG.md", False), ("docs/INSTALLATION.md", True)):
+        path = root / rel_path
+        if not path.is_file():
+            continue
+        for entry in parse_version_sections(path.read_text(encoding="utf-8"), stop_boilerplate=stop_bp):
+            ver = entry["version"]
+            if ver not in by_version:
+                by_version[ver] = entry
+                order.append(ver)
+    entries = [by_version[v] for v in order]
+    entries.sort(key=lambda e: version_key(e["version"]), reverse=True)
+    return entries[:limit]
+
+
+def read_dictionaries(root):
+    """校验 assets/dicts/manifest.json 中的开源词典包并返回清单条目。
+    Validate open-source dictionary archives in assets/dicts/manifest.json and return manifest entries."""
+    dicts_dir = root / "assets/dicts"
+    manifest_path = dicts_dir / "manifest.json"
+    if not manifest_path.is_file():
+        return []
+    raw = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict) or raw.get("schema") != 1 or not isinstance(raw.get("dictionaries"), list):
+        raise SystemExit("Invalid assets/dicts/manifest.json")
+    result = []
+    for item in raw["dictionaries"]:
+        zip_name = item.get("zip_name", "")
+        if not zip_name or "/" in zip_name or "\\" in zip_name or not zip_name.endswith(".zip"):
+            raise SystemExit(f"Invalid dictionary archive name: {zip_name}")
+        archive = dicts_dir / zip_name
+        if not archive.is_file():
+            raise SystemExit(f"Missing dictionary archive: {archive}")
+        data = archive.read_bytes()
+        digest = hashlib.sha256(data).hexdigest()
+        if len(data) != item.get("size") or digest != item.get("sha256"):
+            raise SystemExit(f"Dictionary checksum mismatch: {zip_name}")
+        result.append({
+            "id": item["id"],
+            "title": item["title"],
+            "subtitle": item.get("subtitle", ""),
+            "direction": item.get("direction", ""),
+            "wordcount": item.get("wordcount", 0),
+            "license": item.get("license", ""),
+            "source": item.get("source", ""),
+            "sourceUrl": item.get("source_url", ""),
+            "fileName": zip_name,
+            "path": f"assets/dicts/{zip_name}",
+            "size": len(data),
+            "sha256": digest,
+        })
+    return result
+
+
 def build(out, latest_only=False):
     releases = []
     for folder in (ROOT / "releases").iterdir():
@@ -170,11 +275,23 @@ def build(out, latest_only=False):
         release["_current_table"] = full["_folder"] / FILES["partitionTable"]
     # 先校验所有镜像，再匹配明确登记的正式版本，不继承其他版本的验证结论。 / Validate all images before matching explicitly recorded stable releases; never inherit another version's device status.
     mark_hardware_verified(releases)
+    changelogs = read_changelogs(ROOT)
+    notes_by_version = {entry["version"]: {"date": entry["date"], "items": entry["items"]} for entry in changelogs}
+    dictionaries = read_dictionaries(ROOT)
     if out.exists():
         shutil.rmtree(out)
     shutil.copytree(ROOT / "installer", out)
     shutil.copyfile(ROOT / "assets/wall/PicoNano.zip", out / "assets/PicoNano.zip")
+    if dictionaries:
+        dict_out = out / "assets/dicts"
+        dict_out.mkdir(parents=True, exist_ok=True)
+        for item in dictionaries:
+            shutil.copyfile(ROOT / "assets/dicts" / item["fileName"], dict_out / item["fileName"])
+        shutil.copyfile(ROOT / "assets/dicts/manifest.json", dict_out / "manifest.json")
     for release in releases:
+        base_ver = release["version"].split("+")[0]
+        if base_ver in notes_by_version:
+            release["notes"] = notes_by_version[base_ver]
         target = out / release["path"]
         for key, entry in release["files"].items():
             (target / entry["name"]).parent.mkdir(parents=True, exist_ok=True)
@@ -182,9 +299,10 @@ def build(out, latest_only=False):
             shutil.copyfile(source, target / entry["name"])
         del release["_folder"]
         release.pop("_current_table", None)
-    (out / "firmware" / "manifest.json").write_text(json.dumps({"releases": releases}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    manifest_payload = {"releases": releases, "changelog": changelogs, "dictionaries": dictionaries}
+    (out / "firmware" / "manifest.json").write_text(json.dumps(manifest_payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     (out / ".nojekyll").write_text("", encoding="utf-8")
-    print(f"Installer site: {out} ({', '.join(r['version'] for r in releases)})")
+    print(f"Installer site: {out} ({', '.join(r['version'] for r in releases)}; {len(dictionaries)} dicts; {len(changelogs)} changelog entries)")
 
 
 def main():

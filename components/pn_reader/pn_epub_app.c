@@ -69,6 +69,8 @@ typedef struct {
     
     pn_epub_progress_t bookmark_origin;bool has_bookmark_origin,bookmark_navigation,bookmark_returning;
     char footer_path[PN_ZIP_PATH_MAX]; ///< 当前页所属章节资源，供页脚显示 / Chapter resource of the displayed page, for the footer
+    char footer_chapter_path[PN_ZIP_PATH_MAX]; ///< 已解析章节名的资源路径缓存 / Cached chapter path for footer chapter title
+    char footer_chapter_title[PN_EPUB_META_MAX]; ///< 已解析的当前章节名 / Cached current chapter label for footer
     pn_style_t style,saved_style,pending_style;
     bool style_preview,draft_render;pn_epub_location_t style_origin;uint8_t salt[16];uint64_t last_now;pn_refresh_policy_t refresh;pn_paper_t paper;
     bool persistent,has_restore,has_visible,lost,force_full,last_confirmed,style_pending,font_unavailable;
@@ -106,8 +108,17 @@ static pn_status_t font_write(app_t *,const pn_font_preferences_t *);
 static pn_status_t global_write(app_t *,const pn_font_preferences_t *);
 static uint64_t next_session=1;
 static pn_status_t font_size(app_t *a,int pixels){return ensure_body(a,pixels);}
+static pn_status_t toc_open(app_t *a);
 static pn_status_t glyph(void *ctx,uint32_t cp,const pn_xhtml_style_t *style,pn_epub_metrics_t *out){
-    app_t *a=ctx;int pixels=style->heading?(a->style.pixels*5+3)/4:a->style.pixels;pn_status_t status=font_size(a,pixels);
+    app_t *a=ctx;
+    int pixels=a->style.pixels;
+    if(style->heading){
+        int scale=pn_style_chapter_scale(&a->style);
+        pixels=(a->style.pixels*scale+50)/100;
+        if(pixels>96)pixels=96;
+        if(pixels<20)pixels=20;
+    }
+    pn_status_t status=font_size(a,pixels);
     pn_epub_metrics_t m={.pixels=pixels};
     pn_font_choice_t choice;
     if(status==PN_OK)status=pn_font_chain_choose(chain(a),cp,&choice);
@@ -127,7 +138,7 @@ static pn_status_t image_size(void *ctx,const char *path,int maxw,int maxh,int *
     uint64_t w=info.width,h=info.height;if(w>(unsigned)maxw){h=h*maxw/w;w=maxw;}if(h>(unsigned)maxh){w=w*maxh/h;h=maxh;}
     *outw=w?(int)w:1;*outh=h?(int)h:1;return PN_OK;
 }
-static pn_layout_t layout(const pn_style_t *s){return (pn_layout_t){.width=pn_style_body_width(s),.height=pn_style_body_height(s),.line_height=(s->pixels*s->line_percent+99)/100,.indent=s->pixels*s->indent_em,.paragraph_gap=s->pixels*s->gap_percent/100,.letter_spacing_64=s->pixels*64*s->tracking_percent/100};}
+static pn_layout_t layout(const pn_style_t *s){return (pn_layout_t){.width=pn_style_body_width(s),.height=pn_style_body_height(s),.line_height=(s->pixels*s->line_percent+99)/100,.indent=s->pixels*s->indent_em,.paragraph_gap=s->pixels*s->gap_percent/100,.letter_spacing_64=s->pixels*64*s->tracking_percent/100,.chapter_align=s->chapter_align,.chapter_gap=s->chapter_gap};}
 static bool visible_at_end(const app_t *a){
     pn_epub_reader_anchor_t anchor;
     return a && a->has_visible && pn_epub_reader_visible(&a->reader,&anchor)==PN_OK && !anchor.has_next;
@@ -202,22 +213,46 @@ static pn_status_t compact(app_t *a){
 }
 static void paint_guides(app_t *a,pn_frame_t *frame,const pn_epub_page_t *page){
     pn_frame_t viewport={frame->pixels+pn_style_body_top(&a->style)*frame->stride+pn_style_margin_left(&a->style)/2,a->layout.width,a->layout.height,frame->stride};
-    // 合并同一基线的混合字号；有插图的行不画阅读线，文字/图片在其后绘制。 / Combine mixed sizes on each baseline; skip illustrated rows and paint text/images afterward.
-    if(a->style.reading_line){int baseline=INT_MIN,descent=0,gap=INT_MAX;bool text=false,illustrated=false;
+    // 合并同一基线的混合字号；有插图的行不画阅读线，支持粗细与随字体字宽/字底自适应。
+    // Combine mixed sizes on each baseline; skip illustrated rows, supporting thickness and font-following span/baseline placement.
+    if(a->style.reading_line){
+        int thickness=pn_style_guide_thickness(&a->style);
+        bool follow=a->style.reading_line_follow!=0;
+        int baseline=INT_MIN,descent=0,gap=INT_MAX,min_x=INT_MAX,max_x=0,row_px=a->style.pixels;
+        bool text=false,illustrated=false;
         for(size_t i=0;i<=page->count;i++){
             const pn_epub_page_node_t *n=i<page->count?&page->nodes[i]:NULL;
-            if(!n || n->baseline!=baseline){if(text && !illustrated)pn_reader_guide_row(&viewport,a->style.reading_line,a->style.reading_line_shade,baseline+descent+(gap==INT_MAX?0:gap/2)+a->style.reading_line_offset);baseline=n?n->baseline:INT_MIN;descent=0;gap=INT_MAX;text=illustrated=false;}
+            if(!n || n->baseline!=baseline){
+                if(text && !illustrated){
+                    int gx0=follow?min_x:0,gx1=follow?max_x:viewport.width;
+                    int below=follow?(descent+(row_px>=36?row_px/12:3)):(descent+(gap==INT_MAX?0:gap/2));
+                    pn_reader_guide_row_ex(&viewport,a->style.reading_line,a->style.reading_line_shade,gx0,gx1,baseline+below+a->style.reading_line_offset,thickness,row_px,follow);
+                }
+                baseline=n?n->baseline:INT_MIN;descent=0;gap=INT_MAX;min_x=INT_MAX;max_x=0;row_px=a->style.pixels;text=illustrated=false;
+            }
             if(!n)break;
             if(n->image_index!=UINT_MAX){illustrated=true;continue;}
-            if(n->codepoint==9 || n->codepoint==10 || n->codepoint==' ')continue;
-            text=true;if(n->metrics.descent>descent)descent=n->metrics.descent;
+            if(n->codepoint==9 || n->codepoint==10 || n->codepoint==' ' || n->codepoint==0x3000)continue;
+            text=true;
+            if(n->metrics.descent>descent)descent=n->metrics.descent;
+            if(n->metrics.pixels>row_px)row_px=n->metrics.pixels;
+            int x0=n->x_64/64,x1=(n->x_64+n->metrics.advance_64+63)/64;
+            if(x0<min_x)min_x=x0;
+            if(x1>max_x)max_x=x1;
             int spacing=(n->metrics.line_height?n->metrics.line_height:a->layout.line_height)-n->metrics.ascent-n->metrics.descent;if(spacing<0)spacing=0;if(spacing<gap)gap=spacing;
         }
     }
 }
 static pn_status_t paint_text_node(app_t *a,pn_frame_t *viewport,const pn_epub_page_node_t *n,unsigned *missing,bool prepared){
     if(n->codepoint==9)return PN_OK;
-    pn_status_t status=font_size(a,n->metrics.pixels);if(status==PN_OK)status=prepared?pn_font_chain_prerender(chain(a),viewport,n->codepoint,n->x_64,n->baseline,PN_FONT_GRAY):pn_font_chain_draw(chain(a),viewport,n->codepoint,n->x_64,n->baseline,PN_FONT_GRAY);
+    pn_status_t status=font_size(a,n->metrics.pixels);
+    bool boost=status==PN_OK && n->style.heading && a->style.chapter_bold;
+    if(boost){
+        int w=a->style.weight<0?1:(a->style.weight<3?a->style.weight+1:3);
+        status=pn_font_weight(body(a),w);
+    }
+    if(status==PN_OK)status=prepared?pn_font_chain_prerender(chain(a),viewport,n->codepoint,n->x_64,n->baseline,PN_FONT_GRAY):pn_font_chain_draw(chain(a),viewport,n->codepoint,n->x_64,n->baseline,PN_FONT_GRAY);
+    if(boost){pn_status_t restored=pn_font_weight(body(a),a->style.weight);if(status==PN_OK)status=restored;}
     if(status==PN_EMPTY){int x=n->x_64/64,y=n->baseline-n->metrics.pixels,size=n->metrics.pixels-4;pn_frame_rect(viewport,x,y,size,1,0);pn_frame_rect(viewport,x,y+size,size,1,0);pn_frame_rect(viewport,x,y,1,size,0);pn_frame_rect(viewport,x+size,y,1,size,0);(*missing)++;return PN_OK;}
     return status;
 }
@@ -278,18 +313,43 @@ repaint:;
     if(standalone && !*missing_images)pn_epub_image_cache_store(&a->image_cache,&a->book_file,a->page.images[0].path,&a->style,&viewport);
     return PN_OK;
 }
+static const char *epub_chapter_label(app_t *a,size_t spine_index){
+    if(!a->footer_path[0])return NULL;
+    if(strcmp(a->footer_chapter_path,a->footer_path)!=0){
+        snprintf(a->footer_chapter_path,sizeof a->footer_chapter_path,"%s",a->footer_path);
+        a->footer_chapter_title[0]=0;
+        if(toc_open(a)==PN_OK){
+            size_t n=0;
+            if(pn_toc_count(&a->toc,&n)==PN_OK){
+                pn_toc_entry_t entry,best={0};bool has_exact=false,has_near=false;
+                for(size_t i=0;i<n;i++){
+                    if(pn_toc_get(&a->toc,i,&entry)!=PN_OK || !entry.target || !entry.label[0])continue;
+                    if(!strcmp(entry.path,a->footer_path)){best=entry;has_exact=true;break;}
+                    if(entry.spine_index<=spine_index){best=entry;has_near=true;}
+                }
+                if(has_exact || has_near)snprintf(a->footer_chapter_title,sizeof a->footer_chapter_title,"%s",best.label);
+            }
+        }
+    }
+    return a->footer_chapter_title[0]?a->footer_chapter_title:NULL;
+}
 static pn_status_t paint_footer(app_t *a,pn_frame_t *frame,bool at_end,unsigned missing,unsigned missing_images){
     if(a->style.hide_bars){a->status=pn_w_status_snapshot();return PN_OK;}
     if(!a->ui.impl){pn_text_source_t built=pn_font_builtin_source();pn_status_t status=pn_font_open(&a->ui,a->pool,&built,24);if(status!=PN_OK)return status;}
-    // 页脚：书名与“第N/M节”；预览态改为提示。无顶栏与底部按钮，工具由点正文中央打开的工具栏提供。
-    // Footer: title and "section N of M"; previews show a hint instead. There is no top bar or bottom buttons; tools come from the toolbar opened by tapping the middle of the text.
-    char left[PN_EPUB_META_MAX+16],right[128]="";
-    // 页脚：左“第 N 节 · 共 M 节”，右章节进度百分比；末页显示 100%，章内页数在布局确定前不显示（不伪造页码）。
-    // Footer: "section N of M" on the left and the section-based percentage (100% on the final page) on the right; the in-chapter page count is withheld until layout is final.
+    // 页脚：支持默认（节号）、章节名、书名或隐藏名称及字号调节；预览态显示提示。
+    // Footer: supports default (section), chapter title, book title, hidden label and font size; previews show a hint.
+    char left[PN_EPUB_META_MAX+16]="",right[128]="";
     size_t index=0;unsigned basis=0;bool known=a->footer_path[0] && section_progress(a,a->footer_path,at_end,&index,&basis);
     if(a->draft_render)snprintf(left,sizeof left,"%s",a->font_render?"字体预览，设置尚未保存":"排版预览，设置尚未保存");
     else if((a->has_bookmark_origin || a->bookmark_navigation) && !a->bookmark_returning)snprintf(left,sizeof left,"< 返回跳转前位置");
-    else if(known)snprintf(left,sizeof left,"第 %zu/%zu 节",index+1,a->info.spine_count);
+    else if(a->style.footer_title_mode==3)left[0]=0;
+    else if(a->style.footer_title_mode==2)snprintf(left,sizeof left,"%s",a->info.title[0]?a->info.title:PN_BRAND_NAME);
+    else if(a->style.footer_title_mode==1){
+        const char *chap=known?epub_chapter_label(a,index):NULL;
+        if(chap)snprintf(left,sizeof left,"%s",chap);
+        else if(known)snprintf(left,sizeof left,"第 %zu/%zu 节",index+1,a->info.spine_count);
+        else snprintf(left,sizeof left,"%s",a->info.title[0]?a->info.title:PN_BRAND_NAME);
+    }else if(known)snprintf(left,sizeof left,"第 %zu/%zu 节",index+1,a->info.spine_count);
     else snprintf(left,sizeof left,"%s",a->info.title[0]?a->info.title:PN_BRAND_NAME);
     if(a->draft_render)snprintf(right,sizeof right,"点击返回设置");
     else{
@@ -297,7 +357,7 @@ static pn_status_t paint_footer(app_t *a,pn_frame_t *frame,bool at_end,unsigned 
         if(missing_images)snprintf(right,sizeof right,"图片未显示·%d%s%s",(int)last_image_error,percent[0]?" · ":"",percent);
         else if(missing)snprintf(right,sizeof right,"%u 缺字%s%s",missing,percent[0]?" · ":"",percent);else snprintf(right,sizeof right,"%s",percent);
     }
-    pn_status_t status=pn_reader_footer_progress(&a->ui,body(a),frame,left,right,known && !a->draft_render?(int)basis:-1,a->style.background);if(status==PN_OK)a->status=pn_w_status_snapshot();return status;
+    pn_status_t status=pn_reader_footer_progress_ex(&a->ui,body(a),frame,left,right,known && !a->draft_render?(int)basis:-1,a->style.background,pn_style_footer_pixels(&a->style));if(status==PN_OK)a->status=pn_w_status_snapshot();return status;
 }
 static bool bitmap_location(const pn_epub_location_t *a,const pn_epub_location_t *b){return !strcmp(a->path,b->path) && a->version==b->version && a->chapter_start==b->chapter_start && a->position.element==b->position.element && a->position.run==b->position.run && a->position.offset==b->position.offset && a->position.kind==b->position.kind;}
 static bool bitmap_key(app_t *a,pn_job_token_t token,const pn_epub_reader_anchor_t *anchor){return a->bitmap_token.session==token.session && a->bitmap_token.generation==token.generation && a->bitmap_anchor.has_next==anchor->has_next && bitmap_location(&a->bitmap_anchor.begin,&anchor->begin) && (!anchor->has_next || bitmap_location(&a->bitmap_anchor.next,&anchor->next));}
@@ -1679,4 +1739,49 @@ bool pn_epub_app_index_pending(const pn_epub_app_t *app){
     if(!app || !app->impl)return false;
     const app_t *a=app->impl;
     return a->persistent && pn_page_index_tf_directory() && !a->suspended && !a->style_preview && !a->font_preview && !a->style_pending && !a->font_pending && (a->index_generation!=a->token.generation || (!a->build_complete && !a->build_failed));
+}
+
+pn_status_t pn_epub_app_word_at(pn_epub_app_t *app,int x,int y,char out[][PN_DICT_WORD_MAX],size_t max_out,size_t *count_out){
+    if(count_out)*count_out=0;
+    if(!app || !app->impl || !out || !max_out)return PN_INVALID;
+    app_t *a=app->impl;
+    if(a->lost || a->suspended || !a->has_visible || a->style_preview || a->font_preview)return PN_EMPTY;
+    if(!a->page.valid || !a->page.count){
+        pn_epub_measure_t measure={a,glyph,image_size};
+        const pn_xhtml_position_t *start=a->visible.location.position.element?&a->visible.location.position:NULL;
+        pn_status_t ps=pn_epub_page_prepare(a->pool,&a->epub,a->visible.location.path,a->salt,start,&a->layout,&measure,&a->page);
+        if(ps!=PN_OK || !a->page.valid || !a->page.count)return PN_EMPTY;
+    }
+    int vx=x-pn_style_margin_left(&a->style),vy=y-pn_style_body_top(&a->style);
+    if(vx<-24 || vx>a->layout.width+24 || vy<-24 || vy>a->layout.height+24)return PN_EMPTY;
+    const pn_epub_page_node_t *nodes=a->page.nodes;size_t total=a->page.count;
+    int best_bl=INT_MIN,best_dy=INT_MAX,best_px=a->style.pixels;
+    for(size_t i=0;i<total;i++){
+        if(nodes[i].image_index!=UINT_MAX)continue;
+        uint32_t cp=nodes[i].codepoint;if(!cp || cp==10 || cp==9 || cp==' ' || cp==0x3000)continue;
+        int px=nodes[i].metrics.pixels>0?nodes[i].metrics.pixels:a->style.pixels;
+        int cy=nodes[i].baseline-px*3/8;
+        int dy=vy-cy;if(dy<0)dy=-dy;
+        if(dy<best_dy){best_dy=dy;best_bl=nodes[i].baseline;best_px=px;}
+    }
+    int row_tol=a->layout.line_height>best_px?a->layout.line_height:best_px;
+    if(best_bl==INT_MIN || best_dy>row_tol)return PN_EMPTY;
+    uint32_t line_cps[256];size_t line_len=0,tap_idx=0;int best_dx=INT_MAX;
+    for(size_t i=0;i<total && line_len<256;i++){
+        if(nodes[i].image_index!=UINT_MAX)continue;
+        int db=nodes[i].baseline-best_bl;if(db<-4 || db>4)continue;
+        uint32_t cp=nodes[i].codepoint;if(!cp || cp==10 || cp==9)continue;
+        int x0=nodes[i].x_64/64,x1=(nodes[i].x_64+nodes[i].metrics.advance_64+63)/64;
+        int dx=(vx<x0)?(x0-vx):(vx>x1)?(vx-x1):0;
+        if(dx<best_dx){best_dx=dx;tap_idx=line_len;}
+        line_cps[line_len++]=cp;
+    }
+    if(!line_len || best_dx>best_px*2)return PN_EMPTY;
+    if((line_cps[tap_idx]==' ' || line_cps[tap_idx]==0x3000)){
+        if(tap_idx+1<line_len && line_cps[tap_idx+1]!=' ' && line_cps[tap_idx+1]!=0x3000)tap_idx++;
+        else if(tap_idx>0 && line_cps[tap_idx-1]!=' ' && line_cps[tap_idx-1]!=0x3000)tap_idx--;
+    }
+    size_t n=pn_stardict_extract_candidates(line_cps,line_len,tap_idx,out,max_out);
+    if(count_out)*count_out=n;
+    return n?PN_OK:PN_EMPTY;
 }

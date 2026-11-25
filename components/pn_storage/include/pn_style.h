@@ -18,7 +18,7 @@ typedef struct {
     uint16_t indent_em; ///< 首行0..2个em / First-line zero through two em
     uint16_t margin; ///< 左边距（旧记录同时作为右边距），0..160偶数像素 / Left margin (also right margin in legacy records), even 0..160 px
     uint16_t gl_before_clear; ///< 历史字段仅兼容读写，不控制刷新 / Legacy field retained for record compatibility, never controls refresh
-    uint16_t tracking_percent; ///< 字间距0..50字号百分比 / Tracking zero through 50 percent of body size
+    int16_t tracking_percent; ///< 字间距-20..50字号百分比 / Tracking -20 through 50 percent of body size
     uint16_t reading_line; ///< 阅读线：0关闭、1虚线、2点线 / Reading guide: off, dashed or dotted
     int16_t reading_line_offset; ///< 阅读线上下位置-8..8px，2px一步 / Guide vertical offset -8..8 px in 2 px steps
     uint16_t reading_line_shade; ///< 阅读线深浅：0浅、1中、2深、3黑；旧记录为0 / Guide darkness: light, medium, dark or black; legacy records load as light
@@ -36,7 +36,21 @@ typedef struct {
     uint16_t bg_margin_bottom; ///< 阅读背景下边距0..200偶数像素 / Even reading-background bottom margin 0..200 px
     uint16_t bg_margin_left; ///< 阅读背景左边距0..160偶数像素 / Even reading-background left margin 0..160 px
     uint16_t bg_margin_right; ///< 阅读背景右边距0..160偶数像素 / Even reading-background right margin 0..160 px
+    uint8_t reading_line_thickness_extra; ///< 阅读线额外粗细0..2（有效粗细1..3px）/ Extra guide thickness 0..2 (effective 1..3 px)
+    uint8_t reading_line_follow; ///< 阅读线跟随字体：0通栏固定、1随文字起止与字底/字号自适应 / Guide font-follow: 0 full-width, 1 follow ink span and font metrics
+    uint8_t chapter_scale_percent; ///< 正文章节标题相对字号：0默认（EPUB 125%/TXT同正文），或100..180（步进5）/ Chapter heading relative scale: 0 default, or 100..180 in 5% steps
+    uint8_t chapter_align; ///< 正文章节标题对齐：0默认、1左对齐、2居中、3右对齐 / Chapter heading alignment: 0 default, 1 left, 2 center, 3 right
+    uint8_t chapter_bold; ///< 正文章节标题加粗：0默认、1加粗 / Chapter heading bold: 0 default, 1 bold
+    uint8_t chapter_gap; ///< 正文章节标题段后间距：0默认、1紧凑、2宽松、3宽敞 / Chapter heading trailing gap: 0 default, 1 compact, 2 loose, 3 wide
+    uint8_t footer_title_mode; ///< 页脚左侧名称：0默认、1章节名、2书名、3隐藏名称 / Footer left title: 0 default, 1 chapter name, 2 book title, 3 hidden
+    uint8_t footer_font_pixels; ///< 页脚字号：0默认26px，或20..30偶数像素 / Footer font size: 0 default (26 px), or even 20..30 px
 } pn_style_t;
+/// 有效阅读线粗细、章节字号与页脚字号辅助。/ Helpers for effective guide thickness, chapter heading scale and footer size.
+static inline int pn_style_guide_thickness(const pn_style_t *s){return 1+(s && s->reading_line_thickness_extra<=2u?(int)s->reading_line_thickness_extra:0);}
+static inline int pn_style_chapter_scale(const pn_style_t *s){return (s && s->chapter_scale_percent)?(int)s->chapter_scale_percent:125;}
+static inline int pn_style_footer_pixels(const pn_style_t *s){return (s && s->footer_font_pixels)?(int)s->footer_font_pixels:26;}
+static inline bool pn_style_has_chapter_body(const pn_style_t *s){return s && (s->chapter_scale_percent || s->chapter_align || s->chapter_bold || s->chapter_gap);}
+static inline bool pn_style_has_extended_v2(const pn_style_t *s){return s && (s->tracking_percent<0 || s->reading_line_thickness_extra || s->reading_line_follow || s->chapter_scale_percent || s->chapter_align || s->chapter_bold || s->chapter_gap || s->footer_title_mode || s->footer_font_pixels);}
 /// 有效四周边距与正文区域几何辅助。/ Helpers for effective four-side margins and body viewport geometry.
 static inline int pn_style_margin_left(const pn_style_t *s){return s?(int)s->margin:32;}
 static inline int pn_style_margin_right(const pn_style_t *s){return s?(int)s->margin+(int)s->margin_right_delta:32;}
@@ -50,9 +64,9 @@ static inline int pn_style_body_height(const pn_style_t *s){return (s && s->hide
 static inline int pn_style_body_width(const pn_style_t *s){return 684-pn_style_margin_left(s)-pn_style_margin_right(s);}
 static inline bool pn_style_has_bg_margins(const pn_style_t *s){return s && (s->bg_margin_top || s->bg_margin_bottom || s->bg_margin_left || s->bg_margin_right);}
 static inline bool pn_style_has_extended_layout(const pn_style_t *s){return s && (s->hide_bars || s->margin_top || s->margin_bottom || s->margin_right_delta || s->margin<16 || s->margin>80 || pn_style_has_bg_margins(s));}
-/// 比较排版字段、去上下栏、四周边距及图片策略；仅改背景或背景边距不丢语义邻页。
-/// Compare typesetting, bar visibility, four-side body margins and image policy; changing paper or paper margins preserves semantic neighbors.
-static inline bool pn_style_same_typesetting(const pn_style_t *a,const pn_style_t *b){return a && b && a->hide_images==b->hide_images && a->hide_bars==b->hide_bars && a->margin_top==b->margin_top && a->margin_bottom==b->margin_bottom && a->margin_right_delta==b->margin_right_delta && !memcmp(a,b,offsetof(pn_style_t,background));}
+/// 比较排版字段、去上下栏、四周边距、阅读线扩展、章节标题与图片策略；仅改背景或背景边距不丢语义邻页。
+/// Compare typesetting, bar visibility, body margins, guide/chapter extensions and image policy; changing paper or paper margins preserves semantic neighbors.
+static inline bool pn_style_same_typesetting(const pn_style_t *a,const pn_style_t *b){return a && b && a->hide_images==b->hide_images && a->hide_bars==b->hide_bars && a->margin_top==b->margin_top && a->margin_bottom==b->margin_bottom && a->margin_right_delta==b->margin_right_delta && a->reading_line_thickness_extra==b->reading_line_thickness_extra && a->reading_line_follow==b->reading_line_follow && a->chapter_scale_percent==b->chapter_scale_percent && a->chapter_align==b->chapter_align && a->chapter_bold==b->chapter_bold && a->chapter_gap==b->chapter_gap && a->footer_title_mode==b->footer_title_mode && a->footer_font_pixels==b->footer_font_pixels && !memcmp(a,b,offsetof(pn_style_t,background));}
 /// 产品默认舒适模式字号。/ Product default comfortable-mode body size.
 enum { PN_STYLE_DEFAULT_PIXELS = 44 };
 /// 舒适模式间距：145%行距、40%段距、缩进2字、32px边距；调用方可指定字号。

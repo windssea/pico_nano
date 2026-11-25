@@ -64,7 +64,7 @@ with tempfile.TemporaryDirectory() as directory:
    # 小TXT不刷loading，EPUB保留；字体选择仍只有预期最终页。/ Small TXT skips loading, EPUB retains it; font selection still presents only its final page.
    assert len(captures)==total+(1 if kind=='txt' else 2),(kind,name,len(captures),result.stdout)
    payload=captures[-2].read_bytes().split(b'\n',3)[3]
-   assert payload[1140*684+100]==0,(kind,name,'final page must be typesetting Apply')
+   assert payload[1140*684+500]==0,(kind,name,'final page must be typesetting Apply')
    if name=='direct':assert any(str(fonts/'b.ttf').encode() in record.read_bytes() for record in session.glob('*.fonts.*'))
 
 print('Reading font picker: TXT/EPUB/library preview/cancel, external primary with automatic fallback, global inheritance and built-in choice, configured directory/page two and durable reopen passed')

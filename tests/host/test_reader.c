@@ -17,7 +17,7 @@ static pn_status_t advance(void *ctx,uint32_t cp,int32_t *out){(void)ctx;(void)c
 int main(void){
     memory_t m={.available=true};memset(m.data,'a',sizeof m.data);
     pn_text_source_t source={&m,sizeof m.data,read_at,validate};pn_book_id_t book={{42}};
-    pn_layout_t layout={25,20,10,8,0,0,0,false};pn_font_metrics_t metrics={NULL,advance};pn_page_glyph_t glyphs[100];pn_reader_t reader;
+    pn_layout_t layout={.width=25,.height=20,.line_height=10,.ascent=8};pn_font_metrics_t metrics={.ctx=NULL,.advance=advance};pn_page_glyph_t glyphs[100];pn_reader_t reader;
     assert(pn_reader_init(&reader,&source,PN_TEXT_UTF8,&book,&layout,&metrics,glyphs,100,(pn_job_token_t){1,1},NULL)==PN_OK);
     pn_txt_progress_t position={0};assert(pn_reader_progress(&reader,&position)==PN_EMPTY);
     pn_reader_receipt_t page,other={.ticket=77};assert(pn_reader_prepared(NULL,&other)==PN_INVALID && pn_reader_prepared(&reader,&other)==PN_EMPTY && other.ticket==77);
@@ -49,7 +49,7 @@ int main(void){
     assert(pn_reader_complete(&reader,&page,true,102)==PN_OK);
     assert(pn_reader_progress(&reader,&position)==PN_OK && position.source_offset==303);
     // 冷恢复不能把任意解码检查点当上一页页首。/ Cold resume must never treat an arbitrary decoder checkpoint as the previous page's start.
-    pn_reader_t cold;pn_layout_t small={25,20,10,8,0,0,0,false};pn_reader_anchor_t decode_only={.begin=7};
+    pn_reader_t cold;pn_layout_t small={.width=25,.height=20,.line_height=10,.ascent=8};pn_reader_anchor_t decode_only={.begin=7};
     assert(pn_reader_init(&cold,&source,PN_TEXT_UTF8,&book,&small,&metrics,glyphs,100,(pn_job_token_t){2,1},NULL)==PN_OK);
     cold.checkpoints=&decode_only;cold.checkpoint_count=1;
     assert(pn_reader_prepare(&cold,PN_READ_JUMP,10,&page)==PN_OK && pn_reader_complete(&cold,&page,true,102)==PN_OK);

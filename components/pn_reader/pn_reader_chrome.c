@@ -36,7 +36,7 @@ pn_status_t pn_reader_status_render(pn_font_t *ui,pn_frame_t *frame,unsigned bac
     pn_status_t s=pn_reading_background_region(background,frame,0,PN_READER_TOP);
     return s==PN_OK?pn_reader_status_text(ui,frame):s;
 }
-pn_status_t pn_reader_footer_progress(pn_font_t *ui,pn_font_t *fallback,pn_frame_t *frame,const char *left,const char *right,int basis,unsigned background){
+pn_status_t pn_reader_footer_progress_ex(pn_font_t *ui,pn_font_t *fallback,pn_frame_t *frame,const char *left,const char *right,int basis,unsigned background,int font_pixels){
     if(!ui || !ui->impl || !frame || !frame->pixels || !left || !right)return PN_INVALID;
     int original=ui->pixels;pn_status_t top=background?pn_reader_status_text(ui,frame):pn_reader_status_render(ui,frame,0);if(top!=PN_OK)return top;
     // 进度轨：细灰轨、黑色已读段与小圆点；没有进度时退回一条细线。/ Progress track: a thin gray rail, a black read part and a small knob; a plain hairline without progress.
@@ -47,14 +47,19 @@ pn_status_t pn_reader_footer_progress(pn_font_t *ui,pn_font_t *fallback,pn_frame
         pn_w_dot(frame,(float)(PN_UI_MARGIN+fill),(float)(PN_READER_FOOTER_BAND_Y+8),7.0f,PN_UI_INK);
     }else pn_frame_rect(frame,PN_UI_MARGIN,PN_READER_FOOTER_Y,PN_UI_WIDTH-2*PN_UI_MARGIN,2,PN_UI_RULE);
     pn_w_set_fallback(fallback);
-    pn_status_t status=pn_font_size(ui,26);
+    int fpx=(font_pixels>=20 && font_pixels<=30)?font_pixels:26;
+    pn_status_t status=pn_font_size(ui,fpx);
     int right_width=0;
     if(status==PN_OK)status=pn_w_text_width(ui,right,&right_width);
     int left_room=PN_UI_WIDTH-2*PN_UI_MARGIN-(right_width?right_width+24:0);
-    if(status==PN_OK)status=pn_w_text(ui,frame,left,PN_UI_MARGIN,PN_READER_FOOTER_Y+52,left_room,PN_ALIGN_LEFT);
-    if(status==PN_OK && *right)status=pn_w_text(ui,frame,right,PN_UI_WIDTH-PN_UI_MARGIN-right_width,PN_READER_FOOTER_Y+52,right_width,PN_ALIGN_RIGHT);
+    int baseline=PN_READER_FOOTER_Y+52+(fpx-26)/3;
+    if(status==PN_OK && *left)status=pn_w_text(ui,frame,left,PN_UI_MARGIN,baseline,left_room,PN_ALIGN_LEFT);
+    if(status==PN_OK && *right)status=pn_w_text(ui,frame,right,PN_UI_WIDTH-PN_UI_MARGIN-right_width,baseline,right_width,PN_ALIGN_RIGHT);
     pn_w_set_fallback(NULL);
     pn_status_t restored=pn_font_size(ui,original);return status==PN_OK?restored:status;
+}
+pn_status_t pn_reader_footer_progress(pn_font_t *ui,pn_font_t *fallback,pn_frame_t *frame,const char *left,const char *right,int basis,unsigned background){
+    return pn_reader_footer_progress_ex(ui,fallback,frame,left,right,basis,background,26);
 }
 pn_status_t pn_reader_footer_render(pn_font_t *ui,pn_font_t *fallback,pn_frame_t *frame,const char *left,const char *right){
     return pn_reader_footer_progress(ui,fallback,frame,left,right,-1,0);
@@ -68,7 +73,7 @@ pn_status_t pn_reader_toolbar_top_render(pn_font_t *ui,pn_frame_t *frame,const p
     pn_frame_rect(frame,0,PN_TOOLBAR_TOP_H-2,PN_UI_WIDTH,1,9);
     pn_frame_rect(frame,0,PN_TOOLBAR_TOP_H-1,PN_UI_WIDTH,3,PN_UI_SELECT);
     pn_status_t s=pn_w_status(ui,frame);
-    int right_limit=top->quick_bookmark?528:652;
+    int right_limit=418;
     if(s==PN_OK && top->basis>=0 && top->basis<=10000){
         char pct[16];snprintf(pct,sizeof pct,"%d%%",top->basis/100);
         s=pn_font_size(ui,22);
@@ -79,6 +84,15 @@ pn_status_t pn_reader_toolbar_top_render(pn_font_t *ui,pn_frame_t *frame,const p
         const char *title=(top->title && *top->title)?top->title:"正在阅读";
         s=pn_font_size(ui,26);
         if(s==PN_OK)s=pn_w_text_ex(ui,frame,title,PN_UI_MARGIN,86,right_limit-PN_UI_MARGIN,PN_ALIGN_LEFT,PN_UI_INK,true);
+    }
+    if(s==PN_OK){
+        // 顶栏离线查词入口，紧邻一键书签按钮。/ Top-bar offline dictionary lookup pill beside the quick bookmark button.
+        int dx=430,dy=48,dw=100,dh=50;
+        pn_w_round_fill(frame,dx,dy,dw,dh,14,PN_UI_SURFACE);
+        pn_w_round_stroke(frame,dx,dy,dw,dh,14,1.5f,9);
+        pn_w_icon(frame,PN_ICON_SEARCH,dx+12,dy+12,24,PN_UI_INK);
+        s=pn_font_size(ui,22);
+        if(s==PN_OK)s=pn_w_text_ex(ui,frame,"查词",dx+36,dy+34,58,PN_ALIGN_CENTER,PN_UI_INK,false);
     }
     if(s==PN_OK && top->quick_bookmark){
         int bx=540,by=48,bw=112,bh=50;
@@ -120,6 +134,7 @@ pn_status_t pn_reader_toolbar_render(pn_font_t *ui,pn_frame_t *frame,unsigned un
 int pn_reader_toolbar_hit(int x,int y,unsigned unavailable){
     if(x<0 || x>=PN_UI_WIDTH || y<0 || y>=PN_UI_HEIGHT)return -1;
     if(y>=40 && y<PN_TOOLBAR_TOP_H && x>=532 && x<664)return PN_TOOL_QUICK_BOOKMARK;
+    if(y>=40 && y<PN_TOOLBAR_TOP_H && x>=424 && x<532)return PN_TOOL_DICT;
     if(y<PN_TOOLBAR_Y)return PN_TOOL_CLOSE;
     for(unsigned i=0;i<TOOL_COUNT;i++){
         int bx=SHEET_PADDING+(int)(i%3)*COLUMN_PITCH,by=ROW_Y0+(int)(i/3)*ROW_PITCH;
@@ -133,12 +148,35 @@ pn_status_t pn_reader_jump_loading_render(void *ctx,pn_font_t *font,pn_font_t *m
     pn_status_t s=pn_w_header(font,frame,"","阅读",NULL);
     return s==PN_OK?pn_w_loading(font,frame,"正在跳转书页","正在准备目标页面，请稍候",-1,-1):s;
 }
-void pn_reader_guide_row(pn_frame_t *frame,unsigned style,unsigned shade,int y){
-    if(!frame || !frame->pixels || style<1 || style>2 || y<0 || y>=frame->height || frame->width<1)return;
+void pn_reader_guide_row_ex(pn_frame_t *frame,unsigned style,unsigned shade,int x0,int x1,int y,int thickness,int font_pixels,bool follow_font){
+    if(!frame || !frame->pixels || style<1 || style>2 || frame->width<1 || frame->height<1)return;
+    if(thickness<1)thickness=1;
+    if(thickness>3)thickness=3;
+    if(x0<0)x0=0;
+    if(x1>frame->width)x1=frame->width;
+    if(x1<=x0)return;
+    int y0=y,h=thickness;
+    if(y0<0){h+=y0;y0=0;}
+    if(y0+h>frame->height)h=frame->height-y0;
+    if(h<=0)return;
     // 浅档保留原灰阶10；越界深浅按浅处理。/ The light level keeps the original gray 10; out-of-range shades fall back to light.
     static const uint8_t inks[4]={10,7,4,0};uint8_t ink=inks[shade<4?shade:0];
     int dash=style==1?19:2,period=style==1?31:13;
-    for(int x=0;x<frame->width;x+=period){int width=frame->width-x;if(width>dash)width=dash;pn_frame_rect(frame,x,y,width,1,ink);}
+    if(follow_font){
+        int px=(font_pixels>=20 && font_pixels<=96)?font_pixels:44;
+        if(style==1){
+            dash=px*19/44;if(dash<10)dash=10;if(dash>32)dash=32;
+            period=px*31/44;if(period<16)period=16;if(period>52)period=52;
+        }else{
+            dash=thickness+1;if(dash>4)dash=4;
+            period=px*13/44;if(period<8)period=8;if(period>22)period=22;
+        }
+    }
+    for(int x=x0;x<x1;x+=period){int width=x1-x;if(width>dash)width=dash;pn_frame_rect(frame,x,y0,width,h,ink);}
+}
+void pn_reader_guide_row(pn_frame_t *frame,unsigned style,unsigned shade,int y){
+    if(!frame)return;
+    pn_reader_guide_row_ex(frame,style,shade,0,frame->width,y,1,44,false);
 }
 pn_status_t pn_reader_loading_render(pn_font_t *ui,pn_frame_t *frame,const char *title){
     return pn_reader_loading_render_phase(ui,frame,title,0);

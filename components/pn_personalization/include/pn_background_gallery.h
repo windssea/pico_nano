@@ -15,6 +15,8 @@ void pn_background_gallery_invalidate(pn_background_gallery_t *);
 pn_status_t pn_background_gallery_tick(pn_background_gallery_t *);
 /// 只绘制当前六缩略图，不读盘或写设置。/ Paint six current thumbnails without IO or settings writes.
 void pn_background_gallery_paint(const pn_background_gallery_t *,const pn_style_t *,pn_frame_t *);
+/// 绘制当前六缩略图并显示每张图片的名称，不读盘或写设置。/ Paint six current thumbnails with image filenames, without IO or settings writes.
+void pn_background_gallery_paint_labeled(const pn_background_gallery_t *,pn_font_t *,const pn_style_t *,pn_frame_t *);
 /// 查询分页/条目，不读盘。/ Query paging/items without IO.
 bool pn_background_gallery_can_page(const pn_background_gallery_t *,bool previous);
 size_t pn_background_gallery_count(const pn_background_gallery_t *);

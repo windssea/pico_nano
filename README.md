@@ -2,7 +2,7 @@
 
 基于 ESP32-S3 的独立墨水屏阅读器固件。核心、解析、字体、排版与界面在设备和 PC 模拟器中共用源码，固定目标为 RDP-G01-W/E0470A01、684×1216、16 灰阶、8MiB PSRAM、16MiB Flash。对外品牌在所有语言中统一为 **PicoNano**。
 
-当前正式版本为 **1.1.4**（[GitHub 发布页](https://github.com/windssea/pico_nano/releases/tag/v1.1.4)）。本版全面加固无线连接与热点/局域网传书稳定性（2.4 GHz 20MHz 窄带、Wi-Fi 缓冲与片内 DMA 余量扩容、传书期墨水屏刷屏防抖、SD 暂存同步与整文件校验精简、HTTP/1.1 长连接与网页自动续传重试），精简首页去掉冗余「继续阅读」黑底按钮并将「最近阅读」扩展至 3 条，底栏选中态升级为轻量柔和浅雾圆角胶囊；网页安装器同步支持 Gitee 直链下载、本地 ZIP 固件包导入与 ESP32-S3 原生 USB 看门狗保护。正式发布及下载身份以发行清单为准。
+当前正式版本为 **1.1.5**（[GitHub 发布页](https://github.com/windssea/pico_nano/releases/tag/v1.1.5)）。本版新增 StarDict 离线词典引擎（长按取词与工具栏检索，支持 `.dict` 及标准 `RA` DictZip `.dict.dz`）、4 档翻页刷新模式（直接/高清/水波纹/极速）与直接刷新消残影、锁屏壁纸/透明遮罩/主页横幅/阅读背景独立目录及跨目录一键移动、排版与手势增强（阅读线粗细与跟随、章节名开关、更小字间距与快捷手势）；网页传书支持词典 `.zip` 直传、自动 `RA` DictZip 压缩与整套管理，网页安装器同步提供 3 套开源离线词典包下载并自动展示各版本更新内容。正式发布及下载身份以发行清单为准。
 
 开发与模拟器入口见[构建文档](docs/BUILDING.md#开发时保持可见模拟器)，可运行`tools/run_sim.ps1 -Demo`使用原创演示资源，无需私人书籍或完整字库。
 
@@ -44,6 +44,7 @@
 | [lunar-javascript](https://github.com/6tail/lunar-javascript) | 离线中式黄历数据的生成来源；[固定提交与MIT许可](LICENSES/calendar-manifest.json)。 |
 | [Noto Sans SC / Google Fonts](https://github.com/google/fonts/tree/main/ofl/notosanssc) | 内置中文与应急字库的OFL源字体；[UI字库清单](LICENSES/ui-font-manifest.json)、[正文字库清单](LICENSES/reading-font-manifest.json)。 |
 | [HarmonyOS Sans / 华为](https://developer.huawei.com/consumer/cn/design/resource) | 原始字体资源；使用范围、摘要及原许可见[字体来源清单](LICENSES/harmony-font-manifest.json)。 |
+| [ECDICT](https://github.com/skywind3000/ECDICT) / [chinese-xinhua](https://github.com/pwxcoo/chinese-xinhua) / [CC-CEDICT](https://www.mdbg.net/chinese/dictionary?page=cc-cedict) | 网页刷机页可选开源 StarDict 离线词典数据（MIT / MIT / CC BY-SA 4.0）；原许可分别见 [ECDICT](LICENSES/ECDICT-LICENSE.txt)、[chinese-xinhua](LICENSES/chinese-xinhua-LICENSE.txt)、[CC-CEDICT](LICENSES/CC-CEDICT-LICENSE.txt)。 |
 | [SDL2](https://github.com/libsdl-org/SDL/tree/SDL2) / [fontTools](https://github.com/fonttools/fonttools) | PC模拟器显示与字体资源生成工具。 |
 
 ### 资料、工具与历史选型参考

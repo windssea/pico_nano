@@ -47,5 +47,17 @@ int main(void){
     i.config.vertical_turn=true;
     assert(!pn_reader_input_feed(&i,1,600,10,true,&a));assert(release(&i,&a) && a==PN_APP_PREVIOUS);
     assert(!pn_reader_input_feed(&i,1,100,1180,true,&a));assert(release(&i,&a) && a==PN_APP_NEXT);
-    puts("reader input: release once, vertical turn, full screen, edges turn, footer ignored, swipe, multitouch and cancellation passed");return 0;
+    /* 长按正文查词：满 450 ms 立即触发 PN_APP_LOOKUP 且抬起不再翻页；短按正常翻页；大幅滑动不误触长按。
+     * Long-press body lookup: fires PN_APP_LOOKUP at >=450 ms and suppresses release turn; short tap still turns; large drag never triggers lookup. */
+    i=(pn_reader_input_t){0};
+    assert(!pn_reader_input_feed_timed(&i,1,300,400,true,1000,&a));
+    assert(!pn_reader_input_feed_timed(&i,1,304,405,true,1300,&a));
+    assert(pn_reader_input_feed_timed(&i,1,305,406,true,1460,&a) && a==PN_APP_LOOKUP && i.start_x==300 && i.start_y==400);
+    assert(!pn_reader_input_feed_timed(&i,1,305,406,true,1600,&a));
+    assert(!pn_reader_input_feed_timed(&i,0,0,0,true,1650,&a));
+    assert(!pn_reader_input_feed_timed(&i,0,0,0,true,1700,&a));
+    assert(!pn_reader_input_feed_timed(&i,1,600,400,true,2000,&a));
+    assert(!pn_reader_input_feed_timed(&i,0,0,0,true,2100,&a));
+    assert(pn_reader_input_feed_timed(&i,0,0,0,true,2120,&a) && a==PN_APP_NEXT);
+    puts("reader input: release once, long-press lookup, vertical turn, full screen, edges turn, footer ignored, swipe, multitouch and cancellation passed");return 0;
 }

@@ -85,6 +85,21 @@ int main(void){char root[]="/tmp/pn-style-XXXXXX";assert(mkdtemp(root));char a[3
      bad_ext=ext;bad_ext.bg_margin_top=202;assert(pn_style_validate(&bad_ext)==PN_INVALID);
      pn_style_t plain=pn_style_default(44);assert(!pn_style_has_extended_layout(&plain) && pn_style_save(&io,&book,&plain)==PN_OK);
      pn_record_t fallback;assert(pn_journal_load(&io,&fallback)==PN_OK && fallback.size==64 && fallback.payload[4]==4);}
+    // schema 13/14：负字间距、阅读线粗细/跟随、正文章节排版与页脚名称/字号往返与边界校验。
+    // Schemas 13/14: negative tracking, guide thickness/follow, chapter heading and footer options round-trip and validation.
+    {pn_style_t v2=pn_style_default(44);v2.tracking_percent=-15;v2.reading_line=1;v2.reading_line_thickness_extra=2;v2.reading_line_follow=1;
+     v2.chapter_scale_percent=140;v2.chapter_align=2;v2.chapter_bold=1;v2.chapter_gap=3;v2.footer_title_mode=1;v2.footer_font_pixels=22;
+     assert(pn_style_guide_thickness(&v2)==3 && pn_style_chapter_scale(&v2)==140 && pn_style_footer_pixels(&v2)==22 && pn_style_has_extended_v2(&v2));
+     assert(pn_style_save(&io,&book,&v2)==PN_OK && pn_style_load(&io,&book,&loaded)==PN_OK && !memcmp(&v2,&loaded,sizeof v2));
+     pn_record_t v13;assert(pn_journal_load(&io,&v13)==PN_OK && v13.size==80 && v13.payload[4]==13);
+     v2.background=PN_READING_BACKGROUND_EXTERNAL;strcpy(v2.background_name,"rice-paper.png");v2.background_identity.sha256[0]=99;
+     assert(pn_style_save(&io,&book,&v2)==PN_OK && pn_style_load(&io,&book,&loaded)==PN_OK && !memcmp(&v2,&loaded,sizeof v2));
+     pn_record_t v14;assert(pn_journal_load(&io,&v14)==PN_OK && v14.size==256 && v14.payload[4]==14);
+     pn_style_t bad2=v2;bad2.tracking_percent=-21;assert(pn_style_validate(&bad2)==PN_INVALID);
+     bad2=v2;bad2.reading_line_thickness_extra=3;assert(pn_style_validate(&bad2)==PN_INVALID);
+     bad2=v2;bad2.chapter_scale_percent=95;assert(pn_style_validate(&bad2)==PN_INVALID);
+     bad2=v2;bad2.footer_font_pixels=21;assert(pn_style_validate(&bad2)==PN_INVALID);
+     pn_style_t plain=pn_style_default(44);assert(pn_style_save(&io,&book,&plain)==PN_OK);}
     pn_book_id_t other=book;other.sha256[1]=1;loaded=pn_style_default(30);assert(pn_style_load(&io,&other,&loaded)==PN_STALE_JOB && loaded.pixels==30);
     assert(pn_media_release(&media,&lease)==PN_OK);assert(unlink(a)==0 && unlink(b)==0 && rmdir(root)==0);puts("style: ranges, true journal reopen and book identity passed");return 0;
 }

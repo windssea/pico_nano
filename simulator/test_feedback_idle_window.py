@@ -13,12 +13,12 @@ with tempfile.TemporaryDirectory() as folder:
     cancel='press:100:600,move:100:850,release:100:850'
     out,cap=run(cancel+',wait:750,quit,quit','quiet')
     settles=[line for line in out.splitlines() if line.startswith('feedback ') and 'settle=1' in line]
-    assert len(settles)==1 and 'box=0,512,684,192' in settles[0],out
+    assert len(settles)==1 and 'box=0,576,684,128' in settles[0],out
     restore=next(cap.glob('*restore.pgm'));settle=next(cap.glob('*settle.pgm'));assert restore.read_bytes()==settle.read_bytes()
     lines=[line for line in out.splitlines() if line.startswith('feedback ')];assert len({line.split('revision=')[1].split()[0] for line in lines})==1,out
     out,cap=run(cancel+',wait:150,press:100:700,move:100:850,release:100:850,wait:750,quit,quit','merge')
     settles=[line for line in out.splitlines() if line.startswith('feedback ') and 'settle=1' in line]
-    assert len(settles)==1 and 'box=0,512,684,256' in settles[0],out
+    assert len(settles)==1 and 'box=0,576,684,256' in settles[0],out
     out,cap=run('press:100:600,wait:650,release:100:600,wait:750,back,back,quit','held')
     assert 'settle=1' not in out and out.count('settings command=5 status=0')==1,out
     out,cap=run('tap:100:700,tap:340:240,wait:750,back,back,quit','noop')

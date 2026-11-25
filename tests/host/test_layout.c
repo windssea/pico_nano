@@ -18,7 +18,7 @@ int main(void){
     memory_t m={bytes,sizeof bytes-1};pn_text_source_t source={&m,m.size,read_at,NULL};pn_text_reader_t reader;
     assert(pn_text_open(&reader,&source,PN_TEXT_UTF8)==PN_OK);
     pn_layout_t layout={.width=25,.height=24,.line_height=10,.ascent=8,.indent=0,.paragraph_gap=0};
-    pn_font_metrics_t metrics={NULL,advance};pn_page_glyph_t glyphs[100];pn_text_page_t page={.glyphs=glyphs,.capacity=100};
+    pn_font_metrics_t metrics={.ctx=NULL,.advance=advance};pn_page_glyph_t glyphs[100];pn_text_page_t page={.glyphs=glyphs,.capacity=100};
     uint32_t gathered[100];size_t total=0;bool paragraph=true;unsigned pages=0;
     for(;;){uint64_t begin=reader.cursor;pn_status_t status=pn_text_paginate(&reader,&layout,&metrics,paragraph,&page);if(status==PN_EMPTY)break;assert(status==PN_OK && page.valid && page.begin==begin && page.end>begin && page.end==reader.cursor);pages++;
         for(size_t i=0;i<page.count;i++){assert(total<100);gathered[total++]=page.glyphs[i].source.codepoint;assert(page.glyphs[i].x_64>=0 && page.glyphs[i].baseline<=24);}
@@ -71,5 +71,19 @@ int main(void){
      layout=(pn_layout_t){.width=35,.height=30,.line_height=10,.ascent=8};
      assert(pn_text_paginate(&reader,&layout,&metrics,true,&page)==PN_OK && page.count==sizeof j_en-1);
      assert(glyphs[1].x_64-glyphs[0].x_64==5*64 && glyphs[4].x_64+5*64==35*64);}
-    puts("layout: page source continuity, word wrap, justification, compact blank paragraphs, capacity and oversized glyph passed");return 0;
+    // 负字间距防重叠夹紧 + TXT 章节行识别与居中排版。/ Negative tracking floor clamping + TXT chapter heading detection and centered layout.
+    {const uint8_t tight[]="ABCDEF";m=(memory_t){tight,6};source.size=m.size;assert(pn_text_open(&reader,&source,PN_TEXT_UTF8)==PN_OK);
+     layout=(pn_layout_t){.width=100,.height=30,.line_height=10,.ascent=8,.letter_spacing_64=-4*64};
+     assert(pn_text_paginate(&reader,&layout,&metrics,true,&page)==PN_OK && page.count==6);
+     // advance=5px, -4px clamped to >=2.5px (160/64), ensuring strictly increasing x_64
+     assert(glyphs[1].x_64>glyphs[0].x_64 && glyphs[1].x_64==160);
+     const uint32_t zh_ch[]={0x7b2c,0x4e00,0x7ae0,0x20,0x5f00,0x7bc7}; // 第一章 开篇
+     const uint32_t zh_prose[]={0x7b2c,0x4e00,0x7ae0,0x5f88,0x597d,0x770b,0x3002}; // 第一章很好看。
+     assert(pn_text_is_chapter_line(zh_ch,6) && !pn_text_is_chapter_line(zh_prose,7));
+     const uint8_t txt_ch[]="\xe7\xac\xac\xe4\xb8\x80\xe7\xab\xa0\n" "AB";
+     m=(memory_t){txt_ch,sizeof txt_ch-1};source.size=m.size;assert(pn_text_open(&reader,&source,PN_TEXT_UTF8)==PN_OK);
+     layout=(pn_layout_t){.width=100,.height=60,.line_height=10,.ascent=8,.indent=10,.paragraph_gap=4,.chapter_align=2,.chapter_gap=2,.chapter_style_txt=true};
+     assert(pn_text_paginate(&reader,&layout,&metrics,true,&page)==PN_OK && page.count==6);
+     assert(glyphs[0].heading==1 && glyphs[0].x_64==(100-30)*64/2 && glyphs[4].heading==0 && glyphs[4].x_64==10*64 && glyphs[4].baseline==8+10+6);}
+    puts("layout: page source continuity, word wrap, justification, negative tracking, chapter lines, compact blank paragraphs, capacity and oversized glyph passed");return 0;
 }

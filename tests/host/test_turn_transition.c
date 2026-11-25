@@ -5,7 +5,8 @@
 #include <string.h>
 static unsigned calls,fail_at;static pn_status_t fault=PN_IO;
 static uint8_t last[24];
-static pn_status_t show(void *ctx,const pn_frame_t *f,pn_refresh_t p){(void)ctx;(void)p;calls++;memcpy(last,f->pixels,24);return calls==fail_at?fault:PN_OK;}
+static pn_refresh_t last_profile;
+static pn_status_t show(void *ctx,const pn_frame_t *f,pn_refresh_t p){(void)ctx;last_profile=p;calls++;memcpy(last,f->pixels,24);return calls==fail_at?fault:PN_OK;}
 int main(void){
     uint8_t a[24],b[24],c[24];memset(a,255,24);memset(b,0,24);pn_frame_t old,next,out;
     assert(pn_frame_bind(&old,a,24,12,4) && pn_frame_bind(&next,b,24,12,4) && pn_frame_bind(&out,c,24,12,4));
@@ -29,6 +30,10 @@ int main(void){
         assert(pn_turn_present(&turn,&next,PN_REFRESH_GL16)==fault && calls==1);
     }
     assert(!pool.used && !pool.live && a[0]==255 && b[0]==0);
+    calls=fail_at=0;turn.style=PN_TURN_CRISP;assert(pn_turn_present(&turn,&next,PN_REFRESH_GL16)==PN_OK && last_profile==PN_REFRESH_CRISP);
+    assert(pn_turn_present(&turn,&next,PN_REFRESH_GC16)==PN_OK && last_profile==PN_REFRESH_GC16);
+    turn.style=PN_TURN_FAST;assert(pn_turn_present(&turn,&next,PN_REFRESH_GL16)==PN_OK && last_profile==PN_REFRESH_FAST_TURN);
+    assert(pn_turn_present(&turn,&next,PN_REFRESH_GC16)==PN_OK && last_profile==PN_REFRESH_GC16);
     calls=fail_at=0;pool.fail_at=pool.attempts+1;assert(pn_turn_present(&turn,&next,PN_REFRESH_GL16)==PN_OK && calls==1);
     return 0;
 }

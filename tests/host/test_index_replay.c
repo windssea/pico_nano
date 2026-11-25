@@ -24,7 +24,7 @@ int main(int argc,char **argv){
     assert(argc==2);pn_pool_t pool;assert(pn_pool_init(&pool,2u*1024u*1024u,NULL,NULL,NULL)==PN_OK);pn_media_t media;pn_media_init(&media);pn_media_lease_t lease;pn_text_file_t file={0};pn_text_source_t source;pn_zip_t zip={0};pn_epub_t epub={0};uint8_t salt[16]={1};
     assert(pn_media_attach(&media,1)==PN_OK && pn_media_acquire(&media,PN_MEDIA_READ,&lease)==PN_OK && pn_text_file_open(&file,&media,&lease,argv[1],&source)==PN_OK);
     assert(pn_zip_open(&zip,&pool,&source)==PN_OK && pn_epub_open(&epub,&pool,&zip,salt)==PN_OK);
-    pn_layout_t layout={100,80,20,12,7,4,0,false};pn_epub_measure_t measure={NULL,glyph,image};pn_epub_page_t old={0},next={0};assert(pn_epub_page_reserve(&old,&pool,64,2)==PN_OK && pn_epub_page_reserve(&next,&pool,64,2)==PN_OK);
+    pn_layout_t layout={.width=100,.height=80,.line_height=20,.ascent=12,.indent=7,.paragraph_gap=4};pn_epub_measure_t measure={NULL,glyph,image};pn_epub_page_t old={0},next={0};assert(pn_epub_page_reserve(&old,&pool,64,2)==PN_OK && pn_epub_page_reserve(&next,&pool,64,2)==PN_OK);
     pn_epub_t compiled={0};assert(pn_epub_open(&compiled,&pool,&zip,salt)==PN_OK);
     unsigned pages=0,slow=0,fast=0,continued=0;
     for(unsigned chapter=0;chapter<3;chapter++){

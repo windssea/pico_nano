@@ -695,3 +695,52 @@ test("connect downloads firmware before entering stub when online and clear-pack
   assert.equal(vm.runInContext("state.files", context), null);
   assert.equal(document.getElementById("clear-package").hidden, true);
 });
+
+test("installer page renders selected release notes, changelog history, and dictionary metadata from manifest", async () => {
+  const elements = new Map();
+  const makeEl = (tag = "div") => ({
+    tag, checked: false, hidden: false, className: "", textContent: "", dataset: {}, style: {}, events: {}, children: [],
+    append(...items) { this.children.push(...items); },
+    replaceChildren(...items) { this.children = [...items]; },
+    addEventListener(name, fn) { this.events[name] = fn; },
+    querySelector(sel) { return sel === '[data-field="meta"]' ? this._meta : null; },
+  });
+  const dictCard = makeEl("article");
+  dictCard._meta = makeEl("span");
+  const document = {
+    createElement: makeEl,
+    getElementById(id) { if (!elements.has(id)) elements.set(id, makeEl()); return elements.get(id); },
+    querySelector(sel) { return sel === '[data-dict-id="ecdict-en-zh"]' ? dictCard : null; },
+  };
+  const manifest = {
+    releases: [
+      { version: "1.1.4+eb6f85f", commit: "eb6f85f", mode: "app-only", files: { app: { size: 4700000 } }, notes: { date: "2026-11-25", items: ["无线传书加固", "首页轻量化"] } },
+      { version: "1.1.3+12f9c1c", commit: "12f9c1c", mode: "app-only", files: { app: { size: 4600000 } }, notes: { date: "2026-11-24", items: ["存储卡文件管理"] } },
+    ],
+    changelog: [
+      { version: "1.1.4", date: "2026-11-25", items: ["无线传书加固", "首页轻量化"] },
+      { version: "1.1.3", date: "2026-11-24", items: ["存储卡文件管理"] },
+    ],
+    dictionaries: [
+      { id: "ecdict-en-zh", wordcount: 124675, size: 4296984, license: "MIT" },
+    ],
+  };
+  const context = vm.createContext({
+    document, console, navigator: { serial: {} }, giteeDownloadInfo, extractReleasePackage, disableNativeWatchdogs,
+    fetch: async () => ({ async json() { return manifest; } }),
+  });
+  const source = readFileSync(join(root, "installer/app.js"), "utf8").replace(/^import .*;\r?$/gm, "").replace("init().then(syncButtons);", "");
+  vm.runInContext(source, context);
+  await vm.runInContext("init();", context);
+  assert.equal(document.getElementById("release-notes-box").hidden, false);
+  assert.equal(document.getElementById("release-notes-title").textContent, "v1.1.4 更新内容");
+  assert.deepEqual(document.getElementById("release-notes-list").children.map((li) => li.textContent), ["无线传书加固", "首页轻量化"]);
+  assert.equal(document.getElementById("changelog-list").children.length, 2);
+  assert.match(dictCard._meta.textContent, /124,675 词.*4\.10 MiB.*MIT/);
+  // Switching selected release updates inline release notes immediately.
+  const select = document.getElementById("release");
+  select.value = "1.1.3+12f9c1c";
+  select.events.change();
+  assert.equal(document.getElementById("release-notes-title").textContent, "v1.1.3 更新内容");
+  assert.deepEqual(document.getElementById("release-notes-list").children.map((li) => li.textContent), ["存储卡文件管理"]);
+});

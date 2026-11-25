@@ -27,6 +27,7 @@
 #define PN_WUI_MASK 14
 #define PN_WUI_BOOKMARK 15
 #define PN_WUI_ROW 16
+#define PN_WUI_MOVE_OTHER 23 ///< 预览页把图片在「锁屏壁纸」与「阅读遮罩」目录间移动 / Move previewed image between wallpapers and masks directories
 typedef pn_status_t (*pn_wallpaper_present_fn)(void *,const pn_frame_t *,pn_refresh_t); ///< 与阅读呈现回调同签名 / Same signature as reader presentation callbacks
 /// 页面：列表或预览。/ Screen: list or preview.
 typedef enum {PN_WUI_LIST=0,PN_WUI_PREVIEW=1} pn_wallpaper_screen_t;
@@ -46,6 +47,8 @@ pn_status_t pn_wallpaper_ui_open(pn_wallpaper_ui_t *ui,pn_pool_t *pool,pn_media_
     const pn_wallpaper_store_t *store,pn_wallpaper_present_fn present,void *ctx);
 /// 同上，owner提供可重建图片缓存目录；已有缩略图首帧复用，完整预览仍核对源SHA。/ As above with an owner-owned rebuildable cache; reuse thumbnails in the first frame, and still verify source SHA for full previews.
 pn_status_t pn_wallpaper_ui_open_cached(pn_wallpaper_ui_t *,pn_pool_t *,pn_media_t *,const char *,const pn_wallpaper_store_t *,pn_wallpaper_present_fn,void *,const char *cache_dir);
+/// 配置独立的阅读遮罩目录与缓存目录（未调用时兼容回退至锁屏壁纸目录）。/ Configure a separate reading-mask source directory and thumbnail cache (falls back to wallpaper dir if unset).
+pn_status_t pn_wallpaper_ui_set_mask_dir(pn_wallpaper_ui_t *ui,const char *mask_dir,const char *mask_cache_dir);
 /// 处理一个命令（PN_WUI_*或ROW+i）并重绘。/ Handle one command (PN_WUI_* or ROW+i) and repaint.
 pn_status_t pn_wallpaper_ui_event(pn_wallpaper_ui_t *ui,int command,pn_wallpaper_present_fn present,void *ctx);
 /// 重画当前模型。/ Repaint the current model.

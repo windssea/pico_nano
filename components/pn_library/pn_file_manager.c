@@ -15,7 +15,7 @@
 #include "pn_catalog.h"
 #include "pn_widgets.h"
 
-#define ROOT_CARD_Y 236
+#define ROOT_CARD_Y 200
 #define LIST_PATH_Y 166
 #define LIST_CARD_Y 188
 #define LIST_ROW_H PN_W_CARD_ROW_H
@@ -30,27 +30,34 @@
 #define MKDIR_BTN_Y 286
 #define MKDIR_PRESET_Y 414
 #define MKDIR_KB_Y 696
-#define ROOT_EXT_CARD_Y 820
-#define EXT_SEG_Y 156
-#define EXT_SEG_H 64
-#define EXT_CARD_Y 280
+#define ROOT_EXT_CARD_Y 978
+#define EXT_SEG_Y1 146
+#define EXT_SEG_Y2 210
+#define EXT_SEG_H 56
+#define EXT_CARD_Y 314
 #define EXT_BTN_Y 960
 #define EXT_BROWSE_BTN_Y 1006
 #define EXT_BROWSE_BTN_H 84
 
-static const char *const EXT_CAT_LABELS[PN_SCAN_CAT_COUNT]={"图书","字体","壁纸","背景"};
+static const char *const EXT_CAT_LABELS[PN_SCAN_CAT_COUNT]={"图书","字体","壁纸","背景","横幅","遮罩"};
+static const pn_icon_t EXT_CAT_ICONS[PN_SCAN_CAT_COUNT]={
+    PN_ICON_SHELF,PN_ICON_FONT,PN_ICON_IMAGE,PN_ICON_TYPESET,PN_ICON_IMAGE,PN_ICON_IMAGE
+};
+static const int FM_TO_SCAN_CAT[PN_FM_CAT_COUNT]={
+    PN_SCAN_CAT_BOOKS,PN_SCAN_CAT_FONTS,PN_SCAN_CAT_WALLPAPERS,PN_SCAN_CAT_BACKGROUNDS,-1,PN_SCAN_CAT_BANNERS,PN_SCAN_CAT_MASKS
+};
 
 static const char *const CAT_DIRS[PN_FM_CAT_COUNT]={
-    PN_SD_BOOKS,PN_SD_FONTS,PN_SD_WALLPAPERS,PN_SD_BACKGROUNDS,PN_SD_COVERS
+    PN_SD_BOOKS,PN_SD_FONTS,PN_SD_WALLPAPERS,PN_SD_BACKGROUNDS,PN_SD_COVERS,PN_SD_BANNERS,PN_SD_MASKS
 };
 static const char *const CAT_TITLES[PN_FM_CAT_COUNT]={
-    "图书","字体","壁纸与横幅","阅读背景","封面原图"
+    "图书","字体","锁屏壁纸","阅读背景","封面原图","首页横幅","阅读遮罩"
 };
 static const char *const CAT_SUBTITLES[PN_FM_CAT_COUNT]={
-    "piconano/books · 支持建夹与整理","piconano/fonts · 系统保留字体不可删","piconano/wallpapers · 锁屏与主页横幅","piconano/backgrounds · 自定义阅读底纹","piconano/covers · 图书自定义封面"
+    "piconano/books · 支持建夹与整理","piconano/fonts · 系统保留字体不可删","piconano/wallpapers · 锁屏壁纸原图","piconano/backgrounds · 自定义阅读底纹","piconano/covers · 图书自定义封面","piconano/banners · 首页顶部横幅","piconano/masks · 透明阅读遮罩"
 };
 static const pn_icon_t CAT_ICONS[PN_FM_CAT_COUNT]={
-    PN_ICON_SHELF,PN_ICON_FONT,PN_ICON_IMAGE,PN_ICON_TYPESET,PN_ICON_BOOKMARK
+    PN_ICON_SHELF,PN_ICON_FONT,PN_ICON_IMAGE,PN_ICON_TYPESET,PN_ICON_BOOKMARK,PN_ICON_IMAGE,PN_ICON_IMAGE
 };
 static const char *const PRESET_DIRS[PN_FM_PRESET_COUNT]={
     "已读","小说","文学","历史","科技","资料","漫画","其他"
@@ -98,9 +105,26 @@ static bool entry_in_use(unsigned cat,const char *full_path,const char *name,con
     if(cat==PN_FM_CAT_FONTS)return path_matches(full_path,u->system_font) || path_matches(full_path,u->reading_font);
     if(cat==PN_FM_CAT_WALLPAPERS)return path_matches(full_path,u->lock_wallpaper) || path_matches(full_path,u->lock_mask) || path_matches(name,u->home_banner);
     if(cat==PN_FM_CAT_BACKGROUNDS)return path_matches(name,u->reading_bg);
+    if(cat==PN_FM_CAT_BANNERS)return path_matches(name,u->home_banner);
+    if(cat==PN_FM_CAT_MASKS)return path_matches(full_path,u->lock_mask);
     return false;
 }
 
+static const unsigned IMAGE_MOVE_CATS[4]={
+    PN_FM_CAT_WALLPAPERS,PN_FM_CAT_MASKS,PN_FM_CAT_BANNERS,PN_FM_CAT_BACKGROUNDS
+};
+bool pn_file_manager_is_image_category(unsigned category){
+    return category==PN_FM_CAT_WALLPAPERS || category==PN_FM_CAT_BACKGROUNDS || category==PN_FM_CAT_BANNERS || category==PN_FM_CAT_MASKS;
+}
+static int image_move_target_cat(const char *target){
+    if(!target || !*target)return -1;
+    for(unsigned i=0;i<4u;i++)if(strcmp(target,CAT_DIRS[IMAGE_MOVE_CATS[i]])==0)return (int)IMAGE_MOVE_CATS[i];
+    return -1;
+}
+const char *pn_file_manager_move_target_label(const char *target){
+    int cat=image_move_target_cat(target);
+    return cat>=0?CAT_TITLES[cat]:NULL;
+}
 const char *pn_file_manager_category_dir(unsigned category){
     return category<PN_FM_CAT_COUNT?CAT_DIRS[category]:NULL;
 }
@@ -252,8 +276,20 @@ pn_status_t pn_file_manager_scan(pn_file_manager_t *fm,pn_media_t *media,const p
 }
 
 pn_status_t pn_file_manager_scan_move_targets(pn_file_manager_t *fm,pn_media_t *media,const pn_media_lease_t *lease){
-    if(!fm || !media || !lease || !*fm->cat_dirs[PN_FM_CAT_BOOKS])return PN_INVALID;
+    if(!fm || !media || !lease)return PN_INVALID;
     pn_status_t status=pn_media_validate(media,lease);if(status!=PN_OK)return status;
+    // 四类图片（锁屏壁纸/阅读遮罩/首页横幅/阅读背景）支持跨目录直接移动，避免用户重新上传。
+    // The four image categories (wallpapers/masks/banners/backgrounds) support direct cross-folder move without re-uploading.
+    if(pn_file_manager_is_image_category(fm->category)){
+        fm->move_page=0;fm->move_total=4u;fm->move_count=0;
+        for(unsigned i=0;i<4u;i++){
+            unsigned c=IMAGE_MOVE_CATS[i];
+            if(*fm->cat_dirs[c])snprintf(fm->move_targets[fm->move_count++],PN_FM_SUBPATH_MAX,"%s",CAT_DIRS[c]);
+        }
+        fm->move_total=fm->move_count;
+        return pn_media_validate(media,lease);
+    }
+    if(!*fm->cat_dirs[PN_FM_CAT_BOOKS])return PN_INVALID;
     const char *books_dir=fm->cat_dirs[PN_FM_CAT_BOOKS];
     // 收集 books 根目录（空串）及按字典序排列的子目录当前页。/ Collect books root (empty string) plus sorted subfolders for the current page.
     fm->move_count=0;fm->move_total=1;
@@ -364,14 +400,23 @@ pn_status_t pn_file_manager_delete(const pn_file_manager_t *fm,pn_media_t *media
 
 pn_status_t pn_file_manager_move(const pn_file_manager_t *fm,pn_media_t *media,const pn_media_lease_t *lease,const char *name,const char *target_subdir,
     char *old_path,size_t old_cap,char *new_path,size_t new_cap){
-    if(!fm || !media || !lease || fm->category!=PN_FM_CAT_BOOKS || !name || !*name)return PN_INVALID;
-    if(target_subdir && *target_subdir && !safe_leaf(target_subdir,PN_FM_SUBPATH_MAX))return PN_INVALID;
+    if(!fm || !media || !lease || !name || !*name)return PN_INVALID;
     pn_status_t status=pn_media_validate(media,lease);if(status!=PN_OK)return status;
     char src[PN_FM_PATH_MAX],dst[PN_FM_PATH_MAX];
     status=pn_file_manager_build_path(fm,name,src,sizeof src);if(status!=PN_OK)return status;
     int n=0;
-    if(target_subdir && *target_subdir)n=snprintf(dst,sizeof dst,"%s/%s/%s",fm->cat_dirs[PN_FM_CAT_BOOKS],target_subdir,name);
-    else n=snprintf(dst,sizeof dst,"%s/%s",fm->cat_dirs[PN_FM_CAT_BOOKS],name);
+    if(pn_file_manager_is_image_category(fm->category)){
+        int dst_cat=image_move_target_cat(target_subdir);
+        if(dst_cat<0 || !*fm->cat_dirs[dst_cat] || !safe_leaf(name,PN_FM_NAME_MAX))return PN_INVALID;
+        // 目标图片目录缺失时先创建（不影响原文件）。/ Ensure the destination image folder exists before moving.
+        struct stat dst_dir_st;
+        if(stat(fm->cat_dirs[dst_cat],&dst_dir_st)!=0)(void)mkdir(fm->cat_dirs[dst_cat],0755);
+        n=snprintf(dst,sizeof dst,"%s/%s",fm->cat_dirs[dst_cat],name);
+    }else if(fm->category==PN_FM_CAT_BOOKS){
+        if(target_subdir && *target_subdir && !safe_leaf(target_subdir,PN_FM_SUBPATH_MAX))return PN_INVALID;
+        if(target_subdir && *target_subdir)n=snprintf(dst,sizeof dst,"%s/%s/%s",fm->cat_dirs[PN_FM_CAT_BOOKS],target_subdir,name);
+        else n=snprintf(dst,sizeof dst,"%s/%s",fm->cat_dirs[PN_FM_CAT_BOOKS],name);
+    }else return PN_INVALID;
     if(n<=0 || (size_t)n>=sizeof dst)return PN_INVALID;
     if(strcmp(src,dst)==0){
         if(old_path && old_cap)snprintf(old_path,old_cap,"%s",src);
@@ -533,13 +578,14 @@ pn_status_t pn_file_manager_render(const pn_file_manager_t *fm,pn_font_t *font,p
     if(fm->view==PN_FM_VIEW_ROOT){
         pn_frame_clear(frame,PN_UI_PAPER);
         s=pn_w_header(font,frame,"< 传书","存储卡文件",NULL);
-        if(s==PN_OK)s=pn_font_size(font,24);
-        if(s==PN_OK)s=pn_w_text_ex(font,frame,*fm->storage?fm->storage:"存储卡已就绪",PN_UI_MARGIN,168,620,PN_ALIGN_LEFT,PN_UI_MUTED,false);
+        if(s==PN_OK)s=pn_font_size(font,22);
+        if(s==PN_OK)s=pn_w_text_ex(font,frame,*fm->storage?fm->storage:"存储卡已就绪",PN_UI_MARGIN,154,620,PN_ALIGN_LEFT,PN_UI_MUTED,false);
         if(s==PN_OK)s=pn_w_group(font,frame,"标准目录",ROOT_CARD_Y-14);
         pn_w_card(frame,ROOT_CARD_Y,PN_FM_CAT_COUNT);
         for(unsigned c=0;c<PN_FM_CAT_COUNT && s==PN_OK;c++){
             char badge[32];
-            unsigned ext_n=(c<PN_SCAN_CAT_COUNT)?fm->scan_dirs.count[c]:0u;
+            int sc=FM_TO_SCAN_CAT[c];
+            unsigned ext_n=(sc>=0 && sc<(int)PN_SCAN_CAT_COUNT)?fm->scan_dirs.count[sc]:0u;
             if(ext_n)snprintf(badge,sizeof badge,"%zu 项·+%u",fm->root_counts[c],ext_n);
             else snprintf(badge,sizeof badge,"%zu 项",fm->root_counts[c]);
             s=pn_w_card_row(font,frame,CAT_TITLES[c],CAT_SUBTITLES[c],badge,CAT_ICONS[c],PN_ROW_CHEVRON,ROOT_CARD_Y+(int)c*LIST_ROW_H,c+1u==PN_FM_CAT_COUNT);
@@ -547,20 +593,21 @@ pn_status_t pn_file_manager_render(const pn_file_manager_t *fm,pn_font_t *font,p
         if(s==PN_OK)s=pn_w_group(font,frame,"外部扫描目录",ROOT_EXT_CARD_Y-14);
         if(s==PN_OK){
             pn_w_card(frame,ROOT_EXT_CARD_Y,1u);
-            char ext_sub[96];
-            unsigned total_ext=(unsigned)fm->scan_dirs.count[0]+fm->scan_dirs.count[1]+fm->scan_dirs.count[2]+fm->scan_dirs.count[3];
-            if(total_ext)snprintf(ext_sub,sizeof ext_sub,"图书 +%u · 字体 +%u · 壁纸 +%u · 背景 +%u",
-                (unsigned)fm->scan_dirs.count[0],(unsigned)fm->scan_dirs.count[1],(unsigned)fm->scan_dirs.count[2],(unsigned)fm->scan_dirs.count[3]);
-            else snprintf(ext_sub,sizeof ext_sub,"为图书/字体/壁纸/背景添加扩展目录");
+            char ext_sub[112];
+            unsigned total_ext=0;for(unsigned i=0;i<PN_SCAN_CAT_COUNT;i++)total_ext+=fm->scan_dirs.count[i];
+            unsigned img_ext=(unsigned)fm->scan_dirs.count[PN_SCAN_CAT_WALLPAPERS]+fm->scan_dirs.count[PN_SCAN_CAT_BACKGROUNDS]+fm->scan_dirs.count[PN_SCAN_CAT_BANNERS]+fm->scan_dirs.count[PN_SCAN_CAT_MASKS];
+            if(total_ext)snprintf(ext_sub,sizeof ext_sub,"图书 +%u · 字体 +%u · 四类图片 +%u",
+                (unsigned)fm->scan_dirs.count[PN_SCAN_CAT_BOOKS],(unsigned)fm->scan_dirs.count[PN_SCAN_CAT_FONTS],img_ext);
+            else snprintf(ext_sub,sizeof ext_sub,"为图书/字体/壁纸/背景/横幅/遮罩添加扩展目录");
             s=pn_w_card_row(font,frame,"自定义扫描目录",ext_sub,"管理",PN_ICON_SHELF,PN_ROW_CHEVRON,ROOT_EXT_CARD_Y,true);
         }
         if(s==PN_OK){
-            s=pn_font_size(font,22);
-            if(s==PN_OK)s=pn_w_text_lines_ex(font,frame,"提示：移出外部目录不会删除卡上文件；删除正在使用的资源会自动安全回退默认。",PN_UI_MARGIN+8,966,604,2,32,PN_UI_MUTED,false);
+            s=pn_font_size(font,20);
+            if(s==PN_OK)s=pn_w_text_lines_ex(font,frame,"提示：移出外部目录不会删除卡上文件；删除正在使用的资源会自动安全回退默认。",PN_UI_MARGIN+8,1112,604,2,28,PN_UI_MUTED,false);
         }
         if(s==PN_OK && *fm->notice){
-            s=pn_font_size(font,26);
-            if(s==PN_OK)s=pn_w_text_ex(font,frame,fm->notice,PN_UI_MARGIN,1080,620,PN_ALIGN_CENTER,PN_UI_INK,true);
+            s=pn_font_size(font,24);
+            if(s==PN_OK)s=pn_w_text_ex(font,frame,fm->notice,PN_UI_MARGIN,1190,620,PN_ALIGN_CENTER,PN_UI_INK,true);
         }
     }else if(fm->view==PN_FM_VIEW_LIST){
         s=draw_list_backdrop(fm,font,frame);
@@ -590,6 +637,14 @@ pn_status_t pn_file_manager_render(const pn_file_manager_t *fm,pn_font_t *font,p
                     pn_w_icon(frame,PN_ICON_TRASH,BUTTON_X+220,1008+26,36,PN_UI_INK);
                     s=pn_w_text(font,frame,"删除文件",BUTTON_X+268,1008+BUTTON_H/2+12,220,PN_ALIGN_LEFT);
                 }
+            }else if(pn_file_manager_is_image_category(fm->category)){
+                if(s==PN_OK)s=pn_w_button(font,frame,"移动到其他图片目录",BUTTON_X,800,BUTTON_W,BUTTON_H,PN_W_SELECTED);
+                if(s==PN_OK){
+                    pn_w_round_stroke(frame,BUTTON_X,904,BUTTON_W,BUTTON_H,PN_UI_RADIUS,2.0f,PN_UI_INK);
+                    pn_w_icon(frame,PN_ICON_TRASH,BUTTON_X+220,904+26,36,PN_UI_INK);
+                    s=pn_w_text(font,frame,"删除文件",BUTTON_X+268,904+BUTTON_H/2+12,220,PN_ALIGN_LEFT);
+                }
+                if(s==PN_OK)s=pn_w_button(font,frame,"取消",BUTTON_X,1008,BUTTON_W,BUTTON_H,0u);
             }else{
                 if(s==PN_OK){
                     pn_w_round_stroke(frame,BUTTON_X,904,BUTTON_W,BUTTON_H,PN_UI_RADIUS,2.0f,PN_UI_INK);
@@ -602,7 +657,8 @@ pn_status_t pn_file_manager_render(const pn_file_manager_t *fm,pn_font_t *font,p
         }
     }else if(fm->view==PN_FM_VIEW_MOVE){
         pn_frame_clear(frame,PN_UI_PAPER);
-        s=pn_w_header(font,frame,"< 返回","移动到文件夹",NULL);
+        bool img_move=pn_file_manager_is_image_category(fm->category);
+        s=pn_w_header(font,frame,"< 返回",img_move?"移动到图片目录":"移动到文件夹",NULL);
         char prompt[192];
         if(*fm->notice)snprintf(prompt,sizeof prompt,"%s",fm->notice);
         else snprintf(prompt,sizeof prompt,"选择目标目录：%s",fm->selected.name);
@@ -612,10 +668,19 @@ pn_status_t pn_file_manager_render(const pn_file_manager_t *fm,pn_font_t *font,p
             pn_w_card(frame,LIST_CARD_Y,(unsigned)fm->move_count);
             for(size_t i=0;i<fm->move_count && s==PN_OK;i++){
                 const char *sub=fm->move_targets[i];
-                bool current=(strcmp(sub,fm->subpath)==0);
-                const char *title=*sub?sub:"图书根目录 (books/)";
-                const char *note=current?"当前所在目录":(*sub?"点击移入此文件夹":"点击移回书库根目录");
-                s=pn_w_card_row(font,frame,title,note,current?"当前":NULL,PN_ICON_SHELF,current?0u:PN_ROW_CHEVRON,LIST_CARD_Y+(int)i*LIST_ROW_H,i+1u==fm->move_count);
+                if(img_move){
+                    int cat=image_move_target_cat(sub);
+                    bool current=(cat==(int)fm->category);
+                    const char *title=cat>=0?CAT_TITLES[cat]:sub;
+                    const char *note=current?"当前所在目录":(cat>=0?CAT_SUBTITLES[cat]:"点击移入此目录");
+                    pn_icon_t icon=cat>=0?CAT_ICONS[cat]:PN_ICON_IMAGE;
+                    s=pn_w_card_row(font,frame,title,note,current?"当前":NULL,icon,current?0u:PN_ROW_CHEVRON,LIST_CARD_Y+(int)i*LIST_ROW_H,i+1u==fm->move_count);
+                }else{
+                    bool current=(strcmp(sub,fm->subpath)==0);
+                    const char *title=*sub?sub:"图书根目录 (books/)";
+                    const char *note=current?"当前所在目录":(*sub?"点击移入此文件夹":"点击移回书库根目录");
+                    s=pn_w_card_row(font,frame,title,note,current?"当前":NULL,PN_ICON_SHELF,current?0u:PN_ROW_CHEVRON,LIST_CARD_Y+(int)i*LIST_ROW_H,i+1u==fm->move_count);
+                }
             }
         }
         if(s==PN_OK)s=draw_paging(font,frame,fm->move_page,fm->move_total);
@@ -659,13 +724,14 @@ pn_status_t pn_file_manager_render(const pn_file_manager_t *fm,pn_font_t *font,p
         pn_frame_clear(frame,PN_UI_PAPER);
         s=pn_w_header(font,frame,"< 返回","外部扫描目录",NULL);
         unsigned cat=fm->ext_cat<PN_SCAN_CAT_COUNT?fm->ext_cat:0u;
-        if(s==PN_OK)s=pn_w_segments(font,frame,EXT_CAT_LABELS,NULL,PN_SCAN_CAT_COUNT,(int)cat,EXT_SEG_Y,EXT_SEG_H);
+        if(s==PN_OK)s=pn_w_segments(font,frame,EXT_CAT_LABELS,NULL,3u,cat<3u?(int)cat:-1,EXT_SEG_Y1,EXT_SEG_H);
+        if(s==PN_OK)s=pn_w_segments(font,frame,EXT_CAT_LABELS+3,NULL,3u,cat>=3u?(int)(cat-3u):-1,EXT_SEG_Y2,EXT_SEG_H);
         if(s==PN_OK)s=pn_w_group(font,frame,"当前扫描目录（均支持 3 层子目录）",EXT_CARD_Y-14);
         unsigned cnt=fm->scan_dirs.count[cat];
         if(s==PN_OK){
             pn_w_card(frame,EXT_CARD_Y,1u+cnt);
             const char *def_rel=pn_scan_dirs_default_rel((pn_scan_cat_t)cat);
-            s=pn_w_card_row(font,frame,def_rel?def_rel:"","默认目录 · 始终扫描且不可移出","默认",CAT_ICONS[cat],0u,EXT_CARD_Y,cnt==0u);
+            s=pn_w_card_row(font,frame,def_rel?def_rel:"","默认目录 · 始终扫描且不可移出","默认",EXT_CAT_ICONS[cat],0u,EXT_CARD_Y,cnt==0u);
             for(unsigned i=0;i<cnt && s==PN_OK;i++){
                 s=pn_w_card_row(font,frame,fm->scan_dirs.dirs[cat][i],"用户外部目录 · 点此移出（不删文件）","移出",PN_ICON_SHELF,0u,EXT_CARD_Y+(int)(i+1u)*LIST_ROW_H,i+1u==cnt);
             }
@@ -769,6 +835,12 @@ int pn_file_manager_hit(const pn_file_manager_t *fm,int x,int y){
             if(y>=1008 && y<1008+BUTTON_H)return PN_FM_ACT_DELETE;
             return -1;
         }
+        if(pn_file_manager_is_image_category(fm->category)){
+            if(y>=800 && y<800+BUTTON_H)return PN_FM_ACT_MOVE;
+            if(y>=904 && y<904+BUTTON_H)return PN_FM_ACT_DELETE;
+            if(y>=1008 && y<1008+BUTTON_H)return PN_FM_ACT_CANCEL;
+            return -1;
+        }
         if(y>=904 && y<904+BUTTON_H)return PN_FM_ACT_DELETE;
         if(y>=1008 && y<1008+BUTTON_H)return PN_FM_ACT_CANCEL;
         return -1;
@@ -777,7 +849,9 @@ int pn_file_manager_hit(const pn_file_manager_t *fm,int x,int y){
         if(pn_w_header_hit(x,y,false)==1)return PN_FM_BACK;
         if(x>=PN_UI_MARGIN && x<PN_UI_WIDTH-PN_UI_MARGIN && y>=LIST_CARD_Y && y<LIST_CARD_Y+(int)fm->move_count*LIST_ROW_H){
             int idx=(y-LIST_CARD_Y)/LIST_ROW_H;
-            if(strcmp(fm->move_targets[idx],fm->subpath)==0)return -1;
+            if(pn_file_manager_is_image_category(fm->category)){
+                if(image_move_target_cat(fm->move_targets[idx])==(int)fm->category)return -1;
+            }else if(strcmp(fm->move_targets[idx],fm->subpath)==0)return -1;
             return PN_FM_MOVE_BASE+idx;
         }
         if(y>=PAGE_BAR_Y && y<PAGE_BAR_Y+PAGE_BAR_H){
@@ -817,8 +891,10 @@ int pn_file_manager_hit(const pn_file_manager_t *fm,int x,int y){
     }
     if(fm->view==PN_FM_VIEW_EXT_LIST){
         if(pn_w_header_hit(x,y,false)==1)return PN_FM_BACK;
-        int seg=pn_w_segments_hit(PN_SCAN_CAT_COUNT,EXT_SEG_Y,EXT_SEG_H,x,y);
-        if(seg>=0)return PN_FM_EXT_CAT_BASE+seg;
+        int seg1=pn_w_segments_hit(3u,EXT_SEG_Y1,EXT_SEG_H,x,y);
+        if(seg1>=0)return PN_FM_EXT_CAT_BASE+seg1;
+        int seg2=pn_w_segments_hit(3u,EXT_SEG_Y2,EXT_SEG_H,x,y);
+        if(seg2>=0)return PN_FM_EXT_CAT_BASE+3+seg2;
         unsigned cat=fm->ext_cat<PN_SCAN_CAT_COUNT?fm->ext_cat:0u;
         unsigned cnt=fm->scan_dirs.count[cat];
         if(cnt && x>=PN_UI_MARGIN && x<PN_UI_WIDTH-PN_UI_MARGIN && y>=EXT_CARD_Y+LIST_ROW_H && y<EXT_CARD_Y+(int)(cnt+1u)*LIST_ROW_H){

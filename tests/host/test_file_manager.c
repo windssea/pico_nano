@@ -97,6 +97,22 @@ int main(void){
     assert(pn_file_manager_delete(fm,&media,&wlease,"custom.ttf",false,del_p,sizeof del_p)==PN_OK && !strcmp(del_p,user_font));
     assert(pn_media_release(&media,&wlease)==PN_OK);
 
+    /* 5b. 跨图片目录移动：锁屏壁纸 -> 阅读遮罩（自动创建目标目录）并防重名覆盖，再移回。/ Cross-image-dir move: wallpapers -> masks with mkdir & duplicate guard, then back. */
+    assert(pn_file_manager_is_image_category(PN_FM_CAT_WALLPAPERS) && pn_file_manager_is_image_category(PN_FM_CAT_MASKS) && !pn_file_manager_is_image_category(PN_FM_CAT_BOOKS));
+    fm->category=PN_FM_CAT_WALLPAPERS;fm->subpath[0]=0;
+    assert(pn_media_acquire(&media,PN_MEDIA_READ,&rlease)==PN_OK);
+    assert(pn_file_manager_scan_move_targets(fm,&media,&rlease)==PN_OK && fm->move_count==4);
+    assert(pn_media_release(&media,&rlease)==PN_OK);
+    assert(pn_media_acquire(&media,PN_MEDIA_WRITE,&wlease)==PN_OK);
+    assert(pn_file_manager_move(fm,&media,&wlease,"bg.png",PN_SD_MASKS,old_p,sizeof old_p,new_p,sizeof new_p)==PN_OK && strstr(new_p,"/masks/bg.png"));
+    write_dummy(wall,"dup");
+    assert(pn_file_manager_move(fm,&media,&wlease,"bg.png",PN_SD_MASKS,NULL,0,NULL,0)==PN_BUSY);
+    assert(unlink(wall)==0);
+    fm->category=PN_FM_CAT_MASKS;
+    assert(pn_file_manager_move(fm,&media,&wlease,"bg.png",PN_SD_WALLPAPERS,NULL,0,new_p,sizeof new_p)==PN_OK && !strcmp(new_p,wall));
+    assert(pn_media_release(&media,&wlease)==PN_OK);
+    snprintf(p,sizeof p,"%s/%s",root,PN_SD_MASKS);assert(rmdir(p)==0);
+
     /* 6. 全视图纯绘制与命中，删除进行中遮罩屏蔽一切点击。/ Pure render & hit across all views; deleting overlay blocks all hits. */
     pn_pool_t pool;assert(pn_pool_init(&pool,2u*1024u*1024u,NULL,NULL,NULL)==0);
     pn_font_t font={0};pn_text_source_t src=pn_font_builtin_source();assert(pn_font_open(&font,&pool,&src,24)==PN_OK);

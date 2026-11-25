@@ -35,7 +35,11 @@
 #define PN_SUI_MARGINS_RESET 47 ///< 重置正文与背景四周边距 / Reset body and background margins to defaults
 #define PN_SUI_SAVE_GLOBAL 48 ///< 将当前草稿保存为全局默认排版（保留兼容）/ Save current draft as global default typesetting (legacy)
 #define PN_SUI_USE_GLOBAL 49 ///< 清除本书单独配置并立即使用全局默认排版 / Clear per-book override and apply global default typesetting
+#define PN_SUI_CHAPTER 50 ///< 打开“阅读线与章节”子页 / Open reading-guide and chapter heading sub-page
+#define PN_SUI_CHAPTER_BACK 51 ///< 从“阅读线与章节”子页返回 / Return from reading-guide and chapter sub-page
+#define PN_SUI_CHAPTER_RESET 52 ///< 重置阅读线扩展与章节/页脚选项 / Reset extended guide and chapter/footer options
 #define PN_SUI_MARGIN_ADJ 112 ///< 112..127：8项四周边距减/加（0..3正文上下左右，4..7背景上下左右）/ 112..127: dec/inc for 8 margin controls (0..3 body TBLR, 4..7 paper TBLR)
+#define PN_SUI_CHAPTER_ADJ 128 ///< 128..143：8项阅读线与章节/页脚减加 / 128..143: dec/inc for 8 guide/chapter/footer controls
 typedef struct {
     pn_epub_app_t *epub; ///< 可选EPUB会话，与reader互斥 / Optional EPUB session, exclusive with reader
     pn_reader_app_t *reader; ///< 借用会话 / Borrowed session
@@ -45,6 +49,7 @@ typedef struct {
     bool backgrounds; ///< 正显示背景选择页，仅修改草稿 / Background picker is showing, modifying the draft only
     bool margins; ///< 正显示正文与背景四周边距页，仅修改草稿 / Body and background margins page is showing, modifying the draft only
     bool margins_from_bg; ///< 从阅读背景页进入边距页，返回时回阅读背景 / Entered margins from the background picker, so Back returns there
+    bool chapter_page; ///< 正显示“阅读线与章节”详调页，仅修改草稿 / Reading-guide and chapter sub-page is showing, modifying the draft only
     pn_background_gallery_t gallery; ///< 图库所有权仅在选择页 / Gallery ownership lives only in the picker
     bool more; ///< 正显示“更多排版”页 / The more-options page is showing
     unsigned selected; ///< 键盘选中字段0..12 / Keyboard-selected field zero through twelve

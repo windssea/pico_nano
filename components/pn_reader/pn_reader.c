@@ -64,7 +64,7 @@ pn_status_t pn_reader_prefetch(pn_reader_t *r){
     pn_cache_speculate(r?r->neighbor_pool:NULL,true);
     pn_status_t status=pn_reader_prefetch_impl(r);pn_cache_speculate(r?r->neighbor_pool:NULL,false);if(r)pn_cache_unpin(&r->cache);pn_profile_end(&span,status);return status;
 }
-static bool valid_layout(const pn_layout_t *l){return l && l->width>0 && l->width<=4096 && l->height>0 && l->height<=4096 && l->line_height>0 && l->line_height<=l->height && l->ascent>=0 && l->ascent<=l->line_height && l->indent>=0 && l->indent<l->width && l->paragraph_gap>=0 && l->paragraph_gap<=4096 && l->letter_spacing_64>=0 && l->letter_spacing_64<=4096;}
+static bool valid_layout(const pn_layout_t *l){return l && l->width>0 && l->width<=4096 && l->height>0 && l->height<=4096 && l->line_height>0 && l->line_height<=l->height && l->ascent>=0 && l->ascent<=l->line_height && l->indent>=0 && l->indent<l->width && l->paragraph_gap>=0 && l->paragraph_gap<=4096 && l->letter_spacing_64>=-2048 && l->letter_spacing_64<=4096;}
 static bool same_anchor(pn_reader_anchor_t a,pn_reader_anchor_t b){return a.begin==b.begin && a.end==b.end && a.paragraph==b.paragraph && a.next_paragraph==b.next_paragraph;}
 static bool checkpoint(const pn_reader_t *r,uint64_t offset,bool strict,pn_page_index_entry_t *out){
     bool found=pn_page_index_near(r->index,0,offset,strict,out);

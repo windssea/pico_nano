@@ -42,7 +42,7 @@ static bool cached_store(reader_t *r,pn_epub_page_t *to,const pn_epub_page_t *fr
     if(images)memcpy(images,from->images,from->image_count*sizeof *images);
     cached_free(to);*to=*from;to->nodes=nodes;to->images=images;to->capacity=from->count;to->image_capacity=from->image_count;to->owner=r->pool;if(to==&r->ahead)r->ahead_warm=0;return true;
 }
-static bool layout_valid(const pn_layout_t *l){return l && l->width>0 && l->width<=4096 && l->height>0 && l->height<=4096 && l->line_height>0 && l->line_height<=l->height && l->indent>=0 && l->indent<l->width && l->paragraph_gap>=0 && l->paragraph_gap<=4096 && l->letter_spacing_64>=0 && l->letter_spacing_64<=4096;}
+static bool layout_valid(const pn_layout_t *l){return l && l->width>0 && l->width<=4096 && l->height>0 && l->height<=4096 && l->line_height>0 && l->line_height<=l->height && l->indent>=0 && l->indent<l->width && l->paragraph_gap>=0 && l->paragraph_gap<=4096 && l->letter_spacing_64>=-2048 && l->letter_spacing_64<=4096;}
 static bool same_position(pn_xhtml_position_t a,pn_xhtml_position_t b){return a.element==b.element && a.run==b.run && a.offset==b.offset && a.kind==b.kind;}
 static bool same_location(const pn_epub_location_t *a,const pn_epub_location_t *b){return memchr(a->path,0,sizeof a->path) && memchr(b->path,0,sizeof b->path) && !strcmp(a->path,b->path) && a->version==b->version && a->chapter_start==b->chapter_start && same_position(a->position,b->position);}
 static bool same_anchor(const pn_epub_reader_anchor_t *a,const pn_epub_reader_anchor_t *b){return a->has_next==b->has_next && same_location(&a->begin,&b->begin) && (!a->has_next || same_location(&a->next,&b->next));}

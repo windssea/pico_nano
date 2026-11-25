@@ -109,7 +109,10 @@ static pn_status_t text_lines_impl(pn_font_t *font,pn_frame_t *frame,const char 
     if(!font || !font->impl || (frame && !frame->pixels) || !utf8 || width<=0 || !max_lines || pitch<=0)return PN_INVALID;
     uint32_t cp[MAX_CHARS];int32_t adv[MAX_CHARS];uint8_t miss[MAX_CHARS];size_t n=0;
     pn_status_t status=decode(font,utf8,cp,adv,miss,&n);if(status!=PN_OK)return status;
-    for(size_t i=0;i<n;i++)adv[i]+=tracking_64;
+    for(size_t i=0;i<n;i++){
+        if(tracking_64>=0)adv[i]+=tracking_64;
+        else if(adv[i]>0){int32_t floor_step=adv[i]/2;if(floor_step<64)floor_step=adv[i]<64?adv[i]:64;adv[i]+=tracking_64;if(adv[i]<floor_step)adv[i]=floor_step;}
+    }
     int32_t limit=width*64,period;if(pn_font_advance(font,'.',&period)!=PN_OK)period=font->pixels*16;
     size_t at=0;unsigned line=0;
     while(at<n && line<max_lines){

@@ -45,7 +45,7 @@ static void recompute(layout_t *l,size_t end,bool reposition){
     if(reposition)l->x=0;
     int descent=0;
     for(size_t i=l->row;i<end;i++){
-        pn_epub_page_node_t *n=&l->page->nodes[i];if(reposition){n->x_64=l->x;l->x+=n->metrics.advance_64;if(n->image_index==UINT_MAX)l->x+=l->layout->letter_spacing_64;}
+        pn_epub_page_node_t *n=&l->page->nodes[i];if(reposition){n->x_64=l->x;l->x+=(n->image_index==UINT_MAX)?pn_layout_tracked_advance(n->metrics.advance_64,l->layout->letter_spacing_64):n->metrics.advance_64;}
         if(n->metrics.ascent>l->row_ascent)l->row_ascent=n->metrics.ascent;
         if(n->metrics.descent>descent)descent=n->metrics.descent;
         int h=height(l,&n->metrics);if(h>l->row_height)l->row_height=h;
@@ -91,8 +91,12 @@ static void baselines(layout_t *l,size_t end,bool wrapped){
     pn_epub_page_node_t *nodes=l->page->nodes;int32_t edge=0;
     for(size_t i=l->row;i<end;i++){int32_t right=nodes[i].x_64+nodes[i].metrics.advance_64;if(right>edge)edge=right;}
     int32_t shift=l->layout->width*64-edge;
-    if(nodes[l->row].style.align==PN_XHTML_ALIGN_CENTER)shift/=2;
-    else if(nodes[l->row].style.align!=PN_XHTML_ALIGN_RIGHT)shift=0;
+    pn_xhtml_align_t align=nodes[l->row].style.align;
+    if(nodes[l->row].style.heading && l->layout->chapter_align){
+        align=l->layout->chapter_align==2?PN_XHTML_ALIGN_CENTER:l->layout->chapter_align==3?PN_XHTML_ALIGN_RIGHT:PN_XHTML_ALIGN_LEFT;
+    }
+    if(align==PN_XHTML_ALIGN_CENTER)shift/=2;
+    else if(align!=PN_XHTML_ALIGN_RIGHT)shift=0;
     for(size_t i=l->row;i<end;i++){nodes[i].baseline=l->y+l->row_ascent;nodes[i].x_64+=shift;}
 }
 static void next(layout_t *l,const pn_xhtml_position_t *position,size_t keep,uint64_t order){
@@ -177,7 +181,7 @@ static pn_status_t item(layout_t *l,const pn_xhtml_event_t *event,bool paragraph
     if(p->count==p->capacity && p->owner && p->capacity<PN_PAGE_GLYPHS_MAX){size_t cap=p->capacity*2;if(cap>PN_PAGE_GLYPHS_MAX)cap=PN_PAGE_GLYPHS_MAX;status=pn_epub_page_reserve(p,p->owner,cap,p->image_capacity);if(status!=PN_OK)return status;}
     if(p->count==p->capacity)return PN_LIMIT;
     if(node.image_index!=UINT_MAX)p->images[p->image_count++]=image;
-    node.x_64=l->x;p->nodes[p->count++]=node;l->x+=node.metrics.advance_64;if(node.image_index==UINT_MAX)l->x+=l->layout->letter_spacing_64;l->row_ascent=ascent;l->row_height=h;
+    node.x_64=l->x;p->nodes[p->count++]=node;l->x+=(node.image_index==UINT_MAX)?pn_layout_tracked_advance(node.metrics.advance_64,l->layout->letter_spacing_64):node.metrics.advance_64;l->row_ascent=ascent;l->row_height=h;
     if(node.image_index==UINT_MAX && (node.codepoint==32 || node.codepoint==9))l->last_space=p->count-1;
     if(!l->has_begin){p->begin=node.position;p->begin_order=node.source_order;l->has_begin=true;}
     return PN_OK;
@@ -196,7 +200,15 @@ static pn_status_t consume(void *ctx,const pn_xhtml_event_t *event){
     if(event->kind==PN_XHTML_TEXT || event->kind==PN_XHTML_IMAGE)l->paragraph=false;
     if(!l->active || l->full)return PN_OK;
     if(event->kind==PN_XHTML_BLOCK_OPEN){line_end(l,false,0);return PN_OK;}
-    if(event->kind==PN_XHTML_BLOCK_CLOSE){line_end(l,false,event->block==PN_XHTML_CONTAINER?0:l->layout->paragraph_gap);return PN_OK;}
+    if(event->kind==PN_XHTML_BLOCK_CLOSE){
+        int gap=event->block==PN_XHTML_CONTAINER?0:l->layout->paragraph_gap;
+        if(gap && l->page->count>l->row && l->page->nodes[l->row].style.heading && l->layout->chapter_gap){
+            if(l->layout->chapter_gap==1)gap/=2;
+            else if(l->layout->chapter_gap==2)gap=gap*3/2;
+            else if(l->layout->chapter_gap==3)gap*=2;
+        }
+        line_end(l,false,gap);return PN_OK;
+    }
     if(event->kind==PN_XHTML_BREAK || (event->kind==PN_XHTML_TEXT && event->codepoint==10)){
         if(l->y+l->layout->line_height>l->layout->height){next(l,&event->position,l->page->count,l->order);return PN_OK;}
         if(!l->has_begin){l->page->begin=event->position;l->page->begin_order=l->order;l->has_begin=true;}line_end(l,true,0);return PN_OK;
@@ -207,7 +219,7 @@ static pn_status_t consume(void *ctx,const pn_xhtml_event_t *event){
 static pn_status_t init(pn_pool_t *pool,const pn_xhtml_position_t *start,const pn_xhtml_position_t *stop,const pn_layout_t *layout,const pn_epub_measure_t *measure,pn_epub_page_t *page,layout_t **owner){
     if(!page)return PN_INVALID;
     page->valid=false;page->count=0;page->image_count=0;page->has_next=false;page->begin_order=page->next_order=0;
-    if(!pool || !layout || !measure || !measure->glyph || !page->nodes || !page->capacity || page->capacity>PN_PAGE_GLYPHS_MAX || page->image_capacity>PN_EPUB_PAGE_IMAGES_MAX || (page->image_capacity && !page->images) || layout->width<1 || layout->width>4096 || layout->height<1 || layout->height>4096 || layout->line_height<1 || layout->line_height>layout->height || layout->indent<0 || layout->indent>=layout->width || layout->paragraph_gap<0 || layout->paragraph_gap>4096 || layout->letter_spacing_64<0 || layout->letter_spacing_64>4096)return PN_INVALID;
+    if(!pool || !layout || !measure || !measure->glyph || !page->nodes || !page->capacity || page->capacity>PN_PAGE_GLYPHS_MAX || page->image_capacity>PN_EPUB_PAGE_IMAGES_MAX || (page->image_capacity && !page->images) || layout->width<1 || layout->width>4096 || layout->height<1 || layout->height>4096 || layout->line_height<1 || layout->line_height>layout->height || layout->indent<0 || layout->indent>=layout->width || layout->paragraph_gap<0 || layout->paragraph_gap>4096 || layout->letter_spacing_64<-2048 || layout->letter_spacing_64>4096)return PN_INVALID;
     if(start && (!start->element || (start->kind!=PN_XHTML_ELEMENT && start->kind!=PN_XHTML_TEXT_POSITION) || (start->kind==PN_XHTML_ELEMENT && (start->run || start->offset))))return PN_INVALID;
     if(stop && (!stop->element || (stop->kind!=PN_XHTML_ELEMENT && stop->kind!=PN_XHTML_TEXT_POSITION) || (stop->kind==PN_XHTML_ELEMENT && (stop->run || stop->offset))))return PN_INVALID;
     layout_t *l=pn_alloc_tagged(pool,PN_MEM_LAYOUT,sizeof *l);if(!l)return PN_NO_MEMORY;

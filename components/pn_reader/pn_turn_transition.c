@@ -26,10 +26,12 @@ pn_status_t pn_turn_present(void *ctx,const pn_frame_t *next,pn_refresh_t profil
     if(t->style>PN_TURN_RIPPLE)return PN_INVALID;
     // 历史样式都直接显示一次；不分配动画帧。/ All legacy styles present once, without animation frame allocation.
     if(t->before && (!t->before->pixels || t->before->stride<(size_t)(next->width+1)/2 || t->before->width!=next->width || t->before->height!=next->height))return PN_INVALID;
-    // 普通翻页是只刷变化像素的GL16波纹；周期清理页改用GC16波纹，不再整屏同时闪。
-    // Ordinary turns are GL16 ripples over changed pixels; periodic cleaning turns use GC16 ripples instead of a simultaneous full flash.
+    // 普通翻页按模式路由：水波纹走弧形错峰、高清走完整48相GL16、极速走20相DU；周期清理页除水波纹外均走完整GC16。
+    // Route ordinary turns by style: ripple arc-staggered, crisp full 48-phase GL16, fast 20-phase DU; periodic cleans use full GC16 (or GC16 ripple).
     if(t->style==PN_TURN_RIPPLE && t->before && profile==PN_REFRESH_GL16)profile=t->reverse?PN_REFRESH_RIPPLE_REVERSE:PN_REFRESH_RIPPLE;
     else if(t->style==PN_TURN_RIPPLE && t->before && profile==PN_REFRESH_GC16)profile=t->reverse?PN_REFRESH_RIPPLE_CLEAN_REVERSE:PN_REFRESH_RIPPLE_CLEAN;
+    else if(t->style==PN_TURN_CRISP && t->before && profile==PN_REFRESH_GL16)profile=PN_REFRESH_CRISP;
+    else if(t->style==PN_TURN_FAST && t->before && profile==PN_REFRESH_GL16)profile=PN_REFRESH_FAST_TURN;
     pn_status_t status=t->present(t->ctx,next,profile);
     if(status!=PN_OK && status!=PN_CANCELLED && status!=PN_BUSY && t->before)(void)t->present(t->ctx,t->before,PN_REFRESH_GC16);
     return status;

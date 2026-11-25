@@ -73,7 +73,11 @@ int main(int argc,char **argv){
     assert(pn_settings_ui_event(&ui,PN_SETUI_GSTYLE_IMAGES,present,NULL)==PN_OK && pn_settings_ui_event(&ui,PN_SETUI_GSTYLE_ADJ+15,present,NULL)==PN_OK && pn_settings_ui_event(&ui,PN_SETUI_GSTYLE_EXT+1,present,NULL)==PN_OK);
     assert(pn_settings_ui_event(&ui,PN_SETUI_GSTYLE_MARGINS,present,NULL)==PN_OK && pn_settings_ui_event(&ui,PN_SETUI_GSTYLE_MADJ+1,present,NULL)==PN_OK && pn_settings_ui_event(&ui,PN_SETUI_BACK,present,NULL)==PN_OK);
     assert(pn_settings_ui_event(&ui,PN_SETUI_GSTYLE_BG,present,NULL)==PN_OK && pn_settings_ui_event(&ui,PN_SETUI_GSTYLE_BG_ITEM+2,present,NULL)==PN_OK);
-    {pn_style_t gs={0};assert(pn_style_global_load(&media,root,&gs)==PN_OK && gs.pixels==46 && gs.hide_bars==1 && gs.hide_images==1 && gs.clarity==1 && gs.reading_line==1 && gs.margin_top==4 && gs.background==7);}
+    // 负字间距与“全局阅读线与章节”子页立即持久化。/ Negative tracking and global reading-guide & chapter sub-page save immediately.
+    assert(pn_settings_ui_event(&ui,PN_SETUI_GSTYLE_ADJ+10,present,NULL)==PN_OK);
+    assert(pn_settings_ui_hit(&ui,200,1010)==PN_SETUI_GSTYLE_CHAPTER);
+    assert(pn_settings_ui_event(&ui,PN_SETUI_GSTYLE_CHAPTER,present,NULL)==PN_OK && pn_settings_ui_event(&ui,PN_SETUI_GSTYLE_CADJ+1,present,NULL)==PN_OK && pn_settings_ui_event(&ui,PN_SETUI_GSTYLE_CADJ+3,present,NULL)==PN_OK && pn_settings_ui_event(&ui,PN_SETUI_GSTYLE_CADJ+5,present,NULL)==PN_OK && pn_settings_ui_event(&ui,PN_SETUI_GSTYLE_CADJ+7,present,NULL)==PN_OK && pn_settings_ui_event(&ui,PN_SETUI_GSTYLE_CADJ+13,present,NULL)==PN_OK && pn_settings_ui_event(&ui,PN_SETUI_BACK,present,NULL)==PN_OK);
+    {pn_style_t gs={0};assert(pn_style_global_load(&media,root,&gs)==PN_OK && gs.pixels==46 && gs.tracking_percent==-5 && gs.reading_line_follow==1 && gs.reading_line_thickness_extra==1 && gs.chapter_scale_percent==130 && gs.chapter_align==1 && gs.footer_title_mode==1 && gs.hide_bars==1 && gs.hide_images==1 && gs.clarity==1 && gs.reading_line==1 && gs.margin_top==4 && gs.background==7);}
     assert(pn_settings_ui_event(&ui,PN_SETUI_GSTYLE_RESET,present,NULL)==PN_OK);
     {pn_style_t gs={0};assert(pn_style_global_load(&media,root,&gs)==PN_OK && gs.pixels==44 && !gs.hide_bars && !gs.hide_images && !gs.margin_top && !gs.background);}
     assert(pn_settings_ui_event(&ui,PN_SETUI_BACK,present,NULL)==PN_OK && pn_settings_ui_screen(&ui)==0);
@@ -98,8 +102,10 @@ int main(int argc,char **argv){
     assert(pn_settings_ui_event(&ui,PN_SETUI_LEVEL+1,present,NULL)==PN_OK && (ui.flags&PN_INPUT_REFRESH_MASK)==0x10 && pn_settings_refresh_pages(ui.flags)==6);
     assert(pn_settings_ui_event(&ui,PN_SETUI_FULL_REFRESH,present,NULL)==PN_OK && pn_settings_ui_event(&ui,PN_SETUI_LEVEL,present,NULL)==PN_OK && pn_settings_refresh_pages(ui.flags)==14);
     assert(pn_settings_ui_event(&ui,PN_SETUI_TURN+2,present,NULL)==PN_EMPTY && !(ui.flags&PN_INPUT_TURN_MASK));
-    /* 翻页效果：直接/水波纹两段，水波纹立即保存为样式3。/ Turn effect: direct/ripple segments; ripple saves at once as style 3. */
-    assert(pn_settings_ui_hit(&ui,180,940)==PN_SETUI_TURN && pn_settings_ui_hit(&ui,500,940)==PN_SETUI_TURN+1);
+    /* 翻页效果：直接/高清/水波纹/极速四段，分别保存为样式 0/1/3/2。/ Turn effect: direct/crisp/ripple/fast 4 segments saving as style 0/1/3/2. */
+    assert(pn_settings_ui_hit(&ui,100,940)==PN_SETUI_TURN && pn_settings_ui_hit(&ui,260,940)==PN_SETUI_TURN_CRISP && pn_settings_ui_hit(&ui,420,940)==PN_SETUI_TURN+1 && pn_settings_ui_hit(&ui,580,940)==PN_SETUI_TURN_FAST);
+    assert(pn_settings_ui_event(&ui,PN_SETUI_TURN_CRISP,present,NULL)==PN_OK && ((ui.flags&PN_INPUT_TURN_MASK)>>6)==1u && pn_settings_load_flags(&media,root,&flags)==PN_OK && flags==ui.flags);
+    assert(pn_settings_ui_event(&ui,PN_SETUI_TURN_FAST,present,NULL)==PN_OK && ((ui.flags&PN_INPUT_TURN_MASK)>>6)==2u && pn_settings_load_flags(&media,root,&flags)==PN_OK && flags==ui.flags);
     assert(pn_settings_ui_event(&ui,PN_SETUI_TURN+1,present,NULL)==PN_OK && (ui.flags&PN_INPUT_TURN_MASK)==PN_INPUT_TURN_MASK && pn_settings_load_flags(&media,root,&flags)==PN_OK && flags==ui.flags);
     assert(pn_settings_ui_event(&ui,PN_SETUI_TURN+1,present,NULL)==PN_EMPTY && pn_settings_ui_event(&ui,PN_SETUI_TURN,present,NULL)==PN_OK && !(ui.flags&PN_INPUT_TURN_MASK));
     assert(pn_settings_load_flags(&media,root,&flags)==PN_OK && flags==ui.flags);

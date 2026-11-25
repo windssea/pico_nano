@@ -17,8 +17,11 @@ with tempfile.TemporaryDirectory() as folder:
     assert r.returncode==0,(r.stdout,r.stderr)
     data=(root/'preview.pgm').read_bytes();assert data.startswith(b'P5\n684 1216\n15\n')
     pixels=(root/'preview.pgm-list.pgm').read_bytes().split(b'\n',3)[3]
-    # 横图等比缩入竖缩略框，白色留边；有效图完整出现，伪图只显示图标。/ A landscape thumbnail preserves aspect with white margins; valid pixels appear only after complete decoding.
-    assert pixels[466*684+300]==15 and pixels[686*684+300]==15
-    assert pixels[546*684+290]!=pixels[546*684+390] and pixels[606*684+320]<5
+    # 横图等比缩入竖缩略框（132×234，底留文件名区），白色留边；有效图完整出现，伪图只显示图标。
+    # A landscape thumbnail preserves aspect inside 132x234 with filename caption below; valid pixels appear only after complete decoding.
+    assert pixels[466*684+300]==15 and pixels[650*684+300]==15
+    assert pixels[536*684+290]!=pixels[536*684+390] and pixels[586*684+320]<5
+    # 卡片下方文件名区域应出现文字像素（b-photo）。/ Filename caption region below thumbnail should contain rendered text ink.
+    assert any(pixels[y*684+x]<15 for y in range(694,724) for x in range(256,428))
     print(r.stdout.decode().strip())
 print('wallpaper ui: list/preview/cover/shift/rotate/no-overlay/apply/cancel/busy/no-partition/missing-dir/fault-injected open passed')

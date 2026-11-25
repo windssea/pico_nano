@@ -13,6 +13,7 @@
 #include "pn_text_file.h"
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/stat.h>
 #define W PN_WALLPAPER_WIDTH
 #define H PN_WALLPAPER_HEIGHT
@@ -27,6 +28,7 @@
 #define THUMB_BYTES (TW*TH/2)
 typedef struct {
     pn_pool_t *pool;pn_media_t *images;char directory[PN_CATALOG_PATH_MAX],cache_dir[PN_WALLPAPER_PATH_MAX];
+    char mask_dir[PN_CATALOG_PATH_MAX],mask_cache_dir[PN_WALLPAPER_PATH_MAX];
     pn_wallpaper_store_t store,mask_store;bool has_store,has_mask_store,busy;
     pn_font_t font;uint8_t *canvas_px,*bitmap_px,*small_px,*alpha_px;pn_frame_t canvas,bitmap,small,alpha;
     pn_catalog_page_t page;pn_lock_selection_t saved,saved_mask,draft;pn_bookmark_lock_t bookmark;bool saved_known,saved_mask_known,bitmap_valid;
@@ -47,13 +49,33 @@ static void thumbnail_close(ui_t *u){
     u->thumb_held=false;
 }
 static void thumbnail_reset(ui_t *u){thumbnail_close(u);u->thumb_next=0;memset(u->thumb_valid,0,sizeof u->thumb_valid);}
+static const char *active_dir(const ui_t *u){
+    return (u->chosen==PN_LOCK_MASK && *u->mask_dir)?u->mask_dir:u->directory;
+}
+static const char *active_cache(const ui_t *u){
+    return (u->chosen==PN_LOCK_MASK && *u->mask_dir)?u->mask_cache_dir:u->cache_dir;
+}
+static void strip_image_ext(const char *name,char *out,size_t cap){
+    if(!out || !cap)return;
+    out[0]=0;if(!name || !*name)return;
+    const char *slash=strrchr(name,'/');if(slash)name=slash+1;
+    size_t n=strlen(name);
+    const char *dot=strrchr(name,'.');
+    if(dot && dot>name){
+        const char *ext=dot+1;
+        if(!strcasecmp(ext,"png") || !strcasecmp(ext,"jpg") || !strcasecmp(ext,"jpeg"))n=(size_t)(dot-name);
+    }
+    if(n>=cap){n=cap-1;while(n>0 && ((unsigned char)name[n]&0xc0u)==0x80u)n--;}
+    memcpy(out,name,n);out[n]=0;
+}
 // 命中整CRC的缩略图在首帧前装入，未命中留给原分步任务。/ Load CRC-verified thumbnails before the first frame; leave misses to the incremental decoder.
 static void thumbnails_cached(ui_t *u){
-    if(!*u->cache_dir)return;
+    const char *cache=active_cache(u);
+    if(!*cache)return;
     pn_media_lease_t lease;if(pn_media_acquire(u->images,PN_MEDIA_READ,&lease)!=PN_OK)return;
     for(size_t i=0;i<u->page.count && i<IMAGE_ROWS;i++){
         pn_frame_t thumb;(void)pn_frame_bind(&thumb,u->thumbs[i],THUMB_BYTES,TW,TH);
-        u->thumb_valid[i]=pn_wallpaper_thumbnail_load(u->images,&lease,u->cache_dir,u->page.items[i].path,&thumb)==PN_OK;
+        u->thumb_valid[i]=pn_wallpaper_thumbnail_load(u->images,&lease,cache,u->page.items[i].path,&thumb)==PN_OK;
     }
     (void)pn_media_release(u->images,&lease);
     while(u->thumb_next<u->page.count && u->thumb_next<IMAGE_ROWS && u->thumb_valid[u->thumb_next])u->thumb_next++;
@@ -67,10 +89,12 @@ static pn_status_t thumbnail_read(void *ctx,uint8_t *out,size_t cap,size_t *n){
 static void *thumbnail_alloc(void *ctx,size_t bytes){return pn_alloc_tagged(ctx,PN_MEM_UI,bytes);}
 static void thumbnail_free(void *ctx,void *ptr){(void)ctx;pn_free(ptr);}
 static pn_status_t load_page(ui_t *u,const char *cursor,bool previous){
+    const char *dir=active_dir(u);
     pn_catalog_page_t *next=pn_alloc_tagged(u->pool,PN_MEM_UI,sizeof *next);if(!next)return PN_NO_MEMORY;
     pn_media_lease_t lease;pn_status_t status=pn_media_acquire(u->images,PN_MEDIA_READ,&lease);
-    if(status==PN_OK){status=previous?pn_catalog_image_page_before(u->images,&lease,u->directory,cursor,next):pn_catalog_image_page(u->images,&lease,u->directory,cursor,next);(void)pn_media_release(u->images,&lease);}
+    if(status==PN_OK){status=previous?pn_catalog_image_page_before(u->images,&lease,dir,cursor,next):pn_catalog_image_page(u->images,&lease,dir,cursor,next);(void)pn_media_release(u->images,&lease);}
     if(status==PN_OK && (next->count || !*cursor)){thumbnail_reset(u);u->page=*next;thumbnails_cached(u);}
+    else if(status==PN_EMPTY || (status==PN_IO && !*cursor)){thumbnail_reset(u);memset(&u->page,0,sizeof u->page);status=PN_OK;}
     pn_free(next);return status;
 }
 static void reload_saved(ui_t *u){
@@ -108,8 +132,9 @@ static pn_status_t build_preview(ui_t *u){
                 if(!u->alpha_px)u->alpha_px=pn_alloc_tagged(u->pool,PN_MEM_UI,PN_WALLPAPER_BYTES);
                 if(!u->alpha_px)status=PN_NO_MEMORY;
                 else{(void)pn_frame_bind(&u->alpha,u->alpha_px,PN_WALLPAPER_BYTES,W,H);free_bytes=u->pool->limit>u->pool->used?u->pool->limit-u->pool->used:0;
-                    status=pn_wallpaper_mask_prepare_cached(u->pool,u->images,&lease,u->draft.source,u->draft.transform,free_bytes>RESERVE?free_bytes-RESERVE:1,&u->bitmap,&u->alpha,*u->cache_dir?u->cache_dir:NULL);}
-            }else if(status==PN_OK)status=pn_wallpaper_prepare_cached(u->pool,u->images,&lease,u->draft.source,u->draft.transform,free_bytes>RESERVE?free_bytes-RESERVE:1,&u->bitmap,*u->cache_dir?u->cache_dir:NULL);
+                    const char *cache=active_cache(u);
+                    status=pn_wallpaper_mask_prepare_cached(u->pool,u->images,&lease,u->draft.source,u->draft.transform,free_bytes>RESERVE?free_bytes-RESERVE:1,&u->bitmap,&u->alpha,*cache?cache:NULL);}
+            }else if(status==PN_OK){const char *cache=active_cache(u);status=pn_wallpaper_prepare_cached(u->pool,u->images,&lease,u->draft.source,u->draft.transform,free_bytes>RESERVE?free_bytes-RESERVE:1,&u->bitmap,*cache?cache:NULL);}
             if(status==PN_OK && (stat(u->draft.source,&after) || before.st_size!=after.st_size || before.st_mtime!=after.st_mtime))status=PN_STALE_MEDIA;
             if(status==PN_OK){u->prepared_size=(uint64_t)after.st_size;u->prepared_mtime=(int64_t)after.st_mtime;u->draft.source_size=u->prepared_size;u->draft.source_mtime=u->prepared_mtime;}
             (void)pn_media_release(u->images,&lease);}
@@ -137,6 +162,23 @@ static pn_status_t build_preview(ui_t *u){
 #define PAGER_Y 1084
 #define CONTROL_Y0 770
 #define CONTROL_PITCH 90
+#define MOVE_BTN_Y 1042
+#define MOVE_BTN_H 74
+/// 判断当前预览图是否位于标准壁纸/遮罩目录且可直接移到另一目录。/ Check whether the previewed image lives in the standard wallpaper/mask folder and can be moved to the counterpart folder.
+static bool can_move_other(const ui_t *u,const char **src_dir_out,const char **dst_dir_out,const char **leaf_out){
+    if(!u || !*u->mask_dir || !*u->directory || strcmp(u->directory,u->mask_dir)==0)return false;
+    if(u->draft.mode!=PN_LOCK_CUSTOM && u->draft.mode!=PN_LOCK_MASK)return false;
+    const char *src_dir=u->draft.mode==PN_LOCK_MASK?u->mask_dir:u->directory;
+    const char *dst_dir=u->draft.mode==PN_LOCK_MASK?u->directory:u->mask_dir;
+    size_t dlen=strlen(src_dir);
+    if(!dlen || strncmp(u->draft.source,src_dir,dlen)!=0 || u->draft.source[dlen]!='/')return false;
+    const char *leaf=u->draft.source+dlen+1u;
+    if(!*leaf || strchr(leaf,'/') || strchr(leaf,'\\'))return false;
+    if(src_dir_out)*src_dir_out=src_dir;
+    if(dst_dir_out)*dst_dir_out=dst_dir;
+    if(leaf_out)*leaf_out=leaf;
+    return true;
+}
 static pn_status_t line_text(ui_t *u,const char *value,int size,int baseline,pn_align_t align){
     int original=u->font.pixels;pn_status_t s=pn_font_size(&u->font,size);
     if(s==PN_OK)s=pn_w_text(&u->font,&u->canvas,value,PN_UI_MARGIN,baseline,620,align);
@@ -149,6 +191,7 @@ static pn_status_t sized_button(ui_t *u,const char *label,int x,int y,int w,int 
 }
 static pn_status_t draw(ui_t *u,pn_wallpaper_screen_t screen){
     pn_frame_clear(&u->canvas,15);pn_status_t s=PN_OK;char line[PN_WALLPAPER_PATH_MAX+64];
+    pn_w_font_scope_t scope={0};(void)pn_w_font_scope_begin(&scope,u->pool,NULL);
     if(screen==PN_WUI_LIST){
         s=pn_w_header(&u->font,&u->canvas,"< 返回","锁屏壁纸",NULL);
         if(s==PN_OK){
@@ -161,13 +204,24 @@ static pn_status_t draw(ui_t *u,pn_wallpaper_screen_t screen){
         for(int i=0;i<3 && s==PN_OK;i++)s=sized_button(u,names[i],32+i*212,MODE_BUTTON_Y,196,80,u->chosen==(i==0?PN_LOCK_CUSTOM:i==1?PN_LOCK_MASK:PN_LOCK_BOOKMARK)?PN_W_SELECTED:0u);
         if(s==PN_OK)s=sized_button(u,u->chosen==PN_LOCK_MASK?"关闭阅读遮罩":"重置为系统默认",32,294,620,56,0u);
         bool images=u->chosen!=PN_LOCK_BOOKMARK;
-        if(s==PN_OK)s=pn_w_section(&u->font,&u->canvas,images?(u->page.count?(u->thumb_next<u->page.count && u->thumb_next<IMAGE_ROWS?"选择图片 · 预览准备中":"选择图片"):"暂无图片，请先传入 JPEG/PNG"):"书签自动使用本地阅读数据，无需选择图片",IMAGE_SECTION_Y);
+        const char *sec_title=u->chosen==PN_LOCK_MASK?(u->page.count?(u->thumb_next<u->page.count && u->thumb_next<IMAGE_ROWS?"选择阅读遮罩 · 预览准备中":"选择阅读遮罩"):"暂无遮罩图，请传至「阅读遮罩」目录"):(u->page.count?(u->thumb_next<u->page.count && u->thumb_next<IMAGE_ROWS?"选择锁屏壁纸 · 预览准备中":"选择锁屏壁纸"):"暂无壁纸图，请传至「锁屏壁纸」目录");
+        if(s==PN_OK)s=pn_w_section(&u->font,&u->canvas,images?sec_title:"书签自动使用本地阅读数据，无需选择图片",IMAGE_SECTION_Y);
+        int saved_px=u->font.pixels;
         for(size_t i=0;images && i<u->page.count && i<IMAGE_ROWS && s==PN_OK;i++){
             int x=32+(int)(i%3)*212,y=IMAGE_ROW_Y+(int)(i/3)*IMAGE_PITCH;
-            pn_w_round_stroke(&u->canvas,x,y,196,300,10,1,PN_UI_RULE);
-            if(u->thumb_valid[i]){for(int row=0;row<TH;row++)memcpy(u->canvas.pixels+(size_t)(y+22+row)*u->canvas.stride+(x+26)/2,u->thumbs[i]+row*TW/2,TW/2);}
-            else pn_w_icon(&u->canvas,i>=u->thumb_next?PN_ICON_LOADING:PN_ICON_IMAGE,x+72,y+124,52,PN_UI_MUTED);
+            bool selected=(u->chosen==PN_LOCK_MASK && u->saved_mask_known && u->saved_mask.mode==PN_LOCK_MASK && !strcmp(u->saved_mask.source,u->page.items[i].path))
+                || (u->chosen==PN_LOCK_CUSTOM && u->saved_known && u->saved.mode==PN_LOCK_CUSTOM && !strcmp(u->saved.source,u->page.items[i].path));
+            pn_w_round_stroke(&u->canvas,x,y,196,300,10,selected?3.0f:1.0f,selected?PN_UI_INK:PN_UI_RULE);
+            if(u->thumb_valid[i]){
+                pn_frame_t thumb={u->thumbs[i],TW,TH,TW/2};
+                const int dw=132,dh=234,dx=x+(196-dw)/2,dy=y+12;
+                for(int row=0;row<dh;row++)for(int col=0;col<dw;col++)pn_frame_pixel(&u->canvas,dx+col,dy+row,pn_frame_get(&thumb,col*TW/dw,row*TH/dh));
+            }
+            else pn_w_icon(&u->canvas,i>=u->thumb_next?PN_ICON_LOADING:PN_ICON_IMAGE,x+72,y+106,52,PN_UI_MUTED);
+            char label[PN_CATALOG_NAME_MAX];strip_image_ext(u->page.items[i].name,label,sizeof label);
+            if(pn_font_size(&u->font,20)==PN_OK)s=pn_w_text_ex(&u->font,&u->canvas,label,x+8,y+280,180,PN_ALIGN_CENTER,PN_UI_INK,selected);
         }
+        (void)pn_font_size(&u->font,saved_px);
         if(s==PN_OK && *u->message)s=line_text(u,u->message,22,1196,PN_ALIGN_LEFT);
         if(s==PN_OK && images)s=sized_button(u,"上一页",32,PAGER_Y,196,80,0u);
         if(s==PN_OK && images)s=sized_button(u,"下一页",456,PAGER_Y,196,80,0u);
@@ -179,9 +233,17 @@ static pn_status_t draw(ui_t *u,pn_wallpaper_screen_t screen){
         if(custom && s==PN_OK){s=sized_button(u,u->draft.transform.fit==PN_WALLPAPER_COVER?"铺满裁切":"完整显示",32,CONTROL_Y0,300,80,0u);
             if(s==PN_OK)s=sized_button(u,"旋转 90°",352,CONTROL_Y0,300,80,0u);
             if(s==PN_OK && cover){s=sized_button(u,"裁切位置 -",32,CONTROL_Y0+CONTROL_PITCH,300,80,0u);if(s==PN_OK)s=sized_button(u,"裁切位置 +",352,CONTROL_Y0+CONTROL_PITCH,300,80,0u);}}
-        if(s==PN_OK)s=line_text(u,custom?(u->draft.mode==PN_LOCK_MASK?"遮罩 · 叠加在阅读页面上":"壁纸 · 全屏显示所选图片"):"书签 · 自动使用当前书籍与本地数据",26,1040,PN_ALIGN_CENTER);
+        if(s==PN_OK){
+            if(custom){char name[PN_CATALOG_NAME_MAX];strip_image_ext(u->draft.source,name,sizeof name);snprintf(line,sizeof line,"%s · %s",u->draft.mode==PN_LOCK_MASK?"遮罩":"壁纸",name);}
+            else snprintf(line,sizeof line,"书签 · 自动使用当前书籍与本地数据");
+            s=line_text(u,line,26,1004,PN_ALIGN_CENTER);
+        }
+        if(s==PN_OK && can_move_other(u,NULL,NULL,NULL)){
+            s=sized_button(u,u->draft.mode==PN_LOCK_MASK?"移至「锁屏壁纸」目录":"移至「阅读遮罩」目录",32,MOVE_BTN_Y,620,MOVE_BTN_H,0u);
+        }
         if(s==PN_OK){snprintf(line,sizeof line,"预览未保存：%s",mode_name(&u->draft));s=line_text(u,*u->message?u->message:line,26,1190,PN_ALIGN_LEFT);}
     }
+    pn_w_font_scope_end(&scope);
     return s;
 }
 static pn_status_t show(pn_wallpaper_ui_t *ui,pn_wallpaper_present_fn present,void *ctx){
@@ -220,6 +282,17 @@ pn_status_t pn_wallpaper_ui_open_cached(pn_wallpaper_ui_t *ui,pn_pool_t *pool,pn
 pn_status_t pn_wallpaper_ui_open(pn_wallpaper_ui_t *ui,pn_pool_t *pool,pn_media_t *images_media,const char *directory,const pn_wallpaper_store_t *store,pn_wallpaper_present_fn present,void *ctx){
     return pn_wallpaper_ui_open_cached(ui,pool,images_media,directory,store,present,ctx,NULL);
 }
+pn_status_t pn_wallpaper_ui_set_mask_dir(pn_wallpaper_ui_t *ui,const char *mask_dir,const char *mask_cache_dir){
+    if(!ui || !ui->impl)return PN_INVALID;
+    ui_t *u=ui->impl;
+    if(mask_dir && strlen(mask_dir)>=sizeof u->mask_dir)return PN_LIMIT;
+    if(mask_cache_dir && strlen(mask_cache_dir)>=sizeof u->mask_cache_dir)return PN_LIMIT;
+    u->mask_dir[0]=0;u->mask_cache_dir[0]=0;
+    if(mask_dir && *mask_dir)strcpy(u->mask_dir,mask_dir);
+    if(mask_cache_dir && *mask_cache_dir)strcpy(u->mask_cache_dir,mask_cache_dir);
+    if(u->chosen==PN_LOCK_MASK)(void)load_page(u,"",false);
+    return PN_OK;
+}
 static pn_status_t apply(pn_wallpaper_ui_t *ui,bool for_mask){
     ui_t *u=ui->impl;
     if(!u->has_store || (for_mask && !u->has_mask_store)){snprintf(u->message,sizeof u->message,"内部壁纸分区不可用，锁屏未更改");return PN_UNSUPPORTED;}
@@ -253,7 +326,12 @@ pn_status_t pn_wallpaper_ui_event(pn_wallpaper_ui_t *ui,int command,pn_wallpaper
         u->message[0]=0;
         if(command==PN_WUI_BACK){ui->active=false;return PN_OK;}
         else if(command==PN_WUI_DEFAULT){bool clearing_mask=u->chosen==PN_LOCK_MASK;thumbnail_close(u);begin_preview(u,(pn_lock_selection_t){.mode=PN_LOCK_DEFAULT});status=show_busy(ui,present,ctx,clearing_mask?"正在关闭阅读遮罩":"正在应用锁屏");if(status==PN_OK)status=apply(ui,clearing_mask);ui->last=status;if(status==PN_OK && !clearing_mask)u->chosen=PN_LOCK_CUSTOM;}
-        else if(command==PN_WUI_WALLPAPER || command==PN_WUI_MASK){u->chosen=command==PN_WUI_MASK?PN_LOCK_MASK:PN_LOCK_CUSTOM;}
+        else if(command==PN_WUI_WALLPAPER || command==PN_WUI_MASK){
+            pn_lock_mode_t next_mode=command==PN_WUI_MASK?PN_LOCK_MASK:PN_LOCK_CUSTOM;
+            bool switched=u->chosen!=next_mode && *u->mask_dir!=0;
+            u->chosen=next_mode;
+            if(switched)(void)load_page(u,"",false);
+        }
         else if(command==PN_WUI_BOOKMARK){u->chosen=PN_LOCK_BOOKMARK;thumbnail_close(u);begin_preview(u,(pn_lock_selection_t){.mode=PN_LOCK_BOOKMARK,.hint=false});rebuild=true;}
         else if(u->chosen!=PN_LOCK_BOOKMARK && command>=PN_WUI_ROW && command<PN_WUI_ROW+(int)u->page.count && command<PN_WUI_ROW+IMAGE_ROWS){thumbnail_close(u);const pn_catalog_item_t *item=&u->page.items[command-PN_WUI_ROW];
             if(strlen(item->path)>=PN_WALLPAPER_PATH_MAX)return PN_LIMIT;
@@ -274,6 +352,47 @@ pn_status_t pn_wallpaper_ui_event(pn_wallpaper_ui_t *ui,int command,pn_wallpaper
         else if((command==PN_WUI_LEFT || command==PN_WUI_RIGHT) && cover){int shift=u->draft.transform.shift+(command==PN_WUI_LEFT?-1:1);
             if(shift<-PN_WALLPAPER_SHIFT_MAX || shift>PN_WALLPAPER_SHIFT_MAX)return PN_EMPTY;
             u->draft.transform.shift=(int8_t)shift;rebuild=true;}
+        else if(command==PN_WUI_MOVE_OTHER){
+            const char *src_dir=NULL,*dst_dir=NULL,*leaf=NULL;
+            if(!can_move_other(u,&src_dir,&dst_dir,&leaf))return PN_EMPTY;
+            bool to_mask=(u->draft.mode==PN_LOCK_CUSTOM);
+            char dst[PN_WALLPAPER_PATH_MAX];
+            int n=snprintf(dst,sizeof dst,"%s/%s",dst_dir,leaf);
+            if(n<=0 || (size_t)n>=sizeof dst){snprintf(u->message,sizeof u->message,"目标路径过长，未移动");status=PN_LIMIT;}
+            else{
+                thumbnail_close(u);
+                status=show_busy(ui,present,ctx,to_mask?"正在移至阅读遮罩目录":"正在移至锁屏壁纸目录");
+                if(status==PN_OK){
+                    pn_media_lease_t lease={0};bool exists=false;
+                    status=pn_media_acquire(u->images,PN_MEDIA_WRITE,&lease);
+                    if(status==PN_OK){
+                        struct stat st;
+                        if(stat(dst_dir,&st)!=0)(void)mkdir(dst_dir,0755);
+                        if(stat(dst,&st)==0){exists=true;status=PN_BUSY;}
+                        else if(rename(u->draft.source,dst)!=0)status=PN_IO;
+                        (void)pn_media_release(u->images,&lease);
+                    }
+                    if(status==PN_OK){
+                        // 若移动的原图正被当前遮罩记录引用，同步更新源路径以免丢失绑定。/ Keep active mask source binding intact when moving its file.
+                        if(u->has_mask_store && u->saved_mask_known && u->saved_mask.mode==PN_LOCK_MASK && !strcmp(u->saved_mask.source,u->draft.source)){
+                            pn_media_lease_t wl={0};
+                            if(pn_media_acquire(u->mask_store.media,PN_MEDIA_WRITE,&wl)==PN_OK){
+                                pn_lock_selection_t updated=u->saved_mask;
+                                snprintf(updated.source,sizeof updated.source,"%s",dst);
+                                (void)pn_wallpaper_save(&u->mask_store,&wl,&updated,NULL);
+                                (void)pn_media_release(u->mask_store.media,&wl);
+                            }
+                        }
+                        reload_saved(u);
+                        u->bitmap_valid=false;ui->screen=PN_WUI_LIST;
+                        if(load_page(u,"",false)!=PN_OK)memset(&u->page,0,sizeof u->page);
+                        snprintf(u->message,sizeof u->message,to_mask?"已移至「阅读遮罩」目录":"已移至「锁屏壁纸」目录");
+                    }else{
+                        snprintf(u->message,sizeof u->message,exists?"目标目录已有同名图片，未移动":status==PN_BUSY?"存储卡正忙，请稍后重试":"移动失败，原图已保留");
+                    }
+                }
+            }
+        }
         else return PN_EMPTY;
     }
     if(rebuild){status=show_busy(ui,present,ctx,"正在生成预览");
@@ -317,7 +436,8 @@ pn_status_t pn_wallpaper_ui_tick(pn_wallpaper_ui_t *ui,pn_wallpaper_present_fn p
     // 输入取消不是图片无效，关闭暂定解码并保留本槽，下一轮空闲重试。/ Input cancellation is not an invalid image: discard provisional decoding, retain this slot and retry while idle.
     if(status==PN_CANCELLED){thumbnail_close(u);return PN_BUSY;}
     u->thumb_valid[u->thumb_next]=status==PN_OK;thumbnail_close(u);
-    if(status==PN_OK && *u->cache_dir)(void)pn_wallpaper_thumbnail_save(u->images,u->cache_dir,u->page.items[u->thumb_next].path,&u->thumb_frame);
+    const char *cache=active_cache(u);
+    if(status==PN_OK && *cache)(void)pn_wallpaper_thumbnail_save(u->images,cache,u->page.items[u->thumb_next].path,&u->thumb_frame);
     u->thumb_next++;while(u->thumb_next<count && u->thumb_valid[u->thumb_next])u->thumb_next++;
     if(u->thumb_next==count)return show(ui,present,ctx);
     if(u->thumb_next==1 && status==PN_OK){pn_status_t shown=show(ui,present,ctx);if(shown!=PN_OK)return shown;}
@@ -347,6 +467,7 @@ int pn_wallpaper_ui_hit(const pn_wallpaper_ui_t *ui,int x,int y){
     if(custom){
         if(y>=CONTROL_Y0 && y<CONTROL_Y0+80)return x<332?PN_WUI_FIT:x>=352?PN_WUI_ROTATE:-1;
         if(cover){if(y>=CONTROL_Y0+CONTROL_PITCH && y<CONTROL_Y0+CONTROL_PITCH+80)return x<332?PN_WUI_LEFT:x>=352?PN_WUI_RIGHT:-1;}
+        if(can_move_other(u,NULL,NULL,NULL) && y>=MOVE_BTN_Y && y<MOVE_BTN_Y+MOVE_BTN_H)return PN_WUI_MOVE_OTHER;
     }
     return -1;
 }

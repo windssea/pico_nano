@@ -19,9 +19,9 @@ pn_status_t pn_usb_view_render(const pn_usb_view_t *v,pn_font_t *font,pn_frame_t
     if(s==PN_OK)s=pn_w_text_lines_ex(font,f,state,32,260,620,2,44,0,true);
     if(s==PN_OK)s=pn_font_size(font,24);
     if(s==PN_OK)s=pn_w_text_lines_ex(font,f,"使用数据线连接电脑，在磁盘中按以下目录复制。传输期间暂停阅读与无线连接。",32,390,620,3,36,4,false);
-    const char *paths[]={"图书  /" PN_SD_BOOKS,"字体  /" PN_SD_FONTS,"封面  /" PN_SD_COVERS,"锁屏  /" PN_SD_WALLPAPERS};
-    for(unsigned i=0;i<4 && s==PN_OK;i++)s=pn_w_text_ex(font,f,paths[i],32,560+(int)i*42,620,PN_ALIGN_LEFT,0,false);
-    if(s==PN_OK)s=pn_w_text_lines_ex(font,f,"这是电脑直接读写，文件不经过网页上传校验。复制完成后先在电脑安全弹出，再点击结束。",32,790,620,3,36,4,false);
+    const char *paths[]={"图书  /" PN_SD_BOOKS,"字体  /" PN_SD_FONTS,"封面  /" PN_SD_COVERS,"横幅  /" PN_SD_BANNERS,"锁屏  /" PN_SD_WALLPAPERS,"遮罩  /" PN_SD_MASKS,"背景  /" PN_SD_BACKGROUNDS,"词典  /" PN_SD_DICTS};
+    for(unsigned i=0;i<8 && s==PN_OK;i++)s=pn_w_text_ex(font,f,paths[i],32,498+(int)i*36,620,PN_ALIGN_LEFT,0,false);
+    if(s==PN_OK)s=pn_w_text_lines_ex(font,f,"这是电脑直接读写，文件不经过网页上传校验。复制完成后先在电脑安全弹出，再点击结束。",32,810,620,3,36,4,false);
     if(s==PN_OK)s=pn_w_button(font,f,v->failed?"重试结束":v->released?"返回传书":"结束 USB 传输",32,1030,620,100,0);
     pn_status_t restored=pn_font_size(font,size);return s==PN_OK?restored:s;
 }

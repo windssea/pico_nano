@@ -19,10 +19,12 @@
 
 #define PN_FM_CAT_BOOKS 0u ///< 图书目录 / Books directory
 #define PN_FM_CAT_FONTS 1u ///< 字体目录 / Fonts directory
-#define PN_FM_CAT_WALLPAPERS 2u ///< 壁纸与横幅目录 / Wallpapers and banners directory
+#define PN_FM_CAT_WALLPAPERS 2u ///< 锁屏壁纸目录 / Lock-screen wallpapers directory
 #define PN_FM_CAT_BACKGROUNDS 3u ///< 阅读背景目录 / Reading backgrounds directory
 #define PN_FM_CAT_COVERS 4u ///< 封面原图目录 / Book covers directory
-#define PN_FM_CAT_COUNT 5u ///< 标准目录总数 / Number of standard public directories
+#define PN_FM_CAT_BANNERS 5u ///< 首页横幅目录 / Home top banners directory
+#define PN_FM_CAT_MASKS 6u ///< 阅读遮罩目录 / Reading lock-masks directory
+#define PN_FM_CAT_COUNT 7u ///< 标准目录总数 / Number of standard public directories
 
 #define PN_FM_PAGE_SIZE 9u ///< 每页最多展示项数 / Maximum visible entries per page
 #define PN_FM_BROWSE_PAGE_SIZE 8u ///< 外部目录浏览页每页目录数 / Folders per page in external directory browser
@@ -131,6 +133,11 @@ void pn_file_manager_init(pn_file_manager_t *fm,const char *root,const char *sto
 /// 可选覆盖单个标准目录的完整路径（供主机模拟器映射独立样本目录；设备路径使用 init 默认值）。
 /// Optionally override one standard category directory path (used by the host simulator for sample roots; firmware uses init defaults).
 void pn_file_manager_set_dir(pn_file_manager_t *fm,unsigned category,const char *dir_path);
+/// 判断标准目录是否属于可跨目录移动的四类图片（锁屏壁纸/阅读背景/首页横幅/阅读遮罩）。
+/// Check whether a standard category belongs to the four cross-movable image folders (wallpapers/backgrounds/banners/masks).
+bool pn_file_manager_is_image_category(unsigned category);
+/// 返回图片移动目标标识对应的中文名称，非图片目标返回 NULL。/ Return the Chinese display title for an image move target token, or NULL if not an image target.
+const char *pn_file_manager_move_target_label(const char *target);
 /// 返回标准目录相对路径（pn_sd_layout.h 常量）。/ Return the relative directory constant from pn_sd_layout.h.
 const char *pn_file_manager_category_dir(unsigned category);
 /// 返回新建文件夹预设名称。/ Return a preset subfolder name.

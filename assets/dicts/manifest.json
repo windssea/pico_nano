@@ -1,0 +1,90 @@
+{
+  "schema": 1,
+  "generated_date": "2026-11-25",
+  "dictionaries": [
+    {
+      "id": "ecdict-en-zh",
+      "zip_name": "PicoNano-dict-ecdict-en-zh.zip",
+      "title": "ECDICT 英汉核心词典",
+      "subtitle": "英译中 · 音标、考纲标签与词形变化",
+      "direction": "英 → 汉",
+      "wordcount": 124675,
+      "license": "MIT",
+      "source": "skywind3000/ECDICT",
+      "source_url": "https://github.com/skywind3000/ECDICT",
+      "raw_dict_bytes": 10953069,
+      "size": 4296984,
+      "sha256": "3dfa1a84f44b667601f6646b57cba190e6cb4ccd5f5c9a8d14f819edec019621",
+      "files": [
+        {
+          "name": "ecdict-en-zh.dict.dz",
+          "size": 3297868
+        },
+        {
+          "name": "ecdict-en-zh.idx",
+          "size": 2185586
+        },
+        {
+          "name": "ecdict-en-zh.ifo",
+          "size": 215
+        }
+      ]
+    },
+    {
+      "id": "xinhua-zh",
+      "zip_name": "PicoNano-dict-xinhua-zh.zip",
+      "title": "中华新华字词成语典",
+      "subtitle": "汉解 · 1.6万汉字、3万成语与26万汉语词语",
+      "direction": "汉 → 汉",
+      "wordcount": 293150,
+      "license": "MIT",
+      "source": "pwxcoo/chinese-xinhua",
+      "source_url": "https://github.com/pwxcoo/chinese-xinhua",
+      "raw_dict_bytes": 28734138,
+      "size": 15970553,
+      "sha256": "d947705f97c51c201942bf698b5e779e92fbb44bb0d675bf5d0bbd0b2de51a4b",
+      "files": [
+        {
+          "name": "xinhua-zh.dict.dz",
+          "size": 13468904
+        },
+        {
+          "name": "xinhua-zh.idx",
+          "size": 4724922
+        },
+        {
+          "name": "xinhua-zh.ifo",
+          "size": 207
+        }
+      ]
+    },
+    {
+      "id": "cc-cedict-zh-en",
+      "zip_name": "PicoNano-dict-cc-cedict-zh-en.zip",
+      "title": "CC-CEDICT 汉英词典",
+      "subtitle": "汉译英 · 简繁体双索引、声调拼音与英文释义",
+      "direction": "汉 → 英",
+      "wordcount": 198761,
+      "license": "CC BY-SA 4.0",
+      "source": "MDBG CC-CEDICT",
+      "source_url": "https://www.mdbg.net/chinese/dictionary?page=cc-cedict",
+      "raw_dict_bytes": 14700399,
+      "size": 6924114,
+      "sha256": "cf673cc867ea49d92e22470b7f4b63af92675622c753c3c69214154cd812ea7e",
+      "files": [
+        {
+          "name": "cc-cedict-zh-en.dict.dz",
+          "size": 5187068
+        },
+        {
+          "name": "cc-cedict-zh-en.idx",
+          "size": 3404932
+        },
+        {
+          "name": "cc-cedict-zh-en.ifo",
+          "size": 197
+        }
+      ]
+    }
+  ]
+}

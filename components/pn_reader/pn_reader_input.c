@@ -15,14 +15,14 @@ static int region(int x,int y,bool full_screen){
     if(full_screen)return 4;
     return y>=32 && y<1144?4:-1;
 }
-void pn_reader_input_cancel(pn_reader_input_t *i){if(i){i->cancelled=true;i->blocked=true;i->empty_samples=0;}}
-bool pn_reader_input_feed(pn_reader_input_t *i,unsigned count,int x,int y,bool valid,pn_reader_action_t *out){
+void pn_reader_input_cancel(pn_reader_input_t *i){if(i){i->cancelled=true;i->blocked=true;i->long_fired=false;i->empty_samples=0;}}
+static bool feed_impl(pn_reader_input_t *i,unsigned count,int x,int y,bool valid,bool timed,uint64_t now_ms,pn_reader_action_t *out){
     if(!i || !out)return false;
     if(!valid || count>1){pn_reader_input_cancel(i);return false;}
     if(!count){
         if(i->empty_samples<2)i->empty_samples++;
         if(i->empty_samples<2)return false;
-        bool submit=i->down && !i->cancelled && !i->blocked;pn_reader_action_t action=PN_APP_OPEN;
+        bool submit=i->down && !i->cancelled && !i->blocked && !i->long_fired;pn_reader_action_t action=PN_APP_OPEN;
         if(submit){
             if(i->region==4){int dx=i->last_x-i->start_x,dy=i->last_y-i->start_y;
                 if(i->config.vertical_turn){
@@ -45,12 +45,26 @@ bool pn_reader_input_feed(pn_reader_input_t *i,unsigned count,int x,int y,bool v
                 }
             }else submit=false;
         }
-        i->down=false;i->cancelled=false;i->blocked=false;
+        i->down=false;i->cancelled=false;i->blocked=false;i->long_fired=false;
         if(submit){*out=action;return true;}return false;
     }
     i->empty_samples=0;if(i->blocked)return false;
     int hit=region(x,y,i->config.full_screen);
-    if(!i->down){i->down=true;i->cancelled=hit<0;i->region=hit;i->start_x=x;i->start_y=y;}
+    if(!i->down){i->down=true;i->cancelled=hit<0;i->region=hit;i->start_x=x;i->start_y=y;i->down_ms=now_ms;i->long_fired=false;}
     else if(hit!=4)i->cancelled=true;
-    i->last_x=x;i->last_y=y;return false;
+    i->last_x=x;i->last_y=y;
+    if(timed && i->down && !i->cancelled && !i->long_fired && i->region==4){
+        int dx=i->last_x-i->start_x,dy=i->last_y-i->start_y;
+        if(abs(dx)<=24 && abs(dy)<=24 && now_ms>=i->down_ms && (now_ms-i->down_ms)>=PN_READER_LONG_PRESS_MS){
+            i->long_fired=true;i->cancelled=true;i->blocked=true;
+            *out=PN_APP_LOOKUP;return true;
+        }
+    }
+    return false;
+}
+bool pn_reader_input_feed(pn_reader_input_t *i,unsigned count,int x,int y,bool valid,pn_reader_action_t *out){
+    return feed_impl(i,count,x,y,valid,false,0,out);
+}
+bool pn_reader_input_feed_timed(pn_reader_input_t *i,unsigned count,int x,int y,bool valid,uint64_t now_ms,pn_reader_action_t *out){
+    return feed_impl(i,count,x,y,valid,true,now_ms,out);
 }

@@ -37,6 +37,8 @@ int main(void){
     snprintf(p,sizeof p,"%s/piconano/fonts",root);mk(p);
     snprintf(p,sizeof p,"%s/piconano/wallpapers",root);mk(p);
     snprintf(p,sizeof p,"%s/piconano/backgrounds",root);mk(p);
+    snprintf(p,sizeof p,"%s/piconano/banners",root);mk(p);
+    snprintf(p,sizeof p,"%s/piconano/masks",root);mk(p);
     snprintf(p,sizeof p,"%s/piconano/.readpico",root);mk(p);
     snprintf(p,sizeof p,"%s/MyBooks",root);mk(p);
     snprintf(p,sizeof p,"%s/MyBooks/Classic",root);mk(p);
@@ -44,6 +46,8 @@ int main(void){
     snprintf(p,sizeof p,"%s/MyWalls",root);mk(p);
     snprintf(p,sizeof p,"%s/MyWalls/Sub",root);mk(p);
     snprintf(p,sizeof p,"%s/MyBgs",root);mk(p);
+    snprintf(p,sizeof p,"%s/MyBanners",root);mk(p);
+    snprintf(p,sizeof p,"%s/MyMasks",root);mk(p);
 
     // 放入测试文件（含深度 0/1/3 与超深度 4）/ Place files at depths 0/1/3 and beyond-limit depth 4.
     snprintf(p,sizeof p,"%s/piconano/books/A_Root.txt",root);touch(p,"a");
@@ -58,6 +62,10 @@ int main(void){
     snprintf(p,sizeof p,"%s/piconano/wallpapers/w1.png",root);touch(p,"w1");
     snprintf(p,sizeof p,"%s/MyWalls/Sub/w2.png",root);touch(p,"w2");
     snprintf(p,sizeof p,"%s/MyBgs/bg1.png",root);touch(p,"bg");
+    snprintf(p,sizeof p,"%s/piconano/banners/b0.png",root);touch(p,"bn0");
+    snprintf(p,sizeof p,"%s/MyBanners/b1.png",root);touch(p,"bn1");
+    snprintf(p,sizeof p,"%s/piconano/masks/m0.png",root);touch(p,"mk0");
+    snprintf(p,sizeof p,"%s/MyMasks/m1.png",root);touch(p,"mk1");
 
     /* 1. 路径安全校验与持久化 A/B 读写。/ Validation and A/B journal persistence. */
     pn_scan_dirs_t d=pn_scan_dirs_default();
@@ -75,6 +83,10 @@ int main(void){
     assert(pn_scan_dirs_add(&d,PN_SCAN_CAT_FONTS,"MyFonts")==PN_OK);
     assert(pn_scan_dirs_add(&d,PN_SCAN_CAT_WALLPAPERS,"MyWalls")==PN_OK);
     assert(pn_scan_dirs_add(&d,PN_SCAN_CAT_BACKGROUNDS,"MyBgs")==PN_OK);
+    assert(pn_scan_dirs_add(&d,PN_SCAN_CAT_BANNERS,"MyBanners")==PN_OK);
+    assert(pn_scan_dirs_add(&d,PN_SCAN_CAT_MASKS,"MyMasks")==PN_OK);
+    assert(!pn_scan_dirs_valid_rel(PN_SCAN_CAT_BANNERS,"piconano/banners"));
+    assert(!pn_scan_dirs_valid_rel(PN_SCAN_CAT_MASKS,"piconano/masks"));
 
     pn_media_t sm,tm;pn_media_init(&sm);pn_media_init(&tm);
     assert(pn_media_attach(&sm,1)==PN_OK && pn_media_attach(&tm,2)==PN_OK);
@@ -85,6 +97,8 @@ int main(void){
     assert(loaded.count[PN_SCAN_CAT_FONTS]==1 && strcmp(loaded.dirs[PN_SCAN_CAT_FONTS][0],"MyFonts")==0);
     assert(loaded.count[PN_SCAN_CAT_WALLPAPERS]==1 && strcmp(loaded.dirs[PN_SCAN_CAT_WALLPAPERS][0],"MyWalls")==0);
     assert(loaded.count[PN_SCAN_CAT_BACKGROUNDS]==1 && strcmp(loaded.dirs[PN_SCAN_CAT_BACKGROUNDS][0],"MyBgs")==0);
+    assert(loaded.count[PN_SCAN_CAT_BANNERS]==1 && strcmp(loaded.dirs[PN_SCAN_CAT_BANNERS][0],"MyBanners")==0);
+    assert(loaded.count[PN_SCAN_CAT_MASKS]==1 && strcmp(loaded.dirs[PN_SCAN_CAT_MASKS][0],"MyMasks")==0);
     pn_scan_dirs_set_active(&loaded,root);
 
     /* 2. 路径白名单与跨目录文件名解析。/ Path allowlist & filename resolution across roots/subfolders. */
@@ -92,15 +106,23 @@ int main(void){
     assert(pn_scan_dirs_path_allowed(PN_SCAN_CAT_BOOKS,p));
     snprintf(p,sizeof p,"%s/MyFonts/Ext.otf",root);
     assert(pn_scan_dirs_path_allowed(PN_SCAN_CAT_FONTS,p));
+    snprintf(p,sizeof p,"%s/MyMasks/m1.png",root);
+    assert(pn_scan_dirs_path_allowed(PN_SCAN_CAT_MASKS,p));
     snprintf(p,sizeof p,"%s/piconano/books/SciFi/D2/D3/D4/Z_TooDeep.txt",root);
     assert(!pn_scan_dirs_path_allowed(PN_SCAN_CAT_BOOKS,p));
-    char found[PN_SCAN_PATH_MAX]={0},def_wall[PN_SCAN_PATH_MAX],def_bg[PN_SCAN_PATH_MAX];
+    char found[PN_SCAN_PATH_MAX]={0},def_wall[PN_SCAN_PATH_MAX],def_bg[PN_SCAN_PATH_MAX],def_bn[PN_SCAN_PATH_MAX],def_mk[PN_SCAN_PATH_MAX];
     snprintf(def_wall,sizeof def_wall,"%s/piconano/wallpapers",root);
     snprintf(def_bg,sizeof def_bg,"%s/piconano/backgrounds",root);
+    snprintf(def_bn,sizeof def_bn,"%s/piconano/banners",root);
+    snprintf(def_mk,sizeof def_mk,"%s/piconano/masks",root);
     assert(pn_scan_dirs_find_file(PN_SCAN_CAT_WALLPAPERS,def_wall,"w2.png",found,sizeof found));
     assert(strstr(found,"MyWalls/Sub/w2.png")!=NULL);
     assert(pn_scan_dirs_find_file(PN_SCAN_CAT_BACKGROUNDS,def_bg,"bg1.png",found,sizeof found));
     assert(strstr(found,"MyBgs/bg1.png")!=NULL);
+    assert(pn_scan_dirs_find_file(PN_SCAN_CAT_BANNERS,def_bn,"b1.png",found,sizeof found));
+    assert(strstr(found,"MyBanners/b1.png")!=NULL);
+    assert(pn_scan_dirs_find_file(PN_SCAN_CAT_MASKS,def_mk,"m1.png",found,sizeof found));
+    assert(strstr(found,"MyMasks/m1.png")!=NULL);
 
     /* 3. 多目录递归扫描：书库（深度<=3）、字体、壁纸、背景、单目录筛选与目录列表。/ Multi-dir recursive catalog scan & folder list. */
     pn_media_lease_t lease={0};assert(pn_media_acquire(&tm,PN_MEDIA_READ,&lease)==PN_OK);
@@ -120,10 +142,12 @@ int main(void){
     assert(pn_catalog_page_sorted_n(&tm,&lease,folders[1].path,NULL,PN_SHELF_SORT_NAME,NULL,NULL,false,12,&page)==PN_OK);
     assert(page.total==2 && page.count==2 && strcmp(page.items[0].name,"D_ExtRoot.epub")==0);
 
-    // 字体/壁纸/背景均聚合外部目录与子目录。/ Fonts, wallpapers, backgrounds all merge external & recursive folders.
+    // 字体/壁纸/背景/横幅/遮罩均聚合外部目录与子目录。/ Fonts, wallpapers, backgrounds, banners, masks all merge external & recursive folders.
     assert(pn_catalog_font_page(&tm,&lease,def_fonts,"",&page)==PN_OK && page.total==2);
     assert(pn_catalog_image_page(&tm,&lease,def_wall,"",&page)==PN_OK && page.total==2);
     assert(pn_catalog_image_page(&tm,&lease,def_bg,"",&page)==PN_OK && page.total==1);
+    assert(pn_catalog_image_page(&tm,&lease,def_bn,"",&page)==PN_OK && page.total==2);
+    assert(pn_catalog_image_page(&tm,&lease,def_mk,"",&page)==PN_OK && page.total==2);
 
     /* 4. 文件管理外部目录浏览与绘制/命中不崩溃。/ File Manager external dir browser & render/hit tests. */
     pn_file_manager_t fm;pn_file_manager_init(&fm,root,"16 GB");
@@ -137,9 +161,13 @@ int main(void){
     pn_frame_t frame;assert(pn_frame_bind(&frame,px,342u*1216u,684,1216));
     pn_text_source_t builtin=pn_font_builtin_source();pn_font_t font={0};assert(pn_font_open(&font,&pool,&builtin,28)==PN_OK);
     fm.view=PN_FM_VIEW_ROOT;assert(pn_file_manager_render(&fm,&font,&frame)==PN_OK);
-    assert(pn_file_manager_hit(&fm,200,850)==PN_FM_EXT_OPEN);
+    assert(pn_file_manager_hit(&fm,200,1010)==PN_FM_EXT_OPEN);
+    assert(pn_file_manager_hit(&fm,200,740)==PN_FM_CAT_BASE+PN_FM_CAT_BANNERS);
+    assert(pn_file_manager_hit(&fm,200,840)==PN_FM_CAT_BASE+PN_FM_CAT_MASKS);
     fm.view=PN_FM_VIEW_EXT_LIST;assert(pn_file_manager_render(&fm,&font,&frame)==PN_OK);
-    assert(pn_file_manager_hit(&fm,200,420)==PN_FM_EXT_DEL_BASE+0);
+    assert(pn_file_manager_hit(&fm,340,235)==PN_FM_EXT_CAT_BASE+PN_SCAN_CAT_BANNERS);
+    assert(pn_file_manager_hit(&fm,560,235)==PN_FM_EXT_CAT_BASE+PN_SCAN_CAT_MASKS);
+    assert(pn_file_manager_hit(&fm,200,450)==PN_FM_EXT_DEL_BASE+0);
     assert(pn_file_manager_hit(&fm,200,1000)==PN_FM_EXT_BROWSE);
     fm.view=PN_FM_VIEW_EXT_BROWSE;assert(pn_file_manager_render(&fm,&font,&frame)==PN_OK);
 

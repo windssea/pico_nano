@@ -74,6 +74,8 @@ typedef struct {
     pn_book_id_t book;
     char state_directory[301];
     char book_path[PN_RECENT_PATH_MAX];
+    char footer_chapter[128]; ///< 最近识别到的TXT章节名，供页脚显示 / Latest detected TXT chapter heading for footer display
+    uint64_t footer_chapter_end; ///< 已扫描过的TXT页尾位置 / End offset of the last TXT page scanned for chapter headings
     pn_status_t recent_status;
     pn_recent_observer_fn recent_observer;void *recent_observer_ctx; ///< 借用已保存快照的同步接收者 / Synchronous receiver of a borrowed saved snapshot
     bool recent_recorded;
@@ -108,8 +110,41 @@ static pn_status_t font_write(app_t *,const pn_font_preferences_t *);
 static pn_status_t global_write(app_t *,const pn_font_preferences_t *);
 /// prepared借用同一app内已完整校验的稳定文件，不重新打开或猜身份。/ prepared borrows the same app's fully verified stable file, without reopening or inferring identity.
 static pn_status_t configure_fallback(app_t *,const char *,const pn_text_source_t *prepared);
+static int txt_heading_pixels(const pn_style_t *s){
+    if(!s || !s->chapter_scale_percent)return s?(int)s->pixels:PN_STYLE_DEFAULT_PIXELS;
+    int px=((int)s->pixels*(int)s->chapter_scale_percent+50)/100;
+    if(px>96)px=96;
+    if(px<20)px=20;
+    return px;
+}
 static pn_status_t advance(void *ctx,uint32_t cp,int32_t *width){app_t *a=ctx;pn_status_t s=pn_font_chain_advance(chain(a),cp,width);if(s==PN_EMPTY){*width=body(a)->pixels*64;return PN_OK;}return s;}
-static pn_status_t layout(app_t *a,pn_layout_t *out){int ascent,descent;pn_status_t s=pn_font_chain_vertical(chain(a),&ascent,&descent);if(s!=PN_OK)return s;int line=(body(a)->pixels*a->style.line_percent+99)/100;if(line<ascent+descent)line=ascent+descent;*out=(pn_layout_t){pn_style_body_width(&a->style),pn_style_body_height(&a->style),line,ascent,body(a)->pixels*a->style.indent_em,body(a)->pixels*a->style.gap_percent/100,body(a)->pixels*64*a->style.tracking_percent/100,true};return PN_OK;}
+static pn_status_t heading_advance(void *ctx,uint32_t cp,int32_t *width){
+    app_t *a=ctx;int hpx=txt_heading_pixels(&a->style);
+    if(hpx==a->style.pixels)return advance(ctx,cp,width);
+    pn_status_t s=ensure_size(a,hpx);
+    if(s==PN_OK){s=pn_font_chain_advance(chain(a),cp,width);if(s==PN_EMPTY){*width=hpx*64;s=PN_OK;}}
+    pn_status_t restored=ensure_size(a,a->style.pixels);
+    return s==PN_OK?restored:s;
+}
+static pn_status_t build_metrics(app_t *a,pn_font_metrics_t *out){
+    *out=(pn_font_metrics_t){.ctx=a,.advance=advance};
+    if(!pn_style_has_chapter_body(&a->style))return PN_OK;
+    int hpx=txt_heading_pixels(&a->style);
+    out->heading_advance=heading_advance;
+    if(hpx!=a->style.pixels){
+        pn_status_t s=ensure_size(a,hpx);
+        int hasc=0,hdesc=0;
+        if(s==PN_OK)s=pn_font_chain_vertical(chain(a),&hasc,&hdesc);
+        pn_status_t restored=ensure_size(a,a->style.pixels);
+        if(s!=PN_OK)return s;
+        if(restored!=PN_OK)return restored;
+        int hline=(hpx*a->style.line_percent+99)/100;
+        if(hline<hasc+hdesc)hline=hasc+hdesc;
+        out->heading_line_height=hline;out->heading_ascent=hasc;
+    }
+    return PN_OK;
+}
+static pn_status_t layout(app_t *a,pn_layout_t *out){int ascent,descent;pn_status_t s=pn_font_chain_vertical(chain(a),&ascent,&descent);if(s!=PN_OK)return s;int line=(body(a)->pixels*a->style.line_percent+99)/100;if(line<ascent+descent)line=ascent+descent;*out=(pn_layout_t){pn_style_body_width(&a->style),pn_style_body_height(&a->style),line,ascent,body(a)->pixels*a->style.indent_em,body(a)->pixels*a->style.gap_percent/100,body(a)->pixels*64*a->style.tracking_percent/100,true,a->style.chapter_align,a->style.chapter_gap,pn_style_has_chapter_body(&a->style)};return PN_OK;}
 /// 展示进度与持久锚点分开：末页显示100%，其余按页首字节估算。/ Display progress is separate from the durable anchor: 100% on the final page, otherwise estimated from its first byte.
 static unsigned progress_basis(const app_t *a,pn_reader_anchor_t anchor){
     uint64_t size=a->reader.decoder.source.size;
@@ -117,34 +152,104 @@ static unsigned progress_basis(const app_t *a,pn_reader_anchor_t anchor){
     if(anchor.end>=size)return 10000;
     return (unsigned)(anchor.begin*10000u/size);
 }
-static pn_status_t paint_text(app_t *a,pn_frame_t *frame,const pn_page_glyph_t *glyphs,size_t first,size_t count,int *guide_baseline,unsigned *missing,bool prepared){
+static void encode_utf8_cp(uint32_t cp,char *out,size_t cap,size_t *len){
+    if(cp<0x80u){if(*len+1<cap)out[(*len)++]=(char)cp;}
+    else if(cp<0x800u){if(*len+2<cap){out[(*len)++]=(char)(0xc0u|(cp>>6));out[(*len)++]=(char)(0x80u|(cp&0x3fu));}}
+    else if(cp<0x10000u){if(*len+3<cap){out[(*len)++]=(char)(0xe0u|(cp>>12));out[(*len)++]=(char)(0x80u|((cp>>6)&0x3fu));out[(*len)++]=(char)(0x80u|(cp&0x3fu));}}
+    else if(cp<=0x10ffffu){if(*len+4<cap){out[(*len)++]=(char)(0xf0u|(cp>>18));out[(*len)++]=(char)(0x80u|((cp>>12)&0x3fu));out[(*len)++]=(char)(0x80u|((cp>>6)&0x3fu));out[(*len)++]=(char)(0x80u|(cp&0x3fu));}}
+}
+/// 从当前TXT页扫描独立章节标题行，更新页脚章节名缓存（不触发额外文件IO）。
+/// Scan standalone chapter heading lines on the current TXT page to update the footer chapter label without extra file I/O.
+static void update_txt_chapter_label(app_t *a){
+    const pn_text_page_t *page=&a->reader.page;
+    if(!page->valid || !page->count)return;
+    if(a->footer_chapter_end && page->begin<a->footer_chapter_end-4096u && page->begin!=a->footer_chapter_end){
+        // 向前跳转或重定位时清除旧章节缓存，避免错配。/ Clear stale chapter label on backward jumps so footers stay truthful.
+        a->footer_chapter[0]=0;
+    }
+    a->footer_chapter_end=page->end;
+    size_t i=0;bool at_para=a->reader.visible.paragraph;
+    while(i<page->count){
+        size_t start=i;
+        while(i<page->count && page->glyphs[i].source.codepoint!=10)i++;
+        bool ended_nl=(i<page->count && page->glyphs[i].source.codepoint==10);
+        if(at_para && (ended_nl || i==page->count) && i>start && i-start<=48){
+            uint32_t cps[48];size_t n=0;
+            for(size_t k=start;k<i;k++)cps[n++]=page->glyphs[k].source.codepoint;
+            if(pn_text_is_chapter_line(cps,n)){
+                size_t s0=0,s1=n;
+                while(s0<s1 && (cps[s0]==' ' || cps[s0]==9 || cps[s0]==13 || cps[s0]==0x3000))s0++;
+                while(s1>s0 && (cps[s1-1]==' ' || cps[s1-1]==9 || cps[s1-1]==13 || cps[s1-1]==0x3000))s1--;
+                size_t len=0;
+                for(size_t k=s0;k<s1;k++)encode_utf8_cp(cps[k],a->footer_chapter,sizeof a->footer_chapter,&len);
+                a->footer_chapter[len]=0;
+            }
+        }
+        at_para=ended_nl;
+        if(ended_nl)i++;
+    }
+}
+static pn_status_t paint_text(app_t *a,pn_frame_t *frame,const pn_page_glyph_t *glyphs,size_t first,size_t count,size_t total,int *guide_baseline,unsigned *missing,bool prepared){
     // 偶数边距保持4bpp半字节对齐，仅裁切正文区域。/ Even margin preserves 4bpp nibble alignment and clips the content area.
     pn_frame_t viewport={frame->pixels+pn_style_body_top(&a->style)*frame->stride+pn_style_margin_left(&a->style)/2,pn_style_body_width(&a->style),pn_style_body_height(&a->style),frame->stride};
-    int guide_below=0;
+    int guide_below=0,body_descent=0;
+    bool follow=a->style.reading_line_follow!=0;
+    int thickness=pn_style_guide_thickness(&a->style);
     if(a->style.reading_line){int ascent,descent;pn_status_t s=pn_font_chain_vertical(chain(a),&ascent,&descent);if(s!=PN_OK)return s;
-        int gap=a->reader.layout.line_height-ascent-descent;if(gap<0)gap=0;guide_below=descent+gap/2+a->style.reading_line_offset;}
+        body_descent=descent;int gap=a->reader.layout.line_height-ascent-descent;if(gap<0)gap=0;guide_below=descent+gap/2+a->style.reading_line_offset;}
+    int hpx=txt_heading_pixels(&a->style);
+    int cur_px=a->style.pixels,cur_w=a->style.weight;
+    pn_status_t s=PN_OK;
     for(size_t i=first;i<first+count;i++){const pn_page_glyph_t *g=&glyphs[i];if(g->source.codepoint==10 || g->source.codepoint==9)continue;
-        // 阅读线跟随实际行基线，空段和页脚不画，不改变源位置。 / Guides follow actual baselines, omit empty paragraphs/footer and never change source positions.
-        if(a->style.reading_line && g->baseline!=*guide_baseline && g->source.codepoint!=' '){*guide_baseline=g->baseline;pn_reader_guide_row(&viewport,a->style.reading_line,a->style.reading_line_shade,g->baseline+guide_below);}
-        pn_status_t s=prepared?pn_font_chain_prerender(chain(a),&viewport,g->source.codepoint,g->x_64,g->baseline,PN_FONT_GRAY):pn_font_chain_draw(chain(a),&viewport,g->source.codepoint,g->x_64,g->baseline,PN_FONT_GRAY);
-        if(s==PN_EMPTY){int x=g->x_64/64,y=g->baseline-body(a)->pixels,size=body(a)->pixels-4;pn_frame_rect(&viewport,x,y,size,1,0);pn_frame_rect(&viewport,x,y+size,size,1,0);pn_frame_rect(&viewport,x,y,1,size,0);pn_frame_rect(&viewport,x+size,y,1,size,0);(*missing)++;}
-        else if(s!=PN_OK)return s;
+        // 阅读线跟随实际行基线，支持粗细及随文字横幅/字底自适应，不改变源位置。/ Guides follow actual baselines with thickness and optional font-span/baseline tracking without changing source positions.
+        if(a->style.reading_line && g->baseline!=*guide_baseline && g->source.codepoint!=' ' && g->source.codepoint!=0x3000){
+            *guide_baseline=g->baseline;
+            int gx0=0,gx1=viewport.width,gy=g->baseline+guide_below,row_px=g->heading?hpx:a->style.pixels;
+            if(follow){
+                int min_x=INT_MAX,max_x=0;
+                size_t l=i;while(l>0 && glyphs[l-1].baseline==g->baseline)l--;
+                size_t r=i;while(r<total && glyphs[r].baseline==g->baseline)r++;
+                for(size_t k=l;k<r;k++){
+                    uint32_t cp=glyphs[k].source.codepoint;
+                    if(cp==10 || cp==9 || cp==' ' || cp==0x3000)continue;
+                    int x0=glyphs[k].x_64/64,x1=(glyphs[k].x_64+glyphs[k].advance_64+63)/64;
+                    if(x0<min_x)min_x=x0;
+                    if(x1>max_x)max_x=x1;
+                }
+                if(min_x<max_x){gx0=min_x;gx1=max_x;}
+                int desc=g->heading?(body_descent*row_px/a->style.pixels):body_descent;
+                gy=g->baseline+desc+(row_px>=36?row_px/12:3)+a->style.reading_line_offset;
+            }
+            pn_reader_guide_row_ex(&viewport,a->style.reading_line,a->style.reading_line_shade,gx0,gx1,gy,thickness,row_px,follow);
+        }
+        int want_px=g->heading?hpx:a->style.pixels;
+        int want_w=(g->heading && a->style.chapter_bold)?(a->style.weight<0?1:(a->style.weight<3?a->style.weight+1:3)):a->style.weight;
+        if(want_px!=cur_px){s=ensure_size(a,want_px);if(s!=PN_OK)break;cur_px=want_px;}
+        if(want_w!=cur_w){s=pn_font_weight(body(a),want_w);if(s!=PN_OK)break;cur_w=want_w;}
+        s=prepared?pn_font_chain_prerender(chain(a),&viewport,g->source.codepoint,g->x_64,g->baseline,PN_FONT_GRAY):pn_font_chain_draw(chain(a),&viewport,g->source.codepoint,g->x_64,g->baseline,PN_FONT_GRAY);
+        if(s==PN_EMPTY){int x=g->x_64/64,y=g->baseline-want_px,size=want_px-4;pn_frame_rect(&viewport,x,y,size,1,0);pn_frame_rect(&viewport,x,y+size,size,1,0);pn_frame_rect(&viewport,x,y,1,size,0);pn_frame_rect(&viewport,x+size,y,1,size,0);(*missing)++;s=PN_OK;}
+        else if(s!=PN_OK)break;
     }
-    return PN_OK;
+    if(cur_px!=a->style.pixels){pn_status_t r=ensure_size(a,a->style.pixels);if(s==PN_OK)s=r;}
+    if(cur_w!=a->style.weight){pn_status_t r=pn_font_weight(body(a),a->style.weight);if(s==PN_OK)s=r;}
+    return s;
 }
 static pn_status_t paint_footer(app_t *a,pn_frame_t *frame,const pn_reader_receipt_t *receipt,bool show_return,unsigned missing){
     if(a->style.hide_bars){a->status=pn_w_status_snapshot();return PN_OK;}
-    // 页脚：书名与百分比；预览态改为提示。无顶栏与底部按钮，工具由点正文中央打开的工具栏提供。
-    // Footer: book title and percentage; previews show a hint instead. There is no top bar or bottom buttons; tools come from the toolbar opened by tapping the middle of the text.
-    char left[PN_RECENT_PATH_MAX],right[48]="";
+    update_txt_chapter_label(a);
+    // 页脚：支持默认（书名）、章节名、书名或隐藏名称及字号调节；预览态改为提示。
+    // Footer: supports default (book title), chapter title, book title, hidden label and font size; previews show a hint.
+    char left[PN_RECENT_PATH_MAX]="",right[48]="";
     if(a->draft_render)snprintf(left,sizeof left,"%s",a->font_render?"字体预览，设置尚未保存":"排版预览，设置尚未保存");
     else if(show_return)snprintf(left,sizeof left,"< 返回跳转前位置");
+    else if(a->style.footer_title_mode==3)left[0]=0;
+    else if(a->style.footer_title_mode==1 && a->footer_chapter[0])snprintf(left,sizeof left,"%s",a->footer_chapter);
     else{const char *slash=strrchr(a->book_path,'/');snprintf(left,sizeof left,"%s",slash?slash+1:a->book_path);char *dot=strrchr(left,'.');if(dot && dot!=left)*dot=0;}
     if(a->draft_render)snprintf(right,sizeof right,"点击返回设置");
     unsigned long long basis=progress_basis(a,receipt->anchor);
     if(!a->draft_render){unsigned long long percent=basis/100;
         if(missing)snprintf(right,sizeof right,"%u 缺字 · %llu%%",missing,percent);else snprintf(right,sizeof right,"%llu%%",percent);}
-    pn_status_t status=pn_reader_footer_progress(&a->ui,body(a),frame,left,right,a->draft_render?-1:(int)basis,a->style.background);if(status==PN_OK)a->status=pn_w_status_snapshot();return status;
+    pn_status_t status=pn_reader_footer_progress_ex(&a->ui,body(a),frame,left,right,a->draft_render?-1:(int)basis,a->style.background,pn_style_footer_pixels(&a->style));if(status==PN_OK)a->status=pn_w_status_snapshot();return status;
 }
 static bool bitmap_key(app_t *a,pn_job_token_t token,pn_reader_anchor_t anchor){
     pn_reader_anchor_t old=a->bitmap_anchor;return a->bitmap_token.session==token.session && a->bitmap_token.generation==token.generation && old.begin==anchor.begin && old.end==anchor.end && old.paragraph==anchor.paragraph && old.next_paragraph==anchor.next_paragraph;
@@ -165,7 +270,7 @@ static pn_status_t render_impl(app_t *a,pn_frame_t *frame,const pn_reader_receip
         pn_profile_span_t span;pn_profile_begin(&span,a->pool,"txt.first.use");
         s=pn_font_chain_validate(chain(a));missing=a->first_paint.missing;a->first_paint.ready=false;pn_profile_end(&span,s);
     }else s=bitmap_copy(a,frame,receipt,&missing);
-    if(s==PN_EMPTY){s=pn_paper_draw_style(&a->paper,&a->style,frame);if(s!=PN_OK)return s;int guide=INT_MIN;s=paint_text(a,frame,a->reader.page.glyphs,0,a->reader.page.count,&guide,&missing,false);}
+    if(s==PN_EMPTY){s=pn_paper_draw_style(&a->paper,&a->style,frame);if(s!=PN_OK)return s;int guide=INT_MIN;s=paint_text(a,frame,a->reader.page.glyphs,0,a->reader.page.count,a->reader.page.count,&guide,&missing,false);}
     a->resume_missing=missing;a->resume_pixels=a->style.pixels;a->resume_good=s==PN_OK;
     return s==PN_OK?paint_footer(a,frame,receipt,show_return,missing):s;
 }
@@ -288,7 +393,8 @@ static pn_status_t pn_reader_app_open_on_media_impl(pn_reader_app_t *app,pn_pool
     // 首次排版/预绘前应用已保存字重与清晰度；OPEN接管已绘像素后再设置会留下旧灰阶。/ Apply saved weight/sharpness before initial layout and prepaint; setting them at OPEN leaves already painted pixels on the old appearance.
     if(status==PN_OK)status=ensure_body(a,a->style.pixels);
     if(status==PN_OK)status=layout(a,&current);
-    pn_job_token_t token={1,1};pn_font_metrics_t metrics={a,advance};
+    pn_job_token_t token={1,1};pn_font_metrics_t metrics={0};
+    if(status==PN_OK)status=build_metrics(a,&metrics);
     if(status==PN_OK)status=pn_reader_init(&a->reader,&source,encoding,&a->book,&current,&metrics,a->glyphs,PN_PAGE_GLYPHS_MAX,token,a->persistent?&a->save:NULL);
     if(status==PN_OK){a->reader.checkpoints=a->checkpoints;a->reader.checkpoint_count=a->checkpoint_count;}
     if(status==PN_OK)pn_reader_neighbors(&a->reader,pool);
@@ -348,9 +454,19 @@ pn_status_t pn_reader_app_recent_item(const pn_reader_app_t *app,pn_recent_item_
     *out=(pn_recent_item_t){.book=a->book,.source_size=a->book_file.size,.format=1,.progress=(uint16_t)progress_basis(a,a->reader.visible)};strcpy(out->path,a->book_path);return PN_OK;
 }
 /// 复用前台选择和精确亚像素偏移，只生成可回收字形，不画正文或页脚。 / Reuse foreground face selection and exact subpixel offsets, generating only reclaimable glyphs without painting body/footer.
-static pn_status_t warm_glyph(void *ctx,const pn_page_glyph_t *g){app_t *a=ctx;if(g->source.codepoint==9 || g->source.codepoint==10)return PN_EMPTY;pn_font_choice_t choice;pn_status_t s=pn_font_chain_choose(chain(a),g->source.codepoint,&choice);return s==PN_OK?pn_font_warm(choice.font,g->source.codepoint,g->x_64):s;}
+static pn_status_t warm_glyph(void *ctx,const pn_page_glyph_t *g){
+    app_t *a=ctx;if(g->source.codepoint==9 || g->source.codepoint==10)return PN_EMPTY;
+    int want_px=g->heading?txt_heading_pixels(&a->style):a->style.pixels;
+    bool changed=want_px!=a->style.pixels;
+    pn_status_t s=changed?ensure_size(a,want_px):PN_OK;
+    pn_font_choice_t choice;
+    if(s==PN_OK)s=pn_font_chain_choose(chain(a),g->source.codepoint,&choice);
+    if(s==PN_OK)s=pn_font_warm(choice.font,g->source.codepoint,g->x_64);
+    if(changed){pn_status_t r=ensure_size(a,a->style.pixels);if(s==PN_OK)s=r;}
+    return s;
+}
 typedef struct {app_t *app;const pn_text_page_t *page;size_t budget;} bitmap_work_t; ///< 回调期借用，不保存邻页指针 / Callback-only borrowing, never retaining neighbor pointers
-static pn_status_t bitmap_paint(void *ctx,pn_frame_t *frame,size_t first,size_t count,unsigned *missing){bitmap_work_t *work=ctx;return paint_text(work->app,frame,work->page->glyphs,first,count,&work->app->bitmap_guide,missing,true);}
+static pn_status_t bitmap_paint(void *ctx,pn_frame_t *frame,size_t first,size_t count,unsigned *missing){bitmap_work_t *work=ctx;return paint_text(work->app,frame,work->page->glyphs,first,count,work->page->count,&work->app->bitmap_guide,missing,true);}
 static pn_status_t bitmap_visit(void *ctx,const pn_text_page_t *page,pn_reader_anchor_t anchor,pn_job_token_t token){
     bitmap_work_t *work=ctx;app_t *a=work->app;if(!a->bitmap.enabled)return PN_EMPTY;
     if(!bitmap_key(a,token,anchor) || (!a->bitmap.working && !a->bitmap.ready)){
@@ -615,7 +731,7 @@ pn_status_t pn_reader_app_paint_unshown(pn_reader_app_t *app,size_t budget,size_
         a->first_paint=(pn_first_paint_t){.token=receipt.token,.ticket=receipt.ticket,.guide=INT_MIN};s=pn_paper_draw_style(&a->paper,&a->style,frame);
     }
     size_t count=s==PN_OK?a->reader.page.count-a->first_paint.cursor:0;if(count>budget)count=budget;if(count>8)count=8;
-    if(s==PN_OK)s=paint_text(a,frame,a->reader.page.glyphs,a->first_paint.cursor,count,&a->first_paint.guide,&a->first_paint.missing,true);
+    if(s==PN_OK)s=paint_text(a,frame,a->reader.page.glyphs,a->first_paint.cursor,count,a->reader.page.count,&a->first_paint.guide,&a->first_paint.missing,true);
     if(s==PN_OK)s=pn_cancel_checkpoint();
     if(lease.ticket){pn_status_t discarded=pn_display_discard(&a->display,&lease);if(s==PN_OK)s=discarded;}
     if(s==PN_OK){a->first_paint.cursor+=count;a->first_paint.ready=a->first_paint.cursor==a->reader.page.count;}
@@ -754,9 +870,9 @@ static pn_status_t change_layout(app_t *a,const pn_style_t *style){
     // Swap in the new style before syncing the body font: weight/sharpness come from a->style, and the reverse order leaves glyphs on the previous settings.
     pn_style_t previous=a->style;a->style=*style;pn_status_t status=ensure_body(a,style->pixels);if(status!=PN_OK){a->style=previous;(void)ensure_body(a,previous.pixels);return status;}
     if(pn_style_same_typesetting(&previous,style)){pn_page_bitmap_invalidate(&a->bitmap);a->first_paint.ready=false;a->force_full=true;return PN_OK;}
-    pn_layout_t next;status=layout(a,&next);if(status==PN_OK)status=pn_reader_reflow(&a->reader,&next);
+    pn_layout_t next;pn_font_metrics_t metrics={0};status=layout(a,&next);if(status==PN_OK)status=build_metrics(a,&metrics);if(status==PN_OK){a->reader.metrics=metrics;status=pn_reader_reflow(&a->reader,&next);}
     if(status==PN_OK)status=pn_display_set_token(&a->display,a->reader.token);
-    if(status!=PN_OK){a->style=previous;(void)ensure_body(a,previous.pixels);}else a->force_full=true;
+    if(status!=PN_OK){a->style=previous;(void)ensure_body(a,previous.pixels);(void)build_metrics(a,&a->reader.metrics);}else a->force_full=true;
     return status;
 }
 static pn_status_t preview_style(pn_reader_app_t *app,const pn_style_t *style,uint64_t now,pn_reader_present_fn present,void *ctx,bool hint){
@@ -829,7 +945,7 @@ static pn_status_t configure_fallback(app_t *a,const char *path,const pn_text_so
     else{status=pn_media_acquire(a->book_media,PN_MEDIA_READ,&a->fallback_lease);
         if(status==PN_OK)status=pn_text_file_open(&a->fallback_file,a->book_media,&a->fallback_lease,path,&source);}
     pn_font_t probe={0};if(status==PN_OK)status=pn_font_open(&probe,a->pool,&source,a->style.pixels);pn_font_close(&probe);
-    if(status==PN_OK){pn_font_chain_clear(&a->chain);status=pn_font_chain_init(&a->chain,a->pool,&a->body,&source);pn_layout_t next;if(status==PN_OK)status=layout(a,&next);if(status==PN_OK)status=pn_reader_reflow(&a->reader,&next);if(status==PN_OK)status=pn_display_set_token(&a->display,a->reader.token);}
+    if(status==PN_OK){pn_font_chain_clear(&a->chain);status=pn_font_chain_init(&a->chain,a->pool,&a->body,&source);pn_layout_t next;if(status==PN_OK)status=layout(a,&next);if(status==PN_OK)status=build_metrics(a,&a->reader.metrics);if(status==PN_OK)status=pn_reader_reflow(&a->reader,&next);if(status==PN_OK)status=pn_display_set_token(&a->display,a->reader.token);}
     if(status!=PN_OK){pn_font_chain_clear(&a->chain);(void)pn_font_chain_init(&a->chain,a->pool,&a->body,NULL);(void)pn_text_file_close(&a->fallback_file);if(a->fallback_lease.ticket)(void)pn_media_release(a->book_media,&a->fallback_lease);}
     if(status==PN_OK && strlen(path)<sizeof a->boot_fallback)strcpy(a->boot_fallback,path);
     return status;
@@ -859,7 +975,7 @@ static pn_status_t scoped_font_write(app_t *a,const pn_font_preferences_t *prefs
 }
 static pn_status_t font_write(app_t *a,const pn_font_preferences_t *prefs){return a->persistent?scoped_font_write(a,prefs,&a->book):PN_OK;}
 static pn_status_t global_write(app_t *a,const pn_font_preferences_t *prefs){return scoped_font_write(a,prefs,NULL);}
-static pn_status_t font_relayout(app_t *a){pn_status_t status=ensure_body(a,a->style.pixels);pn_layout_t next;if(status==PN_OK)status=layout(a,&next);if(status==PN_OK)status=pn_reader_reflow(&a->reader,&next);if(status==PN_OK)status=pn_display_set_token(&a->display,a->reader.token);if(status==PN_OK)a->force_full=true;return status;}
+static pn_status_t font_relayout(app_t *a){pn_status_t status=ensure_body(a,a->style.pixels);pn_layout_t next;if(status==PN_OK)status=layout(a,&next);if(status==PN_OK)status=build_metrics(a,&a->reader.metrics);if(status==PN_OK)status=pn_reader_reflow(&a->reader,&next);if(status==PN_OK)status=pn_display_set_token(&a->display,a->reader.token);if(status==PN_OK)a->force_full=true;return status;}
 static void font_metadata_reset(app_t *a){pn_font_close(&a->metadata);a->metadata_tried=false;}
 static pn_status_t font_stage(pn_reader_app_t *app,const pn_font_preferences_t *prefs,uint64_t now,pn_reader_present_fn present,void *ctx,bool hint){
     if(app && app->impl)((app_t *)app->impl)->last_confirmed=false;
@@ -1009,4 +1125,48 @@ pn_status_t pn_reader_app_index_step(pn_reader_app_t *app,pn_book_index_state_t 
 bool pn_reader_app_index_pending(const pn_reader_app_t *app){
     if(!app || !app->impl)return false;
     const app_t *a=app->impl;return a->persistent && pn_page_index_tf_directory() && !a->suspended && !a->style_preview && !a->font_preview && !a->style_pending && !a->font_pending && (a->index_generation!=a->reader.token.generation || (!a->build_complete && !a->build_failed));
+}
+
+pn_status_t pn_reader_app_word_at(pn_reader_app_t *app,int x,int y,char out[][PN_DICT_WORD_MAX],size_t max_out,size_t *count_out){
+    if(count_out)*count_out=0;
+    if(!app || !app->impl || !out || !max_out)return PN_INVALID;
+    app_t *a=app->impl;
+    if(a->media_lost || a->suspended || !a->reader.has_visible)return PN_EMPTY;
+    if(!a->reader.page.valid || !a->reader.page.count){
+        if(a->reader.preparing)return PN_BUSY;
+        pn_text_reader_t work=a->reader.decoder;work.cursor=a->reader.visible.begin;
+        pn_status_t ps=pn_text_paginate(&work,&a->reader.layout,&a->reader.metrics,a->reader.visible.paragraph,&a->reader.page);
+        if(ps!=PN_OK || !a->reader.page.valid || !a->reader.page.count)return PN_EMPTY;
+    }
+    int vx=x-pn_style_margin_left(&a->style),vy=y-pn_style_body_top(&a->style);
+    if(vx<-24 || vx>pn_style_body_width(&a->style)+24 || vy<-24 || vy>pn_style_body_height(&a->style)+24)return PN_EMPTY;
+    const pn_page_glyph_t *glyphs=a->reader.page.glyphs;size_t total=a->reader.page.count;
+    int hpx=txt_heading_pixels(&a->style);
+    int best_bl=INT_MIN,best_dy=INT_MAX,best_px=a->style.pixels;
+    for(size_t i=0;i<total;i++){
+        uint32_t cp=glyphs[i].source.codepoint;if(cp==10 || cp==9 || cp==' ' || cp==0x3000)continue;
+        int px=glyphs[i].heading?hpx:a->style.pixels;
+        int cy=glyphs[i].baseline-px*3/8;
+        int dy=vy-cy;if(dy<0)dy=-dy;
+        if(dy<best_dy){best_dy=dy;best_bl=glyphs[i].baseline;best_px=px;}
+    }
+    int row_tol=a->reader.layout.line_height>best_px?a->reader.layout.line_height:best_px;
+    if(best_bl==INT_MIN || best_dy>row_tol)return PN_EMPTY;
+    uint32_t line_cps[256];size_t line_len=0,tap_idx=0;int best_dx=INT_MAX;
+    for(size_t i=0;i<total && line_len<256;i++){
+        int db=glyphs[i].baseline-best_bl;if(db<-4 || db>4)continue;
+        uint32_t cp=glyphs[i].source.codepoint;if(cp==10 || cp==9)continue;
+        int x0=glyphs[i].x_64/64,x1=(glyphs[i].x_64+glyphs[i].advance_64+63)/64;
+        int dx=(vx<x0)?(x0-vx):(vx>x1)?(vx-x1):0;
+        if(dx<best_dx){best_dx=dx;tap_idx=line_len;}
+        line_cps[line_len++]=cp;
+    }
+    if(!line_len || best_dx>best_px*2)return PN_EMPTY;
+    if((line_cps[tap_idx]==' ' || line_cps[tap_idx]==0x3000)){
+        if(tap_idx+1<line_len && line_cps[tap_idx+1]!=' ' && line_cps[tap_idx+1]!=0x3000)tap_idx++;
+        else if(tap_idx>0 && line_cps[tap_idx-1]!=' ' && line_cps[tap_idx-1]!=0x3000)tap_idx--;
+    }
+    size_t n=pn_stardict_extract_candidates(line_cps,line_len,tap_idx,out,max_out);
+    if(count_out)*count_out=n;
+    return n?PN_OK:PN_EMPTY;
 }

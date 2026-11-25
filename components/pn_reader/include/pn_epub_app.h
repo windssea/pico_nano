@@ -271,3 +271,6 @@ pn_status_t pn_epub_app_resume_checkpoint_step(pn_epub_app_t *);
 bool pn_epub_app_resume_checkpoint_pending(const pn_epub_app_t *);
 /// 当前排版是否隐藏上下栏（状态栏与页脚）。/ Whether the active style hides top/bottom bars (status bar and footer).
 bool pn_epub_app_bars_hidden(const pn_epub_app_t *);
+/// 提取当前可见 EPUB 页屏幕坐标 (x,y) 附近的查词候选词列表；未命中文字时返回 PN_EMPTY。
+/// Extract dictionary lookup candidates near screen coordinate (x,y) on the current visible EPUB page; returns PN_EMPTY when no text is hit.
+pn_status_t pn_epub_app_word_at(pn_epub_app_t *app,int x,int y,char out[][PN_DICT_WORD_MAX],size_t max_out,size_t *count_out);

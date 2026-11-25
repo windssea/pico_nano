@@ -15,7 +15,7 @@
   <div class="site-header">
     <nav class="nav container" aria-label="主导航">
       <a class="wordmark" href="#top" aria-label="PicoNano 首页">PicoNano<span aria-hidden="true">.</span></a>
-      <div class="nav-links"><a href="#features">功能一览</a><a href="#help">安装帮助</a><a class="nav-install" href="#installation">安装 PicoNano <span aria-hidden="true">↗</span></a></div>
+      <div class="nav-links"><a href="#features">功能一览</a><a href="#resources">词典与资源</a><a href="#changelog">更新日志</a><a href="#help">安装帮助</a><a class="nav-install" href="#installation">安装 PicoNano <span aria-hidden="true">↗</span></a></div>
     </nav>
   </div>
   <main id="top">
@@ -58,8 +58,8 @@
       <noscript><p>功能切换需要 JavaScript；也可以直接查看截图：<a href="assets/shelf.png">书库</a>、<a href="assets/style.png">排版</a>、<a href="assets/wallpaper.png">锁屏图库</a>、<a href="assets/bookmark-lock.png">书签锁屏</a>、<a href="assets/lock.png">默认锁屏</a>。</p></noscript>
     </section>
     <section class="reading-note container" aria-labelledby="reading-note-title">
-      <h2 id="reading-note-title">书、字体、背景。<br>喜欢的，都可以带过来。</h2>
-      <div><p>通过设备的网页传书功能，管理本地书籍、字体、封面、锁屏与阅读背景。图片会在上传前转换成适合墨水屏的灰阶。</p><p class="muted">先安装固件，开机后进入设备的传书页面，按屏幕指引连接。此处的 USB 安装器用于安装固件。</p><a class="text-link" href="https://github.com/windssea/pico_nano#readme" target="_blank" rel="noopener">了解项目与使用说明 <span aria-hidden="true">↗</span></a></div>
+      <h2 id="reading-note-title">书、字体、词典与背景。<br>喜欢的，都可以带过来。</h2>
+      <div><p>通过设备的网页传书功能，管理本地书籍、字体、封面、锁屏、阅读背景与离线 StarDict 词典。图片上传前自动转为适合墨水屏的 16 灰阶，词典压缩包可直接拖入自动解包与优化压缩。</p><p class="muted">先安装固件，开机后进入设备的传书页面，按屏幕指引连接。下方也可直接下载开源词典包与默认遮罩壁纸。</p><a class="text-link" href="#resources">查看开源词典与资源下载 <span aria-hidden="true">↓</span></a></div>
     </section>
     <section id="installation" class="installer-section section" aria-labelledby="install-title">
       <div class="container">
@@ -91,6 +91,14 @@
         </select>
       </label>
       <p id="mode-note" class="muted"></p>
+      <div id="release-notes-box" class="release-notes" hidden>
+        <div class="release-notes-head">
+          <strong id="release-notes-title">本版更新内容</strong>
+          <span id="release-notes-date" class="muted"></span>
+        </div>
+        <ul id="release-notes-list"></ul>
+        <a class="text-link release-notes-more" href="#changelog">查看历史版本更新记录 <span aria-hidden="true">↓</span></a>
+      </div>
       <div id="local-package-box" class="package-box">
         <div class="package-head">
           <strong>国内加速：从 Gitee 下载并导入本地固件包</strong>
@@ -116,6 +124,7 @@
       <div class="actions">
         <button id="connect" class="primary">连接设备</button>
         <a class="button secondary" href="assets/PicoNano.zip" download="PicoNano.zip">默认遮罩壁纸下载</a>
+        <a class="text-link" href="#resources">开源词典下载 <span aria-hidden="true">↓</span></a>
         <span id="device" class="muted"></span>
       </div>
     </section>
@@ -149,6 +158,81 @@
           </div>
         </div>
       </div>
+    </section>
+    <section id="resources" class="resources-section section" aria-labelledby="resources-title">
+      <div class="container">
+        <div class="section-heading">
+          <p class="eyebrow">开箱即用的离线词典与壁纸</p>
+          <h2 id="resources-title">下载开源词典，一步导入阅读器。</h2>
+          <p>所有词典均基于合法开源词库构建，已预压缩为标准 StarDict DictZip（<code>.dict.dz</code>）格式并附完整开源许可证；可按需自由勾选下载。</p>
+        </div>
+        <ol class="quick-import-steps" aria-label="快捷导入词典步骤">
+          <li><strong>1. 按需下载词典包</strong><span>点击下方按钮下载任意 <code>.zip</code> 词典包，无需在手机或电脑上手动解压。</span></li>
+          <li><strong>2. 打开设备传书页</strong><span>阅读器进入「传书 → 热点传书 / 局域网传书」，在浏览器切换到「词典」标签。</span></li>
+          <li><strong>3. 直接拖入 .zip 上传</strong><span>网页会自动解包提取 <code>.ifo/.idx/.dict.dz</code>、校验三件套并按序上传；也可经「USB 传输」解压拷贝至 <code>/piconano/dicts/</code>。</span></li>
+        </ol>
+        <div id="resource-grid" class="resource-grid">
+          <article class="resource-card" data-dict-id="ecdict-en-zh">
+            <div class="resource-top">
+              <span class="resource-tag">英 → 汉</span>
+              <span class="resource-meta" data-field="meta">124,675 词 · 4.10 MiB · MIT</span>
+            </div>
+            <h3>ECDICT 英汉核心词典</h3>
+            <p class="muted">涵盖牛津 3000、柯林斯、中高考、四六级、考研、托福、雅思、GRE 与高频词汇，附音标、考纲标签与词形变化。</p>
+            <div class="resource-actions">
+              <a class="button primary" href="assets/dicts/PicoNano-dict-ecdict-en-zh.zip" download="PicoNano-dict-ecdict-en-zh.zip">下载英汉词典（ZIP）</a>
+              <a class="text-link" href="https://github.com/skywind3000/ECDICT" target="_blank" rel="noopener">skywind3000/ECDICT <span aria-hidden="true">↗</span></a>
+            </div>
+          </article>
+          <article class="resource-card" data-dict-id="xinhua-zh">
+            <div class="resource-top">
+              <span class="resource-tag">汉 → 汉</span>
+              <span class="resource-meta" data-field="meta">293,150 词 · 15.23 MiB · MIT</span>
+            </div>
+            <h3>中华新华字词成语典</h3>
+            <p class="muted">收录约 1.6 万汉字（拼音、部首、笔画与释义）、3 万条成语（释义、出处与例句）以及 26 万条汉语词语。</p>
+            <div class="resource-actions">
+              <a class="button primary" href="assets/dicts/PicoNano-dict-xinhua-zh.zip" download="PicoNano-dict-xinhua-zh.zip">下载汉语字词典（ZIP）</a>
+              <a class="text-link" href="https://github.com/pwxcoo/chinese-xinhua" target="_blank" rel="noopener">pwxcoo/chinese-xinhua <span aria-hidden="true">↗</span></a>
+            </div>
+          </article>
+          <article class="resource-card" data-dict-id="cc-cedict-zh-en">
+            <div class="resource-top">
+              <span class="resource-tag">汉 → 英</span>
+              <span class="resource-meta" data-field="meta">198,761 词 · 6.60 MiB · CC BY-SA 4.0</span>
+            </div>
+            <h3>CC-CEDICT 汉英词典</h3>
+            <p class="muted">支持简体与繁体中文双索引，提供声调拼音标注与英文释义，适合中文原著查英解及双语阅读。</p>
+            <div class="resource-actions">
+              <a class="button primary" href="assets/dicts/PicoNano-dict-cc-cedict-zh-en.zip" download="PicoNano-dict-cc-cedict-zh-en.zip">下载汉英词典（ZIP）</a>
+              <a class="text-link" href="https://www.mdbg.net/chinese/dictionary?page=cc-cedict" target="_blank" rel="noopener">MDBG CC-CEDICT <span aria-hidden="true">↗</span></a>
+            </div>
+          </article>
+          <article class="resource-card resource-card-wallpaper">
+            <div class="resource-top">
+              <span class="resource-tag">壁纸 / 遮罩</span>
+              <span class="resource-meta">10 张 PNG · 2.22 MiB</span>
+            </div>
+            <h3>默认遮罩与锁屏壁纸包</h3>
+            <p class="muted">包含 9 张透明遮罩/锁屏壁纸与 PicoNano 徽标，可在传书页「锁屏壁纸」或「阅读遮罩」分类直接上传应用。</p>
+            <div class="resource-actions">
+              <a class="button secondary" href="assets/PicoNano.zip" download="PicoNano.zip">下载默认遮罩壁纸（ZIP）</a>
+            </div>
+          </article>
+        </div>
+        <p class="resources-footnote muted">提示：Web Serial USB 刷机模式仅写入主控闪存，不访问也不修改存储卡内容；词典与壁纸请开机后通过设备「传书」网页直接导入 ZIP，或通过「USB 传输」复制到存储卡对应目录。若自己整理了明文 <code>.dict</code> 或 <code>.idx.gz</code>，设备传书网页也会在上传前自动优化为标准 DictZip / <code>.idx</code>。</p>
+      </div>
+    </section>
+    <section id="changelog" class="changelog-section section container" aria-labelledby="changelog-title">
+      <div class="section-heading">
+        <p class="eyebrow">持续打磨的每一次迭代</p>
+        <h2 id="changelog-title">版本更新内容</h2>
+        <p>与仓库变更日志自动同步，每次发布新固件时一并更新，方便在升级前了解新增功能与修复项。</p>
+      </div>
+      <div id="changelog-list" class="changelog-list" aria-live="polite">
+        <p class="muted">正在读取版本更新记录…</p>
+      </div>
+      <noscript><p class="muted">完整版本记录请查看仓库 <a href="https://github.com/windssea/pico_nano/blob/main/docs/CHANGELOG.md" target="_blank" rel="noopener">CHANGELOG.md</a>。</p></noscript>
     </section>
     <div class="container">
     <section id="help" class="help section" aria-labelledby="help-title">

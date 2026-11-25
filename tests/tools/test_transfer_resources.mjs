@@ -4,7 +4,7 @@ import vm from 'node:vm';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {File} from 'node:buffer';
-import {inflateSync,deflateSync} from 'node:zlib';
+import {inflateSync,deflateSync,inflateRawSync,gzipSync} from 'node:zlib';
 import {SHA256} from '../../assets/transfer/sha256.mjs';
 
 function harness(fetch,bootstrap=false,extras={}){
@@ -15,10 +15,10 @@ function harness(fetch,bootstrap=false,extras={}){
     close(){} showModal(){} click(){}
   }
   const element=id=>{if(!elements.has(id))elements.set(id,new Element());return elements.get(id);};
-  const tabs=['book','font','cover','wallpaper','background'].map(kind=>{const e=new Element();e.dataset.kind=kind;return e;});
-  const context=vm.createContext({document:{getElementById:element,createElement:()=>new Element(),querySelectorAll:()=>tabs},fetch,SHA256,URLSearchParams,Uint8Array,TextEncoder,Blob,File,Response,CompressionStream,location:{hash:'',pathname:'/',search:''},history:{replaceState(){}},sessionStorage:{getItem(){return null;},setItem(){}},setTimeout,clearTimeout,AbortController,...extras});
+  const tabs=['book','font','cover','banner','wallpaper','mask','background','dict'].map(kind=>{const e=new Element();e.dataset.kind=kind;return e;});
+  const context=vm.createContext({document:{getElementById:element,createElement:()=>new Element(),querySelectorAll:()=>tabs},fetch,SHA256,URLSearchParams,Uint8Array,TextEncoder,TextDecoder,Blob,File,Response,CompressionStream,DecompressionStream,location:{hash:'',pathname:'/',search:''},history:{replaceState(){}},sessionStorage:{getItem(){return null;},setItem(){}},setTimeout,clearTimeout,AbortController,...extras});
   const source=readFileSync(new URL('../../assets/transfer/app.js',import.meta.url),'utf8').replace(/^import .*;\r?$/m,'');
-  vm.runInContext((bootstrap?source:source.slice(0,source.indexOf('// 打开页面'))+'render();')+'\nglobalThis.qa={token:value=>{token=value;},auth:()=>token,api,send,remove:removeFont,prepare:prepareImage,png:imagePng,add,entries:()=>entries};',context);
+  vm.runInContext((bootstrap?source:source.slice(0,source.indexOf('// 打开页面'))+'render();')+'\nglobalThis.qa={token:value=>{token=value;},auth:()=>token,api,send,remove:removeFont,prepare:prepareImage,png:imagePng,add,entries:()=>entries,dictZip:dictZipEncode,hasDictZipRA,prepareDict:prepareDictFile,extractDictZip:dictExtractZip,removeDictGroup};',context);
   return {context,element,choose:kind=>tabs.find(t=>t.dataset.kind===kind).onclick()};
 }
 const reply=(value,status=200)=>({ok:status<400,status,json:async()=>value});
@@ -28,7 +28,7 @@ test('late font list cannot repaint the wallpaper category',async()=>{
   let resolveFont;const h=harness(url=>url.endsWith('/fonts')?new Promise(r=>{resolveFont=r;}):Promise.resolve(reply({items:[{name:'透明.png',size:32}],more:false})));
   h.context.qa.token('current');h.choose('font');h.choose('wallpaper');await settle();
   resolveFont(reply({items:[{name:'stale.ttf',size:12}],more:false}));await settle();
-  assert.equal(h.element('resources-title').textContent,'已上传锁屏图片');
+  assert.equal(h.element('resources-title').textContent,'已上传锁屏壁纸');
   assert.deepEqual(h.element('fonts-list').children.map(row=>row.children[0].textContent),['透明.png']);
 });
 
@@ -157,6 +157,17 @@ test('reading backgrounds always fill the portrait panel and use opaque native 4
  const item=imageHarness(100,200);item.h.choose('background');await item.h.context.qa.add([new File(['original'],'paper.jpg')]);assert.equal(item.h.context.qa.entries()[0].kind,'background');
 });
 
+test('home banners crop to 684x146 opaque grayscale and masks keep native bounds and routes',async()=>{
+ const bannerItem=imageHarness(1600,900),bannerRes=await bannerItem.h.context.qa.prepare(new File(['b'],'山水.jpg'),'山水.jpg','banner'),bpng=await decode(bannerRes.file);
+ assert.equal(bpng.width,684);assert.equal(bpng.height,146);assert.equal(bpng.depth,4);assert.equal(bannerItem.draws[0].length,8);assert.ok(bpng.pixels.every(p=>p[1]===255));
+ const maskItem=imageHarness(2000,3000),maskRes=await maskItem.h.context.qa.prepare(new File(['m'],'遮罩.png'),'遮罩.png','mask'),mpng=await decode(maskRes.file);
+ assert.equal(mpng.width,684);assert.equal(mpng.height,1026);assert.equal(maskItem.draws[0].length,4);
+ const routes=[];const h=harness(url=>{routes.push(url);return Promise.resolve(reply({items:[],more:false}));});
+ h.context.qa.token('t');h.choose('banner');await settle();assert.equal(h.element('resources-title').textContent,'已上传首页横幅');assert.equal(routes.at(-1),'/api/v1/banners');
+ h.choose('mask');await settle();assert.equal(h.element('resources-title').textContent,'已上传阅读遮罩');assert.equal(routes.at(-1),'/api/v1/masks');
+ h.choose('dict');await settle();assert.equal(h.element('resources-title').textContent,'已安装词典');assert.equal(routes.at(-1),'/api/v1/dicts');
+});
+
 test('upload previews reference normalized bytes and release their object URL when cleared',async()=>{
  const seen=[],item=imageHarness(80,140,{URL:{createObjectURL(file){seen.push(file);return 'blob:normalized';},revokeObjectURL(url){seen.push(url);}}}),h=item.h;h.choose('cover');await h.context.qa.add([new File(['original'],'cover.jpg')]);const entry=h.context.qa.entries()[0];assert.equal(seen[0],entry.file);assert.equal(entry.previewURL,'blob:normalized');entry.cancelled=true;h.element('clear').onclick();assert.equal(h.context.qa.entries().length,0);assert.equal(seen[1],'blob:normalized');
 });
@@ -171,4 +182,98 @@ test('lossless predictor expansion cannot exceed the frozen three-predictor comp
  let compressed=0;for(let at=8;at<png.bytes.length;){const n=png.bytes.readUInt32BE(at);if(png.bytes.toString('ascii',at+4,at+8)==='IDAT')compressed+=n;at+=n+12;}
  assert.ok(compressed<=deflateSync(legacy).length);
  const long=imageHarness(100,200);await assert.rejects(long.h.context.qa.prepare(new File(['original'],'汉'.repeat(60)+'.jpg'),'汉'.repeat(60)+'.jpg','background'),/文件名过长/);assert.equal(long.closed(),1);
+});
+
+test('dictionary zip import unpacks StarDict components, inflates .idx.gz, ignores junk, and orders .idx -> .dict.dz -> .ifo',async()=>{
+ const h=harness(()=>Promise.resolve(reply({items:[],more:false})));
+ h.choose('dict');
+ // 1. Real built open-source StarDict ZIP unpacks all 3 components and ignores LICENSE.
+ const realZipBytes=readFileSync(new URL('../../assets/dicts/PicoNano-dict-ecdict-en-zh.zip',import.meta.url));
+ await h.context.qa.add([new File([realZipBytes],'PicoNano-dict-ecdict-en-zh.zip')]);
+ const queued=h.context.qa.entries();
+ assert.deepEqual(Array.from(queued,e=>[e.name,e.kind]),[
+  ['ecdict-en-zh.idx','dict'],
+  ['ecdict-en-zh.dict.dz','dict'],
+  ['ecdict-en-zh.ifo','dict'],
+ ]);
+ assert.match(h.element('notice').textContent,/三件套已齐套.*ECDICT/);
+
+ // 2. Standalone .idx.gz auto-inflates to .idx and rejects corrupt .ifo.
+ const idxRaw=Buffer.concat([Buffer.from('hello\0'),Buffer.from([0,0,0,0,0,0,0,5])]);
+ const h2=harness(()=>Promise.resolve(reply({items:[],more:false})));
+ h2.choose('dict');
+ await h2.context.qa.add([new File([gzipSync(idxRaw)],'mini.idx.gz'),new File(['not an ifo'],'bad.ifo')]);
+ assert.equal(h2.context.qa.entries().length,1);
+ assert.equal(h2.context.qa.entries()[0].name,'mini.idx');
+ assert.deepEqual(Buffer.from(await h2.context.qa.entries()[0].file.arrayBuffer()),idxRaw);
+ assert.match(h2.element('notice').textContent,/尚缺组件/);
+});
+
+test('plain .dict and non-RA gzip .dict.dz auto-convert to standard RFC 1952 RA DictZip with decodable chunks',async()=>{
+ const h=harness(()=>Promise.resolve(reply({items:[],more:false})));
+ h.choose('dict');
+ // Create a > 120 KiB compressible plain .dict spanning 3 DictZip chunks (58315 B each).
+ const rawText=('apple: a crisp fruit; 苹果，常见水果，富含膳食纤维。\n'.repeat(2200));
+ const rawBuf=Buffer.from(rawText,'utf8');
+ assert.ok(rawBuf.length>120000);
+ const res=await h.context.qa.prepareDict(new File([rawBuf],'demo.dict'),'demo.dict');
+ assert.equal(res.name,'demo.dict.dz');
+ const dzBytes=new Uint8Array(await res.file.arrayBuffer());
+ assert.ok(dzBytes.length<rawBuf.length*0.2);
+ assert.equal(h.context.qa.hasDictZipRA(dzBytes),true);
+ // Verify RFC 1952 RA chunk table decodes every chunk back to rawBuf identically!
+ const xlen=dzBytes[10]|(dzBytes[11]<<8);
+ const chlen=dzBytes[18]|(dzBytes[19]<<8);
+ const chcnt=dzBytes[20]|(dzBytes[21]<<8);
+ assert.equal(chlen,58315);
+ assert.equal(chcnt,Math.ceil(rawBuf.length/58315));
+ let dataOff=12+xlen;
+ const parts=[];
+ for(let i=0;i<chcnt;i++){
+  const clen=dzBytes[22+i*2]|(dzBytes[23+i*2]<<8);
+  parts.push(inflateRawSync(dzBytes.subarray(dataOff,dataOff+clen)));
+  dataOff+=clen;
+ }
+ assert.deepEqual(Buffer.concat(parts),rawBuf);
+
+ // Non-RA plain gzip renamed to .dict.dz is automatically repacked into valid RA DictZip.
+ const plainGz=gzipSync(rawBuf.subarray(0,4096));
+ assert.equal(h.context.qa.hasDictZipRA(new Uint8Array(plainGz)),false);
+ const fixed=await h.context.qa.prepareDict(new File([plainGz],'legacy.dict.dz'),'legacy.dict.dz');
+ assert.equal(fixed.name,'legacy.dict.dz');
+ assert.equal(h.context.qa.hasDictZipRA(new Uint8Array(await fixed.file.arrayBuffer())),true);
+});
+
+test('installed dictionaries group by prefix with completeness badges and support full-set deletion',async()=>{
+ const calls=[];
+ const h=harness((url,options)=>{
+  calls.push({url,method:options.method});
+  if(url==='/api/v1/dicts')return Promise.resolve(reply({items:[
+   {name:'ecdict.ifo',size:200},{name:'ecdict.idx',size:1000},{name:'ecdict.dict.dz',size:5000},{name:'orphan.ifo',size:120}
+  ],more:false}));
+  if(url.startsWith('/api/v1/files/dict'))return Promise.resolve(reply({size:100,sha256:'b'.repeat(64)}));
+  return Promise.resolve(reply({deleted:true,items:[],more:false}));
+ });
+ h.context.qa.token('t');
+ h.choose('dict');
+ await settle();
+ const rows=h.element('fonts-list').children;
+ assert.equal(rows.length,2);
+ // Group 1: ecdict (complete, 3 files -> 删除整套)
+ assert.equal(rows[0].children[0].textContent,'ecdict');
+ assert.equal(rows[0].children[0].children[0].textContent,'完整可用');
+ assert.equal(rows[0].children[2].textContent,'删除整套');
+ // Group 2: orphan (incomplete, 1 file -> 删除)
+ assert.equal(rows[1].children[0].textContent,'orphan');
+ assert.match(rows[1].children[0].children[0].textContent,/缺 \.idx\/\.dict/);
+ assert.equal(rows[1].children[2].textContent,'删除');
+ // Trigger full-set deletion of ecdict
+ const deleting=rows[0].children[2].onclick();
+ h.element('delete-yes').onclick();
+ await deleting;
+ const deletes=calls.filter(c=>c.method==='DELETE').map(c=>c.url);
+ assert.equal(deletes.length,3);
+ assert.ok(deletes.some(u=>u.includes('name=ecdict.ifo')));
+ assert.ok(deletes.some(u=>u.includes('name=ecdict.idx')));
+ assert.ok(deletes.some(u=>u.includes('name=ecdict.dict.dz')));
 });
