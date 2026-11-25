@@ -50,6 +50,37 @@ int main(void){
     // 菜单表：原GL16逐相相同，只有同色项保持。/ Menu table: identical to the original GL16 per phase, only same-color entries hold.
     {const EpdWaveform *m=pn_device_wave_menu();assert(m && e0470_waveform_phases(m,2)==gc);const EpdWaveformPhases *mp=e0470_waveform_phases(m,5);assert(mp && mp->phases==gl->phases);
      for(int p=0;p<mp->phases;p++)for(int to=0;to<16;to++)for(int from=0;from<16;from++)assert(e0470_phase_action(mp,p,to,from)==(to==from?0:e0470_phase_action(gl,p,to,from)));}
+    // 完整48相表（高清翻页）同起点派生：原48相表字节不变，DU/GC16借用原表，GL16全部动作段完整前移到共同起点。
+    // Start-aligned 48-phase full table (crisp turns): original bytes untouched, DU/GC16 borrow original tables, every GL16 run shifts intact to a common start.
+    {const EpdWaveformPhases *fgl=e0470_waveform_phases(&E0470_FULL_WAVEFORM,5),*fdu=e0470_waveform_phases(&E0470_FULL_WAVEFORM,1);
+     assert(fgl && fgl->phases==48 && fdu);
+     uint8_t full_saved[48*16*4];memcpy(full_saved,fgl->luts,sizeof full_saved);
+     assert(!pn_device_wave_full_aligned());
+     assert(!pn_device_wave_full_init(NULL,3,NULL) && !pn_device_wave_full_init(&E0470_FULL_WAVEFORM,-1,NULL) && !pn_device_wave_full_aligned());
+     pn_device_wave_info_t finfo={0};assert(pn_device_wave_full_init(&E0470_FULL_WAVEFORM,E0470_TRIM_HOLD,&finfo));
+     const EpdWaveform *fw=pn_device_wave_full_aligned();
+     assert(fw && fw!=w && fw->num_modes==E0470_FULL_WAVEFORM.num_modes && fw->temp_intervals==E0470_FULL_WAVEFORM.temp_intervals);
+     assert(!memcmp(full_saved,fgl->luts,sizeof full_saved));
+     assert(e0470_waveform_phases(fw,2)==full_gc && e0470_waveform_phases(fw,1)==fdu);
+     const EpdWaveformPhases *fderived=e0470_waveform_phases(fw,5);
+     assert(fderived && fderived!=fgl && !fderived->phase_times && finfo.original_phases==48 && finfo.phases==fderived->phases && fderived->phases<=48);
+     unsigned fmoved=0;
+     for(int to=0;to<16;to++)for(int from=0;from<16;from++){
+         int first=-1,last=-1,dark=0,light=0;
+         for(int p=0;p<fgl->phases;p++){int a=e0470_phase_action(fgl,p,to,from);if(a){if(first<0)first=p;last=p;}dark+=a==1;light+=a==2;}
+         if(first<0){for(int p=0;p<fderived->phases;p++)assert(!e0470_phase_action(fderived,p,to,from));continue;}
+         int shift=first>finfo.start?first-finfo.start:0;fmoved+=shift>0;
+         for(int p=0;p<fderived->phases;p++){int expected=p+shift<fgl->phases?e0470_phase_action(fgl,p+shift,to,from):0;assert(e0470_phase_action(fderived,p,to,from)==expected);}
+         int d=0,l=0;for(int p=0;p<fderived->phases;p++){int a=e0470_phase_action(fderived,p,to,from);d+=a==1;l+=a==2;}
+         assert(d==dark && l==light);
+         // 48相原表自身尾部保持可能小于裁表常量；前移后至少保留原表自有尾部保持（前移项保留不低于E0470_TRIM_HOLD）。
+         // The untrimmed 48-phase table may carry fewer trailing holds than E0470_TRIM_HOLD; keep at least the original trailing hold (and at least E0470_TRIM_HOLD when shifted).
+         int orig_hold=fgl->phases-1-last;
+         int want_hold=(shift>0 || orig_hold>=E0470_TRIM_HOLD)?E0470_TRIM_HOLD:orig_hold;
+         assert(last-shift+want_hold<fderived->phases);
+     }
+     assert(fmoved>0 && e0470_phase_action(fderived,finfo.start,15,0)==2 && e0470_phase_action(fderived,finfo.start,0,15)==1);
+     printf("device_wave full original=%d derived=%d start=%d moved=%u\n",finfo.original_phases,finfo.phases,finfo.start,fmoved);}
     printf("device_wave original=%d derived=%d start=%d moved=%u\n",info.original_phases,info.phases,info.start,moved);
     return 0;
 }

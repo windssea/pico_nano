@@ -27,22 +27,65 @@ static inline void risk_gate_byte(risk_t *risk,uint8_t old){
     if((old&0xeeu)==0xeeu)return;
     unsigned lo=old&15u,hi=old>>4;risk->gray+=(lo>0 && lo<14)+(hi>0 && hi<14);risk->dark+=(lo<5)+(hi<5);
 }
-/// 只统计旧帧可转白像素的新值是否到白，不重复gray/dark。
-/// Count only whether old pixels eligible to whiten reach white in the target, without recomputing gray/dark.
+static inline uint32_t gray_lanes_word(uint32_t v){
+    const uint32_t lanes=0x11111111u;
+    return (v|(v>>1)|(v>>2)|(v>>3))&~((v>>3)&(v>>2)&(v>>1))&lanes;
+}
+static inline uint32_t dark_lanes_word(uint32_t v){
+    const uint32_t lanes=0x11111111u;
+    uint32_t one=v>>1,two=v>>2,three=v>>3;
+    return ~(three|(two&(v|one)))&lanes;
+}
+static inline uint32_t diff_lanes_word(uint32_t old,uint32_t now){
+    const uint32_t lanes=0x11111111u;
+    uint32_t d=old^now;
+    return (d|(d>>1)|(d>>2)|(d>>3))&lanes;
+}
+/// 只统计旧帧可转白像素的新值是否到白，不重复gray/dark；灰到灰仅统计1..13到1..13的真灰阶变化，避免灰底写黑字误计债。
+/// Count only whether old pixels eligible to whiten reach white in the target without recomputing gray/dark; gray-to-gray counts only true 1..13 -> 1..13 shifts so black ink on gray paper does not accrue false debt.
 static inline void risk_whiten_word(risk_t *risk,uint32_t old,const uint8_t *target){
     if(!target || (old&0xeeeeeeeeu)==0xeeeeeeeeu)return;
     const uint32_t lanes=0x11111111u;
     uint32_t two=old>>2,three=old>>3;
     uint32_t from=~(three&two)&lanes;
     if(from || risk->track_gray){uint32_t now=aligned_word(target);risk->whiten+=nibble_count(from&(now>>3)&(now>>2)&(now>>1));
-        if(risk->track_gray){uint32_t gray=(old|(old>>1)|(old>>2)|(old>>3))&~((old>>3)&(old>>2)&(old>>1))&lanes,difference=old^now;
-            risk->gray_changed+=nibble_count(gray&(difference|(difference>>1)|(difference>>2)|(difference>>3)));}}
+        if(risk->track_gray)risk->gray_changed+=nibble_count(gray_lanes_word(old)&gray_lanes_word(now)&diff_lanes_word(old,now));}
 }
 static inline void risk_whiten_byte(risk_t *risk,uint8_t old,const uint8_t *target){
     if(!target || (old&0xeeu)==0xeeu)return;
     unsigned lo=old&15u,hi=old>>4;
-    unsigned now=*target;risk->whiten+=(lo<12 && (now&15u)>=14)+(hi<12 && (now>>4)>=14);
-    if(risk->track_gray)risk->gray_changed+=(lo>0 && lo<14 && lo!=(now&15u))+(hi>0 && hi<14 && hi!=(now>>4));
+    unsigned now=*target,nlo=now&15u,nhi=now>>4;
+    risk->whiten+=(lo<12 && nlo>=14)+(hi<12 && nhi>=14);
+    if(risk->track_gray)risk->gray_changed+=(lo>0 && lo<14 && nlo>0 && nlo<14 && lo!=nlo)+(hi>0 && hi<14 && nhi>0 && nhi<14 && hi!=nhi);
+}
+/// 静态阅读背景模式：跳过所有未变像素(old==now)，仅把真正变化的旧灰/深色像素纳入内容清屏判断，保留插图翻走清残影同时避免静态背景底纹误触全刷。
+/// Static reading background mode: skip unchanged pixels (old==now) and count only changed old gray/dark pixels so real illustrations still clean while static paper artwork never triggers false full cleans.
+static inline void risk_changed_word(risk_t *risk,uint32_t old,uint32_t now){
+    if(old==now)return;
+    const uint32_t lanes=0x11111111u;
+    uint32_t changed=diff_lanes_word(old,now);
+    uint32_t old_gray=gray_lanes_word(old)&changed;
+    risk->gray+=nibble_count(old_gray);
+    risk->dark+=nibble_count(dark_lanes_word(old)&changed);
+    uint32_t from=~((old>>3)&(old>>2))&lanes;
+    risk->whiten+=nibble_count(from&(now>>3)&(now>>2)&(now>>1));
+    if(risk->track_gray)risk->gray_changed+=nibble_count(old_gray&gray_lanes_word(now));
+}
+static inline void risk_changed_byte(risk_t *risk,uint8_t old,uint8_t now){
+    if(old==now)return;
+    unsigned lo=old&15u,hi=old>>4,nlo=now&15u,nhi=now>>4;
+    if(lo!=nlo){
+        risk->gray+=(lo>0 && lo<14);
+        risk->dark+=(lo<5);
+        risk->whiten+=(lo<12 && nlo>=14);
+        if(risk->track_gray)risk->gray_changed+=(lo>0 && lo<14 && nlo>0 && nlo<14);
+    }
+    if(hi!=nhi){
+        risk->gray+=(hi>0 && hi<14);
+        risk->dark+=(hi<5);
+        risk->whiten+=(hi<12 && nhi>=14);
+        if(risk->track_gray)risk->gray_changed+=(hi>0 && hi<14 && nhi>0 && nhi<14);
+    }
 }
 /// 32位同时分类八个4bpp像素，只有可能转白时读取目标，不查表或分配。/ Classify eight 4bpp pixels in one word, reading the target only for possible whitening, without a table or allocation.
 static inline void risk_word(risk_t *risk,uint32_t old,const uint8_t *target){
@@ -67,11 +110,12 @@ void pn_device_refresh_settle(pn_device_refresh_t *s,pn_device_box_t b){
     int first=(b.y+63)/64,last=(b.y+b.height)/64;
     for(int i=first;i<last && i<PN_REFRESH_BANDS;i++)s->bands[i]=0;
 }
-pn_device_refresh_plan_t pn_device_refresh_plan_masked(const pn_device_refresh_t *s,const uint8_t *target,const uint8_t *shown,bool reading,pn_device_box_t dirty,const uint8_t *rows,size_t row_bytes){
+pn_device_refresh_plan_t pn_device_refresh_plan_ex(const pn_device_refresh_t *s,const uint8_t *target,const uint8_t *shown,bool reading,bool static_background,pn_device_box_t dirty,const uint8_t *rows,size_t row_bytes){
     pn_device_refresh_plan_t p={.area=dirty};
     if(!s || !target || !shown || !dirty.width)return p;
     // 灰底/插图与密集黑块转白才提前清理；普通文字变化不能只凭外接框触发。
     // Clean early for gray artwork/dark blocks becoming white, never just a large text bounding box.
+    bool static_bg=reading && static_background;
     risk_t risk={.track_gray=reading};
     const unsigned body=684u*1152u;
     int bottom=dirty.y+dirty.height;if(bottom>1152)bottom=1152;
@@ -81,26 +125,37 @@ pn_device_refresh_plan_t pn_device_refresh_plan_masked(const pn_device_refresh_t
     // 脏区包围全部变化；转白像素不可能超过它，小操作无需扫描全帧。
     // Dirty bounds contain every change; whitening cannot exceed them, so small actions need no full-frame scan.
     if((unsigned)dirty.width*(unsigned)height>=body/10u){
-        // 第一趟只读旧帧：gray/dark都达不到门槛时content_clean必为false，无需读target。
-        // First pass reads the old frame only: if neither gray nor dark can reach its threshold, content_clean is necessarily false and target reads are unnecessary.
-        bool gate=false;
-        for(int row=0;row<684 && !gate;row++){
-            if(aligned){for(int b=0;b<576 && !gate;b+=4){size_t at=(size_t)row*608+b;risk_gate_word(&risk,aligned_word(shown+at));if(risk.gray>=body/6u || risk.dark>=body/3u)gate=true;}}
-            else{for(int b=0;b<576 && !gate;b++){size_t at=(size_t)row*608+b;risk_gate_byte(&risk,shown[at]);if(risk.gray>=body/6u || risk.dark>=body/3u)gate=true;}}
-        }
-        // 第二趟只在门槛可能成立时数whiten；未变行无需读target。
-        // Second pass counts whitening only when the gate can hold; unchanged rows need no target read.
-        if(gate){
+        if(static_bg){
+            // 启用阅读背景时仅统计实际变化的像素，彻底排除未变静态背景底纹对灰/深色门槛的误拉高。
+            // With a reading background active, classify changed pixels only so untouched paper artwork never inflates gray/dark gates.
             for(int row=0;row<684;row++){
-                const uint8_t *target_row=(!use_rows || (rows[(unsigned)row>>3]&(1u<<(row&7))))?target:NULL;
-                if(!target_row)continue;
-                if(aligned){for(int b=0;b<576;b+=4){size_t at=(size_t)row*608+b;risk_whiten_word(&risk,aligned_word(shown+at),target_row+at);}}
-                else{for(int b=0;b<576;b++){size_t at=(size_t)row*608+b;risk_whiten_byte(&risk,shown[at],target_row+at);}}
-                if(risk.whiten>=body/10u)break;
+                if(use_rows && !(rows[(unsigned)row>>3]&(1u<<(row&7))))continue;
+                if(aligned){for(int b=0;b<576;b+=4){size_t at=(size_t)row*608+b;risk_changed_word(&risk,aligned_word(shown+at),aligned_word(target+at));}}
+                else{for(int b=0;b<576;b++){size_t at=(size_t)row*608+b;risk_changed_byte(&risk,shown[at],target[at]);}}
+                if(risk.whiten>=body/10u && (risk.gray>=body/6u || risk.dark>=body/3u))break;
+            }
+        }else{
+            // 第一趟只读旧帧：gray/dark都达不到门槛时content_clean必为false，无需读target。
+            // First pass reads the old frame only: if neither gray nor dark can reach its threshold, content_clean is necessarily false and target reads are unnecessary.
+            bool gate=false;
+            for(int row=0;row<684 && !gate;row++){
+                if(aligned){for(int b=0;b<576 && !gate;b+=4){size_t at=(size_t)row*608+b;risk_gate_word(&risk,aligned_word(shown+at));if(risk.gray>=body/6u || risk.dark>=body/3u)gate=true;}}
+                else{for(int b=0;b<576 && !gate;b++){size_t at=(size_t)row*608+b;risk_gate_byte(&risk,shown[at]);if(risk.gray>=body/6u || risk.dark>=body/3u)gate=true;}}
+            }
+            // 第二趟只在门槛可能成立时数whiten；未变行无需读target。
+            // Second pass counts whitening only when the gate can hold; unchanged rows need no target read.
+            if(gate){
+                for(int row=0;row<684;row++){
+                    const uint8_t *target_row=(!use_rows || (rows[(unsigned)row>>3]&(1u<<(row&7))))?target:NULL;
+                    if(!target_row)continue;
+                    if(aligned){for(int b=0;b<576;b+=4){size_t at=(size_t)row*608+b;risk_whiten_word(&risk,aligned_word(shown+at),target_row+at);}}
+                    else{for(int b=0;b<576;b++){size_t at=(size_t)row*608+b;risk_whiten_byte(&risk,shown[at],target_row+at);}}
+                    if(risk.whiten>=body/10u)break;
+                }
             }
         }
     }
-    p.gray_transition=reading && risk.gray_changed>=body/8u;
+    p.gray_transition=reading && risk.gray_changed>=(static_bg?body/4u:body/8u);
     // 静态底纹不消耗灰阶额度；第四次大幅灰阶迁移才提前走原GC16。/ Static paper consumes no grayscale allowance; the fourth substantial gray transition requests original GC16.
     p.content_clean=(risk.whiten>=body/10u && (risk.gray>=body/6u || risk.dark>=body/3u)) || (p.gray_transition && s->gray_turns>=3u);
     if(!reading && !p.content_clean){
@@ -111,6 +166,9 @@ pn_device_refresh_plan_t pn_device_refresh_plan_masked(const pn_device_refresh_t
         if(p.area.y+p.area.height>1216)p.area.height=1216-p.area.y;
     }
     return p;
+}
+pn_device_refresh_plan_t pn_device_refresh_plan_masked(const pn_device_refresh_t *s,const uint8_t *target,const uint8_t *shown,bool reading,pn_device_box_t dirty,const uint8_t *rows,size_t row_bytes){
+    return pn_device_refresh_plan_ex(s,target,shown,reading,false,dirty,rows,row_bytes);
 }
 pn_device_refresh_plan_t pn_device_refresh_plan(const pn_device_refresh_t *s,const uint8_t *target,const uint8_t *shown,bool reading,pn_device_box_t dirty){
     return pn_device_refresh_plan_masked(s,target,shown,reading,dirty,NULL,0);

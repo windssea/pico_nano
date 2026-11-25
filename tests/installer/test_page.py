@@ -134,6 +134,9 @@ class InstallerPage(unittest.TestCase):
         ids = {attrs["id"] for _, attrs in Page(self.site).elements if "id" in attrs}
         for required_id in ("release-notes-box", "release-notes-list", "changelog-list", "resources"):
             self.assertIn(required_id, ids)
+        resource_jumps = [attrs.get("class", "") for tag, attrs in Page(self.site).elements
+                          if tag == "a" and attrs.get("href") == "#resources"]
+        self.assertTrue(any("button" in cls and "secondary" in cls for cls in resource_jumps), resource_jumps)
 
 
 if __name__ == "__main__":

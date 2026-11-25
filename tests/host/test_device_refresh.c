@@ -35,6 +35,30 @@ static void exhaustive(void){
     // 无转白资格时不需要目标字节；NULL能抓住意外读取，包括12/13灰。
     // No eligible whitening source needs a target byte; NULL catches unintended reads, including gray 12/13.
     for(unsigned lo=12;lo<16;lo++)for(unsigned hi=12;hi<16;hi++){risk_t counts={0};risk_byte(&counts,(uint8_t)(lo|(hi<<4)),NULL);assert(counts.gray==(unsigned)(lo<14)+(unsigned)(hi<14) && !counts.dark && !counts.whiten);counts=(risk_t){0};risk_word(&counts,(lo|(hi<<4))*0x01010101u,NULL);assert(counts.gray==((unsigned)(lo<14)+(unsigned)(hi<14))*4 && !counts.dark && !counts.whiten);}
+    // risk_whiten_word/byte 与 risk_changed_word/byte 穷举：灰到灰只计 1..13 -> 1..13，且静态背景模式跳过未变像素。
+    // Exhaustive check for risk_whiten_* and risk_changed_*: gray_changed counts only 1..13 -> 1..13, and static-bg skips unchanged pixels.
+    for(unsigned a=0;a<256;a++)for(unsigned z=0;z<256;z++){
+        uint8_t target=(uint8_t)z;uint32_t wa=a*0x01010101u,wz=z*0x01010101u;
+        risk_t ew={.track_gray=true},awb={.track_gray=true},aww={.track_gray=true};
+        risk_t ec={.track_gray=true},acb={.track_gray=true},acw={.track_gray=true};
+        for(unsigned shift=0;shift<8;shift+=4){
+            unsigned before=(a>>shift)&15u,after=(z>>shift)&15u;
+            ew.whiten+=before<12 && after>=14;
+            ew.gray_changed+=before>0 && before<14 && after>0 && after<14 && before!=after;
+            if(before!=after){
+                ec.gray+=before>0 && before<14;
+                ec.dark+=before<5;
+                ec.whiten+=before<12 && after>=14;
+                ec.gray_changed+=before>0 && before<14 && after>0 && after<14;
+            }
+        }
+        risk_whiten_byte(&awb,(uint8_t)a,&target);risk_whiten_word(&aww,wa,(const uint8_t *)&wz);
+        assert(awb.whiten==ew.whiten && awb.gray_changed==ew.gray_changed);
+        assert(aww.whiten==ew.whiten*4 && aww.gray_changed==ew.gray_changed*4);
+        risk_changed_byte(&acb,(uint8_t)a,(uint8_t)z);risk_changed_word(&acw,wa,wz);
+        assert(acb.gray==ec.gray && acb.dark==ec.dark && acb.whiten==ec.whiten && acb.gray_changed==ec.gray_changed);
+        assert(acw.gray==ec.gray*4 && acw.dark==ec.dark*4 && acw.whiten==ec.whiten*4 && acw.gray_changed==ec.gray_changed*4);
+    }
     pn_device_refresh_t s={0};s.bands[2]=5;s.bands[10]=6;pn_device_box_t full={0,0,684,1216};const unsigned body=684u*1152u;
     for(unsigned kind=0;kind<4;kind++)for(int delta=-1;delta<=1;delta++){
         unsigned count=(unsigned)((int)(kind<2?body/10u:kind==2?body/6u:body/3u)+delta);
@@ -87,5 +111,47 @@ int main(void){
     p=pn_device_refresh_plan(&s,next,old,false,(pn_device_box_t){2,1210,4,6});assert(p.area.y+p.area.height<=1216);
     pn_device_refresh_commit(&s,true,false,true,p);assert(s.management==6 && s.bands[10]==4);
     pn_device_refresh_commit(&s,true,true,true,p);assert(!s.management && !s.bands[10]);
+    // 静态阅读背景回归：满屏灰底（如纸纹/浅灰底）与带白框背景图翻普通文字页不误触 content-transition；真插图翻走仍触发清理。
+    // Static reading background regression: full gray paper and framed static backgrounds must not trigger false content-transition on text turns, while real illustrations turning away still clean.
+    {
+        pn_device_refresh_t bg={0};pn_device_box_t full={0,0,684,1152};const unsigned body=684u*1152u;
+        uint8_t rows[PN_DEVICE_ROW_MASK_BYTES];memset(rows,255,sizeof rows);
+        // 1) 灰底写黑字（13->0）不计灰到灰债务，静态背景 15% 灰到灰抗锯齿/阅读线变化低于 25% 门槛亦不误触。
+        // 1) Black text on gray paper (13->0) accrues zero gray-to-gray debt, and 15% gray-to-gray AA/guide turnover stays below the 25% static-bg threshold.
+        memset(old,0xdd,sizeof old);memcpy(next,old,sizeof next);
+        for(unsigned px=0;px<body/5u;px++)native_pixel(next,px,0); // 20% 灰底落黑字 / 20% black ink onto gray paper
+        pn_device_refresh_plan_t p_ink=pn_device_refresh_plan_ex(&bg,next,old,true,true,full,rows,sizeof rows);
+        assert(!p_ink.gray_transition && !p_ink.content_clean);
+        // 无静态背景标记时同样不把灰->黑算作灰到灰变化 / Gray-to-black never counts as gray_changed even without static_bg
+        pn_device_refresh_plan_t p_ink_plain=pn_device_refresh_plan_ex(&bg,next,old,true,false,full,rows,sizeof rows);
+        assert(!p_ink_plain.gray_transition && !p_ink_plain.content_clean);
+        memcpy(next,old,sizeof next);
+        for(unsigned px=0;px<body*3u/20u;px++)native_pixel(next,px,10); // 15% 灰到灰（模拟44px抗锯齿+阅读线）
+        pn_device_refresh_plan_t p_aa=pn_device_refresh_plan_ex(&bg,next,old,true,true,full,rows,sizeof rows);
+        assert(!p_aa.gray_transition && !p_aa.content_clean);
+        pn_device_refresh_plan_t p_aa_unaligned=pn_device_refresh_plan_ex(&bg,next+1,old+1,true,true,full,NULL,0);
+        assert(!p_aa_unaligned.gray_transition && !p_aa_unaligned.content_clean);
+        // 2) 带白底正文区的边框背景图（25% 静态灰边框 + 正文区 12% 黑字擦回白底）：旧逻辑误触 content_clean，静态背景模式不误触。
+        // 2) Framed static background (25% untouched gray border + 12% black text erasing to white): legacy mode falsely fires content_clean, static-bg mode does not.
+        memset(old,0xff,sizeof old);memset(next,0xff,sizeof next);
+        for(unsigned px=0;px<body/4u;px++){native_pixel(old,px,10);native_pixel(next,px,10);}
+        for(unsigned px=body/4u;px<body/4u+body*3u/25u;px++)native_pixel(old,px,0);
+        assert(pn_device_refresh_plan_ex(&bg,next,old,true,false,full,rows,sizeof rows).content_clean);
+        assert(!pn_device_refresh_plan_ex(&bg,next,old,true,true,full,rows,sizeof rows).content_clean);
+        // 3) 启用背景图时，真实灰阶插图（20% 旧灰转白）与大幅灰阶漫画翻页（30% 灰到灰第4次）仍正常清理。
+        // 3) With static_bg enabled, real gray illustrations whitening (20%) and large gray-to-gray pages (30% on 4th turn) still clean.
+        memset(old,0xff,sizeof old);memset(next,0xff,sizeof next);
+        for(unsigned px=0;px<body/5u;px++)native_pixel(old,px,7);
+        assert(pn_device_refresh_plan_ex(&bg,next,old,true,true,full,rows,sizeof rows).content_clean);
+        memset(old,0xdd,sizeof old);memcpy(next,old,sizeof next);
+        for(unsigned px=0;px<body*3u/10u;px++)native_pixel(next,px,6);
+        for(unsigned turn=0;turn<3;turn++){
+            pn_device_refresh_plan_t pg=pn_device_refresh_plan_ex(&bg,next,old,true,true,full,rows,sizeof rows);
+            assert(pg.gray_transition && !pg.content_clean);
+            pn_device_refresh_commit(&bg,true,false,true,pg);
+        }
+        pn_device_refresh_plan_t pg4=pn_device_refresh_plan_ex(&bg,next,old,true,true,full,rows,sizeof rows);
+        assert(pg4.gray_transition && pg4.content_clean);
+    }
     return 0;
 }

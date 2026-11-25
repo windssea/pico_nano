@@ -152,6 +152,56 @@ int main(void){
      const EpdWaveformPhases *carrier=e0470_waveform_phases(wave,2);assert(carrier && carrier->phases>=full->phases);
      assert(!memcmp(carrier->luts,full->luts,(size_t)full->phases*64u));build=reference_build;lookup=reference_lookup;
      assert(pn_device_ripple_select(0x100|2,&build,&lookup));build(lut,carrier,0);lookup((const uint32_t *)difference,out,lut,W);assert(pn_device_ripple_end());}
+    // 平铺48相选择性GC16清理（direct-clean，用于直接/高清/极速的周期清理）：
+    // 经 ghost_note 记账后（含极速DU翻页），未变背景灰阶(13->13、12->12)全程输出0保持不闪，仅账上曾脏与本页变化像素走完整48相GC16。
+    // Flat 48-phase selective GC16 clean (direct-clean for direct/crisp/fast periodic cleans):
+    // after ghost_note recording (including fast-du turns), untouched gray background pixels (13->13, 12->12) output 0 (HOLD) across all 48 phases while ledger and changed pixels run full 48-phase GC16.
+    {const EpdWaveformPhases *full=e0470_waveform_phases(&E0470_FULL_WAVEFORM,2);assert(full && full->phases==48);
+     size_t fb=(size_t)W*H/2;uint8_t *front=malloc(fb),*back=malloc(fb),*diff=aligned_alloc(16,(size_t)W*H);assert(front && back && diff);
+     pn_device_ripple_memory_t flat_mem={.tables=memory.tables,.rows={NULL,NULL}}; // 平铺不需要行段表 / Flat needs no row-run buffers
+     pn_device_ripple_ghost_clear();assert(pn_device_ripple_ghost_selective());
+     // 模拟静态灰底(0xDD/0xCC)上某几处文字在极速DU页变化后又擦回背景色 / Simulate text pixels changing on static gray paper (0xDD/0xCC) during a fast-du turn
+     memset(back,0xDD,fb);memcpy(front,back,fb);
+     const size_t dirty_px[]={0,1,13,W+7,(size_t)100*W+500};
+     for(size_t i=0;i<5;i++){size_t q=dirty_px[i];front[q/2]=(uint8_t)((q&1u)?(front[q/2]&0x0Fu):(front[q/2]&0xF0u));}
+     pn_device_ripple_ghost_note(front,back);
+     // 清理页：大部分像素是静态未变背景(13->13 或 12->12)，dirty_px 恢复为同色13->13待清理，像素W+9本次新变化(13->0)
+     // Clean turn: most pixels are untouched static background (13->13 or 12->12), dirty_px stayed 13->13 on ledger, pixel W+9 changes now (13->0).
+     for(size_t i=0;i<(size_t)W*H;i++)diff[i]=(i&1u)?0xCC:0xDD;
+     for(size_t i=0;i<5;i++)diff[dirty_px[i]]=0xDD;
+     const size_t live_px=(size_t)W+9;diff[live_px]=0x0D;
+     assert(pn_device_ripple_begin_ex(&flat_mem,&E0470_FULL_WAVEFORM,2,false,true,false,diff,&wave));
+     const EpdWaveformPhases *carrier=e0470_waveform_phases(wave,2);assert(carrier && carrier->phases==48);
+     for(int f=0;f<48;f++)for(int v=0;v<16;v++)assert(!e0470_phase_action(carrier,f,v,v));
+     build=reference_build;lookup=reference_lookup;assert(pn_device_ripple_select(0x100|2,&build,&lookup));
+     // 验证仅账上同色像素被改写为差一级(0xDC)，账外未变背景保持原同色(0xDD/0xCC)，新变化像素保持(0x0D)
+     // Verify only ledger same-color pixels were rewritten by one level (0xDC), untouched background stayed same-color, and newly changed pixel stayed 0x0D.
+     for(size_t i=0;i<5;i++)assert(diff[dirty_px[i]]==0xDC);
+     assert(diff[live_px]==0x0D && diff[2]==0xDD && diff[3]==0xCC && diff[(size_t)W+8]==0xDD);
+     // 全部48相抽检：未变背景像素每相必输出0（零闪动），账上与变化像素逐相匹配48相原GC16
+     // Check all 48 phases: untouched background pixels output 0 on every phase (zero flash), while ledger and changed pixels match 48-phase GC16 exactly.
+     for(int tick=0;tick<48;tick++){
+         build(lut,carrier,tick);
+         const unsigned rows_to_check[]={0,1,100};
+         for(size_t r=0;r<3;r++){
+             unsigned row=rows_to_check[r];
+             lookup((const uint32_t *)(diff+(size_t)row*W),out+1,lut,W);
+             for(int c=0;c<W;c++){
+                 uint8_t d=diff[(size_t)row*W+c];
+                 int actual=(out[1+c/4]>>((c&3)*2))&3;
+                 int expected=(d>>4)==(d&15)?0:e0470_phase_action(full,tick,d>>4,d&15);
+                 assert(actual==expected);checked++;
+             }
+         }
+     }
+     assert(pn_device_ripple_end() && pn_device_ripple_ghost_selective());
+     // 清理成功后账本已空：下一次平铺GC16不改写任何同色背景像素 / Ledger is empty after clean: next flat GC16 rewrites zero same-color pixels.
+     for(size_t i=0;i<(size_t)W*H;i++)diff[i]=0xDD;
+     assert(pn_device_ripple_begin_ex(&flat_mem,&E0470_FULL_WAVEFORM,2,false,true,false,diff,&wave));
+     build=reference_build;lookup=reference_lookup;assert(pn_device_ripple_select(0x100|2,&build,&lookup));
+     for(size_t i=0;i<5;i++)assert(diff[dirty_px[i]]==0xDD);
+     assert(pn_device_ripple_end());
+     free(front);free(back);free(diff);}
     printf("device_ripple checks=%u max_runs=%u ticks=%d\n",checked,max_runs,gc->phases+7*PN_DEVICE_RIPPLE_STEP);
     free(difference);free(out);free(lut);free(memory.tables);free(memory.rows[0]);free(memory.rows[1]);return 0;
 }

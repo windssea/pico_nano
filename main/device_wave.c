@@ -31,13 +31,20 @@ static const EpdWaveformPhases *menu_ranges[1];
 static EpdWaveformMode menu_mode;
 static const EpdWaveformMode *menu_modes[MAX_MODES];
 static EpdWaveform menu_wave;
-static bool ready;
+static uint8_t full_derived[PN_DEVICE_WAVE_MAX_PHASES][16][4] PN_EXT_BSS;
+static EpdWaveformPhases full_derived_phases;
+static const EpdWaveformPhases *full_derived_ranges[1];
+static EpdWaveformMode full_derived_mode;
+static const EpdWaveformMode *full_modes[MAX_MODES];
+static EpdWaveform full_aligned;
+static bool ready,full_ready;
 
 /// 原表单元：data[phase][to][from/4]，from0在高位。/ Original cell: data[phase][to][from/4], with from0 in the high bits.
 static int action_at(const uint8_t *luts,int phase,int to,int from){return (luts[((size_t)phase*16+(size_t)to)*4+(size_t)from/4]>>(6-2*(from%4)))&3;}
 
-bool pn_device_wave_init(const EpdWaveform *original,int trailing_hold,pn_device_wave_info_t *info){
-    ready=false;
+/// 公共同起点前移派生：保持每对(from,to)的原脉冲序列与次数不变，仅把晚于基准相S起步的迁移前移到S。
+/// Shared start-alignment derivation: preserve every (from,to) pulse sequence and count while moving late starters up to base phase S.
+static bool align_gl16(const EpdWaveform *original,int trailing_hold,uint8_t (*dst)[16][4],EpdWaveformPhases *dst_phases,const EpdWaveformPhases **dst_ranges,EpdWaveformMode *dst_mode,const EpdWaveformMode **dst_modes,EpdWaveform *dst_wave,const EpdWaveformPhases **source_out,pn_device_wave_info_t *info){
     if(!original || !original->mode_data || original->num_modes<1 || original->num_modes>MAX_MODES || original->num_temp_ranges!=1 || trailing_hold<0)return false;
     const EpdWaveformPhases *source=NULL;
     for(int i=0;i<original->num_modes;i++){
@@ -63,20 +70,30 @@ bool pn_device_wave_init(const EpdWaveform *original,int trailing_hold,pn_device
     int phases=0;
     for(int pair=0;pair<256;pair++)if(first[pair]>=0){int end=last[pair]-(first[pair]>start?first[pair]-start:0)+1+trailing_hold;if(end>phases)phases=end;}
     if(phases>total)phases=total;
-    memset(derived,0,sizeof derived);
+    memset(dst,0,sizeof(uint8_t)*PN_DEVICE_WAVE_MAX_PHASES*16u*4u);
     for(int to=0;to<16;to++)for(int from=0;from<16;from++){
         int pair=to<<4|from;if(first[pair]<0)continue;
         int shift=first[pair]>start?first[pair]-start:0;
         for(int phase=0;phase<phases && phase+shift<total;phase++){
             int action=action_at(source->luts,phase+shift,to,from);
-            derived[phase][to][from/4]|=(uint8_t)(action<<(6-2*(from%4)));
+            dst[phase][to][from/4]|=(uint8_t)(action<<(6-2*(from%4)));
         }
     }
-    derived_phases=(EpdWaveformPhases){.phases=phases,.luts=&derived[0][0][0],.phase_times=NULL};
-    derived_ranges[0]=&derived_phases;
-    derived_mode=(EpdWaveformMode){.type=GL16_TYPE,.temp_ranges=1,.range_data=derived_ranges};
-    for(int i=0;i<original->num_modes;i++)modes[i]=original->mode_data[i]->type==GL16_TYPE?&derived_mode:original->mode_data[i];
-    aligned=(EpdWaveform){.num_modes=original->num_modes,.num_temp_ranges=1,.mode_data=modes,.temp_intervals=original->temp_intervals};
+    *dst_phases=(EpdWaveformPhases){.phases=phases,.luts=&dst[0][0][0],.phase_times=NULL};
+    dst_ranges[0]=dst_phases;
+    *dst_mode=(EpdWaveformMode){.type=GL16_TYPE,.temp_ranges=1,.range_data=dst_ranges};
+    for(int i=0;i<original->num_modes;i++)dst_modes[i]=original->mode_data[i]->type==GL16_TYPE?dst_mode:original->mode_data[i];
+    *dst_wave=(EpdWaveform){.num_modes=original->num_modes,.num_temp_ranges=1,.mode_data=dst_modes,.temp_intervals=original->temp_intervals};
+    if(source_out)*source_out=source;
+    if(info)*info=(pn_device_wave_info_t){.original_phases=total,.phases=phases,.start=start};
+    return true;
+}
+
+bool pn_device_wave_init(const EpdWaveform *original,int trailing_hold,pn_device_wave_info_t *info){
+    ready=false;
+    const EpdWaveformPhases *source=NULL;pn_device_wave_info_t local={0};
+    if(!align_gl16(original,trailing_hold,derived,&derived_phases,derived_ranges,&derived_mode,modes,&aligned,&source,&local))return false;
+    const int phases=local.phases,total=local.original_phases;
     // 同色项（to==from）清零：未变像素不驱动，只有变化的内容被替换。/ Zero same-color entries (to==from): unchanged pixels stay undriven and only changed content is replaced.
     memcpy(changed,derived,sizeof changed);
     for(int phase=0;phase<phases;phase++)for(int v=0;v<16;v++)changed[phase][v][v/4]&=(uint8_t)~(3u<<(6-2*(v%4)));
@@ -93,9 +110,15 @@ bool pn_device_wave_init(const EpdWaveform *original,int trailing_hold,pn_device
     menu_mode=(EpdWaveformMode){.type=GL16_TYPE,.temp_ranges=1,.range_data=menu_ranges};
     for(int i=0;i<original->num_modes;i++)menu_modes[i]=original->mode_data[i]->type==GL16_TYPE?&menu_mode:original->mode_data[i];
     menu_wave=(EpdWaveform){.num_modes=original->num_modes,.num_temp_ranges=1,.mode_data=menu_modes,.temp_intervals=original->temp_intervals};
-    if(info)*info=(pn_device_wave_info_t){.original_phases=total,.phases=phases,.start=start};
+    if(info)*info=local;
     ready=true;return true;
+}
+bool pn_device_wave_full_init(const EpdWaveform *original,int trailing_hold,pn_device_wave_info_t *info){
+    full_ready=false;
+    if(!align_gl16(original,trailing_hold,full_derived,&full_derived_phases,full_derived_ranges,&full_derived_mode,full_modes,&full_aligned,NULL,info))return false;
+    full_ready=true;return true;
 }
 const EpdWaveform *pn_device_wave_aligned(void){return ready?&aligned:NULL;}
 const EpdWaveform *pn_device_wave_changed_only(void){return ready?&changed_only:NULL;}
 const EpdWaveform *pn_device_wave_menu(void){return ready?&menu_wave:NULL;}
+const EpdWaveform *pn_device_wave_full_aligned(void){return full_ready?&full_aligned:NULL;}

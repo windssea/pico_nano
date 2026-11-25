@@ -305,6 +305,7 @@ static const char *reader_turn_phase="prepare"; ///< 仅借静态诊断标签，
 static bool reader_prefetch_batch; ///< 空闲预排批次中的诊断归并 / Diagnostic aggregation during an idle prefetch batch
 static uint64_t reader_turn_started; ///< 原请求的单调计时 / Monotonic time of the original request
 static atomic_bool reading_presentation; ///< 此次显示的用途，独立于输入页面状态 / Purpose of this presentation, independent of input view state
+static atomic_bool reading_background; ///< 当前阅读页是否启用静态阅读背景，供内容风险判断排除未变底纹 / Whether the active reading page uses a static paper background so unchanged artwork is excluded from content-risk cleans
 static atomic_bool sudoku_presentation; ///< 已知游戏帧只更新变化像素，退出另走整屏清理 / Known game frames update changed pixels; exit cleans the full screen separately
 static pn_status_t opening_overlap_result=PN_BUSY; ///< 扫描中已结束的开书步骤结果，tick_opening消费 / Result of an opening step that finished during the scan, consumed by tick_opening
 static atomic_bool deep_clean_pending; ///< 显式清屏意图，由显示owner消费 / Explicit cleaning intent consumed by the display owner
@@ -645,7 +646,7 @@ static pn_status_t present_panel(void *ctx,const pn_frame_t *frame,pn_refresh_t 
     // 退出阅读已有完整整屏GC16，GC16/深清/到期维护也已指定整屏路径，均不再做内容风险与局部区域分类。
     // Reading exit already selects full-screen original GC16; GC16/deep clean/due maintenance also select a full path, so skip content-risk and regional classification.
     bool full_clean=reading_exit || profile==PN_REFRESH_GC16 || atomic_load(&deep_clean_pending) || mgmt_due;
-    pn_device_refresh_plan_t maintenance_plan=(!known || full_clean || game_refresh)?(pn_device_refresh_plan_t){.area=dirty}:pn_device_refresh_plan_masked(&maintenance,hardware.framebuffer,hardware.hl.back_fb,body_refresh,dirty,dirty_rows,sizeof dirty_rows);
+    pn_device_refresh_plan_t maintenance_plan=(!known || full_clean || game_refresh)?(pn_device_refresh_plan_t){.area=dirty}:pn_device_refresh_plan_ex(&maintenance,hardware.framebuffer,hardware.hl.back_fb,body_refresh,body_refresh && atomic_load(&reading_background),dirty,dirty_rows,sizeof dirty_rows);
     const char *reason=mode==MODE_GC16?"requested":body_refresh?"reading":"management";
     (void)reason;
     // 大面积灰/深色内容（书库封面、自定义横幅、壁纸缩略图等）切回浅底时，允许管理页升级为完整GC16清残影。
@@ -672,15 +673,18 @@ static pn_status_t present_panel(void *ctx,const pn_frame_t *frame,pn_refresh_t 
 #if defined(ESP_PLATFORM)
     const EpdWaveform *ripple_wave=NULL;
     bool clean_wanted=ripple_clean || mode==MODE_GC16;
-    // 正文直接/高清/水波纹普通页均启用跨页残影账本静默白推（0→15纯白相，无黑闪）；到期清理仍强制走完整GC16，白推不替代周期清屏。
-    // Direct/crisp/ripple ordinary reading turns all enable per-pixel ghost-ledger white-push (0->15 pure white phases, no dark flash); periodic cleans still run real GC16.
-    bool flat_direct=!ripple_turn && !fast_turn && body_refresh && known && !deep_clean && !reading_exit && mode==MODE_GL16;
-    bool use_engine=(ripple_turn || flat_direct) && body_refresh && known && !deep_clean && !reading_exit;
+    // 正文直接/高清/水波纹普通页启用跨页残影账本静默白推（0→15纯白相，无黑闪）；
+    // 直接/高清/极速的周期清理与内容风险GC16同样走平铺选择性账本引擎，只清变化与曾脏像素，避免未变阅读背景整屏闪动。
+    // Direct/crisp/ripple ordinary reading turns enable per-pixel ghost-ledger white-push (0->15 pure white phases, no dark flash);
+    // direct/crisp/fast periodic and content-transition GC16 cleans also run through the flat selective ledger engine so untouched reading backgrounds never flash.
+    bool flat_engine=!ripple_turn && body_refresh && known && !deep_clean && !reading_exit && (!fast_turn || mode==MODE_GC16);
+    bool use_engine=(ripple_turn || flat_engine) && body_refresh && known && !deep_clean && !reading_exit;
     bool white_push=use_engine && !clean_wanted && pn_device_ripple_ghost_selective();
     int ripple_mode=clean_wanted?MODE_GC16:MODE_GL16;
-    const EpdWaveform *engine_source=(flat_direct && crisp_turn)?&E0470_FULL_WAVEFORM:hardware.hl.waveform;
-    if(use_engine && !ripple_memory.tables)ripple_memory.tables=heap_caps_aligned_alloc(16,(flat_direct?1u:PN_RIPPLE_BANDS)*1024u,MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
-    bool rippling=use_engine && pn_device_ripple_begin_ex(&ripple_memory,engine_source,ripple_mode,ripple_reverse,flat_direct,white_push,hardware.hl.difference_fb,&ripple_wave);
+    const EpdWaveform *crisp_wave=pn_device_wave_full_aligned()?pn_device_wave_full_aligned():&E0470_FULL_WAVEFORM;
+    const EpdWaveform *engine_source=(flat_engine && !clean_wanted && crisp_turn)?crisp_wave:hardware.hl.waveform;
+    if(use_engine && !ripple_memory.tables)ripple_memory.tables=heap_caps_aligned_alloc(16,(flat_engine?1u:PN_RIPPLE_BANDS)*1024u,MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
+    bool rippling=use_engine && pn_device_ripple_begin_ex(&ripple_memory,engine_source,ripple_mode,ripple_reverse,flat_engine,white_push,hardware.hl.difference_fb,&ripple_wave);
     if(!rippling && ripple_memory.tables){heap_caps_free(ripple_memory.tables);ripple_memory.tables=NULL;}
     bool white_cleaned=false;
     // 非账本驱动的普通显示先比较目标帧与已显示参考，把将变化的像素记入账本。/ Non-engine draws record the pixels about to change by comparing target with the shown reference.
@@ -703,19 +707,19 @@ static pn_status_t present_panel(void *ctx,const pn_frame_t *frame,pn_refresh_t 
     }
 #if defined(ESP_PLATFORM)
     else if(rippling){
-        // GL16平铺/波纹只驱动变化像素并在次页对曾脏纯白像素静默白推；GC16波纹驱动全部脏像素完成周期清残影。
-        // Flat/ripple GL16 drives changed pixels only and white-pushes previously-dirty white pixels; GC16 ripple cleans ghosts.
+        // GL16平铺/波纹只驱动变化像素并在次页对曾脏纯白像素静默白推；GC16平铺/波纹只驱动变化与账上像素完成周期清残影。
+        // Flat/ripple GL16 drives changed pixels only and white-pushes previously-dirty white pixels; flat/ripple GC16 selectively cleans changed and ledger pixels.
         const EpdWaveform *saved=hardware.hl.waveform;hardware.hl.waveform=ripple_wave;
         result=epd_hl_update_screen_full(&hardware.hl,(enum EpdDrawMode)ripple_mode,25);
         hardware.hl.waveform=saved;
         if(!pn_device_ripple_end() && result==EPD_DRAW_SUCCESS)result=EPD_DRAW_LOOKUP_NOT_IMPLEMENTED;
         mode=(enum EpdDrawMode)ripple_mode;
-        reason=ripple_mode==MODE_GC16?"ripple-clean":flat_direct?(crisp_turn?"crisp-48":"direct-wp"):"ripple";
+        reason=ripple_mode==MODE_GC16?(flat_engine?"direct-clean":"ripple-clean"):flat_engine?(crisp_turn?"crisp-48":"direct-wp"):"ripple";
         heap_caps_free(ripple_memory.tables);ripple_memory.tables=NULL;
     }
     else if(fast_turn && body_refresh && known && !deep_clean && mode==MODE_GL16){
-        // 极速翻页：20相DU快速扫描，翻页时间近乎减半；因二值阈值与4bpp参考略有差异，置账本失效使下次周期GC16整页清理。
-        // Fast turn: 20-phase DU fast scan (~2x faster); forget the ghost ledger so the next periodic GC16 cleans the whole page.
+        // 极速翻页：20相DU快速扫描，翻页时间近乎减半；DU同色项全0不触及未变背景，变化像素已由上方ghost_note记入账本供下次选择性GC16清理。
+        // Fast turn: 20-phase DU fast scan (~2x faster); DU same-color entries are all-zero so untouched backgrounds stay still while changed pixels remain on the ghost ledger for selective GC16 cleaning.
         const int footer_band=PN_READER_FOOTER_BAND_Y;
         bool footer=changed.width && changed.y+changed.height>footer_band;
         content_area.height=footer?1216:footer_band;
@@ -724,7 +728,6 @@ static pn_status_t present_panel(void *ctx,const pn_frame_t *frame,pn_refresh_t 
         result=epd_hl_update_area(&hardware.hl,MODE_DU,25,(EpdRect){0,0,684,footer?1216:footer_band});
         read_pico_epd_use_scan(READ_PICO_EPD_SCAN_FULL);
         hardware.hl.waveform=saved;
-        pn_device_ripple_ghost_forget();
         reason="fast-du";
     }
 #endif
@@ -986,6 +989,13 @@ static pn_status_t first_reader_present(void *ctx,const pn_frame_t *frame,pn_ref
     if(opening && !atomic_load(&async_port.first_reader)){pn_device_async_reader_mode(&async_port,vertical_turn,reader_bars_hidden());pn_status_t s=pn_device_async_first_begin(&async_port,input_flags);if(s!=PN_OK)return s;}
     return present(ctx,frame,profile);
 }
+/// 当前打开书籍是否启用静态阅读背景（内置或外部背景图，不含已退回“无”的旧编号）。
+/// Whether the active book uses a static reading background (built-in or external paper artwork, excluding retired IDs resolved to None).
+static bool active_has_reading_background(void){
+    pn_style_t style={0};
+    pn_status_t s=epub.impl?pn_epub_app_style_get(&epub,&style):reader.impl?pn_reader_app_style_get(&reader,&style):PN_EMPTY;
+    return s==PN_OK && (pn_reading_background_resolve(style.background)!=PN_READING_BACKGROUND_NONE || style.background==PN_READING_BACKGROUND_EXTERNAL);
+}
 static pn_status_t active_step(pn_reader_action_t action,uint64_t now){
     static uint64_t waiting_reported; ///< BUSY诊断节流，不改变调度期限 / Throttle BUSY diagnostics without changing scheduling deadlines
     reading_stats_pause();
@@ -1001,6 +1011,7 @@ static pn_status_t active_step(pn_reader_action_t action,uint64_t now){
 #endif
     if((action==PN_APP_NEXT || action==PN_APP_PREVIOUS) && panel_known && page_copy && pn_frame_bind(&before,page_copy,342u*1216u,684,1216))effect.before=&before;
     else effect.style=PN_TURN_NONE;
+    atomic_store(&reading_background,active_has_reading_background());
     atomic_store(&reading_presentation,true);
     // 短批次摊薄让出开销；单次库调用仍可能超过软预算。/ Short batches amortize yield overhead; an individual library call can exceed the soft budget.
     pn_profile_span_t batch_timing={0};if(epub.impl && action==PN_APP_NEXT)pn_profile_begin(&batch_timing,&pool,"epub.next.batch");
@@ -1009,6 +1020,7 @@ static pn_status_t active_step(pn_reader_action_t action,uint64_t now){
     while(epub.impl && action==PN_APP_NEXT && status==PN_BUSY && ++batch_steps<32u && now_ms()-batch_started<8u);
     pn_profile_end(&batch_timing,status);
     atomic_store(&reading_presentation,false);
+    atomic_store(&reading_background,false);
     reader_turn_pending=epub.impl && action==PN_APP_NEXT && status==PN_BUSY;
     if(reader_turn_pending){
         reader_turn_started=started;uint64_t tick=now_ms();
@@ -4080,6 +4092,8 @@ static void device_task(void *arg){
 #if defined(ESP_PLATFORM)
     {pn_device_wave_info_t wave;if(pn_device_wave_init(&E0470_WAVEFORM,E0470_TRIM_HOLD,&wave)){hardware.hl.waveform=pn_device_wave_aligned();ESP_LOGI(TAG,"GL16 start-aligned phases=%d/%d start=%d",wave.phases,wave.original_phases,wave.start);}
      else ESP_LOGW(TAG,"GL16 start alignment unavailable; original timing kept");}
+    {pn_device_wave_info_t full_wave;if(pn_device_wave_full_init(&E0470_FULL_WAVEFORM,E0470_TRIM_HOLD,&full_wave)){ESP_LOGI(TAG,"GL16 full start-aligned phases=%d/%d start=%d",full_wave.phases,full_wave.original_phases,full_wave.start);}
+     else ESP_LOGW(TAG,"GL16 full start alignment unavailable; original full table kept");}
 #endif
     int vcom=0;if(!hardware.pmu_ready || read_pico_pmu_vcom_get(&vcom)!=ESP_OK){ESP_LOGE(TAG,"Factory VCOM unavailable; display withheld");read_pico_deinit(&hardware);vTaskDelete(NULL);return;}
     epd_set_vcom((uint16_t)vcom);
