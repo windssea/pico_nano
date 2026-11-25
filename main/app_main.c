@@ -316,7 +316,7 @@ static char trust_failed_path[PN_CATALOG_PATH_MAX] PN_EXT_BSS; ///< 后台复核
 static size_t recent_start;
 static bool list_mode; ///< 书架列表模式（每页5本）/ Shelf list mode (five per page)
 /// 当前书架每页条数。/ Entries per shelf page right now.
-static size_t shelf_per_page(void){return home_mode?3u:list_mode || (!recent_mode && !fav_mode && *search_query)?5u:(size_t)shelf_prefs.columns*3u;}
+static size_t shelf_per_page(void){return home_mode?4u:list_mode || (!recent_mode && !fav_mode && *search_query)?5u:(size_t)shelf_prefs.columns*3u;}
 static pn_book_id_t selected_expected;
 static char selected_path[PN_CATALOG_PATH_MAX] PN_EXT_BSS;
 static pn_opening_view_t opening_view; ///< 同一次开书/解锁的自有展示快照，不作来源凭据 / Owned presentation snapshot for one opening/unlock, never source credentials

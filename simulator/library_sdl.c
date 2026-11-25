@@ -190,7 +190,7 @@ static pn_shelf_options_t shelf_options(const library_t *s){
     }
     return o;
 }
-static size_t shelf_per_page(const library_t *s){pn_shelf_options_t o=shelf_options(s);return s->home?3u:pn_shelf_capacity(&o);}
+static size_t shelf_per_page(const library_t *s){pn_shelf_options_t o=shelf_options(s);return s->home?4u:pn_shelf_capacity(&o);}
 static bool reading(library_t *s){return s->reader.impl || s->epub.impl;}
 static bool stats_clock(uint64_t *utc){struct timespec t;if(clock_gettime(CLOCK_REALTIME,&t) || t.tv_sec<0)return false;*utc=(uint64_t)t.tv_sec*1000u+(uint64_t)t.tv_nsec/1000000u;return *utc<=UINT64_C(4294967295999);}
 static void stats_pause(library_t *s){uint64_t utc=0;bool dated=stats_clock(&utc);pn_reading_stats_gate(&s->reading_stats,SDL_GetTicks64(),false,dated,utc);}

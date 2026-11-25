@@ -397,13 +397,18 @@ pn_status_t pn_w_card_row(pn_font_t *font,pn_frame_t *frame,const char *label,co
 pn_status_t pn_w_navigation(pn_font_t *font,pn_frame_t *frame,pn_navigation_t active){
     static const pn_icon_t icons[]={PN_ICON_HOME,PN_ICON_SHELF,PN_ICON_TRANSFER,PN_ICON_SETTINGS};
     if(!font || !font->impl || !frame || !frame->pixels || active<PN_NAV_HOME || active>PN_NAV_SETTINGS)return PN_INVALID;
-    // 一级导航只画居中图标；整栏命中保持不变。/ Root navigation draws centered icons only; full-tab hit areas stay unchanged.
+    // 轻量柔和卡片风格底栏：细浅灰顶线，选中项为浅雾圆角胶囊配纯黑图标，未选中为柔和中灰图标；整栏命中保持不变。
+    // Lightweight soft-card bottom bar: fine light-gray top rule, fog rounded pill with ink icon for active tab, medium-gray icons for inactive tabs; full-tab hit areas stay unchanged.
     pn_frame_rect(frame,0,1104,PN_UI_WIDTH,112,PN_UI_PAPER);
-    pn_frame_rect(frame,0,1104,PN_UI_WIDTH,2,PN_UI_STROKE);
+    pn_frame_rect(frame,0,1104,PN_UI_WIDTH,1,PN_UI_SELECT);
     for(unsigned i=0;i<4;i++){
         int cx=(int)(PN_UI_WIDTH*(2*i+1)/8);
-        if(i==(unsigned)active)pn_w_round_fill(frame,cx-66,1122,132,76,22,PN_UI_INK);
-        pn_w_icon(frame,icons[i],cx-21,1139,42,i==(unsigned)active?PN_UI_PAPER:PN_UI_INK);
+        bool on=i==(unsigned)active;
+        if(on){
+            pn_w_round_fill(frame,cx-58,1124,116,72,22,PN_UI_SURFACE);
+            pn_w_round_stroke(frame,cx-58,1124,116,72,22,1.5f,PN_UI_ACTIVE);
+        }
+        pn_w_icon(frame,icons[i],cx-21,1139,42,on?PN_UI_INK:7);
     }
     return PN_OK;
 }

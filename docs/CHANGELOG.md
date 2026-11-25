@@ -1,5 +1,17 @@
 # PicoNano 变更记录
 
+## 1.1.4（2026-11-25）
+
+- 无线与传书稳定性加固：AP/STA 强制 2.4 GHz `WIFI_BW20`、SoftAP 信道 6、STA 全信道扫描与渐进重连退避；静态收发缓冲调整至 `6/6`、`pn_transfer_ctl` 片内栈收紧至 `8 KiB`，并将 [app_main.c](../main/app_main.c) 中 25,168 B 纯 Core 1 界面静态状态迁至 `EXT_RAM_BSS_ATTR` 彻底消除热点传书期 SDMMC DMA 耗尽；传书分块间隙保留 6 秒防抖消除每秒刷屏争抢；SD 暂存减少冗余 `ftruncate`/目录同步与重复整文件 SHA-256；HTTP/1.1 2xx 复用长连接、正文超时放宽至 25 秒（HTTP 408）；网页端提供中文超时提示、最多 5 次自动重试、409 偏移对齐与完成阶段复核。
+- 首页与底栏轻量化：移除首页「正在阅读」卡片底部黑色「继续阅读」按钮，保留整卡点击续读并加右上细箭头提示，「最近阅读」由 2 条扩展至 3 条（首页共展示 4 本最近书）；底部四栏导航取消纯黑反色大块，改为 1px `G13` 顶线、`G14` 浅雾圆角胶囊 + `G10` 细描边配纯黑图标（未选中为 `G07` 中灰图标）。
+- 网页安装器：支持 Gitee 直链下载、本地 ZIP 固件包校验导入、下载就绪再进 Stub 及 ESP32-S3 原生 USB 看门狗保护。
+
+## 2026-11-25：首页精简与底栏轻量选中态优化（已并入 1.1.4）
+
+- 首页去除冗余按钮并扩展最近阅读（[pn_shelf_view.c](../components/pn_library/pn_shelf_view.c)、[app_main.c](../main/app_main.c)、[library_sdl.c](../simulator/library_sdl.c)）：移除「正在阅读」卡片底部 `572×60` 黑色「继续阅读 / 打开书库」按钮，保留整卡点击续读（右上角补充细箭头提示），卡片高度由 `384px` 缩至 `294px`；「阅读节奏」上移后，「最近阅读」由 2 条扩展至 3 条（行高 `122px`，首页 `shelf_per_page` 由 `3` 增至 `4`，共展示 4 本最近书），同步更新绘制、命中与焦点局部刷新。
+- 底部四栏导航轻量柔和化（[pn_widgets.c](../components/pn_widgets/pn_widgets.c)）：取消厚重的纯黑反色大胶囊，改为 1px `G13` 浅灰顶线；选中项采用 `G14` 浅雾圆角胶囊（`116×72`，`1.5px G10` 细描边）配 `G00` 纯黑图标，未选中为无底框 `G07` 中灰图标，保持原有整栏命中热区并降低切页残影。
+- 同步更新主机与 SDL 窗口测试（[test_shelf_view.c](../tests/host/test_shelf_view.c)、[test_shelf_focus.c](../tests/host/test_shelf_focus.c)、[test_reading_home_window.py](../simulator/test_reading_home_window.py)），并已重建重启可见 PC 模拟器窗口。
+
 ## 2026-11-25：无线连接与热点传书中断综合修复（正式配置 `firmware-board`/`firmware-ci` 构建与 `1.1.3-diag` 真机实测通过）
 
 - Wi-Fi 驱动与连接策略（[device_wifi.c](../main/device_wifi.c)、[device_transfer.c](../main/device_transfer.c)）：修复静态 TX 缓冲（`TX_BUFFER_TYPE=0`）与静态 RX 缓冲仅 4 个低于 6 包 BA 窗导致的 DMA 缺槽丢包，调整为 `static_rx=6 / dynamic_rx=24 / static_tx=6 / mgmt=12` 并将 `pn_transfer_ctl` 片内栈从 16 KiB 收紧至 8 KiB；AP/STA 强制 2.4GHz `WIFI_BW20` 窄带，SoftAP 切至信道 6 并显式配置 100 TU 信标与可选 PMF，STA 启用 `WIFI_ALL_CHANNEL_SCAN` + 按信号排序，首次连接有界 25s/5 次、会话内断线重连放宽至 45s/8 次（1/2/3s 渐进退避）。

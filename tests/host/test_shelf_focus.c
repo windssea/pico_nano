@@ -16,7 +16,7 @@ int main(void){
     for(unsigned mode=0;mode<10;mode++){
         pn_shelf_options_t o={.columns=mode<8?(mode%2?4:3):3,.style=(uint8_t)(mode/2%4),.list_mode=mode==8,.home=mode==9,.search=true,.layout_toggle=true,.favorite_items=fav};
         if(o.home)pn_shelf_covers_set_last(covers,&page->items[0]);
-        int last=o.home?2:(int)pn_shelf_capacity(&o)-1;int steps[]={0,1,last,-1};int before=-1;
+        int last=o.home?3:(int)pn_shelf_capacity(&o)-1;int steps[]={0,1,last,-1};int before=-1;
         assert(pn_shelf_render_ex(page,&font,&patch,before,false,false,covers,&o)==PN_OK);
         for(unsigned i=0;i<4;i++){
             draws=0;assert(pn_shelf_render_ex(page,&font,&oracle,steps[i],false,false,covers,&o)==PN_OK);unsigned full=draws;draws=0;

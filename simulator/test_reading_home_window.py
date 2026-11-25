@@ -31,7 +31,7 @@ with tempfile.TemporaryDirectory() as directory:
         assert result.returncode==0 and 'used=0 live=0' in result.stdout,(result.stdout,result.stderr)
         return result.stdout,[p.read_bytes().split(b'\n',3)[3] for p in sorted(capture.glob('*.pgm'))]
 
-    out,frames=run('tap:300:500,wait:1800,tap:70:420,next,back,home,wait:800,tap:300:540,next,back,tap:427:1150,wait:1500,tap:598:1150,tap:85:1150,tap:256:1150,tap:600:190,window-close','first')
+    out,frames=run('tap:300:340,wait:1800,tap:70:420,next,back,home,wait:800,tap:300:340,next,back,tap:427:1150,wait:1500,tap:598:1150,tap:85:1150,tap:256:1150,tap:600:190,window-close','first')
     assert out.startswith('navigation root=home count=0'),out
     assert out.count('library_open name=01-file-name.epub')==2 and out.count('library_return status=0')==2,out
     assert 'navigation root=home count=1' in out and 'settings closed request=25' in out,out
@@ -44,7 +44,7 @@ with tempfile.TemporaryDirectory() as directory:
     assert book.read_bytes()==original
     # 冷缓存封面完成后的图书封面确为灰阶带；副标题元数据有像素输出。/ The completed cold-cache cover has the decoded bands and visible subtitle pixels.
     assert any(f[290*684+100]<100 and 120<f[340*684+100]<230 for f in frames)
-    out,warm=run('wait:800,tap:300:540,back,window-close','warm')
+    out,warm=run('wait:800,tap:300:340,back,window-close','warm')
     assert out.startswith('navigation root=home count=1') and 'library_open name=01-file-name.epub' in out,out
     assert 'covers ready=' not in out,out
     assert book.read_bytes()==original and len(warm)>=3

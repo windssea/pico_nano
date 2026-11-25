@@ -86,12 +86,15 @@ int main(void){
     assert(!strcmp(p->items[0].name,"一本很长很长很长很长的中文文件名.epub"));
     memcpy(before,bytes,684*1216/2);covers->display[0].author[0]=0;
     assert(pn_shelf_render_ex(p,&font,&frame,-1,false,true,covers,&list)==PN_OK && memcmp(before,bytes,684*1216/2));
-    /* 继续卡仅首页命中；空记录不伪造书籍。/ Only Home exposes Continue; empty history invents no books. */
-    p->count=3;p->total=3;p->more=false;pn_shelf_covers_set_last(covers,&p->items[0]);
+    /* 继续卡仅首页命中（无大黑按钮，扩展为3条最近阅读）；空记录不伪造书籍。/ Only Home exposes Continue (no black button, 3 recent rows); empty history invents no books. */
+    p->count=4;p->total=4;p->more=false;pn_shelf_covers_set_last(covers,&p->items[0]);
     pn_shelf_options_t home={.home=true};
     assert(pn_shelf_render_ex(p,&font,&frame,-1,true,false,covers,&home)==PN_OK && font.pixels==24);
-    assert(pn_shelf_hit_ex(p,300,540,&home)==PN_SHELF_CONTINUE && pn_shelf_hit_ex(p,580,805,&home)==PN_SHELF_HOME);
-    assert(pn_shelf_hit_ex(p,300,880,&home)==1 && pn_shelf_hit_ex(p,300,1010,&home)==2 && pn_shelf_hit_ex(p,300,730,&home)==PN_SHELF_READING_STATS);
+    assert(pn_shelf_hit_ex(p,300,340,&home)==PN_SHELF_CONTINUE && pn_shelf_hit_ex(p,580,700,&home)==PN_SHELF_HOME);
+    assert(pn_shelf_hit_ex(p,300,780,&home)==1 && pn_shelf_hit_ex(p,300,900,&home)==2 && pn_shelf_hit_ex(p,300,1020,&home)==3 && pn_shelf_hit_ex(p,300,600,&home)==PN_SHELF_READING_STATS);
+    /* 轻量底栏：1px浅灰顶线，选中项浅雾圆角胶囊配纯黑图标，未选中无底框。/ Lightweight nav bar: 1 px light rule, fog pill with ink icon for active tab, plain paper behind inactive tabs. */
+    assert(pn_frame_get(&frame,342,1104)==PN_UI_SELECT && pn_frame_get(&frame,342,1105)==PN_UI_PAPER);
+    assert(pn_frame_get(&frame,85-45,1135)==PN_UI_SURFACE && pn_frame_get(&frame,256-45,1135)==PN_UI_PAPER);
     /* 阅读节奏详情页、自定义主页左上角文案与顶部背景、已读标识与排序按钮。/ Reading stats view, custom Home header/banner, read badge and sort button. */
     {pn_stats_view_t sv={.summary=home.reading};strcpy(sv.date_label,"11月24日 · 周二");strcpy(sv.current_title,"测试书");
      assert(pn_stats_view_render(&sv,&font,&frame)==PN_OK && pn_stats_view_hit(80,90)==PN_STATS_BACK && pn_stats_view_hit(340,600)==-1);
@@ -109,7 +112,7 @@ int main(void){
     memcpy(before,bytes,684*1216/2);strcpy(home.home_date,"10月20日 · 周二");
     home.reading=(pn_reading_summary_t){.known=true,.dated=true,.weekday=1,.total_ms=36u*60000u,.today_ms=99999u*60000u,.week_ms={74u*60000u+40000u,12u*60000u+40000u}};
     assert(pn_shelf_render_ex(p,&font,&frame,-1,true,false,covers,&home)==PN_OK);
-    assert(pn_frame_get(&frame,240,670)==9 && pn_frame_get(&frame,298,723)==0 && pn_frame_get(&frame,356,700)==15);
+    assert(pn_frame_get(&frame,240,580)==9 && pn_frame_get(&frame,298,616)==0 && pn_frame_get(&frame,356,590)==15);
     assert(!memcmp(before+1104*342,bytes+1104*342,(1216-1104)*342));
     memcpy(before,bytes,684*1216/2);home.reading.today_ms=0;
     assert(pn_shelf_render_ex(p,&font,&frame,-1,true,false,covers,&home)==PN_OK && !memcmp(before,bytes,684*1216/2));
@@ -121,7 +124,7 @@ int main(void){
     home.reading=(pn_reading_summary_t){0};home.home_date[0]=0;
     p->count=0;pn_shelf_covers_set_last(covers,NULL);
     assert(pn_shelf_render_ex(p,&font,&frame,-1,true,false,covers,&home)==PN_OK);
-    assert(pn_shelf_hit_ex(p,300,540,&home)==PN_SHELF_HOME && pn_shelf_hit_ex(p,300,970,&home)==PN_SHELF_TRANSFER);
+    assert(pn_shelf_hit_ex(p,300,340,&home)==PN_SHELF_HOME && pn_shelf_hit_ex(p,300,870,&home)==PN_SHELF_TRANSFER);
     assert(pn_shelf_render_ex(p,&font,&frame,-1,false,true,covers,&list)==PN_OK);
     assert(pn_shelf_index_render(&font,&frame)==PN_OK && pn_shelf_index_hit(100,230)=='a' && pn_shelf_index_hit(573,980)=='<');
     pn_font_close(&font);pn_free(bytes);free(before);free(covers);free(p);assert(!pool.live && !pool.used);
