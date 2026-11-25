@@ -1,5 +1,11 @@
 # PicoNano 构建、运行与验证
 
+## 1.1.6 正式构建（2026-11-25）
+
+源码 `e80d9ef78dcdf8644fa596cf48851d09c3074ae9`。ESP-IDF 6.1 的板级和 CI 独立配置均完成构建及尺寸核对。板级应用 4777312 B，6 MiB OTA 槽余 24.067%，DIRAM 占用 50.52%（余 169099 B），SHA-256 为 `b1431f5ab8a05e06beb7e668c7a6544072e7df3e5136650341b3b7e5fdb3ae5b`。CI 应用 4774096 B，槽余 24.118%，DIRAM 占用 49.79%（余 171584 B），SHA-256 为 `b8b84c0d07c68347a32a11e8695918d643dd38a2a8291f1194442df914077d04`。两套均为正式配置（诊断全部关闭），完整包与 OTA 沿用 1.0.5 已资格引导及原公钥。
+
+同源主机 ASan/UBSan 设备/刷新/波纹/波形定向回归 21/21（含静态背景 `pn_device_refresh_plan_ex`、48 相同起点 GL16 `start=19, moved=26`、平铺选择性 48 相 GC16 `direct-clean`）、工具 63/63、网页与安装器 Node 51/51、安装器 Python 21/21 及 `tools/check_docs.py` 全部通过；三个安装 ZIP（含内嵌 3 套开源词典与 12 条更新日志的离线网页安装器）、P-256 签名 OTA 与 `SHA256SUMS` 均通过本地完整性及 dry-run 发布核对。另已按用户授权将同源刷新修复的诊断镜像（`4961040 B`）刷入已连接真机 `ota_1` 备用槽，完成满屏灰底（纯色中）× 4 档模式（直接/高清/极速/水波纹）及边框背景（竹影轻风）× 直接模式共 35 页连续实测（`content-transition` 误触发 0 次、周期清理均走 `direct-clean` / `ripple-clean`、零 underrun、零片内堆泄漏）；正式 `1.1.6` 镜像本身未覆盖 `ota_0`，`hardware_acceptance` 与 `verifiedOnHardware` 保持 `false`。
+
 ## 1.1.5 正式构建（2026-11-25）
 
 源码 `3d594015ffc57fd70adfbd55e2588403ab9d1544`。ESP-IDF 6.1 的板级和 CI 独立配置均完成构建及尺寸核对。板级应用 4775440 B，6 MiB OTA 槽余 24.096%，DIRAM 占用 50.50%（余 169179 B），SHA-256 为 `625cddfdb7a77e90b703c68466c08b35c9287c5491ee41d1ed7c7176c2985dbd`。CI 应用 4772224 B，槽余 24.148%，DIRAM 占用 49.77%（余 171664 B），SHA-256 为 `13c60e1ffc70829effa13b040af6b54160ed3c97eb3ed9f05c5cce7beb700df2`。两套均为正式配置（诊断全部关闭），完整包与 OTA 沿用 1.0.5 已资格引导及原公钥。
