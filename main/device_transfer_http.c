@@ -74,16 +74,19 @@ static bool unique_headers(httpd_req_t *r,unsigned *presence){
 static esp_err_t send_data(httpd_req_t *r,unsigned status,const char *mime,const char *data,size_t n){
  char value[40];snprintf(value,sizeof value,"%u %s",status,status<400?"OK":"Error");
  httpd_resp_set_status(r,value);httpd_resp_set_type(r,mime);
- httpd_resp_set_hdr(r,"Cache-Control","no-store");httpd_resp_set_hdr(r,"X-Content-Type-Options","nosniff");httpd_resp_set_hdr(r,"Connection","close");
+ httpd_resp_set_hdr(r,"Cache-Control","no-store");httpd_resp_set_hdr(r,"X-Content-Type-Options","nosniff");
+ // 仅错误响应主动关闭连接；2xx响应复用HTTP/1.1长连接，避免每个64KiB分块重复TCP握手与TIME_WAIT堆积。
+ // Close connections only on error responses; 2xx responses reuse HTTP/1.1 keep-alive to avoid per-chunk TCP handshakes and TIME_WAIT buildup.
+ if(status>=400)httpd_resp_set_hdr(r,"Connection","close");
  httpd_resp_set_hdr(r,"Content-Security-Policy","default-src 'self'; script-src 'self'; style-src 'self'; worker-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'");
  esp_err_t result=httpd_resp_send(r,data,(int)n);
 #ifdef ESP_PLATFORM
  // 只记录响应结果与内存，不记录URL查询、令牌或用户内容。/ Record response results and memory only, never URL queries, tokens or user content.
  if(result!=ESP_OK){int socket_error=errno;ESP_LOGW("pn_http","response failed status=%u bytes=%zu result=%d errno=%d internal_free=%zu largest=%zu",status,n,(int)result,socket_error,heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));}
 #endif
- // 错误会关闭连接；先读掉不超过64KiB的未读正文，否则对端在发送中收到RST，只看到“发送请求失败”而不是状态码。
- // Errors close the connection; drain up to 64 KiB of unread body first, otherwise the peer gets a reset mid-send and sees "error sending request" instead of the status.
- if(status>=400){char sink[256];size_t drained=0;while(drained<64u*1024u){int got=httpd_req_recv(r,sink,sizeof sink);if(got<=0)break;drained+=(size_t)got;}}
+ // 错误会关闭连接；先读掉不超过64KiB的未读正文，否则对端在发送中收到RST，只看到“发送请求失败”而不是状态码；408已超时不再阻塞排空。
+ // Errors close the connection; drain up to 64 KiB of unread body first so the peer sees the status instead of RST, except 408 which already timed out.
+ if(status>=400 && status!=408){char sink[256];size_t drained=0;while(drained<64u*1024u){int got=httpd_req_recv(r,sink,sizeof sink);if(got<=0)break;drained+=(size_t)got;}}
  return status>=400?ESP_FAIL:result;
 }
 static esp_err_t error(httpd_req_t *r,unsigned status,const char *message){char bytes[384];int n=snprintf(bytes,sizeof bytes,"{\"message\":\"%s\"}",message);return send_data(r,status,"application/json; charset=utf-8",bytes,(size_t)n);}
@@ -216,13 +219,18 @@ static esp_err_t dispatch_serial(httpd_req_t *r){
   size_t limit=r->method==HTTP_POST?8192:PN_UPLOAD_CHUNK;char length[32];uint64_t parsed=0;
   if(!header(r,"Content-Length",length,sizeof length) || !decimal(length,limit,&parsed) || parsed!=r->content_len || !parsed)return error(r,400,"请求长度无效");
   if(r->method==HTTP_POST){char type[64];if(!header(r,"Content-Type",type,sizeof type) || (strcasecmp(type,"application/json") && strcasecmp(type,"application/json; charset=utf-8")))return error(r,400,"请求正文格式无效");}
+  // 正文接收总上限25秒；单次recv超时（5秒）时继续等待并检查停止标志，避免WiFi短时抖动被误判为断连。
+  // Total body-receive budget is 25 s; continue on per-recv timeouts (5 s) while checking stop state so brief Wi-Fi stalls are not misread as disconnects.
   uint64_t started=now_ms();size_t at=0;
   while(at<r->content_len){
    if(is_closing(s))return error(r,503,"传输服务已停止");
-   uint64_t now=now_ms();if(now<started || now-started>=10000)return error(r,400,"请求正文接收超时");
-   int got=httpd_req_recv(r,(char *)s->bytes+at,r->content_len-at);if(got<=0)return error(r,400,"请求正文未完整收到");at+=(size_t)got;
+   uint64_t now=now_ms();if(now<started || now-started>=25000)return error(r,408,"请求正文接收超时");
+   int got=httpd_req_recv(r,(char *)s->bytes+at,r->content_len-at);
+   if(got==HTTPD_SOCK_ERR_TIMEOUT)continue;
+   if(got<=0)return error(r,400,"请求正文未完整收到");
+   at+=(size_t)got;
   }
-  if(now_ms()-started>=10000)return error(r,400,"请求正文接收超时");
+  uint64_t done=now_ms();if(done<started || done-started>=25000)return error(r,408,"请求正文接收超时");
   if(r->method==HTTP_POST){s->bytes[at]=0;if(!json_guard(s->bytes,at))return error(r,400,"请求JSON无效");json=cJSON_ParseWithLengthOpts((char *)s->bytes,at+1,NULL,true);if(!json)return error(r,400,"请求JSON无效");}
  }
  if(!strcmp(uri,"/api/v1/network")){
@@ -299,12 +307,12 @@ pn_status_t pn_device_transfer_http_open(pn_device_transfer_http_t *out,pn_trans
  http_t *s=heap_caps_malloc(sizeof *s,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);if(!s)return PN_NO_MEMORY;memset(s,0,sizeof *s);s->worker=worker;strcpy(s->authority,authority);snprintf(s->origin,sizeof s->origin,"http://%s",authority);
  s->auth=xSemaphoreCreateMutex();s->serial=xSemaphoreCreateMutex();if(!s->auth || !s->serial){if(s->auth)vSemaphoreDelete(s->auth);if(s->serial)vSemaphoreDelete(s->serial);heap_caps_free(s);return PN_NO_MEMORY;}
  uint8_t token[16];esp_fill_random(token,16);encode(token,16,s->token);
- // 接收owner串行处理文件；浏览器上传与状态轮询会并行开连接，两条上限加LRU回收会掐断进行中的上传，放宽到四条。
- // The receiving owner serializes files; browsers open parallel connections for uploads and status polls, and a two-socket cap with LRU purging cut in-flight uploads, so allow four.
- httpd_config_t cfg=HTTPD_DEFAULT_CONFIG();cfg.server_port=port;cfg.ctrl_port=32768;cfg.stack_size=16384;cfg.max_req_hdr_len=2048;cfg.max_uri_len=1024;cfg.max_open_sockets=4;
+ // 接收owner串行处理文件；浏览器上传与状态轮询会并行开长连接，留足6条套接字并启用TCP保活回收半开连接。
+ // The receiving owner serializes files; browsers hold parallel keep-alive sockets for uploads and status polls, so allow six sockets with TCP keep-alive to reap half-open peers.
+ httpd_config_t cfg=HTTPD_DEFAULT_CONFIG();cfg.server_port=port;cfg.ctrl_port=32768;cfg.stack_size=16384;cfg.max_req_hdr_len=2048;cfg.max_uri_len=1024;cfg.max_open_sockets=6;
  // 处理函数不直接写片内flash（存储写入交主任务/接收任务），栈放PSRAM，16KiB片内不足曾让“接收服务”启动失败（阶段4、PN_IO）。
  // Handlers never write internal flash directly (storage writes go to the main/receiving tasks), so the stack lives in PSRAM; a 16 KiB internal shortage made the receiving service fail to start (stage 4, PN_IO).
- cfg.task_caps=MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT;cfg.lru_purge_enable=true;cfg.max_uri_handlers=4;cfg.max_resp_headers=6;cfg.recv_wait_timeout=10;cfg.send_wait_timeout=10;cfg.uri_match_fn=httpd_uri_match_wildcard;
+ cfg.task_caps=MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT;cfg.lru_purge_enable=true;cfg.max_uri_handlers=4;cfg.max_resp_headers=6;cfg.recv_wait_timeout=5;cfg.send_wait_timeout=15;cfg.keep_alive_enable=true;cfg.keep_alive_idle=10;cfg.keep_alive_interval=5;cfg.keep_alive_count=3;cfg.uri_match_fn=httpd_uri_match_wildcard;
  cfg.global_user_ctx=s;cfg.global_user_ctx_free_fn=keep_context;cfg.open_fn=opened;
  esp_err_t result=httpd_start(&s->server,&cfg);out->impl=s;
  if(result==ESP_OK){const int methods[]={HTTP_GET,HTTP_POST,HTTP_PUT,HTTP_DELETE};for(unsigned i=0;i<4;i++){httpd_uri_t uri={.uri="/*",.method=methods[i],.handler=dispatch,.user_ctx=s};result=httpd_register_uri_handler(s->server,&uri);if(result!=ESP_OK)break;}}

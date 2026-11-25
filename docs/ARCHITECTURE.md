@@ -656,7 +656,7 @@ EPUB目录在同一资格入口下复用滚动控制器和设备出口。十行�
 
 ### 同起点GL16与水波纹翻页（开发树）
 
-片内内存：HTTP（80）任务栈在PSRAM；水波纹8KiB LUT仅扫描期间`heap_caps`临时分配，两方向行段表开机分配；`device_wave`派生表、水波纹载体及书库旁图名缓存以`EXT_RAM_BSS_ATTR`置于PSRAM（`CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY`）。管理页（非正文、参考已知、非区域整理）一律以`pn_device_wave_changed_only`在变化外接框内只驱动变化像素，不做内容风险升级。
+片内内存：HTTP（80）任务栈在PSRAM；水波纹8KiB LUT仅扫描期间`heap_caps`临时分配，两方向行段表开机分配；`device_wave`派生表、水波纹载体、书库旁图名缓存以及`main/app_main.c`中仅由Core 1访问的大型非DMA界面静态状态（`shelf_folders`、`toc`、`actions`、`last_read_book`、`bookmark_lock_item`、`hot_session`、`bookmarks`、`scan_dirs`、`focus_nav`及3组路径缓冲，合计25,168B）以`EXT_RAM_BSS_ATTR`置于PSRAM（`CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY`），确保SoftAP与HTTP监听并行运行期间片内`MALLOC_CAP_DMA`仍有充裕连续块供Wi-Fi与SDMMC转运缓冲使用（注意ESP32-S3的8KiB RTC Fast RAM属于`MALLOC_CAP_INTERNAL`但不支持DMA，排障与遥测须显式观测`MALLOC_CAP_DMA`）。管理页（非正文、参考已知、非区域整理）一律以`pn_device_wave_changed_only`在变化外接框内只驱动变化像素，不做内容风险升级。
 
 2026-10-17起水波纹分两档：普通翻页`PN_REFRESH_RIPPLE`用同起点GL16错峰，构表时把同色迁移（to==from）清零，未变像素不驱动；`pn_refresh_policy`到期的清理页或内容风险页用`PN_REFRESH_RIPPLE_CLEAN`执行原GC16错峰并按GC16记账。书库翻页（`shelf_flip`）用`pn_device_wave_changed_only`同样清零同色迁移的GL16，只扫变化外接框，不因内容风险升级为整屏GC16，计入管理带维护。管理页局部刷新改用`pn_device_wave_menu`：原GL16时序（旧内容先退、新内容后出）只清零同色项，避免同起点表在整块内容替换时新旧重叠的发黑闪。
 
@@ -689,9 +689,9 @@ AP 和 STA 共用网页与共享安装层。AP 每次生成随机 12 字符 WPA2
 
 手工 6 位配对码已移除。网页 GET 自动取得当前会话的随机 128 位 RAM token，仍校验窄化 IPv4 Host/Origin、重复头和请求边界，使用本地静态资源/CSP；普通 LAN HTTP 不具有 TLS 保密。移除手工输入不等于删除会话隔离、所有权与跨源检查。
 
-[device_transfer.c](../main/device_transfer.c) 进入传输先保存并关闭书籍/字体/预排，再将 TF 交给传输 owner。HTTP 服务与安装 worker 共享固定目录与事务，客户端不能选择路径；完整分类见 [SD_CARD_LAYOUT](SD_CARD_LAYOUT.md)。网页分块最多 64KiB、ACK 代表已同步的持久偏移；最终摘要/格式检查与可恢复备份替换提交后才显示“已保存”。队列逐文件反馈，网络断开不自动取消成功项。
+[device_transfer.c](../main/device_transfer.c) 进入传输先保存并关闭书籍/字体/预排，再将 TF 交给传输 owner。HTTP 服务与安装 worker 共享固定目录与事务，客户端不能选择路径；完整分类见 [SD_CARD_LAYOUT](SD_CARD_LAYOUT.md)。2xx 响应复用 HTTP/1.1 长连接（最多 6 条套接字，启用 TCP 保活回收半开连接），仅错误响应发送 `Connection: close`；正文接收总预算 25 秒（单次 `recv` 5 秒超时继续检查停止标志，超时返回 HTTP 408）。网页分块最多 64KiB、ACK 代表已同步的持久偏移，已对齐的非零暂存跳过冗余 `truncate` 目录 `fsync`，同一次独占提交内复用已核对的整文件 SHA-256，最终摘要/格式检查与可恢复备份替换提交后才显示“已保存”。网页端为读取与幂等分块提供中文超时/断网提示、408/超时/5xx 退避重试、409 偏移自动对齐及 `complete` 掉包阶段复核（不盲重放新建/删除/完成）；队列逐文件反馈，网络断开不自动取消成功项。控制层在分块间隙保持 6 秒忙碌提示，避免传书中每秒整屏墨水屏刷新与 Core 0/EPD 升压争抢无线。
 
-STA 会话有界连接/重连（20秒内至多3次），活动时设 PS_NONE；同 IP 重连保留会话，新 IP 或最终失败关闭。`/api/v1/status` 提供当前连接的有效负值 RSSI、断连/恢复计数和 SDK 原因，最多每秒采样，不包含凭据。设备数据接口恢复与 TF 所有权恢复都依赖完整停止屏障。
+AP 与 STA 在 2.4GHz 下强制 20MHz 带宽（`WIFI_BW20`），静态收发缓冲均为 6（覆盖 6 包 BA 窗并兼顾传书期片内连续 DMA 堆余量）、动态 RX（PSRAM）为 24、管理帧缓冲为 12；监督任务 `pn_transfer_ctl` 使用 8 KiB 片内栈；SoftAP 使用信道 6、100 TU 信标间隔与可选 PMF，STA 采用全信道按信号强度扫描，活动时设 `PS_NONE`。STA 首次连接有界为 25 秒内至多 5 次，已就绪后的会话内断线重连放宽至 45 秒内至多 8 次（1/2/3 秒渐进退避）；同 IP 重连保留会话，新 IP 或最终失败关闭。`/api/v1/status` 提供当前连接的有效负值 RSSI、断连/恢复计数和 SDK 原因，最多每秒采样，不包含凭据。设备数据接口恢复与 TF 所有权恢复都依赖完整停止屏障。
 
 停止流程是：请求停止并作废网页 token → 停止 HTTP/等待请求 → join worker/完成或保留安装恢复记录 → 释放传输资源与卡租约 → 清理 WiFi、恢复 USB → 归还产品、按原锚点恢复。失败保留句柄重试，不能只把界面改成“关闭”就提前回收。无操作锁屏仅在 `!transfer.impl && !time_sync.impl` 时触发，**活动 WiFi 传书期间没有五分钟自动待机**；手机自身休眠/断网是另一个因素。
 
@@ -731,7 +731,7 @@ LocalSend功能已取消：协议、UDP发现、53317监听、接收界面与专
 
 ## 日期时间同步
 
-[device_time.c](../main/device_time.c) 在“设置 → 存储与关于 → 日期与时间”手动启动单 owner 任务，仅借用已保存 STA，不拿 TF、不自动开机联网、不与传输并行。首次 poll 才开始联网以先显示进度；连接 20秒/至多3次，SNTP 指向 `pool.ntp.org`，每100ms零等待查询，12秒截止。UTC 接受范围为 2024–2099 年。
+[device_time.c](../main/device_time.c) 在“设置 → 存储与关于 → 日期与时间”手动启动单 owner 任务，仅借用已保存 STA，不拿 TF、不自动开机联网、不与传输并行。首次 poll 才开始联网以先显示进度；首次连接 25 秒/至多 5 次，SNTP 指向 `pool.ntp.org`，每100ms零等待查询，12秒截止。UTC 接受范围为 2024–2099 年。
 
 成功取得时间后先停止 SNTP/WiFi、恢复 USB，清理失败保留句柄；按单调计时补偿清理耗时，再由 [device_time_pmu.c](../main/device_time_pmu.c) 发 `TIME_SYNC` 四字节小端 UTC，随后 `TIME_GET` 验证有效/已同步标记及 0…10秒差。只有 PMU 确认才更新产品日期、HH:MM 状态时钟，失败保留旧显示。
 

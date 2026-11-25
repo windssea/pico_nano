@@ -102,6 +102,12 @@
 #include "read_pico_pmu.h"
 #include "esp_littlefs.h"
 #include "esp_heap_caps.h"
+#ifdef ESP_PLATFORM
+#include "esp_attr.h"
+#define PN_EXT_BSS EXT_RAM_BSS_ATTR ///< 非DMA/非ISR大型界面静态状态放PSRAM，片内连续DMA堆留给无线与SDMMC / Place large non-DMA/non-ISR static UI state in PSRAM to keep contiguous internal DMA heap for radio and SDMMC
+#else
+#define PN_EXT_BSS
+#endif
 #include "esp_random.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -117,7 +123,7 @@
 static const char *TAG="pico_nano";
 static read_pico_handle_t hardware;
 static pn_pool_t pool;
-static pn_hot_session_t hot_session; ///< 已保存热会话，所有写入/换卡出口先释放 / Saved warm session, released before writes/card changes
+static pn_hot_session_t hot_session PN_EXT_BSS; ///< 已保存热会话，所有写入/换卡出口先释放 / Saved warm session, released before writes/card changes
 static pn_font_t management_font; ///< owner间歇借用的界面字库及可回收字形 / UI face with reclaimable glyphs borrowed between owner operations
 static pn_settings_ui_t settings_ui; ///< 设置借用同一界面引擎，源交接前先归还 / Settings borrow the same UI engine and return it before source handoff
 static pn_w_font_scope_t management_scope; ///< 常驻中文补字作用域，无TF租约 / Resident CJK scope without a TF lease
@@ -175,9 +181,9 @@ static pn_shelf_sort_t shelf_sort=PN_SHELF_SORT_NAME; ///< 已保存书库排序
 static bool shelf_sort_loaded; ///< 已尝试加载书库排序偏好 / Whether shelf sort preference has been loaded
 static pn_home_prefs_t home_prefs; ///< 主页左上角文案与顶部背景偏好 / Home top-left motto and top banner preferences
 static bool home_prefs_loaded; ///< 已尝试加载主页个性化偏好 / Whether Home personalization preferences have been loaded
-static pn_scan_dirs_t scan_dirs; ///< 用户外部扫描目录配置 / User external scan directories configuration
+static pn_scan_dirs_t scan_dirs PN_EXT_BSS; ///< 用户外部扫描目录配置 / User external scan directories configuration
 static bool scan_dirs_loaded; ///< 已加载外部扫描目录 / Whether external scan dirs have been loaded
-static pn_catalog_folder_t shelf_folders[PN_CATALOG_FOLDER_MAX]; ///< 书库目录筛选列表 / Filterable book folders
+static pn_catalog_folder_t shelf_folders[PN_CATALOG_FOLDER_MAX] PN_EXT_BSS; ///< 书库目录筛选列表 / Filterable book folders
 static size_t shelf_folder_count; ///< 可选筛选目录数 / Number of filterable book folders
 static size_t shelf_folder_index; ///< 0表示全部目录，1..N对应shelf_folders[i-1] / 0=All, 1..N=filtered folder
 static uint8_t *home_banner_pixels; ///< 主页顶部自定义背景缓冲（684×146，仅主页按需加载）/ Home custom top banner buffer (684x146, loaded on demand)
@@ -220,7 +226,7 @@ static size_t fav_start;static pn_favorites_t *favorites;
 static pn_read_marks_t *read_marks;static bool read_marks_valid; ///< 手动已读/未读标记快照 / Manual read/unread marks snapshot
 static bool actions_mode; ///< 书籍操作面板 / Book actions sheet
 static bool stats_mode; ///< 详细阅读数据页 / Detailed reading statistics page
-static pn_book_actions_t actions;
+static pn_book_actions_t actions PN_EXT_BSS;
 static bool hub_mode; ///< 传书一级页 / Transfer root tab
 static pn_transfer_hub_info_t hub_info;static char hub_storage[64];
 static bool files_mode; ///< 存储卡文件管理页 / TF card file manager page
@@ -254,9 +260,9 @@ static bool management_home_pending; ///< 传输停止后回阅读首页 / Retur
 static char saved_network[PN_NETWORK_SSID_MAX+1]; ///< 已保存网络名，不缓存口令 / Saved network name; the password is not cached
 static pn_reader_app_t reader;
 static pn_epub_app_t epub;
-static pn_toc_ui_t toc;
+static pn_toc_ui_t toc PN_EXT_BSS;
 static pn_book_format_t selected_format=PN_BOOK_TXT;
-static pn_bookmark_ui_t bookmarks;
+static pn_bookmark_ui_t bookmarks PN_EXT_BSS;
 static pn_style_ui_t styles;
 static pn_jump_ui_t jump_ui; ///< 进度跳转面板 / Progress jump panel
 static pn_font_ui_t fonts;
@@ -306,21 +312,21 @@ static pn_catalog_page_t *shelf_page;
 static pn_recent_snapshot_t *recent_snapshot;
 static bool recent_mode,selected_identified;
 static uint64_t selected_size; ///< 最近记录中的原书大小，快开门槛 / Source size from the recent record, gating fast opening
-static char trust_failed_path[PN_CATALOG_PATH_MAX]; ///< 后台复核失败过的书，下次走完整打开 / A book whose background verification failed opens fully next time
+static char trust_failed_path[PN_CATALOG_PATH_MAX] PN_EXT_BSS; ///< 后台复核失败过的书，下次走完整打开 / A book whose background verification failed opens fully next time
 static size_t recent_start;
 static bool list_mode; ///< 书架列表模式（每页5本）/ Shelf list mode (five per page)
 /// 当前书架每页条数。/ Entries per shelf page right now.
 static size_t shelf_per_page(void){return home_mode?3u:list_mode || (!recent_mode && !fav_mode && *search_query)?5u:(size_t)shelf_prefs.columns*3u;}
 static pn_book_id_t selected_expected;
-static char selected_path[PN_CATALOG_PATH_MAX];
+static char selected_path[PN_CATALOG_PATH_MAX] PN_EXT_BSS;
 static pn_opening_view_t opening_view; ///< 同一次开书/解锁的自有展示快照，不作来源凭据 / Owned presentation snapshot for one opening/unlock, never source credentials
 static bool identity_takeover_active; ///< 点击正在预计算的书，异步接续后再快开 / Clicked a book already being precomputed; continue it asynchronously before fast open
-static char identity_takeover_path[PN_CATALOG_PATH_MAX];
+static char identity_takeover_path[PN_CATALOG_PATH_MAX] PN_EXT_BSS;
 static void identity_job_stop(void);
 static void start_reader_impl(void);
 static void start_reader_finish(void);
 static void report_reader_result(pn_status_t);
-static pn_catalog_item_t last_read_book; ///< 已成功关闭阅读的书快照，不借用正文句柄 / Snapshot of a successfully closed book, without borrowing a reader handle
+static pn_catalog_item_t last_read_book PN_EXT_BSS; ///< 已成功关闭阅读的书快照，不借用正文句柄 / Snapshot of a successfully closed book, without borrowing a reader handle
 static bool last_read_known; ///< 已有可信在读书身份 / A trusted in-progress book identity is available
 static const char *const book_directory=PN_SD_MOUNT "/" PN_SD_BOOKS;
 static uint64_t card_instance=1;
@@ -332,6 +338,7 @@ static uint64_t usb_draw_at;
 static bool reading_menu,transfer_return,transfer_lock;
 static pn_transfer_view_t transfer_view,last_transfer_view;
 static uint64_t last_transfer_draw;
+static uint64_t transfer_busy_until; ///< 传输分块间隙的忙碌保持截止时间 / Busy-indicator hold deadline across chunk gaps
 static pn_cache_owner_t cover_cache_owner; ///< 封面预算owner / Cover-budget owner
 static bool covers_inactive; ///< 非活动且不再借用时可回收 / Reclaim only when inactive and no longer borrowed
 static pn_shelf_covers_t *shelf_covers;
@@ -535,7 +542,7 @@ static bool toolbar_open;
 static uint8_t *page_copy;
 static const char *reader_notice; ///< 下一次工具栏携带错误反馈 / Error feedback included in the next toolbar
 static bool progress_save_failed; ///< 后台保存失败，不冒充翻页失败 / Background save failure is distinct from turn failure
-static pn_focus_t focus_nav; ///< 当前页的三键焦点表 / Three-key focus table of the current page
+static pn_focus_t focus_nav PN_EXT_BSS; ///< 当前页的三键焦点表 / Three-key focus table of the current page
 /* 局部刷新：GL16时只推变化的外接矩形（逻辑坐标，epdiy按旋转换算）；变化超过45%或没有已知参考则整屏。
  * 已显示参考就是epdiy后缓冲（每次绘制后与前缓冲一致），不再另存一份406KiB逻辑副本。
  * Partial refresh: for GL16 push only the bounding box of what changed (logical coordinates, rotated by epdiy); more than 45% changed or no known reference means a full update.
@@ -1041,7 +1048,7 @@ static bool mount_wallpaper(void){
 /// 锁屏页：读内部有效壁纸记录，任何失败用系统默认图，再失败退回文字页。/ Lock page: load the valid internal wallpaper record, use the system default on any failure, and fall back to the text page last.
 /// 保留最后已呈现的本地书籍快照，退出阅读后仍可锁屏；不保存虚构统计。/ Retain the last presented local book snapshot for locking after leaving reading, without invented statistics.
 static pn_bookmark_lock_t bookmark_lock={.battery=-1};
-static pn_catalog_item_t bookmark_lock_item;
+static pn_catalog_item_t bookmark_lock_item PN_EXT_BSS;
 static uint64_t bookmark_lock_epoch; ///< 快照所属介质代次，不跨换卡复用封面 / Snapshot media generation; never reuse a cover across card changes
 static void bookmark_lock_capture(void){
     pn_bookmark_lock_t next={.battery=-1};unsigned basis=0;size_t section=0,count=0;
@@ -2574,13 +2581,22 @@ static void begin_transfer(bool station){
     if(status!=PN_OK){message("传输未开启","保留阅读位置，请重试");return;}
     if(!data_ready)data_ready=mount_data();
     (void)pn_device_transfer_network_result(&transfer,PN_EMPTY,saved_network);
-    reading_menu=false;transfer_return=false;transfer_lock=false;memset(&transfer_view,0,sizeof transfer_view);transfer_view.phase=PN_TVIEW_STARTING;
+    reading_menu=false;transfer_return=false;transfer_lock=false;transfer_busy_until=0;memset(&transfer_view,0,sizeof transfer_view);transfer_view.phase=PN_TVIEW_STARTING;
     paint_transfer(false);last_transfer_draw=now_ms();
 }
 static void tick_transfer(uint64_t now){
     pn_device_transfer_state_t state;if(pn_device_transfer_state(&transfer,&state)!=PN_OK)return;
     handle_network_request();
-    memset(&transfer_view,0,sizeof transfer_view);transfer_view.released=state.released;transfer_view.busy=state.work.busy;transfer_view.station=state.network.mode==PN_WIFI_STA;
+    memset(&transfer_view,0,sizeof transfer_view);transfer_view.released=state.released;transfer_view.station=state.network.mode==PN_WIFI_STA;
+    // 传输分块间隙保留6秒忙碌显示，避免每秒反复整屏刷新与Core0/EPD高压升压争抢无线。
+    // Hold the busy indicator for 6 s across chunk gaps to avoid per-second full refreshes competing with radio on Core 0 and EPD HV boost.
+    if(state.phase==PN_DTRANSFER_READY){
+        if(state.work.busy)transfer_busy_until=now+6000u;
+        transfer_view.busy=state.work.busy || (transfer_busy_until && now<transfer_busy_until);
+    }else{
+        transfer_busy_until=0;
+        transfer_view.busy=state.work.busy;
+    }
     transfer_view.phase=state.phase==PN_DTRANSFER_READY?PN_TVIEW_READY:state.phase==PN_DTRANSFER_STOPPING?PN_TVIEW_STOPPING:state.phase==PN_DTRANSFER_STARTING?PN_TVIEW_STARTING:PN_TVIEW_FAILED;
     transfer_view.failed_stage=state.stage;transfer_view.error=state.error;transfer_view.native_error=state.network.error;
     memcpy(transfer_view.ssid,state.network.ssid,sizeof transfer_view.ssid);memcpy(transfer_view.password,state.network.ap_password,sizeof transfer_view.password);
@@ -2592,6 +2608,7 @@ static void tick_transfer(uint64_t now){
         // Take this session's confirmed install identities before releasing the transfer context; a cache write failure is logged and never rolls back the install.
         identity_cache_transfer_installs();
         if(pn_device_transfer_close(&transfer)==PN_OK){
+            transfer_busy_until=0;
             // 关闭完成后前台返回；抬手等普通事件不能取消这次唯一重绘，紧急导航仍可取消。/ Return in the foreground after shutdown; ordinary release events cannot cancel the only redraw, while urgent navigation can.
             pn_async_scope_t returned;pn_async_begin(&async_port.input,&returned,false);
             reading_menu=false;favorites_valid=false;recent_loaded=false;pn_catalog_index_invalidate(&catalog_index);

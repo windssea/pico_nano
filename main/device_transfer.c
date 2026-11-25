@@ -97,7 +97,9 @@ static void stage(transfer_t *s,unsigned value){lock(s);s->state.stage=value;unl
 static void memory_stage(const char *phase){
  (void)phase;
 #ifdef ESP_PLATFORM
- ESP_LOGI("pn_transfer","phase=%s internal_free=%zu largest=%zu minimum=%zu psram_free=%zu psram_largest=%zu",phase,heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),heap_caps_get_free_size(MALLOC_CAP_SPIRAM),heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
+ // 同时记录MALLOC_CAP_DMA：ESP32-S3的RTC Fast RAM属于INTERNAL但不支持DMA，单看INTERNAL会掩盖SDMMC/Wi-Fi的DMA耗尽。
+ // Also log MALLOC_CAP_DMA: ESP32-S3 RTC Fast RAM is INTERNAL but non-DMA, so INTERNAL alone can mask SDMMC/Wi-Fi DMA exhaustion.
+ ESP_LOGI("pn_transfer","phase=%s internal_free=%zu largest=%zu minimum=%zu dma_free=%zu dma_largest=%zu dma_min=%zu psram_free=%zu psram_largest=%zu stack_hwm=%u",phase,heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),heap_caps_get_free_size(MALLOC_CAP_DMA|MALLOC_CAP_8BIT),heap_caps_get_largest_free_block(MALLOC_CAP_DMA|MALLOC_CAP_8BIT),heap_caps_get_minimum_free_size(MALLOC_CAP_DMA|MALLOC_CAP_8BIT),heap_caps_get_free_size(MALLOC_CAP_SPIRAM),heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM),(unsigned)uxTaskGetStackHighWaterMark(NULL));
 #else
  (void)phase;
 #endif
@@ -183,7 +185,9 @@ pn_status_t pn_device_transfer_open(pn_device_transfer_t *out,pn_media_t *media,
  transfer_t *s=allocate(sizeof *s);if(!s)return PN_NO_MEMORY;memset(s,0,sizeof *s);s->media=media;s->config=*config;strcpy(s->root,root);s->state.phase=PN_DTRANSFER_STARTING;s->state.network.mode=config->mode;s->network_last=PN_EMPTY;s->sink=(pn_device_network_sink_t){s,sink_submit,sink_status};s->install_sink=(pn_device_transfer_install_sink_t){s,install_note};
 #ifdef ESP_PLATFORM
  s->mutex=xSemaphoreCreateMutex();if(!s->mutex){release(s);return PN_NO_MEMORY;}
- bool created=xTaskCreatePinnedToCore(entry,"pn_transfer_ctl",16384,s,4,&s->task,0)==pdPASS;
+ // 监督任务只做状态轮询与接口启停，8 KiB片内栈足以覆盖phy_init且为Wi-Fi静态DMA缓冲留足片内连续堆。
+ // The supervisor only polls state and opens/closes subsystems; an 8 KiB internal stack covers phy_init while leaving contiguous internal heap for Wi-Fi static DMA buffers.
+ bool created=xTaskCreatePinnedToCore(entry,"pn_transfer_ctl",8192,s,4,&s->task,0)==pdPASS;
 #else
  if(pthread_mutex_init(&s->mutex,NULL)){release(s);return PN_NO_MEMORY;}
  bool created=pthread_create(&s->task,NULL,entry,s)==0;

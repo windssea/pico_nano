@@ -12,22 +12,39 @@ async function waitNetwork(){for(let i=0;i<20;i++){const state=await api('/netwo
 $('network-form').onsubmit=async event=>{event.preventDefault();const button=event.submitter;button.disabled=true;try{await api('/network','POST',{ssid:$('network-ssid').value,password:$('network-password').value});$('network-password').value='';const state=await waitNetwork();if(state&&state.result==='ok')notice('网络已保存到阅读器。');}catch(error){notice(error.message,true);}finally{button.disabled=false;}};
 $('network-forget').onclick=async()=>{try{await api('/network','DELETE');await waitNetwork();notice('已忘记家庭网络。');}catch(error){notice(error.message,true);}};
 // 只自动重试读取和幂等分块；新建/删除/完成等操作不盲重放。 / Retry only reads and idempotent chunks; never blindly replay create/delete/complete operations.
+function requestTimeout(path,method){
+ if(method==='POST'&&path.endsWith('/complete'))return 180000;
+ if(method==='POST'&&path==='/uploads')return 45000;
+ return 30000;
+}
+function friendlyError(error,timedOut){
+ if(timedOut||error?.name==='AbortError'||/signal is aborted/i.test(error?.message||'')){const next=Error('连接超时，请检查与阅读器的 WiFi 连接后重试');next.retryable=true;return next;}
+ if(error?.name==='TypeError'||/failed to fetch|load failed|networkerror/i.test(error?.message||'')){const next=Error('网络连接中断，请检查热点或 WiFi 后重试');next.retryable=true;return next;}
+ return error;
+}
 async function api(path,method='GET',body,headers={}){
- const auth=token;if(auth)headers.Authorization='Bearer '+auth;
- let data=body;if(body&&!(body instanceof Uint8Array)){headers['Content-Type']='application/json';data=JSON.stringify(body);}
- const retries=method==='GET'||(method==='PUT'&&path.endsWith('/chunks'))?3:0;
+ const auth=token;const requestHeaders={...headers};if(auth)requestHeaders.Authorization='Bearer '+auth;
+ let data=body;if(body&&!(body instanceof Uint8Array)){requestHeaders['Content-Type']='application/json';data=JSON.stringify(body);}
+ const retries=method==='GET'||(method==='PUT'&&path.endsWith('/chunks'))?5:0;
+ const timeoutMs=requestTimeout(path,method);
  for(let attempt=0;;attempt++){
   const controller=typeof AbortController==='function'?new AbortController():null;
-  // 大字体的完整校验可能较久，完成请求单独等待，不重复提交。 / Full validation of large fonts can take longer; wait separately without resubmitting completion.
-  const timer=controller?setTimeout(()=>controller.abort(),method==='POST'&&path.endsWith('/complete')?120000:15000):null;
+  let timedOut=false;
+  // 大字体的完整校验与空闲空间检查较慢，按接口分别留足等待时间，不重复提交非幂等写操作。
+  // Large-font validation and free-space checks can take longer; budget timeouts per route without replaying non-idempotent writes.
+  const timer=controller?setTimeout(()=>{timedOut=true;controller.abort();},timeoutMs):null;
   try{
-   const response=await fetch('/api/v1'+path,{method,body:data,headers,signal:controller?.signal}),value=await response.json();
-   if(!response.ok){if(response.status===401&&token===auth){token=null;connected(false);}const error=Error(value.message||'操作失败');error.status=response.status;throw error;}
+   const response=await fetch('/api/v1'+path,{method,body:data,headers:requestHeaders,signal:controller?.signal});
+   let value=null;try{value=await response.json();}catch{value=null;}
+   if(!response.ok){if(response.status===401&&token===auth){token=null;connected(false);}const error=Error(value?.message||('设备响应异常（HTTP '+response.status+'）'));error.status=response.status;throw error;}
+   if(!value){const error=Error('设备响应不完整，请重试');error.retryable=true;throw error;}
    return value;
   }catch(error){
-   if(attempt>=retries||(error.status&&error.status<500))throw error;
+   const normalized=friendlyError(error,timedOut);
+   const retryable=normalized.status?normalized.status===408||normalized.status>=500:true;
+   if(attempt>=retries||!retryable)throw normalized;
   }finally{if(timer)clearTimeout(timer);}
-  await new Promise(resolve=>setTimeout(resolve,500*(2**attempt)));
+  await new Promise(resolve=>setTimeout(resolve,Math.min(500*(2**attempt),4000)));
  }
 }
 
@@ -132,8 +149,13 @@ function renameEntry(entry){const dialog=$('name-dialog');$('save-name').value=e
 function savedId(key,value){try{if(value)sessionStorage.setItem(key,value);return sessionStorage.getItem(key);}catch{return null;}}
 async function send(entry){if(!entry.sha)entry.sha=await hashFile(entry);entry.progress=0;if(entry.cancelled||entry.paused){if(entry.paused)entry.state='已暂停，可继续';render();return;}const key='pico-upload:'+entry.kind+':'+entry.name+':'+entry.file.size+':'+entry.sha;entry.id=entry.id||savedId(key);if(entry.id){try{const state=await api('/uploads/'+entry.id);if(state.name!==entry.name||state.size!==entry.file.size||state.sha256!==entry.sha||state.kind!==entry.kind)throw Error('请选择原文件后再续传');if(state.phase===2){entry.done=true;entry.progress=1;entry.state='已保存';render();return;}if(state.phase===3)throw Error('上传已取消，请重新添加');entry.offset=state.next_offset;}catch(error){if(error.status===404)entry.id=null;else throw error;}}
  if(!entry.id){const request={kind:entry.kind,name:entry.name,size:entry.file.size,sha256:entry.sha};try{entry.id=(await api('/uploads','POST',request)).upload_id;}catch(error){if(error.status!==409)throw error;const old=await api('/files/'+entry.kind+'?name='+encodeURIComponent(entry.name));if(!await confirmReplace(entry.name)){entry.paused=true;entry.state='原文件已保留';render();return;}request.replace={size:old.size,sha256:old.sha256};entry.id=(await api('/uploads','POST',request)).upload_id;}savedId(key,entry.id);}if(entry.cancelled){if(entry.id)await api('/uploads/'+entry.id,'DELETE');entry.state='已取消';render();return;}
- while(entry.offset<entry.file.size&&!entry.paused&&!entry.cancelled){const bytes=new Uint8Array(await entry.file.slice(entry.offset,entry.offset+65536).arrayBuffer());entry.state='发送中 '+Math.round(entry.offset/entry.file.size*100)+'%';entry.progress=entry.offset/entry.file.size;render();const chunk=new SHA256().update(bytes).hex();const result=await api('/uploads/'+entry.id+'/chunks','PUT',bytes,{'X-Offset':String(entry.offset),'X-Chunk-SHA256':chunk});entry.offset=result.next_offset;entry.progress=entry.offset/entry.file.size;render();}
- if(entry.cancelled)return;if(entry.paused){entry.state='已暂停，可继续';render();return;}entry.state='正在校验文件';render();const result=await api('/uploads/'+entry.id+'/complete','POST',{sha256:entry.sha});entry.done=true;entry.progress=1;entry.state=result.cleanup_pending?'已保存，备份待清理':'已保存';render();}
+ let synced=false;
+ while(entry.offset<entry.file.size&&!entry.paused&&!entry.cancelled){const bytes=new Uint8Array(await entry.file.slice(entry.offset,entry.offset+65536).arrayBuffer());entry.state='发送中 '+Math.round(entry.offset/entry.file.size*100)+'%';entry.progress=entry.offset/entry.file.size;render();const chunk=new SHA256().update(bytes).hex();
+  try{const result=await api('/uploads/'+entry.id+'/chunks','PUT',bytes,{'X-Offset':String(entry.offset),'X-Chunk-SHA256':chunk});entry.offset=result.next_offset;entry.progress=entry.offset/entry.file.size;synced=false;render();}
+  catch(error){if(error.status===409&&!synced){const state=await api('/uploads/'+entry.id);if(state.phase===2){entry.done=true;entry.progress=1;entry.state=state.cleanup_pending?'已保存，备份待清理':'已保存';render();return;}if(state.phase===3)throw Error('上传已取消，请重新添加');if(state.next_offset!==entry.offset){entry.offset=state.next_offset;synced=true;continue;}}throw error;}}
+ if(entry.cancelled)return;if(entry.paused){entry.state='已暂停，可继续';render();return;}entry.state='正在校验文件';render();
+ try{const result=await api('/uploads/'+entry.id+'/complete','POST',{sha256:entry.sha});entry.done=true;entry.progress=1;entry.state=result.cleanup_pending?'已保存，备份待清理':'已保存';render();}
+ catch(error){if(!error.status){try{const state=await api('/uploads/'+entry.id);if(state.phase===2){entry.done=true;entry.progress=1;entry.state=state.cleanup_pending?'已保存，备份待清理':'已保存';render();return;}}catch{}}throw error;}}
 async function sendQueue(){if(running||!token)return;running=true;render();for(const entry of entries){if(entry.done||entry.cancelled||entry.paused)continue;try{await send(entry);}catch(error){if(!entry.cancelled){entry.state=error.message;entry.paused=true;notice(error.message,true);}render();if(!token)break;}}running=false;render();syncFonts();if(entries.length&&entries.every(e=>e.done||e.cancelled))notice('这一批已处理完，可以添加更多内容。');}
 $('start').onclick=sendQueue;$('clear').onclick=()=>{entries=entries.filter(e=>{if(!e.done&&!e.cancelled)return true;if(e.previewURL&&typeof URL!=='undefined')URL.revokeObjectURL(e.previewURL);return false;});render();};
 // 打开页面自动建立会话，客户端不再收集配对码。 / Establish a session automatically without collecting a pairing code.

@@ -49,7 +49,9 @@ int main(void){
  assert(pn_transfer_service_open(&service,&pool,&media,&options)==PN_OK);
  assert(pn_transfer_service_execute(&service,&open,&reply)==PN_OK && reply.state.offset==65536);
  chunk.offset=65536;chunk.bytes=data+65536;chunk.length=4464;assert(pn_identity_bytes(chunk.bytes,chunk.length,&chunk.digest)==PN_OK);
- fail_directory_at=2;unchanged(&service,&chunk,PN_IO);fail_directory_at=0;
+ // 已对齐非零暂存不再做冗余truncate目录同步，第1次directory_sync即PNUP日志写后同步。
+ // Aligned non-empty staging skips redundant truncate directory sync, so the 1st directory_sync is the post-journal sync.
+ fail_directory_at=1;unchanged(&service,&chunk,PN_IO);fail_directory_at=0;
  assert(pn_transfer_service_execute(&service,&open,&reply)==PN_OK && reply.state.offset==70000);
  pn_transfer_command_t end={.operation=PN_TRANSFER_COMPLETE,.digest=a.request.digest};end.id[0]=1;
  assert(pn_transfer_service_execute(&service,&end,&reply)==PN_OK && reply.state.phase==PN_UPLOAD_COMMITTED);

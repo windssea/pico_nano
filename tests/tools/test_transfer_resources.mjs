@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {File} from 'node:buffer';
 import {inflateSync,deflateSync} from 'node:zlib';
+import {SHA256} from '../../assets/transfer/sha256.mjs';
 
 function harness(fetch,bootstrap=false,extras={}){
   const elements=new Map();
@@ -15,9 +16,9 @@ function harness(fetch,bootstrap=false,extras={}){
   }
   const element=id=>{if(!elements.has(id))elements.set(id,new Element());return elements.get(id);};
   const tabs=['book','font','cover','wallpaper','background'].map(kind=>{const e=new Element();e.dataset.kind=kind;return e;});
-  const context=vm.createContext({document:{getElementById:element,createElement:()=>new Element(),querySelectorAll:()=>tabs},fetch,URLSearchParams,Uint8Array,TextEncoder,Blob,File,Response,CompressionStream,location:{hash:'',pathname:'/',search:''},history:{replaceState(){}},sessionStorage:{getItem(){return null;},setItem(){}},setTimeout,clearTimeout,AbortController,...extras});
+  const context=vm.createContext({document:{getElementById:element,createElement:()=>new Element(),querySelectorAll:()=>tabs},fetch,SHA256,URLSearchParams,Uint8Array,TextEncoder,Blob,File,Response,CompressionStream,location:{hash:'',pathname:'/',search:''},history:{replaceState(){}},sessionStorage:{getItem(){return null;},setItem(){}},setTimeout,clearTimeout,AbortController,...extras});
   const source=readFileSync(new URL('../../assets/transfer/app.js',import.meta.url),'utf8').replace(/^import .*;\r?$/m,'');
-  vm.runInContext((bootstrap?source:source.slice(0,source.indexOf('// 打开页面'))+'render();')+'\nglobalThis.qa={token:value=>{token=value;},auth:()=>token,api,remove:removeFont,prepare:prepareImage,png:imagePng,add,entries:()=>entries};',context);
+  vm.runInContext((bootstrap?source:source.slice(0,source.indexOf('// 打开页面'))+'render();')+'\nglobalThis.qa={token:value=>{token=value;},auth:()=>token,api,send,remove:removeFont,prepare:prepareImage,png:imagePng,add,entries:()=>entries};',context);
   return {context,element,choose:kind=>tabs.find(t=>t.dataset.kind===kind).onclick()};
 }
 const reply=(value,status=200)=>({ok:status<400,status,json:async()=>value});
@@ -58,6 +59,35 @@ test('idempotent chunk retries retain offset and bytes; creation is never replay
  const result=await h.context.qa.api('/uploads/id/chunks','PUT',bytes,{'X-Offset':'0'});
  assert.equal(result.next_offset,3);assert.equal(puts,2);assert.equal(bodies[0].body,bodies[1].body);assert.equal(bodies[1].headers['X-Offset'],'0');
  await assert.rejects(h.context.qa.api('/uploads','POST',{}),/network lost/);assert.equal(posts,1);
+});
+
+test('timeouts surface friendly Chinese errors and retry 408/abort on chunks; 409 resyncs offset and complete verifies phase',async()=>{
+ const fastTimer=(fn,ms)=>setTimeout(fn,ms>=1000?5:1);
+ // 1. Timeout on POST /uploads surfaces Chinese message instead of raw AbortError.
+ const aborting=harness((url,options)=>new Promise((_,reject)=>{options.signal.addEventListener('abort',()=>{const e=Error('signal is aborted without reason');e.name='AbortError';reject(e);});}),false,{setTimeout:fastTimer});
+ aborting.context.qa.token('current');
+ await assert.rejects(aborting.context.qa.api('/uploads','POST',{}),/连接超时/);
+ // 2. HTTP 408 and transient abort on PUT /chunks retry automatically without failing.
+ let chunkCalls=0;
+ const retrying=harness((url,options)=>{chunkCalls++;if(chunkCalls===1)return Promise.resolve(reply({message:'请求正文接收超时'},408));if(chunkCalls===2){const e=Error('signal is aborted without reason');e.name='AbortError';return Promise.reject(e);}return Promise.resolve(reply({next_offset:3},200));},false,{setTimeout:fastTimer});
+ retrying.context.qa.token('current');
+ const ok=await retrying.context.qa.api('/uploads/id/chunks','PUT',new Uint8Array([1,2,3]),{'X-Offset':'0'});
+ assert.equal(ok.next_offset,3);assert.equal(chunkCalls,3);
+ // 3. 409 offset mismatch resyncs from GET /uploads/<id>; complete timeout checks committed phase without replaying POST.
+ const content=new Uint8Array(65536+10);content.fill(65);
+ const sha=new SHA256().update(content).hex();
+ let putOffsets=[],completeCalls=0,statusPhase=0;
+ const resync=harness((url,options)=>{
+  if(options.method==='POST'&&url==='/api/v1/uploads')return Promise.resolve(reply({upload_id:'u1'},201));
+  if(options.method==='PUT'){putOffsets.push(options.headers['X-Offset']);if(putOffsets.length===1)return Promise.resolve(reply({message:'offset mismatch'},409));return Promise.resolve(reply({next_offset:content.length},200));}
+  if(options.method==='GET'&&url==='/api/v1/uploads/u1')return Promise.resolve(reply({name:'book.txt',kind:'book',size:content.length,sha256:sha,phase:statusPhase,next_offset:statusPhase===2?content.length:65536}));
+  if(options.method==='POST'&&url==='/api/v1/uploads/u1/complete'){completeCalls++;statusPhase=2;const e=Error('signal is aborted without reason');e.name='AbortError';return Promise.reject(e);}
+  return Promise.resolve(reply({items:[],more:false}));
+ },false,{setTimeout:fastTimer});
+ resync.context.qa.token('current');
+ const entry={file:new File([content],'book.txt'),name:'book.txt',kind:'book',sha,offset:0,progress:0,paused:false,cancelled:false};
+ await resync.context.qa.send(entry);
+ assert.deepEqual(putOffsets,['0','65536']);assert.equal(completeCalls,1);assert.equal(entry.done,true);assert.equal(entry.state,'已保存');
 });
 
 // 独立PNG容器/CRC/滤波/像素检查，不把编码器输出自身作为预期值。 / Independently check PNG chunks, CRC, filters and pixels instead of trusting encoder output.

@@ -23,7 +23,8 @@ static unsigned code,headers;
 static const uint8_t *body;
 static size_t body_at;
 static uint64_t receive_delay;
-static bool incomplete;
+static unsigned timeout_once;
+static bool incomplete,connection_close;
 static _Atomic uint64_t now=1000;
 static size_t native_allocations;
 static _Atomic bool http_stop_fails;
@@ -41,7 +42,7 @@ int xSemaphoreGive(void *p){return pthread_mutex_unlock(p)==0;}
 void vSemaphoreDelete(void *p){pthread_mutex_destroy(p);free(p);}
 esp_err_t httpd_start(httpd_handle_t *h,const httpd_config_t *cfg){
     assert(cfg->max_uri_handlers>=4 && cfg->lru_purge_enable && cfg->global_user_ctx);
-    assert(cfg->max_open_sockets==4 && cfg->server_port==80 && cfg->ctrl_port==32768);starts++;*h=&route;global_context=cfg->global_user_ctx;open_socket=cfg->open_fn;return ESP_OK;}
+    assert(cfg->max_open_sockets==6 && cfg->keep_alive_enable && cfg->recv_wait_timeout==5 && cfg->send_wait_timeout==15 && cfg->server_port==80 && cfg->ctrl_port==32768);starts++;*h=&route;global_context=cfg->global_user_ctx;open_socket=cfg->open_fn;return ESP_OK;}
 void *httpd_get_global_user_ctx(httpd_handle_t h){assert(h==&route);return global_context;}
 esp_err_t httpd_sess_set_recv_override(httpd_handle_t h,int fd,httpd_recv_func_t callback){(void)fd;assert(h==&route);receive=callback;return ESP_OK;}
 esp_err_t httpd_stop(httpd_handle_t h){assert(h==&route);return http_stop_fails?ESP_FAIL:ESP_OK;}
@@ -49,10 +50,10 @@ esp_err_t httpd_register_uri_handler(httpd_handle_t h,const httpd_uri_t *r){asse
 static const char *header(const char *name){const char *at=scratch;for(unsigned i=0;i<headers;i++){const char *colon=strchr(at,':');if(colon && (size_t)(colon-at)==strlen(name) && !strncasecmp(at,name,strlen(name))){while(*++colon==' ');return colon;}if(i+1<headers){at+=strlen(at)+1;while(!*at)at++;}}return NULL;}
 size_t httpd_req_get_hdr_value_len(httpd_req_t *r,const char *name){(void)r;const char *value=header(name);return value?strlen(value):0;}
 esp_err_t httpd_req_get_hdr_value_str(httpd_req_t *r,const char *name,char *out,size_t cap){(void)r;const char *value=header(name);if(!value || strlen(value)>=cap)return ESP_FAIL;strcpy(out,value);return ESP_OK;}
-int httpd_req_recv(httpd_req_t *r,char *out,size_t cap){now+=receive_delay;if(incomplete && body_at)return -1;size_t n=r->content_len-body_at;if(n>cap)n=cap;if(n>13)n=13;if(incomplete)n=1;memcpy(out,body+body_at,n);body_at+=n;return (int)n;}
+int httpd_req_recv(httpd_req_t *r,char *out,size_t cap){if(timeout_once){timeout_once--;now+=5000;return HTTPD_SOCK_ERR_TIMEOUT;}now+=receive_delay;if(incomplete && body_at)return -1;size_t n=r->content_len-body_at;if(n>cap)n=cap;if(n>13)n=13;if(incomplete)n=1;memcpy(out,body+body_at,n);body_at+=n;return (int)n;}
 esp_err_t httpd_resp_set_status(httpd_req_t *r,const char *value){(void)r;code=(unsigned)atoi(value);return ESP_OK;}
 esp_err_t httpd_resp_set_type(httpd_req_t *r,const char *value){(void)r;assert(value);return ESP_OK;}
-esp_err_t httpd_resp_set_hdr(httpd_req_t *r,const char *key,const char *value){(void)r;assert(key && value);return ESP_OK;}
+esp_err_t httpd_resp_set_hdr(httpd_req_t *r,const char *key,const char *value){(void)r;assert(key && value);if(!strcasecmp(key,"Connection") && !strcasecmp(value,"close"))connection_close=true;return ESP_OK;}
 esp_err_t httpd_resp_send(httpd_req_t *r,const char *data,int n){(void)r;if(n<0)n=(int)strlen(data);if(n<(int)sizeof response){memcpy(response,data,(size_t)n);response[n]=0;}return ESP_OK;}
 static void add(const char *line){size_t at=0;for(unsigned i=0;i<headers;i++)at+=strlen(scratch+at)+1;strcpy(scratch+at,line);headers++;}
 static cJSON *request(int method,const char *uri,const void *bytes,size_t n,const char *token,const char *extra){
@@ -61,7 +62,7 @@ static cJSON *request(int method,const char *uri,const void *bytes,size_t n,cons
  if(method==HTTP_POST || method==HTTP_PUT){snprintf(line,sizeof line,"Content-Length: %zu",n);add(line);if(method==HTTP_POST)add("Content-Type: application/json");}
  if(method==HTTP_PUT)add("X-Offset: 0");
  if(extra)add(extra);
- body=bytes;body_at=0;code=0;response[0]=0;
+ body=bytes;body_at=0;code=0;connection_close=false;response[0]=0;
  struct httpd_req_aux aux={.scratch=scratch,.scratch_size_limit=sizeof scratch-1,.scratch_cur_size=sizeof scratch-1,.req_hdrs_count=headers};
  httpd_req_t r={.handle=&route,.method=method,.uri=uri,.content_len=n,.user_ctx=route.user_ctx,.aux=&aux};route.handler(&r);return cJSON_Parse(response);
 }
@@ -77,7 +78,7 @@ int main(void){
  pn_upload_files_options_t options={.root=root};pn_transfer_worker_t worker={0};assert(pn_transfer_worker_open(&worker,&media,&options,6u*1024u*1024u,NULL,NULL,NULL)==PN_OK);
  pn_device_transfer_http_t server={0};assert(pn_device_transfer_http_open(&server,&worker,"192.168.4.1",80)==PN_OK && server.impl && starts==1);assert(pn_device_transfer_http_install(&server,&install_sink)==PN_OK);
  int sockets[2];assert(socketpair(AF_UNIX,SOCK_STREAM,0,sockets)==0);assert(open_socket(&route,sockets[0])==ESP_OK);assert(write(sockets[1],"a",1)==1);char received;assert(receive(&route,sockets[0],&received,1,0)==1 && received=='a');
- cJSON *json=request(HTTP_GET,"/api/v1/status",NULL,0,NULL,NULL);assert(code==200 && json && !strcmp(cJSON_GetObjectItemCaseSensitive(json,"name")->valuestring,"PicoNano"));cJSON_Delete(json);
+ cJSON *json=request(HTTP_GET,"/api/v1/status",NULL,0,NULL,NULL);assert(code==200 && !connection_close && json && !strcmp(cJSON_GetObjectItemCaseSensitive(json,"name")->valuestring,"PicoNano"));cJSON_Delete(json);
  pn_device_wifi_state_t radio={.phase=PN_WIFI_READY,.rssi_known=true,.rssi=-61,.disconnects=2,.reconnects=1,.last_disconnect_reason=201};strcpy(radio.ap_password,"private");
  assert(pn_device_transfer_http_diagnostics(&server,&radio)==PN_OK);json=request(HTTP_GET,"/api/v1/status",NULL,0,NULL,NULL);
  assert(code==200 && cJSON_GetObjectItemCaseSensitive(json,"rssi_dbm")->valueint==-61 && cJSON_GetObjectItemCaseSensitive(json,"disconnects")->valueint==2 && cJSON_GetObjectItemCaseSensitive(json,"last_disconnect_reason")->valueint==201 && !strstr(response,"private"));cJSON_Delete(json);
@@ -159,8 +160,9 @@ int main(void){
  json=request(HTTP_DELETE,"/api/v1/network",NULL,0,token,NULL);assert(code==202 && sink_calls==3 && sink_forget);cJSON_Delete(json);
  assert(pn_device_transfer_http_network(&server,NULL)==PN_OK);json=request(HTTP_GET,"/api/v1/network",NULL,0,token,NULL);assert(code==404);cJSON_Delete(json);
  snprintf(begin,sizeof begin,"{\"kind\":\"book\",\"name\":\"leading-zero.txt\",\"size\":01,\"sha256\":\"%s\"}",sha);json=request(HTTP_POST,"/api/v1/uploads",begin,strlen(begin),token,NULL);assert(code==400);cJSON_Delete(json);
- receive_delay=6000;json=request(HTTP_POST,"/api/v1/network",request_body,strlen(request_body),token,NULL);assert(code==400);cJSON_Delete(json);receive_delay=0;
- incomplete=true;json=request(HTTP_POST,"/api/v1/network",request_body,strlen(request_body),token,NULL);assert(code==400);cJSON_Delete(json);incomplete=false;
+ timeout_once=1;assert(pn_device_transfer_http_network(&server,&net_sink)==PN_OK);json=request(HTTP_POST,"/api/v1/network",request_body,strlen(request_body),token,NULL);assert(code==202 && !connection_close && !timeout_once);cJSON_Delete(json);assert(pn_device_transfer_http_network(&server,NULL)==PN_OK);
+ receive_delay=13000;json=request(HTTP_POST,"/api/v1/network",request_body,strlen(request_body),token,NULL);assert(code==408 && connection_close);cJSON_Delete(json);receive_delay=0;
+ incomplete=true;json=request(HTTP_POST,"/api/v1/network",request_body,strlen(request_body),token,NULL);assert(code==400 && connection_close);cJSON_Delete(json);incomplete=false;
  const char *duplicate="{\"kind\":\"book\",\"kind\":\"font\",\"name\":\"dup.txt\",\"size\":1,\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}";json=request(HTTP_POST,"/api/v1/uploads",duplicate,strlen(duplicate),token,NULL);assert(code==400);cJSON_Delete(json);
  now+=300001;json=request(HTTP_GET,"/api/v1/session",NULL,0,NULL,NULL);assert(code==200);cJSON_Delete(json);
  assert(pn_device_transfer_http_request_stop(&server)==PN_OK);json=request(HTTP_GET,"/api/v1/session",NULL,0,token,NULL);assert(code==503);cJSON_Delete(json);

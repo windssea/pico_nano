@@ -1,5 +1,13 @@
 # PicoNano 变更记录
 
+## 2026-11-25：无线连接与热点传书中断综合修复（正式配置 `firmware-board`/`firmware-ci` 构建与 `1.1.3-diag` 真机实测通过）
+
+- Wi-Fi 驱动与连接策略（[device_wifi.c](../main/device_wifi.c)、[device_transfer.c](../main/device_transfer.c)）：修复静态 TX 缓冲（`TX_BUFFER_TYPE=0`）与静态 RX 缓冲仅 4 个低于 6 包 BA 窗导致的 DMA 缺槽丢包，调整为 `static_rx=6 / dynamic_rx=24 / static_tx=6 / mgmt=12` 并将 `pn_transfer_ctl` 片内栈从 16 KiB 收紧至 8 KiB；AP/STA 强制 2.4GHz `WIFI_BW20` 窄带，SoftAP 切至信道 6 并显式配置 100 TU 信标与可选 PMF，STA 启用 `WIFI_ALL_CHANNEL_SCAN` + 按信号排序，首次连接有界 25s/5 次、会话内断线重连放宽至 45s/8 次（1/2/3s 渐进退避）。
+- 消除传书期 DMA 内存饥饿与墨水屏刷屏争抢（[app_main.c](../main/app_main.c)、[device_transfer.c](../main/device_transfer.c)、[device_test_console.c](../main/device_test_console.c)）：真机热点复测定位到 ESP32-S3 的 8 KiB RTC Fast RAM 属于 `MALLOC_CAP_INTERNAL` 但不支持 DMA，导致 SoftAP 启动后 `MALLOC_CAP_DMA` 耗尽并触发 `sdmmc_cmd: allocate_dma_buf (0x101)`；现将 [app_main.c](../main/app_main.c) 中 12 项仅由 Core 1 访问的大型非 DMA 界面静态状态（共 25,168 B）以 `EXT_RAM_BSS_ATTR` 迁至 PSRAM，补齐 `MALLOC_CAP_DMA` 与监督栈水位日志，使诊断镜像热点监听期 `dma_free` 保持约 28.6 KiB（最大连续块 25.6 KiB）；`tick_transfer()` 在分块间隙对 `busy` 态保留 6 秒防抖，避免每个 64 KiB 分块反复触发 Core 0 全屏 GL16 与 SY7636A 高压升压脉冲。
+- SD 暂存与设备 HTTP 服务优化（[pn_upload_files.c](../components/pn_transfer/pn_upload_files.c)、[device_transfer_http.c](../main/device_transfer_http.c)）：已对齐的非零暂存文件跳过 `truncate_part()` 冗余 `ftruncate` 与目录 `fsync`（每块减半同步开销），同一次独占提交复用已验证的整文件 SHA-256（保持全部掉电/损坏恢复语义）；HTTP 2xx 响应复用 HTTP/1.1 长连接、放宽至 6 套接字并开启 TCP 保活，正文接收上限提升至 25s（单次 `recv` 5s 超时继续轮询停止标志，超时返回 HTTP 408 且跳过阻塞排空）。
+- 网页传输客户端加固（[assets/transfer/app.js](../assets/transfer/app.js)）：超时/断网统一转为中文提示（不再裸露 `signal is aborted without reason`），按接口分段放宽超时（分块 30s、新建 45s、完成 180s），读取与幂等分块支持最多 5 次含 HTTP 408/超时/5xx 退避重试，分块 `409` 自动查询对齐 `next_offset`，`complete` 掉包时只读复核是否已提交（不盲重放写操作）。
+- 回归、正式配置构建与真机实测：主机 252/252 目标编译通过，受影响的无线/传输/存储/控制台 21/21 ASan/UBSan CTest、63/63 Python 工具单测、47/47 网页与安装器 JS 单测及 `tools/check_docs.py` 全绿；ESP-IDF v6.1 隔离正式配置构建均通过并核验诊断关闭——`firmware-board` 4,709,696 B（6 MiB 槽余 25.14%，DIRAM 余 169,691 B，SHA-256 `a7ed44a3c80a0103ab8113bf0bb7b4c83c01c0c3c44c5233a05a56136d0b5666`）、`firmware-ci` 4,706,512 B（槽余 25.19%，DIRAM 余 172,176 B，SHA-256 `b2977628e0c93b21f1cd252ac8c4e210d47f3f8e322f24b92c530f7465696107`）；`1.1.3-diag` 真机 `ota_1` 已完成本机 STA 配网保存、8 分钟局域网传书零断连、真实 2.4GHz 热点（信道 6 / 20MHz）7.88 MiB TTF 单连接 Keep-Alive 完整上传提交校验删除（127/127 分块、136.1 KiB/s、中位 452.5 ms、0 重连、仅 1 次 EPD 刷新、`POST /complete` 26.55s）及 4.0 MiB 四项故障注入（幂等重放、断链续传、409 对齐、慢正文超时 HTTP 408 恢复）实测，退出后无内存泄漏。未另打新版本签名发布包。
+
 ## 2026-11-24：网页安装器新增 Gitee 直链下载与本地 ZIP 固件包导入
 
 - 新增纯逻辑模块 [installer/package.js](../installer/package.js)：按所选版本与刷入方式动态生成 Gitee Releases 对应 ZIP 直链与发布页入口，并支持本地选择或拖放导入官方升级包、完整包及离线网页包（内置 ZIP32 解析、CRC-32 与原生 `DecompressionStream` 有界解压，逐文件严格校验清单长度与 SHA-256，模式错配拒绝且不自动切换）。

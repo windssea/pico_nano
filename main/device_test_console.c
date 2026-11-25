@@ -109,8 +109,9 @@ static void status(uint32_t seq){
 // Runs between display jobs on the display task: heap walks hold a spinlock with interrupts masked, which starved line DMA into underruns when done mid-scan (reproduced on hardware).
 static void heap_report(unsigned seq){
     pn_device_async_t *p=console.port;
-    reply("PNT %u heap internal=%u internal_largest=%u internal_min=%u psram=%u psram_largest=%u psram_min=%u",seq,
+    reply("PNT %u heap internal=%u internal_largest=%u internal_min=%u dma=%u dma_largest=%u dma_min=%u psram=%u psram_largest=%u psram_min=%u",seq,
         (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),(unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),(unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL),
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_DMA|MALLOC_CAP_8BIT),(unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA|MALLOC_CAP_8BIT),(unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_DMA|MALLOC_CAP_8BIT),
         (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),(unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM),(unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM));
     if(p->input_task_handle && p->display_task_handle)reply("PNT %u stack input=%u display=%u",seq,(unsigned)uxTaskGetStackHighWaterMark(p->input_task_handle),(unsigned)uxTaskGetStackHighWaterMark(p->display_task_handle));
 }

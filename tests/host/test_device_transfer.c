@@ -43,6 +43,7 @@ esp_err_t esp_wifi_init(const wifi_init_config_t *config){assert(!config->nvs_en
 esp_err_t esp_wifi_set_storage(int storage){assert(storage==WIFI_STORAGE_RAM);return ESP_OK;}
 esp_err_t esp_wifi_set_mode(wifi_mode_t value){assert(value==WIFI_MODE_AP || value==WIFI_MODE_STA);network_mode=value;return ESP_OK;}
 esp_err_t esp_wifi_set_config(wifi_interface_t iface,const wifi_config_t *config){assert(iface==WIFI_IF_AP?config->ap.authmode==WIFI_AUTH_WPA2_PSK:iface==WIFI_IF_STA);return ESP_OK;}
+esp_err_t esp_wifi_set_bandwidth(wifi_interface_t iface,wifi_bandwidth_t bw){assert((iface==WIFI_IF_AP || iface==WIFI_IF_STA) && bw==WIFI_BW20);return ESP_OK;}
 esp_err_t esp_wifi_start(void){wifi_callback(wifi_ctx,WIFI_EVENT,network_mode==WIFI_MODE_AP?WIFI_EVENT_AP_START:WIFI_EVENT_STA_START,NULL);return ESP_OK;}
 esp_err_t esp_wifi_set_ps(wifi_ps_type_t ps){assert(ps==WIFI_PS_NONE);return ESP_OK;}
 esp_err_t esp_wifi_connect(void){
@@ -81,7 +82,7 @@ int main(void){
  state=wait_for(&session,1);assert(connection_calls==connected_before+1 && route.user_ctx==http_before && !state.released);
  json=request(HTTP_GET,retained,NULL,0,automatic,NULL);assert(code==200 && cJSON_GetObjectItemCaseSensitive(json,"next_offset")->valueint==PN_UPLOAD_CHUNK);cJSON_Delete(json);
  // 长时间断网必须退出接收态、释放租约，已确认分块仍可跨会话续传。/ A sustained outage must leave receiving state, release leases and retain acknowledged chunks across sessions.
- wifi_callback(wifi_ctx,WIFI_EVENT,WIFI_EVENT_STA_DISCONNECTED,NULL);state=wait_for(&session,3);assert(state.phase!=PN_DTRANSFER_READY && !state.network.address[0]);now+=20001;
+ wifi_callback(wifi_ctx,WIFI_EVENT,WIFI_EVENT_STA_DISCONNECTED,NULL);state=wait_for(&session,3);assert(state.phase!=PN_DTRANSFER_READY && !state.network.address[0]);now+=45001;
  state=wait_for(&session,0);assert(state.phase==PN_DTRANSFER_FAILED && state.released && !state.work.busy && !pn_media_active(&media));assert(pn_device_transfer_close(&session)==PN_OK && !native_allocations && !radio);
  assert(pn_device_transfer_open(&session,&media,root,&config)==PN_OK);wait_for(&session,1);
  json=request(HTTP_GET,"/api/v1/session",NULL,0,NULL,NULL);assert(code==200);strcpy(automatic,cJSON_GetObjectItemCaseSensitive(json,"token")->valuestring);cJSON_Delete(json);

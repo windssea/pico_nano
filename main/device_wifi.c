@@ -44,9 +44,15 @@ static void unlock(wifi_t *s){xSemaphoreGive(s->mutex);}
 static void clear_secret(void *value,size_t n){volatile uint8_t *p=value;while(n--)*p++=0;}
 static bool changed(wifi_t *s){if(s->state.generation==UINT64_MAX){s->state.phase=PN_WIFI_FAILED;s->state.error=ESP_FAIL;return false;}s->state.generation++;return true;}
 static void address(char out[16],uint32_t ip){const uint8_t *bytes=(const uint8_t *)&ip;snprintf(out,16,"%u.%u.%u.%u",bytes[0],bytes[1],bytes[2],bytes[3]);}
+/// STA重连退避：首次连网固定1秒、有界5次/25秒；已就绪后断线放宽到8次/45秒并渐进退避。
+/// STA reconnect backoff: initial join uses 1 s spacing with a 5-attempt/25 s bound; post-ready drops allow 8 attempts/45 s with stepped backoff.
+static uint64_t retry_delay_ms(const wifi_t *s){
+ if(!s->ever_ready || s->state.attempts<2)return 1000;
+ return s->state.attempts<4?2000:3000;
+}
 static void disconnected(wifi_t *s){
  if(s->state.phase==PN_WIFI_READY){s->window=now_ms();s->state.attempts=0;}
- s->state.phase=PN_WIFI_CONNECTING;s->state.address[0]=0;s->state.rssi_known=false;s->pending_connect=true;s->next_retry=now_ms()+1000;(void)changed(s);
+ s->state.phase=PN_WIFI_CONNECTING;s->state.address[0]=0;s->state.rssi_known=false;s->pending_connect=true;s->next_retry=now_ms()+retry_delay_ms(s);(void)changed(s);
 }
 static void event(void *ctx,esp_event_base_t base,int32_t id,void *data){
  wifi_t *s=ctx;lock(s);if(s->closing || s->state.phase==PN_WIFI_FAILED){unlock(s);return;}
@@ -106,9 +112,9 @@ pn_status_t pn_device_wifi_open_detailed(pn_device_wifi_t *out,const pn_device_w
   for(unsigned i=0;i<12;i++)s->state.ap_password[i]=alphabet[random[i]&31];
   clear_secret(random,sizeof random);
   result=esp_read_mac(mac,ESP_MAC_WIFI_SOFTAP);
-  if(result==ESP_OK){snprintf(s->state.ssid,sizeof s->state.ssid,PN_BRAND_NAME "-%02X%02X",mac[4],mac[5]);memcpy(settings.ap.ssid,s->state.ssid,strlen(s->state.ssid));memcpy(settings.ap.password,s->state.ap_password,12);settings.ap.ssid_len=(uint8_t)strlen(s->state.ssid);settings.ap.channel=1;settings.ap.max_connection=2;settings.ap.authmode=WIFI_AUTH_WPA2_PSK;settings.ap.pairwise_cipher=WIFI_CIPHER_TYPE_CCMP;}
+  if(result==ESP_OK){snprintf(s->state.ssid,sizeof s->state.ssid,PN_BRAND_NAME "-%02X%02X",mac[4],mac[5]);memcpy(settings.ap.ssid,s->state.ssid,strlen(s->state.ssid));memcpy(settings.ap.password,s->state.ap_password,12);settings.ap.ssid_len=(uint8_t)strlen(s->state.ssid);settings.ap.channel=6;settings.ap.beacon_interval=100;settings.ap.max_connection=2;settings.ap.authmode=WIFI_AUTH_WPA2_PSK;settings.ap.pairwise_cipher=WIFI_CIPHER_TYPE_CCMP;settings.ap.pmf_cfg.capable=true;settings.ap.pmf_cfg.required=false;}
  }else{
-  strcpy(s->state.ssid,config->ssid);memcpy(settings.sta.ssid,config->ssid,strlen(config->ssid));memcpy(settings.sta.password,config->password,strlen(config->password));settings.sta.threshold.authmode=config->password[0]?WIFI_AUTH_WPA2_PSK:WIFI_AUTH_OPEN;settings.sta.pmf_cfg.capable=true;settings.sta.sae_pwe_h2e=WPA3_SAE_PWE_BOTH;
+  strcpy(s->state.ssid,config->ssid);memcpy(settings.sta.ssid,config->ssid,strlen(config->ssid));memcpy(settings.sta.password,config->password,strlen(config->password));settings.sta.scan_method=WIFI_ALL_CHANNEL_SCAN;settings.sta.sort_method=WIFI_CONNECT_AP_BY_SIGNAL;settings.sta.threshold.authmode=config->password[0]?WIFI_AUTH_WPA2_PSK:WIFI_AUTH_OPEN;settings.sta.pmf_cfg.capable=true;settings.sta.sae_pwe_h2e=WPA3_SAE_PWE_BOTH;
  }
  if(result==ESP_OK)result=esp_netif_init();
  if(result==ESP_OK){result=esp_event_loop_create_default();if(result==ESP_OK)s->loop_owned=true;else if(result==ESP_ERR_INVALID_STATE)result=ESP_OK;}
@@ -120,13 +126,15 @@ pn_status_t pn_device_wifi_open_detailed(pn_device_wifi_t *out,const pn_device_w
   if(result==ESP_OK)result=config->mode==PN_WIFI_AP?esp_wifi_set_default_wifi_ap_handlers():esp_wifi_set_default_wifi_sta_handlers();
  }
  if(result==ESP_OK){wifi_init_config_t init=WIFI_INIT_CONFIG_DEFAULT();init.nvs_enable=0;
-  // 静态缓冲仍占内部RAM，保持4个；动态缓冲已允许放PSRAM，加到16个，避免传书时接收队列满而丢包重传。BA窗不超过动态RX。
-  // Static buffers stay in internal RAM, so keep four; dynamic buffers may now live in PSRAM, so raise them to 16 to stop receive-queue drops and retransmits during transfers. BA stays within dynamic RX.
-  init.static_rx_buf_num=4;init.dynamic_rx_buf_num=16;init.static_tx_buf_num=4;init.dynamic_tx_buf_num=16;init.rx_ba_win=6;init.mgmt_sbuf_num=8;
+  // 静态收发缓冲设为6个恰好覆盖6包BA窗且不挤爆传书期片内连续DMA堆；动态RX(PSRAM)保持24、管理帧缓冲12。
+  // Keep static RX/TX buffers at 6 to cover the 6-packet BA window without exhausting internal contiguous DMA heap during transfer; keep dynamic RX (PSRAM) at 24 and mgmt buffers at 12.
+  init.static_rx_buf_num=6;init.dynamic_rx_buf_num=24;init.static_tx_buf_num=6;init.dynamic_tx_buf_num=16;init.rx_ba_win=6;init.mgmt_sbuf_num=12;
   result=esp_wifi_init(&init);if(result==ESP_OK)s->initialized=true;}
  if(result==ESP_OK)result=esp_wifi_set_storage(WIFI_STORAGE_RAM);
  if(result==ESP_OK)result=esp_wifi_set_mode(config->mode==PN_WIFI_AP?WIFI_MODE_AP:WIFI_MODE_STA);
  if(result==ESP_OK)result=esp_wifi_set_config(config->mode==PN_WIFI_AP?WIFI_IF_AP:WIFI_IF_STA,&settings);
+ // 2.4GHz下强制20MHz窄带，降低拥挤信道同频干扰与SoftAP断流。/ Force 20 MHz bandwidth on 2.4 GHz to reduce co-channel interference and SoftAP drops.
+ if(result==ESP_OK)result=esp_wifi_set_bandwidth(config->mode==PN_WIFI_AP?WIFI_IF_AP:WIFI_IF_STA,WIFI_BW20);
  clear_secret(&settings,sizeof settings);
  if(result==ESP_OK)result=esp_event_handler_instance_register(WIFI_EVENT,ESP_EVENT_ANY_ID,event,s,&s->wifi_events);
  if(result==ESP_OK && config->mode==PN_WIFI_STA)result=esp_event_handler_instance_register(IP_EVENT,ESP_EVENT_ANY_ID,event,s,&s->ip_events);
@@ -144,10 +152,12 @@ pn_status_t pn_device_wifi_poll(pn_device_wifi_t *out){
  if(s->state.phase==PN_WIFI_FAILED){unlock(s);return PN_IO;}
  if(s->state.phase==PN_WIFI_READY){bool sample=s->state.mode==PN_WIFI_STA && (!s->signal_at || now<s->signal_at || now-s->signal_at>=1000);uint64_t generation=s->state.generation;if(sample)s->signal_at=now;unlock(s);
   if(sample){wifi_ap_record_t ap={0};esp_err_t result=esp_wifi_sta_get_ap_info(&ap);lock(s);if(s->state.phase==PN_WIFI_READY && s->state.generation==generation){s->state.rssi_known=result==ESP_OK;if(result==ESP_OK)s->state.rssi=ap.rssi;}unlock(s);}return PN_OK;}
- if(now<s->window || now-s->window>=20000){s->state.phase=PN_WIFI_FAILED;s->state.error=ESP_FAIL;unlock(s);return PN_IO;}
+ uint64_t limit=s->ever_ready?45000:25000;
+ if(now<s->window || now-s->window>=limit){s->state.phase=PN_WIFI_FAILED;s->state.error=ESP_FAIL;unlock(s);return PN_IO;}
  bool ap=s->state.mode==PN_WIFI_AP && s->ap_ready;
  bool connect=s->state.mode==PN_WIFI_STA && s->pending_connect && now>=s->next_retry;
- if(connect){if(s->state.attempts>=3){s->state.phase=PN_WIFI_FAILED;s->state.error=ESP_FAIL;unlock(s);return PN_IO;}s->state.attempts++;s->pending_connect=false;s->next_retry=now+1000;}
+ unsigned max_attempts=s->ever_ready?8:5;
+ if(connect){if(s->state.attempts>=max_attempts){s->state.phase=PN_WIFI_FAILED;s->state.error=ESP_FAIL;unlock(s);return PN_IO;}s->state.attempts++;s->pending_connect=false;s->next_retry=now+retry_delay_ms(s);}
  unlock(s);esp_err_t result=ESP_OK;
  if(ap){esp_netif_ip_info_t info={0};result=esp_netif_get_ip_info(s->netif,&info);lock(s);if(result==ESP_OK && info.ip.addr && !s->closing && s->state.phase==PN_WIFI_STARTING){address(s->state.address,info.ip.addr);s->state.phase=PN_WIFI_READY;(void)changed(s);}unlock(s);}
  if(connect)result=esp_wifi_connect();
