@@ -24,13 +24,16 @@ typedef enum {
     PN_BUI_SAVE,PN_BUI_BACKSPACE,PN_BUI_SHIFT,PN_BUI_CLEAR,PN_BUI_RETRY,
     PN_BUI_ROW=16, ///< ROW+i选择行，0至5 / ROW+i selects row zero through five
     PN_BUI_UP=32,PN_BUI_DOWN,PN_BUI_TEXT,
+    PN_BUI_TAB_BOOKMARKS=36,PN_BUI_TAB_HIGHLIGHTS=37, ///< 切换书签/高亮摘录页签 / Switch between bookmarks and highlight excerpts tabs
     PN_BUI_CHARACTER=256 ///< CHARACTER+ASCII用于设备键盘 / CHARACTER+ASCII for the device keyboard
 } pn_bookmark_ui_command_t;
 typedef struct {
     pn_epub_app_t *epub; ///< EPUB会话，与reader互斥 / EPUB session, exclusive with reader
     pn_reader_app_t *reader; ///< 借用owner会话对象 / Borrowed owner session object
     pn_bookmark_ui_mode_t mode; ///< 当前屏幕模型 / Current screen model
+    uint8_t tab; ///< 0=书签、1=高亮摘录 / 0=bookmarks, 1=sentence highlight excerpts
     pn_txt_bookmark_t items[PN_BOOKMARK_UI_ROWS]; ///< 本页ID/名称；position仅TXT使用 / Page IDs/labels; position is TXT-only
+    pn_highlight_t highlights[PN_BOOKMARK_UI_ROWS]; ///< 高亮摘录页当前 6 条摘录 / Current 6 highlights on the excerpts tab
     int sections[PN_BOOKMARK_UI_ROWS]; ///< EPUB书签所在章节（从1起），未知为0 / Section of each EPUB bookmark (from 1), 0 when unknown
     int section_count; ///< EPUB章节总数 / EPUB section count
     size_t count; ///< 有效行数 / Valid rows

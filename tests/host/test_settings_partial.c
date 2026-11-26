@@ -35,6 +35,26 @@ int main(void){
     assert(pn_settings_ui_event(&ui,PN_SETUI_REFRESH,present,NULL)==PN_OK);
     for(int i=0;i<3;i++){unsigned n=check(&ui,PN_SETUI_LEVEL+i,PN_OK);if(i)assert(n>0 && n<100);}
     unsigned before=presents;draws=0;assert(pn_settings_ui_event(&ui,PN_SETUI_LEVEL+2,present,NULL)==PN_OK && presents==before && !draws);
+    // 自动锁屏5段位增量与整页逐字节一致，重复点当前项零绘制零提交。/ Auto-lock 5 presets match full repaint byte-for-byte; repeating current option draws/submits nothing.
+    for(int i=0;i<5;i++){unsigned n=check(&ui,PN_SETUI_AUTO_LOCK+i,PN_OK);assert(n>0 && n<120);}
+    before=presents;draws=0;assert(pn_settings_ui_event(&ui,PN_SETUI_AUTO_LOCK+4,present,NULL)==PN_OK && presents==before && !draws);
+    // 翻页动画4段位增量与整页逐字节一致。/ Page-turn animation 4 presets match full repaint byte-for-byte.
+    static const int turn_cmds[4]={PN_SETUI_TURN,PN_SETUI_TURN_CRISP,PN_SETUI_TURN+1,PN_SETUI_TURN_FAST};
+    for(int i=0;i<4;i++){unsigned n=check(&ui,turn_cmds[i],PN_OK);assert(n<120);}
+    // 竖向滑动翻页与触控区/按键自动翻页局部重画逐字节一致。/ Vertical-turn, tap-zone & auto-turn partial repaints match full repaint byte-for-byte.
+    assert(pn_settings_ui_event(&ui,PN_SETUI_KEYS,present,NULL)==PN_OK);
+    assert(check(&ui,PN_SETUI_VERTICAL_TURN,PN_OK)<60);
+    assert(check(&ui,PN_SETUI_VERTICAL_TURN,PN_OK)<60);
+    assert(pn_settings_ui_event(&ui,PN_SETUI_TAP_ZONES,present,NULL)==PN_OK);
+    for(int i=0;i<PN_TAP_ZONE_COUNT;i++)assert(check(&ui,PN_SETUI_TAP_ZONE_PICK+i,PN_OK)<120);
+    assert(pn_settings_ui_event(&ui,PN_SETUI_BACK,present,NULL)==PN_OK);
+    assert(pn_settings_ui_event(&ui,PN_SETUI_KEY_HIGHLIGHT,present,NULL)==PN_OK);
+    for(int i=1;i<5;i++)assert(check(&ui,PN_SETUI_KEY2_SHORT+i,PN_OK)<80);
+    assert(check(&ui,PN_SETUI_KEY2_SHORT+0,PN_OK)<80);
+    assert(check(&ui,PN_SETUI_AUTO_TURN_INC,PN_OK)<80);
+    assert(check(&ui,PN_SETUI_AUTO_TURN_DEC,PN_OK)<80);
+    assert(pn_settings_ui_event(&ui,PN_SETUI_BACK,present,NULL)==PN_OK);
+    assert(pn_settings_ui_event(&ui,PN_SETUI_BACK,present,NULL)==PN_OK);
     assert(pn_settings_ui_event(&ui,PN_SETUI_APPEARANCE,present,NULL)==PN_OK);
     assert(check(&ui,PN_SETUI_COLUMNS+1,PN_OK)<100);
     for(unsigned round=0;round<3;round++)for(int i=0;i<4;i++)assert(check(&ui,PN_SETUI_STYLE+i,PN_OK)<30);

@@ -66,8 +66,8 @@ int main(int argc,char **argv){
     assert(pn_media_release(&media,&lease)==PN_OK);
     assert(pn_settings_ui_event(&ui,PN_SETUI_BACK,present,NULL)==PN_OK);
 
-    /* 一级页：显示与字体（字体、壁纸、书架与主页）、阅读（全局排版、按键与手势、刷新与屏幕）、设备（WiFi、存储与关于）；标题区无按钮。/ Root page groups: display, reading (with Global Typesetting), and device; title area has no button. */
-    assert(pn_settings_ui_hit(&ui,100,220)==PN_SETUI_FONTS && pn_settings_ui_hit(&ui,100,310)==PN_SETUI_WALLPAPER && pn_settings_ui_hit(&ui,100,400)==PN_SETUI_APPEARANCE && pn_settings_ui_hit(&ui,100,550)==PN_SETUI_GLOBAL_STYLE && pn_settings_ui_hit(&ui,100,640)==PN_SETUI_KEYS && pn_settings_ui_hit(&ui,100,730)==PN_SETUI_REFRESH && pn_settings_ui_hit(&ui,100,850)==PN_SETUI_WIFI && pn_settings_ui_hit(&ui,100,950)==PN_SETUI_ABOUT && pn_settings_ui_hit(&ui,100,1050)==-1 && pn_settings_ui_hit(&ui,100,60)==-1 && pn_settings_ui_hit(&ui,560,100)==-1);
+    /* 一级页：显示与字体（字体、壁纸、书架与主页、状态栏设置）、阅读（全局排版、按键与手势、刷新与屏幕）、设备（WiFi、存储与关于）；标题区无按钮。/ Root page groups: display (with Status Bar), reading (with Global Typesetting), and device; single page without scrolling. */
+    assert(pn_settings_ui_hit(&ui,100,180)==PN_SETUI_FONTS && pn_settings_ui_hit(&ui,100,270)==PN_SETUI_WALLPAPER && pn_settings_ui_hit(&ui,100,360)==PN_SETUI_APPEARANCE && pn_settings_ui_hit(&ui,100,440)==PN_SETUI_STATUS_BAR && pn_settings_ui_hit(&ui,100,570)==PN_SETUI_GLOBAL_STYLE && pn_settings_ui_hit(&ui,100,660)==PN_SETUI_KEYS && pn_settings_ui_hit(&ui,100,740)==PN_SETUI_REFRESH && pn_settings_ui_hit(&ui,100,870)==PN_SETUI_WIFI && pn_settings_ui_hit(&ui,100,950)==PN_SETUI_ABOUT && pn_settings_ui_hit(&ui,100,1050)==-1 && pn_settings_ui_hit(&ui,100,60)==-1 && pn_settings_ui_hit(&ui,560,100)==-1);
     /* 全局排版与单书排版对齐（含全部12项、边距详调、阅读背景、书内图片/上下栏与重置），以及主页个性化与顶部横幅快速缓存。/ Global typesetting parity with book style (all 12 fields, margins, backgrounds, images/bars & reset) plus Home personalization & fast banner cache. */
     assert(pn_settings_ui_event(&ui,PN_SETUI_GLOBAL_STYLE,present,NULL)==PN_OK && pn_settings_ui_event(&ui,PN_SETUI_GSTYLE_ADJ+1,present,NULL)==PN_OK && pn_settings_ui_event(&ui,PN_SETUI_GSTYLE_BARS,present,NULL)==PN_OK);
     assert(pn_settings_ui_event(&ui,PN_SETUI_GSTYLE_IMAGES,present,NULL)==PN_OK && pn_settings_ui_event(&ui,PN_SETUI_GSTYLE_ADJ+15,present,NULL)==PN_OK && pn_settings_ui_event(&ui,PN_SETUI_GSTYLE_EXT+1,present,NULL)==PN_OK);
@@ -104,6 +104,27 @@ int main(int argc,char **argv){
     assert(pn_settings_ui_event(&ui,PN_SETUI_TURN+2,present,NULL)==PN_EMPTY && !(ui.flags&PN_INPUT_TURN_MASK));
     /* 翻页效果：直接/高清/水波纹/极速四段，分别保存为样式 0/1/3/2。/ Turn effect: direct/crisp/ripple/fast 4 segments saving as style 0/1/3/2. */
     assert(pn_settings_ui_hit(&ui,100,940)==PN_SETUI_TURN && pn_settings_ui_hit(&ui,260,940)==PN_SETUI_TURN_CRISP && pn_settings_ui_hit(&ui,420,940)==PN_SETUI_TURN+1 && pn_settings_ui_hit(&ui,580,940)==PN_SETUI_TURN_FAST);
+    /* 自动锁屏时间：默认5分钟，5段位（1/5/10/30分钟、从不）立即保存，占用失败保留旧值，非法与未来记录拒绝覆盖。/ Auto-lock timeout: default 5 min, 5 presets persist immediately, busy preserves old value, invalid/future records rejected. */
+    assert(ui.auto_lock_minutes==PN_AUTO_LOCK_DEFAULT_MIN);
+    assert(pn_settings_auto_lock_ms(0u)==0u && pn_settings_auto_lock_ms(1u)==60000u && pn_settings_auto_lock_ms(5u)==300000u && pn_settings_auto_lock_ms(30u)==1800000u && pn_settings_auto_lock_ms(999u)==300000u);
+    assert(pn_settings_ui_hit(&ui,85,718)==PN_SETUI_AUTO_LOCK && pn_settings_ui_hit(&ui,210,718)==PN_SETUI_AUTO_LOCK+1 && pn_settings_ui_hit(&ui,340,718)==PN_SETUI_AUTO_LOCK+2 && pn_settings_ui_hit(&ui,468,718)==PN_SETUI_AUTO_LOCK+3 && pn_settings_ui_hit(&ui,595,718)==PN_SETUI_AUTO_LOCK+4);
+    {uint16_t al=99u;assert(pn_settings_load_auto_lock(&media,root,&al)==PN_OK && al==5u);
+     assert(pn_settings_ui_event(&ui,PN_SETUI_AUTO_LOCK+0,present,NULL)==PN_OK && ui.auto_lock_minutes==1u && pn_settings_load_auto_lock(&media,root,&al)==PN_OK && al==1u);
+     assert(pn_settings_ui_event(&ui,PN_SETUI_AUTO_LOCK+4,present,NULL)==PN_OK && ui.auto_lock_minutes==0u && pn_settings_load_auto_lock(&media,root,&al)==PN_OK && al==0u);
+     assert(pn_settings_ui_event(&ui,PN_SETUI_AUTO_LOCK+3,present,NULL)==PN_OK && ui.auto_lock_minutes==30u && pn_settings_load_auto_lock(&media,root,&al)==PN_OK && al==30u);
+     pn_media_lease_t al_busy;assert(pn_media_acquire(&media,PN_MEDIA_WRITE,&al_busy)==PN_OK);
+     assert(pn_settings_ui_event(&ui,PN_SETUI_AUTO_LOCK+2,present,NULL)==PN_BUSY && ui.auto_lock_minutes==30u);
+     assert(pn_media_release(&media,&al_busy)==PN_OK);
+     assert(pn_settings_ui_event(&ui,PN_SETUI_AUTO_LOCK+2,present,NULL)==PN_OK && ui.auto_lock_minutes==10u && pn_settings_load_auto_lock(&media,root,&al)==PN_OK && al==10u);
+     // 验证底层 A/B 记录边界校验（超范围、未来版本与不覆盖未知记录）。/ Verify A/B record validation (bounds, future versions, no overwrite).
+     pn_media_lease_t al_l;pn_journal_files_t al_f;pn_journal_io_t al_io;
+     assert(pn_media_acquire(&media,PN_MEDIA_WRITE,&al_l)==PN_OK && pn_auto_lock_prefs_files(&al_f,&media,&al_l,root,&al_io)==PN_OK);
+     assert(pn_auto_lock_prefs_save(&al_io,PN_AUTO_LOCK_MAX_MIN+1u)==PN_INVALID);
+     uint8_t bad_ver[8]={'P','N','A','L',2,0,15,0};assert(pn_journal_save(&al_io,bad_ver,8)==PN_OK && pn_auto_lock_prefs_load(&al_io,&al)==PN_UNSUPPORTED && al==10u && pn_auto_lock_prefs_save(&al_io,5u)==PN_UNSUPPORTED);
+     uint8_t bad_val[8]={'P','N','A','L',1,0,250,0};assert(pn_journal_save(&al_io,bad_val,8)==PN_OK && pn_auto_lock_prefs_load(&al_io,&al)==PN_CORRUPT && al==10u);
+     uint8_t restore[8]={'P','N','A','L',1,0,10,0};assert(pn_journal_save(&al_io,restore,8)==PN_OK && pn_auto_lock_prefs_load(&al_io,&al)==PN_OK && al==10u);
+     assert(pn_media_release(&media,&al_l)==PN_OK);
+    }
     assert(pn_settings_ui_event(&ui,PN_SETUI_TURN_CRISP,present,NULL)==PN_OK && ((ui.flags&PN_INPUT_TURN_MASK)>>6)==1u && pn_settings_load_flags(&media,root,&flags)==PN_OK && flags==ui.flags);
     assert(pn_settings_ui_event(&ui,PN_SETUI_TURN_FAST,present,NULL)==PN_OK && ((ui.flags&PN_INPUT_TURN_MASK)>>6)==2u && pn_settings_load_flags(&media,root,&flags)==PN_OK && flags==ui.flags);
     assert(pn_settings_ui_event(&ui,PN_SETUI_TURN+1,present,NULL)==PN_OK && (ui.flags&PN_INPUT_TURN_MASK)==PN_INPUT_TURN_MASK && pn_settings_load_flags(&media,root,&flags)==PN_OK && flags==ui.flags);
@@ -163,10 +184,11 @@ int main(int argc,char **argv){
     assert(pn_media_release(&media,&writer)==PN_OK);
     assert(pn_settings_ui_event(&ui,PN_SETUI_BACK,present,NULL)==PN_OK && ui.active);
     assert(pn_settings_ui_event(&ui,PN_SETUI_BACK,present,NULL)==PN_OK && !ui.active);pn_settings_ui_close(&ui);pn_settings_ui_close(&ui);assert(!pool.used && !pool.live);
-    assert(pn_settings_ui_open(&ui,&pool,&media,root,present,NULL)==PN_OK && ui.shelf.columns==4 && ui.shelf.style==PN_SHELF_PAPER && ui.vertical_turn);pn_settings_ui_close(&ui);
+    assert(pn_settings_ui_open(&ui,&pool,&media,root,present,NULL)==PN_OK && ui.shelf.columns==4 && ui.shelf.style==PN_SHELF_PAPER && ui.vertical_turn && ui.auto_lock_minutes==10u);pn_settings_ui_close(&ui);
     assert(pn_settings_load_flags(&media,root,&flags)==PN_OK && flags==(PN_INPUT_LEFT_HAND|PN_INPUT_NO_SWIPE|PN_INPUT_NO_EDGE_TAP));
     /* 无存储：显示默认、不能保存。/ No storage: defaults shown, nothing saved. */
-    assert(pn_settings_ui_open(&ui,&pool,NULL,NULL,present,NULL)==PN_OK && ui.flags==0 && pn_settings_ui_event(&ui,PN_SETUI_TOGGLE,present,NULL)==PN_UNSUPPORTED && ui.flags==0);pn_settings_ui_close(&ui);
+    assert(pn_settings_ui_open(&ui,&pool,NULL,NULL,present,NULL)==PN_OK && ui.flags==0 && ui.auto_lock_minutes==PN_AUTO_LOCK_DEFAULT_MIN && pn_settings_ui_event(&ui,PN_SETUI_TOGGLE,present,NULL)==PN_UNSUPPORTED && ui.flags==0);
+    assert(pn_settings_ui_event(&ui,PN_SETUI_REFRESH,present,NULL)==PN_OK && pn_settings_ui_event(&ui,PN_SETUI_AUTO_LOCK+0,present,NULL)==PN_UNSUPPORTED && ui.auto_lock_minutes==PN_AUTO_LOCK_DEFAULT_MIN);pn_settings_ui_close(&ui);
     assert(pn_settings_ui_open(&ui,&pool,NULL,NULL,present,NULL)==PN_OK && pn_settings_ui_event(&ui,PN_SETUI_COLUMNS+1,present,NULL)==PN_UNSUPPORTED && ui.shelf.columns==3);pn_settings_ui_close(&ui);
     /* 打开时逐分配失败回收。/ Every allocation failure during open recovers. */
     pn_pool_t probe;assert(!pn_pool_init(&probe,2u*1024u*1024u,NULL,NULL,NULL));assert(pn_settings_ui_open(&ui,&probe,&media,root,present,NULL)==PN_OK);size_t attempts=probe.attempts;pn_settings_ui_close(&ui);

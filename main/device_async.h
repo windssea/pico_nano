@@ -3,6 +3,7 @@
 #pragma once
 #include "pn_async.h"
 #include "pn_reader_app.h"
+#include "pn_input_prefs.h"
 #include "pn_key.h"
 #include "pn_feedback.h"
 #include "read_pico.h"
@@ -18,7 +19,7 @@ typedef enum {PN_DASYNC_TOUCH,PN_DASYNC_KEY,PN_DASYNC_ACTION,PN_DASYNC_POWER,PN_
 typedef struct {
     pn_device_input_kind_t kind; ///< 归一输入种类 / Normalized input kind
     uint64_t at; ///< 捕获时刻 / Capture time
-    unsigned count;int x,y;bool valid,ending; ///< 活动触点及显式UP终点 / Active contacts and explicit UP endpoint
+    unsigned count;int x,y;bool valid,ending,tap; ///< 活动触点、显式UP终点与正文轻点标志 / Active contacts, explicit UP endpoint and body-tap flag
     int key;pn_key_event_t key_event;pn_reader_action_t action; ///< 三键/阅读动作 / Key/reader action
 } pn_device_input_event_t;
 #if PN_DEVICE_TEST_CONSOLE
@@ -38,6 +39,7 @@ typedef struct {
     pn_reader_present_fn panel;void *panel_ctx; ///< 仅显示owner调用 / Called only by display owner
     void (*idle)(uint64_t);void (*off)(void); ///< 显示轨owner操作 / Display-rail owner operations
     atomic_bool paused,body,vertical_turn,full_screen;atomic_uint flags; ///< 输入暂停意图与阅读快照 / Input pause intent and reader snapshot
+    atomic_uint gesture_seq;pn_gesture_prefs_t gestures; ///< 序号锁保护的阅读手势与触控区快照 / Seqlock-protected reader gestures and tap-zone snapshot
     atomic_uint pause_request,pause_ack; ///< 单字包含代次和暂停位，确认必须对应本次请求 / Generation and pause bit in one word; acknowledgement must match this request
     bool input_active,display_active; ///< 已启动端口 / Started ports
     uint32_t revision; ///< 产品worker拥有的管理页呈现代次 / Management presentation revision owned by product worker
@@ -69,6 +71,8 @@ pn_status_t pn_device_async_native(pn_device_async_t *,pn_status_t (*)(void *),v
 void pn_device_async_view(pn_device_async_t *port,uint32_t view,bool body,uint8_t flags);
 /// 发布阅读手势模式（上下翻页与去上下栏全屏热区）。/ Publish reader gesture modes (vertical page turns and full-screen bar-less hit zones).
 void pn_device_async_reader_mode(pn_device_async_t *port,bool vertical_turn,bool full_screen);
+/// 发布可视化屏幕手势、触控区域、长按模式与三键映射。/ Publish visual screen gestures, tap zones, long-press mode, and 3-key mapping.
+void pn_device_async_gestures(pn_device_async_t *port,const pn_gesture_prefs_t *gestures);
 /// 在唯一首屏呈现前预备阅读输入，旧触点随上下文变化取消；翻页留待确认。 / Prepare reading input before the sole first-page presentation, cancelling old contacts and holding turns for confirmation.
 pn_status_t pn_device_async_first_begin(pn_device_async_t *port,uint8_t flags);
 /// 首屏与模型提交成功才交付暂存翻页；失败丢弃，紧急控制保留。 / Release a held turn only after successful screen/model commit; discard on failure and retain urgent controls.

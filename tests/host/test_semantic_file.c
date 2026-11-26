@@ -42,7 +42,7 @@ int main(void){
     f=fopen(file.path,"ab");assert(f && fputc(1,f)!=EOF && !fclose(f));assert(file.store.load(&file,&pool,&loaded,&n)==PN_EMPTY && save_file(&file,&pool,data,152)==PN_OK);
     // 同书多章受同一配额约束；临时包/旧包同计费，随机文件仍不得回收。/ Multiple chapters share the quota, counting staging plus old data without evicting unrelated files.
     for(unsigned chapter=0;chapter<4;chapter++){
-        memset(data,0x55,PN_XHTML_SNAPSHOT_MAX);memcpy(data,"PNSM",4);put32(data+4,1);memcpy(data+8,book.sha256,32);
+        memset(data,0x55,PN_XHTML_SNAPSHOT_MAX);memcpy(data,"PNSM",4);put32(data+4,3);memcpy(data+8,book.sha256,32);
         char requested[16];snprintf(requested,sizeof requested,"chapter-%u",chapter);pn_book_id_t key;assert(pn_identity_bytes((const uint8_t *)requested,strlen(requested),&key)==PN_OK);memcpy(data+40,key.sha256,32);
         put32(data+140,PN_XHTML_SNAPSHOT_MAX-152);put32(data+148,pn_crc32_update(0,data,148));assert(save_file(&file,&pool,data,PN_XHTML_SNAPSHOT_MAX)==PN_OK);
         assert(file.store.load_for(&file,&pool,requested,&loaded,&n)==PN_OK && n==PN_XHTML_SNAPSHOT_MAX && !memcmp(loaded,data,n));pn_free(loaded);

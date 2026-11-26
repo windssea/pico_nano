@@ -18,7 +18,9 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#ifndef ESP_PLATFORM
+#ifdef ESP_PLATFORM
+#include "esp_log.h"
+#else
 #include <sys/statvfs.h>
 #endif
 #define PATH_MAXIMUM PN_JOURNAL_PATH_MAX
@@ -78,11 +80,38 @@ static pn_status_t intent_save(files_t *s,const intent_t *t){intent_t old;pn_sta
 static pn_status_t paths(files_t *s,const intent_t *t,char *folder,char *target,char *backup){const char *sub=pn_upload_directory(t->request.kind);if(!sub)return PN_INVALID;pn_status_t status=join(folder,s->root,sub);if(status==PN_OK)status=join(target,folder,t->request.name);char name[48];snprintf(name,sizeof name,".pn-backup-%s",s->hex);if(status==PN_OK)status=join(backup,folder,name);return status;}
 static pn_status_t identity(files_t *s,const char *path,uint64_t *size,pn_book_id_t *digest){struct stat info;pn_status_t status=leaf(s,path,&info);if(status!=PN_OK)return status;status=pn_identity_file(s->media,&s->lease,path,512u*1024u*1024u,digest);if(status==PN_OK)*size=(uint64_t)info.st_size;return status;}
 static pn_status_t matches(files_t *s,const char *path,uint64_t size,const pn_book_id_t *digest){uint64_t actual_size;pn_book_id_t actual;pn_status_t status=identity(s,path,&actual_size,&actual);if(status!=PN_OK)return status;return actual_size==size && !memcmp(&actual,digest,sizeof actual)?PN_OK:PN_CORRUPT;}
-static pn_status_t count_active(files_t *s,unsigned *out,uint64_t *reserved_out){DIR *dir=opendir(s->uploads);if(!dir)return PN_IO;uint8_t active[8][16];unsigned count=0;uint64_t reserved=0;pn_status_t status=PN_OK;struct dirent *entry;
- while((entry=readdir(dir))){size_t n=strlen(entry->d_name);if(n<34 || entry->d_name[32]!='.')continue;uint8_t id[16];bool valid=true;for(unsigned i=0;i<16;i++){unsigned byte=0;for(unsigned k=0;k<2;k++){char c=entry->d_name[2*i+k];unsigned v=c>='0' && c<='9'?(unsigned)(c-'0'):c>='a' && c<='f'?(unsigned)(c-'a'+10):16;if(v==16){valid=false;break;}byte=byte*16+v;}id[i]=(uint8_t)byte;}if(!valid || !memcmp(id,s->id,16))continue;bool seen=false;for(unsigned i=0;i<count;i++)if(!memcmp(active[i],id,16))seen=true;if(seen)continue;
-  char name[35],a[PATH_MAXIMUM],b[PATH_MAXIMUM];memcpy(name,entry->d_name,32);memcpy(name+32,".a",3);status=join(a,s->uploads,name);name[33]='b';if(status==PN_OK)status=join(b,s->uploads,name);if(status!=PN_OK)break;pn_journal_files_t files;pn_journal_io_t io;status=pn_journal_files_init(&files,s->media,&s->lease,a,b,&io);struct stat info;if(status==PN_OK){pn_status_t check=leaf(s,a,&info);if(check!=PN_OK && check!=PN_EMPTY)status=check;check=leaf(s,b,&info);if(check!=PN_OK && check!=PN_EMPTY)status=check;}uint8_t payload[399];size_t length=0;uint64_t remaining=0;if(status==PN_OK)status=pn_blob_load(&io,s->pool,payload,sizeof payload,&length);
-  if(status==PN_OK){if(length<144 || memcmp(payload,"PNUP",4) || get(payload+4,2)!=1 || payload[7]>PN_UPLOAD_CANCELLED){status=PN_UNSUPPORTED;break;}if(payload[7]==PN_UPLOAD_COMMITTED || payload[7]==PN_UPLOAD_CANCELLED)continue;uint64_t size=get(payload+16,8),offset=get(payload+24,8);if(!size || size>512u*1024u*1024u || offset>size){status=PN_CORRUPT;break;}remaining=size-offset;}else if(status!=PN_EMPTY)break;
-  if(status==PN_EMPTY){char install_name[48];memcpy(install_name,entry->d_name,32);memcpy(install_name+32,".install.a",11);status=join(a,s->uploads,install_name);install_name[41]='b';if(status==PN_OK)status=join(b,s->uploads,install_name);if(status==PN_OK)status=pn_journal_files_init(&files,s->media,&s->lease,a,b,&io);if(status==PN_OK){pn_status_t check=leaf(s,a,&info);if(check!=PN_OK && check!=PN_EMPTY)status=check;check=leaf(s,b,&info);if(check!=PN_OK && check!=PN_EMPTY)status=check;}if(status==PN_OK)status=pn_blob_load(&io,s->pool,payload,sizeof payload,&length);if(status==PN_OK){if(length<FI_HEADER || memcmp(payload,"PNFI",4) || get(payload+4,2)!=1 || payload[6]>4){status=PN_UNSUPPORTED;break;}remaining=get(payload+24,8);if(!remaining || remaining>512u*1024u*1024u){status=PN_CORRUPT;break;}}else if(status!=PN_EMPTY)break;}
+static bool parse_hex_id(const char *name,uint8_t out[16]){
+ size_t n=strlen(name);if(n<34 || name[32]!='.')return false;
+ for(unsigned i=0;i<16;i++){
+  unsigned byte=0;
+  for(unsigned k=0;k<2;k++){
+   char c=name[2*i+k];
+   unsigned v=c>='0' && c<='9'?(unsigned)(c-'0'):c>='a' && c<='f'?(unsigned)(c-'a'+10):16;
+   if(v==16)return false;
+   byte=byte*16+v;
+  }
+  out[i]=(uint8_t)byte;
+ }
+ return true;
+}
+static pn_status_t load_peer_blob(files_t *s,const char hex[32],const char *suffix,uint8_t *payload,size_t cap,size_t *length){
+ char name[48],a[PATH_MAXIMUM],b[PATH_MAXIMUM];
+ memcpy(name,hex,32);int tail=snprintf(name+32,sizeof name-32,"%s.a",suffix);
+ if(tail<0 || (size_t)tail>=sizeof name-32)return PN_LIMIT;
+ pn_status_t status=join(a,s->uploads,name);name[32+tail-1]='b';if(status==PN_OK)status=join(b,s->uploads,name);
+ if(status!=PN_OK)return status;
+ pn_journal_files_t files;pn_journal_io_t io;
+ status=pn_journal_files_init(&files,s->media,&s->lease,a,b,&io);
+ struct stat info;
+ if(status==PN_OK){pn_status_t check=leaf(s,a,&info);if(check!=PN_OK && check!=PN_EMPTY)status=check;check=leaf(s,b,&info);if(check!=PN_OK && check!=PN_EMPTY)status=check;}
+ return status==PN_OK?pn_blob_load(&io,s->pool,payload,cap,length):status;
+}
+static pn_status_t count_active(files_t *s,unsigned *out,uint64_t *reserved_out){DIR *dir=opendir(s->uploads);if(!dir)return PN_IO;uint8_t active[8][16],skipped[64][16];unsigned count=0,skip_count=0;uint64_t reserved=0;pn_status_t status=PN_OK;struct dirent *entry;
+ while((entry=readdir(dir))){uint8_t id[16];if(!parse_hex_id(entry->d_name,id) || !memcmp(id,s->id,16))continue;bool seen=false;for(unsigned i=0;i<count;i++)if(!memcmp(active[i],id,16))seen=true;for(unsigned i=0;!seen && i<skip_count;i++)if(!memcmp(skipped[i],id,16))seen=true;if(seen)continue;
+  uint8_t payload[399];size_t length=0;uint64_t remaining=0;
+  status=load_peer_blob(s,entry->d_name,"",payload,sizeof payload,&length);
+  if(status==PN_OK){if(length<144 || memcmp(payload,"PNUP",4) || get(payload+4,2)!=1 || payload[7]>PN_UPLOAD_CANCELLED){status=PN_UNSUPPORTED;break;}if(payload[7]==PN_UPLOAD_COMMITTED || payload[7]==PN_UPLOAD_CANCELLED){if(skip_count<64)memcpy(skipped[skip_count++],id,16);continue;}uint64_t size=get(payload+16,8),offset=get(payload+24,8);if(!size || size>512u*1024u*1024u || offset>size){status=PN_CORRUPT;break;}remaining=size-offset;}else if(status!=PN_EMPTY)break;
+  if(status==PN_EMPTY){status=load_peer_blob(s,entry->d_name,".install",payload,sizeof payload,&length);if(status==PN_OK){if(length<FI_HEADER || memcmp(payload,"PNFI",4) || get(payload+4,2)!=1 || payload[6]>4){status=PN_UNSUPPORTED;break;}if(payload[6]==4){if(skip_count<64)memcpy(skipped[skip_count++],id,16);continue;}remaining=get(payload+24,8);if(!remaining || remaining>512u*1024u*1024u){status=PN_CORRUPT;break;}}else if(status!=PN_EMPTY)break;}
   status=PN_OK;if(count==8){status=PN_LIMIT;break;}memcpy(active[count++],id,16);reserved+=remaining;
  }
  if(closedir(dir) && status==PN_OK)status=PN_IO;
@@ -96,7 +125,27 @@ static pn_status_t available(files_t *s,uint64_t *out){pn_status_t status=guard(
  struct statvfs info;if(statvfs(s->root,&info))return PN_IO;if(info.f_frsize && info.f_bavail>UINT64_MAX/info.f_frsize)return PN_LIMIT;*out=(uint64_t)info.f_bavail*info.f_frsize;return PN_OK;
 #endif
 }
-static pn_status_t admit(void *ctx,const pn_upload_request_t *r){files_t *s=ctx;unsigned count;uint64_t reserved;pn_status_t status=count_active(s,&count,&reserved);if(status!=PN_OK)return status;if(count>=8)return PN_LIMIT;uint64_t free_bytes;status=available(s,&free_bytes);if(status!=PN_OK)return status;if(free_bytes<r->size+reserved+RESERVE)return PN_LIMIT;intent_t t;status=intent_load(s,&t);
+static pn_status_t admit(void *ctx,const pn_upload_request_t *r){files_t *s=ctx;unsigned count=0;uint64_t reserved=0;pn_status_t status=count_active(s,&count,&reserved);
+ if(status!=PN_OK){
+#ifdef ESP_PLATFORM
+  if(status==PN_LIMIT)ESP_LOGW("pn_upload","admit count_active limit req=%llu",(unsigned long long)r->size);
+#endif
+  return status;
+ }
+ if(count>=8){
+#ifdef ESP_PLATFORM
+  ESP_LOGW("pn_upload","admit slot limit count=%u reserved=%llu req=%llu",count,(unsigned long long)reserved,(unsigned long long)r->size);
+#endif
+  return PN_LIMIT;
+ }
+ uint64_t free_bytes=0;status=available(s,&free_bytes);if(status!=PN_OK)return status;
+ if(free_bytes<r->size+reserved+RESERVE){
+#ifdef ESP_PLATFORM
+  ESP_LOGW("pn_upload","admit space limit free=%llu req=%llu reserved=%llu reserve=%u",(unsigned long long)free_bytes,(unsigned long long)r->size,(unsigned long long)reserved,RESERVE);
+#endif
+  return PN_LIMIT;
+ }
+ intent_t t;status=intent_load(s,&t);
  if(status==PN_OK){if(t.phase || t.request.kind!=r->kind || t.request.size!=r->size || strcmp(t.request.name,r->name) || t.request.has_digest!=r->has_digest || memcmp(&t.request.digest,&r->digest,sizeof r->digest))return PN_BUSY;}else if(status==PN_EMPTY)t=(intent_t){.request=*r,.media_id=s->media->media_id,.replace=s->options.replace,.old_size=s->options.old_size,.old_digest=s->options.old_digest};else return status;
  char folder[PATH_MAXIMUM],target[PATH_MAXIMUM],backup[PATH_MAXIMUM];status=paths(s,&t,folder,target,backup);if(status==PN_OK)status=make_directory(s,folder);if(status!=PN_OK)return status;struct stat info;status=leaf(s,backup,&info);if(status==PN_OK)return PN_BUSY;if(status!=PN_EMPTY)return status;
  if(t.replace)status=matches(s,target,t.old_size,&t.old_digest);else{status=leaf(s,target,&info);if(status==PN_OK)status=PN_BUSY;else if(status==PN_EMPTY)status=PN_OK;}return status==PN_OK?intent_save(s,&t):status;
@@ -155,3 +204,95 @@ pn_status_t pn_upload_files_open(pn_upload_files_t *out,pn_pool_t *pool,const pn
 pn_status_t pn_upload_files_close(pn_upload_files_t *out){if(!out)return PN_INVALID;if(!out->impl)return PN_OK;files_t *s=out->impl;if(s->bound)return PN_BUSY;(void)pn_text_file_close(&s->reader);pn_free(s);out->impl=NULL;return PN_OK;}
 pn_status_t pn_upload_files_cleanup_pending(pn_upload_files_t *out,bool *pending){if(!out || !out->impl || !pending)return PN_INVALID;intent_t t;pn_status_t status=intent_load(out->impl,&t);if(status==PN_OK)*pending=t.phase==3;return status;}
 pn_status_t pn_upload_files_cleanup(pn_upload_files_t *out){if(!out || !out->impl)return PN_INVALID;files_t *s=out->impl;intent_t t;pn_status_t status=intent_load(s,&t);return status==PN_OK?cleanup(s,&t):status;}
+static bool prunable_upload(files_t *s,const char hex[32],bool reclaim_incomplete,pn_status_t *fatal){
+ uint8_t payload[399];size_t length=0;
+ pn_status_t up=load_peer_blob(s,hex,"",payload,sizeof payload,&length);
+ unsigned up_phase=0xff;
+ if(up==PN_OK){
+  if(length<144 || memcmp(payload,"PNUP",4) || get(payload+4,2)!=1 || payload[7]>PN_UPLOAD_CANCELLED)up=PN_CORRUPT;
+  else up_phase=payload[7];
+ }else if(up!=PN_EMPTY && up!=PN_CORRUPT){*fatal=up;return false;}
+ pn_status_t fi=load_peer_blob(s,hex,".install",payload,sizeof payload,&length);
+ unsigned fi_phase=0xff;
+ if(fi==PN_OK){
+  if(length<FI_HEADER || memcmp(payload,"PNFI",4) || get(payload+4,2)!=1 || payload[6]>4)fi=PN_CORRUPT;
+  else fi_phase=payload[6];
+ }else if(fi!=PN_EMPTY && fi!=PN_CORRUPT){*fatal=fi;return false;}
+ // 绝不清理已进入校验/安装阶段(VERIFIED或install phase 1..3)的恢复记录。
+ // Never prune verified or mid-install (phase 1..3) crash-recovery records.
+ if((up==PN_OK && up_phase==PN_UPLOAD_VERIFIED) || (fi==PN_OK && fi_phase>=1 && fi_phase<=3))return false;
+ if(up==PN_OK && up_phase==PN_UPLOAD_COMMITTED && (fi==PN_EMPTY || (fi==PN_OK && fi_phase==4)))return true;
+ if(up==PN_OK && up_phase==PN_UPLOAD_CANCELLED && (fi==PN_EMPTY || (fi==PN_OK && (fi_phase==0 || fi_phase==4))))return true;
+ if(up==PN_EMPTY && fi==PN_OK && fi_phase==4)return true;
+ if(!reclaim_incomplete)return false;
+ return (up==PN_OK && up_phase==PN_UPLOAD_RECEIVING) || (up==PN_EMPTY && fi==PN_OK && fi_phase==0) || (up==PN_EMPTY && fi==PN_EMPTY) || up==PN_CORRUPT || fi==PN_CORRUPT;
+}
+pn_status_t pn_upload_files_prune(pn_media_t *media,pn_pool_t *pool,const pn_upload_files_options_t *options,bool reclaim_incomplete,unsigned *reclaimed_out){
+ if(reclaimed_out)*reclaimed_out=0;
+ if(!media || !pool || !options || !options->root)return PN_INVALID;
+ size_t n=strlen(options->root);
+ if(!root_canonical(options->root,n) || !n || n>=PN_UPLOAD_FILES_ROOT_MAX || (n>1 && options->root[n-1]=='/') || strstr(options->root,"/../") || strstr(options->root,"/./") || strchr(options->root,'\\'))return PN_INVALID;
+#ifdef ESP_PLATFORM
+ if(!options->sync_directory || !options->space_free)return PN_UNSUPPORTED;
+#endif
+ files_t *s=pn_alloc_tagged(pool,PN_MEM_TRANSFER,sizeof *s);if(!s)return PN_NO_MEMORY;
+ *s=(files_t){.pool=pool,.options=*options,.media=media};strcpy(s->root,options->root);s->options.root=s->root;
+ pn_status_t status=pn_media_acquire(media,PN_MEDIA_WRITE,&s->lease);
+ if(status!=PN_OK){pn_free(s);return status;}
+ s->bound=true;
+ char folder[PATH_MAXIMUM];
+ status=directory(s->root);
+ if(status==PN_OK)status=join(folder,s->root,PN_SD_PRIVATE);
+ if(status==PN_OK)status=join(s->uploads,folder,PN_SD_UPLOADS);
+ if(status==PN_OK){
+  pn_status_t dir_status=directory(s->uploads);
+  if(dir_status==PN_EMPTY){
+   pn_status_t rel=pn_media_release(media,&s->lease);pn_free(s);return rel;
+  }
+  status=dir_status;
+ }
+ unsigned reclaimed=0;
+ static const char *const suffixes[]={".part",".a",".b",".install.a",".install.b"};
+ for(unsigned pass=0;status==PN_OK && pass<64;pass++){
+  DIR *dir=opendir(s->uploads);if(!dir){status=PN_IO;break;}
+  uint8_t batch[32][16];unsigned count=0;bool more=false;struct dirent *entry;
+  while((entry=readdir(dir))){
+   uint8_t id[16];if(!parse_hex_id(entry->d_name,id))continue;
+   bool seen=false;for(unsigned i=0;i<count;i++)if(!memcmp(batch[i],id,16)){seen=true;break;}
+   if(seen)continue;
+   pn_status_t fatal=PN_OK;
+   if(!prunable_upload(s,entry->d_name,reclaim_incomplete,&fatal)){
+    if(fatal!=PN_OK){status=fatal;break;}
+    continue;
+   }
+   memcpy(batch[count++],id,16);
+   if(count==32){more=true;break;}
+  }
+  if(closedir(dir) && status==PN_OK)status=PN_IO;
+  if(status!=PN_OK || !count)break;
+  for(unsigned i=0;i<count && status==PN_OK;i++){
+   char hex[33];for(unsigned k=0;k<16;k++)snprintf(hex+2*k,3,"%02x",batch[i][k]);
+   bool removed=false;
+   for(unsigned si=0;si<sizeof suffixes/sizeof suffixes[0];si++){
+    char name[48],path[PATH_MAXIMUM];snprintf(name,sizeof name,"%s%s",hex,suffixes[si]);
+    status=join(path,s->uploads,name);if(status!=PN_OK)break;
+    struct stat info;pn_status_t check=leaf(s,path,&info);
+    if(check==PN_EMPTY)continue;
+    if(check!=PN_OK){status=check;break;}
+    if(unlink(path)){status=PN_IO;break;}
+    removed=true;
+   }
+   if(status==PN_OK && removed)reclaimed++;
+  }
+  if(!more)break;
+ }
+ if(status==PN_OK && reclaimed)status=sync_directory(s,s->uploads);
+ pn_status_t current=pn_media_validate(media,&s->lease);if(current!=PN_OK)status=current;
+ pn_status_t rel=pn_media_release(media,&s->lease);if(status==PN_OK)status=rel;
+ pn_free(s);
+ if(status==PN_OK && reclaimed_out)*reclaimed_out=reclaimed;
+#ifdef ESP_PLATFORM
+ if(status==PN_OK && reclaimed)ESP_LOGI("pn_upload","pruned %u upload records (reclaim_incomplete=%d)",reclaimed,(int)reclaim_incomplete);
+#endif
+ return status;
+}

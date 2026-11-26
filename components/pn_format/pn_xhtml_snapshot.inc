@@ -12,7 +12,9 @@ static uint32_t snap_crc(const uint8_t *p,size_t n){return pn_crc32_update(0,p,n
 bool pn_xhtml_snapshot_header_matches(const uint8_t *data,size_t header_size,size_t packet_size,const pn_book_id_t *book,const char *path){
     if(!data || header_size<SNAP_HEADER || packet_size<SNAP_HEADER || packet_size>PN_XHTML_SNAPSHOT_MAX || !book || !path || !*path || strlen(path)>=PN_ZIP_PATH_MAX)return false;
     unsigned version=(unsigned)snap_get(data+4,4);pn_book_id_t key;
-    return !memcmp(data,"PNSM",4) && (version==1 || version==2) && !memcmp(data+8,book->sha256,32) &&
+    // v3/v4 包含链接事件、上标样式与行内隐藏 EPUB3 脚注语义；旧 v1/v2 缓存自动失效重建。
+    // v3/v4 include link events, superscript styles, and hidden inline EPUB3 footnotes; legacy v1/v2 caches rebuild automatically.
+    return !memcmp(data,"PNSM",4) && (version==3 || version==4) && !memcmp(data+8,book->sha256,32) &&
         pn_identity_bytes((const uint8_t *)path,strlen(path),&key)==PN_OK && !memcmp(data+40,key.sha256,32) &&
         snap_get(data+140,4)==packet_size-SNAP_HEADER && snap_get(data+148,4)==snap_crc(data,148);
 }
@@ -26,13 +28,13 @@ static bool snap_string(const uint8_t *p,size_t n){
 }
 static void snap_style_put(uint8_t *p,const pn_xhtml_style_t *s){
     const pn_xhtml_length_t values[]={s->width,s->height,s->max_width,s->max_height};for(unsigned i=0;i<4;i++){snap_put(p+5*i,values[i].value,4);p[5*i+4]=values[i].percent;}
-    p[20]=(uint8_t)s->align;p[21]=(uint8_t)((s->bold?1u:0u)|(s->italic?2u:0u)|(s->pre?4u:0u)|(s->hidden?8u:0u));p[22]=(uint8_t)s->heading;
+    p[20]=(uint8_t)s->align;p[21]=(uint8_t)((s->bold?1u:0u)|(s->italic?2u:0u)|(s->pre?4u:0u)|(s->hidden?8u:0u)|(s->sup?16u:0u));p[22]=(uint8_t)s->heading;
 }
 static bool snap_style_get(const uint8_t *p,pn_xhtml_style_t *s){
     *s=(pn_xhtml_style_t){0};pn_xhtml_length_t *values[]={&s->width,&s->height,&s->max_width,&s->max_height};for(unsigned i=0;i<4;i++){if(p[5*i+4]>1 || snap_get(p+5*i,4)>10000999u)return false;*values[i]=(pn_xhtml_length_t){(uint32_t)snap_get(p+5*i,4),p[5*i+4]!=0};}
-    if(p[20]>PN_XHTML_ALIGN_RIGHT || p[21]>15 || p[22]>6)return false;
+    if(p[20]>PN_XHTML_ALIGN_RIGHT || p[21]>31 || p[22]>6)return false;
     for(unsigned i=23;i<SNAP_STYLE;i++)if(p[i])return false;
-    s->align=(pn_xhtml_align_t)p[20];s->bold=(p[21]&1)!=0;s->italic=(p[21]&2)!=0;s->pre=(p[21]&4)!=0;s->hidden=(p[21]&8)!=0;s->heading=p[22];return true;
+    s->align=(pn_xhtml_align_t)p[20];s->bold=(p[21]&1)!=0;s->italic=(p[21]&2)!=0;s->pre=(p[21]&4)!=0;s->hidden=(p[21]&8)!=0;s->sup=(p[21]&16)!=0;s->heading=p[22];return true;
 }
 static size_t snap_extra(const model_record_t *r){return r->kind==PN_XHTML_TEXT?model_text_bytes(r):(size_t)r->value_size+r->alt_size;}
 typedef struct {
@@ -52,7 +54,7 @@ static pn_status_t snapshot_decode_step(model_t *m,const pn_xhtml_store_t *store
     if(w->phase==2){
     unsigned version=(unsigned)snap_get(data+4,4);unsigned styles=(unsigned)snap_get(data+118,2),flags=(unsigned)snap_get(data+112,4);size_t count=(size_t)snap_get(data+136,4);if(styles>32 || flags>7 || ((flags&6u) && !(flags&1u)) || count>(n-SNAP_HEADER)/SNAP_RECORD || (size_t)styles*SNAP_STYLE>n-SNAP_HEADER)return PN_EMPTY;
     if((flags&4u) && !((data[116]==PN_XHTML_TEXT || data[116]==PN_XHTML_IMAGE || data[116]==PN_XHTML_BLOCK_OPEN) && data[117]<=PN_XHTML_PREFORMATTED))return PN_EMPTY;
-    model_drop(m);m->compatible=version==2;strcpy(m->path,path);memcpy(m->salt,salt,16);m->style_count=styles;m->windowed=(flags&1)!=0;m->truncated=(flags&2)!=0;m->has_context=(flags&4)!=0;m->base=snap_get(data+120,8);m->max_dropped=snap_get(data+128,8);m->context=(pn_xhtml_event_t){.kind=(pn_xhtml_event_kind_t)data[116],.block=(pn_xhtml_block_t)data[117]};
+    model_drop(m);m->compatible=version==4;strcpy(m->path,path);memcpy(m->salt,salt,16);m->style_count=styles;m->windowed=(flags&1)!=0;m->truncated=(flags&2)!=0;m->has_context=(flags&4)!=0;m->base=snap_get(data+120,8);m->max_dropped=snap_get(data+128,8);m->context=(pn_xhtml_event_t){.kind=(pn_xhtml_event_kind_t)data[116],.block=(pn_xhtml_block_t)data[117]};
     m->stats=(pn_xhtml_stats_t){snap_get(data+72,8),snap_get(data+80,8),snap_get(data+88,8),snap_get(data+96,8),snap_get(data+104,8)};if((!m->windowed && (m->base || m->max_dropped)) || m->max_dropped>m->stats.elements || m->stats.elements>UINT64_MAX/8 || m->stats.text_codepoints>UINT64_MAX/8 || m->stats.blocks>m->stats.elements || m->stats.images>m->stats.elements || m->stats.anchors>m->stats.elements || m->base>4*m->stats.elements+m->stats.text_codepoints)return PN_EMPTY;
     size_t at=SNAP_HEADER;for(unsigned i=0;i<styles;i++,at+=SNAP_STYLE)if(!snap_style_get(data+at,&m->styles[i]))return PN_EMPTY;
         w->at=at;w->count=count;w->phase=3;return PN_BUSY;
@@ -61,9 +63,9 @@ static pn_status_t snapshot_decode_step(model_t *m,const pn_xhtml_store_t *store
     for(unsigned touched=0;touched<16 && w->record<w->count;touched++,w->record++){
         pn_status_t cancelled=pn_cancel_checkpoint();if(cancelled!=PN_OK)return cancelled;if(n-at<SNAP_RECORD)return PN_EMPTY;const uint8_t *p=data+at;at+=SNAP_RECORD;
         model_record_t v={.element=snap_get(p,8),.offset=snap_get(p+8,8),.run=(uint32_t)snap_get(p+16,4),.count=(uint16_t)snap_get(p+20,2),.value_size=(uint16_t)snap_get(p+22,2),.kind=p[24],.block=p[25],.position_kind=p[26],.style=p[27],.text=p[28]};size_t alt=(size_t)snap_get(p+30,2),bytes;
-        if(!v.element || v.element>m->stats.elements || v.kind>PN_XHTML_IMAGE || v.block>PN_XHTML_PREFORMATTED || v.position_kind>PN_XHTML_TEXT_POSITION || v.style>=m->style_count || p[29])return PN_EMPTY;
+        if(!v.element || v.element>m->stats.elements || v.kind>PN_XHTML_LINK_CLOSE || v.block>PN_XHTML_PREFORMATTED || v.position_kind>PN_XHTML_TEXT_POSITION || v.style>=m->style_count || p[29])return PN_EMPTY;
         if(v.kind==PN_XHTML_TEXT){unsigned width=v.text&7u;if(v.position_kind!=PN_XHTML_TEXT_POSITION || !v.count || v.count>MODEL_TEXT_MAX || v.value_size || alt || (v.text&~(MODEL_SEQUENTIAL|7u)) || (width!=1 && width!=2 && width!=4))return PN_EMPTY;bytes=model_text_bytes(&v);}
-        else{if(v.position_kind!=PN_XHTML_ELEMENT || v.offset || v.text || v.count>1 || (alt!=0)!=(v.count!=0) || (v.kind!=PN_XHTML_IMAGE && alt))return PN_EMPTY;bytes=(size_t)v.value_size+alt;}
+        else{if(v.position_kind!=PN_XHTML_ELEMENT || v.offset || v.text || v.count>1 || (alt!=0)!=(v.count!=0) || (v.kind!=PN_XHTML_IMAGE && v.kind!=PN_XHTML_LINK_OPEN && alt))return PN_EMPTY;bytes=(size_t)v.value_size+alt;}
         if(bytes>n-at)return PN_EMPTY;
         v.alt_size=(uint16_t)alt;model_record_t *r=pn_cache_alloc(m->pool,PN_CACHE_CHAPTER,PN_MEM_DOCUMENT,sizeof *r+bytes);if(!r)return PN_EMPTY;*r=v;
         if(v.kind==PN_XHTML_TEXT){unsigned width=v.text&7u;size_t deltas=(v.text&MODEL_SEQUENTIAL)?0u:(size_t)v.count*2u;uint8_t *out=(uint8_t *)(r+1);
@@ -109,7 +111,7 @@ void pn_xhtml_cache_retry(pn_epub_t *epub){
 }
 static bool snapshot_same_port(const snapshot_write_t *w,const pn_xhtml_store_t *s){return s && s->ctx==w->store.ctx && s->load==w->store.load && s->load_for==w->store.load_for && s->save==w->store.save && s->take==w->store.take && s->open_for==w->store.open_for && s->read_step==w->store.read_step && s->close_read==w->store.close_read && !memcmp(&s->book,&w->store.book,sizeof s->book);}
 static pn_status_t snapshot_header(model_t *m,snapshot_write_t *w){
-    uint8_t *data=w->data;memcpy(data,"PNSM",4);snap_put(data+4,m->compatible?2u:1u,4);memcpy(data+8,w->store.book.sha256,32);
+    uint8_t *data=w->data;memcpy(data,"PNSM",4);snap_put(data+4,m->compatible?4u:3u,4);memcpy(data+8,w->store.book.sha256,32);
     pn_book_id_t key;pn_status_t s=pn_identity_bytes((const uint8_t *)m->path,strlen(m->path),&key);if(s!=PN_OK)return s;memcpy(data+40,key.sha256,32);
     const uint64_t stats[]={m->stats.elements,m->stats.text_codepoints,m->stats.blocks,m->stats.images,m->stats.anchors};for(unsigned i=0;i<5;i++)snap_put(data+72+8*i,stats[i],8);
     snap_put(data+112,(m->windowed?1u:0u)|(m->truncated?2u:0u)|(m->has_context?4u:0u),4);data[116]=(uint8_t)m->context.kind;data[117]=(uint8_t)m->context.block;snap_put(data+118,m->style_count,2);snap_put(data+120,m->base,8);snap_put(data+128,m->max_dropped,8);snap_put(data+136,w->count,4);snap_put(data+140,w->size-SNAP_HEADER,4);

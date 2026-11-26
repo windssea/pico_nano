@@ -27,20 +27,23 @@ typedef struct {
     pn_epub_page_job_t prefetch;pn_epub_page_t candidate; ///< 原池内未验证候选 / Unverified candidate in the original pool
     pn_epub_location_t candidate_at,candidate_target;size_t candidate_chapters;bool prefetch_failed; ///< 跨轮目标与失败退路 / Target across ticks and failure fallback
 } reader_t;
-static void cached_free(pn_epub_page_t *page){pn_free(page->nodes);pn_free(page->images);*page=(pn_epub_page_t){0};}
-static size_t neighbor_bytes(void *ctx){reader_t *r=ctx;return pn_alloc_size(r->ahead.nodes)+pn_alloc_size(r->ahead.images)+pn_alloc_size(r->behind.nodes)+pn_alloc_size(r->behind.images)+pn_alloc_size(r->candidate.nodes)+pn_alloc_size(r->candidate.images);}
+static void cached_free(pn_epub_page_t *page){pn_free(page->nodes);pn_free(page->images);pn_free(page->links);*page=(pn_epub_page_t){0};}
+static size_t neighbor_bytes(void *ctx){reader_t *r=ctx;return pn_alloc_size(r->ahead.nodes)+pn_alloc_size(r->ahead.images)+pn_alloc_size(r->ahead.links)+pn_alloc_size(r->behind.nodes)+pn_alloc_size(r->behind.images)+pn_alloc_size(r->behind.links)+pn_alloc_size(r->candidate.nodes)+pn_alloc_size(r->candidate.images)+pn_alloc_size(r->candidate.links);}
 static void prefetch_abort(reader_t *r){pn_epub_page_job_close(&r->prefetch);cached_free(&r->candidate);r->candidate_chapters=0;}
 void pn_epub_reader_prefetch_abort(pn_epub_reader_t *handle){if(handle && handle->impl){reader_t *r=handle->impl;prefetch_abort(r);r->prefetch_failed=false;memset(&r->candidate_target,0,sizeof r->candidate_target);}}
 static void neighbor_drop(void *ctx){reader_t *r=ctx;prefetch_abort(r);cached_free(&r->ahead);cached_free(&r->behind);r->ahead_warm=0;}
 static bool cached_store(reader_t *r,pn_epub_page_t *to,const pn_epub_page_t *from){
-    size_t need=from->count*sizeof(pn_epub_page_node_t)+from->image_count*sizeof(pn_epub_page_image_t);
-    if(need && !pn_cache_allow(r->pool,PN_CACHE_NEIGHBOR,need+(from->count && from->image_count?pn_alloc_overhead():0)))return false;
+    size_t need=from->count*sizeof(pn_epub_page_node_t)+from->image_count*sizeof(pn_epub_page_image_t)+from->link_count*sizeof(pn_epub_page_link_t);
+    size_t allocs=(from->count!=0)+(from->image_count!=0)+(from->link_count!=0);
+    if(need && !pn_cache_allow(r->pool,PN_CACHE_NEIGHBOR,need+(allocs>1?(allocs-1)*pn_alloc_overhead():0)))return false;
     pn_epub_page_node_t *nodes=from->count?pn_cache_alloc(r->pool,PN_CACHE_NEIGHBOR,PN_MEM_LAYOUT,from->count*sizeof *nodes):NULL;
     pn_epub_page_image_t *images=from->image_count?pn_cache_alloc(r->pool,PN_CACHE_NEIGHBOR,PN_MEM_LAYOUT,from->image_count*sizeof *images):NULL;
-    if((from->count && !nodes) || (from->image_count && !images)){pn_free(nodes);pn_free(images);return false;}
+    pn_epub_page_link_t *links=from->link_count?pn_cache_alloc(r->pool,PN_CACHE_NEIGHBOR,PN_MEM_LAYOUT,from->link_count*sizeof *links):NULL;
+    if((from->count && !nodes) || (from->image_count && !images) || (from->link_count && !links)){pn_free(nodes);pn_free(images);pn_free(links);return false;}
     if(nodes)memcpy(nodes,from->nodes,from->count*sizeof *nodes);
     if(images)memcpy(images,from->images,from->image_count*sizeof *images);
-    cached_free(to);*to=*from;to->nodes=nodes;to->images=images;to->capacity=from->count;to->image_capacity=from->image_count;to->owner=r->pool;if(to==&r->ahead)r->ahead_warm=0;return true;
+    if(links)memcpy(links,from->links,from->link_count*sizeof *links);
+    cached_free(to);*to=*from;to->nodes=nodes;to->images=images;to->links=links;to->capacity=from->count;to->image_capacity=from->image_count;to->link_capacity=from->link_count;to->owner=r->pool;if(to==&r->ahead)r->ahead_warm=0;return true;
 }
 static bool layout_valid(const pn_layout_t *l){return l && l->width>0 && l->width<=4096 && l->height>0 && l->height<=4096 && l->line_height>0 && l->line_height<=l->height && l->indent>=0 && l->indent<l->width && l->paragraph_gap>=0 && l->paragraph_gap<=4096 && l->letter_spacing_64>=-2048 && l->letter_spacing_64<=4096;}
 static bool same_position(pn_xhtml_position_t a,pn_xhtml_position_t b){return a.element==b.element && a.run==b.run && a.offset==b.offset && a.kind==b.kind;}
@@ -74,7 +77,9 @@ static pn_status_t next_chapter(reader_t *r,const char *path,bool forward,pn_epu
 static pn_status_t load_page(reader_t *r,const pn_epub_location_t *at,const pn_xhtml_position_t *stop,pn_epub_page_t *page){
     const pn_xhtml_position_t *start=at->chapter_start?NULL:&at->position;
     pn_status_t status=stop?pn_epub_page_prepare_until(r->pool,r->epub,at->path,r->salt,start,stop,&r->layout,&r->measure,page):pn_epub_page_prepare(r->pool,r->epub,at->path,r->salt,start,&r->layout,&r->measure,page);
-    if(status==PN_OK){size_t section;if(pn_epub_spine_find(r->epub,at->path,&section)==PN_OK){pn_page_index_entry_t e={.section=(uint32_t)section,.begin=page->begin_order,.end=page->has_next?page->next_order:UINT64_MAX,.first=page->begin,.next=page->next,.flags=page->has_next?1u:0u};pn_page_index_add(r->index,&e);}}
+    // 仅记录自然满页边界；带 stop 硬截断的回翻桥接页不写入页表，避免覆盖正常整页条目。
+    // Only record natural full-page boundaries; never overwrite full pages in the index with stop-truncated reverse bridge pages.
+    if(status==PN_OK && !stop){size_t section;if(pn_epub_spine_find(r->epub,at->path,&section)==PN_OK){pn_page_index_entry_t e={.section=(uint32_t)section,.begin=page->begin_order,.end=page->has_next?page->next_order:UINT64_MAX,.first=page->begin,.next=page->next,.flags=page->has_next?1u:0u};pn_page_index_add(r->index,&e);}}
     return status;
 }
 static pn_status_t load(reader_t *r,const pn_epub_location_t *at,const pn_xhtml_position_t *stop){return load_page(r,at,stop,r->page);}
@@ -104,17 +109,31 @@ static pn_status_t previous(reader_t *r,pn_epub_location_t *at){
     pn_status_t status;
     if(r->history_count){*at=r->history[r->history_count-1];return load(r,at,!strcmp(at->path,r->visible.begin.path)?&r->visible.begin.position:NULL);}
     location(at,r->visible.begin.path,NULL);
+    bool used_hint=false;
     // 当前事件顺序由完整源重新核对，不按locator元组猜测。/ Revalidate current event order against the full source, never infer it from locator tuples.
     if(!r->visible.begin.chapter_start){uint64_t order,start_order;size_t section;pn_xhtml_position_t start;
         status=pn_epub_spine_find(r->epub,at->path,&section);if(status!=PN_OK)return status;
         status=pn_xhtml_window_start(r->pool,r->epub,at->path,&r->visible.begin.position,r->salt,&order,&start_order,&start);if(status!=PN_OK)return status;
-        pn_page_index_entry_t e;if(pn_page_index_near(r->index,(uint32_t)section,order,true,&e) && (e.end==order || e.begin>=start_order))location(at,at->path,&e.first);
-        else if(start.element)location(at,at->path,&start);
+        pn_page_index_entry_t e;
+        if(pn_page_index_near(r->index,(uint32_t)section,order,true,&e) && (e.end==order || e.begin>=start_order) && !same_position(e.first,r->visible.begin.position)){
+            location(at,at->path,&e.first);used_hint=true;
+        }else if(start.element && !same_position(start,r->visible.begin.position)){
+            location(at,at->path,&start);used_hint=true;
+        }
     }
-    // 以当前首位置为硬终点，不因重排后的自然页边界而覆盖当前首字。/ Use current beginning as a hard stop so natural reflow boundaries never overlap its first glyph.
-    for(;;){status=load(r,at,&r->visible.begin.position);if(status==PN_EMPTY)break;if(status!=PN_OK)return status;
+    // 以当前首位置为硬终点，不因重排后的自然页边界而覆盖当前首字；若索引/窗口提示失配，回退到章首重排而非误跳上一章。
+    // Use current beginning as a hard stop; if an index/window hint misses it, fall back to chapter start instead of skipping to the previous chapter.
+    for(;;){status=load(r,at,&r->visible.begin.position);
+        if(status==PN_EMPTY){
+            if(used_hint){used_hint=false;location(at,r->visible.begin.path,NULL);continue;}
+            break;
+        }
+        if(status!=PN_OK)return status;
         if(r->page->has_next && same_position(r->page->next,r->visible.begin.position))return PN_OK;
-        if(!r->page->has_next || r->page->next_order<=r->page->begin_order)return PN_CORRUPT;
+        if(!r->page->has_next || r->page->next_order<=r->page->begin_order){
+            if(used_hint){used_hint=false;location(at,r->visible.begin.path,NULL);continue;}
+            return PN_CORRUPT;
+        }
         location(at,at->path,&r->page->next);
     }
     for(size_t i=0;i<r->spine_count;i++){
@@ -243,10 +262,12 @@ static pn_status_t prepare_impl(pn_epub_reader_t *handle,pn_read_intent_t intent
     if(intent!=PN_READ_NEXT && intent!=PN_READ_PREVIOUS){cached_free(&r->ahead);cached_free(&r->behind);}
     if(cached && cached->count<=r->page->capacity && cached->image_count<=r->page->image_capacity){
         size_t index;pn_status_t status=check_location(r,&prepared->begin,&index);if(status!=PN_OK)return status;
-        pn_epub_page_node_t *nodes=r->page->nodes;pn_epub_page_image_t *images=r->page->images;size_t cap=r->page->capacity,icap=r->page->image_capacity;pn_pool_t *owner=r->page->owner;
+        pn_epub_page_node_t *nodes=r->page->nodes;pn_epub_page_image_t *images=r->page->images;pn_epub_page_link_t *links=r->page->links;size_t cap=r->page->capacity,icap=r->page->image_capacity,lcap=r->page->link_capacity;pn_pool_t *owner=r->page->owner;
         if(cached->count)memcpy(nodes,cached->nodes,cached->count*sizeof *nodes);
         if(cached->image_count)memcpy(images,cached->images,cached->image_count*sizeof *images);
-        *r->page=*cached;r->page->nodes=nodes;r->page->images=images;r->page->capacity=cap;r->page->image_capacity=icap;r->page->owner=owner;
+        size_t copy_links=(links && cached->link_count<=lcap)?cached->link_count:0;
+        if(copy_links)memcpy(links,cached->links,copy_links*sizeof *links);
+        *r->page=*cached;r->page->nodes=nodes;r->page->images=images;r->page->links=links;r->page->capacity=cap;r->page->image_capacity=icap;r->page->link_capacity=lcap;r->page->link_count=copy_links;r->page->owner=owner;
         if(saved_forward)r->ahead_target=prepared->next;
         r->pending.owner=handle;r->pending.token=r->token;r->pending.ticket=r->next_ticket++;r->pending.intent=intent;r->preparing=true;r->pending_resume=false;*out=r->pending;return PN_OK;
     }

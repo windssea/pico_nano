@@ -27,3 +27,6 @@ pn_status_t pn_upload_files_close(pn_upload_files_t *);
 pn_status_t pn_upload_files_cleanup_pending(pn_upload_files_t *,bool *);
 /// 同ID有效WRITE绑定下重试备份/重复暂存清理，绝不删除新主。/ Retry backup/duplicate staging cleanup under the same ID WRITE binding; never delete the new target.
 pn_status_t pn_upload_files_cleanup(pn_upload_files_t *);
+/// 清理暂存目录中已终结的旧日志；reclaim_incomplete为真时一并回收未进入安装阶段的失效会话与孤立.part（保留安装阶段1..3恢复记录）。
+/// Prune terminal upload journals; when reclaim_incomplete is true, also reclaim non-installing stale sessions and orphan .part files (preserving install phases 1..3).
+pn_status_t pn_upload_files_prune(pn_media_t *,pn_pool_t *,const pn_upload_files_options_t *,bool reclaim_incomplete,unsigned *reclaimed_out);

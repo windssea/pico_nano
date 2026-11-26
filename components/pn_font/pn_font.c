@@ -63,12 +63,13 @@ static pn_status_t builtin_read(void *,uint64_t,uint8_t *,size_t,size_t *);
  * Glyph cache: layout measuring and drawing each loaded the same outline, and every load costs a cmap binary search plus several small loca/glyf reads, which is slow on SD or network drives.
  * It remembers advances/missing results by (code point, pixel height) and rendered gray bitmaps by (code point, pixel height, subpixel offset). Hits still validate the font source first, so lost media is reported as before. */
 #define ADV_SLOTS 1024u
+#define ADV_SLOTS_LARGE 2048u
 #define INDEX_ADV_SLOTS 8192u
-// 菜单多字号使用八路组相联，减少空槽仍多时的互相覆盖；槽数和预算保持。/ Eight-way sets reduce mixed-size menu collisions while retaining the slot count and budget.
+// 菜单多字号使用八路组相联，减少空槽仍多时的互相覆盖；大内存池（>=4MiB PSRAM）扩到2048槽/1MiB减少跨页驱逐。
+// Eight-way sets reduce mixed-size menu collisions; large pools (>=4 MiB PSRAM) expand to 2048 slots / 1 MiB to avoid cross-screen eviction.
 #define ADV_WAYS 8u
-// 真机44px中文字形约1.7KB，384KiB/512槽只容约220字，不足一页，预热下一页会自我驱逐；扩到约两页。
-// On device a 44 px CJK glyph is about 1.7 KB, so 384 KiB/512 slots held only about 220 glyphs, less than a page, and warming the next page evicted itself; size for about two pages.
 #define BMP_SLOTS 1024u
+#define BMP_SLOTS_LARGE 2048u
 #define BMP_WAYS 8u
 #define BMP_BUDGET (704u*1024u)
 #define BMP_ENTRY_MAX (64u*1024u)
@@ -87,8 +88,10 @@ typedef struct {
     bool resident_ui; ///< 仅常驻界面源启用中文回退，外置字体仍报告真实缺字 / Only the resident UI source uses CJK fallback; external faces report real missing glyphs
     bool allocation_failed;
     adv_t *adv; ///< 按需分配的字宽表 / Advance table, allocated on demand
-    unsigned adv_slots; ///< 实际字宽槽数，普通1024或整书可选8192 / Actual metric slots, normally 1024 or optionally 8192 for indexing
+    unsigned adv_slots; ///< 实际字宽槽数，普通1024/大池2048或整书可选8192 / Actual metric slots, 1024/2048 normally or 8192 for indexing
     bmp_t **bmp; ///< 按需分配的位图指针表 / Bitmap pointer table, allocated on demand
+    unsigned bmp_slots; ///< 实际位图槽数 / Actual bitmap slot count
+    size_t bmp_budget; ///< 位图总预算 / Bitmap cache byte budget
     size_t cache_bytes; ///< 含头字形计费快照，查询无需扫描槽 / Charged glyph snapshot including headers, queried without scanning slots
     size_t bmp_bytes;
     uint32_t bmp_clock; ///< 组内LRU时钟，回绕时清零年龄 / Per-set LRU clock, clearing ages on wrap
@@ -151,9 +154,9 @@ static pn_status_t result(engine_t *e,FT_Error error) {
 /// 仅回收本face的可重建字形；回退引擎独立注册。/ Reclaim only this face's rebuildable glyphs; fallback engines register independently.
 static size_t glyph_bytes(void *ctx){return ((engine_t *)ctx)->cache_bytes;}
 static void *glyph_alloc(engine_t *e,size_t bytes){void *p=pn_cache_alloc(e->pool,PN_CACHE_GLYPH,PN_MEM_FONT,bytes);e->cache_bytes+=pn_alloc_size(p);return p;}
-static void glyph_drop(void *ctx){engine_t *e=ctx;if(e->bmp){for(unsigned i=0;i<BMP_SLOTS;i++)pn_free(e->bmp[i]);pn_free(e->bmp);e->bmp=NULL;}pn_free(e->adv);e->adv=NULL;e->adv_slots=0;e->bmp_bytes=0;e->cache_bytes=0;}
-/// 四路共用原512槽，避免相撞字形每次交替重新光栅化。 / Four ways share the original 512 slots, avoiding alternating rerasterization of colliding glyphs.
-static uint32_t bitmap_stamp(engine_t *e){if(++e->bmp_clock)return e->bmp_clock;if(e->bmp)for(unsigned i=0;i<BMP_SLOTS;i++)if(e->bmp[i])e->bmp[i]->age=0;return ++e->bmp_clock;}
+static void glyph_drop(void *ctx){engine_t *e=ctx;if(e->bmp){for(unsigned i=0;i<e->bmp_slots;i++)pn_free(e->bmp[i]);pn_free(e->bmp);e->bmp=NULL;e->bmp_slots=0;}pn_free(e->adv);e->adv=NULL;e->adv_slots=0;e->bmp_bytes=0;e->cache_bytes=0;}
+/// 八路组相联LRU时间戳，回绕时清零年龄。/ Eight-way set-associative LRU stamp, clearing ages on wrap.
+static uint32_t bitmap_stamp(engine_t *e){if(++e->bmp_clock)return e->bmp_clock;if(e->bmp)for(unsigned i=0;i<e->bmp_slots;i++)if(e->bmp[i])e->bmp[i]->age=0;return ++e->bmp_clock;}
 void pn_font_trim(pn_font_t *font){
     if(!font || !font->impl)return;
     engine_t *e=font->impl;
@@ -199,6 +202,7 @@ static pn_status_t pn_font_open_impl(pn_font_t *font,pn_pool_t *pool,const pn_te
     // 随机字形冷读不盲目搬运整4KiB；大请求仍自动覆盖，不改变原字体解析/提示/灰阶。/ Cold random glyph reads avoid blindly fetching 4 KiB; larger requests still fit automatically, preserving font parsing/hinting/grayscale.
     (void)pn_text_file_cache_window(source,1024);
     engine_t *e=pn_alloc_tagged(pool,PN_MEM_FONT,sizeof *e);if(!e)return PN_NO_MEMORY;memset(e,0,sizeof *e);e->pool=pool;e->source=*source;e->resident_ui=source->read_at==harmony_ui_read || (system_source.ctx && source->ctx==system_source.ctx && source->read_at==system_source.read_at);
+    e->bmp_budget=BMP_BUDGET;
     e->memory=(struct FT_MemoryRec_){e,allocate,release,resize};
     e->stream.size=(unsigned long)source->size;e->stream.descriptor.pointer=e;e->stream.read=stream_read;
     pn_font_t temporary={e,0,0};uint8_t prefix[4];
@@ -287,7 +291,9 @@ static pn_status_t advance_impl(void *ctx,uint32_t cp,int32_t *advance) {
         // Pixel resume may leave metrics cold; prefetch may optionally create the original table within the glyph cap, without reclaiming foreground resources on failure.
         bool warming=e->warming;pn_cache_class_t kind=e->pool->speculative_kind;e->warming=true;
         if(e->pool->speculative)e->pool->speculative_kind=PN_CACHE_GLYPH;
-        if(cache_allowed(e,sizeof(adv_t)*ADV_SLOTS)){e->adv=glyph_alloc(e,sizeof(adv_t)*ADV_SLOTS);if(e->adv){memset(e->adv,0,sizeof(adv_t)*ADV_SLOTS);e->adv_slots=ADV_SLOTS;}}
+        unsigned want_adv=e->pool->limit>=4u*1024u*1024u?ADV_SLOTS_LARGE:ADV_SLOTS;
+        if(!cache_allowed(e,sizeof(adv_t)*want_adv))want_adv=ADV_SLOTS;
+        if(cache_allowed(e,sizeof(adv_t)*want_adv)){e->adv=glyph_alloc(e,sizeof(adv_t)*want_adv);if(e->adv){memset(e->adv,0,sizeof(adv_t)*want_adv);e->adv_slots=want_adv;}}
         e->pool->speculative_kind=kind;e->warming=warming;
     }
     adv_t *set=e->adv?&e->adv[hash_key(cp,font->pixels,0)%(e->adv_slots/ADV_WAYS)*ADV_WAYS]:NULL;
@@ -301,8 +307,9 @@ static pn_status_t advance_impl(void *ctx,uint32_t cp,int32_t *advance) {
     }
     pn_cache_observe(e->pool,PN_CACHE_GLYPH,false);
     bool tab=cp==9;
-    if(e->pool->speculative && e->adv && !e->warming && !tab){
-        // 可选分页合并量宽与零相位预热：一次原质量轮廓加载同时产出advance和位图；拒绝/低内存仍回原度量。/ Optional pagination combines metrics with zero-phase warming: one full-quality outline load yields advance and bitmap; denial/low memory keeps original measurement.
+    // 预取阶段或外置 CFF 界面字体（pn_widgets 量宽后随即按 delta=0 绘制）：单次轮廓加载同时填满字宽与零相位位图缓存，避免同一字形从 TF 卡重复读两次。
+    // During prefetch or external CFF UI faces (pn_widgets draws immediately at delta=0 after measuring): one outline load populates both advance and delta=0 bitmap caches, halving TF font I/O.
+    if((e->pool->speculative || (e->resident_ui && e->deep)) && e->adv && !e->warming && !tab){
         pn_status_t warmed=pn_font_warm(font,cp,0);
         if(warmed==PN_CANCELLED || warmed==PN_STALE_MEDIA || warmed==PN_STALE_JOB || warmed==PN_IO)return warmed;
         if(warmed==PN_OK || warmed==PN_EMPTY)for(unsigned i=0;i<ADV_WAYS;i++)if(set[i].state==1 && set[i].cp==cp && set[i].pixels==(uint16_t)font->pixels){adv_t value=set[i];advance_promote(set,i,value);*advance=value.advance;return PN_OK;}
@@ -333,9 +340,13 @@ static pn_status_t draw_impl(pn_font_t *font,pn_frame_t *frame,uint32_t cp,int32
     pn_status_t cancel=pn_cancel_checkpoint();if(cancel!=PN_OK)return cancel;
     if(!font || !font->impl || (!warm && (!frame || !frame->pixels)) || (mode!=PN_FONT_GRAY && mode!=PN_FONT_BINARY))return PN_INVALID;
     engine_t *e=font->impl;int offset=(int)(x_64%64);
-    if(!e->bmp && cache_allowed(e,sizeof(bmp_t *)*BMP_SLOTS)){e->bmp=glyph_alloc(e,sizeof(bmp_t *)*BMP_SLOTS);if(e->bmp)memset(e->bmp,0,sizeof(bmp_t *)*BMP_SLOTS);}
+    if(!e->bmp){
+        unsigned want_bmp=e->pool->limit>=4u*1024u*1024u?BMP_SLOTS_LARGE:BMP_SLOTS;
+        if(!cache_allowed(e,sizeof(bmp_t *)*want_bmp))want_bmp=BMP_SLOTS;
+        if(cache_allowed(e,sizeof(bmp_t *)*want_bmp)){e->bmp=glyph_alloc(e,sizeof(bmp_t *)*want_bmp);if(e->bmp){memset(e->bmp,0,sizeof(bmp_t *)*want_bmp);e->bmp_slots=want_bmp;}}
+    }
     bmp_t **slot=NULL;
-    if(e->bmp){unsigned base=hash_key(cp,font->pixels,offset)%(BMP_SLOTS/BMP_WAYS)*BMP_WAYS;
+    if(e->bmp && e->bmp_slots){unsigned base=hash_key(cp,font->pixels,offset)%(e->bmp_slots/BMP_WAYS)*BMP_WAYS;
         for(unsigned i=0;i<BMP_WAYS;i++){bmp_t **candidate=&e->bmp[base+i];bmp_t *entry=*candidate;
             if(entry && entry->cp==cp && entry->pixels==(uint16_t)font->pixels && entry->delta==(int16_t)offset){slot=candidate;break;}
             if(!slot || (!entry && *slot) || (entry && *slot && entry->age<(*slot)->age))slot=candidate;
@@ -371,7 +382,7 @@ static pn_status_t draw_impl(pn_font_t *font,pn_frame_t *frame,uint32_t cp,int32
     bmp_t *entry=NULL;
     if(slot && bytes<=BMP_ENTRY_MAX){
         size_t freed=*slot?(size_t)(*slot)->width*(*slot)->rows:0;
-        if(e->bmp_bytes-freed+bytes<=BMP_BUDGET && cache_allowed(e,sizeof *entry+bytes))entry=glyph_alloc(e,sizeof *entry+bytes);
+        if(e->bmp_bytes-freed+bytes<=e->bmp_budget && cache_allowed(e,sizeof *entry+bytes))entry=glyph_alloc(e,sizeof *entry+bytes);
     }
     if(entry){
         *entry=(bmp_t){cp,(uint16_t)font->pixels,(int16_t)offset,glyph->bitmap_left,glyph->bitmap_top,(uint16_t)b->width,(uint16_t)b->rows,bitmap_stamp(e)};

@@ -130,7 +130,7 @@ static pn_status_t take(void *ctx,pn_pool_t *pool,uint8_t *data,size_t n){
     // 仅编码器的有效头可决定内部章键；不可信包仍沿用旧槽供兼容测试/读取。/ Only a valid encoded header determines an internal chapter key; other packets retain legacy slot behavior.
     unsigned version=(unsigned)data[4];uint32_t payload=(uint32_t)data[140]|(uint32_t)data[141]<<8|(uint32_t)data[142]<<16|(uint32_t)data[143]<<24;
     uint32_t crc=(uint32_t)data[148]|(uint32_t)data[149]<<8|(uint32_t)data[150]<<16|(uint32_t)data[151]<<24;
-    if(!memcmp(data,"PNSM",4) && (version==1 || version==2) && !data[5] && !data[6] && !data[7] && !memcmp(data+8,f->store.book.sha256,32) && payload==n-152 && crc==pn_crc32_update(0,data,148)){
+    if(!memcmp(data,"PNSM",4) && (version==3 || version==4) && !data[5] && !data[6] && !data[7] && !memcmp(data+8,f->store.book.sha256,32) && payload==n-152 && crc==pn_crc32_update(0,data,148)){
         s=chapter_path(f,data+40,w->target);if(s!=PN_OK){pn_free(w);return s;}
     }
     int length=snprintf(w->temporary,sizeof w->temporary,"%s.tmp",w->target);

@@ -195,23 +195,65 @@ static void build_dz_chinese_dict(const char *dir, const char *base, const char 
 }
 
 static unsigned present_calls;
+static pn_refresh_t last_refresh;
+static const uint8_t *last_presented_px;
 static pn_status_t dummy_present(void *ctx, const pn_frame_t *f, pn_refresh_t p) {
-    (void)ctx; (void)f; (void)p;
+    (void)ctx;
     present_calls++;
+    last_refresh = p;
+    last_presented_px = f ? f->pixels : NULL;
     return PN_OK;
+}
+
+/// 生成小型第 3 本词典，用于验证多词典“全部”聚合与单本固定持久化。
+/// Build a small 3rd dictionary to verify multi-dict "All" aggregation and pinned-dict persistence.
+static void build_extra_dict(const char *dir, const char *base, const char *bookname) {
+    entry_t list[] = {
+        {"apple", "n. [Oxford] round fruit with red or green skin; 苹果（牛津释义）"},
+        {"book", "n. [Oxford] bound set of pages; 书籍（牛津释义）"},
+        {"quiet", "adj. making very little noise"}
+    };
+    size_t n = sizeof(list) / sizeof(list[0]);
+    qsort(list, n, sizeof(list[0]), cmp_entry);
+    char ifo_p[512], idx_p[512], dict_p[512];
+    snprintf(ifo_p, sizeof(ifo_p), "%s/%s.ifo", dir, base);
+    snprintf(idx_p, sizeof(idx_p), "%s/%s.idx", dir, base);
+    snprintf(dict_p, sizeof(dict_p), "%s/%s.dict", dir, base);
+    FILE *fidx = fopen(idx_p, "wb"), *fdict = fopen(dict_p, "wb");
+    assert(fidx && fdict);
+    uint32_t off = 0;
+    for (size_t i = 0; i < n; i++) {
+        uint32_t dlen = (uint32_t)strlen(list[i].def);
+        assert(fwrite(list[i].def, 1, dlen, fdict) == dlen);
+        size_t wlen = strlen(list[i].word) + 1u;
+        assert(fwrite(list[i].word, 1, wlen, fidx) == wlen);
+        put_be32(fidx, off);
+        put_be32(fidx, dlen);
+        off += dlen;
+    }
+    long idx_sz = ftell(fidx);
+    assert(fclose(fidx) == 0 && fclose(fdict) == 0);
+    FILE *fifo = fopen(ifo_p, "wb");
+    assert(fifo);
+    fprintf(fifo, "StarDict's dict ifo file\nversion=2.4.2\nwordcount=%zu\nidxfilesize=%ld\nbookname=%s\nsametypesequence=m\n",
+        n, idx_sz, bookname);
+    assert(fclose(fifo) == 0);
 }
 
 int main(void) {
     char root[] = "/tmp/pn-dict-XXXXXX";
     assert(mkdtemp(root));
-    char dicts_dir[512], sub_dir[512], book_path[512];
+    char dicts_dir[512], sub_dir[512], state_dir[512], book_path[512];
     snprintf(dicts_dir, sizeof(dicts_dir), "%s/dicts", root);
     snprintf(sub_dir, sizeof(sub_dir), "%s/dicts/zh_cn", root);
+    snprintf(state_dir, sizeof(state_dir), "%s/state", root);
     snprintf(book_path, sizeof(book_path), "%s/sample.txt", root);
     assert(mkdir(dicts_dir, 0755) == 0);
     assert(mkdir(sub_dir, 0755) == 0);
+    assert(mkdir(state_dir, 0755) == 0);
 
     build_plain_dict(dicts_dir, "en_basic", "English Basic");
+    build_extra_dict(dicts_dir, "en_oxford", "Oxford Mini");
     build_dz_chinese_dict(sub_dir, "zh_mini", "中文词典");
 
     pn_pool_t pool;
@@ -220,9 +262,31 @@ int main(void) {
     // 1. 扫描根目录 + 一级子目录 / Scan root + 1-level subdirectory.
     pn_stardict_catalog_t *cat = pn_alloc_tagged(&pool, PN_MEM_DOCUMENT, sizeof(*cat));
     assert(cat);
-    assert(pn_stardict_scan(dicts_dir, cat) == PN_OK && cat->count == 2u);
+    assert(pn_stardict_scan(dicts_dir, cat) == PN_OK && cat->count == 3u);
     assert(strcmp(cat->items[0].name, "English Basic") == 0 && !cat->items[0].compressed && cat->items[0].offset_bits == 32u);
-    assert(strcmp(cat->items[1].name, "中文词典") == 0 && cat->items[1].compressed && cat->items[1].offset_bits == 64u);
+    assert(strcmp(cat->items[1].name, "Oxford Mini") == 0 && !cat->items[1].compressed && cat->items[1].offset_bits == 32u);
+    assert(strcmp(cat->items[2].name, "中文词典") == 0 && cat->items[2].compressed && cat->items[2].offset_bits == 64u);
+
+    // 1b. 多词典聚合与位掩码子集查询：全选、2/3子集、单本（无【词典名】前缀）与未命中。
+    // Multi-dict aggregation & bitmask subset query: all, 2-of-3 subset, single-dict (no 【DictName】 header), and miss.
+    pn_stardict_multi_hit_t *mhit = pn_alloc_tagged(&pool, PN_MEM_DOCUMENT, sizeof(*mhit));
+    assert(mhit);
+    assert(pn_stardict_query_all(&pool, cat, "apple", mhit) == PN_OK);
+    assert(mhit->matched_count == 2u && strcmp(mhit->matched_word, "apple") == 0);
+    assert(strstr(mhit->definition, "【English Basic】") && strstr(mhit->definition, "a crisp round fruit"));
+    assert(strstr(mhit->definition, "【Oxford Mini】") && strstr(mhit->definition, "牛津释义"));
+    assert(!strstr(mhit->definition, "中文词典"));
+    // 掩码只启用 Oxford Mini + 中文词典 (0x6 = bit1|bit2)：查 apple 只出 Oxford Mini，查 世界 出 中文词典。
+    assert(pn_stardict_query_masked(&pool, cat, "apple", 0x6u, mhit) == PN_OK);
+    assert(mhit->matched_count == 1u && strstr(mhit->definition, "【Oxford Mini】") && !strstr(mhit->definition, "English Basic"));
+    assert(pn_stardict_query_masked(&pool, cat, "世界", 0x6u, mhit) == PN_OK);
+    assert(mhit->matched_count == 1u && strstr(mhit->definition, "【中文词典】"));
+    // 仅启用单本词典 (0x2 = Oxford Mini)：直接展示纯释义，不冗余加【Oxford Mini】标题。
+    assert(pn_stardict_query_masked(&pool, cat, "apple", 0x2u, mhit) == PN_OK);
+    assert(mhit->matched_count == 1u && strstr(mhit->definition, "牛津释义") && !strstr(mhit->definition, "【Oxford Mini】"));
+    assert(pn_stardict_query_all(&pool, cat, "世界", mhit) == PN_OK && mhit->matched_count == 1u && strstr(mhit->definition, "【中文词典】"));
+    assert(pn_stardict_query_all(&pool, cat, "nonexistent_zzz", mhit) == PN_EMPTY);
+    pn_free(mhit);
 
     // 2. 精确大小写优先 + HTML/实体清洗 / Exact case preference + HTML/entity cleanup.
     pn_stardict_hit_t *hit = pn_alloc_tagged(&pool, PN_MEM_DOCUMENT, sizeof(*hit));
@@ -247,7 +311,7 @@ int main(void) {
     // 5. 多块 DictZip（.dict.dz）64位偏移中文检索 + 前缀回退 / Multi-chunk DictZip 64-bit Chinese lookup + prefix fallback.
     assert(pn_stardict_query(&pool, cat, "安静", SIZE_MAX, hit) == PN_OK && strcmp(hit->dict_name, "中文词典") == 0 && strstr(hit->definition, "没有声音"));
     assert(pn_stardict_query(&pool, cat, "安静的夜晚", SIZE_MAX, hit) == PN_OK && strcmp(hit->matched_word, "安静") == 0);
-    assert(pn_stardict_query(&pool, cat, "世界", 1u, hit) == PN_OK && strstr(hit->definition, "地球上所有地方"));
+    assert(pn_stardict_query(&pool, cat, "世界", 2u, hit) == PN_OK && strstr(hit->definition, "地球上所有地方"));
     assert(pn_stardict_query(&pool, cat, "世界", 0u, hit) == PN_EMPTY); // 限定英文词典时未命中
 
     // 6. 码点行提取候选词 / Candidate extraction from codepoint lines.
@@ -259,37 +323,120 @@ int main(void) {
     for (size_t i = 0; i < nc; i++) if (strcmp(cands[i], "安静") == 0) saw_anjing = true;
     assert(saw_anjing);
 
-    // 7. pn_dict_ui 全流程：候选自动命中、多页释义翻页、切词典、手动键盘查词、关闭无泄漏。
+    // 7. pn_dict_ui 弹窗全流程：多词典聚合、单本固定持久化与删除回退、居底/居顶叠加不改底层帧、命中与退出恢复无泄漏。
     pn_font_t font = {0};
     pn_text_source_t fsrc = pn_font_builtin_source();
     assert(pn_font_open(&font, &pool, &fsrc, 24) == PN_OK);
     uint8_t *px = pn_alloc_tagged(&pool, PN_MEM_FRAME, 684u * 1216u / 2u);
-    pn_frame_t frame;
+    uint8_t *page_px = pn_alloc_tagged(&pool, PN_MEM_FRAME, 684u * 1216u / 2u);
+    uint8_t *page_orig = pn_alloc_tagged(&pool, PN_MEM_FRAME, 684u * 1216u / 2u);
+    assert(px && page_px && page_orig);
+    memset(page_px, 0xA5, 684u * 1216u / 2u);
+    memcpy(page_orig, page_px, 684u * 1216u / 2u);
+    pn_frame_t frame, page_frame;
     assert(pn_frame_bind(&frame, px, 684u * 1216u / 2u, 684, 1216));
+    assert(pn_frame_bind(&page_frame, page_px, 684u * 1216u / 2u, 684, 1216));
+
+    pn_media_t state_media;
+    pn_media_init(&state_media);
+    assert(pn_media_attach(&state_media, 99) == PN_OK);
 
     pn_dict_ui_t ui = {0};
     const char long_cands[2][PN_DICT_WORD_MAX] = {"verbose", "apple"};
-    assert(pn_dict_ui_open(&ui, &pool, NULL, NULL, dicts_dir, long_cands, 2u, false, NULL, NULL) == PN_OK);
-    assert(ui.mode == PN_DUI_RESULT && pn_dict_ui_dict_count(&ui) == 2u && strcmp(pn_dict_ui_matched_word(&ui), "verbose") == 0);
+    pn_dict_ui_options_t opt = {.anchor_y = 200, .page_frame = &page_frame, .pref_media = &state_media, .pref_dir = state_dir};
+    assert(pn_dict_ui_open_ex(&ui, &pool, NULL, NULL, dicts_dir, long_cands, 2u, false, &opt, NULL, NULL) == PN_OK);
+    assert(ui.mode == PN_DUI_RESULT && pn_dict_ui_dict_count(&ui) == 3u && pn_dict_ui_enabled_count(&ui) == 3u);
+    assert(pn_dict_ui_enabled_mask(&ui) == 0x7u && pn_dict_ui_selected_dict(&ui) == SIZE_MAX);
+    assert(pn_dict_ui_sheet_y(&ui) == PN_DICT_BOTTOM_Y && strcmp(pn_dict_ui_matched_word(&ui), "verbose") == 0);
     assert(pn_dict_ui_render(&ui, &font, NULL, &frame) == PN_OK && pn_dict_ui_page_count(&ui) >= 2u);
-    assert(pn_dict_ui_event(&ui, PN_DUI_NEXT_PAGE, 100, NULL, NULL) == PN_OK && pn_dict_ui_page_index(&ui) == 1u);
+    // 悬浮居中弹窗外四周保留底层阅读帧像素，底层 page_px 本身保持字节级不变。
+    assert(memcmp(px, page_orig, 342u * (unsigned)(PN_DICT_BOTTOM_Y - 4)) == 0);
+    // 卡片左右两侧外边距（0..PN_DICT_CARD_X-1 与 PN_DICT_CARD_X+PN_DICT_CARD_W+8..683）保留原阅读正文像素。
+    assert(px[342u * (unsigned)(PN_DICT_BOTTOM_Y + 100) + 10u] == 0xA5u);
+    assert(px[342u * (unsigned)(PN_DICT_BOTTOM_Y + 100) + 336u] == 0xA5u);
+    assert(memcmp(px + 342u * (unsigned)PN_DICT_BOTTOM_Y, page_orig + 342u * (unsigned)PN_DICT_BOTTOM_Y, 342u * (unsigned)PN_DICT_SHEET_H) != 0);
+    assert(memcmp(page_px, page_orig, 342u * 1216u) == 0);
+
+    // 悬浮弹窗命中测试：上下左右四侧外边距关闭、×、搜索图标、词典多选入口、底栏翻页与正文左右快捷翻页。
+    assert(pn_dict_ui_hit(&ui, 100, 100) == PN_DUI_DISMISS);
+    assert(pn_dict_ui_hit(&ui, 10, PN_DICT_BOTTOM_Y + 200) == PN_DUI_DISMISS);
+    assert(pn_dict_ui_hit(&ui, 670, PN_DICT_BOTTOM_Y + 200) == PN_DUI_DISMISS);
+    assert(pn_dict_ui_hit(&ui, 300, PN_DICT_BOTTOM_Y + PN_DICT_SHEET_H + 10) == PN_DUI_DISMISS);
+    assert(pn_dict_ui_hit(&ui, PN_DICT_CARD_X + 550, PN_DICT_BOTTOM_Y + 34) == PN_DUI_BACK);
+    assert(pn_dict_ui_hit(&ui, PN_DICT_CARD_X + 495, PN_DICT_BOTTOM_Y + 34) == PN_DUI_OPEN_SEARCH);
+    assert(pn_dict_ui_hit(&ui, PN_DICT_CARD_X + 410, PN_DICT_BOTTOM_Y + 34) == PN_DUI_OPEN_PICKER);
+    assert(pn_dict_ui_hit(&ui, PN_DICT_CARD_X + 540, PN_DICT_BOTTOM_Y + 506) == PN_DUI_NEXT_PAGE);
+    assert(pn_dict_ui_hit(&ui, PN_DICT_CARD_X + 420, PN_DICT_BOTTOM_Y + 260) == PN_DUI_BODY_NEXT);
+    assert(pn_dict_ui_event(&ui, PN_DUI_BODY_NEXT, 100, NULL, NULL) == PN_OK && pn_dict_ui_page_index(&ui) == 1u);
+    assert(pn_dict_ui_hit(&ui, PN_DICT_CARD_X + 80, PN_DICT_BOTTOM_Y + 260) == PN_DUI_BODY_PREV);
     assert(pn_dict_ui_event(&ui, PN_DUI_PREV_PAGE, 200, NULL, NULL) == PN_OK && pn_dict_ui_page_index(&ui) == 0u);
-    // 切换至第 2 个候选词 / Switch candidate chip.
+
+    // 切换至第 2 个候选词 "apple"：全部模式下同时命中 English Basic 和 Oxford Mini 两本词典！
     assert(pn_dict_ui_event(&ui, PN_DUI_CAND_BASE + 1, 300, NULL, NULL) == PN_OK && strcmp(pn_dict_ui_matched_word(&ui), "apple") == 0);
-    // 切换词典（自动 -> 0 -> 1 -> 自动）/ Cycle dictionary filter.
-    assert(pn_dict_ui_event(&ui, PN_DUI_NEXT_DICT, 310, NULL, NULL) == PN_OK && strcmp(pn_dict_ui_matched_word(&ui), "apple") == 0);
-    assert(pn_dict_ui_event(&ui, PN_DUI_NEXT_DICT, 320, NULL, NULL) == PN_OK && pn_dict_ui_matched_word(&ui)[0] == '\0');
-    assert(pn_dict_ui_event(&ui, PN_DUI_NEXT_DICT, 330, NULL, NULL) == PN_OK && strcmp(pn_dict_ui_matched_word(&ui), "apple") == 0);
-    // 手动查词页 + 键盘输入 "book" + 提交查询 / Manual search view + keyboard typing "book" + lookup.
+    assert(pn_dict_ui_matched_dicts(&ui) == 2u);
+    assert(strstr(pn_dict_ui_definition(&ui), "【English Basic】") && strstr(pn_dict_ui_definition(&ui), "【Oxford Mini】"));
+
+    // 打开词典多选面板，取消勾选第 0 本（English Basic），保留第 1 + 2 本（Oxford Mini + 中文词典，mask = 0x6）。
+    assert(pn_dict_ui_event(&ui, PN_DUI_OPEN_PICKER, 305, NULL, NULL) == PN_OK && ui.mode == PN_DUI_PICKER);
+    assert(pn_dict_ui_render(&ui, &font, NULL, &frame) == PN_OK);
+    assert(pn_dict_ui_hit(&ui, PN_DICT_CARD_X + 120, PN_DICT_BOTTOM_Y + 95) == PN_DUI_PICKER_TOGGLE_BASE + 0);
+    assert(pn_dict_ui_hit(&ui, PN_DICT_CARD_X + 120, PN_DICT_BOTTOM_Y + 159) == PN_DUI_PICKER_TOGGLE_BASE + 1);
+    assert(pn_dict_ui_hit(&ui, PN_DICT_CARD_X + 60, PN_DICT_BOTTOM_Y + 506) == PN_DUI_PICKER_ALL);
+    assert(pn_dict_ui_hit(&ui, PN_DICT_CARD_X + 500, PN_DICT_BOTTOM_Y + 506) == PN_DUI_PICKER_DONE);
+    assert(pn_dict_ui_hit(&ui, 10, 10) == PN_DUI_DISMISS);
+    // 取消勾选第 0 本 -> 剩余 2 本（0x6）立即持久化。
+    assert(pn_dict_ui_event(&ui, PN_DUI_PICKER_TOGGLE_BASE + 0, 310, NULL, NULL) == PN_OK);
+    assert(pn_dict_ui_enabled_mask(&ui) == 0x6u && pn_dict_ui_enabled_count(&ui) == 2u);
+    // 点击卡片外（PN_DUI_DISMISS）在多选态应返回结果页并应用 2/3 子集，而非直接关闭词典！
+    assert(pn_dict_ui_event(&ui, PN_DUI_DISMISS, 315, NULL, NULL) == PN_OK && ui.mode == PN_DUI_RESULT);
+    assert(pn_dict_ui_matched_dicts(&ui) == 1u && strstr(pn_dict_ui_definition(&ui), "【Oxford Mini】") && !strstr(pn_dict_ui_definition(&ui), "English Basic"));
+
+    // 关闭弹窗通过底层 page_frame 做 GL16 局部恢复；重开应保持 2/3 勾选集合（0x6）且支持居顶弹出！
+    unsigned before_dismiss = present_calls;
+    assert(pn_dict_ui_event(&ui, PN_DUI_DISMISS, 330, dummy_present, NULL) == PN_OK && ui.mode == PN_DUI_CLOSED && !ui.impl);
+    assert(present_calls == before_dismiss + 1u && last_refresh == PN_REFRESH_GL16 && last_presented_px == page_px);
+
+    opt.anchor_y = 920;
+    assert(pn_dict_ui_open_ex(&ui, &pool, NULL, NULL, dicts_dir, long_cands + 1, 1u, false, &opt, NULL, NULL) == PN_OK);
+    // 词典浮层统一固定在下方弹出，不随触点上下变换。/ Dictionary floating card always docks at the bottom.
+    assert(pn_dict_ui_enabled_mask(&ui) == 0x6u && pn_dict_ui_enabled_count(&ui) == 2u && pn_dict_ui_sheet_y(&ui) == PN_DICT_BOTTOM_Y);
+    assert(strstr(pn_dict_ui_definition(&ui), "牛津释义") && !strstr(pn_dict_ui_definition(&ui), "English Basic"));
+    assert(pn_dict_ui_hit(&ui, 300, 300) == PN_DUI_DISMISS);
+
+    // 再进入多选取消勾选第 2 本（仅剩第 1 本 Oxford Mini，0x2），并验证最后 1 本无法取消勾选。
+    assert(pn_dict_ui_event(&ui, PN_DUI_OPEN_PICKER, 340, NULL, NULL) == PN_OK && ui.mode == PN_DUI_PICKER);
+    assert(pn_dict_ui_event(&ui, PN_DUI_PICKER_TOGGLE_BASE + 2, 345, NULL, NULL) == PN_OK);
+    assert(pn_dict_ui_enabled_mask(&ui) == 0x2u && pn_dict_ui_selected_dict(&ui) == 1u);
+    assert(pn_dict_ui_event(&ui, PN_DUI_PICKER_TOGGLE_BASE + 1, 350, NULL, NULL) == PN_OK);
+    assert(pn_dict_ui_enabled_mask(&ui) == 0x2u && pn_dict_ui_enabled_count(&ui) == 1u); // 最后一本保留
+    assert(pn_dict_ui_event(&ui, PN_DUI_PICKER_DONE, 355, NULL, NULL) == PN_OK && ui.mode == PN_DUI_RESULT);
+    assert(strstr(pn_dict_ui_definition(&ui), "牛津释义") && !strstr(pn_dict_ui_definition(&ui), "【Oxford Mini】"));
+
+    // 手动查词页 + 键盘输入 "books" + 提交查询（保持单选 Oxford Mini）/ Manual search preserves checked dictionary.
     assert(pn_dict_ui_event(&ui, PN_DUI_OPEN_SEARCH, 400, NULL, NULL) == PN_OK && ui.mode == PN_DUI_SEARCH);
     assert(pn_dict_ui_render(&ui, &font, NULL, &frame) == PN_OK);
     assert(pn_dict_ui_event(&ui, PN_DUI_SEARCH_CLEAR, 410, NULL, NULL) == PN_OK);
     const char *word = "books";
     for (size_t i = 0; word[i]; i++) assert(pn_dict_ui_event(&ui, PN_DUI_KB_ENCODE((int)word[i]), 420 + i, NULL, NULL) == PN_OK);
     assert(pn_dict_ui_event(&ui, PN_DUI_SEARCH_GO, 500, NULL, NULL) == PN_OK && ui.mode == PN_DUI_RESULT);
-    assert(strcmp(pn_dict_ui_matched_word(&ui), "book") == 0);
+    assert(strcmp(pn_dict_ui_matched_word(&ui), "book") == 0 && strstr(pn_dict_ui_definition(&ui), "牛津释义"));
+
+    // 点“全选”恢复全部 3 本词典并持久化。/ Select All restores all 3 dictionaries and persists.
+    assert(pn_dict_ui_event(&ui, PN_DUI_OPEN_PICKER, 510, NULL, NULL) == PN_OK && ui.mode == PN_DUI_PICKER);
+    assert(pn_dict_ui_event(&ui, PN_DUI_PICKER_ALL, 520, NULL, NULL) == PN_OK && pn_dict_ui_enabled_mask(&ui) == 0x7u);
+    assert(pn_dict_ui_event(&ui, PN_DUI_PICKER_DONE, 530, NULL, NULL) == PN_OK && ui.mode == PN_DUI_RESULT);
+    assert(pn_dict_ui_matched_dicts(&ui) == 2u);
     assert(pn_dict_ui_event(&ui, PN_DUI_BACK, 600, NULL, NULL) == PN_OK && ui.mode == PN_DUI_CLOSED && !ui.impl);
 
+    // 若已勾选的词典全部被删除（含 v1 单词典格式兼容），下次打开安全回退到全选。
+    // If all saved dictionaries are deleted (including legacy v1 single-dict format), reopen safely falls back to all.
+    assert(pn_dict_ui_pref_save(&state_media, state_dir, "removed_dict.ifo") == PN_OK);
+    assert(pn_dict_ui_open_ex(&ui, &pool, NULL, NULL, dicts_dir, long_cands + 1, 1u, false, &opt, NULL, NULL) == PN_OK);
+    assert(pn_dict_ui_enabled_mask(&ui) == 0x7u && pn_dict_ui_selected_dict(&ui) == SIZE_MAX && pn_dict_ui_matched_dicts(&ui) == 2u);
+    pn_dict_ui_close(&ui);
+
+    pn_free(page_orig);
+    pn_free(page_px);
     pn_free(px);
     pn_font_close(&font);
     pn_free(hit);
@@ -303,7 +450,8 @@ int main(void) {
     assert(fclose(fb) == 0);
     pn_reader_app_t app = {0};
     assert(pn_reader_app_open(&app, &pool, book_path, NULL, NULL, 44, 1000) == PN_OK);
-    assert(pn_reader_app_step(&app, PN_APP_OPEN, 1000, dummy_present, NULL) == PN_OK && present_calls == 1u);
+    unsigned before_txt = present_calls;
+    assert(pn_reader_app_step(&app, PN_APP_OPEN, 1000, dummy_present, NULL) == PN_OK && present_calls == before_txt + 1u);
     char tapped[6][PN_DICT_WORD_MAX];
     size_t tcnt = 0;
     // 首行靠左位置命中 "The" 或 "running" / Top-left of body hits "The" or "running".
@@ -319,14 +467,16 @@ int main(void) {
     char p[512];
     const char *files[] = {
         "dicts/en_basic.ifo", "dicts/en_basic.idx", "dicts/en_basic.dict",
+        "dicts/en_oxford.ifo", "dicts/en_oxford.idx", "dicts/en_oxford.dict",
         "dicts/zh_cn/zh_mini.ifo", "dicts/zh_cn/zh_mini.idx", "dicts/zh_cn/zh_mini.dict.dz",
+        "state/dict_pref.a", "state/dict_pref.b",
         "sample.txt"
     };
     for (size_t i = 0; i < sizeof(files) / sizeof(files[0]); i++) {
         snprintf(p, sizeof(p), "%s/%s", root, files[i]);
-        assert(unlink(p) == 0);
+        (void)unlink(p);
     }
-    assert(rmdir(sub_dir) == 0 && rmdir(dicts_dir) == 0 && rmdir(root) == 0);
+    assert(rmdir(state_dir) == 0 && rmdir(sub_dir) == 0 && rmdir(dicts_dir) == 0 && rmdir(root) == 0);
     puts("stardict: scan, 32/64-bit idx binary search, plain & multi-chunk DictZip, stem/CJK fallback, UI & TXT word_at passed");
     return 0;
 }

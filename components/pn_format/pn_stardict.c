@@ -715,3 +715,97 @@ pn_status_t pn_stardict_query(pn_pool_t *pool,const pn_stardict_catalog_t *catal
     }
     return PN_EMPTY;
 }
+
+/// 在不切断多字节 UTF-8 序列的前提下向聚合缓冲追加文本。/ Append text to aggregated output without slicing multi-byte UTF-8 sequences.
+static size_t agg_append_utf8(char *dst,size_t cap,size_t pos,const char *src,size_t n,bool *truncated){
+    if(pos+1u>=cap){if(truncated && n)*truncated=true;return pos;}
+    size_t avail=cap-1u-pos;
+    size_t take=n;
+    bool cut=false;
+    if(take>avail){
+        take=avail;
+        if(take>=3u)take-=3u; // 为省略号留出 3 字节。/ Reserve 3 bytes for ellipsis.
+        while(take>0u && (((unsigned char)src[take]&0xC0u)==0x80u))take--;
+        cut=true;
+    }
+    if(take>0u){memcpy(dst+pos,src,take);pos+=take;}
+    if(cut && pos+3u<cap){memcpy(dst+pos,"\xe2\x80\xa6",3);pos+=3u;}
+    dst[pos]='\0';
+    if(truncated && cut)*truncated=true;
+    return pos;
+}
+
+pn_status_t pn_stardict_query_masked(pn_pool_t *pool,const pn_stardict_catalog_t *catalog,const char *raw_query,
+    uint32_t enabled_mask,pn_stardict_multi_hit_t *out){
+    if(!pool || !catalog || !raw_query || !*raw_query || !out)return PN_INVALID;
+    memset(out,0,sizeof *out);
+    if(!catalog->count)return PN_EMPTY;
+    size_t enabled_count=0;
+    for(size_t di=0;di<catalog->count && di<32u;di++){
+        if(enabled_mask&(1u<<di))enabled_count++;
+    }
+    if(!enabled_count)return PN_EMPTY;
+
+    char cands[16][PN_DICT_WORD_MAX];
+    size_t cand_count=build_morph_candidates(raw_query,cands,16u);
+    if(!cand_count)return PN_EMPTY;
+    char *tmp_def=pn_alloc_tagged(pool,PN_MEM_DOCUMENT,PN_DICT_DEF_MAX);
+    if(!tmp_def)return PN_NO_MEMORY;
+
+    size_t pos=0;
+    const size_t cap=sizeof out->definition;
+    // 启用多本词典时为每本保留公平配额，避免首本超长释义挤掉后续词典。
+    // When multiple dictionaries are enabled, cap each section fairly so one verbose entry cannot starve subsequent dicts.
+    size_t per_dict_limit=enabled_count>3u?(cap/enabled_count):3600u;
+    if(per_dict_limit<1024u)per_dict_limit=1024u;
+    if(enabled_count==1u)per_dict_limit=PN_DICT_DEF_MAX;
+
+    pn_status_t fatal=PN_OK;
+    for(size_t di=0;di<catalog->count && di<32u;di++){
+        if(!(enabled_mask&(1u<<di)))continue;
+        char matched[PN_DICT_WORD_MAX];
+        size_t dlen=0;
+        bool found=false;
+        for(size_t ci=0;ci<cand_count;ci++){
+            matched[0]='\0';
+            dlen=0;
+            pn_status_t st=pn_stardict_lookup_one(pool,&catalog->items[di],cands[ci],
+                matched,sizeof matched,tmp_def,PN_DICT_DEF_MAX,&dlen);
+            if(st==PN_OK){found=true;break;}
+            if(st==PN_NO_MEMORY){fatal=st;break;}
+        }
+        if(fatal!=PN_OK)break;
+        if(!found)continue;
+
+        if(out->matched_count==0u){
+            out->first_dict_index=di;
+            snprintf(out->first_dict_name,sizeof out->first_dict_name,"%s",catalog->items[di].name);
+            snprintf(out->matched_word,sizeof out->matched_word,"%s",matched);
+        }
+        out->matched_count++;
+
+        if(pos>0u)pos=agg_append_utf8(out->definition,cap,pos,"\n\n",2u,NULL);
+        if(enabled_count>1u){
+            char hdr[PN_DICT_NAME_MAX+PN_DICT_WORD_MAX+24u];
+            int hn;
+            if(strcmp(matched,out->matched_word)!=0){
+                hn=snprintf(hdr,sizeof hdr,"\xe3\x80\x90%s \xc2\xb7 %s\xe3\x80\x91\n",catalog->items[di].name,matched);
+            }else{
+                hn=snprintf(hdr,sizeof hdr,"\xe3\x80\x90%s\xe3\x80\x91\n",catalog->items[di].name);
+            }
+            if(hn>0)pos=agg_append_utf8(out->definition,cap,pos,hdr,(size_t)hn,NULL);
+        }
+        size_t body_cap=pos+per_dict_limit+1u;
+        if(body_cap>cap)body_cap=cap;
+        pos=agg_append_utf8(out->definition,body_cap,pos,tmp_def,dlen,NULL);
+    }
+    pn_free(tmp_def);
+    if(fatal!=PN_OK){memset(out,0,sizeof *out);return fatal;}
+    out->def_len=pos;
+    return out->matched_count>0u?PN_OK:PN_EMPTY;
+}
+
+pn_status_t pn_stardict_query_all(pn_pool_t *pool,const pn_stardict_catalog_t *catalog,const char *raw_query,
+    pn_stardict_multi_hit_t *out){
+    return pn_stardict_query_masked(pool,catalog,raw_query,UINT32_MAX,out);
+}

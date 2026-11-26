@@ -13,8 +13,9 @@
 #include <string.h>
 #define HTML "http://www.w3.org/1999/xhtml|"
 #define SVG "http://www.w3.org/2000/svg|"
+#define OPS "http://www.idpf.org/2007/ops|"
 typedef struct {
-    uint64_t element,offset;uint32_t run;bool body,seen_text,boundary,foreign;
+    uint64_t element,offset;uint32_t run;bool body,seen_text,boundary,foreign,link;
     pn_xhtml_style_t style;pn_xhtml_block_t block;
 } frame_t;
 typedef struct {char selector[256];char *declarations;uint32_t specificity;} rule_t;
@@ -37,7 +38,7 @@ static pn_status_t body_xml(sheet_t *sheet,pn_pool_t *pool,const pn_xml_input_t 
     }
     sheet->syntax|=syntax;return status;
 }
-typedef struct {uint32_t rank[10];bool display_hidden,visibility_hidden;} cascade_t;
+typedef struct {uint32_t rank[11];bool display_hidden,visibility_hidden;} cascade_t;
 typedef struct {
     sheet_t *sheet;
     frame_t frames[PN_XML_DEPTH_MAX+1];unsigned depth,bodies;bool root,line_text,pending;
@@ -63,7 +64,7 @@ static pn_xhtml_block_t block(const char *local){
     if(local[0]=='h' && local[1]>='1' && local[1]<='6' && !local[2])return PN_XHTML_HEADING;
     if(!strcmp(local,"pre"))return PN_XHTML_PREFORMATTED;
     if(!strcmp(local,"li"))return PN_XHTML_LIST_ITEM;
-    if(!strcmp(local,"div") || !strcmp(local,"section") || !strcmp(local,"article") || !strcmp(local,"blockquote") || !strcmp(local,"ol") || !strcmp(local,"ul") || !strcmp(local,"table") || !strcmp(local,"tr"))return PN_XHTML_CONTAINER;
+    if(!strcmp(local,"div") || !strcmp(local,"section") || !strcmp(local,"article") || !strcmp(local,"aside") || !strcmp(local,"blockquote") || !strcmp(local,"ol") || !strcmp(local,"ul") || !strcmp(local,"table") || !strcmp(local,"tr"))return PN_XHTML_CONTAINER;
     return PN_XHTML_NO_BLOCK;
 }
 static bool css_escaped(const char *text,size_t at){
@@ -104,9 +105,9 @@ static void inline_style(pn_xhtml_style_t *style,const char *css,cascade_t *casc
         if(!c || (c==';' && !quote && !nesting)){
             if(colon && colon<end){const char *value=colon+1;size_t n=(size_t)(end-value);bool important=false;
                 for(size_t i=0;i<n;i++)if(value[i]=='!' && css_word(value+i+1,n-i-1,"important")){n=i;important=true;break;}
-                const char *properties[]={"display","visibility","font-weight","font-style","white-space","width","height","max-width","max-height","text-align"};
+                const char *properties[]={"display","visibility","font-weight","font-style","white-space","width","height","max-width","max-height","text-align","vertical-align"};
                 uint32_t rank=specificity | (important?UINT32_C(0x80000000):0);
-                for(size_t i=0;i<10;i++)if(css_word(start,(size_t)(colon-start),properties[i]) && rank>=cascade->rank[i]){
+                for(size_t i=0;i<11;i++)if(css_word(start,(size_t)(colon-start),properties[i]) && rank>=cascade->rank[i]){
                     bool valid=true;
                     if(i==0){if(css_word(value,n,"none"))cascade->display_hidden=true;else if(css_word(value,n,"block") || css_word(value,n,"inline") || css_word(value,n,"inline-block"))cascade->display_hidden=false;else valid=false;}
                     if(i==1){if(css_word(value,n,"hidden") || css_word(value,n,"collapse"))cascade->visibility_hidden=true;else if(css_word(value,n,"visible"))cascade->visibility_hidden=false;else valid=false;}
@@ -119,6 +120,8 @@ static void inline_style(pn_xhtml_style_t *style,const char *css,cascade_t *casc
                     if(i==9){if(css_word(value,n,"left") || css_word(value,n,"start"))style->align=PN_XHTML_ALIGN_LEFT;
                         else if(css_word(value,n,"center"))style->align=PN_XHTML_ALIGN_CENTER;
                         else if(css_word(value,n,"right") || css_word(value,n,"end"))style->align=PN_XHTML_ALIGN_RIGHT;else valid=false;}
+                    if(i==10){if(css_word(value,n,"super"))style->sup=true;
+                        else if(css_word(value,n,"baseline") || css_word(value,n,"middle") || css_word(value,n,"bottom") || css_word(value,n,"sub"))style->sup=false;else valid=false;}
                     if(valid)cascade->rank[i]=rank;
                 }
             }
@@ -230,6 +233,50 @@ static pn_status_t image(parser_t *p,frame_t *f,const char *src,const char *alt)
     pn_xhtml_event_t event={.kind=PN_XHTML_IMAGE,.position=position(f,PN_XHTML_ELEMENT),.style=f->style,.value=path,.alt=alt?alt:""};
     p->stats.images++;p->line_text=true;return send(p,&event);
 }
+static bool ci_contains(const char *haystack,const char *needle){
+    if(!haystack || !needle || !*needle)return false;
+    size_t nlen=strlen(needle);
+    for(const char *p=haystack;*p;p++){
+        size_t i=0;
+        while(i<nlen && p[i]){char a=p[i],b=needle[i];if(a>='A' && a<='Z')a=(char)(a+32);if(b>='A' && b<='Z')b=(char)(b+32);if(a!=b)break;i++;}
+        if(i==nlen)return true;
+    }
+    return false;
+}
+static bool ci_token_has(const char *list,const char *wanted){
+    if(!list || !wanted)return false;
+    size_t wlen=strlen(wanted);
+    while(*list){while(css_space(*list))list++;const char *end=list;while(*end && !css_space(*end))end++;
+        if((size_t)(end-list)==wlen && css_word(list,wlen,wanted))return true;
+        list=end;
+    }
+    return false;
+}
+/// 判断 <a> 是否带有明确脚注/注释语义（EPUB3 noteref、ARIA doc-noteref、多看/常见注释类或位于 <sup> 内）。
+/// Detect whether <a> carries explicit footnote/annotation semantics (EPUB3 noteref, ARIA doc-noteref, common note classes, or inside <sup>).
+static bool is_note_link(const char *const *attrs,bool in_sup){
+    if(in_sup)return true;
+    const char *etype=attr(attrs,OPS "type");
+    if(!etype)etype=attr(attrs,"epub:type");
+    if(ci_token_has(etype,"noteref") || ci_token_has(etype,"annoref"))return true;
+    const char *role=attr(attrs,"role");
+    if(ci_token_has(role,"doc-noteref"))return true;
+    const char *cls=attr(attrs,"class");
+    if(cls && (ci_contains(cls,"footnote") || ci_contains(cls,"noteref") || ci_contains(cls,"endnote") || ci_contains(cls,"zhushi") || ci_contains(cls,"note-ref") || ci_contains(cls,"note_ref") || ci_token_has(cls,"note") || ci_token_has(cls,"fn") || ci_token_has(cls,"zy") || ci_token_has(cls,"zs")))return true;
+    return false;
+}
+/// 判断块级容器是否属于 EPUB3/多看弹出脚注定义（默认隐藏于行文流外，点击脚注标记时弹窗提取）。
+/// Detect EPUB3/DuoKan popup footnote definitions that should stay hidden from inline chapter flow and show in popups.
+static bool is_popup_note_block(const char *local,const char *const *attrs){
+    if(!local || !attrs)return false;
+    const char *etype=attr(attrs,OPS "type");
+    if(!etype)etype=attr(attrs,"epub:type");
+    const char *role=attr(attrs,"role");
+    const char *cls=attr(attrs,"class");
+    if(!strcmp(local,"aside") && (ci_token_has(etype,"footnote") || ci_token_has(etype,"rearnote") || ci_token_has(role,"doc-footnote")))return true;
+    if(ci_token_has(cls,"duokan-footnote-content"))return true;
+    return false;
+}
 static pn_status_t start(void *ctx,const char *name,const char *const *attrs){
     parser_t *p=ctx;if(++p->depth>PN_XML_DEPTH_MAX || p->stats.elements==UINT64_MAX)return PN_LIMIT;
     frame_t *parent=&p->frames[p->depth-1],*f=&p->frames[p->depth];parent->boundary=true;
@@ -241,10 +288,11 @@ static pn_status_t start(void *ctx,const char *name,const char *const *attrs){
     bool html=!strncmp(name,HTML,sizeof HTML-1);f->foreign=parent->foreign || !html;const char *local=html?name+sizeof HTML-1:"";
     if(p->depth==2 && html_name(name,"body")){if(++p->bodies>1)return PN_CORRUPT;f->body=true;}
     if(!f->body)return PN_OK;
-    if(html_name(name,"script") || html_name(name,"style") || html_name(name,"template") || attr(attrs,"hidden"))f->style.hidden=true;
+    if(html_name(name,"script") || html_name(name,"style") || html_name(name,"template") || attr(attrs,"hidden") || (html && is_popup_note_block(local,attrs)))f->style.hidden=true;
     if(!strcmp(local,"b") || !strcmp(local,"strong"))f->style.bold=true;
     if(!strcmp(local,"i") || !strcmp(local,"em"))f->style.italic=true;
     if(!strcmp(local,"pre"))f->style.pre=true;
+    if(!strcmp(local,"sup"))f->style.sup=true;
     f->block=block(local);
     if(f->block==PN_XHTML_HEADING){f->style.heading=(unsigned)(local[1]-'0');f->style.bold=true;}
     const char *css_id=attr(attrs,"id"),*classes=attr(attrs,"class"),*declarations=attr(attrs,"style");
@@ -270,6 +318,18 @@ static pn_status_t start(void *ctx,const char *name,const char *const *attrs){
     if(f->foreign && strcmp(name,SVG "image"))return PN_OK;
     if(f->block!=PN_XHTML_NO_BLOCK){p->pending=false;p->line_text=false;p->stats.blocks++;
         pn_xhtml_event_t event={.kind=PN_XHTML_BLOCK_OPEN,.position=position(f,PN_XHTML_ELEMENT),.style=f->style,.block=f->block};pn_status_t status=send(p,&event);if(status!=PN_OK)return status;}
+    if(html && !strcmp(local,"a")){
+        const char *href=attr(attrs,"href");
+        if(href && *href){
+            char target_path[PN_ZIP_PATH_MAX],target_frag[PN_RESOURCE_FRAGMENT_MAX];
+            bool explicit_note=is_note_link(attrs,f->style.sup);
+            if(pn_resource_resolve(p->base,href,target_path,target_frag)==PN_OK && (*target_frag || explicit_note)){
+                pn_xhtml_event_t event={.kind=PN_XHTML_LINK_OPEN,.position=position(f,PN_XHTML_ELEMENT),.style=f->style,.block=explicit_note?PN_XHTML_CONTAINER:PN_XHTML_NO_BLOCK,.value=target_path,.alt=target_frag};
+                f->link=true;
+                pn_status_t status=send(p,&event);if(status!=PN_OK)return status;
+            }
+        }
+    }
     if(html_name(name,"br") || html_name(name,"hr")){p->pending=false;p->line_text=false;
         pn_xhtml_event_t event={.kind=PN_XHTML_BREAK,.position=position(f,PN_XHTML_ELEMENT),.style=f->style};return send(p,&event);}
     if(html_name(name,"img"))return image(p,f,attr(attrs,"src"),attr(attrs,"alt"));
@@ -315,6 +375,10 @@ static pn_status_t text(void *ctx,const char *value,size_t n){
 }
 static pn_status_t end(void *ctx,const char *name){
     (void)name;parser_t *p=ctx;frame_t *f=&p->frames[p->depth];
+    if(f->link){
+        pn_xhtml_event_t event={.kind=PN_XHTML_LINK_CLOSE,.position=position(f,PN_XHTML_ELEMENT),.style=f->style};
+        pn_status_t status=send(p,&event);if(status!=PN_OK)return status;
+    }
     if(f->body && !f->style.hidden && !f->foreign && f->block!=PN_XHTML_NO_BLOCK){p->pending=false;p->line_text=false;
         pn_xhtml_event_t event={.kind=PN_XHTML_BLOCK_CLOSE,.position=position(f,PN_XHTML_ELEMENT),.style=f->style,.block=f->block};pn_status_t status=send(p,&event);if(status!=PN_OK)return status;}
     if(p->depth){p->depth--;p->frames[p->depth].boundary=true;}
@@ -826,4 +890,203 @@ pn_status_t pn_xhtml_window_start(pn_pool_t *pool,pn_epub_t *epub,const char *pa
     if(s==PN_OK && target && !w->found)s=PN_EMPTY;
     if(s==PN_OK){if(!target)window_select(w);*out=w->selected;*order=target?w->found:w->order;*start_order=w->selected_order;}
     pn_free(w);return s;
+}
+
+typedef struct {
+    bool body,hidden,skip,is_block,tight_block;
+} fn_frame_t;
+typedef struct {
+    const char *id;
+    char *out;size_t cap,len;
+    fn_frame_t frames[PN_XML_DEPTH_MAX+1];
+    unsigned depth,capture_depth,link_depth;
+    uint64_t elements;
+    bool root,found,hidden,truncated,capturing,capture_tight,done,inline_started,want_next_block,saw_break;
+    bool pending_space,pending_nl,in_link,link_overflow,link_space;
+    char link_buf[36];size_t link_len;
+    pn_xhtml_position_t anchor;
+} fn_ctx_t;
+
+static bool fn_is_backlink_text(const char *s,size_t n){
+    while(n && (*s==' ' || *s=='\t' || *s=='\r' || *s=='\n' || *s=='[' || *s==']' || *s=='(' || *s==')')){s++;n--;}
+    while(n && (s[n-1]==' ' || s[n-1]=='\t' || s[n-1]=='\r' || s[n-1]=='\n' || s[n-1]=='[' || s[n-1]==']' || s[n-1]=='(' || s[n-1]==')'))n--;
+    if(!n)return true;
+    // 跳过常见全角括号包裹 / Strip full-width parentheses/brackets
+    if(n>=6 && !memcmp(s,"\xef\xbc\x88",3) && !memcmp(s+n-3,"\xef\xbc\x89",3)){s+=3;n-=6;}
+    if(n>=6 && !memcmp(s,"\xe3\x80\x90",3) && !memcmp(s+n-3,"\xe3\x80\x91",3)){s+=3;n-=6;}
+    if(!n)return true;
+    static const char *const arrows[]={
+        "\xe2\x86\xa9","\xe2\x86\xb5","\xe2\x86\x91","\xe2\xac\x86","\xe2\x86\xba","\xe2\x86\x90",
+        "^","\xe8\xbf\x94\xe5\x9b\x9e","\xe5\x9b\x9e\xe6\xad\xa3\xe6\x96\x87","back"
+    };
+    for(size_t i=0;i<sizeof arrows/sizeof arrows[0];i++){
+        size_t al=strlen(arrows[i]);
+        if(n==al && css_word(s,n,arrows[i]))return true;
+    }
+    // ↩\xef\xb8\x8e / ↩\xef\xb8\x8f 变体选择符 / Variation selector variants of return arrow
+    if(n==6 && !memcmp(s,"\xe2\x86\xa9\xef\xb8",5))return true;
+    return false;
+}
+static void fn_emit_byte_str(fn_ctx_t *c,const char *bytes,size_t n){
+    if(c->truncated || !n)return;
+    if(c->pending_nl && c->len){
+        if(c->len+1>=c->cap){c->truncated=true;return;}
+        c->out[c->len++]='\n';c->pending_nl=false;c->pending_space=false;
+    }else if(c->pending_space && c->len && c->out[c->len-1]!='\n'){
+        if(c->len+1>=c->cap){c->truncated=true;return;}
+        c->out[c->len++]=' ';c->pending_space=false;
+    }else{c->pending_nl=false;c->pending_space=false;}
+    if(c->len+n>=c->cap){c->truncated=true;return;}
+    memcpy(c->out+c->len,bytes,n);c->len+=n;
+}
+static void fn_emit_cp(fn_ctx_t *c,uint32_t cp){
+    char utf8[4];size_t n=0;
+    if(cp<0x80u){utf8[0]=(char)cp;n=1;}
+    else if(cp<0x800u){utf8[0]=(char)(0xc0u|(cp>>6));utf8[1]=(char)(0x80u|(cp&0x3fu));n=2;}
+    else if(cp<0x10000u){utf8[0]=(char)(0xe0u|(cp>>12));utf8[1]=(char)(0x80u|((cp>>6)&0x3fu));utf8[2]=(char)(0x80u|(cp&0x3fu));n=3;}
+    else{utf8[0]=(char)(0xf0u|(cp>>18));utf8[1]=(char)(0x80u|((cp>>12)&0x3fu));utf8[2]=(char)(0x80u|((cp>>6)&0x3fu));utf8[3]=(char)(0x80u|(cp&0x3fu));n=4;}
+    if(c->in_link && !c->link_overflow){
+        size_t need=n+(c->link_space && c->link_len?1u:0u);
+        if(c->link_len+need<=sizeof c->link_buf){
+            if(c->link_space && c->link_len)c->link_buf[c->link_len++]=' ';
+            c->link_space=false;
+            memcpy(c->link_buf+c->link_len,utf8,n);c->link_len+=n;return;
+        }
+        fn_emit_byte_str(c,c->link_buf,c->link_len);c->link_len=0;c->link_overflow=true;
+        if(c->link_space){c->pending_space=true;c->link_space=false;}
+    }
+    fn_emit_byte_str(c,utf8,n);
+}
+static pn_status_t fn_start(void *ctx,const char *name,const char *const *attrs){
+    fn_ctx_t *c=ctx;
+    pn_status_t cancelled=pn_cancel_checkpoint();if(cancelled!=PN_OK)return cancelled;
+    if(++c->depth>PN_XML_DEPTH_MAX || c->elements==UINT64_MAX)return PN_LIMIT;
+    fn_frame_t *parent=&c->frames[c->depth-1],*f=&c->frames[c->depth];
+    *f=(fn_frame_t){.body=parent->body,.hidden=parent->hidden,.skip=parent->skip};
+    c->elements++;
+    if(c->depth==1){if(!html_name(name,"html"))return PN_CORRUPT;c->root=true;return PN_OK;}
+    bool html=!strncmp(name,HTML,sizeof HTML-1);const char *local=html?name+sizeof HTML-1:"";
+    if(c->depth==2 && html_name(name,"body"))f->body=true;
+    if(!f->body)return PN_OK;
+    if(html && (!strcmp(local,"script") || !strcmp(local,"style") || !strcmp(local,"template")))f->skip=true;
+    if(attr(attrs,"hidden") || (html && is_popup_note_block(local,attrs)))f->hidden=true;
+    const char *decl=attr(attrs,"style");
+    if(decl){pn_xhtml_style_t tmp={0};cascade_t cas={0};inline_style(&tmp,decl,&cas,UINT32_C(0x01000000));if(cas.display_hidden || cas.visibility_hidden)f->hidden=true;}
+    pn_xhtml_block_t b=html?block(local):PN_XHTML_NO_BLOCK;
+    f->tight_block=html && (!strcmp(local,"p") || !strcmp(local,"li") || !strcmp(local,"dd") || !strcmp(local,"aside") || !strcmp(local,"td") || !strcmp(local,"blockquote"));
+    f->is_block=f->tight_block || b!=PN_XHTML_NO_BLOCK;
+    const char *elem_id=attr(attrs,"id");if(!elem_id)elem_id=attr(attrs,"http://www.w3.org/XML/1998/namespace|id");
+    // 整页注释文件（id为空）：从<body>起捕获 / Whole-file note (empty id): capture starting at <body>
+    if(!c->id[0] && c->depth==2 && f->body && !c->found){
+        c->found=true;c->capturing=true;c->capture_depth=c->depth;c->capture_tight=false;c->hidden=f->hidden;
+        return PN_OK;
+    }
+    if(c->capturing){
+        // 若在宽松容器（如<div>）里已抓到正文并遇到下一个不同id的块或带id链接，停在下一条脚注前。
+        // Inside a loose container (e.g. <div>), stop before the next distinct footnote anchor once text is captured.
+        if(elem_id && *elem_id && strcmp(elem_id,c->id) && !c->capture_tight && c->len>0 && (f->is_block || c->saw_break || (html && !strcmp(local,"a")))){
+            c->capturing=false;c->done=true;return PN_OK;
+        }
+        if(html && (!strcmp(local,"br") || !strcmp(local,"hr"))){c->pending_nl=true;c->pending_space=false;c->saw_break=true;}
+        else if(f->is_block && c->len>0){c->pending_nl=true;c->pending_space=false;}
+        if(!c->in_link && !f->skip && html && !strcmp(local,"a") && attr(attrs,"href")){
+            c->in_link=true;c->link_depth=c->depth;c->link_len=0;c->link_overflow=false;c->link_space=false;
+        }
+        return PN_OK;
+    }
+    if(!c->found && c->id[0] && elem_id && !strcmp(elem_id,c->id)){
+        c->found=true;c->hidden=f->hidden;
+        c->anchor=(pn_xhtml_position_t){.element=c->elements,.kind=PN_XHTML_ELEMENT};
+        if(f->is_block){
+            c->capturing=true;c->capture_depth=c->depth;c->capture_tight=f->tight_block;
+        }else{
+            unsigned bd=0;
+            for(unsigned d=c->depth-1;d>=3;d--)if(c->frames[d].is_block){bd=d;break;}
+            c->inline_started=true;
+            if(bd){c->capturing=true;c->capture_depth=bd;c->capture_tight=c->frames[bd].tight_block;}
+            else{c->capturing=true;c->capture_depth=c->depth;c->want_next_block=true;}
+            // 若命中目标本身就是回跳链接（如 <a id="fn1" href="#ref1">↩</a>），仍按链接缓冲过滤纯箭头。
+            if(!f->skip && html && !strcmp(local,"a") && attr(attrs,"href")){
+                c->in_link=true;c->link_depth=c->depth;c->link_len=0;c->link_overflow=false;c->link_space=false;
+            }
+        }
+        return PN_OK;
+    }
+    if(c->want_next_block && !c->done && !f->skip && f->is_block){
+        if(elem_id && *elem_id && c->id[0] && strcmp(elem_id,c->id)){c->want_next_block=false;c->done=true;return PN_OK;}
+        c->capturing=true;c->capture_depth=c->depth;c->capture_tight=true;c->want_next_block=false;
+    }
+    return PN_OK;
+}
+static pn_status_t fn_text(void *ctx,const char *value,size_t n){
+    fn_ctx_t *c=ctx;fn_frame_t *f=&c->frames[c->depth];
+    if(!c->capturing || c->truncated || !f->body || f->skip)return PN_OK;
+    for(size_t i=0;i<n;){
+        size_t used=0;uint32_t cp=0;pn_status_t s=scalar(value+i,n-i,&used,&cp);if(s!=PN_OK)return s;i+=used;
+        bool sp=cp==32 || cp==9 || cp==10 || cp==13;
+        if(sp){
+            if(c->in_link && !c->link_overflow){if(c->link_len>0)c->link_space=true;}
+            else if(c->len>0 && !c->pending_nl)c->pending_space=true;
+            continue;
+        }
+        fn_emit_cp(c,cp);
+        if(c->truncated)break;
+    }
+    return PN_OK;
+}
+static pn_status_t fn_end(void *ctx,const char *name){
+    (void)name;fn_ctx_t *c=ctx;fn_frame_t *f=&c->frames[c->depth];
+    if(c->in_link && c->depth==c->link_depth){
+        if(!c->link_overflow && c->link_len && !fn_is_backlink_text(c->link_buf,c->link_len)){
+            fn_emit_byte_str(c,c->link_buf,c->link_len);
+            if(c->link_space)c->pending_space=true;
+        }
+        c->in_link=false;c->link_len=0;c->link_overflow=false;c->link_space=false;
+    }
+    if(c->capturing && f->is_block && c->len>0){c->pending_nl=true;c->pending_space=false;}
+    if(c->capturing && c->depth==c->capture_depth){
+        c->capturing=false;
+        // 若行内锚点只含空文本或短编号（如 <p><a id="fn1">[103]</a></p><p>实际注释</p>），接着捕获紧随其后的首段。
+        // If an inline anchor yielded empty/short marker text only, capture the immediately following block.
+        if(c->inline_started && c->len<=12){c->inline_started=false;c->want_next_block=true;if(c->len)c->pending_nl=true;}
+        else c->done=true;
+    }
+    if(c->depth)c->depth--;
+    return PN_OK;
+}
+static pn_status_t footnote_pass(pn_pool_t *pool,pn_epub_t *epub,const char *path,const char *id,const uint8_t salt[16],bool compat,char *out,size_t capacity,fn_ctx_t *c,bool *syntax,bool *repaired){
+    *c=(fn_ctx_t){.id=id?id:"",.out=out,.cap=capacity};
+    sheet_t sheet={.pool=pool,.epub=epub,.compat=compat};
+    pn_zip_stream_t stream={0};
+    pn_status_t s=pn_epub_resource_open(epub,path,&stream);
+    if(s==PN_OK){
+        pn_xml_input_t input={&stream,read_stream};
+        pn_xml_hooks_t hooks={fn_start,fn_end,fn_text};
+        s=body_xml(&sheet,pool,&input,&hooks,c,salt);
+    }
+    pn_zip_stream_close(&stream);
+    *syntax=sheet.syntax;*repaired=sheet.repairs!=0;
+    sheet_close(&sheet);
+    if(s==PN_OK && !c->root)s=PN_CORRUPT;
+    return s;
+}
+pn_status_t pn_xhtml_footnote(pn_pool_t *pool,pn_epub_t *epub,const char *path,const char *id,const uint8_t salt[16],char *out,size_t capacity,size_t *out_len,pn_xhtml_footnote_info_t *info){
+    if(!pool || !epub || !path || !*path || strlen(path)>=PN_ZIP_PATH_MAX || !salt || !out || capacity<2)return PN_INVALID;
+    if(id && strlen(id)>=PN_RESOURCE_FRAGMENT_MAX)return PN_LIMIT;
+    if(epub->source_guard){pn_status_t g=epub->source_guard(epub->source_guard_ctx,path);if(g!=PN_OK)return g;}
+    fn_ctx_t *c=pn_alloc_tagged(pool,PN_MEM_DOCUMENT,sizeof *c);if(!c)return PN_NO_MEMORY;
+    bool syntax=false,repaired=false;
+    pn_status_t s=footnote_pass(pool,epub,path,id,salt,false,out,capacity,c,&syntax,&repaired);
+    if(s==PN_CORRUPT && syntax){
+        s=footnote_pass(pool,epub,path,id,salt,true,out,capacity,c,&syntax,&repaired);
+        if(s==PN_OK && !repaired)s=PN_CORRUPT;
+    }
+    if(s==PN_OK){
+        while(c->len && (out[c->len-1]==' ' || out[c->len-1]=='\n'))c->len--;
+        out[c->len]=0;
+        if(info)*info=(pn_xhtml_footnote_info_t){.anchor=c->anchor,.found=c->found,.hidden=c->hidden,.truncated=c->truncated};
+        if(!c->found){pn_free(c);return PN_EMPTY;}
+        if(out_len)*out_len=c->len;
+    }
+    pn_free(c);return s;
 }

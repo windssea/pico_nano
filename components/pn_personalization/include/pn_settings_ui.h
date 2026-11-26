@@ -81,6 +81,36 @@
 #define PN_SETUI_GSTYLE_MADJ 260 ///< 260..275对应8项全局四周边距减加（0..3正文上下左右，4..7背景上下左右）/ 260..275 for 8 global margin dec/inc controls
 #define PN_SETUI_GSTYLE_CADJ 280 ///< 280..295对应8项全局阅读线与章节/页脚减加 / 280..295 for 8 global guide/chapter/footer controls
 #define PN_SETUI_KB_IME_BASE 300 ///< 300..360映射全拼中文键盘功能/候选/标点码（300 + (-key)）/ 300..360 map Chinese Pinyin IME function/candidate/punctuation codes (300 + (-key))
+#define PN_SETUI_AUTO_LOCK 370 ///< 加0–4对应自动锁屏时间档位（1/5/10/30分钟、从不）/ Plus 0–4 for auto-lock timeout presets (1/5/10/30 min, never)
+#define PN_SETUI_STATUS_BAR 380 ///< 打开可视化“状态栏设置”子页 / Open visual status-bar settings sub-page
+#define PN_SETUI_SBAR_SLOT 381 ///< 381..385点击状态栏预览的5个插槽 / 381..385 tap one of 5 preview status-bar slots
+#define PN_SETUI_SBAR_PICK 386 ///< 386..392选择插槽内容（0..6）/ 386..392 pick slot content
+#define PN_SETUI_SBAR_POS 393 ///< 393..395状态栏位置（上方/下方/关闭）/ 393..395 position (top/bottom/off)
+#define PN_SETUI_SBAR_FONT 396 ///< 396..397状态栏字号（小/中）/ 396..397 font size (small/medium)
+#define PN_SETUI_SBAR_PROG 398 ///< 398..400进度条模式（全书/本章/关闭）/ 398..400 progress bar (book/chapter/off)
+#define PN_SETUI_SBAR_MARGIN_DEC 401 ///< 状态栏距屏间距减2px / Decrease bar edge margin by 2 px
+#define PN_SETUI_SBAR_MARGIN_INC 402 ///< 状态栏距屏间距加2px / Increase bar edge margin by 2 px
+#define PN_SETUI_SBAR_RESET 403 ///< 恢复默认经典双栏 / Restore default dual-bar status layout
+#define PN_SETUI_SBAR_MODAL_CLOSE 404 ///< 关闭状态栏插槽选择弹窗 / Dismiss slot picker modal
+#define PN_SETUI_GESTURES 410 ///< 打开可视化“屏幕手势”线框页 / Open visual screen-gesture wireframe sub-page
+#define PN_SETUI_GSLOT 411 ///< 411..419点击9个手势方位胶囊 / 411..419 tap one of 9 gesture wireframe slots
+#define PN_SETUI_GACT_PICK 420 ///< 420..429在弹窗中选择手势动作 / 420..429 pick gesture action in modal
+#define PN_SETUI_GMODAL_CLOSE 430 ///< 关闭手势动作选择弹窗 / Dismiss gesture action modal
+#define PN_SETUI_TAP_ZONES 431 ///< 打开“阅读触控区域”可视化选择页 / Open visual tap-zone picker sub-page
+#define PN_SETUI_TAP_ZONE_PICK 432 ///< 432..436选择5种触控区方案 / 432..436 pick tap-zone scheme
+#define PN_SETUI_KEY_HIGHLIGHT 437 ///< 打开“三键、摘录与自动翻页”子页 / Open bottom keys, highlight & auto-turn sub-page
+#define PN_SETUI_KEY_MAP 438 ///< 438..440底部三键映射（默认/反手/双下页）/ 438..440 bottom 3-key map
+#define PN_SETUI_KEY2_SHORT 470 ///< 470..474中键短按快捷动作（0首页默认/1菜单/2全刷/3书签/4自翻）/ 470..474 KEY2 short shortcut (0 home default .. 4 auto-turn)
+#define PN_SETUI_LP_MODE 445 ///< 445..447正文长按行为（查词/摘录/关闭）/ 445..447 long-press mode
+#define PN_SETUI_AUTO_TURN_DEC 448 ///< 减小自动翻页间隔 / Decrease auto-turn interval
+#define PN_SETUI_AUTO_TURN_INC 449 ///< 增大自动翻页间隔 / Increase auto-turn interval
+#define PN_SETUI_MOTTO_EXCERPTS 450 ///< 打开“从我的摘录中选择左上角文案”子页 / Open excerpt picker for Home top-left motto
+#define PN_SETUI_MOTTO_EXCERPT_PREV 451 ///< 摘录文案列表上一页 / Previous excerpt motto page
+#define PN_SETUI_MOTTO_EXCERPT_NEXT 452 ///< 摘录文案列表下一页 / Next excerpt motto page
+#define PN_SETUI_MOTTO_EXCERPT_ITEM 453 ///< 453..458 选择本页第 0..5 条摘录设为左上角文案 / 453..458 apply excerpt 0..5 as top-left motto
+#define PN_SETUI_SBAR_POS_DUAL 460 ///< 选择自定义上下双栏模式 / Select customizable dual top+bottom status bars
+#define PN_SETUI_SBAR_BSLOT 461 ///< 461..465 点击双栏模式底栏的5个插槽 / 461..465 tap one of 5 bottom-bar slots in dual mode
+#define PN_SETUI_GSTYLE_MSTEP 466 ///< 466..468 全局边距步进倍率（×1=4px / ×5=20px / ×10=40px）/ 466..468 global margin step multiplier (x1/x5/x10)
 #define PN_SETUI_CHAR 128 ///< 加可打印ASCII（32–126）输入一个字符 / Plus printable ASCII (32–126) types one character
 typedef struct {
     char message[160]; ///< 端口提供的真实阶段/错误 / Actual phase/error supplied by the port
@@ -98,6 +128,30 @@ typedef struct {
 /// “存储与关于”页显示的信息，由调用方按实际读取填写；空串不显示猜测值。/ Information on the "storage and about" page, filled by the caller from actual reads; empty strings never show guesses.
 typedef struct {char version[32];char storage[64];char internal[48];char screen[64];} pn_settings_about_t;
 typedef pn_status_t (*pn_settings_present_fn)(void *,const pn_frame_t *,pn_refresh_t); ///< 与阅读呈现同签名 / Same signature as reader presentation
+/// 可选预加载设置快照：控制层将内存中已缓存的偏好直接传入，避免每次打开设置重复读 10 组 LittleFS 日志。
+/// Optional preloaded settings snapshot: controller passes already-cached RAM prefs so opening Settings skips redundant LittleFS journal reads.
+typedef struct {
+    bool has_flags;uint8_t flags;
+    bool has_shelf;pn_shelf_prefs_t shelf;
+    bool has_lan;char lan[PN_NETWORK_SSID_MAX+1];
+    bool has_index;bool index_wait;
+    bool has_vertical;bool vertical_turn;
+    bool has_auto_lock;uint16_t auto_lock_minutes;
+    bool has_status_bar;pn_status_bar_prefs_t status_bar;
+    bool has_gestures;pn_gesture_prefs_t gestures;
+    bool has_home;pn_home_prefs_t home;
+    bool has_global_style;pn_style_t global_style;
+    bool has_about;pn_settings_about_t about;
+} pn_settings_snapshot_t;
+/// 可选设置主屏整页帧缓存适配器（由控制层挂接到 pn_menu_cache，不引入跨组件依赖）。
+/// Optional Settings-root whole-frame cache adapter wired by the controller to pn_menu_cache without cross-component coupling.
+typedef struct {
+    void *ctx;
+    uint8_t *(*begin)(void *ctx,uint64_t key,uint64_t aux,bool *hit,bool *same_aux);
+    void (*commit)(void *ctx,uint64_t key,uint64_t aux);
+    void (*abort)(void *ctx);
+    uint32_t font_epoch; ///< 系统字体代次，换字后自动失效 / System font epoch for automatic cache invalidation
+} pn_settings_frame_cache_t;
 typedef struct {
     void *impl; ///< 初始NULL / Initially NULL
     bool active; ///< 返回后false / False after Back
@@ -105,6 +159,9 @@ typedef struct {
     int request; ///< 0或导航/对时请求，调用方处理后清零 / Zero or a navigation/time request; callers clear it after handling
     bool index_wait; ///< 开启等待完整索引，关闭首屏后后台构建 / Wait for a full index when on, build after the first frame when off
     bool vertical_turn; ///< false左右翻页，true上下翻页 / False for horizontal page turns, true for vertical page turns
+    uint16_t auto_lock_minutes; ///< 自动锁屏时间（分钟），0表示从不自动锁屏 / Auto-lock timeout in minutes; 0 disables auto-lock
+    pn_status_bar_prefs_t status_bar; ///< 当前已保存自定义状态栏配置 / Saved custom status-bar configuration
+    pn_gesture_prefs_t gestures; ///< 当前已保存屏幕手势、触控区、三键与摘录偏好 / Saved gestures, tap-zone, key-map & highlight prefs
     uint8_t flags; ///< 当前已保存翻页标志 / Saved page-turn flags
     pn_shelf_prefs_t shelf; ///< 当前已保存书架外观 / Saved shelf appearance
     pn_home_prefs_t home; ///< 当前已保存主页个性化（左上角文案与顶部背景）/ Saved Home personalization (top-left motto and top banner)
@@ -114,6 +171,11 @@ typedef struct {
 pn_status_t pn_settings_ui_open(pn_settings_ui_t *ui,pn_pool_t *pool,pn_media_t *state_media,const char *state_dir,pn_settings_present_fn present,void *ctx);
 /// 可选移交同池固定UI字体并在close时归还；空槽首次创建，槽须存活到close且期间不得使用，源失效/交接前先close并释放槽。/ Optionally move a same-pool fixed UI face in and return it on close; an empty slot is created on first use, must outlive the UI and remain unused until close, and must be closed/released before source invalidation or handoff.
 pn_status_t pn_settings_ui_open_cached(pn_settings_ui_t *,pn_pool_t *,pn_media_t *,const char *,pn_font_t *return_slot,pn_settings_present_fn,void *);
+/// 带内存快照与主屏整页缓存的快速打开入口：跳过已缓存日志重读，命中主屏缓存时免重绘直接呈现。
+/// Fast open entry with preloaded RAM snapshot and optional root frame cache: skips redundant journal I/O and reuses cached root frames.
+pn_status_t pn_settings_ui_open_fast(pn_settings_ui_t *,pn_pool_t *,pn_media_t *,const char *,pn_font_t *return_slot,const pn_settings_snapshot_t *snapshot,const pn_settings_frame_cache_t *frame_cache,pn_settings_present_fn,void *);
+/// 读取设置会话中最新的全局排版（用于同步控制层内存缓存）。/ Read latest global typesetting style from an open Settings session.
+bool pn_settings_ui_global_style(const pn_settings_ui_t *ui,pn_style_t *out);
 /// 保存成功后只重画变化的开关/分段/预览；旧提示、外部快照或显示失败后完整恢复。/ After persistence succeeds repaint changed toggles/segments/previews; restore completely after old notices, external snapshots or display failure.
 pn_status_t pn_settings_ui_event(pn_settings_ui_t *ui,int command,pn_settings_present_fn present,void *ctx);
 /// 重画。/ Repaint.
@@ -153,6 +215,18 @@ pn_status_t pn_settings_load_index(pn_media_t *,const char *,bool *);
 /// 读取上下翻页偏好；无记录默认左右翻页（false），失败保持输出，不修复未知记录。
 /// Load vertical page-turn preference; absent defaults to horizontal (false), preserving output on failure without repairing unknown records.
 pn_status_t pn_settings_load_vertical_turn(pn_media_t *,const char *,bool *);
+/// 读取自动锁屏时间（分钟）；无记录默认5分钟，0表示从不自动锁屏，失败保持输出，不修复未知记录。
+/// Load auto-lock timeout in minutes; absent defaults to 5 min, 0 disables auto-lock, preserving output on failure without repairing unknown records.
+pn_status_t pn_settings_load_auto_lock(pn_media_t *state_media,const char *state_dir,uint16_t *minutes);
+/// 自动锁屏分钟数换算毫秒（0返回0表示关闭，超上限回退默认5分钟）。/ Convert auto-lock minutes to milliseconds (0 disables; out-of-range falls back to 5 min).
+uint64_t pn_settings_auto_lock_ms(uint16_t minutes);
+/// 读取自定义状态栏配置（无记录返回默认）；同时更新运行时状态栏快照请由调用方调用 pn_status_bar_set_active。
+/// Load custom status bar preferences (absent returns default).
+pn_status_t pn_settings_load_status_bar(pn_media_t *state_media,const char *state_dir,pn_status_bar_prefs_t *prefs);
+/// 读取/保存屏幕手势、触控区、三键与长按摘录配置（无记录返回默认）。
+/// Load/save gesture, tap-zone, key-map & highlight preferences (absent returns default).
+pn_status_t pn_settings_load_gestures(pn_media_t *state_media,const char *state_dir,pn_gesture_prefs_t *prefs);
+pn_status_t pn_settings_save_gestures(pn_media_t *state_media,const char *state_dir,const pn_gesture_prefs_t *prefs);
 /// 可选注入壁纸介质与目录，用于兼容历史回退路径（不持长期租约）。/ Optionally provide wallpaper media and directory for legacy fallback (no long-lived leases).
 void pn_settings_ui_set_wallpaper_dir(pn_settings_ui_t *ui,pn_media_t *media,const char *directory);
 /// 可选注入独立首页横幅介质与目录，用于“正在阅读上方背景”选图列表（不持长期租约）。/ Optionally provide dedicated Home banner media and directory for the banner picker (no long-lived leases).

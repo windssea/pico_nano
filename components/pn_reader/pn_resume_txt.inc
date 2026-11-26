@@ -79,7 +79,7 @@ static pn_status_t resume_prepare(app_t *a, pn_read_intent_t intent, pn_reader_r
 }
 static pn_status_t resume_cache_step(pn_reader_app_t *app, bool current_only) {
     app_t *a = app ? app->impl : NULL;
-    if (!a || a->media_lost || (a->suspended && !current_only) || a->force_full || !a->reader.has_visible || a->style_preview || a->font_preview ||
+    if (!a || a->media_lost || (a->suspended && !current_only) || a->force_full || !a->reader.has_visible || a->highlight_preview || a->style_preview || a->font_preview ||
         a->font_pending || a->style_pending || a->global_pending || a->font_view || a->body_layer.paint || a->pool->speculative)
         return PN_EMPTY;
     // 离开阅读只收口当前页，不为下一页做预热或落盘。/ Leaving reading checkpoints only the current page, never warming or persisting a next page.
@@ -128,5 +128,5 @@ pn_status_t pn_reader_app_resume_cache_idle(pn_reader_app_t *app){return resume_
 pn_status_t pn_reader_app_resume_checkpoint_step(pn_reader_app_t *app){return resume_cache_step(app,true);}
 bool pn_reader_app_resume_checkpoint_pending(const pn_reader_app_t *app){
     const app_t *a=app?app->impl:NULL;
-    return a && a->resume_key_valid && pn_page_index_tf_directory() && !pn_reader_app_verify_pending(app) && !a->media_lost && a->persistent && a->resume_good && !a->force_full && !a->style_preview && !a->font_preview && !a->font_pending && !a->global_pending && !a->style_pending && !a->font_view && !a->body_layer.paint && (a->resume_dirty || pn_resume_pending_slot(&a->resume)==0);
+    return a && a->resume_key_valid && pn_page_index_tf_directory() && !pn_reader_app_verify_pending(app) && !a->media_lost && a->persistent && a->resume_good && !a->highlight_preview && !a->force_full && !a->style_preview && !a->font_preview && !a->font_pending && !a->global_pending && !a->style_pending && !a->font_view && !a->body_layer.paint && (a->resume_dirty || pn_resume_pending_slot(&a->resume)==0);
 }

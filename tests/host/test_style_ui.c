@@ -34,7 +34,8 @@ int main(void){char root[]="/tmp/pn-style-ui-XXXXXX";assert(mkdtemp(root));char 
     {pn_style_t keep=ui.draft;ui.draft.clarity=3;assert(pn_style_ui_event(&ui,PN_SUI_FIELD+10*2+1,2,present,&screen)==PN_OK && ui.draft.clarity==0);
      assert(pn_style_ui_event(&ui,PN_SUI_FIELD+10*2,2,present,&screen)==PN_OK && ui.draft.clarity==3);
      ui.draft.weight=-1;assert(pn_style_ui_event(&ui,PN_SUI_FIELD+9*2,2,present,&screen)==PN_OK && ui.draft.weight==3);
-     ui.draft.reading_line=2;assert(pn_style_ui_event(&ui,PN_SUI_FIELD+6*2+1,2,present,&screen)==PN_OK && ui.draft.reading_line==0);
+     ui.draft.reading_line=2;assert(pn_style_ui_event(&ui,PN_SUI_FIELD+6*2+1,2,present,&screen)==PN_OK && ui.draft.reading_line==3);
+     assert(pn_style_ui_event(&ui,PN_SUI_FIELD+6*2+1,2,present,&screen)==PN_OK && ui.draft.reading_line==0);
      ui.draft.margin=20;assert(pn_style_ui_event(&ui,PN_SUI_FIELD+5*2,2,present,&screen)==PN_OK && ui.draft.margin==48);
      ui.draft.pixels=72;assert(pn_style_ui_event(&ui,PN_SUI_FIELD+1,2,present,&screen)==PN_EMPTY && ui.draft.pixels==72);ui.draft=keep;}
     // 图库顺序与持久ID分离，只展示无、4、7；返回/选图均不保存。/ Gallery order is separate from IDs and lists only None, 4 and 7; Back/select never save.
@@ -63,6 +64,8 @@ int main(void){char root[]="/tmp/pn-style-ui-XXXXXX";assert(mkdtemp(root));char 
     assert(pn_style_ui_hit(&ui,500,1050)==PN_SUI_TOGGLE_BARS && !ui.draft.hide_bars);
     assert(pn_style_ui_event(&ui,PN_SUI_TOGGLE_BARS,2,present,&screen)==PN_OK && ui.draft.hide_bars==1);
     assert(pn_style_ui_hit(&ui,490,646)==PN_SUI_MARGINS);
+    /* 阅读线保留子页入口，上下位置不再重复跳转章节子页。/ Reading Line keeps the sub-page entry; Vertical Position no longer duplicates the chapter sub-page entry. */
+    assert(pn_style_ui_hit(&ui,180,910)==PN_SUI_CHAPTER && pn_style_ui_hit(&ui,180,998)==-1);
     assert(pn_style_ui_event(&ui,PN_SUI_MARGINS,2,present,&screen)==PN_OK && ui.margins && !ui.margins_from_bg);
     assert(pn_style_ui_hit(&ui,100,60)==PN_SUI_MARGINS_BACK && pn_style_ui_hit(&ui,600,90)==PN_SUI_MARGINS_RESET && pn_style_ui_hit(&ui,300,440)==PN_SUI_TOGGLE_BARS);
     /* 放大后的 108x108 边距详调命中区覆盖卡片全高，便于手指点击。/ Enlarged 108x108 margin stepper hit targets cover the full stepper row height. */

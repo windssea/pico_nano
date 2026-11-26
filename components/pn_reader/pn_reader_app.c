@@ -81,8 +81,9 @@ typedef struct {
     bool recent_recorded;
     bool recent_pending;uint64_t recent_due; ///< 首屏只标记近期记录，空闲或安全出口写入 / First display only marks recents dirty; write when idle or at safe exits
     pn_txt_progress_t bookmark_origin;
-    bool has_bookmark_origin,last_confirmed;
+    bool has_bookmark_origin,highlight_preview,last_confirmed;
     pn_reader_overlay_fn font_view;void *font_view_ctx; ///< 仅本次字体事务借用的目标页 / Destination page borrowed only during this font transaction
+    pn_reader_overlay_fn sheet_paint;void *sheet_ctx; ///< 仅本次半屏实时微调借用的叠层绘制 / Bottom half-sheet callback borrowed only during live preview
     pn_reader_body_layer_t body_layer; ///< 控制层借用的常驻正文叠层 / Persistent body decoration borrowed from the controller
     uint64_t last_now;
     bool suspended; ///< 保留已确认正文的热挂起 / Warm suspension retaining confirmed text
@@ -90,6 +91,7 @@ typedef struct {
     pn_first_paint_t first_paint; ///< 借原帧准备首屏正文，不持有额外像素 / First body preparation borrowing the original frame without extra pixels
     bool persistent,has_restore,media_lost,force_full;
     pn_refresh_policy_t refresh;pn_paper_t paper;
+    pn_highlight_t *highlights;size_t highlight_count; ///< 按需缓存的本书有效高亮，无摘录时不占内存 / Lazy-loaded live highlights (NULL when none)
     pn_font_reference_t probed;bool probed_valid;uint64_t probed_ticket; ///< 本会话同一READ租约下刚由探查完整校验的字体引用，应用时免重复整文件SHA / Font reference fully verified by this session's probe under the same READ lease, letting apply skip a second whole-file SHA
 } app_t;
 /// 输入/挂起放弃未提交包后，原页有效时只重试对应槽。/ After input/suspend cancels an uncommitted package, retry only its slot while the page remains valid.
@@ -189,6 +191,24 @@ static void update_txt_chapter_label(app_t *a){
         if(ended_nl)i++;
     }
 }
+static bool txt_offset_highlighted(const app_t *a,uint64_t off){
+    for(size_t i=0;i<a->highlight_count;i++){
+        if(!a->highlights[i].is_epub && off>=a->highlights[i].start && off<a->highlights[i].end)return true;
+    }
+    return false;
+}
+static void txt_highlights_reload(app_t *a){
+    pn_free(a->highlights);a->highlights=NULL;a->highlight_count=0;
+    if(!a->persistent || !a->state_directory[0])return;
+    pn_highlights_t hl;
+    if(pn_highlights_init(&hl,&a->state_media,&a->state_lease,a->state_directory,&a->book)!=PN_OK)return;
+    pn_highlight_t *buf=pn_alloc_tagged(a->pool,PN_MEM_LAYOUT,PN_HIGHLIGHTS_MAX*sizeof *buf);
+    if(!buf)return;
+    size_t count=0;
+    if(pn_highlights_load_all(&hl,buf,PN_HIGHLIGHTS_MAX,&count)==PN_OK && count>0){
+        a->highlights=buf;a->highlight_count=count;
+    }else pn_free(buf);
+}
 static pn_status_t paint_text(app_t *a,pn_frame_t *frame,const pn_page_glyph_t *glyphs,size_t first,size_t count,size_t total,int *guide_baseline,unsigned *missing,bool prepared){
     // 偶数边距保持4bpp半字节对齐，仅裁切正文区域。/ Even margin preserves 4bpp nibble alignment and clips the content area.
     pn_frame_t viewport={frame->pixels+pn_style_body_top(&a->style)*frame->stride+pn_style_margin_left(&a->style)/2,pn_style_body_width(&a->style),pn_style_body_height(&a->style),frame->stride};
@@ -220,12 +240,17 @@ static pn_status_t paint_text(app_t *a,pn_frame_t *frame,const pn_page_glyph_t *
                 int desc=g->heading?(body_descent*row_px/a->style.pixels):body_descent;
                 gy=g->baseline+desc+(row_px>=36?row_px/12:3)+a->style.reading_line_offset;
             }
-            pn_reader_guide_row_ex(&viewport,a->style.reading_line,a->style.reading_line_shade,gx0,gx1,gy,thickness,row_px,follow);
+            pn_reader_guide_row_custom(&viewport,a->style.reading_line,a->style.reading_line_shade,gx0,gx1,gy,thickness,a->style.reading_line_dash,a->style.reading_line_gap,row_px,follow);
         }
         int want_px=g->heading?hpx:a->style.pixels;
         int want_w=(g->heading && a->style.chapter_bold)?(a->style.weight<0?1:(a->style.weight<3?a->style.weight+1:3)):a->style.weight;
         if(want_px!=cur_px){s=ensure_size(a,want_px);if(s!=PN_OK)break;cur_px=want_px;}
         if(want_w!=cur_w){s=pn_font_weight(body(a),want_w);if(s!=PN_OK)break;cur_w=want_w;}
+        if(a->highlight_count && g->source.codepoint!=' ' && g->source.codepoint!=0x3000 && txt_offset_highlighted(a,g->source.begin)){
+            int hx0=g->x_64/64,hw=(g->advance_64+63)/64+2;if(hw<want_px/2)hw=want_px/2;
+            if(!a->style.background)pn_frame_rect(&viewport,hx0,g->baseline-want_px*88/100,hw,want_px+want_px/8,13);
+            pn_frame_rect(&viewport,hx0,g->baseline+want_px/6,hw,2,5);
+        }
         s=prepared?pn_font_chain_prerender(chain(a),&viewport,g->source.codepoint,g->x_64,g->baseline,PN_FONT_GRAY):pn_font_chain_draw(chain(a),&viewport,g->source.codepoint,g->x_64,g->baseline,PN_FONT_GRAY);
         if(s==PN_EMPTY){int x=g->x_64/64,y=g->baseline-want_px,size=want_px-4;pn_frame_rect(&viewport,x,y,size,1,0);pn_frame_rect(&viewport,x,y+size,size,1,0);pn_frame_rect(&viewport,x,y,1,size,0);pn_frame_rect(&viewport,x+size,y,1,size,0);(*missing)++;s=PN_OK;}
         else if(s!=PN_OK)break;
@@ -235,8 +260,31 @@ static pn_status_t paint_text(app_t *a,pn_frame_t *frame,const pn_page_glyph_t *
     return s;
 }
 static pn_status_t paint_footer(app_t *a,pn_frame_t *frame,const pn_reader_receipt_t *receipt,bool show_return,unsigned missing){
-    if(a->style.hide_bars){a->status=pn_w_status_snapshot();return PN_OK;}
+    if(a->style.hide_bars){
+        if(show_return && !a->draft_render){
+            unsigned long long basis=progress_basis(a,receipt->anchor);
+            pn_reader_bar_info_t info={.book_basis=(int)basis,.show_return=true};
+            pn_status_t status=pn_reader_return_bar_render(&a->ui,body(a),frame,&info,a->style.background);
+            if(status!=PN_OK)return status;
+        }
+        a->status=pn_w_status_snapshot();return PN_OK;
+    }
     update_txt_chapter_label(a);
+    unsigned long long basis=progress_basis(a,receipt->anchor);
+    if(pn_status_bar_active().enabled){
+        char book[PN_RECENT_PATH_MAX]="";
+        const char *slash=strrchr(a->book_path,'/');snprintf(book,sizeof book,"%s",slash?slash+1:a->book_path);char *dot=strrchr(book,'.');if(dot && dot!=book)*dot=0;
+        pn_reader_bar_info_t info={
+            .chapter=a->footer_chapter[0]?a->footer_chapter:book,.book=book,.section=NULL,
+            .book_basis=a->draft_render?-1:(int)basis,
+            .chapter_basis=a->draft_render?-1:(int)basis,
+            .show_return=show_return,
+            .draft_hint=a->draft_render?(a->font_render?"字体预览，设置尚未保存":"排版预览，设置尚未保存"):NULL
+        };
+        pn_status_t status=pn_reader_custom_bar_render(&a->ui,body(a),frame,&info,a->style.background);
+        if(status==PN_OK)a->status=pn_w_status_snapshot();
+        return status;
+    }
     // 页脚：支持默认（书名）、章节名、书名或隐藏名称及字号调节；预览态改为提示。
     // Footer: supports default (book title), chapter title, book title, hidden label and font size; previews show a hint.
     char left[PN_RECENT_PATH_MAX]="",right[48]="";
@@ -246,7 +294,6 @@ static pn_status_t paint_footer(app_t *a,pn_frame_t *frame,const pn_reader_recei
     else if(a->style.footer_title_mode==1 && a->footer_chapter[0])snprintf(left,sizeof left,"%s",a->footer_chapter);
     else{const char *slash=strrchr(a->book_path,'/');snprintf(left,sizeof left,"%s",slash?slash+1:a->book_path);char *dot=strrchr(left,'.');if(dot && dot!=left)*dot=0;}
     if(a->draft_render)snprintf(right,sizeof right,"点击返回设置");
-    unsigned long long basis=progress_basis(a,receipt->anchor);
     if(!a->draft_render){unsigned long long percent=basis/100;
         if(missing)snprintf(right,sizeof right,"%u 缺字 · %llu%%",missing,percent);else snprintf(right,sizeof right,"%llu%%",percent);}
     pn_status_t status=pn_reader_footer_progress_ex(&a->ui,body(a),frame,left,right,a->draft_render?-1:(int)basis,a->style.background,pn_style_footer_pixels(&a->style));if(status==PN_OK)a->status=pn_w_status_snapshot();return status;
@@ -264,8 +311,9 @@ static pn_status_t render_impl(app_t *a,pn_frame_t *frame,const pn_reader_receip
     unsigned missing=0;pn_status_t s;
     if(a->resume_pixels_ready){
         a->resume_pixels_ready=false;missing=a->resume_missing;s=ensure_body(a,a->style.pixels);
-        if(s==PN_OK && !a->style.hide_bars)s=pn_paper_region_style(&a->paper,&a->style,frame,0,PN_READER_TOP);
-        if(s==PN_OK && !a->style.hide_bars)s=pn_paper_region_style(&a->paper,&a->style,frame,PN_READER_TOP+PN_READER_HEIGHT,1216-PN_READER_TOP-PN_READER_HEIGHT);
+        int top_in=0,bot_in=0;pn_status_bar_insets(a->style.hide_bars,&top_in,&bot_in);
+        if(s==PN_OK && top_in>0)s=pn_paper_region_style(&a->paper,&a->style,frame,0,top_in);
+        if(s==PN_OK && bot_in>0)s=pn_paper_region_style(&a->paper,&a->style,frame,1216-bot_in,bot_in);
     }else if(a->first_paint.ready && frame->pixels==a->frame.pixels && pn_first_paint_matches(&a->first_paint,receipt->token,receipt->ticket)){
         pn_profile_span_t span;pn_profile_begin(&span,a->pool,"txt.first.use");
         s=pn_font_chain_validate(chain(a));missing=a->first_paint.missing;a->first_paint.ready=false;pn_profile_end(&span,s);
@@ -279,6 +327,7 @@ static pn_status_t render(app_t *a,pn_frame_t *frame,const pn_reader_receipt_t *
     pn_status_t status=render_impl(a,frame,receipt,show_return);pn_profile_end(&span,status);return status;
 }
 static pn_status_t release_app(app_t *a){
+    pn_status_bar_set_return_bar(false);
     pn_resume_close(&a->resume);
     pn_text_file_verify_close(&a->verify);
     pn_page_bitmap_close(&a->bitmap);pn_paper_close(&a->paper);
@@ -291,7 +340,7 @@ static pn_status_t release_app(app_t *a){
     if(a->font_lease.ticket)(void)pn_media_release(a->book_media,&a->font_lease);
     if(a->fallback_lease.ticket)(void)pn_media_release(a->book_media,&a->fallback_lease);
     if(a->state_lease.ticket)(void)pn_media_release(&a->state_media,&a->state_lease);
-    pn_free(a->glyphs);pn_free(a->pixels);pn_free(a);return status;
+    pn_free(a->highlights);pn_free(a->glyphs);pn_free(a->pixels);pn_free(a);return status;
 }
 static pn_status_t open_state(app_t *a,const char *directory,uint64_t now){
     if(strlen(directory)>300)return PN_LIMIT;
@@ -316,7 +365,7 @@ static pn_status_t open_state(app_t *a,const char *directory,uint64_t now){
     }
     if(s==PN_OK)a->style=saved;
     a->saved_style=a->style;a->persistent=true;
-    if(s==PN_OK && a->style.background==PN_READING_BACKGROUND_EXTERNAL){pn_status_t paper=pn_paper_open(&a->paper,a->pool,a->book_media,&a->book_lease,&a->style);if(paper==PN_CANCELLED || paper==PN_STALE_MEDIA)return paper;if(paper!=PN_OK)pn_paper_fallback(&a->paper,&a->style);}strcpy(a->state_directory,directory);return PN_OK;
+    if(s==PN_OK && a->style.background==PN_READING_BACKGROUND_EXTERNAL){pn_status_t paper=pn_paper_open(&a->paper,a->pool,a->book_media,&a->book_lease,&a->style);if(paper==PN_CANCELLED || paper==PN_STALE_MEDIA)return paper;if(paper!=PN_OK)pn_paper_fallback(&a->paper,&a->style);}strcpy(a->state_directory,directory);txt_highlights_reload(a);return PN_OK;
 }
 static void decoder_checkpoint(void *ctx,uint64_t offset,bool paragraph){app_t *a=ctx;if(offset<=4)a->checkpoint_count=0;if(a->checkpoint_count<512)a->checkpoints[a->checkpoint_count++]=(pn_reader_anchor_t){.begin=offset,.paragraph=paragraph};}
 /// 复核期间检查点写入独立数组，完成后一次换入，阅读中借用的数组不缩短。/ Verification checkpoints go to a separate array swapped in on completion, so the borrowed array never shrinks mid-reading.
@@ -451,7 +500,9 @@ static pn_status_t record_recent(app_t *a){
 }
 pn_status_t pn_reader_app_recent_item(const pn_reader_app_t *app,pn_recent_item_t *out){
     const app_t *a=app?app->impl:NULL;if(!a || !out)return PN_INVALID;if(!a->reader.has_visible)return PN_EMPTY;
-    *out=(pn_recent_item_t){.book=a->book,.source_size=a->book_file.size,.format=1,.progress=(uint16_t)progress_basis(a,a->reader.visible)};strcpy(out->path,a->book_path);return PN_OK;
+    pn_reader_anchor_t anchor=a->reader.visible;
+    if(a->highlight_preview && a->has_bookmark_origin){anchor.begin=a->bookmark_origin.source_offset;anchor.end=anchor.begin;}
+    *out=(pn_recent_item_t){.book=a->book,.source_size=a->book_file.size,.format=1,.progress=(uint16_t)progress_basis(a,anchor)};strcpy(out->path,a->book_path);return PN_OK;
 }
 /// 复用前台选择和精确亚像素偏移，只生成可回收字形，不画正文或页脚。 / Reuse foreground face selection and exact subpixel offsets, generating only reclaimable glyphs without painting body/footer.
 static pn_status_t warm_glyph(void *ctx,const pn_page_glyph_t *g){
@@ -536,6 +587,14 @@ static pn_status_t index_layout(app_t *a){
     if(s==PN_CANCELLED || s==PN_STALE_MEDIA)return s;
     a->index_generation=a->reader.token.generation;if(s==PN_OK)a->reader.index=&a->page_index;return PN_OK;
 }
+/* 半屏实时微调叠层：在正文帧下半区叠画控制卡，不分配额外画布。/ Live half-sheet overlay: paint controls on the bottom half of the body frame without extra framebuffers. */
+static pn_status_t paint_sheet(app_t *a,pn_frame_t *frame){
+    if(!a->ui.impl){pn_text_source_t source=pn_font_builtin_source();pn_status_t s=pn_font_open(&a->ui,a->pool,&source,28);if(s!=PN_OK)return s;}
+    int original=a->ui.pixels;pn_status_t status=pn_font_size(&a->ui,28);
+    if(status==PN_OK)status=a->sheet_paint(a->sheet_ctx,&a->ui,body(a),frame);
+    if(a->ui.impl){pn_status_t restored=pn_font_size(&a->ui,original);if(status==PN_OK)status=restored;}
+    return status;
+}
 /* 字体事务直接画最终目标页，使用候选正文字体；不递归推屏。/ Font transactions paint their final destination with the candidate body font, without recursive presentation. */
 static pn_status_t paint_font_view(app_t *a,pn_frame_t *frame){
     pn_status_t status=ensure_body(a,a->style.pixels);
@@ -546,6 +605,21 @@ static pn_status_t paint_font_view(app_t *a,pn_frame_t *frame){
     pn_w_font_scope_end(&scope);
     if(a->ui.impl){pn_status_t restored=pn_font_size(&a->ui,original);if(status==PN_OK)status=restored;}
     return status;
+}
+/// 同步底部「返回跳转前位置」独立保留高度；仅当正文可用高度变化时才重排，避免无底栏模式下返回条遮挡正文。
+/// Sync reserved bottom height for the return-to-origin strip; reflows only when body height actually changes so prose is never covered.
+static bool sync_return_bar(app_t *a,bool want){
+    if(!a)return false;
+    int before_h=a->reader.layout.height;
+    pn_status_bar_set_return_bar(want);
+    pn_layout_t next;
+    if(layout(a,&next)!=PN_OK || next.height==before_h)return false;
+    if(pn_reader_reflow(&a->reader,&next)==PN_OK){
+        (void)pn_display_set_token(&a->display,a->reader.token);
+    }
+    pn_page_bitmap_invalidate(&a->bitmap);
+    a->first_paint.ready=false;a->resume_good=false;a->resume_pixels_ready=false;a->force_full=true;
+    return true;
 }
 static pn_status_t step_location(pn_reader_app_t *app,pn_reader_action_t action,bool jump,uint64_t jump_offset,uint64_t now,
     pn_reader_present_fn present,void *ctx,bool *committed,int return_hint){
@@ -562,47 +636,57 @@ static pn_status_t step_location(pn_reader_app_t *app,pn_reader_action_t action,
     else if(action==PN_APP_NEXT)intent=PN_READ_NEXT;
     else if(action==PN_APP_PREVIOUS)intent=PN_READ_PREVIOUS;
     else if(action==PN_APP_BEGINNING)intent=PN_READ_FIRST;
-    // 确认继续阅读后丢弃跳转返回点；候选页先不画返回入口。/ Discard the jump origin after confirmed continued reading; omit the entry from the candidate page.
-    bool dismiss_return=!jump && (action==PN_APP_NEXT || action==PN_APP_PREVIOUS || action==PN_APP_BEGINNING);
+    // 确认继续阅读后丢弃跳转返回点；摘录预览态保留返回点并禁止覆写进度与近期记录。
+    // Discard the jump origin after confirmed continued reading; highlight preview locks the return anchor and suppresses progress/recent writes.
+    bool dismiss_return=!jump && (action==PN_APP_BEGINNING || (!a->highlight_preview && (action==PN_APP_NEXT || action==PN_APP_PREVIOUS)));
+    bool show_return=dismiss_return?false:return_hint<0?a->has_bookmark_origin:return_hint!=0;
+    bool prev_return_bar=pn_status_bar_return_bar();
+    bool return_resized=sync_return_bar(a,!a->draft_render && !a->font_view && show_return);
     pn_reader_receipt_t receipt;bool prepared=false;
     if(a->unshown_layout){
         prepared=pn_reader_prepared(&a->reader,&receipt)==PN_OK;
-        if(prepared && (action!=PN_APP_OPEN || jump || a->font_view || receipt.intent!=intent)){
+        if(prepared && (return_resized || action!=PN_APP_OPEN || jump || a->font_view || receipt.intent!=intent)){
             (void)pn_reader_complete(&a->reader,&receipt,false,now);prepared=false;
         }
         a->unshown_layout=false;
     }
     pn_status_t s=index_layout(a);
-    if(s!=PN_OK){if(prepared)(void)pn_reader_complete(&a->reader,&receipt,false,now);return s;}
+    if(s!=PN_OK){if(prepared)(void)pn_reader_complete(&a->reader,&receipt,false,now);if(return_resized)(void)sync_return_bar(a,prev_return_bar);return s;}
     if(prepared){
         s=a->reader.decoder.source.validate?a->reader.decoder.source.validate(a->reader.decoder.source.ctx):PN_OK;
         if(s!=PN_OK)(void)pn_reader_complete(&a->reader,&receipt,false,now);
     }else{
-        s=(!jump && action!=PN_APP_BEGINNING)?resume_prepare(a,intent,&receipt):PN_EMPTY;
+        s=(!return_resized && !jump && action!=PN_APP_BEGINNING)?resume_prepare(a,intent,&receipt):PN_EMPTY;
         if(s==PN_EMPTY)s=pn_reader_prepare(&a->reader,intent,offset,&receipt);
     }
-    if(s!=PN_OK)return s;
+    if(s!=PN_OK){if(return_resized)(void)sync_return_bar(a,prev_return_bar);return s;}
     pn_draw_lease_t lease={0};pn_frame_t *frame=NULL;s=pn_display_begin_draw(&a->display,a->reader.token,&lease,&frame);
-    if(s==PN_OK)s=a->font_view?paint_font_view(a,frame):render(a,frame,&receipt,dismiss_return?false:return_hint<0?a->has_bookmark_origin:return_hint!=0);
+    if(s==PN_OK)s=a->font_view?paint_font_view(a,frame):render(a,frame,&receipt,show_return);
     if(s==PN_OK && !a->font_view && a->body_layer.paint)s=a->body_layer.paint(a->body_layer.ctx,frame);
+    if(s==PN_OK && !a->font_view && a->sheet_paint)s=paint_sheet(a,frame);
     bool turn=intent==PN_READ_NEXT || intent==PN_READ_PREVIOUS;
-    pn_refresh_t profile=pn_refresh_policy_next(&a->refresh,!a->reader.has_visible || a->force_full,turn);
+    pn_refresh_t profile=a->sheet_paint?PN_REFRESH_GL16:pn_refresh_policy_next(&a->refresh,!a->reader.has_visible || a->force_full,turn);
     if(s==PN_OK)s=pn_display_publish(&a->display,&lease,receipt.ticket,profile);
-    if(s!=PN_OK){if(lease.ticket)(void)pn_display_discard(&a->display,&lease);(void)pn_reader_complete(&a->reader,&receipt,false,now);return s;}
-    pn_display_job_t job;s=pn_display_start(&a->display,&job);if(s!=PN_OK){(void)pn_reader_complete(&a->reader,&receipt,false,now);return s;}
+    if(s!=PN_OK){if(lease.ticket)(void)pn_display_discard(&a->display,&lease);(void)pn_reader_complete(&a->reader,&receipt,false,now);if(return_resized)(void)sync_return_bar(a,prev_return_bar);return s;}
+    pn_display_job_t job;s=pn_display_start(&a->display,&job);if(s!=PN_OK){(void)pn_reader_complete(&a->reader,&receipt,false,now);if(return_resized)(void)sync_return_bar(a,prev_return_bar);return s;}
     pn_status_t shown=present(ctx,job.frame,job.profile);pn_status_t completed=pn_display_complete(&a->display,&job,shown==PN_OK);
-    if(!a->font_view && a->body_layer.complete)a->body_layer.complete(a->body_layer.ctx,job.frame,shown==PN_OK && completed==PN_OK);
-    if(shown!=PN_OK || completed!=PN_OK)a->force_full=true;
+    if(!a->font_view && !a->sheet_paint && a->body_layer.complete)a->body_layer.complete(a->body_layer.ctx,job.frame,shown==PN_OK && completed==PN_OK);
+    if(shown!=PN_OK || completed!=PN_OK || a->sheet_paint){if((shown!=PN_OK || completed!=PN_OK) && return_resized)(void)sync_return_bar(a,prev_return_bar);a->force_full=true;}
     else {a->force_full=false;pn_refresh_policy_commit(&a->refresh,profile,turn);}
+    pn_save_policy_t *saved_policy=a->reader.save;
+    if(a->highlight_preview)a->reader.save=NULL;
     pn_status_t confirmed=pn_reader_complete(&a->reader,&receipt,shown==PN_OK && completed==PN_OK,now);
+    a->reader.save=saved_policy;
     if(shown!=PN_OK)return shown;
     if(completed!=PN_OK)return completed;
     if(confirmed!=PN_OK)return confirmed;
     a->last_confirmed=true;a->resume_dirty=a->resume_next_dirty=true;
     if(dismiss_return)a->has_bookmark_origin=false;
     if(committed)*committed=true;
-    if(a->persistent && (!a->recent_recorded || progress_basis(a,a->reader.visible)>=10000))a->recent_pending=true;
-    if(a->recent_pending)a->recent_due=now>UINT64_MAX-1500?UINT64_MAX:now+1500;
+    if(!a->highlight_preview){
+        if(a->persistent && (!a->recent_recorded || progress_basis(a,a->reader.visible)>=10000))a->recent_pending=true;
+        if(a->recent_pending)a->recent_due=now>UINT64_MAX-1500?UINT64_MAX:now+1500;
+    }
     return a->persistent?pn_save_policy_tick(&a->save,now):PN_OK;
 }
 pn_status_t pn_reader_app_step(pn_reader_app_t *app,pn_reader_action_t action,uint64_t now,pn_reader_present_fn present,void *ctx){
@@ -634,11 +718,12 @@ pn_status_t pn_reader_app_suspend(pn_reader_app_t *app,uint64_t now){
     if(a->media_lost)return PN_STALE_MEDIA;
     if(!a->reader.has_visible || a->force_full || a->style_preview || a->font_preview || a->font_pending || a->global_pending || a->style_pending)return PN_BUSY;
     pn_status_t status=pn_media_validate(a->book_media,&a->book_lease);if(status!=PN_OK)return status;
-    // 首页可直接合并已确认条目；近期日志在首显后提交，释放/关闭仍强制保存。/ Home can merge the confirmed item directly; commit recents after first display, with mandatory saving before release/close.
-    if(a->persistent)a->recent_pending=true;
+    // 首页可直接合并已确认条目；近期日志在首显后提交，释放/关闭仍强制保存；摘录预览态保留原进度。
+    // Home can merge the confirmed item directly; commit recents after first display, with mandatory saving before release/close; highlight preview preserves original recents.
+    if(a->persistent && !a->highlight_preview)a->recent_pending=true;
     // 页码索引只是可重建缓存，不再挡在离开阅读后的首显之前；由调用者空闲写出，关闭仍强制写出。
     // The page index is a rebuildable cache and no longer precedes the first display after leaving the reader; callers write it when idle and close still forces it.
-    if(status==PN_OK){a->last_now=now;a->suspended=true;}return status;
+    if(status==PN_OK){pn_status_bar_set_return_bar(false);a->last_now=now;a->suspended=true;}return status;
 }
 bool pn_reader_app_deferred_pending(const pn_reader_app_t *app){if(!app || !app->impl)return false;const app_t *a=app->impl;return (a->persistent && (a->save.dirty || a->recent_pending)) || pn_page_index_pending(&a->page_index);}
 pn_status_t pn_reader_app_deferred_flush(pn_reader_app_t *app){
@@ -663,8 +748,19 @@ pn_status_t pn_reader_app_status_refresh(pn_reader_app_t *app,pn_reader_present_
     if(current.battery==a->status.battery && current.charging==a->status.charging && !strcmp(current.clock,a->status.clock))return PN_EMPTY;
     // 可选续读包可能借用正文帧，重绘前先撤回；不写进度。/ Revoke a disposable resume writer's frame borrow before repainting; no progress writes.
     resume_abort_retry(a);
-    status=pn_paper_region_style(&a->paper,&a->style,&a->frame,0,PN_READER_TOP);
-    if(status==PN_OK)status=pn_reader_status_text(&a->ui,&a->frame);
+    if(pn_status_bar_active().enabled){
+        if(pn_status_bar_active().position==PN_SBAR_POS_OFF){a->status=current;return PN_EMPTY;}
+        int top_in=0,bot_in=0;pn_status_bar_insets(false,&top_in,&bot_in);
+        if(a->style.background==PN_READING_BACKGROUND_EXTERNAL){
+            if(top_in>0)status=pn_paper_region_style(&a->paper,&a->style,&a->frame,0,top_in);
+            if(status==PN_OK && bot_in>0)status=pn_paper_region_style(&a->paper,&a->style,&a->frame,1216-bot_in,bot_in);
+        }
+        pn_reader_receipt_t fake={.anchor=a->reader.visible};
+        if(status==PN_OK)status=paint_footer(a,&a->frame,&fake,a->has_bookmark_origin,0);
+    }else{
+        status=pn_paper_region_style(&a->paper,&a->style,&a->frame,0,PN_READER_TOP);
+        if(status==PN_OK)status=pn_reader_status_text(&a->ui,&a->frame);
+    }
     if(status==PN_OK)status=present(ctx,&a->frame,PN_REFRESH_GL16);
     if(status==PN_OK)a->status=current;
     return status;
@@ -676,9 +772,12 @@ pn_status_t pn_reader_app_resume(pn_reader_app_t *app,uint64_t now,pn_reader_pre
     if(!a->suspended)return PN_BUSY;
     pn_status_t status=a->media_lost?PN_STALE_MEDIA:pn_media_validate(a->book_media,&a->book_lease);if(status!=PN_OK)return status;
     pn_w_status_snapshot_t current=pn_w_status_snapshot();
-    if(!a->style.hide_bars && a->ui.impl && (current.battery!=a->status.battery || current.charging!=a->status.charging || strcmp(current.clock,a->status.clock)) && pn_paper_region_style(&a->paper,&a->style,&a->frame,0,PN_READER_TOP)==PN_OK && pn_reader_status_text(&a->ui,&a->frame)==PN_OK)a->status=current;
+    if(!a->style.hide_bars && a->ui.impl && (current.battery!=a->status.battery || current.charging!=a->status.charging || strcmp(current.clock,a->status.clock))){
+        if(pn_status_bar_active().enabled){pn_reader_receipt_t fake={.anchor=a->reader.visible};if(paint_footer(a,&a->frame,&fake,a->has_bookmark_origin,0)==PN_OK)a->status=current;}
+        else if(pn_paper_region_style(&a->paper,&a->style,&a->frame,0,PN_READER_TOP)==PN_OK && pn_reader_status_text(&a->ui,&a->frame)==PN_OK)a->status=current;
+    }
     status=present(ctx,&a->frame,PN_REFRESH_GC16);a->last_now=now;
-    if(status==PN_OK){a->suspended=false;a->force_full=false;a->refresh.turns=0;}return status;
+    if(status==PN_OK){pn_status_bar_set_return_bar(a->has_bookmark_origin);a->suspended=false;a->force_full=false;a->refresh.turns=0;}return status;
 }
 pn_status_t pn_reader_app_retained_source(const pn_reader_app_t *app,pn_media_t *media,const char *path){
     if(!app || !app->impl || !media || !path)return PN_INVALID;
@@ -768,7 +867,7 @@ pn_status_t pn_reader_app_close(pn_reader_app_t *app,uint64_t now){
     if(a->global_pending){pn_status_t saved=global_write(a,&a->global_fonts);if(saved!=PN_OK)return saved;a->global_pending=false;}
     if(a->font_pending){pn_status_t saved=font_write(a,&a->pending_record);if(saved!=PN_OK)return saved;a->font_pending=false;}
     if(a->persistent && a->style_pending){pn_status_t s=pn_style_save(&a->style_io,&a->book,&a->style);if(s!=PN_OK)return s;a->saved_style=a->style;a->style_pending=false;}
-    if(a->persistent && a->reader.has_visible){pn_status_t history=record_recent(a);if(history!=PN_OK)return history;}
+    if(a->persistent && a->reader.has_visible && !a->highlight_preview){pn_status_t history=record_recent(a);if(history!=PN_OK)return history;}
     pn_status_t s=release_app(a);app->impl=NULL;return s;
 }
 
@@ -816,9 +915,11 @@ pn_status_t pn_reader_app_bookmark_jump(pn_reader_app_t *app,uint64_t id,uint64_
     pn_bookmarks_t marks;pn_status_t status=bookmarks(app,&marks);if(status!=PN_OK)return status;
     pn_txt_progress_t position,before;status=pn_bookmarks_position(&marks,id,&position);if(status!=PN_OK)return status;
     status=pn_reader_app_progress(app,&before);if(status!=PN_OK)return status;
+    app_t *a=app->impl;bool prev_preview=a->highlight_preview;a->highlight_preview=false;
     bool committed=false;status=step_location(app,PN_APP_OPEN,true,position.source_offset,now,present,ctx,&committed,1);
     // 保存可能失败而画面已确认，以本次显示确认决定返回点。/ Saving may fail after confirmation; this presentation confirmation controls the return anchor.
-    if(committed){app_t *a=app->impl;a->bookmark_origin=before;a->has_bookmark_origin=true;}
+    if(committed){a->bookmark_origin=before;a->has_bookmark_origin=true;}
+    else a->highlight_preview=prev_preview;
     return status;
 }
 pn_status_t pn_reader_app_jump_percent(pn_reader_app_t *app,unsigned basis_points,uint64_t now,pn_reader_present_fn present,void *ctx){
@@ -827,16 +928,20 @@ pn_status_t pn_reader_app_jump_percent(pn_reader_app_t *app,unsigned basis_point
     pn_txt_progress_t before;pn_status_t status=pn_reader_app_progress(app,&before);if(status!=PN_OK)return status;
     uint64_t offset=before.source_size/10000u*basis_points+before.source_size%10000u*basis_points/10000u; // 分步算以免溢出 / Split to avoid overflow
     {app_t *a=app->impl;uint64_t aligned=0;status=pn_reader_align(&a->reader,offset,&aligned);if(status!=PN_OK)return status;offset=aligned;}
+    app_t *a=app->impl;bool prev_preview=a->highlight_preview;a->highlight_preview=false;
     bool committed=false;status=step_location(app,PN_APP_OPEN,true,offset,now,present,ctx,&committed,1);
-    if(committed){app_t *a=app->impl;a->bookmark_origin=before;a->has_bookmark_origin=true;}
+    if(committed){a->bookmark_origin=before;a->has_bookmark_origin=true;}
+    else a->highlight_preview=prev_preview;
     return status;
 }
 pn_status_t pn_reader_app_bookmark_return(pn_reader_app_t *app,uint64_t now,pn_reader_present_fn present,void *ctx){
     if(app && app->impl)((app_t *)app->impl)->last_confirmed=false;
     if(!app || !app->impl)return PN_INVALID;
     app_t *a=app->impl;if(!a->has_bookmark_origin)return PN_EMPTY;
+    bool prev_preview=a->highlight_preview;a->highlight_preview=false;
     bool committed=false;pn_status_t status=step_location(app,PN_APP_OPEN,true,a->bookmark_origin.source_offset,now,present,ctx,&committed,0);
     if(committed)a->has_bookmark_origin=false;
+    else a->highlight_preview=prev_preview;
     return status;
 }
 
@@ -891,6 +996,20 @@ static pn_status_t preview_style(pn_reader_app_t *app,const pn_style_t *style,ui
 }
 pn_status_t pn_reader_app_style_preview(pn_reader_app_t *app,const pn_style_t *style,uint64_t now,pn_reader_present_fn present,void *ctx){
     return preview_style(app,style,now,present,ctx,true);
+}
+pn_status_t pn_reader_app_style_preview_sheet(pn_reader_app_t *app,const pn_style_t *style,pn_reader_overlay_fn sheet,void *sheet_ctx,uint64_t now,pn_reader_present_fn present,void *ctx){
+    if(!app || !app->impl || !sheet)return PN_INVALID;
+    app_t *a=app->impl;if(a->sheet_paint)return PN_BUSY;
+    a->sheet_paint=sheet;a->sheet_ctx=sheet_ctx;
+    pn_status_t s=preview_style(app,style,now,present,ctx,false);
+    a->sheet_paint=NULL;a->sheet_ctx=NULL;return s;
+}
+pn_status_t pn_reader_app_relayout_chrome(pn_reader_app_t *app,uint64_t now,pn_reader_present_fn present,void *ctx){
+    if(!app || !app->impl || !present)return PN_INVALID;
+    app_t *a=app->impl;if(!a->reader.has_visible)return PN_EMPTY;if(a->media_lost)return PN_STALE_MEDIA;
+    pn_status_t s=change_layout(a,&a->style);if(s!=PN_OK)return s;
+    a->force_full=true;
+    return step_location(app,PN_APP_OPEN,true,a->reader.visible.begin,now,present,ctx,NULL,-1);
 }
 pn_status_t pn_reader_app_style_apply(pn_reader_app_t *app,const pn_style_t *style,uint64_t now,pn_reader_present_fn present,void *ctx){
     pn_status_t status=preview_style(app,style,now,present,ctx,false);if(!pn_reader_app_last_confirmed(app))return status;
@@ -1169,4 +1288,130 @@ pn_status_t pn_reader_app_word_at(pn_reader_app_t *app,int x,int y,char out[][PN
     size_t n=pn_stardict_extract_candidates(line_cps,line_len,tap_idx,out,max_out);
     if(count_out)*count_out=n;
     return n?PN_OK:PN_EMPTY;
+}
+
+static bool hl_is_sentence_end(uint32_t cp){
+    return cp==0x3002u || cp==0xff01u || cp==0xff1fu || cp==0xff1bu || cp=='.' || cp=='!' || cp=='?' || cp==';' || cp==10;
+}
+static bool hl_is_closing_quote(uint32_t cp){
+    return cp==0x201du || cp==0x2019u || cp==0x300du || cp==0x300fu || cp==0xff09u || cp=='"' || cp=='\'' || cp==')';
+}
+static size_t hl_encode_utf8(uint32_t cp,char out[4]){
+    if(cp<0x80u){out[0]=(char)cp;return 1;}
+    if(cp<0x800u){out[0]=(char)(0xc0u|(cp>>6));out[1]=(char)(0x80u|(cp&0x3fu));return 2;}
+    if(cp<0x10000u){out[0]=(char)(0xe0u|(cp>>12));out[1]=(char)(0x80u|((cp>>6)&0x3fu));out[2]=(char)(0x80u|(cp&0x3fu));return 3;}
+    out[0]=(char)(0xf0u|(cp>>18));out[1]=(char)(0x80u|((cp>>12)&0x3fu));out[2]=(char)(0x80u|((cp>>6)&0x3fu));out[3]=(char)(0x80u|(cp&0x3fu));return 4;
+}
+static pn_status_t txt_sentence_at(app_t *a,int x,int y,pn_highlight_t *cand){
+    if(a->media_lost || a->suspended || !a->reader.has_visible)return PN_EMPTY;
+    if(!a->reader.page.valid || !a->reader.page.count){
+        if(a->reader.preparing)return PN_BUSY;
+        pn_text_reader_t work=a->reader.decoder;work.cursor=a->reader.visible.begin;
+        pn_status_t ps=pn_text_paginate(&work,&a->reader.layout,&a->reader.metrics,a->reader.visible.paragraph,&a->reader.page);
+        if(ps!=PN_OK || !a->reader.page.valid || !a->reader.page.count)return PN_EMPTY;
+    }
+    int vx=x-pn_style_margin_left(&a->style),vy=y-pn_style_body_top(&a->style);
+    if(vx<-24 || vx>pn_style_body_width(&a->style)+24 || vy<-24 || vy>pn_style_body_height(&a->style)+24)return PN_EMPTY;
+    const pn_page_glyph_t *glyphs=a->reader.page.glyphs;size_t total=a->reader.page.count;
+    int hpx=txt_heading_pixels(&a->style);
+    size_t best=SIZE_MAX;int best_dist=INT_MAX;
+    for(size_t i=0;i<total;i++){
+        uint32_t cp=glyphs[i].source.codepoint;if(cp==10 || cp==9 || cp==' ' || cp==0x3000)continue;
+        int px=glyphs[i].heading?hpx:a->style.pixels;
+        int x0=glyphs[i].x_64/64,x1=(glyphs[i].x_64+glyphs[i].advance_64+63)/64;
+        int cy=glyphs[i].baseline-px*3/8;
+        int dx=(vx<x0)?(x0-vx):(vx>x1)?(vx-x1):0;
+        int dy=vy-cy;if(dy<0)dy=-dy;
+        int d=dx+dy*2;
+        if(dy<=a->reader.layout.line_height && dx<=px*2 && d<best_dist){best_dist=d;best=i;}
+    }
+    if(best==SIZE_MAX)return PN_EMPTY;
+    // 向前后扩展至整句起止。/ Expand backward and forward to full sentence boundaries.
+    size_t s=best,e=best+1;
+    while(s>0 && !hl_is_sentence_end(glyphs[s-1].source.codepoint))s--;
+    while(s<e && (glyphs[s].source.codepoint==' ' || glyphs[s].source.codepoint==0x3000 || glyphs[s].source.codepoint==10 || glyphs[s].source.codepoint==9))s++;
+    while(e<total && !hl_is_sentence_end(glyphs[e-1].source.codepoint))e++;
+    while(e<total && hl_is_closing_quote(glyphs[e].source.codepoint))e++;
+    while(e>s && (glyphs[e-1].source.codepoint==10 || glyphs[e-1].source.codepoint==9 || glyphs[e-1].source.codepoint==' '))e--;
+    if(s>=e)return PN_EMPTY;
+    memset(cand,0,sizeof *cand);
+    cand->book=a->book;cand->is_epub=false;
+    cand->start=glyphs[s].source.begin;cand->end=glyphs[e-1].source.end;
+    size_t len=0;
+    for(size_t i=s;i<e && len+5<sizeof cand->text;i++){
+        uint32_t cp=glyphs[i].source.codepoint;if(cp==10 || cp==9)continue;
+        char u[4];size_t un=hl_encode_utf8(cp,u);
+        if(len+un>=sizeof cand->text)break;
+        memcpy(cand->text+len,u,un);len+=un;
+    }
+    if(len>=sizeof cand->text)len=sizeof cand->text-1;
+    cand->text[len]=0;
+    cand->text_hash=pn_highlight_text_hash(cand->text);
+    return len?PN_OK:PN_EMPTY;
+}
+pn_status_t pn_reader_app_highlight_at(pn_reader_app_t *app,int x,int y,bool *highlighted){
+    if(highlighted)*highlighted=false;
+    if(!app || !app->impl || !highlighted)return PN_INVALID;
+    app_t *a=app->impl;pn_highlight_t cand;
+    pn_status_t s=txt_sentence_at(a,x,y,&cand);if(s!=PN_OK)return s;
+    for(size_t i=0;i<a->highlight_count;i++){
+        if(!a->highlights[i].is_epub && ((cand.text_hash && a->highlights[i].text_hash==cand.text_hash) || (a->highlights[i].start<cand.end && cand.start<a->highlights[i].end))){
+            *highlighted=true;break;
+        }
+    }
+    return PN_OK;
+}
+pn_status_t pn_reader_app_highlight_toggle(pn_reader_app_t *app,int x,int y,uint64_t now,pn_reader_present_fn present,void *ctx,bool *added,char *excerpt,size_t excerpt_cap){
+    if(added)*added=false;
+    if(excerpt && excerpt_cap)excerpt[0]=0;
+    if(!app || !app->impl)return PN_INVALID;
+    app_t *a=app->impl;if(!a->persistent)return PN_UNSUPPORTED;
+    pn_highlight_t cand;pn_status_t s=txt_sentence_at(a,x,y,&cand);if(s!=PN_OK)return s;
+    pn_highlights_t hl;s=pn_highlights_init(&hl,&a->state_media,&a->state_lease,a->state_directory,&a->book);if(s!=PN_OK)return s;
+    bool did_add=false;uint64_t hid=0;
+    s=pn_highlights_toggle(&hl,&cand,&did_add,&hid);if(s!=PN_OK)return s;
+    txt_highlights_reload(a);
+    pn_page_bitmap_invalidate(&a->bitmap);a->resume_good=false;a->first_paint.ready=false;a->force_full=true;
+    if(added)*added=did_add;
+    if(excerpt && excerpt_cap)snprintf(excerpt,excerpt_cap,"%s",cand.text);
+    if(present)s=step_location(app,PN_APP_OPEN,false,0,now,present,ctx,NULL,-1);
+    return s;
+}
+pn_status_t pn_reader_app_highlight_list(pn_reader_app_t *app,uint64_t after,pn_highlight_t *items,size_t capacity,size_t *count,bool *more){
+    if(count)*count=0;
+    if(more)*more=false;
+    if(!app || !app->impl || !count || !more)return PN_INVALID;
+    app_t *a=app->impl;if(!a->persistent)return PN_UNSUPPORTED;
+    pn_highlights_t hl;pn_status_t s=pn_highlights_init(&hl,&a->state_media,&a->state_lease,a->state_directory,&a->book);
+    return s==PN_OK?pn_highlights_list(&hl,after,items,capacity,count,more):s;
+}
+pn_status_t pn_reader_app_highlight_delete(pn_reader_app_t *app,uint64_t id){
+    if(!app || !app->impl)return PN_INVALID;
+    app_t *a=app->impl;if(!a->persistent)return PN_UNSUPPORTED;
+    pn_highlights_t hl;pn_status_t s=pn_highlights_init(&hl,&a->state_media,&a->state_lease,a->state_directory,&a->book);
+    if(s==PN_OK)s=pn_highlights_delete(&hl,id);
+    if(s==PN_OK){txt_highlights_reload(a);pn_page_bitmap_invalidate(&a->bitmap);a->resume_good=false;a->force_full=true;}
+    return s;
+}
+pn_status_t pn_reader_app_highlight_jump(pn_reader_app_t *app,uint64_t id,uint64_t now,pn_reader_present_fn present,void *ctx){
+    if(app && app->impl)((app_t *)app->impl)->last_confirmed=false;
+    if(!app || !app->impl || !present)return PN_INVALID;
+    app_t *a=app->impl;if(!a->persistent)return PN_UNSUPPORTED;if(a->media_lost)return PN_STALE_MEDIA;
+    pn_highlights_t hl;pn_status_t s=pn_highlights_init(&hl,&a->state_media,&a->state_lease,a->state_directory,&a->book);if(s!=PN_OK)return s;
+    pn_highlight_t item;s=pn_highlights_get(&hl,id,&item);if(s!=PN_OK)return s;
+    pn_txt_progress_t before={0};bool has_before=false;
+    if(a->reader.has_visible && pn_reader_app_progress(app,&before)==PN_OK)has_before=true;
+    else if(a->has_restore){before=a->restored;has_before=true;}
+    uint64_t aligned=item.start;
+    if(pn_reader_align(&a->reader,item.start,&aligned)!=PN_OK)aligned=item.start;
+    bool prev_preview=a->highlight_preview;
+    a->highlight_preview=true;
+    bool committed=false;
+    s=step_location(app,PN_APP_OPEN,true,aligned,now,present,ctx,&committed,(has_before || a->has_bookmark_origin)?1:0);
+    if(committed){
+        if(!a->has_bookmark_origin && has_before){a->bookmark_origin=before;a->has_bookmark_origin=true;}
+    }else{
+        a->highlight_preview=prev_preview;
+    }
+    return s;
 }

@@ -14,6 +14,22 @@
 static bool live(const pn_bookmark_ui_t *u){return u && ((u->reader && u->reader->impl) || (u->epub && u->epub->impl));}
 static bool confirmed(const pn_bookmark_ui_t *u){return u->epub?pn_epub_app_last_confirmed(u->epub):pn_reader_app_last_confirmed(u->reader);}
 static pn_status_t page_list(pn_bookmark_ui_t *u,uint64_t cursor,pn_txt_bookmark_t *items,int *sections,size_t *count,bool *more){
+    if(u->tab==1){
+        pn_highlight_t hl[PN_BOOKMARK_UI_ROWS];
+        pn_status_t status=u->epub?pn_epub_app_highlight_list(u->epub,cursor,hl,PN_BOOKMARK_UI_ROWS,count,more)
+            :pn_reader_app_highlight_list(u->reader,cursor,hl,PN_BOOKMARK_UI_ROWS,count,more);
+        if(status==PN_OK){
+            for(size_t i=0;i<*count;i++){
+                u->highlights[i]=hl[i];
+                items[i]=(pn_txt_bookmark_t){.id=hl[i].id};
+                size_t n=strlen(hl[i].text);if(n>PN_BOOKMARK_LABEL_MAX)n=PN_BOOKMARK_LABEL_MAX;
+                while(n>0 && ((unsigned char)hl[i].text[n]&0xc0)==0x80)n--;
+                memcpy(items[i].label,hl[i].text,n);items[i].label[n]=0;
+                sections[i]=0;
+            }
+        }
+        return status;
+    }
     if(!u->epub)return pn_reader_app_bookmark_list(u->reader,cursor,items,PN_BOOKMARK_UI_ROWS,count,more);
     pn_epub_bookmark_t marks[PN_BOOKMARK_UI_ROWS];pn_status_t status=pn_epub_app_bookmark_list(u->epub,cursor,marks,PN_BOOKMARK_UI_ROWS,count,more);
     if(status==PN_OK)for(size_t i=0;i<*count;i++){items[i]=(pn_txt_bookmark_t){.id=marks[i].id};memcpy(items[i].label,marks[i].label,sizeof items[i].label);
@@ -88,41 +104,62 @@ static bool failed(const pn_bookmark_ui_t *u){return u->notice && u->notice!=sav
 static pn_status_t paint(void *ctx,pn_font_t *font,pn_font_t *metadata,pn_frame_t *frame){
     pn_bookmark_ui_t *u=ctx;if(u->count>PN_BOOKMARK_UI_ROWS || frame->width!=684 || frame->height!=1216 || frame->stride<342)return PN_INVALID;
     pn_frame_clear(frame,15);
-    pn_status_t status=pn_w_header(font,frame,u->mode==PN_BUI_LIST?"< 返回阅读":"< 返回",u->mode==PN_BUI_RENAME?"修改名称":u->mode==PN_BUI_DELETE?"删除书签":"书签",failed(u)?"重试":NULL);
+    pn_status_t status=pn_w_header(font,frame,u->mode==PN_BUI_LIST?"< 返回阅读":"< 返回",u->mode==PN_BUI_RENAME?"修改名称":u->mode==PN_BUI_DELETE?(u->tab?"删除摘录":"删除书签"):(u->tab?"高亮摘录":"书签与摘录"),failed(u)?"重试":NULL);
     pn_w_set_fallback(metadata);
     if(status==PN_OK && u->mode==PN_BUI_LIST){
-        // 主按钮“添加当前页为书签”，书签是带图标的圆角卡片行。/ A primary "bookmark this page" button; bookmarks are rounded card rows with an icon.
-        status=sized_button(font,frame,"+ 添加当前页为书签",32,32,ADD_Y,620,80,PN_W_SELECTED);
-        for(size_t i=0;i<u->count && status==PN_OK;i++){int y=ROW_Y0+(int)i*ROW_PITCH;char label[96];const pn_txt_bookmark_t *mark=&u->items[i];bool on=(int)i==u->selected;
+        if(u->tab==0){
+            // 主按钮“添加当前页为书签”+右侧“高亮摘录”页签入口。/ Primary "bookmark this page" button + right "Highlights" tab entry.
+            status=sized_button(font,frame,"+ 添加当前页为书签",30,32,ADD_Y,428,80,PN_W_SELECTED);
+            if(status==PN_OK)status=sized_button(font,frame,"高亮摘录 >",26,474,ADD_Y,178,80,0u);
+        }else{
+            static const char *const tabs[2]={"书签","高亮摘录"};
+            status=pn_w_segments(font,frame,tabs,NULL,2,1,ADD_Y,80);
+        }
+        for(size_t i=0;i<u->count && status==PN_OK;i++){int y=ROW_Y0+(int)i*ROW_PITCH;char label[128];const pn_txt_bookmark_t *mark=&u->items[i];bool on=(int)i==u->selected;
             pn_w_round_fill(frame,32,y,620,ROW_PITCH-12,PN_UI_RADIUS,PN_UI_PAPER);pn_w_round_stroke(frame,32,y,620,ROW_PITCH-12,PN_UI_RADIUS,on?2.5f:1.5f,on?PN_UI_INK:9);
             pn_w_round_fill(frame,46,y+22,46,46,12,PN_UI_SURFACE);
-            pn_w_icon(frame,PN_ICON_BOOKMARK,55,y+31,28,PN_UI_INK);pn_w_icon(frame,PN_ICON_MORE,604,y+31,26,6);
-            if(*mark->label)snprintf(label,sizeof label,"%s",mark->label);else snprintf(label,sizeof label,"书签 #%llu",(unsigned long long)mark->id);
-            status=sized_text(font,frame,label,30,108,y+42,484,PN_ALIGN_LEFT);
-            if(status==PN_OK){
-                if(u->epub && u->sections[i] && u->section_count)snprintf(label,sizeof label,"第 %d/%d 节",u->sections[i],u->section_count);
-                else if(u->epub)snprintf(label,sizeof label,"书签 #%llu",(unsigned long long)mark->id);
-                else snprintf(label,sizeof label,"已读 %u%%",percent(&mark->position));
-                status=sized_text(font,frame,label,23,108,y+74,484,PN_ALIGN_LEFT);}
+            pn_w_icon(frame,u->tab?PN_ICON_LIST:PN_ICON_BOOKMARK,55,y+31,28,PN_UI_INK);pn_w_icon(frame,PN_ICON_MORE,604,y+31,26,6);
+            if(u->tab){
+                snprintf(label,sizeof label,"%s",u->highlights[i].text[0]?u->highlights[i].text:"(无摘要)");
+                status=sized_text(font,frame,label,26,108,y+42,484,PN_ALIGN_LEFT);
+                if(status==PN_OK){
+                    snprintf(label,sizeof label,"摘录 #%llu · 点击跳转或删除",(unsigned long long)u->highlights[i].id);
+                    status=sized_text(font,frame,label,21,108,y+74,484,PN_ALIGN_LEFT);
+                }
+            }else{
+                if(*mark->label)snprintf(label,sizeof label,"%s",mark->label);else snprintf(label,sizeof label,"书签 #%llu",(unsigned long long)mark->id);
+                status=sized_text(font,frame,label,30,108,y+42,484,PN_ALIGN_LEFT);
+                if(status==PN_OK){
+                    if(u->epub && u->sections[i] && u->section_count)snprintf(label,sizeof label,"第 %d/%d 节",u->sections[i],u->section_count);
+                    else if(u->epub)snprintf(label,sizeof label,"书签 #%llu",(unsigned long long)mark->id);
+                    else snprintf(label,sizeof label,"已读 %u%%",percent(&mark->position));
+                    status=sized_text(font,frame,label,23,108,y+74,484,PN_ALIGN_LEFT);}
+            }
         }
         if(status==PN_OK && !u->count){
-            pn_w_icon(frame,PN_ICON_BOOKMARK,(684-72)/2,ROW_Y0+80,72,PN_UI_INK);
-            status=sized_text(font,frame,failed(u)?"暂时无法读取书签":"还没有书签",34,PN_UI_MARGIN,ROW_Y0+210,620,PN_ALIGN_CENTER);
-            if(status==PN_OK)status=sized_text(font,frame,failed(u)?"点右上“重试”再读一次。":"读到喜欢的地方，随时留个记号。",28,PN_UI_MARGIN,ROW_Y0+260,620,PN_ALIGN_CENTER);
+            pn_w_icon(frame,u->tab?PN_ICON_LIST:PN_ICON_BOOKMARK,(684-72)/2,ROW_Y0+80,72,PN_UI_INK);
+            status=sized_text(font,frame,failed(u)?"暂时无法读取记录":u->tab?"还没有高亮摘录":"还没有书签",34,PN_UI_MARGIN,ROW_Y0+210,620,PN_ALIGN_CENTER);
+            if(status==PN_OK)status=sized_text(font,frame,failed(u)?"点右上“重试”再读一次。":u->tab?"长按正文或词典弹窗点「摘录」即可保存整句。":"读到喜欢的地方，随时留个记号。",26,PN_UI_MARGIN,ROW_Y0+260,620,PN_ALIGN_CENTER);
         }
         if(status==PN_OK)status=sized_button(font,frame,"上一页",30,32,PAGER_Y,196,80,u->page?0u:PN_W_DISABLED);
         if(status==PN_OK && (u->count || u->page)){char ptext[24];snprintf(ptext,sizeof ptext,"第 %u 页",u->page+1u);status=sized_text(font,frame,ptext,26,228,PAGER_Y+50,228,PN_ALIGN_CENTER);}
         if(status==PN_OK)status=sized_button(font,frame,"下一页",30,456,PAGER_Y,196,80,u->more?0u:PN_W_DISABLED);
     }else if(status==PN_OK){
         pn_txt_bookmark_t *mark=selected(u);if(!mark){pn_w_set_fallback(NULL);return PN_INVALID;}
-        int original=font->pixels;status=pn_font_size(font,36);
-        if(status==PN_OK)status=pn_w_text_lines(font,frame,*mark->label?mark->label:"未命名书签",PN_UI_MARGIN,ROW_Y0-40,620,2,48,NULL);
+        int original=font->pixels;status=pn_font_size(font,u->tab?28:36);
+        const char *title_txt=u->tab?(u->highlights[u->selected].text[0]?u->highlights[u->selected].text:"高亮摘录"):(*mark->label?mark->label:"未命名书签");
+        if(status==PN_OK)status=pn_w_text_lines(font,frame,title_txt,PN_UI_MARGIN,ROW_Y0-40,620,u->tab?4:2,u->tab?40:48,NULL);
         pn_status_t restored=pn_font_size(font,original);if(status==PN_OK)status=restored;
         if(status==PN_OK && u->mode==PN_BUI_ACTIONS){
-            const char *labels[]={"跳转阅读","修改名称","删除书签"};
-            for(int i=0;i<3 && status==PN_OK;i++)status=sized_button(font,frame,labels[i],34,32,ACTION_Y0+i*ACTION_PITCH,620,96,0u);
+            if(u->tab){
+                status=sized_button(font,frame,"跳转阅读",34,32,ACTION_Y0,620,96,0u);
+                if(status==PN_OK)status=sized_button(font,frame,"删除摘录",34,32,ACTION_Y0+ACTION_PITCH,620,96,0u);
+            }else{
+                const char *labels[]={"跳转阅读","修改名称","删除书签"};
+                for(int i=0;i<3 && status==PN_OK;i++)status=sized_button(font,frame,labels[i],34,32,ACTION_Y0+i*ACTION_PITCH,620,96,0u);
+            }
         }else if(status==PN_OK && u->mode==PN_BUI_DELETE){
-            status=sized_text(font,frame,"删除这条书签？此操作无法撤销。",32,PN_UI_MARGIN,ROW_Y0+120,620,PN_ALIGN_LEFT);
+            status=sized_text(font,frame,u->tab?"删除这条高亮摘录？此操作无法撤销。":"删除这条书签？此操作无法撤销。",32,PN_UI_MARGIN,ROW_Y0+120,620,PN_ALIGN_LEFT);
             if(status==PN_OK)status=sized_button(font,frame,"取消",34,32,DELETE_BUTTON_Y,300,96,0u);
             if(status==PN_OK)status=sized_button(font,frame,"删除",34,352,DELETE_BUTTON_Y,300,96,0u); // 危险操作不用黑底强调 / Destructive actions are not emphasised in black
         }else if(status==PN_OK && u->mode==PN_BUI_RENAME){
@@ -194,7 +231,11 @@ pn_status_t pn_bookmark_ui_event(pn_bookmark_ui_t *u,int command,const char *val
         }else if(u->mode==PN_BUI_ACTIONS)u->mode=PN_BUI_LIST;
         else u->mode=PN_BUI_ACTIONS;
     }else if(u->mode==PN_BUI_LIST){
-        if(command==PN_BUI_ADD){
+        if(command==PN_BUI_TAB_BOOKMARKS || command==PN_BUI_TAB_HIGHLIGHTS){
+            uint8_t want=(command==PN_BUI_TAB_HIGHLIGHTS)?1u:0u;
+            if(u->tab!=want){u->tab=want;memset(u->cursors,0,sizeof u->cursors);status=load_page(u,0,0);}
+            else status=PN_EMPTY;
+        }else if(command==PN_BUI_ADD && u->tab==0){
             uint64_t id=0;char label[48];bool exists=existing_mark(u,&id);
             // 同一位置不重复添加，选中已有的那条并提示（规范R04）。/ Never add the same position twice; select the existing one and say so (spec R04).
             if(exists){status=load_page(u,0,0);
@@ -214,8 +255,11 @@ pn_status_t pn_bookmark_ui_event(pn_bookmark_ui_t *u,int command,const char *val
         else if(command==PN_BUI_UP || command==PN_BUI_DOWN){int row=u->selected+(command==PN_BUI_UP?-1:1);if(row>=0 && (size_t)row<u->count)u->selected=row;else status=PN_EMPTY;}
         else status=PN_INVALID;
     }else if(u->mode==PN_BUI_ACTIONS && mark){
-        if(command==PN_BUI_JUMP){status=u->epub?pn_epub_app_overlay(u->epub,pn_reader_jump_loading_render,NULL,present,ctx,PN_REFRESH_GL16):pn_reader_app_overlay(u->reader,pn_reader_jump_loading_render,NULL,present,ctx,PN_REFRESH_GL16);if(status!=PN_OK){(void)pn_bookmark_ui_present(u,present,ctx);return status;}status=u->epub?pn_epub_app_bookmark_jump(u->epub,mark->id,now,present,ctx):pn_reader_app_bookmark_jump(u->reader,mark->id,now,present,ctx);if(confirmed(u)){u->mode=PN_BUI_CLOSED;return status;}}
-        else if(command==PN_BUI_EDIT){strcpy(u->draft,mark->label);u->shift=false;u->mode=PN_BUI_RENAME;}
+        if(command==PN_BUI_JUMP){status=u->epub?pn_epub_app_overlay(u->epub,pn_reader_jump_loading_render,NULL,present,ctx,PN_REFRESH_GL16):pn_reader_app_overlay(u->reader,pn_reader_jump_loading_render,NULL,present,ctx,PN_REFRESH_GL16);if(status!=PN_OK){(void)pn_bookmark_ui_present(u,present,ctx);return status;}
+            if(u->tab)status=u->epub?pn_epub_app_highlight_jump(u->epub,mark->id,now,present,ctx):pn_reader_app_highlight_jump(u->reader,mark->id,now,present,ctx);
+            else status=u->epub?pn_epub_app_bookmark_jump(u->epub,mark->id,now,present,ctx):pn_reader_app_bookmark_jump(u->reader,mark->id,now,present,ctx);
+            if(confirmed(u)){u->mode=PN_BUI_CLOSED;return status;}}
+        else if(command==PN_BUI_EDIT && !u->tab){strcpy(u->draft,mark->label);u->shift=false;u->mode=PN_BUI_RENAME;}
         else if(command==PN_BUI_REMOVE)u->mode=PN_BUI_DELETE;
         else status=PN_INVALID;
     }else if(u->mode==PN_BUI_RENAME && mark){
@@ -227,7 +271,9 @@ pn_status_t pn_bookmark_ui_event(pn_bookmark_ui_t *u,int command,const char *val
         else if(command==PN_BUI_SHIFT)u->shift=!u->shift;
         else status=PN_INVALID;
     }else if(u->mode==PN_BUI_DELETE && mark && command==PN_BUI_CONFIRM){
-        status=u->epub?pn_epub_app_bookmark_delete(u->epub,mark->id):pn_reader_app_bookmark_delete(u->reader,mark->id);if(status==PN_OK){status=load_page(u,u->page,u->cursors[u->page]);if(status==PN_OK)u->mode=PN_BUI_LIST;}
+        if(u->tab)status=u->epub?pn_epub_app_highlight_delete(u->epub,mark->id):pn_reader_app_highlight_delete(u->reader,mark->id);
+        else status=u->epub?pn_epub_app_bookmark_delete(u->epub,mark->id):pn_reader_app_bookmark_delete(u->reader,mark->id);
+        if(status==PN_OK){status=load_page(u,u->page,u->cursors[u->page]);if(status==PN_OK)u->mode=PN_BUI_LIST;}
     }else status=PN_INVALID;
     if(status!=PN_OK && status!=PN_EMPTY)u->notice=failure(status,command);
     pn_status_t drawn=pn_bookmark_ui_present(u,present,ctx);return drawn!=PN_OK?drawn:status;
@@ -238,10 +284,19 @@ int pn_bookmark_ui_hit(const pn_bookmark_ui_t *u,int x,int y){
     if(header==1)return PN_BUI_BACK;
     if(header==2)return PN_BUI_RETRY;
     if(u->mode==PN_BUI_LIST){
-        if(x>=32 && x<652 && y>=ADD_Y && y<ADD_Y+88)return PN_BUI_ADD;
+        if(x>=32 && x<652 && y>=ADD_Y && y<ADD_Y+88){
+            if(u->tab==0)return x<468?PN_BUI_ADD:PN_BUI_TAB_HIGHLIGHTS;
+            return x<342?PN_BUI_TAB_BOOKMARKS:-1;
+        }
         if(x>=32 && x<652 && y>=ROW_Y0 && y<ROW_Y0+PN_BOOKMARK_UI_ROWS*ROW_PITCH && (y-ROW_Y0)%ROW_PITCH<ROW_PITCH-8){int row=(y-ROW_Y0)/ROW_PITCH;if((size_t)row<u->count)return PN_BUI_ROW+row;}
         if(y>=PAGER_Y && y<PAGER_Y+80){if(x>=32 && x<228)return PN_BUI_PREVIOUS;if(x>=456 && x<652)return PN_BUI_NEXT;}
-    }else if(u->mode==PN_BUI_ACTIONS){if(x>=32 && x<652 && y>=ACTION_Y0 && y<ACTION_Y0+3*ACTION_PITCH && (y-ACTION_Y0)%ACTION_PITCH<96){int row=(y-ACTION_Y0)/ACTION_PITCH;return row==0?PN_BUI_JUMP:row==1?PN_BUI_EDIT:PN_BUI_REMOVE;}}
+    }else if(u->mode==PN_BUI_ACTIONS){
+        if(u->tab){
+            if(x>=32 && x<652 && y>=ACTION_Y0 && y<ACTION_Y0+2*ACTION_PITCH && (y-ACTION_Y0)%ACTION_PITCH<96){
+                int row=(y-ACTION_Y0)/ACTION_PITCH;return row==0?PN_BUI_JUMP:PN_BUI_REMOVE;
+            }
+        }else if(x>=32 && x<652 && y>=ACTION_Y0 && y<ACTION_Y0+3*ACTION_PITCH && (y-ACTION_Y0)%ACTION_PITCH<96){int row=(y-ACTION_Y0)/ACTION_PITCH;return row==0?PN_BUI_JUMP:row==1?PN_BUI_EDIT:PN_BUI_REMOVE;}
+    }
     else if(u->mode==PN_BUI_DELETE){if(y>=DELETE_BUTTON_Y && y<DELETE_BUTTON_Y+96){if(x>=32 && x<332)return PN_BUI_CANCEL;if(x>=352 && x<652)return PN_BUI_CONFIRM;}}
     else if(u->mode==PN_BUI_RENAME){
         if(x>=KEY_X0 && x<KEY_X0+640 && y>=KEY_Y0 && y<KEY_Y0+5*96 && (y-KEY_Y0)%96<88 && (x-KEY_X0)%80<76)return PN_BUI_CHARACTER+(unsigned char)keys[(y-KEY_Y0)/96][(x-KEY_X0)/80];

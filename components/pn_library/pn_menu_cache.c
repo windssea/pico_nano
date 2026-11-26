@@ -48,8 +48,19 @@ uint8_t *pn_menu_cache_begin(pn_menu_cache_t *cache,uint64_t key,uint64_t aux,bo
         for(unsigned i=1;i<PN_MENU_CACHE_SLOTS;i++)if(cache->entries[i].age<cache->entries[slot].age)slot=i;
     }
     pn_menu_cache_entry_t *entry=&cache->entries[slot];
-    if(!entry->pixels)entry->pixels=pn_cache_alloc(cache->pool,PN_CACHE_MENU,PN_MEM_FRAME,MENU_PAGE_BYTES);
-    if(!entry->pixels)return NULL;
+    if(!entry->pixels){
+        entry->pixels=pn_cache_alloc(cache->pool,PN_CACHE_MENU,PN_MEM_FRAME,MENU_PAGE_BYTES);
+        // 预算不足无法扩展新槽时，回退复用最旧已分配槽位，避免退化为无缓存。/ When budget forbids allocating a new slot, fall back to reusing the oldest allocated slot.
+        if(!entry->pixels){
+            unsigned fallback=PN_MENU_CACHE_SLOTS;
+            for(unsigned i=0;i<PN_MENU_CACHE_SLOTS;i++){
+                if(!cache->entries[i].pixels)continue;
+                if(fallback==PN_MENU_CACHE_SLOTS || !cache->entries[i].valid || (cache->entries[fallback].valid && cache->entries[i].age<cache->entries[fallback].age))fallback=i;
+            }
+            if(fallback==PN_MENU_CACHE_SLOTS)return NULL;
+            slot=fallback;entry=&cache->entries[slot];
+        }
+    }
     entry->valid=false;entry->key=0;entry->aux=0;cache->last=slot;
     pn_cache_pin(&cache->owner);
     return entry->pixels;

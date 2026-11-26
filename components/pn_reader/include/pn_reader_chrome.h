@@ -9,6 +9,7 @@
 #pragma once
 #include "pn_cover.h"
 #include "pn_widgets.h"
+#include "pn_input_prefs.h"
 #define PN_READER_TOP 32 ///< 正文区顶部y / Top y of the text area
 #define PN_READER_HEIGHT 1112 ///< 正文区高度 / Text area height
 #define PN_READER_FOOTER_Y 1144 ///< 页脚上沿y / Footer top y
@@ -27,8 +28,30 @@ typedef enum {
     PN_TOOL_SHELF, ///< 回书架 / Back to the shelf
     PN_TOOL_CLOSE, ///< 点工具栏以外区域关闭 / Tapping outside the toolbar closes it
     PN_TOOL_QUICK_BOOKMARK, ///< 顶栏右侧一键添加书签 / Top-bar one-tap quick bookmark
-    PN_TOOL_DICT ///< 顶栏查词按钮（打开离线词典）/ Top-bar dictionary lookup button
+    PN_TOOL_DICT, ///< 顶栏查词按钮（打开离线词典）/ Top-bar dictionary lookup button
+    PN_TOOL_GUIDE, ///< 阅读线半屏实时微调 / Live half-sheet reading-line editor
+    PN_TOOL_AUTO_TURN ///< 自动翻页开关与调速 / Auto page-turn toggle and speed
 } pn_reader_tool_t;
+/// 自定义单条阅读状态栏数据快照（纯绘制只读）。/ Read-only snapshot for custom single-bar reading status rendering.
+typedef struct {
+    const char *chapter; ///< 当前章节名（可空）/ Current chapter title (nullable)
+    const char *book; ///< 当前书名（可空）/ Current book title (nullable)
+    const char *section; ///< 节号文案，如 "3/20"（可空）/ Section label such as "3/20" (nullable)
+    int book_basis; ///< 全书进度 0..10000（<0 未知）/ Whole-book progress 0..10000 (<0 unknown)
+    int chapter_basis; ///< 本章进度 0..10000（<0 未知，回退全书）/ Chapter progress 0..10000 (<0 falls back to book)
+    bool show_return; ///< 显示“< 返回跳转前位置” / Show "< 返回跳转前位置" return button
+    const char *draft_hint; ///< 预览提示（非空时覆盖左侧显示）/ Preview hint when non-NULL
+} pn_reader_bar_info_t;
+/// 按当前激活的 pn_status_bar_active() 绘制自定义阅读状态栏（双栏/顶部单栏/底部单栏/关闭）；enabled==0 时返回 PN_EMPTY 由调用方走经典双栏。
+/// Render the active custom reading status bar (dual/top/bottom/off); returns PN_EMPTY when enabled==0 so callers use legacy dual bars.
+pn_status_t pn_reader_custom_bar_render(pn_font_t *ui,pn_font_t *fallback,pn_frame_t *frame,const pn_reader_bar_info_t *info,unsigned background);
+/// 在屏幕底部预留的独立返回条区域（y=1160..1216）绘制「< 返回跳转前位置」，避免遮挡正文。
+/// Render the dedicated bottom "< 返回跳转前位置" strip in the reserved bottom band (y=1160..1216) without overlapping prose.
+pn_status_t pn_reader_return_bar_render(pn_font_t *ui,pn_font_t *fallback,pn_frame_t *frame,const pn_reader_bar_info_t *info,unsigned background);
+/// 渲染阅读页自定义状态栏刷新（无副作用）。/ Refresh only the custom status bar band without disturbing body prose.
+pn_status_t pn_reader_custom_bar_refresh(pn_font_t *ui,pn_font_t *fallback,pn_frame_t *frame,const pn_reader_bar_info_t *info,unsigned background);
+/// 状态栏“返回跳转前位置”（始终位于底侧）与点击跳转进度条的命中区判断。/ Check whether (x,y) hits the bottom return-to-origin strip or active status bar.
+int pn_reader_bar_hit(int x,int y,bool hide_bars,bool can_return);
 /// 工具栏顶部阅读信息条数据；title为书名或章节，basis为0..10000（负值表示未知）。/ Reader toolbar top info bar data: title/chapter and progress 0..10000 (negative when unknown).
 typedef struct {
     const char *title; ///< 书名 / Book title
@@ -66,6 +89,9 @@ void pn_reader_guide_row(pn_frame_t *viewport,unsigned style,unsigned shade,int 
 /// 扩展阅读线绘制：支持限定横向起止[x0,x1)、粗细1..3px，以及按字号缩放虚线/点线节距。
 /// Extended guide-row drawing with explicit horizontal span [x0,x1), thickness 1..3 px, and optional font-scaled dash/dot pitch.
 void pn_reader_guide_row_ex(pn_frame_t *viewport,unsigned style,unsigned shade,int x0,int x1,int y,int thickness,int font_pixels,bool follow_font);
+/// 全参数阅读线绘制：支持 1虚线/2点线/3实线，以及自定义虚线长度 dash_len（0自动）与间隔 dash_gap（0自动）。
+/// Full-parameter guide-row drawing: styles 1 dashed / 2 dotted / 3 solid, plus optional custom dash_len and dash_gap (0=auto).
+void pn_reader_guide_row_custom(pn_frame_t *viewport,unsigned style,unsigned shade,int x0,int x1,int y,int thickness,int dash_len,int dash_gap,int font_pixels,bool follow_font);
 
 /// 只画状态文字，底图由控制层准备。/ Draw status text only over a controller-prepared underlay.
 pn_status_t pn_reader_status_text(pn_font_t *,pn_frame_t *);

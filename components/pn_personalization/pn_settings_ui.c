@@ -14,18 +14,25 @@
 #include "pn_profile.h"
 #include "pn_builtin_art.h"
 #include "pn_wallpaper.h"
+#include "pn_highlights.h"
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <time.h>
 #define W 684
 #define H 1216
-enum {SCREEN_MAIN=0,SCREEN_KEYS,SCREEN_REFRESH,SCREEN_ABOUT,SCREEN_APPEARANCE,SCREEN_TIME,SCREEN_UPDATE,SCREEN_WIFI,SCREEN_WIFI_EDIT,SCREEN_GLOBAL_STYLE,SCREEN_GLOBAL_MARGINS,SCREEN_GLOBAL_BG,SCREEN_GLOBAL_CHAPTER,SCREEN_HOME_MOTTO,SCREEN_HOME_MOTTO_EDIT,SCREEN_HOME_BANNER};
+enum {SCREEN_MAIN=0,SCREEN_KEYS,SCREEN_REFRESH,SCREEN_ABOUT,SCREEN_APPEARANCE,SCREEN_TIME,SCREEN_UPDATE,SCREEN_WIFI,SCREEN_WIFI_EDIT,SCREEN_GLOBAL_STYLE,SCREEN_GLOBAL_MARGINS,SCREEN_GLOBAL_BG,SCREEN_GLOBAL_CHAPTER,SCREEN_HOME_MOTTO,SCREEN_HOME_MOTTO_EDIT,SCREEN_HOME_MOTTO_EXCERPTS,SCREEN_HOME_BANNER,SCREEN_STATUS_BAR,SCREEN_GESTURES,SCREEN_TAP_ZONES,SCREEN_KEY_HIGHLIGHT};
 typedef struct {pn_pool_t *pool;pn_media_t *state;char dir[PN_JOURNAL_PATH_MAX];pn_font_t font;uint8_t *pixels;pn_frame_t canvas;char message[96];char lan[40];int screen;pn_settings_about_t about;pn_settings_time_t time;
     pn_settings_update_t update; ///< 控制层升级快照 / Controller update snapshot
     pn_font_t *return_font; ///< 单owner移交的空槽，close归还或正常释放 / Empty slot transferred by the single owner, returned on close or normally released
     bool index_known; ///< 索引偏好可读才允许修改 / Permit changes only when the index preference is readable
     bool vertical_known; ///< 翻页方向偏好可读才允许修改 / Permit changes only when the turn-direction preference is readable
+    bool auto_lock_known; ///< 自动锁屏偏好可读才允许修改 / Permit changes only when the auto-lock preference is readable
+    bool status_bar_known; ///< 状态栏偏好可读才允许修改 / Permit changes only when status-bar prefs are readable
+    bool gestures_known; ///< 手势与交互偏好可读才允许修改 / Permit changes only when gesture prefs are readable
+    int sbar_pick_slot; ///< 状态栏正在编辑的插槽 0..4，-1表示无弹窗 / Active status-bar slot modal (0..4) or -1
+    int gesture_pick_slot; ///< 屏幕手势正在编辑的方位 0..8，-1表示无弹窗 / Active gesture slot modal (0..8) or -1
+    int status_bar_return_screen; ///< 状态栏页返回目标（SCREEN_REFRESH 或 SCREEN_GLOBAL_STYLE）/ Return screen for Status Bar sub-page
     bool snapshot_dirty; ///< 外部快照更新后先完整重画 / Repaint completely after external snapshot changes
     pn_w_status_snapshot_t status; ///< 最近成功画布的实时状态带 / Live status band of the last successful canvas
     pn_keyboard_t kb; ///< WiFi与主页文案共用输入键盘 / Shared on-screen keyboard for WiFi and Home motto
@@ -35,6 +42,7 @@ typedef struct {pn_pool_t *pool;pn_media_t *state;char dir[PN_JOURNAL_PATH_MAX];
     bool testing,test_failed; ///< 连接测试中/上次测试失败可仍然保存 / Connection test running; last test failed and saving anyway is offered
     pn_style_t global_style; ///< 全局默认排版配置 / Global default typesetting configuration
     bool global_style_known; ///< 全局排版存储可读 / Global style storage readable
+    uint8_t margin_step_mult; ///< 全局边距步进倍率（0/1=×1即4px，5=×5即20px，10=×10即40px）/ Global margin step multiplier (1/5/10)
     char motto_draft[PN_HOME_HEADER_MAX]; ///< 编辑中的主页左上角文案 / Draft custom Home top-left text
     pn_media_t *wallpaper_media; ///< 可选壁纸介质，不持长期租约 / Optional wallpaper media without long-lived leases
     char wallpaper_dir[PN_JOURNAL_PATH_MAX]; ///< 壁纸目录路径 / Wallpaper directory path
@@ -45,6 +53,10 @@ typedef struct {pn_pool_t *pool;pn_media_t *state;char dir[PN_JOURNAL_PATH_MAX];
     uint8_t *banner_preview_px; ///< 正在阅读上方背景页的实时预览缓冲（684×146）/ Live banner preview buffer for Home banner picker
     pn_frame_t banner_preview; ///< 预览画布视图 / Preview frame view
     char banner_preview_name[PN_HOME_BANNER_MAX]; ///< 当前预览缓冲对应的文件名 / Filename currently loaded in preview buffer
+    pn_highlight_t *motto_excerpts; ///< 按需加载的摘录候选数组（离开子页即释放）/ On-demand excerpt candidates for top-left motto
+    size_t motto_excerpt_count; ///< 摘录候选条数 / Number of loaded excerpt candidates
+    unsigned motto_excerpt_page; ///< 摘录文案列表当前页 / Current page of excerpt motto picker
+    pn_settings_frame_cache_t frame_cache; ///< 可选主屏整页帧缓存适配器 / Optional Settings-root frame cache adapter
 } su_t;
 static const char *const names[]={"左手模式","滑动翻页","点按翻页","屏下三键翻页"};
 static const char *const hints[]={"点左半屏翻到下一页","左右滑动翻页","点屏幕左半或右半翻页","KEY1 上一页，KEY3 下一页"};
@@ -54,19 +66,27 @@ static bool on(uint8_t flags,unsigned i){bool set=(flags&bits[i])!=0;return i==0
 static unsigned level_of(uint8_t flags){unsigned level=(flags&PN_INPUT_REFRESH_MASK)>>4;return level>2?0u:level;}
 static const char *const level_names[3]={"均衡","清晰","省电"};
 static const char *const style_names[4]={"默认","极简","拟物书架","纸页"};
+static const uint16_t auto_lock_presets[5]={1u,5u,10u,30u,PN_AUTO_LOCK_NEVER};
 unsigned pn_settings_refresh_pages(uint8_t flags){static const unsigned pages[3]={14,6,24};return pages[level_of(flags)];}
+uint64_t pn_settings_auto_lock_ms(uint16_t minutes){
+    if(minutes==PN_AUTO_LOCK_NEVER)return 0u;
+    if(minutes>PN_AUTO_LOCK_MAX_MIN)minutes=PN_AUTO_LOCK_DEFAULT_MIN;
+    return (uint64_t)minutes*60u*1000u;
+}
 /* 版式：一级页大标题与分组卡片，底部固定三栏；子页统一顶栏返回设置。/ Layout: the root page has a large title and grouped cards over the fixed three-tab bar; sub-pages share a header that returns to Settings. */
 #define ROW_H PN_W_CARD_ROW_H
-#define MAIN_ROW_H 92
-#define DISPLAY_Y 172
-#define READING_Y 504
-#define DEVICE_Y 836
+#define MAIN_ROW_H 86
+#define DISPLAY_Y 144
+#define READING_Y 532
+#define DEVICE_Y 834
 #define TAB_Y 1104
 #define TAB_H 112
 #define TOGGLE_Y 640
 #define LEVEL_Y 196
 #define LEVEL_H 92
 #define FULL_Y 520
+#define LOCK_Y 674
+#define LOCK_H 88
 #define ABOUT_Y 190
 #define TURN_Y 900
 #define TURN_H 92
@@ -101,13 +121,13 @@ static void draw_main_card(pn_frame_t *f,int y,int rows){
     pn_w_round_stroke(f,PN_UI_MARGIN,y,w,h,20,1.5f,9);
 }
 static pn_status_t draw_main_row(pn_font_t *font,pn_frame_t *f,const char *label,const char *subtitle,pn_icon_t icon,int y,bool last){
-    int original=font->pixels,text_x=112,room=PN_UI_WIDTH-PN_UI_MARGIN-48-text_x;
-    pn_w_round_fill(f,50,y+23,46,46,14,PN_UI_SURFACE);
-    pn_w_icon(f,icon,60,y+33,26,PN_UI_INK);
-    pn_status_t s=pn_font_size(font,30);
-    if(s==PN_OK)s=pn_w_text_ex(font,f,label,text_x,y+42,room,PN_ALIGN_LEFT,PN_UI_INK,false);
-    if(s==PN_OK && subtitle && *subtitle){s=pn_font_size(font,22);if(s==PN_OK)s=pn_w_text_ex(font,f,subtitle,text_x,y+72,room,PN_ALIGN_LEFT,5,false);}
-    pn_w_icon(f,PN_ICON_CHEVRON,PN_UI_WIDTH-PN_UI_MARGIN-18-24,y+34,24,6);
+    int original=font->pixels,text_x=110,room=PN_UI_WIDTH-PN_UI_MARGIN-48-text_x;
+    pn_w_round_fill(f,50,y+21,44,44,13,PN_UI_SURFACE);
+    pn_w_icon(f,icon,60,y+31,24,PN_UI_INK);
+    pn_status_t s=pn_font_size(font,28);
+    if(s==PN_OK)s=pn_w_text_ex(font,f,label,text_x,y+38,room,PN_ALIGN_LEFT,PN_UI_INK,false);
+    if(s==PN_OK && subtitle && *subtitle){s=pn_font_size(font,21);if(s==PN_OK)s=pn_w_text_ex(font,f,subtitle,text_x,y+67,room,PN_ALIGN_LEFT,5,false);}
+    pn_w_icon(f,PN_ICON_CHEVRON,PN_UI_WIDTH-PN_UI_MARGIN-18-24,y+31,24,6);
     if(!last)pn_frame_rect(f,text_x,y+MAIN_ROW_H-1,PN_UI_WIDTH-PN_UI_MARGIN-20-text_x,1,PN_UI_SELECT);
     pn_status_t restored=pn_font_size(font,original);return s==PN_OK?restored:s;
 }
@@ -115,23 +135,40 @@ static pn_status_t draw_main(pn_settings_ui_t *ui,su_t *u){
     pn_font_t *font=&u->font;pn_frame_t *f=&u->canvas;pn_profile_span_t span;
     pn_profile_begin(&span,NULL,"ui.settings.status");pn_status_t s=pn_w_status(font,f);pn_profile_end(&span,s);
     pn_profile_begin(&span,NULL,"ui.settings.title");
-    if(s==PN_OK)s=pn_font_size(font,48);
-    if(s==PN_OK)s=pn_w_text_ex(font,f,"设置",PN_UI_MARGIN,108,400,PN_ALIGN_LEFT,PN_UI_INK,true);
+    if(s==PN_OK)s=pn_font_size(font,42);
+    if(s==PN_OK)s=pn_w_text_ex(font,f,"设置",PN_UI_MARGIN,92,400,PN_ALIGN_LEFT,PN_UI_INK,true);
     pn_profile_end(&span,s);pn_profile_begin(&span,NULL,"ui.settings.card");
-    if(s==PN_OK)s=draw_main_group(font,f,"显示与字体",DISPLAY_Y-14);
-    draw_main_card(f,DISPLAY_Y,3);pn_profile_end(&span,s);pn_profile_begin(&span,NULL,"ui.settings.rows");
+    if(s==PN_OK)s=draw_main_group(font,f,"显示与字体",DISPLAY_Y-12);
+    draw_main_card(f,DISPLAY_Y,4);pn_profile_end(&span,s);pn_profile_begin(&span,NULL,"ui.settings.rows");
     if(s==PN_OK)s=draw_main_row(font,f,"字体管理","系统字体、全局阅读字体与删除",PN_ICON_FONT,DISPLAY_Y,false);
     if(s==PN_OK)s=draw_main_row(font,f,"锁屏壁纸","系统默认、书签或自定义图片",PN_ICON_IMAGE,DISPLAY_Y+MAIN_ROW_H,false);
     char appearance[64];snprintf(appearance,sizeof appearance,"每行 %u 本 · %s · 主页个性",ui->shelf.columns,style_names[ui->shelf.style]);
-    if(s==PN_OK)s=draw_main_row(font,f,"书架与主页",appearance,PN_ICON_SHELF,DISPLAY_Y+2*MAIN_ROW_H,true);
-    if(s==PN_OK)s=draw_main_group(font,f,"阅读",READING_Y-14);
+    if(s==PN_OK)s=draw_main_row(font,f,"书架与主页",appearance,PN_ICON_SHELF,DISPLAY_Y+2*MAIN_ROW_H,false);
+    char sbar_sub[64];
+    if(!ui->status_bar.enabled){
+        snprintf(sbar_sub,sizeof sbar_sub,"双栏（默认）· 点击自定义上下内容");
+    }else if(ui->status_bar.position==PN_SBAR_POS_OFF){
+        snprintf(sbar_sub,sizeof sbar_sub,"自定义 · 已关闭阅读状态栏");
+    }else{
+        static const char *const prog_s[3]={"全书进度条","本章进度条","无进度条"};
+        const char *pos_lbl=ui->status_bar.position==PN_SBAR_POS_DUAL?"自定义双栏":ui->status_bar.position==PN_SBAR_POS_BOTTOM?"自定义底栏":"自定义顶栏";
+        snprintf(sbar_sub,sizeof sbar_sub,"%s · %s · 间距 %u px",
+            pos_lbl,
+            prog_s[ui->status_bar.progress_bar<3?ui->status_bar.progress_bar:0],
+            (unsigned)ui->status_bar.margin_px);
+    }
+    if(s==PN_OK)s=draw_main_row(font,f,"状态栏设置",sbar_sub,PN_ICON_LIST,DISPLAY_Y+3*MAIN_ROW_H,true);
+    if(s==PN_OK)s=draw_main_group(font,f,"阅读",READING_Y-12);
     draw_main_card(f,READING_Y,3);
     char gstyle[64];snprintf(gstyle,sizeof gstyle,"字号 %u · 行距 %u%% · 边距 %u%s",u->global_style.pixels,u->global_style.line_percent,u->global_style.margin,u->global_style.hide_bars?" · 无栏":"");
-    char line[64];snprintf(line,sizeof line,"%s · 每 %u 页整屏刷新",level_names[level_of(ui->flags)],pn_settings_refresh_pages(ui->flags));
+    char lock_lbl[24];
+    if(ui->auto_lock_minutes==PN_AUTO_LOCK_NEVER)snprintf(lock_lbl,sizeof lock_lbl,"不自动锁屏");
+    else snprintf(lock_lbl,sizeof lock_lbl,"%u 分钟锁屏",(unsigned)ui->auto_lock_minutes);
+    char line[80];snprintf(line,sizeof line,"%s · 每 %u 页全刷 · %s",level_names[level_of(ui->flags)],pn_settings_refresh_pages(ui->flags),lock_lbl);
     if(s==PN_OK)s=draw_main_row(font,f,"全局排版",gstyle,PN_ICON_TYPESET,READING_Y,false);
-    if(s==PN_OK)s=draw_main_row(font,f,"按键与手势","翻页方式、左手模式与屏下三键",PN_ICON_SETTINGS,READING_Y+MAIN_ROW_H,false);
+    if(s==PN_OK)s=draw_main_row(font,f,"按键与手势","屏幕手势、触控区与屏下三键",PN_ICON_SETTINGS,READING_Y+MAIN_ROW_H,false);
     if(s==PN_OK)s=draw_main_row(font,f,"刷新与屏幕",line,PN_ICON_REFRESH,READING_Y+2*MAIN_ROW_H,true);
-    if(s==PN_OK)s=draw_main_group(font,f,"设备",DEVICE_Y-14);
+    if(s==PN_OK)s=draw_main_group(font,f,"设备",DEVICE_Y-12);
     draw_main_card(f,DEVICE_Y,device_rows(u));
     int y=DEVICE_Y;char wifi[64];
     if(*u->lan)snprintf(wifi,sizeof wifi,"已保存：%s",u->lan);else snprintf(wifi,sizeof wifi,"未设置 · 用于传书、对时与更新");
@@ -140,29 +177,53 @@ static pn_status_t draw_main(pn_settings_ui_t *ui,su_t *u){
     if(s==PN_OK)s=draw_main_row(font,f,"存储与关于","版本、存储与设备信息",PN_ICON_LOCK,y,true);
     // 正常时不显示内部说明，只在有问题时提示。/ No internal note when all is well; only problems are shown.
     const char *problem=*u->message?u->message:u->state?"":"内部存储不可用，设置不能保存";
-    if(s==PN_OK && *problem)s=note(u,problem,y+MAIN_ROW_H+44);
+    if(s==PN_OK && *problem)s=note(u,problem,y+MAIN_ROW_H+36);
     pn_profile_end(&span,s);pn_profile_begin(&span,NULL,"ui.settings.nav");
     if(s==PN_OK){
         int original=font->pixels;s=pn_font_size(font,24);if(s==PN_OK)s=pn_w_navigation(font,f,PN_NAV_SETTINGS);pn_status_t restored=pn_font_size(font,original);if(s==PN_OK)s=restored;}
     pn_profile_end(&span,s);
     return s;
 }
-/* 机身示意：屏幕下方三个触摸键与顶部电源键，按本机实际布局画。/ Device sketch: three touch keys under the screen and the power key on top, drawn after the actual hardware. */
+static unsigned gestures_active_count(const pn_gesture_prefs_t *g);
+static const char *const tap_zone_names[PN_TAP_ZONE_COUNT];
+static const char *const key_map_names[PN_KEY_MAP_COUNT];
+static const char *const lp_mode_names[PN_LP_COUNT];
+/* 按键与交互页：上方紧凑机身图 + 3项自定义入口（屏幕手势/触控区/三键与摘录），下方保持 TOGGLE_Y=640 5枚开关不动。
+ * Keys & gestures page: compact top sketch + 3 visual customization rows, keeping the 5 toggles anchored at TOGGLE_Y=640. */
 static pn_status_t draw_keys(pn_settings_ui_t *ui,su_t *u){
     pn_font_t *font=&u->font;pn_frame_t *f=&u->canvas;
     pn_status_t s=pn_w_header(font,f,"< 设置","按键与手势",NULL);
-    int dx=262,dy=150,dw=160,dh=250;
-    pn_w_glass(f,dx,dy,dw,dh,22);pn_w_round_fill(f,dx+14,dy+16,dw-28,dh-74,8,PN_UI_PAPER);pn_w_round_stroke(f,dx+14,dy+16,dw-28,dh-74,8,2.0f,PN_UI_STROKE);
-    for(int i=0;i<3;i++)pn_w_round_fill(f,dx+24+i*42,dy+dh-46,28,14,7,PN_UI_INK);
-    pn_w_round_fill(f,dx+dw-50,dy-8,30,10,5,PN_UI_INK);
-    if(s==PN_OK)s=pn_font_size(font,22);
-    if(s==PN_OK)s=pn_w_text_ex(font,f,"1    2    3",dx,dy+dh+30,dw,PN_ALIGN_CENTER,PN_UI_MUTED,true);
-    if(s==PN_OK)s=pn_w_text_ex(font,f,"电源键",dx+dw+12,dy+4,110,PN_ALIGN_LEFT,PN_UI_MUTED,false);
-    static const char *const legend[4][2]={{"KEY1","上一页 · 焦点上移/左移"},{"KEY2","确认/回书架 · 长按返回/工具栏"},{"KEY3","下一页 · 焦点下移/右移"},{"电源键","锁屏并保存，再按回到原处"}};
+    int dx=42,dy=152,dw=108,dh=164;
+    pn_w_glass(f,dx,dy,dw,dh,16);pn_w_round_fill(f,dx+10,dy+12,dw-20,dh-50,6,PN_UI_PAPER);pn_w_round_stroke(f,dx+10,dy+12,dw-20,dh-50,6,1.5f,PN_UI_STROKE);
+    for(int i=0;i<3;i++)pn_w_round_fill(f,dx+16+i*28,dy+dh-30,20,10,5,PN_UI_INK);
+    pn_w_round_fill(f,dx+dw-34,dy-6,22,7,3,PN_UI_INK);
+    static const char *const legend[4][2]={{"KEY1/3","翻页 · 焦点移动"},{"KEY2","首页/确认 · 长按菜单/返回"},{"电源键","锁屏保存，再按唤醒"},{"长按正文","查词或按句高亮摘录"}};
     for(int i=0;i<4 && s==PN_OK;i++){
-        int base=476+i*36;s=pn_font_size(font,24);
-        if(s==PN_OK)s=pn_w_text_ex(font,f,legend[i][0],PN_UI_MARGIN+8,base,110,PN_ALIGN_LEFT,PN_UI_INK,true);
-        if(s==PN_OK)s=pn_w_text_ex(font,f,legend[i][1],PN_UI_MARGIN+128,base,484,PN_ALIGN_LEFT,PN_UI_MUTED,false);
+        int base=178+i*38;s=pn_font_size(font,22);
+        if(s==PN_OK)s=pn_w_text_ex(font,f,legend[i][0],170,base,114,PN_ALIGN_LEFT,PN_UI_INK,true);
+        if(s==PN_OK)s=pn_w_text_ex(font,f,legend[i][1],288,base,360,PN_ALIGN_LEFT,PN_UI_MUTED,false);
+    }
+    // 自定义交互卡片（y=352..598，每行82px，不侵入 TOGGLE_Y=640）/ Interactive customization card above TOGGLE_Y=640.
+    const int cy=352,rh=82;
+    pn_w_round_fill(f,PN_UI_MARGIN+2,cy+2,PN_UI_WIDTH-2*PN_UI_MARGIN-4,rh*3,18,PN_UI_SELECT);
+    pn_w_round_fill(f,PN_UI_MARGIN,cy,PN_UI_WIDTH-2*PN_UI_MARGIN,rh*3,18,PN_UI_PAPER);
+    pn_w_round_stroke(f,PN_UI_MARGIN,cy,PN_UI_WIDTH-2*PN_UI_MARGIN,rh*3,18,1.5f,9);
+    char sub0[48],sub2[72];
+    snprintf(sub0,sizeof sub0,"已开 %u 项 · 点按线框自由绑定",gestures_active_count(&ui->gestures));
+    const char *sub1=ui->gestures.tap_zone<PN_TAP_ZONE_COUNT?tap_zone_names[ui->gestures.tap_zone]:"左右两分";
+    snprintf(sub2,sizeof sub2,"%s · %s · 自动翻页 %u秒",
+        ui->gestures.key_map<PN_KEY_MAP_COUNT?key_map_names[ui->gestures.key_map]:"默认",
+        ui->gestures.long_press_mode<PN_LP_COUNT?lp_mode_names[ui->gestures.long_press_mode]:"长按查词",
+        (unsigned)ui->gestures.auto_turn_sec);
+    const char *rlabels[3]={"屏幕手势","阅读触控区域","三键、摘录与自动翻页"};
+    const char *rsubs[3]={sub0,sub1,sub2};
+    for(int i=0;i<3 && s==PN_OK;i++){
+        int ry=cy+i*rh;
+        s=pn_font_size(font,26);
+        if(s==PN_OK)s=pn_w_text_ex(font,f,rlabels[i],52,ry+37,540,PN_ALIGN_LEFT,PN_UI_INK,true);
+        if(s==PN_OK){s=pn_font_size(font,20);if(s==PN_OK)s=pn_w_text_ex(font,f,rsubs[i],52,ry+66,540,PN_ALIGN_LEFT,5,false);}
+        pn_w_icon(f,PN_ICON_CHEVRON,612,ry+29,22,6);
+        if(i<2)pn_frame_rect(f,52,ry+rh-1,576,1,PN_UI_SELECT);
     }
     if(s==PN_OK)s=pn_w_group(font,f,"触控与翻页",TOGGLE_Y-14);
     pn_w_card(f,TOGGLE_Y,5);
@@ -198,6 +259,17 @@ static const char *turn_note_text(uint8_t flags){
         default:return "直接显示 16 灰阶正文：借鉴水波纹仅驱动变化像素，并启用跨页静默白推压制浅灰残影，兼顾速度与洁净。";
     }
 }
+static int auto_lock_slot_of(uint16_t minutes){for(int i=0;i<5;i++)if(auto_lock_presets[i]==minutes)return i;return -1;}
+static pn_status_t draw_auto_lock(pn_settings_ui_t *ui,su_t *u){
+    static const char *const labels[5]={"1","5","10","30","从不"},*const notes[5]={"分钟","分钟","分钟","分钟","不锁屏"};
+    return pn_w_segments(&u->font,&u->canvas,labels,notes,5,auto_lock_slot_of(ui->auto_lock_minutes),LOCK_Y,LOCK_H);
+}
+static pn_status_t draw_auto_lock_note(pn_settings_ui_t *ui,su_t *u){
+    char text[96];
+    if(ui->auto_lock_minutes==PN_AUTO_LOCK_NEVER)snprintf(text,sizeof text,"已关闭自动锁屏，仍可按电源键手动锁屏。");
+    else snprintf(text,sizeof text,"无操作 %u 分钟后自动锁屏，按电源键随时唤醒。",(unsigned)ui->auto_lock_minutes);
+    return note(u,text,LOCK_Y+LOCK_H+40);
+}
 static pn_status_t draw_refresh(pn_settings_ui_t *ui,su_t *u){
     pn_font_t *font=&u->font;pn_frame_t *f=&u->canvas;
     pn_status_t s=pn_w_header(font,f,"< 设置","刷新与屏幕",NULL);
@@ -206,9 +278,9 @@ static pn_status_t draw_refresh(pn_settings_ui_t *ui,su_t *u){
     if(s==PN_OK)s=note(u,"所有书籍共用此设置。成功翻到第 6、14 或 24 页时整屏刷新；工具栏、排版预览和重复点击不计页。周期越短，闪屏越多。",LEVEL_Y+LEVEL_H+50);
     if(s==PN_OK)s=pn_w_group(font,f,"手动刷新",FULL_Y-18);
     if(s==PN_OK){int original=font->pixels;s=pn_font_size(font,30);if(s==PN_OK)s=pn_w_button(font,f,"立即整屏刷新",PN_UI_MARGIN,FULL_Y,620,88,PN_W_SELECTED);pn_status_t restored=pn_font_size(font,original);if(s==PN_OK)s=restored;}
-    if(s==PN_OK)s=pn_w_group(font,f,"屏幕",FULL_Y+150);
-    pn_w_card(f,FULL_Y+162,1);
-    if(s==PN_OK)s=pn_w_card_row(font,f,*u->about.screen?u->about.screen:"4.7 英寸墨水屏","16 级灰阶，阅读页保持纯白底",NULL,-1,0u,FULL_Y+162,true);
+    if(s==PN_OK)s=pn_w_group(font,f,"自动锁屏",LOCK_Y-18);
+    if(s==PN_OK)s=draw_auto_lock(ui,u);
+    if(s==PN_OK)s=draw_auto_lock_note(ui,u);
     if(s==PN_OK)s=pn_w_group(font,f,"翻页刷新方式",TURN_Y-18);
     if(s==PN_OK)s=draw_turns(ui,u);
     if(s==PN_OK)s=note(u,turn_note_text(ui->flags),TURN_Y+TURN_H+50);
@@ -337,11 +409,12 @@ static pn_status_t draw_appearance(pn_settings_ui_t *ui,su_t *u){
 /* 全局排版：与书内排版完全同源的12格+图片/上下栏开关+实时预览，外加边距详调与内置背景子页。
  * Global typesetting: full parity with in-book typesetting (12 cells, image/bars toggles, live preview, 4-side margins & built-in backgrounds). */
 static void draw_guide_preview_row(pn_frame_t *frame,unsigned style,unsigned shade,int x0,int width,int y,int thickness,int font_pixels,bool follow){
-    if(style<1 || style>2 || width<=0 || y<0 || y>=frame->height)return;
+    if(style<1 || style>3 || width<=0 || y<0 || y>=frame->height)return;
     if(thickness<1)thickness=1;
     if(thickness>3)thickness=3;
     int h=thickness;if(y+h>frame->height)h=frame->height-y;if(h<=0)return;
     static const uint8_t inks[4]={10,7,4,0};uint8_t ink=inks[shade<4?shade:0];
+    if(style==3u){pn_frame_rect(frame,x0,y,width,h,ink);return;}
     int dash=style==1?19:2,period=style==1?31:13;
     if(follow){
         int px=(font_pixels>=20 && font_pixels<=96)?font_pixels:44;
@@ -419,7 +492,7 @@ static pn_status_t draw_global_style(su_t *u){
     snprintf(vals[5],sizeof vals[5],"%d%%",(int)st->tracking_percent);
     snprintf(vals[6],sizeof vals[6],"%s",weights[(st->weight+1)>=0 && (st->weight+1)<5?st->weight+1:1]);
     snprintf(vals[7],sizeof vals[7],"%s",clarities[st->clarity<4?st->clarity:0]);
-    snprintf(vals[8],sizeof vals[8],"%s",st->reading_line==1?"虚线":st->reading_line==2?"点线":"关闭");
+    snprintf(vals[8],sizeof vals[8],"%s",st->reading_line==1?"虚线":st->reading_line==2?"点线":st->reading_line==3?"实线":"关闭");
     snprintf(vals[9],sizeof vals[9],"%s",shades[st->reading_line_shade<4?st->reading_line_shade:0]);
     snprintf(vals[10],sizeof vals[10],"%+d px",(int)st->reading_line_offset);
     snprintf(vals[11],sizeof vals[11],"%s",st->background==PN_READING_BACKGROUND_EXTERNAL?"自定义":pn_reading_background_name(st->background));
@@ -439,10 +512,14 @@ static pn_status_t draw_global_style(su_t *u){
     if(s==PN_OK){s=pn_font_size(font,24);if(s==PN_OK)s=pn_w_text(font,f,"上下栏",364,921,170,PN_ALIGN_LEFT);}
     if(s==PN_OK)s=pn_w_text_ex(font,f,st->hide_bars?"隐藏":"显示",364,934,276,PN_ALIGN_RIGHT,PN_UI_INK,true);
     if(s==PN_OK){s=pn_font_size(font,18);if(s==PN_OK)s=pn_w_text_ex(font,f,"状态栏与页脚",364,948,180,PN_ALIGN_LEFT,5,false);}
-    pn_w_round_fill(f,32,978,620,66,12,PN_UI_SURFACE);
-    pn_w_round_stroke(f,32,978,620,66,12,1.5f,9);
-    if(s==PN_OK){s=pn_font_size(font,24);if(s==PN_OK)s=pn_w_text_ex(font,f,"阅读线粗细 / 跟随 · 章节标题与页脚",48,1019,540,PN_ALIGN_LEFT,PN_UI_INK,true);}
-    pn_w_icon(f,PN_ICON_CHEVRON,614,999,24,6);
+    pn_w_round_fill(f,32,978,300,66,12,PN_UI_SURFACE);
+    pn_w_round_stroke(f,32,978,300,66,12,1.5f,9);
+    if(s==PN_OK){s=pn_font_size(font,22);if(s==PN_OK)s=pn_w_text_ex(font,f,"阅读线与章节",46,1018,244,PN_ALIGN_LEFT,PN_UI_INK,true);}
+    pn_w_icon(f,PN_ICON_CHEVRON,298,999,22,6);
+    pn_w_round_fill(f,352,978,300,66,12,PN_UI_SURFACE);
+    pn_w_round_stroke(f,352,978,300,66,12,1.5f,9);
+    if(s==PN_OK){s=pn_font_size(font,22);if(s==PN_OK)s=pn_w_text_ex(font,f,"状态栏设置",366,1018,244,PN_ALIGN_LEFT,PN_UI_INK,true);}
+    pn_w_icon(f,PN_ICON_CHEVRON,618,999,22,6);
     if(s==PN_OK)s=note(u,"所有更改自动保存为全局默认；未单独排版的书籍开书即生效。",1082);
     if(s==PN_OK && *u->message)s=note(u,u->message,1152);
     return s;
@@ -458,6 +535,24 @@ static pn_status_t draw_global_margin_cell(pn_font_t *font,pn_frame_t *f,const c
     pn_w_icon(f,PN_ICON_PLUS,x+230,y+54,28,PN_UI_INK);
     if(s==PN_OK)s=pn_font_size(font,26);
     if(s==PN_OK)s=pn_w_text_ex(font,f,val,x+104,y+78,92,PN_ALIGN_CENTER,PN_UI_INK,true);
+    return s;
+}
+static int gmargin_step_mult_of(uint8_t m){return (m==5u || m==10u)?(int)m:1;}
+static pn_status_t draw_global_margin_step_bar(pn_font_t *font,pn_frame_t *f,int y,uint8_t mult_raw){
+    int mult=gmargin_step_mult_of(mult_raw);
+    char lbl[32];snprintf(lbl,sizeof lbl,"步进 %d px",4*mult);
+    pn_status_t s=pn_font_size(font,24);
+    if(s==PN_OK)s=pn_w_text_ex(font,f,lbl,32,y+38,240,PN_ALIGN_LEFT,mult>1?PN_UI_INK:5,mult>1);
+    static const char *const ml[3]={"×1","×5","×10"};
+    static const int mv[3]={1,5,10};
+    pn_w_round_stroke(f,292,y,360,58,12,1.5f,PN_UI_INK);
+    if(s==PN_OK)s=pn_font_size(font,24);
+    for(int i=0;i<3 && s==PN_OK;i++){
+        int cx=292+i*120;bool sel=(mult==mv[i]);
+        if(sel)pn_w_round_fill(f,cx+3,y+3,114,52,9,PN_UI_INK);
+        s=pn_w_text_ex(font,f,ml[i],cx+4,y+38,112,PN_ALIGN_CENTER,sel?PN_UI_PAPER:PN_UI_INK,sel);
+        if(i<2 && !sel && mult!=mv[i+1])pn_frame_rect(f,cx+120,y+12,1,34,11);
+    }
     return s;
 }
 static pn_status_t draw_global_margins(su_t *u){
@@ -486,7 +581,8 @@ static pn_status_t draw_global_margins(su_t *u){
     if(s==PN_OK)s=draw_global_margin_cell(font,f,"背景下",st->bg_margin_bottom,352,732);
     if(s==PN_OK)s=draw_global_margin_cell(font,f,"背景左",st->bg_margin_left,32,850);
     if(s==PN_OK)s=draw_global_margin_cell(font,f,"背景右",st->bg_margin_right,352,850);
-    if(s==PN_OK && *u->message)s=note(u,u->message,1020);
+    if(s==PN_OK)s=draw_global_margin_step_bar(font,f,992,u->margin_step_mult);
+    if(s==PN_OK && *u->message)s=note(u,u->message,1100);
     return s;
 }
 static pn_status_t draw_global_chapter_cell(pn_font_t *font,pn_frame_t *f,const char *label,const char *val,bool choice,int x,int y){
@@ -593,9 +689,64 @@ static pn_status_t draw_home_motto(pn_settings_ui_t *ui,su_t *u){
     if(s==PN_OK)s=pn_font_size(font,30);
     if(s==PN_OK)s=pn_w_button(font,f,"自定义键盘输入",PN_UI_MARGIN,712,620,88,PN_W_SELECTED);
     if(s==PN_OK)s=pn_w_button(font,f,"恢复默认（PicoNano）",PN_UI_MARGIN,822,620,88,0u);
-    if(s==PN_OK)s=note(u,"所有页面状态栏左上角同步显示此文案，留空或恢复默认将显示 PicoNano。",956);
-    if(s==PN_OK && *u->message)s=note(u,u->message,1080);
+    if(s==PN_OK)s=pn_w_button(font,f,"从我的摘录中选择",PN_UI_MARGIN,932,620,88,0u);
+    if(s==PN_OK)s=note(u,"所有页面状态栏左上角同步显示此文案，支持选用阅读摘录或键盘输入。",1054);
+    if(s==PN_OK && *u->message)s=note(u,u->message,1138);
     return s;
+}
+static void motto_excerpts_release(su_t *u){
+    if(u->motto_excerpts){pn_free(u->motto_excerpts);u->motto_excerpts=NULL;}
+    u->motto_excerpt_count=0;u->motto_excerpt_page=0;
+}
+static void motto_excerpts_load(su_t *u){
+    motto_excerpts_release(u);
+    if(!u->state || !*u->dir)return;
+    u->motto_excerpts=pn_alloc_tagged(u->pool,PN_MEM_UI,64u*sizeof *u->motto_excerpts);
+    if(!u->motto_excerpts)return;
+    size_t got=0;
+    if(pn_highlights_scan_all(u->state,u->dir,u->motto_excerpts,64u,&got)==PN_OK){
+        u->motto_excerpt_count=got;
+    }
+}
+static pn_status_t draw_home_motto_excerpts(pn_settings_ui_t *ui,su_t *u){
+    pn_font_t *font=&u->font;pn_frame_t *f=&u->canvas;
+    pn_status_t s=pn_w_header(font,f,"< 返回","选用摘录文案",NULL);
+    int orig=font->pixels;
+    if(s==PN_OK){
+        char sub[80];snprintf(sub,sizeof sub,"共 %zu 条高亮摘录 · 点按即设为左上角文案",u->motto_excerpt_count);
+        s=pn_font_size(font,22);
+        if(s==PN_OK)s=pn_w_text_ex(font,f,sub,PN_UI_MARGIN,158,620,PN_ALIGN_LEFT,PN_UI_MUTED,false);
+    }
+    if(s==PN_OK && u->motto_excerpt_count==0u){
+        pn_w_icon(f,PN_ICON_LIST,(W-72)/2,410,72,PN_UI_INK);
+        s=pn_font_size(font,32);
+        if(s==PN_OK)s=pn_w_text_ex(font,f,"还没有高亮摘录",PN_UI_MARGIN,530,620,PN_ALIGN_CENTER,PN_UI_INK,true);
+        if(s==PN_OK){s=pn_font_size(font,24);if(s==PN_OK)s=pn_w_text_lines_centered_ex(font,f,"阅读时长按正文，或在词典弹窗点「摘录」即可保存整句。",64,580,556,2,36,PN_UI_MUTED,false,NULL);}
+    }else if(s==PN_OK){
+        size_t start=(size_t)u->motto_excerpt_page*6u;
+        for(unsigned row=0;row<6u && start+row<u->motto_excerpt_count && s==PN_OK;row++){
+            const char *txt=u->motto_excerpts[start+row].text;
+            char clipped[PN_HOME_HEADER_MAX];
+            size_t tlen=strlen(txt);if(tlen>=sizeof clipped){tlen=sizeof clipped-1u;while(tlen>0u && (((unsigned char)txt[tlen]&0xc0u)==0x80u))tlen--;}
+            memcpy(clipped,txt,tlen);clipped[tlen]=0;
+            bool active=(*ui->home.header && strcmp(ui->home.header,clipped)==0);
+            int y=184+(int)row*144;
+            pn_w_round_fill(f,PN_UI_MARGIN,y,620,132,14,active?PN_UI_SURFACE:PN_UI_PAPER);
+            pn_w_round_stroke(f,PN_UI_MARGIN,y,620,132,14,active?2.5f:1.5f,active?PN_UI_INK:9);
+            s=pn_font_size(font,24);
+            if(s==PN_OK)s=pn_w_text_lines_ex(font,f,txt[0]?txt:"(无摘要)",PN_UI_MARGIN+20,y+44,active?536:580,2,40,PN_UI_INK,active);
+            if(active)pn_w_icon(f,PN_ICON_CHECK,W-PN_UI_MARGIN-42,y+52,26,PN_UI_INK);
+        }
+    }
+    unsigned pages=u->motto_excerpt_count?(unsigned)((u->motto_excerpt_count+5u)/6u):1u;
+    if(s==PN_OK){
+        s=pn_font_size(font,28);
+        if(s==PN_OK)s=pn_w_button(font,f,"上一页",32,1084,196,80,u->motto_excerpt_page?0u:PN_W_DISABLED);
+        char pg[24];snprintf(pg,sizeof pg,"%u / %u",u->motto_excerpt_page+1u,pages);
+        if(s==PN_OK){s=pn_font_size(font,24);if(s==PN_OK)s=pn_w_text_ex(font,f,pg,228,1134,228,PN_ALIGN_CENTER,PN_UI_MUTED,false);}
+        if(s==PN_OK){s=pn_font_size(font,28);if(s==PN_OK)s=pn_w_button(font,f,"下一页",456,1084,196,80,u->motto_excerpt_page+1u<pages?0u:PN_W_DISABLED);}
+    }
+    pn_status_t r=pn_font_size(font,orig);return s==PN_OK?r:s;
 }
 static pn_status_t draw_home_motto_edit(su_t *u){
     pn_font_t *font=&u->font;pn_frame_t *f=&u->canvas;
@@ -702,17 +853,79 @@ static pn_status_t draw_home_banner(pn_settings_ui_t *ui,su_t *u){
     if(s==PN_OK && *u->message)s=note(u,u->message,1088);
     return s;
 }
+#include "pn_settings_visual.inc"
+static uint64_t set_hash(uint64_t h,uint64_t v){h^=v+0x9e3779b97f4a7c15ull+(h<<6)+(h>>2);return h;}
+static uint64_t set_hash_str(uint64_t h,const char *s){if(!s)return set_hash(h,0);while(*s){h^=(unsigned char)*s++;h*=1099511628211ull;}return h;}
+static uint64_t settings_root_key(const pn_settings_ui_t *ui,const su_t *u){
+    uint64_t h=0x504e53455431ull; // "PNSET1"
+    h=set_hash(h,u->frame_cache.font_epoch);
+    h=set_hash(h,ui->flags);h=set_hash(h,ui->auto_lock_minutes);
+    h=set_hash(h,ui->status_bar.enabled);h=set_hash(h,ui->status_bar.position);
+    h=set_hash(h,ui->status_bar.font_size);h=set_hash(h,ui->status_bar.progress_bar);h=set_hash(h,ui->status_bar.margin_px);
+    h=set_hash(h,u->global_style.pixels);h=set_hash(h,u->global_style.line_percent);
+    h=set_hash(h,u->global_style.margin);h=set_hash(h,u->global_style.hide_bars);
+    h=set_hash(h,u->state!=NULL);
+    h=set_hash_str(h,u->lan);h=set_hash_str(h,pn_w_brand());h=set_hash_str(h,u->message);
+    return h?h:1u;
+}
+static uint64_t settings_status_key(const pn_w_status_snapshot_t *st){
+    uint64_t h=set_hash(0,(uint64_t)(st->battery+1));
+    h=set_hash(h,st->wifi);h=set_hash(h,st->charging);
+    return set_hash_str(h,st->clock);
+}
 static pn_status_t show_profile(pn_settings_ui_t *ui,pn_settings_present_fn present,void *ctx,pn_refresh_t profile){
     su_t *u=ui->impl;pn_w_status_snapshot_t snapshot=pn_w_status_snapshot();ui->presented=false;
+    // 设置一级页复用外部整页菜单缓存：从书库/首页切换或子页返回时零重绘，只按需补顶部状态带。
+    // Settings root reuses the external whole-frame menu cache: zero redraw when switching tabs or returning from sub-pages, patching only the status band on clock/battery change.
+    if(u->screen==SCREEN_MAIN && profile==PN_REFRESH_GL16 && u->frame_cache.begin && u->frame_cache.commit && u->frame_cache.abort){
+        uint64_t key=settings_root_key(ui,u),aux=settings_status_key(&snapshot);
+        bool hit=false,same_aux=false;
+        uint8_t *cached=u->frame_cache.begin(u->frame_cache.ctx,key,aux,&hit,&same_aux);
+        if(cached){
+            pn_frame_t cf;
+            pn_status_t s=pn_frame_bind(&cf,cached,(size_t)W/2*H,W,H)?PN_OK:PN_NO_MEMORY;
+            if(s==PN_OK && hit){
+                if(!same_aux){
+                    pn_frame_rect(&cf,0,0,W,40,PN_UI_PAPER);
+                    int orig=u->font.pixels;
+                    bool need_scope=*pn_w_brand()!=0;
+                    pn_w_font_scope_t scope={0};if(need_scope)(void)pn_w_font_scope_begin(&scope,u->pool,NULL);
+                    s=pn_w_status(&u->font,&cf);
+                    if(need_scope)pn_w_font_scope_end(&scope);
+                    if(u->font.pixels!=orig)(void)pn_font_size(&u->font,orig);
+                }
+            }else if(s==PN_OK){
+                pn_frame_t saved_canvas=u->canvas;u->canvas=cf;
+                pn_profile_span_t span;pn_profile_begin(&span,NULL,"ui.settings.clear");pn_frame_clear(&u->canvas,15);pn_profile_end(&span,PN_OK);
+                pn_profile_begin(&span,NULL,"ui.settings.draw");
+                bool need_scope=*pn_w_brand()!=0;
+                pn_w_font_scope_t scope={0};if(need_scope)(void)pn_w_font_scope_begin(&scope,u->pool,NULL);
+                s=draw_main(ui,u);
+                if(need_scope)pn_w_font_scope_end(&scope);
+                pn_profile_end(&span,s);
+                u->canvas=saved_canvas;
+            }
+            if(s==PN_OK)s=present(ctx,&cf,profile);
+            if(s==PN_OK){
+                memcpy(u->pixels,cached,(size_t)W/2*H);
+                u->frame_cache.commit(u->frame_cache.ctx,key,aux);
+                ui->presented=true;u->snapshot_dirty=false;u->status=snapshot;
+                return PN_OK;
+            }
+            u->frame_cache.abort(u->frame_cache.ctx);
+            if(s==PN_CANCELLED)return s;
+        }
+    }
     // 只计时清屏与绘制，供真机拆分菜单准备耗时。/ Time clearing and drawing only, to split menu preparation on hardware.
     pn_profile_span_t span;pn_profile_begin(&span,NULL,"ui.settings.clear");pn_frame_clear(&u->canvas,15);pn_profile_end(&span,PN_OK);
     pn_profile_begin(&span,NULL,"ui.settings.draw");
     // 仅在需要显示任意中文文案/全拼候选/用户文件名时借用常驻中文字体，避免默认设置主页每次重绘重复开闭字库。
     // Borrow the resident Chinese face only when rendering custom CJK text, Pinyin candidates or user filenames, avoiding redundant font opens on default Settings root.
-    bool need_scope=*pn_w_brand()!=0 || u->screen==SCREEN_HOME_MOTTO || u->screen==SCREEN_HOME_MOTTO_EDIT
-        || u->screen==SCREEN_GLOBAL_STYLE || u->screen==SCREEN_GLOBAL_BG || u->screen==SCREEN_GLOBAL_CHAPTER || u->screen==SCREEN_HOME_BANNER;
+    bool need_scope=*pn_w_brand()!=0 || u->screen==SCREEN_HOME_MOTTO || u->screen==SCREEN_HOME_MOTTO_EDIT || u->screen==SCREEN_HOME_MOTTO_EXCERPTS
+        || u->screen==SCREEN_GLOBAL_STYLE || u->screen==SCREEN_GLOBAL_BG || u->screen==SCREEN_GLOBAL_CHAPTER || u->screen==SCREEN_HOME_BANNER
+        || u->screen==SCREEN_STATUS_BAR || u->screen==SCREEN_GESTURES || u->screen==SCREEN_TAP_ZONES || u->screen==SCREEN_KEY_HIGHLIGHT;
     pn_w_font_scope_t scope={0};if(need_scope)(void)pn_w_font_scope_begin(&scope,u->pool,NULL);
-    pn_status_t s=u->screen==SCREEN_KEYS?draw_keys(ui,u):u->screen==SCREEN_REFRESH?draw_refresh(ui,u):u->screen==SCREEN_ABOUT?draw_about(ui,u):u->screen==SCREEN_TIME?draw_time(u):u->screen==SCREEN_UPDATE?draw_update(u):u->screen==SCREEN_WIFI?draw_wifi(u):u->screen==SCREEN_WIFI_EDIT?draw_wifi_edit(u):u->screen==SCREEN_APPEARANCE?draw_appearance(ui,u):u->screen==SCREEN_GLOBAL_STYLE?draw_global_style(u):u->screen==SCREEN_GLOBAL_MARGINS?draw_global_margins(u):u->screen==SCREEN_GLOBAL_BG?draw_global_bg(u):u->screen==SCREEN_GLOBAL_CHAPTER?draw_global_chapter(u):u->screen==SCREEN_HOME_MOTTO?draw_home_motto(ui,u):u->screen==SCREEN_HOME_MOTTO_EDIT?draw_home_motto_edit(u):u->screen==SCREEN_HOME_BANNER?draw_home_banner(ui,u):draw_main(ui,u);
+    pn_status_t s=u->screen==SCREEN_KEYS?draw_keys(ui,u):u->screen==SCREEN_REFRESH?draw_refresh(ui,u):u->screen==SCREEN_ABOUT?draw_about(ui,u):u->screen==SCREEN_TIME?draw_time(u):u->screen==SCREEN_UPDATE?draw_update(u):u->screen==SCREEN_WIFI?draw_wifi(u):u->screen==SCREEN_WIFI_EDIT?draw_wifi_edit(u):u->screen==SCREEN_APPEARANCE?draw_appearance(ui,u):u->screen==SCREEN_GLOBAL_STYLE?draw_global_style(u):u->screen==SCREEN_GLOBAL_MARGINS?draw_global_margins(u):u->screen==SCREEN_GLOBAL_BG?draw_global_bg(u):u->screen==SCREEN_GLOBAL_CHAPTER?draw_global_chapter(u):u->screen==SCREEN_HOME_MOTTO?draw_home_motto(ui,u):u->screen==SCREEN_HOME_MOTTO_EDIT?draw_home_motto_edit(u):u->screen==SCREEN_HOME_MOTTO_EXCERPTS?draw_home_motto_excerpts(ui,u):u->screen==SCREEN_HOME_BANNER?draw_home_banner(ui,u):u->screen==SCREEN_STATUS_BAR?draw_status_bar(ui,u):u->screen==SCREEN_GESTURES?draw_gestures(ui,u):u->screen==SCREEN_TAP_ZONES?draw_tap_zones(ui,u):u->screen==SCREEN_KEY_HIGHLIGHT?draw_key_highlight(ui,u):draw_main(ui,u);
     if(need_scope)pn_w_font_scope_end(&scope);
     pn_profile_end(&span,s);
     if(s==PN_OK)s=present(ctx,&u->canvas,profile);
@@ -722,18 +935,38 @@ static pn_status_t show_profile(pn_settings_ui_t *ui,pn_settings_present_fn pres
 static pn_status_t show(pn_settings_ui_t *ui,pn_settings_present_fn present,void *ctx){return show_profile(ui,present,ctx,PN_REFRESH_GL16);}
 /* 只重画改变的控件；旧提示、外部快照变化或失败回执走完整路径。
  * Repaint only changed controls; old notices, changed external snapshots or failed receipts use the complete path. */
-static pn_status_t show_controls(pn_settings_ui_t *ui,su_t *u,uint8_t old_flags,pn_shelf_prefs_t old_shelf,int command,bool local,pn_settings_present_fn present,void *ctx){
+static pn_status_t show_controls(pn_settings_ui_t *ui,su_t *u,uint8_t old_flags,pn_shelf_prefs_t old_shelf,uint16_t old_auto_lock,int command,bool local,pn_settings_present_fn present,void *ctx){
     if(!local || !ui->presented || u->snapshot_dirty || *u->message)return show(ui,present,ctx);
     pn_status_t s=PN_OK;bool changed=false;
     if(u->screen==SCREEN_KEYS && command>=PN_SETUI_TOGGLE && command<PN_SETUI_TOGGLE+4){
         unsigned i=(unsigned)(command-PN_SETUI_TOGGLE);changed=old_flags!=ui->flags;
         if(changed){int x=PN_UI_WIDTH-PN_UI_MARGIN-16-64,y=TOGGLE_Y+(int)i*ROW_H+32;
             pn_frame_rect(&u->canvas,x,y,64,36,PN_UI_PAPER);pn_w_toggle(&u->canvas,x,y,on(ui->flags,i));}
+    }else if(u->screen==SCREEN_KEYS && command==PN_SETUI_VERTICAL_TURN){
+        // 仅局部重画第2/3行（滑/点翻页提示文字）和第5行开关，不触碰卡片底圆角，无需重画上方机身示意图与手势卡。
+        // Patch only rows 1-2 (swipe/tap hint text) and row 4's toggle without touching the card's bottom rounded corners or upper diagram/gesture card.
+        changed=true;
+        pn_frame_rect(&u->canvas,36,TOGGLE_Y+ROW_H+1,612,2*ROW_H-2,PN_UI_PAPER);
+        for(unsigned i=1;i<=2 && s==PN_OK;i++){
+            const char *hint=hints[i];
+            if(ui->vertical_turn && i==1)hint="上下滑动翻页";
+            else if(ui->vertical_turn && i==2)hint="点屏幕上半或下半翻页";
+            s=pn_w_card_row(&u->font,&u->canvas,names[i],hint,NULL,-1,on(ui->flags,i)?PN_ROW_ON:PN_ROW_OFF,TOGGLE_Y+(int)i*ROW_H,false);
+        }
+        if(s==PN_OK){int x=PN_UI_WIDTH-PN_UI_MARGIN-16-64,y=TOGGLE_Y+4*ROW_H+32;
+            pn_frame_rect(&u->canvas,x,y,64,36,PN_UI_PAPER);pn_w_toggle(&u->canvas,x,y,ui->vertical_turn);}
     }else if(u->screen==SCREEN_REFRESH && (command==PN_SETUI_TURN || command==PN_SETUI_TURN+1 || command==PN_SETUI_TURN_CRISP || command==PN_SETUI_TURN_FAST)){
-        // 说明文字随样式改变，整页重画。/ The note changes with the style, so repaint the page.
-        return show(ui,present,ctx);
+        changed=old_flags!=ui->flags;
+        if(changed){
+            pn_frame_rect(&u->canvas,26,TURN_Y-6,632,H-(TURN_Y-6),PN_UI_PAPER);
+            s=draw_turns(ui,u);
+            if(s==PN_OK)s=note(u,turn_note_text(ui->flags),TURN_Y+TURN_H+50);
+        }
     }else if(u->screen==SCREEN_REFRESH && command>=PN_SETUI_LEVEL && command<PN_SETUI_LEVEL+3){
         changed=old_flags!=ui->flags;if(changed){pn_frame_rect(&u->canvas,26,LEVEL_Y-6,632,LEVEL_H+12,PN_UI_PAPER);s=draw_levels(ui,u);}
+    }else if(u->screen==SCREEN_REFRESH && command>=PN_SETUI_AUTO_LOCK && command<PN_SETUI_AUTO_LOCK+5){
+        changed=old_auto_lock!=ui->auto_lock_minutes;
+        if(changed){pn_frame_rect(&u->canvas,26,LOCK_Y-6,632,LOCK_H+66,PN_UI_PAPER);s=draw_auto_lock(ui,u);if(s==PN_OK)s=draw_auto_lock_note(ui,u);}
     }else if(u->screen==SCREEN_APPEARANCE && command>=PN_SETUI_COLUMNS && command<PN_SETUI_STYLE+PN_SHELF_STYLE_COUNT){
         bool columns=old_shelf.columns!=ui->shelf.columns;changed=columns || old_shelf.style!=ui->shelf.style;
         if(columns){pn_frame_rect(&u->canvas,26,190,632,108,PN_UI_PAPER);s=draw_columns(ui,u);}
@@ -845,7 +1078,8 @@ static pn_status_t wifi_event(pn_settings_ui_t *ui,su_t *u,int command,pn_settin
     else return PN_EMPTY;
     return changed?show(ui,present,ctx):PN_OK;
 }
-pn_status_t pn_settings_ui_open_cached(pn_settings_ui_t *ui,pn_pool_t *pool,pn_media_t *state,const char *dir,pn_font_t *return_slot,pn_settings_present_fn present,void *ctx){
+pn_status_t pn_settings_ui_open_fast(pn_settings_ui_t *ui,pn_pool_t *pool,pn_media_t *state,const char *dir,pn_font_t *return_slot,
+    const pn_settings_snapshot_t *snapshot,const pn_settings_frame_cache_t *frame_cache,pn_settings_present_fn present,void *ctx){
     if(!ui || !pool || !present || (state && (!dir || !*dir)))return PN_INVALID;
     if(ui->impl)return PN_BUSY;
     if(dir && strlen(dir)>=PN_JOURNAL_PATH_MAX)return PN_LIMIT;
@@ -853,6 +1087,7 @@ pn_status_t pn_settings_ui_open_cached(pn_settings_ui_t *ui,pn_pool_t *pool,pn_m
     if(!u)return PN_NO_MEMORY;
     memset(u,0,sizeof *u);u->pool=pool;u->state=state;
     if(state)strcpy(u->dir,dir);
+    if(frame_cache)u->frame_cache=*frame_cache;
     u->pixels=pn_alloc_tagged(pool,PN_MEM_UI,(size_t)W/2*H);
     pn_status_t status=u->pixels?PN_OK:PN_NO_MEMORY;
     if(status==PN_OK){
@@ -863,22 +1098,54 @@ pn_status_t pn_settings_ui_open_cached(pn_settings_ui_t *ui,pn_pool_t *pool,pn_m
     if(status!=PN_OK){if(u->font.impl && (!return_slot || pn_font_move(return_slot,&u->font,pool)!=PN_OK))pn_font_close(&u->font);pn_free(u->pixels);pn_free(u);return status;}
     u->return_font=return_slot;
     uint8_t flags=0;
-    if(state && pn_settings_load_flags(state,dir,&flags)!=PN_OK){flags=0;snprintf(u->message,sizeof u->message,"设置记录不可读，显示默认值");}
+    if(snapshot && snapshot->has_flags)flags=snapshot->flags;
+    else if(state && pn_settings_load_flags(state,dir,&flags)!=PN_OK){flags=0;snprintf(u->message,sizeof u->message,"设置记录不可读，显示默认值");}
     pn_shelf_prefs_t shelf=pn_shelf_prefs_default();
-    if(state && pn_settings_load_shelf(state,dir,&shelf)!=PN_OK)snprintf(u->message,sizeof u->message,"书架设置不可读，显示默认值");
-    reload_lan(u);
-    bool index_wait=false;u->index_known=!state || pn_settings_load_index(state,dir,&index_wait)==PN_OK;
-    bool vertical_turn=false;u->vertical_known=!state || pn_settings_load_vertical_turn(state,dir,&vertical_turn)==PN_OK;
+    if(snapshot && snapshot->has_shelf)shelf=snapshot->shelf;
+    else if(state && pn_settings_load_shelf(state,dir,&shelf)!=PN_OK)snprintf(u->message,sizeof u->message,"书架设置不可读，显示默认值");
+    if(snapshot && snapshot->has_lan)set_lan_text(u,snapshot->lan);
+    else reload_lan(u);
+    bool index_wait=false;
+    if(snapshot && snapshot->has_index){index_wait=snapshot->index_wait;u->index_known=true;}
+    else u->index_known=!state || pn_settings_load_index(state,dir,&index_wait)==PN_OK;
+    bool vertical_turn=false;
+    if(snapshot && snapshot->has_vertical){vertical_turn=snapshot->vertical_turn;u->vertical_known=true;}
+    else u->vertical_known=!state || pn_settings_load_vertical_turn(state,dir,&vertical_turn)==PN_OK;
+    uint16_t auto_lock_minutes=PN_AUTO_LOCK_DEFAULT_MIN;
+    if(snapshot && snapshot->has_auto_lock){auto_lock_minutes=snapshot->auto_lock_minutes;u->auto_lock_known=true;}
+    else u->auto_lock_known=!state || pn_settings_load_auto_lock(state,dir,&auto_lock_minutes)==PN_OK;
+    pn_status_bar_prefs_t status_bar=pn_status_bar_prefs_default();
+    if(snapshot && snapshot->has_status_bar){status_bar=snapshot->status_bar;u->status_bar_known=true;}
+    else u->status_bar_known=!state || pn_settings_load_status_bar(state,dir,&status_bar)==PN_OK;
+    pn_gesture_prefs_t gestures=pn_gesture_prefs_default();
+    if(snapshot && snapshot->has_gestures){gestures=snapshot->gestures;u->gestures_known=true;}
+    else u->gestures_known=!state || pn_settings_load_gestures(state,dir,&gestures)==PN_OK;
+    u->sbar_pick_slot=-1;u->gesture_pick_slot=-1;u->status_bar_return_screen=SCREEN_MAIN;
     pn_home_prefs_t home=pn_home_prefs_default();
-    if(state)(void)pn_home_prefs_load_dir(state,dir,&home);
+    if(snapshot && snapshot->has_home)home=snapshot->home;
+    else if(state)(void)pn_home_prefs_load_dir(state,dir,&home);
     pn_w_set_brand(home.header);
     u->global_style=pn_style_default(PN_STYLE_DEFAULT_PIXELS);
-    if(state){pn_style_t gs;pn_status_t gstatus=pn_style_global_load(state,dir,&gs);if(gstatus==PN_OK)u->global_style=gs;u->global_style_known=gstatus==PN_OK || gstatus==PN_EMPTY;}
+    if(snapshot && snapshot->has_global_style){u->global_style=snapshot->global_style;u->global_style_known=true;}
+    else if(state){pn_style_t gs;pn_status_t gstatus=pn_style_global_load(state,dir,&gs);if(gstatus==PN_OK)u->global_style=gs;u->global_style_known=gstatus==PN_OK || gstatus==PN_EMPTY;}
     else u->global_style_known=false;
-    *ui=(pn_settings_ui_t){.impl=u,.active=true,.flags=flags,.shelf=shelf,.home=home,.index_wait=index_wait,.vertical_turn=vertical_turn};
+    if(snapshot && snapshot->has_about){
+        u->about=snapshot->about;
+        u->about.version[sizeof u->about.version-1]=0;u->about.storage[sizeof u->about.storage-1]=0;
+        u->about.internal[sizeof u->about.internal-1]=0;u->about.screen[sizeof u->about.screen-1]=0;
+    }
+    *ui=(pn_settings_ui_t){.impl=u,.active=true,.flags=flags,.shelf=shelf,.home=home,.index_wait=index_wait,.vertical_turn=vertical_turn,.auto_lock_minutes=auto_lock_minutes,.status_bar=status_bar,.gestures=gestures};
     (void)show(ui,present,ctx);return PN_OK;
 }
-pn_status_t pn_settings_ui_open(pn_settings_ui_t *ui,pn_pool_t *pool,pn_media_t *state,const char *dir,pn_settings_present_fn present,void *ctx){return pn_settings_ui_open_cached(ui,pool,state,dir,NULL,present,ctx);}
+pn_status_t pn_settings_ui_open_cached(pn_settings_ui_t *ui,pn_pool_t *pool,pn_media_t *state,const char *dir,pn_font_t *return_slot,pn_settings_present_fn present,void *ctx){
+    return pn_settings_ui_open_fast(ui,pool,state,dir,return_slot,NULL,NULL,present,ctx);
+}
+pn_status_t pn_settings_ui_open(pn_settings_ui_t *ui,pn_pool_t *pool,pn_media_t *state,const char *dir,pn_settings_present_fn present,void *ctx){return pn_settings_ui_open_fast(ui,pool,state,dir,NULL,NULL,NULL,present,ctx);}
+bool pn_settings_ui_global_style(const pn_settings_ui_t *ui,pn_style_t *out){
+    if(!ui || !ui->impl || !out)return false;
+    const su_t *u=ui->impl;if(!u->global_style_known)return false;
+    *out=u->global_style;return true;
+}
 pn_status_t pn_settings_load_index(pn_media_t *state,const char *dir,bool *wait){
     if(!state || !dir || !wait)return PN_INVALID;
     pn_media_lease_t lease;pn_status_t s=pn_media_acquire(state,PN_MEDIA_READ,&lease);if(s!=PN_OK)return s;
@@ -893,6 +1160,78 @@ pn_status_t pn_settings_load_vertical_turn(pn_media_t *state,const char *dir,boo
     pn_journal_files_t files;pn_journal_io_t io;bool value=false;s=pn_turn_dir_prefs_files(&files,state,&lease,dir,&io);if(s==PN_OK)s=pn_turn_dir_prefs_load(&io,&value);(void)pn_media_release(state,&lease);
     if(s==PN_EMPTY)s=PN_OK;
     if(s==PN_OK)*vertical=value;
+    return s;
+}
+pn_status_t pn_settings_load_auto_lock(pn_media_t *state,const char *dir,uint16_t *minutes){
+    if(!state || !dir || !*dir || !minutes)return PN_INVALID;
+    pn_media_lease_t lease;pn_status_t s=pn_media_acquire(state,PN_MEDIA_READ,&lease);if(s!=PN_OK)return s;
+    pn_journal_files_t files;pn_journal_io_t io;uint16_t value=PN_AUTO_LOCK_DEFAULT_MIN;
+    s=pn_auto_lock_prefs_files(&files,state,&lease,dir,&io);if(s==PN_OK)s=pn_auto_lock_prefs_load(&io,&value);
+    (void)pn_media_release(state,&lease);
+    if(s==PN_EMPTY)s=PN_OK;
+    if(s==PN_OK)*minutes=value;
+    return s;
+}
+static pn_status_t commit_auto_lock(pn_settings_ui_t *ui,su_t *u,uint16_t next){
+    pn_status_t s=PN_UNSUPPORTED;
+    if(u->state && u->auto_lock_known){
+        pn_media_lease_t lease={0};s=pn_media_acquire(u->state,PN_MEDIA_WRITE,&lease);
+        if(s==PN_OK){pn_journal_files_t files;pn_journal_io_t io;s=pn_auto_lock_prefs_files(&files,u->state,&lease,u->dir,&io);
+            if(s==PN_OK)s=pn_auto_lock_prefs_save(&io,next);
+            (void)pn_media_release(u->state,&lease);}
+    }
+    if(s==PN_OK){ui->auto_lock_minutes=next;u->message[0]=0;}
+    else{uint16_t reread;if(u->state && pn_settings_load_auto_lock(u->state,u->dir,&reread)==PN_OK)ui->auto_lock_minutes=reread;
+        snprintf(u->message,sizeof u->message,s==PN_UNSUPPORTED?"内部存储不可用，设置不能保存":"保存失败，请重试");}
+    return s;
+}
+pn_status_t pn_settings_load_status_bar(pn_media_t *state,const char *dir,pn_status_bar_prefs_t *prefs){
+    if(!state || !dir || !*dir || !prefs)return PN_INVALID;
+    pn_media_lease_t lease={0};pn_status_t s=pn_media_acquire(state,PN_MEDIA_READ,&lease);if(s!=PN_OK)return s;
+    pn_journal_files_t files;pn_journal_io_t io;pn_status_bar_prefs_t v=pn_status_bar_prefs_default();
+    s=pn_status_bar_prefs_files(&files,state,&lease,dir,&io);if(s==PN_OK)s=pn_status_bar_prefs_load(&io,&v);
+    (void)pn_media_release(state,&lease);
+    if(s==PN_EMPTY)s=PN_OK;
+    if(s==PN_OK)*prefs=v;
+    return s;
+}
+pn_status_t pn_settings_load_gestures(pn_media_t *state,const char *dir,pn_gesture_prefs_t *prefs){
+    if(!state || !dir || !*dir || !prefs)return PN_INVALID;
+    pn_media_lease_t lease={0};pn_status_t s=pn_media_acquire(state,PN_MEDIA_READ,&lease);if(s!=PN_OK)return s;
+    pn_journal_files_t files;pn_journal_io_t io;pn_gesture_prefs_t v=pn_gesture_prefs_default();
+    s=pn_gesture_prefs_files(&files,state,&lease,dir,&io);if(s==PN_OK)s=pn_gesture_prefs_load(&io,&v);
+    (void)pn_media_release(state,&lease);
+    if(s==PN_EMPTY)s=PN_OK;
+    if(s==PN_OK)*prefs=v;
+    return s;
+}
+pn_status_t pn_settings_save_gestures(pn_media_t *state,const char *dir,const pn_gesture_prefs_t *prefs){
+    if(!state || !dir || !*dir || pn_gesture_prefs_validate(prefs)!=PN_OK)return PN_INVALID;
+    pn_media_lease_t lease={0};pn_status_t s=pn_media_acquire(state,PN_MEDIA_WRITE,&lease);if(s!=PN_OK)return s;
+    pn_journal_files_t files;pn_journal_io_t io;
+    s=pn_gesture_prefs_files(&files,state,&lease,dir,&io);if(s==PN_OK)s=pn_gesture_prefs_save(&io,prefs);
+    (void)pn_media_release(state,&lease);
+    return s;
+}
+static pn_status_t commit_status_bar(pn_settings_ui_t *ui,su_t *u,const pn_status_bar_prefs_t *next){
+    pn_status_t s=PN_UNSUPPORTED;
+    if(u->state && u->status_bar_known){
+        pn_media_lease_t lease={0};s=pn_media_acquire(u->state,PN_MEDIA_WRITE,&lease);
+        if(s==PN_OK){pn_journal_files_t files;pn_journal_io_t io;s=pn_status_bar_prefs_files(&files,u->state,&lease,u->dir,&io);
+            if(s==PN_OK)s=pn_status_bar_prefs_save(&io,next);
+            (void)pn_media_release(u->state,&lease);}
+    }
+    if(s==PN_OK){ui->status_bar=*next;pn_status_bar_set_active(&ui->status_bar);u->message[0]=0;}
+    else{pn_status_bar_prefs_t reread;if(u->state && pn_settings_load_status_bar(u->state,u->dir,&reread)==PN_OK){ui->status_bar=reread;pn_status_bar_set_active(&ui->status_bar);}
+        snprintf(u->message,sizeof u->message,s==PN_UNSUPPORTED?"内部存储不可用，设置不能保存":"保存失败，请重试");}
+    return s;
+}
+static pn_status_t commit_gestures(pn_settings_ui_t *ui,su_t *u,const pn_gesture_prefs_t *next){
+    pn_status_t s=PN_UNSUPPORTED;
+    if(u->state && u->gestures_known)s=pn_settings_save_gestures(u->state,u->dir,next);
+    if(s==PN_OK){ui->gestures=*next;u->message[0]=0;}
+    else{pn_gesture_prefs_t reread;if(u->state && pn_settings_load_gestures(u->state,u->dir,&reread)==PN_OK)ui->gestures=reread;
+        snprintf(u->message,sizeof u->message,s==PN_UNSUPPORTED?"内部存储不可用，设置不能保存":"保存失败，请重试");}
     return s;
 }
 static pn_status_t save(su_t *u,uint8_t flags){
@@ -960,7 +1299,7 @@ pn_status_t pn_settings_ui_event(pn_settings_ui_t *ui,int command,pn_settings_pr
     su_t *u=ui->impl;
     // 测试中忽略的输入不清掉“正在连接”提示。/ Inputs ignored during a test keep the connecting notice.
     if(u->testing && command!=PN_SETUI_WIFI_TEST_CANCEL && command!=PN_SETUI_BACK)return PN_BUSY;
-    bool local=!*u->message;uint8_t old_flags=ui->flags;pn_shelf_prefs_t old_shelf=ui->shelf;u->message[0]=0;pn_status_t status=PN_OK;
+    bool local=!*u->message;uint8_t old_flags=ui->flags;pn_shelf_prefs_t old_shelf=ui->shelf;uint16_t old_auto_lock=ui->auto_lock_minutes;u->message[0]=0;pn_status_t status=PN_OK;
     if(u->update.running && command!=PN_SETUI_UPDATE_CANCEL){if(command==PN_SETUI_BACK)ui->request=PN_SETUI_UPDATE_CANCEL;return PN_BUSY;}
     if(u->testing && command!=PN_SETUI_WIFI_TEST_CANCEL){if(command==PN_SETUI_BACK){ui->request=PN_SETUI_WIFI_TEST_CANCEL;snprintf(u->message,sizeof u->message,"正在取消测试…");pn_status_t shown=show(ui,present,ctx);return shown==PN_OK?PN_BUSY:shown;}return PN_BUSY;}
     // 输入页返回先回到名称步，再回网络页；离开即清零输入。/ Back on the entry page returns to the name step, then the network page, wiping input on leaving.
@@ -971,7 +1310,108 @@ pn_status_t pn_settings_ui_event(pn_settings_ui_t *ui,int command,pn_settings_pr
         if(status==PN_OK){ui->index_wait=next;u->message[0]=0;}else{bool saved;if(u->state && pn_settings_load_index(u->state,u->dir,&saved)==PN_OK)ui->index_wait=saved;snprintf(u->message,sizeof u->message,"设置未保存，请重试");}
         pn_status_t shown=show(ui,present,ctx);return status==PN_OK?shown:status;
     }
-    if(command==PN_SETUI_BACK){if(u->screen!=SCREEN_MAIN){u->forget_armed=false;u->screen=(u->screen==SCREEN_TIME || u->screen==SCREEN_UPDATE)?SCREEN_ABOUT:(u->screen==SCREEN_GLOBAL_MARGINS || u->screen==SCREEN_GLOBAL_BG || u->screen==SCREEN_GLOBAL_CHAPTER)?SCREEN_GLOBAL_STYLE:u->screen==SCREEN_HOME_MOTTO_EDIT?SCREEN_HOME_MOTTO:(u->screen==SCREEN_HOME_MOTTO || u->screen==SCREEN_HOME_BANNER)?SCREEN_APPEARANCE:SCREEN_MAIN;return show(ui,present,ctx);}ui->active=false;return PN_OK;}
+    if(command==PN_SETUI_BACK){
+        if(u->screen==SCREEN_STATUS_BAR && u->sbar_pick_slot>=0){u->sbar_pick_slot=-1;return show(ui,present,ctx);}
+        if(u->screen==SCREEN_GESTURES && u->gesture_pick_slot>=0){u->gesture_pick_slot=-1;return show(ui,present,ctx);}
+        if(u->screen!=SCREEN_MAIN){
+            u->forget_armed=false;u->sbar_pick_slot=-1;u->gesture_pick_slot=-1;
+            u->screen=(u->screen==SCREEN_TIME || u->screen==SCREEN_UPDATE)?SCREEN_ABOUT
+                :(u->screen==SCREEN_GLOBAL_MARGINS || u->screen==SCREEN_GLOBAL_BG || u->screen==SCREEN_GLOBAL_CHAPTER)?SCREEN_GLOBAL_STYLE
+                :u->screen==SCREEN_STATUS_BAR?u->status_bar_return_screen
+                :(u->screen==SCREEN_GESTURES || u->screen==SCREEN_TAP_ZONES || u->screen==SCREEN_KEY_HIGHLIGHT)?SCREEN_KEYS
+                :(u->screen==SCREEN_HOME_MOTTO_EDIT || u->screen==SCREEN_HOME_MOTTO_EXCERPTS)?(motto_excerpts_release(u),SCREEN_HOME_MOTTO)
+                :(u->screen==SCREEN_HOME_MOTTO || u->screen==SCREEN_HOME_BANNER)?SCREEN_APPEARANCE
+                :SCREEN_MAIN;
+            return show(ui,present,ctx);
+        }
+        ui->active=false;return PN_OK;
+    }
+    if(command==PN_SETUI_STATUS_BAR){u->status_bar_return_screen=(u->screen==SCREEN_GLOBAL_STYLE)?SCREEN_GLOBAL_STYLE:SCREEN_MAIN;u->sbar_pick_slot=-1;u->screen=SCREEN_STATUS_BAR;return show(ui,present,ctx);}
+    if(command==PN_SETUI_GESTURES){u->gesture_pick_slot=-1;u->screen=SCREEN_GESTURES;return show(ui,present,ctx);}
+    if(command==PN_SETUI_TAP_ZONES){u->screen=SCREEN_TAP_ZONES;return show(ui,present,ctx);}
+    if(command==PN_SETUI_KEY_HIGHLIGHT){u->screen=SCREEN_KEY_HIGHLIGHT;return show(ui,present,ctx);}
+    if(u->screen==SCREEN_STATUS_BAR){
+        if(command==PN_SETUI_SBAR_MODAL_CLOSE){u->sbar_pick_slot=-1;return show(ui,present,ctx);}
+        if(command>=PN_SETUI_SBAR_SLOT && command<PN_SETUI_SBAR_SLOT+(int)PN_SBAR_SLOTS){u->sbar_pick_slot=command-PN_SETUI_SBAR_SLOT;return show(ui,present,ctx);}
+        if(command>=PN_SETUI_SBAR_BSLOT && command<PN_SETUI_SBAR_BSLOT+(int)PN_SBAR_SLOTS){u->sbar_pick_slot=(int)PN_SBAR_SLOTS+(command-PN_SETUI_SBAR_BSLOT);return show(ui,present,ctx);}
+        pn_status_bar_prefs_t next=ui->status_bar;bool handled=true;
+        if(!next.enabled)next.position=PN_SBAR_POS_DUAL;
+        if(command>=PN_SETUI_SBAR_PICK && command<PN_SETUI_SBAR_PICK+(int)PN_SBAR_SLOT_COUNT && u->sbar_pick_slot>=0 && u->sbar_pick_slot<(int)(PN_SBAR_SLOTS*2u)){
+            next.enabled=1;
+            if(u->sbar_pick_slot<(int)PN_SBAR_SLOTS)next.slots[u->sbar_pick_slot]=(uint8_t)(command-PN_SETUI_SBAR_PICK);
+            else next.bottom_slots[u->sbar_pick_slot-(int)PN_SBAR_SLOTS]=(uint8_t)(command-PN_SETUI_SBAR_PICK);
+            u->sbar_pick_slot=-1;
+        }else if(command==PN_SETUI_SBAR_POS_DUAL){next.enabled=1;next.position=PN_SBAR_POS_DUAL;}
+        else if(command>=PN_SETUI_SBAR_POS && command<PN_SETUI_SBAR_POS+3){next.enabled=1;next.position=(uint8_t)(command-PN_SETUI_SBAR_POS);}
+        else if(command>=PN_SETUI_SBAR_FONT && command<PN_SETUI_SBAR_FONT+2){next.enabled=1;next.font_size=(uint8_t)(command-PN_SETUI_SBAR_FONT);}
+        else if(command>=PN_SETUI_SBAR_PROG && command<PN_SETUI_SBAR_PROG+3){next.enabled=1;next.progress_bar=(uint8_t)(command-PN_SETUI_SBAR_PROG);}
+        else if(command==PN_SETUI_SBAR_MARGIN_DEC){next.enabled=1;if(next.margin_px>=2)next.margin_px=(uint8_t)(next.margin_px-2);}
+        else if(command==PN_SETUI_SBAR_MARGIN_INC){next.enabled=1;if((unsigned)next.margin_px+2u<=PN_SBAR_MARGIN_MAX)next.margin_px=(uint8_t)(next.margin_px+2u);}
+        else if(command==PN_SETUI_SBAR_RESET){next=pn_status_bar_prefs_default();}
+        else handled=false;
+        if(handled){status=commit_status_bar(ui,u,&next);pn_status_t shown=show(ui,present,ctx);return status==PN_OK?shown:status;}
+        return PN_EMPTY;
+    }
+    if(u->screen==SCREEN_GESTURES){
+        if(command==PN_SETUI_GMODAL_CLOSE){u->gesture_pick_slot=-1;return show(ui,present,ctx);}
+        if(command>=PN_SETUI_GSLOT && command<PN_SETUI_GSLOT+(int)PN_GSLOT_COUNT){u->gesture_pick_slot=command-PN_SETUI_GSLOT;return show(ui,present,ctx);}
+        if(command>=PN_SETUI_GACT_PICK && command<PN_SETUI_GACT_PICK+(int)PN_GACT_COUNT && u->gesture_pick_slot>=0 && u->gesture_pick_slot<(int)PN_GSLOT_COUNT){
+            pn_gesture_prefs_t next=ui->gestures;next.slots[u->gesture_pick_slot]=(uint8_t)(command-PN_SETUI_GACT_PICK);u->gesture_pick_slot=-1;
+            status=commit_gestures(ui,u,&next);pn_status_t shown=show(ui,present,ctx);return status==PN_OK?shown:status;
+        }
+        return PN_EMPTY;
+    }
+    if(u->screen==SCREEN_TAP_ZONES){
+        if(command>=PN_SETUI_TAP_ZONE_PICK && command<PN_SETUI_TAP_ZONE_PICK+(int)PN_TAP_ZONE_COUNT){
+            uint8_t prev_zone=ui->gestures.tap_zone;
+            pn_gesture_prefs_t next=ui->gestures;next.tap_zone=(uint8_t)(command-PN_SETUI_TAP_ZONE_PICK);
+            if(next.tap_zone==prev_zone)return PN_OK;
+            status=commit_gestures(ui,u,&next);
+            if(status==PN_OK && local && ui->presented && !u->snapshot_dirty && !*u->message){
+                pn_w_font_scope_t scope={0};(void)pn_w_font_scope_begin(&scope,u->pool,NULL);
+                pn_status_t ps=draw_tap_zone_card(&u->font,&u->canvas,ui,prev_zone);
+                if(ps==PN_OK)ps=draw_tap_zone_card(&u->font,&u->canvas,ui,ui->gestures.tap_zone);
+                pn_w_font_scope_end(&scope);
+                if(ps==PN_OK){ui->presented=false;ps=present(ctx,&u->canvas,PN_REFRESH_GL16);if(ps==PN_OK)ui->presented=true;}
+                return ps;
+            }
+            pn_status_t shown=show(ui,present,ctx);return status==PN_OK?shown:status;
+        }
+        return PN_EMPTY;
+    }
+    if(u->screen==SCREEN_KEY_HIGHLIGHT){
+        pn_gesture_prefs_t prev_g=ui->gestures,next=ui->gestures;bool handled=true;
+        static const uint8_t speed_steps[8]={5,10,15,20,30,45,60,90};
+        if(command>=PN_SETUI_KEY_MAP && command<PN_SETUI_KEY_MAP+(int)PN_KEY_MAP_COUNT)next.key_map=(uint8_t)(command-PN_SETUI_KEY_MAP);
+        else if(command>=PN_SETUI_KEY2_SHORT && command<PN_SETUI_KEY2_SHORT+5)next.key2_short_action=(uint8_t)(command-PN_SETUI_KEY2_SHORT);
+        else if(command>=PN_SETUI_LP_MODE && command<PN_SETUI_LP_MODE+(int)PN_LP_COUNT)next.long_press_mode=(uint8_t)(command-PN_SETUI_LP_MODE);
+        else if(command==PN_SETUI_AUTO_TURN_DEC){
+            uint8_t cur=next.auto_turn_sec,prev=speed_steps[0];
+            for(unsigned i=0;i<8;i++)if(speed_steps[i]<cur)prev=speed_steps[i];
+            next.auto_turn_sec=prev;
+        }else if(command==PN_SETUI_AUTO_TURN_INC){
+            uint8_t cur=next.auto_turn_sec,nxt=speed_steps[7];
+            for(int i=7;i>=0;i--)if(speed_steps[i]>cur)nxt=speed_steps[i];
+            next.auto_turn_sec=nxt;
+        }else handled=false;
+        if(handled){
+            if(!memcmp(&prev_g,&next,sizeof next))return PN_OK;
+            status=commit_gestures(ui,u,&next);
+            if(status==PN_OK && local && ui->presented && !u->snapshot_dirty && !*u->message){
+                pn_w_font_scope_t scope={0};(void)pn_w_font_scope_begin(&scope,u->pool,NULL);
+                pn_status_t ps=PN_OK;
+                if(prev_g.key_map!=ui->gestures.key_map){pn_frame_rect(&u->canvas,26,188,632,100,PN_UI_PAPER);ps=pn_w_segments(&u->font,&u->canvas,key_map_names,key_map_notes,PN_KEY_MAP_COUNT,(int)ui->gestures.key_map,194,88);}
+                else if(prev_g.key2_short_action!=ui->gestures.key2_short_action){pn_frame_rect(&u->canvas,26,344,632,90,PN_UI_PAPER);ps=pn_w_segments(&u->font,&u->canvas,key2_short_names,key2_short_notes,5,(int)ui->gestures.key2_short_action,350,78);}
+                else if(prev_g.long_press_mode!=ui->gestures.long_press_mode){pn_frame_rect(&u->canvas,26,486,632,100,PN_UI_PAPER);ps=pn_w_segments(&u->font,&u->canvas,lp_mode_names,lp_mode_notes,PN_LP_COUNT,(int)ui->gestures.long_press_mode,492,88);}
+                else if(prev_g.auto_turn_sec!=ui->gestures.auto_turn_sec){ps=draw_auto_turn_box(&u->font,&u->canvas,&ui->gestures);}
+                pn_w_font_scope_end(&scope);
+                if(ps==PN_OK){ui->presented=false;ps=present(ctx,&u->canvas,PN_REFRESH_GL16);if(ps==PN_OK)ui->presented=true;}
+                return ps;
+            }
+            pn_status_t shown=show(ui,present,ctx);return status==PN_OK?shown:status;
+        }
+        return PN_EMPTY;
+    }
     if(command==PN_SETUI_GLOBAL_STYLE){u->screen=SCREEN_GLOBAL_STYLE;return show(ui,present,ctx);}
     if(u->screen==SCREEN_GLOBAL_STYLE){
         if(command==PN_SETUI_GSTYLE_MARGINS){u->screen=SCREEN_GLOBAL_MARGINS;return show(ui,present,ctx);}
@@ -997,7 +1437,7 @@ pn_status_t pn_settings_ui_event(pn_settings_ui_t *ui,int command,pn_settings_pr
             else if(item==7){next.clarity=(uint16_t)((next.clarity+(up?1u:3u))%4u);}
         }else if(command>=PN_SETUI_GSTYLE_EXT && command<PN_SETUI_GSTYLE_EXT+6){
             unsigned item=(unsigned)(command-PN_SETUI_GSTYLE_EXT)/2;bool up=((command-PN_SETUI_GSTYLE_EXT)&1)!=0;
-            if(item==0)next.reading_line=(uint16_t)((next.reading_line+(up?1u:2u))%3u);
+            if(item==0)next.reading_line=(uint16_t)((next.reading_line+(up?1u:3u))%4u);
             else if(item==1)next.reading_line_shade=(uint16_t)((next.reading_line_shade+(up?1u:3u))%4u);
             else{int v=(int)next.reading_line_offset+(up?2:-2);if(v>=-8 && v<=8)next.reading_line_offset=(int16_t)v;}
         }else handled=false;
@@ -1025,22 +1465,41 @@ pn_status_t pn_settings_ui_event(pn_settings_ui_t *ui,int command,pn_settings_pr
         if(handled){if(pn_style_validate(&next)==PN_OK)status=commit_global_style(u,&next);pn_status_t shown=show(ui,present,ctx);return status==PN_OK?shown:status;}
     }
     if(u->screen==SCREEN_GLOBAL_MARGINS){
+        if(command>=PN_SETUI_GSTYLE_MSTEP && command<PN_SETUI_GSTYLE_MSTEP+3){
+            static const uint8_t mults[3]={1u,5u,10u};
+            uint8_t want=mults[command-PN_SETUI_GSTYLE_MSTEP];
+            // 再次点击当前已选倍率（×5/×10）可一键切回 ×1。/ Tapping an already-active x5/x10 multiplier toggles cleanly back to x1.
+            u->margin_step_mult=(want>1u && gmargin_step_mult_of(u->margin_step_mult)==(int)want)?1u:want;
+            return show(ui,present,ctx);
+        }
         pn_style_t next=u->global_style;bool handled=true;
         if(command==PN_SETUI_GSTYLE_MARGINS_RESET){
             next.margin_top=0;next.margin_bottom=0;pn_style_set_margins_lr(&next,32);
             next.bg_margin_top=0;next.bg_margin_bottom=0;next.bg_margin_left=0;next.bg_margin_right=0;
         }else if(command>=PN_SETUI_GSTYLE_MADJ && command<PN_SETUI_GSTYLE_MADJ+16){
             unsigned item=(unsigned)(command-PN_SETUI_GSTYLE_MADJ)/2;bool up=((command-PN_SETUI_GSTYLE_MADJ)&1)!=0;
-            int delta=up?4:-4,val=0;
+            int step=4*gmargin_step_mult_of(u->margin_step_mult),delta=up?step:-step;
+            int cur=0,hi=(item==0 || item==1 || item==4 || item==5)?200:160;
             switch(item){
-                case 0:val=pn_style_margin_top(&next)+delta;if(val>=0 && val<=200)next.margin_top=(uint16_t)val;break;
-                case 1:val=pn_style_margin_bottom(&next)+delta;if(val>=0 && val<=200)next.margin_bottom=(uint16_t)val;break;
-                case 2:val=pn_style_margin_left(&next)+delta;if(val>=0 && val<=160)pn_style_set_margin_left(&next,val);break;
-                case 3:val=pn_style_margin_right(&next)+delta;if(val>=0 && val<=160)pn_style_set_margin_right(&next,val);break;
-                case 4:val=(int)next.bg_margin_top+delta;if(val>=0 && val<=200)next.bg_margin_top=(uint16_t)val;break;
-                case 5:val=(int)next.bg_margin_bottom+delta;if(val>=0 && val<=200)next.bg_margin_bottom=(uint16_t)val;break;
-                case 6:val=(int)next.bg_margin_left+delta;if(val>=0 && val<=160)next.bg_margin_left=(uint16_t)val;break;
-                default:val=(int)next.bg_margin_right+delta;if(val>=0 && val<=160)next.bg_margin_right=(uint16_t)val;break;
+                case 0:cur=pn_style_margin_top(&next);break;
+                case 1:cur=pn_style_margin_bottom(&next);break;
+                case 2:cur=pn_style_margin_left(&next);break;
+                case 3:cur=pn_style_margin_right(&next);break;
+                case 4:cur=(int)next.bg_margin_top;break;
+                case 5:cur=(int)next.bg_margin_bottom;break;
+                case 6:cur=(int)next.bg_margin_left;break;
+                default:cur=(int)next.bg_margin_right;break;
+            }
+            int val=cur+delta;if(val<0)val=0;if(val>hi)val=hi;
+            switch(item){
+                case 0:next.margin_top=(uint16_t)val;break;
+                case 1:next.margin_bottom=(uint16_t)val;break;
+                case 2:pn_style_set_margin_left(&next,val);break;
+                case 3:pn_style_set_margin_right(&next,val);break;
+                case 4:next.bg_margin_top=(uint16_t)val;break;
+                case 5:next.bg_margin_bottom=(uint16_t)val;break;
+                case 6:next.bg_margin_left=(uint16_t)val;break;
+                default:next.bg_margin_right=(uint16_t)val;break;
             }
         }else handled=false;
         if(handled){if(pn_style_validate(&next)==PN_OK)status=commit_global_style(u,&next);pn_status_t shown=show(ui,present,ctx);return status==PN_OK?shown:status;}
@@ -1059,6 +1518,24 @@ pn_status_t pn_settings_ui_event(pn_settings_ui_t *ui,int command,pn_settings_pr
         if(command==PN_SETUI_MOTTO_RESET){pn_home_prefs_t next=ui->home;next.header[0]=0;status=commit_home(ui,u,&next);pn_status_t shown=show(ui,present,ctx);return status==PN_OK?shown:status;}
         if(command>=PN_SETUI_MOTTO_PRESET && command<PN_SETUI_MOTTO_PRESET+6){pn_home_prefs_t next=ui->home;snprintf(next.header,sizeof next.header,"%s",motto_presets[command-PN_SETUI_MOTTO_PRESET]);status=commit_home(ui,u,&next);pn_status_t shown=show(ui,present,ctx);return status==PN_OK?shown:status;}
         if(command==PN_SETUI_MOTTO_EDIT){snprintf(u->motto_draft,sizeof u->motto_draft,"%s",ui->home.header);pn_keyboard_set_ime(&u->kb,true,true);u->screen=SCREEN_HOME_MOTTO_EDIT;return show(ui,present,ctx);}
+        if(command==PN_SETUI_MOTTO_EXCERPTS){motto_excerpts_load(u);u->screen=SCREEN_HOME_MOTTO_EXCERPTS;return show(ui,present,ctx);}
+    }
+    if(u->screen==SCREEN_HOME_MOTTO_EXCERPTS){
+        unsigned pages=u->motto_excerpt_count?(unsigned)((u->motto_excerpt_count+5u)/6u):1u;
+        if(command==PN_SETUI_MOTTO_EXCERPT_PREV){if(u->motto_excerpt_page==0u)return PN_EMPTY;u->motto_excerpt_page--;return show(ui,present,ctx);}
+        if(command==PN_SETUI_MOTTO_EXCERPT_NEXT){if(u->motto_excerpt_page+1u>=pages)return PN_EMPTY;u->motto_excerpt_page++;return show(ui,present,ctx);}
+        if(command>=PN_SETUI_MOTTO_EXCERPT_ITEM && command<PN_SETUI_MOTTO_EXCERPT_ITEM+6){
+            size_t idx=(size_t)u->motto_excerpt_page*6u+(size_t)(command-PN_SETUI_MOTTO_EXCERPT_ITEM);
+            if(idx>=u->motto_excerpt_count)return PN_EMPTY;
+            pn_home_prefs_t next=ui->home;
+            const char *src=u->motto_excerpts[idx].text;
+            size_t tlen=strlen(src);if(tlen>=sizeof next.header){tlen=sizeof next.header-1u;while(tlen>0u && (((unsigned char)src[tlen]&0xc0u)==0x80u))tlen--;}
+            memcpy(next.header,src,tlen);next.header[tlen]=0;
+            status=commit_home(ui,u,&next);
+            if(status==PN_OK){motto_excerpts_release(u);u->screen=SCREEN_HOME_MOTTO;}
+            pn_status_t shown=show(ui,present,ctx);return status==PN_OK?shown:status;
+        }
+        return PN_EMPTY;
     }
     if(u->screen==SCREEN_HOME_MOTTO_EDIT){
         bool changed=false;
@@ -1098,34 +1575,39 @@ pn_status_t pn_settings_ui_event(pn_settings_ui_t *ui,int command,pn_settings_pr
     if(command>=PN_SETUI_COLUMNS && command<PN_SETUI_STYLE+PN_SHELF_STYLE_COUNT){
         pn_shelf_prefs_t next=ui->shelf;if(command<PN_SETUI_STYLE)next.columns=(uint8_t)(3+command-PN_SETUI_COLUMNS);else next.style=(uint8_t)(command-PN_SETUI_STYLE);
         if(next.columns!=ui->shelf.columns || next.style!=ui->shelf.style)status=commit_shelf(ui,u,next);
-        pn_status_t shown=show_controls(ui,u,old_flags,old_shelf,command,local,present,ctx);return status==PN_OK?shown:status;
+        pn_status_t shown=show_controls(ui,u,old_flags,old_shelf,old_auto_lock,command,local,present,ctx);return status==PN_OK?shown:status;
     }
     if(command==PN_SETUI_FULL_REFRESH)return show_profile(ui,present,ctx,PN_REFRESH_GC16);
+    if(u->screen==SCREEN_REFRESH && command>=PN_SETUI_AUTO_LOCK && command<PN_SETUI_AUTO_LOCK+5){
+        uint16_t next=auto_lock_presets[command-PN_SETUI_AUTO_LOCK];
+        if(next!=ui->auto_lock_minutes)status=commit_auto_lock(ui,u,next);
+        pn_status_t shown=show_controls(ui,u,old_flags,old_shelf,old_auto_lock,command,local,present,ctx);return status==PN_OK?shown:status;
+    }
     if(command==PN_SETUI_TURN || command==PN_SETUI_TURN+1 || command==PN_SETUI_TURN_CRISP || command==PN_SETUI_TURN_FAST){
         uint8_t bits=command==PN_SETUI_TURN?0u:command==PN_SETUI_TURN_CRISP?(1u<<6):command==PN_SETUI_TURN_FAST?(2u<<6):PN_INPUT_TURN_MASK;
         uint8_t next=(uint8_t)((ui->flags&~PN_INPUT_TURN_MASK)|bits);
         if(next==ui->flags)return PN_EMPTY;
         status=commit(ui,u,next);
-        pn_status_t shown=show_controls(ui,u,old_flags,old_shelf,command,local,present,ctx);return status==PN_OK?shown:status;
+        pn_status_t shown=show_controls(ui,u,old_flags,old_shelf,old_auto_lock,command,local,present,ctx);return status==PN_OK?shown:status;
     }
     if(command>=PN_SETUI_LEVEL && command<PN_SETUI_LEVEL+3){
         uint8_t next=(uint8_t)((ui->flags&~PN_INPUT_REFRESH_MASK)|((unsigned)(command-PN_SETUI_LEVEL)<<4));
         if(next!=ui->flags)status=commit(ui,u,next);
-        pn_status_t shown=show_controls(ui,u,old_flags,old_shelf,command,local,present,ctx);return status==PN_OK?shown:status;
+        pn_status_t shown=show_controls(ui,u,old_flags,old_shelf,old_auto_lock,command,local,present,ctx);return status==PN_OK?shown:status;
     }
     if(command==PN_SETUI_VERTICAL_TURN && u->screen==SCREEN_KEYS){
         pn_status_t saved_status=PN_UNSUPPORTED;pn_media_lease_t lease={0};bool next=!ui->vertical_turn;
         if(u->state && u->vertical_known){saved_status=pn_media_acquire(u->state,PN_MEDIA_WRITE,&lease);if(saved_status==PN_OK){pn_journal_files_t files;pn_journal_io_t io;saved_status=pn_turn_dir_prefs_files(&files,u->state,&lease,u->dir,&io);if(saved_status==PN_OK)saved_status=pn_turn_dir_prefs_save(&io,next);(void)pn_media_release(u->state,&lease);}}
         if(saved_status==PN_OK){ui->vertical_turn=next;u->message[0]=0;}
         else{bool reread;if(u->state && pn_settings_load_vertical_turn(u->state,u->dir,&reread)==PN_OK)ui->vertical_turn=reread;snprintf(u->message,sizeof u->message,saved_status==PN_UNSUPPORTED?"内部存储不可用，设置不能保存":"保存失败，请重试");}
-        pn_status_t shown=show(ui,present,ctx);return saved_status==PN_OK?shown:saved_status;
+        pn_status_t shown=show_controls(ui,u,old_flags,old_shelf,old_auto_lock,command,local,present,ctx);return saved_status==PN_OK?shown:saved_status;
     }
     if(command<PN_SETUI_TOGGLE || command>PN_SETUI_TOGGLE+3)return PN_EMPTY;
     uint8_t next=(uint8_t)(ui->flags^bits[command-PN_SETUI_TOGGLE]);
     // 关闭全部翻页方式会让正文无法翻页，拒绝。/ Turning every page-turn method off would leave no way to turn pages, so refuse it.
     if((next&(PN_INPUT_NO_SWIPE|PN_INPUT_NO_EDGE_TAP|PN_INPUT_NO_KEYS))==(PN_INPUT_NO_SWIPE|PN_INPUT_NO_EDGE_TAP|PN_INPUT_NO_KEYS)){snprintf(u->message,sizeof u->message,"至少保留一种翻页方式");status=PN_LIMIT;}
     else status=commit(ui,u,next);
-    pn_status_t shown=show_controls(ui,u,old_flags,old_shelf,command,local,present,ctx);return status==PN_OK?shown:status;
+    pn_status_t shown=show_controls(ui,u,old_flags,old_shelf,old_auto_lock,command,local,present,ctx);return status==PN_OK?shown:status;
 }
 pn_status_t pn_settings_ui_present(pn_settings_ui_t *ui,pn_settings_present_fn present,void *ctx){if(!ui || !ui->impl || !present)return PN_INVALID;return show(ui,present,ctx);}
 int pn_settings_ui_hit(const pn_settings_ui_t *ui,int x,int y){
@@ -1137,6 +1619,7 @@ int pn_settings_ui_hit(const pn_settings_ui_t *ui,int x,int y){
         if(y>=DISPLAY_Y && y<DISPLAY_Y+MAIN_ROW_H)return PN_SETUI_FONTS;
         if(y>=DISPLAY_Y+MAIN_ROW_H && y<DISPLAY_Y+2*MAIN_ROW_H)return PN_SETUI_WALLPAPER;
         if(y>=DISPLAY_Y+2*MAIN_ROW_H && y<DISPLAY_Y+3*MAIN_ROW_H)return PN_SETUI_APPEARANCE;
+        if(y>=DISPLAY_Y+3*MAIN_ROW_H && y<DISPLAY_Y+4*MAIN_ROW_H)return PN_SETUI_STATUS_BAR;
         if(y>=READING_Y && y<READING_Y+MAIN_ROW_H)return PN_SETUI_GLOBAL_STYLE;
         if(y>=READING_Y+MAIN_ROW_H && y<READING_Y+2*MAIN_ROW_H)return PN_SETUI_KEYS;
         if(y>=READING_Y+2*MAIN_ROW_H && y<READING_Y+3*MAIN_ROW_H)return PN_SETUI_REFRESH;
@@ -1144,7 +1627,9 @@ int pn_settings_ui_hit(const pn_settings_ui_t *ui,int x,int y){
         if(y>=DEVICE_Y+MAIN_ROW_H && y<DEVICE_Y+device_rows(u)*MAIN_ROW_H)return PN_SETUI_ABOUT;
         return -1;
     }
+    if((u->screen==SCREEN_STATUS_BAR && u->sbar_pick_slot>=0) || (u->screen==SCREEN_GESTURES && u->gesture_pick_slot>=0))return visual_settings_hit(u,ui,x,y);
     if(pn_w_header_hit(x,y,false)==1)return PN_SETUI_BACK;
+    if(u->screen==SCREEN_STATUS_BAR || u->screen==SCREEN_GESTURES || u->screen==SCREEN_TAP_ZONES || u->screen==SCREEN_KEY_HIGHLIGHT)return visual_settings_hit(u,ui,x,y);
     if(u->screen==SCREEN_GLOBAL_STYLE && y<PN_W_HEADER_H && x>=480 && y>=44)return PN_SETUI_GSTYLE_RESET;
     if(u->screen==SCREEN_GLOBAL_MARGINS && y<PN_W_HEADER_H && x>=480 && y>=44)return PN_SETUI_GSTYLE_MARGINS_RESET;
     if(u->screen==SCREEN_GLOBAL_CHAPTER && y<PN_W_HEADER_H && x>=480 && y>=44)return PN_SETUI_GSTYLE_CHAPTER_RESET;
@@ -1184,7 +1669,7 @@ int pn_settings_ui_hit(const pn_settings_ui_t *ui,int x,int y){
             }
         }
         if(y>=892 && y<964){if(x<332)return PN_SETUI_GSTYLE_IMAGES;if(x>=352)return PN_SETUI_GSTYLE_BARS;}
-        if(y>=978 && y<1044)return PN_SETUI_GSTYLE_CHAPTER;
+        if(y>=978 && y<1044){if(x<332)return PN_SETUI_GSTYLE_CHAPTER;if(x>=352)return PN_SETUI_STATUS_BAR;}
         return -1;
     }
     if(u->screen==SCREEN_GLOBAL_CHAPTER){
@@ -1201,6 +1686,7 @@ int pn_settings_ui_hit(const pn_settings_ui_t *ui,int x,int y){
         return -1;
     }
     if(u->screen==SCREEN_GLOBAL_MARGINS){
+        if(y>=992 && y<1050 && x>=292 && x<652)return PN_SETUI_GSTYLE_MSTEP+(x-292)/120;
         static const int tops[4]={450,568,732,850};
         for(unsigned row=0;row<4;row++){
             if(y>=tops[row] && y<tops[row]+108){
@@ -1228,6 +1714,20 @@ int pn_settings_ui_hit(const pn_settings_ui_t *ui,int x,int y){
             if(x>=px && x<px+302 && y>=py && y<py+92)return PN_SETUI_MOTTO_PRESET+(int)i;}
         if(y>=712 && y<800)return PN_SETUI_MOTTO_EDIT;
         if(y>=822 && y<910)return PN_SETUI_MOTTO_RESET;
+        if(y>=932 && y<1020)return PN_SETUI_MOTTO_EXCERPTS;
+        return -1;
+    }
+    if(u->screen==SCREEN_HOME_MOTTO_EXCERPTS){
+        size_t start=(size_t)u->motto_excerpt_page*6u;
+        for(unsigned row=0;row<6u && start+row<u->motto_excerpt_count;row++){
+            int ry=184+(int)row*144;
+            if(y>=ry && y<ry+132)return PN_SETUI_MOTTO_EXCERPT_ITEM+(int)row;
+        }
+        unsigned pages=u->motto_excerpt_count?(unsigned)((u->motto_excerpt_count+5u)/6u):1u;
+        if(y>=1084 && y<1164){
+            if(x<228 && u->motto_excerpt_page>0u)return PN_SETUI_MOTTO_EXCERPT_PREV;
+            if(x>=456 && u->motto_excerpt_page+1u<pages)return PN_SETUI_MOTTO_EXCERPT_NEXT;
+        }
         return -1;
     }
     if(u->screen==SCREEN_HOME_BANNER){
@@ -1249,11 +1749,19 @@ int pn_settings_ui_hit(const pn_settings_ui_t *ui,int x,int y){
         if(y>=944+ROW_H && y<944+2*ROW_H)return PN_SETUI_HOME_BANNER;
         return -1;
     }
-    if(u->screen==SCREEN_KEYS){if(y>=TOGGLE_Y && y<TOGGLE_Y+4*ROW_H)return PN_SETUI_TOGGLE+(y-TOGGLE_Y)/ROW_H;if(y>=TOGGLE_Y+4*ROW_H && y<TOGGLE_Y+5*ROW_H)return PN_SETUI_VERTICAL_TURN;return -1;}
+    if(u->screen==SCREEN_KEYS){
+        if(y>=352 && y<352+82)return PN_SETUI_GESTURES;
+        if(y>=352+82 && y<352+164)return PN_SETUI_TAP_ZONES;
+        if(y>=352+164 && y<352+246)return PN_SETUI_KEY_HIGHLIGHT;
+        if(y>=TOGGLE_Y && y<TOGGLE_Y+4*ROW_H)return PN_SETUI_TOGGLE+(y-TOGGLE_Y)/ROW_H;
+        if(y>=TOGGLE_Y+4*ROW_H && y<TOGGLE_Y+5*ROW_H)return PN_SETUI_VERTICAL_TURN;
+        return -1;
+    }
     if(u->screen==SCREEN_REFRESH){
         static const int order[3]={1,0,2};
         int cell=pn_w_segments_hit(3,LEVEL_Y-6,LEVEL_H+12,x,y);if(cell>=0)return PN_SETUI_LEVEL+order[cell];
         if(y>=FULL_Y && y<FULL_Y+88)return PN_SETUI_FULL_REFRESH;
+        cell=pn_w_segments_hit(5,LOCK_Y-6,LOCK_H+12,x,y);if(cell>=0)return PN_SETUI_AUTO_LOCK+cell;
         static const int turn_cmds[4]={PN_SETUI_TURN,PN_SETUI_TURN_CRISP,PN_SETUI_TURN+1,PN_SETUI_TURN_FAST};
         cell=pn_w_segments_hit(4,TURN_Y-6,TURN_H+12,x,y);if(cell>=0)return turn_cmds[cell];
         return -1;
@@ -1266,7 +1774,7 @@ void pn_settings_ui_close(pn_settings_ui_t *ui){
     // 引擎保持地址与缓存owner，归还不读文件、不分配，也不受取消状态阻挡。
     // Keep the engine address and cache owner; returning it neither reads nor allocates and is not blocked by cancellation.
     if(!u->return_font || pn_font_move(u->return_font,&u->font,u->pool)!=PN_OK)pn_font_close(&u->font);
-    banner_preview_release(u);wipe_edit(u);pn_free(u->pixels);pn_free(u);*ui=(pn_settings_ui_t){0};
+    banner_preview_release(u);motto_excerpts_release(u);wipe_edit(u);pn_free(u->pixels);pn_free(u);*ui=(pn_settings_ui_t){0};
 }
 pn_status_t pn_settings_ui_set_lan(pn_settings_ui_t *ui,const char *ssid,pn_settings_present_fn present,void *ctx){
     if(!ui || !ui->impl || !present)return PN_INVALID;

@@ -56,7 +56,7 @@ int main(void){char root[]="/tmp/pn-style-XXXXXX";assert(mkdtemp(root));char a[3
     record.payload[4]=5;assert(pn_journal_save(&io,record.payload,record.size)==PN_OK && pn_style_load(&io,&book,&loaded)==PN_UNSUPPORTED);
     assert(pn_style_save(&io,&book,&s)==PN_OK);
     pn_style_t bad=s;bad.tracking_percent=51;assert(pn_style_validate(&bad)==PN_INVALID);
-    bad=s;bad.reading_line=3;assert(pn_style_validate(&bad)==PN_INVALID);bad=s;bad.reading_line_offset=9;assert(pn_style_validate(&bad)==PN_INVALID);bad.reading_line_offset=1;assert(pn_style_validate(&bad)==PN_INVALID);
+    bad=s;bad.reading_line=3;assert(pn_style_validate(&bad)==PN_OK);bad.reading_line=4;assert(pn_style_validate(&bad)==PN_INVALID);bad=s;bad.reading_line_offset=9;assert(pn_style_validate(&bad)==PN_INVALID);bad.reading_line_offset=1;assert(pn_style_validate(&bad)==PN_INVALID);
     s.margin=63;assert(pn_style_save(&io,&book,&s)==PN_INVALID);s.margin=64;s.pixels=73;assert(pn_style_validate(&s)==PN_INVALID);
     // 图片默认显示；新schema只在隐藏时使用，草稿/坏标志/外部背景完整往返。/ Images default to shown; use new schemas only when hidden and round-trip drafts, bad flags and external paper.
     {pn_style_t visible=pn_style_default(44),hidden=visible;assert(!visible.hide_images);hidden.hide_images=1;hidden.background=7;

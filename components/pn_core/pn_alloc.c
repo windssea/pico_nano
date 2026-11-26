@@ -30,7 +30,7 @@ int pn_pool_init(pn_pool_t *pool, size_t limit, pn_malloc_fn alloc, pn_free_fn r
         // 6MiB产品池在字形/邻页缓存满时仍要容下一整页预渲染位图（约406KiB），否则真机预渲染被拒、翻页每次重光栅约0.35s。
         // A 6 MiB product pool must still fit a whole prerendered page (about 406 KiB) when glyph/neighbor caches are full; otherwise hardware denied every prerender and re-rastered each turn (about 0.35 s).
         .cache_limit=limit>=4u*1024u*1024u?1536u*1024u+growth/4u:1024u*1024u,.cache_reserve=limit/8<256u*1024u?limit/8:256u*1024u,
-        .cache_caps={512u*1024u,768u*1024u,384u*1024u,384u*1024u,132u*1024u,416u*1024u,limit>=6u*1024u*1024u?832u*1024u:limit>=4u*1024u*1024u?416u*1024u:0u} };
+        .cache_caps={512u*1024u,768u*1024u,384u*1024u,384u*1024u,132u*1024u,416u*1024u,limit>=6u*1024u*1024u?1248u*1024u:limit>=4u*1024u*1024u?416u*1024u:0u} };
     return 0;
 }
 

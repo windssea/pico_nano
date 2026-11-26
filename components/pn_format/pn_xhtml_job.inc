@@ -10,7 +10,7 @@ typedef struct {
     xj_sheet_t css[16];unsigned css_count;size_t css_bytes,css_size,css_capacity;char *css_buffer;
     char needed[PN_ZIP_PATH_MAX];bool want_compat,body_only,building,completed,has_focus,model_only;
     model_record_t *record;unsigned item;pn_status_t status;
-    model_record_t *seek_record;uint64_t seek_order;pn_xhtml_event_kind_t seek_kind;pn_xhtml_block_t seek_block;bool seek_started,seek_done,seek_context; ///< 只借用已pin模型的精确索引定位游标 / Exact compiler seek cursor borrowing the pinned verified model only
+    model_record_t *seek_record,*seek_link;unsigned seek_link_depth;uint64_t seek_order;pn_xhtml_event_kind_t seek_kind;pn_xhtml_block_t seek_block;bool seek_started,seek_done,seek_context; ///< 只借用已pin模型的精确索引定位游标 / Exact compiler seek cursor borrowing the pinned verified model only
     pn_xhtml_store_t load_store;snapshot_read_t snapshot;void *load_handle;bool loading,loaded; ///< 分步包只在完整校验后交付 / Staged packets publish only after full validation
 } xhtml_job_t;
 static pn_status_t xj_source(void *ctx,uint8_t *out,size_t cap,size_t *n){
@@ -167,7 +167,7 @@ static pn_status_t xj_load_step(xhtml_job_t *j){
 }
 /// 按完整事件数跳过记录；保留页首段落上下文，不按locator大小猜顺序。/ Skip whole records by exact event counts, preserving paragraph context without ordering locator tuples.
 static pn_status_t xj_seek_focus(xhtml_job_t *j){
-    if(!j->seek_started){j->seek_started=true;j->seek_record=j->record;j->seek_order=j->model->base;j->seek_context=j->model->has_context;j->seek_kind=j->model->context.kind;j->seek_block=j->model->context.block;}
+    if(!j->seek_started){j->seek_started=true;j->seek_record=j->record;j->seek_link=NULL;j->seek_link_depth=0;j->seek_order=j->model->base;j->seek_context=j->model->has_context;j->seek_kind=j->model->context.kind;j->seek_block=j->model->context.block;}
     for(unsigned count=0;j->seek_record && count<32;count++){
         pn_status_t s=pn_cancel_checkpoint();if(s!=PN_OK)return s;
         model_record_t *r=j->seek_record;unsigned item=0;bool found=false;
@@ -182,10 +182,22 @@ static pn_status_t xj_seek_focus(xhtml_job_t *j){
             if(j->seek_order>UINT64_MAX-item)return PN_LIMIT;
             if(item){j->seek_context=true;j->seek_kind=PN_XHTML_TEXT;}
             pn_xhtml_event_t context={.kind=j->seek_kind,.block=j->seek_block};
-            j->proxy.restart(j->proxy.ctx,j->seek_order+item,j->seek_context?&context:NULL);
+            bool replay_link=j->seek_link && r->kind!=PN_XHTML_LINK_OPEN && j->seek_order+item>0;
+            j->proxy.restart(j->proxy.ctx,j->seek_order+item-(replay_link?1u:0u),j->seek_context?&context:NULL);
+            // 若焦点落在已开启的跨页链接内部，先补发该链接起点事件，保证页首脚注仍可命中且order对齐。
+            // If focus lands inside an already-open link across a page break, replay its LINK_OPEN so page-leading footnotes stay clickable with exact order.
+            if(replay_link){
+                model_record_t *lr=j->seek_link;
+                pn_xhtml_event_t le={.kind=PN_XHTML_LINK_OPEN,.position={.element=lr->element,.offset=lr->offset,.run=lr->run,.kind=(pn_xhtml_position_kind_t)lr->position_kind},.style=j->model->styles[lr->style],.block=(pn_xhtml_block_t)lr->block};
+                if(lr->value_size)le.value=(const char *)(lr+1);
+                if(lr->count)le.alt=(const char *)(lr+1)+lr->value_size;
+                s=j->proxy.sink(j->proxy.ctx,&le);if(s!=PN_OK)return s;
+            }
             j->record=r;j->item=item;j->seek_done=true;return PN_OK;
         }
         uint64_t events=r->kind==PN_XHTML_TEXT?r->count:1u;if(j->seek_order>UINT64_MAX-events)return PN_LIMIT;j->seek_order+=events;
+        if(r->kind==PN_XHTML_LINK_OPEN){j->seek_link=r;j->seek_link_depth++;}
+        else if(r->kind==PN_XHTML_LINK_CLOSE && j->seek_link_depth){if(--j->seek_link_depth==0)j->seek_link=NULL;}
         if(r->kind==PN_XHTML_TEXT || r->kind==PN_XHTML_IMAGE || (r->kind==PN_XHTML_BLOCK_OPEN && r->block!=PN_XHTML_CONTAINER)){j->seek_kind=(pn_xhtml_event_kind_t)r->kind;j->seek_block=(pn_xhtml_block_t)r->block;j->seek_context=true;}
         j->seek_record=r->next;
     }

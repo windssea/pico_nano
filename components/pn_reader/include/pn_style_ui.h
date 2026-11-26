@@ -40,6 +40,9 @@
 #define PN_SUI_CHAPTER_RESET 52 ///< 重置阅读线扩展与章节/页脚选项 / Reset extended guide and chapter/footer options
 #define PN_SUI_MARGIN_ADJ 112 ///< 112..127：8项四周边距减/加（0..3正文上下左右，4..7背景上下左右）/ 112..127: dec/inc for 8 margin controls (0..3 body TBLR, 4..7 paper TBLR)
 #define PN_SUI_CHAPTER_ADJ 128 ///< 128..143：8项阅读线与章节/页脚减加 / 128..143: dec/inc for 8 guide/chapter/footer controls
+#define PN_SUI_GUIDE_STYLE 144 ///< 144..147：半屏阅读线样式（关闭/虚线/点线/实线）/ 144..147: live half-sheet style (off/dash/dot/solid)
+#define PN_SUI_GUIDE_ADJ 150 ///< 150..161：半屏阅读线微调（粗细/深浅/长度/间隔/偏移/跟随）/ 150..161: live half-sheet steppers (thick/shade/dash/gap/offset/follow)
+#define PN_SUI_MARGIN_STEP 162 ///< 162..164：边距步进倍率（×1=4px / ×5=20px / ×10=40px）/ 162..164: margin step multiplier (x1 / x5 / x10)
 typedef struct {
     pn_epub_app_t *epub; ///< 可选EPUB会话，与reader互斥 / Optional EPUB session, exclusive with reader
     pn_reader_app_t *reader; ///< 借用会话 / Borrowed session
@@ -49,7 +52,9 @@ typedef struct {
     bool backgrounds; ///< 正显示背景选择页，仅修改草稿 / Background picker is showing, modifying the draft only
     bool margins; ///< 正显示正文与背景四周边距页，仅修改草稿 / Body and background margins page is showing, modifying the draft only
     bool margins_from_bg; ///< 从阅读背景页进入边距页，返回时回阅读背景 / Entered margins from the background picker, so Back returns there
+    uint8_t margin_step_mult; ///< 边距步进倍率（0/1=×1即4px，5=×5即20px，10=×10即40px）/ Margin step multiplier (1=4px, 5=20px, 10=40px)
     bool chapter_page; ///< 正显示“阅读线与章节”详调页，仅修改草稿 / Reading-guide and chapter sub-page is showing, modifying the draft only
+    bool guide_sheet; ///< 正显示半屏实时阅读线微调卡 / Live half-screen reading-line micro-editor is showing
     pn_background_gallery_t gallery; ///< 图库所有权仅在选择页 / Gallery ownership lives only in the picker
     bool more; ///< 正显示“更多排版”页 / The more-options page is showing
     unsigned selected; ///< 键盘选中字段0..12 / Keyboard-selected field zero through twelve
@@ -74,3 +79,7 @@ pn_status_t pn_style_ui_tick(pn_style_ui_t *,pn_reader_present_fn,void *);
 
 /// EPUB使用同一中文字段、命中和草稿行为。/ EPUB uses the same Chinese fields, hits and draft behavior.
 pn_status_t pn_style_ui_open_epub(pn_style_ui_t *,pn_epub_app_t *,pn_reader_present_fn,void *);
+/// 打开半屏阅读线实时微调卡（上半屏实时渲染当前正文）。/ Open live half-screen reading-line editor over the current reading page.
+pn_status_t pn_style_ui_open_guide(pn_style_ui_t *ui,pn_reader_app_t *reader,uint64_t now,pn_reader_present_fn present,void *ctx);
+/// EPUB版半屏阅读线实时微调卡。/ EPUB variant of the live half-screen reading-line editor.
+pn_status_t pn_style_ui_open_guide_epub(pn_style_ui_t *ui,pn_epub_app_t *epub,uint64_t now,pn_reader_present_fn present,void *ctx);

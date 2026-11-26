@@ -60,6 +60,7 @@ add_library(pn_core STATIC ${ui_font_c} ${reading_font_c} ${harmony_font_c} ${ar
     ${PN_ROOT}/components/pn_reader/pn_hot_session.c
     ${PN_ROOT}/components/pn_reader/pn_identity_cache.c
     ${PN_ROOT}/components/pn_reader/pn_turn_transition.c
+    ${PN_ROOT}/components/pn_reader/pn_footnote_ui.c
     ${PN_ROOT}/components/pn_reader/pn_toc_ui.c
     ${PN_ROOT}/components/pn_format/pn_zip.c
     ${PN_ROOT}/components/pn_format/pn_resource.c
@@ -97,6 +98,7 @@ add_library(pn_core STATIC ${ui_font_c} ${reading_font_c} ${harmony_font_c} ${ar
     ${PN_ROOT}/components/pn_library/pn_tsumego_ui.c
     ${PN_ROOT}/components/pn_library/pn_shelf_view.c
     ${PN_ROOT}/components/pn_library/pn_stats_view.c
+    ${PN_ROOT}/components/pn_library/pn_excerpts_ui.c
     ${PN_ROOT}/components/pn_library/pn_menu_cache.c
     ${PN_ROOT}/components/pn_library/pn_search_ui.c
     ${PN_ROOT}/components/pn_library/pn_book_actions.c
@@ -161,6 +163,7 @@ add_library(pn_core STATIC ${ui_font_c} ${reading_font_c} ${harmony_font_c} ${ar
     ${PN_ROOT}/components/pn_storage/pn_bookmark.c
     ${PN_ROOT}/components/pn_storage/pn_bookmarks.c
     ${PN_ROOT}/components/pn_storage/pn_epub_bookmarks.c
+    ${PN_ROOT}/components/pn_storage/pn_highlights.c
     ${PN_ROOT}/components/pn_display/pn_scheduler.c
     ${PN_ROOT}/components/pn_display/pn_follow.c
     ${PN_ROOT}/components/pn_display/pn_ripple.c

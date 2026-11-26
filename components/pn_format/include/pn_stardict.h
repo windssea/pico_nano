@@ -16,6 +16,7 @@
 #define PN_DICT_PATH_MAX 384u ///< 词典文件路径上限 / Maximum dictionary file path bytes
 #define PN_DICT_WORD_MAX 128u ///< 词条上限 / Maximum headword bytes
 #define PN_DICT_DEF_MAX 4096u ///< 单条释义输出上限 / Maximum formatted UTF-8 definition bytes
+#define PN_DICT_AGG_MAX 12288u ///< 多词典聚合释义缓冲上限 / Maximum aggregated UTF-8 definition bytes across all dicts
 
 /// 单本 StarDict 词典元数据。/ Metadata for one StarDict dictionary.
 typedef struct {
@@ -45,6 +46,17 @@ typedef struct {
     size_t def_len; ///< 释义有效字节数 / Length of definition in bytes
 } pn_stardict_hit_t;
 
+/// 多词典聚合查词结果（“全部”模式下依次查询每本已安装词典并分段合并命中释义；请置于池中，勿放任务栈）。
+/// Aggregated multi-dictionary lookup result ("All" mode); allocate in pool rather than on a task stack.
+typedef struct {
+    size_t matched_count; ///< 命中的词典数量 / Number of dictionaries that matched
+    size_t first_dict_index; ///< 首本命中词典下标 / Index of the first matching dictionary
+    char first_dict_name[PN_DICT_NAME_MAX]; ///< 首本命中词典名 / Name of the first matching dictionary
+    char matched_word[PN_DICT_WORD_MAX]; ///< 首个命中词头 / Primary matched headword
+    char definition[PN_DICT_AGG_MAX]; ///< 按【词典名】分段合并后的可读 UTF-8 释义 / Aggregated UTF-8 definition segmented by 【DictName】
+    size_t def_len; ///< 聚合释义有效字节数 / Byte length of aggregated definition
+} pn_stardict_multi_hit_t;
+
 /// 解析单个 .ifo 文件并校验配套 .idx 与 .dict/.dict.dz 存在。
 /// Parse one .ifo file and verify its companion .idx and .dict/.dict.dz files exist.
 pn_status_t pn_stardict_parse_ifo(const char *ifo_path, pn_stardict_info_t *out);
@@ -62,6 +74,16 @@ pn_status_t pn_stardict_lookup_one(pn_pool_t *pool, const pn_stardict_info_t *di
 /// Smart lookup (exact -> English stem fallback / Chinese prefix fallback); pass dict_filter < catalog->count to query one dict, or SIZE_MAX for all dicts.
 pn_status_t pn_stardict_query(pn_pool_t *pool, const pn_stardict_catalog_t *catalog, const char *raw_query,
     size_t dict_filter, pn_stardict_hit_t *hit_out);
+
+/// 按词典位掩码依次执行智能检索，仅查询 enabled_mask 中置位的词典（bit i 对应 catalog->items[i]）；启用多本时按【词典名】分段聚合，仅启用 1 本时直接输出释义。
+/// Run smart lookup across dictionaries enabled in enabled_mask (bit i = catalog->items[i]); segments by 【DictName】 when >=2 dicts are enabled, or outputs plain definition when 1 dict is enabled.
+pn_status_t pn_stardict_query_masked(pn_pool_t *pool, const pn_stardict_catalog_t *catalog, const char *raw_query,
+    uint32_t enabled_mask, pn_stardict_multi_hit_t *out);
+
+/// 在全部已安装词典中依次执行智能检索，聚合所有命中词典的释义（多本时按【词典名】分段），跳过未命中词典。
+/// Query every installed dictionary and aggregate all hits (segmented by 【DictName】 when multiple dicts are installed), skipping misses.
+pn_status_t pn_stardict_query_all(pn_pool_t *pool, const pn_stardict_catalog_t *catalog, const char *raw_query,
+    pn_stardict_multi_hit_t *out);
 
 /// 从正文某行码点序列与点击下标提取查词候选列表（英文自动扩选整词，中文按 4/3/2/前移2/1 字生成候选）。
 /// Extract lookup candidates from a line of Unicode codepoints and tapped index (expands full English words or generates Chinese multi-char candidates).

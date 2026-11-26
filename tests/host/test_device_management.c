@@ -461,9 +461,9 @@ int main(void){
     feedback_begin(100,600);assert(press_feedback.active && memcmp(stub_back,original,sizeof stub_back) && hardware.hl.waveform==wave && last_scan==READ_PICO_EPD_SCAN_FULL && maintenance.management==management_before && async_port.revision==revision);
     feedback_restore();assert(!press_feedback.active && !memcmp(stub_back,original,sizeof stub_back) && maintenance.management==management_before);
     assert(feedback_idle.pending && feedback_idle_tick(feedback_idle.due-1,false)==PN_EMPTY && feedback_idle_tick(feedback_idle.due+1,true)==PN_EMPTY);
-    maintenance.bands[8]=maintenance.bands[9]=maintenance.bands[10]=3;maintenance.bands[5]=2;size_t attempts=pool.attempts;unsigned areas=area_full_calls;
+    maintenance.bands[7]=maintenance.bands[8]=maintenance.bands[9]=maintenance.bands[10]=3;maintenance.bands[5]=2;size_t attempts=pool.attempts;unsigned areas=area_full_calls;
     clock_us=(int64_t)(feedback_idle.due+1)*1000;assert(feedback_idle_tick(now_ms(),false)==PN_OK && !feedback_idle.pending && feedback_idle.completed==1 && pool.attempts==attempts && area_full_calls==areas+1);
-    assert(last_full_area.y==576 && last_full_area.height==128 && maintenance.management==management_before && maintenance.bands[8]==3 && !maintenance.bands[9] && !maintenance.bands[10] && maintenance.bands[5]==2 && !memcmp(stub_back,original,sizeof stub_back) && async_port.revision==revision);
+    assert(last_full_area.y==512 && last_full_area.height==128 && maintenance.management==management_before && maintenance.bands[7]==3 && !maintenance.bands[8] && !maintenance.bands[9] && maintenance.bands[10]==3 && maintenance.bands[5]==2 && !memcmp(stub_back,original,sizeof stub_back) && async_port.revision==revision);
     feedback_begin(100,600);feedback_restore();panel_fault=true;clock_us=(int64_t)(feedback_idle.due+1)*1000;
     assert(feedback_idle_tick(now_ms(),false)==PN_IO && feedback_idle.pending && !panel_known && settle_recoverable);panel_fault=false;
     clock_us=(int64_t)(feedback_idle.due+1)*1000;assert(feedback_idle_tick(now_ms(),false)==PN_OK && !feedback_idle.pending && panel_known && !memcmp(stub_back,original,sizeof stub_back));

@@ -21,6 +21,7 @@
 #define PN_SHELF_SORT 54 ///< 切换书库排列方式 / Cycle library sort order
 #define PN_SHELF_READING_STATS 55 ///< 点击主页阅读节奏进入阅读统计详情 / Tap Home reading rhythm to open statistics details
 #define PN_SHELF_FOLDER 56 ///< 切换书库目录筛选（全部/默认子目录/外部图书目录）/ Cycle library folder filter (All / subfolders / external book dirs)
+#define PN_SHELF_EXCERPTS 57 ///< 点击主页“摘录”进入全局高亮摘录查询 / Tap Home "Excerpts" to open global highlights query
 #define PN_SHELF_SUDOKU 46 ///< 数独入口 / Sudoku entry
 #define PN_SHELF_ENTERTAINMENT_BACK 47 ///< 返回娱乐 / Return to entertainment
 #define PN_SHELF_CONTINUE 44 ///< 点继续阅读卡 / Tap the continue-reading card

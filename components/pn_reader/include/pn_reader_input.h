@@ -8,6 +8,7 @@
  */
 #pragma once
 #include "pn_reader_app.h"
+#include "pn_input_prefs.h"
 /// 翻页偏好；全零为默认（右手、左右翻页、滑动与边缘点按开启、含上下栏）。/ Page-turn preferences; all zero is the default (right hand, horizontal turns, swipe and edge taps on, bars shown).
 typedef struct {
     bool left_hand; ///< 左手：左边缘下一页、右边缘上一页（左右翻页模式）/ Left hand: left edge next, right edge previous (horizontal mode)
@@ -16,6 +17,8 @@ typedef struct {
     bool no_keys; ///< 关闭三键翻页（调用方使用）/ Disable key turns (used by callers)
     bool vertical_turn; ///< 上下翻页模式：上滑/点下半屏下一页，下滑/点上半屏上一页 / Vertical turn mode: swipe up or tap bottom half for next, swipe down or tap top half for previous
     bool full_screen; ///< 去上下栏全屏模式：整屏0..1215均响应翻页 / Bar-less full-screen mode: entire 0..1215 height accepts page turns
+    bool use_gestures; ///< 启用自定义屏幕手势、触控区与长按行为（默认false保持旧调用零变）/ Enable custom gestures, tap zones & long-press mode (default false preserves legacy callers)
+    pn_gesture_prefs_t gestures; ///< 自定义手势、触控区域与长按模式 / Custom gestures, tap-zone scheme and long-press mode
 } pn_reader_input_config_t;
 #define PN_READER_LONG_PRESS_MS 450u ///< 正文长按查词触发时长（毫秒）/ Long-press duration (ms) for dictionary lookup
 typedef struct {
@@ -26,6 +29,7 @@ typedef struct {
     bool down,cancelled,blocked; ///< 手势与取消状态 / Gesture and cancellation state
     uint64_t down_ms; ///< 按下时间戳（毫秒）/ Press start timestamp in ms
     bool long_fired; ///< 本次按压已触发长按查词 / Long-press lookup already fired for this press
+    bool last_tap; ///< 最近一次 feed 抬起判定为正文轻点（不含滑动与长按，即使关闭点按翻页也为真）/ True when the latest feed release was a plain body tap (excludes swipes/long-press, even with no_edge_tap)
 } pn_reader_input_t;
 /// 初始零状态；count为活动触点，invalid或多点必须等全部释放。
 /// Initially zero; count is active contacts; invalid/multitouch requires full release.

@@ -123,8 +123,10 @@ int main(int argc,char **argv){
         pn_cancel_leave(&crc_scope);watch_crc=false;actual=parse(&pool,&epub,"a.xhtml");assert(!parses && actual.hash==expected.hash && actual.count==expected.count);
     }
     // CRC之外也检查结构和标量；修复CRC后坏字段仍必须回到完整源。/ Structural/scalar checks also reject bad fields after CRC repair and fall back to complete source parsing.
-    // v2沿用同一事件编码，未知版本才拒绝；包头匹配不替代完整载荷验证。/ V2 shares the event encoding, while unknown versions are rejected; matching a header never replaces payload validation.
-    pn_xhtml_cache_close(&epub);memcpy(packet,pristine,original_size);packet[4]=2;repair();parses=0;actual=parse(&pool,&epub,"a.xhtml");assert(actual.hash==expected.hash && actual.count==expected.count && !parses);
+    // v4沿用同一事件编码，旧v1/v2与未知版本均拒绝并回到完整源重建；包头匹配不替代完整载荷验证。
+    // V4 shares the event encoding, while legacy v1/v2 and unknown versions are rejected to rebuild from source; matching a header never replaces payload validation.
+    pn_xhtml_cache_close(&epub);memcpy(packet,pristine,original_size);packet[4]=4;repair();parses=0;actual=parse(&pool,&epub,"a.xhtml");assert(actual.hash==expected.hash && actual.count==expected.count && !parses);
+    for(unsigned legacy=1;legacy<=2;legacy++){pn_xhtml_cache_close(&epub);memcpy(packet,pristine,original_size);packet[4]=(uint8_t)legacy;repair();parses=0;actual=parse(&pool,&epub,"a.xhtml");assert(actual.hash==expected.hash && actual.count==expected.count && parses>0);}
     for(unsigned mode=0;mode<7;mode++){
         pn_xhtml_cache_close(&epub);memcpy(packet,pristine,original_size);packet_size=original_size;
         if(mode==0)packet[4]=99;else if(mode==1)packet[8]^=1;else if(mode==2)packet[40]^=1;else if(mode==3)packet[152+20]=255;else if(mode==4)packet[packet_size-1]^=1;else if(mode==5)packet_size--;else{packet[118]=33;}

@@ -65,6 +65,22 @@ int main(void){
   for(unsigned repeat=0;repeat<3;repeat++){assert(pn_transfer_service_execute(&service,&file,&reply)==PN_OK && reply.has_file && reply.file_size==lengths[i] && !memcmp(&reply.file_digest,&expected,sizeof expected));assert(!pn_media_active(&media));}
  }
  char link[256];snprintf(link,sizeof link,"%s/piconano/books/link.txt",root);assert(symlink("/etc/passwd",link)==0);strcpy(file.request.name,"link.txt");unchanged(&service,&file,PN_INVALID);
+ // 8个陈旧未完成上传/孤立.part占满配额时，新的上传自动回收非安装态残余并成功；已进入安装恢复阶段(phase 2)的意图必须保留。
+ // When 8 stale incomplete/orphan uploads exhaust the quota, a new upload automatically reclaims non-installing leftovers and succeeds while preserving an install phase-2 recovery intent.
+ {
+  char uploads[320];snprintf(uploads,sizeof uploads,"%s/piconano/.readpico/uploads",root);
+  for(unsigned i=10;i<18;i++){
+   char orphan[384];snprintf(orphan,sizeof orphan,"%s/%02x000000000000000000000000000000.part",uploads,i);
+   FILE *of=fopen(orphan,"wb");assert(of && fwrite("stale",1,5,of)==5 && fclose(of)==0);
+  }
+  pn_transfer_command_t fresh=a;fresh.request.id[0]=4;fresh.request.size=5;strcpy(fresh.request.name,"recovered.txt");
+  assert(pn_identity_bytes(data,5,&fresh.request.digest)==PN_OK);
+  assert(pn_transfer_service_execute(&service,&fresh,&reply)==PN_OK && reply.has_upload && reply.state.offset==0);
+  pn_transfer_command_t c4={.operation=PN_TRANSFER_CANCEL};c4.id[0]=4;
+  assert(pn_transfer_service_execute(&service,&c4,&reply)==PN_OK && reply.state.phase==PN_UPLOAD_CANCELLED);
+  char sample_orphan[384];snprintf(sample_orphan,sizeof sample_orphan,"%s/0a000000000000000000000000000000.part",uploads);
+  assert(access(sample_orphan,F_OK)!=0);
+ }
  b.request.id[0]=3;strcpy(b.request.name,"lost.txt");
  assert(pn_transfer_service_execute(&service,&b,&reply)==PN_OK && pn_media_active(&media)==1);
  assert(pn_media_detach(&media)==PN_OK);unchanged(&service,&open,PN_STALE_MEDIA);

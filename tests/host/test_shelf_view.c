@@ -90,7 +90,7 @@ int main(void){
     p->count=4;p->total=4;p->more=false;pn_shelf_covers_set_last(covers,&p->items[0]);
     pn_shelf_options_t home={.home=true};
     assert(pn_shelf_render_ex(p,&font,&frame,-1,true,false,covers,&home)==PN_OK && font.pixels==24);
-    assert(pn_shelf_hit_ex(p,300,340,&home)==PN_SHELF_CONTINUE && pn_shelf_hit_ex(p,580,700,&home)==PN_SHELF_HOME);
+    assert(pn_shelf_hit_ex(p,300,340,&home)==PN_SHELF_CONTINUE && pn_shelf_hit_ex(p,580,700,&home)==-1);
     assert(pn_shelf_hit_ex(p,300,780,&home)==1 && pn_shelf_hit_ex(p,300,900,&home)==2 && pn_shelf_hit_ex(p,300,1020,&home)==3 && pn_shelf_hit_ex(p,300,600,&home)==PN_SHELF_READING_STATS);
     /* 轻量底栏：1px浅灰顶线，选中项浅雾圆角胶囊配纯黑图标，未选中无底框。/ Lightweight nav bar: 1 px light rule, fog pill with ink icon for active tab, plain paper behind inactive tabs. */
     assert(pn_frame_get(&frame,342,1104)==PN_UI_SELECT && pn_frame_get(&frame,342,1105)==PN_UI_PAPER);
@@ -99,7 +99,7 @@ int main(void){
     {pn_stats_view_t sv={.summary=home.reading};strcpy(sv.date_label,"11月24日 · 周二");strcpy(sv.current_title,"测试书");
      assert(pn_stats_view_render(&sv,&font,&frame)==PN_OK && pn_stats_view_hit(80,90)==PN_STATS_BACK && pn_stats_view_hit(340,600)==-1);
      pn_shelf_options_t sorted={.search=true,.layout_toggle=true,.sort=PN_SHELF_SORT_ADDED};
-     assert(pn_shelf_hit_ex(p,290,100,&sorted)==PN_SHELF_SORT && pn_shelf_hit_ex(p,120,245,&sorted)==PN_SHELF_SORT && pn_shelf_render_ex(p,&font,&frame,-1,false,true,covers,&sorted)==PN_OK);
+     assert(pn_shelf_hit_ex(p,290,100,&sorted)==PN_SHELF_SORT && pn_shelf_hit_ex(p,440,100,&sorted)==PN_SHELF_EXCERPTS && pn_shelf_hit_ex(p,120,245,&sorted)==PN_SHELF_SORT && pn_shelf_render_ex(p,&font,&frame,-1,false,true,covers,&sorted)==PN_OK);
      pn_read_marks_t *rm=calloc(1,sizeof *rm);assert(rm);rm->count=1;rm->states[0]=PN_READ_MARK_READ;strcpy(rm->paths[0],p->items[0].path);
      sorted.read_marks=rm;memcpy(before,bytes,684*1216/2);
      assert(pn_shelf_render_ex(p,&font,&frame,-1,false,true,covers,&sorted)==PN_OK && memcmp(before,bytes,684*1216/2));

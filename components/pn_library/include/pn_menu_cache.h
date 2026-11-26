@@ -11,7 +11,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#define PN_MENU_CACHE_SLOTS 2
+#define PN_MENU_CACHE_SLOTS 3
 typedef struct {
     bool valid; ///< 内容与key仍有效 / Content still matches key
     uint64_t key; ///< 调用方计算的全部绘制输入摘要 / Digest of every drawing input

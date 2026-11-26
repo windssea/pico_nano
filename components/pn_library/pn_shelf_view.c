@@ -304,9 +304,6 @@ static pn_status_t home_render(const pn_catalog_page_t *page,pn_font_t *font,pn_
     if(s==PN_OK)s=home_reading(options,font,frame);
     if(s==PN_OK)s=pn_font_size(font,27);
     if(s==PN_OK)s=pn_w_text_ex(font,frame,"最近阅读",32,708,380,PN_ALIGN_LEFT,PN_UI_INK,true);
-    if(s==PN_OK)s=pn_font_size(font,24);
-    if(s==PN_OK)s=pn_w_text_ex(font,frame,"书库",440,708,172,PN_ALIGN_RIGHT,PN_UI_MUTED,false);
-    pn_w_icon(frame,PN_ICON_CHEVRON,626,685,24,PN_UI_MUTED);
     for(size_t i=1;i<page->count && i<HOME_RECENT_MAX && s==PN_OK;i++)s=home_row(page,font,frame,covers,i,selected);
     if(s==PN_OK && page->count<=1){s=pn_font_size(font,26);if(s==PN_OK)s=pn_w_text_ex(font,frame,"下一本，从书库里挑选。",32,792,620,PN_ALIGN_LEFT,PN_UI_MUTED,false);}
     if(s==PN_OK && !page->count){s=pn_font_size(font,28);if(s==PN_OK)s=pn_w_button(font,frame,"传入图书",32,832,620,88,0);}
@@ -474,6 +471,13 @@ pn_status_t pn_shelf_render_ex(const pn_catalog_page_t *page,pn_font_t *font,pn_
         // 像素级下拉三角图标，避免字体缺失 ▾ 字符显示方框。/ Pixel-drawn downward caret so missing U+25BE glyphs never show tofu boxes.
         for(int d=0;d<5;d++)pn_frame_rect(frame,330+d,101+d,10-2*d,1,4);
     }
+    // 标题行「摘录」入口按钮，与右侧「搜索」保持统一柔和雾面风格。/ Library header "Excerpts" pill matching the soft fog surface style of "Search".
+    if(s==PN_OK && !options->entertainment){
+        pn_w_round_fill(frame,376,76,132,52,16,PN_UI_SURFACE);
+        pn_w_round_stroke(frame,376,76,132,52,16,1.5f,9);
+        pn_w_icon(frame,PN_ICON_LIST,392,89,26,PN_UI_INK);
+        s=pn_font_size(font,24);if(s==PN_OK)s=pn_w_text_ex(font,frame,"摘录",422,111,76,PN_ALIGN_CENTER,PN_UI_INK,true);
+    }
     // 标题行右侧恢复搜索入口（已过滤时显示“清除”）。/ Restore the search button on the right of the title row ("Clear" while filtered).
     if(s==PN_OK && !options->entertainment && options->search){
         pn_w_round_fill(frame,520,76,132,52,16,PN_UI_SURFACE);
@@ -483,12 +487,15 @@ pn_status_t pn_shelf_render_ex(const pn_catalog_page_t *page,pn_font_t *font,pn_
     }
 
 
-    // 分类含可选娱乐，深色胶囊为当前；书籍右侧保留布局切换。/ Categories include optional entertainment; a dark capsule marks the active one and books retain the layout toggle.
+    // 分类含可选娱乐，浅雾槽内白底细描边胶囊标示当前项（与整机 Mono Glass 风格统一且少残影）；书籍右侧保留布局切换。
+    // Categories include optional entertainment; a paper capsule with crisp stroke inside a soft fog track marks the active tab (matching Mono Glass with minimal ghosting).
     {static const char *const chips[]={"全部","最近","收藏","娱乐"};unsigned books=options->favorites_tab?3u:2u;int active=options->entertainment?(int)books:options->favorites?2:recent?1:0;unsigned count=books+(options->entertainment_tab?1u:0u);
         pn_w_round_fill(frame,32,CHIP_Y,(int)count*CHIP_W+12,CHIP_H,CHIP_H/2,PN_UI_SURFACE);
-        for(unsigned i=0;i<count && s==PN_OK;i++){int x=38+(int)i*CHIP_W;s=pn_font_size(font,28);
-            if(s==PN_OK)s=pn_w_text_ex(font,frame,chips[i==books?3u:i],x,CHIP_Y+39,CHIP_W,PN_ALIGN_CENTER,PN_UI_INK,(int)i==active);
-            if((int)i==active)pn_w_invert_round(frame,x,CHIP_Y+5,CHIP_W,CHIP_H-10,(CHIP_H-10)/2);}
+        pn_w_round_stroke(frame,32,CHIP_Y,(int)count*CHIP_W+12,CHIP_H,CHIP_H/2,1.0f,12);
+        for(unsigned i=0;i<count && s==PN_OK;i++){int x=38+(int)i*CHIP_W;bool on=(int)i==active;
+            if(on){pn_w_round_fill(frame,x,CHIP_Y+5,CHIP_W,CHIP_H-10,(CHIP_H-10)/2,PN_UI_PAPER);pn_w_round_stroke(frame,x,CHIP_Y+5,CHIP_W,CHIP_H-10,(CHIP_H-10)/2,1.5f,4);}
+            s=pn_font_size(font,28);
+            if(s==PN_OK)s=pn_w_text_ex(font,frame,chips[i==books?3u:i],x,CHIP_Y+39,CHIP_W,PN_ALIGN_CENTER,on?PN_UI_INK:5,on);}
     }
     if(options->entertainment){if(s==PN_OK)s=entertainment_body(font,frame,options->entertainment==2,selected);pn_status_t restored=pn_font_size(font,original);return s==PN_OK?restored:s;}
     if(options->layout_toggle){pn_w_round_fill(frame,LAYOUT_X+28,CHIP_Y,64,CHIP_H,16,PN_UI_SURFACE);pn_w_round_stroke(frame,LAYOUT_X+28,CHIP_Y,64,CHIP_H,16,1.5f,9);if(list)pn_w_icon_grid(frame,LAYOUT_X+44,CHIP_Y+13,32);else pn_w_icon_list(frame,LAYOUT_X+44,CHIP_Y+13,32);}
@@ -595,7 +602,6 @@ int pn_shelf_hit_ex(const pn_catalog_page_t *page,int x,int y,const pn_shelf_opt
     if(options->home){
         if(x>=32 && x<652 && y>=HOME_CARD_Y && y<HOME_CARD_Y+HOME_CARD_H)return page->count?PN_SHELF_CONTINUE:PN_SHELF_HOME;
         if(y>=496 && y<676 && x>=32 && x<652)return PN_SHELF_READING_STATS;
-        if(y>=676 && y<730 && x>=440 && x<652)return PN_SHELF_HOME;
         if(y>=832 && y<920 && x>=32 && x<652 && !page->count)return PN_SHELF_TRANSFER;
         if(y>=HOME_BOOKS_Y && y<HOME_BOOKS_Y+3*HOME_ROW_PITCH && x>=32 && x<652){int row=(y-HOME_BOOKS_Y)/HOME_ROW_PITCH+1;return row<(int)page->count && row<(int)HOME_RECENT_MAX?row:-1;}
         return -1;
@@ -603,8 +609,9 @@ int pn_shelf_hit_ex(const pn_catalog_page_t *page,int x,int y,const pn_shelf_opt
     if(y<56)return -1;
     if(y<CHIP_Y-10){
         if(options->entertainment)return -1;
-        if(options->search && x>=500 && x<664)return PN_SHELF_SEARCH;
-        if(!options->favorites && !options->query && x>=220 && x<380)return PN_SHELF_SORT;
+        if(options->search && x>=514 && x<664)return PN_SHELF_SEARCH;
+        if(x>=370 && x<514)return PN_SHELF_EXCERPTS;
+        if(!options->favorites && !options->query && x>=220 && x<366)return PN_SHELF_SORT;
         return x>=32 && x<220?PN_SHELF_INDEX:-1;
     }
     if(y<CHIP_Y+CHIP_H+6){

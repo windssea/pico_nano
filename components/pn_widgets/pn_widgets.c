@@ -14,9 +14,10 @@
 enum {SRC_PRIMARY=0,SRC_BOX=1,SRC_FALLBACK=2,SRC_SYSTEM=3};
 static pn_font_t *fallback_font;
 static pn_font_t *system_font;
-/* 文字样式：墨色灰阶与是否加粗（加粗=错开0.6px再画一遍）。只在_ex调用期间生效。/ Text style: ink gray and bold (bold draws again 0.6 px to the right); active only during an _ex call. */
+/* 文字样式：墨色灰阶与是否加粗（加粗=右移1px整像素再画一遍，命中同一零相位字形缓存）。只在_ex调用期间生效。
+ * Text style: ink gray and bold (bold draws again 1 integer px to the right, reusing the same zero-phase glyph cache); active only during an _ex call. */
 static uint8_t text_ink;static bool text_bold;
-#define BOLD_SHIFT 40
+#define BOLD_SHIFT 64
 void pn_w_set_fallback(pn_font_t *font){fallback_font=font;}
 pn_status_t pn_w_font_scope_begin(pn_w_font_scope_t *scope,pn_pool_t *pool,pn_font_t *external){
     if(!scope || !pool || scope->active || scope->resident.impl || (external && !external->impl))return PN_INVALID;
@@ -43,6 +44,7 @@ static pn_status_t decode(pn_font_t *font,const char *s,uint32_t *cp,int32_t *ad
     pn_status_t status=pn_text_open(&reader,&source,PN_TEXT_UTF8);if(status!=PN_OK)return status;
     pn_text_char_t c;size_t n=0;
     while(n<MAX_CHARS && (status=pn_text_next(&reader,&c))==PN_OK){
+        if(c.codepoint=='\r' || c.codepoint=='\n'){cp[n]=c.codepoint;adv[n]=0;missing[n]=SRC_PRIMARY;n++;continue;}
         int32_t advance;pn_status_t measured=pn_font_advance(font,c.codepoint,&advance);
         missing[n]=SRC_PRIMARY;
         if(measured==PN_EMPTY){
@@ -59,12 +61,16 @@ static pn_status_t decode(pn_font_t *font,const char *s,uint32_t *cp,int32_t *ad
     *count=n;return status==PN_EMPTY || n==MAX_CHARS?PN_OK:status;
 }
 static pn_status_t draw_styled(pn_font_t *font,pn_frame_t *frame,uint32_t cp,int32_t x_64,int baseline){
+    // 管理界面文字对齐到整像素（delta=0），在墨水屏上笔画更利落且普通/加粗/居中全部命中同一份位图缓存。
+    // Snap UI text to integer pixels (delta=0) for crisper e-ink edges and full bitmap-cache reuse across normal/bold/centered strings.
+    int32_t snapped=(x_64>=0)?((x_64+32)&~63):(-(((-x_64)+32)&~63));
     uint8_t saved=font->ink;font->ink=text_ink;
-    pn_status_t status=pn_font_draw(font,frame,cp,x_64,baseline,PN_FONT_GRAY);
-    if(status==PN_OK && text_bold)status=pn_font_draw(font,frame,cp,x_64+BOLD_SHIFT,baseline,PN_FONT_GRAY);
+    pn_status_t status=pn_font_draw(font,frame,cp,snapped,baseline,PN_FONT_GRAY);
+    if(status==PN_OK && text_bold)status=pn_font_draw(font,frame,cp,snapped+BOLD_SHIFT,baseline,PN_FONT_GRAY);
     font->ink=saved;return status;
 }
 static pn_status_t glyph(pn_font_t *font,pn_frame_t *frame,uint32_t cp,uint8_t source,int32_t x_64,int baseline){
+    if(cp=='\r' || cp=='\n')return PN_OK;
     if(source==SRC_PRIMARY)return draw_styled(font,frame,cp,x_64,baseline);
     if(source==SRC_FALLBACK)return draw_styled(fallback_font,frame,cp,x_64,baseline);
     if(source==SRC_SYSTEM)return draw_styled(system_font,frame,cp,x_64,baseline);
@@ -118,24 +124,36 @@ static pn_status_t text_lines_impl(pn_font_t *font,pn_frame_t *frame,const char 
     while(at<n && line<max_lines){
         while(line>0 && at<n && cp[at]==' ')at++; // 续行不以空格开头。/ Continuation lines do not start with a space.
         if(at>=n)break;
-        // 本行能放下的字符数；最后一行若还有剩余则预留省略号。/ Characters that fit on this line; the last line reserves room for an ellipsis when text remains.
+        if(cp[at]=='\r'){at++;continue;}
+        if(cp[at]=='\n'){at++;line++;continue;} // 显式换行产生空行，不绘制方框。/ Explicit newline advances a line instead of drawing a missing-glyph box.
+        // 本行能放下的字符数；遇显式换行提前折行；最后一行若还有剩余则预留省略号。
+        // Characters that fit on this line; stop early at explicit newlines; the last line reserves room for an ellipsis when text remains.
         int32_t room=limit-(line==0?first_indent*64:0);
-        int32_t sum=0;size_t end=at;bool last=line+1==max_lines;
-        while(end<n && sum+adv[end]<=room){sum+=adv[end];end++;}
-        if(end==at)end=at+1,sum=adv[at]; // 单字比整行还宽也至少画一个。/ Draw at least one character even if it is wider than the line.
+        int32_t sum=0;size_t end=at;bool last=line+1==max_lines;bool hard_break=false;
+        while(end<n){
+            if(cp[end]=='\r' || cp[end]=='\n'){hard_break=true;break;}
+            if(sum+adv[end]>room)break;
+            sum+=adv[end];end++;
+        }
+        if(end==at && !hard_break)end=at+1,sum=adv[at]; // 单字比整行还宽也至少画一个。/ Draw at least one character even if it is wider than the line.
         // 拉丁单词不在中间折断，中文/标点相邻时也找真实词首。/ Preserve Latin words by finding their actual start, including after CJK or punctuation.
-        if(end<n && end>at+1 && is_word(cp[end]) && is_word(cp[end-1])){
+        if(!hard_break && end<n && end>at+1 && is_word(cp[end]) && is_word(cp[end-1])){
             size_t back=end;
             while(back>at && is_word(cp[back-1]))back--;
             if(back>at)end=back;
         }
-        bool cut=last && end<n;
-        if(cut){sum=0;end=at;while(end<n && sum+adv[end]+3*period<=room){sum+=adv[end];end++;}}
+        size_t next=end;
+        if(hard_break){
+            if(next<n && cp[next]=='\r')next++;
+            if(next<n && cp[next]=='\n')next++;
+        }
+        bool cut=last && next<n;
+        if(cut){sum=0;end=at;while(end<n && cp[end]!='\r' && cp[end]!='\n' && sum+adv[end]+3*period<=room){sum+=adv[end];end++;}next=end;}
         int32_t pen=(int32_t)x*64+(line==0?first_indent*64:0);
         if(centered){int32_t actual=cut?3*period:0;for(size_t i=at;i<end;i++)actual+=adv[i];if(actual<room)pen+=(room-actual)/2;}
         if(frame){for(size_t i=at;i<end;i++){status=glyph(font,frame,cp[i],miss[i],pen,baseline+(int)line*pitch);if(status!=PN_OK)return status;pen+=adv[i];}
             for(int i=0;cut && i<3;i++){status=ellipsis_dot(font,frame,pen,baseline+(int)line*pitch,period);if(status!=PN_OK)return status;pen+=period;}}
-        at=end;line++;
+        at=next;line++;
     }
     if(used)*used=line;
     return PN_OK;

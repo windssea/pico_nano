@@ -17,6 +17,7 @@ static bool live(const pn_style_ui_t *u){return u && ((u->reader && u->reader->i
 static bool confirmed(const pn_style_ui_t *u){return u->epub?pn_epub_app_last_confirmed(u->epub):pn_reader_app_last_confirmed(u->reader);}
 static pn_status_t overlay(pn_style_ui_t *u,pn_reader_overlay_fn paint,pn_reader_present_fn present,void *ctx){return u->epub?pn_epub_app_overlay(u->epub,paint,u,present,ctx,PN_REFRESH_GL16):pn_reader_app_overlay(u->reader,paint,u,present,ctx,PN_REFRESH_GL16);}
 static pn_status_t preview(pn_style_ui_t *u,uint64_t now,pn_reader_present_fn present,void *ctx){return u->epub?pn_epub_app_style_preview(u->epub,&u->draft,now,present,ctx):pn_reader_app_style_preview(u->reader,&u->draft,now,present,ctx);}
+static pn_status_t preview_sheet(pn_style_ui_t *u,pn_reader_overlay_fn sheet,uint64_t now,pn_reader_present_fn present,void *ctx){return u->epub?pn_epub_app_style_preview_sheet(u->epub,&u->draft,sheet,u,now,present,ctx):pn_reader_app_style_preview_sheet(u->reader,&u->draft,sheet,u,now,present,ctx);}
 static pn_status_t apply(pn_style_ui_t *u,uint64_t now,pn_reader_present_fn present,void *ctx){return u->epub?pn_epub_app_style_apply(u->epub,&u->draft,now,present,ctx):pn_reader_app_style_apply(u->reader,&u->draft,now,present,ctx);}
 static pn_status_t cancel(pn_style_ui_t *u,uint64_t now,pn_reader_present_fn present,void *ctx){return u->epub?pn_epub_app_style_cancel(u->epub,now,present,ctx):pn_reader_app_style_cancel(u->reader,now,present,ctx);}
 #include "pn_widgets.h"
@@ -52,7 +53,7 @@ static void field_text(const pn_style_t *s,unsigned i,char *out,size_t cap){
         if(s->margin_top || s->margin_bottom || s->margin_right_delta || s->margin<16 || s->margin>80)snprintf(out,cap,"自定义");
         else snprintf(out,cap,v<=20?"窄":v<=32?"中":"宽");
     }
-    else if(i==6)snprintf(out,cap,"%s",v==1?"虚线":v==2?"点线":"关闭");
+    else if(i==6)snprintf(out,cap,"%s",v==1?"虚线":v==2?"点线":v==3?"实线":"关闭");
     else if(i==7)snprintf(out,cap,"%+d px",s->reading_line_offset);
     else if(i==8){static const char *const shades[4]={"浅","中","深","黑"};snprintf(out,cap,"%s",shades[v<4?v:0]);}
     else if(i==9){static const char *const weights[5]={"细","标准","稍粗","粗","特粗"};snprintf(out,cap,"%s",weights[v<5?v:1]);}
@@ -99,7 +100,6 @@ static pn_status_t stepper(pn_font_t *font,pn_frame_t *frame,const pn_style_t *d
     if(s==PN_OK)s=pn_w_text_ex(font,frame,names[field],x+12,y+24,CELL_W-24,PN_ALIGN_LEFT,5,false);
     if(s==PN_OK && field==5)s=pn_w_text_ex(font,frame,"详调 >",x+12,y+24,CELL_W-24,PN_ALIGN_RIGHT,4,true);
     if(s==PN_OK && field==6)s=pn_w_text_ex(font,frame,"详调 >",x+12,y+24,CELL_W-24,PN_ALIGN_RIGHT,4,true);
-    if(s==PN_OK && field==7)s=pn_w_text_ex(font,frame,"章节 >",x+12,y+24,CELL_W-24,PN_ALIGN_RIGHT,4,true);
     bool choice=field==5 || field==6 || field==8 || field==9 || field==10;
     if(field==11){pn_w_icon(frame,PN_ICON_CHEVRON,x+CELL_W-38,y+44,24,6);if(s==PN_OK)s=pn_font_size(font,26);if(s==PN_OK)s=pn_w_text_ex(font,frame,value,x+12,y+67,CELL_W-60,PN_ALIGN_LEFT,PN_UI_INK,true);return s;}
     pn_w_round_fill(frame,x+8,y+32,64,40,8,PN_UI_SURFACE);pn_w_round_stroke(frame,x+8,y+32,64,40,8,1.0f,11);
@@ -134,7 +134,7 @@ static pn_status_t sample(pn_style_ui_t *u,pn_font_t *ui,pn_frame_t *frame){
                 int gx0=(follow && i==0)?(pixels*(int)u->draft.indent_em):0;
                 int gx1=(follow && i+1==lines && lines>1)?350:556;
                 int gy=pixels+(int)i*pitch+descent+(follow?(pixels>=36?pixels/12:3):gap/2)+u->draft.reading_line_offset;
-                pn_reader_guide_row_ex(&preview,u->draft.reading_line,u->draft.reading_line_shade,gx0,gx1,gy,thick,pixels,follow);
+                pn_reader_guide_row_custom(&preview,u->draft.reading_line,u->draft.reading_line_shade,gx0,gx1,gy,thick,u->draft.reading_line_dash,u->draft.reading_line_gap,pixels,follow);
             }}}
     pn_status_t restored=pn_font_size(face,saved);
     if(restored==PN_OK)restored=pn_font_weight(face,saved_weight);
@@ -194,6 +194,24 @@ static pn_status_t margin_stepper(pn_font_t *font,pn_frame_t *frame,const char *
     if(s==PN_OK)s=pn_w_text_ex(font,frame,value,lx+MBTN_W,by+42,rx-(lx+MBTN_W),PN_ALIGN_CENTER,PN_UI_INK,true);
     return s;
 }
+static int margin_step_mult_of(uint8_t m){return (m==5u || m==10u)?(int)m:1;}
+static pn_status_t paint_margin_step_bar(pn_font_t *font,pn_frame_t *frame,int y,uint8_t mult_raw){
+    int mult=margin_step_mult_of(mult_raw);
+    char lbl[32];snprintf(lbl,sizeof lbl,"步进 %d px",4*mult);
+    pn_status_t s=pn_font_size(font,24);
+    if(s==PN_OK)s=pn_w_text_ex(font,frame,lbl,32,y+38,240,PN_ALIGN_LEFT,mult>1?PN_UI_INK:PN_UI_MUTED,mult>1);
+    static const char *const ml[3]={"×1","×5","×10"};
+    static const int mv[3]={1,5,10};
+    pn_w_round_stroke(frame,292,y,360,58,12,1.5f,PN_UI_INK);
+    if(s==PN_OK)s=pn_font_size(font,24);
+    for(int i=0;i<3 && s==PN_OK;i++){
+        int cx=292+i*120;bool sel=(mult==mv[i]);
+        if(sel)pn_w_round_fill(frame,cx+3,y+3,114,52,9,PN_UI_INK);
+        s=pn_w_text_ex(font,frame,ml[i],cx+4,y+38,112,PN_ALIGN_CENTER,sel?PN_UI_PAPER:PN_UI_INK,sel);
+        if(i<2 && !sel && mult!=mv[i+1])pn_frame_rect(frame,cx+120,y+12,1,34,11);
+    }
+    return s;
+}
 static pn_status_t paint_margins(pn_style_ui_t *u,pn_font_t *font,pn_frame_t *frame){
     pn_status_t s=pn_w_header(font,frame,"< 返回","边距与栏位",NULL);
     if(s==PN_OK){s=pn_font_size(font,26);if(s==PN_OK)s=pn_w_text_ex(font,frame,"重置边距",480,100,172,PN_ALIGN_RIGHT,PN_UI_MUTED,false);}
@@ -239,7 +257,7 @@ static pn_status_t paint_margins(pn_style_ui_t *u,pn_font_t *font,pn_frame_t *fr
     if(s==PN_OK)s=margin_stepper(font,frame,"背景下边距",u->draft.bg_margin_bottom,352,762);
     if(s==PN_OK)s=margin_stepper(font,frame,"背景左边距",u->draft.bg_margin_left,32,880);
     if(s==PN_OK)s=margin_stepper(font,frame,"背景右边距",u->draft.bg_margin_right,352,880);
-    if(s==PN_OK){s=pn_font_size(font,22);if(s==PN_OK)s=pn_w_text_ex(font,frame,"步进 4px · 长按连调 · 可先点整页预览查看效果",32,1034,620,PN_ALIGN_CENTER,PN_UI_MUTED,false);}
+    if(s==PN_OK)s=paint_margin_step_bar(font,frame,1004,u->margin_step_mult);
     if(s==PN_OK && u->notice){s=pn_font_size(font,24);if(s==PN_OK)s=pn_w_text_ex(font,frame,u->notice,32,APPLY_Y-14,620,PN_ALIGN_CENTER,PN_UI_INK,true);}
     if(s==PN_OK)s=pn_font_size(font,30);
     if(s==PN_OK)s=pn_w_button(font,frame,"整页预览",32,APPLY_Y,300,APPLY_H,0u);
@@ -290,7 +308,7 @@ static pn_status_t paint_chapter(pn_style_ui_t *u,pn_font_t *font,pn_frame_t *fr
         pn_frame_t sub={frame->pixels+(size_t)(py+8)*frame->stride+(size_t)(px+20)/2u,pw-40,ph-48,frame->stride};
         int gx0=follow?ind_w:0,gx1=follow?(ind_w+text_w):pw-40;
         int gy=(body_y-(py+8))+(follow?6:10)+u->draft.reading_line_offset/2;
-        pn_reader_guide_row_ex(&sub,u->draft.reading_line,u->draft.reading_line_shade,gx0,gx1,gy,thick,u->draft.pixels,follow);
+        pn_reader_guide_row_custom(&sub,u->draft.reading_line,u->draft.reading_line_shade,gx0,gx1,gy,thick,u->draft.reading_line_dash,u->draft.reading_line_gap,u->draft.pixels,follow);
     }
     pn_frame_rect(frame,px+20,py+ph-34,pw-40,1,11);
     int fpx=pn_style_footer_pixels(&u->draft)*3/4;if(fpx<16)fpx=16;if(fpx>24)fpx=24;
@@ -361,8 +379,90 @@ pn_status_t pn_style_ui_render(void *ctx,pn_font_t *font,pn_font_t *metadata,pn_
     if(s==PN_OK && u->notice){s=pn_font_size(font,24);if(s==PN_OK)s=pn_w_text_ex(font,frame,u->notice,PN_UI_MARGIN,APPLY_Y-14,620,PN_ALIGN_CENTER,PN_UI_INK,true);}
     pn_status_t restored=pn_font_size(font,original);return s==PN_OK?restored:s;
 }
+/* 半屏实时阅读线微调卡（参考图7）：上半屏实时渲染当前书页正文，下半屏 y=616..1216 叠画控制卡。
+ * Live half-screen reading-line micro-editor: top half shows live prose, bottom half y=616..1216 paints controls. */
+#define GSHEET_Y 616
+#define GSHEET_STYLE_Y 698
+#define GSHEET_STYLE_H 82
+#define GSHEET_ROW0_Y 796
+#define GSHEET_ROW_H 106
+#define GSHEET_ROW_PITCH 120
+static pn_status_t guide_stepper(pn_font_t *font,pn_frame_t *frame,const char *label,const char *value,bool choice,bool dimmed,int x,int y){
+    pn_w_round_fill(frame,x,y,CELL_W,GSHEET_ROW_H,12,PN_UI_PAPER);
+    pn_w_round_stroke(frame,x,y,CELL_W,GSHEET_ROW_H,12,1.5f,dimmed?11:8);
+    pn_status_t s=pn_font_size(font,22);
+    if(s==PN_OK)s=pn_w_text_ex(font,frame,label,x+12,y+28,CELL_W-24,PN_ALIGN_CENTER,dimmed?9:PN_UI_MUTED,false);
+    int by=y+36,lx=x+8,rx=x+CELL_W-8-82;
+    pn_w_round_fill(frame,lx,by,82,62,10,dimmed?14:PN_UI_SELECT);
+    pn_w_round_stroke(frame,lx,by,82,62,10,1.0f,dimmed?11:PN_UI_INK);
+    pn_w_icon(frame,choice?PN_ICON_BACK:PN_ICON_MINUS,lx+28,by+18,26,dimmed?9:PN_UI_INK);
+    pn_w_round_fill(frame,rx,by,82,62,10,dimmed?14:PN_UI_SELECT);
+    pn_w_round_stroke(frame,rx,by,82,62,10,1.0f,dimmed?11:PN_UI_INK);
+    pn_w_icon(frame,choice?PN_ICON_CHEVRON:PN_ICON_PLUS,rx+28,by+18,26,dimmed?9:PN_UI_INK);
+    if(s==PN_OK)s=pn_font_size(font,24);
+    if(s==PN_OK)s=pn_w_text_ex(font,frame,value,lx+82,by+41,rx-(lx+82),PN_ALIGN_CENTER,dimmed?9:PN_UI_INK,!dimmed);
+    return s;
+}
+static pn_status_t paint_guide_sheet(void *ctx,pn_font_t *font,pn_font_t *metadata,pn_frame_t *frame){
+    (void)metadata;pn_style_ui_t *u=ctx;if(!u || !font || !font->impl || !frame || !frame->pixels)return PN_INVALID;
+    int original=font->pixels;
+    pn_frame_rect(frame,0,GSHEET_Y,684,1216-GSHEET_Y,PN_UI_PAPER);
+    pn_frame_rect(frame,0,GSHEET_Y,684,2,PN_UI_INK);
+    // 顶部栏：< 取消 | 阅读线微调 | 保存。/ Header bar: < Cancel | Reading Line | Save.
+    pn_w_icon(frame,PN_ICON_BACK,32,GSHEET_Y+24,28,PN_UI_INK);
+    pn_status_t s=pn_font_size(font,26);
+    if(s==PN_OK)s=pn_w_text_ex(font,frame,"取消",64,GSHEET_Y+48,96,PN_ALIGN_LEFT,PN_UI_MUTED,false);
+    if(s==PN_OK)s=pn_font_size(font,30);
+    if(s==PN_OK)s=pn_w_text_ex(font,frame,"阅读线微调",170,GSHEET_Y+50,344,PN_ALIGN_CENTER,PN_UI_INK,true);
+    pn_w_round_fill(frame,548,GSHEET_Y+16,104,48,12,PN_UI_INK);
+    if(s==PN_OK)s=pn_font_size(font,26);
+    if(s==PN_OK)s=pn_w_text_ex(font,frame,"保存",548,GSHEET_Y+49,104,PN_ALIGN_CENTER,PN_UI_PAPER,true);
+    pn_frame_rect(frame,32,GSHEET_Y+76,620,1,12);
+    // 第一行：四档样式卡（关闭/实线/虚线/点线），带实时线条图例。/ Row 1: 4 style pills (Off/Solid/Dashed/Dotted) with inline line previews.
+    static const unsigned style_vals[4]={0,3,1,2};
+    static const char *const style_labels[4]={"关闭","实线","虚线","点线"};
+    for(unsigned i=0;i<4 && s==PN_OK;i++){
+        int sx=32+(int)i*158,sw=146;
+        bool active=u->draft.reading_line==style_vals[i];
+        pn_w_round_fill(frame,sx,GSHEET_STYLE_Y,sw,GSHEET_STYLE_H,12,active?PN_UI_INK:PN_UI_PAPER);
+        pn_w_round_stroke(frame,sx,GSHEET_STYLE_Y,sw,GSHEET_STYLE_H,12,active?2.0f:1.5f,active?PN_UI_INK:8);
+        uint8_t lc=active?PN_UI_PAPER:PN_UI_INK;
+        int ly=GSHEET_STYLE_Y+24;
+        if(style_vals[i]==3)pn_frame_rect(frame,sx+24,ly,sw-48,2,lc);
+        else if(style_vals[i]==1){for(int dx=sx+22;dx<sx+sw-22;dx+=18){int seg=10;if(dx+seg>sx+sw-22)seg=sx+sw-22-dx;pn_frame_rect(frame,dx,ly,seg,2,lc);}}
+        else if(style_vals[i]==2){for(int dx=sx+24;dx<sx+sw-24;dx+=10)pn_frame_rect(frame,dx,ly,3,2,lc);}
+        else pn_frame_rect(frame,sx+54,ly,sw-108,2,active?12:10);
+        s=pn_font_size(font,24);
+        if(s==PN_OK)s=pn_w_text_ex(font,frame,style_labels[i],sx+6,GSHEET_STYLE_Y+64,sw-12,PN_ALIGN_CENTER,active?PN_UI_PAPER:PN_UI_INK,active);
+    }
+    // 2×3 微调格：粗细/深浅、长度/间隔、偏移/对齐方式。/ 2x3 micro-editor grid: thickness/shade, dash/gap, offset/follow.
+    static const char *const shades[4]={"浅","中","深","黑"};
+    char val[32];
+    bool off=u->draft.reading_line==0;
+    bool dash_active=u->draft.reading_line==1 || u->draft.reading_line==2;
+    snprintf(val,sizeof val,"%d px",pn_style_guide_thickness(&u->draft));
+    if(s==PN_OK)s=guide_stepper(font,frame,"粗细",val,false,off,32,GSHEET_ROW0_Y);
+    if(s==PN_OK)s=guide_stepper(font,frame,"深浅",shades[u->draft.reading_line_shade<4?u->draft.reading_line_shade:0],true,off,352,GSHEET_ROW0_Y);
+    snprintf(val,sizeof val,"%u px",(unsigned)pn_style_guide_dash(&u->draft));
+    if(s==PN_OK)s=guide_stepper(font,frame,"线段长度",val,false,!dash_active,32,GSHEET_ROW0_Y+GSHEET_ROW_PITCH);
+    snprintf(val,sizeof val,"%u px",(unsigned)pn_style_guide_gap(&u->draft));
+    if(s==PN_OK)s=guide_stepper(font,frame,"线段间隔",val,false,!dash_active,352,GSHEET_ROW0_Y+GSHEET_ROW_PITCH);
+    snprintf(val,sizeof val,"%+d px",(int)u->draft.reading_line_offset);
+    if(s==PN_OK)s=guide_stepper(font,frame,"上下偏移",val,false,off,32,GSHEET_ROW0_Y+GSHEET_ROW_PITCH*2);
+    if(s==PN_OK)s=guide_stepper(font,frame,"对齐范围",u->draft.reading_line_follow?"跟随字体":"通栏固定",true,off,352,GSHEET_ROW0_Y+GSHEET_ROW_PITCH*2);
+    if(s==PN_OK)s=pn_font_size(font,22);
+    if(s==PN_OK)s=pn_w_text_ex(font,frame,u->notice?u->notice:"实时预览上方书页 · 点右上「保存」生效",32,1190,620,PN_ALIGN_CENTER,u->notice?PN_UI_INK:PN_UI_MUTED,u->notice!=NULL);
+    pn_status_t restored=pn_font_size(font,original);return s==PN_OK?restored:s;
+}
+static pn_status_t present_guide_sheet(pn_style_ui_t *u,uint64_t now,pn_reader_present_fn present,void *ctx){
+    u->preview=false;u->presented=false;
+    pn_status_t s=preview_sheet(u,paint_guide_sheet,now,present,ctx);
+    if(confirmed(u)){u->did_preview=true;u->presented=true;}
+    return s;
+}
 pn_status_t pn_style_ui_present(pn_style_ui_t *u,pn_reader_present_fn present,void *ctx){
     if(!u || !u->active || !live(u))return PN_INVALID;
+    if(u->guide_sheet)return present_guide_sheet(u,0,present,ctx);
     u->preview=false;u->presented=false;pn_status_t status=overlay(u,pn_style_ui_render,present,ctx);u->presented=status==PN_OK;return status;
 }
 pn_status_t pn_style_ui_open(pn_style_ui_t *u,pn_reader_app_t *reader,pn_reader_present_fn present,void *ctx){
@@ -379,8 +479,41 @@ pn_status_t pn_style_ui_event(pn_style_ui_t *u,int command,uint64_t now,pn_reade
     if(!u || !u->active || !live(u))return PN_INVALID;
     if(!u->presented && command!=PN_SUI_RETRY)return PN_BUSY;
     if(command==PN_SUI_FORM)u->more=false;
-    if(command==PN_SUI_RETRY || command==PN_SUI_FORM)return pn_style_ui_present(u,present,ctx);
+    if(command==PN_SUI_RETRY || command==PN_SUI_FORM)return u->guide_sheet?present_guide_sheet(u,now,present,ctx):pn_style_ui_present(u,present,ctx);
     pn_status_t status=PN_OK;u->notice=NULL;
+    if(u->guide_sheet){
+        if(command==PN_SUI_APPLY){
+            status=apply(u,now,present,ctx);
+            u->application_failed=status!=PN_OK && confirmed(u);
+            if(status==PN_OK){u->guide_sheet=false;u->active=false;return status;}
+            u->notice="保存失败，请重试";
+            pn_status_t drawn=present_guide_sheet(u,now,present,ctx);return drawn!=PN_OK?drawn:status;
+        }
+        if(command==PN_SUI_CANCEL){
+            status=cancel(u,now,present,ctx);
+            if(status==PN_OK){u->guide_sheet=false;u->active=false;return status;}
+            return status;
+        }
+        if(command>=PN_SUI_GUIDE_STYLE && command<PN_SUI_GUIDE_STYLE+4){
+            u->draft.reading_line=(uint16_t)(command-PN_SUI_GUIDE_STYLE);
+            return present_guide_sheet(u,now,present,ctx);
+        }
+        if(command>=PN_SUI_GUIDE_ADJ && command<PN_SUI_GUIDE_ADJ+12){
+            unsigned item=(unsigned)(command-PN_SUI_GUIDE_ADJ)/2;bool up=((command-PN_SUI_GUIDE_ADJ)&1)!=0;
+            pn_style_t next=u->draft;
+            switch(item){
+                case 0:{int v=(int)next.reading_line_thickness_extra+(up?1:-1);if(v<0 || v>2)status=PN_EMPTY;else next.reading_line_thickness_extra=(uint8_t)v;break;}
+                case 1:next.reading_line_shade=(uint16_t)((next.reading_line_shade+(up?1u:3u))%4u);break;
+                case 2:{int cur=pn_style_guide_dash(&next);int v=cur+(up?2:-2);if(v<4 || v>40)status=PN_EMPTY;else next.reading_line_dash=(uint8_t)v;break;}
+                case 3:{int cur=pn_style_guide_gap(&next);int v=cur+(up?2:-2);if(v<4 || v>40)status=PN_EMPTY;else next.reading_line_gap=(uint8_t)v;break;}
+                case 4:{int v=(int)next.reading_line_offset+(up?2:-2);if(v<-8 || v>8)status=PN_EMPTY;else next.reading_line_offset=(int16_t)v;break;}
+                default:next.reading_line_follow=next.reading_line_follow?0u:1u;break;
+            }
+            if(status==PN_OK && pn_style_validate(&next)==PN_OK)u->draft=next;else status=PN_EMPTY;
+            pn_status_t drawn=present_guide_sheet(u,now,present,ctx);return drawn!=PN_OK?drawn:status;
+        }
+        return PN_EMPTY;
+    }
     if(!u->backgrounds && !u->margins && !u->chapter_page && (command==PN_SUI_PREVIEW || command==PN_SUI_APPLY || command==PN_SUI_USE_GLOBAL || (command==PN_SUI_CANCEL && u->did_preview))){
         u->presented=false;status=overlay(u,busy_paint,present,ctx);
         if(status!=PN_OK){(void)pn_style_ui_present(u,present,ctx);return status;}
@@ -436,19 +569,39 @@ pn_status_t pn_style_ui_event(pn_style_ui_t *u,int command,uint64_t now,pn_reade
             if(pn_style_validate(&next)==PN_OK)u->draft=next;else status=PN_EMPTY;
             return pn_style_ui_present(u,present,ctx);
         }
+        if(command>=PN_SUI_MARGIN_STEP && command<PN_SUI_MARGIN_STEP+3){
+            static const uint8_t mults[3]={1u,5u,10u};
+            uint8_t want=mults[command-PN_SUI_MARGIN_STEP];
+            // 再次点击当前已选倍率（×5/×10）可一键切回 ×1。/ Tapping an already-active x5/x10 multiplier toggles cleanly back to x1.
+            u->margin_step_mult=(want>1u && margin_step_mult_of(u->margin_step_mult)==(int)want)?1u:want;
+            return pn_style_ui_present(u,present,ctx);
+        }
         if(command>=PN_SUI_MARGIN_ADJ && command<PN_SUI_MARGIN_ADJ+16){
             unsigned item=(unsigned)(command-PN_SUI_MARGIN_ADJ)/2;bool up=((command-PN_SUI_MARGIN_ADJ)&1)!=0;
-            int delta=up?4:-4;pn_style_t next=u->draft;
-            int val=0;
+            int step=4*margin_step_mult_of(u->margin_step_mult),delta=up?step:-step;
+            pn_style_t next=u->draft;
+            int cur=0,hi=(item==0 || item==1 || item==4 || item==5)?200:160;
             switch(item){
-                case 0:val=pn_style_margin_top(&next)+delta;if(val<0 || val>200)status=PN_EMPTY;else next.margin_top=(uint16_t)val;break;
-                case 1:val=pn_style_margin_bottom(&next)+delta;if(val<0 || val>200)status=PN_EMPTY;else next.margin_bottom=(uint16_t)val;break;
-                case 2:val=pn_style_margin_left(&next)+delta;if(val<0 || val>160)status=PN_EMPTY;else pn_style_set_margin_left(&next,val);break;
-                case 3:val=pn_style_margin_right(&next)+delta;if(val<0 || val>160)status=PN_EMPTY;else pn_style_set_margin_right(&next,val);break;
-                case 4:val=(int)next.bg_margin_top+delta;if(val<0 || val>200)status=PN_EMPTY;else next.bg_margin_top=(uint16_t)val;break;
-                case 5:val=(int)next.bg_margin_bottom+delta;if(val<0 || val>200)status=PN_EMPTY;else next.bg_margin_bottom=(uint16_t)val;break;
-                case 6:val=(int)next.bg_margin_left+delta;if(val<0 || val>160)status=PN_EMPTY;else next.bg_margin_left=(uint16_t)val;break;
-                default:val=(int)next.bg_margin_right+delta;if(val<0 || val>160)status=PN_EMPTY;else next.bg_margin_right=(uint16_t)val;break;
+                case 0:cur=pn_style_margin_top(&next);break;
+                case 1:cur=pn_style_margin_bottom(&next);break;
+                case 2:cur=pn_style_margin_left(&next);break;
+                case 3:cur=pn_style_margin_right(&next);break;
+                case 4:cur=(int)next.bg_margin_top;break;
+                case 5:cur=(int)next.bg_margin_bottom;break;
+                case 6:cur=(int)next.bg_margin_left;break;
+                default:cur=(int)next.bg_margin_right;break;
+            }
+            int val=cur+delta;if(val<0)val=0;if(val>hi)val=hi;
+            if(val==cur)status=PN_EMPTY;
+            else switch(item){
+                case 0:next.margin_top=(uint16_t)val;break;
+                case 1:next.margin_bottom=(uint16_t)val;break;
+                case 2:pn_style_set_margin_left(&next,val);break;
+                case 3:pn_style_set_margin_right(&next,val);break;
+                case 4:next.bg_margin_top=(uint16_t)val;break;
+                case 5:next.bg_margin_bottom=(uint16_t)val;break;
+                case 6:next.bg_margin_left=(uint16_t)val;break;
+                default:next.bg_margin_right=(uint16_t)val;break;
             }
             if(status==PN_OK && pn_style_validate(&next)==PN_OK)u->draft=next;else status=PN_EMPTY;
             pn_status_t drawn=pn_style_ui_present(u,present,ctx);return drawn!=PN_OK?drawn:status;
@@ -491,7 +644,7 @@ pn_status_t pn_style_ui_event(pn_style_ui_t *u,int command,uint64_t now,pn_reade
     }
     if(command==PN_SUI_FONTS){if(u->application_failed){u->notice="请先应用或取消排版";(void)pn_style_ui_present(u,present,ctx);return PN_BUSY;}if(u->did_preview){status=cancel(u,now,present,ctx);if(status!=PN_OK)return status;u->did_preview=false;}u->request_fonts=true;return PN_OK;}
     if(command>=PN_SUI_FIELD && command<PN_SUI_FIELD+PN_SUI_FIELDS*2){
-        static const unsigned steps[]={2,5,5,1,5,2,1,2,1,1,1,1,1},minimum[]={28,100,0,0,0,16,0,0,0,0,0,0,0},maximum[]={72,220,100,2,70,80,2,16,3,4,3,8,1};
+        static const unsigned steps[]={2,5,5,1,5,2,1,2,1,1,1,1,1},minimum[]={28,100,0,0,0,16,0,0,0,0,0,0,0},maximum[]={72,220,100,2,70,80,3,16,3,4,3,8,1};
         unsigned field=(unsigned)(command-PN_SUI_FIELD)/2;bool up=(command-PN_SUI_FIELD)&1;unsigned v=field_value(&u->draft,field);u->selected=field;u->more=false;
         // 页边距只有窄/中/宽三档。/ Margins have just three levels: narrow, medium and wide.
         // 左右切换的档位项（边距、阅读线、深浅、字重、清晰度）首尾循环，不在两端卡住；数值项仍在上下限停住。
@@ -527,9 +680,35 @@ pn_status_t pn_style_ui_event(pn_style_ui_t *u,int command,uint64_t now,pn_reade
 int pn_style_ui_hit(const pn_style_ui_t *u,int x,int y){
     if(!u || !u->active || x<0 || x>=684 || y<0 || y>=1216)return -1;
     if(u->preview)return PN_SUI_FORM;
+    if(u->guide_sheet){
+        if(y<GSHEET_Y)return -1;
+        if(y<GSHEET_Y+76){
+            if(x<176)return PN_SUI_CANCEL;
+            if(x>=528)return PN_SUI_APPLY;
+            return -1;
+        }
+        if(y>=GSHEET_STYLE_Y && y<GSHEET_STYLE_Y+GSHEET_STYLE_H && x>=32 && x<652){
+            static const int style_cmds[4]={PN_SUI_GUIDE_STYLE+0,PN_SUI_GUIDE_STYLE+3,PN_SUI_GUIDE_STYLE+1,PN_SUI_GUIDE_STYLE+2};
+            int idx=(x-32)/158;
+            if(idx>=0 && idx<4 && (x-32)%158<146)return style_cmds[idx];
+            return -1;
+        }
+        for(unsigned row=0;row<3;row++){
+            int top=GSHEET_ROW0_Y+(int)row*GSHEET_ROW_PITCH;
+            if(y>=top && y<top+GSHEET_ROW_H){
+                for(unsigned col=0;col<2;col++){
+                    int left=32+(int)col*CELL_PITCH;unsigned item=row*2+col;
+                    if(x>=left && x<left+MHIT_W)return PN_SUI_GUIDE_ADJ+(int)item*2;
+                    if(x>=left+CELL_W-MHIT_W && x<left+CELL_W)return PN_SUI_GUIDE_ADJ+(int)item*2+1;
+                }
+            }
+        }
+        return -1;
+    }
     if(u->margins){
         if(y<PN_W_HEADER_H){if(pn_w_header_hit(x,y,false)==1)return PN_SUI_MARGINS_BACK;return x>=480 && y>=44?PN_SUI_MARGINS_RESET:-1;}
         if(y>=404 && y<476 && x>=32 && x<652)return PN_SUI_TOGGLE_BARS;
+        if(y>=1004 && y<1062 && x>=292 && x<652)return PN_SUI_MARGIN_STEP+(x-292)/120;
         if(y>=APPLY_Y && y<APPLY_Y+APPLY_H){if(x>=32 && x<332)return PN_SUI_PREVIEW;if(x>=352 && x<652)return PN_SUI_APPLY;return -1;}
         static const int tops[4]={488,606,762,880};
         for(unsigned row=0;row<4;row++){
@@ -585,7 +764,7 @@ int pn_style_ui_hit(const pn_style_ui_t *u,int x,int y){
         if(fields[i]==11 && x>=left && x<left+CELL_W && y>=top && y<top+CELL_H)return PN_SUI_BACKGROUND;
         if(y>=top+26 && y<top+CELL_H){if(x>=left && x<left+68)return PN_SUI_FIELD+(int)fields[i]*2;if(x>=left+CELL_W-68 && x<left+CELL_W)return PN_SUI_FIELD+(int)fields[i]*2+1;}
         if(fields[i]==5 && x>=left && x<left+CELL_W && y>=top && y<top+CELL_H)return PN_SUI_MARGINS;
-        if((fields[i]==6 || fields[i]==7) && x>=left && x<left+CELL_W && y>=top && y<top+CELL_H)return PN_SUI_CHAPTER;
+        if(fields[i]==6 && x>=left && x<left+CELL_W && y>=top && y<top+CELL_H)return PN_SUI_CHAPTER;
     }
     int preset=pn_w_segments_hit(3,PRESET_Y,PRESET_H,x,y);return preset>=0?PN_SUI_PRESET+preset:-1;
 }
@@ -595,4 +774,14 @@ pn_status_t pn_style_ui_tick(pn_style_ui_t *u,pn_reader_present_fn present,void 
 pn_status_t pn_style_ui_open_epub(pn_style_ui_t *u,pn_epub_app_t *reader,pn_reader_present_fn present,void *ctx){
     if(!u || !reader || !reader->impl)return PN_INVALID;
     memset(u,0,sizeof *u);u->epub=reader;pn_status_t status=pn_epub_app_style_get(reader,&u->draft);if(status!=PN_OK)return status;u->active=true;return pn_style_ui_present(u,present,ctx);
+}
+pn_status_t pn_style_ui_open_guide(pn_style_ui_t *u,pn_reader_app_t *reader,uint64_t now,pn_reader_present_fn present,void *ctx){
+    if(!u || !reader || !reader->impl)return PN_INVALID;
+    memset(u,0,sizeof *u);u->reader=reader;pn_status_t status=pn_reader_app_style_get(reader,&u->draft);if(status!=PN_OK)return status;
+    u->active=true;u->guide_sheet=true;return present_guide_sheet(u,now,present,ctx);
+}
+pn_status_t pn_style_ui_open_guide_epub(pn_style_ui_t *u,pn_epub_app_t *reader,uint64_t now,pn_reader_present_fn present,void *ctx){
+    if(!u || !reader || !reader->impl)return PN_INVALID;
+    memset(u,0,sizeof *u);u->epub=reader;pn_status_t status=pn_epub_app_style_get(reader,&u->draft);if(status!=PN_OK)return status;
+    u->active=true;u->guide_sheet=true;return present_guide_sheet(u,now,present,ctx);
 }

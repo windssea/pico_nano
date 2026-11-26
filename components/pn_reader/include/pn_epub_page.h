@@ -13,6 +13,14 @@ typedef struct {void *impl; ///< 私有候选分页状态 / Private candidate pa
 #include "pn_layout.h"
 #include "pn_resource.h"
 #define PN_EPUB_PAGE_IMAGES_MAX 16
+#define PN_EPUB_PAGE_LINKS_MAX 32
+typedef struct {
+    char path[PN_ZIP_PATH_MAX]; ///< 链接目标资源路径 / Target resource path
+    char fragment[PN_RESOURCE_FRAGMENT_MAX]; ///< 目标锚点id（可空）/ Target anchor fragment ID (may be empty)
+    uint16_t start_node; ///< 页内首节点下标 / First page node index
+    uint16_t end_node; ///< 页内尾节点后下标（开区间）/ Exclusive end page node index
+    bool is_note; ///< 是否具备明确脚注/上标语义 / Whether explicitly marked as a footnote/superscript
+} pn_epub_page_link_t;
 typedef struct {
     int32_t advance_64; ///< 26.6字形宽度 / Glyph width in 26.6 units
     int ascent,descent,line_height; ///< 垂直度量；line_height为0则使用配置 / Vertical metrics; zero line_height uses configuration
@@ -42,6 +50,8 @@ typedef struct {
     size_t capacity,count; ///< 容量与已验证节点数 / Capacity and verified node count
     pn_epub_page_image_t *images; ///< 调用方可选图片缓冲 / Optional caller-owned image buffer
     size_t image_capacity,image_count; ///< 最多16槽 / At most 16 slots
+    pn_epub_page_link_t *links; ///< 可选页内链接/脚注缓冲，按需池分配 / Optional in-page link/footnote buffer, allocated on demand
+    size_t link_capacity,link_count; ///< 最多32槽 / At most 32 slots
     uint64_t begin_order,next_order; ///< 临时源顺序，用于有界上一页重建 / Transient source order for bounded previous-page reconstruction
     pn_xhtml_position_t begin,next; ///< 首节点及下一页位置，不是永久页号 / First node and next-page positions, not permanent page numbers
     bool valid,has_next; ///< 完整CRC成功及还有下一页 / Complete CRC success and another page exists

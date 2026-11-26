@@ -165,6 +165,10 @@ pn_status_t pn_epub_app_overlay(pn_epub_app_t *,pn_reader_overlay_fn,void *,pn_r
 
 /// 原锚点草稿预览，不写PNTS；只有实际显示后进入预览。/ Preview drafts at original anchor without PNTS writes, entering preview only after actual display.
 pn_status_t pn_epub_app_style_preview(pn_epub_app_t *,const pn_style_t *,uint64_t,pn_reader_present_fn,void *);
+/// 原锚点草稿重排并在同一帧叠画底部半屏微调卡，零额外帧缓存。/ Reflow a draft at the entry anchor and paint a bottom half-sheet onto the same frame without extra framebuffers.
+pn_status_t pn_epub_app_style_preview_sheet(pn_epub_app_t *,const pn_style_t *,pn_reader_overlay_fn,void *,uint64_t,pn_reader_present_fn,void *);
+/// 状态栏高度变化后按当前样式重新计算正文区域并重绘。/ Recompute the body viewport and repaint after status-bar inset changes.
+pn_status_t pn_epub_app_relayout_chrome(pn_epub_app_t *,uint64_t,pn_reader_present_fn,void *);
 /// 恢复保存配置和原锚点，失败不关闭草稿。/ Restore saved style and original anchor, retaining draft on failure.
 pn_status_t pn_epub_app_style_cancel(pn_epub_app_t *,uint64_t,pn_reader_present_fn,void *);
 
@@ -274,3 +278,36 @@ bool pn_epub_app_bars_hidden(const pn_epub_app_t *);
 /// 提取当前可见 EPUB 页屏幕坐标 (x,y) 附近的查词候选词列表；未命中文字时返回 PN_EMPTY。
 /// Extract dictionary lookup candidates near screen coordinate (x,y) on the current visible EPUB page; returns PN_EMPTY when no text is hit.
 pn_status_t pn_epub_app_word_at(pn_epub_app_t *app,int x,int y,char out[][PN_DICT_WORD_MAX],size_t max_out,size_t *count_out);
+
+#define PN_FOOTNOTE_TEXT_MAX 2048u ///< 弹窗脚注最大 UTF-8 字节数 / Maximum UTF-8 bytes extracted for a footnote popup
+#define PN_FOOTNOTE_LABEL_MAX 48u ///< 脚注标题标记最大 UTF-8 字节数 / Maximum UTF-8 bytes for footnote marker label
+/// 命中的 EPUB 脚注元数据与跳转目标。/ Resolved EPUB footnote metadata and jump target.
+typedef struct {
+    char label[PN_FOOTNOTE_LABEL_MAX]; ///< 正文标记文字（如“[103]”或“①”）/ Inline marker text (e.g. "[103]" or "①")
+    char path[PN_ZIP_PATH_MAX]; ///< 脚注目标资源路径 / Footnote target resource path
+    char fragment[PN_RESOURCE_FRAGMENT_MAX]; ///< 脚注目标锚点id（可空）/ Footnote target anchor ID (may be empty)
+    pn_xhtml_position_t anchor; ///< 目标锚点语义位置（可跳转时有效）/ Target anchor semantic position when jumpable
+    int marker_y; ///< 命中的正文标记屏幕纵坐标（用于决定弹窗居底或居顶避让）/ Hit marker screen Y coordinate for automatic bottom/top sheet placement
+    bool can_jump; ///< 是否支持“前往脚注”跳转到正文位置 / Whether "Go to footnote" jump is supported
+    bool truncated; ///< 脚注正文是否超过输出缓冲被安全截断 / Whether footnote body was truncated cleanly
+    bool explicit_note; ///< 链接是否带明确脚注语义 / Whether the link carried explicit footnote semantics
+} pn_epub_footnote_t;
+
+/// 命中当前可见 EPUB 页屏幕坐标 (x,y) 处的脚注/注释链接并提取弹窗正文；未命中返回 PN_EMPTY。
+/// Hit-test screen coordinate (x,y) on the current visible EPUB page for a footnote/annotation link and extract popup body text; returns PN_EMPTY on miss.
+pn_status_t pn_epub_app_footnote_at(pn_epub_app_t *app,int x,int y,pn_epub_footnote_t *meta,char *text,size_t text_cap,size_t *text_len);
+
+/// 跳转到脚注目标位置并记录原页为返回锚点（复用书签返回入口）。
+/// Jump to a footnote target while saving the current page as a return anchor (reusing bookmark return).
+pn_status_t pn_epub_app_footnote_jump(pn_epub_app_t *app,const pn_epub_footnote_t *note,uint64_t now,pn_reader_present_fn present,void *ctx);
+/// 查询 EPUB 当前页屏幕坐标 (x,y) 所在整句是否已高亮摘录。/ Query whether the sentence at screen (x,y) on the EPUB page is highlighted.
+pn_status_t pn_epub_app_highlight_at(pn_epub_app_t *app,int x,int y,bool *highlighted);
+/// 切换 EPUB 屏幕坐标 (x,y) 所在整句的高亮摘录状态；present 非空时立即重绘当前页。
+/// Toggle sentence highlight at screen (x,y) on EPUB; repaints immediately when present != NULL.
+pn_status_t pn_epub_app_highlight_toggle(pn_epub_app_t *app,int x,int y,uint64_t now,pn_reader_present_fn present,void *ctx,bool *added,char *excerpt,size_t excerpt_cap);
+/// 分页列出本书有效摘录。/ Page live highlights for this EPUB book.
+pn_status_t pn_epub_app_highlight_list(pn_epub_app_t *app,uint64_t after,pn_highlight_t *items,size_t capacity,size_t *count,bool *more);
+/// 删除指定 ID 摘录并刷新缓存。/ Delete a highlight by ID and refresh render cache.
+pn_status_t pn_epub_app_highlight_delete(pn_epub_app_t *app,uint64_t id);
+/// 跳转到指定摘录位置并保留返回锚点。/ Jump to an EPUB highlight's location while preserving the return anchor.
+pn_status_t pn_epub_app_highlight_jump(pn_epub_app_t *app,uint64_t id,uint64_t now,pn_reader_present_fn present,void *ctx);

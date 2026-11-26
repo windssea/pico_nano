@@ -14,6 +14,7 @@
 #include "pn_font.h"
 #include "pn_text_file.h"
 #include "pn_bookmarks.h"
+#include "pn_highlights.h"
 #include "pn_recent.h"
 #include "pn_style.h"
 #include "pn_page_bitmap.h"
@@ -64,7 +65,15 @@ typedef enum {
     PN_APP_LARGER, ///< 字号加2 / Increase size by two
     PN_APP_BEGINNING, ///< 书首 / Beginning
     PN_APP_TOOLS, ///< 点正文中央打开工具栏；只由输入识别器产生，应用不处理 / Center tap opens the toolbar; produced only by the input recognizer and never handled by the apps
-    PN_APP_LOOKUP ///< 长按正文查词；只由定时输入识别器产生，应用不处理 / Long-press body dictionary lookup; produced only by timed input recognizer and never handled by the apps
+    PN_APP_LOOKUP, ///< 长按正文查词；只由定时输入识别器产生，应用不处理 / Long-press body dictionary lookup; produced only by timed input recognizer and never handled by the apps
+    PN_APP_TAP, ///< 正文轻点（关闭点按翻页时仍用于触发 EPUB 脚注弹窗，不触发翻页）/ Plain body tap (still triggers EPUB footnote popups even when tap-to-turn is disabled, without turning pages)
+    PN_APP_TOC, ///< 快捷手势打开目录 / Gesture action: open TOC
+    PN_APP_JUMP, ///< 快捷手势打开进度跳转 / Gesture action: open progress jump
+    PN_APP_BOOKMARK, ///< 快捷手势一键加书签 / Gesture action: quick bookmark
+    PN_APP_DICT_SEARCH, ///< 快捷手势打开手动查词 / Gesture action: open manual dictionary
+    PN_APP_REFRESH, ///< 快捷手势立即整屏刷新 / Gesture action: full GC16 refresh
+    PN_APP_AUTO_TURN, ///< 快捷手势开关自动翻页 / Gesture action: toggle auto page-turn
+    PN_APP_HIGHLIGHT ///< 长按正文按句高亮摘录（或取消摘录）/ Long-press sentence highlight toggle
 } pn_reader_action_t;
 typedef pn_status_t (*pn_reader_present_fn)(void *,const pn_frame_t *,pn_refresh_t);
 /// state_dir可空禁用持久化；非空只创建此目录、按内容SHA独立A/B文件。
@@ -161,6 +170,10 @@ pn_status_t pn_reader_app_style_get(const pn_reader_app_t *app,pn_style_t *style
 /// 草稿重排并呈现，保留进入时的源锚点，不保存配置。
 /// Reflow and present a draft at the entry source anchor without saving configuration.
 pn_status_t pn_reader_app_style_preview(pn_reader_app_t *app,const pn_style_t *style,uint64_t now,pn_reader_present_fn present,void *ctx);
+/// 原锚点草稿重排并在同一帧上叠画底部半屏微调卡，零额外帧缓存。/ Reflow a draft at the entry anchor and paint a bottom half-sheet onto the same frame without extra framebuffers.
+pn_status_t pn_reader_app_style_preview_sheet(pn_reader_app_t *app,const pn_style_t *style,pn_reader_overlay_fn sheet,void *sheet_ctx,uint64_t now,pn_reader_present_fn present,void *ctx);
+/// 状态栏高度变化后按当前样式重新计算正文区域并重绘。/ Recompute the body viewport and repaint after status-bar inset changes.
+pn_status_t pn_reader_app_relayout_chrome(pn_reader_app_t *app,uint64_t now,pn_reader_present_fn present,void *ctx);
 /// 成功呈现后同步保存；失败保留应用意图供重试。
 /// Save synchronously after successful presentation; retain apply intent on failure for retry.
 pn_status_t pn_reader_app_style_apply(pn_reader_app_t *app,const pn_style_t *style,uint64_t now,pn_reader_present_fn present,void *ctx);
@@ -250,3 +263,14 @@ bool pn_reader_app_bars_hidden(const pn_reader_app_t *);
 /// 提取当前可见页屏幕坐标 (x,y) 附近的查词候选词列表；未命中文字时返回 PN_EMPTY。
 /// Extract dictionary lookup candidates near screen coordinate (x,y) on the current visible page; returns PN_EMPTY when no text is hit.
 pn_status_t pn_reader_app_word_at(pn_reader_app_t *app,int x,int y,char out[][PN_DICT_WORD_MAX],size_t max_out,size_t *count_out);
+/// 查询屏幕坐标 (x,y) 所在整句是否已高亮摘录。/ Query whether the sentence at screen (x,y) is currently highlighted.
+pn_status_t pn_reader_app_highlight_at(pn_reader_app_t *app,int x,int y,bool *highlighted);
+/// 切换屏幕坐标 (x,y) 所在整句的高亮摘录状态；present 非空时立即重绘当前页。
+/// Toggle sentence highlight at screen (x,y); repaints immediately when present != NULL.
+pn_status_t pn_reader_app_highlight_toggle(pn_reader_app_t *app,int x,int y,uint64_t now,pn_reader_present_fn present,void *ctx,bool *added,char *excerpt,size_t excerpt_cap);
+/// 分页列出本书有效摘录。/ Page live highlights for this book.
+pn_status_t pn_reader_app_highlight_list(pn_reader_app_t *app,uint64_t after,pn_highlight_t *items,size_t capacity,size_t *count,bool *more);
+/// 删除指定 ID 摘录并刷新缓存。/ Delete a highlight by ID and refresh render cache.
+pn_status_t pn_reader_app_highlight_delete(pn_reader_app_t *app,uint64_t id);
+/// 跳转到指定摘录位置并保留返回锚点。/ Jump to a highlight's position while preserving the return anchor.
+pn_status_t pn_reader_app_highlight_jump(pn_reader_app_t *app,uint64_t id,uint64_t now,pn_reader_present_fn present,void *ctx);

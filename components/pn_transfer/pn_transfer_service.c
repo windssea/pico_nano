@@ -225,6 +225,9 @@ pn_status_t pn_transfer_service_open(pn_transfer_service_t *out,pn_pool_t *pool,
  pn_status_t status=create_port(s,NULL);
  if(status==PN_OK)status=close_current(s);
  if(status!=PN_OK){pn_free(s);return status;}
+ // 启动时顺手清理已终结的旧上传日志，不碰未完成会话以便跨会话续传。
+ // Sweep terminal completed/cancelled upload journals on open while keeping incomplete sessions resumable.
+ (void)pn_upload_files_prune(s->media,s->pool,&s->options,false,NULL);
  out->impl=s;return PN_OK;
 }
 pn_status_t pn_transfer_service_execute(pn_transfer_service_t *out,const pn_transfer_command_t *command,pn_transfer_reply_t *reply){
@@ -248,6 +251,16 @@ pn_status_t pn_transfer_service_execute(pn_transfer_service_t *out,const pn_tran
   status=close_current(s);
   if(status==PN_OK)status=create_port(s,command);
   if(status==PN_OK)status=pn_upload_begin(&s->upload,s->pool,s->media,&s->port,&command->request);
+  // 若旧的未完成/孤立残余占满8个配额槽、预留空间或日志损坏，自动回收非安装态残余后重试一次。
+  // If stale incomplete/orphan records exhaust the 8-slot quota, reserved space, or leave corrupt journals, reclaim non-installing leftovers and retry once.
+  if(status==PN_LIMIT || status==PN_CORRUPT){
+   (void)close_current(s);
+   unsigned reclaimed=0;
+   if(pn_upload_files_prune(s->media,s->pool,&s->options,true,&reclaimed)==PN_OK && reclaimed){
+    status=create_port(s,command);
+    if(status==PN_OK)status=pn_upload_begin(&s->upload,s->pool,s->media,&s->port,&command->request);
+   }
+  }
   if(status!=PN_OK){(void)close_current(s);return status;}
   if(stream){
    status=snapshot(s,reply);
