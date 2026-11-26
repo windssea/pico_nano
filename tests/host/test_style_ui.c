@@ -20,15 +20,16 @@ int main(void){char root[]="/tmp/pn-style-ui-XXXXXX";assert(mkdtemp(root));char 
     screen.fail=true;assert(pn_style_ui_open(&ui,&app,present,&screen)==PN_IO && !ui.presented);
     assert(pn_style_ui_event(&ui,PN_SUI_APPLY,2,present,&screen)==PN_BUSY && ui.active);
     screen.fail=false;screen.capture=true;assert(pn_style_ui_event(&ui,PN_SUI_RETRY,2,present,&screen)==PN_OK && ui.presented);
-    /* 十一项（含字重、清晰度）六行双列在一页可达，标签与列间隙不误触。/ All eleven two-column fields including weight and sharpness are reachable on one page in six rows, without label/gutter hits. */
-    {static const unsigned rows[11]={0,1,2,5,3,4,9,10,6,8,7};
-     for(unsigned i=0;i<11;i++){if(rows[i]==3)continue;int hit=pn_style_ui_hit(&ui,i%2?620:300,558+(int)(i/2)*88);assert(hit==PN_SUI_FIELD+(int)rows[i]*2+1);assert(pn_style_ui_event(&ui,hit,2,present,&screen)==PN_OK && !ui.more);}}
-    for(unsigned i=0;i<2;i++){int hit=pn_style_ui_hit(&ui,60,734);assert(hit==PN_SUI_FIELD+6);assert(pn_style_ui_event(&ui,hit,2,present,&screen)==PN_OK);}
-    assert(pn_style_ui_hit(&ui,340,610)==-1 && pn_style_ui_hit(&ui,100,560)==-1);
-    assert(pn_style_ui_hit(&ui,300,200)==PN_SUI_PREVIEW && pn_style_ui_hit(&ui,500,1000)==PN_SUI_BACKGROUND && pn_style_ui_hit(&ui,100,480)==PN_SUI_FONTS && pn_style_ui_hit(&ui,100,60)==PN_SUI_CANCEL && pn_style_ui_hit(&ui,600,90)==PN_SUI_RESET && pn_style_ui_hit(&ui,150,1150)==PN_SUI_USE_GLOBAL && pn_style_ui_hit(&ui,300,1150)==PN_SUI_APPLY);
+    /* 去重后十项五行双列在一页可达（前四行八项步进，第五行左背景、右章节标题），标签与列间隙不误触。
+     * Deduplicated 10 cells in 5 two-column rows (first 4 rows steppers, row 4 left Background / right Chapter Title) without label/gutter hits. */
+    {static const unsigned rows[8]={0,1,2,5,3,4,9,10};
+     for(unsigned i=0;i<8;i++){if(rows[i]==3)continue;int hit=pn_style_ui_hit(&ui,i%2?620:300,564+(int)(i/2)*96);assert(hit==PN_SUI_FIELD+(int)rows[i]*2+1);assert(pn_style_ui_event(&ui,hit,2,present,&screen)==PN_OK && !ui.more);}}
+    for(unsigned i=0;i<2;i++){int hit=pn_style_ui_hit(&ui,60,756);assert(hit==PN_SUI_FIELD+6);assert(pn_style_ui_event(&ui,hit,2,present,&screen)==PN_OK);}
+    assert(pn_style_ui_hit(&ui,340,610)==-1 && pn_style_ui_hit(&ui,100,540)==-1);
+    assert(pn_style_ui_hit(&ui,300,200)==PN_SUI_PREVIEW && pn_style_ui_hit(&ui,180,950)==PN_SUI_BACKGROUND && pn_style_ui_hit(&ui,500,950)==PN_SUI_CHAPTER && pn_style_ui_hit(&ui,100,480)==PN_SUI_FONTS && pn_style_ui_hit(&ui,100,60)==PN_SUI_CANCEL && pn_style_ui_hit(&ui,600,90)==PN_SUI_RESET && pn_style_ui_hit(&ui,150,1150)==PN_SUI_USE_GLOBAL && pn_style_ui_hit(&ui,300,1150)==PN_SUI_APPLY);
     assert(pn_style_ui_event(&ui,PN_SUI_MORE,2,present,&screen)==PN_OK && !ui.more && pn_style_ui_hit(&ui,100,60)==PN_SUI_CANCEL);
     assert(pn_style_ui_event(&ui,PN_SUI_BACK_MAIN,2,present,&screen)==PN_OK && !ui.more);
-    assert(ui.draft.pixels==46 && ui.draft.line_percent==150 && ui.draft.gap_percent==45 && ui.draft.indent_em==0 && ui.draft.margin==48 && ui.draft.gl_before_clear==12 && ui.draft.tracking_percent==5 && ui.draft.reading_line==1 && ui.draft.reading_line_offset==2 && ui.draft.reading_line_shade==2 && ui.draft.weight==1 && ui.draft.clarity==1);
+    assert(ui.draft.pixels==46 && ui.draft.line_percent==150 && ui.draft.gap_percent==45 && ui.draft.indent_em==0 && ui.draft.margin==48 && ui.draft.gl_before_clear==12 && ui.draft.tracking_percent==5 && ui.draft.weight==1 && ui.draft.clarity==1);
     /* 档位项首尾循环：清晰度从黑白再右切回到标准，再左切回黑白；字重从细左切到特粗；数值项字号到上限仍停住。
      * Option fields wrap: sharpness steps right from black-and-white back to standard and left again to black-and-white; weight steps left from light to heaviest; numeric size still stops at its limit. */
     {pn_style_t keep=ui.draft;ui.draft.clarity=3;assert(pn_style_ui_event(&ui,PN_SUI_FIELD+10*2+1,2,present,&screen)==PN_OK && ui.draft.clarity==0);
@@ -63,9 +64,12 @@ int main(void){char root[]="/tmp/pn-style-ui-XXXXXX";assert(mkdtemp(root));char 
      * Bar-less toggle, 4-side body margins and reading-background margins sub-page (reachable from both the Margin cell and Background gallery). */
     assert(pn_style_ui_hit(&ui,500,1050)==PN_SUI_TOGGLE_BARS && !ui.draft.hide_bars);
     assert(pn_style_ui_event(&ui,PN_SUI_TOGGLE_BARS,2,present,&screen)==PN_OK && ui.draft.hide_bars==1);
-    assert(pn_style_ui_hit(&ui,490,646)==PN_SUI_MARGINS);
-    /* 阅读线保留子页入口，上下位置不再重复跳转章节子页。/ Reading Line keeps the sub-page entry; Vertical Position no longer duplicates the chapter sub-page entry. */
-    assert(pn_style_ui_hit(&ui,180,910)==PN_SUI_CHAPTER && pn_style_ui_hit(&ui,180,998)==-1);
+    assert(pn_style_ui_hit(&ui,490,640)==PN_SUI_MARGINS);
+    /* 第 4 行右格直达「章节标题」子页，子页不再重复阅读线两行。/ Row 4 right opens the Chapter Title sub-page directly, without duplicate reading-line rows. */
+    assert(pn_style_ui_hit(&ui,500,950)==PN_SUI_CHAPTER && pn_style_ui_event(&ui,PN_SUI_CHAPTER,2,present,&screen)==PN_OK && ui.chapter_page);
+    assert(pn_style_ui_hit(&ui,280,410)==PN_SUI_CHAPTER_ADJ+5 && pn_style_ui_event(&ui,PN_SUI_CHAPTER_ADJ+5,2,present,&screen)==PN_OK && ui.draft.chapter_scale_percent==130);
+    assert(pn_style_ui_event(&ui,PN_SUI_CHAPTER_RESET,2,present,&screen)==PN_OK && ui.draft.chapter_scale_percent==0);
+    assert(pn_style_ui_event(&ui,PN_SUI_CHAPTER_BACK,2,present,&screen)==PN_OK && !ui.chapter_page);
     assert(pn_style_ui_event(&ui,PN_SUI_MARGINS,2,present,&screen)==PN_OK && ui.margins && !ui.margins_from_bg);
     assert(pn_style_ui_hit(&ui,100,60)==PN_SUI_MARGINS_BACK && pn_style_ui_hit(&ui,600,90)==PN_SUI_MARGINS_RESET && pn_style_ui_hit(&ui,300,440)==PN_SUI_TOGGLE_BARS);
     /* 放大后的 108x108 边距详调命中区覆盖卡片全高，便于手指点击。/ Enlarged 108x108 margin stepper hit targets cover the full stepper row height. */

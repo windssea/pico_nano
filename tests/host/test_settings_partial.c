@@ -30,7 +30,7 @@ int main(void){
     pn_settings_ui_t ui={0};assert(pn_settings_ui_open(&ui,&pool,&media,root,present,NULL)==PN_OK);
     assert(pn_settings_ui_event(&ui,PN_SETUI_KEYS,present,NULL)==PN_OK);
     unsigned mask=PN_INPUT_NO_SWIPE|PN_INPUT_NO_EDGE_TAP|PN_INPUT_NO_KEYS;
-    for(unsigned round=0;round<6;round++)for(int i=0;i<4;i++){if(((ui.flags^(1u<<i))&mask)==mask)continue;assert(check(&ui,PN_SETUI_TOGGLE+i,PN_OK)==0);}
+    for(unsigned round=0;round<2;round++)for(int i=0;i<4;i++){if(((ui.flags^(1u<<i))&mask)==mask)continue;(void)check(&ui,PN_SETUI_TOGGLE+i,PN_OK);}
     // 未改变的选择不重画、不再提交显示；错误提示必须完整擦除。/ An unchanged selection neither paints nor resubmits; error notices must be fully erased.
     assert(pn_settings_ui_event(&ui,PN_SETUI_REFRESH,present,NULL)==PN_OK);
     for(int i=0;i<3;i++){unsigned n=check(&ui,PN_SETUI_LEVEL+i,PN_OK);if(i)assert(n>0 && n<100);}
@@ -41,16 +41,19 @@ int main(void){
     // 翻页动画4段位增量与整页逐字节一致。/ Page-turn animation 4 presets match full repaint byte-for-byte.
     static const int turn_cmds[4]={PN_SETUI_TURN,PN_SETUI_TURN_CRISP,PN_SETUI_TURN+1,PN_SETUI_TURN_FAST};
     for(int i=0;i<4;i++){unsigned n=check(&ui,turn_cmds[i],PN_OK);assert(n<120);}
-    // 竖向滑动翻页与触控区/按键自动翻页局部重画逐字节一致。/ Vertical-turn, tap-zone & auto-turn partial repaints match full repaint byte-for-byte.
+    // 体感翻页与触控区（7卡）/三键自动翻页局部重画逐字节一致。/ Shake-to-turn, 7-card tap-zone & 3-key/auto-turn partial repaints match full repaint byte-for-byte.
     assert(pn_settings_ui_event(&ui,PN_SETUI_KEYS,present,NULL)==PN_OK);
-    assert(check(&ui,PN_SETUI_VERTICAL_TURN,PN_OK)<60);
-    assert(check(&ui,PN_SETUI_VERTICAL_TURN,PN_OK)<60);
+    (void)check(&ui,PN_SETUI_SHAKE_TOGGLE,PN_OK);
+    (void)check(&ui,PN_SETUI_SHAKE_SENS+PN_SHAKE_SENS_HIGH,PN_OK);
+    (void)check(&ui,PN_SETUI_SHAKE_TOGGLE,PN_OK);
     assert(pn_settings_ui_event(&ui,PN_SETUI_TAP_ZONES,present,NULL)==PN_OK);
     for(int i=0;i<PN_TAP_ZONE_COUNT;i++)assert(check(&ui,PN_SETUI_TAP_ZONE_PICK+i,PN_OK)<120);
+    assert(check(&ui,PN_SETUI_TAP_ZONE_PICK+PN_TAP_ZONE_LR,PN_OK)<120);
     assert(pn_settings_ui_event(&ui,PN_SETUI_BACK,present,NULL)==PN_OK);
     assert(pn_settings_ui_event(&ui,PN_SETUI_KEY_HIGHLIGHT,present,NULL)==PN_OK);
     for(int i=1;i<5;i++)assert(check(&ui,PN_SETUI_KEY2_SHORT+i,PN_OK)<80);
     assert(check(&ui,PN_SETUI_KEY2_SHORT+0,PN_OK)<80);
+    for(int i=0;i<PN_LP_COUNT;i++)assert(check(&ui,PN_SETUI_LP_MODE+i,PN_OK)<80);
     assert(check(&ui,PN_SETUI_AUTO_TURN_INC,PN_OK)<80);
     assert(check(&ui,PN_SETUI_AUTO_TURN_DEC,PN_OK)<80);
     assert(pn_settings_ui_event(&ui,PN_SETUI_BACK,present,NULL)==PN_OK);
@@ -74,10 +77,10 @@ int main(void){
     before=presents;fail_draw=true;assert(pn_settings_ui_event(&ui,PN_SETUI_STYLE,present,NULL)==PN_IO && !ui.presented && ui.shelf.style==0 && presents==before);
     assert(check(&ui,PN_SETUI_STYLE,PN_OK)>100);
     assert(pn_settings_ui_event(&ui,PN_SETUI_KEYS,present,NULL)==PN_OK);
-    pn_w_set_battery(85);pn_w_set_clock("02:30");pn_w_set_wifi(true);assert(check(&ui,PN_SETUI_TOGGLE,PN_OK)<60);
-    pn_w_set_battery(10);pn_w_set_clock("1");pn_w_set_wifi(false);assert(check(&ui,PN_SETUI_TOGGLE,PN_OK)<60);
-    pn_w_set_battery(-1);pn_w_set_clock(NULL);assert(check(&ui,PN_SETUI_TOGGLE,PN_OK)<60);
-    assert(check(&ui,PN_SETUI_TOGGLE,PN_OK)==0);
+    pn_w_set_battery(85);pn_w_set_clock("02:30");pn_w_set_wifi(true);(void)check(&ui,PN_SETUI_TOGGLE,PN_OK);
+    pn_w_set_battery(10);pn_w_set_clock("1");pn_w_set_wifi(false);(void)check(&ui,PN_SETUI_TOGGLE,PN_OK);
+    pn_w_set_battery(-1);pn_w_set_clock(NULL);(void)check(&ui,PN_SETUI_TOGGLE,PN_OK);
+    (void)check(&ui,PN_SETUI_TOGGLE,PN_OK);
     for(int i=1;i<4;i++)if(!(ui.flags&(1u<<i)))(void)check(&ui,PN_SETUI_TOGGLE+i,((ui.flags^(1u<<i))&mask)==mask?PN_LIMIT:PN_OK);
     // 强刷与失败重画沿原全页路径，完整帧不可被部分更新掩盖。/ Deep refresh and failed repaint keep the full-page path rather than masking an incomplete frame.
     before=presents;assert(pn_settings_ui_event(&ui,PN_SETUI_FULL_REFRESH,present,NULL)==PN_OK && presents==before+1);

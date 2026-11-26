@@ -111,9 +111,11 @@ int main(void){
  assert(up_samples==2 && command==PN_SHELF_NEXT && !gesture.down);atomic_store(&count,0);atomic_store(&touch_ending,false);vTaskDelay(30);
  pn_device_async_view(&p,15,true,0);vTaskDelay(30);while(pn_device_async_take(&p,&e)!=PN_EMPTY){}
  // 关闭三键翻页仍保留中键工具，左右键不发阅读动作。/ Disabling key turns retains middle-key tools and suppresses left/right reader keys.
- pn_device_async_view(&p,15,true,PN_INPUT_NO_KEYS);atomic_store(&x,240);atomic_store(&y,1300);atomic_store(&count,1);vTaskDelay(35);atomic_store(&count,0);bool middle=false;end=ms()+1000;
+ {pn_gesture_prefs_t off_k=pn_gesture_prefs_default();off_k.key_map=PN_KEY_MAP_OFF;pn_device_async_gestures(&p,&off_k);}
+ pn_device_async_view(&p,15,true,0);atomic_store(&x,240);atomic_store(&y,1300);atomic_store(&count,1);vTaskDelay(35);atomic_store(&count,0);bool middle=false;end=ms()+1000;
  while(ms()<end && !middle){if(pn_device_async_take(&p,&e)==PN_OK && e.kind==PN_DASYNC_KEY){assert(e.key==PN_KEY_2 && e.key_event==PN_KEY_SHORT);middle=true;}else vTaskDelay(1);}assert(middle);
  atomic_store(&x,80);atomic_store(&count,1);vTaskDelay(35);atomic_store(&count,0);vTaskDelay(40);while(pn_device_async_take(&p,&e)!=PN_EMPTY)assert(e.kind!=PN_DASYNC_KEY || e.key!=PN_KEY_1);
+ {pn_gesture_prefs_t def_k=pn_gesture_prefs_default();pn_device_async_gestures(&p,&def_k);}
  assert(pn_device_async_peripherals(&p,true)==PN_BUSY);
  assert(pn_device_async_pause(&p,true));unsigned reads=atomic_load(&touch_reads);vTaskDelay(25);assert(atomic_load(&touch_reads)==reads);
  assert(pn_device_async_peripherals(&p,true)==PN_OK && atomic_load(&peripheral_parks)==1);

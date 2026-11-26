@@ -455,35 +455,34 @@ pn_status_t pn_shelf_render_ex(const pn_catalog_page_t *page,pn_font_t *font,pn_
     int original=font->pixels;pn_frame_clear(frame,PN_UI_PAPER);
     if(options->entertainment)home_ornament(frame);
     pn_status_t s=pn_w_status(font,frame);
-    // 标题行：书库标题 + 显性“A–Z”首字母索引徽章 + 快速排序胶囊 + 右侧柔和搜索按钮。
-    // Title row: Library heading + visible "A–Z" index pill + quick-sort pill + soft search button on the right.
+    // 标题行：书库标题 + 统一高度（44px）的「A–Z」「排序」「摘录」「搜索」四枚柔和胶囊。
+    // Title row: Library heading + four uniform-height (44 px) soft fog pills: A–Z, Sort, Excerpts, Search.
     if(s==PN_OK)s=pn_font_size(font,40);
     if(s==PN_OK)s=pn_w_text_ex(font,frame,options->query && !options->entertainment?"搜索结果":"书库",32,120,260,PN_ALIGN_LEFT,PN_UI_INK,true);
     if(s==PN_OK && !options->entertainment && !recent && !options->favorites && !options->query){
-        pn_w_round_fill(frame,130,84,84,38,14,PN_UI_SURFACE);
-        pn_w_round_stroke(frame,130,84,84,38,14,1.0f,10);
-        s=pn_font_size(font,20);
-        if(s==PN_OK)s=pn_w_text_ex(font,frame,"A–Z",130,110,84,PN_ALIGN_CENTER,4,true);
+        pn_w_round_fill(frame,130,80,84,44,14,PN_UI_SURFACE);
+        pn_w_round_stroke(frame,130,80,84,44,14,1.25f,9);
+        s=pn_font_size(font,22);
+        if(s==PN_OK)s=pn_w_text_ex(font,frame,"A–Z",130,110,84,PN_ALIGN_CENTER,PN_UI_INK,true);
         const char *short_sort=options->sort==PN_SHELF_SORT_ADDED?"按添加":options->sort==PN_SHELF_SORT_RECENT?"按最近":"按书名";
-        pn_w_round_fill(frame,224,84,132,38,14,PN_UI_SURFACE);
-        pn_w_round_stroke(frame,224,84,132,38,14,1.0f,10);
-        if(s==PN_OK)s=pn_w_text_ex(font,frame,short_sort,232,110,94,PN_ALIGN_CENTER,PN_UI_INK,true);
+        pn_w_round_fill(frame,224,80,140,44,14,PN_UI_SURFACE);
+        pn_w_round_stroke(frame,224,80,140,44,14,1.25f,9);
+        if(s==PN_OK)s=pn_w_text_ex(font,frame,short_sort,232,110,100,PN_ALIGN_CENTER,PN_UI_INK,true);
         // 像素级下拉三角图标，避免字体缺失 ▾ 字符显示方框。/ Pixel-drawn downward caret so missing U+25BE glyphs never show tofu boxes.
-        for(int d=0;d<5;d++)pn_frame_rect(frame,330+d,101+d,10-2*d,1,4);
+        for(int d=0;d<5;d++)pn_frame_rect(frame,338+d,100+d,10-2*d,1,4);
     }
-    // 标题行「摘录」入口按钮，与右侧「搜索」保持统一柔和雾面风格。/ Library header "Excerpts" pill matching the soft fog surface style of "Search".
+    // 标题行「摘录」与「搜索」入口按钮，与前两枚胶囊完全同高同字号。/ Library header "Excerpts" & "Search" pills matching height and font size with A–Z / Sort.
     if(s==PN_OK && !options->entertainment){
-        pn_w_round_fill(frame,376,76,132,52,16,PN_UI_SURFACE);
-        pn_w_round_stroke(frame,376,76,132,52,16,1.5f,9);
-        pn_w_icon(frame,PN_ICON_LIST,392,89,26,PN_UI_INK);
-        s=pn_font_size(font,24);if(s==PN_OK)s=pn_w_text_ex(font,frame,"摘录",422,111,76,PN_ALIGN_CENTER,PN_UI_INK,true);
+        pn_w_round_fill(frame,376,80,132,44,14,PN_UI_SURFACE);
+        pn_w_round_stroke(frame,376,80,132,44,14,1.25f,9);
+        pn_w_icon(frame,PN_ICON_LIST,392,91,22,PN_UI_INK);
+        s=pn_font_size(font,22);if(s==PN_OK)s=pn_w_text_ex(font,frame,"摘录",420,110,76,PN_ALIGN_CENTER,PN_UI_INK,true);
     }
-    // 标题行右侧恢复搜索入口（已过滤时显示“清除”）。/ Restore the search button on the right of the title row ("Clear" while filtered).
     if(s==PN_OK && !options->entertainment && options->search){
-        pn_w_round_fill(frame,520,76,132,52,16,PN_UI_SURFACE);
-        pn_w_round_stroke(frame,520,76,132,52,16,1.5f,9);
-        pn_w_icon(frame,PN_ICON_SEARCH,536,88,28,PN_UI_INK);
-        s=pn_font_size(font,24);if(s==PN_OK)s=pn_w_text_ex(font,frame,options->query?"清除":"搜索",568,111,76,PN_ALIGN_CENTER,PN_UI_INK,true);
+        pn_w_round_fill(frame,520,80,132,44,14,PN_UI_SURFACE);
+        pn_w_round_stroke(frame,520,80,132,44,14,1.25f,9);
+        pn_w_icon(frame,PN_ICON_SEARCH,536,90,24,PN_UI_INK);
+        s=pn_font_size(font,22);if(s==PN_OK)s=pn_w_text_ex(font,frame,options->query?"清除":"搜索",566,110,76,PN_ALIGN_CENTER,PN_UI_INK,true);
     }
 
 

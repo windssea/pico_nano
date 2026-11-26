@@ -73,9 +73,9 @@ int main(int argc,char **argv){
     assert(pn_settings_ui_event(&ui,PN_SETUI_GSTYLE_IMAGES,present,NULL)==PN_OK && pn_settings_ui_event(&ui,PN_SETUI_GSTYLE_ADJ+15,present,NULL)==PN_OK && pn_settings_ui_event(&ui,PN_SETUI_GSTYLE_EXT+1,present,NULL)==PN_OK);
     assert(pn_settings_ui_event(&ui,PN_SETUI_GSTYLE_MARGINS,present,NULL)==PN_OK && pn_settings_ui_event(&ui,PN_SETUI_GSTYLE_MADJ+1,present,NULL)==PN_OK && pn_settings_ui_event(&ui,PN_SETUI_BACK,present,NULL)==PN_OK);
     assert(pn_settings_ui_event(&ui,PN_SETUI_GSTYLE_BG,present,NULL)==PN_OK && pn_settings_ui_event(&ui,PN_SETUI_GSTYLE_BG_ITEM+2,present,NULL)==PN_OK);
-    // 负字间距与“全局阅读线与章节”子页立即持久化。/ Negative tracking and global reading-guide & chapter sub-page save immediately.
+    // 负字间距与“默认阅读线与章节”子页（可从第4行右格「章节标题」或底部「默认阅读线」双入口进入）立即持久化。/ Negative tracking and global reading-guide & chapter sub-page save immediately.
     assert(pn_settings_ui_event(&ui,PN_SETUI_GSTYLE_ADJ+10,present,NULL)==PN_OK);
-    assert(pn_settings_ui_hit(&ui,200,1010)==PN_SETUI_GSTYLE_CHAPTER);
+    assert(pn_settings_ui_hit(&ui,500,780)==PN_SETUI_GSTYLE_CHAPTER && pn_settings_ui_hit(&ui,200,980)==PN_SETUI_GSTYLE_CHAPTER && pn_settings_ui_hit(&ui,500,980)==PN_SETUI_STATUS_BAR);
     assert(pn_settings_ui_event(&ui,PN_SETUI_GSTYLE_CHAPTER,present,NULL)==PN_OK && pn_settings_ui_event(&ui,PN_SETUI_GSTYLE_CADJ+1,present,NULL)==PN_OK && pn_settings_ui_event(&ui,PN_SETUI_GSTYLE_CADJ+3,present,NULL)==PN_OK && pn_settings_ui_event(&ui,PN_SETUI_GSTYLE_CADJ+5,present,NULL)==PN_OK && pn_settings_ui_event(&ui,PN_SETUI_GSTYLE_CADJ+7,present,NULL)==PN_OK && pn_settings_ui_event(&ui,PN_SETUI_GSTYLE_CADJ+13,present,NULL)==PN_OK && pn_settings_ui_event(&ui,PN_SETUI_BACK,present,NULL)==PN_OK);
     {pn_style_t gs={0};assert(pn_style_global_load(&media,root,&gs)==PN_OK && gs.pixels==46 && gs.tracking_percent==-5 && gs.reading_line_follow==1 && gs.reading_line_thickness_extra==1 && gs.chapter_scale_percent==130 && gs.chapter_align==1 && gs.footer_title_mode==1 && gs.hide_bars==1 && gs.hide_images==1 && gs.clarity==1 && gs.reading_line==1 && gs.margin_top==4 && gs.background==7);}
     assert(pn_settings_ui_event(&ui,PN_SETUI_GSTYLE_RESET,present,NULL)==PN_OK);
@@ -149,8 +149,24 @@ int main(int argc,char **argv){
      assert(pn_settings_ui_event(&ui,PN_SETUI_TIME_CANCEL,present,NULL)==PN_OK && ui.request==PN_SETUI_TIME_CANCEL);ui.request=0;
      assert(pn_settings_ui_event(&ui,PN_SETUI_BACK,present,NULL)==PN_OK && pn_settings_ui_screen(&ui)==3);
      assert(pn_settings_ui_event(&ui,PN_SETUI_BACK,present,NULL)==PN_OK && pn_settings_ui_screen(&ui)==0);}
-    /* 按键与手势：四个翻页开关与上下翻页模式。/ Keys and gestures: the four page-turn switches and vertical page-turn mode. */
-    assert(pn_settings_ui_event(&ui,PN_SETUI_KEYS,present,NULL)==PN_OK && pn_settings_ui_screen(&ui)==1 && pn_settings_ui_hit(&ui,100,680)==PN_SETUI_TOGGLE && pn_settings_ui_hit(&ui,100,1000)==PN_SETUI_TOGGLE+3 && pn_settings_ui_hit(&ui,100,1100)==PN_SETUI_VERTICAL_TURN && pn_settings_ui_hit(&ui,100,1160)==-1);
+    /* 按键与手势：三张可视化入口卡 + 体感翻页开关与灵敏度（旧开关入口已移出，保留旧命令兼容与全关保护）。
+     * Keys and gestures: 3 visual entry cards + shake-to-turn switch/sensitivity (redundant legacy toggles removed from UI while keeping command compat & not-all-off guard). */
+    assert(pn_settings_ui_event(&ui,PN_SETUI_KEYS,present,NULL)==PN_OK && pn_settings_ui_screen(&ui)==1);
+    assert(pn_settings_ui_hit(&ui,200,390)==PN_SETUI_GESTURES && pn_settings_ui_hit(&ui,200,480)==PN_SETUI_TAP_ZONES && pn_settings_ui_hit(&ui,200,570)==PN_SETUI_KEY_HIGHLIGHT);
+    assert(pn_settings_ui_hit(&ui,200,710)==PN_SETUI_SHAKE_TOGGLE && pn_settings_ui_hit(&ui,100,870)==PN_SETUI_SHAKE_SENS && pn_settings_ui_hit(&ui,340,870)==PN_SETUI_SHAKE_SENS+1 && pn_settings_ui_hit(&ui,560,870)==PN_SETUI_SHAKE_SENS+2);
+    assert(!ui.gestures.shake_turn && ui.gestures.shake_sensitivity==PN_SHAKE_SENS_MED);
+    assert(pn_settings_ui_event(&ui,PN_SETUI_SHAKE_TOGGLE,present,NULL)==PN_OK && ui.gestures.shake_turn==1u);
+    assert(pn_settings_ui_event(&ui,PN_SETUI_SHAKE_SENS+PN_SHAKE_SENS_HIGH,present,NULL)==PN_OK && ui.gestures.shake_sensitivity==PN_SHAKE_SENS_HIGH);
+    {pn_gesture_prefs_t gr={0};assert(pn_settings_load_gestures(&media,root,&gr)==PN_OK && gr.shake_turn==1u && gr.shake_sensitivity==PN_SHAKE_SENS_HIGH);}
+    // 禁止把点按/滑动/三键全部关闭（至少保留一种翻页方式）。/ Refuse disabling tap + swipe + keys all at once.
+    assert(pn_settings_ui_event(&ui,PN_SETUI_TAP_ZONES,present,NULL)==PN_OK && pn_settings_ui_event(&ui,PN_SETUI_TAP_ZONE_PICK+PN_TAP_ZONE_OFF,present,NULL)==PN_OK && ui.gestures.tap_zone==PN_TAP_ZONE_OFF);
+    assert(pn_settings_ui_event(&ui,PN_SETUI_BACK,present,NULL)==PN_OK && pn_settings_ui_event(&ui,PN_SETUI_GESTURES,present,NULL)==PN_OK && pn_settings_ui_event(&ui,PN_SETUI_SWIPE_TURN+PN_SWIPE_TURN_OFF,present,NULL)==PN_OK && ui.gestures.swipe_turn==PN_SWIPE_TURN_OFF);
+    assert(pn_settings_ui_event(&ui,PN_SETUI_BACK,present,NULL)==PN_OK && pn_settings_ui_event(&ui,PN_SETUI_KEY_HIGHLIGHT,present,NULL)==PN_OK);
+    assert(pn_settings_ui_event(&ui,PN_SETUI_KEY_MAP+PN_KEY_MAP_OFF,present,NULL)==PN_LIMIT && ui.gestures.key_map!=PN_KEY_MAP_OFF);
+    assert(pn_settings_ui_event(&ui,PN_SETUI_BACK,present,NULL)==PN_OK);
+    assert(pn_settings_ui_event(&ui,PN_SETUI_TAP_ZONES,present,NULL)==PN_OK && pn_settings_ui_event(&ui,PN_SETUI_TAP_ZONE_PICK+PN_TAP_ZONE_LR,present,NULL)==PN_OK && pn_settings_ui_event(&ui,PN_SETUI_BACK,present,NULL)==PN_OK);
+    assert(pn_settings_ui_event(&ui,PN_SETUI_GESTURES,present,NULL)==PN_OK && pn_settings_ui_event(&ui,PN_SETUI_SWIPE_TURN+PN_SWIPE_TURN_LR,present,NULL)==PN_OK && pn_settings_ui_event(&ui,PN_SETUI_BACK,present,NULL)==PN_OK);
+    assert(pn_settings_ui_event(&ui,PN_SETUI_SHAKE_TOGGLE,present,NULL)==PN_OK && ui.gestures.shake_turn==0u);
     assert(!ui.vertical_turn && pn_settings_ui_event(&ui,PN_SETUI_VERTICAL_TURN,present,NULL)==PN_OK && ui.vertical_turn);
     {bool v=false;assert(pn_settings_load_vertical_turn(&media,root,&v)==PN_OK && v);}
     assert(pn_settings_ui_event(&ui,PN_SETUI_TOGGLE,present,NULL)==PN_OK && ui.flags==PN_INPUT_LEFT_HAND && pn_settings_load_flags(&media,root,&flags)==PN_OK && flags==PN_INPUT_LEFT_HAND);

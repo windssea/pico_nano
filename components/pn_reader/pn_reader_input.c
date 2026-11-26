@@ -54,8 +54,9 @@ static bool match_custom_gesture(const pn_reader_input_t *i,int dx,int dy,pn_rea
         if(i->start_x<84 && map_gesture_action(g->slots[PN_GSLOT_LEFT_EDGE_VERT],out))return true;
         if(i->start_x>=600 && map_gesture_action(g->slots[PN_GSLOT_RIGHT_EDGE_VERT],out))return true;
     }
-    // 屏幕内上滑/下滑（非上下翻页模式下生效）/ Center up/down swipes (active in horizontal turn mode).
-    if(vert && !i->config.vertical_turn){
+    // 屏幕内上滑/下滑（非上下滑动翻页模式下生效）/ Center up/down swipes (active when swipe-turn is not vertical).
+    bool vert_swipe=i->config.use_gestures?(g->swipe_turn==PN_SWIPE_TURN_TB):i->config.vertical_turn;
+    if(vert && !vert_swipe){
         uint8_t act=dy<0?g->slots[PN_GSLOT_SWIPE_UP]:g->slots[PN_GSLOT_SWIPE_DOWN];
         if(map_gesture_action(act,out))return true;
     }
@@ -80,8 +81,9 @@ static bool feed_impl(pn_reader_input_t *i,unsigned count,int x,int y,bool valid
                     if(i->start_y<top_in || i->start_y>=1216-bot_in){submit=false;}
                     else{
                         tap=true;
-                        if(i->config.no_edge_tap){submit=false;}
-                        else if(i->config.use_gestures && !i->config.vertical_turn){
+                        if(i->config.use_gestures){
+                            // 新版统一手势与触控区：7 套可视化触控区直接生效，不再被旧开关覆盖或反转。
+                            // Unified gestures & tap zones: all 7 visual tap-zone layouts apply directly without legacy toggle overrides.
                             switch(i->config.gestures.tap_zone){
                                 case PN_TAP_ZONE_TB:{
                                     int mid_y=top_in+(1216-top_in-bot_in)/2;
@@ -89,7 +91,7 @@ static bool feed_impl(pn_reader_input_t *i,unsigned count,int x,int y,bool valid
                                 }
                                 case PN_TAP_ZONE_THREE_COL:
                                     if(i->start_x>=228 && i->start_x<456)action=PN_APP_TOOLS;
-                                    else action=((i->start_x<228)!=i->config.left_hand)?PN_APP_PREVIOUS:PN_APP_NEXT;
+                                    else action=(i->start_x<228)?PN_APP_PREVIOUS:PN_APP_NEXT;
                                     break;
                                 case PN_TAP_ZONE_ONE_HAND_R:{
                                     int mid_y=top_in+(1216-top_in-bot_in)/2;
@@ -97,20 +99,37 @@ static bool feed_impl(pn_reader_input_t *i,unsigned count,int x,int y,bool valid
                                     else action=i->start_y<mid_y?PN_APP_PREVIOUS:PN_APP_NEXT;
                                     break;
                                 }
+                                case PN_TAP_ZONE_ONE_HAND_L:{
+                                    int mid_y=top_in+(1216-top_in-bot_in)/2;
+                                    if(i->start_x>=456)action=PN_APP_PREVIOUS;
+                                    else action=i->start_y<mid_y?PN_APP_PREVIOUS:PN_APP_NEXT;
+                                    break;
+                                }
                                 case PN_TAP_ZONE_ALL_NEXT:
                                     action=PN_APP_NEXT;break;
-                                default:{
-                                    bool left=i->start_x<342;
-                                    action=(left!=i->config.left_hand)?PN_APP_PREVIOUS:PN_APP_NEXT;break;
-                                }
+                                case PN_TAP_ZONE_OFF:
+                                    submit=false;break;
+                                default:
+                                    action=(i->start_x<342)?PN_APP_PREVIOUS:PN_APP_NEXT;break;
                             }
-                        }else if(i->config.vertical_turn){
+                        }else if(i->config.no_edge_tap){submit=false;}
+                        else if(i->config.vertical_turn){
                             int mid_y=i->config.full_screen?608:588;
                             action=i->start_y<mid_y?PN_APP_PREVIOUS:PN_APP_NEXT;
                         }else{
                             bool left=i->start_x<342;
                             action=(left!=i->config.left_hand)?PN_APP_PREVIOUS:PN_APP_NEXT;
                         }
+                    }
+                }else if(i->config.use_gestures){
+                    uint8_t st=i->config.gestures.swipe_turn;
+                    if(st==PN_SWIPE_TURN_OFF)submit=false;
+                    else if(st==PN_SWIPE_TURN_TB){
+                        if(abs(dy)>=64 && 2*abs(dy)>=3*abs(dx))action=dy<0?PN_APP_NEXT:PN_APP_PREVIOUS;
+                        else submit=false;
+                    }else{
+                        if(abs(dx)>=64 && 2*abs(dx)>=3*abs(dy))action=dx<0?PN_APP_NEXT:PN_APP_PREVIOUS;
+                        else submit=false;
                     }
                 }else if(i->config.vertical_turn){
                     if(abs(dy)>=64 && 2*abs(dy)>=3*abs(dx)){if(i->config.no_swipe)submit=false;else action=dy<0?PN_APP_NEXT:PN_APP_PREVIOUS;}
@@ -137,7 +156,7 @@ static bool feed_impl(pn_reader_input_t *i,unsigned count,int x,int y,bool valid
             int dx=i->last_x-i->start_x,dy=i->last_y-i->start_y;
             if(i->start_y>=top_in && i->start_y<1216-bot_in && abs(dx)<=24 && abs(dy)<=24 && now_ms>=i->down_ms && (now_ms-i->down_ms)>=PN_READER_LONG_PRESS_MS){
                 i->long_fired=true;i->cancelled=true;i->blocked=true;
-                *out=(lp_mode==PN_LP_HIGHLIGHT)?PN_APP_HIGHLIGHT:PN_APP_LOOKUP;return true;
+                *out=(lp_mode==PN_LP_MENU)?PN_APP_LONG_PRESS_MENU:(lp_mode==PN_LP_HIGHLIGHT)?PN_APP_HIGHLIGHT:PN_APP_LOOKUP;return true;
             }
         }
     }

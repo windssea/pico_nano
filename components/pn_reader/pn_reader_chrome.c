@@ -373,6 +373,71 @@ void pn_reader_guide_row(pn_frame_t *frame,unsigned style,unsigned shade,int y){
     if(!frame)return;
     pn_reader_guide_row_ex(frame,style,shade,0,frame->width,y,1,44,false);
 }
+void pn_reader_highlight_span(pn_frame_t *viewport,int x0,int x1,int baseline,int pixels,bool has_bg){
+    if(!viewport || !viewport->pixels || pixels<=0)return;
+    if(x0<0)x0=0;
+    if(x1>viewport->width)x1=viewport->width;
+    int w=x1-x0;
+    if(w<=0)return;
+    int top=baseline-pixels*88/100;
+    int h=pixels+pixels/8;
+    if(has_bg){
+        // 有背景图时相对压暗现有像素，保留纸纹/竹影纹理的同时清晰呈现高亮底色。
+        // Darken existing pixels relative to the background so paper/bamboo texture stays visible inside the highlight band.
+        int y0=top<0?0:top;
+        int y1=top+h>viewport->height?viewport->height:top+h;
+        for(int y=y0;y<y1;y++){
+            for(int x=x0;x<x1;x++){
+                uint8_t px=pn_frame_get(viewport,x,y);
+                uint8_t next=px>7u?(uint8_t)(px-3u):(px>4u?4u:px);
+                if(next!=px)pn_frame_pixel(viewport,x,y,next);
+            }
+        }
+        pn_frame_rect(viewport,x0,baseline+pixels/6,w,2,4);
+    }else{
+        pn_frame_rect(viewport,x0,top,w,h,13);
+        pn_frame_rect(viewport,x0,baseline+pixels/6,w,2,5);
+    }
+}
+static void lp_menu_box(const pn_lp_menu_t *m,int *bx,int *by,int *bw,int *bh){
+    int w=m && m->highlighted?344:312,h=76;
+    int x=(m?m->anchor_x:342)-w/2;
+    if(x<24)x=24;
+    if(x+w>684-24)x=684-24-w;
+    int ay=m?m->anchor_y:608;
+    // 默认弹在手指上方避让点中句子；靠近顶部时自动弹在下方。/ Pop above the finger by default; flip below near the top edge.
+    int y=ay-116;
+    if(y<64)y=ay+44;
+    if(y+h>1216-64)y=1216-64-h;
+    *bx=x;*by=y;*bw=w;*bh=h;
+}
+pn_status_t pn_lp_menu_render(const pn_lp_menu_t *menu,pn_font_t *ui,pn_frame_t *frame){
+    if(!menu || !menu->active || !ui || !ui->impl || !frame || !frame->pixels)return PN_INVALID;
+    int x,y,w,h;lp_menu_box(menu,&x,&y,&w,&h);
+    int left_w=menu->highlighted?192:156,right_w=w-left_w;
+    int original=ui->pixels;
+    // 柔和外阴影 + 白底深描边圆角胶囊，低面积刷新几乎无残影。/ Soft drop shadow + crisp white capsule for low-ghosting local refresh.
+    pn_w_round_fill(frame,x+4,y+4,w,h,18,11);
+    pn_w_round_fill(frame,x,y,w,h,18,PN_UI_PAPER);
+    pn_w_round_stroke(frame,x,y,w,h,18,2.0f,PN_UI_INK);
+    pn_frame_rect(frame,x+left_w,y+16,1,h-32,10);
+    pn_w_icon(frame,PN_ICON_LIST,x+20,y+25,26,PN_UI_INK);
+    pn_status_t s=pn_font_size(ui,26);
+    if(s==PN_OK)s=pn_w_text_ex(ui,frame,menu->highlighted?"取消摘录":"摘录",x+50,y+48,left_w-58,PN_ALIGN_CENTER,PN_UI_INK,true);
+    pn_w_icon(frame,PN_ICON_SEARCH,x+left_w+20,y+24,28,PN_UI_INK);
+    if(s==PN_OK)s=pn_w_text_ex(ui,frame,"查词",x+left_w+52,y+48,right_w-60,PN_ALIGN_CENTER,PN_UI_INK,true);
+    pn_status_t restored=pn_font_size(ui,original);
+    return s==PN_OK?restored:s;
+}
+int pn_lp_menu_hit(const pn_lp_menu_t *menu,int x,int y){
+    if(!menu || !menu->active || x<0 || x>=684 || y<0 || y>=1216)return -1;
+    int bx,by,bw,bh;lp_menu_box(menu,&bx,&by,&bw,&bh);
+    int left_w=menu->highlighted?192:156;
+    if(x>=bx && x<bx+bw && y>=by && y<by+bh){
+        return x<bx+left_w?PN_LPM_EXCERPT:PN_LPM_DICT;
+    }
+    return PN_LPM_DISMISS;
+}
 pn_status_t pn_reader_loading_render(pn_font_t *ui,pn_frame_t *frame,const char *title){
     return pn_reader_loading_render_phase(ui,frame,title,0);
 }

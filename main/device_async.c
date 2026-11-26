@@ -3,6 +3,7 @@
 #include "device_async.h"
 #include "pn_reader_input.h"
 #include "pn_input_prefs.h"
+#include "pn_shake_turn.h"
 #include "pn_profile.h"
 #include "pn_widgets.h"
 #include "read_pico_pmu.h"
@@ -60,8 +61,14 @@ static void send(pn_device_async_t *p,const pn_device_input_event_t *input,bool 
     if(p->product_task)xTaskNotifyGive((TaskHandle_t)p->product_task);}
 static void input_task(void *ctx){
     pn_device_async_t *p=ctx;pn_key_t keys={0};pn_reader_input_t reader={0};unsigned empty=0,old_pause=0;uint64_t last_power=0,last_hold=0;uint32_t old_view=0;int last_x=-1,last_y=-1;bool key_opening=false,key_first=false;
+#if defined(SC7A20H_AXIS_XYZ)
+    pn_shake_turn_t shake={0};uint64_t last_accel=0;bool sensor_awake=false;
+#endif
     for(;;){unsigned request=atomic_load(&p->pause_request);
         if(request!=old_pause){pn_key_cancel(&keys);pn_reader_input_cancel(&reader);empty=0;last_x=last_y=-1;old_pause=request;}
+#if defined(SC7A20H_AXIS_XYZ)
+        if((request&1u) && sensor_awake && p->hardware && p->hardware->sensor){read_pico_sensor_sleep(p->hardware->sensor);sensor_awake=false;}
+#endif
         atomic_store(&p->pause_ack,request);if(request&1u){vTaskDelay(pdMS_TO_TICKS(10));continue;}
         uint64_t now=now_ms();uint32_t view=(uint32_t)atomic_load(&p->input.view);
         if(view!=old_view){pn_key_cancel(&keys);pn_reader_input_cancel(&reader);old_view=view;empty=0;}
@@ -70,6 +77,15 @@ static void input_task(void *ctx){
             const pn_device_async_diag_t *power_diag=atomic_load(&p->diag);if(!power && power_diag && power_diag->power)power=power_diag->power(power_diag->ctx);
 #endif
             if(power){pn_device_input_event_t e={.kind=PN_DASYNC_POWER,.at=now};send(p,&e,true,true);}}
+        pn_gesture_prefs_t gcopy=pn_gesture_prefs_default();
+        for(unsigned tries=0;tries<4;tries++){
+            unsigned s0=atomic_load_explicit(&p->gesture_seq,memory_order_acquire);
+            if(s0&1u)continue;
+            gcopy=p->gestures;
+            unsigned s1=atomic_load_explicit(&p->gesture_seq,memory_order_acquire);
+            if(s0==s1)break;
+        }
+        bool body=atomic_load(&p->body);
         if(p->hardware->touch_ready && view){cst836u_touch_t touch={0};bool ending=false,valid;
 #if PN_DEVICE_TEST_CONSOLE
             // 合成采样替代本次读数，下游三键/手势/导航仍走原逻辑。/ A synthetic sample replaces this read; keys, gestures and navigation downstream stay unchanged.
@@ -81,23 +97,16 @@ static void input_task(void *ctx){
             // 键语义以按下时为准，跨首屏确认的返回不能变成上一页；新右键可暂存一次下一页。 / Latch key semantics at press: Back spanning confirmation never becomes Previous, while a fresh Right can hold one Next.
             if(!keys.down && valid && touch.count==1){key_first=atomic_load(&p->first_reader);key_opening=(view&0xffffu)==18u || key_first;}
             int key=-1;pn_key_event_t ke=pn_key_feed(&keys,touch.count,touch.x,touch.y,valid,now,&key);
-            bool body=atomic_load(&p->body);unsigned flags=atomic_load(&p->flags);
+            unsigned flags=atomic_load(&p->flags);
+            bool keys_enabled=gcopy.key_map!=PN_KEY_MAP_OFF;
             if(key_opening){
                 if(ke==PN_KEY_SHORT && (key==PN_KEY_1 || key==PN_KEY_2)){pn_device_input_event_t e={.kind=PN_DASYNC_OPEN_CANCEL,.at=now,.key=key,.key_event=ke};send(p,&e,true,true);}
-                else if(ke==PN_KEY_SHORT && key==PN_KEY_3 && key_first && !(flags&PN_INPUT_NO_KEYS)){pn_device_input_event_t e={.kind=PN_DASYNC_ACTION,.at=now,.action=PN_APP_NEXT};send(p,&e,true,false);}
-            }else if(ke!=PN_KEY_NONE && (!body || !(flags&PN_INPUT_NO_KEYS) || key==PN_KEY_2)){pn_device_input_event_t e={.kind=PN_DASYNC_KEY,.at=now,.key=key,.key_event=ke};send(p,&e,body || key==PN_KEY_1 || key==PN_KEY_2,key==PN_KEY_2 || (!body && key==PN_KEY_1));}
+                else if(ke==PN_KEY_SHORT && key==PN_KEY_3 && key_first && keys_enabled){pn_device_input_event_t e={.kind=PN_DASYNC_ACTION,.at=now,.action=PN_APP_NEXT};send(p,&e,true,false);}
+            }else if(ke!=PN_KEY_NONE && (!body || keys_enabled || key==PN_KEY_2)){pn_device_input_event_t e={.kind=PN_DASYNC_KEY,.at=now,.key=key,.key_event=ke};send(p,&e,body || key==PN_KEY_1 || key==PN_KEY_2,key==PN_KEY_2 || (!body && key==PN_KEY_1));}
             if(!keys.down){key_opening=false;key_first=false;}
-            pn_gesture_prefs_t gcopy=pn_gesture_prefs_default();
-            for(unsigned tries=0;tries<4;tries++){
-                unsigned s0=atomic_load_explicit(&p->gesture_seq,memory_order_acquire);
-                if(s0&1u)continue;
-                gcopy=p->gestures;
-                unsigned s1=atomic_load_explicit(&p->gesture_seq,memory_order_acquire);
-                if(s0==s1)break;
-            }
             reader.config=(pn_reader_input_config_t){.left_hand=(flags&PN_INPUT_LEFT_HAND)!=0,.no_swipe=(flags&PN_INPUT_NO_SWIPE)!=0,.no_edge_tap=(flags&PN_INPUT_NO_EDGE_TAP)!=0,.no_keys=true,.vertical_turn=atomic_load(&p->vertical_turn),.full_screen=atomic_load(&p->full_screen),.use_gestures=true,.gestures=gcopy};
             pn_reader_action_t action=PN_APP_OPEN;
-            if(atomic_load(&p->body)){
+            if(body){
                 if(pn_reader_input_feed_timed(&reader,touch.count,touch.x,touch.y,valid,now,&action)){
                     pn_device_input_event_t e={.kind=PN_DASYNC_ACTION,.at=now,.x=reader.start_x,.y=reader.start_y,.tap=reader.last_tap,.action=action};
                     bool urgent=(action!=PN_APP_NEXT && action!=PN_APP_PREVIOUS && action!=PN_APP_TAP);
@@ -113,11 +122,42 @@ static void input_task(void *ctx){
             if(touch.count){if(post)last_hold=now;empty=0;}else empty++;
             if(post && (touch.y<PN_KEY_AREA_TOP || !touch.count)){pn_device_input_event_t e={.kind=PN_DASYNC_TOUCH,.at=now,.count=touch.count,.x=touch.x,.y=touch.y,.valid=valid,.ending=ending};send(p,&e,false,false);}
         }
-        // 触摸中、释放确认中或读错时10ms采样；完全空闲时等触摸INT，最多50ms兜底轮询（中断失效时仍可用）。
-        // Sample every 10 ms while touching, confirming release or after read errors; when idle wait for touch INT, polling at most every 50 ms as a fallback if the interrupt fails.
+#if defined(SC7A20H_AXIS_XYZ)
+        // 体感翻页（实验性，默认关闭）：仅在阅读正文且用户显式开启时唤醒 SC7A20H 并以 50 Hz 采样，其余任何时刻保持掉电（~0.5 uA）。
+        // Shake-to-turn (experimental, off by default): wake SC7A20H at 50 Hz only on active reading body when enabled; keep powered down otherwise.
+        bool want_shake=body && view && gcopy.shake_turn!=0 && p->hardware && p->hardware->sensor_ready && p->hardware->sensor!=NULL;
+        if(want_shake){
+            if(!sensor_awake){
+                sc7a20h_sensor_config_t cfg={.odr=SC7A20H_ODR_50,.fs=SC7A20H_FS_4G,.mode=SC7A20H_MODE_NORMAL,.osr=SC7A20H_OSR_OFF,.dlpf=SC7A20H_DLPF_OFF,.hpf=SC7A20H_HPF_OFF,.axis_mask=SC7A20H_AXIS_XYZ};
+                read_pico_sensor_wake(p->hardware->sensor);
+                (void)sc7a20h_apply_config(p->hardware->sensor,&cfg);
+                pn_shake_turn_reset(&shake,now);
+                sensor_awake=true;last_accel=0;
+            }
+            if(!last_accel || now-last_accel>=20u){
+                last_accel=now;
+                sc7a20h_sample_t sample={0};
+                if(read_pico_accel_read(p->hardware->sensor,&sample)==ESP_OK &&
+                   pn_shake_turn_feed(&shake,sample.x_mg,sample.y_mg,sample.z_mg,gcopy.shake_sensitivity,now)){
+                    pn_device_input_event_t e={.kind=PN_DASYNC_ACTION,.at=now,.action=PN_APP_NEXT};
+                    send(p,&e,true,false);
+                }
+            }
+        }else if(sensor_awake && p->hardware && p->hardware->sensor){
+            read_pico_sensor_sleep(p->hardware->sensor);
+            sensor_awake=false;
+        }
+#endif
+        // 触摸中、释放确认中或读错时10ms采样；开启体感翻页时按20ms（50Hz）轮询；完全空闲时等触摸INT，最多50ms兜底轮询。
+        // Sample every 10 ms while touching/settling; 20 ms (50 Hz) when shake-to-turn is awake; otherwise wait for touch INT with 50 ms fallback.
         bool settling=empty<2 || last_x>=0;
         // 浅睡时GPIO边沿不能唤醒，改为30ms定时采样（醒着时边沿中断仍立即唤醒）。/ Edges cannot wake light sleep, so sample on a 30 ms timer (edges still wake at once while awake).
-        if(!settling && p->hardware->touch_ready && view && (p->touch_wake || pn_device_power_light_sleep()))(void)pn_device_touch_wake_wait(pn_device_power_light_sleep()?30u:50u);else vTaskDelay(pdMS_TO_TICKS(10));
+#if defined(SC7A20H_AXIS_XYZ)
+        if(sensor_awake)vTaskDelay(pdMS_TO_TICKS(settling?10u:20u));
+        else
+#endif
+        if(!settling && p->hardware->touch_ready && view && (p->touch_wake || pn_device_power_light_sleep()))(void)pn_device_touch_wake_wait(pn_device_power_light_sleep()?30u:50u);
+        else vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
 #endif

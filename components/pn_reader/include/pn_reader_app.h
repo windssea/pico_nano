@@ -73,7 +73,8 @@ typedef enum {
     PN_APP_DICT_SEARCH, ///< 快捷手势打开手动查词 / Gesture action: open manual dictionary
     PN_APP_REFRESH, ///< 快捷手势立即整屏刷新 / Gesture action: full GC16 refresh
     PN_APP_AUTO_TURN, ///< 快捷手势开关自动翻页 / Gesture action: toggle auto page-turn
-    PN_APP_HIGHLIGHT ///< 长按正文按句高亮摘录（或取消摘录）/ Long-press sentence highlight toggle
+    PN_APP_HIGHLIGHT, ///< 长按正文按句高亮摘录（或取消摘录）/ Long-press sentence highlight toggle
+    PN_APP_LONG_PRESS_MENU ///< 长按正文呼出双选浮条（摘录 | 查词）/ Long-press dual action pill (Excerpt | Dictionary)
 } pn_reader_action_t;
 typedef pn_status_t (*pn_reader_present_fn)(void *,const pn_frame_t *,pn_refresh_t);
 /// state_dir可空禁用持久化；非空只创建此目录、按内容SHA独立A/B文件。

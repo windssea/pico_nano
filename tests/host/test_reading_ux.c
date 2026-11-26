@@ -16,6 +16,7 @@
 #include "pn_menu_cache.h"
 #include "pn_reader_chrome.h"
 #include "pn_reader_input.h"
+#include "pn_shake_turn.h"
 #include "pn_settings_ui.h"
 #include "pn_style_ui.h"
 #include <assert.h>
@@ -546,6 +547,144 @@ int main(void) {
     assert(nl_used == 2u);
     assert(pn_w_text_lines_measure_ex(&nl_font, "第一行\r\n\n第三行", 560, 5, false, &nl_used) == PN_OK);
     assert(nl_used == 3u);
+    // 7. 批 1/2/3 回归：触控区/滑动直接生效、背景高亮纹理保留、双选浮条 [摘录|查词]、PNGS v1->v2 迁移与体感翻页算法。
+    // 7. Batch 1/2/3 regression: direct tap-zone & swipe authority, texture-preserving bg highlight, long-press dual pill, PNGS v1->v2 migration & shake detector.
+    {
+        // 7a. use_gestures=true 时，新 7 种触控区和 3 种滑动模式直接生效，不受旧 vertical_turn/no_edge_tap/left_hand 干扰。
+        pn_reader_input_t gi = {0};
+        pn_gesture_prefs_t gp = pn_gesture_prefs_default();
+        gp.tap_zone = PN_TAP_ZONE_TB;
+        gp.swipe_turn = PN_SWIPE_TURN_LR;
+        gi.config = (pn_reader_input_config_t){.left_hand = true, .no_edge_tap = true, .no_swipe = true, .vertical_turn = true, .use_gestures = true, .gestures = gp};
+        pn_reader_action_t ga = PN_APP_OPEN;
+        // 上下两分点按：上=上页、下=下页（即使旧 no_edge_tap=true / left_hand=true 仍生效）。
+        assert(!pn_reader_input_feed_timed(&gi, 1, 340, 260, true, 100, &ga));
+        (void)pn_reader_input_feed_timed(&gi, 0, 0, 0, true, 130, &ga);
+        assert(pn_reader_input_feed_timed(&gi, 0, 0, 0, true, 140, &ga) && ga == PN_APP_PREVIOUS);
+        assert(!pn_reader_input_feed_timed(&gi, 1, 340, 900, true, 200, &ga));
+        (void)pn_reader_input_feed_timed(&gi, 0, 0, 0, true, 230, &ga);
+        assert(pn_reader_input_feed_timed(&gi, 0, 0, 0, true, 240, &ga) && ga == PN_APP_NEXT);
+        // 左右滑动翻页（即使旧 no_swipe=true / vertical_turn=true 仍生效）。
+        assert(!pn_reader_input_feed_timed(&gi, 1, 500, 500, true, 300, &ga));
+        assert(!pn_reader_input_feed_timed(&gi, 1, 320, 500, true, 360, &ga));
+        (void)pn_reader_input_feed_timed(&gi, 0, 0, 0, true, 380, &ga);
+        assert(pn_reader_input_feed_timed(&gi, 0, 0, 0, true, 390, &ga) && ga == PN_APP_NEXT);
+        // 单手左手触控区：左下=下页，左上/右1/3=上页。
+        gi.config.gestures.tap_zone = PN_TAP_ZONE_ONE_HAND_L;
+        assert(!pn_reader_input_feed_timed(&gi, 1, 140, 860, true, 500, &ga));
+        (void)pn_reader_input_feed_timed(&gi, 0, 0, 0, true, 530, &ga);
+        assert(pn_reader_input_feed_timed(&gi, 0, 0, 0, true, 540, &ga) && ga == PN_APP_NEXT);
+        assert(!pn_reader_input_feed_timed(&gi, 1, 140, 260, true, 600, &ga));
+        (void)pn_reader_input_feed_timed(&gi, 0, 0, 0, true, 630, &ga);
+        assert(pn_reader_input_feed_timed(&gi, 0, 0, 0, true, 640, &ga) && ga == PN_APP_PREVIOUS);
+        assert(!pn_reader_input_feed_timed(&gi, 1, 580, 860, true, 700, &ga));
+        (void)pn_reader_input_feed_timed(&gi, 0, 0, 0, true, 730, &ga);
+        assert(pn_reader_input_feed_timed(&gi, 0, 0, 0, true, 740, &ga) && ga == PN_APP_PREVIOUS);
+        // 关闭点按 + 关闭滑动。
+        gi.config.gestures.tap_zone = PN_TAP_ZONE_OFF;
+        gi.config.gestures.swipe_turn = PN_SWIPE_TURN_OFF;
+        assert(!pn_reader_input_feed_timed(&gi, 1, 580, 860, true, 800, &ga));
+        (void)pn_reader_input_feed_timed(&gi, 0, 0, 0, true, 830, &ga);
+        assert(!pn_reader_input_feed_timed(&gi, 0, 0, 0, true, 840, &ga) && gi.last_tap);
+        assert(!pn_reader_input_feed_timed(&gi, 1, 500, 500, true, 900, &ga));
+        assert(!pn_reader_input_feed_timed(&gi, 1, 300, 500, true, 960, &ga));
+        (void)pn_reader_input_feed_timed(&gi, 0, 0, 0, true, 980, &ga);
+        assert(!pn_reader_input_feed_timed(&gi, 0, 0, 0, true, 990, &ga));
+        // 默认长按双选浮条（PN_LP_MENU -> PN_APP_LONG_PRESS_MENU）。
+        assert(gp.long_press_mode == PN_LP_MENU);
+        assert(!pn_reader_input_feed_timed(&gi, 1, 320, 420, true, 1200, &ga));
+        assert(pn_reader_input_feed_timed(&gi, 1, 321, 420, true, 1800, &ga) && ga == PN_APP_LONG_PRESS_MENU);
+
+        // 7b. 背景图上的高亮底色：相对压暗像素并保留纸纹对比度。
+        uint8_t *hpx = pn_alloc(&pool, 342u * 1216u);
+        assert(hpx);
+        pn_frame_t hframe;
+        assert(pn_frame_bind(&hframe, hpx, 342u * 1216u, 684, 1216));
+        for (int y = 0; y < 1216; y++)
+            for (int x = 0; x < 684; x++)
+                pn_frame_pixel(&hframe, x, y, (uint8_t)(((x + y) & 1) ? 14 : 11));
+        pn_reader_highlight_span(&hframe, 100, 260, 300, 44, true);
+        // 压暗后保持两种纹理像素可区分且均比原值暗，同时底部有深灰下划线。
+        uint8_t p_even = pn_frame_get(&hframe, 120, 280);
+        uint8_t p_odd = pn_frame_get(&hframe, 121, 280);
+        assert(p_even < 11 && p_odd < 14 && p_even != p_odd);
+        assert(pn_frame_get(&hframe, 120, 307) <= 6);
+        // 纯白底铺 G13。
+        pn_frame_clear(&hframe, 15);
+        pn_reader_highlight_span(&hframe, 100, 260, 300, 44, false);
+        assert(pn_frame_get(&hframe, 120, 280) == 13);
+
+        // 7c. 长按双选浮条绘制与命中（正常/已摘录/贴顶自动翻至下方）。
+        pn_lp_menu_t lpm = {.active = true, .anchor_x = 340, .anchor_y = 400, .highlighted = false};
+        assert(pn_lp_menu_render(&lpm, &nl_font, &hframe) == PN_OK);
+        assert(pn_lp_menu_hit(&lpm, 260, 340) == PN_LPM_EXCERPT);
+        assert(pn_lp_menu_hit(&lpm, 420, 340) == PN_LPM_DICT);
+        assert(pn_lp_menu_hit(&lpm, 50, 900) == PN_LPM_DISMISS);
+        lpm.highlighted = true;
+        lpm.anchor_y = 60; // 贴顶时自动翻到锚点下方 / Flips below anchor near top edge
+        assert(pn_lp_menu_render(&lpm, &nl_font, &hframe) == PN_OK);
+        assert(pn_lp_menu_hit(&lpm, 260, 120) == PN_LPM_EXCERPT);
+        assert(pn_lp_menu_hit(&lpm, 430, 120) == PN_LPM_DICT);
+        pn_free(hpx);
+
+        // 7d. PNGS v1 (20B) 向后兼容加载 + v2 (24B) 往返。
+        pn_media_lease_t gl = {0};
+        assert(pn_media_acquire(&state_media, PN_MEDIA_WRITE, &gl) == PN_OK);
+        pn_journal_files_t gf;
+        pn_journal_io_t gio;
+        assert(pn_gesture_prefs_files(&gf, &state_media, &gl, state, &gio) == PN_OK);
+        uint8_t v1[20] = {'P','N','G','S', 1, 0, 0,0,0,0,0,0,0,0,0, PN_TAP_ZONE_THREE_COL, PN_KEY_MAP_SWAP_LR, PN_LP_DICT, 30, 2};
+        assert(pn_journal_save(&gio, v1, sizeof v1) == PN_OK);
+        pn_gesture_prefs_t g1 = {0};
+        assert(pn_gesture_prefs_load(&gio, &g1) == PN_OK);
+        assert(g1.tap_zone == PN_TAP_ZONE_THREE_COL && g1.key_map == PN_KEY_MAP_SWAP_LR && g1.key2_short_action == 2 && g1.long_press_mode == PN_LP_DICT && g1.auto_turn_sec == 30);
+        assert(g1.swipe_turn == PN_SWIPE_TURN_LR && g1.shake_turn == 0 && g1.shake_sensitivity == PN_SHAKE_SENS_MED);
+        g1.tap_zone = PN_TAP_ZONE_ONE_HAND_L;
+        g1.swipe_turn = PN_SWIPE_TURN_TB;
+        g1.key_map = PN_KEY_MAP_OFF;
+        g1.long_press_mode = PN_LP_MENU;
+        g1.shake_turn = 1;
+        g1.shake_sensitivity = PN_SHAKE_SENS_HIGH;
+        assert(pn_gesture_prefs_save(&gio, &g1) == PN_OK);
+        pn_gesture_prefs_t g2 = {0};
+        assert(pn_gesture_prefs_load(&gio, &g2) == PN_OK);
+        assert(g2.tap_zone == PN_TAP_ZONE_ONE_HAND_L && g2.swipe_turn == PN_SWIPE_TURN_TB && g2.key_map == PN_KEY_MAP_OFF && g2.long_press_mode == PN_LP_MENU && g2.shake_turn == 1 && g2.shake_sensitivity == PN_SHAKE_SENS_HIGH);
+        assert(pn_media_release(&state_media, &gl) == PN_OK);
+
+        // 7e. 体感翻页检测器：重力姿态免疫、300ms 唤醒稳定期、单脉冲抗干扰、三档灵敏度触发与冷却防连翻。
+        pn_shake_turn_t sh = {0};
+        pn_shake_turn_reset(&sh, 1000);
+        // 300ms 稳定期内剧烈抖动不得触发。
+        assert(!pn_shake_turn_feed(&sh, 0, 0, 1000, PN_SHAKE_SENS_HIGH, 1020));
+        assert(!pn_shake_turn_feed(&sh, 2500, 0, 1000, PN_SHAKE_SENS_HIGH, 1100));
+        assert(!pn_shake_turn_feed(&sh, -2500, 0, 1000, PN_SHAKE_SENS_HIGH, 1140));
+        // 任意静态倾角（竖屏握持 Y=+1000mg）连续喂样稳定后不误触。
+        for (uint64_t t = 1400; t <= 2000; t += 20)
+            assert(!pn_shake_turn_feed(&sh, 0, 1000, 0, PN_SHAKE_SENS_HIGH, t));
+        // 单帧孤立尖峰（轻微磕碰）不触发，300ms 窗口过后自动清零。
+        assert(!pn_shake_turn_feed(&sh, 1500, 1000, 0, PN_SHAKE_SENS_MED, 2100));
+        assert(!pn_shake_turn_feed(&sh, 0, 1000, 0, PN_SHAKE_SENS_MED, 2120));
+        assert(!pn_shake_turn_feed(&sh, 0, 1000, 0, PN_SHAKE_SENS_MED, 2500));
+        // 中档灵敏度：两次相邻手腕甩动脉冲触发翻页，冷却期内不再连翻，冷却后可再次触发。
+        assert(!pn_shake_turn_feed(&sh, 1200, 1000, 0, PN_SHAKE_SENS_MED, 2600));
+        assert(pn_shake_turn_feed(&sh, -1200, 1000, 0, PN_SHAKE_SENS_MED, 2640));
+        // 950ms 冷却期内禁止连续误翻。
+        assert(!pn_shake_turn_feed(&sh, 1500, 1000, 0, PN_SHAKE_SENS_MED, 2700));
+        assert(!pn_shake_turn_feed(&sh, -1500, 1000, 0, PN_SHAKE_SENS_MED, 2740));
+        // 低档需要更大力度（950mg 不触发，1500mg 两次脉冲触发）。
+        for (uint64_t t = 3600; t <= 4000; t += 20)
+            assert(!pn_shake_turn_feed(&sh, 0, 1000, 0, PN_SHAKE_SENS_LOW, t));
+        assert(!pn_shake_turn_feed(&sh, 900, 1000, 0, PN_SHAKE_SENS_LOW, 4040));
+        assert(!pn_shake_turn_feed(&sh, -900, 1000, 0, PN_SHAKE_SENS_LOW, 4080));
+        assert(!pn_shake_turn_feed(&sh, 1600, 1000, 0, PN_SHAKE_SENS_LOW, 4200));
+        assert(pn_shake_turn_feed(&sh, -1600, 1000, 0, PN_SHAKE_SENS_LOW, 4240));
+        // 高档灵敏度：较轻手腕甩动（760mg 双向脉冲）即可在冷却后触发。
+        for (uint64_t t = 5500; t <= 5900; t += 20)
+            assert(!pn_shake_turn_feed(&sh, 0, 1000, 0, PN_SHAKE_SENS_HIGH, t));
+        assert(!pn_shake_turn_feed(&sh, 760, 1000, 0, PN_SHAKE_SENS_HIGH, 5940));
+        assert(pn_shake_turn_feed(&sh, -760, 1000, 0, PN_SHAKE_SENS_HIGH, 5980));
+    }
+
     pn_font_close(&nl_font);
 
     pn_status_bar_prefs_t def_sb = pn_status_bar_prefs_default();

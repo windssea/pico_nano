@@ -92,6 +92,26 @@ void pn_reader_guide_row_ex(pn_frame_t *viewport,unsigned style,unsigned shade,i
 /// 全参数阅读线绘制：支持 1虚线/2点线/3实线，以及自定义虚线长度 dash_len（0自动）与间隔 dash_gap（0自动）。
 /// Full-parameter guide-row drawing: styles 1 dashed / 2 dotted / 3 solid, plus optional custom dash_len and dash_gap (0=auto).
 void pn_reader_guide_row_custom(pn_frame_t *viewport,unsigned style,unsigned shade,int x0,int x1,int y,int thickness,int dash_len,int dash_gap,int font_pixels,bool follow_font);
+/// 按行段绘制摘录高亮底色与下划线：纯白底铺柔和浅灰 G13，有阅读背景图时相对压暗现有背景像素以完整保留纹理。
+/// Paint a contiguous sentence-highlight band and underline: soft G13 fill on plain paper, or texture-preserving pixel darkening over reading backgrounds.
+void pn_reader_highlight_span(pn_frame_t *viewport,int x0,int x1,int baseline,int pixels,bool has_bg);
+
+/// 正文长按双选浮条（摘录 | 查词）命中码，零单击翻页延迟。/ Body long-press dual action pill (Excerpt | Dictionary) hit codes, zero tap-turn delay.
+typedef enum {
+    PN_LPM_EXCERPT=1, ///< 摘录 / 取消摘录 / Highlight or remove highlight
+    PN_LPM_DICT=2, ///< 离线查词 / Open dictionary lookup
+    PN_LPM_DISMISS=3 ///< 点击浮条外侧关闭 / Tap outside pill to dismiss
+} pn_lp_menu_cmd_t;
+/// 正文长按双选浮条状态。/ State of the body long-press dual action pill.
+typedef struct {
+    bool active; ///< 浮条是否显示 / Whether the floating pill is open
+    int anchor_x,anchor_y; ///< 长按触发坐标 / Long-press anchor coordinates
+    bool highlighted; ///< 该句是否已摘录（控制文案「摘录」或「取消摘录」）/ Whether the anchored sentence is already highlighted
+} pn_lp_menu_t;
+/// 在已显示阅读页副本上叠画轻量圆角胶囊「摘录 | 查词」。/ Paint the lightweight rounded floating pill "Excerpt | Dict" over the reading page copy.
+pn_status_t pn_lp_menu_render(const pn_lp_menu_t *menu,pn_font_t *ui,pn_frame_t *frame);
+/// 命中检测：返回 PN_LPM_EXCERPT / PN_LPM_DICT / PN_LPM_DISMISS，未激活返回 -1。/ Hit test returning PN_LPM_* or -1 when inactive.
+int pn_lp_menu_hit(const pn_lp_menu_t *menu,int x,int y);
 
 /// 只画状态文字，底图由控制层准备。/ Draw status text only over a controller-prepared underlay.
 pn_status_t pn_reader_status_text(pn_font_t *,pn_frame_t *);

@@ -345,15 +345,35 @@ static void paint_highlights_epub(const app_t *a,pn_frame_t *viewport,const pn_e
     if(!a->highlight_count || !page || !page->count)return;
     const char *path=a->footer_path[0]?a->footer_path:a->visible.location.path;
     if(!path || !*path)return;
+    // 合并同行连续高亮节点再统一上色，消除重叠接缝并兼容背景图压暗。
+    // Merge contiguous highlighted nodes per line before painting to prevent overlap seams and support background tinting.
+    bool in_span=false;int sp_bl=0,sp_px=0,sp_x0=0,sp_x1=0;
     for(size_t i=0;i<page->count;i++){
         const pn_epub_page_node_t *nd=&page->nodes[i];
-        if(nd->image_index!=UINT_MAX || !nd->codepoint || nd->codepoint==10 || nd->codepoint==9 || nd->codepoint==' ' || nd->codepoint==0x3000)continue;
-        if(!epub_node_highlighted(a,path,nd))continue;
-        int px=nd->metrics.pixels>0?nd->metrics.pixels:a->style.pixels;
-        int hx0=nd->x_64/64,hw=(nd->metrics.advance_64+63)/64+2;if(hw<px/2)hw=px/2;
-        if(!a->style.background)pn_frame_rect(viewport,hx0,nd->baseline-px*88/100,hw,px+px/8,13);
-        pn_frame_rect(viewport,hx0,nd->baseline+px/6,hw,2,5);
+        if(nd->image_index!=UINT_MAX || !nd->codepoint || nd->codepoint==10 || nd->codepoint==9){
+            if(in_span){pn_reader_highlight_span(viewport,sp_x0,sp_x1,sp_bl,sp_px,a->style.background!=0);in_span=false;}
+            continue;
+        }
+        bool is_sp=(nd->codepoint==' ' || nd->codepoint==0x3000);
+        bool hl=!is_sp && epub_node_highlighted(a,path,nd);
+        if(hl){
+            int px=nd->metrics.pixels>0?nd->metrics.pixels:a->style.pixels;
+            int hx0=nd->x_64/64,hw=(nd->metrics.advance_64+63)/64+2;if(hw<px/2)hw=px/2;
+            int hx1=hx0+hw;
+            if(in_span && nd->baseline==sp_bl && hx0<=sp_x1+px){
+                if(hx0<sp_x0)sp_x0=hx0;
+                if(hx1>sp_x1)sp_x1=hx1;
+                if(px>sp_px)sp_px=px;
+            }else{
+                if(in_span)pn_reader_highlight_span(viewport,sp_x0,sp_x1,sp_bl,sp_px,a->style.background!=0);
+                in_span=true;sp_bl=nd->baseline;sp_px=px;sp_x0=hx0;sp_x1=hx1;
+            }
+        }else if(in_span && (!is_sp || nd->baseline!=sp_bl)){
+            pn_reader_highlight_span(viewport,sp_x0,sp_x1,sp_bl,sp_px,a->style.background!=0);
+            in_span=false;
+        }
     }
+    if(in_span)pn_reader_highlight_span(viewport,sp_x0,sp_x1,sp_bl,sp_px,a->style.background!=0);
 }
 static void paint_guides(app_t *a,pn_frame_t *frame,const pn_epub_page_t *page){
     pn_frame_t viewport={frame->pixels+pn_style_body_top(&a->style)*frame->stride+pn_style_margin_left(&a->style)/2,a->layout.width,a->layout.height,frame->stride};

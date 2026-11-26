@@ -220,6 +220,34 @@ static pn_status_t paint_text(app_t *a,pn_frame_t *frame,const pn_page_glyph_t *
     int hpx=txt_heading_pixels(&a->style);
     int cur_px=a->style.pixels,cur_w=a->style.weight;
     pn_status_t s=PN_OK;
+    // 合并同行连续高亮字块再统一上色，避免字间重叠加深接缝；支持有背景图时的纹理压暗底色。
+    // Merge contiguous highlighted spans per line before painting to prevent overlap seams and preserve background texture.
+    if(a->highlight_count){
+        bool in_span=false;int sp_bl=0,sp_px=0,sp_x0=0,sp_x1=0;
+        for(size_t i=first;i<first+count;i++){
+            const pn_page_glyph_t *g=&glyphs[i];
+            if(g->source.codepoint==10 || g->source.codepoint==9)continue;
+            bool is_sp=(g->source.codepoint==' ' || g->source.codepoint==0x3000);
+            bool hl=!is_sp && txt_offset_highlighted(a,g->source.begin);
+            if(hl){
+                int want_px=g->heading?hpx:a->style.pixels;
+                int hx0=g->x_64/64,hw=(g->advance_64+63)/64+2;if(hw<want_px/2)hw=want_px/2;
+                int hx1=hx0+hw;
+                if(in_span && g->baseline==sp_bl && hx0<=sp_x1+want_px){
+                    if(hx0<sp_x0)sp_x0=hx0;
+                    if(hx1>sp_x1)sp_x1=hx1;
+                    if(want_px>sp_px)sp_px=want_px;
+                }else{
+                    if(in_span)pn_reader_highlight_span(&viewport,sp_x0,sp_x1,sp_bl,sp_px,a->style.background!=0);
+                    in_span=true;sp_bl=g->baseline;sp_px=want_px;sp_x0=hx0;sp_x1=hx1;
+                }
+            }else if(in_span && (!is_sp || g->baseline!=sp_bl)){
+                pn_reader_highlight_span(&viewport,sp_x0,sp_x1,sp_bl,sp_px,a->style.background!=0);
+                in_span=false;
+            }
+        }
+        if(in_span)pn_reader_highlight_span(&viewport,sp_x0,sp_x1,sp_bl,sp_px,a->style.background!=0);
+    }
     for(size_t i=first;i<first+count;i++){const pn_page_glyph_t *g=&glyphs[i];if(g->source.codepoint==10 || g->source.codepoint==9)continue;
         // 阅读线跟随实际行基线，支持粗细及随文字横幅/字底自适应，不改变源位置。/ Guides follow actual baselines with thickness and optional font-span/baseline tracking without changing source positions.
         if(a->style.reading_line && g->baseline!=*guide_baseline && g->source.codepoint!=' ' && g->source.codepoint!=0x3000){
@@ -246,11 +274,6 @@ static pn_status_t paint_text(app_t *a,pn_frame_t *frame,const pn_page_glyph_t *
         int want_w=(g->heading && a->style.chapter_bold)?(a->style.weight<0?1:(a->style.weight<3?a->style.weight+1:3)):a->style.weight;
         if(want_px!=cur_px){s=ensure_size(a,want_px);if(s!=PN_OK)break;cur_px=want_px;}
         if(want_w!=cur_w){s=pn_font_weight(body(a),want_w);if(s!=PN_OK)break;cur_w=want_w;}
-        if(a->highlight_count && g->source.codepoint!=' ' && g->source.codepoint!=0x3000 && txt_offset_highlighted(a,g->source.begin)){
-            int hx0=g->x_64/64,hw=(g->advance_64+63)/64+2;if(hw<want_px/2)hw=want_px/2;
-            if(!a->style.background)pn_frame_rect(&viewport,hx0,g->baseline-want_px*88/100,hw,want_px+want_px/8,13);
-            pn_frame_rect(&viewport,hx0,g->baseline+want_px/6,hw,2,5);
-        }
         s=prepared?pn_font_chain_prerender(chain(a),&viewport,g->source.codepoint,g->x_64,g->baseline,PN_FONT_GRAY):pn_font_chain_draw(chain(a),&viewport,g->source.codepoint,g->x_64,g->baseline,PN_FONT_GRAY);
         if(s==PN_EMPTY){int x=g->x_64/64,y=g->baseline-want_px,size=want_px-4;pn_frame_rect(&viewport,x,y,size,1,0);pn_frame_rect(&viewport,x,y+size,size,1,0);pn_frame_rect(&viewport,x,y,1,size,0);pn_frame_rect(&viewport,x+size,y,1,size,0);(*missing)++;s=PN_OK;}
         else if(s!=PN_OK)break;

@@ -30,15 +30,16 @@ static pn_status_t cancel(pn_style_ui_t *u,uint64_t now,pn_reader_present_fn pre
 #define PRESET_H 60
 #define FONT_ROW_Y 410
 #define STEP_Y0 498
-#define STEP_PITCH 88
-#define CELL_H 80 ///< 单格高度 / Cell height
+#define STEP_PITCH 96
+#define CELL_H 86 ///< 单格高度 / Cell height
 #define CELL_W 300
 #define CELL_PITCH 320
 #define APPLY_Y 1112
 #define APPLY_H 88
-// 按用途分组：间距两行、字形外观一行（字重/清晰度）、阅读线两行。/ Grouped by purpose: two spacing rows, one glyph-appearance row (weight/sharpness), two reading-guide rows.
-static const unsigned fields[PN_SUI_FIELDS]={0,1,2,5,3,4,9,10,6,8,7,11,12};
-static const char *const names[PN_SUI_FIELDS]={"字号","行距","段距","首行缩进","字间距","边距","阅读线","上下位置","阅读线深浅","字重","清晰度","背景","书内图片"};
+// 按用途分组：间距两行、缩进/字距、字重/清晰度、背景与独立章节标题入口（阅读线已收口至阅读工具栏半屏微调，避免重复）。
+// Grouped by purpose: spacing, indent/tracking, weight/sharpness, paper & dedicated chapter-title entry (reading line lives in toolbar live editor).
+static const unsigned main_fields[10]={0,1,2,5,3,4,9,10,11,6};
+static const char *const names[PN_SUI_FIELDS]={"字号","行距","段距","首行缩进","字间距","边距","章节标题","上下位置","阅读线深浅","字重","清晰度","背景","书内图片"};
 typedef struct {unsigned pixels,line,gap,indent,margin;} preset_t;
 static const preset_t presets[3]={{PN_STYLE_DEFAULT_PIXELS,145,40,2,32},{36,125,20,2,24},{56,160,40,2,32}};
 static const char *const preset_names[3]={"舒适","紧凑","大字"};
@@ -53,7 +54,14 @@ static void field_text(const pn_style_t *s,unsigned i,char *out,size_t cap){
         if(s->margin_top || s->margin_bottom || s->margin_right_delta || s->margin<16 || s->margin>80)snprintf(out,cap,"自定义");
         else snprintf(out,cap,v<=20?"窄":v<=32?"中":"宽");
     }
-    else if(i==6)snprintf(out,cap,"%s",v==1?"虚线":v==2?"点线":v==3?"实线":"关闭");
+    else if(i==6){
+        static const char *const caligns[4]={"","左对齐","居中","右对齐"};
+        if(!s->chapter_scale_percent && !s->chapter_align && !s->chapter_bold && !s->chapter_gap)snprintf(out,cap,"默认");
+        else if(s->chapter_scale_percent && s->chapter_align)snprintf(out,cap,"%u%%·%s",(unsigned)s->chapter_scale_percent,caligns[s->chapter_align<4?s->chapter_align:0]);
+        else if(s->chapter_scale_percent)snprintf(out,cap,"%u%%%s",(unsigned)s->chapter_scale_percent,s->chapter_bold?"·加粗":"");
+        else if(s->chapter_align)snprintf(out,cap,"%s%s",caligns[s->chapter_align<4?s->chapter_align:0],s->chapter_bold?"·加粗":"");
+        else snprintf(out,cap,"%s",s->chapter_bold?"加粗":"自定义");
+    }
     else if(i==7)snprintf(out,cap,"%+d px",s->reading_line_offset);
     else if(i==8){static const char *const shades[4]={"浅","中","深","黑"};snprintf(out,cap,"%s",shades[v<4?v:0]);}
     else if(i==9){static const char *const weights[5]={"细","标准","稍粗","粗","特粗"};snprintf(out,cap,"%s",weights[v<5?v:1]);}
@@ -99,15 +107,14 @@ static pn_status_t stepper(pn_font_t *font,pn_frame_t *frame,const pn_style_t *d
     pn_status_t s=pn_font_size(font,21);
     if(s==PN_OK)s=pn_w_text_ex(font,frame,names[field],x+12,y+24,CELL_W-24,PN_ALIGN_LEFT,5,false);
     if(s==PN_OK && field==5)s=pn_w_text_ex(font,frame,"详调 >",x+12,y+24,CELL_W-24,PN_ALIGN_RIGHT,4,true);
-    if(s==PN_OK && field==6)s=pn_w_text_ex(font,frame,"详调 >",x+12,y+24,CELL_W-24,PN_ALIGN_RIGHT,4,true);
-    bool choice=field==5 || field==6 || field==8 || field==9 || field==10;
-    if(field==11){pn_w_icon(frame,PN_ICON_CHEVRON,x+CELL_W-38,y+44,24,6);if(s==PN_OK)s=pn_font_size(font,26);if(s==PN_OK)s=pn_w_text_ex(font,frame,value,x+12,y+67,CELL_W-60,PN_ALIGN_LEFT,PN_UI_INK,true);return s;}
-    pn_w_round_fill(frame,x+8,y+32,64,40,8,PN_UI_SURFACE);pn_w_round_stroke(frame,x+8,y+32,64,40,8,1.0f,11);
-    pn_w_round_fill(frame,x+CELL_W-72,y+32,64,40,8,PN_UI_SURFACE);pn_w_round_stroke(frame,x+CELL_W-72,y+32,64,40,8,1.0f,11);
-    pn_w_icon(frame,choice?PN_ICON_BACK:PN_ICON_MINUS,x+29,y+41,22,PN_UI_INK);
-    pn_w_icon(frame,choice?PN_ICON_CHEVRON:PN_ICON_PLUS,x+CELL_W-51,y+41,22,PN_UI_INK);
+    bool choice=field==5 || field==8 || field==9 || field==10;
+    if(field==11 || field==6){pn_w_icon(frame,PN_ICON_CHEVRON,x+CELL_W-38,y+46,24,6);if(s==PN_OK)s=pn_font_size(font,26);if(s==PN_OK)s=pn_w_text_ex(font,frame,value,x+12,y+69,CELL_W-60,PN_ALIGN_LEFT,PN_UI_INK,true);return s;}
+    pn_w_round_fill(frame,x+8,y+36,64,42,8,PN_UI_SURFACE);pn_w_round_stroke(frame,x+8,y+36,64,42,8,1.0f,11);
+    pn_w_round_fill(frame,x+CELL_W-72,y+36,64,42,8,PN_UI_SURFACE);pn_w_round_stroke(frame,x+CELL_W-72,y+36,64,42,8,1.0f,11);
+    pn_w_icon(frame,choice?PN_ICON_BACK:PN_ICON_MINUS,x+29,y+46,22,PN_UI_INK);
+    pn_w_icon(frame,choice?PN_ICON_CHEVRON:PN_ICON_PLUS,x+CELL_W-51,y+46,22,PN_UI_INK);
     if(s==PN_OK)s=pn_font_size(font,26);
-    if(s==PN_OK)s=pn_w_text_ex(font,frame,value,x+74,y+62,CELL_W-148,PN_ALIGN_CENTER,PN_UI_INK,true);
+    if(s==PN_OK)s=pn_w_text_ex(font,frame,value,x+74,y+66,CELL_W-148,PN_ALIGN_CENTER,PN_UI_INK,true);
     return s;
 }
 /* 用草稿的字号/行距/缩进/字距试排一段，让数值变化立刻可见；正文字体不可用时用UI字体。
@@ -155,7 +162,7 @@ static pn_status_t paint_main(pn_style_ui_t *u,pn_font_t *font,pn_frame_t *frame
     if(s==PN_OK)s=pn_w_text_ex(font,frame,pn_brand_label(name),176,FONT_ROW_Y+44,420,PN_ALIGN_RIGHT,PN_UI_MUTED,false);
     pn_w_set_fallback(NULL);pn_w_icon(frame,PN_ICON_CHEVRON,624,FONT_ROW_Y+21,28,PN_UI_INK);
     pn_frame_rect(frame,32,FONT_ROW_Y+72,620,1,PN_UI_SELECT);
-    for(unsigned i=0;i<PN_SUI_FIELDS-1 && s==PN_OK;i++)s=stepper(font,frame,&u->draft,fields[i],32+(int)(i%2)*CELL_PITCH,STEP_Y0+(int)(i/2)*STEP_PITCH,u->selected==fields[i]);
+    for(unsigned i=0;i<10 && s==PN_OK;i++)s=stepper(font,frame,&u->draft,main_fields[i],32+(int)(i%2)*CELL_PITCH,STEP_Y0+(int)(i/2)*STEP_PITCH,u->selected==main_fields[i]);
     // 图片与去上下栏开关并排置于底行，均只改草稿；与应用/取消及键盘字段共用同一状态。
     // Image and bar-hiding toggles share the bottom row, modifying only the draft alongside apply/cancel and keyboard state.
     pn_w_round_stroke(frame,32,1028,CELL_W,72,10,u->selected==12?2:1,u->selected==12?PN_UI_INK:8);
@@ -283,9 +290,9 @@ static pn_status_t paint_chapter(pn_style_ui_t *u,pn_font_t *font,pn_frame_t *fr
     static const char *const aligns[4]={"跟随原文","左对齐","居中","右对齐"};
     static const char *const gaps[4]={"默认","紧凑","宽松","宽敞"};
     static const char *const footers[4]={"默认","章节名","书名","隐藏"};
-    pn_status_t s=pn_w_header(font,frame,"< 返回","阅读线与章节",NULL);
+    pn_status_t s=pn_w_header(font,frame,"< 返回","章节标题",NULL);
     if(s==PN_OK){s=pn_font_size(font,26);if(s==PN_OK)s=pn_w_text_ex(font,frame,"恢复默认",480,100,172,PN_ALIGN_RIGHT,PN_UI_MUTED,false);}
-    // 顶部实时效果预览卡（章节标题 + 正文阅读线 + 迷你页脚）。/ Top live preview card (chapter heading + body guide line + mini footer).
+    // 顶部实时效果预览卡（章节标题 + 正文示例 + 迷你页脚）。/ Top live preview card (chapter heading + body sample + mini footer).
     const int px=32,py=134,pw=620,ph=168;
     pn_w_round_fill(frame,px,py,pw,ph,14,PN_UI_PAPER);
     pn_w_round_stroke(frame,px,py,pw,ph,14,1.5f,9);
@@ -300,16 +307,6 @@ static pn_status_t paint_chapter(pn_style_ui_t *u,pn_font_t *font,pn_frame_t *fr
     if(s==PN_OK)s=pn_font_size(font,bpx);
     const char *sample_line="    字与字之间，留出恰好的距离。";
     if(s==PN_OK)s=pn_w_text_ex(font,frame,sample_line,px+20,body_y,pw-40,PN_ALIGN_LEFT,PN_UI_INK,false);
-    if(s==PN_OK && u->draft.reading_line){
-        bool follow=u->draft.reading_line_follow!=0;
-        int thick=pn_style_guide_thickness(&u->draft);
-        int text_w=0;(void)pn_w_text_width(font,"字与字之间，留出恰好的距离。",&text_w);
-        int ind_w=0;(void)pn_w_text_width(font,"    ",&ind_w);
-        pn_frame_t sub={frame->pixels+(size_t)(py+8)*frame->stride+(size_t)(px+20)/2u,pw-40,ph-48,frame->stride};
-        int gx0=follow?ind_w:0,gx1=follow?(ind_w+text_w):pw-40;
-        int gy=(body_y-(py+8))+(follow?6:10)+u->draft.reading_line_offset/2;
-        pn_reader_guide_row_custom(&sub,u->draft.reading_line,u->draft.reading_line_shade,gx0,gx1,gy,thick,u->draft.reading_line_dash,u->draft.reading_line_gap,u->draft.pixels,follow);
-    }
     pn_frame_rect(frame,px+20,py+ph-34,pw-40,1,11);
     int fpx=pn_style_footer_pixels(&u->draft)*3/4;if(fpx<16)fpx=16;if(fpx>24)fpx=24;
     if(s==PN_OK)s=pn_font_size(font,fpx);
@@ -317,23 +314,20 @@ static pn_status_t paint_chapter(pn_style_ui_t *u,pn_font_t *font,pn_frame_t *fr
     if(s==PN_OK && *fl)s=pn_w_text_ex(font,frame,fl,px+20,py+ph-10,pw-120,PN_ALIGN_LEFT,5,false);
     if(s==PN_OK)s=pn_w_text_ex(font,frame,"42%",px+pw-96,py+ph-10,76,PN_ALIGN_RIGHT,5,false);
 
-    if(s==PN_OK)s=pn_w_group(font,frame,"阅读线扩展",332);
     char val[32];
-    if(s==PN_OK)s=chapter_stepper(font,frame,"跟随字体",u->draft.reading_line_follow?"跟随字体":"通栏固定",true,32,346);
-    snprintf(val,sizeof val,"%d px",pn_style_guide_thickness(&u->draft));
-    if(s==PN_OK)s=chapter_stepper(font,frame,"阅读线粗细",val,false,352,346);
-    if(s==PN_OK)s=pn_w_group(font,frame,"章节标题与页脚",490);
+    if(s==PN_OK)s=pn_w_group(font,frame,"章节标题",340);
     if(u->draft.chapter_scale_percent)snprintf(val,sizeof val,"%u%%",(unsigned)u->draft.chapter_scale_percent);
     else snprintf(val,sizeof val,"默认");
-    if(s==PN_OK)s=chapter_stepper(font,frame,"章节字号",val,false,32,504);
-    if(s==PN_OK)s=chapter_stepper(font,frame,"章节对齐",aligns[u->draft.chapter_align<4?u->draft.chapter_align:0],true,352,504);
-    if(s==PN_OK)s=chapter_stepper(font,frame,"章节加粗",u->draft.chapter_bold?"加粗":"跟随正文",true,32,622);
-    if(s==PN_OK)s=chapter_stepper(font,frame,"章节段距",gaps[u->draft.chapter_gap<4?u->draft.chapter_gap:0],true,352,622);
-    if(s==PN_OK)s=chapter_stepper(font,frame,"页脚名称",footers[u->draft.footer_title_mode<4?u->draft.footer_title_mode:0],true,32,740);
+    if(s==PN_OK)s=chapter_stepper(font,frame,"章节字号",val,false,32,356);
+    if(s==PN_OK)s=chapter_stepper(font,frame,"章节对齐",aligns[u->draft.chapter_align<4?u->draft.chapter_align:0],true,352,356);
+    if(s==PN_OK)s=chapter_stepper(font,frame,"章节加粗",u->draft.chapter_bold?"加粗":"跟随正文",true,32,482);
+    if(s==PN_OK)s=chapter_stepper(font,frame,"章节段距",gaps[u->draft.chapter_gap<4?u->draft.chapter_gap:0],true,352,482);
+    if(s==PN_OK)s=pn_w_group(font,frame,"经典页脚样式",622);
+    if(s==PN_OK)s=chapter_stepper(font,frame,"页脚名称",footers[u->draft.footer_title_mode<4?u->draft.footer_title_mode:0],true,32,638);
     if(u->draft.footer_font_pixels)snprintf(val,sizeof val,"%u px",(unsigned)u->draft.footer_font_pixels);
     else snprintf(val,sizeof val,"默认 26");
-    if(s==PN_OK)s=chapter_stepper(font,frame,"页脚字号",val,false,352,740);
-    if(s==PN_OK){s=pn_font_size(font,22);if(s==PN_OK)s=pn_w_text_lines_ex(font,frame,"支持 EPUB 标题与 TXT 独立章节行（第X章等）；阅读线需在主排版页开启虚线或点线。",32,894,620,2,32,PN_UI_MUTED,false);}
+    if(s==PN_OK)s=chapter_stepper(font,frame,"页脚字号",val,false,352,638);
+    if(s==PN_OK){s=pn_font_size(font,22);if(s==PN_OK)s=pn_w_text_lines_ex(font,frame,"支持 EPUB 标题与 TXT 独立章节行（第X章等）。阅读线请直接从阅读工具栏「阅读线」半屏实时微调。",32,796,620,2,32,PN_UI_MUTED,false);}
     if(s==PN_OK && u->notice){s=pn_font_size(font,24);if(s==PN_OK)s=pn_w_text_ex(font,frame,u->notice,32,APPLY_Y-14,620,PN_ALIGN_CENTER,PN_UI_INK,true);}
     if(s==PN_OK)s=pn_font_size(font,30);
     if(s==PN_OK)s=pn_w_button(font,frame,"整页预览",32,APPLY_Y,300,APPLY_H,0u);
@@ -726,12 +720,12 @@ int pn_style_ui_hit(const pn_style_ui_t *u,int x,int y){
     if(u->chapter_page){
         if(y<PN_W_HEADER_H){if(pn_w_header_hit(x,y,false)==1)return PN_SUI_CHAPTER_BACK;return x>=480 && y>=44?PN_SUI_CHAPTER_RESET:-1;}
         if(y>=APPLY_Y && y<APPLY_Y+APPLY_H){if(x>=32 && x<332)return PN_SUI_PREVIEW;if(x>=352 && x<652)return PN_SUI_APPLY;return -1;}
-        static const int tops[4]={346,504,622,740};
-        for(unsigned row=0;row<4;row++){
+        static const int tops[3]={356,482,638};
+        for(unsigned row=0;row<3;row++){
             int top=tops[row];
             if(y>=top && y<top+MCELL_H){
                 for(unsigned col=0;col<2;col++){
-                    int left=32+(int)col*CELL_PITCH;unsigned item=row*2+col;
+                    int left=32+(int)col*CELL_PITCH;unsigned item=2u+row*2u+col;
                     if(x>=left && x<left+MHIT_W)return PN_SUI_CHAPTER_ADJ+(int)item*2;
                     if(x>=left+CELL_W-MHIT_W && x<left+CELL_W)return PN_SUI_CHAPTER_ADJ+(int)item*2+1;
                 }
@@ -759,12 +753,12 @@ int pn_style_ui_hit(const pn_style_ui_t *u,int x,int y){
     if(y>=PREVIEW_Y && y<PREVIEW_Y+PREVIEW_H && x>=32 && x<652)return PN_SUI_PREVIEW;
     if(y>=FONT_ROW_Y && y<FONT_ROW_Y+74 && x>=32 && x<652)return PN_SUI_FONTS;
     if(y>=1028 && y<1100){if(x>=32 && x<332)return PN_SUI_FIELD+24;if(x>=352 && x<652)return PN_SUI_TOGGLE_BARS;return -1;}
-    for(unsigned i=0;i<PN_SUI_FIELDS-1;i++){
+    for(unsigned i=0;i<10;i++){
         int left=32+(int)(i%2)*CELL_PITCH,top=STEP_Y0+(int)(i/2)*STEP_PITCH;
-        if(fields[i]==11 && x>=left && x<left+CELL_W && y>=top && y<top+CELL_H)return PN_SUI_BACKGROUND;
-        if(y>=top+26 && y<top+CELL_H){if(x>=left && x<left+68)return PN_SUI_FIELD+(int)fields[i]*2;if(x>=left+CELL_W-68 && x<left+CELL_W)return PN_SUI_FIELD+(int)fields[i]*2+1;}
-        if(fields[i]==5 && x>=left && x<left+CELL_W && y>=top && y<top+CELL_H)return PN_SUI_MARGINS;
-        if(fields[i]==6 && x>=left && x<left+CELL_W && y>=top && y<top+CELL_H)return PN_SUI_CHAPTER;
+        if(main_fields[i]==11 && x>=left && x<left+CELL_W && y>=top && y<top+CELL_H)return PN_SUI_BACKGROUND;
+        if(main_fields[i]==6 && x>=left && x<left+CELL_W && y>=top && y<top+CELL_H)return PN_SUI_CHAPTER;
+        if(y>=top+26 && y<top+CELL_H){if(x>=left && x<left+68)return PN_SUI_FIELD+(int)main_fields[i]*2;if(x>=left+CELL_W-68 && x<left+CELL_W)return PN_SUI_FIELD+(int)main_fields[i]*2+1;}
+        if(main_fields[i]==5 && x>=left && x<left+CELL_W && y>=top && y<top+CELL_H)return PN_SUI_MARGINS;
     }
     int preset=pn_w_segments_hit(3,PRESET_Y,PRESET_H,x,y);return preset>=0?PN_SUI_PRESET+preset:-1;
 }

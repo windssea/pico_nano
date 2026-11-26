@@ -97,11 +97,14 @@
 #define PN_SETUI_GACT_PICK 420 ///< 420..429在弹窗中选择手势动作 / 420..429 pick gesture action in modal
 #define PN_SETUI_GMODAL_CLOSE 430 ///< 关闭手势动作选择弹窗 / Dismiss gesture action modal
 #define PN_SETUI_TAP_ZONES 431 ///< 打开“阅读触控区域”可视化选择页 / Open visual tap-zone picker sub-page
-#define PN_SETUI_TAP_ZONE_PICK 432 ///< 432..436选择5种触控区方案 / 432..436 pick tap-zone scheme
+#define PN_SETUI_TAP_ZONE_PICK 480 ///< 480..486选择7种触控区方案 / 480..486 pick 7 tap-zone schemes
 #define PN_SETUI_KEY_HIGHLIGHT 437 ///< 打开“三键、摘录与自动翻页”子页 / Open bottom keys, highlight & auto-turn sub-page
-#define PN_SETUI_KEY_MAP 438 ///< 438..440底部三键映射（默认/反手/双下页）/ 438..440 bottom 3-key map
+#define PN_SETUI_KEY_MAP 438 ///< 438..441底部三键映射（默认/反手/双下页/关闭）/ 438..441 bottom 3-key map
 #define PN_SETUI_KEY2_SHORT 470 ///< 470..474中键短按快捷动作（0首页默认/1菜单/2全刷/3书签/4自翻）/ 470..474 KEY2 short shortcut (0 home default .. 4 auto-turn)
-#define PN_SETUI_LP_MODE 445 ///< 445..447正文长按行为（查词/摘录/关闭）/ 445..447 long-press mode
+#define PN_SETUI_LP_MODE 490 ///< 490..493正文长按行为（查词/摘录/关闭/双选浮条）/ 490..493 long-press mode
+#define PN_SETUI_SWIPE_TURN 496 ///< 496..498滑动翻页方向（左右/上下/关闭）/ 496..498 swipe page-turn mode (LR/TB/off)
+#define PN_SETUI_SHAKE_TOGGLE 500 ///< 体感晃动翻页开关（默认关闭）/ Shake-to-turn toggle (default off)
+#define PN_SETUI_SHAKE_SENS 501 ///< 501..503体感灵敏度（低/中/高）/ 501..503 shake sensitivity (low/med/high)
 #define PN_SETUI_AUTO_TURN_DEC 448 ///< 减小自动翻页间隔 / Decrease auto-turn interval
 #define PN_SETUI_AUTO_TURN_INC 449 ///< 增大自动翻页间隔 / Increase auto-turn interval
 #define PN_SETUI_MOTTO_EXCERPTS 450 ///< 打开“从我的摘录中选择左上角文案”子页 / Open excerpt picker for Home top-left motto

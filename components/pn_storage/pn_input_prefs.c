@@ -184,9 +184,12 @@ pn_gesture_prefs_t pn_gesture_prefs_default(void){
     g.slots[PN_GSLOT_TOP_DOWN]=PN_GACT_TOOLBAR;
     g.tap_zone=PN_TAP_ZONE_LR;
     g.key_map=PN_KEY_MAP_DEFAULT;
-    g.long_press_mode=PN_LP_DICT;
+    g.long_press_mode=PN_LP_MENU;
     g.auto_turn_sec=PN_AUTO_TURN_DEFAULT_SEC;
     g.key2_short_action=0;
+    g.swipe_turn=PN_SWIPE_TURN_LR;
+    g.shake_turn=0;
+    g.shake_sensitivity=PN_SHAKE_SENS_MED;
     return g;
 }
 pn_status_t pn_gesture_prefs_validate(const pn_gesture_prefs_t *p){
@@ -194,6 +197,7 @@ pn_status_t pn_gesture_prefs_validate(const pn_gesture_prefs_t *p){
     for(unsigned i=0;i<PN_GSLOT_COUNT;i++)if(p->slots[i]>=PN_GACT_COUNT)return PN_INVALID;
     if(p->tap_zone>=PN_TAP_ZONE_COUNT || p->key_map>=PN_KEY_MAP_COUNT || p->long_press_mode>=PN_LP_COUNT)return PN_INVALID;
     if(p->auto_turn_sec<PN_AUTO_TURN_MIN_SEC || p->auto_turn_sec>PN_AUTO_TURN_MAX_SEC || p->key2_short_action>4u)return PN_INVALID;
+    if(p->swipe_turn>=PN_SWIPE_TURN_COUNT || p->shake_turn>1u || p->shake_sensitivity>=PN_SHAKE_SENS_COUNT)return PN_INVALID;
     return PN_OK;
 }
 pn_status_t pn_gesture_prefs_files(pn_journal_files_t *files,pn_media_t *media,const pn_media_lease_t *lease,const char *root,pn_journal_io_t *io){
@@ -205,12 +209,19 @@ pn_status_t pn_gesture_prefs_files(pn_journal_files_t *files,pn_media_t *media,c
 pn_status_t pn_gesture_prefs_load(const pn_journal_io_t *io,pn_gesture_prefs_t *prefs){
     if(!io || !prefs)return PN_INVALID;
     pn_record_t r;pn_status_t s=pn_journal_load(io,&r);if(s!=PN_OK)return s;
-    if(r.size!=20 || memcmp(r.payload,"PNGS",4))return PN_CORRUPT;
-    if(r.payload[4]!=1 || r.payload[5]!=0)return PN_UNSUPPORTED;
-    pn_gesture_prefs_t v={0};
+    if(r.size<20 || memcmp(r.payload,"PNGS",4))return PN_CORRUPT;
+    uint8_t ver=r.payload[4];
+    if((ver!=1 && ver!=2) || r.payload[5]!=0)return PN_UNSUPPORTED;
+    if((ver==1 && r.size!=20) || (ver==2 && r.size!=24))return PN_CORRUPT;
+    pn_gesture_prefs_t v=pn_gesture_prefs_default();
     for(unsigned i=0;i<PN_GSLOT_COUNT;i++)v.slots[i]=r.payload[6+i];
     v.tap_zone=r.payload[15];v.key_map=r.payload[16];v.long_press_mode=r.payload[17];
     v.auto_turn_sec=r.payload[18];v.key2_short_action=r.payload[19];
+    if(ver>=2){
+        v.swipe_turn=r.payload[20];
+        v.shake_turn=r.payload[21];
+        v.shake_sensitivity=r.payload[22];
+    }
     if(pn_gesture_prefs_validate(&v)!=PN_OK)return PN_CORRUPT;
     *prefs=v;return PN_OK;
 }
@@ -218,9 +229,10 @@ pn_status_t pn_gesture_prefs_save(const pn_journal_io_t *io,const pn_gesture_pre
     if(!io || pn_gesture_prefs_validate(prefs)!=PN_OK)return PN_INVALID;
     pn_gesture_prefs_t prev;pn_status_t s=pn_gesture_prefs_load(io,&prev);
     if(s!=PN_OK && s!=PN_EMPTY)return s;
-    uint8_t payload[20]={'P','N','G','S',1,0};
+    uint8_t payload[24]={'P','N','G','S',2,0};
     for(unsigned i=0;i<PN_GSLOT_COUNT;i++)payload[6+i]=prefs->slots[i];
     payload[15]=prefs->tap_zone;payload[16]=prefs->key_map;payload[17]=prefs->long_press_mode;
     payload[18]=prefs->auto_turn_sec;payload[19]=prefs->key2_short_action;
+    payload[20]=prefs->swipe_turn;payload[21]=prefs->shake_turn;payload[22]=prefs->shake_sensitivity;payload[23]=0;
     return pn_journal_save(io,payload,sizeof payload);
 }

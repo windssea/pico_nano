@@ -143,14 +143,25 @@ typedef enum {
     PN_TAP_ZONE_THREE_COL, ///< 左中右三区（中栏呼出菜单）/ 3-column (Left / Toolbar / Right)
     PN_TAP_ZONE_ONE_HAND_R, ///< 单手右手（右半上下分翻、左半上页）/ Right-hand ergonomic
     PN_TAP_ZONE_ALL_NEXT, ///< 全屏下一页 / Tap anywhere = Next
+    PN_TAP_ZONE_ONE_HAND_L, ///< 单手左手（左半上下分翻、右半上页）/ Left-hand ergonomic
+    PN_TAP_ZONE_OFF, ///< 关闭点按翻页（仅滑动或按键翻页）/ Disable tap-to-turn
     PN_TAP_ZONE_COUNT
 } pn_tap_zone_t;
 
+/// 阅读滑动翻页方向 / Reading swipe-to-turn direction
+typedef enum {
+    PN_SWIPE_TURN_LR=0, ///< 左右滑动翻页（默认）/ Horizontal swipe turns (default)
+    PN_SWIPE_TURN_TB=1, ///< 上下滑动翻页 / Vertical swipe turns
+    PN_SWIPE_TURN_OFF=2, ///< 关闭滑动翻页 / Disable swipe turns
+    PN_SWIPE_TURN_COUNT
+} pn_swipe_turn_t;
+
 /// 底部三键阅读映射 / Bottom 3-key reading map
 typedef enum {
-    PN_KEY_MAP_DEFAULT=0, ///< KEY1上页 / KEY2菜单 / KEY3下页 / Default
-    PN_KEY_MAP_SWAP_LR, ///< KEY1下页 / KEY2菜单 / KEY3上页 / Swapped L/R
+    PN_KEY_MAP_DEFAULT=0, ///< KEY1上页 / KEY2默认回首页 / KEY3下页 / Default
+    PN_KEY_MAP_SWAP_LR, ///< KEY1下页 / KEY2默认回首页 / KEY3上页 / Swapped L/R
     PN_KEY_MAP_BOTH_NEXT, ///< KEY1与KEY3均下页 / Both L/R turn next
+    PN_KEY_MAP_OFF, ///< 关闭 KEY1/KEY3 翻页（保留 KEY2）/ Disable KEY1/KEY3 turns
     PN_KEY_MAP_COUNT
 } pn_key_map_t;
 
@@ -159,21 +170,33 @@ typedef enum {
     PN_LP_DICT=0, ///< 长按查词（弹窗内支持一键摘录）/ Long-press dictionary (with excerpt button)
     PN_LP_HIGHLIGHT=1, ///< 长按直接按句高亮摘录（再长按取消）/ Long-press sentence highlight toggle
     PN_LP_OFF=2, ///< 关闭长按 / Disabled
+    PN_LP_MENU=3, ///< 长按双选浮条（摘录 | 查词，默认）/ Long-press dual action pill (Excerpt | Dict, default)
     PN_LP_COUNT
 } pn_long_press_mode_t;
+
+/// 体感晃动翻页灵敏度 / Shake-to-turn sensitivity
+typedef enum {
+    PN_SHAKE_SENS_LOW=0, ///< 低灵敏度（防误触，需明显甩动）/ Low (anti-false-trigger)
+    PN_SHAKE_SENS_MED=1, ///< 中灵敏度（默认均衡）/ Medium (balanced default)
+    PN_SHAKE_SENS_HIGH=2, ///< 高灵敏度（轻抖即翻）/ High (light flick)
+    PN_SHAKE_SENS_COUNT
+} pn_shake_sens_t;
 
 #define PN_AUTO_TURN_DEFAULT_SEC 15u ///< 默认自动翻页间隔（秒）/ Default auto page-turn interval (s)
 #define PN_AUTO_TURN_MIN_SEC 3u
 #define PN_AUTO_TURN_MAX_SEC 120u
-/// 屏幕手势、触控区、底部三键、长按摘录与自动翻页间隔偏好（独立 A/B 日志 gestures.{a,b}）。
-/// Screen gestures, tap zones, bottom keys, long-press highlight mode & auto-turn speed (separate A/B journal gestures.{a,b}).
+/// 屏幕手势、触控区、底部三键、长按摘录、自动翻页与体感翻页偏好（独立 A/B 日志 gestures.{a,b}）。
+/// Screen gestures, tap zones, bottom keys, long-press mode, auto-turn & shake-turn prefs (separate A/B journal gestures.{a,b}).
 typedef struct {
     uint8_t slots[PN_GSLOT_COUNT]; ///< 9个手势槽绑定动作（pn_gesture_action_t）/ Actions bound to 9 gesture slots
-    uint8_t tap_zone; ///< pn_tap_zone_t / Tap-zone scheme
-    uint8_t key_map; ///< pn_key_map_t / Bottom 3-key reading map
-    uint8_t long_press_mode; ///< pn_long_press_mode_t / Long-press mode (dict / highlight / off)
+    uint8_t tap_zone; ///< pn_tap_zone_t / Tap-zone scheme (0..6)
+    uint8_t key_map; ///< pn_key_map_t / Bottom 3-key reading map (0..3)
+    uint8_t long_press_mode; ///< pn_long_press_mode_t / Long-press mode (dict / highlight / off / dual menu)
     uint8_t auto_turn_sec; ///< 自动翻页间隔（秒，3..120，默认15）/ Auto page-turn interval in seconds
     uint8_t key2_short_action; ///< 中键短按动作：0返回首页（默认）、1阅读菜单、2立即全刷、3添加书签、4自动翻页 / KEY2 short action: 0 home (default), 1 menu, 2 refresh, 3 bookmark, 4 auto-turn
+    uint8_t swipe_turn; ///< pn_swipe_turn_t：0左右滑动（默认）、1上下滑动、2关闭滑动 / Swipe page-turn mode (0 LR, 1 TB, 2 off)
+    uint8_t shake_turn; ///< 体感晃动翻页开关：0关闭（默认）、1开启 / Shake-to-turn toggle: 0 off (default), 1 on
+    uint8_t shake_sensitivity; ///< pn_shake_sens_t：0低、1中（默认）、2高 / Shake sensitivity: 0 low, 1 medium (default), 2 high
 } pn_gesture_prefs_t;
 
 /// 默认手势与交互配置（屏幕内上滑=目录、下滑=阅读菜单、顶部下拉=阅读菜单，其余边缘关闭；左右两分；默认三键；长按查词；自动翻页15秒）。

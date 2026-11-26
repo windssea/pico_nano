@@ -121,6 +121,8 @@ typedef struct {
     pn_dict_ui_t dict_ui; ///< 离线词典界面 / Offline dictionary UI
     bool dict_pointer; ///< 词典弹窗自身按下的指针所有权，屏蔽长按触发后的首次抬手 / Pointer ownership pressed inside dictionary popup, ignoring release from the opening long-press
     pn_footnote_ui_t footnote_ui; ///< EPUB 脚注弹窗 / EPUB footnote popup UI
+    pn_lp_menu_t lp_menu; ///< 正文长按双选浮条（摘录 | 查词）/ Body long-press dual action pill (Excerpt | Dict)
+    bool lp_menu_pointer; ///< 双选浮条自身按下的指针所有权，屏蔽触发长按后的松手 / Pointer ownership inside pill, ignoring release from opening long-press
     pn_style_ui_t styles;
     pn_font_ui_t fonts;bool font_pointer;
     uint64_t ui_retry;
@@ -304,7 +306,7 @@ static pn_status_t present_raw(library_t *s,const pn_frame_t *frame){
             uint8_t row[684]; // 行批量写，避免截图自身放大输入延迟。/ Write rows in batches so capture does not inflate input latency.
             for(int y=0;frame->width<=(int)sizeof row && y<frame->height;y++){for(int x=0;x<frame->width;x++)row[x]=(uint8_t)(pn_frame_get(frame,x,y)*17u);if(fwrite(row,1,(size_t)frame->width,file)!=(size_t)frame->width)break;}
             fclose(file);
-            if(getenv("PN_SIM_CAPTURE_READING") && reading(s) && !s->locked && !s->toolbar && !s->footnote_ui.active && !s->styles.active && !s->fonts.active && !(s->foreground_open.impl || s->index_gate))printf("reading_frame=%u\n",index);
+            if(getenv("PN_SIM_CAPTURE_READING") && reading(s) && !s->locked && !s->toolbar && !s->footnote_ui.active && !s->lp_menu.active && !s->styles.active && !s->fonts.active && !(s->foreground_open.impl || s->index_gate))printf("reading_frame=%u\n",index);
         }
     }
     return status;
@@ -329,7 +331,7 @@ static pn_status_t ripple_demo(library_t *s,const pn_frame_t *next,bool reverse,
     pn_free(pixels);return status;
 }
 static bool management_active(const library_t *s){
-    return s->fonts.active || s->toc.active || s->jumpui.active || s->styles.active || s->bookmarks.mode!=PN_BUI_CLOSED || s->dict_ui.mode!=PN_DUI_CLOSED || s->footnote_ui.active || s->actions_mode || s->stats_open || s->excerpts_ui.mode!=PN_EXUI_CLOSED || s->files_open || s->settings.impl || s->font_manage.impl || s->wallpaper.impl || s->hub || s->search_open || s->index || s->toolbar;
+    return s->fonts.active || s->toc.active || s->jumpui.active || s->styles.active || s->bookmarks.mode!=PN_BUI_CLOSED || s->dict_ui.mode!=PN_DUI_CLOSED || s->footnote_ui.active || s->lp_menu.active || s->actions_mode || s->stats_open || s->excerpts_ui.mode!=PN_EXUI_CLOSED || s->files_open || s->settings.impl || s->font_manage.impl || s->wallpaper.impl || s->hub || s->search_open || s->index || s->toolbar;
 }
 static pn_status_t present_impl(void *ctx,const pn_frame_t *frame,pn_refresh_t profile){
     library_t *s=ctx;
@@ -354,7 +356,7 @@ static pn_status_t present_impl(void *ctx,const pn_frame_t *frame,pn_refresh_t p
     if(status==PN_OK){s->feedback_known=true;(void)pn_feedback_discard(&s->feedback);pn_feedback_idle_cover(&s->feedback_idle,(profile==PN_REFRESH_GC16 || profile==PN_REFRESH_EXIT_GC16)?(pn_feedback_box_t){0,0,684,1216}:s->content_area);
         if(game_exit_clean){s->game_exit_clean_pending=false;printf("game_exit_clean destination=entertainment presentations=1 status=0\n");}}
     else if(status!=PN_CANCELLED && status!=PN_BUSY){s->feedback_known=false;(void)pn_feedback_discard(&s->feedback);}
-    if(status==PN_OK && reading(s) && !s->toolbar && !s->footnote_ui.active && s->dict_ui.mode==PN_DUI_CLOSED && frame->width==684 && frame->height==1216 && frame->stride>=342){
+    if(status==PN_OK && reading(s) && !s->toolbar && !s->footnote_ui.active && !s->lp_menu.active && s->dict_ui.mode==PN_DUI_CLOSED && frame->width==684 && frame->height==1216 && frame->stride>=342){
         if(!s->page_px)s->page_px=pn_alloc_tagged(s->pool,PN_MEM_FRAME,342u*1216u);
         if(s->page_px && frame->pixels!=s->page_px)for(int y=0;y<1216;y++)memcpy(s->page_px+(size_t)y*342,frame->pixels+(size_t)y*frame->stride,342);
     }
@@ -1130,7 +1132,7 @@ static pn_status_t toolbar_show_ex(library_t *s,const char *notice,bool bookmark
 static pn_status_t toolbar_show(library_t *s){return toolbar_show_ex(s,NULL,false);}
 /* 关闭工具栏：恢复原页面；refresh为真时按强刷重画。/ Close the toolbar and restore the page; a full refresh repaint when refresh is true. */
 static pn_status_t toolbar_close(library_t *s,bool refresh){
-    s->toolbar=false;pn_footnote_ui_close(&s->footnote_ui);
+    s->toolbar=false;pn_footnote_ui_close(&s->footnote_ui);s->lp_menu.active=false;s->lp_menu_pointer=false;s->lp_menu.active=false;s->lp_menu_pointer=false;
     if(!s->page_px)return PN_EMPTY;
     pn_frame_t frame;if(!pn_frame_bind(&frame,s->page_px,342u*1216u,684,1216))return PN_INVALID;
     pn_status_t status=present_raw(s,&frame);if(status==PN_OK && refresh){pn_reader_app_refresh_reset(&s->reader);pn_epub_app_refresh_reset(&s->epub);}
@@ -1143,12 +1145,12 @@ static pn_status_t return_to_shelf(library_t *s,uint64_t now){
     pn_recent_item_t preview;bool has_preview=s->recent_loaded && s->recent &&
         (s->epub.impl?pn_epub_app_recent_item(&s->epub,&preview):pn_reader_app_recent_item(&s->reader,&preview))==PN_OK;
     pn_status_t status=PN_EMPTY;
-    if(reading(s) && s->last_read_known && !s->toc.active && !s->fonts.active && !s->styles.active && !s->jumpui.active && s->bookmarks.mode==PN_BUI_CLOSED && s->dict_ui.mode==PN_DUI_CLOSED && !s->footnote_ui.active)
+    if(reading(s) && s->last_read_known && !s->toc.active && !s->fonts.active && !s->styles.active && !s->jumpui.active && s->bookmarks.mode==PN_BUI_CLOSED && s->dict_ui.mode==PN_DUI_CLOSED && !s->footnote_ui.active && !s->lp_menu.active)
         status=pn_hot_session_park(&s->hot,s->pool,&s->media,s->last_read.path,1,now,&s->reader,&s->epub);
     if(status==PN_EMPTY || status==PN_BUSY)status=active_close(s,now);
     s->recent_loaded=status==PN_OK && has_preview && pn_recent_preview(s->recent,&preview,NULL)==PN_OK;
     printf("library_hot park=%zu retained=%d status=%d\n",s->hot.parks,s->hot.media!=NULL,(int)status);
-    if(status==PN_OK){pn_toc_ui_close(&s->toc);pn_bookmark_ui_cancel(&s->bookmarks);pn_dict_ui_close(&s->dict_ui);s->dict_pointer=false;pn_footnote_ui_close(&s->footnote_ui);pn_style_ui_close(&s->styles);pn_jump_ui_close(&s->jumpui);pn_font_ui_close(&s->fonts);pn_sdl_async_text(&s->async,false);if(s->home)status=page(s,false,true);else{covers_reset(s);status=draw(s);}printf("library_return status=%d\n",(int)status);}return status;
+    if(status==PN_OK){pn_toc_ui_close(&s->toc);pn_bookmark_ui_cancel(&s->bookmarks);pn_dict_ui_close(&s->dict_ui);s->dict_pointer=false;pn_footnote_ui_close(&s->footnote_ui);s->lp_menu.active=false;s->lp_menu_pointer=false;pn_style_ui_close(&s->styles);pn_jump_ui_close(&s->jumpui);pn_font_ui_close(&s->fonts);pn_sdl_async_text(&s->async,false);if(s->home)status=page(s,false,true);else{covers_reset(s);status=draw(s);}printf("library_return status=%d\n",(int)status);}return status;
 }
 /// 打开离线词典界面：解析书库同级 dicts 目录，长按自动提取候选词，工具栏入口进入手动查词。
 /// Open offline dictionary UI using sibling dicts dir; long-press extracts candidates, toolbar enters manual search.
@@ -1217,6 +1219,37 @@ static pn_status_t footnote_jump(library_t *s,uint64_t now){
     if(status!=PN_OK && s->page_px){pn_frame_t frame;if(pn_frame_bind(&frame,s->page_px,342u*1216u,684,1216))(void)present_raw(s,&frame);}
     return status;
 }
+static pn_status_t lp_menu_present(library_t *s){
+    if(!s->lp_menu.active || !reading(s) || !s->page_px)return PN_EMPTY;
+    uint8_t *pixels=pn_alloc_tagged(s->pool,PN_MEM_FRAME,342u*1216u);pn_frame_t frame;
+    if(!pixels || !pn_frame_bind(&frame,pixels,342u*1216u,684,1216)){pn_free(pixels);return PN_NO_MEMORY;}
+    memcpy(pixels,s->page_px,342u*1216u);
+    pn_font_t ui={0};pn_text_source_t builtin=pn_font_builtin_source();pn_status_t status=pn_font_open(&ui,s->pool,&builtin,26);
+    pn_w_font_scope_t scope={0};if(status==PN_OK)status=pn_w_font_scope_begin(&scope,s->pool,NULL);
+    if(status==PN_OK)status=pn_lp_menu_render(&s->lp_menu,&ui,&frame);
+    pn_w_font_scope_end(&scope);pn_font_close(&ui);
+    if(status==PN_OK)status=present(s,&frame,PN_REFRESH_GL16);
+    pn_free(pixels);
+    return status;
+}
+static pn_status_t lp_menu_close(library_t *s,bool repaint){
+    if(!s->lp_menu.active)return PN_EMPTY;
+    s->lp_menu.active=false;s->lp_menu_pointer=false;
+    if(!repaint || !s->page_px)return PN_OK;
+    pn_frame_t frame;if(!pn_frame_bind(&frame,s->page_px,342u*1216u,684,1216))return PN_INVALID;
+    return present_raw(s,&frame);
+}
+static pn_status_t lp_menu_open_at(library_t *s,int x,int y){
+    if(!reading(s) || !s->page_px)return PN_EMPTY;
+    bool hl=false;
+    pn_status_t hs=s->epub.impl?pn_epub_app_highlight_at(&s->epub,x,y,&hl):pn_reader_app_highlight_at(&s->reader,x,y,&hl);
+    s->lp_menu=(pn_lp_menu_t){.active=true,.anchor_x=x,.anchor_y=y,.highlighted=(hs==PN_OK && hl)};
+    s->lp_menu_pointer=false;
+    pn_status_t st=lp_menu_present(s);
+    if(st!=PN_OK)s->lp_menu.active=false;
+    printf("lp_menu open x=%d y=%d highlighted=%d status=%d\n",x,y,(int)s->lp_menu.highlighted,(int)st);
+    return st;
+}
 /// 管理页命中源，与点击共用。/ Management hit source shared with pointer input.
 static int management_hit(void *ctx,int x,int y){
     library_t *s=ctx;
@@ -1227,6 +1260,7 @@ static int management_hit(void *ctx,int x,int y){
     if(s->bookmarks.mode!=PN_BUI_CLOSED)return pn_bookmark_ui_hit(&s->bookmarks,x,y);
     if(s->dict_ui.mode!=PN_DUI_CLOSED)return pn_dict_ui_hit(&s->dict_ui,x,y);
     if(s->footnote_ui.active)return pn_footnote_ui_hit(&s->footnote_ui,x,y);
+    if(s->lp_menu.active)return pn_lp_menu_hit(&s->lp_menu,x,y);
     if(s->actions_mode)return pn_book_actions_hit(&s->actions,x,y);
     if(s->stats_open)return pn_stats_view_hit(x,y);
     if(s->excerpts_ui.mode!=PN_EXUI_CLOSED)return pn_excerpts_ui_hit(&s->excerpts_ui,x,y);
@@ -1243,7 +1277,7 @@ static int management_hit(void *ctx,int x,int y){
 /// 只把一级页真实底栏交给按下路由，内容区、子页与模态保留原点击语义。/ Route only real root navigation on press; content, subpages and modals retain their click semantics.
 static int root_navigation_hit(library_t *s,int x,int y){
     if((s->foreground_open.impl || s->index_gate) || s->opening_book)return -1;
-    if(s->tsumego.active || s->klotski.active || s->xiangqi.active || s->nonogram.active || s->minesweeper.active || s->sokoban.active || s->sudoku.active || s->locked || s->fonts.active || s->toc.active || s->jumpui.active || s->styles.active || s->bookmarks.mode!=PN_BUI_CLOSED || s->dict_ui.mode!=PN_DUI_CLOSED || s->footnote_ui.active || s->actions_mode || s->stats_open || s->excerpts_ui.mode!=PN_EXUI_CLOSED || s->font_manage.impl || s->wallpaper.impl || s->search_open || s->index || s->toolbar || pn_w_navigation_hit(x,y)<0)return -1;
+    if(s->tsumego.active || s->klotski.active || s->xiangqi.active || s->nonogram.active || s->minesweeper.active || s->sokoban.active || s->sudoku.active || s->locked || s->fonts.active || s->toc.active || s->jumpui.active || s->styles.active || s->bookmarks.mode!=PN_BUI_CLOSED || s->dict_ui.mode!=PN_DUI_CLOSED || s->footnote_ui.active || s->lp_menu.active || s->actions_mode || s->stats_open || s->excerpts_ui.mode!=PN_EXUI_CLOSED || s->font_manage.impl || s->wallpaper.impl || s->search_open || s->index || s->toolbar || pn_w_navigation_hit(x,y)<0)return -1;
     if(s->settings.impl)return pn_settings_ui_screen(&s->settings)==0?pn_settings_ui_hit(&s->settings,x,y):-1;
     if(s->hub){pn_transfer_hub_info_t info=hub_info(s);return pn_transfer_hub_hit(&info,x,y);}
     return reading(s) || !s->page?-1:shelf_hit(s,x,y);
@@ -1314,19 +1348,19 @@ static bool feedback_event(library_t *s,const SDL_Event *e){
     if(!motion && e->type!=SDL_MOUSEBUTTONDOWN && e->type!=SDL_MOUSEBUTTONUP)return true;
     if((motion && !(e->motion.state&SDL_BUTTON_LMASK)) || (!motion && e->button.button!=SDL_BUTTON_LEFT))return true;
     int x=motion?e->motion.x:e->button.x,y=motion?e->motion.y:e->button.y;
-    int hit=management_hit(s,x,y);bool supported=s->settings.impl || s->font_manage.impl || s->wallpaper.impl || s->files_open || s->hub || s->toolbar || s->footnote_ui.active || s->actions_mode || s->stats_open || s->excerpts_ui.mode!=PN_EXUI_CLOSED || s->fonts.active || s->toc.active || s->styles.active || s->jumpui.active || s->bookmarks.mode!=PN_BUI_CLOSED || s->dict_ui.mode!=PN_DUI_CLOSED || s->search_open || s->index;
+    int hit=management_hit(s,x,y);bool supported=s->settings.impl || s->font_manage.impl || s->wallpaper.impl || s->files_open || s->hub || s->toolbar || s->footnote_ui.active || s->lp_menu.active || s->actions_mode || s->stats_open || s->excerpts_ui.mode!=PN_EXUI_CLOSED || s->fonts.active || s->toc.active || s->styles.active || s->jumpui.active || s->bookmarks.mode!=PN_BUI_CLOSED || s->dict_ui.mode!=PN_DUI_CLOSED || s->search_open || s->index;
     if(!supported)return true;
     if(e->type!=SDL_MOUSEBUTTONDOWN && !s->feedback_tap.down)return false;
     int selected=-1;bool was_down=s->feedback_tap.down;
     (void)pn_tap_feed(&s->feedback_tap,1,hit,true,&selected);
     if(s->feedback_tap.cancelled){feedback_restore(s);if(motion)return false;}
-    if(e->type==SDL_MOUSEBUTTONDOWN && !was_down && !s->feedback_tap.cancelled && !(s->footnote_ui.active && hit>=PN_FNUI_DISMISS) && !((s->dict_ui.mode==PN_DUI_RESULT || s->dict_ui.mode==PN_DUI_PICKER) && hit>=PN_DUI_DISMISS && hit<=PN_DUI_BODY_NEXT)){pn_feedback_box_t box;int code;
+    if(e->type==SDL_MOUSEBUTTONDOWN && !was_down && !s->feedback_tap.cancelled && !(s->footnote_ui.active && hit>=PN_FNUI_DISMISS) && !(s->lp_menu.active && hit==PN_LPM_DISMISS) && !((s->dict_ui.mode==PN_DUI_RESULT || s->dict_ui.mode==PN_DUI_PICKER) && hit>=PN_DUI_DISMISS && hit<=PN_DUI_BODY_NEXT)){pn_feedback_box_t box;int code;
         if(pn_feedback_region(management_hit,s,x,y,&box,&code)==PN_OK && pn_feedback_prepare(&s->feedback,s->pool,box,atomic_load(&s->async.input.view),code,feedback_read,s)==PN_OK){
             pn_status_t r=pn_feedback_present(&s->feedback,true,feedback_submit,s);if(r!=PN_OK)feedback_restore(s);}}
     if(e->type==SDL_MOUSEBUTTONUP){(void)pn_tap_feed(&s->feedback_tap,0,-1,true,&selected);bool commit=pn_tap_feed(&s->feedback_tap,0,-1,true,&selected);s->feedback_release=true;if(!commit)return false;}
     return true;
 }
-static int management_focus_hit(void *ctx,int x,int y){library_t *s=ctx;int c=management_hit(s,x,y);return (s->jumpui.active && c>=PN_JUI_PERCENT) || (s->footnote_ui.active && c>=PN_FNUI_DISMISS) || ((s->dict_ui.mode==PN_DUI_RESULT || s->dict_ui.mode==PN_DUI_PICKER) && c>=PN_DUI_DISMISS && c<=PN_DUI_BODY_NEXT)?-1:c;}
+static int management_focus_hit(void *ctx,int x,int y){library_t *s=ctx;int c=management_hit(s,x,y);return (s->jumpui.active && c>=PN_JUI_PERCENT) || (s->footnote_ui.active && c>=PN_FNUI_DISMISS) || (s->lp_menu.active && c==PN_LPM_DISMISS) || ((s->dict_ui.mode==PN_DUI_RESULT || s->dict_ui.mode==PN_DUI_PICKER) && c>=PN_DUI_DISMISS && c<=PN_DUI_BODY_NEXT)?-1:c;}
 static void management_focus_rescan(library_t *s){
     int keep=-1;const pn_focus_item_t *current=pn_focus_current(&s->management_focus);if(current)keep=current->code;
     pn_focus_scan(&s->management_focus,management_focus_hit,s,NULL,0);
@@ -1349,6 +1383,7 @@ static void management_repaint(library_t *s){
     else if(s->bookmarks.mode!=PN_BUI_CLOSED)(void)pn_bookmark_ui_present(&s->bookmarks,present,s);
     else if(s->dict_ui.mode!=PN_DUI_CLOSED)(void)pn_dict_ui_present(&s->dict_ui,present,s);
     else if(s->footnote_ui.active)(void)footnote_present(s);
+    else if(s->lp_menu.active)(void)lp_menu_present(s);
     else if(s->toolbar)(void)toolbar_show(s);
     else if(s->actions_mode){
         pn_w_font_scope_t scope={0};pn_status_t st=pn_w_font_scope_begin(&scope,s->pool,NULL);
@@ -1362,7 +1397,7 @@ static bool management_dispatch_code(library_t *s,SDL_Event *event,int code){
         // 同命中码可能有分离区域，外接矩形中心未必可点。/ A code can span disjoint regions; its bounding-box center may not be clickable.
         for(int y=4;y<1216;y+=8)for(int x=4;x<684;x+=8)if(management_hit(s,x,y)==code){
             *event=(SDL_Event){.type=SDL_MOUSEBUTTONUP};event->button.button=SDL_BUTTON_LEFT;event->button.x=x;event->button.y=y;
-            s->toc_pointer=true;s->font_pointer=true;s->dict_pointer=true;return true;
+            s->toc_pointer=true;s->font_pointer=true;s->dict_pointer=true;s->lp_menu_pointer=true;return true;
         }
     }
     return false;
@@ -1376,7 +1411,7 @@ static bool management_event(library_t *s,SDL_Event *event,uint64_t now){
     if(event->key.repeat)return true;
     bool long_middle=sym==SDLK_F10;
     int key=long_middle?PN_KEY_2:(int)(sym-SDLK_1);
-    int back=s->fonts.active?(s->fonts.preview?PN_FUI_FORM:PN_FUI_BACK):s->toc.active?PN_TOC_UI_BACK:s->jumpui.active?PN_JUI_CANCEL:s->styles.active?(s->styles.preview?PN_SUI_FORM:s->styles.margins?PN_SUI_MARGINS_BACK:s->styles.backgrounds?PN_SUI_BACKGROUND_BACK:s->styles.more?PN_SUI_BACK_MAIN:PN_SUI_CANCEL):s->bookmarks.mode!=PN_BUI_CLOSED?PN_BUI_BACK:s->dict_ui.mode!=PN_DUI_CLOSED?PN_DUI_BACK:s->footnote_ui.active?PN_FNUI_CLOSE:s->actions_mode?PN_BA_CANCEL:s->stats_open?PN_STATS_BACK:s->excerpts_ui.mode!=PN_EXUI_CLOSED?PN_EXUI_BACK:s->files_open?(s->file_manager && s->file_manager->view==PN_FM_VIEW_ACTIONS?PN_FM_ACT_CANCEL:PN_FM_BACK):s->settings.impl?PN_SETUI_BACK:s->font_manage.impl?PN_FMU_BACK:s->wallpaper.impl?(s->wallpaper.screen==PN_WUI_LIST?PN_WUI_BACK:PN_WUI_CANCEL):s->hub?PN_HUB_SHELF:s->search_open?PN_SEARCH_BACK:s->index?'<':PN_TOOL_CLOSE;
+    int back=s->fonts.active?(s->fonts.preview?PN_FUI_FORM:PN_FUI_BACK):s->toc.active?PN_TOC_UI_BACK:s->jumpui.active?PN_JUI_CANCEL:s->styles.active?(s->styles.preview?PN_SUI_FORM:s->styles.margins?PN_SUI_MARGINS_BACK:s->styles.backgrounds?PN_SUI_BACKGROUND_BACK:s->styles.more?PN_SUI_BACK_MAIN:PN_SUI_CANCEL):s->bookmarks.mode!=PN_BUI_CLOSED?PN_BUI_BACK:s->dict_ui.mode!=PN_DUI_CLOSED?PN_DUI_BACK:s->footnote_ui.active?PN_FNUI_CLOSE:s->lp_menu.active?PN_LPM_DISMISS:s->actions_mode?PN_BA_CANCEL:s->stats_open?PN_STATS_BACK:s->excerpts_ui.mode!=PN_EXUI_CLOSED?PN_EXUI_BACK:s->files_open?(s->file_manager && s->file_manager->view==PN_FM_VIEW_ACTIONS?PN_FM_ACT_CANCEL:PN_FM_BACK):s->settings.impl?PN_SETUI_BACK:s->font_manage.impl?PN_FMU_BACK:s->wallpaper.impl?(s->wallpaper.screen==PN_WUI_LIST?PN_WUI_BACK:PN_WUI_CANCEL):s->hub?PN_HUB_SHELF:s->search_open?PN_SEARCH_BACK:s->index?'<':PN_TOOL_CLOSE;
     bool dialog=(s->actions_mode && s->actions.confirming) || (s->files_open && s->file_manager && s->file_manager->view==PN_FM_VIEW_CONFIRM) || (s->font_manage.impl && s->font_manage.screen==PN_FMU_CONFIRMING) || s->bookmarks.mode==PN_BUI_DELETE;
     int dlg_confirm=s->actions_mode?PN_BA_CONFIRM:s->files_open?PN_FM_CONFIRM_DELETE:s->font_manage.impl?PN_FMU_CONFIRM:PN_BUI_CONFIRM;
     int dlg_cancel=s->actions_mode?PN_BA_CANCEL:s->files_open?PN_FM_CONFIRM_CANCEL:s->font_manage.impl?PN_FMU_CANCEL:PN_BUI_CANCEL;
@@ -1395,6 +1430,7 @@ static bool management_event(library_t *s,SDL_Event *event,uint64_t now){
         }
         if(s->toolbar){pn_status_t status=toolbar_close(s,false);printf("reading settings middle status=%d active=%d\n",(int)status,(int)s->toolbar);return true;}
         if(s->footnote_ui.active){(void)footnote_close(s,true);return true;}
+        if(s->lp_menu.active){(void)lp_menu_close(s,true);return true;}
         management_focus_rescan(s);s->management_focus.index=-1;
         if(management_dispatch_code(s,event,back))return false;
         event->key.keysym.sym=SDLK_ESCAPE;return false;
@@ -1437,6 +1473,7 @@ static bool management_event(library_t *s,SDL_Event *event,uint64_t now){
     if(s->styles.active){pn_status_t status=pn_style_ui_event(&s->styles,PN_SUI_APPLY,now,present,s);style_report(&s->styles,PN_SUI_APPLY,status);return true;}
     if(s->toolbar){pn_status_t status=toolbar_close(s,false);printf("reading settings middle status=%d active=%d\n",(int)status,(int)s->toolbar);return true;}
     if(s->footnote_ui.active){(void)footnote_close(s,true);return true;}
+    if(s->lp_menu.active){(void)lp_menu_close(s,true);return true;}
     if(s->toc.active || s->jumpui.active || s->bookmarks.mode!=PN_BUI_CLOSED){event->key.keysym.sym=SDLK_RETURN;return false;}
     for(size_t i=0;i<s->management_focus.count;i++)if(s->management_focus.items[i].code!=back){s->management_focus.index=(int)i;break;}
     if(s->management_focus.index<0 && s->management_focus.count)s->management_focus.index=0;
@@ -1478,7 +1515,7 @@ static pn_status_t lock_preview(library_t *s,uint64_t now){
     pn_status_t status=opening_abort(s);
     if(reading(s)){status=s->epub.impl?pn_epub_app_suspend(&s->epub,now):pn_reader_app_suspend(&s->reader,now);if(status==PN_BUSY)status=active_close(s,now);}
     if(status!=PN_OK)return status;
-    s->toolbar=false;pn_footnote_ui_close(&s->footnote_ui);
+    s->toolbar=false;pn_footnote_ui_close(&s->footnote_ui);s->lp_menu.active=false;s->lp_menu_pointer=false;
     if(!s->frame.pixels){uint8_t *pixels=pn_alloc_tagged(s->pool,PN_MEM_FRAME,PN_WALLPAPER_BYTES);if(!pixels)return PN_NO_MEMORY;pn_frame_bind(&s->frame,pixels,PN_WALLPAPER_BYTES,684,1216);}
     if(!s->font.impl){pn_text_source_t font=pn_font_builtin_source();status=pn_font_open(&s->font,s->pool,&font,32);}
     pn_lock_selection_t selection={.mode=PN_LOCK_DEFAULT,.hint=false},mask_sel={.mode=PN_LOCK_DEFAULT,.hint=false};
@@ -1971,6 +2008,37 @@ static int library_worker(void *ctx){
             if(command>=0)cancel_pointer(&input,&tap,(atomic_load(&s->async.mouse)&SDL_BUTTON_LMASK)==0);
             continue;
         }
+        if(s->lp_menu.active){
+            int command=-1;
+            if(event.type==SDL_QUIT){s->lp_menu.active=false;s->lp_menu_pointer=false;if(reading(s)){status=return_to_shelf(s,now);}if(!reading(s))running=false;continue;}
+            if(event.type==SDL_KEYDOWN && !event.key.repeat){
+                SDL_Keycode key=event.key.keysym.sym;
+                if(key==SDLK_ESCAPE)command=PN_LPM_DISMISS;
+                else if(key==SDLK_e)command=PN_LPM_EXCERPT;
+                else if(key==SDLK_d)command=PN_LPM_DICT;
+            }else if(event.type==SDL_MOUSEBUTTONDOWN && event.button.button==SDL_BUTTON_LEFT){
+                s->lp_menu_pointer=true;
+            }else if(event.type==SDL_MOUSEBUTTONUP && event.button.button==SDL_BUTTON_LEFT && s->lp_menu_pointer){
+                s->lp_menu_pointer=false;
+                command=pn_lp_menu_hit(&s->lp_menu,event.button.x,event.button.y);
+            }
+            if(command==PN_LPM_DISMISS)status=lp_menu_close(s,true);
+            else if(command==PN_LPM_EXCERPT){
+                int ax=s->lp_menu.anchor_x,ay=s->lp_menu.anchor_y;
+                s->lp_menu.active=false;s->lp_menu_pointer=false;
+                bool added=false;
+                status=s->epub.impl?pn_epub_app_highlight_toggle(&s->epub,ax,ay,now,present,s,&added,NULL,0)
+                    :pn_reader_app_highlight_toggle(&s->reader,ax,ay,now,present,s,&added,NULL,0);
+                if(status!=PN_OK && s->page_px){pn_frame_t frame;if(pn_frame_bind(&frame,s->page_px,342u*1216u,684,1216))(void)present_raw(s,&frame);}
+                printf("lp_menu excerpt added=%d status=%d\n",(int)added,(int)status);
+            }else if(command==PN_LPM_DICT){
+                int ax=s->lp_menu.anchor_x,ay=s->lp_menu.anchor_y;
+                s->lp_menu.active=false;s->lp_menu_pointer=false;
+                status=dict_open_at(s,ax,ay,false);
+            }
+            if(command>=0)cancel_pointer(&input,&tap,(atomic_load(&s->async.mouse)&SDL_BUTTON_LMASK)==0);
+            continue;
+        }
         if(s->jumpui.active){
             // 跳转面板：Esc取消，Enter跳转，左右键±1，上下翻页键±大步；鼠标松开命中。/ Jump panel: Esc cancels, Enter jumps, left/right step by 1, page keys by the large step; mouse release hits.
             int command=-1;
@@ -2354,7 +2422,8 @@ static int library_worker(void *ctx){
                 if(key==SDLK_s){status=s->epub.impl?pn_style_ui_open_epub(&s->styles,&s->epub,present,s):pn_style_ui_open(&s->styles,&s->reader,present,s);printf("style_ui open status=%d pixels=%u\n",(int)status,s->styles.draft.pixels);continue;}
                 if(key==SDLK_k){status=toolbar_show(s);continue;}
                 if(key==SDLK_d){status=dict_open_at(s,0,0,true);continue;}
-                if(key==SDLK_u){status=s->epub.impl?pn_epub_app_bookmark_return(&s->epub,now,present,s):pn_reader_app_bookmark_return(&s->reader,now,present,s);printf("bookmark_return status=%d\n",(int)status);continue;}
+                if(key==SDLK_j && s->gestures.shake_turn){action=PN_APP_NEXT;turn=true;printf("shake_turn simulated\n");}
+                else if(key==SDLK_u){status=s->epub.impl?pn_epub_app_bookmark_return(&s->epub,now,present,s):pn_reader_app_bookmark_return(&s->reader,now,present,s);printf("bookmark_return status=%d\n",(int)status);continue;}
                 if(key==SDLK_RIGHT || key==SDLK_DOWN || key==SDLK_PAGEDOWN || key==SDLK_SPACE){action=PN_APP_NEXT;turn=true;}
                 else if(key==SDLK_LEFT || key==SDLK_UP || key==SDLK_PAGEUP){action=PN_APP_PREVIOUS;turn=true;}
                 else if(key==SDLK_PLUS || key==SDLK_EQUALS){action=PN_APP_LARGER;turn=true;}
@@ -2422,8 +2491,10 @@ static int library_worker(void *ctx){
         }else if(event.type==SDL_MOUSEBUTTONDOWN || event.type==SDL_MOUSEBUTTONUP || event.type==SDL_MOUSEMOTION){
             if(event.type==SDL_MOUSEBUTTONUP && event.button.button==SDL_BUTTON_RIGHT){
                 if(!reading(s)){int h=shelf_hit(s,event.button.x,event.button.y);if(h>=0 && h<PN_CATALOG_PAGE_MAX)open_actions(s,h);}
-                else if(s->bookmarks.mode==PN_BUI_CLOSED && !s->styles.active && s->dict_ui.mode==PN_DUI_CLOSED && !s->footnote_ui.active){
-                    if(s->gestures.long_press_mode==PN_LP_HIGHLIGHT){
+                else if(s->bookmarks.mode==PN_BUI_CLOSED && !s->styles.active && s->dict_ui.mode==PN_DUI_CLOSED && !s->footnote_ui.active && !s->lp_menu.active){
+                    if(s->gestures.long_press_mode==PN_LP_MENU){
+                        status=lp_menu_open_at(s,event.button.x,event.button.y);
+                    }else if(s->gestures.long_press_mode==PN_LP_HIGHLIGHT){
                         bool added=false;
                         status=s->epub.impl?pn_epub_app_highlight_toggle(&s->epub,event.button.x,event.button.y,now,present,s,&added,NULL,0)
                             :pn_reader_app_highlight_toggle(&s->reader,event.button.x,event.button.y,now,present,s,&added,NULL,0);
@@ -2443,13 +2514,13 @@ static int library_worker(void *ctx){
 
             int target=s->styles.active?pn_style_ui_hit(&s->styles,x,y):s->bookmarks.mode!=PN_BUI_CLOSED?pn_bookmark_ui_hit(&s->bookmarks,x,y):reading(s)?pn_reader_bar_hit(x,y,bars_hidden,s->epub.impl?pn_epub_app_bookmark_can_return(&s->epub):pn_reader_app_bookmark_can_return(&s->reader)):shelf_hit(s,x,y);
             (void)pn_tap_feed(&tap,1,target,true,&hit);
-            if(reading(s) && s->bookmarks.mode==PN_BUI_CLOSED && !s->styles.active && s->dict_ui.mode==PN_DUI_CLOSED && !s->footnote_ui.active){
-                if(pn_reader_input_feed_timed(&input,1,x,y,true,now,&action) && (action==PN_APP_LOOKUP || action==PN_APP_HIGHLIGHT)){turn=true;}
+            if(reading(s) && s->bookmarks.mode==PN_BUI_CLOSED && !s->styles.active && s->dict_ui.mode==PN_DUI_CLOSED && !s->footnote_ui.active && !s->lp_menu.active){
+                if(pn_reader_input_feed_timed(&input,1,x,y,true,now,&action) && (action==PN_APP_LOOKUP || action==PN_APP_HIGHLIGHT || action==PN_APP_LONG_PRESS_MENU)){turn=true;}
             }
             if(event.type==SDL_MOUSEBUTTONUP){
                 s->pointer_down=navigation_selected && (navigation_press.down || navigation_press.blocked);
                 (void)pn_tap_feed(&tap,0,-1,true,&hit);commit=pn_tap_feed(&tap,0,-1,true,&hit);
-                if(reading(s) && s->bookmarks.mode==PN_BUI_CLOSED && !s->styles.active && s->dict_ui.mode==PN_DUI_CLOSED && !s->footnote_ui.active && !turn){(void)pn_reader_input_feed_timed(&input,0,0,0,true,now,&action);turn=pn_reader_input_feed_timed(&input,0,0,0,true,now,&action);body_tap=input.last_tap;}
+                if(reading(s) && s->bookmarks.mode==PN_BUI_CLOSED && !s->styles.active && s->dict_ui.mode==PN_DUI_CLOSED && !s->footnote_ui.active && !s->lp_menu.active && !turn){(void)pn_reader_input_feed_timed(&input,0,0,0,true,now,&action);turn=pn_reader_input_feed_timed(&input,0,0,0,true,now,&action);body_tap=input.last_tap;}
             }
         }else if(event.type==SDL_WINDOWEVENT && event.window.event==SDL_WINDOWEVENT_FOCUS_LOST){
             s->pointer_down=false;pn_reader_input_cancel(&input);(void)pn_tap_feed(&tap,1,-1,false,&hit);
@@ -2495,6 +2566,7 @@ static int library_worker(void *ctx){
         if(body_tap && !commit && reading(s) && s->epub.impl && footnote_open_at(s,input.start_x,input.start_y)){turn=false;status=PN_OK;}
         if(turn && reading(s) && action==PN_APP_TOOLS){turn=false;status=toolbar_show(s);}
         if(turn && reading(s) && action==PN_APP_LOOKUP){int lx=input.start_x,ly=input.start_y;turn=false;s->pointer_down=false;cancel_pointer(&input,&tap,true);status=dict_open_at(s,lx,ly,false);}
+        if(turn && reading(s) && action==PN_APP_LONG_PRESS_MENU){int lx=input.start_x,ly=input.start_y;turn=false;s->pointer_down=false;cancel_pointer(&input,&tap,true);status=lp_menu_open_at(s,lx,ly);}
         if(turn && reading(s) && action==PN_APP_HIGHLIGHT){int lx=input.start_x,ly=input.start_y;turn=false;s->pointer_down=false;cancel_pointer(&input,&tap,true);bool added=false;status=s->epub.impl?pn_epub_app_highlight_toggle(&s->epub,lx,ly,now,present,s,&added,NULL,0):pn_reader_app_highlight_toggle(&s->reader,lx,ly,now,present,s,&added,NULL,0);printf("highlight toggle added=%d status=%d\n",(int)added,(int)status);}
         if(turn && reading(s) && action==PN_APP_TOC){turn=false;if(s->epub.impl){status=open_toc(s);toc_report(&s->toc,0,status);}}
         if(turn && reading(s) && action==PN_APP_JUMP){turn=false;status=s->epub.impl?pn_jump_ui_open_epub(&s->jumpui,&s->epub,present,s):pn_jump_ui_open(&s->jumpui,&s->reader,present,s);}

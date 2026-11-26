@@ -58,10 +58,7 @@ typedef struct {pn_pool_t *pool;pn_media_t *state;char dir[PN_JOURNAL_PATH_MAX];
     unsigned motto_excerpt_page; ///< 摘录文案列表当前页 / Current page of excerpt motto picker
     pn_settings_frame_cache_t frame_cache; ///< 可选主屏整页帧缓存适配器 / Optional Settings-root frame cache adapter
 } su_t;
-static const char *const names[]={"左手模式","滑动翻页","点按翻页","屏下三键翻页"};
-static const char *const hints[]={"点左半屏翻到下一页","左右滑动翻页","点屏幕左半或右半翻页","KEY1 上一页，KEY3 下一页"};
 static const uint8_t bits[]={PN_INPUT_LEFT_HAND,PN_INPUT_NO_SWIPE,PN_INPUT_NO_EDGE_TAP,PN_INPUT_NO_KEYS};
-static bool on(uint8_t flags,unsigned i){bool set=(flags&bits[i])!=0;return i==0?set:!set;}
 /* 刷新策略：标志位4–5，0均衡、1清晰、2省电。/ Refresh policy in flag bits 4–5: 0 balanced, 1 crisp, 2 saver. */
 static unsigned level_of(uint8_t flags){unsigned level=(flags&PN_INPUT_REFRESH_MASK)>>4;return level>2?0u:level;}
 static const char *const level_names[3]={"均衡","清晰","省电"};
@@ -186,10 +183,16 @@ static pn_status_t draw_main(pn_settings_ui_t *ui,su_t *u){
 }
 static unsigned gestures_active_count(const pn_gesture_prefs_t *g);
 static const char *const tap_zone_names[PN_TAP_ZONE_COUNT];
+static const char *const swipe_turn_names[PN_SWIPE_TURN_COUNT];
 static const char *const key_map_names[PN_KEY_MAP_COUNT];
 static const char *const lp_mode_names[PN_LP_COUNT];
-/* 按键与交互页：上方紧凑机身图 + 3项自定义入口（屏幕手势/触控区/三键与摘录），下方保持 TOGGLE_Y=640 5枚开关不动。
- * Keys & gestures page: compact top sketch + 3 visual customization rows, keeping the 5 toggles anchored at TOGGLE_Y=640. */
+static const char *const lp_disp_names[PN_LP_COUNT];
+static const char *const lp_disp_notes[PN_LP_COUNT];
+static const char *const shake_sens_names[PN_SHAKE_SENS_COUNT];
+static const char *const shake_sens_notes[PN_SHAKE_SENS_COUNT];
+static int lp_disp_index(uint8_t mode);
+/* 按键与手势页：上方机身示意 + 3大可视化配置入口（屏幕手势与滑动/触控区/三键与摘录），下方为默认关闭的体感翻页与灵敏度。
+ * Keys & gestures page: top device sketch + 3 visual configuration entries + experimental shake-to-turn card below (off by default). */
 static pn_status_t draw_keys(pn_settings_ui_t *ui,su_t *u){
     pn_font_t *font=&u->font;pn_frame_t *f=&u->canvas;
     pn_status_t s=pn_w_header(font,f,"< 设置","按键与手势",NULL);
@@ -197,44 +200,43 @@ static pn_status_t draw_keys(pn_settings_ui_t *ui,su_t *u){
     pn_w_glass(f,dx,dy,dw,dh,16);pn_w_round_fill(f,dx+10,dy+12,dw-20,dh-50,6,PN_UI_PAPER);pn_w_round_stroke(f,dx+10,dy+12,dw-20,dh-50,6,1.5f,PN_UI_STROKE);
     for(int i=0;i<3;i++)pn_w_round_fill(f,dx+16+i*28,dy+dh-30,20,10,5,PN_UI_INK);
     pn_w_round_fill(f,dx+dw-34,dy-6,22,7,3,PN_UI_INK);
-    static const char *const legend[4][2]={{"KEY1/3","翻页 · 焦点移动"},{"KEY2","首页/确认 · 长按菜单/返回"},{"电源键","锁屏保存，再按唤醒"},{"长按正文","查词或按句高亮摘录"}};
+    static const char *const legend[4][2]={{"KEY1/3","翻页 · 焦点移动"},{"KEY2","首页/确认 · 长按菜单/返回"},{"电源键","锁屏保存，再按唤醒"},{"长按正文","双选摘录/查词（可配）"}};
     for(int i=0;i<4 && s==PN_OK;i++){
         int base=178+i*38;s=pn_font_size(font,22);
         if(s==PN_OK)s=pn_w_text_ex(font,f,legend[i][0],170,base,114,PN_ALIGN_LEFT,PN_UI_INK,true);
         if(s==PN_OK)s=pn_w_text_ex(font,f,legend[i][1],288,base,360,PN_ALIGN_LEFT,PN_UI_MUTED,false);
     }
-    // 自定义交互卡片（y=352..598，每行82px，不侵入 TOGGLE_Y=640）/ Interactive customization card above TOGGLE_Y=640.
-    const int cy=352,rh=82;
+    // 3大可视化配置卡片（整合了原重复的 5 枚旧开关，避免打架）/ 3 unified visual config rows (replacing the 5 legacy redundant toggles).
+    const int cy=352,rh=88;
     pn_w_round_fill(f,PN_UI_MARGIN+2,cy+2,PN_UI_WIDTH-2*PN_UI_MARGIN-4,rh*3,18,PN_UI_SELECT);
     pn_w_round_fill(f,PN_UI_MARGIN,cy,PN_UI_WIDTH-2*PN_UI_MARGIN,rh*3,18,PN_UI_PAPER);
     pn_w_round_stroke(f,PN_UI_MARGIN,cy,PN_UI_WIDTH-2*PN_UI_MARGIN,rh*3,18,1.5f,9);
-    char sub0[48],sub2[72];
-    snprintf(sub0,sizeof sub0,"已开 %u 项 · 点按线框自由绑定",gestures_active_count(&ui->gestures));
+    char sub0[64],sub2[72];
+    const char *sw_lbl=ui->gestures.swipe_turn<PN_SWIPE_TURN_COUNT?swipe_turn_names[ui->gestures.swipe_turn]:"左右滑动";
+    snprintf(sub0,sizeof sub0,"%s · 已开 %u 项快捷手势",sw_lbl,gestures_active_count(&ui->gestures));
     const char *sub1=ui->gestures.tap_zone<PN_TAP_ZONE_COUNT?tap_zone_names[ui->gestures.tap_zone]:"左右两分";
     snprintf(sub2,sizeof sub2,"%s · %s · 自动翻页 %u秒",
         ui->gestures.key_map<PN_KEY_MAP_COUNT?key_map_names[ui->gestures.key_map]:"默认",
-        ui->gestures.long_press_mode<PN_LP_COUNT?lp_mode_names[ui->gestures.long_press_mode]:"长按查词",
+        ui->gestures.long_press_mode<PN_LP_COUNT?lp_mode_names[ui->gestures.long_press_mode]:"双选条",
         (unsigned)ui->gestures.auto_turn_sec);
-    const char *rlabels[3]={"屏幕手势","阅读触控区域","三键、摘录与自动翻页"};
+    const char *rlabels[3]={"屏幕手势与滑动","阅读触控区域","三键、摘录与自动翻页"};
     const char *rsubs[3]={sub0,sub1,sub2};
     for(int i=0;i<3 && s==PN_OK;i++){
         int ry=cy+i*rh;
         s=pn_font_size(font,26);
-        if(s==PN_OK)s=pn_w_text_ex(font,f,rlabels[i],52,ry+37,540,PN_ALIGN_LEFT,PN_UI_INK,true);
-        if(s==PN_OK){s=pn_font_size(font,20);if(s==PN_OK)s=pn_w_text_ex(font,f,rsubs[i],52,ry+66,540,PN_ALIGN_LEFT,5,false);}
-        pn_w_icon(f,PN_ICON_CHEVRON,612,ry+29,22,6);
+        if(s==PN_OK)s=pn_w_text_ex(font,f,rlabels[i],52,ry+39,540,PN_ALIGN_LEFT,PN_UI_INK,true);
+        if(s==PN_OK){s=pn_font_size(font,20);if(s==PN_OK)s=pn_w_text_ex(font,f,rsubs[i],52,ry+70,540,PN_ALIGN_LEFT,5,false);}
+        pn_w_icon(f,PN_ICON_CHEVRON,612,ry+32,22,6);
         if(i<2)pn_frame_rect(f,52,ry+rh-1,576,1,PN_UI_SELECT);
     }
-    if(s==PN_OK)s=pn_w_group(font,f,"触控与翻页",TOGGLE_Y-14);
-    pn_w_card(f,TOGGLE_Y,5);
-    for(unsigned i=0;i<4 && s==PN_OK;i++){
-        const char *hint=hints[i];
-        if(ui->vertical_turn && i==1)hint="上下滑动翻页";
-        else if(ui->vertical_turn && i==2)hint="点屏幕上半或下半翻页";
-        s=pn_w_card_row(font,f,names[i],hint,NULL,-1,on(ui->flags,i)?PN_ROW_ON:PN_ROW_OFF,TOGGLE_Y+(int)i*ROW_H,false);
-    }
-    if(s==PN_OK)s=pn_w_card_row(font,f,"上下翻页","开启后改为上下滑动与上下点按翻页",NULL,-1,ui->vertical_turn?PN_ROW_ON:PN_ROW_OFF,TOGGLE_Y+4*ROW_H,true);
-    if(s==PN_OK && *u->message)s=note(u,u->message,TOGGLE_Y+5*ROW_H+42);
+    // 体感翻页卡片（默认关闭，含低/中/高三档灵敏度）/ Experimental shake-to-turn card (off by default, 3 sensitivity levels).
+    if(s==PN_OK)s=pn_w_group(font,f,"体感翻页（实验功能）",652);
+    pn_w_card(f,668,1);
+    if(s==PN_OK)s=pn_w_card_row(font,f,"晃动翻页",ui->gestures.shake_turn?"阅读时轻晃或轻甩手腕翻下一页":"默认关闭 · 开启后仅阅读正文时启用传感器",NULL,-1,ui->gestures.shake_turn?PN_ROW_ON:PN_ROW_OFF,668,true);
+    if(s==PN_OK)s=pn_w_group(font,f,"体感灵敏度",812);
+    if(s==PN_OK)s=pn_w_segments(font,f,shake_sens_names,shake_sens_notes,PN_SHAKE_SENS_COUNT,(int)(ui->gestures.shake_sensitivity<PN_SHAKE_SENS_COUNT?ui->gestures.shake_sensitivity:PN_SHAKE_SENS_MED),830,88);
+    if(s==PN_OK)s=note(u,"提示：体感翻页默认关闭；离开阅读或锁屏后加速度计立即休眠，不增加待机耗电。若乘车易误触请调至「低」或关闭。",962);
+    if(s==PN_OK && *u->message)s=note(u,u->message,1084);
     return s;
 }
 static pn_status_t draw_levels(pn_settings_ui_t *ui,su_t *u){
@@ -446,7 +448,6 @@ static pn_status_t draw_global_style(su_t *u){
     static const char *const gpresets[3]={"舒适","紧凑","大字"};
     static const char *const weights[5]={"细","标准","稍粗","粗","特粗"};
     static const char *const clarities[4]={"标准","清晰","锐利","黑白"};
-    static const char *const shades[4]={"浅","中","深","黑"};
     pn_font_t *font=&u->font;pn_frame_t *f=&u->canvas;const pn_style_t *st=&u->global_style;
     pn_status_t s=pn_w_header(font,f,"< 设置","全局排版",NULL);
     if(s==PN_OK){s=pn_font_size(font,24);if(s==PN_OK)s=pn_w_text_ex(font,f,"恢复默认",480,100,172,PN_ALIGN_RIGHT,5,false);}
@@ -481,8 +482,9 @@ static pn_status_t draw_global_style(su_t *u){
     }
     int chosen=st->pixels==44 && st->line_percent==145 && st->gap_percent==40 && st->margin==32?0:st->pixels==36 && st->line_percent==125 && st->gap_percent==20 && st->margin==24?1:st->pixels==56 && st->line_percent==160 && st->gap_percent==40 && st->margin==32?2:-1;
     if(s==PN_OK)s=pn_w_segments(font,f,gpresets,NULL,3,chosen,306,56);
-    // 与书内排版完全一致的12项双列网格。/ Exact 12-cell two-column grid matching in-book typesetting.
-    char vals[12][32];
+    // 与书内排版一致的10项双列网格（移除重复的3格阅读线，底部保留「默认阅读线与章节」入口）。
+    // Clean 10-cell two-column grid matching in-book typesetting (removes 3 redundant guide cells; keeps bottom guide/chapter entry).
+    char vals[10][32];
     snprintf(vals[0],sizeof vals[0],"%u",(unsigned)st->pixels);
     snprintf(vals[1],sizeof vals[1],"%u.%02u",(unsigned)(st->line_percent/100u),(unsigned)(st->line_percent%100u));
     snprintf(vals[2],sizeof vals[2],"%u.%02u",(unsigned)(st->gap_percent/100u),(unsigned)(st->gap_percent%100u));
@@ -492,36 +494,36 @@ static pn_status_t draw_global_style(su_t *u){
     snprintf(vals[5],sizeof vals[5],"%d%%",(int)st->tracking_percent);
     snprintf(vals[6],sizeof vals[6],"%s",weights[(st->weight+1)>=0 && (st->weight+1)<5?st->weight+1:1]);
     snprintf(vals[7],sizeof vals[7],"%s",clarities[st->clarity<4?st->clarity:0]);
-    snprintf(vals[8],sizeof vals[8],"%s",st->reading_line==1?"虚线":st->reading_line==2?"点线":st->reading_line==3?"实线":"关闭");
-    snprintf(vals[9],sizeof vals[9],"%s",shades[st->reading_line_shade<4?st->reading_line_shade:0]);
-    snprintf(vals[10],sizeof vals[10],"%+d px",(int)st->reading_line_offset);
-    snprintf(vals[11],sizeof vals[11],"%s",st->background==PN_READING_BACKGROUND_EXTERNAL?"自定义":pn_reading_background_name(st->background));
-    static const char *const glabels[12]={"字号","行距","段距","边距","首行缩进","字间距","字重","清晰度","阅读线","阅读线深浅","上下位置","背景"};
-    static const bool gchoice[12]={false,false,false,true,false,false,true,true,true,true,false,false};
-    for(unsigned i=0;i<12 && s==PN_OK;i++){
-        const char *extra=i==3?"详调 >":i==8?"详调 >":i==10?"章节 >":NULL;
-        s=draw_gstyle_cell(font,f,glabels[i],vals[i],extra,gchoice[i],i==11,32+(int)(i%2)*320,378+(int)(i/2)*84);
+    snprintf(vals[8],sizeof vals[8],"%s",st->background==PN_READING_BACKGROUND_EXTERNAL?"自定义":pn_reading_background_name(st->background));
+    if(!st->chapter_scale_percent && !st->chapter_align && !st->chapter_bold && !st->chapter_gap)snprintf(vals[9],sizeof vals[9],"默认");
+    else if(st->chapter_scale_percent)snprintf(vals[9],sizeof vals[9],"%u%%%s",(unsigned)st->chapter_scale_percent,st->chapter_bold?"·加粗":"");
+    else snprintf(vals[9],sizeof vals[9],"自定义");
+    static const char *const glabels[10]={"字号","行距","段距","边距","首行缩进","字间距","字重","清晰度","背景","章节标题"};
+    static const bool gchoice[10]={false,false,false,true,false,false,true,true,false,false};
+    for(unsigned i=0;i<10 && s==PN_OK;i++){
+        const char *extra=i==3?"详调 >":NULL;
+        s=draw_gstyle_cell(font,f,glabels[i],vals[i],extra,gchoice[i],i>=8,32+(int)(i%2)*320,378+(int)(i/2)*92);
     }
-    // 底行并排开关：书内图片 + 上下栏，下方附独立入口直达阅读线与章节标题设置。
-    // Bottom toggle row: book images + bars, plus a direct row into reading-guide & chapter heading settings.
-    pn_w_round_stroke(f,32,892,300,72,12,1.5f,9);
-    if(s==PN_OK){s=pn_font_size(font,24);if(s==PN_OK)s=pn_w_text(font,f,"书内图片",44,921,170,PN_ALIGN_LEFT);}
-    if(s==PN_OK)s=pn_w_text_ex(font,f,st->hide_images?"不显示":"显示",44,934,276,PN_ALIGN_RIGHT,PN_UI_INK,true);
-    if(s==PN_OK){s=pn_font_size(font,18);if(s==PN_OK)s=pn_w_text_ex(font,f,"关闭后保留占位",44,948,180,PN_ALIGN_LEFT,5,false);}
-    pn_w_round_stroke(f,352,892,300,72,12,1.5f,9);
-    if(s==PN_OK){s=pn_font_size(font,24);if(s==PN_OK)s=pn_w_text(font,f,"上下栏",364,921,170,PN_ALIGN_LEFT);}
-    if(s==PN_OK)s=pn_w_text_ex(font,f,st->hide_bars?"隐藏":"显示",364,934,276,PN_ALIGN_RIGHT,PN_UI_INK,true);
-    if(s==PN_OK){s=pn_font_size(font,18);if(s==PN_OK)s=pn_w_text_ex(font,f,"状态栏与页脚",364,948,180,PN_ALIGN_LEFT,5,false);}
-    pn_w_round_fill(f,32,978,300,66,12,PN_UI_SURFACE);
-    pn_w_round_stroke(f,32,978,300,66,12,1.5f,9);
-    if(s==PN_OK){s=pn_font_size(font,22);if(s==PN_OK)s=pn_w_text_ex(font,f,"阅读线与章节",46,1018,244,PN_ALIGN_LEFT,PN_UI_INK,true);}
-    pn_w_icon(f,PN_ICON_CHEVRON,298,999,22,6);
-    pn_w_round_fill(f,352,978,300,66,12,PN_UI_SURFACE);
-    pn_w_round_stroke(f,352,978,300,66,12,1.5f,9);
-    if(s==PN_OK){s=pn_font_size(font,22);if(s==PN_OK)s=pn_w_text_ex(font,f,"状态栏设置",366,1018,244,PN_ALIGN_LEFT,PN_UI_INK,true);}
-    pn_w_icon(f,PN_ICON_CHEVRON,618,999,22,6);
-    if(s==PN_OK)s=note(u,"所有更改自动保存为全局默认；未单独排版的书籍开书即生效。",1082);
-    if(s==PN_OK && *u->message)s=note(u,u->message,1152);
+    // 底行并排开关：书内图片 + 上下栏，下方附独立入口直达默认阅读线与状态栏设置。
+    // Bottom toggle row: book images + bars, plus direct entries to global reading-line/chapter and status-bar settings.
+    pn_w_round_stroke(f,32,854,300,72,12,1.5f,9);
+    if(s==PN_OK){s=pn_font_size(font,24);if(s==PN_OK)s=pn_w_text(font,f,"书内图片",44,883,170,PN_ALIGN_LEFT);}
+    if(s==PN_OK)s=pn_w_text_ex(font,f,st->hide_images?"不显示":"显示",44,896,276,PN_ALIGN_RIGHT,PN_UI_INK,true);
+    if(s==PN_OK){s=pn_font_size(font,18);if(s==PN_OK)s=pn_w_text_ex(font,f,"关闭后保留占位",44,910,180,PN_ALIGN_LEFT,5,false);}
+    pn_w_round_stroke(f,352,854,300,72,12,1.5f,9);
+    if(s==PN_OK){s=pn_font_size(font,24);if(s==PN_OK)s=pn_w_text(font,f,"上下栏",364,883,170,PN_ALIGN_LEFT);}
+    if(s==PN_OK)s=pn_w_text_ex(font,f,st->hide_bars?"隐藏":"显示",364,896,276,PN_ALIGN_RIGHT,PN_UI_INK,true);
+    if(s==PN_OK){s=pn_font_size(font,18);if(s==PN_OK)s=pn_w_text_ex(font,f,"状态栏与页脚",364,910,180,PN_ALIGN_LEFT,5,false);}
+    pn_w_round_fill(f,32,944,300,68,12,PN_UI_SURFACE);
+    pn_w_round_stroke(f,32,944,300,68,12,1.5f,9);
+    if(s==PN_OK){s=pn_font_size(font,22);if(s==PN_OK)s=pn_w_text_ex(font,f,"默认阅读线",46,985,244,PN_ALIGN_LEFT,PN_UI_INK,true);}
+    pn_w_icon(f,PN_ICON_CHEVRON,298,966,22,6);
+    pn_w_round_fill(f,352,944,300,68,12,PN_UI_SURFACE);
+    pn_w_round_stroke(f,352,944,300,68,12,1.5f,9);
+    if(s==PN_OK){s=pn_font_size(font,22);if(s==PN_OK)s=pn_w_text_ex(font,f,"状态栏设置",366,985,244,PN_ALIGN_LEFT,PN_UI_INK,true);}
+    pn_w_icon(f,PN_ICON_CHEVRON,618,966,22,6);
+    if(s==PN_OK)s=note(u,"所有更改自动保存为全局默认；未单独排版的书籍开书即生效。",1058);
+    if(s==PN_OK && *u->message)s=note(u,u->message,1136);
     return s;
 }
 static pn_status_t draw_global_margin_cell(pn_font_t *font,pn_frame_t *f,const char *label,int px,int x,int y){
@@ -938,23 +940,8 @@ static pn_status_t show(pn_settings_ui_t *ui,pn_settings_present_fn present,void
 static pn_status_t show_controls(pn_settings_ui_t *ui,su_t *u,uint8_t old_flags,pn_shelf_prefs_t old_shelf,uint16_t old_auto_lock,int command,bool local,pn_settings_present_fn present,void *ctx){
     if(!local || !ui->presented || u->snapshot_dirty || *u->message)return show(ui,present,ctx);
     pn_status_t s=PN_OK;bool changed=false;
-    if(u->screen==SCREEN_KEYS && command>=PN_SETUI_TOGGLE && command<PN_SETUI_TOGGLE+4){
-        unsigned i=(unsigned)(command-PN_SETUI_TOGGLE);changed=old_flags!=ui->flags;
-        if(changed){int x=PN_UI_WIDTH-PN_UI_MARGIN-16-64,y=TOGGLE_Y+(int)i*ROW_H+32;
-            pn_frame_rect(&u->canvas,x,y,64,36,PN_UI_PAPER);pn_w_toggle(&u->canvas,x,y,on(ui->flags,i));}
-    }else if(u->screen==SCREEN_KEYS && command==PN_SETUI_VERTICAL_TURN){
-        // 仅局部重画第2/3行（滑/点翻页提示文字）和第5行开关，不触碰卡片底圆角，无需重画上方机身示意图与手势卡。
-        // Patch only rows 1-2 (swipe/tap hint text) and row 4's toggle without touching the card's bottom rounded corners or upper diagram/gesture card.
-        changed=true;
-        pn_frame_rect(&u->canvas,36,TOGGLE_Y+ROW_H+1,612,2*ROW_H-2,PN_UI_PAPER);
-        for(unsigned i=1;i<=2 && s==PN_OK;i++){
-            const char *hint=hints[i];
-            if(ui->vertical_turn && i==1)hint="上下滑动翻页";
-            else if(ui->vertical_turn && i==2)hint="点屏幕上半或下半翻页";
-            s=pn_w_card_row(&u->font,&u->canvas,names[i],hint,NULL,-1,on(ui->flags,i)?PN_ROW_ON:PN_ROW_OFF,TOGGLE_Y+(int)i*ROW_H,false);
-        }
-        if(s==PN_OK){int x=PN_UI_WIDTH-PN_UI_MARGIN-16-64,y=TOGGLE_Y+4*ROW_H+32;
-            pn_frame_rect(&u->canvas,x,y,64,36,PN_UI_PAPER);pn_w_toggle(&u->canvas,x,y,ui->vertical_turn);}
+    if(u->screen==SCREEN_KEYS && ((command>=PN_SETUI_TOGGLE && command<PN_SETUI_TOGGLE+4) || command==PN_SETUI_VERTICAL_TURN)){
+        return show(ui,present,ctx);
     }else if(u->screen==SCREEN_REFRESH && (command==PN_SETUI_TURN || command==PN_SETUI_TURN+1 || command==PN_SETUI_TURN_CRISP || command==PN_SETUI_TURN_FAST)){
         changed=old_flags!=ui->flags;
         if(changed){
@@ -1227,6 +1214,10 @@ static pn_status_t commit_status_bar(pn_settings_ui_t *ui,su_t *u,const pn_statu
     return s;
 }
 static pn_status_t commit_gestures(pn_settings_ui_t *ui,su_t *u,const pn_gesture_prefs_t *next){
+    if(next->tap_zone==PN_TAP_ZONE_OFF && next->swipe_turn==PN_SWIPE_TURN_OFF && next->key_map==PN_KEY_MAP_OFF){
+        snprintf(u->message,sizeof u->message,"至少保留一种翻页方式");
+        return PN_LIMIT;
+    }
     pn_status_t s=PN_UNSUPPORTED;
     if(u->state && u->gestures_known)s=pn_settings_save_gestures(u->state,u->dir,next);
     if(s==PN_OK){ui->gestures=*next;u->message[0]=0;}
@@ -1354,6 +1345,11 @@ pn_status_t pn_settings_ui_event(pn_settings_ui_t *ui,int command,pn_settings_pr
     }
     if(u->screen==SCREEN_GESTURES){
         if(command==PN_SETUI_GMODAL_CLOSE){u->gesture_pick_slot=-1;return show(ui,present,ctx);}
+        if(command>=PN_SETUI_SWIPE_TURN && command<PN_SETUI_SWIPE_TURN+(int)PN_SWIPE_TURN_COUNT){
+            pn_gesture_prefs_t next=ui->gestures;next.swipe_turn=(uint8_t)(command-PN_SETUI_SWIPE_TURN);
+            if(next.swipe_turn==ui->gestures.swipe_turn)return PN_OK;
+            status=commit_gestures(ui,u,&next);pn_status_t shown=show(ui,present,ctx);return status==PN_OK?shown:status;
+        }
         if(command>=PN_SETUI_GSLOT && command<PN_SETUI_GSLOT+(int)PN_GSLOT_COUNT){u->gesture_pick_slot=command-PN_SETUI_GSLOT;return show(ui,present,ctx);}
         if(command>=PN_SETUI_GACT_PICK && command<PN_SETUI_GACT_PICK+(int)PN_GACT_COUNT && u->gesture_pick_slot>=0 && u->gesture_pick_slot<(int)PN_GSLOT_COUNT){
             pn_gesture_prefs_t next=ui->gestures;next.slots[u->gesture_pick_slot]=(uint8_t)(command-PN_SETUI_GACT_PICK);u->gesture_pick_slot=-1;
@@ -1402,7 +1398,7 @@ pn_status_t pn_settings_ui_event(pn_settings_ui_t *ui,int command,pn_settings_pr
                 pn_status_t ps=PN_OK;
                 if(prev_g.key_map!=ui->gestures.key_map){pn_frame_rect(&u->canvas,26,188,632,100,PN_UI_PAPER);ps=pn_w_segments(&u->font,&u->canvas,key_map_names,key_map_notes,PN_KEY_MAP_COUNT,(int)ui->gestures.key_map,194,88);}
                 else if(prev_g.key2_short_action!=ui->gestures.key2_short_action){pn_frame_rect(&u->canvas,26,344,632,90,PN_UI_PAPER);ps=pn_w_segments(&u->font,&u->canvas,key2_short_names,key2_short_notes,5,(int)ui->gestures.key2_short_action,350,78);}
-                else if(prev_g.long_press_mode!=ui->gestures.long_press_mode){pn_frame_rect(&u->canvas,26,486,632,100,PN_UI_PAPER);ps=pn_w_segments(&u->font,&u->canvas,lp_mode_names,lp_mode_notes,PN_LP_COUNT,(int)ui->gestures.long_press_mode,492,88);}
+                else if(prev_g.long_press_mode!=ui->gestures.long_press_mode){pn_frame_rect(&u->canvas,26,486,632,100,PN_UI_PAPER);ps=pn_w_segments(&u->font,&u->canvas,lp_disp_names,lp_disp_notes,PN_LP_COUNT,lp_disp_index(ui->gestures.long_press_mode),492,88);}
                 else if(prev_g.auto_turn_sec!=ui->gestures.auto_turn_sec){ps=draw_auto_turn_box(&u->font,&u->canvas,&ui->gestures);}
                 pn_w_font_scope_end(&scope);
                 if(ps==PN_OK){ui->presented=false;ps=present(ctx,&u->canvas,PN_REFRESH_GL16);if(ps==PN_OK)ui->presented=true;}
@@ -1595,6 +1591,14 @@ pn_status_t pn_settings_ui_event(pn_settings_ui_t *ui,int command,pn_settings_pr
         if(next!=ui->flags)status=commit(ui,u,next);
         pn_status_t shown=show_controls(ui,u,old_flags,old_shelf,old_auto_lock,command,local,present,ctx);return status==PN_OK?shown:status;
     }
+    if(u->screen==SCREEN_KEYS && (command==PN_SETUI_SHAKE_TOGGLE || (command>=PN_SETUI_SHAKE_SENS && command<PN_SETUI_SHAKE_SENS+(int)PN_SHAKE_SENS_COUNT))){
+        pn_gesture_prefs_t prev_g=ui->gestures,next=ui->gestures;
+        if(command==PN_SETUI_SHAKE_TOGGLE)next.shake_turn=next.shake_turn?0u:1u;
+        else next.shake_sensitivity=(uint8_t)(command-PN_SETUI_SHAKE_SENS);
+        if(!memcmp(&prev_g,&next,sizeof next))return PN_OK;
+        status=commit_gestures(ui,u,&next);
+        pn_status_t shown=show(ui,present,ctx);return status==PN_OK?shown:status;
+    }
     if(command==PN_SETUI_VERTICAL_TURN && u->screen==SCREEN_KEYS){
         pn_status_t saved_status=PN_UNSUPPORTED;pn_media_lease_t lease={0};bool next=!ui->vertical_turn;
         if(u->state && u->vertical_known){saved_status=pn_media_acquire(u->state,PN_MEDIA_WRITE,&lease);if(saved_status==PN_OK){pn_journal_files_t files;pn_journal_io_t io;saved_status=pn_turn_dir_prefs_files(&files,u->state,&lease,u->dir,&io);if(saved_status==PN_OK)saved_status=pn_turn_dir_prefs_save(&io,next);(void)pn_media_release(u->state,&lease);}}
@@ -1655,21 +1659,21 @@ int pn_settings_ui_hit(const pn_settings_ui_t *ui,int x,int y){
     if(x<32 || x>=652)return -1;
     if(u->screen==SCREEN_GLOBAL_STYLE){
         int preset=pn_w_segments_hit(3,306,56,x,y);if(preset>=0)return PN_SETUI_GSTYLE_PRESET+preset;
-        for(unsigned i=0;i<12;i++){
-            int cx=32+(int)(i%2)*320,cy=378+(int)(i/2)*84;
+        for(unsigned i=0;i<10;i++){
+            int cx=32+(int)(i%2)*320,cy=378+(int)(i/2)*92;
             if(y>=cy && y<cy+76 && x>=cx && x<cx+300){
-                if(i==11)return PN_SETUI_GSTYLE_BG;
+                if(i==8)return PN_SETUI_GSTYLE_BG;
+                if(i==9)return PN_SETUI_GSTYLE_CHAPTER;
                 if(y>=cy+30){
-                    if(x<cx+82)return i<8?PN_SETUI_GSTYLE_ADJ+(int)i*2:PN_SETUI_GSTYLE_EXT+(int)(i-8)*2;
-                    if(x>=cx+218)return i<8?PN_SETUI_GSTYLE_ADJ+(int)i*2+1:PN_SETUI_GSTYLE_EXT+(int)(i-8)*2+1;
+                    if(x<cx+82)return PN_SETUI_GSTYLE_ADJ+(int)i*2;
+                    if(x>=cx+218)return PN_SETUI_GSTYLE_ADJ+(int)i*2+1;
                 }
                 if(i==3)return PN_SETUI_GSTYLE_MARGINS;
-                if(i==8 || i==10)return PN_SETUI_GSTYLE_CHAPTER;
                 return -1;
             }
         }
-        if(y>=892 && y<964){if(x<332)return PN_SETUI_GSTYLE_IMAGES;if(x>=352)return PN_SETUI_GSTYLE_BARS;}
-        if(y>=978 && y<1044){if(x<332)return PN_SETUI_GSTYLE_CHAPTER;if(x>=352)return PN_SETUI_STATUS_BAR;}
+        if(y>=854 && y<926){if(x<332)return PN_SETUI_GSTYLE_IMAGES;if(x>=352)return PN_SETUI_GSTYLE_BARS;}
+        if(y>=944 && y<1012){if(x<332)return PN_SETUI_GSTYLE_CHAPTER;if(x>=352)return PN_SETUI_STATUS_BAR;}
         return -1;
     }
     if(u->screen==SCREEN_GLOBAL_CHAPTER){
@@ -1750,11 +1754,12 @@ int pn_settings_ui_hit(const pn_settings_ui_t *ui,int x,int y){
         return -1;
     }
     if(u->screen==SCREEN_KEYS){
-        if(y>=352 && y<352+82)return PN_SETUI_GESTURES;
-        if(y>=352+82 && y<352+164)return PN_SETUI_TAP_ZONES;
-        if(y>=352+164 && y<352+246)return PN_SETUI_KEY_HIGHLIGHT;
-        if(y>=TOGGLE_Y && y<TOGGLE_Y+4*ROW_H)return PN_SETUI_TOGGLE+(y-TOGGLE_Y)/ROW_H;
-        if(y>=TOGGLE_Y+4*ROW_H && y<TOGGLE_Y+5*ROW_H)return PN_SETUI_VERTICAL_TURN;
+        if(y>=352 && y<352+88)return PN_SETUI_GESTURES;
+        if(y>=352+88 && y<352+176)return PN_SETUI_TAP_ZONES;
+        if(y>=352+176 && y<352+264)return PN_SETUI_KEY_HIGHLIGHT;
+        if(y>=668 && y<668+ROW_H && x>=32 && x<652)return PN_SETUI_SHAKE_TOGGLE;
+        int sc=pn_w_segments_hit(PN_SHAKE_SENS_COUNT,830,88,x,y);
+        if(sc>=0)return PN_SETUI_SHAKE_SENS+sc;
         return -1;
     }
     if(u->screen==SCREEN_REFRESH){
