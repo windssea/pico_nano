@@ -8,10 +8,11 @@
 #include <stdio.h>
 #include "pn_widgets.h"
 #define USB_ROW 2 ///< USB行序 / USB row index
-#define CHANNEL_Y 230
+#define CHANNEL_Y 186
 #define ROW_H PN_W_CARD_ROW_H
-#define STORAGE_Y 710
-#define FORMAT_Y 860
+#define NOTE_Y 524 ///< 传输方式说明文字基线（位于 USB 传输卡下方）/ Transfer description baseline below the USB card
+#define STORAGE_Y 612
+#define FORMAT_Y 780
 #define TAB_Y 1104
 #define TAB_H 112
 pn_status_t pn_transfer_hub_render(pn_font_t *font,pn_frame_t *frame,const pn_transfer_hub_info_t *info){
@@ -20,8 +21,6 @@ pn_status_t pn_transfer_hub_render(pn_font_t *font,pn_frame_t *frame,const pn_tr
     pn_status_t s=pn_w_status(font,frame);
     if(s==PN_OK)s=pn_font_size(font,50);
     if(s==PN_OK)s=pn_w_text_ex(font,frame,"传书",PN_UI_MARGIN,124,400,PN_ALIGN_LEFT,PN_UI_INK,true);
-    if(s==PN_OK)s=pn_font_size(font,24);
-    if(s==PN_OK)s=pn_w_text_ex(font,frame,"把手机或电脑上的书、字体与图片传到设备。",PN_UI_MARGIN,166,620,PN_ALIGN_LEFT,PN_UI_MUTED,false);
     if(s==PN_OK)s=pn_w_group(font,frame,"传输方式",CHANNEL_Y-14);
     pn_w_card(frame,CHANNEL_Y,3);
     // 可用通道带箭头；不可用的只写原因（规范T01：不展示虚假地址或入口）。/ Available channels get a chevron; unavailable ones only state the reason (spec T01: no fake addresses or entries).
@@ -32,12 +31,14 @@ pn_status_t pn_transfer_hub_render(pn_font_t *font,pn_frame_t *frame,const pn_tr
     else snprintf(lan,sizeof lan,"%s",info->hotspot?"先在热点传书网页里保存家庭网络":wireless_off);
     if(s==PN_OK)s=pn_w_card_row(font,frame,"局域网传书",lan,NULL,PN_ICON_TRANSFER,info->lan?PN_ROW_CHEVRON:0u,CHANNEL_Y+ROW_H,false);
     if(s==PN_OK)s=pn_w_card_row(font,frame,"USB 传输",info->usb?"连接电脑直接复制，期间暂停阅读":"此运行环境未接入 USB 读卡",NULL,PN_ICON_IMPORT,info->usb?PN_ROW_CHEVRON:0u,CHANNEL_Y+USB_ROW*ROW_H,true);
+    if(s==PN_OK)s=pn_font_size(font,24);
+    if(s==PN_OK)s=pn_w_text_ex(font,frame,"把手机或电脑上的书、字体与图片传到设备。",PN_UI_MARGIN+8,NOTE_Y,604,PN_ALIGN_LEFT,PN_UI_MUTED,false);
     if(s==PN_OK)s=pn_w_group(font,frame,"存储",STORAGE_Y-14);
     pn_w_card(frame,STORAGE_Y,1);
     if(s==PN_OK)s=pn_w_card_row(font,frame,"存储卡",info->storage && *info->storage?info->storage:"未读取到存储卡",info->storage_manage?"文件管理":NULL,info->storage_manage?PN_ICON_SHELF:-1,info->storage_manage?PN_ROW_CHEVRON:0u,STORAGE_Y,true);
     if(s==PN_OK)s=pn_w_group(font,frame,"支持的文件",FORMAT_Y-14);
     if(s==PN_OK)s=pn_font_size(font,24);
-    if(s==PN_OK)s=pn_w_text_lines_ex(font,frame,"图书 EPUB / TXT · 字体 TTF / OTF · 封面、锁屏与阅读背景 JPG / PNG。",PN_UI_MARGIN+8,FORMAT_Y+22,604,3,34,PN_UI_MUTED,false);
+    if(s==PN_OK)s=pn_w_text_lines_ex(font,frame,"图书 EPUB / TXT · 字体 TTF / OTF · 封面、锁屏、首页横幅、阅读背景与遮罩 JPG / PNG · StarDict 词典。",PN_UI_MARGIN+8,FORMAT_Y+22,604,3,34,PN_UI_MUTED,false);
     if(s==PN_OK){s=pn_font_size(font,24);if(s==PN_OK)s=pn_w_navigation(font,frame,PN_NAV_TRANSFER);}
     pn_status_t restored=pn_font_size(font,original);return s==PN_OK?restored:s;
 }

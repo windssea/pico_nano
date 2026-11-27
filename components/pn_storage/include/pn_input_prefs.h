@@ -7,6 +7,7 @@
  */
 #pragma once
 #include "pn_journal.h"
+#include "pn_identity.h"
 #define PN_INPUT_LEFT_HAND 0x01u ///< 左手模式 / Left-hand mode
 #define PN_INPUT_NO_SWIPE 0x02u ///< 关闭滑动 / Swipe off
 #define PN_INPUT_NO_EDGE_TAP 0x04u ///< 关闭边缘点按 / Edge taps off
@@ -93,16 +94,26 @@ typedef struct {
 pn_status_bar_prefs_t pn_status_bar_prefs_default(void);
 /// 校验状态栏配置合法性。/ Validate status bar preferences.
 pn_status_t pn_status_bar_prefs_validate(const pn_status_bar_prefs_t *prefs);
-/// 绑定 root 下 status_bar.{a,b}。/ Bind status_bar.{a,b} under root.
+/// 绑定 root 下 status_bar.{a,b}（全局默认状态栏）。/ Bind global default status_bar.{a,b} under root.
 pn_status_t pn_status_bar_prefs_files(pn_journal_files_t *files,pn_media_t *media,const pn_media_lease_t *lease,const char *root,pn_journal_io_t *io);
+/// 绑定单书独立状态栏日志 <root>/<book_sha>.sbar.{a,b}（不建目录）。/ Bind per-book status bar journal <root>/<book_sha>.sbar.{a,b} without creating directories.
+pn_status_t pn_status_bar_book_files(pn_journal_files_t *files,pn_media_t *media,const pn_media_lease_t *lease,const char *root,const pn_book_id_t *book,pn_journal_io_t *io);
+/// 删除单书独立状态栏覆盖文件（.sbar.a/b），使该书恢复跟随全局状态栏。/ Remove per-book status bar override files (.sbar.a/b) so the book follows the global status bar again.
+pn_status_t pn_status_bar_clear_files(const pn_journal_files_t *files);
 /// 读取状态栏配置；无记录返回 PN_EMPTY，错误不改输出。/ Load status bar prefs; EMPTY if absent; errors preserve output.
 pn_status_t pn_status_bar_prefs_load(const pn_journal_io_t *io,pn_status_bar_prefs_t *prefs);
 /// 同步保存状态栏配置；未知或损坏旧记录拒绝覆盖。/ Save status bar prefs synchronously, refusing to overwrite unknown/corrupt records.
 pn_status_t pn_status_bar_prefs_save(const pn_journal_io_t *io,const pn_status_bar_prefs_t *prefs);
-/// 更新/读取当前生效的阅读状态栏配置、底部返回条保留态与正文上下留白（单 owner 线程访问）。
-/// Set/get active runtime status bar config, bottom return-bar reservation, and reserved top/bottom insets (single owner thread).
+/// 更新/读取全局与当前生效的阅读状态栏配置、书籍独立覆盖、底部返回条保留态与正文上下留白（单 owner 线程访问）。
+/// Set/get global and effective runtime status bar configs, per-book overrides, return-bar reservation, and reserved top/bottom insets (single owner thread).
 void pn_status_bar_set_active(const pn_status_bar_prefs_t *prefs);
 pn_status_bar_prefs_t pn_status_bar_active(void);
+/// 读取全局默认状态栏配置（不受当前书籍独立覆盖影响）。/ Read global default status bar config (unaffected by any active per-book override).
+pn_status_bar_prefs_t pn_status_bar_global(void);
+/// 设置或清除当前打开书籍的独立状态栏覆盖（NULL 表示跟随全局）。/ Set or clear the active book's per-book status bar override (NULL inherits global).
+void pn_status_bar_set_book_override(const pn_status_bar_prefs_t *prefs);
+/// 当前是否有生效的书籍独立状态栏覆盖。/ Whether a per-book status bar override is currently active.
+bool pn_status_bar_has_book_override(void);
 void pn_status_bar_set_return_bar(bool active);
 bool pn_status_bar_return_bar(void);
 void pn_status_bar_insets(bool hide_bars,int *top_px,int *bottom_px);

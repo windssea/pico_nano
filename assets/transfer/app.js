@@ -3,7 +3,13 @@ import {SHA256} from './sha256.mjs';
 const $=id=>document.getElementById(id),kinds={book:{label:'书籍',accept:'.txt,.epub',hint:'TXT、EPUB 电子书，支持多本添加',limit:512*1024*1024},font:{label:'字体',accept:'.ttf,.otf',hint:'TTF、OTF 字体，最大 32 MiB',limit:32*1024*1024},cover:{label:'封面',accept:'.png,.jpg,.jpeg',hint:'PNG/JPEG → 184×256、16灰阶 PNG；居中裁切，与书籍同名关联',limit:8*1024*1024},banner:{label:'首页横幅',accept:'.png,.jpg,.jpeg',hint:'PNG/JPEG → 684×146、16灰阶 PNG；居中裁切，上传后在设置→书架与主页选择',limit:8*1024*1024},wallpaper:{label:'锁屏壁纸',accept:'.png,.jpg,.jpeg',hint:'PNG/JPEG → 原生尺寸内的16灰阶 PNG；上传后在锁屏壁纸→壁纸预览并应用',limit:8*1024*1024},mask:{label:'阅读遮罩',accept:'.png,.jpg,.jpeg',hint:'PNG/JPEG → 原生尺寸内的16灰阶 PNG，保留16级透明度；上传后在锁屏壁纸→遮罩选择',limit:8*1024*1024}};
 kinds.background={label:'阅读背景',accept:'.png,.jpg,.jpeg',hint:'PNG/JPEG → 684×1216、16灰阶 PNG；铺满居中裁切，上传后在排版设置选择',limit:8*1024*1024};
 kinds.dict={label:'词典',accept:'.zip,.ifo,.idx,.dict,.dz,.gz',hint:'支持直接拖入 StarDict .zip 词典包，或选择同名 .ifo/.idx/.dict(.dz)；明文 .dict 自动压缩为 DictZip',limit:256*1024*1024};
-let kind='book',token=null,running=false,entries=[],resourceGeneration=0,installedDictItems=[];
+let kind='book',token=null,running=false,entries=[],resourceGeneration=0,installedDictItems=[],installedByKind={};
+const ONLINE_SOURCES=[
+ {id:'jsdelivr',label:'国内 CDN 镜像',base:'https://cdn.jsdelivr.net/gh/windssea/pico_nano@main/'},
+ {id:'pages',label:'官方站点',base:'https://windssea.github.io/pico_nano/'},
+ {id:'raw',label:'GitHub Raw',base:'https://raw.githubusercontent.com/windssea/pico_nano/main/'},
+];
+const onlineState={catalog:null,source:null,catId:'',checker:false,loading:false,downloading:new Set(),preview:null,fontsLoaded:new Set()};
 function notice(text,error=false){$('notice').textContent=text;$('notice').classList.toggle('error',error);}
 function connected(value){$('connection').textContent=value?'已连接':'正在连接';$('connection').classList.toggle('connected',value);if(!value)$('network-panel').hidden=true;else loadNetwork();syncFonts();render();}
 // 家庭网络：只在设备支持时显示；口令只提交，不回显。/ Home network: shown only when the device supports it; passwords are submitted, never echoed.
@@ -49,7 +55,16 @@ async function api(path,method='GET',body,headers={}){
  }
 }
 
-for(const button of document.querySelectorAll('[data-kind]'))button.onclick=()=>{kind=button.dataset.kind;for(const tab of document.querySelectorAll('[data-kind]'))tab.setAttribute('aria-pressed',String(tab===button));$('files').accept=kinds[kind].accept;$('accept-hint').textContent=kinds[kind].hint;syncFonts();};
+function selectKind(nextKind){
+ if(!kinds[nextKind])return;
+ kind=nextKind;
+ for(const tab of document.querySelectorAll('[data-kind]'))tab.setAttribute('aria-pressed',String(tab.dataset.kind===kind));
+ $('files').accept=kinds[kind].accept;
+ $('accept-hint').textContent=kinds[kind].hint;
+ syncFonts();
+ if(onlineState.catalog)renderOnlineCategory(kind);
+}
+for(const button of document.querySelectorAll('[data-kind]'))button.onclick=()=>selectKind(button.dataset.kind);
 // 资源原图管理：切换类别丢弃旧列表回复；删除前现取身份，内部锁屏缓存保留。/ Resource management: discard old-category replies and fetch identity before deletion; retain the internal lock cache.
 const resourceTypes={font:{route:'fonts',title:'已安装字体',note:'删除后，使用它的书会暂用默认字体，阅读位置不变。'},cover:{route:'covers',title:'已上传封面',note:'封面与书籍文件同名关联，独立保存，不进入壁纸列表；旧 JPEG 可能优先匹配，替换后仍显示旧图时请删除旧封面。删除封面不删除书籍。'},banner:{route:'banners',title:'已上传首页横幅',note:'首页横幅独立保存（684×146），在设置 → 书架与主页 → 正在阅读上方背景中选用。删除后自动回退默认山水背景。'},wallpaper:{route:'wallpapers',title:'已上传锁屏壁纸',note:'上传前按原生边界优化为16灰阶PNG。删除图片文件会保留已应用的内部锁屏缓存；上传后仍需在设备预览并应用。'},mask:{route:'masks',title:'已上传阅读遮罩',note:'阅读遮罩独立保存并保留16级透明度，请在锁屏壁纸 → 遮罩中预览并应用。'}};
 resourceTypes.background={route:'backgrounds',title:'已上传阅读背景',note:'背景独立保存；请在阅读器排版设置中选择并应用。删除后暂用无背景，字体和排版保留。'};
@@ -94,7 +109,7 @@ async function loadFonts(after){
     if(!data.more||!data.items.length)break;
     cursor=data.items[data.items.length-1].name;
    }
-   installedDictItems=all;list.replaceChildren();
+   installedDictItems=all;installedByKind.dict=new Set(groupDictItems(all).map(g=>g.stem.toLowerCase()));list.replaceChildren();
    for(const g of groupDictItems(all)){
     const row=document.createElement('li'),name=document.createElement('span'),badge=document.createElement('span'),info=document.createElement('span'),button=document.createElement('button');
     const complete=g.hasIfo&&g.hasIdx&&g.hasDict;
@@ -104,15 +119,18 @@ async function loadFonts(after){
     row.append(name,info,button);list.append(row);
    }
    $('fonts-empty').textContent='暂无已安装词典。';$('fonts-empty').hidden=list.children.length>0;$('fonts-more').hidden=true;
+   if(onlineState.catalog&&onlineState.catId==='dict')renderOnlineCategory('dict');
    return;
   }
   const data=await api('/'+type.route+(after?'?after='+encodeURIComponent(after):''));
   if(generation!==resourceGeneration||kind!==selected||token!==auth)return;
-  if(!after)list.replaceChildren();
-  for(const item of data.items){const row=document.createElement('li'),name=document.createElement('span'),info=document.createElement('span'),button=document.createElement('button');
+  if(!after){list.replaceChildren();installedByKind[selected]=new Set();}
+  const seenSet=installedByKind[selected]||(installedByKind[selected]=new Set());
+  for(const item of data.items){seenSet.add(item.name.toLowerCase());const row=document.createElement('li'),name=document.createElement('span'),info=document.createElement('span'),button=document.createElement('button');
    name.textContent=item.name;info.textContent=size(item.size);button.className='secondary';button.textContent='删除';button.onclick=()=>removeFont(item,selected);row.append(name,info,button);list.append(row);}
   $('fonts-empty').textContent='暂无'+kinds[selected].label+'。';$('fonts-empty').hidden=list.children.length>0;$('fonts-more').hidden=!data.more;
   $('fonts-more').onclick=()=>loadFonts(data.items[data.items.length-1].name);
+  if(onlineState.catalog&&onlineState.catId===selected)renderOnlineCategory(selected);
  }catch(error){if(generation!==resourceGeneration||kind!==selected||token!==auth)return;if(error.status===404)$('fonts-panel').hidden=true;else notice(error.message,true);}
 }
 function confirmDelete(name,selected){return new Promise(resolve=>{const dialog=$('delete-dialog'),label=kinds[selected].label;$('delete-title').textContent='删除这个'+label+'原文件？';$('delete-note').textContent=resourceTypes[selected].note+' 原文件删除后无法撤销。';$('delete-no').textContent='保留'+label;$('delete-name').textContent=name;$('delete-no').onclick=()=>{dialog.close();resolve(false);};$('delete-yes').onclick=()=>{dialog.close();resolve(true);};dialog.oncancel=()=>resolve(false);dialog.showModal();});}
@@ -382,8 +400,8 @@ function dictQueueCompleteness(){
  });
  return '词典三件套已齐套：'+names.join('、')+'，将按 .idx → .dict(.dz) → .ifo 顺序发送。';
 }
-async function add(files){
- const selected=kind,expanded=[];
+async function add(files,forceKind=null){
+ const selected=forceKind||kind,expanded=[];let addedCount=0;
  for(const file of Array.from(files)){
   const part=dictPartOf(file.name);
   if(selected==='dict'&&part&&part.role==='zip'){
@@ -397,7 +415,7 @@ async function add(files){
  for(const item of expanded){
   const file=item.file;let name=file.name,target=item.forceDict?'dict':selected;const suffix=suffixOf(name),part=dictPartOf(name);
   if(entries.length>=32){notice('一次最多添加 32 项。',true);break;}
-  if(!item.forceDict&&!accepts(target,suffix)){
+  if(!item.forceDict&&!forceKind&&!accepts(target,suffix)){
    const other=['book','font'].find(k=>accepts(k,suffix));
    if(other)target=other;
    else if(part&&(part.role==='ifo'||part.role==='idx'||part.role==='dict'||part.role==='dict.dz'||part.role==='idx.gz'||part.role==='dict.gz'))target='dict';
@@ -410,13 +428,15 @@ async function add(files){
   else if(target==='dict'){try{const prepared=await prepareDictFile(file,name);upload=prepared.file;name=prepared.name;dictMeta=prepared.meta||null;if(prepared.note)notice('“'+file.name+'”：'+prepared.note+'。');}catch(error){notice('“'+file.name+'”：'+error.message,true);continue;}}
   if(upload.size>kinds[target].limit){notice('“'+file.name+'”有 '+size(upload.size)+'，超过'+kinds[target].label+'上限 '+size(kinds[target].limit)+'。',true);continue;}
   if(entries.length>=32){notice('一次最多添加 32 项。',true);break;}
-  if(target!==kind)notice('“'+file.name+'”已按'+kinds[target].label+'发送。');
+  if(!forceKind&&target!==kind)notice('“'+file.name+'”已按'+kinds[target].label+'发送。');
   const previewURL=target!=='dict'&&upload!==file&&typeof URL!=='undefined'&&typeof URL.createObjectURL==='function'?URL.createObjectURL(upload):null;
   entries.push({file:upload,name,kind:target,dictMeta,previewURL,state:'等待发送',offset:0,progress:0,paused:false,cancelled:false});
+  addedCount++;
   if(target==='dict')addedDict=true;
  }
  if(addedDict){sortPendingDictEntries();const summary=dictQueueCompleteness();if(summary)notice(summary,summary.startsWith('词典尚缺'));}
  render();
+ return addedCount;
 }
 $('files').onchange=()=>{add($('files').files);$('files').value='';};$('choose').onclick=event=>{event.stopPropagation();$('files').click();};$('drop').onclick=()=> $('files').click();$('drop').onkeydown=event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();$('files').click();}};
 for(const event of ['dragenter','dragover'])$('drop').addEventListener(event,e=>{e.preventDefault();$('drop').classList.add('drag');});for(const event of ['dragleave','drop'])$('drop').addEventListener(event,e=>{e.preventDefault();$('drop').classList.remove('drag');if(event==='drop')add(e.dataTransfer.files);});
@@ -437,5 +457,233 @@ async function send(entry){if(!entry.sha)entry.sha=await hashFile(entry);entry.p
  catch(error){if(!error.status){try{const state=await api('/uploads/'+entry.id);if(state.phase===2){entry.done=true;entry.progress=1;entry.state=state.cleanup_pending?'已保存，备份待清理':'已保存';savedId(key,null);render();return;}}catch{}}if(error.status===422&&entry.id){try{await api('/uploads/'+entry.id,'DELETE');}catch{}entry.id=null;entry.offset=0;savedId(key,null);}throw error;}}
 async function sendQueue(){if(running||!token)return;sortPendingDictEntries();running=true;render();for(const entry of entries){if(entry.done||entry.cancelled||entry.paused)continue;try{await send(entry);}catch(error){if(!entry.cancelled){entry.state=error.message;entry.paused=true;notice(error.message,true);}render();if(!token)break;}}running=false;render();syncFonts();if(entries.length&&entries.every(e=>e.done||e.cancelled))notice('这一批已处理完，可以添加更多内容。');}
 $('start').onclick=sendQueue;$('clear').onclick=()=>{entries=entries.filter(e=>{if(!e.done&&!e.cancelled)return true;if(e.previewURL&&typeof URL!=='undefined')URL.revokeObjectURL(e.previewURL);return false;});render();};
+// 在线共享素材与词典库：按需加载、绝不向外域携带设备令牌、下载前严格校验 SHA-256，复用本地优化与上传事务。
+// Online shared-assets & dictionaries: lazy-loaded, never sends device tokens to external origins, strictly SHA-256 verified, and routed through the local optimizer/upload pipeline.
+function onlineUrl(source,relPath){
+ const clean=String(relPath||'').replace(/^\/+/,'');
+ return source.base+clean.split('/').map(seg=>encodeURIComponent(seg)).join('/');
+}
+async function fetchExternal(url,timeoutMs){
+ const controller=typeof AbortController==='function'?new AbortController():null;
+ const timer=controller?setTimeout(()=>controller.abort(),timeoutMs):null;
+ try{
+  const response=await fetch(url,{method:'GET',mode:'cors',credentials:'omit',cache:'no-cache',signal:controller?.signal});
+  if(!response.ok)throw Error('HTTP '+response.status);
+  return response;
+ }finally{if(timer)clearTimeout(timer);}
+}
+function onlineCategories(doc){
+ const list=Array.isArray(doc?.categories)?doc.categories.slice():[];
+ const dicts=Array.isArray(doc?.dictionaries)?doc.dictionaries:[];
+ list.push({id:'dict',kind:'dict',title:'词典',shortTitle:'词典',description:'开源 StarDict 离线词典（自动解包并按 .idx → .dict.dz → .ifo 发送）。',uploadTarget:'传书页「词典」（/piconano/dicts/）',previewMode:'dict',count:dicts.length,items:dicts.map(d=>({name:d.fileName,stem:d.title,subtitle:d.subtitle,wordcount:d.wordcount,license:d.license,path:d.path,giteeUrl:d.giteeUrl,size:d.size,sha256:d.sha256,id:d.id}))});
+ return list;
+}
+function onlineIsInstalled(catId,item){
+ const set=installedByKind[catId];
+ if(!set||!set.size)return false;
+ if(catId==='dict'){const id=String(item.id||'').toLowerCase();return id&&set.has(id);}
+ const pngName=String(item.name||'').replace(/\.[^.]+$/,'.png').toLowerCase();
+ return set.has(String(item.name||'').toLowerCase())||set.has(pngName);
+}
+function onlineProseNode(){
+ const prose=document.createElement('div');prose.className='online-prose';prose.setAttribute('aria-hidden','true');
+ const h=document.createElement('strong');h.textContent='第一章 拾起阅读';
+ const p1=document.createElement('span');p1.textContent='字与字之间，留出恰好的距离。让阅读回到舒适，把时间留给文字。';
+ const p2=document.createElement('span');p2.textContent='在柔和的墨水屏上，每一页都安静沉稳。';
+ prose.append(h,p1,p2);return prose;
+}
+function renderOnlinePreviewStage(stage,cat,item,url){
+ stage.className='online-preview-stage is-'+(cat.previewMode||'wallpaper')+(cat.previewMode==='mask'&&onlineState.checker?' is-checker':'');
+ stage.replaceChildren();
+ if(cat.previewMode==='mask'||cat.previewMode==='background')stage.append(onlineProseNode());
+ else if(cat.previewMode==='banner'){const ov=document.createElement('div');ov.className='online-banner-copy';ov.textContent='读书 · 拾起上次的阅读';stage.append(ov);}
+ const img=document.createElement('img');img.src=url;img.alt=item.stem||item.name;img.crossOrigin='anonymous';
+ stage.append(img);
+}
+function openOnlinePreview(cat,item){
+ if(!onlineState.source)return;
+ const url=onlineUrl(onlineState.source,item.path);
+ onlineState.preview={cat,item,url};
+ $('online-preview-title').textContent=(cat.title||'素材')+' · '+(item.stem||item.name);
+ const dims=item.width&&item.height?item.width+'×'+item.height+' · ':'';
+ $('online-preview-meta').textContent=dims+size(item.size||0)+' · 保存至 '+(cat.uploadTarget||kinds[cat.id]?.label||'');
+ $('online-preview-bg').hidden=cat.previewMode!=='mask';
+ $('online-preview-bg').textContent=onlineState.checker?'切换阅读底':'切换透明棋盘';
+ renderOnlinePreviewStage($('online-preview-stage'),cat,item,url);
+ $('online-preview-dialog').showModal?.();
+}
+async function loadOnlineFontPreview(item,url,box){
+ if(typeof FontFace!=='function'||typeof document.fonts==='undefined')return;
+ const family='pn-tr-font-'+String(item.sha256||item.name).slice(0,12);
+ if(!onlineState.fontsLoaded.has(family)){
+  const face=new FontFace(family,'url("'+url+'")');
+  await face.load();document.fonts.add(face);onlineState.fontsLoaded.add(family);
+ }
+ box.style.fontFamily='"'+family+'","Microsoft YaHei",sans-serif';
+}
+async function importOnlineAsset(catId,item,autoSend=true){
+ if(!onlineState.source)throw Error('请先加载在线素材库');
+ const key=catId+':'+(item.sha256||item.name);
+ if(onlineState.downloading.has(key))return 0;
+ onlineState.downloading.add(key);
+ if(onlineState.catalog)renderOnlineCategory(onlineState.catId||catId);
+ try{
+  const url=onlineUrl(onlineState.source,item.path);
+  notice('正在从「'+onlineState.source.label+'」下载“'+(item.stem||item.name)+'”…');
+  const response=await fetchExternal(url,catId==='dict'||catId==='font'?90000:30000);
+  const bytes=new Uint8Array(await response.arrayBuffer());
+  if(!bytes.length)throw Error('下载到的文件为空');
+  if(item.sha256){
+   const actual=new SHA256().update(bytes).hex();
+   if(actual!==String(item.sha256).toLowerCase())throw Error('文件摘要校验失败，已中止导入');
+  }
+  const mime=catId==='dict'?'application/zip':/\.png$/i.test(item.name)?'image/png':/\.jpe?g$/i.test(item.name)?'image/jpeg':'application/octet-stream';
+  const file=new File([bytes],item.name,{type:mime});
+  const queued=await add([file],catId);
+  if(queued>0&&autoSend&&token&&!running)await sendQueue();
+  else if(queued>0&&!token)notice('已加入待传列表（等待与阅读器连接后可点击“开始发送”）。');
+  return queued;
+ }catch(error){
+  notice('拉取“'+(item.stem||item.name)+'”失败：'+error.message+'（可尝试切换线路或使用 Gitee 下载）',true);
+  throw error;
+ }finally{
+  onlineState.downloading.delete(key);
+  if(onlineState.catalog)renderOnlineCategory(onlineState.catId||catId);
+ }
+}
+function renderOnlineCategory(preferredId){
+ const doc=onlineState.catalog,body=$('online-body'),tabs=$('online-tabs'),grid=$('online-grid');
+ if(!doc||!body||!tabs||!grid)return;
+ body.hidden=false;
+ const cats=onlineCategories(doc);
+ let cat=cats.find(c=>c.id===preferredId);
+ if(!cat)cat=cats.find(c=>c.count>0)||cats[0];
+ onlineState.catId=cat?cat.id:'';
+ tabs.replaceChildren();
+ for(const c of cats){
+  const btn=document.createElement('button');btn.type='button';btn.className='online-tab';btn.setAttribute('role','tab');
+  btn.setAttribute('aria-selected',String(c.id===onlineState.catId));
+  const title=document.createElement('span');title.textContent=c.shortTitle||c.title;
+  const cnt=document.createElement('span');cnt.className='online-tab-count';cnt.textContent=String(c.count||0);
+  btn.append(title,cnt);
+  btn.onclick=()=>{if(kinds[c.id]&&kind!==c.id)selectKind(c.id);else renderOnlineCategory(c.id);};
+  tabs.append(btn);
+ }
+ const giteeHome=$('online-gitee-home');
+ if(giteeHome){giteeHome.hidden=!doc.giteeReleaseUrl;if(doc.giteeReleaseUrl)giteeHome.href=doc.giteeReleaseUrl;}
+ const packLink=$('online-pack-gitee');
+ if(packLink){const hasPack=Boolean(cat?.pack?.giteeUrl);packLink.hidden=!hasPack;if(hasPack){packLink.href=cat.pack.giteeUrl;packLink.textContent='Gitee 整包（'+size(cat.pack.size||0)+'）';}}
+ const checkerBtn=$('online-checker');
+ if(checkerBtn){checkerBtn.hidden=cat?.previewMode!=='mask';checkerBtn.textContent=onlineState.checker?'切换阅读底':'切换棋盘底';}
+ $('online-cat-note').textContent=cat?(cat.description||'选择素材即可预览并发送到设备。'):'';
+ grid.dataset.mode=cat?.previewMode||'wallpaper';
+ grid.replaceChildren();
+ if(!cat||!cat.items||!cat.items.length){
+  const empty=document.createElement('div');empty.className='online-empty';
+  const msg=document.createElement('p');msg.textContent='「'+(cat?.title||'当前分类')+'」暂未收录在线素材，后续推送到仓库后会自动显示。';
+  empty.append(msg);
+  const avail=cats.filter(c=>c.count>0);
+  if(avail.length){
+   const jumps=document.createElement('div');jumps.className='online-empty-jumps';
+   for(const c of avail){
+    const jump=document.createElement('button');jump.type='button';jump.className='secondary';
+    jump.textContent='查看'+(c.title||c.shortTitle)+'（'+c.count+'）';
+    jump.onclick=()=>{if(kinds[c.id])selectKind(c.id);else renderOnlineCategory(c.id);};
+    jumps.append(jump);
+   }
+   empty.append(jumps);
+  }
+  grid.append(empty);
+  return;
+ }
+ for(const item of cat.items){
+  const card=document.createElement('article');card.className='online-card';
+  const url=onlineUrl(onlineState.source,item.path);
+  const busy=onlineState.downloading.has(cat.id+':'+(item.sha256||item.name));
+  if(cat.kind==='image'){
+   const stage=document.createElement('button');stage.type='button';
+   stage.className='online-thumb is-'+(cat.previewMode||'wallpaper')+(cat.previewMode==='mask'&&onlineState.checker?' is-checker':'');
+   stage.setAttribute('aria-label','放大预览 '+(item.stem||item.name));
+   if(cat.previewMode==='mask'||cat.previewMode==='background')stage.append(onlineProseNode());
+   else if(cat.previewMode==='banner'){const ov=document.createElement('div');ov.className='online-banner-copy';ov.textContent='读书 · 拾起上次的阅读';stage.append(ov);}
+   const img=document.createElement('img');img.src=url;img.alt=item.stem||item.name;img.loading='lazy';img.crossOrigin='anonymous';
+   stage.append(img);stage.onclick=()=>openOnlinePreview(cat,item);card.append(stage);
+  }else if(cat.kind==='font'){
+   const box=document.createElement('div');box.className='online-font-box';
+   const l1=document.createElement('p');l1.textContent='字与字之间，留出恰好的距离。';
+   const l2=document.createElement('p');l2.textContent='PicoNano 0123456789';
+   box.append(l1,l2);card.append(box);
+   card._fontBox=box;
+  }
+  const info=document.createElement('div');info.className='online-card-body';
+  const title=document.createElement('p');title.className='online-card-title';title.textContent=item.stem||item.name;
+  if(onlineIsInstalled(cat.id,item)){const tag=document.createElement('span');tag.className='dict-badge ok';tag.textContent='设备已有';title.append(tag);}
+  const meta=document.createElement('p');meta.className='online-card-meta';
+  const parts=[];
+  if(item.width&&item.height)parts.push(item.width+'×'+item.height);
+  if(item.wordcount)parts.push(Number(item.wordcount).toLocaleString()+' 词');
+  if(item.license)parts.push(item.license);
+  if(item.size)parts.push(size(item.size));
+  meta.textContent=parts.join(' · ');
+  const actions=document.createElement('div');actions.className='online-card-actions';
+  if(cat.kind==='image'){
+   const prev=document.createElement('button');prev.type='button';prev.className='secondary';prev.textContent='预览';prev.onclick=()=>openOnlinePreview(cat,item);actions.append(prev);
+  }else if(cat.kind==='font'&&card._fontBox){
+   const tryBtn=document.createElement('button');tryBtn.type='button';tryBtn.className='secondary';tryBtn.textContent='试看字形';
+   tryBtn.onclick=()=>{tryBtn.disabled=true;loadOnlineFontPreview(item,url,card._fontBox).catch(()=>notice('字形预览加载失败，可直接下载导入',true)).finally(()=>{tryBtn.disabled=false;});};
+   actions.append(tryBtn);
+  }else if(item.giteeUrl){
+   const gitee=document.createElement('a');gitee.className='online-link';gitee.href=item.giteeUrl;gitee.target='_blank';gitee.rel='noopener noreferrer';gitee.textContent='Gitee';actions.append(gitee);
+  }
+  const sendBtn=document.createElement('button');sendBtn.type='button';sendBtn.disabled=busy;
+  sendBtn.textContent=busy?'拉取中…':token?'发送到设备':'加入待传';
+  sendBtn.onclick=()=>{importOnlineAsset(cat.id,item,Boolean(token)).catch(()=>{});};
+  actions.append(sendBtn);
+  info.append(title,meta,actions);card.append(info);grid.append(card);
+ }
+}
+async function loadOnlineCatalog(preferredSourceId){
+ if(onlineState.loading)return null;
+ onlineState.loading=true;
+ const loadBtn=$('online-load'),statusEl=$('online-status');
+ if(loadBtn)loadBtn.disabled=true;
+ const chosenId=preferredSourceId||$('online-source')?.value||'jsdelivr';
+ const order=[...ONLINE_SOURCES.filter(s=>s.id===chosenId),...ONLINE_SOURCES.filter(s=>s.id!==chosenId)];
+ let lastErr=null;
+ try{
+  for(const src of order){
+   if(statusEl)statusEl.textContent='正在连接「'+src.label+'」获取在线素材清单…';
+   try{
+    const response=await fetchExternal(onlineUrl(src,'assets/share/manifest.json'),8000);
+    const doc=await response.json();
+    if(!doc||doc.schema!==1||!Array.isArray(doc.categories))throw Error('清单格式无效');
+    onlineState.catalog=doc;onlineState.source=src;
+    if($('online-source'))$('online-source').value=src.id;
+    const total=onlineCategories(doc).reduce((sum,c)=>sum+(c.count||0),0);
+    if(statusEl)statusEl.textContent='已连接「'+src.label+'」 · 共 '+total+' 项在线资源（下载前自动 SHA-256 校验，图片自动转为 16 灰阶 PNG）。';
+    if(loadBtn)loadBtn.textContent='刷新素材库';
+    const cats=onlineCategories(doc);
+    const currentHas=cats.find(c=>c.id===kind&&c.count>0);
+    const targetCat=currentHas?kind:(cats.find(c=>c.count>0)?.id||kind);
+    renderOnlineCategory(targetCat);
+    return doc;
+   }catch(error){lastErr=error;}
+  }
+  if(statusEl)statusEl.textContent='无法连接在线素材库（若正使用「热点传书」，请改用「局域网传书」或联网后点重试；仍可正常上传本地文件）。';
+  if(loadBtn)loadBtn.textContent='重试加载';
+  notice('在线素材库暂不可达：'+(lastErr?.message||'网络不可用')+'，不影响本地传书。',true);
+  return null;
+ }finally{
+  onlineState.loading=false;
+  if(loadBtn)loadBtn.disabled=false;
+ }
+}
+if($('online-load'))$('online-load').onclick=()=>loadOnlineCatalog();
+if($('online-source'))$('online-source').onchange=()=>{if(onlineState.catalog)loadOnlineCatalog($('online-source').value);};
+if($('online-checker'))$('online-checker').onclick=()=>{onlineState.checker=!onlineState.checker;if(onlineState.catalog)renderOnlineCategory(onlineState.catId);};
+if($('online-preview-close'))$('online-preview-close').onclick=()=>$('online-preview-dialog').close?.();
+if($('online-preview-bg'))$('online-preview-bg').onclick=()=>{if(!onlineState.preview)return;onlineState.checker=!onlineState.checker;$('online-preview-bg').textContent=onlineState.checker?'切换阅读底':'切换透明棋盘';renderOnlinePreviewStage($('online-preview-stage'),onlineState.preview.cat,onlineState.preview.item,onlineState.preview.url);if(onlineState.catalog)renderOnlineCategory(onlineState.catId);};
+if($('online-preview-queue'))$('online-preview-queue').onclick=()=>{const p=onlineState.preview;if(!p)return;$('online-preview-dialog').close?.();importOnlineAsset(p.cat.id,p.item,false).catch(()=>{});};
+if($('online-preview-send'))$('online-preview-send').onclick=()=>{const p=onlineState.preview;if(!p)return;$('online-preview-dialog').close?.();importOnlineAsset(p.cat.id,p.item,true).catch(()=>{});};
 // 打开页面自动建立会话，客户端不再收集配对码。 / Establish a session automatically without collecting a pairing code.
 api('/session').then(session=>{token=session.token;connected(true);notice('已连接，可以开始发送。');}).catch(error=>{connected(false);notice(error.message,true);});render();

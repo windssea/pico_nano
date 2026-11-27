@@ -62,7 +62,8 @@ typedef struct {
     bool font_use_draft,font_preview,font_pending,font_render,global_pending;
     char boot_primary[PN_FONT_REFERENCE_PATH_MAX],boot_fallback[PN_FONT_REFERENCE_PATH_MAX];pn_font_preferences_t live_fonts;bool fonts_known,font_inherited;
     pn_font_preferences_t draft_fonts,pending_fonts,pending_record,before_fonts,global_fonts;pn_epub_location_t font_origin;pn_epub_reader_t reader;pn_epub_page_t page;pn_layout_t layout;pn_job_token_t token;pn_display_t display;pn_frame_t frame;uint8_t *pixels;
-    pn_journal_files_t progress_files,style_files;pn_journal_io_t progress_io,style_io;pn_epub_save_t save;pn_epub_progress_t restored,visible;
+    pn_journal_files_t progress_files,style_files,sbar_files;pn_journal_io_t progress_io,style_io,sbar_io;pn_epub_save_t save;pn_epub_progress_t restored,visible;
+    pn_status_bar_prefs_t book_status_bar,applied_status_bar; ///< 本书独立状态栏与已排视口状态栏快照 / Per-book status bar and active-layout snapshot
     char book_path[PN_RECENT_PATH_MAX],state_directory[PN_JOURNAL_PATH_MAX];bool recent_recorded,recent_at_end;size_t recent_section; ///< 最近记录对应的章节与末页态，换章或抵达全书末页均更新记录 / Section index and end-of-book state of the latest recent record; refreshed on section change or reaching book end
     pn_recent_observer_fn recent_observer;void *recent_observer_ctx; ///< 借用已保存快照的同步接收者 / Synchronous receiver of a borrowed saved snapshot
     bool recent_pending;uint64_t recent_due; ///< 首屏与换章只置待写标记，空闲或安全出口写近期记录 / First display and section changes only mark pending recents, written at idle or safe exits
@@ -72,7 +73,8 @@ typedef struct {
     char footer_chapter_path[PN_ZIP_PATH_MAX]; ///< 已解析章节名的资源路径缓存 / Cached chapter path for footer chapter title
     char footer_chapter_title[PN_EPUB_META_MAX]; ///< 已解析的当前章节名 / Cached current chapter label for footer
     pn_style_t style,saved_style,pending_style;
-    bool style_preview,draft_render;pn_epub_location_t style_origin;uint8_t salt[16];uint64_t last_now;pn_refresh_policy_t refresh;pn_paper_t paper;
+    int chrome_top; ///< 当前已排版视口对应的顶边偏移 / Body top inset matching the active layout
+    bool style_preview,draft_render,style_inherited,status_bar_inherited;pn_epub_location_t style_origin;uint8_t salt[16];uint64_t last_now;pn_refresh_policy_t refresh;pn_paper_t paper;
     bool persistent,has_restore,has_visible,lost,force_full,last_confirmed,style_pending,font_unavailable;
     uint64_t *chapter_starts; ///< 会话章节累计长度索引 / Session cumulative chapter-length index
     bool suspended; ///< 已保存的热挂起 / Saved warm suspension
@@ -605,6 +607,9 @@ static pn_status_t paint(app_t *a,pn_frame_t *frame,const pn_epub_reader_receipt
     pn_profile_span_t span;pn_profile_begin(&span,a->pool,"epub.raster");
     pn_status_t status=paint_impl(a,frame,receipt);pn_profile_end(&span,status);return status;
 }
+static void sync_book_status_bar(const app_t *a){
+    pn_status_bar_set_book_override(a->status_bar_inherited?NULL:&a->book_status_bar);
+}
 static pn_status_t state_open(app_t *a,const char *directory,uint64_t now){
     if(strlen(directory)>=sizeof a->state_directory)return PN_LIMIT;
     strcpy(a->state_directory,directory);
@@ -624,17 +629,28 @@ static pn_status_t state_open(app_t *a,const char *directory,uint64_t now){
     n=snprintf(first,sizeof first,"%s/%s.style.a",directory,hash);m=snprintf(second,sizeof second,"%s/%s.style.b",directory,hash);if(n<0 || m<0 || (size_t)n>=sizeof first || (size_t)m>=sizeof second)return PN_LIMIT;
     if(status==PN_OK)status=pn_journal_files_init(&a->style_files,&a->state,&a->state_lease,first,second,&a->style_io);
     if(status==PN_OK){pn_style_t style;status=pn_style_load(&a->style_io,&a->book,&style);
+        a->style_inherited=(status==PN_EMPTY);
         if(status==PN_EMPTY){
             // 本书无独立排版记录时，自动继承全局默认排版。/ Inherit global default typesetting when this book has no per-book record.
             pn_journal_files_t gf;pn_journal_io_t gio;pn_book_id_t gid=pn_style_global_id();
             if(pn_style_global_files(&gf,&a->state,&a->state_lease,directory,&gio)==PN_OK && pn_style_load(&gio,&gid,&style)==PN_OK)status=PN_OK;
         }
         if(status==PN_OK)a->style=style;else if(status==PN_EMPTY)status=PN_OK;}
+    if(status==PN_OK){
+        status=pn_status_bar_book_files(&a->sbar_files,&a->state,&a->state_lease,directory,&a->book,&a->sbar_io);
+        if(status==PN_OK){
+            pn_status_bar_prefs_t sb;status=pn_status_bar_prefs_load(&a->sbar_io,&sb);
+            if(status==PN_OK){a->book_status_bar=sb;a->status_bar_inherited=false;}
+            else if(status==PN_EMPTY){a->book_status_bar=pn_status_bar_prefs_default();a->status_bar_inherited=true;status=PN_OK;}
+            if(status==PN_OK){sync_book_status_bar(a);a->applied_status_bar=pn_status_bar_active();}
+        }
+    }
     if(status==PN_OK){a->saved_style=a->style;a->persistent=true;epub_highlights_reload(a);}
     if(status==PN_OK && a->style.background==PN_READING_BACKGROUND_EXTERNAL){pn_status_t paper=pn_paper_open(&a->paper,a->pool,a->media,&a->book_lease,&a->style);if(paper==PN_CANCELLED || paper==PN_STALE_MEDIA)return paper;if(paper!=PN_OK)pn_paper_fallback(&a->paper,&a->style);}return status;
 }
 static pn_status_t release(app_t *a){
     pn_status_bar_set_return_bar(false);
+    if(!a->suspended)pn_status_bar_set_book_override(NULL);
     pn_bootstrap_abort(&a->bootstrap);
     pn_resume_close(&a->resume);
     pn_text_file_verify_close(&a->verify);
@@ -661,7 +677,7 @@ static pn_status_t tap_read(void *ctx,uint64_t offset,uint8_t *out,size_t cap,si
 /// prepared只借用本会话已校验的稳定文件源；不移动活动文件或重读完整摘要。/ prepared borrows only this session's verified stable source, without moving live files or rehashing complete content.
 static pn_status_t configure_fallback(app_t *,const char *,const pn_text_source_t *prepared);
 static pn_status_t open_start(app_t **result,pn_pool_t *pool,pn_media_t *media,const char *book,int pixels,uint64_t now,pn_text_source_t *source){
-    app_t *a=pn_alloc_tagged(pool,PN_MEM_LAYOUT,sizeof *a);if(!a)return PN_NO_MEMORY;*result=a;*a=(app_t){.pool=pool,.style=pn_style_default(pixels),.last_now=now,.force_full=true};pn_page_bitmap_init(&a->bitmap,pool);pn_epub_image_cache_init(&a->image_cache,pool);a->media=media?media:&a->local;strcpy(a->book_path,book);
+    app_t *a=pn_alloc_tagged(pool,PN_MEM_LAYOUT,sizeof *a);if(!a)return PN_NO_MEMORY;*result=a;*a=(app_t){.pool=pool,.style=pn_style_default(pixels),.style_inherited=true,.status_bar_inherited=true,.book_status_bar=pn_status_bar_prefs_default(),.last_now=now,.force_full=true};pn_page_bitmap_init(&a->bitmap,pool);pn_epub_image_cache_init(&a->image_cache,pool);a->media=media?media:&a->local;strcpy(a->book_path,book);
     pn_status_t status=PN_OK;if(!media){pn_media_init(a->media);status=pn_media_attach(a->media,1);}
     if(status==PN_OK)status=pn_media_acquire(a->media,PN_MEDIA_READ,&a->book_lease);
     if(status==PN_OK)status=pn_text_file_open(&a->book_file,a->media,&a->book_lease,book,source);
@@ -745,6 +761,7 @@ static pn_status_t open_metadata(app_t *a){
 }
 static pn_status_t open_state(app_t *a,const char *state,uint64_t now){
     pn_status_t status=state?state_open(a,state,now):PN_OK;
+    if(status==PN_OK && !state){pn_status_bar_set_book_override(NULL);a->applied_status_bar=pn_status_bar_active();}
     if(status==PN_OK && a->persistent && pn_semantic_file_bind(&a->semantic_file,&a->state,&a->state_lease,a->state_directory,&a->book)==PN_OK)a->epub.semantic_store=&a->semantic_file.store;
     a->saved_style=a->style;a->font_source=pn_font_reading_source();
     return status;
@@ -799,7 +816,7 @@ static pn_status_t open_fonts(app_t *a,const char *font){
     if(status==PN_OK){a->pixels=pn_alloc_tagged(pool,PN_MEM_FRAME,684*1216/2);if(!a->pixels)status=PN_NO_MEMORY;}
     if(status==PN_OK && !pn_frame_bind(&a->frame,a->pixels,684*1216/2,684,1216))status=PN_INVALID;
     if(status==PN_OK)status=scratch(a);
-    a->layout=layout(&a->style);a->token=(pn_job_token_t){next_session++,1};pn_epub_measure_t measure={a,glyph,image_size};
+    a->layout=layout(&a->style);a->chrome_top=pn_style_body_top(&a->style);a->token=(pn_job_token_t){next_session++,1};pn_epub_measure_t measure={a,glyph,image_size};
     if(status==PN_OK)status=pn_epub_reader_init(&a->reader,pool,&a->epub,&a->book,a->salt,&a->layout,&measure,&a->page,a->token,confirmed,a);
     if(status==PN_OK)status=pn_display_init(&a->display,&a->frame,1,a->token);
     if(status==PN_OK && has_selected_fonts && selected_fonts.fallback.kind==PN_FONT_FILE)status=configure_fallback(a,selected_fonts.fallback.path,&fallback_source);
@@ -1191,7 +1208,7 @@ static bool sync_return_bar(app_t *a,bool want){
     pn_status_bar_set_return_bar(want);
     pn_layout_t next=layout(&a->style);
     if(next.height==before_h)return false;
-    a->layout=next;
+    a->layout=next;a->chrome_top=pn_style_body_top(&a->style);
     if(pn_epub_reader_reflow(&a->reader,&a->layout)==PN_OK){
         a->token.generation++;
         (void)pn_display_set_token(&a->display,a->token);
@@ -1444,7 +1461,7 @@ pn_status_t pn_epub_app_suspend(pn_epub_app_t *app,uint64_t now){
     if(a->persistent && !a->highlight_preview)a->recent_pending=true;
     // 页码索引只是可重建缓存，不再挡在离开阅读后的首显之前；由调用者空闲写出，关闭仍强制写出。
     // The page index is a rebuildable cache and no longer precedes the first display after leaving the reader; callers write it when idle and close still forces it.
-    if(status==PN_OK){pn_status_bar_set_return_bar(false);a->last_now=now;a->suspended=true;}return status;
+    if(status==PN_OK){pn_status_bar_set_return_bar(false);pn_status_bar_set_book_override(NULL);a->last_now=now;a->suspended=true;}return status;
 }
 bool pn_epub_app_deferred_pending(const pn_epub_app_t *app){if(!app || !app->impl)return false;const app_t *a=app->impl;return (a->persistent && (a->save.dirty || a->recent_pending || pn_source_blocks_dirty(&a->blocks))) || pn_page_index_pending(&a->page_index);}
 pn_status_t pn_epub_app_deferred_flush(pn_epub_app_t *app){
@@ -1496,13 +1513,24 @@ pn_status_t pn_epub_app_resume(pn_epub_app_t *app,uint64_t now,pn_reader_present
     // 退出后的缓存可能借帧或持写租约；恢复前全部让出，保留可重试状态。/ Deferred caches may borrow pixels or hold write leases; yield all of them before resuming, retaining retry state.
     cache_abort(a);
     pn_status_t status=a->lost?PN_STALE_MEDIA:pn_zip_validate(&a->zip);if(status!=PN_OK)return status;
+    sync_book_status_bar(a);
+    pn_status_bar_prefs_t eff=pn_status_bar_active();
+    if(memcmp(&a->applied_status_bar,&eff,sizeof eff)!=0){
+        a->suspended=false;
+        status=pn_epub_app_relayout_chrome(app,now,present,ctx);
+        if(status==PN_OK){a->applied_status_bar=eff;pn_status_bar_set_return_bar(a->has_bookmark_origin);a->force_full=false;a->refresh.turns=0;a->semantic_due=now>UINT64_MAX-1500?UINT64_MAX:now+1500;}
+        else{a->suspended=true;pn_status_bar_set_book_override(NULL);}
+        return status;
+    }
     pn_w_status_snapshot_t current=pn_w_status_snapshot();
     if(!a->style.hide_bars && a->ui.impl && (current.battery!=a->status.battery || current.charging!=a->status.charging || strcmp(current.clock,a->status.clock))){
         if(pn_status_bar_active().enabled){if(paint_footer(a,&a->frame,false,0,0)==PN_OK)a->status=current;}
         else if(pn_paper_region_style(&a->paper,&a->style,&a->frame,0,PN_READER_TOP)==PN_OK && pn_reader_status_text(&a->ui,&a->frame)==PN_OK)a->status=current;
     }
     status=present(ctx,&a->frame,PN_REFRESH_GC16);a->last_now=now;
-    if(status==PN_OK){pn_status_bar_set_return_bar(a->has_bookmark_origin);a->suspended=false;a->force_full=false;a->refresh.turns=0;a->semantic_due=now>UINT64_MAX-1500?UINT64_MAX:now+1500;}return status;
+    if(status==PN_OK){pn_status_bar_set_return_bar(a->has_bookmark_origin);a->suspended=false;a->force_full=false;a->refresh.turns=0;a->semantic_due=now>UINT64_MAX-1500?UINT64_MAX:now+1500;}
+    else pn_status_bar_set_book_override(NULL);
+    return status;
 }
 pn_status_t pn_epub_app_retained_source(const pn_epub_app_t *app,pn_media_t *media,const char *path){
     if(!app || !app->impl || !media || !path)return PN_INVALID;
@@ -1607,6 +1635,19 @@ pn_status_t pn_epub_app_media_lost(pn_epub_app_t *app){
     return status;
 }
 pn_status_t pn_epub_app_style_get(const pn_epub_app_t *app,pn_style_t *out){if(!app || !app->impl || !out)return PN_INVALID;*out=((app_t *)app->impl)->style;return PN_OK;}
+bool pn_epub_app_style_is_inherited(const pn_epub_app_t *app){return !app || !app->impl || ((const app_t *)app->impl)->style_inherited;}
+pn_status_t pn_epub_app_style_global_get(const pn_epub_app_t *app,pn_style_t *out){
+    if(!app || !app->impl || !out)return PN_INVALID;
+    const app_t *a=app->impl;
+    pn_style_t global=pn_style_default(PN_STYLE_DEFAULT_PIXELS);
+    if(a->persistent && *a->state_directory){
+        pn_journal_files_t gf;pn_journal_io_t gio;pn_book_id_t gid=pn_style_global_id();
+        if(pn_style_global_files(&gf,(pn_media_t *)&a->state,&a->state_lease,a->state_directory,&gio)==PN_OK){
+            pn_style_t loaded;if(pn_style_load(&gio,&gid,&loaded)==PN_OK)global=loaded;
+        }
+    }
+    *out=global;return PN_OK;
+}
 bool pn_epub_app_bars_hidden(const pn_epub_app_t *app){return app && app->impl && ((const app_t *)app->impl)->style.hide_bars!=0;}
 static pn_status_t preview_style(pn_epub_app_t *app,const pn_style_t *style,uint64_t now,pn_reader_present_fn present,void *ctx,bool hint){
     if(app && app->impl)((app_t *)app->impl)->last_confirmed=false;
@@ -1615,14 +1656,16 @@ static pn_status_t preview_style(pn_epub_app_t *app,const pn_style_t *style,uint
     pn_epub_location_t origin=a->style_preview?a->style_origin:a->visible.location;pn_style_t previous=a->style;
     pn_paper_t paper_candidate={0},previous_paper=a->paper;bool changed=!pn_paper_matches(&a->paper,style);
     pn_status_t status=changed?pn_paper_open(&paper_candidate,a->pool,a->media,&a->book_lease,style):PN_OK;if(status!=PN_OK)return status;
-    bool paper_only=pn_style_same_typesetting(&previous,style);pn_layout_t candidate=layout(style);
+    pn_layout_t candidate=layout(style);
+    int next_top=pn_style_body_top(style);
+    bool paper_only=pn_style_same_typesetting(&previous,style) && a->layout.width==candidate.width && a->layout.height==candidate.height && a->chrome_top==next_top;
     if(!paper_only)status=pn_epub_reader_reflow(&a->reader,&candidate);
     if(status!=PN_OK){pn_paper_close(&paper_candidate);return status;}if(changed)a->paper=paper_candidate;
-    a->style=*style;a->layout=candidate;if(!paper_only)a->token.generation++;pn_page_bitmap_invalidate(&a->bitmap);a->first_paint.ready=false;status=pn_display_set_token(&a->display,a->token);a->force_full=true;
+    a->style=*style;a->layout=candidate;a->chrome_top=next_top;if(!paper_only)a->token.generation++;pn_page_bitmap_invalidate(&a->bitmap);a->first_paint.ready=false;status=pn_display_set_token(&a->display,a->token);a->force_full=true;
     a->draft_render=hint;if(status==PN_OK)status=pn_epub_app_jump(app,&origin,now,present,ctx);a->draft_render=false;
-    if(!a->last_confirmed){if(changed){pn_paper_close(&a->paper);a->paper=previous_paper;}a->style=previous;a->layout=layout(&previous);if(pn_epub_reader_reflow(&a->reader,&a->layout)==PN_OK){a->token.generation++;(void)pn_display_set_token(&a->display,a->token);}return status;}
+    if(!a->last_confirmed){if(changed){pn_paper_close(&a->paper);a->paper=previous_paper;}a->style=previous;a->layout=layout(&previous);a->chrome_top=pn_style_body_top(&previous);if(pn_epub_reader_reflow(&a->reader,&a->layout)==PN_OK){a->token.generation++;(void)pn_display_set_token(&a->display,a->token);}return status;}
     if(changed)pn_paper_close(&previous_paper);
-    a->style_origin=origin;a->style_preview=true;return status;
+    a->style_origin=origin;a->style_preview=true;a->applied_status_bar=pn_status_bar_active();return status;
 }
 pn_status_t pn_epub_app_style_preview(pn_epub_app_t *app,const pn_style_t *style,uint64_t now,pn_reader_present_fn present,void *ctx){return preview_style(app,style,now,present,ctx,true);}
 pn_status_t pn_epub_app_style_preview_sheet(pn_epub_app_t *app,const pn_style_t *style,pn_reader_overlay_fn sheet,void *sheet_ctx,uint64_t now,pn_reader_present_fn present,void *ctx){
@@ -1635,17 +1678,43 @@ pn_status_t pn_epub_app_style_preview_sheet(pn_epub_app_t *app,const pn_style_t 
 pn_status_t pn_epub_app_relayout_chrome(pn_epub_app_t *app,uint64_t now,pn_reader_present_fn present,void *ctx){
     if(!app || !app->impl || !present)return PN_INVALID;
     app_t *a=app->impl;if(a->lost)return PN_STALE_MEDIA;if(!a->has_visible)return PN_EMPTY;
+    sync_book_status_bar(a);
     pn_layout_t candidate=layout(&a->style);
     pn_status_t s=pn_epub_reader_reflow(&a->reader,&candidate);if(s!=PN_OK)return s;
-    a->layout=candidate;a->token.generation++;pn_page_bitmap_invalidate(&a->bitmap);a->first_paint.ready=false;
+    a->layout=candidate;a->chrome_top=pn_style_body_top(&a->style);a->token.generation++;pn_page_bitmap_invalidate(&a->bitmap);a->first_paint.ready=false;
     s=pn_display_set_token(&a->display,a->token);a->force_full=true;
-    return s==PN_OK?pn_epub_app_jump(app,&a->visible.location,now,present,ctx):s;
+    s=(s==PN_OK)?pn_epub_app_jump(app,&a->visible.location,now,present,ctx):s;
+    if(s==PN_OK)a->applied_status_bar=pn_status_bar_active();
+    return s;
+}
+bool pn_epub_app_status_bar_is_inherited(const pn_epub_app_t *app){return !app || !app->impl || ((const app_t *)app->impl)->status_bar_inherited;}
+pn_status_t pn_epub_app_status_bar_save(pn_epub_app_t *app,const pn_status_bar_prefs_t *prefs){
+    if(!app || !app->impl || pn_status_bar_prefs_validate(prefs)!=PN_OK)return PN_INVALID;
+    app_t *a=app->impl;
+    if(a->persistent && *a->state_directory){
+        pn_status_t status=pn_status_bar_prefs_save(&a->sbar_io,prefs);
+        if(status!=PN_OK)return status;
+    }
+    a->book_status_bar=*prefs;a->status_bar_inherited=false;
+    sync_book_status_bar(a);
+    return PN_OK;
+}
+pn_status_t pn_epub_app_status_bar_use_global(pn_epub_app_t *app){
+    if(!app || !app->impl)return PN_INVALID;
+    app_t *a=app->impl;
+    if(a->persistent && *a->state_directory){
+        pn_status_t status=pn_status_bar_clear_files(&a->sbar_files);
+        if(status!=PN_OK)return status;
+    }
+    a->book_status_bar=pn_status_bar_prefs_default();a->status_bar_inherited=true;
+    sync_book_status_bar(a);
+    return PN_OK;
 }
 pn_status_t pn_epub_app_style_apply(pn_epub_app_t *app,const pn_style_t *style,uint64_t now,pn_reader_present_fn present,void *ctx){
     pn_status_t navigation=preview_style(app,style,now,present,ctx,false);if(!pn_epub_app_last_confirmed(app))return navigation;
     app_t *a=app->impl;a->pending_style=*style;a->style_pending=a->persistent;
     if(a->persistent){pn_status_t status=pn_style_save(&a->style_io,&a->book,style);if(status!=PN_OK){pn_style_t loaded;if(pn_style_load(&a->style_io,&a->book,&loaded)==PN_OK && !memcmp(&loaded,style,sizeof loaded))status=PN_OK;}if(status!=PN_OK)return status;}
-    a->saved_style=*style;a->style_pending=false;a->style_preview=false;return navigation;
+    a->saved_style=*style;a->style_inherited=false;a->style_pending=false;a->style_preview=false;return navigation;
 }
 pn_status_t pn_epub_app_style_save_global(pn_epub_app_t *app,const pn_style_t *style){
     if(!app || !app->impl || !style)return PN_INVALID;
@@ -1671,7 +1740,7 @@ pn_status_t pn_epub_app_style_use_global(pn_epub_app_t *app,uint64_t now,pn_read
         pn_status_t cleared=pn_style_clear_files(&a->style_files);
         if(cleared!=PN_OK)return cleared;
     }
-    a->saved_style=global;a->style_pending=false;a->style_preview=false;return navigation;
+    a->saved_style=global;a->style_inherited=true;a->style_pending=false;a->style_preview=false;return navigation;
 }
 pn_status_t pn_epub_app_style_cancel(pn_epub_app_t *app,uint64_t now,pn_reader_present_fn present,void *ctx){
     if(app && app->impl)((app_t *)app->impl)->last_confirmed=false;

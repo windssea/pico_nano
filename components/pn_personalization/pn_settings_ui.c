@@ -7,6 +7,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "pn_brand.h"
 #include "pn_settings_ui.h"
+#include "pn_status_bar_ui.h"
 #include "pn_widgets.h"
 #include "pn_keyboard.h"
 #include "pn_network_store.h"
@@ -21,7 +22,7 @@
 #include <time.h>
 #define W 684
 #define H 1216
-enum {SCREEN_MAIN=0,SCREEN_KEYS,SCREEN_REFRESH,SCREEN_ABOUT,SCREEN_APPEARANCE,SCREEN_TIME,SCREEN_UPDATE,SCREEN_WIFI,SCREEN_WIFI_EDIT,SCREEN_GLOBAL_STYLE,SCREEN_GLOBAL_MARGINS,SCREEN_GLOBAL_BG,SCREEN_GLOBAL_CHAPTER,SCREEN_HOME_MOTTO,SCREEN_HOME_MOTTO_EDIT,SCREEN_HOME_MOTTO_EXCERPTS,SCREEN_HOME_BANNER,SCREEN_STATUS_BAR,SCREEN_GESTURES,SCREEN_TAP_ZONES,SCREEN_KEY_HIGHLIGHT};
+enum {SCREEN_MAIN=0,SCREEN_KEYS,SCREEN_REFRESH,SCREEN_ABOUT,SCREEN_APPEARANCE,SCREEN_TIME,SCREEN_UPDATE,SCREEN_WIFI,SCREEN_WIFI_EDIT,SCREEN_GLOBAL_STYLE,SCREEN_GLOBAL_MARGINS,SCREEN_GLOBAL_BG,SCREEN_GLOBAL_CHAPTER,SCREEN_GLOBAL_GUIDE,SCREEN_GLOBAL_PREVIEW,SCREEN_HOME_MOTTO,SCREEN_HOME_MOTTO_EDIT,SCREEN_HOME_MOTTO_EXCERPTS,SCREEN_HOME_BANNER,SCREEN_STATUS_BAR,SCREEN_GESTURES,SCREEN_TAP_ZONES,SCREEN_KEY_HIGHLIGHT};
 typedef struct {pn_pool_t *pool;pn_media_t *state;char dir[PN_JOURNAL_PATH_MAX];pn_font_t font;uint8_t *pixels;pn_frame_t canvas;char message[96];char lan[40];int screen;pn_settings_about_t about;pn_settings_time_t time;
     pn_settings_update_t update; ///< 控制层升级快照 / Controller update snapshot
     pn_font_t *return_font; ///< 单owner移交的空槽，close归还或正常释放 / Empty slot transferred by the single owner, returned on close or normally released
@@ -33,6 +34,7 @@ typedef struct {pn_pool_t *pool;pn_media_t *state;char dir[PN_JOURNAL_PATH_MAX];
     int sbar_pick_slot; ///< 状态栏正在编辑的插槽 0..4，-1表示无弹窗 / Active status-bar slot modal (0..4) or -1
     int gesture_pick_slot; ///< 屏幕手势正在编辑的方位 0..8，-1表示无弹窗 / Active gesture slot modal (0..8) or -1
     int status_bar_return_screen; ///< 状态栏页返回目标（SCREEN_REFRESH 或 SCREEN_GLOBAL_STYLE）/ Return screen for Status Bar sub-page
+    int global_preview_return_screen; ///< 全局全屏预览返回目标 / Return screen for global full-screen preview
     bool snapshot_dirty; ///< 外部快照更新后先完整重画 / Repaint completely after external snapshot changes
     pn_w_status_snapshot_t status; ///< 最近成功画布的实时状态带 / Live status band of the last successful canvas
     pn_keyboard_t kb; ///< WiFi与主页文案共用输入键盘 / Shared on-screen keyboard for WiFi and Home motto
@@ -410,19 +412,23 @@ static pn_status_t draw_appearance(pn_settings_ui_t *ui,su_t *u){
 }
 /* 全局排版：与书内排版完全同源的12格+图片/上下栏开关+实时预览，外加边距详调与内置背景子页。
  * Global typesetting: full parity with in-book typesetting (12 cells, image/bars toggles, live preview, 4-side margins & built-in backgrounds). */
-static void draw_guide_preview_row(pn_frame_t *frame,unsigned style,unsigned shade,int x0,int width,int y,int thickness,int font_pixels,bool follow){
-    if(style<1 || style>3 || width<=0 || y<0 || y>=frame->height)return;
-    if(thickness<1)thickness=1;
-    if(thickness>3)thickness=3;
-    int h=thickness;if(y+h>frame->height)h=frame->height-y;if(h<=0)return;
-    static const uint8_t inks[4]={10,7,4,0};uint8_t ink=inks[shade<4?shade:0];
+static void draw_guide_preview_row_ex(pn_frame_t *frame,unsigned style,unsigned shade,int x0,int width,int y,int thickness,uint8_t custom_dash,uint8_t custom_gap,int font_pixels,bool follow){
+    if(!frame || !frame->pixels || style<1u || style>3u || width<=0 || y<0 || y>=frame->height)return;
+    int h=thickness<1?1:(thickness>3?3:thickness);
+    if(y+h>frame->height)h=frame->height-y;
+    if(h<=0)return;
+    static const uint8_t inks[4]={10,7,4,0};
+    uint8_t ink=inks[shade<4?shade:0];
     if(style==3u){pn_frame_rect(frame,x0,y,width,h,ink);return;}
-    int dash=style==1?19:2,period=style==1?31:13;
+    int dash=style==1?19:2,gap=style==1?12:11;
     if(follow){
         int px=(font_pixels>=20 && font_pixels<=96)?font_pixels:44;
-        if(style==1){dash=px*19/44;if(dash<10)dash=10;if(dash>32)dash=32;period=px*31/44;if(period<16)period=16;if(period>52)period=52;}
-        else{dash=thickness+1;if(dash>4)dash=4;period=px*13/44;if(period<8)period=8;if(period>22)period=22;}
+        if(style==1){dash=px*19/44;if(dash<10)dash=10;if(dash>32)dash=32;gap=px*12/44;if(gap<6)gap=6;if(gap>20)gap=20;}
+        else{dash=h+1;if(dash>4)dash=4;gap=px*11/44;if(gap<6)gap=6;if(gap>20)gap=20;}
     }
+    if(custom_dash>=4u && custom_dash<=40u)dash=(int)custom_dash;
+    if(custom_gap>=4u && custom_gap<=40u)gap=(int)custom_gap;
+    int period=dash+gap;if(period<2)period=2;
     for(int x=0;x<width;x+=period){int w=width-x;if(w>dash)w=dash;pn_frame_rect(frame,x0+x,y,w,h,ink);}
 }
 static pn_status_t draw_gstyle_cell(pn_font_t *font,pn_frame_t *f,const char *label,const char *value,const char *extra_right,bool choice,bool chevron_only,int x,int y){
@@ -444,19 +450,20 @@ static pn_status_t draw_gstyle_cell(pn_font_t *font,pn_frame_t *f,const char *la
     if(s==PN_OK)s=pn_w_text_ex(font,f,value,x+72,y+58,156,PN_ALIGN_CENTER,PN_UI_INK,true);
     return s;
 }
-static pn_status_t draw_global_style(su_t *u){
+static pn_status_t draw_global_style(pn_settings_ui_t *ui,su_t *u){
     static const char *const gpresets[3]={"舒适","紧凑","大字"};
     static const char *const weights[5]={"细","标准","稍粗","粗","特粗"};
     static const char *const clarities[4]={"标准","清晰","锐利","黑白"};
+    static const char *const gstyles[4]={"关闭","虚线","点线","实线"};
     pn_font_t *font=&u->font;pn_frame_t *f=&u->canvas;const pn_style_t *st=&u->global_style;
     pn_status_t s=pn_w_header(font,f,"< 设置","全局排版",NULL);
     if(s==PN_OK){s=pn_font_size(font,24);if(s==PN_OK)s=pn_w_text_ex(font,f,"恢复默认",480,100,172,PN_ALIGN_RIGHT,5,false);}
-    // 顶部实时段落预览（含阅读线与左右边距示意）。/ Top live paragraph preview including reading guide lines and margins.
+    // 顶部实时段落预览（轻点进入 1:1 全屏预览）。/ Top live paragraph preview (tap for 1:1 full-screen preview).
     pn_w_round_fill(f,34,140,616,154,16,PN_UI_SELECT);
     pn_w_round_fill(f,32,138,620,154,16,PN_UI_PAPER);
     pn_w_round_stroke(f,32,138,620,154,16,1.5f,9);
     if(s==PN_OK){s=pn_font_size(font,20);if(s==PN_OK)s=pn_w_text_ex(font,f,"全局排版实时预览",48,164,300,PN_ALIGN_LEFT,5,true);}
-    if(s==PN_OK)s=pn_w_text_ex(font,f,"未特配书籍自动生效",360,164,276,PN_ALIGN_RIGHT,5,false);
+    if(s==PN_OK)s=pn_w_text_ex(font,f,"轻点全屏预览 >",360,164,276,PN_ALIGN_RIGHT,PN_UI_INK,true);
     if(s==PN_OK){
         int saved_px=font->pixels,px=(int)st->pixels*2/3;if(px>34)px=34;if(px<22)px=22;
         int inset=pn_style_margin_left(st)/2;if(inset<14)inset=14;if(inset>52)inset=52;
@@ -475,15 +482,13 @@ static pn_status_t draw_global_style(su_t *u){
                 int gw=full_w-((follow && li==0)?(px*(int)st->indent_em):0);
                 if(follow && li+1==used && used>1)gw=gw*2/3;
                 int gy=174+px+(int)li*pitch+descent+(follow?(px>=36?px/12:3):gap/2)+st->reading_line_offset;
-                if(gy>174 && gy<288 && gw>0)draw_guide_preview_row(f,st->reading_line,st->reading_line_shade,gx0,gw,gy,thick,px,follow);
+                if(gy>174 && gy<288 && gw>0)draw_guide_preview_row_ex(f,st->reading_line,st->reading_line_shade,gx0,gw,gy,thick,st->reading_line_dash,st->reading_line_gap,px,follow);
             }
         }
         pn_status_t restored=pn_font_size(font,saved_px);if(s==PN_OK)s=restored;
     }
     int chosen=st->pixels==44 && st->line_percent==145 && st->gap_percent==40 && st->margin==32?0:st->pixels==36 && st->line_percent==125 && st->gap_percent==20 && st->margin==24?1:st->pixels==56 && st->line_percent==160 && st->gap_percent==40 && st->margin==32?2:-1;
     if(s==PN_OK)s=pn_w_segments(font,f,gpresets,NULL,3,chosen,306,56);
-    // 与书内排版一致的10项双列网格（移除重复的3格阅读线，底部保留「默认阅读线与章节」入口）。
-    // Clean 10-cell two-column grid matching in-book typesetting (removes 3 redundant guide cells; keeps bottom guide/chapter entry).
     char vals[10][32];
     snprintf(vals[0],sizeof vals[0],"%u",(unsigned)st->pixels);
     snprintf(vals[1],sizeof vals[1],"%u.%02u",(unsigned)(st->line_percent/100u),(unsigned)(st->line_percent%100u));
@@ -504,8 +509,6 @@ static pn_status_t draw_global_style(su_t *u){
         const char *extra=i==3?"详调 >":NULL;
         s=draw_gstyle_cell(font,f,glabels[i],vals[i],extra,gchoice[i],i>=8,32+(int)(i%2)*320,378+(int)(i/2)*92);
     }
-    // 底行并排开关：书内图片 + 上下栏，下方附独立入口直达默认阅读线与状态栏设置。
-    // Bottom toggle row: book images + bars, plus direct entries to global reading-line/chapter and status-bar settings.
     pn_w_round_stroke(f,32,854,300,72,12,1.5f,9);
     if(s==PN_OK){s=pn_font_size(font,24);if(s==PN_OK)s=pn_w_text(font,f,"书内图片",44,883,170,PN_ALIGN_LEFT);}
     if(s==PN_OK)s=pn_w_text_ex(font,f,st->hide_images?"不显示":"显示",44,896,276,PN_ALIGN_RIGHT,PN_UI_INK,true);
@@ -516,13 +519,15 @@ static pn_status_t draw_global_style(su_t *u){
     if(s==PN_OK){s=pn_font_size(font,18);if(s==PN_OK)s=pn_w_text_ex(font,f,"状态栏与页脚",364,910,180,PN_ALIGN_LEFT,5,false);}
     pn_w_round_fill(f,32,944,300,68,12,PN_UI_SURFACE);
     pn_w_round_stroke(f,32,944,300,68,12,1.5f,9);
-    if(s==PN_OK){s=pn_font_size(font,22);if(s==PN_OK)s=pn_w_text_ex(font,f,"默认阅读线",46,985,244,PN_ALIGN_LEFT,PN_UI_INK,true);}
+    if(s==PN_OK){s=pn_font_size(font,22);if(s==PN_OK)s=pn_w_text_ex(font,f,"阅读线微调",46,985,156,PN_ALIGN_LEFT,PN_UI_INK,true);}
+    if(s==PN_OK){s=pn_font_size(font,20);if(s==PN_OK)s=pn_w_text_ex(font,f,gstyles[st->reading_line<4?st->reading_line:0],180,985,112,PN_ALIGN_RIGHT,5,false);}
     pn_w_icon(f,PN_ICON_CHEVRON,298,966,22,6);
     pn_w_round_fill(f,352,944,300,68,12,PN_UI_SURFACE);
     pn_w_round_stroke(f,352,944,300,68,12,1.5f,9);
-    if(s==PN_OK){s=pn_font_size(font,22);if(s==PN_OK)s=pn_w_text_ex(font,f,"状态栏设置",366,985,244,PN_ALIGN_LEFT,PN_UI_INK,true);}
+    if(s==PN_OK){s=pn_font_size(font,22);if(s==PN_OK)s=pn_w_text_ex(font,f,"状态栏设置",366,985,156,PN_ALIGN_LEFT,PN_UI_INK,true);}
+    if(s==PN_OK){s=pn_font_size(font,20);if(s==PN_OK)s=pn_w_text_ex(font,f,st->hide_bars?"全局隐藏":pn_status_bar_ui_summary(&ui->status_bar,false),500,985,112,PN_ALIGN_RIGHT,5,false);}
     pn_w_icon(f,PN_ICON_CHEVRON,618,966,22,6);
-    if(s==PN_OK)s=note(u,"所有更改自动保存为全局默认；未单独排版的书籍开书即生效。",1058);
+    if(s==PN_OK)s=note(u,"所有更改自动保存为全局默认；点顶部预览卡可查看 1:1 全屏效果。",1058);
     if(s==PN_OK && *u->message)s=note(u,u->message,1136);
     return s;
 }
@@ -584,7 +589,8 @@ static pn_status_t draw_global_margins(su_t *u){
     if(s==PN_OK)s=draw_global_margin_cell(font,f,"背景左",st->bg_margin_left,32,850);
     if(s==PN_OK)s=draw_global_margin_cell(font,f,"背景右",st->bg_margin_right,352,850);
     if(s==PN_OK)s=draw_global_margin_step_bar(font,f,992,u->margin_step_mult);
-    if(s==PN_OK && *u->message)s=note(u,u->message,1100);
+    if(s==PN_OK){s=pn_font_size(font,28);if(s==PN_OK)s=pn_w_button(font,f,"整页预览",32,1086,620,80,PN_W_SELECTED);}
+    if(s==PN_OK && *u->message)s=note(u,u->message,1194);
     return s;
 }
 static pn_status_t draw_global_chapter_cell(pn_font_t *font,pn_frame_t *f,const char *label,const char *val,bool choice,int x,int y){
@@ -604,7 +610,7 @@ static pn_status_t draw_global_chapter(su_t *u){
     static const char *const gaps[4]={"默认","紧凑","宽松","宽敞"};
     static const char *const footers[4]={"默认","章节名","书名","隐藏"};
     pn_font_t *font=&u->font;pn_frame_t *f=&u->canvas;const pn_style_t *st=&u->global_style;
-    pn_status_t s=pn_w_header(font,f,"< 返回","全局阅读线与章节",NULL);
+    pn_status_t s=pn_w_header(font,f,"< 返回","全局章节与页脚",NULL);
     if(s==PN_OK){s=pn_font_size(font,24);if(s==PN_OK)s=pn_w_text_ex(font,f,"恢复默认",480,100,172,PN_ALIGN_RIGHT,5,false);}
     const int px=32,py=138,pw=620,ph=168;
     pn_w_round_fill(f,px,py,pw,ph,14,PN_UI_PAPER);pn_w_round_stroke(f,px,py,pw,ph,14,1.5f,9);
@@ -622,7 +628,7 @@ static pn_status_t draw_global_chapter(su_t *u){
         int text_w=0,ind_w=0;(void)pn_w_text_width(font,"字与字之间，留出恰好的距离。",&text_w);(void)pn_w_text_width(font,"    ",&ind_w);
         int gx0=px+20+(follow?ind_w:0),gw=follow?text_w:(pw-40);
         int gy=body_y+(follow?6:10)+st->reading_line_offset/2;
-        if(gy>py+20 && gy<py+ph-38)draw_guide_preview_row(f,st->reading_line,st->reading_line_shade,gx0,gw,gy,thick,st->pixels,follow);
+        if(gy>py+20 && gy<py+ph-38)draw_guide_preview_row_ex(f,st->reading_line,st->reading_line_shade,gx0,gw,gy,thick,st->reading_line_dash,st->reading_line_gap,st->pixels,follow);
     }
     pn_frame_rect(f,px+20,py+ph-34,pw-40,1,11);
     int fpx=pn_style_footer_pixels(st)*3/4;if(fpx<16)fpx=16;if(fpx>24)fpx=24;
@@ -632,24 +638,243 @@ static pn_status_t draw_global_chapter(su_t *u){
     if(s==PN_OK)s=pn_w_text_ex(font,f,"42%",px+pw-96,py+ph-10,76,PN_ALIGN_RIGHT,5,false);
 
     char val[32];
-    if(s==PN_OK)s=pn_w_group(font,f,"阅读线扩展",336);
-    if(s==PN_OK)s=draw_global_chapter_cell(font,f,"跟随字体",st->reading_line_follow?"跟随字体":"通栏固定",true,32,352);
-    snprintf(val,sizeof val,"%d px",pn_style_guide_thickness(st));
-    if(s==PN_OK)s=draw_global_chapter_cell(font,f,"阅读线粗细",val,false,352,352);
-    if(s==PN_OK)s=pn_w_group(font,f,"章节标题与页脚",496);
+    if(s==PN_OK)s=pn_w_group(font,f,"章节标题",340);
     if(st->chapter_scale_percent)snprintf(val,sizeof val,"%u%%",(unsigned)st->chapter_scale_percent);
     else snprintf(val,sizeof val,"默认");
-    if(s==PN_OK)s=draw_global_chapter_cell(font,f,"章节字号",val,false,32,512);
-    if(s==PN_OK)s=draw_global_chapter_cell(font,f,"章节对齐",aligns[st->chapter_align<4?st->chapter_align:0],true,352,512);
-    if(s==PN_OK)s=draw_global_chapter_cell(font,f,"章节加粗",st->chapter_bold?"加粗":"跟随正文",true,32,630);
-    if(s==PN_OK)s=draw_global_chapter_cell(font,f,"章节段距",gaps[st->chapter_gap<4?st->chapter_gap:0],true,352,630);
-    if(s==PN_OK)s=draw_global_chapter_cell(font,f,"页脚名称",footers[st->footer_title_mode<4?st->footer_title_mode:0],true,32,748);
+    if(s==PN_OK)s=draw_global_chapter_cell(font,f,"章节字号",val,false,32,356);
+    if(s==PN_OK)s=draw_global_chapter_cell(font,f,"章节对齐",aligns[st->chapter_align<4?st->chapter_align:0],true,352,356);
+    if(s==PN_OK)s=draw_global_chapter_cell(font,f,"章节加粗",st->chapter_bold?"加粗":"跟随正文",true,32,482);
+    if(s==PN_OK)s=draw_global_chapter_cell(font,f,"章节段距",gaps[st->chapter_gap<4?st->chapter_gap:0],true,352,482);
+    if(s==PN_OK)s=pn_w_group(font,f,"经典页脚样式",622);
+    if(s==PN_OK)s=draw_global_chapter_cell(font,f,"页脚名称",footers[st->footer_title_mode<4?st->footer_title_mode:0],true,32,638);
     if(st->footer_font_pixels)snprintf(val,sizeof val,"%u px",(unsigned)st->footer_font_pixels);
     else snprintf(val,sizeof val,"默认 26");
-    if(s==PN_OK)s=draw_global_chapter_cell(font,f,"页脚字号",val,false,352,748);
-    if(s==PN_OK)s=note(u,"所有更改自动保存为全局默认，同时作用于 EPUB 标题与 TXT 独立章节行（第X章等）。",908);
-    if(s==PN_OK && *u->message)s=note(u,u->message,1024);
+    if(s==PN_OK)s=draw_global_chapter_cell(font,f,"页脚字号",val,false,352,638);
+    if(s==PN_OK)s=note(u,"所有更改自动保存为全局默认，同时作用于 EPUB 标题与 TXT 独立章节行（第X章等）。阅读线请从「阅读线微调」独立精调。",806);
+    if(s==PN_OK){s=pn_font_size(font,28);if(s==PN_OK)s=pn_w_button(font,f,"整页预览",32,1086,620,80,PN_W_SELECTED);}
+    if(s==PN_OK && *u->message)s=note(u,u->message,980);
     return s;
+}
+/* 全局排版 1:1 样页绘制（供「整页预览」与半屏「全局阅读线微调」共用，纯绘制零额外内存）。
+ * 1:1 global typesetting sample page renderer shared by Full-Screen Preview and Half-Screen Guide Micro-Editor (pure draw, zero extra RAM). */
+static pn_status_t draw_preview_sbar_slots(pn_font_t *font,pn_frame_t *f,const uint8_t *slots,int bar_y,int bar_h,int fpx){
+    static const pn_align_t aligns[5]={PN_ALIGN_LEFT,PN_ALIGN_LEFT,PN_ALIGN_CENTER,PN_ALIGN_RIGHT,PN_ALIGN_RIGHT};
+    int sx[5]={24,134,234,450,540},sw[5]={104,96,216,86,120};
+    if(slots[0]!=PN_SBAR_SLOT_NONE && slots[1]==PN_SBAR_SLOT_NONE && slots[2]==PN_SBAR_SLOT_NONE)sw[0]=360;
+    else if(slots[0]!=PN_SBAR_SLOT_NONE && slots[1]==PN_SBAR_SLOT_NONE)sw[0]=200;
+    if(slots[1]==PN_SBAR_SLOT_NONE && slots[3]==PN_SBAR_SLOT_NONE){sx[2]=140;sw[2]=392;}
+    else if(slots[1]==PN_SBAR_SLOT_NONE){sx[2]=140;sw[2]=304;}
+    else if(slots[3]==PN_SBAR_SLOT_NONE)sw[2]=304;
+    pn_status_t s=pn_font_size(font,fpx);
+    int baseline=bar_y+(bar_h+fpx*3/4)/2;
+    for(unsigned i=0;i<5 && s==PN_OK;i++){
+        uint8_t k=slots[i];if(k==PN_SBAR_SLOT_NONE)continue;
+        if(k==PN_SBAR_SLOT_BATTERY){
+            int bw=32,bh=18,by=bar_y+(bar_h-bh)/2;
+            int bx=(aligns[i]==PN_ALIGN_RIGHT)?(sx[i]+sw[i]-bw):(aligns[i]==PN_ALIGN_CENTER)?(sx[i]+(sw[i]-bw)/2):sx[i];
+            pn_w_battery_status(f,bx,by,bw,bh,76,false,PN_UI_MUTED);
+            if(sw[i]>=bw+44){
+                if(aligns[i]==PN_ALIGN_RIGHT)s=pn_w_text_ex(font,f,"76%",sx[i],baseline,bx-sx[i]-6,PN_ALIGN_RIGHT,PN_UI_MUTED,false);
+                else if(aligns[i]==PN_ALIGN_LEFT)s=pn_w_text_ex(font,f,"76%",bx+bw+6,baseline,sx[i]+sw[i]-(bx+bw+6),PN_ALIGN_LEFT,PN_UI_MUTED,false);
+            }
+            continue;
+        }
+        const char *txt=k==PN_SBAR_SLOT_TIME?"12:00":k==PN_SBAR_SLOT_CHAPTER?"第一章 拾起阅读":k==PN_SBAR_SLOT_BOOK?"全局排版示例":k==PN_SBAR_SLOT_PROGRESS?"42%":k==PN_SBAR_SLOT_SECTION?"1/12":"";
+        if(*txt)s=pn_w_text_ex(font,f,txt,sx[i],baseline,sw[i],aligns[i],PN_UI_MUTED,false);
+    }
+    return s;
+}
+static pn_status_t draw_global_sample_page(pn_settings_ui_t *ui,su_t *u,int clip_y_max,bool full_preview){
+    pn_font_t *font=&u->font;pn_frame_t *f=&u->canvas;const pn_style_t *st=&u->global_style;
+    int orig_px=font->pixels,orig_w=pn_font_weight_level(font),orig_c=pn_font_clarity_level(font);
+    pn_status_t s=PN_OK;
+    if(st->background && st->background!=PN_READING_BACKGROUND_EXTERNAL){
+        int bx=(int)st->bg_margin_left,by=(int)st->bg_margin_top;
+        int bw=W-(int)st->bg_margin_left-(int)st->bg_margin_right;
+        int bh=H-(int)st->bg_margin_top-(int)st->bg_margin_bottom;
+        if(by+bh>clip_y_max)bh=clip_y_max-by;
+        if(bw>0 && bh>0 && bx>=0 && by>=0)s=pn_reading_background_rect(st->background,f,bx,by,bw,bh);
+    }
+    int left=pn_style_margin_left(st),bw=pn_style_body_width(st);
+    int top=pn_style_body_top(st),bottom=top+pn_style_body_height(st);
+    if(bottom>clip_y_max-8)bottom=clip_y_max-8;
+    if(full_preview){
+        const pn_status_bar_prefs_t *sb_lim=&ui->status_bar;
+        bool has_bot=!st->hide_bars && (!sb_lim->enabled || sb_lim->position==PN_SBAR_POS_DUAL || sb_lim->position==PN_SBAR_POS_BOTTOM);
+        int pill_y=has_bot?1064:1138;
+        if(bottom>pill_y-16)bottom=pill_y-16;
+    }
+    if(top<12)top=12;
+    int y=top;
+    // 1:1 章节标题 / 1:1 chapter heading.
+    int bpx=(int)st->pixels;if(bpx<28)bpx=28;if(bpx>72)bpx=72;
+    int cpx=(bpx*pn_style_chapter_scale(st)+50)/100;if(cpx<24)cpx=24;if(cpx>84)cpx=84;
+    if(s==PN_OK && y+cpx<bottom){
+        pn_align_t calign=st->chapter_align==2?PN_ALIGN_CENTER:st->chapter_align==3?PN_ALIGN_RIGHT:PN_ALIGN_LEFT;
+        int cw=(st->chapter_bold)?(st->weight<0?1:(st->weight<3?st->weight+1:3)):st->weight;
+        s=pn_font_size(font,cpx);
+        if(s==PN_OK)(void)pn_font_weight(font,cw);
+        if(s==PN_OK)(void)pn_font_clarity(font,st->clarity);
+        if(s==PN_OK)s=pn_w_text_ex(font,f,"第一章 拾起阅读",left,y+cpx,bw,calign,PN_UI_INK,st->chapter_bold!=0);
+        int cgap=st->chapter_gap==1?(cpx/4):st->chapter_gap==2?(cpx*3/4):st->chapter_gap==3?cpx:(cpx/2);
+        y+=cpx+cgap+bpx/4;
+    }
+    // 1:1 多段正文与全参数阅读线 / 1:1 multi-paragraph sample prose and full-parameter reading lines.
+    static const char *const paras[4]={
+        "字与字之间，留出恰好的距离。让阅读回到舒适，把时间留给文字。在柔和的墨水屏上，每一行文字都像印在纸页上一样安静沉稳。",
+        "调整行距、段距与四周边距时，页面留白会随之舒展。若开启阅读线，你可以微调虚线与点线的长度、间隔、粗细与深浅，让视线自然过渡到下一行。",
+        "清风拂过窗棂，书页轻翻。无论是长篇小说还是随笔散文，合适的字号与字重总能减轻久读的疲惫，让思绪随文字自由远行。",
+        "此处展示的是全局默认排版的真实比例效果，保存后对所有未单独定制的书籍自动生效。"
+    };
+    if(s==PN_OK){
+        s=pn_font_size(font,bpx);
+        if(s==PN_OK)(void)pn_font_weight(font,st->weight);
+        if(s==PN_OK)(void)pn_font_clarity(font,st->clarity);
+        int ascent=bpx*4/5,descent=bpx/5;(void)pn_font_vertical(font,&ascent,&descent);
+        int pitch=(bpx*(int)st->line_percent+99)/100;if(pitch<ascent+descent)pitch=ascent+descent;
+        int gap=pitch-ascent-descent;if(gap<0)gap=0;
+        int para_gap=bpx*(int)st->gap_percent/100;
+        int indent=bpx*(int)st->indent_em;
+        int tracking=bpx*64*(int)st->tracking_percent/100;
+        bool follow=st->reading_line_follow!=0;
+        int thick=pn_style_guide_thickness(st);
+        for(unsigned pi=0;pi<4 && s==PN_OK;pi++){
+            if(y+ascent>=bottom)break;
+            int avail=bottom-(y+ascent);
+            unsigned max_lines=(unsigned)(avail/pitch)+1u;
+            if(max_lines<1u)break;
+            unsigned used=0;
+            s=pn_w_text_flow(font,f,paras[pi],left,y+ascent,bw,max_lines,pitch,indent,tracking,&used);
+            if(s==PN_OK && st->reading_line && used){
+                for(unsigned li=0;li<used;li++){
+                    int gx0=left+((follow && li==0)?indent:0);
+                    int gw=bw-((follow && li==0)?indent:0);
+                    if(follow && li+1==used && used>1)gw=gw*2/3;
+                    int gy=y+ascent+(int)li*pitch+descent+(follow?(bpx>=36?bpx/12:3):gap/2)+st->reading_line_offset;
+                    if(gy>=top && gy<clip_y_max-2 && gw>0)draw_guide_preview_row_ex(f,st->reading_line,st->reading_line_shade,gx0,gw,gy,thick,st->reading_line_dash,st->reading_line_gap,bpx,follow);
+                }
+            }
+            if(!used)break;
+            y+=(int)used*pitch+para_gap;
+        }
+    }
+    (void)pn_font_weight(font,orig_w);(void)pn_font_clarity(font,orig_c);
+    // 全屏预览叠画状态栏/经典页脚与退出提示胶囊 / Full-screen preview paints status bar / classic footer and tap-to-return pill.
+    if(s==PN_OK && full_preview){
+        const pn_status_bar_prefs_t *sb=&ui->status_bar;
+        bool has_bottom_bar=false;
+        if(!st->hide_bars){
+            if(sb->enabled){
+                int fpx=sb->font_size?24:20,bar_h=sb->font_size?36:30,mg=(int)sb->margin_px;
+                if(sb->position==PN_SBAR_POS_DUAL){
+                    has_bottom_bar=true;
+                    s=draw_preview_sbar_slots(font,f,sb->slots,mg,bar_h,fpx);
+                    int bot_y=H-mg-bar_h;
+                    if(sb->progress_bar!=PN_SBAR_PROG_OFF){int py=bot_y-8;pn_frame_rect(f,24,py,W-48,3,12);pn_frame_rect(f,24,py,260,3,PN_UI_INK);}
+                    if(s==PN_OK)s=draw_preview_sbar_slots(font,f,sb->bottom_slots,bot_y,bar_h,fpx);
+                }else if(sb->position==PN_SBAR_POS_TOP){
+                    int by=mg;
+                    if(sb->progress_bar!=PN_SBAR_PROG_OFF){pn_frame_rect(f,24,by,W-48,3,12);pn_frame_rect(f,24,by,260,3,PN_UI_INK);by+=8;}
+                    s=draw_preview_sbar_slots(font,f,sb->slots,by,bar_h,fpx);
+                }else if(sb->position==PN_SBAR_POS_BOTTOM){
+                    has_bottom_bar=true;
+                    int bot_y=H-mg-bar_h;
+                    if(sb->progress_bar!=PN_SBAR_PROG_OFF){int py=bot_y-8;pn_frame_rect(f,24,py,W-48,3,12);pn_frame_rect(f,24,py,260,3,PN_UI_INK);}
+                    s=draw_preview_sbar_slots(font,f,sb->slots,bot_y,bar_h,fpx);
+                }
+            }else{
+                has_bottom_bar=true;
+                pn_w_battery_status(f,620,6,32,18,76,false,PN_UI_MUTED);
+                s=pn_font_size(font,20);
+                if(s==PN_OK)s=pn_w_text_ex(font,f,"12:00   76%",410,24,202,PN_ALIGN_RIGHT,PN_UI_MUTED,false);
+                int track=W-2*PN_UI_MARGIN,fill=track*42/100;
+                pn_w_round_fill(f,PN_UI_MARGIN,1138,track,4,2,10);
+                pn_w_round_fill(f,PN_UI_MARGIN,1138,fill,4,2,PN_UI_INK);
+                pn_w_dot(f,(float)(PN_UI_MARGIN+fill),1140.0f,7.0f,PN_UI_INK);
+                int fpx=pn_style_footer_pixels(st);
+                if(s==PN_OK)s=pn_font_size(font,fpx);
+                const char *fl=st->footer_title_mode==1?"第一章 拾起阅读":st->footer_title_mode==2?"全局排版示例":st->footer_title_mode==3?"":"第 1/12 节";
+                int base=1192+(fpx-26)/3;
+                if(s==PN_OK && *fl)s=pn_w_text(font,f,fl,PN_UI_MARGIN,base,480,PN_ALIGN_LEFT);
+                if(s==PN_OK)s=pn_w_text(font,f,"42%",PN_UI_MARGIN+480,base,140,PN_ALIGN_RIGHT);
+            }
+        }
+        int py=has_bottom_bar?1064:1138;
+        pn_w_round_fill(f,122,py,440,52,26,PN_UI_PAPER);
+        pn_w_round_stroke(f,122,py,440,52,26,2.0f,PN_UI_INK);
+        if(s==PN_OK){s=pn_font_size(font,22);if(s==PN_OK)s=pn_w_text_ex(font,f,"全局排版全屏预览 · 轻点任意处返回",134,py+34,416,PN_ALIGN_CENTER,PN_UI_INK,true);}
+    }
+    pn_status_t r=pn_font_size(font,orig_px);return s==PN_OK?r:s;
+}
+#define GG_SHEET_Y 616
+#define GG_STYLE_Y 698
+#define GG_STYLE_H 82
+#define GG_ROW0_Y 796
+#define GG_ROW_H 106
+#define GG_ROW_PITCH 120
+static pn_status_t draw_global_guide_stepper(pn_font_t *font,pn_frame_t *f,const char *label,const char *value,bool choice,bool dimmed,int x,int y){
+    pn_w_round_fill(f,x,y,300,GG_ROW_H,12,PN_UI_PAPER);
+    pn_w_round_stroke(f,x,y,300,GG_ROW_H,12,1.5f,dimmed?11:8);
+    pn_status_t s=pn_font_size(font,22);
+    if(s==PN_OK)s=pn_w_text_ex(font,f,label,x+12,y+28,276,PN_ALIGN_CENTER,dimmed?9:PN_UI_MUTED,false);
+    int by=y+36,lx=x+8,rx=x+300-8-82;
+    pn_w_round_fill(f,lx,by,82,62,10,dimmed?14:PN_UI_SELECT);
+    pn_w_round_stroke(f,lx,by,82,62,10,1.0f,dimmed?11:PN_UI_INK);
+    pn_w_icon(f,choice?PN_ICON_BACK:PN_ICON_MINUS,lx+28,by+18,26,dimmed?9:PN_UI_INK);
+    pn_w_round_fill(f,rx,by,82,62,10,dimmed?14:PN_UI_SELECT);
+    pn_w_round_stroke(f,rx,by,82,62,10,1.0f,dimmed?11:PN_UI_INK);
+    pn_w_icon(f,choice?PN_ICON_CHEVRON:PN_ICON_PLUS,rx+28,by+18,26,dimmed?9:PN_UI_INK);
+    if(s==PN_OK)s=pn_font_size(font,24);
+    if(s==PN_OK)s=pn_w_text_ex(font,f,value,lx+82,by+41,rx-(lx+82),PN_ALIGN_CENTER,dimmed?9:PN_UI_INK,!dimmed);
+    return s;
+}
+static pn_status_t draw_global_guide(pn_settings_ui_t *ui,su_t *u){
+    pn_font_t *font=&u->font;pn_frame_t *f=&u->canvas;const pn_style_t *st=&u->global_style;
+    pn_status_t s=draw_global_sample_page(ui,u,GG_SHEET_Y,false);
+    int orig=font->pixels;
+    pn_frame_rect(f,0,GG_SHEET_Y,W,H-GG_SHEET_Y,PN_UI_PAPER);
+    pn_frame_rect(f,0,GG_SHEET_Y,W,2,PN_UI_INK);
+    pn_w_icon(f,PN_ICON_BACK,32,GG_SHEET_Y+24,28,PN_UI_INK);
+    if(s==PN_OK){s=pn_font_size(font,26);if(s==PN_OK)s=pn_w_text_ex(font,f,"返回",64,GG_SHEET_Y+48,96,PN_ALIGN_LEFT,PN_UI_MUTED,false);}
+    if(s==PN_OK){s=pn_font_size(font,30);if(s==PN_OK)s=pn_w_text_ex(font,f,"全局阅读线微调",170,GG_SHEET_Y+50,344,PN_ALIGN_CENTER,PN_UI_INK,true);}
+    pn_w_round_stroke(f,548,GG_SHEET_Y+16,104,48,12,1.5f,PN_UI_INK);
+    if(s==PN_OK){s=pn_font_size(font,24);if(s==PN_OK)s=pn_w_text_ex(font,f,"重置",548,GG_SHEET_Y+48,104,PN_ALIGN_CENTER,PN_UI_INK,true);}
+    pn_frame_rect(f,32,GG_SHEET_Y+76,620,1,12);
+    static const unsigned style_vals[4]={0,3,1,2};
+    static const char *const style_labels[4]={"关闭","实线","虚线","点线"};
+    for(unsigned i=0;i<4 && s==PN_OK;i++){
+        int sx=32+(int)i*158,sw=146;
+        bool active=st->reading_line==style_vals[i];
+        pn_w_round_fill(f,sx,GG_STYLE_Y,sw,GG_STYLE_H,12,active?PN_UI_INK:PN_UI_PAPER);
+        pn_w_round_stroke(f,sx,GG_STYLE_Y,sw,GG_STYLE_H,12,active?2.0f:1.5f,active?PN_UI_INK:8);
+        uint8_t lc=active?PN_UI_PAPER:PN_UI_INK;
+        int ly=GG_STYLE_Y+24;
+        if(style_vals[i]==3)pn_frame_rect(f,sx+24,ly,sw-48,2,lc);
+        else if(style_vals[i]==1){for(int dx=sx+22;dx<sx+sw-22;dx+=18){int seg=10;if(dx+seg>sx+sw-22)seg=sx+sw-22-dx;pn_frame_rect(f,dx,ly,seg,2,lc);}}
+        else if(style_vals[i]==2){for(int dx=sx+24;dx<sx+sw-24;dx+=10)pn_frame_rect(f,dx,ly,3,2,lc);}
+        else pn_frame_rect(f,sx+54,ly,sw-108,2,active?12:10);
+        s=pn_font_size(font,24);
+        if(s==PN_OK)s=pn_w_text_ex(font,f,style_labels[i],sx+6,GG_STYLE_Y+64,sw-12,PN_ALIGN_CENTER,active?PN_UI_PAPER:PN_UI_INK,active);
+    }
+    static const char *const shades[4]={"浅","中","深","黑"};
+    char val[32];
+    bool off=st->reading_line==0;
+    bool dash_active=st->reading_line==1 || st->reading_line==2;
+    snprintf(val,sizeof val,"%d px",pn_style_guide_thickness(st));
+    if(s==PN_OK)s=draw_global_guide_stepper(font,f,"粗细",val,false,off,32,GG_ROW0_Y);
+    if(s==PN_OK)s=draw_global_guide_stepper(font,f,"深浅",shades[st->reading_line_shade<4?st->reading_line_shade:0],true,off,352,GG_ROW0_Y);
+    snprintf(val,sizeof val,"%u px",(unsigned)pn_style_guide_dash(st));
+    if(s==PN_OK)s=draw_global_guide_stepper(font,f,"线段长度",val,false,!dash_active,32,GG_ROW0_Y+GG_ROW_PITCH);
+    snprintf(val,sizeof val,"%u px",(unsigned)pn_style_guide_gap(st));
+    if(s==PN_OK)s=draw_global_guide_stepper(font,f,"线段间隔",val,false,!dash_active,352,GG_ROW0_Y+GG_ROW_PITCH);
+    snprintf(val,sizeof val,"%+d px",(int)st->reading_line_offset);
+    if(s==PN_OK)s=draw_global_guide_stepper(font,f,"上下偏移",val,false,off,32,GG_ROW0_Y+GG_ROW_PITCH*2);
+    if(s==PN_OK)s=draw_global_guide_stepper(font,f,"对齐范围",st->reading_line_follow?"跟随字体":"通栏固定",true,off,352,GG_ROW0_Y+GG_ROW_PITCH*2);
+    if(s==PN_OK){s=pn_font_size(font,22);if(s==PN_OK)s=pn_w_text_ex(font,f,*u->message?u->message:"点上方样页全屏预览 · 所有微调自动保存",32,1190,620,PN_ALIGN_CENTER,*u->message?PN_UI_INK:PN_UI_MUTED,*u->message!=0);}
+    pn_status_t r=pn_font_size(font,orig);return s==PN_OK?r:s;
+}
+static pn_status_t draw_global_preview(pn_settings_ui_t *ui,su_t *u){
+    return draw_global_sample_page(ui,u,H,true);
 }
 static pn_status_t draw_global_bg(su_t *u){
     pn_font_t *font=&u->font;pn_frame_t *f=&u->canvas;const pn_style_t *st=&u->global_style;
@@ -924,10 +1149,10 @@ static pn_status_t show_profile(pn_settings_ui_t *ui,pn_settings_present_fn pres
     // 仅在需要显示任意中文文案/全拼候选/用户文件名时借用常驻中文字体，避免默认设置主页每次重绘重复开闭字库。
     // Borrow the resident Chinese face only when rendering custom CJK text, Pinyin candidates or user filenames, avoiding redundant font opens on default Settings root.
     bool need_scope=*pn_w_brand()!=0 || u->screen==SCREEN_HOME_MOTTO || u->screen==SCREEN_HOME_MOTTO_EDIT || u->screen==SCREEN_HOME_MOTTO_EXCERPTS
-        || u->screen==SCREEN_GLOBAL_STYLE || u->screen==SCREEN_GLOBAL_BG || u->screen==SCREEN_GLOBAL_CHAPTER || u->screen==SCREEN_HOME_BANNER
+        || u->screen==SCREEN_GLOBAL_STYLE || u->screen==SCREEN_GLOBAL_BG || u->screen==SCREEN_GLOBAL_CHAPTER || u->screen==SCREEN_GLOBAL_GUIDE || u->screen==SCREEN_GLOBAL_PREVIEW || u->screen==SCREEN_HOME_BANNER
         || u->screen==SCREEN_STATUS_BAR || u->screen==SCREEN_GESTURES || u->screen==SCREEN_TAP_ZONES || u->screen==SCREEN_KEY_HIGHLIGHT;
     pn_w_font_scope_t scope={0};if(need_scope)(void)pn_w_font_scope_begin(&scope,u->pool,NULL);
-    pn_status_t s=u->screen==SCREEN_KEYS?draw_keys(ui,u):u->screen==SCREEN_REFRESH?draw_refresh(ui,u):u->screen==SCREEN_ABOUT?draw_about(ui,u):u->screen==SCREEN_TIME?draw_time(u):u->screen==SCREEN_UPDATE?draw_update(u):u->screen==SCREEN_WIFI?draw_wifi(u):u->screen==SCREEN_WIFI_EDIT?draw_wifi_edit(u):u->screen==SCREEN_APPEARANCE?draw_appearance(ui,u):u->screen==SCREEN_GLOBAL_STYLE?draw_global_style(u):u->screen==SCREEN_GLOBAL_MARGINS?draw_global_margins(u):u->screen==SCREEN_GLOBAL_BG?draw_global_bg(u):u->screen==SCREEN_GLOBAL_CHAPTER?draw_global_chapter(u):u->screen==SCREEN_HOME_MOTTO?draw_home_motto(ui,u):u->screen==SCREEN_HOME_MOTTO_EDIT?draw_home_motto_edit(u):u->screen==SCREEN_HOME_MOTTO_EXCERPTS?draw_home_motto_excerpts(ui,u):u->screen==SCREEN_HOME_BANNER?draw_home_banner(ui,u):u->screen==SCREEN_STATUS_BAR?draw_status_bar(ui,u):u->screen==SCREEN_GESTURES?draw_gestures(ui,u):u->screen==SCREEN_TAP_ZONES?draw_tap_zones(ui,u):u->screen==SCREEN_KEY_HIGHLIGHT?draw_key_highlight(ui,u):draw_main(ui,u);
+    pn_status_t s=u->screen==SCREEN_KEYS?draw_keys(ui,u):u->screen==SCREEN_REFRESH?draw_refresh(ui,u):u->screen==SCREEN_ABOUT?draw_about(ui,u):u->screen==SCREEN_TIME?draw_time(u):u->screen==SCREEN_UPDATE?draw_update(u):u->screen==SCREEN_WIFI?draw_wifi(u):u->screen==SCREEN_WIFI_EDIT?draw_wifi_edit(u):u->screen==SCREEN_APPEARANCE?draw_appearance(ui,u):u->screen==SCREEN_GLOBAL_STYLE?draw_global_style(ui,u):u->screen==SCREEN_GLOBAL_MARGINS?draw_global_margins(u):u->screen==SCREEN_GLOBAL_BG?draw_global_bg(u):u->screen==SCREEN_GLOBAL_CHAPTER?draw_global_chapter(u):u->screen==SCREEN_GLOBAL_GUIDE?draw_global_guide(ui,u):u->screen==SCREEN_GLOBAL_PREVIEW?draw_global_preview(ui,u):u->screen==SCREEN_HOME_MOTTO?draw_home_motto(ui,u):u->screen==SCREEN_HOME_MOTTO_EDIT?draw_home_motto_edit(u):u->screen==SCREEN_HOME_MOTTO_EXCERPTS?draw_home_motto_excerpts(ui,u):u->screen==SCREEN_HOME_BANNER?draw_home_banner(ui,u):u->screen==SCREEN_STATUS_BAR?draw_status_bar(ui,u):u->screen==SCREEN_GESTURES?draw_gestures(ui,u):u->screen==SCREEN_TAP_ZONES?draw_tap_zones(ui,u):u->screen==SCREEN_KEY_HIGHLIGHT?draw_key_highlight(ui,u):draw_main(ui,u);
     if(need_scope)pn_w_font_scope_end(&scope);
     pn_profile_end(&span,s);
     if(s==PN_OK)s=present(ctx,&u->canvas,profile);
@@ -1107,7 +1332,7 @@ pn_status_t pn_settings_ui_open_fast(pn_settings_ui_t *ui,pn_pool_t *pool,pn_med
     pn_gesture_prefs_t gestures=pn_gesture_prefs_default();
     if(snapshot && snapshot->has_gestures){gestures=snapshot->gestures;u->gestures_known=true;}
     else u->gestures_known=!state || pn_settings_load_gestures(state,dir,&gestures)==PN_OK;
-    u->sbar_pick_slot=-1;u->gesture_pick_slot=-1;u->status_bar_return_screen=SCREEN_MAIN;
+    u->sbar_pick_slot=-1;u->gesture_pick_slot=-1;u->status_bar_return_screen=SCREEN_MAIN;u->global_preview_return_screen=SCREEN_GLOBAL_STYLE;
     pn_home_prefs_t home=pn_home_prefs_default();
     if(snapshot && snapshot->has_home)home=snapshot->home;
     else if(state)(void)pn_home_prefs_load_dir(state,dir,&home);
@@ -1180,6 +1405,14 @@ pn_status_t pn_settings_load_status_bar(pn_media_t *state,const char *dir,pn_sta
     (void)pn_media_release(state,&lease);
     if(s==PN_EMPTY)s=PN_OK;
     if(s==PN_OK)*prefs=v;
+    return s;
+}
+pn_status_t pn_settings_save_status_bar(pn_media_t *state,const char *dir,const pn_status_bar_prefs_t *prefs){
+    if(!state || !dir || !*dir || pn_status_bar_prefs_validate(prefs)!=PN_OK)return PN_INVALID;
+    pn_media_lease_t lease={0};pn_status_t s=pn_media_acquire(state,PN_MEDIA_WRITE,&lease);if(s!=PN_OK)return s;
+    pn_journal_files_t files;pn_journal_io_t io;
+    s=pn_status_bar_prefs_files(&files,state,&lease,dir,&io);if(s==PN_OK)s=pn_status_bar_prefs_save(&io,prefs);
+    (void)pn_media_release(state,&lease);
     return s;
 }
 pn_status_t pn_settings_load_gestures(pn_media_t *state,const char *dir,pn_gesture_prefs_t *prefs){
@@ -1307,7 +1540,8 @@ pn_status_t pn_settings_ui_event(pn_settings_ui_t *ui,int command,pn_settings_pr
         if(u->screen!=SCREEN_MAIN){
             u->forget_armed=false;u->sbar_pick_slot=-1;u->gesture_pick_slot=-1;
             u->screen=(u->screen==SCREEN_TIME || u->screen==SCREEN_UPDATE)?SCREEN_ABOUT
-                :(u->screen==SCREEN_GLOBAL_MARGINS || u->screen==SCREEN_GLOBAL_BG || u->screen==SCREEN_GLOBAL_CHAPTER)?SCREEN_GLOBAL_STYLE
+                :(u->screen==SCREEN_GLOBAL_MARGINS || u->screen==SCREEN_GLOBAL_BG || u->screen==SCREEN_GLOBAL_CHAPTER || u->screen==SCREEN_GLOBAL_GUIDE)?SCREEN_GLOBAL_STYLE
+                :u->screen==SCREEN_GLOBAL_PREVIEW?u->global_preview_return_screen
                 :u->screen==SCREEN_STATUS_BAR?u->status_bar_return_screen
                 :(u->screen==SCREEN_GESTURES || u->screen==SCREEN_TAP_ZONES || u->screen==SCREEN_KEY_HIGHLIGHT)?SCREEN_KEYS
                 :(u->screen==SCREEN_HOME_MOTTO_EDIT || u->screen==SCREEN_HOME_MOTTO_EXCERPTS)?(motto_excerpts_release(u),SCREEN_HOME_MOTTO)
@@ -1409,10 +1643,14 @@ pn_status_t pn_settings_ui_event(pn_settings_ui_t *ui,int command,pn_settings_pr
         return PN_EMPTY;
     }
     if(command==PN_SETUI_GLOBAL_STYLE){u->screen=SCREEN_GLOBAL_STYLE;return show(ui,present,ctx);}
+    if(command==PN_SETUI_GSTYLE_PREVIEW && (u->screen==SCREEN_GLOBAL_STYLE || u->screen==SCREEN_GLOBAL_MARGINS || u->screen==SCREEN_GLOBAL_CHAPTER || u->screen==SCREEN_GLOBAL_GUIDE)){
+        u->global_preview_return_screen=u->screen;u->screen=SCREEN_GLOBAL_PREVIEW;return show(ui,present,ctx);
+    }
     if(u->screen==SCREEN_GLOBAL_STYLE){
         if(command==PN_SETUI_GSTYLE_MARGINS){u->screen=SCREEN_GLOBAL_MARGINS;return show(ui,present,ctx);}
         if(command==PN_SETUI_GSTYLE_BG){u->screen=SCREEN_GLOBAL_BG;return show(ui,present,ctx);}
         if(command==PN_SETUI_GSTYLE_CHAPTER){u->screen=SCREEN_GLOBAL_CHAPTER;return show(ui,present,ctx);}
+        if(command==PN_SETUI_GSTYLE_GUIDE){u->screen=SCREEN_GLOBAL_GUIDE;return show(ui,present,ctx);}
         pn_style_t next=u->global_style;bool handled=true;
         if(command==PN_SETUI_GSTYLE_RESET){next=pn_style_default(PN_STYLE_DEFAULT_PIXELS);}
         else if(command==PN_SETUI_GSTYLE_BARS){next.hide_bars=next.hide_bars?0:1;}
@@ -1459,6 +1697,31 @@ pn_status_t pn_settings_ui_event(pn_settings_ui_t *ui,int command,pn_settings_pr
             }
         }else handled=false;
         if(handled){if(pn_style_validate(&next)==PN_OK)status=commit_global_style(u,&next);pn_status_t shown=show(ui,present,ctx);return status==PN_OK?shown:status;}
+    }
+    if(u->screen==SCREEN_GLOBAL_GUIDE){
+        pn_style_t next=u->global_style;bool handled=true;
+        if(command==PN_SETUI_GSTYLE_GUIDE_RESET){
+            next.reading_line=0;next.reading_line_offset=0;next.reading_line_shade=0;
+            next.reading_line_thickness_extra=0;next.reading_line_follow=0;
+            next.reading_line_dash=0;next.reading_line_gap=0;
+        }else if(command>=PN_SETUI_GSTYLE_GUIDE_STYLE && command<PN_SETUI_GSTYLE_GUIDE_STYLE+4){
+            next.reading_line=(uint16_t)(command-PN_SETUI_GSTYLE_GUIDE_STYLE);
+        }else if(command>=PN_SETUI_GSTYLE_GUIDE_ADJ && command<PN_SETUI_GSTYLE_GUIDE_ADJ+12){
+            unsigned item=(unsigned)(command-PN_SETUI_GSTYLE_GUIDE_ADJ)/2;bool up=((command-PN_SETUI_GSTYLE_GUIDE_ADJ)&1)!=0;
+            switch(item){
+                case 0:{int v=(int)next.reading_line_thickness_extra+(up?1:-1);if(v>=0 && v<=2)next.reading_line_thickness_extra=(uint8_t)v;else status=PN_EMPTY;break;}
+                case 1:next.reading_line_shade=(uint16_t)((next.reading_line_shade+(up?1u:3u))%4u);break;
+                case 2:{int cur=pn_style_guide_dash(&next);int v=cur+(up?2:-2);if(v>=4 && v<=40)next.reading_line_dash=(uint8_t)v;else status=PN_EMPTY;break;}
+                case 3:{int cur=pn_style_guide_gap(&next);int v=cur+(up?2:-2);if(v>=4 && v<=40)next.reading_line_gap=(uint8_t)v;else status=PN_EMPTY;break;}
+                case 4:{int v=(int)next.reading_line_offset+(up?2:-2);if(v>=-8 && v<=8)next.reading_line_offset=(int16_t)v;else status=PN_EMPTY;break;}
+                default:next.reading_line_follow=next.reading_line_follow?0u:1u;break;
+            }
+        }else handled=false;
+        if(handled){
+            if(status==PN_OK && pn_style_validate(&next)==PN_OK)status=commit_global_style(u,&next);
+            pn_status_t shown=show(ui,present,ctx);return status==PN_OK?shown:status;
+        }
+        return PN_EMPTY;
     }
     if(u->screen==SCREEN_GLOBAL_MARGINS){
         if(command>=PN_SETUI_GSTYLE_MSTEP && command<PN_SETUI_GSTYLE_MSTEP+3){
@@ -1631,6 +1894,32 @@ int pn_settings_ui_hit(const pn_settings_ui_t *ui,int x,int y){
         if(y>=DEVICE_Y+MAIN_ROW_H && y<DEVICE_Y+device_rows(u)*MAIN_ROW_H)return PN_SETUI_ABOUT;
         return -1;
     }
+    if(u->screen==SCREEN_GLOBAL_PREVIEW)return PN_SETUI_BACK;
+    if(u->screen==SCREEN_GLOBAL_GUIDE){
+        if(y<GG_SHEET_Y)return PN_SETUI_GSTYLE_PREVIEW;
+        if(y<GG_SHEET_Y+76){
+            if(x<176)return PN_SETUI_BACK;
+            if(x>=528)return PN_SETUI_GSTYLE_GUIDE_RESET;
+            return -1;
+        }
+        if(y>=GG_STYLE_Y && y<GG_STYLE_Y+GG_STYLE_H && x>=32 && x<652){
+            static const int style_cmds[4]={PN_SETUI_GSTYLE_GUIDE_STYLE+0,PN_SETUI_GSTYLE_GUIDE_STYLE+3,PN_SETUI_GSTYLE_GUIDE_STYLE+1,PN_SETUI_GSTYLE_GUIDE_STYLE+2};
+            int idx=(x-32)/158;
+            if(idx>=0 && idx<4 && (x-32)%158<146)return style_cmds[idx];
+            return -1;
+        }
+        for(unsigned row=0;row<3;row++){
+            int top=GG_ROW0_Y+(int)row*GG_ROW_PITCH;
+            if(y>=top && y<top+GG_ROW_H){
+                for(unsigned col=0;col<2;col++){
+                    int left=32+(int)col*320;unsigned item=row*2+col;
+                    if(x>=left && x<left+108)return PN_SETUI_GSTYLE_GUIDE_ADJ+(int)item*2;
+                    if(x>=left+192 && x<left+300)return PN_SETUI_GSTYLE_GUIDE_ADJ+(int)item*2+1;
+                }
+            }
+        }
+        return -1;
+    }
     if((u->screen==SCREEN_STATUS_BAR && u->sbar_pick_slot>=0) || (u->screen==SCREEN_GESTURES && u->gesture_pick_slot>=0))return visual_settings_hit(u,ui,x,y);
     if(pn_w_header_hit(x,y,false)==1)return PN_SETUI_BACK;
     if(u->screen==SCREEN_STATUS_BAR || u->screen==SCREEN_GESTURES || u->screen==SCREEN_TAP_ZONES || u->screen==SCREEN_KEY_HIGHLIGHT)return visual_settings_hit(u,ui,x,y);
@@ -1658,6 +1947,7 @@ int pn_settings_ui_hit(const pn_settings_ui_t *ui,int x,int y){
     }
     if(x<32 || x>=652)return -1;
     if(u->screen==SCREEN_GLOBAL_STYLE){
+        if(y>=138 && y<292)return PN_SETUI_GSTYLE_PREVIEW;
         int preset=pn_w_segments_hit(3,306,56,x,y);if(preset>=0)return PN_SETUI_GSTYLE_PRESET+preset;
         for(unsigned i=0;i<10;i++){
             int cx=32+(int)(i%2)*320,cy=378+(int)(i/2)*92;
@@ -1673,17 +1963,18 @@ int pn_settings_ui_hit(const pn_settings_ui_t *ui,int x,int y){
             }
         }
         if(y>=854 && y<926){if(x<332)return PN_SETUI_GSTYLE_IMAGES;if(x>=352)return PN_SETUI_GSTYLE_BARS;}
-        if(y>=944 && y<1012){if(x<332)return PN_SETUI_GSTYLE_CHAPTER;if(x>=352)return PN_SETUI_STATUS_BAR;}
+        if(y>=944 && y<1012){if(x<332)return PN_SETUI_GSTYLE_GUIDE;if(x>=352)return PN_SETUI_STATUS_BAR;}
         return -1;
     }
     if(u->screen==SCREEN_GLOBAL_CHAPTER){
-        static const int tops[4]={352,512,630,748};
-        for(unsigned row=0;row<4;row++){
+        if(y>=1086 && y<1166)return PN_SETUI_GSTYLE_PREVIEW;
+        static const int tops[3]={356,482,638};
+        for(unsigned row=0;row<3;row++){
             if(y>=tops[row] && y<tops[row]+108){
                 for(unsigned col=0;col<2;col++){
-                    int cx=32+(int)col*320;unsigned item=row*2+col;
-                    if(x>=cx && x<cx+96)return PN_SETUI_GSTYLE_CADJ+(int)item*2;
-                    if(x>=cx+204 && x<cx+300)return PN_SETUI_GSTYLE_CADJ+(int)item*2+1;
+                    int cx=32+(int)col*320;unsigned item=2u+row*2u+col;
+                    if(x>=cx && x<cx+108)return PN_SETUI_GSTYLE_CADJ+(int)item*2;
+                    if(x>=cx+192 && x<cx+300)return PN_SETUI_GSTYLE_CADJ+(int)item*2+1;
                 }
             }
         }
@@ -1691,6 +1982,7 @@ int pn_settings_ui_hit(const pn_settings_ui_t *ui,int x,int y){
     }
     if(u->screen==SCREEN_GLOBAL_MARGINS){
         if(y>=992 && y<1050 && x>=292 && x<652)return PN_SETUI_GSTYLE_MSTEP+(x-292)/120;
+        if(y>=1086 && y<1166)return PN_SETUI_GSTYLE_PREVIEW;
         static const int tops[4]={450,568,732,850};
         for(unsigned row=0;row<4;row++){
             if(y>=tops[row] && y<tops[row]+108){

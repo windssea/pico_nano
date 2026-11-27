@@ -7,6 +7,7 @@
 #include "pn_cache_file.h"
 #include "pn_cancel.h"
 #include "pn_crc32.h"
+#include "pn_input_prefs.h"
 #include "pn_profile.h"
 #include "pn_sd_layout.h"
 #include "pn_reading_store.h"
@@ -191,6 +192,18 @@ pn_status_t pn_resume_bind(pn_resume_t *h, pn_pool_t *pool, pn_media_t *media, c
     key[311] = style->chapter_gap;
     key[312] = style->footer_title_mode;
     key[313] = style->footer_font_pixels;
+    key[314] = style->reading_line_dash;
+    key[315] = style->reading_line_gap;
+    pn_status_bar_prefs_t sb = pn_status_bar_active();
+    if (!style->hide_bars && sb.enabled) {
+        uint8_t sb_bytes[5 + 2 * PN_SBAR_SLOTS] = {sb.enabled, sb.position, sb.font_size, sb.progress_bar, sb.margin_px};
+        memcpy(sb_bytes + 5, sb.slots, PN_SBAR_SLOTS);
+        memcpy(sb_bytes + 5 + PN_SBAR_SLOTS, sb.bottom_slots, PN_SBAR_SLOTS);
+        uint32_t sbh = pn_crc32_update(0u, sb_bytes, sizeof sb_bytes);
+        if (!sbh)
+            sbh = 1u;
+        put(key + 316, sbh, 4);
+    }
     resume_t *r = pn_alloc_optional(pool, PN_MEM_INDEX, sizeof *r);
     if (!r)
         return PN_EMPTY;

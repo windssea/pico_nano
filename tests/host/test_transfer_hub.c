@@ -12,14 +12,14 @@ int main(void){
     uint8_t *bytes=pn_alloc(&pool,684*1216/2);pn_frame_t frame;assert(pn_frame_bind(&frame,bytes,684*1216/2,684,1216));
     pn_transfer_hub_info_t info={.hotspot=true,.lan=false,.storage="共 29.7 GB · 可用 12.1 GB"};
     assert(pn_transfer_hub_render(&font,&frame,&info)==PN_OK && font.pixels==24);
-    assert(pn_transfer_hub_hit(&info,300,280)==PN_HUB_HOTSPOT && pn_transfer_hub_hit(&info,300,380)==-1 && pn_transfer_hub_hit(&info,300,480)==-1);
+    assert(pn_transfer_hub_hit(&info,300,230)==PN_HUB_HOTSPOT && pn_transfer_hub_hit(&info,300,330)==-1 && pn_transfer_hub_hit(&info,300,430)==-1);
     assert(pn_transfer_hub_hit(&info,100,1150)==PN_HUB_HOME && pn_transfer_hub_hit(&info,260,1150)==PN_HUB_SHELF && pn_transfer_hub_hit(&info,430,1150)==-1 && pn_transfer_hub_hit(&info,600,1150)==PN_HUB_SETTINGS);
-    info.lan=true;info.lan_name="家里的WiFi";assert(pn_transfer_hub_render(&font,&frame,&info)==PN_OK && pn_transfer_hub_hit(&info,300,380)==PN_HUB_LAN);
-    info.usb=true;assert(pn_transfer_hub_render(&font,&frame,&info)==PN_OK && pn_transfer_hub_hit(&info,300,480)==PN_HUB_USB && pn_transfer_hub_hit(&info,300,580)==-1 && pn_transfer_hub_hit(&info,300,760)==-1);
-    info.storage_manage=true;assert(pn_transfer_hub_render(&font,&frame,&info)==PN_OK && pn_transfer_hub_hit(&info,300,760)==PN_HUB_STORAGE);
+    info.lan=true;info.lan_name="家里的WiFi";assert(pn_transfer_hub_render(&font,&frame,&info)==PN_OK && pn_transfer_hub_hit(&info,300,330)==PN_HUB_LAN);
+    info.usb=true;assert(pn_transfer_hub_render(&font,&frame,&info)==PN_OK && pn_transfer_hub_hit(&info,300,430)==PN_HUB_USB && pn_transfer_hub_hit(&info,300,524)==-1 && pn_transfer_hub_hit(&info,300,660)==-1);
+    info.storage_manage=true;assert(pn_transfer_hub_render(&font,&frame,&info)==PN_OK && pn_transfer_hub_hit(&info,300,660)==PN_HUB_STORAGE);
     /* 无线不可用：只显示原因，热点与局域网都不可点。/ Wireless unavailable: only the reason is shown and neither hotspot nor LAN is tappable. */
     pn_transfer_hub_info_t off={.unavailable="PC 模拟器不提供无线传书"};
-    assert(pn_transfer_hub_render(&font,&frame,&off)==PN_OK && pn_transfer_hub_hit(&off,300,280)==-1 && pn_transfer_hub_hit(&off,300,380)==-1);
-    assert(pn_transfer_hub_render(&font,&frame,NULL)==PN_INVALID && pn_transfer_hub_hit(NULL,300,280)==-1);
+    assert(pn_transfer_hub_render(&font,&frame,&off)==PN_OK && pn_transfer_hub_hit(&off,300,230)==-1 && pn_transfer_hub_hit(&off,300,330)==-1);
+    assert(pn_transfer_hub_render(&font,&frame,NULL)==PN_INVALID && pn_transfer_hub_hit(NULL,300,230)==-1);
     pn_font_close(&font);pn_free(bytes);assert(!pool.live && !pool.used);return 0;
 }

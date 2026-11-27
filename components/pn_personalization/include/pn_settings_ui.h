@@ -105,6 +105,11 @@
 #define PN_SETUI_SWIPE_TURN 496 ///< 496..498滑动翻页方向（左右/上下/关闭）/ 496..498 swipe page-turn mode (LR/TB/off)
 #define PN_SETUI_SHAKE_TOGGLE 500 ///< 体感晃动翻页开关（默认关闭）/ Shake-to-turn toggle (default off)
 #define PN_SETUI_SHAKE_SENS 501 ///< 501..503体感灵敏度（低/中/高）/ 501..503 shake sensitivity (low/med/high)
+#define PN_SETUI_GSTYLE_GUIDE 504 ///< 打开全局半屏“阅读线微调”子页 / Open global half-screen reading-line micro-editor
+#define PN_SETUI_GSTYLE_GUIDE_STYLE 505 ///< 505..508全局阅读线样式（0关闭/1虚线/2点线/3实线）/ 505..508 global guide style (off/dash/dot/solid)
+#define PN_SETUI_GSTYLE_GUIDE_ADJ 510 ///< 510..521全局阅读线6项微调减加（粗细/深浅/长度/间隔/偏移/对齐）/ 510..521 global guide 6-control steppers
+#define PN_SETUI_GSTYLE_GUIDE_RESET 522 ///< 重置全局阅读线全部参数 / Reset all global reading-line parameters
+#define PN_SETUI_GSTYLE_PREVIEW 523 ///< 打开全局排版 1:1 全屏预览（轻点返回）/ Open 1:1 full-screen global typesetting preview (tap to return)
 #define PN_SETUI_AUTO_TURN_DEC 448 ///< 减小自动翻页间隔 / Decrease auto-turn interval
 #define PN_SETUI_AUTO_TURN_INC 449 ///< 增大自动翻页间隔 / Increase auto-turn interval
 #define PN_SETUI_MOTTO_EXCERPTS 450 ///< 打开“从我的摘录中选择左上角文案”子页 / Open excerpt picker for Home top-left motto
@@ -226,6 +231,8 @@ uint64_t pn_settings_auto_lock_ms(uint16_t minutes);
 /// 读取自定义状态栏配置（无记录返回默认）；同时更新运行时状态栏快照请由调用方调用 pn_status_bar_set_active。
 /// Load custom status bar preferences (absent returns default).
 pn_status_t pn_settings_load_status_bar(pn_media_t *state_media,const char *state_dir,pn_status_bar_prefs_t *prefs);
+/// 同步保存自定义状态栏配置。/ Save custom status bar preferences synchronously.
+pn_status_t pn_settings_save_status_bar(pn_media_t *state_media,const char *state_dir,const pn_status_bar_prefs_t *prefs);
 /// 读取/保存屏幕手势、触控区、三键与长按摘录配置（无记录返回默认）。
 /// Load/save gesture, tap-zone, key-map & highlight preferences (absent returns default).
 pn_status_t pn_settings_load_gestures(pn_media_t *state_media,const char *state_dir,pn_gesture_prefs_t *prefs);

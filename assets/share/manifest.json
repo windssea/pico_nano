@@ -1,0 +1,302 @@
+{
+  "schema": 1,
+  "giteeRepo": "windssea/pico_nano",
+  "giteeTag": "share-assets",
+  "giteeReleaseUrl": "https://gitee.com/windssea/pico_nano/releases/tag/share-assets",
+  "categories": [
+    {
+      "id": "mask",
+      "kind": "image",
+      "dir": "image/mask",
+      "title": "透明遮罩",
+      "shortTitle": "遮罩",
+      "badge": "锁屏透明遮罩",
+      "description": "带透明通道的锁屏遮罩图，叠加在阅读画面或壁纸上方使用。点开可模拟墨水屏阅读正文叠加预览。",
+      "uploadTarget": "传书页「阅读遮罩」（/piconano/masks/）",
+      "previewMode": "mask",
+      "extensions": [
+        ".png"
+      ],
+      "count": 10,
+      "totalSize": 2330435,
+      "items": [
+        {
+          "name": "徽标-PicoNano.png",
+          "stem": "徽标-PicoNano",
+          "ext": "png",
+          "relPath": "image/mask/徽标-PicoNano.png",
+          "path": "assets/share/image/mask/徽标-PicoNano.png",
+          "size": 67140,
+          "sha256": "40b277d057c97f15ca5c58bc622831f21d018e220fa8baa5bf69aa80285c1b23",
+          "width": 684,
+          "height": 1216
+        },
+        {
+          "name": "锁屏-01-熊猫祥云.png",
+          "stem": "锁屏-01-熊猫祥云",
+          "ext": "png",
+          "relPath": "image/mask/锁屏-01-熊猫祥云.png",
+          "path": "assets/share/image/mask/锁屏-01-熊猫祥云.png",
+          "size": 124296,
+          "sha256": "6601bee05b3928c57163f498b46949fb5a275d89fbe945af3abada398594034d",
+          "width": 684,
+          "height": 1216
+        },
+        {
+          "name": "锁屏-02-熊猫书海.png",
+          "stem": "锁屏-02-熊猫书海",
+          "ext": "png",
+          "relPath": "image/mask/锁屏-02-熊猫书海.png",
+          "path": "assets/share/image/mask/锁屏-02-熊猫书海.png",
+          "size": 173851,
+          "sha256": "3711a2ced3089118ea3d68cba1f961fe61f0fa320a8546a1f620a2f715d14ded",
+          "width": 684,
+          "height": 1216
+        },
+        {
+          "name": "锁屏-03-熊猫竹影.png",
+          "stem": "锁屏-03-熊猫竹影",
+          "ext": "png",
+          "relPath": "image/mask/锁屏-03-熊猫竹影.png",
+          "path": "assets/share/image/mask/锁屏-03-熊猫竹影.png",
+          "size": 137821,
+          "sha256": "15bb2b961af96d95a0e3c31267ae068a343385174a4e8d4b93d33b3c584865a4",
+          "width": 684,
+          "height": 1216
+        },
+        {
+          "name": "锁屏-04-熊猫星环.png",
+          "stem": "锁屏-04-熊猫星环",
+          "ext": "png",
+          "relPath": "image/mask/锁屏-04-熊猫星环.png",
+          "path": "assets/share/image/mask/锁屏-04-熊猫星环.png",
+          "size": 136235,
+          "sha256": "09e2e36040596af567cb1b10586830341d63cbbd4e893cb7f45837b088c7d39a",
+          "width": 684,
+          "height": 1216
+        },
+        {
+          "name": "锁屏-05-月下独酌.png",
+          "stem": "锁屏-05-月下独酌",
+          "ext": "png",
+          "relPath": "image/mask/锁屏-05-月下独酌.png",
+          "path": "assets/share/image/mask/锁屏-05-月下独酌.png",
+          "size": 361472,
+          "sha256": "1ea42655f0a2f77b5f8ef1ab93bca19d352e7e3f68e42c0c787efc106e348ce1",
+          "width": 684,
+          "height": 1216
+        },
+        {
+          "name": "锁屏-06-水调歌头.png",
+          "stem": "锁屏-06-水调歌头",
+          "ext": "png",
+          "relPath": "image/mask/锁屏-06-水调歌头.png",
+          "path": "assets/share/image/mask/锁屏-06-水调歌头.png",
+          "size": 355250,
+          "sha256": "ee2b16238dff2fd6921ee875a7f8387f5e5daa502565e246b1b67bd9131fb387",
+          "width": 684,
+          "height": 1216
+        },
+        {
+          "name": "锁屏-07-声声慢.png",
+          "stem": "锁屏-07-声声慢",
+          "ext": "png",
+          "relPath": "image/mask/锁屏-07-声声慢.png",
+          "path": "assets/share/image/mask/锁屏-07-声声慢.png",
+          "size": 359432,
+          "sha256": "598e696806f411472f6fe5c7a8bfb00aa4eae797b28a39175e6eb4e8c619aa6d",
+          "width": 684,
+          "height": 1216
+        },
+        {
+          "name": "锁屏-08-枫桥夜泊.png",
+          "stem": "锁屏-08-枫桥夜泊",
+          "ext": "png",
+          "relPath": "image/mask/锁屏-08-枫桥夜泊.png",
+          "path": "assets/share/image/mask/锁屏-08-枫桥夜泊.png",
+          "size": 306195,
+          "sha256": "00a647b5884e38ee6308097c9e685f4dc08f3a54fbc0caa62e546dd9aec2f529",
+          "width": 684,
+          "height": 1216
+        },
+        {
+          "name": "锁屏-09-青玉案·元夕.png",
+          "stem": "锁屏-09-青玉案·元夕",
+          "ext": "png",
+          "relPath": "image/mask/锁屏-09-青玉案·元夕.png",
+          "path": "assets/share/image/mask/锁屏-09-青玉案·元夕.png",
+          "size": 308743,
+          "sha256": "a17a65a73886ee1d7458be32581e53d7679edb5dd20879acc63c8dcf27a52d21",
+          "width": 684,
+          "height": 1216
+        }
+      ],
+      "pack": {
+        "fileName": "PicoNano-share-mask.zip",
+        "path": "assets/share-packs/PicoNano-share-mask.zip",
+        "giteeUrl": "https://gitee.com/windssea/pico_nano/releases/download/share-assets/PicoNano-share-mask.zip",
+        "size": 2327802,
+        "sha256": "88f871019e945b0491da8759e7dc600b72966ee7e1df57ede45cc6276c164020"
+      }
+    },
+    {
+      "id": "wallpaper",
+      "kind": "image",
+      "dir": "image/wallpaper",
+      "title": "锁屏壁纸",
+      "shortTitle": "壁纸",
+      "badge": "684×1216 锁屏图",
+      "description": "适合小纸 Pico 竖屏比例（684×1216）的整屏锁屏壁纸，上传时自动转为 16 灰阶。",
+      "uploadTarget": "传书页「锁屏壁纸」（/piconano/wallpapers/）",
+      "previewMode": "wallpaper",
+      "extensions": [
+        ".png",
+        ".jpg",
+        ".jpeg"
+      ],
+      "count": 0,
+      "totalSize": 0,
+      "items": []
+    },
+    {
+      "id": "background",
+      "kind": "image",
+      "dir": "image/background",
+      "title": "阅读背景",
+      "shortTitle": "阅读背景",
+      "badge": "正文纸纹底图",
+      "description": "阅读正文时的纸纹与浅色底图，上传后可在「排版设置 → 背景」中选用。",
+      "uploadTarget": "传书页「阅读背景」（/piconano/backgrounds/）",
+      "previewMode": "background",
+      "extensions": [
+        ".png",
+        ".jpg",
+        ".jpeg"
+      ],
+      "count": 0,
+      "totalSize": 0,
+      "items": []
+    },
+    {
+      "id": "banner",
+      "kind": "image",
+      "dir": "image/banner",
+      "title": "首页横幅",
+      "shortTitle": "首页横幅",
+      "badge": "684×146 顶部横幅",
+      "description": "首页「正在阅读」上方横幅背景图（建议 684×146），上传后在「书架与主页 → 正在阅读上方背景」选用。",
+      "uploadTarget": "传书页「首页横幅」（/piconano/banners/）",
+      "previewMode": "banner",
+      "extensions": [
+        ".png",
+        ".jpg",
+        ".jpeg"
+      ],
+      "count": 0,
+      "totalSize": 0,
+      "items": []
+    },
+    {
+      "id": "cover",
+      "kind": "image",
+      "dir": "image/cover",
+      "title": "书籍封面",
+      "shortTitle": "封面",
+      "badge": "3:4 自定义书封",
+      "description": "为本地 TXT 或缺少封面的电子书准备的自定义书封，命名与书名一致即可在书架自动匹配。",
+      "uploadTarget": "传书页「书籍封面」（/piconano/covers/）",
+      "previewMode": "cover",
+      "extensions": [
+        ".png",
+        ".jpg",
+        ".jpeg"
+      ],
+      "count": 0,
+      "totalSize": 0,
+      "items": []
+    },
+    {
+      "id": "font",
+      "kind": "font",
+      "dir": "font",
+      "title": "字体分享",
+      "shortTitle": "字体",
+      "badge": "TTF / OTF 开源字体",
+      "description": "可合法再分发的开源阅读字体（TTF / OTF），支持网页实时试看字形并下载导入设备。",
+      "uploadTarget": "传书页「字体」（/piconano/fonts/）",
+      "previewMode": "font",
+      "extensions": [
+        ".ttf",
+        ".otf"
+      ],
+      "count": 0,
+      "totalSize": 0,
+      "items": []
+    },
+    {
+      "id": "book",
+      "kind": "book",
+      "dir": "book",
+      "title": "书籍分享",
+      "shortTitle": "书籍",
+      "badge": "EPUB / TXT 公版书",
+      "description": "公版名著与开源电子书（EPUB / TXT），下载后直接经传书页导入即可开始阅读。",
+      "uploadTarget": "传书页「书籍」（/piconano/books/）",
+      "previewMode": "book",
+      "extensions": [
+        ".epub",
+        ".txt"
+      ],
+      "count": 0,
+      "totalSize": 0,
+      "items": []
+    }
+  ],
+  "dictionaries": [
+    {
+      "id": "ecdict-en-zh",
+      "title": "ECDICT 英汉核心词典",
+      "subtitle": "英译中 · 音标、考纲标签与词形变化",
+      "direction": "英 → 汉",
+      "wordcount": 124675,
+      "license": "MIT",
+      "source": "skywind3000/ECDICT",
+      "sourceUrl": "https://github.com/skywind3000/ECDICT",
+      "fileName": "PicoNano-dict-ecdict-en-zh.zip",
+      "path": "assets/dicts/PicoNano-dict-ecdict-en-zh.zip",
+      "giteeUrl": "https://gitee.com/windssea/pico_nano/releases/download/share-assets/PicoNano-dict-ecdict-en-zh.zip",
+      "size": 4296984,
+      "sha256": "3dfa1a84f44b667601f6646b57cba190e6cb4ccd5f5c9a8d14f819edec019621"
+    },
+    {
+      "id": "xinhua-zh",
+      "title": "中华新华字词成语典",
+      "subtitle": "汉解 · 1.6万汉字、3万成语与26万汉语词语",
+      "direction": "汉 → 汉",
+      "wordcount": 293150,
+      "license": "MIT",
+      "source": "pwxcoo/chinese-xinhua",
+      "sourceUrl": "https://github.com/pwxcoo/chinese-xinhua",
+      "fileName": "PicoNano-dict-xinhua-zh.zip",
+      "path": "assets/dicts/PicoNano-dict-xinhua-zh.zip",
+      "giteeUrl": "https://gitee.com/windssea/pico_nano/releases/download/share-assets/PicoNano-dict-xinhua-zh.zip",
+      "size": 15970553,
+      "sha256": "d947705f97c51c201942bf698b5e779e92fbb44bb0d675bf5d0bbd0b2de51a4b"
+    },
+    {
+      "id": "cc-cedict-zh-en",
+      "title": "CC-CEDICT 汉英词典",
+      "subtitle": "汉译英 · 简繁体双索引、声调拼音与英文释义",
+      "direction": "汉 → 英",
+      "wordcount": 198761,
+      "license": "CC BY-SA 4.0",
+      "source": "MDBG CC-CEDICT",
+      "sourceUrl": "https://www.mdbg.net/chinese/dictionary?page=cc-cedict",
+      "fileName": "PicoNano-dict-cc-cedict-zh-en.zip",
+      "path": "assets/dicts/PicoNano-dict-cc-cedict-zh-en.zip",
+      "giteeUrl": "https://gitee.com/windssea/pico_nano/releases/download/share-assets/PicoNano-dict-cc-cedict-zh-en.zip",
+      "size": 6924114,
+      "sha256": "cf673cc867ea49d92e22470b7f4b63af92675622c753c3c69214154cd812ea7e"
+    }
+  ]
+}

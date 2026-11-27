@@ -5,8 +5,6 @@
  * English: Visual settings sub-pages: slot-based status bar editor, wireframe screen-gesture mapper + action modal, visual tap-zone picker, and bottom keys / long-press highlight / auto-turn speed.
  */
 
-static const char *const sbar_slot_names[PN_SBAR_SLOT_COUNT]={"空","时间","章节","书名","进度","节号","电量"};
-static const char *const sbar_slot_samples[PN_SBAR_SLOT_COUNT]={"+","12:00","章节","书名","42%","3/20","76%"};
 static const char *const gact_names[PN_GACT_COUNT]={"关闭","上一页","下一页","阅读菜单","阅读目录","阅读进度","添加书签","离线查词","立即全刷","自动翻页"};
 static const char *const gslot_titles[PN_GSLOT_COUNT]={
     "屏幕内 ↑","屏幕内 ↓","顶部下拉 ↓","左上边缘 →","右上边缘 ←","左边缘 ↕","右边缘 ↕","左下边缘 ↑","右下边缘 ↑"
@@ -32,204 +30,15 @@ static int lp_disp_index(uint8_t mode){
     return 0;
 }
 
-/// 绘制虚线矩形框（用于状态栏可点击格子占位）。/ Draw a dashed rectangle (for clickable status-bar preview slots).
-static void draw_dashed_box(pn_frame_t *f,int x,int y,int w,int h,uint8_t ink){
-    for(int px=x;px<x+w;px+=8){int sw=(x+w-px>4)?4:(x+w-px);pn_frame_rect(f,px,y,sw,1,ink);pn_frame_rect(f,px,y+h-1,sw,1,ink);}
-    for(int py=y;py<y+h;py+=8){int sh=(y+h-py>4)?4:(y+h-py);pn_frame_rect(f,x,py,1,sh,ink);pn_frame_rect(f,x+w-1,py,1,sh,ink);}
-}
-
-/// 绘制居中浮层单选菜单（参考图2风格，用于状态栏格子与手势动作选择）。
-/// Draw a centered floating single-select modal (Image 2 style, shared by status-bar slots and gesture actions).
 static pn_status_t draw_picker_modal(pn_font_t *font,pn_frame_t *f,const char *title,const char *subtitle,const char *const *items,unsigned count,int current){
-    const int row_h=64;
-    const int mh=108+(int)count*row_h+12;
-    const int mx=64,mw=556,my=(H-mh)/2;
-    // 阴影与白卡外框 / Drop shadow and crisp white modal border.
-    pn_w_round_fill(f,mx+5,my+6,mw,mh,14,12);
-    pn_w_round_fill(f,mx,my,mw,mh,14,PN_UI_PAPER);
-    pn_w_round_stroke(f,mx,my,mw,mh,14,2.0f,PN_UI_INK);
-    int orig=font->pixels;
-    pn_status_t s=pn_font_size(font,30);
-    if(s==PN_OK)s=pn_w_text_ex(font,f,title,mx+28,my+46,mw-56,PN_ALIGN_LEFT,PN_UI_INK,true);
-    if(s==PN_OK && subtitle && *subtitle){
-        s=pn_font_size(font,22);
-        if(s==PN_OK)s=pn_w_text_ex(font,f,subtitle,mx+28,my+82,mw-56,PN_ALIGN_LEFT,5,false);
-    }
-    pn_frame_rect(f,mx+20,my+98,mw-40,2,8);
-    if(s==PN_OK)s=pn_font_size(font,28);
-    for(unsigned i=0;i<count && s==PN_OK;i++){
-        int ry=my+102+(int)i*row_h;
-        s=pn_w_text_ex(font,f,items[i],mx+28,ry+42,mw-96,PN_ALIGN_LEFT,PN_UI_INK,(int)i==current);
-        if((int)i==current)pn_w_icon(f,PN_ICON_CHECK,mx+mw-54,ry+18,28,PN_UI_INK);
-        if(i+1<count)pn_frame_rect(f,mx+24,ry+row_h-1,mw-48,1,12);
-    }
-    pn_status_t r=pn_font_size(font,orig);return s==PN_OK?r:s;
+    return pn_status_bar_ui_picker_modal(font,f,title,subtitle,items,count,current);
 }
 static int hit_picker_modal(unsigned count,int x,int y,int base_cmd,int close_cmd){
-    const int row_h=64;
-    const int mh=108+(int)count*row_h+12;
-    const int mx=64,mw=556,my=(H-mh)/2;
-    if(x<mx || x>=mx+mw || y<my || y>=my+mh)return close_cmd;
-    if(y>=my+102 && y<my+102+(int)count*row_h)return base_cmd+(y-(my+102))/row_h;
-    return -1;
+    return pn_status_bar_ui_picker_hit(count,x,y,base_cmd,close_cmd);
 }
-
-static pn_status_t draw_sbar_preview_row(pn_font_t *font,pn_frame_t *f,const uint8_t *slots,int bar_y,int bar_h,int pick_offset,int active_pick,bool font_med){
-    const int sx0=32+18,sw=112,sgap=6;
-    pn_status_t s=pn_font_size(font,font_med?22:20);
-    for(unsigned i=0;i<PN_SBAR_SLOTS && s==PN_OK;i++){
-        int bx=sx0+(int)i*(sw+sgap);
-        bool picked=(active_pick==pick_offset+(int)i);
-        if(picked)pn_frame_rect(f,bx,bar_y,sw,bar_h,PN_UI_SURFACE);
-        draw_dashed_box(f,bx,bar_y,sw,bar_h,picked?PN_UI_INK:6);
-        uint8_t kind=slots[i]<PN_SBAR_SLOT_COUNT?slots[i]:0;
-        if(kind==PN_SBAR_SLOT_BATTERY){
-            pn_w_battery_status(f,bx+38,bar_y+(bar_h-18)/2,34,18,76,false,PN_UI_INK);
-        }else{
-            s=pn_w_text_ex(font,f,sbar_slot_samples[kind],bx+4,bar_y+bar_h/2+8,sw-8,PN_ALIGN_CENTER,kind?PN_UI_INK:6,kind!=0);
-        }
-    }
-    return s;
-}
-
-/// 可视化状态栏设置页（双栏上下 2×5 格 / 单栏 5 格可点预览 + 布局/字号/进度条/间距 + 恢复默认）。
-/// Visual status bar settings (dual 2x5 or single 5 clickable preview slots + layout/size/progress/margin + reset).
 static pn_status_t draw_status_bar(pn_settings_ui_t *ui,su_t *u){
-    pn_font_t *font=&u->font;pn_frame_t *f=&u->canvas;
-    const pn_status_bar_prefs_t *sb=&ui->status_bar;
-    uint8_t eff_pos=sb->enabled?sb->position:(uint8_t)PN_SBAR_POS_DUAL;
-    pn_status_t s=pn_w_header(font,f,u->status_bar_return_screen==SCREEN_MAIN?"< 设置":"< 返回","状态栏设置",NULL);
-    int orig=font->pixels;
-    const char *mode_sub=!sb->enabled?"当前：默认双栏（点下方或预览格子即可自定义）"
-        :eff_pos==PN_SBAR_POS_DUAL?"当前：自定义 · 上下双栏（上下均可配置）"
-        :eff_pos==PN_SBAR_POS_TOP?"当前：自定义 · 顶部单栏"
-        :eff_pos==PN_SBAR_POS_BOTTOM?"当前：自定义 · 底部单栏"
-        :"当前：自定义 · 已关闭状态栏";
-    if(s==PN_OK){s=pn_font_size(font,22);if(s==PN_OK)s=pn_w_text_ex(font,f,mode_sub,32,148,620,PN_ALIGN_CENTER,sb->enabled?PN_UI_INK:5,sb->enabled!=0);}
-    // 顶部可视化阅读页预览框（x=32..652, y=166..412）/ Top visual reading page preview card.
-    const int px=32,py=166,pw=620,ph=246;
-    pn_w_round_fill(f,px,py,pw,ph,14,PN_UI_PAPER);
-    pn_w_round_stroke(f,px,py,pw,ph,14,2.0f,PN_UI_INK);
-    bool bar_dual=(eff_pos==PN_SBAR_POS_DUAL);
-    bool bar_top=(eff_pos==PN_SBAR_POS_TOP);
-    bool bar_bot=(eff_pos==PN_SBAR_POS_BOTTOM);
-    bool bar_off=(eff_pos==PN_SBAR_POS_OFF);
-    int text_y0=bar_dual?(py+74):bar_top?(py+88):(py+24);
-    int text_lines=bar_off?7:bar_dual?3:5;
-    // 模拟正文灰条 / Schematic prose lines.
-    for(int li=0;li<text_lines;li++){
-        int lw=(li==text_lines-1)?340:564;
-        pn_frame_rect(f,px+28,text_y0+li*28,lw,10,12);
-    }
-    if(bar_dual){
-        // 顶栏 5 格 + 底栏进度条 + 底栏 5 格 / Top 5 slots + bottom progress rail + bottom 5 slots.
-        if(s==PN_OK)s=draw_sbar_preview_row(font,f,sb->slots,py+12,44,0,u->sbar_pick_slot,sb->font_size!=0);
-        if(sb->progress_bar!=PN_SBAR_PROG_OFF){
-            int py_line=py+ph-64;
-            pn_frame_rect(f,px+20,py_line,pw-40,3,12);
-            pn_frame_rect(f,px+20,py_line,(sb->progress_bar==PN_SBAR_PROG_BOOK)?320:190,4,4);
-        }
-        if(s==PN_OK)s=draw_sbar_preview_row(font,f,sb->bottom_slots,py+ph-56,44,5,u->sbar_pick_slot,sb->font_size!=0);
-    }else if(bar_top || bar_bot){
-        int bar_y=bar_top?(py+22):(py+ph-58);
-        if(sb->progress_bar!=PN_SBAR_PROG_OFF){
-            int py_line=bar_top?(py+12):(py+ph-66);
-            pn_frame_rect(f,px+20,py_line,pw-40,3,12);
-            pn_frame_rect(f,px+20,py_line,(sb->progress_bar==PN_SBAR_PROG_BOOK)?320:190,4,4);
-        }
-        if(s==PN_OK)s=draw_sbar_preview_row(font,f,sb->slots,bar_y,46,0,u->sbar_pick_slot,sb->font_size!=0);
-    }else if(s==PN_OK){
-        s=pn_font_size(font,22);
-        if(s==PN_OK)s=pn_w_text_ex(font,f,"状态栏已关闭（纯全屏正文）",px+20,py+ph-24,pw-40,PN_ALIGN_CENTER,5,false);
-    }
-    const char *hint=bar_dual?"点上方或下方虚线格子，分别配置上下栏内容":bar_off?"可点下方「布局」重新开启双栏或单栏":"点状态栏上的虚线格子，换显示内容";
-    if(s==PN_OK){s=pn_font_size(font,22);if(s==PN_OK)s=pn_w_text_ex(font,f,hint,32,444,620,PN_ALIGN_CENTER,5,false);}
-
-    // 行1：布局 [双栏 | 上方 | 下方 | 关闭] / Row 1: Layout mode (4-way explicit).
-    int ry=476;
-    if(s==PN_OK){s=pn_font_size(font,28);if(s==PN_OK)s=pn_w_text_ex(font,f,"布局",32,ry+42,160,PN_ALIGN_LEFT,PN_UI_INK,false);}
-    {
-        static const char *const pos_l[4]={"双栏","上方","下方","关闭"};
-        static const uint8_t pos_v[4]={PN_SBAR_POS_DUAL,PN_SBAR_POS_TOP,PN_SBAR_POS_BOTTOM,PN_SBAR_POS_OFF};
-        pn_w_round_stroke(f,212,ry,440,64,12,1.5f,PN_UI_INK);
-        if(s==PN_OK)s=pn_font_size(font,24);
-        for(int i=0;i<4 && s==PN_OK;i++){
-            int cx=212+i*110;bool sel=(eff_pos==pos_v[i]);
-            if(sel)pn_w_round_fill(f,cx+3,ry+3,104,58,9,PN_UI_INK);
-            s=pn_w_text_ex(font,f,pos_l[i],cx+4,ry+41,102,PN_ALIGN_CENTER,sel?PN_UI_PAPER:PN_UI_INK,sel);
-            if(i<3 && !sel && eff_pos!=pos_v[i+1])pn_frame_rect(f,cx+110,ry+14,1,36,11);
-        }
-    }
-    pn_frame_rect(f,32,ry+80,620,1,12);
-
-    // 行2：字号 [小 | 中] / Row 2: Font size.
-    ry=572;
-    if(s==PN_OK){s=pn_font_size(font,28);if(s==PN_OK)s=pn_w_text_ex(font,f,"字号",32,ry+42,200,PN_ALIGN_LEFT,PN_UI_INK,false);}
-    {
-        static const char *const sz_l[2]={"小","中"};
-        pn_w_round_stroke(f,452,ry,200,64,12,1.5f,PN_UI_INK);
-        if(s==PN_OK)s=pn_font_size(font,24);
-        for(int i=0;i<2 && s==PN_OK;i++){
-            int cx=452+i*100;bool sel=(sb->font_size==(uint8_t)i);
-            if(sel)pn_w_round_fill(f,cx+3,ry+3,94,58,9,PN_UI_INK);
-            s=pn_w_text_ex(font,f,sz_l[i],cx+4,ry+41,92,PN_ALIGN_CENTER,sel?PN_UI_PAPER:PN_UI_INK,sel);
-        }
-    }
-    pn_frame_rect(f,32,ry+80,620,1,12);
-
-    // 行3：进度条 [全书 | 本章 | 关闭] / Row 3: Progress bar.
-    ry=668;
-    if(s==PN_OK){s=pn_font_size(font,28);if(s==PN_OK)s=pn_w_text_ex(font,f,"进度条",32,ry+42,200,PN_ALIGN_LEFT,PN_UI_INK,false);}
-    {
-        static const char *const pr_l[3]={"全书","本章","关闭"};
-        pn_w_round_stroke(f,292,ry,360,64,12,1.5f,PN_UI_INK);
-        if(s==PN_OK)s=pn_font_size(font,24);
-        for(int i=0;i<3 && s==PN_OK;i++){
-            int cx=292+i*120;bool sel=(sb->progress_bar==(uint8_t)i);
-            if(sel)pn_w_round_fill(f,cx+3,ry+3,114,58,9,PN_UI_INK);
-            s=pn_w_text_ex(font,f,pr_l[i],cx+4,ry+41,112,PN_ALIGN_CENTER,sel?PN_UI_PAPER:PN_UI_INK,sel);
-            if(i<2 && !sel && sb->progress_bar!=(uint8_t)(i+1))pn_frame_rect(f,cx+120,ry+14,1,36,11);
-        }
-    }
-    pn_frame_rect(f,32,ry+80,620,1,12);
-
-    // 行4：距离屏幕间距 [-  8 px  +] / Row 4: Edge spacing.
-    ry=764;
-    if(s==PN_OK){s=pn_font_size(font,28);if(s==PN_OK)s=pn_w_text_ex(font,f,"距离屏幕间距",32,ry+42,260,PN_ALIGN_LEFT,PN_UI_INK,false);}
-    pn_w_round_stroke(f,352,ry,300,64,12,1.5f,PN_UI_INK);
-    pn_frame_rect(f,442,ry+12,1,40,11);pn_frame_rect(f,562,ry+12,1,40,11);
-    pn_w_icon(f,PN_ICON_MINUS,385,ry+20,24,sb->margin_px>0?PN_UI_INK:PN_UI_DISABLED);
-    pn_w_icon(f,PN_ICON_PLUS,595,ry+20,24,sb->margin_px<PN_SBAR_MARGIN_MAX?PN_UI_INK:PN_UI_DISABLED);
-    if(s==PN_OK){
-        char mv[24];snprintf(mv,sizeof mv,"%u px",(unsigned)sb->margin_px);
-        s=pn_font_size(font,24);
-        if(s==PN_OK)s=pn_w_text_ex(font,f,mv,444,ry+41,116,PN_ALIGN_CENTER,PN_UI_INK,true);
-    }
-
-    // 底部：恢复默认按钮（默认态与自定义态视觉区分明确）/ Footer: Restore defaults (clearly distinguishes default vs customized).
-    ry=884;
-    if(sb->enabled){
-        pn_w_round_stroke(f,32,ry,620,76,14,1.5f,PN_UI_INK);
-        if(s==PN_OK){s=pn_font_size(font,28);if(s==PN_OK)s=pn_w_text_ex(font,f,"恢复默认（经典双栏）",56,ry+48,500,PN_ALIGN_LEFT,PN_UI_INK,false);}
-        pn_w_icon(f,PN_ICON_CHEVRON,606,ry+26,24,PN_UI_INK);
-    }else{
-        pn_w_round_fill(f,32,ry,620,76,14,PN_UI_SURFACE);
-        pn_w_round_stroke(f,32,ry,620,76,14,1.5f,10);
-        if(s==PN_OK){s=pn_font_size(font,24);if(s==PN_OK)s=pn_w_text_ex(font,f,"当前为默认经典双栏 · 修改上方任一项即启用自定义",48,ry+46,588,PN_ALIGN_CENTER,5,false);}
-    }
-    if(s==PN_OK && *u->message)s=note(u,u->message,1012);
-
-    // 格子内容选择浮层（支持双栏顶/底共 10 格）/ Floating slot content picker modal (supports top & bottom 10 slots in dual mode).
-    if(s==PN_OK && u->sbar_pick_slot>=0 && u->sbar_pick_slot<(int)(PN_SBAR_SLOTS*2u)){
-        bool is_bot=(u->sbar_pick_slot>=(int)PN_SBAR_SLOTS);
-        int idx=is_bot?(u->sbar_pick_slot-(int)PN_SBAR_SLOTS):u->sbar_pick_slot;
-        char stitle[48];
-        if(bar_dual)snprintf(stitle,sizeof stitle,"%s第 %d 格显示内容",is_bot?"底栏":"顶栏",idx+1);
-        else snprintf(stitle,sizeof stitle,"第 %d 格显示内容",idx+1);
-        int cur=(int)(is_bot?sb->bottom_slots[idx]:sb->slots[idx]);
-        s=draw_picker_modal(font,f,stitle,"点按选项立即保存生效",sbar_slot_names,PN_SBAR_SLOT_COUNT,cur);
-    }
-    pn_status_t r=pn_font_size(font,orig);return s==PN_OK?r:s;
+    return pn_status_bar_ui_render(&u->font,&u->canvas,&ui->status_bar,u->sbar_pick_slot,PN_SBAR_SCOPE_GLOBAL,
+        u->status_bar_return_screen==SCREEN_MAIN?"< 设置":"< 返回",u->message);
 }
 
 /// 图1 & 图2：可视化屏幕手势线框图 + 动作选择弹窗。
@@ -424,32 +233,22 @@ static unsigned gestures_active_count(const pn_gesture_prefs_t *g){
 }
 static int visual_settings_hit(const su_t *u,const pn_settings_ui_t *ui,int x,int y){
     if(u->screen==SCREEN_STATUS_BAR){
-        if(u->sbar_pick_slot>=0)return hit_picker_modal(PN_SBAR_SLOT_COUNT,x,y,PN_SETUI_SBAR_PICK,PN_SETUI_SBAR_MODAL_CLOSE);
-        const pn_status_bar_prefs_t *sb=&ui->status_bar;
-        uint8_t eff_pos=sb->enabled?sb->position:(uint8_t)PN_SBAR_POS_DUAL;
-        const int sx0=32+18,sw=112,sgap=6;
-        if(eff_pos==PN_SBAR_POS_DUAL){
-            int top_y=166+12,bot_y=166+246-56;
-            if(y>=top_y-6 && y<top_y+50){
-                for(int i=0;i<(int)PN_SBAR_SLOTS;i++){int bx=sx0+i*(sw+sgap);if(x>=bx && x<bx+sw)return PN_SETUI_SBAR_SLOT+i;}
-            }
-            if(y>=bot_y-6 && y<bot_y+50){
-                for(int i=0;i<(int)PN_SBAR_SLOTS;i++){int bx=sx0+i*(sw+sgap);if(x>=bx && x<bx+sw)return PN_SETUI_SBAR_BSLOT+i;}
-            }
-        }else if(eff_pos==PN_SBAR_POS_TOP || eff_pos==PN_SBAR_POS_BOTTOM){
-            int bar_y=(eff_pos==PN_SBAR_POS_TOP)?(166+22):(166+246-58);
-            if(y>=bar_y-6 && y<bar_y+52){
-                for(int i=0;i<(int)PN_SBAR_SLOTS;i++){int bx=sx0+i*(sw+sgap);if(x>=bx && x<bx+sw)return PN_SETUI_SBAR_SLOT+i;}
-            }
-        }
-        if(y>=476 && y<540 && x>=212 && x<652){
-            static const int pos_cmds[4]={PN_SETUI_SBAR_POS_DUAL,PN_SETUI_SBAR_POS+PN_SBAR_POS_TOP,PN_SETUI_SBAR_POS+PN_SBAR_POS_BOTTOM,PN_SETUI_SBAR_POS+PN_SBAR_POS_OFF};
-            return pos_cmds[(x-212)/110];
-        }
-        if(y>=572 && y<636 && x>=452 && x<652)return PN_SETUI_SBAR_FONT+(x-452)/100;
-        if(y>=668 && y<732 && x>=292 && x<652)return PN_SETUI_SBAR_PROG+(x-292)/120;
-        if(y>=764 && y<828){if(x>=352 && x<442)return PN_SETUI_SBAR_MARGIN_DEC;if(x>=562 && x<652)return PN_SETUI_SBAR_MARGIN_INC;}
-        if(sb->enabled && y>=884 && y<960 && x>=32 && x<652)return PN_SETUI_SBAR_RESET;
+        int act=pn_status_bar_ui_hit(&ui->status_bar,u->sbar_pick_slot,PN_SBAR_SCOPE_GLOBAL,x,y);
+        if(act<0)return -1;
+        if(act==PN_SBAR_UI_BACK)return PN_SETUI_BACK;
+        if(act==PN_SBAR_UI_MODAL_CLOSE)return PN_SETUI_SBAR_MODAL_CLOSE;
+        if(act>=PN_SBAR_UI_SLOT_BASE && act<PN_SBAR_UI_SLOT_BASE+(int)PN_SBAR_SLOTS)return PN_SETUI_SBAR_SLOT+(act-PN_SBAR_UI_SLOT_BASE);
+        if(act>=PN_SBAR_UI_BSLOT_BASE && act<PN_SBAR_UI_BSLOT_BASE+(int)PN_SBAR_SLOTS)return PN_SETUI_SBAR_BSLOT+(act-PN_SBAR_UI_BSLOT_BASE);
+        if(act>=PN_SBAR_UI_PICK_BASE && act<PN_SBAR_UI_PICK_BASE+(int)PN_SBAR_SLOT_COUNT)return PN_SETUI_SBAR_PICK+(act-PN_SBAR_UI_PICK_BASE);
+        if(act==PN_SBAR_UI_POS_DUAL)return PN_SETUI_SBAR_POS_DUAL;
+        if(act==PN_SBAR_UI_POS_TOP)return PN_SETUI_SBAR_POS+PN_SBAR_POS_TOP;
+        if(act==PN_SBAR_UI_POS_BOTTOM)return PN_SETUI_SBAR_POS+PN_SBAR_POS_BOTTOM;
+        if(act==PN_SBAR_UI_POS_OFF)return PN_SETUI_SBAR_POS+PN_SBAR_POS_OFF;
+        if(act>=PN_SBAR_UI_FONT_BASE && act<PN_SBAR_UI_FONT_BASE+2)return PN_SETUI_SBAR_FONT+(act-PN_SBAR_UI_FONT_BASE);
+        if(act>=PN_SBAR_UI_PROG_BASE && act<PN_SBAR_UI_PROG_BASE+3)return PN_SETUI_SBAR_PROG+(act-PN_SBAR_UI_PROG_BASE);
+        if(act==PN_SBAR_UI_MARGIN_DEC)return PN_SETUI_SBAR_MARGIN_DEC;
+        if(act==PN_SBAR_UI_MARGIN_INC)return PN_SETUI_SBAR_MARGIN_INC;
+        if(act==PN_SBAR_UI_RESET)return PN_SETUI_SBAR_RESET;
         return -1;
     }
     if(u->screen==SCREEN_GESTURES){

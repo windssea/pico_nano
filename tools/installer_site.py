@@ -1,15 +1,22 @@
-"""生成网页安装器静态站点，包含壁纸与开源词典下载、自动同步版本更新日志、固件和清单。
-Build the web-installer static site with wallpaper & open-source dictionary downloads, auto-synced changelog, firmware and manifest."""
+"""生成网页安装器静态站点，包含 PicoNano 共享素材预览/打包、开源词典、自动同步版本更新日志、固件和清单。
+Build the web-installer static site with PicoNano shared-asset previews/packs, open-source dictionaries, auto-synced changelog, firmware and manifest."""
 import argparse
 import functools
 import hashlib
 import http.server
+import io
 import json
 import pathlib
 import re
 import shutil
+import struct
+import zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+GITEE_SHARE_REPO = "windssea/pico_nano"
+GITEE_SHARE_TAG = "share-assets"
+ZIP_FIXED_TIME = (2026, 1, 1, 0, 0, 0)
+
 # 清单键 → 发布目录内文件名。/ Manifest key -> file name inside a release folder.
 FILES = {
     "bootloader": "bootloader.bin",
@@ -24,6 +31,227 @@ OFFSETS = {"bootloader.bin": 0x0, "partition-table.bin": 0x8000}
 RELEASE = re.compile(r"pico_nano-(\d+(?:\.\d+)+)-esp32s3")
 UPGRADE = re.compile(r"pico_nano-(\d+(?:\.\d+)+)-([0-9a-f]{7})-upgrade")
 FULL = re.compile(r"pico_nano-(\d+(?:\.\d+)+)-([0-9a-f]{7})-full")
+
+# PicoNano 共享素材分类（与设备存储卡上传目录一一对应）。
+# PicoNano shared-asset categories (1:1 aligned with device SD upload targets).
+SHARE_CATEGORIES = (
+    {
+        "id": "mask",
+        "kind": "image",
+        "dir": "image/mask",
+        "title": "透明遮罩",
+        "shortTitle": "遮罩",
+        "badge": "锁屏透明遮罩",
+        "description": "带透明通道的锁屏遮罩图，叠加在阅读画面或壁纸上方使用。点开可模拟墨水屏阅读正文叠加预览。",
+        "uploadTarget": "传书页「阅读遮罩」（/piconano/masks/）",
+        "extensions": (".png",),
+        "previewMode": "mask",
+    },
+    {
+        "id": "wallpaper",
+        "kind": "image",
+        "dir": "image/wallpaper",
+        "title": "锁屏壁纸",
+        "shortTitle": "壁纸",
+        "badge": "684×1216 锁屏图",
+        "description": "适合小纸 Pico 竖屏比例（684×1216）的整屏锁屏壁纸，上传时自动转为 16 灰阶。",
+        "uploadTarget": "传书页「锁屏壁纸」（/piconano/wallpapers/）",
+        "extensions": (".png", ".jpg", ".jpeg"),
+        "previewMode": "wallpaper",
+    },
+    {
+        "id": "background",
+        "kind": "image",
+        "dir": "image/background",
+        "title": "阅读背景",
+        "shortTitle": "阅读背景",
+        "badge": "正文纸纹底图",
+        "description": "阅读正文时的纸纹与浅色底图，上传后可在「排版设置 → 背景」中选用。",
+        "uploadTarget": "传书页「阅读背景」（/piconano/backgrounds/）",
+        "extensions": (".png", ".jpg", ".jpeg"),
+        "previewMode": "background",
+    },
+    {
+        "id": "banner",
+        "kind": "image",
+        "dir": "image/banner",
+        "title": "首页横幅",
+        "shortTitle": "首页横幅",
+        "badge": "684×146 顶部横幅",
+        "description": "首页「正在阅读」上方横幅背景图（建议 684×146），上传后在「书架与主页 → 正在阅读上方背景」选用。",
+        "uploadTarget": "传书页「首页横幅」（/piconano/banners/）",
+        "extensions": (".png", ".jpg", ".jpeg"),
+        "previewMode": "banner",
+    },
+    {
+        "id": "cover",
+        "kind": "image",
+        "dir": "image/cover",
+        "title": "书籍封面",
+        "shortTitle": "封面",
+        "badge": "3:4 自定义书封",
+        "description": "为本地 TXT 或缺少封面的电子书准备的自定义书封，命名与书名一致即可在书架自动匹配。",
+        "uploadTarget": "传书页「书籍封面」（/piconano/covers/）",
+        "extensions": (".png", ".jpg", ".jpeg"),
+        "previewMode": "cover",
+    },
+    {
+        "id": "font",
+        "kind": "font",
+        "dir": "font",
+        "title": "字体分享",
+        "shortTitle": "字体",
+        "badge": "TTF / OTF 开源字体",
+        "description": "可合法再分发的开源阅读字体（TTF / OTF），支持网页实时试看字形并下载导入设备。",
+        "uploadTarget": "传书页「字体」（/piconano/fonts/）",
+        "extensions": (".ttf", ".otf"),
+        "previewMode": "font",
+    },
+    {
+        "id": "book",
+        "kind": "book",
+        "dir": "book",
+        "title": "书籍分享",
+        "shortTitle": "书籍",
+        "badge": "EPUB / TXT 公版书",
+        "description": "公版名著与开源电子书（EPUB / TXT），下载后直接经传书页导入即可开始阅读。",
+        "uploadTarget": "传书页「书籍」（/piconano/books/）",
+        "extensions": (".epub", ".txt"),
+        "previewMode": "book",
+    },
+)
+
+
+def image_dimensions(data):
+    """纯标准库解析 PNG / JPEG 尺寸，不依赖 Pillow。 / Parse PNG/JPEG width and height using stdlib only."""
+    if len(data) >= 24 and data[:8] == b"\x89PNG\r\n\x1a\n" and data[12:16] == b"IHDR":
+        return struct.unpack(">II", data[16:24])
+    if len(data) >= 4 and data[:2] == b"\xff\xd8":
+        pos = 2
+        while pos + 4 <= len(data):
+            if data[pos] != 0xFF:
+                pos += 1
+                continue
+            while pos < len(data) and data[pos] == 0xFF:
+                pos += 1
+            if pos >= len(data):
+                break
+            marker = data[pos]
+            pos += 1
+            if marker in (0xD8, 0xD9, 0x01) or 0xD0 <= marker <= 0xD7:
+                continue
+            if pos + 2 > len(data):
+                break
+            seg_len = struct.unpack(">H", data[pos:pos + 2])[0]
+            if seg_len < 2 or pos + seg_len > len(data):
+                break
+            if marker in (0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF):
+                if pos + 7 <= len(data):
+                    h, w = struct.unpack(">HH", data[pos + 3:pos + 7])
+                    return w, h
+                break
+            pos += seg_len
+    return 0, 0
+
+
+def build_deterministic_zip(entries):
+    """生成时间戳固定、条目有序的可复现 ZIP 字节串。 / Build deterministic ZIP bytes with fixed timestamps and sorted entries."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
+        for arcname, payload in sorted(entries, key=lambda pair: pair[0]):
+            info = zipfile.ZipInfo(arcname, date_time=ZIP_FIXED_TIME)
+            info.compress_type = zipfile.ZIP_DEFLATED
+            info.external_attr = 0o644 << 16
+            archive.writestr(info, payload)
+    return buf.getvalue()
+
+
+def gitee_share_download_url(file_name, gitee_repo=GITEE_SHARE_REPO, gitee_tag=GITEE_SHARE_TAG):
+    """构造 Gitee 共享素材 Release 附件下载地址。 / Construct a Gitee share-assets release download URL."""
+    return f"https://gitee.com/{gitee_repo}/releases/download/{gitee_tag}/{file_name}"
+
+
+def scan_share_assets(root, gitee_repo=GITEE_SHARE_REPO, gitee_tag=GITEE_SHARE_TAG):
+    """扫描 assets/share/ 生成共享素材清单、分类 ZIP 字节与兼容 PicoNano.zip。
+    Scan assets/share/ to build the shared-asset manifest, per-category ZIP packs, and backward-compatible PicoNano.zip."""
+    share_root = root / "assets/share"
+    categories = []
+    packs = {}
+    mask_entries = []
+    for spec in SHARE_CATEGORIES:
+        folder = share_root / spec["dir"]
+        items = []
+        pack_entries = []
+        if folder.is_dir():
+            for path in sorted(folder.iterdir(), key=lambda p: p.name):
+                if not path.is_file() or path.name.startswith(".") or path.name.lower() == "readme.md":
+                    continue
+                ext = path.suffix.lower()
+                if ext not in spec["extensions"]:
+                    continue
+                data = path.read_bytes()
+                digest = hashlib.sha256(data).hexdigest()
+                rel = f"{spec['dir']}/{path.name}"
+                entry = {
+                    "name": path.name,
+                    "stem": path.stem,
+                    "ext": ext.lstrip("."),
+                    "relPath": rel,
+                    "path": f"assets/share/{rel}",
+                    "size": len(data),
+                    "sha256": digest,
+                }
+                if spec["kind"] == "image":
+                    width, height = image_dimensions(data)
+                    if width > 0 and height > 0:
+                        entry["width"] = width
+                        entry["height"] = height
+                items.append(entry)
+                pack_entries.append((f"PicoNano-{spec['id']}/{path.name}", data))
+                if spec["id"] == "mask":
+                    mask_entries.append((f"PicoNano/{path.name}", data))
+        cat_obj = {
+            "id": spec["id"],
+            "kind": spec["kind"],
+            "dir": spec["dir"],
+            "title": spec["title"],
+            "shortTitle": spec["shortTitle"],
+            "badge": spec["badge"],
+            "description": spec["description"],
+            "uploadTarget": spec["uploadTarget"],
+            "previewMode": spec["previewMode"],
+            "extensions": list(spec["extensions"]),
+            "count": len(items),
+            "totalSize": sum(item["size"] for item in items),
+            "items": items,
+        }
+        if pack_entries:
+            pack_name = f"PicoNano-share-{spec['id']}.zip"
+            pack_bytes = build_deterministic_zip(pack_entries)
+            packs[pack_name] = pack_bytes
+            cat_obj["pack"] = {
+                "fileName": pack_name,
+                "path": f"assets/share-packs/{pack_name}",
+                "giteeUrl": gitee_share_download_url(pack_name, gitee_repo, gitee_tag),
+                "size": len(pack_bytes),
+                "sha256": hashlib.sha256(pack_bytes).hexdigest(),
+            }
+        categories.append(cat_obj)
+
+    compat_zip = None
+    if mask_entries:
+        compat_zip = build_deterministic_zip(mask_entries)
+    elif (root / "assets/wall/PicoNano.zip").is_file():
+        compat_zip = (root / "assets/wall/PicoNano.zip").read_bytes()
+
+    manifest = {
+        "schema": 1,
+        "giteeRepo": gitee_repo,
+        "giteeTag": gitee_tag,
+        "giteeReleaseUrl": f"https://gitee.com/{gitee_repo}/releases/tag/{gitee_tag}",
+        "categories": categories,
+    }
+    return manifest, packs, compat_zip
 
 
 def read_full(folder):
@@ -200,9 +428,9 @@ def read_changelogs(root, limit=12):
     return entries[:limit]
 
 
-def read_dictionaries(root):
-    """校验 assets/dicts/manifest.json 中的开源词典包并返回清单条目。
-    Validate open-source dictionary archives in assets/dicts/manifest.json and return manifest entries."""
+def read_dictionaries(root, gitee_repo=GITEE_SHARE_REPO, gitee_tag=GITEE_SHARE_TAG):
+    """校验 assets/dicts/manifest.json 中的开源词典包并返回清单条目（含 Gitee 加速地址）。
+    Validate open-source dictionary archives in assets/dicts/manifest.json and return manifest entries with Gitee URLs."""
     dicts_dir = root / "assets/dicts"
     manifest_path = dicts_dir / "manifest.json"
     if not manifest_path.is_file():
@@ -233,10 +461,32 @@ def read_dictionaries(root):
             "sourceUrl": item.get("source_url", ""),
             "fileName": zip_name,
             "path": f"assets/dicts/{zip_name}",
+            "giteeUrl": gitee_share_download_url(zip_name, gitee_repo, gitee_tag),
             "size": len(data),
             "sha256": digest,
         })
     return result
+
+
+def build_share_manifest_doc(root, gitee_repo=GITEE_SHARE_REPO, gitee_tag=GITEE_SHARE_TAG):
+    """构建包含全部共享素材分类与开源词典的统一在线清单文档。
+    Build the unified online manifest document combining all shared-asset categories and open-source dictionaries."""
+    share_manifest, share_packs, compat_zip = scan_share_assets(root, gitee_repo, gitee_tag)
+    dictionaries = read_dictionaries(root, gitee_repo, gitee_tag)
+    doc = {**share_manifest, "dictionaries": dictionaries}
+    return doc, share_packs, compat_zip, dictionaries
+
+
+def write_share_manifest(root=ROOT):
+    """将统一在线素材清单写入仓库 assets/share/manifest.json，供国内 CDN 与传书页在线拉取。
+    Write the unified online manifest to assets/share/manifest.json for CDN mirrors and the Transfer page."""
+    doc, _, _, dictionaries = build_share_manifest_doc(root)
+    target = root / "assets/share/manifest.json"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(doc, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    total_share = sum(cat["count"] for cat in doc["categories"])
+    print(f"Share manifest: {target} ({total_share} share assets; {len(dictionaries)} dicts)")
+    return doc
 
 
 def build(out, latest_only=False):
@@ -277,11 +527,30 @@ def build(out, latest_only=False):
     mark_hardware_verified(releases)
     changelogs = read_changelogs(ROOT)
     notes_by_version = {entry["version"]: {"date": entry["date"], "items": entry["items"]} for entry in changelogs}
-    dictionaries = read_dictionaries(ROOT)
+    share_doc, share_packs, compat_zip, dictionaries = build_share_manifest_doc(ROOT)
+    share_manifest = {k: v for k, v in share_doc.items() if k != "dictionaries"}
     if out.exists():
         shutil.rmtree(out)
     shutil.copytree(ROOT / "installer", out)
-    shutil.copyfile(ROOT / "assets/wall/PicoNano.zip", out / "assets/PicoNano.zip")
+    (out / "assets").mkdir(parents=True, exist_ok=True)
+    if compat_zip is not None:
+        (out / "assets/PicoNano.zip").write_bytes(compat_zip)
+    # 输出共享素材原文件、分类打包 ZIP 与独立清单（含词典，与仓库 assets/share/manifest.json 同构）。
+    # Emit shareable asset files, category ZIP packs, and standalone manifest (including dictionaries, matching assets/share/manifest.json).
+    share_out = out / "assets/share"
+    share_out.mkdir(parents=True, exist_ok=True)
+    for cat in share_manifest["categories"]:
+        for item in cat["items"]:
+            src = ROOT / "assets/share" / item["relPath"]
+            dst = share_out / item["relPath"]
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(src, dst)
+    (share_out / "manifest.json").write_text(json.dumps(share_doc, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    if share_packs:
+        packs_out = out / "assets/share-packs"
+        packs_out.mkdir(parents=True, exist_ok=True)
+        for pack_name, pack_bytes in share_packs.items():
+            (packs_out / pack_name).write_bytes(pack_bytes)
     if dictionaries:
         dict_out = out / "assets/dicts"
         dict_out.mkdir(parents=True, exist_ok=True)
@@ -299,10 +568,16 @@ def build(out, latest_only=False):
             shutil.copyfile(source, target / entry["name"])
         del release["_folder"]
         release.pop("_current_table", None)
-    manifest_payload = {"releases": releases, "changelog": changelogs, "dictionaries": dictionaries}
+    manifest_payload = {
+        "releases": releases,
+        "changelog": changelogs,
+        "dictionaries": dictionaries,
+        "share": share_manifest,
+    }
     (out / "firmware" / "manifest.json").write_text(json.dumps(manifest_payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     (out / ".nojekyll").write_text("", encoding="utf-8")
-    print(f"Installer site: {out} ({', '.join(r['version'] for r in releases)}; {len(dictionaries)} dicts; {len(changelogs)} changelog entries)")
+    total_share = sum(cat["count"] for cat in share_manifest["categories"])
+    print(f"Installer site: {out} ({', '.join(r['version'] for r in releases)}; {len(dictionaries)} dicts; {total_share} share assets; {len(changelogs)} changelog entries)")
 
 
 def main():
@@ -310,7 +585,11 @@ def main():
     parser.add_argument("--out", type=pathlib.Path, default=ROOT / "build-dev" / "installer-site")
     parser.add_argument("--serve", type=int, metavar="PORT", help="Serve on http://localhost:PORT after building")
     parser.add_argument("--latest-only", action="store_true", help="Publish only the highest version; keep matching upgrade/full modes")
+    parser.add_argument("--write-share-manifest", action="store_true", help="Refresh repository assets/share/manifest.json and exit")
     args = parser.parse_args()
+    if args.write_share_manifest:
+        write_share_manifest(ROOT)
+        return
     out = args.out.resolve()
     build(out, args.latest_only)
     if args.serve:

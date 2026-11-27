@@ -168,6 +168,10 @@ bool pn_reader_app_font_unavailable(const pn_reader_app_t *app);
 pn_status_t pn_reader_app_recent_status(const pn_reader_app_t *app);
 /// 当前可见排版值；不写存储。/ Current visual style without storage writes.
 pn_status_t pn_reader_app_style_get(const pn_reader_app_t *app,pn_style_t *style);
+/// 当前排版是否跟随全局默认（无单书排版覆盖）；预览不改变它。/ Whether the accepted typesetting follows global defaults (no per-book override); previews do not change it.
+bool pn_reader_app_style_is_inherited(const pn_reader_app_t *app);
+/// 读取全局默认排版配置（未设全局时返回出厂舒适默认）；不改当前书状态。/ Read the global default typesetting (falling back to factory defaults if unset) without altering this book.
+pn_status_t pn_reader_app_style_global_get(const pn_reader_app_t *app,pn_style_t *style);
 /// 草稿重排并呈现，保留进入时的源锚点，不保存配置。
 /// Reflow and present a draft at the entry source anchor without saving configuration.
 pn_status_t pn_reader_app_style_preview(pn_reader_app_t *app,const pn_style_t *style,uint64_t now,pn_reader_present_fn present,void *ctx);
@@ -175,6 +179,12 @@ pn_status_t pn_reader_app_style_preview(pn_reader_app_t *app,const pn_style_t *s
 pn_status_t pn_reader_app_style_preview_sheet(pn_reader_app_t *app,const pn_style_t *style,pn_reader_overlay_fn sheet,void *sheet_ctx,uint64_t now,pn_reader_present_fn present,void *ctx);
 /// 状态栏高度变化后按当前样式重新计算正文区域并重绘。/ Recompute the body viewport and repaint after status-bar inset changes.
 pn_status_t pn_reader_app_relayout_chrome(pn_reader_app_t *app,uint64_t now,pn_reader_present_fn present,void *ctx);
+/// 当前书籍状态栏是否跟随全局默认（无本书独立状态栏覆盖）。/ Whether this book's status bar follows global defaults (no per-book override).
+bool pn_reader_app_status_bar_is_inherited(const pn_reader_app_t *app);
+/// 保存本书独立阅读状态栏配置（不影响全局和其他书籍）并立即更新本书生效快照。/ Persist per-book reading status-bar prefs (without touching global or other books) and activate the book override.
+pn_status_t pn_reader_app_status_bar_save(pn_reader_app_t *app,const pn_status_bar_prefs_t *prefs);
+/// 清除本书独立状态栏覆盖并恢复跟随全局状态栏设置。/ Clear per-book status-bar override and restore following the global status bar.
+pn_status_t pn_reader_app_status_bar_use_global(pn_reader_app_t *app);
 /// 成功呈现后同步保存；失败保留应用意图供重试。
 /// Save synchronously after successful presentation; retain apply intent on failure for retry.
 pn_status_t pn_reader_app_style_apply(pn_reader_app_t *app,const pn_style_t *style,uint64_t now,pn_reader_present_fn present,void *ctx);

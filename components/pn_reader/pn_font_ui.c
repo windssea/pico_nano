@@ -69,8 +69,8 @@ static pn_status_t paint(void *ctx,pn_font_t *font,pn_font_t *metadata,pn_frame_
  (void)metadata;
  if(status==PN_OK && u->mode==0){
   bool system=s->current.primary.kind==PN_FONT_RESIDENT;
-  status=font_card(font,frame,"跟随全局默认",s->inherited?"已跟随 · 重开读取全局设置":"取消本书覆盖，采用全局默认",INHERIT_Y,DEFAULT_H,s->inherited,false,false);
-  if(status==PN_OK)status=font_card(font,frame,"系统字体","仅设置本书 · 自动补字",RESIDENT_Y,DEFAULT_H,system && !s->inherited,false,true);
+  status=font_card(font,frame,s->inherited?"当前：跟随全局字体":"恢复全局字体（当前：本书独立）",s->inherited?"已使用全局默认 · 点选下方仅对本书生效":"点此清除本书独立设置，恢复跟随全局默认",INHERIT_Y,DEFAULT_H,s->inherited,!s->inherited,false);
+  if(status==PN_OK)status=font_card(font,frame,"系统字体",system && !s->inherited?"本书独立指定 · 自动补字":"仅设置本书 · 自动补字",RESIDENT_Y,DEFAULT_H,system && !s->inherited,false,true);
   char count[128];snprintf(count,sizeof count,"已安装 %zu 款",s->page.total);
   if(status==PN_OK)status=label(font,frame,"外置字体",32,TARGET_Y,300,26,PN_UI_MUTED,PN_ALIGN_LEFT);
   if(status==PN_OK)status=label(font,frame,count,352,TARGET_Y,300,24,PN_UI_MUTED,PN_ALIGN_RIGHT);
@@ -97,7 +97,7 @@ static pn_status_t paint(void *ctx,pn_font_t *font,pn_font_t *metadata,pn_frame_
   char value[128];
   if(status==PN_OK){if(s->info.glyphs)snprintf(value,sizeof value,"字重 %u · 字形 %" PRIu32,s->info.weight,s->info.glyphs);else snprintf(value,sizeof value,"%s","默认阅读字库，缺字由系统回退");status=sized_text(font,frame,value,28,332,PN_ALIGN_LEFT);}
   if(status==PN_OK){if(s->checked)snprintf(value,sizeof value,"样例检查：缺字 %u / %u",s->missing,s->checked);else snprintf(value,sizeof value,"请预览原文检查缺字");status=sized_text(font,frame,value,28,384,PN_ALIGN_LEFT);}
-  if(status==PN_OK)status=sized_text(font,frame,"仅用于电子书阅读，不改变界面字体",28,436,PN_ALIGN_LEFT);
+  if(status==PN_OK)status=sized_text(font,frame,s->inherited?"当前本书：跟随全局字体 · 仅用于电子书阅读":"当前本书：独立字体 · 仅用于电子书阅读",28,436,PN_ALIGN_LEFT);
   const char *labels[]={"预览原文","应用本书","设为默认阅读字体","取消"};
   for(int i=0;i<4 && status==PN_OK;i++)status=sized_button(font,frame,labels[i],32,DETAIL_Y0+i*DETAIL_PITCH,620,96,i==1?PN_W_SELECTED:0u);
  }

@@ -33,9 +33,10 @@ class FullPackages(unittest.TestCase):
         self.board.mkdir()
         self.factory.mkdir()
         (self.root / "installer/assets").mkdir(parents=True)
-        wallpaper_zip = self.root / "assets/wall/PicoNano.zip"
-        wallpaper_zip.parent.mkdir(parents=True)
-        wallpaper_zip.write_bytes((ROOT / "assets/wall/PicoNano.zip").read_bytes())
+        mask_dir = self.root / "assets/share/image/mask"
+        mask_dir.mkdir(parents=True)
+        sample_mask = next((ROOT / "assets/share/image/mask").glob("*.png"))
+        (mask_dir / sample_mask.name).write_bytes(sample_mask.read_bytes())
         shipped = ROOT / "releases/pico_nano-0.0.57-esp32s3"
         for source, target in (("bootloader.bin", "bootloader/bootloader.bin"),
                                ("ota_data_initial.bin", "ota_data_initial.bin")):

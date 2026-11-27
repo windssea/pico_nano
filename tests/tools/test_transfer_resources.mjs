@@ -18,7 +18,7 @@ function harness(fetch,bootstrap=false,extras={}){
   const tabs=['book','font','cover','banner','wallpaper','mask','background','dict'].map(kind=>{const e=new Element();e.dataset.kind=kind;return e;});
   const context=vm.createContext({document:{getElementById:element,createElement:()=>new Element(),querySelectorAll:()=>tabs},fetch,SHA256,URLSearchParams,Uint8Array,TextEncoder,TextDecoder,Blob,File,Response,CompressionStream,DecompressionStream,location:{hash:'',pathname:'/',search:''},history:{replaceState(){}},sessionStorage:{getItem(){return null;},setItem(){}},setTimeout,clearTimeout,AbortController,...extras});
   const source=readFileSync(new URL('../../assets/transfer/app.js',import.meta.url),'utf8').replace(/^import .*;\r?$/m,'');
-  vm.runInContext((bootstrap?source:source.slice(0,source.indexOf('// 打开页面'))+'render();')+'\nglobalThis.qa={token:value=>{token=value;},auth:()=>token,api,send,remove:removeFont,prepare:prepareImage,png:imagePng,add,entries:()=>entries,dictZip:dictZipEncode,hasDictZipRA,prepareDict:prepareDictFile,extractDictZip:dictExtractZip,removeDictGroup};',context);
+  vm.runInContext((bootstrap?source:source.slice(0,source.indexOf('// 打开页面'))+'render();')+'\nglobalThis.qa={token:value=>{token=value;},auth:()=>token,api,send,remove:removeFont,prepare:prepareImage,png:imagePng,add,entries:()=>entries,dictZip:dictZipEncode,hasDictZipRA,prepareDict:prepareDictFile,extractDictZip:dictExtractZip,removeDictGroup,loadOnlineCatalog,importOnlineAsset,onlineUrl,onlineState,openOnlinePreview};',context);
   return {context,element,choose:kind=>tabs.find(t=>t.dataset.kind===kind).onclick()};
 }
 const reply=(value,status=200)=>({ok:status<400,status,json:async()=>value});
@@ -276,4 +276,68 @@ test('installed dictionaries group by prefix with completeness badges and suppor
  assert.ok(deletes.some(u=>u.includes('name=ecdict.ifo')));
  assert.ok(deletes.some(u=>u.includes('name=ecdict.idx')));
  assert.ok(deletes.some(u=>u.includes('name=ecdict.dict.dz')));
+});
+
+test('online asset gallery lazy-loads with mirror fallback, never leaks device tokens, verifies SHA-256, and routes to exact target kind',async()=>{
+ const manifest=JSON.parse(readFileSync(new URL('../../assets/share/manifest.json',import.meta.url),'utf8'));
+ const maskCat=manifest.categories.find(c=>c.id==='mask'&&c.count>0);
+ const dictEntry=manifest.dictionaries.find(d=>d.fileName==='PicoNano-dict-ecdict-en-zh.zip');
+ assert.ok(maskCat&&dictEntry);
+ const sampleMask=maskCat.items[0];
+ const realMaskBytes=readFileSync(new URL('../../'+sampleMask.path,import.meta.url));
+ const realDictBytes=readFileSync(new URL('../../'+dictEntry.path,import.meta.url));
+
+ const externalCalls=[];
+ let corruptMask=false;
+ const customFetch=(url,options={})=>{
+  if(String(url).startsWith('https://')){
+   externalCalls.push({url:String(url),options});
+   if(String(url).startsWith('https://cdn.jsdelivr.net/'))return Promise.reject(Error('cdn unreachable'));
+   if(String(url).endsWith('/assets/share/manifest.json'))return Promise.resolve(reply(manifest));
+   if(String(url).includes('/assets/share/image/mask/')){
+    const payload=corruptMask?Buffer.from('tampered-bytes'):realMaskBytes;
+    return Promise.resolve({ok:true,status:200,arrayBuffer:async()=>payload.buffer.slice(payload.byteOffset,payload.byteOffset+payload.byteLength)});
+   }
+   if(String(url).includes('/assets/dicts/')){
+    return Promise.resolve({ok:true,status:200,arrayBuffer:async()=>realDictBytes.buffer.slice(realDictBytes.byteOffset,realDictBytes.byteOffset+realDictBytes.byteLength)});
+   }
+   return Promise.resolve(reply({},404));
+  }
+  return Promise.resolve(reply({items:[],more:false}));
+ };
+
+ const harnessOnline=harness(customFetch,false,{createImageBitmap:async()=>({width:684,height:1216,close(){}})});
+ const origCreate=harnessOnline.context.document.createElement;
+ harnessOnline.context.document.createElement=tag=>{if(tag!=='canvas')return origCreate(tag);return {width:0,height:0,getContext(){return {fillRect(){},drawImage(){},getImageData(){const data=new Uint8Array(684*1216*4);data.fill(255);return {data};}};}};};
+ harnessOnline.context.qa.token('secret-device-token');
+ assert.equal(externalCalls.length,0,'must not make external requests before user action');
+
+ const doc=await harnessOnline.context.qa.loadOnlineCatalog('jsdelivr');
+ assert.ok(doc&&harnessOnline.context.qa.onlineState.source.id==='pages');
+ assert.equal(harnessOnline.context.qa.onlineState.catId,'mask');
+ assert.ok(externalCalls.every(c=>!c.options.headers?.Authorization&&c.options.credentials==='omit'));
+
+ // 1. Tampered asset fails SHA-256 check and never enters the upload queue.
+ corruptMask=true;
+ await assert.rejects(harnessOnline.context.qa.importOnlineAsset('mask',sampleMask,false),/摘要校验失败/);
+ assert.equal(harnessOnline.context.qa.entries().length,0);
+
+ // 2. Valid mask downloaded while top tab is still 'book' routes strictly to 'mask' as 16-gray PNG.
+ corruptMask=false;
+ const queuedMask=await harnessOnline.context.qa.importOnlineAsset('mask',sampleMask,false);
+ assert.equal(queuedMask,1);
+ assert.equal(harnessOnline.context.qa.entries()[0].kind,'mask');
+ assert.ok(harnessOnline.context.qa.entries()[0].name.endsWith('.png'));
+
+ // 3. Valid online StarDict dictionary ZIP verifies SHA-256 and unpacks ordered 3-part bundle.
+ const queuedDict=await harnessOnline.context.qa.importOnlineAsset('dict',{name:dictEntry.fileName,stem:dictEntry.title,path:dictEntry.path,sha256:dictEntry.sha256,size:dictEntry.size,id:dictEntry.id},false);
+ assert.equal(queuedDict,3);
+ const dictKinds=Array.from(harnessOnline.context.qa.entries().slice(1),e=>[e.name,e.kind]);
+ assert.deepEqual(dictKinds,[['ecdict-en-zh.idx','dict'],['ecdict-en-zh.dict.dz','dict'],['ecdict-en-zh.ifo','dict']]);
+
+ // 4. Offline mode (all mirrors unreachable) degrades gracefully without throwing.
+ const offline=harness(()=>Promise.reject(Error('offline')));
+ const res=await offline.context.qa.loadOnlineCatalog('jsdelivr');
+ assert.equal(res,null);
+ assert.match(offline.element('online-status').textContent,/热点传书|局域网传书/);
 });

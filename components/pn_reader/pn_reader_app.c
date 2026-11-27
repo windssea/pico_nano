@@ -67,8 +67,13 @@ typedef struct {
     pn_journal_io_t io;
     pn_journal_files_t style_files;
     pn_journal_io_t style_io;
+    pn_journal_files_t sbar_files; ///< 单书独立状态栏日志文件 / Per-book status bar journal files
+    pn_journal_io_t sbar_io; ///< 单书独立状态栏日志 IO / Per-book status bar journal I/O
+    pn_status_bar_prefs_t book_status_bar; ///< 本书独立状态栏配置 / Per-book status bar configuration
+    pn_status_bar_prefs_t applied_status_bar; ///< 当前视口排版时生效的状态栏快照 / Effective status bar snapshot used for current layout
     pn_style_t style,saved_style;
-    bool style_preview,style_pending,draft_render;
+    int chrome_top; ///< 当前已排版视口对应的顶边偏移 / Body top inset matching the active layout
+    bool style_preview,style_pending,draft_render,style_inherited,status_bar_inherited;
     uint64_t style_origin;
     pn_txt_progress_t restored;
     pn_book_id_t book;
@@ -146,7 +151,7 @@ static pn_status_t build_metrics(app_t *a,pn_font_metrics_t *out){
     }
     return PN_OK;
 }
-static pn_status_t layout(app_t *a,pn_layout_t *out){int ascent,descent;pn_status_t s=pn_font_chain_vertical(chain(a),&ascent,&descent);if(s!=PN_OK)return s;int line=(body(a)->pixels*a->style.line_percent+99)/100;if(line<ascent+descent)line=ascent+descent;*out=(pn_layout_t){pn_style_body_width(&a->style),pn_style_body_height(&a->style),line,ascent,body(a)->pixels*a->style.indent_em,body(a)->pixels*a->style.gap_percent/100,body(a)->pixels*64*a->style.tracking_percent/100,true,a->style.chapter_align,a->style.chapter_gap,pn_style_has_chapter_body(&a->style)};return PN_OK;}
+static pn_status_t layout(app_t *a,pn_layout_t *out){int ascent,descent;pn_status_t s=pn_font_chain_vertical(chain(a),&ascent,&descent);if(s!=PN_OK)return s;int line=(body(a)->pixels*a->style.line_percent+99)/100;if(line<ascent+descent)line=ascent+descent;*out=(pn_layout_t){pn_style_body_width(&a->style),pn_style_body_height(&a->style),line,ascent,body(a)->pixels*a->style.indent_em,body(a)->pixels*a->style.gap_percent/100,body(a)->pixels*64*a->style.tracking_percent/100,true,a->style.chapter_align,a->style.chapter_gap,pn_style_has_chapter_body(&a->style)};a->chrome_top=pn_style_body_top(&a->style);return PN_OK;}
 /// 展示进度与持久锚点分开：末页显示100%，其余按页首字节估算。/ Display progress is separate from the durable anchor: 100% on the final page, otherwise estimated from its first byte.
 static unsigned progress_basis(const app_t *a,pn_reader_anchor_t anchor){
     uint64_t size=a->reader.decoder.source.size;
@@ -349,8 +354,12 @@ static pn_status_t render(app_t *a,pn_frame_t *frame,const pn_reader_receipt_t *
     pn_profile_span_t span;pn_profile_begin(&span,a->pool,"txt.raster");
     pn_status_t status=render_impl(a,frame,receipt,show_return);pn_profile_end(&span,status);return status;
 }
+static void sync_book_status_bar(const app_t *a){
+    pn_status_bar_set_book_override(a->status_bar_inherited?NULL:&a->book_status_bar);
+}
 static pn_status_t release_app(app_t *a){
     pn_status_bar_set_return_bar(false);
+    if(!a->suspended)pn_status_bar_set_book_override(NULL);
     pn_resume_close(&a->resume);
     pn_text_file_verify_close(&a->verify);
     pn_page_bitmap_close(&a->bitmap);pn_paper_close(&a->paper);
@@ -381,6 +390,7 @@ static pn_status_t open_state(app_t *a,const char *directory,uint64_t now){
     snprintf(path_a,sizeof path_a,"%s/%s.style.a",directory,hash);snprintf(path_b,sizeof path_b,"%s/%s.style.b",directory,hash);
     s=pn_journal_files_init(&a->style_files,&a->state_media,&a->state_lease,path_a,path_b,&a->style_io);if(s!=PN_OK)return s;
     pn_style_t saved;s=pn_style_load(&a->style_io,&a->book,&saved);if(s!=PN_OK && s!=PN_EMPTY)return s;
+    a->style_inherited=(s==PN_EMPTY);
     if(s==PN_EMPTY){
         // 本书无独立排版记录时，自动继承全局默认排版。/ Inherit global default typesetting when this book has no per-book record.
         pn_journal_files_t gf;pn_journal_io_t gio;pn_book_id_t gid=pn_style_global_id();
@@ -388,7 +398,13 @@ static pn_status_t open_state(app_t *a,const char *directory,uint64_t now){
     }
     if(s==PN_OK)a->style=saved;
     a->saved_style=a->style;a->persistent=true;
-    if(s==PN_OK && a->style.background==PN_READING_BACKGROUND_EXTERNAL){pn_status_t paper=pn_paper_open(&a->paper,a->pool,a->book_media,&a->book_lease,&a->style);if(paper==PN_CANCELLED || paper==PN_STALE_MEDIA)return paper;if(paper!=PN_OK)pn_paper_fallback(&a->paper,&a->style);}strcpy(a->state_directory,directory);txt_highlights_reload(a);return PN_OK;
+    s=pn_status_bar_book_files(&a->sbar_files,&a->state_media,&a->state_lease,directory,&a->book,&a->sbar_io);if(s!=PN_OK)return s;
+    pn_status_bar_prefs_t sb;s=pn_status_bar_prefs_load(&a->sbar_io,&sb);if(s!=PN_OK && s!=PN_EMPTY)return s;
+    a->status_bar_inherited=(s==PN_EMPTY);
+    a->book_status_bar=(s==PN_OK)?sb:pn_status_bar_prefs_default();
+    sync_book_status_bar(a);
+    a->applied_status_bar=pn_status_bar_active();
+    if(a->style.background==PN_READING_BACKGROUND_EXTERNAL){pn_status_t paper=pn_paper_open(&a->paper,a->pool,a->book_media,&a->book_lease,&a->style);if(paper==PN_CANCELLED || paper==PN_STALE_MEDIA)return paper;if(paper!=PN_OK)pn_paper_fallback(&a->paper,&a->style);}strcpy(a->state_directory,directory);txt_highlights_reload(a);return PN_OK;
 }
 static void decoder_checkpoint(void *ctx,uint64_t offset,bool paragraph){app_t *a=ctx;if(offset<=4)a->checkpoint_count=0;if(a->checkpoint_count<512)a->checkpoints[a->checkpoint_count++]=(pn_reader_anchor_t){.begin=offset,.paragraph=paragraph};}
 /// 复核期间检查点写入独立数组，完成后一次换入，阅读中借用的数组不缩短。/ Verification checkpoints go to a separate array swapped in on completion, so the borrowed array never shrinks mid-reading.
@@ -403,6 +419,8 @@ static pn_status_t pn_reader_app_open_on_media_impl(pn_reader_app_t *app,pn_pool
     app_t *a=pn_alloc_tagged(pool,PN_MEM_LAYOUT,sizeof *a);if(!a)return PN_NO_MEMORY;memset(a,0,sizeof *a);a->pool=pool;a->last_now=now;pn_page_bitmap_init(&a->bitmap,pool);
     strcpy(a->book_path,book_path);a->recent_status=PN_EMPTY;
     a->style=a->saved_style=pn_style_default(pixels);
+    a->style_inherited=true;a->status_bar_inherited=true;a->book_status_bar=pn_status_bar_prefs_default();
+    if(!state_dir){pn_status_bar_set_book_override(NULL);a->applied_status_bar=pn_status_bar_active();}
     a->book_media=media?media:&a->local_media;pn_status_t status=PN_OK;
     if(!media){pn_media_init(a->book_media);status=pn_media_attach(a->book_media,1);}
     pn_text_source_t source={0},font_source=pn_font_reading_source(),fallback_source={0};pn_text_encoding_t encoding;
@@ -746,7 +764,7 @@ pn_status_t pn_reader_app_suspend(pn_reader_app_t *app,uint64_t now){
     if(a->persistent && !a->highlight_preview)a->recent_pending=true;
     // 页码索引只是可重建缓存，不再挡在离开阅读后的首显之前；由调用者空闲写出，关闭仍强制写出。
     // The page index is a rebuildable cache and no longer precedes the first display after leaving the reader; callers write it when idle and close still forces it.
-    if(status==PN_OK){pn_status_bar_set_return_bar(false);a->last_now=now;a->suspended=true;}return status;
+    if(status==PN_OK){pn_status_bar_set_return_bar(false);pn_status_bar_set_book_override(NULL);a->last_now=now;a->suspended=true;}return status;
 }
 bool pn_reader_app_deferred_pending(const pn_reader_app_t *app){if(!app || !app->impl)return false;const app_t *a=app->impl;return (a->persistent && (a->save.dirty || a->recent_pending)) || pn_page_index_pending(&a->page_index);}
 pn_status_t pn_reader_app_deferred_flush(pn_reader_app_t *app){
@@ -794,13 +812,24 @@ pn_status_t pn_reader_app_resume(pn_reader_app_t *app,uint64_t now,pn_reader_pre
     resume_abort_retry(a);pn_page_index_abort(&a->page_index);
     if(!a->suspended)return PN_BUSY;
     pn_status_t status=a->media_lost?PN_STALE_MEDIA:pn_media_validate(a->book_media,&a->book_lease);if(status!=PN_OK)return status;
+    sync_book_status_bar(a);
+    pn_status_bar_prefs_t eff=pn_status_bar_active();
+    if(memcmp(&a->applied_status_bar,&eff,sizeof eff)!=0){
+        a->suspended=false;
+        status=pn_reader_app_relayout_chrome(app,now,present,ctx);
+        if(status==PN_OK){a->applied_status_bar=eff;pn_status_bar_set_return_bar(a->has_bookmark_origin);a->force_full=false;a->refresh.turns=0;}
+        else{a->suspended=true;pn_status_bar_set_book_override(NULL);}
+        return status;
+    }
     pn_w_status_snapshot_t current=pn_w_status_snapshot();
     if(!a->style.hide_bars && a->ui.impl && (current.battery!=a->status.battery || current.charging!=a->status.charging || strcmp(current.clock,a->status.clock))){
         if(pn_status_bar_active().enabled){pn_reader_receipt_t fake={.anchor=a->reader.visible};if(paint_footer(a,&a->frame,&fake,a->has_bookmark_origin,0)==PN_OK)a->status=current;}
         else if(pn_paper_region_style(&a->paper,&a->style,&a->frame,0,PN_READER_TOP)==PN_OK && pn_reader_status_text(&a->ui,&a->frame)==PN_OK)a->status=current;
     }
     status=present(ctx,&a->frame,PN_REFRESH_GC16);a->last_now=now;
-    if(status==PN_OK){pn_status_bar_set_return_bar(a->has_bookmark_origin);a->suspended=false;a->force_full=false;a->refresh.turns=0;}return status;
+    if(status==PN_OK){pn_status_bar_set_return_bar(a->has_bookmark_origin);a->suspended=false;a->force_full=false;a->refresh.turns=0;}
+    else pn_status_bar_set_book_override(NULL);
+    return status;
 }
 pn_status_t pn_reader_app_retained_source(const pn_reader_app_t *app,pn_media_t *media,const char *path){
     if(!app || !app->impl || !media || !path)return PN_INVALID;
@@ -992,14 +1021,28 @@ bool pn_reader_app_font_unavailable(const pn_reader_app_t *app){return app && ap
 pn_status_t pn_reader_app_identity(const pn_reader_app_t *app,pn_book_id_t *book){if(!app || !app->impl || !book)return PN_INVALID;*book=((app_t *)app->impl)->book;return PN_OK;}
 pn_status_t pn_reader_app_recent_status(const pn_reader_app_t *app){return app && app->impl?((app_t *)app->impl)->recent_status:PN_INVALID;}
 pn_status_t pn_reader_app_style_get(const pn_reader_app_t *app,pn_style_t *style){if(!app || !app->impl || !style)return PN_INVALID;*style=((app_t *)app->impl)->style;return PN_OK;}
+bool pn_reader_app_style_is_inherited(const pn_reader_app_t *app){return !app || !app->impl || ((const app_t *)app->impl)->style_inherited;}
+pn_status_t pn_reader_app_style_global_get(const pn_reader_app_t *app,pn_style_t *style){
+    if(!app || !app->impl || !style)return PN_INVALID;
+    const app_t *a=app->impl;
+    pn_style_t global=pn_style_default(PN_STYLE_DEFAULT_PIXELS);
+    if(a->persistent && *a->state_directory){
+        pn_journal_files_t gf;pn_journal_io_t gio;pn_book_id_t gid=pn_style_global_id();
+        if(pn_style_global_files(&gf,(pn_media_t *)&a->state_media,&a->state_lease,a->state_directory,&gio)==PN_OK){
+            pn_style_t loaded;if(pn_style_load(&gio,&gid,&loaded)==PN_OK)global=loaded;
+        }
+    }
+    *style=global;return PN_OK;
+}
 bool pn_reader_app_bars_hidden(const pn_reader_app_t *app){return app && app->impl && ((const app_t *)app->impl)->style.hide_bars!=0;}
 static pn_status_t change_layout(app_t *a,const pn_style_t *style){
     // 先换入新样式再同步正文字体：字重/清晰度取自a->style，顺序颠倒会让字形沿用上一次的设置。
     // Swap in the new style before syncing the body font: weight/sharpness come from a->style, and the reverse order leaves glyphs on the previous settings.
     pn_style_t previous=a->style;a->style=*style;pn_status_t status=ensure_body(a,style->pixels);if(status!=PN_OK){a->style=previous;(void)ensure_body(a,previous.pixels);return status;}
-    if(pn_style_same_typesetting(&previous,style)){pn_page_bitmap_invalidate(&a->bitmap);a->first_paint.ready=false;a->force_full=true;return PN_OK;}
+    bool same_viewport=(a->reader.layout.width==pn_style_body_width(style) && a->reader.layout.height==pn_style_body_height(style) && a->chrome_top==pn_style_body_top(style));
+    if(same_viewport && pn_style_same_typesetting(&previous,style)){pn_page_bitmap_invalidate(&a->bitmap);a->first_paint.ready=false;a->force_full=true;return PN_OK;}
     pn_layout_t next;pn_font_metrics_t metrics={0};status=layout(a,&next);if(status==PN_OK)status=build_metrics(a,&metrics);if(status==PN_OK){a->reader.metrics=metrics;status=pn_reader_reflow(&a->reader,&next);}
-    if(status==PN_OK)status=pn_display_set_token(&a->display,a->reader.token);
+    if(status==PN_OK){pn_page_bitmap_invalidate(&a->bitmap);a->first_paint.ready=false;status=pn_display_set_token(&a->display,a->reader.token);}
     if(status!=PN_OK){a->style=previous;(void)ensure_body(a,previous.pixels);(void)build_metrics(a,&a->reader.metrics);}else a->force_full=true;
     return status;
 }
@@ -1012,7 +1055,7 @@ static pn_status_t preview_style(pn_reader_app_t *app,const pn_style_t *style,ui
     pn_status_t status=changed?pn_paper_open(&candidate,a->pool,a->book_media,&a->book_lease,style):PN_OK;if(status!=PN_OK)return status;
     status=change_layout(a,style);if(status!=PN_OK){pn_paper_close(&candidate);return status;}if(changed)a->paper=candidate;
     a->draft_render=hint;status=step_location(app,PN_APP_OPEN,true,origin,now,present,ctx,NULL,-1);a->draft_render=false;
-    if(a->last_confirmed){a->style_origin=origin;a->style_preview=true;}
+    if(a->last_confirmed){a->style_origin=origin;a->style_preview=true;a->applied_status_bar=pn_status_bar_active();}
     else{pn_status_t rollback=change_layout(a,&previous);if(changed){pn_paper_close(&a->paper);a->paper=previous_paper;}if(rollback!=PN_OK)return rollback;}
     if(changed && a->last_confirmed)pn_paper_close(&previous_paper);
     return status;
@@ -1030,9 +1073,41 @@ pn_status_t pn_reader_app_style_preview_sheet(pn_reader_app_t *app,const pn_styl
 pn_status_t pn_reader_app_relayout_chrome(pn_reader_app_t *app,uint64_t now,pn_reader_present_fn present,void *ctx){
     if(!app || !app->impl || !present)return PN_INVALID;
     app_t *a=app->impl;if(!a->reader.has_visible)return PN_EMPTY;if(a->media_lost)return PN_STALE_MEDIA;
-    pn_status_t s=change_layout(a,&a->style);if(s!=PN_OK)return s;
+    sync_book_status_bar(a);
+    pn_status_t s=ensure_body(a,a->style.pixels);
+    pn_layout_t next;pn_font_metrics_t metrics={0};
+    if(s==PN_OK)s=layout(a,&next);
+    if(s==PN_OK)s=build_metrics(a,&metrics);
+    if(s==PN_OK){a->reader.metrics=metrics;s=pn_reader_reflow(&a->reader,&next);}
+    if(s==PN_OK){pn_page_bitmap_invalidate(&a->bitmap);a->first_paint.ready=false;s=pn_display_set_token(&a->display,a->reader.token);}
+    if(s!=PN_OK)return s;
     a->force_full=true;
-    return step_location(app,PN_APP_OPEN,true,a->reader.visible.begin,now,present,ctx,NULL,-1);
+    s=step_location(app,PN_APP_OPEN,true,a->reader.visible.begin,now,present,ctx,NULL,-1);
+    if(s==PN_OK)a->applied_status_bar=pn_status_bar_active();
+    return s;
+}
+bool pn_reader_app_status_bar_is_inherited(const pn_reader_app_t *app){return !app || !app->impl || ((const app_t *)app->impl)->status_bar_inherited;}
+pn_status_t pn_reader_app_status_bar_save(pn_reader_app_t *app,const pn_status_bar_prefs_t *prefs){
+    if(!app || !app->impl || pn_status_bar_prefs_validate(prefs)!=PN_OK)return PN_INVALID;
+    app_t *a=app->impl;
+    if(a->persistent && *a->state_directory){
+        pn_status_t status=pn_status_bar_prefs_save(&a->sbar_io,prefs);
+        if(status!=PN_OK)return status;
+    }
+    a->book_status_bar=*prefs;a->status_bar_inherited=false;
+    sync_book_status_bar(a);
+    return PN_OK;
+}
+pn_status_t pn_reader_app_status_bar_use_global(pn_reader_app_t *app){
+    if(!app || !app->impl)return PN_INVALID;
+    app_t *a=app->impl;
+    if(a->persistent && *a->state_directory){
+        pn_status_t status=pn_status_bar_clear_files(&a->sbar_files);
+        if(status!=PN_OK)return status;
+    }
+    a->book_status_bar=pn_status_bar_prefs_default();a->status_bar_inherited=true;
+    sync_book_status_bar(a);
+    return PN_OK;
 }
 pn_status_t pn_reader_app_style_apply(pn_reader_app_t *app,const pn_style_t *style,uint64_t now,pn_reader_present_fn present,void *ctx){
     pn_status_t status=preview_style(app,style,now,present,ctx,false);if(!pn_reader_app_last_confirmed(app))return status;
@@ -1041,7 +1116,7 @@ pn_status_t pn_reader_app_style_apply(pn_reader_app_t *app,const pn_style_t *sty
         if(status!=PN_OK){pn_style_t loaded;if(pn_style_load(&a->style_io,&a->book,&loaded)==PN_OK && !memcmp(&loaded,style,sizeof loaded))status=PN_OK;}
         if(status!=PN_OK)return status;
     }
-    a->saved_style=*style;a->style_preview=false;a->style_pending=false;return PN_OK;
+    a->saved_style=*style;a->style_inherited=false;a->style_preview=false;a->style_pending=false;return PN_OK;
 }
 pn_status_t pn_reader_app_style_save_global(pn_reader_app_t *app,const pn_style_t *style){
     if(!app || !app->impl || !style)return PN_INVALID;
@@ -1067,7 +1142,7 @@ pn_status_t pn_reader_app_style_use_global(pn_reader_app_t *app,uint64_t now,pn_
         pn_status_t cleared=pn_style_clear_files(&a->style_files);
         if(cleared!=PN_OK)return cleared;
     }
-    a->saved_style=global;a->style_preview=false;a->style_pending=false;return PN_OK;
+    a->saved_style=global;a->style_inherited=true;a->style_preview=false;a->style_pending=false;return PN_OK;
 }
 pn_status_t pn_reader_app_style_cancel(pn_reader_app_t *app,uint64_t now,pn_reader_present_fn present,void *ctx){
     if(app && app->impl)((app_t *)app->impl)->last_confirmed=false;

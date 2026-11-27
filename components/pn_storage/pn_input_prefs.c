@@ -5,6 +5,7 @@
  * English: PNIP v1/v2/v3 payload: magic, version and flags, six bytes total; v3 is used only for turn style 3 (ripple), which older firmware reads as defaults.
  */
 #include "pn_input_prefs.h"
+#include <errno.h>
 #include <stdio.h>
 #include <string.h>
 pn_status_t pn_input_prefs_files(pn_journal_files_t *files,pn_media_t *media,const pn_media_lease_t *lease,const char *root,pn_journal_io_t *io){
@@ -93,12 +94,19 @@ pn_status_t pn_auto_lock_prefs_save(const pn_journal_io_t *io,uint16_t minutes){
     return pn_journal_save(io,payload,sizeof payload);
 }
 
-static pn_status_bar_prefs_t active_sbar={
+static pn_status_bar_prefs_t global_sbar={
     .enabled=0,.position=PN_SBAR_POS_DUAL,.font_size=1,.progress_bar=PN_SBAR_PROG_BOOK,.margin_px=8,
     .slots={PN_SBAR_SLOT_TIME,PN_SBAR_SLOT_NONE,PN_SBAR_SLOT_NONE,PN_SBAR_SLOT_NONE,PN_SBAR_SLOT_BATTERY},
     .bottom_slots={PN_SBAR_SLOT_CHAPTER,PN_SBAR_SLOT_NONE,PN_SBAR_SLOT_NONE,PN_SBAR_SLOT_NONE,PN_SBAR_SLOT_PROGRESS}
 };
+static pn_status_bar_prefs_t book_sbar={
+    .enabled=0,.position=PN_SBAR_POS_DUAL,.font_size=1,.progress_bar=PN_SBAR_PROG_BOOK,.margin_px=8,
+    .slots={PN_SBAR_SLOT_TIME,PN_SBAR_SLOT_NONE,PN_SBAR_SLOT_NONE,PN_SBAR_SLOT_NONE,PN_SBAR_SLOT_BATTERY},
+    .bottom_slots={PN_SBAR_SLOT_CHAPTER,PN_SBAR_SLOT_NONE,PN_SBAR_SLOT_NONE,PN_SBAR_SLOT_NONE,PN_SBAR_SLOT_PROGRESS}
+};
+static bool has_book_sbar=false;
 static bool active_return_bar=false;
+static const pn_status_bar_prefs_t *effective_sbar(void){return has_book_sbar?&book_sbar:&global_sbar;}
 pn_status_bar_prefs_t pn_status_bar_prefs_default(void){
     return (pn_status_bar_prefs_t){
         .enabled=0,.position=PN_SBAR_POS_DUAL,.font_size=1,.progress_bar=PN_SBAR_PROG_BOOK,.margin_px=8,
@@ -117,6 +125,24 @@ pn_status_t pn_status_bar_prefs_files(pn_journal_files_t *files,pn_media_t *medi
     char a[PN_JOURNAL_PATH_MAX],b[PN_JOURNAL_PATH_MAX];int n=snprintf(a,sizeof a,"%s/status_bar.a",root),m=snprintf(b,sizeof b,"%s/status_bar.b",root);
     if(n<0 || m<0 || (size_t)n>=sizeof a || (size_t)m>=sizeof b)return PN_LIMIT;
     return pn_journal_files_init(files,media,lease,a,b,io);
+}
+pn_status_t pn_status_bar_book_files(pn_journal_files_t *files,pn_media_t *media,const pn_media_lease_t *lease,const char *root,const pn_book_id_t *book,pn_journal_io_t *io){
+    if(!files || !media || !lease || !root || !*root || !book || !io)return PN_INVALID;
+    char hash[65],a[PN_JOURNAL_PATH_MAX],b[PN_JOURNAL_PATH_MAX];
+    for(unsigned i=0;i<32;i++)snprintf(hash+i*2,3,"%02x",book->sha256[i]);
+    int n=snprintf(a,sizeof a,"%s/%s.sbar.a",root,hash),m=snprintf(b,sizeof b,"%s/%s.sbar.b",root,hash);
+    if(n<0 || m<0 || (size_t)n>=sizeof a || (size_t)m>=sizeof b)return PN_LIMIT;
+    return pn_journal_files_init(files,media,lease,a,b,io);
+}
+pn_status_t pn_status_bar_clear_files(const pn_journal_files_t *files){
+    if(!files || !files->media)return PN_INVALID;
+    pn_status_t status=pn_media_validate(files->media,&files->lease);
+    if(status!=PN_OK)return status;
+    for(int i=0;i<2;i++){
+        if(!files->paths[i][0])continue;
+        if(remove(files->paths[i])!=0 && errno!=ENOENT)return PN_IO;
+    }
+    return PN_OK;
 }
 pn_status_t pn_status_bar_prefs_load(const pn_journal_io_t *io,pn_status_bar_prefs_t *prefs){
     if(!io || !prefs)return PN_INVALID;
@@ -147,30 +173,37 @@ pn_status_t pn_status_bar_prefs_save(const pn_journal_io_t *io,const pn_status_b
     return pn_journal_save(io,payload,sizeof payload);
 }
 void pn_status_bar_set_active(const pn_status_bar_prefs_t *prefs){
-    if(!prefs){active_sbar=pn_status_bar_prefs_default();return;}
-    if(pn_status_bar_prefs_validate(prefs)==PN_OK)active_sbar=*prefs;
+    if(!prefs){global_sbar=pn_status_bar_prefs_default();return;}
+    if(pn_status_bar_prefs_validate(prefs)==PN_OK)global_sbar=*prefs;
 }
-pn_status_bar_prefs_t pn_status_bar_active(void){return active_sbar;}
+pn_status_bar_prefs_t pn_status_bar_active(void){return *effective_sbar();}
+pn_status_bar_prefs_t pn_status_bar_global(void){return global_sbar;}
+void pn_status_bar_set_book_override(const pn_status_bar_prefs_t *prefs){
+    if(!prefs){has_book_sbar=false;return;}
+    if(pn_status_bar_prefs_validate(prefs)==PN_OK){book_sbar=*prefs;has_book_sbar=true;}
+}
+bool pn_status_bar_has_book_override(void){return has_book_sbar;}
 void pn_status_bar_set_return_bar(bool active){active_return_bar=active;}
 bool pn_status_bar_return_bar(void){return active_return_bar;}
 void pn_status_bar_insets(bool hide_bars,int *top_px,int *bottom_px){
+    const pn_status_bar_prefs_t *eff=effective_sbar();
     int top=0,bot=0;
     if(!hide_bars){
-        int text_h=active_sbar.font_size?40:34;
-        int prog_h=active_sbar.progress_bar!=PN_SBAR_PROG_OFF?6:0;
-        if(!active_sbar.enabled){top=32;bot=72;}
-        else if(active_sbar.position==PN_SBAR_POS_DUAL){
-            top=(int)active_sbar.margin_px+text_h;
-            bot=(int)active_sbar.margin_px+text_h+prog_h;
-        }else if(active_sbar.position==PN_SBAR_POS_TOP){
-            top=(int)active_sbar.margin_px+text_h+prog_h;
-        }else if(active_sbar.position==PN_SBAR_POS_BOTTOM){
-            bot=(int)active_sbar.margin_px+text_h+prog_h;
+        int text_h=eff->font_size?40:34;
+        int prog_h=eff->progress_bar!=PN_SBAR_PROG_OFF?6:0;
+        if(!eff->enabled){top=32;bot=72;}
+        else if(eff->position==PN_SBAR_POS_DUAL){
+            top=(int)eff->margin_px+text_h;
+            bot=(int)eff->margin_px+text_h+prog_h;
+        }else if(eff->position==PN_SBAR_POS_TOP){
+            top=(int)eff->margin_px+text_h+prog_h;
+        }else if(eff->position==PN_SBAR_POS_BOTTOM){
+            bot=(int)eff->margin_px+text_h+prog_h;
         }
     }
     // 当处于跳转/摘录预览态且当前模式无底部栏（上方单栏、关闭状态栏或隐藏上下栏）时，在屏幕底部留出独立返回条空间，避免遮挡正文。
     // When return-to-origin is active without a bottom bar (top-only, off, or hide_bars), reserve bottom height for the return strip so it never covers prose.
-    if(active_return_bar && (hide_bars || (active_sbar.enabled && (active_sbar.position==PN_SBAR_POS_TOP || active_sbar.position==PN_SBAR_POS_OFF)))){
+    if(active_return_bar && (hide_bars || (eff->enabled && (eff->position==PN_SBAR_POS_TOP || eff->position==PN_SBAR_POS_OFF)))){
         if(bot<PN_RETURN_BAR_HEIGHT)bot=PN_RETURN_BAR_HEIGHT;
     }
     if(top_px)*top_px=top;

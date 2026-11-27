@@ -32,7 +32,7 @@ class InstallerPage(unittest.TestCase):
         temporary = TemporaryDirectory()
         cls.addClassCleanup(temporary.cleanup)
         root = Path(temporary.name)
-        for path in ("installer", "assets/wall", "assets/dicts", "releases/pico_nano-0.0.57-esp32s3"):
+        for path in ("installer", "assets/share", "assets/dicts", "releases/pico_nano-0.0.57-esp32s3"):
             copytree(ROOT / path, root / path)
         (root / "docs").mkdir(parents=True, exist_ok=True)
         for doc in ("docs/CHANGELOG.md", "docs/INSTALLATION.md"):
@@ -78,14 +78,35 @@ class InstallerPage(unittest.TestCase):
         downloads = [(attrs.get("href"), attrs["download"])
                      for tag, attrs in Page(self.site).elements if tag == "a" and "download" in attrs]
         self.assertIn(("assets/PicoNano.zip", "PicoNano.zip"), downloads)
-        source = ROOT / "assets/wall"
+        source = ROOT / "assets/share/image/mask"
         served_zip = self.site / "assets/PicoNano.zip"
-        self.assertEqual(served_zip.read_bytes(), (source / "PicoNano.zip").read_bytes())
-        wallpapers = {f"PicoNano/{path.name}": path.read_bytes() for path in (source / "PicoNano").glob("*.png")}
+        self.assertTrue(served_zip.is_file())
+        wallpapers = {f"PicoNano/{path.name}": path.read_bytes() for path in source.glob("*.png")}
         self.assertTrue(wallpapers)
         with ZipFile(served_zip) as archive:
             self.assertEqual({entry.filename: archive.read(entry) for entry in archive.infolist()
                               if not entry.is_dir()}, wallpapers)
+
+    def test_share_assets_gallery_manifest_packs_and_gitee_urls_exist(self):
+        manifest = json.loads((self.site / "firmware/manifest.json").read_text(encoding="utf-8"))
+        share = manifest.get("share")
+        self.assertIsInstance(share, dict)
+        self.assertEqual(share.get("schema"), 1)
+        self.assertTrue(share.get("giteeReleaseUrl", "").startswith("https://gitee.com/windssea/pico_nano/releases/tag/"))
+        cats = {c["id"]: c for c in share.get("categories", [])}
+        self.assertEqual(set(cats), {"mask", "wallpaper", "background", "banner", "cover", "font", "book"})
+        mask = cats["mask"]
+        self.assertGreaterEqual(mask["count"], 10)
+        self.assertTrue((self.site / mask["pack"]["path"]).is_file())
+        self.assertTrue(mask["pack"]["giteeUrl"].startswith("https://gitee.com/windssea/pico_nano/releases/download/share-assets/"))
+        for item in mask["items"]:
+            self.assertTrue((self.site / item["path"]).is_file())
+            self.assertGreater(item.get("width", 0), 0)
+            self.assertGreater(item.get("height", 0), 0)
+        self.assertTrue((self.site / "assets/share/manifest.json").is_file())
+        ids = {attrs["id"] for _, attrs in Page(self.site).elements if "id" in attrs}
+        for required_id in ("share-section", "share-tabs", "share-grid", "share-lightbox", "share-pack-gitee"):
+            self.assertIn(required_id, ids)
 
     def test_gitee_download_and_local_zip_import_controls_exist(self):
         elements = {attrs["id"]: (tag, attrs) for tag, attrs in Page(self.site).elements if "id" in attrs}

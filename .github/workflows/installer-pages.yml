@@ -2,7 +2,7 @@ name: Web installer (GitHub Pages)
 on:
   push:
     branches: [main]
-    paths: [installer/**, assets/wall/**, assets/dicts/**, docs/CHANGELOG.md, docs/INSTALLATION.md, releases/**, tools/installer_site.py, tests/installer/**, .github/workflows/installer-pages.yml]
+    paths: [installer/**, assets/share/**, assets/wall/**, assets/dicts/**, docs/CHANGELOG.md, docs/INSTALLATION.md, releases/**, tools/installer_site.py, tests/installer/**, .github/workflows/installer-pages.yml]
   workflow_dispatch:
 permissions:
   contents: read

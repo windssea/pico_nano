@@ -15,7 +15,7 @@
   <div class="site-header">
     <nav class="nav container" aria-label="主导航">
       <a class="wordmark" href="#top" aria-label="PicoNano 首页">PicoNano<span aria-hidden="true">.</span></a>
-      <div class="nav-links"><a href="#features">功能一览</a><a href="#resources">词典与资源</a><a href="#changelog">更新日志</a><a href="#help">安装帮助</a><a class="nav-install" href="#installation">安装 PicoNano <span aria-hidden="true">↗</span></a></div>
+      <div class="nav-links"><a href="#features">功能一览</a><a href="#resources">素材与词典</a><a href="#changelog">更新日志</a><a href="#help">安装帮助</a><a class="nav-install" href="#installation">安装 PicoNano <span aria-hidden="true">↗</span></a></div>
     </nav>
   </div>
   <main id="top">
@@ -124,7 +124,7 @@
       <div class="actions">
         <button id="connect" class="primary">连接设备</button>
         <a class="button secondary" href="assets/PicoNano.zip" download="PicoNano.zip">默认遮罩壁纸下载</a>
-        <a class="button secondary" href="#resources">开源词典下载</a>
+        <a class="button secondary" href="#resources">素材预览与词典下载</a>
         <span id="device" class="muted"></span>
       </div>
     </section>
@@ -162,14 +162,79 @@
     <section id="resources" class="resources-section section" aria-labelledby="resources-title">
       <div class="container">
         <div class="section-heading">
-          <p class="eyebrow">开箱即用的离线词典与壁纸</p>
-          <h2 id="resources-title">下载开源词典，一步导入阅读器。</h2>
-          <p>所有词典均基于合法开源词库构建，已预压缩为标准 StarDict DictZip（<code>.dict.dz</code>）格式并附完整开源许可证；可按需自由勾选下载。</p>
+          <p class="eyebrow">开箱即用的 PicoNano 素材库与离线词典</p>
+          <h2 id="resources-title">在线预览素材与开源词典，一步导入阅读器。</h2>
+          <p>支持透明遮罩、锁屏壁纸、阅读背景、首页横幅、书籍封面、字体与书籍分类预览与单文件下载，同时自动同步至 Gitee 供国内高速整包下载。</p>
+        </div>
+        <div id="share-section" class="share-section" aria-labelledby="share-title">
+          <div class="share-head">
+            <div>
+              <h3 id="share-title">PicoNano 共享素材库</h3>
+              <p class="muted">点击任意透明遮罩或背景图即可放大并模拟阅读页叠加效果；支持单张直下或从 Gitee 高速下载整包。</p>
+            </div>
+            <a id="share-gitee-home" class="text-link" href="https://gitee.com/windssea/pico_nano/releases/tag/share-assets" target="_blank" rel="noopener">Gitee 国内素材库 <span aria-hidden="true">↗</span></a>
+          </div>
+          <div id="share-tabs" class="share-tabs" role="tablist" aria-label="素材分类"></div>
+          <div id="share-toolbar" class="share-toolbar" hidden>
+            <div class="share-toolbar-copy">
+              <div class="share-toolbar-title">
+                <strong id="share-cat-title">透明遮罩</strong>
+                <span id="share-cat-badge" class="resource-tag">锁屏透明遮罩</span>
+              </div>
+              <p id="share-cat-desc" class="muted"></p>
+              <p id="share-cat-target" class="share-target"></p>
+            </div>
+            <div class="share-toolbar-actions">
+              <button type="button" id="share-backdrop-toggle" class="share-toggle" hidden>切换棋盘格底图</button>
+              <a id="share-pack-gitee" class="button primary" href="https://gitee.com/windssea/pico_nano/releases/tag/share-assets" target="_blank" rel="noopener" hidden>Gitee 国内下载（ZIP）</a>
+              <a id="share-pack-local" class="button secondary" href="assets/PicoNano.zip" download="PicoNano.zip" hidden>本站下载（ZIP）</a>
+            </div>
+          </div>
+          <div id="share-grid" class="share-grid" aria-live="polite">
+            <p class="muted">正在读取共享素材清单…</p>
+          </div>
+          <noscript><p class="muted">启用 JavaScript 可在线预览全部透明遮罩与素材；也可以直接下载 <a href="assets/PicoNano.zip" download="PicoNano.zip">PicoNano.zip</a> 或前往 <a href="https://gitee.com/windssea/pico_nano/releases/tag/share-assets" target="_blank" rel="noopener">Gitee 共享素材页</a>。</p></noscript>
+        </div>
+        <dialog id="share-lightbox" class="share-lightbox" aria-labelledby="lightbox-title">
+          <div class="lightbox-card">
+            <div class="lightbox-head">
+              <div>
+                <h3 id="lightbox-title">素材预览</h3>
+                <p id="lightbox-meta" class="muted"></p>
+              </div>
+              <button type="button" id="lightbox-close" class="lightbox-close" aria-label="关闭预览">关闭</button>
+            </div>
+            <div id="lightbox-stage" class="lightbox-stage is-prose">
+              <div class="sim-prose" aria-hidden="true">
+                <h4>第一章 拾起阅读</h4>
+                <p>　　字与字之间，留出恰好的距离。让阅读回到舒适，把时间留给文字。在柔和的墨水屏上，每一页都像印在纸页上一样安静沉稳。</p>
+                <p>　　清风拂过窗棂，书页轻翻。合上书时，透明遮罩会温柔覆在当前书页之上。</p>
+                <p>　　小小的屏幕，装下你的大世界。把喜欢的画面，留在手边。</p>
+              </div>
+              <img id="lightbox-img" src="assets/home.png" alt="素材原图预览">
+            </div>
+            <div class="lightbox-foot">
+              <div class="lightbox-backdrops" id="lightbox-backdrops" hidden>
+                <button type="button" data-backdrop="prose" aria-pressed="true">模拟阅读页</button>
+                <button type="button" data-backdrop="checker" aria-pressed="false">透明棋盘格</button>
+                <button type="button" data-backdrop="paper" aria-pressed="false">纯白纸底</button>
+              </div>
+              <p id="lightbox-target" class="muted"></p>
+              <div class="resource-actions">
+                <a id="lightbox-download" class="button primary" href="assets/PicoNano.zip" download="PicoNano.zip">下载此文件</a>
+                <a id="lightbox-gitee-pack" class="button secondary" href="https://gitee.com/windssea/pico_nano/releases/tag/share-assets" target="_blank" rel="noopener" hidden>Gitee 下载整包（ZIP）</a>
+              </div>
+            </div>
+          </div>
+        </dialog>
+        <div class="resources-subhead">
+          <h3>开源离线词典与默认资源包</h3>
+          <p class="muted">所有词典均基于合法开源词库构建，已预压缩为标准 StarDict DictZip（<code>.dict.dz</code>）格式并附完整开源许可证；本站与 Gitee 均可直接下载。</p>
         </div>
         <ol class="quick-import-steps" aria-label="快捷导入词典步骤">
-          <li><strong>1. 按需下载词典包</strong><span>点击下方按钮下载任意 <code>.zip</code> 词典包，无需在手机或电脑上手动解压。</span></li>
-          <li><strong>2. 打开设备传书页</strong><span>阅读器进入「传书 → 热点传书 / 局域网传书」，在浏览器切换到「词典」标签。</span></li>
-          <li><strong>3. 直接拖入 .zip 上传</strong><span>网页会自动解包提取 <code>.ifo/.idx/.dict.dz</code>、校验三件套并按序上传；也可经「USB 传输」解压拷贝至 <code>/piconano/dicts/</code>。</span></li>
+          <li><strong>1. 按需下载词典或素材包</strong><span>点击下方按钮下载任意 <code>.zip</code> 词典包或单张素材图片；词典包无需在手机或电脑上手动解压。</span></li>
+          <li><strong>2. 打开设备传书页</strong><span>阅读器进入「传书 → 热点传书 / 局域网传书」，在浏览器选择对应分类标签（词典、锁屏壁纸、阅读背景等）。</span></li>
+          <li><strong>3. 直接拖入上传</strong><span>词典 <code>.zip</code> 会自动解包校验并按序上传，图片自动转为 16 灰阶；也可经「USB 传输」直接拷贝至存储卡对应目录。</span></li>
         </ol>
         <div id="resource-grid" class="resource-grid">
           <article class="resource-card" data-dict-id="ecdict-en-zh">
@@ -180,7 +245,8 @@
             <h3>ECDICT 英汉核心词典</h3>
             <p class="muted">涵盖牛津 3000、柯林斯、中高考、四六级、考研、托福、雅思、GRE 与高频词汇，附音标、考纲标签与词形变化。</p>
             <div class="resource-actions">
-              <a class="button primary" href="assets/dicts/PicoNano-dict-ecdict-en-zh.zip" download="PicoNano-dict-ecdict-en-zh.zip">下载英汉词典（ZIP）</a>
+              <a class="button primary" href="assets/dicts/PicoNano-dict-ecdict-en-zh.zip" download="PicoNano-dict-ecdict-en-zh.zip">本站下载（ZIP）</a>
+              <a class="button secondary" data-field="gitee" href="https://gitee.com/windssea/pico_nano/releases/download/share-assets/PicoNano-dict-ecdict-en-zh.zip" target="_blank" rel="noopener">Gitee 加速下载</a>
               <a class="text-link" href="https://github.com/skywind3000/ECDICT" target="_blank" rel="noopener">skywind3000/ECDICT <span aria-hidden="true">↗</span></a>
             </div>
           </article>
@@ -192,7 +258,8 @@
             <h3>中华新华字词成语典</h3>
             <p class="muted">收录约 1.6 万汉字（拼音、部首、笔画与释义）、3 万条成语（释义、出处与例句）以及 26 万条汉语词语。</p>
             <div class="resource-actions">
-              <a class="button primary" href="assets/dicts/PicoNano-dict-xinhua-zh.zip" download="PicoNano-dict-xinhua-zh.zip">下载汉语字词典（ZIP）</a>
+              <a class="button primary" href="assets/dicts/PicoNano-dict-xinhua-zh.zip" download="PicoNano-dict-xinhua-zh.zip">本站下载（ZIP）</a>
+              <a class="button secondary" data-field="gitee" href="https://gitee.com/windssea/pico_nano/releases/download/share-assets/PicoNano-dict-xinhua-zh.zip" target="_blank" rel="noopener">Gitee 加速下载</a>
               <a class="text-link" href="https://github.com/pwxcoo/chinese-xinhua" target="_blank" rel="noopener">pwxcoo/chinese-xinhua <span aria-hidden="true">↗</span></a>
             </div>
           </article>
@@ -204,23 +271,25 @@
             <h3>CC-CEDICT 汉英词典</h3>
             <p class="muted">支持简体与繁体中文双索引，提供声调拼音标注与英文释义，适合中文原著查英解及双语阅读。</p>
             <div class="resource-actions">
-              <a class="button primary" href="assets/dicts/PicoNano-dict-cc-cedict-zh-en.zip" download="PicoNano-dict-cc-cedict-zh-en.zip">下载汉英词典（ZIP）</a>
+              <a class="button primary" href="assets/dicts/PicoNano-dict-cc-cedict-zh-en.zip" download="PicoNano-dict-cc-cedict-zh-en.zip">本站下载（ZIP）</a>
+              <a class="button secondary" data-field="gitee" href="https://gitee.com/windssea/pico_nano/releases/download/share-assets/PicoNano-dict-cc-cedict-zh-en.zip" target="_blank" rel="noopener">Gitee 加速下载</a>
               <a class="text-link" href="https://www.mdbg.net/chinese/dictionary?page=cc-cedict" target="_blank" rel="noopener">MDBG CC-CEDICT <span aria-hidden="true">↗</span></a>
             </div>
           </article>
           <article class="resource-card" data-resource-id="default-wallpapers">
             <div class="resource-top">
               <span class="resource-tag">壁纸 / 遮罩</span>
-              <span class="resource-meta">10 张 PNG · 2.22 MiB</span>
+              <span class="resource-meta">10 张 PNG · 透明遮罩合集</span>
             </div>
             <h3>默认遮罩与锁屏壁纸包</h3>
-            <p class="muted">包含 9 张透明遮罩/锁屏壁纸与 PicoNano 徽标，可在传书页「锁屏壁纸」或「阅读遮罩」分类直接上传应用。</p>
+            <p class="muted">包含 9 张透明遮罩与 PicoNano 徽标，上方素材库支持逐张叠加预览，也可一键下载完整 ZIP。</p>
             <div class="resource-actions">
-              <a class="button primary" href="assets/PicoNano.zip" download="PicoNano.zip">下载默认遮罩壁纸（ZIP）</a>
+              <a class="button primary" href="assets/PicoNano.zip" download="PicoNano.zip">本站下载（ZIP）</a>
+              <a class="button secondary" href="https://gitee.com/windssea/pico_nano/releases/download/share-assets/PicoNano.zip" target="_blank" rel="noopener">Gitee 加速下载</a>
             </div>
           </article>
         </div>
-        <p class="resources-footnote muted">提示：Web Serial USB 刷机模式仅写入主控闪存，不访问也不修改存储卡内容；词典与壁纸请开机后通过设备「传书」网页直接导入 ZIP，或通过「USB 传输」复制到存储卡对应目录。若自己整理了明文 <code>.dict</code> 或 <code>.idx.gz</code>，设备传书网页也会在上传前自动优化为标准 DictZip / <code>.idx</code>。</p>
+        <p class="resources-footnote muted">提示：Web Serial USB 刷机模式仅写入主控闪存，不访问也不修改存储卡内容；词典与素材请开机后通过设备「传书」网页直接导入，或通过「USB 传输」复制到存储卡对应目录。若自己整理了明文 <code>.dict</code> 或 <code>.idx.gz</code>，设备传书网页也会在上传前自动优化为标准 DictZip / <code>.idx</code>。</p>
       </div>
     </section>
     <section id="changelog" class="changelog-section section container" aria-labelledby="changelog-title">

@@ -136,6 +136,10 @@ pn_status_t pn_epub_app_media_lost(pn_epub_app_t *);
 bool pn_epub_app_last_confirmed(const pn_epub_app_t *);
 /// 逐书当前配置。/ Current per-book configuration.
 pn_status_t pn_epub_app_style_get(const pn_epub_app_t *,pn_style_t *);
+/// 当前排版是否跟随全局默认（无单书排版覆盖）；预览不改变它。/ Whether the accepted typesetting follows global defaults (no per-book override); previews do not change it.
+bool pn_epub_app_style_is_inherited(const pn_epub_app_t *);
+/// 读取全局默认排版配置（未设全局时返回出厂舒适默认）；不改当前书状态。/ Read the global default typesetting (falling back to factory defaults if unset) without altering this book.
+pn_status_t pn_epub_app_style_global_get(const pn_epub_app_t *,pn_style_t *);
 /// 实际原锚点重排/显示后保存逐书配置；失败保留会话。/ Reflow/present at the original anchor then persist per-book style; retain on failure.
 pn_status_t pn_epub_app_style_apply(pn_epub_app_t *,const pn_style_t *,uint64_t,pn_reader_present_fn,void *);
 /// 将指定排版配置保存为全局默认（写入状态目录global_style.a/b，不改当前书状态）。/ Save style as the global default into state_dir/global_style.a/b without altering current book state.
@@ -169,6 +173,12 @@ pn_status_t pn_epub_app_style_preview(pn_epub_app_t *,const pn_style_t *,uint64_
 pn_status_t pn_epub_app_style_preview_sheet(pn_epub_app_t *,const pn_style_t *,pn_reader_overlay_fn,void *,uint64_t,pn_reader_present_fn,void *);
 /// 状态栏高度变化后按当前样式重新计算正文区域并重绘。/ Recompute the body viewport and repaint after status-bar inset changes.
 pn_status_t pn_epub_app_relayout_chrome(pn_epub_app_t *,uint64_t,pn_reader_present_fn,void *);
+/// 当前书籍状态栏是否跟随全局默认（无本书独立状态栏覆盖）。/ Whether this book's status bar follows global defaults (no per-book override).
+bool pn_epub_app_status_bar_is_inherited(const pn_epub_app_t *);
+/// 保存本书独立阅读状态栏配置（不影响全局和其他书籍）并立即更新本书生效快照。/ Persist per-book reading status-bar prefs (without touching global or other books) and activate the book override.
+pn_status_t pn_epub_app_status_bar_save(pn_epub_app_t *,const pn_status_bar_prefs_t *);
+/// 清除本书独立状态栏覆盖并恢复跟随全局状态栏设置。/ Clear per-book status-bar override and restore following the global status bar.
+pn_status_t pn_epub_app_status_bar_use_global(pn_epub_app_t *);
 /// 恢复保存配置和原锚点，失败不关闭草稿。/ Restore saved style and original anchor, retaining draft on failure.
 pn_status_t pn_epub_app_style_cancel(pn_epub_app_t *,uint64_t,pn_reader_present_fn,void *);
 

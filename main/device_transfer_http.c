@@ -78,7 +78,7 @@ static esp_err_t send_data(httpd_req_t *r,unsigned status,const char *mime,const
  // 仅错误响应主动关闭连接；2xx响应复用HTTP/1.1长连接，避免每个64KiB分块重复TCP握手与TIME_WAIT堆积。
  // Close connections only on error responses; 2xx responses reuse HTTP/1.1 keep-alive to avoid per-chunk TCP handshakes and TIME_WAIT buildup.
  if(status>=400)httpd_resp_set_hdr(r,"Connection","close");
- httpd_resp_set_hdr(r,"Content-Security-Policy","default-src 'self'; script-src 'self'; style-src 'self'; worker-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'");
+ httpd_resp_set_hdr(r,"Content-Security-Policy","default-src 'self'; script-src 'self'; style-src 'self'; worker-src 'self'; img-src 'self' data: blob: https://cdn.jsdelivr.net https://windssea.github.io https://raw.githubusercontent.com; font-src 'self' data: blob: https://cdn.jsdelivr.net https://windssea.github.io https://raw.githubusercontent.com; connect-src 'self' https://cdn.jsdelivr.net https://windssea.github.io https://raw.githubusercontent.com; object-src 'none'; base-uri 'none'; frame-ancestors 'none'");
  esp_err_t result=httpd_resp_send(r,data,(int)n);
 #ifdef ESP_PLATFORM
  // 只记录响应结果与内存，不记录URL查询、令牌或用户内容。/ Record response results and memory only, never URL queries, tokens or user content.

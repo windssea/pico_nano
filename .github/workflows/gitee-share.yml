@@ -1,0 +1,46 @@
+name: Mirror shared assets & dicts to Gitee
+on:
+  push:
+    branches: [main]
+    paths:
+      - assets/share/**
+      - assets/dicts/**
+      - tools/installer_site.py
+      - tools/sync_gitee_share.py
+      - .github/workflows/gitee-share.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: gitee-share-mirror
+  cancel-in-progress: false
+jobs:
+  mirror-share:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Test shared-assets Gitee sync
+        run: python3 -m unittest discover -s tests/tools -p test_sync_gitee_share.py -v
+      - name: Sync shared assets and dictionaries to Gitee
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+        run: |
+          for attempt in 1 2 3; do
+            if python3 tools/sync_gitee_share.py --apply --report build-dev/gitee-share-mirror.json; then
+              exit 0
+            fi
+            if [[ "$attempt" == 3 ]]; then exit 1; fi
+            echo "Rechecking existing share attachments before retry"
+            sleep 15
+          done
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: gitee-share-verification
+          path: build-dev/gitee-share-mirror.json

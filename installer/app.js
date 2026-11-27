@@ -216,7 +216,7 @@ function renderChangelogHistory() {
   });
 }
 
-/// 使用清单中的实测大小与词条数同步刷新词典卡片展示。/ Sync dictionary card sizes and word counts from manifest.json.
+/// 使用清单中的实测大小与词条数同步刷新词典卡片展示。/ Sync dictionary card sizes, word counts, and Gitee links from manifest.json.
 function renderDictionaryCards() {
   const dicts = state.manifest?.dictionaries || [];
   for (const dict of dicts) {
@@ -227,7 +227,254 @@ function renderDictionaryCards() {
       const count = dict.wordcount ? `${Number(dict.wordcount).toLocaleString("en-US")} 词` : "";
       meta.textContent = [count, kib(dict.size || 0), dict.license].filter(Boolean).join(" · ");
     }
+    const gitee = card.querySelector('[data-field="gitee"]');
+    if (gitee && dict.giteeUrl) gitee.href = dict.giteeUrl;
   }
+}
+
+/// 渲染 PicoNano 共享素材库（分类标签、模拟阅读页叠加预览、字体试看、放大灯箱与 Gitee 加速整包下载）。
+/// Render the PicoNano shareable assets gallery (category tabs, simulated e-ink previews, font preview, lightbox, and Gitee pack download).
+const shareState = { activeId: null, checker: false, loadedFonts: new Set() };
+
+function setLightboxBackdrop(mode) {
+  const stage = $("lightbox-stage");
+  if (!stage) return;
+  stage.classList.remove("is-prose", "is-checker", "is-paper");
+  stage.classList.add(mode === "checker" ? "is-checker" : mode === "paper" ? "is-paper" : "is-prose");
+  for (const btn of (document.querySelectorAll?.("#lightbox-backdrops button[data-backdrop]") || [])) {
+    btn.setAttribute("aria-pressed", btn.dataset.backdrop === mode ? "true" : "false");
+  }
+}
+
+function openShareLightbox(cat, item) {
+  const dialog = $("share-lightbox");
+  if (!dialog) return;
+  $("lightbox-title").textContent = item.stem || item.name;
+  const dims = item.width && item.height ? `${item.width}×${item.height} px` : "";
+  $("lightbox-meta").textContent = [cat.title, dims, kib(item.size || 0), item.ext?.toUpperCase()].filter(Boolean).join(" · ");
+  const img = $("lightbox-img");
+  img.src = item.path;
+  img.alt = `${cat.title}：${item.name}`;
+  const stage = $("lightbox-stage");
+  stage.dataset.mode = cat.previewMode || "wallpaper";
+  const backdrops = $("lightbox-backdrops");
+  const showBackdrops = cat.previewMode === "mask" || cat.previewMode === "background";
+  if (backdrops) backdrops.hidden = !showBackdrops;
+  setLightboxBackdrop(cat.previewMode === "mask" ? (shareState.checker ? "checker" : "prose") : "paper");
+  $("lightbox-target").textContent = `导入目标：${cat.uploadTarget}`;
+  const dl = $("lightbox-download");
+  dl.href = item.path;
+  dl.download = item.name;
+  const giteePack = $("lightbox-gitee-pack");
+  if (giteePack) {
+    if (cat.pack?.giteeUrl) {
+      giteePack.href = cat.pack.giteeUrl;
+      giteePack.hidden = false;
+    } else {
+      giteePack.hidden = true;
+    }
+  }
+  if (typeof dialog.showModal === "function") dialog.showModal();
+  else dialog.setAttribute("open", "");
+}
+
+function loadShareFontPreview(item, familyName, sampleNode) {
+  if (typeof FontFace !== "function" || !document.fonts) return;
+  if (shareState.loadedFonts.has(familyName)) {
+    sampleNode.style.fontFamily = `"${familyName}", var(--display)`;
+    return;
+  }
+  const face = new FontFace(familyName, `url("${encodeURI(item.path)}")`);
+  face.load().then((loaded) => {
+    document.fonts.add(loaded);
+    shareState.loadedFonts.add(familyName);
+    sampleNode.style.fontFamily = `"${familyName}", var(--display)`;
+  }).catch(() => {});
+}
+
+function renderShareCategory(share, catId) {
+  const categories = share?.categories || [];
+  const cat = categories.find((c) => c.id === catId) || categories.find((c) => c.count > 0) || categories[0];
+  if (!cat) return;
+  shareState.activeId = cat.id;
+
+  const tabs = $("share-tabs");
+  if (tabs) {
+    for (const btn of tabs.querySelectorAll('button[role="tab"]')) {
+      const selected = btn.dataset.catId === cat.id;
+      btn.setAttribute("aria-selected", selected ? "true" : "false");
+    }
+  }
+
+  const toolbar = $("share-toolbar");
+  if (toolbar) {
+    toolbar.hidden = false;
+    $("share-cat-title").textContent = `${cat.title}（${cat.count} 项）`;
+    $("share-cat-badge").textContent = cat.badge || cat.title;
+    $("share-cat-desc").textContent = cat.description || "";
+    $("share-cat-target").textContent = `设备导入位置：${cat.uploadTarget || ""}`;
+    const toggle = $("share-backdrop-toggle");
+    if (toggle) {
+      toggle.hidden = !(cat.previewMode === "mask" && cat.count > 0);
+      toggle.textContent = shareState.checker ? "切回阅读页底图" : "切换透明棋盘格";
+    }
+    const giteeBtn = $("share-pack-gitee");
+    const localBtn = $("share-pack-local");
+    if (cat.pack) {
+      giteeBtn.href = cat.pack.giteeUrl;
+      giteeBtn.textContent = `Gitee 国内下载整包（${kib(cat.pack.size)}）`;
+      giteeBtn.hidden = false;
+      localBtn.href = cat.pack.path;
+      localBtn.download = cat.pack.fileName;
+      localBtn.textContent = `本站下载整包（ZIP）`;
+      localBtn.hidden = false;
+    } else {
+      giteeBtn.hidden = true;
+      localBtn.hidden = true;
+    }
+  }
+
+  const grid = $("share-grid");
+  if (!grid) return;
+  grid.replaceChildren();
+  grid.dataset.mode = cat.previewMode || "wallpaper";
+
+  if (!cat.items || !cat.items.length) {
+    const empty = document.createElement("div");
+    empty.className = "share-empty";
+    const title = document.createElement("strong");
+    title.textContent = `「${cat.title}」目录已就绪，待补充素材`;
+    const body = document.createElement("p");
+    body.className = "muted";
+    body.textContent = `将合法可分享的 ${cat.extensions.join(" / ")} 文件放入仓库 assets/share/${cat.dir}/ 并推送到 main 分支后，本页会自动生成在线预览并同步至 Gitee 国内高速下载。`;
+    empty.append(title, body);
+    grid.append(empty);
+    return;
+  }
+
+  cat.items.forEach((item, index) => {
+    const card = document.createElement("article");
+    card.className = `share-card is-${cat.kind}`;
+
+    if (cat.kind === "image") {
+      const stage = document.createElement("button");
+      stage.type = "button";
+      stage.className = `share-thumb is-${cat.previewMode}${cat.previewMode === "mask" && shareState.checker ? " is-checker" : ""}`;
+      stage.setAttribute("aria-label", `放大预览 ${item.stem || item.name}`);
+      if (cat.previewMode === "mask" || cat.previewMode === "background") {
+        const prose = document.createElement("div");
+        prose.className = "thumb-prose";
+        prose.setAttribute("aria-hidden", "true");
+        const h = document.createElement("span");
+        h.textContent = "第一章 拾起阅读";
+        const p1 = document.createElement("span");
+        p1.textContent = "字与字之间，留出恰好的距离。让阅读回到舒适，把时间留给文字。";
+        const p2 = document.createElement("span");
+        p2.textContent = "在柔和的墨水屏上，每一页都安静沉稳。";
+        prose.append(h, p1, p2);
+        stage.append(prose);
+      } else if (cat.previewMode === "banner") {
+        const titleOverlay = document.createElement("div");
+        titleOverlay.className = "thumb-banner-copy";
+        titleOverlay.setAttribute("aria-hidden", "true");
+        titleOverlay.textContent = "读书 · 拾起上次的阅读";
+        stage.append(titleOverlay);
+      }
+      const img = document.createElement("img");
+      img.src = item.path;
+      img.alt = `${cat.title}：${item.stem || item.name}`;
+      img.loading = "lazy";
+      if (item.width && item.height) {
+        img.width = item.width;
+        img.height = item.height;
+      }
+      const zoomHint = document.createElement("span");
+      zoomHint.className = "thumb-zoom";
+      zoomHint.textContent = "点开预览";
+      stage.append(img, zoomHint);
+      stage.addEventListener("click", () => openShareLightbox(cat, item));
+      card.append(stage);
+    } else if (cat.kind === "font") {
+      const sample = document.createElement("div");
+      sample.className = "share-font-sample";
+      const line1 = document.createElement("p");
+      line1.textContent = "字与字之间，留出恰好的距离。";
+      const line2 = document.createElement("p");
+      line2.className = "muted";
+      line2.textContent = "PicoNano Reading 0123456789";
+      sample.append(line1, line2);
+      const familyName = `pn-share-font-${index}`;
+      loadShareFontPreview(item, familyName, sample);
+      card.append(sample);
+    } else {
+      const badge = document.createElement("div");
+      badge.className = "share-book-cover";
+      const ext = document.createElement("span");
+      ext.className = "resource-tag";
+      ext.textContent = (item.ext || "BOOK").toUpperCase();
+      const bookTitle = document.createElement("strong");
+      bookTitle.textContent = item.stem || item.name;
+      badge.append(ext, bookTitle);
+      card.append(badge);
+    }
+
+    const info = document.createElement("div");
+    info.className = "share-card-body";
+    const nameEl = document.createElement("h4");
+    nameEl.textContent = item.stem || item.name;
+    const metaEl = document.createElement("p");
+    metaEl.className = "share-card-meta";
+    const dims = item.width && item.height ? `${item.width}×${item.height}` : "";
+    metaEl.textContent = [dims, kib(item.size || 0)].filter(Boolean).join(" · ");
+    const actions = document.createElement("div");
+    actions.className = "share-card-actions";
+    const dl = document.createElement("a");
+    dl.className = "share-dl-link";
+    dl.href = item.path;
+    dl.download = item.name;
+    dl.textContent = cat.kind === "image" ? "下载原图" : "下载文件";
+    actions.append(dl);
+    if (cat.kind === "image") {
+      const prevBtn = document.createElement("button");
+      prevBtn.type = "button";
+      prevBtn.className = "share-preview-link";
+      prevBtn.textContent = "放大预览";
+      prevBtn.addEventListener("click", () => openShareLightbox(cat, item));
+      actions.append(prevBtn);
+    }
+    info.append(nameEl, metaEl, actions);
+    card.append(info);
+    grid.append(card);
+  });
+}
+
+function renderShareGallery() {
+  const share = state.manifest?.share;
+  const tabs = $("share-tabs");
+  const grid = $("share-grid");
+  if (!tabs || !grid || !share || !Array.isArray(share.categories)) return;
+  const giteeHome = $("share-gitee-home");
+  if (giteeHome && share.giteeReleaseUrl) giteeHome.href = share.giteeReleaseUrl;
+
+  tabs.replaceChildren();
+  for (const cat of share.categories) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.role = "tab";
+    btn.className = "share-tab";
+    btn.dataset.catId = cat.id;
+    btn.setAttribute("aria-selected", "false");
+    const label = document.createElement("span");
+    label.textContent = cat.title;
+    const count = document.createElement("span");
+    count.className = "share-tab-count";
+    count.textContent = String(cat.count || 0);
+    btn.append(label, count);
+    btn.addEventListener("click", () => renderShareCategory(share, cat.id));
+    tabs.append(btn);
+  }
+  const initial = share.categories.find((c) => c.count > 0) || share.categories[0];
+  if (initial) renderShareCategory(share, initial.id);
 }
 
 function renderRelease() {
@@ -319,6 +566,7 @@ async function init() {
   }
   renderChangelogHistory();
   renderDictionaryCards();
+  renderShareGallery();
   const select = $("release");
   select.addEventListener("change", () => {
     state.plan = null;
@@ -606,4 +854,15 @@ $("install-mode").addEventListener("change", () => selectMode(state.release?.com
 $("backup").addEventListener("change", () => { $("backup").dataset.touched = "1"; });
 $("clear-nvs").addEventListener("change", () => { if (!state.busy && state.device?.reads) { try { buildPlan(); } catch (error) { fail(error); } } });
 $("initialize-storage").addEventListener("change", () => { if (!state.busy && state.device?.reads) { try { buildPlan(); } catch (error) { fail(error); } } });
+$("share-backdrop-toggle")?.addEventListener("click", () => {
+  shareState.checker = !shareState.checker;
+  if (state.manifest?.share) renderShareCategory(state.manifest.share, shareState.activeId);
+});
+$("lightbox-close")?.addEventListener("click", () => $("share-lightbox")?.close?.());
+$("share-lightbox")?.addEventListener("click", (event) => {
+  if (event.target === $("share-lightbox")) $("share-lightbox")?.close?.();
+});
+for (const btn of (document.querySelectorAll?.("#lightbox-backdrops button[data-backdrop]") || [])) {
+  btn.addEventListener("click", () => setLightboxBackdrop(btn.dataset.backdrop));
+}
 init().then(syncButtons);

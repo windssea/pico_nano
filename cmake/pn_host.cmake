@@ -81,6 +81,7 @@ add_library(pn_core STATIC ${ui_font_c} ${reading_font_c} ${harmony_font_c} ${ar
     ${PN_ROOT}/components/pn_personalization/pn_chinese_calendar.c
     ${PN_ROOT}/components/pn_personalization/pn_wallpaper_ui.c
     ${PN_ROOT}/components/pn_personalization/pn_font_manage.c
+    ${PN_ROOT}/components/pn_personalization/pn_status_bar_ui.c
     ${PN_ROOT}/components/pn_personalization/pn_settings_ui.c
     ${PN_ROOT}/components/pn_library/pn_sudoku.c
     ${PN_ROOT}/components/pn_library/pn_sudoku_ui.c
