@@ -27,6 +27,7 @@
 #include "pn_xiangqi.h"
 #include "pn_klotski.h"
 #include "pn_tsumego.h"
+#include "pn_scoundrel.h"
 #include "pn_reader_chrome.h"
 #include "pn_reader_toolbar.h"
 #include "pn_dict_ui.h"
@@ -83,6 +84,7 @@ typedef struct {
     uint8_t *home_banner_pixels; ///< 主页顶部自定义背景缓冲（684×146）/ Home custom top banner buffer (684x146)
     pn_frame_t home_banner_frame;
     char home_banner_loaded[PN_HOME_BANNER_MAX];
+    pn_scoundrel_t scoundrel; ///< 同源地牢纸牌 / Shared Scoundrel
     pn_tsumego_t tsumego; ///< 同源围棋死活题 / Shared Go Tsumego
     pn_klotski_t klotski; ///< 同源三国华容道 / Shared Three Kingdoms Klotski
     pn_xiangqi_t xiangqi; ///< 同源中国象棋残局 / Shared Xiangqi endgame
@@ -615,6 +617,20 @@ static pn_status_t tsumego_draw(library_t *s,bool clean){
 static pn_status_t tsumego_open(library_t *s){
     pn_cover_work_abort(&s->cover_work);s->covers_inactive=true;pn_status_t r=pn_hot_session_drop_for_switch(&s->hot);if(r!=PN_OK)return r;
     r=pn_tsumego_open(&s->tsumego,s->pool,&s->state_media,s->state_dir,SDL_GetTicks64());if(r==PN_OK)r=tsumego_draw(s,false);return r;
+}
+/// 地牢纸牌复用原画布与牌槽局部更新。/ Scoundrel reuses the shared canvas and slot partial updates.
+static pn_status_t scoundrel_draw(library_t *s,bool clean){
+    pn_w_font_scope_t scope={0};(void)pn_w_font_scope_begin(&scope,s->pool,NULL);
+    pn_status_t r=pn_scoundrel_render_update(&s->scoundrel,&s->font,&s->frame);
+    if(r==PN_UNSUPPORTED)r=pn_scoundrel_render(&s->scoundrel,&s->font,&s->frame);
+    pn_w_font_scope_end(&scope);
+    if(r==PN_OK)r=present(s,&s->frame,clean?PN_REFRESH_GC16:PN_REFRESH_GL16);
+    pn_scoundrel_displayed(&s->scoundrel,r==PN_OK);s->ui_retry=SDL_GetTicks64();s->shelf_draw_valid=false;
+    printf("scoundrel screen=%d status=%d used=%zu peak=%zu\n",pn_scoundrel_screen(&s->scoundrel),r,s->pool->used,s->pool->peak);return r;
+}
+static pn_status_t scoundrel_open(library_t *s){
+    pn_cover_work_abort(&s->cover_work);s->covers_inactive=true;pn_status_t r=pn_hot_session_drop_for_switch(&s->hot);if(r!=PN_OK)return r;
+    r=pn_scoundrel_open(&s->scoundrel,s->pool,&s->state_media,s->state_dir,SDL_GetTicks64());if(r==PN_OK)r=scoundrel_draw(s,false);return r;
 }
 
 /// 仅键盘焦点变动复用已确认画布，失败/叠层/封面或状态更新完整恢复。/ Reuse confirmed pixels only for keyboard focus; failures, overlays, cover/status changes restore fully.
@@ -1277,7 +1293,7 @@ static int management_hit(void *ctx,int x,int y){
 /// 只把一级页真实底栏交给按下路由，内容区、子页与模态保留原点击语义。/ Route only real root navigation on press; content, subpages and modals retain their click semantics.
 static int root_navigation_hit(library_t *s,int x,int y){
     if((s->foreground_open.impl || s->index_gate) || s->opening_book)return -1;
-    if(s->tsumego.active || s->klotski.active || s->xiangqi.active || s->nonogram.active || s->minesweeper.active || s->sokoban.active || s->sudoku.active || s->locked || s->fonts.active || s->toc.active || s->jumpui.active || s->styles.active || s->bookmarks.mode!=PN_BUI_CLOSED || s->dict_ui.mode!=PN_DUI_CLOSED || s->footnote_ui.active || s->lp_menu.active || s->actions_mode || s->stats_open || s->excerpts_ui.mode!=PN_EXUI_CLOSED || s->font_manage.impl || s->wallpaper.impl || s->search_open || s->index || s->toolbar || pn_w_navigation_hit(x,y)<0)return -1;
+    if(s->scoundrel.active || s->tsumego.active || s->klotski.active || s->xiangqi.active || s->nonogram.active || s->minesweeper.active || s->sokoban.active || s->sudoku.active || s->locked || s->fonts.active || s->toc.active || s->jumpui.active || s->styles.active || s->bookmarks.mode!=PN_BUI_CLOSED || s->dict_ui.mode!=PN_DUI_CLOSED || s->footnote_ui.active || s->lp_menu.active || s->actions_mode || s->stats_open || s->excerpts_ui.mode!=PN_EXUI_CLOSED || s->font_manage.impl || s->wallpaper.impl || s->search_open || s->index || s->toolbar || pn_w_navigation_hit(x,y)<0)return -1;
     if(s->settings.impl)return pn_settings_ui_screen(&s->settings)==0?pn_settings_ui_hit(&s->settings,x,y):-1;
     if(s->hub){pn_transfer_hub_info_t info=hub_info(s);return pn_transfer_hub_hit(&info,x,y);}
     return reading(s) || !s->page?-1:shelf_hit(s,x,y);
@@ -1503,6 +1519,7 @@ static pn_status_t wallpaper_open(library_t *s){
 }
 /// PC电源边界：保存关闭正文后，用共用锁屏记录/绘制预览；不模拟硬件睡眠或功耗。/ PC power boundary: save/close the reader and preview shared lock records/rendering; no hardware sleep or power simulation.
 static pn_status_t lock_preview(library_t *s,uint64_t now){
+    if(s->scoundrel.active){pn_status_t saved=pn_scoundrel_pause(&s->scoundrel,now);if(saved!=PN_OK){(void)scoundrel_draw(s,false);return saved;}}
     if(s->tsumego.active){pn_status_t saved=pn_tsumego_pause(&s->tsumego,now);if(saved!=PN_OK){(void)tsumego_draw(s,false);return saved;}}
     if(s->klotski.active){pn_status_t saved=pn_klotski_pause(&s->klotski,now);if(saved!=PN_OK){(void)klotski_draw(s,false);return saved;}}
     if(s->xiangqi.active){pn_status_t saved=pn_xiangqi_pause(&s->xiangqi,now);if(saved!=PN_OK){(void)xiangqi_draw(s,false);return saved;}}
@@ -1678,6 +1695,11 @@ static int library_worker(void *ctx){
         if(s->bookmarks.mode!=PN_BUI_CLOSED && !s->bookmarks.presented && now-s->ui_retry>=1000){s->ui_retry=now;status=pn_bookmark_ui_present(&s->bookmarks,present,s);}
         // 页面请求不等待下一次输入，空闲轮询也完成导航。/ Navigation requests complete during idle polling without waiting for another input.
         if(!s->locked && s->styles.request_fonts){s->styles.request_fonts=false;status=pn_font_ui_open(&s->fonts,s->pool,s->epub.impl?NULL:&s->reader,s->epub.impl?&s->epub:NULL,s->font_dir,present,s);pn_font_ui_return_to(&s->fonts,pn_style_ui_render,&s->styles);printf("font_ui open status=%d active=%d\n",status,s->fonts.active);}
+        if(!s->locked && s->scoundrel.active){
+            (void)pn_scoundrel_tick(&s->scoundrel,now);
+            if(!s->scoundrel.presented && now-s->ui_retry>=100)(void)scoundrel_draw(s,false);
+            if(!got)continue;
+        }
         if(!s->locked && s->tsumego.active){
             (void)pn_tsumego_tick(&s->tsumego,now);
             if(!s->tsumego.presented && now-s->ui_retry>=100)(void)tsumego_draw(s,false);
@@ -1768,12 +1790,13 @@ static int library_worker(void *ctx){
                 if(!s->entertainment && !pn_hot_session_checkpoint_pending(&s->hot)){covers_tick(s,now-font_activity>=250);if(!pn_hot_session_deferred_pending(&s->hot))prepare_continue(s,now,font_activity);}}
             continue;}
 
-        if(!s->tsumego.active && !s->klotski.active && !s->xiangqi.active && !s->nonogram.active && !s->minesweeper.active && !s->sokoban.active && !s->sudoku.active && !s->locked && management_event(s,&event,now)){cancel_pointer(&input,&tap,true);continue;}
+        if(!s->scoundrel.active && !s->tsumego.active && !s->klotski.active && !s->xiangqi.active && !s->nonogram.active && !s->minesweeper.active && !s->sokoban.active && !s->sudoku.active && !s->locked && management_event(s,&event,now)){cancel_pointer(&input,&tap,true);continue;}
         if(s->locked){
             if(event.type==SDL_QUIT){running=false;continue;}
             if(event.type==SDL_KEYDOWN && !event.key.repeat && (event.key.keysym.sym==SDLK_l || event.key.keysym.sym==SDLK_RETURN || event.key.keysym.sym==SDLK_ESCAPE)){
                 s->locked=false;
-                if(s->tsumego.active)status=tsumego_draw(s,false);
+                if(s->scoundrel.active)status=scoundrel_draw(s,false);
+                else if(s->tsumego.active)status=tsumego_draw(s,false);
                 else if(s->klotski.active)status=klotski_draw(s,false);
                 else if(s->xiangqi.active)status=xiangqi_draw(s,false);
                 else if(s->nonogram.active)status=nonogram_draw(s,false);
@@ -1783,6 +1806,31 @@ static int library_worker(void *ctx){
                 else if(reading(s))status=s->epub.impl?pn_epub_app_resume(&s->epub,now,present,s):pn_reader_app_resume(&s->reader,now,present,s);
                 else status=s->last_read_known?open_item(s,&s->last_read,now):draw(s);
                 printf("lock_preview wake status=%d\n",(int)status);}
+            continue;
+        }
+        if(s->scoundrel.active){
+            int command=0;
+            if(event.type==SDL_QUIT){status=pn_scoundrel_pause(&s->scoundrel,now);if(status==PN_OK)running=false;else (void)scoundrel_draw(s,false);continue;}
+            if(event.type==SDL_KEYDOWN && !event.key.repeat){
+                SDL_Keycode key=event.key.keysym.sym;
+                pn_sc_screen_t scr=pn_scoundrel_screen(&s->scoundrel);
+                if(key==SDLK_l){status=lock_preview(s,now);continue;}
+                if(key==SDLK_ESCAPE)command=PN_SC_BACK;
+                else if(key==SDLK_RETURN)command=scr==PN_SC_SELECT?PN_SC_START:scr==PN_SC_CONFIRM?PN_SC_ACCEPT:scr==PN_SC_COMPLETE?PN_SC_START:PN_SC_EXIT;
+                else if(key==SDLK_f)command=PN_SC_FLEE;
+                else if(key==SDLK_z || key==SDLK_BACKSPACE)command=PN_SC_UNDO_MOVE;
+                else if(key==SDLK_w)command=PN_SC_FIGHT_WEAPON;
+                else if(key==SDLK_b)command=PN_SC_FIGHT_BARE;
+                else if(key==SDLK_r)command=PN_SC_RESTART;
+                else if(key==SDLK_c)command=PN_SC_CLEAN;
+                else if(key==SDLK_p)command=PN_SC_CHOOSE;
+                else if(key>=SDLK_1 && key<=SDLK_4)command=scr==PN_SC_SELECT?(key<=SDLK_2?PN_SC_MODE_BASE+(int)(key-SDLK_1):0):PN_SC_SLOT_BASE+(int)(key-SDLK_1);
+            }else if(event.type==SDL_MOUSEBUTTONDOWN || event.type==SDL_MOUSEBUTTONUP || event.type==SDL_MOUSEMOTION){
+                bool motion=event.type==SDL_MOUSEMOTION,up=event.type==SDL_MOUSEBUTTONUP;int x=motion?event.motion.x:event.button.x,y=motion?event.motion.y:event.button.y;
+                if(event.type==SDL_MOUSEBUTTONDOWN)s->pointer_down=true;
+                if(s->pointer_down){int target=pn_scoundrel_hit(&s->scoundrel,x,y);(void)pn_tap_feed(&tap,1,target>0?target:-1,true,&command);if(up){(void)pn_tap_feed(&tap,0,-1,true,&command);(void)pn_tap_feed(&tap,0,-1,true,&command);s->pointer_down=false;}}
+            }else if(event.type==SDL_WINDOWEVENT && event.window.event==SDL_WINDOWEVENT_FOCUS_LOST){cancel_pointer(&input,&tap,true);s->pointer_down=false;}
+            if(command>0){status=pn_scoundrel_event(&s->scoundrel,command,now);printf("scoundrel command=%d status=%d\n",command,status);if(!s->scoundrel.active){pn_scoundrel_close(&s->scoundrel);status=game_return_to_entertainment(s);}else if(!s->scoundrel.presented)status=scoundrel_draw(s,command==PN_SC_CLEAN);}
             continue;
         }
         if(s->tsumego.active){
@@ -2434,13 +2482,13 @@ static int library_worker(void *ctx){
                     if(key==SDLK_F10){s->entertainment=s->entertainment==2?1:0;s->shelf_focus_visible=false;s->selected=-1;status=page(s,false,true);continue;}
                     if(s->entertainment==2){if(key==SDLK_2 || key==SDLK_RETURN){s->entertainment=1;s->shelf_focus_visible=false;s->selected=-1;status=page(s,false,true);}continue;}
                     if(key==SDLK_1 || key==SDLK_3){
-                        s->selected=!s->shelf_focus_visible?(key==SDLK_3?0:6):(s->selected+(key==SDLK_3?1:6))%7;
+                        s->selected=!s->shelf_focus_visible?(key==SDLK_3?0:7):(s->selected+(key==SDLK_3?1:7))%8;
                         s->shelf_focus_visible=true;status=draw(s);continue;
                     }
                     if(key==SDLK_2){
                         if(!s->shelf_focus_visible){s->selected=0;s->shelf_focus_visible=true;status=draw(s);continue;}
-                        int pick=s->selected>=0 && s->selected<7?s->selected:0;s->shelf_focus_visible=false;s->selected=-1;
-                        status=pick==0?sudoku_open(s):pick==1?sokoban_open(s):pick==2?minesweeper_open(s):pick==3?nonogram_open(s):pick==4?xiangqi_open(s):pick==5?klotski_open(s):tsumego_open(s);
+                        int pick=s->selected>=0 && s->selected<8?s->selected:0;s->shelf_focus_visible=false;s->selected=-1;
+                        status=pick==0?sudoku_open(s):pick==1?sokoban_open(s):pick==2?minesweeper_open(s):pick==3?nonogram_open(s):pick==4?xiangqi_open(s):pick==5?klotski_open(s):pick==6?tsumego_open(s):scoundrel_open(s);
                         continue;
                     }
                     if(key==SDLK_RETURN){status=sudoku_open(s);}
@@ -2449,6 +2497,7 @@ static int library_worker(void *ctx){
                     else if(key==SDLK_6){status=xiangqi_open(s);}
                     else if(key==SDLK_7){status=klotski_open(s);}
                     else if(key==SDLK_8){status=tsumego_open(s);}
+                    else if(key==SDLK_9){status=scoundrel_open(s);}
                     continue;
                 }
                 if(key==SDLK_F10){
@@ -2537,7 +2586,7 @@ static int library_worker(void *ctx){
             else if(reading(s) && hit==13 && s->epub.impl){status=open_toc(s);toc_report(&s->toc,0,status);turn=false;}
             else if(reading(s) && hit==8){status=return_to_shelf(s,now);turn=false;}
             else if(!reading(s)){
-                if(hit==PN_SHELF_TAB_ENTERTAINMENT || hit==PN_SHELF_ENTERTAINMENT_BACK || hit==PN_SHELF_SUDOKU || hit==PN_SHELF_SOKOBAN || hit==PN_SHELF_MINESWEEPER || hit==PN_SHELF_NONOGRAM || hit==PN_SHELF_XIANGQI || hit==PN_SHELF_KLOTSKI || hit==PN_SHELF_TSUMEGO){s->home=false;s->entertainment=1;status=hit==PN_SHELF_SUDOKU?sudoku_open(s):hit==PN_SHELF_SOKOBAN?sokoban_open(s):hit==PN_SHELF_MINESWEEPER?minesweeper_open(s):hit==PN_SHELF_NONOGRAM?nonogram_open(s):hit==PN_SHELF_XIANGQI?xiangqi_open(s):hit==PN_SHELF_KLOTSKI?klotski_open(s):hit==PN_SHELF_TSUMEGO?tsumego_open(s):page(s,false,true);}
+                if(hit==PN_SHELF_TAB_ENTERTAINMENT || hit==PN_SHELF_ENTERTAINMENT_BACK || hit==PN_SHELF_SUDOKU || hit==PN_SHELF_SOKOBAN || hit==PN_SHELF_MINESWEEPER || hit==PN_SHELF_NONOGRAM || hit==PN_SHELF_XIANGQI || hit==PN_SHELF_KLOTSKI || hit==PN_SHELF_TSUMEGO || hit==PN_SHELF_SCOUNDREL){s->home=false;s->entertainment=1;status=hit==PN_SHELF_SUDOKU?sudoku_open(s):hit==PN_SHELF_SOKOBAN?sokoban_open(s):hit==PN_SHELF_MINESWEEPER?minesweeper_open(s):hit==PN_SHELF_NONOGRAM?nonogram_open(s):hit==PN_SHELF_XIANGQI?xiangqi_open(s):hit==PN_SHELF_KLOTSKI?klotski_open(s):hit==PN_SHELF_TSUMEGO?tsumego_open(s):hit==PN_SHELF_SCOUNDREL?scoundrel_open(s):page(s,false,true);}
                 else if(hit==PN_SHELF_READING_HOME){s->home=true;status=page(s,false,true);}
                 else if(hit==PN_SHELF_READING_STATS){status=open_stats(s);}
                 else if(hit==PN_SHELF_EXCERPTS){status=open_excerpts(s);}
@@ -2590,6 +2639,7 @@ cleanup:;
     pn_dict_ui_close(&s->dict_ui);
     pn_footnote_ui_close(&s->footnote_ui);
     pn_excerpts_ui_close(&s->excerpts_ui);
+    pn_scoundrel_close(&s->scoundrel);
     pn_tsumego_close(&s->tsumego);
     pn_klotski_close(&s->klotski);
     pn_xiangqi_close(&s->xiangqi);

@@ -652,6 +652,22 @@ int main(void){
      game_exit=game_clear_before();handle_key(PN_KEY_2,PN_KEY_SHORT);
      assert(!tsumego.active && !tsumego.impl && shelf_mode && entertainment==1);game_clear_after(game_exit);
      for(unsigned i=0;i<2;i++){snprintf(game_file,sizeof game_file,"%s/tsumego.%c",tg_root,'a'+i);(void)unlink(game_file);}assert(!rmdir(tg_root));}
+    assert(!sd_media.available && active_hit(342,888)==PN_SHELF_SCOUNDREL);
+    old_data_ready=data_ready;data_ready=false;
+    apply_selection(PN_SHELF_SCOUNDREL);assert(!scoundrel.active && !scoundrel.impl && !reader_active());
+    data_ready=old_data_ready;
+    {char sc_root[]="/tmp/pn-device-scoundrel-XXXXXX";assert(mkdtemp(sc_root));
+     assert(pn_scoundrel_open(&scoundrel,&pool,&data_media,sc_root,now_ms())==PN_OK);shelf_mode=false;status_page=false;
+     assert(scoundrel_draw(false)==PN_OK && active_hit(340,880)==PN_SC_START && root_navigation_hit(80,1150)<0);
+     apply_selection(PN_SC_START);assert(scoundrel.presented && pn_scoundrel_screen(&scoundrel)==PN_SC_PLAY);
+     assert(pn_media_acquire(&data_media,PN_MEDIA_READ,&game_busy)==PN_OK);
+     handle_key(PN_KEY_1,PN_KEY_SHORT);assert(scoundrel.active);
+     assert(!prepare_lock() && scoundrel.active);handle_key(PN_KEY_2,PN_KEY_SHORT);assert(scoundrel.active);
+     assert(pn_media_release(&data_media,&game_busy)==PN_OK && prepare_lock());
+     locked=true;resume_reader();assert(!locked && scoundrel.presented && !reader_active());
+     game_exit=game_clear_before();handle_key(PN_KEY_2,PN_KEY_SHORT);
+     assert(!scoundrel.active && !scoundrel.impl && shelf_mode && entertainment==1);game_clear_after(game_exit);
+     for(unsigned i=0;i<2;i++){snprintf(game_file,sizeof game_file,"%s/scoundrel.%c",sc_root,'a'+i);(void)unlink(game_file);}assert(!rmdir(sc_root));}
     sd_media.available=card_available;entertainment=0;covers_inactive=false;
     assert(draw_shelf(PN_REFRESH_GL16)==PN_OK && shelf_draw_valid);unsigned shown=presents;handle_key(PN_KEY_2,PN_KEY_SHORT);assert(shelf_focus==0 && shelf_draw_valid && presents==shown+1);
     pn_frame_t expected;assert(pn_frame_bind(&expected,logical,415872,684,1216));pn_font_t face={0};assert(management_font_begin(&face,24)==PN_OK);pn_shelf_options_t options=shelf_options();if(favorites_valid)options.favorite_items=favorites;

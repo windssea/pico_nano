@@ -15,10 +15,12 @@
 #define PN_HUB_SETTINGS 4 ///< 底栏设置 / Bottom-bar Settings
 #define PN_HUB_USB 7 ///< 手动开始USB独占传书 / Manually start exclusive USB transfer
 #define PN_HUB_STORAGE 8 ///< 打开存储卡文件管理 / Open TF card file manager
+#define PN_HUB_ONLINE 9 ///< 连接家庭WiFi在线浏览与下载共享素材 / Connect saved Wi-Fi to browse and download shared assets
 /// 页面上显示的能力与信息，由调用方按实际状态填写。/ Capabilities and information shown on the page, filled by the caller from actual state.
 typedef struct {
     bool hotspot; ///< 热点传书可用 / Hotspot transfer available
     bool lan; ///< 已保存家庭网络，局域网传书可用 / A home network is saved so LAN transfer is available
+    bool online; ///< 已保存家庭网络且支持在线素材下载 / Saved home network available for online asset downloads
     bool usb; ///< 当前端口支持独占MSC / Current port supports exclusive MSC
     bool storage_manage; ///< 存储卡已就绪且允许进入文件管理 / TF card is ready and file manager entry is enabled
     const char *lan_name; ///< 已保存网络名，可NULL / Saved network name, may be NULL

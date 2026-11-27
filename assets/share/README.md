@@ -6,11 +6,11 @@
 
 | 目录 | 类型 | 对应设备存储卡目录 | 支持格式 | 网页预览方式 |
 | --- | --- | --- | --- | --- |
-| `image/mask/` | 透明遮罩（阅读遮罩） | `/piconano/masks/`（传书「阅读遮罩」） | `.png`（含 Alpha 通道） | 模拟墨水屏阅读正文叠加预览 / 透明棋盘格切换 |
+| `image/mask/` | 透明遮罩（阅读遮罩，建议 684×1216） | `/piconano/masks/`（传书「阅读遮罩」） | `.png`（含 Alpha 通道） | 模拟墨水屏阅读正文叠加预览 / 透明棋盘格切换 |
 | `image/wallpaper/` | 锁屏壁纸（建议 684×1216） | `/piconano/wallpapers/`（传书「锁屏壁纸」） | `.png` / `.jpg` / `.jpeg` | 模拟阅读器整屏边框预览 |
-| `image/background/` | 阅读背景（正文纸纹底图） | `/piconano/backgrounds/`（传书「阅读背景」） | `.png` / `.jpg` / `.jpeg` | 叠加阅读正文示例预览 |
+| `image/background/` | 阅读背景（正文纸纹底图，建议 684×1216） | `/piconano/backgrounds/`（传书「阅读背景」） | `.png` / `.jpg` / `.jpeg` | 叠加阅读正文示例预览 |
 | `image/banner/` | 首页横幅（建议 684×146） | `/piconano/banners/`（传书「首页横幅」） | `.png` / `.jpg` / `.jpeg` | 模拟首页「读书」顶部横幅预览 |
-| `image/cover/` | 书籍封面（建议 3:4） | `/piconano/covers/`（传书「书籍封面」） | `.png` / `.jpg` / `.jpeg` | 3:4 书封卡片预览 |
+| `image/cover/` | 书籍封面（建议 184×256） | `/piconano/covers/`（传书「书籍封面」） | `.png` / `.jpg` / `.jpeg` | 3:4 书封卡片预览 |
 | `font/` | 开源/可再分发字体 | `/piconano/fonts/`（传书「字体」） | `.ttf` / `.otf` | 浏览器加载字体实时示例预览 |
 | `book/` | 公版/开源电子书 | `/piconano/books/`（传书「书籍」） | `.epub` / `.txt` | 书名、格式与大小卡片 + 下载 |
 

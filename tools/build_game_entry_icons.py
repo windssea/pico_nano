@@ -12,7 +12,7 @@ except ImportError:
     Image = None
 
 ROOT = Path(__file__).resolve().parents[1]
-NAMES = ("sudoku", "sokoban", "minesweeper", "nonogram", "xiangqi", "klotski", "tsumego")
+NAMES = ("sudoku", "sokoban", "minesweeper", "nonogram", "xiangqi", "klotski", "tsumego", "scoundrel")
 SIDE = 64
 BYTES_PER_ICON = SIDE * SIDE // 4
 TOTAL_BUDGET = len(NAMES) * BYTES_PER_ICON

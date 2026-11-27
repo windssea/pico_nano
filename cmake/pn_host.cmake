@@ -37,6 +37,7 @@ add_library(pn_core STATIC ${ui_font_c} ${reading_font_c} ${harmony_font_c} ${ar
     ${PN_ROOT}/components/pn_qr/vendor/qrcodegen.c
     ${PN_ROOT}/components/pn_reader/pn_transfer_view.c
     ${PN_ROOT}/components/pn_reader/pn_transfer_hub.c
+    ${PN_ROOT}/components/pn_reader/pn_online_ui.c
     ${PN_ROOT}/components/pn_reader/pn_usb_view.c
     ${PN_ROOT}/components/pn_transfer/pn_transfer_worker.c
     ${PN_ROOT}/components/pn_transfer/pn_transfer_service.c
@@ -97,6 +98,8 @@ add_library(pn_core STATIC ${ui_font_c} ${reading_font_c} ${harmony_font_c} ${ar
     ${PN_ROOT}/components/pn_library/pn_klotski_ui.c
     ${PN_ROOT}/components/pn_library/pn_tsumego.c
     ${PN_ROOT}/components/pn_library/pn_tsumego_ui.c
+    ${PN_ROOT}/components/pn_library/pn_scoundrel.c
+    ${PN_ROOT}/components/pn_library/pn_scoundrel_ui.c
     ${PN_ROOT}/components/pn_library/pn_shelf_view.c
     ${PN_ROOT}/components/pn_library/pn_stats_view.c
     ${PN_ROOT}/components/pn_library/pn_excerpts_ui.c

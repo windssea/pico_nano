@@ -51,12 +51,12 @@ int main(void){
         assert(pn_shelf_hit_ex(p,460,190,&o)==PN_SHELF_TAB_ENTERTAINMENT);
         assert(pn_shelf_hit_ex(p,100,400,&o)==PN_SHELF_SUDOKU);
         assert(pn_shelf_hit_ex(p,128,408,&o)==PN_SHELF_SUDOKU && pn_shelf_hit_ex(p,342,408,&o)==PN_SHELF_SOKOBAN && pn_shelf_hit_ex(p,556,408,&o)==PN_SHELF_MINESWEEPER);
-        assert(pn_shelf_hit_ex(p,128,648,&o)==PN_SHELF_NONOGRAM && pn_shelf_hit_ex(p,342,648,&o)==PN_SHELF_XIANGQI && pn_shelf_hit_ex(p,556,648,&o)==PN_SHELF_KLOTSKI && pn_shelf_hit_ex(p,128,888,&o)==PN_SHELF_TSUMEGO);
+        assert(pn_shelf_hit_ex(p,128,648,&o)==PN_SHELF_NONOGRAM && pn_shelf_hit_ex(p,342,648,&o)==PN_SHELF_XIANGQI && pn_shelf_hit_ex(p,556,648,&o)==PN_SHELF_KLOTSKI && pn_shelf_hit_ex(p,128,888,&o)==PN_SHELF_TSUMEGO && pn_shelf_hit_ex(p,342,888,&o)==PN_SHELF_SCOUNDREL);
         assert(pn_shelf_hit_ex(p,500,400,&o)==PN_SHELF_MINESWEEPER);
-        // 三列共用绘制边界，列缝、行缝及未安装的两个空位不可点击。/ Three columns share drawing bounds; column/row gaps and the two uninstalled slots are inert.
-        static const int games[]={PN_SHELF_SUDOKU,PN_SHELF_SOKOBAN,PN_SHELF_MINESWEEPER,PN_SHELF_NONOGRAM,PN_SHELF_XIANGQI,PN_SHELF_KLOTSKI,PN_SHELF_TSUMEGO};
-        for(int i=0;i<7;i++){int x=36+(i%3)*214,y=304+(i/3)*240;assert(pn_shelf_hit_ex(p,x,y,&o)==games[i] && pn_shelf_hit_ex(p,x+183,y+207,&o)==games[i]);assert(pn_shelf_hit_ex(p,x-1,y+104,&o)==-1 && pn_shelf_hit_ex(p,x+184,y+104,&o)==-1);assert(pn_shelf_hit_ex(p,x+92,y-1,&o)==-1 && pn_shelf_hit_ex(p,x+92,y+208,&o)==-1);}
-        for(int i=7;i<9;i++){int x=36+(i%3)*214,y=304+(i/3)*240;assert(pn_shelf_hit_ex(p,x+92,y+104,&o)==-1);}
+        // 三列共用绘制边界，列缝、行缝及未安装的一个空位不可点击。/ Three columns share drawing bounds; column/row gaps and the uninstalled slot are inert.
+        static const int games[]={PN_SHELF_SUDOKU,PN_SHELF_SOKOBAN,PN_SHELF_MINESWEEPER,PN_SHELF_NONOGRAM,PN_SHELF_XIANGQI,PN_SHELF_KLOTSKI,PN_SHELF_TSUMEGO,PN_SHELF_SCOUNDREL};
+        for(int i=0;i<8;i++){int x=36+(i%3)*214,y=304+(i/3)*240;assert(pn_shelf_hit_ex(p,x,y,&o)==games[i] && pn_shelf_hit_ex(p,x+183,y+207,&o)==games[i]);assert(pn_shelf_hit_ex(p,x-1,y+104,&o)==-1 && pn_shelf_hit_ex(p,x+184,y+104,&o)==-1);assert(pn_shelf_hit_ex(p,x+92,y-1,&o)==-1 && pn_shelf_hit_ex(p,x+92,y+208,&o)==-1);}
+        for(int i=8;i<9;i++){int x=36+(i%3)*214,y=304+(i/3)*240;assert(pn_shelf_hit_ex(p,x+92,y+104,&o)==-1);}
         assert(pn_shelf_hit_ex(p,342,528,&o)==-1 && pn_shelf_hit_ex(p,342,768,&o)==-1 && pn_shelf_hit_ex(p,342,1008,&o)==-1);
         assert(pn_shelf_hit_ex(p,648,400,&o)==-1 && pn_shelf_hit_ex(p,600,190,&o)==-1 && pn_shelf_hit_ex(p,100,100,&o)==-1);
         size_t base=pool.used;

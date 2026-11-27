@@ -9,7 +9,7 @@
   ],
   "pixel_order": "High two bits first, row-major",
   "display_scale": 2,
-  "total_packed_bytes": 7168,
+  "total_packed_bytes": 8192,
   "icons": [
     {
       "name": "sudoku",
@@ -90,6 +90,17 @@
       "packed_bytes": 1024,
       "png_sha256": "042f77e12aeb78df0d2e1144dc92077013c462e5204a9eedab158583a555321c",
       "packed_sha256": "281dfc46ceb9a945d250edd23c03cadd765cf178887727cdd80202d6da2e4fce"
+    },
+    {
+      "name": "scoundrel",
+      "file": "scoundrel.png",
+      "width": 64,
+      "height": 64,
+      "levels": 4,
+      "png_bytes": 321,
+      "packed_bytes": 1024,
+      "png_sha256": "5988ab1859f5cf92266bf4513be9786896c12707c0e6663031cbd983cb32e306",
+      "packed_sha256": "949afbd0b03d8524ad856c2b8126b9a2300bf00c5f1f3fb95514cfc0c182947f"
     }
   ]
 }

@@ -1,11 +1,12 @@
 # PicoNano 变更记录
 
-## 2026-11-27：1.1.8 反馈优化、共享素材库与传书页在线素材下载
+## 1.1.9（2026-11-27）
 
+- 设备端「在线下载」（[pn_online_ui.h](../components/pn_reader/include/pn_online_ui.h)、[pn_online_ui.c](../components/pn_reader/pn_online_ui.c)、[device_online.h](../main/device_online.h)、[device_online.c](../main/device_online.c)、[pn_transfer_hub.c](../components/pn_reader/pn_transfer_hub.c)、[app_main.c](../main/app_main.c)）：传输页新增第 4 项「在线下载」，连接已保存 Wi-Fi 后自动按需完成 SNTP 校时，经 `jsDelivr → GitHub Pages → GitHub Raw` 三源 HTTPS 回退拉取统一共享素材清单，支持按锁屏壁纸、阅读遮罩、阅读背景、首页横幅、图书封面等 7 类浏览 3×2 缩略图（带 `.readpico/online_thumbs/*.thm` SD 缓存与透明通道白底合成）、详情页即时放大预览、复用共享上传安装事务进行分块 SHA-256 校验原子落盘与「已下载」状态标记，退出时可靠关闭网络并返回传输中心。
+- 娱乐页新增第 8 款游戏「地牢纸牌（Scoundrel）」（[pn_scoundrel.h](../components/pn_library/include/pn_scoundrel.h)、[pn_scoundrel.c](../components/pn_library/pn_scoundrel.c)、[pn_scoundrel_ui.c](../components/pn_library/pn_scoundrel_ui.c)）：44 张扑克单人地牢（标准 `<=` / 硬核 `<` 两档、确定性种子与同种子重打、本房内最多 2 步撤销且补牌/逃跑清空、每房限饮 1 瓶血瓶、官方满血药水彩蛋计分），配备 684×1216 16 灰阶纯 C 矢量花色 2×2 大牌、20 格分段扣血预览血条、武器磨损叠放轨、零弹窗同页战斗二选一操作带、局部增量与整绘逐字节等价更新、`scoundrel.a|b` 320 B A/B 事务存档与单次深度清屏退出，已接入书库娱乐第 8 格（321 B 四灰阶入口图标）。
+- 165 张共享素材库、网页安装器预览与传书页在线下载：建立 `assets/share/` 7 类共享素材目录与统一清单 `assets/share/manifest.json`，收录 165 张墨水屏适配图片（锁屏壁纸 39、透明遮罩 28、阅读背景 33、首页横幅 32、图书封面 33，含 InkPaper 选图、原创高对比度素材、国风半/全遮罩与动漫同人）；网页安装器新增分类预览（棋盘格/模拟墨水屏叠加/大图弹窗）与 Gitee 自动同步（`tools/sync_gitee_share.py`、`.github/workflows/gitee-share.yml`）；网页传书页新增懒加载在线素材面板（零自动外网请求、三源 CORS 回退与 Gitee 整包直链、外网零令牌隔离、SHA-256 强校验一键导入与收口 CSP 白名单）。
 - 阅读内上下栏与每书独立/全局标识：书内「上下栏」复用系统「状态栏设置」全套可视化配置并以 `<book_sha>.sbar.{a,b}` 独立存储，与全局状态栏互不干扰；全面审计阅读排版、状态栏、阅读线、边距、章节标题、背景与字体界面，统一明确标识「本书独立 / 跟随全局」并提供一键恢复跟随全局。
 - 传输页排版与全局排版预览：修正传输方式说明文字位置（移至 USB 传书下方）；全局排版补齐与书内一致的阅读线详调子页（实线/虚线长度与间隔等）及「预览当前排版」全屏示例正文预览。
-- 网页安装器共享素材库与 Gitee 自动同步：建立 `assets/share/` 7 类共享素材目录与统一清单 `assets/share/manifest.json`，支持安装器分类在线预览（透明遮罩棋盘格切换、模拟墨水屏叠加与大图弹窗）与 GitHub/Gitee 自动同步发布（`tools/sync_gitee_share.py`、`.github/workflows/gitee-share.yml`）。
-- 网页传书页在线素材下载：传书页新增懒加载在线素材库面板（零自动外网请求，不拖慢热点模式），支持 `jsDelivr CDN → GitHub Pages → GitHub Raw` 三源 CORS 自动回退与 Gitee 整包直链、外网零令牌隔离、SHA-256 强校验、预览与一键导入设备现有上传安装事务（并同步收口更新设备/主机 HTTP CSP 白名单）。
 
 ## 1.1.8（2026-11-26）
 

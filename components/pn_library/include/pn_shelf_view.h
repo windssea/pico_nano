@@ -18,6 +18,7 @@
 #define PN_SHELF_XIANGQI 51 ///< 象棋残局入口 / Chinese Chess endgame entry
 #define PN_SHELF_KLOTSKI 52 ///< 华容道入口 / Klotski entry
 #define PN_SHELF_TSUMEGO 53 ///< 围棋死活入口 / Go Tsumego entry
+#define PN_SHELF_SCOUNDREL 58 ///< 地牢纸牌入口 / Scoundrel dungeon-card entry
 #define PN_SHELF_SORT 54 ///< 切换书库排列方式 / Cycle library sort order
 #define PN_SHELF_READING_STATS 55 ///< 点击主页阅读节奏进入阅读统计详情 / Tap Home reading rhythm to open statistics details
 #define PN_SHELF_FOLDER 56 ///< 切换书库目录筛选（全部/默认子目录/外部图书目录）/ Cycle library folder filter (All / subfolders / external book dirs)

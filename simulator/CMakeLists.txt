@@ -154,6 +154,8 @@ if(PN_SIM_SDL)
     set_tests_properties(klotski_window PROPERTIES LABELS "library;ui;storage" TIMEOUT 180)
     add_test(NAME tsumego_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_tsumego_window.py $<TARGET_FILE:pn_sim>)
     set_tests_properties(tsumego_window PROPERTIES LABELS "library;ui;storage" TIMEOUT 180)
+    add_test(NAME scoundrel_window COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_scoundrel_window.py $<TARGET_FILE:pn_sim>)
+    set_tests_properties(scoundrel_window PROPERTIES LABELS "library;ui;storage" TIMEOUT 180)
 endif()
 
 if(PN_SIM_SDL)

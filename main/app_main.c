@@ -38,6 +38,7 @@
 #include "pn_search_ui.h"
 #include "pn_jump_ui.h"
 #include "pn_transfer_hub.h"
+#include "device_online.h"
 #include "pn_book_actions.h"
 #include "esp_vfs_fat.h"
 #include "esp_app_desc.h"
@@ -54,6 +55,7 @@
 #include "pn_xiangqi.h"
 #include "pn_klotski.h"
 #include "pn_tsumego.h"
+#include "pn_scoundrel.h"
 #include "pn_menu_cache.h"
 #include "pn_wallpaper.h"
 #include "pn_wallpaper_ui.h"
@@ -167,6 +169,9 @@ static pn_font_manage_t font_manage;
 static pn_device_time_t time_sync;
 static pn_device_ota_t ota; ///< 独占无线升级会话 / Exclusive wireless update session
 static pn_device_wifi_probe_t wifi_probe; ///< 保存前WiFi连接测试 / WiFi connection test before saving
+static pn_device_online_t online_assets; ///< 设备端在线素材下载会话 / On-device online asset download session
+static bool online_lock_pending; ///< 在线下载收口后再锁屏 / Lock after online download stops
+static uint64_t online_poll_at; ///< 在线下载轮询节流 / Online download poll throttle
 static bool probe_lock_pending; ///< 测试结束后再锁屏 / Lock only after the test stops
 static uint64_t probe_poll_at; ///< 有界轮询 / Bounded polling
 static char ota_notice[160]; ///< 升级阶段及错误 / Update phase and error
@@ -226,6 +231,9 @@ static uint32_t klotski_draw_revision; ///< 游戏回执的屏幕代次 / Screen
 static pn_tsumego_t tsumego; ///< 按需围棋死活控制器 / On-demand Tsumego controller
 static uint64_t tsumego_retry; ///< 呈现重试节流 / Display retry throttle
 static uint32_t tsumego_draw_revision; ///< 游戏回执的屏幕代次 / Screen revision of the game receipt
+static pn_scoundrel_t scoundrel; ///< 按需地牢纸牌控制器 / On-demand Scoundrel controller
+static uint64_t scoundrel_retry; ///< 呈现重试节流 / Display retry throttle
+static uint32_t scoundrel_draw_revision; ///< 游戏回执的屏幕代次 / Screen revision of the game receipt
 static pn_sudoku_t sudoku; ///< 按需数独控制器 / On-demand Sudoku controller
 static uint64_t sudoku_retry; ///< 呈现重试节流 / Display retry throttle
 static uint32_t sudoku_draw_revision; ///< 最近游戏回执的屏幕代次 / Screen revision of the latest game receipt
@@ -1819,6 +1827,31 @@ static void tsumego_command(int command){
     else if(!tsumego.presented)(void)tsumego_draw(command==PN_TG_CLEAN);
     if(r!=PN_OK && r!=PN_EMPTY && r!=PN_BUSY)ESP_LOGW(TAG,"Tsumego command=%d status=%d",command,r);
 }
+/// 地牢纸牌借用原画布与牌槽局部差分通路。/ Scoundrel borrows the shared canvas and slot-diff path.
+static pn_status_t scoundrel_draw(bool clean){
+    uint8_t *pixels=pn_alloc_tagged(&pool,PN_MEM_FRAME,415872);pn_frame_t frame;pn_font_t font={0};pn_w_font_scope_t scope={0};
+    pn_status_t r=pixels && pn_frame_bind(&frame,pixels,415872,684,1216)?management_font_begin(&font,24):PN_NO_MEMORY;
+    if(r==PN_OK){(void)pn_w_font_scope_begin(&scope,&pool,NULL);
+        pn_status_t patch=panel_known && scoundrel_draw_revision==async_port.revision?pn_device_frame_restore(hardware.hl.back_fb,415872,&frame):PN_UNSUPPORTED;
+        if(patch==PN_OK)patch=pn_scoundrel_render_update(&scoundrel,&font,&frame);
+        r=patch==PN_UNSUPPORTED?pn_scoundrel_render(&scoundrel,&font,&frame):patch;
+        pn_w_font_scope_end(&scope);}
+    if(r==PN_OK){atomic_store(&sudoku_presentation,pn_scoundrel_screen(&scoundrel)==PN_SC_PLAY);r=present(NULL,&frame,clean?PN_REFRESH_GC16:PN_REFRESH_GL16);atomic_store(&sudoku_presentation,false);}
+    if(r==PN_OK)scoundrel_draw_revision=async_port.revision;
+    management_font_end(&font);pn_free(pixels);scoundrel_retry=now_ms();pn_scoundrel_displayed(&scoundrel,r==PN_OK);
+    ESP_LOGI(TAG,"Scoundrel screen=%d status=%d used=%u peak=%u",pn_scoundrel_screen(&scoundrel),r,(unsigned)pool.used,(unsigned)pool.peak);return r;
+}
+static void scoundrel_open(void){
+    pn_cover_work_abort(&cover_work);pn_status_t r=pn_hot_session_drop(&hot_session);
+    if(r==PN_OK)r=pn_scoundrel_open(&scoundrel,&pool,&data_media,data_ready?"/data/progress":NULL,now_ms());
+    if(r==PN_OK){shelf_mode=false;status_page=false;shelf_draw_valid=false;(void)scoundrel_draw(false);}else message("地牢纸牌暂不可用","内部存储未就绪，请重试");
+}
+static void scoundrel_command(int command){
+    pn_status_t r=pn_scoundrel_event(&scoundrel,command,now_ms());
+    if(!scoundrel.active){pn_scoundrel_close(&scoundrel);game_return_to_entertainment();}
+    else if(!scoundrel.presented)(void)scoundrel_draw(command==PN_SC_CLEAN);
+    if(r!=PN_OK && r!=PN_EMPTY && r!=PN_BUSY)ESP_LOGW(TAG,"Scoundrel command=%d status=%d",command,r);
+}
 /// 缓存预算查询由设备port提供，不用TF大小推断内部状态容量。/ The device port reports cache capacity without inferring internal-state space from TF size.
 static pn_status_t index_space(void *ctx,uint64_t *available){(void)ctx;size_t total=0,used=0;if(esp_littlefs_info("data",&total,&used)!=ESP_OK || used>total)return PN_IO;*available=total-used;return PN_OK;}
 /// TF容量来自实际挂载卷，不能用内部LittleFS容量替代。/ Obtain TF capacity from its actual mounted volume, never internal LittleFS.
@@ -2263,7 +2296,7 @@ static bool tick_hot_deferred(uint64_t now){
 }
 /// 输入先消费，空闲到期只释放已保留会话；单次必要文件系统调用仍可能阻塞。/ Consume input first; idle expiry releases retained sessions only, while an individual mandatory filesystem call may still block.
 static pn_status_t expire_hot_idle(uint64_t now,bool idle){
-    if(!idle || touch_held || reader_active() || locked || opening || tsumego.active || klotski.active || xiangqi.active || nonogram.active || minesweeper.active || sokoban.active || sudoku.active || !shelf_mode || focus_page() || transfer.impl || usb.open || time_sync.impl || ota_busy() || wifi_probe.impl || now<last_input || now-last_input<1500u)return PN_EMPTY;
+    if(!idle || touch_held || reader_active() || locked || opening || scoundrel.active || tsumego.active || klotski.active || xiangqi.active || nonogram.active || minesweeper.active || sokoban.active || sudoku.active || !shelf_mode || focus_page() || transfer.impl || usb.open || time_sync.impl || ota_busy() || wifi_probe.impl || now<last_input || now-last_input<1500u)return PN_EMPTY;
     if(!hot_session.media || hot_session.expire_failed || now<hot_session.at || now-hot_session.at<PN_HOT_SESSION_MS)return PN_EMPTY;
     pn_status_t s=pn_cancel_checkpoint();if(s!=PN_OK)return s;
     pn_device_power_busy(PN_POWER_PRODUCT,true);pn_profile_span_t span;pn_profile_begin(&span,&pool,"hot.expire");
@@ -2443,7 +2476,7 @@ static pn_status_t load_network(pn_network_credentials_t *out){
 }
 /// 对时只借用无线；打开时复制凭据，所有长网络等待由poll推进。 / Time sync borrows only radio; opening copies credentials and polls advance all long network waits.
 static void begin_time_sync(void){
-    if(time_sync.impl || ota.impl || wifi_probe.impl || transfer.impl || usb.open)return;
+    if(time_sync.impl || ota.impl || wifi_probe.impl || transfer.impl || online_assets.impl || usb.open)return;
     pn_network_credentials_t credentials={0};pn_status_t status=load_network(&credentials);
     if(status==PN_OK && !credentials.ssid[0])status=PN_EMPTY;
     pn_device_wifi_config_t config={.mode=PN_WIFI_STA};
@@ -2475,7 +2508,7 @@ static void update_command(int command){
 #endif
         }else{ota_commit_failed=true;snprintf(ota_notice,sizeof ota_notice,"升级收尾失败，请重启核对版本，必要时使用 USB 恢复。");update_ota_ui(true);}return;
     }
-    if(time_sync.impl || wifi_probe.impl || transfer.impl || usb.open){snprintf(ota_notice,sizeof ota_notice,"请先结束传书或对时，再检查更新。");update_ota_ui(true);return;}
+    if(time_sync.impl || wifi_probe.impl || transfer.impl || online_assets.impl || usb.open){snprintf(ota_notice,sizeof ota_notice,"请先结束传书、在线下载或对时，再检查更新。");update_ota_ui(true);return;}
     if(!pn_device_ota_configured() || !clock_known)return;
     if(command==PN_SETUI_UPDATE_CHECK){
         ota_commit_failed=false;
@@ -2687,7 +2720,7 @@ static pn_status_t begin_toc(void){
 static void end_wallpaper(void){pn_wallpaper_ui_close(&wallpaper_ui);if(back_to_settings){back_to_settings=false;begin_settings();return;}if(*selected_path)start_reader();else show_shelf("",false);}
 static void begin_transfer(bool station){
     resource_previews_close();
-    if(time_sync.impl || ota.impl || wifi_probe.impl){message("无线操作尚未结束","请先结束对时或固件更新");return;}
+    if(time_sync.impl || ota.impl || wifi_probe.impl || online_assets.impl){message("无线操作尚未结束","请先结束在线下载、对时或固件更新");return;}
     if(transfer.impl || usb.open)return;
     if(reader_active()){
         pn_status_t status=epub.impl?pn_epub_app_identity(&epub,&selected_expected):pn_reader_app_identity(&reader,&selected_expected);
@@ -2748,6 +2781,63 @@ static void tick_transfer(uint64_t now){
     }
     if(now-last_transfer_draw>=1000 && memcmp(&transfer_view,&last_transfer_view,sizeof transfer_view)){paint_transfer(false);last_transfer_draw=now;}
 }
+/// 绘制设备端在线素材下载页；不借用外置字体，确保后台下载与 SD 写入互不争抢。
+/// Render the on-device online asset store using built-in UI font so background SD installs never contend on font files.
+static void paint_online(bool full){
+    if(!online_assets.impl)return;
+    uint8_t *pixels=pn_alloc_tagged(&pool,PN_MEM_FRAME,684u*1216u/2u);pn_frame_t frame;pn_font_t font={0};
+    pn_w_font_scope_t scope={0};(void)pn_w_font_scope_begin(&scope,&pool,NULL);
+    pn_status_t s=pn_frame_bind(&frame,pixels,684u*1216u/2u,684,1216)?PN_OK:PN_NO_MEMORY;
+    if(s==PN_OK){pn_text_source_t builtin=pn_font_builtin_source();s=pn_font_open(&font,&pool,&builtin,28);}
+    if(s==PN_OK)s=pn_device_online_render(&online_assets,&font,&frame);
+    if(s==PN_OK)s=present(NULL,&frame,full?PN_REFRESH_GC16:PN_REFRESH_GL16);
+    pn_w_font_scope_end(&scope);
+    pn_font_close(&font);pn_free(pixels);
+}
+static void file_manager_close(void);
+static void begin_online(void){
+    resource_previews_close();
+    if(time_sync.impl || ota.impl || wifi_probe.impl || transfer.impl || usb.open || online_assets.impl){message("无线操作尚未结束","请先结束当前传输或更新");return;}
+    if(!sd_media.available){message("未读取到存储卡","插入存储卡后再使用在线下载");return;}
+    if(!stop_reader())return;
+    pn_font_manage_close(&font_manage);pn_wallpaper_ui_close(&wallpaper_ui);pn_settings_ui_close(&settings_ui);file_manager_close();
+    pn_network_credentials_t c={0};pn_status_t loaded=load_network(&c);
+    if(loaded!=PN_OK || !c.ssid[0]){pn_network_wipe(&c);message("没有已保存的网络","请先在设置或热点传书里保存家庭 Wi-Fi");return;}
+    pn_device_wifi_config_t config={.mode=PN_WIFI_STA};
+    strcpy(config.ssid,c.ssid);strcpy(config.password,c.password);pn_network_wipe(&c);
+    system_font_release();
+    pn_free(page_copy);page_copy=NULL;(void)pn_cache_reclaim(&pool,SIZE_MAX);
+    pn_status_t status=pn_device_online_open(&online_assets,&sd_media,&config,PN_SD_MOUNT);
+    {volatile uint8_t *secret=(volatile uint8_t *)config.password;for(size_t i=0;i<sizeof config.password;i++)secret[i]=0;}
+    if(status!=PN_OK){system_font_ready();message("在线下载未开启","请检查网络后稍后重试");return;}
+    online_lock_pending=false;online_poll_at=0;status_page=true;shelf_mode=false;hub_mode=false;
+    paint_online(true);
+}
+static void tick_online(uint64_t now){
+    if(!online_assets.impl || (online_poll_at && now<online_poll_at))return;
+    online_poll_at=now+120u;
+    pn_device_online_poll_t p={0};
+    if(pn_device_online_poll(&online_assets,&p)!=PN_OK)return;
+    if(p.time_synced && p.synced_utc){
+        clock_base_sec=p.synced_utc;clock_base_ms=now;clock_known=true;
+        clock_tick(now);
+    }
+    if(p.exited){
+        if(pn_device_online_close(&online_assets)==PN_OK){
+            // 关闭完成后前台返回；抬手等普通事件不能取消这次唯一重绘，避免停留在“正在关闭网络”。
+            // Return in foreground after shutdown; ordinary touch releases must not cancel the exit redraw and leave "Closing network" stuck.
+            pn_async_scope_t returned;pn_async_begin(&async_port.input,&returned,false);
+            pn_catalog_index_invalidate(&catalog_index);
+            resource_preview_pending|=15u;
+            system_font_ready();
+            if(online_lock_pending){online_lock_pending=false;lock_and_sleep("已关闭在线下载，按电源键继续阅读");}
+            else show_hub();
+            pn_async_end(&returned);
+        }
+        return;
+    }
+    if(p.dirty){paint_online(p.full_refresh);}
+}
 /// 锁屏后浅睡，电源键唤醒即解锁回原书；唤醒源不可用时保持锁屏等待轮询。/ Light-sleep after locking and unlock back to the book on a power-key wake; if the wake source is unavailable stay locked and keep polling.
 
 /// 画布释放/睡眠前的可选当前页收口，180ms为软预算，不能截断一次文件系统调用。/ Optional current-page checkpoint before frame release/sleep; 180 ms is a soft budget and cannot interrupt a filesystem call.
@@ -2775,6 +2865,7 @@ static void reader_checkpoint_current(void) {
 }
 
 static bool prepare_lock(void){
+    if(scoundrel.active){pn_status_t r=pn_scoundrel_pause(&scoundrel,now_ms());if(r!=PN_OK)(void)scoundrel_draw(false);return r==PN_OK;}
     if(tsumego.active){pn_status_t r=pn_tsumego_pause(&tsumego,now_ms());if(r!=PN_OK)(void)tsumego_draw(false);return r==PN_OK;}
     if(klotski.active){pn_status_t r=pn_klotski_pause(&klotski,now_ms());if(r!=PN_OK)(void)klotski_draw(false);return r==PN_OK;}
     if(xiangqi.active){pn_status_t r=pn_xiangqi_pause(&xiangqi,now_ms());if(r!=PN_OK)(void)xiangqi_draw(false);return r==PN_OK;}
@@ -2871,6 +2962,7 @@ static void resume_reader(void){
 #if defined(CONFIG_PN_WAKE_TRACE) && CONFIG_PN_WAKE_TRACE
     wake_trace_capture(resume_at);
 #endif
+    if(scoundrel.active){locked=false;if(scoundrel_draw(false)!=PN_OK)locked=true;return;}
     if(tsumego.active){locked=false;if(tsumego_draw(false)!=PN_OK)locked=true;return;}
     if(klotski.active){locked=false;if(klotski_draw(false)!=PN_OK)locked=true;return;}
     if(xiangqi.active){locked=false;if(xiangqi_draw(false)!=PN_OK)locked=true;return;}
@@ -3464,11 +3556,11 @@ static void file_manager_apply(int selection){
 }
 /// 传书一级页：按实际能力列出通道。/ Transfer root tab listing channels by real capability.
 static void show_hub(void){
-    if(transfer.impl || usb.open)return;
+    if(transfer.impl || online_assets.impl || usb.open)return;
     file_manager_close();
     refresh_network_name();storage_note(hub_storage,sizeof hub_storage);
     pn_device_usb_port_t usb_port=pn_device_usb_board_port();
-    hub_info=(pn_transfer_hub_info_t){.hotspot=true,.lan=*saved_network!=0,.usb=usb_port.start!=NULL,.storage_manage=sd_media.available,.lan_name=saved_network,.storage=hub_storage};
+    hub_info=(pn_transfer_hub_info_t){.hotspot=true,.lan=*saved_network!=0,.online=*saved_network!=0 && sd_media.available,.usb=usb_port.start!=NULL,.storage_manage=sd_media.available,.lan_name=saved_network,.storage=hub_storage};
     uint8_t *pixels=pn_alloc_tagged(&pool,PN_MEM_FRAME,684u*1216u/2u);pn_frame_t frame;pn_font_t font={0};
     pn_status_t status=pn_frame_bind(&frame,pixels,684u*1216u/2u,684,1216)?PN_OK:PN_NO_MEMORY;
     if(status==PN_OK)status=management_font_begin(&font,28);
@@ -3491,7 +3583,7 @@ static void paint_usb(void){
 /// 保存并关闭全部TF消费者，再取得USB独占；没有插线也可等待枚举。/ Save/close all TF consumers before exclusive USB ownership, allowing enumeration wait without a cable.
 static void begin_usb(void){
     resource_previews_close();
-    if(usb.open || transfer.impl || time_sync.impl || ota.impl || wifi_probe.impl)return;
+    if(usb.open || transfer.impl || online_assets.impl || time_sync.impl || ota.impl || wifi_probe.impl)return;
     if(!stop_reader())return;
     pn_wallpaper_mask_close(&lock_mask);pn_wallpaper_ui_close(&wallpaper_ui);pn_font_manage_close(&font_manage);pn_settings_ui_close(&settings_ui);file_manager_close();
     pn_catalog_index_close(&catalog_index);covers_inactive=true;cover_drop(NULL);
@@ -3743,7 +3835,7 @@ static int active_hit(int x,int y);
 static void apply_selection(int selection);
 /// 三键焦点导航适用的页面：触摸页与工具栏等（书架和阅读正文各有自己的按键规则）。/ Pages three-key focus navigation applies to: touch pages and the toolbar (the shelf and the reading text have their own key rules).
 static bool focus_page(void){
-    return actions_mode || stats_mode || excerpts_ui.mode!=PN_EXUI_CLOSED || files_mode || hub_mode || transfer.impl || usb.open || wallpaper_ui.impl || font_manage.impl || settings_ui.impl || search_mode || index_mode || reading_menu || fonts.active || toc.active || jump_ui.active || styles.active || bookmarks.mode!=PN_BUI_CLOSED || dict_ui.mode!=PN_DUI_CLOSED || footnote_ui.active || lp_menu.active || toolbar_open || status_page;
+    return actions_mode || stats_mode || excerpts_ui.mode!=PN_EXUI_CLOSED || files_mode || hub_mode || transfer.impl || online_assets.impl || usb.open || wallpaper_ui.impl || font_manage.impl || settings_ui.impl || search_mode || index_mode || reading_menu || fonts.active || toc.active || jump_ui.active || styles.active || bookmarks.mode!=PN_BUI_CLOSED || dict_ui.mode!=PN_DUI_CLOSED || footnote_ui.active || lp_menu.active || toolbar_open || status_page;
 }
 /// 充电状态变化只补顶部，失败留待安静时重试；锁屏/传输/模态不被后台画面覆盖。/ Patch only the top on charge changes, retrying when quiet; never cover locks, transfers or modals.
 static pn_status_t battery_status_present(bool reader_body){
@@ -3855,6 +3947,7 @@ static void open_shelf_item(int index){
 }
 static void handle_key(int key,pn_key_event_t event){
     pn_auto_turn_stop(&auto_turn);
+    if(scoundrel.active){if(event==PN_KEY_SHORT){pn_sc_screen_t scr=pn_scoundrel_screen(&scoundrel);scoundrel_command(key==PN_KEY_1?(scr==PN_SC_PLAY?PN_SC_FLEE:PN_SC_BACK):key==PN_KEY_2?PN_SC_EXIT:PN_SC_UNDO_MOVE);}return;}
     if(tsumego.active){if(event==PN_KEY_SHORT)tsumego_command(key==PN_KEY_1?PN_TG_BACK:key==PN_KEY_2?PN_TG_EXIT:PN_TG_UNDO_MOVE);return;}
     if(klotski.active){if(event==PN_KEY_SHORT)klotski_command(key==PN_KEY_1?PN_KL_BACK:key==PN_KEY_2?PN_KL_EXIT:PN_KL_UNDO_MOVE);return;}
     if(xiangqi.active){if(event==PN_KEY_SHORT)xiangqi_command(key==PN_KEY_1?PN_XQ_BACK:key==PN_KEY_2?PN_XQ_EXIT:PN_XQ_UNDO_MOVE);return;}
@@ -3873,7 +3966,7 @@ static void handle_key(int key,pn_key_event_t event){
     // 统一方案A三键：KEY1/KEY3移动焦点，KEY2短按确认/进入焦点，KEY2长按返回/关闭（顶层设置与传书返回主页）。
     // Unified Plan A three-key navigation: KEY1/KEY3 move focus, KEY2 short confirms/enters focus, KEY2 long returns/closes (top-level Settings/Hub return Home).
     if(focus_page()){
-        int back=transfer.impl?PN_TRANSFER_VIEW_STOP:wallpaper_ui.impl?(wallpaper_ui.screen==PN_WUI_LIST?PN_WUI_BACK:PN_WUI_CANCEL):font_manage.impl?PN_FMU_BACK:settings_ui.impl?PN_SETUI_BACK:actions_mode?PN_BA_CANCEL:stats_mode?PN_STATS_BACK:excerpts_ui.mode!=PN_EXUI_CLOSED?PN_EXUI_BACK:files_mode?(file_manager && file_manager->view==PN_FM_VIEW_ACTIONS?PN_FM_ACT_CANCEL:PN_FM_BACK):hub_mode?PN_HUB_SHELF:search_mode?PN_SEARCH_BACK:index_mode?'<':reading_menu?PN_READING_MENU_RESUME:fonts.active?(fonts.preview?PN_FUI_FORM:PN_FUI_BACK):toc.active?PN_TOC_UI_BACK:jump_ui.active?PN_JUI_CANCEL:styles.active?(styles.guide_sheet?PN_SUI_CANCEL:styles.preview?PN_SUI_FORM:styles.margins?PN_SUI_MARGINS_BACK:styles.backgrounds?PN_SUI_BACKGROUND_BACK:styles.more?PN_SUI_BACK_MAIN:PN_SUI_CANCEL):bookmarks.mode!=PN_BUI_CLOSED?PN_BUI_BACK:dict_ui.mode!=PN_DUI_CLOSED?PN_DUI_BACK:footnote_ui.active?PN_FNUI_CLOSE:lp_menu.active?PN_LPM_DISMISS:toolbar_open?PN_TOOL_CLOSE:-1;
+        int back=transfer.impl?PN_TRANSFER_VIEW_STOP:online_assets.impl?PN_ONLINE_CMD_BACK:wallpaper_ui.impl?(wallpaper_ui.screen==PN_WUI_LIST?PN_WUI_BACK:PN_WUI_CANCEL):font_manage.impl?PN_FMU_BACK:settings_ui.impl?PN_SETUI_BACK:actions_mode?PN_BA_CANCEL:stats_mode?PN_STATS_BACK:excerpts_ui.mode!=PN_EXUI_CLOSED?PN_EXUI_BACK:files_mode?(file_manager && file_manager->view==PN_FM_VIEW_ACTIONS?PN_FM_ACT_CANCEL:PN_FM_BACK):hub_mode?PN_HUB_SHELF:search_mode?PN_SEARCH_BACK:index_mode?'<':reading_menu?PN_READING_MENU_RESUME:fonts.active?(fonts.preview?PN_FUI_FORM:PN_FUI_BACK):toc.active?PN_TOC_UI_BACK:jump_ui.active?PN_JUI_CANCEL:styles.active?(styles.guide_sheet?PN_SUI_CANCEL:styles.preview?PN_SUI_FORM:styles.margins?PN_SUI_MARGINS_BACK:styles.backgrounds?PN_SUI_BACKGROUND_BACK:styles.more?PN_SUI_BACK_MAIN:PN_SUI_CANCEL):bookmarks.mode!=PN_BUI_CLOSED?PN_BUI_BACK:dict_ui.mode!=PN_DUI_CLOSED?PN_DUI_BACK:footnote_ui.active?PN_FNUI_CLOSE:lp_menu.active?PN_LPM_DISMISS:toolbar_open?PN_TOOL_CLOSE:-1;
         if(key==PN_KEY_2 && event==PN_KEY_LONG){
             focus_nav.index=-1;
             if(transfer.impl){management_home_pending=true;transfer_return=true;transfer_lock=false;(void)pn_device_transfer_request_stop(&transfer);return;}
@@ -3937,13 +4030,13 @@ static void handle_key(int key,pn_key_event_t event){
             if(event!=PN_KEY_SHORT)return;
             if(entertainment==2){if(key==PN_KEY_2){entertainment=1;shelf_focus=-1;show_shelf("",false);}return;}
             if(key==PN_KEY_1 || key==PN_KEY_3){
-                shelf_focus=shelf_focus<0?(key==PN_KEY_3?0:6):(shelf_focus+(key==PN_KEY_3?1:6))%7;
+                shelf_focus=shelf_focus<0?(key==PN_KEY_3?0:7):(shelf_focus+(key==PN_KEY_3?1:7))%8;
                 (void)draw_shelf(PN_REFRESH_GL16);return;
             }
             if(key==PN_KEY_2){
                 if(shelf_focus<0){shelf_focus=0;(void)draw_shelf(PN_REFRESH_GL16);return;}
-                static const int games[7]={PN_SHELF_SUDOKU,PN_SHELF_SOKOBAN,PN_SHELF_MINESWEEPER,PN_SHELF_NONOGRAM,PN_SHELF_XIANGQI,PN_SHELF_KLOTSKI,PN_SHELF_TSUMEGO};
-                int pick=shelf_focus<7?shelf_focus:0;shelf_focus=-1;apply_selection(games[pick]);
+                static const int games[8]={PN_SHELF_SUDOKU,PN_SHELF_SOKOBAN,PN_SHELF_MINESWEEPER,PN_SHELF_NONOGRAM,PN_SHELF_XIANGQI,PN_SHELF_KLOTSKI,PN_SHELF_TSUMEGO,PN_SHELF_SCOUNDREL};
+                int pick=shelf_focus<8?shelf_focus:0;shelf_focus=-1;apply_selection(games[pick]);
             }
             return;
         }
@@ -4009,6 +4102,7 @@ static void handle_key(int key,pn_key_event_t event){
 }
 /// 按当前活动页面扫描命中码（触摸与三键焦点共用）。/ Hit code of the active page at a point (shared by touch and three-key focus).
 static int active_hit(int x,int y){
+    if(scoundrel.active){int h=pn_scoundrel_hit(&scoundrel,x,y);return h>0?h:-1;}
     if(tsumego.active){int h=pn_tsumego_hit(&tsumego,x,y);return h>0?h:-1;}
     if(klotski.active){int h=pn_klotski_hit(&klotski,x,y);return h>0?h:-1;}
     if(xiangqi.active){int h=pn_xiangqi_hit(&xiangqi,x,y);return h>0?h:-1;}
@@ -4019,6 +4113,7 @@ static int active_hit(int x,int y){
     int hit=-1;
     if(usb.open)hit=pn_usb_view_hit(x,y);
     else if(transfer.impl)hit=pn_transfer_view_hit(&transfer_view,x,y);
+    else if(online_assets.impl)hit=pn_device_online_hit(&online_assets,x,y);
     else if(wallpaper_ui.impl)hit=pn_wallpaper_ui_hit(&wallpaper_ui,x,y);
     else if(font_manage.impl)hit=pn_font_manage_hit(&font_manage,x,y);
     else if(settings_ui.impl)hit=pn_settings_ui_hit(&settings_ui,x,y);
@@ -4049,9 +4144,9 @@ static int active_hit(int x,int y){
 }
 /// 只有显示固定底栏的四个一级页允许按下切页；子页、模态和活动传输沿原确认规则。/ Only the four roots with fixed navigation switch on press; subpages, modals and active transfers retain normal confirmation.
 static int root_navigation_hit(int x,int y){
-    if(tsumego.active || klotski.active || xiangqi.active || nonogram.active || minesweeper.active || sokoban.active || sudoku.active)return -1;
+    if(scoundrel.active || tsumego.active || klotski.active || xiangqi.active || nonogram.active || minesweeper.active || sokoban.active || sudoku.active)return -1;
     if(opening)return -1;
-    if(locked || usb.open || transfer.impl || time_sync.impl || ota.impl || wallpaper_ui.impl || font_manage.impl || reading_menu || fonts.active || toc.active || jump_ui.active || styles.active || bookmarks.mode!=PN_BUI_CLOSED || dict_ui.mode!=PN_DUI_CLOSED || footnote_ui.active || lp_menu.active || actions_mode || stats_mode || excerpts_ui.mode!=PN_EXUI_CLOSED || index_mode || search_mode || toolbar_open)return -1;
+    if(locked || usb.open || transfer.impl || online_assets.impl || time_sync.impl || ota.impl || wallpaper_ui.impl || font_manage.impl || reading_menu || fonts.active || toc.active || jump_ui.active || styles.active || bookmarks.mode!=PN_BUI_CLOSED || dict_ui.mode!=PN_DUI_CLOSED || footnote_ui.active || lp_menu.active || actions_mode || stats_mode || excerpts_ui.mode!=PN_EXUI_CLOSED || index_mode || search_mode || toolbar_open)return -1;
     if(settings_ui.impl){if(pn_settings_ui_screen(&settings_ui)!=0)return -1;}
     else if(!hub_mode && !(shelf_mode && shelf_page))return -1;
     return pn_w_navigation_hit(x,y)>=0?active_hit(x,y):-1;
@@ -4083,6 +4178,7 @@ static void apply_selection(int selection){
     // 任意已确认选择执行前清除旧焦点表，避免传书/设置页选择框残留到切换后的页面。
     // Clear any prior focus selection before executing a confirmed action so focus rings never leak across page switches.
     focus_nav.index=-1;focus_nav.count=0;
+    if(scoundrel.active){scoundrel_command(selection);return;}
     if(tsumego.active){tsumego_command(selection);return;}
     if(klotski.active){klotski_command(selection);return;}
     if(xiangqi.active){xiangqi_command(selection);return;}
@@ -4094,6 +4190,7 @@ static void apply_selection(int selection){
     if(ota.impl && (selection<PN_SETUI_UPDATE_CHECK || selection>PN_SETUI_UPDATE_CANCEL)){if(selection==PN_SETUI_BACK)update_command(PN_SETUI_UPDATE_CANCEL);return;}
     if(usb.open){if(selection==PN_USB_VIEW_STOP){usb_return=true;pn_device_usb_request_stop(&usb);}}
     else if(transfer.impl){if(selection==PN_TRANSFER_VIEW_STOP){transfer_return=true;(void)pn_device_transfer_request_stop(&transfer);}}
+    else if(online_assets.impl){(void)pn_device_online_command(&online_assets,selection);tick_online(now_ms());}
     else if(wallpaper_ui.impl){
         pn_status_t status=pn_wallpaper_ui_event(&wallpaper_ui,selection,present,NULL);
         if(selection==PN_WUI_MOVE_OTHER && status==PN_OK){resource_preview_pending|=5u;resource_preview_force|=5u;}
@@ -4149,6 +4246,7 @@ static void apply_selection(int selection){
         if(selection==PN_HUB_USB){begin_usb();}
         else if(selection==PN_HUB_HOTSPOT){hub_mode=false;begin_transfer(false);}
         else if(selection==PN_HUB_LAN){hub_mode=false;begin_transfer(true);}
+        else if(selection==PN_HUB_ONLINE){hub_mode=false;begin_online();}
         else if(selection==PN_HUB_STORAGE){file_manager_open();}
         else if(selection==PN_HUB_SHELF || selection==PN_HUB_HOME){hub_mode=false;home_mode=selection==PN_HUB_HOME;atomic_store(&mgmt_root_switch,true);show_shelf("",false);}
         else if(selection==PN_HUB_SETTINGS){hub_mode=false;atomic_store(&mgmt_root_switch,true);begin_settings();}
@@ -4232,8 +4330,8 @@ static void apply_selection(int selection){
         else if(selection==PN_TOOL_SHELF){toolbar_open=false;if(leave_reader()){selected_path[0]=0;show_shelf_profile("",false,PN_REFRESH_EXIT_GC16);}}
     }
     else if(reading_menu){if(selection==PN_READING_MENU_LAN)begin_transfer(true);else if(selection==PN_READING_MENU_SETTINGS)begin_settings();else if(selection==PN_READING_MENU_TRANSFER)begin_transfer(false);else if(selection==PN_READING_MENU_SHELF){home_mode=false;recent_mode=false;fav_mode=false;search_query[0]=0;reading_menu=false;if(leave_reader()){selected_path[0]=0;show_shelf_profile("",false,PN_REFRESH_EXIT_GC16);}}else if(selection==PN_READING_MENU_RESUME){reading_menu=false;if(reader_active()){if(active_step(PN_APP_OPEN,now_ms())==PN_OK){status_page=false;shelf_mode=false;}}else start_reader();}}
-    else if(shelf_mode && (selection==PN_SHELF_TAB_ENTERTAINMENT || selection==PN_SHELF_ENTERTAINMENT_BACK || selection==PN_SHELF_SUDOKU || selection==PN_SHELF_SOKOBAN || selection==PN_SHELF_MINESWEEPER || selection==PN_SHELF_NONOGRAM || selection==PN_SHELF_XIANGQI || selection==PN_SHELF_KLOTSKI || selection==PN_SHELF_TSUMEGO)){
-        home_mode=false;entertainment=1;if(selection==PN_SHELF_SUDOKU)sudoku_open();else if(selection==PN_SHELF_SOKOBAN)sokoban_open();else if(selection==PN_SHELF_MINESWEEPER)minesweeper_open();else if(selection==PN_SHELF_NONOGRAM)nonogram_open();else if(selection==PN_SHELF_XIANGQI)xiangqi_open();else if(selection==PN_SHELF_KLOTSKI)klotski_open();else if(selection==PN_SHELF_TSUMEGO)tsumego_open();else show_shelf("",false);
+    else if(shelf_mode && (selection==PN_SHELF_TAB_ENTERTAINMENT || selection==PN_SHELF_ENTERTAINMENT_BACK || selection==PN_SHELF_SUDOKU || selection==PN_SHELF_SOKOBAN || selection==PN_SHELF_MINESWEEPER || selection==PN_SHELF_NONOGRAM || selection==PN_SHELF_XIANGQI || selection==PN_SHELF_KLOTSKI || selection==PN_SHELF_TSUMEGO || selection==PN_SHELF_SCOUNDREL)){
+        home_mode=false;entertainment=1;if(selection==PN_SHELF_SUDOKU)sudoku_open();else if(selection==PN_SHELF_SOKOBAN)sokoban_open();else if(selection==PN_SHELF_MINESWEEPER)minesweeper_open();else if(selection==PN_SHELF_NONOGRAM)nonogram_open();else if(selection==PN_SHELF_XIANGQI)xiangqi_open();else if(selection==PN_SHELF_KLOTSKI)klotski_open();else if(selection==PN_SHELF_TSUMEGO)tsumego_open();else if(selection==PN_SHELF_SCOUNDREL)scoundrel_open();else show_shelf("",false);
     }
     else if(shelf_mode && selection==PN_SHELF_READING_HOME){if(!home_mode){home_mode=true;atomic_store(&mgmt_root_switch,true);show_shelf("",false);}}
     else if(shelf_mode && selection==PN_SHELF_READING_STATS){show_stats();}
@@ -4415,9 +4513,9 @@ static void device_task(void *arg){
         wake_trace_poll(now);
 #endif
         if(scope_active)pn_async_end(&scope);
-        bool body=!tsumego.active && !klotski.active && !xiangqi.active && !nonogram.active && !minesweeper.active && !sokoban.active && !sudoku.active && reader_active() && !locked && !focus_page() && !status_page && !reading_menu && !shelf_mode && !toolbar_open && !footnote_ui.active && !lp_menu.active;
+        bool body=!scoundrel.active && !tsumego.active && !klotski.active && !xiangqi.active && !nonogram.active && !minesweeper.active && !sokoban.active && !sudoku.active && reader_active() && !locked && !focus_page() && !status_page && !reading_menu && !shelf_mode && !toolbar_open && !footnote_ui.active && !lp_menu.active;
         reading_stats_poll(body && !opening && !reader_turn_pending);
-        uint32_t view=locked?1:tsumego.active?25:klotski.active?24:xiangqi.active?23:nonogram.active?22:minesweeper.active?21:sokoban.active?20:sudoku.active?19:opening?18:fonts.active?2:toc.active?3:styles.active?4:jump_ui.active?5:bookmarks.mode!=PN_BUI_CLOSED?6:dict_ui.mode!=PN_DUI_CLOSED?27:footnote_ui.active?28:lp_menu.active?29:actions_mode?7:settings_ui.impl?8:wallpaper_ui.impl?9:font_manage.impl?10:hub_mode?11:index_mode?12:search_mode?13:toolbar_open?14:body?15:home_mode?16:17;
+        uint32_t view=locked?1:scoundrel.active?30:tsumego.active?25:klotski.active?24:xiangqi.active?23:nonogram.active?22:minesweeper.active?21:sokoban.active?20:sudoku.active?19:opening?18:fonts.active?2:toc.active?3:styles.active?4:jump_ui.active?5:bookmarks.mode!=PN_BUI_CLOSED?6:dict_ui.mode!=PN_DUI_CLOSED?27:footnote_ui.active?28:lp_menu.active?29:actions_mode?7:settings_ui.impl?8:wallpaper_ui.impl?9:font_manage.impl?10:hub_mode?11:index_mode?12:search_mode?13:toolbar_open?14:body?15:home_mode?16:17;
         if(!opening && shelf_mode && !home_mode && shelf_page)view+=(uint32_t)shelf_page->index*32u;
         pn_device_async_reader_mode(&async_port,vertical_turn,reader_bars_hidden());
         pn_device_async_root_view(&async_port,view,body,input_flags,root_navigation_hit(80,1150)>=0);
@@ -4460,6 +4558,7 @@ static void device_task(void *arg){
             if(queued.kind==PN_DASYNC_ACTION && body && !locked){execute_reader_action(queued.action,queued.x,queued.y,queued.tap,now,&tap,&input);}}
         if(!async_port.display_active)rails_idle_check(now);
         if(transfer.impl)tick_transfer(now);
+        if(online_assets.impl)tick_online(now);
         if(usb.open)tick_usb(now);
         if(time_sync.impl)tick_time_sync(now);
         if(ota.impl)tick_ota(now);
@@ -4481,11 +4580,12 @@ static void device_task(void *arg){
             if(!index_wait_loaded && pn_settings_load_index(&data_media,"/data/progress",&index_wait)==PN_OK)index_wait_loaded=true;
          }} // 读取失败限频重试，不能每10ms重复访问存储。/ Rate-limit failed loads instead of repeating storage reads every 10 ms.
         input.config=(pn_reader_input_config_t){.left_hand=(input_flags&PN_INPUT_LEFT_HAND)!=0,.no_swipe=(input_flags&PN_INPUT_NO_SWIPE)!=0,.no_edge_tap=(input_flags&PN_INPUT_NO_EDGE_TAP)!=0,.no_keys=(input_flags&PN_INPUT_NO_KEYS)!=0,.vertical_turn=vertical_turn,.full_screen=reader_bars_hidden(),.use_gestures=true,.gestures=gesture_prefs};
-        if(!transfer.impl && !usb.open && !ota.impl && now-last_card>=250){last_card=now;
+        if(!transfer.impl && !online_assets.impl && !usb.open && !ota.impl && now-last_card>=250){last_card=now;
             if(sd_media.available && pn_device_card_presence()==PN_STALE_MEDIA){if(reader_active()){if(epub.impl)(void)pn_epub_app_media_lost(&epub);else (void)pn_reader_app_media_lost(&reader);(void)stop_reader();}else (void)pn_media_detach(&sd_media);system_font_release();selected_path[0]=0;pn_reader_input_cancel(&input);message("卡已移除","保留上次阅读位置\n插卡后点下方重试");}}
         if((async_port.input_active && available==PN_OK && queued.kind==PN_DASYNC_POWER) || (!async_port.input_active && now-last_key>=100)){last_key=now;if((async_port.input_active || read_pico_pmu_take_key_short()) && now-boot>=1000){pn_reader_input_cancel(&input);
                 if(usb.open){usb_return=true;usb_lock=true;usb_home=false;pn_device_usb_request_stop(&usb);}
                 else if(transfer.impl){transfer_return=true;transfer_lock=true;(void)pn_device_transfer_request_stop(&transfer);}
+                else if(online_assets.impl){online_lock_pending=true;(void)pn_device_online_request_stop(&online_assets);}
                 else if(time_sync.impl){time_lock_pending=true;(void)pn_device_time_request_stop(&time_sync);}
                 else if(ota.impl){if(!ota_lock_pending){ota_lock_pending=true;update_command(PN_SETUI_UPDATE_CANCEL);}}
                 else if(wifi_probe.impl){probe_lock_pending=true;(void)pn_device_wifi_probe_stop(&wifi_probe);}
@@ -4508,7 +4608,7 @@ static void device_task(void *arg){
             else{pn_auto_turn_receipt(&auto_turn,now_ms(),false);report_reader_result(ast);}
         }
         uint64_t auto_lock_ms=pn_settings_auto_lock_ms(auto_lock_minutes);
-        if(PN_AUTO_LOCK && auto_lock_ms>0u && !locked && !transfer.impl && !usb.open && !time_sync.impl && !ota_busy() && !wifi_probe.impl && !ota_lock_pending && now>=last_input && now-last_input>=auto_lock_ms && now-boot>=auto_lock_ms){pn_reader_input_cancel(&input);
+        if(PN_AUTO_LOCK && auto_lock_ms>0u && !locked && !transfer.impl && !online_assets.impl && !usb.open && !time_sync.impl && !ota_busy() && !wifi_probe.impl && !ota_lock_pending && now>=last_input && now-last_input>=auto_lock_ms && now-boot>=auto_lock_ms){pn_reader_input_cancel(&input);
             if(ota.impl){ota_lock_pending=true;update_command(PN_SETUI_UPDATE_CANCEL);}else if(prepare_lock())lock_and_sleep("");else last_input=now;}
         lock_sleep_retry_tick(now_ms(),available==PN_EMPTY);now=now_ms();
         #if PN_DEVICE_TEST_CONSOLE
@@ -4625,6 +4725,11 @@ static void device_task(void *arg){
                     execute_reader_action(action,input.start_x,input.start_y,input.last_tap,now_ms(),&tap,&input);
                 }else if(input.last_tap && epub.impl)(void)footnote_open_at(input.start_x,input.start_y);}}}
         bool background=false;
+        if(!locked && scoundrel.active && available==PN_EMPTY && !touch_held && !tap.down){
+            pn_status_t st=pn_scoundrel_tick(&scoundrel,now_ms());
+            if(st!=PN_OK && st!=PN_EMPTY && st!=PN_BUSY)ESP_LOGW(TAG,"Scoundrel background save failed: %d",(int)st);
+            if(!scoundrel.presented && now_ms()-scoundrel_retry>=1000)(void)scoundrel_draw(false);
+        }
         if(!locked && tsumego.active && available==PN_EMPTY && !touch_held && !tap.down){
             pn_status_t st=pn_tsumego_tick(&tsumego,now_ms());
             if(st!=PN_OK && st!=PN_EMPTY && st!=PN_BUSY)ESP_LOGW(TAG,"Tsumego background save failed: %d",(int)st);
@@ -4684,15 +4789,15 @@ static void device_task(void *arg){
             if(motion==PN_OK){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);}}
 #endif
 #if defined(CONFIG_PN_UI_FEEDBACK) && CONFIG_PN_UI_FEEDBACK
-        if(available==PN_EMPTY){pn_status_t settled=feedback_idle_tick(now_ms(),body || locked || touch_held || tap.down || pn_font_manage_motion_stats(&font_manage).active || pn_toc_ui_motion_stats(&toc).active || transfer.impl || usb.open || time_sync.impl || ota_busy() || wifi_probe.impl);if(settled!=PN_EMPTY){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);}}
+        if(available==PN_EMPTY){pn_status_t settled=feedback_idle_tick(now_ms(),body || locked || touch_held || tap.down || pn_font_manage_motion_stats(&font_manage).active || pn_toc_ui_motion_stats(&toc).active || transfer.impl || online_assets.impl || usb.open || time_sync.impl || ota_busy() || wifi_probe.impl);if(settled!=PN_EMPTY){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);}}
 #endif
-        if(!background && available==PN_EMPTY && shelf_mode && !focus_page() && !transfer.impl && !usb.open && !locked && !opening && !touch_held && !tap.down && now>=last_input && now-last_input>=1500u)background=resource_previews_idle(now);
+        if(!background && available==PN_EMPTY && shelf_mode && !focus_page() && !transfer.impl && !online_assets.impl && !usb.open && !locked && !opening && !touch_held && !tap.down && now>=last_input && now-last_input>=1500u)background=resource_previews_idle(now);
         if(!body)reader_turn_pending=false;
         if(body && available==PN_EMPTY && !touch_held){background=tick_reader_background(now_ms());
             if(background){power_idle=0;pn_device_power_busy(PN_POWER_PRODUCT,true);}}
         if(available!=PN_OK){if(power_idle<POWER_IDLE_ROUNDS)power_idle++;if(power_idle>=POWER_IDLE_ROUNDS)pn_device_power_busy(PN_POWER_PRODUCT,false);
             // 活动/会话/降级输入时10ms；长空闲时等输入通知，最多100ms处理定时职责。/ 10 ms while active, in sessions or with degraded input; when long idle wait for input notification, at most 100 ms for timed duties.
-            bool slow=async_port.input_active && power_idle>=POWER_IDLE_ROUNDS && !transfer.impl && !usb.open && !time_sync.impl && !ota_busy() && !wifi_probe.impl;
+            bool slow=async_port.input_active && power_idle>=POWER_IDLE_ROUNDS && !transfer.impl && !online_assets.impl && !usb.open && !time_sync.impl && !ota_busy() && !wifi_probe.impl;
             if(background && background_rounds<50u){background_rounds++;vTaskDelay(pdMS_TO_TICKS(1));}
             else{background_rounds=0;if(async_port.product_task)pn_device_async_wait(&async_port,slow?100u:10u);else vTaskDelay(pdMS_TO_TICKS(10));}}
         idle_power_trace(now_ms(),power_idle,body);

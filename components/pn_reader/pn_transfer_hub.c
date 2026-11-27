@@ -7,12 +7,13 @@
 #include "pn_transfer_hub.h"
 #include <stdio.h>
 #include "pn_widgets.h"
-#define USB_ROW 2 ///< USB行序 / USB row index
-#define CHANNEL_Y 186
+#define ONLINE_ROW 2 ///< 在线下载行序 / Online download row index
+#define USB_ROW 3 ///< USB行序 / USB row index
+#define CHANNEL_Y 182
 #define ROW_H PN_W_CARD_ROW_H
-#define NOTE_Y 524 ///< 传输方式说明文字基线（位于 USB 传输卡下方）/ Transfer description baseline below the USB card
-#define STORAGE_Y 612
-#define FORMAT_Y 780
+#define NOTE_Y 620 ///< 传输方式说明文字基线（位于 USB 传输卡下方）/ Transfer description baseline below the USB card
+#define STORAGE_Y 696
+#define FORMAT_Y 852
 #define TAB_Y 1104
 #define TAB_H 112
 pn_status_t pn_transfer_hub_render(pn_font_t *font,pn_frame_t *frame,const pn_transfer_hub_info_t *info){
@@ -22,7 +23,7 @@ pn_status_t pn_transfer_hub_render(pn_font_t *font,pn_frame_t *frame,const pn_tr
     if(s==PN_OK)s=pn_font_size(font,50);
     if(s==PN_OK)s=pn_w_text_ex(font,frame,"传书",PN_UI_MARGIN,124,400,PN_ALIGN_LEFT,PN_UI_INK,true);
     if(s==PN_OK)s=pn_w_group(font,frame,"传输方式",CHANNEL_Y-14);
-    pn_w_card(frame,CHANNEL_Y,3);
+    pn_w_card(frame,CHANNEL_Y,4);
     // 可用通道带箭头；不可用的只写原因（规范T01：不展示虚假地址或入口）。/ Available channels get a chevron; unavailable ones only state the reason (spec T01: no fake addresses or entries).
     const char *wireless_off=info->unavailable?info->unavailable:"当前设备暂不支持无线传书";
     if(s==PN_OK)s=pn_w_card_row(font,frame,"热点传书",info->hotspot?"手机连设备热点，扫码打开传书网页":wireless_off,NULL,PN_ICON_WIFI,info->hotspot?PN_ROW_CHEVRON:0u,CHANNEL_Y,false);
@@ -30,6 +31,10 @@ pn_status_t pn_transfer_hub_render(pn_font_t *font,pn_frame_t *frame,const pn_tr
     if(info->lan)snprintf(lan,sizeof lan,"通过家里的网络「%s」",info->lan_name && *info->lan_name?info->lan_name:"已保存网络");
     else snprintf(lan,sizeof lan,"%s",info->hotspot?"先在热点传书网页里保存家庭网络":wireless_off);
     if(s==PN_OK)s=pn_w_card_row(font,frame,"局域网传书",lan,NULL,PN_ICON_TRANSFER,info->lan?PN_ROW_CHEVRON:0u,CHANNEL_Y+ROW_H,false);
+    char online[96];
+    if(info->online)snprintf(online,sizeof online,"连网预览下载锁屏壁纸、遮罩、背景与素材");
+    else snprintf(online,sizeof online,"%s",info->hotspot?"先在设置或热点传书里保存家庭网络":wireless_off);
+    if(s==PN_OK)s=pn_w_card_row(font,frame,"在线下载",online,NULL,PN_ICON_IMAGE,info->online?PN_ROW_CHEVRON:0u,CHANNEL_Y+ONLINE_ROW*ROW_H,false);
     if(s==PN_OK)s=pn_w_card_row(font,frame,"USB 传输",info->usb?"连接电脑直接复制，期间暂停阅读":"此运行环境未接入 USB 读卡",NULL,PN_ICON_IMPORT,info->usb?PN_ROW_CHEVRON:0u,CHANNEL_Y+USB_ROW*ROW_H,true);
     if(s==PN_OK)s=pn_font_size(font,24);
     if(s==PN_OK)s=pn_w_text_ex(font,frame,"把手机或电脑上的书、字体与图片传到设备。",PN_UI_MARGIN+8,NOTE_Y,604,PN_ALIGN_LEFT,PN_UI_MUTED,false);
@@ -48,6 +53,7 @@ int pn_transfer_hub_hit(const pn_transfer_hub_info_t *info,int x,int y){
     if(x<PN_UI_MARGIN || x>=PN_UI_WIDTH-PN_UI_MARGIN)return -1;
     if(y>=CHANNEL_Y && y<CHANNEL_Y+ROW_H)return info->hotspot?PN_HUB_HOTSPOT:-1;
     if(y>=CHANNEL_Y+ROW_H && y<CHANNEL_Y+2*ROW_H)return info->lan?PN_HUB_LAN:-1;
+    if(y>=CHANNEL_Y+ONLINE_ROW*ROW_H && y<CHANNEL_Y+(ONLINE_ROW+1)*ROW_H)return info->online?PN_HUB_ONLINE:-1;
     if(y>=CHANNEL_Y+USB_ROW*ROW_H && y<CHANNEL_Y+(USB_ROW+1)*ROW_H)return info->usb?PN_HUB_USB:-1;
     if(y>=STORAGE_Y && y<STORAGE_Y+ROW_H)return info->storage_manage?PN_HUB_STORAGE:-1;
     return -1;
