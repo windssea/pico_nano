@@ -1,0 +1,2 @@
+fe5b0556c606530b28295eb773aafd9635038c7e3a05de41356261dafd42d01b  PicoNano-a8fb90b-upgrade.zip
+b4dd17ff9a210062f796b8ee90b1cccf3467de111bb332c251d0ebb978c91d29  PicoNano-web-installer-a8fb90b.zip
